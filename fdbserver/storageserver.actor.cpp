@@ -4111,6 +4111,9 @@ ACTOR Future<Void> fetchChangeFeedApplier(StorageServer* data,
 	if (!existing) {
 		try {
 			loop {
+				while (data->fetchKeysBudgetUsed.get()) {
+					wait(data->fetchKeysBudgetUsed.onChange());
+				}
 				Standalone<VectorRef<MutationsAndVersionRef>> res = waitNext(feedResults->mutations.getFuture());
 				for (auto& it : res) {
 					if (it.mutations.size()) {
@@ -4133,6 +4136,10 @@ ACTOR Future<Void> fetchChangeFeedApplier(StorageServer* data,
 						lastVersion = it.version;
 						versionsFetched++;
 					}
+				}
+				data->fetchKeysBytesBudget -= res.expectedSize();
+				if (data->fetchKeysBytesBudget <= 0) {
+					data->fetchKeysBudgetUsed.set(true);
 				}
 				wait(yield());
 			}
@@ -4165,6 +4172,10 @@ ACTOR Future<Void> fetchChangeFeedApplier(StorageServer* data,
 	localResult = _localResult;
 	try {
 		loop {
+			while (data->fetchKeysBudgetUsed.get()) {
+				wait(data->fetchKeysBudgetUsed.onChange());
+			}
+
 			state Standalone<VectorRef<MutationsAndVersionRef>> remoteResult =
 			    waitNext(feedResults->mutations.getFuture());
 			state int remoteLoc = 0;
@@ -4227,6 +4238,10 @@ ACTOR Future<Void> fetchChangeFeedApplier(StorageServer* data,
 					Standalone<MutationsAndVersionRef> _localResult = waitNext(localResults.getFuture());
 					localResult = _localResult;
 				}
+			}
+			data->fetchKeysBytesBudget -= remoteResult.expectedSize();
+			if (data->fetchKeysBytesBudget <= 0) {
+				data->fetchKeysBudgetUsed.set(true);
 			}
 			wait(yield());
 		}
