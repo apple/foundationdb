@@ -50,6 +50,10 @@ static const char* typeString[] = { "SetValue",
 	                                "AndV2",
 	                                "CompareAndClear",
 	                                "Reserved_For_SpanContextMessage",
+	                                "KVSAddShard",
+	                                "KVSDropShard",
+	                                "KVSPersistShard",
+	                                "KVSDisposeShard",
 	                                "MAX_ATOMIC_OP" };
 
 struct MutationRef {
@@ -77,6 +81,10 @@ struct MutationRef {
 		AndV2,
 		CompareAndClear,
 		Reserved_For_SpanContextMessage /* See fdbserver/SpanContextMessage.h */,
+		KVSAddShard,
+		KVSDropShard,
+		KVSPersistShard,
+		KVSDisposeShard,
 		MAX_ATOMIC_OP
 	};
 	// This is stored this way for serialization purposes.
@@ -110,6 +118,8 @@ struct MutationRef {
 
 	bool isAtomicOp() const { return (ATOMIC_MASK & (1 << type)) != 0; }
 
+	bool isKVSOp() const { return (KVS_OP_MASK & (1 << type)) != 0; }
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		if (ar.isSerializing && type == ClearRange && equalsKeyAfter(param1, param2)) {
@@ -134,7 +144,8 @@ struct MutationRef {
 		SINGLE_KEY_MASK = ATOMIC_MASK | (1 << SetValue),
 		NON_ASSOCIATIVE_MASK = (1 << AddValue) | (1 << Or) | (1 << Xor) | (1 << Max) | (1 << Min) |
 		                       (1 << SetVersionstampedKey) | (1 << SetVersionstampedValue) | (1 << MinV2) |
-		                       (1 << CompareAndClear)
+		                       (1 << CompareAndClear),
+		KVS_OP_MASK = (1 << KVSAddShard) | (1 << KVSDropShard) | (1 << KVSPersistShard) | (1 << KVSDisposeShard)
 	};
 };
 

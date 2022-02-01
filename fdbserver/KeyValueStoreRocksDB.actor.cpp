@@ -572,7 +572,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		void action(RestoreDurableStateAction& a) {
 			ASSERT(db); // Database should have been created.
 
-			std::cout << "Restore durable state\n";
+			TraceEvent(SevInfo, "RocksDB").detail("Method", "RestoreDurableState");
 			if (a.dirtyShards) {
 				// Do not destroy shard
 				for (auto shard : *a.dirtyShards) {
@@ -610,6 +610,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 					openShards[name] = it.value();
 				} else {
 					it.value()->deletePending = true;
+					logShardMovement(it.range(), ShardOp::DELETE);
 				}
 			}
 
@@ -670,7 +671,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		};
 
 		rocksdb::Status doCommit(rocksdb::WriteBatch* batch, rocksdb::DB* db, bool sample) {
-			std::cout << "Committing in db " << db->GetName() << std::endl;
+			// std::cout << "Committing in db " << db->GetName() << std::endl;
 			Standalone<VectorRef<KeyRangeRef>> deletes;
 			DeleteVisitor dv(deletes, deletes.arena());
 			ASSERT(batch->Iterate(&dv).ok());
@@ -1210,7 +1211,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			    .detail("Begin", it.range().begin)
 			    .detail("End", it.range().end);
 
-			// raise(SIGSEGV);
+			raise(SIGSEGV);
 			return;
 		}
 
@@ -1246,7 +1247,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			return Void();
 		}
 
-		std::cout << "Commit action\n";
+		// std::cout << "Commit action\n";
 
 		auto a = new Writer::CommitAction();
 		a->dirtyShards = std::move(dirtyShards);
@@ -1441,6 +1442,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	}
 
 	Standalone<VectorRef<MutationRef>> getPersistShardMutations(KeyRangeRef range) override {
+		TraceEvent(SevDebug, "GetPersistShardMutations")
+		    .detail("Begin", range.begin.toString())
+		    .detail("End", range.end.toString());
 		Standalone<VectorRef<MutationRef>> refs;
 
 		auto shard = shardMap.rangeContaining(range.begin);
@@ -1487,6 +1491,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	}
 
 	Standalone<VectorRef<MutationRef>> getDisposeRangeMutations(KeyRangeRef range) override {
+		TraceEvent(SevDebug, "GetDisposeRangeMutations")
+		    .detail("Begin", range.begin.toString())
+		    .detail("End", range.end.toString());
 		Standalone<VectorRef<MutationRef>> refs;
 		auto shards = shardMap.intersectingRanges(range);
 
@@ -1531,6 +1538,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		if (dirtyShards == nullptr) {
 			dirtyShards.reset(new std::set<std::shared_ptr<DataShard>>());
 		}
+
+		std::cout << "DisposeRange " << range.begin.toString() << " : " << range.end.toString() << "\n";
 
 		if (range.intersects(specialKeys)) {
 			std::cout << "Invalid range to dispose " << range.begin.toString() << " : " << range.end.toString() << "\n";
