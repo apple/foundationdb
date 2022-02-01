@@ -1127,11 +1127,18 @@ ACTOR Future<Void> waitVersionCommitted(Reference<BlobWorkerData> bwData,
 		}
 		wait(grvAtLeast);
 	}
-	state Version grvVersion = bwData->grvVersion.get();
-	if ((DEBUG_BW_VERSION(version)) || (DEBUG_BW_VERSION(grvVersion))) {
-		fmt::print("waitVersionCommitted got {0} < {1}, waiting on CF (currently {2})\n",
+	Version grvVersion = bwData->grvVersion.get();
+	// If GRV is way in the future, we know we can't roll back more than 5 seconds (or whatever this knob is set to)
+	// worth of versions
+	Version cantRollbackVersion = version + SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS;
+	state Version committedWaitVersion = std::min(grvVersion, cantRollbackVersion);
+
+	if ((DEBUG_BW_VERSION(version)) || (DEBUG_BW_VERSION(committedWaitVersion))) {
+		fmt::print("waitVersionCommitted got {0} < {1} -  min of ({2}, {3}) waiting on CF (currently {4})\n",
 		           version,
+		           committedWaitVersion,
 		           grvVersion,
+		           cantRollbackVersion,
 		           metadata->activeCFData.get()->getVersion());
 	}
 	// make sure the change feed has consumed mutations up through grvVersion to ensure none of them are rollbacks
@@ -1140,7 +1147,7 @@ ACTOR Future<Void> waitVersionCommitted(Reference<BlobWorkerData> bwData,
 		try {
 			// if not valid, we're about to be cancelled anyway
 			state Future<Void> atLeast = metadata->activeCFData.get().isValid()
-			                                 ? metadata->activeCFData.get()->whenAtLeast(grvVersion)
+			                                 ? metadata->activeCFData.get()->whenAtLeast(committedWaitVersion)
 			                                 : Never();
 			choose {
 				when(wait(atLeast)) { break; }
@@ -1164,15 +1171,16 @@ ACTOR Future<Void> waitVersionCommitted(Reference<BlobWorkerData> bwData,
 		}
 	}
 	// sanity check to make sure whenAtLeast didn't return early
-	if (grvVersion > metadata->waitForVersionReturned) {
-		metadata->waitForVersionReturned = grvVersion;
+	if (committedWaitVersion > metadata->waitForVersionReturned) {
+		metadata->waitForVersionReturned = committedWaitVersion;
 	}
 	if (version > metadata->knownCommittedVersion) {
 		metadata->knownCommittedVersion = version;
 	}
 	/*if (BW_DEBUG) {
 	    fmt::print(
-	        "waitVersionCommitted CF whenAtLeast {0}: {1}\n", grvVersion, metadata->activeCFData.get()->getVersion());
+	        "waitVersionCommitted CF whenAtLeast {0}: {1}\n", committedWaitVersion,
+	metadata->activeCFData.get()->getVersion());
 	}*/
 
 	return Void();
