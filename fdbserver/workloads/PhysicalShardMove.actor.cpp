@@ -168,6 +168,25 @@ struct SSCheckpointWorkload : TestWorkload {
 			}
 		}
 
+		tr.reset();
+		loop {
+			std::cout << "Commit checkpoint key." << std::endl;
+			try {
+				// state RangeResult serverList = wait(tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
+				// ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
+
+				// const int idx = deterministicRandom()->randomInt(0, serverList.size());
+				// UID ssID = decodeServerListKey(serverList[idx].key);
+				// CheckpointMetaData checkpoint;
+				wait(createCheckpoint(&tr, KeyRangeRef(key, endKey), RocksDBColumnFamily));
+				// tr.set(checkpointKeyFor(checkpoint.ssID), checkpointValue(checkpoint), .getPtr());
+				std::cout << "Buffer write done." << std::endl;
+				wait(tr.commit());
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
 		state int i = 0;
 
 		for (i = 0; i < res.size(); ++i) {

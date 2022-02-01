@@ -941,7 +941,7 @@ struct CheckpointMetaData {
 	constexpr static FileIdentifier file_identifier = 13804342;
 	Version version;
 	KeyRange range;
-	CheckpointFormat format;
+	int16_t format;
 	UID checkpointID; // A unique id for this checkpoint.
 	UID ssID; // Storage server ID on which this checkpoint is created.
 	int64_t gcTime; // Time to delete this checkpoint, a Unix timestamp in seconds.
@@ -949,12 +949,14 @@ struct CheckpointMetaData {
 	Optional<RocksDBColumnFamilyCheckpoint> rocksCF; // Present when format == RocksDBColumnFamily.
 
 	CheckpointMetaData() : format(InvalidFormat) {}
+	CheckpointMetaData(KeyRange const& range, CheckpointFormat format, UID const& ssID, UID const& checkpointID)
+	  : version(invalidVersion), range(range), format(format), ssID(ssID), checkpointID(checkpointID) {}
 	CheckpointMetaData(Version version, KeyRange const& range, CheckpointFormat format, UID checkpointID)
 	  : version(version), range(range), format(format), checkpointID(checkpointID) {}
 
 	std::string toString() const {
 		std::string res = "Checkpoint MetaData:\nServer: " + ssID.toString() + "\nVersion: " + std::to_string(version) +
-		                  "\nFormat: " + getFdbCheckpointFormatName(format) + "\n";
+		                  "\nFormat: " + getFdbCheckpointFormatName(static_cast<CheckpointFormat>(format)) + "\n";
 		if (rocksCF.present()) {
 			res += rocksCF.get().toString();
 		}
@@ -972,7 +974,7 @@ struct GetCheckpointRequest {
 	constexpr static FileIdentifier file_identifier = 13804343;
 	Version minVersion;
 	KeyRange range;
-	CheckpointFormat format;
+	int16_t format;
 	bool createNew; // Create a new checkpoint if not exist.
 	int64_t ttl; // Retention in seconds.
 	Optional<UID> checkpointID; // When present, look for the checkpoint with the exact UID.

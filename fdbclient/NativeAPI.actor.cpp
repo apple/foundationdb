@@ -6924,6 +6924,46 @@ ACTOR static Future<CheckpointMetaData> getCheckpointInternal(Database cx,
 	throw internal_error();
 }
 
+ACTOR template <class T>
+static Future<Void> createCheckpointImpl(T tr, KeyRangeRef range, CheckpointFormat format) {
+	TraceEvent("CreateCheckpointTransactionBegin").detail("Range", range.toString());
+
+	state RangeResult keyServers = wait(krmGetRanges(tr, keyServersPrefix, range));
+	ASSERT(!keyServers.more);
+
+	state RangeResult UIDtoTagMap = wait(tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+	ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
+
+	for (int i = 0; i < keyServers.size() - 1; ++i) {
+		KeyRangeRef shard(keyServers[i].key, keyServers[i + 1].key);
+		std::vector<UID> src;
+		std::vector<UID> dest;
+		decodeKeyServersValue(UIDtoTagMap, keyServers[i].value, src, dest);
+
+		const int idx = deterministicRandom()->randomInt(0, src.size());
+
+		TraceEvent("CreateCheckpointTransactionShard")
+		    .detail("Shard", shard.toString())
+		    .detail("SrcServers", describe(src))
+		    .detail("ServerSelected", src[idx])
+		    .detail("ReadVersion", tr->getReadVersion().get());
+
+		const UID checkpointID = deterministicRandom()->randomUniqueID();
+		CheckpointMetaData checkpoint(shard & range, format, src[idx], checkpointID);
+		tr->set(checkpointKeyFor(checkpointID), checkpointValue(checkpoint));
+	}
+
+	return Void();
+}
+
+Future<Void> createCheckpoint(Reference<ReadYourWritesTransaction> tr, KeyRangeRef range, CheckpointFormat format) {
+	return holdWhile(tr, createCheckpointImpl(tr, range, format));
+}
+
+Future<Void> createCheckpoint(Transaction* tr, KeyRangeRef range, CheckpointFormat format) {
+	return createCheckpointImpl(tr, range, format);
+}
+
 ACTOR Future<CheckpointMetaData> getCheckpoint(Database cx,
                                                KeyRange keys,
                                                Version minVersion,

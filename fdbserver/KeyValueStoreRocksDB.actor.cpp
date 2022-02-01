@@ -765,8 +765,16 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			const Version version = s.IsNotFound()
 			                            ? latestVersion
 			                            : BinaryReader::fromStringRef<Version>(toStringRef(value), Unversioned());
+
+			TraceEvent("RocksDBServeCheckpointVersion", id)
+			    .detail("CheckpointVersion", a.request.minVersion)
+			    .detail("PersistVersion", version);
+
 			// TODO: set the range as the actual shard range.
-			CheckpointMetaData res(version, a.request.range, a.request.format, deterministicRandom()->randomUniqueID());
+			CheckpointMetaData res(version,
+			                       a.request.range,
+			                       static_cast<CheckpointFormat>(a.request.format),
+			                       deterministicRandom()->randomUniqueID());
 			const std::string& checkpointDir = a.checkpointDir;
 
 			if (a.request.format == RocksDBColumnFamily) {

@@ -403,8 +403,8 @@ private:
 	std::unordered_map<KeyRef, Reference<ServerWatchMetadata>> watchMap; // keep track of server watches
 
 public:
-public:
 	std::unordered_map<CheckpointFormat, std::map<Version, CheckpointMetaData>> checkpoints;
+	std::map<Version, std::vector<CheckpointMetaData>> pendingCheckpoints;
 
 	// Histograms
 	struct FetchKeysHistograms {
@@ -1654,7 +1654,8 @@ ACTOR Future<Void> checkpointQ(StorageServer* self, GetCheckpointRequest req) {
 		    wait(self->storage.checkpoint(req, self->folder + "/rockscheckpoints_" + std::to_string(minVersion) + "/"));
 
 		checkpointMetaData.ssID = self->thisServerID;
-		self->checkpoints[req.format].emplace(checkpointMetaData.version, checkpointMetaData);
+		self->checkpoints[static_cast<CheckpointFormat>(req.format)].emplace(checkpointMetaData.version,
+		                                                                     checkpointMetaData);
 		// TODO: persist the checkpoint metadata.
 
 		req.reply.send(checkpointMetaData);
@@ -3983,6 +3984,12 @@ static const KeyRangeRef persistChangeFeedKeys =
     KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "RF/"), LiteralStringRef(PERSIST_PREFIX "RF0"));
 // data keys are unmangled (but never start with PERSIST_PREFIX because they are always in allKeys)
 
+static const KeyRangeRef persistCheckpointKeys =
+    KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "Checkpoint/"), LiteralStringRef(PERSIST_PREFIX "Checkpoint0"));
+static const KeyRangeRef persistPendingCheckpointKeys =
+    KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "PendingCheckpoint/"),
+                LiteralStringRef(PERSIST_PREFIX "PendingCheckpoint0"));
+
 ACTOR Future<Void> fetchChangeFeedApplier(StorageServer* data,
                                           Reference<ChangeFeedInfo> changeFeedInfo,
                                           Key rangeId,
@@ -4843,9 +4850,12 @@ public:
 		}
 
 		if (m.param1.startsWith(systemKeys.end)) {
-			if ((m.type == MutationRef::SetValue) && m.param1.substr(1).startsWith(storageCachePrefix))
+			if ((m.type == MutationRef::SetValue) && m.param1.substr(1).startsWith(storageCachePrefix)) {
 				applyPrivateCacheData(data, m);
-			else {
+			} else if ((m.type == MutationRef::SetValue) && m.param1.substr(1).startsWith(checkpointPrefix)) {
+				std::cout << "Received create checkpoint mutation." << std::endl;
+				registerPendingCheckpoint(data, m, ver);
+			} else {
 				applyPrivateData(data, m);
 			}
 		} else {
@@ -4880,8 +4890,8 @@ private:
 
 		if (processedStartKey) {
 			// Because of the implementation of the krm* functions, we expect changes in pairs, [begin,end)
-			// We can also ignore clearRanges, because they are always accompanied by such a pair of sets with the same
-			// keys
+			// We can also ignore clearRanges, because they are always accompanied by such a pair of sets with the
+			// same keys
 			ASSERT(m.type == MutationRef::SetValue && m.param1.startsWith(data->sk));
 			KeyRangeRef keys(startKey.removePrefix(data->sk), m.param1.removePrefix(data->sk));
 
@@ -4890,10 +4900,9 @@ private:
 				// add changes in shard assignment to the mutation log
 				setAssignedStatus(data, keys, nowAssigned);
 
-				// The changes for version have already been received (and are being processed now).  We need to fetch
-				// the data for change.version-1 (changes from versions < change.version)
-				// If emptyRange, treat the shard as empty, see removeKeysFromFailedServer() for more details about this
-				// scenario.
+				// The changes for version have already been received (and are being processed now).  We need to
+				// fetch the data for change.version-1 (changes from versions < change.version) If emptyRange, treat
+				// the shard as empty, see removeKeysFromFailedServer() for more details about this scenario.
 				const ChangeServerKeysContext context = emptyRange ? CSK_ASSIGN_EMPTY : CSK_UPDATE;
 				changeServerKeys(data, keys, nowAssigned, currentVersion - 1, context);
 			}
@@ -4901,8 +4910,8 @@ private:
 			processedStartKey = false;
 		} else if (m.type == MutationRef::SetValue && m.param1.startsWith(data->sk)) {
 			// Because of the implementation of the krm* functions, we expect changes in pairs, [begin,end)
-			// We can also ignore clearRanges, because they are always accompanied by such a pair of sets with the same
-			// keys
+			// We can also ignore clearRanges, because they are always accompanied by such a pair of sets with the
+			// same keys
 			startKey = m.param1;
 			nowAssigned = m.param2 != serverKeysFalse;
 			emptyRange = m.param2 == serverKeysTrueEmptyRange;
@@ -5087,7 +5096,8 @@ private:
 			                 m.param1.removePrefix(systemKeys.begin).removePrefix(storageCachePrefix));
 			data->cachedRangeMap.insert(keys, true);
 
-			// Figure out the affected shard ranges and maintain the cached key-range information in the in-memory map
+			// Figure out the affected shard ranges and maintain the cached key-range information in the in-memory
+			// map
 			// TODO revisit- we are not splitting the cached ranges based on shards as of now.
 			if (0) {
 				auto cachedRanges = data->shards.intersectingRanges(keys);
@@ -5108,6 +5118,22 @@ private:
 			ASSERT(false); // Unknown private mutation
 		}
 	}
+
+	void registerPendingCheckpoint(StorageServer* data, const MutationRef& m, Version ver) {
+		CheckpointMetaData checkpoint = decodeCheckpointValue(m.param2);
+		checkpoint.version = ver;
+		std::cout << std::endl << "Adding pending checkpoit: " << checkpoint.toString() << std::endl;
+		;
+		data->pendingCheckpoints[ver].push_back(checkpoint);
+
+		auto& mLV = data->addVersionToMutationLog(ver);
+
+		KeyRef pendingCheckpointKey =
+		    m.param1.substr(1).removePrefix(checkpointPrefix).withPrefix(persistPendingCheckpointKeys.begin);
+		data->addMutationToMutationLog(
+		    mLV, MutationRef(MutationRef::SetValue, pendingCheckpointKey, checkpointValue(checkpoint)));
+		std::cout << "buffer write pending checkpoint key: " << pendingCheckpointKey.toString() << std::endl;
+	}
 };
 
 ACTOR Future<Void> tssDelayForever() {
@@ -5122,8 +5148,8 @@ ACTOR Future<Void> tssDelayForever() {
 ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 	state double start;
 	try {
-		// If we are disk bound and durableVersion is very old, we need to block updates or we could run out of memory
-		// This is often referred to as the storage server e-brake (emergency brake)
+		// If we are disk bound and durableVersion is very old, we need to block updates or we could run out of
+		// memory This is often referred to as the storage server e-brake (emergency brake)
 
 		// We allow the storage server to make some progress between e-brake periods, referreed to as "overage", in
 		// order to ensure that it advances desiredOldestVersion enough for updateStorage to make enough progress on
@@ -5161,8 +5187,8 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		    data->tssFaultInjectTime.get() < now()) {
 			if (deterministicRandom()->random01() < 0.01) {
 				TraceEvent(SevWarnAlways, "TSSInjectDelayForever", data->thisServerID).log();
-				// small random chance to just completely get stuck here, each tss should eventually hit this in this
-				// mode
+				// small random chance to just completely get stuck here, each tss should eventually hit this in
+				// this mode
 				wait(tssDelayForever());
 			} else {
 				// otherwise pause for part of a second
@@ -5259,14 +5285,14 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			}
 
 			// Any fetchKeys which are ready to transition their shards to the adding,transferred state do so now.
-			// If there is an epoch end we skip this step, to increase testability and to prevent inserting a version in
-			// the middle of a rolled back version range.
+			// If there is an epoch end we skip this step, to increase testability and to prevent inserting a
+			// version in the middle of a rolled back version range.
 			while (!hasPrivateData && !epochEnd && !data->readyFetchKeys.empty()) {
 				auto fk = data->readyFetchKeys.back();
 				data->readyFetchKeys.pop_back();
 				fk.send(&fii);
-				// fetchKeys() would put the data it fetched into the fii. The thread will not return back to this actor
-				// until it was completed.
+				// fetchKeys() would put the data it fetched into the fii. The thread will not return back to this
+				// actor until it was completed.
 			}
 
 			for (auto& c : fii.changes)
@@ -5275,9 +5301,10 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			wait(doEagerReads(data, &eager));
 			if (data->shardChangeCounter == changeCounter)
 				break;
-			TEST(true); // A fetchKeys completed while we were doing this, so eager might be outdated.  Read it again.
-			// SOMEDAY: Theoretically we could check the change counters of individual shards and retry the reads only
-			// selectively
+			TEST(true); // A fetchKeys completed while we were doing this, so eager might be outdated.  Read it
+			            // again.
+			// SOMEDAY: Theoretically we could check the change counters of individual shards and retry the reads
+			// only selectively
 			eager = UpdateEagerReadInfo();
 		}
 		data->eagerReadsLatencyHistogram->sampleSeconds(now() - start);
@@ -5307,8 +5334,8 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			for (; mutationNum < pUpdate->mutations.size(); mutationNum++) {
 				updater.applyMutation(data, pUpdate->mutations[mutationNum], pUpdate->version, true);
 				mutationBytes += pUpdate->mutations[mutationNum].totalSize();
-				// data->counters.mutationBytes or data->counters.mutations should not be updated because they should
-				// have counted when the mutations arrive from cursor initially.
+				// data->counters.mutationBytes or data->counters.mutations should not be updated because they
+				// should have counted when the mutations arrive from cursor initially.
 				injectedChanges = true;
 				if (mutationBytes > SERVER_KNOBS->DESIRED_UPDATE_BYTES) {
 					mutationBytes = 0;
@@ -5366,8 +5393,8 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				Span span("SS:update"_loc, { spanContext });
 				span.addTag("key"_sr, msg.param1);
 
-				// Drop non-private mutations if TSS fault injection is enabled in simulation, or if this is a TSS in
-				// quarantine.
+				// Drop non-private mutations if TSS fault injection is enabled in simulation, or if this is a TSS
+				// in quarantine.
 				if (g_network->isSimulated() && data->isTss() && !g_simulator.speedUpSimulation &&
 				    g_simulator.tssMode == ISimulator::TSSMode::EnabledDropMutations &&
 				    data->tssFaultInjectTime.present() && data->tssFaultInjectTime.get() < now() &&
@@ -5559,13 +5586,25 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		state Version desiredVersion = data->desiredOldestVersion.get();
 		state int64_t bytesLeft = SERVER_KNOBS->STORAGE_COMMIT_BYTES;
 
+		state bool requireCheckpoint = false;
+		if (!data->pendingCheckpoints.empty()) {
+			const Version cVer = data->pendingCheckpoints.begin()->first;
+			if (cVer <= desiredVersion) {
+				TraceEvent("CheckpointVersionSatisfied", data->thisServerID)
+				    .detail("DesiredVersion", desiredVersion)
+				    .detail("CheckPointVersion", cVer);
+				desiredVersion = cVer;
+				requireCheckpoint = true;
+			}
+		}
+
 		// Write mutations to storage until we reach the desiredVersion or have written too much (bytesleft)
 		state double beforeStorageUpdates = now();
 		loop {
 			state bool done = data->storage.makeVersionMutationsDurable(newOldestVersion, desiredVersion, bytesLeft);
-			// We want to forget things from these data structures atomically with changing oldestVersion (and "before",
-			// since oldestVersion.set() may trigger waiting actors) forgetVersionsBeforeAsync visibly forgets
-			// immediately (without waiting) but asynchronously frees memory.
+			// We want to forget things from these data structures atomically with changing oldestVersion (and
+			// "before", since oldestVersion.set() may trigger waiting actors) forgetVersionsBeforeAsync visibly
+			// forgets immediately (without waiting) but asynchronously frees memory.
 			Future<Void> finishedForgetting =
 			    data->mutableData().forgetVersionsBeforeAsync(newOldestVersion, TaskPriority::UpdateStorage);
 			data->oldestVersion.set(newOldestVersion);
@@ -5620,13 +5659,36 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 
 		debug_advanceMinCommittedVersion(data->thisServerID, newOldestVersion);
 
+		if (requireCheckpoint) {
+			ASSERT(newOldestVersion == data->pendingCheckpoints.begin()->first);
+			state int idx = 0;
+			for (; idx < data->pendingCheckpoints.begin()->second.size(); ++idx) {
+				auto& metaData = data->pendingCheckpoints.begin()->second[idx];
+				GetCheckpointRequest req(newOldestVersion, metaData.range);
+				req.format = metaData.format;
+				// req.checkpointID = metaData.checkpointID;
+				try {
+					state CheckpointMetaData checkpointResult = wait(data->storage.checkpoint(
+					    req, data->folder + "/rockscheckpoints_" + metaData.checkpointID.toString()));
+					TraceEvent("StorageCreatedCheckpoint", data->thisServerID)
+					    .detail("Checkpoint", checkpointResult.toString());
+				} catch (Error& e) {
+					TraceEvent("StorageCreatedCheckpointFailure", data->thisServerID)
+					    .detail("Checkpoint", checkpointResult.toString());
+					ASSERT(false);
+				}
+			}
+			data->pendingCheckpoints.erase(data->pendingCheckpoints.begin());
+			requireCheckpoint = false;
+		}
+
 		if (newOldestVersion > data->rebootAfterDurableVersion) {
 			TraceEvent("RebootWhenDurableTriggered", data->thisServerID)
 			    .detail("NewOldestVersion", newOldestVersion)
 			    .detail("RebootAfterDurableVersion", data->rebootAfterDurableVersion);
-			// To avoid brokenPromise error, which is caused by the sender of the durableInProgress (i.e., this process)
-			// never sets durableInProgress, we should set durableInProgress before send the please_reboot() error.
-			// Otherwise, in the race situation when storage server receives both reboot and
+			// To avoid brokenPromise error, which is caused by the sender of the durableInProgress (i.e., this
+			// process) never sets durableInProgress, we should set durableInProgress before send the
+			// please_reboot() error. Otherwise, in the race situation when storage server receives both reboot and
 			// brokenPromise of durableInProgress, the worker of the storage server will die.
 			// We will eventually end up with no worker for storage server role.
 			// The data distributor's buildTeam() will get stuck in building a team
@@ -5648,12 +5710,13 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		}
 
 		durableInProgress.send(Void());
-		wait(delay(0, TaskPriority::UpdateStorage)); // Setting durableInProgess could cause the storage server to shut
-		                                             // down, so delay to check for cancellation
+		wait(delay(0, TaskPriority::UpdateStorage)); // Setting durableInProgess could cause the storage server to
+		                                             // shut down, so delay to check for cancellation
 
 		// Taking and releasing the durableVersionLock ensures that no eager reads both begin before the commit was
-		// effective and are applied after we change the durable version. Also ensure that we have to lock while calling
-		// changeDurableVersion, because otherwise the latest version of mutableData might be partially loaded.
+		// effective and are applied after we change the durable version. Also ensure that we have to lock while
+		// calling changeDurableVersion, because otherwise the latest version of mutableData might be partially
+		// loaded.
 		state double beforeSSDurableVersionUpdate = now();
 		wait(data->durableVersionLock.take());
 		data->popVersion(data->durableVersion.get() + 1);
@@ -6019,8 +6082,8 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	}
 
 	// It's a bit sketchy to rely on an untrusted storage engine to persist its quarantine state when the quarantine
-	// state means the storage engine already had a durability or correctness error, but it should get re-quarantined
-	// very quickly because of a mismatch if it starts trying to do things again
+	// state means the storage engine already had a durability or correctness error, but it should get
+	// re-quarantined very quickly because of a mismatch if it starts trying to do things again
 	if (fTssQuarantine.get().present()) {
 		TEST(true); // TSS restarted while quarantined
 		data->tssInQuarantine = true;
@@ -6264,15 +6327,15 @@ ACTOR Future<Void> waitMetrics(StorageServerMetrics* self, WaitMetricsRequest re
 
 						// SOMEDAY: validation! The changes here are possibly partial changes (we receive multiple
 						// messages per
-						//  update to our requested range). This means that the validation would have to occur after all
-						//  the messages for one clear or set have been dispatched.
+						//  update to our requested range). This means that the validation would have to occur after
+						//  all the messages for one clear or set have been dispatched.
 
 						/*StorageMetrics m = getMetrics( data, req.keys );
 						  bool b = ( m.bytes != metrics.bytes || m.bytesPerKSecond != metrics.bytesPerKSecond ||
 						  m.iosPerKSecond != metrics.iosPerKSecond ); if (b) { printf("keys: '%s' - '%s' @%p\n",
 						  printable(req.keys.begin).c_str(), printable(req.keys.end).c_str(), this);
-						  printf("waitMetrics: desync %d (%lld %lld %lld) != (%lld %lld %lld); +(%lld %lld %lld)\n", b,
-						  m.bytes, m.bytesPerKSecond, m.iosPerKSecond, metrics.bytes, metrics.bytesPerKSecond,
+						  printf("waitMetrics: desync %d (%lld %lld %lld) != (%lld %lld %lld); +(%lld %lld %lld)\n",
+						  b, m.bytes, m.bytesPerKSecond, m.iosPerKSecond, metrics.bytes, metrics.bytesPerKSecond,
 						  metrics.iosPerKSecond, c.bytes, c.bytesPerKSecond, c.iosPerKSecond);
 
 						  }*/
@@ -6281,8 +6344,8 @@ ACTOR Future<Void> waitMetrics(StorageServerMetrics* self, WaitMetricsRequest re
 				}
 			} catch (Error& e) {
 				if (e.code() == error_code_actor_cancelled)
-					throw; // This is only cancelled when the main loop had exited...no need in this case to clean up
-					       // self
+					throw; // This is only cancelled when the main loop had exited...no need in this case to clean
+					       // up self
 				error = e;
 				break;
 			}
@@ -6461,8 +6524,8 @@ ACTOR Future<Void> serveGetValueRequests(StorageServer* self, FutureStream<GetVa
 	getCurrentLineage()->modify(&TransactionLineage::operation) = TransactionLineage::Operation::GetValue;
 	loop {
 		GetValueRequest req = waitNext(getValue);
-		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so downgrade
-		// before doing real work
+		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so
+		// downgrade before doing real work
 		if (req.debugID.present())
 			g_traceBatch.addEvent("GetValueDebug",
 			                      req.debugID.get().first(),
@@ -6480,8 +6543,8 @@ ACTOR Future<Void> serveGetKeyValuesRequests(StorageServer* self, FutureStream<G
 	loop {
 		GetKeyValuesRequest req = waitNext(getKeyValues);
 
-		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so downgrade
-		// before doing real work
+		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so
+		// downgrade before doing real work
 		self->actors.add(self->readGuard(req, getKeyValuesQ));
 	}
 }
@@ -6494,8 +6557,8 @@ ACTOR Future<Void> serveGetKeyValuesAndFlatMapRequests(
 	loop {
 		GetKeyValuesAndFlatMapRequest req = waitNext(getKeyValuesAndFlatMap);
 
-		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so downgrade
-		// before doing real work
+		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so
+		// downgrade before doing real work
 		self->actors.add(self->readGuard(req, getKeyValuesAndFlatMapQ));
 	}
 }
@@ -6504,8 +6567,8 @@ ACTOR Future<Void> serveGetKeyValuesStreamRequests(StorageServer* self,
                                                    FutureStream<GetKeyValuesStreamRequest> getKeyValuesStream) {
 	loop {
 		GetKeyValuesStreamRequest req = waitNext(getKeyValuesStream);
-		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so downgrade
-		// before doing real work
+		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so
+		// downgrade before doing real work
 		// FIXME: add readGuard again
 		self->actors.add(getKeyValuesStreamQ(self, req));
 	}
@@ -6515,8 +6578,8 @@ ACTOR Future<Void> serveGetKeyRequests(StorageServer* self, FutureStream<GetKeyR
 	getCurrentLineage()->modify(&TransactionLineage::operation) = TransactionLineage::Operation::GetKey;
 	loop {
 		GetKeyRequest req = waitNext(getKey);
-		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so downgrade
-		// before doing real work
+		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so
+		// downgrade before doing real work
 		self->actors.add(self->readGuard(req, getKeyQ));
 	}
 }
@@ -6550,16 +6613,16 @@ ACTOR Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream
 			KeyRef key = self->setWatchMetadata(metadata);
 			metadata->watch_impl = forward(watchWaitForValueChange(self, span.context, key), metadata->versionPromise);
 			self->actors.add(watchValueSendReply(self, req, metadata->versionPromise.getFuture(), span.context));
-		} else if (metadata->value ==
-		           req.value) { // case 2: there is a watch in the map and it has the same value so just update version
+		} else if (metadata->value == req.value) { // case 2: there is a watch in the map and it has the same value
+			                                       // so just update version
 			if (req.version > metadata->version) {
 				metadata->version = req.version;
 				metadata->tags = req.tags;
 				metadata->debugID = req.debugID;
 			}
 			self->actors.add(watchValueSendReply(self, req, metadata->versionPromise.getFuture(), span.context));
-		} else if (req.version > metadata->version) { // case 3: version in map has a lower version so trigger watch and
-			                                          // create a new entry in map
+		} else if (req.version > metadata->version) { // case 3: version in map has a lower version so trigger watch
+			                                          // and create a new entry in map
 			self->deleteWatchMetadata(req.key.contents());
 			metadata->versionPromise.send(req.version);
 			metadata->watch_impl.cancel();
@@ -6661,8 +6724,9 @@ ACTOR Future<Void> serveGetCheckpointRequests(StorageServer* self, FutureStream<
 		} else {
 			// TODO: Load existing checkpoints from disk once persisting checkpoint metadata is implemented.
 			// TODO: Implement lookup on checkpointID.
-			const auto it = self->checkpoints[req.format].lower_bound(req.minVersion);
-			if (it != self->checkpoints[req.format].end()) {
+			const CheckpointFormat format = static_cast<CheckpointFormat>(req.format);
+			const auto it = self->checkpoints[format].lower_bound(req.minVersion);
+			if (it != self->checkpoints[format].end()) {
 				TraceEvent(SevDebug, "ServeCheckpointFoundExisting", self->thisServerID)
 				    .detail("Version", it->second.version);
 				req.reply.send(it->second);
@@ -6724,8 +6788,8 @@ ACTOR Future<Void> reportStorageServerState(StorageServer* self) {
 
 ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface ssi) {
 	state Future<Void> doUpdate = Void();
-	state bool updateReceived =
-	    false; // true iff the current update() actor assigned to doUpdate has already received an update from the tlog
+	state bool updateReceived = false; // true iff the current update() actor assigned to doUpdate has already
+	                                   // received an update from the tlog
 	state double lastLoopTopTime = now();
 	state Future<Void> dbInfoChange = Void();
 	state Future<Void> checkLastUpdate = Void();
@@ -6793,8 +6857,8 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 						self->popVersion(self->durableVersion.get() + 1, true);
 					}
 					// If update() is waiting for results from the tlog, it might never get them, so needs to be
-					// cancelled.  But if it is waiting later, cancelling it could cause problems (e.g. fetchKeys that
-					// already committed to transitioning to waiting state)
+					// cancelled.  But if it is waiting later, cancelling it could cause problems (e.g. fetchKeys
+					// that already committed to transitioning to waiting state)
 					if (!updateReceived) {
 						doUpdate = Void();
 					}
@@ -6849,16 +6913,17 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 bool storageServerTerminated(StorageServer& self, IKeyValueStore* persistentData, Error const& e) {
 	self.shuttingDown = true;
 
-	// Clearing shards shuts down any fetchKeys actors; these may do things on cancellation that are best done with self
-	// still valid
+	// Clearing shards shuts down any fetchKeys actors; these may do things on cancellation that are best done with
+	// self still valid
 	self.shards.insert(allKeys, Reference<ShardInfo>());
 
-	// Dispose the IKVS (destroying its data permanently) only if this shutdown is definitely permanent.  Otherwise just
-	// close it.
+	// Dispose the IKVS (destroying its data permanently) only if this shutdown is definitely permanent.  Otherwise
+	// just close it.
 	if (e.code() == error_code_please_reboot) {
 		// do nothing.
 	} else if (e.code() == error_code_worker_removed || e.code() == error_code_recruitment_failed) {
-		// SOMEDAY: could close instead of dispose if tss in quarantine gets removed so it could still be investigated?
+		// SOMEDAY: could close instead of dispose if tss in quarantine gets removed so it could still be
+		// investigated?
 		persistentData->dispose();
 	} else {
 		persistentData->close();
