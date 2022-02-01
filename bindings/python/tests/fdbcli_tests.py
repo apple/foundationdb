@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import sys
+import shutil
 import os
 import subprocess
 import logging
@@ -216,6 +217,9 @@ def kill(logger):
 
 @enable_logging()
 def suspend(logger):
+    if not shutil.which("pidof"):
+        logger.debug("Skipping suspend test. Pidof not available")
+        return
     output1 = run_fdbcli_command('suspend')
     lines = output1.split('\n')
     assert len(lines) == 2

@@ -57,7 +57,7 @@ ACTOR Future<Reference<ClusterConnectionKey>> ClusterConnectionKey::loadClusterC
 }
 
 // Sets the connections string held by this object and persists it.
-Future<Void> ClusterConnectionKey::setConnectionString(ClusterConnectionString const& connectionString) {
+Future<Void> ClusterConnectionKey::setAndPersistConnectionString(ClusterConnectionString const& connectionString) {
 	cs = connectionString;
 	return success(persist());
 }

@@ -786,7 +786,9 @@ void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime, bool logDetails) {
 
 void getDiskStatistics(std::string const& directory,
                        uint64_t& currentIOs,
-                       uint64_t& busyTicks,
+                       uint64_t& readMilliSecs,
+                       uint64_t& writeMilliSecs,
+                       uint64_t& IOMilliSecs,
                        uint64_t& reads,
                        uint64_t& writes,
                        uint64_t& writeSectors,
@@ -872,7 +874,9 @@ void getDiskStatistics(std::string const& directory,
 			disk_stream >> aveq;
 
 			currentIOs = cur_ios;
-			busyTicks = ticks;
+			readMilliSecs = rd_ticks;
+			writeMilliSecs = wr_ticks;
+			IOMilliSecs = ticks;
 			reads = rd_ios;
 			writes = wr_ios;
 			writeSectors = wr_sectors;
@@ -1015,14 +1019,18 @@ void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime, bool logDetails) {
 
 void getDiskStatistics(std::string const& directory,
                        uint64_t& currentIOs,
-                       uint64_t& busyTicks,
+                       uint64_t& readMilliSecs,
+                       uint64_t& writeMilliSecs,
+                       uint64_t& IOMilliSecs,
                        uint64_t& reads,
                        uint64_t& writes,
                        uint64_t& writeSectors,
                        uint64_t& readSectors) {
 	INJECT_FAULT(platform_error, "getDiskStatistics"); // getting disk stats failed
 	currentIOs = 0;
-	busyTicks = 0;
+	readMilliSecs = 0; // This will not be used because we cannot get its value.
+	writeMilliSecs = 0; // This will not be used because we cannot get its value.
+	IOMilliSecs = 0;
 	reads = 0;
 	writes = 0;
 	writeSectors = 0;
@@ -1085,12 +1093,12 @@ void getDiskStatistics(std::string const& directory,
 			throw platform_error();
 		}
 
-		currentIOs = queue_len;
-		busyTicks = (u_int64_t)ms_per_transaction;
-		reads = total_transfers_read;
-		writes = total_transfers_write;
-		writeSectors = total_blocks_read;
-		readSectors = total_blocks_write;
+		currentIOs += queue_len;
+		IOMilliSecs += (u_int64_t)ms_per_transaction;
+		reads += total_transfers_read;
+		writes += total_transfers_write;
+		writeSectors += total_blocks_read;
+		readSectors += total_blocks_write;
 	}
 }
 
@@ -1195,14 +1203,18 @@ void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime, bool logDetails) {
 
 void getDiskStatistics(std::string const& directory,
                        uint64_t& currentIOs,
-                       uint64_t& busyTicks,
+                       uint64_t& readMilliSecs,
+                       uint64_t& writeMilliSecs,
+                       uint64_t& IOMilliSecs,
                        uint64_t& reads,
                        uint64_t& writes,
                        uint64_t& writeSectors,
                        uint64_t& readSectors) {
 	INJECT_FAULT(platform_error, "getDiskStatistics"); // Getting disk stats failed (macOS)
-	currentIOs = 0;
-	busyTicks = 0;
+	currentIOs = 0; // This will not be used because we cannot get its value.
+	readMilliSecs = 0;
+	writeMilliSecs = 0;
+	IOMilliSecs = 0;
 	writeSectors = 0;
 	readSectors = 0;
 
@@ -1282,6 +1294,24 @@ void getDiskStatistics(std::string const& directory,
 	if ((number = (CFNumberRef)CFDictionaryGetValue(stats_dict, CFSTR(kIOBlockStorageDriverStatisticsWritesKey)))) {
 		CFNumberGetValue(number, kCFNumberSInt64Type, &writes);
 	}
+
+	uint64_t nanoSecs;
+	if ((number =
+	         (CFNumberRef)CFDictionaryGetValue(stats_dict, CFSTR(kIOBlockStorageDriverStatisticsTotalReadTimeKey)))) {
+		CFNumberGetValue(number, kCFNumberSInt64Type, &nanoSecs);
+		readMilliSecs += nanoSecs;
+		IOMilliSecs += nanoSecs;
+	}
+	if ((number =
+	         (CFNumberRef)CFDictionaryGetValue(stats_dict, CFSTR(kIOBlockStorageDriverStatisticsTotalWriteTimeKey)))) {
+		CFNumberGetValue(number, kCFNumberSInt64Type, &nanoSecs);
+		writeMilliSecs += nanoSecs;
+		IOMilliSecs += nanoSecs;
+	}
+	// nanoseconds to milliseconds
+	readMilliSecs /= 1000000;
+	writeMilliSecs /= 1000000;
+	IOMilliSecs /= 1000000;
 
 	CFRelease(disk_dict);
 	IOObjectRelease(disk);
@@ -1390,13 +1420,14 @@ struct SystemStatisticsState {
 #elif defined(__unixish__)
 	uint64_t machineLastSent, machineLastReceived;
 	uint64_t machineLastOutSegs, machineLastRetransSegs;
-	uint64_t lastBusyTicks, lastReads, lastWrites, lastWriteSectors, lastReadSectors;
+	uint64_t lastReadMilliSecs, lastWriteMilliSecs, lastIOMilliSecs, lastReads, lastWrites, lastWriteSectors,
+	    lastReadSectors;
 	uint64_t lastClockIdleTime, lastClockTotalTime;
 	SystemStatisticsState()
 	  : lastTime(0), lastClockThread(0), lastClockProcess(0), processLastSent(0), processLastReceived(0),
-	    machineLastSent(0), machineLastReceived(0), machineLastOutSegs(0), machineLastRetransSegs(0), lastBusyTicks(0),
-	    lastReads(0), lastWrites(0), lastWriteSectors(0), lastReadSectors(0), lastClockIdleTime(0),
-	    lastClockTotalTime(0) {}
+	    machineLastSent(0), machineLastReceived(0), machineLastOutSegs(0), machineLastRetransSegs(0),
+	    lastReadMilliSecs(0), lastWriteMilliSecs(0), lastIOMilliSecs(0), lastReads(0), lastWrites(0),
+	    lastWriteSectors(0), lastReadSectors(0), lastClockIdleTime(0), lastClockTotalTime(0) {}
 #else
 #error Port me!
 #endif
@@ -1675,14 +1706,24 @@ SystemStatistics getSystemStatistics(std::string const& dataFolder,
 	(*statState)->machineLastRetransSegs = machineRetransSegs;
 
 	uint64_t currentIOs;
-	uint64_t nowBusyTicks = (*statState)->lastBusyTicks;
+	uint64_t nowReadMilliSecs = (*statState)->lastReadMilliSecs;
+	uint64_t nowWriteMilliSecs = (*statState)->lastWriteMilliSecs;
+	uint64_t nowIOMilliSecs = (*statState)->lastIOMilliSecs;
 	uint64_t nowReads = (*statState)->lastReads;
 	uint64_t nowWrites = (*statState)->lastWrites;
 	uint64_t nowWriteSectors = (*statState)->lastWriteSectors;
 	uint64_t nowReadSectors = (*statState)->lastReadSectors;
 
 	if (dataFolder != "") {
-		getDiskStatistics(dataFolder, currentIOs, nowBusyTicks, nowReads, nowWrites, nowWriteSectors, nowReadSectors);
+		getDiskStatistics(dataFolder,
+		                  currentIOs,
+		                  nowReadMilliSecs,
+		                  nowWriteMilliSecs,
+		                  nowIOMilliSecs,
+		                  nowReads,
+		                  nowWrites,
+		                  nowWriteSectors,
+		                  nowReadSectors);
 		returnStats.processDiskQueueDepth = currentIOs;
 		returnStats.processDiskReadCount = nowReads;
 		returnStats.processDiskWriteCount = nowWrites;
@@ -1690,13 +1731,24 @@ SystemStatistics getSystemStatistics(std::string const& dataFolder,
 			returnStats.processDiskIdleSeconds = std::max<double>(
 			    0,
 			    returnStats.elapsed -
-			        std::min<double>(returnStats.elapsed, (nowBusyTicks - (*statState)->lastBusyTicks) / 1000.0));
+			        std::min<double>(returnStats.elapsed, (nowIOMilliSecs - (*statState)->lastIOMilliSecs) / 1000.0));
+			returnStats.processDiskReadSeconds = std::max<double>(
+			    0,
+			    returnStats.elapsed - std::min<double>(returnStats.elapsed,
+			                                           (nowReadMilliSecs - (*statState)->lastReadMilliSecs) / 1000.0));
+			returnStats.processDiskWriteSeconds =
+			    std::max<double>(0,
+			                     returnStats.elapsed -
+			                         std::min<double>(returnStats.elapsed,
+			                                          (nowWriteMilliSecs - (*statState)->lastWriteMilliSecs) / 1000.0));
 			returnStats.processDiskRead = (nowReads - (*statState)->lastReads);
 			returnStats.processDiskWrite = (nowWrites - (*statState)->lastWrites);
 			returnStats.processDiskWriteSectors = (nowWriteSectors - (*statState)->lastWriteSectors);
 			returnStats.processDiskReadSectors = (nowReadSectors - (*statState)->lastReadSectors);
 		}
-		(*statState)->lastBusyTicks = nowBusyTicks;
+		(*statState)->lastIOMilliSecs = nowIOMilliSecs;
+		(*statState)->lastReadMilliSecs = nowReadMilliSecs;
+		(*statState)->lastWriteMilliSecs = nowWriteMilliSecs;
 		(*statState)->lastReads = nowReads;
 		(*statState)->lastWrites = nowWrites;
 		(*statState)->lastWriteSectors = nowWriteSectors;
@@ -3428,6 +3480,7 @@ void crashHandler(int sig) {
 	bool error = (sig != SIGUSR2);
 
 #if (!defined(TLS_DISABLED) && !defined(_WIN32))
+	StreamCipherKey::cleanup();
 	StreamCipher::cleanup();
 #endif
 
