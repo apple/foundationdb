@@ -1716,6 +1716,12 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 		}
 	}
 
+	// Get set of workers again. Some could have died after reporting assignments
+	std::unordered_set<UID> endingWorkers;
+	for (auto& it : bmData->workersById) {
+		endingWorkers.insert(it.first);
+	}
+
 	// revoke assignments that are old and incorrect
 	TEST(!outOfDateAssignments.empty()); // BM resolved conflicting assignments on recovery
 	for (auto& it : outOfDateAssignments) {
@@ -1762,7 +1768,7 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 
 		// if worker id is already set to a known worker that replied with it in the mapping, range is already assigned
 		// there. If not, need to explicitly assign it to someone
-		if (workerId == UID() || epoch == 0) {
+		if (workerId == UID() || epoch == 0 || !endingWorkers.count(workerId)) {
 			RangeAssignment raAssign;
 			raAssign.isAssign = true;
 			raAssign.worker = workerId;
