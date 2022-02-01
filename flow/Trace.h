@@ -64,8 +64,8 @@ enum Severity {
 	SevMax = 1000000
 };
 
-inline Severity intToSeverity(int sev) {
-	switch(sev) {
+inline Severity intToSeverity(int sevnum) {
+	switch(sevnum) {
 		case 0:
 			return SevVerbose;
 		case 1:

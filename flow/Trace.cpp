@@ -868,7 +868,7 @@ Future<Void> pingTraceLogWriterThread() {
 }
 
 TraceEvent::TraceEvent(const char* type, UID id)
-  : initialized(false), enabled(true), logged(false), severity(intToSeverity(FLOW_KNOBS->TRACE_EVENT_SEVERITY)), type(type), id(id) {
+  : initialized(false), enabled(true), logged(false), severity(SevInfo), type(type), id(id) {
 	setMaxFieldLength(0);
 	setMaxEventLength(0);
 }
