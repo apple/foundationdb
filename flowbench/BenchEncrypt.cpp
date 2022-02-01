@@ -29,7 +29,7 @@ static StreamCipher::IV getRandomIV() {
 	return iv;
 }
 
-static inline Standalone<StringRef> encrypt(const StreamCipher::Key& key,
+static inline Standalone<StringRef> encrypt(const StreamCipherKey* const key,
                                             const StreamCipher::IV& iv,
                                             unsigned char const* data,
                                             size_t len) {
@@ -43,8 +43,8 @@ static void bench_encrypt(benchmark::State& state) {
 	auto bytes = state.range(0);
 	auto chunks = state.range(1);
 	auto chunkSize = bytes / chunks;
-	StreamCipher::Key::initializeRandomTestKey();
-	const auto& key = StreamCipher::Key::getKey();
+	StreamCipherKey::initializeGlobalRandomTestKey();
+	auto key = StreamCipherKey::getGlobalCipherKey();
 	auto iv = getRandomIV();
 	auto data = getKey(bytes);
 	while (state.KeepRunning()) {
@@ -59,8 +59,8 @@ static void bench_decrypt(benchmark::State& state) {
 	auto bytes = state.range(0);
 	auto chunks = state.range(1);
 	auto chunkSize = bytes / chunks;
-	StreamCipher::Key::initializeRandomTestKey();
-	const auto& key = StreamCipher::Key::getKey();
+	StreamCipherKey::initializeGlobalRandomTestKey();
+	auto key = StreamCipherKey::getGlobalCipherKey();
 	auto iv = getRandomIV();
 	auto data = getKey(bytes);
 	auto encrypted = encrypt(key, iv, data.begin(), data.size());
