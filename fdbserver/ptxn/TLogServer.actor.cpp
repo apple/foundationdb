@@ -183,11 +183,17 @@ static const KeyRangeRef persistLocalityKeys =
 static const KeyRangeRef persistLogRouterTagsKeys =
     KeyRangeRef(LiteralStringRef("LogRouterTags/"), LiteralStringRef("LogRouterTags0"));
 static const KeyRangeRef persistTxsTagsKeys = KeyRangeRef(LiteralStringRef("TxsTags/"), LiteralStringRef("TxsTags0"));
-static const KeyRange persistTagMessagesKeys = prefixRange(LiteralStringRef("TagMsg/"));
-static const KeyRange persistTagMessageRefsKeys = prefixRange(LiteralStringRef("TagMsgRef/"));
+
+// For each (tlogID), store storageTeamId -> vector<Tag> mapping (i.e. std::map<StorageTeamID, std::vector<Tag>>)
 static const KeyRange persistStorageTeamKeys = prefixRange(LiteralStringRef("StorageTeam/"));
+
+// For each (tlogID, storageTeam), store its poped tag -> version mapping(i.e. std::map<Tag, Version>)
 static const KeyRange persistStorageTeamPoppedKeys = prefixRange(LiteralStringRef("StorageTeamPop/"));
+
+// For each (tlogID, storageTeam, version), store the corresponding message. (they should be spilled messages)
 static const KeyRange persistStorageTeamMessagesKeys = prefixRange(LiteralStringRef("StorageTeamMsg/"));
+
+// similar to persistStorageTeamMessagesKeys
 static const KeyRange persistStorageTeamMessageRefsKeys = prefixRange(LiteralStringRef("StorageTeamMsgRef/"));
 
 static Key persistStorageTeamMessagesKey(UID id, StorageTeamID storageTeamId, Version version) {
@@ -721,9 +727,9 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 			tlogGroupData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistTLogSpillTypeKeys.begin)));
 			tlogGroupData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistRecoveryLocationKey)));
 			tlogGroupData->persistentData->clear(singleKeyRange(logIdKey.withPrefix(persistStorageTeamKeys.begin)));
-			Key msgKey = logIdKey.withPrefix(persistTagMessagesKeys.begin);
+			Key msgKey = logIdKey.withPrefix(persistStorageTeamMessagesKeys.begin);
 			tlogGroupData->persistentData->clear(KeyRangeRef(msgKey, strinc(msgKey)));
-			Key msgRefKey = logIdKey.withPrefix(persistTagMessageRefsKeys.begin);
+			Key msgRefKey = logIdKey.withPrefix(persistStorageTeamMessageRefsKeys.begin);
 			tlogGroupData->persistentData->clear(KeyRangeRef(msgRefKey, strinc(msgRefKey)));
 			Key poppedKey = logIdKey.withPrefix(persistStorageTeamPoppedKeys.begin);
 			tlogGroupData->persistentData->clear(KeyRangeRef(poppedKey, strinc(poppedKey)));
@@ -1691,7 +1697,7 @@ ACTOR Future<Void> restorePersistentState(Reference<TLogGroupData> self,
                                           Reference<TLogServerData> serverData) {
 	state double startt = now();
 	state Reference<LogGenerationData> logData;
-	state KeyRange tagKeys;
+	state KeyRange storageTeamKeys;
 	// PERSIST: Read basic state from persistentData; replay persistentQueue but don't erase it
 
 	state IKeyValueStore* storage = self->persistentData;
@@ -1865,14 +1871,15 @@ ACTOR Future<Void> restorePersistentState(Reference<TLogGroupData> self,
 		    .detail("RecoveryCount", logData->recoveryCount);
 		// Restore popped keys.  Pop operations that took place after the last (committed) updatePersistentDataVersion
 		// might be lost, but that is fine because we will get the corresponding data back, too.
-		tagKeys = prefixRange(rawId.withPrefix(persistStorageTeamPoppedKeys.begin));
+		storageTeamKeys = prefixRange(rawId.withPrefix(persistStorageTeamPoppedKeys.begin));
 		loop {
 			if (logData->removed.isReady())
 				break;
-			RangeResult data = wait(self->persistentData->readRange(tagKeys, BUGGIFY ? 3 : 1 << 30, 1 << 20));
+			RangeResult data = wait(self->persistentData->readRange(storageTeamKeys, BUGGIFY ? 3 : 1 << 30, 1 << 20));
 			if (!data.size())
 				break;
-			((KeyRangeRef&)tagKeys) = KeyRangeRef(keyAfter(data.back().key, tagKeys.arena()), tagKeys.end);
+			((KeyRangeRef&)storageTeamKeys) =
+			    KeyRangeRef(keyAfter(data.back().key, storageTeamKeys.arena()), storageTeamKeys.end);
 
 			for (auto& kv : data) {
 				StorageTeamID teamID = decodeStorageTeamIDPoppedKey(rawId, kv.key);
