@@ -66,24 +66,24 @@ enum Severity {
 
 inline Severity intToSeverity(int sevnum) {
 	switch (sevnum) {
-		case 0:
-			return SevVerbose;
-		case 1:
-			return SevSample;
-		case 5:
-			return SevDebug;
-		case 10:
-			return SevInfo;
-		case 20:
-			return SevWarn;
-		case 30:
-			return SevWarnAlways;
-		case 40:
-			return SevError;
-		case 1000000:
-			return SevMax;
-		default:
-			return SevInfo;
+	case 0:
+		return SevVerbose;
+	case 1:
+		return SevSample;
+	case 5:
+		return SevDebug;
+	case 10:
+		return SevInfo;
+	case 20:
+		return SevWarn;
+	case 30:
+		return SevWarnAlways;
+	case 40:
+		return SevError;
+	case 1000000:
+		return SevMax;
+	default:
+		return SevInfo;
 	}
 }
 
