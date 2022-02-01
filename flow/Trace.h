@@ -65,7 +65,7 @@ enum Severity {
 };
 
 inline Severity intToSeverity(int sevnum) {
-	switch(sevnum) {
+	switch (sevnum) {
 		case 0:
 			return SevVerbose;
 		case 1:
