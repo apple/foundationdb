@@ -294,8 +294,8 @@ int64_t getMaxShardSize(double dbSizeEstimate);
 struct DDTeamCollection;
 struct StorageWiggleMetrics {
 	// round statistics
-	// 1 wiggle round as all storage servers that created before a wiggle round start time T are wiggled.  The Round is
-	// done when all defined (but not necessarily alive/active) Storage Servers have a CreateTime >= T.
+	// One StorageServer wiggle round is considered 'complete', when all StorageServers with creationTime < T are
+	// wiggled
 	uint64_t last_round_start = 0; // wall timer: timer_int()
 	uint64_t last_round_finish = 0;
 	TimerSmoother smoothed_round_duration;
@@ -303,34 +303,34 @@ struct StorageWiggleMetrics {
 
 	// step statistics
 	// 1 wiggle step as 1 storage server is wiggled in the current round
-	uint64_t last_step_start = 0; // wall timer: timer_int()
-	uint64_t last_step_finish = 0;
-	TimerSmoother smoothed_step_duration;
-	int finished_step = 0; // finished step since storage wiggle is open
+	uint64_t last_wiggle_start = 0; // wall timer: timer_int()
+	uint64_t last_wiggle_finish = 0;
+	TimerSmoother smoothed_wiggle_duration;
+	int finished_wiggle = 0; // finished step since storage wiggle is open
 
-	StorageWiggleMetrics() : smoothed_round_duration(20.0 * 60), smoothed_step_duration(10.0 * 60) {}
+	StorageWiggleMetrics() : smoothed_round_duration(20.0 * 60), smoothed_wiggle_duration(10.0 * 60) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
 		if (ar.isDeserializing) {
 			double step_total, round_total;
 			serializer(ar,
-			           last_step_start,
-			           last_step_finish,
+			           last_wiggle_start,
+			           last_wiggle_finish,
 			           step_total,
-			           finished_step,
+			           finished_wiggle,
 			           last_round_start,
 			           last_round_finish,
 			           round_total,
 			           finished_round);
 			smoothed_round_duration.reset(round_total);
-			smoothed_step_duration.reset(step_total);
+			smoothed_wiggle_duration.reset(step_total);
 		} else {
 			serializer(ar,
-			           last_step_start,
-			           last_step_finish,
-			           smoothed_step_duration.total,
-			           finished_step,
+			           last_wiggle_start,
+			           last_wiggle_finish,
+			           smoothed_wiggle_duration.total,
+			           finished_wiggle,
 			           last_round_start,
 			           last_round_finish,
 			           smoothed_round_duration.total,
@@ -343,29 +343,31 @@ struct StorageWiggleMetrics {
 		return runRYWTransaction(cx, [metricsRef, primary](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr->set(storageWiggleStatsPrefix.withSuffix(primary ? "primary"_sr : "remote"_sr),
+			tr->set(perpetualStorageWiggleStatsPrefix.withSuffix(primary ? "primary"_sr : "remote"_sr),
 			        BinaryWriter::toValue(metricsRef, IncludeVersion()));
 			return Void();
 		});
 	}
+
 	Future<Optional<Value>> runGetTransaction(Database cx, bool primary) {
 		return runRYWTransaction(cx, [primary](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-			return tr->get(storageWiggleStatsPrefix.withSuffix(primary ? "primary"_sr : "remote"_sr));
+			return tr->get(perpetualStorageWiggleStatsPrefix.withSuffix(primary ? "primary"_sr : "remote"_sr));
 		});
 	}
+
 	StatusObject toJSON() {
 		StatusObject result;
-		result["last_round_start"] = last_round_start;
-		result["last_round_finish"] = last_round_finish;
-		result["smoothed_round_duration"] = smoothed_round_duration.estimate;
+		result["last_round_start"] = timerIntToGmt(last_round_start);
+		result["last_round_finish"] = timerIntToGmt(last_round_finish);
+		result["smoothed_round_seconds"] = smoothed_round_duration.estimate;
 		result["finished_round"] = finished_round;
 
-		result["last_step_start"] = last_step_start;
-		result["last_step_finish"] = last_step_finish;
-		result["smoothed_step_duration"] = smoothed_step_duration.estimate;
-		result["finished_step"] = finished_step;
+		result["last_wiggle_start"] = timerIntToGmt(last_wiggle_start);
+		result["last_wiggle_finish"] = timerIntToGmt(last_wiggle_finish);
+		result["smoothed_wiggle_seconds"] = smoothed_wiggle_duration.estimate;
+		result["finished_wiggle"] = finished_wiggle;
 		return result;
 	}
 };
@@ -413,8 +415,8 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 	// restore Statistic from database when the perpetual wiggle is opened
 	Future<Void> restoreStats();
 	// called when start wiggling a SS
-	Future<Void> startStep();
-	Future<Void> finishStep();
+	Future<Void> startWiggle();
+	Future<Void> finishWiggle();
 	bool shouldStartNewRound() { return metrics.last_round_finish >= metrics.last_round_start; }
 	bool shouldFinishRound() {
 		if (wiggle_pq.empty())

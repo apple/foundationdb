@@ -24,26 +24,26 @@
 const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
 {
    "cluster":{
-	  "storage_wiggler": {
+       "storage_wiggler": {
          "primary": {
-          	"last_round_start": 1,
-			"last_round_finish": 1,
-			"smoothed_round_duration": 1,
+          	"last_round_start": "%c %z",
+			"last_round_finish": "%c %z",
+			"smoothed_round_seconds": 1,
 			"finished_round": 1,
-			"last_step_start": 1,
-			"last_step_finish": 1,
-			"smoothed_step_duration": 1,
-			"finished_step": 1
+			"last_wiggle_start": "%c %z",
+			"last_wiggle_finish": "%c %z",
+			"smoothed_wiggle_seconds": 1,
+			"finished_wiggle": 1
           },
          "remote": {
-         	"last_round_start": 1,
-			"last_round_finish": 1,
-			"smoothed_round_duration": 1,
+         	"last_round_start": "%c %z",
+			"last_round_finish": "%c %z",
+			"smoothed_round_seconds": 1,
 			"finished_round": 1,
-			"last_step_start": 1,
-			"last_step_finish": 1,
-			"smoothed_step_duration": 1,
-			"finished_step": 1
+			"last_wiggle_start": "%c %z",
+			"last_wiggle_finish": "%c %z",
+			"smoothed_wiggle_seconds": 1,
+			"finished_wiggle": 1
          }
       },
       "layers":{

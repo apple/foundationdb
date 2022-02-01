@@ -1870,7 +1870,13 @@ void getLocalTime(const time_t* timep, struct tm* result) {
 #error Port me!
 #endif
 }
-std::string getGMTimeStr(const time_t* time) {
+
+std::string timerIntToGmt(uint64_t timestamp) {
+	auto time = (time_t)(timestamp / 1e9); // convert to second, see timer_int() implementation
+	return getGmtTimeStr(&time);
+}
+
+std::string getGmtTimeStr(const time_t* time) {
 	char buff[50];
 	auto size = strftime(buff, 50, "%c %z", gmtime(time));
 	// printf(buff);

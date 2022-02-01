@@ -1192,11 +1192,11 @@ struct ReadBlobGranuleContext {
 	bool debugNoMaterialize;
 };
 
-// Store metadata associated with each storage server
+// Store metadata associated with each storage server. Now it only contains data be used in perpetual storage wiggle.
 struct StorageMetadataType {
 	constexpr static FileIdentifier file_identifier = 732123;
 	uint64_t createdTime; // comes from Platform::timer_int()
-	bool expireNow;
+	bool expireNow; // SS can be forced to be expired regardless of the createdTime field
 	StorageMetadataType() : createdTime(0), expireNow(false) {}
 	StorageMetadataType(uint64_t t, bool expireNow = false) : createdTime(t), expireNow(expireNow) {}
 
@@ -1205,11 +1205,6 @@ struct StorageMetadataType {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, createdTime, expireNow);
-	}
-
-	std::string getCreatedTimeStr() const {
-		auto time = (time_t)(createdTime / 1e9); // convert to second, see timer_int() implementation
-		return getGMTimeStr(&time);
 	}
 };
 #endif

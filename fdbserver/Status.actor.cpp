@@ -1929,7 +1929,7 @@ ACTOR static Future<std::vector<std::pair<StorageServerInterface, EventMap>>> ge
 		// read StorageServer and Metadata in an atomic transaction?
 		if (metadata[i].present()) {
 			TraceEventFields metadataField;
-			metadataField.addField("CreatedTime", metadata[i].get().getCreatedTimeStr());
+			metadataField.addField("CreatedTime", timerIntToGmt(metadata[i].get().createdTime));
 			metadataField.addField("ExpireNow", metadata[i].get().expireNow ? "1" : "0");
 			results[i].second.emplace("Metadata", metadataField);
 		} else if (!servers[i].isTss()) {
@@ -2903,8 +2903,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		state std::vector<std::pair<GrvProxyInterface, EventMap>> grvProxies;
 		state std::vector<BlobWorkerInterface> blobWorkers;
 		state JsonBuilderObject qos;
-		state JsonBuilderObject data_overlay;
-		state JsonBuilderObject storage_wiggler;
+		state JsonBuilderObject dataOverlay;
+		state JsonBuilderObject storageWiggler;
 
 		statusObj["protocol_version"] = format("%" PRIx64, g_network->protocolVersion().version());
 		statusObj["connection_string"] = coordinators.ccr->getConnectionString().toString();
@@ -2987,7 +2987,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			std::vector<Future<JsonBuilderObject>> futures2;
 			futures2.push_back(dataStatusFetcher(ddWorker, configuration.get(), &minStorageReplicasRemaining));
 			futures2.push_back(workloadStatusFetcher(
-			    db, workers, mWorker, rkWorker, &qos, &data_overlay, &status_incomplete_reasons, storageServerFuture));
+			    db, workers, mWorker, rkWorker, &qos, &dataOverlay, &status_incomplete_reasons, storageServerFuture));
 			futures2.push_back(layerStatusFetcher(cx, &messages, &status_incomplete_reasons));
 			futures2.push_back(lockedStatusFetcher(db, &messages, &status_incomplete_reasons));
 			futures2.push_back(
@@ -2997,8 +2997,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			wait(success(primaryDCFO));
 
 			if (configuration.get().perpetualStorageWiggleSpeed > 0) {
-				wait(store(storage_wiggler, storageWigglerStatsFetcher(configuration.get(), cx)));
-				statusObj["storage_wiggler"] = storage_wiggler;
+				wait(store(storageWiggler, storageWigglerStatsFetcher(configuration.get(), cx)));
+				statusObj["storage_wiggler"] = storageWiggler;
 			}
 
 			int logFaultTolerance = 100;
@@ -3029,7 +3029,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			}
 
 			// workloadStatusFetcher returns the workload section but also optionally writes the qos section and adds to
-			// the data_overlay object
+			// the dataOverlay object
 			if (!workerStatuses[1].empty())
 				statusObj["workload"] = workerStatuses[1];
 
@@ -3045,12 +3045,12 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			if (!qos.empty())
 				statusObj["qos"] = qos;
 
-			// Merge data_overlay into data
+			// Merge dataOverlay into data
 			JsonBuilderObject& clusterDataSection = workerStatuses[0];
 
 			// TODO:  This probably is no longer possible as there is no ability to merge json objects with an
 			// output-only model
-			clusterDataSection.addContents(data_overlay);
+			clusterDataSection.addContents(dataOverlay);
 
 			// If data section not empty, add it to statusObj
 			if (!clusterDataSection.empty())
