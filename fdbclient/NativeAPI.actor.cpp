@@ -7494,6 +7494,11 @@ ACTOR Future<Void> doCFMerge(Reference<ChangeFeedData> results,
 	wait(delay(0));
 	ASSERT(results->mutations.isEmpty());
 
+	// update lastReturned once the previous mutation has been consumed
+	if (*begin - 1 > results->lastReturnedVersion.get()) {
+		results->lastReturnedVersion.set(*begin - 1);
+	}
+
 	state int interfNum = 0;
 
 	// TODO minor optimization - could make this just a vector of indexes if each MutationAndVersionStream remembered
@@ -7711,11 +7716,18 @@ ACTOR Future<Void> doSingleCFStream(KeyRange range,
 	ASSERT(results->streams.size() == 1);
 	ASSERT(results->storageData.size() == 1);
 	state bool atLatest = false;
+
+	// wait for any previous mutations in stream to be consumed
+	wait(results->mutations.onEmpty());
+	wait(delay(0));
+	ASSERT(results->mutations.isEmpty());
+	// update lastReturned once the previous mutation has been consumed
+	if (*begin - 1 > results->lastReturnedVersion.get()) {
+		results->lastReturnedVersion.set(*begin - 1);
+	}
+
 	loop {
-		// wait for any previous mutations in stream to be consumed
-		wait(results->mutations.onEmpty());
-		wait(delay(0));
-		ASSERT(results->mutations.isEmpty());
+
 		state ChangeFeedStreamReply feedReply = waitNext(results->streams[0].getFuture());
 		*begin = feedReply.mutations.back().version + 1;
 
