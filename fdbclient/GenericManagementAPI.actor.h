@@ -36,7 +36,7 @@ the contents of the system key space.
 #include <map>
 #include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/DatabaseConfiguration.h"
-#include "fdbclient/HighContentionAllocator.actor.h"
+#include "fdbclient/HighContentionPrefixAllocator.actor.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/Subspace.h"
 #include "fdbclient/DatabaseConfiguration.h"
@@ -632,7 +632,7 @@ std::string generateErrorMessage(const CoordinatorsResult& res);
 
 ACTOR template <class DB>
 Future<Void> createTenant(Reference<DB> db, TenantName name) {
-	state HighContentionAllocator allocator = HighContentionAllocator(Subspace(tenantAllocatorPrefix));
+	state HighContentionPrefixAllocator allocator = HighContentionPrefixAllocator(Subspace(tenantAllocatorPrefix));
 
 	if (name.startsWith("\xff"_sr)) {
 		throw invalid_tenant_name();
