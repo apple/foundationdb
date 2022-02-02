@@ -20,6 +20,7 @@
 
 #include <stdint.h>
 
+#include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Notified.h"
@@ -150,7 +151,7 @@ struct Resolver : ReferenceCounted<Resolver> {
 	Reference<TLogGroupCollection> tLogGroupCollection = Reference<TLogGroupCollection>(nullptr);
 
 	// Each storage server's teams.
-	std::unordered_map<UID, std::unordered_set<ptxn::StorageTeamID>> ssToStorageTeam;
+	std::unordered_map<UID, ptxn::StorageServerStorageTeams> ssToStorageTeam;
 
 	Version debugMinRecentStateVersion = 0;
 
@@ -539,10 +540,12 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 				if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 					// Add storage teams of storage servers
 					ASSERT(pContext->pResolverData->ssToStorageTeam.count(id));
-					ASSERT(pContext->pResolverData->ssToStorageTeam[id].size());
-					if (pContext->pResolverData->ssToStorageTeam[id].count(srcDstTeams[0])) {
+
+					auto ssTeams = pContext->pResolverData->ssToStorageTeam.find(id)->second;
+					ASSERT(ssTeams.size());
+					if (ssTeams.contains(srcDstTeams[0])) {
 						info.storageTeams.insert(srcDstTeams[0]);
-					} else if (pContext->pResolverData->ssToStorageTeam[id].count(srcDstTeams[1])) {
+					} else if (ssTeams.contains(srcDstTeams[1])) {
 						info.storageTeams.insert(srcDstTeams[1]);
 					} else {
 						ASSERT(false);
@@ -556,9 +559,12 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 
 				// Initially, each storage server belongs to two teams (1) Seed
 				// team and (2) its own team for private mutations.
-				const auto& teamSet = teamIDs.getStorageTeams();
 				UID k = decodeStorageServerToTeamIdKey(kv.key);
-				pContext->pResolverData->ssToStorageTeam[k].insert(teamSet.begin(), teamSet.end());
+				auto it = pContext->pResolverData->ssToStorageTeam.find(k);
+				if (it == pContext->pResolverData->ssToStorageTeam.end())
+					pContext->pResolverData->ssToStorageTeam.emplace(k, teamIDs);
+				else
+					it->second.insert(teamIDs.getStorageTeams());
 			}
 		}
 
