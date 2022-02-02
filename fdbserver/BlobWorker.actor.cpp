@@ -474,6 +474,7 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			try {
 				wait(readAndCheckGranuleLock(tr, keyRange, epoch, seqno));
+				numIterations++;
 
 				Key dfKey = blobGranuleFileKeyFor(granuleID, 'D', currentDeltaVersion);
 				Value dfValue = blobGranuleFileValueFor(fname, 0, serializedSize);
@@ -505,32 +506,22 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 				}
 				return BlobFileIndex(currentDeltaVersion, fname, 0, serializedSize);
 			} catch (Error& e) {
-				numIterations++;
 				wait(tr->onError(e));
 			}
 		}
 	} catch (Error& e) {
-		if (e.code() == error_code_operation_cancelled) {
+		// If this actor was cancelled, doesn't own the granule anymore, or got some other error before trying to
+		// commit a transaction, we can and want to safely delete the file we wrote. Otherwise, we may have updated FDB
+		// with file and cannot safely delete it.
+		if (numIterations > 0) {
 			throw e;
 		}
-
-		// FIXME: this could also fail due to actor cancelled. Since we are speculatively writing here, we should clean
-		// stuff up more aggressively
-
-		// if commit failed the first time due to granule assignment conflict (which is non-retryable),
-		// then the file key was persisted and we should delete it. Otherwise, the commit failed
-		// for some other reason and the key wasn't persisted, so we should just propogate the error
-		if (numIterations != 1 || e.code() != error_code_granule_assignment_conflict) {
-			throw e;
-		}
-
 		if (BW_DEBUG) {
-			fmt::print("deleting s3 delta file {0} after error {1}\n", fname, e.name());
+			fmt::print("deleting delta file {0} after error {1}\n", fname, e.name());
 		}
-		state Error eState = e;
 		++bwData->stats.s3DeleteReqs;
-		wait(bwData->bstore->deleteFile(fname));
-		throw eState;
+		bwData->addActor.send(bwData->bstore->deleteFile(fname));
+		throw e;
 	}
 }
 
@@ -619,6 +610,7 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			try {
 				wait(readAndCheckGranuleLock(tr, keyRange, epoch, seqno));
+				numIterations++;
 				Key snapshotFileKey = blobGranuleFileKeyFor(granuleID, 'S', version);
 				Key snapshotFileValue = blobGranuleFileValueFor(fname, 0, serializedSize);
 				tr->set(snapshotFileKey, snapshotFileValue);
@@ -632,32 +624,22 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 				wait(tr->commit());
 				break;
 			} catch (Error& e) {
-				numIterations++;
 				wait(tr->onError(e));
 			}
 		}
 	} catch (Error& e) {
-		if (e.code() == error_code_operation_cancelled) {
+		// If this actor was cancelled, doesn't own the granule anymore, or got some other error before trying to
+		// commit a transaction, we can and want to safely delete the file we wrote. Otherwise, we may have updated FDB
+		// with file and cannot safely delete it.
+		if (numIterations > 0) {
 			throw e;
 		}
-
-		// FIXME: this could also fail due to actor cancelled. Since we are speculatively writing here, we should clean
-		// stuff up more aggressively
-
-		// if commit failed the first time due to granule assignment conflict (which is non-retryable),
-		// then the file key was persisted and we should delete it. Otherwise, the commit failed
-		// for some other reason and the key wasn't persisted, so we should just propogate the error
-		if (numIterations != 1 || e.code() != error_code_granule_assignment_conflict) {
-			throw e;
-		}
-
 		if (BW_DEBUG) {
-			fmt::print("deleting s3 snapshot file {0} after error {1}\n", fname, e.name());
+			fmt::print("deleting snapshot file {0} after error {1}\n", fname, e.name());
 		}
-		state Error eState = e;
 		++bwData->stats.s3DeleteReqs;
-		wait(bwData->bstore->deleteFile(fname));
-		throw eState;
+		bwData->addActor.send(bwData->bstore->deleteFile(fname));
+		throw e;
 	}
 
 	if (BW_DEBUG) {
@@ -1834,8 +1816,9 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			if (granuleCanRetry(e)) {
 				// explicitly cancel all outstanding write futures BEFORE updating promise stream, to ensure they
 				// can't update files after the re-assigned granule acquires the lock
-				for (auto& f : inFlightFiles) {
-					f.future.cancel();
+				// do it backwards though because future depends on previous one, so it could cause a cascade
+				for (int i = inFlightFiles.size() - 1; i >= 0; i--) {
+					inFlightFiles[i].future.cancel();
 				}
 
 				// if we retry and re-open, we need to use a normal request (no continue or reassign) and update the
