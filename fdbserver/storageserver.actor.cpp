@@ -5719,6 +5719,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 					    .detail("Checkpoint", checkpointResult.toString());
 					ASSERT(false);
 				}
+
 				try {
 					Key pendingCheckpointKey(persistPendingCheckpointKeys.begin.toString() +
 					                         checkpointResult.checkpointID.toString());
@@ -5733,6 +5734,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 					    .error(e, true);
 				}
 			}
+			data->pendingCheckpoints.erase(data->pendingCheckpoints.begin());
 			requireCheckpoint = false;
 		}
 
@@ -6783,28 +6785,28 @@ ACTOR Future<Void> serveGetCheckpointRequests(StorageServer* self, FutureStream<
 		// TODO: Implement lookup on checkpointID.
 		// const CheckpointFormat format = static_cast<CheckpointFormat>(req.format);
 		// const auto it = self->checkpoints[format].lower_bound(req.minVersion);
-	// 	try {
-	// 		RangeResult checkpoints = wait(self->storage.readRange(persistCheckpointKeys));
-	// 		int i = 0;
-	// 		for (; i < checkpoints.size(); ++i) {
-	// 			CheckpointMetaData md = decodeCheckpointValue(checkpoints[i].value);
-	// 			if (md.version == req.version && md.format == req.format && md.range.contains(req.range)) {
-	// 				TraceEvent(SevDebug, "ServeCheckpointFoundExisting", self->thisServerID)
-	// 				    .detail("Checkpoint", md.toString());
-	// 				req.reply.send(md);
-	// 				break;
-	// 			}
-	// 		}
-	// 		if (i >= checkpoints.size()) {
-	// 			req.reply.sendError(checkpoint_not_found());
-	// 		}
-	// 	} catch (Error& e) {
-	// 		if (!canReplyWith(e)) {
-	// 			throw;
-	// 		}
-	// 		req.reply.sendError(e);
-	// 	}
-	// }
+		// 	try {
+		// 		RangeResult checkpoints = wait(self->storage.readRange(persistCheckpointKeys));
+		// 		int i = 0;
+		// 		for (; i < checkpoints.size(); ++i) {
+		// 			CheckpointMetaData md = decodeCheckpointValue(checkpoints[i].value);
+		// 			if (md.version == req.version && md.format == req.format && md.range.contains(req.range)) {
+		// 				TraceEvent(SevDebug, "ServeCheckpointFoundExisting", self->thisServerID)
+		// 				    .detail("Checkpoint", md.toString());
+		// 				req.reply.send(md);
+		// 				break;
+		// 			}
+		// 		}
+		// 		if (i >= checkpoints.size()) {
+		// 			req.reply.sendError(checkpoint_not_found());
+		// 		}
+		// 	} catch (Error& e) {
+		// 		if (!canReplyWith(e)) {
+		// 			throw;
+		// 		}
+		// 		req.reply.sendError(e);
+		// 	}
+		// }
 	}
 }
 

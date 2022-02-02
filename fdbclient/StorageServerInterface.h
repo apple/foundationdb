@@ -986,8 +986,8 @@ struct GetCheckpointRequest {
 	  : minVersion(minVersion), range(range), format(RocksDBColumnFamily), createNew(false) {}
 	GetCheckpointRequest(Version minVersion, KeyRange const& range, bool createNew)
 	  : minVersion(minVersion), range(range), format(RocksDBColumnFamily), createNew(createNew) {}
-	GetCheckpointRequest(Version minVersion, KeyRange const& range, CheckpointFormat format, bool createNew)
-	  : minVersion(minVersion), range(range), format(format), createNew(createNew) {}
+	GetCheckpointRequest(Version minVersion, KeyRange const& range, CheckpointFormat format)
+	  : minVersion(minVersion), range(range), format(format), createNew(false) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

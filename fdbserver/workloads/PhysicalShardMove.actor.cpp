@@ -78,6 +78,22 @@ struct SSCheckpointWorkload : TestWorkload {
 
 		std::cout << "Initialized" << std::endl;
 
+		state Transaction tr(cx);
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		loop {
+			std::cout << "Creating checkpoint." << std::endl;
+			try {
+				wait(createCheckpoint(&tr, KeyRangeRef(key, endKey), RocksDBColumnFamily));
+				std::cout << "Buffer write done." << std::endl;
+				wait(tr.commit());
+				version = tr.getCommittedVersion();
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+
 		// loop {
 		// 	try {
 		// 		std::cout << "Creating checkpoint." << std::endl;
@@ -88,33 +104,36 @@ struct SSCheckpointWorkload : TestWorkload {
 		// 		wait(delay(1));
 		// 	}
 		// }
-		// std::cout << "Created checkpoint:" << checkpoint.toString() << std::endl;
+		std::cout << "Created checkpoint." << std::endl;
 
-		// state std::string pwd = platform::getWorkingDirectory();
-		// state std::string folder = pwd + "/checkpoints";
-		// platform::eraseDirectoryRecursive(folder);
-		// ASSERT(platform::createDirectory(folder));
+		state std::string pwd = platform::getWorkingDirectory();
+		state std::string folder = pwd + "/checkpoints";
+		platform::eraseDirectoryRecursive(folder);
+		ASSERT(platform::createDirectory(folder));
 
-		// loop {
-		// 	try {
-		// 		std::cout << "Getting checkpoint." << std::endl;
-		// 		state CheckpointMetaData record = wait(
-		// 		    fetchCheckpoint(cx, KeyRangeRef(key, endKey), checkpoint.version, RocksDBColumnFamily, folder));
-		// 		break;
-		// 	} catch (Error& e) {
-		// 		std::cout << "Getting checkpoint failure: " << e.name() << std::endl;
-		// 		wait(delay(1));
-		// 	}
-		// }
+		loop {
+			try {
+				std::cout << "Getting checkpoint." << std::endl;
+				state std::vector<CheckpointMetaData> records =
+				    wait(fetchCheckpoint(cx, KeyRangeRef(key, endKey), version, RocksDBColumnFamily, folder));
+				ASSERT(records.size() == 1);
+				break;
+			} catch (Error& e) {
+				std::cout << "Getting checkpoint failure: " << e.name() << std::endl;
+				wait(delay(1));
+			}
+		}
 
-		// std::cout << "Got checkpoint:" << checkpoint.toString() << std::endl;
+		state CheckpointMetaData record = records[0];
 
-		// std::vector<std::string> files = platform::listFiles(folder);
-		// std::cout << "Received checkpoint files on disk: " << folder << std::endl;
-		// for (auto& file : files) {
-		// 	std::cout << file << std::endl;
-		// }
-		// std::cout << std::endl;
+		std::cout << "Got checkpoint:" << record.toString() << std::endl;
+
+		std::vector<std::string> files = platform::listFiles(folder);
+		std::cout << "Received checkpoint files on disk: " << folder << std::endl;
+		for (auto& file : files) {
+			std::cout << file << std::endl;
+		}
+		std::cout << std::endl;
 
 		// ASSERT(files.size() == record.rocksCF.get().sstFiles.size());
 		// std::unordered_set<std::string> sstFiles(files.begin(), files.end());
@@ -144,61 +163,41 @@ struct SSCheckpointWorkload : TestWorkload {
 		// 	}
 		// }
 
-		// state std::string rocksDBTestDir = "rocksdb-kvstore-test-db";
-		// platform::eraseDirectoryRecursive(rocksDBTestDir);
+		state std::string rocksDBTestDir = "rocksdb-kvstore-test-db";
+		platform::eraseDirectoryRecursive(rocksDBTestDir);
 
-		// state IKeyValueStore* kvStore = keyValueStoreRocksDB(
-		//     rocksDBTestDir, deterministicRandom()->randomUniqueID(), KeyValueStoreType::SSD_ROCKSDB_V1);
-		// try {
-		// 	wait(kvStore->restore(record));
-		// } catch (Error& e) {
-		// 	std::cout << e.name() << std::endl;
-		// }
+		state IKeyValueStore* kvStore = keyValueStoreRocksDB(
+		    rocksDBTestDir, deterministicRandom()->randomUniqueID(), KeyValueStoreType::SSD_ROCKSDB_V1);
+		try {
+			wait(kvStore->restore(record));
+		} catch (Error& e) {
+			std::cout << e.name() << std::endl;
+		}
 
-		// std::cout << "Restore complete" << std::endl;
+		std::cout << "Restore complete" << std::endl;
 
 		// state Transaction tr(cx);
-		// tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-		// loop {
-		// 	try {
-		// 		state RangeResult res = wait(tr.getRange(KeyRangeRef(key, endKey), CLIENT_KNOBS->TOO_MANY));
-		// 		break;
-		// 	} catch (Error& e) {
-		// 		wait(tr.onError(e));
-		// 	}
-		// }
-
-		state Transaction tr(cx);
+		tr.reset();
 		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		loop {
-			std::cout << "Commit checkpoint key." << std::endl;
 			try {
-				// state RangeResult serverList = wait(tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
-				// ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
-
-				// const int idx = deterministicRandom()->randomInt(0, serverList.size());
-				// UID ssID = decodeServerListKey(serverList[idx].key);
-				// CheckpointMetaData checkpoint;
-				wait(createCheckpoint(&tr, KeyRangeRef(key, endKey), RocksDBColumnFamily));
-				// tr.set(checkpointKeyFor(checkpoint.ssID), checkpointValue(checkpoint), .getPtr());
-				std::cout << "Buffer write done." << std::endl;
-				wait(tr.commit());
+				state RangeResult res = wait(tr.getRange(KeyRangeRef(key, endKey), CLIENT_KNOBS->TOO_MANY));
 				break;
 			} catch (Error& e) {
 				wait(tr.onError(e));
 			}
 		}
-		// state int i = 0;
 
-		// for (i = 0; i < res.size(); ++i) {
-		// 	std::cout << "Reading key:" << res[i].key.toString() << std::endl;
-		// 	Optional<Value> value = wait(kvStore->readValue(res[i].key));
-		// 	ASSERT(value.present());
-		// 	ASSERT(value.get() == res[i].value);
-		// }
+		state int i = 0;
 
-		// std::cout << "Done print." << std::endl;
+		for (i = 0; i < res.size(); ++i) {
+			std::cout << "Reading key:" << res[i].key.toString() << std::endl;
+			Optional<Value> value = wait(kvStore->readValue(res[i].key));
+			ASSERT(value.present());
+			ASSERT(value.get() == res[i].value);
+		}
+
+		std::cout << "Verified." << std::endl;
 
 		// state std::unordered_map<Key, Value>::iterator it = kvs.begin();
 		// for (; it != kvs.end(); ++it) {
