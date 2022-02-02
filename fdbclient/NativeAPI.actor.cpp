@@ -6043,16 +6043,6 @@ ACTOR Future<Version> extractReadVersion(Reference<TransactionState> trState,
 	return rep.version;
 }
 
-// ACTOR Future<Version> getDBCachedReadVersion(DatabaseContext* cx, double requestTime) {
-// 	if (requestTime - cx->lastTimedGrv.get() > CLIENT_KNOBS->MAX_VERSION_CACHE_LAG) {
-// 		wait(cx->lastTimedGrv.whenAtLeast(requestTime - CLIENT_KNOBS->MAX_VERSION_CACHE_LAG));
-// 	}
-// 	// Want to check that the cached version is at most
-// 	// MAX_VERSION_CACHE_LAG (100ms) old compared to requestTime.
-// 	ASSERT(!debug_checkVersionTime(cx->cachedRv, requestTime, "CheckStaleness"));
-// 	return cx->cachedRv;
-// }
-
 bool rkThrottlingCooledDown(DatabaseContext* cx) {
 	if (cx->lastTimedRkThrottle == 0.0) {
 		return true;
