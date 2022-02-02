@@ -57,15 +57,16 @@ class CommitQuorum {
 	                                          ConfigGeneration generation,
 	                                          ConfigTransactionInterface cti) {
 		try {
-			wait(retryBrokenPromise(cti.commit, self->getCommitRequest(generation)));
+			wait(timeoutError(cti.commit.getReply(self->getCommitRequest(generation)),
+			                  CLIENT_KNOBS->COMMIT_QUORUM_TIMEOUT));
 			++self->successful;
 		} catch (Error& e) {
-			// self might be destroyed if this actor is canceled
+			// self might be destroyed if this actor is cancelled
 			if (e.code() == error_code_actor_cancelled) {
 				throw;
 			}
 
-			if (e.code() == error_code_not_committed) {
+			if (e.code() == error_code_not_committed || e.code() == error_code_timed_out) {
 				++self->failed;
 			} else {
 				++self->maybeCommitted;
@@ -117,21 +118,41 @@ class GetGenerationQuorum {
 	Future<ConfigGeneration> getGenerationFuture;
 
 	ACTOR static Future<Void> addRequestActor(GetGenerationQuorum* self, ConfigTransactionInterface cti) {
-		ConfigTransactionGetGenerationReply reply = wait(
-		    retryBrokenPromise(cti.getGeneration, ConfigTransactionGetGenerationRequest{ self->lastSeenLiveVersion }));
+		loop {
+			try {
+				ConfigTransactionGetGenerationReply reply = wait(timeoutError(
+				    cti.getGeneration.getReply(ConfigTransactionGetGenerationRequest{ self->lastSeenLiveVersion }),
+				    CLIENT_KNOBS->GET_GENERATION_QUORUM_TIMEOUT));
 
-		++self->totalRepliesReceived;
-		auto gen = reply.generation;
-		self->lastSeenLiveVersion = std::max(gen.liveVersion, self->lastSeenLiveVersion.orDefault(::invalidVersion));
-		auto& replicas = self->seenGenerations[gen];
-		replicas.push_back(cti);
-		self->maxAgreement = std::max(replicas.size(), self->maxAgreement);
-		if (replicas.size() >= self->ctis.size() / 2 + 1 && !self->result.isSet()) {
-			self->result.send(gen);
-		} else if (self->maxAgreement + (self->ctis.size() - self->totalRepliesReceived) <
-		           (self->ctis.size() / 2 + 1)) {
-			if (!self->result.isError()) {
-				self->result.sendError(failed_to_reach_quorum());
+				++self->totalRepliesReceived;
+				auto gen = reply.generation;
+				self->lastSeenLiveVersion =
+				    std::max(gen.liveVersion, self->lastSeenLiveVersion.orDefault(::invalidVersion));
+				auto& replicas = self->seenGenerations[gen];
+				replicas.push_back(cti);
+				self->maxAgreement = std::max(replicas.size(), self->maxAgreement);
+				if (replicas.size() >= self->ctis.size() / 2 + 1 && !self->result.isSet()) {
+					self->result.send(gen);
+				} else if (self->maxAgreement + (self->ctis.size() - self->totalRepliesReceived) <
+				           (self->ctis.size() / 2 + 1)) {
+					if (!self->result.isError()) {
+						self->result.sendError(failed_to_reach_quorum());
+					}
+				}
+				break;
+			} catch (Error& e) {
+				if (e.code() == error_code_broken_promise) {
+					continue;
+				} else if (e.code() == error_code_timed_out) {
+					++self->totalRepliesReceived;
+					if (self->totalRepliesReceived == self->ctis.size() && self->result.canBeSet() &&
+					    !self->result.isError()) {
+						self->result.sendError(failed_to_reach_quorum());
+					}
+					break;
+				} else {
+					throw;
+				}
 			}
 		}
 		return Void();
@@ -151,9 +172,10 @@ class GetGenerationQuorum {
 			} catch (Error& e) {
 				if (e.code() == error_code_failed_to_reach_quorum) {
 					TEST(true); // Failed to reach quorum getting generation
-					wait(delayJittered(0.01 * (1 << retries)));
+					wait(delayJittered(0.005 * (1 << retries)));
 					++retries;
 					self->actors.clear(false);
+					self->seenGenerations.clear();
 					self->result.reset();
 					self->totalRepliesReceived = 0;
 					self->maxAgreement = 0;
@@ -197,15 +219,25 @@ class PaxosConfigTransactionImpl {
 	Database cx;
 
 	ACTOR static Future<Optional<Value>> get(PaxosConfigTransactionImpl* self, Key key) {
-		state ConfigKey configKey = ConfigKey::decodeKey(key);
-		ConfigGeneration generation = wait(self->getGenerationQuorum.getGeneration());
-		// TODO: Load balance
-		ConfigTransactionGetReply reply = wait(retryBrokenPromise(
-		    self->getGenerationQuorum.getReadReplicas()[0].get, ConfigTransactionGetRequest{ generation, configKey }));
-		if (reply.value.present()) {
-			return reply.value.get().toValue();
-		} else {
-			return Optional<Value>{};
+		loop {
+			try {
+				state ConfigKey configKey = ConfigKey::decodeKey(key);
+				ConfigGeneration generation = wait(self->getGenerationQuorum.getGeneration());
+				// TODO: Load balance
+				ConfigTransactionGetReply reply =
+				    wait(timeoutError(self->getGenerationQuorum.getReadReplicas()[0].get.getReply(
+				                          ConfigTransactionGetRequest{ generation, configKey }),
+				                      CLIENT_KNOBS->GET_KNOB_TIMEOUT));
+				if (reply.value.present()) {
+					return reply.value.get().toValue();
+				} else {
+					return Optional<Value>{};
+				}
+			} catch (Error& e) {
+				if (e.code() != error_code_timed_out && e.code() != error_code_broken_promise) {
+					throw;
+				}
+			}
 		}
 	}
 

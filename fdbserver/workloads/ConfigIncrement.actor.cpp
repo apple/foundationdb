@@ -148,7 +148,8 @@ public:
 			// TODO: The timeout is a hack to get the test to pass before rollforward and
 			// rollback are supported. Eventually, this timeout should be removed so
 			// we test that all clients make progress.
-			actors.push_back(timeout(incrementActor(this, cx), 60.0, Void()));
+			// TODO(ljoswiak): REMEMBER TO REMOVE THIS TIMEOUT ALTOGETHER
+			actors.push_back(timeout(incrementActor(this, cx), 600.0, Void()));
 		}
 		return waitForAll(actors);
 	}

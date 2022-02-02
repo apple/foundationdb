@@ -1,5 +1,6 @@
 [configuration]
-configDB = 'random'
+configDB = 'paxos'
+coordinators = 3
 
 [[test]]
 testTitle = 'ConfigIncrement'
@@ -13,7 +14,3 @@ testTitle = 'ConfigIncrement'
 
   [[test.workload]]
   testName = 'Attrition'
-  machinesToKill = 10
-  machinesToLeave = 3
-  reboot = true
-  testDuration = 10.0

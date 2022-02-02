@@ -34,6 +34,7 @@ namespace {
 
 const KeyRef lastCompactedVersionKey = "lastCompactedVersion"_sr;
 const KeyRef currentGenerationKey = "currentGeneration"_sr;
+const KeyRef registeredKey = "registered"_sr;
 const KeyRangeRef kvKeys = KeyRangeRef("kv/"_sr, "kv0"_sr);
 const KeyRangeRef mutationKeys = KeyRangeRef("mutation/"_sr, "mutation0"_sr);
 const KeyRangeRef annotationKeys = KeyRangeRef("annotation/"_sr, "annotation0"_sr);
@@ -202,14 +203,14 @@ class ConfigNodeImpl {
 		state Version committedVersion =
 		    wait(map(getGeneration(self), [](auto const& gen) { return gen.committedVersion; }));
 		// TODO: Reenable this when running the ConfigIncrement workload with reboot=false
-		// if (committedVersion < req.mostRecentVersion) {
-		// 	// Handle a very rare case where a ConfigNode loses data between
-		// 	// responding with a committed version and responding to the
-		// 	// subsequent get changes request.
-		// 	TEST(true); // ConfigNode data loss occurred on a minority of coordinators
-		// 	req.reply.sendError(process_behind()); // Reuse the process_behind error
-		// 	return Void();
-		// }
+		if (committedVersion < req.mostRecentVersion) {
+			// Handle a very rare case where a ConfigNode loses data between
+			// responding with a committed version and responding to the
+			// subsequent get changes request.
+			TEST(true); // ConfigNode data loss occurred on a minority of coordinators
+			req.reply.sendError(process_behind()); // Reuse the process_behind error
+			return Void();
+		}
 		state Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations =
 		    wait(getMutations(self, req.lastSeenVersion + 1, committedVersion));
 		state Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> versionedAnnotations =
@@ -443,8 +444,7 @@ class ConfigNodeImpl {
 		TraceEvent(SevDebug, "ConfigNodeGettingSnapshot", self->id)
 		    .detail("SnapshotVersion", reply.snapshotVersion)
 		    .detail("SnapshotSize", reply.snapshot.size())
-		    .detail("ChangesSize", reply.changes.size())
-		    .detail("AnnotationsSize", reply.annotations.size());
+		    .detail("ChangesSize", reply.changes.size());
 		req.reply.send(reply);
 		return Void();
 	}
@@ -506,6 +506,11 @@ class ConfigNodeImpl {
 			req.reply.sendError(transaction_too_old());
 			return Void();
 		}
+		TraceEvent("ConfigNodeRollforward")
+		    .detail("RollbackTo", req.rollback)
+		    .detail("Target", req.target)
+		    .detail("LastKnownCommitted", req.lastKnownCommitted)
+		    .detail("Committed", currentGeneration.committedVersion);
 		// Rollback to prior known committed version to erase any commits not
 		// made on a quorum.
 		if (req.rollback.present() && req.rollback.get() < currentGeneration.committedVersion) {
@@ -570,6 +575,42 @@ class ConfigNodeImpl {
 		}
 	}
 
+	ACTOR static Future<Void> serve(ConfigNodeImpl* self, ConfigBroadcastInterface const* cbi, bool infinite) {
+		loop {
+			choose {
+				when(state ConfigBroadcastRegisteredRequest req = waitNext(cbi->registered.getFuture())) {
+					bool isRegistered = wait(registered(self));
+					req.reply.send(ConfigBroadcastRegisteredReply{ isRegistered });
+				}
+				when(ConfigBroadcastReadyRequest readyReq = waitNext(cbi->ready.getFuture())) {
+					readyReq.reply.send(ConfigBroadcastReadyReply{});
+					if (!infinite) {
+						return Void();
+					}
+				}
+			}
+		}
+	}
+
+	ACTOR static Future<Void> serve(ConfigNodeImpl* self,
+	                                ConfigBroadcastInterface const* cbi,
+	                                ConfigTransactionInterface const* cti,
+	                                ConfigFollowerInterface const* cfi) {
+		wait(serve(self, cbi, false));
+
+		self->kvStore->set(KeyValueRef(registeredKey, BinaryWriter::toValue(true, IncludeVersion())));
+		wait(self->kvStore->commit());
+
+		// Shouldn't return (coordinationServer will throw an error if it does).
+		wait(serve(self, cbi, true) || serve(self, cti) || serve(self, cfi));
+		return Void();
+	}
+
+	ACTOR static Future<bool> registered(ConfigNodeImpl* self) {
+		Optional<Value> value = wait(self->kvStore->readValue(registeredKey));
+		return value.present();
+	}
+
 public:
 	ConfigNodeImpl(std::string const& folder)
 	  : id(deterministicRandom()->randomUniqueID()), kvStore(folder, id, "globalconf-"), cc("ConfigNode"),
@@ -587,6 +628,12 @@ public:
 
 	Future<Void> serve(ConfigFollowerInterface const& cfi) { return serve(this, &cfi); }
 
+	Future<Void> serve(ConfigBroadcastInterface const& cbi,
+	                   ConfigTransactionInterface const& cti,
+	                   ConfigFollowerInterface const& cfi) {
+		return serve(this, &cbi, &cti, &cfi);
+	}
+
 	void close() { kvStore.close(); }
 
 	Future<Void> onClosed() { return kvStore.onClosed(); }
@@ -602,6 +649,12 @@ Future<Void> ConfigNode::serve(ConfigTransactionInterface const& cti) {
 
 Future<Void> ConfigNode::serve(ConfigFollowerInterface const& cfi) {
 	return impl->serve(cfi);
+}
+
+Future<Void> ConfigNode::serve(ConfigBroadcastInterface const& cbi,
+                               ConfigTransactionInterface const& cti,
+                               ConfigFollowerInterface const& cfi) {
+	return impl->serve(cbi, cti, cfi);
 }
 
 void ConfigNode::close() {

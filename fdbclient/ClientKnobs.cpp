@@ -223,6 +223,11 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( BLOBSTORE_READ_REQUESTS_PER_SECOND,       100 );
 	init( BLOBSTORE_DELETE_REQUESTS_PER_SECOND,     200 );
 
+	// Dynamic Knobs
+	init( COMMIT_QUORUM_TIMEOUT,                    3.0 );
+	init( GET_GENERATION_QUORUM_TIMEOUT,            3.0 );
+	init( GET_KNOB_TIMEOUT,                         3.0 );
+
 	// Client Status Info
 	init(CSI_SAMPLING_PROBABILITY, -1.0);
 	init(CSI_SIZE_LIMIT, std::numeric_limits<int64_t>::max());

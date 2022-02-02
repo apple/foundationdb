@@ -189,6 +189,11 @@ public:
 	int32_t DEFAULT_AUTO_RESOLVERS;
 	int32_t DEFAULT_AUTO_LOGS;
 
+	// Dynamic Knobs
+	double COMMIT_QUORUM_TIMEOUT;
+	double GET_GENERATION_QUORUM_TIMEOUT;
+	double GET_KNOB_TIMEOUT;
+
 	// Client Status Info
 	double CSI_SAMPLING_PROBABILITY;
 	int64_t CSI_SIZE_LIMIT;
