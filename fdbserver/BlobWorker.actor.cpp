@@ -837,7 +837,8 @@ ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bw
                                                     Reference<GranuleMetadata> metadata,
                                                     UID granuleID,
                                                     int64_t bytesInNewDeltaFiles,
-                                                    Future<BlobFileIndex> lastDeltaBeforeSnapshot) {
+                                                    Future<BlobFileIndex> lastDeltaBeforeSnapshot,
+                                                    int64_t versionsSinceLastSnapshot) {
 
 	BlobFileIndex lastDeltaIdx = wait(lastDeltaBeforeSnapshot);
 	state Version reSnapshotVersion = lastDeltaIdx.version;
@@ -861,12 +862,15 @@ ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bw
 	metadata->resumeSnapshot.reset();
 	state int64_t statusEpoch = metadata->continueEpoch;
 	state int64_t statusSeqno = metadata->continueSeqno;
+	// TODO its own knob or something better? This is wrong in case of rollbacks
+	state bool writeHot = versionsSinceLastSnapshot <= SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS;
 	loop {
 		loop {
 			try {
 				wait(bwData->currentManagerStatusStream.get().onReady());
 				bwData->currentManagerStatusStream.get().send(GranuleStatusReply(metadata->keyRange,
 				                                                                 true,
+				                                                                 writeHot,
 				                                                                 statusEpoch,
 				                                                                 statusSeqno,
 				                                                                 granuleID,
@@ -1707,8 +1711,14 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 					} else {
 						previousFuture = Future<BlobFileIndex>(metadata->files.deltaFiles.back());
 					}
-					Future<BlobFileIndex> inFlightBlobSnapshot = checkSplitAndReSnapshot(
-					    bwData, metadata, startState.granuleID, metadata->bytesInNewDeltaFiles, previousFuture);
+					int64_t versionsSinceLastSnapshot =
+					    metadata->pendingDeltaVersion - metadata->pendingSnapshotVersion;
+					Future<BlobFileIndex> inFlightBlobSnapshot = checkSplitAndReSnapshot(bwData,
+					                                                                     metadata,
+					                                                                     startState.granuleID,
+					                                                                     metadata->bytesInNewDeltaFiles,
+					                                                                     previousFuture,
+					                                                                     versionsSinceLastSnapshot);
 					inFlightFiles.push_back(InFlightFile(inFlightBlobSnapshot, metadata->pendingDeltaVersion, 0, true));
 					pendingSnapshots++;
 

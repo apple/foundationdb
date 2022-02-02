@@ -245,13 +245,18 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 	}
 };
 
-ACTOR Future<Standalone<VectorRef<KeyRef>>> splitRange(Reference<ReadYourWritesTransaction> tr, KeyRange range) {
+ACTOR Future<Standalone<VectorRef<KeyRef>>> splitRange(Reference<ReadYourWritesTransaction> tr,
+                                                       KeyRange range,
+                                                       bool writeHot) {
 	// TODO is it better to just pass empty metrics to estimated?
 	// redo split if previous txn failed to calculate it
 	loop {
 		try {
 			if (BM_DEBUG) {
-				fmt::print("Splitting new range [{0} - {1})\n", range.begin.printable(), range.end.printable());
+				fmt::print("Splitting new range [{0} - {1}): {2}\n",
+				           range.begin.printable(),
+				           range.end.printable(),
+				           writeHot ? "hot" : "normal");
 			}
 			state StorageMetrics estimated =
 			    wait(tr->getTransaction().getStorageMetrics(range, CLIENT_KNOBS->TOO_MANY));
@@ -263,15 +268,21 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitRange(Reference<ReadYourWritesT
 				           estimated.bytes);
 			}
 
-			if (estimated.bytes > SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES) {
+			if (estimated.bytes > SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES || writeHot) {
 				// printf("  Splitting range\n");
-				// only split on bytes
+				// only split on bytes and write rate
 				state Standalone<VectorRef<KeyRef>> keys;
 				state StorageMetrics splitMetrics;
 				splitMetrics.bytes = SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES;
-				splitMetrics.bytesPerKSecond = splitMetrics.infinity;
+				splitMetrics.bytesPerKSecond = SERVER_KNOBS->SHARD_SPLIT_BYTES_PER_KSEC;
+				if (writeHot) {
+					splitMetrics.bytesPerKSecond =
+					    std::min(splitMetrics.bytesPerKSecond, estimated.bytesPerKSecond / 2);
+					splitMetrics.bytesPerKSecond =
+					    std::max(splitMetrics.bytesPerKSecond, SERVER_KNOBS->SHARD_MIN_BYTES_PER_KSEC);
+				}
 				splitMetrics.iosPerKSecond = splitMetrics.infinity;
-				splitMetrics.bytesReadPerKSecond = splitMetrics.infinity; // Don't split by readBandwidth
+				splitMetrics.bytesReadPerKSecond = splitMetrics.infinity;
 
 				while (keys.empty() || keys.back() < range.end) {
 					// allow partial in case we have a large split
@@ -693,7 +704,7 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 				state std::vector<Future<Standalone<VectorRef<KeyRef>>>> splitFutures;
 				// Divide new ranges up into equal chunks by using SS byte sample
 				for (KeyRangeRef range : rangesToAdd) {
-					splitFutures.push_back(splitRange(tr, range));
+					splitFutures.push_back(splitRange(tr, range, false));
 				}
 
 				for (auto f : splitFutures) {
@@ -790,13 +801,14 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
                                    KeyRange granuleRange,
                                    UID granuleID,
                                    Version granuleStartVersion,
-                                   Version latestVersion) {
+                                   Version latestVersion,
+                                   bool writeHot) {
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
 	state Standalone<VectorRef<KeyRef>> newRanges;
 	state int64_t newLockSeqno = -1;
 
 	// first get ranges to split
-	Standalone<VectorRef<KeyRef>> _newRanges = wait(splitRange(tr, granuleRange));
+	Standalone<VectorRef<KeyRef>> _newRanges = wait(splitRange(tr, granuleRange, writeHot));
 	newRanges = _newRanges;
 
 	ASSERT(newRanges.size() >= 2);
@@ -1151,14 +1163,15 @@ ACTOR Future<Void> monitorBlobWorkerStatus(Reference<BlobManagerData> bmData, Bl
 				GranuleStatusReply rep = waitNext(statusStream.getFuture());
 
 				if (BM_DEBUG) {
-					fmt::print("BM {0} got status of [{1} - {2}) @ ({3}, {4}) from BW {5}: {6}\n",
+					fmt::print("BM {0} got status of [{1} - {2}) @ ({3}, {4}) from BW {5}: {6} {7}\n",
 					           bmData->epoch,
 					           rep.granuleRange.begin.printable(),
 					           rep.granuleRange.end.printable(),
 					           rep.epoch,
 					           rep.seqno,
 					           bwInterf.id().toString(),
-					           rep.doSplit ? "split" : "");
+					           rep.doSplit ? "split" : "",
+					           rep.writeHotSplit ? "hot" : "normal");
 				}
 				// if we get a reply from the stream, reset backoff
 				backoff = 0.1;
@@ -1208,8 +1221,13 @@ ACTOR Future<Void> monitorBlobWorkerStatus(Reference<BlobManagerData> bmData, Bl
 						           rep.granuleRange.end.printable().c_str());
 					}
 					lastSeenSeqno.insert(rep.granuleRange, std::pair(rep.epoch, rep.seqno));
-					bmData->addActor.send(maybeSplitRange(
-					    bmData, bwInterf.id(), rep.granuleRange, rep.granuleID, rep.startVersion, rep.latestVersion));
+					bmData->addActor.send(maybeSplitRange(bmData,
+					                                      bwInterf.id(),
+					                                      rep.granuleRange,
+					                                      rep.granuleID,
+					                                      rep.startVersion,
+					                                      rep.latestVersion,
+					                                      rep.writeHotSplit));
 				}
 			}
 		} catch (Error& e) {

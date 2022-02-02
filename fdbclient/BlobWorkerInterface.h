@@ -149,6 +149,7 @@ struct GranuleStatusReply : public ReplyPromiseStreamReply {
 
 	KeyRange granuleRange;
 	bool doSplit;
+	bool writeHotSplit;
 	int64_t epoch;
 	int64_t seqno;
 	UID granuleID;
@@ -158,13 +159,14 @@ struct GranuleStatusReply : public ReplyPromiseStreamReply {
 	GranuleStatusReply() {}
 	explicit GranuleStatusReply(KeyRange range,
 	                            bool doSplit,
+	                            bool writeHotSplit,
 	                            int64_t epoch,
 	                            int64_t seqno,
 	                            UID granuleID,
 	                            Version startVersion,
 	                            Version latestVersion)
-	  : granuleRange(range), doSplit(doSplit), epoch(epoch), seqno(seqno), granuleID(granuleID),
-	    startVersion(startVersion), latestVersion(latestVersion) {}
+	  : granuleRange(range), doSplit(doSplit), writeHotSplit(writeHotSplit), epoch(epoch), seqno(seqno),
+	    granuleID(granuleID), startVersion(startVersion), latestVersion(latestVersion) {}
 
 	int expectedSize() const { return sizeof(GranuleStatusReply) + granuleRange.expectedSize(); }
 
@@ -175,6 +177,7 @@ struct GranuleStatusReply : public ReplyPromiseStreamReply {
 		           ReplyPromiseStreamReply::sequence,
 		           granuleRange,
 		           doSplit,
+		           writeHotSplit,
 		           epoch,
 		           seqno,
 		           granuleID,
