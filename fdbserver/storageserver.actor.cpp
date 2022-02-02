@@ -4379,12 +4379,14 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data, KeyR
 }
 
 // returns max version fetched for each feed
+// newFeedIds is used for the second fetch to get data for new feeds that weren't there for the first fetch
 ACTOR Future<std::unordered_map<Key, Version>> dispatchChangeFeeds(StorageServer* data,
                                                                    UID fetchKeysID,
                                                                    KeyRange keys,
                                                                    Version beginVersion,
                                                                    Version endVersion,
-                                                                   std::vector<Key> feedIds) {
+                                                                   std::vector<Key> feedIds,
+                                                                   std::unordered_set<Key> newFeedIds) {
 
 	// find overlapping range feeds
 	state std::unordered_map<Key, Version> feedMaxFetched;
@@ -4398,6 +4400,13 @@ ACTOR Future<std::unordered_map<Key, Version>> dispatchChangeFeeds(StorageServer
 			ASSERT(feedIt != data->uidChangeFeed.end());
 			Reference<ChangeFeedInfo> feed = feedIt->second;
 			feedFetches[feed->id] = fetchChangeFeed(data, feed, beginVersion, endVersion);
+		}
+		for (auto& feedId : newFeedIds) {
+			auto feedIt = data->uidChangeFeed.find(feedId);
+			// TODO REMOVE this assert once we enable change feed deletion
+			ASSERT(feedIt != data->uidChangeFeed.end());
+			Reference<ChangeFeedInfo> feed = feedIt->second;
+			feedFetches[feed->id] = fetchChangeFeed(data, feed, 0, endVersion);
 		}
 
 		loop {
@@ -4669,8 +4678,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		// being recovered. Instead we wait for the updateStorage loop to commit something (and consequently also what
 		// we have written)
 
-		state Future<std::unordered_map<Key, Version>> feedFetchMain =
-		    dispatchChangeFeeds(data, fetchKeysID, keys, 0, fetchVersion + 1, changeFeedsToFetch);
+		state Future<std::unordered_map<Key, Version>> feedFetchMain = dispatchChangeFeeds(
+		    data, fetchKeysID, keys, 0, fetchVersion + 1, changeFeedsToFetch, std::unordered_set<Key>());
 
 		state Future<Void> fetchDurable = data->durableVersion.whenAtLeast(data->storageVersion() + 1);
 
@@ -4709,11 +4718,22 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		ASSERT(shard->transferredVersion > data->storageVersion());
 		ASSERT(shard->transferredVersion == data->data().getLatestVersion());
 
+		// find new change feeds for this range that didn't exist when we started the fetch
+		auto ranges = data->keyChangeFeed.intersectingRanges(keys);
+		std::unordered_set<Key> newChangeFeeds;
+		for (auto& r : ranges) {
+			for (auto& cfInfo : r.value()) {
+				newChangeFeeds.insert(cfInfo->id);
+			}
+		}
+		for (auto& cfId : changeFeedsToFetch) {
+			newChangeFeeds.erase(cfId);
+		}
 		// This is split into two fetches to reduce tail. Fetch [0 - fetchVersion+1)
 		// once fetchVersion is finalized, and [fetchVersion+1, transferredVersion) here once transferredVersion is
-		// finalized
-		Future<std::unordered_map<Key, Version>> feedFetchTransferred = dispatchChangeFeeds(
-		    data, fetchKeysID, keys, fetchVersion + 1, shard->transferredVersion, changeFeedsToFetch);
+		// finalized. Also fetch new change feeds alongside it
+		state Future<std::unordered_map<Key, Version>> feedFetchTransferred = dispatchChangeFeeds(
+		    data, fetchKeysID, keys, fetchVersion + 1, shard->transferredVersion, changeFeedsToFetch, newChangeFeeds);
 
 		TraceEvent(SevDebug, "FetchKeysHaveData", data->thisServerID)
 		    .detail("FKID", interval.pairID)
