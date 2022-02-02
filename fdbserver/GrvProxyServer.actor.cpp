@@ -677,7 +677,7 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
 				stats->lastTxnThrottled = true;
 				stats->throttleStartTime = now();
 			}
-		} else { // reply.timeThrottled <= CLIENT_KNOBS->GRV_THROTTLING_THRESHOLD
+		} else {
 			TraceEvent("DebugGrvProxyNotThrottled");
 			stats->lastTxnThrottled = false;
 		}
