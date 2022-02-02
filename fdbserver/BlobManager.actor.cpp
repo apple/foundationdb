@@ -1663,7 +1663,7 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 	// Plus, we don't have a consistent snapshot of the mapping ACROSS blob workers, so we need the DB to reconcile any
 	// differences (eg blob manager revoked from worker A, assigned to B, the revoke from A was processed but the assign
 	// to B wasn't, meaning in the snapshot nobody owns the granule)
-	state KeyRef beginKey = blobGranuleMappingKeys.begin;
+	state Key beginKey = blobGranuleMappingKeys.begin;
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -1678,6 +1678,9 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 
 			// Add the mappings to our in memory key range map
 			for (int rangeIdx = 0; rangeIdx < results.size() - 1; rangeIdx++) {
+				// TODO REMOVE asserts eventually
+				ASSERT(results[rangeIdx].key.startsWith(blobGranuleMappingKeys.begin));
+				ASSERT(results[rangeIdx + 1].key.startsWith(blobGranuleMappingKeys.begin));
 				Key granuleStartKey = results[rangeIdx].key.removePrefix(blobGranuleMappingKeys.begin);
 				Key granuleEndKey = results[rangeIdx + 1].key.removePrefix(blobGranuleMappingKeys.begin);
 				if (results[rangeIdx].value.size()) {
