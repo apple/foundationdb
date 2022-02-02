@@ -1110,45 +1110,12 @@ static Version doGranuleRollback(Reference<GranuleMetadata> metadata,
 	return cfRollbackVersion;
 }
 
-ACTOR Future<Void> waitVersionCommitted(Reference<BlobWorkerData> bwData,
-                                        Reference<GranuleMetadata> metadata,
-                                        Version version) {
-	// TODO REMOVE debugs
-	if (version > bwData->grvVersion.get()) {
-		/*if (BW_DEBUG) {
-		    fmt::print("waitVersionCommitted waiting {0}\n", version);
-		}*/
-		// this order is important, since we need to register a waiter on the notified version before waking the GRV
-		// actor
-		Future<Void> grvAtLeast = bwData->grvVersion.whenAtLeast(version);
-		Promise<Void> doGrvCheck = bwData->doGRVCheck;
-		if (doGrvCheck.canBeSet()) {
-			doGrvCheck.send(Void());
-		}
-		wait(grvAtLeast);
-	}
-	Version grvVersion = bwData->grvVersion.get();
-	// If GRV is way in the future, we know we can't roll back more than 5 seconds (or whatever this knob is set to)
-	// worth of versions
-	Version cantRollbackVersion = version + SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS;
-	state Version committedWaitVersion = std::min(grvVersion, cantRollbackVersion);
-
-	if ((DEBUG_BW_VERSION(version)) || (DEBUG_BW_VERSION(committedWaitVersion))) {
-		fmt::print("waitVersionCommitted got {0} < {1} -  min of ({2}, {3}) waiting on CF (currently {4})\n",
-		           version,
-		           committedWaitVersion,
-		           grvVersion,
-		           cantRollbackVersion,
-		           metadata->activeCFData.get()->getVersion());
-	}
-	// make sure the change feed has consumed mutations up through grvVersion to ensure none of them are rollbacks
-
+ACTOR Future<Void> waitOnCFVersion(Reference<GranuleMetadata> metadata, Version cfVersion) {
 	loop {
 		try {
 			// if not valid, we're about to be cancelled anyway
-			state Future<Void> atLeast = metadata->activeCFData.get().isValid()
-			                                 ? metadata->activeCFData.get()->whenAtLeast(committedWaitVersion)
-			                                 : Never();
+			state Future<Void> atLeast =
+			    metadata->activeCFData.get().isValid() ? metadata->activeCFData.get()->whenAtLeast(cfVersion) : Never();
 			choose {
 				when(wait(atLeast)) { break; }
 				when(wait(metadata->activeCFData.onChange())) {}
@@ -1170,19 +1137,51 @@ ACTOR Future<Void> waitVersionCommitted(Reference<BlobWorkerData> bwData,
 			wait(delay(0.05));
 		}
 	}
+
 	// sanity check to make sure whenAtLeast didn't return early
-	if (committedWaitVersion > metadata->waitForVersionReturned) {
-		metadata->waitForVersionReturned = committedWaitVersion;
+	if (cfVersion > metadata->waitForVersionReturned) {
+		metadata->waitForVersionReturned = cfVersion;
 	}
+
+	// stop after change feed callback
+	wait(delay(0, TaskPriority::BlobWorkerReadChangeFeed));
+
+	return Void();
+}
+
+ACTOR Future<Void> waitCommittedGrv(Reference<BlobWorkerData> bwData,
+                                    Reference<GranuleMetadata> metadata,
+                                    Version version) {
+	// TODO REMOVE debugs
+	if (version > bwData->grvVersion.get()) {
+		/*if (BW_DEBUG) {
+		    fmt::print("waitVersionCommitted waiting {0}\n", version);
+		}*/
+		// this order is important, since we need to register a waiter on the notified version before waking the GRV
+		// actor
+		Future<Void> grvAtLeast = bwData->grvVersion.whenAtLeast(version);
+		Promise<Void> doGrvCheck = bwData->doGRVCheck;
+		if (doGrvCheck.canBeSet()) {
+			doGrvCheck.send(Void());
+		}
+		wait(grvAtLeast);
+	}
+
+	Version grvVersion = bwData->grvVersion.get();
+	wait(waitOnCFVersion(metadata, grvVersion));
+	return Void();
+}
+
+ACTOR Future<Void> waitVersionCommitted(Reference<BlobWorkerData> bwData,
+                                        Reference<GranuleMetadata> metadata,
+                                        Version version) {
+	// If GRV is way in the future, we know we can't roll back more than 5 seconds (or whatever this knob is set to)
+	// worth of versions
+	wait(waitCommittedGrv(bwData, metadata, version) ||
+	     waitOnCFVersion(metadata, version + SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS));
 	if (version > metadata->knownCommittedVersion) {
 		metadata->knownCommittedVersion = version;
 	}
-	/*if (BW_DEBUG) {
-	    fmt::print(
-	        "waitVersionCommitted CF whenAtLeast {0}: {1}\n", committedWaitVersion,
-	metadata->activeCFData.get()->getVersion());
-	}*/
-
 	return Void();
 }
 
@@ -1698,7 +1697,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 					}
 
 					// Speculatively assume we will get the range back. This is both a performance optimization, and
-					// necessary to keep consuming committed versions from the change feed so that we can realize
+					// necessary to keep consuming versions from the change feed so that we can realize
 					// our last delta file is committed and write it
 
 					Future<BlobFileIndex> previousFuture;
@@ -1724,14 +1723,18 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 					if (pendingSnapshots > 1) {
 						state int waitIdx = 0;
 						int idx = 0;
+						Version safeVersion =
+						    std::max(metadata->knownCommittedVersion,
+						             metadata->bufferedDeltaVersion - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS);
 						for (auto& f : inFlightFiles) {
 							if (f.snapshot && f.version < metadata->pendingSnapshotVersion &&
-							    f.version <= metadata->knownCommittedVersion) {
+							    f.version <= safeVersion) {
 								if (BW_DEBUG) {
-									fmt::print("[{0} - {1}) Waiting on previous snapshot file @ {2}\n",
+									fmt::print("[{0} - {1}) Waiting on previous snapshot file @ {2} <= {3}\n",
 									           metadata->keyRange.begin.printable(),
 									           metadata->keyRange.end.printable(),
-									           f.version);
+									           f.version,
+									           safeVersion);
 								}
 								waitIdx = idx + 1;
 							}
