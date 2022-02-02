@@ -101,6 +101,41 @@ bool canReplyWith(Error e) {
 }
 } // namespace
 
+#define PERSIST_PREFIX "\xff\xff"
+
+// Immutable
+static const KeyValueRef persistFormat(LiteralStringRef(PERSIST_PREFIX "Format"),
+                                       LiteralStringRef("FoundationDB/StorageServer/1/4"));
+static const KeyRangeRef persistFormatReadableRange(LiteralStringRef("FoundationDB/StorageServer/1/2"),
+                                                    LiteralStringRef("FoundationDB/StorageServer/1/5"));
+static const KeyRef persistID = LiteralStringRef(PERSIST_PREFIX "ID");
+static const KeyRef persistTssPairID = LiteralStringRef(PERSIST_PREFIX "tssPairID");
+static const KeyRef persistTssQuarantine = LiteralStringRef(PERSIST_PREFIX "tssQ");
+static const KeyRef persistClusterIdKey = LiteralStringRef(PERSIST_PREFIX "clusterId");
+
+// (Potentially) change with the durable version or when fetchKeys completes
+static const KeyRef persistVersion = LiteralStringRef(PERSIST_PREFIX "Version");
+static const KeyRangeRef persistShardAssignedKeys =
+    KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "ShardAssigned/"), LiteralStringRef(PERSIST_PREFIX "ShardAssigned0"));
+static const KeyRangeRef persistShardAvailableKeys =
+    KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "ShardAvailable/"), LiteralStringRef(PERSIST_PREFIX "ShardAvailable0"));
+static const KeyRangeRef persistByteSampleKeys =
+    KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "BS/"), LiteralStringRef(PERSIST_PREFIX "BS0"));
+static const KeyRangeRef persistByteSampleSampleKeys =
+    KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "BS/" PERSIST_PREFIX "BS/"),
+                LiteralStringRef(PERSIST_PREFIX "BS/" PERSIST_PREFIX "BS0"));
+static const KeyRef persistLogProtocol = LiteralStringRef(PERSIST_PREFIX "LogProtocol");
+static const KeyRef persistPrimaryLocality = LiteralStringRef(PERSIST_PREFIX "PrimaryLocality");
+static const KeyRangeRef persistChangeFeedKeys =
+    KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "RF/"), LiteralStringRef(PERSIST_PREFIX "RF0"));
+// data keys are unmangled (but never start with PERSIST_PREFIX because they are always in allKeys)
+
+static const KeyRangeRef persistCheckpointKeys =
+    KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "Checkpoint/"), LiteralStringRef(PERSIST_PREFIX "Checkpoint0"));
+static const KeyRangeRef persistPendingCheckpointKeys =
+    KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "PendingCheckpoint/"),
+                LiteralStringRef(PERSIST_PREFIX "PendingCheckpoint0"));
+
 struct AddingShard : NonCopyable {
 	KeyRange keys;
 	Future<Void> fetchClient; // holds FetchKeys() actor
@@ -228,9 +263,7 @@ struct StorageServerDisk {
 		return storage->readRange(keys, rowLimit, byteLimit, type);
 	}
 
-	Future<CheckpointMetaData> checkpoint(const GetCheckpointRequest& request, const std::string& checkpointDir) {
-		return storage->checkpoint(request, checkpointDir);
-	}
+	Future<CheckpointMetaData> checkpoint(const CheckpointRequest& request) { return storage->checkpoint(request); }
 
 	KeyValueStoreType getKeyValueStoreType() const { return storage->getType(); }
 	StorageBytes getStorageBytes() const { return storage->getStorageBytes(); }
@@ -403,7 +436,7 @@ private:
 	std::unordered_map<KeyRef, Reference<ServerWatchMetadata>> watchMap; // keep track of server watches
 
 public:
-	std::unordered_map<CheckpointFormat, std::map<Version, CheckpointMetaData>> checkpoints;
+	// std::unordered_map<CheckpointFormat, std::vector<CheckpointMetaData>> checkpoints;
 	std::map<Version, std::vector<CheckpointMetaData>> pendingCheckpoints;
 
 	// Histograms
@@ -1650,12 +1683,16 @@ ACTOR Future<Void> checkpointQ(StorageServer* self, GetCheckpointRequest req) {
 			return Void();
 		}
 
-		state CheckpointMetaData checkpointMetaData =
-		    wait(self->storage.checkpoint(req, self->folder + "/rockscheckpoints_" + std::to_string(minVersion) + "/"));
+		const CheckpointRequest request(req.minVersion,
+		                                req.range,
+		                                static_cast<CheckpointFormat>(req.format),
+		                                deterministicRandom()->randomUniqueID(),
+		                                self->folder + "/rockscheckpoints_" + std::to_string(minVersion) + "/");
+
+		state CheckpointMetaData checkpointMetaData = wait(self->storage.checkpoint(request));
 
 		checkpointMetaData.ssID = self->thisServerID;
-		self->checkpoints[static_cast<CheckpointFormat>(req.format)].emplace(checkpointMetaData.version,
-		                                                                     checkpointMetaData);
+		// self->checkpoints[static_cast<CheckpointFormat>(req.format)].push_back(checkpointMetaData);
 		// TODO: persist the checkpoint metadata.
 
 		req.reply.send(checkpointMetaData);
@@ -1665,6 +1702,39 @@ ACTOR Future<Void> checkpointQ(StorageServer* self, GetCheckpointRequest req) {
 		    .detail("MinVersion", minVersion)
 		    .detail("Range", req.range.toString())
 		    .error(e, /*includeCancel=*/true);
+		if (!canReplyWith(e)) {
+			throw;
+		}
+		req.reply.sendError(e);
+	}
+	return Void();
+}
+
+// Create a checkpoint.
+ACTOR Future<Void> getCheckpointQ(StorageServer* self, GetCheckpointRequest req) {
+	wait(delay(0));
+
+	TraceEvent(SevDebug, "ServeGetpointBegin", self->thisServerID)
+	    .detail("MinVersion", req.minVersion)
+	    .detail("Range", req.range.toString())
+	    .detail("Format", static_cast<int>(req.format));
+
+	try {
+		RangeResult checkpoints = wait(self->storage.readRange(persistCheckpointKeys));
+		int i = 0;
+		for (; i < checkpoints.size(); ++i) {
+			CheckpointMetaData md = decodeCheckpointValue(checkpoints[i].value);
+			if (md.version == req.minVersion && md.format == req.format && md.range.contains(req.range)) {
+				TraceEvent(SevDebug, "ServeCheckpointFoundExisting", self->thisServerID)
+				    .detail("Checkpoint", md.toString());
+				req.reply.send(md);
+				break;
+			}
+		}
+		if (i >= checkpoints.size()) {
+			req.reply.sendError(checkpoint_not_found());
+		}
+	} catch (Error& e) {
 		if (!canReplyWith(e)) {
 			throw;
 		}
@@ -3955,41 +4025,6 @@ ACTOR Future<Void> tryGetRange(PromiseStream<RangeResult> results, Transaction* 
 	}
 }
 
-#define PERSIST_PREFIX "\xff\xff"
-
-// Immutable
-static const KeyValueRef persistFormat(LiteralStringRef(PERSIST_PREFIX "Format"),
-                                       LiteralStringRef("FoundationDB/StorageServer/1/4"));
-static const KeyRangeRef persistFormatReadableRange(LiteralStringRef("FoundationDB/StorageServer/1/2"),
-                                                    LiteralStringRef("FoundationDB/StorageServer/1/5"));
-static const KeyRef persistID = LiteralStringRef(PERSIST_PREFIX "ID");
-static const KeyRef persistTssPairID = LiteralStringRef(PERSIST_PREFIX "tssPairID");
-static const KeyRef persistTssQuarantine = LiteralStringRef(PERSIST_PREFIX "tssQ");
-static const KeyRef persistClusterIdKey = LiteralStringRef(PERSIST_PREFIX "clusterId");
-
-// (Potentially) change with the durable version or when fetchKeys completes
-static const KeyRef persistVersion = LiteralStringRef(PERSIST_PREFIX "Version");
-static const KeyRangeRef persistShardAssignedKeys =
-    KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "ShardAssigned/"), LiteralStringRef(PERSIST_PREFIX "ShardAssigned0"));
-static const KeyRangeRef persistShardAvailableKeys =
-    KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "ShardAvailable/"), LiteralStringRef(PERSIST_PREFIX "ShardAvailable0"));
-static const KeyRangeRef persistByteSampleKeys =
-    KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "BS/"), LiteralStringRef(PERSIST_PREFIX "BS0"));
-static const KeyRangeRef persistByteSampleSampleKeys =
-    KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "BS/" PERSIST_PREFIX "BS/"),
-                LiteralStringRef(PERSIST_PREFIX "BS/" PERSIST_PREFIX "BS0"));
-static const KeyRef persistLogProtocol = LiteralStringRef(PERSIST_PREFIX "LogProtocol");
-static const KeyRef persistPrimaryLocality = LiteralStringRef(PERSIST_PREFIX "PrimaryLocality");
-static const KeyRangeRef persistChangeFeedKeys =
-    KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "RF/"), LiteralStringRef(PERSIST_PREFIX "RF0"));
-// data keys are unmangled (but never start with PERSIST_PREFIX because they are always in allKeys)
-
-static const KeyRangeRef persistCheckpointKeys =
-    KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "Checkpoint/"), LiteralStringRef(PERSIST_PREFIX "Checkpoint0"));
-static const KeyRangeRef persistPendingCheckpointKeys =
-    KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "PendingCheckpoint/"),
-                LiteralStringRef(PERSIST_PREFIX "PendingCheckpoint0"));
-
 ACTOR Future<Void> fetchChangeFeedApplier(StorageServer* data,
                                           Reference<ChangeFeedInfo> changeFeedInfo,
                                           Key rangeId,
@@ -5667,12 +5702,16 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			state int idx = 0;
 			for (; idx < data->pendingCheckpoints.begin()->second.size(); ++idx) {
 				auto& metaData = data->pendingCheckpoints.begin()->second[idx];
-				GetCheckpointRequest req(newOldestVersion, metaData.range);
-				req.format = metaData.format;
-				// req.checkpointID = metaData.checkpointID;
+				ASSERT(metaData.ssID == data->thisServerID);
+				const CheckpointRequest req(newOldestVersion,
+				                            metaData.range,
+				                            static_cast<CheckpointFormat>(metaData.format),
+				                            metaData.checkpointID,
+				                            data->folder + "/rockscheckpoints_" + metaData.checkpointID.toString());
 				try {
-					state CheckpointMetaData checkpointResult = wait(data->storage.checkpoint(
-					    req, data->folder + "/rockscheckpoints_" + metaData.checkpointID.toString()));
+					state CheckpointMetaData checkpointResult = wait(data->storage.checkpoint(req));
+					checkpointResult.ssID = data->thisServerID;
+					// data->checkpoints[req.format].push_back(checkpointMetaData);
 					TraceEvent("StorageCreatedCheckpoint", data->thisServerID)
 					    .detail("Checkpoint", checkpointResult.toString());
 				} catch (Error& e) {
@@ -5680,8 +5719,20 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 					    .detail("Checkpoint", checkpointResult.toString());
 					ASSERT(false);
 				}
+				try {
+					Key pendingCheckpointKey(persistPendingCheckpointKeys.begin.toString() +
+					                         checkpointResult.checkpointID.toString());
+					Key persistCheckpointKey(persistCheckpointKeys.begin.toString() +
+					                         checkpointResult.checkpointID.toString());
+					data->storage.clearRange(singleKeyRange(pendingCheckpointKey));
+					data->storage.writeKeyValue(KeyValueRef(persistCheckpointKey, checkpointValue(checkpointResult)));
+					wait(data->storage.commit());
+				} catch (Error& e) {
+					TraceEvent("StorageCreateCheckpointPersistFailure", data->thisServerID)
+					    .detail("Checkpoint", checkpointResult.toString())
+					    .error(e, true);
+				}
 			}
-			data->pendingCheckpoints.erase(data->pendingCheckpoints.begin());
 			requireCheckpoint = false;
 		}
 
@@ -6724,23 +6775,36 @@ ACTOR Future<Void> serveGetCheckpointRequests(StorageServer* self, FutureStream<
 		GetCheckpointRequest req = waitNext(checkpoint);
 		if (!self->isReadable(req.range)) {
 			req.reply.sendError(wrong_shard_server());
+			continue;
 		} else {
-			// TODO: Load existing checkpoints from disk once persisting checkpoint metadata is implemented.
-			// TODO: Implement lookup on checkpointID.
-			const CheckpointFormat format = static_cast<CheckpointFormat>(req.format);
-			const auto it = self->checkpoints[format].lower_bound(req.minVersion);
-			if (it != self->checkpoints[format].end()) {
-				TraceEvent(SevDebug, "ServeCheckpointFoundExisting", self->thisServerID)
-				    .detail("Version", it->second.version);
-				req.reply.send(it->second);
-			} else if (req.createNew) {
-				self->actors.add(checkpointQ(self, req));
-			} else {
-				TraceEvent(SevDebug, "ServeCheckpointNotFoundExisting", self->thisServerID)
-				    .detail("Version", it->second.version);
-				req.reply.sendError(checkpoint_not_found());
-			}
+			self->actors.add(getCheckpointQ(self, req));
 		}
+		// TODO: Load existing checkpoints from disk once persisting checkpoint metadata is implemented.
+		// TODO: Implement lookup on checkpointID.
+		// const CheckpointFormat format = static_cast<CheckpointFormat>(req.format);
+		// const auto it = self->checkpoints[format].lower_bound(req.minVersion);
+	// 	try {
+	// 		RangeResult checkpoints = wait(self->storage.readRange(persistCheckpointKeys));
+	// 		int i = 0;
+	// 		for (; i < checkpoints.size(); ++i) {
+	// 			CheckpointMetaData md = decodeCheckpointValue(checkpoints[i].value);
+	// 			if (md.version == req.version && md.format == req.format && md.range.contains(req.range)) {
+	// 				TraceEvent(SevDebug, "ServeCheckpointFoundExisting", self->thisServerID)
+	// 				    .detail("Checkpoint", md.toString());
+	// 				req.reply.send(md);
+	// 				break;
+	// 			}
+	// 		}
+	// 		if (i >= checkpoints.size()) {
+	// 			req.reply.sendError(checkpoint_not_found());
+	// 		}
+	// 	} catch (Error& e) {
+	// 		if (!canReplyWith(e)) {
+	// 			throw;
+	// 		}
+	// 		req.reply.sendError(e);
+	// 	}
+	// }
 	}
 }
 

@@ -727,22 +727,20 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 
 		struct CheckpointAction : TypedAction<Writer, CheckpointAction> {
-			CheckpointAction(const GetCheckpointRequest& request, const std::string& checkpointDir)
-			  : request(request), checkpointDir(checkpointDir) {}
+			CheckpointAction(const CheckpointRequest& request) : request(request) {}
 
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 
-			const GetCheckpointRequest request;
-			const std::string checkpointDir;
+			const CheckpointRequest request;
 			ThreadReturnPromise<CheckpointMetaData> reply;
 		};
 
 		void action(CheckpointAction& a) {
 			TraceEvent("RocksDBServeCheckpointBegin", id)
-			    .detail("MinVersion", a.request.minVersion)
+			    .detail("MinVersion", a.request.version)
 			    .detail("Range", a.request.range.toString())
 			    .detail("Format", static_cast<int>(a.request.format))
-			    .detail("CheckpointDir", a.checkpointDir);
+			    .detail("CheckpointDir", a.request.checkpointDir);
 
 			rocksdb::Checkpoint* checkpoint;
 			rocksdb::Status s = rocksdb::Checkpoint::Create(db, &checkpoint);
@@ -767,15 +765,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			                            : BinaryReader::fromStringRef<Version>(toStringRef(value), Unversioned());
 
 			TraceEvent("RocksDBServeCheckpointVersion", id)
-			    .detail("CheckpointVersion", a.request.minVersion)
+			    .detail("CheckpointVersion", a.request.version)
 			    .detail("PersistVersion", version);
 
 			// TODO: set the range as the actual shard range.
-			CheckpointMetaData res(version,
-			                       a.request.range,
-			                       static_cast<CheckpointFormat>(a.request.format),
-			                       deterministicRandom()->randomUniqueID());
-			const std::string& checkpointDir = a.checkpointDir;
+			CheckpointMetaData res(version, a.request.range, a.request.format, a.request.checkpointID);
+			const std::string& checkpointDir = a.request.checkpointDir;
 
 			if (a.request.format == RocksDBColumnFamily) {
 				rocksdb::ExportImportFilesMetaData* pMetadata;
@@ -1418,9 +1413,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		return StorageBytes(free, total, live, free);
 	}
 
-	Future<CheckpointMetaData> checkpoint(const GetCheckpointRequest& request,
-	                                      const std::string& checkpointDir) override {
-		auto a = new Writer::CheckpointAction(request, checkpointDir);
+	Future<CheckpointMetaData> checkpoint(const CheckpointRequest& request) override {
+		auto a = new Writer::CheckpointAction(request);
 
 		auto res = a->reply.getFuture();
 		writeThread->post(a);
@@ -1567,8 +1561,9 @@ TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/CheckpointRestore") {
 	platform::eraseDirectoryRecursive("checkpoint");
 	state std::string checkpointDir = cwd + "checkpoint";
 
-	GetCheckpointRequest request(latestVersion, allKeys, RocksDBColumnFamily, true);
-	CheckpointMetaData metaData = wait(kvStore->checkpoint(request, checkpointDir));
+	CheckpointRequest request(
+	    latestVersion, allKeys, RocksDBColumnFamily, deterministicRandom()->randomUniqueID(), checkpointDir);
+	CheckpointMetaData metaData = wait(kvStore->checkpoint(request));
 
 	state std::string rocksDBRestoreDir = "rocksdb-kvstore-br-restore-db";
 	platform::eraseDirectoryRecursive(rocksDBRestoreDir);
