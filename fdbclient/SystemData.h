@@ -160,11 +160,20 @@ public:
 	// Gets the storage team ID for private mutations
 	const StorageTeamID& getPrivateMutationsStorageTeamID() const { return privateMutationsStorageTeamID; }
 
-	// Gets the set of storage team IDs
+	// Gets the set of storage team IDs, not including the private team.
 	const StorageTeamIDContainer& getStorageTeams() const { return storageTeamIDs; }
 
 	// Add a new storage team ID to list
 	StorageServerStorageTeams& insert(const StorageTeamID& storageTeamID);
+
+	// Adds storage teams from given STL style container.
+	template <class T>
+	void insert(const T& teams) {
+		for (const auto& t : teams) {
+			ASSERT_WE_THINK(t != privateMutationsStorageTeamID);
+			insert(t);
+		}
+	}
 
 	// Removes a storage team ID
 	StorageServerStorageTeams& erase(const StorageTeamID& storageTeamID);
@@ -179,6 +188,9 @@ public:
 
 	// Encodes the object into a std::string object
 	std::string toString() const;
+
+	// Returns the number of teams excluding the private team.
+	int size() const;
 };
 
 } // namespace ptxn

@@ -2153,10 +2153,12 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 				if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 					// Add storage teams of storage servers
 					ASSERT(pContext->pCommitData->ssToStorageTeam.count(id));
-					ASSERT(pContext->pCommitData->ssToStorageTeam[id].size());
-					if (pContext->pCommitData->ssToStorageTeam[id].count(srcDstTeams[0])) {
+
+					auto ssTeams = pContext->pCommitData->ssToStorageTeam.find(id)->second;
+					ASSERT(ssTeams.size());
+					if (ssTeams.contains(srcDstTeams[0])) {
 						info.storageTeams.insert(srcDstTeams[0]);
-					} else if (pContext->pCommitData->ssToStorageTeam[id].count(srcDstTeams[1])) {
+					} else if (ssTeams.contains(srcDstTeams[1])) {
 						info.storageTeams.insert(srcDstTeams[1]);
 					} else {
 						ASSERT(false);
@@ -2167,14 +2169,17 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 
 		for (auto& kv : data) {
 			if (kv.key.startsWith(storageServerToTeamIdKeyPrefix)) {
-				UID k = decodeStorageServerToTeamIdKey(kv.key);
 				// The first team of a storage server is its own team.
 				ptxn::StorageServerStorageTeams teamIDs(kv.value);
 
 				// Initially, each storage server belongs to two teams (1) Seed
 				// team and (2) its own team for private mutations.
-				const auto& teamSet = teamIDs.getStorageTeams();
-				pContext->pCommitData->ssToStorageTeam[k].insert(teamSet.begin(), teamSet.end());
+				UID k = decodeStorageServerToTeamIdKey(kv.key);
+				auto it = pContext->pCommitData->ssToStorageTeam.find(k);
+				if (it == pContext->pCommitData->ssToStorageTeam.end())
+					pContext->pCommitData->ssToStorageTeam.emplace(k, teamIDs);
+				else
+					it->second.insert(teamIDs.getStorageTeams());
 			}
 		}
 

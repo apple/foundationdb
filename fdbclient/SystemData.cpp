@@ -422,16 +422,21 @@ namespace ptxn {
 
 StorageServerStorageTeams::StorageServerStorageTeams(const StorageTeamID& privateMutationsStorageTeamID_,
                                                      const StorageTeamIDContainer& storageTeamIDs_)
-  : privateMutationsStorageTeamID(privateMutationsStorageTeamID_), storageTeamIDs(storageTeamIDs_) {}
+  : privateMutationsStorageTeamID(privateMutationsStorageTeamID_), storageTeamIDs(storageTeamIDs_) {
+
+	ASSERT_WE_THINK(!storageTeamIDs.count(privateMutationsStorageTeamID));
+}
 
 StorageServerStorageTeams::StorageServerStorageTeams(const ValueRef& serializedValue) {
 	auto [privateMutationsStorageTeamID_, storageTeamIDs_] = decodeStorageServerToTeamIdValue(serializedValue);
 
 	privateMutationsStorageTeamID = privateMutationsStorageTeamID_;
 	storageTeamIDs.swap(storageTeamIDs_);
+	ASSERT_WE_THINK(!storageTeamIDs.count(privateMutationsStorageTeamID));
 }
 
 StorageServerStorageTeams& StorageServerStorageTeams::insert(const StorageTeamID& storageTeamID) {
+	ASSERT_WE_THINK(storageTeamID != privateMutationsStorageTeamID);
 	storageTeamIDs.insert(storageTeamID);
 	return *this;
 }
@@ -447,6 +452,10 @@ const Value StorageServerStorageTeams::toValue() const {
 
 std::string StorageServerStorageTeams::toString() const {
 	return concatToString("{", privateMutationsStorageTeamID, ", {", joinToString(storageTeamIDs), "}}");
+}
+
+int StorageServerStorageTeams::size() const {
+	return storageTeamIDs.size();
 }
 
 } // namespace ptxn

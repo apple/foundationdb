@@ -70,7 +70,7 @@ public:
 	                           IKeyValueStore* txnStateStore_,
 	                           Reference<TLogGroupCollection> tLogGroupCollection_,
 	                           std::map<Tag, UID>* tagToServer_,
-	                           std::unordered_map<UID, std::unordered_set<ptxn::StorageTeamID>>* ssToStorageTeam_)
+	                           std::unordered_map<UID, ptxn::StorageServerStorageTeams>* ssToStorageTeam_)
 	  : spanContext(spanContext_), dbgid(dbgid_), arena(arena_), mutations(mutations_), txnStateStore(txnStateStore_),
 	    confChange(dummyConfChange), tLogGroupCollection(tLogGroupCollection_), tagToServer(tagToServer_),
 	    ssToStorageTeam(ssToStorageTeam_) {}
@@ -96,8 +96,9 @@ public:
 	    ssToStorageTeam(&proxyCommitData_.ssToStorageTeam), changedTeams(&proxyCommitData_.changedTeams) {
 
 		for (const auto& [ss, teams] : proxyCommitData_.ssToStorageTeam) {
-			TraceEvent(SevDebug, "SSTeam", dbgid).detail("SS", ss).detail("Teams", describe(teams));
-			allTeams.insert(teams.begin(), teams.end());
+			TraceEvent(SevDebug, "SSTeam", dbgid).detail("SS", ss).detail("Teams", describe(teams.getStorageTeams()));
+			allTeams.insert(teams.getStorageTeams().begin(), teams.getStorageTeams().end());
+			allTeams.insert(teams.getPrivateMutationsStorageTeamID());
 		}
 	}
 
@@ -169,7 +170,7 @@ private:
 	std::vector<std::pair<UID, UID>> tssMappingToAdd;
 
 	std::map<Tag, UID>* tagToServer = nullptr;
-	std::unordered_map<UID, std::unordered_set<ptxn::StorageTeamID>>* ssToStorageTeam = nullptr;
+	std::unordered_map<UID, ptxn::StorageServerStorageTeams>* ssToStorageTeam = nullptr;
 	std::unordered_map<UID, std::vector<std::pair<ptxn::StorageTeamID, bool>>>* changedTeams = nullptr;
 
 	// All SSes' own teams, populated from ssToStorageTeam mapping.
@@ -188,7 +189,7 @@ private:
 
 		auto team_it = ssToStorageTeam->find(ss_it->second);
 		ASSERT(team_it != ssToStorageTeam->end());
-		ASSERT(team_it->second.count(team_it->first));
+		ASSERT(team_it->second.contains(team_it->first));
 		return team_it->first; // Private teams have same id as the SSID.
 	}
 
@@ -307,7 +308,13 @@ private:
 		auto team = decodeStorageTeams(m.param2);
 		TraceEvent("AddSSTeam", dbgid).detail("SS", describe(team)).detail("Team", teamid);
 		for (auto& ss : team) {
-			(*ssToStorageTeam)[ss].emplace(teamid);
+			auto teamSet = (teamid == ss) ? std::set<UID>() : std::set<UID>({ teamid });
+			auto it = ssToStorageTeam->find(ss);
+			if (it == ssToStorageTeam->end()) {
+				ssToStorageTeam->emplace(ss, ptxn::StorageServerStorageTeams(ss, teamSet));
+			} else {
+				it->second.insert(teamSet);
+			}
 		}
 
 		if (tLogGroupCollection->tryAddStorageTeam(teamid, team)) {
@@ -1312,7 +1319,7 @@ void applyMetadataMutations(SpanID const& spanContext,
                             IKeyValueStore* txnStateStore,
                             TLogGroupCollectionRef tLogGroupCollection) {
 	std::map<Tag, UID> tagToServer;
-	std::unordered_map<UID, std::unordered_set<ptxn::StorageTeamID>> ssToStorageTeam;
+	std::unordered_map<UID, ptxn::StorageServerStorageTeams> ssToStorageTeam;
 	ApplyMetadataMutationsImpl(
 	    spanContext, dbgid, arena, mutations, txnStateStore, tLogGroupCollection, &tagToServer, &ssToStorageTeam)
 	    .apply();
