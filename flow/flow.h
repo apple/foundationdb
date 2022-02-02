@@ -61,7 +61,8 @@
 #define TEST(condition)                                                                                                \
 	if (!(condition)) {                                                                                                \
 	} else {                                                                                                           \
-		static TraceEvent* __test = &(TraceEvent(intToSeverity(FLOW_KNOBS->CODE_COV_TRACE_EVENT_SEVERITY), "CodeCoverage")    \
+		static TraceEvent* __test = &(TraceEvent(                                                                      \
+		                                  intToSeverity(FLOW_KNOBS->CODE_COV_TRACE_EVENT_SEVERITY), "CodeCoverage")    \
 		                                  .detail("File", __FILE__)                                                    \
 		                                  .detail("Line", __LINE__)                                                    \
 		                                  .detail("Condition", #condition));                                           \
