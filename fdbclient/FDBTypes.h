@@ -1171,22 +1171,6 @@ struct StorageMigrationType {
 	uint32_t type;
 };
 
-struct GRVCacheSpace {
-	Version cachedRv;
-	double lastTimedGrv;
-
-	GRVCacheSpace() : cachedRv(Version(0)), lastTimedGrv(0.0) {}
-};
-
-// This structure can be extended in the future to include additional features that required a shared state
-struct DatabaseSharedState {
-	Mutex mutexLock;
-	GRVCacheSpace grvCacheSpace;
-	int refCount;
-
-	DatabaseSharedState() : mutexLock(Mutex()), grvCacheSpace(GRVCacheSpace()) {}
-};
-
 inline bool isValidPerpetualStorageWiggleLocality(std::string locality) {
 	int pos = locality.find(':');
 	// locality should be either 0 or in the format '<non_empty_string>:<non_empty_string>'

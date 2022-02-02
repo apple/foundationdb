@@ -209,23 +209,8 @@ void DatabaseContext::removeTssMapping(StorageServerInterface const& ssi) {
 	}
 }
 
-void updateCachedRVShared(double t, Version v, DatabaseSharedState* p) {
-	MutexHolder mutex(p->mutexLock);
-	TraceEvent("CheckpointCacheUpdateShared")
-	    .detail("Version", v)
-	    .detail("CurTime", t)
-	    .detail("LastVersion", p->grvCacheSpace.cachedRv)
-	    .detail("LastTime", p->grvCacheSpace.lastTimedGrv);
-	p->grvCacheSpace.cachedRv = v;
-	if (t > p->grvCacheSpace.lastTimedGrv) {
-		p->grvCacheSpace.lastTimedGrv = t;
-	}
-}
 
 void DatabaseContext::updateCachedRV(double t, Version v) {
-	if (sharedStatePtr) {
-		return updateCachedRVShared(t, v, sharedStatePtr);
-	}
 	if (v >= cachedRv) {
 		TraceEvent("CheckpointCacheUpdate")
 		    .detail("Version", v)
@@ -244,18 +229,10 @@ void DatabaseContext::updateCachedRV(double t, Version v) {
 }
 
 Version DatabaseContext::getCachedRV() {
-	if (sharedStatePtr) {
-		MutexHolder mutex(sharedStatePtr->mutexLock);
-		return sharedStatePtr->grvCacheSpace.cachedRv;
-	}
 	return cachedRv;
 }
 
 double DatabaseContext::getLastTimedGRV() {
-	if (sharedStatePtr) {
-		MutexHolder mutex(sharedStatePtr->mutexLock);
-		return sharedStatePtr->grvCacheSpace.lastTimedGrv;
-	}
 	return lastTimedGrv;
 }
 
@@ -1335,10 +1312,10 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
     transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
     transactionGrvFullBatches("NumGrvFullBatches", cc), transactionGrvTimedOutBatches("NumGrvTimedOutBatches", cc),
     latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000),
-    bytesPerCommit(1000), outstandingWatches(0), sharedStatePtr(nullptr), lastTimedGrv(0.0), cachedRv(0),
-    lastTimedRkThrottle(0.0), lastProxyRequest(0.0), transactionTracingSample(false), taskID(taskID),
-    clientInfo(clientInfo), clientInfoMonitor(clientInfoMonitor), coordinator(coordinator), apiVersion(apiVersion),
-    mvCacheInsertLocation(0), healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0),
+    bytesPerCommit(1000), outstandingWatches(0), lastTimedGrv(0.0), cachedRv(0), lastTimedRkThrottle(0.0),
+    lastProxyRequest(0.0), transactionTracingSample(false), taskID(taskID), clientInfo(clientInfo),
+    clientInfoMonitor(clientInfoMonitor), coordinator(coordinator), apiVersion(apiVersion), mvCacheInsertLocation(0),
+    healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0),
     smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
     specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)),
     connectToDatabaseEventCacheHolder(format("ConnectToDatabase/%s", dbId.toString().c_str())) {
@@ -1626,13 +1603,6 @@ DatabaseContext::~DatabaseContext() {
 	tssMismatchHandler.cancel();
 	if (grvUpdateHandler.isValid()) {
 		grvUpdateHandler.cancel();
-	}
-	if (sharedStatePtr) {
-		sharedStatePtr->refCount--;
-		if (sharedStatePtr->refCount <= 0) {
-			delete sharedStatePtr;
-			sharedStatePtr = nullptr;
-		}
 	}
 	for (auto it = server_interf.begin(); it != server_interf.end(); it = server_interf.erase(it))
 		it->second->notifyContextDestroyed();
@@ -6043,16 +6013,6 @@ ACTOR Future<Version> extractReadVersion(Reference<TransactionState> trState,
 	return rep.version;
 }
 
-// ACTOR Future<Version> getDBCachedReadVersion(DatabaseContext* cx, double requestTime) {
-// 	if (requestTime - cx->lastTimedGrv.get() > CLIENT_KNOBS->MAX_VERSION_CACHE_LAG) {
-// 		wait(cx->lastTimedGrv.whenAtLeast(requestTime - CLIENT_KNOBS->MAX_VERSION_CACHE_LAG));
-// 	}
-// 	// Want to check that the cached version is at most
-// 	// MAX_VERSION_CACHE_LAG (100ms) old compared to requestTime.
-// 	ASSERT(!debug_checkVersionTime(cx->cachedRv, requestTime, "CheckStaleness"));
-// 	return cx->cachedRv;
-// }
-
 bool rkThrottlingCooledDown(DatabaseContext* cx) {
 	if (cx->lastTimedRkThrottle == 0.0) {
 		return true;
@@ -7167,17 +7127,6 @@ Future<Void> DatabaseContext::createSnapshot(StringRef uid, StringRef snapshot_c
 		throw snap_invalid_uid_string();
 	}
 	return createSnapshotActor(this, UID::fromString(uid_str), snapshot_command);
-}
-
-DatabaseSharedState* DatabaseContext::initSharedState() {
-	DatabaseSharedState* newState = new DatabaseSharedState();
-	setSharedState(newState);
-	return newState;
-}
-
-void DatabaseContext::setSharedState(DatabaseSharedState* p) {
-	sharedStatePtr = p;
-	sharedStatePtr->refCount++;
 }
 
 ACTOR Future<Void> storageFeedVersionUpdater(StorageServerInterface interf, ChangeFeedStorageData* self) {

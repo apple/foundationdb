@@ -137,10 +137,6 @@ public:
 	// Management API, create snapshot
 	virtual ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) = 0;
 
-	// Interface to manage shared state across multiple connections to the same Database
-	virtual DatabaseSharedState* createSharedState() = 0;
-	virtual void setSharedState(DatabaseSharedState* p) = 0;
-
 	// used in template functions as the Transaction type that can be created through createTransaction()
 	using TransactionT = ITransaction;
 };

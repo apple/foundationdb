@@ -108,8 +108,6 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                     int uidLength,
 	                                     uint8_t const* snapshotCommmand,
 	                                     int snapshotCommandLength);
-	DatabaseSharedState* (*databaseCreateSharedState)(FDBDatabase* database);
-	void (*databaseSetSharedState)(FDBDatabase* database, DatabaseSharedState* p);
 
 	double (*databaseGetMainThreadBusyness)(FDBDatabase* database);
 	FDBFuture* (*databaseGetServerProtocol)(FDBDatabase* database, uint64_t expectedVersion);
@@ -362,9 +360,6 @@ public:
 	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
 	ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) override;
 
-	DatabaseSharedState* createSharedState() override;
-	void setSharedState(DatabaseSharedState* p) override;
-
 private:
 	const Reference<FdbCApi> api;
 	FdbCApi::FDBDatabase*
@@ -593,9 +588,6 @@ public:
 	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
 	ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) override;
 
-	DatabaseSharedState* createSharedState() override;
-	void setSharedState(DatabaseSharedState* p) override;
-
 	// private:
 
 	struct LegacyVersionMonitor;
@@ -718,8 +710,6 @@ public:
 
 	bool callbackOnMainThread;
 	bool localClientDisabled;
-	// Map of (clusterFilePath + protocolVersion) -> DatabaseSharedState pointer
-	std::map<std::pair<std::string, ProtocolVersion>, DatabaseSharedState*> clusterSharedStateMap;
 
 	static bool apiVersionAtLeast(int minVersion);
 
