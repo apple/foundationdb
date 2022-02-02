@@ -1140,6 +1140,15 @@ public:
 		}
 		return fun(this, request);
 	}
+
+	void getSplitPoints(SplitRangeRequest const& req) {
+		try {
+			checkTenant(version.get(), req.tenantInfo.name, req.keys.begin, req.keys.end);
+			metrics.getSplitPoints(req);
+		} catch (Error& e) {
+			req.reply.sendError(e);
+		}
+	}
 };
 
 const StringRef StorageServer::CurrentRunningFetchKeys::emptyString = LiteralStringRef("");
@@ -1377,6 +1386,11 @@ Optional<TenantMapEntry> StorageServer::checkTenant(Version version,
 		auto view = tenantMap.at(version);
 		auto itr = view.find(tenantName.get());
 		if (itr == view.end()) {
+			TraceEvent(SevWarn, "TenantNotFound", thisServerID)
+			    .detail("Tenant", tenantName)
+			    .detail("Begin", begin)
+			    .detail("End", end)
+			    .backtrace();
 			throw tenant_not_found();
 		}
 
@@ -6652,8 +6666,7 @@ ACTOR Future<Void> metricsCore(StorageServer* self, StorageServerInterface ssi) 
 					TEST(true); // getSplitPoints immediate wrong_shard_server()
 					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
 				} else {
-					self->checkTenant(self->version.get(), req.tenantInfo.name, req.keys.begin, req.keys.end);
-					self->metrics.getSplitPoints(req);
+					self->getSplitPoints(req);
 				}
 			}
 			when(wait(doPollMetrics)) {
