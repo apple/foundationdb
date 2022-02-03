@@ -940,21 +940,34 @@ struct RocksDBColumnFamilyCheckpoint {
 
 // Metadata of a FDB checkpoint.
 struct CheckpointMetaData {
+	enum CheckpointState {
+		InvalidState = 0,
+		Pending = 1,
+		Complete = 2,
+		Deleting = 3,
+	};
+
 	constexpr static FileIdentifier file_identifier = 13804342;
 	Version version;
 	KeyRange range;
 	int16_t format;
+	int16_t state;
 	UID checkpointID; // A unique id for this checkpoint.
 	UID ssID; // Storage server ID on which this checkpoint is created.
+
 	int64_t gcTime; // Time to delete this checkpoint, a Unix timestamp in seconds.
 
 	Optional<RocksDBColumnFamilyCheckpoint> rocksCF; // Present when format == RocksDBColumnFamily.
 
-	CheckpointMetaData() : format(InvalidFormat) {}
+	CheckpointMetaData() : format(InvalidFormat), state(InvalidState) {}
 	CheckpointMetaData(KeyRange const& range, CheckpointFormat format, UID const& ssID, UID const& checkpointID)
-	  : version(invalidVersion), range(range), format(format), ssID(ssID), checkpointID(checkpointID) {}
+	  : version(invalidVersion), range(range), format(format), ssID(ssID), checkpointID(checkpointID), state(Pending) {}
 	CheckpointMetaData(Version version, KeyRange const& range, CheckpointFormat format, UID checkpointID)
 	  : version(version), range(range), format(format), checkpointID(checkpointID) {}
+
+	CheckpointState getState() const { return static_cast<CheckpointState>(state); }
+
+	void setState(CheckpointState state) { this->state = static_cast<int16_t>(state); }
 
 	std::string toString() const {
 		std::string res = "Checkpoint MetaData:\nServer: " + ssID.toString() + "\nID: " + checkpointID.toString() +
@@ -968,32 +981,26 @@ struct CheckpointMetaData {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, range, format, checkpointID, ssID, gcTime, rocksCF);
+		serializer(ar, version, range, format, state, checkpointID, ssID, gcTime, rocksCF);
 	}
 };
 
-// Request to create a checkpoint for keyrange: `range`, with a minimum version of `minVersion`, in the specific format;
+// Request to create a checkpoint for keyrange: `range`, with a minimum version of `version`, in the specific format;
 struct GetCheckpointRequest {
 	constexpr static FileIdentifier file_identifier = 13804343;
-	Version minVersion;
+	Version version;
 	KeyRange range;
 	int16_t format;
-	bool createNew; // Create a new checkpoint if not exist.
-	int64_t ttl; // Retention in seconds.
 	Optional<UID> checkpointID; // When present, look for the checkpoint with the exact UID.
 	ReplyPromise<CheckpointMetaData> reply;
 
 	GetCheckpointRequest() {}
-	GetCheckpointRequest(Version minVersion, KeyRange const& range)
-	  : minVersion(minVersion), range(range), format(RocksDBColumnFamily), createNew(false) {}
-	GetCheckpointRequest(Version minVersion, KeyRange const& range, bool createNew)
-	  : minVersion(minVersion), range(range), format(RocksDBColumnFamily), createNew(createNew) {}
-	GetCheckpointRequest(Version minVersion, KeyRange const& range, CheckpointFormat format)
-	  : minVersion(minVersion), range(range), format(format), createNew(false) {}
+	GetCheckpointRequest(Version version, KeyRange const& range, CheckpointFormat format)
+	  : version(version), range(range), format(format) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, minVersion, range, format, createNew, ttl, checkpointID, reply);
+		serializer(ar, version, range, format, checkpointID, reply);
 	}
 };
 

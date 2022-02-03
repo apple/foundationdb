@@ -1656,66 +1656,12 @@ ACTOR Future<Void> changeFeedPopQ(StorageServer* self, ChangeFeedPopRequest req)
 	return Void();
 }
 
-// Create a checkpoint.
-ACTOR Future<Void> checkpointQ(StorageServer* self, GetCheckpointRequest req) {
-	wait(delay(0));
-
-	TraceEvent(SevDebug, "ServeCheckpointBegin", self->thisServerID)
-	    .detail("MinVersion", req.minVersion)
-	    .detail("Range", req.range.toString())
-	    .detail("Format", static_cast<int>(req.format));
-
-	state Version minVersion = req.minVersion == latestVersion ? self->version.get() : req.minVersion;
-	wait(self->durableVersion.whenAtLeast(minVersion));
-
-	TraceEvent(SevDebug, "ServeCheckpointVersionSatisfied", self->thisServerID)
-	    .detail("MinVersion", req.minVersion)
-	    .detail("Range", req.range.toString())
-	    .detail("Format", static_cast<int>(req.format));
-
-	try {
-		// Taking the lock is necessary to prevent data move.
-		wait(self->durableVersionLock.take(TaskPriority::MoveKeys, 1));
-		state FlowLock::Releaser holdingDVL(self->durableVersionLock);
-
-		if (!self->isReadable(req.range)) {
-			req.reply.sendError(wrong_shard_server());
-			return Void();
-		}
-
-		const CheckpointRequest request(req.minVersion,
-		                                req.range,
-		                                static_cast<CheckpointFormat>(req.format),
-		                                deterministicRandom()->randomUniqueID(),
-		                                self->folder + "/rockscheckpoints_" + std::to_string(minVersion) + "/");
-
-		state CheckpointMetaData checkpointMetaData = wait(self->storage.checkpoint(request));
-
-		checkpointMetaData.ssID = self->thisServerID;
-		// self->checkpoints[static_cast<CheckpointFormat>(req.format)].push_back(checkpointMetaData);
-		// TODO: persist the checkpoint metadata.
-
-		req.reply.send(checkpointMetaData);
-		TraceEvent("ServeCheckpointSuccess").detail("Checkpoint", checkpointMetaData.toString());
-	} catch (Error& e) {
-		TraceEvent(SevWarnAlways, "ServerCheckpointFailure")
-		    .detail("MinVersion", minVersion)
-		    .detail("Range", req.range.toString())
-		    .error(e, /*includeCancel=*/true);
-		if (!canReplyWith(e)) {
-			throw;
-		}
-		req.reply.sendError(e);
-	}
-	return Void();
-}
-
-// Create a checkpoint.
+// Find a checkpoint.
 ACTOR Future<Void> getCheckpointQ(StorageServer* self, GetCheckpointRequest req) {
-	wait(delay(0));
+	wait(self->durableVersion.whenAtLeast(req.version + 1));
 
 	TraceEvent(SevDebug, "ServeGetpointBegin", self->thisServerID)
-	    .detail("MinVersion", req.minVersion)
+	    .detail("Version", req.version)
 	    .detail("Range", req.range.toString())
 	    .detail("Format", static_cast<int>(req.format));
 
@@ -1724,7 +1670,7 @@ ACTOR Future<Void> getCheckpointQ(StorageServer* self, GetCheckpointRequest req)
 		int i = 0;
 		for (; i < checkpoints.size(); ++i) {
 			CheckpointMetaData md = decodeCheckpointValue(checkpoints[i].value);
-			if (md.version == req.minVersion && md.format == req.format && md.range.contains(req.range)) {
+			if (md.version == req.version && md.format == req.format && md.range.contains(req.range)) {
 				TraceEvent(SevDebug, "ServeCheckpointFoundExisting", self->thisServerID)
 				    .detail("Checkpoint", md.toString());
 				req.reply.send(md);

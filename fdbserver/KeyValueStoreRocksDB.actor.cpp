@@ -791,6 +791,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 
 			TraceEvent("RocksDBServeCheckpointSuccess", id).detail("CheckpointMetaData", res.toString());
+			res.setState(CheckpointMetaData::Complete);
 			a.reply.send(res);
 		}
 
