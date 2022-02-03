@@ -1145,6 +1145,9 @@ private:
 		case DiskQueueVersion::V1:
 			p.implementationVersion = 1;
 			break;
+		case DiskQueueVersion::V2:
+			p.implementationVersion = 2;
+			break;
 		}
 		p.payloadSize = 0;
 		p.seq = nextPageSeq;
