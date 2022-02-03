@@ -102,11 +102,13 @@ struct TraceRequest {
 
 // A server listening for UDP trace messages, run only in simulation.
 ACTOR Future<Void> simulationStartServer() {
+	// We're going to force the address to be loopback regardless of FLOW_KNOBS->TRACING_UDP_LISTENER_ADDR
+	// because we're in simulation testing mode.
 	TraceEvent(SevInfo, "UDPServerStarted")
-	    .detail("Address", FLOW_KNOBS->TRACING_UDP_LISTENER_ADDR)
+	    .detail("Address", "127.0.0.1")
 	    .detail("Port", FLOW_KNOBS->TRACING_UDP_LISTENER_PORT);
-	state NetworkAddress localAddress = NetworkAddress::parse(FLOW_KNOBS->TRACING_UDP_LISTENER_ADDR + ":" +
-	                                                          std::to_string(FLOW_KNOBS->TRACING_UDP_LISTENER_PORT));
+	state NetworkAddress localAddress =
+	    NetworkAddress::parse("127.0.0.1:" + std::to_string(FLOW_KNOBS->TRACING_UDP_LISTENER_PORT));
 	state Reference<IUDPSocket> serverSocket = wait(INetworkConnections::net()->createUDPSocket(localAddress));
 	serverSocket->bind(localAddress);
 
