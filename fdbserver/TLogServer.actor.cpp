@@ -3036,6 +3036,7 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 				break;
 			((KeyRangeRef&)tagKeys) = KeyRangeRef(keyAfter(data.back().key, tagKeys.arena()), tagKeys.end);
 
+			// restore tag_data through createTagData
 			for (auto& kv : data) {
 				Tag tag = decodeTagPoppedKey(rawId, kv.key);
 				Version popped = decodeTagPoppedValue(kv.value);

@@ -250,8 +250,9 @@ struct TLogPopRequest {
 
 	ReplyPromise<Void> reply;
 
-	TLogPopRequest(Version version, Version durableKnownCommittedVersion, Tag tag)
-	  : version(version), durableKnownCommittedVersion(durableKnownCommittedVersion), tag(tag) {}
+	TLogPopRequest(Version version, Version durableKnownCommittedVersion, Tag tag, StorageTeamID storageTeamID)
+	  : version(version), durableKnownCommittedVersion(durableKnownCommittedVersion), tag(tag),
+	    storageTeamID(storageTeamID) {}
 	TLogPopRequest() {}
 
 	template <typename Ar>
