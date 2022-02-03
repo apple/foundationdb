@@ -3029,6 +3029,9 @@ Future<Void> StorageWiggler::restoreStats() {
 }
 Future<Void> StorageWiggler::startWiggle() {
 	metrics.last_wiggle_start = timer_int();
+	if (shouldStartNewRound()) {
+		metrics.last_round_start = metrics.last_wiggle_start;
+	}
 	return metrics.runSetTransaction(teamCollection->cx, teamCollection->primary);
 }
 
