@@ -1080,7 +1080,7 @@ private:
 			return crc32c_append(0xfdbeefdb, (uint8_t*)&_unused, sizeof(Page) - sizeof(uint32_t));
 		}
 		uint64_t checksum_xxhash3() const {
-			return XXH3_64bits(static_cast<const void*>(&magic), sizeof(Page) - sizeof(uint32_t));
+			return XXH3_64bits(static_cast<const void*>(&magic), sizeof(Page) - sizeof(uint64_t));
 		}
 		void updateHash() {
 			switch (diskQueueVersion()) {
