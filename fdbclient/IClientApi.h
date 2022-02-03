@@ -27,7 +27,7 @@
 
 #include "flow/ThreadHelper.actor.h"
 
-class VersionVector;
+struct VersionVector;
 
 // An interface that represents a transaction created by a client
 class ITransaction {
