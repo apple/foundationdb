@@ -470,18 +470,17 @@ Future<Void> createCheckpoint(Reference<ReadYourWritesTransaction> tr, KeyRangeR
 Future<Void> createCheckpoint(Transaction* tr, KeyRangeRef range, CheckpointFormat format);
 
 // Get a checkpoint for keys with a minimum version, in the specific format.
-ACTOR Future<std::vector<CheckpointMetaData>> getCheckpoint(Database cx,
-                                                            KeyRange keys,
-                                                            Version version,
-                                                            CheckpointFormat format,
-                                                            double timeout = 5.0);
+ACTOR Future<std::vector<CheckpointMetaData>> getCheckpointMetaData(Database cx,
+                                                                    KeyRange keys,
+                                                                    Version version,
+                                                                    CheckpointFormat format,
+                                                                    double timeout = 5.0);
 
 // Fetch a checkpoint to dir, a new checkpoint will be created on the storage server(s) if none exists.
-ACTOR Future<std::vector<CheckpointMetaData>> fetchCheckpoint(Database cx,
-                                                              KeyRange keys,
-                                                              Version minVersion,
-                                                              CheckpointFormat format,
-                                                              std::string dir);
+ACTOR Future<CheckpointMetaData> fetchCheckpoint(Database cx,
+                                                 CheckpointMetaData initialState,
+                                                 std::string dir,
+                                                 std::function<Future<Void>(const CheckpointMetaData&)> cFun = nullptr);
 
 // Checks with Data Distributor that it is safe to mark all servers in exclusions as failed
 ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion> exclusions);

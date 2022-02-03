@@ -884,7 +884,8 @@ struct LiveFileMetaData : public SstFileMetaData {
 	constexpr static FileIdentifier file_identifier = 3804346;
 	std::string column_family_name; // Name of the column family
 	int level; // Level at which this file resides.
-	LiveFileMetaData() : column_family_name(), level(0) {}
+	bool fetched;
+	LiveFileMetaData() : column_family_name(), level(0), fetched(false) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -908,7 +909,8 @@ struct LiveFileMetaData : public SstFileMetaData {
 		           SstFileMetaData::file_checksum,
 		           SstFileMetaData::file_checksum_func_name,
 		           column_family_name,
-		           level);
+		           level,
+		           fetched);
 	}
 };
 
