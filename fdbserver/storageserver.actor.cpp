@@ -1689,6 +1689,39 @@ ACTOR Future<Void> getCheckpointQ(StorageServer* self, GetCheckpointRequest req)
 	return Void();
 }
 
+ACTOR Future<Void> deleteCheckpointQ(StorageServer* self, CheckpointMetaData checkpoint) {
+	wait(delay(0, TaskPriority::UpdateStorage));
+
+	TraceEvent(SevDebug, "DeleteCheckpointBegin", self->thisServerID).detail("Checkpoint", checkpoint.toString());
+
+	ASSERT(checkpoint.state == CheckpointMetaData::Deleting);
+
+	try {
+		if (checkpoint.format == RocksDBColumnFamily) {
+			ASSERT(checkpont.rocksCF.present());
+			const RocksDBColumnFamilyCheckpoint& rocksCF = checkpoint.rocksCF.get();
+			std::unordered_set<std::string> dirs;
+			for (const LiveFileMetaData& file : rocksCF.sstFiles) {
+				dirs.insert(file.db_path);
+			}
+			for (const std::string dir : dirs) {
+				platform::eraseDirectoryRecursive(dir);
+			}
+
+		auto& mLV =self->addVersionToMutationLog(self->data().getLatestVersion());
+		self->addMutationToMutationLog(
+		    mLV,
+		    MutationRef(MutationRef::Clear,
+		                persistChangeFeedKeys.begin.toString() + rangeId.toString(),
+		                changeFeedValue(range, invalidVersion, ChangeFeedStatus::CHANGE_FEED_CREATE)));
+		} else if (checkpoint.format == RocksDBSSTFile) {
+
+		} else {
+		}
+	} catch (Error& e) {
+	}
+	return Void();
+}
 ACTOR Future<Void> getFileQ(StorageServer* self, GetFileRequest req) {
 	TraceEvent("ServeGetFileBegin").detail("File", req.path).detail("Offset", req.offset);
 
@@ -6727,32 +6760,6 @@ ACTOR Future<Void> serveGetCheckpointRequests(StorageServer* self, FutureStream<
 		} else {
 			self->actors.add(getCheckpointQ(self, req));
 		}
-		// TODO: Load existing checkpoints from disk once persisting checkpoint metadata is implemented.
-		// TODO: Implement lookup on checkpointID.
-		// const CheckpointFormat format = static_cast<CheckpointFormat>(req.format);
-		// const auto it = self->checkpoints[format].lower_bound(req.minVersion);
-		// 	try {
-		// 		RangeResult checkpoints = wait(self->storage.readRange(persistCheckpointKeys));
-		// 		int i = 0;
-		// 		for (; i < checkpoints.size(); ++i) {
-		// 			CheckpointMetaData md = decodeCheckpointValue(checkpoints[i].value);
-		// 			if (md.version == req.version && md.format == req.format && md.range.contains(req.range)) {
-		// 				TraceEvent(SevDebug, "ServeCheckpointFoundExisting", self->thisServerID)
-		// 				    .detail("Checkpoint", md.toString());
-		// 				req.reply.send(md);
-		// 				break;
-		// 			}
-		// 		}
-		// 		if (i >= checkpoints.size()) {
-		// 			req.reply.sendError(checkpoint_not_found());
-		// 		}
-		// 	} catch (Error& e) {
-		// 		if (!canReplyWith(e)) {
-		// 			throw;
-		// 		}
-		// 		req.reply.sendError(e);
-		// 	}
-		// }
 	}
 }
 
