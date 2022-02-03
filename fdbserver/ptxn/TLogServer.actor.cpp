@@ -1429,12 +1429,12 @@ ACTOR Future<Void> tLogPopCore(Reference<TLogGroupData> self,
 		}
 
 		storageTeamData->popped = minVersionInTeam;
-		// pop from in-memory object: TagData::versionMessages
+		// pop from in-memory object: StorageTeamData::versionMessages
 		// only when minVersionInTeam > logData->persistentDataDurableVersion, there are data
 		// need to be popped from in memory data structure(i.e. versionMessages) that has not been persisted.
 		// if minVersionInTeam < logData->persistentDataDurableVersion, it means all the data needs to be popped has
 		// been persisted into disk, so they are already erased from in memory data structure in updatePersistentData(),
-		// thus we only need to erase them from disk.
+		// thus we only need to erase them from disk (in popDiskQueue actor)
 		if (minVersionInTeam > logData->persistentDataDurableVersion)
 			wait(storageTeamData->eraseMessagesBefore(minVersionInTeam, self, logData, TaskPriority::TLogPop));
 		//TraceEvent("TLogPop", logData->logId).detail("Tag", tag.toString()).detail("To", upTo);
