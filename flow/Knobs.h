@@ -122,7 +122,7 @@ public:
 
 	bool WRITE_TRACING_ENABLED;
 	double TRACING_SAMPLE_RATE;
-	int TRACING_UDP_LISTENER_PORT;
+	std::string TRACING_UDP_LISTENER_ADDR;
 
 	// run loop profiling
 	double RUN_LOOP_PROFILING_INTERVAL;
