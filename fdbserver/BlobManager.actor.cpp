@@ -1391,7 +1391,8 @@ static void addAssignment(KeyRangeMap<std::tuple<UID, int64_t, int64_t>>& map,
 				// different workers can't have same epoch and seqno for granule assignment
 				ASSERT(oldEpoch != newEpoch || oldSeqno != newSeqno);
 			}
-			if (outOfDate != nullptr && oldEpoch > 0) {
+			if (outOfDate != nullptr && oldWorker != UID() &&
+			    (oldEpoch < newEpoch || (oldEpoch == newEpoch && oldSeqno < newSeqno))) {
 				outOfDate->push_back(std::pair(oldWorker, old.range()));
 			}
 		}
@@ -1403,7 +1404,7 @@ static void addAssignment(KeyRangeMap<std::tuple<UID, int64_t, int64_t>>& map,
 
 		// then, if there were any ranges superceded by this one, insert them over this one
 		if (newer.size()) {
-			if (outOfDate != nullptr) {
+			if (outOfDate != nullptr && newId != UID()) {
 				outOfDate->push_back(std::pair(newId, newRange));
 			}
 			for (auto& it : newer) {
@@ -1411,7 +1412,7 @@ static void addAssignment(KeyRangeMap<std::tuple<UID, int64_t, int64_t>>& map,
 			}
 		}
 	} else {
-		if (outOfDate != nullptr) {
+		if (outOfDate != nullptr && newId != UID()) {
 			outOfDate->push_back(std::pair(newId, newRange));
 		}
 	}
