@@ -125,6 +125,7 @@ struct numeric_limits<IDiskQueue::location> {
 enum class DiskQueueVersion : uint16_t {
 	V0 = 0, // Use hashlittle
 	V1 = 1, // Use crc32, which is faster than hashlittle
+	V2 = 2, // Use xxhash3
 };
 
 IDiskQueue* openDiskQueue(std::string basename,
