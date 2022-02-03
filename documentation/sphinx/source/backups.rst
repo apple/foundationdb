@@ -405,6 +405,16 @@ The ``list`` subcommand will list the backups at a given 'base' or shortened Bac
 ``-b <BASE_URL>`` or ``--base-url <BASE_URL>``
   This a shortened Backup URL which looks just like a Backup URL but without the backup <name> so that the list command will discover and list all of the backups in the bucket.
 
+.. program:: fdbbackup list
+
+``tags``
+----------
+
+The ``tags`` subcommand will list the tags of all backups on a source cluster.
+
+::
+
+   user@host$ fdbbackup tags [-C <CLUSTER_FILE>]
 
 .. program:: fdbbackup cleanup
 

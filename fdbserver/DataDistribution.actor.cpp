@@ -4674,7 +4674,7 @@ ACTOR Future<Void> waitForAllDataRemoved(Database cx, UID serverID, Version adde
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			Version ver = wait(tr->getReadVersion());
 
-			// we cannot remove a server immediately after adding it, because a perfectly timed master recovery could
+			// we cannot remove a server immediately after adding it, because a perfectly timed cluster recovery could
 			// cause us to not store the mutations sent to the short lived storage server.
 			if (ver > addedVersion + SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) {
 				bool canRemove = wait(canRemoveStorageServer(tr, serverID));

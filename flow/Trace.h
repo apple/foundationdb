@@ -64,6 +64,29 @@ enum Severity {
 	SevMax = 1000000
 };
 
+inline Severity intToSeverity(int sevnum) {
+	switch (sevnum) {
+	case 0:
+		return SevVerbose;
+	case 1:
+		return SevSample;
+	case 5:
+		return SevDebug;
+	case 10:
+		return SevInfo;
+	case 20:
+		return SevWarn;
+	case 30:
+		return SevWarnAlways;
+	case 40:
+		return SevError;
+	case 1000000:
+		return SevMax;
+	default:
+		return SevInfo;
+	}
+}
+
 enum class ErrorKind : uint8_t {
 	Unset,
 	DiskIssue,
@@ -587,6 +610,9 @@ void addTraceRole(std::string const& role);
 void removeTraceRole(std::string const& role);
 void retrieveTraceLogIssues(std::set<std::string>& out);
 void setTraceLogGroup(const std::string& role);
+void addUniversalTraceField(std::string const& name, std::string const& value);
+uint64_t getTraceThreadId();
+
 template <class T>
 class Future;
 class Void;

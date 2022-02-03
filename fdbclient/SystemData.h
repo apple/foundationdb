@@ -332,7 +332,7 @@ extern const KeyRef backupPausedKey;
 extern const KeyRef coordinatorsKey;
 
 //	"\xff/logs" = "[[LogsValue]]"
-//	Used during master recovery in order to communicate
+//	Used during cluster recovery in order to communicate
 //	and store info about the logs system.
 extern const KeyRef logsKey;
 

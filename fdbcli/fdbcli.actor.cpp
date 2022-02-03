@@ -85,6 +85,7 @@ enum {
 	OPT_HELP,
 	OPT_TRACE,
 	OPT_TRACE_DIR,
+	OPT_LOGGROUP,
 	OPT_TIMEOUT,
 	OPT_EXEC,
 	OPT_NO_STATUS,
@@ -103,6 +104,7 @@ CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
 	                                  { OPT_DATABASE, "-d", SO_REQ_SEP },
 	                                  { OPT_TRACE, "--log", SO_NONE },
 	                                  { OPT_TRACE_DIR, "--log-dir", SO_REQ_SEP },
+	                                  { OPT_LOGGROUP, "--log-group", SO_REQ_SEP },
 	                                  { OPT_TIMEOUT, "--timeout", SO_REQ_SEP },
 	                                  { OPT_EXEC, "--exec", SO_REQ_SEP },
 	                                  { OPT_NO_STATUS, "--no-status", SO_NONE },
@@ -125,7 +127,7 @@ CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
 
 	                                      SO_END_OF_OPTIONS };
 
-void printAtCol(const char* text, int col) {
+void printAtCol(const char* text, int col, FILE* stream = stdout) {
 	const char* iter = text;
 	const char* start = text;
 	const char* space = nullptr;
@@ -137,7 +139,7 @@ void printAtCol(const char* text, int col) {
 		if (*iter == '\n' || *iter == '\0' || (iter - start == col)) {
 			if (!space)
 				space = iter;
-			printf("%.*s\n", (int)(space - start), start);
+			fprintf(stream, "%.*s\n", (int)(space - start), start);
 			start = space;
 			if (*start == ' ' || *start == '\n')
 				start++;
@@ -427,6 +429,9 @@ static void printProgramUsage(const char* name) {
 	       "  --log-dir PATH Specifes the output directory for trace files. If\n"
 	       "                 unspecified, defaults to the current directory. Has\n"
 	       "                 no effect unless --log is specified.\n"
+	       "  --log-group LOG_GROUP\n"
+	       "                 Sets the LogGroup field with the specified value for all\n"
+	       "                 events in the trace output (defaults to `default').\n"
 	       "  --trace-format FORMAT\n"
 	       "                 Select the format of the log files. xml (the default) and json\n"
 	       "                 are supported. Has no effect unless --log is specified.\n"
@@ -1366,6 +1371,7 @@ struct CLIOptions {
 	bool trace = false;
 	std::string traceDir;
 	std::string traceFormat;
+	std::string logGroup;
 	int exit_timeout = 0;
 	Optional<std::string> exec;
 	bool initialStatusCheck = true;
@@ -1467,6 +1473,9 @@ struct CLIOptions {
 			break;
 		case OPT_TRACE_DIR:
 			traceDir = args.OptionArg();
+			break;
+		case OPT_LOGGROUP:
+			logGroup = args.OptionArg();
 			break;
 		case OPT_TIMEOUT: {
 			char* endptr;
@@ -2459,6 +2468,10 @@ int main(int argc, char** argv) {
 			setNetworkOption(FDBNetworkOptions::TRACE_FORMAT, StringRef(opt.traceFormat));
 		}
 		setNetworkOption(FDBNetworkOptions::ENABLE_SLOW_TASK_PROFILING);
+
+		if (!opt.logGroup.empty()) {
+			setNetworkOption(FDBNetworkOptions::TRACE_LOG_GROUP, StringRef(opt.logGroup));
+		}
 	}
 	initHelp();
 

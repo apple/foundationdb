@@ -151,13 +151,22 @@ public:
 	Future<Reference<IConnection>> connectExternal(NetworkAddress toAddr, const std::string& host) override;
 	Future<Reference<IUDPSocket>> createUDPSocket(NetworkAddress toAddr) override;
 	Future<Reference<IUDPSocket>> createUDPSocket(bool isV6) override;
-	// This method should only be used in simulation.
+	// The mock DNS methods should only be used in simulation.
 	void addMockTCPEndpoint(const std::string& host,
 	                        const std::string& service,
 	                        const std::vector<NetworkAddress>& addresses) override {
 		throw operation_failed();
 	}
+	// The mock DNS methods should only be used in simulation.
+	void removeMockTCPEndpoint(const std::string& host, const std::string& service) override {
+		throw operation_failed();
+	}
+	void parseMockDNSFromString(const std::string& s) override { throw operation_failed(); }
+	std::string convertMockDNSToString() override { throw operation_failed(); }
+
 	Future<std::vector<NetworkAddress>> resolveTCPEndpoint(const std::string& host,
+	                                                       const std::string& service) override;
+	std::vector<NetworkAddress> resolveTCPEndpointBlocking(const std::string& host,
 	                                                       const std::string& service) override;
 	Reference<IListener> listen(NetworkAddress localAddr) override;
 
@@ -1863,6 +1872,25 @@ Future<Reference<IUDPSocket>> Net2::createUDPSocket(bool isV6) {
 
 Future<std::vector<NetworkAddress>> Net2::resolveTCPEndpoint(const std::string& host, const std::string& service) {
 	return resolveTCPEndpoint_impl(this, host, service);
+}
+
+std::vector<NetworkAddress> Net2::resolveTCPEndpointBlocking(const std::string& host, const std::string& service) {
+	tcp::resolver tcpResolver(reactor.ios);
+	tcp::resolver::query query(host, service);
+	auto iter = tcpResolver.resolve(query);
+	decltype(iter) end;
+	std::vector<NetworkAddress> addrs;
+	while (iter != end) {
+		auto endpoint = iter->endpoint();
+		auto addr = endpoint.address();
+		if (addr.is_v6()) {
+			addrs.emplace_back(IPAddress(addr.to_v6().to_bytes()), endpoint.port());
+		} else {
+			addrs.emplace_back(addr.to_v4().to_ulong(), endpoint.port());
+		}
+		++iter;
+	}
+	return addrs;
 }
 
 bool Net2::isAddressOnThisHost(NetworkAddress const& addr) const {

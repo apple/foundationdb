@@ -27,6 +27,7 @@
 
 #include "fdbserver/BackupInterface.h"
 #include "fdbserver/DataDistributorInterface.h"
+#include "fdbserver/EncryptKeyProxyInterface.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/RatekeeperInterface.h"
@@ -60,6 +61,7 @@ struct WorkerInterface {
 	RequestStream<struct InitializeStorageRequest> storage;
 	RequestStream<struct InitializeLogRouterRequest> logRouter;
 	RequestStream<struct InitializeBackupRequest> backup;
+	RequestStream<struct InitializeEncryptKeyProxyRequest> encryptKeyProxy;
 
 	RequestStream<struct LoadedPingRequest> debugPing;
 	RequestStream<struct CoordinationPingMessage> coordinationPing;
@@ -125,6 +127,7 @@ struct WorkerInterface {
 		           execReq,
 		           workerSnapReq,
 		           backup,
+		           encryptKeyProxy,
 		           updateServerDBInfo,
 		           configBroadcastInterface);
 	}
@@ -425,6 +428,7 @@ struct RegisterWorkerRequest {
 	Optional<DataDistributorInterface> distributorInterf;
 	Optional<RatekeeperInterface> ratekeeperInterf;
 	Optional<BlobManagerInterface> blobManagerInterf;
+	Optional<EncryptKeyProxyInterface> encryptKeyProxyInterf;
 	Standalone<VectorRef<StringRef>> issues;
 	std::vector<NetworkAddress> incompatiblePeers;
 	ReplyPromise<RegisterWorkerReply> reply;
@@ -443,13 +447,14 @@ struct RegisterWorkerRequest {
 	                      Optional<DataDistributorInterface> ddInterf,
 	                      Optional<RatekeeperInterface> rkInterf,
 	                      Optional<BlobManagerInterface> bmInterf,
+	                      Optional<EncryptKeyProxyInterface> ekpInterf,
 	                      bool degraded,
 	                      Version lastSeenKnobVersion,
 	                      ConfigClassSet knobConfigClassSet)
 	  : wi(wi), initialClass(initialClass), processClass(processClass), priorityInfo(priorityInfo),
 	    generation(generation), distributorInterf(ddInterf), ratekeeperInterf(rkInterf), blobManagerInterf(bmInterf),
-	    degraded(degraded), lastSeenKnobVersion(lastSeenKnobVersion), knobConfigClassSet(knobConfigClassSet),
-	    requestDbInfo(false) {}
+	    encryptKeyProxyInterf(ekpInterf), degraded(degraded), lastSeenKnobVersion(lastSeenKnobVersion),
+	    knobConfigClassSet(knobConfigClassSet), requestDbInfo(false) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -462,6 +467,7 @@ struct RegisterWorkerRequest {
 		           distributorInterf,
 		           ratekeeperInterf,
 		           blobManagerInterf,
+		           encryptKeyProxyInterf,
 		           issues,
 		           incompatiblePeers,
 		           reply,
@@ -647,7 +653,6 @@ struct InitializeBackupRequest {
 // FIXME: Rename to InitializeMasterRequest, etc
 struct RecruitMasterRequest {
 	constexpr static FileIdentifier file_identifier = 12684574;
-	Arena arena;
 	LifetimeToken lifetime;
 	bool forceRecovery;
 	ReplyPromise<struct MasterInterface> reply;
@@ -657,7 +662,7 @@ struct RecruitMasterRequest {
 		if constexpr (!is_fb_function<Ar>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar, lifetime, forceRecovery, reply, arena);
+		serializer(ar, lifetime, forceRecovery, reply);
 	}
 };
 
@@ -785,6 +790,21 @@ struct InitializeBlobWorkerRequest {
 	UID reqId;
 	UID interfaceId;
 	ReplyPromise<InitializeBlobWorkerReply> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reqId, interfaceId, reply);
+	}
+};
+
+struct InitializeEncryptKeyProxyRequest {
+	constexpr static FileIdentifier file_identifier = 4180191;
+	UID reqId;
+	UID interfaceId;
+	ReplyPromise<EncryptKeyProxyInterface> reply;
+
+	InitializeEncryptKeyProxyRequest() {}
+	explicit InitializeEncryptKeyProxyRequest(UID uid) : reqId(uid) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -957,6 +977,7 @@ struct Role {
 	static const Role STORAGE_CACHE;
 	static const Role COORDINATOR;
 	static const Role BACKUP;
+	static const Role ENCRYPT_KEY_PROXY;
 
 	std::string roleName;
 	std::string abbreviation;
@@ -992,6 +1013,8 @@ struct Role {
 			return STORAGE_CACHE;
 		case ProcessClass::Backup:
 			return BACKUP;
+		case ProcessClass::EncryptKeyProxy:
+			return ENCRYPT_KEY_PROXY;
 		case ProcessClass::Worker:
 			return WORKER;
 		case ProcessClass::NoRole:
@@ -1053,6 +1076,7 @@ ACTOR Future<Void> clusterController(Reference<IClusterConnectionRecord> ccr,
 ACTOR Future<Void> blobWorker(BlobWorkerInterface bwi,
                               ReplyPromise<InitializeBlobWorkerReply> blobWorkerReady,
                               Reference<AsyncVar<ServerDBInfo> const> dbInfo);
+ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ei, Reference<AsyncVar<ServerDBInfo>> db);
 
 // These servers are started by workerServer
 class IKeyValueStore;

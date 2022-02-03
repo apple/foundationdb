@@ -812,6 +812,10 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		roles.addRole("blob_manager", db->get().blobManager.get());
 	}
 
+	if (SERVER_KNOBS->ENABLE_ENCRYPT_KEY_PROXY && db->get().encryptKeyProxy.present()) {
+		roles.addRole("encrypt_key_proxy", db->get().encryptKeyProxy.get());
+	}
+
 	for (auto& tLogSet : db->get().logSystemConfig.tLogs) {
 		for (auto& it : tLogSet.logRouters) {
 			if (it.present()) {
