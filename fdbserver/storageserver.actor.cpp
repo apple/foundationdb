@@ -1706,9 +1706,9 @@ MutationsAndVersionRef filterMutations(Arena& arena,
 }
 
 // TODO REMOVE!!! when BG is correctness clean
-#define DEBUG_SS_ID ""_sr
-#define DEBUG_SS_CF_ID ""_sr
-#define DEBUG_SS_CF_BEGIN_VERSION invalidVersion
+#define DEBUG_SS_ID "bdd3"_sr
+#define DEBUG_SS_CF_ID "b65dda"_sr
+#define DEBUG_SS_CF_BEGIN_VERSION 244526755
 #define DEBUG_SS_CFM(ssId, cfId, v)                                                                                    \
 	ssId.toString().substr(0, 4) == DEBUG_SS_ID&& cfId.printable().substr(0, 6) == DEBUG_SS_CF_ID &&                   \
 	    (v >= DEBUG_SS_CF_BEGIN_VERSION || latestVersion == DEBUG_SS_CF_BEGIN_VERSION)
@@ -1716,6 +1716,7 @@ MutationsAndVersionRef filterMutations(Arena& arena,
 ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(StorageServer* data,
                                                                             ChangeFeedStreamRequest req,
                                                                             bool inverted,
+                                                                            bool atLatest,
                                                                             UID streamUID
                                                                             /*TODO REMOVE*/) {
 	state ChangeFeedStreamReply reply;
@@ -1725,7 +1726,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 	state Version startVersion = data->version.get();
 
 	if (DEBUG_SS_CFM(data->thisServerID, req.rangeID, req.begin)) {
-		printf("CFM: SS %s CF %s: GCFM %s [%s - %s) %lld - %lld\n",
+		printf("CFM: SS %s CF %s: SQ %s [%s - %s) %lld - %lld\n",
 		       data->thisServerID.toString().substr(0, 4).c_str(),
 		       req.rangeID.printable().substr(0, 6).c_str(),
 		       streamUID.toString().substr(0, 8).c_str(),
@@ -1746,7 +1747,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		// we must delay here to ensure that any up-to-date change feeds that are waiting on the
 		// mutation trigger run BEFORE any blocked change feeds run, in order to preserve the
 		// correct minStreamVersion ordering
-		wait(delay(0.0));
+		wait(delay(0));
 	}
 	state uint64_t changeCounter = data->shardChangeCounter;
 	if (!inverted && !data->isReadable(req.range)) {
@@ -1785,10 +1786,13 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 	state Version emptyVersion = feedInfo->emptyVersion;
 
 	if (DEBUG_SS_CFM(data->thisServerID, req.rangeID, req.begin)) {
-		printf("CFM: SS %s CF %s:   dequeVersion=%lld, emptyVersion=%lld, storageVersion=%lld, durableVersion=%lld, "
+		printf("CFM: SS %s CF %s: SQ %s   atLatest=%s, dequeVersion=%lld, emptyVersion=%lld, storageVersion=%lld, "
+		       "durableVersion=%lld, "
 		       "fetchVersion=%lld\n",
 		       data->thisServerID.toString().substr(0, 4).c_str(),
 		       req.rangeID.printable().substr(0, 6).c_str(),
+		       streamUID.toString().substr(0, 8).c_str(),
+		       atLatest ? "T" : "F",
 		       dequeVersion,
 		       feedInfo->emptyVersion,
 		       feedInfo->storageVersion,
@@ -1797,15 +1801,18 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 	}
 
 	if (req.end > emptyVersion + 1) {
+		// FIXME: do exponential backwards search from end to find beginVersion if atLatest to reduce cpu
 		for (auto& it : feedInfo->mutations) {
 			if (it.version >= req.end || it.version > dequeVersion || remainingLimitBytes <= 0) {
 				break;
 			}
 			if (it.version >= req.begin) {
-				memoryReply.arena.dependsOn(it.arena());
 				auto m = filterMutations(memoryReply.arena, it, req.range, inverted);
-				memoryReply.mutations.push_back(memoryReply.arena, m);
-				remainingLimitBytes -= sizeof(MutationsAndVersionRef) + m.expectedSize();
+				if (m.mutations.size()) {
+					memoryReply.arena.dependsOn(it.arena());
+					memoryReply.mutations.push_back(memoryReply.arena, m);
+					remainingLimitBytes -= sizeof(MutationsAndVersionRef) + m.expectedSize();
+				}
 			}
 		}
 		if (DEBUG_SS_CFM(data->thisServerID, req.rangeID, req.begin)) {
@@ -1818,8 +1825,9 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		}
 	}
 
-	bool readDurable = feedInfo->durableVersion != invalidVersion && req.begin <= feedInfo->durableVersion;
-	bool readFetched = feedInfo->durableVersion < feedInfo->fetchVersion && req.begin <= feedInfo->fetchVersion;
+	state bool readDurable = feedInfo->durableVersion != invalidVersion && req.begin <= feedInfo->durableVersion;
+	state bool readFetched = feedInfo->durableVersion < feedInfo->fetchVersion && req.begin <= feedInfo->fetchVersion;
+	state bool readAnyFromDisk = false;
 	if (req.end > emptyVersion + 1 && (readDurable || readFetched)) {
 		if (readFetched) {
 			// To not block fetchKeys making normal SS data readable on making change feed data written to storage, we
@@ -1842,6 +1850,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		}
 
 		Version lastVersion = req.begin - 1;
+		Version lastKnownCommitted = invalidVersion;
 		for (auto& kv : res) {
 			Key id;
 			Version version, knownCommittedVersion;
@@ -1851,12 +1860,16 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 			reply.arena.dependsOn(mutations.arena());
 			auto m = filterMutations(
 			    reply.arena, MutationsAndVersionRef(mutations, version, knownCommittedVersion), req.range, inverted);
-			reply.mutations.push_back(reply.arena, m);
+			if (m.mutations.size()) {
+				readAnyFromDisk = true;
+				reply.mutations.push_back(reply.arena, m);
+			}
 			remainingDurableBytes -=
 			    sizeof(KeyValueRef) +
 			    kv.expectedSize(); // This is tracking the size on disk rather than the reply size
 			                       // because we cannot add mutations from memory if there are potentially more on disk
 			lastVersion = version;
+			lastKnownCommitted = knownCommittedVersion;
 		}
 		if (DEBUG_SS_CFM(data->thisServerID, req.rangeID, req.begin)) {
 			printf("CFM: SS %s CF %s:     got %lld - %lld (%d) from disk\n",
@@ -1865,6 +1878,15 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 			       reply.mutations.empty() ? invalidVersion : reply.mutations.front().version,
 			       reply.mutations.empty() ? invalidVersion : reply.mutations.back().version,
 			       reply.mutations.size());
+			if (!reply.mutations.empty() && reply.mutations.front().version == 252133030) {
+				for (auto& it : reply.mutations) {
+					printf("CFM: SS %s CF %s:       %lld (%d)\n",
+					       data->thisServerID.toString().substr(0, 4).c_str(),
+					       req.rangeID.printable().substr(0, 6).c_str(),
+					       it.version,
+					       it.mutations.size());
+				}
+			}
 		}
 		if (remainingDurableBytes > 0) {
 			reply.arena.dependsOn(memoryReply.arena);
@@ -1875,20 +1897,41 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 				--totalCount;
 			}
 			reply.mutations.append(reply.arena, it, totalCount);
+		} else if (!readAnyFromDisk) {
+			if (DEBUG_SS_CFM(data->thisServerID, req.rangeID, req.begin)) {
+				printf("CFM: SS %s CF %s:     adding empty from disk %lld\n",
+				       data->thisServerID.toString().substr(0, 4).c_str(),
+				       req.rangeID.printable().substr(0, 6).c_str(),
+				       lastVersion);
+			}
+			reply.mutations.push_back(reply.arena, MutationsAndVersionRef(lastVersion, lastKnownCommitted));
 		}
 	} else {
 		reply = memoryReply;
 	}
 
-	// check if pop happened concurrently with read
+	// check if pop happened concurrently with disk read
 	if (!req.canReadPopped && req.begin <= feedInfo->emptyVersion) {
-		printf("SS %s:   CF %s popped after read! req.begin=%lld, emptyVersion=%lld, emptyBeforeRead=%lld\n",
-		       data->thisServerID.toString().substr(0, 4).c_str(),
-		       req.rangeID.printable().substr(0, 6).c_str(),
-		       req.begin,
-		       feedInfo->emptyVersion,
-		       emptyVersion);
-		throw change_feed_popped();
+		// this can happen under normal circumstances on one condition: a feed atLatest has to wait for a fetch to read
+		// from disk, and the feed is popped during that. Since pop can't guarantee cleaning up the entire fetch, if the
+		// read only got empty mutations after filtering, this is fine
+		bool ok = atLatest && readFetched && !readDurable && !readAnyFromDisk;
+		TEST(ok); // feed popped while read waiting for fetch
+		if (!ok) {
+			printf("SS %s:   CF %s SQ %s popped after read! req.begin=%lld, emptyVersion=%lld, emptyBeforeRead=%lld, "
+			       "atLatest=%s, readFetched=%s, readDurable=%s, readAnyFromDisk=%s\n",
+			       data->thisServerID.toString().substr(0, 4).c_str(),
+			       req.rangeID.printable().substr(0, 6).c_str(),
+			       streamUID.toString().substr(0, 8).c_str(),
+			       req.begin,
+			       feedInfo->emptyVersion,
+			       emptyVersion,
+			       atLatest ? "T" : "F",
+			       readFetched ? "T" : "F",
+			       readDurable ? "T" : "F",
+			       readAnyFromDisk ? "T" : "F");
+			throw change_feed_popped();
+		}
 	}
 
 	bool gotAll = remainingLimitBytes > 0 && remainingDurableBytes > 0 && data->version.get() == startVersion;
@@ -1958,7 +2001,7 @@ ACTOR Future<Void> localChangeFeedStream(StorageServer* data,
 			feedRequest.end = end;
 			feedRequest.range = range;
 			state std::pair<ChangeFeedStreamReply, bool> feedReply =
-			    wait(getChangeFeedMutations(data, feedRequest, true, UID()));
+			    wait(getChangeFeedMutations(data, feedRequest, true, false, UID()));
 			begin = feedReply.first.mutations.back().version + 1;
 			state int resultLoc = 0;
 			while (resultLoc < feedReply.first.mutations.size()) {
@@ -2029,7 +2072,7 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 			}
 			wait(onReady);
 			state Future<std::pair<ChangeFeedStreamReply, bool>> feedReplyFuture =
-			    getChangeFeedMutations(data, req, false, streamUID);
+			    getChangeFeedMutations(data, req, false, atLatest, streamUID);
 			if (atLatest && !removeUID && !feedReplyFuture.isReady()) {
 				data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()][streamUID] =
 				    blockedVersion.present() ? blockedVersion.get() : data->prevVersion;
@@ -2039,6 +2082,7 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 			ChangeFeedStreamReply feedReply = _feedReply.first;
 			bool gotAll = _feedReply.second;
 
+			ASSERT(feedReply.mutations.size() > 0);
 			req.begin = feedReply.mutations.back().version + 1;
 			if (!atLatest && gotAll) {
 				atLatest = true;
@@ -4061,6 +4105,9 @@ ACTOR Future<Void> changeFeedPopQ(StorageServer* self, ChangeFeedPopRequest req)
 				feed->second->storageVersion = invalidVersion;
 				feed->second->durableVersion = invalidVersion;
 			}
+			if (req.version > feed->second->fetchVersion) {
+				feed->second->fetchVersion = invalidVersion;
+			}
 		}
 		// wake up requests that didn't get any mutations since the last pop to update their beginVersion
 		feed->second->newMutations.trigger();
@@ -4070,7 +4117,6 @@ ACTOR Future<Void> changeFeedPopQ(StorageServer* self, ChangeFeedPopRequest req)
 	return Void();
 }
 
-// TODO handle being popped in the middle by removing after fetch
 // Returns max version fetched
 ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
                                              Reference<ChangeFeedInfo> changeFeedInfo,
@@ -4103,63 +4149,11 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 	state Version lastVersion = invalidVersion;
 	state int64_t versionsFetched = 0;
 
-	if (!existing) {
-		try {
-			loop {
-				while (data->fetchKeysBudgetUsed.get()) {
-					wait(data->fetchKeysBudgetUsed.onChange());
-				}
-				Standalone<VectorRef<MutationsAndVersionRef>> res = waitNext(feedResults->mutations.getFuture());
-				for (auto& it : res) {
-					if (it.mutations.size()) {
-						if (MUTATION_TRACKING_ENABLED) {
-							for (auto& m : it.mutations) {
-								DEBUG_MUTATION("ChangeFeedWriteMove", it.version, m, data->thisServerID)
-								    .detail("Range", range)
-								    .detail("Existing", existing)
-								    .detail("ChangeFeedID", rangeId);
-							}
-						}
-						data->storage.writeKeyValue(
-						    KeyValueRef(changeFeedDurableKey(rangeId, it.version),
-						                changeFeedDurableValue(it.mutations, it.knownCommittedVersion)));
-
-						changeFeedInfo->fetchVersion = std::max(changeFeedInfo->fetchVersion, it.version);
-						if (firstVersion == invalidVersion) {
-							firstVersion = it.version;
-						}
-						lastVersion = it.version;
-						versionsFetched++;
-					}
-				}
-				data->fetchKeysBytesBudget -= res.expectedSize();
-				if (data->fetchKeysBytesBudget <= 0) {
-					data->fetchKeysBudgetUsed.set(true);
-				}
-				wait(yield());
-			}
-		} catch (Error& e) {
-			if (e.code() != error_code_end_of_stream) {
-				throw;
-			}
-			// TODO REMOVE?
-			TraceEvent(SevDebug, "FetchChangeFeedDone", data->thisServerID)
-			    .detail("RangeID", rangeId.printable())
-			    .detail("Range", range.toString())
-			    .detail("StartVersion", startVersion)
-			    .detail("EndVersion", endVersion)
-			    .detail("FirstFetchedVersion", firstVersion)
-			    .detail("LastFetchedVersion", lastVersion)
-			    .detail("VersionsFetched", versionsFetched)
-			    .detail("Existing", existing);
-			return lastVersion;
-		}
-	}
-
 	state PromiseStream<Standalone<MutationsAndVersionRef>> localResults;
 
 	// Add 1 to fetch version to make sure the local stream will have more versions in the stream than the remote stream
 	// to avoid edge cases in the merge logic
+
 	state Future<Void> localStream =
 	    localChangeFeedStream(data, localResults, rangeId, startVersion, endVersion + 1, range);
 	state Standalone<MutationsAndVersionRef> localResult;
@@ -4175,62 +4169,64 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 			state Standalone<VectorRef<MutationsAndVersionRef>> remoteResult =
 			    waitNext(feedResults->mutations.getFuture());
 			state int remoteLoc = 0;
+
 			while (remoteLoc < remoteResult.size()) {
-				if (firstVersion == invalidVersion) {
-					firstVersion = remoteResult[remoteLoc].version;
+				Version localVersion = localResult.version;
+				Version remoteVersion = remoteResult[remoteLoc].version;
+				if (remoteVersion <= localVersion) {
+					if (remoteVersion > changeFeedInfo->emptyVersion) {
+						// merge if same version
+						if (remoteVersion == localVersion && remoteResult[remoteLoc].mutations.size() &&
+						    remoteResult[remoteLoc].mutations.back().param1 != lastEpochEndPrivateKey) {
+							int remoteSize = remoteResult[remoteLoc].mutations.size();
+							ASSERT(localResult.mutations.size());
+							remoteResult[remoteLoc].mutations.append(
+							    remoteResult.arena(), localResult.mutations.begin(), localResult.mutations.size());
+							if (MUTATION_TRACKING_ENABLED) {
+								int midx = 0;
+								for (auto& m : remoteResult[remoteLoc].mutations) {
+									DEBUG_MUTATION("ChangeFeedWriteMoveMerge", remoteVersion, m, data->thisServerID)
+									    .detail("Range", range)
+									    .detail("FromLocal", midx >= remoteSize)
+									    .detail("ChangeFeedID", rangeId);
+									midx++;
+								}
+							}
+						} else {
+							if (MUTATION_TRACKING_ENABLED) {
+								for (auto& m : remoteResult[remoteLoc].mutations) {
+									DEBUG_MUTATION("ChangeFeedWriteMove", remoteVersion, m, data->thisServerID)
+									    .detail("Range", range)
+									    .detail("Existing", existing)
+									    .detail("ChangeFeedID", rangeId);
+								}
+							}
+						}
+
+						data->storage.writeKeyValue(
+						    KeyValueRef(changeFeedDurableKey(rangeId, remoteVersion),
+						                changeFeedDurableValue(remoteResult[remoteLoc].mutations,
+						                                       remoteResult[remoteLoc].knownCommittedVersion)));
+						changeFeedInfo->fetchVersion = std::max(changeFeedInfo->fetchVersion, remoteVersion);
+
+						if (firstVersion == invalidVersion) {
+							firstVersion = remoteVersion;
+						}
+						lastVersion = remoteVersion;
+						versionsFetched++;
+					} else if (versionsFetched > 0) {
+						ASSERT(firstVersion != invalidVersion);
+						ASSERT(lastVersion != invalidVersion);
+						data->storage.clearRange(
+						    KeyRangeRef(changeFeedDurableKey(changeFeedInfo->id, firstVersion),
+						                changeFeedDurableKey(changeFeedInfo->id, lastVersion + 1)));
+						firstVersion = invalidVersion;
+						lastVersion = invalidVersion;
+						versionsFetched = 0;
+					}
+					remoteLoc++;
 				}
-				lastVersion = remoteResult[remoteLoc].version;
-				versionsFetched++;
-
-				if (remoteResult[remoteLoc].version < localResult.version) {
-					if (remoteResult[remoteLoc].mutations.size()) {
-						if (MUTATION_TRACKING_ENABLED) {
-							for (auto& m : remoteResult[remoteLoc].mutations) {
-								DEBUG_MUTATION(
-								    "ChangeFeedWriteMove", remoteResult[remoteLoc].version, m, data->thisServerID)
-								    .detail("Range", range)
-								    .detail("Existing", existing)
-								    .detail("ChangeFeedID", rangeId);
-							}
-						}
-						data->storage.writeKeyValue(
-						    KeyValueRef(changeFeedDurableKey(rangeId, remoteResult[remoteLoc].version),
-						                changeFeedDurableValue(remoteResult[remoteLoc].mutations,
-						                                       remoteResult[remoteLoc].knownCommittedVersion)));
-						changeFeedInfo->fetchVersion =
-						    std::max(changeFeedInfo->fetchVersion, remoteResult[remoteLoc].version);
-					}
-					remoteLoc++;
-				} else if (remoteResult[remoteLoc].version == localResult.version) {
-					if (remoteResult[remoteLoc].mutations.size() &&
-					    remoteResult[remoteLoc].mutations.back().param1 != lastEpochEndPrivateKey) {
-						int remoteSize = remoteResult[remoteLoc].mutations.size();
-						ASSERT(localResult.mutations.size());
-						remoteResult[remoteLoc].mutations.append(
-						    remoteResult.arena(), localResult.mutations.begin(), localResult.mutations.size());
-						if (MUTATION_TRACKING_ENABLED) {
-							int midx = 0;
-							for (auto& m : remoteResult[remoteLoc].mutations) {
-								DEBUG_MUTATION(
-								    "ChangeFeedWriteMoveMerge", remoteResult[remoteLoc].version, m, data->thisServerID)
-								    .detail("Range", range)
-								    .detail("FromLocal", midx >= remoteSize)
-								    .detail("ChangeFeedID", rangeId);
-								midx++;
-							}
-						}
-						data->storage.writeKeyValue(
-						    KeyValueRef(changeFeedDurableKey(rangeId, remoteResult[remoteLoc].version),
-						                changeFeedDurableValue(remoteResult[remoteLoc].mutations,
-						                                       remoteResult[remoteLoc].knownCommittedVersion)));
-
-						changeFeedInfo->fetchVersion =
-						    std::max(changeFeedInfo->fetchVersion, remoteResult[remoteLoc].version);
-					}
-					remoteLoc++;
-					Standalone<MutationsAndVersionRef> _localResult = waitNext(localResults.getFuture());
-					localResult = _localResult;
-				} else {
+				if (localVersion <= remoteVersion) {
 					Standalone<MutationsAndVersionRef> _localResult = waitNext(localResults.getFuture());
 					localResult = _localResult;
 				}
@@ -4245,6 +4241,18 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 		if (e.code() != error_code_end_of_stream) {
 			throw;
 		}
+	}
+
+	// if we were popped while fetching but it didn't pass the fetch version while writing, clean up here
+	if (versionsFetched > 0 && startVersion < changeFeedInfo->emptyVersion) {
+		ASSERT(firstVersion != invalidVersion);
+		ASSERT(lastVersion != invalidVersion);
+		data->storage.clearRange(KeyRangeRef(
+		    changeFeedDurableKey(changeFeedInfo->id, firstVersion),
+		    changeFeedDurableKey(changeFeedInfo->id, std::min(lastVersion + 1, changeFeedInfo->emptyVersion))));
+		firstVersion = invalidVersion;
+		lastVersion = invalidVersion;
+		versionsFetched = 0;
 	}
 
 	// TODO REMOVE?
@@ -5374,7 +5382,9 @@ private:
 						if (popVersion > feed->second->storageVersion) {
 							feed->second->storageVersion = invalidVersion;
 							feed->second->durableVersion = invalidVersion;
-							// don't set fetchVersion to invalidVersion here because there could be an active fetch
+						}
+						if (popVersion > feed->second->fetchVersion) {
+							feed->second->fetchVersion = invalidVersion;
 						}
 					}
 					addMutationToLog = true;
