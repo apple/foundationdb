@@ -204,7 +204,6 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES rare/TransactionTagSwizzledApiCorrectness.toml)
   add_fdb_test(TEST_FILES rare/WriteTagThrottling.toml)
   add_fdb_test(TEST_FILES rare/AllSimUnitTests.toml)
-  add_fdb_test(TEST_FILES rare/Downgrade.toml)
   add_fdb_test(TEST_FILES rare/StatusBuilderPerf.toml)
   add_fdb_test(TEST_FILES rare/TLogVersionMessagesOverheadFactor.toml)
   add_fdb_test(
