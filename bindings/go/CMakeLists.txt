@@ -110,10 +110,8 @@ function(build_go_package)
     set(testfile ${CMAKE_CURRENT_BINARY_DIR}/${BGP_NAME}_test)
     add_custom_command(OUTPUT ${testfile}
       COMMAND ${CMAKE_COMMAND} -E env ${go_env}
-              ${GO_EXECUTABLE} get -d ${GO_IMPORT_PATH}/${BGP_PATH} &&
-              ${CMAKE_COMMAND} -E env ${go_env}
               ${GO_EXECUTABLE} test -c ${GO_IMPORT_PATH}/${BGP_PATH} -o ${testfile}
-      DEPENDS ${fdb_options_file} fdb_c
+      DEPENDS ${fdb_options_file} fdb_c ${BGP_NAME}
       COMMENT "Building ${BGP_NAME} test")
     add_custom_target(${BGP_NAME}_test_target ALL DEPENDS ${testfile})
     set(library_path LD_LIBRARY_PATH)
