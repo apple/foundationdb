@@ -4247,12 +4247,11 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 	if (versionsFetched > 0 && startVersion < changeFeedInfo->emptyVersion) {
 		ASSERT(firstVersion != invalidVersion);
 		ASSERT(lastVersion != invalidVersion);
-		data->storage.clearRange(KeyRangeRef(
-		    changeFeedDurableKey(changeFeedInfo->id, firstVersion),
-		    changeFeedDurableKey(changeFeedInfo->id, std::min(lastVersion + 1, changeFeedInfo->emptyVersion))));
-		firstVersion = invalidVersion;
-		lastVersion = invalidVersion;
-		versionsFetched = 0;
+		Version endClear = std::min(lastVersion + 1, changeFeedInfo->emptyVersion);
+		if (endClear > firstVersion) {
+			data->storage.clearRange(KeyRangeRef(changeFeedDurableKey(changeFeedInfo->id, firstVersion),
+			                                     changeFeedDurableKey(changeFeedInfo->id, endClear)));
+		}
 	}
 
 	// TODO REMOVE?
