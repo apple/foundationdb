@@ -101,9 +101,9 @@ struct TraceRequest {
 
 // A server listening for UDP trace messages, run only in simulation.
 ACTOR Future<Void> simulationStartServer() {
-	TraceEvent(SevInfo, "UDPServerStarted").detail("Port", FLOW_KNOBS->TRACING_UDP_LISTENER_PORT);
+	TraceEvent(SevInfo, "UDPServerStarted").detail("Port", FLOW_KNOBS->TRACING_UDP_LISTENER_ADDR);
 	state NetworkAddress localAddress =
-	    NetworkAddress::parse("127.0.0.1:" + std::to_string(FLOW_KNOBS->TRACING_UDP_LISTENER_PORT));
+	    NetworkAddress::parse(FLOW_KNOBS->TRACING_UDP_LISTENER_ADDR);
 	state Reference<IUDPSocket> serverSocket = wait(INetworkConnections::net()->createUDPSocket(localAddress));
 	serverSocket->bind(localAddress);
 
@@ -295,7 +295,7 @@ struct FastUDPTracer : public UDPTracer {
 			}
 
 			NetworkAddress localAddress =
-			    NetworkAddress::parse("127.0.0.1:" + std::to_string(FLOW_KNOBS->TRACING_UDP_LISTENER_PORT));
+			    NetworkAddress::parse(FLOW_KNOBS->TRACING_UDP_LISTENER_ADDR);
 			socket_ = INetworkConnections::net()->createUDPSocket(localAddress);
 		});
 
