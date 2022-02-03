@@ -126,9 +126,9 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	                        LogEpoch e,
 	                        Optional<PromiseStream<Future<Void>>> addActor = Optional<PromiseStream<Future<Void>>>())
 	  : dbgid(dbgid), logSystemType(LogSystemType::empty), expectedLogSets(0), logRouterTags(0), txsTags(0),
-	    repopulateRegionAntiQuorum(0), stopped(false), epoch(e), oldestBackupEpoch(0), maxRv(0),
+	    repopulateRegionAntiQuorum(0), stopped(false), epoch(e), oldestBackupEpoch(0),
 	    recoveryCompleteWrittenToCoreState(false), remoteLogsWrittenToCoreState(false), hasRemoteServers(false),
-	    locality(locality), addActor(addActor), popActors(false) {}
+	    maxRv(0), locality(locality), addActor(addActor), popActors(false) {}
 
 	void stopRejoins() final;
 
