@@ -592,7 +592,6 @@ struct RolesInfo {
 				TraceEventFields const& metadata = metrics.at("Metadata");
 				JsonBuilderObject metadataObj;
 				metadataObj["created_time"] = metadata.getValue("CreatedTime");
-				metadataObj["expire_now"] = metadata.getValue("ExpireNow");
 				obj["storage_metadata"] = metadataObj;
 			}
 
@@ -1930,12 +1929,10 @@ ACTOR static Future<std::vector<std::pair<StorageServerInterface, EventMap>>> ge
 		if (metadata[i].present()) {
 			TraceEventFields metadataField;
 			metadataField.addField("CreatedTime", timerIntToGmt(metadata[i].get().createdTime));
-			metadataField.addField("ExpireNow", metadata[i].get().expireNow ? "1" : "0");
 			results[i].second.emplace("Metadata", metadataField);
 		} else if (!servers[i].isTss()) {
 			TraceEventFields metadataField;
 			metadataField.addField("CreatedTime", "[removed]");
-			metadataField.addField("ExpireNow", "[removed]");
 			results[i].second.emplace("Metadata", metadataField);
 		}
 	}

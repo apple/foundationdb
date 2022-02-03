@@ -1195,16 +1195,31 @@ struct ReadBlobGranuleContext {
 // Store metadata associated with each storage server. Now it only contains data be used in perpetual storage wiggle.
 struct StorageMetadataType {
 	constexpr static FileIdentifier file_identifier = 732123;
+	// when the SS is initialized
 	uint64_t createdTime; // comes from Platform::timer_int()
-	bool expireNow; // SS can be forced to be expired regardless of the createdTime field
-	StorageMetadataType() : createdTime(0), expireNow(false) {}
-	StorageMetadataType(uint64_t t, bool expireNow = false) : createdTime(t), expireNow(expireNow) {}
+	StorageMetadataType() : createdTime(0) {}
+	StorageMetadataType(uint64_t t) : createdTime(t) {}
 
 	// To change this serialization, ProtocolVersion::StorageMetadata must be updated, and downgrades need
 	// to be considered
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, createdTime, expireNow);
+		serializer(ar, createdTime);
+	}
+};
+
+// store metadata of wiggle action
+struct StorageWiggleValue {
+	constexpr static FileIdentifier file_identifier = 732124;
+	UID id; // storage id
+
+	StorageWiggleValue(UID id = UID(0, 0)) : id(id) {}
+
+	// To change this serialization, ProtocolVersion::PerpetualWiggleMetadata must be updated, and downgrades need
+	// to be considered
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, id);
 	}
 };
 #endif

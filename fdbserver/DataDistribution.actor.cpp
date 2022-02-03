@@ -669,6 +669,7 @@ struct DDTeamCollection : ReferenceCounted<DDTeamCollection> {
 	Optional<UID> wigglingId; // Process id of current wiggling storage server;
 	Reference<AsyncVar<bool>> pauseWiggle;
 	Reference<AsyncVar<bool>> processingWiggle; // track whether wiggling relocation is being processed
+	PromiseStream<StorageWiggleValue> nextWiggleInfo;
 
 	// machine_info has all machines info; key must be unique across processes on the same machine
 	std::map<Standalone<StringRef>, Reference<TCMachineInfo>> machine_info;
@@ -2991,7 +2992,7 @@ void StorageWiggler::updateMetadata(const UID& serverId, const StorageMetadataTy
 	//	std::cout << "size: " << pq_handles.size() << " update " << serverId.toString()
 	//	          << " DC: " << teamCollection->primary << std::endl;
 	auto handle = pq_handles.at(serverId);
-	if ((*handle).first.expireNow == metadata.expireNow && (*handle).first.createdTime == metadata.createdTime) {
+	if ((*handle).first.createdTime == metadata.createdTime) {
 		return;
 	}
 	wiggle_pq.update(handle, std::make_pair(metadata, serverId));
@@ -4196,22 +4197,26 @@ ACTOR Future<UID> getNextWigglingServerID(DDTeamCollection* teamCollection) {
 // Create a transaction updating `perpetualStorageWiggleIDPrefix` to the next serverID according to a sorted wiggle_pq
 // maintained by the wiggler.
 ACTOR Future<Void> updateNextWigglingStorageID(DDTeamCollection* teamCollection) {
-	state ReadYourWritesTransaction tr(teamCollection->cx);
-	state const Key writeKey =
-	    perpetualStorageWiggleIDPrefix.withSuffix(teamCollection->primary ? "primary"_sr : "remote"_sr);
+	state Key writeKey =
+	    perpetualStorageWiggleIDPrefix.withSuffix(teamCollection->primary ? "primary/"_sr : "remote/"_sr);
+	state KeyBackedObjectMap<UID, StorageWiggleValue, decltype(IncludeVersion())> metadataMap(writeKey,
+	                                                                                          IncludeVersion());
 	state UID nextId = wait(getNextWigglingServerID(teamCollection));
-
+	state StorageWiggleValue value(nextId);
+	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(teamCollection->cx));
 	loop {
 		// write the next server id
 		try {
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr.set(writeKey, BinaryWriter::toValue(nextId, Unversioned()));
-			wait(tr.commit());
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			metadataMap.set(tr, nextId, value);
+			wait(tr->commit());
 			break;
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			wait(tr->onError(e));
 		}
 	}
+
+	teamCollection->nextWiggleInfo.send(value);
 	TraceEvent(SevDebug, "PerpetualStorageWiggleNextID", teamCollection->distributorId)
 	    .detail("Primary", teamCollection->primary)
 	    .detail("WriteID", nextId);
@@ -4255,26 +4260,42 @@ ACTOR Future<Void> perpetualStorageWiggleIterator(AsyncVar<bool>* stopSignal,
 	return Void();
 }
 
-// Watch the value change of `perpetualStorageWiggleIDPrefix`.
-// Return the watch future and the current value of `perpetualStorageWiggleIDPrefix`.
-ACTOR Future<std::pair<Future<Void>, Optional<Value>>> watchPerpetualStorageIDChange(DDTeamCollection* self) {
-	state ReadYourWritesTransaction tr(self->cx);
-	state Future<Void> watchFuture;
-	state Optional<Value> ret;
-	state const Key readKey = perpetualStorageWiggleIDPrefix.withSuffix(self->primary ? "primary"_sr : "remote"_sr);
+// read the current map of `perpetualStorageWiggleIDPrefix`, then restore wigglingId.
+ACTOR Future<Void> readStorageWiggleMap(DDTeamCollection* self) {
 
+	state const Key readKey = perpetualStorageWiggleIDPrefix.withSuffix(self->primary ? "primary/"_sr : "remote/"_sr);
+	state KeyBackedObjectMap<UID, StorageWiggleValue, decltype(IncludeVersion())> metadataMap(readKey,
+	                                                                                          IncludeVersion());
+	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
+	state std::vector<std::pair<UID, StorageWiggleValue>> res;
+	// read the wiggling pairs
 	loop {
 		try {
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			wait(store(ret, tr.get(readKey)));
-			watchFuture = tr.watch(readKey);
-			wait(tr.commit());
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			wait(store(res, metadataMap.getRange(tr, UID(0, 0), Optional<UID>(), CLIENT_KNOBS->TOO_MANY)));
+			wait(tr->commit());
 			break;
 		} catch (Error& e) {
-			wait(tr.onError(e));
+			wait(tr->onError(e));
 		}
 	}
-	return std::make_pair(watchFuture, ret);
+	if (res.size() > 0) {
+		// SOMEDAY: support wiggle multiple SS at once
+		ASSERT(!self->wigglingId.present()); // only single process wiggle is allowed
+		self->wigglingId = res.begin()->first;
+	}
+	return Void();
+}
+
+auto eraseStorageWiggleMap(DDTeamCollection* self,
+                           KeyBackedObjectMap<UID, StorageWiggleValue, decltype(IncludeVersion())>* metadataMap,
+                           UID id) {
+	return runRYWTransaction(self->cx, [metadataMap, id](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		metadataMap->erase(tr, id);
+		return Void();
+	});
 }
 
 // periodically check whether the cluster is healthy if we continue perpetual wiggle
@@ -4312,20 +4333,20 @@ ACTOR Future<Void> clusterHealthCheckForPerpetualWiggle(DDTeamCollection* self, 
 ACTOR Future<Void> perpetualStorageWiggler(AsyncVar<bool>* stopSignal,
                                            PromiseStream<Void> finishStorageWiggleSignal,
                                            DDTeamCollection* self) {
-	state Future<Void> watchFuture = Never();
+	state KeyBackedObjectMap<UID, StorageWiggleValue, decltype(IncludeVersion())> metadataMap(
+	    perpetualStorageWiggleIDPrefix.withSuffix(self->primary ? "primary/"_sr : "remote/"_sr), IncludeVersion());
+
+	state Future<StorageWiggleValue> nextFuture = Never();
 	state Future<Void> moveFinishFuture = Never();
 	state int extraTeamCount = 0;
 	state Future<Void> ddQueueCheck = clusterHealthCheckForPerpetualWiggle(self, &extraTeamCount);
-	state std::pair<Future<Void>, Optional<Value>> res = wait(watchPerpetualStorageIDChange(self));
+	state FutureStream<StorageWiggleValue> nextStream = self->nextWiggleInfo.getFuture();
 
-	// SOMEDAY: support wiggle multiple SS at once
-	ASSERT(!self->wigglingId.present()); // only single process wiggle is allowed
+	wait(readStorageWiggleMap(self));
 
-	if (res.second.present()) {
-		self->wigglingId = Optional<UID>(BinaryReader::fromStringRef<UID>(res.second.get(), Unversioned()));
-	} else {
+	if (!self->wigglingId.present()) {
 		// skip to the next valid ID
-		watchFuture = res.first;
+		nextFuture = waitAndForward(nextStream);
 		finishStorageWiggleSignal.send(Void());
 	}
 
@@ -4364,20 +4385,10 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncVar<bool>* stopSignal,
 		}
 
 		choose {
-			when(wait(watchFuture)) {
+			when(StorageWiggleValue value = wait(nextFuture)) {
 				ASSERT(!self->wigglingId.present()); // the previous wiggle must be finished
-				watchFuture = Never();
-				// read new id and set the next watch Future
-				wait(store(res, watchPerpetualStorageIDChange(self)));
-
-				if (res.second.present()) {
-					self->wigglingId = Optional<UID>(BinaryReader::fromStringRef<UID>(res.second.get(), Unversioned()));
-				} else {
-					// skip to the next valid ID
-					watchFuture = res.first;
-					finishStorageWiggleSignal.send(Void());
-				}
-
+				nextFuture = Never();
+				self->wigglingId = value.id;
 				// random delay
 				wait(delayJittered(5.0, TaskPriority::DataDistributionLow));
 			}
@@ -4392,9 +4403,10 @@ ACTOR Future<Void> perpetualStorageWiggler(AsyncVar<bool>* stopSignal,
 				    .detail("Primary", self->primary)
 				    .detail("ProcessId", self->wigglingId.get());
 
+				wait(eraseStorageWiggleMap(self, &metadataMap, self->wigglingId.get()) &&
+				     self->storageWiggler->finishWiggle());
 				self->wigglingId.reset();
-				wait(self->storageWiggler->finishWiggle());
-				watchFuture = res.first;
+				nextFuture = waitAndForward(nextStream);
 				finishStorageWiggleSignal.send(Void());
 				extraTeamCount = std::max(0, extraTeamCount - 1);
 			}

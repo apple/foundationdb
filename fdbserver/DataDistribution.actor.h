@@ -378,18 +378,14 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 
 	// data structures
 	typedef std::pair<StorageMetadataType, UID> MetadataUIDP;
-	// sorted by (!expireNow, createdTime, UID), the least comes first
+	// sorted by (createdTime, UID), the least comes first
 	struct CompPair {
 		bool operator()(MetadataUIDP const& a, MetadataUIDP const& b) const {
-			if (a.first.expireNow == b.first.expireNow) {
-				if (a.first.createdTime == b.first.createdTime) {
-					return a.second > b.second;
-				}
-				// larger createdTime means the age is younger
-				return a.first.createdTime > b.first.createdTime;
+			if (a.first.createdTime == b.first.createdTime) {
+				return a.second > b.second;
 			}
-			// expireNow=true is greater than expireNow=false
-			return a.first.expireNow < b.first.expireNow;
+			// larger createdTime means the age is younger
+			return a.first.createdTime > b.first.createdTime;
 		}
 	};
 	boost::heap::skew_heap<MetadataUIDP, boost::heap::mutable_<true>, boost::heap::compare<CompPair>> wiggle_pq;
@@ -421,7 +417,7 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 	bool shouldFinishRound() {
 		if (wiggle_pq.empty())
 			return true;
-		return (!wiggle_pq.top().first.expireNow && wiggle_pq.top().first.createdTime >= metrics.last_round_start);
+		return (wiggle_pq.top().first.createdTime >= metrics.last_round_start);
 	}
 };
 

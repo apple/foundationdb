@@ -125,8 +125,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                      ]
                   },
                   "storage_metadata":{
-                     "created_time":"%c %z",
-                     "expire_now": "0"
+                     "created_time":"%c %z"
                   },
                   "data_version":12341234,
                   "durable_version":12341234,
