@@ -2476,7 +2476,7 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderWithDelayedCandidacyImplOneGenerati
 						    .detail("CurrentConnectionString",
 						            info.intermediateConnRecord->getConnectionString().toString());
 					}
-					connRecord->setConnectionString(info.intermediateConnRecord->getConnectionString());
+					connRecord->setAndPersistConnectionString(info.intermediateConnRecord->getConnectionString());
 					info.intermediateConnRecord = connRecord;
 				}
 

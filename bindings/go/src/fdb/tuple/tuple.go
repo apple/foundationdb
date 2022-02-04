@@ -102,7 +102,7 @@ func printTuple(tuple Tuple, sb *strings.Builder) {
 			fmt.Fprintf(sb, "%v", t)
 		}
 
-		if (i < len(tuple) - 1) {
+		if i < len(tuple)-1 {
 			sb.WriteString(", ")
 		}
 	}

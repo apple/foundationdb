@@ -960,6 +960,14 @@ public:
 		}
 		return SimExternalConnection::resolveTCPEndpoint(host, service);
 	}
+	std::vector<NetworkAddress> resolveTCPEndpointBlocking(const std::string& host,
+	                                                       const std::string& service) override {
+		// If a <hostname, vector<NetworkAddress>> pair was injected to mock DNS, use it.
+		if (mockDNS.findMockTCPEndpoint(host, service)) {
+			return mockDNS.getTCPEndpoint(host, service);
+		}
+		return SimExternalConnection::resolveTCPEndpointBlocking(host, service);
+	}
 	ACTOR static Future<Reference<IConnection>> onConnect(Future<Void> ready, Reference<Sim2Conn> conn) {
 		wait(ready);
 		if (conn->isPeerGone()) {

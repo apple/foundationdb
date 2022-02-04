@@ -72,7 +72,7 @@ int main(int argc, char** argv) {
 
 	// Apparently you need to open a database to initialize logging
 	FDBDatabase* out;
-	fdb_check(fdb_create_database(nullptr, &out));
+	fdb_check(fdb_create_database(argv[1], &out));
 	fdb_database_destroy(out);
 
 	// Eventually there's a new trace file for this test ending in .tmp

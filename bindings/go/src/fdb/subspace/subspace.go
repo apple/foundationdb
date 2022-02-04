@@ -78,8 +78,8 @@ type Subspace interface {
 	// FoundationDB keys (corresponding to the prefix of this Subspace).
 	fdb.KeyConvertible
 
-	// All Subspaces implement fdb.ExactRange and fdb.Range, and describe all 
-	// keys strictly within the subspace that encode tuples. Specifically, 
+	// All Subspaces implement fdb.ExactRange and fdb.Range, and describe all
+	// keys strictly within the subspace that encode tuples. Specifically,
 	// this will include all keys in [prefix + '\x00', prefix + '\xff').
 	fdb.ExactRange
 }

@@ -137,6 +137,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/CycleTest.toml)
   add_fdb_test(TEST_FILES fast/ChangeFeeds.toml)
   add_fdb_test(TEST_FILES fast/DataLossRecovery.toml)
+  add_fdb_test(TEST_FILES fast/EncryptionOps.toml)
   add_fdb_test(TEST_FILES fast/FuzzApiCorrectness.toml)
   add_fdb_test(TEST_FILES fast/FuzzApiCorrectnessClean.toml)
   add_fdb_test(TEST_FILES fast/IncrementalBackup.toml)
@@ -186,6 +187,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES rare/CycleRollbackClogged.toml)
   add_fdb_test(TEST_FILES rare/CycleWithKills.toml)
   add_fdb_test(TEST_FILES rare/FuzzTest.toml)
+  add_fdb_test(TEST_FILES rare/HighContentionPrefixAllocator.toml)
   add_fdb_test(TEST_FILES rare/InventoryTestHeavyWrites.toml)
   add_fdb_test(TEST_FILES rare/LargeApiCorrectness.toml)
   add_fdb_test(TEST_FILES rare/LargeApiCorrectnessStatus.toml)
@@ -235,10 +237,9 @@ if(WITH_PYTHON)
   add_fdb_test(
     TEST_FILES restarting/from_7.0.0/UpgradeAndBackupRestore-1.toml
                restarting/from_7.0.0/UpgradeAndBackupRestore-2.toml)
-  # TODO: revert this after fixing downgrade tests to 7.0
   add_fdb_test(
-    TEST_FILES restarting/to_7.1.0/CycleTestRestart-1.txt
-               restarting/to_7.1.0/CycleTestRestart-2.txt)
+    TEST_FILES restarting/to_7.0.0/CycleTestRestart-1.txt
+               restarting/to_7.0.0/CycleTestRestart-2.txt)
   add_fdb_test(
     TEST_FILES restarting/from_7.0.0/SnapTestAttrition-1.txt
                restarting/from_7.0.0/SnapTestAttrition-2.txt)

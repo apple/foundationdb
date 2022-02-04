@@ -221,8 +221,8 @@ UID SimExternalConnection::getDebugID() const {
 	return dbgid;
 }
 
-ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpointImpl(std::string host, std::string service) {
-	wait(delayJittered(0.1));
+std::vector<NetworkAddress> SimExternalConnection::resolveTCPEndpointBlocking(const std::string& host,
+                                                                              const std::string& service) {
 	ip::tcp::resolver resolver(ios);
 	ip::tcp::resolver::query query(host, service);
 	auto iter = resolver.resolve(query);
@@ -239,6 +239,11 @@ ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpointImpl(std::str
 		++iter;
 	}
 	return addrs;
+}
+
+ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpointImpl(std::string host, std::string service) {
+	wait(delayJittered(0.1));
+	return SimExternalConnection::resolveTCPEndpointBlocking(host, service);
 }
 
 Future<std::vector<NetworkAddress>> SimExternalConnection::resolveTCPEndpoint(const std::string& host,

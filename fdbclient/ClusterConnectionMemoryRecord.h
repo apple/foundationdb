@@ -36,7 +36,7 @@ public:
 	}
 
 	// Sets the connections string held by this object.
-	Future<Void> setConnectionString(ClusterConnectionString const&) override;
+	Future<Void> setAndPersistConnectionString(ClusterConnectionString const&) override;
 
 	// Returns the connection string currently held in this object (there is no persistent storage).
 	Future<ClusterConnectionString> getStoredConnectionString() override;

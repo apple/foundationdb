@@ -23,7 +23,7 @@
 #include "flow/actorcompiler.h" // has to be last include
 
 // Sets the connections string held by this object.
-Future<Void> ClusterConnectionMemoryRecord::setConnectionString(ClusterConnectionString const& conn) {
+Future<Void> ClusterConnectionMemoryRecord::setAndPersistConnectionString(ClusterConnectionString const& conn) {
 	cs = conn;
 	return Void();
 }

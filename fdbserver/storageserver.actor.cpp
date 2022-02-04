@@ -892,8 +892,8 @@ public:
 		    fetchesFromLogs("FetchesFromLogs", cc), quickGetValueHit("QuickGetValueHit", cc),
 		    quickGetValueMiss("QuickGetValueMiss", cc), quickGetKeyValuesHit("QuickGetKeyValuesHit", cc),
 		    quickGetKeyValuesMiss("QuickGetKeyValuesMiss", cc), kvScanBytes("KVScanBytes", cc),
-		    eagerReadsKeys("EagerReadsKeys", cc), kvGets("KVGets", cc), kvScans("KVScans", cc),
-		    kvCommits("KVCommits", cc), kvGetBytes("KVGetBytes", cc),
+		    kvGetBytes("KVGetBytes", cc), eagerReadsKeys("EagerReadsKeys", cc), kvGets("KVGets", cc),
+		    kvScans("KVScans", cc), kvCommits("KVCommits", cc),
 		    readLatencySample("ReadLatencyMetrics",
 		                      self->thisServerID,
 		                      SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
@@ -3220,7 +3220,10 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 					throw transaction_too_old();
 				}
 
-				state int byteLimit = (BUGGIFY && g_simulator.tssMode == ISimulator::TSSMode::Disabled)
+				// Even if TSS mode is Disabled, this may be the second test in a restarting test where the first run
+				// had it enabled.
+				state int byteLimit = (BUGGIFY && g_simulator.tssMode == ISimulator::TSSMode::Disabled &&
+				                       !data->isTss() && !data->isSSWithTSSPair())
 				                          ? 1
 				                          : CLIENT_KNOBS->REPLY_BYTE_LIMIT;
 				GetKeyValuesReply _r =
