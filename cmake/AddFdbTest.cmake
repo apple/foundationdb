@@ -95,6 +95,10 @@ function(add_fdb_test)
   if((NOT test_name MATCHES "${TEST_INCLUDE}") OR (test_name MATCHES "${TEST_EXCLUDE}"))
     return()
   endif()
+  # We shouldn't run downgrade tests under valgrind: https://github.com/apple/foundationdb/issues/6322
+  if(USE_VALGRIND AND ${test_name} MATCHES .*to_.*)
+    return()
+  endif()
   math(EXPR test_idx "${CURRENT_TEST_INDEX} + ${NUM_TEST_FILES}")
   set(CURRENT_TEST_INDEX "${test_idx}" PARENT_SCOPE)
   # set(<var> <value> PARENT_SCOPE) doesn't set the
