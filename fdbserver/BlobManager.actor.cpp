@@ -269,9 +269,7 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitRange(Reference<ReadYourWritesT
 			}
 
 			if (estimated.bytes > SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES || writeHot) {
-				// printf("  Splitting range\n");
 				// only split on bytes and write rate
-				state Standalone<VectorRef<KeyRef>> keys;
 				state StorageMetrics splitMetrics;
 				splitMetrics.bytes = SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES;
 				splitMetrics.bytesPerKSecond = SERVER_KNOBS->SHARD_SPLIT_BYTES_PER_KSEC;
@@ -284,31 +282,39 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitRange(Reference<ReadYourWritesT
 				splitMetrics.iosPerKSecond = splitMetrics.infinity;
 				splitMetrics.bytesReadPerKSecond = splitMetrics.infinity;
 
-				while (keys.empty() || keys.back() < range.end) {
-					// allow partial in case we have a large split
-					Standalone<VectorRef<KeyRef>> newKeys =
-					    wait(tr->getTransaction().splitStorageMetrics(range, splitMetrics, estimated, true));
-					ASSERT(!newKeys.empty());
-					if (keys.empty()) {
-						keys = newKeys;
-					} else {
-						TEST(true); // large split that requires multiple rounds
-						// start key was repeated with last request, so don't include it
-						ASSERT(newKeys[0] == keys.back());
-						keys.append_deep(keys.arena(), newKeys.begin() + 1, newKeys.size() - 1);
+				state PromiseStream<Key> resultStream;
+				state Standalone<VectorRef<KeyRef>> keys;
+				state Future<Void> streamFuture =
+				    tr->getTransaction().splitStorageMetricsStream(resultStream, range, splitMetrics, estimated);
+				loop {
+					try {
+						Key k = waitNext(resultStream.getFuture());
+						keys.push_back_deep(keys.arena(), k);
+					} catch (Error& e) {
+						if (e.code() != error_code_end_of_stream) {
+							throw;
+						}
+						break;
 					}
-					range = KeyRangeRef(keys.back(), range.end);
 				}
+
 				ASSERT(keys.size() >= 2);
+				ASSERT(keys.front() == range.begin);
+				ASSERT(keys.back() == range.end);
 				return keys;
 			} else {
-				// printf("  Not splitting range\n");
+				if (BM_DEBUG) {
+					printf("Not splitting range\n");
+				}
 				Standalone<VectorRef<KeyRef>> keys;
 				keys.push_back_deep(keys.arena(), range.begin);
 				keys.push_back_deep(keys.arena(), range.end);
 				return keys;
 			}
 		} catch (Error& e) {
+			if (BM_DEBUG) {
+				printf("Splitting range got error %s\n", e.name());
+			}
 			wait(tr->onError(e));
 		}
 	}

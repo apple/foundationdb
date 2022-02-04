@@ -6772,11 +6772,88 @@ ACTOR Future<Void> setPerpetualStorageWiggle(Database cx, bool enable, LockAware
 	return Void();
 }
 
+ACTOR Future<Void> splitStorageMetricsStream(Database cx,
+                                             KeyRange keys,
+                                             StorageMetrics limit,
+                                             StorageMetrics estimated,
+                                             PromiseStream<Key> resultStream) {
+	state Span span("NAPI:SplitStorageMetricsStream"_loc);
+	Key beginKey = keys.begin;
+	resultStream.send(beginKey);
+	// track used across loops in case one loop does not find any split points
+	state StorageMetrics used;
+	loop {
+		state std::vector<std::pair<KeyRange, Reference<LocationInfo>>> locations =
+		    wait(getKeyRangeLocations(cx,
+		                              KeyRangeRef(beginKey, keys.end),
+		                              CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT,
+		                              Reverse::False,
+		                              &StorageServerInterface::splitMetrics,
+		                              TransactionInfo(TaskPriority::DataDistribution, span.context)));
+
+		try {
+			//TraceEvent("SplitStorageMetrics").detail("Locations", locations.size());
+
+			state Standalone<VectorRef<KeyRef>> results;
+			state int i = 0;
+			for (; i < locations.size(); i++) {
+				SplitMetricsRequest req(locations[i].first, limit, used, estimated, i == locations.size() - 1);
+				SplitMetricsReply res = wait(loadBalance(locations[i].second->locations(),
+				                                         &StorageServerInterface::splitMetrics,
+				                                         req,
+				                                         TaskPriority::DataDistribution));
+				if (res.splits.size() &&
+				    res.splits[0] <= results.back()) { // split points are out of order, possibly because of
+					                                   // moving data, throw error to retry
+					ASSERT_WE_THINK(false); // FIXME: This seems impossible and doesn't seem to be covered by testing
+					throw all_alternatives_failed();
+				}
+				if (res.splits.size()) {
+					results.append(results.arena(), res.splits.begin(), res.splits.size());
+					results.arena().dependsOn(res.splits.arena());
+				}
+				used = res.used;
+
+				//TraceEvent("SplitStorageMetricsResult").detail("Used", used.bytes).detail("Location", i).detail("Size", res.splits.size());
+			}
+
+			// only truncate split at end
+			if (keys.end <= locations.back().first.end &&
+			    used.allLessOrEqual(limit * CLIENT_KNOBS->STORAGE_METRICS_UNFAIR_SPLIT_LIMIT) && results.size() > 1) {
+				results.resize(results.arena(), results.size() - 1);
+			}
+
+			for (auto& splitKey : results) {
+				resultStream.send(splitKey);
+			}
+
+			if (keys.end <= locations.back().first.end) {
+				resultStream.send(keys.end);
+				resultStream.sendError(end_of_stream());
+				break;
+			} else {
+				ASSERT(results.size() > 0);
+				beginKey = locations.back().first.end;
+			}
+		} catch (Error& e) {
+			if (e.code() == error_code_operation_cancelled) {
+				throw e;
+			}
+			if (e.code() != error_code_wrong_shard_server && e.code() != error_code_all_alternatives_failed) {
+				TraceEvent(SevError, "SplitStorageMetricsStreamError").error(e);
+				resultStream.sendError(e);
+				throw;
+			}
+			cx->invalidateCache(keys);
+			wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
+		}
+	}
+}
+
 ACTOR Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(Database cx,
                                                                 KeyRange keys,
                                                                 StorageMetrics limit,
-                                                                StorageMetrics estimated,
-                                                                bool allowPartial) {
+                                                                StorageMetrics estimated) {
 	state Span span("NAPI:SplitStorageMetrics"_loc);
 	loop {
 		state std::vector<std::pair<KeyRange, Reference<LocationInfo>>> locations =
@@ -6791,7 +6868,7 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(Database cx,
 
 		// SOMEDAY: Right now, if there are too many shards we delay and check again later. There may be a better
 		// solution to this.
-		if (locations.size() == CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT && !allowPartial) {
+		if (locations.size() == CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT) {
 			wait(delay(CLIENT_KNOBS->STORAGE_METRICS_TOO_MANY_SHARDS_DELAY, TaskPriority::DataDistribution));
 			cx->invalidateCache(keys);
 		} else {
@@ -6827,7 +6904,7 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(Database cx,
 					results.resize(results.arena(), results.size() - 1);
 				}
 
-				if (!allowPartial || keys.end <= locations.back().first.end) {
+				if (keys.end <= locations.back().first.end) {
 					results.push_back_deep(results.arena(), keys.end);
 				}
 				return results;

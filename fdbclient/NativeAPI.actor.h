@@ -364,10 +364,13 @@ public:
 	                                                                    int expectedShardCount);
 	// Pass a negative value for `shardLimit` to indicate no limit on the shard number.
 	Future<StorageMetrics> getStorageMetrics(KeyRange const& keys, int shardLimit);
+	Future<Void> splitStorageMetricsStream(PromiseStream<Key> resultsStream,
+	                                       KeyRange const& keys,
+	                                       StorageMetrics const& limit,
+	                                       StorageMetrics const& estimated);
 	Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(KeyRange const& keys,
 	                                                          StorageMetrics const& limit,
-	                                                          StorageMetrics const& estimated,
-	                                                          bool allowPartial = false);
+	                                                          StorageMetrics const& estimated);
 	Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> getReadHotRanges(KeyRange const& keys);
 
 	// Try to split the given range into equally sized chunks based on estimated size.
