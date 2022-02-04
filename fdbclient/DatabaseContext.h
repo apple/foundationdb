@@ -296,6 +296,7 @@ public:
 	                                 Version begin = 0,
 	                                 Version end = std::numeric_limits<Version>::max(),
 	                                 KeyRange range = allKeys,
+	                                 int replyBufferSize = -1,
 	                                 bool canReadPopped = true);
 
 	Future<std::vector<OverlappingChangeFeedEntry>> getOverlappingChangeFeeds(KeyRangeRef ranges, Version minVersion);

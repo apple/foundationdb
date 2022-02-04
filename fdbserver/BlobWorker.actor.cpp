@@ -177,6 +177,8 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	Promise<Void> doGRVCheck;
 	NotifiedVersion grvVersion;
 
+	int changeFeedStreamReplyBufferSize = SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES / 2;
+
 	BlobWorkerData(UID id, Database db) : id(id), db(db), stats(id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL) {}
 	~BlobWorkerData() {
 		if (BW_DEBUG) {
@@ -1338,12 +1340,18 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			                                                      startVersion + 1,
 			                                                      startState.changeFeedStartVersion,
 			                                                      metadata->keyRange,
+			                                                      bwData->changeFeedStreamReplyBufferSize,
 			                                                      false);
 
 		} else {
 			readOldChangeFeed = false;
-			changeFeedFuture = bwData->db->getChangeFeedStream(
-			    newCFData, cfKey, startVersion + 1, MAX_VERSION, metadata->keyRange, false);
+			changeFeedFuture = bwData->db->getChangeFeedStream(newCFData,
+			                                                   cfKey,
+			                                                   startVersion + 1,
+			                                                   MAX_VERSION,
+			                                                   metadata->keyRange,
+			                                                   bwData->changeFeedStreamReplyBufferSize,
+			                                                   false);
 		}
 
 		// Start actors BEFORE setting new change feed data to ensure the change feed data is properly initialized by
@@ -1469,8 +1477,13 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 
 				Reference<ChangeFeedData> newCFData = makeReference<ChangeFeedData>();
 
-				changeFeedFuture = bwData->db->getChangeFeedStream(
-				    newCFData, cfKey, startState.changeFeedStartVersion, MAX_VERSION, metadata->keyRange, false);
+				changeFeedFuture = bwData->db->getChangeFeedStream(newCFData,
+				                                                   cfKey,
+				                                                   startState.changeFeedStartVersion,
+				                                                   MAX_VERSION,
+				                                                   metadata->keyRange,
+				                                                   bwData->changeFeedStreamReplyBufferSize,
+				                                                   false);
 
 				// Start actors BEFORE setting new change feed data to ensure the change feed data is properly
 				// initialized by the client
@@ -1590,6 +1603,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 										                                    cfRollbackVersion + 1,
 										                                    startState.changeFeedStartVersion,
 										                                    metadata->keyRange,
+										                                    bwData->changeFeedStreamReplyBufferSize,
 										                                    false);
 
 									} else {
@@ -1600,12 +1614,14 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 										}
 										ASSERT(cfRollbackVersion >= startState.changeFeedStartVersion);
 
-										changeFeedFuture = bwData->db->getChangeFeedStream(newCFData,
-										                                                   cfKey,
-										                                                   cfRollbackVersion + 1,
-										                                                   MAX_VERSION,
-										                                                   metadata->keyRange,
-										                                                   false);
+										changeFeedFuture =
+										    bwData->db->getChangeFeedStream(newCFData,
+										                                    cfKey,
+										                                    cfRollbackVersion + 1,
+										                                    MAX_VERSION,
+										                                    metadata->keyRange,
+										                                    bwData->changeFeedStreamReplyBufferSize,
+										                                    false);
 									}
 
 									// Start actors BEFORE setting new change feed data to ensure the change feed data
@@ -3094,7 +3110,7 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 					self->currentManagerStatusStream.get().sendError(connection_failed());
 
 					// TODO: pick a reasonable byte limit instead of just piggy-backing
-					req.reply.setByteLimit(SERVER_KNOBS->RANGESTREAM_LIMIT_BYTES);
+					req.reply.setByteLimit(SERVER_KNOBS->BLOBWORKERSTATUSSTREAM_LIMIT_BYTES);
 					self->currentManagerStatusStream.set(req.reply);
 				} else {
 					req.reply.sendError(blob_manager_replaced());

@@ -2050,7 +2050,11 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 	state UID streamUID = req.debugID;
 	state bool removeUID = false;
 	state Optional<Version> blockedVersion;
-	req.reply.setByteLimit(SERVER_KNOBS->RANGESTREAM_LIMIT_BYTES);
+	if (req.replyBufferSize <= 0) {
+		req.reply.setByteLimit(SERVER_KNOBS->CHANGEFEEDSTREAM_LIMIT_BYTES);
+	} else {
+		req.reply.setByteLimit(req.replyBufferSize);
+	}
 
 	wait(delay(0, TaskPriority::DefaultEndpoint));
 
@@ -4145,8 +4149,8 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 	}
 
 	state Reference<ChangeFeedData> feedResults = makeReference<ChangeFeedData>();
-	state Future<Void> feed =
-	    data->cx->getChangeFeedStream(feedResults, rangeId, startVersion, endVersion, range, true);
+	state Future<Void> feed = data->cx->getChangeFeedStream(
+	    feedResults, rangeId, startVersion, endVersion, range, SERVER_KNOBS->CHANGEFEEDSTREAM_LIMIT_BYTES, true);
 
 	// TODO remove debugging eventually?
 	state Version firstVersion = invalidVersion;

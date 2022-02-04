@@ -500,7 +500,7 @@ public:
 
 	Future<Void> onConnected() {
 		if (connected()) {
-			return Future<Void>(Void());
+			return Void();
 		}
 		if (!queue->onConnect.isValid()) {
 			queue->onConnect = Promise<Void>();
