@@ -1784,11 +1784,12 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 	state Version dequeVersion = data->version.get();
 	state Version dequeKnownCommit = data->knownCommittedVersion;
 	state Version emptyVersion = feedInfo->emptyVersion;
+	Version fetchStorageVersion = std::max(feedInfo->fetchVersion, feedInfo->durableFetchVersion.get());
 
 	if (DEBUG_SS_CFM(data->thisServerID, req.rangeID, req.begin)) {
 		printf("CFM: SS %s CF %s: SQ %s   atLatest=%s, dequeVersion=%lld, emptyVersion=%lld, storageVersion=%lld, "
 		       "durableVersion=%lld, "
-		       "fetchVersion=%lld\n",
+		       "fetchStorageVersion=%lld\n",
 		       data->thisServerID.toString().substr(0, 4).c_str(),
 		       req.rangeID.printable().substr(0, 6).c_str(),
 		       streamUID.toString().substr(0, 8).c_str(),
@@ -1797,7 +1798,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		       feedInfo->emptyVersion,
 		       feedInfo->storageVersion,
 		       feedInfo->durableVersion,
-		       feedInfo->fetchVersion);
+		       fetchStorageVersion);
 	}
 
 	if (req.end > emptyVersion + 1) {
@@ -1826,17 +1827,20 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 	}
 
 	state bool readDurable = feedInfo->durableVersion != invalidVersion && req.begin <= feedInfo->durableVersion;
-	state bool readFetched = feedInfo->durableVersion < feedInfo->fetchVersion && req.begin <= feedInfo->fetchVersion;
+	state bool readFetched = feedInfo->durableVersion < fetchStorageVersion && req.begin <= fetchStorageVersion;
 	state bool readAnyFromDisk = false;
 	if (req.end > emptyVersion + 1 && (readDurable || readFetched)) {
-		if (readFetched) {
+		if (readFetched && req.begin > feedInfo->durableFetchVersion.get()) {
+			// Request needs data that has been written to storage by a change feed fetch, but not committed yet
 			// To not block fetchKeys making normal SS data readable on making change feed data written to storage, we
 			// wait in here instead for all fetched data to become readable from the storage engine.
+			ASSERT(req.begin <= feedInfo->fetchVersion);
 			TEST(true); // getChangeFeedMutations before fetched data durable
-			// wait for next commit to write feed data to storage
+
+			// Wait for next commit to write pending feed data to storage
 			wait(feedInfo->durableFetchVersion.whenAtLeast(
 			    std::min(feedInfo->fetchVersion, feedInfo->durableFetchVersion.get() + 1)));
-			// To return control back to updateStorage
+			// To let update storage finish
 			wait(delay(0));
 		}
 		RangeResult res = wait(
