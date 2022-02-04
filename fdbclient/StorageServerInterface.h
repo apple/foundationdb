@@ -753,7 +753,7 @@ enum CheckpointFormat {
 	// Checkpoint generated via rocksdb::Checkpoint::ExportColumnFamily().
 	RocksDBColumnFamily = 1,
 	// Checkpoint generated via rocksdb::Checkpoint::CreateCheckpoint().
-	RocksDBCheckpoint = 2,
+	SingleRocksDB = 2,
 };
 
 namespace {
@@ -767,8 +767,8 @@ std::string getFdbCheckpointFormatName(const CheckpointFormat& format) {
 	case RocksDBColumnFamily:
 		name = "RocksDBColumnFamily";
 		break;
-	case RocksDBCheckpoint:
-		name = "RocksDBCheckpoint";
+	case SingleRocksDB:
+		name = "SingleRocksDB";
 	}
 
 	return name;
@@ -939,20 +939,19 @@ struct RocksDBColumnFamilyCheckpoint {
 };
 
 struct RocksDBCheckpoint {
-	constexpr static FileIdentifier file_identifier = 13804346;
+	constexpr static FileIdentifier file_identifier = 13804347;
 	std::string checkpointDir;
+	Key restartKey;
 
-	CheckpointFormat format() const { return RocksDBCheckpoint; }
+	CheckpointFormat format() const { return SingleRocksDB; }
 
-	std::string toString() const {
-		return "RocksDBCheckpoint:\nCheckpoint dir:\n" + checkpointDir;
-	}
+	std::string toString() const { return "RocksDBCheckpoint:\nCheckpoint dir:\n" + checkpointDir; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, checkpointDir);
+		serializer(ar, checkpointDir, restartKey);
 	}
-}
+};
 
 // Metadata of a FDB checkpoint.
 struct CheckpointMetaData {
@@ -977,7 +976,7 @@ struct CheckpointMetaData {
 
 	Optional<RocksDBColumnFamilyCheckpoint> rocksCF; // Present when format == RocksDBColumnFamily.
 
-	Optional<RocksDBCheckpoint> rocksCheckpoint; // Present when format == RocksDBCheckpoint.
+	Optional<RocksDBCheckpoint> rocksDBCheckpoint; // Present when format == RocksDBCheckpoint.
 
 	CheckpointMetaData() : format(InvalidFormat), state(InvalidState), referenceCount(0) {}
 	CheckpointMetaData(KeyRange const& range, CheckpointFormat format, UID const& ssID, UID const& checkpointID)
@@ -998,12 +997,15 @@ struct CheckpointMetaData {
 		if (rocksCF.present()) {
 			res += rocksCF.get().toString();
 		}
+		if (rocksDBCheckpoint.present()) {
+			res += rocksDBCheckpoint.get().toString();
+		}
 		return res;
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, range, format, state, checkpointID, ssID, gcTime, rocksCF, rocksCheckpoint);
+		serializer(ar, version, range, format, state, checkpointID, ssID, gcTime, rocksCF, rocksDBCheckpoint);
 	}
 };
 

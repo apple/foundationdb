@@ -1717,7 +1717,7 @@ ACTOR Future<Void> deleteCheckpointQ(StorageServer* self, Version version, Check
 			}
 
 			// Remove the checkpoint record.
-		} else if (checkpoint.format == RocksDBSSTFile) {
+		} else if (checkpoint.format == SingleRocksDB) {
 			throw not_implemented();
 		} else {
 			throw internal_error();

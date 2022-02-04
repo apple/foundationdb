@@ -774,19 +774,33 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			if (a.request.format == RocksDBColumnFamily) {
 				rocksdb::ExportImportFilesMetaData* pMetadata;
 				platform::eraseDirectoryRecursive(checkpointDir);
-				const std::string cwd = platform::getWorkingDirectory() + "/";
 				s = checkpoint->ExportColumnFamily(cf, checkpointDir, &pMetadata);
 
 				if (!s.ok()) {
-					logRocksDBError(s, "Checkpoint");
+					logRocksDBError(s, "CheckpointColumnFamily");
 					a.reply.sendError(statusToError(s));
 					return;
 				}
 
 				populateMetaData(&res, *pMetadata);
 				delete pMetadata;
+			} else if (a.request.format == SingleRocksDB) {
+				uint64_t debugCheckpointSeq = -1;
+				s = checkpoint->CreateCheckpoint(checkpointDir, /*log_size_for_flush=*/0, &debugCheckpointSeq);
+				if (!s.ok()) {
+					logRocksDBError(s, "Checkpoint");
+					a.reply.sendError(statusToError(s));
+					return;
+				}
+				RocksDBCheckpoint rcp;
+				rcp.checkpointDir = checkpointDir;
+				res.rocksDBCheckpoint = rcp;
+				TraceEvent("RocksDBCheckpointCreated", id)
+				    .detail("CheckpointVersion", a.request.version)
+				    .detail("RocksSequenceNumber", debugCheckpointSeq)
+				    .detail("CheckpointDir", checkpointDir);
 			} else {
-				throw not_implemented();
+				throw internal_error();
 			}
 
 			TraceEvent("RocksDBServeCheckpointSuccess", id).detail("CheckpointMetaData", res.toString());
