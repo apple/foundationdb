@@ -200,13 +200,6 @@ struct ResolutionRequestBuilder {
 				auto& tr = getOutTransaction(0, trIn.read_snapshot);
 				tr.mutations.push_back(requests[0].arena, m);
 				tr.lock_aware = trRequest.isLockAware();
-
-				for (int r = 1; r < self->resolvers.size() && SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS; r++) {
-					// Keep metadata in sync on all resolvers
-					auto& outTransaction = getOutTransaction(r, trIn.read_snapshot);
-					outTransaction.mutations.push_back(requests[r].arena, m);
-					outTransaction.lock_aware = trRequest.isLockAware();
-				}
 			}
 		}
 		if (isTXNStateTransaction && !trRequest.isLockAware()) {
@@ -827,13 +820,8 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 }
 
 void assertResolutionStateMutationsSizeConsistent(const std::vector<ResolveTransactionBatchReply>& resolution) {
-
 	for (int r = 1; r < resolution.size(); r++) {
 		ASSERT(resolution[r].stateMutations.size() == resolution[0].stateMutations.size());
-		// The resolution[r].privateMutationCount can be different due to random log router tags:
-		// two consecutive mutations may have the same or different locations. If they share the
-		// same locations, then no new SpanContextMessage is written. Otherwise, a new one is written.
-		ASSERT_EQ(resolution[0].privateMutations.size(), resolution[r].privateMutations.size());
 		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 			ASSERT_EQ(resolution[0].tpcvMap.size(), resolution[r].tpcvMap.size());
 		}
