@@ -525,7 +525,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			std::vector<std::string> columnFamilies;
 			rocksdb::Options options = getOptions();
 			rocksdb::Status status = rocksdb::DB::ListColumnFamilies(options, a.path, &columnFamilies);
-			std::cout << "Open RocksDB Found Column Families: " << describe(columnFamilies) << std::endl;
 			if (std::find(columnFamilies.begin(), columnFamilies.end(), "default") == columnFamilies.end()) {
 				columnFamilies.push_back("default");
 			}

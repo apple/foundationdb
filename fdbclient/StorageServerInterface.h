@@ -945,6 +945,7 @@ struct CheckpointMetaData {
 		Pending = 1,
 		Complete = 2,
 		Deleting = 3,
+		Fail = 4,
 	};
 
 	constexpr static FileIdentifier file_identifier = 13804342;
@@ -954,16 +955,18 @@ struct CheckpointMetaData {
 	int16_t state;
 	UID checkpointID; // A unique id for this checkpoint.
 	UID ssID; // Storage server ID on which this checkpoint is created.
+	int referenceCount; // A reference count on the checkpoint, it can only be deleted when this is 0.
 
 	int64_t gcTime; // Time to delete this checkpoint, a Unix timestamp in seconds.
 
 	Optional<RocksDBColumnFamilyCheckpoint> rocksCF; // Present when format == RocksDBColumnFamily.
 
-	CheckpointMetaData() : format(InvalidFormat), state(InvalidState) {}
+	CheckpointMetaData() : format(InvalidFormat), state(InvalidState), referenceCount(0) {}
 	CheckpointMetaData(KeyRange const& range, CheckpointFormat format, UID const& ssID, UID const& checkpointID)
-	  : version(invalidVersion), range(range), format(format), ssID(ssID), checkpointID(checkpointID), state(Pending) {}
+	  : version(invalidVersion), range(range), format(format), ssID(ssID), checkpointID(checkpointID), state(Pending),
+	    referenceCount(0) {}
 	CheckpointMetaData(Version version, KeyRange const& range, CheckpointFormat format, UID checkpointID)
-	  : version(version), range(range), format(format), checkpointID(checkpointID) {}
+	  : version(version), range(range), format(format), checkpointID(checkpointID), referenceCount(0) {}
 
 	CheckpointState getState() const { return static_cast<CheckpointState>(state); }
 
@@ -972,7 +975,8 @@ struct CheckpointMetaData {
 	std::string toString() const {
 		std::string res = "Checkpoint MetaData:\nServer: " + ssID.toString() + "\nID: " + checkpointID.toString() +
 		                  "\nVersion: " + std::to_string(version) +
-		                  "\nFormat: " + getFdbCheckpointFormatName(static_cast<CheckpointFormat>(format)) + "\n";
+		                  "\nFormat: " + getFdbCheckpointFormatName(static_cast<CheckpointFormat>(format)) +
+		                  "\nState: " + std::to_string(static_cast<int>(state)) + "\n";
 		if (rocksCF.present()) {
 			res += rocksCF.get().toString();
 		}

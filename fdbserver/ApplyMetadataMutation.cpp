@@ -535,25 +535,23 @@ private:
 		toCommit->writeTypedMessage(privatized);
 	}
 
+	// Generates private mutations for the target storage server, instructing it to create a checkpoint.
 	void checkSetCheckpointKeys(MutationRef m) {
 		if (!m.param1.startsWith(checkpointPrefix)) {
 			return;
 		}
 		if (toCommit) {
 			CheckpointMetaData checkpoint = decodeCheckpointValue(m.param2);
-			std::cout << "Decoded checkpont." << checkpoint.toString() << std::endl;
 			Tag tag = decodeServerTagValue(txnStateStore->readValue(serverTagKeyFor(checkpoint.ssID)).get().get());
 			MutationRef privatized = m;
 			privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
-			std::cout << "Privatized checkpoint mutation." << std::endl;
-			// TraceEvent("SendingPrivateMutation", dbgid)
-			//     .detail("Type", "CreateCheckpoint")
-			//     .detail("Original", m)
-			//     .detail("Privatized", privatized)
-			//     .detail("Server", checkpoint.ssID)
-			//     .detail("TagKey", serverTagKeyFor(checkpoint.ssID))
-			//     .detail("Tag", tag.toString())
-			//     .detail("Checkpoint", checkpoint.toString());
+			TraceEvent("SendingPrivateMutationCheckpoint", dbgid)
+			    .detail("Original", m)
+			    .detail("Privatized", privatized)
+			    .detail("Server", checkpoint.ssID)
+			    .detail("TagKey", serverTagKeyFor(checkpoint.ssID))
+			    .detail("Tag", tag.toString())
+			    .detail("Checkpoint", checkpoint.toString());
 
 			toCommit->addTag(tag);
 			toCommit->writeTypedMessage(privatized);

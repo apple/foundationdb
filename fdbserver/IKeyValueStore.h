@@ -104,10 +104,10 @@ public:
 	virtual void enableSnapshot() {}
 
 	// Create a checkpoint.
-	virtual Future<CheckpointMetaData> checkpoint(const CheckpointRequest& request) { throw internal_error(); }
+	virtual Future<CheckpointMetaData> checkpoint(const CheckpointRequest& request) { throw not_implemented(); }
 
 	// Restore from a checkpoint.
-	virtual Future<Void> restore(const CheckpointMetaData& checkpoint) { throw internal_error(); }
+	virtual Future<Void> restore(const CheckpointMetaData& checkpoint) { throw not_implemented(); }
 
 	/*
 	Concurrency contract

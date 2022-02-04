@@ -465,7 +465,7 @@ int64_t extractIntOption(Optional<StringRef> value,
 // states: coordinator, TLog and storage state
 ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID);
 
-// Adds necessary mutation(s) to the transaction, so that *one* checkpoint will be created for 
+// Adds necessary mutation(s) to the transaction, so that *one* checkpoint will be created for
 // each and every shards overlapping with `range`. Each checkpoint will be created at a random
 // storage server for each shard.
 // All checkpoint(s) will be created at the transaction's commit version.

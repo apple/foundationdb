@@ -6867,6 +6867,7 @@ static Future<Void> createCheckpointImpl(T tr, KeyRangeRef range, CheckpointForm
 		    .detail("ReadVersion", tr->getReadVersion().get());
 
 		CheckpointMetaData checkpoint(shard & range, format, src[idx], checkpointID);
+		checkpoint.setState(CheckpointMetaData::Pending);
 		tr->set(checkpointKeyFor(checkpointID), checkpointValue(checkpoint));
 	}
 
