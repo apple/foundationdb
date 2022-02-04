@@ -6017,8 +6017,6 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 						// to add it back to fetchingChangeFeeds
 						data->fetchingChangeFeeds.insert(info->first);
 					}
-				} else {
-					info->second->fetchVersion = invalidVersion;
 				}
 				wait(yield(TaskPriority::UpdateStorage));
 			}
@@ -6079,6 +6077,10 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			if (info != data->uidChangeFeed.end()) {
 				if (feedFetchVersions[curFeed].second > info->second->durableFetchVersion.get()) {
 					info->second->durableFetchVersion.set(feedFetchVersions[curFeed].second);
+				}
+				if (feedFetchVersions[curFeed].second == info->second->fetchVersion) {
+					// haven't fetched anything else since commit started, reset fetch version
+					info->second->fetchVersion = invalidVersion;
 				}
 			}
 			curFeed++;
