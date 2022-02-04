@@ -35,18 +35,6 @@ auto get(MapContainer& m, K const& k) -> decltype(m.at(k)) {
 
 } // namespace
 
-class TCTeamInfoImpl {
-public:
-	ACTOR static Future<Void> updateStorageMetrics(TCTeamInfo* self) {
-		std::vector<Future<Void>> updates;
-		updates.reserve(self->servers.size());
-		for (int i = 0; i < self->servers.size(); i++)
-			updates.push_back(TCServerInfo::updateServerMetrics(self->servers[i]));
-		wait(waitForAll(updates));
-		return Void();
-	}
-};
-
 class DDTeamCollectionImpl {
 	ACTOR static Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self) {
 		state double start = now();
@@ -2971,10 +2959,6 @@ bool DDTeamCollection::teamContainsFailedServer(Reference<TCTeamInfo> team) {
 		}
 	}
 	return false;
-}
-
-Future<Void> TCTeamInfo::updateStorageMetrics() {
-	return TCTeamInfoImpl::updateStorageMetrics(this);
 }
 
 Future<Void> DDTeamCollection::logOnCompletion(Future<Void> signal) {

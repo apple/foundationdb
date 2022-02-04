@@ -131,8 +131,8 @@ set(FDBSERVER_SRCS
   TagPartitionedLogSystem.actor.cpp
   TagPartitionedLogSystem.actor.h
   template_fdb.h
-  TCServerInfo.actor.cpp
-  TCServerInfo.h
+  TCInfo.actor.cpp
+  TCInfo.h
   tester.actor.cpp
   TesterInterface.actor.h
   TLogInterface.h

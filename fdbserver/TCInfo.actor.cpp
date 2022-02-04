@@ -1,26 +1,6 @@
-/*
- * TCServerInfo.actor.cpp
- *
- * This source file is part of the FoundationDB open source project
- *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
 #include "fdbclient/ServerKnobs.h"
 #include "fdbserver/DDTeamCollection.h"
-#include "fdbserver/TCServerInfo.h"
+#include "fdbserver/TCInfo.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 class TCServerInfoImpl {
@@ -110,6 +90,18 @@ public:
 	}
 };
 
+class TCTeamInfoImpl {
+public:
+	ACTOR static Future<Void> updateStorageMetrics(TCTeamInfo* self) {
+		std::vector<Future<Void>> updates;
+		updates.reserve(self->servers.size());
+		for (int i = 0; i < self->servers.size(); i++)
+			updates.push_back(TCServerInfo::updateServerMetrics(self->servers[i]));
+		wait(waitForAll(updates));
+		return Void();
+	}
+};
+
 Future<Void> TCServerInfo::updateServerMetrics() {
 	return TCServerInfoImpl::updateServerMetrics(this);
 }
@@ -126,4 +118,8 @@ TCServerInfo::~TCServerInfo() {
 	if (collection && ssVersionTooFarBehind.get() && !lastKnownInterface.isTss()) {
 		collection->removeLaggingStorageServer(lastKnownInterface.locality.zoneId().get());
 	}
+}
+
+Future<Void> TCTeamInfo::updateStorageMetrics() {
+	return TCTeamInfoImpl::updateStorageMetrics(this);
 }
