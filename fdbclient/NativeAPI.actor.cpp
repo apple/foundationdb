@@ -7158,9 +7158,9 @@ Version ChangeFeedData::getVersion() {
 // range that surrounds wait_version enough to figure out what's going on
 // DEBUG_CF_ID is optional
 #define DEBUG_CF_ID ""_sr
-#define DEBUG_CF_START_VERSION 322240646
-#define DEBUG_CF_END_VERSION 393714633
-#define DEBUG_CF_WAIT_VERSION 383714633
+#define DEBUG_CF_START_VERSION invalidVersion
+#define DEBUG_CF_END_VERSION invalidVersion
+#define DEBUG_CF_WAIT_VERSION invalidVersion
 #define DEBUG_CF_VERSION(cfId, v)                                                                                      \
 	DEBUG_CF_START_VERSION <= v&& v <= DEBUG_CF_END_VERSION && (""_sr == DEBUG_CF_ID || cfId.printable() == DEBUG_CF_ID)
 

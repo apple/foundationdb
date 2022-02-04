@@ -4243,7 +4243,7 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 		}
 	}
 
-	// if we were popped while fetching but it didn't pass the fetch version while writing, clean up here
+	// if we were popped or removed while fetching but it didn't pass the fetch version while writing, clean up here
 	if (versionsFetched > 0 && startVersion < changeFeedInfo->emptyVersion) {
 		ASSERT(firstVersion != invalidVersion);
 		ASSERT(lastVersion != invalidVersion);
@@ -4263,7 +4263,8 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 	    .detail("FirstFetchedVersion", firstVersion)
 	    .detail("LastFetchedVersion", lastVersion)
 	    .detail("VersionsFetched", versionsFetched)
-	    .detail("Existing", existing);
+	    .detail("Existing", existing)
+	    .detail("Removed", changeFeedInfo->removing);
 	return lastVersion;
 }
 
@@ -4403,17 +4404,16 @@ ACTOR Future<std::unordered_map<Key, Version>> dispatchChangeFeeds(StorageServer
 	try {
 		for (auto& feedId : feedIds) {
 			auto feedIt = data->uidChangeFeed.find(feedId);
-			// TODO REMOVE this assert once we enable change feed deletion
-			ASSERT(feedIt != data->uidChangeFeed.end());
-			Reference<ChangeFeedInfo> feed = feedIt->second;
-			feedFetches[feed->id] = fetchChangeFeed(data, feed, beginVersion, endVersion);
+			// feed may have been moved away or deleted after move was scheduled, do nothing in that case
+			if (feedIt != data->uidChangeFeed.end() && !feedIt->second->removing) {
+				feedFetches[feedIt->second->id] = fetchChangeFeed(data, feedIt->second, beginVersion, endVersion);
+			}
 		}
 		for (auto& feedId : newFeedIds) {
 			auto feedIt = data->uidChangeFeed.find(feedId);
-			// TODO REMOVE this assert once we enable change feed deletion
+			// we just read the change feed data map earlier in fetchKeys without yielding, so these feeds must exist
 			ASSERT(feedIt != data->uidChangeFeed.end());
-			Reference<ChangeFeedInfo> feed = feedIt->second;
-			feedFetches[feed->id] = fetchChangeFeed(data, feed, 0, endVersion);
+			feedFetches[feedIt->second->id] = fetchChangeFeed(data, feedIt->second, 0, endVersion);
 		}
 
 		loop {
@@ -5100,6 +5100,7 @@ void changeServerKeys(StorageServer* data,
 				data->keyChangeFeed.coalesce(f.second.contents());
 				auto feed = data->uidChangeFeed.find(f.first);
 				if (feed != data->uidChangeFeed.end()) {
+					feed->second->emptyVersion = version - 1;
 					feed->second->removing = true;
 					feed->second->moved();
 					feed->second->newMutations.trigger();
