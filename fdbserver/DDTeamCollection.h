@@ -38,6 +38,7 @@
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/TCServerInfo.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/WaitFailure.h"
 #include "flow/ActorCollection.h"
@@ -134,67 +135,6 @@ struct TSSPairState : ReferenceCounted<TSSPairState>, NonCopyable {
 	Future<bool> waitOnTSS() { return tssPairDone.getFuture(); }
 
 	Future<Void> waitComplete() { return complete.getFuture(); }
-};
-
-class TCServerInfo : public ReferenceCounted<TCServerInfo> {
-	friend class TCServerInfoImpl;
-
-public:
-	UID id;
-	Version addedVersion; // Read version when this Server is added
-	DDTeamCollection* collection;
-	StorageServerInterface lastKnownInterface;
-	ProcessClass lastKnownClass;
-	std::vector<Reference<TCTeamInfo>> teams;
-	Reference<TCMachineInfo> machine;
-	Future<Void> tracker;
-	int64_t dataInFlightToServer;
-	ErrorOr<GetStorageMetricsReply> serverMetrics;
-	Promise<std::pair<StorageServerInterface, ProcessClass>> interfaceChanged;
-	Future<std::pair<StorageServerInterface, ProcessClass>> onInterfaceChanged;
-	Promise<Void> removed;
-	Future<Void> onRemoved;
-	Future<Void> onTSSPairRemoved;
-	Promise<Void> killTss;
-	Promise<Void> wakeUpTracker;
-	bool inDesiredDC;
-	LocalityEntry localityEntry;
-	Promise<Void> updated;
-	AsyncVar<bool> wrongStoreTypeToRemove;
-	AsyncVar<bool> ssVersionTooFarBehind;
-	// A storage server's StoreType does not change.
-	// To change storeType for an ip:port, we destroy the old one and create a new one.
-	KeyValueStoreType storeType; // Storage engine type
-
-	TCServerInfo(StorageServerInterface ssi,
-	             DDTeamCollection* collection,
-	             ProcessClass processClass,
-	             bool inDesiredDC,
-	             Reference<LocalitySet> storageServerSet,
-	             Version addedVersion = 0)
-	  : id(ssi.id()), addedVersion(addedVersion), collection(collection), lastKnownInterface(ssi),
-	    lastKnownClass(processClass), dataInFlightToServer(0), onInterfaceChanged(interfaceChanged.getFuture()),
-	    onRemoved(removed.getFuture()), onTSSPairRemoved(Never()), inDesiredDC(inDesiredDC),
-	    storeType(KeyValueStoreType::END) {
-
-		if (!ssi.isTss()) {
-			localityEntry = ((LocalityMap<UID>*)storageServerSet.getPtr())->add(ssi.locality, &id);
-		}
-	}
-
-	bool isCorrectStoreType(KeyValueStoreType configStoreType) const {
-		// A new storage server's store type may not be set immediately.
-		// If a storage server does not reply its storeType, it will be tracked by failure monitor and removed.
-		return (storeType == configStoreType || storeType == KeyValueStoreType::END);
-	}
-
-	Future<Void> updateServerMetrics();
-
-	static Future<Void> updateServerMetrics(Reference<TCServerInfo> server);
-
-	Future<Void> serverMetricsPolling();
-
-	~TCServerInfo();
 };
 
 class TCMachineInfo : public ReferenceCounted<TCMachineInfo> {
