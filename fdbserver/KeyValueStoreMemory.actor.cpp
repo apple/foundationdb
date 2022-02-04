@@ -887,7 +887,8 @@ IKeyValueStore* keyValueStoreMemory(std::string const& basename,
 	    .detail("MemoryLimit", memoryLimit)
 	    .detail("StoreType", storeType);
 
-	IDiskQueue* log = openDiskQueue(basename, ext, logID, DiskQueueVersion::V2);
+	// SOMEDAY: Maybe update to use DiskQueueVersion::V2 with xxhash3 checksum.
+	IDiskQueue* log = openDiskQueue(basename, ext, logID, DiskQueueVersion::V1);
 	if (storeType == KeyValueStoreType::MEMORY_RADIXTREE) {
 		return new KeyValueStoreMemory<radix_tree>(log, logID, memoryLimit, storeType, false, false, false);
 	} else {
