@@ -1,3 +1,23 @@
+/*
+ * TCInfo.actor.cpp
+ *
+ * This source file is part of the FoundationDB open source project
+ *
+ * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 #include "fdbclient/ServerKnobs.h"
 #include "fdbserver/DDTeamCollection.h"
 #include "fdbserver/TCInfo.h"
@@ -81,7 +101,7 @@ public:
 	ACTOR static Future<Void> serverMetricsPolling(TCServerInfo* server) {
 		state double lastUpdate = now();
 		loop {
-			wait(updateServerMetrics(server));
+			wait(server->updateServerMetrics());
 			wait(delayUntil(lastUpdate + SERVER_KNOBS->STORAGE_METRICS_POLLING_DELAY +
 			                    SERVER_KNOBS->STORAGE_METRICS_RANDOM_DELAY * deterministicRandom()->random01(),
 			                TaskPriority::DataDistributionLaunch));
