@@ -324,9 +324,20 @@ function(package_bindingtester)
   endif()
   set(bdir ${CMAKE_BINARY_DIR}/bindingtester)
   file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/bindingtester)
-  set(outfiles ${bdir}/fdbcli ${bdir}/fdbserver ${bdir}/${fdbcName} ${bdir}/joshua_test ${bdir}/joshua_timeout)
+
+  set(outfiles ${bdir}/fdbcli 
+               ${bdir}/fdbserver 
+               ${bdir}/${fdbcName} 
+               ${bdir}/joshua_test 
+               ${bdir}/joshua_timeout 
+               ${bdir}/localClusterStart.sh 
+               ${bdir}/bindingTestScript.sh)
   add_custom_command(
     OUTPUT ${outfiles}
+    DEPENDS ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/bindingTest.sh
+            ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/bindingTimeout.sh
+            ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/localClusterStart.sh
+            ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/bindingTestScript.sh
     COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/CMakeCache.txt
             ${CMAKE_BINARY_DIR}/packages/bin/fdbcli
             ${CMAKE_BINARY_DIR}/packages/bin/fdbserver
@@ -337,9 +348,11 @@ function(package_bindingtester)
     COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/localClusterStart.sh ${bdir}/localClusterStart.sh
     COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/contrib/Joshua/scripts/bindingTestScript.sh ${bdir}/bindingTestScript.sh
     COMMENT "Copy executables and scripts to bindingtester dir")
-  file(GLOB_RECURSE test_files ${CMAKE_SOURCE_DIR}/bindings/*)
+
+  file(GLOB_RECURSE binding_files ${CMAKE_SOURCE_DIR}/bindings/*)
   add_custom_command(
     OUTPUT "${CMAKE_BINARY_DIR}/bindingtester.touch"
+    DEPENDS ${binding_files}
     COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_BINARY_DIR}/bindingtester/tests
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/bindingtester/tests
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/bindings ${CMAKE_BINARY_DIR}/bindingtester/tests
@@ -372,6 +385,7 @@ function(package_bindingtester)
 
   if(WITH_GO_BINDING AND NOT OPEN_FOR_IDE)
     add_dependencies(copy_binding_output_files fdb_go_tester fdb_go)
+    file(MAKE_DIRECTORY ${bdir}/tests/go/build/bin ${bdir}/tests/go/src/fdb)
     add_custom_command(
       TARGET copy_binding_output_files
       COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/bindings/go/bin/_stacktester ${bdir}/tests/go/build/bin/_stacktester
@@ -392,13 +406,16 @@ function(package_bindingtester)
     DEPENDS ${outfiles} "${CMAKE_BINARY_DIR}/bindingtester.touch" copy_binding_output_files)
   add_dependencies(copy_bindingtester_binaries strip_only_fdbserver strip_only_fdbcli strip_only_fdb_c)
   set(tar_file ${CMAKE_BINARY_DIR}/packages/bindingtester-${FDB_VERSION}.tar.gz)
+
+  file(GLOB_RECURSE package_files ${bdir}/*)
+
   add_custom_command(
     OUTPUT ${tar_file}
+    DEPENDS copy_bindingtester_binaries ${package_files}
     COMMAND ${CMAKE_COMMAND} -E tar czf ${tar_file} *
-    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/bindingtester
+    WORKING_DIRECTORY ${bdir}
     COMMENT "Pack bindingtester")
   add_custom_target(bindingtester ALL DEPENDS ${tar_file})
-  add_dependencies(bindingtester copy_bindingtester_binaries)
 endfunction()
 
 # Creates a single cluster before running the specified command (usually a ctest test)
