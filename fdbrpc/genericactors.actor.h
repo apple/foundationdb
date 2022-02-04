@@ -197,6 +197,11 @@ struct PeerHolder {
 	}
 };
 
+ACTOR template <class X>
+void holdUntilConnected(Future<Void> signal, ReplyPromiseStream<X> stream) {
+	wait(stream.onConnected() || signal);
+}
+
 // Implements getReplyStream, this a void actor with the same lifetime as the input ReplyPromiseStream.
 // Because this actor holds a reference to the stream, normally it would be impossible to know when there are no other
 // references. To get around this, there is a SAV inside the stream that has one less promise reference than it should
@@ -212,7 +217,12 @@ void endStreamOnDisconnect(Future<Void> signal,
 	stream.setRequestStreamEndpoint(endpoint);
 	choose {
 		when(wait(signal)) { stream.sendError(connection_failed()); }
-		when(wait(stream.getErrorFutureAndDelPromiseRef())) {}
+		when(wait(stream.getErrorFutureAndDelPromiseRef())) {
+			// Wait for a response from the server
+			/*if (!stream.connected()) {
+			    // TODO WANT TO DO holdAndConnected ACTOR HERE INSTEAD!
+			}*/
+		}
 	}
 }
 

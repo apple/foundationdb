@@ -7158,9 +7158,9 @@ Version ChangeFeedData::getVersion() {
 // range that surrounds wait_version enough to figure out what's going on
 // DEBUG_CF_ID is optional
 #define DEBUG_CF_ID ""_sr
-#define DEBUG_CF_START_VERSION invalidVersion
-#define DEBUG_CF_END_VERSION invalidVersion
-#define DEBUG_CF_WAIT_VERSION invalidVersion
+#define DEBUG_CF_START_VERSION 322240646
+#define DEBUG_CF_END_VERSION 393714633
+#define DEBUG_CF_WAIT_VERSION 383714633
 #define DEBUG_CF_VERSION(cfId, v)                                                                                      \
 	DEBUG_CF_START_VERSION <= v&& v <= DEBUG_CF_END_VERSION && (""_sr == DEBUG_CF_ID || cfId.printable() == DEBUG_CF_ID)
 
@@ -7459,14 +7459,15 @@ ACTOR Future<Void> partialChangeFeedStream(StorageServerInterface interf,
 		}
 	} catch (Error& e) {
 		// TODO REMOVE eventually, useful for debugging for now
-		if (DEBUG_CF_VERSION(feedData->id, nextVersion)) {
-			fmt::print("  single {0} {1} [{2} - {3}): CFError {4}\n",
-			           idx,
-			           interf.id().toString().substr(0, 4),
-			           range.begin.printable(),
-			           range.end.printable(),
-			           e.name());
-		}
+		// if (DEBUG_CF_VERSION(feedData->id, nextVersion)) {
+		fmt::print("  single {0} {1} {2} [{3} - {4}): CFError {5}\n",
+		           idx,
+		           interf.id().toString().substr(0, 4),
+		           debugID.toString().substr(0, 8).c_str(),
+		           range.begin.printable(),
+		           range.end.printable(),
+		           e.name());
+		// }
 		if (e.code() == error_code_actor_cancelled) {
 			throw;
 		}
@@ -7627,6 +7628,16 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 		debugIDs.push_back(debugID);
 		req.debugID = debugID;
 		results->streams.push_back(it.first.changeFeedStream.getReplyStream(req));
+		if (debugID.toString().substr(0, 8) == "637bfa4e") {
+			printf(
+			    "Good example: %s: %p\n", debugID.toString().substr(0, 8).c_str(), results->streams.back().debugAddr());
+			printf("\n");
+		}
+		if (debugID.toString().substr(0, 8) == "1ad27675") {
+			printf(
+			    "Bad example: %s: %p\n", debugID.toString().substr(0, 8).c_str(), results->streams.back().debugAddr());
+			printf("\n");
+		}
 	}
 
 	for (auto& it : results->storageData) {
