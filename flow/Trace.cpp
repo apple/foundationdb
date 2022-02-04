@@ -1553,6 +1553,18 @@ void parseNumericValue(std::string const& s, int64_t& outValue, bool permissive 
 	throw attribute_not_found();
 }
 
+void parseNumericValue(std::string const& s, uint64_t& outValue, bool permissive = false) {
+	unsigned long long int i = 0;
+	int consumed = 0;
+	int r = sscanf(s.c_str(), "%llu%n", &i, &consumed);
+	if (r == 1 && (consumed == s.size() || permissive)) {
+		outValue = i;
+		return;
+	}
+
+	throw attribute_not_found();
+}
+
 template <class T>
 T getNumericValue(TraceEventFields const& fields, std::string key, bool permissive) {
 	std::string field = fields.getValue(key);
@@ -1583,6 +1595,10 @@ int TraceEventFields::getInt(std::string key, bool permissive) const {
 
 int64_t TraceEventFields::getInt64(std::string key, bool permissive) const {
 	return getNumericValue<int64_t>(*this, key, permissive);
+}
+
+uint64_t TraceEventFields::getUint64(std::string key, bool permissive) const {
+	return getNumericValue<uint64_t>(*this, key, permissive);
 }
 
 double TraceEventFields::getDouble(std::string key, bool permissive) const {

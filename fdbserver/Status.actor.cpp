@@ -591,7 +591,8 @@ struct RolesInfo {
 			if (!iface.isTss()) { // only storage server has Metadata field
 				TraceEventFields const& metadata = metrics.at("Metadata");
 				JsonBuilderObject metadataObj;
-				metadataObj["created_time"] = metadata.getValue("CreatedTime");
+				metadataObj["created_time_datetime"] = metadata.getValue("CreatedTimeDatetime");
+				metadataObj["created_time_timestamp"] = metadata.getUint64("CreatedTimeTimestamp");
 				obj["storage_metadata"] = metadataObj;
 			}
 
@@ -1932,11 +1933,13 @@ ACTOR static Future<std::vector<std::pair<StorageServerInterface, EventMap>>> ge
 		// read StorageServer and Metadata in an atomic transaction?
 		if (metadata[i].present()) {
 			TraceEventFields metadataField;
-			metadataField.addField("CreatedTime", timerIntToGmt(metadata[i].get().createdTime));
+			metadataField.addField("CreatedTimeTimestamp", std::to_string(metadata[i].get().createdTime));
+			metadataField.addField("CreatedTimeDatetime", timerIntToGmt(metadata[i].get().createdTime));
 			results[i].second.emplace("Metadata", metadataField);
 		} else if (!servers[i].isTss()) {
 			TraceEventFields metadataField;
-			metadataField.addField("CreatedTime", "[removed]");
+			metadataField.addField("CreatedTimeTimestamp", "0");
+			metadataField.addField("CreatedTimeDatetime", "[removed]");
 			results[i].second.emplace("Metadata", metadataField);
 		}
 	}

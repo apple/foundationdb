@@ -359,13 +359,17 @@ struct StorageWiggleMetrics {
 
 	StatusObject toJSON() {
 		StatusObject result;
-		result["last_round_start"] = timerIntToGmt(last_round_start);
-		result["last_round_finish"] = timerIntToGmt(last_round_finish);
+		result["last_round_start_datetime"] = timerIntToGmt(last_round_start);
+		result["last_round_finish_datetime"] = timerIntToGmt(last_round_finish);
+		result["last_round_start_timestamp"] = last_round_start;
+		result["last_round_finish_timestamp"] = last_round_finish;
 		result["smoothed_round_seconds"] = smoothed_round_duration.estimate;
 		result["finished_round"] = finished_round;
 
-		result["last_wiggle_start"] = timerIntToGmt(last_wiggle_start);
-		result["last_wiggle_finish"] = timerIntToGmt(last_wiggle_finish);
+		result["last_wiggle_start_datetime"] = timerIntToGmt(last_wiggle_start);
+		result["last_wiggle_finish_datetime"] = timerIntToGmt(last_wiggle_finish);
+		result["last_wiggle_start_timestamp"] = last_wiggle_start;
+		result["last_wiggle_finish_timestamp"] = last_wiggle_finish;
 		result["smoothed_wiggle_seconds"] = smoothed_wiggle_duration.estimate;
 		result["finished_wiggle"] = finished_wiggle;
 		return result;

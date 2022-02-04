@@ -4274,7 +4274,8 @@ ACTOR Future<Void> readStorageWiggleMap(DDTeamCollection* self) {
 	// read the wiggling pairs
 	loop {
 		try {
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			wait(store(res, metadataMap.getRange(tr, UID(0, 0), Optional<UID>(), CLIENT_KNOBS->TOO_MANY)));
 			wait(tr->commit());
 			break;

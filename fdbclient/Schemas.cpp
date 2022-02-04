@@ -25,26 +25,20 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
 {
    "cluster":{
        "storage_wiggler": {
-         "primary": {
-          	"last_round_start": "%c %z",
-			"last_round_finish": "%c %z",
+         "$map": {
+          	"last_round_start_datetime": "Thu Jan  1 00:00:00 1970 +0000",
+			"last_round_finish_datetime": "Thu Jan  1 00:00:00 1970 +0000",
+            "last_round_start_timestamp": 0,
+			"last_round_finish_timestamp": 0,
 			"smoothed_round_seconds": 1,
 			"finished_round": 1,
-			"last_wiggle_start": "%c %z",
-			"last_wiggle_finish": "%c %z",
+			"last_wiggle_start_datetime": "Thu Jan  1 00:00:00 1970 +0000",
+			"last_wiggle_finish_datetime": "Thu Jan  1 00:00:00 1970 +0000",
+            "last_wiggle_start_timestamp": 0,
+            "last_wiggle_finish_timestamp": 0,
 			"smoothed_wiggle_seconds": 1,
 			"finished_wiggle": 1
-          },
-         "remote": {
-         	"last_round_start": "%c %z",
-			"last_round_finish": "%c %z",
-			"smoothed_round_seconds": 1,
-			"finished_round": 1,
-			"last_wiggle_start": "%c %z",
-			"last_wiggle_finish": "%c %z",
-			"smoothed_wiggle_seconds": 1,
-			"finished_wiggle": 1
-         }
+          }
       },
       "layers":{
          "_valid":true,
@@ -126,7 +120,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                      ]
                   },
                   "storage_metadata":{
-                     "created_time":"%c %z"
+                     "created_time_datetime":"Thu Jan  1 00:00:00 1970 +0000",
+                     "created_time_timestamp": 0
                   },
                   "data_version":12341234,
                   "durable_version":12341234,
