@@ -2804,7 +2804,18 @@ THREAD_HANDLE startThread(void* (*func)(void*), void* arg, int stackSize, const 
 #if defined(__linux__)
 	if (name != nullptr) {
 		// TODO: Should this just truncate?
-		ASSERT_EQ(pthread_setname_np(t, name), 0);
+		int retVal = pthread_setname_np(t, name);
+		if (!retVal)
+			return t;
+		// In simulation and unit testing a thread may return before the name can be set, this will
+		// return ENOENT or ESRCH. We'll log when ENOENT or ESRCH is encountered and continue, otherwise we'll log and
+		// throw a platform_error.
+		if (errno == ENOENT || errno == ESRCH) {
+			TraceEvent(SevWarn, "PthreadSetNameNp").detail("Name", name).detail("ReturnCode", retVal).GetLastError();
+		} else {
+			TraceEvent(SevError, "PthreadSetNameNp").detail("Name", name).detail("ReturnCode", retVal).GetLastError();
+			throw platform_error();
+		}
 	}
 #endif
 
@@ -3739,7 +3750,7 @@ void setupRunLoopProfiler() {
 		// Start a thread which will use signals to log stacks on long events
 		pthread_t* mainThread = (pthread_t*)malloc(sizeof(pthread_t));
 		*mainThread = pthread_self();
-		startThread(&checkThread, (void*)mainThread);
+		startThread(&checkThread, (void*)mainThread, 0, "fdb-loopprofile");
 	}
 #else
 	// No slow task profiling for other platforms!
