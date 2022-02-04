@@ -4466,10 +4466,11 @@ ACTOR Future<Void> monitorPerpetualStorageWiggle(DDTeamCollection* teamCollectio
 					TraceEvent("PerpetualStorageWiggleOpen", teamCollection->distributorId)
 					    .detail("Primary", teamCollection->primary);
 				} else if (speed == 0) {
+					wait(teamCollection->storageWiggler->resetStats());
 					if (!stopWiggleSignal.get()) {
 						stopWiggleSignal.set(true);
 						teamCollection->pauseWiggle->set(true);
-						wait(collection.signalAndReset() && teamCollection->storageWiggler->resetStats());
+						wait(collection.signalAndReset());
 					}
 					TraceEvent("PerpetualStorageWiggleClose", teamCollection->distributorId)
 					    .detail("Primary", teamCollection->primary);
