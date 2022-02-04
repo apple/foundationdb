@@ -767,7 +767,6 @@ public:
 			    FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(), true);
 			// FIXME: defer sending the message until we know the connection is established
 			endStreamOnDisconnect(disc, p, getEndpoint(), peer);
-			holdUntilConnected(disc, p);
 			return p;
 		} else {
 			send(value);
