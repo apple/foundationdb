@@ -83,9 +83,9 @@ struct StorageServerInterface {
 	RequestStream<struct ChangeFeedStreamRequest> changeFeedStream;
 	RequestStream<struct OverlappingChangeFeedsRequest> overlappingChangeFeeds;
 	RequestStream<struct ChangeFeedPopRequest> changeFeedPop;
+	RequestStream<struct ChangeFeedVersionUpdateRequest> changeFeedVersionUpdate;
 	RequestStream<struct GetCheckpointRequest> checkpoint;
 	RequestStream<struct GetFileRequest> getFile;
-	RequestStream<struct ChangeFeedVersionUpdateRequest> changeFeedVersionUpdate;
 
 	explicit StorageServerInterface(UID uid) : uniqueID(uid) {}
 	StorageServerInterface() : uniqueID(deterministicRandom()->randomUniqueID()) {}
@@ -985,7 +985,9 @@ struct CheckpointMetaData {
 	}
 };
 
-// Request to create a checkpoint for keyrange: `range`, with a minimum version of `version`, in the specific format;
+// Request to search for a checkpoint for a minimum keyrange: `range`, at the specific version,
+// in the specific format.
+// A CheckpointMetaData will be returned if the specific checkpoint is found.
 struct GetCheckpointRequest {
 	constexpr static FileIdentifier file_identifier = 13804343;
 	Version version;

@@ -4949,8 +4949,8 @@ void Transaction::fullReset() {
 	backoff = CLIENT_KNOBS->DEFAULT_BACKOFF;
 }
 
-int Transaction::apiVersionAtLeast(int version) const {
-	return trState->cx->apiVersionAtLeast(version);
+int Transaction::apiVersionAtLeast(int minVersion) const {
+	return trState->cx->apiVersionAtLeast(minVersion);
 }
 
 class MutationBlock {
@@ -6855,8 +6855,8 @@ static Future<Void> createCheckpointImpl(T tr, KeyRangeRef range, CheckpointForm
 		std::vector<UID> dest;
 		decodeKeyServersValue(UIDtoTagMap, keyServers[i].value, src, dest);
 
+		// Randomly choose a storage server to create the checkpoint.
 		const int idx = deterministicRandom()->randomInt(0, src.size());
-
 		const UID checkpointID = deterministicRandom()->randomUniqueID();
 
 		TraceEvent("CreateCheckpointTransactionShard")
@@ -6889,7 +6889,11 @@ ACTOR Future<std::vector<CheckpointMetaData>> getCheckpointMetaData(Database cx,
 	state Span span("NAPI:GetCheckpoint"_loc);
 
 	loop {
-		TraceEvent("GetCheckpointBegin").detail("Range", keys.toString()).detail("Version", version);
+		TraceEvent("GetCheckpointBegin")
+		    .detail("Range", keys.toString())
+		    .detail("Version", version)
+		    .detail("Format", static_cast<int>(format));
+
 		state std::vector<std::vector<Future<CheckpointMetaData>>> alternatives;
 		state std::vector<Future<Void>> fs;
 		state int i = 0;
@@ -6899,7 +6903,7 @@ ACTOR Future<std::vector<CheckpointMetaData>> getCheckpointMetaData(Database cx,
 			state std::vector<std::pair<KeyRange, Reference<LocationInfo>>> locations =
 			    wait(getKeyRangeLocations(cx,
 			                              keys,
-			                              2,
+			                              CLIENT_KNOBS->TOO_MANY,
 			                              Reverse::False,
 			                              &StorageServerInterface::checkpoint,
 			                              span.context,
@@ -6908,8 +6912,8 @@ ACTOR Future<std::vector<CheckpointMetaData>> getCheckpointMetaData(Database cx,
 
 			alternatives.resize(locations.size());
 			for (i = 0; i < locations.size(); ++i) {
-				state int e = locations[i].second->size();
-				for (j = 0; j < e; ++j) {
+				// For each shard, all storage servers are checked, only one is required.
+				for (j = 0; j < locations[i].second->size(); ++j) {
 					alternatives[i].push_back(locations[i].second->getInterface(j).checkpoint.getReply(
 					    GetCheckpointRequest(version, keys, format)));
 				}
@@ -6959,39 +6963,15 @@ ACTOR Future<std::vector<CheckpointMetaData>> getCheckpointMetaData(Database cx,
 	return res;
 }
 
-// ACTOR Future<CheckpointMetaData> getCheckpoint(Database cx,
-//                                                KeyRange keys,
-//                                                Version version,
-//                                                CheckpointFormat format) {
-// 	state Span span("NAPI:GetCheckpoint"_loc);
-
-// 	TraceEvent("GetCheckpointBegin")
-// 	    .detail("Version", version)
-// 	    .detail("Range", keys.toString())
-// 	    .detail("Format", static_cast<int>(format));
-
-// 	try {
-// 		state CheckpointMetaData m1 = wait(getCheckpointInternal(cx, keys, version, format, /*createNew=*/false));
-// 		TraceEvent("GetCheckpointReuse").detail("MetaData", m1.toString());
-// 		return m1;
-// 	} catch (Error& e) {
-// 		if (e.code() != error_code_checkpoint_not_found) {
-// 			throw e;
-// 		}
-// 	}
-
-// 	TraceEvent("GetCheckpointCreateNew").detail("Version", version);
-// 	CheckpointMetaData m2 = wait(getCheckpointInternal(cx, keys, version, format, /*createNew=*/true));
-// 	return m2;
-// }
-
-// Fetch a single file from storage server with ID of `ssID`.
+// Fetch a single sst file from storage server. If the file is fetch successfully, it will be recorded via cFun.
 ACTOR static Future<Void> fetchCheckpointFile(Database cx,
                                               std::shared_ptr<CheckpointMetaData> metaData,
                                               int idx,
                                               std::string dir,
                                               std::function<Future<Void>(const CheckpointMetaData&)> cFun,
                                               int maxRetries = 3) {
+	ASSERT(metaData->rocksCF.present());
+	// Skip fetched file.
 	if (metaData->rocksCF.get().sstFiles[idx].fetched && metaData->rocksCF.get().sstFiles[idx].db_path == dir) {
 		return Void();
 	}

@@ -438,6 +438,7 @@ private:
 public:
 	// std::unordered_map<CheckpointFormat, std::vector<CheckpointMetaData>> checkpoints;
 	std::map<Version, std::vector<CheckpointMetaData>> pendingCheckpoints;
+	std::unordered_map<UID, CheckpointMetaData> checkpoints;
 
 	// Histograms
 	struct FetchKeysHistograms {
@@ -1666,10 +1667,10 @@ ACTOR Future<Void> getCheckpointQ(StorageServer* self, GetCheckpointRequest req)
 	    .detail("Format", static_cast<int>(req.format));
 
 	try {
-		RangeResult checkpoints = wait(self->storage.readRange(persistCheckpointKeys));
-		int i = 0;
-		for (; i < checkpoints.size(); ++i) {
-			CheckpointMetaData md = decodeCheckpointValue(checkpoints[i].value);
+		// int i = 0;
+		std::unordered_map<UID, CheckpointMetaData>::iterator it = self->checkpoints.begin();
+		for (; it != self->checkpoints.end(); ++it) {
+			const CheckpointMetaData& md = it->second;
 			if (md.version == req.version && md.format == req.format && md.range.contains(req.range)) {
 				TraceEvent(SevDebug, "ServeCheckpointFoundExisting", self->thisServerID)
 				    .detail("Checkpoint", md.toString());
@@ -1677,7 +1678,7 @@ ACTOR Future<Void> getCheckpointQ(StorageServer* self, GetCheckpointRequest req)
 				break;
 			}
 		}
-		if (i >= checkpoints.size()) {
+		if (it == self->checkpoints.end()) {
 			req.reply.sendError(checkpoint_not_found());
 		}
 	} catch (Error& e) {
@@ -1689,16 +1690,25 @@ ACTOR Future<Void> getCheckpointQ(StorageServer* self, GetCheckpointRequest req)
 	return Void();
 }
 
-ACTOR Future<Void> deleteCheckpointQ(StorageServer* self, CheckpointMetaData checkpoint) {
-	wait(delay(0, TaskPriority::UpdateStorage));
+ACTOR Future<Void> deleteCheckpointQ(StorageServer* self, Version version, UID checkpointID) {
+	// wait(delay(0, TaskPriority::UpdateStorage));
+	// wait()
+	wait(self->durableVersion.whenAtLeast(version));
 
+	state Key persistCheckpointKey(persistCheckpointKeys.begin.toString() + checkpointID.toString());
+	Optional<Value> val = wait(self->storage.readValue(persistCheckpointKey));
+	if (!val.present()) {
+		return Void();
+	}
+	state CheckpointMetaData checkpoint = decodeCheckpointValue(val.get());
 	TraceEvent(SevDebug, "DeleteCheckpointBegin", self->thisServerID).detail("Checkpoint", checkpoint.toString());
 
 	ASSERT(checkpoint.state == CheckpointMetaData::Deleting);
 
 	try {
 		if (checkpoint.format == RocksDBColumnFamily) {
-			ASSERT(checkpont.rocksCF.present());
+			ASSERT(checkpoint.rocksCF.present());
+			self->checkpoints.erase(checkpoint.checkpointID);
 			const RocksDBColumnFamilyCheckpoint& rocksCF = checkpoint.rocksCF.get();
 			std::unordered_set<std::string> dirs;
 			for (const LiveFileMetaData& file : rocksCF.sstFiles) {
@@ -1707,21 +1717,23 @@ ACTOR Future<Void> deleteCheckpointQ(StorageServer* self, CheckpointMetaData che
 			for (const std::string dir : dirs) {
 				platform::eraseDirectoryRecursive(dir);
 			}
-
-		auto& mLV =self->addVersionToMutationLog(self->data().getLatestVersion());
-		self->addMutationToMutationLog(
-		    mLV,
-		    MutationRef(MutationRef::Clear,
-		                persistChangeFeedKeys.begin.toString() + rangeId.toString(),
-		                changeFeedValue(range, invalidVersion, ChangeFeedStatus::CHANGE_FEED_CREATE)));
+			Version version = self->data().getLatestVersion();
+			auto& mLV = self->addVersionToMutationLog(version);
+			self->addMutationToMutationLog(
+			    mLV, MutationRef(MutationRef::ClearRange, persistCheckpointKey, keyAfter(persistCheckpointKey)));
+			wait(self->durableVersion.whenAtLeast(version + 1));
 		} else if (checkpoint.format == RocksDBSSTFile) {
-
+			throw not_implemented();
 		} else {
+			throw internal_error();
 		}
 	} catch (Error& e) {
+		throw;
 	}
+
 	return Void();
 }
+
 ACTOR Future<Void> getFileQ(StorageServer* self, GetFileRequest req) {
 	TraceEvent("ServeGetFileBegin").detail("File", req.path).detail("Offset", req.offset);
 
@@ -5713,6 +5725,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 					    .error(e, true);
 				}
 			}
+			data->checkpoints[checkpointResult.checkpointID] = checkpointResult;
 			data->pendingCheckpoints.erase(data->pendingCheckpoints.begin());
 			requireCheckpoint = false;
 		}
@@ -5820,6 +5833,18 @@ void setAvailableStatus(StorageServer* self, KeyRangeRef keys, bool available) {
 		                               MutationRef(MutationRef::SetValue,
 		                                           availableKeys.end,
 		                                           endAvailable ? LiteralStringRef("1") : LiteralStringRef("0")));
+	}
+
+	if (!available) {
+		for (auto& [id, checkpoint] : self->checkpoints) {
+			if (checkpoint.range.intersects(keys)) {
+				Key persistCheckpointKey(persistCheckpointKeys.begin.toString() + checkpoint.checkpointID.toString());
+				checkpoint.state = CheckpointMetaData::Deleting;
+				self->addMutationToMutationLog(
+				    mLV, MutationRef(MutationRef::SetValue, persistCheckpointKey, checkpointValue(checkpoint)));
+			}
+			self->actors.add(deleteCheckpointQ(self, mLV.version + 1, checkpoint.checkpointID));
+		}
 	}
 }
 
@@ -6077,6 +6102,8 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	state Future<RangeResult> fShardAssigned = storage->readRange(persistShardAssignedKeys);
 	state Future<RangeResult> fShardAvailable = storage->readRange(persistShardAvailableKeys);
 	state Future<RangeResult> fChangeFeeds = storage->readRange(persistChangeFeedKeys);
+	state Future<RangeResult> fPendingCheckpoints = storage->readRange(persistPendingCheckpointKeys);
+	state Future<RangeResult> fCheckpoints = storage->readRange(persistCheckpointKeys);
 
 	state Promise<Void> byteSampleSampleRecovered;
 	state Promise<Void> startByteSampleRestore;
@@ -6086,7 +6113,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	TraceEvent("ReadingDurableState", data->thisServerID).log();
 	wait(waitForAll(
 	    std::vector{ fFormat, fID, fClusterID, ftssPairID, fTssQuarantine, fVersion, fLogProtocol, fPrimaryLocality }));
-	wait(waitForAll(std::vector{ fShardAssigned, fShardAvailable, fChangeFeeds }));
+	wait(waitForAll(std::vector{ fShardAssigned, fShardAvailable, fChangeFeeds, fPendingCheckpoints, fCheckpoints }));
 	wait(byteSampleSampleRecovered.getFuture());
 	TraceEvent("RestoringDurableState", data->thisServerID).log();
 
@@ -6136,6 +6163,25 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	state Version version = BinaryReader::fromStringRef<Version>(fVersion.get().get(), Unversioned());
 	debug_checkRestoredVersion(data->thisServerID, version, "StorageServer");
 	data->setInitialVersion(version);
+
+	state RangeResult pendingCheckpoints = fPendingCheckpoints.get();
+	state int pCLoc;
+	for (pCLoc = 0; pCLoc < pendingCheckpoints.size(); ++pCLoc) {
+		CheckpointMetaData metaData = decodeCheckpointValue(pendingCheckpoints[pCLoc].value);
+		data->pendingCheckpoints[metaData.version].push_back(metaData);
+		wait(yield());
+	}
+
+	state RangeResult checkpoints = fCheckpoints.get();
+	state int cLoc;
+	for (cLoc = 0; cLoc < checkpoints.size(); ++cLoc) {
+		CheckpointMetaData metaData = decodeCheckpointValue(checkpoints[cLoc].value);
+		data->checkpoints[metaData.checkpointID] = metaData;
+		if (metaData.state == CheckpointState::Deleting) {
+			data->actors.add(deleteCheckpointQ(data, version, metaData.checkpointID));
+		}
+		wait(yield());
+	}
 
 	state RangeResult available = fShardAvailable.get();
 	state int availableLoc;
