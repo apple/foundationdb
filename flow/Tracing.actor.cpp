@@ -295,13 +295,16 @@ struct FastUDPTracer : public UDPTracer {
 		static std::once_flag once;
 		std::call_once(once, [&]() {
 			log_actor_ = fastTraceLogger(&unready_socket_messages_, &failed_messages_, &total_messages_, &send_error_);
+			std::string destAddr = FLOW_KNOBS->TRACING_UDP_LISTENER_ADDR;
 			if (g_network->isSimulated()) {
 				udp_server_actor_ = simulationStartServer();
+				// Force loopback when in simulation mode
+				destAddr = "127.0.0.1";
 			}
+			NetworkAddress destAddress =
+			    NetworkAddress::parse(destAddr + ":" + std::to_string(FLOW_KNOBS->TRACING_UDP_LISTENER_PORT));
 
-			NetworkAddress localAddress = NetworkAddress::parse(FLOW_KNOBS->TRACING_UDP_LISTENER_ADDR + ":" +
-			                                                    std::to_string(FLOW_KNOBS->TRACING_UDP_LISTENER_PORT));
-			socket_ = INetworkConnections::net()->createUDPSocket(localAddress);
+			socket_ = INetworkConnections::net()->createUDPSocket(destAddress);
 		});
 
 		if (span.location.name.size() == 0) {
