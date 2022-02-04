@@ -31,6 +31,8 @@ set(FDBSERVER_SRCS
   DataDistributionTracker.actor.cpp
   DataDistributorInterface.h
   DBCoreState.h
+  DDTeamCollection.actor.cpp
+  DDTeamCollection.h
   DiskQueue.actor.cpp
   EncryptKeyProxyInterface.h
   EncryptKeyProxy.actor.cpp  
