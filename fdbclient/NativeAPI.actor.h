@@ -465,15 +465,32 @@ int64_t extractIntOption(Optional<StringRef> value,
 // states: coordinator, TLog and storage state
 ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID);
 
-// Get a checkpoint for keys with a minimum version, in the specific format.
-ACTOR Future<CheckpointMetaData> getCheckpoint(Database cx, KeyRange keys, Version minVersion, CheckpointFormat format);
+// Adds necessary mutation(s) to the transaction, so that *one* checkpoint will be created for
+// each and every shards overlapping with `range`. Each checkpoint will be created at a random
+// storage server for each shard.
+// All checkpoint(s) will be created at the transaction's commit version.
+Future<Void> createCheckpoint(Transaction* tr, KeyRangeRef range, CheckpointFormat format);
 
-// Fetch a checkpoint to dir, a new checkpoint will be created on the storage server(s) if none exists.
+// Same as above.
+Future<Void> createCheckpoint(Reference<ReadYourWritesTransaction> tr, KeyRangeRef range, CheckpointFormat format);
+
+// Gets checkpoint metadata for `keys` at the specific version, with the particular format.
+// One CheckpointMetaData will be returned for each distinctive shard.
+// The collective keyrange of the returned checkpoint(s) is a super-set of `keys`.
+// checkpoint_not_found() error will be returned if the specific checkpoint(s) cannot be found.
+ACTOR Future<std::vector<CheckpointMetaData>> getCheckpointMetaData(Database cx,
+                                                                    KeyRange keys,
+                                                                    Version version,
+                                                                    CheckpointFormat format,
+                                                                    double timeout = 5.0);
+
+// Fetch the checkpoint file(s) to local dir, the checkpoint is specified by initialState.
+// If cFun is provided, the fetch progress can be checkpointed, so that next time, the fetch process
+// can be continued, in case of crash.
 ACTOR Future<CheckpointMetaData> fetchCheckpoint(Database cx,
-                                                 KeyRange keys,
-                                                 Version minVersion,
-                                                 CheckpointFormat format,
-                                                 std::string dir);
+                                                 CheckpointMetaData initialState,
+                                                 std::string dir,
+                                                 std::function<Future<Void>(const CheckpointMetaData&)> cFun = nullptr);
 
 // Checks with Data Distributor that it is safe to mark all servers in exclusions as failed
 ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion> exclusions);

@@ -101,6 +101,42 @@ bool canReplyWith(Error e) {
 }
 } // namespace
 
+#define PERSIST_PREFIX "\xff\xff"
+
+// Immutable
+static const KeyValueRef persistFormat(LiteralStringRef(PERSIST_PREFIX "Format"),
+                                       LiteralStringRef("FoundationDB/StorageServer/1/4"));
+static const KeyRangeRef persistFormatReadableRange(LiteralStringRef("FoundationDB/StorageServer/1/2"),
+                                                    LiteralStringRef("FoundationDB/StorageServer/1/5"));
+static const KeyRef persistID = LiteralStringRef(PERSIST_PREFIX "ID");
+static const KeyRef persistTssPairID = LiteralStringRef(PERSIST_PREFIX "tssPairID");
+static const KeyRef persistTssQuarantine = LiteralStringRef(PERSIST_PREFIX "tssQ");
+static const KeyRef persistClusterIdKey = LiteralStringRef(PERSIST_PREFIX "clusterId");
+
+// (Potentially) change with the durable version or when fetchKeys completes
+static const KeyRef persistVersion = LiteralStringRef(PERSIST_PREFIX "Version");
+static const KeyRangeRef persistShardAssignedKeys =
+    KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "ShardAssigned/"), LiteralStringRef(PERSIST_PREFIX "ShardAssigned0"));
+static const KeyRangeRef persistShardAvailableKeys =
+    KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "ShardAvailable/"), LiteralStringRef(PERSIST_PREFIX "ShardAvailable0"));
+static const KeyRangeRef persistByteSampleKeys =
+    KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "BS/"), LiteralStringRef(PERSIST_PREFIX "BS0"));
+static const KeyRangeRef persistByteSampleSampleKeys =
+    KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "BS/" PERSIST_PREFIX "BS/"),
+                LiteralStringRef(PERSIST_PREFIX "BS/" PERSIST_PREFIX "BS0"));
+static const KeyRef persistLogProtocol = LiteralStringRef(PERSIST_PREFIX "LogProtocol");
+static const KeyRef persistPrimaryLocality = LiteralStringRef(PERSIST_PREFIX "PrimaryLocality");
+static const KeyRangeRef persistChangeFeedKeys =
+    KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "RF/"), LiteralStringRef(PERSIST_PREFIX "RF0"));
+// data keys are unmangled (but never start with PERSIST_PREFIX because they are always in allKeys)
+
+static const KeyRangeRef persistCheckpointKeys =
+    KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "Checkpoint/"), LiteralStringRef(PERSIST_PREFIX "Checkpoint0"));
+static const KeyRangeRef persistPendingCheckpointKeys =
+    KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "PendingCheckpoint/"),
+                LiteralStringRef(PERSIST_PREFIX "PendingCheckpoint0"));
+static const std::string rocksdbCheckpointDirPrefix = "/rockscheckpoints_";
+
 struct AddingShard : NonCopyable {
 	KeyRange keys;
 	Future<Void> fetchClient; // holds FetchKeys() actor
@@ -228,9 +264,9 @@ struct StorageServerDisk {
 		return storage->readRange(keys, rowLimit, byteLimit, type);
 	}
 
-	Future<CheckpointMetaData> checkpoint(const GetCheckpointRequest& request, const std::string& checkpointDir) {
-		return storage->checkpoint(request, checkpointDir);
-	}
+	Future<CheckpointMetaData> checkpoint(const CheckpointRequest& request) { return storage->checkpoint(request); }
+
+	Future<Void> restore(const CheckpointMetaData& checkpoint) { return storage->restore(checkpoint); }
 
 	KeyValueStoreType getKeyValueStoreType() const { return storage->getType(); }
 	StorageBytes getStorageBytes() const { return storage->getStorageBytes(); }
@@ -403,10 +439,8 @@ private:
 	std::unordered_map<KeyRef, Reference<ServerWatchMetadata>> watchMap; // keep track of server watches
 
 public:
-	std::set<Version> checkpointVersions;
-
-public:
-	std::unordered_map<CheckpointFormat, std::map<Version, CheckpointMetaData>> checkpoints;
+	std::map<Version, std::vector<CheckpointMetaData>> pendingCheckpoints; // Pending checkpoint requests
+	std::unordered_map<UID, CheckpointMetaData> checkpoints; // Existing and deleting checkpoints
 
 	// Histograms
 	struct FetchKeysHistograms {
@@ -1625,47 +1659,32 @@ ACTOR Future<Void> changeFeedPopQ(StorageServer* self, ChangeFeedPopRequest req)
 	return Void();
 }
 
-// Create a checkpoint.
-ACTOR Future<Void> checkpointQ(StorageServer* self, GetCheckpointRequest req) {
-	wait(delay(0));
+// Finds a checkpoint.
+ACTOR Future<Void> getCheckpointQ(StorageServer* self, GetCheckpointRequest req) {
+	// Wait until the desired version is durable.
+	wait(self->durableVersion.whenAtLeast(req.version + 1));
 
-	TraceEvent(SevDebug, "ServeCheckpointBegin", self->thisServerID)
-	    .detail("MinVersion", req.minVersion)
-	    .detail("Range", req.range.toString())
-	    .detail("Format", static_cast<int>(req.format));
-
-	state Version minVersion = req.minVersion == latestVersion ? self->version.get() : req.minVersion;
-	wait(self->durableVersion.whenAtLeast(minVersion));
-
-	TraceEvent(SevDebug, "ServeCheckpointVersionSatisfied", self->thisServerID)
-	    .detail("MinVersion", req.minVersion)
+	TraceEvent(SevDebug, "ServeGetCheckpointVersionSatisfied", self->thisServerID)
+	    .detail("Version", req.version)
 	    .detail("Range", req.range.toString())
 	    .detail("Format", static_cast<int>(req.format));
 
 	try {
-		// Taking the lock is necessary to prevent data move.
-		wait(self->durableVersionLock.take(TaskPriority::MoveKeys, 1));
-		state FlowLock::Releaser holdingDVL(self->durableVersionLock);
-
-		if (!self->isReadable(req.range)) {
-			req.reply.sendError(wrong_shard_server());
-			return Void();
+		std::unordered_map<UID, CheckpointMetaData>::iterator it = self->checkpoints.begin();
+		for (; it != self->checkpoints.end(); ++it) {
+			const CheckpointMetaData& md = it->second;
+			if (md.version == req.version && md.format == req.format && md.range.contains(req.range) &&
+			    md.getState() == CheckpointMetaData::Complete) {
+				req.reply.send(md);
+				TraceEvent(SevDebug, "ServeGetCheckpointEnd", self->thisServerID).detail("Checkpoint", md.toString());
+				break;
+			}
 		}
 
-		state CheckpointMetaData checkpointMetaData =
-		    wait(self->storage.checkpoint(req, self->folder + "/rockscheckpoints_" + std::to_string(minVersion) + "/"));
-
-		checkpointMetaData.ssID = self->thisServerID;
-		self->checkpoints[req.format].emplace(checkpointMetaData.version, checkpointMetaData);
-		// TODO: persist the checkpoint metadata.
-
-		req.reply.send(checkpointMetaData);
-		TraceEvent("ServeCheckpointSuccess").detail("Checkpoint", checkpointMetaData.toString());
+		if (it == self->checkpoints.end()) {
+			req.reply.sendError(checkpoint_not_found());
+		}
 	} catch (Error& e) {
-		TraceEvent(SevWarnAlways, "ServerCheckpointFailure")
-		    .detail("MinVersion", minVersion)
-		    .detail("Range", req.range.toString())
-		    .error(e, /*includeCancel=*/true);
 		if (!canReplyWith(e)) {
 			throw;
 		}
@@ -1674,10 +1693,54 @@ ACTOR Future<Void> checkpointQ(StorageServer* self, GetCheckpointRequest req) {
 	return Void();
 }
 
-ACTOR Future<Void> getFileQ(StorageServer* self, GetFileRequest req) {
-	TraceEvent("ServeGetFileBegin").detail("File", req.path).detail("Offset", req.offset);
+ACTOR Future<Void> deleteCheckpointQ(StorageServer* self, Version version, CheckpointMetaData checkpoint) {
+	wait(self->durableVersion.whenAtLeast(version));
 
-	state int transactionSize = 64 * 1024;
+	TraceEvent("DeleteCheckpointBegin", self->thisServerID).detail("Checkpoint", checkpoint.toString());
+	state Key persistCheckpointKey(persistCheckpointKeys.begin.toString() + checkpoint.checkpointID.toString());
+	state Key pendingCheckpointKey(persistPendingCheckpointKeys.begin.toString() + checkpoint.checkpointID.toString());
+
+	try {
+		if (checkpoint.format == RocksDBColumnFamily) {
+			ASSERT(checkpoint.rocksCF.present());
+			self->checkpoints.erase(checkpoint.checkpointID);
+			const RocksDBColumnFamilyCheckpoint& rocksCF = checkpoint.rocksCF.get();
+			std::unordered_set<std::string> dirs;
+			for (const LiveFileMetaData& file : rocksCF.sstFiles) {
+				dirs.insert(file.db_path);
+			}
+			for (const std::string dir : dirs) {
+				platform::eraseDirectoryRecursive(dir);
+				TraceEvent("DeleteCheckpointRemovedDir", self->thisServerID)
+				    .detail("CheckpointID", checkpoint.checkpointID)
+				    .detail("Dir", dir);
+			}
+
+			// Remove the checkpoint record.
+		} else if (checkpoint.format == RocksDBSSTFile) {
+			throw not_implemented();
+		} else {
+			throw internal_error();
+		}
+		Version version = self->data().getLatestVersion();
+		auto& mLV = self->addVersionToMutationLog(version);
+		self->addMutationToMutationLog(
+		    mLV, MutationRef(MutationRef::ClearRange, pendingCheckpointKey, keyAfter(pendingCheckpointKey)));
+		self->addMutationToMutationLog(
+		    mLV, MutationRef(MutationRef::ClearRange, persistCheckpointKey, keyAfter(persistCheckpointKey)));
+	} catch (Error& e) {
+		// TODO: Handle errors more gracefully.
+		throw;
+	}
+
+	return Void();
+}
+
+// Serves GetFileRequests.
+ACTOR Future<Void> getFileQ(StorageServer* self, GetFileRequest req) {
+	TraceEvent("ServeGetFileBegin", self->thisServerID).detail("File", req.path).detail("Offset", req.offset);
+
+	state int transactionSize = 64 * 1024; // Block size read from disk.
 	state size_t fileOffset = req.offset;
 	state Arena arena;
 	state StringRef buf;
@@ -3956,35 +4019,6 @@ ACTOR Future<Void> tryGetRange(PromiseStream<RangeResult> results, Transaction* 
 	}
 }
 
-#define PERSIST_PREFIX "\xff\xff"
-
-// Immutable
-static const KeyValueRef persistFormat(LiteralStringRef(PERSIST_PREFIX "Format"),
-                                       LiteralStringRef("FoundationDB/StorageServer/1/4"));
-static const KeyRangeRef persistFormatReadableRange(LiteralStringRef("FoundationDB/StorageServer/1/2"),
-                                                    LiteralStringRef("FoundationDB/StorageServer/1/5"));
-static const KeyRef persistID = LiteralStringRef(PERSIST_PREFIX "ID");
-static const KeyRef persistTssPairID = LiteralStringRef(PERSIST_PREFIX "tssPairID");
-static const KeyRef persistTssQuarantine = LiteralStringRef(PERSIST_PREFIX "tssQ");
-static const KeyRef persistClusterIdKey = LiteralStringRef(PERSIST_PREFIX "clusterId");
-
-// (Potentially) change with the durable version or when fetchKeys completes
-static const KeyRef persistVersion = LiteralStringRef(PERSIST_PREFIX "Version");
-static const KeyRangeRef persistShardAssignedKeys =
-    KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "ShardAssigned/"), LiteralStringRef(PERSIST_PREFIX "ShardAssigned0"));
-static const KeyRangeRef persistShardAvailableKeys =
-    KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "ShardAvailable/"), LiteralStringRef(PERSIST_PREFIX "ShardAvailable0"));
-static const KeyRangeRef persistByteSampleKeys =
-    KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "BS/"), LiteralStringRef(PERSIST_PREFIX "BS0"));
-static const KeyRangeRef persistByteSampleSampleKeys =
-    KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "BS/" PERSIST_PREFIX "BS/"),
-                LiteralStringRef(PERSIST_PREFIX "BS/" PERSIST_PREFIX "BS0"));
-static const KeyRef persistLogProtocol = LiteralStringRef(PERSIST_PREFIX "LogProtocol");
-static const KeyRef persistPrimaryLocality = LiteralStringRef(PERSIST_PREFIX "PrimaryLocality");
-static const KeyRangeRef persistChangeFeedKeys =
-    KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "RF/"), LiteralStringRef(PERSIST_PREFIX "RF0"));
-// data keys are unmangled (but never start with PERSIST_PREFIX because they are always in allKeys)
-
 ACTOR Future<Void> fetchChangeFeedApplier(StorageServer* data,
                                           Reference<ChangeFeedInfo> changeFeedInfo,
                                           Key rangeId,
@@ -4845,9 +4879,11 @@ public:
 		}
 
 		if (m.param1.startsWith(systemKeys.end)) {
-			if ((m.type == MutationRef::SetValue) && m.param1.substr(1).startsWith(storageCachePrefix))
+			if ((m.type == MutationRef::SetValue) && m.param1.substr(1).startsWith(storageCachePrefix)) {
 				applyPrivateCacheData(data, m);
-			else {
+			} else if ((m.type == MutationRef::SetValue) && m.param1.substr(1).startsWith(checkpointPrefix)) {
+				registerPendingCheckpoint(data, m, ver);
+			} else {
 				applyPrivateData(data, m);
 			}
 		} else {
@@ -5110,6 +5146,24 @@ private:
 			ASSERT(false); // Unknown private mutation
 		}
 	}
+
+	// Registers a pending checkpoint request, it will be fullfilled when the desired version is durable.
+	void registerPendingCheckpoint(StorageServer* data, const MutationRef& m, Version ver) {
+		CheckpointMetaData checkpoint = decodeCheckpointValue(m.param2);
+		ASSERT(checkpoint.getState() == CheckpointMetaData::Pending);
+		const UID checkpointID = decodeCheckpointKey(m.param1.substr(1));
+		checkpoint.version = ver;
+		data->pendingCheckpoints[ver].push_back(checkpoint);
+
+		auto& mLV = data->addVersionToMutationLog(ver);
+		const Key pendingCheckpointKey(persistPendingCheckpointKeys.begin.toString() + checkpointID.toString());
+		data->addMutationToMutationLog(
+		    mLV, MutationRef(MutationRef::SetValue, pendingCheckpointKey, checkpointValue(checkpoint)));
+
+		TraceEvent("RegisterPendingCheckpoint", data->thisServerID)
+		    .detail("Key", pendingCheckpointKey)
+		    .detail("Checkpoint", checkpoint.toString());
+	}
 };
 
 ACTOR Future<Void> tssDelayForever() {
@@ -5124,8 +5178,8 @@ ACTOR Future<Void> tssDelayForever() {
 ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 	state double start;
 	try {
-		// If we are disk bound and durableVersion is very old, we need to block updates or we could run out of memory
-		// This is often referred to as the storage server e-brake (emergency brake)
+		// If we are disk bound and durableVersion is very old, we need to block updates or we could run out of
+		// memory This is often referred to as the storage server e-brake (emergency brake)
 
 		// We allow the storage server to make some progress between e-brake periods, referreed to as "overage", in
 		// order to ensure that it advances desiredOldestVersion enough for updateStorage to make enough progress on
@@ -5163,8 +5217,8 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		    data->tssFaultInjectTime.get() < now()) {
 			if (deterministicRandom()->random01() < 0.01) {
 				TraceEvent(SevWarnAlways, "TSSInjectDelayForever", data->thisServerID).log();
-				// small random chance to just completely get stuck here, each tss should eventually hit this in this
-				// mode
+				// small random chance to just completely get stuck here, each tss should eventually hit this in
+				// this mode
 				wait(tssDelayForever());
 			} else {
 				// otherwise pause for part of a second
@@ -5261,14 +5315,14 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			}
 
 			// Any fetchKeys which are ready to transition their shards to the adding,transferred state do so now.
-			// If there is an epoch end we skip this step, to increase testability and to prevent inserting a version in
-			// the middle of a rolled back version range.
+			// If there is an epoch end we skip this step, to increase testability and to prevent inserting a
+			// version in the middle of a rolled back version range.
 			while (!hasPrivateData && !epochEnd && !data->readyFetchKeys.empty()) {
 				auto fk = data->readyFetchKeys.back();
 				data->readyFetchKeys.pop_back();
 				fk.send(&fii);
-				// fetchKeys() would put the data it fetched into the fii. The thread will not return back to this actor
-				// until it was completed.
+				// fetchKeys() would put the data it fetched into the fii. The thread will not return back to this
+				// actor until it was completed.
 			}
 
 			for (auto& c : fii.changes)
@@ -5277,9 +5331,10 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			wait(doEagerReads(data, &eager));
 			if (data->shardChangeCounter == changeCounter)
 				break;
-			TEST(true); // A fetchKeys completed while we were doing this, so eager might be outdated.  Read it again.
-			// SOMEDAY: Theoretically we could check the change counters of individual shards and retry the reads only
-			// selectively
+			TEST(true); // A fetchKeys completed while we were doing this, so eager might be outdated.  Read it
+			            // again.
+			// SOMEDAY: Theoretically we could check the change counters of individual shards and retry the reads
+			// only selectively
 			eager = UpdateEagerReadInfo();
 		}
 		data->eagerReadsLatencyHistogram->sampleSeconds(now() - start);
@@ -5309,8 +5364,8 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			for (; mutationNum < pUpdate->mutations.size(); mutationNum++) {
 				updater.applyMutation(data, pUpdate->mutations[mutationNum], pUpdate->version, true);
 				mutationBytes += pUpdate->mutations[mutationNum].totalSize();
-				// data->counters.mutationBytes or data->counters.mutations should not be updated because they should
-				// have counted when the mutations arrive from cursor initially.
+				// data->counters.mutationBytes or data->counters.mutations should not be updated because they
+				// should have counted when the mutations arrive from cursor initially.
 				injectedChanges = true;
 				if (mutationBytes > SERVER_KNOBS->DESIRED_UPDATE_BYTES) {
 					mutationBytes = 0;
@@ -5561,6 +5616,33 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		state Version desiredVersion = data->desiredOldestVersion.get();
 		state int64_t bytesLeft = SERVER_KNOBS->STORAGE_COMMIT_BYTES;
 
+		// Clean up stale checkpoint requests, this is not supposed to happen, since checkpoints are cleaned up onup
+		// failures. This is kept as a safeguard.
+		while (!data->pendingCheckpoints.empty() && data->pendingCheckpoints.begin()->first <= startOldestVersion) {
+			for (int idx = 0; idx < data->pendingCheckpoints.begin()->second.size(); ++idx) {
+				auto& metaData = data->pendingCheckpoints.begin()->second[idx];
+				data->actors.add(deleteCheckpointQ(data, startOldestVersion, metaData));
+				TraceEvent("StorageStaleCheckpointRequest", data->thisServerID)
+				    .detail("PendingCheckpoint", metaData.toString())
+				    .detail("DurableVersion", startOldestVersion);
+			}
+			data->pendingCheckpoints.erase(data->pendingCheckpoints.begin());
+		}
+
+		// Create checkpoint if the pending request version is within (startOldestVersion, desiredVersion].
+		// Versions newer than the checkpoint version won't be committed before the checkpoint is created.
+		state bool requireCheckpoint = false;
+		if (!data->pendingCheckpoints.empty()) {
+			const Version cVer = data->pendingCheckpoints.begin()->first;
+			if (cVer <= desiredVersion) {
+				TraceEvent("CheckpointVersionSatisfied", data->thisServerID)
+				    .detail("DesiredVersion", desiredVersion)
+				    .detail("CheckPointVersion", cVer);
+				desiredVersion = cVer;
+				requireCheckpoint = true;
+			}
+		}
+
 		// Write mutations to storage until we reach the desiredVersion or have written too much (bytesleft)
 		state double beforeStorageUpdates = now();
 		loop {
@@ -5622,13 +5704,64 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 
 		debug_advanceMinCommittedVersion(data->thisServerID, newOldestVersion);
 
+		if (requireCheckpoint) {
+			ASSERT(newOldestVersion == data->pendingCheckpoints.begin()->first);
+			state int idx = 0;
+			for (; idx < data->pendingCheckpoints.begin()->second.size(); ++idx) {
+				auto& metaData = data->pendingCheckpoints.begin()->second[idx];
+				ASSERT(metaData.ssID == data->thisServerID);
+				const CheckpointRequest req(newOldestVersion,
+				                            metaData.range,
+				                            static_cast<CheckpointFormat>(metaData.format),
+				                            metaData.checkpointID,
+				                            data->folder + rocksdbCheckpointDirPrefix +
+				                                metaData.checkpointID.toString());
+				state CheckpointMetaData checkpointResult;
+				try {
+					state CheckpointMetaData res = wait(data->storage.checkpoint(req));
+					checkpointResult = res;
+					checkpointResult.ssID = data->thisServerID;
+					ASSERT(checkpointResult.getState() == CheckpointMetaData::Complete);
+					data->checkpoints[checkpointResult.checkpointID] = checkpointResult;
+					TraceEvent("StorageCreatedCheckpoint", data->thisServerID)
+					    .detail("Checkpoint", checkpointResult.toString());
+				} catch (Error& e) {
+					// If checkpoint creation fails, the failure is persisted.
+					checkpointResult = data->pendingCheckpoints.begin()->second[idx];
+					checkpointResult.setState(CheckpointMetaData::Fail);
+					TraceEvent("StorageCreatedCheckpointFailure", data->thisServerID)
+					    .detail("PendingCheckpoint", checkpointResult.toString());
+				}
+
+				// Persist the checkpoint meta data.
+				try {
+					Key pendingCheckpointKey(persistPendingCheckpointKeys.begin.toString() +
+					                         checkpointResult.checkpointID.toString());
+					Key persistCheckpointKey(persistCheckpointKeys.begin.toString() +
+					                         checkpointResult.checkpointID.toString());
+					data->storage.clearRange(singleKeyRange(pendingCheckpointKey));
+					data->storage.writeKeyValue(KeyValueRef(persistCheckpointKey, checkpointValue(checkpointResult)));
+					wait(data->storage.commit());
+				} catch (Error& e) {
+					// If the checkpoint meta data is not persisted successfully, remove the checkpoint.
+					TraceEvent("StorageCreateCheckpointPersistFailure", data->thisServerID)
+					    .detail("Checkpoint", checkpointResult.toString())
+					    .error(e, true);
+					data->checkpoints.erase(checkpointResult.checkpointID);
+					data->actors.add(deleteCheckpointQ(data, newOldestVersion, checkpointResult));
+				}
+			}
+			data->pendingCheckpoints.erase(data->pendingCheckpoints.begin());
+			requireCheckpoint = false;
+		}
+
 		if (newOldestVersion > data->rebootAfterDurableVersion) {
 			TraceEvent("RebootWhenDurableTriggered", data->thisServerID)
 			    .detail("NewOldestVersion", newOldestVersion)
 			    .detail("RebootAfterDurableVersion", data->rebootAfterDurableVersion);
-			// To avoid brokenPromise error, which is caused by the sender of the durableInProgress (i.e., this process)
-			// never sets durableInProgress, we should set durableInProgress before send the please_reboot() error.
-			// Otherwise, in the race situation when storage server receives both reboot and
+			// To avoid brokenPromise error, which is caused by the sender of the durableInProgress (i.e., this
+			// process) never sets durableInProgress, we should set durableInProgress before send the
+			// please_reboot() error. Otherwise, in the race situation when storage server receives both reboot and
 			// brokenPromise of durableInProgress, the worker of the storage server will die.
 			// We will eventually end up with no worker for storage server role.
 			// The data distributor's buildTeam() will get stuck in building a team
@@ -5650,12 +5783,13 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		}
 
 		durableInProgress.send(Void());
-		wait(delay(0, TaskPriority::UpdateStorage)); // Setting durableInProgess could cause the storage server to shut
-		                                             // down, so delay to check for cancellation
+		wait(delay(0, TaskPriority::UpdateStorage)); // Setting durableInProgess could cause the storage server to
+		                                             // shut down, so delay to check for cancellation
 
 		// Taking and releasing the durableVersionLock ensures that no eager reads both begin before the commit was
-		// effective and are applied after we change the durable version. Also ensure that we have to lock while calling
-		// changeDurableVersion, because otherwise the latest version of mutableData might be partially loaded.
+		// effective and are applied after we change the durable version. Also ensure that we have to lock while
+		// calling changeDurableVersion, because otherwise the latest version of mutableData might be partially
+		// loaded.
 		state double beforeSSDurableVersionUpdate = now();
 		wait(data->durableVersionLock.take());
 		data->popVersion(data->durableVersion.get() + 1);
@@ -5724,6 +5858,19 @@ void setAvailableStatus(StorageServer* self, KeyRangeRef keys, bool available) {
 		                               MutationRef(MutationRef::SetValue,
 		                                           availableKeys.end,
 		                                           endAvailable ? LiteralStringRef("1") : LiteralStringRef("0")));
+	}
+
+	// When a shard is moved out, delete all related checkpoints created for data move.
+	if (!available) {
+		for (auto& [id, checkpoint] : self->checkpoints) {
+			if (checkpoint.range.intersects(keys)) {
+				Key persistCheckpointKey(persistCheckpointKeys.begin.toString() + checkpoint.checkpointID.toString());
+				checkpoint.setState(CheckpointMetaData::Deleting);
+				self->addMutationToMutationLog(
+				    mLV, MutationRef(MutationRef::SetValue, persistCheckpointKey, checkpointValue(checkpoint)));
+			}
+			self->actors.add(deleteCheckpointQ(self, mLV.version + 1, checkpoint));
+		}
 	}
 }
 
@@ -5981,6 +6128,8 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	state Future<RangeResult> fShardAssigned = storage->readRange(persistShardAssignedKeys);
 	state Future<RangeResult> fShardAvailable = storage->readRange(persistShardAvailableKeys);
 	state Future<RangeResult> fChangeFeeds = storage->readRange(persistChangeFeedKeys);
+	state Future<RangeResult> fPendingCheckpoints = storage->readRange(persistPendingCheckpointKeys);
+	state Future<RangeResult> fCheckpoints = storage->readRange(persistCheckpointKeys);
 
 	state Promise<Void> byteSampleSampleRecovered;
 	state Promise<Void> startByteSampleRestore;
@@ -5990,7 +6139,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	TraceEvent("ReadingDurableState", data->thisServerID).log();
 	wait(waitForAll(
 	    std::vector{ fFormat, fID, fClusterID, ftssPairID, fTssQuarantine, fVersion, fLogProtocol, fPrimaryLocality }));
-	wait(waitForAll(std::vector{ fShardAssigned, fShardAvailable, fChangeFeeds }));
+	wait(waitForAll(std::vector{ fShardAssigned, fShardAvailable, fChangeFeeds, fPendingCheckpoints, fCheckpoints }));
 	wait(byteSampleSampleRecovered.getFuture());
 	TraceEvent("RestoringDurableState", data->thisServerID).log();
 
@@ -6021,8 +6170,8 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	}
 
 	// It's a bit sketchy to rely on an untrusted storage engine to persist its quarantine state when the quarantine
-	// state means the storage engine already had a durability or correctness error, but it should get re-quarantined
-	// very quickly because of a mismatch if it starts trying to do things again
+	// state means the storage engine already had a durability or correctness error, but it should get
+	// re-quarantined very quickly because of a mismatch if it starts trying to do things again
 	if (fTssQuarantine.get().present()) {
 		TEST(true); // TSS restarted while quarantined
 		data->tssInQuarantine = true;
@@ -6040,6 +6189,25 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	state Version version = BinaryReader::fromStringRef<Version>(fVersion.get().get(), Unversioned());
 	debug_checkRestoredVersion(data->thisServerID, version, "StorageServer");
 	data->setInitialVersion(version);
+
+	state RangeResult pendingCheckpoints = fPendingCheckpoints.get();
+	state int pCLoc;
+	for (pCLoc = 0; pCLoc < pendingCheckpoints.size(); ++pCLoc) {
+		CheckpointMetaData metaData = decodeCheckpointValue(pendingCheckpoints[pCLoc].value);
+		data->pendingCheckpoints[metaData.version].push_back(metaData);
+		wait(yield());
+	}
+
+	state RangeResult checkpoints = fCheckpoints.get();
+	state int cLoc;
+	for (cLoc = 0; cLoc < checkpoints.size(); ++cLoc) {
+		CheckpointMetaData metaData = decodeCheckpointValue(checkpoints[cLoc].value);
+		data->checkpoints[metaData.checkpointID] = metaData;
+		if (metaData.getState() == CheckpointMetaData::Deleting) {
+			data->actors.add(deleteCheckpointQ(data, version, metaData));
+		}
+		wait(yield());
+	}
 
 	state RangeResult available = fShardAvailable.get();
 	state int availableLoc;
@@ -6266,15 +6434,15 @@ ACTOR Future<Void> waitMetrics(StorageServerMetrics* self, WaitMetricsRequest re
 
 						// SOMEDAY: validation! The changes here are possibly partial changes (we receive multiple
 						// messages per
-						//  update to our requested range). This means that the validation would have to occur after all
-						//  the messages for one clear or set have been dispatched.
+						//  update to our requested range). This means that the validation would have to occur after
+						//  all the messages for one clear or set have been dispatched.
 
 						/*StorageMetrics m = getMetrics( data, req.keys );
 						  bool b = ( m.bytes != metrics.bytes || m.bytesPerKSecond != metrics.bytesPerKSecond ||
 						  m.iosPerKSecond != metrics.iosPerKSecond ); if (b) { printf("keys: '%s' - '%s' @%p\n",
 						  printable(req.keys.begin).c_str(), printable(req.keys.end).c_str(), this);
-						  printf("waitMetrics: desync %d (%lld %lld %lld) != (%lld %lld %lld); +(%lld %lld %lld)\n", b,
-						  m.bytes, m.bytesPerKSecond, m.iosPerKSecond, metrics.bytes, metrics.bytesPerKSecond,
+						  printf("waitMetrics: desync %d (%lld %lld %lld) != (%lld %lld %lld); +(%lld %lld %lld)\n",
+						  b, m.bytes, m.bytesPerKSecond, m.iosPerKSecond, metrics.bytes, metrics.bytesPerKSecond,
 						  metrics.iosPerKSecond, c.bytes, c.bytesPerKSecond, c.iosPerKSecond);
 
 						  }*/
@@ -6283,8 +6451,8 @@ ACTOR Future<Void> waitMetrics(StorageServerMetrics* self, WaitMetricsRequest re
 				}
 			} catch (Error& e) {
 				if (e.code() == error_code_actor_cancelled)
-					throw; // This is only cancelled when the main loop had exited...no need in this case to clean up
-					       // self
+					throw; // This is only cancelled when the main loop had exited...no need in this case to clean
+					       // up self
 				error = e;
 				break;
 			}
@@ -6463,8 +6631,8 @@ ACTOR Future<Void> serveGetValueRequests(StorageServer* self, FutureStream<GetVa
 	getCurrentLineage()->modify(&TransactionLineage::operation) = TransactionLineage::Operation::GetValue;
 	loop {
 		GetValueRequest req = waitNext(getValue);
-		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so downgrade
-		// before doing real work
+		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so
+		// downgrade before doing real work
 		if (req.debugID.present())
 			g_traceBatch.addEvent("GetValueDebug",
 			                      req.debugID.get().first(),
@@ -6482,8 +6650,8 @@ ACTOR Future<Void> serveGetKeyValuesRequests(StorageServer* self, FutureStream<G
 	loop {
 		GetKeyValuesRequest req = waitNext(getKeyValues);
 
-		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so downgrade
-		// before doing real work
+		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so
+		// downgrade before doing real work
 		self->actors.add(self->readGuard(req, getKeyValuesQ));
 	}
 }
@@ -6496,8 +6664,8 @@ ACTOR Future<Void> serveGetKeyValuesAndFlatMapRequests(
 	loop {
 		GetKeyValuesAndFlatMapRequest req = waitNext(getKeyValuesAndFlatMap);
 
-		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so downgrade
-		// before doing real work
+		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so
+		// downgrade before doing real work
 		self->actors.add(self->readGuard(req, getKeyValuesAndFlatMapQ));
 	}
 }
@@ -6506,8 +6674,8 @@ ACTOR Future<Void> serveGetKeyValuesStreamRequests(StorageServer* self,
                                                    FutureStream<GetKeyValuesStreamRequest> getKeyValuesStream) {
 	loop {
 		GetKeyValuesStreamRequest req = waitNext(getKeyValuesStream);
-		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so downgrade
-		// before doing real work
+		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so
+		// downgrade before doing real work
 		// FIXME: add readGuard again
 		self->actors.add(getKeyValuesStreamQ(self, req));
 	}
@@ -6517,8 +6685,8 @@ ACTOR Future<Void> serveGetKeyRequests(StorageServer* self, FutureStream<GetKeyR
 	getCurrentLineage()->modify(&TransactionLineage::operation) = TransactionLineage::Operation::GetKey;
 	loop {
 		GetKeyRequest req = waitNext(getKey);
-		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so downgrade
-		// before doing real work
+		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so
+		// downgrade before doing real work
 		self->actors.add(self->readGuard(req, getKeyQ));
 	}
 }
@@ -6552,16 +6720,16 @@ ACTOR Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream
 			KeyRef key = self->setWatchMetadata(metadata);
 			metadata->watch_impl = forward(watchWaitForValueChange(self, span.context, key), metadata->versionPromise);
 			self->actors.add(watchValueSendReply(self, req, metadata->versionPromise.getFuture(), span.context));
-		} else if (metadata->value ==
-		           req.value) { // case 2: there is a watch in the map and it has the same value so just update version
+		} else if (metadata->value == req.value) { // case 2: there is a watch in the map and it has the same value
+			                                       // so just update version
 			if (req.version > metadata->version) {
 				metadata->version = req.version;
 				metadata->tags = req.tags;
 				metadata->debugID = req.debugID;
 			}
 			self->actors.add(watchValueSendReply(self, req, metadata->versionPromise.getFuture(), span.context));
-		} else if (req.version > metadata->version) { // case 3: version in map has a lower version so trigger watch and
-			                                          // create a new entry in map
+		} else if (req.version > metadata->version) { // case 3: version in map has a lower version so trigger watch
+			                                          // and create a new entry in map
 			self->deleteWatchMetadata(req.key.contents());
 			metadata->versionPromise.send(req.version);
 			metadata->watch_impl.cancel();
@@ -6660,21 +6828,9 @@ ACTOR Future<Void> serveGetCheckpointRequests(StorageServer* self, FutureStream<
 		GetCheckpointRequest req = waitNext(checkpoint);
 		if (!self->isReadable(req.range)) {
 			req.reply.sendError(wrong_shard_server());
+			continue;
 		} else {
-			// TODO: Load existing checkpoints from disk once persisting checkpoint metadata is implemented.
-			// TODO: Implement lookup on checkpointID.
-			const auto it = self->checkpoints[req.format].lower_bound(req.minVersion);
-			if (it != self->checkpoints[req.format].end()) {
-				TraceEvent(SevDebug, "ServeCheckpointFoundExisting", self->thisServerID)
-				    .detail("Version", it->second.version);
-				req.reply.send(it->second);
-			} else if (req.createNew) {
-				self->actors.add(checkpointQ(self, req));
-			} else {
-				TraceEvent(SevDebug, "ServeCheckpointNotFoundExisting", self->thisServerID)
-				    .detail("Version", it->second.version);
-				req.reply.sendError(checkpoint_not_found());
-			}
+			self->actors.add(getCheckpointQ(self, req));
 		}
 	}
 }
@@ -6726,8 +6882,8 @@ ACTOR Future<Void> reportStorageServerState(StorageServer* self) {
 
 ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface ssi) {
 	state Future<Void> doUpdate = Void();
-	state bool updateReceived =
-	    false; // true iff the current update() actor assigned to doUpdate has already received an update from the tlog
+	state bool updateReceived = false; // true iff the current update() actor assigned to doUpdate has already
+	                                   // received an update from the tlog
 	state double lastLoopTopTime = now();
 	state Future<Void> dbInfoChange = Void();
 	state Future<Void> checkLastUpdate = Void();
@@ -6795,8 +6951,8 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 						self->popVersion(self->durableVersion.get() + 1, true);
 					}
 					// If update() is waiting for results from the tlog, it might never get them, so needs to be
-					// cancelled.  But if it is waiting later, cancelling it could cause problems (e.g. fetchKeys that
-					// already committed to transitioning to waiting state)
+					// cancelled.  But if it is waiting later, cancelling it could cause problems (e.g. fetchKeys
+					// that already committed to transitioning to waiting state)
 					if (!updateReceived) {
 						doUpdate = Void();
 					}
@@ -6851,16 +7007,17 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 bool storageServerTerminated(StorageServer& self, IKeyValueStore* persistentData, Error const& e) {
 	self.shuttingDown = true;
 
-	// Clearing shards shuts down any fetchKeys actors; these may do things on cancellation that are best done with self
-	// still valid
+	// Clearing shards shuts down any fetchKeys actors; these may do things on cancellation that are best done with
+	// self still valid
 	self.shards.insert(allKeys, Reference<ShardInfo>());
 
-	// Dispose the IKVS (destroying its data permanently) only if this shutdown is definitely permanent.  Otherwise just
-	// close it.
+	// Dispose the IKVS (destroying its data permanently) only if this shutdown is definitely permanent.  Otherwise
+	// just close it.
 	if (e.code() == error_code_please_reboot) {
 		// do nothing.
 	} else if (e.code() == error_code_worker_removed || e.code() == error_code_recruitment_failed) {
-		// SOMEDAY: could close instead of dispose if tss in quarantine gets removed so it could still be investigated?
+		// SOMEDAY: could close instead of dispose if tss in quarantine gets removed so it could still be
+		// investigated?
 		persistentData->dispose();
 	} else {
 		persistentData->close();

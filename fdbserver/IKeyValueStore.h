@@ -27,6 +27,21 @@
 #include "flow/Error.h"
 #include "fdbclient/StorageServerInterface.h"
 
+struct CheckpointRequest {
+	const Version version;
+	const KeyRange range;
+	const CheckpointFormat format;
+	const UID checkpointID;
+	const std::string checkpointDir;
+
+	CheckpointRequest(const Version version,
+	                  const KeyRange& range,
+	                  const CheckpointFormat format,
+	                  const UID& id,
+	                  const std::string& checkpointDir)
+	  : version(version), range(range), format(format), checkpointID(id), checkpointDir(checkpointDir) {}
+};
+
 class IClosable {
 public:
 	// IClosable is a base interface for any disk-backed data structure that needs to support asynchronous errors,
@@ -89,13 +104,10 @@ public:
 	virtual void enableSnapshot() {}
 
 	// Create a checkpoint.
-	virtual Future<CheckpointMetaData> checkpoint(const GetCheckpointRequest& request,
-	                                              const std::string& checkpointDir) {
-		throw internal_error();
-	}
+	virtual Future<CheckpointMetaData> checkpoint(const CheckpointRequest& request) { throw not_implemented(); }
 
 	// Restore from a checkpoint.
-	virtual Future<Void> restore(const CheckpointMetaData& checkpoint) { throw internal_error(); }
+	virtual Future<Void> restore(const CheckpointMetaData& checkpoint) { throw not_implemented(); }
 
 	/*
 	Concurrency contract

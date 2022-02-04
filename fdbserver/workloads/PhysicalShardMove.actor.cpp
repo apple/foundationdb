@@ -78,17 +78,37 @@ struct SSCheckpointWorkload : TestWorkload {
 
 		std::cout << "Initialized" << std::endl;
 
+		state Transaction tr(cx);
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		loop {
+			std::cout << "Creating checkpoint." << std::endl;
 			try {
-				std::cout << "Creating checkpoint." << std::endl;
-				state CheckpointMetaData checkpoint = wait(getCheckpoint(cx, normalKeys, version, RocksDBColumnFamily));
+				wait(createCheckpoint(&tr, KeyRangeRef(key, endKey), RocksDBColumnFamily));
+				std::cout << "Buffer write done." << std::endl;
+				wait(tr.commit());
+				version = tr.getCommittedVersion();
 				break;
 			} catch (Error& e) {
-				std::cout << "Creating checkpoint failure: " << e.name() << std::endl;
-				wait(delay(1));
+				wait(tr.onError(e));
 			}
 		}
-		std::cout << "Created checkpoint:" << checkpoint.toString() << std::endl;
+
+		std::cout << "Created checkpoint." << std::endl;
+
+		loop {
+			try {
+				state std::vector<CheckpointMetaData> records =
+				    wait(getCheckpointMetaData(cx, KeyRangeRef(key, endKey), version, RocksDBColumnFamily));
+				break;
+			} catch (Error& e) {
+			}
+		}
+
+		std::cout << "Got checkpoint metadata." << std::endl;
+		for (const auto& record : records) {
+			std::cout << record.toString() << std::endl;
+		}
 
 		state std::string pwd = platform::getWorkingDirectory();
 		state std::string folder = pwd + "/checkpoints";
@@ -97,9 +117,8 @@ struct SSCheckpointWorkload : TestWorkload {
 
 		loop {
 			try {
-				std::cout << "Getting checkpoint." << std::endl;
-				state CheckpointMetaData record = wait(
-				    fetchCheckpoint(cx, KeyRangeRef(key, endKey), checkpoint.version, RocksDBColumnFamily, folder));
+				std::cout << "Fetching checkpoint." << std::endl;
+				state CheckpointMetaData record = wait(fetchCheckpoint(cx, records[0], folder));
 				break;
 			} catch (Error& e) {
 				std::cout << "Getting checkpoint failure: " << e.name() << std::endl;
@@ -107,7 +126,7 @@ struct SSCheckpointWorkload : TestWorkload {
 			}
 		}
 
-		std::cout << "Got checkpoint:" << checkpoint.toString() << std::endl;
+		std::cout << "Fetched checkpoint:" << record.toString() << std::endl;
 
 		std::vector<std::string> files = platform::listFiles(folder);
 		std::cout << "Received checkpoint files on disk: " << folder << std::endl;
@@ -115,34 +134,6 @@ struct SSCheckpointWorkload : TestWorkload {
 			std::cout << file << std::endl;
 		}
 		std::cout << std::endl;
-
-		ASSERT(files.size() == record.rocksCF.get().sstFiles.size());
-		std::unordered_set<std::string> sstFiles(files.begin(), files.end());
-		// for (const LiveFileMetaData& metaData : record.sstFiles) {
-		// 	std::cout << "Checkpoint file:" << metaData.db_path << metaData.name << std::endl;
-		// 	// ASSERT(sstFiles.count(metaData.name.subString) > 0);
-		// }
-
-		rocksdb::Options options;
-		rocksdb::ReadOptions ropts;
-		state std::unordered_map<Key, Value> kvs;
-		for (auto& file : files) {
-			rocksdb::SstFileReader reader(options);
-			std::cout << file << std::endl;
-			ASSERT(reader.Open(folder + "/" + file).ok());
-			ASSERT(reader.VerifyChecksum().ok());
-			std::unique_ptr<rocksdb::Iterator> iter(reader.NewIterator(ropts));
-			iter->SeekToFirst();
-			while (iter->Valid()) {
-				if (normalKeys.contains(Key(iter->key().ToString()))) {
-					std::cout << "Key: " << iter->key().ToString() << ", Value: " << iter->value().ToString()
-					          << std::endl;
-				}
-				// std::endl; writer.Put(iter->key().ToString(), iter->value().ToString());
-				// kvs[Key(iter->key().ToString())] = Value(iter->value().ToString());
-				iter->Next();
-			}
-		}
 
 		state std::string rocksDBTestDir = "rocksdb-kvstore-test-db";
 		platform::eraseDirectoryRecursive(rocksDBTestDir);
@@ -157,7 +148,7 @@ struct SSCheckpointWorkload : TestWorkload {
 
 		std::cout << "Restore complete" << std::endl;
 
-		state Transaction tr(cx);
+		tr.reset();
 		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 		loop {
 			try {
@@ -169,7 +160,6 @@ struct SSCheckpointWorkload : TestWorkload {
 		}
 
 		state int i = 0;
-
 		for (i = 0; i < res.size(); ++i) {
 			std::cout << "Reading key:" << res[i].key.toString() << std::endl;
 			Optional<Value> value = wait(kvStore->readValue(res[i].key));
@@ -177,7 +167,36 @@ struct SSCheckpointWorkload : TestWorkload {
 			ASSERT(value.get() == res[i].value);
 		}
 
-		// std::cout << "Done print." << std::endl;
+		std::cout << "Verified." << std::endl;
+
+		return Void();
+		// ASSERT(files.size() == record.rocksCF.get().sstFiles.size());
+		// std::unordered_set<std::string> sstFiles(files.begin(), files.end());
+		// // for (const LiveFileMetaData& metaData : record.sstFiles) {
+		// // 	std::cout << "Checkpoint file:" << metaData.db_path << metaData.name << std::endl;
+		// // 	// ASSERT(sstFiles.count(metaData.name.subString) > 0);
+		// // }
+
+		// rocksdb::Options options;
+		// rocksdb::ReadOptions ropts;
+		// state std::unordered_map<Key, Value> kvs;
+		// for (auto& file : files) {
+		// 	rocksdb::SstFileReader reader(options);
+		// 	std::cout << file << std::endl;
+		// 	ASSERT(reader.Open(folder + "/" + file).ok());
+		// 	ASSERT(reader.VerifyChecksum().ok());
+		// 	std::unique_ptr<rocksdb::Iterator> iter(reader.NewIterator(ropts));
+		// 	iter->SeekToFirst();
+		// 	while (iter->Valid()) {
+		// 		if (normalKeys.contains(Key(iter->key().ToString()))) {
+		// 			std::cout << "Key: " << iter->key().ToString() << ", Value: " << iter->value().ToString()
+		// 			          << std::endl;
+		// 		}
+		// 		// std::endl; writer.Put(iter->key().ToString(), iter->value().ToString());
+		// 		// kvs[Key(iter->key().ToString())] = Value(iter->value().ToString());
+		// 		iter->Next();
+		// 	}
+		// }
 
 		// state std::unordered_map<Key, Value>::iterator it = kvs.begin();
 		// for (; it != kvs.end(); ++it) {
@@ -187,8 +206,6 @@ struct SSCheckpointWorkload : TestWorkload {
 		// 		wait(self->readAndVerify(self, cx, it->first, value));
 		// 	}
 		// }
-
-		return Void();
 	}
 
 	ACTOR Future<Void> readAndVerify(SSCheckpointWorkload* self,
