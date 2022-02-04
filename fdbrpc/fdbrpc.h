@@ -324,10 +324,12 @@ struct NetNotifiedQueueWithAcknowledgements final : NotifiedQueue<T>,
 	AcknowledgementReceiver acknowledgements;
 	Endpoint requestStreamEndpoint;
 	bool sentError = false;
+	Promise<Void> onConnect;
 
-	NetNotifiedQueueWithAcknowledgements(int futures, int promises) : NotifiedQueue<T>(futures, promises) {}
+	NetNotifiedQueueWithAcknowledgements(int futures, int promises)
+	  : NotifiedQueue<T>(futures, promises), onConnect(nullptr) {}
 	NetNotifiedQueueWithAcknowledgements(int futures, int promises, const Endpoint& remoteEndpoint)
-	  : NotifiedQueue<T>(futures, promises), FlowReceiver(remoteEndpoint, true) {
+	  : NotifiedQueue<T>(futures, promises), FlowReceiver(remoteEndpoint, true), onConnect(nullptr) {
 		// A ReplyPromiseStream will be terminated on the server side if the network connection with the client breaks
 		acknowledgements.failures = tagError<Void>(
 		    makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnect(remoteEndpoint.getPrimaryAddress()),
@@ -348,11 +350,17 @@ struct NetNotifiedQueueWithAcknowledgements final : NotifiedQueue<T>,
 				// GetKeyValuesStream requests on the same endpoint will fail
 				IFailureMonitor::failureMonitor().endpointNotFound(requestStreamEndpoint);
 			}
+			if (onConnect.isValid() && onConnect.canBeSet()) {
+				onConnect.send(Void());
+			}
 			this->sendError(message.getError());
 		} else {
 			if (message.get().asUnderlyingType().acknowledgeToken.present()) {
 				acknowledgements = AcknowledgementReceiver(
 				    FlowTransport::transport().loadedEndpoint(message.get().asUnderlyingType().acknowledgeToken.get()));
+				if (onConnect.isValid() && onConnect.canBeSet()) {
+					onConnect.send(Void());
+				}
 			}
 			if (acknowledgements.sequence != message.get().asUnderlyingType().sequence) {
 				TraceEvent(SevError, "StreamSequenceMismatch")
@@ -439,6 +447,9 @@ public:
 		}
 	}
 
+	// TODO REMOVE
+	const void* debugAddr() const { return queue; }
+
 	template <class E>
 	void sendError(const E& exc) const {
 		if (queue->isRemoteEndpoint()) {
@@ -484,6 +495,18 @@ public:
 	}
 
 	void setRequestStreamEndpoint(const Endpoint& endpoint) { queue->requestStreamEndpoint = endpoint; }
+
+	bool connected() { return queue->acknowledgements.getRawEndpoint().isValid() || queue->error.isValid(); }
+
+	Future<Void> onConnected() {
+		if (connected()) {
+			return Future<Void>(Void());
+		}
+		if (!queue->onConnect.isValid()) {
+			queue->onConnect = Promise<Void>();
+		}
+		return queue->onConnect.getFuture();
+	}
 
 	~ReplyPromiseStream() {
 		if (queue)
@@ -744,6 +767,7 @@ public:
 			    FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(), true);
 			// FIXME: defer sending the message until we know the connection is established
 			endStreamOnDisconnect(disc, p, getEndpoint(), peer);
+			holdUntilConnected(disc, p);
 			return p;
 		} else {
 			send(value);
