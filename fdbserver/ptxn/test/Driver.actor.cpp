@@ -180,7 +180,6 @@ std::shared_ptr<TestDriverContext> initTestDriverContext(const TestDriverOptions
 		TLogGroupID groupId = tLogGroupByStorageTeamID(groups, storageTeamID);
 		TLogGroup& tLogGroup = context->getTLogGroup(groupId);
 		context->storageTeamIDTLogGroupIDMapper[storageTeamID] = groupId;
-		// TODO: support tags when implementing pop
 		tLogGroup.storageTeams[storageTeamID] =
 		    std::vector<Tag>{ Tag(1, deterministicRandom()->randomInt(1, 1 << 16)) };
 	}

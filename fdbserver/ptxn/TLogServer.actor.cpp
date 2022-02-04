@@ -223,7 +223,7 @@ static Key persistStorageTeamPoppedKey(UID id, StorageTeamID storageTeamId) {
 }
 
 static Value persistStorageTeamPoppedValue(std::map<Tag, Version> poppedTagVersions) {
-	return BinaryWriter::toValue(poppedTagVersions, Unversioned());
+	return BinaryWriter::toValue(poppedTagVersions, IncludeVersion(ProtocolVersion::withPartitionTransaction()));
 }
 
 static StorageTeamID decodeStorageTeamIDPoppedKey(KeyRef id, KeyRef key) {
@@ -234,7 +234,8 @@ static StorageTeamID decodeStorageTeamIDPoppedKey(KeyRef id, KeyRef key) {
 }
 
 static std::map<Tag, Version> decodeStorageTeamTagToVersions(ValueRef value) {
-	return BinaryReader::fromStringRef<std::map<Tag, Version>>(value, Unversioned());
+	return BinaryReader::fromStringRef<std::map<Tag, Version>>(
+	    value, IncludeVersion(ProtocolVersion::withPartitionTransaction()));
 }
 
 struct SpilledData {
@@ -485,10 +486,23 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 		bool nothingPersistent =
 		    false; // true means tag is *known* to have no messages in persistentData.  false means nothing.
 
-		StorageTeamData(StorageTeamID storageTeam, std::vector<Tag> tags) : storageTeamId(storageTeam), tags(tags) {}
+		StorageTeamData(StorageTeamID storageTeam, std::vector<Tag> tags) : storageTeamId(storageTeam), tags(tags) {
+			popped = invalidVersion;
+			persistentPopped = invalidVersion;
+			for (auto& tag : tags) {
+				poppedTagVersions[tag] = invalidVersion;
+			}
+		}
 
-		StorageTeamData(StorageTeamID storageTeam, std::vector<Tag> tags, std::map<Tag, Version> tagToVersions)
-		  : storageTeamId(storageTeam), tags(tags), poppedTagVersions(tagToVersions) {}
+		StorageTeamData(StorageTeamID storageTeam,
+		                std::vector<Tag> tags,
+		                std::map<Tag, Version> tagToVersions,
+		                bool nothingPersistent,
+		                bool poppedRecently,
+		                bool unpoppedRecovered)
+		  : storageTeamId(storageTeam), tags(tags), poppedTagVersions(tagToVersions),
+		    nothingPersistent(nothingPersistent), poppedRecently(poppedRecently), unpoppedRecovered(unpoppedRecovered) {
+		}
 
 		StorageTeamData(StorageTeamData&& r) noexcept
 		  : storageTeamId(r.storageTeamId), tags(r.tags), versionMessages(std::move(r.versionMessages)),
@@ -525,6 +539,7 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 					auto const& m = self->versionMessages.begin();
 					++messagesErased;
 
+					// TODO: understand what this means and make it work for txsTeam
 					if (self->storageTeamId != txsTeam) {
 						sizes.first -= m->second.first.size();
 					} else {
@@ -660,8 +675,12 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 	// only callable after getStorageTeamData returns a null reference
 	Reference<StorageTeamData> createStorageTeamData(StorageTeamID team,
 	                                                 std::vector<Tag>& tags,
+	                                                 bool nothingPersistent,
+	                                                 bool poppedRecently,
+	                                                 bool unpoppedRecovered,
 	                                                 std::map<Tag, Version> tagToVersions = {}) {
-		return storageTeamData[team] = makeReference<StorageTeamData>(team, tags, tagToVersions);
+		return storageTeamData[team] = makeReference<StorageTeamData>(
+		           team, tags, tagToVersions, nothingPersistent, poppedRecently, unpoppedRecovered);
 	}
 
 	// only callable after getStorageTeamData returns a null reference
@@ -852,7 +871,8 @@ void commitMessages(Reference<TLogGroupData> self,
 
 	Reference<LogGenerationData::StorageTeamData> storageTeamData = logData->getStorageTeamData(storageTeamId);
 	if (!storageTeamData) {
-		storageTeamData = logData->createStorageTeamData(storageTeamId, logData->storageTeams[storageTeamId]);
+		storageTeamData =
+		    logData->createStorageTeamData(storageTeamId, logData->storageTeams[storageTeamId], true, true, false);
 	}
 
 	ASSERT(storageTeamData->versionMessages.find(version) == storageTeamData->versionMessages.end());
@@ -930,7 +950,7 @@ ACTOR Future<Void> doQueueCommit(Reference<TLogGroupData> self,
 	}
 	//TraceEvent("TLogCommitDurable", self->dbgid).detail("Version", ver);
 
-	logData->queueCommittedVersion.set(ver);
+	logData->queueCommittedVersion.set(ver); // here we change queueCommittedVersion after data is committed to queue.
 	self->queueCommitEnd.set(commitNumber);
 
 	for (auto& it : missingFinalCommit) {
@@ -1199,7 +1219,7 @@ ACTOR Future<Void> initPersistentState(Reference<TLogGroupData> self, Reference<
 
 	for (auto team : logData->storageTeams) {
 		ASSERT(!logData->getStorageTeamData(team.first));
-		logData->createStorageTeamData(team.first, team.second);
+		logData->createStorageTeamData(team.first, team.second, true, true, true);
 	}
 
 	TraceEvent("TLogInitCommit", logData->logId);
@@ -1410,7 +1430,7 @@ ACTOR Future<Void> tLogPopCore(Reference<TLogGroupData> self,
 			    .detail("StorageTeam", storageTeamData->storageTeamId)
 			    .detail("UpTo", upTo)
 			    .detail("PoppedVersionLag", PoppedVersionLag)
-			    // TODO: add minPopStorageTeam after having popDiskQueue()
+			    .detail("MinPoppedStorageTeamVersion", logData->minPoppedStorageTeamVersion)
 			    .detail("QueuePoppedVersion", logData->queuePoppedVersion)
 			    .detail("UnpoppedRecovered", storageTeamData->unpoppedRecovered ? "True" : "False")
 			    .detail("NothingPersistent", storageTeamData->nothingPersistent ? "True" : "False");
@@ -1429,6 +1449,7 @@ ACTOR Future<Void> tLogPopCore(Reference<TLogGroupData> self,
 		}
 
 		storageTeamData->popped = minVersionInTeam;
+
 		// pop from in-memory object: StorageTeamData::versionMessages
 		// only when minVersionInTeam > logData->persistentDataDurableVersion, there are data
 		// need to be popped from in memory data structure(i.e. versionMessages) that has not been persisted.
@@ -1528,7 +1549,7 @@ ACTOR Future<Void> serveTLogInterface_PassivelyPull(
 			// Update storage teams.
 			for (auto t : req.addedTeams) {
 				logData->storageTeams.emplace(t, req.teamToTags.find(t)->second);
-				logData->createStorageTeamData(t, logData->storageTeams[t]);
+				logData->createStorageTeamData(t, logData->storageTeams[t], true, true, false);
 			}
 
 			for (auto& t : req.removedTeams) {
@@ -1888,7 +1909,7 @@ ACTOR Future<Void> restorePersistentState(Reference<TLogGroupData> self,
 
 				auto storageTeamData = logData->getStorageTeamData(teamID);
 				ASSERT(!storageTeamData);
-				logData->createStorageTeamData(teamID, storageTeams[id1][teamID], tagToVersions);
+				logData->createStorageTeamData(teamID, storageTeams[id1][teamID], false, false, false, tagToVersions);
 
 				for (std::map<Tag, Version>::iterator it = tagToVersions.begin(); it != tagToVersions.end(); it++) {
 					if (it == tagToVersions.begin()) {
@@ -2094,7 +2115,6 @@ void updatePersistentPopped(Reference<TLogGroupData> self,
 	                                      persistStorageTeamPoppedValue(data->poppedTagVersions)));
 	data->poppedRecently = false;
 	data->persistentPopped = data->popped;
-
 	if (data->nothingPersistent)
 		return;
 
@@ -2111,6 +2131,119 @@ void updatePersistentPopped(Reference<TLogGroupData> self,
 	if (data->popped > logData->persistentDataVersion) {
 		data->nothingPersistent = true;
 	}
+}
+
+ACTOR Future<Void> updatePoppedLocation(Reference<TLogGroupData> self,
+                                        Reference<LogGenerationData> logData,
+                                        Reference<LogGenerationData::StorageTeamData> data) {
+	// For anything spilled by value, we do not need to track its popped location.
+	if (logData->shouldSpillByValue(data->storageTeamId)) {
+		return Void();
+	}
+
+	if (data->versionForPoppedLocation >= data->persistentPopped) // both are 0 here, thus not continuing.
+		return Void();
+	data->versionForPoppedLocation = data->persistentPopped;
+
+	// Use persistentPopped and not popped, so that a pop update received after spilling doesn't cause
+	// us to remove data that still is pointed to by SpilledData in the btree.
+	if (data->persistentPopped <= logData->persistentDataVersion) {
+		// Recover the next needed location in the Disk Queue from the index.
+		RangeResult kvrefs = wait(self->persistentData->readRange(
+		    KeyRangeRef(persistStorageTeamMessageRefsKey(logData->logId, data->storageTeamId, data->persistentPopped),
+		                persistStorageTeamMessageRefsKey(
+		                    logData->logId, data->storageTeamId, logData->persistentDataVersion + 1)),
+		    1));
+
+		if (kvrefs.empty()) {
+			// Nothing was persistent after all.
+			data->nothingPersistent = true;
+		} else {
+			VectorRef<SpilledData> spilledData;
+			BinaryReader r(kvrefs[0].value, AssumeVersion(logData->protocolVersion));
+			r >> spilledData;
+
+			for (const SpilledData& sd : spilledData) {
+				if (sd.version >= data->persistentPopped) {
+					data->poppedLocation =
+					    sd.start; // stoargeTeamData updates `poppedLocation` through data from spilling
+					data->versionForPoppedLocation = sd.version;
+					break;
+				}
+			}
+		}
+	}
+
+	if (data->persistentPopped >= logData->persistentDataVersion || data->nothingPersistent) {
+		// Then the location must be in memory.
+		auto locationIter = logData->versionLocation.lower_bound(data->persistentPopped);
+		if (locationIter != logData->versionLocation.end()) {
+			data->poppedLocation = locationIter->value.first;
+			data->versionForPoppedLocation = locationIter->key;
+		} else {
+			// No data on disk and no data in RAM.
+			// This TLog instance will be removed soon anyway, so we temporarily freeze our poppedLocation
+			// to avoid trying to track what the ending location of this TLog instance was.
+		}
+	}
+
+	return Void();
+}
+
+// It runs against the oldest TLog instance, calculates the first location in the disk queue that contains un-popped
+// data, and then issues a pop to the disk queue at that location so that anything earlier can be
+// removed/forgotten/overwritten. In effect, it applies the effect of TLogPop RPCs to disk.
+ACTOR Future<Void> popDiskQueue(Reference<TLogGroupData> self, Reference<LogGenerationData> logData) {
+	if (!logData->initialized)
+		return Void();
+
+	std::vector<Future<Void>> updates;
+	for (const auto& storageTeam : logData->storageTeamData) {
+		updates.push_back(updatePoppedLocation(self, logData, storageTeam.second));
+	}
+	wait(waitForAll(updates));
+
+	IDiskQueue::location minLocation = 0;
+	Version minVersion = 0;
+	auto locationIter = logData->versionLocation.lower_bound(logData->persistentDataVersion);
+	if (locationIter != logData->versionLocation.end()) {
+		// TODO: 1)why lower_bound? 2)understand -- if there is no larger or equal version
+		// in versionLocation, then minLocation is 0 -- not popping, why? bc not using memory?
+		minLocation = locationIter->value.first;
+		minVersion = locationIter->key;
+	}
+	logData->minPoppedStorageTeamVersion = std::numeric_limits<Version>::max();
+	for (auto& storageTeam : logData->storageTeamData) {
+		auto& storageTeamData = storageTeam.second;
+		if (storageTeamData && logData->shouldSpillByReference(storageTeamData->storageTeamId)) {
+			if (!storageTeamData->nothingPersistent) {
+				// for storageData who has data in persistentData, find the minimum of it
+				minLocation = std::min(minLocation, storageTeamData->poppedLocation);
+				minVersion = std::min(minVersion, storageTeamData->popped);
+			}
+			if ((!storageTeamData->nothingPersistent || storageTeamData->versionMessages.size()) &&
+			    storageTeamData->popped < logData->minPoppedStorageTeamVersion) {
+				logData->minPoppedStorageTeamVersion = storageTeamData->popped;
+				logData->minPoppedStorageTeam = storageTeamData->storageTeamId;
+			}
+		}
+	}
+
+	// it seems code above is about finding the min version for spilling data,
+	// code below is about finding the min location for on disk data,
+	// but why using committedLocation? how do we know all SSes already have them?
+	if (self->queueCommitEnd.get() > 0) {
+		Version lastCommittedVersion = logData->queueCommittedVersion.get();
+		IDiskQueue::location lastCommittedLocation = minLocation;
+		auto locationIter = logData->versionLocation.lower_bound(lastCommittedVersion);
+		if (locationIter != logData->versionLocation.end()) {
+			lastCommittedLocation = locationIter->value.first;
+		}
+		self->persistentQueue->pop(std::min(minLocation, lastCommittedLocation));
+		logData->queuePoppedVersion = std::max(logData->queuePoppedVersion, minVersion);
+	}
+
+	return Void();
 }
 
 ACTOR Future<Void> updatePersistentData(Reference<TLogGroupData> self,
@@ -2154,7 +2287,7 @@ ACTOR Future<Void> updatePersistentData(Reference<TLogGroupData> self,
 			while (msg != teamData->versionMessages.end() && msg->first <= newPersistentDataVersion) {
 				currentVersion = msg->first;
 				anyData = true;
-				teamData->nothingPersistent = false;
+				teamData->nothingPersistent = false; // update nothingPersistent because now doing spilling
 
 				if (logData->shouldSpillByValue(teamData->storageTeamId)) {
 					wr = BinaryWriter(Unversioned());
@@ -2233,7 +2366,6 @@ ACTOR Future<Void> updatePersistentData(Reference<TLogGroupData> self,
 	self->persistentData->set(KeyValueRef(
 	    BinaryWriter::toValue(logData->logId, Unversioned()).withPrefix(persistKnownCommittedVersionKeys.begin),
 	    BinaryWriter::toValue(logData->knownCommittedVersion, Unversioned())));
-	// TODO: update teams -> tags mapping when it changes!
 	logData->persistentDataVersion = newPersistentDataVersion;
 
 	wait(self->persistentData->commit()); // SOMEDAY: This seems to be running pretty often, should we slow it down???
@@ -2372,8 +2504,7 @@ ACTOR Future<Void> updateStorage(Reference<TLogGroupData> self) {
 					wait(updatePersistentData(self, logData, nextVersion));
 					// Concurrently with this loop, the last stopped TLog could have been removed.
 					if (self->popOrder.size()) {
-						// TODO: add popDiskQueue()
-						// wait(popDiskQueue(self, self->id_data[self->popOrder.front()]));
+						wait(popDiskQueue(self, self->id_data[self->popOrder.front()]));
 					}
 					commitLockReleaser.release();
 				} else {
@@ -2420,13 +2551,14 @@ ACTOR Future<Void> updateStorage(Reference<TLogGroupData> self) {
 		wait(logData->queueCommittedVersion.whenAtLeast(nextVersion));
 		wait(delay(0, TaskPriority::UpdateStorage));
 
+		// if no spill(or meta txn) AND a new commit, then nextVersion is 0, then we do not call either
+		// updatePersistentData or popDiskQueue, so pop from disk need both spill and a new commit to happen.
 		if (nextVersion > logData->persistentDataVersion) {
 			wait(self->persistentDataCommitLock.take());
 			commitLockReleaser = FlowLock::Releaser(self->persistentDataCommitLock);
 			wait(updatePersistentData(self, logData, nextVersion));
 			if (self->popOrder.size()) {
-				// TODO: add popDiskQueue()
-				// wait(popDiskQueue(self, self->id_data[self->popOrder.front()]));
+				wait(popDiskQueue(self, self->id_data[self->popOrder.front()]));
 			}
 			commitLockReleaser.release();
 		}
