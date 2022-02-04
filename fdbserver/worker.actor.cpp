@@ -216,11 +216,13 @@ ACTOR Future<Void> handleIOErrors(Future<Void> actor, IClosable* store, UID id, 
 			if (e.isError() && e.getError().code() == error_code_broken_promise && !storeError.isReady()) {
 				wait(delay(0.00001 + FLOW_KNOBS->MAX_BUGGIFIED_DELAY));
 			}
-			if (storeError.isReady())
-				throw storeError.get().getError();
-			if (e.isError())
+			if (storeError.isReady() &&
+			    !((storeError.get().isError() && storeError.get().getError().code() == error_code_file_not_found))) {
+				throw storeError.get().isError() ? storeError.get().getError() : actor_cancelled();
+			}
+			if (e.isError()) {
 				throw e.getError();
-			else
+			} else
 				return e.get();
 		}
 		when(ErrorOr<Void> e = wait(storeError)) {
