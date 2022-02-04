@@ -1384,7 +1384,15 @@ static void addAssignment(KeyRangeMap<std::tuple<UID, int64_t, int64_t>>& map,
 		int64_t oldEpoch = std::get<1>(old.value());
 		int64_t oldSeqno = std::get<2>(old.value());
 		if (oldEpoch > newEpoch || (oldEpoch == newEpoch && oldSeqno > newSeqno)) {
-			newer.push_back(std::pair(old.range(), std::tuple(oldWorker, oldEpoch, oldSeqno)));
+			if (newId != oldWorker && newId != UID() && newEpoch == 0 && newSeqno == 1 &&
+			    old.begin() == newRange.begin && old.end() == newRange.end) {
+				// granule mapping disagrees with worker with highest value. Just do an explicit reassign to a random
+				// worker for now to ensure the conflict is resolved.
+				newer.push_back(std::pair(old.range(), std::tuple(UID(), oldEpoch, oldSeqno)));
+				allNewer = false;
+			} else {
+				newer.push_back(std::pair(old.range(), std::tuple(oldWorker, oldEpoch, oldSeqno)));
+			}
 		} else {
 			allNewer = false;
 			if (newId != UID()) {
@@ -1780,6 +1788,7 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 		fmt::print("BM {0} final ranges:\n", bmData->epoch);
 	}
 
+	int explicitAssignments = 0;
 	for (auto& range : workerAssignments.intersectingRanges(normalKeys)) {
 		int64_t epoch = std::get<1>(range.value());
 		int64_t seqno = std::get<2>(range.value());
@@ -1811,8 +1820,15 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 			raAssign.keyRange = range.range();
 			raAssign.assign = RangeAssignmentData(AssignRequestType::Normal);
 			bmData->rangesToAssign.send(raAssign);
+			explicitAssignments++;
 		}
 	}
+
+	TraceEvent("BlobManagerRecovered", bmData->id)
+	    .detail("Epoch", bmData->epoch)
+	    .detail("Granules", bmData->workerAssignments.size())
+	    .detail("Assigned", explicitAssignments)
+	    .detail("Revoked", outOfDateAssignments.size());
 
 	return Void();
 }
