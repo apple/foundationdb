@@ -631,6 +631,34 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db,
 std::string generateErrorMessage(const CoordinatorsResult& res);
 
 ACTOR template <class DB>
+Future<Optional<TenantMapEntry>> tryGetTenant(Reference<DB> db, TenantName name) {
+	state Reference<typename DB::TransactionT> tr = db->createTransaction();
+	state Key tenantMapKey = name.withPrefix(tenantMapPrefix);
+
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+
+			Optional<Value> val = wait(safeThreadFutureToFuture(tr->get(tenantMapKey)));
+			return val.map<TenantMapEntry>([](Optional<Value> v) { return decodeTenantEntry(v.get()); });
+		} catch (Error& e) {
+			wait(safeThreadFutureToFuture(tr->onError(e)));
+		}
+	}
+}
+
+ACTOR template <class DB>
+Future<TenantMapEntry> getTenant(Reference<DB> db, TenantName name) {
+	Optional<TenantMapEntry> entry = wait(tryGetTenant(db, name));
+	if (!entry.present()) {
+		throw tenant_not_found();
+	}
+
+	return entry.get();
+}
+
+ACTOR template <class DB>
 Future<Void> createTenant(Reference<DB> db, TenantName name) {
 	state HighContentionPrefixAllocator allocator = HighContentionPrefixAllocator(Subspace(tenantAllocatorPrefix));
 
@@ -698,8 +726,8 @@ Future<Void> deleteTenant(Reference<DB> db, TenantName name) {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			Optional<Value> val = wait(safeThreadFutureToFuture(tr->get(tenantMapKey)));
-			if (!val.present()) {
+			Optional<TenantMapEntry> tenantEntry = wait(tryGetTenant(db, name));
+			if (!tenantEntry.present()) {
 				if (!tenantCheckCompleted) {
 					throw tenant_not_found();
 				} else {
@@ -712,7 +740,8 @@ Future<Void> deleteTenant(Reference<DB> db, TenantName name) {
 				tenantCheckCompleted = true;
 			}
 
-			RangeResult contents = wait(safeThreadFutureToFuture(tr->getRange(prefixRange(val.get()), 1)));
+			RangeResult contents =
+			    wait(safeThreadFutureToFuture(tr->getRange(prefixRange(tenantEntry.get().prefix), 1)));
 			if (!contents.empty()) {
 				throw tenant_not_empty();
 			}
@@ -748,34 +777,6 @@ Future<Standalone<VectorRef<StringRef>>> listTenants(Reference<DB> db, StringRef
 			wait(safeThreadFutureToFuture(tr->onError(e)));
 		}
 	}
-}
-
-ACTOR template <class DB>
-Future<Optional<TenantMapEntry>> tryGetTenant(Reference<DB> db, TenantName name) {
-	state Reference<typename DB::TransactionT> tr = db->createTransaction();
-	state Key tenantMapKey = name.withPrefix(tenantMapPrefix);
-
-	loop {
-		try {
-			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-
-			Optional<Value> val = wait(safeThreadFutureToFuture(tr->get(tenantMapKey)));
-			return val.map<TenantMapEntry>([](Optional<Value> v) { return decodeTenantEntry(v.get()); });
-		} catch (Error& e) {
-			wait(safeThreadFutureToFuture(tr->onError(e)));
-		}
-	}
-}
-
-ACTOR template <class DB>
-Future<TenantMapEntry> getTenant(Reference<DB> db, TenantName name) {
-	Optional<TenantMapEntry> entry = wait(tryGetTenant(db, name));
-	if (!entry.present()) {
-		throw tenant_not_found();
-	}
-
-	return entry.get();
 }
 } // namespace ManagementAPI
 
