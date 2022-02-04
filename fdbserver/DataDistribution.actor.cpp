@@ -3012,8 +3012,7 @@ Future<Void> StorageWiggler::resetStats() {
 	auto newMetrics = StorageWiggleMetrics();
 	newMetrics.smoothed_round_duration = metrics.smoothed_round_duration;
 	newMetrics.smoothed_wiggle_duration = metrics.smoothed_wiggle_duration;
-	metrics = newMetrics;
-	return metrics.runSetTransaction(teamCollection->cx, teamCollection->primary);
+	return StorageWiggleMetrics::runSetTransaction(teamCollection->cx, teamCollection->primary, newMetrics);
 }
 
 Future<Void> StorageWiggler::restoreStats() {
@@ -3024,7 +3023,7 @@ Future<Void> StorageWiggler::restoreStats() {
 		}
 		return Void();
 	};
-	auto readFuture = metrics.runGetTransaction(teamCollection->cx, teamCollection->primary);
+	auto readFuture = StorageWiggleMetrics::runGetTransaction(teamCollection->cx, teamCollection->primary);
 	return map(readFuture, assignFunc);
 }
 Future<Void> StorageWiggler::startWiggle() {
@@ -3032,7 +3031,7 @@ Future<Void> StorageWiggler::startWiggle() {
 	if (shouldStartNewRound()) {
 		metrics.last_round_start = metrics.last_wiggle_start;
 	}
-	return metrics.runSetTransaction(teamCollection->cx, teamCollection->primary);
+	return StorageWiggleMetrics::runSetTransaction(teamCollection->cx, teamCollection->primary, metrics);
 }
 
 Future<Void> StorageWiggler::finishWiggle() {
@@ -3047,7 +3046,7 @@ Future<Void> StorageWiggler::finishWiggle() {
 		duration = metrics.last_round_finish - metrics.last_round_start;
 		metrics.smoothed_round_duration.setTotal((double)duration);
 	}
-	return metrics.runSetTransaction(teamCollection->cx, teamCollection->primary);
+	return StorageWiggleMetrics::runSetTransaction(teamCollection->cx, teamCollection->primary, metrics);
 }
 
 TCServerInfo::~TCServerInfo() {

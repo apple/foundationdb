@@ -25,7 +25,21 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
 {
    "cluster":{
        "storage_wiggler": {
-         "$map": {
+         "primary": {
+          	"last_round_start_datetime": "Thu Jan  1 00:00:00 1970 +0000",
+			"last_round_finish_datetime": "Thu Jan  1 00:00:00 1970 +0000",
+            "last_round_start_timestamp": 0,
+			"last_round_finish_timestamp": 0,
+			"smoothed_round_seconds": 1,
+			"finished_round": 1,
+			"last_wiggle_start_datetime": "Thu Jan  1 00:00:00 1970 +0000",
+			"last_wiggle_finish_datetime": "Thu Jan  1 00:00:00 1970 +0000",
+            "last_wiggle_start_timestamp": 0,
+            "last_wiggle_finish_timestamp": 0,
+			"smoothed_wiggle_seconds": 1,
+			"finished_wiggle": 1
+          },
+          "remote": {
           	"last_round_start_datetime": "Thu Jan  1 00:00:00 1970 +0000",
 			"last_round_finish_datetime": "Thu Jan  1 00:00:00 1970 +0000",
             "last_round_start_timestamp": 0,

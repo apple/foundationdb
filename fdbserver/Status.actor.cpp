@@ -1885,7 +1885,8 @@ static Future<std::vector<TraceEventFields>> getServerBusiestWriteTags(
 
 ACTOR
 static Future<std::vector<Optional<StorageMetadataType>>> getServerMetadata(std::vector<StorageServerInterface> servers,
-                                                                            Database cx) {
+                                                                            Database cx,
+                                                                            bool use_system_priority) {
 	state KeyBackedObjectMap<UID, StorageMetadataType, decltype(IncludeVersion())> metadataMap(serverMetadataKeys.begin,
 	                                                                                           IncludeVersion());
 	state std::vector<Optional<StorageMetadataType>> res(servers.size());
@@ -1894,6 +1895,10 @@ static Future<std::vector<Optional<StorageMetadataType>>> getServerMetadata(std:
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			if (use_system_priority) {
+				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			}
 			state int i = 0;
 			for (i = 0; i < servers.size(); ++i) {
 				Optional<StorageMetadataType> metadata = wait(metadataMap.get(tr, servers[i].id(), Snapshot::True));
@@ -1923,7 +1928,7 @@ ACTOR static Future<std::vector<std::pair<StorageServerInterface, EventMap>>> ge
 	                            std::vector<std::string>{
 	                                "StorageMetrics", "ReadLatencyMetrics", "ReadLatencyBands", "BusiestReadTag" })) &&
 	     store(busiestWriteTags, getServerBusiestWriteTags(servers, address_workers, rkWorker)) &&
-	     store(metadata, getServerMetadata(servers, cx)));
+	     store(metadata, getServerMetadata(servers, cx, true)));
 
 	ASSERT(busiestWriteTags.size() == results.size() && metadata.size() == results.size());
 	for (int i = 0; i < results.size(); ++i) {
@@ -2758,18 +2763,32 @@ ACTOR Future<Optional<Value>> getActivePrimaryDC(Database cx, int* fullyReplicat
 }
 
 // read storageWigglerStats through Read-only tx, then convert it to JSON field
-ACTOR Future<JsonBuilderObject> storageWigglerStatsFetcher(DatabaseConfiguration conf, Database cx) {
-	state StorageWiggleMetrics metrics;
-	state Optional<Value> v1 = wait(metrics.runGetTransaction(cx, true));
-	state Optional<Value> v2 = wait(metrics.runGetTransaction(cx, false));
-	state JsonBuilderObject res;
-	if (v1.present()) {
-		metrics = BinaryReader::fromStringRef<StorageWiggleMetrics>(v1.get(), IncludeVersion());
-		res["primary"] = metrics.toJSON();
+ACTOR Future<JsonBuilderObject> storageWigglerStatsFetcher(DatabaseConfiguration conf,
+                                                           Database cx,
+                                                           bool use_system_priority) {
+	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+	state Optional<Value> primaryV;
+	state Optional<Value> remoteV;
+	loop {
+		try {
+			if (use_system_priority) {
+				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			}
+			wait(store(primaryV, StorageWiggleMetrics::runGetTransaction(tr, true)) &&
+			     store(remoteV, StorageWiggleMetrics::runGetTransaction(tr, false)));
+			wait(tr->commit());
+			break;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
 	}
-	if (conf.regions.size() > 1 && v2.present()) {
-		metrics = BinaryReader::fromStringRef<StorageWiggleMetrics>(v2.get(), IncludeVersion());
-		res["remote"] = metrics.toJSON();
+
+	JsonBuilderObject res;
+	if (primaryV.present()) {
+		res["primary"] = ObjectReader::fromStringRef<StorageWiggleMetrics>(primaryV.get(), IncludeVersion()).toJSON();
+	}
+	if (conf.regions.size() > 1 && remoteV.present()) {
+		res["remote"] = ObjectReader::fromStringRef<StorageWiggleMetrics>(remoteV.get(), IncludeVersion()).toJSON();
 	}
 	return res;
 }
@@ -2987,8 +3006,9 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 			state int minStorageReplicasRemaining = -1;
 			state int fullyReplicatedRegions = -1;
+			// NOTE: here we should start all the transaction before wait in order to overlay latency
 			state Future<Optional<Value>> primaryDCFO = getActivePrimaryDC(cx, &fullyReplicatedRegions, &messages);
-			std::vector<Future<JsonBuilderObject>> futures2;
+			state std::vector<Future<JsonBuilderObject>> futures2;
 			futures2.push_back(dataStatusFetcher(ddWorker, configuration.get(), &minStorageReplicasRemaining));
 			futures2.push_back(workloadStatusFetcher(
 			    db, workers, mWorker, rkWorker, &qos, &dataOverlay, &status_incomplete_reasons, storageServerFuture));
@@ -2997,13 +3017,13 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			futures2.push_back(
 			    clusterSummaryStatisticsFetcher(pMetrics, storageServerFuture, tLogFuture, &status_incomplete_reasons));
 
-			state std::vector<JsonBuilderObject> workerStatuses = wait(getAll(futures2));
-			wait(success(primaryDCFO));
-
 			if (configuration.get().perpetualStorageWiggleSpeed > 0) {
-				wait(store(storageWiggler, storageWigglerStatsFetcher(configuration.get(), cx)));
+				wait(store(storageWiggler, storageWigglerStatsFetcher(configuration.get(), cx, true)));
 				statusObj["storage_wiggler"] = storageWiggler;
 			}
+
+			state std::vector<JsonBuilderObject> workerStatuses = wait(getAll(futures2));
+			wait(success(primaryDCFO));
 
 			int logFaultTolerance = 100;
 			if (db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {

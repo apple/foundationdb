@@ -293,6 +293,8 @@ int64_t getMaxShardSize(double dbSizeEstimate);
 
 struct DDTeamCollection;
 struct StorageWiggleMetrics {
+	constexpr static FileIdentifier file_identifier = 4728961;
+
 	// round statistics
 	// One StorageServer wiggle round is considered 'complete', when all StorageServers with creationTime < T are
 	// wiggled
@@ -338,22 +340,31 @@ struct StorageWiggleMetrics {
 		}
 	}
 
-	Future<Void> runSetTransaction(Database cx, bool primary) {
-		auto& metricsRef = *this;
-		return runRYWTransaction(cx, [metricsRef, primary](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr->set(perpetualStorageWiggleStatsPrefix.withSuffix(primary ? "primary"_sr : "remote"_sr),
-			        BinaryWriter::toValue(metricsRef, IncludeVersion()));
-			return Void();
+	static Future<Void> runSetTransaction(Reference<ReadYourWritesTransaction> tr,
+	                                      bool primary,
+	                                      StorageWiggleMetrics metrics) {
+		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+		tr->set(perpetualStorageWiggleStatsPrefix.withSuffix(primary ? "primary"_sr : "remote"_sr),
+		        ObjectWriter::toValue(metrics, IncludeVersion()));
+		return Void();
+	}
+
+	static Future<Void> runSetTransaction(Database cx, bool primary, StorageWiggleMetrics metrics) {
+		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+			return runSetTransaction(tr, primary, metrics);
 		});
 	}
 
-	Future<Optional<Value>> runGetTransaction(Database cx, bool primary) {
-		return runRYWTransaction(cx, [primary](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
-			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-			return tr->get(perpetualStorageWiggleStatsPrefix.withSuffix(primary ? "primary"_sr : "remote"_sr));
+	static Future<Optional<Value>> runGetTransaction(Reference<ReadYourWritesTransaction> tr, bool primary) {
+		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+		tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+		return tr->get(perpetualStorageWiggleStatsPrefix.withSuffix(primary ? "primary"_sr : "remote"_sr));
+	}
+
+	static Future<Optional<Value>> runGetTransaction(Database cx, bool primary) {
+		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
+			return runGetTransaction(tr, primary);
 		});
 	}
 
