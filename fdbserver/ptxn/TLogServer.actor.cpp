@@ -486,7 +486,8 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 		bool nothingPersistent =
 		    false; // true means tag is *known* to have no messages in persistentData.  false means nothing.
 
-		StorageTeamData(StorageTeamID storageTeam, std::vector<Tag> tags) : storageTeamId(storageTeam), tags(tags) {
+		StorageTeamData(StorageTeamID storageTeam, const std::vector<Tag>& tags)
+		  : storageTeamId(storageTeam), tags(tags) {
 			popped = invalidVersion;
 			persistentPopped = invalidVersion;
 			for (auto& tag : tags) {
@@ -495,8 +496,8 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 		}
 
 		StorageTeamData(StorageTeamID storageTeam,
-		                std::vector<Tag> tags,
-		                std::map<Tag, Version> tagToVersions,
+		                const std::vector<Tag>& tags,
+		                const std::map<Tag, Version>& tagToVersions,
 		                bool nothingPersistent,
 		                bool poppedRecently,
 		                bool unpoppedRecovered)
@@ -539,7 +540,7 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 					auto const& m = self->versionMessages.begin();
 					++messagesErased;
 
-					// TODO: understand what this means and make it work for txsTeam
+					// TODO: understand why we need to subtract the size for normal/txs team
 					if (self->storageTeamId != txsTeam) {
 						sizes.first -= m->second.first.size();
 					} else {
@@ -674,11 +675,11 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 
 	// only callable after getStorageTeamData returns a null reference
 	Reference<StorageTeamData> createStorageTeamData(StorageTeamID team,
-	                                                 std::vector<Tag>& tags,
+	                                                 const std::vector<Tag>& tags,
 	                                                 bool nothingPersistent,
 	                                                 bool poppedRecently,
 	                                                 bool unpoppedRecovered,
-	                                                 std::map<Tag, Version> tagToVersions = {}) {
+	                                                 const std::map<Tag, Version>& tagToVersions = {}) {
 		return storageTeamData[team] = makeReference<StorageTeamData>(
 		           team, tags, tagToVersions, nothingPersistent, poppedRecently, unpoppedRecovered);
 	}

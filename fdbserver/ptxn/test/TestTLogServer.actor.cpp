@@ -810,6 +810,8 @@ TEST_CASE("/fdbserver/ptxn/test/pop_data") {
 	state std::pair<std::vector<Standalone<StringRef>>, std::vector<Version>> res =
 	    wait(commitInjectReturnVersions(pContext, storageTeamID, pContext->numCommits));
 	state std::vector<Standalone<StringRef>> expectedMessages = res.first;
+
+	// TODO: uncomment this once enable peek from disk
 	// wait(verifyPeek(pContext, storageTeamID, pContext->numCommits));
 
 	wait(pop(pContext,
@@ -829,11 +831,11 @@ TEST_CASE("/fdbserver/ptxn/test/pop_data") {
 	}
 	totalSizeExcludeHeader -= res.first.back().size(); // because poppedLocation record the start location
 
-	// the final popped location is the total sizes of written messages + page headers
-	// it is hard to calculate page headers size here, thus using '>'
+	// the final popped location is the total sizes of written messages + page headers + spilledData
+	// it is hard to calculate page headers size or spilledData(spill as reference though) here, assert on '>'
 	// (note that the last message needs to be excluded because pop location use the start instead of end of a location)
 	// ref: https://github.com/apple/foundationdb/blob/4bf14e6/fdbserver/TLogServer.actor.cpp#L919
-	ASSERT(q->getPoppedLocationForTest() > totalSizeExcludeHeader);
+	ASSERT(q->TEST_getPoppedLocation() > totalSizeExcludeHeader);
 
 	(const_cast<ServerKnobs*> SERVER_KNOBS)->TLOG_SPILL_THRESHOLD = 1500e6;
 	platform::eraseDirectoryRecursive(folder);

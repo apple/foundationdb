@@ -1614,7 +1614,7 @@ public:
 
 	StorageBytes getStorageBytes() const override { return queue->getStorageBytes(); }
 
-	location getPoppedLocationForTest() override { return popped; }
+	location TEST_getPoppedLocation() override { return popped; }
 
 private:
 	DiskQueue* queue;
