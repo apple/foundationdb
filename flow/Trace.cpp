@@ -20,6 +20,7 @@
 
 #include "flow/Trace.h"
 #include "flow/FileTraceLogWriter.h"
+#include "flow/PrintTraceLogWriter.h"
 #include "flow/Knobs.h"
 #include "flow/XmlTraceLogFormatter.h"
 #include "flow/JsonTraceLogFormatter.h"
@@ -101,9 +102,9 @@ static int TRACE_LOG_MAX_PREOPEN_BUFFER = 1000000;
 
 struct TraceLog {
 	Reference<ITraceLogFormatter> formatter;
+	std::vector<Reference<ITraceLogWriter>> logWriters;
 
 private:
-	Reference<ITraceLogWriter> logWriter;
 	std::vector<TraceEventFields> eventBuffer;
 	int loggedLength;
 	int bufferLength;
@@ -205,13 +206,13 @@ public:
 
 	struct WriterThread final : IThreadPoolReceiver {
 		WriterThread(Reference<BarrierList> barriers,
-		             Reference<ITraceLogWriter> logWriter,
+		             std::vector<Reference<ITraceLogWriter>> logWriters,
 		             Reference<ITraceLogFormatter> formatter)
-		  : logWriter(logWriter), formatter(formatter), barriers(barriers) {}
+		  : logWriters(logWriters), formatter(formatter), barriers(barriers) {}
 
 		void init() override {}
 
-		Reference<ITraceLogWriter> logWriter;
+		std::vector<Reference<ITraceLogWriter>> logWriters;
 		Reference<ITraceLogFormatter> formatter;
 		Reference<BarrierList> barriers;
 
@@ -219,25 +220,31 @@ public:
 			double getTimeEstimate() const override { return 0; }
 		};
 		void action(Open& o) {
-			logWriter->open();
-			logWriter->write(formatter->getHeader());
+			for (auto logWriter : logWriters) {
+				logWriter->open();
+				logWriter->write(formatter->getHeader());
+			}
 		}
 
 		struct Close final : TypedAction<WriterThread, Close> {
 			double getTimeEstimate() const override { return 0; }
 		};
 		void action(Close& c) {
-			logWriter->write(formatter->getFooter());
-			logWriter->close();
+			for (auto logWriter : logWriters) {
+				logWriter->write(formatter->getFooter());
+				logWriter->close();
+			}
 		}
 
 		struct Roll final : TypedAction<WriterThread, Roll> {
 			double getTimeEstimate() const override { return 0; }
 		};
 		void action(Roll& c) {
-			logWriter->write(formatter->getFooter());
-			logWriter->roll();
-			logWriter->write(formatter->getHeader());
+			for (auto logWriter : logWriters) {
+				logWriter->write(formatter->getFooter());
+				logWriter->roll();
+				logWriter->write(formatter->getHeader());
+			}
 		}
 
 		struct Barrier final : TypedAction<WriterThread, Barrier> {
@@ -254,11 +261,15 @@ public:
 		void action(WriteBuffer& a) {
 			for (auto event : a.events) {
 				event.validateFormat();
-				logWriter->write(formatter->formatEvent(event));
+				for (auto logWriter : logWriters) {
+					logWriter->write(formatter->formatEvent(event));
+				}
 			}
 
 			if (FLOW_KNOBS->TRACE_SYNC_ENABLED) {
-				logWriter->sync();
+				for (auto logWriter : logWriters) {
+					logWriter->sync();
+				}
 			}
 		}
 
@@ -285,19 +296,18 @@ public:
 	bool isOpen() const { return opened; }
 
 	void open(std::string const& directory,
-	          std::string const& processName,
+	          std::string const& baseName,
 	          std::string logGroup,
+	          std::string identifier,
 	          std::string const& timestamp,
 	          uint64_t rs,
 	          uint64_t maxLogsSize,
-	          Optional<NetworkAddress> na,
 	          std::string const& tracePartialFileSuffix) {
 		ASSERT(!writer && !opened);
 
 		this->directory = directory;
-		this->processName = processName;
+		this->baseName = baseName;
 		this->logGroup = logGroup;
-		this->localAddress = na;
 		this->tracePartialFileSuffix = tracePartialFileSuffix;
 
 		basename = format("%s/%s.%s.%s",
@@ -305,21 +315,37 @@ public:
 		                  processName.c_str(),
 		                  timestamp.c_str(),
 		                  deterministicRandom()->randomAlphaNumeric(6).c_str());
-		logWriter = Reference<ITraceLogWriter>(new FileTraceLogWriter(
+
+		if (logWriters.size() == 0) {
+			logWriters.push_back(makeReference<ITraceLogWriter>(new FileTraceLogWriter()));
+		}
+
+		auto onError = [this]() { barriers->triggerAll(); };
+
+		TraceLogWriterParams params(
 		    directory,
-		    processName,
 		    basename,
+			identifier,
 		    formatter->getExtension(),
 		    tracePartialFileSuffix,
 		    maxLogsSize,
-		    [this]() { barriers->triggerAll(); },
+		    [this]() {
+			barriers->triggerAll(); },
 		    issues));
+
+		for (auto logWriter : logWriters) {
+			logWriter->open(params);
+			if (localAddress.present()) {
+				logWriter->setNetworkAddress(localAddress.get());
+			}
+		}
 
 		if (g_network->isSimulated())
 			writer = Reference<IThreadPool>(new DummyThreadPool());
 		else
 			writer = createGenericThreadPool();
-		writer->addThread(new WriterThread(barriers, logWriter, formatter), "fdb-trace-log");
+
+		writer->addThread(new WriterThread(barriers, logWriters, formatter), "fdb-trace-log");
 
 		rollsize = rs;
 
@@ -343,15 +369,26 @@ public:
 		}
 
 		opened = true;
-		for (TraceEventFields& fields : eventBuffer) {
-			annotateEvent(fields);
-		}
+		if (localAddress.present()) {
+			for (TraceEventFields& fields : eventBuffer) {
+				annotateEvent(fields);
+			}
 
-		if (preopenOverflowCount > 0) {
-			TraceEvent(SevWarn, "TraceLogPreopenOverflow").detail("OverflowEventCount", preopenOverflowCount);
-			preopenOverflowCount = 0;
+			if (preopenOverflowCount > 0) {
+				TraceEvent(SevWarn, "TraceLogPreopenOverflow").detail("OverflowEventCount", preopenOverflowCount);
+				preopenOverflowCount = 0;
+			}
 		}
 	}
+
+	void setNetworkAddress(const NetworkAddress& address) {
+		localAddress = address;
+		for (auto logWriter : logWriters) {
+			logWriter->setNetworkAddress(address);
+		}
+	}
+
+	Optional<NetworkAddress> getNetworkAddress() { return localAddress; }
 
 	void annotateEvent(TraceEventFields& fields) {
 		MutexHolder holder(mutex);
@@ -383,14 +420,14 @@ public:
 			fields.addField("TrackLatestType", "Original");
 		}
 
-		if (!isOpen() &&
+		if ((!isOpen() || !localAddress.present()) &&
 		    (preopenOverflowCount > 0 || bufferLength + fields.sizeBytes() > TRACE_LOG_MAX_PREOPEN_BUFFER)) {
 			++preopenOverflowCount;
 			return;
 		}
 
 		// FIXME: What if we are using way too much memory for buffer?
-		ASSERT(!isOpen() || fields.isAnnotated());
+		ASSERT(!isOpen() || !localAddress.present() || fields.isAnnotated());
 		eventBuffer.push_back(fields);
 		bufferLength += fields.sizeBytes();
 
@@ -662,6 +699,32 @@ bool traceFormatImpl(std::string& format) {
 	}
 }
 
+namespace {
+template <bool validate>
+bool traceWriterImpl(std::string& writer) {
+	std::transform(writer.begin(), writer.end(), writer.begin(), ::tolower);
+	if (writer == "file") {
+		if (!validate) {
+			g_traceLog.logWriters.push_back(makeReference<ITraceLogWriter>(new FileTraceLogWriter()));
+		}
+		return true;
+	} else if (writer == "stdout") {
+		if (!validate) {
+			g_traceLog.logWriters.push_back(
+			    makeReference<ITraceLogWriter>(new PrintTraceLogWriter(PrintTraceLogWriter::Stream::STDOUT)));
+		}
+		return true;
+	} else if (writer == "stderr") {
+		if (!validate) {
+			g_traceLog.logWriters.push_back(
+			    makeReference<ITraceLogWriter>(new PrintTraceLogWriter(PrintTraceLogWriter::Stream::STDERR)));
+		}
+		return true;
+	} else {
+		return false;
+	}
+}
+
 template <bool validate>
 bool traceClockSource(std::string& source) {
 	std::transform(source.begin(), source.end(), source.begin(), ::tolower);
@@ -700,7 +763,7 @@ bool selectTraceFormatter(std::string format) {
 	ASSERT(!g_traceLog.isOpen());
 	bool recognized = traceFormatImpl</*validate*/ false>(format);
 	if (!recognized) {
-		TraceEvent(SevWarnAlways, "UnrecognizedTraceFormat").detail("format", format);
+		TraceEvent(SevWarnAlways, "UnrecognizedTraceFormat").detail("Format", format);
 	}
 	return recognized;
 }
@@ -709,11 +772,24 @@ bool validateTraceFormat(std::string format) {
 	return traceFormatImpl</*validate*/ true>(format);
 }
 
+bool addTraceWriter(std::string writer) {
+	ASSERT(!g_traceLog.isOpen());
+	bool recognized = traceWriterImpl</*validate*/ false>(writer);
+	if (!recognized) {
+		TraceEvent(SevWarnAlways, "UnrecognizedTraceWriter").detail("Writer", writer);
+	}
+	return recognized;
+}
+
+bool validateTraceWriter(std::string writer) {
+	return traceWriterImpl</*validate*/ true>(writer);
+}
+
 bool selectTraceClockSource(std::string source) {
 	ASSERT(!g_traceLog.isOpen());
 	bool recognized = traceClockSource</*validate*/ false>(source);
 	if (!recognized) {
-		TraceEvent(SevWarnAlways, "UnrecognizedTraceClockSource").detail("source", source);
+		TraceEvent(SevWarnAlways, "UnrecognizedTraceClockSource").detail("Source", source);
 	}
 	return recognized;
 }
@@ -728,6 +804,14 @@ ThreadFuture<Void> flushTraceFile() {
 	return g_traceLog.flush();
 }
 
+void tryFlushTraceFile() {
+	if (!g_traceLog.getNetworkAddress().present()) {
+		return;
+	}
+
+	g_traceLog.flush();
+}
+
 void flushTraceFileVoid() {
 	if (g_network && g_network->isSimulated())
 		flushTraceFile();
@@ -736,11 +820,10 @@ void flushTraceFileVoid() {
 	}
 }
 
-void openTraceFile(const NetworkAddress& na,
-                   uint64_t rollsize,
+void openTraceFile(uint64_t rollsize,
                    uint64_t maxLogsSize,
                    std::string directory,
-                   std::string baseOfBase,
+                   std::string baseName,
                    std::string logGroup,
                    std::string identifier,
                    std::string tracePartialFileSuffix) {
@@ -750,28 +833,28 @@ void openTraceFile(const NetworkAddress& na,
 	if (directory.empty())
 		directory = ".";
 
-	if (baseOfBase.empty())
-		baseOfBase = "trace";
+	if (baseName.empty())
+		baseName = "trace";
 
-	std::string ip = na.ip.toString();
-	std::replace(ip.begin(), ip.end(), ':', '_'); // For IPv6, Windows doesn't accept ':' in filenames.
-	std::string baseName;
-	if (identifier.size() > 0) {
-		baseName = format("%s.%s.%s", baseOfBase.c_str(), ip.c_str(), identifier.c_str());
-	} else {
-		baseName = format("%s.%s.%d", baseOfBase.c_str(), ip.c_str(), na.port);
-	}
 	g_traceLog.open(directory,
 	                baseName,
 	                logGroup,
+	                identifier,
 	                format("%lld", time(nullptr)),
 	                rollsize,
 	                maxLogsSize,
-	                !g_network->isSimulated() ? na : Optional<NetworkAddress>(),
 	                tracePartialFileSuffix);
 
-	uncancellable(recurring(&flushTraceFile, FLOW_KNOBS->TRACE_FLUSH_INTERVAL, TaskPriority::FlushTrace));
+	uncancellable(recurring(&tryFlushTraceFile, FLOW_KNOBS->TRACE_FLUSH_INTERVAL, TaskPriority::FlushTrace));
 	g_traceBatch.dump();
+}
+
+void setTraceNetworkAddress(const NetworkAddress& address) {
+	g_traceLog.setNetworkAddress(address);
+}
+
+bool hasTraceNetworkAddress() {
+	return g_traceLog.getNetworkAddress().present();
 }
 
 void initTraceEventMetrics() {
@@ -1400,7 +1483,7 @@ void TraceBatch::dump() {
 		g_traceLog.writeEvent(buggifyBatch[i].fields, "", false);
 	}
 
-	onMainThreadVoid([]() { g_traceLog.flush(); }, nullptr);
+	onMainThreadVoid([]() { tryFlushTraceFile(); }, nullptr);
 	eventBatch.clear();
 	attachBatch.clear();
 	buggifyBatch.clear();
@@ -1659,4 +1742,40 @@ std::string traceableStringToString(const char* value, size_t S) {
 	}
 
 	return std::string(value, S - 1); // Exclude trailing \0 byte
+}
+
+struct IssuesListImpl {
+	IssuesListImpl() {}
+	void addIssue(std::string const& issue) {
+		MutexHolder h(mutex);
+		issues.insert(issue);
+	}
+
+	void retrieveIssues(std::set<std::string>& out) const {
+		MutexHolder h(mutex);
+		for (auto const& i : issues) {
+			out.insert(i);
+		}
+	}
+
+	void resolveIssue(std::string const& issue) {
+		MutexHolder h(mutex);
+		issues.erase(issue);
+	}
+
+private:
+	mutable Mutex mutex;
+	std::set<std::string> issues;
+};
+
+IssuesList::IssuesList() : impl(std::make_unique<IssuesListImpl>()) {}
+IssuesList::~IssuesList() = default;
+void IssuesList::addIssue(std::string const& issue) {
+	impl->addIssue(issue);
+}
+void IssuesList::retrieveIssues(std::set<std::string>& out) const {
+	impl->retrieveIssues(out);
+}
+void IssuesList::resolveIssue(std::string const& issue) {
+	impl->resolveIssue(issue);
 }

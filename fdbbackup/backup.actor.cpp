@@ -3921,8 +3921,10 @@ int main(int argc, char* argv[]) {
 		// For most modes, initCluster() will open a trace file, but some fdbbackup operations do not require
 		// a cluster so they should use this instead.
 		auto initTraceFile = [&]() {
-			if (trace)
-				openTraceFile(NetworkAddress(), traceRollSize, traceMaxLogsSize, traceDir, "trace", traceLogGroup);
+			if (trace) {
+				openTraceFile(traceRollSize, traceMaxLogsSize, traceDir, "trace", traceLogGroup);
+				setTraceNetworkAddress(NetworkAddress());
+			}
 		};
 
 		auto initCluster = [&](bool quiet = false) {

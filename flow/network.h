@@ -20,7 +20,6 @@
 
 #ifndef FLOW_OPENNETWORK_H
 #define FLOW_OPENNETWORK_H
-#include "flow/ProtocolVersion.h"
 #pragma once
 
 #include <array>
@@ -33,6 +32,8 @@
 #ifndef TLS_DISABLED
 #include "boost/asio/ssl.hpp"
 #endif
+
+#include "flow/ProtocolVersion.h"
 #include "flow/Arena.h"
 #include "flow/BooleanParam.h"
 #include "flow/IRandom.h"

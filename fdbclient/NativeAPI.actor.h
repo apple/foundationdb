@@ -68,6 +68,7 @@ struct NetworkOptions {
 	uint64_t traceMaxLogsSize;
 	std::string traceLogGroup;
 	std::string traceFormat;
+	std::vector<std::string> traceWriters;
 	std::string traceClockSource;
 	std::string traceFileIdentifier;
 	std::string tracePartialFileSuffix;
@@ -121,7 +122,7 @@ private:
 void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> value = Optional<StringRef>());
 
 // Configures the global networking machinery
-void setupNetwork(uint64_t transportId = 0, UseMetrics = UseMetrics::False);
+void setupNetwork(uint64_t transportId = 0, UseMetrics = UseMetrics::False, int apiVersion = -1);
 
 // This call blocks while the network is running.  To use the API in a single-threaded
 //  environment, the calling program must have ACTORs already launched that are waiting

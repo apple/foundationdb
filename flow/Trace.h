@@ -582,14 +582,17 @@ struct EventCacheHolder : public ReferenceCounted<EventCacheHolder> {
 #endif
 
 struct NetworkAddress;
-void openTraceFile(const NetworkAddress& na,
-                   uint64_t rollsize,
+void openTraceFile(uint64_t rollsize,
                    uint64_t maxLogsSize,
                    std::string directory = ".",
-                   std::string baseOfBase = "trace",
+                   std::string baseName = "trace",
                    std::string logGroup = "default",
                    std::string identifier = "",
                    std::string tracePartialFileSuffix = "");
+
+void setTraceNetworkAddress(const NetworkAddress& address);
+bool hasTraceNetworkAddress();
+
 void initTraceEventMetrics();
 void closeTraceFile();
 bool traceFileIsOpen();
@@ -600,6 +603,12 @@ void flushTraceFileVoid();
 bool selectTraceFormatter(std::string format);
 // Returns true iff format is recognized.
 bool validateTraceFormat(std::string format);
+
+// Adds a writer for trace files. Returns false if the writer is unrecognized. No longer safe to call after a call
+// to openTraceFile.
+bool addTraceWriter(std::string writer);
+// Returns true iff writer is recognized.
+bool validateTraceWriter(std::string writer);
 
 // Select the clock source for trace files. Returns false if the format is unrecognized. No longer safe to call after a
 // call to openTraceFile.

@@ -1,5 +1,5 @@
 /*
- * FileTraceLogWriter.h
+ * PrintTraceLogWriter.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,41 +18,28 @@
  * limitations under the License.
  */
 
-#ifndef FLOW_FILE_TRACE_LOG_WRITER_H
-#define FLOW_FILE_TRACE_LOG_WRITER_H
+#ifndef FLOW_PRINT_TRACE_LOG_WRITER_H
+#define FLOW_PRINT_TRACE_LOG_WRITER_H
 #pragma once
 
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/Trace.h"
-#include "flow/network.h"
 
-#include <functional>
+#include <cstdio>
 
-class FileTraceLogWriter final : public ITraceLogWriter, ReferenceCounted<FileTraceLogWriter> {
+class PrintTraceLogWriter final : public ITraceLogWriter, ReferenceCounted<PrintTraceLogWriter> {
 private:
 	void write(const char* str, size_t size);
-	void initializeFile();
-
-	TraceLogWriterParams writerParams;
-	Optional<NetworkAddress> address;
-	bool opened = false;
-	bool initialized = false;
-	uint32_t index = 0;
-	int traceFileFD;
-	std::string basenameWithProcess;
-	std::string noAddressBasename;
-	std::string finalname;
-
-	std::vector<std::string> pendingLogs;
+	std::FILE* outStream;
 
 public:
-	FileTraceLogWriter();
+	enum class Stream { STDOUT, STDERR };
+
+	FileTraceLogWriter(Stream stream);
 
 	void addref() override;
 	void delref() override;
-
-	void lastError(int err);
 
 	void write(const std::string& str) override;
 	void write(StringRef const& str) override;
@@ -61,8 +48,6 @@ public:
 	void close() override;
 	void roll() override;
 	void sync() override;
-
-	void cleanupTraceFiles();
 };
 
 #endif

@@ -1611,7 +1611,7 @@ private:
 				flushAndExit(FDB_EXIT_ERROR);
 			}
 			auto publicIP = determinePublicIPAutomatically(connectionFile->getConnectionString());
-			publicAddresses.address = NetworkAddress(publicIP, ::getpid());
+			publicAddresses.address = NetworkAddress(publicIP, getpid());
 		}
 
 		if (role == ServerRole::Simulation) {
@@ -1788,7 +1788,8 @@ int main(int argc, char* argv[]) {
 		if (role == ServerRole::Simulation || role == ServerRole::CreateTemplateDatabase) {
 			// startOldSimulator();
 			startNewSimulator(opts.printSimTime);
-			openTraceFile(NetworkAddress(), opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace", opts.logGroup);
+			openTraceFile(opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace", opts.logGroup);
+			setTraceNetworkAddress(NetworkAddress());
 			openTracer(TracerType(deterministicRandom()->randomInt(static_cast<int>(TracerType::DISABLED),
 			                                                       static_cast<int>(TracerType::SIM_END))));
 		} else {
@@ -1806,8 +1807,8 @@ int main(int argc, char* argv[]) {
 				}
 			}
 
-			openTraceFile(
-			    opts.publicAddresses.address, opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace", opts.logGroup);
+			openTraceFile(opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace", opts.logGroup);
+			setTraceNetworkAddress(opts.publicAddresses.address);
 			g_network->initTLS();
 
 			if (expectsPublicAddress) {

@@ -24,9 +24,66 @@
 #include <set>
 
 class StringRef;
+struct NetworkAddress;
+
+struct ITraceLogIssuesReporter {
+	virtual ~ITraceLogIssuesReporter();
+	virtual void addIssue(std::string const& issue) = 0;
+	virtual void resolveIssue(std::string const& issue) = 0;
+
+	virtual void retrieveIssues(std::set<std::string>& out) const = 0;
+
+	virtual void addref() = 0;
+	virtual void delref() = 0;
+};
+
+struct IssuesListImpl;
+struct IssuesList final : ITraceLogIssuesReporter, ThreadSafeReferenceCounted<IssuesList> {
+	IssuesList();
+	~IssuesList() override;
+	void addIssue(std::string const& issue) override;
+
+	void retrieveIssues(std::set<std::string>& out) const override;
+
+	void resolveIssue(std::string const& issue) override;
+
+	void addref() override { ThreadSafeReferenceCounted<IssuesList>::addref(); }
+	void delref() override { ThreadSafeReferenceCounted<IssuesList>::delref(); }
+
+private:
+	std::unique_ptr<IssuesListImpl> impl;
+};
+
+// A set of parameters that may optionally be used by a trace log writers
+struct TraceLogWriterParams {
+	TraceLogWriterParams();
+	TraceLogWriterParams(std::string const& directory,
+	                     std::string const& basename,
+	                     std::string const& identifier,
+	                     std::string const& extension,
+	                     std::string const& tracePartialFileSuffix,
+	                     uint64_t maxLogsSize,
+	                     std::function<void()> onError,
+	                     Reference<ITraceLogIssuesReporter> issues)
+	  : directory(directory), basename(basename), identifier(identifier), extension(extension),
+	    tracePartialFileSuffix(tracePartialFileSuffix), maxLogsSize(maxLogsSize), onError(onError), issues(issues) {}
+
+	std::string directory;
+	std::string basename;
+	std::string identifier;
+	std::string extension;
+	std::string finalname;
+	std::string tracePartialFileSuffix;
+
+	uint64_t maxLogsSize;
+
+	std::function<void()> onError;
+	Reference<ITraceLogIssuesReporter> issues;
+};
 
 struct ITraceLogWriter {
-	virtual void open() = 0;
+	virtual void open(TraceLogWriterParams const& params) = 0;
+	virtual void setNetworkAddress(NetworkAddress const& address) = 0;
 	virtual void roll() = 0;
 	virtual void close() = 0;
 	virtual void write(const std::string&) = 0;
@@ -44,17 +101,6 @@ struct ITraceLogFormatter {
 	virtual const char* getHeader() const = 0; // Called when starting a new file
 	virtual const char* getFooter() const = 0; // Called when ending a file
 	virtual std::string formatEvent(const TraceEventFields&) const = 0; // Called for each event
-
-	virtual void addref() = 0;
-	virtual void delref() = 0;
-};
-
-struct ITraceLogIssuesReporter {
-	virtual ~ITraceLogIssuesReporter();
-	virtual void addIssue(std::string const& issue) = 0;
-	virtual void resolveIssue(std::string const& issue) = 0;
-
-	virtual void retrieveIssues(std::set<std::string>& out) const = 0;
 
 	virtual void addref() = 0;
 	virtual void delref() = 0;

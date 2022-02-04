@@ -574,8 +574,8 @@ int main(int argc, char* argv[]) {
 	if (isServer) {
 		publicAddress = NetworkAddress::parse("0.0.0.0:" + port);
 	}
-	// openTraceFile(publicAddress, TRACE_DEFAULT_ROLL_SIZE,
-	//              TRACE_DEFAULT_MAX_LOGS_SIZE);
+	// openTraceFile(TRACE_DEFAULT_ROLL_SIZE, TRACE_DEFAULT_MAX_LOGS_SIZE);
+	// setTraceNetworkAddress(publicAddress);
 	try {
 		if (isServer) {
 			auto listenError = FlowTransport::transport().bind(publicAddress, publicAddress);

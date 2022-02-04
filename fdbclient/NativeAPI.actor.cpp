@@ -1804,50 +1804,14 @@ Database Database::createDatabase(Reference<IClusterConnectionRecord> connRecord
 	if (!g_network)
 		throw network_not_setup();
 
-	ASSERT(TraceEvent::isNetworkThread());
+	if (connRecord && !hasTraceNetworkAddress()) {
+		auto publicIP = determinePublicIPAutomatically(connRecord->getConnectionString());
+		setTraceNetworkAddress(NetworkAddress(publicIP, 0));
 
-	platform::ImageInfo imageInfo = platform::getImageInfo();
+		initializeSystemMonitorMachineState(SystemMonitorMachineState(IPAddress(publicIP)));
 
-	if (connRecord) {
-		if (networkOptions.traceDirectory.present() && !traceFileIsOpen()) {
-			g_network->initMetrics();
-			FlowTransport::transport().initMetrics();
-			initTraceEventMetrics();
-
-			auto publicIP = determinePublicIPAutomatically(connRecord->getConnectionString());
-			selectTraceFormatter(networkOptions.traceFormat);
-			selectTraceClockSource(networkOptions.traceClockSource);
-			addUniversalTraceField("ClientDescription",
-			                       format("%s-%s-%" PRIu64,
-			                              networkOptions.primaryClient ? "primary" : "external",
-			                              FDB_VT_VERSION,
-			                              getTraceThreadId()));
-
-			openTraceFile(NetworkAddress(publicIP, ::getpid()),
-			              networkOptions.traceRollSize,
-			              networkOptions.traceMaxLogsSize,
-			              networkOptions.traceDirectory.get(),
-			              "trace",
-			              networkOptions.traceLogGroup,
-			              networkOptions.traceFileIdentifier,
-			              networkOptions.tracePartialFileSuffix);
-
-			TraceEvent("ClientStart")
-			    .detail("SourceVersion", getSourceVersion())
-			    .detail("Version", FDB_VT_VERSION)
-			    .detail("PackageName", FDB_VT_PACKAGE_NAME)
-			    .detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(nullptr))
-			    .detail("ApiVersion", apiVersion)
-			    .detail("ClientLibrary", imageInfo.fileName)
-			    .detailf("ImageOffset", "%p", imageInfo.offset)
-			    .detail("Primary", networkOptions.primaryClient)
-			    .trackLatest("ClientStart");
-
-			initializeSystemMonitorMachineState(SystemMonitorMachineState(IPAddress(publicIP)));
-
-			systemMonitor();
-			uncancellable(recurring(&systemMonitor, CLIENT_KNOBS->SYSTEM_MONITOR_INTERVAL, TaskPriority::FlushTrace));
-		}
+		systemMonitor();
+		uncancellable(recurring(&systemMonitor, CLIENT_KNOBS->SYSTEM_MONITOR_INTERVAL, TaskPriority::FlushTrace));
 	}
 
 	g_network->initTLS();
@@ -1895,6 +1859,7 @@ Database Database::createDatabase(Reference<IClusterConnectionRecord> connRecord
 	GlobalConfig::globalConfig().trigger(samplingFrequency, samplingProfilerUpdateFrequency);
 	GlobalConfig::globalConfig().trigger(samplingWindow, samplingProfilerUpdateWindow);
 
+	platform::ImageInfo imageInfo = platform::getImageInfo();
 	TraceEvent("ConnectToDatabase", database->dbId)
 	    .detail("Version", FDB_VT_VERSION)
 	    .detail("ClusterFile", connRecord ? connRecord->toString() : "None")
@@ -1963,6 +1928,14 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 			fprintf(stderr, "Unrecognized trace format: `%s'\n", networkOptions.traceFormat.c_str());
 			throw invalid_option_value();
 		}
+		break;
+	case FDBNetworkOptions::TRACE_LOG_WRITER:
+		validateOptionValuePresent(value);
+		if (!validateTraceFormat(value.get().toString())) {
+			fprintf(stderr, "Unrecognized trace format: `%s'\n", value.get().toString().c_str());
+			throw invalid_option_value();
+		}
+		networkOptions.traceWriters.push_back(value.get().toString());
 		break;
 	case FDBNetworkOptions::TRACE_FILE_IDENTIFIER:
 		validateOptionValuePresent(value);
@@ -2184,7 +2157,7 @@ static void setupGlobalKnobs() {
 }
 
 // Setup g_network and start monitoring for network busyness
-void setupNetwork(uint64_t transportId, UseMetrics useMetrics) {
+void setupNetwork(uint64_t transportId, UseMetrics useMetrics, int apiVersion) {
 	if (g_network)
 		throw network_already_setup();
 
@@ -2198,6 +2171,51 @@ void setupNetwork(uint64_t transportId, UseMetrics useMetrics) {
 	Net2FileSystem::newFileSystem();
 
 	uncancellable(monitorNetworkBusyness());
+
+	if (networkOptions.traceDirectory.present() && !traceFileIsOpen()) {
+		g_network->initMetrics();
+		FlowTransport::transport().initMetrics();
+		initTraceEventMetrics();
+
+		selectTraceFormatter(networkOptions.traceFormat);
+		for (auto writer : networkOptions.traceWriters) {
+			addTraceWriter(writer);
+		}
+		selectTraceClockSource(networkOptions.traceClockSource);
+
+		std::string traceFileIdentifier;
+		if (networkOptions.traceFileIdentifier.size() > 0) {
+			traceFileIdentifier = networkOptions.traceFileIdentifier;
+		} else {
+			traceFileIdentifier = format("%d", gitpid());
+		}
+
+		openTraceFile(networkOptions.traceRollSize,
+		              networkOptions.traceMaxLogsSize,
+		              networkOptions.traceDirectory.get(),
+		              "trace",
+		              networkOptions.traceLogGroup,
+		              networkOptions.traceFileIdentifier,
+		              networkOptions.tracePartialFileSuffix);
+
+		addUniversalTraceField("ClientDescription",
+		                       format("%s-%s-%" PRIu64,
+		                              networkOptions.primaryClient ? "primary" : "external",
+		                              FDB_VT_VERSION,
+		                              getTraceThreadId()));
+
+		platform::ImageInfo imageInfo = platform::getImageInfo();
+		TraceEvent("ClientStart")
+		    .detail("SourceVersion", getSourceVersion())
+		    .detail("Version", FDB_VT_VERSION)
+		    .detail("PackageName", FDB_VT_PACKAGE_NAME)
+		    .detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(nullptr))
+		    .detail("ApiVersion", apiVersion)
+		    .detail("ClientLibrary", imageInfo.fileName)
+		    .detailf("ImageOffset", "%p", imageInfo.offset)
+		    .detail("Primary", networkOptions.primaryClient)
+		    .trackLatest("ClientStart");
+	}
 }
 
 void runNetwork() {
