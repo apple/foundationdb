@@ -369,6 +369,9 @@ UID decodeTssQuarantineKey(KeyRef const& key) {
 
 const KeyRangeRef tssMismatchKeys(LiteralStringRef("\xff/tssMismatch/"), LiteralStringRef("\xff/tssMismatch0"));
 
+const KeyRangeRef serverMetadataKeys(LiteralStringRef("\xff/serverMetadata/"),
+                                     LiteralStringRef("\xff/serverMetadata0"));
+
 const KeyRangeRef serverTagKeys(LiteralStringRef("\xff/serverTag/"), LiteralStringRef("\xff/serverTag0"));
 
 const KeyRef serverTagPrefix = serverTagKeys.begin;
@@ -633,7 +636,10 @@ const KeyRef configKeysPrefix = configKeys.begin;
 
 const KeyRef perpetualStorageWiggleKey(LiteralStringRef("\xff/conf/perpetual_storage_wiggle"));
 const KeyRef perpetualStorageWiggleLocalityKey(LiteralStringRef("\xff/conf/perpetual_storage_wiggle_locality"));
-const KeyRef wigglingStorageServerKey(LiteralStringRef("\xff/storageWigglePID"));
+const KeyRef perpetualStorageWiggleIDPrefix(
+    LiteralStringRef("\xff/storageWiggleID/")); // withSuffix /primary or /remote
+const KeyRef perpetualStorageWiggleStatsPrefix(
+    LiteralStringRef("\xff/storageWiggleStats/")); // withSuffix /primary or /remote
 
 const KeyRef triggerDDTeamInfoPrintKey(LiteralStringRef("\xff/triggerDDTeamInfoPrint"));
 

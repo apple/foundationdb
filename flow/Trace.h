@@ -119,6 +119,7 @@ public:
 	std::string getValue(std::string key) const;
 	int getInt(std::string key, bool permissive = false) const;
 	int64_t getInt64(std::string key, bool permissive = false) const;
+	uint64_t getUint64(std::string key, bool permissive = false) const;
 	double getDouble(std::string key, bool permissive = false) const;
 
 	Field& mutate(int index);
