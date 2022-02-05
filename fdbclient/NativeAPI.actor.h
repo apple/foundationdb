@@ -364,7 +364,7 @@ public:
 	                                                                    int expectedShardCount);
 	// Pass a negative value for `shardLimit` to indicate no limit on the shard number.
 	Future<StorageMetrics> getStorageMetrics(KeyRange const& keys, int shardLimit);
-	Future<Void> splitStorageMetricsStream(PromiseStream<Key> resultsStream,
+	Future<Void> splitStorageMetricsStream(PromiseStream<Key> const& resultsStream,
 	                                       KeyRange const& keys,
 	                                       StorageMetrics const& limit,
 	                                       StorageMetrics const& estimated);
