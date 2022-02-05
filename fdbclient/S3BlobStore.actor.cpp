@@ -1092,11 +1092,11 @@ void S3BlobStoreEndpoint::setAuthHeaders(std::string const& verb, std::string co
 
 	std::string& date = headers["Date"];
 
-	char dateBuf[20];
+	char dateBuf[40];
 	time_t ts;
 	time(&ts);
-	// ISO 8601 format YYYYMMDD'T'HHMMSS'Z'
-	strftime(dateBuf, 20, "%Y%m%dT%H%M%SZ", gmtime(&ts));
+	// RFC 1123 format
+	strftime(dateBuf, 40, "%a, %d %b %Y %T GMT", gmtime(&ts));
 	date = dateBuf;
 
 	std::string msg;
