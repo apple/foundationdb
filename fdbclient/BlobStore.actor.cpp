@@ -1165,11 +1165,11 @@ void BlobStoreEndpoint::setV4AuthHeaders(std::string const& verb,
 	if (date.empty() || datestamp.empty()) {
 		time_t ts;
 		time(&ts);
-		char dateBuf[20];
-		// ISO 8601 format YYYYMMDD'T'HHMMSS'Z'
-		strftime(dateBuf, 20, "%Y%m%dT%H%M%SZ", gmtime(&ts));
+		char dateBuf[40];
+		// RFC 1123 format
+		strftime(dateBuf, 40, "%a, %d %b %Y %T GMT", gmtime(&ts));
 		amzDate = dateBuf;
-		strftime(dateBuf, 20, "%Y%m%d", gmtime(&ts));
+		strftime(dateBuf, 40, "%Y%m%d", gmtime(&ts));
 		dateStamp = dateBuf;
 	} else {
 		amzDate = date;
@@ -1254,11 +1254,11 @@ void BlobStoreEndpoint::setV4AuthHeaders(std::string const& verb,
 void BlobStoreEndpoint::setAuthHeaders(std::string const& verb, std::string const& resource, HTTP::Headers& headers) {
 	std::string& date = headers["Date"];
 
-	char dateBuf[20];
+	char dateBuf[40];
 	time_t ts;
 	time(&ts);
-	// ISO 8601 format YYYYMMDD'T'HHMMSS'Z'
-	strftime(dateBuf, 20, "%Y%m%dT%H%M%SZ", gmtime(&ts));
+	// RFC 1123 format
+	strftime(dateBuf, 40, "%a, %d %b %Y %T GMT", gmtime(&ts));
 	date = dateBuf;
 
 	std::string msg;
