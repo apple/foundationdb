@@ -34,6 +34,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/MetricLogger.actor.h"
 #include "fdbserver/BackupInterface.h"
+#include "fdbserver/EncryptKeyProxyInterface.h"
 #include "fdbserver/RoleLineage.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/IKeyValueStore.h"
@@ -519,6 +520,7 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
                                       Reference<AsyncVar<Optional<DataDistributorInterface>> const> ddInterf,
                                       Reference<AsyncVar<Optional<RatekeeperInterface>> const> rkInterf,
                                       Reference<AsyncVar<Optional<BlobManagerInterface>> const> bmInterf,
+                                      Reference<AsyncVar<Optional<EncryptKeyProxyInterface>> const> ekpInterf,
                                       Reference<AsyncVar<bool> const> degraded,
                                       Reference<IClusterConnectionRecord> connRecord,
                                       Reference<AsyncVar<std::set<std::string>> const> issues,
@@ -554,6 +556,7 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 		                              ddInterf->get(),
 		                              rkInterf->get(),
 		                              bmInterf->get(),
+		                              ekpInterf->get(),
 		                              degraded->get(),
 		                              localConfig->lastSeenVersion(),
 		                              localConfig->configClassSet());
@@ -616,6 +619,7 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 			when(wait(ddInterf->onChange())) { break; }
 			when(wait(rkInterf->onChange())) { break; }
 			when(wait(bmInterf->onChange())) { break; }
+			when(wait(ekpInterf->onChange())) { break; }
 			when(wait(degraded->onChange())) { break; }
 			when(wait(FlowTransport::transport().onIncompatibleChanged())) { break; }
 			when(wait(issues->onChange())) { break; }
@@ -640,6 +644,10 @@ bool addressInDbAndPrimaryDc(const NetworkAddress& address, Reference<AsyncVar<S
 	}
 
 	if (dbi.blobManager.present() && dbi.blobManager.get().address() == address) {
+		return true;
+	}
+
+	if (dbi.encryptKeyProxy.present() && dbi.encryptKeyProxy.get().address() == address) {
 		return true;
 	}
 
@@ -700,8 +708,8 @@ TEST_CASE("/fdbserver/worker/addressInDbAndPrimaryDc") {
 
 	// Manually set up a master address.
 	NetworkAddress testAddress(IPAddress(0x13131313), 1);
-	testDbInfo.master.changeCoordinators =
-	    RequestStream<struct ChangeCoordinatorsRequest>(Endpoint({ testAddress }, UID(1, 2)));
+	testDbInfo.master.getCommitVersion =
+	    RequestStream<struct GetCommitVersionRequest>(Endpoint({ testAddress }, UID(1, 2)));
 
 	// First, create an empty TLogInterface, and check that it shouldn't be considered as in primary DC.
 	testDbInfo.logSystemConfig.tLogs.push_back(TLogSet());
@@ -1376,6 +1384,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	    new AsyncVar<Optional<DataDistributorInterface>>());
 	state Reference<AsyncVar<Optional<RatekeeperInterface>>> rkInterf(new AsyncVar<Optional<RatekeeperInterface>>());
 	state Reference<AsyncVar<Optional<BlobManagerInterface>>> bmInterf(new AsyncVar<Optional<BlobManagerInterface>>());
+	state Reference<AsyncVar<Optional<EncryptKeyProxyInterface>>> ekpInterf(
+	    new AsyncVar<Optional<EncryptKeyProxyInterface>>());
 	state Future<Void> handleErrors = workerHandleErrors(errors.getFuture()); // Needs to be stopped last
 	state ActorCollection errorForwarders(false);
 	state Future<Void> loggingTrigger = Void();
@@ -1646,6 +1656,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		                                       ddInterf,
 		                                       rkInterf,
 		                                       bmInterf,
+		                                       ekpInterf,
 		                                       degraded,
 		                                       connRecord,
 		                                       issues,
@@ -1681,13 +1692,17 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					           dbInfo->get().clusterInterface != ccInterface->get().get()) {
 						TraceEvent("GotServerDBInfoChange")
 						    .detail("ChangeID", localInfo.id)
+						    .detail("InfoGeneration", localInfo.infoGeneration)
 						    .detail("MasterID", localInfo.master.id())
 						    .detail("RatekeeperID",
 						            localInfo.ratekeeper.present() ? localInfo.ratekeeper.get().id() : UID())
 						    .detail("DataDistributorID",
 						            localInfo.distributor.present() ? localInfo.distributor.get().id() : UID())
 						    .detail("BlobManagerID",
-						            localInfo.blobManager.present() ? localInfo.blobManager.get().id() : UID());
+						            localInfo.blobManager.present() ? localInfo.blobManager.get().id() : UID())
+						    .detail("EncryptKeyProxyID",
+						            localInfo.encryptKeyProxy.present() ? localInfo.encryptKeyProxy.get().id() : UID());
+
 						dbInfo->set(localInfo);
 					}
 					errorForwarders.add(
@@ -1772,12 +1787,10 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				startRole(Role::MASTER, recruited.id(), interf.id());
 
 				DUMPTOKEN(recruited.waitFailure);
-				DUMPTOKEN(recruited.tlogRejoin);
-				DUMPTOKEN(recruited.changeCoordinators);
 				DUMPTOKEN(recruited.getCommitVersion);
 				DUMPTOKEN(recruited.getLiveCommittedVersion);
 				DUMPTOKEN(recruited.reportLiveCommittedVersion);
-				DUMPTOKEN(recruited.notifyBackupWorkerDone);
+				DUMPTOKEN(recruited.updateRecoveryData);
 
 				// printf("Recruited as masterServer\n");
 				Future<Void> masterProcess = masterServer(
@@ -1883,6 +1896,30 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				} else {
 					forwardPromise(req.reply, backupWorkerCache.get(req.reqId));
 				}
+			}
+			when(InitializeEncryptKeyProxyRequest req = waitNext(interf.encryptKeyProxy.getFuture())) {
+				LocalLineage _;
+				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::EncryptKeyProxy;
+				EncryptKeyProxyInterface recruited(locality, req.reqId);
+				recruited.initEndpoints();
+
+				if (ekpInterf->get().present()) {
+					recruited = ekpInterf->get().get();
+					TEST(true); // Recruited while already a encryptKeyProxy server.
+				} else {
+					startRole(Role::ENCRYPT_KEY_PROXY, recruited.id(), interf.id());
+					DUMPTOKEN(recruited.waitFailure);
+
+					Future<Void> encryptKeyProxyProcess = encryptKeyProxyServer(recruited, dbInfo);
+					errorForwarders.add(forwardError(
+					    errors,
+					    Role::ENCRYPT_KEY_PROXY,
+					    recruited.id(),
+					    setWhenDoneOrError(encryptKeyProxyProcess, ekpInterf, Optional<EncryptKeyProxyInterface>())));
+					ekpInterf->set(Optional<EncryptKeyProxyInterface>(recruited));
+				}
+				TraceEvent("EncryptKeyProxyReceived", req.reqId).detail("EncryptKeyProxyId", recruited.id());
+				req.reply.send(recruited);
 			}
 			when(InitializeTLogRequest req = waitNext(interf.tLog.getFuture())) {
 				// For now, there's a one-to-one mapping of spill type to TLogVersion.
@@ -2028,7 +2065,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				} else if (storageCache.exists(req.reqId)) {
 					forwardPromise(req.reply, storageCache.get(req.reqId));
 				} else {
-					TraceEvent("AttemptedDoubleRecruitement", interf.id()).detail("ForRole", "StorageServer");
+					TraceEvent("AttemptedDoubleRecruitment", interf.id()).detail("ForRole", "StorageServer");
 					errorForwarders.add(map(delay(0.5), [reply = req.reply](Void) {
 						reply.sendError(recruitment_failed());
 						return Void();
@@ -2439,7 +2476,7 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderWithDelayedCandidacyImplOneGenerati
 						    .detail("CurrentConnectionString",
 						            info.intermediateConnRecord->getConnectionString().toString());
 					}
-					connRecord->setConnectionString(info.intermediateConnRecord->getConnectionString());
+					connRecord->setAndPersistConnectionString(info.intermediateConnRecord->getConnectionString());
 					info.intermediateConnRecord = connRecord;
 				}
 
@@ -2707,3 +2744,4 @@ const Role Role::BLOB_WORKER("BlobWorker", "BW");
 const Role Role::STORAGE_CACHE("StorageCache", "SC");
 const Role Role::COORDINATOR("Coordinator", "CD");
 const Role Role::BACKUP("Backup", "BK");
+const Role Role::ENCRYPT_KEY_PROXY("EncryptKeyProxy", "EP");

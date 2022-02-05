@@ -8,7 +8,10 @@ set(FDBSERVER_SRCS
   BlobManager.actor.cpp
   BlobManagerInterface.h
   BlobWorker.actor.cpp
+  ClusterController.actor.h
   ClusterController.actor.cpp
+  ClusterRecovery.actor.h
+  ClusterRecovery.actor.cpp
   ConfigBroadcaster.actor.cpp
   ConfigBroadcaster.h
   ConfigDatabaseUnitTests.actor.cpp
@@ -29,6 +32,8 @@ set(FDBSERVER_SRCS
   DataDistributorInterface.h
   DBCoreState.h
   DiskQueue.actor.cpp
+  EncryptKeyProxyInterface.h
+  EncryptKeyProxy.actor.cpp  
   fdbserver.actor.cpp
   FDBExecHelper.actor.cpp
   FDBExecHelper.actor.h
@@ -185,6 +190,7 @@ set(FDBSERVER_SRCS
   workloads/DiskDurabilityTest.actor.cpp
   workloads/DiskFailureInjection.actor.cpp
   workloads/DummyWorkload.actor.cpp
+  workloads/EncryptionOps.actor.cpp
   workloads/ExternalWorkload.actor.cpp
   workloads/FastTriggeredWatches.actor.cpp
   workloads/FileSystem.actor.cpp
@@ -192,6 +198,7 @@ set(FDBSERVER_SRCS
   workloads/FuzzApiCorrectness.actor.cpp
   workloads/GetRangeStream.actor.cpp
   workloads/HealthMetricsApi.actor.cpp
+  workloads/HighContentionPrefixAllocatorWorkload.actor.cpp
   workloads/IncrementalBackup.actor.cpp
   workloads/Increment.actor.cpp
   workloads/IndexScan.actor.cpp
