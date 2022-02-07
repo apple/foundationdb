@@ -129,6 +129,7 @@ class NetworkMessageReceiver {
 public:
 	virtual void receive(ArenaObjectReader&) = 0;
 	virtual bool isStream() const { return false; }
+	virtual bool isPublic() const = 0;
 	virtual PeerCompatibilityPolicy peerCompatibilityPolicy() const {
 		return { RequirePeer::Exactly, g_network->protocolVersion() };
 	}

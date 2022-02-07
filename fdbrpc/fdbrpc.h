@@ -110,6 +110,8 @@ struct NetSAV final : SAV<T>, FlowReceiver, FastAllocated<NetSAV<T>> {
 			SAV<T>::sendAndDelPromiseRef(message.get().asUnderlyingType());
 		}
 	}
+
+	bool isPublic() const override { return true; }
 };
 
 template <class T>
@@ -290,6 +292,8 @@ struct AcknowledgementReceiver final : FlowReceiver, FastAllocated<Acknowledgeme
 	AcknowledgementReceiver() : ready(nullptr) {}
 	AcknowledgementReceiver(const Endpoint& remoteEndpoint) : FlowReceiver(remoteEndpoint, false), ready(nullptr) {}
 
+	bool isPublic() const override { return true; }
+
 	void receive(ArenaObjectReader& reader) override {
 		ErrorOr<AcknowledgementReply> message;
 		reader.deserialize(message);
@@ -335,6 +339,8 @@ struct NetNotifiedQueueWithAcknowledgements final : NotifiedQueue<T>,
 		    makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnect(remoteEndpoint.getPrimaryAddress()),
 		    operation_obsolete());
 	}
+
+	bool isPublic() const override { return true; }
 
 	void destroy() override { delete this; }
 	void receive(ArenaObjectReader& reader) override {
@@ -602,10 +608,10 @@ struct serializable_traits<ReplyPromiseStream<T>> : std::true_type {
 	}
 };
 
-template <class T>
-struct NetNotifiedQueue final : NotifiedQueue<T>, FlowReceiver, FastAllocated<NetNotifiedQueue<T>> {
-	using FastAllocated<NetNotifiedQueue<T>>::operator new;
-	using FastAllocated<NetNotifiedQueue<T>>::operator delete;
+template <class T, bool IsPublic>
+struct NetNotifiedQueue final : NotifiedQueue<T>, FlowReceiver, FastAllocated<NetNotifiedQueue<T, IsPublic>> {
+	using FastAllocated<NetNotifiedQueue<T, IsPublic>>::operator new;
+	using FastAllocated<NetNotifiedQueue<T, IsPublic>>::operator delete;
 
 	NetNotifiedQueue(int futures, int promises) : NotifiedQueue<T>(futures, promises) {}
 	NetNotifiedQueue(int futures, int promises, const Endpoint& remoteEndpoint)
@@ -620,9 +626,10 @@ struct NetNotifiedQueue final : NotifiedQueue<T>, FlowReceiver, FastAllocated<Ne
 		this->delPromiseRef();
 	}
 	bool isStream() const override { return true; }
+	bool isPublic() const override { return IsPublic; }
 };
 
-template <class T>
+template <class T, bool IsPublic = false>
 class RequestStream {
 public:
 	// stream.send( request )
@@ -778,13 +785,13 @@ public:
 		return getReplyUnlessFailedFor(ReplyPromise<X>(), sustainedFailureDuration, sustainedFailureSlope);
 	}
 
-	explicit RequestStream(const Endpoint& endpoint) : queue(new NetNotifiedQueue<T>(0, 1, endpoint)) {}
+	explicit RequestStream(const Endpoint& endpoint) : queue(new NetNotifiedQueue<T, IsPublic>(0, 1, endpoint)) {}
 
 	FutureStream<T> getFuture() const {
 		queue->addFutureRef();
 		return FutureStream<T>(queue);
 	}
-	RequestStream() : queue(new NetNotifiedQueue<T>(0, 1)) {}
+	RequestStream() : queue(new NetNotifiedQueue<T, IsPublic>(0, 1)) {}
 	explicit RequestStream(PeerCompatibilityPolicy policy) : RequestStream() {
 		queue->setPeerCompatibilityPolicy(policy);
 	}
@@ -828,7 +835,7 @@ public:
 	}
 
 private:
-	NetNotifiedQueue<T>* queue;
+	NetNotifiedQueue<T, IsPublic>* queue;
 };
 
 template <class Ar, class T>
