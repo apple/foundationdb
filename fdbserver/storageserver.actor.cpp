@@ -1788,6 +1788,55 @@ ACTOR Future<Void> getFileQ(StorageServer* self, GetFileRequest req) {
 	return Void();
 }
 
+ACTOR Future<Void> getCheckpointKeyValuesQ(StorageServer* self, GetCheckpointKeyValuesRequest req) {
+	TraceEvent("ServeGetCheckpointKeyValuesBegin", self->thisServerID)
+	    .detail("CheckpointDir", req.checkpointDir)
+	    .detail("Range", req.range);
+
+	req.reply.setByteLimit(SERVER_KNOBS->FILE_TRANSFER_BLOCK_BYTES);
+
+	try {
+		state ICheckpointReader* rocksReader =
+		    checkpointReaderRocksDB(req.checkpointDir, deterministicRandom()->randomUniqueID());
+		wait(rocksReader->init(req.range));
+
+		std::cout << "Init Checkpoint Done" << std::endl;
+
+		loop {
+			state RangeResult res =
+			    wait(rocksReader->next(CLIENT_KNOBS->REPLY_BYTE_LIMIT, CLIENT_KNOBS->REPLY_BYTE_LIMIT));
+			if (res.size() == 0) {
+				break;
+			}
+			wait(req.reply.onReady());
+			GetCheckpointKeyValuesStreamReply reply;
+			reply.arena.dependsOn(res.arena());
+			for (const auto* kv = res.begin(); kv != res.end(); ++kv) {
+				reply.data.push_back(reply.arena, *kv);
+			}
+			req.reply.send(reply);
+		}
+	} catch (Error& e) {
+		rocksReader->close();
+		TraceEvent(SevWarnAlways, "ServerGetCheckpointKeyValuesFailure")
+		    .detail("CheckpointDir", req.checkpointDir)
+		    .detail("Range", req.range.toString())
+		    .error(e, /*includeCancel=*/true);
+		if (!canReplyWith(e)) {
+			throw;
+		}
+		req.reply.sendError(e);
+	}
+
+	TraceEvent(SevWarnAlways, "ServerGetCheckpointKeyValuesEnd")
+	    .detail("CheckpointDir", req.checkpointDir)
+	    .detail("Range", req.range);
+
+	req.reply.sendError(end_of_stream());
+	rocksReader->close();
+	return Void();
+}
+
 ACTOR Future<Void> overlappingChangeFeedsQ(StorageServer* data, OverlappingChangeFeedsRequest req) {
 	wait(delay(0));
 	wait(data->version.whenAtLeast(req.minVersion));
@@ -6842,6 +6891,15 @@ ACTOR Future<Void> serveGetFileRequests(StorageServer* self, FutureStream<GetFil
 	}
 }
 
+ACTOR Future<Void> serveGetCheckpointKeyValuesRequests(
+    StorageServer* self,
+    FutureStream<GetCheckpointKeyValuesRequest> getCheckpointKeyValues) {
+	loop {
+		GetCheckpointKeyValuesRequest req = waitNext(getCheckpointKeyValues);
+		self->actors.add(getCheckpointKeyValuesQ(self, req));
+	}
+}
+
 ACTOR Future<Void> serveChangeFeedVersionUpdateRequests(
     StorageServer* self,
     FutureStream<ChangeFeedVersionUpdateRequest> changeFeedVersionUpdate) {
@@ -6906,6 +6964,7 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 	self->actors.add(serveChangeFeedPopRequests(self, ssi.changeFeedPop.getFuture()));
 	self->actors.add(serveGetCheckpointRequests(self, ssi.checkpoint.getFuture()));
 	self->actors.add(serveGetFileRequests(self, ssi.getFile.getFuture()));
+	self->actors.add(serveGetCheckpointKeyValuesRequests(self, ssi.getCheckpointKeyValues.getFuture()));
 	self->actors.add(serveChangeFeedVersionUpdateRequests(self, ssi.changeFeedVersionUpdate.getFuture()));
 	self->actors.add(traceRole(Role::STORAGE_SERVER, ssi.id()));
 	self->actors.add(reportStorageServerState(self));

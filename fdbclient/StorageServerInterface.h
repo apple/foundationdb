@@ -86,6 +86,7 @@ struct StorageServerInterface {
 	RequestStream<struct ChangeFeedVersionUpdateRequest> changeFeedVersionUpdate;
 	RequestStream<struct GetCheckpointRequest> checkpoint;
 	RequestStream<struct GetFileRequest> getFile;
+	RequestStream<struct GetCheckpointKeyValuesRequest> getCheckpointKeyValues;
 
 	explicit StorageServerInterface(UID uid) : uniqueID(uid) {}
 	StorageServerInterface() : uniqueID(deterministicRandom()->randomUniqueID()) {}
@@ -140,6 +141,8 @@ struct StorageServerInterface {
 				    getValue.getEndpoint().getAdjustedEndpoint(18));
 				checkpoint = RequestStream<struct GetCheckpointRequest>(getValue.getEndpoint().getAdjustedEndpoint(19));
 				getFile = RequestStream<struct GetFileRequest>(getValue.getEndpoint().getAdjustedEndpoint(20));
+				getCheckpointKeyValues =
+				    RequestStream<struct GetCheckpointKeyValuesRequest>(getValue.getEndpoint().getAdjustedEndpoint(21));
 			}
 		} else {
 			ASSERT(Ar::isDeserializing);
@@ -189,6 +192,7 @@ struct StorageServerInterface {
 		streams.push_back(changeFeedVersionUpdate.getReceiver());
 		streams.push_back(checkpoint.getReceiver());
 		streams.push_back(getFile.getReceiver());
+		streams.push_back(getCheckpointKeyValues.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -1027,6 +1031,39 @@ struct GetCheckpointRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, version, range, format, checkpointID, reply);
+	}
+};
+
+//
+struct GetCheckpointKeyValuesStreamReply : public ReplyPromiseStreamReply {
+	constexpr static FileIdentifier file_identifier = 13804353;
+	Arena arena;
+	VectorRef<KeyValueRef, VecSerStrategy::String> data;
+	bool more;
+
+	GetCheckpointKeyValuesStreamReply() : more(false) {}
+
+	int expectedSize() const { return data.expectedSize(); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, ReplyPromiseStreamReply::acknowledgeToken, ReplyPromiseStreamReply::sequence, data, more, arena);
+	}
+};
+
+struct GetCheckpointKeyValuesRequest {
+	constexpr static FileIdentifier file_identifier = 13804354;
+	std::string checkpointDir; // File path on the storage server.
+	KeyRange range;
+	ReplyPromiseStream<GetCheckpointKeyValuesStreamReply> reply;
+
+	GetCheckpointKeyValuesRequest() {}
+	GetCheckpointKeyValuesRequest(std::string checkpointDir, KeyRange range)
+	  : checkpointDir(checkpointDir), range(range) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, checkpointDir, range, reply);
 	}
 };
 

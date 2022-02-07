@@ -2,18 +2,16 @@
 
 #include <rocksdb/cache.h>
 #include <rocksdb/db.h>
+#include <rocksdb/env.h>
 #include <rocksdb/filter_policy.h>
-#include <rocksdb/options.h>
 #include <rocksdb/metadata.h>
+#include <rocksdb/options.h>
+#include <rocksdb/slice.h>
 #include <rocksdb/slice_transform.h>
 #include <rocksdb/sst_file_reader.h>
 #include <rocksdb/sst_file_writer.h>
-#include <rocksdb/slice.h>
-#include <rocksdb/env.h>
-#include <rocksdb/options.h>
 #include <rocksdb/statistics.h>
 #include <rocksdb/table.h>
-#include <rocksdb/version.h>
 #include <rocksdb/types.h>
 #include <rocksdb/utilities/checkpoint.h>
 #include <rocksdb/utilities/table_properties_collectors.h>

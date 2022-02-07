@@ -58,7 +58,7 @@ rocksdb::Options getOptions() {
 	rocksdb::Options options({}, getCFOptions());
 
 	// options.avoid_unnecessary_blocking_io = true;
-	options.create_if_missing = true;
+	options.create_if_missing = false;
 	options.db_log_dir = SERVER_KNOBS->LOG_DIRECTORY;
 	return options;
 }

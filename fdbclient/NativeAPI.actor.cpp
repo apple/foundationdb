@@ -30,6 +30,16 @@
 
 #include "contrib/fmt-8.0.1/include/fmt/format.h"
 
+#ifdef SSD_ROCKSDB_EXPERIMENTAL
+
+// #include <rocksdb/env.h>
+// #include <rocksdb/options.h>
+#include <rocksdb/slice.h>
+#include <rocksdb/slice_transform.h>
+#include <rocksdb/sst_file_writer.h>
+
+#endif // SSD_ROCKSDB_EXPERIMENTAL
+
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/MultiInterface.h"
@@ -99,6 +109,14 @@ namespace {
 
 TransactionLineageCollector transactionLineageCollector;
 NameLineageCollector nameLineageCollector;
+
+#ifdef SSD_ROCKSDB_EXPERIMENTAL
+
+rocksdb::Slice toSlice(StringRef s) {
+	return rocksdb::Slice(reinterpret_cast<const char*>(s.begin()), s.size());
+}
+
+#endif // SSD_ROCKSDB_EXPERIMENTAL
 
 template <class Interface, class Request>
 Future<REPLY_TYPE(Request)> loadBalance(
@@ -7058,6 +7076,7 @@ ACTOR static Future<Void> fetchCheckpointFile(Database cx,
 	}
 }
 
+
 ACTOR Future<CheckpointMetaData> fetchCheckpoint(Database cx,
                                                  CheckpointMetaData initialState,
                                                  std::string dir,
@@ -7074,13 +7093,18 @@ ACTOR Future<CheckpointMetaData> fetchCheckpoint(Database cx,
 		}
 
 		state int i = 0;
-		TraceEvent("GetCheckpointMetaData").detail("Checkpoint", metaData->toString());
 		for (; i < metaData->rocksCF.get().sstFiles.size(); ++i) {
 			TraceEvent("GetCheckpointFetchingFile")
 			    .detail("FileName", metaData->rocksCF.get().sstFiles[i].name)
 			    .detail("Server", metaData->ssID.toString());
 			wait(fetchCheckpointFile(cx, metaData, i, dir, cFun));
 		}
+	} else if (metaData->format == SingleRocksDB) {
+		if (!metaData->rocksDBCheckpoint.present()) {
+			throw internal_error();
+		}
+		const std::string localFile = dir + "/" + metaData->checkpointID.toString() + ".sst";
+		wait(fetchCheckpointRange(cx, metaData, metaData->range, localFile, cFun));
 	} else {
 		throw not_implemented();
 	}
