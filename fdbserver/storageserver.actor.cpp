@@ -1801,7 +1801,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 	if (DEBUG_SS_CFM(data->thisServerID, req.rangeID, req.begin)) {
 		printf("CFM: SS %s CF %s: SQ %s   atLatest=%s, dequeVersion=%lld, emptyVersion=%lld, storageVersion=%lld, "
 		       "durableVersion=%lld, "
-		       "fetchStorageVersion=%lld\n",
+		       "fetchStorageVersion=%lld (%lld, %lld)\n",
 		       data->thisServerID.toString().substr(0, 4).c_str(),
 		       req.rangeID.printable().substr(0, 6).c_str(),
 		       streamUID.toString().substr(0, 8).c_str(),
@@ -1810,7 +1810,9 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		       feedInfo->emptyVersion,
 		       feedInfo->storageVersion,
 		       feedInfo->durableVersion,
-		       fetchStorageVersion);
+		       fetchStorageVersion,
+		       feedInfo->fetchVersion,
+		       feedInfo->durableFetchVersion.get());
 	}
 
 	if (req.end > emptyVersion + 1) {
@@ -1839,21 +1841,33 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 	}
 
 	state bool readDurable = feedInfo->durableVersion != invalidVersion && req.begin <= feedInfo->durableVersion;
-	state bool readFetched = feedInfo->durableVersion < fetchStorageVersion && req.begin <= fetchStorageVersion;
+	state bool readFetched = req.begin <= fetchStorageVersion;
 	state bool readAnyFromDisk = false;
 	if (req.end > emptyVersion + 1 && (readDurable || readFetched)) {
-		if (readFetched && req.begin > feedInfo->durableFetchVersion.get()) {
+		if (readFetched && req.begin <= feedInfo->fetchVersion) {
 			// Request needs data that has been written to storage by a change feed fetch, but not committed yet
 			// To not block fetchKeys making normal SS data readable on making change feed data written to storage, we
 			// wait in here instead for all fetched data to become readable from the storage engine.
 			ASSERT(req.begin <= feedInfo->fetchVersion);
 			TEST(true); // getChangeFeedMutations before fetched data durable
 
+			if (DEBUG_SS_CFM(data->thisServerID, req.rangeID, req.begin)) {
+				printf("CFM: SS %s CF %s:     waiting on fetch durable up to %lld\n",
+				       data->thisServerID.toString().substr(0, 4).c_str(),
+				       req.rangeID.printable().substr(0, 6).c_str(),
+				       feedInfo->fetchVersion);
+			}
+
 			// Wait for next commit to write pending feed data to storage
-			wait(feedInfo->durableFetchVersion.whenAtLeast(
-			    std::min(feedInfo->fetchVersion, feedInfo->durableFetchVersion.get() + 1)));
+			wait(feedInfo->durableFetchVersion.whenAtLeast(feedInfo->fetchVersion));
 			// To let update storage finish
 			wait(delay(0));
+			if (DEBUG_SS_CFM(data->thisServerID, req.rangeID, req.begin)) {
+				printf("CFM: SS %s CF %s:     got fetch durable up to %lld\n",
+				       data->thisServerID.toString().substr(0, 4).c_str(),
+				       req.rangeID.printable().substr(0, 6).c_str(),
+				       feedInfo->durableFetchVersion.get());
+			}
 		}
 		RangeResult res = wait(
 		    data->storage.readRange(KeyRangeRef(changeFeedDurableKey(req.rangeID, std::max(req.begin, emptyVersion)),
