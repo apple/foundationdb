@@ -644,7 +644,7 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 	UID recruitmentID;
 	TLogSpillType logSpillType;
 	PromiseStream<Void> warningCollectorInput;
-	int unpoppedRecoveredStorageTeams;
+	int unpoppedRecoveredStorageTeams = 0;
 
 	Reference<StorageTeamData> getStorageTeamData(const StorageTeamID& storageTeamID) {
 		for (const auto& [id, data] : storageTeamData) {
@@ -680,7 +680,7 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 	                           const std::string& context)
 	  : tlogGroupData(tlogGroupData), logId(interf.id()), cc("TLog", interf.id().toString()),
 	    bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc), protocolVersion(protocolVersion),
-	    unpoppedRecoveredStorageTeams(0), storageTeams(storageTeams), terminated(tlogGroupData->terminated.getFuture()),
+	    storageTeams(storageTeams), terminated(tlogGroupData->terminated.getFuture()),
 	    logSystem(new AsyncVar<Reference<ILogSystem>>()),
 	    // These are initialized differently on init() or recovery
 	    locality(locality), recruitmentID(recruitmentID), logSpillType(logSpillType) {
