@@ -75,6 +75,9 @@ public:
 	std::string toString() const;
 	static std::string getErrorString(std::string const& source, Error const& e);
 	Future<Void> resolveHostnames();
+	// This one should only be used when resolving asynchronously is impossible. For all other cases, resolveHostnames()
+	// should be preferred.
+	void resolveHostnamesBlocking();
 	void resetToUnresolved();
 
 	bool hasUnresolvedHostnames = false;
@@ -105,12 +108,10 @@ public:
 
 	// Returns the connection string currently held in this object. This may not match the stored record if it hasn't
 	// been persisted or if the persistent storage for the record has been modified externally.
-	ClusterConnectionString const& getConnectionString() const;
-
-	ClusterConnectionString* getMutableConnectionString();
+	ClusterConnectionString& getConnectionString();
 
 	// Sets the connections string held by this object and persists it.
-	virtual Future<Void> setConnectionString(ClusterConnectionString const&) = 0;
+	virtual Future<Void> setAndPersistConnectionString(ClusterConnectionString const&) = 0;
 
 	// If this record is backed by persistent storage, get the connection string from that storage. Otherwise, return
 	// the connection string stored in memory.
@@ -140,6 +141,9 @@ public:
 
 	bool hasUnresolvedHostnames() const;
 	Future<Void> resolveHostnames();
+	// This one should only be used when resolving asynchronously is impossible. For all other cases, resolveHostnames()
+	// should be preferred.
+	void resolveHostnamesBlocking();
 
 	virtual void addref() = 0;
 	virtual void delref() = 0;

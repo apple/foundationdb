@@ -7,10 +7,22 @@ import sys
 import socket
 
 
-def get_free_port():
+def _get_free_port_internal():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(('0.0.0.0', 0))
         return s.getsockname()[1]
+
+
+_used_ports = set()
+
+
+def get_free_port():
+    global _used_ports
+    port = _get_free_port_internal()
+    while port in _used_ports:
+        port = _get_free_port_internal()
+    _used_ports.add(port)
+    return port
 
 
 class LocalCluster:
