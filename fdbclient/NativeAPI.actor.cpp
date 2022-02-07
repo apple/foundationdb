@@ -7710,7 +7710,11 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 		req.end = end;
 		req.range = it.second;
 		req.canReadPopped = canReadPopped;
+		// divide total buffer size among sub-streams, but keep individual streams large enough to be efficient
 		req.replyBufferSize = replyBufferSize / interfs.size();
+		if (replyBufferSize != -1 && req.replyBufferSize < CLIENT_KNOBS->REPLY_BYTE_LIMIT) {
+			req.replyBufferSize = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
+		}
 		UID debugID = deterministicRandom()->randomUniqueID();
 		debugIDs.push_back(debugID);
 		req.debugID = debugID;
