@@ -206,7 +206,6 @@ void DatabaseContext::removeTssMapping(StorageServerInterface const& ssi) {
 	}
 }
 
-
 void DatabaseContext::updateCachedRV(double t, Version v) {
 	if (v >= cachedRv) {
 		TraceEvent("CheckpointCacheUpdate")
