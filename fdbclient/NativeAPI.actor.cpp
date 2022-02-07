@@ -31,7 +31,6 @@
 #include "contrib/fmt-8.0.1/include/fmt/format.h"
 
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/Knobs.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/MultiInterface.h"
 
@@ -65,14 +64,12 @@
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/sim_validation.h"
-#include "fdbserver/Knobs.h"
 #include "flow/Arena.h"
 #include "flow/ActorCollection.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/Error.h"
 #include "flow/FastRef.h"
 #include "flow/IRandom.h"
-#include "flow/Trace.h"
 #include "flow/flow.h"
 #include "flow/genericactors.actor.h"
 #include "flow/Knobs.h"
@@ -1038,20 +1035,13 @@ ACTOR static Future<Void> handleTssMismatches(DatabaseContext* cx) {
 ACTOR static Future<Void> backgroundGrvUpdater(DatabaseContext* cx) {
 	state Transaction tr;
 	state double grvDelay = 0.001;
-	TraceEvent("BackgroundGrvUpdaterStart").detail("DBID", cx->dbId).detail("GrvDelay", grvDelay);
-	TraceEvent("DebugGrvCheckKnobValues")
-	    .detail("MinTraceSeverity", FLOW_KNOBS->MIN_TRACE_SEVERITY)
-	    .detail("GrvSustainedThrottlingThreshold", CLIENT_KNOBS->GRV_SUSTAINED_THROTTLING_THRESHOLD)
-	    .detail("GrvCacheRkCooldown", CLIENT_KNOBS->GRV_CACHE_RK_COOLDOWN)
-	    .detail("MaxVersionCacheLag", CLIENT_KNOBS->MAX_VERSION_CACHE_LAG)
-	    .detail("DebugUseGrvCacheChance", CLIENT_KNOBS->DEBUG_USE_GRV_CACHE_CHANCE);
 	try {
 		loop {
 			wait(refreshTransaction(cx, &tr));
 			state double curTime = now();
 			state double lastTime = cx->getLastTimedGRV();
 			state double lastProxyTime = cx->lastProxyRequest;
-			TraceEvent("BackgroundGrvUpdaterBefore")
+			TraceEvent(SevDebug, "BackgroundGrvUpdaterBefore")
 			    .detail("CurTime", curTime)
 			    .detail("LastTime", lastTime)
 			    .detail("GrvDelay", grvDelay)
@@ -1066,12 +1056,12 @@ ACTOR static Future<Void> backgroundGrvUpdater(DatabaseContext* cx) {
 					wait(success(tr.getReadVersion()));
 					cx->lastProxyRequest = curTime;
 					grvDelay = (grvDelay + (now() - curTime)) / 2.0;
-					TraceEvent("BackgroundGrvUpdaterSuccess")
+					TraceEvent(SevDebug, "BackgroundGrvUpdaterSuccess")
 					    .detail("GrvDelay", grvDelay)
 					    .detail("CachedRv", cx->getCachedRV())
 					    .detail("CachedTime", cx->getLastTimedGRV());
 				} catch (Error& e) {
-					TraceEvent("BackgroundGrvUpdaterTxnError").error(e, true);
+					TraceEvent(SevInfo, "BackgroundGrvUpdaterTxnError").error(e, true);
 					wait(tr.onError(e));
 				}
 			} else {
@@ -1079,7 +1069,7 @@ ACTOR static Future<Void> backgroundGrvUpdater(DatabaseContext* cx) {
 			}
 		}
 	} catch (Error& e) {
-		TraceEvent("BackgroundGrvUpdaterFailed").error(e, true);
+		TraceEvent(SevInfo, "BackgroundGrvUpdaterFailed").error(e, true);
 		throw;
 	}
 }
@@ -5950,11 +5940,7 @@ ACTOR Future<Version> extractReadVersion(Reference<TransactionState> trState,
 	double latency = now() - trState->startTime;
 	trState->cx->lastProxyRequest = trState->startTime;
 	trState->cx->updateCachedRV(trState->startTime, rep.version);
-	TraceEvent("DebugGrvQueueIterations").detail("TimeThrottled", rep.queueIterations);
 	if (rep.rkThrottled && trState->options.priority != TransactionPriority::IMMEDIATE) {
-		TraceEvent("DebugGrvThrottleObserved")
-		    .detail("TimeThrottled", rep.queueIterations)
-		    .detail("Threshold", CLIENT_KNOBS->GRV_THROTTLING_THRESHOLD);
 		trState->cx->lastTimedRkThrottle = now();
 	}
 	trState->cx->GRVLatencies.addSample(latency);
@@ -6017,10 +6003,6 @@ bool rkThrottlingCooledDown(DatabaseContext* cx) {
 	if (cx->lastTimedRkThrottle == 0.0) {
 		return true;
 	}
-	TraceEvent("DebugGrvRkCd")
-	    .detail("LastTimedRkThrottle", cx->lastTimedRkThrottle)
-	    .detail("TimeElapsed", now() - cx->lastTimedRkThrottle)
-	    .detail("CooldownTime", CLIENT_KNOBS->GRV_CACHE_RK_COOLDOWN);
 	return (now() - cx->lastTimedRkThrottle > CLIENT_KNOBS->GRV_CACHE_RK_COOLDOWN);
 }
 
@@ -6030,7 +6012,6 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 		    (deterministicRandom()->random01() <= CLIENT_KNOBS->DEBUG_USE_GRV_CACHE_CHANCE ||
 		     trState->options.useGrvCache) &&
 		    rkThrottlingCooledDown(getDatabase().getPtr())) {
-			TraceEvent("DebugGrvEnterCachePath");
 			// Upon our first request to use cached RVs, start the background updater
 			if (!trState->cx->grvUpdateHandler.isValid()) {
 				trState->cx->grvUpdateHandler = backgroundGrvUpdater(getDatabase().getPtr());
@@ -6039,7 +6020,6 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 			double lastTime = trState->cx->getLastTimedGRV();
 			double requestTime = now();
 			if (requestTime - lastTime <= CLIENT_KNOBS->MAX_VERSION_CACHE_LAG && rv != Version(0)) {
-				TraceEvent("DebugGrvUseCache").detail("LastRV", rv).detail("LastTime", format("%.6f", lastTime));
 				ASSERT(!debug_checkVersionTime(rv, requestTime, "CheckStaleness"));
 				readVersion = rv;
 				return readVersion;

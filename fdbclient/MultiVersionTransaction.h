@@ -108,7 +108,6 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                     int uidLength,
 	                                     uint8_t const* snapshotCommmand,
 	                                     int snapshotCommandLength);
-
 	double (*databaseGetMainThreadBusyness)(FDBDatabase* database);
 	FDBFuture* (*databaseGetServerProtocol)(FDBDatabase* database, uint64_t expectedVersion);
 

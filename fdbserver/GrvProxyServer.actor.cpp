@@ -654,7 +654,7 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
 		}
 
 		reply.queueIterations = request.queueIterations;
-		TraceEvent("DebugGrvProxyThrottleCheck")
+		TraceEvent(SevDebug, "DebugGrvProxyThrottleCheck")
 		    .detail("QueueIterations", reply.queueIterations)
 		    .detail("ThrottleThreshold", CLIENT_KNOBS->GRV_THROTTLING_THRESHOLD)
 		    .detail("LastTxnThrottled", stats->lastTxnThrottled)
@@ -662,23 +662,18 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
 		    .detail("Diff", now() - stats->throttleStartTime)
 		    .detail("SustainedThrottlingThreshold", CLIENT_KNOBS->GRV_SUSTAINED_THROTTLING_THRESHOLD);
 		if (reply.queueIterations >= CLIENT_KNOBS->GRV_THROTTLING_THRESHOLD) {
-			TraceEvent("DebugGrvProxyThrottled");
 			if (stats->lastTxnThrottled) {
-				TraceEvent("DebugGrvProxyLastTxnThrottled");
 				// Check if this throttling has been sustained for a certain amount of time to avoid false positives
 				if (now() - stats->throttleStartTime > CLIENT_KNOBS->GRV_SUSTAINED_THROTTLING_THRESHOLD) {
-					TraceEvent("DebugGrvProxyRkThrottled");
 					reply.rkThrottled = true;
 				}
 			} else { // !stats->lastTxnThrottled
-				TraceEvent("DebugGrvProxyLastTxnNotThrottled");
 				// If not previously throttled, this request/reply is our new starting point
 				// for judging whether we are being actively throttled by ratekeeper now
 				stats->lastTxnThrottled = true;
 				stats->throttleStartTime = now();
 			}
 		} else {
-			TraceEvent("DebugGrvProxyNotThrottled");
 			stats->lastTxnThrottled = false;
 		}
 		request.reply.send(reply);

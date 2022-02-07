@@ -1177,6 +1177,7 @@ MultiVersionDatabase::MultiVersionDatabase(MultiVersionApi* api,
   : dbState(new DatabaseState(clusterFilePath, versionMonitorDb)) {
 	dbState->db = db;
 	dbState->dbVar->set(db);
+
 	if (openConnectors) {
 		if (!api->localClientDisabled) {
 			dbState->addClient(api->getLocalClient());
