@@ -6779,7 +6779,7 @@ ACTOR Future<Void> splitStorageMetricsStream(PromiseStream<Key> resultStream,
                                              StorageMetrics estimated) {
 	state Span span("NAPI:SplitStorageMetricsStream"_loc);
 	state Key beginKey = keys.begin;
-	state Key lastKey = beginKey;
+	state Key globalLastKey = beginKey;
 	resultStream.send(beginKey);
 	// track used across loops
 	state StorageMetrics globalUsed;
@@ -6795,6 +6795,7 @@ ACTOR Future<Void> splitStorageMetricsStream(PromiseStream<Key> resultStream,
 			//TraceEvent("SplitStorageMetrics").detail("Locations", locations.size());
 
 			state StorageMetrics localUsed = globalUsed;
+			state Key localLastKey = globalLastKey;
 			state Standalone<VectorRef<KeyRef>> results;
 			state int i = 0;
 			for (; i < locations.size(); i++) {
@@ -6807,7 +6808,8 @@ ACTOR Future<Void> splitStorageMetricsStream(PromiseStream<Key> resultStream,
 				                                         &StorageServerInterface::splitMetrics,
 				                                         req,
 				                                         TaskPriority::DataDistribution));
-				if (res.splits.size() && res.splits[0] <= lastKey) { // split points are out of order, possibly because
+				if (res.splits.size() &&
+				    res.splits[0] <= localLastKey) { // split points are out of order, possibly because
 					// of moving data, throw error to retry
 					ASSERT_WE_THINK(false); // FIXME: This seems impossible and doesn't seem to be covered by testing
 					throw all_alternatives_failed();
@@ -6816,7 +6818,7 @@ ACTOR Future<Void> splitStorageMetricsStream(PromiseStream<Key> resultStream,
 				if (res.splits.size()) {
 					results.append(results.arena(), res.splits.begin(), res.splits.size());
 					results.arena().dependsOn(res.splits.arena());
-					lastKey = res.splits.back();
+					localLastKey = res.splits.back();
 				}
 				localUsed = res.used;
 
@@ -6830,8 +6832,9 @@ ACTOR Future<Void> splitStorageMetricsStream(PromiseStream<Key> resultStream,
 			    globalUsed.allLessOrEqual(limit * CLIENT_KNOBS->STORAGE_METRICS_UNFAIR_SPLIT_LIMIT) &&
 			    results.size() > 1) {
 				results.resize(results.arena(), results.size() - 1);
-				lastKey = results.back();
+				localLastKey = results.back();
 			}
+			globalLastKey = localLastKey;
 
 			for (auto& splitKey : results) {
 				resultStream.send(splitKey);

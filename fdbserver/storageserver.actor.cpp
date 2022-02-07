@@ -1718,9 +1718,9 @@ MutationsAndVersionRef filterMutations(Arena& arena,
 }
 
 // TODO REMOVE!!! when BG is correctness clean
-#define DEBUG_SS_ID "bdd3"_sr
-#define DEBUG_SS_CF_ID "b65dda"_sr
-#define DEBUG_SS_CF_BEGIN_VERSION 244526755
+#define DEBUG_SS_ID ""_sr
+#define DEBUG_SS_CF_ID ""_sr
+#define DEBUG_SS_CF_BEGIN_VERSION invalidVersion
 #define DEBUG_SS_CFM(ssId, cfId, v)                                                                                    \
 	ssId.toString().substr(0, 4) == DEBUG_SS_ID&& cfId.printable().substr(0, 6) == DEBUG_SS_CF_ID &&                   \
 	    (v >= DEBUG_SS_CF_BEGIN_VERSION || latestVersion == DEBUG_SS_CF_BEGIN_VERSION)
