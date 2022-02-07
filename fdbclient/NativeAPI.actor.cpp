@@ -7721,23 +7721,13 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 		req.canReadPopped = canReadPopped;
 		// divide total buffer size among sub-streams, but keep individual streams large enough to be efficient
 		req.replyBufferSize = replyBufferSize / interfs.size();
-		if (replyBufferSize != -1 && req.replyBufferSize < CLIENT_KNOBS->REPLY_BYTE_LIMIT) {
-			req.replyBufferSize = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
+		if (replyBufferSize != -1 && req.replyBufferSize < CLIENT_KNOBS->CHANGE_FEED_STREAM_MIN_BYTES) {
+			req.replyBufferSize = CLIENT_KNOBS->CHANGE_FEED_STREAM_MIN_BYTES;
 		}
 		UID debugID = deterministicRandom()->randomUniqueID();
 		debugIDs.push_back(debugID);
 		req.debugID = debugID;
 		results->streams.push_back(it.first.changeFeedStream.getReplyStream(req));
-		if (debugID.toString().substr(0, 8) == "637bfa4e") {
-			printf(
-			    "Good example: %s: %p\n", debugID.toString().substr(0, 8).c_str(), results->streams.back().debugAddr());
-			printf("\n");
-		}
-		if (debugID.toString().substr(0, 8) == "1ad27675") {
-			printf(
-			    "Bad example: %s: %p\n", debugID.toString().substr(0, 8).c_str(), results->streams.back().debugAddr());
-			printf("\n");
-		}
 	}
 
 	for (auto& it : results->storageData) {

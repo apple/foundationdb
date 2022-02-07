@@ -702,6 +702,7 @@ public:
 
 	FlowLock durableVersionLock;
 	FlowLock fetchKeysParallelismLock;
+	FlowLock fetchChangeFeedParallelismLock;
 	int64_t fetchKeysBytesBudget;
 	AsyncVar<bool> fetchKeysBudgetUsed;
 	std::vector<Promise<FetchInjectionInfo*>> readyFetchKeys;
@@ -808,7 +809,7 @@ public:
 		CounterCollection cc;
 		Counter allQueries, getKeyQueries, getValueQueries, getRangeQueries, getRangeAndFlatMapQueries,
 		    getRangeStreamQueries, finishedQueries, lowPriorityQueries, rowsQueried, bytesQueried, watchQueries,
-		    emptyQueries;
+		    emptyQueries, feedRowsQueried, feedBytesQueried;
 
 		// Bytes of the mutations that have been added to the memory of the storage server. When the data is durable
 		// and cleared from the memory, we do not subtract it but add it to bytesDurable.
@@ -823,6 +824,9 @@ public:
 		// is basically the size of both parameters of the mutation and a 12 bytes overhead that keeps mutation type
 		// and the lengths of both parameters.
 		Counter mutationBytes;
+
+		// Bytes fetched by fetchChangeFeed for data movements.
+		Counter feedBytesFetched;
 
 		Counter sampledBytesCleared;
 		// The number of key-value pairs fetched by fetchKeys()
@@ -850,17 +854,19 @@ public:
 		    getRangeStreamQueries("GetRangeStreamQueries", cc), finishedQueries("FinishedQueries", cc),
 		    lowPriorityQueries("LowPriorityQueries", cc), rowsQueried("RowsQueried", cc),
 		    bytesQueried("BytesQueried", cc), watchQueries("WatchQueries", cc), emptyQueries("EmptyQueries", cc),
+		    feedRowsQueried("FeedRowsQueried", cc), feedBytesQueried("FeedBytesQueried", cc),
 		    bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc), bytesFetched("BytesFetched", cc),
-		    mutationBytes("MutationBytes", cc), sampledBytesCleared("SampledBytesCleared", cc),
-		    kvFetched("KVFetched", cc), mutations("Mutations", cc), setMutations("SetMutations", cc),
-		    clearRangeMutations("ClearRangeMutations", cc), atomicMutations("AtomicMutations", cc),
-		    updateBatches("UpdateBatches", cc), updateVersions("UpdateVersions", cc), loops("Loops", cc),
-		    fetchWaitingMS("FetchWaitingMS", cc), fetchWaitingCount("FetchWaitingCount", cc),
-		    fetchExecutingMS("FetchExecutingMS", cc), fetchExecutingCount("FetchExecutingCount", cc),
-		    readsRejected("ReadsRejected", cc), wrongShardServer("WrongShardServer", cc),
-		    fetchedVersions("FetchedVersions", cc), fetchesFromLogs("FetchesFromLogs", cc),
-		    quickGetValueHit("QuickGetValueHit", cc), quickGetValueMiss("QuickGetValueMiss", cc),
-		    quickGetKeyValuesHit("QuickGetKeyValuesHit", cc), quickGetKeyValuesMiss("QuickGetKeyValuesMiss", cc),
+		    mutationBytes("MutationBytes", cc), feedBytesFetched("FeedBytesFetched", cc),
+		    sampledBytesCleared("SampledBytesCleared", cc), kvFetched("KVFetched", cc), mutations("Mutations", cc),
+		    setMutations("SetMutations", cc), clearRangeMutations("ClearRangeMutations", cc),
+		    atomicMutations("AtomicMutations", cc), updateBatches("UpdateBatches", cc),
+		    updateVersions("UpdateVersions", cc), loops("Loops", cc), fetchWaitingMS("FetchWaitingMS", cc),
+		    fetchWaitingCount("FetchWaitingCount", cc), fetchExecutingMS("FetchExecutingMS", cc),
+		    fetchExecutingCount("FetchExecutingCount", cc), readsRejected("ReadsRejected", cc),
+		    wrongShardServer("WrongShardServer", cc), fetchedVersions("FetchedVersions", cc),
+		    fetchesFromLogs("FetchesFromLogs", cc), quickGetValueHit("QuickGetValueHit", cc),
+		    quickGetValueMiss("QuickGetValueMiss", cc), quickGetKeyValuesHit("QuickGetKeyValuesHit", cc),
+		    quickGetKeyValuesMiss("QuickGetKeyValuesMiss", cc),
 		    readLatencySample("ReadLatencyMetrics",
 		                      self->thisServerID,
 		                      SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
@@ -878,6 +884,11 @@ public:
 			specialCounter(
 			    cc, "FetchKeysFetchActive", [self]() { return self->fetchKeysParallelismLock.activePermits(); });
 			specialCounter(cc, "FetchKeysWaiting", [self]() { return self->fetchKeysParallelismLock.waiters(); });
+			specialCounter(cc, "FetchChangeFeedFetchActive", [self]() {
+				return self->fetchChangeFeedParallelismLock.activePermits();
+			});
+			specialCounter(
+			    cc, "FetchChangeFeedWaiting", [self]() { return self->fetchChangeFeedParallelismLock.waiters(); });
 			specialCounter(cc, "QueryQueueMax", [self]() { return self->getAndResetMaxQueryQueueSize(); });
 			specialCounter(cc, "BytesStored", [self]() { return self->metrics.byteSample.getEstimate(allKeys); });
 			specialCounter(cc, "ActiveWatches", [self]() { return self->numWatches; });
@@ -926,6 +937,7 @@ public:
 	    numWatches(0), noRecentUpdates(false), lastUpdate(now()),
 	    readQueueSizeMetric(LiteralStringRef("StorageServer.ReadQueueSize")), updateEagerReads(nullptr),
 	    fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM),
+	    fetchChangeFeedParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM),
 	    fetchKeysBytesBudget(SERVER_KNOBS->STORAGE_FETCH_BYTES), fetchKeysBudgetUsed(false),
 	    instanceID(deterministicRandom()->randomUniqueID().first()), shuttingDown(false), behind(false),
 	    versionBehind(false), debug_inApplyUpdate(false), debug_lastValidateTime(0), lastBytesInputEBrake(0),
@@ -2113,6 +2125,9 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 			}
 			feedReply.atLatestVersion = atLatest;
 			feedReply.minStreamVersion = minVersion;
+
+			data->counters.feedRowsQueried += feedReply.mutations.size();
+			data->counters.feedBytesQueried += feedReply.mutations.expectedSize();
 
 			req.reply.send(feedReply);
 			if (feedReply.mutations.back().version == req.end - 1) {
@@ -4135,7 +4150,11 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
                                              Version endVersion,
                                              bool existing) {
 
-	state Version startVersion = std::max(beginVersion, emptyVersion + 1);
+	state Version startVersion = beginVersion;
+	startVersion = std::max(startVersion, emptyVersion + 1);
+	startVersion = std::max(startVersion, changeFeedInfo->fetchVersion + 1);
+	startVersion = std::max(startVersion, changeFeedInfo->durableFetchVersion.get() + 1);
+
 	ASSERT(startVersion >= 0);
 
 	if (startVersion >= endVersion) {
@@ -4239,6 +4258,7 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 					localResult = _localResult;
 				}
 			}
+			data->counters.feedBytesFetched += remoteResult.expectedSize();
 			data->fetchKeysBytesBudget -= remoteResult.expectedSize();
 			if (data->fetchKeysBytesBudget <= 0) {
 				data->fetchKeysBudgetUsed.set(true);
@@ -4282,6 +4302,10 @@ ACTOR Future<Version> fetchChangeFeed(StorageServer* data,
                                       Version beginVersion,
                                       Version endVersion) {
 	wait(delay(0)); // allow this actor to be cancelled by removals
+
+	// bound active change feed fetches
+	wait(data->fetchChangeFeedParallelismLock.take(TaskPriority::DefaultYield));
+	state FlowLock::Releaser holdingFCFPL(data->fetchChangeFeedParallelismLock);
 
 	TraceEvent(SevDebug, "FetchChangeFeed", data->thisServerID)
 	    .detail("RangeID", changeFeedInfo->id.printable())
