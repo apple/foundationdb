@@ -1332,6 +1332,11 @@ void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
 		}
 	}
 
+	// TODO CHANGE BACK BEFORE MERGING!!
+	// Avoid memory storage engines for now to avoid extra memory pressure of change feeds, and redwood is ocasionally
+	// hitting a root too large issue with change feeds
+	storage_engine_type = 0;
+
 	switch (storage_engine_type) {
 	case 0: {
 		TEST(true); // Simulated cluster using ssd storage engine
