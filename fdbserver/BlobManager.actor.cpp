@@ -571,10 +571,10 @@ ACTOR Future<Void> rangeAssigner(Reference<BlobManagerData> bmData) {
 					// revoke the range for the worker that owns it, not the worker specified in the revoke
 					bmData->addActor.send(doRangeAssignment(bmData, assignment, it.value(), seqNo));
 				}
+				bmData->workerAssignments.insert(assignment.keyRange, UID());
 			}
 
 			bmData->assignsInProgress.cancel(assignment.keyRange);
-			bmData->workerAssignments.insert(assignment.keyRange, UID());
 		}
 	}
 }
