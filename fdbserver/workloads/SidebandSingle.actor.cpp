@@ -170,14 +170,11 @@ struct SidebandSingleWorkload : TestWorkload {
 				try {
 					// tr.setOption(FDBTransactionOptions::CAUSAL_WRITE_RISKY);
 					tr.set(messageKey, LiteralStringRef("deadbeef"));
-					TraceEvent("DebugSidebandBeforeCommit");
 					wait(tr.commit());
 					commitVersion = tr.getCommittedVersion();
-					TraceEvent("DebugSidebandAfterCommit").detail("CommitVersion", commitVersion);
 					break;
 				} catch (Error& e) {
 					if (e.code() == error_code_commit_unknown_result) {
-						TraceEvent("DebugSidebandUnknownResult");
 						unknown = true;
 						++self->messages;
 						checker.updates.send(SidebandMessage(key, invalidVersion));
@@ -202,10 +199,8 @@ struct SidebandSingleWorkload : TestWorkload {
 			state Transaction tr(cx);
 			loop {
 				try {
-					TraceEvent("DebugSidebandCacheGetBefore");
 					tr.setOption(FDBTransactionOptions::USE_GRV_CACHE);
 					state Optional<Value> val = wait(tr.get(messageKey));
-					TraceEvent("DebugSidebandCacheGetAfter");
 					if (!val.present()) {
 						TraceEvent(SevError, "CausalConsistencyError1", self->interf.id())
 						    .detail("MessageKey", messageKey.toString().c_str())
@@ -214,15 +209,12 @@ struct SidebandSingleWorkload : TestWorkload {
 						            tr.getReadVersion().get()); // will assert that ReadVersion is set
 						++self->consistencyErrors;
 					} else if (val.get() != LiteralStringRef("deadbeef")) {
-						TraceEvent("DebugSidebandOldBeef");
 						// check again without cache, and if it's the same, that's expected
 						state Transaction tr2(cx);
 						state Optional<Value> val2;
 						loop {
 							try {
-								TraceEvent("DebugSidebandNoCacheGetBefore");
 								wait(store(val2, tr2.get(messageKey)));
-								TraceEvent("DebugSidebandNoCacheGetAfter");
 								break;
 							} catch (Error& e) {
 								TraceEvent("DebugSidebandNoCacheError").error(e, true);
