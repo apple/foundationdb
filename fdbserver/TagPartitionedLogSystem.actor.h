@@ -105,7 +105,6 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	Optional<Version> recoveredAt;
 	Version knownCommittedVersion;
 	Version backupStartVersion = invalidVersion; // max(tLogs[0].startVersion, previous epochEnd).
-	Version maxRv; // (when ENABLE_VERSION_VECTOR_TLOG_UNICAST is on) the maximum DV over all tLogs.
 	std::map<UID, Version> rvLogs; // recovery versions per tlog
 	LocalityData locality;
 	// For each currently running popFromLog actor, outstandingPops is
@@ -128,7 +127,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	  : dbgid(dbgid), logSystemType(LogSystemType::empty), expectedLogSets(0), logRouterTags(0), txsTags(0),
 	    repopulateRegionAntiQuorum(0), stopped(false), epoch(e), oldestBackupEpoch(0),
 	    recoveryCompleteWrittenToCoreState(false), remoteLogsWrittenToCoreState(false), hasRemoteServers(false),
-	    maxRv(0), locality(locality), addActor(addActor), popActors(false) {}
+	    locality(locality), addActor(addActor), popActors(false) {}
 
 	void stopRejoins() final;
 
