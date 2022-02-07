@@ -6842,7 +6842,6 @@ ACTOR Future<Void> splitStorageMetricsStream(PromiseStream<Key> resultStream,
 				resultStream.sendError(end_of_stream());
 				break;
 			} else {
-				ASSERT(results.size() > 0);
 				beginKey = locations.back().first.end;
 			}
 		} catch (Error& e) {
