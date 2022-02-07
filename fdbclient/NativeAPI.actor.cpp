@@ -30,15 +30,15 @@
 
 #include "contrib/fmt-8.0.1/include/fmt/format.h"
 
-#ifdef SSD_ROCKSDB_EXPERIMENTAL
+// #ifdef SSD_ROCKSDB_EXPERIMENTAL
 
-// #include <rocksdb/env.h>
-// #include <rocksdb/options.h>
-#include <rocksdb/slice.h>
-#include <rocksdb/slice_transform.h>
-#include <rocksdb/sst_file_writer.h>
+// // #include <rocksdb/env.h>
+// // #include <rocksdb/options.h>
+// #include <rocksdb/slice.h>
+// #include <rocksdb/slice_transform.h>
+// #include <rocksdb/sst_file_writer.h>
 
-#endif // SSD_ROCKSDB_EXPERIMENTAL
+// #endif // SSD_ROCKSDB_EXPERIMENTAL
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/FailureMonitor.h"
@@ -7076,7 +7076,6 @@ ACTOR static Future<Void> fetchCheckpointFile(Database cx,
 	}
 }
 
-
 ACTOR Future<CheckpointMetaData> fetchCheckpoint(Database cx,
                                                  CheckpointMetaData initialState,
                                                  std::string dir,
@@ -7099,12 +7098,12 @@ ACTOR Future<CheckpointMetaData> fetchCheckpoint(Database cx,
 			    .detail("Server", metaData->ssID.toString());
 			wait(fetchCheckpointFile(cx, metaData, i, dir, cFun));
 		}
-	} else if (metaData->format == SingleRocksDB) {
-		if (!metaData->rocksDBCheckpoint.present()) {
-			throw internal_error();
-		}
-		const std::string localFile = dir + "/" + metaData->checkpointID.toString() + ".sst";
-		wait(fetchCheckpointRange(cx, metaData, metaData->range, localFile, cFun));
+		// } else if (metaData->format == SingleRocksDB) {
+		// 	if (!metaData->rocksDBCheckpoint.present()) {
+		// 		throw internal_error();
+		// 	}
+		// 	const std::string localFile = dir + "/" + metaData->checkpointID.toString() + ".sst";
+		// 	wait(fetchCheckpointRange(cx, metaData, metaData->range, localFile, cFun));
 	} else {
 		throw not_implemented();
 	}

@@ -40,14 +40,23 @@ static_assert(ROCKSDB_MAJOR == 6 ? ROCKSDB_MINOR >= 22 : true,
 static_assert((ROCKSDB_MAJOR == 6 && ROCKSDB_MINOR == 22) ? ROCKSDB_PATCH >= 1 : true,
               "Unsupported rocksdb version. Update the rocksdb to 6.22.1 version");
 
+namespace {
+
+rocksdb::Slice toSlice(StringRef s) {
+	return rocksdb::Slice(reinterpret_cast<const char*>(s.begin()), s.size());
+}
+
+} // namespace
+
 // Fetch a keyrange from a checkpoint on a storage server.
 // If the file is fetch successfully, it will be recorded via cFun.
-ACTOR Future<Void> fetchCheckpointRange(Database cx,
-                                        std::shared_ptr<CheckpointMetaData> metaData,
-                                        KeyRange range,
-                                        std::string localFile,
-                                        std::function<Future<Void>(const CheckpointMetaData&)> cFun,
-                                        int maxRetries = 3) {
+ACTOR static Future<Void> fetchCheckpointRange(Database cx,
+                                               std::shared_ptr<CheckpointMetaData> metaData,
+                                               KeyRange range,
+                                               std::string localFile,
+                                               std::shared_ptr<rocksdb::SstFileWriter> writer,
+                                               std::function<Future<Void>(const CheckpointMetaData&)> cFun,
+                                               int maxRetries = 3) {
 	ASSERT(metaData->rocksDBCheckpoint.present());
 	TraceEvent("FetchCheckpointRange").detail("InitialState", metaData->toString());
 	// Skip fetched file.
@@ -78,7 +87,7 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 
 	state int attempt = 0;
 	state int64_t totalBytes = 0;
-	state rocksdb::SstFileWriter writer(rocksdb::EnvOptions(), rocksdb::Options());
+	// state rocksdb::SstFileWriter writer = rocksdb::SstFileWriter(rocksdb::EnvOptions(), rocksdb::Options());
 	state rocksdb::Status status;
 	loop {
 		totalBytes = 0;
@@ -97,7 +106,7 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 			// }
 
 			wait(IAsyncFileSystem::filesystem()->deleteFile(localFile, true));
-			status = writer.Open(localFile);
+			status = writer->Open(localFile);
 			if (!status.ok()) {
 				std::cout << "SstFileWriter open failure: " << status.ToString() << std::endl;
 				break;
@@ -121,7 +130,7 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 				// wait(asyncFile->flush());
 				//  += rep.data.size();
 				for (const auto* it = rep.data.begin(); it != rep.data.end(); ++it) {
-					status = writer.Put(toSlice(it->key), toSlice(it->value));
+					status = writer->Put(toSlice(it->key), toSlice(it->value));
 					if (!status.ok()) {
 						std::cout << "SstFileWriter put failure: " << status.ToString() << std::endl;
 						break;
@@ -129,7 +138,7 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 				}
 			}
 		} catch (Error& e) {
-			status = writer.Finish();
+			status = writer->Finish();
 			if (!status.ok()) {
 				std::cout << "SstFileWriter close failure: " << status.ToString() << std::endl;
 			}
@@ -149,7 +158,7 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 				    .detail("StorageServer", ssi.toString())
 				    .detail("LocalFile", localFile)
 				    .detail("Attempt", attempt)
-				    .detail("FileSize", fileSize);
+				    .detail("TotalBytes", totalBytes);
 				if (cFun) {
 					wait(cFun(*metaData));
 				}
@@ -158,7 +167,7 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 		}
 	}
 
-	rocksdb::Status s = writer.Finish();
+	rocksdb::Status s = writer->Finish();
 
 	if (!status.ok()) {
 		throw internal_error();
@@ -166,16 +175,40 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 
 	return Void();
 }
+
+ACTOR Future<CheckpointMetaData> fetchRocksCheckpoint(Database cx,
+                                                      CheckpointMetaData initialState,
+                                                      std::string dir,
+                                                      std::function<Future<Void>(const CheckpointMetaData&)> cFun) {
+	TraceEvent("FetchRocksCheckpointBegin")
+	    .detail("InitialState", initialState.toString())
+	    .detail("CheckpointDir", dir);
+
+	state std::shared_ptr<CheckpointMetaData> metaData = std::make_shared<CheckpointMetaData>(initialState);
+
+	if (metaData->format == SingleRocksDB) {
+		if (!metaData->rocksDBCheckpoint.present()) {
+			throw internal_error();
+		}
+		std::string localFile = dir + "/" + metaData->checkpointID.toString() + ".sst";
+		std::shared_ptr<rocksdb::SstFileWriter> writer =
+		    std::make_shared<rocksdb::SstFileWriter>(rocksdb::EnvOptions(), rocksdb::Options());
+		wait(fetchCheckpointRange(cx, metaData, metaData->range, localFile, writer, cFun));
+	} else {
+		throw not_implemented();
+	}
+
+	return *metaData;
+}
 #else
-ACTOR Future<Void> fetchCheckpointRange(Database cx,
-                                        std::shared_ptr<CheckpointMetaData> metaData,
-                                        KeyRange range,
-                                        std::string localFile,
-                                        std::function<Future<Void>(const CheckpointMetaData&)> cFun,
-                                        int maxRetries = 3) {
+
+ACTOR Future<CheckpointMetaData> fetchRocksCheckpoint(Database cx,
+                                                      CheckpointMetaData initialState,
+                                                      std::string dir,
+                                                      std::function<Future<Void>(const CheckpointMetaData&)> cFun) {
 	wait(delay(0));
 	std::cout << "RocksDB not enabled." << std::endl;
 	ASSERT(false);
-	return Void();
+	return CheckpointMetaData();
 }
 #endif // SSD_ROCKSDB_EXPERIMENTAL

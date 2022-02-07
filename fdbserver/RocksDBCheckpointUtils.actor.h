@@ -31,7 +31,9 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
-ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
-                                                 CheckpointMetaData initialState,
-                                                 std::string dir,
-                                                 std::function<Future<Void>(const CheckpointMetaData&)> cFun = nullptr);
+ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(
+    Database cx,
+    CheckpointMetaData initialState,
+    std::string dir,
+    std::function<Future<Void>(const CheckpointMetaData&)> cFun = nullptr);
+#endif
