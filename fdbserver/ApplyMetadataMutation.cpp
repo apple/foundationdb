@@ -943,10 +943,7 @@ private:
 				StringRef startTenant = std::max(range.begin, tenantMapPrefix).removePrefix(tenantMapPrefix);
 				StringRef endTenant = range.end.startsWith(tenantMapPrefix) ? range.end : tenantMapKeys.end;
 
-				auto view = tenantMap->at(version);
-				for (auto itr = view.lower_bound(startTenant); itr != view.lower_bound(endTenant); ++itr) {
-					tenantMap->erase(itr);
-				}
+				tenantMap->erase(startTenant, endTenant);
 			}
 
 			if (!initialCommit) {

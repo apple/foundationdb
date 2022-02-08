@@ -2451,11 +2451,6 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 	return result;
 }
 
-// bool selectorInRange( KeySelectorRef const& sel, KeyRangeRef const& range ) {
-// Returns true if the given range suffices to at least begin to resolve the given KeySelectorRef
-//	return sel.getKey() >= range.begin && (sel.isBackward() ? sel.getKey() <= range.end : sel.getKey() < range.end);
-//}
-
 KeyRangeRef StorageServer::clampRangeToTenant(KeyRangeRef range,
                                               Optional<TenantName> tenant,
                                               Version version,
@@ -2466,7 +2461,7 @@ KeyRangeRef StorageServer::clampRangeToTenant(KeyRangeRef range,
 		ASSERT(itr != view.end());
 
 		return KeyRangeRef(range.begin.startsWith(itr->prefix) ? range.begin : itr->prefix,
-		                   range.end.startsWith(itr->prefix) ? range.end : allKeys.end.withPrefix(itr->prefix));
+		                   range.end.startsWith(itr->prefix) ? range.end : allKeys.end.withPrefix(itr->prefix, arena));
 	} else {
 		return range;
 	}
@@ -5294,10 +5289,10 @@ void StorageServer::clearTenants(KeyRef startKey, KeyRef endKey, Version version
 	for (auto itr = view.lower_bound(startTenant); itr != view.lower_bound(endTenant); ++itr) {
 		// Trigger any watches on the prefix associated with the tenant.
 		watches.triggerRange(itr->prefix, strinc(itr->prefix));
-
-		tenantMap.erase(itr);
 		tenantPrefixIndex.erase(itr->prefix);
 	}
+
+	tenantMap.erase(startTenant, endTenant);
 
 	auto& mLV = addVersionToMutationLog(version);
 	addMutationToMutationLog(mLV,

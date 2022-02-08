@@ -1337,11 +1337,11 @@ TenantMapEntry decodeTenantEntry(ValueRef const& value) {
 	return entry;
 }
 
-const KeyRangeRef tenantMapKeys("\xff\x02/tenantMap/"_sr, "\xff\x02/tenantMap0"_sr);
+const KeyRangeRef tenantMapKeys("\xff/tenantMap/"_sr, "\xff/tenantMap0"_sr);
 const KeyRef tenantMapPrefix = tenantMapKeys.begin;
-const KeyRef tenantMapPrivatePrefix = "\xff\xff\x02/tenantMap/"_sr;
-const KeyRef tenantAllocatorPrefix = "\xff\x02/tenantAllocator/"_sr;
-const KeyRef tenantDataPrefixKey = "\xff\x02/tenantDataPrefix"_sr;
+const KeyRef tenantMapPrivatePrefix = "\xff\xff/tenantMap/"_sr;
+const KeyRef tenantAllocatorPrefix = "\xff/tenantAllocator/"_sr;
+const KeyRef tenantDataPrefixKey = "\xff/tenantDataPrefix"_sr;
 
 // for tests
 void testSSISerdes(StorageServerInterface const& ssi, bool useFB) {
