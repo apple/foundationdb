@@ -161,6 +161,7 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	int64_t currentManagerEpoch = -1;
 
 	AsyncVar<ReplyPromiseStream<GranuleStatusReply>> currentManagerStatusStream;
+	bool statusStreamInitialized = false;
 
 	// FIXME: refactor out the parts of this that are just for interacting with blob stores from the backup business
 	// logic
@@ -848,6 +849,10 @@ ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bw
 	state int64_t statusSeqno = metadata->continueSeqno;
 	// TODO its own knob or something better? This is wrong in case of rollbacks
 	state bool writeHot = versionsSinceLastSnapshot <= SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS;
+
+	while (!bwData->statusStreamInitialized) {
+		wait(bwData->currentManagerStatusStream.onChange());
+	}
 	loop {
 		loop {
 			try {
@@ -3111,6 +3116,7 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 
 					// TODO: pick a reasonable byte limit instead of just piggy-backing
 					req.reply.setByteLimit(SERVER_KNOBS->BLOBWORKERSTATUSSTREAM_LIMIT_BYTES);
+					self->statusStreamInitialized = true;
 					self->currentManagerStatusStream.set(req.reply);
 				} else {
 					req.reply.sendError(blob_manager_replaced());

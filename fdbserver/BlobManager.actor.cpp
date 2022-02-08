@@ -223,6 +223,7 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 	std::set<NetworkAddress> recruitingLocalities; // the addrs of the workers being recruited on
 	AsyncVar<int> recruitingStream;
 	Promise<Void> foundBlobWorkers;
+	Promise<Void> doneRecovering;
 
 	int64_t epoch = -1;
 	int64_t seqNo = 1;
@@ -1158,6 +1159,9 @@ ACTOR Future<Void> monitorBlobWorkerStatus(Reference<BlobManagerData> bmData, Bl
 	// outer loop handles reconstructing stream if it got a retryable error
 	// do backoff, we can get a lot of retries in a row
 
+	// wait for blob manager to be done recovering, so it has initial granule mapping and worker data
+	wait(bmData->doneRecovering.getFuture());
+
 	// TODO knob?
 	state double backoff = 0.1;
 	loop {
@@ -1189,12 +1193,6 @@ ACTOR Future<Void> monitorBlobWorkerStatus(Reference<BlobManagerData> bmData, Bl
 					if (bmData->iAmReplaced.canBeSet()) {
 						bmData->iAmReplaced.send(Void());
 					}
-				} else if (rep.epoch < bmData->epoch) {
-					// TODO: revoke the range from that worker? and send optimistic halt req to other (zombie) BM?
-					// it's optimistic because such a BM is not necessarily a zombie. it could have gotten killed
-					// properly but the BW that sent this reply was behind (i.e. it started the req when the old BM
-					// was in charge and finished by the time the new BM took over)
-					continue;
 				}
 
 				// TODO maybe this won't be true eventually, but right now the only time the blob worker reports
@@ -1206,6 +1204,16 @@ ACTOR Future<Void> monitorBlobWorkerStatus(Reference<BlobManagerData> bmData, Bl
 				if (!(currGranuleAssignment.begin() == rep.granuleRange.begin &&
 				      currGranuleAssignment.end() == rep.granuleRange.end &&
 				      currGranuleAssignment.cvalue() == bwInterf.id())) {
+					if (BM_DEBUG) {
+						fmt::print(
+						    "Manager {0} ignoring status from BW {1} for granule [{2} - {3}) since BW {4} owns it.\n",
+						    bmData->epoch,
+						    bwInterf.id().toString().substr(0, 5),
+						    rep.granuleRange.begin.printable(),
+						    rep.granuleRange.end.printable(),
+						    currGranuleAssignment.cvalue().toString().substr(0, 5));
+					}
+					// FIXME: could send revoke request
 					continue;
 				}
 
@@ -1221,10 +1229,12 @@ ACTOR Future<Void> monitorBlobWorkerStatus(Reference<BlobManagerData> bmData, Bl
 					}
 				} else {
 					if (BM_DEBUG) {
-						fmt::print("Manager {0} evaluating [{1} - {2}) for split\n",
+						fmt::print("Manager {0} evaluating [{1} - {2}) @ ({3}, {4}) for split\n",
 						           bmData->epoch,
 						           rep.granuleRange.begin.printable().c_str(),
-						           rep.granuleRange.end.printable().c_str());
+						           rep.granuleRange.end.printable().c_str(),
+						           rep.epoch,
+						           rep.seqno);
 					}
 					lastSeenSeqno.insert(rep.granuleRange, std::pair(rep.epoch, rep.seqno));
 					bmData->addActor.send(maybeSplitRange(bmData,
@@ -1835,6 +1845,9 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 	    .detail("Granules", bmData->workerAssignments.size())
 	    .detail("Assigned", explicitAssignments)
 	    .detail("Revoked", outOfDateAssignments.size());
+
+	ASSERT(bmData->doneRecovering.canBeSet());
+	bmData->doneRecovering.send(Void());
 
 	return Void();
 }
