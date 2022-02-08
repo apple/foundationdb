@@ -396,11 +396,20 @@ struct TLogOptions {
 			break;
 		case TLogVersion::V5:
 		case TLogVersion::V6:
+		case TLogVersion::V7:
 			toReturn = "V_" + boost::lexical_cast<std::string>(version);
 			break;
 		}
 		ASSERT_WE_THINK(FromStringRef(toReturn).get() == *this);
 		return toReturn + "-";
+	}
+
+	DiskQueueVersion getDiskQueueVersion() const {
+		if (version < TLogVersion::V3)
+			return DiskQueueVersion::V0;
+		if (version < TLogVersion::V7)
+			return DiskQueueVersion::V1;
+		return DiskQueueVersion::V2;
 	}
 };
 
@@ -418,6 +427,7 @@ TLogFn tLogFnForOptions(TLogOptions options) {
 			return oldTLog_6_2::tLog;
 	case TLogVersion::V5:
 	case TLogVersion::V6:
+	case TLogVersion::V7:
 		return tLog;
 	default:
 		ASSERT(false);
@@ -1558,8 +1568,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				}
 				ASSERT_WE_THINK(abspath(parentDirectory(s.filename)) == folder);
 				IKeyValueStore* kv = openKVStore(s.storeType, s.filename, s.storeID, memoryLimit, validateDataFiles);
-				const DiskQueueVersion dqv =
-				    s.tLogOptions.version >= TLogVersion::V3 ? DiskQueueVersion::V1 : DiskQueueVersion::V0;
+				const DiskQueueVersion dqv = s.tLogOptions.getDiskQueueVersion();
 				const int64_t diskQueueWarnSize =
 				    s.tLogOptions.spillType == TLogSpillType::VALUE ? 10 * SERVER_KNOBS->TARGET_BYTES_PER_TLOG : -1;
 				IDiskQueue* queue = openDiskQueue(joinPath(folder, logQueueBasename + s.storeID.toString() + "-"),
@@ -1953,8 +1962,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					std::string filename =
 					    filenameFromId(req.storeType, folder, prefix.toString() + tLogOptions.toPrefix(), logId);
 					IKeyValueStore* data = openKVStore(req.storeType, filename, logId, memoryLimit);
-					const DiskQueueVersion dqv =
-					    tLogOptions.version >= TLogVersion::V3 ? DiskQueueVersion::V1 : DiskQueueVersion::V0;
+					const DiskQueueVersion dqv = tLogOptions.getDiskQueueVersion();
 					IDiskQueue* queue = openDiskQueue(
 					    joinPath(folder,
 					             fileLogQueuePrefix.toString() + tLogOptions.toPrefix() + logId.toString() + "-"),
