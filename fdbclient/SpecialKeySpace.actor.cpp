@@ -1629,7 +1629,8 @@ Future<RangeResult> CoordinatorsImpl::getRange(ReadYourWritesTransaction* ryw, K
 ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
 	state Reference<IQuorumChange> change;
 	state std::vector<NetworkAddress> addressesVec;
-	state std::vector<std::string> process_address_strs;
+	state std::vector<Hostname> hostnamesVec;
+	state std::vector<std::string> process_address_or_hostname_strs;
 	state Optional<std::string> msg;
 	state int index;
 	state bool parse_error = false;
@@ -1640,21 +1641,30 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 	if (processes_entry.first) {
 		ASSERT(processes_entry.second.present()); // no clear should be seen here
 		auto processesStr = processes_entry.second.get().toString();
-		boost::split(process_address_strs, processesStr, [](char c) { return c == ','; });
-		if (!process_address_strs.size()) {
+		boost::split(process_address_or_hostname_strs, processesStr, [](char c) { return c == ','; });
+		if (!process_address_or_hostname_strs.size()) {
 			return ManagementAPIError::toJsonString(
 			    false,
 			    "coordinators",
 			    "New coordinators\' processes are empty, please specify new processes\' network addresses with format "
-			    "\"IP:PORT,IP:PORT,...,IP:PORT\"");
+			    "\"IP:PORT,IP:PORT,...,IP:PORT\" or \"HOSTNAME:PORT,HOSTNAME:PORT,...,HOSTNAME:PORT\"");
 		}
-		for (index = 0; index < process_address_strs.size(); index++) {
+	
+		TraceEvent("Xxxxxxx1").detail("NewCoordinatorsStr", processesStr).log();
+
+		for (index = 0; index < process_address_or_hostname_strs.size(); index++) {
 			try {
-				auto a = NetworkAddress::parse(process_address_strs[index]);
-				if (!a.isValid())
-					parse_error = true;
-				else
-					addressesVec.push_back(a);
+				if (Hostname::isHostname(process_address_or_hostname_strs[index])) {
+					hostnamesVec.push_back(Hostname::parse(process_address_or_hostname_strs[index]));
+				} else {
+					NetworkAddress a = NetworkAddress::parse(process_address_or_hostname_strs[index]);
+					if (!a.isValid()) {
+						parse_error = true;
+					}
+					else {
+						addressesVec.push_back(a);
+					}
+				}
 			} catch (Error& e) {
 				TraceEvent(SevDebug, "SpecialKeysNetworkParseError").error(e);
 				parse_error = true;
@@ -1662,12 +1672,29 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 
 			if (parse_error) {
 				std::string error =
-				    "ERROR: \'" + process_address_strs[index] + "\' is not a valid network endpoint address\n";
-				if (process_address_strs[index].find(":tls") != std::string::npos)
+				    "ERROR: \'" + process_address_or_hostname_strs[index] + "\' is not a valid network endpoint address\n";
+				if (process_address_or_hostname_strs[index].find(":tls") != std::string::npos)
 					error += "        Do not include the `:tls' suffix when naming a process\n";
 				return ManagementAPIError::toJsonString(false, "coordinators", error);
 			}
 		}
+
+		std::vector<Future<Void>> fs;
+		for (const auto& hostname : hostnamesVec) {
+			fs.push_back(map(INetworkConnections::net()->resolveTCPEndpoint(hostname.host, hostname.service),
+			                 [=](std::vector<NetworkAddress> const& addresses) -> Void {
+				                 NetworkAddress address =
+				                     addresses[deterministicRandom()->randomInt(0, addresses.size())];
+				                 address.flags = 0; // Reset the parsed address to public
+				                 address.fromHostname = NetworkAddressFromHostname::True;
+				                 if (hostname.isTLS) {
+					                 address.flags |= NetworkAddress::FLAG_TLS;
+				                 }
+				                 addressesVec.push_back(address);
+				                 return Void();
+			                 }));
+		}
+		wait(waitForAll(fs));
 	}
 
 	if (addressesVec.size())
@@ -1692,13 +1719,14 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 
 	ASSERT(change.isValid());
 
-	TraceEvent(SevDebug, "SKSChangeCoordinatorsStart")
+	TraceEvent("SKSChangeCoordinatorsStart")
+		.detail("NewHostnames", hostnamesVec.size()? describe(hostnamesVec) : "N/A")
 	    .detail("NewAddresses", describe(addressesVec))
-	    .detail("Description", entry.first ? entry.second.get().toString() : "");
+	    .detail("Description", entry.first ? entry.second.get().toString() : "").log();
 
-	Optional<CoordinatorsResult> r = wait(changeQuorumChecker(&ryw->getTransaction(), change, &addressesVec));
+	Optional<CoordinatorsResult> r = wait(changeQuorumChecker(&ryw->getTransaction(), change, &hostnamesVec, &addressesVec));
 
-	TraceEvent(SevDebug, "SKSChangeCoordinatorsFinish")
+	TraceEvent("SKSChangeCoordinatorsFinish")
 	    .detail("Result", r.present() ? static_cast<int>(r.get()) : -1); // -1 means success
 	if (r.present()) {
 		auto res = r.get();
@@ -1710,11 +1738,13 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 			ASSERT(false);
 		}
 		msg = ManagementAPIError::toJsonString(retriable, "coordinators", ManagementAPI::generateErrorMessage(res));
+		TraceEvent("SKSChangeCoordinators").detail("Error", msg).log();
 	}
 	return msg;
 }
 
 Future<Optional<std::string>> CoordinatorsImpl::commit(ReadYourWritesTransaction* ryw) {
+	TraceEvent("Xxxxxxx0").log();
 	return coordinatorsCommitActor(ryw, getKeyRange());
 }
 

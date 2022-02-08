@@ -306,6 +306,10 @@ ACTOR Future<Optional<StatusObject>> clientCoordinatorsStatusFetcher(Reference<I
                                                                      bool* quorum_reachable,
                                                                      int* coordinatorsFaultTolerance) {
 	try {
+		TraceEvent("Xianyiren4").detail("Unresolved", connRecord->hasUnresolvedHostnames()).log();
+		if(connRecord->hasUnresolvedHostnames()) {
+			wait(connRecord->resolveHostnames());
+		}
 		state ClientCoordinators coord(connRecord);
 		state StatusObject statusObj;
 

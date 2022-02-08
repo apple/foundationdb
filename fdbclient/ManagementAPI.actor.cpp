@@ -772,7 +772,8 @@ ACTOR Future<std::vector<NetworkAddress>> getCoordinators(Database cx) {
 
 ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
                                                                Reference<IQuorumChange> change,
-                                                               std::vector<NetworkAddress>* desiredCoordinators) {
+															   std::vector<Hostname>* desiredCoordinatorHostnames,
+                                                               std::vector<NetworkAddress>* desiredCoordinatorAddresses) {
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::USE_PROVISIONAL_PROXIES);
@@ -783,44 +784,52 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 		return CoordinatorsResult::BAD_DATABASE_STATE; // Someone deleted this key entirely?
 
 	state ClusterConnectionString old(currentKey.get().toString());
+	wait(old.resolveHostnames());
 	if (tr->getDatabase()->getConnectionRecord() &&
 	    old.clusterKeyName().toString() !=
 	        tr->getDatabase()->getConnectionRecord()->getConnectionString().clusterKeyName())
 		return CoordinatorsResult::BAD_DATABASE_STATE; // Someone changed the "name" of the database??
 
 	state CoordinatorsResult result = CoordinatorsResult::SUCCESS;
-	if (!desiredCoordinators->size()) {
-		std::vector<NetworkAddress> _desiredCoordinators = wait(change->getDesiredCoordinators(
+	if (!desiredCoordinatorAddresses->size()) {
+		std::vector<NetworkAddress> _desiredCoordinatorAddresses = wait(change->getDesiredCoordinators(
 		    tr,
 		    old.coordinators(),
 		    Reference<ClusterConnectionMemoryRecord>(new ClusterConnectionMemoryRecord(old)),
 		    result));
-		*desiredCoordinators = _desiredCoordinators;
+		*desiredCoordinatorAddresses = _desiredCoordinatorAddresses;
 	}
 
 	if (result != CoordinatorsResult::SUCCESS)
 		return result;
 
-	if (!desiredCoordinators->size())
+	if (!desiredCoordinatorAddresses->size())
 		return CoordinatorsResult::INVALID_NETWORK_ADDRESSES;
 
-	std::sort(desiredCoordinators->begin(), desiredCoordinators->end());
+	std::sort(desiredCoordinatorAddresses->begin(), desiredCoordinatorAddresses->end());
+	std::sort(desiredCoordinatorHostnames->begin(), desiredCoordinatorHostnames->end());
 
 	std::string newName = change->getDesiredClusterKeyName();
-	if (newName.empty())
+	if (newName.empty()) {
 		newName = old.clusterKeyName().toString();
+	}
 
-	if (old.coordinators() == *desiredCoordinators && old.clusterKeyName() == newName)
+	if (old.coordinators() == *desiredCoordinatorAddresses && old.clusterKeyName() == newName) {
 		return CoordinatorsResult::SAME_NETWORK_ADDRESSES;
+	}
 
-	state ClusterConnectionString conn(*desiredCoordinators,
-	                                   StringRef(newName + ':' + deterministicRandom()->randomAlphaNumeric(32)));
+	Key key(newName + ':' + deterministicRandom()->randomAlphaNumeric(32));
+	state ClusterConnectionString conn(*desiredCoordinatorAddresses, key);
+	if (desiredCoordinatorHostnames->size()) {
+		conn = ClusterConnectionString(*desiredCoordinatorHostnames, key);
+		wait(conn.resolveHostnames());
+	}
 
 	if (g_network->isSimulated()) {
 		int i = 0;
 		int protectedCount = 0;
-		while ((protectedCount < ((desiredCoordinators->size() / 2) + 1)) && (i < desiredCoordinators->size())) {
-			auto process = g_simulator.getProcessByAddress((*desiredCoordinators)[i]);
+		while ((protectedCount < ((desiredCoordinatorAddresses->size() / 2) + 1)) && (i < desiredCoordinatorAddresses->size())) {
+			auto process = g_simulator.getProcessByAddress((*desiredCoordinatorAddresses)[i]);
 			auto addresses = process->addresses;
 
 			if (!process->isReliable()) {
@@ -832,13 +841,14 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 			if (addresses.secondaryAddress.present()) {
 				g_simulator.protectedAddresses.insert(process->addresses.secondaryAddress.get());
 			}
-			TraceEvent("ProtectCoordinator").detail("Address", (*desiredCoordinators)[i]).backtrace();
+			TraceEvent("ProtectCoordinator").detail("Address", (*desiredCoordinatorAddresses)[i]).backtrace();
 			protectedCount++;
 			i++;
 		}
 	}
 
 	std::vector<Future<Optional<LeaderInfo>>> leaderServers;
+	TraceEvent("Xianyiren2").detail("Unresolved", conn.hasUnresolvedHostnames).log();
 	ClientCoordinators coord(Reference<ClusterConnectionMemoryRecord>(new ClusterConnectionMemoryRecord(conn)));
 
 	leaderServers.reserve(coord.clientLeaderServers.size());
@@ -1039,6 +1049,7 @@ struct AutoQuorumChange final : IQuorumChange {
 			return false;
 
 		// Check availability
+		TraceEvent("Xianyiren3").detail("Unresolved", ccr->hasUnresolvedHostnames()).log();
 		ClientCoordinators coord(ccr);
 		std::vector<Future<Optional<LeaderInfo>>> leaderServers;
 		leaderServers.reserve(coord.clientLeaderServers.size());

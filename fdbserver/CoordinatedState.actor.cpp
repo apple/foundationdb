@@ -292,7 +292,7 @@ struct MovableCoordinatedStateImpl {
 		state CoordinatedState nccs(ServerCoordinators(makeReference<ClusterConnectionMemoryRecord>(nc)));
 		state Future<Void> creationTimeout = delay(30);
 		ASSERT(self->lastValue.present() && self->lastCSValue.present());
-		TraceEvent("StartMove").detail("ConnectionString", nc.toString());
+		TraceEvent("StartMove").detail("ConnectionString", nc.toString()).detail("Unresolved", nc.hasUnresolvedHostnames).log();
 		choose {
 			when(wait(creationTimeout)) { throw new_coordinators_timed_out(); }
 			when(Value ncInitialValue = wait(nccs.read())) {

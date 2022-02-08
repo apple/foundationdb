@@ -65,13 +65,14 @@ ACTOR Future<bool> changeCoordinators(Reference<IDatabase> db, std::vector<Strin
 	state StringRef new_cluster_description;
 	state std::string auto_coordinators_str;
 	StringRef nameTokenBegin = LiteralStringRef("description=");
-	for (auto tok = tokens.begin() + 1; tok != tokens.end(); ++tok)
+	for (auto tok = tokens.begin() + 1; tok != tokens.end(); ++tok) {
 		if (tok->startsWith(nameTokenBegin)) {
 			new_cluster_description = tok->substr(nameTokenBegin.size());
 			std::copy(tok + 1, tokens.end(), tok);
 			tokens.resize(tokens.size() - 1);
 			break;
 		}
+	}
 
 	state bool automatic = tokens.size() == 2 && tokens[1] == LiteralStringRef("auto");
 	state Reference<ITransaction> tr = db->createTransaction();
@@ -96,18 +97,31 @@ ACTOR Future<bool> changeCoordinators(Reference<IDatabase> db, std::vector<Strin
 				tr->set(fdb_cli::coordinatorsProcessSpecialKey, auto_coordinators_str);
 			} else if (tokens.size() > 1) {
 				state std::set<NetworkAddress> new_coordinators_addresses;
-				state std::vector<std::string> newAddresslist;
+				state std::set<Hostname> new_coordinators_hostnames;
+				state std::vector<std::string> newCoordinatorslist;
 				state std::vector<StringRef>::iterator t;
 				for (t = tokens.begin() + 1; t != tokens.end(); ++t) {
 					try {
-						// TODO(renxuan): add hostname parsing here.
-						auto const& addr = NetworkAddress::parse(t->toString());
-						if (new_coordinators_addresses.count(addr)) {
-							fprintf(stderr, "ERROR: passed redundant coordinators: `%s'\n", addr.toString().c_str());
-							return true;
+						if (Hostname::isHostname(t->toString())) {
+							const auto& hostname = Hostname::parse(t->toString());
+							if (new_coordinators_hostnames.count(hostname)) {
+								fprintf(stderr,
+								        "ERROR: passed redundant coordinators: `%s'\n",
+								        hostname.toString().c_str());
+								return true;
+							}
+							new_coordinators_hostnames.insert(hostname);
+							newCoordinatorslist.push_back(hostname.toString());
+						} else {
+							const auto& addr = NetworkAddress::parse(t->toString());
+							if (new_coordinators_addresses.count(addr)) {
+								fprintf(
+								    stderr, "ERROR: passed redundant coordinators: `%s'\n", addr.toString().c_str());
+								return true;
+							}
+							new_coordinators_addresses.insert(addr);
+							newCoordinatorslist.push_back(addr.toString());
 						}
-						new_coordinators_addresses.insert(addr);
-						newAddresslist.push_back(addr.toString());
 					} catch (Error& e) {
 						if (e.code() == error_code_connection_string_invalid) {
 							fprintf(
@@ -117,12 +131,34 @@ ACTOR Future<bool> changeCoordinators(Reference<IDatabase> db, std::vector<Strin
 						throw;
 					}
 				}
-				std::string new_addresses_str = boost::algorithm::join(newAddresslist, ", ");
-				tr->set(fdb_cli::coordinatorsProcessSpecialKey, new_addresses_str);
+
+				// std::vector<Future<Void>> fs;
+				// for (const auto& hostname : new_coordinators_hostnames) {
+				// 	fs.push_back(map(INetworkConnections::net()->resolveTCPEndpoint(hostname.host, hostname.service),
+				// 	                 [=](std::vector<NetworkAddress> const& addresses) -> Void {
+				// 		                 NetworkAddress address =
+				// 		                     addresses[deterministicRandom()->randomInt(0, addresses.size())];
+				// 		                 address.flags = 0; // Reset the parsed address to public
+				// 		                 address.fromHostname = NetworkAddressFromHostname::True;
+				// 		                 if (hostname.isTLS) {
+				// 			                 address.flags |= NetworkAddress::FLAG_TLS;
+				// 		                 }
+				// 		                 new_coordinators_addresses.insert(address);
+				// 		                 return Void();
+				// 	                 }));
+				// }
+				// wait(waitForAll(fs));
+				// for (const auto& address : new_coordinators_addresses) {
+				// 	newCoordinatorslist.push_back(address.toString());
+				// }
+
+				std::string new_coordinators_str = boost::algorithm::join(newCoordinatorslist, ", ");
+				tr->set(fdb_cli::coordinatorsProcessSpecialKey, new_coordinators_str);
+				TraceEvent("Xxxxxxx-1").detail("NewCoordinatorsStr", new_coordinators_str).log();
 			}
 			wait(safeThreadFutureToFuture(tr->commit()));
 			// commit should always fail here
-			// if coordinators are changed, we should get commit_unknown() error
+			// If the commit succeeded, the coordinators changed and the commit will fail with commit_unknown_result() error
 			ASSERT(false);
 		} catch (Error& e) {
 			state Error err(e);

@@ -2590,6 +2590,7 @@ ACTOR Future<Void> monitorLeaderWithDelayedCandidacy(
 			                                     : Never())) {}
 			when(wait(timeout.isValid() ? timeout : Never())) {
 				monitor.cancel();
+				TraceEvent("Xianyiren0").detail("Unresolved", connRecord->hasUnresolvedHostnames()).log();
 				wait(clusterController(
 				    connRecord, currentCC, asyncPriorityInfo, recoveredDiskFiles, locality, configDBType));
 				return Void();
@@ -2728,6 +2729,7 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 			                                                                configDBType),
 			                              "ClusterController"));
 		} else {
+			TraceEvent("Xianyiren5").detail("Unresolved", connRecord->hasUnresolvedHostnames()).log();
 			actors.push_back(reportErrors(
 			    clusterController(
 			        connRecord, cc, asyncPriorityInfo, recoveredDiskFiles.getFuture(), localities, configDBType),
