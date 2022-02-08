@@ -40,7 +40,9 @@ struct ConfigGeneration {
 	bool operator>(ConfigGeneration const&) const;
 
 	std::string toString() const {
-		return format("liveVersion: %d, committedVersion: %d", liveVersion, committedVersion);
+		std::stringstream ss;
+		ss << "liveVersion: " << liveVersion << ", committedVersion: " << committedVersion;
+		return ss.str();
 	}
 
 	template <class Ar>
