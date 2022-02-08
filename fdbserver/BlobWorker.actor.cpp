@@ -826,6 +826,9 @@ ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bw
                                                     int64_t versionsSinceLastSnapshot) {
 
 	BlobFileIndex lastDeltaIdx = wait(lastDeltaBeforeSnapshot);
+	while (!bwData->statusStreamInitialized) {
+		wait(bwData->currentManagerStatusStream.onChange());
+	}
 	state Version reSnapshotVersion = lastDeltaIdx.version;
 	wait(delay(0, TaskPriority::BlobWorkerUpdateFDB));
 
@@ -849,10 +852,6 @@ ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bw
 	state int64_t statusSeqno = metadata->continueSeqno;
 	// TODO its own knob or something better? This is wrong in case of rollbacks
 	state bool writeHot = versionsSinceLastSnapshot <= SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS;
-
-	while (!bwData->statusStreamInitialized) {
-		wait(bwData->currentManagerStatusStream.onChange());
-	}
 	loop {
 		loop {
 			try {
