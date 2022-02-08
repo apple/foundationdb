@@ -1093,6 +1093,16 @@ public:
 		}
 		return fun(this, request);
 	}
+
+	Version minFeedVersionForAddress(const NetworkAddress& addr) {
+		auto& clientVersions = changeFeedClientVersions[addr];
+		Version minVersion = version.get();
+		for (auto& it : clientVersions) {
+			// printf("Blocked client %s @ %lld\n", it.first.toString().substr(0, 8).c_str(), it.second);
+			minVersion = std::min(minVersion, it.second);
+		}
+		return minVersion;
+	}
 };
 
 const StringRef StorageServer::CurrentRunningFetchKeys::emptyString = LiteralStringRef("");
@@ -1782,16 +1792,6 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		       req.begin);
 	}
 
-	if (!req.canReadPopped && req.begin <= feedInfo->emptyVersion) {
-		printf("CFM: SS %s CF %s:   %s popped! req.begin=%lld, emptyVersion=%lld\n",
-		       data->thisServerID.toString().substr(0, 4).c_str(),
-		       req.rangeID.printable().substr(0, 6).c_str(),
-		       streamUID.toString().substr(0, 8).c_str(),
-		       req.begin,
-		       feedInfo->emptyVersion);
-		throw change_feed_popped();
-	}
-
 	// We must copy the mutationDeque when fetching the durable bytes in case mutations are popped from memory while
 	// waiting for the results
 	state Version dequeVersion = data->version.get();
@@ -1941,30 +1941,6 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		reply = memoryReply;
 	}
 
-	// check if pop happened concurrently with disk read
-	if (!req.canReadPopped && req.begin <= feedInfo->emptyVersion) {
-		// this can happen under normal circumstances on one condition: a feed atLatest has to wait for a fetch to read
-		// from disk, and the feed is popped during that. Since pop can't guarantee cleaning up the entire fetch, if the
-		// read only got empty mutations after filtering, this is fine
-		bool ok = atLatest && readFetched && !readDurable && !readAnyFromDisk;
-		TEST(ok); // feed popped while read waiting for fetch
-		if (!ok) {
-			printf("SS %s:   CF %s SQ %s popped after read! req.begin=%lld, emptyVersion=%lld, emptyBeforeRead=%lld, "
-			       "atLatest=%s, readFetched=%s, readDurable=%s, readAnyFromDisk=%s\n",
-			       data->thisServerID.toString().substr(0, 4).c_str(),
-			       req.rangeID.printable().substr(0, 6).c_str(),
-			       streamUID.toString().substr(0, 8).c_str(),
-			       req.begin,
-			       feedInfo->emptyVersion,
-			       emptyVersion,
-			       atLatest ? "T" : "F",
-			       readFetched ? "T" : "F",
-			       readDurable ? "T" : "F",
-			       readAnyFromDisk ? "T" : "F");
-			throw change_feed_popped();
-		}
-	}
-
 	bool gotAll = remainingLimitBytes > 0 && remainingDurableBytes > 0 && data->version.get() == startVersion;
 	Version finalVersion = std::min(req.end - 1, dequeVersion);
 	if ((reply.mutations.empty() || reply.mutations.back().version < finalVersion) && remainingLimitBytes > 0 &&
@@ -1980,6 +1956,32 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		// if we add empty mutation after the last thing in memory, and didn't read from disk, gotAll is true
 		if (data->version.get() == startVersion) {
 			gotAll = true;
+		}
+	}
+
+	// This check is done just before returning, after all waits in this function
+	// Check if pop happened concurently
+	if (!req.canReadPopped && req.begin <= feedInfo->emptyVersion) {
+		// This can happen under normal circumstances if this part of a change feed got no updates, but then the feed
+		// was popped. We can check by confirming that the client was sent empty versions as part of another feed's
+		// response's minStorageVersion, or a ChangeFeedUpdateRequest. If this was the case, we know no updates could
+		// have happened between req.begin and minVersion.
+		Version minVersion = data->minFeedVersionForAddress(req.reply.getEndpoint().getPrimaryAddress());
+		bool ok = atLatest && minVersion > feedInfo->emptyVersion;
+		TEST(ok); // feed popped while valid read waiting
+		TEST(!ok); // feed popped while invalid read waiting
+		if (!ok) {
+			printf("SS %s:   CF %s SQ %s popped after read! req.begin=%lld, emptyVersion=%lld, emptyBeforeRead=%lld, "
+			       "atLatest=%s, minVersionSent=%lld\n",
+			       data->thisServerID.toString().substr(0, 4).c_str(),
+			       req.rangeID.printable().substr(0, 6).c_str(),
+			       streamUID.toString().substr(0, 8).c_str(),
+			       req.begin,
+			       feedInfo->emptyVersion,
+			       emptyVersion,
+			       atLatest ? "T" : "F",
+			       minVersion);
+			throw change_feed_popped();
 		}
 	}
 
@@ -2171,14 +2173,6 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 					// throw to delete from changeFeedClientVersions if present
 					throw unknown_change_feed();
 				}
-				if (emptyBefore != feed->second->emptyVersion && !req.canReadPopped &&
-				    req.begin <= feed->second->emptyVersion) {
-					// Change feed was popped with no new mutations, update its begin version to skip those versions so
-					// it doesn't get change_feed_popped. This is safe because change_feed_popped is to ensure an old
-					// read can't miss mutations from a change feed stream, and this read is guaranteed not to (it was
-					// caught up before the pop, and trigger wasn't called on any new mutations before the pop)
-					req.begin = feed->second->emptyVersion + 1;
-				}
 			} else {
 				blockedVersion = feedReply.mutations.back().version;
 			}
@@ -2207,12 +2201,7 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 ACTOR Future<Void> changeFeedVersionUpdateQ(StorageServer* data, ChangeFeedVersionUpdateRequest req) {
 	wait(data->version.whenAtLeast(req.minVersion));
 	wait(delay(0));
-	auto& clientVersions = data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()];
-	Version minVersion = data->version.get();
-	for (auto& it : clientVersions) {
-		// printf("Blocked client %s @ %lld\n", it.first.toString().substr(0, 8).c_str(), it.second);
-		minVersion = std::min(minVersion, it.second);
-	}
+	Version minVersion = data->minFeedVersionForAddress(req.reply.getEndpoint().getPrimaryAddress());
 	req.reply.send(ChangeFeedVersionUpdateReply(minVersion));
 	return Void();
 }
@@ -4152,8 +4141,6 @@ ACTOR Future<Void> changeFeedPopQ(StorageServer* self, ChangeFeedPopRequest req)
 				feed->second->fetchVersion = invalidVersion;
 			}
 		}
-		// wake up requests that didn't get any mutations since the last pop to update their beginVersion
-		feed->second->newMutations.trigger();
 		wait(self->durableVersion.whenAtLeast(durableVersion));
 	}
 	req.reply.send(Void());
@@ -5447,8 +5434,6 @@ private:
 					addMutationToLog = true;
 				}
 				feed->second->stopped = (status == ChangeFeedStatus::CHANGE_FEED_STOP);
-				// wake up requests that didn't get any mutations since the last pop to update their beginVersion
-				feed->second->newMutations.trigger();
 			} else if (status == ChangeFeedStatus::CHANGE_FEED_CREATE) {
 				TraceEvent(SevDebug, "CreatingChangeFeed", data->thisServerID)
 				    .detail("RangeID", changeFeedId.printable())
