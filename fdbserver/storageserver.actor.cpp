@@ -1749,6 +1749,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		// TODO REMOVE
 		TraceEvent(SevDebug, "ChangeFeedMutations", data->thisServerID)
 		    .detail("FeedID", req.rangeID)
+		    .detail("StreamUID", streamUID)
 		    .detail("Range", req.range)
 		    .detail("Begin", req.begin)
 		    .detail("End", req.end);
@@ -1987,6 +1988,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 			for (auto& m : mutations.mutations) {
 				DEBUG_MUTATION("ChangeFeedRead", mutations.version, m, data->thisServerID)
 				    .detail("ChangeFeedID", req.rangeID)
+				    .detail("StreamUID", streamUID)
 				    .detail("ReqBegin", req.begin)
 				    .detail("ReqEnd", req.end)
 				    .detail("ReqRange", req.range);
@@ -2004,6 +2006,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		// TODO REMOVE
 		TraceEvent(SevDebug, "ChangeFeedMutationsDone", data->thisServerID)
 		    .detail("FeedID", req.rangeID)
+		    .detail("StreamUID", streamUID)
 		    .detail("Range", req.range)
 		    .detail("Begin", req.begin)
 		    .detail("End", req.end)
@@ -2125,7 +2128,7 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 			auto& clientVersions = data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()];
 			Version minVersion = removeUID ? data->version.get() : data->prevVersion;
 			if (removeUID) {
-				if (gotAll) {
+				if (gotAll || req.begin == req.end) {
 					data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()].erase(streamUID);
 					removeUID = false;
 				} else {
@@ -2144,7 +2147,7 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 			data->counters.feedBytesQueried += feedReply.mutations.expectedSize();
 
 			req.reply.send(feedReply);
-			if (feedReply.mutations.back().version == req.end - 1) {
+			if (req.begin == req.end) {
 				req.reply.sendError(end_of_stream());
 				return Void();
 			}
@@ -2153,7 +2156,8 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 				auto feed = data->uidChangeFeed.find(req.rangeID);
 				if (feed == data->uidChangeFeed.end() || feed->second->removing) {
 					req.reply.sendError(unknown_change_feed());
-					return Void();
+					// throw to delete from changeFeedClientVersions if present
+					throw unknown_change_feed();
 				}
 				state Version emptyBefore = feed->second->emptyVersion;
 				choose {
@@ -2164,7 +2168,8 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 				auto feed = data->uidChangeFeed.find(req.rangeID);
 				if (feed == data->uidChangeFeed.end() || feed->second->removing) {
 					req.reply.sendError(unknown_change_feed());
-					return Void();
+					// throw to delete from changeFeedClientVersions if present
+					throw unknown_change_feed();
 				}
 				if (emptyBefore != feed->second->emptyVersion && !req.canReadPopped &&
 				    req.begin <= feed->second->emptyVersion) {
@@ -2205,6 +2210,7 @@ ACTOR Future<Void> changeFeedVersionUpdateQ(StorageServer* data, ChangeFeedVersi
 	auto& clientVersions = data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()];
 	Version minVersion = data->version.get();
 	for (auto& it : clientVersions) {
+		// printf("Blocked client %s @ %lld\n", it.first.toString().substr(0, 8).c_str(), it.second);
 		minVersion = std::min(minVersion, it.second);
 	}
 	req.reply.send(ChangeFeedVersionUpdateReply(minVersion));
