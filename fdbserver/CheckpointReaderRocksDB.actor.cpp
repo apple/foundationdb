@@ -102,9 +102,9 @@ struct RocksDBCheckpointReader : ICheckpointReader {
 		}
 
 		~Reader() override {
-			if (db) {
-				delete db;
-			}
+			// if (db) {
+			// 	delete db;
+			// }
 		}
 
 		void init() override {}
@@ -209,6 +209,7 @@ struct RocksDBCheckpointReader : ICheckpointReader {
 				}
 			}
 
+			std::cout << "RocksDBCheckpointReader close acton done" << std::endl;
 			TraceEvent("RocksDBCheckpointReader").detail("Path", a.path).detail("Method", "Close");
 			a.done.send(Void());
 		}
@@ -263,6 +264,7 @@ struct RocksDBCheckpointReader : ICheckpointReader {
 					    .detail("Method", "ReadRangeAction")
 					    .detail("Timeout value", readRangeTimeout);
 					a.result.sendError(transaction_too_old());
+					delete(cursor.release());
 					return;
 				}
 				cursor->Next();
@@ -278,6 +280,10 @@ struct RocksDBCheckpointReader : ICheckpointReader {
 
             std::cout << "Read Done." << cursor->status().ToString() << std::endl;
 			// throw end_of_stream();
+
+			if (result.empty()) {
+				delete(cursor.release());
+			}
 
 			a.result.send(result);
 		}
@@ -302,21 +308,30 @@ struct RocksDBCheckpointReader : ICheckpointReader {
 	Future<Void> getError() const override { return errorPromise.getFuture(); }
 
 	ACTOR static void doClose(RocksDBCheckpointReader* self, bool deleteOnClose) {
+		if (self == nullptr) return;
+
 		auto a = new Reader::CloseAction(self->path, deleteOnClose);
 		auto f = a->done.getFuture();
 		self->readThreads->post(a);
 		wait(f);
 
-		wait(self->readThreads->stop());
+		std::cout << "Closed Action." << std::endl;
 
-		if (self->closePromise.canBeSet()) {
+		if (self != nullptr) {
+			wait(self->readThreads->stop());
+		}
+
+		std::cout << "threads stopped." << std::endl;
+
+		if (self != nullptr && self->closePromise.canBeSet()) {
 			self->closePromise.send(Void());
 		}
-		if (self->errorPromise.canBeSet()) {
+		if (self != nullptr && self->errorPromise.canBeSet()) {
 			self->errorPromise.send(Never());
 		}
-
-		delete self;
+		if (self != nullptr) {
+			delete self;
+		}
 	}
 
 	Future<Void> onClosed() const override { return closePromise.getFuture(); }

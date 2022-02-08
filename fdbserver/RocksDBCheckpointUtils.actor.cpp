@@ -85,6 +85,8 @@ ACTOR static Future<Void> fetchCheckpointRange(Database cx,
 		}
 	}
 
+	std::cout << "FetchRocksCheckpointKeyValues found ss: " << ssi.toString() << std::endl;
+
 	state int attempt = 0;
 	state int64_t totalBytes = 0;
 	// state rocksdb::SstFileWriter writer = rocksdb::SstFileWriter(rocksdb::EnvOptions(), rocksdb::Options());
@@ -98,7 +100,8 @@ ACTOR static Future<Void> fetchCheckpointRange(Database cx,
 			    .detail("TargetUID", ssID.toString())
 			    .detail("StorageServer", ssi.id().toString())
 			    .detail("LocalFile", localFile)
-			    .detail("Attempt", attempt);
+			    .detail("Attempt", attempt)
+			    .log();
 			// status = writer.Finish();
 			// if (!status.ok()) {
 			// 	std::cout << "SstFileWriter close failure: " << status.ToString() << std::endl;
@@ -118,19 +121,23 @@ ACTOR static Future<Void> fetchCheckpointRange(Database cx,
 
 			state ReplyPromiseStream<GetCheckpointKeyValuesStreamReply> stream =
 			    ssi.getCheckpointKeyValues.getReplyStream(GetCheckpointKeyValuesRequest(remoteDir, range));
+			std::cout << "FetchRocksCheckpointKeyValues stream." << std::endl;
 			TraceEvent("FetchCheckpointKeyValuesReceivingData")
 			    .detail("RemoteDir", remoteDir)
 			    .detail("TargetUID", ssID.toString())
 			    .detail("StorageServer", ssi.id().toString())
 			    .detail("LocalFile", localFile)
-			    .detail("Attempt", attempt);
+			    .detail("Attempt", attempt)
+			    .log();
 			loop {
-				state GetCheckpointKeyValuesStreamReply rep = waitNext(stream.getFuture());
+				GetCheckpointKeyValuesStreamReply rep = waitNext(stream.getFuture());
 				// wait(asyncFile->write(rep.data.begin(), rep.size, offset));
 				// wait(asyncFile->flush());
 				//  += rep.data.size();
-				for (const auto* it = rep.data.begin(); it != rep.data.end(); ++it) {
-					status = writer->Put(toSlice(it->key), toSlice(it->value));
+				for (int i = 0; i < rep.data.size(); ++i) {
+					std::cout << "Writing key: " << rep.data[i].key.toString()
+					          << ", value: " << rep.data[i].value.toString() << std::endl;
+					status = writer->Put(toSlice(rep.data[i].key), toSlice(rep.data[i].value));
 					if (!status.ok()) {
 						std::cout << "SstFileWriter put failure: " << status.ToString() << std::endl;
 						break;
@@ -153,6 +160,7 @@ ACTOR static Future<Void> fetchCheckpointRange(Database cx,
 					throw e;
 				}
 			} else {
+                metaData->rocksDBCheckpoint.get().fetchedFiles.emplace_back(range, localFile);
 				TraceEvent("FetchCheckpointFileEnd")
 				    .detail("RemoteFile", remoteDir)
 				    .detail("StorageServer", ssi.toString())
@@ -168,6 +176,7 @@ ACTOR static Future<Void> fetchCheckpointRange(Database cx,
 	}
 
 	rocksdb::Status s = writer->Finish();
+    std::cout << "SstFileWriterFinish status: " << s.ToString() << std::endl;
 
 	if (!status.ok()) {
 		throw internal_error();
@@ -176,10 +185,10 @@ ACTOR static Future<Void> fetchCheckpointRange(Database cx,
 	return Void();
 }
 
-ACTOR Future<CheckpointMetaData> fetchRocksCheckpoint(Database cx,
-                                                      CheckpointMetaData initialState,
-                                                      std::string dir,
-                                                      std::function<Future<Void>(const CheckpointMetaData&)> cFun) {
+ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
+                                                        CheckpointMetaData initialState,
+                                                        std::string dir,
+                                                        std::function<Future<Void>(const CheckpointMetaData&)> cFun) {
 	TraceEvent("FetchRocksCheckpointBegin")
 	    .detail("InitialState", initialState.toString())
 	    .detail("CheckpointDir", dir);
@@ -202,10 +211,10 @@ ACTOR Future<CheckpointMetaData> fetchRocksCheckpoint(Database cx,
 }
 #else
 
-ACTOR Future<CheckpointMetaData> fetchRocksCheckpoint(Database cx,
-                                                      CheckpointMetaData initialState,
-                                                      std::string dir,
-                                                      std::function<Future<Void>(const CheckpointMetaData&)> cFun) {
+ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
+                                                        CheckpointMetaData initialState,
+                                                        std::string dir,
+                                                        std::function<Future<Void>(const CheckpointMetaData&)> cFun) {
 	wait(delay(0));
 	std::cout << "RocksDB not enabled." << std::endl;
 	ASSERT(false);

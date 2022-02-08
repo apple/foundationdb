@@ -945,7 +945,7 @@ struct RocksDBColumnFamilyCheckpoint {
 struct RocksDBCheckpoint {
 	constexpr static FileIdentifier file_identifier = 13804347;
 	std::string checkpointDir;
-	Key restartKey;
+	std::vector<std::pair<KeyRange, std::string>> fetchedFiles;
 
 	CheckpointFormat format() const { return SingleRocksDB; }
 
@@ -953,7 +953,7 @@ struct RocksDBCheckpoint {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, checkpointDir, restartKey);
+		serializer(ar, checkpointDir, fetchedFiles);
 	}
 };
 
@@ -1038,16 +1038,26 @@ struct GetCheckpointRequest {
 struct GetCheckpointKeyValuesStreamReply : public ReplyPromiseStreamReply {
 	constexpr static FileIdentifier file_identifier = 13804353;
 	Arena arena;
-	VectorRef<KeyValueRef, VecSerStrategy::String> data;
+	VectorRef<KeyValueRef> data;
+	// Standalone<VectorRef<KeyValueRef>> data;
+	// std::vector<KeyValue> data;
 	bool more;
 
 	GetCheckpointKeyValuesStreamReply() : more(false) {}
 
 	int expectedSize() const { return data.expectedSize(); }
+	// int expectedSize() const {
+	// 	int res = 0;
+	// 	for (int i = 0; i < data.size(); ++i) {
+	// 		res += data[i].expectedSize();
+	// 	}
+	// 	return res;
+	// }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, ReplyPromiseStreamReply::acknowledgeToken, ReplyPromiseStreamReply::sequence, data, more, arena);
+		// serializer(ar, ReplyPromiseStreamReply::acknowledgeToken, ReplyPromiseStreamReply::sequence, data, more);
 	}
 };
 

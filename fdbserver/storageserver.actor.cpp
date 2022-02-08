@@ -1806,17 +1806,36 @@ ACTOR Future<Void> getCheckpointKeyValuesQ(StorageServer* self, GetCheckpointKey
 			state RangeResult res =
 			    wait(rocksReader->next(CLIENT_KNOBS->REPLY_BYTE_LIMIT, CLIENT_KNOBS->REPLY_BYTE_LIMIT));
 			if (res.size() == 0) {
+				std::cout << "Reached end of checkpoint." << std::endl;
 				break;
 			}
+			std::cout << "Read range size:" << res.size() << std::endl;
 			wait(req.reply.onReady());
 			GetCheckpointKeyValuesStreamReply reply;
 			reply.arena.dependsOn(res.arena());
-			for (const auto* kv = res.begin(); kv != res.end(); ++kv) {
-				reply.data.push_back(reply.arena, *kv);
+			reply.data.reserve(reply.arena, res.size());
+			std::cout << "Before kvs." << reply.expectedSize() << std::endl;
+			// reply.arena.dependsOn(res.arena());
+
+			for (int i = 0; i < res.size(); ++i) {
+				std::cout << "Key:" << res[i].key.toString() << "Value: " << res[i].value.toString() << std::endl;
+				reply.data.push_back(reply.arena, res[i]);
+				// reply.data.push_back_deep(reply.data.arena(), res[i].key, res[i].value);
+			}
+			// for (const auto* kv = res.begin(); kv != res.end(); ++kv) {
+			// 	std::cout << "KV:" << kv->key.toString() << std::endl;
+			// 	reply.data.push_back_deep(reply.arena, *kv);
+			// }
+			std::cout << "Packed kvs." << reply.expectedSize() << std::endl;
+			for (int i = 0; i < reply.data.size(); ++i) {
+				std::cout << "Key:" << reply.data[i].key.toString() << "Value: " << reply.data[i].value.toString()
+				          << std::endl;
 			}
 			req.reply.send(reply);
+			std::cout << "Sent." << std::endl;
 		}
 	} catch (Error& e) {
+		std::cout << "Error." << std::endl;
 		rocksReader->close();
 		TraceEvent(SevWarnAlways, "ServerGetCheckpointKeyValuesFailure")
 		    .detail("CheckpointDir", req.checkpointDir)
@@ -1826,14 +1845,21 @@ ACTOR Future<Void> getCheckpointKeyValuesQ(StorageServer* self, GetCheckpointKey
 			throw;
 		}
 		req.reply.sendError(e);
+		return Void();
 	}
 
-	TraceEvent(SevWarnAlways, "ServerGetCheckpointKeyValuesEnd")
-	    .detail("CheckpointDir", req.checkpointDir)
-	    .detail("Range", req.range);
+	std::cout << "Done." << std::endl;
+	TraceEvent("ServerGetCheckpointKeyValuesEnd")
+		.detail("CheckpointDir", req.checkpointDir)
+		.detail("Range", req.range.toString());
 
 	req.reply.sendError(end_of_stream());
+
+	Future<Void> closed = rocksReader->onClosed();
 	rocksReader->close();
+	wait(closed);
+
+	std::cout << "closed." << std::endl;
 	return Void();
 }
 

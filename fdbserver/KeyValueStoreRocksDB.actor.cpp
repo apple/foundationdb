@@ -822,16 +822,16 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			    .detail("Path", a.path)
 			    .detail("CheckpointMetaData", a.checkpoint.toString());
 
+			auto options = getOptions();
+			rocksdb::Status status = rocksdb::DB::Open(options, a.path, &db);
+
+			if (!status.ok()) {
+				logRocksDBError(status, "Restore");
+				a.done.sendError(statusToError(status));
+				return;
+			}
+
 			if (a.checkpoint.format == RocksDBColumnFamily) {
-				auto options = getOptions();
-				rocksdb::Status status = rocksdb::DB::Open(options, a.path, &db);
-
-				if (!status.ok()) {
-					logRocksDBError(status, "Restore");
-					a.done.sendError(statusToError(status));
-					return;
-				}
-
 				rocksdb::ExportImportFilesMetaData metaData = getMetaData(a.checkpoint);
 				rocksdb::ImportColumnFamilyOptions importOptions;
 				importOptions.move_files = true;
@@ -845,6 +845,36 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 					TraceEvent(SevInfo, "RocksDB").detail("Path", a.path).detail("Method", "Restore");
 					a.done.send(Void());
 				}
+			} else if (a.checkpoint.format == SingleRocksDB) {
+				ASSERT(a.checkpoint.rocksDBCheckpoint.present());
+				rocksdb::IngestExternalFileOptions ingestOptions;
+				ingestOptions.move_files = true;
+				auto options = getOptions();
+				status = db->CreateColumnFamily(getCFOptions(), SERVER_KNOBS->DEFAULT_FDB_ROCKSDB_COLUMN_FAMILY, &cf);
+				if (!status.ok()) {
+					logRocksDBError(status, "CreateColumnFamily");
+					a.done.sendError(statusToError(status));
+					return;
+				}
+				std::vector<std::string> sstFiles;
+				for (const auto& [range, file] : a.checkpoint.rocksDBCheckpoint.get().fetchedFiles) {
+					sstFiles.push_back(file);
+				}
+				//  =
+				//     platform::listFiles(a.checkpoint.rocksDBCheckpoint.get().checkpointDir, ".sst");
+				// std::vector<std::string> paths;
+				// for (const std::string& file : sstFiles) {
+				// 	std::cout << "Found sstFile: " << file << std::endl;
+				// 	paths.push_back(a.checkpoint.rocksDBCheckpoint.get().checkpointDir + "/" + file);
+				// }
+				status = db->IngestExternalFile(cf, sstFiles, ingestOptions);
+				if (!status.ok()) {
+					std::cout << "Ingest sst file failure: " << status.ToString() << std::endl;
+					logRocksDBError(status, "IngestExternalFile");
+					a.done.sendError(statusToError(status));
+					return;
+				}
+				a.done.send(Void());
 			} else {
 				throw not_implemented();
 			}
