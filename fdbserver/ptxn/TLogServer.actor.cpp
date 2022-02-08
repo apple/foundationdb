@@ -540,7 +540,8 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 					auto const& m = self->versionMessages.begin();
 					++messagesErased;
 
-					// TODO: understand why we need to subtract the size for normal/txs team
+					// decrement the sizes of each version, so that updateStorage can see whether a certain
+					// version has been popped by looking at the corresponding size.
 					if (self->storageTeamId != txsTeam) {
 						sizes.first -= m->second.first.size();
 					} else {
@@ -1457,6 +1458,7 @@ ACTOR Future<Void> tLogPopCore(Reference<TLogGroupData> self,
 		// if minVersionInTeam < logData->persistentDataDurableVersion, it means all the data needs to be popped has
 		// been persisted into disk, so they are already erased from in memory data structure in updatePersistentData(),
 		// thus we only need to erase them from disk (in popDiskQueue actor)
+		// note that eraseMessagesBefore takes a version V and erase versions < V, not <= V.
 		if (minVersionInTeam > logData->persistentDataDurableVersion)
 			wait(storageTeamData->eraseMessagesBefore(minVersionInTeam, self, logData, TaskPriority::TLogPop));
 		//TraceEvent("TLogPop", logData->logId).detail("Tag", tag.toString()).detail("To", upTo);
@@ -2116,6 +2118,7 @@ void updatePersistentPopped(Reference<TLogGroupData> self,
 	                                      persistStorageTeamPoppedValue(data->poppedTagVersions)));
 	data->poppedRecently = false;
 	data->persistentPopped = data->popped;
+
 	if (data->nothingPersistent)
 		return;
 
@@ -2191,8 +2194,8 @@ ACTOR Future<Void> updatePoppedLocation(Reference<TLogGroupData> self,
 	return Void();
 }
 
-// It runs against the oldest TLog instance, calculates the first location in the disk queue that contains un-popped
-// data, and then issues a pop to the disk queue at that location so that anything earlier can be
+// It calculates the first location in the disk queue that contains un-popped data for a group,
+// and then issues a pop to the disk queue at that location so that anything earlier can be
 // removed/forgotten/overwritten. In effect, it applies the effect of TLogPop RPCs to disk.
 ACTOR Future<Void> popDiskQueue(Reference<TLogGroupData> self, Reference<LogGenerationData> logData) {
 	if (!logData->initialized)
@@ -2230,9 +2233,6 @@ ACTOR Future<Void> popDiskQueue(Reference<TLogGroupData> self, Reference<LogGene
 		}
 	}
 
-	// it seems code above is about finding the min version for spilling data,
-	// code below is about finding the min location for on disk data,
-	// but why using committedLocation? how do we know all SSes already have them?
 	if (self->queueCommitEnd.get() > 0) {
 		Version lastCommittedVersion = logData->queueCommittedVersion.get();
 		IDiskQueue::location lastCommittedLocation = minLocation;
@@ -2536,14 +2536,24 @@ ACTOR Future<Void> updateStorage(Reference<TLogGroupData> self) {
 			// Double check that a running TLog wasn't wrongly affected by spilling locked SharedTLogs.
 			ASSERT_WE_THINK(self->targetVolatileBytes == SERVER_KNOBS->TLOG_SPILL_THRESHOLD);
 			Map<Version, std::pair<int, int>>::iterator sizeItr = logData->version_sizes.begin();
-			while (totalSize < SERVER_KNOBS->REFERENCE_SPILL_UPDATE_STORAGE_BYTE_LIMIT &&
-			       sizeItr != logData->version_sizes.end() &&
-			       (logData->bytesInput.getValue() - logData->bytesDurable.getValue() - totalSize >=
-			            self->targetVolatileBytes ||
-			        sizeItr->value.first == 0)) {
+
+			bool hasMoreSpace = totalSize < SERVER_KNOBS->REFERENCE_SPILL_UPDATE_STORAGE_BYTE_LIMIT;
+			bool hasMoreVersion = sizeItr != logData->version_sizes.end();
+			bool needSpilling = hasMoreSpace && hasMoreVersion &&
+			                    logData->bytesInput.getValue() - logData->bytesDurable.getValue() - totalSize >=
+			                        self->targetVolatileBytes;
+			bool alreadyPopped = hasMoreSpace && hasMoreVersion && sizeItr->value.first == 0;
+			while (needSpilling || alreadyPopped) {
 				totalSize += sizeItr->value.first + sizeItr->value.second;
 				++sizeItr;
 				nextVersion = sizeItr == logData->version_sizes.end() ? logData->version.get() : sizeItr->key;
+
+				hasMoreSpace = totalSize < SERVER_KNOBS->REFERENCE_SPILL_UPDATE_STORAGE_BYTE_LIMIT;
+				hasMoreVersion = sizeItr != logData->version_sizes.end();
+				needSpilling = hasMoreSpace && hasMoreVersion &&
+				               logData->bytesInput.getValue() - logData->bytesDurable.getValue() - totalSize >=
+				                   self->targetVolatileBytes;
+				alreadyPopped = hasMoreSpace && hasMoreVersion && sizeItr->value.first == 0;
 			}
 		}
 
@@ -2552,8 +2562,6 @@ ACTOR Future<Void> updateStorage(Reference<TLogGroupData> self) {
 		wait(logData->queueCommittedVersion.whenAtLeast(nextVersion));
 		wait(delay(0, TaskPriority::UpdateStorage));
 
-		// if no spill(or meta txn) AND a new commit, then nextVersion is 0, then we do not call either
-		// updatePersistentData or popDiskQueue, so pop from disk need both spill and a new commit to happen.
 		if (nextVersion > logData->persistentDataVersion) {
 			wait(self->persistentDataCommitLock.take());
 			commitLockReleaser = FlowLock::Releaser(self->persistentDataCommitLock);

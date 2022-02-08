@@ -792,7 +792,7 @@ TEST_CASE("/fdbserver/ptxn/test/pop_data") {
 	state ptxn::test::TestDriverOptions options(params);
 	state std::vector<Future<Void>> actors;
 	(const_cast<ServerKnobs*> SERVER_KNOBS)->BUGGIFY_TLOG_STORAGE_MIN_UPDATE_INTERVAL = 0.5;
-	(const_cast<ServerKnobs*> SERVER_KNOBS)->TLOG_SPILL_THRESHOLD = 0;
+	(const_cast<ServerKnobs*> SERVER_KNOBS)->TLOG_SPILL_THRESHOLD = 1500e6; // disable spilling
 
 	state std::shared_ptr<ptxn::test::TestDriverContext> pContext = ptxn::test::initTestDriverContext(options);
 
@@ -814,27 +814,26 @@ TEST_CASE("/fdbserver/ptxn/test/pop_data") {
 	// TODO: uncomment this once enable peek from disk
 	// wait(verifyPeek(pContext, storageTeamID, pContext->numCommits));
 
+	ASSERT(q->TEST_getPoppedLocation() == 0);
+
 	wait(pop(pContext,
 	         res.second.back(),
 	         storageTeamID,
 	         pContext->getTLogGroup(pContext->storageTeamIDTLogGroupIDMapper[storageTeamID])
 	             .storageTeams[storageTeamID][0]));
 
-	// commit 1 more time, to give TLog a chance to pop disk
-	state std::pair<std::vector<Standalone<StringRef>>, std::vector<Version>> resIgnore =
-	    wait(commitInjectReturnVersions(pContext, storageTeamID, 1, res.second.back()));
-
 	wait(delay(5.0)); // give some time for the updateStorageLoop to run
+
 	int totalSizeExcludeHeader = 0;
 	for (const auto& written : res.first) {
 		totalSizeExcludeHeader += written.size();
 	}
 	totalSizeExcludeHeader -= res.first.back().size(); // because poppedLocation record the start location
 
-	// the final popped location is the total sizes of written messages + page headers + spilledData
-	// it is hard to calculate page headers size or spilledData(spill as reference though) here, assert on '>'
-	// (note that the last message needs to be excluded because pop location use the start instead of end of a location)
-	// ref: https://github.com/apple/foundationdb/blob/4bf14e6/fdbserver/TLogServer.actor.cpp#L919
+	// finalPoppedLocation = written messages + page alignment overhead + page headers + spilledData(optional)
+	// thus assert on '>'.
+	// (note that the last message needs to be excluded because pop location use the start instead of end
+	// of a location) ref: https://github.com/apple/foundationdb/blob/4bf14e6/fdbserver/TLogServer.actor.cpp#L919
 	ASSERT(q->TEST_getPoppedLocation() > totalSizeExcludeHeader);
 
 	(const_cast<ServerKnobs*> SERVER_KNOBS)->TLOG_SPILL_THRESHOLD = 1500e6;

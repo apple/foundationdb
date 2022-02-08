@@ -1365,8 +1365,6 @@ ACTOR Future<Void> updateStorage(TLogData* self) {
 		// this if means if there are some version will not be read by SS anymore but still persistent, then pop from
 		// disk queue.
 
-		// nextVersion var is closely related to spilling, popDiskQueue should not be only called under cerain condition
-		// of nextVersion
 		if (nextVersion > logData->persistentDataVersion) {
 			wait(self->persistentDataCommitLock.take());
 			commitLockReleaser = FlowLock::Releaser(self->persistentDataCommitLock);
