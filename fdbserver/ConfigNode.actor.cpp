@@ -624,15 +624,15 @@ public:
 		TraceEvent(SevDebug, "StartingConfigNode", id).detail("KVStoreAlreadyExists", kvStore.exists());
 	}
 
-	Future<Void> serve(ConfigTransactionInterface const& cti) { return serve(this, &cti); }
-
-	Future<Void> serve(ConfigFollowerInterface const& cfi) { return serve(this, &cfi); }
-
 	Future<Void> serve(ConfigBroadcastInterface const& cbi,
 	                   ConfigTransactionInterface const& cti,
 	                   ConfigFollowerInterface const& cfi) {
 		return serve(this, &cbi, &cti, &cfi);
 	}
+
+	Future<Void> serve(ConfigTransactionInterface const& cti) { return serve(this, &cti); }
+
+	Future<Void> serve(ConfigFollowerInterface const& cfi) { return serve(this, &cfi); }
 
 	void close() { kvStore.close(); }
 
@@ -643,18 +643,18 @@ ConfigNode::ConfigNode(std::string const& folder) : impl(PImpl<ConfigNodeImpl>::
 
 ConfigNode::~ConfigNode() = default;
 
+Future<Void> ConfigNode::serve(ConfigBroadcastInterface const& cbi,
+                               ConfigTransactionInterface const& cti,
+                               ConfigFollowerInterface const& cfi) {
+	return impl->serve(cbi, cti, cfi);
+}
+
 Future<Void> ConfigNode::serve(ConfigTransactionInterface const& cti) {
 	return impl->serve(cti);
 }
 
 Future<Void> ConfigNode::serve(ConfigFollowerInterface const& cfi) {
 	return impl->serve(cfi);
-}
-
-Future<Void> ConfigNode::serve(ConfigBroadcastInterface const& cbi,
-                               ConfigTransactionInterface const& cti,
-                               ConfigFollowerInterface const& cfi) {
-	return impl->serve(cbi, cti, cfi);
 }
 
 void ConfigNode::close() {
