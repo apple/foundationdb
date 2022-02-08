@@ -31,6 +31,10 @@ instructions:
   - A global transaction map from byte string to Transactions. This map is
     shared by all tester 'threads'.
 
+  - A tenant that is to be used when creating transactions. This tenant must
+    support an unset state, in which case transactions will be created directly
+	on the database.
+
   - A stack of data items of mixed types and their associated metadata. At a
     minimum, each item should be stored with the 0-based instruction number
     which resulted in it being put onto the stack. Your stack must support push
@@ -106,15 +110,17 @@ FoundationDB Operations
 All of these operations map to a portion of the FoundationDB API. When an
 operation applies to a transaction, it should use the transaction stored in
 the global transaction map corresponding to the current transaction name. Certain
-instructions will be followed by one or both of _SNAPSHOT and _DATABASE to
+instructions will be followed by _SNAPSHOT and/or one of _DATABASE or _TENANT to
 indicate that they may appear with these variations. _SNAPSHOT operations should
-perform the operation as a snapshot read. _DATABASE operations should (if
-possible) make use of the methods available directly on the FoundationDB
-database object, rather than the currently open transaction.
+perform the operation as a snapshot read. _DATABASE and _TENANT operations should 
+(if possible) make use of the methods available directly on the FoundationDB
+database or tenant object, rather than the currently open transaction. If _TENANT
+is specified and no tenant is selected, then the operation should be run on the
+database object as if _DATABASE was specified.
 
-If your binding does not support operations directly on a database object, you
-should simulate it using an anonymous transaction. Remember that set and clear
-operations must immediately commit (with appropriate retry behavior!).
+If your binding does not support operations directly on a database or tenant 
+object, you should simulate it using an anonymous transaction. Remember that set 
+and clear operations must immediately commit (with appropriate retry behavior!).
 
 Any error that bubbles out of these operations must be caught. In the event of
 an error, you must push the packed tuple of the byte string `"ERROR"` and the
@@ -141,7 +147,9 @@ futures must apply the following rules to the result:
 #### NEW_TRANSACTION
 
     Creates a new transaction and stores it in the global transaction map
-    under the currently used transaction name.
+    under the currently used transaction name. If the current tenant has been
+	set, then this transaction should be created from that tenant. Otherwise,
+	it should be created from the database.
 
 #### USE_TRANSACTION
 
@@ -158,7 +166,7 @@ futures must apply the following rules to the result:
     the error out as indicated above. May optionally push a future onto the
     stack.
 
-#### GET (_SNAPSHOT, _DATABASE)
+#### GET (_SNAPSHOT, _DATABASE, _TENANT)
 
     Pops the top item off of the stack as KEY and then looks up KEY in the
     database using the get() method. May optionally push a future onto the
@@ -171,7 +179,7 @@ futures must apply the following rules to the result:
     the language binding. Make sure the API returns without error. Finally 
     push the string "GOT_ESTIMATED_RANGE_SIZE" onto the stack.
 
-#### GET_KEY (_SNAPSHOT, _DATABASE)
+#### GET_KEY (_SNAPSHOT, _DATABASE, _TENANT)
 
     Pops the top four items off of the stack as KEY, OR_EQUAL, OFFSET, PREFIX
     and then constructs a key selector. This key selector is then resolved
@@ -180,7 +188,7 @@ futures must apply the following rules to the result:
     is pushed onto the stack. If RESULT > PREFIX, then strinc(PREFIX) is pushed
     onto the stack. May optionally push a future onto the stack.
 
-#### GET_RANGE (_SNAPSHOT, _DATABASE)
+#### GET_RANGE (_SNAPSHOT, _DATABASE, _TENANT)
 
     Pops the top five items off of the stack as BEGIN_KEY, END_KEY, LIMIT,
     REVERSE and STREAMING_MODE. Performs a range read in a language-appropriate
@@ -188,13 +196,13 @@ futures must apply the following rules to the result:
     packed into a tuple as [k1,v1,k2,v2,...,kn,vn], and this single packed value
     is pushed onto the stack.
 
-#### GET_RANGE_STARTS_WITH (_SNAPSHOT, _DATABASE)
+#### GET_RANGE_STARTS_WITH (_SNAPSHOT, _DATABASE, _TENANT)
 
     Pops the top four items off of the stack as PREFIX, LIMIT, REVERSE and
     STREAMING_MODE. Performs a prefix range read in a language-appropriate way
     using these parameters. Output is pushed onto the stack as with GET_RANGE.
 
-#### GET_RANGE_SELECTOR (_SNAPSHOT, _DATABASE)
+#### GET_RANGE_SELECTOR (_SNAPSHOT, _DATABASE, _TENANT)
 
     Pops the top ten items off of the stack as BEGIN_KEY, BEGIN_OR_EQUAL,
     BEGIN_OFFSET, END_KEY, END_OR_EQUAL, END_OFFSET, LIMIT, REVERSE,
@@ -214,39 +222,43 @@ futures must apply the following rules to the result:
 
     Calls get_versionstamp and pushes the resulting future onto the stack.
 
-#### SET (_DATABASE)
+#### SET (_DATABASE, _TENANT)
 
     Pops the top two items off of the stack as KEY and VALUE. Sets KEY to have
-    the value VALUE. A SET_DATABASE call may optionally push a future onto the
-    stack.
+    the value VALUE. A SET_DATABASE or SET_TENANT call may optionally push a 
+	future onto the stack.
 
 #### SET_READ_VERSION
 
     Sets the current transaction read version to the internal state machine last
     seen version.
 
-#### CLEAR (_DATABASE)
+#### CLEAR (_DATABASE, _TENANT)
 
     Pops the top item off of the stack as KEY and then clears KEY from the
-    database. A CLEAR_DATABASE call may optionally push a future onto the stack.
+    database. A CLEAR_DATABASE or CLEAR_TENANT call may optionally push a 
+	future onto the stack.
 
-#### CLEAR_RANGE (_DATABASE)
+#### CLEAR_RANGE (_DATABASE, _TENANT)
 
     Pops the top two items off of the stack as BEGIN_KEY and END_KEY. Clears the
     range of keys from BEGIN_KEY to END_KEY in the database. A
-    CLEAR_RANGE_DATABASE call may optionally push a future onto the stack.
+    CLEAR_RANGE_DATABASE or CLEAR_RANGE_TENANT call may optionally push a future 
+	onto the stack.
 
-#### CLEAR_RANGE_STARTS_WITH (_DATABASE)
+#### CLEAR_RANGE_STARTS_WITH (_DATABASE, _TENANT)
 
     Pops the top item off of the stack as PREFIX and then clears all keys from
-    the database that begin with PREFIX. A CLEAR_RANGE_STARTS_WITH_DATABASE call
-    may optionally push a future onto the stack.
+    the database that begin with PREFIX. A CLEAR_RANGE_STARTS_WITH_DATABASE or 
+	CLEAR_RANGE_STARTS_WITH_TENANT call may optionally push a future onto the 
+	stack.
 
-#### ATOMIC_OP (_DATABASE)
+#### ATOMIC_OP (_DATABASE, _TENANT)
 
     Pops the top three items off of the stack as OPTYPE, KEY, and VALUE.
     Performs the atomic operation described by OPTYPE upon KEY with VALUE. An
-    ATOMIC_OP_DATABASE call may optionally push a future onto the stack.
+    ATOMIC_OP_DATABASE or ATOMIC_OP_TENANT call may optionally push a future 
+	onto the stack.
 
 #### READ_CONFLICT_RANGE and WRITE_CONFLICT_RANGE
 
@@ -387,6 +399,30 @@ Thread Operations
     retryable construct which synthesizes FoundationDB error 1020 when the range
     is not empty. Pushes the string "WAITED_FOR_EMPTY" onto the stack when
     complete.
+
+Tenant Operations
+-----------------
+
+#### TENANT_CREATE
+
+	Pops the top item off of the stack as TENANT_NAME. Creates a new tenant
+	in the database with the name TENANT_NAME. May optionally push a future
+	onto the stack.
+
+#### TENANT_DELETE
+
+	Pops the top item off of the stack as TENANT_NAME. Deletes the tenant with
+	the name TENANT_NAME from the database. May optionally push a future onto 
+	the stack.
+
+#### TENANT_SET_ACTIVE
+
+	Pops the top item off of the stack as TENANT_NAME. Opens the tenant with
+	name TENANT_NAME and stores it as the active tenant.
+
+#### TENANT_CLEAR_ACTIVE
+
+	Unsets the active tenant.
 
 Miscellaneous
 -------------
