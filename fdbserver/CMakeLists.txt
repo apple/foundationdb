@@ -33,7 +33,7 @@ set(FDBSERVER_SRCS
   DBCoreState.h
   DiskQueue.actor.cpp
   EncryptKeyProxyInterface.h
-  EncryptKeyProxy.actor.cpp  
+  EncryptKeyProxy.actor.cpp
   fdbserver.actor.cpp
   FDBExecHelper.actor.cpp
   FDBExecHelper.actor.h
@@ -170,7 +170,6 @@ set(FDBSERVER_SRCS
   workloads/Cache.actor.cpp
   workloads/ChangeConfig.actor.cpp
   workloads/ClearSingleRange.actor.cpp
-  workloads/ClientLibManagementWorkload.actor.cpp
   workloads/ClientTransactionProfileCorrectness.actor.cpp
   workloads/TriggerRecovery.actor.cpp
   workloads/SuspendProcesses.actor.cpp
