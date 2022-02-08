@@ -129,6 +129,10 @@ if __name__ == "__main__":
             break
 
         if errcode:
+            for etc_file in glob.glob(os.path.join(cluster.etc, "*")):
+                print(">>>>>>>>>>>>>>>>>>>> Contents of {}:".format(etc_file))
+                with open(etc_file, "r") as f:
+                    print(f.read())
             for log_file in glob.glob(os.path.join(cluster.log, "*")):
                 print(">>>>>>>>>>>>>>>>>>>> Contents of {}:".format(log_file))
                 with open(log_file, "r") as f:

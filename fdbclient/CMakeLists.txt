@@ -47,6 +47,7 @@ set(FDBCLIENT_SRCS
   ConfigKnobs.h
   ConfigTransactionInterface.cpp
   ConfigTransactionInterface.h
+  ConvertUTF.h
   CoordinationInterface.h
   DatabaseBackupAgent.actor.cpp
   DatabaseConfiguration.cpp
@@ -58,10 +59,12 @@ set(FDBCLIENT_SRCS
   FDBTypes.h
   FluentDSampleIngestor.cpp
   FileBackupAgent.actor.cpp
+  GenericManagementAPI.actor.h
   GlobalConfig.h
   GlobalConfig.actor.h
   GlobalConfig.actor.cpp
   GrvProxyInterface.h
+  HighContentionPrefixAllocator.actor.h
   HTTP.actor.cpp
   IClientApi.h
   IConfigTransaction.cpp
@@ -118,6 +121,7 @@ set(FDBCLIENT_SRCS
   ServerKnobs.cpp
   ServerKnobs.h
   SimpleConfigTransaction.h
+  SimpleIni.h
   SnapshotCache.h
   SpecialKeySpace.actor.cpp
   SpecialKeySpace.actor.h

@@ -141,7 +141,7 @@ ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
 					    .detail("StoredConnectionString", coordinators.ccr->getConnectionString().toString())
 					    .detail("CurrentConnectionString", leader.get().first.serializedInfo.toString());
 				}
-				coordinators.ccr->setConnectionString(
+				coordinators.ccr->setAndPersistConnectionString(
 				    ClusterConnectionString(leader.get().first.serializedInfo.toString()));
 				TraceEvent("LeaderForwarding")
 				    .detail("ConnStr", coordinators.ccr->getConnectionString().toString())

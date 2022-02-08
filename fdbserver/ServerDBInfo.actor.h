@@ -49,9 +49,10 @@ struct ServerDBInfo {
 	MasterInterface master; // The best guess as to the most recent master, which might still be recovering
 	Optional<RatekeeperInterface> ratekeeper;
 	Optional<BlobManagerInterface> blobManager;
+	Optional<EncryptKeyProxyInterface> encryptKeyProxy;
 	std::vector<ResolverInterface> resolvers;
 	DBRecoveryCount
-	    recoveryCount; // A recovery count from DBCoreState.  A successful master recovery increments it twice;
+	    recoveryCount; // A recovery count from DBCoreState.  A successful cluster recovery increments it twice;
 	                   // unsuccessful recoveries may increment it once. Depending on where the current master is in its
 	                   // recovery process, this might not have been written by the current master.
 	RecoveryState recoveryState;
@@ -82,6 +83,7 @@ struct ServerDBInfo {
 		           master,
 		           ratekeeper,
 		           blobManager,
+		           encryptKeyProxy,
 		           resolvers,
 		           recoveryCount,
 		           recoveryState,
