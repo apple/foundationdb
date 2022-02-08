@@ -1599,10 +1599,6 @@ public:
 			server_info[newServer.id()] = r;
 			// Establish the relation between server and machine
 			checkAndCreateMachine(r);
-			// Add storage server to pid map
-			ASSERT(r->lastKnownInterface.locality.processId().present());
-			StringRef pid = r->lastKnownInterface.locality.processId().get();
-			pid2server_info[pid].push_back(r);
 		}
 
 		r->tracker = storageServerTracker(cx, r.getPtr(), errorOut, addedVersion, ddEnabledState, newServer.isTss());
