@@ -547,7 +547,6 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 					} else {
 						sizes.second -= m->second.first.size();
 					}
-
 					self->versionMessages.erase(it);
 				}
 
@@ -800,7 +799,6 @@ void TLogQueue::forgetBefore(Version upToVersion, Reference<LogGenerationData> l
 	} else {
 		v.decrementNonEnd();
 	}
-
 	logData->versionLocation.erase(logData->versionLocation.begin(),
 	                               v); // ... and then we erase that previous version and all prior versions
 }
@@ -1434,8 +1432,8 @@ ACTOR Future<Void> tLogPopCore(Reference<TLogGroupData> self,
 			    .detail("PoppedVersionLag", PoppedVersionLag)
 			    .detail("MinPoppedStorageTeamVersion", logData->minPoppedStorageTeamVersion)
 			    .detail("QueuePoppedVersion", logData->queuePoppedVersion)
-			    .detail("UnpoppedRecovered", storageTeamData->unpoppedRecovered ? "True" : "False")
-			    .detail("NothingPersistent", storageTeamData->nothingPersistent ? "True" : "False");
+			    .detail("UnpoppedRecovered", storageTeamData->unpoppedRecovered)
+			    .detail("NothingPersistent", storageTeamData->nothingPersistent);
 		}
 
 		Version minVersionInTeam = upTo; // storageTeams
@@ -2137,6 +2135,8 @@ void updatePersistentPopped(Reference<TLogGroupData> self,
 	}
 }
 
+// Each storage team tries to update its poppedLocation by reading data from persistentData
+// persistentData got updated in updatePersistentData actor.
 ACTOR Future<Void> updatePoppedLocation(Reference<TLogGroupData> self,
                                         Reference<LogGenerationData> logData,
                                         Reference<LogGenerationData::StorageTeamData> data) {
@@ -2144,8 +2144,7 @@ ACTOR Future<Void> updatePoppedLocation(Reference<TLogGroupData> self,
 	if (logData->shouldSpillByValue(data->storageTeamId)) {
 		return Void();
 	}
-
-	if (data->versionForPoppedLocation >= data->persistentPopped) // both are 0 here, thus not continuing.
+	if (data->versionForPoppedLocation >= data->persistentPopped)
 		return Void();
 	data->versionForPoppedLocation = data->persistentPopped;
 
