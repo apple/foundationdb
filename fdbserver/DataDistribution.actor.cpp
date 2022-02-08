@@ -248,72 +248,85 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Data
 	return result;
 }
 
-ACTOR Future<Void> updateServerMetrics(TCServerInfo* server) {
-	state StorageServerInterface ssi = server->lastKnownInterface;
-	state Future<ErrorOr<GetStorageMetricsReply>> metricsRequest =
-	    ssi.getStorageMetrics.tryGetReply(GetStorageMetricsRequest(), TaskPriority::DataDistributionLaunch);
-	state Future<Void> resetRequest = Never();
-	state Future<std::pair<StorageServerInterface, ProcessClass>> interfaceChanged(server->onInterfaceChanged);
-	state Future<Void> serverRemoved(server->onRemoved);
+// add server to wiggling queue
+void StorageWiggler::addServer(const UID& serverId, const StorageMetadataType& metadata) {
+	// std::cout << "size: " << pq_handles.size() << " add " << serverId.toString() << " DC: "<< teamCollection->primary
+	// << std::endl;
+	ASSERT(!pq_handles.count(serverId));
+	pq_handles[serverId] = wiggle_pq.emplace(metadata, serverId);
+	nonEmpty.set(true);
+}
 
-	loop {
-		choose {
-			when(ErrorOr<GetStorageMetricsReply> rep = wait(metricsRequest)) {
-				if (rep.present()) {
-					server->serverMetrics = rep;
-					if (server->updated.canBeSet()) {
-						server->updated.send(Void());
-					}
-					break;
-				}
-				metricsRequest = Never();
-				resetRequest = delay(SERVER_KNOBS->METRIC_DELAY, TaskPriority::DataDistributionLaunch);
-			}
-			when(std::pair<StorageServerInterface, ProcessClass> _ssi = wait(interfaceChanged)) {
-				ssi = _ssi.first;
-				interfaceChanged = server->onInterfaceChanged;
-				resetRequest = Void();
-			}
-			when(wait(serverRemoved)) { return Void(); }
-			when(wait(resetRequest)) { // To prevent a tight spin loop
-				if (IFailureMonitor::failureMonitor().getState(ssi.getStorageMetrics.getEndpoint()).isFailed()) {
-					resetRequest = IFailureMonitor::failureMonitor().onStateEqual(ssi.getStorageMetrics.getEndpoint(),
-					                                                              FailureStatus(false));
-				} else {
-					resetRequest = Never();
-					metricsRequest = ssi.getStorageMetrics.tryGetReply(GetStorageMetricsRequest(),
-					                                                   TaskPriority::DataDistributionLaunch);
-				}
-			}
-		}
+void StorageWiggler::removeServer(const UID& serverId) {
+	// std::cout << "size: " << pq_handles.size() << " remove " << serverId.toString() << " DC: "<<
+	// teamCollection->primary <<std::endl;
+	if (contains(serverId)) { // server haven't been popped
+		auto handle = pq_handles.at(serverId);
+		pq_handles.erase(serverId);
+		wiggle_pq.erase(handle);
 	}
+	nonEmpty.set(!wiggle_pq.empty());
+}
 
-	if (server->serverMetrics.get().lastUpdate < now() - SERVER_KNOBS->DD_SS_STUCK_TIME_LIMIT) {
-		if (server->ssVersionTooFarBehind.get() == false) {
-			TraceEvent("StorageServerStuck", server->collection->distributorId)
-			    .detail("ServerId", server->id.toString())
-			    .detail("LastUpdate", server->serverMetrics.get().lastUpdate);
-			server->ssVersionTooFarBehind.set(true);
-			server->collection->addLaggingStorageServer(server->lastKnownInterface.locality.zoneId().get());
-		}
-	} else if (server->serverMetrics.get().versionLag > SERVER_KNOBS->DD_SS_FAILURE_VERSIONLAG) {
-		if (server->ssVersionTooFarBehind.get() == false) {
-			TraceEvent(SevWarn, "SSVersionDiffLarge", server->collection->distributorId)
-			    .detail("ServerId", server->id.toString())
-			    .detail("VersionLag", server->serverMetrics.get().versionLag);
-			server->ssVersionTooFarBehind.set(true);
-			server->collection->addLaggingStorageServer(server->lastKnownInterface.locality.zoneId().get());
-		}
-	} else if (server->serverMetrics.get().versionLag < SERVER_KNOBS->DD_SS_ALLOWED_VERSIONLAG) {
-		if (server->ssVersionTooFarBehind.get() == true) {
-			TraceEvent("SSVersionDiffNormal", server->collection->distributorId)
-			    .detail("ServerId", server->id.toString())
-			    .detail("VersionLag", server->serverMetrics.get().versionLag);
-			server->ssVersionTooFarBehind.set(false);
-			server->collection->removeLaggingStorageServer(server->lastKnownInterface.locality.zoneId().get());
-		}
+void StorageWiggler::updateMetadata(const UID& serverId, const StorageMetadataType& metadata) {
+	//	std::cout << "size: " << pq_handles.size() << " update " << serverId.toString()
+	//	          << " DC: " << teamCollection->primary << std::endl;
+	auto handle = pq_handles.at(serverId);
+	if ((*handle).first.createdTime == metadata.createdTime) {
+		return;
 	}
-	return Void();
+	wiggle_pq.update(handle, std::make_pair(metadata, serverId));
+}
+
+Optional<UID> StorageWiggler::getNextServerId() {
+	if (!wiggle_pq.empty()) {
+		auto [metadata, id] = wiggle_pq.top();
+		wiggle_pq.pop();
+		pq_handles.erase(id);
+		return Optional<UID>(id);
+	}
+	return Optional<UID>();
+}
+
+Future<Void> StorageWiggler::resetStats() {
+	auto newMetrics = StorageWiggleMetrics();
+	newMetrics.smoothed_round_duration = metrics.smoothed_round_duration;
+	newMetrics.smoothed_wiggle_duration = metrics.smoothed_wiggle_duration;
+	return StorageWiggleMetrics::runSetTransaction(teamCollection->cx, teamCollection->primary, newMetrics);
+}
+
+Future<Void> StorageWiggler::restoreStats() {
+	auto& metricsRef = metrics;
+	auto assignFunc = [&metricsRef](Optional<Value> v) {
+		if (v.present()) {
+			metricsRef = BinaryReader::fromStringRef<StorageWiggleMetrics>(v.get(), IncludeVersion());
+		}
+		return Void();
+	};
+	auto readFuture = StorageWiggleMetrics::runGetTransaction(teamCollection->cx, teamCollection->primary);
+	return map(readFuture, assignFunc);
+}
+Future<Void> StorageWiggler::startWiggle() {
+	metrics.last_wiggle_start = timer_int();
+	if (shouldStartNewRound()) {
+		metrics.last_round_start = metrics.last_wiggle_start;
+	}
+	return StorageWiggleMetrics::runSetTransaction(teamCollection->cx, teamCollection->primary, metrics);
+}
+
+Future<Void> StorageWiggler::finishWiggle() {
+	metrics.last_wiggle_finish = timer_int();
+	metrics.finished_wiggle += 1;
+	auto duration = metrics.last_wiggle_finish - metrics.last_wiggle_start;
+	metrics.smoothed_wiggle_duration.setTotal((double)duration);
+
+	if (shouldFinishRound()) {
+		metrics.last_round_finish = metrics.last_wiggle_finish;
+		metrics.finished_round += 1;
+		duration = metrics.last_round_finish - metrics.last_round_start;
+		metrics.smoothed_round_duration.setTotal((double)duration);
+	}
+	return StorageWiggleMetrics::runSetTransaction(teamCollection->cx, teamCollection->primary, metrics);
 }
 
 // Take a snapshot of necessary data structures from `DDTeamCollection` and print them out with yields to avoid slow

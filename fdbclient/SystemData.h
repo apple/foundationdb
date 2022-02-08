@@ -131,6 +131,10 @@ UID decodeTssQuarantineKey(KeyRef const&);
 // For recording tss mismatch details in the system keyspace
 extern const KeyRangeRef tssMismatchKeys;
 
+// \xff/serverMetadata/[[storageInterfaceUID]] = [[StorageMetadataType]]
+// Note: storageInterfaceUID is the one stated in the file name
+extern const KeyRangeRef serverMetadataKeys;
+
 // "\xff/serverTag/[[serverID]]" = "[[Tag]]"
 //	Provides the Tag for the given serverID. Used to access a
 //	storage server's corresponding TLog in order to apply mutations.
@@ -214,7 +218,9 @@ extern const KeyRef configKeysPrefix;
 
 extern const KeyRef perpetualStorageWiggleKey;
 extern const KeyRef perpetualStorageWiggleLocalityKey;
-extern const KeyRef wigglingStorageServerKey;
+extern const KeyRef perpetualStorageWiggleIDPrefix;
+extern const KeyRef perpetualStorageWiggleStatsPrefix;
+
 // Change the value of this key to anything and that will trigger detailed data distribution team info log.
 extern const KeyRef triggerDDTeamInfoPrintKey;
 

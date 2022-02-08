@@ -279,6 +279,11 @@ uint64_t timer_int(); // Return timer as uint64_t
 
 void getLocalTime(const time_t* timep, struct tm* result);
 
+// convert timestamp returned by timer_int() to Gmt format string
+std::string timerIntToGmt(uint64_t timestamp);
+
+std::string getGmtTimeStr(const time_t* time);
+
 void setMemoryQuota(size_t limit);
 
 void* allocate(size_t length, bool allowLargePages);

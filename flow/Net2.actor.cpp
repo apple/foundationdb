@@ -1358,7 +1358,7 @@ void Net2::initTLS(ETLSInitState targetState) {
 
 			for (int i = 0; i < threadsToStart; ++i) {
 				++sslHandshakerThreadsStarted;
-				sslHandshakerPool->addThread(new SSLHandshakerThread());
+				sslHandshakerPool->addThread(new SSLHandshakerThread(), "fdb-ssl-connect");
 			}
 		}
 	}

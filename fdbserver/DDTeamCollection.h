@@ -24,6 +24,7 @@
 #include <sstream>
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
@@ -196,14 +197,18 @@ public:
 	std::map<int,int> priority_teams;
 	std::map<UID, Reference<TCServerInfo>> server_info;
 	std::map<Key, std::vector<Reference<TCServerInfo>>> pid2server_info; // some process may serve as multiple storage servers
-	std::vector<AddressExclusion> wiggle_addresses; // collection of wiggling servers' address
 	std::map<UID, Reference<TCServerInfo>> tss_info_by_pair;
 	std::map<UID, Reference<TCServerInfo>> server_and_tss_info; // TODO could replace this with an efficient way to do a read-only concatenation of 2 data structures?
 	std::map<Key, int> lagging_zones; // zone to number of storage servers lagging
 	AsyncVar<bool> disableFailingLaggingServers;
-	Optional<Key> wigglingPid; // Process id of current wiggling storage server;
-    Reference<AsyncVar<bool>> pauseWiggle;
+
+	// storage wiggle info
+	Reference<StorageWiggler> storageWiggler;
+	std::vector<AddressExclusion> wiggleAddresses; // collection of wiggling servers' address
+	Optional<UID> wigglingId; // Process id of current wiggling storage server;
+	Reference<AsyncVar<bool>> pauseWiggle;
 	Reference<AsyncVar<bool>> processingWiggle; // track whether wiggling relocation is being processed
+	PromiseStream<StorageWiggleValue> nextWiggleInfo;
 
 	// machine_info has all machines info; key must be unique across processes on the same machine
 	std::map<Standalone<StringRef>, Reference<TCMachineInfo>> machine_info;
@@ -316,7 +321,8 @@ public:
 	                 PromiseStream<Promise<int>> getUnhealthyRelocationCount)
 	  : cx(cx), distributorId(distributorId), configuration(configuration), doBuildTeams(true),
 	    lastBuildTeamsFailed(false), teamBuilder(Void()), lock(lock), output(output), unhealthyServers(0),
-	    processingWiggle(processingWiggle), shardsAffectedByTeamFailure(shardsAffectedByTeamFailure),
+	    storageWiggler(makeReference<StorageWiggler>(this)), processingWiggle(processingWiggle),
+	    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure),
 	    initialFailureReactionDelay(
 	        delayed(readyToStart, SERVER_KNOBS->INITIAL_FAILURE_REACTION_DELAY, TaskPriority::DataDistribution)),
 	    initializationDoneActor(logOnCompletion(readyToStart && initialFailureReactionDelay)), recruitingStream(0),
@@ -386,6 +392,7 @@ public:
 			info->collection = nullptr;
 		}
 
+		storageWiggler->teamCollection = nullptr;
 		// TraceEvent("DDTeamCollectionDestructed", distributorId)
 		//    .detail("Primary", primary)
 		//    .detail("ServerTrackerDestroyed", server_info.size());
@@ -1796,19 +1803,8 @@ public:
 
 		// ASSERT( !shardsAffectedByTeamFailure->getServersForTeam( t ) for all t in teams that contain removedServer )
 		Reference<TCServerInfo> removedServerInfo = server_info[removedServer];
-		// Step: Remove TCServerInfo from pid2server_info
-		ASSERT(removedServerInfo->lastKnownInterface.locality.processId().present());
-		StringRef pid = removedServerInfo->lastKnownInterface.locality.processId().get();
-		auto& info_vec = pid2server_info[pid];
-		for (size_t i = 0; i < info_vec.size(); ++i) {
-			if (info_vec[i] == removedServerInfo) {
-				info_vec[i--] = info_vec.back();
-				info_vec.pop_back();
-			}
-		}
-		if (info_vec.size() == 0) {
-			pid2server_info.erase(pid);
-		}
+		// Step: Remove TCServerInfo from storageWiggler
+		storageWiggler->removeServer(removedServer);
 
 		// Step: Remove server team that relate to removedServer
 		// Find all servers with which the removedServer shares teams
@@ -1924,34 +1920,41 @@ public:
 		    .detail("DesiredTeamsPerServer", SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER);
 	}
 
-	// Adds storage servers held on process of which the Process Id is “pid” into excludeServers which prevent
+	// Adds storage servers held on process of which the Process Id is “id” into excludeServers which prevent
 	// recruiting the wiggling storage servers and let teamTracker start to move data off the affected teams;
 	// Return a vector of futures wait for all data is moved to other teams.
-	std::vector<Future<Void>> excludeStorageServersForWiggle(const Value& pid) {
-		std::vector<Future<Void>> moveFutures;
-		if (this->pid2server_info.count(pid) != 0) {
-			for (auto& info : this->pid2server_info[pid]) {
-				AddressExclusion addr(info->lastKnownInterface.address().ip, info->lastKnownInterface.address().port);
-				if (this->excludedServers.count(addr) &&
-				    this->excludedServers.get(addr) != DDTeamCollection::Status::NONE) {
-					continue; // don't overwrite the value set by actor trackExcludedServer
-				}
-				this->wiggle_addresses.push_back(addr);
-				this->excludedServers.set(addr, DDTeamCollection::Status::WIGGLING);
-				moveFutures.push_back(info->onRemoved);
+	Future<Void> excludeStorageServersForWiggle(const UID& id) {
+		Future<Void> moveFuture = Void();
+		if (this->server_info.count(id) != 0) {
+			auto& info = server_info.at(id);
+			AddressExclusion addr(info->lastKnownInterface.address().ip, info->lastKnownInterface.address().port);
+
+			// don't overwrite the value set by actor trackExcludedServer
+			bool abnormal =
+			    this->excludedServers.count(addr) && this->excludedServers.get(addr) != DDTeamCollection::Status::NONE;
+
+			if (info->lastKnownInterface.secondaryAddress().present()) {
+				AddressExclusion addr2(info->lastKnownInterface.secondaryAddress().get().ip,
+				                       info->lastKnownInterface.secondaryAddress().get().port);
+				abnormal |= this->excludedServers.count(addr2) &&
+				            this->excludedServers.get(addr2) != DDTeamCollection::Status::NONE;
 			}
-			if (!moveFutures.empty()) {
+
+			if (!abnormal) {
+				this->wiggleAddresses.push_back(addr);
+				this->excludedServers.set(addr, DDTeamCollection::Status::WIGGLING);
+				moveFuture = info->onRemoved;
 				this->restartRecruiting.trigger();
 			}
 		}
-		return moveFutures;
+		return moveFuture;
 	}
 
 	// Include wiggled storage servers by setting their status from `WIGGLING`
 	// to `NONE`. The storage recruiter will recruit them as new storage servers
 	void includeStorageServersForWiggle() {
 		bool included = false;
-		for (auto& address : this->wiggle_addresses) {
+		for (auto& address : this->wiggleAddresses) {
 			if (!this->excludedServers.count(address) ||
 			    this->excludedServers.get(address) != DDTeamCollection::Status::WIGGLING) {
 				continue;
@@ -1959,7 +1962,7 @@ public:
 			included = true;
 			this->excludedServers.set(address, DDTeamCollection::Status::NONE);
 		}
-		this->wiggle_addresses.clear();
+		this->wiggleAddresses.clear();
 		if (included) {
 			this->restartRecruiting.trigger();
 		}
@@ -2014,28 +2017,23 @@ public:
 
 	Future<Void> trackExcludedServers();
 
-	// Create a transaction reading the value of `wigglingStorageServerKey` and update it to the next Process ID
-	// according to a sorted PID set maintained by the data distributor. If now no storage server exists, the new
-	// Process ID is 0.
-	Future<Void> updateNextWigglingStoragePID();
+	// Create a transaction updating `perpetualStorageWiggleIDPrefix` to the next serverID according to a sorted
+	// wiggle_pq maintained by the wiggler.
+	Future<Void> updateNextWigglingStorageID();
 
 	// Iterate over each storage process to do storage wiggle. After initializing the first Process ID, it waits a
 	// signal from `perpetualStorageWiggler` indicating the wiggling of current process is finished. Then it writes the
-	// next Process ID to a system key: `wigglingStorageServerKey` to show the next process to wiggle.
+	// next Process ID to a system key: `perpetualStorageWiggleIDPrefix` to show the next process to wiggle.
 	Future<Void> perpetualStorageWiggleIterator(AsyncVar<bool>* stopSignal,
 	                                            FutureStream<Void> finishStorageWiggleSignal);
-
-	// Watch the value change of `wigglingStorageServerKey`.
-	// Return the watch future and the current value of `wigglingStorageServerKey`.
-	Future<std::pair<Future<Void>, Value>> watchPerpetualStoragePIDChange();
 
 	// periodically check whether the cluster is healthy if we continue perpetual wiggle
 	Future<Void> clusterHealthCheckForPerpetualWiggle(int* extraTeamCount);
 
-	// Watches the value (pid) change of \xff/storageWigglePID, and adds storage servers held on process of which the
-	// Process Id is “pid” into excludeServers which prevent recruiting the wiggling storage servers and let teamTracker
-	// start to move data off the affected teams. The wiggling process of current storage servers will be paused if the
-	// cluster is unhealthy and restarted once the cluster is healthy again.
+	// Watches the value change of `perpetualStorageWiggleIDPrefix`, and adds the storage server into excludeServers
+	// which prevent recruiting the wiggling storage servers and let teamTracker start to move data off the affected
+	// teams. The wiggling process of current storage servers will be paused if the cluster is unhealthy and restarted
+	// once the cluster is healthy again.
 	Future<Void> perpetualStorageWiggler(AsyncVar<bool>* stopSignal, PromiseStream<Void> finishStorageWiggleSignal);
 
 	// This coroutine sets a watch to monitor the value change of `perpetualStorageWiggleKey` which is controlled by
@@ -2106,4 +2104,23 @@ public:
 	}
 
 	Future<UID> getClusterId();
+
+	// return the next ServerID in storageWiggler
+	Future<UID> getNextWigglingServerID();
+
+	// read the current map of `perpetualStorageWiggleIDPrefix`, then restore wigglingId.
+	Future<Void> readStorageWiggleMap();
+
+	auto eraseStorageWiggleMap(KeyBackedObjectMap<UID, StorageWiggleValue, decltype(IncludeVersion())>* metadataMap,
+	                           UID id) {
+		return runRYWTransaction(cx, [metadataMap, id](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			metadataMap->erase(tr, id);
+			return Void();
+		});
+	}
+
+	// Read storage metadata from database, and do necessary updates
+	Future<Void> readOrCreateStorageMetadata(TCServerInfo* server);
 };
