@@ -4274,10 +4274,15 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 					remoteLoc++;
 				}
 				if (localVersion <= remoteVersion) {
+					// Do this once per wait instead of once per version for efficiency
+					data->fetchingChangeFeeds.insert(changeFeedInfo->id);
 					Standalone<MutationsAndVersionRef> _localResult = waitNext(localResults.getFuture());
 					localResult = _localResult;
 				}
 			}
+			// Do this once per wait instead of once per version for efficiency
+			data->fetchingChangeFeeds.insert(changeFeedInfo->id);
+
 			data->counters.feedBytesFetched += remoteResult.expectedSize();
 			data->fetchKeysBytesBudget -= remoteResult.expectedSize();
 			if (data->fetchKeysBytesBudget <= 0) {
