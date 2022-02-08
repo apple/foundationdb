@@ -6,9 +6,10 @@ testTitle = 'BlobGranuleVerifySmallClean'
 
     [[test.workload]]
     testName = 'WriteDuringRead'
-    testDuration = 120.0
+    testDuration = 60.0
     useSystemKeys = false
+    maximumDataWritten=50000000
 
     [[test.workload]]
     testName = 'BlobGranuleVerifier'
-    testDuration = 120.0
+    testDuration = 60.0

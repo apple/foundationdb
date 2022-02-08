@@ -6,33 +6,34 @@ testTitle = 'BlobGranuleVerifySmall'
 
     [[test.workload]]
     testName = 'WriteDuringRead'
-    testDuration = 120.0
+    testDuration = 60.0
     useSystemKeys = false
+    maximumDataWritten=50000000
 
     [[test.workload]]
     testName = 'BlobGranuleVerifier'
-    testDuration = 120.0
+    testDuration = 60.0
 
     [[test.workload]]
     testName = 'RandomClogging'
-    testDuration = 120.0 
+    testDuration = 60.0 
 
     [[test.workload]]
     testName = 'Rollback'
     meanDelay = 30.0
-    testDuration = 120.0 
+    testDuration = 60.0 
 
     [[test.workload]]
     testName = 'Attrition'
     machinesToKill = 10
     machinesToLeave = 3
     reboot = true
-    testDuration = 120.0 
+    testDuration = 60.0 
 
     [[test.workload]]
     testName = 'Attrition'
     machinesToKill = 10
     machinesToLeave = 3
     reboot = true
-    testDuration = 120.0 
+    testDuration = 60.0 
 

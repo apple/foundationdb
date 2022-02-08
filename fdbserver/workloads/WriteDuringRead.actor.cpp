@@ -45,6 +45,9 @@ struct WriteDuringReadWorkload : TestWorkload {
 	bool useSystemKeys;
 	std::string keyPrefix;
 	int64_t maximumTotalData;
+	int64_t maximumDataWritten;
+
+	int64_t dataWritten = 0;
 
 	bool success;
 	Database extraDB;
@@ -57,6 +60,8 @@ struct WriteDuringReadWorkload : TestWorkload {
 		numOps = getOption(options, LiteralStringRef("numOps"), 21);
 		rarelyCommit = getOption(options, LiteralStringRef("rarelyCommit"), false);
 		maximumTotalData = getOption(options, LiteralStringRef("maximumTotalData"), 3e6);
+		maximumDataWritten =
+		    getOption(options, LiteralStringRef("maximumDataWritten"), std::numeric_limits<int64_t>::max());
 		minNode = getOption(options, LiteralStringRef("minNode"), 0);
 		useSystemKeys = getOption(options, LiteralStringRef("useSystemKeys"), deterministicRandom()->random01() < 0.5);
 		// TODO CHANGE BACK!!
@@ -75,6 +80,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 			nodes = deterministicRandom()->randomInt(1, 4 << deterministicRandom()->randomInt(0, 20));
 		}
 
+		dataWritten = 0;
 		int newNodes = std::min<int>(nodes, maximumTotalData / (getKeyForIndex(nodes).size() + valueSizeRange.second));
 		minNode = std::max(minNode, nodes - newNodes);
 		nodes = newNodes;
@@ -536,11 +542,13 @@ ACTOR Future<Void> commitAndUpdateMemory(ReadYourWritesTransaction* tr,
 			}
 		}
 
+		state int64_t txnSize = tr->getApproximateSize();
 		state std::map<Key, Value> committedDB = self->memoryDatabase;
 		*doingCommit = true;
 		wait(tr->commit());
 		*doingCommit = false;
 		self->finished.trigger();
+		self->dataWritten += txnSize;
 
 		if (readYourWritesDisabled)
 			tr->setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
@@ -591,9 +599,10 @@ ACTOR Future<Void> loadAndRun(Database cx, WriteDuringReadWorkload* self) {
 		for (; i < self->nodes; i += keysPerBatch) {
 			state Transaction tr(cx);
 			loop {
-				if (now() - startTime > self->testDuration)
+				if (now() - startTime > self->testDuration || self->dataWritten >= self->maximumDataWritten)
 					return Void();
 				try {
+					state int64_t txnSize = 0;
 					if (i == 0) {
 						tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 						tr.addWriteConflictRange(
@@ -618,10 +627,14 @@ ACTOR Future<Void> loadAndRun(Database cx, WriteDuringReadWorkload* self) {
 								value = value.substr(0, std::min<int>(value.size(), CLIENT_KNOBS->VALUE_SIZE_LIMIT));
 								self->memoryDatabase[key] = value;
 								tr.set(key, value);
+								int64_t rowSize = key.expectedSize() + value.expectedSize();
+								txnSize += rowSize;
 							}
 						}
 					}
 					wait(tr.commit());
+					self->dataWritten += txnSize;
+
 					//TraceEvent("WDRInitBatch").detail("I", i).detail("CommittedVersion", tr.getCommittedVersion());
 					break;
 				} catch (Error& e) {
@@ -648,7 +661,7 @@ ACTOR Future<Void> loadAndRun(Database cx, WriteDuringReadWorkload* self) {
 					throw;
 				break;
 			}
-			if (now() - startTime > self->testDuration)
+			if (now() - startTime > self->testDuration || self->dataWritten >= self->maximumDataWritten)
 				return Void();
 		}
 	}
