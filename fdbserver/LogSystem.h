@@ -748,7 +748,7 @@ struct LogPushData : NonCopyable {
 				}
 			}
 		}
-		isEmptyMessage = std::vector<bool>(messagesWriter.size(), false);
+		messagesWritten = std::vector<bool>(messagesWriter.size(), false);
 	}
 
 	void addTxsTag();
@@ -825,7 +825,7 @@ private:
 	std::vector<Tag> prev_tags;
 	std::set<Tag> written_tags;
 	std::vector<BinaryWriter> messagesWriter;
-	std::vector<bool> isEmptyMessage; // if messagesWriter has written anything
+	std::vector<bool> messagesWritten; // if messagesWriter has written anything
 	std::vector<int> msg_locations;
 	// Stores message locations that have had span information written to them
 	// for the current transaction. Adding transaction info will reset this

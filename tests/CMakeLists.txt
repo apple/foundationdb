@@ -47,6 +47,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES AsyncFileReadRandom.txt UNIT IGNORE)
   add_fdb_test(TEST_FILES AsyncFileWrite.txt UNIT IGNORE)
   add_fdb_test(TEST_FILES BackupContainers.txt IGNORE)
+  add_fdb_test(TEST_FILES s3VersionHeaders.txt IGNORE)
   add_fdb_test(TEST_FILES BandwidthThrottle.txt IGNORE)
   add_fdb_test(TEST_FILES BigInsert.txt IGNORE)
   add_fdb_test(TEST_FILES BlobGranuleFileUnit.txt IGNORE)
@@ -137,6 +138,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/CycleTest.toml)
   add_fdb_test(TEST_FILES fast/ChangeFeeds.toml)
   add_fdb_test(TEST_FILES fast/DataLossRecovery.toml)
+  add_fdb_test(TEST_FILES fast/EncryptionOps.toml)
   add_fdb_test(TEST_FILES fast/FuzzApiCorrectness.toml)
   add_fdb_test(TEST_FILES fast/FuzzApiCorrectnessClean.toml)
   add_fdb_test(TEST_FILES fast/IncrementalBackup.toml)
@@ -186,6 +188,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES rare/CycleRollbackClogged.toml)
   add_fdb_test(TEST_FILES rare/CycleWithKills.toml)
   add_fdb_test(TEST_FILES rare/FuzzTest.toml)
+  add_fdb_test(TEST_FILES rare/HighContentionPrefixAllocator.toml)
   add_fdb_test(TEST_FILES rare/InventoryTestHeavyWrites.toml)
   add_fdb_test(TEST_FILES rare/LargeApiCorrectness.toml)
   add_fdb_test(TEST_FILES rare/LargeApiCorrectnessStatus.toml)
@@ -200,11 +203,14 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES rare/TransactionTagSwizzledApiCorrectness.toml)
   add_fdb_test(TEST_FILES rare/WriteTagThrottling.toml)
   add_fdb_test(
-    TEST_FILES restarting/from_7.0.0/SnapIncrementalRestore-1.toml
-               restarting/from_7.0.0/SnapIncrementalRestore-2.toml)
+    TEST_FILES restarting/from_7.0.0/SnapIncrementalRestore-1.txt
+               restarting/from_7.0.0/SnapIncrementalRestore-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_7.0.0/ConfigureTestRestart-1.toml
-               restarting/from_7.0.0/ConfigureTestRestart-2.toml)
+    TEST_FILES restarting/from_7.0.0_until_7.1.0/ConfigureTestRestart-1.toml
+               restarting/from_7.0.0_until_7.1.0/ConfigureTestRestart-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/from_7.1.0/ConfigureTestRestart-1.toml
+               restarting/from_7.1.0/ConfigureTestRestart-2.toml)
   add_fdb_test(
     TEST_FILES restarting/from_5.0.0_until_6.3.0/CycleTestRestart-1.txt
                restarting/from_5.0.0_until_6.3.0/CycleTestRestart-2.txt)
@@ -233,20 +239,20 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_7.0.0/UpgradeAndBackupRestore-1.toml
                restarting/from_7.0.0/UpgradeAndBackupRestore-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/to_7.0.0/CycleTestRestart-1.toml
-               restarting/to_7.0.0/CycleTestRestart-2.toml)
+    TEST_FILES restarting/to_7.0.0/CycleTestRestart-1.txt
+               restarting/to_7.0.0/CycleTestRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_7.0.0/SnapTestAttrition-1.toml
-               restarting/from_7.0.0/SnapTestAttrition-2.toml)
+    TEST_FILES restarting/from_7.0.0/SnapTestAttrition-1.txt
+               restarting/from_7.0.0/SnapTestAttrition-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_7.0.0/SnapTestSimpleRestart-1.toml
-               restarting/from_7.0.0/SnapTestSimpleRestart-2.toml)
+    TEST_FILES restarting/from_7.0.0/SnapTestSimpleRestart-1.txt
+               restarting/from_7.0.0/SnapTestSimpleRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_7.0.0/SnapTestRestart-1.toml
-               restarting/from_7.0.0/SnapTestRestart-2.toml)
+    TEST_FILES restarting/from_7.0.0/SnapTestRestart-1.txt
+               restarting/from_7.0.0/SnapTestRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_7.0.0/SnapCycleRestart-1.toml
-               restarting/from_7.0.0/SnapCycleRestart-2.toml)
+    TEST_FILES restarting/from_7.0.0/SnapCycleRestart-1.txt
+               restarting/from_7.0.0/SnapCycleRestart-2.txt)
   add_fdb_test(TEST_FILES slow/ApiCorrectness.toml)
   add_fdb_test(TEST_FILES slow/ApiCorrectnessAtomicRestore.toml)
   add_fdb_test(TEST_FILES slow/ApiCorrectnessSwitchover.toml)

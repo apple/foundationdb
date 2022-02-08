@@ -183,6 +183,7 @@ ACTOR Future<Void> GlobalConfig::refresh(GlobalConfig* self) {
 	self->erase(KeyRangeRef(""_sr, "\xff"_sr));
 
 	Transaction tr(self->cx);
+	tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 	RangeResult result = wait(tr.getRange(globalConfigDataKeys, CLIENT_KNOBS->TOO_MANY));
 	for (const auto& kv : result) {
 		KeyRef systemKey = kv.key.removePrefix(globalConfigKeysPrefix);

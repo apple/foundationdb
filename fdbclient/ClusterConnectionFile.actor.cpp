@@ -41,7 +41,7 @@ ClusterConnectionFile::ClusterConnectionFile(std::string const& filename, Cluste
 }
 
 // Sets the connections string held by this object and persists it.
-Future<Void> ClusterConnectionFile::setConnectionString(ClusterConnectionString const& conn) {
+Future<Void> ClusterConnectionFile::setAndPersistConnectionString(ClusterConnectionString const& conn) {
 	ASSERT(filename.size());
 	cs = conn;
 	return success(persist());
