@@ -228,9 +228,9 @@ class ConfigBroadcasterImpl {
 	// ensure strict serializability, some nodes may be temporarily restricted
 	// from participation until the other nodes in the system are brought up to
 	// date.
-	ACTOR static Future<Void> registerNode_internal(ConfigBroadcasterImpl* self,
-	                                                WorkerInterface w,
-	                                                Version lastSeenVersion) {
+	ACTOR static Future<Void> registerNodeInternal(ConfigBroadcasterImpl* self,
+	                                               WorkerInterface w,
+	                                               Version lastSeenVersion) {
 		state NetworkAddress address = w.address();
 
 		// Ask the registering ConfigNode whether it has registered in the past.
@@ -301,7 +301,7 @@ class ConfigBroadcasterImpl {
 		    .detail("ClientID", broadcastInterface.id())
 		    .detail("MostRecentVersion", impl->mostRecentVersion);
 
-		impl->actors.add(registerNode_internal(impl, w, lastSeenVersion));
+		impl->actors.add(registerNodeInternal(impl, w, lastSeenVersion));
 
 		// Push full snapshot to worker if it isn't up to date.
 		wait(impl->pushSnapshot(impl->mostRecentVersion, client));
