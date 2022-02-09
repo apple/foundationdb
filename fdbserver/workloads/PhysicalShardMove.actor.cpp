@@ -46,6 +46,8 @@ std::string printValue(const ErrorOr<Optional<Value>>& value) {
 } // namespace
 
 struct SSCheckpointWorkload : TestWorkload {
+	FlowLock startMoveKeysParallelismLock;
+	FlowLock finishMoveKeysParallelismLock;
 	const bool enabled;
 	bool pass;
 
@@ -70,22 +72,30 @@ struct SSCheckpointWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> _start(SSCheckpointWorkload* self, Database cx) {
-		state Key key = "TestKey"_sr;
-		state Key endKey = "TestKey0"_sr;
-		state Value oldValue = "TestValue"_sr;
-		state Value newValue = "TestNewValue"_sr;
+		state Key keyA = "TestKeyA"_sr;
+		state Key keyB = "TestKeyB"_sr;
+		state Key keyC = "TestKeyC"_sr;
+		state Value testValue = "TestValue"_sr;
 
-		state Version version = wait(self->writeAndVerify(self, cx, key, oldValue));
+		{ Version ignore = wait(self->writeAndVerify(self, cx, keyA, testValue)); }
+		{ Version ignore = wait(self->writeAndVerify(self, cx, keyB, testValue)); }
+		{ Version ignore = wait(self->writeAndVerify(self, cx, keyC, testValue)); }
 
 		std::cout << "Initialized" << std::endl;
 
+		state std::unordered_set<UID> excludes;
+		state int teamSize = 3;
+		state std::vector<UID> teamA = wait(self->moveShard(self, cx, KeyRangeRef(keyA, keyB), teamSize, &excludes));
+		state std::vector<UID> teamB = wait(self->moveShard(self, cx, KeyRangeRef(keyB, keyC), teamSize, &excludes));
+
 		state Transaction tr(cx);
+		state Version version;
 		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		loop {
 			std::cout << "Creating checkpoint." << std::endl;
 			try {
-				wait(createCheckpoint(&tr, KeyRangeRef(key, endKey), SingleRocksDB));
+				wait(createCheckpoint(&tr, KeyRangeRef(keyA, keyC), SingleRocksDB));
 				std::cout << "Buffer write done." << std::endl;
 				wait(tr.commit());
 				version = tr.getCommittedVersion();
@@ -100,9 +110,12 @@ struct SSCheckpointWorkload : TestWorkload {
 		loop {
 			try {
 				state std::vector<CheckpointMetaData> records =
-				    wait(getCheckpointMetaData(cx, KeyRangeRef(key, endKey), version, SingleRocksDB));
+				    wait(getCheckpointMetaData(cx, KeyRangeRef(keyA, keyC), version, SingleRocksDB));
 				break;
 			} catch (Error& e) {
+				std::cout << "GetCheckpointMetaData error: " << e.code() << "Name: " << e.name() << "What: " << e.what()
+				          << std::endl;
+				ASSERT(e.code() != error_code_checkpoint_not_found);
 			}
 		}
 
@@ -116,18 +129,23 @@ struct SSCheckpointWorkload : TestWorkload {
 		platform::eraseDirectoryRecursive(folder);
 		ASSERT(platform::createDirectory(folder));
 
-		loop {
-			try {
-				std::cout << "Fetching checkpoint." << std::endl;
-				state CheckpointMetaData record = wait(fetchRocksDBCheckpoint(cx, records[0], folder));
-				break;
-			} catch (Error& e) {
-				std::cout << "Getting checkpoint failure: " << e.name() << std::endl;
-				wait(delay(1));
+		state int idx = 0;
+		state std::vector<CheckpointMetaData> localRecords;
+		localRecords.resize(records.size());
+		for (; idx < records.size(); ++idx) {
+			loop {
+				try {
+					std::cout << "Fetching checkpoint." << std::endl;
+					CheckpointMetaData record = wait(fetchRocksDBCheckpoint(cx, records[idx], folder));
+					localRecords[idx] = record;
+					break;
+				} catch (Error& e) {
+					std::cout << "Getting checkpoint failure: " << e.name() << std::endl;
+					wait(delay(1));
+				}
 			}
+			std::cout << "Fetched checkpoint:" << records[idx].toString() << std::endl;
 		}
-
-		std::cout << "Fetched checkpoint:" << record.toString() << std::endl;
 
 		std::vector<std::string> files = platform::listFiles(folder);
 		std::cout << "Received checkpoint files on disk: " << folder << std::endl;
@@ -136,40 +154,41 @@ struct SSCheckpointWorkload : TestWorkload {
 		}
 		std::cout << std::endl;
 
-		state std::string rocksDBTestDir = "rocksdb-kvstore-test-db";
-		platform::eraseDirectoryRecursive(rocksDBTestDir);
+		// state std::string rocksDBTestDir = "rocksdb-kvstore-test-db";
+		// platform::eraseDirectoryRecursive(rocksDBTestDir);
 
-		state IKeyValueStore* kvStore = keyValueStoreRocksDB(
-		    rocksDBTestDir, deterministicRandom()->randomUniqueID(), KeyValueStoreType::SSD_ROCKSDB_V1);
-		try {
-			wait(kvStore->restore(record));
-		} catch (Error& e) {
-			std::cout << e.name() << std::endl;
-		}
+		// state IKeyValueStore* kvStore = keyValueStoreRocksDB(
+		//     rocksDBTestDir, deterministicRandom()->randomUniqueID(), KeyValueStoreType::SSD_ROCKSDB_V1);
+		// try {
+		// 	wait(kvStore->restore(record));
+		// } catch (Error& e) {
+		// 	std::cout << e.name() << std::endl;
+		// }
 
-		std::cout << "Restore complete" << std::endl;
+		// std::cout << "Restore complete" << std::endl;
 
-		tr.reset();
-		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-		loop {
-			try {
-				state RangeResult res = wait(tr.getRange(KeyRangeRef(key, endKey), CLIENT_KNOBS->TOO_MANY));
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
+		// tr.reset();
+		// tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+		// loop {
+		// 	try {
+		// 		state RangeResult res = wait(tr.getRange(KeyRangeRef(key, endKey), CLIENT_KNOBS->TOO_MANY));
+		// 		break;
+		// 	} catch (Error& e) {
+		// 		wait(tr.onError(e));
+		// 	}
+		// }
 
-		state int i = 0;
-		for (i = 0; i < res.size(); ++i) {
-			std::cout << "Reading key:" << res[i].key.toString() << std::endl;
-			Optional<Value> value = wait(kvStore->readValue(res[i].key));
-			ASSERT(value.present());
-			ASSERT(value.get() == res[i].value);
-		}
+		// state int i = 0;
+		// for (i = 0; i < res.size(); ++i) {
+		// 	std::cout << "Reading key:" << res[i].key.toString() << std::endl;
+		// 	Optional<Value> value = wait(kvStore->readValue(res[i].key));
+		// 	ASSERT(value.present());
+		// 	ASSERT(value.get() == res[i].value);
+		// }
 
-		std::cout << "Verified." << std::endl;
+		// std::cout << "Verified." << std::endl;
 
+		int ignore = wait(setDDMode(cx, 1));
 		return Void();
 		// ASSERT(files.size() == record.rocksCF.get().sstFiles.size());
 		// std::unordered_set<std::string> sstFiles(files.begin(), files.end());
@@ -261,6 +280,71 @@ struct SSCheckpointWorkload : TestWorkload {
 	Future<bool> check(Database const& cx) override { return pass; }
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
+
+	// Move keys to a random selected team consisting of a single SS, after disabling DD, so that keys won't be
+	// kept in the new team until DD is enabled.
+	// Returns the address of the single SS of the new team.
+	ACTOR Future<std::vector<UID>> moveShard(SSCheckpointWorkload* self,
+	                                         Database cx,
+	                                         KeyRange keys,
+	                                         int teamSize,
+	                                         std::unordered_set<UID>* excludes) {
+		// Disable DD to avoid DD undoing of our move.
+		int ignore = wait(setDDMode(cx, 0));
+		state std::vector<UID> dests;
+
+		// Pick a random SS as the dest, keys will reside on a single server after the move.
+		std::vector<StorageServerInterface> interfs = wait(getStorageServers(cx));
+		ASSERT(interfs.size() > teamSize);
+		while (dests.size() < teamSize) {
+			const auto& interf = interfs[deterministicRandom()->randomInt(0, interfs.size())];
+			if (excludes->count(interf.uniqueID) == 0) {
+				dests.push_back(interf.uniqueID);
+				excludes->insert(interf.uniqueID);
+			}
+		}
+
+		state UID owner = deterministicRandom()->randomUniqueID();
+		state DDEnabledState ddEnabledState;
+
+		state Transaction tr(cx);
+
+		loop {
+			try {
+				BinaryWriter wrMyOwner(Unversioned());
+				wrMyOwner << owner;
+				tr.set(moveKeysLockOwnerKey, wrMyOwner.toValue());
+				wait(tr.commit());
+
+				MoveKeysLock moveKeysLock;
+				moveKeysLock.myOwner = owner;
+
+				wait(moveKeys(cx,
+				              keys,
+				              dests,
+				              dests,
+				              moveKeysLock,
+				              Promise<Void>(),
+				              &self->startMoveKeysParallelismLock,
+				              &self->finishMoveKeysParallelismLock,
+				              false,
+				              UID(), // for logging only
+				              &ddEnabledState));
+				break;
+			} catch (Error& e) {
+				if (e.code() == error_code_movekeys_conflict) {
+					// Conflict on moveKeysLocks with the current running DD is expected, just retry.
+					tr.reset();
+				} else {
+					wait(tr.onError(e));
+				}
+			}
+		}
+
+		TraceEvent("TestMoveShardComplete").detail("Range", keys.toString()).detail("NewTeam", describe(dests));
+
+		return dests;
+	}
 };
 
 WorkloadFactory<SSCheckpointWorkload> SSCheckpointWorkloadFactory("SSCheckpointWorkload");

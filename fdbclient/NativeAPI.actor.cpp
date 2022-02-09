@@ -6919,6 +6919,8 @@ ACTOR Future<std::vector<CheckpointMetaData>> getCheckpointMetaData(Database cx,
 		state int j = 0;
 
 		try {
+			alternatives.clear();
+			fs.clear();
 			state std::vector<std::pair<KeyRange, Reference<LocationInfo>>> locations =
 			    wait(getKeyRangeLocations(cx,
 			                              keys,
@@ -6934,7 +6936,7 @@ ACTOR Future<std::vector<CheckpointMetaData>> getCheckpointMetaData(Database cx,
 				// For each shard, all storage servers are checked, only one is required.
 				for (j = 0; j < locations[i].second->size(); ++j) {
 					alternatives[i].push_back(locations[i].second->getInterface(j).checkpoint.getReply(
-					    GetCheckpointRequest(version, keys, format)));
+					    GetCheckpointRequest(version, locations[i].first, format)));
 				}
 				TraceEvent("GetCheckpointShardBegin")
 				    .detail("Range", locations[i].first.toString())
@@ -6943,7 +6945,7 @@ ACTOR Future<std::vector<CheckpointMetaData>> getCheckpointMetaData(Database cx,
 			}
 
 			for (i = 0; i < alternatives.size(); ++i) {
-				fs.push_back(waitForAny(alternatives[i]));
+				fs.push_back(waitForAll(alternatives[i]));
 			}
 
 			choose {

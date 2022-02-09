@@ -1711,17 +1711,23 @@ ACTOR Future<Void> deleteCheckpointQ(StorageServer* self, Version version, Check
 			}
 			for (const std::string dir : dirs) {
 				platform::eraseDirectoryRecursive(dir);
-				TraceEvent("DeleteCheckpointRemovedDir", self->thisServerID)
-				    .detail("CheckpointID", checkpoint.checkpointID)
-				    .detail("Dir", dir);
 			}
-
-			// Remove the checkpoint record.
+			TraceEvent("DeleteCheckpointRemovedDir", self->thisServerID)
+			    .detail("Checkpoint", checkpoint.toString())
+			    .detail("Dirs", describe(dirs));
 		} else if (checkpoint.format == SingleRocksDB) {
-			throw not_implemented();
+			ASSERT(checkpoint.rocksDBCheckpoint.present());
+			self->checkpoints.erase(checkpoint.checkpointID);
+			const RocksDBCheckpoint& rocksDBCheckpoint = checkpoint.rocksDBCheckpoint.get();
+			platform::eraseDirectoryRecursive(rocksDBCheckpoint.checkpointDir);
+			TraceEvent("DeleteCheckpointRemovedDir", self->thisServerID)
+			    .detail("Checkpoint", checkpoint.toString())
+			    .detail("Dir",rocksDBCheckpoint.checkpointDir);
 		} else {
 			throw internal_error();
 		}
+
+		// Remove the checkpoint record.
 		Version version = self->data().getLatestVersion();
 		auto& mLV = self->addVersionToMutationLog(version);
 		self->addMutationToMutationLog(
@@ -1850,8 +1856,8 @@ ACTOR Future<Void> getCheckpointKeyValuesQ(StorageServer* self, GetCheckpointKey
 
 	std::cout << "Done." << std::endl;
 	TraceEvent("ServerGetCheckpointKeyValuesEnd")
-		.detail("CheckpointDir", req.checkpointDir)
-		.detail("Range", req.range.toString());
+	    .detail("CheckpointDir", req.checkpointDir)
+	    .detail("Range", req.range.toString());
 
 	req.reply.sendError(end_of_stream());
 
@@ -6901,9 +6907,12 @@ ACTOR Future<Void> serveChangeFeedPopRequests(StorageServer* self, FutureStream<
 ACTOR Future<Void> serveGetCheckpointRequests(StorageServer* self, FutureStream<GetCheckpointRequest> checkpoint) {
 	loop {
 		GetCheckpointRequest req = waitNext(checkpoint);
+		TraceEvent("ReceivedGetCheckpointReqeust", self->thisServerID)
+	    .detail("Version", req.version)
+	    .detail("Range", req.range.toString())
+	    .detail("Format", static_cast<int>(req.format));
 		if (!self->isReadable(req.range)) {
 			req.reply.sendError(wrong_shard_server());
-			continue;
 		} else {
 			self->actors.add(getCheckpointQ(self, req));
 		}

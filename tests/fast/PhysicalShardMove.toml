@@ -3,7 +3,7 @@ config = 'triple'
 storageEngineType = 4
 processesPerMachine = 1
 coordinators = 3
-machineCount = 15
+machineCount = 45
 
 [[test]]
 testTitle = 'PhysicalShardMove'
