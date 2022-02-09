@@ -871,13 +871,6 @@ ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bw
 			}
 		}
 
-		// TODO: figure out why the status stream on change isn't working
-		// We could just do something like statusEpoch, save down the original status stream
-		// and compare it to the current one
-		if (statusEpoch < bwData->currentManagerEpoch) {
-			break;
-		}
-
 		choose {
 			when(wait(bwData->currentManagerStatusStream.onChange())) {}
 			when(wait(metadata->resumeSnapshot.getFuture())) { break; }
