@@ -2602,7 +2602,7 @@ ACTOR Future<Void> clusterController(Reference<IClusterConnectionRecord> connRec
 			if (connRecord->hasUnresolvedHostnames()) {
 				wait(connRecord->resolveHostnames());
 			}
-			TraceEvent("Xianyiren1").detail("Unresolved", connRecord->getConnectionString().hasUnresolvedHostnames).log();
+			TraceEvent("Suspect1").detail("Unresolved", connRecord->getConnectionString().hasUnresolvedHostnames).log();
 			ServerCoordinators coordinators(connRecord);
 			wait(clusterController(coordinators, currentCC, hasConnected, asyncPriorityInfo, locality, configDBType));
 		} catch (Error& e) {

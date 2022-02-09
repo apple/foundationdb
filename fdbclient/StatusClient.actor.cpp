@@ -306,10 +306,11 @@ ACTOR Future<Optional<StatusObject>> clientCoordinatorsStatusFetcher(Reference<I
                                                                      bool* quorum_reachable,
                                                                      int* coordinatorsFaultTolerance) {
 	try {
-		TraceEvent("Xianyiren4").detail("Unresolved", connRecord->hasUnresolvedHostnames()).log();
+		TraceEvent("Suspect41").detail("Unresolved", connRecord->hasUnresolvedHostnames()).log();
 		if(connRecord->hasUnresolvedHostnames()) {
 			wait(connRecord->resolveHostnames());
 		}
+		TraceEvent("Suspect42").log();
 		state ClientCoordinators coord(connRecord);
 		state StatusObject statusObj;
 
@@ -320,6 +321,8 @@ ACTOR Future<Optional<StatusObject>> clientCoordinatorsStatusFetcher(Reference<I
 			                                           GetLeaderRequest(coord.clusterKey, UID()),
 			                                           TaskPriority::CoordinationReply));
 
+		TraceEvent("Suspect43").log();
+
 		state std::vector<Future<ProtocolInfoReply>> coordProtocols;
 		coordProtocols.reserve(coord.clientLeaderServers.size());
 		for (int i = 0; i < coord.clientLeaderServers.size(); i++) {
@@ -328,12 +331,18 @@ ACTOR Future<Optional<StatusObject>> clientCoordinatorsStatusFetcher(Reference<I
 			coordProtocols.push_back(retryBrokenPromise(requestStream, ProtocolInfoRequest{}));
 		}
 
+		TraceEvent("Suspect44").log();
+
 		wait(smartQuorum(leaderServers, leaderServers.size() / 2 + 1, 1.5) &&
 		         smartQuorum(coordProtocols, coordProtocols.size() / 2 + 1, 1.5) ||
 		     delay(2.0));
 
+		TraceEvent("Suspect45").log();
+
 		statusObj["quorum_reachable"] = *quorum_reachable =
 		    quorum(leaderServers, leaderServers.size() / 2 + 1).isReady();
+
+		TraceEvent("Suspect46").log();
 
 		StatusArray coordsStatus;
 		int coordinatorsUnavailable = 0;
@@ -358,10 +367,12 @@ ACTOR Future<Optional<StatusObject>> clientCoordinatorsStatusFetcher(Reference<I
 			coordsStatus.push_back(coordStatus);
 		}
 		statusObj["coordinators"] = coordsStatus;
+		TraceEvent("Suspect47").log();
 
 		*coordinatorsFaultTolerance = (leaderServers.size() - 1) / 2 - coordinatorsUnavailable;
 		return statusObj;
 	} catch (Error& e) {
+		TraceEvent("Suspect4e").error(e, true).log();
 		*quorum_reachable = false;
 		return Optional<StatusObject>();
 	}

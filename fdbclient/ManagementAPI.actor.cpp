@@ -848,7 +848,7 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 	}
 
 	std::vector<Future<Optional<LeaderInfo>>> leaderServers;
-	TraceEvent("Xianyiren2").detail("Unresolved", conn.hasUnresolvedHostnames).log();
+	TraceEvent("Suspect2").detail("Unresolved", conn.hasUnresolvedHostnames).log();
 	ClientCoordinators coord(Reference<ClusterConnectionMemoryRecord>(new ClusterConnectionMemoryRecord(conn)));
 
 	leaderServers.reserve(coord.clientLeaderServers.size());
@@ -1049,7 +1049,7 @@ struct AutoQuorumChange final : IQuorumChange {
 			return false;
 
 		// Check availability
-		TraceEvent("Xianyiren3").detail("Unresolved", ccr->hasUnresolvedHostnames()).log();
+		TraceEvent("Suspect3").detail("Unresolved", ccr->hasUnresolvedHostnames()).log();
 		ClientCoordinators coord(ccr);
 		std::vector<Future<Optional<LeaderInfo>>> leaderServers;
 		leaderServers.reserve(coord.clientLeaderServers.size());
