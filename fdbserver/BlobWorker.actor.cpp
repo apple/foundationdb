@@ -2442,6 +2442,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 
 			wait(yield(TaskPriority::DefaultEndpoint));
 		}
+		ASSERT(!req.reply.isSet());
 		req.reply.send(rep);
 		--bwData->stats.activeReadRequests;
 	} catch (Error& e) {
@@ -2468,18 +2469,21 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 	choose {
 		when(wait(doBlobGranuleFileRequest(bwData, req))) {}
 		when(wait(delay(SERVER_KNOBS->BLOB_WORKER_REQUEST_TIMEOUT))) {
-			TEST(true); // Blob Worker request timeout hit
-			if (BW_DEBUG) {
-				fmt::print("BW {0} request [{1} - {2}) @ {3} timed out, sending WSS\n",
-				           bwData->id.toString().substr(0, 5),
-				           req.keyRange.begin.printable(),
-				           req.keyRange.end.printable(),
-				           req.readVersion);
+			if (!req.reply.isSet()) {
+				TEST(true); // Blob Worker request timeout hit
+				if (BW_DEBUG) {
+					fmt::print("BW {0} request [{1} - {2}) @ {3} timed out, sending WSS\n",
+					           bwData->id.toString().substr(0, 5),
+					           req.keyRange.begin.printable(),
+					           req.keyRange.end.printable(),
+					           req.readVersion);
+				}
+				--bwData->stats.activeReadRequests;
+				++bwData->stats.granuleRequestTimeouts;
+
+				// return wrong_shard_server because it's possible that someone else actually owns the granule now
+				req.reply.sendError(wrong_shard_server());
 			}
-			--bwData->stats.activeReadRequests;
-			++bwData->stats.granuleRequestTimeouts;
-			// return wrong_shard_server because it's possible that someone else actually owns the granule now
-			req.reply.sendError(wrong_shard_server());
 		}
 	}
 	return Void();
