@@ -31,6 +31,8 @@ set(FDBSERVER_SRCS
   DataDistributionTracker.actor.cpp
   DataDistributorInterface.h
   DBCoreState.h
+  DDTeamCollection.actor.cpp
+  DDTeamCollection.h
   DiskQueue.actor.cpp
   EncryptKeyProxyInterface.h
   EncryptKeyProxy.actor.cpp
@@ -129,6 +131,8 @@ set(FDBSERVER_SRCS
   TagPartitionedLogSystem.actor.cpp
   TagPartitionedLogSystem.actor.h
   template_fdb.h
+  TCInfo.actor.cpp
+  TCInfo.h
   tester.actor.cpp
   TesterInterface.actor.h
   TLogInterface.h
