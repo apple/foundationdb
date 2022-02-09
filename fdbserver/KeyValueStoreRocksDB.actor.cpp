@@ -110,27 +110,40 @@ void logRocksDBError(const rocksdb::Status& status, const std::string& method) {
 }
 
 enum class ShardOp {
-	ADD,
-	DELETE,
+	CREATE,
+	OPEN,
+	DESTROY,
+	CLOSE,
 	MODIFY_RANGE,
 };
 
 const char* ShardOpToString(ShardOp op) {
 	switch (op) {
-	case ShardOp::ADD:
-		return "Add";
-	case ShardOp::DELETE:
-		return "Delete";
+	case ShardOp::CREATE:
+		return "CREATE";
+	case ShardOp::OPEN:
+		return "OPEN";
+	case ShardOp::DESTROY:
+		return "DESTROY";
+	case ShardOp::CLOSE:
+		return "CLOSE";
 	case ShardOp::MODIFY_RANGE:
-		return "ModifyRange";
+		return "MODIFY_RANGE";
 	default:
 		return "Unknown";
 	}
 }
 
-void logShardMovement(KeyRangeRef range, ShardOp op, Severity severity = SevInfo) {
-	TraceEvent e(severity, "KVSShardMovement");
-	e.detail("Action", ShardOpToString(op)).detail("Begin", range.begin).detail("End", range.end);
+void logShardEvent(StringRef name,
+                   KeyRangeRef range,
+                   ShardOp op,
+                   Severity severity = SevInfo,
+                   const std::string& message = "") {
+	TraceEvent e(severity, "KVSShardEvent");
+	e.detail("Name", name).detail("Action", ShardOpToString(op)).detail("Begin", range.begin).detail("End", range.end);
+	if (message != "") {
+		e.detail("Message", message);
+	}
 }
 
 Error statusToError(const rocksdb::Status& s) {
@@ -390,18 +403,19 @@ ACTOR Future<Void> rocksDBMetricLogger(std::shared_ptr<rocksdb::Statistics> stat
 }
 
 struct DataShard {
-	DataShard(std::string name) : name(name) {}
+	DataShard(std::string name, KeyRangeRef range) : name(name), range(range) {}
+
 	~DataShard() {
 		if (db == nullptr)
 			return;
 		// Close DB
-		std::cout << "Close shard --- ";
 		auto s = db->Close();
 		if (!s.ok()) {
+			logShardEvent(name, range, ShardOp::CLOSE, SevError, s.ToString());
 			logRocksDBError(s, "CloseShard");
 			return;
 		}
-		TraceEvent(SevInfo, "RocksDB").detail("Method", "CloseShard").detail("Name", name);
+		logShardEvent(name, range, ShardOp::CLOSE);
 
 		if (!deletePending)
 			return;
@@ -411,14 +425,35 @@ struct DataShard {
 		s = rocksdb::DestroyDB(name, getOptions(), defaultCF);
 		if (!s.ok()) {
 			logRocksDBError(s, "DestroyShard");
-		} else {
-			TraceEvent(SevInfo, "RocksDB").detail("Name", name).detail("Method", "DestroyShard");
+			logShardEvent(name, range, ShardOp::DESTROY, SevError, s.ToString());
+			return;
 		}
+		logShardEvent(name, range, ShardOp::DESTROY);
 	}
+
+	/*
+	bool crateDb() {
+	    if (db)
+	        return true;
+	    std::vector<rocksdb::ColumnFamilyDescriptor> defaultCF = { rocksdb::ColumnFamilyDescriptor{ "default",
+	                                                                                                getCFOptions() } };
+	    std::vector<rocksdb::ColumnFamilyHandle*> handle;
+	    auto options = getOptions();
+	    rocksdb::Status status = rocksdb::DB::Open(options, name, defaultCF, &handle, &db);
+	    if (!status.ok()) {
+	        logRocksDBError(status, "AddShard");
+	        logShardEvent(name, range, ShardOp::CREATE, SevError, s.ToString());
+	        a.done.sendError(statusToError(status));
+	        return false;
+	    }
+	    logShardEvent(name, range, ShardOp::CREATE);
+	    return true;
+	}*/
 
 	rocksdb::DB* db = nullptr;
 	rocksdb::WriteBatch writeBatch;
 	std::string name;
+	KeyRange range;
 	bool deletePending = false;
 	bool isSpecialKeysShard = false;
 };
@@ -496,7 +531,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				a.done.sendError(statusToError(status));
 				return;
 			}
-			auto defaultShard = std::make_shared<DataShard>(a.path);
+			auto defaultShard = std::make_shared<DataShard>(a.path, specialKeys);
 			defaultShard->db = db;
 			defaultShard->isSpecialKeysShard = true;
 
@@ -533,11 +568,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			auto shards = decodeShardMapping(rangeResult, persistShardMappingPrefix);
 
 			for (const auto& [range, name] : shards) {
-				auto shard = std::make_shared<DataShard>(name);
+				auto shard = std::make_shared<DataShard>(name, range);
 				rocksdb::DB* shardDb;
 				status = rocksdb::DB::Open(options, name, defaultCF, &handle, &shardDb);
 				if (!status.ok()) {
 					logRocksDBError(status, "OpenShard");
+					logShardEvent(name, range, ShardOp::OPEN, SevError, status.ToString());
 					a.done.sendError(statusToError(status));
 					return;
 				}
@@ -592,7 +628,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				openShards[name] = nullptr;
 			}
 
-			std::cout << "Num persisted shards: " << openShards.size() << "\n";
 
 			std::shared_ptr<DataShard> specialKeysShard;
 			for (auto it : a.shardMap->ranges()) {
@@ -610,7 +645,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 					openShards[name] = it.value();
 				} else {
 					it.value()->deletePending = true;
-					logShardMovement(it.range(), ShardOp::DELETE);
 				}
 			}
 
@@ -625,7 +659,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			for (const auto& [range, name] : shards) {
 				auto shard = openShards[name];
 				if (shard == nullptr) {
-					shard = std::make_shared<DataShard>(name);
+					shard = std::make_shared<DataShard>(name, range);
 					auto status = rocksdb::DB::Open(options, name, defaultCF, &handle, &shard->db);
 					if (!status.ok()) {
 						logRocksDBError(status, "RestoreShard");
@@ -722,19 +756,21 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 					// Destroy shard.
 					continue;
 				}
+
 				if (!shard->db) {
-					// create DB
+					// create db
 					std::vector<rocksdb::ColumnFamilyDescriptor> defaultCF = { rocksdb::ColumnFamilyDescriptor{
 						"default", getCFOptions() } };
 					std::vector<rocksdb::ColumnFamilyHandle*> handle;
 					auto options = getOptions();
 					rocksdb::Status status = rocksdb::DB::Open(options, shard->name, defaultCF, &handle, &shard->db);
 					if (!status.ok()) {
+						logShardEvent(shard->name, shard->range, ShardOp::CREATE, SevError, status.ToString());
 						logRocksDBError(status, "AddShard");
 						a.done.sendError(statusToError(status));
 						return;
 					}
-					TraceEvent(SevInfo, "RocksDB").detail("Method", "OpenShard").detail("Name", shard->name);
+					logShardEvent(shard->name, shard->range, ShardOp::CREATE);
 				}
 
 				s = doCommit(&shard->writeBatch, shard->db, a.getHistograms);
@@ -763,8 +799,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 			// Destroy all the delete pending shards.
 			a.dirtyShards->clear();
-
-			// TODO: Destroy all delete pending shards.
 			a.done.send(Void());
 		}
 
@@ -1173,7 +1207,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 	Future<Void> init() override {
 		if (openFuture.isValid()) {
-			std::cout << "Restore action\n";
+			// return openFuture;
 			// Restore durable state if KVS is open. KVS will be re-initialized during rollback. To avoid the cost of
 			// opening and closing multiple rocksdb instances, we reconcile the shard map using persist shard mapping
 			// data.
@@ -1183,7 +1217,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			writeThread->post(a.release());
 			return future;
 		} else {
-			std::cout << "Open action\n";
 			auto a = std::make_unique<Writer::OpenAction>(
 			    path, dataPath, metrics, &readSemaphore, &fetchSemaphore, &shardMap);
 			openFuture = a->done.getFuture();
@@ -1427,11 +1460,59 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			dirtyShards.reset(new std::set<std::shared_ptr<DataShard>>());
 		}
 
-		auto shard = std::make_shared<DataShard>(dataPath + id.toString());
+		auto shard = std::make_shared<DataShard>(dataPath + id.toString(), range);
+
+		auto ranges = shardMap.intersectingRanges(range);
+
+		for (auto it = ranges.begin(); it != ranges.end(); ++it) {
+			if (!it.value())
+				continue;
+			auto existingShard = it.value();
+			if (range.contains(existingShard->range)) {
+				// Replace shard
+				existingShard->deletePending = true;
+				dirtyShards->insert(existingShard);
+				continue;
+			}
+
+			if (existingShard->range.contains(range)) {
+				TraceEvent(SevInfo, "RocksDB")
+				    .detail("Action", "SplitShard")
+				    .detail("Begin", range.begin)
+				    .detail("End", range.end);
+				logShardEvent(existingShard->name,
+				              existingShard->range,
+				              ShardOp::MODIFY_RANGE,
+				              SevWarn,
+				              "Split shard, inner range: " + range.begin.toString() + range.end.toString());
+				continue;
+			}
+
+			if (existingShard->range.end > range.begin) {
+				// left
+				existingShard->range = KeyRange(KeyRangeRef(existingShard->range.begin, range.begin));
+			} else {
+				existingShard->range = KeyRange(KeyRangeRef(range.end, existingShard->range.end));
+			}
+			logShardEvent(existingShard->name, existingShard->range, ShardOp::MODIFY_RANGE);
+		}
+
+		/*
+		auto affectedRanges = shardMap.getAffectedRangesAfterInsertion(range, shard);
+
+		for(int i = 0; i < affectedRanges.size(); ++i) {
+
+		    if (affectedRanges[i].value->range != affectedRanges[i]) {
+		        auto existingShard = affectedRanges[i].value;
+		        // Truncate shard
+		        existingShard->range = affectedRanges[i];
+		        logShardEvent(existingShard->name, existingShard->range, ShardOp::MODIFY_RANGE);
+		        // TODO: issue clear range.
+		    }
+		}*/
+
 		shardMap.insert(range, shard);
 		dirtyShards->insert(shard);
-
-		logShardMovement(range, ShardOp::ADD);
 
 		TraceEvent(SevInfo, "RocksDB")
 		    .detail("Method", "AddShard")
@@ -1467,9 +1548,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		                                StringRef(persistShardMappingPrefix.toString() + range.begin.toString()),
 		                                StringRef(shard.value()->name)));
 
-		std::cout << "get shard mutations " << range.begin.toString() << " : " << range.end.toString()
-		          << ", name: " << shard.value()->name;
-		// TODO: should we include sys key range here?
 		if (range.end <= allKeys.end) {
 			auto it = shardMap.rangeContaining(range.end);
 			refs.push_back_deep(refs.arena(),
@@ -1483,10 +1561,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			                                LiteralStringRef("")));
 		}
 
-		/*
-		for (auto& mutation : refs) {
-		    std::cout << "mutation ref " << mutation.toString() << "\n";
-		}*/
 		return refs;
 	}
 
@@ -1539,7 +1613,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			dirtyShards.reset(new std::set<std::shared_ptr<DataShard>>());
 		}
 
-		std::cout << "DisposeRange " << range.begin.toString() << " : " << range.end.toString() << "\n";
 
 		if (range.intersects(specialKeys)) {
 			std::cout << "Invalid range to dispose " << range.begin.toString() << " : " << range.end.toString() << "\n";
@@ -1559,17 +1632,24 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			if (range.contains(shard.range())) {
 				shard.value()->deletePending = true;
 				dirtyShards->insert(shard.value());
-
-				logShardMovement(shard.range(), ShardOp::DELETE);
 			} else {
 				// truncate shard
-				logShardMovement(shard.range(), ShardOp::MODIFY_RANGE);
+			}
+		}
+
+		auto affectedRanges = shardMap.getAffectedRangesAfterInsertion(range, nullptr);
+		for (int i = 0; i < affectedRanges.size(); ++i) {
+			if (affectedRanges[i].value->range != affectedRanges[i]) {
+				auto existingShard = affectedRanges[i].value;
+				// Truncate shard
+				existingShard->range = affectedRanges[i];
+				logShardEvent(existingShard->name, existingShard->range, ShardOp::MODIFY_RANGE);
+				// TODO: issue clear range.
 			}
 		}
 
 		shardMap.insert(range, nullptr);
-
-		TraceEvent(SevError, "RocksDB")
+		TraceEvent(SevInfo, "RocksDB")
 		    .detail("Method", "DisposeRange")
 		    .detail("Begin", range.begin.toString())
 		    .detail("End", range.end.toString());

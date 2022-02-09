@@ -138,7 +138,9 @@ struct AddingShard : NonCopyable {
 	// When fetchKeys "partially completes" (splits an adding shard in two), this is used to construct the left half
 	AddingShard(AddingShard* prev, KeyRange const& keys, Version version = invalidVersion)
 	  : keys(keys), fetchClient(prev->fetchClient), server(prev->server), transferredVersion(prev->transferredVersion),
-	    phase(prev->phase), shardVersion(version) {}
+	    phase(prev->phase), shardVersion(version) {
+		TraceEvent("AddingShard").detail("Begin", keys.begin).detail("End", keys.end).detail("Reason", "SplitShard");
+	}
 	~AddingShard() {
 		if (!fetchComplete.isSet())
 			fetchComplete.send(Void());
@@ -3588,9 +3590,6 @@ void applyMutation(StorageServer* self,
                    Version version,
                    bool fromFetch) {
 
-	if (m.param1.toString() == "3fc340a2877ee4e2") {
-		std::cout << "---- Mutation Version: " << version << "\n";
-	}
 	// m is expected to be in arena already
 	// Clear split keys are added to arena
 	StorageMetrics metrics;
@@ -4130,7 +4129,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		}
 
 		if (shard->shardVersion != invalidVersion) {
-			wait(data->durableVersion.whenAtLeast(shard->shardVersion));
+			wait(data->durableVersion.whenAtLeast(shard->shardVersion + 1));
 		}
 		TraceEvent(SevInfo, "ShardVersion")
 		    .detail("Version", shard->shardVersion)
@@ -4463,6 +4462,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 AddingShard::AddingShard(StorageServer* server, KeyRangeRef const& keys, Version version)
   : keys(keys), server(server), transferredVersion(invalidVersion), phase(WaitPrevious), shardVersion(version) {
+	TraceEvent("AddingShard").detail("Begin", keys.begin).detail("End", keys.end).detail("Reason", "NewShard");
 	fetchClient = fetchKeys(server, this);
 }
 
@@ -4535,7 +4535,7 @@ void ShardInfo::addMutation(Version version, bool fromFetch, MutationRef const& 
 }
 
 enum ChangeServerKeysContext { CSK_UPDATE, CSK_RESTORE, CSK_ASSIGN_EMPTY };
-const char* changeServerKeysContextName[] = { "Update", "Restore" };
+const char* changeServerKeysContextName[] = { "Update", "Restore", "AssignEmpty" };
 
 void changeServerKeys(StorageServer* data,
                       const KeyRangeRef& keys,
@@ -4640,7 +4640,6 @@ void changeServerKeys(StorageServer* data,
 			data->addShard(ShardInfo::newNotAssigned(range));
 			data->watches.triggerRange(range.begin, range.end);
 		} else if (!dataAvailable) {
-			std::cout << "Data not available\n";
 			// Assigning a key range to SS. Adds shard in KVS.
 
 			TraceEvent("ChangeServerKeysAddShard", data->thisServerID)
@@ -4665,7 +4664,6 @@ void changeServerKeys(StorageServer* data,
 				}
 			}
 		} else {
-			std::cout << "Data already exists in SS.";
 			TraceEvent(SevDebug, "CSKDataAvailable").detail("Begin", range.begin).detail("End", range.end);
 			// Data already exist in SS.
 			changeNewestAvailable.emplace_back(range, latestVersion);
