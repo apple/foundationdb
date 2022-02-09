@@ -22,6 +22,7 @@
 
 #include <algorithm>
 #include <map>
+#include <numeric>
 
 #include "fdbserver/Knobs.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -171,7 +172,11 @@ class GetCommittedVersionQuorum {
 				throw;
 			} else if (self->totalRepliesReceived == self->cfis.size() && self->quorumVersion.canBeSet() &&
 			           !self->quorumVersion.isError()) {
-				if (self->replies.size() >= self->cfis.size() / 2 + 1) {
+				size_t nonTimeoutReplies =
+				    std::accumulate(self->replies.begin(), self->replies.end(), 0, [](int value, auto const& p) {
+					    return value + p.second.size();
+				    });
+				if (nonTimeoutReplies >= self->cfis.size() / 2 + 1) {
 					// Make sure to trigger the quorumVersion if a timeout
 					// occurred, a quorum disagree on the committed version, and
 					// there are no more incoming responses. Note that this means
