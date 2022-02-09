@@ -1134,7 +1134,7 @@ ACTOR Future<Void> waitOnCFVersion(Reference<GranuleMetadata> metadata,
 			if (DEBUG_BW_VERSION(original) && DEBUG_WAIT_VERSION_COMMITTED) {
 				fmt::print("WVC {0}:   got error {1} \n", original, e.name());
 			}
-			if (e.code() == error_code_operation_cancelled) {
+			if (e.code() == error_code_operation_cancelled || e.code() == error_code_change_feed_popped) {
 				throw e;
 			}
 
@@ -2324,6 +2324,9 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 						}
 					} catch (Error& e) {
 						// we can get change feed cancelled from whenAtLeast. This is effectively
+						if (e.code() == error_code_change_feed_popped) {
+							throw wrong_shard_server();
+						}
 						if (e.code() != error_code_change_feed_cancelled) {
 							throw e;
 						}

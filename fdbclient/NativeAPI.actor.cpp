@@ -8044,7 +8044,7 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 			}
 		} catch (Error& e) {
 			fmt::print("CFNA error {}\n", e.name());
-			if (e.code() == error_code_actor_cancelled) {
+			if (e.code() == error_code_actor_cancelled || e.code() == error_code_change_feed_popped) {
 				for (auto& it : results->storageData) {
 					if (it->debugGetReferenceCount() == 2) {
 						db->changeFeedUpdaters.erase(it->interfToken);
@@ -8052,7 +8052,11 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 				}
 				results->streams.clear();
 				results->storageData.clear();
-				results->refresh.sendError(change_feed_cancelled());
+				if (e.code() == error_code_change_feed_popped) {
+					results->refresh.sendError(change_feed_popped());
+				} else {
+					results->refresh.sendError(change_feed_cancelled());
+				}
 				throw;
 			}
 			// TODO REMOVE
