@@ -72,6 +72,7 @@ class ConfigBroadcasterImpl {
 		    broadcastInterface(broadcastInterface) {}
 	};
 
+	ConfigDBType configDBType;
 	std::map<ConfigKey, KnobValue> snapshot;
 	std::deque<VersionedConfigMutation> mutationHistory;
 	std::deque<VersionedConfigCommitAnnotation> annotationHistory;
@@ -231,6 +232,11 @@ class ConfigBroadcasterImpl {
 	ACTOR static Future<Void> registerNodeInternal(ConfigBroadcasterImpl* self,
 	                                               WorkerInterface w,
 	                                               Version lastSeenVersion) {
+		if (self->configDBType == ConfigDBType::SIMPLE) {
+			wait(success(retryBrokenPromise(w.configBroadcastInterface.ready, ConfigBroadcastReadyRequest{})));
+			return Void();
+		}
+
 		state NetworkAddress address = w.address();
 
 		// Ask the registering ConfigNode whether it has registered in the past.
@@ -373,12 +379,14 @@ public:
 	}
 
 	ConfigBroadcasterImpl(ConfigFollowerInterface const& cfi) : ConfigBroadcasterImpl() {
+		configDBType = ConfigDBType::SIMPLE;
 		coordinators = 1;
 		consumer = IConfigConsumer::createTestSimple(cfi, 0.5, Optional<double>{});
 		TraceEvent(SevDebug, "ConfigBroadcasterStartingConsumer", id).detail("Consumer", consumer->getID());
 	}
 
 	ConfigBroadcasterImpl(ServerCoordinators const& coordinators, ConfigDBType configDBType) : ConfigBroadcasterImpl() {
+		this->configDBType = configDBType;
 		this->coordinators = coordinators.configServers.size();
 		if (configDBType != ConfigDBType::DISABLED) {
 			if (configDBType == ConfigDBType::SIMPLE) {
