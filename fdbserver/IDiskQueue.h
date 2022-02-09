@@ -93,6 +93,8 @@ public:
 	                                           // that immediately followed this call
 
 	virtual StorageBytes getStorageBytes() const = 0;
+
+	virtual location TEST_getPoppedLocation() { throw unsupported_operation(); };
 };
 
 // InMemoryDiskQueue

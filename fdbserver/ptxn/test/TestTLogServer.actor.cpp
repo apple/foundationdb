@@ -571,8 +571,8 @@ ACTOR Future<Void> verifyReadStorageServer(std::shared_ptr<ptxn::test::TestDrive
 TEST_CASE("/fdbserver/ptxn/test/commit_peek") {
 	state ptxn::test::TestDriverOptions options(params);
 	state std::vector<Future<Void>> actors;
+	(const_cast<ServerKnobs*> SERVER_KNOBS)->TLOG_SPILL_THRESHOLD = 1500e6; // remove after implementing peek from disk
 	state std::shared_ptr<ptxn::test::TestDriverContext> pContext = ptxn::test::initTestDriverContext(options);
-	state const int NUM_COMMITS = 10;
 
 	for (const auto& group : pContext->tLogGroups) {
 		ptxn::test::print::print(group);
@@ -584,8 +584,8 @@ TEST_CASE("/fdbserver/ptxn/test/commit_peek") {
 	wait(startTLogServers(&actors, pContext, folder));
 
 	state ptxn::StorageTeamID storageTeamID = pContext->storageTeamIDs[0];
-	std::vector<Standalone<StringRef>> messages = wait(commitInject(pContext, storageTeamID, NUM_COMMITS));
-	wait(verifyPeek(pContext, storageTeamID, NUM_COMMITS));
+	std::vector<Standalone<StringRef>> messages = wait(commitInject(pContext, storageTeamID, pContext->numCommits));
+	wait(verifyPeek(pContext, storageTeamID, pContext->numCommits));
 	platform::eraseDirectoryRecursive(folder);
 	return Void();
 }
@@ -593,6 +593,7 @@ TEST_CASE("/fdbserver/ptxn/test/commit_peek") {
 TEST_CASE("/fdbserver/ptxn/test/run_storage_server") {
 	state ptxn::test::TestDriverOptions options(params);
 	state std::vector<Future<Void>> actors;
+	(const_cast<ServerKnobs*> SERVER_KNOBS)->TLOG_SPILL_THRESHOLD = 1500e6; // remove after implementing peek from disk
 	state std::shared_ptr<ptxn::test::TestDriverContext> pContext = ptxn::test::initTestDriverContext(options);
 
 	for (const auto& group : pContext->tLogGroups) {
@@ -680,14 +681,15 @@ TEST_CASE("/fdbserver/ptxn/test/lock_tlog") {
 ACTOR Future<std::pair<std::vector<Standalone<StringRef>>, std::vector<Version>>> commitInjectReturnVersions(
     std::shared_ptr<ptxn::test::TestDriverContext> pContext,
     ptxn::StorageTeamID storageTeamID,
-    int numCommits) {
+    int numCommits,
+    Version cur = 0) {
 	state ptxn::test::print::PrintTiming printTiming("tlog/commitInject");
 
 	state const ptxn::TLogGroupID tLogGroupID = pContext->storageTeamIDTLogGroupIDMapper.at(storageTeamID);
 	state std::shared_ptr<ptxn::TLogInterfaceBase> pInterface = pContext->getTLogLeaderByStorageTeamID(storageTeamID);
 	ASSERT(pInterface);
 
-	state Version currVersion = 0;
+	state Version currVersion = cur;
 	state Version prevVersion = currVersion;
 	state Version storageTeamVersion = -1;
 	increaseVersion(currVersion);
@@ -740,6 +742,7 @@ TEST_CASE("/fdbserver/ptxn/test/read_persisted_disk_on_tlog") {
 	state ptxn::test::TestDriverOptions options(params);
 	state std::vector<Future<Void>> actors;
 	(const_cast<ServerKnobs*> SERVER_KNOBS)->BUGGIFY_TLOG_STORAGE_MIN_UPDATE_INTERVAL = 0.5;
+	(const_cast<ServerKnobs*> SERVER_KNOBS)->TLOG_SPILL_THRESHOLD = 1500e6; // remove after implementing peek from disk
 	state std::shared_ptr<ptxn::test::TestDriverContext> pContext = ptxn::test::initTestDriverContext(options);
 
 	for (const auto& group : pContext->tLogGroups) {
@@ -789,29 +792,51 @@ TEST_CASE("/fdbserver/ptxn/test/pop_data") {
 	state ptxn::test::TestDriverOptions options(params);
 	state std::vector<Future<Void>> actors;
 	(const_cast<ServerKnobs*> SERVER_KNOBS)->BUGGIFY_TLOG_STORAGE_MIN_UPDATE_INTERVAL = 0.5;
+	(const_cast<ServerKnobs*> SERVER_KNOBS)->TLOG_SPILL_THRESHOLD = 1500e6; // disable spilling
+
 	state std::shared_ptr<ptxn::test::TestDriverContext> pContext = ptxn::test::initTestDriverContext(options);
 
 	for (const auto& group : pContext->tLogGroups) {
 		ptxn::test::print::print(group);
 	}
 	state ptxn::StorageTeamID storageTeamID = pContext->storageTeamIDs[0];
-
 	state std::string folder = "simfdb/" + deterministicRandom()->randomAlphaNumeric(10);
 	platform::createDirectory(folder);
 
-	wait(startTLogServers(&actors, pContext, folder, true));
+	wait(startTLogServers(&actors, pContext, folder));
 	state IKeyValueStore* d = pContext->kvStores[pContext->storageTeamIDTLogGroupIDMapper[storageTeamID]];
+	state IDiskQueue* q = pContext->diskQueues[pContext->storageTeamIDTLogGroupIDMapper[storageTeamID]];
 
 	state std::pair<std::vector<Standalone<StringRef>>, std::vector<Version>> res =
 	    wait(commitInjectReturnVersions(pContext, storageTeamID, pContext->numCommits));
 	state std::vector<Standalone<StringRef>> expectedMessages = res.first;
-	wait(verifyPeek(pContext, storageTeamID, pContext->numCommits));
+
+	// TODO: uncomment this once enable peek from disk
+	// wait(verifyPeek(pContext, storageTeamID, pContext->numCommits));
+
+	ASSERT(q->TEST_getPoppedLocation() == 0);
 
 	wait(pop(pContext,
 	         res.second.back(),
 	         storageTeamID,
 	         pContext->getTLogGroup(pContext->storageTeamIDTLogGroupIDMapper[storageTeamID])
 	             .storageTeams[storageTeamID][0]));
+
+	wait(delay(5.0)); // give some time for the updateStorageLoop to run
+
+	int totalSizeExcludeHeader = 0;
+	for (const auto& written : res.first) {
+		totalSizeExcludeHeader += written.size();
+	}
+	totalSizeExcludeHeader -= res.first.back().size(); // because poppedLocation record the start location
+
+	// finalPoppedLocation = written messages + page alignment overhead + page headers + spilledData(optional)
+	// thus assert on '>'.
+	// (note that the last message needs to be excluded because pop location use the start instead of end
+	// of a location) ref: https://github.com/apple/foundationdb/blob/4bf14e6/fdbserver/TLogServer.actor.cpp#L919
+	ASSERT(q->TEST_getPoppedLocation() > totalSizeExcludeHeader);
+
+	(const_cast<ServerKnobs*> SERVER_KNOBS)->TLOG_SPILL_THRESHOLD = 1500e6;
 	platform::eraseDirectoryRecursive(folder);
 	return Void();
 }
@@ -831,7 +856,7 @@ TEST_CASE("/fdbserver/ptxn/test/read_tlog_spilled") {
 	state std::string folder = "simfdb/" + deterministicRandom()->randomAlphaNumeric(10);
 	platform::createDirectory(folder);
 
-	wait(startTLogServers(&actors, pContext, folder, true));
+	wait(startTLogServers(&actors, pContext, folder));
 	state IKeyValueStore* d = pContext->kvStores[pContext->storageTeamIDTLogGroupIDMapper[storageTeamID]];
 
 	state std::pair<std::vector<Standalone<StringRef>>, std::vector<Version>> res =
@@ -882,7 +907,7 @@ TEST_CASE("/fdbserver/ptxn/test/read_tlog_not_spilled_with_default_threshold") {
 	state std::string folder = "simfdb/" + deterministicRandom()->randomAlphaNumeric(10);
 	platform::createDirectory(folder);
 
-	wait(startTLogServers(&actors, pContext, folder, true));
+	wait(startTLogServers(&actors, pContext, folder));
 	state IKeyValueStore* d = pContext->kvStores[pContext->storageTeamIDTLogGroupIDMapper[storageTeamID]];
 
 	state std::pair<std::vector<Standalone<StringRef>>, std::vector<Version>> res =

@@ -1364,6 +1364,7 @@ ACTOR Future<Void> updateStorage(TLogData* self) {
 		// nextVersion is the next to be read by SS, that is still on TLog
 		// this if means if there are some version will not be read by SS anymore but still persistent, then pop from
 		// disk queue.
+
 		if (nextVersion > logData->persistentDataVersion) {
 			wait(self->persistentDataCommitLock.take());
 			commitLockReleaser = FlowLock::Releaser(self->persistentDataCommitLock);
