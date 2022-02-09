@@ -227,6 +227,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( COMMIT_QUORUM_TIMEOUT,                    3.0 );
 	init( GET_GENERATION_QUORUM_TIMEOUT,            3.0 );
 	init( GET_KNOB_TIMEOUT,                         3.0 );
+	init( TIMEOUT_RETRY_UPPER_BOUND,               20.0 );
 
 	// Client Status Info
 	init(CSI_SAMPLING_PROBABILITY, -1.0);

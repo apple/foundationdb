@@ -172,7 +172,8 @@ class GetGenerationQuorum {
 			} catch (Error& e) {
 				if (e.code() == error_code_failed_to_reach_quorum) {
 					TEST(true); // Failed to reach quorum getting generation
-					wait(delayJittered(0.005 * (1 << retries)));
+					wait(delayJittered(
+					    std::clamp(0.005 * (1 << retries), 0.0, CLIENT_KNOBS->TIMEOUT_RETRY_UPPER_BOUND)));
 					++retries;
 					self->actors.clear(false);
 					self->seenGenerations.clear();
@@ -219,9 +220,9 @@ class PaxosConfigTransactionImpl {
 	Database cx;
 
 	ACTOR static Future<Optional<Value>> get(PaxosConfigTransactionImpl* self, Key key) {
+		state ConfigKey configKey = ConfigKey::decodeKey(key);
 		loop {
 			try {
-				state ConfigKey configKey = ConfigKey::decodeKey(key);
 				ConfigGeneration generation = wait(self->getGenerationQuorum.getGeneration());
 				// TODO: Load balance
 				ConfigTransactionGetReply reply =
@@ -237,6 +238,7 @@ class PaxosConfigTransactionImpl {
 				if (e.code() != error_code_timed_out && e.code() != error_code_broken_promise) {
 					throw;
 				}
+				self->reset();
 			}
 		}
 	}
@@ -280,7 +282,9 @@ class PaxosConfigTransactionImpl {
 		// TODO: Improve this:
 		TraceEvent("ConfigIncrementOnError").error(e).detail("NumRetries", self->numRetries);
 		if (e.code() == error_code_transaction_too_old || e.code() == error_code_not_committed) {
-			wait(delay((1 << self->numRetries++) * 0.01 * deterministicRandom()->random01()));
+			wait(delay(std::clamp((1 << self->numRetries++) * 0.01 * deterministicRandom()->random01(),
+			                      0.0,
+			                      CLIENT_KNOBS->TIMEOUT_RETRY_UPPER_BOUND)));
 			self->reset();
 			return Void();
 		}
