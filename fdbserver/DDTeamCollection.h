@@ -1984,7 +1984,7 @@ public:
 	// processingWiggle and processingUnhealthy indicate that some servers are going to be removed.
 	Future<Void> waitUntilHealthy(double extraDelay = 0, bool waitWiggle = false);
 
-	bool isCorrectDC(TCServerInfo* server) {
+	bool isCorrectDC(TCServerInfo* server) const {
 		return (includedDCs.empty() ||
 		        std::find(includedDCs.begin(), includedDCs.end(), server->lastKnownInterface.locality.dcId()) !=
 		            includedDCs.end());
