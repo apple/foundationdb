@@ -202,7 +202,6 @@ class ConfigNodeImpl {
 		}
 		state Version committedVersion =
 		    wait(map(getGeneration(self), [](auto const& gen) { return gen.committedVersion; }));
-		// TODO: Reenable this when running the ConfigIncrement workload with reboot=false
 		if (committedVersion < req.mostRecentVersion) {
 			// Handle a very rare case where a ConfigNode loses data between
 			// responding with a committed version and responding to the
@@ -577,6 +576,14 @@ class ConfigNodeImpl {
 
 	ACTOR static Future<Void> serve(ConfigNodeImpl* self, ConfigBroadcastInterface const* cbi, bool infinite) {
 		loop {
+			// Normally, the ConfigBroadcaster will first send a
+			// ConfigBroadcastRegisteredRequest, followed by a
+			// ConfigBroadcastReadyRequest. However, if the cluster controller
+			// the broadcaster is running on fails in between sending these two
+			// messages, the new broadcaster may need to resend its registered
+			// request. So we need to listen for either message in a loop to
+			// guarantee no pattern of failure will result in a stuck
+			// ConfigNode.
 			choose {
 				when(state ConfigBroadcastRegisteredRequest req = waitNext(cbi->registered.getFuture())) {
 					bool isRegistered = wait(registered(self));
