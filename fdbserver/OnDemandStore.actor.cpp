@@ -20,6 +20,7 @@
 
 #include "fdbserver/OnDemandStore.h"
 #include "flow/actorcompiler.h" // must be last include
+#include "flow/flow.h"
 
 ACTOR static Future<Void> onErr(Future<Future<Void>> e) {
 	Future<Void> f = wait(e);
@@ -68,11 +69,13 @@ void OnDemandStore::dispose() {
 	if (store) {
 		store->dispose();
 		store = nullptr;
+		err = Promise<Future<Void>>();
 	}
 }
 void OnDemandStore::close() {
 	if (store) {
 		store->close();
 		store = nullptr;
+		err = Promise<Future<Void>>();
 	}
 }

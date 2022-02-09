@@ -254,6 +254,8 @@ public:
 	void check(V T::*member, Optional<E> value) const {
 		return readFrom.checkImmediate(member, value);
 	}
+	void close() const { readFrom.close(); }
+	Future<Void> onClosed() const { return readFrom.onClosed(); }
 };
 
 class BroadcasterToLocalConfigEnvironment {
@@ -421,6 +423,8 @@ public:
 		return writeTo.rollforward(rollback, lastKnownCommitted, target, mutations, annotations);
 	}
 	Future<Void> getError() const { return writeTo.getError(); }
+	void close() const { writeTo.close(); }
+	Future<Void> onClosed() const { return writeTo.onClosed(); }
 };
 
 class TransactionToLocalConfigEnvironment {
@@ -542,6 +546,9 @@ Future<Void> testRestartLocalConfig(UnitTestParameters params) {
 	wait(check(env, &TestKnobs::TEST_LONG, Optional<int64_t>{ 1 }));
 	wait(set(env, "class-A"_sr, "test_long"_sr, 2));
 	wait(check(env, &TestKnobs::TEST_LONG, Optional<int64_t>{ 2 }));
+	Future<Void> closed = env.onClosed();
+	env.close();
+	wait(closed);
 	return Void();
 }
 
@@ -555,6 +562,9 @@ Future<Void> testRestartLocalConfigAndChangeClass(UnitTestParameters params) {
 	wait(check(env, &TestKnobs::TEST_LONG, Optional<int64_t>{ 0 }));
 	wait(set(env, "class-B"_sr, "test_long"_sr, int64_t{ 2 }));
 	wait(check(env, &TestKnobs::TEST_LONG, Optional<int64_t>{ 2 }));
+	Future<Void> closed = env.onClosed();
+	env.close();
+	wait(closed);
 	return Void();
 }
 
@@ -575,6 +585,9 @@ Future<Void> testNewLocalConfigAfterCompaction(UnitTestParameters params) {
 	wait(check(env, &TestKnobs::TEST_LONG, Optional<int64_t>{ 1 }));
 	wait(set(env, "class-A"_sr, "test_long"_sr, 2));
 	wait(check(env, &TestKnobs::TEST_LONG, Optional<int64_t>{ 2 }));
+	Future<Void> closed = env.onClosed();
+	env.close();
+	wait(closed);
 	return Void();
 }
 
@@ -597,6 +610,9 @@ Future<Void> testSet(UnitTestParameters params) {
 	wait(env.setup(ConfigClassSet({ "class-A"_sr })));
 	wait(set(env, "class-A"_sr, "test_long"_sr, int64_t{ 1 }));
 	wait(check(env, &TestKnobs::TEST_LONG, Optional<int64_t>{ 1 }));
+	Future<Void> closed = env.onClosed();
+	env.close();
+	wait(closed);
 	return Void();
 }
 
@@ -614,6 +630,9 @@ Future<Void> testAtomicSet(UnitTestParameters params) {
 	ASSERT(restarted);
 	wait(env.restartLocalConfig("class-A"));
 	wait(check(env, &TestKnobs::TEST_ATOMIC_LONG, Optional<int64_t>{ 1 }));
+	Future<Void> closed = env.onClosed();
+	env.close();
+	wait(closed);
 	return Void();
 }
 
@@ -624,6 +643,9 @@ Future<Void> testClear(UnitTestParameters params) {
 	wait(set(env, "class-A"_sr, "test_long"_sr, int64_t{ 1 }));
 	wait(clear(env, "class-A"_sr, "test_long"_sr));
 	wait(check(env, &TestKnobs::TEST_LONG, Optional<int64_t>{}));
+	Future<Void> closed = env.onClosed();
+	env.close();
+	wait(closed);
 	return Void();
 }
 
@@ -648,6 +670,9 @@ Future<Void> testAtomicClear(UnitTestParameters params) {
 	}
 	ASSERT(restarted);
 	wait(check(env, &TestKnobs::TEST_ATOMIC_LONG, Optional<int64_t>{}));
+	auto closed = env.onClosed();
+	env.close();
+	wait(closed);
 	return Void();
 }
 
@@ -659,6 +684,9 @@ Future<Void> testGlobalSet(UnitTestParameters params) {
 	wait(check(env, &TestKnobs::TEST_LONG, Optional<int64_t>{ 1 }));
 	wait(set(env, "class-A"_sr, "test_long"_sr, int64_t{ 10 }));
 	wait(check(env, &TestKnobs::TEST_LONG, Optional<int64_t>{ 10 }));
+	auto closed = env.onClosed();
+	env.close();
+	wait(closed);
 	return Void();
 }
 
@@ -671,6 +699,9 @@ Future<Void> testIgnore(UnitTestParameters params) {
 		when(wait(delay(5))) {}
 		when(wait(check(env, &TestKnobs::TEST_LONG, Optional<int64_t>{ 1 }))) { ASSERT(false); }
 	}
+	auto closed = env.onClosed();
+	env.close();
+	wait(closed);
 	return Void();
 }
 
@@ -682,6 +713,9 @@ Future<Void> testCompact(UnitTestParameters params) {
 	wait(compact(env));
 	wait(check(env, &TestKnobs::TEST_LONG, Optional<int64_t>{ 1 }));
 	wait(set(env, "class-A"_sr, "test_long"_sr, int64_t{ 2 }));
+	auto closed = env.onClosed();
+	env.close();
+	wait(closed);
 	wait(check(env, &TestKnobs::TEST_LONG, Optional<int64_t>{ 2 }));
 	return Void();
 }
@@ -695,6 +729,9 @@ Future<Void> testChangeBroadcaster(UnitTestParameters params) {
 	env.changeBroadcaster();
 	wait(set(env, "class-A"_sr, "test_long"_sr, int64_t{ 2 }));
 	wait(check(env, &TestKnobs::TEST_LONG, Optional<int64_t>{ 2 }));
+	auto closed = env.onClosed();
+	env.close();
+	wait(closed);
 	return Void();
 }
 
@@ -715,6 +752,9 @@ ACTOR Future<Void> testGetConfigClasses(UnitTestParameters params, bool doCompac
 	}
 	Standalone<VectorRef<KeyRef>> configClasses = wait(env.getConfigClasses());
 	ASSERT(matches(configClasses, { "class-A"_sr, "class-B"_sr }));
+	auto closed = env.onClosed();
+	env.close();
+	wait(closed);
 	return Void();
 }
 
@@ -733,6 +773,9 @@ ACTOR Future<Void> testGetKnobs(UnitTestParameters params, bool global, bool doC
 	Standalone<VectorRef<KeyRef>> knobNames =
 	    wait(waitOrError(env.getKnobNames(configClass.castTo<KeyRef>()), env.getError()));
 	ASSERT(matches(knobNames, { "test_long"_sr, "test_int"_sr }));
+	auto closed = env.onClosed();
+	env.close();
+	wait(closed);
 	return Void();
 }
 
@@ -779,6 +822,9 @@ TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/ConflictingOverrides") {
 	wait(set(env, "class-A"_sr, "test_long"_sr, int64_t{ 1 }));
 	wait(set(env, "class-B"_sr, "test_long"_sr, int64_t{ 10 }));
 	env.check(&TestKnobs::TEST_LONG, Optional<int64_t>{ 10 });
+	auto closed = env.onClosed();
+	env.close();
+	wait(closed);
 	return Void();
 }
 
@@ -787,6 +833,9 @@ TEST_CASE("/fdbserver/ConfigDB/LocalConfiguration/Manual") {
 	wait(env.setup(ConfigClassSet({ "class-A"_sr })));
 	wait(set(env, "class-A"_sr, "test_long"_sr, int64_t{ 1 }));
 	env.check(&TestKnobs::TEST_LONG, Optional<int64_t>{ 1000 });
+	auto closed = env.onClosed();
+	env.close();
+	wait(closed);
 	return Void();
 }
 
@@ -861,6 +910,9 @@ TEST_CASE("/fdbserver/ConfigDB/TransactionToLocalConfig/RestartNode") {
 	wait(set(env, "class-A"_sr, "test_long"_sr, int64_t{ 1 }));
 	env.restartNode();
 	wait(check(env, &TestKnobs::TEST_LONG, Optional<int64_t>{ 1 }));
+	auto closed = env.onClosed();
+	env.close();
+	wait(closed);
 	return Void();
 }
 
@@ -894,6 +946,9 @@ TEST_CASE("/fdbserver/ConfigDB/Transaction/Set") {
 	wait(env.setup());
 	wait(set(env, "class-A"_sr, "test_long"_sr, int64_t{ 1 }));
 	wait(check(env, "class-A"_sr, "test_long"_sr, Optional<int64_t>{ 1 }));
+	auto closed = env.onClosed();
+	env.close();
+	wait(closed);
 	return Void();
 }
 
@@ -903,6 +958,9 @@ TEST_CASE("/fdbserver/ConfigDB/Transaction/Clear") {
 	wait(set(env, "class-A"_sr, "test_long"_sr, int64_t{ 1 }));
 	wait(clear(env, "class-A"_sr, "test_long"_sr));
 	wait(check(env, "class-A"_sr, "test_long"_sr, Optional<int64_t>{}));
+	auto closed = env.onClosed();
+	env.close();
+	wait(closed);
 	return Void();
 }
 
@@ -911,6 +969,9 @@ TEST_CASE("/fdbserver/ConfigDB/Transaction/Restart") {
 	wait(set(env, "class-A"_sr, "test_long"_sr, int64_t{ 1 }));
 	env.restartNode();
 	wait(check(env, "class-A"_sr, "test_long"_sr, Optional<int64_t>{ 1 }));
+	auto closed = env.onClosed();
+	env.close();
+	wait(closed);
 	return Void();
 }
 
@@ -921,6 +982,9 @@ TEST_CASE("/fdbserver/ConfigDB/Transaction/CompactNode") {
 	wait(check(env, "class-A"_sr, "test_long"_sr, Optional<int64_t>{ 1 }));
 	wait(set(env, "class-A"_sr, "test_long"_sr, int64_t{ 2 }));
 	wait(check(env, "class-A"_sr, "test_long"_sr, Optional<int64_t>{ 2 }));
+	auto closed = env.onClosed();
+	env.close();
+	wait(closed);
 	return Void();
 }
 
@@ -937,6 +1001,9 @@ TEST_CASE("/fdbserver/ConfigDB/Transaction/Rollforward") {
 	wait(rollforward(env, Optional<Version>{}, 0, 2, mutations, annotations));
 	wait(check(env, "class-A"_sr, "test_long_v1"_sr, Optional<int64_t>{ 1 }));
 	wait(check(env, "class-B"_sr, "test_long_v2"_sr, Optional<int64_t>{ 2 }));
+	auto closed = env.onClosed();
+	env.close();
+	wait(closed);
 	return Void();
 }
 
@@ -955,6 +1022,9 @@ TEST_CASE("/fdbserver/ConfigDB/Transaction/RollforwardWithExistingMutation") {
 	wait(check(env, "class-A"_sr, "test_long"_sr, Optional<int64_t>{ 1 }));
 	wait(check(env, "class-A"_sr, "test_long_v2"_sr, Optional<int64_t>{ 2 }));
 	wait(check(env, "class-A"_sr, "test_long_v3"_sr, Optional<int64_t>{ 3 }));
+	auto closed = env.onClosed();
+	env.close();
+	wait(closed);
 	return Void();
 }
 
@@ -970,6 +1040,9 @@ TEST_CASE("/fdbserver/ConfigDB/Transaction/RollforwardWithInvalidMutation") {
 	wait(rollforward(env, Optional<Version>{}, 0, 5, mutations, annotations));
 	wait(check(env, "class-A"_sr, "test_long_v1"_sr, Optional<int64_t>{ 1 }));
 	wait(check(env, "class-A"_sr, "test_long_v10"_sr, Optional<int64_t>{}));
+	auto closed = env.onClosed();
+	env.close();
+	wait(closed);
 	return Void();
 }
 
@@ -984,6 +1057,9 @@ TEST_CASE("/fdbserver/ConfigDB/Transaction/RollbackThenRollforward") {
 	wait(rollforward(env, 0, 1, 1, mutations, annotations));
 	wait(check(env, "class-A"_sr, "test_long"_sr, Optional<int64_t>{}));
 	wait(check(env, "class-B"_sr, "test_long_v1"_sr, Optional<int64_t>{ 2 }));
+	auto closed = env.onClosed();
+	env.close();
+	wait(closed);
 	return Void();
 }
 
@@ -1025,5 +1101,8 @@ TEST_CASE("/fdbserver/ConfigDB/Transaction/BadRangeRead") {
 	} catch (Error& e) {
 		ASSERT_EQ(e.code(), error_code_invalid_config_db_range_read);
 	}
+	auto closed = env.onClosed();
+	env.close();
+	wait(closed);
 	return Void();
 }
