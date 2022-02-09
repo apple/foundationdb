@@ -1427,6 +1427,29 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		writeThread->post(a);
 		return res;
 	}
+
+	// Delete a checkpoint.
+	Future<Void> deleteCheckpoint(const CheckpointMetaData& checkpoint) override {
+		if (checkpoint.format == RocksDBColumnFamily) {
+			ASSERT(checkpoint.rocksCF.present());
+			const RocksDBColumnFamilyCheckpoint& rocksCF = checkpoint.rocksCF.get();
+			std::unordered_set<std::string> dirs;
+			for (const LiveFileMetaData& file : rocksCF.sstFiles) {
+				dirs.insert(file.db_path);
+			}
+			for (const std::string dir : dirs) {
+				platform::eraseDirectoryRecursive(dir);
+				TraceEvent("DeleteCheckpointRemovedDir", id)
+				    .detail("CheckpointID", checkpoint.checkpointID)
+				    .detail("Dir", dir);
+			}
+		} else if (checkpoint.format == RocksDBSSTFile) {
+			throw not_implemented();
+		} else {
+			throw internal_error();
+		}
+		return Void();
+	}
 };
 
 } // namespace

@@ -268,6 +268,10 @@ struct StorageServerDisk {
 
 	Future<Void> restore(const CheckpointMetaData& checkpoint) { return storage->restore(checkpoint); }
 
+	Future<Void> deleteCheckpoint(const CheckpointMetaData& checkpoint) {
+		return storage->deleteCheckpoint(checkpoint);
+	}
+
 	KeyValueStoreType getKeyValueStoreType() const { return storage->getType(); }
 	StorageBytes getStorageBytes() const { return storage->getStorageBytes(); }
 	std::tuple<size_t, size_t, size_t> getSize() const { return storage->getSize(); }
@@ -1697,41 +1701,24 @@ ACTOR Future<Void> deleteCheckpointQ(StorageServer* self, Version version, Check
 	wait(self->durableVersion.whenAtLeast(version));
 
 	TraceEvent("DeleteCheckpointBegin", self->thisServerID).detail("Checkpoint", checkpoint.toString());
-	state Key persistCheckpointKey(persistCheckpointKeys.begin.toString() + checkpoint.checkpointID.toString());
-	state Key pendingCheckpointKey(persistPendingCheckpointKeys.begin.toString() + checkpoint.checkpointID.toString());
+
+	self->checkpoints.erase(checkpoint.checkpointID);
 
 	try {
-		if (checkpoint.format == RocksDBColumnFamily) {
-			ASSERT(checkpoint.rocksCF.present());
-			self->checkpoints.erase(checkpoint.checkpointID);
-			const RocksDBColumnFamilyCheckpoint& rocksCF = checkpoint.rocksCF.get();
-			std::unordered_set<std::string> dirs;
-			for (const LiveFileMetaData& file : rocksCF.sstFiles) {
-				dirs.insert(file.db_path);
-			}
-			for (const std::string dir : dirs) {
-				platform::eraseDirectoryRecursive(dir);
-				TraceEvent("DeleteCheckpointRemovedDir", self->thisServerID)
-				    .detail("CheckpointID", checkpoint.checkpointID)
-				    .detail("Dir", dir);
-			}
-
-			// Remove the checkpoint record.
-		} else if (checkpoint.format == RocksDBSSTFile) {
-			throw not_implemented();
-		} else {
-			throw internal_error();
-		}
-		Version version = self->data().getLatestVersion();
-		auto& mLV = self->addVersionToMutationLog(version);
-		self->addMutationToMutationLog(
-		    mLV, MutationRef(MutationRef::ClearRange, pendingCheckpointKey, keyAfter(pendingCheckpointKey)));
-		self->addMutationToMutationLog(
-		    mLV, MutationRef(MutationRef::ClearRange, persistCheckpointKey, keyAfter(persistCheckpointKey)));
+		wait(self->storage.deleteCheckpoint(checkpoint));
 	} catch (Error& e) {
 		// TODO: Handle errors more gracefully.
 		throw;
 	}
+
+	state Key persistCheckpointKey(persistCheckpointKeys.begin.toString() + checkpoint.checkpointID.toString());
+	state Key pendingCheckpointKey(persistPendingCheckpointKeys.begin.toString() + checkpoint.checkpointID.toString());
+	Version version = self->data().getLatestVersion();
+	auto& mLV = self->addVersionToMutationLog(version);
+	self->addMutationToMutationLog(
+	    mLV, MutationRef(MutationRef::ClearRange, pendingCheckpointKey, keyAfter(pendingCheckpointKey)));
+	self->addMutationToMutationLog(
+	    mLV, MutationRef(MutationRef::ClearRange, persistCheckpointKey, keyAfter(persistCheckpointKey)));
 
 	return Void();
 }

@@ -202,13 +202,7 @@ endif()
 
 add_flow_target(STATIC_LIBRARY NAME fdbclient SRCS ${FDBCLIENT_SRCS} ADDL_SRCS ${options_srcs})
 add_dependencies(fdbclient fdboptions)
-# if (WITH_ROCKSDB_EXPERIMENTAL)
-# add_dependencies(fdbclient rocksdb)
-#   target_include_directories(fdbclient PUBLIC ${ROCKSDB_INCLUDE_DIR})
-#   target_link_libraries(fdbclient PUBLIC fdbrpc msgpack ${ROCKSDB_LIBRARIES})
-# else()
 target_link_libraries(fdbclient PUBLIC fdbrpc msgpack)
-# endif()
 
 # Create a separate fdbclient library with sampling enabled. This lets
 # fdbserver retain sampling functionality in client code while disabling

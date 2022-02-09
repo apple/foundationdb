@@ -109,6 +109,9 @@ public:
 	// Restore from a checkpoint.
 	virtual Future<Void> restore(const CheckpointMetaData& checkpoint) { throw not_implemented(); }
 
+	// Delete a checkpoint.
+	virtual Future<Void> deleteCheckpoint(const CheckpointMetaData& checkpoint) { throw not_implemented(); }
+
 	/*
 	Concurrency contract
 	    Causal consistency:
