@@ -228,7 +228,7 @@ class PaxosConfigConsumerImpl {
 	ACTOR static Future<Version> getCommittedVersion(PaxosConfigConsumerImpl* self) {
 		QuorumVersion quorumVersion = wait(self->getCommittedVersionQuorum.getCommittedVersion());
 		if (!quorumVersion.isQuorum) {
-			throw config_node_no_quorum();
+			throw failed_to_reach_quorum();
 		}
 		return quorumVersion.versions.lastCommitted;
 	}
@@ -281,7 +281,7 @@ class PaxosConfigConsumerImpl {
 				wait(self->getCommittedVersionQuorum.complete());
 				break;
 			} catch (Error& e) {
-				if (e.code() == error_code_config_node_no_quorum) {
+				if (e.code() == error_code_failed_to_reach_quorum) {
 					wait(self->getCommittedVersionQuorum.complete());
 				} else if (e.code() != error_code_timed_out && e.code() != error_code_broken_promise) {
 					throw;
@@ -340,9 +340,9 @@ class PaxosConfigConsumerImpl {
 				wait(delayJittered(self->pollingInterval));
 			} catch (Error& e) {
 				if (e.code() == error_code_version_already_compacted || e.code() == error_code_timed_out ||
-				    e.code() == error_code_config_node_no_quorum) {
+				    e.code() == error_code_failed_to_reach_quorum) {
 					TEST(true); // PaxosConfigConsumer get version_already_compacted error
-					if (e.code() == error_code_config_node_no_quorum) {
+					if (e.code() == error_code_failed_to_reach_quorum) {
 						try {
 							wait(self->getCommittedVersionQuorum.complete());
 						} catch (Error& e) {
