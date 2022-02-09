@@ -4515,6 +4515,15 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	//  This allows adding->start() to be called inline with CSK.
 	wait(data->coreStarted.getFuture() && delay(0));
 
+	// On SS Reboot, durableVersion == latestVersion, so any mutations we add to the mutation log would be skipped if
+	// added before latest version advances.
+	// To ensure this doesn't happen, we wait for version to increase by one if this fetchKeys was initiated by a
+	// changeServerKeys from restoreDurableState
+	if (data->version.get() == data->durableVersion.get()) {
+		wait(data->version.whenAtLeast(data->version.get() + 1));
+		wait(delay(0));
+	}
+
 	try {
 		DEBUG_KEY_RANGE("fetchKeysBegin", data->version.get(), shard->keys, data->thisServerID);
 
