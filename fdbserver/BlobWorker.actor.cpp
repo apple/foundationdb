@@ -826,10 +826,11 @@ ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bw
                                                     int64_t versionsSinceLastSnapshot) {
 
 	BlobFileIndex lastDeltaIdx = wait(lastDeltaBeforeSnapshot);
+	state Version reSnapshotVersion = lastDeltaIdx.version;
 	while (!bwData->statusStreamInitialized) {
 		wait(bwData->currentManagerStatusStream.onChange());
 	}
-	state Version reSnapshotVersion = lastDeltaIdx.version;
+
 	wait(delay(0, TaskPriority::BlobWorkerUpdateFDB));
 
 	if (BW_DEBUG) {
