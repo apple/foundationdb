@@ -2139,7 +2139,7 @@ ACTOR Future<Void> waitForVersion(Reference<GranuleMetadata> metadata, Version v
 	return Void();
 }
 
-ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, BlobGranuleFileRequest req) {
+ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, BlobGranuleFileRequest req) {
 	if (BW_REQUEST_DEBUG || DEBUG_BW_WAIT_VERSION == req.readVersion) {
 		fmt::print("BW {0} processing blobGranuleFileRequest for range [{1} - {2}) @ {3}\n",
 		           bwData->id.toString(),
@@ -2459,6 +2459,27 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 			req.reply.sendError(e);
 		} else {
 			throw e;
+		}
+	}
+	return Void();
+}
+
+ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, BlobGranuleFileRequest req) {
+	choose {
+		when(wait(doBlobGranuleFileRequest(bwData, req))) {}
+		when(wait(delay(SERVER_KNOBS->BLOB_WORKER_REQUEST_TIMEOUT))) {
+			TEST(true); // Blob Worker request timeout hit
+			if (BW_DEBUG) {
+				fmt::print("BW {0} request [{1} - {2}) @ {3} timed out, sending WSS\n",
+				           bwData->id.toString().substr(0, 5),
+				           req.keyRange.begin.printable(),
+				           req.keyRange.end.printable(),
+				           req.readVersion);
+			}
+			--bwData->stats.activeReadRequests;
+			++bwData->stats.granuleRequestTimeouts;
+			// return wrong_shard_server because it's possible that someone else actually owns the granule now
+			req.reply.sendError(wrong_shard_server());
 		}
 	}
 	return Void();

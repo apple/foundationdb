@@ -748,6 +748,7 @@ public:
 	double BG_PRUNE_TIMEOUT;
 
 	double BLOB_WORKER_TIMEOUT; // Blob Manager's reaction time to a blob worker failure
+	double BLOB_WORKER_REQUEST_TIMEOUT; // Blob Worker's server-side request timeout
 	double BLOB_WORKERLIST_FETCH_INTERVAL;
 
 	ServerKnobs(Randomize, ClientKnobs*, IsSimulated);
