@@ -1545,7 +1545,17 @@ public:
 			T leftBase = leftBaseIndex == -1 ? cache->lowerBound : get(cache->get(leftBaseIndex));
 			T rightBase = rightBaseIndex == -1 ? cache->upperBound : get(cache->get(rightBaseIndex));
 
-			int common = leftBase.getCommonPrefixLen(rightBase, skipLen);
+			// If seek has reached a non-edge node then whatever bytes the left and right bases
+			// have in common are definitely in common with k.  However, for an edge node there
+			// is no guarantee, as one of the bases will be the lower or upper decode boundary
+			// and it is possible to add elements to the DeltaTree beyond those boundaries.
+			int common;
+			if (leftBaseIndex == -1 || rightBaseIndex == -1) {
+				common = 0;
+			} else {
+				common = leftBase.getCommonPrefixLen(rightBase, skipLen);
+			}
+
 			int commonWithLeftParent = k.getCommonPrefixLen(leftBase, common);
 			int commonWithRightParent = k.getCommonPrefixLen(rightBase, common);
 			bool borrowFromLeft = commonWithLeftParent >= commonWithRightParent;
