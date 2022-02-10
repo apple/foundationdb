@@ -8615,7 +8615,7 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/IntIntPair") {
 	DeltaTree<IntIntPair>::Mirror r(tree, &lowerBound, &upperBound);
 
 	DeltaTree2<IntIntPair>* tree2 = (DeltaTree2<IntIntPair>*)new uint8_t[bufferSize];
-	int builtSize2 = tree2->build(bufferSize, &items[0], &items[items.size()], &lowerBound, &upperBound);
+	int builtSize2 = tree2->build(bufferSize, &items[0], &items[0] + items.size(), &lowerBound, &upperBound);
 	ASSERT(builtSize2 <= bufferSize);
 	DeltaTree2<IntIntPair>::DecodeCache cache(lowerBound, upperBound);
 	DeltaTree2<IntIntPair>::Cursor cur2(&cache, tree2);
