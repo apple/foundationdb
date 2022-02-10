@@ -1577,7 +1577,7 @@ public:
 		return Void(); // Don't ignore failures
 	}
 
-	ACTOR static Future<Void> waitForAllDataRemoved(DDTeamCollection* teams,
+	ACTOR static Future<Void> waitForAllDataRemoved(DDTeamCollection const* teams,
 	                                                Database cx,
 	                                                UID serverID,
 	                                                Version addedVersion) {
@@ -2981,7 +2981,7 @@ bool DDTeamCollection::isMachineHealthy(Reference<TCMachineInfo> const& machine)
 	return false;
 }
 
-bool DDTeamCollection::teamContainsFailedServer(Reference<TCTeamInfo> team) {
+bool DDTeamCollection::teamContainsFailedServer(Reference<TCTeamInfo> team) const {
 	auto ssis = team->getLastKnownServerInterfaces();
 	for (const auto& ssi : ssis) {
 		AddressExclusion addr(ssi.address().ip, ssi.address().port);
@@ -3074,7 +3074,7 @@ Future<Void> DDTeamCollection::storageServerFailureTracker(TCServerInfo* server,
 	return DDTeamCollectionImpl::storageServerFailureTracker(this, server, cx, status, addedVersion);
 }
 
-Future<Void> DDTeamCollection::waitForAllDataRemoved(Database cx, UID serverID, Version addedVersion) {
+Future<Void> DDTeamCollection::waitForAllDataRemoved(Database cx, UID serverID, Version addedVersion) const {
 	return DDTeamCollectionImpl::waitForAllDataRemoved(this, cx, serverID, addedVersion);
 }
 

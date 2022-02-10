@@ -531,7 +531,7 @@ public:
 
 	Future<Void> removeWrongStoreType();
 
-	bool teamContainsFailedServer(Reference<TCTeamInfo> team);
+	bool teamContainsFailedServer(Reference<TCTeamInfo> team) const;
 
 	// NOTE: this actor returns when the cluster is healthy and stable (no server is expected to be removed in a period)
 	// processingWiggle and processingUnhealthy indicate that some servers are going to be removed.
@@ -549,7 +549,7 @@ public:
 	                                         ServerStatus* status,
 	                                         Version addedVersion);
 
-	Future<Void> waitForAllDataRemoved(Database cx, UID serverID, Version addedVersion);
+	Future<Void> waitForAllDataRemoved(Database cx, UID serverID, Version addedVersion) const;
 
 	Future<Void> machineTeamRemover();
 
