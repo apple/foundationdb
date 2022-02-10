@@ -1066,8 +1066,10 @@ ACTOR static Future<Void> backgroundGrvUpdater(DatabaseContext* cx) {
 					wait(tr.onError(e));
 				}
 			} else {
-				wait(delay(0.001 + std::min(CLIENT_KNOBS->MAX_PROXY_CONTACT_LAG - (curTime - lastProxyTime),
-				                            (CLIENT_KNOBS->MAX_VERSION_CACHE_LAG - grvDelay) - (curTime - lastTime))));
+				wait(
+				    delay(std::max(0.001,
+				                   std::min(CLIENT_KNOBS->MAX_PROXY_CONTACT_LAG - (curTime - lastProxyTime),
+				                            (CLIENT_KNOBS->MAX_VERSION_CACHE_LAG - grvDelay) - (curTime - lastTime)))));
 			}
 		}
 	} catch (Error& e) {

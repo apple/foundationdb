@@ -217,6 +217,14 @@ struct SidebandSingleWorkload : TestWorkload {
 						            tr.getReadVersion().get()); // will assert that ReadVersion is set
 						++self->consistencyErrors;
 					} else if (val.get() != LiteralStringRef("deadbeef")) {
+						// If we read something NOT "deadbeef" and there was no commit_unknown_result,
+						// the cache somehow read a stale version of our key
+						if (message.commitVersion != invalidVersion) {
+							TraceEvent(SevError, "CausalConsistencyError2", self->interf.id())
+							    .detail("MessageKey", messageKey.toString().c_str());
+							++self->consistencyErrors;
+							break;
+						}
 						// check again without cache, and if it's the same, that's expected
 						state Transaction tr2(cx);
 						state Optional<Value> val2;
@@ -230,7 +238,7 @@ struct SidebandSingleWorkload : TestWorkload {
 							}
 						}
 						if (val != val2) {
-							TraceEvent(SevError, "CausalConsistencyError2", self->interf.id())
+							TraceEvent(SevError, "CausalConsistencyError3", self->interf.id())
 							    .detail("MessageKey", messageKey.toString().c_str())
 							    .detail("Val1", val)
 							    .detail("Val2", val2)

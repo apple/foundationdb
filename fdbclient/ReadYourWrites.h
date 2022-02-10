@@ -44,8 +44,6 @@ struct ReadYourWritesTransactionOptions {
 	int maxRetries;
 	int snapshotRywEnabled;
 	bool bypassUnreadable : 1;
-	bool useGrvCache : 1;
-	bool skipGrvCache : 1;
 
 	ReadYourWritesTransactionOptions() {}
 	explicit ReadYourWritesTransactionOptions(Transaction const& tr);
