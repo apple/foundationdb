@@ -741,7 +741,7 @@ public:
 						lastOptimal = optimal;
 						self->optimalTeamCount += optimal ? 1 : -1;
 
-						ASSERT(self->optimalTeamCount >= 0);
+						ASSERT_GE(self->optimalTeamCount, 0);
 						self->zeroOptimalTeams.set(self->optimalTeamCount == 0);
 					}
 
@@ -750,7 +750,7 @@ public:
 						// Update healthy team count when the team healthy changes
 						self->healthyTeamCount += healthy ? 1 : -1;
 
-						ASSERT(self->healthyTeamCount >= 0);
+						ASSERT_GE(self->healthyTeamCount, 0);
 						self->zeroHealthyTeams->set(self->healthyTeamCount == 0);
 
 						if (self->healthyTeamCount == 0) {
@@ -864,7 +864,7 @@ public:
 										// differently.
 										throw dd_cancelled();
 									}
-									ASSERT(tc->primary == t.primary);
+									ASSERT_EQ(tc->primary, t.primary);
 									// tc->traceAllInfo();
 									if (tc->server_info.count(t.servers[0])) {
 										auto& info = tc->server_info[t.servers[0]];
@@ -935,7 +935,7 @@ public:
 			self->priority_teams[team->getPriority()]--;
 			if (team->isHealthy()) {
 				self->healthyTeamCount--;
-				ASSERT(self->healthyTeamCount >= 0);
+				ASSERT_GE(self->healthyTeamCount, 0);
 
 				if (self->healthyTeamCount == 0) {
 					TraceEvent(SevWarn, "ZeroTeamsHealthySignalling", self->distributorId)
@@ -946,7 +946,7 @@ public:
 			}
 			if (lastOptimal) {
 				self->optimalTeamCount--;
-				ASSERT(self->optimalTeamCount >= 0);
+				ASSERT_GE(self->optimalTeamCount, 0);
 				self->zeroOptimalTeams.set(self->optimalTeamCount == 0);
 			}
 			throw;
@@ -1210,7 +1210,7 @@ public:
 							if (machineLocalityChanged) {
 								// First handle the impact on the machine of the server on the old locality
 								Reference<TCMachineInfo> machine = server->machine;
-								ASSERT(machine->serversOnMachine.size() >= 1);
+								ASSERT_GE(machine->serversOnMachine.size(), 1);
 								if (machine->serversOnMachine.size() == 1) {
 									// When server is the last server on the machine,
 									// remove the machine and the related machine team
@@ -1596,7 +1596,7 @@ public:
 					//     .detail("Server", serverID)
 					//     .detail("CanRemove", canRemove)
 					//     .detail("Shards", teams->shardsAffectedByTeamFailure->getNumberOfShards(serverID));
-					ASSERT(teams->shardsAffectedByTeamFailure->getNumberOfShards(serverID) >= 0);
+					ASSERT_GE(teams->shardsAffectedByTeamFailure->getNumberOfShards(serverID), 0);
 					if (canRemove && teams->shardsAffectedByTeamFailure->getNumberOfShards(serverID) == 0) {
 						return Void();
 					}
@@ -1683,7 +1683,7 @@ public:
 
 					// The team will be marked as a bad team
 					bool foundTeam = self->removeTeam(team);
-					ASSERT(foundTeam == true);
+					ASSERT(foundTeam);
 					// removeTeam() has side effect of swapping the last element to the current pos
 					// in the serverTeams vector in the machine team.
 					--teamIndex;
@@ -1770,7 +1770,7 @@ public:
 				ASSERT(st.isValid());
 				// The team will be marked as a bad team
 				bool foundTeam = self->removeTeam(st);
-				ASSERT(foundTeam == true);
+				ASSERT(foundTeam);
 				self->addTeam(st->getServers(), true, true);
 				TEST(true); // Marked team as a bad team
 
@@ -3294,7 +3294,7 @@ void DDTeamCollection::removeLaggingStorageServer(Key zoneId) {
 	auto iter = lagging_zones.find(zoneId);
 	ASSERT(iter != lagging_zones.end());
 	iter->second--;
-	ASSERT(iter->second >= 0);
+	ASSERT_GE(iter->second, 0);
 	if (iter->second == 0)
 		lagging_zones.erase(iter);
 	if (lagging_zones.size() <= std::max(1, configuration.storageTeamSize - 1) && disableFailingLaggingServers.get())
@@ -3363,7 +3363,7 @@ void DDTeamCollection::evaluateTeamQuality() const {
 	int teamCount = teams.size(), serverCount = allServers.size();
 	double teamsPerServer = (double)teamCount * configuration.storageTeamSize / serverCount;
 
-	ASSERT(serverCount == server_info.size());
+	ASSERT_EQ(serverCount, server_info.size());
 
 	int minTeams = std::numeric_limits<int>::max();
 	int maxTeams = std::numeric_limits<int>::min();
@@ -3426,7 +3426,7 @@ int DDTeamCollection::overlappingMembers(const std::vector<UID>& team) const {
 				usedIdx++;
 			}
 		}
-		ASSERT(matchingServers > 0);
+		ASSERT_GT(matchingServers, 0);
 		maxMatchingServers = std::max(maxMatchingServers, matchingServers);
 		if (maxMatchingServers == team.size()) {
 			return maxMatchingServers;
@@ -3461,7 +3461,7 @@ int DDTeamCollection::overlappingMachineMembers(std::vector<Standalone<StringRef
 				usedIdx++;
 			}
 		}
-		ASSERT(matchingServers > 0);
+		ASSERT_GT(matchingServers, 0);
 		maxMatchingServers = std::max(maxMatchingServers, matchingServers);
 		if (maxMatchingServers == team.size()) {
 			return maxMatchingServers;
@@ -3699,9 +3699,9 @@ void DDTeamCollection::rebuildMachineLocalityMap() {
 int DDTeamCollection::addBestMachineTeams(int machineTeamsToBuild) {
 	int addedMachineTeams = 0;
 
-	ASSERT(machineTeamsToBuild >= 0);
+	ASSERT_GE(machineTeamsToBuild, 0);
 	// The number of machines is always no smaller than the storageTeamSize in a correct configuration
-	ASSERT(machine_info.size() >= configuration.storageTeamSize);
+	ASSERT_GE(machine_info.size(), configuration.storageTeamSize);
 	// Future: Consider if we should overbuild more machine teams to
 	// allow machineTeamRemover() to get a more balanced machine teams per machine
 
@@ -3776,7 +3776,7 @@ int DDTeamCollection::addBestMachineTeams(int machineTeamsToBuild) {
 			if (!success) {
 				continue; // Try up to maxAttempts, since next time we may choose a different forcedAttributes
 			}
-			ASSERT(forcedAttributes.size() > 0);
+			ASSERT_GT(forcedAttributes.size(), 0);
 			team.push_back((UID*)machineLocalityMap.getObject(forcedAttributes[0]));
 
 			// selectReplicas() may NEVER return server not in server_info.
@@ -3785,7 +3785,7 @@ int DDTeamCollection::addBestMachineTeams(int machineTeamsToBuild) {
 			}
 
 			// selectReplicas() should always return a team with correct size. otherwise, it has a bug
-			ASSERT(team.size() == configuration.storageTeamSize);
+			ASSERT_EQ(team.size(), configuration.storageTeamSize);
 
 			int score = 0;
 			std::vector<Standalone<StringRef>> machineIDs;
@@ -4055,7 +4055,7 @@ std::pair<Reference<TCTeamInfo>, int> DDTeamCollection::getServerTeamWithMostPro
 int DDTeamCollection::getHealthyMachineTeamCount() const {
 	int healthyTeamCount = 0;
 	for (const auto& mt : machineTeams) {
-		ASSERT(mt->machines.size() == configuration.storageTeamSize);
+		ASSERT_EQ(mt->machines.size(), configuration.storageTeamSize);
 
 		if (isMachineTeamHealthy(*mt)) {
 			++healthyTeamCount;
@@ -4094,7 +4094,7 @@ bool DDTeamCollection::notEnoughTeamsForAServer() const {
 	// ideal_num_of_teams_per_server is (#teams * storageTeamSize) / #servers, which is
 	// (#servers * DESIRED_TEAMS_PER_SERVER * storageTeamSize) / #servers.
 	int targetTeamNumPerServer = (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (configuration.storageTeamSize + 1)) / 2;
-	ASSERT(targetTeamNumPerServer > 0);
+	ASSERT_GT(targetTeamNumPerServer, 0);
 	for (auto& s : server_info) {
 		if (s.second->teams.size() < targetTeamNumPerServer && !server_status.get(s.first).isUnhealthy()) {
 			return true;
@@ -4105,7 +4105,7 @@ bool DDTeamCollection::notEnoughTeamsForAServer() const {
 }
 
 int DDTeamCollection::addTeamsBestOf(int teamsToBuild, int desiredTeams, int maxTeams) {
-	ASSERT(teamsToBuild >= 0);
+	ASSERT_GE(teamsToBuild, 0);
 	ASSERT_WE_THINK(machine_info.size() > 0 || server_info.size() == 0);
 	ASSERT_WE_THINK(SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER >= 1 && configuration.storageTeamSize >= 1);
 
@@ -4186,8 +4186,8 @@ int DDTeamCollection::addTeamsBestOf(int teamsToBuild, int desiredTeams, int max
 				serverTeam.push_back(serverID);
 			}
 
-			ASSERT(chosenServerCount == 1); // chosenServer should be used exactly once
-			ASSERT(serverTeam.size() == configuration.storageTeamSize);
+			ASSERT_EQ(chosenServerCount, 1); // chosenServer should be used exactly once
+			ASSERT_EQ(serverTeam.size(), configuration.storageTeamSize);
 
 			std::sort(serverTeam.begin(), serverTeam.end());
 			int overlap = overlappingMembers(serverTeam);

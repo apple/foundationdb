@@ -211,7 +211,7 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Data
 					result->shards.push_back(info);
 				}
 
-				ASSERT(keyServers.size() > 0);
+				ASSERT_GT(keyServers.size(), 0);
 				beginKey = keyServers.end()[-1].key;
 				break;
 			} catch (Error& e) {
