@@ -674,7 +674,11 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
 				stats->throttleStartTime = now();
 			}
 		} else {
-			stats->lastTxnThrottled = false;
+			// If an immediate priority txn comes in, it may get processed on the first time through and
+			// reset our throttling state prematurely.
+			if (request.priority != TransactionPriority::IMMEDIATE) {
+				stats->lastTxnThrottled = false;
+			}
 		}
 		request.reply.send(reply);
 		++stats->txnRequestOut;

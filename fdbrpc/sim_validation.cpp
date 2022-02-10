@@ -25,7 +25,7 @@
 
 // used for simulation validations
 static std::map<std::string, int64_t> validationData;
-static std::map<int64_t, double> validationData2;
+static std::map<int64_t, double> timedVersionsValidationData;
 static std::set<UID> disabledMachines;
 
 void debug_setVersionCheckEnabled(UID uid, bool enabled) {
@@ -131,23 +131,23 @@ void debug_setCheckRelocationDuration(bool check) {
 void debug_advanceVersionTimestamp(int64_t version, double t) {
 	if (!g_network->isSimulated() || g_simulator.extraDB)
 		return;
-	validationData2[version] = t;
+	timedVersionsValidationData[version] = t;
 }
 
 bool debug_checkVersionTime(int64_t version, double t, std::string context, Severity sev) {
 	if (!g_network->isSimulated() || g_simulator.extraDB)
 		return false;
-	if (!validationData2.count(version)) {
+	if (!timedVersionsValidationData.count(version)) {
 		TraceEvent(SevWarn, (context + "UnknownTime").c_str())
 		    .detail("VersionChecking", version)
 		    .detail("TimeChecking", t);
 		return false;
 	}
-	if (t > validationData2[version]) {
-		TraceEvent(sev, (context + "DurabilityError").c_str())
+	if (t > timedVersionsValidationData[version]) {
+		TraceEvent(sev, (context + "VersionTimeError").c_str())
 		    .detail("VersionChecking", version)
 		    .detail("TimeChecking", t)
-		    .detail("MaxTime", validationData2[version]);
+		    .detail("MaxTime", timedVersionsValidationData[version]);
 		return true;
 	}
 	return false;

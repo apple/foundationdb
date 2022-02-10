@@ -24,6 +24,15 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+/*
+ * This workload is modelled off the Sideband workload, except it uses a single
+ * mutator and checker rather than several. In addition to ordinary consistency checks,
+ * it also checks the consistency of the cached read versions when using the
+ * USE_GRV_CACHE transaction option, specifically when commit_unknown_result
+ * produces a maybe/maybe-not written scenario. It makes sure that a cached read of an
+ * unknown result matches the regular read of that same key and is not too stale.
+ */
+
 struct SidebandMessage {
 	constexpr static FileIdentifier file_identifier = 11862047;
 	uint64_t key;
@@ -168,7 +177,6 @@ struct SidebandSingleWorkload : TestWorkload {
 			// second set, the checker should see this, no retries on unknown result
 			loop {
 				try {
-					// tr.setOption(FDBTransactionOptions::CAUSAL_WRITE_RISKY);
 					tr.set(messageKey, LiteralStringRef("deadbeef"));
 					wait(tr.commit());
 					commitVersion = tr.getCommittedVersion();

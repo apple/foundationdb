@@ -199,7 +199,7 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 	Optional<Value> metadataVersion;
 	int64_t midShardSize = 0;
 	uint32_t queueIterations = 0;
-	bool rkThrottled;
+	bool rkThrottled = false;
 
 	TransactionTagMap<ClientTagThrottleLimits> tagThrottleInfo;
 
