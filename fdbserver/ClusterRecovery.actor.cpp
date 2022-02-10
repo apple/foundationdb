@@ -1283,6 +1283,12 @@ ACTOR Future<Void> sendInitialCommitToResolvers(Reference<ClusterRecoveryData> s
 		endpoints.push_back(it.txnState.getEndpoint());
 	}
 
+	for (auto& it : self->commitProxies) {
+		TraceEvent("RecoveryInternalProxyStart", self->dbgid)
+		    .detail("ProxyID", it.id())
+		    .detail("TxnEndpoint", it.txnState.getEndpoint().token);
+	}
+
 	loop {
 		if (!data.size())
 			break;
@@ -1318,6 +1324,12 @@ ACTOR Future<Void> sendInitialCommitToResolvers(Reference<ClusterRecoveryData> s
 	    .detail("RecoveryTxnVersion", self->recoveryTransactionVersion)
 	    .detail("LastEpochEnd", self->lastEpochEnd)
 	    .detail("Step", "SentTxnStateStoreToCommitProxies");
+
+	for (auto& it : self->commitProxies) {
+		TraceEvent("RecoveryInternalProxy", self->dbgid)
+		    .detail("ProxyID", it.id())
+		    .detail("TxnEndpoint", it.txnState.getEndpoint().token);
+	}
 
 	std::vector<Future<ResolveTransactionBatchReply>> replies;
 	for (auto& r : self->resolvers) {

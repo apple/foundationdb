@@ -140,58 +140,64 @@ public:
 	}
 
 	Future<Void> commit(bool sequential) override {
-		if (getAvailableSize() <= 0) {
-			TraceEvent(SevError, "KeyValueStoreMemory_OutOfSpace", id).log();
-			return Never();
-		}
-
-		if (recovering.isError())
-			throw recovering.getError();
-		if (!recovering.isReady())
-			return waitAndCommit(this, sequential);
-
-		if (!disableSnapshot && replaceContent && !firstCommitWithSnapshot) {
-			transactionSize += SERVER_KNOBS->REPLACE_CONTENTS_BYTES;
-			committedWriteBytes += SERVER_KNOBS->REPLACE_CONTENTS_BYTES;
-			semiCommit();
-		}
-
-		if (transactionIsLarge) {
-			fullSnapshot(data);
-			resetSnapshot = true;
-			committedWriteBytes = notifiedCommittedWriteBytes.get();
-			overheadWriteBytes = 0;
-
-			if (disableSnapshot) {
-				return Void();
-			}
-			log_op(OpCommit, StringRef(), StringRef());
-		} else {
-			int64_t bytesWritten = commit_queue(queue, !disableSnapshot, sequential);
-
-			if (disableSnapshot) {
-				return Void();
+		try {
+			if (getAvailableSize() <= 0) {
+				TraceEvent(SevError, "KeyValueStoreMemory_OutOfSpace", id).log();
+				return Never();
 			}
 
-			if (bytesWritten > 0 || committedWriteBytes > notifiedCommittedWriteBytes.get()) {
-				committedWriteBytes += bytesWritten + overheadWriteBytes +
-				                       OP_DISK_OVERHEAD; // OP_DISK_OVERHEAD is for the following log_op(OpCommit)
-				notifiedCommittedWriteBytes.set(committedWriteBytes); // This set will cause snapshot items to be
-				                                                      // written, so it must happen before the OpCommit
+			if (recovering.isError())
+				throw recovering.getError();
+			if (!recovering.isReady())
+				return waitAndCommit(this, sequential);
+
+			if (!disableSnapshot && replaceContent && !firstCommitWithSnapshot) {
+				transactionSize += SERVER_KNOBS->REPLACE_CONTENTS_BYTES;
+				committedWriteBytes += SERVER_KNOBS->REPLACE_CONTENTS_BYTES;
+				semiCommit();
+			}
+
+			if (transactionIsLarge) {
+				fullSnapshot(data);
+				resetSnapshot = true;
+				committedWriteBytes = notifiedCommittedWriteBytes.get();
+				overheadWriteBytes = 0;
+
+				if (disableSnapshot) {
+					return Void();
+				}
 				log_op(OpCommit, StringRef(), StringRef());
-				overheadWriteBytes = log->getCommitOverhead();
+			} else {
+				int64_t bytesWritten = commit_queue(queue, !disableSnapshot, sequential);
+
+				if (disableSnapshot) {
+					return Void();
+				}
+
+				if (bytesWritten > 0 || committedWriteBytes > notifiedCommittedWriteBytes.get()) {
+					committedWriteBytes += bytesWritten + overheadWriteBytes +
+					                       OP_DISK_OVERHEAD; // OP_DISK_OVERHEAD is for the following log_op(OpCommit)
+					notifiedCommittedWriteBytes.set(
+					    committedWriteBytes); // This set will cause snapshot items to be
+					                          // written, so it must happen before the OpCommit
+					log_op(OpCommit, StringRef(), StringRef());
+					overheadWriteBytes = log->getCommitOverhead();
+				}
 			}
+
+			auto c = log->commit();
+
+			committedDataSize = data.sumTo(data.end());
+			transactionSize = 0;
+			transactionIsLarge = false;
+			firstCommitWithSnapshot = false;
+
+			addActor.send(commitAndUpdateVersions(this, c, previousSnapshotEnd));
+			return c;
+		} catch (Error& e) {
+			TraceEvent("KVSMemCommitError", id).error(e, true);
+			throw e;
 		}
-
-		auto c = log->commit();
-
-		committedDataSize = data.sumTo(data.end());
-		transactionSize = 0;
-		transactionIsLarge = false;
-		firstCommitWithSnapshot = false;
-
-		addActor.send(commitAndUpdateVersions(this, c, previousSnapshotEnd));
-		return c;
 	}
 
 	Future<Optional<Value>> readValue(KeyRef key, IKeyValueStore::ReadType, Optional<UID> debugID) override {

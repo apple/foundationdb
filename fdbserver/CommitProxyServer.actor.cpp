@@ -587,6 +587,11 @@ ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 	// Pre-resolution the commits
 	TEST(pProxyCommitData->latestLocalCommitBatchResolving.get() < localBatchNumber - 1); // Wait for local batch
 	wait(pProxyCommitData->latestLocalCommitBatchResolving.whenAtLeast(localBatchNumber - 1));
+
+	if (self->localBatchNumber < 3) {
+		TraceEvent("CommitBatchPreprocess", pProxyCommitData->dbgid).detail("BatchNum", localBatchNumber);
+	}
+
 	double queuingDelay = g_network->now() - timeStart;
 	pProxyCommitData->stats.commitBatchQueuingDist->sampleSeconds(queuingDelay);
 	if ((queuingDelay > (double)SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS / SERVER_KNOBS->VERSIONS_PER_SECOND ||
@@ -632,6 +637,10 @@ ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 	state double beforeGettingCommitVersion = now();
 	GetCommitVersionReply versionReply = wait(brokenPromiseToNever(
 	    pProxyCommitData->master.getCommitVersion.getReply(req, TaskPriority::ProxyMasterVersionReply)));
+
+	if (self->localBatchNumber < 3) {
+		TraceEvent("CommitBatchMasterReply", pProxyCommitData->dbgid).detail("BatchNum", localBatchNumber);
+	}
 
 	pProxyCommitData->mostRecentProcessedRequestNumber = versionReply.requestNum;
 
@@ -781,6 +790,13 @@ void applyMetadataEffect(CommitBatchContext* self) {
 			self->pProxyCommitData->txnStateStore->resyncLog();
 
 			for (auto& p : self->storeCommits) {
+				if (p.second.isReady()) {
+					TraceEvent evt(SevError, "CommitIncorrectlyReady", self->pProxyCommitData->dbgid);
+					if (p.second.isError()) {
+						evt.error(p.second.getError(), true);
+					}
+					evt.log();
+				}
 				ASSERT(!p.second.isReady());
 				p.first.get().acknowledge.send(Void());
 				ASSERT(p.second.isReady());
@@ -1443,9 +1459,18 @@ ACTOR Future<Void> commitBatch(ProxyCommitData* self,
 	++context.pProxyCommitData->stats.commitBatchIn;
 	context.setupTraceBatch();
 
+	if (context.localBatchNumber < 3) {
+		TraceEvent("CommitBatchStarted", self->dbgid).detail("BatchNum", context.localBatchNumber);
+	}
+
 	/////// Phase 1: Pre-resolution processing (CPU bound except waiting for a version # which is separately pipelined
 	/// and *should* be available by now (unless empty commit); ordered; currently atomic but could yield)
 	wait(CommitBatch::preresolutionProcessing(&context));
+
+	if (context.localBatchNumber < 3) {
+		TraceEvent("CommitBatchResolutionComplete", self->dbgid).detail("BatchNum", context.localBatchNumber);
+	}
+
 	if (context.rejected) {
 		self->commitBatchesMemBytesCount -= currentBatchMemBytesCount;
 		return Void();
@@ -1464,6 +1489,10 @@ ACTOR Future<Void> commitBatch(ProxyCommitData* self,
 	/////// Phase 5: Replies (CPU bound; no particular order required, though ordered execution would be best for
 	/// latency)
 	wait(CommitBatch::reply(&context));
+
+	if (context.localBatchNumber < 3) {
+		TraceEvent("CommitBatchFinished", self->dbgid).detail("BatchNum", context.localBatchNumber);
+	}
 
 	return Void();
 }
@@ -1964,6 +1993,7 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 	pContext->pCommitData->locked = lockedKey.present() && lockedKey.get().size();
 	pContext->pCommitData->metadataVersion = pContext->pTxnStateStore->readValue(metadataVersionKey).get();
 
+	TraceEvent("ProxyEnableSnapshot", pContext->pCommitData->dbgid);
 	pContext->pTxnStateStore->enableSnapshot();
 
 	return Void();
@@ -1983,6 +2013,9 @@ ACTOR Future<Void> processTransactionStateRequestPart(TransactionStateResolveCon
 
 	if (pContext->receivedSequences.count(request.sequence)) {
 		// This part is already received. Still we will re-broadcast it to other CommitProxies
+		TraceEvent("ProxyTxnReplyDuplicate", pContext->pCommitData->dbgid)
+		    .detail("Seq", request.sequence)
+		    .detail("MaxSeq", pContext->maxSequence);
 		pContext->pActors->send(broadcastTxnRequest(request, SERVER_KNOBS->TXN_STATE_SEND_AMOUNT, true));
 		wait(yield());
 		return Void();
@@ -2011,6 +2044,9 @@ ACTOR Future<Void> processTransactionStateRequestPart(TransactionStateResolveCon
 		pContext->processed = true;
 	}
 
+	TraceEvent("ProxyTxnReply", pContext->pCommitData->dbgid)
+	    .detail("Seq", request.sequence)
+	    .detail("MaxSeq", pContext->maxSequence);
 	pContext->pActors->send(broadcastTxnRequest(request, SERVER_KNOBS->TXN_STATE_SEND_AMOUNT, true));
 	wait(yield());
 	return Void();
@@ -2071,6 +2107,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	commitData.logAdapter =
 	    new LogSystemDiskQueueAdapter(commitData.logSystem, Reference<AsyncVar<PeekTxsInfo>>(), 1, false);
 	commitData.txnStateStore = keyValueStoreLogSystem(commitData.logAdapter, proxy.id(), 2e9, true, true, true);
+	TraceEvent("ProxyCreateTxnStateStore", commitData.dbgid);
 	createWhitelistBinPathVec(whitelistBinPaths, commitData.whitelistedBinPathVec);
 
 	commitData.updateLatencyBandConfig(commitData.db->get().latencyBandConfig);
@@ -2092,6 +2129,8 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 
 	// wait for txnStateStore recovery
 	wait(success(commitData.txnStateStore->readValue(StringRef())));
+
+	TraceEvent("ProxyTxnStateStoreReady", commitData.dbgid);
 
 	int commitBatchByteLimit =
 	    (int)std::min<double>(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_BYTES_MAX,
