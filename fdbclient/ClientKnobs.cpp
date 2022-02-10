@@ -67,7 +67,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( RESOURCE_CONSTRAINED_MAX_BACKOFF,       30.0 );
 	init( PROXY_COMMIT_OVERHEAD_BYTES,              23 ); //The size of serializing 7 tags (3 primary, 3 remote, 1 log router) + 2 for the tag length
 	init( SHARD_STAT_SMOOTH_AMOUNT,                5.0 );
-	init( INIT_MID_SHARD_BYTES,                 200000 ); if( randomize && BUGGIFY ) INIT_MID_SHARD_BYTES = 40000; // The same value as SERVER_KNOBS->MIN_SHARD_BYTES
+	init( INIT_MID_SHARD_BYTES,               50000000 ); if( randomize && BUGGIFY ) INIT_MID_SHARD_BYTES = 40000; else if(randomize && !BUGGIFY) INIT_MID_SHARD_BYTES = 200000; // The same value as SERVER_KNOBS->MIN_SHARD_BYTES
 
 	init( TRANSACTION_SIZE_LIMIT,                  1e7 );
 	init( KEY_SIZE_LIMIT,                          1e4 );
@@ -193,6 +193,8 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( HTTP_SEND_SIZE,                      32*1024 );
 	init( HTTP_VERBOSE_LEVEL,                        0 );
 	init( HTTP_REQUEST_ID_HEADER,                   "" );
+	init( HTTP_REQUEST_AWS_V4_HEADER,             true );
+	init( BLOBSTORE_ENCRYPTION_TYPE,                "" );
 	init( BLOBSTORE_CONNECT_TRIES,                  10 );
 	init( BLOBSTORE_CONNECT_TIMEOUT,                10 );
 	init( BLOBSTORE_MAX_CONNECTION_LIFE,           120 );

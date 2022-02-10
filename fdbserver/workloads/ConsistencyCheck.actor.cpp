@@ -2369,6 +2369,21 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			return false;
 		}
 
+		// Check EncryptKeyProxy
+		if (SERVER_KNOBS->ENABLE_ENCRYPT_KEY_PROXY && db.encryptKeyProxy.present() &&
+		    (!nonExcludedWorkerProcessMap.count(db.encryptKeyProxy.get().address()) ||
+		     nonExcludedWorkerProcessMap[db.encryptKeyProxy.get().address()].processClass.machineClassFitness(
+		         ProcessClass::EncryptKeyProxy) > fitnessLowerBound)) {
+			TraceEvent("ConsistencyCheck_EncyrptKeyProxyNotBest")
+			    .detail("BestEncryptKeyProxyFitness", fitnessLowerBound)
+			    .detail("ExistingEncyrptKeyProxyFitness",
+			            nonExcludedWorkerProcessMap.count(db.encryptKeyProxy.get().address())
+			                ? nonExcludedWorkerProcessMap[db.encryptKeyProxy.get().address()]
+			                      .processClass.machineClassFitness(ProcessClass::EncryptKeyProxy)
+			                : -1);
+			return false;
+		}
+
 		// TODO: Check Tlog
 
 		return true;

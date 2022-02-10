@@ -1133,8 +1133,8 @@ public:
 		    filename,
 		    IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE,
 		    0600));
-		StreamCipher::Key::RawKeyType testKey;
-		generateRandomData(testKey.data(), testKey.size());
+		StreamCipherKey testKey(AES_256_KEY_LENGTH);
+		testKey.initializeRandomTestKey();
 		keyFile->write(testKey.data(), testKey.size(), 0);
 		wait(keyFile->sync());
 		return Void();
@@ -1142,7 +1142,7 @@ public:
 
 	ACTOR static Future<Void> readEncryptionKey(std::string encryptionKeyFileName) {
 		state Reference<IAsyncFile> keyFile;
-		state StreamCipher::Key::RawKeyType key;
+		state StreamCipherKey const* cipherKey = StreamCipherKey::getGlobalCipherKey();
 		try {
 			Reference<IAsyncFile> _keyFile =
 			    wait(IAsyncFileSystem::filesystem()->open(encryptionKeyFileName, 0x0, 0400));
@@ -1153,15 +1153,14 @@ public:
 			    .error(e);
 			throw e;
 		}
-		int bytesRead = wait(keyFile->read(key.data(), key.size(), 0));
-		if (bytesRead != key.size()) {
+		int bytesRead = wait(keyFile->read(cipherKey->data(), cipherKey->size(), 0));
+		if (bytesRead != cipherKey->size()) {
 			TraceEvent(SevWarnAlways, "InvalidEncryptionKeyFileSize")
-			    .detail("ExpectedSize", key.size())
+			    .detail("ExpectedSize", cipherKey->size())
 			    .detail("ActualSize", bytesRead);
 			throw invalid_encryption_key_file();
 		}
-		ASSERT_EQ(bytesRead, key.size());
-		StreamCipher::Key::initializeKey(std::move(key));
+		ASSERT_EQ(bytesRead, cipherKey->size());
 		return Void();
 	}
 #endif // ENCRYPTION_ENABLED

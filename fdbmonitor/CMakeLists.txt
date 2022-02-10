@@ -1,4 +1,4 @@
-set(FDBMONITOR_SRCS ConvertUTF.h SimpleIni.h fdbmonitor.cpp)
+set(FDBMONITOR_SRCS fdbmonitor.cpp)
 
 add_executable(fdbmonitor ${FDBMONITOR_SRCS})
 strip_debug_symbols(fdbmonitor)

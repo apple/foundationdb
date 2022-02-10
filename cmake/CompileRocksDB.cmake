@@ -1,6 +1,6 @@
 # FindRocksDB
 
-find_package(RocksDB 6.22.1)
+find_package(RocksDB 6.27.3)
 
 include(ExternalProject)
 
@@ -22,6 +22,7 @@ if (RocksDB_FOUND)
                -DWITH_SNAPPY=OFF
                -DWITH_ZLIB=OFF
                -DWITH_ZSTD=OFF
+               -DWITH_LIBURING=${WITH_LIBURING}
                -DWITH_TSAN=${USE_TSAN}
                -DWITH_ASAN=${USE_ASAN}
                -DWITH_UBSAN=${USE_UBSAN}
@@ -36,8 +37,8 @@ if (RocksDB_FOUND)
       ${BINARY_DIR}/librocksdb.a)
 else()
   ExternalProject_Add(rocksdb
-    URL        https://github.com/facebook/rocksdb/archive/v6.22.1.tar.gz
-    URL_HASH   SHA256=2df8f34a44eda182e22cf84dee7a14f17f55d305ff79c06fb3cd1e5f8831e00d
+    URL        https://github.com/facebook/rocksdb/archive/refs/tags/v6.27.3.tar.gz
+    URL_HASH   SHA256=ee29901749b9132692b26f0a6c1d693f47d1a9ed8e3771e60556afe80282bf58
     CMAKE_ARGS -DUSE_RTTI=1 -DPORTABLE=${PORTABLE_ROCKSDB}
                -DCMAKE_CXX_STANDARD=${CMAKE_CXX_STANDARD}
                -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
@@ -52,6 +53,7 @@ else()
                -DWITH_SNAPPY=OFF
                -DWITH_ZLIB=OFF
                -DWITH_ZSTD=OFF
+               -DWITH_LIBURING=${WITH_LIBURING}
                -DWITH_TSAN=${USE_TSAN}
                -DWITH_ASAN=${USE_ASAN}
                -DWITH_UBSAN=${USE_UBSAN}
