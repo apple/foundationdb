@@ -3261,7 +3261,8 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 
 	TraceEvent("TLogReady", logData->logId)
 	    .detail("AllTags", describe(req.allTags))
-	    .detail("Locality", logData->locality);
+	    .detail("Locality", logData->locality)
+		.detail("RecoveryCount", logData->recoveryCount);
 
 	updater = Void();
 	wait(tLogCore(self, logData, recruited, pulledRecoveryVersions));

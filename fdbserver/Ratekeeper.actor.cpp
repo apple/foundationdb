@@ -123,8 +123,8 @@ struct TLogQueueInfo {
 	TLogQueuingMetricsReply lastReply;
 	TLogQueuingMetricsReply prevReply;
 	Smoother smoothDurableBytes, smoothInputBytes, verySmoothDurableBytes;
-	Smoother smoothFreeSpace;
-	Smoother smoothTotalSpace;
+	Smoother smoothFreeSpace; // TLogMetrics' KvstoreBytesUsed
+	Smoother smoothTotalSpace; // TLogMetrics' KvstoreBytesTotal
 	TLogQueueInfo(UID id)
 	  : valid(false), id(id), smoothDurableBytes(SERVER_KNOBS->SMOOTHING_AMOUNT),
 	    smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
@@ -1276,6 +1276,8 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 
 		if (minSSVer != std::numeric_limits<Version>::max() && maxTLVer != std::numeric_limits<Version>::min()) {
 			// writeToReadLatencyLimit: 0 = infinte speed; 1 = TL durable speed ; 2 = half TL durable speed
+			// Current knob for maxVersionDifference makes writeToReadLatencyLimit always 0;
+			// We donot control based on writeToReadLatency
 			writeToReadLatencyLimit =
 			    ((maxTLVer - minLimitingSSVer) - limits->maxVersionDifference / 2) / (limits->maxVersionDifference / 4);
 			worstVersionLag = std::max((Version)0, maxTLVer - minSSVer);

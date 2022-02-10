@@ -122,10 +122,9 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Data
 
 			break;
 		} catch (Error& e) {
-			wait(tr.onError(e));
-
+			TraceEvent("GetInitialTeamsRetry", distributorId).error();
 			ASSERT(!succeeded); // We shouldn't be retrying if we have already started modifying result in this loop
-			TraceEvent("GetInitialTeamsRetry", distributorId).log();
+			wait(tr.onError(e));
 		}
 	}
 

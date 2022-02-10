@@ -141,7 +141,7 @@ struct ReadWriteWorkload : KVWorkload {
 		writesPerTransactionA = getOption(options, LiteralStringRef("writesPerTransactionA"), 0);
 		readsPerTransactionB = getOption(options, LiteralStringRef("readsPerTransactionB"), 1);
 		writesPerTransactionB = getOption(options, LiteralStringRef("writesPerTransactionB"), 9);
-		alpha = getOption(options, LiteralStringRef("alpha"), 0.1);
+		alpha = getOption(options, LiteralStringRef("alpha"), 0.1); // chance to choose transactionB
 
 		extraReadConflictRangesPerTransaction =
 		    getOption(options, LiteralStringRef("extraReadConflictRangesPerTransaction"), 0);

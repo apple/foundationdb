@@ -3020,7 +3020,9 @@ ACTOR Future<Void> TagPartitionedLogSystem::trackRejoins(
 				if (pos != -1) {
 					TraceEvent("TLogJoinedMe", dbgid)
 					    .detail("TLog", req.myInterface.id())
-					    .detail("Address", req.myInterface.commit.getEndpoint().getPrimaryAddress().toString());
+					    .detail("Address", req.myInterface.commit.getEndpoint().getPrimaryAddress().toString())
+						.detail("Position", pos)
+						.detail("NewAndOldTLogs", logServers.size());
 					if (!logServers[pos].first->get().present() ||
 					    req.myInterface.commit.getEndpoint() !=
 					        logServers[pos].first->get().interf().commit.getEndpoint()) {
