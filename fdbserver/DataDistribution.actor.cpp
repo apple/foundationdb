@@ -47,18 +47,6 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 #include "flow/serialize.h"
 
-namespace {
-
-// Helper function for STL containers, with flow-friendly error handling
-template <class MapContainer, class K>
-auto get(MapContainer& m, K const& k) -> decltype(m.at(k)) {
-	auto it = m.find(k);
-	ASSERT(it != m.end());
-	return it->second;
-}
-
-} // namespace
-
 // Read keyservers, return unique set of teams
 ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Database cx,
                                                                             UID distributorId,
@@ -223,7 +211,7 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Data
 					result->shards.push_back(info);
 				}
 
-				ASSERT(keyServers.size() > 0);
+				ASSERT_GT(keyServers.size(), 0);
 				beginKey = keyServers.end()[-1].key;
 				break;
 			} catch (Error& e) {
