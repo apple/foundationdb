@@ -453,7 +453,7 @@ public:
 						self->addActor.send(self->checkInvalidLocalities);
 					}
 				}
-				self->addServer(server.first, server.second, self->serverTrackerErrorOut, 0, ddEnabledState);
+				self->addServer(server.first, server.second, self->serverTrackerErrorOut, 0, *ddEnabledState);
 			}
 		}
 
@@ -2114,9 +2114,9 @@ public:
 					if (speed == 1 && stopWiggleSignal.get()) { // avoid duplicated start
 						stopWiggleSignal.set(false);
 						collection.add(teamCollection->perpetualStorageWiggleIterator(
-						    &stopWiggleSignal, finishStorageWiggleSignal.getFuture()));
+						    stopWiggleSignal, finishStorageWiggleSignal.getFuture()));
 						collection.add(
-						    teamCollection->perpetualStorageWiggler(&stopWiggleSignal, finishStorageWiggleSignal));
+						    teamCollection->perpetualStorageWiggler(stopWiggleSignal, finishStorageWiggleSignal));
 						TraceEvent("PerpetualStorageWiggleOpen", teamCollection->distributorId)
 						    .detail("Primary", teamCollection->primary);
 					} else if (speed == 0) {
@@ -2371,7 +2371,7 @@ public:
 						                candidateWorker.processClass,
 						                self->serverTrackerErrorOut,
 						                newServer.get().addedVersion,
-						                ddEnabledState);
+						                *ddEnabledState);
 						self->waitUntilRecruited.set(false);
 						// signal all done after adding tss to tracking info
 						tssState->markComplete();
@@ -2752,7 +2752,7 @@ public:
 								                processClass,
 								                self->serverTrackerErrorOut,
 								                tr.getReadVersion().get(),
-								                ddEnabledState);
+								                *ddEnabledState);
 							}
 						}
 
@@ -3023,8 +3023,8 @@ Future<Void> DDTeamCollection::addSubsetOfEmergencyTeams() {
 }
 
 Future<Void> DDTeamCollection::init(Reference<InitialDataDistribution> initTeams,
-                                    DDEnabledState const* ddEnabledState) {
-	return DDTeamCollectionImpl::init(this, initTeams, ddEnabledState);
+                                    DDEnabledState const& ddEnabledState) {
+	return DDTeamCollectionImpl::init(this, initTeams, &ddEnabledState);
 }
 
 Future<Void> DDTeamCollection::buildTeams() {
@@ -3040,9 +3040,9 @@ Future<Void> DDTeamCollection::storageServerTracker(
     TCServerInfo* server, // This actor is owned by this TCServerInfo, point to server_info[id]
     Promise<Void> errorOut,
     Version addedVersion,
-    const DDEnabledState* ddEnabledState,
+    DDEnabledState const& ddEnabledState,
     bool isTss) {
-	return DDTeamCollectionImpl::storageServerTracker(this, cx, server, errorOut, addedVersion, ddEnabledState, isTss);
+	return DDTeamCollectionImpl::storageServerTracker(this, cx, server, errorOut, addedVersion, &ddEnabledState, isTss);
 }
 
 Future<Void> DDTeamCollection::removeWrongStoreType() {
@@ -3094,18 +3094,18 @@ Future<Void> DDTeamCollection::updateNextWigglingStorageID() {
 	return DDTeamCollectionImpl::updateNextWigglingStorageID(this);
 }
 
-Future<Void> DDTeamCollection::perpetualStorageWiggleIterator(AsyncVar<bool>* stopSignal,
+Future<Void> DDTeamCollection::perpetualStorageWiggleIterator(AsyncVar<bool>& stopSignal,
                                                               FutureStream<Void> finishStorageWiggleSignal) {
-	return DDTeamCollectionImpl::perpetualStorageWiggleIterator(this, stopSignal, finishStorageWiggleSignal);
+	return DDTeamCollectionImpl::perpetualStorageWiggleIterator(this, &stopSignal, finishStorageWiggleSignal);
 }
 
-Future<Void> DDTeamCollection::clusterHealthCheckForPerpetualWiggle(int* extraTeamCount) {
-	return DDTeamCollectionImpl::clusterHealthCheckForPerpetualWiggle(this, extraTeamCount);
+Future<Void> DDTeamCollection::clusterHealthCheckForPerpetualWiggle(int& extraTeamCount) {
+	return DDTeamCollectionImpl::clusterHealthCheckForPerpetualWiggle(this, &extraTeamCount);
 }
 
-Future<Void> DDTeamCollection::perpetualStorageWiggler(AsyncVar<bool>* stopSignal,
+Future<Void> DDTeamCollection::perpetualStorageWiggler(AsyncVar<bool>& stopSignal,
                                                        PromiseStream<Void> finishStorageWiggleSignal) {
-	return DDTeamCollectionImpl::perpetualStorageWiggler(this, stopSignal, finishStorageWiggleSignal);
+	return DDTeamCollectionImpl::perpetualStorageWiggler(this, &stopSignal, finishStorageWiggleSignal);
 }
 
 Future<Void> DDTeamCollection::monitorPerpetualStorageWiggle() {
@@ -3113,8 +3113,8 @@ Future<Void> DDTeamCollection::monitorPerpetualStorageWiggle() {
 }
 
 Future<Void> DDTeamCollection::waitServerListChange(FutureStream<Void> serverRemoved,
-                                                    DDEnabledState const* ddEnabledState) {
-	return DDTeamCollectionImpl::waitServerListChange(this, serverRemoved, ddEnabledState);
+                                                    DDEnabledState const& ddEnabledState) {
+	return DDTeamCollectionImpl::waitServerListChange(this, serverRemoved, &ddEnabledState);
 }
 
 Future<Void> DDTeamCollection::waitHealthyZoneChange() {
@@ -3126,16 +3126,16 @@ Future<Void> DDTeamCollection::monitorStorageServerRecruitment() {
 }
 
 Future<Void> DDTeamCollection::initializeStorage(RecruitStorageReply candidateWorker,
-                                                 DDEnabledState const* ddEnabledState,
+                                                 DDEnabledState const& ddEnabledState,
                                                  bool recruitTss,
                                                  Reference<TSSPairState> tssState) {
-	return DDTeamCollectionImpl::initializeStorage(this, candidateWorker, ddEnabledState, recruitTss, tssState);
+	return DDTeamCollectionImpl::initializeStorage(this, candidateWorker, &ddEnabledState, recruitTss, tssState);
 }
 
 Future<Void> DDTeamCollection::storageRecruiter(
     Reference<IAsyncListener<RequestStream<RecruitStorageRequest>>> recruitStorage,
-    DDEnabledState const* ddEnabledState) {
-	return DDTeamCollectionImpl::storageRecruiter(this, recruitStorage, ddEnabledState);
+    DDEnabledState const& ddEnabledState) {
+	return DDTeamCollectionImpl::storageRecruiter(this, recruitStorage, &ddEnabledState);
 }
 
 Future<Void> DDTeamCollection::updateReplicasKey(Optional<Key> dcId) {
@@ -4330,7 +4330,7 @@ void DDTeamCollection::addServer(StorageServerInterface newServer,
                                  ProcessClass processClass,
                                  Promise<Void> errorOut,
                                  Version addedVersion,
-                                 const DDEnabledState* ddEnabledState) {
+                                 DDEnabledState const& ddEnabledState) {
 	if (!shouldHandleServer(newServer)) {
 		return;
 	}

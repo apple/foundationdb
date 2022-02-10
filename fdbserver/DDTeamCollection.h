@@ -315,7 +315,7 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	                                  TCServerInfo* server,
 	                                  Promise<Void> errorOut,
 	                                  Version addedVersion,
-	                                  const DDEnabledState* ddEnabledState,
+	                                  DDEnabledState const& ddEnabledState,
 	                                  bool isTss);
 
 	bool teamContainsFailedServer(Reference<TCTeamInfo> team) const;
@@ -343,22 +343,22 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	// Iterate over each storage process to do storage wiggle. After initializing the first Process ID, it waits a
 	// signal from `perpetualStorageWiggler` indicating the wiggling of current process is finished. Then it writes the
 	// next Process ID to a system key: `perpetualStorageWiggleIDPrefix` to show the next process to wiggle.
-	Future<Void> perpetualStorageWiggleIterator(AsyncVar<bool>* stopSignal,
+	Future<Void> perpetualStorageWiggleIterator(AsyncVar<bool>& stopSignal,
 	                                            FutureStream<Void> finishStorageWiggleSignal);
 
 	// periodically check whether the cluster is healthy if we continue perpetual wiggle
-	Future<Void> clusterHealthCheckForPerpetualWiggle(int* extraTeamCount);
+	Future<Void> clusterHealthCheckForPerpetualWiggle(int& extraTeamCount);
 
 	// Watches the value change of `perpetualStorageWiggleIDPrefix`, and adds the storage server into excludeServers
 	// which prevent recruiting the wiggling storage servers and let teamTracker start to move data off the affected
 	// teams. The wiggling process of current storage servers will be paused if the cluster is unhealthy and restarted
 	// once the cluster is healthy again.
-	Future<Void> perpetualStorageWiggler(AsyncVar<bool>* stopSignal, PromiseStream<Void> finishStorageWiggleSignal);
+	Future<Void> perpetualStorageWiggler(AsyncVar<bool>& stopSignal, PromiseStream<Void> finishStorageWiggleSignal);
 
 	int numExistingSSOnAddr(const AddressExclusion& addr) const;
 
 	Future<Void> initializeStorage(RecruitStorageReply candidateWorker,
-	                               DDEnabledState const* ddEnabledState,
+	                               DDEnabledState const& ddEnabledState,
 	                               bool recruitTss,
 	                               Reference<TSSPairState> tssState);
 
@@ -519,7 +519,7 @@ public:
 
 	int64_t getDebugTotalDataInFlight() const;
 
-	Future<Void> init(Reference<InitialDataDistribution> initTeams, DDEnabledState const* ddEnabledState);
+	Future<Void> init(Reference<InitialDataDistribution> initTeams, DDEnabledState const& ddEnabledState);
 
 	// Assume begin to end is sorted by std::sort
 	// Assume InputIt is iterator to UID
@@ -585,7 +585,7 @@ public:
 	               ProcessClass processClass,
 	               Promise<Void> errorOut,
 	               Version addedVersion,
-	               const DDEnabledState* ddEnabledState);
+	               DDEnabledState const& ddEnabledState);
 
 	bool removeTeam(Reference<TCTeamInfo> team);
 
@@ -617,7 +617,7 @@ public:
 	// The serverList system keyspace keeps the StorageServerInterface for each serverID. Storage server's storeType
 	// and serverID are decided by the server's filename. By parsing storage server file's filename on each disk,
 	// process on each machine creates the TCServer with the correct serverID and StorageServerInterface.
-	Future<Void> waitServerListChange(FutureStream<Void> serverRemoved, const DDEnabledState* ddEnabledState);
+	Future<Void> waitServerListChange(FutureStream<Void> serverRemoved, DDEnabledState const& ddEnabledState);
 
 	Future<Void> waitHealthyZoneChange();
 
@@ -625,7 +625,7 @@ public:
 	Future<Void> monitorStorageServerRecruitment();
 
 	Future<Void> storageRecruiter(Reference<IAsyncListener<RequestStream<RecruitStorageRequest>>> recruitStorage,
-	                              DDEnabledState const* ddEnabledState);
+	                              DDEnabledState const& ddEnabledState);
 
 	Future<Void> updateReplicasKey(Optional<Key> dcId);
 

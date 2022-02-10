@@ -577,7 +577,7 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 	state Future<Void> error = actorCollection(self->addActor.getFuture());
 
 	try {
-		wait(self->init(initData, ddEnabledState));
+		wait(self->init(initData, *ddEnabledState));
 		initData = Reference<InitialDataDistribution>();
 		self->addActor.send(self->serverGetTeamRequests(tci));
 
@@ -609,9 +609,9 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 
 		// The following actors (e.g. storageRecruiter) do not need to be assigned to a variable because
 		// they are always running.
-		self->addActor.send(self->storageRecruiter(recruitStorage, ddEnabledState));
+		self->addActor.send(self->storageRecruiter(recruitStorage, *ddEnabledState));
 		self->addActor.send(self->monitorStorageServerRecruitment());
-		self->addActor.send(self->waitServerListChange(serverRemoved.getFuture(), ddEnabledState));
+		self->addActor.send(self->waitServerListChange(serverRemoved.getFuture(), *ddEnabledState));
 		self->addActor.send(self->trackExcludedServers());
 		self->addActor.send(self->monitorHealthyTeams());
 		self->addActor.send(self->waitHealthyZoneChange());
