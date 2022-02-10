@@ -72,6 +72,13 @@ public interface Tenant extends AutoCloseable, TransactionContext {
 	Transaction createTransaction(Executor e, EventKeeper eventKeeper);
 
 	/**
+	 * Returns the name of this {@code Tenant}.
+	 *
+	 * @return the name of this {@code Tenant} as a byte string.
+	 */
+	byte[] getName();
+
+	/**
 	 * Runs a read-only transactional function against this {@code Tenant} with retry logic.
 	 *  {@link Function#apply(Object) apply(ReadTransaction)} will be called on the
 	 *  supplied {@link Function} until a non-retryable

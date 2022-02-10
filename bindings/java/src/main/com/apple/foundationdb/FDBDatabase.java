@@ -146,7 +146,7 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 		pointerReadLock.lock();
 		Tenant tenant = null;
 		try {
-			tenant = new FDBTenant(Database_openTenant(getPtr(), tenantName), this, e, eventKeeper);
+			tenant = new FDBTenant(Database_openTenant(getPtr(), tenantName), this, tenantName, e, eventKeeper);
 			return tenant;
 		} catch (RuntimeException err) {
 			if (tenant != null) {

@@ -30,16 +30,18 @@ import com.apple.foundationdb.async.AsyncUtil;
 
 class FDBTenant extends NativeObjectWrapper implements Tenant {
 	private final Database database;
+	private final byte[] name;
 	private final Executor executor;
 	private final EventKeeper eventKeeper;
 
-	protected FDBTenant(long cPtr, Database database, Executor executor) {
-		this(cPtr, database, executor, null);
+	protected FDBTenant(long cPtr, Database database, byte[] name, Executor executor) {
+		this(cPtr, database, name, executor, null);
 	}
 
-	protected FDBTenant(long cPtr, Database database, Executor executor, EventKeeper eventKeeper) {
+	protected FDBTenant(long cPtr, Database database, byte[] name, Executor executor, EventKeeper eventKeeper) {
 		super(cPtr);
 		this.database = database;
+		this.name = name;
 		this.executor = executor;
 		this.eventKeeper = eventKeeper;
 	}
@@ -133,6 +135,11 @@ class FDBTenant extends NativeObjectWrapper implements Tenant {
 		} finally {
 			pointerReadLock.unlock();
 		}
+	}
+
+	@Override
+	public byte[] getName() {
+		return name;
 	}
 
 	@Override
