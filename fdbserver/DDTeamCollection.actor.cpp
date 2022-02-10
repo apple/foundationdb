@@ -3063,10 +3063,6 @@ Future<Void> DDTeamCollection::removeBadTeams() {
 	return DDTeamCollectionImpl::removeBadTeams(this);
 }
 
-Future<Void> DDTeamCollection::zeroServerLeftLoggerActor(Reference<TCTeamInfo> team) {
-	return DDTeamCollectionImpl::zeroServerLeftLoggerActor(this, team);
-}
-
 Future<Void> DDTeamCollection::keyValueStoreTypeTracker(TCServerInfo* server) {
 	return DDTeamCollectionImpl::keyValueStoreTypeTracker(this, server);
 }

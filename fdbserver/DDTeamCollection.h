@@ -541,8 +541,6 @@ public:
 
 	Future<Void> removeBadTeams();
 
-	Future<Void> zeroServerLeftLoggerActor(Reference<TCTeamInfo> team);
-
 	// Set the server's storeType; Error is catched by the caller
 	Future<Void> keyValueStoreTypeTracker(TCServerInfo* server);
 
