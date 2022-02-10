@@ -352,12 +352,30 @@ struct ChangeFeedInfo : ReferenceCounted<ChangeFeedInfo> {
 	bool stopped = false; // A stopped change feed no longer adds new mutations, but is still queriable
 	bool removing = false;
 
-	// TODO: could change this to a promiseStream<KeyRange>, and only cancel stream if the cancelled range overlaps the
-	// request range
-	void moved() {
-		Promise<Void> hold = onMove;
-		onMove = Promise<Void>();
-		hold.send(Void());
+	KeyRangeMap<std::vector<Promise<Void>>> moveTriggers;
+
+	void triggerOnMove(KeyRange range, Promise<Void> p) {
+		printf("DBG: Trigger onMove registering [%s - %s)\n",
+		       range.begin.printable().c_str(),
+		       range.end.printable().c_str());
+		auto toInsert = moveTriggers.modify(range);
+		for (auto triggerRange = toInsert.begin(); triggerRange != toInsert.end(); ++triggerRange) {
+			triggerRange->value().push_back(p);
+		}
+	}
+
+	void moved(KeyRange range) {
+		printf("DBG: onMove triggered [%s - %s)\n", range.begin.printable().c_str(), range.end.printable().c_str());
+		auto toTrigger = moveTriggers.intersectingRanges(range);
+		for (auto triggerRange : toTrigger) {
+			for (int i = 0; i < triggerRange.cvalue().size(); i++) {
+				if (triggerRange.cvalue()[i].canBeSet()) {
+					triggerRange.cvalue()[i].send(Void());
+				}
+			}
+		}
+		// coalesce doesn't work with promises
+		moveTriggers.insert(range, std::vector<Promise<Void>>());
 	}
 };
 
@@ -2058,16 +2076,20 @@ ACTOR Future<Void> localChangeFeedStream(StorageServer* data,
 	}
 }
 
+// Change feed stream must be sent an error as soon as it is moved away, or change feed can get incorrect results
 ACTOR Future<Void> stopChangeFeedOnMove(StorageServer* data, ChangeFeedStreamRequest req) {
+	wait(delay(0, TaskPriority::DefaultEndpoint));
+
 	auto feed = data->uidChangeFeed.find(req.rangeID);
 	if (feed == data->uidChangeFeed.end() || feed->second->removing) {
 		req.reply.sendError(unknown_change_feed());
 		return Void();
 	}
-	state Future<Void> moved = feed->second->onMove.getFuture();
-	wait(moved);
+	state Promise<Void> moved;
+	feed->second->triggerOnMove(req.range, moved);
+	wait(moved.getFuture());
 	printf("CF Moved! %lld - %lld. sending WSS\n", req.begin, req.end);
-	// DO NOT call req.reply.onReady before sending - we want to propagate this error through regardless of how far
+	// DO NOT call req.reply.onReady before sending - we need to propagate this error through regardless of how far
 	// behind client is
 	req.reply.sendError(wrong_shard_server());
 	return Void();
@@ -5169,7 +5191,7 @@ void changeServerKeys(StorageServer* data,
 				if (feed != data->uidChangeFeed.end()) {
 					feed->second->emptyVersion = version - 1;
 					feed->second->removing = true;
-					feed->second->moved();
+					feed->second->moved(feed->second->range);
 					feed->second->newMutations.trigger();
 					data->uidChangeFeed.erase(feed);
 				}
@@ -5177,7 +5199,7 @@ void changeServerKeys(StorageServer* data,
 				// if just part of feed's range is moved away
 				auto feed = data->uidChangeFeed.find(f.first);
 				if (feed != data->uidChangeFeed.end()) {
-					feed->second->moved();
+					feed->second->moved(keys);
 				}
 			}
 		}
