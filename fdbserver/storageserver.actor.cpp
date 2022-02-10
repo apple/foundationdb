@@ -1906,10 +1906,10 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 			Standalone<VectorRef<MutationRef>> mutations;
 			std::tie(id, version) = decodeChangeFeedDurableKey(kv.key);
 			std::tie(mutations, knownCommittedVersion) = decodeChangeFeedDurableValue(kv.value);
-			reply.arena.dependsOn(mutations.arena());
 			auto m = filterMutations(
 			    reply.arena, MutationsAndVersionRef(mutations, version, knownCommittedVersion), req.range, inverted);
 			if (m.mutations.size()) {
+				reply.arena.dependsOn(mutations.arena());
 				readAnyFromDisk = true;
 				reply.mutations.push_back(reply.arena, m);
 			}
@@ -2132,7 +2132,8 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 				removeUID = true;
 			}
 			wait(onReady);
-			state Future<std::pair<ChangeFeedStreamReply, bool>> feedReplyFuture =
+			// keep this as not state variable so it is freed after sending to reduce memory
+			Future<std::pair<ChangeFeedStreamReply, bool>> feedReplyFuture =
 			    getChangeFeedMutations(data, req, false, atLatest, streamUID);
 			if (atLatest && !removeUID && !feedReplyFuture.isReady()) {
 				data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()][streamUID] =
