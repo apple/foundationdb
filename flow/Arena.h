@@ -553,7 +553,7 @@ public:
 	int expectedSize() const { return size(); }
 
 	int compare(StringRef const& other) const {
-		size_t minSize = std::min(size(), other.size());
+		auto minSize = static_cast<int>(std::min(size(), other.size()));
 		if (minSize != 0) {
 			int c = memcmp(begin(), other.begin(), minSize);
 			if (c != 0)
