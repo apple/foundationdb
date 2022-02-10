@@ -24,6 +24,7 @@
 
 #include "contrib/fmt-8.0.1/include/fmt/format.h"
 #include "fdbrpc/simulator.h"
+#include "flow/Trace.h"
 #define BOOST_SYSTEM_NO_LIB
 #define BOOST_DATE_TIME_NO_LIB
 #define BOOST_REGEX_NO_LIB
@@ -223,6 +224,8 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 
 	bool isPeerGone() const { return !peer || peerProcess->failed; }
 
+	bool buggifyDisabled() const { return process->address.ip == peerProcess->address.ip; }
+
 	void peerClosed() {
 		leakedConnectionTracker = trackLeakedConnection(this);
 		stopReceive = delay(1.0);
@@ -250,7 +253,7 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 		ASSERT(limit > 0);
 
 		int toSend = 0;
-		if (BUGGIFY) {
+		if (BUGGIFY && !buggifyDisabled()) {
 			toSend = std::min(limit, buffer->bytes_written - buffer->bytes_sent);
 		} else {
 			for (auto p = buffer; p; p = p->next) {
@@ -263,7 +266,7 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 			}
 		}
 		ASSERT(toSend);
-		if (BUGGIFY)
+		if (BUGGIFY && !buggifyDisabled())
 			toSend = std::min(toSend, deterministicRandom()->randomInt(0, 1000));
 
 		if (!peer)
@@ -340,7 +343,8 @@ private:
 			wait(delay(g_clogging.getSendDelay(self->process->address, self->peerProcess->address)));
 			wait(g_simulator.onProcess(self->process));
 			ASSERT(g_simulator.getCurrentProcess() == self->process);
-			wait(delay(g_clogging.getRecvDelay(self->process->address, self->peerProcess->address)));
+			if (!self->buggifyDisabled())
+				wait(delay(g_clogging.getRecvDelay(self->process->address, self->peerProcess->address)));
 			ASSERT(g_simulator.getCurrentProcess() == self->process);
 			if (self->stopReceive.isReady()) {
 				wait(Future<Void>(Never()));
@@ -391,11 +395,8 @@ private:
 
 	void rollRandomClose() {
 		// make sure processes on the same machine doesn't get severed
-		std::string currProcessStr = process->address.ip.toString();
-		std::string peerProcessStr = peerProcess->address.ip.toString();
-		if (currProcessStr == peerProcessStr) {
+		if (buggifyDisabled())
 			return;
-		}
 		if (now() - g_simulator.lastConnectionFailure > g_simulator.connectionFailuresDisableDuration &&
 		    deterministicRandom()->random01() < .00001) {
 			g_simulator.lastConnectionFailure = now();
@@ -1093,6 +1094,10 @@ public:
 		if (mustBeDurable || deterministicRandom()->random01() < 0.5) {
 			state ISimulator::ProcessInfo* currentProcess = g_simulator.getCurrentProcess();
 			state TaskPriority currentTaskID = g_network->getCurrentTask();
+			TraceEvent(SevDebug, "Sim2DeleteFileImpl")
+			    .detail("CurrentProcess", currentProcess->toString())
+			    .detail("Filename", filename)
+			    .detail("Durable", mustBeDurable);
 			wait(g_simulator.onMachine(currentProcess));
 			try {
 				wait(::delay(0.05 * deterministicRandom()->random01()));
@@ -1110,6 +1115,9 @@ public:
 				throw err;
 			}
 		} else {
+			TraceEvent(SevDebug, "Sim2DeleteFileImplNonDurable")
+			    .detail("Filename", filename)
+			    .detail("Durable", mustBeDurable);
 			TEST(true); // Simulated non-durable delete
 			return Void();
 		}
@@ -2393,8 +2401,12 @@ ACTOR void doReboot(ISimulator::ProcessInfo* p, ISimulator::KillType kt) {
 		    kt ==
 		    ISimulator::RebootProcessAndDelete); // Simulated process rebooted with data and coordination state deletion
 
-		if (p->rebooting || !p->isReliable())
+		if (p->rebooting || !p->isReliable()) {
+			TraceEvent(SevDebug, "DoRebootFailed")
+			    .detail("Rebooting", p->rebooting)
+			    .detail("Reliable", p->isReliable());
 			return;
+		}
 		TraceEvent("RebootingProcess")
 		    .detail("KillType", kt)
 		    .detail("Address", p->address)

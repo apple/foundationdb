@@ -489,7 +489,7 @@ VFSAsyncFile::~VFSAsyncFile() {
 	if (!--filename_lockCount_openCount[filename].second) {
 		filename_lockCount_openCount.erase(filename);
 
-		TraceEvent(SevDebug, "VFSAsyncFileDestroy").detail("Filename", filename).backtrace();
+		TraceEvent(SevDebug, "VFSAsyncFileDestroyFinished").detail("Filename", filename).backtrace();
 
 		// Always delete the shared memory when the last copy of the file is deleted.  In simulation, this is helpful
 		// because "killing" a file without properly closing it can result in a shared memory state that causes

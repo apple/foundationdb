@@ -208,10 +208,13 @@ ACTOR Future<Void> handleIOErrors(Future<Void> actor, IClosable* store, UID id, 
 	state Future<ErrorOr<Void>> storeError = actor.isReady() ? Never() : errorOr(store->getError());
 	choose {
 		when(state ErrorOr<Void> e = wait(errorOr(actor))) {
+			TraceEvent(SevDebug, "HandleIOErrorsActorIsReady").detail("Error", e.isError() ? e.getError().code() : -1);
 			if (e.isError() && e.getError().code() == error_code_please_reboot) {
 				// no need to wait.
 			} else {
+				TraceEvent(SevDebug, "HandleIOErrorsActorBeforeOnClosed").detail("IsClosed", onClosed.isReady());
 				wait(onClosed);
+				TraceEvent(SevDebug, "HandleIOErrorsActorOnClosedFinished");
 			}
 			if (e.isError() && e.getError().code() == error_code_broken_promise && !storeError.isReady()) {
 				wait(delay(0.00001 + FLOW_KNOBS->MAX_BUGGIFIED_DELAY));
@@ -1074,9 +1077,13 @@ struct TrackRunningStorage {
 	                    KeyValueStoreType storeType,
 	                    std::set<std::pair<UID, KeyValueStoreType>>* runningStorages)
 	  : self(self), storeType(storeType), runningStorages(runningStorages) {
+		TraceEvent(SevDebug, "TrackingRunningStorageConstruction").detail("StorageID", self);
 		runningStorages->emplace(self, storeType);
 	}
-	~TrackRunningStorage() { runningStorages->erase(std::make_pair(self, storeType)); };
+	~TrackRunningStorage() {
+		runningStorages->erase(std::make_pair(self, storeType));
+		TraceEvent(SevDebug, "TrackingRunningStorageDesctruction").detail("StorageID", self);
+	};
 };
 
 ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValueStoreType>>* runningStorages,

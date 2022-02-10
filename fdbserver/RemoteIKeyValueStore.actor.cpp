@@ -10,24 +10,47 @@
 #include "flow/Platform.h"
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/network.h"
 
 // test adding a guard for guaranteed killing of machine after runIKVS returns
 struct AfterReturn {
 	IKeyValueStore* kvStore;
-	AfterReturn() {}
-	AfterReturn(IKeyValueStore* store) : kvStore(store) {}
+	UID id;
+	AfterReturn() : kvStore(nullptr) {}
+	AfterReturn(IKeyValueStore* store, UID& uid) : kvStore(store), id(uid) {}
 	~AfterReturn() {
-		TraceEvent(SevDebug, "RemoteKVStoreAfterReturn").log();
+		TraceEvent(SevDebug, "RemoteKVStoreAfterReturn").detail("UID", id).log();
 		if (kvStore != nullptr) {
 			kvStore->close();
 		}
 	}
+	void invalidate() { kvStore = nullptr; }
 };
 
-ACTOR void sendCommitReply(IKVSCommitRequest commitReq, IKeyValueStore* kvStore) {
-	wait(kvStore->commit(commitReq.sequential));
-	StorageBytes storageBytes = kvStore->getStorageBytes();
-	commitReq.reply.send(IKVSCommitReply{ storageBytes });
+ACTOR void sendCommitReply(IKVSCommitRequest commitReq, IKeyValueStore* kvStore, Future<Void> onClosed) {
+	try {
+		choose {
+			when(wait(onClosed)) { commitReq.reply.sendError(remote_kvs_cancelled()); }
+			when(wait(kvStore->commit(commitReq.sequential))) {
+				StorageBytes storageBytes = kvStore->getStorageBytes();
+				commitReq.reply.send(IKVSCommitReply(storageBytes));
+			}
+		}
+	} catch (Error& e) {
+		TraceEvent(SevDebug, "RemoteKVSCommitReplyError").error(e, true);
+		commitReq.reply.sendError(e.code() == error_code_actor_cancelled ? remote_kvs_cancelled() : e);
+	}
+}
+
+ACTOR template <class T>
+void forwardPromiseVariant(ReplyPromise<T> output, Future<T> input) {
+	try {
+		T value = wait(input);
+		output.send(value);
+	} catch (Error& e) {
+		TraceEvent(SevDebug, "ForwardPromiseVariantError").error(e, true);
+		output.sendError(e.code() == error_code_actor_cancelled ? remote_kvs_cancelled() : e);
+	}
 }
 
 ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterface) {
@@ -37,7 +60,11 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 	                                            openReq.memoryLimit,
 	                                            openReq.checkChecksums,
 	                                            openReq.checkIntegrity);
-	state AfterReturn guard(kvStore);
+	state UID uid_kvs(deterministicRandom()->randomUniqueID());
+	state AfterReturn guard(kvStore, uid_kvs);
+	state Promise<Void> onClosed;
+	state uint64_t set_counter = 0;
+	state uint64_t clear_counter = 0;
 	TraceEvent(SevDebug, "RemoteKVStore").detail("Action", "initializing local store");
 	wait(kvStore->init());
 	openReq.reply.send(ikvsInterface);
@@ -49,10 +76,23 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 				when(IKVSGetValueRequest getReq = waitNext(ikvsInterface.getValue.getFuture())) {
 					forwardPromise(getReq.reply, kvStore->readValue(getReq.key, getReq.type, getReq.debugID));
 				}
-				when(IKVSSetRequest req = waitNext(ikvsInterface.set.getFuture())) { kvStore->set(req.keyValue); }
-				when(IKVSClearRequest req = waitNext(ikvsInterface.clear.getFuture())) { kvStore->clear(req.range); }
+				when(IKVSSetRequest req = waitNext(ikvsInterface.set.getFuture())) {
+					if (req.order != set_counter) {
+						TraceEvent(SevInfo, "IKVSSetRequestOrder")
+						    .detail("RequestOrder", req.order)
+						    .detail("ReceivedOrder", set_counter);
+					}
+					ASSERT(req.order == set_counter);
+					set_counter = req.order + 1;
+					kvStore->set(req.keyValue);
+				}
+				when(IKVSClearRequest req = waitNext(ikvsInterface.clear.getFuture())) {
+					ASSERT(req.order == clear_counter);
+					clear_counter = req.order + 1;
+					kvStore->clear(req.range);
+				}
 				when(IKVSCommitRequest commitReq = waitNext(ikvsInterface.commit.getFuture())) {
-					sendCommitReply(commitReq, kvStore);
+					sendCommitReply(commitReq, kvStore, onClosed.getFuture());
 				}
 				when(IKVSReadValuePrefixRequest readPrefixReq = waitNext(ikvsInterface.readValuePrefix.getFuture())) {
 					forwardPromise(
@@ -61,6 +101,12 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 					        readPrefixReq.key, readPrefixReq.maxLength, readPrefixReq.type, readPrefixReq.debugID));
 				}
 				when(IKVSReadRangeRequest readRangeReq = waitNext(ikvsInterface.readRange.getFuture())) {
+					// forwardPromise(
+					//     readRangeReq.reply,
+					//     fmap([](const RangeResult& result) { return IKVSReadRangeReply(result); },
+					//          kvStore->readRange(
+					//              readRangeReq.keys, readRangeReq.rowLimit, readRangeReq.byteLimit,
+					//              readRangeReq.type)));
 					forwardPromise(
 					    readRangeReq.reply,
 					    kvStore->readRange(
@@ -71,16 +117,32 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 					req.reply.send(storageBytes);
 				}
 				when(IKVSGetErrorRequest getFutureReq = waitNext(ikvsInterface.getError.getFuture())) {
-					forwardPromise(getFutureReq.reply, kvStore->getError());
+					forwardPromiseVariant(getFutureReq.reply, kvStore->getError());
 				}
 				when(IKVSOnClosedRequest onClosedReq = waitNext(ikvsInterface.onClosed.getFuture())) {
 					forwardPromise(onClosedReq.reply, kvStore->onClosed());
 				}
-				when(IKVSDisposeRequest req = waitNext(ikvsInterface.dispose.getFuture())) { kvStore->dispose(); }
-				when(IKVSCloseRequest req = waitNext(ikvsInterface.close.getFuture())) { kvStore->close(); }
+				when(IKVSDisposeRequest req = waitNext(ikvsInterface.dispose.getFuture())) {
+					Future<Void> f = kvStore->onClosed();
+					kvStore->dispose();
+					guard.invalidate();
+					onClosed.send(Void());
+					TraceEvent(SevDebug, "RemoteIKVSDispose").detail("UID", uid_kvs);
+					wait(f);
+					return Void();
+				}
+				when(IKVSCloseRequest req = waitNext(ikvsInterface.close.getFuture())) {
+					Future<Void> f = kvStore->onClosed();
+					kvStore->close();
+					guard.invalidate();
+					onClosed.send(Void());
+					TraceEvent(SevDebug, "RemoteIKVSClose").detail("UID", uid_kvs);
+					wait(f);
+					return Void();
+				}
 			}
 		} catch (Error& e) {
-			TraceEvent(SevDebug, "RemoteKVStoreError").detail("Error", e.code());
+			TraceEvent(SevDebug, "RemoteKVStoreError").detail("UID", uid_kvs).detail("Error", e.code());
 			if (e.code() == error_code_actor_cancelled) {
 				throw;
 			}
@@ -88,13 +150,12 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 			// TODO: Error handling
 		}
 	}
-	// return Void();
 }
 
 ACTOR Future<Void> spawnRemoteIKVS(RemoteIKeyValueStore* self, OpenKVStoreRequest openKVSReq) {
 	state KeyValueStoreProcess process;
 	process.start();
-	TraceEvent(SevDebug, "WaitingOnFlowProcess").log();
+	TraceEvent(SevDebug, "WaitingOnFlowProcess").detail("StoreType", openKVSReq.storeType).log();
 	wait(process.onReady());
 	TraceEvent(SevDebug, "FlowProcessReady").log();
 	IKVSInterface ikvsInterface = wait(process.kvsIf.openKVStore.getReply(openKVSReq));

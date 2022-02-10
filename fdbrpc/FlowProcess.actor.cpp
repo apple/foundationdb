@@ -54,7 +54,13 @@ ACTOR Future<int> flowProcessRunner(FlowProcess* self, Promise<Void> ready) {
 			ready.send(Void());
 		}
 		when(int res = wait(process)) {
-			ready.sendError(operation_failed());
+			TraceEvent(SevDebug, "FlowProcessRunnerChoose2").detail("Result", res);
+			// 0 means process killed; non-zero means errors
+			if (res) {
+				ready.sendError(operation_failed());
+			} else {
+				ready.sendError(shutdown_in_progress());
+			}
 			return res;
 		}
 	}
@@ -73,6 +79,7 @@ void FlowProcess::start() {
 Future<Void> runFlowProcess(std::string name, Endpoint endpoint) {
 	TraceEvent(SevDebug, "RunFlowProcessStart").log();
 	FlowProcess* self = IProcessFactory::create(name.c_str()); // it->second->create() segfaulting?
+	self->registerEndpoint(endpoint);
 	RequestStream<FlowProcessRegistrationRequest> registerProcess(endpoint);
 	FlowProcessRegistrationRequest req;
 	req.flowProcessInterface = self->serializedInterface();

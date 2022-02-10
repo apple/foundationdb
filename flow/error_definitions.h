@@ -84,6 +84,7 @@ ERROR( change_feed_not_registered, 1060, "Change feed not registered" )
 ERROR( granule_assignment_conflict, 1061, "Conflicting attempts to assign blob granules" )
 ERROR( change_feed_cancelled, 1062, "Change feed was cancelled" )
 ERROR( blob_granule_file_load_error, 1063, "Error loading a blob file during granule materialization" )
+ERROR( remote_kvs_cancelled, 1064, "The remote key-value store is cancelled" )
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )

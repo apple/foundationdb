@@ -1016,7 +1016,7 @@ static void scanPackets(TransportData* transport,
 
 		if (checksumEnabled) {
 			bool isBuggifyEnabled = false;
-			if (g_network->isSimulated() &&
+			if (g_network->isSimulated() && false &&
 			    g_network->now() - g_simulator.lastConnectionFailure > g_simulator.connectionFailuresDisableDuration &&
 			    BUGGIFY_WITH_PROB(0.0001)) {
 				g_simulator.lastConnectionFailure = g_network->now();
@@ -1043,7 +1043,8 @@ static void scanPackets(TransportData* transport,
 				if (isBuggifyEnabled) {
 					TraceEvent(SevInfo, "ChecksumMismatchExp")
 					    .detail("PacketChecksum", packetChecksum)
-					    .detail("CalculatedChecksum", calculatedChecksum);
+					    .detail("CalculatedChecksum", calculatedChecksum)
+					    .detail("PeerAddress", peerAddress.toString());
 				} else {
 					TraceEvent(SevWarnAlways, "ChecksumMismatchUnexp")
 					    .detail("PacketChecksum", packetChecksum)

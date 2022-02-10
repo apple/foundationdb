@@ -87,6 +87,8 @@ ACTOR static Future<Void> incrementalDeleteHelper(std::string filename,
 	state int64_t remainingFileSize;
 	state bool exists = fileExists(filename);
 
+	TraceEvent(SevDebug, "IncrementalDeleteHelperStart").detail("Exist", exists).detail("Filename", filename);
+
 	if (exists) {
 		Reference<IAsyncFile> f = wait(IAsyncFileSystem::filesystem()->open(
 		    filename, IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_UNBUFFERED, 0));
@@ -105,6 +107,8 @@ ACTOR static Future<Void> incrementalDeleteHelper(std::string filename,
 			wait(delay(interval));
 		}
 	}
+
+	TraceEvent(SevDebug, "IncrementalDeleteHelperFinished");
 
 	return Void();
 }

@@ -28,6 +28,9 @@ struct IKVSCommitReply {
 	constexpr static FileIdentifier file_identifier = 3958189;
 	StorageBytes storeBytes;
 
+	IKVSCommitReply() : storeBytes(0, 0, 0, 0) {}
+	IKVSCommitReply(const StorageBytes& sb) : storeBytes(sb) {}
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, storeBytes);
@@ -147,22 +150,24 @@ struct IKVSGetValueRequest {
 struct IKVSSetRequest {
 	constexpr static FileIdentifier file_identifier = 7283948;
 	KeyValueRef keyValue;
+	uint64_t order;
 	ReplyPromise<Void> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keyValue, reply);
+		serializer(ar, keyValue, order, reply);
 	}
 };
 
 struct IKVSClearRequest {
 	constexpr static FileIdentifier file_identifier = 2838575;
 	KeyRangeRef range;
+	uint64_t order;
 	ReplyPromise<Void> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, range, reply);
+		serializer(ar, range, order, reply);
 	}
 };
 
@@ -188,6 +193,34 @@ struct IKVSReadValuePrefixRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, key, maxLength, type, debugID, reply);
+	}
+};
+
+struct IKVSReadRangeReply {
+	constexpr static FileIdentifier file_identifier = 6682449;
+	Arena arena;
+	VectorRef<KeyValueRef, VecSerStrategy::String> data;
+	bool more;
+	Optional<KeyRef> readThrough;
+	bool readToBegin;
+	bool readThroughEnd;
+
+	IKVSReadRangeReply() = default;
+
+	explicit IKVSReadRangeReply(const RangeResult& res)
+	  : arena(res.arena()), data(static_cast<const VectorRef<KeyValueRef>&>(res)), more(res.more),
+	    readThrough(res.readThrough), readToBegin(res.readToBegin), readThroughEnd(res.readThroughEnd) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, data, more, readThrough, readToBegin, readThroughEnd, arena);
+	}
+
+	RangeResult toRangeResult() const {
+		RangeResult r(RangeResultRef(data, more, readThrough), arena);
+		r.readToBegin = readToBegin;
+		r.readThroughEnd = readThroughEnd;
+		return r;
 	}
 };
 
@@ -261,11 +294,19 @@ struct KeyValueStoreProcess : FlowProcess {
 	IKVSProcessInterface kvsIf;
 	Standalone<StringRef> serializedIf;
 
+	Endpoint ssProcess; // endpoint for the storage process
+	RequestStream<FlowProcessRegistrationRequest> ssRequestStream;
+
 	KeyValueStoreProcess() {
 		TraceEvent(SevDebug, "InitKeyValueStoreProcess").log();
 		ObjectWriter writer(IncludeVersion());
 		writer.serialize(kvsIf);
 		serializedIf = writer.toString();
+	}
+
+	void registerEndpoint(Endpoint p) override {
+		ssProcess = p;
+		ssRequestStream = RequestStream<FlowProcessRegistrationRequest>(p);
 	}
 
 	StringRef name() const override { return "KeyValueStoreProcess"_sr; }
@@ -298,23 +339,33 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 	Future<Void> initialized;
 	KeyValueStoreProcess ikvsProcess;
 	StorageBytes storageBytes;
-	RemoteIKeyValueStore() {}
+	uint64_t set_counter, clear_counter;
+	RemoteIKeyValueStore() : storageBytes(0, 0, 0, 0), set_counter(0), clear_counter(0) {}
 
-	Future<Void> init() override { return initialized; }
+	Future<Void> init() override {
+		TraceEvent(SevInfo, "RemoteIKeyValueStoreInit").log();
+		return initialized;
+	}
 
 	Future<Void> getError() const override { return getErrorImpl(this); }
 	Future<Void> onClosed() const override { return onCloseImpl(this); }
 
-	void dispose() override { interf.dispose.send(IKVSDisposeRequest{}); }
-	void close() override { interf.close.send(IKVSCloseRequest{}); }
+	void dispose() override {
+		interf.dispose.send(IKVSDisposeRequest{});
+		delete this;
+	}
+	void close() override {
+		interf.close.send(IKVSCloseRequest{});
+		delete this;
+	}
 
 	KeyValueStoreType getType() const override { return interf.type(); }
 
 	void set(KeyValueRef keyValue, const Arena* arena = nullptr) override {
-		interf.set.send(IKVSSetRequest{ keyValue });
+		interf.set.send(IKVSSetRequest{ keyValue, set_counter++ });
 	}
 	void clear(KeyRangeRef range, const Arena* arena = nullptr) override {
-		interf.clear.send(IKVSClearRequest{ range });
+		interf.clear.send(IKVSClearRequest{ range, clear_counter++ });
 	}
 
 	Future<Void> commit(bool sequential = false) override {
@@ -341,6 +392,8 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 	                              ReadType type = ReadType::NORMAL) override {
 		IKVSReadRangeRequest req{ keys, rowLimit, byteLimit, type };
 		return interf.readRange.getReply(req);
+		// return fmap([](const IKVSReadRangeReply& reply) { return reply.toRangeResult(); },
+		//             interf.readRange.getReply(req));
 	}
 
 	StorageBytes getStorageBytes() const override { return storageBytes; }
@@ -353,29 +406,40 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 	}
 
 	ACTOR static Future<Optional<Value>> readValueImpl(RemoteIKeyValueStore* self, IKVSGetValueRequest req) {
-		wait(self->init());
+		// wait(self->init());
 		Optional<Value> val = wait(self->interf.getValue.getReply(req));
 		return val;
 	}
 
 	ACTOR static Future<Void> getErrorImpl(const RemoteIKeyValueStore* self) {
 		wait(self->initialized);
-		choose {
-			when(wait(self->interf.getError.getReply(IKVSGetErrorRequest{}))) {
-				TraceEvent(SevDebug, "RemoteIKVSGetError").log();
-				UNSTOPPABLE_ASSERT(false);
+		try {
+			choose {
+				when(wait(self->interf.getError.getReply(IKVSGetErrorRequest{}))) {
+					TraceEvent(SevDebug, "RemoteIKVSGetError").log();
+				}
+				when(int res = wait(self->ikvsProcess.returnCode())) {
+					TraceEvent(SevDebug, "SpawnedProcessHasDied").detail("Res", res);
+					ASSERT(!res); // non-zero value means child process died with errors
+				}
 			}
-			when(int res = wait(self->ikvsProcess.returnCode())) {
-				TraceEvent(SevDebug, "SpawnedProcessHasDied").detail("Res", res);
-				ASSERT(false);
-			}
+		} catch (Error& e) {
+			TraceEvent(SevInfo, "GetErrorImplError").error(e, true).backtrace();
+			throw;
 		}
 		return Void();
 	}
 
 	ACTOR static Future<Void> onCloseImpl(const RemoteIKeyValueStore* self) {
-		wait(self->initialized);
-		wait(self->interf.onClosed.getReply(IKVSOnClosedRequest{}));
+		try {
+			wait(self->initialized);
+			TraceEvent(SevInfo, "RemoteIKVSOnCloseImplInitialized");
+			wait(self->interf.onClosed.getReply(IKVSOnClosedRequest{}));
+			TraceEvent(SevInfo, "RemoteIKVSOnCloseImplOnClosedFinished");
+		} catch (Error& e) {
+			TraceEvent(SevInfo, "RemoteIKVSOnCloseImplError").detail("Error", e.code()).backtrace();
+			throw;
+		}
 		return Void();
 	}
 };

@@ -61,6 +61,7 @@ public:
 	virtual StringRef serializedInterface() const = 0;
 	virtual void consumeInterface(StringRef intf) = 0;
 	virtual Future<Void> run() = 0;
+	virtual void registerEndpoint(Endpoint p) = 0;
 
 	void start();
 	Future<Void> onReady() const { return readyPromise.getFuture(); }
