@@ -172,6 +172,217 @@ typedef AsyncMap<UID, ServerStatus> ServerStatusMap;
 class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	friend class DDTeamCollectionImpl;
 
+	// Randomly choose one machine team that has chosenServer and has the correct size
+	// When configuration is changed, we may have machine teams with old storageTeamSize
+	Reference<TCMachineTeamInfo> findOneRandomMachineTeam(TCServerInfo const& chosenServer) const;
+
+	Future<Void> logOnCompletion(Future<Void> signal);
+
+	void resetLocalitySet();
+
+	bool satisfiesPolicy(const std::vector<Reference<TCServerInfo>>& team, int amount = -1) const;
+
+	Future<Void> interruptableBuildTeams();
+
+	Future<Void> checkBuildTeams();
+
+	Future<Void> addSubsetOfEmergencyTeams();
+
+	// Check if server or machine has a valid locality based on configured replication policy
+	bool isValidLocality(Reference<IReplicationPolicy> storagePolicy, const LocalityData& locality) const;
+
+	void evaluateTeamQuality() const;
+
+	int overlappingMembers(const std::vector<UID>& team) const;
+
+	int overlappingMachineMembers(std::vector<Standalone<StringRef>> const& team) const;
+
+	Reference<TCMachineTeamInfo> findMachineTeam(std::vector<Standalone<StringRef>> const& machineIDs) const;
+
+	// Add a machine team specified by input machines
+	Reference<TCMachineTeamInfo> addMachineTeam(std::vector<Reference<TCMachineInfo>> machines);
+
+	// Add a machine team by using the machineIDs from begin to end
+	Reference<TCMachineTeamInfo> addMachineTeam(std::vector<Standalone<StringRef>>::iterator begin,
+	                                            std::vector<Standalone<StringRef>>::iterator end);
+
+	void traceConfigInfo() const;
+
+	void traceServerInfo() const;
+
+	void traceServerTeamInfo() const;
+
+	void traceMachineInfo() const;
+
+	void traceMachineTeamInfo() const;
+
+	// Locality string is hashed into integer, used as KeyIndex
+	// For better understand which KeyIndex is used for locality, we print this info in trace.
+	void traceLocalityArrayIndexName() const;
+
+	void traceMachineLocalityMap() const;
+
+	// We must rebuild machine locality map whenever the entry in the map is inserted or removed
+	void rebuildMachineLocalityMap();
+
+	bool isMachineTeamHealthy(std::vector<Standalone<StringRef>> const& machineIDs) const;
+
+	bool isMachineTeamHealthy(TCMachineTeamInfo const& machineTeam) const;
+
+	bool isMachineHealthy(Reference<TCMachineInfo> const& machine) const;
+
+	// Return the healthy server with the least number of correct-size server teams
+	Reference<TCServerInfo> findOneLeastUsedServer() const;
+
+	// A server team should always come from servers on a machine team
+	// Check if it is true
+	bool isOnSameMachineTeam(TCTeamInfo const& team) const;
+
+	int calculateHealthyServerCount() const;
+
+	int calculateHealthyMachineCount() const;
+
+	std::pair<int64_t, int64_t> calculateMinMaxServerTeamsOnServer() const;
+
+	std::pair<int64_t, int64_t> calculateMinMaxMachineTeamsOnMachine() const;
+
+	// Sanity check
+	bool isServerTeamCountCorrect(Reference<TCMachineTeamInfo> const& mt) const;
+
+	// Find the machine team with the least number of server teams
+	std::pair<Reference<TCMachineTeamInfo>, int> getMachineTeamWithLeastProcessTeams() const;
+
+	// Find the machine team whose members are on the most number of machine teams, same logic as serverTeamRemover
+	std::pair<Reference<TCMachineTeamInfo>, int> getMachineTeamWithMostMachineTeams() const;
+
+	// Find the server team whose members are on the most number of server teams
+	std::pair<Reference<TCTeamInfo>, int> getServerTeamWithMostProcessTeams() const;
+
+	int getHealthyMachineTeamCount() const;
+
+	// Each machine is expected to have targetMachineTeamNumPerMachine
+	// Return true if there exists a machine that does not have enough teams.
+	bool notEnoughMachineTeamsForAMachine() const;
+
+	// Each server is expected to have targetTeamNumPerServer teams.
+	// Return true if there exists a server that does not have enough teams.
+	bool notEnoughTeamsForAServer() const;
+
+	// Use the current set of known processes (from server_info) to compute an optimized set of storage server teams.
+	// The following are guarantees of the process:
+	//   - Each newly-built team will meet the replication policy
+	//   - All newly-built teams will have exactly teamSize machines
+	//
+	// buildTeams() only ever adds teams to the list of teams. Teams are only removed from the list when all data has
+	// been removed.
+	//
+	// buildTeams will not count teams larger than teamSize against the desired teams.
+	Future<Void> buildTeams();
+
+	bool shouldHandleServer(const StorageServerInterface& newServer) const;
+
+	// Check if the serverTeam belongs to a machine team; If not, create the machine team
+	// Note: This function may make the machine team number larger than the desired machine team number
+	Reference<TCMachineTeamInfo> checkAndCreateMachineTeam(Reference<TCTeamInfo> serverTeam);
+
+	// Remove the removedMachineInfo machine and any related machine team
+	void removeMachine(Reference<TCMachineInfo> removedMachineInfo);
+
+	// Invariant: Remove a machine team only when the server teams on it has been removed
+	// We never actively remove a machine team.
+	// A machine team is removed when a machine is removed,
+	// which is caused by the event when all servers on the machine is removed.
+	// NOTE: When this function is called in the loop of iterating machineTeams, make sure NOT increase the index
+	// in the next iteration of the loop. Otherwise, you may miss checking some elements in machineTeams
+	bool removeMachineTeam(Reference<TCMachineTeamInfo> targetMT);
+
+	// Adds storage servers held on process of which the Process Id is “id” into excludeServers which prevent
+	// recruiting the wiggling storage servers and let teamTracker start to move data off the affected teams;
+	// Return a vector of futures wait for all data is moved to other teams.
+	Future<Void> excludeStorageServersForWiggle(const UID& id);
+
+	// Include wiggled storage servers by setting their status from `WIGGLING`
+	// to `NONE`. The storage recruiter will recruit them as new storage servers
+	void includeStorageServersForWiggle();
+
+	// Track a team and issue RelocateShards when the level of degradation changes
+	// A badTeam can be unhealthy or just a redundantTeam removed by machineTeamRemover() or serverTeamRemover()
+	Future<Void> teamTracker(Reference<TCTeamInfo> team, bool badTeam, bool redundantTeam);
+
+	// Check the status of a storage server.
+	// Apply all requirements to the server and mark it as excluded if it fails to satisfies these requirements
+	Future<Void> storageServerTracker(Database cx,
+	                                  TCServerInfo* server,
+	                                  Promise<Void> errorOut,
+	                                  Version addedVersion,
+	                                  const DDEnabledState* ddEnabledState,
+	                                  bool isTss);
+
+	bool teamContainsFailedServer(Reference<TCTeamInfo> team) const;
+
+	// NOTE: this actor returns when the cluster is healthy and stable (no server is expected to be removed in a period)
+	// processingWiggle and processingUnhealthy indicate that some servers are going to be removed.
+	Future<Void> waitUntilHealthy(double extraDelay = 0, bool waitWiggle = false);
+
+	bool isCorrectDC(TCServerInfo* server) const;
+
+	// Set the server's storeType; Error is caught by the caller
+	Future<Void> keyValueStoreTypeTracker(TCServerInfo* server);
+
+	Future<Void> storageServerFailureTracker(TCServerInfo* server,
+	                                         Database cx,
+	                                         ServerStatus* status,
+	                                         Version addedVersion);
+
+	Future<Void> waitForAllDataRemoved(Database cx, UID serverID, Version addedVersion) const;
+
+	// Create a transaction updating `perpetualStorageWiggleIDPrefix` to the next serverID according to a sorted
+	// wiggle_pq maintained by the wiggler.
+	Future<Void> updateNextWigglingStorageID();
+
+	// Iterate over each storage process to do storage wiggle. After initializing the first Process ID, it waits a
+	// signal from `perpetualStorageWiggler` indicating the wiggling of current process is finished. Then it writes the
+	// next Process ID to a system key: `perpetualStorageWiggleIDPrefix` to show the next process to wiggle.
+	Future<Void> perpetualStorageWiggleIterator(AsyncVar<bool>* stopSignal,
+	                                            FutureStream<Void> finishStorageWiggleSignal);
+
+	// periodically check whether the cluster is healthy if we continue perpetual wiggle
+	Future<Void> clusterHealthCheckForPerpetualWiggle(int* extraTeamCount);
+
+	// Watches the value change of `perpetualStorageWiggleIDPrefix`, and adds the storage server into excludeServers
+	// which prevent recruiting the wiggling storage servers and let teamTracker start to move data off the affected
+	// teams. The wiggling process of current storage servers will be paused if the cluster is unhealthy and restarted
+	// once the cluster is healthy again.
+	Future<Void> perpetualStorageWiggler(AsyncVar<bool>* stopSignal, PromiseStream<Void> finishStorageWiggleSignal);
+
+	int numExistingSSOnAddr(const AddressExclusion& addr) const;
+
+	Future<Void> initializeStorage(RecruitStorageReply candidateWorker,
+	                               DDEnabledState const* ddEnabledState,
+	                               bool recruitTss,
+	                               Reference<TSSPairState> tssState);
+
+	Future<UID> getClusterId();
+
+	// return the next ServerID in storageWiggler
+	Future<UID> getNextWigglingServerID();
+
+	// read the current map of `perpetualStorageWiggleIDPrefix`, then restore wigglingId.
+	Future<Void> readStorageWiggleMap();
+
+	auto eraseStorageWiggleMap(KeyBackedObjectMap<UID, StorageWiggleValue, decltype(IncludeVersion())>* metadataMap,
+	                           UID id) {
+		return runRYWTransaction(cx, [metadataMap, id](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			metadataMap->erase(tr, id);
+			return Void();
+		});
+	}
+
+	// Read storage metadata from database, and do necessary updates
+	Future<Void> readOrCreateStorageMetadata(TCServerInfo* server);
+
 public:
 	// clang-format off
 	enum class Status { NONE = 0, WIGGLING = 1, EXCLUDED = 2, FAILED = 3};
@@ -278,10 +489,6 @@ public:
 	Reference<EventCacheHolder> teamCollectionInfoEventHolder;
 	Reference<EventCacheHolder> storageServerRecruitmentEventHolder;
 
-	void resetLocalitySet();
-
-	bool satisfiesPolicy(const std::vector<Reference<TCServerInfo>>& team, int amount = -1) const;
-
 	DDTeamCollection(Database const& cx,
 	                 UID distributorId,
 	                 MoveKeysLock const& lock,
@@ -305,10 +512,6 @@ public:
 
 	void removeLaggingStorageServer(Key zoneId);
 
-	Future<Void> logOnCompletion(Future<Void> signal);
-	Future<Void> interruptableBuildTeams();
-	Future<Void> checkBuildTeams();
-
 	// Returns a random healthy team, which does not contain excludeServer.
 	std::vector<UID> getRandomHealthyTeam(const UID& excludeServer);
 
@@ -316,19 +519,7 @@ public:
 
 	int64_t getDebugTotalDataInFlight() const;
 
-	Future<Void> addSubsetOfEmergencyTeams();
 	Future<Void> init(Reference<InitialDataDistribution> initTeams, DDEnabledState const* ddEnabledState);
-
-	// Check if server or machine has a valid locality based on configured replication policy
-	bool isValidLocality(Reference<IReplicationPolicy> storagePolicy, const LocalityData& locality) const;
-
-	void evaluateTeamQuality() const;
-
-	int overlappingMembers(const std::vector<UID>& team) const;
-
-	int overlappingMachineMembers(std::vector<Standalone<StringRef>> const& team) const;
-
-	Reference<TCMachineTeamInfo> findMachineTeam(std::vector<Standalone<StringRef>> const& machineIDs) const;
 
 	// Assume begin to end is sorted by std::sort
 	// Assume InputIt is iterator to UID
@@ -356,39 +547,13 @@ public:
 
 	void addTeam(std::set<UID> const& team, bool isInitialTeam) { addTeam(team.begin(), team.end(), isInitialTeam); }
 
-	// Add a machine team specified by input machines
-	Reference<TCMachineTeamInfo> addMachineTeam(std::vector<Reference<TCMachineInfo>> machines);
-
-	// Add a machine team by using the machineIDs from begin to end
-	Reference<TCMachineTeamInfo> addMachineTeam(std::vector<Standalone<StringRef>>::iterator begin,
-	                                            std::vector<Standalone<StringRef>>::iterator end);
-
 	// Group storage servers (process) based on their machineId in LocalityData
 	// All created machines are healthy
 	// Return The number of healthy servers we grouped into machines
 	int constructMachinesFromServers();
 
-	void traceConfigInfo() const;
-
-	void traceServerInfo() const;
-
-	void traceServerTeamInfo() const;
-
-	void traceMachineInfo() const;
-
-	void traceMachineTeamInfo() const;
-
-	// Locality string is hashed into integer, used as KeyIndex
-	// For better understand which KeyIndex is used for locality, we print this info in trace.
-	void traceLocalityArrayIndexName() const;
-
-	void traceMachineLocalityMap() const;
-
 	// To enable verbose debug info, set shouldPrint to true
 	void traceAllInfo(bool shouldPrint = false) const;
-
-	// We must rebuild machine locality map whenever the entry in the map is inserted or removed
-	void rebuildMachineLocalityMap();
 
 	// Create machineTeamsToBuild number of machine teams
 	// No operation if machineTeamsToBuild is 0
@@ -401,56 +566,9 @@ public:
 	// return number of added machine teams
 	int addBestMachineTeams(int machineTeamsToBuild);
 
-	bool isMachineTeamHealthy(std::vector<Standalone<StringRef>> const& machineIDs) const;
-
-	bool isMachineTeamHealthy(TCMachineTeamInfo const& machineTeam) const;
-
-	bool isMachineHealthy(Reference<TCMachineInfo> const& machine) const;
-
-	// Return the healthy server with the least number of correct-size server teams
-	Reference<TCServerInfo> findOneLeastUsedServer() const;
-
-	// Randomly choose one machine team that has chosenServer and has the correct size
-	// When configuration is changed, we may have machine teams with old storageTeamSize
-	Reference<TCMachineTeamInfo> findOneRandomMachineTeam(TCServerInfo const& chosenServer) const;
-
-	// A server team should always come from servers on a machine team
-	// Check if it is true
-	bool isOnSameMachineTeam(TCTeamInfo const& team) const;
-
 	// Sanity check the property of teams in unit test
 	// Return true if all server teams belong to machine teams
 	bool sanityCheckTeams() const;
-
-	int calculateHealthyServerCount() const;
-
-	int calculateHealthyMachineCount() const;
-
-	std::pair<int64_t, int64_t> calculateMinMaxServerTeamsOnServer() const;
-
-	std::pair<int64_t, int64_t> calculateMinMaxMachineTeamsOnMachine() const;
-
-	// Sanity check
-	bool isServerTeamCountCorrect(Reference<TCMachineTeamInfo> const& mt) const;
-
-	// Find the machine team with the least number of server teams
-	std::pair<Reference<TCMachineTeamInfo>, int> getMachineTeamWithLeastProcessTeams() const;
-
-	// Find the machine team whose members are on the most number of machine teams, same logic as serverTeamRemover
-	std::pair<Reference<TCMachineTeamInfo>, int> getMachineTeamWithMostMachineTeams() const;
-
-	// Find the server team whose members are on the most number of server teams
-	std::pair<Reference<TCTeamInfo>, int> getServerTeamWithMostProcessTeams() const;
-
-	int getHealthyMachineTeamCount() const;
-
-	// Each machine is expected to have targetMachineTeamNumPerMachine
-	// Return true if there exists a machine that does not have enough teams.
-	bool notEnoughMachineTeamsForAMachine() const;
-
-	// Each server is expected to have targetTeamNumPerServer teams.
-	// Return true if there exists a server that does not have enough teams.
-	bool notEnoughTeamsForAServer() const;
 
 	// Create server teams based on machine teams
 	// Before the number of machine teams reaches the threshold, build a machine team for each server team
@@ -461,20 +579,7 @@ public:
 	// Check if the number of server (and machine teams) is larger than the maximum allowed number
 	void traceTeamCollectionInfo() const;
 
-	// Use the current set of known processes (from server_info) to compute an optimized set of storage server teams.
-	// The following are guarantees of the process:
-	//   - Each newly-built team will meet the replication policy
-	//   - All newly-built teams will have exactly teamSize machines
-	//
-	// buildTeams() only ever adds teams to the list of teams. Teams are only removed from the list when all data has
-	// been removed.
-	//
-	// buildTeams will not count teams larger than teamSize against the desired teams.
-	Future<Void> buildTeams();
-
 	void noHealthyTeams() const;
-
-	bool shouldHandleServer(const StorageServerInterface& newServer) const;
 
 	void addServer(StorageServerInterface newServer,
 	               ProcessClass processClass,
@@ -488,68 +593,13 @@ public:
 	// Establish the two-direction link between server and machine
 	Reference<TCMachineInfo> checkAndCreateMachine(Reference<TCServerInfo> server);
 
-	// Check if the serverTeam belongs to a machine team; If not, create the machine team
-	// Note: This function may make the machine team number larger than the desired machine team number
-	Reference<TCMachineTeamInfo> checkAndCreateMachineTeam(Reference<TCTeamInfo> serverTeam);
-
-	// Remove the removedMachineInfo machine and any related machine team
-	void removeMachine(Reference<TCMachineInfo> removedMachineInfo);
-
-	// Invariant: Remove a machine team only when the server teams on it has been removed
-	// We never actively remove a machine team.
-	// A machine team is removed when a machine is removed,
-	// which is caused by the event when all servers on the machine is removed.
-	// NOTE: When this function is called in the loop of iterating machineTeams, make sure NOT increase the index
-	// in the next iteration of the loop. Otherwise, you may miss checking some elements in machineTeams
-	bool removeMachineTeam(Reference<TCMachineTeamInfo> targetMT);
-
 	void removeTSS(UID removedServer);
 
 	void removeServer(UID removedServer);
 
-	// Adds storage servers held on process of which the Process Id is “id” into excludeServers which prevent
-	// recruiting the wiggling storage servers and let teamTracker start to move data off the affected teams;
-	// Return a vector of futures wait for all data is moved to other teams.
-	Future<Void> excludeStorageServersForWiggle(const UID& id);
-
-	// Include wiggled storage servers by setting their status from `WIGGLING`
-	// to `NONE`. The storage recruiter will recruit them as new storage servers
-	void includeStorageServersForWiggle();
-
-	// Track a team and issue RelocateShards when the level of degradation changes
-	// A badTeam can be unhealthy or just a redundantTeam removed by machineTeamRemover() or serverTeamRemover()
-	Future<Void> teamTracker(Reference<TCTeamInfo> team, bool badTeam, bool redundantTeam);
-
-	// Check the status of a storage server.
-	// Apply all requirements to the server and mark it as excluded if it fails to satisfies these requirements
-	Future<Void> storageServerTracker(Database cx,
-	                                  TCServerInfo* server,
-	                                  Promise<Void> errorOut,
-	                                  Version addedVersion,
-	                                  const DDEnabledState* ddEnabledState,
-	                                  bool isTss);
-
 	Future<Void> removeWrongStoreType();
 
-	bool teamContainsFailedServer(Reference<TCTeamInfo> team) const;
-
-	// NOTE: this actor returns when the cluster is healthy and stable (no server is expected to be removed in a period)
-	// processingWiggle and processingUnhealthy indicate that some servers are going to be removed.
-	Future<Void> waitUntilHealthy(double extraDelay = 0, bool waitWiggle = false);
-
-	bool isCorrectDC(TCServerInfo* server) const;
-
 	Future<Void> removeBadTeams();
-
-	// Set the server's storeType; Error is caught by the caller
-	Future<Void> keyValueStoreTypeTracker(TCServerInfo* server);
-
-	Future<Void> storageServerFailureTracker(TCServerInfo* server,
-	                                         Database cx,
-	                                         ServerStatus* status,
-	                                         Version addedVersion);
-
-	Future<Void> waitForAllDataRemoved(Database cx, UID serverID, Version addedVersion) const;
 
 	Future<Void> machineTeamRemover();
 
@@ -558,25 +608,6 @@ public:
 	Future<Void> serverTeamRemover();
 
 	Future<Void> trackExcludedServers();
-
-	// Create a transaction updating `perpetualStorageWiggleIDPrefix` to the next serverID according to a sorted
-	// wiggle_pq maintained by the wiggler.
-	Future<Void> updateNextWigglingStorageID();
-
-	// Iterate over each storage process to do storage wiggle. After initializing the first Process ID, it waits a
-	// signal from `perpetualStorageWiggler` indicating the wiggling of current process is finished. Then it writes the
-	// next Process ID to a system key: `perpetualStorageWiggleIDPrefix` to show the next process to wiggle.
-	Future<Void> perpetualStorageWiggleIterator(AsyncVar<bool>* stopSignal,
-	                                            FutureStream<Void> finishStorageWiggleSignal);
-
-	// periodically check whether the cluster is healthy if we continue perpetual wiggle
-	Future<Void> clusterHealthCheckForPerpetualWiggle(int* extraTeamCount);
-
-	// Watches the value change of `perpetualStorageWiggleIDPrefix`, and adds the storage server into excludeServers
-	// which prevent recruiting the wiggling storage servers and let teamTracker start to move data off the affected
-	// teams. The wiggling process of current storage servers will be paused if the cluster is unhealthy and restarted
-	// once the cluster is healthy again.
-	Future<Void> perpetualStorageWiggler(AsyncVar<bool>* stopSignal, PromiseStream<Void> finishStorageWiggleSignal);
 
 	// This coroutine sets a watch to monitor the value change of `perpetualStorageWiggleKey` which is controlled by
 	// command `configure perpetual_storage_wiggle=$value` if the value is 1, this actor start 2 actors,
@@ -593,13 +624,6 @@ public:
 	// Monitor whether or not storage servers are being recruited.  If so, then a database cannot be considered quiet
 	Future<Void> monitorStorageServerRecruitment();
 
-	int numExistingSSOnAddr(const AddressExclusion& addr) const;
-
-	Future<Void> initializeStorage(RecruitStorageReply candidateWorker,
-	                               DDEnabledState const* ddEnabledState,
-	                               bool recruitTss,
-	                               Reference<TSSPairState> tssState);
-
 	Future<Void> storageRecruiter(Reference<IAsyncListener<RequestStream<RecruitStorageRequest>>> recruitStorage,
 	                              DDEnabledState const* ddEnabledState);
 
@@ -612,25 +636,4 @@ public:
 	// Find size of set intersection of excludeServerIDs and serverIDs on each team and see if the leftover team is
 	// valid
 	bool exclusionSafetyCheck(std::vector<UID>& excludeServerIDs);
-
-	Future<UID> getClusterId();
-
-	// return the next ServerID in storageWiggler
-	Future<UID> getNextWigglingServerID();
-
-	// read the current map of `perpetualStorageWiggleIDPrefix`, then restore wigglingId.
-	Future<Void> readStorageWiggleMap();
-
-	auto eraseStorageWiggleMap(KeyBackedObjectMap<UID, StorageWiggleValue, decltype(IncludeVersion())>* metadataMap,
-	                           UID id) {
-		return runRYWTransaction(cx, [metadataMap, id](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			metadataMap->erase(tr, id);
-			return Void();
-		});
-	}
-
-	// Read storage metadata from database, and do necessary updates
-	Future<Void> readOrCreateStorageMetadata(TCServerInfo* server);
 };
