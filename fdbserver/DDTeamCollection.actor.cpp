@@ -969,7 +969,7 @@ public:
 		state Future<std::pair<StorageServerInterface, ProcessClass>> interfaceChanged = server->onInterfaceChanged;
 
 		state Future<Void> storeTypeTracker = (isTss) ? Never() : keyValueStoreTypeTracker(self, server);
-		state bool hasWrongDC = !self->isCorrectDC(server);
+		state bool hasWrongDC = !self->isCorrectDC(*server);
 		state bool hasInvalidLocality =
 		    !self->isValidLocality(self->configuration.storagePolicy, server->lastKnownInterface.locality);
 		state int targetTeamNumPerServer =
@@ -980,7 +980,7 @@ public:
 				status.isUndesired = !self->disableFailingLaggingServers.get() && server->ssVersionTooFarBehind.get();
 				status.isWrongConfiguration = false;
 				status.isWiggling = false;
-				hasWrongDC = !self->isCorrectDC(server);
+				hasWrongDC = !self->isCorrectDC(*server);
 				hasInvalidLocality =
 				    !self->isValidLocality(self->configuration.storagePolicy, server->lastKnownInterface.locality);
 
@@ -1301,7 +1301,7 @@ public:
 						// keyValueStoreTypeTracker
 						storeTypeTracker = (isTss) ? Never() : keyValueStoreTypeTracker(self, server);
 						storageMetadataTracker = (isTss) ? Never() : readOrCreateStorageMetadata(self, server);
-						hasWrongDC = !self->isCorrectDC(server);
+						hasWrongDC = !self->isCorrectDC(*server);
 						hasInvalidLocality = !self->isValidLocality(self->configuration.storagePolicy,
 						                                            server->lastKnownInterface.locality);
 						self->restartTeamBuilder.trigger();
@@ -3053,9 +3053,9 @@ Future<Void> DDTeamCollection::waitUntilHealthy(double extraDelay, bool waitWigg
 	return DDTeamCollectionImpl::waitUntilHealthy(this, extraDelay, waitWiggle);
 }
 
-bool DDTeamCollection::isCorrectDC(TCServerInfo* server) const {
+bool DDTeamCollection::isCorrectDC(TCServerInfo const& server) const {
 	return (includedDCs.empty() ||
-	        std::find(includedDCs.begin(), includedDCs.end(), server->lastKnownInterface.locality.dcId()) !=
+	        std::find(includedDCs.begin(), includedDCs.end(), server.lastKnownInterface.locality.dcId()) !=
 	            includedDCs.end());
 }
 

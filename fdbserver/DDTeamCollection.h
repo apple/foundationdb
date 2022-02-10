@@ -324,7 +324,7 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	// processingWiggle and processingUnhealthy indicate that some servers are going to be removed.
 	Future<Void> waitUntilHealthy(double extraDelay = 0, bool waitWiggle = false) const;
 
-	bool isCorrectDC(TCServerInfo* server) const;
+	bool isCorrectDC(TCServerInfo const& server) const;
 
 	// Set the server's storeType; Error is caught by the caller
 	Future<Void> keyValueStoreTypeTracker(TCServerInfo* server);
