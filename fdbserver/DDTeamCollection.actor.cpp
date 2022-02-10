@@ -2891,7 +2891,117 @@ public:
 
 		return Never();
 	}
-};
+
+	ACTOR static Future<Void> run(Reference<DDTeamCollection> teamCollection,
+								  Reference<InitialDataDistribution> initData,
+								  TeamCollectionInterface tci,
+								  Reference<IAsyncListener<RequestStream<RecruitStorageRequest>>> recruitStorage,
+								  DDEnabledState const* ddEnabledState) {
+		state DDTeamCollection* self = teamCollection.getPtr();
+		state Future<Void> loggingTrigger = Void();
+		state PromiseStream<Void> serverRemoved;
+		state Future<Void> error = actorCollection(self->addActor.getFuture());
+
+		try {
+			wait(self->init(initData, *ddEnabledState));
+			initData = Reference<InitialDataDistribution>();
+			self->addActor.send(self->serverGetTeamRequests(tci));
+
+			TraceEvent("DDTeamCollectionBegin", self->distributorId).detail("Primary", self->primary);
+			wait(self->readyToStart || error);
+			TraceEvent("DDTeamCollectionReadyToStart", self->distributorId).detail("Primary", self->primary);
+
+			// removeBadTeams() does not always run. We may need to restart the actor when needed.
+			// So we need the badTeamRemover variable to check if the actor is ready.
+			if (self->badTeamRemover.isReady()) {
+				self->badTeamRemover = self->removeBadTeams();
+				self->addActor.send(self->badTeamRemover);
+			}
+
+			self->addActor.send(self->machineTeamRemover());
+			self->addActor.send(self->serverTeamRemover());
+
+			if (self->wrongStoreTypeRemover.isReady()) {
+				self->wrongStoreTypeRemover = self->removeWrongStoreType();
+				self->addActor.send(self->wrongStoreTypeRemover);
+			}
+
+			self->traceTeamCollectionInfo();
+
+			if (self->includedDCs.size()) {
+				// start this actor before any potential recruitments can happen
+				self->addActor.send(self->updateReplicasKey(self->includedDCs[0]));
+			}
+
+			// The following actors (e.g. storageRecruiter) do not need to be assigned to a variable because
+			// they are always running.
+			self->addActor.send(self->storageRecruiter(recruitStorage, *ddEnabledState));
+			self->addActor.send(self->monitorStorageServerRecruitment());
+			self->addActor.send(self->waitServerListChange(serverRemoved.getFuture(), *ddEnabledState));
+			self->addActor.send(self->trackExcludedServers());
+			self->addActor.send(self->monitorHealthyTeams());
+			self->addActor.send(self->waitHealthyZoneChange());
+			self->addActor.send(self->monitorPerpetualStorageWiggle());
+			// SOMEDAY: Monitor FF/serverList for (new) servers that aren't in allServers and add or remove them
+
+			loop choose {
+				when(UID removedServer = waitNext(self->removedServers.getFuture())) {
+					TEST(true); // Storage server removed from database
+					self->removeServer(removedServer);
+					serverRemoved.send(Void());
+
+					self->restartRecruiting.trigger();
+				}
+				when(UID removedTSS = waitNext(self->removedTSS.getFuture())) {
+					TEST(true); // TSS removed from database
+					self->removeTSS(removedTSS);
+					serverRemoved.send(Void());
+
+					self->restartRecruiting.trigger();
+				}
+				when(wait(self->zeroHealthyTeams->onChange())) {
+					if (self->zeroHealthyTeams->get()) {
+						self->restartRecruiting.trigger();
+						self->noHealthyTeams();
+					}
+				}
+				when(wait(loggingTrigger)) {
+					int highestPriority = 0;
+					for (auto it : self->priority_teams) {
+						if (it.second > 0) {
+							highestPriority = std::max(highestPriority, it.first);
+						}
+					}
+
+					TraceEvent("TotalDataInFlight", self->distributorId)
+						.detail("Primary", self->primary)
+						.detail("TotalBytes", self->getDebugTotalDataInFlight())
+						.detail("UnhealthyServers", self->unhealthyServers)
+						.detail("ServerCount", self->server_info.size())
+						.detail("StorageTeamSize", self->configuration.storageTeamSize)
+						.detail("HighestPriority", highestPriority)
+						.trackLatest(
+									 self->primary
+									 ? "TotalDataInFlight"
+									 : "TotalDataInFlightRemote"); // This trace event's trackLatest lifetime is controlled by
+					// DataDistributorData::totalDataInFlightEventHolder or
+					// DataDistributorData::totalDataInFlightRemoteEventHolder.
+					// The track latest key we use here must match the key used in
+					// the holder.
+
+					loggingTrigger = delay(SERVER_KNOBS->DATA_DISTRIBUTION_LOGGING_INTERVAL, TaskPriority::FlushTrace);
+				}
+				when(wait(self->serverTrackerErrorOut.getFuture())) {} // Propagate errors from storageServerTracker
+				when(wait(error)) {}
+			}
+		} catch (Error& e) {
+			if (e.code() != error_code_movekeys_conflict)
+				TraceEvent(SevError, "DataDistributionTeamCollectionError", self->distributorId).error(e);
+			throw e;
+		}
+	}
+
+}; // class DDTeamCollectionImpl
 
 Reference<TCMachineTeamInfo> DDTeamCollection::findMachineTeam(
     std::vector<Standalone<StringRef>> const& machineIDs) const {
@@ -4745,4 +4855,12 @@ bool DDTeamCollection::exclusionSafetyCheck(std::vector<UID>& excludeServerIDs) 
 		}
 	}
 	return true;
+}
+
+Future<Void> DDTeamCollection::run(Reference<DDTeamCollection> teamCollection,
+								   Reference<InitialDataDistribution> initData,
+								   TeamCollectionInterface tci,
+								   Reference<IAsyncListener<RequestStream<RecruitStorageRequest>>> recruitStorage,
+								   DDEnabledState const &ddEnabledState) {
+	return DDTeamCollectionImpl::run(teamCollection, initData, tci, recruitStorage, &ddEnabledState);
 }

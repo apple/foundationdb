@@ -636,4 +636,11 @@ public:
 	// Find size of set intersection of excludeServerIDs and serverIDs on each team and see if the leftover team is
 	// valid
 	bool exclusionSafetyCheck(std::vector<UID>& excludeServerIDs);
+
+	// Keep track of servers and teams -- serves requests for getRandomTeam
+	static Future<Void> run(Reference<DDTeamCollection> teamCollection,
+							Reference<InitialDataDistribution> initData,
+							TeamCollectionInterface tci,
+							Reference<IAsyncListener<RequestStream<RecruitStorageRequest>>> recruitStorage,
+							DDEnabledState const &ddEnabledState);
 };
