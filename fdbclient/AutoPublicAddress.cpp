@@ -28,7 +28,7 @@
 
 #include "fdbclient/CoordinationInterface.h"
 
-IPAddress determinePublicIPAutomatically(ClusterConnectionString const& ccs) {
+IPAddress determinePublicIPAutomatically(ClusterConnectionString& ccs) {
 	try {
 		using namespace boost::asio;
 

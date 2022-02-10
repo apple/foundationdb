@@ -314,7 +314,7 @@ struct _IncludeVersion {
 			throw err;
 		}
 		if (v >= minInvalidProtocolVersion) {
-			// Downgrades are only supported for one minor version
+			// The version v is too large to be downgraded from.
 			auto err = incompatible_protocol_version();
 			TraceEvent(SevError, "FutureProtocolVersion").error(err).detailf("Version", "%llx", v.versionWithFlags());
 			throw err;

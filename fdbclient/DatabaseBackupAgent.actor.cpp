@@ -2366,7 +2366,7 @@ std::string getDRMutationStreamId(StatusObjectReader statusObj, const char* cont
 bool getLockedStatus(StatusObjectReader statusObj) {
 	try {
 		StatusObjectReader statusObjCluster = statusObj["cluster"].get_obj();
-		return statusObjCluster["database_locked"].get_bool();
+		return statusObjCluster["database_lock_state.locked"].get_bool();
 	} catch (std::runtime_error& e) {
 		TraceEvent(SevWarn, "DBA_GetLockedStatusFail").detail("Error", e.what());
 		throw backup_error();

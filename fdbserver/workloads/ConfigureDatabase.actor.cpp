@@ -36,9 +36,9 @@ static const char* storageMigrationTypes[] = { "perpetual_storage_wiggle=0 stora
 	                                           "perpetual_storage_wiggle=1",
 	                                           "perpetual_storage_wiggle=1 storage_migration_type=gradual",
 	                                           "storage_migration_type=aggressive" };
-static const char* logTypes[] = { "log_engine:=1",  "log_engine:=2",  "log_spill:=1",
-	                              "log_spill:=2",   "log_version:=2", "log_version:=3",
-	                              "log_version:=4", "log_version:=5", "log_version:=6" };
+static const char* logTypes[] = { "log_engine:=1",  "log_engine:=2",  "log_spill:=1",   "log_spill:=2",
+	                              "log_version:=2", "log_version:=3", "log_version:=4", "log_version:=5",
+	                              "log_version:=6", "log_version:=7" };
 static const char* redundancies[] = { "single", "double", "triple" };
 static const char* backupTypes[] = { "backup_worker_enabled:=0", "backup_worker_enabled:=1" };
 

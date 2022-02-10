@@ -31,7 +31,11 @@ set(FDBSERVER_SRCS
   DataDistributionTracker.actor.cpp
   DataDistributorInterface.h
   DBCoreState.h
+  DDTeamCollection.actor.cpp
+  DDTeamCollection.h
   DiskQueue.actor.cpp
+  EncryptKeyProxyInterface.h
+  EncryptKeyProxy.actor.cpp
   fdbserver.actor.cpp
   FDBExecHelper.actor.cpp
   FDBExecHelper.actor.h
@@ -127,6 +131,8 @@ set(FDBSERVER_SRCS
   TagPartitionedLogSystem.actor.cpp
   TagPartitionedLogSystem.actor.h
   template_fdb.h
+  TCInfo.actor.cpp
+  TCInfo.h
   tester.actor.cpp
   TesterInterface.actor.h
   TLogInterface.h
@@ -188,6 +194,7 @@ set(FDBSERVER_SRCS
   workloads/DiskDurabilityTest.actor.cpp
   workloads/DiskFailureInjection.actor.cpp
   workloads/DummyWorkload.actor.cpp
+  workloads/EncryptionOps.actor.cpp
   workloads/ExternalWorkload.actor.cpp
   workloads/FastTriggeredWatches.actor.cpp
   workloads/FileSystem.actor.cpp
@@ -195,6 +202,7 @@ set(FDBSERVER_SRCS
   workloads/FuzzApiCorrectness.actor.cpp
   workloads/GetRangeStream.actor.cpp
   workloads/HealthMetricsApi.actor.cpp
+  workloads/HighContentionPrefixAllocatorWorkload.actor.cpp
   workloads/IncrementalBackup.actor.cpp
   workloads/Increment.actor.cpp
   workloads/IndexScan.actor.cpp
@@ -291,14 +299,15 @@ add_library(fdb_sqlite STATIC
 
 if (WITH_ROCKSDB_EXPERIMENTAL)
   add_definitions(-DSSD_ROCKSDB_EXPERIMENTAL)
-  # Set this to 0 if you want to compile RocksDB with `-march=native`.
-  set(PORTABLE_ROCKSDB 1)
 
   include(CompileRocksDB)
   # CompileRocksDB sets `lz4_LIBRARIES` to be the shared lib, we want to link
   # statically, so find the static library here.
   find_library(lz4_STATIC_LIBRARIES
     NAMES liblz4.a REQUIRED)
+  if (WITH_LIBURING)
+    find_package(uring)
+  endif()
 endif()
 
 # Suppress warnings in sqlite since it's third party
@@ -318,8 +327,15 @@ target_include_directories(fdbserver PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/workloads)
 if (WITH_ROCKSDB_EXPERIMENTAL)
   add_dependencies(fdbserver rocksdb)
-  target_include_directories(fdbserver PRIVATE ${ROCKSDB_INCLUDE_DIR})
-  target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite ${ROCKSDB_LIBRARIES} ${lz4_STATIC_LIBRARIES})
+  if(WITH_LIBURING)
+    target_include_directories(fdbserver PRIVATE ${ROCKSDB_INCLUDE_DIR} ${uring_INCLUDE_DIR})
+    target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite ${ROCKSDB_LIBRARIES} ${uring_LIBRARIES} ${lz4_STATIC_LIBRARIES})
+    target_compile_definitions(fdbserver PRIVATE BOOST_ASIO_HAS_IO_URING=1 BOOST_ASIO_DISABLE_EPOLL=1)
+  else()
+    target_include_directories(fdbserver PRIVATE ${ROCKSDB_INCLUDE_DIR})
+    target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite ${ROCKSDB_LIBRARIES} ${lz4_STATIC_LIBRARIES})
+    target_compile_definitions(fdbserver PRIVATE)
+  endif()
 else()
   target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite)
 endif()

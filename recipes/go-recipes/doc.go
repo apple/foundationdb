@@ -23,12 +23,13 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
+	"math/rand"
+
 	"github.com/apple/foundationdb/bindings/go/src/fdb"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/directory"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/subspace"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
-	"io/ioutil"
-	"math/rand"
 )
 
 func clear_subspace(trtr fdb.Transactor, sub subspace.Subspace) error {
@@ -69,7 +70,7 @@ func ToTuples(item interface{}) []tuple.Tuple {
 	switch i := item.(type) {
 	case []interface{}:
 		if len(i) == 0 {
-			return []tuple.Tuple{tuple.Tuple{EmptyList}}
+			return []tuple.Tuple{{EmptyList}}
 		}
 		tuples := make([]tuple.Tuple, 0)
 		for i, v := range i {
@@ -80,7 +81,7 @@ func ToTuples(item interface{}) []tuple.Tuple {
 		return tuples
 	case map[string]interface{}:
 		if len(i) == 0 {
-			return []tuple.Tuple{tuple.Tuple{EmptyObject}}
+			return []tuple.Tuple{{EmptyObject}}
 		}
 		tuples := make([]tuple.Tuple, 0)
 		for k, v := range i {
@@ -90,7 +91,7 @@ func ToTuples(item interface{}) []tuple.Tuple {
 		}
 		return tuples
 	default:
-		return []tuple.Tuple{tuple.Tuple{i}}
+		return []tuple.Tuple{{i}}
 	}
 	return nil
 }
@@ -119,7 +120,7 @@ func FromTuples(tuples []tuple.Tuple) interface{} {
 		if !ok {
 			group[k] = make([]tuple.Tuple, 0)
 		}
-		group[k] = append(group[k], t[0:len(t)])
+		group[k] = append(group[k], t[0:])
 	}
 
 	switch first[0].(type) {
@@ -128,7 +129,7 @@ func FromTuples(tuples []tuple.Tuple) interface{} {
 		for _, g := range group {
 			subtup := make([]tuple.Tuple, 0)
 			for _, t := range g {
-				subtup = append(subtup, t[1:len(t)])
+				subtup = append(subtup, t[1:])
 			}
 			res = append(res, FromTuples(subtup))
 		}
@@ -138,7 +139,7 @@ func FromTuples(tuples []tuple.Tuple) interface{} {
 		for _, g := range group {
 			subtup := make([]tuple.Tuple, 0)
 			for _, t := range g {
-				subtup = append(subtup, t[1:len(t)])
+				subtup = append(subtup, t[1:])
 			}
 			res[g[0][0].(string)] = FromTuples(subtup)
 		}
@@ -210,7 +211,7 @@ func (doc Doc) GetDoc(trtr fdb.Transactor, doc_id int) interface{} {
 			if err != nil {
 				panic(err)
 			}
-			tuples = append(tuples, append(tup[1:len(tup)], _unpack(v.Value)...))
+			tuples = append(tuples, append(tup[1:], _unpack(v.Value)...))
 		}
 		return nil, nil
 	})

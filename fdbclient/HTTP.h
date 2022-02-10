@@ -31,6 +31,7 @@ struct is_iless {
 typedef std::map<std::string, std::string, is_iless> Headers;
 
 std::string urlEncode(const std::string& s);
+std::string awsV4URIEncode(const std::string& s, bool encodeSlash);
 
 struct Response : ReferenceCounted<Response> {
 	Response() {}
