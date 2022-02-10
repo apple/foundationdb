@@ -1355,7 +1355,7 @@ public:
 			// Removing a server here when DD is not healthy may lead to rare failure scenarios, for example,
 			// the server with wrong storeType is shutting down while this actor marks it as to-be-removed.
 			// In addition, removing servers cause extra data movement, which should be done while a cluster is healthy
-			wait(waitUntilHealthy(self));
+			wait(self->waitUntilHealthy());
 
 			bool foundSSToRemove = false;
 
@@ -1388,7 +1388,7 @@ public:
 
 	// NOTE: this actor returns when the cluster is healthy and stable (no server is expected to be removed in a period)
 	// processingWiggle and processingUnhealthy indicate that some servers are going to be removed.
-	ACTOR static Future<Void> waitUntilHealthy(DDTeamCollection* self, double extraDelay = 0, bool waitWiggle = false) {
+	ACTOR static Future<Void> waitUntilHealthy(DDTeamCollection const* self, double extraDelay, bool waitWiggle) {
 		state int waitCount = 0;
 		loop {
 			while (self->zeroHealthyTeams->get() || self->processingUnhealthy->get() ||
@@ -1424,7 +1424,7 @@ public:
 
 	ACTOR static Future<Void> removeBadTeams(DDTeamCollection* self) {
 		wait(self->initialFailureReactionDelay);
-		wait(waitUntilHealthy(self));
+		wait(self->waitUntilHealthy());
 		wait(self->addSubsetComplete.getFuture());
 		TraceEvent("DDRemovingBadServerTeams", self->distributorId).detail("Primary", self->primary);
 		for (auto it : self->badTeams) {
@@ -1622,7 +1622,7 @@ public:
 			// To avoid removing machine teams too fast, which is unlikely happen though
 			wait(delay(SERVER_KNOBS->TR_REMOVE_MACHINE_TEAM_DELAY, TaskPriority::DataDistribution));
 
-			wait(waitUntilHealthy(self, SERVER_KNOBS->TR_REMOVE_SERVER_TEAM_EXTRA_DELAY));
+			wait(self->waitUntilHealthy(SERVER_KNOBS->TR_REMOVE_SERVER_TEAM_EXTRA_DELAY));
 
 			// Wait for the badTeamRemover() to avoid the potential race between adding the bad team (add the team
 			// tracker) and remove bad team (cancel the team tracker).
@@ -1750,7 +1750,7 @@ public:
 					wait(self->pauseWiggle->onChange());
 				}
 			} else {
-				wait(waitUntilHealthy(self, SERVER_KNOBS->TR_REMOVE_SERVER_TEAM_EXTRA_DELAY));
+				wait(self->waitUntilHealthy(SERVER_KNOBS->TR_REMOVE_SERVER_TEAM_EXTRA_DELAY));
 			}
 			// Wait for the badTeamRemover() to avoid the potential race between
 			// adding the bad team (add the team tracker) and remove bad team (cancel the team tracker).
@@ -2026,7 +2026,7 @@ public:
 					    .detail("HealthyTeamCount", self->healthyTeamCount);
 				} else {
 					choose {
-						when(wait(waitUntilHealthy(self))) {
+						when(wait(self->waitUntilHealthy())) {
 							TEST(true); // start wiggling
 							wait(self->storageWiggler->startWiggle());
 							auto fv = self->excludeStorageServersForWiggle(id);
@@ -2637,7 +2637,7 @@ public:
 		}
 
 		wait(self->initialFailureReactionDelay && waitForAll(serverUpdates));
-		wait(waitUntilHealthy(self));
+		wait(self->waitUntilHealthy());
 		TraceEvent("DDUpdatingReplicas", self->distributorId)
 		    .detail("Primary", self->primary)
 		    .detail("DcId", dcId)
@@ -3049,7 +3049,7 @@ Future<Void> DDTeamCollection::removeWrongStoreType() {
 	return DDTeamCollectionImpl::removeWrongStoreType(this);
 }
 
-Future<Void> DDTeamCollection::waitUntilHealthy(double extraDelay, bool waitWiggle) {
+Future<Void> DDTeamCollection::waitUntilHealthy(double extraDelay, bool waitWiggle) const {
 	return DDTeamCollectionImpl::waitUntilHealthy(this, extraDelay, waitWiggle);
 }
 

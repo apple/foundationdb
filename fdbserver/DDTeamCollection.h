@@ -322,7 +322,7 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 
 	// NOTE: this actor returns when the cluster is healthy and stable (no server is expected to be removed in a period)
 	// processingWiggle and processingUnhealthy indicate that some servers are going to be removed.
-	Future<Void> waitUntilHealthy(double extraDelay = 0, bool waitWiggle = false);
+	Future<Void> waitUntilHealthy(double extraDelay = 0, bool waitWiggle = false) const;
 
 	bool isCorrectDC(TCServerInfo* server) const;
 
