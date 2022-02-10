@@ -3335,8 +3335,9 @@ std::vector<UID> DDTeamCollection::getRandomHealthyTeam(const UID& excludeServer
 
 int64_t DDTeamCollection::getDebugTotalDataInFlight() const {
 	int64_t total = 0;
-	for (auto itr = server_info.begin(); itr != server_info.end(); ++itr)
-		total += itr->second->dataInFlightToServer;
+	for (const auto& [_, server] : server_info) {
+		total += server->dataInFlightToServer;
+	}
 	return total;
 }
 
@@ -3926,8 +3927,8 @@ bool DDTeamCollection::sanityCheckTeams() const {
 
 int DDTeamCollection::calculateHealthyServerCount() const {
 	int serverCount = 0;
-	for (auto i = server_info.begin(); i != server_info.end(); ++i) {
-		if (!server_status.get(i->first).isUnhealthy()) {
+	for (const auto& [id, _] : server_info) {
+		if (!server_status.get(id).isUnhealthy()) {
 			++serverCount;
 		}
 	}
