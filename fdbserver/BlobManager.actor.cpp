@@ -506,21 +506,35 @@ ACTOR Future<Void> rangeAssigner(Reference<BlobManagerData> bmData) {
 		// modify the in-memory assignment data structures, and send request off to worker
 		state UID workerId;
 		if (assignment.isAssign) {
+			bool skip = false;
 			// Ensure range isn't currently assigned anywhere, and there is only 1 intersecting range
 			auto currentAssignments = bmData->workerAssignments.intersectingRanges(assignment.keyRange);
 			int count = 0;
 			for (auto i = currentAssignments.begin(); i != currentAssignments.end(); ++i) {
-				/* TODO: rethink asserts here
 				if (assignment.assign.get().type == AssignRequestType::Continue) {
-				    ASSERT(assignment.worker.present());
-				    ASSERT(it.value() == assignment.worker.get());
-				} else {
-				    ASSERT(it.value() == UID());
+					ASSERT(assignment.worker.present());
+					if (i.range() != assignment.keyRange || i.cvalue() != assignment.worker.get()) {
+						if (BM_DEBUG) {
+							fmt::print("Out of date re-assign for ({0}, {1}). Assignment must have changed while "
+							           "checking split.\n  Reassign: [{2} - {3}): {4}\n  Existing: [{5} - {6}): {7}\n",
+							           bmData->epoch,
+							           seqNo,
+							           assignment.keyRange.begin.printable(),
+							           assignment.keyRange.end.printable(),
+							           assignment.worker.get().toString().substr(0, 5),
+							           i.begin().printable(),
+							           i.end().printable(),
+							           i.cvalue().toString().substr(0, 5));
+						}
+						skip = true;
+					}
 				}
-				*/
 				count++;
 			}
 			ASSERT(count == 1);
+			if (skip) {
+				continue;
+			}
 
 			if (assignment.worker.present() && assignment.worker.get().isValid()) {
 				if (BM_DEBUG) {
