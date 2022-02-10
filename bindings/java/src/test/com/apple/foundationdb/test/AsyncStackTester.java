@@ -489,10 +489,8 @@ public class AsyncStackTester {
 			}, FDB.DEFAULT_EXECUTOR);
 		}
 		else if (op == StackOperation.TENANT_CLEAR_ACTIVE) {
-			return inst.popParam().thenAcceptAsync(param -> {
-				byte[] tenantName = (byte[])param;
-				inst.context.setTenant(Optional.empty());
-			}, FDB.DEFAULT_EXECUTOR);
+			inst.context.setTenant(Optional.empty());
+			return AsyncUtil.DONE;
 		}
 		else if(op == StackOperation.UNIT_TESTS) {
 			inst.context.db.options().setLocationCacheSize(100001);
