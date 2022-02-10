@@ -541,7 +541,7 @@ public:
 
 	Future<Void> removeBadTeams();
 
-	// Set the server's storeType; Error is catched by the caller
+	// Set the server's storeType; Error is caught by the caller
 	Future<Void> keyValueStoreTypeTracker(TCServerInfo* server);
 
 	Future<Void> storageServerFailureTracker(TCServerInfo* server,
