@@ -1502,7 +1502,7 @@ int worker_process_main(mako_args_t* args, int worker_id, mako_shmhdr_t* shm, pi
 
 	/*** let's party! ***/
 
-	/* set up cluster and datbase for workder threads */
+	/* set up cluster and datbase for worker threads */
 
 #if FDB_API_VERSION < 610
 	/* cluster */
