@@ -72,7 +72,7 @@ struct TSSPairState : ReferenceCounted<TSSPairState>, NonCopyable {
 	TSSPairState(const LocalityData& locality)
 	  : dcId(locality.dcId()), dataHallId(locality.dataHallId()), active(true) {}
 
-	bool inDataZone(const LocalityData& locality) {
+	bool inDataZone(const LocalityData& locality) const {
 		return locality.dcId() == dcId && locality.dataHallId() == dataHallId;
 	}
 
@@ -131,11 +131,11 @@ struct TSSPairState : ReferenceCounted<TSSPairState>, NonCopyable {
 		return false;
 	}
 
-	Future<Optional<std::pair<UID, Version>>> waitOnSS() { return ssPairInfo.getFuture(); }
+	Future<Optional<std::pair<UID, Version>>> waitOnSS() const { return ssPairInfo.getFuture(); }
 
-	Future<bool> waitOnTSS() { return tssPairDone.getFuture(); }
+	Future<bool> waitOnTSS() const { return tssPairDone.getFuture(); }
 
-	Future<Void> waitComplete() { return complete.getFuture(); }
+	Future<Void> waitComplete() const { return complete.getFuture(); }
 };
 
 class ServerStatus {
