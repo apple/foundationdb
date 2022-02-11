@@ -172,6 +172,8 @@ typedef AsyncMap<UID, ServerStatus> ServerStatusMap;
 class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	friend class DDTeamCollectionImpl;
 
+	enum class Status { NONE = 0, WIGGLING = 1, EXCLUDED = 2, FAILED = 3 };
+
 	// addActor: add to actorCollection so that when an actor has error, the ActorCollection can catch the error.
 	// addActor is used to create the actorCollection when the dataDistributionTeamCollection is created
 	PromiseStream<Future<Void>> addActor;
@@ -249,6 +251,12 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	PromiseStream<GetMetricsRequest> getShardMetrics;
 	PromiseStream<Promise<int>> getUnhealthyRelocationCount;
 	Promise<UID> removeFailedServer;
+
+	// WIGGLING if an address is under storage wiggling.
+	// EXCLUDED if an address is in the excluded list in the database.
+	// FAILED if an address is permanently failed.
+	// NONE by default.  Updated asynchronously (eventually)
+	AsyncMap<AddressExclusion, Status> excludedServers;
 
 	Reference<EventCacheHolder> ddTrackerStartingEventHolder;
 	Reference<EventCacheHolder> teamCollectionInfoEventHolder;
@@ -509,8 +517,6 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	void noHealthyTeams() const;
 
 public:
-	enum class Status { NONE = 0, WIGGLING = 1, EXCLUDED = 2, FAILED = 3};
-
 	Database cx;
 	UID distributorId;
 
@@ -525,12 +531,6 @@ public:
 	LocalityMap<UID> machineLocalityMap; // locality info of machines
 
 	std::vector<Reference<TCTeamInfo>> teams;
-
-	// WIGGLING if an address is under storage wiggling.
-	// EXCLUDED if an address is in the excluded list in the database.
-	// FAILED if an address is permanently failed.
-	// NONE by default.  Updated asynchronously (eventually)
-	AsyncMap< AddressExclusion, Status > excludedServers;
 
 	bool primary;
 
