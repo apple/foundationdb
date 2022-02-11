@@ -3660,7 +3660,7 @@ std::vector<UID> DDTeamCollection::getRandomHealthyTeam(const UID& excludeServer
 int64_t DDTeamCollection::getDebugTotalDataInFlight() const {
 	int64_t total = 0;
 	for (const auto& [_, server] : server_info) {
-		total += server->dataInFlightToServer;
+		total += server->getDataInFlightToServer();
 	}
 	return total;
 }

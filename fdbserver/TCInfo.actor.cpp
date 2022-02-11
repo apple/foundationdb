@@ -265,13 +265,14 @@ std::string TCTeamInfo::getServerIDsStr() const {
 
 void TCTeamInfo::addDataInFlightToTeam(int64_t delta) {
 	for (int i = 0; i < servers.size(); i++)
-		servers[i]->dataInFlightToServer += delta;
+		servers[i]->incrementDataInFlightToServer(delta);
 }
 
 int64_t TCTeamInfo::getDataInFlightToTeam() const {
 	int64_t dataInFlight = 0.0;
-	for (int i = 0; i < servers.size(); i++)
-		dataInFlight += servers[i]->dataInFlightToServer;
+	for (auto const& server : servers) {
+		dataInFlight += server->getDataInFlightToServer();
+	}
 	return dataInFlight;
 }
 
@@ -306,7 +307,7 @@ int64_t TCTeamInfo::getMinAvailableSpace(bool includeInFlight) const {
 
 			int64_t bytesAvailable = replyValue.available.bytes;
 			if (includeInFlight) {
-				bytesAvailable -= server->dataInFlightToServer;
+				bytesAvailable -= server->getDataInFlightToServer();
 			}
 
 			minAvailableSpace = std::min(bytesAvailable, minAvailableSpace);
@@ -327,7 +328,7 @@ double TCTeamInfo::getMinAvailableSpaceRatio(bool includeInFlight) const {
 
 			int64_t bytesAvailable = replyValue.available.bytes;
 			if (includeInFlight) {
-				bytesAvailable = std::max((int64_t)0, bytesAvailable - server->dataInFlightToServer);
+				bytesAvailable = std::max((int64_t)0, bytesAvailable - server->getDataInFlightToServer());
 			}
 
 			if (replyValue.capacity.bytes == 0)

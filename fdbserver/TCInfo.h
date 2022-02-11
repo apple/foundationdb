@@ -43,10 +43,11 @@ class TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	// To change storeType for an ip:port, we destroy the old one and create a new one.
 	KeyValueStoreType storeType; // Storage engine type
 
+	int64_t dataInFlightToServer;
+
 public:
 	std::vector<Reference<TCTeamInfo>> teams;
 	Reference<TCMachineInfo> machine;
-	int64_t dataInFlightToServer;
 	ErrorOr<GetStorageMetricsReply> serverMetrics;
 	Promise<std::pair<StorageServerInterface, ProcessClass>> interfaceChanged;
 	Future<std::pair<StorageServerInterface, ProcessClass>> onInterfaceChanged;
@@ -84,6 +85,10 @@ public:
 	Future<Void> updateStoreType();
 
 	KeyValueStoreType getStoreType() const { return storeType; }
+
+	int64_t getDataInFlightToServer() const { return dataInFlightToServer; }
+
+	void incrementDataInFlightToServer(int64_t bytes) { dataInFlightToServer += bytes; }
 
 	void cancel();
 
