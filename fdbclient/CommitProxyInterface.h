@@ -198,8 +198,8 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 	bool locked;
 	Optional<Value> metadataVersion;
 	int64_t midShardSize = 0;
-	uint32_t queueIterations = 0;
-	bool rkThrottled = false;
+	bool rkDefaultThrottled = false;
+	bool rkBatchThrottled = false;
 
 	TransactionTagMap<ClientTagThrottleLimits> tagThrottleInfo;
 
@@ -214,8 +214,8 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 		           metadataVersion,
 		           tagThrottleInfo,
 		           midShardSize,
-		           queueIterations,
-		           rkThrottled);
+		           rkDefaultThrottled,
+		           rkBatchThrottled);
 	}
 };
 
@@ -238,22 +238,21 @@ struct GetReadVersionRequest : TimedRequest {
 	uint32_t transactionCount;
 	uint32_t flags;
 	TransactionPriority priority;
-	uint32_t queueIterations;
 
 	TransactionTagMap<uint32_t> tags;
 
 	Optional<UID> debugID;
 	ReplyPromise<GetReadVersionReply> reply;
 
-	GetReadVersionRequest() : transactionCount(1), flags(0), queueIterations(0) {}
+	GetReadVersionRequest() : transactionCount(1), flags(0) {}
 	GetReadVersionRequest(SpanID spanContext,
 	                      uint32_t transactionCount,
 	                      TransactionPriority priority,
 	                      uint32_t flags = 0,
 	                      TransactionTagMap<uint32_t> tags = TransactionTagMap<uint32_t>(),
 	                      Optional<UID> debugID = Optional<UID>())
-	  : spanContext(spanContext), transactionCount(transactionCount), flags(flags), priority(priority),
-	    queueIterations(0), tags(tags), debugID(debugID) {
+	  : spanContext(spanContext), transactionCount(transactionCount), flags(flags), priority(priority), tags(tags),
+	    debugID(debugID) {
 		flags = flags & ~FLAG_PRIORITY_MASK;
 		switch (priority) {
 		case TransactionPriority::BATCH:
@@ -274,7 +273,7 @@ struct GetReadVersionRequest : TimedRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, transactionCount, flags, tags, debugID, reply, spanContext, queueIterations);
+		serializer(ar, transactionCount, flags, tags, debugID, reply, spanContext);
 
 		if (ar.isDeserializing) {
 			if ((flags & PRIORITY_SYSTEM_IMMEDIATE) == PRIORITY_SYSTEM_IMMEDIATE) {

@@ -74,11 +74,7 @@ struct SidebandSingleWorkload : TestWorkload {
 	}
 
 	std::string description() const override { return "SidebandSingleWorkload"; }
-	Future<Void> setup(Database const& cx) override {
-		if (clientId != 0)
-			return Void();
-		return persistInterface(this, cx);
-	}
+	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override {
 		if (clientId != 0)
 			return Void();
@@ -108,51 +104,8 @@ struct SidebandSingleWorkload : TestWorkload {
 		m.push_back(keysUnexpectedlyPresent.getMetric());
 	}
 
-	ACTOR Future<Void> persistInterface(SidebandSingleWorkload* self, Database cx) {
-		state Transaction tr(cx);
-		BinaryWriter wr(IncludeVersion());
-		wr << self->interf;
-		state Standalone<StringRef> serializedInterface = wr.toValue();
-		loop {
-			try {
-				Optional<Value> val = wait(tr.get(StringRef(format("Sideband/Client/%d", self->clientId))));
-				if (val.present()) {
-					if (val.get() != serializedInterface)
-						throw operation_failed();
-					break;
-				}
-				tr.set(format("Sideband/Client/%d", self->clientId), serializedInterface);
-				wait(tr.commit());
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
-		TraceEvent("SidebandPersisted", self->interf.id()).detail("ClientIdx", self->clientId);
-		return Void();
-	}
-
-	ACTOR Future<SidebandInterface> fetchSideband(SidebandSingleWorkload* self, Database cx) {
-		state Transaction tr(cx);
-		loop {
-			try {
-				Optional<Value> val = wait(tr.get(StringRef(format("Sideband/Client/%d", self->clientId))));
-				if (!val.present()) {
-					throw operation_failed();
-				}
-				SidebandInterface sideband;
-				BinaryReader br(val.get(), IncludeVersion());
-				br >> sideband;
-				TraceEvent("SidebandFetched", sideband.id()).detail("ClientIdx", self->clientId);
-				return sideband;
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
-	}
-
 	ACTOR Future<Void> mutator(SidebandSingleWorkload* self, Database cx) {
-		state SidebandInterface checker = wait(self->fetchSideband(self, cx));
+		state SidebandInterface checker = self->interf;
 		state double lastTime = now();
 		state Version commitVersion;
 		state bool unknown = false;

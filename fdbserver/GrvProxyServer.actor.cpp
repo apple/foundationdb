@@ -47,8 +47,10 @@ struct GrvProxyStats {
 	double percentageOfDefaultGRVQueueProcessed;
 	double percentageOfBatchGRVQueueProcessed;
 
-	bool lastTxnThrottled;
-	double throttleStartTime;
+	bool lastBatchQueueThrottled;
+	bool lastDefaultQueueThrottled;
+	double batchThrottleStartTime;
+	double defaultThrottleStartTime;
 
 	LatencySample defaultTxnGRVTimeInQueue;
 	LatencySample batchTxnGRVTimeInQueue;
@@ -102,7 +104,8 @@ struct GrvProxyStats {
 	    updatesFromRatekeeper("UpdatesFromRatekeeper", cc), leaseTimeouts("LeaseTimeouts", cc), systemGRVQueueSize(0),
 	    defaultGRVQueueSize(0), batchGRVQueueSize(0), transactionRateAllowed(0), batchTransactionRateAllowed(0),
 	    transactionLimit(0), batchTransactionLimit(0), percentageOfDefaultGRVQueueProcessed(0),
-	    percentageOfBatchGRVQueueProcessed(0), lastTxnThrottled(false), throttleStartTime(0.0),
+	    percentageOfBatchGRVQueueProcessed(0), lastBatchQueueThrottled(false), lastDefaultQueueThrottled(false),
+	    batchThrottleStartTime(0.0), defaultThrottleStartTime(0.0),
 	    defaultTxnGRVTimeInQueue("DefaultTxnGRVTimeInQueue",
 	                             id,
 	                             SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
@@ -653,31 +656,16 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
 			}
 		}
 
-		reply.queueIterations = request.queueIterations;
-		TraceEvent(SevDebug, "DebugGrvProxyThrottleCheck")
-		    .detail("QueueIterations", reply.queueIterations)
-		    .detail("ThrottleThreshold", CLIENT_KNOBS->GRV_THROTTLING_THRESHOLD)
-		    .detail("LastTxnThrottled", stats->lastTxnThrottled)
-		    .detail("ThrottleStartTime", format("%.6f", stats->throttleStartTime))
-		    .detail("Diff", now() - stats->throttleStartTime)
-		    .detail("SustainedThrottlingThreshold", CLIENT_KNOBS->GRV_SUSTAINED_THROTTLING_THRESHOLD);
-		if (reply.queueIterations >= CLIENT_KNOBS->GRV_THROTTLING_THRESHOLD) {
-			if (stats->lastTxnThrottled) {
-				// Check if this throttling has been sustained for a certain amount of time to avoid false positives
-				if (now() - stats->throttleStartTime > CLIENT_KNOBS->GRV_SUSTAINED_THROTTLING_THRESHOLD) {
-					reply.rkThrottled = true;
-				}
-			} else { // !stats->lastTxnThrottled
-				// If not previously throttled, this request/reply is our new starting point
-				// for judging whether we are being actively throttled by ratekeeper now
-				stats->lastTxnThrottled = true;
-				stats->throttleStartTime = now();
+		if (stats->lastBatchQueueThrottled) {
+			// Check if this throttling has been sustained for a certain amount of time to avoid false positives
+			if (now() - stats->batchThrottleStartTime > CLIENT_KNOBS->GRV_SUSTAINED_THROTTLING_THRESHOLD) {
+				reply.rkBatchThrottled = true;
 			}
-		} else {
-			// If an immediate priority txn comes in, it may get processed on the first time through and
-			// reset our throttling state prematurely.
-			if (request.priority != TransactionPriority::IMMEDIATE) {
-				stats->lastTxnThrottled = false;
+		}
+		if (stats->lastDefaultQueueThrottled) {
+			// Check if this throttling has been sustained for a certain amount of time to avoid false positives
+			if (now() - stats->defaultThrottleStartTime > CLIENT_KNOBS->GRV_SUSTAINED_THROTTLING_THRESHOLD) {
+				reply.rkDefaultThrottled = true;
 			}
 		}
 		request.reply.send(reply);
@@ -841,7 +829,6 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 			// transactionQueue->span.swap(span);
 
 			auto& req = transactionQueue->front();
-			req.queueIterations++;
 			int tc = req.transactionCount;
 
 			if (req.priority < TransactionPriority::DEFAULT &&
@@ -876,6 +863,18 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 			static_assert(GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY == 1, "Implementation dependent on flag value");
 			transactionQueue->pop_front();
 			requestsToStart++;
+		}
+		if (!batchQueue.empty()) {
+			grvProxyData->stats.lastBatchQueueThrottled = true;
+			grvProxyData->stats.batchThrottleStartTime = now();
+		} else {
+			grvProxyData->stats.lastBatchQueueThrottled = false;
+		}
+		if (!defaultQueue.empty()) {
+			grvProxyData->stats.lastDefaultQueueThrottled = true;
+			grvProxyData->stats.defaultThrottleStartTime = now();
+		} else {
+			grvProxyData->stats.lastDefaultQueueThrottled = false;
 		}
 
 		if (!systemQueue.empty() || !defaultQueue.empty() || !batchQueue.empty()) {

@@ -475,7 +475,8 @@ public:
 	void updateCachedReadVersion(double t, Version v);
 	Version getCachedReadVersion();
 	double getLastGrvTime();
-	double lastRkThrottleTime;
+	double lastRkBatchThrottleTime;
+	double lastRkDefaultThrottleTime;
 	// Cached RVs can be updated through commits, and using cached RVs avoids the proxies altogether
 	// Because our checks for ratekeeper throttling requires communication with the proxies,
 	// we want to track the last time in order to periodically contact the proxy to check for throttling

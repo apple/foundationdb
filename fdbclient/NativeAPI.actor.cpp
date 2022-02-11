@@ -1306,10 +1306,10 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
     transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
     transactionGrvFullBatches("NumGrvFullBatches", cc), transactionGrvTimedOutBatches("NumGrvTimedOutBatches", cc),
     latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000),
-    bytesPerCommit(1000), outstandingWatches(0), lastGrvTime(0.0), cachedReadVersion(0), lastRkThrottleTime(0.0),
-    lastProxyRequestTime(0.0), transactionTracingSample(false), taskID(taskID), clientInfo(clientInfo),
-    clientInfoMonitor(clientInfoMonitor), coordinator(coordinator), apiVersion(apiVersion), mvCacheInsertLocation(0),
-    healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0),
+    bytesPerCommit(1000), outstandingWatches(0), lastGrvTime(0.0), cachedReadVersion(0), lastRkBatchThrottleTime(0.0),
+    lastRkDefaultThrottleTime(0.0), lastProxyRequestTime(0.0), transactionTracingSample(false), taskID(taskID),
+    clientInfo(clientInfo), clientInfoMonitor(clientInfoMonitor), coordinator(coordinator), apiVersion(apiVersion),
+    mvCacheInsertLocation(0), healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0),
     smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
     specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)),
     connectToDatabaseEventCacheHolder(format("ConnectToDatabase/%s", dbId.toString().c_str())) {
@@ -5963,11 +5963,15 @@ ACTOR Future<Version> extractReadVersion(Reference<TransactionState> trState,
                                          Promise<Optional<Value>> metadataVersion) {
 	state Span span(spanContext, location, { trState->spanID });
 	GetReadVersionReply rep = wait(f);
-	double latency = now() - trState->startTime;
+	double replyTime = now();
+	double latency = replyTime - trState->startTime;
 	trState->cx->lastProxyRequestTime = trState->startTime;
 	trState->cx->updateCachedReadVersion(trState->startTime, rep.version);
-	if (rep.rkThrottled && trState->options.priority != TransactionPriority::IMMEDIATE) {
-		trState->cx->lastRkThrottleTime = now();
+	if (rep.rkBatchThrottled) {
+		trState->cx->lastRkBatchThrottleTime = replyTime;
+	}
+	if (rep.rkDefaultThrottled) {
+		trState->cx->lastRkDefaultThrottleTime = replyTime;
 	}
 	trState->cx->GRVLatencies.addSample(latency);
 	if (trState->trLogInfo)
@@ -6025,11 +6029,21 @@ ACTOR Future<Version> extractReadVersion(Reference<TransactionState> trState,
 	return rep.version;
 }
 
-bool rkThrottlingCooledDown(DatabaseContext* cx) {
-	if (cx->lastRkThrottleTime == 0.0) {
+bool rkThrottlingCooledDown(DatabaseContext* cx, TransactionPriority priority) {
+	if (priority == TransactionPriority::IMMEDIATE) {
 		return true;
+	} else if (priority == TransactionPriority::BATCH) {
+		if (cx->lastRkBatchThrottleTime == 0.0) {
+			return true;
+		}
+		return (now() - cx->lastRkBatchThrottleTime > CLIENT_KNOBS->GRV_CACHE_RK_COOLDOWN);
+	} else if (priority == TransactionPriority::DEFAULT) {
+		if (cx->lastRkDefaultThrottleTime == 0.0) {
+			return true;
+		}
+		return (now() - cx->lastRkDefaultThrottleTime > CLIENT_KNOBS->GRV_CACHE_RK_COOLDOWN);
 	}
-	return (now() - cx->lastRkThrottleTime > CLIENT_KNOBS->GRV_CACHE_RK_COOLDOWN);
+	return false;
 }
 
 Future<Version> Transaction::getReadVersion(uint32_t flags) {
@@ -6037,7 +6051,7 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 		if (!CLIENT_KNOBS->FORCE_GRV_CACHE_OFF && !trState->options.skipGrvCache &&
 		    (deterministicRandom()->random01() <= CLIENT_KNOBS->DEBUG_USE_GRV_CACHE_CHANCE ||
 		     trState->options.useGrvCache) &&
-		    rkThrottlingCooledDown(getDatabase().getPtr())) {
+		    rkThrottlingCooledDown(getDatabase().getPtr(), trState->options.priority)) {
 			// Upon our first request to use cached RVs, start the background updater
 			if (!trState->cx->grvUpdateHandler.isValid()) {
 				trState->cx->grvUpdateHandler = backgroundGrvUpdater(getDatabase().getPtr());
