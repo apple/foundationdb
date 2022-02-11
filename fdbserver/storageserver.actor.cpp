@@ -5186,12 +5186,15 @@ void changeServerKeys(StorageServer* data,
 				            swapAndPop(&feedList, i--);
 				        }
 				    }
-				}*/
+				}
+				data->keyChangeFeed.coalesce(f.second.contents());
+				*/
+
 				// We can't actually remove this change feed fully until the mutations clearing its data become durable.
 				// If the SS restarted at version R before the clearing mutations became durable at version D (R < D),
 				// then the restarted SS would restore the change feed clients would be able to read data and would miss
 				// mutations from versions [R, D), up until we got the private mutation triggering the cleanup again.
-				data->keyChangeFeed.coalesce(f.second.contents());
+
 				auto feed = data->uidChangeFeed.find(f.first);
 				if (feed != data->uidChangeFeed.end()) {
 					feed->second->emptyVersion = version - 1;
@@ -6210,6 +6213,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 							}
 						}
 					}
+					data->keyChangeFeed.coalesce(feed->second->range.contents());
 					data->uidChangeFeed.erase(feed);
 				} else {
 					TEST(true); // Feed re-fetched after remove
