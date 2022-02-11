@@ -3599,8 +3599,7 @@ DDTeamCollection::~DDTeamCollection() {
 	// stopped
 	//  before the server_status map to which it has a pointer, is destroyed.
 	for (auto& [_, info] : server_and_tss_info) {
-		info->tracker.cancel();
-		info->collection = nullptr;
+		info->cancel();
 	}
 
 	storageWiggler->teamCollection = nullptr;
@@ -4692,7 +4691,7 @@ void DDTeamCollection::addServer(StorageServerInterface newServer,
 		checkAndCreateMachine(r);
 	}
 
-	r->tracker = storageServerTracker(cx, r.getPtr(), errorOut, addedVersion, ddEnabledState, newServer.isTss());
+	r->setTracker(storageServerTracker(cx, r.getPtr(), errorOut, addedVersion, ddEnabledState, newServer.isTss()));
 
 	if (!newServer.isTss()) {
 		// link and wake up tss' tracker so it knows when this server gets removed

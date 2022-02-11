@@ -128,10 +128,9 @@ TCServerInfo::TCServerInfo(StorageServerInterface ssi,
                            bool inDesiredDC,
                            Reference<LocalitySet> storageServerSet,
                            Version addedVersion)
-  : id(ssi.id()), addedVersion(addedVersion), collection(collection), lastKnownInterface(ssi),
+  : id(ssi.id()), inDesiredDC(inDesiredDC), collection(collection), addedVersion(addedVersion), lastKnownInterface(ssi),
     lastKnownClass(processClass), dataInFlightToServer(0), onInterfaceChanged(interfaceChanged.getFuture()),
-    onRemoved(removed.getFuture()), onTSSPairRemoved(Never()), inDesiredDC(inDesiredDC),
-    storeType(KeyValueStoreType::END) {
+    onRemoved(removed.getFuture()), onTSSPairRemoved(Never()), storeType(KeyValueStoreType::END) {
 
 	if (!ssi.isTss()) {
 		localityEntry = ((LocalityMap<UID>*)storageServerSet.getPtr())->add(ssi.locality, &id);
@@ -154,6 +153,11 @@ void TCServerInfo::updateInDesiredDC(std::vector<Optional<Key>> const& includedD
 	inDesiredDC =
 	    (includedDCs.empty() ||
 	     std::find(includedDCs.begin(), includedDCs.end(), lastKnownInterface.locality.dcId()) != includedDCs.end());
+}
+
+void TCServerInfo::cancel() {
+	tracker.cancel();
+	collection = nullptr;
 }
 
 TCServerInfo::~TCServerInfo() {

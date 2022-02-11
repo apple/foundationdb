@@ -30,15 +30,15 @@ class TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	friend class TCServerInfoImpl;
 	UID id;
 	bool inDesiredDC;
+	DDTeamCollection* collection;
+	Future<Void> tracker;
 
 public:
 	Version addedVersion; // Read version when this Server is added
-	DDTeamCollection* collection;
 	StorageServerInterface lastKnownInterface;
 	ProcessClass lastKnownClass;
 	std::vector<Reference<TCTeamInfo>> teams;
 	Reference<TCMachineInfo> machine;
-	Future<Void> tracker;
 	int64_t dataInFlightToServer;
 	ErrorOr<GetStorageMetricsReply> serverMetrics;
 	Promise<std::pair<StorageServerInterface, ProcessClass>> interfaceChanged;
@@ -68,6 +68,10 @@ public:
 	bool isInDesiredDC() const { return inDesiredDC; }
 
 	void updateInDesiredDC(std::vector<Optional<Key>> const& includedDCs);
+
+	void setTracker(Future<Void> tracker) { this->tracker = tracker; }
+
+	void cancel();
 
 	bool isCorrectStoreType(KeyValueStoreType configStoreType) const {
 		// A new storage server's store type may not be set immediately.
