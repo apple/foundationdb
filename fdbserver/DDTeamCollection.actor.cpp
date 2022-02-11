@@ -5003,7 +5003,7 @@ TEST_CASE("/DataDistribution/GetTeam/NewServersNotNeeded") {
 	Reference<IReplicationPolicy> policy =
 	    Reference<IReplicationPolicy>(new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
 	state int processSize = 5;
- 	state int teamSize = 3;
+	state int teamSize = 3;
 	state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
 
 	GetStorageMetricsReply mid_avail;
@@ -5020,10 +5020,10 @@ TEST_CASE("/DataDistribution/GetTeam/NewServersNotNeeded") {
 	collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), true);
 	collection->doBuildTeams = false;
 	collection->checkTeamDelay = Void();
-	
+
 	collection->server_info[UID(1, 0)]->serverMetrics = mid_avail;
-	collection->server_info[UID(2, 0)]->serverMetrics = high_avail;	
-	collection->server_info[UID(3, 0)]->serverMetrics = high_avail;	
+	collection->server_info[UID(2, 0)]->serverMetrics = high_avail;
+	collection->server_info[UID(3, 0)]->serverMetrics = high_avail;
 	collection->server_info[UID(4, 0)]->serverMetrics = high_avail;
 
 	/*
@@ -5041,13 +5041,13 @@ TEST_CASE("/DataDistribution/GetTeam/NewServersNotNeeded") {
 
 	state GetTeamRequest req(wantsNewServers, wantsTrueBest, preferLowerUtilization, teamMustHaveShards);
 	req.completeSources = completeSources;
-	
+
 	Future<Void> a = collection->getTeam(req);
 	wait(a);
 
 	std::pair<Optional<Reference<IDataDistributionTeam>>, bool> resTeam = req.reply.getFuture().get();
 
-	std::set<UID> expectedServers{ UID(1, 0), UID(2, 0), UID(3, 0)};	
+	std::set<UID> expectedServers{ UID(1, 0), UID(2, 0), UID(3, 0) };
 	ASSERT(resTeam.first.present());
 	auto servers = resTeam.first.get()->getServerIDs();
 	const std::set<UID> selectedServers(servers.begin(), servers.end());
@@ -5062,7 +5062,7 @@ TEST_CASE("/DataDistribution/GetTeam/HealthyCompleteSource") {
 	Reference<IReplicationPolicy> policy =
 	    Reference<IReplicationPolicy>(new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
 	state int processSize = 5;
- 	state int teamSize = 3;
+	state int teamSize = 3;
 	state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
 
 	GetStorageMetricsReply mid_avail;
@@ -5079,11 +5079,11 @@ TEST_CASE("/DataDistribution/GetTeam/HealthyCompleteSource") {
 	collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), true);
 	collection->doBuildTeams = false;
 	collection->checkTeamDelay = Void();
-	
+
 	collection->server_info[UID(1, 0)]->serverMetrics = mid_avail;
-	collection->server_info[UID(2, 0)]->serverMetrics = high_avail;	
-	collection->server_info[UID(3, 0)]->serverMetrics = high_avail;	
-	collection->server_info[UID(4, 0)]->serverMetrics = high_avail;	
+	collection->server_info[UID(2, 0)]->serverMetrics = high_avail;
+	collection->server_info[UID(3, 0)]->serverMetrics = high_avail;
+	collection->server_info[UID(4, 0)]->serverMetrics = high_avail;
 	collection->server_info[UID(1, 0)]->teams[0]->setHealthy(false);
 
 	/*
@@ -5105,13 +5105,13 @@ TEST_CASE("/DataDistribution/GetTeam/HealthyCompleteSource") {
 	collection->traceAllInfo();
 	collection->traceServerInfo();
 	collection->traceServerTeamInfo();
-	
+
 	Future<Void> a = collection->getTeam(req);
 	wait(a);
 
 	std::pair<Optional<Reference<IDataDistributionTeam>>, bool> resTeam = req.reply.getFuture().get();
 
-	std::set<UID> expectedServers{ UID(2, 0), UID(3, 0), UID(4, 0)};
+	std::set<UID> expectedServers{ UID(2, 0), UID(3, 0), UID(4, 0) };
 	ASSERT(resTeam.first.present());
 	auto servers = resTeam.first.get()->getServerIDs();
 	const std::set<UID> selectedServers(servers.begin(), servers.end());
@@ -5126,9 +5126,9 @@ TEST_CASE("/DataDistribution/GetTeam/TrueBestLeastUtilized") {
 	Reference<IReplicationPolicy> policy =
 	    Reference<IReplicationPolicy>(new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
 	state int processSize = 5;
- 	state int teamSize = 3;
+	state int teamSize = 3;
 	state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
-	
+
 	GetStorageMetricsReply mid_avail;
 	mid_avail.capacity.bytes = 1000 * 1024 * 1024;
 	mid_avail.available.bytes = 400 * 1024 * 1024;
@@ -5150,9 +5150,9 @@ TEST_CASE("/DataDistribution/GetTeam/TrueBestLeastUtilized") {
 	 */
 
 	collection->server_info[UID(1, 0)]->serverMetrics = mid_avail;
-	collection->server_info[UID(2, 0)]->serverMetrics = high_avail;	
-	collection->server_info[UID(3, 0)]->serverMetrics = high_avail;	
-	collection->server_info[UID(4, 0)]->serverMetrics = high_avail;	
+	collection->server_info[UID(2, 0)]->serverMetrics = high_avail;
+	collection->server_info[UID(3, 0)]->serverMetrics = high_avail;
+	collection->server_info[UID(4, 0)]->serverMetrics = high_avail;
 
 	bool wantsNewServers = true;
 	bool wantsTrueBest = true;
@@ -5162,13 +5162,13 @@ TEST_CASE("/DataDistribution/GetTeam/TrueBestLeastUtilized") {
 
 	state GetTeamRequest req(wantsNewServers, wantsTrueBest, preferLowerUtilization, teamMustHaveShards);
 	req.completeSources = completeSources;
-	
+
 	Future<Void> a = collection->getTeam(req);
 	wait(a);
 
 	std::pair<Optional<Reference<IDataDistributionTeam>>, bool> resTeam = req.reply.getFuture().get();
 
-	std::set<UID> expectedServers{ UID(2, 0), UID(3, 0), UID(4, 0)};
+	std::set<UID> expectedServers{ UID(2, 0), UID(3, 0), UID(4, 0) };
 	ASSERT(resTeam.first.present());
 	auto servers = resTeam.first.get()->getServerIDs();
 	const std::set<UID> selectedServers(servers.begin(), servers.end());
@@ -5183,9 +5183,9 @@ TEST_CASE("/DataDistribution/GetTeam/TrueBestMostUtilized") {
 	Reference<IReplicationPolicy> policy =
 	    Reference<IReplicationPolicy>(new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
 	state int processSize = 5;
- 	state int teamSize = 3;
+	state int teamSize = 3;
 	state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
-	
+
 	GetStorageMetricsReply mid_avail;
 	mid_avail.capacity.bytes = 1000 * 1024 * 1024;
 	mid_avail.available.bytes = 400 * 1024 * 1024;
@@ -5202,9 +5202,9 @@ TEST_CASE("/DataDistribution/GetTeam/TrueBestMostUtilized") {
 	collection->checkTeamDelay = Void();
 
 	collection->server_info[UID(1, 0)]->serverMetrics = mid_avail;
-	collection->server_info[UID(2, 0)]->serverMetrics = high_avail;	
-	collection->server_info[UID(3, 0)]->serverMetrics = high_avail;	
-	collection->server_info[UID(4, 0)]->serverMetrics = high_avail;	
+	collection->server_info[UID(2, 0)]->serverMetrics = high_avail;
+	collection->server_info[UID(3, 0)]->serverMetrics = high_avail;
+	collection->server_info[UID(4, 0)]->serverMetrics = high_avail;
 
 	/*
 	 * Among server teams that have healthy space available, pick the team that is
@@ -5219,13 +5219,13 @@ TEST_CASE("/DataDistribution/GetTeam/TrueBestMostUtilized") {
 
 	state GetTeamRequest req(wantsNewServers, wantsTrueBest, preferLowerUtilization, teamMustHaveShards);
 	req.completeSources = completeSources;
-	
+
 	Future<Void> a = collection->getTeam(req);
 	wait(a);
 
 	std::pair<Optional<Reference<IDataDistributionTeam>>, bool> resTeam = req.reply.getFuture().get();
 
-	std::set<UID> expectedServers{ UID(1, 0), UID(2, 0), UID(3, 0)};
+	std::set<UID> expectedServers{ UID(1, 0), UID(2, 0), UID(3, 0) };
 	ASSERT(resTeam.first.present());
 	auto servers = resTeam.first.get()->getServerIDs();
 	const std::set<UID> selectedServers(servers.begin(), servers.end());
@@ -5240,9 +5240,9 @@ TEST_CASE("/DataDistribution/GetTeam/ServerUtilizationBelowCutoff") {
 	Reference<IReplicationPolicy> policy =
 	    Reference<IReplicationPolicy>(new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
 	state int processSize = 5;
- 	state int teamSize = 3;
+	state int teamSize = 3;
 	state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
-	
+
 	GetStorageMetricsReply low_avail;
 	low_avail.capacity.bytes = SERVER_KNOBS->MIN_AVAILABLE_SPACE * 20;
 	low_avail.available.bytes = SERVER_KNOBS->MIN_AVAILABLE_SPACE / 2;
@@ -5259,8 +5259,8 @@ TEST_CASE("/DataDistribution/GetTeam/ServerUtilizationBelowCutoff") {
 	collection->checkTeamDelay = Void();
 
 	collection->server_info[UID(1, 0)]->serverMetrics = high_avail;
-	collection->server_info[UID(2, 0)]->serverMetrics = low_avail;	
-	collection->server_info[UID(3, 0)]->serverMetrics = high_avail;	
+	collection->server_info[UID(2, 0)]->serverMetrics = low_avail;
+	collection->server_info[UID(3, 0)]->serverMetrics = high_avail;
 	collection->server_info[UID(4, 0)]->serverMetrics = low_avail;
 	collection->server_info[UID(1, 0)]->teams[0]->setHealthy(false);
 
@@ -5278,7 +5278,7 @@ TEST_CASE("/DataDistribution/GetTeam/ServerUtilizationBelowCutoff") {
 
 	state GetTeamRequest req(wantsNewServers, wantsTrueBest, preferLowerUtilization, teamMustHaveShards);
 	req.completeSources = completeSources;
-	
+
 	Future<Void> a = collection->getTeam(req);
 	wait(a);
 
@@ -5295,9 +5295,9 @@ TEST_CASE("/DataDistribution/GetTeam/ServerUtilizationNearCutoff") {
 	Reference<IReplicationPolicy> policy =
 	    Reference<IReplicationPolicy>(new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
 	state int processSize = 5;
- 	state int teamSize = 3;
+	state int teamSize = 3;
 	state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
-	
+
 	GetStorageMetricsReply low_avail;
 	if (SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO > 0) {
 		/* Pick a capacity where MIN_AVAILABLE_SPACE_RATIO of the capacity would be higher than MIN_AVAILABLE_SPACE */
@@ -5320,8 +5320,8 @@ TEST_CASE("/DataDistribution/GetTeam/ServerUtilizationNearCutoff") {
 	collection->checkTeamDelay = Void();
 
 	collection->server_info[UID(1, 0)]->serverMetrics = high_avail;
-	collection->server_info[UID(2, 0)]->serverMetrics = low_avail;	
-	collection->server_info[UID(3, 0)]->serverMetrics = high_avail;	
+	collection->server_info[UID(2, 0)]->serverMetrics = low_avail;
+	collection->server_info[UID(3, 0)]->serverMetrics = high_avail;
 	collection->server_info[UID(4, 0)]->serverMetrics = low_avail;
 	collection->server_info[UID(5, 0)]->serverMetrics = high_avail;
 	collection->server_info[UID(1, 0)]->teams[0]->setHealthy(false);
@@ -5340,13 +5340,13 @@ TEST_CASE("/DataDistribution/GetTeam/ServerUtilizationNearCutoff") {
 
 	state GetTeamRequest req(wantsNewServers, wantsTrueBest, preferLowerUtilization, teamMustHaveShards);
 	req.completeSources = completeSources;
-	
+
 	Future<Void> a = collection->getTeam(req);
 	wait(a);
 
 	std::pair<Optional<Reference<IDataDistributionTeam>>, bool> resTeam = req.reply.getFuture().get();
 
-	std::set<UID> expectedServers{ UID(2, 0), UID(3, 0), UID(4, 0)};
+	std::set<UID> expectedServers{ UID(2, 0), UID(3, 0), UID(4, 0) };
 	ASSERT(resTeam.first.present());
 	auto servers = resTeam.first.get()->getServerIDs();
 	const std::set<UID> selectedServers(servers.begin(), servers.end());
