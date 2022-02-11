@@ -355,9 +355,6 @@ struct ChangeFeedInfo : ReferenceCounted<ChangeFeedInfo> {
 	KeyRangeMap<std::vector<Promise<Void>>> moveTriggers;
 
 	void triggerOnMove(KeyRange range, Promise<Void> p) {
-		printf("DBG: Trigger onMove registering [%s - %s)\n",
-		       range.begin.printable().c_str(),
-		       range.end.printable().c_str());
 		auto toInsert = moveTriggers.modify(range);
 		for (auto triggerRange = toInsert.begin(); triggerRange != toInsert.end(); ++triggerRange) {
 			triggerRange->value().push_back(p);
@@ -365,7 +362,6 @@ struct ChangeFeedInfo : ReferenceCounted<ChangeFeedInfo> {
 	}
 
 	void moved(KeyRange range) {
-		printf("DBG: onMove triggered [%s - %s)\n", range.begin.printable().c_str(), range.end.printable().c_str());
 		auto toTrigger = moveTriggers.intersectingRanges(range);
 		for (auto triggerRange : toTrigger) {
 			for (int i = 0; i < triggerRange.cvalue().size(); i++) {
@@ -4435,7 +4431,16 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data, KeyR
 			                                                : ChangeFeedStatus::CHANGE_FEED_CREATE)));
 		} else {
 			auto changeFeedInfo = existingEntry->second;
-			if (changeFeedInfo->emptyVersion < cfEntry.emptyVersion) {
+			auto feedCleanup = data->changeFeedCleanupDurable.find(cfEntry.rangeId);
+
+			if (feedCleanup != data->changeFeedCleanupDurable.end()) {
+				TEST(true); // re-fetching feed scheduled for deletion!
+				ASSERT(fetchVersion > feedCleanup->second);
+				changeFeedInfo->emptyVersion = cfEntry.emptyVersion;
+				changeFeedInfo->stopped = cfEntry.stopped;
+				changeFeedInfo->removing = false;
+				data->changeFeedCleanupDurable.erase(feedCleanup);
+			} else if (changeFeedInfo->emptyVersion < cfEntry.emptyVersion) {
 				TEST(true); // Got updated CF emptyVersion from a parallel fetchChangeFeedMetadata
 				changeFeedInfo->emptyVersion = cfEntry.emptyVersion;
 				auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
@@ -4483,6 +4488,7 @@ ACTOR Future<std::unordered_map<Key, Version>> dispatchChangeFeeds(StorageServer
 			auto feedIt = data->uidChangeFeed.find(feedId);
 			// we just read the change feed data map earlier in fetchKeys without yielding, so these feeds must exist
 			ASSERT(feedIt != data->uidChangeFeed.end());
+			ASSERT(!feedIt->second->removing);
 			feedFetches[feedIt->second->id] = fetchChangeFeed(data, feedIt->second, 0, endVersion);
 		}
 
@@ -5178,23 +5184,29 @@ void changeServerKeys(StorageServer* data,
 				                                           changeFeedDurableKey(f.first, 0),
 				                                           changeFeedDurableKey(f.first, version)));
 
-				auto rs = data->keyChangeFeed.modify(f.second);
+				// do this cleanup later!!
+				/*auto rs = data->keyChangeFeed.modify(f.second);
 				for (auto r = rs.begin(); r != rs.end(); ++r) {
-					auto& feedList = r->value();
-					for (int i = 0; i < feedList.size(); i++) {
-						if (feedList[i]->id == f.first) {
-							swapAndPop(&feedList, i--);
-						}
-					}
-				}
+				    auto& feedList = r->value();
+				    for (int i = 0; i < feedList.size(); i++) {
+				        if (feedList[i]->id == f.first) {
+				            swapAndPop(&feedList, i--);
+				        }
+				    }
+				}*/
+				// We can't actually remove this change feed fully until the mutations clearing its data become durable.
+				// If the SS restarted at version R before the clearing mutations became durable at version D (R < D),
+				// then the restarted SS would restore the change feed clients would be able to read data and would miss
+				// mutations from versions [R, D), up until we got the private mutation triggering the cleanup again.
 				data->keyChangeFeed.coalesce(f.second.contents());
 				auto feed = data->uidChangeFeed.find(f.first);
 				if (feed != data->uidChangeFeed.end()) {
 					feed->second->emptyVersion = version - 1;
+					feed->second->stopped = true;
 					feed->second->removing = true;
 					feed->second->moved(feed->second->range);
 					feed->second->newMutations.trigger();
-					data->uidChangeFeed.erase(feed);
+					// data->uidChangeFeed.erase(feed);
 				}
 			} else {
 				// if just part of feed's range is moved away
@@ -5368,9 +5380,11 @@ private:
 				rollback(data, rollbackVersion, currentVersion);
 			}
 			for (auto& it : data->uidChangeFeed) {
-				it.second->mutations.push_back(MutationsAndVersionRef(currentVersion, rollbackVersion));
-				it.second->mutations.back().mutations.push_back_deep(it.second->mutations.back().arena(), m);
-				data->currentChangeFeeds.insert(it.first);
+				if (!it.second->stopped && !it.second->removing) {
+					it.second->mutations.push_back(MutationsAndVersionRef(currentVersion, rollbackVersion));
+					it.second->mutations.back().mutations.push_back_deep(it.second->mutations.back().arena(), m);
+					data->currentChangeFeeds.insert(it.first);
+				}
 			}
 
 			data->recoveryVersionSkips.emplace_back(rollbackVersion, currentVersion - rollbackVersion);
@@ -5508,17 +5522,24 @@ private:
 				                               MutationRef(MutationRef::ClearRange,
 				                                           changeFeedDurableKey(feed->second->id, 0),
 				                                           changeFeedDurableKey(feed->second->id, currentVersion)));
-				auto rs = data->keyChangeFeed.modify(feed->second->range);
+				/*auto rs = data->keyChangeFeed.modify(feed->second->range);
 				for (auto r = rs.begin(); r != rs.end(); ++r) {
-					auto& feedList = r->value();
-					for (int i = 0; i < feedList.size(); i++) {
-						if (feedList[i] == feed->second) {
-							swapAndPop(&feedList, i--);
-						}
-					}
+				    auto& feedList = r->value();
+				    for (int i = 0; i < feedList.size(); i++) {
+				        if (feedList[i] == feed->second) {
+				            swapAndPop(&feedList, i--);
+				        }
+				    }
 				}
 				data->keyChangeFeed.coalesce(feed->second->range.contents());
-				data->uidChangeFeed.erase(feed);
+				data->uidChangeFeed.erase(feed);*/
+
+				feed->second->emptyVersion = currentVersion - 1;
+				feed->second->stopped = true;
+				feed->second->removing = true;
+				feed->second->moved(feed->second->range);
+				feed->second->newMutations.trigger();
+
 				data->changeFeedCleanupDurable[feed->first] = cleanupVersion;
 			}
 
@@ -6178,6 +6199,34 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		auto cfCleanup = data->changeFeedCleanupDurable.begin();
 		while (cfCleanup != data->changeFeedCleanupDurable.end()) {
 			if (cfCleanup->second <= newOldestVersion) {
+				// remove from the data structure here, if it wasn't added back by another fetch or something
+				auto feed = data->uidChangeFeed.find(cfCleanup->first);
+				ASSERT(feed != data->uidChangeFeed.end());
+				if (feed->second->removing) {
+					// TODO  REMOVE
+					printf("DBG: SS %s Feed %s removing @ %lld!\n",
+					       data->thisServerID.toString().substr(0, 4).c_str(),
+					       feed->first.printable().substr(0, 6).c_str(),
+					       cfCleanup->second);
+					auto rs = data->keyChangeFeed.modify(feed->second->range);
+					for (auto r = rs.begin(); r != rs.end(); ++r) {
+						auto& feedList = r->value();
+						for (int i = 0; i < feedList.size(); i++) {
+							if (feedList[i]->id == cfCleanup->first) {
+								swapAndPop(&feedList, i--);
+							}
+						}
+					}
+					data->uidChangeFeed.erase(feed);
+				} else {
+					TEST(true); // Feed re-fetched after remove
+					// TODO  REMOVE
+					printf("DBG: SS %s Feed %s not removing @ %lld, must have been re-fetched after moved away!\n",
+					       data->thisServerID.toString().substr(0, 4).c_str(),
+					       feed->first.printable().substr(0, 6).c_str(),
+					       cfCleanup->second);
+				}
+
 				cfCleanup = data->changeFeedCleanupDurable.erase(cfCleanup);
 			} else {
 				cfCleanup++;
