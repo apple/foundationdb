@@ -117,7 +117,7 @@ const Endpoint& EndpointMap::insert(NetworkAddressList localAddresses,
 	int adjacentFree = 0;
 	int adjacentStart = -1;
 	firstFree = -1;
-	for (int i = 0; i < data.size(); i++) {
+	for (int i = wellKnownEndpointCount; i < data.size(); i++) {
 		if (data[i].receiver) {
 			adjacentFree = 0;
 		} else {
