@@ -484,14 +484,6 @@ ACTOR Future<std::vector<CheckpointMetaData>> getCheckpointMetaData(Database cx,
                                                                     CheckpointFormat format,
                                                                     double timeout = 5.0);
 
-// Fetch the checkpoint file(s) to local dir, the checkpoint is specified by initialState.
-// If cFun is provided, the fetch progress can be checkpointed, so that next time, the fetch process
-// can be continued, in case of crash.
-ACTOR Future<CheckpointMetaData> fetchCheckpoint(Database cx,
-                                                 CheckpointMetaData initialState,
-                                                 std::string dir,
-                                                 std::function<Future<Void>(const CheckpointMetaData&)> cFun = nullptr);
-
 // Checks with Data Distributor that it is safe to mark all servers in exclusions as failed
 ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion> exclusions);
 

@@ -22,6 +22,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/IKeyValueStore.h"
+#include "fdbserver/RocksDBCheckpointUtils.actor.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/workloads/workloads.actor.h"
@@ -117,7 +118,7 @@ struct SSCheckpointWorkload : TestWorkload {
 		loop {
 			try {
 				std::cout << "Fetching checkpoint." << std::endl;
-				state CheckpointMetaData record = wait(fetchCheckpoint(cx, records[0], folder));
+				state CheckpointMetaData record = wait(fetchRocksDBCheckpoint(cx, records[0], folder));
 				break;
 			} catch (Error& e) {
 				std::cout << "Getting checkpoint failure: " << e.name() << std::endl;

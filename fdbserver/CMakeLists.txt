@@ -46,6 +46,8 @@ set(FDBSERVER_SRCS
   KeyValueStoreMemory.actor.cpp
   KeyValueStoreRocksDB.actor.cpp
   KeyValueStoreSQLite.actor.cpp
+  RocksDBCheckpointUtils.actor.cpp
+  RocksDBCheckpointUtils.actor.h
   Knobs.h
   LatencyBandConfig.cpp
   LatencyBandConfig.h
