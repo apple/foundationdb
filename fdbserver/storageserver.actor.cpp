@@ -123,6 +123,9 @@ struct AddingShard : NonCopyable {
 		// During Fetching phase, it fetches data before fetchVersion and write it to storage, then let updater know it
 		// is ready to update the deferred updates` (see the comment of member variable `updates` above).
 		Fetching,
+		// During the FetchingCF phase, the shard data is transferred but the remaining change feed data is still being
+		// transferred. This is equivalent to the waiting phase for non-changefeed data.
+		FetchingCF,
 		// During Waiting phase, it sends updater the deferred updates, and wait until they are durable.
 		Waiting
 		// The shard's state is changed from adding to readWrite then.
@@ -145,7 +148,8 @@ struct AddingShard : NonCopyable {
 
 	void addMutation(Version version, bool fromFetch, MutationRef const& mutation);
 
-	bool isTransferred() const { return phase == Waiting; }
+	bool isDataTransferred() const { return phase >= FetchingCF; }
+	bool isDataAndCFTransferred() const { return phase >= Waiting; }
 };
 
 class ShardInfo : public ReferenceCounted<ShardInfo>, NonCopyable {
@@ -171,14 +175,17 @@ public:
 	bool isReadable() const { return readWrite != nullptr; }
 	bool notAssigned() const { return !readWrite && !adding; }
 	bool assigned() const { return readWrite || adding; }
-	bool isInVersionedData() const { return readWrite || (adding && adding->isTransferred()); }
+	bool isInVersionedData() const { return readWrite || (adding && adding->isDataTransferred()); }
+	bool isCFInVersionedData() const { return readWrite || (adding && adding->isDataAndCFTransferred()); }
 	void addMutation(Version version, bool fromFetch, MutationRef const& mutation);
 	bool isFetched() const { return readWrite || (adding && adding->fetchComplete.isSet()); }
 
 	const char* debugDescribeState() const {
 		if (notAssigned())
 			return "NotAssigned";
-		else if (adding && !adding->isTransferred())
+		else if (adding && !adding->isDataAndCFTransferred())
+			return "AddingFetchingCF";
+		else if (adding && !adding->isDataTransferred())
 			return "AddingFetching";
 		else if (adding)
 			return "AddingTransferred";
@@ -1250,6 +1257,8 @@ void validate(StorageServer* data, bool force = false) {
 					ASSERT(latest.lower_bound(s->begin()) == latest.lower_bound(s->end()));
 				}
 			}
+
+			// FIXME: do some change feed validation?
 
 			latest.validate();
 			validateRange(latest, allKeys, data->version.get(), data->thisServerID, data->durableVersion.get());
@@ -4824,7 +4833,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		FetchInjectionInfo* batch = wait(p.getFuture());
 		TraceEvent(SevDebug, "FKUpdateBatch", data->thisServerID).detail("FKID", interval.pairID);
 
-		shard->phase = AddingShard::Waiting;
+		shard->phase = AddingShard::FetchingCF;
 
 		// Choose a transferredVersion.  This choice and timing ensure that
 		//   * The transferredVersion can be mutated in versionedData
@@ -4903,16 +4912,19 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			}
 		}
 
-		setAvailableStatus(data,
-		                   keys,
-		                   true); // keys will be available when getLatestVersion()==transferredVersion is durable
+		shard->phase = AddingShard::Waiting;
 
 		// Similar to transferred version, but wait for all feed data and
 		Version feedTransferredVersion = data->version.get() + 1;
+
 		TraceEvent(SevDebug, "FetchKeysHaveFeedData", data->thisServerID)
 		    .detail("FKID", interval.pairID)
 		    .detail("Version", feedTransferredVersion)
 		    .detail("StorageVersion", data->storageVersion());
+
+		setAvailableStatus(data,
+		                   keys,
+		                   true); // keys will be available when getLatestVersion()==transferredVersion is durable
 
 		// Note that since it receives a pointer to FetchInjectionInfo, the thread does not leave this actor until this
 		// point.
@@ -4957,7 +4969,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		TraceEvent(SevDebug, interval.end(), data->thisServerID).error(e, true).detail("Version", data->version.get());
 
 		if (e.code() == error_code_actor_cancelled && !data->shuttingDown && shard->phase >= AddingShard::Fetching) {
-			if (shard->phase < AddingShard::Waiting) {
+			if (shard->phase < AddingShard::FetchingCF) {
 				data->storage.clearRange(keys);
 				data->byteSampleApplyClear(keys, invalidVersion);
 			} else {
@@ -5012,7 +5024,7 @@ void AddingShard::addMutation(Version version, bool fromFetch, MutationRef const
 		}
 		// Add the mutation to the version.
 		updates.back().mutations.push_back_deep(updates.back().arena(), mutation);
-	} else if (phase == Waiting) {
+	} else if (phase == FetchingCF || phase == Waiting) {
 		server->addMutation(version, fromFetch, mutation, keys, server->updateEagerReads);
 	} else
 		ASSERT(false);
@@ -6366,7 +6378,7 @@ void setAvailableStatus(StorageServer* self, KeyRangeRef keys, bool available) {
 	                                           availableKeys.begin,
 	                                           available ? LiteralStringRef("1") : LiteralStringRef("0")));
 	if (keys.end != allKeys.end) {
-		bool endAvailable = self->shards.rangeContaining(keys.end)->value()->isInVersionedData();
+		bool endAvailable = self->shards.rangeContaining(keys.end)->value()->isCFInVersionedData();
 		self->addMutationToMutationLog(mLV,
 		                               MutationRef(MutationRef::SetValue,
 		                                           availableKeys.end,
