@@ -4177,6 +4177,17 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 
 	ASSERT(startVersion >= 0);
 
+	// TODO REMOVE
+	TraceEvent(SevDebug, "FetchChangeFeedStarting", data->thisServerID)
+	    .detail("RangeID", rangeId.printable())
+	    .detail("Range", range.toString())
+	    .detail("StartVersion", startVersion)
+	    .detail("EndVersion", endVersion)
+	    .detail("BeginVersion", beginVersion)
+	    .detail("EmptyVersion", emptyVersion)
+	    .detail("FetchVersion", changeFeedInfo->fetchVersion)
+	    .detail("DurableFetchVersion", changeFeedInfo->durableFetchVersion.get());
+
 	if (startVersion >= endVersion) {
 		TEST(true); // Change Feed popped before fetch
 		TraceEvent(SevDebug, "FetchChangeFeedNoOp", data->thisServerID)
@@ -4448,6 +4459,9 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data, KeyR
 				changeFeedInfo->emptyVersion = cfEntry.emptyVersion;
 				changeFeedInfo->stopped = cfEntry.stopped;
 				changeFeedInfo->removing = false;
+				// reset fetch versions because everything previously fetched was cleaned up
+				changeFeedInfo->fetchVersion = invalidVersion;
+				changeFeedInfo->durableFetchVersion = NotifiedVersion();
 			} else if (changeFeedInfo->emptyVersion < cfEntry.emptyVersion) {
 				TEST(true); // Got updated CF emptyVersion from a parallel fetchChangeFeedMetadata
 				changeFeedInfo->emptyVersion = cfEntry.emptyVersion;
