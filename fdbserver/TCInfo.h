@@ -33,10 +33,17 @@ class TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	DDTeamCollection* collection;
 	Future<Void> tracker;
 
-public:
-	Version addedVersion; // Read version when this Server is added
+	// TODO: Remove?
+	[[maybe_unused]] Version addedVersion; // Read version when this Server is added
+
 	StorageServerInterface lastKnownInterface;
 	ProcessClass lastKnownClass;
+
+	// A storage server's StoreType does not change.
+	// To change storeType for an ip:port, we destroy the old one and create a new one.
+	KeyValueStoreType storeType; // Storage engine type
+
+public:
 	std::vector<Reference<TCTeamInfo>> teams;
 	Reference<TCMachineInfo> machine;
 	int64_t dataInFlightToServer;
@@ -52,9 +59,6 @@ public:
 	Promise<Void> updated;
 	AsyncVar<bool> wrongStoreTypeToRemove;
 	AsyncVar<bool> ssVersionTooFarBehind;
-	// A storage server's StoreType does not change.
-	// To change storeType for an ip:port, we destroy the old one and create a new one.
-	KeyValueStoreType storeType; // Storage engine type
 
 	TCServerInfo(StorageServerInterface ssi,
 	             DDTeamCollection* collection,
@@ -70,6 +74,16 @@ public:
 	void updateInDesiredDC(std::vector<Optional<Key>> const& includedDCs);
 
 	void setTracker(Future<Void> tracker) { this->tracker = tracker; }
+
+	void updateLastKnown(StorageServerInterface const&, ProcessClass);
+
+	StorageServerInterface const& getLastKnownInterface() const { return lastKnownInterface; }
+
+	ProcessClass const& getLastKnownClass() const { return lastKnownClass; }
+
+	Future<Void> updateStoreType();
+
+	KeyValueStoreType getStoreType() const { return storeType; }
 
 	void cancel();
 

@@ -129,8 +129,8 @@ TCServerInfo::TCServerInfo(StorageServerInterface ssi,
                            Reference<LocalitySet> storageServerSet,
                            Version addedVersion)
   : id(ssi.id()), inDesiredDC(inDesiredDC), collection(collection), addedVersion(addedVersion), lastKnownInterface(ssi),
-    lastKnownClass(processClass), dataInFlightToServer(0), onInterfaceChanged(interfaceChanged.getFuture()),
-    onRemoved(removed.getFuture()), onTSSPairRemoved(Never()), storeType(KeyValueStoreType::END) {
+    lastKnownClass(processClass), storeType(KeyValueStoreType::END), dataInFlightToServer(0),
+    onInterfaceChanged(interfaceChanged.getFuture()), onRemoved(removed.getFuture()), onTSSPairRemoved(Never()) {
 
 	if (!ssi.isTss()) {
 		localityEntry = ((LocalityMap<UID>*)storageServerSet.getPtr())->add(ssi.locality, &id);
@@ -160,6 +160,17 @@ void TCServerInfo::cancel() {
 	collection = nullptr;
 }
 
+void TCServerInfo::updateLastKnown(StorageServerInterface const& ssi, ProcessClass processClass) {
+	lastKnownInterface = ssi;
+	lastKnownClass = processClass;
+}
+
+Future<Void> TCServerInfo::updateStoreType() {
+	return store(storeType,
+	             brokenPromiseToNever(lastKnownInterface.getKeyValueStoreType.getReplyWithTaskID<KeyValueStoreType>(
+	                 TaskPriority::DataDistribution)));
+}
+
 TCServerInfo::~TCServerInfo() {
 	if (collection && ssVersionTooFarBehind.get() && !lastKnownInterface.isTss()) {
 		collection->removeLaggingStorageServer(lastKnownInterface.locality.zoneId().get());
@@ -179,7 +190,7 @@ TCMachineInfo::TCMachineInfo(Reference<TCServerInfo> server, const LocalityEntry
 	ASSERT(serversOnMachine.empty());
 	serversOnMachine.push_back(server);
 
-	LocalityData& locality = server->lastKnownInterface.locality;
+	LocalityData const& locality = server->getLastKnownInterface().locality;
 	ASSERT(locality.zoneId().present());
 	machineID = locality.zoneId().get();
 }
@@ -234,7 +245,7 @@ std::vector<StorageServerInterface> TCTeamInfo::getLastKnownServerInterfaces() c
 	std::vector<StorageServerInterface> v;
 	v.reserve(servers.size());
 	for (const auto& server : servers) {
-		v.push_back(server->lastKnownInterface);
+		v.push_back(server->getLastKnownInterface());
 	}
 	return v;
 }
@@ -335,7 +346,7 @@ bool TCTeamInfo::hasHealthyAvailableSpace(double minRatio) const {
 
 bool TCTeamInfo::isOptimal() const {
 	for (const auto& server : servers) {
-		if (server->lastKnownClass.machineClassFitness(ProcessClass::Storage) > ProcessClass::UnsetFit) {
+		if (server->getLastKnownClass().machineClassFitness(ProcessClass::Storage) > ProcessClass::UnsetFit) {
 			return false;
 		}
 	}

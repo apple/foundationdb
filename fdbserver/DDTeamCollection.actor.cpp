@@ -400,7 +400,7 @@ public:
 						} else {
 							tempSet->clear();
 							for (auto it : servers) {
-								tempMap->add(it->lastKnownInterface.locality, &it->getId());
+								tempMap->add(it->getLastKnownInterface().locality, &it->getId());
 							}
 
 							std::vector<LocalityEntry> resultEntries, forcedEntries;
@@ -489,7 +489,7 @@ public:
 		for (auto i = self->server_info.begin(); i != self->server_info.end(); ++i) {
 			if (!self->server_status.get(i->first).isUnhealthy()) {
 				++serverCount;
-				LocalityData& serverLocation = i->second->lastKnownInterface.locality;
+				LocalityData const& serverLocation = i->second->getLastKnownInterface().locality;
 				machines.insert(serverLocation.zoneId());
 			}
 		}
@@ -962,7 +962,7 @@ public:
 	    const DDEnabledState* ddEnabledState,
 	    bool isTss) {
 		state Future<Void> failureTracker;
-		state ServerStatus status(false, false, false, server->lastKnownInterface.locality);
+		state ServerStatus status(false, false, false, server->getLastKnownInterface().locality);
 		state bool lastIsUnhealthy = false;
 		state Future<Void> metricsTracker = server->serverMetricsPolling();
 
@@ -971,7 +971,7 @@ public:
 		state Future<Void> storeTypeTracker = (isTss) ? Never() : keyValueStoreTypeTracker(self, server);
 		state bool hasWrongDC = !self->isCorrectDC(*server);
 		state bool hasInvalidLocality =
-		    !self->isValidLocality(self->configuration.storagePolicy, server->lastKnownInterface.locality);
+		    !self->isValidLocality(self->configuration.storagePolicy, server->getLastKnownInterface().locality);
 		state int targetTeamNumPerServer =
 		    (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (self->configuration.storageTeamSize + 1)) / 2;
 		state Future<Void> storageMetadataTracker = (isTss) ? Never() : self->readOrCreateStorageMetadata(server);
@@ -982,7 +982,7 @@ public:
 				status.isWiggling = false;
 				hasWrongDC = !self->isCorrectDC(*server);
 				hasInvalidLocality =
-				    !self->isValidLocality(self->configuration.storagePolicy, server->lastKnownInterface.locality);
+				    !self->isValidLocality(self->configuration.storagePolicy, server->getLastKnownInterface().locality);
 
 				// If there is any other server on this exact NetworkAddress, this server is undesired and will
 				// eventually be eliminated. This samAddress checking must be redo whenever the server's state (e.g.,
@@ -991,14 +991,14 @@ public:
 				std::vector<Promise<Void>> wakeUpTrackers;
 				for (const auto& i : self->server_and_tss_info) {
 					if (i.second.getPtr() != server &&
-					    i.second->lastKnownInterface.address() == server->lastKnownInterface.address()) {
+					    i.second->getLastKnownInterface().address() == server->getLastKnownInterface().address()) {
 						auto& statusInfo = self->server_status.get(i.first);
 						TraceEvent("SameAddress", self->distributorId)
 						    .detail("Failed", statusInfo.isFailed)
 						    .detail("Undesired", statusInfo.isUndesired)
 						    .detail("Server", server->getId())
 						    .detail("OtherServer", i.second->getId())
-						    .detail("Address", server->lastKnownInterface.address())
+						    .detail("Address", server->getLastKnownInterface().address())
 						    .detail("NumShards", self->shardsAffectedByTeamFailure->getNumberOfShards(server->getId()))
 						    .detail("OtherNumShards",
 						            self->shardsAffectedByTeamFailure->getNumberOfShards(i.second->getId()))
@@ -1010,7 +1010,7 @@ public:
 							    self->shardsAffectedByTeamFailure->getNumberOfShards(server->getId())) {
 								TraceEvent(SevWarn, "UndesiredStorageServer", self->distributorId)
 								    .detail("Server", server->getId())
-								    .detail("Address", server->lastKnownInterface.address())
+								    .detail("Address", server->getLastKnownInterface().address())
 								    .detail("OtherServer", i.second->getId())
 								    .detail("NumShards",
 								            self->shardsAffectedByTeamFailure->getNumberOfShards(server->getId()))
@@ -1029,7 +1029,7 @@ public:
 						p.send(Void());
 				}
 
-				if (server->lastKnownClass.machineClassFitness(ProcessClass::Storage) > ProcessClass::UnsetFit) {
+				if (server->getLastKnownClass().machineClassFitness(ProcessClass::Storage) > ProcessClass::UnsetFit) {
 					// NOTE: Should not use self->healthyTeamCount > 0 in if statement, which will cause status bouncing
 					// between healthy and unhealthy and result in OOM (See PR#2228).
 
@@ -1037,7 +1037,7 @@ public:
 						TraceEvent(SevWarn, "UndesiredStorageServer", self->distributorId)
 						    .detail("Server", server->getId())
 						    .detail("OptimalTeamCount", self->optimalTeamCount)
-						    .detail("Fitness", server->lastKnownClass.machineClassFitness(ProcessClass::Storage));
+						    .detail("Fitness", server->getLastKnownClass().machineClassFitness(ProcessClass::Storage));
 						status.isUndesired = true;
 					}
 					otherChanges.push_back(self->zeroOptimalTeams.onChange());
@@ -1068,14 +1068,14 @@ public:
 					    return !tc->wigglingId.present() || server->getId() != tc->wigglingId.get();
 				    };
 				// If the storage server is in the excluded servers list, it is undesired
-				NetworkAddress a = server->lastKnownInterface.address();
+				NetworkAddress a = server->getLastKnownInterface().address();
 				AddressExclusion worstAddr(a.ip, a.port);
 				DDTeamCollection::Status worstStatus = self->excludedServers.get(worstAddr);
 
 				if (worstStatus == DDTeamCollection::Status::WIGGLING && invalidWiggleServer(worstAddr, self, server)) {
 					TraceEvent(SevInfo, "InvalidWiggleServer", self->distributorId)
 					    .detail("Address", worstAddr.toString())
-					    .detail("ProcessId", server->lastKnownInterface.locality.processId())
+					    .detail("ProcessId", server->getLastKnownInterface().locality.processId())
 					    .detail("WigglingId", self->wigglingId.present());
 					self->excludedServers.set(worstAddr, DDTeamCollection::Status::NONE);
 					worstStatus = DDTeamCollection::Status::NONE;
@@ -1083,24 +1083,24 @@ public:
 				otherChanges.push_back(self->excludedServers.onChange(worstAddr));
 
 				for (int i = 0; i < 3; i++) {
-					if (i > 0 && !server->lastKnownInterface.secondaryAddress().present()) {
+					if (i > 0 && !server->getLastKnownInterface().secondaryAddress().present()) {
 						break;
 					}
 					AddressExclusion testAddr;
 					if (i == 0)
 						testAddr = AddressExclusion(a.ip);
 					else if (i == 1)
-						testAddr = AddressExclusion(server->lastKnownInterface.secondaryAddress().get().ip,
-						                            server->lastKnownInterface.secondaryAddress().get().port);
+						testAddr = AddressExclusion(server->getLastKnownInterface().secondaryAddress().get().ip,
+						                            server->getLastKnownInterface().secondaryAddress().get().port);
 					else if (i == 2)
-						testAddr = AddressExclusion(server->lastKnownInterface.secondaryAddress().get().ip);
+						testAddr = AddressExclusion(server->getLastKnownInterface().secondaryAddress().get().ip);
 					DDTeamCollection::Status testStatus = self->excludedServers.get(testAddr);
 
 					if (testStatus == DDTeamCollection::Status::WIGGLING &&
 					    invalidWiggleServer(testAddr, self, server)) {
 						TraceEvent(SevInfo, "InvalidWiggleServer", self->distributorId)
 						    .detail("Address", testAddr.toString())
-						    .detail("ProcessId", server->lastKnownInterface.locality.processId())
+						    .detail("ProcessId", server->getLastKnownInterface().locality.processId())
 						    .detail("ValidWigglingId", self->wigglingId.present());
 						self->excludedServers.set(testAddr, DDTeamCollection::Status::NONE);
 						testStatus = DDTeamCollection::Status::NONE;
@@ -1125,7 +1125,7 @@ public:
 						TraceEvent("PerpetualStorageWiggleSS", self->distributorId)
 						    .detail("Primary", self->primary)
 						    .detail("Server", server->getId())
-						    .detail("ProcessId", server->lastKnownInterface.locality.processId())
+						    .detail("ProcessId", server->getLastKnownInterface().locality.processId())
 						    .detail("Address", worstAddr.toString());
 					} else if (worstStatus == DDTeamCollection::Status::FAILED && !isTss) {
 						TraceEvent(SevWarn, "FailedServerRemoveKeys", self->distributorId)
@@ -1170,8 +1170,11 @@ public:
 
 						// Remove server from FF/serverList
 						storageMetadataTracker.cancel();
-						wait(removeStorageServer(
-						    cx, server->getId(), server->lastKnownInterface.tssPairID, self->lock, ddEnabledState));
+						wait(removeStorageServer(cx,
+						                         server->getId(),
+						                         server->getLastKnownInterface().tssPairID,
+						                         self->lock,
+						                         ddEnabledState));
 
 						TraceEvent("StatusMapChange", self->distributorId)
 						    .detail("ServerID", server->getId())
@@ -1187,21 +1190,20 @@ public:
 						return Void();
 					}
 					when(std::pair<StorageServerInterface, ProcessClass> newInterface = wait(interfaceChanged)) {
-						bool restartRecruiting =
-						    newInterface.first.waitFailure.getEndpoint().getPrimaryAddress() !=
-						    server->lastKnownInterface.waitFailure.getEndpoint().getPrimaryAddress();
-						bool localityChanged = server->lastKnownInterface.locality != newInterface.first.locality;
-						bool machineLocalityChanged = server->lastKnownInterface.locality.zoneId().get() !=
-						                              newInterface.first.locality.zoneId().get();
+						auto const& lastKnownInterface = server->getLastKnownInterface();
+						bool restartRecruiting = newInterface.first.waitFailure.getEndpoint().getPrimaryAddress() !=
+						                         lastKnownInterface.waitFailure.getEndpoint().getPrimaryAddress();
+						bool localityChanged = lastKnownInterface.locality != newInterface.first.locality;
+						bool machineLocalityChanged =
+						    lastKnownInterface.locality.zoneId().get() != newInterface.first.locality.zoneId().get();
 						TraceEvent("StorageServerInterfaceChanged", self->distributorId)
 						    .detail("ServerID", server->getId())
 						    .detail("NewWaitFailureToken", newInterface.first.waitFailure.getEndpoint().token)
-						    .detail("OldWaitFailureToken", server->lastKnownInterface.waitFailure.getEndpoint().token)
+						    .detail("OldWaitFailureToken", lastKnownInterface.waitFailure.getEndpoint().token)
 						    .detail("LocalityChanged", localityChanged)
 						    .detail("MachineLocalityChanged", machineLocalityChanged);
 
-						server->lastKnownInterface = newInterface.first;
-						server->lastKnownClass = newInterface.second;
+						server->updateLastKnown(newInterface.first, newInterface.second);
 						if (localityChanged && !isTss) {
 							TEST(true); // Server locality changed
 
@@ -1289,7 +1291,7 @@ public:
 						status = ServerStatus(status.isFailed,
 						                      status.isUndesired,
 						                      status.isWiggling,
-						                      server->lastKnownInterface.locality);
+						                      server->getLastKnownInterface().locality);
 
 						// self->traceTeamCollectionInfo();
 						recordTeamCollectionInfo = true;
@@ -1299,7 +1301,7 @@ public:
 						storageMetadataTracker = (isTss) ? Never() : readOrCreateStorageMetadata(self, server);
 						hasWrongDC = !self->isCorrectDC(*server);
 						hasInvalidLocality = !self->isValidLocality(self->configuration.storagePolicy,
-						                                            server->lastKnownInterface.locality);
+						                                            server->getLastKnownInterface().locality);
 						self->restartTeamBuilder.trigger();
 
 						if (restartRecruiting)
@@ -1311,7 +1313,7 @@ public:
 					when(wait(server->wrongStoreTypeToRemove.onChange())) {
 						TraceEvent("UndesiredStorageServerTriggered", self->distributorId)
 						    .detail("Server", server->getId())
-						    .detail("StoreType", server->storeType)
+						    .detail("StoreType", server->getStoreType())
 						    .detail("ConfigStoreType", self->configuration.storageServerStoreType)
 						    .detail("WrongStoreTypeRemoved", server->wrongStoreTypeToRemove.get());
 					}
@@ -1368,7 +1370,7 @@ public:
 					foundSSToRemove = true;
 					TraceEvent("WrongStoreTypeRemover", self->distributorId)
 					    .detail("Server", server.first)
-					    .detail("StoreType", server.second->storeType)
+					    .detail("StoreType", server.second->getStoreType())
 					    .detail("ConfiguredStoreType", self->configuration.storageServerStoreType);
 					break;
 				}
@@ -1461,12 +1463,9 @@ public:
 
 	ACTOR static Future<Void> keyValueStoreTypeTracker(DDTeamCollection* self, TCServerInfo* server) {
 		// Update server's storeType, especially when it was created
-		state KeyValueStoreType type = wait(
-		    brokenPromiseToNever(server->lastKnownInterface.getKeyValueStoreType.getReplyWithTaskID<KeyValueStoreType>(
-		        TaskPriority::DataDistribution)));
-		server->storeType = type;
+		wait(server->updateStoreType());
 
-		if (type != self->configuration.storageServerStoreType) {
+		if (server->getStoreType() != self->configuration.storageServerStoreType) {
 			if (self->wrongStoreTypeRemover.isReady()) {
 				self->wrongStoreTypeRemover = removeWrongStoreType(self);
 				self->addActor.send(self->wrongStoreTypeRemover);
@@ -1481,7 +1480,7 @@ public:
 	                                                      Database cx,
 	                                                      ServerStatus* status,
 	                                                      Version addedVersion) {
-		state StorageServerInterface interf = server->lastKnownInterface;
+		state StorageServerInterface interf = server->getLastKnownInterface();
 		state int targetTeamNumPerServer =
 		    (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (self->configuration.storageTeamSize + 1)) / 2;
 		loop {
@@ -2452,12 +2451,12 @@ public:
 				RecruitStorageRequest rsr;
 				std::set<AddressExclusion> exclusions;
 				for (auto s = self->server_and_tss_info.begin(); s != self->server_and_tss_info.end(); ++s) {
-					auto serverStatus = self->server_status.get(s->second->lastKnownInterface.id());
+					auto serverStatus = self->server_status.get(s->second->getLastKnownInterface().id());
 					if (serverStatus.excludeOnRecruit()) {
 						TraceEvent(SevDebug, "DDRecruitExcl1")
 						    .detail("Primary", self->primary)
-						    .detail("Excluding", s->second->lastKnownInterface.address());
-						auto addr = s->second->lastKnownInterface.stableAddress();
+						    .detail("Excluding", s->second->getLastKnownInterface().address());
+						auto addr = s->second->getLastKnownInterface().stableAddress();
 						AddressExclusion addrExcl(addr.ip, addr.port);
 						exclusions.insert(addrExcl);
 						numSSPerAddr[addrExcl]++; // increase from 0
@@ -2584,7 +2583,7 @@ public:
 							auto itr = self->tss_info_by_pair.begin();
 							for (int i = 0; i < tssToKill; i++, itr++) {
 								UID tssId = itr->second->getId();
-								StorageServerInterface tssi = itr->second->lastKnownInterface;
+								StorageServerInterface tssi = itr->second->getLastKnownInterface();
 
 								if (self->shouldHandleServer(tssi) && self->server_and_tss_info.count(tssId)) {
 									Promise<Void> killPromise = itr->second->killTss;
@@ -2732,8 +2731,8 @@ public:
 							} else if (self->server_and_tss_info.count(serverId)) {
 								auto& serverInfo = self->server_and_tss_info[serverId];
 								if (ssi.getValue.getEndpoint() !=
-								        serverInfo->lastKnownInterface.getValue.getEndpoint() ||
-								    processClass != serverInfo->lastKnownClass.classType()) {
+								        serverInfo->getLastKnownInterface().getValue.getEndpoint() ||
+								    processClass != serverInfo->getLastKnownClass().classType()) {
 									Promise<std::pair<StorageServerInterface, ProcessClass>> currentInterfaceChanged =
 									    serverInfo->interfaceChanged;
 									serverInfo->interfaceChanged =
@@ -2802,8 +2801,8 @@ public:
 					continue;
 				auto server = teamCollection->server_info.at(id.get());
 
-				// TraceEvent("PerpetualLocality").detail("Server", server->lastKnownInterface.locality.get(localityKey)).detail("Desire", localityValue);
-				if (server->lastKnownInterface.locality.get(localityKey.get()) == localityValue) {
+				// TraceEvent("PerpetualLocality").detail("Server", server->getLastKnownInterface().locality.get(localityKey)).detail("Desire", localityValue);
+				if (server->getLastKnownInterface().locality.get(localityKey.get()) == localityValue) {
 					return id.get();
 				} else {
 					if (teamCollection->storageWiggler->empty()) {
@@ -3244,7 +3243,7 @@ void DDTeamCollection::traceServerInfo() const {
 		    .detail("ServerID", server.first.toString())
 		    .detail("ServerTeamOwned", server.second->teams.size())
 		    .detail("MachineID", server.second->machine->machineID.contents().toString())
-		    .detail("StoreType", server.second->storeType.toString())
+		    .detail("StoreType", server.second->getStoreType().toString())
 		    .detail("InDesiredDC", server.second->isInDesiredDC());
 	}
 	for (auto& server : server_info) {
@@ -3380,7 +3379,7 @@ Future<Void> DDTeamCollection::waitUntilHealthy(double extraDelay, bool waitWigg
 
 bool DDTeamCollection::isCorrectDC(TCServerInfo const& server) const {
 	return (includedDCs.empty() ||
-	        std::find(includedDCs.begin(), includedDCs.end(), server.lastKnownInterface.locality.dcId()) !=
+	        std::find(includedDCs.begin(), includedDCs.end(), server.getLastKnownInterface().locality.dcId()) !=
 	            includedDCs.end());
 }
 
@@ -3496,7 +3495,8 @@ void DDTeamCollection::resetLocalitySet() {
 	LocalityMap<UID>* storageServerMap = (LocalityMap<UID>*)storageServerSet.getPtr();
 
 	for (auto& it : server_info) {
-		it.second->localityEntry = storageServerMap->add(it.second->lastKnownInterface.locality, &it.second->getId());
+		it.second->localityEntry =
+		    storageServerMap->add(it.second->getLastKnownInterface().locality, &it.second->getId());
 	}
 }
 
@@ -3702,7 +3702,7 @@ void DDTeamCollection::evaluateTeamQuality() const {
 			maxTeams = std::max(maxTeams, stc);
 			varTeams += (stc - teamsPerServer) * (stc - teamsPerServer);
 			// Use zoneId as server's machine id
-			machineTeams[info->lastKnownInterface.locality.zoneId()] += stc;
+			machineTeams[info->getLastKnownInterface().locality.zoneId()] += stc;
 		}
 	}
 	varTeams /= teamsPerServer * teamsPerServer;
@@ -4008,7 +4008,7 @@ void DDTeamCollection::rebuildMachineLocalityMap() {
 			continue;
 		}
 		Reference<TCServerInfo> representativeServer = machine->second->serversOnMachine[0];
-		auto& locality = representativeServer->lastKnownInterface.locality;
+		auto& locality = representativeServer->getLastKnownInterface().locality;
 		if (!isValidLocality(configuration.storagePolicy, locality)) {
 			TraceEvent(SevWarn, "RebuildMachineLocalityMapError")
 			    .detail("Machine", machine->second->machineID.toString())
@@ -4046,7 +4046,7 @@ int DDTeamCollection::addBestMachineTeams(int machineTeamsToBuild) {
 				continue;
 			// Skip machine with incomplete locality
 			if (!isValidLocality(configuration.storagePolicy,
-			                     machine.second->serversOnMachine[0]->lastKnownInterface.locality)) {
+			                     machine.second->serversOnMachine[0]->getLastKnownInterface().locality)) {
 				continue;
 			}
 
@@ -4117,7 +4117,7 @@ int DDTeamCollection::addBestMachineTeams(int machineTeamsToBuild) {
 			for (auto process = team.begin(); process != team.end(); process++) {
 				Reference<TCServerInfo> server = server_info[**process];
 				score += server->machine->machineTeams.size();
-				Standalone<StringRef> machine_id = server->lastKnownInterface.locality.zoneId().get();
+				Standalone<StringRef> machine_id = server->getLastKnownInterface().locality.zoneId().get();
 				machineIDs.push_back(machine_id);
 			}
 
@@ -4173,7 +4173,7 @@ Reference<TCServerInfo> DDTeamCollection::findOneLeastUsedServer() const {
 		// Only pick healthy server, which is not failed or excluded.
 		if (server_status.get(server.first).isUnhealthy())
 			continue;
-		if (!isValidLocality(configuration.storagePolicy, server.second->lastKnownInterface.locality))
+		if (!isValidLocality(configuration.storagePolicy, server.second->getLastKnownInterface().locality))
 			continue;
 
 		int numTeams = server.second->teams.size();
@@ -4632,7 +4632,7 @@ void DDTeamCollection::noHealthyTeams() const {
 		ASSERT(i->first == i->second->getId());
 		if (!server_status.get(i->first).isFailed) {
 			desiredServerSet.insert(i->first);
-			desc += i->first.shortString() + " (" + i->second->lastKnownInterface.toString() + "), ";
+			desc += i->first.shortString() + " (" + i->second->getLastKnownInterface().toString() + "), ";
 		}
 	}
 
@@ -4754,7 +4754,7 @@ bool DDTeamCollection::removeTeam(Reference<TCTeamInfo> team) {
 
 Reference<TCMachineInfo> DDTeamCollection::checkAndCreateMachine(Reference<TCServerInfo> server) {
 	ASSERT(server.isValid() && server_info.find(server->getId()) != server_info.end());
-	auto& locality = server->lastKnownInterface.locality;
+	auto const& locality = server->getLastKnownInterface().locality;
 	Standalone<StringRef> machine_id = locality.zoneId().get(); // locality to machine_id with std::string type
 
 	Reference<TCMachineInfo> machineInfo;
@@ -4864,7 +4864,7 @@ void DDTeamCollection::removeTSS(UID removedServer) {
 	TraceEvent("RemovedTSS", distributorId).detail("ServerID", removedServer);
 	Reference<TCServerInfo> removedServerInfo = server_and_tss_info[removedServer];
 
-	tss_info_by_pair.erase(removedServerInfo->lastKnownInterface.tssPairID.get());
+	tss_info_by_pair.erase(removedServerInfo->getLastKnownInterface().tssPairID.get());
 	server_and_tss_info.erase(removedServer);
 
 	server_status.clear(removedServer);
@@ -4996,15 +4996,15 @@ Future<Void> DDTeamCollection::excludeStorageServersForWiggle(const UID& id) {
 	Future<Void> moveFuture = Void();
 	if (this->server_info.count(id) != 0) {
 		auto& info = server_info.at(id);
-		AddressExclusion addr(info->lastKnownInterface.address().ip, info->lastKnownInterface.address().port);
+		AddressExclusion addr(info->getLastKnownInterface().address().ip, info->getLastKnownInterface().address().port);
 
 		// don't overwrite the value set by actor trackExcludedServer
 		bool abnormal =
 		    this->excludedServers.count(addr) && this->excludedServers.get(addr) != DDTeamCollection::Status::NONE;
 
-		if (info->lastKnownInterface.secondaryAddress().present()) {
-			AddressExclusion addr2(info->lastKnownInterface.secondaryAddress().get().ip,
-			                       info->lastKnownInterface.secondaryAddress().get().port);
+		if (info->getLastKnownInterface().secondaryAddress().present()) {
+			AddressExclusion addr2(info->getLastKnownInterface().secondaryAddress().get().ip,
+			                       info->getLastKnownInterface().secondaryAddress().get().port);
 			abnormal |= this->excludedServers.count(addr2) &&
 			            this->excludedServers.get(addr2) != DDTeamCollection::Status::NONE;
 		}
@@ -5038,7 +5038,7 @@ void DDTeamCollection::includeStorageServersForWiggle() {
 int DDTeamCollection::numExistingSSOnAddr(const AddressExclusion& addr) const {
 	int numExistingSS = 0;
 	for (auto& server : server_and_tss_info) {
-		const NetworkAddress& netAddr = server.second->lastKnownInterface.stableAddress();
+		const NetworkAddress& netAddr = server.second->getLastKnownInterface().stableAddress();
 		AddressExclusion usedAddr(netAddr.ip, netAddr.port);
 		if (usedAddr == addr) {
 			++numExistingSS;
