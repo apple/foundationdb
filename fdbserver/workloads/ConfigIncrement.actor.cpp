@@ -145,10 +145,7 @@ public:
 		auto localIncrementActors =
 		    (clientId < incrementActors) ? ((incrementActors - clientId - 1) / clientCount + 1) : 0;
 		for (int i = 0; i < localIncrementActors; ++i) {
-			// TODO: The timeout is a hack to get the test to pass before rollforward and
-			// rollback are supported. Eventually, this timeout should be removed so
-			// we test that all clients make progress.
-			actors.push_back(timeout(incrementActor(this, cx), 60.0, Void()));
+			actors.push_back(incrementActor(this, cx));
 		}
 		return waitForAll(actors);
 	}
