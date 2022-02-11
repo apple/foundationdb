@@ -150,6 +150,12 @@ Future<Void> TCServerInfo::serverMetricsPolling() {
 	return TCServerInfoImpl::serverMetricsPolling(this);
 }
 
+void TCServerInfo::updateInDesiredDC(std::vector<Optional<Key>> const& includedDCs) {
+	inDesiredDC =
+	    (includedDCs.empty() ||
+	     std::find(includedDCs.begin(), includedDCs.end(), lastKnownInterface.locality.dcId()) != includedDCs.end());
+}
+
 TCServerInfo::~TCServerInfo() {
 	if (collection && ssVersionTooFarBehind.get() && !lastKnownInterface.isTss()) {
 		collection->removeLaggingStorageServer(lastKnownInterface.locality.zoneId().get());

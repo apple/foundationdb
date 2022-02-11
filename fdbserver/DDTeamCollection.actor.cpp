@@ -355,7 +355,7 @@ public:
 		for (; idx < self->badTeams.size(); idx++) {
 			servers.clear();
 			for (const auto& server : self->badTeams[idx]->getServers()) {
-				if (server->inDesiredDC && !self->server_status.get(server->getId()).isUnhealthy()) {
+				if (server->isInDesiredDC() && !self->server_status.get(server->getId()).isUnhealthy()) {
 					servers.push_back(server);
 				}
 			}
@@ -1259,11 +1259,7 @@ public:
 								}
 							}
 
-							server->inDesiredDC =
-							    (self->includedDCs.empty() ||
-							     std::find(self->includedDCs.begin(),
-							               self->includedDCs.end(),
-							               server->lastKnownInterface.locality.dcId()) != self->includedDCs.end());
+							server->updateInDesiredDC(self->includedDCs);
 							self->resetLocalitySet();
 
 							bool addedNewBadTeam = false;
@@ -3249,7 +3245,7 @@ void DDTeamCollection::traceServerInfo() const {
 		    .detail("ServerTeamOwned", server.second->teams.size())
 		    .detail("MachineID", server.second->machine->machineID.contents().toString())
 		    .detail("StoreType", server.second->storeType.toString())
-		    .detail("InDesiredDC", server.second->inDesiredDC);
+		    .detail("InDesiredDC", server.second->isInDesiredDC());
 	}
 	for (auto& server : server_info) {
 		const UID& uid = server.first;

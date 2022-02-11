@@ -29,6 +29,7 @@ class TCMachineTeamInfo;
 class TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	friend class TCServerInfoImpl;
 	UID id;
+	bool inDesiredDC;
 
 public:
 	Version addedVersion; // Read version when this Server is added
@@ -47,7 +48,6 @@ public:
 	Future<Void> onTSSPairRemoved;
 	Promise<Void> killTss;
 	Promise<Void> wakeUpTracker;
-	bool inDesiredDC;
 	LocalityEntry localityEntry;
 	Promise<Void> updated;
 	AsyncVar<bool> wrongStoreTypeToRemove;
@@ -64,6 +64,10 @@ public:
 	             Version addedVersion = 0);
 
 	UID const& getId() const { return id; }
+
+	bool isInDesiredDC() const { return inDesiredDC; }
+
+	void updateInDesiredDC(std::vector<Optional<Key>> const& includedDCs);
 
 	bool isCorrectStoreType(KeyValueStoreType configStoreType) const {
 		// A new storage server's store type may not be set immediately.
