@@ -265,6 +265,8 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	bool primary;
 	UID distributorId;
 
+	LocalityMap<UID> machineLocalityMap; // locality info of machines
+
 	// Randomly choose one machine team that has chosenServer and has the correct size
 	// When configuration is changed, we may have machine teams with old storageTeamSize
 	Reference<TCMachineTeamInfo> findOneRandomMachineTeam(TCServerInfo const& chosenServer) const;
@@ -530,7 +532,6 @@ public:
 	// machine_info has all machines info; key must be unique across processes on the same machine
 	std::map<Standalone<StringRef>, Reference<TCMachineInfo>> machine_info;
 	std::vector<Reference<TCMachineTeamInfo>> machineTeams; // all machine teams
-	LocalityMap<UID> machineLocalityMap; // locality info of machines
 
 	std::vector<Reference<TCTeamInfo>> teams;
 
@@ -658,4 +659,8 @@ public:
 	                        TeamCollectionInterface tci,
 	                        Reference<IAsyncListener<RequestStream<RecruitStorageRequest>>> recruitStorage,
 	                        DDEnabledState const& ddEnabledState);
+
+	// Take a snapshot of necessary data structures from `DDTeamCollection` and print them out with yields to avoid slow
+	// task on the run loop.
+	static Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self);
 };
