@@ -138,6 +138,7 @@ Operation Types
 - ``u`` – Update (= GET followed by SET)
 - ``i`` – Insert (= SET with a new key)
 - ``ir`` – Insert Range (Sequential)
+- ``o`` – Overwrite (Blind write to existing keys)
 - ``c`` – CLEAR
 - ``sc`` – SET & CLEAR
 - ``cr`` – CLEAR RANGE
