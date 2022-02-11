@@ -56,7 +56,7 @@ struct KeyData {
 	std::vector<WriteData> writes;
 };
 
-static std::vector<int> targetValSizes = { 20, 100, 500 };
+static std::vector<int> targetValSizes = { 40, 100, 500 };
 
 struct ThreadData : ReferenceCounted<ThreadData>, NonCopyable {
 	// directory info
@@ -89,8 +89,9 @@ struct ThreadData : ReferenceCounted<ThreadData>, NonCopyable {
 	int64_t timeTravelReads = 0;
 	int64_t timeTravelTooOld = 0;
 	int64_t rowsRead = 0;
-	int64_t rowsWritten = 0;
 	int64_t bytesRead = 0;
+	int64_t rowsWritten = 0;
+	int64_t bytesWritten = 0;
 
 	ThreadData(uint32_t directoryID, int64_t targetByteRate)
 	  : directoryID(directoryID), targetByteRate(targetByteRate) {
@@ -168,8 +169,20 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 			int myDirectories = deterministicRandom()->randomInt(1, 2 * targetMyDirectories + 1);
 
 			// anywhere from 2 delta files per second to 1 delta file every 4 seconds, spread across all directories
-			targetByteRate = 2 * SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES / (1 + (randomness % 8)) / myDirectories;
+			targetByteRate = 2 * SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES / (1 + (randomness % 8));
 			randomness /= 8;
+
+			// either do equal across all of my directories, or skewed
+			bool skewed = myDirectories > 1 && deterministicRandom()->random01() < 0.4;
+			int skewMultiplier;
+			if (skewed) {
+				// first directory has 1/2, second has 1/4, third has 1/8, etc...
+				skewMultiplier = 2;
+				targetByteRate /= 2;
+			} else {
+				skewMultiplier = 1;
+				targetByteRate /= myDirectories;
+			}
 			for (int i = 0; i < myDirectories; i++) {
 				// set up directory with its own randomness
 				uint32_t dirId = i * clientCount + clientId;
@@ -177,6 +190,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 					printf("Client %d/%d creating directory %d\n", clientId, clientCount, dirId);
 				}
 				directories.push_back(makeReference<ThreadData>(dirId, targetByteRate));
+				targetByteRate /= skewMultiplier;
 			}
 		}
 	}
@@ -647,8 +661,8 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 
 		state double last = now();
 		state int keysPerQuery = 100;
-		state int targetBytesPerQuery = threadData->targetValLength * keysPerQuery;
-		state double targetTps = (1.0 * threadData->targetByteRate) / targetBytesPerQuery;
+		// state int targetBytesPerQuery = threadData->targetValLength * keysPerQuery;
+		// state double targetTps = (1.0 * threadData->targetByteRate) / targetBytesPerQuery;
 		state uint32_t nextVal = 0;
 
 		TraceEvent("BlobGranuleCorrectnessWriterStart").log();
@@ -664,7 +678,9 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 			state std::vector<std::tuple<uint32_t, uint32_t, uint32_t, uint16_t>> keyAndIdToWrite;
 			state std::vector<std::pair<uint32_t, uint32_t>> keyAndIdToClear;
 
-			for (int i = 0; i < keysPerQuery; i++) {
+			state int queryKeys =
+			    keysPerQuery * (0.1 + deterministicRandom()->random01() * 1.8); // 10% to 190% of target keys per query
+			for (int i = 0; i < queryKeys; i++) {
 				uint32_t key;
 				if (threadData->keyData.empty() || deterministicRandom()->random01() > threadData->reuseKeyProb) {
 					// new key
@@ -711,6 +727,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 				}
 			}
 
+			state int64_t txnBytes;
 			loop {
 				try {
 					// write rows in txn
@@ -721,7 +738,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 					for (auto& it : keyAndIdToClear) {
 						tr.clear(singleKeyRange(threadData->getKey(it.first, it.second)));
 					}
-
+					txnBytes = tr.getSize();
 					wait(tr.commit());
 					break;
 				} catch (Error& e) {
@@ -766,8 +783,11 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 				threadData->firstWriteSuccessful.send(Void());
 			}
 
+			threadData->rowsWritten += queryKeys;
+			threadData->bytesWritten += txnBytes;
+
 			// wait
-			wait(poisson(&last, 1.0 / targetTps));
+			wait(poisson(&last, (txnBytes + 1.0) / threadData->targetByteRate));
 		}
 	}
 
@@ -830,6 +850,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		fmt::print("  {} time travel too old\n", threadData->timeTravelTooOld);
 		fmt::print("  {} errors\n", threadData->errors);
 		fmt::print("  {} rows written\n", threadData->rowsWritten);
+		fmt::print("  {} bytes written\n", threadData->bytesWritten);
 		fmt::print("  {} unique keys\n", threadData->usedKeys.size());
 		fmt::print("  {} real-time reads\n", threadData->reads);
 		fmt::print("  {} time travel reads\n", threadData->timeTravelReads);
