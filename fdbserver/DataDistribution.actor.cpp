@@ -238,7 +238,8 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Data
 
 // add server to wiggling queue
 void StorageWiggler::addServer(const UID& serverId, const StorageMetadataType& metadata) {
-	// std::cout << "size: " << pq_handles.size() << " add " << serverId.toString() << " DC: "<< teamCollection->primary
+	// std::cout << "size: " << pq_handles.size() << " add " << serverId.toString() << " DC: "<<
+	// teamCollection->isPrimary()
 	// << std::endl;
 	ASSERT(!pq_handles.count(serverId));
 	pq_handles[serverId] = wiggle_pq.emplace(metadata, serverId);
@@ -247,7 +248,7 @@ void StorageWiggler::addServer(const UID& serverId, const StorageMetadataType& m
 
 void StorageWiggler::removeServer(const UID& serverId) {
 	// std::cout << "size: " << pq_handles.size() << " remove " << serverId.toString() << " DC: "<<
-	// teamCollection->primary <<std::endl;
+	// teamCollection->isPrimary() <<std::endl;
 	if (contains(serverId)) { // server haven't been popped
 		auto handle = pq_handles.at(serverId);
 		pq_handles.erase(serverId);
@@ -258,7 +259,7 @@ void StorageWiggler::removeServer(const UID& serverId) {
 
 void StorageWiggler::updateMetadata(const UID& serverId, const StorageMetadataType& metadata) {
 	//	std::cout << "size: " << pq_handles.size() << " update " << serverId.toString()
-	//	          << " DC: " << teamCollection->primary << std::endl;
+	//	          << " DC: " << teamCollection->isPrimary() << std::endl;
 	auto handle = pq_handles.at(serverId);
 	if ((*handle).first.createdTime == metadata.createdTime) {
 		return;
@@ -280,7 +281,7 @@ Future<Void> StorageWiggler::resetStats() {
 	auto newMetrics = StorageWiggleMetrics();
 	newMetrics.smoothed_round_duration = metrics.smoothed_round_duration;
 	newMetrics.smoothed_wiggle_duration = metrics.smoothed_wiggle_duration;
-	return StorageWiggleMetrics::runSetTransaction(teamCollection->cx, teamCollection->primary, newMetrics);
+	return StorageWiggleMetrics::runSetTransaction(teamCollection->cx, teamCollection->isPrimary(), newMetrics);
 }
 
 Future<Void> StorageWiggler::restoreStats() {
@@ -291,7 +292,7 @@ Future<Void> StorageWiggler::restoreStats() {
 		}
 		return Void();
 	};
-	auto readFuture = StorageWiggleMetrics::runGetTransaction(teamCollection->cx, teamCollection->primary);
+	auto readFuture = StorageWiggleMetrics::runGetTransaction(teamCollection->cx, teamCollection->isPrimary());
 	return map(readFuture, assignFunc);
 }
 Future<Void> StorageWiggler::startWiggle() {
@@ -299,7 +300,7 @@ Future<Void> StorageWiggler::startWiggle() {
 	if (shouldStartNewRound()) {
 		metrics.last_round_start = metrics.last_wiggle_start;
 	}
-	return StorageWiggleMetrics::runSetTransaction(teamCollection->cx, teamCollection->primary, metrics);
+	return StorageWiggleMetrics::runSetTransaction(teamCollection->cx, teamCollection->isPrimary(), metrics);
 }
 
 Future<Void> StorageWiggler::finishWiggle() {
@@ -314,7 +315,7 @@ Future<Void> StorageWiggler::finishWiggle() {
 		duration = metrics.last_round_finish - metrics.last_round_start;
 		metrics.smoothed_round_duration.setTotal((double)duration);
 	}
-	return StorageWiggleMetrics::runSetTransaction(teamCollection->cx, teamCollection->primary, metrics);
+	return StorageWiggleMetrics::runSetTransaction(teamCollection->cx, teamCollection->isPrimary(), metrics);
 }
 
 // Take a snapshot of necessary data structures from `DDTeamCollection` and print them out with yields to avoid slow
@@ -371,18 +372,18 @@ ACTOR Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self) {
 
 			TraceEvent("DDPrintSnapshotTeasmInfo", self->distributorId)
 			    .detail("SnapshotSpeed", now() - snapshotStart)
-			    .detail("Primary", self->primary);
+			    .detail("Primary", self->isPrimary());
 
 			// Print to TraceEvents
 			TraceEvent("DDConfig", self->distributorId)
 			    .detail("StorageTeamSize", configuration.storageTeamSize)
 			    .detail("DesiredTeamsPerServer", SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER)
 			    .detail("MaxTeamsPerServer", SERVER_KNOBS->MAX_TEAMS_PER_SERVER)
-			    .detail("Primary", self->primary);
+			    .detail("Primary", self->isPrimary());
 
 			TraceEvent("ServerInfo", self->distributorId)
 			    .detail("Size", server_info.size())
-			    .detail("Primary", self->primary);
+			    .detail("Primary", self->isPrimary());
 			state int i;
 			state std::map<UID, Reference<TCServerInfo>>::iterator server = server_info.begin();
 			for (i = 0; i < server_info.size(); i++) {
@@ -391,7 +392,7 @@ ACTOR Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self) {
 				    .detail("ServerID", server->first.toString())
 				    .detail("ServerTeamOwned", server->second->teams.size())
 				    .detail("MachineID", server->second->machine->machineID.contents().toString())
-				    .detail("Primary", self->primary);
+				    .detail("Primary", self->isPrimary());
 				server++;
 				if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
 					wait(yield());
@@ -407,7 +408,7 @@ ACTOR Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self) {
 				    .detail("MachineIsValid", server_info[uid]->machine.isValid())
 				    .detail("MachineTeamSize",
 				            server_info[uid]->machine.isValid() ? server_info[uid]->machine->machineTeams.size() : -1)
-				    .detail("Primary", self->primary);
+				    .detail("Primary", self->isPrimary());
 
 				// ServerStatus might not be known if server was very recently added and storageServerFailureTracker()
 				// has not yet updated self->server_status
@@ -425,7 +426,7 @@ ACTOR Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self) {
 
 			TraceEvent("ServerTeamInfo", self->distributorId)
 			    .detail("Size", teams.size())
-			    .detail("Primary", self->primary);
+			    .detail("Primary", self->isPrimary());
 			for (i = 0; i < teams.size(); i++) {
 				const auto& team = teams[i];
 				TraceEvent("ServerTeamInfo", self->distributorId)
@@ -433,7 +434,7 @@ ACTOR Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self) {
 				    .detail("Healthy", team->isHealthy())
 				    .detail("TeamSize", team->size())
 				    .detail("MemberIDs", team->getServerIDsStr())
-				    .detail("Primary", self->primary);
+				    .detail("Primary", self->isPrimary());
 				if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
 					wait(yield());
 				}
@@ -441,7 +442,7 @@ ACTOR Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self) {
 
 			TraceEvent("MachineInfo", self->distributorId)
 			    .detail("Size", machine_info.size())
-			    .detail("Primary", self->primary);
+			    .detail("Primary", self->isPrimary());
 			state std::map<Standalone<StringRef>, Reference<TCMachineInfo>>::iterator machine = machine_info.begin();
 			state bool isMachineHealthy = false;
 			for (i = 0; i < machine_info.size(); i++) {
@@ -470,7 +471,7 @@ ACTOR Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self) {
 				    .detail("MachineTeamOwned", machine->second->machineTeams.size())
 				    .detail("ServerNumOnMachine", machine->second->serversOnMachine.size())
 				    .detail("ServersID", machine->second->getServersIDStr())
-				    .detail("Primary", self->primary);
+				    .detail("Primary", self->isPrimary());
 				machine++;
 				if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
 					wait(yield());
@@ -479,14 +480,14 @@ ACTOR Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self) {
 
 			TraceEvent("MachineTeamInfo", self->distributorId)
 			    .detail("Size", machineTeams.size())
-			    .detail("Primary", self->primary);
+			    .detail("Primary", self->isPrimary());
 			for (i = 0; i < machineTeams.size(); i++) {
 				const auto& team = machineTeams[i];
 				TraceEvent("MachineTeamInfo", self->distributorId)
 				    .detail("TeamIndex", i)
 				    .detail("MachineIDs", team->getMachineIDsStr())
 				    .detail("ServerTeams", team->serverTeams.size())
-				    .detail("Primary", self->primary);
+				    .detail("Primary", self->isPrimary());
 				if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
 					wait(yield());
 				}
@@ -495,12 +496,12 @@ ACTOR Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self) {
 			// TODO: re-enable the following logging or remove them.
 			// TraceEvent("LocalityRecordKeyName", self->distributorId)
 			//     .detail("Size", internedLocalityRecordKeyNameStrings.size())
-			//     .detail("Primary", self->primary);
+			//     .detail("Primary", self->isPrimary());
 			// for (i = 0; i < internedLocalityRecordKeyNameStrings.size(); i++) {
 			// 	TraceEvent("LocalityRecordKeyIndexName", self->distributorId)
 			// 	    .detail("KeyIndex", i)
 			// 	    .detail("KeyName", internedLocalityRecordKeyNameStrings[i])
-			// 	    .detail("Primary", self->primary);
+			// 	    .detail("Primary", self->isPrimary());
 			// 	if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
 			// 		wait(yield());
 			// 	}
@@ -508,7 +509,7 @@ ACTOR Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self) {
 
 			// TraceEvent("MachineLocalityMap", self->distributorId)
 			//     .detail("Size", machineLocalityMapEntryArraySize)
-			//     .detail("Primary", self->primary);
+			//     .detail("Primary", self->isPrimary());
 			// for (i = 0; i < serverIDs.size(); i++) {
 			// 	const auto& serverID = serverIDs[i];
 			// 	Reference<LocalityRecord> record = machineLocalityMapRecordArray[i];
@@ -517,13 +518,13 @@ ACTOR Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self) {
 			// 		    .detail("LocalityIndex", i)
 			// 		    .detail("UID", serverID->toString())
 			// 		    .detail("LocalityRecord", record->toString())
-			// 		    .detail("Primary", self->primary);
+			// 		    .detail("Primary", self->isPrimary());
 			// 	} else {
 			// 		TraceEvent("MachineLocalityMap", self->distributorId)
 			// 		    .detail("LocalityIndex", i)
 			// 		    .detail("UID", serverID->toString())
 			// 		    .detail("LocalityRecord", "[NotFound]")
-			// 		    .detail("Primary", self->primary);
+			// 		    .detail("Primary", self->isPrimary());
 			// 	}
 			// 	if (++traceEventsPrinted % SERVER_KNOBS->DD_TEAMS_INFO_PRINT_YIELD_COUNT == 0) {
 			// 		wait(yield());

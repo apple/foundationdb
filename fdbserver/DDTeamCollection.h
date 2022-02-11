@@ -262,6 +262,8 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	Reference<EventCacheHolder> teamCollectionInfoEventHolder;
 	Reference<EventCacheHolder> storageServerRecruitmentEventHolder;
 
+	bool primary;
+
 	// Randomly choose one machine team that has chosenServer and has the correct size
 	// When configuration is changed, we may have machine teams with old storageTeamSize
 	Reference<TCMachineTeamInfo> findOneRandomMachineTeam(TCServerInfo const& chosenServer) const;
@@ -532,8 +534,6 @@ public:
 
 	std::vector<Reference<TCTeamInfo>> teams;
 
-	bool primary;
-
 	std::vector<DDTeamCollection*> teamCollections;
 	AsyncTrigger printDetailedTeamsInfo;
 	Reference<LocalitySet> storageServerSet;
@@ -647,6 +647,8 @@ public:
 	// Find size of set intersection of excludeServerIDs and serverIDs on each team and see if the leftover team is
 	// valid
 	bool exclusionSafetyCheck(std::vector<UID>& excludeServerIDs);
+
+	bool isPrimary() const { return primary; }
 
 	// Keep track of servers and teams -- serves requests for getRandomTeam
 	static Future<Void> run(Reference<DDTeamCollection> teamCollection,
