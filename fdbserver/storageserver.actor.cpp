@@ -4462,6 +4462,13 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data, KeyR
 				// reset fetch versions because everything previously fetched was cleaned up
 				changeFeedInfo->fetchVersion = invalidVersion;
 				changeFeedInfo->durableFetchVersion = NotifiedVersion();
+				// TODO REMOVE
+				TraceEvent(SevDebug, "FetchedChangeFeedInfoReset", data->thisServerID)
+				    .detail("RangeID", cfEntry.rangeId.printable())
+				    .detail("Range", cfEntry.range.toString())
+				    .detail("FetchVersion", fetchVersion)
+				    .detail("EmptyVersion", cfEntry.emptyVersion)
+				    .detail("Stopped", cfEntry.stopped);
 			} else if (changeFeedInfo->emptyVersion < cfEntry.emptyVersion) {
 				TEST(true); // Got updated CF emptyVersion from a parallel fetchChangeFeedMetadata
 				changeFeedInfo->emptyVersion = cfEntry.emptyVersion;
@@ -6139,7 +6146,14 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 					info->second->storageVersion = it.version;
 				}
 
-				if (info->second->fetchVersion != invalidVersion) {
+				if (info->second->fetchVersion != invalidVersion && !info->second->removing) {
+					// TODO REMOVE trace
+					TraceEvent(SevDebug, "UpdateStorageChangeFeedStart", data->thisServerID)
+					    .detail("RangeID", info->second->id.printable())
+					    .detail("Range", info->second->range.toString())
+					    .detail("FetchVersion", info->second->fetchVersion)
+					    .detail("Stopped", info->second->stopped)
+					    .detail("Removing", info->second->removing);
 					feedFetchVersions.push_back(std::pair(info->second->id, info->second->fetchVersion));
 				}
 				// handle case where fetch had version ahead of last in-memory mutation
@@ -6208,7 +6222,18 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		curFeed = 0;
 		while (curFeed < feedFetchVersions.size()) {
 			auto info = data->uidChangeFeed.find(feedFetchVersions[curFeed].first);
-			if (info != data->uidChangeFeed.end()) {
+			// Don't update if the feed is pending cleanup. Either it will get cleaned up and destroyed, or it will get
+			// fetched again, where the fetch version will get reset.
+			if (info != data->uidChangeFeed.end() && !data->changeFeedCleanupDurable.count(info->second->id)) {
+				// TODO REMOVE trace
+				TraceEvent(SevDebug, "UpdateStorageChangeFeedDurable", data->thisServerID)
+				    .detail("RangeID", info->second->id.printable())
+				    .detail("Range", info->second->range.toString())
+				    .detail("FetchVersion", info->second->fetchVersion)
+				    .detail("OldDurableVersion", info->second->durableFetchVersion.get())
+				    .detail("NewDurableVersion", feedFetchVersions[curFeed].second)
+				    .detail("Stopped", info->second->stopped)
+				    .detail("Removing", info->second->removing);
 				if (feedFetchVersions[curFeed].second > info->second->durableFetchVersion.get()) {
 					info->second->durableFetchVersion.set(feedFetchVersions[curFeed].second);
 				}
@@ -6243,6 +6268,12 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 						}
 					}
 					data->keyChangeFeed.coalesce(feed->second->range.contents());
+
+					// TODO REMOVE
+					TraceEvent(SevDebug, "UpdateStorageChangeFeedCleanup", data->thisServerID)
+					    .detail("RangeID", feed->second->id.printable())
+					    .detail("Range", feed->second->range.toString());
+
 					data->uidChangeFeed.erase(feed);
 				} else {
 					TEST(true); // Feed re-fetched after remove

@@ -928,7 +928,10 @@ ACTOR Future<Void> handleCompletedDeltaFile(Reference<BlobWorkerData> bwData,
 		wait(popFuture);
 	}
 	while (!rollbacksCompleted->empty() && completedDeltaFile.version >= rollbacksCompleted->front().second) {
-		fmt::print("Completed rollback {0} -> {1} with delta file {2}\n",
+		fmt::print("Granule [{0} - {1}) on BW {2} completed rollback {3} -> {4} with delta file {5}\n",
+		           metadata->keyRange.begin.printable().c_str(),
+		           metadata->keyRange.end.printable().c_str(),
+		           bwData->id.toString().substr(0, 5).c_str(),
 		           rollbacksCompleted->front().second,
 		           rollbacksCompleted->front().first,
 		           completedDeltaFile.version);
@@ -1542,9 +1545,13 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 								     metadata->currentDeltas.back().version <= rollbackVersion)) {
 
 									if (BW_DEBUG) {
-										fmt::print("BW skipping rollback {0} -> {1} completely\n",
-										           deltas.version,
-										           rollbackVersion);
+										fmt::print(
+										    "Granule [{0} - {1}) on BW {2} skipping rollback {0} -> {1} completely\n",
+										    metadata->keyRange.begin.printable().c_str(),
+										    metadata->keyRange.end.printable().c_str(),
+										    bwData->id.toString().substr(0, 5).c_str(),
+										    deltas.version,
+										    rollbackVersion);
 									}
 									// Still have to add to rollbacksCompleted. If we later roll the granule back past
 									// this because of cancelling a delta file, we need to count this as in progress so
@@ -1553,9 +1560,10 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 									rollbacksCompleted.push_back(std::pair(rollbackVersion, deltas.version));
 								} else {
 									if (BW_DEBUG) {
-										fmt::print("BW [{0} - {1}) ROLLBACK @ {2} -> {3}\n",
+										fmt::print("[{0} - {1}) on BW {2} ROLLBACK @ {2} -> {3}\n",
 										           metadata->keyRange.begin.printable(),
 										           metadata->keyRange.end.printable(),
+										           bwData->id.toString().substr(0, 5).c_str(),
 										           deltas.version,
 										           rollbackVersion);
 										TraceEvent(SevWarn, "GranuleRollback", bwData->id)
