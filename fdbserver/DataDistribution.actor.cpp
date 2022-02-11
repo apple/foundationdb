@@ -238,17 +238,16 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Data
 
 // add server to wiggling queue
 void StorageWiggler::addServer(const UID& serverId, const StorageMetadataType& metadata) {
-	// std::cout << "size: " << pq_handles.size() << " add " << serverId.toString() << " DC: "<<
-	// teamCollection->isPrimary()
-	// << std::endl;
+	// std::cout << "size: " << pq_handles.size() << " add " << serverId.toString() << " DC: "
+	//           << teamCollection->isPrimary() << std::endl;
 	ASSERT(!pq_handles.count(serverId));
 	pq_handles[serverId] = wiggle_pq.emplace(metadata, serverId);
 	nonEmpty.set(true);
 }
 
 void StorageWiggler::removeServer(const UID& serverId) {
-	// std::cout << "size: " << pq_handles.size() << " remove " << serverId.toString() << " DC: "<<
-	// teamCollection->isPrimary() <<std::endl;
+	// std::cout << "size: " << pq_handles.size() << " remove " << serverId.toString() << " DC: "
+	//           << teamCollection->isPrimary() << std::endl;
 	if (contains(serverId)) { // server haven't been popped
 		auto handle = pq_handles.at(serverId);
 		pq_handles.erase(serverId);
