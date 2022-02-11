@@ -4340,6 +4340,10 @@ ACTOR Future<Version> fetchChangeFeed(StorageServer* data,
 
 	auto cleanupPending = data->changeFeedCleanupDurable.find(changeFeedInfo->id);
 	if (cleanupPending != data->changeFeedCleanupDurable.end()) {
+		/*printf("SS %s waiting for CF %s cleanup @ %lld\n",
+		       data->thisServerID.toString().substr(0, 4).c_str(),
+		       changeFeedInfo->id.toString().substr(0, 6).c_str(),
+		       cleanupPending->second);*/
 		TraceEvent(SevDebug, "FetchChangeFeedWaitCleanup", data->thisServerID)
 		    .detail("RangeID", changeFeedInfo->id.printable())
 		    .detail("Range", changeFeedInfo->range.toString())
@@ -4348,7 +4352,18 @@ ACTOR Future<Version> fetchChangeFeed(StorageServer* data,
 		    .detail("BeginVersion", beginVersion)
 		    .detail("EndVersion", endVersion);
 		wait(data->durableVersion.whenAtLeast(cleanupPending->second + 1));
-		ASSERT(!data->changeFeedCleanupDurable.count(changeFeedInfo->id));
+		wait(delay(0));
+		// shard might have gotten moved away (again) while we were waiting
+		auto cleanupPendingAfter = data->changeFeedCleanupDurable.find(changeFeedInfo->id);
+		if (cleanupPendingAfter != data->changeFeedCleanupDurable.end()) {
+			ASSERT(cleanupPendingAfter->second >= endVersion);
+			TraceEvent(SevDebug, "FetchChangeFeedCancelledByCleanup", data->thisServerID)
+			    .detail("RangeID", changeFeedInfo->id.printable())
+			    .detail("Range", changeFeedInfo->range.toString())
+			    .detail("BeginVersion", beginVersion)
+			    .detail("EndVersion", endVersion);
+			return invalidVersion;
+		}
 	}
 
 	loop {
@@ -6200,10 +6215,10 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 				ASSERT(feed != data->uidChangeFeed.end());
 				if (feed->second->removing) {
 					// TODO  REMOVE
-					printf("DBG: SS %s Feed %s removing @ %lld!\n",
+					/*printf("DBG: SS %s Feed %s removing metadata @ %lld!\n",
 					       data->thisServerID.toString().substr(0, 4).c_str(),
 					       feed->first.printable().substr(0, 6).c_str(),
-					       cfCleanup->second);
+					       cfCleanup->second);*/
 					auto rs = data->keyChangeFeed.modify(feed->second->range);
 					for (auto r = rs.begin(); r != rs.end(); ++r) {
 						auto& feedList = r->value();
@@ -6218,12 +6233,18 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 				} else {
 					TEST(true); // Feed re-fetched after remove
 					// TODO  REMOVE
-					printf("DBG: SS %s Feed %s not removing @ %lld, must have been re-fetched after moved away!\n",
+					/*printf("DBG: SS %s Feed %s not removing metadata @ %lld, must have been re-fetched after moved "
+					       "away!\n",
 					       data->thisServerID.toString().substr(0, 4).c_str(),
 					       feed->first.printable().substr(0, 6).c_str(),
-					       cfCleanup->second);
+					       cfCleanup->second);*/
 				}
 
+				// TODO REMOVE
+				/*printf("DBG: SS %s Feed %s removing cleanup entry @ %lld!\n",
+				       data->thisServerID.toString().substr(0, 4).c_str(),
+				       feed->first.printable().substr(0, 6).c_str(),
+				       cfCleanup->second);*/
 				cfCleanup = data->changeFeedCleanupDurable.erase(cfCleanup);
 			} else {
 				cfCleanup++;
