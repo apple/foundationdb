@@ -1020,22 +1020,20 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 				                                    getUnhealthyRelocationCount);
 				teamCollectionsPtrs.push_back(remoteTeamCollection.getPtr());
 				remoteTeamCollection->teamCollections = teamCollectionsPtrs;
-				actors.push_back(
-				    reportErrorsExcept(DDTeamCollection::run(
-				                           remoteTeamCollection, initData, tcis[1], recruitStorage, *ddEnabledState),
-				                       "DDTeamCollectionSecondary",
-				                       self->ddId,
-				                       &normalDDQueueErrors()));
+				actors.push_back(reportErrorsExcept(
+				    DDTeamCollection::run(remoteTeamCollection, initData, tcis[1], recruitStorage, *ddEnabledState),
+				    "DDTeamCollectionSecondary",
+				    self->ddId,
+				    &normalDDQueueErrors()));
 				actors.push_back(printSnapshotTeamsInfo(remoteTeamCollection));
 			}
 			primaryTeamCollection->teamCollections = teamCollectionsPtrs;
 			self->teamCollection = primaryTeamCollection.getPtr();
-			actors.push_back(
-			    reportErrorsExcept(DDTeamCollection::run(
-			                           primaryTeamCollection, initData, tcis[0], recruitStorage, *ddEnabledState),
-			                       "DDTeamCollectionPrimary",
-			                       self->ddId,
-			                       &normalDDQueueErrors()));
+			actors.push_back(reportErrorsExcept(
+			    DDTeamCollection::run(primaryTeamCollection, initData, tcis[0], recruitStorage, *ddEnabledState),
+			    "DDTeamCollectionPrimary",
+			    self->ddId,
+			    &normalDDQueueErrors()));
 
 			actors.push_back(printSnapshotTeamsInfo(primaryTeamCollection));
 			actors.push_back(yieldPromiseStream(output.getFuture(), input));

@@ -2893,10 +2893,10 @@ public:
 	}
 
 	ACTOR static Future<Void> run(Reference<DDTeamCollection> teamCollection,
-								  Reference<InitialDataDistribution> initData,
-								  TeamCollectionInterface tci,
-								  Reference<IAsyncListener<RequestStream<RecruitStorageRequest>>> recruitStorage,
-								  DDEnabledState const* ddEnabledState) {
+	                              Reference<InitialDataDistribution> initData,
+	                              TeamCollectionInterface tci,
+	                              Reference<IAsyncListener<RequestStream<RecruitStorageRequest>>> recruitStorage,
+	                              DDEnabledState const* ddEnabledState) {
 		state DDTeamCollection* self = teamCollection.getPtr();
 		state Future<Void> loggingTrigger = Void();
 		state PromiseStream<Void> serverRemoved;
@@ -2974,16 +2974,15 @@ public:
 					}
 
 					TraceEvent("TotalDataInFlight", self->distributorId)
-						.detail("Primary", self->primary)
-						.detail("TotalBytes", self->getDebugTotalDataInFlight())
-						.detail("UnhealthyServers", self->unhealthyServers)
-						.detail("ServerCount", self->server_info.size())
-						.detail("StorageTeamSize", self->configuration.storageTeamSize)
-						.detail("HighestPriority", highestPriority)
-						.trackLatest(
-									 self->primary
-									 ? "TotalDataInFlight"
-									 : "TotalDataInFlightRemote"); // This trace event's trackLatest lifetime is controlled by
+					    .detail("Primary", self->primary)
+					    .detail("TotalBytes", self->getDebugTotalDataInFlight())
+					    .detail("UnhealthyServers", self->unhealthyServers)
+					    .detail("ServerCount", self->server_info.size())
+					    .detail("StorageTeamSize", self->configuration.storageTeamSize)
+					    .detail("HighestPriority", highestPriority)
+					    .trackLatest(self->primary ? "TotalDataInFlight"
+					                               : "TotalDataInFlightRemote"); // This trace event's trackLatest
+					                                                             // lifetime is controlled by
 					// DataDistributorData::totalDataInFlightEventHolder or
 					// DataDistributorData::totalDataInFlightRemoteEventHolder.
 					// The track latest key we use here must match the key used in
@@ -4858,9 +4857,9 @@ bool DDTeamCollection::exclusionSafetyCheck(std::vector<UID>& excludeServerIDs) 
 }
 
 Future<Void> DDTeamCollection::run(Reference<DDTeamCollection> teamCollection,
-								   Reference<InitialDataDistribution> initData,
-								   TeamCollectionInterface tci,
-								   Reference<IAsyncListener<RequestStream<RecruitStorageRequest>>> recruitStorage,
-								   DDEnabledState const &ddEnabledState) {
+                                   Reference<InitialDataDistribution> initData,
+                                   TeamCollectionInterface tci,
+                                   Reference<IAsyncListener<RequestStream<RecruitStorageRequest>>> recruitStorage,
+                                   DDEnabledState const& ddEnabledState) {
 	return DDTeamCollectionImpl::run(teamCollection, initData, tci, recruitStorage, &ddEnabledState);
 }
