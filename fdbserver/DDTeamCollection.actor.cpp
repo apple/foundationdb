@@ -3315,26 +3315,26 @@ DDTeamCollection::DDTeamCollection(Database const& cx,
                                    PromiseStream<GetMetricsRequest> getShardMetrics,
                                    Promise<UID> removeFailedServer,
                                    PromiseStream<Promise<int>> getUnhealthyRelocationCount)
-  : doBuildTeams(true), lastBuildTeamsFailed(false), teamBuilder(Void()), cx(cx), distributorId(distributorId),
-    configuration(configuration), lock(lock), output(output), unhealthyServers(0),
-    storageWiggler(makeReference<StorageWiggler>(this)), processingWiggle(processingWiggle),
+  : doBuildTeams(true), lastBuildTeamsFailed(false), teamBuilder(Void()), lock(lock), output(output),
+    unhealthyServers(0), storageWiggler(makeReference<StorageWiggler>(this)), processingWiggle(processingWiggle),
     shardsAffectedByTeamFailure(shardsAffectedByTeamFailure),
     initialFailureReactionDelay(
         delayed(readyToStart, SERVER_KNOBS->INITIAL_FAILURE_REACTION_DELAY, TaskPriority::DataDistribution)),
     initializationDoneActor(logOnCompletion(readyToStart && initialFailureReactionDelay)), recruitingStream(0),
     restartRecruiting(SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY), healthyTeamCount(0), zeroHealthyTeams(zeroHealthyTeams),
     optimalTeamCount(0), zeroOptimalTeams(true), isTssRecruiting(false), includedDCs(includedDCs),
-    otherTrackedDCs(otherTrackedDCs), primary(primary), processingUnhealthy(processingUnhealthy),
-    readyToStart(readyToStart), checkTeamDelay(delay(SERVER_KNOBS->CHECK_TEAM_DELAY, TaskPriority::DataDistribution)),
-    badTeamRemover(Void()), checkInvalidLocalities(Void()), wrongStoreTypeRemover(Void()),
-    storageServerSet(new LocalityMap<UID>()), clearHealthyZoneFuture(true),
+    otherTrackedDCs(otherTrackedDCs), processingUnhealthy(processingUnhealthy), readyToStart(readyToStart),
+    checkTeamDelay(delay(SERVER_KNOBS->CHECK_TEAM_DELAY, TaskPriority::DataDistribution)), badTeamRemover(Void()),
+    checkInvalidLocalities(Void()), wrongStoreTypeRemover(Void()), clearHealthyZoneFuture(true),
     medianAvailableSpace(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO), lastMedianAvailableSpaceUpdate(0),
     lowestUtilizationTeam(0), highestUtilizationTeam(0), getShardMetrics(getShardMetrics),
     getUnhealthyRelocationCount(getUnhealthyRelocationCount), removeFailedServer(removeFailedServer),
     ddTrackerStartingEventHolder(makeReference<EventCacheHolder>("DDTrackerStarting")),
     teamCollectionInfoEventHolder(makeReference<EventCacheHolder>("TeamCollectionInfo")),
     storageServerRecruitmentEventHolder(
-        makeReference<EventCacheHolder>("StorageServerRecruitment_" + distributorId.toString())) {
+        makeReference<EventCacheHolder>("StorageServerRecruitment_" + distributorId.toString())),
+    cx(cx), distributorId(distributorId), configuration(configuration), primary(primary),
+    storageServerSet(new LocalityMap<UID>()) {
 	if (!primary || configuration.usableRegions == 1) {
 		TraceEvent("DDTrackerStarting", distributorId)
 		    .detail("State", "Inactive")
