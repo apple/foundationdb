@@ -472,9 +472,7 @@ inline static uint64_t __rdtsc() {
 #elif defined(__powerpc64__) || defined(__ppc64__)
 inline static uint64_t __rdtsc() {
 	uint64_t tb;
-	__asm__ volatile (\
-			"mfspr %0, 268"
-			: "=r" (tb));
+	__asm__ volatile("mfspr %0, 268" : "=r"(tb));
 	return tb;
 }
 #endif
