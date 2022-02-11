@@ -65,11 +65,11 @@ public:
 	void enter() {
 		while (isLocked.test_and_set(std::memory_order_acquire))
 #if defined(__aarch64__)
-		__asm__ volatile("isb");
+			__asm__ volatile("isb");
 #elif defined(__powerpc64__)
-		__asm__ volatile ("or 27,27,27" ::: "memory");
+			__asm__ volatile ("or 27,27,27" ::: "memory");
 #else
-		_mm_pause();
+			_mm_pause();
 #endif
 #if VALGRIND
 		ANNOTATE_RWLOCK_ACQUIRED(this, true);
