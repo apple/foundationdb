@@ -5102,10 +5102,6 @@ TEST_CASE("/DataDistribution/GetTeam/HealthyCompleteSource") {
 	state GetTeamRequest req(wantsNewServers, wantsTrueBest, preferLowerUtilization, teamMustHaveShards);
 	req.completeSources = completeSources;
 
-	collection->traceAllInfo();
-	collection->traceServerInfo();
-	collection->traceServerTeamInfo();
-
 	Future<Void> a = collection->getTeam(req);
 	wait(a);
 
