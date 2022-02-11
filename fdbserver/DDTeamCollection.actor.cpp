@@ -3333,7 +3333,7 @@ DDTeamCollection::DDTeamCollection(Database const& cx,
     teamCollectionInfoEventHolder(makeReference<EventCacheHolder>("TeamCollectionInfo")),
     storageServerRecruitmentEventHolder(
         makeReference<EventCacheHolder>("StorageServerRecruitment_" + distributorId.toString())),
-    primary(primary), cx(cx), distributorId(distributorId), configuration(configuration),
+    primary(primary), distributorId(distributorId), cx(cx), configuration(configuration),
     storageServerSet(new LocalityMap<UID>()) {
 	if (!primary || configuration.usableRegions == 1) {
 		TraceEvent("DDTrackerStarting", distributorId)

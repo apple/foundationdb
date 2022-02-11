@@ -263,6 +263,7 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	Reference<EventCacheHolder> storageServerRecruitmentEventHolder;
 
 	bool primary;
+	UID distributorId;
 
 	// Randomly choose one machine team that has chosenServer and has the correct size
 	// When configuration is changed, we may have machine teams with old storageTeamSize
@@ -520,7 +521,6 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 
 public:
 	Database cx;
-	UID distributorId;
 
 	DatabaseConfiguration configuration;
 
@@ -649,6 +649,8 @@ public:
 	bool exclusionSafetyCheck(std::vector<UID>& excludeServerIDs);
 
 	bool isPrimary() const { return primary; }
+
+	UID getDistributorId() const { return distributorId; }
 
 	// Keep track of servers and teams -- serves requests for getRandomTeam
 	static Future<Void> run(Reference<DDTeamCollection> teamCollection,

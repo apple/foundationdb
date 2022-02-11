@@ -370,24 +370,24 @@ ACTOR Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self) {
 				server_status[key] = self->server_status.get(key);
 			}
 
-			TraceEvent("DDPrintSnapshotTeasmInfo", self->distributorId)
+			TraceEvent("DDPrintSnapshotTeasmInfo", self->getDistributorId())
 			    .detail("SnapshotSpeed", now() - snapshotStart)
 			    .detail("Primary", self->isPrimary());
 
 			// Print to TraceEvents
-			TraceEvent("DDConfig", self->distributorId)
+			TraceEvent("DDConfig", self->getDistributorId())
 			    .detail("StorageTeamSize", configuration.storageTeamSize)
 			    .detail("DesiredTeamsPerServer", SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER)
 			    .detail("MaxTeamsPerServer", SERVER_KNOBS->MAX_TEAMS_PER_SERVER)
 			    .detail("Primary", self->isPrimary());
 
-			TraceEvent("ServerInfo", self->distributorId)
+			TraceEvent("ServerInfo", self->getDistributorId())
 			    .detail("Size", server_info.size())
 			    .detail("Primary", self->isPrimary());
 			state int i;
 			state std::map<UID, Reference<TCServerInfo>>::iterator server = server_info.begin();
 			for (i = 0; i < server_info.size(); i++) {
-				TraceEvent("ServerInfo", self->distributorId)
+				TraceEvent("ServerInfo", self->getDistributorId())
 				    .detail("ServerInfoIndex", i)
 				    .detail("ServerID", server->first.toString())
 				    .detail("ServerTeamOwned", server->second->teams.size())
@@ -403,7 +403,7 @@ ACTOR Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self) {
 			for (i = 0; i < server_info.size(); i++) {
 				const UID& uid = server->first;
 
-				TraceEvent e("ServerStatus", self->distributorId);
+				TraceEvent e("ServerStatus", self->getDistributorId());
 				e.detail("ServerUID", uid)
 				    .detail("MachineIsValid", server_info[uid]->machine.isValid())
 				    .detail("MachineTeamSize",
@@ -424,12 +424,12 @@ ACTOR Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self) {
 				}
 			}
 
-			TraceEvent("ServerTeamInfo", self->distributorId)
+			TraceEvent("ServerTeamInfo", self->getDistributorId())
 			    .detail("Size", teams.size())
 			    .detail("Primary", self->isPrimary());
 			for (i = 0; i < teams.size(); i++) {
 				const auto& team = teams[i];
-				TraceEvent("ServerTeamInfo", self->distributorId)
+				TraceEvent("ServerTeamInfo", self->getDistributorId())
 				    .detail("TeamIndex", i)
 				    .detail("Healthy", team->isHealthy())
 				    .detail("TeamSize", team->size())
@@ -440,7 +440,7 @@ ACTOR Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self) {
 				}
 			}
 
-			TraceEvent("MachineInfo", self->distributorId)
+			TraceEvent("MachineInfo", self->getDistributorId())
 			    .detail("Size", machine_info.size())
 			    .detail("Primary", self->isPrimary());
 			state std::map<Standalone<StringRef>, Reference<TCMachineInfo>>::iterator machine = machine_info.begin();
@@ -464,7 +464,7 @@ ACTOR Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self) {
 				}
 
 				isMachineHealthy = false;
-				TraceEvent("MachineInfo", self->distributorId)
+				TraceEvent("MachineInfo", self->getDistributorId())
 				    .detail("MachineInfoIndex", i)
 				    .detail("Healthy", isMachineHealthy)
 				    .detail("MachineID", machine->first.contents().toString())
@@ -478,12 +478,12 @@ ACTOR Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self) {
 				}
 			}
 
-			TraceEvent("MachineTeamInfo", self->distributorId)
+			TraceEvent("MachineTeamInfo", self->getDistributorId())
 			    .detail("Size", machineTeams.size())
 			    .detail("Primary", self->isPrimary());
 			for (i = 0; i < machineTeams.size(); i++) {
 				const auto& team = machineTeams[i];
-				TraceEvent("MachineTeamInfo", self->distributorId)
+				TraceEvent("MachineTeamInfo", self->getDistributorId())
 				    .detail("TeamIndex", i)
 				    .detail("MachineIDs", team->getMachineIDsStr())
 				    .detail("ServerTeams", team->serverTeams.size())
@@ -494,11 +494,11 @@ ACTOR Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self) {
 			}
 
 			// TODO: re-enable the following logging or remove them.
-			// TraceEvent("LocalityRecordKeyName", self->distributorId)
+			// TraceEvent("LocalityRecordKeyName", self->getDistributorId())
 			//     .detail("Size", internedLocalityRecordKeyNameStrings.size())
 			//     .detail("Primary", self->isPrimary());
 			// for (i = 0; i < internedLocalityRecordKeyNameStrings.size(); i++) {
-			// 	TraceEvent("LocalityRecordKeyIndexName", self->distributorId)
+			// 	TraceEvent("LocalityRecordKeyIndexName", self->getDistributorId())
 			// 	    .detail("KeyIndex", i)
 			// 	    .detail("KeyName", internedLocalityRecordKeyNameStrings[i])
 			// 	    .detail("Primary", self->isPrimary());
@@ -507,20 +507,20 @@ ACTOR Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self) {
 			// 	}
 			// }
 
-			// TraceEvent("MachineLocalityMap", self->distributorId)
+			// TraceEvent("MachineLocalityMap", self->getDistributorId())
 			//     .detail("Size", machineLocalityMapEntryArraySize)
 			//     .detail("Primary", self->isPrimary());
 			// for (i = 0; i < serverIDs.size(); i++) {
 			// 	const auto& serverID = serverIDs[i];
 			// 	Reference<LocalityRecord> record = machineLocalityMapRecordArray[i];
 			// 	if (record.isValid()) {
-			// 		TraceEvent("MachineLocalityMap", self->distributorId)
+			// 		TraceEvent("MachineLocalityMap", self->getDistributorId())
 			// 		    .detail("LocalityIndex", i)
 			// 		    .detail("UID", serverID->toString())
 			// 		    .detail("LocalityRecord", record->toString())
 			// 		    .detail("Primary", self->isPrimary());
 			// 	} else {
-			// 		TraceEvent("MachineLocalityMap", self->distributorId)
+			// 		TraceEvent("MachineLocalityMap", self->getDistributorId())
 			// 		    .detail("LocalityIndex", i)
 			// 		    .detail("UID", serverID->toString())
 			// 		    .detail("LocalityRecord", "[NotFound]")

@@ -67,7 +67,7 @@ public:
 
 		if (server->serverMetrics.get().lastUpdate < now() - SERVER_KNOBS->DD_SS_STUCK_TIME_LIMIT) {
 			if (server->ssVersionTooFarBehind.get() == false) {
-				TraceEvent("StorageServerStuck", server->collection->distributorId)
+				TraceEvent("StorageServerStuck", server->collection->getDistributorId())
 				    .detail("ServerId", server->id.toString())
 				    .detail("LastUpdate", server->serverMetrics.get().lastUpdate);
 				server->ssVersionTooFarBehind.set(true);
@@ -75,7 +75,7 @@ public:
 			}
 		} else if (server->serverMetrics.get().versionLag > SERVER_KNOBS->DD_SS_FAILURE_VERSIONLAG) {
 			if (server->ssVersionTooFarBehind.get() == false) {
-				TraceEvent(SevWarn, "SSVersionDiffLarge", server->collection->distributorId)
+				TraceEvent(SevWarn, "SSVersionDiffLarge", server->collection->getDistributorId())
 				    .detail("ServerId", server->id.toString())
 				    .detail("VersionLag", server->serverMetrics.get().versionLag);
 				server->ssVersionTooFarBehind.set(true);
@@ -83,7 +83,7 @@ public:
 			}
 		} else if (server->serverMetrics.get().versionLag < SERVER_KNOBS->DD_SS_ALLOWED_VERSIONLAG) {
 			if (server->ssVersionTooFarBehind.get() == true) {
-				TraceEvent("SSVersionDiffNormal", server->collection->distributorId)
+				TraceEvent("SSVersionDiffNormal", server->collection->getDistributorId())
 				    .detail("ServerId", server->id.toString())
 				    .detail("VersionLag", server->serverMetrics.get().versionLag);
 				server->ssVersionTooFarBehind.set(false);
