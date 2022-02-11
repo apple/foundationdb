@@ -43,23 +43,27 @@ public:
 	ConfigBroadcaster(ConfigBroadcaster&&);
 	ConfigBroadcaster& operator=(ConfigBroadcaster&&);
 	~ConfigBroadcaster();
-	Future<Void> registerWorker(Version lastSeenVersion,
-	                            ConfigClassSet const& configClassSet,
-	                            Future<Void> watcher,
-	                            ConfigBroadcastInterface worker);
+	Future<Void> registerNode(WorkerInterface const& w,
+	                          Version lastSeenVersion,
+	                          ConfigClassSet const& configClassSet,
+	                          Future<Void> watcher,
+	                          ConfigBroadcastInterface const& worker);
 	void applyChanges(Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
 	                  Version mostRecentVersion,
-	                  Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> const& annotations);
+	                  Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> const& annotations,
+	                  std::vector<ConfigFollowerInterface> const& readReplicas);
 	void applySnapshotAndChanges(std::map<ConfigKey, KnobValue> const& snapshot,
 	                             Version snapshotVersion,
 	                             Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
 	                             Version changesVersion,
-	                             Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> const& annotations);
+	                             Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> const& annotations,
+	                             std::vector<ConfigFollowerInterface> const& readReplicas);
 	void applySnapshotAndChanges(std::map<ConfigKey, KnobValue>&& snapshot,
 	                             Version snapshotVersion,
 	                             Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
 	                             Version changesVersion,
-	                             Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> const& annotations);
+	                             Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> const& annotations,
+	                             std::vector<ConfigFollowerInterface> const& readReplicas);
 	Future<Void> getError() const;
 	UID getID() const;
 	JsonBuilderObject getStatus() const;

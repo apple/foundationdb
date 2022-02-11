@@ -172,6 +172,101 @@ typedef AsyncMap<UID, ServerStatus> ServerStatusMap;
 class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	friend class DDTeamCollectionImpl;
 
+	enum class Status { NONE = 0, WIGGLING = 1, EXCLUDED = 2, FAILED = 3 };
+
+	// addActor: add to actorCollection so that when an actor has error, the ActorCollection can catch the error.
+	// addActor is used to create the actorCollection when the dataDistributionTeamCollection is created
+	PromiseStream<Future<Void>> addActor;
+
+	bool doBuildTeams;
+	bool lastBuildTeamsFailed;
+	Future<Void> teamBuilder;
+	AsyncTrigger restartTeamBuilder;
+	AsyncVar<bool> waitUntilRecruited; // make teambuilder wait until one new SS is recruited
+
+	MoveKeysLock lock;
+	PromiseStream<RelocateShard> output;
+	std::vector<UID> allServers;
+	int64_t unhealthyServers;
+	std::map<int, int> priority_teams;
+	std::map<UID, Reference<TCServerInfo>> tss_info_by_pair;
+	std::map<UID, Reference<TCServerInfo>> server_and_tss_info; // TODO could replace this with an efficient way to do a
+	                                                            // read-only concatenation of 2 data structures?
+	std::map<Key, int> lagging_zones; // zone to number of storage servers lagging
+	AsyncVar<bool> disableFailingLaggingServers;
+
+	// storage wiggle info
+	Reference<StorageWiggler> storageWiggler;
+	std::vector<AddressExclusion> wiggleAddresses; // collection of wiggling servers' address
+	Optional<UID> wigglingId; // Process id of current wiggling storage server;
+	Reference<AsyncVar<bool>> pauseWiggle;
+	Reference<AsyncVar<bool>> processingWiggle; // track whether wiggling relocation is being processed
+	PromiseStream<StorageWiggleValue> nextWiggleInfo;
+
+	std::vector<Reference<TCTeamInfo>> badTeams;
+	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
+	PromiseStream<UID> removedServers;
+	PromiseStream<UID> removedTSS;
+	std::set<UID> recruitingIds; // The IDs of the SS/TSS which are being recruited
+	std::set<NetworkAddress> recruitingLocalities;
+	Future<Void> initialFailureReactionDelay;
+	Future<Void> initializationDoneActor;
+	Promise<Void> serverTrackerErrorOut;
+	AsyncVar<int> recruitingStream;
+	Debouncer restartRecruiting;
+
+	int healthyTeamCount;
+	Reference<AsyncVar<bool>> zeroHealthyTeams;
+
+	int optimalTeamCount;
+	AsyncVar<bool> zeroOptimalTeams;
+
+	int bestTeamKeepStuckCount = 0;
+
+	bool isTssRecruiting; // If tss recruiting is waiting on a pair, don't consider DD recruiting for the purposes of
+	                      // QuietDB
+
+	std::set<AddressExclusion>
+	    invalidLocalityAddr; // These address have invalidLocality for the configured storagePolicy
+
+	std::vector<Optional<Key>> includedDCs;
+	Optional<std::vector<Optional<Key>>> otherTrackedDCs;
+	Reference<AsyncVar<bool>> processingUnhealthy;
+	Future<Void> readyToStart;
+	Future<Void> checkTeamDelay;
+	Promise<Void> addSubsetComplete;
+	Future<Void> badTeamRemover;
+	Future<Void> checkInvalidLocalities;
+
+	Future<Void> wrongStoreTypeRemover;
+
+	AsyncVar<Optional<Key>> healthyZone;
+	Future<bool> clearHealthyZoneFuture;
+	double medianAvailableSpace;
+	double lastMedianAvailableSpaceUpdate;
+
+	int lowestUtilizationTeam;
+	int highestUtilizationTeam;
+
+	PromiseStream<GetMetricsRequest> getShardMetrics;
+	PromiseStream<Promise<int>> getUnhealthyRelocationCount;
+	Promise<UID> removeFailedServer;
+
+	// WIGGLING if an address is under storage wiggling.
+	// EXCLUDED if an address is in the excluded list in the database.
+	// FAILED if an address is permanently failed.
+	// NONE by default.  Updated asynchronously (eventually)
+	AsyncMap<AddressExclusion, Status> excludedServers;
+
+	Reference<EventCacheHolder> ddTrackerStartingEventHolder;
+	Reference<EventCacheHolder> teamCollectionInfoEventHolder;
+	Reference<EventCacheHolder> storageServerRecruitmentEventHolder;
+
+	bool primary;
+	UID distributorId;
+
+	LocalityMap<UID> machineLocalityMap; // locality info of machines
+
 	// Randomly choose one machine team that has chosenServer and has the correct size
 	// When configuration is changed, we may have machine teams with old storageTeamSize
 	Reference<TCMachineTeamInfo> findOneRandomMachineTeam(TCServerInfo const& chosenServer) const;
@@ -315,16 +410,16 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	                                  TCServerInfo* server,
 	                                  Promise<Void> errorOut,
 	                                  Version addedVersion,
-	                                  const DDEnabledState* ddEnabledState,
+	                                  DDEnabledState const& ddEnabledState,
 	                                  bool isTss);
 
 	bool teamContainsFailedServer(Reference<TCTeamInfo> team) const;
 
 	// NOTE: this actor returns when the cluster is healthy and stable (no server is expected to be removed in a period)
 	// processingWiggle and processingUnhealthy indicate that some servers are going to be removed.
-	Future<Void> waitUntilHealthy(double extraDelay = 0, bool waitWiggle = false);
+	Future<Void> waitUntilHealthy(double extraDelay = 0, bool waitWiggle = false) const;
 
-	bool isCorrectDC(TCServerInfo* server) const;
+	bool isCorrectDC(TCServerInfo const& server) const;
 
 	// Set the server's storeType; Error is caught by the caller
 	Future<Void> keyValueStoreTypeTracker(TCServerInfo* server);
@@ -343,22 +438,22 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	// Iterate over each storage process to do storage wiggle. After initializing the first Process ID, it waits a
 	// signal from `perpetualStorageWiggler` indicating the wiggling of current process is finished. Then it writes the
 	// next Process ID to a system key: `perpetualStorageWiggleIDPrefix` to show the next process to wiggle.
-	Future<Void> perpetualStorageWiggleIterator(AsyncVar<bool>* stopSignal,
+	Future<Void> perpetualStorageWiggleIterator(AsyncVar<bool>& stopSignal,
 	                                            FutureStream<Void> finishStorageWiggleSignal);
 
 	// periodically check whether the cluster is healthy if we continue perpetual wiggle
-	Future<Void> clusterHealthCheckForPerpetualWiggle(int* extraTeamCount);
+	Future<Void> clusterHealthCheckForPerpetualWiggle(int& extraTeamCount);
 
 	// Watches the value change of `perpetualStorageWiggleIDPrefix`, and adds the storage server into excludeServers
 	// which prevent recruiting the wiggling storage servers and let teamTracker start to move data off the affected
 	// teams. The wiggling process of current storage servers will be paused if the cluster is unhealthy and restarted
 	// once the cluster is healthy again.
-	Future<Void> perpetualStorageWiggler(AsyncVar<bool>* stopSignal, PromiseStream<Void> finishStorageWiggleSignal);
+	Future<Void> perpetualStorageWiggler(AsyncVar<bool>& stopSignal, PromiseStream<Void> finishStorageWiggleSignal);
 
 	int numExistingSSOnAddr(const AddressExclusion& addr) const;
 
 	Future<Void> initializeStorage(RecruitStorageReply candidateWorker,
-	                               DDEnabledState const* ddEnabledState,
+	                               DDEnabledState const& ddEnabledState,
 	                               bool recruitTss,
 	                               Reference<TSSPairState> tssState);
 
@@ -383,111 +478,66 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	// Read storage metadata from database, and do necessary updates
 	Future<Void> readOrCreateStorageMetadata(TCServerInfo* server);
 
-public:
-	// clang-format off
-	enum class Status { NONE = 0, WIGGLING = 1, EXCLUDED = 2, FAILED = 3};
+	Future<Void> serverGetTeamRequests(TeamCollectionInterface tci);
 
-	// addActor: add to actorCollection so that when an actor has error, the ActorCollection can catch the error.
-	// addActor is used to create the actorCollection when the dataDistributionTeamCollection is created
-	PromiseStream<Future<Void>> addActor;
+	Future<Void> removeBadTeams();
+
+	Future<Void> machineTeamRemover();
+
+	// Remove the server team whose members have the most number of process teams
+	// until the total number of server teams is no larger than the desired number
+	Future<Void> serverTeamRemover();
+
+	Future<Void> removeWrongStoreType();
+
+	// Check if the number of server (and machine teams) is larger than the maximum allowed number
+	void traceTeamCollectionInfo() const;
+
+	Future<Void> updateReplicasKey(Optional<Key> dcId);
+
+	Future<Void> storageRecruiter(Reference<IAsyncListener<RequestStream<RecruitStorageRequest>>> recruitStorage,
+	                              DDEnabledState const& ddEnabledState);
+
+	// Monitor whether or not storage servers are being recruited.  If so, then a database cannot be considered quiet
+	Future<Void> monitorStorageServerRecruitment();
+
+	// The serverList system keyspace keeps the StorageServerInterface for each serverID. Storage server's storeType
+	// and serverID are decided by the server's filename. By parsing storage server file's filename on each disk,
+	// process on each machine creates the TCServer with the correct serverID and StorageServerInterface.
+	Future<Void> waitServerListChange(FutureStream<Void> serverRemoved, DDEnabledState const& ddEnabledState);
+
+	Future<Void> trackExcludedServers();
+
+	Future<Void> monitorHealthyTeams();
+
+	// This coroutine sets a watch to monitor the value change of `perpetualStorageWiggleKey` which is controlled by
+	// command `configure perpetual_storage_wiggle=$value` if the value is 1, this actor start 2 actors,
+	// `perpetualStorageWiggleIterator` and `perpetualStorageWiggler`. Otherwise, it sends stop signal to them.
+	Future<Void> monitorPerpetualStorageWiggle();
+
+	Future<Void> waitHealthyZoneChange();
+
+	int64_t getDebugTotalDataInFlight() const;
+
+	void noHealthyTeams() const;
+
+public:
 	Database cx;
-	UID distributorId;
+
 	DatabaseConfiguration configuration;
 
-	bool doBuildTeams;
-	bool lastBuildTeamsFailed;
-	Future<Void> teamBuilder;
-	AsyncTrigger restartTeamBuilder;
-	AsyncVar<bool> waitUntilRecruited; // make teambuilder wait until one new SS is recruited
-
-	MoveKeysLock lock;
-	PromiseStream<RelocateShard> output;
-	std::vector<UID> allServers;
 	ServerStatusMap server_status;
-	int64_t unhealthyServers;
-	std::map<int,int> priority_teams;
 	std::map<UID, Reference<TCServerInfo>> server_info;
-	std::map<UID, Reference<TCServerInfo>> tss_info_by_pair;
-	std::map<UID, Reference<TCServerInfo>> server_and_tss_info; // TODO could replace this with an efficient way to do a read-only concatenation of 2 data structures?
-	std::map<Key, int> lagging_zones; // zone to number of storage servers lagging
-	AsyncVar<bool> disableFailingLaggingServers;
-
-	// storage wiggle info
-	Reference<StorageWiggler> storageWiggler;
-	std::vector<AddressExclusion> wiggleAddresses; // collection of wiggling servers' address
-	Optional<UID> wigglingId; // Process id of current wiggling storage server;
-	Reference<AsyncVar<bool>> pauseWiggle;
-	Reference<AsyncVar<bool>> processingWiggle; // track whether wiggling relocation is being processed
-	PromiseStream<StorageWiggleValue> nextWiggleInfo;
 
 	// machine_info has all machines info; key must be unique across processes on the same machine
 	std::map<Standalone<StringRef>, Reference<TCMachineInfo>> machine_info;
 	std::vector<Reference<TCMachineTeamInfo>> machineTeams; // all machine teams
-	LocalityMap<UID> machineLocalityMap; // locality info of machines
 
 	std::vector<Reference<TCTeamInfo>> teams;
-	std::vector<Reference<TCTeamInfo>> badTeams;
-	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
-	PromiseStream<UID> removedServers;
-	PromiseStream<UID> removedTSS;
-	std::set<UID> recruitingIds; // The IDs of the SS/TSS which are being recruited
-	std::set<NetworkAddress> recruitingLocalities;
-	Future<Void> initialFailureReactionDelay;
-	Future<Void> initializationDoneActor;
-	Promise<Void> serverTrackerErrorOut;
-	AsyncVar<int> recruitingStream;
-	Debouncer restartRecruiting;
-
-	int healthyTeamCount;
-	Reference<AsyncVar<bool>> zeroHealthyTeams;
-
-	int optimalTeamCount;
-	AsyncVar<bool> zeroOptimalTeams;
-
-	int bestTeamKeepStuckCount = 0;
-
-	bool isTssRecruiting; // If tss recruiting is waiting on a pair, don't consider DD recruiting for the purposes of QuietDB
-
-	// WIGGLING if an address is under storage wiggling.
-	// EXCLUDED if an address is in the excluded list in the database.
-	// FAILED if an address is permanently failed.
-	// NONE by default.  Updated asynchronously (eventually)
-	AsyncMap< AddressExclusion, Status > excludedServers;
-
-	std::set<AddressExclusion> invalidLocalityAddr; // These address have invalidLocality for the configured storagePolicy
-
-	std::vector<Optional<Key>> includedDCs;
-	Optional<std::vector<Optional<Key>>> otherTrackedDCs;
-	bool primary;
-	Reference<AsyncVar<bool>> processingUnhealthy;
-	Future<Void> readyToStart;
-	Future<Void> checkTeamDelay;
-	Promise<Void> addSubsetComplete;
-	Future<Void> badTeamRemover;
-	Future<Void> checkInvalidLocalities;
-
-	Future<Void> wrongStoreTypeRemover;
-
-	Reference<LocalitySet> storageServerSet;
 
 	std::vector<DDTeamCollection*> teamCollections;
-	AsyncVar<Optional<Key>> healthyZone;
-	Future<bool> clearHealthyZoneFuture;
-	double medianAvailableSpace;
-	double lastMedianAvailableSpaceUpdate;
-	// clang-format on
-
-	int lowestUtilizationTeam;
-	int highestUtilizationTeam;
-
 	AsyncTrigger printDetailedTeamsInfo;
-	PromiseStream<GetMetricsRequest> getShardMetrics;
-	PromiseStream<Promise<int>> getUnhealthyRelocationCount;
-	Promise<UID> removeFailedServer;
-
-	Reference<EventCacheHolder> ddTrackerStartingEventHolder;
-	Reference<EventCacheHolder> teamCollectionInfoEventHolder;
-	Reference<EventCacheHolder> storageServerRecruitmentEventHolder;
+	Reference<LocalitySet> storageServerSet;
 
 	DDTeamCollection(Database const& cx,
 	                 UID distributorId,
@@ -517,9 +567,7 @@ public:
 
 	Future<Void> getTeam(GetTeamRequest);
 
-	int64_t getDebugTotalDataInFlight() const;
-
-	Future<Void> init(Reference<InitialDataDistribution> initTeams, DDEnabledState const* ddEnabledState);
+	Future<Void> init(Reference<InitialDataDistribution> initTeams, DDEnabledState const& ddEnabledState);
 
 	// Assume begin to end is sorted by std::sort
 	// Assume InputIt is iterator to UID
@@ -547,14 +595,17 @@ public:
 
 	void addTeam(std::set<UID> const& team, bool isInitialTeam) { addTeam(team.begin(), team.end(), isInitialTeam); }
 
+	// FIXME: Public for testing only
 	// Group storage servers (process) based on their machineId in LocalityData
 	// All created machines are healthy
 	// Return The number of healthy servers we grouped into machines
 	int constructMachinesFromServers();
 
+	// FIXME: Public for testing only
 	// To enable verbose debug info, set shouldPrint to true
 	void traceAllInfo(bool shouldPrint = false) const;
 
+	// FIXME: Public for testing only
 	// Create machineTeamsToBuild number of machine teams
 	// No operation if machineTeamsToBuild is 0
 	// Note: The creation of machine teams should not depend on server teams:
@@ -566,6 +617,7 @@ public:
 	// return number of added machine teams
 	int addBestMachineTeams(int machineTeamsToBuild);
 
+	// FIXME: Public for testing only
 	// Sanity check the property of teams in unit test
 	// Return true if all server teams belong to machine teams
 	bool sanityCheckTeams() const;
@@ -576,19 +628,15 @@ public:
 	// build an extra machine team and record the event in trace
 	int addTeamsBestOf(int teamsToBuild, int desiredTeams, int maxTeams);
 
-	// Check if the number of server (and machine teams) is larger than the maximum allowed number
-	void traceTeamCollectionInfo() const;
-
-	void noHealthyTeams() const;
-
 	void addServer(StorageServerInterface newServer,
 	               ProcessClass processClass,
 	               Promise<Void> errorOut,
 	               Version addedVersion,
-	               const DDEnabledState* ddEnabledState);
+	               DDEnabledState const& ddEnabledState);
 
 	bool removeTeam(Reference<TCTeamInfo> team);
 
+	// FIXME: Public for testing only
 	// Check if the server belongs to a machine; if not, create the machine.
 	// Establish the two-direction link between server and machine
 	Reference<TCMachineInfo> checkAndCreateMachine(Reference<TCServerInfo> server);
@@ -597,43 +645,22 @@ public:
 
 	void removeServer(UID removedServer);
 
-	Future<Void> removeWrongStoreType();
-
-	Future<Void> removeBadTeams();
-
-	Future<Void> machineTeamRemover();
-
-	// Remove the server team whose members have the most number of process teams
-	// until the total number of server teams is no larger than the desired number
-	Future<Void> serverTeamRemover();
-
-	Future<Void> trackExcludedServers();
-
-	// This coroutine sets a watch to monitor the value change of `perpetualStorageWiggleKey` which is controlled by
-	// command `configure perpetual_storage_wiggle=$value` if the value is 1, this actor start 2 actors,
-	// `perpetualStorageWiggleIterator` and `perpetualStorageWiggler`. Otherwise, it sends stop signal to them.
-	Future<Void> monitorPerpetualStorageWiggle();
-
-	// The serverList system keyspace keeps the StorageServerInterface for each serverID. Storage server's storeType
-	// and serverID are decided by the server's filename. By parsing storage server file's filename on each disk,
-	// process on each machine creates the TCServer with the correct serverID and StorageServerInterface.
-	Future<Void> waitServerListChange(FutureStream<Void> serverRemoved, const DDEnabledState* ddEnabledState);
-
-	Future<Void> waitHealthyZoneChange();
-
-	// Monitor whether or not storage servers are being recruited.  If so, then a database cannot be considered quiet
-	Future<Void> monitorStorageServerRecruitment();
-
-	Future<Void> storageRecruiter(Reference<IAsyncListener<RequestStream<RecruitStorageRequest>>> recruitStorage,
-	                              DDEnabledState const* ddEnabledState);
-
-	Future<Void> updateReplicasKey(Optional<Key> dcId);
-
-	Future<Void> serverGetTeamRequests(TeamCollectionInterface tci);
-
-	Future<Void> monitorHealthyTeams();
-
 	// Find size of set intersection of excludeServerIDs and serverIDs on each team and see if the leftover team is
 	// valid
 	bool exclusionSafetyCheck(std::vector<UID>& excludeServerIDs);
+
+	bool isPrimary() const { return primary; }
+
+	UID getDistributorId() const { return distributorId; }
+
+	// Keep track of servers and teams -- serves requests for getRandomTeam
+	static Future<Void> run(Reference<DDTeamCollection> teamCollection,
+	                        Reference<InitialDataDistribution> initData,
+	                        TeamCollectionInterface tci,
+	                        Reference<IAsyncListener<RequestStream<RecruitStorageRequest>>> recruitStorage,
+	                        DDEnabledState const& ddEnabledState);
+
+	// Take a snapshot of necessary data structures from `DDTeamCollection` and print them out with yields to avoid slow
+	// task on the run loop.
+	static Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self);
 };
