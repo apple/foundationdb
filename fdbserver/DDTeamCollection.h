@@ -182,6 +182,78 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	AsyncTrigger restartTeamBuilder;
 	AsyncVar<bool> waitUntilRecruited; // make teambuilder wait until one new SS is recruited
 
+	MoveKeysLock lock;
+	PromiseStream<RelocateShard> output;
+	std::vector<UID> allServers;
+	int64_t unhealthyServers;
+	std::map<int, int> priority_teams;
+	std::map<UID, Reference<TCServerInfo>> tss_info_by_pair;
+	std::map<UID, Reference<TCServerInfo>> server_and_tss_info; // TODO could replace this with an efficient way to do a
+	                                                            // read-only concatenation of 2 data structures?
+	std::map<Key, int> lagging_zones; // zone to number of storage servers lagging
+	AsyncVar<bool> disableFailingLaggingServers;
+
+	// storage wiggle info
+	Reference<StorageWiggler> storageWiggler;
+	std::vector<AddressExclusion> wiggleAddresses; // collection of wiggling servers' address
+	Optional<UID> wigglingId; // Process id of current wiggling storage server;
+	Reference<AsyncVar<bool>> pauseWiggle;
+	Reference<AsyncVar<bool>> processingWiggle; // track whether wiggling relocation is being processed
+	PromiseStream<StorageWiggleValue> nextWiggleInfo;
+
+	std::vector<Reference<TCTeamInfo>> badTeams;
+	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
+	PromiseStream<UID> removedServers;
+	PromiseStream<UID> removedTSS;
+	std::set<UID> recruitingIds; // The IDs of the SS/TSS which are being recruited
+	std::set<NetworkAddress> recruitingLocalities;
+	Future<Void> initialFailureReactionDelay;
+	Future<Void> initializationDoneActor;
+	Promise<Void> serverTrackerErrorOut;
+	AsyncVar<int> recruitingStream;
+	Debouncer restartRecruiting;
+
+	int healthyTeamCount;
+	Reference<AsyncVar<bool>> zeroHealthyTeams;
+
+	int optimalTeamCount;
+	AsyncVar<bool> zeroOptimalTeams;
+
+	int bestTeamKeepStuckCount = 0;
+
+	bool isTssRecruiting; // If tss recruiting is waiting on a pair, don't consider DD recruiting for the purposes of
+	                      // QuietDB
+
+	std::set<AddressExclusion>
+	    invalidLocalityAddr; // These address have invalidLocality for the configured storagePolicy
+
+	std::vector<Optional<Key>> includedDCs;
+	Optional<std::vector<Optional<Key>>> otherTrackedDCs;
+	Reference<AsyncVar<bool>> processingUnhealthy;
+	Future<Void> readyToStart;
+	Future<Void> checkTeamDelay;
+	Promise<Void> addSubsetComplete;
+	Future<Void> badTeamRemover;
+	Future<Void> checkInvalidLocalities;
+
+	Future<Void> wrongStoreTypeRemover;
+
+	AsyncVar<Optional<Key>> healthyZone;
+	Future<bool> clearHealthyZoneFuture;
+	double medianAvailableSpace;
+	double lastMedianAvailableSpaceUpdate;
+
+	int lowestUtilizationTeam;
+	int highestUtilizationTeam;
+
+	PromiseStream<GetMetricsRequest> getShardMetrics;
+	PromiseStream<Promise<int>> getUnhealthyRelocationCount;
+	Promise<UID> removeFailedServer;
+
+	Reference<EventCacheHolder> ddTrackerStartingEventHolder;
+	Reference<EventCacheHolder> teamCollectionInfoEventHolder;
+	Reference<EventCacheHolder> storageServerRecruitmentEventHolder;
+
 	// Randomly choose one machine team that has chosenServer and has the correct size
 	// When configuration is changed, we may have machine teams with old storageTeamSize
 	Reference<TCMachineTeamInfo> findOneRandomMachineTeam(TCServerInfo const& chosenServer) const;
@@ -437,7 +509,6 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	void noHealthyTeams() const;
 
 public:
-	// clang-format off
 	enum class Status { NONE = 0, WIGGLING = 1, EXCLUDED = 2, FAILED = 3};
 
 	Database cx;
@@ -445,25 +516,8 @@ public:
 
 	DatabaseConfiguration configuration;
 
-	MoveKeysLock lock;
-	PromiseStream<RelocateShard> output;
-	std::vector<UID> allServers;
 	ServerStatusMap server_status;
-	int64_t unhealthyServers;
-	std::map<int,int> priority_teams;
 	std::map<UID, Reference<TCServerInfo>> server_info;
-	std::map<UID, Reference<TCServerInfo>> tss_info_by_pair;
-	std::map<UID, Reference<TCServerInfo>> server_and_tss_info; // TODO could replace this with an efficient way to do a read-only concatenation of 2 data structures?
-	std::map<Key, int> lagging_zones; // zone to number of storage servers lagging
-	AsyncVar<bool> disableFailingLaggingServers;
-
-	// storage wiggle info
-	Reference<StorageWiggler> storageWiggler;
-	std::vector<AddressExclusion> wiggleAddresses; // collection of wiggling servers' address
-	Optional<UID> wigglingId; // Process id of current wiggling storage server;
-	Reference<AsyncVar<bool>> pauseWiggle;
-	Reference<AsyncVar<bool>> processingWiggle; // track whether wiggling relocation is being processed
-	PromiseStream<StorageWiggleValue> nextWiggleInfo;
 
 	// machine_info has all machines info; key must be unique across processes on the same machine
 	std::map<Standalone<StringRef>, Reference<TCMachineInfo>> machine_info;
@@ -471,27 +525,6 @@ public:
 	LocalityMap<UID> machineLocalityMap; // locality info of machines
 
 	std::vector<Reference<TCTeamInfo>> teams;
-	std::vector<Reference<TCTeamInfo>> badTeams;
-	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
-	PromiseStream<UID> removedServers;
-	PromiseStream<UID> removedTSS;
-	std::set<UID> recruitingIds; // The IDs of the SS/TSS which are being recruited
-	std::set<NetworkAddress> recruitingLocalities;
-	Future<Void> initialFailureReactionDelay;
-	Future<Void> initializationDoneActor;
-	Promise<Void> serverTrackerErrorOut;
-	AsyncVar<int> recruitingStream;
-	Debouncer restartRecruiting;
-
-	int healthyTeamCount;
-	Reference<AsyncVar<bool>> zeroHealthyTeams;
-
-	int optimalTeamCount;
-	AsyncVar<bool> zeroOptimalTeams;
-
-	int bestTeamKeepStuckCount = 0;
-
-	bool isTssRecruiting; // If tss recruiting is waiting on a pair, don't consider DD recruiting for the purposes of QuietDB
 
 	// WIGGLING if an address is under storage wiggling.
 	// EXCLUDED if an address is in the excluded list in the database.
@@ -499,40 +532,11 @@ public:
 	// NONE by default.  Updated asynchronously (eventually)
 	AsyncMap< AddressExclusion, Status > excludedServers;
 
-	std::set<AddressExclusion> invalidLocalityAddr; // These address have invalidLocality for the configured storagePolicy
-
-	std::vector<Optional<Key>> includedDCs;
-	Optional<std::vector<Optional<Key>>> otherTrackedDCs;
 	bool primary;
-	Reference<AsyncVar<bool>> processingUnhealthy;
-	Future<Void> readyToStart;
-	Future<Void> checkTeamDelay;
-	Promise<Void> addSubsetComplete;
-	Future<Void> badTeamRemover;
-	Future<Void> checkInvalidLocalities;
-
-	Future<Void> wrongStoreTypeRemover;
-
-	Reference<LocalitySet> storageServerSet;
 
 	std::vector<DDTeamCollection*> teamCollections;
-	AsyncVar<Optional<Key>> healthyZone;
-	Future<bool> clearHealthyZoneFuture;
-	double medianAvailableSpace;
-	double lastMedianAvailableSpaceUpdate;
-	// clang-format on
-
-	int lowestUtilizationTeam;
-	int highestUtilizationTeam;
-
 	AsyncTrigger printDetailedTeamsInfo;
-	PromiseStream<GetMetricsRequest> getShardMetrics;
-	PromiseStream<Promise<int>> getUnhealthyRelocationCount;
-	Promise<UID> removeFailedServer;
-
-	Reference<EventCacheHolder> ddTrackerStartingEventHolder;
-	Reference<EventCacheHolder> teamCollectionInfoEventHolder;
-	Reference<EventCacheHolder> storageServerRecruitmentEventHolder;
+	Reference<LocalitySet> storageServerSet;
 
 	DDTeamCollection(Database const& cx,
 	                 UID distributorId,
