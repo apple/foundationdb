@@ -19,6 +19,7 @@
  */
 
 #include "fdbserver/DDTeamCollection.h"
+#include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 FDB_DEFINE_BOOLEAN_PARAM(IsPrimary);
@@ -3404,6 +3405,7 @@ TEST_CASE("/DataDistribution/GetTeam/NewServersNotNeeded") {
 	collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
 	collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), true);
 	collection->doBuildTeams = false;
+	collection->checkTeamDelay = Void();
 	
 	collection->server_info[UID(1, 0)]->serverMetrics = mid_avail;
 	collection->server_info[UID(2, 0)]->serverMetrics = high_avail;	
@@ -3455,14 +3457,13 @@ TEST_CASE("/DataDistribution/GetTeam/HealthyCompleteSource") {
 	collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
 	collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), true);
 	collection->doBuildTeams = false;
+	collection->checkTeamDelay = Void();
 	
 	collection->server_info[UID(1, 0)]->serverMetrics = mid_avail;
 	collection->server_info[UID(2, 0)]->serverMetrics = high_avail;	
 	collection->server_info[UID(3, 0)]->serverMetrics = high_avail;	
 	collection->server_info[UID(4, 0)]->serverMetrics = high_avail;	
-	ServerStatus server1status = collection->server_status.get(UID(1, 0));
-	server1status.isUndesired = true;
-	collection->server_status.set(UID(1, 0), server1status);
+	collection->server_info[UID(1, 0)]->teams[0]->setHealthy(false);
 
 	bool wantsNewServers = false;
 	bool wantsTrueBest = true;
@@ -3513,6 +3514,7 @@ TEST_CASE("/DataDistribution/GetTeam/TrueBestLeastUtilized") {
 	collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
 	collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), true);
 	collection->doBuildTeams = false;
+	collection->checkTeamDelay = Void();
 
 	collection->server_info[UID(1, 0)]->serverMetrics = mid_avail;
 	collection->server_info[UID(2, 0)]->serverMetrics = high_avail;	
@@ -3564,6 +3566,7 @@ TEST_CASE("/DataDistribution/GetTeam/TrueBestMostUtilized") {
 	collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
 	collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), true);
 	collection->doBuildTeams = false;
+	collection->checkTeamDelay = Void();
 
 	collection->server_info[UID(1, 0)]->serverMetrics = mid_avail;
 	collection->server_info[UID(2, 0)]->serverMetrics = high_avail;	
@@ -3615,14 +3618,13 @@ TEST_CASE("/DataDistribution/GetTeam/ServerUtilizationBelowCutoff") {
 	collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
 	collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), true);
 	collection->doBuildTeams = false;
+	collection->checkTeamDelay = Void();
 
 	collection->server_info[UID(1, 0)]->serverMetrics = high_avail;
 	collection->server_info[UID(2, 0)]->serverMetrics = low_avail;	
 	collection->server_info[UID(3, 0)]->serverMetrics = high_avail;	
 	collection->server_info[UID(4, 0)]->serverMetrics = low_avail;
-	ServerStatus server1status = collection->server_status.get(UID(1, 0));
-	server1status.isUndesired = true;
-	collection->server_status.set(UID(1, 0), server1status);
+	collection->server_info[UID(1, 0)]->teams[0]->setHealthy(false);
 
 	bool wantsNewServers = true;
 	bool wantsTrueBest = true;
@@ -3666,15 +3668,14 @@ TEST_CASE("/DataDistribution/GetTeam/ServerUtilizationNearCutoff") {
 	collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), true);
 	collection->addTeam(std::set<UID>({ UID(3, 0), UID(4, 0), UID(5, 0) }), true);
 	collection->doBuildTeams = false;
+	collection->checkTeamDelay = Void();
 
 	collection->server_info[UID(1, 0)]->serverMetrics = high_avail;
 	collection->server_info[UID(2, 0)]->serverMetrics = low_avail;	
 	collection->server_info[UID(3, 0)]->serverMetrics = high_avail;	
 	collection->server_info[UID(4, 0)]->serverMetrics = low_avail;
 	collection->server_info[UID(5, 0)]->serverMetrics = high_avail;
-	ServerStatus server1status = collection->server_status.get(UID(1, 0));
-	server1status.isUndesired = true;
-	collection->server_status.set(UID(1, 0), server1status);
+	collection->server_info[UID(1, 0)]->teams[0]->setHealthy(false);
 
 	bool wantsNewServers = true;
 	bool wantsTrueBest = true;
