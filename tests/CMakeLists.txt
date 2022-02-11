@@ -118,6 +118,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES randomSelector.txt IGNORE)
   add_fdb_test(TEST_FILES selectorCorrectness.txt IGNORE)
   add_fdb_test(TEST_FILES IThreadPool.txt IGNORE)
+  add_fdb_test(TEST_FILES PerfUnitTests.toml IGNORE)
   add_fdb_test(TEST_FILES fast/AtomicBackupCorrectness.toml)
   add_fdb_test(TEST_FILES fast/AtomicBackupToDBCorrectness.toml)
   add_fdb_test(TEST_FILES fast/AtomicOps.toml)
@@ -202,12 +203,12 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES rare/TransactionTagApiCorrectness.toml)
   add_fdb_test(TEST_FILES rare/TransactionTagSwizzledApiCorrectness.toml)
   add_fdb_test(TEST_FILES rare/WriteTagThrottling.toml)
+  add_fdb_test(TEST_FILES rare/AllSimUnitTests.toml IGNORE)
+  add_fdb_test(TEST_FILES rare/StatusBuilderPerf.toml)
+  add_fdb_test(TEST_FILES rare/TLogVersionMessagesOverheadFactor.toml)
   add_fdb_test(
     TEST_FILES restarting/from_7.0.0/SnapIncrementalRestore-1.txt
                restarting/from_7.0.0/SnapIncrementalRestore-2.txt)
-  add_fdb_test(
-    TEST_FILES restarting/from_7.0.0_until_7.1.0/ConfigureTestRestart-1.toml
-               restarting/from_7.0.0_until_7.1.0/ConfigureTestRestart-2.toml)
   add_fdb_test(
     TEST_FILES restarting/from_7.1.0/ConfigureTestRestart-1.toml
                restarting/from_7.1.0/ConfigureTestRestart-2.toml)
