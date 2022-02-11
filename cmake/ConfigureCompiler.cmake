@@ -219,7 +219,7 @@ else()
   endif()
   if(STATIC_LINK_LIBCXX)
     if (NOT USE_LIBCXX AND NOT APPLE)
-	add_link_options(-static-libstdc++ -static-libgcc)
+	    add_link_options(-static-libstdc++ -static-libgcc)
     endif()
   endif()
   # # Instruction sets we require to be supported by the CPU
