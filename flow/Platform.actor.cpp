@@ -85,7 +85,7 @@
 #include <ftw.h>
 #include <pwd.h>
 #include <sched.h>
-#ifndef __aarch64__
+#if !defined(__aarch64__) && !defined(__powerpc64__)
 #include <cpuid.h>
 #endif
 
@@ -3194,6 +3194,8 @@ bool isHwCrcSupported() {
 	return (info[2] & (1 << 20)) != 0;
 #elif defined(__aarch64__)
 	return true; /* force to use crc instructions */
+#elif defined(__powerpc64__)
+	return false; /* force not to use crc instructions */
 #elif defined(__unixish__)
 	uint32_t eax, ebx, ecx, edx, level = 1, count = 0;
 	__cpuid_count(level, count, eax, ebx, ecx, edx);
