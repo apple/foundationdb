@@ -6856,19 +6856,21 @@ static Future<Void> createCheckpointImpl(T tr, KeyRangeRef range, CheckpointForm
 		decodeKeyServersValue(UIDtoTagMap, keyServers[i].value, src, dest);
 
 		// Randomly choose a storage server to create the checkpoint.
-		const int idx = deterministicRandom()->randomInt(0, src.size());
+		// const int idx = deterministicRandom()->randomInt(0, src.size());
 		const UID checkpointID = deterministicRandom()->randomUniqueID();
+		for (int idx = 0; idx < src.size(); ++idx) {
+			CheckpointMetaData checkpoint(shard & range, format, src[idx], checkpointID);
+			checkpoint.setState(CheckpointMetaData::Pending);
+			tr->set(checkpointKeyFor(checkpointID), checkpointValue(checkpoint));
+		}
 
 		TraceEvent("CreateCheckpointTransactionShard")
 		    .detail("Shard", shard.toString())
 		    .detail("SrcServers", describe(src))
-		    .detail("ServerSelected", src[idx])
+		    .detail("ServerSelected", describe(src))
 		    .detail("CheckpointKey", checkpointKeyFor(checkpointID))
 		    .detail("ReadVersion", tr->getReadVersion().get());
 
-		CheckpointMetaData checkpoint(shard & range, format, src[idx], checkpointID);
-		checkpoint.setState(CheckpointMetaData::Pending);
-		tr->set(checkpointKeyFor(checkpointID), checkpointValue(checkpoint));
 	}
 
 	return Void();
@@ -6899,6 +6901,7 @@ ACTOR static Future<CheckpointMetaData> getCheckpointMetaDataInternal(GetCheckpo
 		fs.push_back(errorOr(timeoutError(alternatives->getInterface(i).checkpoint.getReply(req), timeout)));
 	}
 	std::cout << "start waiting" << std::endl;
+	state Optional<Error> error;
 	choose {
 		when(wait(waitForAll(fs))) {
 			TraceEvent("GetCheckpointMetaDataInternalWaitEnd")
@@ -6906,13 +6909,13 @@ ACTOR static Future<CheckpointMetaData> getCheckpointMetaDataInternal(GetCheckpo
 			    .detail("Version", req.version);
 		}
 		when(wait(delay(timeout))) {
+			error = timed_out();
 			TraceEvent("GetCheckpointMetaDataInternalTimeout")
 			    .detail("Range", req.range.toString())
 			    .detail("Version", req.version);
 		}
 	}
 
-	Optional<Error> error;
 	for (i = 0; i < fs.size(); ++i) {
 		if (!fs[i].isReady()) {
 			error = timed_out();

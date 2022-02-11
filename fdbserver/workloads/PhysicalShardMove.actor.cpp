@@ -72,20 +72,15 @@ struct SSCheckpointWorkload : TestWorkload {
 		state Key key = "TestKey"_sr;
 		state Key endKey = "TestKey0"_sr;
 		state Value oldValue = "TestValue"_sr;
-		state Value newValue = "TestNewValue"_sr;
 
 		state Version version = wait(self->writeAndVerify(self, cx, key, oldValue));
-
-		std::cout << "Initialized" << std::endl;
 
 		state Transaction tr(cx);
 		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		loop {
-			std::cout << "Creating checkpoint." << std::endl;
 			try {
 				wait(createCheckpoint(&tr, KeyRangeRef(key, endKey), RocksDBColumnFamily));
-				std::cout << "Buffer write done." << std::endl;
 				wait(tr.commit());
 				version = tr.getCommittedVersion();
 				break;
@@ -94,7 +89,9 @@ struct SSCheckpointWorkload : TestWorkload {
 			}
 		}
 
-		std::cout << "Created checkpoint." << std::endl;
+		TraceEvent("TestCreatedCheckpoint")
+		    .detail("Range", KeyRangeRef(key, endKey).toString())
+		    .detail("Version", version);
 
 		loop {
 			try {
@@ -102,6 +99,8 @@ struct SSCheckpointWorkload : TestWorkload {
 				    wait(getCheckpointMetaData(cx, KeyRangeRef(key, endKey), version, RocksDBColumnFamily));
 				break;
 			} catch (Error& e) {
+				std::cout << e.what() << std::endl;
+				ASSERT(e.code() != error_code_checkpoint_not_found);
 			}
 		}
 

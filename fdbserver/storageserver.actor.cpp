@@ -1720,12 +1720,22 @@ ACTOR Future<Void> deleteCheckpointQ(StorageServer* self, Version version, Check
 	self->addMutationToMutationLog(
 	    mLV, MutationRef(MutationRef::ClearRange, persistCheckpointKey, keyAfter(persistCheckpointKey)));
 
+	loop {
+		try {
+			state Transaction tr(self->cx);
+			tr.clear(checkpointKeyFor(checkpoint.checkpointID));
+			wait(tr.commit());
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
 	return Void();
 }
 
 // Serves GetFileRequests.
 ACTOR Future<Void> getFileQ(StorageServer* self, GetFileRequest req) {
-	TraceEvent("ServeGetFileBegin", self->thisServerID).detail("File", req.path).detail("Offset", req.offset);
+	TraceEvent("ServeGetCheckpointFileBegin", self->thisServerID).detail("File", req.path).detail("Offset", req.offset);
 
 	state int transactionSize = 64 * 1024; // Block size read from disk.
 	state size_t fileOffset = req.offset;
@@ -1756,7 +1766,7 @@ ACTOR Future<Void> getFileQ(StorageServer* self, GetFileRequest req) {
 			req.reply.send(reply);
 		}
 	} catch (Error& e) {
-		TraceEvent(SevWarnAlways, "ServerGetFileFailure")
+		TraceEvent(SevWarnAlways, "ServerGetCheckpointFileFailure")
 		    .detail("File", req.path)
 		    .detail("Offset", req.offset)
 		    .error(e, /*includeCancel=*/true);
@@ -1766,7 +1776,7 @@ ACTOR Future<Void> getFileQ(StorageServer* self, GetFileRequest req) {
 		req.reply.sendError(e);
 	}
 
-	TraceEvent(SevWarnAlways, "ServerGetFileEnd")
+	TraceEvent("ServerGetCheckpointFileEnd")
 	    .detail("File", req.path)
 	    .detail("Offset", req.offset)
 	    .detail("TotalBytes", fileOffset - req.offset);
@@ -5166,7 +5176,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 	state double start;
 	try {
 		// If we are disk bound and durableVersion is very old, we need to block updates or we could run out of
-		// memory This is often referred to as the storage server e-brake (emergency brake)
+		// memory. This is often referred to as the storage server e-brake (emergency brake)
 
 		// We allow the storage server to make some progress between e-brake periods, referreed to as "overage", in
 		// order to ensure that it advances desiredOldestVersion enough for updateStorage to make enough progress on
@@ -5582,6 +5592,49 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 	}
 }
 
+ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData metaData) {
+	ASSERT(metaData.ssID == data->thisServerID);
+	const CheckpointRequest req(metaData.version,
+	                            metaData.range,
+	                            static_cast<CheckpointFormat>(metaData.format),
+	                            metaData.checkpointID,
+	                            data->folder + rocksdbCheckpointDirPrefix + metaData.checkpointID.toString());
+	state CheckpointMetaData checkpointResult;
+	try {
+		state CheckpointMetaData res = wait(data->storage.checkpoint(req));
+		checkpointResult = res;
+		checkpointResult.ssID = data->thisServerID;
+		ASSERT(checkpointResult.getState() == CheckpointMetaData::Complete);
+		data->checkpoints[checkpointResult.checkpointID] = checkpointResult;
+		TraceEvent("StorageCreatedCheckpoint", data->thisServerID).detail("Checkpoint", checkpointResult.toString());
+	} catch (Error& e) {
+		// If checkpoint creation fails, the failure is persisted.
+		checkpointResult = metaData;
+		checkpointResult.setState(CheckpointMetaData::Fail);
+		TraceEvent("StorageCreatedCheckpointFailure", data->thisServerID)
+		    .detail("PendingCheckpoint", checkpointResult.toString());
+	}
+
+	// Persist the checkpoint meta data.
+	try {
+		Key pendingCheckpointKey(persistPendingCheckpointKeys.begin.toString() +
+		                         checkpointResult.checkpointID.toString());
+		Key persistCheckpointKey(persistCheckpointKeys.begin.toString() + checkpointResult.checkpointID.toString());
+		data->storage.clearRange(singleKeyRange(pendingCheckpointKey));
+		data->storage.writeKeyValue(KeyValueRef(persistCheckpointKey, checkpointValue(checkpointResult)));
+		wait(data->storage.commit());
+	} catch (Error& e) {
+		// If the checkpoint meta data is not persisted successfully, remove the checkpoint.
+		TraceEvent("StorageCreateCheckpointPersistFailure", data->thisServerID)
+		    .detail("Checkpoint", checkpointResult.toString())
+		    .error(e, true);
+		data->checkpoints.erase(checkpointResult.checkpointID);
+		data->actors.add(deleteCheckpointQ(data, metaData.version, checkpointResult));
+	}
+
+	return Void();
+}
+
 ACTOR Future<Void> updateStorage(StorageServer* data) {
 	loop {
 		ASSERT(data->durableVersion.get() == data->storageVersion());
@@ -5603,13 +5656,13 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		state Version desiredVersion = data->desiredOldestVersion.get();
 		state int64_t bytesLeft = SERVER_KNOBS->STORAGE_COMMIT_BYTES;
 
-		// Clean up stale checkpoint requests, this is not supposed to happen, since checkpoints are cleaned up onup
+		// Clean up stale checkpoint requests, this is not supposed to happen, since checkpoints are cleaned up on
 		// failures. This is kept as a safeguard.
 		while (!data->pendingCheckpoints.empty() && data->pendingCheckpoints.begin()->first <= startOldestVersion) {
 			for (int idx = 0; idx < data->pendingCheckpoints.begin()->second.size(); ++idx) {
 				auto& metaData = data->pendingCheckpoints.begin()->second[idx];
 				data->actors.add(deleteCheckpointQ(data, startOldestVersion, metaData));
-				TraceEvent("StorageStaleCheckpointRequest", data->thisServerID)
+				TraceEvent(SevWarnAlways, "StorageStaleCheckpointRequest", data->thisServerID)
 				    .detail("PendingCheckpoint", metaData.toString())
 				    .detail("DurableVersion", startOldestVersion);
 			}
@@ -5693,51 +5746,11 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 
 		if (requireCheckpoint) {
 			ASSERT(newOldestVersion == data->pendingCheckpoints.begin()->first);
-			state int idx = 0;
-			for (; idx < data->pendingCheckpoints.begin()->second.size(); ++idx) {
-				auto& metaData = data->pendingCheckpoints.begin()->second[idx];
-				ASSERT(metaData.ssID == data->thisServerID);
-				const CheckpointRequest req(newOldestVersion,
-				                            metaData.range,
-				                            static_cast<CheckpointFormat>(metaData.format),
-				                            metaData.checkpointID,
-				                            data->folder + rocksdbCheckpointDirPrefix +
-				                                metaData.checkpointID.toString());
-				state CheckpointMetaData checkpointResult;
-				try {
-					state CheckpointMetaData res = wait(data->storage.checkpoint(req));
-					checkpointResult = res;
-					checkpointResult.ssID = data->thisServerID;
-					ASSERT(checkpointResult.getState() == CheckpointMetaData::Complete);
-					data->checkpoints[checkpointResult.checkpointID] = checkpointResult;
-					TraceEvent("StorageCreatedCheckpoint", data->thisServerID)
-					    .detail("Checkpoint", checkpointResult.toString());
-				} catch (Error& e) {
-					// If checkpoint creation fails, the failure is persisted.
-					checkpointResult = data->pendingCheckpoints.begin()->second[idx];
-					checkpointResult.setState(CheckpointMetaData::Fail);
-					TraceEvent("StorageCreatedCheckpointFailure", data->thisServerID)
-					    .detail("PendingCheckpoint", checkpointResult.toString());
-				}
-
-				// Persist the checkpoint meta data.
-				try {
-					Key pendingCheckpointKey(persistPendingCheckpointKeys.begin.toString() +
-					                         checkpointResult.checkpointID.toString());
-					Key persistCheckpointKey(persistCheckpointKeys.begin.toString() +
-					                         checkpointResult.checkpointID.toString());
-					data->storage.clearRange(singleKeyRange(pendingCheckpointKey));
-					data->storage.writeKeyValue(KeyValueRef(persistCheckpointKey, checkpointValue(checkpointResult)));
-					wait(data->storage.commit());
-				} catch (Error& e) {
-					// If the checkpoint meta data is not persisted successfully, remove the checkpoint.
-					TraceEvent("StorageCreateCheckpointPersistFailure", data->thisServerID)
-					    .detail("Checkpoint", checkpointResult.toString())
-					    .error(e, true);
-					data->checkpoints.erase(checkpointResult.checkpointID);
-					data->actors.add(deleteCheckpointQ(data, newOldestVersion, checkpointResult));
-				}
+			std::vector<Future<Void>> createCheckpoints;
+			for (int idx = 0; idx < data->pendingCheckpoints.begin()->second.size(); ++idx) {
+				createCheckpoints.push_back(createCheckpoint(data, data->pendingCheckpoints.begin()->second[idx]));
 			}
+			wait(waitForAll(createCheckpoints));
 			data->pendingCheckpoints.erase(data->pendingCheckpoints.begin());
 			requireCheckpoint = false;
 		}
@@ -5857,6 +5870,10 @@ void setAvailableStatus(StorageServer* self, KeyRangeRef keys, bool available) {
 				    mLV, MutationRef(MutationRef::SetValue, persistCheckpointKey, checkpointValue(checkpoint)));
 			}
 			self->actors.add(deleteCheckpointQ(self, mLV.version + 1, checkpoint));
+			TraceEvent("SSDeleteCheckpointScheduled", self->thisServerID)
+			    .detail("MovedOutRange", keys.toString())
+			    .detail("Checkpoint", checkpoint.toString())
+			    .detail("DeleteVersion", mLV.version + 1);
 		}
 	}
 }
@@ -6810,25 +6827,6 @@ ACTOR Future<Void> serveChangeFeedPopRequests(StorageServer* self, FutureStream<
 	}
 }
 
-ACTOR Future<Void> serveGetCheckpointRequests(StorageServer* self, FutureStream<GetCheckpointRequest> checkpoint) {
-	loop {
-		GetCheckpointRequest req = waitNext(checkpoint);
-		if (!self->isReadable(req.range)) {
-			req.reply.sendError(wrong_shard_server());
-			continue;
-		} else {
-			self->actors.add(getCheckpointQ(self, req));
-		}
-	}
-}
-
-ACTOR Future<Void> serveGetFileRequests(StorageServer* self, FutureStream<GetFileRequest> getFile) {
-	loop {
-		GetFileRequest req = waitNext(getFile);
-		self->actors.add(getFileQ(self, req));
-	}
-}
-
 ACTOR Future<Void> serveChangeFeedVersionUpdateRequests(
     StorageServer* self,
     FutureStream<ChangeFeedVersionUpdateRequest> changeFeedVersionUpdate) {
@@ -6891,8 +6889,6 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 	self->actors.add(serveChangeFeedStreamRequests(self, ssi.changeFeedStream.getFuture()));
 	self->actors.add(serveOverlappingChangeFeedsRequests(self, ssi.overlappingChangeFeeds.getFuture()));
 	self->actors.add(serveChangeFeedPopRequests(self, ssi.changeFeedPop.getFuture()));
-	self->actors.add(serveGetCheckpointRequests(self, ssi.checkpoint.getFuture()));
-	self->actors.add(serveGetFileRequests(self, ssi.getFile.getFuture()));
 	self->actors.add(serveChangeFeedVersionUpdateRequests(self, ssi.changeFeedVersionUpdate.getFuture()));
 	self->actors.add(traceRole(Role::STORAGE_SERVER, ssi.id()));
 	self->actors.add(reportStorageServerState(self));
@@ -6982,6 +6978,15 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				else
 					doUpdate = update(self, &updateReceived);
 			}
+			when(GetCheckpointRequest req = waitNext(ssi.checkpoint.getFuture())) {
+				if (!self->isReadable(req.range)) {
+					req.reply.sendError(wrong_shard_server());
+					continue;
+				} else {
+					self->actors.add(getCheckpointQ(self, req));
+				}
+			}
+			when(GetFileRequest req = waitNext(ssi.getFile.getFuture())) { self->actors.add(getFileQ(self, req)); }
 			when(wait(updateProcessStatsTimer)) {
 				updateProcessStats(self);
 				updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);

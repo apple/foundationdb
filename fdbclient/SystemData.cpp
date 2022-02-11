@@ -225,20 +225,20 @@ const Key checkpointKeyFor(UID checkpointID) {
 }
 
 const Value checkpointValue(const CheckpointMetaData& checkpoint) {
-	BinaryWriter wr(IncludeVersion());
-	wr << checkpoint;
-	return wr.toValue();
+	return ObjectWriter::toValue(checkpoint, IncludeVersion());
 }
+
 UID decodeCheckpointKey(const KeyRef& key) {
 	UID checkpointID;
 	BinaryReader rd(key.removePrefix(checkpointPrefix), Unversioned());
 	rd >> checkpointID;
 	return checkpointID;
 }
+
 CheckpointMetaData decodeCheckpointValue(const ValueRef& value) {
 	CheckpointMetaData checkpoint;
-	BinaryReader reader(value, IncludeVersion());
-	reader >> checkpoint;
+	ObjectReader reader(value.begin(), IncludeVersion());
+	reader.deserialize(checkpoint);
 	return checkpoint;
 }
 

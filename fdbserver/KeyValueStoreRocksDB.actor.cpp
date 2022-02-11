@@ -1578,9 +1578,6 @@ TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/CheckpointRestore") {
 	Optional<Value> val = wait(kvStore->readValue(LiteralStringRef("foo")));
 	ASSERT(Optional<Value>(LiteralStringRef("bar")) == val);
 
-	state rocksdb::DB* db = ((RocksDBKeyValueStore*)kvStore)->db;
-	ASSERT(db != nullptr);
-
 	platform::eraseDirectoryRecursive("checkpoint");
 	state std::string checkpointDir = cwd + "checkpoint";
 
@@ -1598,6 +1595,16 @@ TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/CheckpointRestore") {
 
 	Optional<Value> val = wait(kvStoreCopy->readValue(LiteralStringRef("foo")));
 	ASSERT(Optional<Value>(LiteralStringRef("bar")) == val);
+
+	std::vector<Future<Void>> closes;
+	closes.push_back(kvStore->onClosed());
+	closes.push_back(kvStoreCopy->onClosed());
+	kvStore->close();
+	kvStoreCopy->close();
+	wait(waitForAll(closes));
+
+	platform::eraseDirectoryRecursive(rocksDBTestDir);
+	platform::eraseDirectoryRecursive(rocksDBRestoreDir);
 
 	return Void();
 }

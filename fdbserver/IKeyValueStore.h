@@ -28,11 +28,11 @@
 #include "fdbclient/StorageServerInterface.h"
 
 struct CheckpointRequest {
-	const Version version;
-	const KeyRange range;
+	const Version version; // The FDB version at which the checkpoint is created.
+	const KeyRange range; // Keyrange this checkpoint must contain.
 	const CheckpointFormat format;
 	const UID checkpointID;
-	const std::string checkpointDir;
+	const std::string checkpointDir; // The local directory where the checkpoint file will be created.
 
 	CheckpointRequest(const Version version,
 	                  const KeyRange& range,
