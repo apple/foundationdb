@@ -3630,8 +3630,8 @@ TEST_CASE("/DataDistribution/GetTeam/ServerUtilizationBelowCutoff") {
 	state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
 	
 	GetStorageMetricsReply low_avail;
-	low_avail.capacity.bytes = 2000 * 1024 * 1024;
-	low_avail.available.bytes = 50 * 1024 * 1024;
+	low_avail.capacity.bytes = SERVER_KNOBS->MIN_AVAILABLE_SPACE * 20;
+	low_avail.available.bytes = SERVER_KNOBS->MIN_AVAILABLE_SPACE / 2;
 	low_avail.load.bytes = 90 * 1024 * 1024;
 
 	GetStorageMetricsReply high_avail;
@@ -3685,8 +3685,13 @@ TEST_CASE("/DataDistribution/GetTeam/ServerUtilizationNearCutoff") {
 	state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
 	
 	GetStorageMetricsReply low_avail;
-	low_avail.capacity.bytes = 2000 * 1024 * 1024;
-	low_avail.available.bytes = 150 * 1024 * 1024;
+	if (SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO > 0) {
+		/* Pick a capacity where MIN_AVAILABLE_SPACE_RATIO of the capacity would be higher than MIN_AVAILABLE_SPACE */
+		low_avail.capacity.bytes = SERVER_KNOBS->MIN_AVAILABLE_SPACE * (2 / SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO);
+	} else {
+		low_avail.capacity.bytes = 2000 * 1024 * 1024;
+	}
+	low_avail.available.bytes = (SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO * 1.1) * low_avail.capacity.bytes;
 	low_avail.load.bytes = 90 * 1024 * 1024;
 
 	GetStorageMetricsReply high_avail;
