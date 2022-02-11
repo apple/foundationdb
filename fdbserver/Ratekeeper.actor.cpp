@@ -1024,6 +1024,10 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 
 	std::map<UID, limitReason_t> ssReasons;
 
+	bool printRateKeepLimitReasonDetails =
+	    SERVER_KNOBS->RATEKEEPER_PRINT_LIMIT_REASON &&
+	    (deterministicRandom()->random01() < SERVER_KNOBS->RATEKEEPER_LIMIT_REASON_SAMPLE_RATE);
+
 	// Look at each storage server's write queue and local rate, compute and store the desired rate ratio
 	for (auto i = self->storageQueueInfo.begin(); i != self->storageQueueInfo.end(); ++i) {
 		auto& ss = i->value;
@@ -1049,6 +1053,16 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 				ssLimitReason = limitReason_t::storage_server_min_free_space;
 			} else {
 				ssLimitReason = limitReason_t::storage_server_min_free_space_ratio;
+			}
+			if (printRateKeepLimitReasonDetails) {
+				TraceEvent("RatekeeperLimitReasonDetails")
+				    .detail("Reason", ssLimitReason)
+				    .detail("SSID", ss.id)
+				    .detail("SSSmoothTotalSpace", ss.smoothTotalSpace.smoothTotal())
+				    .detail("SSSmoothFreeSpace", ss.smoothFreeSpace.smoothTotal())
+				    .detail("TargetBytes", targetBytes)
+				    .detail("LimitsStorageTargetBytes", limits->storageTargetBytes)
+				    .detail("MinFreeSpace", minFreeSpace);
 			}
 		}
 
@@ -1109,9 +1123,34 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 			double x = smoothedRate / (inputRate * targetRateRatio);
 			double lim = actualTps * x;
 			if (lim < limitTps) {
+				double oldLimitTps = limitTps;
 				limitTps = lim;
 				if (ssLimitReason == limitReason_t::unlimited ||
 				    ssLimitReason == limitReason_t::storage_server_write_bandwidth_mvcc) {
+					if (printRateKeepLimitReasonDetails) {
+						TraceEvent("RatekeeperLimitReasonDetails")
+						    .detail("Reason", limitReason_t::storage_server_write_queue_size)
+						    .detail("FromReason", ssLimitReason)
+						    .detail("SSID", ss.id)
+						    .detail("SSSmoothTotalSpace", ss.smoothTotalSpace.smoothTotal())
+						    .detail("LimitsStorageTargetBytes", limits->storageTargetBytes)
+						    .detail("LimitsStorageSpringBytes", limits->storageSpringBytes)
+						    .detail("SSSmoothFreeSpace", ss.smoothFreeSpace.smoothTotal())
+						    .detail("MinFreeSpace", minFreeSpace)
+						    .detail("SSLastReplyBytesInput", ss.lastReply.bytesInput)
+						    .detail("SSSmoothDurableBytes", ss.smoothDurableBytes.smoothTotal())
+						    .detail("StorageQueue", storageQueue)
+						    .detail("TargetBytes", targetBytes)
+						    .detail("SpringBytes", springBytes)
+						    .detail("SSVerySmoothDurableBytesSmoothRate", ss.verySmoothDurableBytes.smoothRate())
+						    .detail("SmoothedRate", smoothedRate)
+						    .detail("X", x)
+						    .detail("ActualTps", actualTps)
+						    .detail("Lim", lim)
+						    .detail("LimitTps", oldLimitTps)
+						    .detail("InputRate", inputRate)
+						    .detail("TargetRateRatio", targetRateRatio);
+					}
 					ssLimitReason = limitReason_t::storage_server_write_queue_size;
 				}
 			}
@@ -1179,6 +1218,15 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 				limits->durabilityLagLimit = SERVER_KNOBS->DURABILITY_LAG_REDUCTION_RATE * limits->durabilityLagLimit;
 			}
 			if (limits->durabilityLagLimit < limits->tpsLimit) {
+				if (printRateKeepLimitReasonDetails) {
+					TraceEvent("RatekeeperLimitReasonDetails")
+					    .detail("SSID", ss->second->id)
+					    .detail("Reason", limitReason_t::storage_server_durability_lag)
+					    .detail("LimitsDurabilityLagLimit", limits->durabilityLagLimit)
+					    .detail("LimitsTpsLimit", limits->tpsLimit)
+					    .detail("LimitingDurabilityLag", limitingDurabilityLag)
+					    .detail("LimitsLastDurabilityLag", limits->lastDurabilityLag);
+				}
 				limits->tpsLimit = limits->durabilityLagLimit;
 				limitReason = limitReason_t::storage_server_durability_lag;
 			}
@@ -1262,6 +1310,16 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 			} else {
 				tlogLimitReason = limitReason_t::log_server_min_free_space_ratio;
 			}
+			if (printRateKeepLimitReasonDetails) {
+				TraceEvent("RatekeeperLimitReasonDetails")
+				    .detail("TLogID", tl.id)
+				    .detail("Reason", tlogLimitReason)
+				    .detail("TLSmoothFreeSpace", tl.smoothFreeSpace.smoothTotal())
+				    .detail("TLSmoothTotalSpace", tl.smoothTotalSpace.smoothTotal())
+				    .detail("LimitsLogTargetBytes", limits->logTargetBytes)
+				    .detail("TargetBytes", targetBytes)
+				    .detail("MinFreeSpace", minFreeSpace);
+			}
 		}
 
 		int64_t queue = tl.lastReply.bytesInput - tl.smoothDurableBytes.smoothTotal();
@@ -1282,6 +1340,25 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 		double targetRateRatio = std::min((b + springBytes) / (double)springBytes, 2.0);
 
 		if (writeToReadLatencyLimit > targetRateRatio) {
+			if (printRateKeepLimitReasonDetails) {
+				TraceEvent("RatekeeperLimitReasonDetails")
+				    .detail("TLogID", tl.id)
+				    .detail("Reason", limitReason_t::storage_server_readable_behind)
+				    .detail("TLSmoothFreeSpace", tl.smoothFreeSpace.smoothTotal())
+				    .detail("TLSmoothTotalSpace", tl.smoothTotalSpace.smoothTotal())
+				    .detail("LimitsLogSpringBytes", limits->logSpringBytes)
+				    .detail("LimitsLogTargetBytes", limits->logTargetBytes)
+				    .detail("SpringBytes", springBytes)
+				    .detail("TargetBytes", targetBytes)
+				    .detail("TLLastReplyBytesInput", tl.lastReply.bytesInput)
+				    .detail("TLSmoothDurableBytes", tl.smoothDurableBytes.smoothTotal())
+				    .detail("Queue", queue)
+				    .detail("B", b)
+				    .detail("TargetRateRatio", targetRateRatio)
+				    .detail("WriteToReadLatencyLimit", writeToReadLatencyLimit)
+				    .detail("MinFreeSpace", minFreeSpace)
+				    .detail("LimitsMaxVersionDifference", limits->maxVersionDifference);
+			}
 			targetRateRatio = writeToReadLatencyLimit;
 			tlogLimitReason = limitReason_t::storage_server_readable_behind;
 		}
@@ -1310,6 +1387,23 @@ void updateRate(RatekeeperData* self, RatekeeperLimits* limits) {
 			    inputRate;
 			double lim = actualTps * x;
 			if (lim < limits->tpsLimit) {
+				if (printRateKeepLimitReasonDetails) {
+					TraceEvent("RatekeeperLimitReasonDetails")
+					    .detail("Reason", limitReason_t::log_server_mvcc_write_bandwidth)
+					    .detail("TLogID", tl.id)
+					    .detail("MinFreeSpace", minFreeSpace)
+					    .detail("TLSmoothFreeSpace", tl.smoothFreeSpace.smoothTotal())
+					    .detail("TLSmoothTotalSpace", tl.smoothTotalSpace.smoothTotal())
+					    .detail("LimitsLogSpringBytes", limits->logSpringBytes)
+					    .detail("LimitsLogTargetBytes", limits->logTargetBytes)
+					    .detail("SpringBytes", springBytes)
+					    .detail("TargetBytes", targetBytes)
+					    .detail("InputRate", inputRate)
+					    .detail("X", x)
+					    .detail("ActualTps", actualTps)
+					    .detail("Lim", lim)
+					    .detail("LimitsTpsLimit", limits->tpsLimit);
+				}
 				limits->tpsLimit = lim;
 				reasonID = tl.id;
 				limitReason = limitReason_t::log_server_mvcc_write_bandwidth;
