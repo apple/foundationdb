@@ -3315,8 +3315,8 @@ DDTeamCollection::DDTeamCollection(Database const& cx,
                                    PromiseStream<GetMetricsRequest> getShardMetrics,
                                    Promise<UID> removeFailedServer,
                                    PromiseStream<Promise<int>> getUnhealthyRelocationCount)
-  : cx(cx), distributorId(distributorId), configuration(configuration), doBuildTeams(true), lastBuildTeamsFailed(false),
-    teamBuilder(Void()), lock(lock), output(output), unhealthyServers(0),
+  : doBuildTeams(true), lastBuildTeamsFailed(false), teamBuilder(Void()), cx(cx), distributorId(distributorId),
+    configuration(configuration), lock(lock), output(output), unhealthyServers(0),
     storageWiggler(makeReference<StorageWiggler>(this)), processingWiggle(processingWiggle),
     shardsAffectedByTeamFailure(shardsAffectedByTeamFailure),
     initialFailureReactionDelay(

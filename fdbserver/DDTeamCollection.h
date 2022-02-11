@@ -172,6 +172,16 @@ typedef AsyncMap<UID, ServerStatus> ServerStatusMap;
 class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	friend class DDTeamCollectionImpl;
 
+	// addActor: add to actorCollection so that when an actor has error, the ActorCollection can catch the error.
+	// addActor is used to create the actorCollection when the dataDistributionTeamCollection is created
+	PromiseStream<Future<Void>> addActor;
+
+	bool doBuildTeams;
+	bool lastBuildTeamsFailed;
+	Future<Void> teamBuilder;
+	AsyncTrigger restartTeamBuilder;
+	AsyncVar<bool> waitUntilRecruited; // make teambuilder wait until one new SS is recruited
+
 	// Randomly choose one machine team that has chosenServer and has the correct size
 	// When configuration is changed, we may have machine teams with old storageTeamSize
 	Reference<TCMachineTeamInfo> findOneRandomMachineTeam(TCServerInfo const& chosenServer) const;
@@ -430,18 +440,10 @@ public:
 	// clang-format off
 	enum class Status { NONE = 0, WIGGLING = 1, EXCLUDED = 2, FAILED = 3};
 
-	// addActor: add to actorCollection so that when an actor has error, the ActorCollection can catch the error.
-	// addActor is used to create the actorCollection when the dataDistributionTeamCollection is created
-	PromiseStream<Future<Void>> addActor;
 	Database cx;
 	UID distributorId;
-	DatabaseConfiguration configuration;
 
-	bool doBuildTeams;
-	bool lastBuildTeamsFailed;
-	Future<Void> teamBuilder;
-	AsyncTrigger restartTeamBuilder;
-	AsyncVar<bool> waitUntilRecruited; // make teambuilder wait until one new SS is recruited
+	DatabaseConfiguration configuration;
 
 	MoveKeysLock lock;
 	PromiseStream<RelocateShard> output;
