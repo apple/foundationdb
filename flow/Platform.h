@@ -842,7 +842,7 @@ static inline uint64_t hwCrc32cU64(uint64_t crc, uint64_t v) {
 #endif
 #endif
 
-#if !defined(__aarch64__) && !defined(__powerpc64__)
+#if defined(__aarch64__) || defined(__powerpc64__)
 #define _MM_HINT_T0 0 /* dummy -- not used */
 #endif
 
