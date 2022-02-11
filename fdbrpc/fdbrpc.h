@@ -763,10 +763,14 @@ public:
 			Future<Void> disc =
 			    makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnectOrFailure(getEndpoint());
 			auto& p = getReplyPromiseStream(value);
-			Reference<Peer> peer =
-			    FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(), true);
-			// FIXME: defer sending the message until we know the connection is established
-			endStreamOnDisconnect(disc, p, getEndpoint(), peer);
+			if (disc.isReady()) {
+				p.sendError(request_maybe_delivered());
+			} else {
+				Reference<Peer> peer =
+				    FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(), true);
+				// FIXME: defer sending the message until we know the connection is established
+				endStreamOnDisconnect(disc, p, getEndpoint(), peer);
+			}
 			return p;
 		} else {
 			send(value);
