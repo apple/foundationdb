@@ -596,6 +596,12 @@ public:
 	void addTeam(std::set<UID> const& team, bool isInitialTeam) { addTeam(team.begin(), team.end(), isInitialTeam); }
 
 	// FIXME: Public for testing only
+	void enableBuildingTeams(bool doBuildTeams) { this->doBuildTeams = doBuildTeams; }
+
+	// FIXME: Public for testing only
+	void clearCheckTeamDelay() { this->checkTeamDelay = Void(); }
+
+	// FIXME: Public for testing only
 	// Group storage servers (process) based on their machineId in LocalityData
 	// All created machines are healthy
 	// Return The number of healthy servers we grouped into machines
