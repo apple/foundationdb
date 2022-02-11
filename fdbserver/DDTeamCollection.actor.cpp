@@ -3410,7 +3410,14 @@ TEST_CASE("/DataDistribution/GetTeam/NewServersNotNeeded") {
 	collection->server_info[UID(1, 0)]->serverMetrics = mid_avail;
 	collection->server_info[UID(2, 0)]->serverMetrics = high_avail;	
 	collection->server_info[UID(3, 0)]->serverMetrics = high_avail;	
-	collection->server_info[UID(4, 0)]->serverMetrics = high_avail;	
+	collection->server_info[UID(4, 0)]->serverMetrics = high_avail;
+
+	/*
+	 * Suppose  1, 2 and 3 are complete sources, i.e., they have all shards in
+	 * the key range being considered for movement. If the caller says that they
+	 * don't strictly need new servers and all of these servers are healthy,
+	 * maintain status quo.
+	 */
 
 	bool wantsNewServers = false;
 	bool wantsTrueBest = true;
@@ -3465,6 +3472,13 @@ TEST_CASE("/DataDistribution/GetTeam/HealthyCompleteSource") {
 	collection->server_info[UID(4, 0)]->serverMetrics = high_avail;	
 	collection->server_info[UID(1, 0)]->teams[0]->setHealthy(false);
 
+	/*
+	 * Suppose  1, 2, 3 and 4 are complete sources, i.e., they have all shards in
+	 * the key range being considered for movement. If the caller says that they don't
+	 * strictly need new servers but '1' is not healthy, see that the other team of
+	 * complete sources is selected.
+	 */
+
 	bool wantsNewServers = false;
 	bool wantsTrueBest = true;
 	bool preferLowerUtilization = true;
@@ -3515,6 +3529,11 @@ TEST_CASE("/DataDistribution/GetTeam/TrueBestLeastUtilized") {
 	collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), true);
 	collection->doBuildTeams = false;
 	collection->checkTeamDelay = Void();
+
+	/*
+	 * Among server teams that have healthy space available, pick the team that is
+	 * least utilized, if the caller says they preferLowerUtilization.
+	 */
 
 	collection->server_info[UID(1, 0)]->serverMetrics = mid_avail;
 	collection->server_info[UID(2, 0)]->serverMetrics = high_avail;	
@@ -3573,6 +3592,11 @@ TEST_CASE("/DataDistribution/GetTeam/TrueBestMostUtilized") {
 	collection->server_info[UID(3, 0)]->serverMetrics = high_avail;	
 	collection->server_info[UID(4, 0)]->serverMetrics = high_avail;	
 
+	/*
+	 * Among server teams that have healthy space available, pick the team that is
+	 * most utilized, if the caller says they don't preferLowerUtilization.
+	 */
+
 	bool wantsNewServers = true;
 	bool wantsTrueBest = true;
 	bool preferLowerUtilization = false;
@@ -3626,6 +3650,12 @@ TEST_CASE("/DataDistribution/GetTeam/ServerUtilizationBelowCutoff") {
 	collection->server_info[UID(4, 0)]->serverMetrics = low_avail;
 	collection->server_info[UID(1, 0)]->teams[0]->setHealthy(false);
 
+	/*
+	 * If the only available team is one where at least one server is low on
+	 * space, decline to pick that team. Every server must have some minimum
+	 * free space defined by the MIN_AVAILABLE_SPACE server knob.
+	 */
+
 	bool wantsNewServers = true;
 	bool wantsTrueBest = true;
 	bool preferLowerUtilization = true;
@@ -3676,6 +3706,12 @@ TEST_CASE("/DataDistribution/GetTeam/ServerUtilizationNearCutoff") {
 	collection->server_info[UID(4, 0)]->serverMetrics = low_avail;
 	collection->server_info[UID(5, 0)]->serverMetrics = high_avail;
 	collection->server_info[UID(1, 0)]->teams[0]->setHealthy(false);
+
+	/*
+	 * If the only available team is one where all servers are low on space,
+	 * test that each server has at least MIN_AVAILABLE_SPACE_RATIO (server knob)
+	 * percentage points of capacity free before picking that team.
+	 */
 
 	bool wantsNewServers = true;
 	bool wantsTrueBest = true;
