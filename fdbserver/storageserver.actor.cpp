@@ -647,6 +647,7 @@ public:
 	std::set<Key> fetchingChangeFeeds;
 	std::unordered_map<NetworkAddress, std::map<UID, Version>> changeFeedClientVersions;
 	std::unordered_map<Key, Version> changeFeedCleanupDurable;
+	int64_t activeFeedQueries = 0;
 
 	// newestAvailableVersion[k]
 	//   == invalidVersion -> k is unavailable at all versions
@@ -910,6 +911,8 @@ public:
 			specialCounter(cc, "KvstoreSizeTotal", [self]() { return std::get<0>(self->storage.getSize()); });
 			specialCounter(cc, "KvstoreNodeTotal", [self]() { return std::get<1>(self->storage.getSize()); });
 			specialCounter(cc, "KvstoreInlineKey", [self]() { return std::get<2>(self->storage.getSize()); });
+			specialCounter(cc, "ActiveChangeFeeds", [self]() { return self->uidChangeFeed.size(); });
+			specialCounter(cc, "ActiveChangeFeedQueries", [self]() { return self->activeFeedQueries; });
 		}
 	} counters;
 
@@ -1857,7 +1860,6 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 
 	state bool readDurable = feedInfo->durableVersion != invalidVersion && req.begin <= feedInfo->durableVersion;
 	state bool readFetched = req.begin <= fetchStorageVersion;
-	state bool readAnyFromDisk = false;
 	if (req.end > emptyVersion + 1 && (readDurable || readFetched)) {
 		if (readFetched && req.begin <= feedInfo->fetchVersion) {
 			// Request needs data that has been written to storage by a change feed fetch, but not committed yet
@@ -1906,7 +1908,6 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 			    reply.arena, MutationsAndVersionRef(mutations, version, knownCommittedVersion), req.range, inverted);
 			if (m.mutations.size()) {
 				reply.arena.dependsOn(mutations.arena());
-				readAnyFromDisk = true;
 				reply.mutations.push_back(reply.arena, m);
 			}
 			remainingDurableBytes -=
@@ -1923,15 +1924,6 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 			       reply.mutations.empty() ? invalidVersion : reply.mutations.front().version,
 			       reply.mutations.empty() ? invalidVersion : reply.mutations.back().version,
 			       reply.mutations.size());
-			if (!reply.mutations.empty() && reply.mutations.front().version == 252133030) {
-				for (auto& it : reply.mutations) {
-					printf("CFM: SS %s CF %s:       %lld (%d)\n",
-					       data->thisServerID.toString().substr(0, 4).c_str(),
-					       req.rangeID.printable().substr(0, 6).c_str(),
-					       it.version,
-					       it.mutations.size());
-				}
-			}
 		}
 		if (remainingDurableBytes > 0) {
 			reply.arena.dependsOn(memoryReply.arena);
@@ -1942,7 +1934,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 				--totalCount;
 			}
 			reply.mutations.append(reply.arena, it, totalCount);
-		} else if (!readAnyFromDisk) {
+		} else if (reply.mutations.empty() || reply.mutations.back().version < lastVersion) {
 			if (DEBUG_SS_CFM(data->thisServerID, req.rangeID, req.begin)) {
 				printf("CFM: SS %s CF %s:     adding empty from disk %lld\n",
 				       data->thisServerID.toString().substr(0, 4).c_str(),
@@ -2120,6 +2112,7 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 	}
 
 	try {
+		data->activeFeedQueries++;
 		loop {
 			Future<Void> onReady = req.reply.onReady();
 			if (atLatest && !onReady.isReady() && !removeUID) {
@@ -2197,6 +2190,7 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 			}
 		}
 	} catch (Error& e) {
+		data->activeFeedQueries--;
 		// TODO REMOVE
 		printf("CFSQ %s got error %s\n", streamUID.toString().substr(0, 8).c_str(), e.name());
 		auto it = data->changeFeedClientVersions.find(req.reply.getEndpoint().getPrimaryAddress());
@@ -4433,13 +4427,12 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data, KeyR
 			auto changeFeedInfo = existingEntry->second;
 			auto feedCleanup = data->changeFeedCleanupDurable.find(cfEntry.rangeId);
 
-			if (feedCleanup != data->changeFeedCleanupDurable.end()) {
-				TEST(true); // re-fetching feed scheduled for deletion!
+			if (feedCleanup != data->changeFeedCleanupDurable.end() && changeFeedInfo->removing) {
+				TEST(true); // re-fetching feed scheduled for deletion! Un-mark it as removing
 				ASSERT(fetchVersion > feedCleanup->second);
 				changeFeedInfo->emptyVersion = cfEntry.emptyVersion;
 				changeFeedInfo->stopped = cfEntry.stopped;
 				changeFeedInfo->removing = false;
-				data->changeFeedCleanupDurable.erase(feedCleanup);
 			} else if (changeFeedInfo->emptyVersion < cfEntry.emptyVersion) {
 				TEST(true); // Got updated CF emptyVersion from a parallel fetchChangeFeedMetadata
 				changeFeedInfo->emptyVersion = cfEntry.emptyVersion;
