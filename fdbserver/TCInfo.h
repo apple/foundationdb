@@ -28,9 +28,9 @@ class TCMachineTeamInfo;
 
 class TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	friend class TCServerInfoImpl;
+	UID id;
 
 public:
-	UID id;
 	Version addedVersion; // Read version when this Server is added
 	DDTeamCollection* collection;
 	StorageServerInterface lastKnownInterface;
@@ -62,6 +62,8 @@ public:
 	             bool inDesiredDC,
 	             Reference<LocalitySet> storageServerSet,
 	             Version addedVersion = 0);
+
+	UID const& getId() const { return id; }
 
 	bool isCorrectStoreType(KeyValueStoreType configStoreType) const {
 		// A new storage server's store type may not be set immediately.

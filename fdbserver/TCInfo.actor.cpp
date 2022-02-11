@@ -180,7 +180,7 @@ std::string TCMachineInfo::getServersIDStr() const {
 		return "[unset]";
 
 	for (const auto& server : serversOnMachine) {
-		ss << server->id.toString() << " ";
+		ss << server->getId().toString() << " ";
 	}
 
 	return std::move(ss).str();
@@ -216,7 +216,7 @@ TCTeamInfo::TCTeamInfo(std::vector<Reference<TCServerInfo>> const& servers)
 	}
 	serverIDs.reserve(servers.size());
 	for (int i = 0; i < servers.size(); i++) {
-		serverIDs.push_back(servers[i]->id);
+		serverIDs.push_back(servers[i]->getId());
 	}
 }
 
