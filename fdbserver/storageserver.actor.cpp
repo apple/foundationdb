@@ -4238,7 +4238,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					state int expectedBlockSize =
 					    (int)this_block.expectedSize() + (8 - (int)sizeof(KeyValueRef)) * this_block.size();
 
-					int severity = DD_DEBUG_INFO ? SevInfo, SevDebug;
+					Severity severity = SERVER_KNOBS->DD_DEBUG_INFO ? SevInfo : SevDebug;
 					TraceEvent(severity, "FetchKeysBlock", data->thisServerID)
 					    .detail("FKID", interval.pairID)
 					    .detail("BlockRows", this_block.size())
