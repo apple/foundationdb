@@ -1694,7 +1694,7 @@ public:
 				}
 
 				TraceEvent("MachineTeamRemover", self->distributorId)
-				    .detail("MachineTeamIDToRemove", mt->id.shortString())
+				    .detail("MachineTeamIDToRemove", mt->id().shortString())
 				    .detail("MachineTeamToRemove", mt->getMachineIDsStr())
 				    .detail("NumProcessTeamsOnTheMachineTeam", minNumProcessTeams)
 				    .detail("CurrentMachineTeams", self->machineTeams.size())

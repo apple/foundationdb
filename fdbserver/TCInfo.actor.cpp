@@ -228,7 +228,7 @@ std::string TCMachineInfo::getServersIDStr() const {
 }
 
 TCMachineTeamInfo::TCMachineTeamInfo(std::vector<Reference<TCMachineInfo>> const& machines)
-  : machines(machines), id(deterministicRandom()->randomUniqueID()) {
+  : _id(deterministicRandom()->randomUniqueID()), machines(machines) {
 	machineIDs.reserve(machines.size());
 	for (int i = 0; i < machines.size(); i++) {
 		machineIDs.push_back(machines[i]->machineID);

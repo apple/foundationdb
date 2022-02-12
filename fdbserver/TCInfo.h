@@ -118,18 +118,20 @@ public:
 
 // TeamCollection's machine team information
 class TCMachineTeamInfo : public ReferenceCounted<TCMachineTeamInfo> {
+	UID _id;
 public:
 	std::vector<Reference<TCMachineInfo>> machines;
 	std::vector<Standalone<StringRef>> machineIDs;
 	std::vector<Reference<TCTeamInfo>> serverTeams;
-	UID id;
 
 	explicit TCMachineTeamInfo(std::vector<Reference<TCMachineInfo>> const& machines);
 
 	int size() const {
-		ASSERT(machines.size() == machineIDs.size());
+		ASSERT_EQ(machines.size(), machineIDs.size());
 		return machineIDs.size();
 	}
+
+	UID id() const { return _id; }
 
 	std::string getMachineIDsStr() const;
 
