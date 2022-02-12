@@ -92,7 +92,9 @@ public:
 
 	void cancel();
 
-	void removeTeam(Reference<TCTeamInfo> team);
+	void removeTeamsContainingServer(UID removedServer);
+
+	void removeTeam(Reference<TCTeamInfo>);
 
 	bool isCorrectStoreType(KeyValueStoreType configStoreType) const {
 		// A new storage server's store type may not be set immediately.

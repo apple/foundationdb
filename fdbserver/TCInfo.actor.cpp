@@ -171,6 +171,16 @@ Future<Void> TCServerInfo::updateStoreType() {
 	                 TaskPriority::DataDistribution)));
 }
 
+void TCServerInfo::removeTeamsContainingServer(UID removedServer) {
+	for (int t = 0; t < teams.size(); t++) {
+		auto const& serverIds = teams[t]->getServerIDs();
+		if (std::count(serverIds.begin(), serverIds.end(), removedServer)) {
+			teams[t--] = teams.back();
+			teams.pop_back();
+		}
+	}
+}
+
 void TCServerInfo::removeTeam(Reference<TCTeamInfo> team) {
 	for (int t = 0; t < teams.size(); t++) {
 		if (teams[t] == team) {

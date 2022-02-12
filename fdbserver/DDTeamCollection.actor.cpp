@@ -4884,14 +4884,7 @@ void DDTeamCollection::removeServer(UID removedServer) {
 	// For each server in a team with the removedServer, erase shared teams from the list of teams in that other
 	// server
 	for (auto it = serversWithAjoiningTeams.begin(); it != serversWithAjoiningTeams.end(); ++it) {
-		auto& serverTeams = server_info[*it]->teams;
-		for (int t = 0; t < serverTeams.size(); t++) {
-			auto& serverIds = serverTeams[t]->getServerIDs();
-			if (std::count(serverIds.begin(), serverIds.end(), removedServer)) {
-				serverTeams[t--] = serverTeams.back();
-				serverTeams.pop_back();
-			}
-		}
+		server_info[*it]->removeTeamsContainingServer(removedServer);
 	}
 
 	// Step: Remove all teams that contain removedServer
