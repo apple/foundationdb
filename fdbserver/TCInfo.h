@@ -119,11 +119,11 @@ public:
 // TeamCollection's machine team information
 class TCMachineTeamInfo : public ReferenceCounted<TCMachineTeamInfo> {
 	UID _id;
-public:
 	std::vector<Reference<TCMachineInfo>> machines;
 	std::vector<Standalone<StringRef>> machineIDs;
 	std::vector<Reference<TCTeamInfo>> serverTeams;
 
+public:
 	explicit TCMachineTeamInfo(std::vector<Reference<TCMachineInfo>> const& machines);
 
 	int size() const {
@@ -132,8 +132,18 @@ public:
 	}
 
 	UID id() const { return _id; }
-
+	std::vector<Reference<TCMachineInfo>> const& getMachines() const { return machines; }
+	std::vector<Standalone<StringRef>> const& getMachineIDs() const { return machineIDs; }
+	std::vector<Reference<TCTeamInfo>> const& getServerTeams() const { return serverTeams; }
+	void addServerTeam(Reference<TCTeamInfo> team) { serverTeams.push_back(team); }
+	bool matches(std::vector<Standalone<StringRef>> const& sortedMachineIDs);
 	std::string getMachineIDsStr() const;
+	bool containsMachine(Standalone<StringRef> machineID) const {
+		return std::count(machineIDs.begin(), machineIDs.end(), machineID);
+	}
+
+	// Returns true iff team is found
+	bool removeServerTeam(Reference<TCTeamInfo> team);
 
 	bool operator==(TCMachineTeamInfo& rhs) const { return this->machineIDs == rhs.machineIDs; }
 };

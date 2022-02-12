@@ -197,6 +197,22 @@ TCServerInfo::~TCServerInfo() {
 	}
 }
 
+bool TCMachineTeamInfo::matches(std::vector<Standalone<StringRef>> const& sortedMachineIDs) {
+	std::sort(machineIDs.begin(), machineIDs.end());
+	return sortedMachineIDs == machineIDs;
+}
+
+bool TCMachineTeamInfo::removeServerTeam(Reference<TCTeamInfo> team) {
+	for (int t = 0; t < serverTeams.size(); ++t) {
+		if (serverTeams[t] == team) {
+			serverTeams[t--] = serverTeams.back();
+			serverTeams.pop_back();
+			return true; // The same team is added to the serverTeams only once
+		}
+	}
+	return false;
+}
+
 Reference<TCMachineInfo> TCMachineInfo::clone() const {
 	auto result = Reference<TCMachineInfo>(new TCMachineInfo);
 	result->serversOnMachine = serversOnMachine;
