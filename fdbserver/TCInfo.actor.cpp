@@ -319,8 +319,8 @@ int64_t TCTeamInfo::getLoadBytes(bool includeInFlight, double inflightPenalty) c
 int64_t TCTeamInfo::getMinAvailableSpace(bool includeInFlight) const {
 	int64_t minAvailableSpace = std::numeric_limits<int64_t>::max();
 	for (const auto& server : servers) {
-		if (server->serverMetrics.present()) {
-			auto& replyValue = server->serverMetrics.get();
+		if (server->serverMetricsPresent()) {
+			auto& replyValue = server->getServerMetrics();
 
 			ASSERT(replyValue.available.bytes >= 0);
 			ASSERT(replyValue.capacity.bytes >= 0);
@@ -340,8 +340,8 @@ int64_t TCTeamInfo::getMinAvailableSpace(bool includeInFlight) const {
 double TCTeamInfo::getMinAvailableSpaceRatio(bool includeInFlight) const {
 	double minRatio = 1.0;
 	for (const auto& server : servers) {
-		if (server->serverMetrics.present()) {
-			auto& replyValue = server->serverMetrics.get();
+		if (server->serverMetricsPresent()) {
+			auto const& replyValue = server->getServerMetrics();
 
 			ASSERT(replyValue.available.bytes >= 0);
 			ASSERT(replyValue.capacity.bytes >= 0);
@@ -389,9 +389,9 @@ int64_t TCTeamInfo::getLoadAverage() const {
 	int64_t bytesSum = 0;
 	int added = 0;
 	for (int i = 0; i < servers.size(); i++)
-		if (servers[i]->serverMetrics.present()) {
+		if (servers[i]->serverMetricsPresent()) {
 			added++;
-			bytesSum += servers[i]->serverMetrics.get().load.bytes;
+			bytesSum += servers[i]->getServerMetrics().load.bytes;
 		}
 
 	if (added < servers.size())

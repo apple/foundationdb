@@ -45,10 +45,10 @@ class TCServerInfo : public ReferenceCounted<TCServerInfo> {
 
 	int64_t dataInFlightToServer;
 	std::vector<Reference<TCTeamInfo>> teams;
+	ErrorOr<GetStorageMetricsReply> serverMetrics;
 
 public:
 	Reference<TCMachineInfo> machine;
-	ErrorOr<GetStorageMetricsReply> serverMetrics;
 	Promise<std::pair<StorageServerInterface, ProcessClass>> interfaceChanged;
 	Future<std::pair<StorageServerInterface, ProcessClass>> onInterfaceChanged;
 	Promise<Void> removed;
@@ -84,6 +84,8 @@ public:
 	void addTeam(Reference<TCTeamInfo> team) { teams.push_back(team); }
 	void removeTeamsContainingServer(UID removedServer);
 	void removeTeam(Reference<TCTeamInfo>);
+	GetStorageMetricsReply const& getServerMetrics() const { return serverMetrics.get(); }
+	bool serverMetricsPresent() const { return serverMetrics.present(); }
 
 	bool isCorrectStoreType(KeyValueStoreType configStoreType) const {
 		// A new storage server's store type may not be set immediately.
