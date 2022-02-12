@@ -69,35 +69,20 @@ public:
 	             Version addedVersion = 0);
 
 	UID const& getId() const { return id; }
-
 	bool isInDesiredDC() const { return inDesiredDC; }
-
 	void updateInDesiredDC(std::vector<Optional<Key>> const& includedDCs);
-
 	void setTracker(Future<Void> tracker) { this->tracker = tracker; }
-
 	void updateLastKnown(StorageServerInterface const&, ProcessClass);
-
 	StorageServerInterface const& getLastKnownInterface() const { return lastKnownInterface; }
-
 	ProcessClass const& getLastKnownClass() const { return lastKnownClass; }
-
 	Future<Void> updateStoreType();
-
 	KeyValueStoreType getStoreType() const { return storeType; }
-
 	int64_t getDataInFlightToServer() const { return dataInFlightToServer; }
-
 	void incrementDataInFlightToServer(int64_t bytes) { dataInFlightToServer += bytes; }
-
 	void cancel();
-
 	std::vector<Reference<TCTeamInfo>> const& getTeams() const { return teams; }
-
 	void addTeam(Reference<TCTeamInfo> team) { teams.push_back(team); }
-
 	void removeTeamsContainingServer(UID removedServer);
-
 	void removeTeam(Reference<TCTeamInfo>);
 
 	bool isCorrectStoreType(KeyValueStoreType configStoreType) const {
@@ -107,9 +92,7 @@ public:
 	}
 
 	Future<Void> updateServerMetrics();
-
 	static Future<Void> updateServerMetrics(Reference<TCServerInfo> server);
-
 	Future<Void> serverMetricsPolling();
 
 	~TCServerInfo();
