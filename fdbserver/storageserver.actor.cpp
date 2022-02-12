@@ -1317,12 +1317,14 @@ Future<Version> waitForVersion(StorageServer* data, Version version, SpanID span
 	}
 
 	if (version < data->oldestVersion.get() || version <= 0) {
+		// TODO: count the error type
 		return transaction_too_old();
 	} else if (version <= data->version.get()) {
 		return version;
 	}
 
 	if ((data->behind || data->versionBehind) && version > data->version.get()) {
+		// TODO: count the error type
 		return process_behind();
 	}
 
@@ -4236,7 +4238,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					state int expectedBlockSize =
 					    (int)this_block.expectedSize() + (8 - (int)sizeof(KeyValueRef)) * this_block.size();
 
-					TraceEvent(SevDebug, "FetchKeysBlock", data->thisServerID)
+					int severity = DD_DEBUG_INFO ? SevInfo, SevDebug;
+					TraceEvent(severity, "FetchKeysBlock", data->thisServerID)
 					    .detail("FKID", interval.pairID)
 					    .detail("BlockRows", this_block.size())
 					    .detail("BlockBytes", expectedBlockSize)
@@ -4244,7 +4247,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					    .detail("KeyEnd", keys.end)
 					    .detail("Last", this_block.size() ? this_block.end()[-1].key : std::string())
 					    .detail("Version", fetchVersion)
-					    .detail("More", this_block.more);
+					    .detail("More", this_block.more)
+						.detail("FetchKeysBytesBudget", data->fetchKeysBytesBudget);
 
 					DEBUG_KEY_RANGE("fetchRange", fetchVersion, keys, data->thisServerID);
 					if (MUTATION_TRACKING_ENABLED) {
@@ -4306,7 +4310,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 						    .detail("TotalAttempts", debug_getRangeRetries)
 						    .detail("FKID", interval.pairID)
 						    .detail("N", fetchVersion)
-						    .detail("E", data->version.get());
+						    .detail("E", data->version.get())
+							.error(e);
 					}
 					wait(delayJittered(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
 					continue;
@@ -5116,6 +5121,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			while (data->queueSize() >= SERVER_KNOBS->STORAGE_HARD_LIMIT_BYTES &&
 			       data->durableVersion.get() < data->desiredOldestVersion.get()) {
 				if (now() - waitStartT >= 1) {
+					// RocksDB SS crash
 					TraceEvent(SevWarn, "StorageServerUpdateLag", data->thisServerID)
 					    .detail("Version", data->version.get())
 					    .detail("DurableVersion", data->durableVersion.get())

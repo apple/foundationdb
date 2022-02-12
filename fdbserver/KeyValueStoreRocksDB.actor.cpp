@@ -189,6 +189,7 @@ rocksdb::Options getOptions() {
 	rocksdb::Options options({}, getCFOptions());
 	options.avoid_unnecessary_blocking_io = true;
 	options.create_if_missing = true;
+	options.max_subcompactions = 3; // TODO: change to knob.
 	if (SERVER_KNOBS->ROCKSDB_BACKGROUND_PARALLELISM > 0) {
 		options.IncreaseParallelism(SERVER_KNOBS->ROCKSDB_BACKGROUND_PARALLELISM);
 	}
