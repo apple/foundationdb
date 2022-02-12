@@ -92,6 +92,8 @@ public:
 
 	void cancel();
 
+	void removeTeam(Reference<TCTeamInfo> team);
+
 	bool isCorrectStoreType(KeyValueStoreType configStoreType) const {
 		// A new storage server's store type may not be set immediately.
 		// If a storage server does not reply its storeType, it will be tracked by failure monitor and removed.

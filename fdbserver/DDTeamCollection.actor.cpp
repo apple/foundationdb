@@ -4721,15 +4721,8 @@ bool DDTeamCollection::removeTeam(Reference<TCTeamInfo> team) {
 		}
 	}
 
-	for (const auto& server : team->getServers()) {
-		for (int t = 0; t < server->teams.size(); t++) {
-			if (server->teams[t] == team) {
-				ASSERT(found);
-				server->teams[t--] = server->teams.back();
-				server->teams.pop_back();
-				break; // The teams on a server should never duplicate
-			}
-		}
+	for (auto& server : team->getServers()) {
+		server->removeTeam(team);
 	}
 
 	// Remove the team from its machine team

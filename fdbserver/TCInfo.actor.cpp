@@ -171,6 +171,16 @@ Future<Void> TCServerInfo::updateStoreType() {
 	                 TaskPriority::DataDistribution)));
 }
 
+void TCServerInfo::removeTeam(Reference<TCTeamInfo> team) {
+	for (int t = 0; t < teams.size(); t++) {
+		if (teams[t] == team) {
+			teams[t--] = teams.back();
+			teams.pop_back();
+			return; // The teams on a server should never duplicate
+		}
+	}
+}
+
 TCServerInfo::~TCServerInfo() {
 	if (collection && ssVersionTooFarBehind.get() && !lastKnownInterface.isTss()) {
 		collection->removeLaggingStorageServer(lastKnownInterface.locality.zoneId().get());
