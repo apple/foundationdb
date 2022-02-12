@@ -44,9 +44,9 @@ class TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	KeyValueStoreType storeType; // Storage engine type
 
 	int64_t dataInFlightToServer;
+	std::vector<Reference<TCTeamInfo>> teams;
 
 public:
-	std::vector<Reference<TCTeamInfo>> teams;
 	Reference<TCMachineInfo> machine;
 	ErrorOr<GetStorageMetricsReply> serverMetrics;
 	Promise<std::pair<StorageServerInterface, ProcessClass>> interfaceChanged;
@@ -91,6 +91,10 @@ public:
 	void incrementDataInFlightToServer(int64_t bytes) { dataInFlightToServer += bytes; }
 
 	void cancel();
+
+	std::vector<Reference<TCTeamInfo>> const& getTeams() const { return teams; }
+
+	void addTeam(Reference<TCTeamInfo> team) { teams.push_back(team); }
 
 	void removeTeamsContainingServer(UID removedServer);
 

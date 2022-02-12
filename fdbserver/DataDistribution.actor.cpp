@@ -1460,7 +1460,7 @@ TEST_CASE("/DataDistribution/AddTeamsBestOf/SkippingBusyServers") {
 	ASSERT(result >= 8);
 
 	for (auto process = collection->server_info.begin(); process != collection->server_info.end(); process++) {
-		auto teamCount = process->second->teams.size();
+		auto teamCount = process->second->getTeams().size();
 		ASSERT(teamCount >= 1);
 		// ASSERT(teamCount <= targetTeamsPerServer);
 	}
@@ -1499,7 +1499,7 @@ TEST_CASE("/DataDistribution/AddTeamsBestOf/NotEnoughServers") {
 
 	// We need to guarantee a server always have at least a team so that the server can participate in data distribution
 	for (auto process = collection->server_info.begin(); process != collection->server_info.end(); process++) {
-		auto teamCount = process->second->teams.size();
+		auto teamCount = process->second->getTeams().size();
 		ASSERT(teamCount >= 1);
 	}
 

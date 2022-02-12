@@ -209,7 +209,7 @@ public:
 					if (!self->server_info.count(req.completeSources[i])) {
 						continue;
 					}
-					auto& teamList = self->server_info[req.completeSources[i]]->teams;
+					auto const& teamList = self->server_info[req.completeSources[i]]->getTeams();
 					for (int j = 0; j < teamList.size(); j++) {
 						bool found = true;
 						auto serverIDs = teamList[j]->getServerIDs();
@@ -312,7 +312,7 @@ public:
 					if (!self->server_info.count(req.completeSources[i])) {
 						continue;
 					}
-					auto& teamList = self->server_info[req.completeSources[i]]->teams;
+					auto const& teamList = self->server_info[req.completeSources[i]]->getTeams();
 					for (int j = 0; j < teamList.size(); j++) {
 						bool found = true;
 						auto serverIDs = teamList[j]->getServerIDs();
@@ -367,7 +367,7 @@ public:
 			if (servers.size() >= self->configuration.storageTeamSize) {
 				bool foundTeam = false;
 				for (int j = 0; j < servers.size() - self->configuration.storageTeamSize + 1 && !foundTeam; j++) {
-					auto& serverTeams = servers[j]->teams;
+					auto const& serverTeams = servers[j]->getTeams();
 					for (int k = 0; k < serverTeams.size(); k++) {
 						auto& testTeam = serverTeams[k]->getServerIDs();
 						bool allInTeam = true; // All servers in testTeam belong to the healthy servers
@@ -870,9 +870,9 @@ public:
 										auto& info = tc->server_info[t.servers[0]];
 
 										bool found = false;
-										for (int k = 0; k < info->teams.size(); k++) {
-											if (info->teams[k]->getServerIDs() == t.servers) {
-												maxPriority = std::max(maxPriority, info->teams[k]->getPriority());
+										for (int k = 0; k < info->getTeams().size(); k++) {
+											if (info->getTeams()[k]->getServerIDs() == t.servers) {
+												maxPriority = std::max(maxPriority, info->getTeams()[k]->getPriority());
 												found = true;
 
 												break;
@@ -1149,7 +1149,7 @@ public:
 				}
 
 				if (lastIsUnhealthy && !status.isUnhealthy() && !isTss &&
-				    (server->teams.size() < targetTeamNumPerServer || self->lastBuildTeamsFailed)) {
+				    (server->getTeams().size() < targetTeamNumPerServer || self->lastBuildTeamsFailed)) {
 					self->doBuildTeams = true;
 					self->restartTeamBuilder
 					    .trigger(); // This does not trigger building teams if there exist healthy teams
@@ -1248,7 +1248,7 @@ public:
 							// Ensure the server's server team belong to a machine team, and
 							// Get the newBadTeams due to the locality change
 							std::vector<Reference<TCTeamInfo>> newBadTeams;
-							for (auto& serverTeam : server->teams) {
+							for (auto& serverTeam : server->getTeams()) {
 								if (!self->satisfiesPolicy(serverTeam->getServers())) {
 									newBadTeams.push_back(serverTeam);
 									continue;
@@ -1668,7 +1668,7 @@ public:
 
 					// Check if a server will have 0 team after the team is removed
 					for (auto& s : team->getServers()) {
-						if (s->teams.size() == 0) {
+						if (s->getTeams().size() == 0) {
 							TraceEvent(SevError, "MachineTeamRemoverTooAggressive", self->distributorId)
 							    .detail("Server", s->getId())
 							    .detail("ServerTeam", team->getDesc());
@@ -3067,7 +3067,7 @@ public:
 					TraceEvent("ServerInfo", self->getDistributorId())
 					    .detail("ServerInfoIndex", i)
 					    .detail("ServerID", server->first.toString())
-					    .detail("ServerTeamOwned", server->second->teams.size())
+					    .detail("ServerTeamOwned", server->second->getTeams().size())
 					    .detail("MachineID", server->second->machine->machineID.contents().toString())
 					    .detail("Primary", self->isPrimary());
 					server++;
@@ -3241,7 +3241,7 @@ void DDTeamCollection::traceServerInfo() const {
 		TraceEvent("ServerInfo", distributorId)
 		    .detail("ServerInfoIndex", i++)
 		    .detail("ServerID", server.first.toString())
-		    .detail("ServerTeamOwned", server.second->teams.size())
+		    .detail("ServerTeamOwned", server.second->getTeams().size())
 		    .detail("MachineID", server.second->machine->machineID.contents().toString())
 		    .detail("StoreType", server.second->getStoreType().toString())
 		    .detail("InDesiredDC", server.second->isInDesiredDC());
@@ -3697,7 +3697,7 @@ void DDTeamCollection::evaluateTeamQuality() const {
 	std::map<Optional<Standalone<StringRef>>, int> machineTeams;
 	for (const auto& [id, info] : server_info) {
 		if (!server_status.get(id).isUnhealthy()) {
-			int stc = info->teams.size();
+			int stc = info->getTeams().size();
 			minTeams = std::min(minTeams, stc);
 			maxTeams = std::max(maxTeams, stc);
 			varTeams += (stc - teamsPerServer) * (stc - teamsPerServer);
@@ -3734,7 +3734,7 @@ int DDTeamCollection::overlappingMembers(const std::vector<UID>& team) const {
 	const UID& serverID = team[0];
 	const auto it = server_info.find(serverID);
 	ASSERT(it != server_info.end());
-	const auto& usedTeams = it->second->teams;
+	const auto& usedTeams = it->second->getTeams();
 	for (const auto& usedTeam : usedTeams) {
 		auto used = usedTeam->getServerIDs();
 		int teamIdx = 0;
@@ -3815,7 +3815,7 @@ void DDTeamCollection::addTeam(const std::vector<Reference<TCServerInfo>>& newTe
 	// For a good team, we add it to teams and create machine team for it when necessary
 	teams.push_back(teamInfo);
 	for (int i = 0; i < newTeamServers.size(); ++i) {
-		newTeamServers[i]->teams.push_back(teamInfo);
+		newTeamServers[i]->addTeam(teamInfo);
 	}
 
 	// Find or create machine team for the server team
@@ -4176,7 +4176,7 @@ Reference<TCServerInfo> DDTeamCollection::findOneLeastUsedServer() const {
 		if (!isValidLocality(configuration.storagePolicy, server.second->getLastKnownInterface().locality))
 			continue;
 
-		int numTeams = server.second->teams.size();
+		int numTeams = server.second->getTeams().size();
 		if (numTeams < minTeams) {
 			minTeams = numTeams;
 			leastUsedServers.clear();
@@ -4277,8 +4277,8 @@ std::pair<int64_t, int64_t> DDTeamCollection::calculateMinMaxServerTeamsOnServer
 		if (server_status.get(server.first).isUnhealthy()) {
 			continue;
 		}
-		minTeams = std::min((int64_t)server.second->teams.size(), minTeams);
-		maxTeams = std::max((int64_t)server.second->teams.size(), maxTeams);
+		minTeams = std::min((int64_t)server.second->getTeams().size(), minTeams);
+		maxTeams = std::max((int64_t)server.second->getTeams().size(), maxTeams);
 	}
 	return std::make_pair(minTeams, maxTeams);
 }
@@ -4364,7 +4364,7 @@ std::pair<Reference<TCTeamInfo>, int> DDTeamCollection::getServerTeamWithMostPro
 		// The minimum number of teams of a server in a team is the representative team number for the team t
 		int representNumProcessTeams = std::numeric_limits<int>::max();
 		for (auto& server : t->getServers()) {
-			representNumProcessTeams = std::min<int>(representNumProcessTeams, server->teams.size());
+			representNumProcessTeams = std::min<int>(representNumProcessTeams, server->getTeams().size());
 		}
 		// We only remove the team whose representNumProcessTeams is larger than the targetTeamNumPerServer number
 		// otherwise, teamBuilder will build the to-be-removed team again
@@ -4421,7 +4421,7 @@ bool DDTeamCollection::notEnoughTeamsForAServer() const {
 	int targetTeamNumPerServer = (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (configuration.storageTeamSize + 1)) / 2;
 	ASSERT_GT(targetTeamNumPerServer, 0);
 	for (auto& s : server_info) {
-		if (s.second->teams.size() < targetTeamNumPerServer && !server_status.get(s.first).isUnhealthy()) {
+		if (s.second->getTeams().size() < targetTeamNumPerServer && !server_status.get(s.first).isUnhealthy()) {
 			return true;
 		}
 	}
@@ -4526,7 +4526,7 @@ int DDTeamCollection::addTeamsBestOf(int teamsToBuild, int desiredTeams, int max
 			// SOMEDAY: Improve the code efficiency by using reservoir algorithm
 			int score = SERVER_KNOBS->DD_OVERLAP_PENALTY * overlap;
 			for (auto& server : serverTeam) {
-				score += server_info[server]->teams.size();
+				score += server_info[server]->getTeams().size();
 			}
 			TraceEvent(SevDebug, "BuildServerTeams")
 			    .detail("Score", score)
@@ -4874,7 +4874,7 @@ void DDTeamCollection::removeServer(UID removedServer) {
 	// Step: Remove server team that relate to removedServer
 	// Find all servers with which the removedServer shares teams
 	std::set<UID> serversWithAjoiningTeams;
-	auto& sharedTeams = removedServerInfo->teams;
+	auto const& sharedTeams = removedServerInfo->getTeams();
 	for (int i = 0; i < sharedTeams.size(); ++i) {
 		auto& teamIds = sharedTeams[i]->getServerIDs();
 		serversWithAjoiningTeams.insert(teamIds.begin(), teamIds.end());
