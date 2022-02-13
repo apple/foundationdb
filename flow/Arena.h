@@ -417,8 +417,6 @@ private:
 	Standalone<T> const& operator=(Standalone<U> const&); // unimplemented
 };
 
-extern std::string format(const char* form, ...);
-
 #pragma pack(push, 4)
 class StringRef {
 public:
