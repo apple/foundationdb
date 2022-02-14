@@ -5359,8 +5359,8 @@ TEST_CASE("/DataDistribution/GetTeam/NewServersNotNeeded") {
 
 	collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
 	collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), true);
-	collection->enableBuildingTeams(false);
-	collection->clearCheckTeamDelay();
+	collection->disableBuildingTeams();
+	collection->setCheckTeamDelay();
 
 	collection->server_info[UID(1, 0)]->serverMetrics = mid_avail;
 	collection->server_info[UID(2, 0)]->serverMetrics = high_avail;
@@ -5383,8 +5383,7 @@ TEST_CASE("/DataDistribution/GetTeam/NewServersNotNeeded") {
 	state GetTeamRequest req(wantsNewServers, wantsTrueBest, preferLowerUtilization, teamMustHaveShards);
 	req.completeSources = completeSources;
 
-	Future<Void> a = collection->getTeam(req);
-	wait(a);
+	wait(collection->getTeam(req));
 
 	std::pair<Optional<Reference<IDataDistributionTeam>>, bool> resTeam = req.reply.getFuture().get();
 
@@ -5418,8 +5417,8 @@ TEST_CASE("/DataDistribution/GetTeam/HealthyCompleteSource") {
 
 	collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
 	collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), true);
-	collection->enableBuildingTeams(false);
-	collection->clearCheckTeamDelay();
+	collection->disableBuildingTeams();
+	collection->setCheckTeamDelay();
 
 	collection->server_info[UID(1, 0)]->serverMetrics = mid_avail;
 	collection->server_info[UID(2, 0)]->serverMetrics = high_avail;
@@ -5443,8 +5442,7 @@ TEST_CASE("/DataDistribution/GetTeam/HealthyCompleteSource") {
 	state GetTeamRequest req(wantsNewServers, wantsTrueBest, preferLowerUtilization, teamMustHaveShards);
 	req.completeSources = completeSources;
 
-	Future<Void> a = collection->getTeam(req);
-	wait(a);
+	wait(collection->getTeam(req));
 
 	std::pair<Optional<Reference<IDataDistributionTeam>>, bool> resTeam = req.reply.getFuture().get();
 
@@ -5478,8 +5476,8 @@ TEST_CASE("/DataDistribution/GetTeam/TrueBestLeastUtilized") {
 
 	collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
 	collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), true);
-	collection->enableBuildingTeams(false);
-	collection->clearCheckTeamDelay();
+	collection->disableBuildingTeams();
+	collection->setCheckTeamDelay();
 
 	/*
 	 * Among server teams that have healthy space available, pick the team that is
@@ -5500,8 +5498,7 @@ TEST_CASE("/DataDistribution/GetTeam/TrueBestLeastUtilized") {
 	state GetTeamRequest req(wantsNewServers, wantsTrueBest, preferLowerUtilization, teamMustHaveShards);
 	req.completeSources = completeSources;
 
-	Future<Void> a = collection->getTeam(req);
-	wait(a);
+	wait(collection->getTeam(req));
 
 	std::pair<Optional<Reference<IDataDistributionTeam>>, bool> resTeam = req.reply.getFuture().get();
 
@@ -5535,8 +5532,8 @@ TEST_CASE("/DataDistribution/GetTeam/TrueBestMostUtilized") {
 
 	collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
 	collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), true);
-	collection->enableBuildingTeams(false);
-	collection->clearCheckTeamDelay();
+	collection->disableBuildingTeams();
+	collection->setCheckTeamDelay();
 
 	collection->server_info[UID(1, 0)]->serverMetrics = mid_avail;
 	collection->server_info[UID(2, 0)]->serverMetrics = high_avail;
@@ -5557,8 +5554,7 @@ TEST_CASE("/DataDistribution/GetTeam/TrueBestMostUtilized") {
 	state GetTeamRequest req(wantsNewServers, wantsTrueBest, preferLowerUtilization, teamMustHaveShards);
 	req.completeSources = completeSources;
 
-	Future<Void> a = collection->getTeam(req);
-	wait(a);
+	wait(collection->getTeam(req));
 
 	std::pair<Optional<Reference<IDataDistributionTeam>>, bool> resTeam = req.reply.getFuture().get();
 
@@ -5592,8 +5588,8 @@ TEST_CASE("/DataDistribution/GetTeam/ServerUtilizationBelowCutoff") {
 
 	collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
 	collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), true);
-	collection->enableBuildingTeams(false);
-	collection->clearCheckTeamDelay();
+	collection->disableBuildingTeams();
+	collection->setCheckTeamDelay();
 
 	collection->server_info[UID(1, 0)]->serverMetrics = high_avail;
 	collection->server_info[UID(2, 0)]->serverMetrics = low_avail;
@@ -5616,8 +5612,7 @@ TEST_CASE("/DataDistribution/GetTeam/ServerUtilizationBelowCutoff") {
 	state GetTeamRequest req(wantsNewServers, wantsTrueBest, preferLowerUtilization, teamMustHaveShards);
 	req.completeSources = completeSources;
 
-	Future<Void> a = collection->getTeam(req);
-	wait(a);
+	wait(collection->getTeam(req));
 
 	std::pair<Optional<Reference<IDataDistributionTeam>>, bool> resTeam = req.reply.getFuture().get();
 
@@ -5653,8 +5648,8 @@ TEST_CASE("/DataDistribution/GetTeam/ServerUtilizationNearCutoff") {
 	collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
 	collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), true);
 	collection->addTeam(std::set<UID>({ UID(3, 0), UID(4, 0), UID(5, 0) }), true);
-	collection->enableBuildingTeams(false);
-	collection->clearCheckTeamDelay();
+	collection->disableBuildingTeams();
+	collection->setCheckTeamDelay();
 
 	collection->server_info[UID(1, 0)]->serverMetrics = high_avail;
 	collection->server_info[UID(2, 0)]->serverMetrics = low_avail;
@@ -5678,8 +5673,7 @@ TEST_CASE("/DataDistribution/GetTeam/ServerUtilizationNearCutoff") {
 	state GetTeamRequest req(wantsNewServers, wantsTrueBest, preferLowerUtilization, teamMustHaveShards);
 	req.completeSources = completeSources;
 
-	Future<Void> a = collection->getTeam(req);
-	wait(a);
+	wait(collection->getTeam(req));
 
 	std::pair<Optional<Reference<IDataDistributionTeam>>, bool> resTeam = req.reply.getFuture().get();
 
