@@ -665,6 +665,10 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
 		if (stats->lastDefaultQueueThrottled) {
 			// Check if this throttling has been sustained for a certain amount of time to avoid false positives
 			if (now() - stats->defaultThrottleStartTime > CLIENT_KNOBS->GRV_SUSTAINED_THROTTLING_THRESHOLD) {
+				// Consider the batch queue throttled if the default is throttled
+				// to deal with a potential lull in activity for that priority.
+				// Avoids mistakenly thinking batch is unthrottled while default is still throttled.
+				reply.rkBatchThrottled = true;
 				reply.rkDefaultThrottled = true;
 			}
 		}

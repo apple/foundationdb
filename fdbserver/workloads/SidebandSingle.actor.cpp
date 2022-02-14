@@ -33,35 +33,10 @@
  * unknown result matches the regular read of that same key and is not too stale.
  */
 
-struct SidebandMessage {
-	constexpr static FileIdentifier file_identifier = 11862047;
-	uint64_t key;
-	Version commitVersion;
-
-	SidebandMessage() {}
-	SidebandMessage(uint64_t key, Version commitVersion) : key(key), commitVersion(commitVersion) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, key, commitVersion);
-	}
-};
-
-struct SidebandInterface {
-	constexpr static FileIdentifier file_identifier = 15950545;
-	RequestStream<SidebandMessage> updates;
-
-	UID id() const { return updates.getEndpoint().token; }
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, updates);
-	}
-};
-
 struct SidebandSingleWorkload : TestWorkload {
 	double testDuration, operationsPerSecond;
-	SidebandInterface interf;
+	// Pair represents <Key, commitVersion>
+	PromiseStream<std::pair<uint64_t, Version>> interf;
 
 	std::vector<Future<Void>> clients;
 	PerfIntCounter messages, consistencyErrors, keysUnexpectedlyPresent;
@@ -105,7 +80,6 @@ struct SidebandSingleWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> mutator(SidebandSingleWorkload* self, Database cx) {
-		state SidebandInterface checker = self->interf;
 		state double lastTime = now();
 		state Version commitVersion;
 		state bool unknown = false;
@@ -138,7 +112,7 @@ struct SidebandSingleWorkload : TestWorkload {
 					if (e.code() == error_code_commit_unknown_result) {
 						unknown = true;
 						++self->messages;
-						checker.updates.send(SidebandMessage(key, invalidVersion));
+						self->interf.send(std::pair(key, invalidVersion));
 						break;
 					}
 					wait(tr.onError(e));
@@ -149,31 +123,32 @@ struct SidebandSingleWorkload : TestWorkload {
 				continue;
 			}
 			++self->messages;
-			checker.updates.send(SidebandMessage(key, commitVersion));
+			self->interf.send(std::pair(key, commitVersion));
 		}
 	}
 
 	ACTOR Future<Void> checker(SidebandSingleWorkload* self, Database cx) {
 		loop {
-			state SidebandMessage message = waitNext(self->interf.updates.getFuture());
-			state Standalone<StringRef> messageKey(format("Sideband/Message/%llx", message.key));
+			// Pair represents <Key, commitVersion>
+			state std::pair<uint64_t, Version> message = waitNext(self->interf.getFuture());
+			state Standalone<StringRef> messageKey(format("Sideband/Message/%llx", message.first));
 			state Transaction tr(cx);
 			loop {
 				try {
 					tr.setOption(FDBTransactionOptions::USE_GRV_CACHE);
 					state Optional<Value> val = wait(tr.get(messageKey));
 					if (!val.present()) {
-						TraceEvent(SevError, "CausalConsistencyError1", self->interf.id())
+						TraceEvent(SevError, "CausalConsistencyError1")
 						    .detail("MessageKey", messageKey.toString().c_str())
-						    .detail("RemoteCommitVersion", message.commitVersion)
+						    .detail("RemoteCommitVersion", message.second)
 						    .detail("LocalReadVersion",
 						            tr.getReadVersion().get()); // will assert that ReadVersion is set
 						++self->consistencyErrors;
 					} else if (val.get() != LiteralStringRef("deadbeef")) {
 						// If we read something NOT "deadbeef" and there was no commit_unknown_result,
 						// the cache somehow read a stale version of our key
-						if (message.commitVersion != invalidVersion) {
-							TraceEvent(SevError, "CausalConsistencyError2", self->interf.id())
+						if (message.second != invalidVersion) {
+							TraceEvent(SevError, "CausalConsistencyError2")
 							    .detail("MessageKey", messageKey.toString().c_str());
 							++self->consistencyErrors;
 							break;
@@ -191,11 +166,11 @@ struct SidebandSingleWorkload : TestWorkload {
 							}
 						}
 						if (val != val2) {
-							TraceEvent(SevError, "CausalConsistencyError3", self->interf.id())
+							TraceEvent(SevError, "CausalConsistencyError3")
 							    .detail("MessageKey", messageKey.toString().c_str())
 							    .detail("Val1", val)
 							    .detail("Val2", val2)
-							    .detail("RemoteCommitVersion", message.commitVersion)
+							    .detail("RemoteCommitVersion", message.second)
 							    .detail("LocalReadVersion",
 							            tr.getReadVersion().get()); // will assert that ReadVersion is set
 							++self->consistencyErrors;
