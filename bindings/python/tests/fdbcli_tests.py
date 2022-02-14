@@ -103,7 +103,7 @@ def maintenance(logger):
     assert output3 == no_maintenance_output
 
 
-@enable_logging()
+@enable_logging(logging.DEBUG)
 def setclass(logger):
     # get all processes' network addresses
     output1 = run_fdbcli_command('setclass')
@@ -152,10 +152,23 @@ def setclass(logger):
     logger.debug(output3)
     assert 'No matching addresses found' in output3
     # Verify setclass did not execute
-    output4 = run_fdbcli_command('setclass')
-    logger.debug(output4)
-    # except the first line, each line is one process
-    process_types = output4.split('\n')[1:]
+    # Retry up to 3 times, waiting for all processes to return before failing
+    for i in range(0,3):
+        try:
+            output4 = run_fdbcli_command('setclass')
+            logger.debug(output4)
+            # except the first line, each line is one process
+            process_types = output4.split('\n')[1:]
+            if len(process_types) != args.process_number:
+                logger.debug("set_class attempt {} waiting for process to return before continuing".format(i))
+                logger.debug("length of process_types was {}".format(len(process_types)))
+                logger.debug("value of process_types is {}".format(process_types))
+                time.sleep(1)
+                continue
+            else:
+                break
+        except:
+            continue
     assert len(process_types) == args.process_number
     addresses = []
     for line in process_types:
@@ -590,5 +603,4 @@ if __name__ == '__main__':
         assert args.process_number > 1, "Process number should be positive"
         coordinators()
         exclude()
-        # TODO: fix the failure where one process is not available after setclass call
-        #setclass()
+        setclass()
