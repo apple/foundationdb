@@ -33,6 +33,7 @@
 
 #if (!defined(TLS_DISABLED) && !defined(_WIN32))
 #include "flow/StreamCipher.h"
+#include "flow/BlockCipher.h"
 #endif
 #include "flow/Trace.h"
 #include "flow/Error.h"
@@ -3501,6 +3502,7 @@ void crashHandler(int sig) {
 #if (!defined(TLS_DISABLED) && !defined(_WIN32))
 	StreamCipherKey::cleanup();
 	StreamCipher::cleanup();
+	BlockCipherKeyCache::cleanup();
 #endif
 
 	fflush(stdout);

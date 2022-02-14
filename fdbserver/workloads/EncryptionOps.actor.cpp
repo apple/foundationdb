@@ -21,7 +21,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "flow/IRandom.h"
-#include "flow/StreamCipher.h"
+#include "flow/BlockCipher.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -31,6 +31,7 @@
 #include <chrono>
 #include <cstring>
 #include <memory>
+#include <random>
 
 #define MEGA_BYTES (1024 * 1024)
 #define NANO_SECOND (1000 * 1000 * 1000)
@@ -86,9 +87,8 @@ struct EncryptionOpsWorkload : TestWorkload {
 	std::unique_ptr<uint8_t[]> buff;
 	std::unique_ptr<uint8_t[]> validationBuff;
 
-	StreamCipher::IV iv;
-	std::unique_ptr<HmacSha256StreamCipher> hmacGenerator;
-	std::unique_ptr<uint8_t[]> parentKey;
+	BlockCipherIV iv;
+	std::unique_ptr<uint8_t[]> parentCipher;
 	Arena arena;
 	std::unique_ptr<WorkloadMetrics> metrics;
 
@@ -101,9 +101,8 @@ struct EncryptionOpsWorkload : TestWorkload {
 		validationBuff = std::make_unique<uint8_t[]>(maxBufSize);
 
 		iv = getRandomIV();
-		hmacGenerator = std::make_unique<HmacSha256StreamCipher>();
-		parentKey = std::make_unique<uint8_t[]>(AES_256_KEY_LENGTH);
-		generateRandomData(parentKey.get(), AES_256_KEY_LENGTH);
+		parentCipher = std::make_unique<uint8_t[]>(AES_256_KEY_LENGTH);
+		generateRandomData(parentCipher.get(), AES_256_KEY_LENGTH);
 
 		metrics = std::make_unique<WorkloadMetrics>();
 
@@ -112,7 +111,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 
 	bool isFixedSizePayload() { return mode == 1; }
 
-	StreamCipher::IV getRandomIV() {
+	BlockCipherIV getRandomIV() {
 		generateRandomData(iv.data(), iv.size());
 		return iv;
 	}
@@ -127,41 +126,37 @@ struct EncryptionOpsWorkload : TestWorkload {
 		throw internal_error();
 	}
 
-	void updateEncryptionKey(StreamCipherKey* cipherKey) {
-		auto start = std::chrono::high_resolution_clock::now();
-		applyHmacKeyDerivationFunc(cipherKey, hmacGenerator.get(), arena);
-		auto end = std::chrono::high_resolution_clock::now();
-
-		metrics->updateKeyDerivationTime(std::chrono::duration<double, std::nano>(end - start).count());
-	}
-
-	StringRef doEncryption(const StreamCipherKey* key, uint8_t* payload, int len) {
-		EncryptionStreamCipher encryptor(key, iv);
+	StringRef doEncryption(Reference<BlockCipherKey> key, uint8_t* payload, int len, BlockCipherEncryptHeader* header) {
+		EncryptBlockCipher encryptor(key, iv);
 
 		auto start = std::chrono::high_resolution_clock::now();
-		auto encrypted = encryptor.encrypt(buff.get(), len, arena);
-		encryptor.finish(arena);
+		auto encrypted = encryptor.encrypt(buff.get(), len, header, arena);
 		auto end = std::chrono::high_resolution_clock::now();
 
 		// validate encrypted buffer size and contents (not matching with plaintext)
 		ASSERT(encrypted.size() == len);
 		std::copy(encrypted.begin(), encrypted.end(), validationBuff.get());
 		ASSERT(memcmp(validationBuff.get(), buff.get(), len) != 0);
+		ASSERT(header->flags.headerVersion == EncryptBlockCipher::ENCRYPT_HEADER_VERSION);
 
 		metrics->updateEncryptionTime(std::chrono::duration<double, std::nano>(end - start).count());
 		return encrypted;
 	}
 
-	void doDecryption(const StreamCipherKey* key,
-	                  const StringRef& encrypted,
+	void doDecryption(const StringRef& encrypted,
 	                  int len,
+	                  const BlockCipherEncryptHeader& header,
 	                  uint8_t* originalPayload,
 	                  uint8_t* validationBuff) {
-		DecryptionStreamCipher decryptor(key, iv);
+		ASSERT(header.flags.headerVersion == EncryptBlockCipher::ENCRYPT_HEADER_VERSION);
+
+		auto& cipherKeyCache = BlockCipherKeyCache::getInstance();
+		Reference<BlockCipherKey> cipherKey = cipherKeyCache.getCipherKey(header);
+		assert(cipherKey != nullptr);
+		DecryptBlockCipher decryptor(cipherKey, iv);
 
 		auto start = std::chrono::high_resolution_clock::now();
-		Standalone<StringRef> decrypted = decryptor.decrypt(encrypted.begin(), len, arena);
-		decryptor.finish(arena);
+		Standalone<StringRef> decrypted = decryptor.decrypt(encrypted.begin(), len, header, arena);
 		auto end = std::chrono::high_resolution_clock::now();
 
 		// validate decrypted buffer size and contents (matching with original plaintext)
@@ -177,19 +172,29 @@ struct EncryptionOpsWorkload : TestWorkload {
 	std::string description() const override { return "EncryptionOps"; }
 
 	Future<Void> start(Database const& cx) override {
-		for (int i = 0; i < numIterations; i++) {
-			StreamCipherKey key(AES_256_KEY_LENGTH);
-			// derive the encryption key
-			updateEncryptionKey(&key);
+		// use uniform distribution random data generator
+		std::random_device rd; // random seed gen.
+		std::mt19937 gen(rd()); // Standard mersenne_twister_engine seeded with rd()
+		std::uniform_int_distribution<> distrib(100, maxBufSize);
 
-			int dataLen = isFixedSizePayload() ? pageSize : deterministicRandom()->randomInt(100, maxBufSize);
-			generateRandomData(buff.get(), dataLen);
+		BlockCipherDomainId domainId{ 1 };
+		for (int i = 0; i < numIterations; i++, domainId++) {
+			// Step-1: Encryption key derivation, caching the cipher for later use
+			auto start = std::chrono::high_resolution_clock::now();
+			auto& cipherKeyCache = BlockCipherKeyCache::getInstance();
+			cipherKeyCache.insertCipherKey(domainId, domainId, parentCipher.get(), AES_256_KEY_LENGTH);
+			Reference<BlockCipherKey> cipherKey = cipherKeyCache.getLatestCipherKey(domainId, domainId);
+			auto end = std::chrono::high_resolution_clock::now();
+			metrics->updateKeyDerivationTime(std::chrono::duration<double, std::nano>(end - start).count());
 
-			// encrypt the payload
-			const auto& encrypted = doEncryption(&key, buff.get(), dataLen);
+			int dataLen = isFixedSizePayload() ? pageSize : distrib(gen);
 
-			// decrypt the payload
-			doDecryption(&key, encrypted, dataLen, buff.get(), validationBuff.get());
+			// Encrypt the payload - generates BlockCipherEncryptHeader to assist decryption later
+			BlockCipherEncryptHeader header;
+			const auto& encrypted = doEncryption(cipherKey, buff.get(), dataLen, &header);
+
+			// Decrypt the payload - parses the BlockCipherEncryptHeader, fetch corresponding cipherKey and decrypt
+			doDecryption(encrypted, dataLen, header, buff.get(), validationBuff.get());
 
 			metrics->updateBytes(dataLen);
 		}
