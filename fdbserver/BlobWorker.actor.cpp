@@ -383,7 +383,13 @@ ACTOR Future<Void> updateGranuleSplitState(Transaction* tr,
 			// FIXME: appears change feed destroy isn't working! ADD BACK
 			// wait(updateChangeFeed(tr, KeyRef(parentGranuleID.toString()), ChangeFeedStatus::CHANGE_FEED_DESTROY));
 			Key oldGranuleLockKey = blobGranuleLockKeyFor(parentGranuleRange);
-			tr->clear(singleKeyRange(oldGranuleLockKey));
+			// FIXME: deleting granule lock can cause races where another granule with the same range starts way later
+			// and thinks it can own the granule! Need to change file cleanup to destroy these, if there is no more
+			// granule in the history with that exact key range!
+			// Alternative fix could be to, on granule open, query for all overlapping granule locks and ensure none of
+			// them have higher (epoch, seqno), but that is much more expensive
+
+			// tr->clear(singleKeyRange(oldGranuleLockKey));
 			tr->clear(currentRange);
 			tr->clear(blobGranuleSplitBoundaryKeyRangeFor(parentGranuleID));
 		} else {
