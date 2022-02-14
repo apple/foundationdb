@@ -5339,7 +5339,6 @@ TEST_CASE("/DataDistribution/AddTeamsBestOf/NotEnoughServers") {
 }
 
 TEST_CASE("/DataDistribution/GetTeam/NewServersNotNeeded") {
-	wait(Future<Void>(Void()));
 
 	Reference<IReplicationPolicy> policy =
 	    Reference<IReplicationPolicy>(new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
@@ -5397,7 +5396,6 @@ TEST_CASE("/DataDistribution/GetTeam/NewServersNotNeeded") {
 }
 
 TEST_CASE("/DataDistribution/GetTeam/HealthyCompleteSource") {
-	wait(Future<Void>(Void()));
 
 	Reference<IReplicationPolicy> policy =
 	    Reference<IReplicationPolicy>(new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
@@ -5456,7 +5454,6 @@ TEST_CASE("/DataDistribution/GetTeam/HealthyCompleteSource") {
 }
 
 TEST_CASE("/DataDistribution/GetTeam/TrueBestLeastUtilized") {
-	wait(Future<Void>(Void()));
 
 	Reference<IReplicationPolicy> policy =
 	    Reference<IReplicationPolicy>(new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
@@ -5512,7 +5509,6 @@ TEST_CASE("/DataDistribution/GetTeam/TrueBestLeastUtilized") {
 }
 
 TEST_CASE("/DataDistribution/GetTeam/TrueBestMostUtilized") {
-	wait(Future<Void>(Void()));
 
 	Reference<IReplicationPolicy> policy =
 	    Reference<IReplicationPolicy>(new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
@@ -5568,7 +5564,6 @@ TEST_CASE("/DataDistribution/GetTeam/TrueBestMostUtilized") {
 }
 
 TEST_CASE("/DataDistribution/GetTeam/ServerUtilizationBelowCutoff") {
-	wait(Future<Void>(Void()));
 
 	Reference<IReplicationPolicy> policy =
 	    Reference<IReplicationPolicy>(new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
@@ -5622,7 +5617,6 @@ TEST_CASE("/DataDistribution/GetTeam/ServerUtilizationBelowCutoff") {
 }
 
 TEST_CASE("/DataDistribution/GetTeam/ServerUtilizationNearCutoff") {
-	wait(Future<Void>(Void()));
 
 	Reference<IReplicationPolicy> policy =
 	    Reference<IReplicationPolicy>(new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
