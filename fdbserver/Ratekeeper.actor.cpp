@@ -18,7 +18,10 @@
  * limitations under the License.
  */
 
+#include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/Ratekeeper.h"
+#include "fdbserver/WaitFailure.h"
+
 #include "flow/actorcompiler.h" // must be last include
 
 const char* limitReasonName[] = { "workload",

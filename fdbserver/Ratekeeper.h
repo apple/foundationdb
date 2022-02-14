@@ -18,22 +18,17 @@
  * limitations under the License.
  */
 
-// TODO: Trim down these includes
-#include "fdbserver/WorkerInterface.actor.h"
-#include "flow/IndexedSet.h"
-#include "fdbrpc/FailureMonitor.h"
-#include "fdbrpc/Smoother.h"
-#include "fdbrpc/simulator.h"
+#pragma once
+
+#include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/DatabaseContext.h"
-#include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/TagThrottle.actor.h"
+#include "fdbrpc/Smoother.h"
 #include "fdbserver/Knobs.h"
-#include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/RatekeeperInterface.h"
 #include "fdbserver/ServerDBInfo.h"
-#include "fdbserver/WaitFailure.h"
-
-#pragma once
+#include "fdbserver/TLogInterface.h"
 
 enum limitReason_t {
 	unlimited, // TODO: rename to workload?
