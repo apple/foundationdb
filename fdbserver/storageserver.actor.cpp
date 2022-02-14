@@ -4464,7 +4464,6 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data, KeyR
 
 			if (feedCleanup != data->changeFeedCleanupDurable.end() && changeFeedInfo->removing) {
 				TEST(true); // re-fetching feed scheduled for deletion! Un-mark it as removing
-				ASSERT(fetchVersion > feedCleanup->second);
 				changeFeedInfo->emptyVersion = cfEntry.emptyVersion;
 				changeFeedInfo->stopped = cfEntry.stopped;
 				changeFeedInfo->removing = false;
@@ -4477,6 +4476,7 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data, KeyR
 				    .detail("Range", cfEntry.range.toString())
 				    .detail("FetchVersion", fetchVersion)
 				    .detail("EmptyVersion", cfEntry.emptyVersion)
+				    .detail("CleanupVersion", feedCleanup->second)
 				    .detail("Stopped", cfEntry.stopped);
 			} else if (changeFeedInfo->emptyVersion < cfEntry.emptyVersion) {
 				TEST(true); // Got updated CF emptyVersion from a parallel fetchChangeFeedMetadata
