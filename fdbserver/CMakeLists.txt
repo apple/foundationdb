@@ -91,6 +91,8 @@ set(FDBSERVER_SRCS
   QuietDatabase.h
   RadixTree.h
   Ratekeeper.actor.cpp
+  RatekeeperData.actor.cpp
+  RatekeeperData.h
   RatekeeperInterface.h
   RecoveryState.h
   RestoreCommon.actor.h
