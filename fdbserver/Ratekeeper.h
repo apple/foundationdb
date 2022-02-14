@@ -502,7 +502,7 @@ struct RatekeeperLimits {
 	    context(context), rkUpdateEventCacheHolder(makeReference<EventCacheHolder>("RkUpdate" + context)) {}
 };
 
-struct RatekeeperData {
+struct Ratekeeper {
 	// Differentiate from GrvProxyInfo in DatabaseContext.h
 	struct GrvProxyInfo {
 		int64_t totalTransactions;
@@ -523,7 +523,7 @@ struct RatekeeperData {
 	Map<UID, StorageQueueInfo> storageQueueInfo;
 	Map<UID, TLogQueueInfo> tlogQueueInfo;
 
-	std::map<UID, RatekeeperData::GrvProxyInfo> grvProxyInfo;
+	std::map<UID, Ratekeeper::GrvProxyInfo> grvProxyInfo;
 	Smoother smoothReleasedTransactions, smoothBatchReleasedTransactions, smoothTotalDurableBytes;
 	HealthMetrics healthMetrics;
 	DatabaseConfiguration configuration;
@@ -548,7 +548,7 @@ struct RatekeeperData {
 
 	bool autoThrottlingEnabled;
 
-	RatekeeperData(UID id, Database db);
+	Ratekeeper(UID id, Database db);
 
 	Future<Void> configurationMonitor();
 	void updateCommitCostEstimation(UIDTransactionTagMap<TransactionCommitCostEstimation> const& costEstimation);
