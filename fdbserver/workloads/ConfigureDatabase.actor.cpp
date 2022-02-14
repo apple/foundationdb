@@ -220,6 +220,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 	int additionalDBs;
 	bool allowDescriptorChange;
 	bool allowTestStorageMigration;
+	bool waitStoreTypeCheck;
 	std::vector<Future<Void>> clients;
 	PerfIntCounter retries;
 
@@ -229,6 +230,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 		    getOption(options, LiteralStringRef("allowDescriptorChange"), SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT);
 		allowTestStorageMigration =
 		    getOption(options, "allowTestStorageMigration"_sr, false) && g_simulator.allowStorageMigrationTypeChange;
+		waitStoreTypeCheck = getOption(options, "waitStoreTypeCheck"_sr, false);
 		g_simulator.usableRegions = 1;
 	}
 
@@ -273,7 +275,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 		// only storage_migration_type=gradual && perpetual_storage_wiggle=1 need this check because in QuietDatabase
 		// perpetual wiggle will be forced to close For other cases, later ConsistencyCheck will check KV store type
 		// there
-		if (self->allowTestStorageMigration) {
+		if (self->allowTestStorageMigration || self->waitStoreTypeCheck) {
 			loop {
 				// There exists a race where the check can start before the last transaction that singleDB issued
 				// finishes, if singleDB gets actor cancelled from a timeout at the end of a test. This means the
