@@ -245,9 +245,6 @@ if(WITH_PYTHON)
     TEST_FILES restarting/to_7.0.0/CycleTestRestart-1.txt
                restarting/to_7.0.0/CycleTestRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/to_7.0.0/ConfigureStorageMigrationTestRestart-1.toml
-               restarting/to_7.0.0/ConfigureStorageMigrationTestRestart-2.toml)
-  add_fdb_test(
     TEST_FILES restarting/from_7.0.0/SnapTestAttrition-1.txt
                restarting/from_7.0.0/SnapTestAttrition-2.txt)
   add_fdb_test(
@@ -259,11 +256,6 @@ if(WITH_PYTHON)
   add_fdb_test(
     TEST_FILES restarting/from_7.0.0/SnapCycleRestart-1.txt
                restarting/from_7.0.0/SnapCycleRestart-2.txt)
-  add_fdb_test(
-    TEST_FILES restarting/from_7.0.0/ConfigureStorageMigrationTestRestart-1.toml
-               restarting/from_7.0.0/ConfigureStorageMigrationTestRestart-2.toml)
-
-
   add_fdb_test(TEST_FILES slow/ApiCorrectness.toml)
   add_fdb_test(TEST_FILES slow/ApiCorrectnessAtomicRestore.toml)
   add_fdb_test(TEST_FILES slow/ApiCorrectnessSwitchover.toml)
