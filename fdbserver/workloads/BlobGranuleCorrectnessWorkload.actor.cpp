@@ -166,11 +166,15 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		    (targetDirectories / clientCount) + ((targetDirectories % clientCount > clientId) ? 1 : 0);
 
 		if (targetMyDirectories > 0) {
-			int myDirectories = deterministicRandom()->randomInt(1, 2 * targetMyDirectories + 1);
+			int myDirectories = 1;
+			if (targetMyDirectories > 1) {
+				myDirectories = deterministicRandom()->randomInt(1, 2 * targetMyDirectories + 1);
+			}
 
-			// anywhere from 2 delta files per second to 1 delta file every 4 seconds, spread across all directories
-			targetByteRate = 2 * SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES / (1 + (randomness % 8));
-			randomness /= 8;
+			// anywhere from 2 delta files per second to 1 delta file every 2 seconds, spread across all directories
+			int denom = std::min(clientCount, (int)targetDirectories);
+			targetByteRate = 2 * SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES / (1 + (randomness % 4)) / denom;
+			randomness /= 4;
 
 			// either do equal across all of my directories, or skewed
 			bool skewed = myDirectories > 1 && deterministicRandom()->random01() < 0.4;
