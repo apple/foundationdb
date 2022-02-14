@@ -113,6 +113,54 @@ struct ConfigBroadcastChangesRequest {
 	}
 };
 
+struct ConfigBroadcastRegisteredReply {
+	static constexpr FileIdentifier file_identifier = 12041047;
+	bool registered;
+
+	ConfigBroadcastRegisteredReply() = default;
+	explicit ConfigBroadcastRegisteredReply(bool registered) : registered(registered) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, registered);
+	}
+};
+
+struct ConfigBroadcastRegisteredRequest {
+	static constexpr FileIdentifier file_identifier = 6921417;
+	ReplyPromise<ConfigBroadcastRegisteredReply> reply;
+
+	ConfigBroadcastRegisteredRequest() = default;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply);
+	}
+};
+
+struct ConfigBroadcastReadyReply {
+	static constexpr FileIdentifier file_identifier = 7032251;
+
+	ConfigBroadcastReadyReply() = default;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar);
+	}
+};
+
+struct ConfigBroadcastReadyRequest {
+	static constexpr FileIdentifier file_identifier = 7402862;
+	ReplyPromise<ConfigBroadcastReadyReply> reply;
+
+	ConfigBroadcastReadyRequest() = default;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply);
+	}
+};
+
 /*
  * The ConfigBroadcaster uses a ConfigBroadcastInterface from each worker to
  * push updates made to the configuration database to the worker.
@@ -124,6 +172,8 @@ public:
 	static constexpr FileIdentifier file_identifier = 1676543;
 	RequestStream<ConfigBroadcastSnapshotRequest> snapshot;
 	RequestStream<ConfigBroadcastChangesRequest> changes;
+	RequestStream<ConfigBroadcastRegisteredRequest> registered;
+	RequestStream<ConfigBroadcastReadyRequest> ready;
 
 	ConfigBroadcastInterface() : _id(deterministicRandom()->randomUniqueID()) {}
 
@@ -133,6 +183,6 @@ public:
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, _id, snapshot, changes);
+		serializer(ar, _id, snapshot, changes, registered, ready);
 	}
 };

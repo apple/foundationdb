@@ -1067,12 +1067,23 @@ void haltRegisteringOrCurrentSingleton(ClusterControllerData* self,
 	}
 }
 
-void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self, ConfigBroadcaster* configBroadcaster) {
+void registerWorker(RegisterWorkerRequest req,
+                    ClusterControllerData* self,
+                    ServerCoordinators coordinators,
+                    ConfigBroadcaster* configBroadcaster) {
 	const WorkerInterface& w = req.wi;
 	ProcessClass newProcessClass = req.processClass;
 	auto info = self->id_worker.find(w.locality.processId());
 	ClusterControllerPriorityInfo newPriorityInfo = req.priorityInfo;
 	newPriorityInfo.processClassFitness = newProcessClass.machineClassFitness(ProcessClass::ClusterController);
+	Optional<ConfigFollowerInterface> cfi;
+	bool isCoordinator =
+	    std::find_if(coordinators.configServers.begin(),
+	                 coordinators.configServers.end(),
+	                 [&req](const ConfigFollowerInterface& cfi) {
+		                 return cfi.address() == req.wi.address() || (req.wi.secondaryAddress().present() &&
+		                                                              cfi.address() == req.wi.secondaryAddress().get());
+	                 }) != coordinators.configServers.end();
 
 	for (auto it : req.incompatiblePeers) {
 		self->db.incompatibleConnections[it] = now() + SERVER_KNOBS->INCOMPATIBLE_PEERS_LOGGING_INTERVAL;
@@ -1156,8 +1167,9 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self, Conf
 		    w.locality.processId() == self->db.serverInfo->get().master.locality.processId()) {
 			self->masterProcessId = w.locality.processId();
 		}
-		if (configBroadcaster != nullptr) {
-			self->addActor.send(configBroadcaster->registerWorker(
+		if (configBroadcaster != nullptr && isCoordinator) {
+			self->addActor.send(configBroadcaster->registerNode(
+			    w,
 			    req.lastSeenKnobVersion,
 			    req.knobConfigClassSet,
 			    self->id_worker[w.locality.processId()].watcher,
@@ -1187,12 +1199,12 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self, Conf
 			self->updateDBInfoEndpoints.insert(w.updateServerDBInfo.getEndpoint());
 			self->updateDBInfo.trigger();
 		}
-		if (configBroadcaster != nullptr) {
-			self->addActor.send(
-			    configBroadcaster->registerWorker(req.lastSeenKnobVersion,
-			                                      req.knobConfigClassSet,
-			                                      info->second.watcher,
-			                                      info->second.details.interf.configBroadcastInterface));
+		if (configBroadcaster != nullptr && isCoordinator) {
+			self->addActor.send(configBroadcaster->registerNode(w,
+			                                                    req.lastSeenKnobVersion,
+			                                                    req.knobConfigClassSet,
+			                                                    info->second.watcher,
+			                                                    info->second.details.interf.configBroadcastInterface));
 		}
 		checkOutstandingRequests(self);
 	} else {
@@ -2503,7 +2515,8 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 		}
 		when(RegisterWorkerRequest req = waitNext(interf.registerWorker.getFuture())) {
 			++self.registerWorkerRequests;
-			registerWorker(req, &self, (configDBType == ConfigDBType::DISABLED) ? nullptr : &configBroadcaster);
+			registerWorker(
+			    req, &self, coordinators, (configDBType == ConfigDBType::DISABLED) ? nullptr : &configBroadcaster);
 		}
 		when(GetWorkersRequest req = waitNext(interf.getWorkers.getFuture())) {
 			++self.getWorkersRequests;
