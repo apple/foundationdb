@@ -382,6 +382,7 @@ ACTOR Future<Void> updateGranuleSplitState(Transaction* tr,
 
 			// FIXME: appears change feed destroy isn't working! ADD BACK
 			// wait(updateChangeFeed(tr, KeyRef(parentGranuleID.toString()), ChangeFeedStatus::CHANGE_FEED_DESTROY));
+
 			Key oldGranuleLockKey = blobGranuleLockKeyFor(parentGranuleRange);
 			// FIXME: deleting granule lock can cause races where another granule with the same range starts way later
 			// and thinks it can own the granule! Need to change file cleanup to destroy these, if there is no more
@@ -417,16 +418,19 @@ ACTOR Future<Void> updateGranuleSplitState(Transaction* tr,
 	return Void();
 }
 
-// returns the split state for a given granule on granule reassignment. Assumes granule is in fact splitting, by the
-// presence of the previous granule's lock key
+// Returns the split state for a given granule on granule reassignment, or unknown if it doesn't exist (meaning the
+// granule splitting finished)
 ACTOR Future<std::pair<BlobGranuleSplitState, Version>> getGranuleSplitState(Transaction* tr,
                                                                              UID parentGranuleID,
                                                                              UID currentGranuleID) {
 	Key myStateKey = blobGranuleSplitKeyFor(parentGranuleID, currentGranuleID);
 
 	Optional<Value> st = wait(tr->get(myStateKey));
-	ASSERT(st.present());
-	return decodeBlobGranuleSplitValue(st.get());
+	if (st.present()) {
+		return decodeBlobGranuleSplitValue(st.get());
+	} else {
+		return std::pair(BlobGranuleSplitState::Unknown, invalidVersion);
+	}
 }
 
 // writeDelta file writes speculatively in the common case to optimize throughput. It creates the s3 object even though
@@ -2626,7 +2630,6 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 						// will be set later
 					} else {
 						// this sub-granule is done splitting, no need for split logic.
-						ASSERT(granuleSplitState.first == BlobGranuleSplitState::Done);
 						info.parentGranule.reset();
 					}
 				}
