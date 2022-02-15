@@ -4091,7 +4091,7 @@ struct RedwoodRecordRef {
 
 	typedef KeyRef Partial;
 
-	void updateCache(Optional<Partial> cache, Arena& arena) const { cache = KeyRef(arena, key); }
+	void updateCache(Optional<Partial>& cache, Arena& arena) const { cache = KeyRef(arena, key); }
 
 	KeyValueRef toKeyValueRef() const { return KeyValueRef(key, value.get()); }
 
