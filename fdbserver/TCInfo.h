@@ -97,6 +97,12 @@ public:
 	static Future<Void> updateServerMetrics(Reference<TCServerInfo> server);
 	Future<Void> serverMetricsPolling();
 
+	// FIXME: Public for testing only:
+	void setServerMetrics(GetStorageMetricsReply serverMetrics) { this->serverMetrics = serverMetrics; }
+
+	// FIXME: Public for testing only:
+	void markTeamUnhealthy(int teamIndex);
+
 	~TCServerInfo();
 };
 

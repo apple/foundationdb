@@ -191,6 +191,10 @@ void TCServerInfo::removeTeam(Reference<TCTeamInfo> team) {
 	}
 }
 
+void TCServerInfo::markTeamUnhealthy(int teamIndex) {
+	teams[teamIndex]->setHealthy(false);
+}
+
 TCServerInfo::~TCServerInfo() {
 	if (collection && ssVersionTooFarBehind.get() && !lastKnownInterface.isTss()) {
 		collection->removeLaggingStorageServer(lastKnownInterface.locality.zoneId().get());
