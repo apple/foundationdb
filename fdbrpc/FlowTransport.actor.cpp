@@ -1205,8 +1205,8 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 								    FLOW_KNOBS->CONNECTION_REJECTED_MESSAGE_DELAY) {
 									TraceEvent(SevWarn, "ConnectionRejected", conn->getDebugID())
 									    .detail("Reason", "IncompatibleProtocolVersion")
-									    .detail("LocalVersion", g_network->protocolVersion().version())
-									    .detail("RejectedVersion", pkt.protocolVersion.version())
+									    .detail("LocalVersion", g_network->protocolVersion())
+									    .detail("RejectedVersion", pkt.protocolVersion)
 									    .detail("Peer",
 									            pkt.canonicalRemotePort
 									                ? NetworkAddress(pkt.canonicalRemoteIp(), pkt.canonicalRemotePort)
