@@ -6983,24 +6983,30 @@ ACTOR Future<Optional<ProtocolVersion>> getCoordinatorProtocolFromConnectPacket(
 		coordinatorAddress = coordinator->get().get().getLeader.getEndpoint().getPrimaryAddress();
 	}
 
-	state Reference<AsyncVar<Optional<ProtocolVersion>> const> protocolVersion =
+	state Optional<Reference<AsyncVar<Optional<ProtocolVersion>> const>> protocolVersion =
 	    FlowTransport::transport().getPeerProtocolAsyncVar(coordinatorAddress);
 
+	if (!protocolVersion.present()) {
+		TraceEvent(SevWarnAlways, "GetCoordinatorProtocolPeerMissing").detail("Address", coordinatorAddress);
+		wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT));
+		return Optional<ProtocolVersion>();
+	}
+
 	loop {
-		if (protocolVersion->get().present() && protocolVersion->get() != expectedVersion) {
-			return protocolVersion->get();
+		if (protocolVersion.get()->get().present() && protocolVersion.get()->get() != expectedVersion) {
+			return protocolVersion.get()->get();
 		}
 
-		Future<Void> change = protocolVersion->onChange();
-		if (!protocolVersion->get().present()) {
+		Future<Void> change = protocolVersion.get()->onChange();
+		if (!protocolVersion.get()->get().present()) {
 			// If we still don't have any connection info after a timeout, retry sending the protocol version request
 			change = timeout(change, FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT, Void());
 		}
 
 		wait(change);
 
-		if (!protocolVersion->get().present()) {
-			return protocolVersion->get();
+		if (!protocolVersion.get()->get().present()) {
+			return protocolVersion.get()->get();
 		}
 	}
 }
