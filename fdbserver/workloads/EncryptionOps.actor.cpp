@@ -21,7 +21,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "flow/IRandom.h"
-#include "flow/BlockCipher.h"
+#include "flow/BlobCipher.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -87,7 +87,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 	std::unique_ptr<uint8_t[]> buff;
 	std::unique_ptr<uint8_t[]> validationBuff;
 
-	BlockCipherIV iv;
+	BlobCipherIV iv;
 	std::unique_ptr<uint8_t[]> parentCipher;
 	Arena arena;
 	std::unique_ptr<WorkloadMetrics> metrics;
@@ -111,7 +111,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 
 	bool isFixedSizePayload() { return mode == 1; }
 
-	BlockCipherIV getRandomIV() {
+	BlobCipherIV getRandomIV() {
 		generateRandomData(iv.data(), iv.size());
 		return iv;
 	}
@@ -126,8 +126,8 @@ struct EncryptionOpsWorkload : TestWorkload {
 		throw internal_error();
 	}
 
-	StringRef doEncryption(Reference<BlockCipherKey> key, uint8_t* payload, int len, BlockCipherEncryptHeader* header) {
-		EncryptBlockCipher encryptor(key, iv);
+	StringRef doEncryption(Reference<BlobCipherKey> key, uint8_t* payload, int len, BlobCipherEncryptHeader* header) {
+		EncryptBlobCipher encryptor(key, iv);
 
 		auto start = std::chrono::high_resolution_clock::now();
 		auto encrypted = encryptor.encrypt(buff.get(), len, header, arena);
@@ -137,7 +137,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 		ASSERT(encrypted.size() == len);
 		std::copy(encrypted.begin(), encrypted.end(), validationBuff.get());
 		ASSERT(memcmp(validationBuff.get(), buff.get(), len) != 0);
-		ASSERT(header->flags.headerVersion == EncryptBlockCipher::ENCRYPT_HEADER_VERSION);
+		ASSERT(header->flags.headerVersion == EncryptBlobCipher::ENCRYPT_HEADER_VERSION);
 
 		metrics->updateEncryptionTime(std::chrono::duration<double, std::nano>(end - start).count());
 		return encrypted;
@@ -145,15 +145,15 @@ struct EncryptionOpsWorkload : TestWorkload {
 
 	void doDecryption(const StringRef& encrypted,
 	                  int len,
-	                  const BlockCipherEncryptHeader& header,
+	                  const BlobCipherEncryptHeader& header,
 	                  uint8_t* originalPayload,
 	                  uint8_t* validationBuff) {
-		ASSERT(header.flags.headerVersion == EncryptBlockCipher::ENCRYPT_HEADER_VERSION);
+		ASSERT(header.flags.headerVersion == EncryptBlobCipher::ENCRYPT_HEADER_VERSION);
 
-		auto& cipherKeyCache = BlockCipherKeyCache::getInstance();
-		Reference<BlockCipherKey> cipherKey = cipherKeyCache.getCipherKey(header);
+		auto& cipherKeyCache = BlobCipherKeyCache::getInstance();
+		Reference<BlobCipherKey> cipherKey = cipherKeyCache.getCipherKey(header);
 		assert(cipherKey != nullptr);
-		DecryptBlockCipher decryptor(cipherKey, iv);
+		DecryptBlobCipher decryptor(cipherKey, iv);
 
 		auto start = std::chrono::high_resolution_clock::now();
 		Standalone<StringRef> decrypted = decryptor.decrypt(encrypted.begin(), len, header, arena);
@@ -177,23 +177,23 @@ struct EncryptionOpsWorkload : TestWorkload {
 		std::mt19937 gen(rd()); // Standard mersenne_twister_engine seeded with rd()
 		std::uniform_int_distribution<> distrib(100, maxBufSize);
 
-		BlockCipherDomainId domainId{ 1 };
+		BlobCipherDomainId domainId{ 1 };
 		for (int i = 0; i < numIterations; i++, domainId++) {
 			// Step-1: Encryption key derivation, caching the cipher for later use
 			auto start = std::chrono::high_resolution_clock::now();
-			auto& cipherKeyCache = BlockCipherKeyCache::getInstance();
+			auto& cipherKeyCache = BlobCipherKeyCache::getInstance();
 			cipherKeyCache.insertCipherKey(domainId, domainId, parentCipher.get(), AES_256_KEY_LENGTH);
-			Reference<BlockCipherKey> cipherKey = cipherKeyCache.getLatestCipherKey(domainId, domainId);
+			Reference<BlobCipherKey> cipherKey = cipherKeyCache.getLatestCipherKey(domainId, domainId);
 			auto end = std::chrono::high_resolution_clock::now();
 			metrics->updateKeyDerivationTime(std::chrono::duration<double, std::nano>(end - start).count());
 
 			int dataLen = isFixedSizePayload() ? pageSize : distrib(gen);
 
-			// Encrypt the payload - generates BlockCipherEncryptHeader to assist decryption later
-			BlockCipherEncryptHeader header;
+			// Encrypt the payload - generates BlobCipherEncryptHeader to assist decryption later
+			BlobCipherEncryptHeader header;
 			const auto& encrypted = doEncryption(cipherKey, buff.get(), dataLen, &header);
 
-			// Decrypt the payload - parses the BlockCipherEncryptHeader, fetch corresponding cipherKey and decrypt
+			// Decrypt the payload - parses the BlobCipherEncryptHeader, fetch corresponding cipherKey and decrypt
 			doDecryption(encrypted, dataLen, header, buff.get(), validationBuff.get());
 
 			metrics->updateBytes(dataLen);

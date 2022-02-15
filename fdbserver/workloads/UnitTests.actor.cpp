@@ -77,7 +77,7 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkMemcpyPerfTests();
 #if (!defined(TLS_DISABLED) && !defined(_WIN32))
 		forceLinkStreamCipherTests();
-		void forceLinkBLockCiherTests();
+		void forceLinkBlobCipherTests();
 #endif
 		forceLinkParallelStreamTests();
 		forceLinkSimExternalConnectionTests();
