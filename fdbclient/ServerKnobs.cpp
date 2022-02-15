@@ -546,6 +546,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( METRIC_UPDATE_RATE,                                     .1 ); if( slowRatekeeper ) METRIC_UPDATE_RATE = 0.5;
 	init( DETAILED_METRIC_UPDATE_RATE,                           5.0 );
 	init (RATEKEEPER_DEFAULT_LIMIT,                              1e6 ); if( randomize && BUGGIFY ) RATEKEEPER_DEFAULT_LIMIT = 0;
+	init( RATEKEEPER_LIMIT_REASON_SAMPLE_RATE,                   0.1 );
+	init( RATEKEEPER_PRINT_LIMIT_REASON,                       false ); if( randomize && BUGGIFY ) RATEKEEPER_PRINT_LIMIT_REASON = true;
 
 	bool smallStorageTarget = randomize && BUGGIFY;
 	init( TARGET_BYTES_PER_STORAGE_SERVER,                    1000e6 ); if( smallStorageTarget ) TARGET_BYTES_PER_STORAGE_SERVER = 3000e3;
@@ -696,7 +698,10 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( COORDINATOR_LEADER_CONNECTION_TIMEOUT,                20.0 );
 
 	// Dynamic Knobs (implementation)
-	init( GET_COMMITTED_VERSION_TIMEOUT,                         3.0 ); // Maximum time the consumer should wait for a response from a ConfigNode when asking for the latest committed version.
+	init( UPDATE_NODE_TIMEOUT,                                   3.0 );
+	init( GET_COMMITTED_VERSION_TIMEOUT,                         3.0 );
+	init( GET_SNAPSHOT_AND_CHANGES_TIMEOUT,                      3.0 );
+	init( FETCH_CHANGES_TIMEOUT,                                 3.0 );
 
 	// Buggification
 	init( BUGGIFIED_EVENTUAL_CONSISTENCY,                        1.0 );

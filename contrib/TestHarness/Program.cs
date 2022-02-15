@@ -160,7 +160,7 @@ namespace SummarizeTest
                 }
                 else if (args[0] == "version")
                 {
-                    return VersionInfo();
+                    return VersionInfo.Show();
                 }
 
                 return UsageMessage();
@@ -1633,16 +1633,6 @@ namespace SummarizeTest
             }
         }
 
-        private static int VersionInfo()
-        {
-            Console.WriteLine("Version:         1.02");
-
-            Console.WriteLine("FDB Project Ver: " + "${FDB_VERSION}");
-            Console.WriteLine("FDB Version:     " + "${FDB_VERSION_MAJOR}" + "." + "${FDB_VERSION_MINOR}");
-            Console.WriteLine("Source Version:  " + "${CURRENT_GIT_VERSION}");
-            return 1;
-        }
-
         private static int UsageMessage()
         {
             Console.WriteLine("Usage:");
@@ -1653,7 +1643,7 @@ namespace SummarizeTest
             Console.WriteLine("  TestHarness remote [queue folder] [root foundation folder] [duration in hours] [amount of tests] [all/fast/<test_path>] [scope]");
             Console.WriteLine("  TestHarness extract-errors [summary-file] [error-summary-file]");
             Console.WriteLine("  TestHarness joshua-run <useValgrind> <maxTries>");
-            VersionInfo();
+            VersionInfo.Show();
             return 1;
         }
     }
