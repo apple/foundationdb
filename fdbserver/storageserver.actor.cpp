@@ -1730,6 +1730,7 @@ ACTOR Future<Void> deleteCheckpointQ(StorageServer* self, Version version, Check
 			wait(tr.onError(e));
 		}
 	}
+
 	return Void();
 }
 

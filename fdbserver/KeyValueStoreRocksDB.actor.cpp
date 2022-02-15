@@ -72,33 +72,38 @@ const StringRef ROCKSDB_READPREFIX_GET_HISTOGRAM = LiteralStringRef("RocksDBRead
 
 rocksdb::ExportImportFilesMetaData getMetaData(const CheckpointMetaData& checkpoint) {
 	rocksdb::ExportImportFilesMetaData metaData;
-	metaData.db_comparator_name = checkpoint.rocksCF.get().dbComparatorName;
+	if (checkpoint.getFormat() != RocksDBColumnFamily) {
+		return metaData;
+	}
 
-	if (checkpoint.rocksCF.present()) {
-		for (const LiveFileMetaData& fileMetaData : checkpoint.rocksCF.get().sstFiles) {
-			rocksdb::LiveFileMetaData liveFileMetaData;
-			liveFileMetaData.size = fileMetaData.size;
-			liveFileMetaData.name = fileMetaData.name;
-			liveFileMetaData.file_number = fileMetaData.file_number;
-			liveFileMetaData.db_path = fileMetaData.db_path;
-			liveFileMetaData.smallest_seqno = fileMetaData.smallest_seqno;
-			liveFileMetaData.largest_seqno = fileMetaData.largest_seqno;
-			liveFileMetaData.smallestkey = fileMetaData.smallestkey;
-			liveFileMetaData.largestkey = fileMetaData.largestkey;
-			liveFileMetaData.num_reads_sampled = fileMetaData.num_reads_sampled;
-			liveFileMetaData.being_compacted = fileMetaData.being_compacted;
-			liveFileMetaData.num_entries = fileMetaData.num_entries;
-			liveFileMetaData.num_deletions = fileMetaData.num_deletions;
-			liveFileMetaData.temperature = static_cast<rocksdb::Temperature>(fileMetaData.temperature);
-			liveFileMetaData.oldest_blob_file_number = fileMetaData.oldest_blob_file_number;
-			liveFileMetaData.oldest_ancester_time = fileMetaData.oldest_ancester_time;
-			liveFileMetaData.file_creation_time = fileMetaData.file_creation_time;
-			liveFileMetaData.file_checksum = fileMetaData.file_checksum;
-			liveFileMetaData.file_checksum_func_name = fileMetaData.file_checksum_func_name;
-			liveFileMetaData.column_family_name = fileMetaData.column_family_name;
-			liveFileMetaData.level = fileMetaData.level;
-			metaData.files.push_back(liveFileMetaData);
-		}
+	RocksDBColumnFamilyCheckpoint rocksCF;
+	ObjectReader reader(checkpoint.serializedCheckpoint.begin(), IncludeVersion());
+	reader.deserialize(rocksCF);
+	metaData.db_comparator_name = rocksCF.dbComparatorName;
+
+	for (const LiveFileMetaData& fileMetaData : rocksCF.sstFiles) {
+		rocksdb::LiveFileMetaData liveFileMetaData;
+		liveFileMetaData.size = fileMetaData.size;
+		liveFileMetaData.name = fileMetaData.name;
+		liveFileMetaData.file_number = fileMetaData.file_number;
+		liveFileMetaData.db_path = fileMetaData.db_path;
+		liveFileMetaData.smallest_seqno = fileMetaData.smallest_seqno;
+		liveFileMetaData.largest_seqno = fileMetaData.largest_seqno;
+		liveFileMetaData.smallestkey = fileMetaData.smallestkey;
+		liveFileMetaData.largestkey = fileMetaData.largestkey;
+		liveFileMetaData.num_reads_sampled = fileMetaData.num_reads_sampled;
+		liveFileMetaData.being_compacted = fileMetaData.being_compacted;
+		liveFileMetaData.num_entries = fileMetaData.num_entries;
+		liveFileMetaData.num_deletions = fileMetaData.num_deletions;
+		liveFileMetaData.temperature = static_cast<rocksdb::Temperature>(fileMetaData.temperature);
+		liveFileMetaData.oldest_blob_file_number = fileMetaData.oldest_blob_file_number;
+		liveFileMetaData.oldest_ancester_time = fileMetaData.oldest_ancester_time;
+		liveFileMetaData.file_creation_time = fileMetaData.file_creation_time;
+		liveFileMetaData.file_checksum = fileMetaData.file_checksum;
+		liveFileMetaData.file_checksum_func_name = fileMetaData.file_checksum_func_name;
+		liveFileMetaData.column_family_name = fileMetaData.column_family_name;
+		liveFileMetaData.level = fileMetaData.level;
+		metaData.files.push_back(liveFileMetaData);
 	}
 
 	return metaData;
@@ -131,8 +136,8 @@ void populateMetaData(CheckpointMetaData* checkpoint, const rocksdb::ExportImpor
 		liveFileMetaData.level = fileMetaData.level;
 		rocksCF.sstFiles.push_back(liveFileMetaData);
 	}
-	checkpoint->format = RocksDBColumnFamily;
-	checkpoint->rocksCF = rocksCF;
+	checkpoint->setFormat(RocksDBColumnFamily);
+	checkpoint->serializedCheckpoint = ObjectWriter::toValue(rocksCF, IncludeVersion());
 }
 
 rocksdb::Slice toSlice(StringRef s) {
@@ -1431,8 +1436,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	// Delete a checkpoint.
 	Future<Void> deleteCheckpoint(const CheckpointMetaData& checkpoint) override {
 		if (checkpoint.format == RocksDBColumnFamily) {
-			ASSERT(checkpoint.rocksCF.present());
-			const RocksDBColumnFamilyCheckpoint& rocksCF = checkpoint.rocksCF.get();
+			RocksDBColumnFamilyCheckpoint rocksCF;
+			ObjectReader reader(checkpoint.serializedCheckpoint.begin(), IncludeVersion());
+			reader.deserialize(rocksCF);
+
 			std::unordered_set<std::string> dirs;
 			for (const LiveFileMetaData& file : rocksCF.sstFiles) {
 				dirs.insert(file.db_path);
