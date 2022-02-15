@@ -378,7 +378,7 @@ public:
 };
 
 class TagThrottlerImpl {
-	Ratekeeper* ratekeeper;
+	Ratekeeper const* ratekeeper;
 	RkTagThrottleCollection throttledTags;
 	uint64_t throttledTagChangeId{ 0 };
 	bool autoThrottlingEnabled{ false };
@@ -523,7 +523,7 @@ class TagThrottlerImpl {
 	}
 
 public:
-	TagThrottlerImpl(Ratekeeper* ratekeeper) : ratekeeper(ratekeeper) {}
+	TagThrottlerImpl(Ratekeeper const* ratekeeper) : ratekeeper(ratekeeper) {}
 	Future<Void> monitorThrottlingChanges() { return monitorThrottlingChanges(this); }
 
 	void addRequests(TransactionTag tag, int count) { throttledTags.addRequests(tag, count); }
