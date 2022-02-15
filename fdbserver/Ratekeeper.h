@@ -181,6 +181,8 @@ struct Ratekeeper {
 
 	Future<Void> expiredTagThrottleCleanup;
 
+	double lastBusiestCommitTagPick;
+
 	Ratekeeper(UID id, Database db);
 
 	Future<Void> configurationMonitor();

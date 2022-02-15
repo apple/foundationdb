@@ -386,11 +386,10 @@ class TagThrottler {
 	Ratekeeper* ratekeeper;
 	RkTagThrottleCollection throttledTags;
 	uint64_t throttledTagChangeId{ 0 };
-	double lastBusiestCommitTagPick;
 	bool autoThrottlingEnabled{ false };
 
 public:
-	TagThrottler(Ratekeeper* ratekeeper) : ratekeeper(ratekeeper), lastBusiestCommitTagPick(0.0) {}
+	TagThrottler(Ratekeeper* ratekeeper) : ratekeeper(ratekeeper) {}
 	Future<Void> monitorThrottlingChanges();
 	void addRequests(TransactionTag tag, int count) { throttledTags.addRequests(tag, count); }
 	uint64_t getThrottledTagChangeId() const { return throttledTagChangeId; }
@@ -405,8 +404,4 @@ public:
 	Optional<double> autoThrottleTag(UID id, TransactionTag tag, double busyness) {
 		return throttledTags.autoThrottleTag(id, tag, busyness);
 	}
-
-	void updateLastBusiestCommitTagPick() { lastBusiestCommitTagPick = now(); }
-
-	double getLastBusiestCommitTagPick() const { return lastBusiestCommitTagPick; }
 };

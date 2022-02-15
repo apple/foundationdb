@@ -462,7 +462,8 @@ Ratekeeper::Ratekeeper(UID id, Database db)
                 SERVER_KNOBS->TARGET_BYTES_PER_TLOG_BATCH,
                 SERVER_KNOBS->SPRING_BYTES_TLOG_BATCH,
                 SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE_BATCH,
-                SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS_BATCH) {
+                SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS_BATCH),
+    lastBusiestCommitTagPick(0.0) {
 	tagThrottler = std::make_unique<TagThrottler>(this);
 	expiredTagThrottleCleanup = recurring([this]() { ThrottleApi::expire(this->db.getReference()); },
 	                                      SERVER_KNOBS->TAG_THROTTLE_EXPIRED_CLEANUP_INTERVAL);
@@ -964,11 +965,11 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 }
 
 Future<Void> Ratekeeper::refreshStorageServerCommitCost() {
-	if (tagThrottler->getLastBusiestCommitTagPick() == 0) { // the first call should be skipped
-		tagThrottler->updateLastBusiestCommitTagPick();
+	if (lastBusiestCommitTagPick == 0) { // the first call should be skipped
+		lastBusiestCommitTagPick = now();
 		return Void();
 	}
-	double elapsed = now() - tagThrottler->getLastBusiestCommitTagPick();
+	double elapsed = now() - lastBusiestCommitTagPick;
 	// for each SS, select the busiest commit tag from ssTrTagCommitCost
 	for (auto it = storageQueueInfo.begin(); it != storageQueueInfo.end(); ++it) {
 		it->value.busiestWriteTag.reset();
@@ -1006,7 +1007,7 @@ Future<Void> Ratekeeper::refreshStorageServerCommitCost() {
 		it->value.totalWriteOps = 0;
 		it->value.totalWriteCosts = 0;
 	}
-	tagThrottler->updateLastBusiestCommitTagPick();
+	lastBusiestCommitTagPick = now();
 	return Void();
 }
 
