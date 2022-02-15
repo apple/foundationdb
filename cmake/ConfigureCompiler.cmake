@@ -219,7 +219,7 @@ else()
   endif()
   if(STATIC_LINK_LIBCXX)
     if (NOT USE_LIBCXX AND NOT APPLE)
-	    add_link_options(-static-libstdc++ -static-libgcc)
+	add_link_options(-static-libstdc++ -static-libgcc)
     endif()
   endif()
   # # Instruction sets we require to be supported by the CPU
@@ -350,7 +350,7 @@ else()
   endif()
 
   if (CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64le")
-      add_compile_options(-m64 -mcpu=power9 -mtune=power9 -DNO_WARN_X86_INTRINSICS)
+    add_compile_options(-m64 -mcpu=power9 -mtune=power9 -DNO_WARN_X86_INTRINSICS)
   endif()
   # Check whether we can use dtrace probes
   include(CheckSymbolExists)
