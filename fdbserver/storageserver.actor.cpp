@@ -1761,6 +1761,15 @@ MutationsAndVersionRef filterMutations(Arena& arena,
 	ssId.toString().substr(0, 4) == DEBUG_SS_ID&& cfId.printable().substr(0, 6) == DEBUG_SS_CF_ID &&                   \
 	    (v >= DEBUG_SS_CF_BEGIN_VERSION || latestVersion == DEBUG_SS_CF_BEGIN_VERSION)
 
+#define DO_DEBUG_CF_MISSING false
+#define DEBUG_CF_MISSING_CF ""_sr
+#define DEBUG_CF_MISSING_KEY ""_sr
+#define DEBUG_CF_MISSING_VERSION invalidVersion
+#define DEBUG_CF_MISSING(cfId, keyRange, beginVersion, lastVersion)                                                    \
+	DO_DEBUG_CF_MISSING&& cfId.printable().substr(0, 6) ==                                                             \
+	        DEBUG_CF_MISSING_CF&& keyRange.contains(DEBUG_CF_MISSING_KEY) &&                                           \
+	    beginVersion <= DEBUG_CF_MISSING_VERSION&& lastVersion >= DEBUG_CF_MISSING_VERSION
+
 ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(StorageServer* data,
                                                                             ChangeFeedStreamRequest req,
                                                                             bool inverted,
@@ -1868,7 +1877,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 	}
 
 	state bool readDurable = feedInfo->durableVersion != invalidVersion && req.begin <= feedInfo->durableVersion;
-	state bool readFetched = req.begin <= fetchStorageVersion;
+	state bool readFetched = req.begin <= fetchStorageVersion && !atLatest;
 	if (req.end > emptyVersion + 1 && (readDurable || readFetched)) {
 		if (readFetched && req.begin <= feedInfo->fetchVersion) {
 			// Request needs data that has been written to storage by a change feed fetch, but not committed yet
@@ -2032,8 +2041,55 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		    .detail("Count", reply.mutations.size());
 	}
 
-	// If the SS's version advanced at all during any of the waits, the read from memory may have missed some mutations,
-	// so gotAll can only be true if data->version didn't change over the course of this actor
+	if (DEBUG_CF_MISSING(req.rangeID, req.range, req.begin, reply.mutations.back().version) && !req.canReadPopped) {
+		bool foundVersion = false;
+		bool foundKey = false;
+		for (auto& it : reply.mutations) {
+			if (it.version == DEBUG_CF_MISSING_VERSION) {
+				foundVersion = true;
+				for (auto& m : it.mutations) {
+					if (m.type == MutationRef::SetValue && m.param1 == DEBUG_CF_MISSING_KEY) {
+						foundKey = true;
+						break;
+					}
+				}
+				break;
+			}
+		}
+		if (!foundVersion || !foundKey) {
+			printf("ERROR: SS %s CF %s missing %s @ %lld from request for [%s - %s) %lld - %lld\n",
+			       data->thisServerID.toString().substr(0, 4).c_str(),
+			       req.rangeID.printable().substr(0, 6).c_str(),
+			       foundVersion ? "key" : "version",
+			       DEBUG_CF_MISSING_VERSION,
+			       req.range.begin.printable().c_str(),
+			       req.range.end.printable().c_str(),
+			       req.begin,
+			       req.end);
+			printf("ERROR: %d versions in response %lld - %lld:\n",
+			       reply.mutations.size(),
+			       reply.mutations.front().version,
+			       reply.mutations.back().version);
+			for (auto& it : reply.mutations) {
+				printf("ERROR:    %lld (%d)%s\n",
+				       it.version,
+				       it.mutations.size(),
+				       it.version == DEBUG_CF_MISSING_VERSION ? "<-------" : "");
+			}
+		} else {
+			printf("DBG: SS %s CF %s correct @ %lld from request for [%s - %s) %lld - %lld\n",
+			       data->thisServerID.toString().substr(0, 4).c_str(),
+			       req.rangeID.printable().substr(0, 6).c_str(),
+			       DEBUG_CF_MISSING_VERSION,
+			       req.range.begin.printable().c_str(),
+			       req.range.end.printable().c_str(),
+			       req.begin,
+			       req.end);
+		}
+	}
+
+	// If the SS's version advanced at all during any of the waits, the read from memory may have missed some
+	// mutations, so gotAll can only be true if data->version didn't change over the course of this actor
 	return std::make_pair(reply, gotAll);
 }
 

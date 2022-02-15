@@ -8053,7 +8053,8 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 				results->streams.clear();
 				results->storageData.clear();
 				if (e.code() == error_code_change_feed_popped) {
-					results->refresh.sendError(change_feed_popped());
+					results->mutations.sendError(e);
+					results->refresh.sendError(e);
 				} else {
 					results->refresh.sendError(change_feed_cancelled());
 				}
