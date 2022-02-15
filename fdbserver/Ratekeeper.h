@@ -139,7 +139,9 @@ struct RatekeeperLimits {
 	    context(context), rkUpdateEventCacheHolder(makeReference<EventCacheHolder>("RkUpdate" + context)) {}
 };
 
-struct Ratekeeper {
+class Ratekeeper {
+	friend class RatekeeperImpl;
+
 	// Differentiate from GrvProxyInfo in DatabaseContext.h
 	struct GrvProxyInfo {
 		int64_t totalTransactions;
@@ -200,5 +202,6 @@ struct Ratekeeper {
 	void tryAutoThrottleTag(StorageQueueInfo&, int64_t storageQueue, int64_t storageDurabilityLag);
 	Future<Void> monitorThrottlingChanges();
 
+public:
 	static Future<Void> run(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo);
 };
