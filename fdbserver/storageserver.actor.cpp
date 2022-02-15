@@ -4159,9 +4159,6 @@ ACTOR Future<Void> changeFeedPopQ(StorageServer* self, ChangeFeedPopRequest req)
 				feed->second->storageVersion = invalidVersion;
 				feed->second->durableVersion = invalidVersion;
 			}
-			if (req.version > feed->second->fetchVersion) {
-				feed->second->fetchVersion = invalidVersion;
-			}
 		}
 		wait(self->durableVersion.whenAtLeast(durableVersion));
 	}
@@ -5530,9 +5527,6 @@ private:
 						if (popVersion > feed->second->storageVersion) {
 							feed->second->storageVersion = invalidVersion;
 							feed->second->durableVersion = invalidVersion;
-						}
-						if (popVersion > feed->second->fetchVersion) {
-							feed->second->fetchVersion = invalidVersion;
 						}
 					}
 					addMutationToLog = true;
