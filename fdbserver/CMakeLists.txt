@@ -131,6 +131,8 @@ set(FDBSERVER_SRCS
   storageserver.actor.cpp
   TagPartitionedLogSystem.actor.cpp
   TagPartitionedLogSystem.actor.h
+  TagThrottler.actor.cpp
+  TagThrottler.h
   template_fdb.h
   TCInfo.actor.cpp
   TCInfo.h
