@@ -48,6 +48,7 @@ struct ProcessClass {
 		GrvProxyClass,
 		BlobManagerClass,
 		BlobWorkerClass,
+		EncryptKeyProxyClass,
 		InvalidClass = -1
 	};
 
@@ -75,6 +76,7 @@ struct ProcessClass {
 		BlobWorker,
 		StorageCache,
 		Backup,
+		EncryptKeyProxy,
 		Worker, // used for actor lineage tracking
 		NoRole
 	};
@@ -112,6 +114,7 @@ public:
 		else if (s=="blob_worker") _class = BlobWorkerClass;
 		else if (s=="storage_cache") _class = StorageCacheClass;
 		else if (s=="backup") _class = BackupClass;
+		else if (s=="encrypt_key_proxy") _class = EncryptKeyProxyClass;
 		else _class = InvalidClass;
 	}
 
@@ -141,6 +144,7 @@ public:
 		else if (classStr=="blob_worker") _class = BlobWorkerClass;
 		else if (classStr=="storage_cache") _class = StorageCacheClass;
 		else if (classStr=="backup") _class = BackupClass;
+		else if (classStr=="encrypt_key_proxy") _class = EncryptKeyProxyClass;
 		else _class = InvalidClass;
 
 		if (sourceStr=="command_line") _source = CommandLineSource;
@@ -180,6 +184,7 @@ public:
 			case BlobWorkerClass: return "blob_worker";
 			case StorageCacheClass: return "storage_cache";
 			case BackupClass: return "backup";
+			case EncryptKeyProxyClass: return "encrypt_key_proxy";
 			default: return "invalid";
 		}
 	}

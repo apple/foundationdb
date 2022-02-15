@@ -83,10 +83,11 @@ For blob store backup locations, the Backup URL format is
 
 ::
 
-    blobstore://<api_key>[:<secret>]@<hostname>[:<port>]/<name>?bucket=<bucket_name>[&<param>=<value>]...]
+    blobstore://[<api_key>][:<secret>[:<security_token>]]@<hostname>[:<port>]/<name>?bucket=<bucket_name>[&<param>=<value>]...]
 
-      <api_key> - API key to use for authentication
+      <api_key> - API key to use for authentication. Optional.
       <secret> - API key's secret.  Optional.
+      <security_token> - Security token if temporary credentials are used. Optional.
       <hostname> - Remote hostname or IP address to connect to
       <port> - Remote port to connect to.  Optional.  Default is 80.
       <name> - Name of the backup within the backup bucket.  It can contain '/' characters in order to organize backups into a folder-like structure.
@@ -174,6 +175,17 @@ The Blob Credential File format is JSON with the following schema:
     "accounts" : {
       "user@host" :   { "secret" : "SECRETKEY" },
       "user2@host2" : { "secret" : "SECRETKEY2" }
+    }
+  }
+
+If temporary credentials are being used, the following schema is also supported
+
+::
+
+  {
+    "accounts" : {
+      "@host" :     { "api_key" : user, "secret" : "SECRETKEY", token: "TOKEN1" },
+      "@host2" :    { "api_key" : user2, "secret" : "SECRETKEY2", token: "TOKEN2" }
     }
   }
 
@@ -405,6 +417,16 @@ The ``list`` subcommand will list the backups at a given 'base' or shortened Bac
 ``-b <BASE_URL>`` or ``--base-url <BASE_URL>``
   This a shortened Backup URL which looks just like a Backup URL but without the backup <name> so that the list command will discover and list all of the backups in the bucket.
 
+.. program:: fdbbackup list
+
+``tags``
+----------
+
+The ``tags`` subcommand will list the tags of all backups on a source cluster.
+
+::
+
+   user@host$ fdbbackup tags [-C <CLUSTER_FILE>]
 
 .. program:: fdbbackup cleanup
 

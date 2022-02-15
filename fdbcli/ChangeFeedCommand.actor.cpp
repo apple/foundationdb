@@ -48,10 +48,10 @@ ACTOR Future<Void> changeFeedList(Database db) {
 			printf("Found %d range feeds%s\n", result.size(), result.size() == 0 ? "." : ":");
 			for (auto& it : result) {
 				auto range = std::get<0>(decodeChangeFeedValue(it.value));
-				printf("  %s: %s - %s\n",
+				printf("  %s: `%s' - `%s'\n",
 				       it.key.removePrefix(changeFeedPrefix).toString().c_str(),
-				       range.begin.toString().c_str(),
-				       range.end.toString().c_str());
+				       printable(range.begin).c_str(),
+				       printable(range.end).c_str());
 			}
 			return Void();
 		} catch (Error& e) {

@@ -308,19 +308,19 @@ void LogPushData::writeMessage(StringRef rawMessageWithoutLength, bool usePrevio
 }
 
 void LogPushData::recordEmptyMessage(int loc, const Standalone<StringRef>& value) {
-	if (!isEmptyMessage[loc]) {
+	if (!messagesWritten[loc]) {
 		BinaryWriter w(AssumeVersion(g_network->protocolVersion()));
 		Standalone<StringRef> v = w.toValue();
 		if (value.size() > v.size()) {
-			isEmptyMessage[loc] = true;
+			messagesWritten[loc] = true;
 		}
 	}
 }
 
 float LogPushData::getEmptyMessageRatio() const {
-	auto count = std::count(isEmptyMessage.begin(), isEmptyMessage.end(), false);
-	ASSERT_WE_THINK(isEmptyMessage.size() > 0);
-	return 1.0 * count / isEmptyMessage.size();
+	auto count = std::count(messagesWritten.begin(), messagesWritten.end(), false);
+	ASSERT_WE_THINK(messagesWritten.size() > 0);
+	return 1.0 * count / messagesWritten.size();
 }
 
 bool LogPushData::writeTransactionInfo(int location, uint32_t subseq) {
