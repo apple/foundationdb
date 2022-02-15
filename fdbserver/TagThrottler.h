@@ -27,7 +27,7 @@ class TagThrottler {
 	PImpl<class TagThrottlerImpl> impl;
 
 public:
-	TagThrottler(Ratekeeper* ratekeeper);
+	TagThrottler(Database db, UID id);
 	~TagThrottler();
 	Future<Void> monitorThrottlingChanges();
 	void addRequests(TransactionTag tag, int count);
