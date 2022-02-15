@@ -573,7 +573,7 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 		double targetRateRatio = std::min((storageQueue - targetBytes + springBytes) / (double)springBytes, 2.0);
 
 		if (limits->priority == TransactionPriority::DEFAULT) {
-			tryAutoThrottleTag(ss, storageQueue, storageDurabilityLag);
+			addActor.send(tagThrottler->tryAutoThrottleTag(ss, storageQueue, storageDurabilityLag));
 		}
 
 		double inputRate = ss.smoothInputBytes.smoothRate();
@@ -1009,50 +1009,6 @@ Future<Void> Ratekeeper::refreshStorageServerCommitCost() {
 	}
 	lastBusiestCommitTagPick = now();
 	return Void();
-}
-
-void Ratekeeper::tryAutoThrottleTag(TransactionTag tag, double rate, double busyness, TagThrottledReason reason) {
-	// NOTE: before the comparison with MIN_TAG_COST, the busiest tag rate also compares with MIN_TAG_PAGES_RATE
-	// currently MIN_TAG_PAGES_RATE > MIN_TAG_COST in our default knobs.
-	if (busyness > SERVER_KNOBS->AUTO_THROTTLE_TARGET_TAG_BUSYNESS && rate > SERVER_KNOBS->MIN_TAG_COST) {
-		TEST(true); // Transaction tag auto-throttled
-		Optional<double> clientRate = tagThrottler->autoThrottleTag(id, tag, busyness);
-		if (clientRate.present()) {
-			TagSet tags;
-			tags.addTag(tag);
-
-			Reference<DatabaseContext> dbRef = Reference<DatabaseContext>::addRef(db.getPtr());
-			addActor.send(ThrottleApi::throttleTags(dbRef,
-			                                        tags,
-			                                        clientRate.get(),
-			                                        SERVER_KNOBS->AUTO_TAG_THROTTLE_DURATION,
-			                                        TagThrottleType::AUTO,
-			                                        TransactionPriority::DEFAULT,
-			                                        now() + SERVER_KNOBS->AUTO_TAG_THROTTLE_DURATION,
-			                                        reason));
-		}
-	}
-}
-
-void Ratekeeper::tryAutoThrottleTag(StorageQueueInfo& ss, int64_t storageQueue, int64_t storageDurabilityLag) {
-	// NOTE: we just keep it simple and don't differentiate write-saturation and read-saturation at the moment. In most
-	// of situation, this works. More indicators besides queue size and durability lag could be investigated in the
-	// future
-	if (storageQueue > SERVER_KNOBS->AUTO_TAG_THROTTLE_STORAGE_QUEUE_BYTES ||
-	    storageDurabilityLag > SERVER_KNOBS->AUTO_TAG_THROTTLE_DURABILITY_LAG_VERSIONS) {
-		if (ss.busiestWriteTag.present()) {
-			tryAutoThrottleTag(ss.busiestWriteTag.get(),
-			                   ss.busiestWriteTagRate,
-			                   ss.busiestWriteTagFractionalBusyness,
-			                   TagThrottledReason::BUSY_WRITE);
-		}
-		if (ss.busiestReadTag.present()) {
-			tryAutoThrottleTag(ss.busiestReadTag.get(),
-			                   ss.busiestReadTagRate,
-			                   ss.busiestReadTagFractionalBusyness,
-			                   TagThrottledReason::BUSY_READ);
-		}
-	}
 }
 
 ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {

@@ -38,5 +38,5 @@ public:
 	uint32_t busyWriteTagCount() const;
 	int64_t manualThrottleCount() const;
 	bool isAutoThrottlingEnabled() const;
-	Optional<double> autoThrottleTag(UID id, TransactionTag tag, double busyness);
+	Future<Void> tryAutoThrottleTag(StorageQueueInfo&, int64_t storageQueue, int64_t storageDurabilityLag);
 };
