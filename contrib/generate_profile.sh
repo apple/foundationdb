@@ -13,7 +13,7 @@ export LLVM_PROFILE_FILE=$fdbdir/sandbox/mako-run-%m.profraw
 
 # Shutdown fdbserver to trigger profile dumping
 pid=$(ps -u $USER | grep fdbserver | fgrep -v grep | awk '{print $2}')
-gdb --batch --eval-command 'call exit(0)' --pid
+gdb --batch --eval-command 'call exit(0)' --pid $pid
 
 # Clean up
 killall -9 fdbmonitor
