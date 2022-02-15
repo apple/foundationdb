@@ -270,10 +270,6 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( BUSYNESS_SPIKE_START_THRESHOLD,         0.100 );
 	init( BUSYNESS_SPIKE_SATURATED_THRESHOLD,     0.500 );
 
-	// multi-version client control
-	init( MVC_CLIENTLIB_CHUNK_SIZE,              8*1024 );
-	init( MVC_CLIENTLIB_CHUNKS_PER_TRANSACTION,      32 );
-
 	// blob granules
 	init( ENABLE_BLOB_GRANULES,                   false );
 

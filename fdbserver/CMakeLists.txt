@@ -174,7 +174,6 @@ set(FDBSERVER_SRCS
   workloads/Cache.actor.cpp
   workloads/ChangeConfig.actor.cpp
   workloads/ClearSingleRange.actor.cpp
-  workloads/ClientLibManagementWorkload.actor.cpp
   workloads/ClientTransactionProfileCorrectness.actor.cpp
   workloads/TriggerRecovery.actor.cpp
   workloads/SuspendProcesses.actor.cpp
