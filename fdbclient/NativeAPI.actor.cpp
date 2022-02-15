@@ -5968,9 +5968,11 @@ ACTOR Future<Version> extractReadVersion(Reference<TransactionState> trState,
 	trState->cx->lastProxyRequestTime = trState->startTime;
 	trState->cx->updateCachedReadVersion(trState->startTime, rep.version);
 	if (rep.rkBatchThrottled) {
+		TraceEvent("DebugGrvLastRkBatchThrottled").detail("ReplyTime", replyTime);
 		trState->cx->lastRkBatchThrottleTime = replyTime;
 	}
 	if (rep.rkDefaultThrottled) {
+		TraceEvent("DebugGrvLastRkDefaultThrottled").detail("ReplyTime", replyTime);
 		trState->cx->lastRkDefaultThrottleTime = replyTime;
 	}
 	trState->cx->GRVLatencies.addSample(latency);
