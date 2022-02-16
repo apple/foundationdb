@@ -489,11 +489,12 @@ std::shared_ptr<FakeTLogContext> ptxnFakeTLogFixture::getTLogContextByIndex(cons
 const KeyValueStoreType ptxnStorageServerFixture::keyValueStoreType(KeyValueStoreType::MEMORY);
 
 std::string ptxnStorageServerFixture::StorageServerResources::getFolder() const {
-	return concatToString("./", "storage-", storageTeamID, ".", keyValueStoreType);
+	return concatToString(folderPrefix, "storage-", storageTeamID, ".", keyValueStoreType);
 }
 
-ptxnStorageServerFixture::StorageServerResources::StorageServerResources(const StorageTeamID& storageTeamID_)
-  : storageTeamID(storageTeamID_),
+ptxnStorageServerFixture::StorageServerResources::StorageServerResources(const StorageTeamID& storageTeamID_,
+                                                                         const std::string& folderPrefix_)
+  : folderPrefix(folderPrefix_), storageTeamID(storageTeamID_),
     interface(std::make_shared<::StorageServerInterface>(deterministicRandom()->randomUniqueID())),
     clusterID(deterministicRandom()->randomUniqueID()),
     /* IKeyValueStore has protected destructor and is not intended to be deleted, since we are doing test we tolerate
@@ -508,9 +509,10 @@ void ptxnStorageServerFixture::setUp(const int numStorageServers) {
 	const auto& asyncServerDBInfoRef = serverDBInfoFixture.getAsyncServerDBInfoRef();
 	const auto& storageTeamID =
 	    dynamic_cast<const TLogGroupWithPrivateMutationsFixture&>(tLogGroupFixture).privateMutationsStorageTeamID;
-	storageServerResources.emplace_back(storageTeamID);
+	storageServerResources.emplace_back(storageTeamID, folderPrefix);
 	initializeStorageReplies.emplace_back();
 
+	std::cout << " Using private mutations storage team ID = " << storageTeamID.toString() << std::endl;
 	std::vector<ptxn::StorageTeamID> storageTeams{ storageTeamID };
 	const auto& resource = storageServerResources.back();
 	const auto& initializeReply = initializeStorageReplies.back();
@@ -521,7 +523,7 @@ void ptxnStorageServerFixture::setUp(const int numStorageServers) {
 	                               resource.seedVersion,
 	                               initializeReply,
 	                               asyncServerDBInfoRef,
-	                               /* folder */ "./",
+	                               folderPrefix,
 	                               storageTeams));
 }
 
@@ -529,6 +531,7 @@ ptxnStorageServerFixture::~ptxnStorageServerFixture() {
 	for (auto& actor : actors) {
 		actor.cancel();
 	}
+	platform::eraseDirectoryRecursive(folderPrefix);
 }
 
 #pragma endregion ptxnStorageServerFixture

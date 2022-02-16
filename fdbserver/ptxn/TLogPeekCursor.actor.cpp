@@ -182,6 +182,10 @@ void PeekCursorBase::next() {
 	nextImpl();
 }
 
+void PeekCursorBase::reset() {
+	resetImpl();
+}
+
 bool PeekCursorBase::hasRemaining() const {
 	return hasRemainingImpl();
 }
@@ -296,11 +300,25 @@ bool StorageTeamPeekCursor::hasRemainingImpl() const {
 	return wrappedDeserializerIter.get() != deserializer.end();
 }
 
+void StorageTeamPeekCursor::resetImpl() {
+	wrappedDeserializerIter = std::begin(deserializer);
+	std::cout << " Resetting storage server peek cursor " << this->getStorageTeamID().toString() << std::endl;
+}
+
 #pragma endregion StorageTeamPeekCursor
 
 namespace merged {
 
 namespace details {
+
+std::string CursorContainerBase::toString() const {
+	std::stringstream ss;
+	ss << "CursorContainerBase: Total = " << size() << std::endl;
+	for (const auto& item : container) {
+		ss << "\t" << item->getStorageTeamID().toString() << std::endl;
+	}
+	return ss.str();
+}
 
 #pragma region OrderedCursorContainer
 
@@ -489,11 +507,9 @@ ACTOR Future<bool> peekRemote(std::shared_ptr<PeekRemoteContext> pPeekRemoteCont
 
 	std::vector<Future<PeekSingleCursorResult>> cursorFutures;
 	std::transform(
-	    std::begin(pCursors),
-	    std::end(pCursors),
-	    std::back_inserter(cursorFutures),
-	    /* NOTE ACTORs are compiled into classes */
-	    [](const auto& pCursor) -> auto { return peekSingleCursor(pCursor); });
+	    std::begin(pCursors), std::end(pCursors), std::back_inserter(cursorFutures), [](const auto& pCursor) -> auto {
+		    return peekSingleCursor(pCursor);
+	    });
 	state std::vector<PeekSingleCursorResult> cursorResults = wait(getAll(cursorFutures));
 
 	auto cursorResultsIter = std::begin(cursorResults);
@@ -545,30 +561,25 @@ ACTOR Future<bool> peekRemote(std::shared_ptr<PeekRemoteContext> pPeekRemoteCont
 #pragma region BroadcastedStorageTeamPeekCursorBase
 
 bool BroadcastedStorageTeamPeekCursorBase::tryFillCursorContainer() {
+	std::cout << "tryFillCursorContainer" << std::endl;
 	ASSERT(getNumCursors() != 0);
 	ASSERT(pCursorContainer && pCursorContainer->empty());
 
-	if (getNumCursors() == 0) {
-		// We have no active cursors, fail the cursor filling process
-		// In this case, the caller should do the RPC, and peekRemote should throw end_of_stream to indicate the cursor
-		// is expired.
-		return false;
-	}
-
-	// The previous code assumes in broadcasted model, all cursors should share the same version; however it may not be
-	// possible if we supports cursor add/remove mechanism. The shippet here is kept when we revisit the implementation.
-	// Find the current version all the cursors are sharing
 	currentVersion = invalidVersion;
 	bool isFirstElement = true;
-	for (auto iter = cursorsBegin(); iter != cursorsEnd(); ++iter) {
+	int numCursors = 0;
+	for (auto iter = cursorsBegin(); iter != cursorsEnd(); ++iter, ++numCursors) {
 		auto pCursor = iter->second;
 		if (!pCursor->hasRemaining()) {
+			std::cout << pCursor->getStorageTeamID().toString() << " has no remaining data" << std::endl;
 			emptyCursorStorageTeamIDs.insert(pCursor->getStorageTeamID());
 			continue;
 		}
 
 		Version cursorVersion = iter->second->getVersion();
 		if (isFirstElement) {
+			std::cout << " Update currentVersion " << currentVersion << " <- " << cursorVersion
+			          << " team: " << iter->first.toString() << std::endl;
 			currentVersion = cursorVersion;
 			isFirstElement = false;
 		} else {
@@ -576,9 +587,12 @@ bool BroadcastedStorageTeamPeekCursorBase::tryFillCursorContainer() {
 			//   * For cursors that have messages, they share the same version.
 			//   * Otherwise, the cursor must have no remaining data, i.e. needs RPC to get refilled.
 			// The cursors cannot be lagged behind, or the subsequence constraint cannot be fulfilled.
+			std::cout << "currentVersion = " << currentVersion << "\tcursorVersion = " << cursorVersion
+			          << " team: " << iter->first.toString() << std::endl;
 			UNSTOPPABLE_ASSERT(currentVersion == cursorVersion);
 		}
 	}
+	std::cout << " numcursors = " << numCursors << std::endl;
 
 	// The cursor can be empty due to end_of_stream, in this case, remove these cursors from empty cursor set
 	std::set<StorageTeamID> retiredAndAllConsumedStorageTeamIDs;
@@ -597,32 +611,38 @@ bool BroadcastedStorageTeamPeekCursorBase::tryFillCursorContainer() {
 	    std::inserter(notRetiredEmptyCursorStorageTeamIDs, std::end(notRetiredEmptyCursorStorageTeamIDs)));
 	std::swap(emptyCursorStorageTeamIDs, notRetiredEmptyCursorStorageTeamIDs);
 
-	// Remove retired/consumed cursors
-	for (const auto& retiredAndAllConsumedStorageTeamID : retiredAndAllConsumedStorageTeamIDs) {
-		removeCursor(retiredAndAllConsumedStorageTeamID);
-	}
-
 	// Do we still have storage teams needs RPC call for a refill?
 	if (!emptyCursorStorageTeamIDs.empty()) {
+		std::cout << " empty cursor found: " << joinToString(emptyCursorStorageTeamIDs) << std::endl;
 		return false;
 	}
 	// No remaining cursors? Report no more data and let remoteMoreAvailable reports end_of_stream
-	if (getNumCursors() == 0) {
+	if (getNumCursors() == 0 || currentVersion == invalidVersion) {
+		std::cout << " No active cursors " << std::endl;
 		return false;
 	}
 
-	// Now all cursors hasRemaining and are sharing the same version, ready to consume
-	ASSERT(currentVersion != invalidVersion);
-
 	// Now the cursors are all sharing the same version, fill the cursor container for consumption
 	for (auto iter = cursorsBegin(); iter != cursorsEnd(); ++iter) {
-		pCursorContainer->push(iter->second.get());
+		if (emptyCursorStorageTeamIDs.count(iter->first) == 0) {
+			pCursorContainer->push(iter->second.get());
+		}
 	}
 
+	std::cout << "Refill completed" << std::endl;
 	return true;
 }
 
 Future<bool> BroadcastedStorageTeamPeekCursorBase::remoteMoreAvailableImpl() {
+	remoteMoreAvailableSnapshot.needSnapshot = true;
+	std::cout << "need snapshot" << std::endl;
+
+	for (const auto& retiredCursorStorageTeamID : retiredCursorStorageTeamIDs) {
+		std::cout << " removing cursor due to retirement " << retiredCursorStorageTeamID.toString() << std::endl;
+		removeCursor(retiredCursorStorageTeamID);
+	}
+	retiredCursorStorageTeamIDs.clear();
+
 	using PeekRemoteContext = details::BroadcastedStorageTeamPeekCursor::PeekRemoteContext;
 	std::shared_ptr<PeekRemoteContext> pContext = std::make_shared<PeekRemoteContext>(
 	    emptyCursorStorageTeamIDs,
@@ -653,37 +673,63 @@ std::shared_ptr<StorageTeamPeekCursor> BroadcastedStorageTeamPeekCursorBase::rem
 }
 
 bool BroadcastedStorageTeamPeekCursorBase::hasRemainingImpl() const {
-	// Remove all empty version message
-	// NOTE: Consider the following situation: *ALL* storage team cursors returned empty version message. In this
-	// case, since hasRemaining is called after get, the receiver recieves exact one of the empty version message
-	// while others are dropped here.
-	while (!pCursorContainer->empty() &&
-	       /* FIXME Rethink if this is necessary */
-	       pCursorContainer->front()->hasRemaining() &&
-	       pCursorContainer->front()->get().message.getType() == Message::Type::EMPTY_VERSION_MESSAGE) {
-		auto& pCursorContainer = const_cast<BroadcastedStorageTeamPeekCursorBase*>(this)->pCursorContainer;
-		auto pConsumedCursor = pCursorContainer->front();
-		pConsumedCursor->next();
-		pCursorContainer->pop();
+	bool tryFillResult = true;
+	if (pCursorContainer->empty()) {
+		// FIXME Rethink this... const_cast is bitter yet setting hasRemainingImpl non-const is also painful
+		tryFillResult = const_cast<BroadcastedStorageTeamPeekCursorBase*>(this)->tryFillCursorContainer();
 	}
 
-	if (!pCursorContainer->empty()) {
-		return true;
-	} else {
-		// FIXME Rethink this... const_cast is bitter yet setting hasRemainingImpl non-const is also painful
-		bool tryFillResult = const_cast<BroadcastedStorageTeamPeekCursorBase*>(this)->tryFillCursorContainer();
-		if (!tryFillResult) {
-			return false;
-		}
-		return true;
+	// If remoteMoreAvailable is called just before this hasRemainingImpl, a snapshot of internal state is created, in
+	// case the cursor is being re-iterated.
+	if (remoteMoreAvailableSnapshot.needSnapshot) {
+		remoteMoreAvailableSnapshot.needSnapshot = false;
+		remoteMoreAvailableSnapshot.version = currentVersion;
+		*remoteMoreAvailableSnapshot.pCursorContainer = *pCursorContainer;
+		std::cout << " snapshot at version " << remoteMoreAvailableSnapshot.version << std::endl;
+		std::cout << " cursor container: " << remoteMoreAvailableSnapshot.pCursorContainer->toString() << std::endl;
 	}
+
+	return tryFillResult;
+}
+
+void BroadcastedStorageTeamPeekCursorBase::resetImpl() {
+	// If the version is invalidVersion, that means we have reached the end of stream
+	if (remoteMoreAvailableSnapshot.version == invalidVersion) {
+		return;
+	}
+
+	currentVersion = remoteMoreAvailableSnapshot.version;
+	*pCursorContainer = *remoteMoreAvailableSnapshot.pCursorContainer;
+
+	// The empty cursor will be re-captured during re-iteration; yet the retired cursors are only known during RPC, so
+	// those are not reset.
+	emptyCursorStorageTeamIDs.clear();
+
+	// Reset all known cursors inside the container to currentVersion
+	for (auto cursorIter = cursorsBegin(); cursorIter != cursorsEnd(); ++cursorIter) {
+		if (retiredCursorStorageTeamIDs.count(cursorIter->first) > 0) {
+			// The cursor is retired, resetting is meaningless
+			continue;
+		}
+		cursorIter->second->reset();
+		// Since all data is inside the memory, no RPC call should be called.
+		auto vsmIter = cursorIter->second->begin();
+		while (vsmIter != cursorIter->second->end() && vsmIter->version < currentVersion) {
+			++vsmIter;
+		}
+		std::cout << "Cursor " << cursorIter->first.toString() << "at version: " << cursorIter->second->getVersion()
+		          << " data " << cursorIter->second->get().toString() << std::endl;
+	}
+
+	std::cout << "Resetting to version = " << currentVersion << std::endl;
+	std::cout << pCursorContainer->toString();
 }
 
 #pragma endregion BroadcastedStorageTeamPeekCursorBase
 
 void BroadcastedStorageTeamPeekCursor_Ordered::nextImpl() {
 	if (pCursorContainer->empty() && !tryFillCursorContainer()) {
-		// Calling BroadcastedStorageTeamPeekCursor::next while hasRemaining is true...
+		// Calling BroadcastedStorageTeamPeekCursor::next while hasRemaining is false
 		// TODO: Rethink this, need better description of this assertion
 		ASSERT(false);
 	}
@@ -699,7 +745,7 @@ void BroadcastedStorageTeamPeekCursor_Ordered::nextImpl() {
 
 void BroadcastedStorageTeamPeekCursor_Unordered::nextImpl() {
 	if (pCursorContainer->empty() && !tryFillCursorContainer()) {
-		// Calling BroadcastedStorageTeamPeekCursor::next while hasRemaining is true
+		// Calling BroadcastedStorageTeamPeekCursor::next while hasRemaining is false
 		ASSERT(false);
 	}
 

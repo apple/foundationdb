@@ -92,6 +92,7 @@ void processTLogCommitRequestByStorageTeam(std::shared_ptr<FakeTLogContext> pFak
 	auto iter = std::begin(deserializer);
 	auto& arena = iter.arena();
 	for (; iter != std::end(deserializer); ++iter) {
+		std::cout << iter->toString() << std::endl;
 		storageTeamMessages[storageTeamID].push_back(pFakeTLogContext->persistenceArena, *iter);
 	}
 	pFakeTLogContext->persistenceArena.dependsOn(arena);
@@ -165,13 +166,14 @@ ACTOR Future<Void> fakeTLogPeek(TLogPeekRequest request, std::shared_ptr<FakeTLo
 
 	Version firstVersion = std::max(versionRange.first, request.beginVersion);
 	Version lastVersion = invalidVersion;
-	Version endVersion = versionRange.second;
+	Version endVersion = std::max(versionRange.second, receivedVersionRange.second + 1);
 
 	if (request.endVersion.present() && request.endVersion.get() != invalidVersion) {
 		endVersion = std::min(endVersion, request.endVersion.get());
 	}
 
-	if (request.beginVersion >= endVersion) {
+	// NOTE: Since the broadcast will cause new
+	if (request.beginVersion >= std::max(versionRange.second, receivedVersionRange.second + 1)) {
 		printTiming << "End of stream" << std::endl;
 		request.reply.sendError(end_of_stream());
 		return Void();
@@ -191,7 +193,7 @@ ACTOR Future<Void> fakeTLogPeek(TLogPeekRequest request, std::shared_ptr<FakeTLo
 		// No storage team written in this version
 		if (epochVersionMessagesIter->second.count(storageTeamID) != 0) {
 			serializer.startVersionWriting(epochVersionMessagesIter->first);
-			for (auto vsm : epochVersionMessagesIter->second.at(storageTeamID)) {
+			for (const auto& vsm : epochVersionMessagesIter->second.at(storageTeamID)) {
 				serializer.write(vsm.subsequence, vsm.message);
 			}
 			serializer.completeVersionWriting();
@@ -217,6 +219,7 @@ ACTOR Future<Void> fakeTLogPeek(TLogPeekRequest request, std::shared_ptr<FakeTLo
 
 	serializer.completeMessageWriting();
 
+	printTiming << "Serializd " << numVersions << " versions" << std::endl;
 	if (epochVersionMessagesIter != std::end(pFakeTLogContext->epochVersionMessages)) {
 		printTiming << "Storage Team ID = " << storageTeamID.toString() << " Last processed version = " << lastVersion
 		            << std::endl;

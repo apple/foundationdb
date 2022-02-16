@@ -5547,8 +5547,12 @@ void updateVersion(StorageServerBase* pStorageServerContext,
 namespace ptxn {
 
 const StorageTeamID& getStoragePrivateMutationTeam(const ptxn::StorageServer& storageServerContext) {
-	ASSERT(storageServerContext.storageTeamIDs.present());
-	return storageServerContext.thisServerID; // NOTE: Private team is same as SSID.
+	// FIXME Rethink this
+	if (storageServerContext.storageTeamIDs.present() && storageServerContext.storageTeamIDs.get().size() == 1) {
+		return *storageServerContext.storageTeamIDs.get().begin();
+	} else {
+		return storageServerContext.thisServerID; // NOTE: Private team is same as SSID.
+	}
 }
 
 std::vector<ptxn::TLogInterfaceBase*> getTLogInterfaceByStorageTeamID(const ServerDBInfo& serverDBInfo,
@@ -5717,7 +5721,8 @@ ACTOR Future<Void> prepareEagerReadInfo(UpdateEagerReadInfo* pEagerReadInfo,
 	// TODO Cursor might need to support protocol switching, e.g.
 	// cursor->setLogProtocolVersion(some value)
 
-	for (const auto vsm : *pStorageServerContext->logCursor) {
+	for (const auto& vsm : *pStorageServerContext->logCursor) {
+		std::cout << vsm.toString() << std::endl;
 		messageHandler.handleMessage(vsm.message);
 	}
 
@@ -5856,6 +5861,7 @@ ACTOR Future<Void> applyMutationsFromCursor(StorageUpdater* pStorageUpdater,
 	// TODO cursor might need to adjust protocol
 	state CursorIterator_t cursorIterator = pStorageServerContext->logCursor->begin();
 	for (; cursorIterator != pStorageServerContext->logCursor->end(); std::next(cursorIterator)) {
+		std::cout << cursorIterator->toString() << std::endl;
 		if (mutationBytes > SERVER_KNOBS->DESIRED_UPDATE_BYTES) {
 			mutationBytes = 0;
 			// Instead of just yielding, leave time for the storage server to respond to reads
@@ -5865,6 +5871,7 @@ ACTOR Future<Void> applyMutationsFromCursor(StorageUpdater* pStorageUpdater,
 		const auto& versionSubsequenceMessage = *cursorIterator;
 		// Version for this immediate
 		Version cursorVersion = versionSubsequenceMessage.version;
+		std::cout << " cursorVersion = " << cursorVersion << std::endl;
 		if (cursorVersion > version) {
 			ASSERT(cursorVersion > pStorageServerContext->version.get());
 		}
@@ -5911,10 +5918,27 @@ ACTOR Future<Void> update(std::shared_ptr<ptxn::StorageServer> storageServerCont
 		state ::details::UniqueObjectHolder<FlowLock::Releaser> holdingDurableVersionLock =
 		    wait(::details::takeDurableVersionLock(storageServerContext.get()));
 
+		std::cout << " iterate over " << std::endl;
+		for (auto iter = storageServerContext.get()->logCursor->begin(); iter != storageServerContext.get()->logCursor->end(); ++iter) {
+			std::cout << iter->toString() << std::endl;
+		}
+		std::cout << " iterate over done " << std::endl;
+
+		std::cout << " iterate over " << std::endl;
+		for (auto iter = storageServerContext.get()->logCursor->begin(); iter != storageServerContext.get()->logCursor->end(); ++iter) {
+			std::cout << iter->toString() << std::endl;
+		}
+		std::cout << " iterate over done " << std::endl;
+
 		Stopwatch::time_t eagerReadLatency =
 		    wait(::details::ensureNoShardChange(storageServerContext.get(), [this]() -> Future<Void> {
 			    return prepareEagerReadInfo(&eagerReadInfo, &fetchInjectionInfo, storageServerContext.get());
 		    }));
+		std::cout << " iterate over " << std::endl;
+		for (auto iter = storageServerContext.get()->logCursor->begin(); iter != storageServerContext.get()->logCursor->end(); ++iter) {
+			std::cout << iter->toString() << std::endl;
+		}
+		std::cout << " iterate over done " << std::endl;
 		if (eagerReadLatency > 0.1) {
 			TraceEvent("SSSlowTakeLock2", storageServerContext->thisServerID)
 			    .detailf("From", "%016llx", debug_lastLoadBalanceResultEndpointToken)
@@ -5930,13 +5954,16 @@ ACTOR Future<Void> update(std::shared_ptr<ptxn::StorageServer> storageServerCont
 			storageServerContext->data().atLatest().validate();
 		validate(storageServerContext.get());
 
+		std::cout << " iterate over " << std::endl;
+		for (auto iter = storageServerContext.get()->logCursor->begin(); iter != storageServerContext.get()->logCursor->end(); ++iter) {
+			std::cout << iter->toString() << std::endl;
+		}
+		std::cout << " iterate over done " << std::endl;
+
 		state StorageUpdater storageUpdater(storageServerContext->lastVersionWithData,
 		                                    storageServerContext->restoredVersion);
 		state bool injectedChanges = wait(::details::applyMutationsFromFetchInjectionInfo(
 		    &storageUpdater, &fetchInjectionInfo, &mutationBytes, storageServerContext.get()));
-
-		wait(applyMutationsFromCursor(
-		    &storageUpdater, &version, &mutationBytes, &updatedChangeFeeds, storageServerContext.get()));
 
 		// Apply the mutations from the cursor.
 		wait(applyMutationsFromCursor(
@@ -5956,8 +5983,6 @@ ACTOR Future<Void> update(std::shared_ptr<ptxn::StorageServer> storageServerCont
 			storageServerContext->lastVersionWithData = version;
 		}
 
-		// version = storageServerContext->logCursor->getVersion() - 1;
-
 		if (injectedChanges)
 			storageServerContext->lastVersionWithData = version;
 
@@ -5968,18 +5993,22 @@ ACTOR Future<Void> update(std::shared_ptr<ptxn::StorageServer> storageServerCont
 			version = storageUpdater.currentVersion;
 		}
 
+		std::cout << "S7Version = " << version << std::endl;
+
 		// The fully supported version (all storageServerContext at or before this version have arrived) is increased.
 		// Update the version and possibly change the desired oldest version
 		if (version != invalidVersion && version > storageServerContext->version.get()) {
 			// FIXME Set up TLogID
 			Optional<UID> cursorSourceTLogID = UID();
 			const Version minKnownCommittedVersion =
-			    dynamic_cast<ptxn::merged::BroadcastedStorageTeamPeekCursor_Ordered*>(storageServerContext->logCursor.get())
+			    dynamic_cast<ptxn::merged::BroadcastedStorageTeamPeekCursor_Ordered*>(
+			        storageServerContext->logCursor.get())
 			        ->getMinKnownCommittedVersion();
 			::details::updateVersion(
 			    storageServerContext.get(), cursorSourceTLogID, version, minKnownCommittedVersion, updatedChangeFeeds);
 		}
 
+		std::cout << " S8 " << std::endl;
 		validate(storageServerContext.get());
 
 		if (version >= storageServerContext->lastTLogVersion && storageServerContext->behind) {
@@ -7677,9 +7706,14 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 	    persistentData, db, ssi, storageTeams.present() ? storageTeams.get()[0] : Optional<ptxn::StorageTeamID>());
 	state Future<Void> ssCore;
 
-	self->storageTeamIDs = storageTeams.present()
-	                           ? std::set<ptxn::StorageTeamID>(storageTeams.get().begin(), storageTeams.get().end())
-	                           : Optional<std::set<ptxn::StorageTeamID>>();
+	if (storageTeams.present()) {
+		const auto& storageTeamIDs = storageTeams.get();
+		self->storageTeamIDs = std::set<ptxn::StorageTeamID>(std::begin(storageTeamIDs), std::end(storageTeamIDs));
+		for (const auto& storageTeamID : self->storageTeamIDs.get()) {
+			TraceEvent("StorageServerInit", ssi.id()).detail("StorageTeamID", storageTeamID);
+		}
+	}
+
 	self->folder = folder;
 	if (storageTeams.present()) {
 		self->logProtocol = ProtocolVersion::withPartitionTransaction();
