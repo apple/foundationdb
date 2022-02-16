@@ -708,6 +708,7 @@ Future<Void> createTenant(Reference<DB> db, TenantName name) {
 			tr->set(tenantMapKey, encodeTenantEntry(TenantMapEntry(prefix)));
 
 			wait(safeThreadFutureToFuture(tr->commit()));
+			TraceEvent("CreatedTenant").detail("Tenant", name).detail("Prefix", prefix);
 			return Void();
 		} catch (Error& e) {
 			wait(safeThreadFutureToFuture(tr->onError(e)));
@@ -748,6 +749,7 @@ Future<Void> deleteTenant(Reference<DB> db, TenantName name) {
 
 			tr->clear(tenantMapKey);
 			wait(safeThreadFutureToFuture(tr->commit()));
+			TraceEvent("DeletedTenant").detail("Tenant", name);
 			return Void();
 		} catch (Error& e) {
 			wait(safeThreadFutureToFuture(tr->onError(e)));

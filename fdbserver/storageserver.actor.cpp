@@ -456,8 +456,8 @@ public:
 	void clearWatchMetadata();
 
 	// tenant map operations
-	void insertTenant(KeyRef key, ValueRef value, Version version, bool insertIntoMutationLog);
-	void clearTenants(KeyRef startKey, KeyRef endKey, Version version);
+	void insertTenant(TenantNameRef tenantName, ValueRef value, Version version, bool insertIntoMutationLog);
+	void clearTenants(TenantNameRef startTenant, TenantNameRef endTenant, Version version);
 
 	Optional<TenantMapEntry> checkTenant(Version version,
 	                                     Optional<TenantName> tenant,
@@ -1386,7 +1386,7 @@ Optional<TenantMapEntry> StorageServer::checkTenant(Version version,
 		auto view = tenantMap.at(version);
 		auto itr = view.find(tenantName.get());
 		if (itr == view.end()) {
-			TraceEvent(SevWarn, "TenantNotFound", thisServerID)
+			TraceEvent(SevWarn, "StorageTenantNotFound", thisServerID)
 			    .detail("Tenant", tenantName)
 			    .detail("Begin", begin)
 			    .detail("End", end)
@@ -5191,9 +5191,11 @@ private:
 		} else if ((m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange) &&
 		           m.param1.startsWith(tenantMapPrivatePrefix)) {
 			if (m.type == MutationRef::SetValue) {
-				data->insertTenant(m.param1, m.param2, currentVersion, true);
+				data->insertTenant(m.param1.removePrefix(tenantMapPrivatePrefix), m.param2, currentVersion, true);
 			} else if (m.type == MutationRef::ClearRange) {
-				data->clearTenants(m.param1, m.param2, currentVersion);
+				data->clearTenants(m.param1.removePrefix(tenantMapPrivatePrefix),
+				                   m.param2.removePrefix(tenantMapPrivatePrefix),
+				                   currentVersion);
 			}
 		} else if (m.param1.substr(1).startsWith(tssMappingKeys.begin) &&
 		           (m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange)) {
@@ -5261,11 +5263,13 @@ private:
 	}
 };
 
-void StorageServer::insertTenant(KeyRef key, ValueRef value, Version version, bool insertIntoMutationLog) {
+void StorageServer::insertTenant(TenantNameRef tenantName,
+                                 ValueRef value,
+                                 Version version,
+                                 bool insertIntoMutationLog) {
 	tenantMap.createNewVersion(version);
 	tenantPrefixIndex.createNewVersion(version);
 
-	TenantName tenantName = key.substr(tenantMapPrivatePrefix.size());
 	TenantMapEntry tenantEntry = decodeTenantEntry(value);
 
 	tenantMap.insert(tenantName, tenantEntry);
@@ -5278,12 +5282,9 @@ void StorageServer::insertTenant(KeyRef key, ValueRef value, Version version, bo
 	}
 }
 
-void StorageServer::clearTenants(KeyRef startKey, KeyRef endKey, Version version) {
+void StorageServer::clearTenants(TenantNameRef startTenant, TenantNameRef endTenant, Version version) {
 	tenantMap.createNewVersion(version);
 	tenantPrefixIndex.createNewVersion(version);
-
-	StringRef startTenant = startKey.substr(tenantMapPrivatePrefix.size());
-	StringRef endTenant = endKey.substr(tenantMapPrivatePrefix.size());
 
 	auto view = tenantMap.at(version);
 	for (auto itr = view.lower_bound(startTenant); itr != view.lower_bound(endTenant); ++itr) {
@@ -7138,7 +7139,7 @@ ACTOR Future<Void> initTenantMap(StorageServer* self) {
 			RangeResult entries = wait(tr->getRange(tenantMapKeys, CLIENT_KNOBS->TOO_MANY));
 
 			for (auto kv : entries) {
-				self->insertTenant(kv.key, kv.value, version, false);
+				self->insertTenant(kv.key.removePrefix(tenantMapPrefix), kv.value, version, false);
 			}
 			break;
 		} catch (Error& e) {

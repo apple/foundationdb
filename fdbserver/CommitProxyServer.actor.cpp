@@ -850,6 +850,9 @@ ErrorOr<Void> checkTenant(ProxyCommitData* commitData, CommitTransactionRequest 
 		auto view = commitData->tenantMap.at(commitVersion);
 		auto itr = view.find(tr.tenantInfo.name.get());
 		if (itr == view.end()) {
+			TraceEvent(SevWarn, "CommitProxyTenantNotFound", commitData->dbgid)
+			    .detail("Tenant", tr.tenantInfo.name.get())
+			    .backtrace();
 			return tenant_not_found();
 		}
 

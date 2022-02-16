@@ -4466,6 +4466,9 @@ ACTOR Future<Key> getTenantPrefixImpl(Reference<TransactionState> trState, Futur
 	    wait(getValue(trState, trState->tenant.get().withPrefix(tenantMapPrefix), version, UseTenant::False));
 
 	if (!val.present()) {
+		TraceEvent(SevWarn, "ClientTenantNotFound", trState->cx->dbId)
+		    .detail("Tenant", trState->tenant.get())
+		    .backtrace();
 		throw tenant_not_found();
 	}
 
