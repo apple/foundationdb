@@ -62,13 +62,12 @@ public:
 
 	T median() { return percentile(0.5); }
 
+	// Percentile (X) is the smallest element in the sample set at least as large as X% of the samples.
 	T percentile(double percentile) {
 		if (!samples.size() || percentile < 0.0 || percentile > 1.0)
 			return T();
 		sort();
-		// Percentile (X) is the smallest element in the sample set at least as large as X% of the samples.
-		// Min with last idx to ensure no out of bounds for percentile=1.0
-		int idx = std::min((int)std::ceil(samples.size() - 1 * percentile), (int)samples.size() - 1);
+		int idx = std::max<int>(0, std::ceil(samples.size() * percentile) - 1);
 		return samples[idx];
 	}
 
