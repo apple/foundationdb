@@ -40,7 +40,7 @@ struct DetailedTSSMismatch {
 
 struct TSSMetrics : ReferenceCounted<TSSMetrics>, NonCopyable {
 	CounterCollection cc;
-	Counter requests;
+	Counter requests; // requests is the number of requests attempted, successful or not
 	Counter streamComparisons;
 	Counter ssErrors;
 	Counter tssErrors;
@@ -90,10 +90,12 @@ struct TSSMetrics : ReferenceCounted<TSSMetrics>, NonCopyable {
 		SSgetValueLatency.clear();
 		SSgetKeyLatency.clear();
 		SSgetKeyValuesLatency.clear();
+		SSgetKeyValuesAndFlatMapLatency.clear();
 
 		TSSgetValueLatency.clear();
 		TSSgetKeyLatency.clear();
 		TSSgetKeyValuesLatency.clear();
+		TSSgetKeyValuesAndFlatMapLatency.clear();
 
 		tssErrorsByCode.clear();
 		ssErrorsByCode.clear();

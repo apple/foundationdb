@@ -36,6 +36,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 
 	init( SYSTEM_MONITOR_INTERVAL,                 5.0 );
 	init( NETWORK_BUSYNESS_MONITOR_INTERVAL,       1.0 );
+	init( TSS_METRICS_LOGGING_INTERVAL,          120.0 ); // 2 minutes by default
 
 	init( FAILURE_MAX_DELAY,                       5.0 );
 	init( FAILURE_MIN_DELAY,                       4.0 ); if( randomize && BUGGIFY ) FAILURE_MIN_DELAY = 1.0;
