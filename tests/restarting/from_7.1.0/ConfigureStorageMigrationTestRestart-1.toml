@@ -8,6 +8,7 @@ clearAfterTest = false
     testName = 'ConfigureDatabase'
     testDuration = 30.0
     allowTestStorageMigration = true
+    allowDescriptorChange = false
 
     [[test.workload]]
     testName = 'RandomClogging'

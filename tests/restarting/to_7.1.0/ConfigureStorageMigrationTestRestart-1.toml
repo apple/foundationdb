@@ -1,4 +1,8 @@
+[configuration]
 extraMachineCountDC = 2
+maxTLogVersion=6
+disableHostname=true
+storageEngineExcludeTypes=[4]
 
 [[test]]
 testTitle = 'CloggedConfigureDatabaseTest'
@@ -8,6 +12,8 @@ clearAfterTest = false
     testName = 'ConfigureDatabase'
     testDuration = 30.0
     allowTestStorageMigration = true
+    allowDescriptorChange = false
+    downgradeTest1 = true
 
     [[test.workload]]
     testName = 'RandomClogging'
