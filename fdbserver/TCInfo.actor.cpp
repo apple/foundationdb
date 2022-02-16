@@ -128,10 +128,9 @@ TCServerInfo::TCServerInfo(StorageServerInterface ssi,
                            bool inDesiredDC,
                            Reference<LocalitySet> storageServerSet,
                            Version addedVersion)
-  : id(ssi.id()), addedVersion(addedVersion), collection(collection), lastKnownInterface(ssi),
-    lastKnownClass(processClass), dataInFlightToServer(0), onInterfaceChanged(interfaceChanged.getFuture()),
-    onRemoved(removed.getFuture()), onTSSPairRemoved(Never()), inDesiredDC(inDesiredDC),
-    storeType(KeyValueStoreType::END) {
+  : id(ssi.id()), inDesiredDC(inDesiredDC), collection(collection), addedVersion(addedVersion), lastKnownInterface(ssi),
+    lastKnownClass(processClass), storeType(KeyValueStoreType::END), dataInFlightToServer(0),
+    onInterfaceChanged(interfaceChanged.getFuture()), onRemoved(removed.getFuture()), onTSSPairRemoved(Never()) {
 
 	if (!ssi.isTss()) {
 		localityEntry = ((LocalityMap<UID>*)storageServerSet.getPtr())->add(ssi.locality, &id);
@@ -167,10 +166,72 @@ Future<Void> TCServerInfo::serverMetricsPolling() {
 	return TCServerInfoImpl::serverMetricsPolling(this);
 }
 
+void TCServerInfo::updateInDesiredDC(std::vector<Optional<Key>> const& includedDCs) {
+	inDesiredDC =
+	    (includedDCs.empty() ||
+	     std::find(includedDCs.begin(), includedDCs.end(), lastKnownInterface.locality.dcId()) != includedDCs.end());
+}
+
+void TCServerInfo::cancel() {
+	tracker.cancel();
+	collection = nullptr;
+}
+
+void TCServerInfo::updateLastKnown(StorageServerInterface const& ssi, ProcessClass processClass) {
+	lastKnownInterface = ssi;
+	lastKnownClass = processClass;
+}
+
+Future<Void> TCServerInfo::updateStoreType() {
+	return store(storeType,
+	             brokenPromiseToNever(lastKnownInterface.getKeyValueStoreType.getReplyWithTaskID<KeyValueStoreType>(
+	                 TaskPriority::DataDistribution)));
+}
+
+void TCServerInfo::removeTeamsContainingServer(UID removedServer) {
+	for (int t = 0; t < teams.size(); t++) {
+		auto const& serverIds = teams[t]->getServerIDs();
+		if (std::count(serverIds.begin(), serverIds.end(), removedServer)) {
+			teams[t--] = teams.back();
+			teams.pop_back();
+		}
+	}
+}
+
+void TCServerInfo::removeTeam(Reference<TCTeamInfo> team) {
+	for (int t = 0; t < teams.size(); t++) {
+		if (teams[t] == team) {
+			teams[t--] = teams.back();
+			teams.pop_back();
+			return; // The teams on a server should never duplicate
+		}
+	}
+}
+
+void TCServerInfo::markTeamUnhealthy(int teamIndex) {
+	teams[teamIndex]->setHealthy(false);
+}
+
 TCServerInfo::~TCServerInfo() {
 	if (collection && ssVersionTooFarBehind.get() && !lastKnownInterface.isTss()) {
 		collection->removeLaggingStorageServer(lastKnownInterface.locality.zoneId().get());
 	}
+}
+
+bool TCMachineTeamInfo::matches(std::vector<Standalone<StringRef>> const& sortedMachineIDs) {
+	std::sort(machineIDs.begin(), machineIDs.end());
+	return sortedMachineIDs == machineIDs;
+}
+
+bool TCMachineTeamInfo::removeServerTeam(Reference<TCTeamInfo> team) {
+	for (int t = 0; t < serverTeams.size(); ++t) {
+		if (serverTeams[t] == team) {
+			serverTeams[t--] = serverTeams.back();
+			serverTeams.pop_back();
+			return true; // The same team is added to the serverTeams only once
+		}
+	}
+	return false;
 }
 
 Reference<TCMachineInfo> TCMachineInfo::clone() const {
@@ -186,7 +247,7 @@ TCMachineInfo::TCMachineInfo(Reference<TCServerInfo> server, const LocalityEntry
 	ASSERT(serversOnMachine.empty());
 	serversOnMachine.push_back(server);
 
-	LocalityData& locality = server->lastKnownInterface.locality;
+	LocalityData const& locality = server->getLastKnownInterface().locality;
 	ASSERT(locality.zoneId().present());
 	machineID = locality.zoneId().get();
 }
@@ -204,7 +265,7 @@ std::string TCMachineInfo::getServersIDStr() const {
 }
 
 TCMachineTeamInfo::TCMachineTeamInfo(std::vector<Reference<TCMachineInfo>> const& machines)
-  : machines(machines), id(deterministicRandom()->randomUniqueID()) {
+  : _id(deterministicRandom()->randomUniqueID()), machines(machines) {
 	machineIDs.reserve(machines.size());
 	for (int i = 0; i < machines.size(); i++) {
 		machineIDs.push_back(machines[i]->machineID);
@@ -241,7 +302,7 @@ std::vector<StorageServerInterface> TCTeamInfo::getLastKnownServerInterfaces() c
 	std::vector<StorageServerInterface> v;
 	v.reserve(servers.size());
 	for (const auto& server : servers) {
-		v.push_back(server->lastKnownInterface);
+		v.push_back(server->getLastKnownInterface());
 	}
 	return v;
 }
@@ -261,13 +322,14 @@ std::string TCTeamInfo::getServerIDsStr() const {
 
 void TCTeamInfo::addDataInFlightToTeam(int64_t delta) {
 	for (int i = 0; i < servers.size(); i++)
-		servers[i]->dataInFlightToServer += delta;
+		servers[i]->incrementDataInFlightToServer(delta);
 }
 
 int64_t TCTeamInfo::getDataInFlightToTeam() const {
 	int64_t dataInFlight = 0.0;
-	for (int i = 0; i < servers.size(); i++)
-		dataInFlight += servers[i]->dataInFlightToServer;
+	for (auto const& server : servers) {
+		dataInFlight += server->getDataInFlightToServer();
+	}
 	return dataInFlight;
 }
 
@@ -294,15 +356,15 @@ int64_t TCTeamInfo::getLoadBytes(bool includeInFlight, double inflightPenalty) c
 int64_t TCTeamInfo::getMinAvailableSpace(bool includeInFlight) const {
 	int64_t minAvailableSpace = std::numeric_limits<int64_t>::max();
 	for (const auto& server : servers) {
-		if (server->serverMetrics.present()) {
-			auto& replyValue = server->serverMetrics.get();
+		if (server->serverMetricsPresent()) {
+			auto& replyValue = server->getServerMetrics();
 
 			ASSERT(replyValue.available.bytes >= 0);
 			ASSERT(replyValue.capacity.bytes >= 0);
 
 			int64_t bytesAvailable = replyValue.available.bytes;
 			if (includeInFlight) {
-				bytesAvailable -= server->dataInFlightToServer;
+				bytesAvailable -= server->getDataInFlightToServer();
 			}
 
 			minAvailableSpace = std::min(bytesAvailable, minAvailableSpace);
@@ -315,15 +377,15 @@ int64_t TCTeamInfo::getMinAvailableSpace(bool includeInFlight) const {
 double TCTeamInfo::getMinAvailableSpaceRatio(bool includeInFlight) const {
 	double minRatio = 1.0;
 	for (const auto& server : servers) {
-		if (server->serverMetrics.present()) {
-			auto& replyValue = server->serverMetrics.get();
+		if (server->serverMetricsPresent()) {
+			auto const& replyValue = server->getServerMetrics();
 
 			ASSERT(replyValue.available.bytes >= 0);
 			ASSERT(replyValue.capacity.bytes >= 0);
 
 			int64_t bytesAvailable = replyValue.available.bytes;
 			if (includeInFlight) {
-				bytesAvailable = std::max((int64_t)0, bytesAvailable - server->dataInFlightToServer);
+				bytesAvailable = std::max((int64_t)0, bytesAvailable - server->getDataInFlightToServer());
 			}
 
 			if (replyValue.capacity.bytes == 0)
@@ -357,7 +419,7 @@ bool TCTeamInfo::hasHealthyAvailableSpace(double minRatio) const {
 
 bool TCTeamInfo::isOptimal() const {
 	for (const auto& server : servers) {
-		if (server->lastKnownClass.machineClassFitness(ProcessClass::Storage) > ProcessClass::UnsetFit) {
+		if (server->getLastKnownClass().machineClassFitness(ProcessClass::Storage) > ProcessClass::UnsetFit) {
 			return false;
 		}
 	}
@@ -379,9 +441,9 @@ int64_t TCTeamInfo::getLoadAverage() const {
 	int64_t bytesSum = 0;
 	int added = 0;
 	for (int i = 0; i < servers.size(); i++)
-		if (servers[i]->serverMetrics.present()) {
+		if (servers[i]->serverMetricsPresent()) {
 			added++;
-			bytesSum += servers[i]->serverMetrics.get().load.bytes;
+			bytesSum += servers[i]->getServerMetrics().load.bytes;
 		}
 
 	if (added < servers.size())

@@ -29,17 +29,26 @@ class TCMachineTeamInfo;
 class TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	friend class TCServerInfoImpl;
 	UID id;
-
-public:
-	Version addedVersion; // Read version when this Server is added
+	bool inDesiredDC;
 	DDTeamCollection* collection;
+	Future<Void> tracker;
+
+	// TODO: Remove?
+	[[maybe_unused]] Version addedVersion; // Read version when this Server is added
+
 	StorageServerInterface lastKnownInterface;
 	ProcessClass lastKnownClass;
-	std::vector<Reference<TCTeamInfo>> teams;
-	Reference<TCMachineInfo> machine;
-	Future<Void> tracker;
+
+	// A storage server's StoreType does not change.
+	// To change storeType for an ip:port, we destroy the old one and create a new one.
+	KeyValueStoreType storeType; // Storage engine type
+
 	int64_t dataInFlightToServer;
+	std::vector<Reference<TCTeamInfo>> teams;
 	ErrorOr<GetStorageMetricsReply> serverMetrics;
+
+public:
+	Reference<TCMachineInfo> machine;
 	Promise<std::pair<StorageServerInterface, ProcessClass>> interfaceChanged;
 	Future<std::pair<StorageServerInterface, ProcessClass>> onInterfaceChanged;
 	Promise<Void> removed;
@@ -47,14 +56,10 @@ public:
 	Future<Void> onTSSPairRemoved;
 	Promise<Void> killTss;
 	Promise<Void> wakeUpTracker;
-	bool inDesiredDC;
 	LocalityEntry localityEntry;
 	Promise<Void> updated;
 	AsyncVar<bool> wrongStoreTypeToRemove;
 	AsyncVar<bool> ssVersionTooFarBehind;
-	// A storage server's StoreType does not change.
-	// To change storeType for an ip:port, we destroy the old one and create a new one.
-	KeyValueStoreType storeType; // Storage engine type
 
 	TCServerInfo(StorageServerInterface ssi,
 	             DDTeamCollection* collection,
@@ -64,6 +69,23 @@ public:
 	             Version addedVersion = 0);
 
 	UID const& getId() const { return id; }
+	bool isInDesiredDC() const { return inDesiredDC; }
+	void updateInDesiredDC(std::vector<Optional<Key>> const& includedDCs);
+	void setTracker(Future<Void> tracker) { this->tracker = tracker; }
+	void updateLastKnown(StorageServerInterface const&, ProcessClass);
+	StorageServerInterface const& getLastKnownInterface() const { return lastKnownInterface; }
+	ProcessClass const& getLastKnownClass() const { return lastKnownClass; }
+	Future<Void> updateStoreType();
+	KeyValueStoreType getStoreType() const { return storeType; }
+	int64_t getDataInFlightToServer() const { return dataInFlightToServer; }
+	void incrementDataInFlightToServer(int64_t bytes) { dataInFlightToServer += bytes; }
+	void cancel();
+	std::vector<Reference<TCTeamInfo>> const& getTeams() const { return teams; }
+	void addTeam(Reference<TCTeamInfo> team) { teams.push_back(team); }
+	void removeTeamsContainingServer(UID removedServer);
+	void removeTeam(Reference<TCTeamInfo>);
+	GetStorageMetricsReply const& getServerMetrics() const { return serverMetrics.get(); }
+	bool serverMetricsPresent() const { return serverMetrics.present(); }
 
 	bool isCorrectStoreType(KeyValueStoreType configStoreType) const {
 		// A new storage server's store type may not be set immediately.
@@ -74,10 +96,14 @@ public:
 	bool hasHealthyAvailableSpace(double minAvailableSpaceRatio) const;
 
 	Future<Void> updateServerMetrics();
-
 	static Future<Void> updateServerMetrics(Reference<TCServerInfo> server);
-
 	Future<Void> serverMetricsPolling();
+
+	// FIXME: Public for testing only:
+	void setServerMetrics(GetStorageMetricsReply serverMetrics) { this->serverMetrics = serverMetrics; }
+
+	// FIXME: Public for testing only:
+	void markTeamUnhealthy(int teamIndex);
 
 	~TCServerInfo();
 };
@@ -100,20 +126,32 @@ public:
 
 // TeamCollection's machine team information
 class TCMachineTeamInfo : public ReferenceCounted<TCMachineTeamInfo> {
-public:
+	UID _id;
 	std::vector<Reference<TCMachineInfo>> machines;
 	std::vector<Standalone<StringRef>> machineIDs;
 	std::vector<Reference<TCTeamInfo>> serverTeams;
-	UID id;
 
+public:
 	explicit TCMachineTeamInfo(std::vector<Reference<TCMachineInfo>> const& machines);
 
 	int size() const {
-		ASSERT(machines.size() == machineIDs.size());
+		ASSERT_EQ(machines.size(), machineIDs.size());
 		return machineIDs.size();
 	}
 
+	UID id() const { return _id; }
+	std::vector<Reference<TCMachineInfo>> const& getMachines() const { return machines; }
+	std::vector<Standalone<StringRef>> const& getMachineIDs() const { return machineIDs; }
+	std::vector<Reference<TCTeamInfo>> const& getServerTeams() const { return serverTeams; }
+	void addServerTeam(Reference<TCTeamInfo> team) { serverTeams.push_back(team); }
+	bool matches(std::vector<Standalone<StringRef>> const& sortedMachineIDs);
 	std::string getMachineIDsStr() const;
+	bool containsMachine(Standalone<StringRef> machineID) const {
+		return std::count(machineIDs.begin(), machineIDs.end(), machineID);
+	}
+
+	// Returns true iff team is found
+	bool removeServerTeam(Reference<TCTeamInfo> team);
 
 	bool operator==(TCMachineTeamInfo& rhs) const { return this->machineIDs == rhs.machineIDs; }
 };
