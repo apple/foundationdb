@@ -59,8 +59,12 @@ TEST_CASE("fdbserver/ptxn/test/StorageServerPull") {
 	    .initPtxnTLog(ptxn::MessageTransferModel::StorageServerActivelyPull, options.numTLogs)
 	    .initServerDBInfo()
 	    .initPtxnStorageServer(1)
-	    .initMessagesWithPrivateMutations(
-	        options.initialVersion, options.numVersions, options.numMutationsPerVersion, Optional<std::vector<UID>>());
+	    .initMessagesWithPrivateMutations(options.initialVersion,
+	                                      options.numVersions,
+	                                      options.numMutationsPerVersion,
+	                                      /* optionalStorageServerIDs= */ {});
+
+	ptxn::test::print::printCommitRecords();
 
 	wait(ptxn::test::messageFeeder());
 

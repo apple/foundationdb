@@ -127,7 +127,7 @@ ACTOR Future<Void> runStorageServer(StorageServerTestDriver* self) {
 
 	const auto storeType = self->options.storeType;
 
-	const std::string folder = ".";
+	const std::string folder = "./simfdb/";
 	const std::string fileName = joinPath(folder, "storage-" + ssi.id().toString() + "." + storeType.toString());
 	printTiming << "new Storage Server file name: " << fileName << std::endl;
 	deleteFile(fileName);
@@ -155,6 +155,8 @@ ACTOR Future<Void> runStorageServer(StorageServerTestDriver* self) {
 
 	self->actors.add(ss);
 	wait(ss);
+
+	// FIXME: folder should be RAII cleaned up
 
 	return Void();
 }

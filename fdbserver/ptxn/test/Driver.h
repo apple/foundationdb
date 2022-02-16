@@ -293,6 +293,8 @@ protected:
 	const TLogGroupFixture& tLogGroupFixture;
 	const ServerDBInfoFixture& serverDBInfoFixture;
 
+	const std::string folderPrefix;
+
 public:
 	// TODO For test, only support in-memory store type at this stage
 	static const KeyValueStoreType keyValueStoreType;
@@ -300,6 +302,7 @@ public:
 	struct StorageServerResources {
 		static constexpr int MEMORY_LIMIT = 256 * 1024 * 1024; // 256MB per storage server
 
+		const std::string folderPrefix;
 		const StorageTeamID storageTeamID;
 		std::shared_ptr<::StorageServerInterface> interface;
 		const UID clusterID;
@@ -309,7 +312,7 @@ public:
 
 		std::string getFolder() const;
 
-		StorageServerResources(const StorageTeamID& storageTeamID_);
+		StorageServerResources(const StorageTeamID& storageTeamID_, const std::string& folderPrefix_);
 	};
 
 	std::vector<StorageServerResources> storageServerResources;
@@ -317,7 +320,7 @@ public:
 	std::vector<Future<Void>> actors;
 
 	ptxnStorageServerFixture(const TLogGroupFixture& tLogGroupFixture_, const ServerDBInfoFixture& serverDBInfoFixture_)
-	  : tLogGroupFixture(tLogGroupFixture_), serverDBInfoFixture(serverDBInfoFixture_) {}
+	  : tLogGroupFixture(tLogGroupFixture_), serverDBInfoFixture(serverDBInfoFixture_), folderPrefix("./simfdb/") {}
 	~ptxnStorageServerFixture();
 
 	void setUp(const int numStorageServers);

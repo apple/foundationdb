@@ -1,5 +1,5 @@
 [[test]]
-testTitle = 'Test TLog group peek cursor'
+testTitle = 'Test TLog single storage team peek cursor'
 useDB = false
 startDelay = 0
 
@@ -8,7 +8,7 @@ startDelay = 0
    maxTestCases = 1
    testsMatching = '/fdbserver/ptxn/test/tLogPeek/cursor/StorageTeamPeekCursor'
 
-   numVersions = 10
+   numVersions = 50
    numMutationsPerVersion = 100
 
 [[test]]
@@ -22,7 +22,7 @@ startDelay = 0
     testsMatching = '/fdbserver/ptxn/test/tLogPeek/cursor/merged/BroadcastedStorageTeamPeekCursor_Unordered'
 
     numVersions = 10
-    numMutationsPerVersion = 100
+    numMutationsPerVersion = 10
 
 [[test]]
 testTitle = "BroadcastedStorageTeamPeekCursor_Ordered test"

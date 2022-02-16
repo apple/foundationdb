@@ -128,6 +128,7 @@ ACTOR Future<Void> messageFeeder() {
 ACTOR Future<std::vector<VersionSubsequenceMessage>> getAllMessageFromCursor(std::shared_ptr<PeekCursorBase> pCursor,
                                                                              Arena* arena) {
 	state std::vector<VersionSubsequenceMessage> messages;
+	state std::vector<VersionSubsequenceMessage> messagesDup;
 	state RandomDelay randomDelay(0.01, 0.02);
 	loop {
 		try {
@@ -143,17 +144,43 @@ ACTOR Future<std::vector<VersionSubsequenceMessage>> getAllMessageFromCursor(std
 			// In serious work this should be exponental backoff with jitter
 			wait(randomDelay());
 		} else {
-			for (const VersionSubsequenceMessage& vsm : *pCursor) {
-				// Empty version message type is not stored in CommitRecord
-				if (vsm.message.getType() == Message::Type::EMPTY_VERSION_MESSAGE) {
-					continue;
+			auto getAllMessages = [this](std::vector<VersionSubsequenceMessage>& container) {
+				std::cout << " Begin dumping cursor data" << std::endl;
+				int i = 0;
+				for (const VersionSubsequenceMessage& vsm : *pCursor) {
+					std::cout << vsm.toString() << std::endl;
+					if (vsm.message.getType() == Message::Type::MUTATION_REF) {
+						MutationRef ref = std::get<MutationRef>(vsm.message);
+						if (ref.param1.startsWith(storageServerToTeamIdKeyPrefix)) {
+							ptxn::StorageServerStorageTeams ss(ref.param2);
+							std::cout << "\t\t" << ss.toString() << std::endl;
+						}
+					}
+					// Empty version message type is not stored in CommitRecord
+					if (vsm.message.getType() == Message::Type::EMPTY_VERSION_MESSAGE) {
+						continue;
+					}
+					if (vsm.message.getType() == Message::Type::MUTATION_REF) {
+						container.emplace_back(
+						    vsm.version, vsm.subsequence, MutationRef(*arena, std::get<MutationRef>(vsm.message)));
+					} else {
+						container.emplace_back(vsm);
+					}
 				}
-				if (vsm.message.getType() == Message::Type::MUTATION_REF) {
-					messages.emplace_back(
-					    vsm.version, vsm.subsequence, MutationRef(*arena, std::get<MutationRef>(vsm.message)));
-				} else {
-					messages.emplace_back(vsm);
-				}
+				std::cout << " End dumping cursor data" << std::endl;
+				std::cout << " iterate = " << i << std::endl;
+			};
+
+			// Ensure the cursor can be repeatly iterated
+			getAllMessages(messages);
+			pCursor->reset();
+			getAllMessages(messagesDup);
+
+			std::cout << "Next RPC" << std::endl;
+
+			ASSERT_EQ(messages.size(), messagesDup.size());
+			for (int i = 0; i < static_cast<int>(messages.size()); ++i) {
+				ASSERT(messages[i] == messagesDup[i]);
 			}
 		}
 	}
@@ -175,7 +202,7 @@ TEST_CASE("/fdbserver/ptxn/test/tLogPeek/cursor/StorageTeamPeekCursor") {
 
 	for (auto& pTLogContext : ptxn::test::TestEnvironment::getTLogs()->tLogContexts) {
 		// Limit the versions per reply, to force multiple peeks
-		pTLogContext->maxVersionsPerPeek = 5;
+		pTLogContext->maxVersionsPerPeek = deterministicRandom()->randomInt(1, 5);
 		pTLogContext->latency.enable();
 	}
 
@@ -274,7 +301,7 @@ Future<Void> runMergedCursorTest(ptxn::test::TestTLogPeekMergeCursorOptions opti
 
 	// Force multiple time peek, and peek causes latency
 	for (auto pFakeTLogContext : ptxn::test::TestEnvironment::getTLogs()->tLogContexts) {
-		pFakeTLogContext->maxVersionsPerPeek = 10;
+		pFakeTLogContext->maxVersionsPerPeek = deterministicRandom()->randomInt(3, 5);
 		pFakeTLogContext->latency.enable();
 	}
 
@@ -466,6 +493,8 @@ TEST_CASE("/fdbserver/ptxn/test/tLogPeek/cursor/merged/OrderedMutableTeamPeekCur
 	                                      options.numVersions,
 	                                      options.numMutationsPerVersion,
 	                                      Optional<std::vector<UID>>(storageServerIDs));
+
+	ptxn::test::print::printCommitRecords();
 
 	// Force multiple time peek, and peek causes latency
 	for (auto pFakeTLogContext : ptxn::test::TestEnvironment::getTLogs()->tLogContexts) {

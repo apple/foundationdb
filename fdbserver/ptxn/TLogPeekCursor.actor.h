@@ -49,7 +49,8 @@ public:
 	// operator++ support. NOTE It will *NOT* trigger remoteMoreAvailable(). It will only iterate over the serialized
 	// data that are already peeked from TLog.
 	// NOTE: Duplicating the iterator may led to unexpected behavior, i.e. step one iterator causes the other iterators
-	// being stepped. It is discouraged to explicitly duplicate the iterator.
+	// being stepped. It is discouraged to explicitly duplicate the iterator. At one time, only one iterator should be
+	// used.
 	class iterator : public ConstInputIteratorBase<VersionSubsequenceMessage> {
 		friend class PeekCursorBase;
 
@@ -80,8 +81,8 @@ public:
 
 	PeekCursorBase();
 
-	// Checks if there are any more messages in the remote TLog(s), if so, retrieve the messages to local. Will
-	// invalidate the existing iterators.
+	// Checks if there are any more messages in the remote TLog(s), if so, retrieve the messages to local. The behavior
+	// is undefined if hasRemaining is true.
 	Future<bool> remoteMoreAvailable();
 
 	// Gets one mutation, the behavior is undefined if hasRemaining is not called or returning false.
@@ -106,6 +107,10 @@ public:
 	// Returns an iterator that represents the end of the data
 	const iterator& end() const { return endIterator; }
 
+	// Resets the deserializer, allowing re-iterate over the data
+	// SOMEDAY: Should support multiple iterator, since the data is already retrieved from RPC
+	void reset();
+
 protected:
 	// Checks if there is any mutations remotely
 	virtual Future<bool> remoteMoreAvailableImpl() = 0;
@@ -118,6 +123,9 @@ protected:
 
 	// Checks if any remaining mutations
 	virtual bool hasRemainingImpl() const = 0;
+
+	// Resets the iterator
+	virtual void resetImpl() = 0;
 
 private:
 	// The iterator that represents the end of the unserialized data
@@ -295,6 +303,7 @@ protected:
 	virtual void nextImpl() override;
 	virtual const VersionSubsequenceMessage& getImpl() const override;
 	virtual bool hasRemainingImpl() const override;
+	virtual void resetImpl() override;
 };
 
 // Cursor that merges multiple cursors into one
@@ -355,6 +364,9 @@ public:
 
 	// Erase a cursor by its storage team ID
 	void erase(const StorageTeamID& storageTeamID) { eraseImpl(storageTeamID); }
+
+	// Format the content to string
+	std::string toString() const;
 };
 
 // Provides an ordered container of cursors. In the container the first element is defined as the container that is
@@ -440,6 +452,18 @@ class BroadcastedStorageTeamPeekCursorBase : public ptxn::details::VersionSubseq
 protected:
 	std::unique_ptr<details::CursorContainerBase> pCursorContainer;
 
+	// A snapshot of the context after remoteMoreAvailable call, to support re-iterate the content
+	mutable struct {
+		// Flag that indicates if a remoteMoreAvailable is just called and the context needs to be updated
+		bool needSnapshot = false;
+
+		// The first version received from the latest remoteMoreAvailable call
+		Version version;
+
+		// The cursor container snapshot from the latest remoteMoreAvailable call
+		std::unique_ptr<details::CursorContainerBase> pCursorContainer;
+	} remoteMoreAvailableSnapshot;
+
 	// The current version the cursorContainer is using
 	Version currentVersion;
 
@@ -451,8 +475,11 @@ protected:
 
 protected:
 	BroadcastedStorageTeamPeekCursorBase(std::unique_ptr<details::CursorContainerBase>&& pCursorContainer_,
+	                                     std::unique_ptr<details::CursorContainerBase>&& pCursorContainerSnapshot_,
 	                                     const Version& version_ = 0)
-	  : pCursorContainer(std::move(pCursorContainer_)), currentVersion(version_) {}
+	  : pCursorContainer(std::move(pCursorContainer_)),
+	    remoteMoreAvailableSnapshot{ false, version_, std::move(pCursorContainerSnapshot_) }, currentVersion(version_) {
+	}
 
 	// Tries to fill the cursor heap, returns true if the cursorContainer is filled with cursors.
 	// If cursorContainer is not empty, the behavior is undefined.
@@ -461,9 +488,12 @@ protected:
 	virtual Future<bool> remoteMoreAvailableImpl() override;
 	virtual const VersionSubsequenceMessage& getImpl() const override;
 	virtual bool hasRemainingImpl() const override;
+	virtual void resetImpl() override;
 
 	virtual void addCursorImpl(const std::shared_ptr<StorageTeamPeekCursor>& cursor) override;
 	virtual std::shared_ptr<StorageTeamPeekCursor> removeCursorImpl(const StorageTeamID& cursor) override;
+
+	bool isCursorContainerEmpty() const { return pCursorContainer->empty(); }
 
 public:
 	using ptxn::details::ExtraTLogPeekReplyContextMixin::getMaxKnownVersion;
@@ -484,7 +514,8 @@ protected:
 
 public:
 	BroadcastedStorageTeamPeekCursor_Ordered()
-	  : BroadcastedStorageTeamPeekCursorBase(std::make_unique<details::OrderedCursorContainer>()) {}
+	  : BroadcastedStorageTeamPeekCursorBase(std::make_unique<details::OrderedCursorContainer>(),
+	                                         std::make_unique<details::OrderedCursorContainer>()) {}
 };
 
 // Merge multiple storage team peek cursor into one. The version is the barrier, i.e., a version is complete iff all
@@ -497,7 +528,8 @@ protected:
 
 public:
 	BroadcastedStorageTeamPeekCursor_Unordered()
-	  : BroadcastedStorageTeamPeekCursorBase(std::make_unique<details::UnorderedCursorContainer>()) {}
+	  : BroadcastedStorageTeamPeekCursorBase(std::make_unique<details::UnorderedCursorContainer>(),
+	                                         std::make_unique<details::UnorderedCursorContainer>()) {}
 };
 
 } // namespace merged

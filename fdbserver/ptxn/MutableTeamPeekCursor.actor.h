@@ -29,6 +29,7 @@
 #include <algorithm>
 #include <functional>
 #include <list>
+#include <unordered_map>
 #include <memory>
 #include <set>
 #include <vector>
@@ -54,6 +55,9 @@ private:
 	// The storageServerToTeamId key for the storage server
 	const Key storageServerToTeamIDKey;
 
+	// Storage team ID snapshot
+	mutable StorageServerStorageTeams storageTeamIDsSnapshot;
+
 	// Teams
 	StorageServerStorageTeams storageTeamIDs;
 
@@ -66,6 +70,13 @@ private:
 	// Creates new cursor
 	std::shared_ptr<StorageTeamPeekCursor> createCursor(const StorageTeamID& storageTeamID);
 
+	// Cursors that being removed when remoteMoreAvailable is called
+	// NOTE: They might be reintroduced later when re-iterate the cursor, thus they are not immediately dropped
+	std::unordered_map<StorageTeamID, std::shared_ptr<StorageTeamPeekCursor>> cursorsToBeRemoved;
+
+	// Additional Storage team IDs that should be included in the next RPC
+	std::list<StorageTeamID> storageTeamIDsToBeAdded;
+
 	// Refreshes storageTeamIDs by newStorageTeamIDs, add/remove corresponding storage teams
 	bool updateStorageTeams();
 
@@ -75,15 +86,17 @@ private:
 
 protected:
 	virtual const VersionSubsequenceMessage& getImpl() const override;
-
 	virtual bool hasRemainingImpl() const override;
+	virtual void resetImpl() override;
+	virtual Future<bool> remoteMoreAvailableImpl() override;
 
 public:
 	MutableTeamPeekCursor(const UID serverID_,
 	                      const StorageTeamID& privateMutationStorageTeamID_,
 	                      const TLogInterfaceByStorageTeamIDFunc& getTLogInterfaceByStorageTeamID_)
 	  : BaseClass(), serverID(serverID_), storageServerToTeamIDKey(::storageServerToTeamIdKey(serverID_)),
-	    storageTeamIDs(privateMutationStorageTeamID_), newStorageTeamIDs(privateMutationStorageTeamID_),
+	    storageTeamIDsSnapshot(privateMutationStorageTeamID_), storageTeamIDs(privateMutationStorageTeamID_),
+	    newStorageTeamIDs(privateMutationStorageTeamID_),
 	    getTLogInterfaceByStorageTeamID(getTLogInterfaceByStorageTeamID_), shouldUpdateStorageTeamCursor(false) {
 
 		const auto& privateMutationStorageTeamID = storageTeamIDs.getPrivateMutationsStorageTeamID();
@@ -104,6 +117,7 @@ std::shared_ptr<StorageTeamPeekCursor> MutableTeamPeekCursor<BaseClass>::createC
 
 	const auto tLogInterfaces = getTLogInterfaceByStorageTeamID(storageTeamID);
 	ASSERT(tLogInterfaces.size() > 0);
+	std::cout << " New cursor has version " << BaseClass::currentVersion + 1 << std::endl;
 	return std::make_shared<StorageTeamPeekCursor>(
 	    // NOTE: Do NOT use BaseCalss::getVersion() since it will trigger getImpl
 	    // The new cursor will start peeking *AFTER* current version is completed. The peek will be called immediately
@@ -121,6 +135,9 @@ bool MutableTeamPeekCursor<BaseClass>::updateStorageTeams() {
 	const auto& newStorageTeams = newStorageTeamIDs.getStorageTeams();
 	const auto& oldStorageTeams = storageTeamIDs.getStorageTeams();
 
+	std::cout << " New storage teams " << joinToString(newStorageTeams) << std::endl;
+	std::cout << " Old storage teams " << joinToString(oldStorageTeams) << std::endl;
+
 	// NOTE: Do NOT use BaseCalss::getVersion() since it will trigger getImpl
 	TraceEvent("MutableTeamPeekCursorUpdateTeam")
 	    .detail("StorageServerID", serverID)
@@ -135,41 +152,91 @@ bool MutableTeamPeekCursor<BaseClass>::updateStorageTeams() {
 	                    std::back_inserter(teamsToBeRemoved));
 	for (const auto& storageTeamID : teamsToBeRemoved) {
 		if (!BaseClass::isCursorExists(storageTeamID)) {
-			// The cursor might get end-of-stream already, and being removed automatically by tryFillCursorContainer
 			TraceEvent("MutableTeamPeekCursorRemoveTeam")
 			    .detail("StorageServerID", serverID)
 			    .detail("StorageTeamID", storageTeamID)
 			    .detail("PreviouslyRemoved", true);
 			continue;
 		}
-		BaseClass::removeCursor(storageTeamID);
+
+		ASSERT_EQ(cursorsToBeRemoved.count(storageTeamID), 0);
+		// Remove cursor is done immediately -- otherwise the content will still be accessed when iterating.
+		cursorsToBeRemoved[storageTeamID] = BaseClass::removeCursor(storageTeamID);
+
+		std::cout << " Remove cursor " << storageTeamID.toString() << std::endl;
+
 		TraceEvent("MutableTeamPeekCursorRemoveTeam")
 		    .detail("StorageServerID", serverID)
 		    .detail("StorageTeamID", storageTeamID);
 	}
 
 	// Storage teams to be added, newStorageTeams - oldStorageTeams
-	std::list<StorageTeamID> teamsToBeAdded;
+	// NOTE: The new cursor might be a cursor previously removed, however in real situation this will happen rarely.
+	// Thus, do not try to reuse old cursor.
 	std::set_difference(std::begin(newStorageTeams),
 	                    std::end(newStorageTeams),
 	                    std::begin(oldStorageTeams),
 	                    std::end(oldStorageTeams),
-	                    std::back_inserter(teamsToBeAdded));
-	for (const auto& storageTeamID : teamsToBeAdded) {
+	                    std::back_inserter(storageTeamIDsToBeAdded));
+	std::cout << "Cursors to be added back " << joinToString(storageTeamIDsToBeAdded) << std::endl;
+	// NOTE: Adding new cursors will always cause RPC, so the cursors will be created at RPC step, i.e.,
+	// remoteMoreAvailableImpl
+	/*
+for (const auto& storageTeamID : teamsToBeAdded) {
+ASSERT(!BaseClass::isCursorExists(storageTeamID));
+
+auto newCursor = createCursor(storageTeamID);
+BaseClass::addCursor(newCursor);
+// NOTE: Do *NOT* remove the cursor from cursorsToBeRemoved list if it exists, otherwise the cursor will not
+// be reset properly
+
+TraceEvent("MutableTeamPeekCursorAddTeam")
+.detail("StorageServerID", serverID)
+.detail("StorageTeamID", storageTeamID)
+.detail("BeginVersion", newCursor->getBeginVersion());
+}
+*/
+
+	storageTeamIDs = newStorageTeamIDs;
+
+	return storageTeamIDsToBeAdded.size() > 0;
+}
+
+template <typename BaseClass>
+void MutableTeamPeekCursor<BaseClass>::resetImpl() {
+	for (const auto& [_, cursor] : cursorsToBeRemoved) {
+		std::cout << " Adding back " << _.toString() << std::endl;
+		BaseClass::addCursor(cursor);
+	}
+	cursorsToBeRemoved.clear();
+	storageTeamIDsToBeAdded.clear();
+	shouldUpdateStorageTeamCursor = false;
+	storageTeamIDs = storageTeamIDsSnapshot;
+
+	BaseClass::resetImpl();
+}
+
+template <typename BaseClass>
+Future<bool> MutableTeamPeekCursor<BaseClass>::remoteMoreAvailableImpl() {
+	// Since RPC will invalidate all local cursors, drop all cursors to be removed and create new cursors if needed
+	cursorsToBeRemoved.clear();
+	for (const auto& storageTeamID : storageTeamIDsToBeAdded) {
 		ASSERT(!BaseClass::isCursorExists(storageTeamID));
 
 		auto newCursor = createCursor(storageTeamID);
+		std::cout << " Add cursor " << storageTeamID.toString() << std::endl;
 		BaseClass::addCursor(newCursor);
+		// NOTE: Do *NOT* remove the cursor from cursorsToBeRemoved list if it exists, otherwise the cursor will not
+		// be reset properly
 
 		TraceEvent("MutableTeamPeekCursorAddTeam")
 		    .detail("StorageServerID", serverID)
 		    .detail("StorageTeamID", storageTeamID)
 		    .detail("BeginVersion", newCursor->getBeginVersion());
 	}
+	storageTeamIDsToBeAdded.clear();
 
-	storageTeamIDs = newStorageTeamIDs;
-
-	return teamsToBeAdded.size() > 0;
+	return BaseClass::remoteMoreAvailableImpl();
 }
 
 template <typename BaseClass>
@@ -198,16 +265,20 @@ bool MutableTeamPeekCursor<BaseClass>::hasRemainingImpl() const {
 		return false;
 	}
 
+	if (BaseClass::remoteMoreAvailableSnapshot.needSnapshot) {
+		storageTeamIDsSnapshot = storageTeamIDs;
+	}
+
 	bool newCursorsAdded = false;
-	if (shouldUpdateStorageTeamCursor) {
+	if (BaseClass::isCursorContainerEmpty() && shouldUpdateStorageTeamCursor) {
+		// One version is completely consumed, update the list of cursors
 		// FIXME Rethink this const_cast, perhaps relax the function not to be const??
 		newCursorsAdded = const_cast<MutableTeamPeekCursor*>(this)->updateStorageTeams();
 		const_cast<MutableTeamPeekCursor*>(this)->shouldUpdateStorageTeamCursor = false;
 	}
 
-	bool hasRemaining = BaseClass::hasRemainingImpl();
-
-	return !newCursorsAdded && hasRemaining;
+	// If no new cursor added, we call hasRemainingImpl to do a tryFillCursorContainer
+	return !newCursorsAdded && BaseClass::hasRemainingImpl();
 }
 
 } // namespace detail
