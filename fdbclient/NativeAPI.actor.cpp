@@ -418,13 +418,15 @@ void traceTSSErrors(const char* name, UID tssId, const std::unordered_map<int, u
 */
 void traceSSOrTSSPercentiles(TraceEvent& ev, const std::string name, ContinuousSample<double>& sample) {
 	ev.detail(name + "Mean", sample.mean());
-	ev.detail(name + "P50", sample.median());
 	// don't log the larger percentiles unless we actually have enough samples to log the accurate percentile instead of
 	// the largest sample in this window
-	if (sample.getPopulationSize() > 10) {
+	if (sample.getPopulationSize() >= 2) {
+		ev.detail(name + "P50", sample.median());
+	}
+	if (sample.getPopulationSize() >= 10) {
 		ev.detail(name + "P90", sample.percentile(0.90));
 	}
-	if (sample.getPopulationSize() > 100) {
+	if (sample.getPopulationSize() >= 100) {
 		ev.detail(name + "P99", sample.percentile(0.99));
 	}
 }
