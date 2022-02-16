@@ -409,6 +409,82 @@ void traceTSSErrors(const char* name, UID tssId, const std::unordered_map<int, u
 	}
 }
 
+/*
+    For each request type, this will produce
+    <Type>Count
+    <Type>{SS,TSS}{Mean,P50,P90,P99}
+    Example:
+    GetValueLatencySSMean
+*/
+void traceSSOrTSSPercentiles(TraceEvent& ev, const std::string name, ContinuousSample<double>& sample) {
+	ev.detail(name + "Mean", sample.mean());
+	ev.detail(name + "P50", sample.median());
+	// don't log the larger percentiles unless we actually have enough samples to log the accurate percentile instead of
+	// the largest sample in this window
+	if (sample.getPopulationSize() > 10) {
+		ev.detail(name + "P90", sample.percentile(0.90));
+	}
+	if (sample.getPopulationSize() > 100) {
+		ev.detail(name + "P99", sample.percentile(0.99));
+	}
+}
+
+void traceTSSPercentiles(TraceEvent& ev,
+                         const std::string name,
+                         ContinuousSample<double>& ssSample,
+                         ContinuousSample<double>& tssSample) {
+	ASSERT(ssSample.getPopulationSize() == tssSample.getPopulationSize());
+	ev.detail(name + "Count", ssSample.getPopulationSize());
+	if (ssSample.getPopulationSize() > 0) {
+		traceSSOrTSSPercentiles(ev, name + "SS", ssSample);
+		traceSSOrTSSPercentiles(ev, name + "TSS", tssSample);
+	}
+}
+
+ACTOR Future<Void> tssLogger(DatabaseContext* cx) {
+	state double lastLogged = 0;
+	loop {
+		wait(delay(CLIENT_KNOBS->TSS_METRICS_LOGGING_INTERVAL, TaskPriority::FlushTrace));
+
+		// Log each TSS pair separately
+		for (const auto& it : cx->tssMetrics) {
+			if (it.second->mismatches.getIntervalDelta()) {
+				cx->tssMismatchStream.send(
+				    std::pair<UID, std::vector<DetailedTSSMismatch>>(it.first, it.second->detailedMismatches));
+			}
+
+			// Do error histograms as separate event
+			if (it.second->ssErrorsByCode.size()) {
+				traceTSSErrors("TSS_SSErrors", it.first, it.second->ssErrorsByCode);
+			}
+
+			if (it.second->tssErrorsByCode.size()) {
+				traceTSSErrors("TSS_TSSErrors", it.first, it.second->tssErrorsByCode);
+			}
+
+			TraceEvent tssEv("TSSClientMetrics", cx->dbId);
+			tssEv.detail("TSSID", it.first)
+			    .detail("Elapsed", (lastLogged == 0) ? 0 : now() - lastLogged)
+			    .detail("Internal", cx->internal);
+
+			it.second->cc.logToTraceEvent(tssEv);
+
+			traceTSSPercentiles(tssEv, "GetValueLatency", it.second->SSgetValueLatency, it.second->TSSgetValueLatency);
+			traceTSSPercentiles(
+			    tssEv, "GetKeyValuesLatency", it.second->SSgetKeyValuesLatency, it.second->TSSgetKeyValuesLatency);
+			traceTSSPercentiles(tssEv, "GetKeyLatency", it.second->SSgetKeyLatency, it.second->TSSgetKeyLatency);
+			traceTSSPercentiles(tssEv,
+			                    "GetKeyValuesAndFlatMapLatency",
+			                    it.second->SSgetKeyValuesAndFlatMapLatency,
+			                    it.second->TSSgetKeyValuesAndFlatMapLatency);
+
+			it.second->clear();
+		}
+
+		lastLogged = now();
+	}
+}
+
 ACTOR Future<Void> databaseLogger(DatabaseContext* cx) {
 	state double lastLogged = 0;
 	loop {
@@ -454,63 +530,6 @@ ACTOR Future<Void> databaseLogger(DatabaseContext* cx) {
 		cx->commitLatencies.clear();
 		cx->mutationsPerCommit.clear();
 		cx->bytesPerCommit.clear();
-
-		for (const auto& it : cx->tssMetrics) {
-			// TODO could skip this whole thing if tss if request counter is zero?
-			// That would potentially complicate elapsed calculation though
-			if (it.second->mismatches.getIntervalDelta()) {
-				cx->tssMismatchStream.send(
-				    std::pair<UID, std::vector<DetailedTSSMismatch>>(it.first, it.second->detailedMismatches));
-			}
-
-			// do error histograms as separate event
-			if (it.second->ssErrorsByCode.size()) {
-				traceTSSErrors("TSS_SSErrors", it.first, it.second->ssErrorsByCode);
-			}
-
-			if (it.second->tssErrorsByCode.size()) {
-				traceTSSErrors("TSS_TSSErrors", it.first, it.second->tssErrorsByCode);
-			}
-
-			TraceEvent tssEv("TSSClientMetrics", cx->dbId);
-			tssEv.detail("TSSID", it.first)
-			    .detail("Elapsed", (lastLogged == 0) ? 0 : now() - lastLogged)
-			    .detail("Internal", cx->internal);
-
-			it.second->cc.logToTraceEvent(tssEv);
-
-			tssEv.detail("MeanSSGetValueLatency", it.second->SSgetValueLatency.mean())
-			    .detail("MedianSSGetValueLatency", it.second->SSgetValueLatency.median())
-			    .detail("SSGetValueLatency90", it.second->SSgetValueLatency.percentile(0.90))
-			    .detail("SSGetValueLatency99", it.second->SSgetValueLatency.percentile(0.99));
-
-			tssEv.detail("MeanTSSGetValueLatency", it.second->TSSgetValueLatency.mean())
-			    .detail("MedianTSSGetValueLatency", it.second->TSSgetValueLatency.median())
-			    .detail("TSSGetValueLatency90", it.second->TSSgetValueLatency.percentile(0.90))
-			    .detail("TSSGetValueLatency99", it.second->TSSgetValueLatency.percentile(0.99));
-
-			tssEv.detail("MeanSSGetKeyLatency", it.second->SSgetKeyLatency.mean())
-			    .detail("MedianSSGetKeyLatency", it.second->SSgetKeyLatency.median())
-			    .detail("SSGetKeyLatency90", it.second->SSgetKeyLatency.percentile(0.90))
-			    .detail("SSGetKeyLatency99", it.second->SSgetKeyLatency.percentile(0.99));
-
-			tssEv.detail("MeanTSSGetKeyLatency", it.second->TSSgetKeyLatency.mean())
-			    .detail("MedianTSSGetKeyLatency", it.second->TSSgetKeyLatency.median())
-			    .detail("TSSGetKeyLatency90", it.second->TSSgetKeyLatency.percentile(0.90))
-			    .detail("TSSGetKeyLatency99", it.second->TSSgetKeyLatency.percentile(0.99));
-
-			tssEv.detail("MeanSSGetKeyValuesLatency", it.second->SSgetKeyValuesLatency.mean())
-			    .detail("MedianSSGetKeyValuesLatency", it.second->SSgetKeyValuesLatency.median())
-			    .detail("SSGetKeyValuesLatency90", it.second->SSgetKeyValuesLatency.percentile(0.90))
-			    .detail("SSGetKeyValuesLatency99", it.second->SSgetKeyValuesLatency.percentile(0.99));
-
-			tssEv.detail("MeanTSSGetKeyValuesLatency", it.second->TSSgetKeyValuesLatency.mean())
-			    .detail("MedianTSSGetKeyValuesLatency", it.second->TSSgetKeyValuesLatency.median())
-			    .detail("TSSGetKeyValuesLatency90", it.second->TSSgetKeyValuesLatency.percentile(0.90))
-			    .detail("TSSGetKeyValuesLatency99", it.second->TSSgetKeyValuesLatency.percentile(0.99));
-
-			it.second->clear();
-		}
 
 		lastLogged = now();
 	}
@@ -1319,7 +1338,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 
 	snapshotRywEnabled = apiVersionAtLeast(300) ? 1 : 0;
 
-	logger = databaseLogger(this);
+	logger = databaseLogger(this) && tssLogger(this);
 	locationCacheSize = g_network->isSimulated() ? CLIENT_KNOBS->LOCATION_CACHE_EVICTION_SIZE_SIM
 	                                             : CLIENT_KNOBS->LOCATION_CACHE_EVICTION_SIZE;
 
