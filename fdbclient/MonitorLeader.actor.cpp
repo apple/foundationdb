@@ -115,6 +115,10 @@ ACTOR Future<Void> resolveHostnamesImpl(ClusterConnectionString* self) {
 	}
 	wait(waitForAll(fs));
 	std::sort(self->coords.begin(), self->coords.end());
+	TraceEvent("ResolveHostnames")
+		.detail("Hosts", self->hostnames.size())
+		.detail("Coords", self->coords.size())
+		.detail("String", self->toVerboseString());
 	if (std::unique(self->coords.begin(), self->coords.end()) != self->coords.end()) {
 		throw connection_string_invalid();
 	}
@@ -489,6 +493,26 @@ std::string ClusterConnectionString::toString() const {
 		}
 	}
 	for (auto const& host : hostnames) {
+		if (s.find('@') != s.length() - 1) {
+			s += ',';
+		}
+		s += host.toString();
+	}
+	return s;
+}
+
+std::string ClusterConnectionString::toVerboseString() const {
+	std::string s = key.toString();
+	s += '@';
+	for (int i = 0; i < coords.size(); i++) {
+		s += "Coordinators:";
+		if (s.find('@') != s.length() - 1) {
+			s += ',';
+		}
+		s += coords[i].toString();
+	}
+	for (auto const& host : hostnames) {
+		s += "Hosts:";
 		if (s.find('@') != s.length() - 1) {
 			s += ',';
 		}

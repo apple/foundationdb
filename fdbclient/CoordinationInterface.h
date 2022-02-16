@@ -69,6 +69,7 @@ public:
 		return keyDesc;
 	} // Returns the "name" or "description" part of the clusterKey (the part before the ':')
 	std::string toString() const;
+	std::string toVerboseString() const;
 	static std::string getErrorString(std::string const& source, Error const& e);
 	Future<Void> resolveHostnames();
 	// This one should only be used when resolving asynchronously is impossible. For all other cases, resolveHostnames()
