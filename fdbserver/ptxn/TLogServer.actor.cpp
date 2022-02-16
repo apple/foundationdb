@@ -1501,6 +1501,20 @@ ACTOR Future<Void> servicePopRequest(
 	return Void();
 }
 
+ACTOR Future<Void> serveTestInfoRequest(
+    TLogTestInfoRequest req,
+    std::shared_ptr<std::unordered_map<TLogGroupID, Reference<LogGenerationData>>> activeGeneration) {
+
+	TLogTestInfoReply reply;
+	for (const auto& [groupId, logData] : *activeGeneration) {
+		for (const auto& [team, _] : logData->storageTeams) {
+			reply.groupToTeams[groupId].insert(team);
+		}
+	}
+	req.reply.send(reply);
+	return Void();
+}
+
 ACTOR Future<Void> serveTLogInterface_PassivelyPull(
     Reference<TLogServerData> self,
     TLogInterface_PassivelyPull tli,
@@ -1567,6 +1581,9 @@ ACTOR Future<Void> serveTLogInterface_PassivelyPull(
 		}
 		when(ReplyPromise<TLogLockResult> reply = waitNext(tli.lock.getFuture())) {
 			wait(lockTLogServer(self, reply, activeGeneration));
+		}
+		when(TLogTestInfoRequest req = waitNext(tli.testInfo.getFuture())) {
+			self->addActors.send(serveTestInfoRequest(req, activeGeneration));
 		}
 	}
 }

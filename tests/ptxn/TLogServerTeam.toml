@@ -1,0 +1,15 @@
+[[test]]
+testTitle = 'Team Partitioned TLog Group/Team test'
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    maxTestCases = 1
+    testsMatching = '/fdbserver/ptxn/test/tlog_server_group_teams'
+
+    numProxies = 3
+    numTLogs = 4
+    numStorageTeams = 55
+    numTLogGroups = 8
+    skipCommitValidation = 1
