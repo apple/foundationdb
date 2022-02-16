@@ -1,4 +1,9 @@
 #!/bin/bash
+if [ $# -eq 0 ]
+  then
+    echo "Please specify the path to foundation build directory"
+    exit 1
+fi
 fdbdir=$1
 export LD_LIBRARY_PATH=$fdbdir/lib:$LD_LIBRARY_PATH
 export FDB_CLUSTER_FILE=$fdbdir/fdb.cluster
