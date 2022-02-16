@@ -38,5 +38,7 @@ ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(
     Database cx,
     CheckpointMetaData initialState,
     std::string dir,
-    std::function<Future<Void>(const CheckpointMetaData&)> cFun = nullptr);
+    std::function<Future<Void>(const CheckpointMetaData&)> cFun);
+
+ACTOR Future<Void> deleteRocksCFCheckpoint(CheckpointMetaData checkpoint);
 #endif

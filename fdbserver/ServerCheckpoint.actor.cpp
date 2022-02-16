@@ -1,39 +1,35 @@
 #include "fdbserver/ServerCheckpoint.actor.h"
+#include "fdbserver/RocksDBCheckpointUtils.actor.h"
 
 #include "flow/actorcompiler.h" // has to be last include
 
-namespace {
-ACTOR Future<Void> deleteRocksCFCheckpoint(CheckpointMetaData checkpoint) {
-	ASSERT_EQ(checkpoint.getFormat(), RocksDBColumnFamily);
-	ObjectReader reader(checkpoint.serializedCheckpoint.begin(), IncludeVersion());
-	RocksDBColumnFamilyCheckpoint rocksCF;
-	reader.deserialize(rocksCF);
+ACTOR Future<Void> deleteCheckpoint(CheckpointMetaData checkpoint) {
+	wait(delay(0, TaskPriority::FetchKeys));
 
-	state std::unordered_set<std::string> dirs;
-	for (const LiveFileMetaData& file : rocksCF.sstFiles) {
-		dirs.insert(file.db_path);
+	if (checkpoint.getFormat() == RocksDBColumnFamily) {
+		wait(deleteRocksCFCheckpoint(checkpoint));
+	} else if (checkpoint.getFormat() == RocksDB) {
+		throw not_implemented();
+	} else {
+		ASSERT(false);
 	}
 
-    state std::unordered_set<std::string>::iterator it = dirs.begin();
-	for (; it != dirs.end(); ++it) {
-		const std::string dir = *it;
-		platform::eraseDirectoryRecursive(dir);
-		TraceEvent("DeleteCheckpointRemovedDir", checkpoint.checkpointID)
-		    .detail("CheckpointID", checkpoint.checkpointID)
-		    .detail("Dir", dir);
-		wait(delay(0, TaskPriority::FetchKeys));
-	}
 	return Void();
 }
 
-} // namespace
-
-ACTOR Future<Void> deleteCheckpoint(CheckpointMetaData checkpoint) {
-	wait(delay(0, TaskPriority::FetchKeys));
-	if (checkpoint.getFormat() == RocksDBColumnFamily) {
-		wait(deleteRocksCFCheckpoint(checkpoint));
-	} else {
+ACTOR Future<CheckpointMetaData> fetchCheckpoint(Database cx,
+                                                 CheckpointMetaData initialState,
+                                                 std::string dir,
+                                                 std::function<Future<Void>(const CheckpointMetaData&)> cFun) {
+	state CheckpointMetaData result;
+	if (initialState.getFormat() == RocksDBColumnFamily) {
+		CheckpointMetaData _result = wait(fetchRocksDBCheckpoint(cx, initialState, dir, cFun));
+		result = _result;
+	} else if (initialState.getFormat() == RocksDB) {
 		throw not_implemented();
+	} else {
+		ASSERT(false);
 	}
-    return Void();
+
+	return result;
 }

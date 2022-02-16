@@ -1450,7 +1450,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				    .detail("CheckpointID", checkpoint.checkpointID)
 				    .detail("Dir", dir);
 			}
-		} else if (checkpoint.format == RocksDBSSTFile) {
+		} else if (checkpoint.format == RocksDB) {
 			throw not_implemented();
 		} else {
 			throw internal_error();

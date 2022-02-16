@@ -30,7 +30,7 @@ enum CheckpointFormat {
 	// Checkpoint generated via rocksdb::Checkpoint::ExportColumnFamily().
 	RocksDBColumnFamily = 1,
 	// Checkpoint generated via rocksdb::Checkpoint::CreateCheckpoint().
-	RocksDBSSTFile = 2,
+	RocksDB = 2,
 };
 
 namespace {
@@ -44,8 +44,8 @@ std::string getFdbCheckpointFormatName(const CheckpointFormat& format) {
 	case RocksDBColumnFamily:
 		name = "RocksDBColumnFamily";
 		break;
-	case RocksDBSSTFile:
-		name = "RocksDBSSTFile";
+	case RocksDB:
+		name = "RocksDB";
 	}
 
 	return name;

@@ -33,26 +33,25 @@
 #include "flow/actorcompiler.h" // has to be last include
 
 class ICheckpointReader : public IClosable {
- public:
- 	virtual Future<Void> init() = 0;
+public:
+	virtual Future<Void> init() = 0;
 
- 	virtual Future<RangeResult> nextKeyValues(const int rowLimit, const int ByteLimit) = 0;
+	virtual Future<RangeResult> nextKeyValues(const int rowLimit, const int ByteLimit) = 0;
 
-    // Returns the next chunk of serialized checkpoint.
- 	virtual Future<Standalone<StringRef>> nextChunk(const int ByteLimit) = 0;
+	// Returns the next chunk of serialized checkpoint.
+	virtual Future<Standalone<StringRef>> nextChunk(const int ByteLimit) = 0;
 
- protected:
- 	virtual ~ICheckpointReader() {}
- };
+protected:
+	virtual ~ICheckpointReader() {}
+};
 
- extern ICheckpointReader* newCheckpointReader(const CheckpointMetaData& checkpoint, UID logID);
+extern ICheckpointReader* newCheckpointReader(const CheckpointMetaData& checkpoint, UID logID);
 
- // Delete a checkpoint.
- ACTOR Future<Void> deleteCheckpoint(CheckpointMetaData checkpoint);
+// Delete a checkpoint.
+ACTOR Future<Void> deleteCheckpoint(CheckpointMetaData checkpoint);
 
- ACTOR Future<CheckpointMetaData> fetchBCheckpoint(
-     Database cx,
-     CheckpointMetaData initialState,
-     std::string dir,
-     std::function<Future<Void>(const CheckpointMetaData&)> cFun = nullptr);
+ACTOR Future<CheckpointMetaData> fetchCheckpoint(Database cx,
+                                                 CheckpointMetaData initialState,
+                                                 std::string dir,
+                                                 std::function<Future<Void>(const CheckpointMetaData&)> cFun = nullptr);
 #endif

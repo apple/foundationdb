@@ -1,55 +1,19 @@
-#ifdef SSD_ROCKSDB_EXPERIMENTAL
-
-#include <rocksdb/env.h>
-#include <rocksdb/filter_policy.h>
-#include <rocksdb/metadata.h>
-#include <rocksdb/options.h>
-#include <rocksdb/slice.h>
-#include <rocksdb/slice_transform.h>
-#include <rocksdb/sst_file_reader.h>
-#include <rocksdb/sst_file_writer.h>
-#include <rocksdb/statistics.h>
-#include <rocksdb/table.h>
-#include <rocksdb/types.h>
-#include <rocksdb/utilities/checkpoint.h>
-#include <rocksdb/utilities/table_properties_collectors.h>
-#include <rocksdb/version.h>
-
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbclient/StorageServerInterface.h"
+#include "fdbclient/StorageCheckpoint.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/FDBTypes.h"
 #include "flow/flow.h"
 #include "flow/Trace.h"
-#include "flow/IRandom.h"
 
 #include <memory>
 #include <tuple>
 #include <vector>
 
-#endif // SSD_ROCKSDB_EXPERIMENTAL
-
 #include "flow/actorcompiler.h" // has to be last include
 
-#ifdef SSD_ROCKSDB_EXPERIMENTAL
-
-// Enforcing rocksdb version to be 6.22.1 or greater.
-static_assert(ROCKSDB_MAJOR >= 6, "Unsupported rocksdb version. Update the rocksdb to 6.22.1 version");
-static_assert(ROCKSDB_MAJOR == 6 ? ROCKSDB_MINOR >= 22 : true,
-              "Unsupported rocksdb version. Update the rocksdb to 6.22.1 version");
-static_assert((ROCKSDB_MAJOR == 6 && ROCKSDB_MINOR == 22) ? ROCKSDB_PATCH >= 1 : true,
-              "Unsupported rocksdb version. Update the rocksdb to 6.22.1 version");
-
 namespace {
-
-rocksdb::Slice toSlice(StringRef s) {
-	return rocksdb::Slice(reinterpret_cast<const char*>(s.begin()), s.size());
-}
-
-} // namespace
-
 // Fetch a single sst file from storage server. If the file is fetch successfully, it will be recorded via cFun.
-ACTOR static Future<Void> fetchCheckpointFile(Database cx,
+ACTOR Future<Void> fetchCheckpointFile(Database cx,
                                               std::shared_ptr<CheckpointMetaData> metaData,
                                               int idx,
                                               std::string dir,
@@ -146,6 +110,8 @@ ACTOR static Future<Void> fetchCheckpointFile(Database cx,
 	}
 }
 
+} // namespace
+
 ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
                                                         CheckpointMetaData initialState,
                                                         std::string dir,
@@ -175,15 +141,26 @@ ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
 
 	return *metaData;
 }
-#else
 
-ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
-                                                        CheckpointMetaData initialState,
-                                                        std::string dir,
-                                                        std::function<Future<Void>(const CheckpointMetaData&)> cFun) {
-	wait(delay(0));
-	std::cout << "RocksDB not enabled." << std::endl;
-	ASSERT(false);
-	return CheckpointMetaData();
+ACTOR Future<Void> deleteRocksCFCheckpoint(CheckpointMetaData checkpoint) {
+	ASSERT_EQ(checkpoint.getFormat(), RocksDBColumnFamily);
+	ObjectReader reader(checkpoint.serializedCheckpoint.begin(), IncludeVersion());
+	RocksDBColumnFamilyCheckpoint rocksCF;
+	reader.deserialize(rocksCF);
+
+	state std::unordered_set<std::string> dirs;
+	for (const LiveFileMetaData& file : rocksCF.sstFiles) {
+		dirs.insert(file.db_path);
+	}
+
+	state std::unordered_set<std::string>::iterator it = dirs.begin();
+	for (; it != dirs.end(); ++it) {
+		const std::string dir = *it;
+		platform::eraseDirectoryRecursive(dir);
+		TraceEvent("DeleteCheckpointRemovedDir", checkpoint.checkpointID)
+		    .detail("CheckpointID", checkpoint.checkpointID)
+		    .detail("Dir", dir);
+		wait(delay(0, TaskPriority::FetchKeys));
+	}
+	return Void();
 }
-#endif // SSD_ROCKSDB_EXPERIMENTAL
