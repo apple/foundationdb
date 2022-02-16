@@ -5415,21 +5415,12 @@ ACTOR Future<Optional<ClientTrCommitCostEstimation>> estimateCommitCosts(Referen
 // deserialized as normal), though the implementation of this may not be trivial.
 //
 // We could also try to support a split key on the proxy where the prefix and the rest of the key are not contiguous.
-void applyTenantPrefix(CommitTransactionRequest req, Key tenantPrefix) {
+void applyTenantPrefix(CommitTransactionRequest& req, Key tenantPrefix) {
 	for (auto& m : req.transaction.mutations) {
+		m.param1 = m.param1.withPrefix(tenantPrefix, req.arena);
 		if (m.type == MutationRef::ClearRange) {
-			if (m.param2.startsWith(m.param1)) {
-				m.param2 = m.param2.withPrefix(tenantPrefix, req.arena);
-				m.param1 = m.param2.substr(0, tenantPrefix.size() + m.param1.size());
-			} else {
-				m.param1 = m.param1.withPrefix(tenantPrefix, req.arena);
-				m.param2 = m.param2.withPrefix(tenantPrefix, req.arena);
-			}
-		} else {
-			m.param1 = m.param1.withPrefix(tenantPrefix, req.arena);
-		}
-
-		if (m.type == MutationRef::SetVersionstampedKey) {
+			m.param2 = m.param2.withPrefix(tenantPrefix, req.arena);
+		} else if (m.type == MutationRef::SetVersionstampedKey) {
 			uint8_t* key = mutateString(m.param1);
 			int* offset = reinterpret_cast<int*>(&key[m.param1.size() - 4]);
 			*offset += tenantPrefix.size();
@@ -5437,21 +5428,11 @@ void applyTenantPrefix(CommitTransactionRequest req, Key tenantPrefix) {
 	}
 
 	for (auto& rc : req.transaction.read_conflict_ranges) {
-		if (rc.end.startsWith(rc.begin)) {
-			KeyRef end = rc.end.withPrefix(tenantPrefix, req.arena);
-			rc = KeyRangeRef(end.substr(0, tenantPrefix.size() + rc.begin.size()), end);
-		} else {
-			rc = rc.withPrefix(tenantPrefix, req.arena);
-		}
+		rc = rc.withPrefix(tenantPrefix, req.arena);
 	}
 
 	for (auto& wc : req.transaction.write_conflict_ranges) {
-		if (wc.end.startsWith(wc.begin)) {
-			KeyRef end = wc.end.withPrefix(tenantPrefix, req.arena);
-			wc = KeyRangeRef(end.substr(0, tenantPrefix.size() + wc.begin.size()), end);
-		} else {
-			wc = wc.withPrefix(tenantPrefix, req.arena);
-		}
+		wc = wc.withPrefix(tenantPrefix, req.arena);
 	}
 }
 
