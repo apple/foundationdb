@@ -27,6 +27,7 @@
 #include <memcheck.h>
 #endif
 
+#include "fdbrpc/TenantInfo.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/HealthMonitor.h"
@@ -204,6 +205,7 @@ struct EndpointNotFoundReceiver final : NetworkMessageReceiver {
 		Endpoint e = FlowTransport::transport().loadedEndpoint(token);
 		IFailureMonitor::failureMonitor().endpointNotFound(e);
 	}
+	bool isPublic() const override { return true; }
 };
 
 struct PingRequest {
@@ -228,6 +230,29 @@ struct PingReceiver final : NetworkMessageReceiver {
 	PeerCompatibilityPolicy peerCompatibilityPolicy() const override {
 		return PeerCompatibilityPolicy{ RequirePeer::AtLeast, ProtocolVersion::withStableInterfaces() };
 	}
+	bool isPublic() const override { return true; }
+};
+
+struct TenantAuthorizer final : NetworkMessageReceiver {
+	void receive(ArenaObjectReader& reader) override {
+		AuthorizationRequest req;
+		try {
+			reader.deserialize(req);
+			// TODO: verify that token is valid
+			AuthorizedTenants& auth = reader.variable<AuthorizedTenants>("AuthorizedTenants");
+			for (auto const& t : req.tenants) {
+				auth.authorizedTenants.insert(TenantInfoRef(auth.arena, t));
+			}
+			req.reply.send(Void());
+		} catch (Error& e) {
+			if (e.code() == error_code_permission_denied) {
+				req.reply.sendError(e);
+			} else {
+				throw;
+			}
+		}
+	}
+	bool isPublic() const override { return true; }
 };
 
 class TransportData {
@@ -918,6 +943,8 @@ ACTOR static void deliver(TransportData* self,
                           Endpoint destination,
                           TaskPriority priority,
                           ArenaReader reader,
+						  NetworkAddress peerAddress,
+						  AuthorizedTenants authorizedTenants,
                           bool inReadSocket) {
 	// We want to run the task at the right priority. If the priority is higher than the current priority (which is
 	// ReadSocket) we can just upgrade. Otherwise we'll context switch so that we don't block other tasks that might run
@@ -932,6 +959,11 @@ ACTOR static void deliver(TransportData* self,
 
 	auto receiver = self->endpoints.get(destination.token);
 	if (receiver) {
+		if (!authorizedTenants.trusted && !receiver->isPublic()) {
+			TraceEvent(SevWarnAlways, "AttemptedRPCToPrivatePrevented")
+				.detail("From", peerAddress);
+			throw connection_failed();
+		}
 		if (!checkCompatible(receiver->peerCompatibilityPolicy(), reader.protocolVersion())) {
 			return;
 		}
@@ -940,6 +972,9 @@ ACTOR static void deliver(TransportData* self,
 			StringRef data = reader.arenaReadAll();
 			ASSERT(data.size() > 8);
 			ArenaObjectReader objReader(reader.arena(), reader.arenaReadAll(), AssumeVersion(reader.protocolVersion()));
+			bool didInsert = objReader.variable<AuthorizedTenants>("AuthorizedTenants", &authorizedTenants);
+			didInsert = didInsert && objReader.variable<NetworkAddress>("PeerAddress", &peerAddress);
+			ASSERT(didInsert); // check that we could set both context variables
 			receiver->receive(objReader);
 			g_currentDeliveryPeerAddress = { NetworkAddress() };
 		} catch (Error& e) {
@@ -977,6 +1012,7 @@ static void scanPackets(TransportData* transport,
                         const uint8_t* e,
                         Arena& arena,
                         NetworkAddress const& peerAddress,
+						AuthorizedTenants authorizedTenants,
                         ProtocolVersion peerProtocolVersion) {
 	// Find each complete packet in the given byte range and queue a ready task to deliver it.
 	// Remove the complete packets from the range by increasing unprocessed_begin.
@@ -1090,7 +1126,13 @@ static void scanPackets(TransportData* transport,
 		// we have many messages to UnknownEndpoint we want to optimize earlier. As deliver is an actor it
 		// will allocate some state on the heap and this prevents it from doing that.
 		if (priority != TaskPriority::UnknownEndpoint || (token.first() & TOKEN_STREAM_FLAG) != 0) {
-			deliver(transport, Endpoint({ peerAddress }, token), priority, std::move(reader), true);
+			deliver(transport,
+			        Endpoint({ peerAddress }, token),
+			        priority,
+			        std::move(reader),
+			        peerAddress,
+			        authorizedTenants,
+			        true);
 		}
 
 		unprocessed_begin = p = p + packetLen;
@@ -1136,8 +1178,11 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 	state bool incompatibleProtocolVersionNewer = false;
 	state NetworkAddress peerAddress;
 	state ProtocolVersion peerProtocolVersion;
+	state AuthorizedTenants authorizedTenants;
 
 	peerAddress = conn->getPeerAddress();
+	// TODO: check whether peers ip is in trusted range
+	authorizedTenants.trusted = true;
 	if (!peer) {
 		ASSERT(!peerAddress.isPublic());
 	}
@@ -1286,7 +1331,7 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 				if (!expectConnectPacket) {
 					if (compatible || peerProtocolVersion.hasStableInterfaces()) {
 						scanPackets(
-						    transport, unprocessed_begin, unprocessed_end, arena, peerAddress, peerProtocolVersion);
+						    transport, unprocessed_begin, unprocessed_end, arena, peerAddress, authorizedTenants, peerProtocolVersion);
 					} else {
 						unprocessed_begin = unprocessed_end;
 						peer->resetPing.trigger();
@@ -1554,8 +1599,15 @@ static void sendLocal(TransportData* self, ISerializeSource const& what, const E
 	ASSERT(copy.size() > 0);
 	TaskPriority priority = self->endpoints.getPriority(destination.token);
 	if (priority != TaskPriority::UnknownEndpoint || (destination.token.first() & TOKEN_STREAM_FLAG) != 0) {
-		deliver(
-		    self, destination, priority, ArenaReader(copy.arena(), copy, AssumeVersion(currentProtocolVersion)), false);
+		AuthorizedTenants authorizedTenants;
+		authorizedTenants.trusted = true;
+		deliver(self,
+		        destination,
+		        priority,
+		        ArenaReader(copy.arena(), copy, AssumeVersion(currentProtocolVersion)),
+		        NetworkAddress(),
+		        authorizedTenants,
+		        false);
 	}
 }
 

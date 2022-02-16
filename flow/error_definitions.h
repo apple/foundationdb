@@ -273,6 +273,10 @@ ERROR( snap_invalid_uid_string, 2509, "The given uid string is not a 32-length h
 // 4xxx Internal errors (those that should be generated only by bugs) are decimal 4xxx
 ERROR( unknown_error, 4000, "An unknown error occurred" )  // C++ exception not of type Error
 ERROR( internal_error, 4100, "An internal error occurred" )
+
+// 5xxx Authorization and authentication error codes
+ERROR( permission_denied, 5000, "Client is not allowed to access endpoint" )
+ERROR( unauthorized_attempt, 5001, "A untrusted client tried to send a message to a private endpoint" )
 // clang-format on
 
 #undef ERROR

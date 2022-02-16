@@ -32,8 +32,8 @@
 const int MAX_CLUSTER_FILE_BYTES = 60000;
 
 struct ClientLeaderRegInterface {
-	RequestStream<struct GetLeaderRequest> getLeader;
-	RequestStream<struct OpenDatabaseCoordRequest> openDatabase;
+	RequestStream<struct GetLeaderRequest, true> getLeader;
+	RequestStream<struct OpenDatabaseCoordRequest, true> openDatabase;
 	RequestStream<struct CheckDescriptorMutableRequest> checkDescriptorMutable;
 
 	ClientLeaderRegInterface() {}

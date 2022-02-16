@@ -60,30 +60,30 @@ struct StorageServerInterface {
 	UID uniqueID;
 	Optional<UID> tssPairID;
 
-	RequestStream<struct GetValueRequest> getValue;
-	RequestStream<struct GetKeyRequest> getKey;
+	RequestStream<struct GetValueRequest, true> getValue;
+	RequestStream<struct GetKeyRequest, true> getKey;
 
 	// Throws a wrong_shard_server if the keys in the request or result depend on data outside this server OR if a large
 	// selector offset prevents all data from being read in one range read
-	RequestStream<struct GetKeyValuesRequest> getKeyValues;
-	RequestStream<struct GetKeyValuesAndFlatMapRequest> getKeyValuesAndFlatMap;
+	RequestStream<struct GetKeyValuesRequest, true> getKeyValues;
+	RequestStream<struct GetKeyValuesAndFlatMapRequest, true> getKeyValuesAndFlatMap;
 
-	RequestStream<struct GetShardStateRequest> getShardState;
+	RequestStream<struct GetShardStateRequest, true> getShardState;
 	RequestStream<struct WaitMetricsRequest> waitMetrics;
 	RequestStream<struct SplitMetricsRequest> splitMetrics;
 	RequestStream<struct GetStorageMetricsRequest> getStorageMetrics;
-	RequestStream<ReplyPromise<Void>> waitFailure;
+	RequestStream<ReplyPromise<Void>, true> waitFailure;
 	RequestStream<struct StorageQueuingMetricsRequest> getQueuingMetrics;
 
 	RequestStream<ReplyPromise<KeyValueStoreType>> getKeyValueStoreType;
-	RequestStream<struct WatchValueRequest> watchValue;
+	RequestStream<struct WatchValueRequest, true> watchValue;
 	RequestStream<struct ReadHotSubRangeRequest> getReadHotRanges;
 	RequestStream<struct SplitRangeRequest> getRangeSplitPoints;
-	RequestStream<struct GetKeyValuesStreamRequest> getKeyValuesStream;
-	RequestStream<struct ChangeFeedStreamRequest> changeFeedStream;
-	RequestStream<struct OverlappingChangeFeedsRequest> overlappingChangeFeeds;
-	RequestStream<struct ChangeFeedPopRequest> changeFeedPop;
-	RequestStream<struct ChangeFeedVersionUpdateRequest> changeFeedVersionUpdate;
+	RequestStream<struct GetKeyValuesStreamRequest, true> getKeyValuesStream;
+	RequestStream<struct ChangeFeedStreamRequest, true> changeFeedStream;
+	RequestStream<struct OverlappingChangeFeedsRequest, true> overlappingChangeFeeds;
+	RequestStream<struct ChangeFeedPopRequest, true> changeFeedPop;
+	RequestStream<struct ChangeFeedVersionUpdateRequest, true> changeFeedVersionUpdate;
 
 	explicit StorageServerInterface(UID uid) : uniqueID(uid) {}
 	StorageServerInterface() : uniqueID(deterministicRandom()->randomUniqueID()) {}

@@ -101,6 +101,7 @@ enum {
 	OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_UNITTESTPARAM, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
 	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE, OPT_CONFIG_PATH, OPT_USE_TEST_CONFIG_DB, OPT_FAULT_INJECTION, OPT_PROFILER, OPT_PRINT_SIMTIME,
+	OPT_IP_TRUSTED_MASK,
 };
 
 CSimpleOpt::SOption g_rgOptions[] = {
@@ -188,7 +189,8 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_FAULT_INJECTION,       "-fi",                         SO_REQ_SEP },
 	{ OPT_FAULT_INJECTION,       "--fault-injection",           SO_REQ_SEP },
 	{ OPT_PROFILER,	             "--profiler-",                 SO_REQ_SEP},
-	{ OPT_PRINT_SIMTIME,         "--print-sim-time",             SO_NONE },
+	{ OPT_PRINT_SIMTIME,         "--print-sim-time",            SO_NONE },
+	{ OPT_IP_TRUSTED_MASK,       "--trusted-subnet-",           SO_REQ_SEP },
 
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
@@ -294,7 +296,7 @@ UID getSharedMemoryMachineId() {
 	std::string sharedMemoryIdentifier = "fdbserver_shared_memory_id";
 	loop {
 		try {
-			// "0" is the default parameter "addr"
+			// "0" is the default netPrefix "addr"
 			boost::interprocess::managed_shared_memory segment(
 			    boost::interprocess::open_or_create, sharedMemoryIdentifier.c_str(), 1000, 0, p.permission);
 			machineId = segment.find_or_construct<UID>("machineId")(deterministicRandom()->randomUniqueID());
@@ -1666,7 +1668,103 @@ private:
 };
 } // namespace
 
+#include <fmt/printf.h>
+
+struct AuthAllowedSubnet {
+	IPAddress baseAddress;
+	IPAddress addressMask;
+
+	AuthAllowedSubnet(IPAddress const& baseAddress, IPAddress const& addressMask)
+	  : baseAddress(baseAddress), addressMask(addressMask) {
+		ASSERT(baseAddress.isV4() == addressMask.isV4());
+	}
+
+	static AuthAllowedSubnet fromString(std::string_view addressString) {
+		auto pos = addressString.find('/');
+		if (pos == std::string_view::npos) {
+			fmt::print("ERROR: {} is not a valid (use Network-Prefix/hostcount syntax)\n");
+			throw invalid_option();
+		}
+		auto address = addressString.substr(0, pos);
+		auto hostCount = std::stoi(std::string(addressString.substr(pos + 1)));
+		auto addr = boost::asio::ip::make_address(address);
+		if (addr.is_v4()) {
+			auto bM = createBitMask(addr.to_v4().to_bytes(), hostCount);
+			// we typically would expect a base address has been passed, but to be safe we still
+			// will make the last bits 0
+			auto mask = boost::asio::ip::address_v4(bM).to_uint();
+			auto baseAddress = addr.to_v4().to_uint() & mask;
+			return AuthAllowedSubnet(IPAddress(baseAddress), IPAddress(mask));
+		} else {
+			auto mask = createBitMask(addr.to_v6().to_bytes(), hostCount);
+			auto baseAddress = addr.to_v6().to_bytes();
+			for (int i = 0; i < mask.size(); ++i) {
+				baseAddress[i] &= mask[i];
+			}
+			return AuthAllowedSubnet(IPAddress(baseAddress), IPAddress(mask));
+		}
+	}
+
+	template <std::size_t sz>
+	static auto createBitMask(std::array<unsigned char, sz> const& addr, int hostCount) -> std::array<unsigned char, sz> {
+		std::array<unsigned char, sz> res;
+		res.fill((unsigned char)0xff);
+		for (auto idx = (hostCount / 8) - 1; idx < res.size(); ++idx) {
+			if (hostCount > 0) {
+				// 2^(hostCount % 8) - 1 sets the last (hostCount % 8) number of bits to 1
+				// everything else will be zero. For example: 2^3 - 1 == 7 == 0b111
+				unsigned char bitmask = (1 << (hostCount % 8)) - ((unsigned char)1);
+				res[idx] ^= bitmask;
+			} else {
+				res[idx] = (unsigned char)0;
+			}
+			hostCount = 0;
+		}
+		return res;
+	}
+
+	bool operator() (IPAddress const& address) const {
+		if (addressMask.isV4() != address.isV4()) {
+			return false;
+		}
+		if (addressMask.isV4()) {
+			return (addressMask.toV4() & address.toV4()) == baseAddress.toV4();
+		} else {
+			auto res = address.toV6();
+			auto const& mask = addressMask.toV6();
+			for (int i = 0; i < res.size(); ++i) {
+				res[i] &= mask[i];
+			}
+			return res == baseAddress.toV6();
+		}
+	}
+};
+
+template<std::size_t C>
+void printIP(std::array<unsigned char, C> const& addr) {
+	for (auto c : addr) {
+		fmt::print(" {:02x}", int(c));
+	}
+}
+
+void printIP(std::string_view txt, IPAddress const& address) {
+	fmt::print("{}:", txt);
+	if (address.isV4()) {
+		printIP(boost::asio::ip::address_v4(address.toV4()).to_bytes());
+	} else {
+		printIP(address.toV6());
+	}
+	fmt::print("\n");
+}
+
 int main(int argc, char* argv[]) {
+	//auto allowed = AuthAllowedSubnet::fromString(argv[1]);
+	//printIP("Base Address", allowed.baseAddress);
+	//printIP("Address Mask", allowed.addressMask);
+	//for (int idx = 1; idx < argc; ++idx) {
+	//	auto addr = IPAddress::parse(argv[idx]);
+	//}
+	//return 0;
 	// TODO: Remove later, this is just to force the statics to be initialized
 	// otherwise the unit test won't run
 #ifdef ENABLE_SAMPLING

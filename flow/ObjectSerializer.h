@@ -24,9 +24,13 @@
 #include "flow/flat_buffers.h"
 #include "flow/ProtocolVersion.h"
 
+#include <unordered_map>
+
 template <class Ar>
 struct LoadContext {
 	Ar* ar;
+	std::unordered_map<std::string_view, void*> variables;
+
 	LoadContext(Ar* ar) : ar(ar) {}
 	Arena& arena() { return ar->arena(); }
 
@@ -47,6 +51,23 @@ struct LoadContext {
 	void addArena(Arena& arena) { arena = ar->arena(); }
 
 	LoadContext& context() { return *this; }
+
+	template <class T>
+	bool variable(std::string_view name, T* val) {
+		auto p = variables.insert(std::make_pair(name, val));
+		return p.second;
+	}
+
+	template <class T>
+	T& variable(std::string_view name) {
+		auto res = variables.at(name);
+		return *reinterpret_cast<T*>(res);
+	}
+
+	template <class T>
+	T const& variable(std::string_view name) const {
+		return const_cast<LoadContext<Ar>*>(this)->variable<T>(name);
+	}
 };
 
 template <class Ar, class Allocator>
@@ -69,15 +90,16 @@ template <class ReaderImpl>
 class _ObjectReader {
 protected:
 	ProtocolVersion mProtocolVersion;
+	LoadContext<ReaderImpl> context;
 
 public:
+	_ObjectReader() : context(static_cast<ReaderImpl*>(this)) {}
 	ProtocolVersion protocolVersion() const { return mProtocolVersion; }
 	void setProtocolVersion(ProtocolVersion v) { mProtocolVersion = v; }
 
 	template <class... Items>
 	void deserialize(FileIdentifier file_identifier, Items&... items) {
 		const uint8_t* data = static_cast<ReaderImpl*>(this)->data();
-		LoadContext<ReaderImpl> context(static_cast<ReaderImpl*>(this));
 		if (read_file_identifier(data) != file_identifier) {
 			// Some file identifiers are changed in 7.0, so file identifier mismatches
 			// are expected during a downgrade from 7.0 to 6.3
@@ -99,6 +121,21 @@ public:
 	template <class Item>
 	void deserialize(Item& item) {
 		deserialize(FileIdentifierFor<Item>::value, item);
+	}
+
+	template <class T>
+	bool variable(std::string_view name, T* val) {
+		return context.template variable<T>(name, val);
+	}
+
+	template <class T>
+	T& variable(std::string_view name) {
+		return context.template variable<T>(name);
+	}
+
+	template <class T>
+	T const& variable(std::string_view name) const {
+		return context.template variable<T>(name);
 	}
 };
 
