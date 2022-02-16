@@ -138,9 +138,9 @@ TCServerInfo::TCServerInfo(StorageServerInterface ssi,
 }
 
 bool TCServerInfo::hasHealthyAvailableSpace(double minAvailableSpaceRatio) const {
-	ASSERT(serverMetrics.present());
+	ASSERT(serverMetricsPresent());
 
-	auto& metrics = serverMetrics.get();
+	auto& metrics = getServerMetrics();
 	ASSERT(metrics.available.bytes >= 0);
 	ASSERT(metrics.capacity.bytes >= 0);
 
@@ -403,7 +403,7 @@ bool TCTeamInfo::allServersHaveHealthyAvailableSpace() const {
 	double minAvailableSpaceRatio =
 	    SERVER_KNOBS->AVAILABLE_SPACE_RATIO_CUTOFF + SERVER_KNOBS->AVAILABLE_SPACE_RATIO_CUTOFF_SAFETY_BUFFER;
 	for (const auto& server : servers) {
-		if (!server->serverMetrics.present() || !server->hasHealthyAvailableSpace(minAvailableSpaceRatio)) {
+		if (!server->serverMetricsPresent() || !server->hasHealthyAvailableSpace(minAvailableSpaceRatio)) {
 			result = false;
 			break;
 		}
