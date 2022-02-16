@@ -1,3 +1,4 @@
+[configuration]
 extraMachineCountDC = 2
 
 [[test]]
