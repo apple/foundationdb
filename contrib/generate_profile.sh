@@ -1,7 +1,7 @@
 #!/bin/bash
 if [ $# -eq 0 ]
   then
-    echo "Please specify the path to foundation build directory"
+    echo "Usage: generate_profile.sh Path_Of_Foundation_Build_Directory"
     exit 1
 fi
 fdbdir=$1

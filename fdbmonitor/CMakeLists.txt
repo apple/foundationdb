@@ -38,10 +38,10 @@ add_dependencies(start_sandbox fdbmonitor fdbserver)
 
 if(NOT EXISTS ${CMAKE_BINARY_DIR}/generate_profile.sh)
   configure_file(${CMAKE_SOURCE_DIR}/contrib/generate_profile.sh
-    ${CMAKE_BINARY_DIR}/generate_profile.sh)
+    ${CMAKE_BINARY_DIR}/contrib/generate_profile.sh)
 endif()
 
 add_custom_target(generate_profile
-  COMMAND  ${CMAKE_BINARY_DIR}/generate_profile.sh ${CMAKE_BINARY_DIR})
+  COMMAND  ${CMAKE_BINARY_DIR}/contrib/generate_profile.sh ${CMAKE_BINARY_DIR})
 
 add_dependencies(generate_profile fdbmonitor fdbserver mako fdbcli)
