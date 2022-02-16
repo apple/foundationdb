@@ -57,6 +57,7 @@
 #include "fdbserver/MutationTracking.h"
 #include "fdbserver/RecoveryState.h"
 #include "fdbserver/StorageMetrics.h"
+#include "fdbserver/ServerCheckpoint.actor.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/WaitFailure.h"
@@ -1705,7 +1706,7 @@ ACTOR Future<Void> deleteCheckpointQ(StorageServer* self, Version version, Check
 	self->checkpoints.erase(checkpoint.checkpointID);
 
 	try {
-		wait(self->storage.deleteCheckpoint(checkpoint));
+		wait(deleteCheckpoint(checkpoint));
 	} catch (Error& e) {
 		// TODO: Handle errors more gracefully.
 		throw;
@@ -1734,10 +1735,12 @@ ACTOR Future<Void> deleteCheckpointQ(StorageServer* self, Version version, Check
 	return Void();
 }
 
-// Serves GetFileRequests.
-ACTOR Future<Void> getFileQ(StorageServer* self, GetFileRequest req) {
-	TraceEvent("ServeGetCheckpointFileBegin", self->thisServerID).detail("File", req.path).detail("Offset", req.offset);
-
+// Serves GetCheckpointFileRequests.
+ACTOR Future<Void> getCheckpointFileQ(StorageServer* self, GetCheckpointFileRequest req) {
+	TraceEvent("ServeGetCheckpointFileBegin", self->thisServerID)
+	    .detail("CheckpointID", req.checkpointID)
+	    .detail("File", req.path)
+	    .detail("Offset", req.offset);
 	state int transactionSize = 64 * 1024; // Block size read from disk.
 	state size_t fileOffset = req.offset;
 	state Arena arena;
@@ -1762,7 +1765,7 @@ ACTOR Future<Void> getFileQ(StorageServer* self, GetFileRequest req) {
 			}
 
 			wait(req.reply.onReady());
-			GetFileReply reply(name, fileOffset, bytesRead);
+			GetCheckpointFileReply reply(name, fileOffset, bytesRead);
 			reply.data = buf;
 			req.reply.send(reply);
 		}
@@ -6987,7 +6990,9 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 					self->actors.add(getCheckpointQ(self, req));
 				}
 			}
-			when(GetFileRequest req = waitNext(ssi.getFile.getFuture())) { self->actors.add(getFileQ(self, req)); }
+			when(GetCheckpointFileRequest req = waitNext(ssi.getCheckpointFile.getFuture())) {
+				self->actors.add(getCheckpointFileQ(self, req));
+			}
 			when(wait(updateProcessStatsTimer)) {
 				updateProcessStats(self);
 				updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);

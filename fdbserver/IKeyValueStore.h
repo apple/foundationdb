@@ -24,8 +24,7 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/Knobs.h"
-#include "flow/Error.h"
-#include "fdbclient/StorageServerInterface.h"
+#include "fdbclient/StorageCheckpoint.h"
 
 struct CheckpointRequest {
 	const Version version; // The FDB version at which the checkpoint is created.

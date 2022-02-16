@@ -46,6 +46,8 @@ set(FDBSERVER_SRCS
   KeyValueStoreMemory.actor.cpp
   KeyValueStoreRocksDB.actor.cpp
   KeyValueStoreSQLite.actor.cpp
+  ServerCheckpoint.actor.cpp
+  ServerCheckpoint.actor.h
   RocksDBCheckpointUtils.actor.cpp
   RocksDBCheckpointUtils.actor.h
   Knobs.h
