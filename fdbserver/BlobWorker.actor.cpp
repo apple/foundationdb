@@ -1334,6 +1334,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 		metadata->durableDeltaVersion.set(startVersion);
 		metadata->pendingDeltaVersion = startVersion;
 		metadata->bufferedDeltaVersion = startVersion;
+		metadata->knownCommittedVersion = startVersion;
 
 		Reference<ChangeFeedData> newCFData = makeReference<ChangeFeedData>();
 
@@ -1556,7 +1557,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 
 									if (BW_DEBUG) {
 										fmt::print(
-										    "Granule [{0} - {1}) on BW {2} skipping rollback {0} -> {1} completely\n",
+										    "Granule [{0} - {1}) on BW {2} skipping rollback {3} -> {4} completely\n",
 										    metadata->keyRange.begin.printable().c_str(),
 										    metadata->keyRange.end.printable().c_str(),
 										    bwData->id.toString().substr(0, 5).c_str(),
@@ -1570,7 +1571,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 									rollbacksCompleted.push_back(std::pair(rollbackVersion, deltas.version));
 								} else {
 									if (BW_DEBUG) {
-										fmt::print("[{0} - {1}) on BW {2} ROLLBACK @ {2} -> {3}\n",
+										fmt::print("[{0} - {1}) on BW {2} ROLLBACK @ {3} -> {4}\n",
 										           metadata->keyRange.begin.printable(),
 										           metadata->keyRange.end.printable(),
 										           bwData->id.toString().substr(0, 5).c_str(),
@@ -1751,7 +1752,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 
 				// If we have enough delta files, try to re-snapshot
 				if (snapshotEligible && metadata->bytesInNewDeltaFiles >= SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT &&
-				    !readOldChangeFeed) {
+				    metadata->pendingDeltaVersion >= startState.changeFeedStartVersion) {
 					if (BW_DEBUG && !inFlightFiles.empty()) {
 						fmt::print("Granule [{0} - {1}) ready to re-snapshot after {2} > {3} bytes, waiting for "
 						           "outstanding {4} files to finish\n",
