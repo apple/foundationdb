@@ -877,16 +877,20 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 		}
 		if (!batchQueue.empty()) {
 			TraceEvent("DebugGrvProxyBatchQueueNonEmpty").detail("Size", batchQueue.size());
-			grvProxyData->stats.lastBatchQueueThrottled = true;
-			grvProxyData->stats.batchThrottleStartTime = now();
+			if (!grvProxyData->stats.lastBatchQueueThrottled) {
+				grvProxyData->stats.lastBatchQueueThrottled = true;
+				grvProxyData->stats.batchThrottleStartTime = now();
+			}
 		} else {
 			TraceEvent("DebugGrvProxyBatchQueueEmpty");
 			grvProxyData->stats.lastBatchQueueThrottled = false;
 		}
 		if (!defaultQueue.empty()) {
 			TraceEvent("DebugGrvProxyDefaultQueueNonEmpty").detail("Size", defaultQueue.size());
-			grvProxyData->stats.lastDefaultQueueThrottled = true;
-			grvProxyData->stats.defaultThrottleStartTime = now();
+			if (!grvProxyData->stats.lastDefaultQueueThrottled) {
+				grvProxyData->stats.lastDefaultQueueThrottled = true;
+				grvProxyData->stats.defaultThrottleStartTime = now();
+			}
 		} else {
 			TraceEvent("DebugGrvProxyDefaultQueueEmpty");
 			grvProxyData->stats.lastDefaultQueueThrottled = false;
