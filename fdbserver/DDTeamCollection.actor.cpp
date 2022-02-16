@@ -5671,11 +5671,7 @@ TEST_CASE("/DataDistribution/GetTeam/ServerUtilizationNearCutoff") {
 
 	std::pair<Optional<Reference<IDataDistributionTeam>>, bool> resTeam = req.reply.getFuture().get();
 
-	std::set<UID> expectedServers{ UID(2, 0), UID(3, 0), UID(4, 0) };
-	ASSERT(resTeam.first.present());
-	auto servers = resTeam.first.get()->getServerIDs();
-	const std::set<UID> selectedServers(servers.begin(), servers.end());
-	ASSERT(expectedServers == selectedServers);
+	ASSERT(!resTeam.first.present());
 
 	return Void();
 }

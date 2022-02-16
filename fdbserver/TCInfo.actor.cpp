@@ -138,6 +138,23 @@ TCServerInfo::TCServerInfo(StorageServerInterface ssi,
 	}
 }
 
+bool TCServerInfo::hasHealthyAvailableSpace(double minAvailableSpaceRatio) const {
+	ASSERT(serverMetrics.present());
+
+	auto& metrics = serverMetrics.get();
+	ASSERT(metrics.available.bytes >= 0);
+	ASSERT(metrics.capacity.bytes >= 0);
+
+	double availableSpaceRatio;
+	if (metrics.capacity.bytes == 0) {
+		availableSpaceRatio = 0;
+	} else {
+		availableSpaceRatio = (((double)metrics.available.bytes) / metrics.capacity.bytes);
+	}
+
+	return availableSpaceRatio >= minAvailableSpaceRatio;
+}
+
 Future<Void> TCServerInfo::updateServerMetrics() {
 	return TCServerInfoImpl::updateServerMetrics(this);
 }
@@ -319,8 +336,23 @@ double TCTeamInfo::getMinAvailableSpaceRatio(bool includeInFlight) const {
 	return minRatio;
 }
 
+bool TCTeamInfo::allServersHaveHealthyAvailableSpace() const {
+	bool result = true;
+	double minAvailableSpaceRatio =
+	    SERVER_KNOBS->AVAILABLE_SPACE_RATIO_CUTOFF + SERVER_KNOBS->AVAILABLE_SPACE_RATIO_CUTOFF_SAFETY_BUFFER;
+	for (const auto& server : servers) {
+		if (!server->serverMetrics.present() || !server->hasHealthyAvailableSpace(minAvailableSpaceRatio)) {
+			result = false;
+			break;
+		}
+	}
+
+	return result;
+}
+
 bool TCTeamInfo::hasHealthyAvailableSpace(double minRatio) const {
-	return getMinAvailableSpaceRatio() >= minRatio && getMinAvailableSpace() > SERVER_KNOBS->MIN_AVAILABLE_SPACE;
+	return getMinAvailableSpaceRatio() >= minRatio && getMinAvailableSpace() > SERVER_KNOBS->MIN_AVAILABLE_SPACE &&
+	       allServersHaveHealthyAvailableSpace();
 }
 
 bool TCTeamInfo::isOptimal() const {
