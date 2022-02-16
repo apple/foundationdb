@@ -420,7 +420,7 @@ void traceSSOrTSSPercentiles(TraceEvent& ev, const std::string name, ContinuousS
 	ev.detail(name + "Mean", sample.mean());
 	// don't log the larger percentiles unless we actually have enough samples to log the accurate percentile instead of
 	// the largest sample in this window
-	if (sample.getPopulationSize() >= 2) {
+	if (sample.getPopulationSize() >= 3) {
 		ev.detail(name + "P50", sample.median());
 	}
 	if (sample.getPopulationSize() >= 10) {
