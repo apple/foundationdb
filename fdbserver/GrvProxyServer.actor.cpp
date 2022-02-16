@@ -657,10 +657,10 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
 		}
 
 		TraceEvent("DebugGrvProxyThrottleTimes")
-		    .detail("LastBatchThrottled", stats->lastBatchQueueThrottled)
-		    .detail("BatchThrottleStart", stats->batchThrottleStartTime)
-		    .detail("LastDefaultThrottled", stats->lastDefaultQueueThrottled)
-		    .detail("DefaultThrottleStart", stats->defaultThrottleStartTime);
+		    .detail("LastBatchThrottled", format("%.6f", stats->lastBatchQueueThrottled))
+		    .detail("BatchThrottleStart", format("%.6f", stats->batchThrottleStartTime))
+		    .detail("LastDefaultThrottled", format("%.6f", stats->lastDefaultQueueThrottled))
+		    .detail("DefaultThrottleStart", format("%.6f", stats->defaultThrottleStartTime));
 		if (stats->lastBatchQueueThrottled) {
 			// Check if this throttling has been sustained for a certain amount of time to avoid false positives
 			if (now() - stats->batchThrottleStartTime > CLIENT_KNOBS->GRV_SUSTAINED_THROTTLING_THRESHOLD) {
