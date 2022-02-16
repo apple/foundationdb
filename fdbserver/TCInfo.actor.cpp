@@ -401,7 +401,7 @@ double TCTeamInfo::getMinAvailableSpaceRatio(bool includeInFlight) const {
 bool TCTeamInfo::allServersHaveHealthyAvailableSpace() const {
 	bool result = true;
 	double minAvailableSpaceRatio =
-	    SERVER_KNOBS->AVAILABLE_SPACE_RATIO_CUTOFF + SERVER_KNOBS->AVAILABLE_SPACE_RATIO_CUTOFF_SAFETY_BUFFER;
+	    SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO + SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO_SAFETY_BUFFER;
 	for (const auto& server : servers) {
 		if (!server->serverMetricsPresent() || !server->hasHealthyAvailableSpace(minAvailableSpaceRatio)) {
 			result = false;

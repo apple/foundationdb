@@ -233,7 +233,6 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( STORAGE_METRICS_POLLING_DELAY,                         2.0 ); if( randomize && BUGGIFY ) STORAGE_METRICS_POLLING_DELAY = 15.0;
 	init( STORAGE_METRICS_RANDOM_DELAY,                          0.2 );
 	init( AVAILABLE_SPACE_RATIO_CUTOFF,                         0.05 );
-	init( AVAILABLE_SPACE_RATIO_CUTOFF_SAFETY_BUFFER,           0.03 );
 	init( DESIRED_TEAMS_PER_SERVER,                                5 ); if( randomize && BUGGIFY ) DESIRED_TEAMS_PER_SERVER = deterministicRandom()->randomInt(1, 10);
 	init( MAX_TEAMS_PER_SERVER,           5*DESIRED_TEAMS_PER_SERVER );
 	init( DD_SHARD_SIZE_GRANULARITY,                         5000000 );
@@ -580,6 +579,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 
 	init( MIN_AVAILABLE_SPACE,                                   1e8 );
 	init( MIN_AVAILABLE_SPACE_RATIO,                            0.05 );
+	init( MIN_AVAILABLE_SPACE_RATIO_SAFETY_BUFFER,              0.03 );
 	init( TARGET_AVAILABLE_SPACE_RATIO,                         0.30 );
 	init( AVAILABLE_SPACE_UPDATE_DELAY,                          5.0 );
 
