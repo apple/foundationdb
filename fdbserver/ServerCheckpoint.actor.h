@@ -45,7 +45,7 @@ protected:
 	virtual ~ICheckpointReader() {}
 };
 
-extern ICheckpointReader* newCheckpointReader(const CheckpointMetaData& checkpoint, UID logID);
+ICheckpointReader* newCheckpointReader(const CheckpointMetaData& checkpoint, UID logID);
 
 // Delete a checkpoint.
 ACTOR Future<Void> deleteCheckpoint(CheckpointMetaData checkpoint);

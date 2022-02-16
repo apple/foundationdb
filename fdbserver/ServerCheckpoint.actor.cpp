@@ -3,6 +3,18 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
+ICheckpointReader* newCheckpointReader(const CheckpointMetaData& checkpoint, UID logID) {
+	if (checkpoint.getFormat() == RocksDBColumnFamily) {
+        return newRocksDBCheckpointReader(checkpoint, logID);
+	} else if (checkpoint.getFormat() == RocksDB) {
+		throw not_implemented();
+	} else {
+		ASSERT(false);
+	}
+
+	return nullptr;
+}
+
 ACTOR Future<Void> deleteCheckpoint(CheckpointMetaData checkpoint) {
 	wait(delay(0, TaskPriority::FetchKeys));
 

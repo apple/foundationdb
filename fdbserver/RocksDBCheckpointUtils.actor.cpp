@@ -1,9 +1,10 @@
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/StorageCheckpoint.h"
 #include "fdbclient/SystemData.h"
-#include "fdbclient/FDBTypes.h"
-#include "flow/flow.h"
+#include "fdbserver/ServerCheckpoint.actor.h"
 #include "flow/Trace.h"
+#include "flow/flow.h"
 
 #include <memory>
 #include <tuple>
@@ -14,11 +15,11 @@
 namespace {
 // Fetch a single sst file from storage server. If the file is fetch successfully, it will be recorded via cFun.
 ACTOR Future<Void> fetchCheckpointFile(Database cx,
-                                              std::shared_ptr<CheckpointMetaData> metaData,
-                                              int idx,
-                                              std::string dir,
-                                              std::function<Future<Void>(const CheckpointMetaData&)> cFun,
-                                              int maxRetries = 3) {
+                                       std::shared_ptr<CheckpointMetaData> metaData,
+                                       int idx,
+                                       std::string dir,
+                                       std::function<Future<Void>(const CheckpointMetaData&)> cFun,
+                                       int maxRetries = 3) {
 	state RocksDBColumnFamilyCheckpoint rocksCF;
 	ObjectReader reader(metaData->serializedCheckpoint.begin(), IncludeVersion());
 	reader.deserialize(rocksCF);
@@ -110,6 +111,39 @@ ACTOR Future<Void> fetchCheckpointFile(Database cx,
 	}
 }
 
+class RocksDBCheckpointReader : public ICheckpointReader {
+public:
+	RocksDBCheckpointReader(const CheckpointMetaData& checkpoint, UID logID) : checkpoint_(checkpoint), id_(logID) {}
+
+	Future<Void> init() override;
+
+	Future<RangeResult> nextKeyValues(const int rowLimit, const int ByteLimit) override { throw not_implemented(); }
+
+	// Returns the next chunk of serialized checkpoint.
+	Future<Standalone<StringRef>> nextChunk(const int ByteLimit) override;
+
+	Future<Void> getError() const override { return Never(); }
+	Future<Void> onClosed() const override { return Void(); }
+
+	void dispose() override {}
+	void close() override;
+
+private:
+	CheckpointMetaData checkpoint_;
+	UID id_;
+};
+
+Future<Void>
+RocksDBCheckpointReader::init() {
+	return Void();
+}
+
+Future<Standalone<StringRef>> RocksDBCheckpointReader::nextChunk(const int ByteLimit) {
+	Standalone<StringRef> result;
+	return result;
+}
+
+void RocksDBCheckpointReader::close() {}
 } // namespace
 
 ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
@@ -163,4 +197,8 @@ ACTOR Future<Void> deleteRocksCFCheckpoint(CheckpointMetaData checkpoint) {
 		wait(delay(0, TaskPriority::FetchKeys));
 	}
 	return Void();
+}
+
+ICheckpointReader* newRocksDBCheckpointReader(const CheckpointMetaData& checkpoint, UID logID) {
+	return new RocksDBCheckpointReader(checkpoint, logID);
 }

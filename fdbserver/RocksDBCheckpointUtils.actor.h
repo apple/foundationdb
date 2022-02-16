@@ -34,11 +34,12 @@
 // Fetch the checkpoint file(s) to local dir, the checkpoint is specified by initialState.
 // If cFun is provided, the fetch progress can be checkpointed, so that next time, the fetch process
 // can be continued, in case of crash.
-ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(
-    Database cx,
-    CheckpointMetaData initialState,
-    std::string dir,
-    std::function<Future<Void>(const CheckpointMetaData&)> cFun);
+ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
+                                                        CheckpointMetaData initialState,
+                                                        std::string dir,
+                                                        std::function<Future<Void>(const CheckpointMetaData&)> cFun);
 
 ACTOR Future<Void> deleteRocksCFCheckpoint(CheckpointMetaData checkpoint);
+
+ICheckpointReader* newRocksDBCheckpointReader(const CheckpointMetaData& checkpoint, UID logID);
 #endif
