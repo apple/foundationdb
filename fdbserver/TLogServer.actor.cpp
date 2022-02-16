@@ -1896,7 +1896,8 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 
 		// Currently, from `reqBegin` to logData->version are all empty peeks. Wait for more versions, or the empty
 		// batching interval has expired.
-		wait(logData->version.whenAtLeast(waitUntilVersion) || delay(SERVER_KNOBS->PEEK_BATCHING_EMPTY_MSG_INTERVAL));
+		wait(logData->version.whenAtLeast(waitUntilVersion) ||
+		     delay(SERVER_KNOBS->PEEK_BATCHING_EMPTY_MSG_INTERVAL - (now() - blockStart)));
 		if (logData->version.get() < waitUntilVersion) {
 			break; // We know that from `reqBegin` to logData->version are all empty messages. Skip re-executing the
 			       // peek logic.
