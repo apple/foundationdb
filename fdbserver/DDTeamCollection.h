@@ -171,6 +171,7 @@ typedef AsyncMap<UID, ServerStatus> ServerStatusMap;
 
 class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	friend class DDTeamCollectionImpl;
+	friend class DDTeamCollectionUnitTest;
 
 	enum class Status { NONE = 0, WIGGLING = 1, EXCLUDED = 2, FAILED = 3 };
 
@@ -521,6 +522,10 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 
 	void noHealthyTeams() const;
 
+	void disableBuildingTeams() { doBuildTeams = false; }
+
+	void setCheckTeamDelay() { this->checkTeamDelay = Void(); }
+
 public:
 	Database cx;
 
@@ -594,12 +599,6 @@ public:
 	             bool redundantTeam = false);
 
 	void addTeam(std::set<UID> const& team, bool isInitialTeam) { addTeam(team.begin(), team.end(), isInitialTeam); }
-
-	// FIXME: Public for testing only
-	void disableBuildingTeams() { doBuildTeams = false; }
-
-	// FIXME: Public for testing only
-	void setCheckTeamDelay() { this->checkTeamDelay = Void(); }
 
 	// FIXME: Public for testing only
 	// Group storage servers (process) based on their machineId in LocalityData
