@@ -612,6 +612,7 @@ ACTOR Future<Void> checkManagerLock(Reference<ReadYourWritesTransaction> tr, Ref
 		throw blob_manager_replaced();
 	}
 	tr->addReadConflictRange(singleKeyRange(blobManagerEpochKey));
+	tr->addWriteConflictRange(singleKeyRange(blobManagerEpochKey));
 
 	return Void();
 }
@@ -630,10 +631,12 @@ ACTOR Future<Void> writeInitialGranuleMapping(Reference<BlobManagerData> bmData,
 			try {
 				tr->setOption(FDBTransactionOptions::Option::PRIORITY_SYSTEM_IMMEDIATE);
 				tr->setOption(FDBTransactionOptions::Option::ACCESS_SYSTEM_KEYS);
+				wait(checkManagerLock(tr, bmData));
 				while (i + j < boundaries.size() - 1 && j < transactionChunkSize) {
 					// TODO REMOVE
 					if (BM_DEBUG) {
-						fmt::print("Persisting initial mapping for [{0} - {1})\n",
+						fmt::print("BM {0} Persisting initial mapping for [{1} - {2})\n",
+						           bmData->epoch,
 						           boundaries[i + j].printable(),
 						           boundaries[i + j + 1].printable());
 					}
@@ -647,7 +650,8 @@ ACTOR Future<Void> writeInitialGranuleMapping(Reference<BlobManagerData> bmData,
 				wait(tr->commit());
 				if (BM_DEBUG) {
 					for (int k = 0; k < j; k++) {
-						fmt::print("Persisted initial mapping for [{0} - {1})\n",
+						fmt::print("BM {0} Persisted initial mapping for [{1} - {2})\n",
+						           bmData->epoch,
 						           boundaries[i + k].printable(),
 						           boundaries[i + k + 1].printable());
 					}
@@ -655,7 +659,7 @@ ACTOR Future<Void> writeInitialGranuleMapping(Reference<BlobManagerData> bmData,
 				break;
 			} catch (Error& e) {
 				if (BM_DEBUG) {
-					fmt::print("Persisting initial mapping got error {}\n", e.name());
+					fmt::print("BM {} Persisting initial mapping got error {}\n", bmData->epoch, e.name());
 				}
 				wait(tr->onError(e));
 				j = 0;
@@ -1782,6 +1786,7 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			wait(checkManagerLock(tr, bmData));
+			wait(tr->commit());
 			break;
 		} catch (Error& e) {
 			if (BM_DEBUG) {
@@ -2740,6 +2745,7 @@ ACTOR Future<Void> doLockChecks(Reference<BlobManagerData> bmData) {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				wait(checkManagerLock(tr, bmData));
+				wait(tr->commit());
 				break;
 			} catch (Error& e) {
 				if (e.code() == error_code_granule_assignment_conflict) {
@@ -2801,7 +2807,7 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 		loop choose {
 			when(wait(self->iAmReplaced.getFuture())) {
 				if (BM_DEBUG) {
-					printf("Blob Manager exiting because it is replaced\n");
+					fmt::print("BM {} exiting because it is replaced\n", self->epoch);
 				}
 				break;
 			}
