@@ -75,23 +75,18 @@ private:
 Future<Void> RocksDBCheckpointReader::init(StringRef token) {
 	ASSERT_EQ(this->checkpoint_.getFormat(), RocksDBColumnFamily);
 	const std::string name = token.toString();
-	std::cout << "RocksDBCheckpointReader: " << name << std::endl;
 	this->offset_ = 0;
 	this->path_.clear();
-	RocksDBColumnFamilyCheckpoint rocksCF;
-	ObjectReader reader(this->checkpoint_.serializedCheckpoint.begin(), IncludeVersion());
-	reader.deserialize(rocksCF);
+	const RocksDBColumnFamilyCheckpoint rocksCF = getRocksCF(this->checkpoint_);
 	for (const auto& sstFile : rocksCF.sstFiles) {
-		std::cout << "Seen file: " << sstFile.name << std::endl;
 		if (sstFile.name == name) {
 			this->path_ = sstFile.db_path + sstFile.name;
 			break;
 		}
 	}
 
-	TraceEvent("RocksDBCheckpointReaderInit").detail("File", this->path_);
-
 	if (this->path_.empty()) {
+		TraceEvent("RocksDBCheckpointReaderInitFileNotFound").detail("File", this->path_);
 		return checkpoint_not_found();
 	}
 
@@ -103,7 +98,7 @@ Future<Standalone<StringRef>> RocksDBCheckpointReader::nextChunk(const int byteL
 }
 
 Future<Void> RocksDBCheckpointReader::close() {
-	return doClose(this);	
+	return doClose(this);
 }
 
 // Fetch a single sst file from storage server. If the file is fetch successfully, it will be recorded via cFun.
@@ -169,8 +164,6 @@ ACTOR Future<Void> fetchCheckpointFile(Database cx,
 			    .detail("Attempt", attempt);
 			loop {
 				state FetchCheckpointReply rep = waitNext(stream.getFuture());
-				std::cout << "Received checkpoint data: " << rep.data.size() << std::endl
-				          << rep.data.toString() << std::endl;
 				wait(asyncFile->write(rep.data.begin(), rep.data.size(), offset));
 				wait(asyncFile->flush());
 				offset += rep.data.size();
@@ -221,18 +214,18 @@ ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
 	state std::shared_ptr<CheckpointMetaData> metaData = std::make_shared<CheckpointMetaData>(initialState);
 
 	if (metaData->format == RocksDBColumnFamily) {
-		state RocksDBColumnFamilyCheckpoint rocksCF;
-		ObjectReader reader(initialState.serializedCheckpoint.begin(), IncludeVersion());
-		reader.deserialize(rocksCF);
+		state RocksDBColumnFamilyCheckpoint rocksCF = getRocksCF(initialState);
+		TraceEvent("RocksDBCheckpointMetaData").detail("RocksCF", rocksCF.toString());
 
 		state int i = 0;
-		TraceEvent("GetCheckpointMetaData").detail("Checkpoint", metaData->toString());
+		state std::vector<Future<Void>> fs;
 		for (; i < rocksCF.sstFiles.size(); ++i) {
+			fs.push_back(fetchCheckpointFile(cx, metaData, i, dir, cFun));
 			TraceEvent("GetCheckpointFetchingFile")
 			    .detail("FileName", rocksCF.sstFiles[i].name)
 			    .detail("Server", metaData->ssID.toString());
-			wait(fetchCheckpointFile(cx, metaData, i, dir, cFun));
 		}
+		wait(waitForAll(fs));
 	} else {
 		throw not_implemented();
 	}
@@ -242,9 +235,10 @@ ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
 
 ACTOR Future<Void> deleteRocksCFCheckpoint(CheckpointMetaData checkpoint) {
 	ASSERT_EQ(checkpoint.getFormat(), RocksDBColumnFamily);
-	ObjectReader reader(checkpoint.serializedCheckpoint.begin(), IncludeVersion());
-	RocksDBColumnFamilyCheckpoint rocksCF;
-	reader.deserialize(rocksCF);
+	RocksDBColumnFamilyCheckpoint rocksCF = getRocksCF(checkpoint);
+	TraceEvent("DeleteRocksColumnFamilyCheckpoint", checkpoint.checkpointID)
+	    .detail("CheckpointID", checkpoint.checkpointID)
+	    .detail("RocksCF", rocksCF.toString());
 
 	state std::unordered_set<std::string> dirs;
 	for (const LiveFileMetaData& file : rocksCF.sstFiles) {

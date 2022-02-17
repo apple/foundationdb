@@ -6912,7 +6912,7 @@ ACTOR static Future<CheckpointMetaData> getCheckpointMetaDataInternal(GetCheckpo
 		// For each shard, all storage servers are checked, only one is required.
 		fs.push_back(errorOr(timeoutError(alternatives->getInterface(i).checkpoint.getReply(req), timeout)));
 	}
-	std::cout << "start waiting" << std::endl;
+
 	state Optional<Error> error;
 	choose {
 		when(wait(waitForAll(fs))) {
@@ -6941,10 +6941,6 @@ ACTOR static Future<CheckpointMetaData> getCheckpointMetaDataInternal(GetCheckpo
 		    .detail("Range", req.range.toString())
 		    .detail("Version", req.version)
 		    .detail("StorageServer", alternatives->getInterface(i).uniqueID);
-		// TraceEvent("GetCheckpointMetaDataInternalError")
-		//     .detail("Range", req.range.toString())
-		//     .detail("Version", req.version)
-		//     .error(e, true);
 		if (fs[i].get().isError()) {
 			const Error& e = fs[i].get().getError();
 			if (e.code() != error_code_checkpoint_not_found || !error.present()) {
@@ -6965,7 +6961,6 @@ ACTOR Future<std::vector<CheckpointMetaData>> getCheckpointMetaData(Database cx,
                                                                     CheckpointFormat format,
                                                                     double timeout) {
 	state Span span("NAPI:GetCheckpoint"_loc);
-	// state double deadline = now() + timeout;
 
 	loop {
 		TraceEvent("GetCheckpointBegin")
