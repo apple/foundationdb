@@ -137,6 +137,7 @@ if(OPEN_FOR_IDE)
 else()
   add_library(fdb_java SHARED fdbJNI.cpp)
   add_library(java_workloads SHARED JavaWorkload.cpp)
+  target_link_libraries(java_workloads PRIVATE fdb_java_native)
 endif()
 
 if (NOT WIN32 AND NOT APPLE AND NOT OPEN_FOR_IDE)
@@ -146,6 +147,7 @@ endif()
 target_include_directories(fdb_java PRIVATE ${JNI_INCLUDE_DIRS})
 # libfdb_java.so is loaded by fdb-java.jar and doesn't need to depened on jvm shared libraries.
 target_link_libraries(fdb_java PRIVATE fdb_c)
+target_link_libraries(fdb_java PRIVATE fdb_java_native)
 if(APPLE)
   set_target_properties(fdb_java PROPERTIES SUFFIX ".jnilib")
 endif()
@@ -182,8 +184,8 @@ set(MANIFEST_FILE ${CMAKE_CURRENT_BINARY_DIR}/resources/META-INF/MANIFEST.MF)
 file(WRITE ${MANIFEST_FILE} ${MANIFEST_TEXT})
 
 add_jar(fdb-java ${JAVA_BINDING_SRCS} ${GENERATED_JAVA_FILES} ${CMAKE_SOURCE_DIR}/LICENSE
-  OUTPUT_DIR ${PROJECT_BINARY_DIR}/lib VERSION ${FDB_VERSION} MANIFEST ${MANIFEST_FILE})
-add_dependencies(fdb-java fdb_java_options fdb_java)
+  OUTPUT_DIR ${PROJECT_BINARY_DIR}/lib VERSION ${FDB_VERSION} MANIFEST ${MANIFEST_FILE} GENERATE_NATIVE_HEADERS fdb_java_native)
+add_dependencies(fdb-java fdb_java_options)
 
 if(NOT OPEN_FOR_IDE)
   set(FAT_JAR_BINARIES "NOTFOUND" CACHE STRING
@@ -218,7 +220,11 @@ if(NOT OPEN_FOR_IDE)
   if(WIN32)
     set(lib_destination "windows/amd64")
   elseif(APPLE)
-    set(lib_destination "osx/x86_64")
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64")
+      set(lib_destination "osx/aarch64")
+    else()
+      set(lib_destination "osx/x86_64")
+    endif()
   else()
    if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
      set(lib_destination "linux/aarch64")
@@ -234,6 +240,7 @@ if(NOT OPEN_FOR_IDE)
     COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:fdb_java> ${lib_destination} &&
     ${CMAKE_COMMAND} -E copy $<TARGET_FILE:fdb_java> ${jni_package} &&
     ${CMAKE_COMMAND} -E touch ${CMAKE_CURRENT_BINARY_DIR}/lib_copied
+    DEPENDS fdb_java
     COMMENT "Copy jni library for fat jar")
   add_custom_target(copy_lib DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/lib_copied)
   add_dependencies(copy_lib unpack_jar)
@@ -260,6 +267,7 @@ if(NOT OPEN_FOR_IDE)
   add_dependencies(fdb-java-tests foundationdb-tests)
   add_custom_target(fat-jar ALL DEPENDS ${target_jar})
   add_dependencies(fat-jar fdb-java)
+  add_dependencies(fat-jar fdb_java)
   add_dependencies(fat-jar copy_lib)
   add_dependencies(packages fat-jar)
 

@@ -97,6 +97,19 @@ func TestVersionstamp(t *testing.T) {
 	t.Logf("setOne returned %s", k)
 }
 
+func TestReadTransactionOptions(t *testing.T) {
+	fdb.MustAPIVersion(710)
+	db := fdb.MustOpenDefault()
+	_, e := db.ReadTransact(func(rtr fdb.ReadTransaction) (interface{}, error) {
+		rtr.Options().SetAccessSystemKeys();
+		return rtr.Get(fdb.Key("\xff/")).MustGet(), nil
+	})
+	if e != nil {
+		t.Errorf("Failed to read system key: %s", e)
+	}
+}
+
+
 func ExampleTransactor() {
 	fdb.MustAPIVersion(710)
 	db := fdb.MustOpenDefault()

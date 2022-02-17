@@ -25,6 +25,7 @@
 #include "flow/crc32c.h"
 #include "flow/genericactors.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/xxhash.h"
 
 typedef bool (*compare_pages)(void*, void*);
 typedef int64_t loc_t;
@@ -869,7 +870,7 @@ public:
 	}
 };
 
-class DiskQueue : public IDiskQueue, public Tracked<DiskQueue> {
+class DiskQueue final : public IDiskQueue, public Tracked<DiskQueue> {
 public:
 	// FIXME: Is setting lastCommittedSeq to -1 instead of 0 necessary?
 	DiskQueue(std::string basename,
@@ -1044,8 +1045,13 @@ private:
 		union {
 			UID hash;
 			struct {
-				uint32_t hash32;
-				uint32_t _unused;
+				union {
+					uint64_t hash64;
+					struct {
+						uint32_t hash32;
+						uint32_t _unused;
+					};
+				};
 				uint16_t magic;
 				uint16_t implementationVersion;
 			};
@@ -1073,15 +1079,22 @@ private:
 		uint32_t checksum_crc32c() const {
 			return crc32c_append(0xfdbeefdb, (uint8_t*)&_unused, sizeof(Page) - sizeof(uint32_t));
 		}
+		uint64_t checksum_xxhash3() const {
+			return XXH3_64bits(static_cast<const void*>(&magic), sizeof(Page) - sizeof(uint64_t));
+		}
 		void updateHash() {
 			switch (diskQueueVersion()) {
 			case DiskQueueVersion::V0: {
 				hash = checksum_hashlittle2();
 				return;
 			}
-			case DiskQueueVersion::V1:
-			default: {
+			case DiskQueueVersion::V1: {
 				hash32 = checksum_crc32c();
+				return;
+			}
+			case DiskQueueVersion::V2:
+			default: {
+				hash64 = checksum_xxhash3();
 				return;
 			}
 			}
@@ -1093,6 +1106,9 @@ private:
 			}
 			case DiskQueueVersion::V1: {
 				return hash32 == checksum_crc32c();
+			}
+			case DiskQueueVersion::V2: {
+				return hash64 == checksum_xxhash3();
 			}
 			default:
 				return false;
@@ -1128,6 +1144,9 @@ private:
 			break;
 		case DiskQueueVersion::V1:
 			p.implementationVersion = 1;
+			break;
+		case DiskQueueVersion::V2:
+			p.implementationVersion = 2;
 			break;
 		}
 		p.payloadSize = 0;
@@ -1539,7 +1558,7 @@ private:
 // This works by performing two commits when uncommitted data is popped:
 //	Commit 1 - pop only previously committed data and push new data (i.e., commit uncommitted data)
 //  Commit 2 - finish pop into uncommitted data
-class DiskQueue_PopUncommitted : public IDiskQueue {
+class DiskQueue_PopUncommitted final : public IDiskQueue {
 
 public:
 	DiskQueue_PopUncommitted(std::string basename,

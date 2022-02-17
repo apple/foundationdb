@@ -319,9 +319,9 @@ struct TLogData : NonCopyable {
 	// data is written from. This value is restored from disk when the tlog
 	// restarts.
 	UID durableClusterId;
-	// The master cluster ID stores the cluster ID read from the txnStateStore.
+	// The cluster-controller cluster ID stores the cluster ID read from the txnStateStore.
 	// It is cached in this variable.
-	UID masterClusterId;
+	UID ccClusterId;
 	UID dbgid;
 	UID workerID;
 
@@ -783,7 +783,7 @@ void TLogQueue::updateVersionSizes(const TLogQueueEntry& result,
 ACTOR Future<Void> tLogLock(TLogData* self, ReplyPromise<TLogLockResult> reply, Reference<LogData> logData) {
 	state Version stopVersion = logData->version.get();
 
-	TEST(true); // TLog stopped by recovering master
+	TEST(true); // TLog stopped by recovering cluster-controller
 	TEST(logData->stopped); // logData already stopped
 	TEST(!logData->stopped); // logData not yet stopped
 
@@ -1740,140 +1740,168 @@ Future<Void> tLogPeekMessages(PromiseType replyPromise,
 		return Void();
 	}
 
-	state Version endVersion = logData->version.get() + 1;
-	state bool onlySpilled = false;
+	state Version endVersion;
+	state bool onlySpilled;
 
-	// grab messages from disk
-	//TraceEvent("TLogPeekMessages", self->dbgid).detail("ReqBeginEpoch", reqBegin.epoch).detail("ReqBeginSeq", reqBegin.sequence).detail("Epoch", self->epoch()).detail("PersistentDataSeq", self->persistentDataSequence).detail("Tag1", reqTag1).detail("Tag2", reqTag2);
-	if (reqBegin <= logData->persistentDataDurableVersion) {
-		// Just in case the durable version changes while we are waiting for the read, we grab this data from memory. We
-		// may or may not actually send it depending on whether we get enough data from disk. SOMEDAY: Only do this if
-		// an initial attempt to read from disk results in insufficient data and the required data is no longer in
-		// memory SOMEDAY: Should we only send part of the messages we collected, to actually limit the size of the
-		// result?
+	// Run the peek logic in a loop to account for the case where there is no data to return to the caller, and we may
+	// want to wait a little bit instead of just sending back an empty message. This feature is controlled by a knob.
+	loop {
+		endVersion = logData->version.get() + 1;
+		onlySpilled = false;
 
-		if (reqOnlySpilled) {
-			endVersion = logData->persistentDataDurableVersion + 1;
-		} else {
-			peekMessagesFromMemory(logData, reqTag, reqBegin, messages2, endVersion);
-		}
+		// grab messages from disk
+		//TraceEvent("TLogPeekMessages", self->dbgid).detail("ReqBeginEpoch", reqBegin.epoch).detail("ReqBeginSeq", reqBegin.sequence).detail("Epoch", self->epoch()).detail("PersistentDataSeq", self->persistentDataSequence).detail("Tag1", reqTag1).detail("Tag2", reqTag2);
+		if (reqBegin <= logData->persistentDataDurableVersion) {
+			// Just in case the durable version changes while we are waiting for the read, we grab this data from
+			// memory. We may or may not actually send it depending on whether we get enough data from disk. SOMEDAY:
+			// Only do this if an initial attempt to read from disk results in insufficient data and the required data
+			// is no longer in memory SOMEDAY: Should we only send part of the messages we collected, to actually limit
+			// the size of the result?
 
-		if (logData->shouldSpillByValue(reqTag)) {
-			RangeResult kvs = wait(self->persistentData->readRange(
-			    KeyRangeRef(persistTagMessagesKey(logData->logId, reqTag, reqBegin),
-			                persistTagMessagesKey(logData->logId, reqTag, logData->persistentDataDurableVersion + 1)),
-			    SERVER_KNOBS->DESIRED_TOTAL_BYTES,
-			    SERVER_KNOBS->DESIRED_TOTAL_BYTES));
-
-			for (auto& kv : kvs) {
-				auto ver = decodeTagMessagesKey(kv.key);
-				messages << VERSION_HEADER << ver;
-				messages.serializeBytes(kv.value);
-			}
-
-			if (kvs.expectedSize() >= SERVER_KNOBS->DESIRED_TOTAL_BYTES) {
-				endVersion = decodeTagMessagesKey(kvs.end()[-1].key) + 1;
-				onlySpilled = true;
+			if (reqOnlySpilled) {
+				endVersion = logData->persistentDataDurableVersion + 1;
 			} else {
-				messages.serializeBytes(messages2.toValue());
+				peekMessagesFromMemory(logData, reqTag, reqBegin, messages2, endVersion);
 			}
-		} else {
-			// FIXME: Limit to approximately DESIRED_TOTATL_BYTES somehow.
-			RangeResult kvrefs = wait(self->persistentData->readRange(
-			    KeyRangeRef(
-			        persistTagMessageRefsKey(logData->logId, reqTag, reqBegin),
-			        persistTagMessageRefsKey(logData->logId, reqTag, logData->persistentDataDurableVersion + 1)),
-			    SERVER_KNOBS->TLOG_SPILL_REFERENCE_MAX_BATCHES_PER_PEEK + 1));
 
-			//TraceEvent("TLogPeekResults", self->dbgid).detail("ForAddress", replyPromise.getEndpoint().getPrimaryAddress()).detail("Tag1Results", s1).detail("Tag2Results", s2).detail("Tag1ResultsLim", kv1.size()).detail("Tag2ResultsLim", kv2.size()).detail("Tag1ResultsLast", kv1.size() ? kv1[0].key : "").detail("Tag2ResultsLast", kv2.size() ? kv2[0].key : "").detail("Limited", limited).detail("NextEpoch", next_pos.epoch).detail("NextSeq", next_pos.sequence).detail("NowEpoch", self->epoch()).detail("NowSeq", self->sequence.getNextSequence());
+			if (logData->shouldSpillByValue(reqTag)) {
+				RangeResult kvs = wait(self->persistentData->readRange(
+				    KeyRangeRef(
+				        persistTagMessagesKey(logData->logId, reqTag, reqBegin),
+				        persistTagMessagesKey(logData->logId, reqTag, logData->persistentDataDurableVersion + 1)),
+				    SERVER_KNOBS->DESIRED_TOTAL_BYTES,
+				    SERVER_KNOBS->DESIRED_TOTAL_BYTES));
 
-			state std::vector<std::pair<IDiskQueue::location, IDiskQueue::location>> commitLocations;
-			state bool earlyEnd = false;
-			uint32_t mutationBytes = 0;
-			state uint64_t commitBytes = 0;
-			state Version firstVersion = std::numeric_limits<Version>::max();
-			for (int i = 0; i < kvrefs.size() && i < SERVER_KNOBS->TLOG_SPILL_REFERENCE_MAX_BATCHES_PER_PEEK; i++) {
-				auto& kv = kvrefs[i];
-				VectorRef<SpilledData> spilledData;
-				BinaryReader r(kv.value, AssumeVersion(logData->protocolVersion));
-				r >> spilledData;
-				for (const SpilledData& sd : spilledData) {
-					if (mutationBytes >= SERVER_KNOBS->DESIRED_TOTAL_BYTES) {
-						earlyEnd = true;
+				for (auto& kv : kvs) {
+					auto ver = decodeTagMessagesKey(kv.key);
+					messages << VERSION_HEADER << ver;
+					messages.serializeBytes(kv.value);
+				}
+
+				if (kvs.expectedSize() >= SERVER_KNOBS->DESIRED_TOTAL_BYTES) {
+					endVersion = decodeTagMessagesKey(kvs.end()[-1].key) + 1;
+					onlySpilled = true;
+				} else {
+					messages.serializeBytes(messages2.toValue());
+				}
+			} else {
+				// FIXME: Limit to approximately DESIRED_TOTATL_BYTES somehow.
+				RangeResult kvrefs = wait(self->persistentData->readRange(
+				    KeyRangeRef(
+				        persistTagMessageRefsKey(logData->logId, reqTag, reqBegin),
+				        persistTagMessageRefsKey(logData->logId, reqTag, logData->persistentDataDurableVersion + 1)),
+				    SERVER_KNOBS->TLOG_SPILL_REFERENCE_MAX_BATCHES_PER_PEEK + 1));
+
+				//TraceEvent("TLogPeekResults", self->dbgid).detail("ForAddress", replyPromise.getEndpoint().getPrimaryAddress()).detail("Tag1Results", s1).detail("Tag2Results", s2).detail("Tag1ResultsLim", kv1.size()).detail("Tag2ResultsLim", kv2.size()).detail("Tag1ResultsLast", kv1.size() ? kv1[0].key : "").detail("Tag2ResultsLast", kv2.size() ? kv2[0].key : "").detail("Limited", limited).detail("NextEpoch", next_pos.epoch).detail("NextSeq", next_pos.sequence).detail("NowEpoch", self->epoch()).detail("NowSeq", self->sequence.getNextSequence());
+
+				state std::vector<std::pair<IDiskQueue::location, IDiskQueue::location>> commitLocations;
+				state bool earlyEnd = false;
+				uint32_t mutationBytes = 0;
+				state uint64_t commitBytes = 0;
+				state Version firstVersion = std::numeric_limits<Version>::max();
+				for (int i = 0; i < kvrefs.size() && i < SERVER_KNOBS->TLOG_SPILL_REFERENCE_MAX_BATCHES_PER_PEEK; i++) {
+					auto& kv = kvrefs[i];
+					VectorRef<SpilledData> spilledData;
+					BinaryReader r(kv.value, AssumeVersion(logData->protocolVersion));
+					r >> spilledData;
+					for (const SpilledData& sd : spilledData) {
+						if (mutationBytes >= SERVER_KNOBS->DESIRED_TOTAL_BYTES) {
+							earlyEnd = true;
+							break;
+						}
+						if (sd.version >= reqBegin) {
+							firstVersion = std::min(firstVersion, sd.version);
+							const IDiskQueue::location end = sd.start.lo + sd.length;
+							commitLocations.emplace_back(sd.start, end);
+							// This isn't perfect, because we aren't accounting for page boundaries, but should be
+							// close enough.
+							commitBytes += sd.length;
+							mutationBytes += sd.mutationBytes;
+						}
+					}
+					if (earlyEnd)
 						break;
-					}
-					if (sd.version >= reqBegin) {
-						firstVersion = std::min(firstVersion, sd.version);
-						const IDiskQueue::location end = sd.start.lo + sd.length;
-						commitLocations.emplace_back(sd.start, end);
-						// This isn't perfect, because we aren't accounting for page boundaries, but should be
-						// close enough.
-						commitBytes += sd.length;
-						mutationBytes += sd.mutationBytes;
-					}
 				}
-				if (earlyEnd)
-					break;
-			}
-			earlyEnd = earlyEnd || (kvrefs.size() >= SERVER_KNOBS->TLOG_SPILL_REFERENCE_MAX_BATCHES_PER_PEEK + 1);
-			wait(self->peekMemoryLimiter.take(TaskPriority::TLogSpilledPeekReply, commitBytes));
-			state FlowLock::Releaser memoryReservation(self->peekMemoryLimiter, commitBytes);
-			state std::vector<Future<Standalone<StringRef>>> messageReads;
-			messageReads.reserve(commitLocations.size());
-			for (const auto& pair : commitLocations) {
-				messageReads.push_back(self->rawPersistentQueue->read(pair.first, pair.second, CheckHashes::True));
-			}
-			commitLocations.clear();
-			wait(waitForAll(messageReads));
+				earlyEnd = earlyEnd || (kvrefs.size() >= SERVER_KNOBS->TLOG_SPILL_REFERENCE_MAX_BATCHES_PER_PEEK + 1);
+				wait(self->peekMemoryLimiter.take(TaskPriority::TLogSpilledPeekReply, commitBytes));
+				state FlowLock::Releaser memoryReservation(self->peekMemoryLimiter, commitBytes);
+				state std::vector<Future<Standalone<StringRef>>> messageReads;
+				messageReads.reserve(commitLocations.size());
+				for (const auto& pair : commitLocations) {
+					messageReads.push_back(self->rawPersistentQueue->read(pair.first, pair.second, CheckHashes::True));
+				}
+				commitLocations.clear();
+				wait(waitForAll(messageReads));
 
-			state Version lastRefMessageVersion = 0;
-			state int index = 0;
-			loop {
-				if (index >= messageReads.size())
-					break;
-				Standalone<StringRef> queueEntryData = messageReads[index].get();
-				uint8_t valid;
-				const uint32_t length = *(uint32_t*)queueEntryData.begin();
-				queueEntryData = queueEntryData.substr(4, queueEntryData.size() - 4);
-				BinaryReader rd(queueEntryData, IncludeVersion());
-				state TLogQueueEntry entry;
-				rd >> entry >> valid;
-				ASSERT(valid == 0x01);
-				ASSERT(length + sizeof(valid) == queueEntryData.size());
+				state Version lastRefMessageVersion = 0;
+				state int index = 0;
+				loop {
+					if (index >= messageReads.size())
+						break;
+					Standalone<StringRef> queueEntryData = messageReads[index].get();
+					uint8_t valid;
+					const uint32_t length = *(uint32_t*)queueEntryData.begin();
+					queueEntryData = queueEntryData.substr(4, queueEntryData.size() - 4);
+					BinaryReader rd(queueEntryData, IncludeVersion());
+					state TLogQueueEntry entry;
+					rd >> entry >> valid;
+					ASSERT(valid == 0x01);
+					ASSERT(length + sizeof(valid) == queueEntryData.size());
 
-				messages << VERSION_HEADER << entry.version;
+					messages << VERSION_HEADER << entry.version;
 
-				std::vector<StringRef> rawMessages =
-				    wait(parseMessagesForTag(entry.messages, reqTag, logData->logRouterTags));
-				for (const StringRef& msg : rawMessages) {
-					messages.serializeBytes(msg);
-					DEBUG_TAGS_AND_MESSAGE("TLogPeekFromDisk", entry.version, msg, logData->logId)
-					    .detail("DebugID", self->dbgid)
-					    .detail("PeekTag", reqTag);
+					std::vector<StringRef> rawMessages =
+					    wait(parseMessagesForTag(entry.messages, reqTag, logData->logRouterTags));
+					for (const StringRef& msg : rawMessages) {
+						messages.serializeBytes(msg);
+						DEBUG_TAGS_AND_MESSAGE("TLogPeekFromDisk", entry.version, msg, logData->logId)
+						    .detail("DebugID", self->dbgid)
+						    .detail("PeekTag", reqTag);
+					}
+
+					lastRefMessageVersion = entry.version;
+					index++;
 				}
 
-				lastRefMessageVersion = entry.version;
-				index++;
-			}
+				messageReads.clear();
+				memoryReservation.release();
 
-			messageReads.clear();
-			memoryReservation.release();
-
-			if (earlyEnd) {
-				endVersion = lastRefMessageVersion + 1;
-				onlySpilled = true;
-			} else {
-				messages.serializeBytes(messages2.toValue());
+				if (earlyEnd) {
+					endVersion = lastRefMessageVersion + 1;
+					onlySpilled = true;
+				} else {
+					messages.serializeBytes(messages2.toValue());
+				}
 			}
-		}
-	} else {
-		if (reqOnlySpilled) {
-			endVersion = logData->persistentDataDurableVersion + 1;
 		} else {
-			peekMessagesFromMemory(logData, reqTag, reqBegin, messages, endVersion);
+			if (reqOnlySpilled) {
+				endVersion = logData->persistentDataDurableVersion + 1;
+			} else {
+				peekMessagesFromMemory(logData, reqTag, reqBegin, messages, endVersion);
+			}
+
+			//TraceEvent("TLogPeekResults", self->dbgid).detail("ForAddress", replyPromise.getEndpoint().getPrimaryAddress()).detail("MessageBytes", messages.getLength()).detail("NextEpoch", next_pos.epoch).detail("NextSeq", next_pos.sequence).detail("NowSeq", self->sequence.getNextSequence());
 		}
 
-		//TraceEvent("TLogPeekResults", self->dbgid).detail("ForAddress", replyPromise.getEndpoint().getPrimaryAddress()).detail("MessageBytes", messages.getLength()).detail("NextEpoch", next_pos.epoch).detail("NextSeq", next_pos.sequence).detail("NowSeq", self->sequence.getNextSequence());
+		// Reply the peek request when
+		//   - Have data return to the caller, or
+		//   - Batching empty peek is disabled, or
+		//   - Batching empty peek interval has been reached.
+		if (messages.getLength() > 0 || !SERVER_KNOBS->PEEK_BATCHING_EMPTY_MSG ||
+		    (now() - blockStart > SERVER_KNOBS->PEEK_BATCHING_EMPTY_MSG_INTERVAL)) {
+			break;
+		}
+
+		state Version waitUntilVersion = logData->version.get() + 1;
+
+		// Currently, from `reqBegin` to logData->version are all empty peeks. Wait for more versions, or the empty
+		// batching interval has expired.
+		wait(logData->version.whenAtLeast(waitUntilVersion) ||
+		     delay(SERVER_KNOBS->PEEK_BATCHING_EMPTY_MSG_INTERVAL - (now() - blockStart)));
+		if (logData->version.get() < waitUntilVersion) {
+			break; // We know that from `reqBegin` to logData->version are all empty messages. Skip re-executing the
+			       // peek logic.
+		}
 	}
 
 	TLogPeekReply reply;
@@ -2251,12 +2279,12 @@ ACTOR Future<UID> getClusterId(TLogData* self) {
 	}
 }
 
-ACTOR Future<Void> rejoinMasters(TLogData* self,
-                                 TLogInterface tli,
-                                 DBRecoveryCount recoveryCount,
-                                 Future<Void> registerWithMaster,
-                                 bool isPrimary) {
-	state UID lastMasterID(0, 0);
+ACTOR Future<Void> rejoinClusterController(TLogData* self,
+                                           TLogInterface tli,
+                                           DBRecoveryCount recoveryCount,
+                                           Future<Void> registerWithCC,
+                                           bool isPrimary) {
+	state LifetimeToken lastMasterLifetime;
 	loop {
 		auto const& inf = self->dbInfo->get();
 		bool isDisplaced =
@@ -2284,24 +2312,27 @@ ACTOR Future<Void> rejoinMasters(TLogData* self,
 			// with a different cluster ID.
 			state UID clusterId = wait(getClusterId(self));
 			ASSERT(clusterId.isValid());
-			self->masterClusterId = clusterId;
+			self->ccClusterId = clusterId;
 			ev.detail("ClusterId", clusterId).detail("SelfClusterId", self->durableClusterId);
 			if (BUGGIFY)
 				wait(delay(SERVER_KNOBS->BUGGIFY_WORKER_REMOVED_MAX_LAG * deterministicRandom()->random01()));
 			throw worker_removed();
 		}
 
-		if (registerWithMaster.isReady()) {
-			if (self->dbInfo->get().master.id() != lastMasterID) {
+		if (registerWithCC.isReady()) {
+			if (!lastMasterLifetime.isEqual(self->dbInfo->get().masterLifetime)) {
 				// The TLogRejoinRequest is needed to establish communications with a new master, which doesn't have our
 				// TLogInterface
 				TLogRejoinRequest req(tli);
-				TraceEvent("TLogRejoining", tli.id()).detail("Master", self->dbInfo->get().master.id());
+				TraceEvent("TLogRejoining", tli.id())
+				    .detail("ClusterController", self->dbInfo->get().clusterInterface.id())
+				    .detail("DbInfoMasterLifeTime", self->dbInfo->get().masterLifetime.toString())
+				    .detail("LastMasterLifeTime", lastMasterLifetime.toString());
 				choose {
-					when(TLogRejoinReply rep =
-					         wait(brokenPromiseToNever(self->dbInfo->get().master.tlogRejoin.getReply(req)))) {
+					when(TLogRejoinReply rep = wait(
+					         brokenPromiseToNever(self->dbInfo->get().clusterInterface.tlogRejoin.getReply(req)))) {
 						if (rep.masterIsRecovered)
-							lastMasterID = self->dbInfo->get().master.id();
+							lastMasterLifetime = self->dbInfo->get().masterLifetime;
 					}
 					when(wait(self->dbInfo->onChange())) {}
 				}
@@ -2309,7 +2340,7 @@ ACTOR Future<Void> rejoinMasters(TLogData* self,
 				wait(self->dbInfo->onChange());
 			}
 		} else {
-			wait(registerWithMaster || self->dbInfo->onChange());
+			wait(registerWithCC || self->dbInfo->onChange());
 		}
 	}
 }
@@ -2506,13 +2537,13 @@ ACTOR Future<Void> serveTLogInterface(TLogData* self,
 			}
 
 			// Persist cluster ID once cluster has recovered.
-			auto masterClusterId = self->dbInfo->get().clusterId;
+			auto ccClusterId = self->dbInfo->get().clusterId;
 			if (self->dbInfo->get().recoveryState == RecoveryState::FULLY_RECOVERED &&
 			    !self->durableClusterId.isValid()) {
-				ASSERT(masterClusterId.isValid());
-				self->durableClusterId = masterClusterId;
+				ASSERT(ccClusterId.isValid());
+				self->durableClusterId = ccClusterId;
 				self->persistentData->set(
-				    KeyValueRef(persistClusterIdKey, BinaryWriter::toValue(masterClusterId, Unversioned())));
+				    KeyValueRef(persistClusterIdKey, BinaryWriter::toValue(ccClusterId, Unversioned())));
 				wait(self->persistentData->commit());
 			}
 		}
@@ -2958,7 +2989,7 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 	}
 
 	state int idx = 0;
-	state Promise<Void> registerWithMaster;
+	state Promise<Void> registerWithCC;
 	state std::map<UID, TLogInterface> id_interf;
 	state std::vector<std::pair<Version, UID>> logsByVersion;
 	for (idx = 0; idx < fVers.get().size(); idx++) {
@@ -3014,7 +3045,7 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 		logData->recoveryCount =
 		    BinaryReader::fromStringRef<DBRecoveryCount>(fRecoverCounts.get()[idx].value, Unversioned());
 		logData->removed =
-		    rejoinMasters(self, recruited, logData->recoveryCount, registerWithMaster.getFuture(), false);
+		    rejoinClusterController(self, recruited, logData->recoveryCount, registerWithCC.getFuture(), false);
 		removed.push_back(errorOr(logData->removed));
 		logsByVersion.emplace_back(ver, id1);
 
@@ -3137,8 +3168,8 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 		self->sharedActors.send(tLogCore(self, it.second, id_interf[it.first], false));
 	}
 
-	if (registerWithMaster.canBeSet())
-		registerWithMaster.send(Void());
+	if (registerWithCC.canBeSet())
+		registerWithCC.send(Void());
 	return Void();
 }
 
@@ -3263,7 +3294,7 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 	self->id_data[recruited.id()] = logData;
 	logData->locality = req.locality;
 	logData->recoveryCount = req.epoch;
-	logData->removed = rejoinMasters(self, recruited, req.epoch, Future<Void>(Void()), req.isPrimary);
+	logData->removed = rejoinClusterController(self, recruited, req.epoch, Future<Void>(Void()), req.isPrimary);
 	self->popOrder.push_back(recruited.id());
 	self->spillOrder.push_back(recruited.id());
 
@@ -3491,13 +3522,13 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 			// it should automatically exclude itself to avoid being used in
 			// the new cluster.
 			auto recoveryState = self.dbInfo->get().recoveryState;
-			if (recoveryState == RecoveryState::FULLY_RECOVERED && self.masterClusterId.isValid() &&
-			    self.durableClusterId.isValid() && self.masterClusterId != self.durableClusterId) {
+			if (recoveryState == RecoveryState::FULLY_RECOVERED && self.ccClusterId.isValid() &&
+			    self.durableClusterId.isValid() && self.ccClusterId != self.durableClusterId) {
 				state NetworkAddress address = g_network->getLocalAddress();
 				wait(excludeServers(self.cx, { AddressExclusion{ address.ip, address.port } }));
 				TraceEvent(SevWarnAlways, "TLogBelongsToExistingCluster")
 				    .detail("ClusterId", self.durableClusterId)
-				    .detail("NewClusterId", self.masterClusterId);
+				    .detail("NewClusterId", self.ccClusterId);
 			}
 			// If the tlog has a valid durable cluster ID, we don't want it to
 			// wipe its data! Throw this error to signal to `tlogTerminated` to

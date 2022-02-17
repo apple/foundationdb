@@ -435,7 +435,8 @@ ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration(Database cx) {
 	state Transaction tr(cx);
 	loop {
 		try {
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			RangeResult res = wait(tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY));
 			ASSERT(res.size() < CLIENT_KNOBS->TOO_MANY);
 			DatabaseConfiguration config;
@@ -766,7 +767,8 @@ ACTOR Future<std::vector<NetworkAddress>> getCoordinators(Database cx) {
 	state Transaction tr(cx);
 	loop {
 		try {
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			Optional<Value> currentKey = wait(tr.get(coordinatorsKey));
 			if (!currentKey.present())
 				return std::vector<NetworkAddress>();
@@ -782,6 +784,7 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
                                                                Reference<IQuorumChange> change,
                                                                std::vector<NetworkAddress>* desiredCoordinators) {
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::USE_PROVISIONAL_PROXIES);
 	tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 	Optional<Value> currentKey = wait(tr->get(coordinatorsKey));
@@ -824,14 +827,24 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 	                                   StringRef(newName + ':' + deterministicRandom()->randomAlphaNumeric(32)));
 
 	if (g_network->isSimulated()) {
-		for (int i = 0; i < (desiredCoordinators->size() / 2) + 1; i++) {
-			auto addresses = g_simulator.getProcessByAddress((*desiredCoordinators)[i])->addresses;
+		int i = 0;
+		int protectedCount = 0;
+		while ((protectedCount < ((desiredCoordinators->size() / 2) + 1)) && (i < desiredCoordinators->size())) {
+			auto process = g_simulator.getProcessByAddress((*desiredCoordinators)[i]);
+			auto addresses = process->addresses;
 
-			g_simulator.protectedAddresses.insert(addresses.address);
+			if (!process->isReliable()) {
+				i++;
+				continue;
+			}
+
+			g_simulator.protectedAddresses.insert(process->addresses.address);
 			if (addresses.secondaryAddress.present()) {
-				g_simulator.protectedAddresses.insert(addresses.secondaryAddress.get());
+				g_simulator.protectedAddresses.insert(process->addresses.secondaryAddress.get());
 			}
 			TraceEvent("ProtectCoordinator").detail("Address", (*desiredCoordinators)[i]).backtrace();
+			protectedCount++;
+			i++;
 		}
 	}
 
@@ -861,6 +874,7 @@ ACTOR Future<CoordinatorsResult> changeQuorum(Database cx, Reference<IQuorumChan
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::USE_PROVISIONAL_PROXIES);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			Optional<Value> currentKey = wait(tr.get(coordinatorsKey));
@@ -1116,9 +1130,10 @@ struct AutoQuorumChange final : IQuorumChange {
 		self->addDesiredWorkers(chosen, workers, desiredCount, excluded);
 
 		if (chosen.size() < desiredCount) {
-			if (chosen.size() < oldCoordinators.size()) {
+			if (chosen.empty() || chosen.size() < oldCoordinators.size()) {
 				TraceEvent("NotEnoughMachinesForCoordinators")
 				    .detail("EligibleWorkers", workers.size())
+				    .detail("ChosenWorkers", chosen.size())
 				    .detail("DesiredCoordinators", desiredCount)
 				    .detail("CurrentCoordinators", oldCoordinators.size());
 				*err = CoordinatorsResult::NOT_ENOUGH_MACHINES;
@@ -1679,7 +1694,8 @@ ACTOR Future<Void> printHealthyZone(Database cx) {
 	state Transaction tr(cx);
 	loop {
 		try {
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			Optional<Value> val = wait(tr.get(healthyZoneKey));
 			if (val.present() && decodeHealthyZoneValue(val.get()).first == ignoreSSFailuresZoneString) {
 				printf("Data distribution has been disabled for all storage server failures in this cluster and thus "
@@ -1705,6 +1721,7 @@ ACTOR Future<bool> clearHealthyZone(Database cx, bool printWarning, bool clearSS
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			Optional<Value> val = wait(tr.get(healthyZoneKey));
 			if (!clearSSFailureZoneString && val.present() &&
@@ -1731,6 +1748,7 @@ ACTOR Future<bool> setHealthyZone(Database cx, StringRef zoneId, double seconds,
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			Optional<Value> val = wait(tr.get(healthyZoneKey));
 			if (val.present() && decodeHealthyZoneValue(val.get()).first == ignoreSSFailuresZoneString) {
@@ -1756,6 +1774,7 @@ ACTOR Future<Void> setDDIgnoreRebalanceSwitch(Database cx, bool ignoreRebalance)
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			if (ignoreRebalance) {
 				tr.set(rebalanceDDIgnoreKey, LiteralStringRef("on"));
 			} else {
@@ -1777,6 +1796,8 @@ ACTOR Future<int> setDDMode(Database cx, int mode) {
 
 	loop {
 		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			Optional<Value> old = wait(tr.get(dataDistributionModeKey));
 			if (oldMode < 0) {
 				oldMode = 1;

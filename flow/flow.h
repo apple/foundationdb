@@ -61,10 +61,11 @@
 #define TEST(condition)                                                                                                \
 	if (!(condition)) {                                                                                                \
 	} else {                                                                                                           \
-		static TraceEvent* __test = &(TraceEvent("CodeCoverage")                                                       \
-		                                  .detail("File", __FILE__)                                                    \
-		                                  .detail("Line", __LINE__)                                                    \
-		                                  .detail("Condition", #condition));                                           \
+		static TraceEvent* __test =                                                                                    \
+		    &(TraceEvent(intToSeverity(FLOW_KNOBS->CODE_COV_TRACE_EVENT_SEVERITY), "CodeCoverage")                     \
+		          .detail("File", __FILE__)                                                                            \
+		          .detail("Line", __LINE__)                                                                            \
+		          .detail("Condition", #condition));                                                                   \
 		(void)__test;                                                                                                  \
 	}
 
@@ -747,7 +748,14 @@ public:
 	int getFutureReferenceCount() const { return futures; }
 	int getPromiseReferenceCount() const { return promises; }
 
-	virtual void destroy() { delete this; }
+	// Derived classes should override destroy.
+	virtual void destroy() {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdelete-non-virtual-dtor"
+		delete this;
+#pragma clang diagnostic pop
+	}
+
 	virtual void cancel() {}
 
 	void addCallbackAndDelFutureRef(Callback<T>* cb) {
@@ -968,6 +976,8 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 	  : promises(promises), futures(futures), onEmpty(nullptr), onError(nullptr) {
 		SingleCallback<T>::next = this;
 	}
+
+	virtual ~NotifiedQueue() = default;
 
 	bool isReady() const { return !queue.empty() || error.isValid(); }
 	bool isError() const { return queue.empty() && error.isValid(); } // the *next* thing queued is an error

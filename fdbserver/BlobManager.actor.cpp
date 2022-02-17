@@ -28,6 +28,7 @@
 #include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/BlobWorkerInterface.h"
 #include "fdbclient/KeyRangeMap.h"
+#include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/BlobManagerInterface.h"
@@ -260,7 +261,7 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitRange(Reference<ReadYourWritesT
 				           writeHot ? "hot" : "normal");
 			}
 			state StorageMetrics estimated =
-			    wait(tr->getTransaction().getStorageMetrics(range, CLIENT_KNOBS->TOO_MANY));
+			    wait(tr->getTransaction().getDatabase()->getStorageMetrics(range, CLIENT_KNOBS->TOO_MANY));
 
 			if (BM_DEBUG) {
 				fmt::print("Estimated bytes for [{0} - {1}): {2}\n",
@@ -285,8 +286,8 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitRange(Reference<ReadYourWritesT
 
 				state PromiseStream<Key> resultStream;
 				state Standalone<VectorRef<KeyRef>> keys;
-				state Future<Void> streamFuture =
-				    tr->getTransaction().splitStorageMetricsStream(resultStream, range, splitMetrics, estimated);
+				state Future<Void> streamFuture = tr->getTransaction().getDatabase()->splitStorageMetricsStream(
+				    resultStream, range, splitMetrics, estimated);
 				loop {
 					try {
 						Key k = waitNext(resultStream.getFuture());

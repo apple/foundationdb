@@ -216,22 +216,26 @@ ACTOR Future<Void> openDatabase(ClientData* db,
 		    ClientStatusInfo(req.traceLogGroup, req.supportedVersions, req.issues);
 	}
 
-	while (db->clientInfo->get().read().id == req.knownClientInfoID &&
-	       !db->clientInfo->get().read().forward.present()) {
+	while (!db->clientInfo->get().read().id.isValid() || (db->clientInfo->get().read().id == req.knownClientInfoID &&
+	                                                      !db->clientInfo->get().read().forward.present())) {
 		choose {
 			when(wait(checkStuck)) {
 				replyContents = failed_to_progress();
 				break;
 			}
-			when(wait(yieldedFuture(db->clientInfo->onChange()))) {}
+			when(wait(yieldedFuture(db->clientInfo->onChange()))) { replyContents = db->clientInfo->get(); }
 			when(wait(delayJittered(SERVER_KNOBS->CLIENT_REGISTER_INTERVAL))) {
-				if (req.supportedVersions.size() > 0) {
-					db->clientStatusInfoMap.erase(req.reply.getEndpoint().getPrimaryAddress());
+				if (db->clientInfo->get().read().id.isValid()) {
+					replyContents = db->clientInfo->get();
 				}
-				replyContents = db->clientInfo->get();
+				// Otherwise, we still break out of the loop and return a default_error_or.
 				break;
 			} // The client might be long gone!
 		}
+	}
+
+	if (req.supportedVersions.size() > 0) {
+		db->clientStatusInfoMap.erase(req.reply.getEndpoint().getPrimaryAddress());
 	}
 
 	if (replyContents.present()) {
@@ -295,7 +299,8 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 
 	loop choose {
 		when(OpenDatabaseCoordRequest req = waitNext(interf.openDatabase.getFuture())) {
-			if (clientData.clientInfo->get().read().id != req.knownClientInfoID &&
+			if (clientData.clientInfo->get().read().id.isValid() &&
+			    clientData.clientInfo->get().read().id != req.knownClientInfoID &&
 			    !clientData.clientInfo->get().read().forward.present()) {
 				req.reply.send(clientData.clientInfo->get());
 			} else {
@@ -727,25 +732,23 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
 
 ACTOR Future<Void> coordinationServer(std::string dataFolder,
                                       Reference<IClusterConnectionRecord> ccr,
-                                      ConfigDBType configDBType) {
+                                      Reference<ConfigNode> configNode,
+                                      ConfigBroadcastInterface cbi) {
 	state UID myID = deterministicRandom()->randomUniqueID();
 	state LeaderElectionRegInterface myLeaderInterface(g_network);
 	state GenerationRegInterface myInterface(g_network);
 	state OnDemandStore store(dataFolder, myID, "coordination-");
 	state ConfigTransactionInterface configTransactionInterface;
 	state ConfigFollowerInterface configFollowerInterface;
-	state Reference<ConfigNode> configNode;
 	state Future<Void> configDatabaseServer = Never();
 	TraceEvent("CoordinationServer", myID)
 	    .detail("MyInterfaceAddr", myInterface.read.getEndpoint().getPrimaryAddress())
 	    .detail("Folder", dataFolder);
 
-	if (configDBType != ConfigDBType::DISABLED) {
+	if (configNode.isValid()) {
 		configTransactionInterface.setupWellKnownEndpoints();
 		configFollowerInterface.setupWellKnownEndpoints();
-		configNode = makeReference<ConfigNode>(dataFolder);
-		configDatabaseServer =
-		    configNode->serve(configTransactionInterface) || configNode->serve(configFollowerInterface);
+		configDatabaseServer = configNode->serve(cbi, configTransactionInterface, configFollowerInterface);
 	}
 
 	try {

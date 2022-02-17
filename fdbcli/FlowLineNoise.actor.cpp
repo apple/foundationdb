@@ -123,7 +123,7 @@ LineNoise::LineNoise(std::function<void(std::string const&, std::vector<std::str
 	linenoiseSetFreeHintsCallback(free);
 #endif
 
-	threadPool->addThread(reader);
+	threadPool->addThread(reader, "fdb-linenoise");
 }
 
 LineNoise::~LineNoise() {

@@ -151,13 +151,22 @@ public:
 	Future<Reference<IConnection>> connectExternal(NetworkAddress toAddr, const std::string& host) override;
 	Future<Reference<IUDPSocket>> createUDPSocket(NetworkAddress toAddr) override;
 	Future<Reference<IUDPSocket>> createUDPSocket(bool isV6) override;
-	// This method should only be used in simulation.
+	// The mock DNS methods should only be used in simulation.
 	void addMockTCPEndpoint(const std::string& host,
 	                        const std::string& service,
 	                        const std::vector<NetworkAddress>& addresses) override {
 		throw operation_failed();
 	}
+	// The mock DNS methods should only be used in simulation.
+	void removeMockTCPEndpoint(const std::string& host, const std::string& service) override {
+		throw operation_failed();
+	}
+	void parseMockDNSFromString(const std::string& s) override { throw operation_failed(); }
+	std::string convertMockDNSToString() override { throw operation_failed(); }
+
 	Future<std::vector<NetworkAddress>> resolveTCPEndpoint(const std::string& host,
+	                                                       const std::string& service) override;
+	std::vector<NetworkAddress> resolveTCPEndpointBlocking(const std::string& host,
 	                                                       const std::string& service) override;
 	Reference<IListener> listen(NetworkAddress localAddr) override;
 
@@ -1349,7 +1358,7 @@ void Net2::initTLS(ETLSInitState targetState) {
 
 			for (int i = 0; i < threadsToStart; ++i) {
 				++sslHandshakerThreadsStarted;
-				sslHandshakerPool->addThread(new SSLHandshakerThread());
+				sslHandshakerPool->addThread(new SSLHandshakerThread(), "fdb-ssl-connect");
 			}
 		}
 	}
@@ -1499,6 +1508,7 @@ void Net2::run() {
 			ready.push(timers.top());
 			timers.pop();
 		}
+		// FIXME: Is this double counting?
 		countTimers += numTimers;
 		FDB_TRACE_PROBE(run_loop_ready_timers, numTimers);
 
@@ -1530,6 +1540,14 @@ void Net2::run() {
 			if (currentTaskID < minTaskID) {
 				trackAtPriority(currentTaskID, taskBegin);
 				minTaskID = currentTaskID;
+			}
+
+			// attempt to empty out the IO backlog
+			if (ready.size() % FLOW_KNOBS->ITERATIONS_PER_REACTOR_CHECK == 1) {
+				if (runFunc) {
+					runFunc();
+				}
+				reactor.react();
 			}
 
 			double tscNow = timestampCounter();
@@ -1610,7 +1628,7 @@ void Net2::run() {
 #ifdef WIN32
 	timeEndPeriod(1);
 #endif
-}
+} // Net2::run
 
 // Updates the PriorityStats found in NetworkMetrics
 void Net2::updateStarvationTracker(struct NetworkMetrics::PriorityStats& binStats,
@@ -1819,33 +1837,33 @@ ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl(Net2* s
 	Promise<std::vector<NetworkAddress>> promise;
 	state Future<std::vector<NetworkAddress>> result = promise.getFuture();
 
-	tcpResolver.async_resolve(
-	    tcp::resolver::query(host, service), [=](const boost::system::error_code& ec, tcp::resolver::iterator iter) {
-		    if (ec) {
-			    promise.sendError(lookup_failed());
-			    return;
-		    }
+	tcpResolver.async_resolve(tcp::resolver::query(host, service),
+	                          [=](const boost::system::error_code& ec, tcp::resolver::iterator iter) {
+		                          if (ec) {
+			                          promise.sendError(lookup_failed());
+			                          return;
+		                          }
 
-		    std::vector<NetworkAddress> addrs;
+		                          std::vector<NetworkAddress> addrs;
 
-		    tcp::resolver::iterator end;
-		    while (iter != end) {
-			    auto endpoint = iter->endpoint();
-			    auto addr = endpoint.address();
-			    if (addr.is_v6()) {
-				    addrs.push_back(NetworkAddress(IPAddress(addr.to_v6().to_bytes()), endpoint.port()));
-			    } else {
-				    addrs.push_back(NetworkAddress(addr.to_v4().to_ulong(), endpoint.port()));
-			    }
-			    ++iter;
-		    }
+		                          tcp::resolver::iterator end;
+		                          while (iter != end) {
+			                          auto endpoint = iter->endpoint();
+			                          auto addr = endpoint.address();
+			                          if (addr.is_v6()) {
+				                          addrs.emplace_back(IPAddress(addr.to_v6().to_bytes()), endpoint.port());
+			                          } else {
+				                          addrs.emplace_back(addr.to_v4().to_ulong(), endpoint.port());
+			                          }
+			                          ++iter;
+		                          }
 
-		    if (addrs.empty()) {
-			    promise.sendError(lookup_failed());
-		    } else {
-			    promise.send(addrs);
-		    }
-	    });
+		                          if (addrs.empty()) {
+			                          promise.sendError(lookup_failed());
+		                          } else {
+			                          promise.send(addrs);
+		                          }
+	                          });
 
 	wait(ready(result));
 	tcpResolver.cancel();
@@ -1863,6 +1881,25 @@ Future<Reference<IUDPSocket>> Net2::createUDPSocket(bool isV6) {
 
 Future<std::vector<NetworkAddress>> Net2::resolveTCPEndpoint(const std::string& host, const std::string& service) {
 	return resolveTCPEndpoint_impl(this, host, service);
+}
+
+std::vector<NetworkAddress> Net2::resolveTCPEndpointBlocking(const std::string& host, const std::string& service) {
+	tcp::resolver tcpResolver(reactor.ios);
+	tcp::resolver::query query(host, service);
+	auto iter = tcpResolver.resolve(query);
+	decltype(iter) end;
+	std::vector<NetworkAddress> addrs;
+	while (iter != end) {
+		auto endpoint = iter->endpoint();
+		auto addr = endpoint.address();
+		if (addr.is_v6()) {
+			addrs.emplace_back(IPAddress(addr.to_v6().to_bytes()), endpoint.port());
+		} else {
+			addrs.emplace_back(addr.to_v4().to_ulong(), endpoint.port());
+		}
+		++iter;
+	}
+	return addrs;
 }
 
 bool Net2::isAddressOnThisHost(NetworkAddress const& addr) const {

@@ -62,11 +62,11 @@ def write_unix_asm(asmfile, functions, prefix):
     if cpu != "aarch64":
         asmfile.write(".intel_syntax noprefix\n")
 
-    if cpu == 'aarch64' or os == 'linux' or os == 'freebsd':
+    if os == 'linux' or os == 'freebsd':
         asmfile.write("\n.data\n")
         for f in functions:
             asmfile.write("\t.extern fdb_api_ptr_%s\n" % f)
-        
+
         if os == 'linux' or os == 'freebsd':
             asmfile.write("\n.text\n")
             for f in functions:
@@ -74,6 +74,8 @@ def write_unix_asm(asmfile, functions, prefix):
 
     for f in functions:
         asmfile.write("\n.globl %s%s\n" % (prefix, f))
+        if cpu == 'aarch64' and os == 'osx':
+            asmfile.write(".p2align\t2\n")
         asmfile.write("%s%s:\n" % (prefix, f))
 
         # These assembly implementations of versioned fdb c api functions must have the following properties.
@@ -105,16 +107,16 @@ def write_unix_asm(asmfile, functions, prefix):
         # 	.size	g, .-g
         # 	.ident	"GCC: (GNU) 8.3.1 20190311 (Red Hat 8.3.1-3)"
 
-        p = ''
-        if os == 'osx':
-            p = '_'
         if cpu == "aarch64":
-            asmfile.write("\tldr x16, =%sfdb_api_ptr_%s\n" % (p, f))
             if os == 'osx':
-                asmfile.write("\tldr x16, [x16]\n")
-            else:
+                asmfile.write("\tadrp x8, _fdb_api_ptr_%s@GOTPAGE\n" % (f))
+                asmfile.write("\tldr x8, [x8, _fdb_api_ptr_%s@GOTPAGEOFF]\n" % (f))
+            elif os == 'linux':
+                asmfile.write("\tadrp x8, :got:fdb_api_ptr_%s\n" % (f))
                 asmfile.write("\tldr x8, [x8, #:got_lo12:fdb_api_ptr_%s]\n" % (f))
-                asmfile.write("\tldr x8, [x8]\n")
+            else:
+                assert False, '{} not supported for Arm yet'.format(os)
+            asmfile.write("\tldr x8, [x8]\n")
             asmfile.write("\tbr x8\n")
         else:
             asmfile.write(

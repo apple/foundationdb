@@ -27,6 +27,7 @@
 
 #include "fdbserver/BackupInterface.h"
 #include "fdbserver/DataDistributorInterface.h"
+#include "fdbserver/EncryptKeyProxyInterface.h"
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/RatekeeperInterface.h"
@@ -60,6 +61,7 @@ struct WorkerInterface {
 	RequestStream<struct InitializeStorageRequest> storage;
 	RequestStream<struct InitializeLogRouterRequest> logRouter;
 	RequestStream<struct InitializeBackupRequest> backup;
+	RequestStream<struct InitializeEncryptKeyProxyRequest> encryptKeyProxy;
 
 	RequestStream<struct LoadedPingRequest> debugPing;
 	RequestStream<struct CoordinationPingMessage> coordinationPing;
@@ -125,6 +127,7 @@ struct WorkerInterface {
 		           execReq,
 		           workerSnapReq,
 		           backup,
+		           encryptKeyProxy,
 		           updateServerDBInfo,
 		           configBroadcastInterface);
 	}
@@ -163,17 +166,25 @@ struct ClusterControllerFullInterface {
 	RequestStream<struct GetServerDBInfoRequest>
 	    getServerDBInfo; // only used by testers; the cluster controller will send the serverDBInfo to workers
 	RequestStream<struct UpdateWorkerHealthRequest> updateWorkerHealth;
+	RequestStream<struct TLogRejoinRequest>
+	    tlogRejoin; // sent by tlog (whether or not rebooted) to communicate with a new controller
+	RequestStream<struct BackupWorkerDoneRequest> notifyBackupWorkerDone;
+	RequestStream<struct ChangeCoordinatorsRequest> changeCoordinators;
 
 	UID id() const { return clientInterface.id(); }
 	bool operator==(ClusterControllerFullInterface const& r) const { return id() == r.id(); }
 	bool operator!=(ClusterControllerFullInterface const& r) const { return id() != r.id(); }
+
+	NetworkAddress address() const { return clientInterface.address(); }
 
 	bool hasMessage() const {
 		return clientInterface.hasMessage() || recruitFromConfiguration.getFuture().isReady() ||
 		       recruitRemoteFromConfiguration.getFuture().isReady() || recruitStorage.getFuture().isReady() ||
 		       recruitBlobWorker.getFuture().isReady() || registerWorker.getFuture().isReady() ||
 		       getWorkers.getFuture().isReady() || registerMaster.getFuture().isReady() ||
-		       getServerDBInfo.getFuture().isReady() || updateWorkerHealth.getFuture().isReady();
+		       getServerDBInfo.getFuture().isReady() || updateWorkerHealth.getFuture().isReady() ||
+		       tlogRejoin.getFuture().isReady() || notifyBackupWorkerDone.getFuture().isReady() ||
+		       changeCoordinators.getFuture().isReady();
 	}
 
 	void initEndpoints() {
@@ -187,6 +198,9 @@ struct ClusterControllerFullInterface {
 		registerMaster.getEndpoint(TaskPriority::ClusterControllerRegister);
 		getServerDBInfo.getEndpoint(TaskPriority::ClusterController);
 		updateWorkerHealth.getEndpoint(TaskPriority::ClusterController);
+		tlogRejoin.getEndpoint(TaskPriority::MasterTLogRejoin);
+		notifyBackupWorkerDone.getEndpoint(TaskPriority::ClusterController);
+		changeCoordinators.getEndpoint(TaskPriority::DefaultEndpoint);
 	}
 
 	template <class Ar>
@@ -204,7 +218,10 @@ struct ClusterControllerFullInterface {
 		           getWorkers,
 		           registerMaster,
 		           getServerDBInfo,
-		           updateWorkerHealth);
+		           updateWorkerHealth,
+		           tlogRejoin,
+		           notifyBackupWorkerDone,
+		           changeCoordinators);
 	}
 };
 
@@ -323,10 +340,11 @@ struct RecruitRemoteFromConfigurationReply {
 	constexpr static FileIdentifier file_identifier = 9091392;
 	std::vector<WorkerInterface> remoteTLogs;
 	std::vector<WorkerInterface> logRouters;
+	Optional<UID> dbgId;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, remoteTLogs, logRouters);
+		serializer(ar, remoteTLogs, logRouters, dbgId);
 	}
 };
 
@@ -336,6 +354,7 @@ struct RecruitRemoteFromConfigurationRequest {
 	Optional<Key> dcId;
 	int logRouterCount;
 	std::vector<UID> exclusionWorkerIds;
+	Optional<UID> dbgId;
 	ReplyPromise<RecruitRemoteFromConfigurationReply> reply;
 
 	RecruitRemoteFromConfigurationRequest() {}
@@ -348,7 +367,7 @@ struct RecruitRemoteFromConfigurationRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, configuration, dcId, logRouterCount, exclusionWorkerIds, reply);
+		serializer(ar, configuration, dcId, logRouterCount, exclusionWorkerIds, dbgId, reply);
 	}
 };
 
@@ -409,6 +428,7 @@ struct RegisterWorkerRequest {
 	Optional<DataDistributorInterface> distributorInterf;
 	Optional<RatekeeperInterface> ratekeeperInterf;
 	Optional<BlobManagerInterface> blobManagerInterf;
+	Optional<EncryptKeyProxyInterface> encryptKeyProxyInterf;
 	Standalone<VectorRef<StringRef>> issues;
 	std::vector<NetworkAddress> incompatiblePeers;
 	ReplyPromise<RegisterWorkerReply> reply;
@@ -427,13 +447,14 @@ struct RegisterWorkerRequest {
 	                      Optional<DataDistributorInterface> ddInterf,
 	                      Optional<RatekeeperInterface> rkInterf,
 	                      Optional<BlobManagerInterface> bmInterf,
+	                      Optional<EncryptKeyProxyInterface> ekpInterf,
 	                      bool degraded,
 	                      Version lastSeenKnobVersion,
 	                      ConfigClassSet knobConfigClassSet)
 	  : wi(wi), initialClass(initialClass), processClass(processClass), priorityInfo(priorityInfo),
 	    generation(generation), distributorInterf(ddInterf), ratekeeperInterf(rkInterf), blobManagerInterf(bmInterf),
-	    degraded(degraded), lastSeenKnobVersion(lastSeenKnobVersion), knobConfigClassSet(knobConfigClassSet),
-	    requestDbInfo(false) {}
+	    encryptKeyProxyInterf(ekpInterf), degraded(degraded), lastSeenKnobVersion(lastSeenKnobVersion),
+	    knobConfigClassSet(knobConfigClassSet), requestDbInfo(false) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -446,6 +467,7 @@ struct RegisterWorkerRequest {
 		           distributorInterf,
 		           ratekeeperInterf,
 		           blobManagerInterf,
+		           encryptKeyProxyInterf,
 		           issues,
 		           incompatiblePeers,
 		           reply,
@@ -483,6 +505,49 @@ struct UpdateWorkerHealthRequest {
 			ASSERT(ar.protocolVersion().isValid());
 		}
 		serializer(ar, address, degradedPeers);
+	}
+};
+
+struct TLogRejoinReply {
+	constexpr static FileIdentifier file_identifier = 11;
+
+	// false means someone else registered, so we should re-register.  true means this master is recovered, so don't
+	// send again to the same master.
+	bool masterIsRecovered;
+	TLogRejoinReply() = default;
+	explicit TLogRejoinReply(bool masterIsRecovered) : masterIsRecovered(masterIsRecovered) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, masterIsRecovered);
+	}
+};
+
+struct TLogRejoinRequest {
+	constexpr static FileIdentifier file_identifier = 15692200;
+	TLogInterface myInterface;
+	ReplyPromise<TLogRejoinReply> reply;
+
+	TLogRejoinRequest() {}
+	explicit TLogRejoinRequest(const TLogInterface& interf) : myInterface(interf) {}
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, myInterface, reply);
+	}
+};
+
+struct BackupWorkerDoneRequest {
+	constexpr static FileIdentifier file_identifier = 8736351;
+	UID workerUID;
+	LogEpoch backupEpoch;
+	ReplyPromise<Void> reply;
+
+	BackupWorkerDoneRequest() : workerUID(), backupEpoch(-1) {}
+	BackupWorkerDoneRequest(UID id, LogEpoch epoch) : workerUID(id), backupEpoch(epoch) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, workerUID, backupEpoch, reply);
 	}
 };
 
@@ -588,7 +653,6 @@ struct InitializeBackupRequest {
 // FIXME: Rename to InitializeMasterRequest, etc
 struct RecruitMasterRequest {
 	constexpr static FileIdentifier file_identifier = 12684574;
-	Arena arena;
 	LifetimeToken lifetime;
 	bool forceRecovery;
 	ReplyPromise<struct MasterInterface> reply;
@@ -598,13 +662,14 @@ struct RecruitMasterRequest {
 		if constexpr (!is_fb_function<Ar>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar, lifetime, forceRecovery, reply, arena);
+		serializer(ar, lifetime, forceRecovery, reply);
 	}
 };
 
 struct InitializeCommitProxyRequest {
 	constexpr static FileIdentifier file_identifier = 10344153;
 	MasterInterface master;
+	LifetimeToken masterLifetime;
 	uint64_t recoveryCount;
 	Version recoveryTransactionVersion;
 	bool firstProxy;
@@ -612,19 +677,20 @@ struct InitializeCommitProxyRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, master, recoveryCount, recoveryTransactionVersion, firstProxy, reply);
+		serializer(ar, master, masterLifetime, recoveryCount, recoveryTransactionVersion, firstProxy, reply);
 	}
 };
 
 struct InitializeGrvProxyRequest {
 	constexpr static FileIdentifier file_identifier = 8265613;
 	MasterInterface master;
+	LifetimeToken masterLifetime;
 	uint64_t recoveryCount;
 	ReplyPromise<GrvProxyInterface> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, master, recoveryCount, reply);
+		serializer(ar, master, masterLifetime, recoveryCount, reply);
 	}
 };
 
@@ -724,6 +790,21 @@ struct InitializeBlobWorkerRequest {
 	UID reqId;
 	UID interfaceId;
 	ReplyPromise<InitializeBlobWorkerReply> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reqId, interfaceId, reply);
+	}
+};
+
+struct InitializeEncryptKeyProxyRequest {
+	constexpr static FileIdentifier file_identifier = 4180191;
+	UID reqId;
+	UID interfaceId;
+	ReplyPromise<EncryptKeyProxyInterface> reply;
+
+	InitializeEncryptKeyProxyRequest() {}
+	explicit InitializeEncryptKeyProxyRequest(UID uid) : reqId(uid) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -896,6 +977,7 @@ struct Role {
 	static const Role STORAGE_CACHE;
 	static const Role COORDINATOR;
 	static const Role BACKUP;
+	static const Role ENCRYPT_KEY_PROXY;
 
 	std::string roleName;
 	std::string abbreviation;
@@ -931,6 +1013,8 @@ struct Role {
 			return STORAGE_CACHE;
 		case ProcessClass::Backup:
 			return BACKUP;
+		case ProcessClass::EncryptKeyProxy:
+			return ENCRYPT_KEY_PROXY;
 		case ProcessClass::Worker:
 			return WORKER;
 		case ProcessClass::NoRole:
@@ -992,6 +1076,7 @@ ACTOR Future<Void> clusterController(Reference<IClusterConnectionRecord> ccr,
 ACTOR Future<Void> blobWorker(BlobWorkerInterface bwi,
                               ReplyPromise<InitializeBlobWorkerReply> blobWorkerReady,
                               Reference<AsyncVar<ServerDBInfo> const> dbInfo);
+ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ei, Reference<AsyncVar<ServerDBInfo>> db);
 
 // These servers are started by workerServer
 class IKeyValueStore;

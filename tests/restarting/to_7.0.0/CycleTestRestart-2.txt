@@ -26,4 +26,3 @@ testTitle=Clogged
     machinesToKill=10
     machinesToLeave=3
     reboot=true
-    testDuration=10.0

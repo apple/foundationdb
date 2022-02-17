@@ -341,14 +341,14 @@ example this file would create a server with 8 processes of which 4 would act as
     group = foundationdb
 
     [general]
-    restart_delay = 60
-    cluster_file = /etc/foundationdb/fdb.cluster
+    restart-delay = 60
+    cluster-file = /etc/foundationdb/fdb.cluster
 
     ## Default parameters for individual fdbserver processes
     [fdbserver]
     command = /usr/sbin/fdbserver
-    public_address = auto:$ID
-    listen_address = public
+    public-address = auto:$ID
+    listen-address = public
     datadir = /var/lib/foundationdb/data/$ID
     logdir = /var/log/foundationdb
 
