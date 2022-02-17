@@ -2072,9 +2072,10 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 			}
 		}
 		if (!foundVersion || !foundKey) {
-			printf("ERROR: SS %s CF %s missing %s @ %lld from request for [%s - %s) %lld - %lld\n",
+			printf("ERROR: SS %s CF %s SQ %s missing %s @ %lld from request for [%s - %s) %lld - %lld\n",
 			       data->thisServerID.toString().substr(0, 4).c_str(),
 			       req.rangeID.printable().substr(0, 6).c_str(),
+			       streamUID.toString().substr(0, 8).c_str(),
 			       foundVersion ? "key" : "version",
 			       DEBUG_CF_MISSING_VERSION,
 			       req.range.begin.printable().c_str(),
@@ -2092,9 +2093,10 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 				       it.version == DEBUG_CF_MISSING_VERSION ? "<-------" : "");
 			}
 		} else {
-			printf("DBG: SS %s CF %s correct @ %lld from request for [%s - %s) %lld - %lld\n",
+			printf("DBG: SS %s CF %s SQ %s correct @ %lld from request for [%s - %s) %lld - %lld\n",
 			       data->thisServerID.toString().substr(0, 4).c_str(),
 			       req.rangeID.printable().substr(0, 6).c_str(),
+			       streamUID.toString().substr(0, 8).c_str(),
 			       DEBUG_CF_MISSING_VERSION,
 			       req.range.begin.printable().c_str(),
 			       req.range.end.printable().c_str(),
@@ -3906,7 +3908,8 @@ void applyMutation(StorageServer* self,
 void applyChangeFeedMutation(StorageServer* self, MutationRef const& m, Version version) {
 	if (m.type == MutationRef::SetValue) {
 		for (auto& it : self->keyChangeFeed[m.param1]) {
-			if (!it->stopped && version > it->emptyVersion) {
+			if (!it->stopped) {
+				ASSERT(version > it->emptyVersion);
 				if (it->mutations.empty() || it->mutations.back().version != version) {
 					it->mutations.push_back(MutationsAndVersionRef(version, self->knownCommittedVersion));
 				}
@@ -3919,7 +3922,7 @@ void applyChangeFeedMutation(StorageServer* self, MutationRef const& m, Version 
 			} else {
 				TEST(it->stopped); // Skip CF write because stopped
 				TEST(version <= it->emptyVersion); // Skip CF write because popped and SS behind
-				DEBUG_MUTATION("ChangeFeedIgnoreSet", version, m, self->thisServerID)
+				DEBUG_MUTATION("ChangeFeedWriteSetIgnore", version, m, self->thisServerID)
 				    .detail("Range", it->range)
 				    .detail("ChangeFeedID", it->id)
 				    .detail("Stopped", it->stopped)
@@ -3930,7 +3933,8 @@ void applyChangeFeedMutation(StorageServer* self, MutationRef const& m, Version 
 		auto ranges = self->keyChangeFeed.intersectingRanges(KeyRangeRef(m.param1, m.param2));
 		for (auto& r : ranges) {
 			for (auto& it : r.value()) {
-				if (!it->stopped && version > it->emptyVersion) {
+				if (!it->stopped) {
+					ASSERT(version > it->emptyVersion);
 					if (it->mutations.empty() || it->mutations.back().version != version) {
 						it->mutations.push_back(MutationsAndVersionRef(version, self->knownCommittedVersion));
 					}
@@ -3942,7 +3946,7 @@ void applyChangeFeedMutation(StorageServer* self, MutationRef const& m, Version 
 				} else {
 					TEST(it->stopped); // Skip CF clear because stopped
 					TEST(version <= it->emptyVersion); // Skip CF clear because popped and SS behind
-					DEBUG_MUTATION("ChangeFeedIgnoreClear", version, m, self->thisServerID)
+					DEBUG_MUTATION("ChangeFeedWriteClearIgnore", version, m, self->thisServerID)
 					    .detail("Range", it->range)
 					    .detail("ChangeFeedID", it->id)
 					    .detail("Stopped", it->stopped)
@@ -4190,12 +4194,9 @@ static const KeyRangeRef persistChangeFeedKeys =
 // data keys are unmangled (but never start with PERSIST_PREFIX because they are always in allKeys)
 
 ACTOR Future<Void> changeFeedPopQ(StorageServer* self, ChangeFeedPopRequest req) {
+	// if a SS restarted and is way behind, wait for it to at least have caught up through the pop version
+	wait(self->version.whenAtLeast(req.version));
 	wait(delay(0));
-
-	TraceEvent(SevDebug, "ChangeFeedPopQuery", self->thisServerID)
-	    .detail("RangeID", req.rangeID.printable())
-	    .detail("Version", req.version)
-	    .detail("Range", req.range.toString());
 
 	if (!self->isReadable(req.range)) {
 		req.reply.sendError(wrong_shard_server());
@@ -4206,6 +4207,12 @@ ACTOR Future<Void> changeFeedPopQ(StorageServer* self, ChangeFeedPopRequest req)
 		req.reply.sendError(unknown_change_feed());
 		return Void();
 	}
+
+	TraceEvent(SevDebug, "ChangeFeedPopQuery", self->thisServerID)
+	    .detail("RangeID", req.rangeID.printable())
+	    .detail("Version", req.version)
+	    .detail("Range", req.range.toString());
+
 	if (req.version - 1 > feed->second->emptyVersion) {
 		feed->second->emptyVersion = req.version - 1;
 		while (!feed->second->mutations.empty() && feed->second->mutations.front().version < req.version) {
