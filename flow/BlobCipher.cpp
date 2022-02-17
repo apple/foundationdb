@@ -28,15 +28,11 @@
 #include <cstring>
 #include <memory>
 
-//#if ENCRYPTION_ENABLED
-
-uint64_t BlobCipherKeyCache::CIPHER_KEY_CACHE_TTL_NS = 10 * 60 * 1000 * 1000 * 1000L;
-uint8_t EncryptBlobCipher::ENCRYPT_HEADER_VERSION = 1;
+#if ENCRYPTION_ENABLED
 
 // BlobCipherEncryptHeader
 BlobCipherEncryptHeader::BlobCipherEncryptHeader() {
-	flags.headerVersion = EncryptBlobCipher::ENCRYPT_HEADER_VERSION;
-	tag = std::make_unique<uint8_t[]>(AES_256_TAG_LENGTH);
+	flags.encryptMode = BLOB_CIPHER_ENCRYPT_MODE_NONE;
 }
 
 // BlobCipherKey class methods
@@ -180,15 +176,12 @@ std::vector<Reference<BlobCipherKey>> BlobCipherKeyCache::getAllCiphers(const Bl
 
 // EncyrptBlobCipher class methods
 
-EncryptBlobCipher::EncryptBlobCipher(Reference<BlobCipherKey> key, const BlobCipherIV& iv)
+EncryptBlobCipherAes265Ctr::EncryptBlobCipherAes265Ctr(Reference<BlobCipherKey> key, const BlobCipherIV& iv)
   : ctx(EVP_CIPHER_CTX_new()), cipherKey(key) {
 	if (ctx == nullptr) {
 		throw internal_error();
 	}
-	if (EVP_EncryptInit_ex(ctx, EVP_aes_256_gcm(), nullptr, nullptr, nullptr) != 1) {
-		throw internal_error();
-	}
-	if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_IVLEN, iv.size(), nullptr) != 1) {
+	if (EVP_EncryptInit_ex(ctx, EVP_aes_256_ctr(), nullptr, nullptr, nullptr) != 1) {
 		throw internal_error();
 	}
 	if (EVP_EncryptInit_ex(ctx, nullptr, nullptr, key.getPtr()->data(), iv.data()) != 1) {
@@ -196,44 +189,50 @@ EncryptBlobCipher::EncryptBlobCipher(Reference<BlobCipherKey> key, const BlobCip
 	}
 }
 
-StringRef EncryptBlobCipher::encrypt(unsigned char const* plaintext,
-                                     int len,
-                                     BlobCipherEncryptHeader* header,
-                                     Arena& arena) {
+StringRef EncryptBlobCipherAes265Ctr::encrypt(unsigned char const* plaintext,
+                                              const int plaintextLen,
+                                              BlobCipherEncryptHeader* header,
+                                              Arena& arena) {
 	TEST(true); // Encrypting data with BlobCipher
-	auto ciphertext = new (arena) unsigned char[len + AES_BLOCK_SIZE];
+	auto ciphertext = new (arena) unsigned char[plaintextLen + AES_BLOCK_SIZE];
 	int bytes{ 0 };
-	if (EVP_EncryptUpdate(ctx, ciphertext, &bytes, plaintext, len) != 1) {
+	if (EVP_EncryptUpdate(ctx, ciphertext, &bytes, plaintext, plaintextLen) != 1) {
 		throw internal_error();
 	}
 	int finalBytes{ 0 };
 	if (EVP_EncryptFinal_ex(ctx, ciphertext + bytes, &finalBytes) != 1) {
 		throw internal_error();
 	}
-	if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_GET_TAG, AES_256_TAG_LENGTH, header->tag.get()) != 1) {
-		throw internal_error();
-	}
+	// populate header details for the encrypted blob.
+	header->flags.size = sizeof(BlobCipherEncryptHeader);
+	header->flags.headerVersion = EncryptBlobCipherAes265Ctr::ENCRYPT_HEADER_VERSION;
+	header->flags.encryptMode = BLOB_CIPHER_ENCRYPT_MODE_AES_256_CTR;
 	header->baseCipherId = cipherKey->getBaseCipherId();
 	header->encryptDomainId = cipherKey->getDomainId();
 	header->salt = cipherKey->getSalt();
+
+	// Preserve checksum of encrypted bytes in the header; approach protects against disk induced bit-rot/flip
+	// scenarios. AES CTR mode doesn't generate 'tag' by default as with schemes such as: AES 256 GCM.
+	//
+	// Possible to use XXH3_64bitsWithSeed() where 'seed' could be cipherKey->randomSalt; for performance reasons
+	// choosing 'default seed'.
+
+	header->checksum = XXH3_64bits(ciphertext, bytes + finalBytes);
 	return StringRef(ciphertext, bytes + finalBytes);
 }
 
-EncryptBlobCipher::~EncryptBlobCipher() {
+EncryptBlobCipherAes265Ctr::~EncryptBlobCipherAes265Ctr() {
 	EVP_CIPHER_CTX_free(ctx);
 }
 
 // DecryptBlobCipher class methods
 
-DecryptBlobCipher::DecryptBlobCipher(Reference<BlobCipherKey> key, const BlobCipherIV& iv) : ctx(EVP_CIPHER_CTX_new()) {
+DecryptBlobCipherAes256Ctr::DecryptBlobCipherAes256Ctr(Reference<BlobCipherKey> key, const BlobCipherIV& iv)
+  : ctx(EVP_CIPHER_CTX_new()) {
 	if (ctx == nullptr) {
 		throw internal_error();
 	}
-	if (!EVP_DecryptInit_ex(ctx, EVP_aes_256_gcm(), nullptr, nullptr, nullptr)) {
-		EVP_CIPHER_CTX_free(ctx);
-		throw internal_error();
-	}
-	if (!EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_AEAD_SET_IVLEN, iv.size(), nullptr)) {
+	if (!EVP_DecryptInit_ex(ctx, EVP_aes_256_ctr(), nullptr, nullptr, nullptr)) {
 		EVP_CIPHER_CTX_free(ctx);
 		throw internal_error();
 	}
@@ -243,18 +242,24 @@ DecryptBlobCipher::DecryptBlobCipher(Reference<BlobCipherKey> key, const BlobCip
 	}
 }
 
-StringRef DecryptBlobCipher::decrypt(unsigned char const* ciphertext,
-                                     int len,
-                                     const BlobCipherEncryptHeader& header,
-                                     Arena& arena) {
+StringRef DecryptBlobCipherAes256Ctr::decrypt(unsigned char const* ciphertext,
+                                              const int ciphertextLen,
+                                              const BlobCipherEncryptHeader& header,
+                                              Arena& arena) {
 	TEST(true); // Decrypting data with BlobCipher
-	auto plaintext = new (arena) unsigned char[len + AES_BLOCK_SIZE];
-	int bytesDecrypted{ 0 };
-	if (!EVP_DecryptUpdate(ctx, plaintext, &bytesDecrypted, ciphertext, len)) {
-		EVP_CIPHER_CTX_free(ctx);
+	// validate header flag sanity; for now only one valid header version exists.
+	if (header.flags.headerVersion != EncryptBlobCipherAes265Ctr::ENCRYPT_HEADER_VERSION ||
+	    header.flags.encryptMode != BLOB_CIPHER_ENCRYPT_MODE_AES_256_CTR) {
 		throw internal_error();
 	}
-	if (!EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_TAG, AES_256_TAG_LENGTH, header.tag.get())) {
+	// encrypted byte checksum sanity; protection against data bit-rot/flip.
+	BlobCipherChecksum checksum = XXH3_64bits(ciphertext, ciphertextLen);
+	if (checksum != header.checksum) {
+		throw internal_error();
+	}
+	auto plaintext = new (arena) unsigned char[ciphertextLen + AES_BLOCK_SIZE];
+	int bytesDecrypted{ 0 };
+	if (!EVP_DecryptUpdate(ctx, plaintext, &bytesDecrypted, ciphertext, ciphertextLen)) {
 		EVP_CIPHER_CTX_free(ctx);
 		throw internal_error();
 	}
@@ -266,7 +271,7 @@ StringRef DecryptBlobCipher::decrypt(unsigned char const* ciphertext,
 	return StringRef(plaintext, bytesDecrypted + finalBlobBytes);
 }
 
-DecryptBlobCipher::~DecryptBlobCipher() {
+DecryptBlobCipherAes256Ctr::~DecryptBlobCipherAes256Ctr() {
 	EVP_CIPHER_CTX_free(ctx);
 }
 
@@ -384,4 +389,4 @@ TEST_CASE("flow/BlobCipher") {
 	return Void();
 }
 
-//#endif // ENCRYPTION_ENABLED
+#endif // ENCRYPTION_ENABLED

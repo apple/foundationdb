@@ -26,11 +26,12 @@
 #define ENCRYPTION_ENABLED 0
 #endif
 
-//#if ENCRYPTION_ENABLED
+#if ENCRYPTION_ENABLED
 
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/flow.h"
+#include "flow/xxhash.h"
 
 #include <openssl/aes.h>
 #include <openssl/engine.h>
@@ -48,27 +49,30 @@ using BlobCipherDomainId = uint64_t;
 using BlobCipherRandomSalt = uint64_t;
 using BlobCipherBaseKeyId = uint64_t;
 using BlobCipherIV = std::array<unsigned char, AES_256_IV_LENGTH>;
-using BlobCipherTag = std::unique_ptr<uint8_t[]>;
+using BlobCipherChecksum = XXH64_hash_t;
+
+typedef enum { BLOB_CIPHER_ENCRYPT_MODE_NONE = 0, BLOB_CIPHER_ENCRYPT_MODE_AES_256_CTR = 1 } BlockCipherEncryptMode;
 
 // BlobCipher Encryption header format
 // The header is persisted as 'plaintext' for encrypted block containing sufficient information for encyrption key
-// regeneration to assit decryption on reads. The total space overhead is 48 bytes.
+// regeneration to assit decryption on reads. The total space overhead is 40 bytes.
 
 #pragma pack(push, 1) // exact fit - no padding
 typedef struct BlobCipherEncryptHeader {
 	union {
 		struct {
-			uint8_t headerVersion;
-			uint8_t _reserved[7];
+			uint8_t
+			    size; // reading first byte is sufficient to determine header length. ALWAYS THE FIRST HEADER ELEMENT.
+			uint8_t headerVersion{};
+			uint8_t encryptMode{};
+			uint8_t _reserved[5]{};
 		} flags;
-		uint64_t _padding;
+		uint64_t _padding{};
 	};
-	uint8_t headerVersion;
-	BlobCipherDomainId encryptDomainId;
-	BlobCipherBaseKeyId baseCipherId;
-	BlobCipherRandomSalt salt;
-	BlobCipherTag tag;
-	uint64_t _reserved;
+	BlobCipherDomainId encryptDomainId{};
+	BlobCipherBaseKeyId baseCipherId{};
+	BlobCipherRandomSalt salt{};
+	BlobCipherChecksum checksum{};
 
 	BlobCipherEncryptHeader();
 } BlobCipherEncryptHeader;
@@ -173,7 +177,7 @@ using BlobCipherDomainCacheMap = std::unordered_map<BlobCipherDomainId, BlobCiph
 
 class BlobCipherKeyCache : NonCopyable {
 	BlobCipherDomainCacheMap domainCacheMap;
-	static uint64_t CIPHER_KEY_CACHE_TTL_NS;
+	static constexpr uint64_t CIPHER_KEY_CACHE_TTL_NS = 10 * 60 * 1000 * 1000 * 1;
 
 	BlobCipherKeyCache() {}
 
@@ -200,28 +204,31 @@ public:
 // encrypted ciphertext for given plaintext input. b) generate BlobCipherEncryptHeader (including the 'tag') persiting
 // for decryption on reads.
 
-class EncryptBlobCipher final : NonCopyable, public ReferenceCounted<EncryptBlobCipher> {
+class EncryptBlobCipherAes265Ctr final : NonCopyable, public ReferenceCounted<EncryptBlobCipherAes265Ctr> {
 	EVP_CIPHER_CTX* ctx;
 	Reference<BlobCipherKey> cipherKey;
 
 public:
-	static uint8_t ENCRYPT_HEADER_VERSION;
+	static constexpr uint8_t ENCRYPT_HEADER_VERSION = 1;
 
-	EncryptBlobCipher(Reference<BlobCipherKey> key, const BlobCipherIV& iv);
-	~EncryptBlobCipher();
-	StringRef encrypt(unsigned char const* plaintext, int len, BlobCipherEncryptHeader* header, Arena&);
+	EncryptBlobCipherAes265Ctr(Reference<BlobCipherKey> key, const BlobCipherIV& iv);
+	~EncryptBlobCipherAes265Ctr();
+	StringRef encrypt(unsigned char const* plaintext, const int plaintextLen, BlobCipherEncryptHeader* header, Arena&);
 };
 
 // This interface enable data block decryption. An invocation to decrypt() would generate 'plaintext' for a given
 // 'ciphertext' input, the caller needs to supply BlobCipherEncryptHeader.
 
-class DecryptBlobCipher final : NonCopyable, public ReferenceCounted<DecryptBlobCipher> {
+class DecryptBlobCipherAes256Ctr final : NonCopyable, public ReferenceCounted<DecryptBlobCipherAes256Ctr> {
 	EVP_CIPHER_CTX* ctx;
 
 public:
-	DecryptBlobCipher(Reference<BlobCipherKey> key, const BlobCipherIV& iv);
-	~DecryptBlobCipher();
-	StringRef decrypt(unsigned char const* ciphertext, int len, const BlobCipherEncryptHeader& header, Arena&);
+	DecryptBlobCipherAes256Ctr(Reference<BlobCipherKey> key, const BlobCipherIV& iv);
+	~DecryptBlobCipherAes256Ctr();
+	StringRef decrypt(unsigned char const* ciphertext,
+	                  const int ciphertextLen,
+	                  const BlobCipherEncryptHeader& header,
+	                  Arena&);
 };
 
 class HmacSha256DigestGen final : NonCopyable {
@@ -234,4 +241,4 @@ public:
 	StringRef digest(unsigned char const* data, size_t len, Arena&);
 };
 
-//#endif // ENCRYPTION_ENABLED
+#endif // ENCRYPTION_ENABLED

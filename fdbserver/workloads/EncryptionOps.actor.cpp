@@ -127,7 +127,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 	}
 
 	StringRef doEncryption(Reference<BlobCipherKey> key, uint8_t* payload, int len, BlobCipherEncryptHeader* header) {
-		EncryptBlobCipher encryptor(key, iv);
+		EncryptBlobCipherAes265Ctr encryptor(key, iv);
 
 		auto start = std::chrono::high_resolution_clock::now();
 		auto encrypted = encryptor.encrypt(buff.get(), len, header, arena);
@@ -137,7 +137,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 		ASSERT(encrypted.size() == len);
 		std::copy(encrypted.begin(), encrypted.end(), validationBuff.get());
 		ASSERT(memcmp(validationBuff.get(), buff.get(), len) != 0);
-		ASSERT(header->flags.headerVersion == EncryptBlobCipher::ENCRYPT_HEADER_VERSION);
+		ASSERT(header->flags.headerVersion == EncryptBlobCipherAes265Ctr::ENCRYPT_HEADER_VERSION);
 
 		metrics->updateEncryptionTime(std::chrono::duration<double, std::nano>(end - start).count());
 		return encrypted;
@@ -148,12 +148,13 @@ struct EncryptionOpsWorkload : TestWorkload {
 	                  const BlobCipherEncryptHeader& header,
 	                  uint8_t* originalPayload,
 	                  uint8_t* validationBuff) {
-		ASSERT(header.flags.headerVersion == EncryptBlobCipher::ENCRYPT_HEADER_VERSION);
+		ASSERT(header.flags.headerVersion == EncryptBlobCipherAes265Ctr::ENCRYPT_HEADER_VERSION);
+		ASSERT(header.flags.encryptMode == BLOB_CIPHER_ENCRYPT_MODE_AES_256_CTR);
 
 		auto& cipherKeyCache = BlobCipherKeyCache::getInstance();
 		Reference<BlobCipherKey> cipherKey = cipherKeyCache.getCipherKey(header);
 		assert(cipherKey != nullptr);
-		DecryptBlobCipher decryptor(cipherKey, iv);
+		DecryptBlobCipherAes256Ctr decryptor(cipherKey, iv);
 
 		auto start = std::chrono::high_resolution_clock::now();
 		Standalone<StringRef> decrypted = decryptor.decrypt(encrypted.begin(), len, header, arena);
@@ -172,11 +173,6 @@ struct EncryptionOpsWorkload : TestWorkload {
 	std::string description() const override { return "EncryptionOps"; }
 
 	Future<Void> start(Database const& cx) override {
-		// use uniform distribution random data generator
-		std::random_device rd; // random seed gen.
-		std::mt19937 gen(rd()); // Standard mersenne_twister_engine seeded with rd()
-		std::uniform_int_distribution<> distrib(100, maxBufSize);
-
 		BlobCipherDomainId domainId{ 1 };
 		for (int i = 0; i < numIterations; i++, domainId++) {
 			// Step-1: Encryption key derivation, caching the cipher for later use
@@ -187,7 +183,8 @@ struct EncryptionOpsWorkload : TestWorkload {
 			auto end = std::chrono::high_resolution_clock::now();
 			metrics->updateKeyDerivationTime(std::chrono::duration<double, std::nano>(end - start).count());
 
-			int dataLen = isFixedSizePayload() ? pageSize : distrib(gen);
+			int dataLen = isFixedSizePayload() ? pageSize : deterministicRandom()->randomInt(100, maxBufSize);
+			generateRandomData(buff.get(), dataLen);
 
 			// Encrypt the payload - generates BlobCipherEncryptHeader to assist decryption later
 			BlobCipherEncryptHeader header;
