@@ -1,15 +1,10 @@
+#include "fdbserver/RocksDBCheckpointUtils.actor.h"
+
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/StorageCheckpoint.h"
-#include "fdbclient/SystemData.h"
-#include "fdbserver/RocksDBCheckpointUtils.actor.h"
-// #include "fdbserver/ServerCheckpoint.actor.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
-
-#include <memory>
-#include <tuple>
-#include <vector>
 
 #include "flow/actorcompiler.h" // has to be last include
 
@@ -117,7 +112,6 @@ ACTOR Future<Void> fetchCheckpointFile(Database cx,
 		return Void();
 	}
 
-	// state std::string remoteFile = rocksCF.sstFiles[idx].db_path + rocksCF.sstFiles[idx].name;
 	state std::string remoteFile = rocksCF.sstFiles[idx].name;
 	state std::string localFile = dir + rocksCF.sstFiles[idx].name;
 	state UID ssID = metaData->ssID;

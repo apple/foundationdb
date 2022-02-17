@@ -106,7 +106,7 @@ public:
 	virtual Future<CheckpointMetaData> checkpoint(const CheckpointRequest& request) { throw not_implemented(); }
 
 	// Restore from a checkpoint.
-	virtual Future<Void> restore(const CheckpointMetaData& checkpoint) { throw not_implemented(); }
+	virtual Future<Void> restore(const std::vector<CheckpointMetaData>& checkpoints) { throw not_implemented(); }
 
 	// Delete a checkpoint.
 	virtual Future<Void> deleteCheckpoint(const CheckpointMetaData& checkpoint) { throw not_implemented(); }

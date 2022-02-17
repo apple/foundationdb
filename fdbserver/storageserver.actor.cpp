@@ -276,7 +276,7 @@ struct StorageServerDisk {
 
 	Future<CheckpointMetaData> checkpoint(const CheckpointRequest& request) { return storage->checkpoint(request); }
 
-	Future<Void> restore(const CheckpointMetaData& checkpoint) { return storage->restore(checkpoint); }
+	Future<Void> restore(const std::vector<CheckpointMetaData>& checkpoints) { return storage->restore(checkpoints); }
 
 	Future<Void> deleteCheckpoint(const CheckpointMetaData& checkpoint) {
 		return storage->deleteCheckpoint(checkpoint);
@@ -1828,7 +1828,7 @@ ACTOR Future<Void> fetchCheckpointQ(StorageServer* self, FetchCheckpointRequest 
 		}
 	}
 
-		wait(reader->close());
+	wait(reader->close());
 	return Void();
 }
 

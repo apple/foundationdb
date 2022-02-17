@@ -6867,8 +6867,8 @@ static Future<Void> createCheckpointImpl(T tr, KeyRangeRef range, CheckpointForm
 		std::vector<UID> dest;
 		decodeKeyServersValue(UIDtoTagMap, keyServers[i].value, src, dest);
 
-		// Randomly choose a storage server to create the checkpoint.
-		// const int idx = deterministicRandom()->randomInt(0, src.size());
+		// The checkpoint request is sent to all replicas, in case any of them is unhealthy.
+		// An alternative is to choose a healthy replica.
 		const UID checkpointID = deterministicRandom()->randomUniqueID();
 		for (int idx = 0; idx < src.size(); ++idx) {
 			CheckpointMetaData checkpoint(shard & range, format, src[idx], checkpointID);
@@ -6882,7 +6882,6 @@ static Future<Void> createCheckpointImpl(T tr, KeyRangeRef range, CheckpointForm
 		    .detail("ServerSelected", describe(src))
 		    .detail("CheckpointKey", checkpointKeyFor(checkpointID))
 		    .detail("ReadVersion", tr->getReadVersion().get());
-
 	}
 
 	return Void();
@@ -6937,12 +6936,14 @@ ACTOR static Future<CheckpointMetaData> getCheckpointMetaDataInternal(GetCheckpo
 			    .detail("StorageServer", alternatives->getInterface(i).uniqueID);
 			continue;
 		}
-		TraceEvent("GetCheckpointMetaDataInternalSSResult")
-		    .detail("Range", req.range.toString())
-		    .detail("Version", req.version)
-		    .detail("StorageServer", alternatives->getInterface(i).uniqueID);
+
 		if (fs[i].get().isError()) {
 			const Error& e = fs[i].get().getError();
+			TraceEvent("GetCheckpointMetaDataInternalError")
+			    .detail("Range", req.range.toString())
+			    .detail("Version", req.version)
+			    .detail("StorageServer", alternatives->getInterface(i).uniqueID)
+			    .error(e, true);
 			if (e.code() != error_code_checkpoint_not_found || !error.present()) {
 				error = e;
 			}
@@ -6997,7 +6998,6 @@ ACTOR Future<std::vector<CheckpointMetaData>> getCheckpointMetaData(Database cx,
 				when(wait(waitForAll(fs))) { break; }
 				when(wait(delay(timeout))) {
 					TraceEvent("GetCheckpointTimeout").detail("Range", keys.toString()).detail("Version", version);
-					// cx->invalidateCache(keys);
 				}
 			}
 		} catch (Error& e) {

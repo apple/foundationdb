@@ -72,9 +72,10 @@ struct CheckpointMetaData {
 	void setFormat(CheckpointFormat format) { this->format = static_cast<int16_t>(format); }
 
 	std::string toString() const {
-		std::string res = "Checkpoint MetaData:\nServer: " + ssID.toString() + "\nID: " + checkpointID.toString() +
-		                  "\nVersion: " + std::to_string(version) + "\nFormat: " + std::to_string(format) +
-		                  "\nState: " + std::to_string(static_cast<int>(state)) + "\n";
+		std::string res = "Checkpoint MetaData:\nRange: " + range.toString() + "\nVersion: " + std::to_string(version) +
+		                  "\nFormat: " + std::to_string(format) + "\nServer: " + ssID.toString() +
+		                  "\nID: " + checkpointID.toString() + "\nState: " + std::to_string(static_cast<int>(state)) +
+		                  "\n";
 		return res;
 	}
 
