@@ -36,8 +36,14 @@ static const char* storageMigrationTypes[] = { "perpetual_storage_wiggle=0 stora
 	                                           "perpetual_storage_wiggle=1",
 	                                           "perpetual_storage_wiggle=1 storage_migration_type=gradual",
 	                                           "storage_migration_type=aggressive" };
-static const char* logTypes[] = { "log_engine:=1",  "log_engine:=2",  "log_spill:=1",   "log_spill:=2",
-	                              "log_version:=2", "log_version:=3", "log_version:=4", "log_version:=5",
+static const char* logTypes[] = { "log_engine:=1",
+	                              "log_engine:=2",
+	                              "log_spill:=1",
+	                              "log_spill:=2",
+	                              "log_version:=2",
+	                              "log_version:=3",
+	                              "log_version:=4",
+	                              "log_version:=5",
 	                              "log_version:=6",
 	                              // downgrade incompatible log version
 	                              "log_version:=7" };
@@ -412,12 +418,12 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				// Some configurations will be invalid, and that's fine.
 				int length = sizeof(logTypes) / sizeof(logTypes[0]);
 
-				if(self->downgradeTest1) {
+				if (self->downgradeTest1) {
 					length -= 1;
 				}
 
-				wait(success(IssueConfigurationChange(
-				    cx, logTypes[deterministicRandom()->randomInt(0, length)], false)));
+				wait(success(
+				    IssueConfigurationChange(cx, logTypes[deterministicRandom()->randomInt(0, length)], false)));
 			} else if (randomChoice == 7) {
 				wait(success(IssueConfigurationChange(
 				    cx,
