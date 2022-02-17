@@ -433,7 +433,7 @@ ACTOR Future<Void> databaseLogger(DatabaseContext* cx) {
 		for (const auto& it : cx->tssMetrics) {
 			// TODO could skip this whole thing if tss if request counter is zero?
 			// That would potentially complicate elapsed calculation though
-			if (it.second->mismatches.getIntervalDelta()) {
+			if (it.second->detailedMismatches.size()) {
 				cx->tssMismatchStream.send(
 				    std::pair<UID, std::vector<DetailedTSSMismatch>>(it.first, it.second->detailedMismatches));
 			}
@@ -943,6 +943,8 @@ ACTOR static Future<Void> handleTssMismatches(DatabaseContext* cx) {
 	loop {
 		// <tssid, list of detailed mismatch data>
 		state std::pair<UID, std::vector<DetailedTSSMismatch>> data = waitNext(cx->tssMismatchStream.getFuture());
+		// return to calling actor, don't do this as part of metrics loop
+		wait(delay(0));
 		// find ss pair id so we can remove it from the mapping
 		state UID tssPairID;
 		bool found = false;
