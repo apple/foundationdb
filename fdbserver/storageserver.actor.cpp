@@ -1849,6 +1849,20 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		       fetchStorageVersion,
 		       feedInfo->fetchVersion,
 		       feedInfo->durableFetchVersion.get());
+		TraceEvent(SevDebug, "ChangeFeedMutationsDetails", data->thisServerID)
+		    .detail("FeedID", req.rangeID)
+		    .detail("StreamUID", streamUID)
+		    .detail("Range", req.range)
+		    .detail("Begin", req.begin)
+		    .detail("End", req.end)
+		    .detail("AtLatest", atLatest)
+		    .detail("DequeVersion", dequeVersion)
+		    .detail("EmptyVersion", feedInfo->emptyVersion)
+		    .detail("StorageVersion", feedInfo->storageVersion)
+		    .detail("DurableVersion", feedInfo->durableVersion)
+		    .detail("FetchStorageVersion", fetchStorageVersion)
+		    .detail("FetchVersion", feedInfo->fetchVersion)
+		    .detail("DurableFetchVersion", feedInfo->durableFetchVersion.get());
 	}
 
 	if (req.end > emptyVersion + 1) {
@@ -2038,7 +2052,8 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		    .detail("End", req.end)
 		    .detail("FirstVersion", reply.mutations.empty() ? invalidVersion : reply.mutations.front().version)
 		    .detail("LastVersion", reply.mutations.empty() ? invalidVersion : reply.mutations.back().version)
-		    .detail("Count", reply.mutations.size());
+		    .detail("Count", reply.mutations.size())
+		    .detail("GotAll", gotAll);
 	}
 
 	if (DEBUG_CF_MISSING(req.rangeID, req.range, req.begin, reply.mutations.back().version) && !req.canReadPopped) {
@@ -6219,11 +6234,11 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 					feedFetchVersions.push_back(std::pair(info->second->id, info->second->fetchVersion));
 				}
 				// handle case where fetch had version ahead of last in-memory mutation
-				if (info->second->fetchVersion > info->second->storageVersion) {
-					info->second->storageVersion = std::min(info->second->fetchVersion, newOldestVersion);
-					if (info->second->fetchVersion > info->second->storageVersion) {
-						// This change feed still has pending mutations fetched and written to storage that are not yet
-						// durable. To ensure its storageVersion gets updated once its fetchVersion is durable, we need
+				if (alreadyFetched > info->second->storageVersion) {
+					info->second->storageVersion = std::min(alreadyFetched, newOldestVersion);
+					if (alreadyFetched > info->second->storageVersion) {
+						// This change feed still has pending mutations fetched and written to storage that are higher
+						// than the new durableVersion. To ensure its storage and durable version get updated, we need
 						// to add it back to fetchingChangeFeeds
 						data->fetchingChangeFeeds.insert(info->first);
 					}
