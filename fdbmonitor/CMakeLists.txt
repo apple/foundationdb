@@ -36,7 +36,7 @@ add_custom_target(start_sandbox
 
 add_dependencies(start_sandbox fdbmonitor fdbserver)
 
-if(NOT EXISTS ${CMAKE_BINARY_DIR}/generate_profile.sh)
+if(NOT EXISTS ${CMAKE_BINARY_DIR}/contrib/generate_profile.sh)
   configure_file(${CMAKE_SOURCE_DIR}/contrib/generate_profile.sh
     ${CMAKE_BINARY_DIR}/contrib/generate_profile.sh)
 endif()

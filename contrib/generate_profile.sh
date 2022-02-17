@@ -18,12 +18,12 @@ export LLVM_PROFILE_FILE=$fdbdir/sandbox/mako-run-%m.profraw
 $fdbdir/bin/mako -p 1 -t 2 --keylen 32 --vallen 16 --mode run --rows 10000 --transaction grvg7i2gr1:48cr1:48 --seconds 60 --trace $fdbdir/sandbox/logs --trace_format json
 
 # Shutdown fdbserver to trigger profile dumping
-fdbmonitor=$(cat $fdbdir/sandbox/fdbmonitor.pid)
-pid=$(cat /proc/$fdbmonitor/task/$fdbmonitor/children)
-gdb --batch --eval-command 'call exit(0)' --pid $pid
+fdbmonitor_pid=$(cat $fdbdir/sandbox/fdbmonitor.pid)
+fdbserver_pid=$(cat /proc/$fdbmonitor_pid/task/$fdbmonitor_pid/children)
+gdb --batch --eval-command 'call exit(0)' --pid $fdbserver_pid
 
 # Clean up
-kill -9 $fdbmonitor
+kill -9 $fdbmonitor_pid
 
 # Profile for server
 llvm-profdata merge -output=$fdbdir/fdb.profdata $fdbdir/sandbox/fdb-*.profraw
