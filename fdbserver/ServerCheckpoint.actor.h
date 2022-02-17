@@ -27,21 +27,25 @@
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/StorageCheckpoint.h"
-#include "fdbserver/IKeyValueStore.h"
 #include "flow/flow.h"
 
 #include "flow/actorcompiler.h" // has to be last include
 
-class ICheckpointReader : public IClosable {
+// An ICheckpointReader can read the contents of a checkpoint created by a KV store,
+// i.e., with IKeyValueStore::checkpoint().
+class ICheckpointReader {
 public:
-    // `token` is a serialized object defined by each derived ICheckpointReader class, to specify the 
-    // starting point for the underlying checkpoint.
+	// `token` is a serialized object defined by each derived ICheckpointReader class, to specify the
+	// starting point for the underlying checkpoint.
 	virtual Future<Void> init(StringRef token) = 0;
 
+	// Scans the checkpoint, and returns the key-value pairs.
 	virtual Future<RangeResult> nextKeyValues(const int rowLimit, const int ByteLimit) = 0;
 
 	// Returns the next chunk of serialized checkpoint.
 	virtual Future<Standalone<StringRef>> nextChunk(const int ByteLimit) = 0;
+
+	virtual Future<Void> close() = 0;
 
 protected:
 	virtual ~ICheckpointReader() {}
@@ -52,6 +56,9 @@ ICheckpointReader* newCheckpointReader(const CheckpointMetaData& checkpoint, UID
 // Delete a checkpoint.
 ACTOR Future<Void> deleteCheckpoint(CheckpointMetaData checkpoint);
 
+// Fetchs checkpoint to a local `dir`, `initialState` provides the checkpoint formats, location, restart point, etc.
+// If cFun is provided, the progress can be checkpointed.
+// Returns a CheckpointMetaData, which could contain KVS-specific results, e.g., the list of fetched checkpoint files.
 ACTOR Future<CheckpointMetaData> fetchCheckpoint(Database cx,
                                                  CheckpointMetaData initialState,
                                                  std::string dir,

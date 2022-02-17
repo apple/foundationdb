@@ -1795,16 +1795,17 @@ ACTOR Future<Void> deleteCheckpointQ(StorageServer* self, Version version, Check
 
 // Serves FetchCheckpointRequests.
 ACTOR Future<Void> fetchCheckpointQ(StorageServer* self, FetchCheckpointRequest req) {
-	// TraceEvent("ServeGetCheckpointFileBegin", self->thisServerID).detail("CheckpointID", req.checkpointID);
-	// .detail("File", req.path)
-	// .detail("Offset", req.offset);
+	TraceEvent("ServeFetchCheckpointBegin", self->thisServerID)
+	    .detail("CheckpointID", req.checkpointID)
+	    .detail("Token", req.token);
 
-	req.reply.setByteLimit(SERVER_KNOBS->FILE_TRANSFER_BLOCK_BYTES);
+	req.reply.setByteLimit(SERVER_KNOBS->CHECKPOINT_TRANSFER_BLOCK_BYTES);
 
+	// Returns error is the checkpoint cannot be found.
 	const auto it = self->checkpoints.find(req.checkpointID);
 	if (it == self->checkpoints.end()) {
-		std::cout << "not found" << std::endl;
 		req.reply.sendError(checkpoint_not_found());
+		TraceEvent("ServeFetchCheckpointNotFound", self->thisServerID).detail("CheckpointID", req.checkpointID);
 		return Void();
 	}
 
@@ -1813,8 +1814,7 @@ ACTOR Future<Void> fetchCheckpointQ(StorageServer* self, FetchCheckpointRequest 
 		wait(reader->init(req.token));
 
 		loop {
-			state Standalone<StringRef> data = wait(reader->nextChunk(1024 * 64));
-			std::cout << "Get batch from reader: " << data.toString() << std::endl;
+			state Standalone<StringRef> data = wait(reader->nextChunk(CLIENT_KNOBS->REPLY_BYTE_LIMIT));
 			wait(req.reply.onReady());
 			FetchCheckpointReply reply(req.token);
 			reply.data = data;
@@ -1823,23 +1823,22 @@ ACTOR Future<Void> fetchCheckpointQ(StorageServer* self, FetchCheckpointRequest 
 	} catch (Error& e) {
 		if (e.code() == error_code_end_of_stream) {
 			req.reply.sendError(end_of_stream());
-			return Void();
+			TraceEvent("ServeFetchCheckpointEnd", self->thisServerID)
+			    .detail("CheckpointID", req.checkpointID)
+			    .detail("Token", req.token);
+		} else {
+			TraceEvent(SevWarnAlways, "ServerFetchCheckpointFailure")
+			    .detail("CheckpointID", req.checkpointID)
+			    .detail("Token", req.token)
+			    .error(e, /*includeCancel=*/true);
+			if (!canReplyWith(e)) {
+				throw e;
+			}
+			req.reply.sendError(e);
 		}
-		// TraceEvent(SevWarnAlways, "ServerGetCheckpointFileFailure")
-		//     .detail("File", req.path)
-		//     .detail("Offset", req.offset)
-		// .error(e, /*includeCancel=*/true);
-		if (!canReplyWith(e)) {
-			throw;
-		}
-		req.reply.sendError(e);
 	}
 
-	// TraceEvent("ServerGetCheckpointFileEnd") .detail("Checkpoint", req.checkpoitID);
-	// .detail("Offset", req.offset)
-	// .detail("TotalBytes", fileOffset - req.offset);
-
-	req.reply.sendError(end_of_stream());
+		wait(reader->close());
 	return Void();
 }
 

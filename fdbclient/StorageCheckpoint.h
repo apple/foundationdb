@@ -74,7 +74,7 @@ struct CheckpointMetaData {
 
 	int64_t gcTime; // Time to delete this checkpoint, a Unix timestamp in seconds.
 
-	// Optional<RocksDBColumnFamilyCheckpoint> rocksCF; // Present when format == RocksDBColumnFamily.
+	// A serialized metadata associated with format, this data can be understood by the corresponding KVS.
 	Standalone<StringRef> serializedCheckpoint;
 
 	CheckpointMetaData() : format(InvalidFormat), state(InvalidState), referenceCount(0) {}

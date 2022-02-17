@@ -27,11 +27,7 @@ public:
 	// Returns the next chunk of serialized checkpoint.
 	Future<Standalone<StringRef>> nextChunk(const int byteLimit) override;
 
-	Future<Void> getError() const override { return Never(); }
-	Future<Void> onClosed() const override { return Void(); }
-
-	void dispose() override {}
-	void close() override;
+	Future<Void> close() override;
 
 private:
 	ACTOR static Future<Void> doInit(RocksDBCheckpointReader* self) {
@@ -59,9 +55,14 @@ private:
 			throw end_of_stream();
 		}
 
-		// ASSERT_EQ(bytesRead, buf.size());
 		self->offset_ += bytesRead;
 		return buf.substr(0, bytesRead);
+	}
+
+	ACTOR static Future<Void> doClose(RocksDBCheckpointReader* self) {
+		wait(delay(0, TaskPriority::FetchKeys));
+		delete self;
+		return Void();
 	}
 
 	CheckpointMetaData checkpoint_;
@@ -101,7 +102,9 @@ Future<Standalone<StringRef>> RocksDBCheckpointReader::nextChunk(const int byteL
 	return getNextChunk(this, byteLimit);
 }
 
-void RocksDBCheckpointReader::close() {}
+Future<Void> RocksDBCheckpointReader::close() {
+	return doClose(this);	
+}
 
 // Fetch a single sst file from storage server. If the file is fetch successfully, it will be recorded via cFun.
 ACTOR Future<Void> fetchCheckpointFile(Database cx,
