@@ -25,6 +25,7 @@
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/WellKnownEndpoints.h"
 #include "fdbserver/ConfigFollowerInterface.h"
+#include "fdbserver/ConfigBroadcastInterface.h"
 
 struct GenerationRegInterface {
 	constexpr static FileIdentifier file_identifier = 16726744;
@@ -212,6 +213,8 @@ struct ForwardRequest {
 	}
 };
 
+class ConfigNode;
+
 class ServerCoordinators : public ClientCoordinators {
 public:
 	explicit ServerCoordinators(Reference<IClusterConnectionRecord>);
@@ -223,6 +226,7 @@ public:
 
 Future<Void> coordinationServer(std::string const& dataFolder,
                                 Reference<IClusterConnectionRecord> const& ccf,
-                                ConfigDBType const&);
+                                Reference<ConfigNode> const&,
+                                ConfigBroadcastInterface const&);
 
 #endif

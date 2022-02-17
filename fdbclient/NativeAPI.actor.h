@@ -258,6 +258,8 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 
 	TransactionState(Database cx, TaskPriority taskID, SpanID spanID, Reference<TransactionLogInfo> trLogInfo)
 	  : cx(cx), trLogInfo(trLogInfo), options(cx), taskID(taskID), spanID(spanID) {}
+
+	Reference<TransactionState> cloneAndReset(Reference<TransactionLogInfo> newTrLogInfo, bool generateNewSpan) const;
 };
 
 class Transaction : NonCopyable {
@@ -440,6 +442,8 @@ private:
 	                                     GetRangeLimits limits,
 	                                     Snapshot snapshot,
 	                                     Reverse reverse);
+
+	void resetImpl(bool generateNewSpan);
 
 	double backoff;
 	CommitTransactionRequest tr;

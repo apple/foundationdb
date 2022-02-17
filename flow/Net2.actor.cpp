@@ -166,6 +166,8 @@ public:
 
 	Future<std::vector<NetworkAddress>> resolveTCPEndpoint(const std::string& host,
 	                                                       const std::string& service) override;
+	std::vector<NetworkAddress> resolveTCPEndpointBlocking(const std::string& host,
+	                                                       const std::string& service) override;
 	Reference<IListener> listen(NetworkAddress localAddr) override;
 
 	// INetwork interface
@@ -1356,7 +1358,7 @@ void Net2::initTLS(ETLSInitState targetState) {
 
 			for (int i = 0; i < threadsToStart; ++i) {
 				++sslHandshakerThreadsStarted;
-				sslHandshakerPool->addThread(new SSLHandshakerThread());
+				sslHandshakerPool->addThread(new SSLHandshakerThread(), "fdb-ssl-connect");
 			}
 		}
 	}
@@ -1506,6 +1508,7 @@ void Net2::run() {
 			ready.push(timers.top());
 			timers.pop();
 		}
+		// FIXME: Is this double counting?
 		countTimers += numTimers;
 		FDB_TRACE_PROBE(run_loop_ready_timers, numTimers);
 
@@ -1537,6 +1540,14 @@ void Net2::run() {
 			if (currentTaskID < minTaskID) {
 				trackAtPriority(currentTaskID, taskBegin);
 				minTaskID = currentTaskID;
+			}
+
+			// attempt to empty out the IO backlog
+			if (ready.size() % FLOW_KNOBS->ITERATIONS_PER_REACTOR_CHECK == 1) {
+				if (runFunc) {
+					runFunc();
+				}
+				reactor.react();
 			}
 
 			double tscNow = timestampCounter();
@@ -1617,7 +1628,7 @@ void Net2::run() {
 #ifdef WIN32
 	timeEndPeriod(1);
 #endif
-}
+} // Net2::run
 
 // Updates the PriorityStats found in NetworkMetrics
 void Net2::updateStarvationTracker(struct NetworkMetrics::PriorityStats& binStats,
@@ -1870,6 +1881,25 @@ Future<Reference<IUDPSocket>> Net2::createUDPSocket(bool isV6) {
 
 Future<std::vector<NetworkAddress>> Net2::resolveTCPEndpoint(const std::string& host, const std::string& service) {
 	return resolveTCPEndpoint_impl(this, host, service);
+}
+
+std::vector<NetworkAddress> Net2::resolveTCPEndpointBlocking(const std::string& host, const std::string& service) {
+	tcp::resolver tcpResolver(reactor.ios);
+	tcp::resolver::query query(host, service);
+	auto iter = tcpResolver.resolve(query);
+	decltype(iter) end;
+	std::vector<NetworkAddress> addrs;
+	while (iter != end) {
+		auto endpoint = iter->endpoint();
+		auto addr = endpoint.address();
+		if (addr.is_v6()) {
+			addrs.emplace_back(IPAddress(addr.to_v6().to_bytes()), endpoint.port());
+		} else {
+			addrs.emplace_back(addr.to_v4().to_ulong(), endpoint.port());
+		}
+		++iter;
+	}
+	return addrs;
 }
 
 bool Net2::isAddressOnThisHost(NetworkAddress const& addr) const {

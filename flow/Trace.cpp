@@ -111,6 +111,7 @@ private:
 	int64_t preopenOverflowCount;
 	std::string basename;
 	std::string logGroup;
+	std::map<std::string, std::string> universalFields;
 
 	std::string directory;
 	std::string processName;
@@ -365,6 +366,11 @@ public:
 		if (r.rolesString.size() > 0) {
 			fields.addField("Roles", r.rolesString);
 		}
+
+		for (auto const& field : universalFields) {
+			fields.addField(field.first, field.second);
+		}
+
 		fields.setAnnotated();
 	}
 
@@ -543,6 +549,12 @@ public:
 	void setLogGroup(const std::string& logGroup) {
 		MutexHolder holder(mutex);
 		this->logGroup = logGroup;
+	}
+
+	void addUniversalTraceField(const std::string& name, const std::string& value) {
+		MutexHolder holder(mutex);
+		ASSERT(universalFields.count(name) == 0);
+		universalFields[name] = value;
 	}
 
 	Future<Void> pingWriterThread() {
@@ -784,6 +796,10 @@ void removeTraceRole(std::string const& role) {
 
 void setTraceLogGroup(const std::string& logGroup) {
 	g_traceLog.setLogGroup(logGroup);
+}
+
+void addUniversalTraceField(const std::string& name, const std::string& value) {
+	g_traceLog.addUniversalTraceField(name, value);
 }
 
 TraceEvent::TraceEvent() : initialized(true), enabled(false), logged(true) {}
@@ -1141,11 +1157,16 @@ TraceEvent& TraceEvent::setMaxFieldLength(int maxFieldLength) {
 // or multiversion client setups and for multithreaded storage engines.
 thread_local uint64_t threadId = 0;
 
-void TraceEvent::setThreadId() {
+uint64_t getTraceThreadId() {
 	while (threadId == 0) {
 		threadId = deterministicRandom()->randomUInt64();
 	}
-	this->detail("ThreadID", threadId);
+
+	return threadId;
+}
+
+void TraceEvent::setThreadId() {
+	this->detail("ThreadID", getTraceThreadId());
 }
 
 int TraceEvent::getMaxFieldLength() const {
@@ -1532,6 +1553,18 @@ void parseNumericValue(std::string const& s, int64_t& outValue, bool permissive 
 	throw attribute_not_found();
 }
 
+void parseNumericValue(std::string const& s, uint64_t& outValue, bool permissive = false) {
+	unsigned long long int i = 0;
+	int consumed = 0;
+	int r = sscanf(s.c_str(), "%llu%n", &i, &consumed);
+	if (r == 1 && (consumed == s.size() || permissive)) {
+		outValue = i;
+		return;
+	}
+
+	throw attribute_not_found();
+}
+
 template <class T>
 T getNumericValue(TraceEventFields const& fields, std::string key, bool permissive) {
 	std::string field = fields.getValue(key);
@@ -1562,6 +1595,10 @@ int TraceEventFields::getInt(std::string key, bool permissive) const {
 
 int64_t TraceEventFields::getInt64(std::string key, bool permissive) const {
 	return getNumericValue<int64_t>(*this, key, permissive);
+}
+
+uint64_t TraceEventFields::getUint64(std::string key, bool permissive) const {
+	return getNumericValue<uint64_t>(*this, key, permissive);
 }
 
 double TraceEventFields::getDouble(std::string key, bool permissive) const {

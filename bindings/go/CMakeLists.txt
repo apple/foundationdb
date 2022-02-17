@@ -69,7 +69,7 @@ add_custom_target(go_options_file DEPENDS ${go_options_file})
 add_dependencies(go_options_file copy_go_sources)
 
 function(build_go_package)
-  set(options LIBRARY EXECUTABLE)
+  set(options LIBRARY EXECUTABLE INCLUDE_TEST)
   set(oneValueArgs NAME PATH)
   set(multiValueArgs)
   cmake_parse_arguments(BGP "${options}" "${oneValueArgs}" "${multiValueArgs}" "${ARGN}")
@@ -106,12 +106,30 @@ function(build_go_package)
     DEPENDS ${fdb_options_file}
     COMMENT "Building ${BGP_NAME}")
   add_custom_target(${BGP_NAME} ALL DEPENDS ${outfile})
+  if(BGP_INCLUDE_TEST)
+    set(testfile ${CMAKE_CURRENT_BINARY_DIR}/${BGP_NAME}_test)
+    add_custom_command(OUTPUT ${testfile}
+      COMMAND ${CMAKE_COMMAND} -E env ${go_env}
+              ${GO_EXECUTABLE} test -c ${GO_IMPORT_PATH}/${BGP_PATH} -o ${testfile}
+      DEPENDS ${fdb_options_file} fdb_c ${BGP_NAME}
+      COMMENT "Building ${BGP_NAME} test")
+    add_custom_target(${BGP_NAME}_test_target ALL DEPENDS ${testfile})
+    set(library_path LD_LIBRARY_PATH)
+    if (APPLE)
+      set(library_path DYLD_LIBRARY_PATH)
+    endif()
+    add_fdbclient_test(
+      NAME ${BGP_PATH}_go_test
+      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/${BGP_PATH}
+      COMMAND ${CMAKE_COMMAND} -E env ${library_path}=${CMAKE_BINARY_DIR}/lib ${testfile}
+    )
+  endif()
 endfunction()
 
-build_go_package(LIBRARY NAME fdb_go PATH fdb)
+build_go_package(LIBRARY NAME fdb_go PATH fdb INCLUDE_TEST)
 add_dependencies(fdb_go fdb_c go_options_file)
 
-build_go_package(LIBRARY NAME tuple_go PATH fdb/tuple)
+build_go_package(LIBRARY NAME tuple_go PATH fdb/tuple INCLUDE_TEST)
 add_dependencies(tuple_go fdb_go)
 
 build_go_package(LIBRARY NAME subspace_go PATH fdb/subspace)

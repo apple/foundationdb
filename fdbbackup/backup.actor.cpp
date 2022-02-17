@@ -95,7 +95,8 @@ enum class BackupType {
 	LIST,
 	QUERY,
 	DUMP,
-	CLEANUP
+	CLEANUP,
+	TAGS,
 };
 
 enum class DBType { UNDEFINED = 0, START, STATUS, SWITCH, ABORT, PAUSE, RESUME };
@@ -599,6 +600,24 @@ CSimpleOpt::SOption g_rgBackupDumpOptions[] = {
 	    SO_END_OF_OPTIONS
 };
 
+CSimpleOpt::SOption g_rgBackupTagsOptions[] = {
+#ifdef _WIN32
+	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
+#endif
+	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
+	{ OPT_CLUSTERFILE, "--cluster-file", SO_REQ_SEP },
+	{ OPT_TRACE, "--log", SO_NONE },
+	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
+	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
+	{ OPT_QUIET, "-q", SO_NONE },
+	{ OPT_QUIET, "--quiet", SO_NONE },
+#ifndef TLS_DISABLED
+	TLS_OPTION_FLAGS
+#endif
+	    SO_END_OF_OPTIONS
+};
+
 CSimpleOpt::SOption g_rgBackupListOptions[] = {
 #ifdef _WIN32
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
@@ -998,7 +1017,7 @@ void printBackupContainerInfo() {
 static void printBackupUsage(bool devhelp) {
 	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
 	printf("Usage: %s [TOP_LEVEL_OPTIONS] (start | status | abort | wait | discontinue | pause | resume | expire | "
-	       "delete | describe | list | query | cleanup) [ACTION_OPTIONS]\n\n",
+	       "delete | describe | list | query | cleanup | tags) [ACTION_OPTIONS]\n\n",
 	       exeBackup.toString().c_str());
 	printf(" TOP LEVEL OPTIONS:\n");
 	printf("  --build-flags  Print build information and exit.\n");
@@ -1424,6 +1443,7 @@ BackupType getBackupType(std::string backupType) {
 		values["query"] = BackupType::QUERY;
 		values["dump"] = BackupType::DUMP;
 		values["modify"] = BackupType::MODIFY;
+		values["tags"] = BackupType::TAGS;
 	}
 
 	auto i = values.find(backupType);
@@ -2812,6 +2832,23 @@ ACTOR Future<Void> listBackup(std::string baseUrl) {
 	return Void();
 }
 
+ACTOR Future<Void> listBackupTags(Database cx) {
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			std::vector<KeyBackedTag> tags = wait(getAllBackupTags(tr));
+			for (const auto& tag : tags) {
+				printf("%s\n", tag.tagName.c_str());
+			}
+			return Void();
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+}
+
 struct BackupModifyOptions {
 	Optional<std::string> verifyUID;
 	Optional<std::string> destURL;
@@ -3213,6 +3250,10 @@ int main(int argc, char* argv[]) {
 				case BackupType::MODIFY:
 					args = std::make_unique<CSimpleOpt>(
 					    argc - 1, &argv[1], g_rgBackupModifyOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
+					break;
+				case BackupType::TAGS:
+					args = std::make_unique<CSimpleOpt>(
+					    argc - 1, &argv[1], g_rgBackupTagsOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
 					break;
 				case BackupType::UNDEFINED:
 				default:
@@ -4028,6 +4069,12 @@ int main(int argc, char* argv[]) {
 			case BackupType::LIST:
 				initTraceFile();
 				f = stopAfter(listBackup(baseUrl));
+				break;
+
+			case BackupType::TAGS:
+				if (!initCluster())
+					return FDB_EXIT_ERROR;
+				f = stopAfter(listBackupTags(db));
 				break;
 
 			case BackupType::QUERY:

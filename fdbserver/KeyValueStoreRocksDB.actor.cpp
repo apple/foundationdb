@@ -3,6 +3,7 @@
 #include <rocksdb/cache.h>
 #include <rocksdb/db.h>
 #include <rocksdb/filter_policy.h>
+#include <rocksdb/listener.h>
 #include <rocksdb/options.h>
 #include <rocksdb/metadata.h>
 #include <rocksdb/slice_transform.h>
@@ -20,6 +21,11 @@
 #include <rocksdb/version.h>
 
 #include <rocksdb/rate_limiter.h>
+#if defined __has_include
+#if __has_include(<liburing.h>)
+#include <liburing.h>
+#endif
+#endif
 #include "fdbclient/SystemData.h"
 #include "fdbserver/CoroFlow.h"
 #include "flow/flow.h"
@@ -40,14 +46,83 @@
 
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 
-// Enforcing rocksdb version to be 6.22.1 or greater.
-static_assert(ROCKSDB_MAJOR >= 6, "Unsupported rocksdb version. Update the rocksdb to 6.22.1 version");
-static_assert(ROCKSDB_MAJOR == 6 ? ROCKSDB_MINOR >= 22 : true,
-              "Unsupported rocksdb version. Update the rocksdb to 6.22.1 version");
-static_assert((ROCKSDB_MAJOR == 6 && ROCKSDB_MINOR == 22) ? ROCKSDB_PATCH >= 1 : true,
-              "Unsupported rocksdb version. Update the rocksdb to 6.22.1 version");
+// Enforcing rocksdb version to be 6.27.3 or greater.
+static_assert(ROCKSDB_MAJOR >= 6, "Unsupported rocksdb version. Update the rocksdb to 6.27.3 version");
+static_assert(ROCKSDB_MAJOR == 6 ? ROCKSDB_MINOR >= 27 : true,
+              "Unsupported rocksdb version. Update the rocksdb to 6.27.3 version");
+static_assert((ROCKSDB_MAJOR == 6 && ROCKSDB_MINOR == 27) ? ROCKSDB_PATCH >= 3 : true,
+              "Unsupported rocksdb version. Update the rocksdb to 6.27.3 version");
 
 namespace {
+using rocksdb::BackgroundErrorReason;
+
+// Returns string representation of RocksDB background error reason.
+// Error reason code:
+// https://github.com/facebook/rocksdb/blob/12d798ac06bcce36be703b057d5f5f4dab3b270c/include/rocksdb/listener.h#L125
+// This function needs to be updated when error code changes.
+std::string getErrorReason(BackgroundErrorReason reason) {
+	switch (reason) {
+	case BackgroundErrorReason::kFlush:
+		return format("%d Flush", reason);
+	case BackgroundErrorReason::kCompaction:
+		return format("%d Compaction", reason);
+	case BackgroundErrorReason::kWriteCallback:
+		return format("%d WriteCallback", reason);
+	case BackgroundErrorReason::kMemTable:
+		return format("%d MemTable", reason);
+	case BackgroundErrorReason::kManifestWrite:
+		return format("%d ManifestWrite", reason);
+	case BackgroundErrorReason::kFlushNoWAL:
+		return format("%d FlushNoWAL", reason);
+	case BackgroundErrorReason::kManifestWriteNoWAL:
+		return format("%d ManifestWriteNoWAL", reason);
+	default:
+		return format("%d Unknown", reason);
+	}
+}
+// Background error handling is tested with Chaos test.
+// TODO: Test background error in simulation. RocksDB doesn't use flow IO in simulation, which limits our ability to
+// inject IO errors. We could implement rocksdb::FileSystem using flow IO to unblock simulation. Also, trace event is
+// not available on background threads because trace event requires setting up special thread locals. Using trace event
+// could potentially cause segmentation fault.
+class RocksDBErrorListener : public rocksdb::EventListener {
+public:
+	RocksDBErrorListener(){};
+	void OnBackgroundError(rocksdb::BackgroundErrorReason reason, rocksdb::Status* bg_error) override {
+		TraceEvent(SevError, "RocksDBBGError")
+		    .detail("Reason", getErrorReason(reason))
+		    .detail("RocksDBSeverity", bg_error->severity())
+		    .detail("Status", bg_error->ToString());
+		std::unique_lock<std::mutex> lock(mutex);
+		if (!errorPromise.isValid())
+			return;
+		// RocksDB generates two types of background errors, IO Error and Corruption
+		// Error type and severity map could be found at
+		// https://github.com/facebook/rocksdb/blob/2e09a54c4fb82e88bcaa3e7cfa8ccbbbbf3635d5/db/error_handler.cc#L138.
+		// All background errors will be treated as storage engine failure. Send the error to storage server.
+		if (bg_error->IsIOError()) {
+			errorPromise.sendError(io_error());
+		} else if (bg_error->IsCorruption()) {
+			errorPromise.sendError(file_corrupt());
+		} else {
+			errorPromise.sendError(unknown_error());
+		}
+	}
+	Future<Void> getFuture() {
+		std::unique_lock<std::mutex> lock(mutex);
+		return errorPromise.getFuture();
+	}
+	~RocksDBErrorListener() {
+		std::unique_lock<std::mutex> lock(mutex);
+		if (!errorPromise.isValid())
+			return;
+		errorPromise.send(Never());
+	}
+
+private:
+	ThreadReturnPromise<Void> errorPromise;
+	std::mutex mutex;
+};
 using DB = rocksdb::DB*;
 using CF = rocksdb::ColumnFamilyHandle*;
 
@@ -518,11 +593,14 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			Optional<Future<Void>>& metrics;
 			const FlowLock* readLock;
 			const FlowLock* fetchLock;
+			std::shared_ptr<RocksDBErrorListener> errorListener;
 			OpenAction(std::string path,
 			           Optional<Future<Void>>& metrics,
 			           const FlowLock* readLock,
-			           const FlowLock* fetchLock)
-			  : path(std::move(path)), metrics(metrics), readLock(readLock), fetchLock(fetchLock) {}
+			           const FlowLock* fetchLock,
+			           std::shared_ptr<RocksDBErrorListener> errorListener)
+			  : path(std::move(path)), metrics(metrics), readLock(readLock), fetchLock(fetchLock),
+			    errorListener(errorListener) {}
 
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
@@ -542,6 +620,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				descriptors.push_back(rocksdb::ColumnFamilyDescriptor{ name, cfOptions });
 			}
 
+			options.listeners.push_back(a.errorListener);
 			if (SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC > 0) {
 				options.rate_limiter = rateLimiter;
 			}
@@ -1180,7 +1259,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	UID id;
 	Reference<IThreadPool> writeThread;
 	Reference<IThreadPool> readThreads;
-	Promise<Void> errorPromise;
+	std::shared_ptr<RocksDBErrorListener> errorListener;
+	Future<Void> errorFuture;
 	Promise<Void> closePromise;
 	Future<Void> openFuture;
 	std::unique_ptr<rocksdb::WriteBatch> writeBatch;
@@ -1207,7 +1287,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	    readSemaphore(SERVER_KNOBS->ROCKSDB_READ_QUEUE_SOFT_MAX),
 	    fetchSemaphore(SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_SOFT_MAX),
 	    numReadWaiters(SERVER_KNOBS->ROCKSDB_READ_QUEUE_HARD_MAX - SERVER_KNOBS->ROCKSDB_READ_QUEUE_SOFT_MAX),
-	    numFetchWaiters(SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_HARD_MAX - SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_SOFT_MAX) {
+	    numFetchWaiters(SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_HARD_MAX - SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_SOFT_MAX),
+	    errorListener(std::make_shared<RocksDBErrorListener>()), errorFuture(errorListener->getFuture()) {
 		// In simluation, run the reader/writer threads as Coro threads (i.e. in the network thread. The storage engine
 		// is still multi-threaded as background compaction threads are still present. Reads/writes to disk will also
 		// block the network thread in a way that would be unacceptable in production but is a necessary evil here. When
@@ -1232,7 +1313,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 	}
 
-	Future<Void> getError() const override { return errorPromise.getFuture(); }
+	Future<Void> getError() const override { return errorFuture; }
 
 	ACTOR static void doClose(RocksDBKeyValueStore* self, bool deleteOnClose) {
 		// The metrics future retains a reference to the DB, so stop it before we delete it.
@@ -1247,8 +1328,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		wait(self->writeThread->stop());
 		if (self->closePromise.canBeSet())
 			self->closePromise.send(Void());
-		if (self->errorPromise.canBeSet())
-			self->errorPromise.send(Never());
 		delete self;
 	}
 
@@ -1264,7 +1343,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		if (openFuture.isValid()) {
 			return openFuture;
 		}
-		auto a = std::make_unique<Writer::OpenAction>(path, metrics, &readSemaphore, &fetchSemaphore);
+		auto a = std::make_unique<Writer::OpenAction>(path, metrics, &readSemaphore, &fetchSemaphore, errorListener);
 		openFuture = a->done.getFuture();
 		writeThread->post(a.release());
 		return openFuture;

@@ -22,7 +22,24 @@
 #include <cstdint>
 #include "flow/Trace.h"
 
+// This version impacts both communications and the deserialization of certain database and IKeyValueStore keys.
+//
+// The convention is that 'x' and 'y' should match the major and minor version of the software, and 'z' should be 0.
+// To make a change without a corresponding increase to the x.y version, increment the 'dev' digit.
+//
+// The last 2 bytes (4 digits) of the protocol version do not affect compatibility. These two bytes are not currently
+// used and should not be changed from 0.
+//                                                         xyzdev
+//                                                         vvvv
+constexpr uint64_t currentProtocolVersionValue = 0x0FDB00B071010000LL;
+
+// The first protocol version that cannot be downgraded from. Ordinarily, this will be two release versions larger
+// than the current version, meaning that we only support downgrades between consecutive release versions.
+constexpr uint64_t minInvalidProtocolVersionValue = 0x0FDB00B073000000LL;
+
 #define PROTOCOL_VERSION_FEATURE(v, x)                                                                                 \
+	static_assert((v & 0xF0FFFFLL) == 0 || v < 0x0FDB00B071000000LL, "Unexpected feature protocol version");           \
+	static_assert(v <= currentProtocolVersionValue, "Feature protocol version too large");                             \
 	struct x {                                                                                                         \
 		static constexpr uint64_t protocolVersion = v;                                                                 \
 	};                                                                                                                 \
@@ -121,7 +138,6 @@ public: // introduced features
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B062010001LL, CloseUnusedConnection);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, DBCoreState);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, TagThrottleValue);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B070010001LL, ServerListValue);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, StorageCacheValue);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, RestoreStatusValue);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, RestoreRequestValue);
@@ -136,12 +152,15 @@ public: // introduced features
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, SmallEndpoints);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B063010000LL, CacheRole);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B070010000LL, StableInterfaces);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B070010001LL, ServerListValue);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B070010001LL, TagThrottleValueReason);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B070010001LL, SpanContext);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B070010001LL, TSS);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B071010001LL, ChangeFeed);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B071010001LL, BlobGranule);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B071010001LL, NetworkAddressHostnameFlag);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B071010000LL, ChangeFeed);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B071010000LL, BlobGranule);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B071010000LL, NetworkAddressHostnameFlag);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B071010000LL, StorageMetadata);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B071010000LL, PerpetualWiggleMetadata);
 };
 
 template <>
@@ -151,17 +170,24 @@ struct Traceable<ProtocolVersion> : std::true_type {
 	}
 };
 
-// These impact both communications and the deserialization of certain database and IKeyValueStore keys.
-//
-// The convention is that 'x' and 'y' should match the major and minor version of the software, and 'z' should be 0.
-// To make a change without a corresponding increase to the x.y version, increment the 'dev' digit.
-//
-//                                                         xyzdev
-//                                                         vvvv
-constexpr ProtocolVersion currentProtocolVersion(0x0FDB00B071010001LL);
+constexpr ProtocolVersion currentProtocolVersion(currentProtocolVersionValue);
+constexpr ProtocolVersion minInvalidProtocolVersion(minInvalidProtocolVersionValue);
+
 // This assert is intended to help prevent incrementing the leftmost digits accidentally. It will probably need to
 // change when we reach version 10.
 static_assert(currentProtocolVersion.version() < 0x0FDB00B100000000LL, "Unexpected protocol version");
 
-// Downgrades are only supported for one minor version
-constexpr ProtocolVersion minInvalidProtocolVersion(0x0FDB00B073000000LL);
+// The last two bytes of the protocol version are currently masked out in compatibility checks. We do not use them,
+// so prevent them from being inadvertently changed.
+//
+// We also do not modify the protocol version for patch releases, so prevent modifying the patch version digit.
+static_assert((currentProtocolVersion.version() & 0xF0FFFFLL) == 0, "Unexpected protocol version");
+
+// Downgrades must support at least one minor version.
+static_assert(minInvalidProtocolVersion.version() >=
+                  (currentProtocolVersion.version() & 0xFFFFFFFFFF000000LL) + 0x0000000002000000,
+              "Downgrades must support one minor version");
+
+// The min invalid protocol version should be the smallest possible protocol version associated with a minor release
+// version.
+static_assert((minInvalidProtocolVersion.version() & 0xFFFFFFLL) == 0, "Unexpected min invalid protocol version");

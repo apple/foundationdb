@@ -48,7 +48,7 @@ public:
 	ACTOR static Future<Reference<ClusterConnectionKey>> loadClusterConnectionKey(Database db, Key connectionStringKey);
 
 	// Sets the connections string held by this object and persists it.
-	Future<Void> setConnectionString(ClusterConnectionString const&) override;
+	Future<Void> setAndPersistConnectionString(ClusterConnectionString const&) override;
 
 	// Get the connection string stored in the database.
 	Future<ClusterConnectionString> getStoredConnectionString() override;

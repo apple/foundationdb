@@ -138,9 +138,10 @@ class Void;
 struct Hostname {
 	std::string host;
 	std::string service; // decimal port number
-	bool useTLS;
+	bool isTLS;
 
-	Hostname(std::string host, std::string service, bool useTLS) : host(host), service(service), useTLS(useTLS) {}
+	Hostname(std::string host, std::string service, bool isTLS) : host(host), service(service), isTLS(isTLS) {}
+	Hostname() : host(""), service(""), isTLS(false) {}
 
 	// Allow hostnames in forms like following:
 	//    hostname:1234
@@ -155,7 +156,7 @@ struct Hostname {
 
 	static Hostname parse(std::string const& str);
 
-	std::string toString() const { return host + ":" + service + (useTLS ? ":tls" : ""); }
+	std::string toString() const { return host + ":" + service + (isTLS ? ":tls" : ""); }
 };
 
 struct IPAddress {
@@ -702,12 +703,16 @@ public:
 	// NetworkAddresses
 	virtual Future<std::vector<NetworkAddress>> resolveTCPEndpoint(const std::string& host,
 	                                                               const std::string& service) = 0;
+	// Resolve host name and service name. This one should only be used when resolving asynchronously is impossible. For
+	// all other cases, resolveTCPEndpoint() should be preferred.
+	virtual std::vector<NetworkAddress> resolveTCPEndpointBlocking(const std::string& host,
+	                                                               const std::string& service) = 0;
 
 	// Convenience function to resolve host/service and connect to one of its NetworkAddresses randomly
-	// useTLS has to be a parameter here because it is passed to connect() as part of the toAddr object.
+	// isTLS has to be a parameter here because it is passed to connect() as part of the toAddr object.
 	virtual Future<Reference<IConnection>> connect(const std::string& host,
 	                                               const std::string& service,
-	                                               bool useTLS = false);
+	                                               bool isTLS = false);
 
 	// Listen for connections on the given local address
 	virtual Reference<IListener> listen(NetworkAddress localAddr) = 0;
