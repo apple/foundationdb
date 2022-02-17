@@ -42,4 +42,6 @@ ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
 ACTOR Future<Void> deleteRocksCFCheckpoint(CheckpointMetaData checkpoint);
 
 ICheckpointReader* newRocksDBCheckpointReader(const CheckpointMetaData& checkpoint, UID logID);
+
+RocksDBColumnFamilyCheckpoint getRocksCF(const CheckpointMetaData& checkpoint);
 #endif

@@ -13,6 +13,94 @@
 #include "flow/actorcompiler.h" // has to be last include
 
 namespace {
+
+class RocksDBCheckpointReader : public ICheckpointReader {
+public:
+	RocksDBCheckpointReader(const CheckpointMetaData& checkpoint, UID logID)
+	  : checkpoint_(checkpoint), id_(logID), file_(Reference<IAsyncFile>()), offset_(0) {}
+
+	Future<Void> init(StringRef token) override;
+
+	Future<RangeResult> nextKeyValues(const int rowLimit, const int byteLimit) override { throw not_implemented(); }
+
+	// Returns the next chunk of serialized checkpoint.
+	Future<Standalone<StringRef>> nextChunk(const int byteLimit) override;
+
+	Future<Void> getError() const override { return Never(); }
+	Future<Void> onClosed() const override { return Void(); }
+
+	void dispose() override {}
+	void close() override;
+
+private:
+	ACTOR static Future<Void> doInit(RocksDBCheckpointReader* self) {
+		ASSERT_NE(self, nullptr);
+		try {
+			state Reference<IAsyncFile> _file = wait(IAsyncFileSystem::filesystem()->open(
+			    self->path_, IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_NO_AIO, 0));
+			self->file_ = _file;
+			TraceEvent("RocksDBCheckpointReaderOpenFile").detail("File", self->path_);
+		} catch (Error& e) {
+			TraceEvent(SevWarnAlways, "ServerGetCheckpointFileFailure")
+			    .detail("File", self->path_)
+			    .error(e, /*includeCancel=*/true);
+			throw e;
+		}
+
+		return Void();
+	}
+
+	ACTOR Future<Standalone<StringRef>> getNextChunk(RocksDBCheckpointReader* self, int byteLimit) {
+		state int transactionSize = std::min(64 * 1024, byteLimit); // Block size read from disk.
+		state Standalone<StringRef> buf = makeAlignedString(_PAGE_SIZE, transactionSize);
+		int bytesRead = wait(self->file_->read(mutateString(buf), transactionSize, self->offset_));
+		if (bytesRead == 0) {
+			throw end_of_stream();
+		}
+
+		self->offset_ += bytesRead;
+		return buf;
+	}
+
+	CheckpointMetaData checkpoint_;
+	UID id_;
+	Reference<IAsyncFile> file_;
+	int offset_;
+	std::string path_;
+};
+
+Future<Void> RocksDBCheckpointReader::init(StringRef token) {
+	ASSERT_EQ(this->checkpoint_.getFormat(), RocksDBColumnFamily);
+	const std::string name = token.toString();
+	std::cout << "RocksDBCheckpointReader: " << name << std::endl;
+	this->offset_ = 0;
+	this->path_.clear();
+	RocksDBColumnFamilyCheckpoint rocksCF;
+	ObjectReader reader(this->checkpoint_.serializedCheckpoint.begin(), IncludeVersion());
+	reader.deserialize(rocksCF);
+	for (const auto& sstFile : rocksCF.sstFiles) {
+		std::cout << "Seen file: " << sstFile.name << std::endl;
+		if (sstFile.name == name) {
+			this->path_ = sstFile.db_path + sstFile.name;
+			break;
+		}
+	}
+
+	TraceEvent("RocksDBCheckpointReaderInit").detail("File", this->path_);
+
+	if (this->path_.empty()) {
+		return checkpoint_not_found();
+	}
+
+	return doInit(this);
+}
+
+Future<Standalone<StringRef>> RocksDBCheckpointReader::nextChunk(const int byteLimit) {
+	return getNextChunk(this, byteLimit);
+}
+
+void RocksDBCheckpointReader::close() {}
+
 // Fetch a single sst file from storage server. If the file is fetch successfully, it will be recorded via cFun.
 ACTOR Future<Void> fetchCheckpointFile(Database cx,
                                        std::shared_ptr<CheckpointMetaData> metaData,
@@ -29,7 +117,8 @@ ACTOR Future<Void> fetchCheckpointFile(Database cx,
 		return Void();
 	}
 
-	state std::string remoteFile = rocksCF.sstFiles[idx].db_path + rocksCF.sstFiles[idx].name;
+	// state std::string remoteFile = rocksCF.sstFiles[idx].db_path + rocksCF.sstFiles[idx].name;
+	state std::string remoteFile = rocksCF.sstFiles[idx].name;
 	state std::string localFile = dir + rocksCF.sstFiles[idx].name;
 	state UID ssID = metaData->ssID;
 
@@ -65,8 +154,8 @@ ACTOR Future<Void> fetchCheckpointFile(Database cx,
 			state int64_t offset = 0;
 			state Reference<IAsyncFile> asyncFile = wait(IAsyncFileSystem::filesystem()->open(localFile, flags, 0666));
 
-			state ReplyPromiseStream<GetCheckpointFileReply> stream =
-			    ssi.getCheckpointFile.getReplyStream(GetCheckpointFileRequest(metaData->checkpointID, remoteFile, 0));
+			state ReplyPromiseStream<FetchCheckpointReply> stream =
+			    ssi.fetchCheckpoint.getReplyStream(FetchCheckpointRequest(metaData->checkpointID, remoteFile));
 			TraceEvent("FetchCheckpointFileReceivingData")
 			    .detail("RemoteFile", remoteFile)
 			    .detail("TargetUID", ssID.toString())
@@ -74,8 +163,8 @@ ACTOR Future<Void> fetchCheckpointFile(Database cx,
 			    .detail("LocalFile", localFile)
 			    .detail("Attempt", attempt);
 			loop {
-				state GetCheckpointFileReply rep = waitNext(stream.getFuture());
-				wait(asyncFile->write(rep.data.begin(), rep.size, offset));
+				state FetchCheckpointReply rep = waitNext(stream.getFuture());
+				wait(asyncFile->write(rep.data.begin(), rep.data.size(), offset));
 				wait(asyncFile->flush());
 				offset += rep.data.size();
 			}
@@ -111,39 +200,6 @@ ACTOR Future<Void> fetchCheckpointFile(Database cx,
 	}
 }
 
-class RocksDBCheckpointReader : public ICheckpointReader {
-public:
-	RocksDBCheckpointReader(const CheckpointMetaData& checkpoint, UID logID) : checkpoint_(checkpoint), id_(logID) {}
-
-	Future<Void> init() override;
-
-	Future<RangeResult> nextKeyValues(const int rowLimit, const int ByteLimit) override { throw not_implemented(); }
-
-	// Returns the next chunk of serialized checkpoint.
-	Future<Standalone<StringRef>> nextChunk(const int ByteLimit) override;
-
-	Future<Void> getError() const override { return Never(); }
-	Future<Void> onClosed() const override { return Void(); }
-
-	void dispose() override {}
-	void close() override;
-
-private:
-	CheckpointMetaData checkpoint_;
-	UID id_;
-};
-
-Future<Void>
-RocksDBCheckpointReader::init() {
-	return Void();
-}
-
-Future<Standalone<StringRef>> RocksDBCheckpointReader::nextChunk(const int ByteLimit) {
-	Standalone<StringRef> result;
-	return result;
-}
-
-void RocksDBCheckpointReader::close() {}
 } // namespace
 
 ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
@@ -201,4 +257,11 @@ ACTOR Future<Void> deleteRocksCFCheckpoint(CheckpointMetaData checkpoint) {
 
 ICheckpointReader* newRocksDBCheckpointReader(const CheckpointMetaData& checkpoint, UID logID) {
 	return new RocksDBCheckpointReader(checkpoint, logID);
+}
+
+RocksDBColumnFamilyCheckpoint getRocksCF(const CheckpointMetaData& checkpoint) {
+	RocksDBColumnFamilyCheckpoint rocksCF;
+	ObjectReader reader(checkpoint.serializedCheckpoint.begin(), IncludeVersion());
+	reader.deserialize(rocksCF);
+	return rocksCF;
 }

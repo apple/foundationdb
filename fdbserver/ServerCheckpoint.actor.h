@@ -34,7 +34,9 @@
 
 class ICheckpointReader : public IClosable {
 public:
-	virtual Future<Void> init() = 0;
+    // `token` is a serialized object defined by each derived ICheckpointReader class, to specify the 
+    // starting point for the underlying checkpoint.
+	virtual Future<Void> init(StringRef token) = 0;
 
 	virtual Future<RangeResult> nextKeyValues(const int rowLimit, const int ByteLimit) = 0;
 

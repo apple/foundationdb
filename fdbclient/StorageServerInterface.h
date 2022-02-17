@@ -86,7 +86,7 @@ struct StorageServerInterface {
 	RequestStream<struct ChangeFeedPopRequest> changeFeedPop;
 	RequestStream<struct ChangeFeedVersionUpdateRequest> changeFeedVersionUpdate;
 	RequestStream<struct GetCheckpointRequest> checkpoint;
-	RequestStream<struct GetCheckpointFileRequest> getCheckpointFile;
+	RequestStream<struct FetchCheckpointRequest> fetchCheckpoint;
 
 	explicit StorageServerInterface(UID uid) : uniqueID(uid) {}
 	StorageServerInterface() : uniqueID(deterministicRandom()->randomUniqueID()) {}
@@ -140,7 +140,8 @@ struct StorageServerInterface {
 				changeFeedVersionUpdate = RequestStream<struct ChangeFeedVersionUpdateRequest>(
 				    getValue.getEndpoint().getAdjustedEndpoint(18));
 				checkpoint = RequestStream<struct GetCheckpointRequest>(getValue.getEndpoint().getAdjustedEndpoint(19));
-				getCheckpointFile = RequestStream<struct GetCheckpointFileRequest>(getValue.getEndpoint().getAdjustedEndpoint(20));
+				fetchCheckpoint =
+				    RequestStream<struct FetchCheckpointRequest>(getValue.getEndpoint().getAdjustedEndpoint(20));
 			}
 		} else {
 			ASSERT(Ar::isDeserializing);
@@ -189,7 +190,7 @@ struct StorageServerInterface {
 		streams.push_back(changeFeedPop.getReceiver());
 		streams.push_back(changeFeedVersionUpdate.getReceiver());
 		streams.push_back(checkpoint.getReceiver());
-		streams.push_back(getCheckpointFile.getReceiver());
+		streams.push_back(fetchCheckpoint.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -769,41 +770,36 @@ struct GetCheckpointRequest {
 	}
 };
 
-// Reply to GetCheckpointFileRequest, used to transfer files.
-struct GetCheckpointFileReply : public ReplyPromiseStreamReply {
+// Reply to FetchCheckpointRequest, used to transfer files.
+struct FetchCheckpointReply : public ReplyPromiseStreamReply {
 	constexpr static FileIdentifier file_identifier = 13804345;
-	std::string name; // File name.
-	int64_t offset;
-	int64_t size; // Size of `data`.
+	Standalone<StringRef> token;
 	Standalone<StringRef> data;
 
-	GetCheckpointFileReply() {}
-	GetCheckpointFileReply(std::string name, int64_t offset, int64_t size) : name(name), offset(offset), size(size) {}
-	GetCheckpointFileReply(std::string name) : GetCheckpointFileReply(name, 0, 0) {}
+	FetchCheckpointReply() {}
+	FetchCheckpointReply(StringRef token) : token(token) {}
 
 	int expectedSize() const { return data.expectedSize(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(
-		    ar, ReplyPromiseStreamReply::acknowledgeToken, ReplyPromiseStreamReply::sequence, name, offset, size, data);
+		serializer(ar, ReplyPromiseStreamReply::acknowledgeToken, ReplyPromiseStreamReply::sequence, token, data);
 	}
 };
 
 // Request to get a file from a storage server.
-struct GetCheckpointFileRequest {
+struct FetchCheckpointRequest {
 	constexpr static FileIdentifier file_identifier = 13804344;
 	UID checkpointID;
-	std::string path; // File path on the storage server.
-	int64_t offset;
-	ReplyPromiseStream<GetCheckpointFileReply> reply;
+	Standalone<StringRef> token;
+	ReplyPromiseStream<FetchCheckpointReply> reply;
 
-	GetCheckpointFileRequest() {}
-	GetCheckpointFileRequest(UID checkpointID, std::string path, int64_t offset) : checkpointID(checkpointID), path(path), offset(offset) {}
+	FetchCheckpointRequest() {}
+	FetchCheckpointRequest(UID checkpointID, StringRef token) : checkpointID(checkpointID), token(token) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, checkpointID, path, offset, reply);
+		serializer(ar, checkpointID, token, reply);
 	}
 };
 

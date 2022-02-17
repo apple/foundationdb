@@ -1735,55 +1735,51 @@ ACTOR Future<Void> deleteCheckpointQ(StorageServer* self, Version version, Check
 	return Void();
 }
 
-// Serves GetCheckpointFileRequests.
-ACTOR Future<Void> getCheckpointFileQ(StorageServer* self, GetCheckpointFileRequest req) {
-	TraceEvent("ServeGetCheckpointFileBegin", self->thisServerID)
-	    .detail("CheckpointID", req.checkpointID)
-	    .detail("File", req.path)
-	    .detail("Offset", req.offset);
-	state int transactionSize = 64 * 1024; // Block size read from disk.
-	state size_t fileOffset = req.offset;
-	state Arena arena;
-	state StringRef buf;
-
-	size_t pos = req.path.rfind("/");
-	state std::string name = pos == std::string::npos ? req.path : req.path.substr(pos + 1);
+// Serves FetchCheckpointRequests.
+ACTOR Future<Void> fetchCheckpointQ(StorageServer* self, FetchCheckpointRequest req) {
+	// TraceEvent("ServeGetCheckpointFileBegin", self->thisServerID).detail("CheckpointID", req.checkpointID);
+	// .detail("File", req.path)
+	// .detail("Offset", req.offset);
 
 	req.reply.setByteLimit(SERVER_KNOBS->FILE_TRANSFER_BLOCK_BYTES);
 
+	const auto it = self->checkpoints.find(req.checkpointID);
+	if (it == self->checkpoints.end()) {
+		std::cout << "not found" << std::endl;
+		req.reply.sendError(checkpoint_not_found());
+		return Void();
+	}
+
 	try {
-		state Reference<IAsyncFile> file = wait(IAsyncFileSystem::filesystem()->open(
-		    req.path, IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_NO_AIO, 0));
+		state ICheckpointReader* reader = newCheckpointReader(it->second, deterministicRandom()->randomUniqueID());
+		wait(reader->init(req.token));
 
 		loop {
-			arena = Arena();
-			buf = makeAlignedString(_PAGE_SIZE, transactionSize, arena);
-			state int bytesRead = wait(file->read(mutateString(buf), transactionSize, fileOffset));
-			fileOffset += bytesRead;
-			if (bytesRead <= 0) {
-				break;
-			}
-
+			state Standalone<StringRef> data = wait(reader->nextChunk(1024 * 64));
+			std::cout << "Get batch from reader: " << data.toString() << std::endl;
 			wait(req.reply.onReady());
-			GetCheckpointFileReply reply(name, fileOffset, bytesRead);
-			reply.data = buf;
+			FetchCheckpointReply reply(req.token);
+			reply.data = data;
 			req.reply.send(reply);
 		}
 	} catch (Error& e) {
-		TraceEvent(SevWarnAlways, "ServerGetCheckpointFileFailure")
-		    .detail("File", req.path)
-		    .detail("Offset", req.offset)
-		    .error(e, /*includeCancel=*/true);
+		if (e.code() == error_code_end_of_stream) {
+			req.reply.sendError(end_of_stream());
+			return Void();
+		}
+		// TraceEvent(SevWarnAlways, "ServerGetCheckpointFileFailure")
+		//     .detail("File", req.path)
+		//     .detail("Offset", req.offset)
+		// .error(e, /*includeCancel=*/true);
 		if (!canReplyWith(e)) {
 			throw;
 		}
 		req.reply.sendError(e);
 	}
 
-	TraceEvent("ServerGetCheckpointFileEnd")
-	    .detail("File", req.path)
-	    .detail("Offset", req.offset)
-	    .detail("TotalBytes", fileOffset - req.offset);
+	// TraceEvent("ServerGetCheckpointFileEnd") .detail("Checkpoint", req.checkpoitID);
+	// .detail("Offset", req.offset)
+	// .detail("TotalBytes", fileOffset - req.offset);
 
 	req.reply.sendError(end_of_stream());
 	return Void();
@@ -6990,8 +6986,8 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 					self->actors.add(getCheckpointQ(self, req));
 				}
 			}
-			when(GetCheckpointFileRequest req = waitNext(ssi.getCheckpointFile.getFuture())) {
-				self->actors.add(getCheckpointFileQ(self, req));
+			when(FetchCheckpointRequest req = waitNext(ssi.fetchCheckpoint.getFuture())) {
+				self->actors.add(fetchCheckpointQ(self, req));
 			}
 			when(wait(updateProcessStatsTimer)) {
 				updateProcessStats(self);
