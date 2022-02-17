@@ -58,8 +58,9 @@ private:
 			throw end_of_stream();
 		}
 
+		// ASSERT_EQ(bytesRead, buf.size());
 		self->offset_ += bytesRead;
-		return buf;
+		return buf.substr(0, bytesRead);
 	}
 
 	CheckpointMetaData checkpoint_;
@@ -164,6 +165,8 @@ ACTOR Future<Void> fetchCheckpointFile(Database cx,
 			    .detail("Attempt", attempt);
 			loop {
 				state FetchCheckpointReply rep = waitNext(stream.getFuture());
+				std::cout << "Received checkpoint data: " << rep.data.size() << std::endl
+				          << rep.data.toString() << std::endl;
 				wait(asyncFile->write(rep.data.begin(), rep.data.size(), offset));
 				wait(asyncFile->flush());
 				offset += rep.data.size();
@@ -187,6 +190,7 @@ ACTOR Future<Void> fetchCheckpointFile(Database cx,
 				    .detail("StorageServer", ssi.toString())
 				    .detail("LocalFile", localFile)
 				    .detail("Attempt", attempt)
+				    .detail("DataSize", offset)
 				    .detail("FileSize", fileSize);
 				rocksCF.sstFiles[idx].db_path = dir;
 				rocksCF.sstFiles[idx].fetched = true;
