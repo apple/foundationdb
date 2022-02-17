@@ -2,7 +2,8 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/StorageCheckpoint.h"
 #include "fdbclient/SystemData.h"
-#include "fdbserver/ServerCheckpoint.actor.h"
+#include "fdbserver/RocksDBCheckpointUtils.actor.h"
+// #include "fdbserver/ServerCheckpoint.actor.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
 
