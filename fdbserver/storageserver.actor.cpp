@@ -1756,6 +1756,7 @@ ACTOR Future<Void> getCheckpointQ(StorageServer* self, GetCheckpointRequest req)
 	return Void();
 }
 
+// Delete the checkpoint from disk, as well as all related presisted meta data.
 ACTOR Future<Void> deleteCheckpointQ(StorageServer* self, Version version, CheckpointMetaData checkpoint) {
 	wait(self->durableVersion.whenAtLeast(version));
 
@@ -1778,17 +1779,6 @@ ACTOR Future<Void> deleteCheckpointQ(StorageServer* self, Version version, Check
 	    mLV, MutationRef(MutationRef::ClearRange, pendingCheckpointKey, keyAfter(pendingCheckpointKey)));
 	self->addMutationToMutationLog(
 	    mLV, MutationRef(MutationRef::ClearRange, persistCheckpointKey, keyAfter(persistCheckpointKey)));
-
-	loop {
-		try {
-			state Transaction tr(self->cx);
-			tr.clear(checkpointKeyFor(checkpoint.checkpointID));
-			wait(tr.commit());
-			break;
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
 
 	return Void();
 }

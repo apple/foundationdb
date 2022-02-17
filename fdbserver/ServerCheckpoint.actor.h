@@ -31,8 +31,8 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
-// An ICheckpointReader can read the contents of a checkpoint created by a KV store,
-// i.e., with IKeyValueStore::checkpoint().
+// An ICheckpointReader can read the contents of a checkpoint created from a KV store,
+// i.e., by IKeyValueStore::checkpoint().
 class ICheckpointReader {
 public:
 	// `token` is a serialized object defined by each derived ICheckpointReader class, to specify the
@@ -42,7 +42,7 @@ public:
 	// Scans the checkpoint, and returns the key-value pairs.
 	virtual Future<RangeResult> nextKeyValues(const int rowLimit, const int ByteLimit) = 0;
 
-	// Returns the next chunk of serialized checkpoint.
+	// Returns the next chunk of the serialized checkpoint.
 	virtual Future<Standalone<StringRef>> nextChunk(const int ByteLimit) = 0;
 
 	virtual Future<Void> close() = 0;

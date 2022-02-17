@@ -27,51 +27,30 @@
 // FDB storage checkpoint format.
 enum CheckpointFormat {
 	InvalidFormat = 0,
-	// Checkpoint generated via rocksdb::Checkpoint::ExportColumnFamily().
+	// For RocksDB, checkpoint generated via rocksdb::Checkpoint::ExportColumnFamily().
 	RocksDBColumnFamily = 1,
-	// Checkpoint generated via rocksdb::Checkpoint::CreateCheckpoint().
+	// For RocksDB, checkpoint generated via rocksdb::Checkpoint::CreateCheckpoint().
 	RocksDB = 2,
 };
-
-namespace {
-
-std::string getFdbCheckpointFormatName(const CheckpointFormat& format) {
-	std::string name;
-	switch (format) {
-	case InvalidFormat:
-		name = "Invalid";
-		break;
-	case RocksDBColumnFamily:
-		name = "RocksDBColumnFamily";
-		break;
-	case RocksDB:
-		name = "RocksDB";
-	}
-
-	return name;
-}
-
-} // namespace
 
 // Metadata of a FDB checkpoint.
 struct CheckpointMetaData {
 	enum CheckpointState {
 		InvalidState = 0,
-		Pending = 1,
-		Complete = 2,
-		Deleting = 3,
+		Pending = 1, // Checkpoint creation pending.
+		Complete = 2, // Checkpoint is created and ready to be read.
+		Deleting = 3, // Checkpoint deletion requested.
 		Fail = 4,
 	};
 
 	constexpr static FileIdentifier file_identifier = 13804342;
 	Version version;
 	KeyRange range;
-	int16_t format;
-	int16_t state;
+	int16_t format; // CheckpointFormat.
+	int16_t state; // CheckpointState.
 	UID checkpointID; // A unique id for this checkpoint.
 	UID ssID; // Storage server ID on which this checkpoint is created.
 	int referenceCount; // A reference count on the checkpoint, it can only be deleted when this is 0.
-
 	int64_t gcTime; // Time to delete this checkpoint, a Unix timestamp in seconds.
 
 	// A serialized metadata associated with format, this data can be understood by the corresponding KVS.
@@ -94,8 +73,7 @@ struct CheckpointMetaData {
 
 	std::string toString() const {
 		std::string res = "Checkpoint MetaData:\nServer: " + ssID.toString() + "\nID: " + checkpointID.toString() +
-		                  "\nVersion: " + std::to_string(version) +
-		                  "\nFormat: " + getFdbCheckpointFormatName(static_cast<CheckpointFormat>(format)) +
+		                  "\nVersion: " + std::to_string(version) + "\nFormat: " + std::to_string(format) +
 		                  "\nState: " + std::to_string(static_cast<int>(state)) + "\n";
 		return res;
 	}
@@ -103,7 +81,6 @@ struct CheckpointMetaData {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, version, range, format, state, checkpointID, ssID, gcTime, serializedCheckpoint);
-		// serializer(ar, version, range, format, state, checkpointID, ssID, gcTime, rocksCF, serializedCheckpoint);
 	}
 };
 

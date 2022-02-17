@@ -754,9 +754,9 @@ struct ChangeFeedPopRequest {
 // A CheckpointMetaData will be returned if the specific checkpoint is found.
 struct GetCheckpointRequest {
 	constexpr static FileIdentifier file_identifier = 13804343;
-	Version version;
+	Version version; // The FDB version at which the checkpoint is created.
 	KeyRange range;
-	int16_t format;
+	int16_t format; // CheckpointFormat.
 	Optional<UID> checkpointID; // When present, look for the checkpoint with the exact UID.
 	ReplyPromise<CheckpointMetaData> reply;
 
@@ -770,10 +770,10 @@ struct GetCheckpointRequest {
 	}
 };
 
-// Reply to FetchCheckpointRequest, used to transfer files.
+// Reply to FetchCheckpointRequest, transfers checkpoint back to client.
 struct FetchCheckpointReply : public ReplyPromiseStreamReply {
 	constexpr static FileIdentifier file_identifier = 13804345;
-	Standalone<StringRef> token;
+	Standalone<StringRef> token; // Serialized data specific to a particular checkpoint format.
 	Standalone<StringRef> data;
 
 	FetchCheckpointReply() {}
@@ -787,11 +787,11 @@ struct FetchCheckpointReply : public ReplyPromiseStreamReply {
 	}
 };
 
-// Request to get a file from a storage server.
+// Request to fetch checkpoint from a storage server.
 struct FetchCheckpointRequest {
 	constexpr static FileIdentifier file_identifier = 13804344;
 	UID checkpointID;
-	Standalone<StringRef> token;
+	Standalone<StringRef> token; // Serialized data specific to a particular checkpoint format.
 	ReplyPromiseStream<FetchCheckpointReply> reply;
 
 	FetchCheckpointRequest() {}
