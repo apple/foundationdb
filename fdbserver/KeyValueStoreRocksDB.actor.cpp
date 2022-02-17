@@ -403,7 +403,8 @@ ACTOR Future<Void> rocksDBMetricLogger(std::shared_ptr<rocksdb::Statistics> stat
 }
 
 struct DataShard {
-	DataShard(std::string name, KeyRangeRef range) : name(name), range(range) {}
+	DataShard(std::string name, KeyRangeRef range)
+	  : name(name), range(range), writeBatch(std::make_unique<rocksdb::WriteBatch>()) {}
 
 	~DataShard() {
 		if (db == nullptr)
@@ -451,7 +452,7 @@ struct DataShard {
 	}*/
 
 	rocksdb::DB* db = nullptr;
-	rocksdb::WriteBatch writeBatch;
+	std::unique_ptr<rocksdb::WriteBatch> writeBatch;
 	std::string name;
 	KeyRange range;
 	bool deletePending = false;
@@ -773,8 +774,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 					logShardEvent(shard->name, shard->range, ShardOp::CREATE);
 				}
 
-				s = doCommit(&shard->writeBatch, shard->db, a.getHistograms);
-				shard->writeBatch.Clear();
+				s = doCommit(shard->writeBatch.get(), shard->db, a.getHistograms);
+				shard->writeBatch = std::make_unique<rocksdb::WriteBatch>();
 				if (!s.ok()) {
 					a.done.sendError(statusToError(s));
 					return;
@@ -789,12 +790,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 			// System mutation needs to be committed after all other mutations.
 			if (specialKeysShard) {
-				s = doCommit(&specialKeysShard->writeBatch, specialKeysShard->db, a.getHistograms);
+				s = doCommit(specialKeysShard->writeBatch.get(), specialKeysShard->db, a.getHistograms);
 				if (!s.ok()) {
 					a.done.sendError(statusToError(s));
 					return;
 				}
-				specialKeysShard->writeBatch.Clear();
+				specialKeysShard->writeBatch = std::make_unique<rocksdb::WriteBatch>();
 			}
 
 			// Destroy all the delete pending shards.
@@ -1244,11 +1245,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			    .detail("Begin", it.range().begin)
 			    .detail("End", it.range().end);
 
-			raise(SIGSEGV);
 			return;
 		}
 
-		it.value()->writeBatch.Put(toSlice(kv.key), toSlice(kv.value));
+		it.value()->writeBatch->Put(toSlice(kv.key), toSlice(kv.value));
 
 		dirtyShards->insert(it.value());
 	}
@@ -1266,9 +1266,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				continue;
 
 			if (range.singleKeyRange()) {
-				it.value()->writeBatch.Delete(toSlice(range.begin));
+				it.value()->writeBatch->Delete(toSlice(range.begin));
 			} else {
-				it.value()->writeBatch.DeleteRange(toSlice(range.begin), toSlice(range.end));
+				it.value()->writeBatch->DeleteRange(toSlice(range.begin), toSlice(range.end));
 			}
 			dirtyShards->insert(it.value());
 		}
@@ -1529,10 +1529,24 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		Standalone<VectorRef<MutationRef>> refs;
 
 		auto shard = shardMap.rangeContaining(range.begin);
-		ASSERT(shard.range() == range);
-		ASSERT(shard.value());
+		if (shard.range() != range) {
+			TraceEvent(SevError, "RocksDB")
+			    .detail("Action", "PersistShard")
+			    .detail("ExpectedRangeBegin", range.begin)
+			    .detail("ExpectedRangeEnd", range.end)
+			    .detail("ShardRangeBegin", shard.range().begin)
+			    .detail("ShardRangeEnd", shard.range().end)
+			    .detail("Error", "RangeDiscrepancy");
+			return refs;
+		}
+
 		if (!shard.value()) {
-			raise(SIGSEGV);
+			TraceEvent(SevError, "RocksDB")
+			    .detail("Action", "PersistShard")
+			    .detail("ExpectedRangeBegin", range.begin)
+			    .detail("ExpectedRangeEnd", range.end)
+			    .detail("Error", "ShardNotFound");
+			return refs;
 		}
 
 		// Ref:
@@ -1616,7 +1630,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 		if (range.intersects(specialKeys)) {
 			std::cout << "Invalid range to dispose " << range.begin.toString() << " : " << range.end.toString() << "\n";
-			raise(SIGSEGV);
+			return;
 		}
 
 		if (range.intersects(systemKeys)) {
@@ -1632,19 +1646,20 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			if (range.contains(shard.range())) {
 				shard.value()->deletePending = true;
 				dirtyShards->insert(shard.value());
-			} else {
-				// truncate shard
+				continue;
 			}
-		}
 
-		auto affectedRanges = shardMap.getAffectedRangesAfterInsertion(range, nullptr);
-		for (int i = 0; i < affectedRanges.size(); ++i) {
-			if (affectedRanges[i].value->range != affectedRanges[i]) {
-				auto existingShard = affectedRanges[i].value;
-				// Truncate shard
-				existingShard->range = affectedRanges[i];
+			auto existingShard = shard.value();
+
+			// Modify existing shard
+			if (existingShard->range.begin < range.begin) {
+				existingShard->range = KeyRange(KeyRangeRef(existingShard->range.begin, range.begin));
 				logShardEvent(existingShard->name, existingShard->range, ShardOp::MODIFY_RANGE);
-				// TODO: issue clear range.
+			}
+
+			if (existingShard->range.end > range.end) {
+				existingShard->range = KeyRange(KeyRangeRef(range.end, existingShard->range.end));
+				logShardEvent(existingShard->name, existingShard->range, ShardOp::MODIFY_RANGE);
 			}
 		}
 
