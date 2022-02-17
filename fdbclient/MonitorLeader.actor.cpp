@@ -98,40 +98,39 @@ std::string ClusterConnectionString::getErrorString(std::string const& source, E
 }
 
 ACTOR Future<Void> resolveHostnamesImpl(ClusterConnectionString* self) {
-	std::vector<Future<Void>> fs;
-	for (auto const& hostname : self->hostnames) {
-		fs.push_back(map(INetworkConnections::net()->resolveTCPEndpoint(hostname.host, hostname.service),
-		                 [=](std::vector<NetworkAddress> const& addresses) -> Void {
-			                 NetworkAddress address = addresses[deterministicRandom()->randomInt(0, addresses.size())];
-			                 address.flags = 0; // Reset the parsed address to public
-			                 address.fromHostname = NetworkAddressFromHostname::True;
-			                 if (hostname.isTLS) {
-				                 address.flags |= NetworkAddress::FLAG_TLS;
-			                 }
-			                 self->coords.push_back(address);
-			                 self->networkAddressToHostname.emplace(address, hostname);
-			                 return Void();
-		                 }));
+	if (self->hasUnresolvedHostnames) {
+		std::vector<Future<Void>> fs;
+		for (auto const& hostname : self->hostnames) {
+			fs.push_back(map(INetworkConnections::net()->resolveTCPEndpoint(hostname.host, hostname.service),
+			                 [=](std::vector<NetworkAddress> const& addresses) -> Void {
+				                 NetworkAddress address =
+				                     addresses[deterministicRandom()->randomInt(0, addresses.size())];
+				                 address.flags = 0; // Reset the parsed address to public
+				                 address.fromHostname = NetworkAddressFromHostname::True;
+				                 if (hostname.isTLS) {
+					                 address.flags |= NetworkAddress::FLAG_TLS;
+				                 }
+				                 self->coords.push_back(address);
+				                 self->networkAddressToHostname.emplace(address, hostname);
+				                 return Void();
+			                 }));
+		}
+		wait(waitForAll(fs));
+		std::sort(self->coords.begin(), self->coords.end());
+		TraceEvent("ResolveHostnames")
+			.detail("Hosts", self->hostnames.size())
+			.detail("Coords", self->coords.size())
+			.detail("String", self->toVerboseString());
+		if (std::unique(self->coords.begin(), self->coords.end()) != self->coords.end()) {
+			throw connection_string_invalid();
+		}
+		self->hasUnresolvedHostnames = false;
 	}
-	wait(waitForAll(fs));
-	std::sort(self->coords.begin(), self->coords.end());
-	TraceEvent("ResolveHostnames")
-		.detail("Hosts", self->hostnames.size())
-		.detail("Coords", self->coords.size())
-		.detail("String", self->toVerboseString());
-	if (std::unique(self->coords.begin(), self->coords.end()) != self->coords.end()) {
-		throw connection_string_invalid();
-	}
-	self->hasUnresolvedHostnames = false;
 	return Void();
 }
 
 Future<Void> ClusterConnectionString::resolveHostnames() {
-	if (!hasUnresolvedHostnames) {
-		return Void();
-	} else {
-		return resolveHostnamesImpl(this);
-	}
+	return resolveHostnamesImpl(this);
 }
 
 void ClusterConnectionString::resolveHostnamesBlocking() {
