@@ -43,10 +43,13 @@ ACTOR void sendCommitReply(IKVSCommitRequest commitReq, IKeyValueStore* kvStore,
 }
 
 ACTOR template <class T>
-void forwardPromiseVariant(ReplyPromise<T> output, Future<T> input) {
+void forwardPromiseVariant(ReplyPromise<T> output, Future<T> input, std::string trace = "") {
 	try {
 		T value = wait(input);
 		output.send(value);
+		if (trace.size()) {
+			TraceEvent(SevDebug, "ForwardPromiseSend").detail("Name", trace);
+		}
 	} catch (Error& e) {
 		TraceEvent(SevDebug, "ForwardPromiseVariantError").error(e, true);
 		output.sendError(e.code() == error_code_actor_cancelled ? remote_kvs_cancelled() : e);
@@ -120,15 +123,15 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 					forwardPromiseVariant(getFutureReq.reply, kvStore->getError());
 				}
 				when(IKVSOnClosedRequest onClosedReq = waitNext(ikvsInterface.onClosed.getFuture())) {
-					forwardPromise(onClosedReq.reply, kvStore->onClosed());
+					forwardPromiseVariant(onClosedReq.reply, kvStore->onClosed(), "OnClosed");
 				}
 				when(IKVSDisposeRequest req = waitNext(ikvsInterface.dispose.getFuture())) {
 					Future<Void> f = kvStore->onClosed();
 					kvStore->dispose();
 					guard.invalidate();
 					onClosed.send(Void());
-					TraceEvent(SevDebug, "RemoteIKVSDispose").detail("UID", uid_kvs);
 					wait(f);
+					TraceEvent(SevDebug, "RemoteIKVSDispose").detail("UID", uid_kvs);
 					return Void();
 				}
 				when(IKVSCloseRequest req = waitNext(ikvsInterface.close.getFuture())) {
@@ -136,17 +139,28 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 					kvStore->close();
 					guard.invalidate();
 					onClosed.send(Void());
-					TraceEvent(SevDebug, "RemoteIKVSClose").detail("UID", uid_kvs);
 					wait(f);
+					TraceEvent(SevDebug, "RemoteIKVSClose").detail("UID", uid_kvs);
 					return Void();
 				}
 			}
 		} catch (Error& e) {
-			TraceEvent(SevDebug, "RemoteKVStoreError").detail("UID", uid_kvs).detail("Error", e.code());
 			if (e.code() == error_code_actor_cancelled) {
+				TraceEvent(SevDebug, "RemoteKVStoreCancelled").detail("UID", uid_kvs).backtrace();
+				// TODO : do we need to wait it fully closed
+				// state Future<Void> f = kvStore->onClosed();
+				// kvStore->close();
+				guard.invalidate();
+				// wait(f);
+				return Void();
+			} else {
+				TraceEvent(SevError, "RemoteKVStoreError").detail("UID", uid_kvs).error(e).backtrace();
 				throw;
 			}
-			throw actor_cancelled();
+			// if (e.code() == error_code_actor_cancelled) {
+			// 	throw;
+			// }
+			// throw actor_cancelled();
 			// TODO: Error handling
 		}
 	}
@@ -154,6 +168,7 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 
 ACTOR Future<Void> spawnRemoteIKVS(RemoteIKeyValueStore* self, OpenKVStoreRequest openKVSReq) {
 	state KeyValueStoreProcess process;
+	process.setSSInterface(self);
 	process.start();
 	TraceEvent(SevDebug, "WaitingOnFlowProcess").detail("StoreType", openKVSReq.storeType).log();
 	wait(process.onReady());
@@ -176,41 +191,4 @@ IKeyValueStore* openRemoteKVStore(KeyValueStoreType storeType,
 	OpenKVStoreRequest request(storeType, filename, logID, memoryLimit, checkChecksums, checkIntegrity);
 	self->initialized = spawnRemoteIKVS(self, request);
 	return self;
-}
-
-ACTOR Future<Void> runRemoteServer() {
-
-	state IKVSProcessInterface processInterface;
-	state ActorCollection actors(false);
-	processInterface.getProcessInterface.makeWellKnownEndpoint(WLTOKEN_IKVS_PROCESS_SERVER,
-	                                                           TaskPriority::DefaultEndpoint);
-
-	loop {
-		try {
-			choose {
-				when(GetIKVSProcessInterfaceRequest req = waitNext(processInterface.getProcessInterface.getFuture())) {
-					TraceEvent(SevDebug, "RequestIKVSProcessInterface").detail("Status", "received request");
-					req.reply.send(processInterface);
-				}
-				when(OpenKVStoreRequest req = waitNext(processInterface.openKVStore.getFuture())) {
-					IKVSInterface ikvsInterf;
-					ikvsInterf.storeType = req.storeType;
-					TraceEvent(SevDebug, "CreatingIKVSInterface").detail("UID", ikvsInterf.id());
-					actors.add(runIKVS(req, ikvsInterf));
-				}
-				when(wait(actors.getResult())) {
-					TraceEvent(SevDebug, "RemoteIKVStoreServerError").detail("Action", "actors got result");
-					// add futures, if any throw exception, throw on the wait get result
-					UNSTOPPABLE_ASSERT(false);
-				}
-			}
-		} catch (Error& e) {
-			TraceEvent(SevDebug, "RemoteIKVStoreServerError").detail("Error", e.code());
-			if (e.code() == error_code_actor_cancelled) {
-				throw;
-			}
-			throw;
-			// TODO: Error handling
-		}
-	}
 }

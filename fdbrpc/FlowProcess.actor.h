@@ -52,8 +52,8 @@ struct FlowProcessRegistrationRequest {
 };
 
 class FlowProcess {
-	Promise<Void> readyPromise;
 	Future<int> returnCodePromise;
+	Promise<Void> readyPromise;
 
 public:
 	virtual ~FlowProcess();
@@ -62,6 +62,9 @@ public:
 	virtual void consumeInterface(StringRef intf) = 0;
 	virtual Future<Void> run() = 0;
 	virtual void registerEndpoint(Endpoint p) = 0;
+	// For remote IKV store, we need to make sure the shutdown signal is sent back until we can destroy it in the
+	// simulation
+	virtual Future<Void> onClosed() const { throw unsupported_operation(); }
 
 	void start();
 	Future<Void> onReady() const { return readyPromise.getFuture(); }

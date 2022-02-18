@@ -81,10 +81,20 @@ void ExecCmdValueString::dbgPrint() const {
 	return;
 }
 
+ACTOR void destoryChildProcess(Future<Void> parentSSClosed, ISimulator::ProcessInfo* childInfo, std::string message) {
+	// TODO : need to wait the onClosed message is sent back to the storage server
+	// This code path should be bug free
+	wait(parentSSClosed);
+	TraceEvent(SevDebug, message.c_str()).log();
+	// This one is root cause for most failures, make sure it's okay to destory
+	g_pSimulator->destroyProcess(childInfo);
+}
+
 ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
                                  double maxWaitTime,
                                  bool isSync,
-                                 double maxSimDelayTime) {
+                                 double maxSimDelayTime,
+                                 FlowProcess* parent) {
 	state ISimulator::ProcessInfo* self = g_pSimulator->getCurrentProcess();
 	state ISimulator::ProcessInfo* child;
 
@@ -128,7 +138,6 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 		}
 	}
 	state int result = 0;
-	// short port = 8716;
 	child = g_pSimulator->newProcess("remote flow process",
 	                                 self->address.ip,
 	                                 0,
@@ -154,17 +163,39 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 			}
 		}
 		if (role == "flowprocess") {
+			state Future<Void> parentSSClosed = parent->onClosed();
 			FlowTransport::createInstance(false, 1, WLTOKEN_IKVS_RESERVED_COUNT);
 			FlowTransport::transport().bind(child->address, child->address);
 			Sim2FileSystem::newFileSystem();
 			ProcessFactory<KeyValueStoreProcess>(flowProcessName.c_str());
-			Future<Void> f = runFlowProcess(flowProcessName, flowProcessEndpoint);
+			state Future<Void> flowProcessF = runFlowProcess(flowProcessName, flowProcessEndpoint);
 
 			choose {
-				when(wait(success(onShutdown) || f)) { TraceEvent(SevDebug, "ChildProcessKilled").log(); }
-				when(wait(success(parentShutdown))) {
-					TraceEvent(SevDebug, "ParentProcessKilled").log();
+				when(wait(flowProcessF)) {
+					TraceEvent(SevDebug, "ChildProcessKilled").log();
+					wait(g_pSimulator->onProcess(self));
+					TraceEvent(SevDebug, "BackOnParentProcess").detail("Result", std::to_string(result));
+					destoryChildProcess(parentSSClosed, child, "StorageServerReceivedClosedMessage");
+				}
+				when(ISimulator::KillType killType = wait(onShutdown)) {
+					TraceEvent(SevError, "ChildProcessReboot").detail("KillType", killType).log();
+					// TODO : need to make sure the close is finished before destroying the child process
+					// wait(flowProcessF);
+					// pair it up, child dies and also the parent dies
 					g_pSimulator->killProcess(child, ISimulator::KillInstantly);
+				}
+				when(ISimulator::KillType killType = wait(parentShutdown)) {
+					TraceEvent(SevDebug, "ParentProcessReboot").detail("KillType", killType).log();
+					// Note: failed machines are not cancelled and actors behind is just running
+					// g_pSimulator->killProcess(child, killType);
+					if (killType < ISimulator::RebootAndDelete) {
+						ASSERT(false);
+					} else {
+						// wait(delay(0));
+						destoryChildProcess(flowProcessF, child, "ChildClosedAfterParentShutdown");
+						// flowProcessF.cancel();
+						// g_pSimulator->destroyProcess(child);
+					}
 				}
 			}
 		} else {
@@ -185,9 +216,7 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 		}
 		result = -1;
 	}
-	wait(g_pSimulator->onProcess(self));
-	g_pSimulator->destroyProcess(child);
-	TraceEvent(SevDebug, "BackOnParentProcess").detail("Result", std::to_string(result));
+
 	return result;
 }
 
@@ -196,9 +225,10 @@ ACTOR Future<int> spawnProcess(std::string binPath,
                                std::vector<std::string> paramList,
                                double maxWaitTime,
                                bool isSync,
-                               double maxSimDelayTime) {
+                               double maxSimDelayTime,
+                               FlowProcess* parent) {
 	if (g_network->isSimulated() && getExecPath() == binPath) {
-		int res = wait(spawnSimulated(paramList, maxWaitTime, isSync, maxSimDelayTime));
+		int res = wait(spawnSimulated(paramList, maxWaitTime, isSync, maxSimDelayTime, parent));
 		return res;
 	}
 	wait(delay(0.0));
@@ -247,9 +277,10 @@ ACTOR Future<int> spawnProcess(std::string path,
                                std::vector<std::string> args,
                                double maxWaitTime,
                                bool isSync,
-                               double maxSimDelayTime) {
+                               double maxSimDelayTime,
+                               FlowProcess* parent) {
 	if (g_network->isSimulated() && getExecPath() == path) {
-		int res = wait(spawnSimulated(args, maxWaitTime, isSync, maxSimDelayTime));
+		int res = wait(spawnSimulated(args, maxWaitTime, isSync, maxSimDelayTime, parent));
 		return res;
 	}
 	// for async calls in simulator, always delay by a deterministic amount of time and then

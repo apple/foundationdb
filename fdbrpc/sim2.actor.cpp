@@ -1230,6 +1230,11 @@ public:
 		    .detail("Excluded", m->excluded)
 		    .detail("Cleared", m->cleared);
 
+		if (std::string(name) == "remote flow process") {
+			protectedAddresses.insert(m->address);
+			TraceEvent(SevDebug, "NewFlowProcessProtected").detail("Address", m->address);
+		}
+
 		// FIXME: Sometimes, connections to/from this process will explicitly close
 
 		return m;
@@ -1531,7 +1536,8 @@ public:
 			    .detail("Protected", protectedAddresses.count(machine->address))
 			    .backtrace();
 			// This will remove all the "tracked" messages that came from the machine being killed
-			latestEventCache.clear();
+			if (std::string(machine->name) != "remote flow process")
+				latestEventCache.clear();
 			machine->failed = true;
 		} else if (kt == InjectFaults) {
 			TraceEvent(SevWarn, "FaultMachine")
@@ -1559,7 +1565,8 @@ public:
 		} else {
 			ASSERT(false);
 		}
-		ASSERT(!protectedAddresses.count(machine->address) || machine->rebooting);
+		ASSERT(!protectedAddresses.count(machine->address) || machine->rebooting ||
+		       std::string(machine->name) == "remote flow process");
 	}
 	void rebootProcess(ProcessInfo* process, KillType kt) override {
 		if (kt == RebootProcessAndDelete && protectedAddresses.count(process->address)) {
@@ -2083,6 +2090,7 @@ public:
 
 	void execTask(struct Task& t) {
 		if (t.machine->failed) {
+			// TraceEvent(SevDebug, "Sim2ExecTaskNever").detail("Address", t.machine->address.toString());
 			t.action.send(Never());
 		} else {
 			mutex.enter();
@@ -2405,6 +2413,11 @@ ACTOR void doReboot(ISimulator::ProcessInfo* p, ISimulator::KillType kt) {
 			TraceEvent(SevDebug, "DoRebootFailed")
 			    .detail("Rebooting", p->rebooting)
 			    .detail("Reliable", p->isReliable());
+			return;
+		} else if (std::string(p->name) == "remote flow process") {
+			TraceEvent(SevDebug, "DoRebootFailed")
+			    .detail("Name", p->name)
+			    .detail("Address", p->address);
 			return;
 		}
 		TraceEvent("RebootingProcess")

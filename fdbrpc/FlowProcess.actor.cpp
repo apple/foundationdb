@@ -20,15 +20,16 @@
 #include "fdbrpc/FlowProcess.actor.h"
 #include "flow/flow.h"
 #include "fdbserver/RemoteIKeyValueStore.actor.h"
+#include "fdbrpc/simulator.h"
 
 #include "flow/actorcompiler.h" // has to be last include
-#include <cstdio>
 
 ACTOR Future<int> spawnProcess(std::string binPath,
                                std::vector<std::string> paramList,
                                double maxWaitTime,
                                bool isSync,
-                               double maxSimDelayTime);
+                               double maxSimDelayTime,
+                               FlowProcess* parent);
 
 namespace {
 
@@ -47,7 +48,7 @@ ACTOR Future<int> flowProcessRunner(FlowProcess* self, Promise<Void> ready) {
 	args.emplace_back("--process_endpoint");
 	args.emplace_back(format("%s,%lu,%lu", address.c_str(), token.first(), token.second()));
 
-	process = spawnProcess(path, args, -1.0, false, 0.01);
+	process = spawnProcess(path, args, -1.0, false, 0.01, self);
 	choose {
 		when(FlowProcessRegistrationRequest req = waitNext(processInterface.registerProcess.getFuture())) {
 			self->consumeInterface(req.flowProcessInterface);
