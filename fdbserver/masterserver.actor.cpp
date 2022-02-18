@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include <algorithm>
 #include <iterator>
 
 #include "fdbclient/NativeAPI.actor.h"
@@ -64,6 +65,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	Version version; // The last version assigned to a proxy by getVersion()
 	double lastVersionTime;
 	IKeyValueStore* txnStateStore;
+	Version referenceVersion = -1;
 
 	std::vector<CommitProxyInterface> commitProxies;
 	std::map<UID, CommitProxyVersionReplies> lastCommitProxyVersionReplies;
@@ -94,11 +96,16 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	  : dbgid(myInterface.id()), lastEpochEnd(invalidVersion), recoveryTransactionVersion(invalidVersion),
 	    liveCommittedVersion(invalidVersion), databaseLocked(false), minKnownCommittedVersion(invalidVersion),
 	    coordinators(coordinators), version(invalidVersion), lastVersionTime(0), txnStateStore(nullptr),
-	    myInterface(myInterface), forceRecovery(forceRecovery), cc("Master", dbgid.toString()),
+	    referenceVersion(1262307600 * SERVER_KNOBS->VERSIONS_PER_SECOND), myInterface(myInterface),
+	    forceRecovery(forceRecovery), cc("Master", dbgid.toString()),
 	    getCommitVersionRequests("GetCommitVersionRequests", cc),
 	    getLiveCommittedVersionRequests("GetLiveCommittedVersionRequests", cc),
 	    reportLiveCommittedVersionRequests("ReportLiveCommittedVersionRequests", cc) {
 		logger = traceCounters("MasterMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "MasterMetrics");
+		// TODO: Temporary, until data is fetched during master creation
+		if (g_network->isSimulated()) {
+			referenceVersion = 0;
+		}
 		if (forceRecovery && !myInterface.locality.dcId().present()) {
 			TraceEvent(SevError, "ForcedRecoveryRequiresDcID").log();
 			forceRecovery = false;
@@ -147,11 +154,46 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 			if (BUGGIFY) {
 				t1 = self->lastVersionTime;
 			}
-			rep.prevVersion = self->version;
-			self->version +=
+
+			// Versions should roughly follow wall-clock time, based on the
+			// system clock of the current machine and an FDB-specific epoch.
+			// Calculate the expected version and determine whether we need to
+			// hand out versions faster or slower to stay in sync with the
+			// clock.
+			Version toAdd =
 			    std::max<Version>(1,
 			                      std::min<Version>(SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS,
 			                                        SERVER_KNOBS->VERSIONS_PER_SECOND * (t1 - self->lastVersionTime)));
+			Version expectedVersion = g_network->timer() * SERVER_KNOBS->VERSIONS_PER_SECOND - self->referenceVersion;
+
+			// How far the new version is off from the expected version.
+			Version offset = self->version + toAdd - expectedVersion;
+			// Clamp the offset to a specific range. This prevents huge version
+			// jumps.
+			Version clamped =
+			    std::clamp(offset, -SERVER_KNOBS->MAX_VERSION_RATE_OFFSET, SERVER_KNOBS->MAX_VERSION_RATE_OFFSET);
+
+			// Translate the version offset (in the range [-1,000,000,
+			// 1,000,000]) to a value in the range [0.9, 1.1]). Note that these
+			// values are examples, and are based on the
+			// MAX_VERSION_RATE_OFFSET and MAX_VERSION_RATE_MODIFIER knobs.
+			double modifier =
+			    ((1.0 + SERVER_KNOBS->MAX_VERSION_RATE_MODIFIER) - (1.0 - SERVER_KNOBS->MAX_VERSION_RATE_MODIFIER)) /
+			    (2 * SERVER_KNOBS->MAX_VERSION_RATE_OFFSET);
+			// Use std::pow to apply a more aggressive curve to version
+			// corrections. Versions further from the expected version will
+			// receive a larger multiplier.
+			double versionCorrection =
+			    std::clamp(std::pow((1.0 - SERVER_KNOBS->MAX_VERSION_RATE_MODIFIER) +
+			                            modifier * (-clamped + SERVER_KNOBS->MAX_VERSION_RATE_OFFSET),
+			                        2.5),
+			               1.0 - SERVER_KNOBS->MAX_VERSION_RATE_MODIFIER,
+			               1.0 + SERVER_KNOBS->MAX_VERSION_RATE_MODIFIER);
+			;
+			toAdd *= versionCorrection;
+
+			rep.prevVersion = self->version;
+			self->version += toAdd;
 
 			TEST(self->version - rep.prevVersion == 1); // Minimum possible version gap
 

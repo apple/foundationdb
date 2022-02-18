@@ -342,6 +342,7 @@ ACTOR Future<Void> newSeedServers(Reference<ClusterRecoveryData> self,
 		isr.reqId = deterministicRandom()->randomUniqueID();
 		isr.interfaceId = deterministicRandom()->randomUniqueID();
 		isr.clusterId = self->clusterId;
+		isr.initialClusterVersion = self->recoveryTransactionVersion;
 
 		ErrorOr<InitializeStorageReply> newServer = wait(recruits.storageServers[idx].storage.tryGetReply(isr));
 
@@ -1188,7 +1189,14 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	// Recover version info
 	self->lastEpochEnd = oldLogSystem->getEnd() - 1;
 	if (self->lastEpochEnd == 0) {
-		self->recoveryTransactionVersion = 1;
+		// Set the initial cluster version equal to the current timestamp in
+		// microseconds, relative to a defined epoch. Versions advance at
+		// roughtly one million versions per second, so one version equals one
+		// microsecond.
+		self->recoveryTransactionVersion = g_network->timer() * SERVER_KNOBS->VERSIONS_PER_SECOND;
+		if (!g_network->isSimulated()) {
+			self->recoveryTransactionVersion -= SERVER_KNOBS->DEFAULT_VERSION_EPOCH * SERVER_KNOBS->VERSIONS_PER_SECOND;
+		}
 	} else {
 		if (self->forceRecovery) {
 			self->recoveryTransactionVersion = self->lastEpochEnd + SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT_FORCED;

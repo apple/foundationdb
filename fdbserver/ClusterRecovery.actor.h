@@ -210,6 +210,7 @@ struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> 
 	std::map<UID, CommitProxyVersionReplies> lastCommitProxyVersionReplies;
 
 	UID clusterId;
+	Version initialClusterVersion = -1;
 	Standalone<StringRef> dbId;
 
 	MasterInterface masterInterface;
