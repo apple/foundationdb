@@ -35,9 +35,7 @@ IPAddress determinePublicIPAutomatically(ClusterConnectionString& ccs) {
 		io_service ioService;
 		ip::udp::socket socket(ioService);
 
-		if (ccs.hasUnresolvedHostnames) {
-			ccs.resolveHostnamesBlocking();
-		}
+		ccs.resolveHostnamesBlocking();
 		const auto& coordAddr = ccs.coordinators()[0];
 		const auto boostIp = coordAddr.ip.isV6() ? ip::address(ip::address_v6(coordAddr.ip.toV6()))
 		                                         : ip::address(ip::address_v4(coordAddr.ip.toV4()));

@@ -45,6 +45,8 @@ struct ClientLeaderRegInterface {
 	}
 };
 
+enum ConnectionStringStatus { RESOLVED, RESOLVING, UNRESOLVED };
+
 // A string containing the information necessary to connect to a cluster.
 //
 // The format of the connection string is: description:id@[addrs]+
@@ -63,6 +65,18 @@ public:
 	ClusterConnectionString(const std::vector<NetworkAddress>& coordinators, Key key);
 	ClusterConnectionString(const std::vector<Hostname>& hosts, Key key);
 
+	ClusterConnectionString( const ClusterConnectionString &rhs) { operator=(rhs); }
+	ClusterConnectionString& operator=(const ClusterConnectionString& rhs) {
+		status = rhs.status;
+		coords = rhs.coords;
+		hostnames = rhs.hostnames;
+		networkAddressToHostname = rhs.networkAddressToHostname;
+		key = rhs.key;
+		keyDesc = rhs.keyDesc;
+		connectionString = rhs.connectionString;
+		return *this;
+	}
+
 	std::vector<NetworkAddress> const& coordinators() const { return coords; }
 	Key clusterKey() const { return key; }
 	Key clusterKeyName() const {
@@ -77,7 +91,8 @@ public:
 	void resolveHostnamesBlocking();
 	void resetToUnresolved();
 
-	bool hasUnresolvedHostnames = false;
+	ConnectionStringStatus status = RESOLVED;
+	AsyncTrigger resolveFinish;
 	std::vector<NetworkAddress> coords;
 	std::vector<Hostname> hostnames;
 	std::unordered_map<NetworkAddress, Hostname> networkAddressToHostname;
@@ -136,7 +151,7 @@ public:
 	// Signals to the connection record that it was successfully used to connect to a cluster.
 	void notifyConnected();
 
-	bool hasUnresolvedHostnames() const;
+	ConnectionStringStatus connectionStringStatus() const;
 	Future<Void> resolveHostnames();
 	// This one should only be used when resolving asynchronously is impossible. For all other cases, resolveHostnames()
 	// should be preferred.

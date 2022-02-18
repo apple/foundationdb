@@ -833,9 +833,7 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(
 	NetworkAddressList publicNetworkAddresses;
 	NetworkAddressList listenNetworkAddresses;
 
-	if (connectionRecord.hasUnresolvedHostnames()) {
-		connectionRecord.resolveHostnamesBlocking();
-	}
+	connectionRecord.resolveHostnamesBlocking();
 	auto& coordinators = connectionRecord.getConnectionString().coordinators();
 	ASSERT(coordinators.size() > 0);
 

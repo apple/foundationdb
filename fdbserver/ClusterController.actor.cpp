@@ -2599,10 +2599,8 @@ ACTOR Future<Void> clusterController(Reference<IClusterConnectionRecord> connRec
 	state bool hasConnected = false;
 	loop {
 		try {
-			if (connRecord->hasUnresolvedHostnames()) {
-				wait(connRecord->resolveHostnames());
-			}
-			TraceEvent("Suspect1").detail("Unresolved", connRecord->getConnectionString().hasUnresolvedHostnames).log();
+			wait(connRecord->resolveHostnames());
+			TraceEvent("Suspect1").detail("CCSStatus", connRecord->connectionStringStatus()).log();
 			ServerCoordinators coordinators(connRecord);
 			wait(clusterController(coordinators, currentCC, hasConnected, asyncPriorityInfo, locality, configDBType));
 		} catch (Error& e) {

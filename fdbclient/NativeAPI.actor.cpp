@@ -732,7 +732,7 @@ Future<Void> attemptGRVFromOldProxies(std::vector<GrvProxyInterface> oldProxies,
 
 ACTOR static Future<Void> monitorClientDBInfoChange(DatabaseContext* cx,
                                                     Reference<AsyncVar<ClientDBInfo> const> clientDBInfo,
-                                                    AsyncTrigger* proxyChangeTrigger) {
+                                                    AsyncTrigger* proxiesChangeTrigger) {
 	state std::vector<CommitProxyInterface> curCommitProxies;
 	state std::vector<GrvProxyInterface> curGrvProxies;
 	state ActorCollection actors(false);
@@ -6884,9 +6884,7 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion
 		throw;
 	}
 	TraceEvent("ExclusionSafetyCheckCoordinators").log();
-	if (cx->getConnectionRecord()->hasUnresolvedHostnames()) {
-		wait(cx->getConnectionRecord()->resolveHostnames());
-	}
+	wait(cx->getConnectionRecord()->resolveHostnames());
 	state ClientCoordinators coordinatorList(cx->getConnectionRecord());
 	state std::vector<Future<Optional<LeaderInfo>>> leaderServers;
 	leaderServers.reserve(coordinatorList.clientLeaderServers.size());
