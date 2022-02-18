@@ -1095,20 +1095,47 @@ public:
 	// DecodedNodes are stored in a contiguous vector, which sometimes must be expanded, so care
 	// must be taken to resolve DecodedNode pointers again after the DecodeCache has new entries added.
 	struct DecodeCache : FastAllocated<DecodeCache>, ReferenceCounted<DecodeCache> {
-		DecodeCache(const T& lowerBound = T(), const T& upperBound = T())
-		  : lowerBound(arena, lowerBound), upperBound(arena, upperBound) {
+		DecodeCache(const T& lowerBound = T(), const T& upperBound = T(), size_t* pMemoryTracker = nullptr)
+		  : lowerBound(arena, lowerBound), upperBound(arena, upperBound), lastKnownUsedMemory(0),
+		    pMemoryTracker(pMemoryTracker) {
 			decodedNodes.reserve(10);
 			deltatree_printf("DecodedNode size: %d\n", sizeof(DecodedNode));
+		}
+
+		~DecodeCache() {
+			if (pMemoryTracker != nullptr) {
+				// Do not update, only subtract the last known amount which would have been
+				// published to the counter
+				*pMemoryTracker -= lastKnownUsedMemory;
+			}
 		}
 
 		Arena arena;
 		T lowerBound;
 		T upperBound;
 
+		// Track the amount of memory used by the vector and arena and publish updates to some counter.
+		// Note that no update is pushed on construction because a Cursor will surely soon follow.
+		// Updates are pushed to the counter on
+		//    DecodeCache clear
+		//    DecodeCache destruction
+		//    Cursor destruction
+		// as those are the most efficient times to publish an update.
+		size_t lastKnownUsedMemory;
+		size_t* pMemoryTracker;
+
 		// Index 0 is always the root
 		std::vector<DecodedNode> decodedNodes;
 
 		DecodedNode& get(int index) { return decodedNodes[index]; }
+
+		void updateUsedMemory() {
+			size_t usedNow = arena.getSize(true) + (decodedNodes.capacity() * sizeof(DecodedNode));
+			if (pMemoryTracker != nullptr) {
+				*pMemoryTracker += (usedNow - lastKnownUsedMemory);
+			}
+			lastKnownUsedMemory = usedNow;
+		}
 
 		template <class... Args>
 		int emplace_new(Args&&... args) {
@@ -1125,6 +1152,7 @@ public:
 			lowerBound = T(a, lowerBound);
 			upperBound = T(a, upperBound);
 			arena = a;
+			updateUsedMemory();
 		}
 	};
 
@@ -1141,6 +1169,12 @@ public:
 
 		// Copy constructor does not copy item because normally a copied cursor will be immediately moved.
 		Cursor(const Cursor& c) : tree(c.tree), cache(c.cache), nodeIndex(c.nodeIndex) {}
+
+		~Cursor() {
+			if (cache != nullptr) {
+				cache->updateUsedMemory();
+			}
+		}
 
 		Cursor next() const {
 			Cursor c = *this;

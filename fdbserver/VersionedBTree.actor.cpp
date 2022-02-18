@@ -1673,6 +1673,9 @@ struct RedwoodMetrics {
 	Reference<Histogram> kvSizeReadByGetRange;
 	double startTime;
 
+	// Absolute counters, not reset per time interval
+	size_t decodeCacheMemory = 0;
+
 	// Return number of pages read or written, from cache or disk
 	unsigned int pageOps() const {
 		// All page reads are either a cache hit, probe hit, or a disk read
@@ -1889,6 +1892,9 @@ class ObjectCache : NonCopyable {
 public:
 	ObjectCache(int sizeLimit = 1) : sizeLimit(sizeLimit), currentSize(0) {}
 
+	int64_t getSizeUsed() const { return currentSize; }
+	int64_t getSizeLimit() const { return sizeLimit; }
+
 	void setSizeLimit(int n) {
 		ASSERT(n > 0);
 		sizeLimit = n;
@@ -2022,8 +2028,6 @@ public:
 		ASSERT(evictionOrder.size() + prioritizedEvictions.size() == cache.size());
 		return clear_impl(this);
 	}
-
-	int count() const { return currentSize; }
 
 	// Move the prioritized evictions queued to the front of the eviction order
 	void flushPrioritizedEvictions() { evictionOrder.splice(evictionOrder.begin(), prioritizedEvictions); }
@@ -3665,7 +3669,7 @@ public:
 		int64_t total;
 		if (memoryOnly) {
 			total = pageCacheBytes;
-			free = pageCacheBytes - ((int64_t)pageCache.count() * physicalPageSize);
+			free = pageCacheBytes - (pageCache.getSizeUsed() * physicalPageSize);
 		} else {
 			g_network->getDiskBytes(parentDirectory(filename), free, total);
 		}
@@ -3688,9 +3692,9 @@ public:
 		return StorageBytes(free, total, pagerSize - reusable, free + reusable, temp);
 	}
 
-	int64_t getPageCacheCount() override { return (int64_t)pageCache.count(); }
+	int64_t getPageCacheCount() override { return pageCache.getSizeUsed(); }
 	int64_t getPageCount() override { return pHeader->pageCount; }
-	int64_t getExtentCacheCount() override { return (int64_t)extentCache.count(); }
+	int64_t getExtentCacheCount() override { return extentCache.getSizeUsed(); }
 
 	ACTOR static Future<Void> getUserPageCount_cleanup(DWALPager* self) {
 		// Wait for the remap eraser to finish all of its work (not triggering stop)
@@ -4860,7 +4864,7 @@ public:
 				entries.emplace_back(q.get(),
 				                     self->readPage(PagerEventReasons::LazyClear,
 				                                    q.get().height,
-				                                    snapshot,
+				                                    snapshot.getPtr(),
 				                                    q.get().pageID,
 				                                    ioLeafPriority,
 				                                    true,
@@ -4883,7 +4887,7 @@ public:
 
 				// Iterate over page entries, skipping key decoding using BTreePage::ValueTree which uses
 				// RedwoodRecordRef::DeltaValueOnly as the delta type type to skip key decoding
-				BTreePage::ValueTree::DecodeCache cache(dbBegin, dbEnd);
+				BTreePage::ValueTree::DecodeCache cache(dbBegin, dbEnd, &g_redwoodMetrics.decodeCacheMemory);
 				BTreePage::ValueTree::Cursor c(&cache, btPage.valueTree());
 				ASSERT(c.moveFirst());
 				Version v = entry.version;
@@ -5697,7 +5701,7 @@ private:
 
 	ACTOR static Future<Reference<const ArenaPage>> readPage(PagerEventReasons reason,
 	                                                         unsigned int level,
-	                                                         Reference<IPagerSnapshot> snapshot,
+	                                                         IPagerSnapshot* snapshot,
 	                                                         BTreePageIDRef id,
 	                                                         int priority,
 	                                                         bool forLazyClear,
@@ -5738,7 +5742,8 @@ private:
 			             lowerBound.toString().c_str(),
 			             upperBound.toString().c_str());
 
-			BTreePage::BinaryTree::DecodeCache* cache = new BTreePage::BinaryTree::DecodeCache(lowerBound, upperBound);
+			BTreePage::BinaryTree::DecodeCache* cache =
+			    new BTreePage::BinaryTree::DecodeCache(lowerBound, upperBound, &g_redwoodMetrics.decodeCacheMemory);
 			page->userData = cache;
 			page->userDataDestructor = [](void* cache) { ((BTreePage::BinaryTree::DecodeCache*)cache)->delref(); };
 		}
@@ -6170,7 +6175,7 @@ private:
 		}
 
 		state Reference<const ArenaPage> page =
-		    wait(readPage(PagerEventReasons::Commit, height, batch->snapshot, rootID, height, false, true));
+		    wait(readPage(PagerEventReasons::Commit, height, batch->snapshot.getPtr(), rootID, height, false, true));
 
 		// If the page exists in the cache, it must be copied before modification.
 		// That copy will be referenced by pageCopy, as page must stay in scope in case anything references its
@@ -7047,7 +7052,7 @@ public:
 			debug_printf("pushPage(link=%s)\n", link.get().toString(false).c_str());
 			return map(readPage(reason,
 			                    path.back().btPage()->height - 1,
-			                    pager,
+			                    pager.getPtr(),
 			                    link.get().getChildPage(),
 			                    ioMaxPriority,
 			                    false,
@@ -7064,7 +7069,7 @@ public:
 
 		Future<Void> pushPage(BTreePageIDRef id) {
 			debug_printf("pushPage(root=%s)\n", ::toString(id).c_str());
-			return map(readPage(reason, btree->m_pHeader->height, pager, id, ioMaxPriority, false, true),
+			return map(readPage(reason, btree->m_pHeader->height, pager.getPtr(), id, ioMaxPriority, false, true),
 			           [=](Reference<const ArenaPage> p) {
 #if REDWOOD_DEBUG
 				           path.push_back({ p, getCursor(p, dbBegin, dbEnd), id });
