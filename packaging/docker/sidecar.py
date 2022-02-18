@@ -189,6 +189,10 @@ class Config(object):
         with open("/var/fdb/version") as version_file:
             self.primary_version = version_file.read().strip()
 
+        self.primary_version_is_rc = False
+        if self.primary_version.find("rc") > 0:
+            self.primary_version_is_rc = True
+
         version_split = self.primary_version.split(".")
         self.minor_version = [int(version_split[0]), int(version_split[1])]
 
@@ -645,9 +649,14 @@ def copy_libraries():
         if version == config.copy_libraries[0]:
             target_path = Path(f"{config.output_dir}/lib/libfdb_c.so")
         else:
-            target_path = Path(
-                f"{config.output_dir}/lib/multiversion/libfdb_c_{version}.so"
-            )
+            if config.primary_version_is_rc:
+                target_path = Path(
+                    f"{config.output_dir}/lib/multiversion/libfdb_c_{config.primary_version}.so"
+                )
+            else:
+                target_path = Path(
+                    f"{config.output_dir}/lib/multiversion/libfdb_c_{config.version}.so"
+                )
         if not target_path.exists():
             target_path.parent.mkdir(parents=True, exist_ok=True)
             tmp_file = tempfile.NamedTemporaryFile(
