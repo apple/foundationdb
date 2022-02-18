@@ -98,6 +98,18 @@ Key KVWorkload::keyForIndex(uint64_t index) const {
 	}
 }
 
+// the reverse process of keyForIndex() without division
+int64_t KVWorkload::indexForKey(const KeyRef& key) const {
+	int idx = 0;
+	if(nodePrefix > 0) {
+		ASSERT(keyBytes >= 32);
+		idx += 16;
+	}
+	ASSERT(keyBytes >= 16);
+	int64_t res = *(int64_t*)(key.begin() + idx);
+	return res;
+}
+
 Key KVWorkload::keyForIndex(uint64_t index, bool absent) const {
 	int adjustedKeyBytes = (absent) ? (keyBytes + 1) : keyBytes;
 	Key result = makeString(adjustedKeyBytes);

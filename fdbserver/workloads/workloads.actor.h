@@ -101,6 +101,7 @@ struct KVWorkload : TestWorkload {
 	Key getRandomKey(bool absent) const;
 	Key keyForIndex(uint64_t index) const;
 	Key keyForIndex(uint64_t index, bool absent) const;
+	int64_t indexForKey(const KeyRef& key) const;
 };
 
 struct IWorkloadFactory : ReferenceCounted<IWorkloadFactory> {

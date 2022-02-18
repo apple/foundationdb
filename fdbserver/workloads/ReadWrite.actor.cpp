@@ -30,6 +30,7 @@
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/TDMetric.actor.h"
+#include "fdbclient/RunTransaction.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 const int sampleSize = 10000;
@@ -81,6 +82,7 @@ struct ReadWriteWorkload : KVWorkload {
 	int extraReadConflictRangesPerTransaction, extraWriteConflictRangesPerTransaction;
 	double testDuration, transactionsPerSecond, alpha, warmingDelay, loadTime, maxInsertRate, debugInterval, debugTime;
 	double metricsStart, metricsDuration, clientBegin;
+
 	std::string valueString;
 
 	bool dependentReads;
@@ -92,7 +94,6 @@ struct ReadWriteWorkload : KVWorkload {
 	bool adjacentWrites;
 	bool rampUpLoad;
 	int rampSweepCount;
-	double hotKeyFraction, forceHotProbability;
 	bool rangeReads;
 	bool useRYW;
 	bool rampTransactionType;
@@ -117,6 +118,16 @@ struct ReadWriteWorkload : KVWorkload {
 	std::vector<std::pair<uint64_t, double>> ratesAtKeyCounts;
 
 	std::vector<PerfMetric> periodicMetrics;
+
+	double hotKeyFraction, forceHotProbability; // key based hot traffic setting
+
+	// server based hot traffic setting
+	double skewDuration = 0; // skewDuration = ceil(testDuration / skewRound)
+	double hotServerFraction = 0; // set > 0 to issue hot key based on shard map
+	double hotServerReadFrac, hotServerWriteFrac; // hot many traffic goes to hot servers
+	typedef std::vector<std::pair<int64_t, int64_t>> IndexRangeVec;
+	// keyForIndex generate key from index. So for a shard range, recording the start and end is enough
+	std::vector<std::pair<UID, IndexRangeVec>> serverShards; // storage server and the shards it owns
 
 	bool doSetup;
 
@@ -209,14 +220,24 @@ struct ReadWriteWorkload : KVWorkload {
 		{
 			// with P(hotTrafficFraction) an access is directed to one of a fraction
 			//   of hot keys, else it is directed to a disjoint set of cold keys
-			hotKeyFraction = getOption(options, LiteralStringRef("hotKeyFraction"), 0.0);
-			double hotTrafficFraction = getOption(options, LiteralStringRef("hotTrafficFraction"), 0.0);
-			ASSERT(hotKeyFraction >= 0 && hotTrafficFraction <= 1);
-			ASSERT(hotKeyFraction <= hotTrafficFraction); // hot keys should be actually hot!
-			// p(Cold key) = (1-FHP) * (1-hkf)
-			// p(Cold key) = (1-htf)
-			// solving for FHP gives:
-			forceHotProbability = (hotTrafficFraction - hotKeyFraction) / (1 - hotKeyFraction);
+			hotKeyFraction = getOption(options, "hotKeyFraction"_sr, 0.0);
+			hotServerFraction = getOption(options, "hotServerFraction"_sr, 0.0);
+
+			if (hotServerFraction > 0) {
+				int skewRound = getOption(options, "skewRound"_sr, 0);
+				hotServerReadFrac = getOption(options, "hotServerReadFrac"_sr, 0.0);
+				hotServerWriteFrac = getOption(options, "hotServerWriteFrac"_sr, 0.0);
+				ASSERT(hotServerReadFrac >= hotServerFraction && hotServerWriteFrac >= hotServerFraction && skewRound > 0);
+				skewDuration = ceil(testDuration / skewRound);
+			} else if (hotKeyFraction > 0) {
+				double hotTrafficFraction = getOption(options, LiteralStringRef("hotTrafficFraction"), 0.0);
+				ASSERT(hotTrafficFraction <= 1);
+				ASSERT(hotKeyFraction <= hotTrafficFraction); // hot keys should be actually hot!
+				// p(Cold key) = (1-FHP) * (1-hkf)
+				// p(Cold key) = (1-htf)
+				// solving for FHP gives:
+				forceHotProbability = (hotTrafficFraction - hotKeyFraction) / (1 - hotKeyFraction);
+			}
 		}
 	}
 
@@ -332,6 +353,61 @@ struct ReadWriteWorkload : KVWorkload {
 		if (batchPriority) {
 			tr->setOption(FDBTransactionOptions::PRIORITY_BATCH);
 		}
+	}
+
+	ACTOR static Future<Void> updateServerShards(Database cx, ReadWriteWorkload* self) {
+		state RangeResult range =
+		    wait(runRYWTransaction(cx, [](Reference<ReadYourWritesTransaction> tr) -> Future<RangeResult> {
+			    tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			    return tr->getRange(serverKeysRange, CLIENT_KNOBS->TOO_MANY, Snapshot::True);
+		    }));
+
+		// leftEdge < workloadBegin < workloadEnd
+		Key workloadBegin = self->keyForIndex(0), workloadEnd = self->keyForIndex(self->nodeCount);
+		Key leftEdge(allKeys.begin);
+		std::vector<UID> leftServer; // left server owns the range [leftEdge, workloadBegin)
+		KeyRangeRef workloadRange(workloadBegin, workloadEnd);
+		std::map<int64_t, std::vector<UID>> beginServers; // begin index to server ID
+		std::vector<int64_t> keyIndex; // shard boundary by index
+
+		for (auto kv = range.begin(); kv != range.end(); kv++) {
+			if (serverHasKey(kv->value)) {
+				auto [id, key] = serverKeysDecodeServerBegin(kv->key);
+
+				if (workloadRange.contains(key)) {
+					auto idx = self->indexForKey(key);
+					beginServers[idx].push_back(id);
+					keyIndex.push_back(idx);
+				} else if (workloadBegin > key && key > leftEdge) { // update left boundary
+					leftEdge = key;
+					leftServer.clear();
+				}
+
+				if (key == leftEdge) {
+					leftServer.push_back(id);
+				}
+			}
+		}
+		ASSERT(beginServers.begin()->first >= 0);
+		// handle the left boundary
+		if (beginServers.begin()->first > 0) {
+			keyIndex.push_back(0);
+			beginServers[0] = std::move(leftServer);
+		}
+
+		// sort shard begin idx
+		ASSERT(keyIndex.size() == beginServers.size());
+		std::sort(keyIndex.begin(), keyIndex.end());
+		// build self->serverShards, starting from the left shard
+		std::unordered_map<UID, IndexRangeVec> serverShards;
+		int i = 0;
+		for (auto it = beginServers.begin(); i < keyIndex.size() && it != beginServers.end(); ++i, ++it) {
+			auto shardEnd = i < keyIndex.size() - 1 ? keyIndex[i + 1] : self->nodeCount;
+			for (auto id : it->second) {
+				serverShards[id].emplace_back(keyIndex[i], shardEnd);
+			}
+		}
+		return Void();
 	}
 
 	ACTOR static Future<Void> tracePeriodically(ReadWriteWorkload* self) {
