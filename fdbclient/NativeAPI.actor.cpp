@@ -3199,6 +3199,7 @@ Future<Void> getWatchFuture(Database cx, Reference<WatchParameters> parameters) 
 
 ACTOR Future<Void> watchValueMap(Future<Version> version,
                                  Optional<TenantName> tenant,
+                                 Future<Key> tenantPrefix,
                                  Key key,
                                  Optional<Value> value,
                                  Database cx,
@@ -3208,9 +3209,16 @@ ACTOR Future<Void> watchValueMap(Future<Version> version,
                                  Optional<UID> debugID,
                                  UseProvisionalProxies useProvisionalProxies) {
 	state Version ver = wait(version);
+
+	Key resolvedTenantPrefix = wait(tenantPrefix);
+	if (resolvedTenantPrefix.size()) {
+		key = key.withPrefix(resolvedTenantPrefix);
+	}
+
 	wait(getWatchFuture(
 	    cx,
 	    makeReference<WatchParameters>(tenant, key, value, ver, tags, spanID, taskID, debugID, useProvisionalProxies)));
+
 	return Void();
 }
 
@@ -4614,6 +4622,7 @@ void Watch::setWatch(Future<Void> watchFuture) {
 ACTOR Future<Void> watch(Reference<Watch> watch,
                          Database cx,
                          Optional<TenantName> tenant,
+                         Future<Key> tenantPrefix,
                          TagSet tags,
                          SpanID spanID,
                          TaskPriority taskID,
@@ -4638,6 +4647,7 @@ ACTOR Future<Void> watch(Reference<Watch> watch,
 							cx->clearWatchMetadata();
 							watch->watchFuture = watchValueMap(cx->minAcceptableReadVersion,
 							                                   tenant,
+							                                   tenantPrefix,
 							                                   watch->key,
 							                                   watch->value,
 							                                   cx,
@@ -4677,6 +4687,7 @@ Future<Void> Transaction::watch(Reference<Watch> watch) {
 	return ::watch(watch,
 	               trState->cx,
 	               trState->tenant,
+	               getTenantPrefix(),
 	               trState->options.readTags,
 	               trState->spanID,
 	               trState->taskID,
@@ -5333,6 +5344,7 @@ void Transaction::setupWatches() {
 		for (int i = 0; i < watches.size(); ++i)
 			watches[i]->setWatch(watchValueMap(watchVersion,
 			                                   trState->tenant,
+			                                   getTenantPrefix(),
 			                                   watches[i]->key,
 			                                   watches[i]->value,
 			                                   trState->cx,
