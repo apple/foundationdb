@@ -5049,8 +5049,8 @@ void changeServerKeys(StorageServer* data,
 			data->watches.triggerRange(range.begin, range.end);
 		} else if (!dataAvailable) {
 			// SOMEDAY: Avoid restarting adding/transferred shards
-			if (version ==
-			    data->initialClusterVersion - 1) { // bypass fetchkeys; shard is known empty at initial cluster version
+			// bypass fetchkeys; shard is known empty at initial cluster version
+			if (version == data->initialClusterVersion - 1) {
 				TraceEvent("ChangeServerKeysInitialRange", data->thisServerID)
 				    .detail("Begin", range.begin)
 				    .detail("End", range.end);
@@ -5841,8 +5841,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 					    .detail("Version", cloneCursor2->version().toString());
 				} else if (ver != invalidVersion) { // This change belongs to a version < minVersion
 					DEBUG_MUTATION("SSPeek", ver, msg, data->thisServerID);
-					if (ver == data->initialClusterVersion) { // TODO: Change to log based on current version, not
-						                                      // always set to 1
+					if (ver == data->initialClusterVersion) {
 						//TraceEvent("SSPeekMutation", data->thisServerID).log();
 						// The following trace event may produce a value with special characters
 						TraceEvent("SSPeekMutation", data->thisServerID)

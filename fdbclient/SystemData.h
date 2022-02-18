@@ -348,7 +348,6 @@ extern const KeyRef logsKey;
 //	Used during backup/recovery to restrict version requirements
 extern const KeyRef minRequiredCommitVersionKey;
 
-// TODO: Currently unused
 //	"\xff/versionEpochKey" = "[[uint64_t]]"
 //	Defines the base epoch representing version 0. The value itself is the
 //	number of seconds since the Unix epoch.

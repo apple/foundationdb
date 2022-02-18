@@ -1175,6 +1175,9 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	self->txnStateStore =
 	    keyValueStoreLogSystem(self->txnStateLogAdapter, self->dbgid, self->memoryLimit, false, false, true);
 
+	// TODO: Think about how to handle clusters being upgraded. They should
+	// continue to use the old method of calculating versions until explicitly
+	// upgraded!
 	// Version 0 occurs at the version epoch. The version epoch can be set
 	// through the management API, otherwise a default timestamp is used. The
 	// version epoch is the number of seconds since the Unix epoch.

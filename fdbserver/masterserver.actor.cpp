@@ -175,9 +175,7 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 				// 1,000,000]) to a value in the range [0.9, 1.1]). Note that these
 				// values are examples, and are based on the
 				// MAX_VERSION_RATE_OFFSET and MAX_VERSION_RATE_MODIFIER knobs.
-				double modifier = ((1.0 + SERVER_KNOBS->MAX_VERSION_RATE_MODIFIER) -
-				                   (1.0 - SERVER_KNOBS->MAX_VERSION_RATE_MODIFIER)) /
-				                  (2 * SERVER_KNOBS->MAX_VERSION_RATE_OFFSET);
+				double modifier = SERVER_KNOBS->MAX_VERSION_RATE_MODIFIER / SERVER_KNOBS->MAX_VERSION_RATE_OFFSET;
 				// Use std::pow to apply a more aggressive curve to version
 				// corrections. Versions further from the expected version will
 				// receive a larger multiplier.
@@ -188,7 +186,7 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 				               1.0 - SERVER_KNOBS->MAX_VERSION_RATE_MODIFIER,
 				               1.0 + SERVER_KNOBS->MAX_VERSION_RATE_MODIFIER);
 				;
-				toAdd = std::max((Version)1, (Version)(toAdd * versionCorrection));
+				toAdd = std::max(static_cast<Version>(1), static_cast<Version>(toAdd * versionCorrection));
 			}
 
 			rep.prevVersion = self->version;
