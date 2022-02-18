@@ -4403,6 +4403,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 		TraceEvent(SevDebug, "FKBeforeAvailable").detail("KeyBegin", keys.begin).detail("KeyEnd", keys.end);
 
+		// The keys could be different from the original FK range due to errors. However, the shard range in KVS remains
+		// the same. When persisting a shard, we could see range discrepancy.
 		setAvailableStatus(data,
 		                   keys,
 		                   true); // keys will be available when getLatestVersion()==transferredVersion is durable
@@ -5298,7 +5300,6 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			state int mutationNum = 0;
 			state VerUpdateRef* pUpdate = &fii.changes[changeNum];
 			for (; mutationNum < pUpdate->mutations.size(); mutationNum++) {
-				// std::cout << "---- Mutation Version: " << pUpdate->version << "\n";
 				updater.applyMutation(data, pUpdate->mutations[mutationNum], pUpdate->version, true);
 				mutationBytes += pUpdate->mutations[mutationNum].totalSize();
 				// data->counters.mutationBytes or data->counters.mutations should not be updated because they should
@@ -5386,7 +5387,6 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 						    .detail("Version", cloneCursor2->version().toString());
 					}
 
-					// std::cout << "---- Mutation Version: " << pUpdate->version << "\n";
 					updater.applyMutation(data, msg, ver, false);
 					mutationBytes += msg.totalSize();
 					data->counters.mutationBytes += msg.totalSize();
