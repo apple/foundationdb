@@ -2252,6 +2252,23 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 		       req.canReadPopped ? "T" : "F");
 	}
 
+	// send an empty version at begin - 1 to establish the stream quickly
+	ChangeFeedStreamReply emptyInitialReply;
+	MutationsAndVersionRef emptyInitialVersion;
+	emptyInitialVersion.version = req.begin - 1;
+	emptyInitialReply.mutations.push_back_deep(emptyInitialReply.arena, emptyInitialVersion);
+	ASSERT(emptyInitialReply.atLatestVersion == false);
+	ASSERT(emptyInitialReply.minStreamVersion == invalidVersion);
+	req.reply.send(emptyInitialReply);
+
+	if (DEBUG_SS_CFM(data->thisServerID, req.rangeID, req.begin)) {
+		printf("CFM: SS %s CF %s: CFSQ %s send empty initial version %lld\n",
+		       data->thisServerID.toString().substr(0, 4).c_str(),
+		       req.rangeID.printable().substr(0, 6).c_str(),
+		       streamUID.toString().substr(0, 8).c_str(),
+		       req.begin - 1);
+	}
+
 	try {
 		data->activeFeedQueries++;
 		loop {

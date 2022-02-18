@@ -7412,6 +7412,7 @@ Future<Void> ChangeFeedData::whenAtLeast(Version version) {
 ACTOR Future<Void> partialChangeFeedStream(StorageServerInterface interf,
                                            PromiseStream<Standalone<MutationsAndVersionRef>> results,
                                            ReplyPromiseStream<ChangeFeedStreamReply> replyStream,
+                                           Version begin,
                                            Version end,
                                            Reference<ChangeFeedData> feedData,
                                            Reference<ChangeFeedStorageData> storageData,
@@ -7422,7 +7423,7 @@ ACTOR Future<Void> partialChangeFeedStream(StorageServerInterface interf,
 	// calling lastReturnedVersion's callbacks could cause us to be cancelled
 	state Promise<Void> refresh = feedData->refresh;
 	state bool atLatestVersion = false;
-	state Version nextVersion = 0;
+	state Version nextVersion = begin;
 	try {
 		loop {
 			if (nextVersion >= end) {
@@ -7454,10 +7455,10 @@ ACTOR Future<Void> partialChangeFeedStream(StorageServerInterface interf,
 						           rep.minStreamVersion);
 					}
 
-					// TODO REMOVE, just for debugging
-					// set next version so debug statements trigger
-					if (nextVersion == 0) {
-						nextVersion = rep.mutations.front().version;
+					// handle first empty mutation on stream establishment explicitly
+					if (nextVersion == begin && rep.mutations.size() == 1 && rep.mutations[0].mutations.size() == 0 &&
+					    rep.mutations[0].version == begin - 1) {
+						continue;
 					}
 
 					if (rep.mutations.back().version > feedData->maxSeenVersion) {
@@ -7752,6 +7753,7 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 		fetchers[i] = partialChangeFeedStream(interfs[i].first,
 		                                      streams[i].results,
 		                                      results->streams[i],
+		                                      *begin,
 		                                      end,
 		                                      results,
 		                                      results->storageData[i],
