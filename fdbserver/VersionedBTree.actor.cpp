@@ -2144,9 +2144,10 @@ public:
 	          bool memoryOnly = false,
 	          Promise<Void> errorPromise = {})
 	  : ioLock(FLOW_KNOBS->MAX_OUTSTANDING, ioMaxPriority, FLOW_KNOBS->MAX_OUTSTANDING / 2),
-	    pageCacheBytes(pageCacheSizeBytes), pHeader(nullptr), desiredPageSize(desiredPageSize),
-	    desiredExtentSize(desiredExtentSize), filename(filename), memoryOnly(memoryOnly), errorPromise(errorPromise),
-	    remapCleanupWindow(remapCleanupWindow), concurrentExtentReads(new FlowLock(concurrentExtentReads)) {
+	    pageCacheBytes(pageCacheSizeBytes * (1.0 - SERVER_KNOBS->REDWOOD_DECODE_CACHE_RESERVATION)), pHeader(nullptr),
+	    desiredPageSize(desiredPageSize), desiredExtentSize(desiredExtentSize), filename(filename),
+	    memoryOnly(memoryOnly), errorPromise(errorPromise), remapCleanupWindow(remapCleanupWindow),
+	    concurrentExtentReads(new FlowLock(concurrentExtentReads)) {
 
 		if (!g_redwoodMetricsActor.isValid()) {
 			g_redwoodMetricsActor = redwoodMetricsLogger();
