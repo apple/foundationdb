@@ -2919,7 +2919,7 @@ TEST_CASE("/fdbserver/clustercontroller/shouldTriggerRecoveryDueToDegradedServer
 	testDbInfo.logSystemConfig.tLogs.push_back(remoteTLogSet);
 
 	GrvProxyInterface proxyInterf;
-	proxyInterf.getConsistentReadVersion = RequestStream<struct GetReadVersionRequest>(Endpoint({ proxy }, testUID));
+	proxyInterf.getConsistentReadVersion = RequestStream<struct GetReadVersionRequest, true>(Endpoint({ proxy }, testUID));
 	testDbInfo.client.grvProxies.push_back(proxyInterf);
 
 	ResolverInterface resolverInterf;
@@ -3028,11 +3028,11 @@ TEST_CASE("/fdbserver/clustercontroller/shouldTriggerFailoverDueToDegradedServer
 	testDbInfo.logSystemConfig.tLogs.push_back(remoteTLogSet);
 
 	GrvProxyInterface grvProxyInterf;
-	grvProxyInterf.getConsistentReadVersion = RequestStream<struct GetReadVersionRequest>(Endpoint({ proxy }, testUID));
+	grvProxyInterf.getConsistentReadVersion = RequestStream<struct GetReadVersionRequest, true>(Endpoint({ proxy }, testUID));
 	testDbInfo.client.grvProxies.push_back(grvProxyInterf);
 
 	CommitProxyInterface commitProxyInterf;
-	commitProxyInterf.commit = RequestStream<struct CommitTransactionRequest>(Endpoint({ proxy2 }, testUID));
+	commitProxyInterf.commit = RequestStream<struct CommitTransactionRequest, true>(Endpoint({ proxy2 }, testUID));
 	testDbInfo.client.commitProxies.push_back(commitProxyInterf);
 
 	ResolverInterface resolverInterf;

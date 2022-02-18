@@ -182,6 +182,8 @@ struct Peer : public ReferenceCounted<Peer> {
 	void onIncomingConnection(Reference<Peer> self, Reference<IConnection> conn, Future<Void> reader);
 };
 
+class IPAllowList;
+
 class FlowTransport {
 public:
 	FlowTransport(uint64_t transportId, int maxWellKnownEndpoints);
@@ -189,7 +191,7 @@ public:
 
 	// Creates a new FlowTransport and makes FlowTransport::transport() return it.  This uses g_network->global()
 	// variables, so it will be private to a simulation.
-	static void createInstance(bool isClient, uint64_t transportId, int maxWellKnownEndpoints);
+	static void createInstance(bool isClient, uint64_t transportId, int maxWellKnownEndpoints, IPAllowList const* allowList = nullptr);
 
 	static bool isClient() { return g_network->global(INetwork::enClientFailureMonitor) != nullptr; }
 

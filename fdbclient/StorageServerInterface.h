@@ -68,11 +68,11 @@ struct StorageServerInterface {
 	RequestStream<struct GetKeyValuesRequest, true> getKeyValues;
 	RequestStream<struct GetKeyValuesAndFlatMapRequest, true> getKeyValuesAndFlatMap;
 
-	RequestStream<struct GetShardStateRequest, true> getShardState;
+	RequestStream<struct GetShardStateRequest> getShardState;
 	RequestStream<struct WaitMetricsRequest> waitMetrics;
 	RequestStream<struct SplitMetricsRequest> splitMetrics;
 	RequestStream<struct GetStorageMetricsRequest> getStorageMetrics;
-	RequestStream<ReplyPromise<Void>, true> waitFailure;
+	RequestStream<ReplyPromise<Void>> waitFailure;
 	RequestStream<struct StorageQueuingMetricsRequest> getQueuingMetrics;
 
 	RequestStream<ReplyPromise<KeyValueStoreType>> getKeyValueStoreType;
@@ -106,8 +106,8 @@ struct StorageServerInterface {
 				serializer(ar, uniqueID, locality, getValue);
 			}
 			if (Ar::isDeserializing) {
-				getKey = RequestStream<struct GetKeyRequest>(getValue.getEndpoint().getAdjustedEndpoint(1));
-				getKeyValues = RequestStream<struct GetKeyValuesRequest>(getValue.getEndpoint().getAdjustedEndpoint(2));
+				getKey = RequestStream<struct GetKeyRequest, true>(getValue.getEndpoint().getAdjustedEndpoint(1));
+				getKeyValues = RequestStream<struct GetKeyValuesRequest, true>(getValue.getEndpoint().getAdjustedEndpoint(2));
 				getShardState =
 				    RequestStream<struct GetShardStateRequest>(getValue.getEndpoint().getAdjustedEndpoint(3));
 				waitMetrics = RequestStream<struct WaitMetricsRequest>(getValue.getEndpoint().getAdjustedEndpoint(4));
@@ -119,22 +119,22 @@ struct StorageServerInterface {
 				    RequestStream<struct StorageQueuingMetricsRequest>(getValue.getEndpoint().getAdjustedEndpoint(8));
 				getKeyValueStoreType =
 				    RequestStream<ReplyPromise<KeyValueStoreType>>(getValue.getEndpoint().getAdjustedEndpoint(9));
-				watchValue = RequestStream<struct WatchValueRequest>(getValue.getEndpoint().getAdjustedEndpoint(10));
+				watchValue = RequestStream<struct WatchValueRequest, true>(getValue.getEndpoint().getAdjustedEndpoint(10));
 				getReadHotRanges =
 				    RequestStream<struct ReadHotSubRangeRequest>(getValue.getEndpoint().getAdjustedEndpoint(11));
 				getRangeSplitPoints =
 				    RequestStream<struct SplitRangeRequest>(getValue.getEndpoint().getAdjustedEndpoint(12));
 				getKeyValuesStream =
-				    RequestStream<struct GetKeyValuesStreamRequest>(getValue.getEndpoint().getAdjustedEndpoint(13));
+				    RequestStream<struct GetKeyValuesStreamRequest, true>(getValue.getEndpoint().getAdjustedEndpoint(13));
 				getKeyValuesAndFlatMap =
-				    RequestStream<struct GetKeyValuesAndFlatMapRequest>(getValue.getEndpoint().getAdjustedEndpoint(14));
+				    RequestStream<struct GetKeyValuesAndFlatMapRequest, true>(getValue.getEndpoint().getAdjustedEndpoint(14));
 				changeFeedStream =
-				    RequestStream<struct ChangeFeedStreamRequest>(getValue.getEndpoint().getAdjustedEndpoint(15));
+				    RequestStream<struct ChangeFeedStreamRequest, true>(getValue.getEndpoint().getAdjustedEndpoint(15));
 				overlappingChangeFeeds =
-				    RequestStream<struct OverlappingChangeFeedsRequest>(getValue.getEndpoint().getAdjustedEndpoint(16));
+				    RequestStream<struct OverlappingChangeFeedsRequest, true>(getValue.getEndpoint().getAdjustedEndpoint(16));
 				changeFeedPop =
-				    RequestStream<struct ChangeFeedPopRequest>(getValue.getEndpoint().getAdjustedEndpoint(17));
-				changeFeedVersionUpdate = RequestStream<struct ChangeFeedVersionUpdateRequest>(
+				    RequestStream<struct ChangeFeedPopRequest, true>(getValue.getEndpoint().getAdjustedEndpoint(17));
+				changeFeedVersionUpdate = RequestStream<struct ChangeFeedVersionUpdateRequest, true>(
 				    getValue.getEndpoint().getAdjustedEndpoint(18));
 			}
 		} else {

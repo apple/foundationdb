@@ -229,7 +229,7 @@ struct GrvProxyData {
 
 	GrvProxyStats stats;
 	MasterInterface master;
-	RequestStream<GetReadVersionRequest> getConsistentReadVersion;
+	RequestStream<GetReadVersionRequest, true> getConsistentReadVersion;
 	Reference<ILogSystem> logSystem;
 
 	Database cx;
@@ -261,7 +261,7 @@ struct GrvProxyData {
 
 	GrvProxyData(UID dbgid,
 	             MasterInterface master,
-	             RequestStream<GetReadVersionRequest> getConsistentReadVersion,
+	             RequestStream<GetReadVersionRequest, true> getConsistentReadVersion,
 	             Reference<AsyncVar<ServerDBInfo> const> db)
 	  : dbgid(dbgid), stats(dbgid), master(master), getConsistentReadVersion(getConsistentReadVersion),
 	    cx(openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True)), db(db), lastStartCommit(0),

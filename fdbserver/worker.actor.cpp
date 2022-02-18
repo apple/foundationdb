@@ -749,14 +749,14 @@ TEST_CASE("/fdbserver/worker/addressInDbAndPrimaryDc") {
 	NetworkAddress grvProxyAddress(IPAddress(0x26262626), 1);
 	GrvProxyInterface grvProxyInterf;
 	grvProxyInterf.getConsistentReadVersion =
-	    RequestStream<struct GetReadVersionRequest>(Endpoint({ grvProxyAddress }, UID(1, 2)));
+	    RequestStream<struct GetReadVersionRequest, true>(Endpoint({ grvProxyAddress }, UID(1, 2)));
 	testDbInfo.client.grvProxies.push_back(grvProxyInterf);
 	ASSERT(addressInDbAndPrimaryDc(grvProxyAddress, makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
 
 	NetworkAddress commitProxyAddress(IPAddress(0x37373737), 1);
 	CommitProxyInterface commitProxyInterf;
 	commitProxyInterf.commit =
-	    RequestStream<struct CommitTransactionRequest>(Endpoint({ commitProxyAddress }, UID(1, 2)));
+	    RequestStream<struct CommitTransactionRequest, true>(Endpoint({ commitProxyAddress }, UID(1, 2)));
 	testDbInfo.client.commitProxies.push_back(commitProxyInterf);
 	ASSERT(addressInDbAndPrimaryDc(commitProxyAddress, makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
 

@@ -825,8 +825,8 @@ public:
 		queue->makeWellKnownEndpoint(Endpoint::Token(-1, wlTokenID), taskID);
 	}
 
-	bool operator==(const RequestStream<T>& rhs) const { return queue == rhs.queue; }
-	bool operator!=(const RequestStream<T>& rhs) const { return !(*this == rhs); }
+	bool operator==(const RequestStream<T, IsPublic>& rhs) const { return queue == rhs.queue; }
+	bool operator!=(const RequestStream<T, IsPublic>& rhs) const { return !(*this == rhs); }
 	bool isEmpty() const { return !queue->isReady(); }
 	uint32_t size() const { return queue->size(); }
 
@@ -838,29 +838,29 @@ private:
 	NetNotifiedQueue<T, IsPublic>* queue;
 };
 
-template <class Ar, class T>
-void save(Ar& ar, const RequestStream<T>& value) {
+template <class Ar, class T, bool P>
+void save(Ar& ar, const RequestStream<T, P>& value) {
 	auto const& ep = value.getEndpoint();
 	ar << ep;
 	UNSTOPPABLE_ASSERT(
 	    ep.getPrimaryAddress().isValid()); // No serializing PromiseStreams on a client with no public address
 }
 
-template <class Ar, class T>
-void load(Ar& ar, RequestStream<T>& value) {
+template <class Ar, class T, bool P>
+void load(Ar& ar, RequestStream<T, P>& value) {
 	Endpoint endpoint;
 	ar >> endpoint;
-	value = RequestStream<T>(endpoint);
+	value = RequestStream<T, P>(endpoint);
 }
 
-template <class T>
-struct serializable_traits<RequestStream<T>> : std::true_type {
+template <class T, bool P>
+struct serializable_traits<RequestStream<T, P>> : std::true_type {
 	template <class Archiver>
-	static void serialize(Archiver& ar, RequestStream<T>& stream) {
+	static void serialize(Archiver& ar, RequestStream<T, P>& stream) {
 		if constexpr (Archiver::isDeserializing) {
 			Endpoint endpoint;
 			serializer(ar, endpoint);
-			stream = RequestStream<T>(endpoint);
+			stream = RequestStream<T, P>(endpoint);
 		} else {
 			const auto& ep = stream.getEndpoint();
 			serializer(ar, ep);
