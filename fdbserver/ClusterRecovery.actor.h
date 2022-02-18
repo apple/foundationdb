@@ -169,6 +169,7 @@ struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> 
 	AsyncTrigger registrationTrigger;
 	Version lastEpochEnd, // The last version in the old epoch not (to be) rolled back in this recovery
 	    recoveryTransactionVersion; // The first version in this epoch
+	uint64_t versionEpoch; // The epoch which all versions are based off of
 	double lastCommitTime;
 
 	Version liveCommittedVersion; // The largest live committed version reported by commit proxies.

@@ -1128,8 +1128,8 @@ ACTOR Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
 	     newTLogServers(self, recruits, oldLogSystem, &confChanges));
 
 	// Update recovery related information to the newly elected sequencer (master) process.
-	wait(brokenPromiseToNever(self->masterInterface.updateRecoveryData.getReply(
-	    UpdateRecoveryDataRequest(self->recoveryTransactionVersion, self->lastEpochEnd, self->commitProxies))));
+	wait(brokenPromiseToNever(self->masterInterface.updateRecoveryData.getReply(UpdateRecoveryDataRequest(
+	    self->recoveryTransactionVersion, self->lastEpochEnd, self->commitProxies, self->versionEpoch))));
 
 	return confChanges;
 }
@@ -1174,6 +1174,15 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	self->txnStateLogAdapter = openDiskQueueAdapter(oldLogSystem, myLocality, txsPoppedVersion);
 	self->txnStateStore =
 	    keyValueStoreLogSystem(self->txnStateLogAdapter, self->dbgid, self->memoryLimit, false, false, true);
+
+	// Version 0 occurs at the version epoch. The version epoch can be set
+	// through the management API, otherwise a default timestamp is used. The
+	// version epoch is the number of seconds since the Unix epoch.
+	Optional<Standalone<StringRef>> versionEpochValue = wait(self->txnStateStore->readValue(versionEpochKey));
+	self->versionEpoch = SERVER_KNOBS->DEFAULT_VERSION_EPOCH;
+	if (versionEpochValue.present()) {
+		self->versionEpoch = BinaryReader::fromStringRef<Version>(versionEpochValue.get(), Unversioned());
+	}
 
 	// Versionstamped operations (particularly those applied from DR) define a minimum commit version
 	// that we may recover to, as they embed the version in user-readable data and require that no

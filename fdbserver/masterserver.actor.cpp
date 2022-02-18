@@ -65,7 +65,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	Version version; // The last version assigned to a proxy by getVersion()
 	double lastVersionTime;
 	IKeyValueStore* txnStateStore;
-	Version referenceVersion = -1;
+	Version referenceVersion = invalidVersion;
 
 	std::vector<CommitProxyInterface> commitProxies;
 	std::map<UID, CommitProxyVersionReplies> lastCommitProxyVersionReplies;
@@ -96,16 +96,11 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	  : dbgid(myInterface.id()), lastEpochEnd(invalidVersion), recoveryTransactionVersion(invalidVersion),
 	    liveCommittedVersion(invalidVersion), databaseLocked(false), minKnownCommittedVersion(invalidVersion),
 	    coordinators(coordinators), version(invalidVersion), lastVersionTime(0), txnStateStore(nullptr),
-	    referenceVersion(1262307600 * SERVER_KNOBS->VERSIONS_PER_SECOND), myInterface(myInterface),
-	    forceRecovery(forceRecovery), cc("Master", dbgid.toString()),
+	    myInterface(myInterface), forceRecovery(forceRecovery), cc("Master", dbgid.toString()),
 	    getCommitVersionRequests("GetCommitVersionRequests", cc),
 	    getLiveCommittedVersionRequests("GetLiveCommittedVersionRequests", cc),
 	    reportLiveCommittedVersionRequests("ReportLiveCommittedVersionRequests", cc) {
 		logger = traceCounters("MasterMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "MasterMetrics");
-		// TODO: Temporary, until data is fetched during master creation
-		if (g_network->isSimulated()) {
-			referenceVersion = 0;
-		}
 		if (forceRecovery && !myInterface.locality.dcId().present()) {
 			TraceEvent(SevError, "ForcedRecoveryRequiresDcID").log();
 			forceRecovery = false;
@@ -164,33 +159,37 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 			    std::max<Version>(1,
 			                      std::min<Version>(SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS,
 			                                        SERVER_KNOBS->VERSIONS_PER_SECOND * (t1 - self->lastVersionTime)));
-			Version expectedVersion = g_network->timer() * SERVER_KNOBS->VERSIONS_PER_SECOND - self->referenceVersion;
 
-			// How far the new version is off from the expected version.
-			Version offset = self->version + toAdd - expectedVersion;
-			// Clamp the offset to a specific range. This prevents huge version
-			// jumps.
-			Version clamped =
-			    std::clamp(offset, -SERVER_KNOBS->MAX_VERSION_RATE_OFFSET, SERVER_KNOBS->MAX_VERSION_RATE_OFFSET);
+			if (self->referenceVersion >= 0) {
+				Version expectedVersion =
+				    g_network->timer() * SERVER_KNOBS->VERSIONS_PER_SECOND - self->referenceVersion;
 
-			// Translate the version offset (in the range [-1,000,000,
-			// 1,000,000]) to a value in the range [0.9, 1.1]). Note that these
-			// values are examples, and are based on the
-			// MAX_VERSION_RATE_OFFSET and MAX_VERSION_RATE_MODIFIER knobs.
-			double modifier =
-			    ((1.0 + SERVER_KNOBS->MAX_VERSION_RATE_MODIFIER) - (1.0 - SERVER_KNOBS->MAX_VERSION_RATE_MODIFIER)) /
-			    (2 * SERVER_KNOBS->MAX_VERSION_RATE_OFFSET);
-			// Use std::pow to apply a more aggressive curve to version
-			// corrections. Versions further from the expected version will
-			// receive a larger multiplier.
-			double versionCorrection =
-			    std::clamp(std::pow((1.0 - SERVER_KNOBS->MAX_VERSION_RATE_MODIFIER) +
-			                            modifier * (-clamped + SERVER_KNOBS->MAX_VERSION_RATE_OFFSET),
-			                        2.5),
-			               1.0 - SERVER_KNOBS->MAX_VERSION_RATE_MODIFIER,
-			               1.0 + SERVER_KNOBS->MAX_VERSION_RATE_MODIFIER);
-			;
-			toAdd *= versionCorrection;
+				// How far the new version is off from the expected version.
+				Version offset = self->version + toAdd - expectedVersion;
+				// Clamp the offset to a specific range. This prevents huge version
+				// jumps.
+				Version clamped =
+				    std::clamp(offset, -SERVER_KNOBS->MAX_VERSION_RATE_OFFSET, SERVER_KNOBS->MAX_VERSION_RATE_OFFSET);
+
+				// Translate the version offset (in the range [-1,000,000,
+				// 1,000,000]) to a value in the range [0.9, 1.1]). Note that these
+				// values are examples, and are based on the
+				// MAX_VERSION_RATE_OFFSET and MAX_VERSION_RATE_MODIFIER knobs.
+				double modifier = ((1.0 + SERVER_KNOBS->MAX_VERSION_RATE_MODIFIER) -
+				                   (1.0 - SERVER_KNOBS->MAX_VERSION_RATE_MODIFIER)) /
+				                  (2 * SERVER_KNOBS->MAX_VERSION_RATE_OFFSET);
+				// Use std::pow to apply a more aggressive curve to version
+				// corrections. Versions further from the expected version will
+				// receive a larger multiplier.
+				double versionCorrection =
+				    std::clamp(std::pow((1.0 - SERVER_KNOBS->MAX_VERSION_RATE_MODIFIER) +
+				                            modifier * (-clamped + SERVER_KNOBS->MAX_VERSION_RATE_OFFSET),
+				                        2.5),
+				               1.0 - SERVER_KNOBS->MAX_VERSION_RATE_MODIFIER,
+				               1.0 + SERVER_KNOBS->MAX_VERSION_RATE_MODIFIER);
+				;
+				toAdd = std::max((Version)1, (Version)(toAdd * versionCorrection));
+			}
 
 			rep.prevVersion = self->version;
 			self->version += toAdd;
@@ -291,7 +290,8 @@ ACTOR Future<Void> updateRecoveryData(Reference<MasterData> self) {
 				TraceEvent("UpdateRecoveryData", self->dbgid)
 				    .detail("RecoveryTxnVersion", req.recoveryTransactionVersion)
 				    .detail("LastEpochEnd", req.lastEpochEnd)
-				    .detail("NumCommitProxies", req.commitProxies.size());
+				    .detail("NumCommitProxies", req.commitProxies.size())
+				    .detail("VersionEpoch", req.versionEpoch);
 
 				if (self->recoveryTransactionVersion == invalidVersion ||
 				    req.recoveryTransactionVersion > self->recoveryTransactionVersion) {
@@ -308,6 +308,8 @@ ACTOR Future<Void> updateRecoveryData(Reference<MasterData> self) {
 						self->lastCommitProxyVersionReplies[p.id()] = CommitProxyVersionReplies();
 					}
 				}
+				self->referenceVersion =
+				    !g_network->isSimulated() ? req.versionEpoch * SERVER_KNOBS->VERSIONS_PER_SECOND : 0;
 				req.reply.send(Void());
 			}
 		}
