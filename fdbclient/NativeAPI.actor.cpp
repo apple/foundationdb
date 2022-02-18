@@ -125,10 +125,14 @@ Future<REPLY_TYPE(Request)> loadBalance(
 }
 } // namespace
 
-FDB_BOOLEAN_PARAM(UseTenant);
 FDB_BOOLEAN_PARAM(TransactionRecordLogInfo);
-FDB_BOOLEAN_PARAM(ApplyTenantPrefix);
 FDB_DEFINE_BOOLEAN_PARAM(UseProvisionalProxies);
+
+// Whether or not a request should include the tenant name
+FDB_BOOLEAN_PARAM(UseTenant);
+
+// Whether or not a function should implicitly add the tenant prefix to the request and/or remove it from the result
+FDB_BOOLEAN_PARAM(ApplyTenantPrefix);
 
 NetworkOptions networkOptions;
 TLSConfig tlsConfig(TLSEndpointType::CLIENT);
@@ -4323,7 +4327,8 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
 
 ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Reference<TransactionState> trState,
                                                                 KeyRange keys,
-                                                                int64_t chunkSize);
+                                                                int64_t chunkSize,
+                                                                Optional<Future<Key>> tenantPrefix);
 
 static KeyRange intersect(KeyRangeRef lhs, KeyRangeRef rhs) {
 	return KeyRange(KeyRangeRef(std::max(lhs.begin, rhs.begin), std::min(lhs.end, rhs.end)));
@@ -4348,6 +4353,12 @@ ACTOR Future<Void> getRangeStream(Reference<TransactionState> trState,
 
 	state Version version = wait(fVersion);
 	trState->cx->validateVersion(version);
+
+	Key resolvedTenantPrefix = wait(trState->tenantPrefix);
+	if (resolvedTenantPrefix.size() > 0) {
+		begin = KeySelectorRef(begin.getKey().withPrefix(resolvedTenantPrefix), begin.orEqual, begin.offset);
+		end = KeySelectorRef(end.getKey().withPrefix(resolvedTenantPrefix), end.orEqual, end.offset);
+	}
 
 	Future<Key> fb = resolveKey(trState, begin, version);
 	state Future<Key> fe = resolveKey(trState, end, version);
@@ -4375,8 +4386,8 @@ ACTOR Future<Void> getRangeStream(Reference<TransactionState> trState,
 		state std::pair<KeyRange, Reference<LocationInfo>> ssi =
 		    wait(getKeyLocation(trState, reverse ? e : b, &StorageServerInterface::getKeyValuesStream, reverse));
 		state KeyRange shardIntersection = intersect(ssi.first, KeyRangeRef(b, e));
-		state Standalone<VectorRef<KeyRef>> splitPoints =
-		    wait(getRangeSplitPoints(trState, shardIntersection, CLIENT_KNOBS->RANGESTREAM_FRAGMENT_SIZE));
+		state Standalone<VectorRef<KeyRef>> splitPoints = wait(getRangeSplitPoints(
+		    trState, shardIntersection, CLIENT_KNOBS->RANGESTREAM_FRAGMENT_SIZE, Optional<Future<Key>>()));
 		state std::vector<KeyRange> toSend;
 		// state std::vector<Future<std::list<KeyRangeRef>::iterator>> outstandingRequests;
 
@@ -4477,7 +4488,7 @@ ACTOR Future<Key> getTenantPrefixImpl(Reference<TransactionState> trState, Futur
 
 Future<Key> Transaction::getTenantPrefix() {
 	if (!trState->tenant.present()) {
-		return Key();
+		trState->tenantPrefix = Key();
 	} else if (!trState->tenantPrefix.isValid()) {
 		trState->tenantPrefix = getTenantPrefixImpl(trState, getReadVersion());
 	}
@@ -5459,9 +5470,14 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 			wait(store(req.transaction.read_snapshot, readVersion));
 		}
 
-		Key resolvedTenantPrefix = wait(trState->tenantPrefix);
-		if (!resolvedTenantPrefix.empty()) {
-			applyTenantPrefix(req, resolvedTenantPrefix);
+		try {
+			Key resolvedTenantPrefix = wait(trState->tenantPrefix);
+			if (!resolvedTenantPrefix.empty()) {
+				applyTenantPrefix(req, resolvedTenantPrefix);
+			}
+		} catch (Error& e) {
+			// TODO: use a different error here?
+			throw not_committed();
 		}
 
 		startTime = now();
@@ -6694,8 +6710,19 @@ Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> DatabaseContext::getReadH
 
 ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Reference<TransactionState> trState,
                                                                 KeyRange keys,
-                                                                int64_t chunkSize) {
+                                                                int64_t chunkSize,
+                                                                Optional<Future<Key>> tenantPrefix) {
 	state Span span("NAPI:GetRangeSplitPoints"_loc, trState->spanID);
+
+	state Key resolvedTenantPrefix;
+	if (tenantPrefix.present()) {
+		Key _resolvedTenantPrefix = wait(trState->tenantPrefix);
+		if (_resolvedTenantPrefix.size() > 0) {
+			resolvedTenantPrefix = _resolvedTenantPrefix;
+			keys = keys.withPrefix(resolvedTenantPrefix);
+		}
+	}
+
 	loop {
 		state std::vector<std::pair<KeyRange, Reference<LocationInfo>>> locations = wait(getKeyRangeLocations(
 		    trState, keys, CLIENT_KNOBS->TOO_MANY, Reverse::False, &StorageServerInterface::getRangeSplitPoints));
@@ -6716,19 +6743,28 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Reference<Transa
 			wait(waitForAll(fReplies));
 			Standalone<VectorRef<KeyRef>> results;
 
-			results.push_back_deep(results.arena(), keys.begin);
+			results.push_back_deep(results.arena(), keys.begin.removePrefix(resolvedTenantPrefix));
 			for (int i = 0; i < nLocs; i++) {
 				if (i > 0) {
-					results.push_back_deep(results.arena(), locations[i].first.begin); // Need this shard boundary
+					results.push_back_deep(
+					    results.arena(),
+					    locations[i].first.begin.removePrefix(resolvedTenantPrefix)); // Need this shard boundary
 				}
 				if (fReplies[i].get().splitPoints.size() > 0) {
-					results.append(
-					    results.arena(), fReplies[i].get().splitPoints.begin(), fReplies[i].get().splitPoints.size());
+					if (resolvedTenantPrefix.size() == 0) {
+						results.append(results.arena(),
+						               fReplies[i].get().splitPoints.begin(),
+						               fReplies[i].get().splitPoints.size());
+					} else {
+						for (auto sp : fReplies[i].get().splitPoints) {
+							results.push_back(results.arena(), sp.removePrefix(resolvedTenantPrefix));
+						}
+					}
 					results.arena().dependsOn(fReplies[i].get().splitPoints.arena());
 				}
 			}
 			if (results.back() != keys.end) {
-				results.push_back_deep(results.arena(), keys.end);
+				results.push_back_deep(results.arena(), keys.end.removePrefix(resolvedTenantPrefix));
 			}
 
 			return results;
@@ -6744,7 +6780,7 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Reference<Transa
 }
 
 Future<Standalone<VectorRef<KeyRef>>> Transaction::getRangeSplitPoints(KeyRange const& keys, int64_t chunkSize) {
-	return ::getRangeSplitPoints(trState, keys, chunkSize);
+	return ::getRangeSplitPoints(trState, keys, chunkSize, getTenantPrefix());
 }
 
 #define BG_REQUEST_DEBUG false
