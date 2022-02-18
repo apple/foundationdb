@@ -18,7 +18,7 @@ endif()
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64" OR CMAKE_SYSTEM_PROCESSOR MATCHES "arm64")
   set(cpu "aarch64")
-elseif(CMAKE_SYSTEM_PROCESSOR STREQUAL "^(ppc64le|powerpc64le)")
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(ppc64le|powerpc64le)")
   set(cpu "ppc64le")
 endif()
 
