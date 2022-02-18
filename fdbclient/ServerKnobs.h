@@ -744,6 +744,10 @@ public:
 	double REDWOOD_METRICS_INTERVAL;
 	double REDWOOD_HISTOGRAM_INTERVAL;
 	bool REDWOOD_EVICT_UPDATED_PAGES; // Whether to prioritize eviction of updated pages from cache.
+	double REDWOOD_DECODE_CACHE_RESERVATION; // Fraction of the configured page cache memory that should be reserved
+	                                         // for use by DecodeCache instances.  This is a soft reservation for this
+	                                         // purpose and not a hard limit on memory usage by these structures.  This
+	                                         // value may need to be tuned for a particular workload.
 
 	// Server request latency measurement
 	int LATENCY_SAMPLE_SIZE;
