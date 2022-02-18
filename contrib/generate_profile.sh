@@ -26,7 +26,7 @@ $fdbdir/bin/mako -p 1 -t 2 --keylen 32 --vallen 16 --mode run --rows 10000 --tra
 # Shutdown fdbserver to trigger profile dumping
 fdbmonitor_pid=$(cat $fdbdir/sandbox/fdbmonitor.pid)
 fdbserver_pid=$(cat /proc/$fdbmonitor_pid/task/$fdbmonitor_pid/children)
-gdb --batch --eval-command 'call exit(0)' --pid $fdbserver_pid
+gdb --batch --eval-command 'call (void)exit(0)' --pid $fdbserver_pid
 
 # Clean up
 kill -9 $fdbmonitor_pid
