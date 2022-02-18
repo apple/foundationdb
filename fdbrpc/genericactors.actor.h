@@ -30,8 +30,8 @@
 #include "fdbrpc/fdbrpc.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-ACTOR template <class Req>
-Future<REPLY_TYPE(Req)> retryBrokenPromise(RequestStream<Req> to, Req request) {
+ACTOR template <class Req, bool P>
+Future<REPLY_TYPE(Req)> retryBrokenPromise(RequestStream<Req, P> to, Req request) {
 	// Like to.getReply(request), except that a broken_promise exception results in retrying request immediately.
 	// Suitable for use with well known endpoints, which are likely to return to existence after the other process
 	// restarts. Not normally useful for ordinary endpoints, which conventionally are permanently destroyed after
@@ -50,8 +50,8 @@ Future<REPLY_TYPE(Req)> retryBrokenPromise(RequestStream<Req> to, Req request) {
 	}
 }
 
-ACTOR template <class Req>
-Future<REPLY_TYPE(Req)> retryBrokenPromise(RequestStream<Req> to, Req request, TaskPriority taskID) {
+ACTOR template <class Req, bool P>
+Future<REPLY_TYPE(Req)> retryBrokenPromise(RequestStream<Req, P> to, Req request, TaskPriority taskID) {
 	// Like to.getReply(request), except that a broken_promise exception results in retrying request immediately.
 	// Suitable for use with well known endpoints, which are likely to return to existence after the other process
 	// restarts. Not normally useful for ordinary endpoints, which conventionally are permanently destroyed after

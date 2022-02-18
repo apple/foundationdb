@@ -71,9 +71,9 @@ struct CommitProxyInterface {
 		serializer(ar, processId, provisional, commit);
 		if (Archive::isDeserializing) {
 			getConsistentReadVersion =
-			    RequestStream<struct GetReadVersionRequest>(commit.getEndpoint().getAdjustedEndpoint(1));
+			    RequestStream<struct GetReadVersionRequest, true>(commit.getEndpoint().getAdjustedEndpoint(1));
 			getKeyServersLocations =
-			    RequestStream<struct GetKeyServerLocationsRequest>(commit.getEndpoint().getAdjustedEndpoint(2));
+			    RequestStream<struct GetKeyServerLocationsRequest, true>(commit.getEndpoint().getAdjustedEndpoint(2));
 			getStorageServerRejoinInfo =
 			    RequestStream<struct GetStorageServerRejoinInfoRequest>(commit.getEndpoint().getAdjustedEndpoint(3));
 			waitFailure = RequestStream<ReplyPromise<Void>>(commit.getEndpoint().getAdjustedEndpoint(4));

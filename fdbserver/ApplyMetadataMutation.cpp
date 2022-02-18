@@ -107,7 +107,7 @@ private:
 	KeyRangeMap<ServerCacheInfo>* keyInfo = nullptr;
 	KeyRangeMap<bool>* cacheInfo = nullptr;
 	std::map<Key, ApplyMutationsData>* uid_applyMutationsData = nullptr;
-	RequestStream<CommitTransactionRequest> commit = RequestStream<CommitTransactionRequest>();
+	RequestStream<CommitTransactionRequest, true> commit = RequestStream<CommitTransactionRequest, true>();
 	Database cx = Database();
 	NotifiedVersion* commitVersion = nullptr;
 	std::map<UID, Reference<StorageInfo>>* storageCache = nullptr;
