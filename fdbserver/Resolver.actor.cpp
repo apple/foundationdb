@@ -353,7 +353,10 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 			// The condition here must match CommitBatch::applyMetadataToCommittedTransactions()
 			if (reply.committed[t] == ConflictBatch::TransactionCommitted && !self->forceRecovery &&
 			    SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS && (!isLocked || req.transactions[t].lock_aware)) {
-				applyMetadataMutations(req.transactions[t].spanContext, resolverData, req.transactions[t].mutations);
+				SpanID spanContext =
+				    req.transactions[t].spanContext.present() ? req.transactions[t].spanContext.get() : SpanID();
+
+				applyMetadataMutations(spanContext, resolverData, req.transactions[t].mutations);
 			}
 			TEST(self->forceRecovery); // Resolver detects forced recovery
 		}
