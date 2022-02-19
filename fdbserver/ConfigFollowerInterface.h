@@ -191,6 +191,8 @@ struct ConfigFollowerGetCommittedVersionRequest {
 	static constexpr FileIdentifier file_identifier = 1093472;
 	ReplyPromise<ConfigFollowerGetCommittedVersionReply> reply;
 
+	ConfigFollowerGetCommittedVersionRequest() = default;
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, reply);
@@ -218,6 +220,7 @@ public:
 	bool operator==(ConfigFollowerInterface const& rhs) const;
 	bool operator!=(ConfigFollowerInterface const& rhs) const;
 	UID id() const { return _id; }
+	NetworkAddress address() const { return getSnapshotAndChanges.getEndpoint().getPrimaryAddress(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {

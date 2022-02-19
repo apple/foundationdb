@@ -381,23 +381,29 @@ ACTOR Future<bool> excludeCommandActor(Reference<IDatabase> db, std::vector<Stri
 CommandFactory excludeFactory(
     "exclude",
     CommandHelp(
-        "exclude [FORCE] [failed] [no_wait] [<ADDRESS...>] [locality_dcid:<excludedcid>] "
-        "[locality_zoneid:<excludezoneid>] [locality_machineid:<excludemachineid>] "
-        "[locality_processid:<excludeprocessid>] or any locality data",
-        "exclude servers from the database either with IP address match or locality match",
-        "If no addresses or locaities are specified, lists the set of excluded addresses and localities."
-        "\n\nFor each IP address or IP:port pair in <ADDRESS...> or any LocalityData attributes (like dcid, "
-        "zoneid, "
-        "machineid, processid), adds the address/locality to the set of excluded servers and localities then waits "
-        "until all database state has been safely moved away from the specified servers. If 'no_wait' is set, the "
-        "command returns \nimmediately without checking if the exclusions have completed successfully.\n"
+        "exclude [FORCE] [failed] [no_wait] [<ADDRESS...>] [locality_dcid:<excludedcid>]\n"
+        "        [locality_zoneid:<excludezoneid>] [locality_machineid:<excludemachineid>]\n"
+        "        [locality_processid:<excludeprocessid>] [locality_<KEY>:<localtyvalue>]",
+        "exclude servers from the database by IP address or locality",
+        "If no addresses or localities are specified, lists the set of excluded addresses and localities.\n"
+        "\n"
+        "For each IP address or IP:port pair in <ADDRESS...> and/or each locality attribute (like dcid, "
+        "zoneid, machineid, processid), adds the address/locality to the set of exclusions and waits until all "
+        "database state has been safely moved away from affected servers.\n"
+        "\n"
         "If 'FORCE' is set, the command does not perform safety checks before excluding.\n"
-        "If 'failed' is set, the transaction log queue is dropped pre-emptively before waiting\n"
-        "for data movement to finish and the server cannot be included again."
-        "\n\nWARNING of potential dataloss\n:"
-        "If a to-be-excluded server is the last server of some team(s), and 'failed' is set, the data in the team(s) "
-        "will be lost. 'failed' should be set only if the server(s) have permanently failed."
-        "In the case all servers of a team have failed permanently and dataloss has been a fact, excluding all the "
-        "servers will clean up the corresponding keyrange, and fix the invalid metadata. The keyrange will be "
-        "assigned to a new team as an empty shard."));
+        "\n"
+        "If 'no_wait' is set, the command returns immediately without checking if the exclusions have completed "
+        "successfully.\n"
+        "\n"
+        "If 'failed' is set, the cluster will immediately forget all data associated with the excluded processes. "
+        "Doing so can be helpful if the process is not expected to recover, as it will allow the cluster to delete "
+        "state that would be needed to catch the failed process up. Re-including a process excluded with 'failed' will "
+        "result in it joining as an empty process.\n"
+        "\n"
+        "If a cluster has failed storage servers that result in all replicas of some data being permanently gone, "
+        "'exclude failed' can be used to clean up the affected key ranges by restoring them to empty.\n"
+        "\n"
+        "WARNING: use of 'exclude failed' can result in data loss. If an excluded server contains the last replica of "
+        "some data, then using the 'failed' option will permanently remove that data from the cluster."));
 } // namespace fdb_cli
