@@ -1832,6 +1832,77 @@ ACTOR Future<Void> fetchCheckpointQ(StorageServer* self, FetchCheckpointRequest 
 	return Void();
 }
 
+ACTOR Future<Void> fetchCheckpointKeyValuesQ(StorageServer* self, FetchCheckpointKeyValuesRequest req) {
+	TraceEvent("ServeFetchCheckpointKeyValuesBegin", self->thisServerID)
+	    .detail("CheckpointID", req.checkpointID)
+	    .detail("Range", req.range);
+
+	req.reply.setByteLimit(SERVER_KNOBS->CHECKPOINT_TRANSFER_BLOCK_BYTES);
+
+	// Returns error is the checkpoint cannot be found.
+	const auto it = self->checkpoints.find(req.checkpointID);
+	if (it == self->checkpoints.end()) {
+		req.reply.sendError(checkpoint_not_found());
+		TraceEvent("ServeFetchCheckpointNotFound", self->thisServerID).detail("CheckpointID", req.checkpointID);
+		return Void();
+	}
+
+	try {
+		state ICheckpointReader* reader = newCheckpointReader(it->second, deterministicRandom()->randomUniqueID());
+		wait(reader->init(req.range));
+
+		std::cout << "Init Checkpoint Done" << std::endl;
+
+		loop {
+			state RangeResult res =
+			    wait(reader->nextKeyValues(CLIENT_KNOBS->REPLY_BYTE_LIMIT, CLIENT_KNOBS->REPLY_BYTE_LIMIT));
+			std::cout << "Read checkpoint range size:" << res.size() << std::endl;
+			wait(req.reply.onReady());
+			FetchCheckpointKeyValuesStreamReply reply;
+			reply.arena.dependsOn(res.arena());
+			reply.data.reserve(reply.arena, res.size());
+			std::cout << "Before kvs." << reply.expectedSize() << std::endl;
+			// reply.arena.dependsOn(res.arena());
+
+			for (int i = 0; i < res.size(); ++i) {
+				std::cout << "Key:" << res[i].key.toString() << "Value: " << res[i].value.toString() << std::endl;
+				reply.data.push_back(reply.arena, res[i]);
+				// reply.data.push_back_deep(reply.data.arena(), res[i].key, res[i].value);
+			}
+			// for (const auto* kv = res.begin(); kv != res.end(); ++kv) {
+			// 	std::cout << "KV:" << kv->key.toString() << std::endl;
+			// 	reply.data.push_back_deep(reply.arena, *kv);
+			// }
+			std::cout << "Packed kvs." << reply.expectedSize() << std::endl;
+			for (int i = 0; i < reply.data.size(); ++i) {
+				std::cout << "Key:" << reply.data[i].key.toString() << "Value: " << reply.data[i].value.toString()
+				          << std::endl;
+			}
+			req.reply.send(reply);
+			std::cout << "Sent." << std::endl;
+		}
+	} catch (Error& e) {
+		if (e.code() == error_code_end_of_stream) {
+			req.reply.sendError(end_of_stream());
+			TraceEvent("ServeFetchCheckpointKeyValuesEnd", self->thisServerID)
+			    .detail("CheckpointID", req.checkpointID)
+			    .detail("Range", req.range);
+		} else {
+			TraceEvent(SevWarnAlways, "ServerFetchCheckpointKeyValuesFailure")
+			    .detail("CheckpointID", req.checkpointID)
+			    .detail("Range", req.range)
+			    .error(e, /*includeCancel=*/true);
+			if (!canReplyWith(e)) {
+				throw e;
+			}
+			req.reply.sendError(e);
+		}
+	}
+
+	wait(reader->close());
+	return Void();
+}
+
 ACTOR Future<Void> overlappingChangeFeedsQ(StorageServer* data, OverlappingChangeFeedsRequest req) {
 	wait(delay(0));
 	wait(data->version.whenAtLeast(req.minVersion));
@@ -7092,6 +7163,9 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 			}
 			when(FetchCheckpointRequest req = waitNext(ssi.fetchCheckpoint.getFuture())) {
 				self->actors.add(fetchCheckpointQ(self, req));
+			}
+			when(FetchCheckpointKeyValuesRequest req = waitNext(ssi.fetchCheckpointKeyValues.getFuture())) {
+				self->actors.add(fetchCheckpointKeyValuesQ(self, req));
 			}
 			when(wait(updateProcessStatsTimer)) {
 				updateProcessStats(self);

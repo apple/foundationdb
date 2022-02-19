@@ -25,6 +25,10 @@
 #elif !defined(FDBSERVER_ROCKSDB_CHECKPOINT_UTILS_ACTOR_H)
 #define FDBSERVER_ROCKSDB_CHECKPOINT_UTILS_ACTOR_H
 
+#ifdef SSD_ROCKSDB_EXPERIMENTAL
+#include <rocksdb/slice.h>
+#endif // SSD_ROCKSDB_EXPERIMENTAL
+
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/ServerCheckpoint.actor.h"
 #include "flow/flow.h"
@@ -193,6 +197,30 @@ struct RocksDBColumnFamilyCheckpoint {
 	}
 };
 
+// Checkpoint metadata associated with RocksDB format.
+// The checkpoint is created via rocksdb::CreateCheckpoint().
+struct RocksDBCheckpoint {
+	constexpr static FileIdentifier file_identifier = 13804347;
+	std::string checkpointDir; // Checkpoint directory on the storage server.
+	std::vector<std::string> sstFiles; // All checkpoint files.
+	std::vector<std::pair<KeyRange, std::string>> fetchedFiles; // Used for fetchCheckpoint, to record the progress.
+
+	CheckpointFormat format() const { return RocksDB; }
+
+	std::string toString() const {
+		std::string res = "RocksDBCheckpoint:\nCheckpoint dir:\n" + checkpointDir + "\nFiles:\n";
+		for (const std::string& file : sstFiles) {
+			res += (file + "\n");
+		}
+		return res;
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, checkpointDir, sstFiles, fetchedFiles);
+	}
+};
+
 // Fetch the checkpoint file(s) to local dir, the checkpoint is specified by initialState.
 // If cFun is provided, the fetch progress can be checkpointed, so that next time, the fetch process
 // can be continued, in case of crash.
@@ -206,4 +234,6 @@ ACTOR Future<Void> deleteRocksCFCheckpoint(CheckpointMetaData checkpoint);
 ICheckpointReader* newRocksDBCheckpointReader(const CheckpointMetaData& checkpoint, UID logID);
 
 RocksDBColumnFamilyCheckpoint getRocksCF(const CheckpointMetaData& checkpoint);
+
+RocksDBCheckpoint getRocksCheckpoint(const CheckpointMetaData& checkpoint);
 #endif

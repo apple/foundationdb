@@ -174,6 +174,7 @@ ERROR( blob_granule_no_ryw, 2036, "Blob Granule Read Transactions must be specif
 ERROR( blob_granule_not_materialized, 2037, "Blob Granule Read Transactions must be specified as ryw-disabled" )
 ERROR( get_key_values_and_map_has_more, 2038, "getRangeAndFlatMap does not support continuation for now" )
 ERROR( checkpoint_not_found, 2039, "Checkpoint not found" )
+ERROR( invalid_checkpoint_format, 2040, "Invalid checkpoint format" )
 
 ERROR( incompatible_protocol_version, 2100, "Incompatible protocol version" )
 ERROR( transaction_too_large, 2101, "Transaction exceeds byte limit" )
