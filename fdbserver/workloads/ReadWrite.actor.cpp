@@ -77,59 +77,63 @@ DESCR struct ReadMetric {
 };
 
 struct ReadWriteWorkload : KVWorkload {
+	// general test setting
+	Standalone<StringRef> descriptionString;
+	bool doSetup, cancelWorkersAtDuration;
+	double testDuration, transactionsPerSecond, warmingDelay, maxInsertRate, debugInterval, debugTime;
+	double metricsStart, metricsDuration;
+	std::vector<uint64_t> insertionCountsToMeasure; // measure the speed of sequential insertion when bulkSetup
+
+	// test log setting
+	bool enableReadLatencyLogging;
+	double periodicLoggingInterval;
+
+	// use ReadWrite as a ramp up workload
+	bool rampUpLoad; // indicate this is a ramp up workload
+	int rampSweepCount; // how many times of ramp up
+	bool rampTransactionType; // choose transaction type based on client start time
+	bool rampUpConcurrency; // control client concurrency
+
+	// transaction setting
+	bool useRYW;
+	bool batchPriority;
+	bool rangeReads; // read operations are all single key range read
+	bool dependentReads; // read operations are issued sequentially
+	bool inconsistentReads; // read with previous read version
+	bool adjacentReads; // keys are adjacent within a transaction
+	bool adjacentWrites;
+	double alpha; // probability for run TransactionA type
+	// two type of transaction
 	int readsPerTransactionA, writesPerTransactionA;
 	int readsPerTransactionB, writesPerTransactionB;
 	int extraReadConflictRangesPerTransaction, extraWriteConflictRangesPerTransaction;
-	double testDuration, transactionsPerSecond, alpha, warmingDelay, loadTime, maxInsertRate, debugInterval, debugTime;
-	double metricsStart, metricsDuration, clientBegin;
-
 	std::string valueString;
-
-	bool dependentReads;
-	bool enableReadLatencyLogging;
-	double periodicLoggingInterval;
-	bool cancelWorkersAtDuration;
-	bool inconsistentReads;
-	bool adjacentReads;
-	bool adjacentWrites;
-	bool rampUpLoad;
-	int rampSweepCount;
-	bool rangeReads;
-	bool useRYW;
-	bool rampTransactionType;
-	bool rampUpConcurrency;
-	bool batchPriority;
-
-	Standalone<StringRef> descriptionString;
-
-	Int64MetricHandle totalReadsMetric;
-	Int64MetricHandle totalRetriesMetric;
-	EventMetricHandle<TransactionSuccessMetric> transactionSuccessMetric;
-	EventMetricHandle<TransactionFailureMetric> transactionFailureMetric;
-	EventMetricHandle<ReadMetric> readMetric;
-
-	std::vector<Future<Void>> clients;
-	PerfIntCounter aTransactions, bTransactions, retries;
-	ContinuousSample<double> latencies, readLatencies, commitLatencies, GRVLatencies, fullReadLatencies;
-	double readLatencyTotal;
-	int readLatencyCount;
-
-	std::vector<uint64_t> insertionCountsToMeasure;
-	std::vector<std::pair<uint64_t, double>> ratesAtKeyCounts;
-
-	std::vector<PerfMetric> periodicMetrics;
-
+	// hot traffic pattern
 	double hotKeyFraction, forceHotProbability; // key based hot traffic setting
-
 	// server based hot traffic setting
-	double skewDuration = 0; // skewDuration = ceil(testDuration / skewRound)
+	int skewRound = 0; // skewDuration = ceil(testDuration / skewRound)
 	double hotServerFraction = 0; // set > 0 to issue hot key based on shard map
 	double hotServerReadFrac, hotServerWriteFrac; // hot many traffic goes to hot servers
 	typedef std::vector<std::pair<int64_t, int64_t>> IndexRangeVec;
 	// keyForIndex generate key from index. So for a shard range, recording the start and end is enough
 	std::vector<std::pair<UID, IndexRangeVec>> serverShards; // storage server and the shards it owns
 
-	bool doSetup;
+	// states of metric
+	Int64MetricHandle totalReadsMetric;
+	Int64MetricHandle totalRetriesMetric;
+	EventMetricHandle<TransactionSuccessMetric> transactionSuccessMetric;
+	EventMetricHandle<TransactionFailureMetric> transactionFailureMetric;
+	EventMetricHandle<ReadMetric> readMetric;
+	PerfIntCounter aTransactions, bTransactions, retries;
+	ContinuousSample<double> latencies, readLatencies, commitLatencies, GRVLatencies, fullReadLatencies;
+	double readLatencyTotal;
+	int readLatencyCount;
+	std::vector<PerfMetric> periodicMetrics;
+	std::vector<std::pair<uint64_t, double>> ratesAtKeyCounts; // sequential insertion speed
+
+	// other internal states
+	std::vector<Future<Void>> clients;
+	double loadTime, clientBegin;
 
 	ReadWriteWorkload(WorkloadContext const& wcx)
 	  : KVWorkload(wcx), loadTime(0.0), clientBegin(0), dependentReads(false), adjacentReads(false),
@@ -224,11 +228,11 @@ struct ReadWriteWorkload : KVWorkload {
 			hotServerFraction = getOption(options, "hotServerFraction"_sr, 0.0);
 
 			if (hotServerFraction > 0) {
-				int skewRound = getOption(options, "skewRound"_sr, 0);
+				skewRound = getOption(options, "skewRound"_sr, 0);
 				hotServerReadFrac = getOption(options, "hotServerReadFrac"_sr, 0.0);
 				hotServerWriteFrac = getOption(options, "hotServerWriteFrac"_sr, 0.0);
-				ASSERT(hotServerReadFrac >= hotServerFraction && hotServerWriteFrac >= hotServerFraction && skewRound > 0);
-				skewDuration = ceil(testDuration / skewRound);
+				ASSERT(hotServerReadFrac >= hotServerFraction && hotServerWriteFrac >= hotServerFraction &&
+				       skewRound > 0);
 			} else if (hotKeyFraction > 0) {
 				double hotTrafficFraction = getOption(options, LiteralStringRef("hotTrafficFraction"), 0.0);
 				ASSERT(hotTrafficFraction <= 1);
@@ -345,8 +349,6 @@ struct ReadWriteWorkload : KVWorkload {
 		return StringRef((uint8_t*)valueString.c_str(),
 		                 deterministicRandom()->randomInt(minValueBytes, maxValueBytes + 1));
 	}
-
-	Standalone<KeyValueRef> operator()(uint64_t n) { return KeyValueRef(keyForIndex(n, false), randomValue()); }
 
 	template <class Trans>
 	void setupTransaction(Trans* tr) {
@@ -657,14 +659,13 @@ struct ReadWriteWorkload : KVWorkload {
 		return Void();
 	}
 
-	ACTOR Future<Void> _start(Database cx, ReadWriteWorkload* self) {
+	ACTOR static Future<Void> warmCache(Database cx, ReadWriteWorkload* self) {
 		// Read one record from the database to warm the cache of keyServers
 		state std::vector<int64_t> keys;
 		keys.push_back(deterministicRandom()->randomInt64(0, self->nodeCount));
 		state double startTime = now();
 		loop {
 			state Transaction tr(cx);
-
 			try {
 				self->setupTransaction(&tr);
 				wait(self->readOp(&tr, keys, self, false));
@@ -674,30 +675,45 @@ struct ReadWriteWorkload : KVWorkload {
 				wait(tr.onError(e));
 			}
 		}
-
 		wait(delay(std::max(0.1, 1.0 - (now() - startTime))));
+		return Void();
+	}
 
-		std::vector<Future<Void>> clients;
+	void startReadWriteClients(Database cx, std::vector<Future<Void>>& clients) {
+		clientBegin = now();
+		for (int c = 0; c < actorCount; c++) {
+			Future<Void> worker;
+			if (useRYW)
+				worker =
+				    randomReadWriteClient<ReadYourWritesTransaction>(cx, this, actorCount / transactionsPerSecond, c);
+			else
+				worker = randomReadWriteClient<Transaction>(cx, this, actorCount / transactionsPerSecond, c);
+			clients.push_back(worker);
+		}
+	}
+
+	ACTOR static Future<Void> _start(Database cx, ReadWriteWorkload* self) {
+		wait(warmCache(cx, self));
+
+		state std::vector<Future<Void>> clients;
 		if (self->enableReadLatencyLogging)
 			clients.push_back(tracePeriodically(self));
 
-		self->clientBegin = now();
-		for (int c = 0; c < self->actorCount; c++) {
-			Future<Void> worker;
-			if (self->useRYW)
-				worker = self->randomReadWriteClient<ReadYourWritesTransaction>(
-				    cx, self, self->actorCount / self->transactionsPerSecond, c);
-			else
-				worker = self->randomReadWriteClient<Transaction>(
-				    cx, self, self->actorCount / self->transactionsPerSecond, c);
-			clients.push_back(worker);
+		if (self->skewRound > 0) {
+			while (self->skewRound--) {
+				wait(updateServerShards(cx, self));
+				self->startReadWriteClients(cx, clients);
+				wait(timeout(waitForAll(clients), self->testDuration / self->skewRound, Void()));
+				clients.clear();
+			}
+		} else {
+			self->startReadWriteClients(cx, clients);
+			if (!self->cancelWorkersAtDuration)
+				self->clients = clients; // Don't cancel them until check()
+
+			wait(self->cancelWorkersAtDuration ? timeout(waitForAll(clients), self->testDuration, Void())
+			                                   : delay(self->testDuration));
 		}
-
-		if (!self->cancelWorkersAtDuration)
-			self->clients = clients; // Don't cancel them until check()
-
-		wait(self->cancelWorkersAtDuration ? timeout(waitForAll(clients), self->testDuration, Void())
-		                                   : delay(self->testDuration));
 		return Void();
 	}
 
