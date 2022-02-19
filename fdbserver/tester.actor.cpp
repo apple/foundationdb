@@ -106,7 +106,8 @@ int64_t KVWorkload::indexForKey(const KeyRef& key) const {
 		idx += 16;
 	}
 	ASSERT(keyBytes >= 16);
-	int64_t res = *(int64_t*)(key.begin() + idx);
+	std::string str((char*)key.begin()+idx, key.size() - idx);
+	int64_t res = std::stoll(str, nullptr, 16);
 	return res;
 }
 

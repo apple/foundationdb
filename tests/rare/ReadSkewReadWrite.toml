@@ -5,8 +5,8 @@ connectionFailuresDisableDuration = 100000
 
     [[test.workload]]
     testName = 'ReadWrite'
-    testDuration = 300.0
-    skewRound = 1
+    testDuration = 30.0
+    skewRound = 2
     transactionsPerSecond = 2000
     nodeCount = 150000
     valueBytes = 128

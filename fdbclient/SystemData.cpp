@@ -312,6 +312,7 @@ std::pair<UID, Key> serverKeysDecodeServerBegin(const KeyRef& key) {
 	while(!rd.empty()) {
 		bytes.push_back((char)*rd.arenaRead(1));
 	}
+	// std::cout << bytes.size() << " " <<bytes << std::endl;
 	return std::make_pair(server_id, Key(bytes));
 }
 

@@ -181,6 +181,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES noSim/RandomUnitTests.toml UNIT)
   add_fdb_test(TEST_FILES noSim/KeyValueStoreRocksDBTest.toml IGNORE) # re-enable as needed for RocksDB. Breaks correctness tests if RocksDB is disabled.
   add_fdb_test(TEST_FILES rare/CheckRelocation.toml)
+  add_fdb_test(TEST_FILES rare/ReadSkewReadWrite.toml)
   add_fdb_test(TEST_FILES rare/ClogUnclog.toml)
   add_fdb_test(TEST_FILES rare/CloggedCycleWithKills.toml)
   add_fdb_test(TEST_FILES rare/ConfigIncrement.toml)

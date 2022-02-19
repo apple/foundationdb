@@ -109,11 +109,13 @@ struct ReadWriteWorkload : KVWorkload {
 	int extraReadConflictRangesPerTransaction, extraWriteConflictRangesPerTransaction;
 	std::string valueString;
 	// hot traffic pattern
-	double hotKeyFraction, forceHotProbability; // key based hot traffic setting
+	double hotKeyFraction, forceHotProbability = 0; // key based hot traffic setting
 	// server based hot traffic setting
 	int skewRound = 0; // skewDuration = ceil(testDuration / skewRound)
 	double hotServerFraction = 0; // set > 0 to issue hot key based on shard map
 	double hotServerReadFrac, hotServerWriteFrac; // hot many traffic goes to hot servers
+
+	// hot server state
 	typedef std::vector<std::pair<int64_t, int64_t>> IndexRangeVec;
 	// keyForIndex generate key from index. So for a shard range, recording the start and end is enough
 	std::vector<std::pair<UID, IndexRangeVec>> serverShards; // storage server and the shards it owns
@@ -136,12 +138,13 @@ struct ReadWriteWorkload : KVWorkload {
 	double loadTime, clientBegin;
 
 	ReadWriteWorkload(WorkloadContext const& wcx)
-	  : KVWorkload(wcx), loadTime(0.0), clientBegin(0), dependentReads(false), adjacentReads(false),
-	    adjacentWrites(false), totalReadsMetric(LiteralStringRef("RWWorkload.TotalReads")),
+	  : KVWorkload(wcx), dependentReads(false), adjacentReads(false), adjacentWrites(false),
+	    totalReadsMetric(LiteralStringRef("RWWorkload.TotalReads")),
 	    totalRetriesMetric(LiteralStringRef("RWWorkload.TotalRetries")), aTransactions("A Transactions"),
 	    bTransactions("B Transactions"), retries("Retries"), latencies(sampleSize), readLatencies(sampleSize),
 	    commitLatencies(sampleSize), GRVLatencies(sampleSize), fullReadLatencies(sampleSize), readLatencyTotal(0),
-	    readLatencyCount(0) {
+	    readLatencyCount(0), loadTime(0.0), clientBegin(0) {
+
 		transactionSuccessMetric.init(LiteralStringRef("RWWorkload.SuccessfulTransaction"));
 		transactionFailureMetric.init(LiteralStringRef("RWWorkload.FailedTransaction"));
 		readMetric.init(LiteralStringRef("RWWorkload.Read"));
@@ -226,15 +229,15 @@ struct ReadWriteWorkload : KVWorkload {
 			//   of hot keys, else it is directed to a disjoint set of cold keys
 			hotKeyFraction = getOption(options, "hotKeyFraction"_sr, 0.0);
 			hotServerFraction = getOption(options, "hotServerFraction"_sr, 0.0);
+			skewRound = getOption(options, "skewRound"_sr, 0);
+			hotServerReadFrac = getOption(options, "hotServerReadFrac"_sr, 0.0);
+			hotServerWriteFrac = getOption(options, "hotServerWriteFrac"_sr, 0.0);
+			double hotTrafficFraction = getOption(options, LiteralStringRef("hotTrafficFraction"), 0.0);
 
 			if (hotServerFraction > 0) {
-				skewRound = getOption(options, "skewRound"_sr, 0);
-				hotServerReadFrac = getOption(options, "hotServerReadFrac"_sr, 0.0);
-				hotServerWriteFrac = getOption(options, "hotServerWriteFrac"_sr, 0.0);
 				ASSERT(hotServerReadFrac >= hotServerFraction && hotServerWriteFrac >= hotServerFraction &&
 				       skewRound > 0);
 			} else if (hotKeyFraction > 0) {
-				double hotTrafficFraction = getOption(options, LiteralStringRef("hotTrafficFraction"), 0.0);
 				ASSERT(hotTrafficFraction <= 1);
 				ASSERT(hotKeyFraction <= hotTrafficFraction); // hot keys should be actually hot!
 				// p(Cold key) = (1-FHP) * (1-hkf)
@@ -350,10 +353,22 @@ struct ReadWriteWorkload : KVWorkload {
 		                 deterministicRandom()->randomInt(minValueBytes, maxValueBytes + 1));
 	}
 
+	Standalone<KeyValueRef> operator()(uint64_t n) { return KeyValueRef(keyForIndex(n, false), randomValue()); }
+
 	template <class Trans>
 	void setupTransaction(Trans* tr) {
 		if (batchPriority) {
 			tr->setOption(FDBTransactionOptions::PRIORITY_BATCH);
+		}
+	}
+
+	void debugPrintServerShards() const {
+		for (auto it : this->serverShards) {
+			std::cout << it.first.toString() << ": [";
+			for (auto p : it.second) {
+				std::cout << "[" << p.first << "," << p.second << "), ";
+			}
+			std::cout << "] \n";
 		}
 	}
 
@@ -401,7 +416,7 @@ struct ReadWriteWorkload : KVWorkload {
 		ASSERT(keyIndex.size() == beginServers.size());
 		std::sort(keyIndex.begin(), keyIndex.end());
 		// build self->serverShards, starting from the left shard
-		std::unordered_map<UID, IndexRangeVec> serverShards;
+		std::map<UID, IndexRangeVec> serverShards;
 		int i = 0;
 		for (auto it = beginServers.begin(); i < keyIndex.size() && it != beginServers.end(); ++i, ++it) {
 			auto shardEnd = i < keyIndex.size() - 1 ? keyIndex[i + 1] : self->nodeCount;
@@ -409,6 +424,11 @@ struct ReadWriteWorkload : KVWorkload {
 				serverShards[id].emplace_back(keyIndex[i], shardEnd);
 			}
 		}
+		// self->serverShards is ordered by UID
+		for (auto it : serverShards) {
+			self->serverShards.emplace_back(it);
+		}
+		// self->debugPrintServerShards();
 		return Void();
 	}
 
@@ -700,7 +720,8 @@ struct ReadWriteWorkload : KVWorkload {
 			clients.push_back(tracePeriodically(self));
 
 		if (self->skewRound > 0) {
-			while (self->skewRound--) {
+			state int round = 0;
+			for (; round < self->skewRound; ++round) {
 				wait(updateServerShards(cx, self));
 				self->startReadWriteClients(cx, clients);
 				wait(timeout(waitForAll(clients), self->testDuration / self->skewRound, Void()));
