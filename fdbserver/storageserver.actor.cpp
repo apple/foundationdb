@@ -2926,7 +2926,7 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 		                        .append("{...}"_sr);
 
 		bool isRangeQuery = false;
-		Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery, TenantMapEntry("Prefix"_sr));
+		Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery, TenantMapEntry(1));
 
 		Key expectedMappedKey = Tuple()
 		                            .append("normal"_sr)
@@ -2934,7 +2934,7 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 		                            .append("key-2"_sr)
 		                            .append("value-0"_sr)
 		                            .getDataAsStandalone()
-		                            .withPrefix("Prefix"_sr);
+		                            .withPrefix("\x00\x00\x00\x00\x00\x00\x00\x01"_sr);
 		//		std::cout << printable(mappedKey) << " == " << printable(expectedMappedKey) << std::endl;
 		ASSERT(mappedKey.compare(expectedMappedKey) == 0);
 		ASSERT(isRangeQuery == true);

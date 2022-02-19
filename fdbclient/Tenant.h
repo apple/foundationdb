@@ -32,14 +32,25 @@ typedef Standalone<TenantNameRef> TenantName;
 struct TenantMapEntry {
 	constexpr static FileIdentifier file_identifier = 12247338;
 
+private:
+	static Key idToPrefix(int64_t id) {
+		int64_t swapped = bigEndian64(id);
+		return StringRef(reinterpret_cast<const uint8_t*>(&swapped), 8);
+	}
+
+public:
+	int64_t id;
 	Key prefix;
 
-	TenantMapEntry() {}
-	TenantMapEntry(Key prefix) : prefix(prefix) {}
+	TenantMapEntry() : id(-1) {}
+	TenantMapEntry(int64_t id) : id(id), prefix(idToPrefix(id)) { ASSERT(id >= 0); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, prefix);
+		serializer(ar, id);
+		if (ar.isDeserializing) {
+			prefix = idToPrefix(id);
+		}
 	}
 };
 
