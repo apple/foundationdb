@@ -1358,7 +1358,7 @@ void Net2::initTLS(ETLSInitState targetState) {
 
 			for (int i = 0; i < threadsToStart; ++i) {
 				++sslHandshakerThreadsStarted;
-				sslHandshakerPool->addThread(new SSLHandshakerThread());
+				sslHandshakerPool->addThread(new SSLHandshakerThread(), "fdb-ssl-connect");
 			}
 		}
 	}
@@ -1508,6 +1508,7 @@ void Net2::run() {
 			ready.push(timers.top());
 			timers.pop();
 		}
+		// FIXME: Is this double counting?
 		countTimers += numTimers;
 		FDB_TRACE_PROBE(run_loop_ready_timers, numTimers);
 
@@ -1539,6 +1540,14 @@ void Net2::run() {
 			if (currentTaskID < minTaskID) {
 				trackAtPriority(currentTaskID, taskBegin);
 				minTaskID = currentTaskID;
+			}
+
+			// attempt to empty out the IO backlog
+			if (ready.size() % FLOW_KNOBS->ITERATIONS_PER_REACTOR_CHECK == 1) {
+				if (runFunc) {
+					runFunc();
+				}
+				reactor.react();
 			}
 
 			double tscNow = timestampCounter();
@@ -1619,7 +1628,7 @@ void Net2::run() {
 #ifdef WIN32
 	timeEndPeriod(1);
 #endif
-}
+} // Net2::run
 
 // Updates the PriorityStats found in NetworkMetrics
 void Net2::updateStarvationTracker(struct NetworkMetrics::PriorityStats& binStats,

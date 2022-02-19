@@ -251,7 +251,6 @@ public:
 	Future<Reference<CommitProxyInfo>> getCommitProxiesFuture(UseProvisionalProxies useProvisionalProxies);
 	Reference<GrvProxyInfo> getGrvProxies(UseProvisionalProxies useProvisionalProxies);
 	Future<Void> onProxiesChanged() const;
-	Future<Void> onClientLibStatusChanged() const;
 	Future<HealthMetrics> getHealthMetrics(bool detailed);
 	// Pass a negative value for `shardLimit` to indicate no limit on the shard number.
 	Future<StorageMetrics> getStorageMetrics(KeyRange const& keys, int shardLimit);
@@ -349,7 +348,6 @@ public:
 	// Key DB-specific information
 	Reference<AsyncVar<Reference<IClusterConnectionRecord>>> connectionRecord;
 	AsyncTrigger proxiesChangeTrigger;
-	AsyncTrigger clientLibChangeTrigger;
 	Future<Void> clientDBInfoMonitor;
 	Future<Void> monitorTssInfoChange;
 	Future<Void> tssMismatchHandler;

@@ -1072,12 +1072,23 @@ void haltRegisteringOrCurrentSingleton(ClusterControllerData* self,
 	}
 }
 
-void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self, ConfigBroadcaster* configBroadcaster) {
+void registerWorker(RegisterWorkerRequest req,
+                    ClusterControllerData* self,
+                    ServerCoordinators coordinators,
+                    ConfigBroadcaster* configBroadcaster) {
 	const WorkerInterface& w = req.wi;
 	ProcessClass newProcessClass = req.processClass;
 	auto info = self->id_worker.find(w.locality.processId());
 	ClusterControllerPriorityInfo newPriorityInfo = req.priorityInfo;
 	newPriorityInfo.processClassFitness = newProcessClass.machineClassFitness(ProcessClass::ClusterController);
+	Optional<ConfigFollowerInterface> cfi;
+	bool isCoordinator =
+	    std::find_if(coordinators.configServers.begin(),
+	                 coordinators.configServers.end(),
+	                 [&req](const ConfigFollowerInterface& cfi) {
+		                 return cfi.address() == req.wi.address() || (req.wi.secondaryAddress().present() &&
+		                                                              cfi.address() == req.wi.secondaryAddress().get());
+	                 }) != coordinators.configServers.end();
 
 	for (auto it : req.incompatiblePeers) {
 		self->db.incompatibleConnections[it] = now() + SERVER_KNOBS->INCOMPATIBLE_PEERS_LOGGING_INTERVAL;
@@ -1161,8 +1172,9 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self, Conf
 		    w.locality.processId() == self->db.serverInfo->get().master.locality.processId()) {
 			self->masterProcessId = w.locality.processId();
 		}
-		if (configBroadcaster != nullptr) {
-			self->addActor.send(configBroadcaster->registerWorker(
+		if (configBroadcaster != nullptr && isCoordinator) {
+			self->addActor.send(configBroadcaster->registerNode(
+			    w,
 			    req.lastSeenKnobVersion,
 			    req.knobConfigClassSet,
 			    self->id_worker[w.locality.processId()].watcher,
@@ -1192,12 +1204,12 @@ void registerWorker(RegisterWorkerRequest req, ClusterControllerData* self, Conf
 			self->updateDBInfoEndpoints.insert(w.updateServerDBInfo.getEndpoint());
 			self->updateDBInfo.trigger();
 		}
-		if (configBroadcaster != nullptr) {
-			self->addActor.send(
-			    configBroadcaster->registerWorker(req.lastSeenKnobVersion,
-			                                      req.knobConfigClassSet,
-			                                      info->second.watcher,
-			                                      info->second.details.interf.configBroadcastInterface));
+		if (configBroadcaster != nullptr && isCoordinator) {
+			self->addActor.send(configBroadcaster->registerNode(w,
+			                                                    req.lastSeenKnobVersion,
+			                                                    req.knobConfigClassSet,
+			                                                    info->second.watcher,
+			                                                    info->second.details.interf.configBroadcastInterface));
 		}
 		checkOutstandingRequests(self);
 	} else {
@@ -1618,48 +1630,6 @@ ACTOR Future<Void> monitorGlobalConfig(ClusterControllerData::DBInfo* db) {
 				state Future<Void> globalConfigFuture = tr.watch(globalConfigVersionKey);
 				wait(tr.commit());
 				wait(globalConfigFuture);
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
-	}
-}
-
-ACTOR Future<Void> monitorClientLibChangeCounter(ClusterControllerData::DBInfo* db) {
-	state ClientDBInfo clientInfo;
-	state ReadYourWritesTransaction tr;
-	state Future<Void> clientLibChangeFuture;
-
-	loop {
-		tr = ReadYourWritesTransaction(db->db);
-		loop {
-			try {
-				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-
-				Optional<Value> counterVal = wait(tr.get(clientLibChangeCounterKey));
-				if (counterVal.present() && counterVal.get().size() == sizeof(uint64_t)) {
-					uint64_t changeCounter = *reinterpret_cast<const uint64_t*>(counterVal.get().begin());
-
-					clientInfo = db->serverInfo->get().client;
-					if (changeCounter != clientInfo.clientLibChangeCounter) {
-						TraceEvent("ClientLibChangeCounterChanged").detail("Value", changeCounter);
-						clientInfo.id = deterministicRandom()->randomUniqueID();
-						clientInfo.clientLibChangeCounter = changeCounter;
-						db->clientInfo->set(clientInfo);
-
-						ServerDBInfo serverInfo = db->serverInfo->get();
-						serverInfo.id = deterministicRandom()->randomUniqueID();
-						serverInfo.infoGeneration = ++db->dbInfoCount;
-						serverInfo.client = clientInfo;
-						db->serverInfo->set(serverInfo);
-					}
-				}
-
-				clientLibChangeFuture = tr.watch(clientLibChangeCounterKey);
-				wait(tr.commit());
-				wait(clientLibChangeFuture);
 				break;
 			} catch (Error& e) {
 				wait(tr.onError(e));
@@ -2459,7 +2429,6 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	self.addActor.send(monitorProcessClasses(&self));
 	self.addActor.send(monitorServerInfoConfig(&self.db));
 	self.addActor.send(monitorGlobalConfig(&self.db));
-	self.addActor.send(monitorClientLibChangeCounter(&self.db));
 	self.addActor.send(updatedChangingDatacenters(&self));
 	self.addActor.send(updatedChangedDatacenters(&self));
 	self.addActor.send(updateDatacenterVersionDifference(&self));
@@ -2508,7 +2477,8 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 		}
 		when(RegisterWorkerRequest req = waitNext(interf.registerWorker.getFuture())) {
 			++self.registerWorkerRequests;
-			registerWorker(req, &self, (configDBType == ConfigDBType::DISABLED) ? nullptr : &configBroadcaster);
+			registerWorker(
+			    req, &self, coordinators, (configDBType == ConfigDBType::DISABLED) ? nullptr : &configBroadcaster);
 		}
 		when(GetWorkersRequest req = waitNext(interf.getWorkers.getFuture())) {
 			++self.getWorkersRequests;

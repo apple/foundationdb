@@ -744,16 +744,18 @@ struct TLogVersion {
 		// V4 changed how data gets written to satellite TLogs so that we can peek from them;
 		// V5 merged reference and value spilling
 		// V6 added span context to list of serialized mutations sent from proxy to tlogs
+		// V7 use xxhash3 for TLog checksum
 		// V1 = 1,  // 4.6 is dispatched to via 6.0
 		V2 = 2, // 6.0
 		V3 = 3, // 6.1
 		V4 = 4, // 6.2
 		V5 = 5, // 6.3
 		V6 = 6, // 7.0
+		V7 = 7, // 7.2
 		MIN_SUPPORTED = V2,
-		MAX_SUPPORTED = V6,
-		MIN_RECRUITABLE = V5,
-		DEFAULT = V5,
+		MAX_SUPPORTED = V7,
+		MIN_RECRUITABLE = V6,
+		DEFAULT = V6,
 	} version;
 
 	TLogVersion() : version(UNSET) {}
@@ -779,6 +781,8 @@ struct TLogVersion {
 			return V5;
 		if (s == LiteralStringRef("6"))
 			return V6;
+		if (s == LiteralStringRef("7"))
+			return V7;
 		return default_error_or();
 	}
 };
@@ -1233,4 +1237,34 @@ struct ReadBlobGranuleContext {
 	bool debugNoMaterialize;
 };
 
+// Store metadata associated with each storage server. Now it only contains data be used in perpetual storage wiggle.
+struct StorageMetadataType {
+	constexpr static FileIdentifier file_identifier = 732123;
+	// when the SS is initialized
+	uint64_t createdTime; // comes from Platform::timer_int()
+	StorageMetadataType() : createdTime(0) {}
+	StorageMetadataType(uint64_t t) : createdTime(t) {}
+
+	// To change this serialization, ProtocolVersion::StorageMetadata must be updated, and downgrades need
+	// to be considered
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, createdTime);
+	}
+};
+
+// store metadata of wiggle action
+struct StorageWiggleValue {
+	constexpr static FileIdentifier file_identifier = 732124;
+	UID id; // storage id
+
+	StorageWiggleValue(UID id = UID(0, 0)) : id(id) {}
+
+	// To change this serialization, ProtocolVersion::PerpetualWiggleMetadata must be updated, and downgrades need
+	// to be considered
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, id);
+	}
+};
 #endif

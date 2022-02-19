@@ -739,15 +739,12 @@ Future<Void> attemptGRVFromOldProxies(std::vector<GrvProxyInterface> oldProxies,
 
 ACTOR static Future<Void> monitorClientDBInfoChange(DatabaseContext* cx,
                                                     Reference<AsyncVar<ClientDBInfo> const> clientDBInfo,
-                                                    AsyncTrigger* proxyChangeTrigger,
-                                                    AsyncTrigger* clientLibChangeTrigger) {
+                                                    AsyncTrigger* proxyChangeTrigger) {
 	state std::vector<CommitProxyInterface> curCommitProxies;
 	state std::vector<GrvProxyInterface> curGrvProxies;
 	state ActorCollection actors(false);
-	state uint64_t curClientLibChangeCounter;
 	curCommitProxies = clientDBInfo->get().commitProxies;
 	curGrvProxies = clientDBInfo->get().grvProxies;
-	curClientLibChangeCounter = clientDBInfo->get().clientLibChangeCounter;
 
 	loop {
 		choose {
@@ -769,9 +766,6 @@ ACTOR static Future<Void> monitorClientDBInfoChange(DatabaseContext* cx,
 					curCommitProxies = clientDBInfo->get().commitProxies;
 					curGrvProxies = clientDBInfo->get().grvProxies;
 					proxyChangeTrigger->trigger();
-				}
-				if (curClientLibChangeCounter != clientDBInfo->get().clientLibChangeCounter) {
-					clientLibChangeTrigger->trigger();
 				}
 			}
 			when(wait(actors.getResult())) { UNSTOPPABLE_ASSERT(false); }
@@ -1262,7 +1256,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 	getValueSubmitted.init(LiteralStringRef("NativeAPI.GetValueSubmitted"));
 	getValueCompleted.init(LiteralStringRef("NativeAPI.GetValueCompleted"));
 
-	clientDBInfoMonitor = monitorClientDBInfoChange(this, clientInfo, &proxiesChangeTrigger, &clientLibChangeTrigger);
+	clientDBInfoMonitor = monitorClientDBInfoChange(this, clientInfo, &proxiesChangeTrigger);
 	tssMismatchHandler = handleTssMismatches(this);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
 	cacheListMonitor = monitorCacheList(this);
@@ -1611,10 +1605,6 @@ void DatabaseContext::invalidateCache(const KeyRangeRef& keys) {
 
 Future<Void> DatabaseContext::onProxiesChanged() const {
 	return this->proxiesChangeTrigger.onTrigger();
-}
-
-Future<Void> DatabaseContext::onClientLibStatusChanged() const {
-	return this->clientLibChangeTrigger.onTrigger();
 }
 
 bool DatabaseContext::sampleReadTags() const {

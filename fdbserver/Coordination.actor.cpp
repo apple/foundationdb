@@ -732,25 +732,23 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
 
 ACTOR Future<Void> coordinationServer(std::string dataFolder,
                                       Reference<IClusterConnectionRecord> ccr,
-                                      ConfigDBType configDBType) {
+                                      Reference<ConfigNode> configNode,
+                                      ConfigBroadcastInterface cbi) {
 	state UID myID = deterministicRandom()->randomUniqueID();
 	state LeaderElectionRegInterface myLeaderInterface(g_network);
 	state GenerationRegInterface myInterface(g_network);
 	state OnDemandStore store(dataFolder, myID, "coordination-");
 	state ConfigTransactionInterface configTransactionInterface;
 	state ConfigFollowerInterface configFollowerInterface;
-	state Reference<ConfigNode> configNode;
 	state Future<Void> configDatabaseServer = Never();
 	TraceEvent("CoordinationServer", myID)
 	    .detail("MyInterfaceAddr", myInterface.read.getEndpoint().getPrimaryAddress())
 	    .detail("Folder", dataFolder);
 
-	if (configDBType != ConfigDBType::DISABLED) {
+	if (configNode.isValid()) {
 		configTransactionInterface.setupWellKnownEndpoints();
 		configFollowerInterface.setupWellKnownEndpoints();
-		configNode = makeReference<ConfigNode>(dataFolder);
-		configDatabaseServer =
-		    configNode->serve(configTransactionInterface) || configNode->serve(configFollowerInterface);
+		configDatabaseServer = configNode->serve(cbi, configTransactionInterface, configFollowerInterface);
 	}
 
 	try {

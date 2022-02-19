@@ -64,6 +64,29 @@ enum Severity {
 	SevMax = 1000000
 };
 
+inline Severity intToSeverity(int sevnum) {
+	switch (sevnum) {
+	case 0:
+		return SevVerbose;
+	case 1:
+		return SevSample;
+	case 5:
+		return SevDebug;
+	case 10:
+		return SevInfo;
+	case 20:
+		return SevWarn;
+	case 30:
+		return SevWarnAlways;
+	case 40:
+		return SevError;
+	case 1000000:
+		return SevMax;
+	default:
+		return SevInfo;
+	}
+}
+
 enum class ErrorKind : uint8_t {
 	Unset,
 	DiskIssue,
@@ -96,6 +119,7 @@ public:
 	std::string getValue(std::string key) const;
 	int getInt(std::string key, bool permissive = false) const;
 	int64_t getInt64(std::string key, bool permissive = false) const;
+	uint64_t getUint64(std::string key, bool permissive = false) const;
 	double getDouble(std::string key, bool permissive = false) const;
 
 	Field& mutate(int index);

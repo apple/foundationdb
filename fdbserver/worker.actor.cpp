@@ -47,6 +47,7 @@
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "fdbserver/CoordinationInterface.h"
+#include "fdbserver/ConfigNode.h"
 #include "fdbserver/LocalConfiguration.h"
 #include "fdbclient/MonitorLeader.h"
 #include "fdbclient/ClientWorkerInterface.h"
@@ -396,11 +397,20 @@ struct TLogOptions {
 			break;
 		case TLogVersion::V5:
 		case TLogVersion::V6:
+		case TLogVersion::V7:
 			toReturn = "V_" + boost::lexical_cast<std::string>(version);
 			break;
 		}
 		ASSERT_WE_THINK(FromStringRef(toReturn).get() == *this);
 		return toReturn + "-";
+	}
+
+	DiskQueueVersion getDiskQueueVersion() const {
+		if (version < TLogVersion::V3)
+			return DiskQueueVersion::V0;
+		if (version < TLogVersion::V7)
+			return DiskQueueVersion::V1;
+		return DiskQueueVersion::V2;
 	}
 };
 
@@ -418,6 +428,7 @@ TLogFn tLogFnForOptions(TLogOptions options) {
 			return oldTLog_6_2::tLog;
 	case TLogVersion::V5:
 	case TLogVersion::V6:
+	case TLogVersion::V7:
 		return tLog;
 	default:
 		ASSERT(false);
@@ -524,6 +535,7 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
                                       Reference<AsyncVar<bool> const> degraded,
                                       Reference<IClusterConnectionRecord> connRecord,
                                       Reference<AsyncVar<std::set<std::string>> const> issues,
+                                      Reference<ConfigNode> configNode,
                                       Reference<LocalConfiguration> localConfig,
                                       Reference<AsyncVar<ServerDBInfo>> dbInfo) {
 	// Keeps the cluster controller (as it may be re-elected) informed that this worker exists
@@ -1377,7 +1389,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
                                 std::string _coordFolder,
                                 std::string whitelistBinPaths,
                                 Reference<AsyncVar<ServerDBInfo>> dbInfo,
-                                ConfigDBType configDBType,
+                                ConfigBroadcastInterface configBroadcastInterface,
+                                Reference<ConfigNode> configNode,
                                 Reference<LocalConfiguration> localConfig) {
 	state PromiseStream<ErrorInfo> errors;
 	state Reference<AsyncVar<Optional<DataDistributorInterface>>> ddInterf(
@@ -1408,6 +1421,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	state std::string coordFolder = abspath(_coordFolder);
 
 	state WorkerInterface interf(locality);
+	interf.configBroadcastInterface = configBroadcastInterface;
 	state std::set<std::pair<UID, KeyValueStoreType>> runningStorages;
 	interf.initEndpoints();
 
@@ -1558,8 +1572,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				}
 				ASSERT_WE_THINK(abspath(parentDirectory(s.filename)) == folder);
 				IKeyValueStore* kv = openKVStore(s.storeType, s.filename, s.storeID, memoryLimit, validateDataFiles);
-				const DiskQueueVersion dqv =
-				    s.tLogOptions.version >= TLogVersion::V3 ? DiskQueueVersion::V1 : DiskQueueVersion::V0;
+				const DiskQueueVersion dqv = s.tLogOptions.getDiskQueueVersion();
 				const int64_t diskQueueWarnSize =
 				    s.tLogOptions.spillType == TLogSpillType::VALUE ? 10 * SERVER_KNOBS->TARGET_BYTES_PER_TLOG : -1;
 				IDiskQueue* queue = openDiskQueue(joinPath(folder, logQueueBasename + s.storeID.toString() + "-"),
@@ -1660,10 +1673,11 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		                                       degraded,
 		                                       connRecord,
 		                                       issues,
+		                                       configNode,
 		                                       localConfig,
 		                                       dbInfo));
 
-		if (configDBType != ConfigDBType::DISABLED) {
+		if (configNode.isValid()) {
 			errorForwarders.add(localConfig->consume(interf.configBroadcastInterface));
 		}
 
@@ -1953,8 +1967,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					std::string filename =
 					    filenameFromId(req.storeType, folder, prefix.toString() + tLogOptions.toPrefix(), logId);
 					IKeyValueStore* data = openKVStore(req.storeType, filename, logId, memoryLimit);
-					const DiskQueueVersion dqv =
-					    tLogOptions.version >= TLogVersion::V3 ? DiskQueueVersion::V1 : DiskQueueVersion::V0;
+					const DiskQueueVersion dqv = tLogOptions.getDiskQueueVersion();
 					IDiskQueue* queue = openDiskQueue(
 					    joinPath(folder,
 					             fileLogQueuePrefix.toString() + tLogOptions.toPrefix() + logId.toString() + "-"),
@@ -2623,10 +2636,15 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
                         ConfigDBType configDBType) {
 	state std::vector<Future<Void>> actors;
 	state Promise<Void> recoveredDiskFiles;
+	state Reference<ConfigNode> configNode;
 	state Reference<LocalConfiguration> localConfig =
 	    makeReference<LocalConfiguration>(dataFolder, configPath, manualKnobOverrides);
 	// setupStackSignal();
 	getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::Worker;
+
+	if (configDBType != ConfigDBType::DISABLED) {
+		configNode = makeReference<ConfigNode>(dataFolder);
+	}
 
 	// FIXME: Initializing here causes simulation issues, these must be fixed
 	/*
@@ -2650,13 +2668,15 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		    .detail("CoordPath", coordFolder)
 		    .detail("WhiteListBinPath", whitelistBinPaths);
 
+		state ConfigBroadcastInterface configBroadcastInterface;
 		// SOMEDAY: start the services on the machine in a staggered fashion in simulation?
 		// Endpoints should be registered first before any process trying to connect to it.
 		// So coordinationServer actor should be the first one executed before any other.
 		if (coordFolder.size()) {
 			// SOMEDAY: remove the fileNotFound wrapper and make DiskQueue construction safe from errors setting up
 			// their files
-			actors.push_back(fileNotFoundToNever(coordinationServer(coordFolder, coordinators.ccr, configDBType)));
+			actors.push_back(fileNotFoundToNever(
+			    coordinationServer(coordFolder, coordinators.ccr, configNode, configBroadcastInterface)));
 		}
 
 		state UID processIDUid = wait(createAndLockProcessIdFile(dataFolder));
@@ -2705,7 +2725,8 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		                                                 coordFolder,
 		                                                 whitelistBinPaths,
 		                                                 dbInfo,
-		                                                 configDBType,
+		                                                 configBroadcastInterface,
+		                                                 configNode,
 		                                                 localConfig),
 		                                    "WorkerServer",
 		                                    UID(),

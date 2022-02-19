@@ -43,7 +43,7 @@
 #include "fdbclient/versions.h"
 #include "fdbclient/BuildFlags.h"
 #include "fdbclient/WellKnownEndpoints.h"
-#include "fdbmonitor/SimpleIni.h"
+#include "fdbclient/SimpleIni.h"
 #include "fdbrpc/AsyncFileCached.actor.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/PerfMetric.h"
@@ -1301,7 +1301,7 @@ private:
 					fprintf(stderr, "Could not open parent process at pid %d (error %d)", parent_pid, GetLastError());
 					throw platform_error();
 				}
-				startThread(&parentWatcher, pHandle);
+				startThread(&parentWatcher, pHandle, 0, "fdb-parentwatch");
 				break;
 			}
 			case OPT_NEWCONSOLE:
@@ -1319,7 +1319,7 @@ private:
 				auto pid_str = args.OptionArg();
 				int* parent_pid = new (int);
 				*parent_pid = atoi(pid_str);
-				startThread(&parentWatcher, parent_pid);
+				startThread(&parentWatcher, parent_pid, 0, "fdb-parentwatch");
 				break;
 			}
 #endif

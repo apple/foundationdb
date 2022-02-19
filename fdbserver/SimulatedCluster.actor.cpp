@@ -34,7 +34,7 @@
 #include "fdbclient/ClusterInterface.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/CoordinationInterface.h"
-#include "fdbmonitor/SimpleIni.h"
+#include "fdbclient/SimpleIni.h"
 #include "fdbrpc/AsyncFileNonDurable.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"

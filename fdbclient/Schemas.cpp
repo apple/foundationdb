@@ -24,6 +24,36 @@
 const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
 {
    "cluster":{
+       "storage_wiggler": {
+         "primary": {
+          	"last_round_start_datetime": "Wed Feb  4 09:36:37 2022 +0000",
+			"last_round_start_timestamp": 63811229797,
+			"last_round_finish_datetime": "Thu Jan  1 00:00:00 1970 +0000",
+			"last_round_finish_timestamp": 0,
+			"smoothed_round_seconds": 1,
+			"finished_round": 1,
+			"last_wiggle_start_datetime": "Wed Feb  4 09:36:37 2022 +0000",
+			"last_wiggle_start_timestamp": 63811229797,
+			"last_wiggle_finish_datetime": "Thu Jan  1 00:00:00 1970 +0000",
+			"last_wiggle_finish_timestamp": 0,
+			"smoothed_wiggle_seconds": 1,
+			"finished_wiggle": 1
+          },
+          "remote": {
+          	"last_round_start_datetime": "Wed Feb  4 09:36:37 2022 +0000",
+			"last_round_start_timestamp": 63811229797,
+			"last_round_finish_datetime": "Thu Jan  1 00:00:00 1970 +0000",
+			"last_round_finish_timestamp": 0,
+			"smoothed_round_seconds": 1,
+			"finished_round": 1,
+			"last_wiggle_start_datetime": "Wed Feb  4 09:36:37 2022 +0000",
+			"last_wiggle_start_timestamp": 63811229797,
+			"last_wiggle_finish_datetime": "Thu Jan  1 00:00:00 1970 +0000",
+			"last_wiggle_finish_timestamp": 0,
+			"smoothed_wiggle_seconds": 1,
+			"finished_wiggle": 1
+          }
+      },
       "layers":{
          "_valid":true,
          "_error":"some error description"
@@ -102,6 +132,10 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                         "router",
                         "coordinator"
                      ]
+                  },
+                  "storage_metadata":{
+                     "created_time_datetime":"Thu Jan  1 00:00:00 1970 +0000",
+                     "created_time_timestamp": 0
                   },
                   "data_version":12341234,
                   "durable_version":12341234,
@@ -1048,19 +1082,3 @@ const KeyRef JSONSchemas::managementApiErrorSchema = LiteralStringRef(R"""(
    "message": "The reason of the error"
 }
 )""");
-
-const KeyRef JSONSchemas::clientLibMetadataSchema = LiteralStringRef(R"""(
-{
-    "platform": "x86_64-linux",
-    "version": "7.1.0",
-    "githash": "e28fef6264d05ab0c9488238022d1ee885a30bea",
-    "type": "debug",
-    "checksum": "fcef53fb4ae86d2c4fff4dc17c7e5d08",
-    "checksumalg": "md5",
-    "apiversion": 710,
-    "protocol": "fdb00b07001001",
-    "filename": "libfdb_c.7.1.0.so",
-    "size" : 19467552,
-    "chunkcount" : 2377,
-    "status": "available"
-})""");

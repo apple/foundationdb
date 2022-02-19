@@ -24,7 +24,7 @@
 #include "fdbserver/MutationTracking.h"
 #include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/SpanContextMessage.h"
-
+#include "fdbclient/SystemData.h"
 #if defined(FDB_CLEAN_BUILD) && MUTATION_TRACKING_ENABLED
 #error "You cannot use mutation tracking in a clean/release build."
 #endif

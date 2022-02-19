@@ -76,8 +76,8 @@
 #include <grp.h>
 
 #include "flow/SimpleOpt.h"
-#include "SimpleIni.h"
 
+#include "fdbclient/SimpleIni.h"
 #include "fdbclient/versions.h"
 
 #ifdef __linux__
