@@ -30,6 +30,7 @@ import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.function.Function;
@@ -197,7 +198,7 @@ public class StackTester {
 				inst.tr.options().setNextWriteNoWriteConflictRange();
 			}
 			else if(op == StackOperation.RESET) {
-				inst.context.newTransaction();
+				inst.context.resetTransaction();
 			}
 			else if(op == StackOperation.CANCEL) {
 				inst.tr.cancel();
@@ -300,12 +301,12 @@ public class StackTester {
 
 				try {
 					Transaction tr = inst.tr.onError(err).join();
-					if(!inst.setTransaction(tr)) {
+					if(!inst.replaceTransaction(tr)) {
 						tr.close();
 					}
 				}
 				catch(Throwable t) {
-					inst.context.newTransaction(); // Other bindings allow reuse of non-retryable transactions, so we need to emulate that behavior.
+					inst.context.resetTransaction(); // Other bindings allow reuse of non-retryable transactions, so we need to emulate that behavior.
 					throw t;
 				}
 
@@ -417,6 +418,21 @@ public class StackTester {
 				Object param = inst.popParam().join();
 				double value = ((Number)param).doubleValue();
 				inst.push(ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN).putDouble(value).array());
+			}
+			else if (op == StackOperation.TENANT_CREATE) {
+				byte[] tenantName = (byte[])inst.popParam().join();
+				inst.push(inst.context.db.allocateTenant(tenantName));
+			}
+			else if (op == StackOperation.TENANT_DELETE) {
+				byte[] tenantName = (byte[])inst.popParam().join();
+				inst.push(inst.context.db.deleteTenant(tenantName));
+			}
+			else if (op == StackOperation.TENANT_SET_ACTIVE) {
+				byte[] tenantName = (byte[])inst.popParam().join();
+				inst.context.setTenant(Optional.of(tenantName));
+			}
+			else if (op == StackOperation.TENANT_CLEAR_ACTIVE) {
+				inst.context.setTenant(Optional.empty());
 			}
 			else if(op == StackOperation.UNIT_TESTS) {
 				try {
@@ -579,7 +595,7 @@ public class StackTester {
 	private static void executeMutation(Instruction inst, Function<Transaction, Void> r) {
 		// run this with a retry loop (and commit)
 		inst.tcx.run(r);
-		if(inst.isDatabase)
+		if(inst.isDatabase || inst.isTenant)
 			inst.push("RESULT_NOT_PRESENT".getBytes());
 	}
 

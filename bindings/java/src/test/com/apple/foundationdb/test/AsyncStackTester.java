@@ -30,6 +30,7 @@ import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 
@@ -184,7 +185,7 @@ public class AsyncStackTester {
 			return AsyncUtil.DONE;
 		}
 		else if(op == StackOperation.RESET) {
-			inst.context.newTransaction();
+			inst.context.resetTransaction();
 			return AsyncUtil.DONE;
 		}
 		else if(op == StackOperation.CANCEL) {
@@ -332,9 +333,9 @@ public class AsyncStackTester {
 				final Transaction oldTr = inst.tr;
 				CompletableFuture<Void> f = oldTr.onError(err).whenComplete((tr, t) -> {
 					if(t != null) {
-						inst.context.newTransaction(oldTr); // Other bindings allow reuse of non-retryable transactions, so we need to emulate that behavior.
+						inst.context.resetTransaction(oldTr); // Other bindings allow reuse of non-retryable transactions, so we need to emulate that behavior.
 					}
-					else if(!inst.setTransaction(oldTr, tr)) {
+					else if(!inst.replaceTransaction(oldTr, tr)) {
 						tr.close();
 					}
 				}).thenApply(v -> null);
@@ -469,6 +470,28 @@ public class AsyncStackTester {
 				inst.push(ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN).putDouble(value).array());
 			}, FDB.DEFAULT_EXECUTOR);
 		}
+		else if (op == StackOperation.TENANT_CREATE) {
+			return inst.popParam().thenAcceptAsync(param -> {
+				byte[] tenantName = (byte[])param;
+				inst.push(inst.context.db.allocateTenant(tenantName));
+			}, FDB.DEFAULT_EXECUTOR);
+		}
+		else if (op == StackOperation.TENANT_DELETE) {
+			return inst.popParam().thenAcceptAsync(param -> {
+				byte[] tenantName = (byte[])param;
+				inst.push(inst.context.db.deleteTenant(tenantName));
+			}, FDB.DEFAULT_EXECUTOR);
+		}
+		else if (op == StackOperation.TENANT_SET_ACTIVE) {
+			return inst.popParam().thenAcceptAsync(param -> {
+				byte[] tenantName = (byte[])param;
+				inst.context.setTenant(Optional.of(tenantName));
+			}, FDB.DEFAULT_EXECUTOR);
+		}
+		else if (op == StackOperation.TENANT_CLEAR_ACTIVE) {
+			inst.context.setTenant(Optional.empty());
+			return AsyncUtil.DONE;
+		}
 		else if(op == StackOperation.UNIT_TESTS) {
 			inst.context.db.options().setLocationCacheSize(100001);
 			return inst.context.db.runAsync(tr -> {
@@ -554,7 +577,7 @@ public class AsyncStackTester {
 	private static CompletableFuture<Void> executeMutation(final Instruction inst, Function<Transaction, CompletableFuture<Void>> r) {
 		// run this with a retry loop
 		return inst.tcx.runAsync(r).thenRunAsync(() -> {
-			if(inst.isDatabase)
+			if(inst.isDatabase || inst.isTenant)
 				inst.push("RESULT_NOT_PRESENT".getBytes());
 		}, FDB.DEFAULT_EXECUTOR);
 	}
