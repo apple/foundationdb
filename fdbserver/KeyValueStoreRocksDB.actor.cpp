@@ -524,6 +524,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			std::vector<rocksdb::ColumnFamilyHandle*> handle;
 			auto options = getOptions();
 			options.listeners.push_back(a.errorListener);
+			options.env->SetBackgroundThreads(3, rocksdb::Env::Priority::LOW);
+			options.max_background_compactions = 3;
+			//options.max_subcompactions = 2;
 			if (SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC > 0) {
 				options.rate_limiter = rateLimiter;
 			}
@@ -1038,6 +1041,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			writeThread = createGenericThreadPool();
 			readThreads = createGenericThreadPool();
 		}
+
 		writeThread->addThread(new Writer(db, id, readIterPool), "fdb-rocksdb-wr");
 		TraceEvent("RocksDBReadThreads").detail("KnobRocksDBReadParallelism", SERVER_KNOBS->ROCKSDB_READ_PARALLELISM);
 		for (unsigned i = 0; i < SERVER_KNOBS->ROCKSDB_READ_PARALLELISM; ++i) {
@@ -1105,6 +1109,13 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		if (writeBatch == nullptr) {
 			return Void();
 		}
+
+		/*uint64_t estPendCompactBytes;
+		db->GetIntProperty(rocksdb::DB::Properties::kEstimatePendingCompactionBytes, &estPendCompactBytes);
+		if(estPendCompactBytes > 50000000000) {
+			throw server_overloaded();
+		}*/
+
 		auto a = new Writer::CommitAction();
 		a->batchToCommit = std::move(writeBatch);
 		auto res = a->done.getFuture();
@@ -1225,7 +1236,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		int64_t total;
 		g_network->getDiskBytes(path, free, total);
 
-		return StorageBytes(free, total, live, free);
+		uint64_t estPendCompactBytes;
+		db->GetIntProperty(rocksdb::DB::Properties::kEstimatePendingCompactionBytes, &estPendCompactBytes);		
+
+		return StorageBytes(free, total, live, free, estPendCompactBytes);
 	}
 };
 

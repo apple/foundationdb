@@ -850,22 +850,24 @@ struct StorageBytes {
 	int64_t available;
 	// Amount of space that could eventually be available for use after garbage collection
 	int64_t temp;
+	int64_t pendCompactionBytes;
 
 	StorageBytes() {}
-	StorageBytes(int64_t free, int64_t total, int64_t used, int64_t available, int64_t temp = 0)
-	  : free(free), total(total), used(used), available(available), temp(temp) {}
+	StorageBytes(int64_t free, int64_t total, int64_t used, int64_t available, int64_t pendCompactionBytes = 0, int64_t temp = 0)
+	  : free(free), total(total), used(used), available(available), pendCompactionBytes(pendCompactionBytes), temp(temp) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, free, total, used, available);
+		serializer(ar, free, total, used, available, pendCompactionBytes);
 	}
 
 	std::string toString() const {
-		return format("{%.2f MB total, %.2f MB free, %.2f MB available, %.2f MB used, %.2f MB temp}",
+		return format("{%.2f MB total, %.2f MB free, %.2f MB available, %.2f MB used, %.2f MB pendingCompactionbytes, %.2f MB temp}",
 		              total / 1e6,
 		              free / 1e6,
 		              available / 1e6,
 		              used / 1e6,
+					  pendCompactionBytes / 1e6,
 		              temp / 1e6);
 	}
 
