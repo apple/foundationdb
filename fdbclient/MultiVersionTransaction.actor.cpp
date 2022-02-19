@@ -18,7 +18,9 @@
  * limitations under the License.
  */
 
+#include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/GenericManagementAPI.actor.h"
 #include "fdbclient/MultiVersionTransaction.h"
 #include "fdbclient/MultiVersionAssignmentVars.h"
 #include "fdbclient/ClientVersion.h"
@@ -382,6 +384,15 @@ void DLTransaction::reset() {
 	api->transactionReset(tr);
 }
 
+// DLTenant
+Reference<ITransaction> DLTenant::createTransaction() {
+	ASSERT(api->tenantCreateTransaction != nullptr);
+
+	FdbCApi::FDBTransaction* tr;
+	api->tenantCreateTransaction(tenant, &tr);
+	return Reference<ITransaction>(new DLTransaction(api, tr));
+}
+
 // DLDatabase
 DLDatabase::DLDatabase(Reference<FdbCApi> api, ThreadFuture<FdbCApi::FDBDatabase*> dbFuture) : api(api), db(nullptr) {
 	addref();
@@ -401,9 +412,19 @@ ThreadFuture<Void> DLDatabase::onReady() {
 	return ready;
 }
 
+Reference<ITenant> DLDatabase::openTenant(StringRef tenantName) {
+	if (!api->databaseOpenTenant) {
+		throw unsupported_operation();
+	}
+
+	FdbCApi::FDBTenant* tenant;
+	throwIfError(api->databaseOpenTenant(db, tenantName.begin(), tenantName.size(), &tenant));
+	return makeReference<DLTenant>(api, tenant);
+}
+
 Reference<ITransaction> DLDatabase::createTransaction() {
 	FdbCApi::FDBTransaction* tr;
-	api->databaseCreateTransaction(db, &tr);
+	throwIfError(api->databaseCreateTransaction(db, &tr));
 	return Reference<ITransaction>(new DLTransaction(api, tr));
 }
 
@@ -473,6 +494,26 @@ ThreadFuture<ProtocolVersion> DLDatabase::getServerProtocol(Optional<ProtocolVer
 	});
 }
 
+// Registers a tenant with the given name. A prefix is automatically allocated for the tenant.
+ThreadFuture<Void> DLDatabase::createTenant(StringRef const& tenantName) {
+	if (api->databaseAllocateTenant == nullptr) {
+		throw unsupported_operation();
+	}
+
+	FdbCApi::FDBFuture* f = api->databaseAllocateTenant(db, tenantName.begin(), tenantName.size());
+	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) { return Void(); });
+}
+
+// Deletes the tenant with the given name. The tenant must be empty.
+ThreadFuture<Void> DLDatabase::deleteTenant(StringRef const& tenantName) {
+	if (api->databaseRemoveTenant == nullptr) {
+		throw unsupported_operation();
+	}
+
+	FdbCApi::FDBFuture* f = api->databaseRemoveTenant(db, tenantName.begin(), tenantName.size());
+	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) { return Void(); });
+}
+
 // DLApi
 
 // Loads the specified function from a dynamic library
@@ -522,6 +563,7 @@ void DLApi::init() {
 	loadClientFunction(&api->stopNetwork, lib, fdbCPath, "fdb_stop_network", headerVersion >= 0);
 	loadClientFunction(&api->createDatabase, lib, fdbCPath, "fdb_create_database", headerVersion >= 610);
 
+	loadClientFunction(&api->databaseOpenTenant, lib, fdbCPath, "fdb_database_open_tenant", headerVersion >= 710);
 	loadClientFunction(
 	    &api->databaseCreateTransaction, lib, fdbCPath, "fdb_database_create_transaction", headerVersion >= 0);
 	loadClientFunction(&api->databaseSetOption, lib, fdbCPath, "fdb_database_set_option", headerVersion >= 0);
@@ -532,6 +574,9 @@ void DLApi::init() {
 	                   headerVersion >= 700);
 	loadClientFunction(
 	    &api->databaseGetServerProtocol, lib, fdbCPath, "fdb_database_get_server_protocol", headerVersion >= 700);
+	loadClientFunction(
+	    &api->databaseAllocateTenant, lib, fdbCPath, "fdb_database_allocate_tenant", headerVersion >= 710);
+	loadClientFunction(&api->databaseRemoveTenant, lib, fdbCPath, "fdb_database_remove_tenant", headerVersion >= 710);
 	loadClientFunction(&api->databaseDestroy, lib, fdbCPath, "fdb_database_destroy", headerVersion >= 0);
 	loadClientFunction(&api->databaseRebootWorker, lib, fdbCPath, "fdb_database_reboot_worker", headerVersion >= 700);
 	loadClientFunction(&api->databaseForceRecoveryWithDataLoss,
@@ -541,6 +586,10 @@ void DLApi::init() {
 	                   headerVersion >= 700);
 	loadClientFunction(
 	    &api->databaseCreateSnapshot, lib, fdbCPath, "fdb_database_create_snapshot", headerVersion >= 700);
+
+	loadClientFunction(
+	    &api->tenantCreateTransaction, lib, fdbCPath, "fdb_tenant_create_transaction", headerVersion >= 710);
+	loadClientFunction(&api->tenantDestroy, lib, fdbCPath, "fdb_tenant_destroy", headerVersion >= 710);
 
 	loadClientFunction(&api->transactionSetOption, lib, fdbCPath, "fdb_transaction_set_option", headerVersion >= 0);
 	loadClientFunction(&api->transactionDestroy, lib, fdbCPath, "fdb_transaction_destroy", headerVersion >= 0);
@@ -737,6 +786,7 @@ void DLApi::addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParame
 
 // MultiVersionTransaction
 MultiVersionTransaction::MultiVersionTransaction(Reference<MultiVersionDatabase> db,
+                                                 Optional<Reference<MultiVersionTenant>> tenant,
                                                  UniqueOrderedOptionList<FDBTransactionOptions> defaultOptions)
   : db(db), startTime(timer_monotonic()), timeoutTsav(new ThreadSingleAssignmentVar<Void>()) {
 	setDefaultOptions(defaultOptions);
@@ -749,18 +799,29 @@ void MultiVersionTransaction::setDefaultOptions(UniqueOrderedOptionList<FDBTrans
 }
 
 void MultiVersionTransaction::updateTransaction() {
-	auto currentDb = db->dbState->dbVar->get();
-
 	TransactionInfo newTr;
-	if (currentDb.value) {
-		newTr.transaction = currentDb.value->createTransaction();
+	if (tenant.present()) {
+		ASSERT(tenant.get());
+		auto currentTenant = tenant.get()->tenantVar->get();
+		if (currentTenant.value) {
+			newTr.transaction = currentTenant.value->createTransaction();
+		}
+
+		newTr.onChange = currentTenant.onChange;
+	} else {
+		auto currentDb = db->dbState->dbVar->get();
+		if (currentDb.value) {
+			newTr.transaction = currentDb.value->createTransaction();
+		}
+
+		newTr.onChange = currentDb.onChange;
 	}
 
 	Optional<StringRef> timeout;
 	for (auto option : persistentOptions) {
 		if (option.first == FDBTransactionOptions::TIMEOUT) {
 			timeout = option.second.castTo<StringRef>();
-		} else if (currentDb.value) {
+		} else if (newTr.transaction) {
 			newTr.transaction->setOption(option.first, option.second.castTo<StringRef>());
 		}
 	}
@@ -770,12 +831,10 @@ void MultiVersionTransaction::updateTransaction() {
 	// that might inadvertently fail the transaction.
 	if (timeout.present()) {
 		setTimeout(timeout);
-		if (currentDb.value) {
+		if (newTr.transaction) {
 			newTr.transaction->setOption(FDBTransactionOptions::TIMEOUT, timeout);
 		}
 	}
-
-	newTr.onChange = currentDb.onChange;
 
 	lock.enter();
 	transaction = newTr;
@@ -1167,6 +1226,39 @@ bool MultiVersionTransaction::isValid() {
 	return tr.transaction.isValid();
 }
 
+// MultiVersionTenant
+MultiVersionTenant::MultiVersionTenant(Reference<MultiVersionDatabase> db, StringRef tenantName)
+  : db(db), tenantName(tenantName) {
+	updateTenant();
+}
+
+MultiVersionTenant::~MultiVersionTenant() {}
+
+Reference<ITransaction> MultiVersionTenant::createTransaction() {
+	return Reference<ITransaction>(new MultiVersionTransaction(
+	    db, Reference<MultiVersionTenant>::addRef(this), db->dbState->transactionDefaultOptions));
+}
+
+// Creates a new underlying tenant object whenever the database connection changes. This change is signaled
+// to open transactions via an AsyncVar.
+void MultiVersionTenant::updateTenant() {
+	Reference<ITenant> tenant;
+	auto currentDb = db->dbState->dbVar->get();
+	if (currentDb.value) {
+		tenant = currentDb.value->openTenant(tenantName);
+	} else {
+		tenant = Reference<ITenant>(nullptr);
+	}
+
+	tenantVar->set(tenant);
+
+	MutexHolder holder(tenantLock);
+	tenantUpdater = mapThreadFuture<Void, Void>(currentDb.onChange, [this](ErrorOr<Void> result) {
+		updateTenant();
+		return Void();
+	});
+}
+
 // MultiVersionDatabase
 MultiVersionDatabase::MultiVersionDatabase(MultiVersionApi* api,
                                            int threadIdx,
@@ -1241,9 +1333,14 @@ Reference<IDatabase> MultiVersionDatabase::debugCreateFromExistingDatabase(Refer
 	return Reference<IDatabase>(new MultiVersionDatabase(MultiVersionApi::api, 0, "", db, db, false));
 }
 
+Reference<ITenant> MultiVersionDatabase::openTenant(StringRef tenantName) {
+	return makeReference<MultiVersionTenant>(Reference<MultiVersionDatabase>::addRef(this), tenantName);
+}
+
 Reference<ITransaction> MultiVersionDatabase::createTransaction() {
-	return Reference<ITransaction>(
-	    new MultiVersionTransaction(Reference<MultiVersionDatabase>::addRef(this), dbState->transactionDefaultOptions));
+	return Reference<ITransaction>(new MultiVersionTransaction(Reference<MultiVersionDatabase>::addRef(this),
+	                                                           Optional<Reference<MultiVersionTenant>>(),
+	                                                           dbState->transactionDefaultOptions));
 }
 
 void MultiVersionDatabase::setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value) {
@@ -1306,6 +1403,22 @@ double MultiVersionDatabase::getMainThreadBusyness() {
 // Note: this will never return if the server is running a protocol from FDB 5.0 or older
 ThreadFuture<ProtocolVersion> MultiVersionDatabase::getServerProtocol(Optional<ProtocolVersion> expectedVersion) {
 	return dbState->versionMonitorDb->getServerProtocol(expectedVersion);
+}
+
+// Registers a tenant with the given name. A prefix is automatically allocated for the tenant.
+ThreadFuture<Void> MultiVersionDatabase::createTenant(StringRef const& tenantName) {
+	Standalone<StringRef> tenantNameCopy = tenantName;
+	Reference<MultiVersionDatabase> self = Reference<MultiVersionDatabase>::addRef(this);
+
+	return onMainThread([self, tenantNameCopy]() { return ManagementAPI::createTenant(self, tenantNameCopy); });
+}
+
+// Deletes the tenant with the given name. The tenant must be empty.
+ThreadFuture<Void> MultiVersionDatabase::deleteTenant(StringRef const& tenantName) {
+	Standalone<StringRef> tenantNameCopy = tenantName;
+	Reference<MultiVersionDatabase> self = Reference<MultiVersionDatabase>::addRef(this);
+
+	return onMainThread([self, tenantNameCopy]() { return ManagementAPI::deleteTenant(self, tenantNameCopy); });
 }
 
 MultiVersionDatabase::DatabaseState::DatabaseState(std::string clusterFilePath, Reference<IDatabase> versionMonitorDb)

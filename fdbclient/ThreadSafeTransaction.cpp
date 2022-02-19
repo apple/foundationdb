@@ -23,6 +23,7 @@
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/versions.h"
+#include "fdbclient/GenericManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 
 // Users of ThreadSafeTransaction might share Reference<ThreadSafe...> between different threads as long as they don't
@@ -46,9 +47,13 @@ ThreadFuture<Reference<IDatabase>> ThreadSafeDatabase::createFromExistingDatabas
 	});
 }
 
+Reference<ITenant> ThreadSafeDatabase::openTenant(StringRef tenantName) {
+	return makeReference<ThreadSafeTenant>(Reference<ThreadSafeDatabase>::addRef(this), tenantName);
+}
+
 Reference<ITransaction> ThreadSafeDatabase::createTransaction() {
 	auto type = isConfigDB ? ISingleThreadTransaction::Type::SIMPLE_CONFIG : ISingleThreadTransaction::Type::RYW;
-	return Reference<ITransaction>(new ThreadSafeTransaction(db, type));
+	return Reference<ITransaction>(new ThreadSafeTransaction(db, type, Optional<TenantName>()));
 }
 
 void ThreadSafeDatabase::setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value) {
@@ -111,6 +116,24 @@ ThreadFuture<ProtocolVersion> ThreadSafeDatabase::getServerProtocol(Optional<Pro
 	    [db, expectedVersion]() -> Future<ProtocolVersion> { return db->getClusterProtocol(expectedVersion); });
 }
 
+// Registers a tenant with the given name. A prefix is automatically allocated for the tenant.
+ThreadFuture<Void> ThreadSafeDatabase::createTenant(StringRef const& name) {
+	DatabaseContext* db = this->db;
+	TenantName tenantNameCopy = name;
+	return onMainThread([db, tenantNameCopy]() -> Future<Void> {
+		return ManagementAPI::createTenant(Reference<DatabaseContext>::addRef(db), tenantNameCopy);
+	});
+}
+
+// Deletes the tenant with the given name. The tenant must be empty.
+ThreadFuture<Void> ThreadSafeDatabase::deleteTenant(StringRef const& name) {
+	DatabaseContext* db = this->db;
+	TenantName tenantNameCopy = name;
+	return onMainThread([db, tenantNameCopy]() -> Future<Void> {
+		return ManagementAPI::deleteTenant(Reference<DatabaseContext>::addRef(db), tenantNameCopy);
+	});
+}
+
 ThreadSafeDatabase::ThreadSafeDatabase(std::string connFilename, int apiVersion) {
 	ClusterConnectionFile* connFile =
 	    new ClusterConnectionFile(ClusterConnectionFile::lookupClusterFileName(connFilename).first);
@@ -139,7 +162,16 @@ ThreadSafeDatabase::~ThreadSafeDatabase() {
 	onMainThreadVoid([db]() { db->delref(); }, nullptr);
 }
 
-ThreadSafeTransaction::ThreadSafeTransaction(DatabaseContext* cx, ISingleThreadTransaction::Type type) {
+Reference<ITransaction> ThreadSafeTenant::createTransaction() {
+	auto type = db->isConfigDB ? ISingleThreadTransaction::Type::SIMPLE_CONFIG : ISingleThreadTransaction::Type::RYW;
+	return Reference<ITransaction>(new ThreadSafeTransaction(db->db, type, name));
+}
+
+ThreadSafeTenant::~ThreadSafeTenant() {}
+
+ThreadSafeTransaction::ThreadSafeTransaction(DatabaseContext* cx,
+                                             ISingleThreadTransaction::Type type,
+                                             Optional<TenantName> tenant) {
 	// Allocate memory for the transaction from this thread (so the pointer is known for subsequent method calls)
 	// but run its constructor on the main thread
 
@@ -150,9 +182,13 @@ ThreadSafeTransaction::ThreadSafeTransaction(DatabaseContext* cx, ISingleThreadT
 	auto tr = this->tr = ISingleThreadTransaction::allocateOnForeignThread(type);
 	// No deferred error -- if the construction of the RYW transaction fails, we have no where to put it
 	onMainThreadVoid(
-	    [tr, cx]() {
+	    [tr, cx, tenant]() {
 		    cx->addref();
-		    tr->setDatabase(Database(cx));
+		    if (tenant.present()) {
+			    tr->construct(Database(cx), tenant.get());
+		    } else {
+			    tr->construct(Database(cx));
+		    }
 	    },
 	    nullptr);
 }

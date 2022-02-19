@@ -35,6 +35,7 @@ public:
 	~ThreadSafeDatabase() override;
 	static ThreadFuture<Reference<IDatabase>> createFromExistingDatabase(Database cx);
 
+	Reference<ITenant> openTenant(StringRef tenantName) override;
 	Reference<ITransaction> createTransaction() override;
 
 	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
@@ -45,6 +46,12 @@ public:
 	// Note: this will never return if the server is running a protocol from FDB 5.0 or older
 	ThreadFuture<ProtocolVersion> getServerProtocol(
 	    Optional<ProtocolVersion> expectedVersion = Optional<ProtocolVersion>()) override;
+
+	// Registers a tenant with the given name. A prefix is automatically allocated for the tenant.
+	ThreadFuture<Void> createTenant(StringRef const& name) override;
+
+	// Deletes the tenant with the given name. The tenant must be empty.
+	ThreadFuture<Void> deleteTenant(StringRef const& name) override;
 
 	// Returns after a majority of coordination servers are available and have reported a leader. The
 	// cluster file therefore is valid, but the database might be unavailable.
@@ -58,6 +65,7 @@ public:
 	ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) override;
 
 private:
+	friend class ThreadSafeTenant;
 	friend class ThreadSafeTransaction;
 	bool isConfigDB{ false };
 	DatabaseContext* db;
@@ -68,11 +76,28 @@ public: // Internal use only
 	DatabaseContext* unsafeGetPtr() const { return db; }
 };
 
+class ThreadSafeTenant : public ITenant, ThreadSafeReferenceCounted<ThreadSafeTenant>, NonCopyable {
+public:
+	ThreadSafeTenant(Reference<ThreadSafeDatabase> db, StringRef name) : db(db), name(name) {}
+	~ThreadSafeTenant() override;
+
+	Reference<ITransaction> createTransaction() override;
+
+	void addref() override { ThreadSafeReferenceCounted<ThreadSafeTenant>::addref(); }
+	void delref() override { ThreadSafeReferenceCounted<ThreadSafeTenant>::delref(); }
+
+private:
+	Reference<ThreadSafeDatabase> db;
+	Standalone<StringRef> name;
+};
+
 // An implementation of ITransaction that serializes operations onto the network thread and interacts with the
 // lower-level client APIs exposed by ISingleThreadTransaction
 class ThreadSafeTransaction : public ITransaction, ThreadSafeReferenceCounted<ThreadSafeTransaction>, NonCopyable {
 public:
-	explicit ThreadSafeTransaction(DatabaseContext* cx, ISingleThreadTransaction::Type type);
+	explicit ThreadSafeTransaction(DatabaseContext* cx,
+	                               ISingleThreadTransaction::Type type,
+	                               Optional<TenantName> tenant);
 	~ThreadSafeTransaction() override;
 
 	// Note: used while refactoring fdbcli, need to be removed later

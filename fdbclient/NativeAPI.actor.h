@@ -159,6 +159,7 @@ struct TransactionOptions {
 	bool expensiveClearCostEstimation : 1;
 	bool useGrvCache : 1;
 	bool skipGrvCache : 1;
+	bool rawAccess : 1;
 
 	TransactionPriority priority;
 
@@ -236,6 +237,7 @@ struct Watch : public ReferenceCounted<Watch>, NonCopyable {
 
 struct TransactionState : ReferenceCounted<TransactionState> {
 	Database cx;
+	Optional<TenantName> tenant;
 	Reference<TransactionLogInfo> trLogInfo;
 	TransactionOptions options;
 
@@ -250,23 +252,29 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 
 	Version committedVersion{ invalidVersion };
 
+	Future<Key> tenantPrefix;
+
 	// Used to save conflicting keys if FDBTransactionOptions::REPORT_CONFLICTING_KEYS is enabled
 	// prefix/<key1> : '1' - any keys equal or larger than this key are (probably) conflicting keys
 	// prefix/<key2> : '0' - any keys equal or larger than this key are (definitely) not conflicting keys
 	std::shared_ptr<CoalescedKeyRangeMap<Value>> conflictingKeys;
 
 	// Only available so that Transaction can have a default constructor, for use in state variables
-	TransactionState(TaskPriority taskID, SpanID spanID) : taskID(taskID), spanID(spanID) {}
+	TransactionState(TaskPriority taskID, SpanID spanID) : taskID(taskID), spanID(spanID), tenantPrefix(Key()) {}
 
-	TransactionState(Database cx, TaskPriority taskID, SpanID spanID, Reference<TransactionLogInfo> trLogInfo)
-	  : cx(cx), trLogInfo(trLogInfo), options(cx), taskID(taskID), spanID(spanID) {}
+	TransactionState(Database cx,
+	                 Optional<TenantName> tenant,
+	                 TaskPriority taskID,
+	                 SpanID spanID,
+	                 Reference<TransactionLogInfo> trLogInfo);
 
 	Reference<TransactionState> cloneAndReset(Reference<TransactionLogInfo> newTrLogInfo, bool generateNewSpan) const;
+	TenantInfo getTenantInfo() const;
 };
 
 class Transaction : NonCopyable {
 public:
-	explicit Transaction(Database const& cx);
+	explicit Transaction(Database const& cx, Optional<TenantName> const& tenant = Optional<TenantName>());
 	~Transaction();
 
 	void setVersion(Version v);
@@ -439,6 +447,8 @@ public:
 	Standalone<VectorRef<KeyRangeRef>> writeConflictRanges() const {
 		return Standalone<VectorRef<KeyRangeRef>>(tr.transaction.write_conflict_ranges, tr.arena);
 	}
+
+	Future<Key> getTenantPrefix();
 
 	Reference<TransactionState> trState;
 	std::vector<Reference<Watch>> watches;

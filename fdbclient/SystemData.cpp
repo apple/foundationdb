@@ -1336,6 +1336,8 @@ TenantMapEntry decodeTenantEntry(ValueRef const& value) {
 const KeyRangeRef tenantMapKeys("\xff/tenantMap/"_sr, "\xff/tenantMap0"_sr);
 const KeyRef tenantMapPrefix = tenantMapKeys.begin;
 const KeyRef tenantMapPrivatePrefix = "\xff\xff/tenantMap/"_sr;
+const KeyRef tenantLastIdKey = "\xff/tenantLastId/"_sr;
+const KeyRef tenantDataPrefixKey = "\xff/tenantDataPrefix"_sr;
 
 // for tests
 void testSSISerdes(StorageServerInterface const& ssi, bool useFB) {

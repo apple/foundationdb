@@ -37,6 +37,9 @@ the contents of the system key space.
 #include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/Status.h"
+#include "fdbclient/Subspace.h"
+#include "fdbclient/DatabaseConfiguration.h"
+#include "fdbclient/Status.h"
 #include "fdbclient/SystemData.h"
 #include "flow/actorcompiler.h" // has to be last include
 
@@ -626,6 +629,158 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db,
 // used by special keys and fdbcli
 std::string generateErrorMessage(const CoordinatorsResult& res);
 
+ACTOR template <class DB>
+Future<Optional<TenantMapEntry>> tryGetTenant(Reference<DB> db, TenantName name) {
+	state Reference<typename DB::TransactionT> tr = db->createTransaction();
+	state Key tenantMapKey = name.withPrefix(tenantMapPrefix);
+
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+
+			Optional<Value> val = wait(safeThreadFutureToFuture(tr->get(tenantMapKey)));
+			return val.map<TenantMapEntry>([](Optional<Value> v) { return decodeTenantEntry(v.get()); });
+		} catch (Error& e) {
+			wait(safeThreadFutureToFuture(tr->onError(e)));
+		}
+	}
+}
+
+ACTOR template <class DB>
+Future<TenantMapEntry> getTenant(Reference<DB> db, TenantName name) {
+	Optional<TenantMapEntry> entry = wait(tryGetTenant(db, name));
+	if (!entry.present()) {
+		throw tenant_not_found();
+	}
+
+	return entry.get();
+}
+
+ACTOR template <class DB>
+Future<Void> createTenant(Reference<DB> db, TenantName name) {
+	if (name.startsWith("\xff"_sr)) {
+		throw invalid_tenant_name();
+	}
+
+	state Reference<typename DB::TransactionT> tr = db->createTransaction();
+	state Key tenantMapKey = name.withPrefix(tenantMapPrefix);
+
+	state bool tenantCheckCompleted = false;
+
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+			Optional<Value> val = wait(safeThreadFutureToFuture(tr->get(tenantMapKey)));
+			if (val.present()) {
+				if (!tenantCheckCompleted) {
+					throw tenant_already_exists();
+				} else {
+					// If the tenant did not exist when we started trying to create it, then we will return success
+					// even if someone else created it simultaneously. This helps us avoid problems if the commit
+					// result for creating this tenant is unknown.
+					return Void();
+				}
+			} else {
+				tenantCheckCompleted = true;
+			}
+
+			state Future<Optional<Value>> tenantDataPrefixFuture =
+			    safeThreadFutureToFuture(tr->get(tenantDataPrefixKey));
+
+			state Optional<Value> lastIdVal = wait(safeThreadFutureToFuture(tr->get(tenantLastIdKey)));
+			Optional<Value> tenantDataPrefix = wait(tenantDataPrefixFuture);
+
+			state TenantMapEntry newTenant(lastIdVal.present() ? TenantMapEntry::prefixToId(lastIdVal.get()) + 1 : 0,
+			                               tenantDataPrefix.present() ? (KeyRef)tenantDataPrefix.get() : ""_sr);
+
+			RangeResult contents = wait(safeThreadFutureToFuture(tr->getRange(prefixRange(newTenant.prefix), 1)));
+			if (!contents.empty()) {
+				throw tenant_prefix_allocator_conflict();
+			}
+
+			tr->set(tenantLastIdKey, TenantMapEntry::idToPrefix(newTenant.id));
+			tr->set(tenantMapKey, encodeTenantEntry(newTenant));
+
+			wait(safeThreadFutureToFuture(tr->commit()));
+			TraceEvent("CreatedTenant")
+			    .detail("Tenant", name)
+			    .detail("ID", newTenant.id)
+			    .detail("Prefix", newTenant.prefix);
+
+			return Void();
+		} catch (Error& e) {
+			wait(safeThreadFutureToFuture(tr->onError(e)));
+		}
+	}
+}
+
+ACTOR template <class DB>
+Future<Void> deleteTenant(Reference<DB> db, TenantName name) {
+	state Reference<typename DB::TransactionT> tr = db->createTransaction();
+	state Key tenantMapKey = name.withPrefix(tenantMapPrefix);
+
+	state bool tenantCheckCompleted = false;
+
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			Optional<TenantMapEntry> tenantEntry = wait(tryGetTenant(db, name));
+			if (!tenantEntry.present()) {
+				if (!tenantCheckCompleted) {
+					throw tenant_not_found();
+				} else {
+					// If the tenant existed when we started trying to delete it, then we will return success
+					// even if someone else deleted it simultaneously. This helps us avoid problems if the commit
+					// result for deleting this tenant is unknown.
+					return Void();
+				}
+			} else {
+				tenantCheckCompleted = true;
+			}
+
+			RangeResult contents =
+			    wait(safeThreadFutureToFuture(tr->getRange(prefixRange(tenantEntry.get().prefix), 1)));
+			if (!contents.empty()) {
+				throw tenant_not_empty();
+			}
+
+			tr->clear(tenantMapKey);
+			wait(safeThreadFutureToFuture(tr->commit()));
+			TraceEvent("DeletedTenant").detail("Tenant", name);
+			return Void();
+		} catch (Error& e) {
+			wait(safeThreadFutureToFuture(tr->onError(e)));
+		}
+	}
+}
+
+ACTOR template <class DB>
+Future<Standalone<VectorRef<StringRef>>> listTenants(Reference<DB> db, StringRef begin, StringRef end, int limit) {
+	state Reference<typename DB::TransactionT> tr = db->createTransaction();
+	state KeyRange range = KeyRangeRef(begin, end).withPrefix(tenantMapPrefix);
+
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			RangeResult results = wait(safeThreadFutureToFuture(
+			    tr->getRange(firstGreaterOrEqual(range.begin), firstGreaterOrEqual(range.end), limit)));
+
+			Standalone<VectorRef<StringRef>> tenants;
+			for (auto kv : results) {
+				tenants.push_back_deep(tenants.arena(), kv.key.removePrefix(tenantMapPrefix));
+			}
+
+			return tenants;
+		} catch (Error& e) {
+			wait(safeThreadFutureToFuture(tr->onError(e)));
+		}
+	}
+}
 } // namespace ManagementAPI
 
 #include "flow/unactorcompiler.h"

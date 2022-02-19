@@ -598,6 +598,8 @@ BlobWorkerInterface decodeBlobWorkerListValue(ValueRef const& value);
 extern const KeyRangeRef tenantMapKeys;
 extern const KeyRef tenantMapPrefix;
 extern const KeyRef tenantMapPrivatePrefix;
+extern const KeyRef tenantLastIdKey;
+extern const KeyRef tenantDataPrefixKey;
 
 Value encodeTenantEntry(TenantMapEntry const& tenantEntry);
 TenantMapEntry decodeTenantEntry(ValueRef const& value);

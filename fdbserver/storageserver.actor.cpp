@@ -4470,7 +4470,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			                              : tryGetRange(results, &tr, keys);
 			state Key nfk = keys.begin;
 
-			try {
+			try 
 				loop {
 					TEST(true); // Fetching keys for transferred shard
 					while (data->fetchKeysBudgetUsed.get()) {
