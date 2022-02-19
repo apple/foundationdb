@@ -174,6 +174,18 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 			}
 			out[p + key] = format("%d", type);
 		}
+		if (key == "tenant_mode") {
+			TenantMode tenantMode;
+			if (value == "optional") {
+				tenantMode = TenantMode::OPTIONAL;
+			} else if (value == "required") {
+				tenantMode = TenantMode::REQUIRED;
+			} else {
+				printf("Error: Only optional|required are valid for tenant_mode.\n");
+				return out;
+			}
+			out[p + key] = format("%d", tenantMode);
+		}
 		return out;
 	}
 

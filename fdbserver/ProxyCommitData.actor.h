@@ -26,6 +26,7 @@
 #define FDBSERVER_PROXYCOMMITDATA_ACTOR_H
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/Tenant.h"
 #include "fdbrpc/Stats.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogSystemDiskQueueAdapter.h"
@@ -213,6 +214,8 @@ struct ProxyCommitData {
 	UIDTransactionTagMap<TransactionCommitCostEstimation> ssTrTagCommitCost;
 	double lastMasterReset;
 	double lastResolverReset;
+
+	TenantMap tenantMap;
 
 	// The tag related to a storage server rarely change, so we keep a vector of tags for each key range to be slightly
 	// more CPU efficient. When a tag related to a storage server does change, we empty out all of these vectors to

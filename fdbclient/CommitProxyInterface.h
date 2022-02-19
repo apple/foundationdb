@@ -116,6 +116,8 @@ struct ClientDBInfo {
 	Optional<Value> forward;
 	std::vector<VersionHistory> history;
 
+	TenantMode tenantMode;
+
 	ClientDBInfo() {}
 
 	bool operator==(ClientDBInfo const& r) const { return id == r.id; }
@@ -126,7 +128,7 @@ struct ClientDBInfo {
 		if constexpr (!is_fb_function<Archive>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar, grvProxies, commitProxies, id, forward, history);
+		serializer(ar, grvProxies, commitProxies, id, forward, history, tenantMode);
 	}
 };
 
@@ -167,12 +169,16 @@ struct CommitTransactionRequest : TimedRequest {
 	Optional<ClientTrCommitCostEstimation> commitCostEstimation;
 	Optional<TagSet> tagSet;
 
-	CommitTransactionRequest() : CommitTransactionRequest(SpanID()) {}
-	CommitTransactionRequest(SpanID const& context) : spanContext(context), flags(0) {}
+	TenantInfo tenantInfo;
+
+	CommitTransactionRequest() : CommitTransactionRequest(TenantInfo(), SpanID()) {}
+	CommitTransactionRequest(TenantInfo const& tenantInfo, SpanID const& context)
+	  : spanContext(context), flags(0), tenantInfo(tenantInfo) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, transaction, reply, arena, flags, debugID, commitCostEstimation, tagSet, spanContext);
+		serializer(
+		    ar, transaction, reply, arena, flags, debugID, commitCostEstimation, tagSet, spanContext, tenantInfo);
 	}
 };
 
