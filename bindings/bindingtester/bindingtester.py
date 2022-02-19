@@ -202,6 +202,7 @@ class TestRunner(object):
         self.args.types = list(reduce(lambda t1, t2: filter(t1.__contains__, t2), map(lambda tester: tester.types, self.testers)))
 
         self.args.no_directory_snapshot_ops = self.args.no_directory_snapshot_ops or any([not tester.directory_snapshot_ops_enabled for tester in self.testers])
+        self.args.no_tenants = self.args.no_tenants or any([not tester.tenants_enabled for tester in self.testers])
 
     def print_test(self):
         test_instructions = self._generate_test()
@@ -282,6 +283,18 @@ class TestRunner(object):
     def _insert_instructions(self, test_instructions):
         util.get_logger().info('\nInserting test into database...')
         del self.db[:]
+
+        # TODO: use tenant list API when available
+        while True:
+            tr = self.db.create_transaction()
+            try:
+                tr.options.set_access_system_keys()
+                del tr[b'\xff/tenantMap/' : b'\xff/tenantMap0']
+                tr.commit().wait()
+                break
+            except fdb.FDBError as e:
+                tr.on_error(e).wait()
+
         for subspace, thread in test_instructions.items():
             thread.insert_operations(self.db, subspace)
 
@@ -444,6 +457,8 @@ def parse_args(argv):
     parser.add_argument('--no-threads', action='store_true', help='Disables the START_THREAD instruction in the scripted test.')
     
     parser.add_argument('--no-directory-snapshot-ops', action='store_true', help='Disables snapshot operations for directory instructions.')
+
+    parser.add_argument('--no-tenants', action='store_true', help='Disables tenant operations.')
 
     return parser.parse_args(argv)
 
