@@ -1203,6 +1203,7 @@ ACTOR Future<Void> tLog(
     Reference<AsyncVar<UID>> activeSharedTLog);
 
 Key persistStorageTeamMessageRefsKey(UID id, StorageTeamID storageTeamId, Version version);
+Key persistStorageTeamMessagesKey(UID id, StorageTeamID storageTeamId, Version version);
 } // namespace ptxn
 
 typedef decltype(&tLog) TLogFn;

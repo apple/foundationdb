@@ -196,7 +196,7 @@ static const KeyRange persistStorageTeamMessagesKeys = prefixRange(LiteralString
 // similar to persistStorageTeamMessagesKeys
 static const KeyRange persistStorageTeamMessageRefsKeys = prefixRange(LiteralStringRef("StorageTeamMsgRef/"));
 
-static Key persistStorageTeamMessagesKey(UID id, StorageTeamID storageTeamId, Version version) {
+Key persistStorageTeamMessagesKey(UID id, StorageTeamID storageTeamId, Version version) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(persistStorageTeamMessagesKeys.begin);
 	wr << id;
@@ -236,6 +236,14 @@ static StorageTeamID decodeStorageTeamIDPoppedKey(KeyRef id, KeyRef key) {
 static std::map<Tag, Version> decodeStorageTeamTagToVersions(ValueRef value) {
 	return BinaryReader::fromStringRef<std::map<Tag, Version>>(
 	    value, IncludeVersion(ProtocolVersion::withPartitionTransaction()));
+}
+
+StringRef stripStorageTeamMessagesKey(StringRef key) {
+	return key.substr(sizeof(UID) + sizeof(StorageTeamID) + persistStorageTeamMessagesKeys.begin.size());
+}
+
+Version decodeStorageTeamMessagesKey(StringRef key) {
+	return bigEndian64(BinaryReader::fromStringRef<Version>(stripStorageTeamMessagesKey(key), Unversioned()));
 }
 
 struct SpilledData {
@@ -670,8 +678,9 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 	}
 
 	// For a given version, get the serialized messages
-	Optional<std::pair<Version, StringRef>> getSerializedTLogData(const Version& version,
-	                                                              const StorageTeamID& strorageTeamID);
+	Optional<std::pair<Version, std::pair<StringRef, Arena>>> getSerializedTLogData(
+	    const Version& version,
+	    const StorageTeamID& strorageTeamID);
 
 	// only callable after getStorageTeamData returns a null reference
 	Reference<StorageTeamData> createStorageTeamData(StorageTeamID team,
@@ -1115,76 +1124,71 @@ ACTOR Future<Void> tLogCommit(Reference<TLogGroupData> self,
 	return Void();
 }
 
-Optional<std::pair<Version, StringRef>> LogGenerationData::getSerializedTLogData(const Version& version,
-                                                                                 const StorageTeamID& storageTeamID) {
+Optional<std::pair<Version, std::pair<StringRef, Arena>>> LogGenerationData::getSerializedTLogData(
+    const Version& version,
+    const StorageTeamID& storageTeamID) {
 
 	auto pStorageTeamData = getStorageTeamData(storageTeamID);
 	// by lower_bound, if we pass in 10, we might get 12, and return 12
 	auto iter = pStorageTeamData->versionMessages.lower_bound(version);
 	if (iter == pStorageTeamData->versionMessages.end()) {
-		return Optional<std::pair<Version, StringRef>>();
+		return Optional<std::pair<Version, std::pair<StringRef, Arena>>>();
 	}
 
-	return std::make_pair(iter->first, iter->second.first);
+	return std::make_pair(iter->first, iter->second);
 }
 
 static const size_t TLOG_PEEK_REQUEST_REPLY_SIZE_CRITERIA = 1024 * 1024;
 
-ACTOR Future<Void> tLogPeekMessages(TLogPeekRequest req, Reference<LogGenerationData> logData) {
-	ASSERT(logData.isValid());
-
-	wait(logData->version.whenAtLeast(req.beginVersion));
-
-	if (!logData->getStorageTeamData(req.storageTeamID).isValid()) {
-		req.reply.sendError(storage_team_id_not_found());
-		return Void();
+Version poppedVersion(Reference<LogGenerationData> logData, StorageTeamID teamID) {
+	auto teamData = logData->getStorageTeamData(teamID);
+	if (!teamData) {
+		if (teamID == txsTeam) {
+			return 0;
+		}
+		return logData->recoveredAt + 1;
 	}
+	return teamData->popped;
+}
 
-	TLogPeekReply reply;
-	TLogSubsequencedMessageSerializer serializer(req.storageTeamID);
+void peekMessagesFromMemory(const TLogPeekRequest& req,
+                            std::vector<std::pair<Version, std::pair<StringRef, Arena>>>& values,
+                            Optional<Version>& beginVersion,
+                            Version& endVersion,
+                            Reference<LogGenerationData> logData) {
+	ASSERT(logData.isValid());
+	StorageTeamID storageTeamID = req.storageTeamID;
+	Version reqBegin = req.beginVersion;
+	Optional<Version> reqEnd = req.endVersion;
 	int versionCount = 0;
-	Version version = req.beginVersion;
-	Optional<std::pair<Version, StringRef>> serializedData;
-	while ((serializedData = logData->getSerializedTLogData(version, req.storageTeamID)).present()) {
+	Version version = reqBegin;
+	Optional<std::pair<Version, std::pair<StringRef, Arena>>> serializedData;
+	long total = 0;
+	while ((serializedData = logData->getSerializedTLogData(version, storageTeamID)).present()) {
 		auto result = serializedData.get();
 		version = result.first;
 
-		if (req.endVersion.present() && version > req.endVersion.get()) {
-			// [will remove afterPR] previously has a bug, if first run version is bigger than req, it will be returned
-			// anyways.
+		if (reqEnd.present() && version > reqEnd.get()) {
 			break;
 		}
-		auto& data = result.second;
 
-		if (!reply.beginVersion.present()) {
-			reply.beginVersion = version;
+		if (!beginVersion.present()) {
+			beginVersion = version;
 		}
-
-		serializer.writeSerializedVersionSection(data);
+		values.push_back(result);
 		++version;
 		versionCount++;
-
-		if (serializer.getTotalBytes() > TLOG_PEEK_REQUEST_REPLY_SIZE_CRITERIA) {
+		total += result.second.first.size();
+		if (total > TLOG_PEEK_REQUEST_REPLY_SIZE_CRITERIA) {
 			break;
 		}
 	}
-
-	Standalone<StringRef> serialized = serializer.getSerialized();
-
-	reply.arena = serialized.arena();
-	reply.data = serialized;
-	reply.endVersion = version;
+	endVersion = version;
 	if (versionCount == 0) {
 		// Up to this version is empty. This is because within a group,
 		// all version data must be continuously received.
-		reply.endVersion = logData->version.get() + 1;
+		endVersion = logData->version.get() + 1;
 	}
-	reply.maxKnownVersion = logData->version.get();
-	reply.minKnownCommittedVersion = logData->minKnownCommittedVersion;
-
-	req.reply.send(reply);
-
-	return Void();
 }
 
 ACTOR Future<Void> initPersistentState(Reference<TLogGroupData> self, Reference<LogGenerationData> logData) {
@@ -1363,21 +1367,154 @@ Reference<LogGenerationData> findLogData(
 	return tlogGroup->second;
 }
 
+void serializeMemoryData(const std::vector<std::pair<Version, std::pair<StringRef, Arena>>>& values,
+                         TLogSubsequencedMessageSerializer& serializer,
+                         const std::unordered_set<Version>& versionsFromDisk = {}) {
+	for (auto& value : values) {
+		if (versionsFromDisk.find(value.first) != versionsFromDisk.end()) {
+			// corner case : version V is in memory when peeking from memory(happens first)
+			// when read from disk, version V is now in disk because spill just happened
+			// data on V would be serialized twice and cause version order bug.
+			// thus skip it here.
+			continue;
+		}
+		serializer.writeSerializedVersionSection(value.second.first);
+	}
+}
+
 // Services a peek request.
+// TODO : make it work with reqSequence
 ACTOR Future<Void> servicePeekRequest(
     Reference<TLogServerData> self,
     TLogPeekRequest req,
-    std::shared_ptr<std::unordered_map<TLogGroupID, Reference<LogGenerationData>>> activeGeneration) {
+    std::shared_ptr<std::unordered_map<TLogGroupID, Reference<LogGenerationData>>> activeGeneration,
+    bool reqReturnIfBlocked = false,
+    bool reqOnlySpilled = false) {
 	// block until dbInfo is ready, otherwise we won't find the correct TLog group
+	state std::vector<std::pair<Version, std::pair<StringRef, Arena>>> values;
+	state TLogSubsequencedMessageSerializer serializer(req.storageTeamID); // aggregate all values from disk
+	state std::unordered_set<Version> versionsFromDisk; // store versions from disk, to avoid duplicate peek
+
 	while (self->dbInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
 		wait(self->dbInfo->onChange());
 	}
-
-	Reference<LogGenerationData> logData = findLogData(self, "peek", req.storageTeamID, activeGeneration);
+	state Reference<LogGenerationData> logData = findLogData(self, "peek", req.storageTeamID, activeGeneration);
 	if (!logData.isValid()) {
 		req.reply.sendError(tlog_group_not_found());
 	}
-	logData->addActor.send(tLogPeekMessages(req, logData));
+	if (!logData->getStorageTeamData(req.storageTeamID).isValid()) {
+		req.reply.sendError(storage_team_id_not_found());
+	}
+	// find group here
+	auto tLogGroupID =
+	    tLogGroupByStorageTeamID(self->dbInfo->get().logSystemConfig.tLogs[0].tLogGroupIDs, req.storageTeamID);
+	state std::unordered_map<TLogGroupID, Reference<TLogGroupData>>::iterator tlogGroup =
+	    self->tlogGroups.find(tLogGroupID);
+
+	state double blockStart = now();
+
+	if (req.returnIfBlocked && logData->version.get() < req.beginVersion) {
+		req.reply.sendError(end_of_stream());
+		return Void();
+	}
+
+	// Wait until we have something to return that the caller doesn't already have
+	if (logData->version.get() < req.beginVersion) {
+		wait(logData->version.whenAtLeast(req.beginVersion));
+		wait(delay(SERVER_KNOBS->TLOG_PEEK_DELAY, g_network->getCurrentTask()));
+	}
+
+	if (req.beginVersion <= logData->persistentDataDurableVersion && req.storageTeamID != txsTeam) {
+		// Reading spilled data will almost always imply that the storage server is >5s behind the rest
+		// of the cluster.  We shouldn't prioritize spending CPU on helping this server catch up
+		// slightly faster over keeping the rest of the cluster operating normally.
+		// txsTeam is only ever peeked on recovery, and we would still wish to prioritize requests
+		// that impact recovery duration.
+		wait(delay(0, TaskPriority::TLogSpilledPeekReply));
+	}
+
+	state double workStart = now();
+	Version poppedVer = poppedVersion(logData, req.storageTeamID);
+	if (poppedVer > req.beginVersion) {
+		TLogPeekReply rep;
+		rep.maxKnownVersion = logData->version.get();
+		rep.minKnownCommittedVersion = logData->minKnownCommittedVersion;
+		rep.popped = poppedVer;
+		rep.endVersion = poppedVer;
+		rep.onlySpilled = false;
+		req.reply.send(rep);
+		return Void();
+	}
+
+	state Version endVersion = logData->version.get() + 1;
+	state Optional<Version> beginVersion;
+
+	state bool onlySpilled = false;
+	// persistentDataDurableVersion is the first version not popped and thus still in memory, so we need < here.
+	// this might be an off-by-one error from other places.
+	if (req.beginVersion <= logData->persistentDataDurableVersion) {
+		// Just in case the durable version changes while we are waiting for the read, we grab this data from memory. We
+		// may or may not actually send it depending on whether we get enough data from disk. SOMEDAY: Only do this if
+		// an initial attempt to read from disk results in insufficient data and the required data is no longer in
+		// memory SOMEDAY: Should we only send part of the messages we collected, to actually limit the size of the
+		// result?
+
+		if (reqOnlySpilled) {
+			endVersion = logData->persistentDataDurableVersion + 1;
+		} else {
+			peekMessagesFromMemory(req, values, beginVersion, endVersion, logData);
+		}
+
+		if (logData->shouldSpillByValue(req.storageTeamID)) {
+			RangeResult kvs = wait(tlogGroup->second->persistentData->readRange(
+			    KeyRangeRef(persistStorageTeamMessagesKey(logData->logId, req.storageTeamID, req.beginVersion),
+			                persistStorageTeamMessagesKey(
+			                    logData->logId, req.storageTeamID, logData->persistentDataDurableVersion + 1)),
+			    TLOG_PEEK_REQUEST_REPLY_SIZE_CRITERIA,
+			    TLOG_PEEK_REQUEST_REPLY_SIZE_CRITERIA));
+			bool first = true;
+			for (auto& kv : kvs) {
+				auto ver = decodeStorageTeamMessagesKey(kv.key);
+				// try decode kv.value here, who is encoded by proxy
+				versionsFromDisk.insert(ver);
+				serializer.writeSerializedVersionSection(
+				    kv.value); // if comment this line, then can read the in-memory data, so problem is here
+				if (first) {
+					beginVersion = ver;
+					first = false;
+				}
+			}
+			if (kvs.expectedSize() >=
+			    TLOG_PEEK_REQUEST_REPLY_SIZE_CRITERIA) { // if enough from disk, not reading from memory
+				endVersion = decodeStorageTeamMessagesKey(kvs.end()[-1].key) + 1;
+				onlySpilled = true;
+			} else {
+				serializeMemoryData(values, serializer, versionsFromDisk);
+			}
+		} else {
+			// TODO: make it work for spill by reference,
+			// now writing(and only writing) those in-memory data without considering on-disk data
+			serializeMemoryData(values, serializer);
+		}
+	} else {
+		if (reqOnlySpilled) {
+			endVersion = logData->persistentDataDurableVersion + 1;
+		} else {
+			peekMessagesFromMemory(req, values, beginVersion, endVersion, logData);
+			serializeMemoryData(values, serializer);
+		}
+		//TraceEvent("TLogPeekResults", self->dbgid).detail("ForAddress", replyPromise.getEndpoint().getPrimaryAddress()).detail("MessageBytes", messages.getLength()).detail("NextEpoch", next_pos.epoch).detail("NextSeq", next_pos.sequence).detail("NowSeq", self->sequence.getNextSequence());
+	}
+
+	TLogPeekReply reply;
+	reply.maxKnownVersion = logData->version.get();
+	reply.minKnownCommittedVersion = logData->minKnownCommittedVersion;
+	reply.data = StringRef(reply.arena, serializer.getSerialized());
+	reply.endVersion = endVersion;
+	reply.beginVersion = beginVersion;
+	reply.onlySpilled = onlySpilled;
+	req.reply.send(reply);
+
 	return Void();
 }
 
@@ -2162,6 +2299,8 @@ ACTOR Future<Void> updatePoppedLocation(Reference<TLogGroupData> self,
 			// Nothing was persistent after all.
 			data->nothingPersistent = true;
 		} else {
+			// TODO: uncomment this once debug the format issue --
+			// now pop_data would see failure due to encoding/decoding reason
 			VectorRef<SpilledData> spilledData;
 			BinaryReader r(kvrefs[0].value, AssumeVersion(logData->protocolVersion));
 			r >> spilledData;
@@ -2282,20 +2421,19 @@ ACTOR Future<Void> updatePersistentData(Reference<TLogGroupData> self,
 			    teamData->versionMessages.lower_bound(logData->versionLocation.begin()->key);
 			state int refSpilledTagCount = 0;
 			wr = BinaryWriter(AssumeVersion(logData->protocolVersion));
-			// We prefix our spilled locations with a count, so that we can read this back out as a VectorRef.
-			wr << uint32_t(0);
 			while (msg != teamData->versionMessages.end() && msg->first <= newPersistentDataVersion) {
 				currentVersion = msg->first;
 				anyData = true;
 				teamData->nothingPersistent = false; // update nothingPersistent because now doing spilling
 
+				std::unordered_map<Version, int> um;
 				if (logData->shouldSpillByValue(teamData->storageTeamId)) {
 					wr = BinaryWriter(Unversioned());
 					// write real data here as the value to be persisted.
 					for (; msg != teamData->versionMessages.end() && msg->first == currentVersion; ++msg) {
-						wr << msg->second.first; // question: do we need arena here?
+						wr.serializeBytes(msg->second.first);
+						um[currentVersion] = msg->second.first.size();
 					}
-
 					self->persistentData->set(KeyValueRef(
 					    persistStorageTeamMessagesKey(logData->logId, teamData->storageTeamId, currentVersion),
 					    wr.toValue()));

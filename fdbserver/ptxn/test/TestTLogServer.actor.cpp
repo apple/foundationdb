@@ -59,7 +59,8 @@ std::string filenameFromId(KeyValueStoreType storeType, std::string folder, std:
 ACTOR Future<Void> startTLogServers(std::vector<Future<Void>>* actors,
                                     std::shared_ptr<ptxn::test::TestDriverContext> pContext,
                                     std::string folder,
-                                    bool mockDiskQueue = false) {
+                                    bool mockDiskQueue = false,
+                                    TLogSpillType spillType = TLogSpillType::REFERENCE) {
 	state ptxn::test::print::PrintTiming printTiming("startTLogServers");
 	state std::vector<ptxn::InitializePtxnTLogRequest> tLogInitializations;
 	state Reference<AsyncVar<ServerDBInfo>> dbInfo = makeReference<AsyncVar<ServerDBInfo>>();
@@ -79,6 +80,7 @@ ACTOR Future<Void> startTLogServers(std::vector<Future<Void>>* actors,
 		tLogInitializations.back().isPrimary = true;
 		tLogInitializations.back().storeType = KeyValueStoreType::MEMORY;
 		tLogInitializations.back().tlogGroups = pContext->groupsPerTLog[i];
+		tLogInitializations.back().spillType = spillType;
 		UID tlogId = ptxn::test::randomUID();
 		UID workerId = ptxn::test::randomUID();
 		StringRef fileVersionedLogDataPrefix = "log2-"_sr;
@@ -803,7 +805,9 @@ TEST_CASE("/fdbserver/ptxn/test/pop_data") {
 	state std::string folder = "simfdb/" + deterministicRandom()->randomAlphaNumeric(10);
 	platform::createDirectory(folder);
 
-	wait(startTLogServers(&actors, pContext, folder));
+	// Spill-by-reference is not finished yet thus test might fail, so using spill-by-value here
+	// TODO: have a spill-by-reference test once the support is completed.
+	wait(startTLogServers(&actors, pContext, folder, false, TLogSpillType::VALUE));
 	state IKeyValueStore* d = pContext->kvStores[pContext->storageTeamIDTLogGroupIDMapper[storageTeamID]];
 	state IDiskQueue* q = pContext->diskQueues[pContext->storageTeamIDTLogGroupIDMapper[storageTeamID]];
 
@@ -811,7 +815,10 @@ TEST_CASE("/fdbserver/ptxn/test/pop_data") {
 	    wait(commitInjectReturnVersions(pContext, storageTeamID, pContext->numCommits));
 	state std::vector<Standalone<StringRef>> expectedMessages = res.first;
 
-	// TODO: uncomment this once enable peek from disk
+	// TODO: uncomment this once enable peek from disk when spill by reference
+	// now tests are written in a way assuming spill-by-reference, then verify data is written to disk
+	// if spill-by-value, data would not be written to disk.
+
 	// wait(verifyPeek(pContext, storageTeamID, pContext->numCommits));
 
 	ASSERT(q->TEST_getPoppedLocation() == 0);
@@ -858,12 +865,13 @@ TEST_CASE("/fdbserver/ptxn/test/read_tlog_spilled") {
 
 	wait(startTLogServers(&actors, pContext, folder));
 	state IKeyValueStore* d = pContext->kvStores[pContext->storageTeamIDTLogGroupIDMapper[storageTeamID]];
+	state IDiskQueue* q = pContext->diskQueues[pContext->storageTeamIDTLogGroupIDMapper[storageTeamID]];
 
 	state std::pair<std::vector<Standalone<StringRef>>, std::vector<Version>> res =
 	    wait(commitInjectReturnVersions(pContext, storageTeamID, pContext->numCommits));
 	state std::vector<Standalone<StringRef>> expectedMessages = res.first;
 
-	// TODO: uncomment this once enable peek from disk
+	// TODO: uncomment this once enable peek from disk when spill by reference
 	// wait(verifyPeek(pContext, storageTeamID, pContext->numCommits));
 
 	// wait 1s so that actors who update persistent data can do their job.
@@ -884,6 +892,55 @@ TEST_CASE("/fdbserver/ptxn/test/read_tlog_spilled") {
 
 	// we can only assert v is present, because its value is encoded by TLog and it is hard to decode it
 	// TODO: assert the value of the spilled data,
+	// there are many factors that can change the encoding of the value, such whether it is spilled by value of ref.
+	ASSERT(exist);
+	(const_cast<ServerKnobs*> SERVER_KNOBS)->TLOG_SPILL_THRESHOLD = 1500e6;
+	platform::eraseDirectoryRecursive(folder);
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ptxn/test/read_tlog_spilled_by_value") {
+	state ptxn::test::TestDriverOptions options(params);
+	state std::vector<Future<Void>> actors;
+	(const_cast<ServerKnobs*> SERVER_KNOBS)->TLOG_SPILL_THRESHOLD = 0;
+	(const_cast<ServerKnobs*> SERVER_KNOBS)->BUGGIFY_TLOG_STORAGE_MIN_UPDATE_INTERVAL = 0.5;
+	state std::shared_ptr<ptxn::test::TestDriverContext> pContext = ptxn::test::initTestDriverContext(options);
+
+	for (const auto& group : pContext->tLogGroups) {
+		ptxn::test::print::print(group);
+	}
+	state ptxn::StorageTeamID storageTeamID = pContext->storageTeamIDs[0];
+
+	state std::string folder = "simfdb/" + deterministicRandom()->randomAlphaNumeric(10);
+	platform::createDirectory(folder);
+
+	wait(startTLogServers(&actors, pContext, folder, false, TLogSpillType::VALUE));
+	state IKeyValueStore* d = pContext->kvStores[pContext->storageTeamIDTLogGroupIDMapper[storageTeamID]];
+	state IDiskQueue* q = pContext->diskQueues[pContext->storageTeamIDTLogGroupIDMapper[storageTeamID]];
+
+	state std::pair<std::vector<Standalone<StringRef>>, std::vector<Version>> res =
+	    wait(commitInjectReturnVersions(pContext, storageTeamID, pContext->numCommits));
+	state std::vector<Standalone<StringRef>> expectedMessages = res.first;
+
+	wait(verifyPeek(pContext, storageTeamID, pContext->numCommits));
+
+	// wait 1s so that actors who update persistent data can do their job.
+	wait(delay(1.5));
+
+	// only wrote to a single storageTeamId, thus only 1 tlogGroup, while each tlogGroup has their own disk queue.
+	state bool exist = false;
+	state int i = 0;
+
+	ASSERT(!res.second.empty());
+	// commit to IKeyValueStore might happen in any version of our commits(multiple versions might be combined)
+
+	for (i = 0; i < res.second.size(); i++) {
+		state Key k = ptxn::persistStorageTeamMessagesKey(
+		    pContext->getTLogLeaderByStorageTeamID(storageTeamID)->id(), storageTeamID, res.second[i]);
+		state Optional<Value> v = wait(d->readValue(k));
+		exist = exist || v.present();
+	}
+	// we can only assert v is present, because its value is encoded by TLog and it is hard to decode it
 	// there are many factors that can change the encoding of the value, such whether it is spilled by value of ref.
 	ASSERT(exist);
 	(const_cast<ServerKnobs*> SERVER_KNOBS)->TLOG_SPILL_THRESHOLD = 1500e6;
@@ -947,14 +1004,14 @@ TEST_CASE("/fdbserver/ptxn/test/single_tlog_recovery") {
 	state std::string folder = "simfdb/" + deterministicRandom()->randomAlphaNumeric(10);
 	platform::createDirectory(folder);
 
-	wait(startTLogServers(&actors, pContext, folder));
+	wait(startTLogServers(&actors, pContext, folder, false, TLogSpillType::VALUE));
 	state IKeyValueStore* d = pContext->kvStores[pContext->storageTeamIDTLogGroupIDMapper[storageTeamID]];
 
 	state std::pair<std::vector<Standalone<StringRef>>, std::vector<Version>> res =
 	    wait(commitInjectReturnVersions(pContext, storageTeamID, pContext->numCommits));
 
-	// TODO: uncomment this once enable peek from disk
-	// wait(verifyPeek(pContext, storageTeamID, pContext->numCommits));
+	// TODO: now peek only works with spill-by-value, need another test once spill-by-ref is supported.
+	wait(verifyPeek(pContext, storageTeamID, pContext->numCommits));
 
 	// wait here so that actors who update persistentData can do their job.
 	wait(delay(1.5));

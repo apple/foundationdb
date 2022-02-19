@@ -172,3 +172,17 @@ startDelay = 0
     numTLogGroups = 7
     numCommits = 10
 
+[[test]]
+testTitle = 'Team Partitioned TLog Server Test 12: Read from TLog spilled data by value'
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    maxTestCases = 1
+    testsMatching = '/fdbserver/ptxn/test/read_tlog_spilled_by_value'
+
+    numTLogs = 3
+    numStorageTeams = 40
+    numTLogGroups = 7
+    numCommits = 10
