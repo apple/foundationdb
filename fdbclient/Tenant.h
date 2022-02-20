@@ -32,24 +32,46 @@ typedef Standalone<TenantNameRef> TenantName;
 struct TenantMapEntry {
 	constexpr static FileIdentifier file_identifier = 12247338;
 
-private:
 	static Key idToPrefix(int64_t id) {
 		int64_t swapped = bigEndian64(id);
 		return StringRef(reinterpret_cast<const uint8_t*>(&swapped), 8);
 	}
 
-public:
+	static int64_t prefixToId(KeyRef prefix) {
+		ASSERT(prefix.size() == 8);
+		int64_t id = *reinterpret_cast<const int64_t*>(prefix.begin());
+		id = bigEndian64(id);
+		ASSERT(id >= 0);
+		return id;
+	}
+
 	int64_t id;
 	Key prefix;
 
+private:
+	void initPrefix(KeyRef subspace) {
+		ASSERT(id >= 0);
+		prefix = makeString(8 + subspace.size());
+		uint8_t* data = mutateString(prefix);
+		memcpy(data, subspace.begin(), subspace.size());
+		int64_t swapped = bigEndian64(id);
+		memcpy(data + subspace.size(), &swapped, 8);
+	}
+
+public:
 	TenantMapEntry() : id(-1) {}
-	TenantMapEntry(int64_t id) : id(id), prefix(idToPrefix(id)) { ASSERT(id >= 0); }
+	TenantMapEntry(int64_t id, KeyRef subspace) : id(id) { initPrefix(subspace); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, id);
 		if (ar.isDeserializing) {
-			prefix = idToPrefix(id);
+			KeyRef subspace;
+			serializer(ar, subspace);
+			initPrefix(subspace);
+		} else {
+			KeyRef subspace = prefix.substr(0, prefix.size() - 8);
+			serializer(ar, subspace);
 		}
 	}
 };
