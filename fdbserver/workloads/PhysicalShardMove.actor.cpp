@@ -45,7 +45,7 @@ std::string printValue(const ErrorOr<Optional<Value>>& value) {
 
 struct SSCheckpointWorkload : TestWorkload {
 	FlowLock startMoveKeysParallelismLock;
- 	FlowLock finishMoveKeysParallelismLock;
+	FlowLock finishMoveKeysParallelismLock;
 	const bool enabled;
 	bool pass;
 
@@ -142,7 +142,7 @@ struct SSCheckpointWorkload : TestWorkload {
 					wait(delay(1));
 				}
 			}
-			std::cout << "Fetched checkpoint:" << records[idx].toString() << std::endl;
+			std::cout << "Fetched checkpoint:" << localRecords[idx].toString() << std::endl;
 		}
 
 		std::vector<std::string> files = platform::listFiles(folder);
@@ -152,39 +152,39 @@ struct SSCheckpointWorkload : TestWorkload {
 		}
 		std::cout << std::endl;
 
-		// state std::string rocksDBTestDir = "rocksdb-kvstore-test-db";
-		// platform::eraseDirectoryRecursive(rocksDBTestDir);
+		state std::string rocksDBTestDir = "rocksdb-kvstore-test-db";
+		platform::eraseDirectoryRecursive(rocksDBTestDir);
 
-		// state IKeyValueStore* kvStore = keyValueStoreRocksDB(
-		//     rocksDBTestDir, deterministicRandom()->randomUniqueID(), KeyValueStoreType::SSD_ROCKSDB_V1);
-		// try {
-		// 	wait(kvStore->restore(record));
-		// } catch (Error& e) {
-		// 	std::cout << e.name() << std::endl;
-		// }
+		state IKeyValueStore* kvStore = keyValueStoreRocksDB(
+		    rocksDBTestDir, deterministicRandom()->randomUniqueID(), KeyValueStoreType::SSD_ROCKSDB_V1);
+		try {
+			wait(kvStore->restore(localRecords));
+		} catch (Error& e) {
+			std::cout << e.name() << std::endl;
+		}
 
-		// std::cout << "Restore complete" << std::endl;
+		std::cout << "Restore complete" << std::endl;
 
-		// tr.reset();
-		// tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-		// loop {
-		// 	try {
-		// 		state RangeResult res = wait(tr.getRange(KeyRangeRef(key, endKey), CLIENT_KNOBS->TOO_MANY));
-		// 		break;
-		// 	} catch (Error& e) {
-		// 		wait(tr.onError(e));
-		// 	}
-		// }
+		tr.reset();
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+		loop {
+			try {
+				state RangeResult res = wait(tr.getRange(KeyRangeRef(keyA, keyC), CLIENT_KNOBS->TOO_MANY));
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
 
-		// state int i = 0;
-		// for (i = 0; i < res.size(); ++i) {
-		// 	std::cout << "Reading key:" << res[i].key.toString() << std::endl;
-		// 	Optional<Value> value = wait(kvStore->readValue(res[i].key));
-		// 	ASSERT(value.present());
-		// 	ASSERT(value.get() == res[i].value);
-		// }
+		state int i = 0;
+		for (i = 0; i < res.size(); ++i) {
+			std::cout << "Reading key:" << res[i].key.toString() << std::endl;
+			Optional<Value> value = wait(kvStore->readValue(res[i].key));
+			ASSERT(value.present());
+			ASSERT(value.get() == res[i].value);
+		}
 
-		// std::cout << "Verified." << std::endl;
+		std::cout << "Verified." << std::endl;
 
 		int ignore = wait(setDDMode(cx, 1));
 		return Void();
