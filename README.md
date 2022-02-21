@@ -22,7 +22,7 @@ Contributing to FoundationDB can be in contributions to the code base, sharing y
 
 ### Binary downloads
 
-Developers interested in using FoundationDB can get started by downloading and installing a binary package. Please see the [downloads page](https://www.foundationdb.org/download/) for a list of available packages.
+Developers interested in using FoundationDB can get started by downloading and installing a binary package. Please see the [downloads page](https://github.com/apple/foundationdb/releases) for a list of available packages.
 
 
 ### Compiling from source
