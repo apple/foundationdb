@@ -99,7 +99,16 @@ if(NOT WIN32 AND NOT IS_ARM_MAC)
 
   set(SYSTEM_TESTER_SRCS
     test/system/fdb_c_system_tester.cpp
-    test/system/TesterOptions.h
+    test/system/SysTestApiWrapper.cpp
+    test/system/SysTestApiWrapper.h
+    test/system/SysTestCorrectnessWorkload.cpp
+    test/system/SysTestOptions.h
+    test/system/SysTestScheduler.cpp
+    test/system/SysTestScheduler.h
+    test/system/SysTestTransactionExecutor.cpp
+    test/system/SysTestTransactionExecutor.h
+    test/system/SysTestWorkload.cpp
+    test/system/SysTestWorkload.h
   )
 
   if(OPEN_FOR_IDE)

@@ -1,5 +1,5 @@
 /*
- * TesterOptions.h
+ * SysTestOptions.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,7 +20,7 @@
 
 #pragma once
 
-#ifndef SYSTEM_TESTER_TESTER_OPTIONS_H
+#ifndef SYS_TEST_OPTIONS_TESTER_OPTIONS_H
 #define SYSTEM_TESTER_TESTER_OPTIONS_H
 
 #include "flow/SimpleOpt.h"
@@ -34,18 +34,6 @@ namespace FDBSystemTester {
 
 class TesterOptions {
 public:
-	enum {
-		OPT_CONNFILE,
-		OPT_HELP,
-		OPT_TRACE,
-		OPT_TRACE_DIR,
-		OPT_LOGGROUP,
-		OPT_TRACE_FORMAT,
-		OPT_KNOB,
-		OPT_API_VERSION,
-	};
-	static const CSimpleOpt::SOption optionDefs[];
-
 	std::string clusterFile;
 	bool trace = false;
 	std::string traceDir;
@@ -56,6 +44,8 @@ public:
 	std::vector<std::pair<std::string, std::string>> knobs;
 	// api version, using the latest version by default
 	int api_version = FDB_API_VERSION;
+	bool blockOnFutures = false;
+	int numClientThreads = 1;
 
 	bool parseArgs(int argc, char** argv);
 

@@ -18,17 +18,37 @@
  * limitations under the License.
  */
 
-#include "TesterOptions.h"
+#include "SysTestOptions.h"
+#include "SysTestWorkload.h"
 #include "flow/Platform.h"
 #include "flow/Trace.h"
 #include "flow/ArgParseUtil.h"
+#include "test/system/SysTestScheduler.h"
+#include "test/system/SysTestTransactionExecutor.h"
+#include <iostream>
+#include <thread>
 
 #define FDB_API_VERSION 710
 #include "bindings/c/foundationdb/fdb_c.h"
 
 namespace FDBSystemTester {
 
-const CSimpleOpt::SOption TesterOptions::optionDefs[] = //
+namespace {
+
+enum TesterOptionId {
+	OPT_CONNFILE,
+	OPT_HELP,
+	OPT_TRACE,
+	OPT_TRACE_DIR,
+	OPT_LOGGROUP,
+	OPT_TRACE_FORMAT,
+	OPT_KNOB,
+	OPT_API_VERSION,
+	OPT_BLOCK_ON_FUTURES,
+	OPT_NUM_CLIENT_THREADS
+};
+
+CSimpleOpt::SOption TesterOptionDefs[] = //
     { { OPT_CONNFILE, "-C", SO_REQ_SEP },
 	  { OPT_CONNFILE, "--cluster-file", SO_REQ_SEP },
 	  { OPT_TRACE, "--log", SO_NONE },
@@ -38,7 +58,11 @@ const CSimpleOpt::SOption TesterOptions::optionDefs[] = //
 	  { OPT_HELP, "--help", SO_NONE },
 	  { OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
 	  { OPT_KNOB, "--knob-", SO_REQ_SEP },
-	  { OPT_API_VERSION, "--api-version", SO_REQ_SEP } };
+	  { OPT_API_VERSION, "--api-version", SO_REQ_SEP },
+	  { OPT_BLOCK_ON_FUTURES, "--block-on-futures", SO_NONE },
+	  { OPT_NUM_CLIENT_THREADS, "--num-client-threads", SO_REQ_SEP } };
+
+} // namespace
 
 void TesterOptions::printProgramUsage(const char* execName) {
 	printf("usage: %s [OPTIONS]\n"
@@ -63,13 +87,17 @@ void TesterOptions::printProgramUsage(const char* execName) {
 	       "                 Specifies the version of the API for the CLI to use.\n"
 	       "  --knob-KNOBNAME KNOBVALUE\n"
 	       "                 Changes a knob option. KNOBNAME should be lowercase.\n"
+	       "  --block-on-futures\n"
+	       "                 Use blocking waits on futures instead of scheduling callbacks.\n"
+	       "  --num-client-threads NUM_THREADS\n"
+	       "                 Number of threads to be used for execution of client workloads.\n"
 	       "  -h, --help     Display this help and exit.\n");
 }
 
 bool TesterOptions::parseArgs(int argc, char** argv) {
 	// declare our options parser, pass in the arguments from main
 	// as well as our array of valid options.
-	CSimpleOpt args(argc, argv, optionDefs);
+	CSimpleOpt args(argc, argv, TesterOptionDefs);
 
 	// while there are arguments left to process
 	while (args.Next()) {
@@ -100,14 +128,14 @@ bool TesterOptions::processArg(const CSimpleOpt& args) {
 		api_version = strtoul((char*)args.OptionArg(), &endptr, 10);
 		if (*endptr != '\0') {
 			fprintf(stderr, "ERROR: invalid client version %s\n", args.OptionArg());
-			return 1;
+			return false;
 		} else if (api_version < 700 || api_version > FDB_API_VERSION) {
 			// multi-version fdbcli only available after 7.0
 			fprintf(stderr,
 			        "ERROR: api version %s is not supported. (Min: 700, Max: %d)\n",
 			        args.OptionArg(),
 			        FDB_API_VERSION);
-			return 1;
+			return false;
 		}
 		break;
 	}
@@ -130,18 +158,58 @@ bool TesterOptions::processArg(const CSimpleOpt& args) {
 		Optional<std::string> knobName = extractPrefixedArgument("--knob", args.OptionSyntax());
 		if (!knobName.present()) {
 			fprintf(stderr, "ERROR: unable to parse knob option '%s'\n", args.OptionSyntax());
-			return FDB_EXIT_ERROR;
+			return false;
 		}
 		knobs.emplace_back(knobName.get(), args.OptionArg());
 		break;
 	}
+	case OPT_BLOCK_ON_FUTURES:
+		blockOnFutures = true;
+		break;
+
+	case OPT_NUM_CLIENT_THREADS:
+		char* endptr;
+		numClientThreads = strtoul((char*)args.OptionArg(), &endptr, 10);
+		if (*endptr != '\0' || numClientThreads <= 0 || numClientThreads > 1000) {
+			fprintf(stderr, "ERROR: number of threads %s\n", args.OptionArg());
+			return false;
+		}
+		break;
 	}
 	return true;
 }
 
+namespace {
+void fdb_check(fdb_error_t e) {
+	if (e) {
+		std::cerr << fdb_get_error(e) << std::endl;
+		std::abort();
+	}
+}
+} // namespace
+
+IWorkload* createApiCorrectnessWorkload();
+
 } // namespace FDBSystemTester
 
 using namespace FDBSystemTester;
+
+void runApiCorrectness(TesterOptions& options) {
+	TransactionExecutorOptions txExecOptions;
+	txExecOptions.blockOnFutures = options.blockOnFutures;
+
+	IScheduler* scheduler = createScheduler(options.numClientThreads);
+	ITransactionExecutor* txExecutor = createTransactionExecutor();
+	scheduler->start();
+	txExecutor->init(scheduler, options.clusterFile.c_str(), txExecOptions);
+	IWorkload* workload = createApiCorrectnessWorkload();
+	workload->init(txExecutor, scheduler, [scheduler]() { scheduler->stop(); });
+	workload->start();
+	scheduler->join();
+	delete workload;
+	delete txExecutor;
+	delete scheduler;
+}
 
 int main(int argc, char** argv) {
 	TesterOptions options;
@@ -149,5 +217,14 @@ int main(int argc, char** argv) {
 		return 1;
 	}
 
+	fdb_check(fdb_select_api_version(options.api_version));
+	fdb_check(fdb_setup_network());
+
+	std::thread network_thread{ &fdb_run_network };
+
+	runApiCorrectness(options);
+
+	fdb_check(fdb_stop_network());
+	network_thread.join();
 	return 0;
 }
