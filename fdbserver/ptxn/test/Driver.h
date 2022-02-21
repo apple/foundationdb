@@ -195,12 +195,6 @@ public:
 // Initializes a set of commits to be sent to TLogs
 struct MessageFixture {
 
-protected:
-	void generateMutationsToStorageTeamIDs(const std::vector<StorageTeamID>& storageTeamIDs,
-	                                       const int initialVersion,
-	                                       const int numVersions,
-	                                       const int numMutationsInVersion);
-
 public:
 	CommitRecord& commitRecord;
 
@@ -213,7 +207,13 @@ public:
 	           const int numMutationsInVersion);
 
 	const decltype(std::declval<CommitRecord>().messages)& getMessages() const { return commitRecord.messages; }
+
+	friend void broadcastEmptyVersionMessage(MessageFixture&, const TLogGroupFixture&);
 };
+
+
+// Broadcasts empty version message to commit record
+void broadcastEmptyVersionMessage(MessageFixture& messageFixture, const TLogGroupFixture&);
 
 // Initializes a set of commits to be sent to TLogs, with a special storage team
 struct MessageWithPrivateMutationsFixture : public MessageFixture {
@@ -371,6 +371,7 @@ public:
 	                                                  const int numVersions,
 	                                                  const int numMutationsInVersion,
 	                                                  Optional<std::vector<UID>> optionalStorageServerIDs);
+	TestEnvironment& broadcastEmptyVersionMessage();
 
 	TestEnvironment& initServerDBInfo();
 

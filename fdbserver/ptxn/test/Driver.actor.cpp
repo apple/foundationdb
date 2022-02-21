@@ -313,11 +313,6 @@ void TLogGroupWithPrivateMutationsFixture::setUp(const int numTLogGroups, const 
 	storageTeamTLogGroupMapping[privateMutationsStorageTeamID] = privateMutationsTLogGroupID;
 }
 
-void MessageFixture::generateMutationsToStorageTeamIDs(const std::vector<StorageTeamID>& storageTeamIDs,
-                                                       const int initialVersion,
-                                                       const int numVersions,
-                                                       const int numMutationsInVersion) {}
-
 void MessageFixture::setUp(const TLogGroupFixture& tLogGroupFixture,
                            const int initialVersion,
                            const int numVersions,
@@ -334,6 +329,22 @@ void MessageFixture::setUp(const TLogGroupFixture& tLogGroupFixture,
 		distributeMutationRefs(
 		    mutationRefs, commitVersion, ++storageTeamVersion, tLogGroupFixture.storageTeamIDs, commitRecord);
 		increaseVersion(commitVersion);
+	}
+
+	commitRecord.updateVersionInformation();
+}
+
+void broadcastEmptyVersionMessage(MessageFixture& messageFixture, const TLogGroupFixture& tLogGroupFixture) {
+	auto& commitRecord = messageFixture.commitRecord;
+	const auto& storageTeamIDs = tLogGroupFixture.storageTeamIDs;
+
+	for(auto& [version, storageTeamMessages] : commitRecord.messages) {
+		for(const auto& storageTeamID: storageTeamIDs) {
+			if (storageTeamMessages.count(storageTeamID) == 0) {
+				// Create a VectorRef with 0 messages, imply an empty message
+				storageTeamMessages[storageTeamID];
+			}
+		}
 	}
 
 	commitRecord.updateVersionInformation();
@@ -512,7 +523,6 @@ void ptxnStorageServerFixture::setUp(const int numStorageServers) {
 	storageServerResources.emplace_back(storageTeamID, folderPrefix);
 	initializeStorageReplies.emplace_back();
 
-	std::cout << " Using private mutations storage team ID = " << storageTeamID.toString() << std::endl;
 	std::vector<ptxn::StorageTeamID> storageTeams{ storageTeamID };
 	const auto& resource = storageServerResources.back();
 	const auto& initializeReply = initializeStorageReplies.back();
@@ -683,6 +693,16 @@ TestEnvironment& TestEnvironment::initMessagesWithPrivateMutations(
 	           numMutationsInVersion,
 	           tLogGroup.privateMutationsStorageTeamID,
 	           storageServerIDs);
+
+	return *this;
+}
+
+TestEnvironment& TestEnvironment::broadcastEmptyVersionMessage() {
+	ASSERT(pImpl->testDriverContextImpl);
+	ASSERT(pImpl->tLogGroup);
+	ASSERT(pImpl->messages);
+
+	details::broadcastEmptyVersionMessage(*pImpl->messages, *pImpl->tLogGroup);
 
 	return *this;
 }

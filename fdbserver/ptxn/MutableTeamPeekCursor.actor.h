@@ -77,6 +77,10 @@ private:
 	// Additional Storage team IDs that should be included in the next RPC
 	std::list<StorageTeamID> storageTeamIDsToBeAdded;
 
+	// Retired cursor that are removed by private mutations, not by remoteMoreAvailable, they should be added back when
+	// reset
+	std::list<StorageTeamID> retiredCursorsRemovedByPrivateMutations;
+
 	// Refreshes storageTeamIDs by newStorageTeamIDs, add/remove corresponding storage teams
 	bool updateStorageTeams();
 
@@ -117,7 +121,6 @@ std::shared_ptr<StorageTeamPeekCursor> MutableTeamPeekCursor<BaseClass>::createC
 
 	const auto tLogInterfaces = getTLogInterfaceByStorageTeamID(storageTeamID);
 	ASSERT(tLogInterfaces.size() > 0);
-	std::cout << " New cursor has version " << BaseClass::currentVersion + 1 << std::endl;
 	return std::make_shared<StorageTeamPeekCursor>(
 	    // NOTE: Do NOT use BaseCalss::getVersion() since it will trigger getImpl
 	    // The new cursor will start peeking *AFTER* current version is completed. The peek will be called immediately
@@ -134,9 +137,6 @@ template <typename BaseClass>
 bool MutableTeamPeekCursor<BaseClass>::updateStorageTeams() {
 	const auto& newStorageTeams = newStorageTeamIDs.getStorageTeams();
 	const auto& oldStorageTeams = storageTeamIDs.getStorageTeams();
-
-	std::cout << " New storage teams " << joinToString(newStorageTeams) << std::endl;
-	std::cout << " Old storage teams " << joinToString(oldStorageTeams) << std::endl;
 
 	// NOTE: Do NOT use BaseCalss::getVersion() since it will trigger getImpl
 	TraceEvent("MutableTeamPeekCursorUpdateTeam")
@@ -163,7 +163,12 @@ bool MutableTeamPeekCursor<BaseClass>::updateStorageTeams() {
 		// Remove cursor is done immediately -- otherwise the content will still be accessed when iterating.
 		cursorsToBeRemoved[storageTeamID] = BaseClass::removeCursor(storageTeamID);
 
-		std::cout << " Remove cursor " << storageTeamID.toString() << std::endl;
+		if (BaseClass::retiredCursorStorageTeamIDs.count(storageTeamID) > 0) {
+			// If the cursor is also retired, remove it from retired cursors list; otherwise remoteMoreAvailable will
+			// remove the cursor again, causing ASSERT error.
+			BaseClass::retiredCursorStorageTeamIDs.erase(storageTeamID);
+			retiredCursorsRemovedByPrivateMutations.push_back(storageTeamID);
+		}
 
 		TraceEvent("MutableTeamPeekCursorRemoveTeam")
 		    .detail("StorageServerID", serverID)
@@ -178,24 +183,8 @@ bool MutableTeamPeekCursor<BaseClass>::updateStorageTeams() {
 	                    std::begin(oldStorageTeams),
 	                    std::end(oldStorageTeams),
 	                    std::back_inserter(storageTeamIDsToBeAdded));
-	std::cout << "Cursors to be added back " << joinToString(storageTeamIDsToBeAdded) << std::endl;
 	// NOTE: Adding new cursors will always cause RPC, so the cursors will be created at RPC step, i.e.,
 	// remoteMoreAvailableImpl
-	/*
-for (const auto& storageTeamID : teamsToBeAdded) {
-ASSERT(!BaseClass::isCursorExists(storageTeamID));
-
-auto newCursor = createCursor(storageTeamID);
-BaseClass::addCursor(newCursor);
-// NOTE: Do *NOT* remove the cursor from cursorsToBeRemoved list if it exists, otherwise the cursor will not
-// be reset properly
-
-TraceEvent("MutableTeamPeekCursorAddTeam")
-.detail("StorageServerID", serverID)
-.detail("StorageTeamID", storageTeamID)
-.detail("BeginVersion", newCursor->getBeginVersion());
-}
-*/
 
 	storageTeamIDs = newStorageTeamIDs;
 
@@ -205,10 +194,15 @@ TraceEvent("MutableTeamPeekCursorAddTeam")
 template <typename BaseClass>
 void MutableTeamPeekCursor<BaseClass>::resetImpl() {
 	for (const auto& [_, cursor] : cursorsToBeRemoved) {
-		std::cout << " Adding back " << _.toString() << std::endl;
 		BaseClass::addCursor(cursor);
 	}
 	cursorsToBeRemoved.clear();
+
+	for (const auto& retiredCursorRemovedByPrivateMutations : retiredCursorsRemovedByPrivateMutations) {
+		BaseClass::retiredCursorStorageTeamIDs.insert(retiredCursorRemovedByPrivateMutations);
+	}
+	retiredCursorsRemovedByPrivateMutations.clear();
+
 	storageTeamIDsToBeAdded.clear();
 	shouldUpdateStorageTeamCursor = false;
 	storageTeamIDs = storageTeamIDsSnapshot;
@@ -219,12 +213,12 @@ void MutableTeamPeekCursor<BaseClass>::resetImpl() {
 template <typename BaseClass>
 Future<bool> MutableTeamPeekCursor<BaseClass>::remoteMoreAvailableImpl() {
 	// Since RPC will invalidate all local cursors, drop all cursors to be removed and create new cursors if needed
+	retiredCursorsRemovedByPrivateMutations.clear();
 	cursorsToBeRemoved.clear();
 	for (const auto& storageTeamID : storageTeamIDsToBeAdded) {
 		ASSERT(!BaseClass::isCursorExists(storageTeamID));
 
 		auto newCursor = createCursor(storageTeamID);
-		std::cout << " Add cursor " << storageTeamID.toString() << std::endl;
 		BaseClass::addCursor(newCursor);
 		// NOTE: Do *NOT* remove the cursor from cursorsToBeRemoved list if it exists, otherwise the cursor will not
 		// be reset properly

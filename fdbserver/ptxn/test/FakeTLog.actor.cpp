@@ -92,7 +92,6 @@ void processTLogCommitRequestByStorageTeam(std::shared_ptr<FakeTLogContext> pFak
 	auto iter = std::begin(deserializer);
 	auto& arena = iter.arena();
 	for (; iter != std::end(deserializer); ++iter) {
-		std::cout << iter->toString() << std::endl;
 		storageTeamMessages[storageTeamID].push_back(pFakeTLogContext->persistenceArena, *iter);
 	}
 	pFakeTLogContext->persistenceArena.dependsOn(arena);
@@ -146,6 +145,7 @@ ACTOR Future<Void> fakeTLogPeek(TLogPeekRequest request, std::shared_ptr<FakeTLo
 	const auto& storageTeamEpochVersionRange =
 	    pFakeTLogContext->pTestDriverContext->commitRecord.storageTeamEpochVersionRange;
 
+	// FIXME 
 	if (storageTeamEpochVersionRange.find(storageTeamID) == std::end(storageTeamEpochVersionRange)) {
 		printTiming << "No storage team ID " << storageTeamID << " in FakeTLog" << std::endl;
 		fakeTLogPeekReplyEmpty(request, storageTeamID);
