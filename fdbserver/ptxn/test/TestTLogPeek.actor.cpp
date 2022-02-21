@@ -145,15 +145,11 @@ ACTOR Future<std::vector<VersionSubsequenceMessage>> getAllMessageFromCursor(std
 			wait(randomDelay());
 		} else {
 			auto getAllMessages = [this](std::vector<VersionSubsequenceMessage>& container) {
-				std::cout << " Begin dumping cursor data" << std::endl;
-				int i = 0;
 				for (const VersionSubsequenceMessage& vsm : *pCursor) {
-					std::cout << vsm.toString() << std::endl;
 					if (vsm.message.getType() == Message::Type::MUTATION_REF) {
 						MutationRef ref = std::get<MutationRef>(vsm.message);
 						if (ref.param1.startsWith(storageServerToTeamIdKeyPrefix)) {
 							ptxn::StorageServerStorageTeams ss(ref.param2);
-							std::cout << "\t\t" << ss.toString() << std::endl;
 						}
 					}
 					// Empty version message type is not stored in CommitRecord
@@ -167,16 +163,12 @@ ACTOR Future<std::vector<VersionSubsequenceMessage>> getAllMessageFromCursor(std
 						container.emplace_back(vsm);
 					}
 				}
-				std::cout << " End dumping cursor data" << std::endl;
-				std::cout << " iterate = " << i << std::endl;
 			};
 
 			// Ensure the cursor can be repeatly iterated
 			getAllMessages(messages);
 			pCursor->reset();
 			getAllMessages(messagesDup);
-
-			std::cout << "Next RPC" << std::endl;
 
 			ASSERT_EQ(messages.size(), messagesDup.size());
 			for (int i = 0; i < static_cast<int>(messages.size()); ++i) {
@@ -265,7 +257,7 @@ void verifyMergedCursorResult_Unordered(const std::vector<ptxn::VersionSubsequen
 			// Find the storage team for the current message
 			bool found = false;
 			for (const auto& [storageTeamID, subsequenceMessages] : storageTeamMessage) {
-				if (storageTeamMessage.size() == 0) {
+				if (subsequenceMessages.size() == 0) {
 					continue;
 				}
 				if (subsequenceMessages[0].first == vsm.subsequence && subsequenceMessages[0].second == vsm.message) {
@@ -297,7 +289,10 @@ Future<Void> runMergedCursorTest(ptxn::test::TestTLogPeekMergeCursorOptions opti
 	testEnvironment.initDriverContext()
 	    .initTLogGroup(options.numTLogs, options.numTLogs)
 	    .initPtxnTLog(ptxn::MessageTransferModel::StorageServerActivelyPull, options.numTLogs)
-	    .initMessages(options.initialVersion, options.numVersions, options.numMutationsPerVersion);
+	    .initMessages(options.initialVersion, options.numVersions, options.numMutationsPerVersion)
+	    .broadcastEmptyVersionMessage();
+
+	ptxn::test::print::printCommitRecords();
 
 	// Force multiple time peek, and peek causes latency
 	for (auto pFakeTLogContext : ptxn::test::TestEnvironment::getTLogs()->tLogContexts) {
@@ -369,7 +364,8 @@ TEST_CASE("/fdbserver/ptxn/test/tLogPeek/cursor/advanceTo") {
 	testEnvironment.initDriverContext()
 	    .initTLogGroup(options.numTLogs, /* numStorageTeams */ options.numTLogs * 3)
 	    .initPtxnTLog(ptxn::MessageTransferModel::StorageServerActivelyPull, options.numTLogs)
-	    .initMessages(options.initialVersion, options.numVersions, options.numMutationsPerVersion);
+	    .initMessages(options.initialVersion, options.numVersions, options.numMutationsPerVersion)
+		.broadcastEmptyVersionMessage();
 
 	for (auto pFakeTLogContext : ptxn::test::TestEnvironment::getTLogs()->tLogContexts) {
 		pFakeTLogContext->latency.enable();
@@ -405,9 +401,15 @@ TEST_CASE("/fdbserver/ptxn/test/tLogPeek/cursor/advanceTo") {
 		state Version advanceToVersion = ptxn::test::randomlyPick(versions);
 
 		std::vector<ptxn::StorageTeamID> storageTeamIDs;
-		for (const auto& [storageTeamID, _] : commitRecords.at(advanceToVersion)) {
+		for (const auto& [storageTeamID, subsequencedMessages] : commitRecords.at(advanceToVersion)) {
+			if (subsequencedMessages.size() == 0) {
+				continue;
+			}
 			storageTeamIDs.push_back(storageTeamID);
 		}
+		// At least one storage team has non-empty message
+		ASSERT(storageTeamIDs.size() > 0);
+
 		state ptxn::StorageTeamID advanceToUseStorageTeamID = ptxn::test::randomlyPick(storageTeamIDs);
 
 		std::vector<Subsequence> subsequences;
@@ -449,6 +451,10 @@ std::vector<ptxn::VersionSubsequenceMessage> getMessagesFromMutableTeams(
 
 	for (const auto& [commitVersion, storageTeamSubsequenceMessages] : commitRecord.messages) {
 		for (const auto& [storageTeamID, subsequenceMessages] : storageTeamSubsequenceMessages) {
+			if (subsequenceMessages.size() == 0) {
+				continue;
+			}
+
 			if (storageTeamID == privateMutationsStorageTeamID) {
 				// The team mutation KV pair will always have subsequence 1
 				const auto& message = subsequenceMessages[0].second;
@@ -492,7 +498,8 @@ TEST_CASE("/fdbserver/ptxn/test/tLogPeek/cursor/merged/OrderedMutableTeamPeekCur
 	    .initMessagesWithPrivateMutations(options.initialVersion,
 	                                      options.numVersions,
 	                                      options.numMutationsPerVersion,
-	                                      Optional<std::vector<UID>>(storageServerIDs));
+	                                      Optional<std::vector<UID>>(storageServerIDs))
+	    .broadcastEmptyVersionMessage();
 
 	ptxn::test::print::printCommitRecords();
 
