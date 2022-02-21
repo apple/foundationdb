@@ -2525,15 +2525,11 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderWithDelayedCandidacyImplOneGenerati
 
 ACTOR Future<Void> monitorLeaderWithDelayedCandidacyImplInternal(Reference<IClusterConnectionRecord> connRecord,
                                                                  Reference<AsyncVar<Value>> outSerializedLeaderInfo) {
-	if (connRecord->hasUnresolvedHostnames()) {
-		wait(connRecord->resolveHostnames());
-	}
+	wait(connRecord->resolveHostnames());
 	state MonitorLeaderInfo info(connRecord);
 	loop {
 		try {
-			if (info.intermediateConnRecord->hasUnresolvedHostnames()) {
-				wait(info.intermediateConnRecord->resolveHostnames());
-			}
+			wait(info.intermediateConnRecord->resolveHostnames());
 			MonitorLeaderInfo _info =
 			    wait(monitorLeaderWithDelayedCandidacyImplOneGeneration(connRecord, outSerializedLeaderInfo, info));
 			info = _info;
@@ -2677,9 +2673,7 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 	actors.push_back(serveProcess());
 
 	try {
-		if (connRecord->hasUnresolvedHostnames()) {
-			wait(connRecord->resolveHostnames());
-		}
+		wait(connRecord->resolveHostnames());
 		ServerCoordinators coordinators(connRecord);
 		if (g_network->isSimulated()) {
 			whitelistBinPaths = ",, random_path,  /bin/snap_create.sh,,";
