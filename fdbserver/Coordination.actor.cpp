@@ -96,7 +96,7 @@ LeaderElectionRegInterface::LeaderElectionRegInterface(INetwork* local) : Client
 }
 
 ServerCoordinators::ServerCoordinators(Reference<IClusterConnectionRecord> ccr) : ClientCoordinators(ccr) {
-	ASSERT(!ccr->hasUnresolvedHostnames());
+	ASSERT(ccr->connectionStringStatus() == ClusterConnectionString::RESOLVED);
 	ClusterConnectionString cs = ccr->getConnectionString();
 	for (auto s = cs.coordinators().begin(); s != cs.coordinators().end(); ++s) {
 		leaderElectionServers.emplace_back(*s);

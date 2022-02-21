@@ -516,7 +516,7 @@ std::string ClusterConnectionString::toString() const {
 }
 
 ClientCoordinators::ClientCoordinators(Reference<IClusterConnectionRecord> ccr) : ccr(ccr) {
-	ASSERT(!ccr->hasUnresolvedHostnames());
+	ASSERT(ccr->connectionStringStatus() == ClusterConnectionString::RESOLVED);
 	ClusterConnectionString cs = ccr->getConnectionString();
 	for (auto s = cs.coordinators().begin(); s != cs.coordinators().end(); ++s)
 		clientLeaderServers.push_back(ClientLeaderRegInterface(*s));
@@ -658,12 +658,8 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration(Reference<IClusterCon
                                                            Reference<AsyncVar<Value>> outSerializedLeaderInfo,
                                                            MonitorLeaderInfo info) {
 	loop {
-		if (connRecord->hasUnresolvedHostnames()) {
-			wait(connRecord->resolveHostnames());
-		}
-		if (info.intermediateConnRecord->hasUnresolvedHostnames()) {
-			wait(info.intermediateConnRecord->resolveHostnames());
-		}
+		wait(connRecord->resolveHostnames());
+		wait(info.intermediateConnRecord->resolveHostnames());
 		state ClientCoordinators coordinators(info.intermediateConnRecord);
 		state AsyncTrigger nomineeChange;
 		state std::vector<Optional<LeaderInfo>> nominees;
@@ -1063,15 +1059,11 @@ ACTOR Future<Void> monitorProxies(
     Reference<AsyncVar<Optional<ClientLeaderRegInterface>>> coordinator,
     Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions,
     Key traceLogGroup) {
-	if (connRecord->get()->hasUnresolvedHostnames()) {
-		wait(connRecord->get()->resolveHostnames());
-	}
+	wait(connRecord->get()->resolveHostnames());
 	state MonitorLeaderInfo info(connRecord->get());
 	loop {
 		try {
-			if (info.intermediateConnRecord->hasUnresolvedHostnames()) {
-				wait(info.intermediateConnRecord->resolveHostnames());
-			}
+			wait(info.intermediateConnRecord->resolveHostnames());
 			choose {
 				when(MonitorLeaderInfo _info = wait(monitorProxiesOneGeneration(
 				         connRecord->get(), clientInfo, coordinator, info, supportedVersions, traceLogGroup))) {

@@ -6884,9 +6884,7 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion
 		throw;
 	}
 	TraceEvent("ExclusionSafetyCheckCoordinators").log();
-	if (cx->getConnectionRecord()->hasUnresolvedHostnames()) {
-		wait(cx->getConnectionRecord()->resolveHostnames());
-	}
+	wait(cx->getConnectionRecord()->resolveHostnames());
 	state ClientCoordinators coordinatorList(cx->getConnectionRecord());
 	state std::vector<Future<Optional<LeaderInfo>>> leaderServers;
 	leaderServers.reserve(coordinatorList.clientLeaderServers.size());
