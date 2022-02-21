@@ -45,7 +45,8 @@ enum TesterOptionId {
 	OPT_KNOB,
 	OPT_API_VERSION,
 	OPT_BLOCK_ON_FUTURES,
-	OPT_NUM_CLIENT_THREADS
+	OPT_NUM_CLIENT_THREADS,
+	OPT_NUM_DATABASES
 };
 
 CSimpleOpt::SOption TesterOptionDefs[] = //
@@ -60,7 +61,8 @@ CSimpleOpt::SOption TesterOptionDefs[] = //
 	  { OPT_KNOB, "--knob-", SO_REQ_SEP },
 	  { OPT_API_VERSION, "--api-version", SO_REQ_SEP },
 	  { OPT_BLOCK_ON_FUTURES, "--block-on-futures", SO_NONE },
-	  { OPT_NUM_CLIENT_THREADS, "--num-client-threads", SO_REQ_SEP } };
+	  { OPT_NUM_CLIENT_THREADS, "--num-client-threads", SO_REQ_SEP },
+	  { OPT_NUM_DATABASES, "--num-databases", SO_REQ_SEP } };
 
 } // namespace
 
@@ -91,6 +93,8 @@ void TesterOptions::printProgramUsage(const char* execName) {
 	       "                 Use blocking waits on futures instead of scheduling callbacks.\n"
 	       "  --num-client-threads NUM_THREADS\n"
 	       "                 Number of threads to be used for execution of client workloads.\n"
+	       "  --num-databases NUM_DB\n"
+	       "                 Number of database connections to be used concurrently.\n"
 	       "  -h, --help     Display this help and exit.\n");
 }
 
@@ -118,25 +122,32 @@ bool TesterOptions::parseArgs(int argc, char** argv) {
 	return true;
 }
 
+namespace {
+
+bool processIntArg(const CSimpleOpt& args, int& res, int minVal, int maxVal) {
+	char* endptr;
+	res = strtol(args.OptionArg(), &endptr, 10);
+	if (*endptr != '\0') {
+		fprintf(stderr, "ERROR: invalid value %s for %s\n", args.OptionArg(), args.OptionText());
+		return false;
+	}
+	if (res < minVal || res > maxVal) {
+		fprintf(stderr, "ERROR: value for %s must be between %d and %d\n", args.OptionText(), minVal, maxVal);
+		return false;
+	}
+	return true;
+}
+
+} // namespace
+
 bool TesterOptions::processArg(const CSimpleOpt& args) {
 	switch (args.OptionId()) {
 	case OPT_CONNFILE:
 		clusterFile = args.OptionArg();
 		break;
 	case OPT_API_VERSION: {
-		char* endptr;
-		api_version = strtoul((char*)args.OptionArg(), &endptr, 10);
-		if (*endptr != '\0') {
-			fprintf(stderr, "ERROR: invalid client version %s\n", args.OptionArg());
-			return false;
-		} else if (api_version < 700 || api_version > FDB_API_VERSION) {
-			// multi-version fdbcli only available after 7.0
-			fprintf(stderr,
-			        "ERROR: api version %s is not supported. (Min: 700, Max: %d)\n",
-			        args.OptionArg(),
-			        FDB_API_VERSION);
-			return false;
-		}
+		// multi-version fdbcli only available after 7.0
+		processIntArg(args, api_version, 700, FDB_API_VERSION);
 		break;
 	}
 	case OPT_TRACE:
@@ -168,12 +179,11 @@ bool TesterOptions::processArg(const CSimpleOpt& args) {
 		break;
 
 	case OPT_NUM_CLIENT_THREADS:
-		char* endptr;
-		numClientThreads = strtoul((char*)args.OptionArg(), &endptr, 10);
-		if (*endptr != '\0' || numClientThreads <= 0 || numClientThreads > 1000) {
-			fprintf(stderr, "ERROR: number of threads %s\n", args.OptionArg());
-			return false;
-		}
+		processIntArg(args, numClientThreads, 1, 1000);
+		break;
+
+	case OPT_NUM_DATABASES:
+		processIntArg(args, numDatabases, 1, 1000);
 		break;
 	}
 	return true;
@@ -197,6 +207,7 @@ using namespace FDBSystemTester;
 void runApiCorrectness(TesterOptions& options) {
 	TransactionExecutorOptions txExecOptions;
 	txExecOptions.blockOnFutures = options.blockOnFutures;
+	txExecOptions.numDatabases = options.numDatabases;
 
 	IScheduler* scheduler = createScheduler(options.numClientThreads);
 	ITransactionExecutor* txExecutor = createTransactionExecutor();
@@ -206,6 +217,7 @@ void runApiCorrectness(TesterOptions& options) {
 	workload->init(txExecutor, scheduler, [scheduler]() { scheduler->stop(); });
 	workload->start();
 	scheduler->join();
+
 	delete workload;
 	delete txExecutor;
 	delete scheduler;

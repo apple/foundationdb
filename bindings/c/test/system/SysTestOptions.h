@@ -46,6 +46,7 @@ public:
 	int api_version = FDB_API_VERSION;
 	bool blockOnFutures = false;
 	int numClientThreads = 1;
+	int numDatabases = 1;
 
 	bool parseArgs(int argc, char** argv);
 

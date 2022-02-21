@@ -65,6 +65,7 @@ private:
 struct TransactionExecutorOptions {
 	std::string prefix = "";
 	bool blockOnFutures = false;
+	int numDatabases = 1;
 };
 
 class ITransactionExecutor {

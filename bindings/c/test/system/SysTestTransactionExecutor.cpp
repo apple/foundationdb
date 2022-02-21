@@ -19,6 +19,7 @@
  */
 
 #include "SysTestTransactionExecutor.h"
+#include "flow/IRandom.h"
 #include <iostream>
 #include <cassert>
 
@@ -137,28 +138,37 @@ private:
 
 class TransactionExecutor : public ITransactionExecutor {
 public:
-	TransactionExecutor() : db(nullptr), scheduler(nullptr) {}
+	TransactionExecutor() : scheduler(nullptr) {}
 
 	~TransactionExecutor() { release(); }
 
 	void init(IScheduler* scheduler, const char* clusterFile, const TransactionExecutorOptions& options) override {
 		this->scheduler = scheduler;
 		this->options = options;
-		fdb_check(fdb_create_database(clusterFile, &db));
+		for (int i = 0; i < options.numDatabases; i++) {
+			FDBDatabase* db;
+			fdb_check(fdb_create_database(clusterFile, &db));
+			databases.push_back(db);
+		}
 	}
 
 	void execute(ITransactionActor* txActor, TTaskFct cont) override {
+		int idx = deterministicRandom()->randomInt(0, options.numDatabases);
 		FDBTransaction* tx;
-		fdb_check(fdb_database_create_transaction(db, &tx));
+		fdb_check(fdb_database_create_transaction(databases[idx], &tx));
 		TransactionContext* ctx = new TransactionContext(tx, txActor, cont, options, scheduler);
 		txActor->init(ctx);
 		txActor->start();
 	}
 
-	void release() override { fdb_database_destroy(db); }
+	void release() override {
+		for (FDBDatabase* db : databases) {
+			fdb_database_destroy(db);
+		}
+	}
 
 private:
-	FDBDatabase* db;
+	std::vector<FDBDatabase*> databases;
 	TransactionExecutorOptions options;
 	IScheduler* scheduler;
 };
