@@ -756,15 +756,25 @@ ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
 
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 ACTOR Future<Void> deleteRocksCFCheckpoint(CheckpointMetaData checkpoint) {
-	ASSERT_EQ(checkpoint.getFormat(), RocksDBColumnFamily);
-	RocksDBColumnFamilyCheckpoint rocksCF = getRocksCF(checkpoint);
-	TraceEvent("DeleteRocksColumnFamilyCheckpoint", checkpoint.checkpointID)
-	    .detail("CheckpointID", checkpoint.checkpointID)
-	    .detail("RocksCF", rocksCF.toString());
-
+	state CheckpointFormat format = checkpoint.getFormat();
 	state std::unordered_set<std::string> dirs;
-	for (const LiveFileMetaData& file : rocksCF.sstFiles) {
-		dirs.insert(file.db_path);
+	if (format = RocksDBColumnFamily) {
+		RocksDBColumnFamilyCheckpoint rocksCF = getRocksCF(checkpoint);
+		TraceEvent("DeleteRocksColumnFamilyCheckpoint", checkpoint.checkpointID)
+		    .detail("CheckpointID", checkpoint.checkpointID)
+		    .detail("RocksCF", rocksCF.toString());
+
+		for (const LiveFileMetaData& file : rocksCF.sstFiles) {
+			dirs.insert(file.db_path);
+		}
+	} else if (format == RocksDB) {
+		RocksDBCheckpoint rocksCheckpoint = getRocksCheckpoint(checkpoint);
+		TraceEvent("DeleteRocksCheckpoint", checkpoint.checkpointID)
+		    .detail("CheckpointID", checkpoint.checkpointID)
+		    .detail("RocksCheckpoint", rocksCheckpoint.toString());
+		dirs.insert(rocksCheckpoint.checkpointDir);
+	} else {
+		ASSERT(false);
 	}
 
 	state std::unordered_set<std::string>::iterator it = dirs.begin();
@@ -776,6 +786,7 @@ ACTOR Future<Void> deleteRocksCFCheckpoint(CheckpointMetaData checkpoint) {
 		    .detail("Dir", dir);
 		wait(delay(0, TaskPriority::FetchKeys));
 	}
+
 	return Void();
 }
 #else

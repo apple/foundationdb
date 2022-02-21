@@ -17,13 +17,11 @@ ICheckpointReader* newCheckpointReader(const CheckpointMetaData& checkpoint, UID
 
 ACTOR Future<Void> deleteCheckpoint(CheckpointMetaData checkpoint) {
 	wait(delay(0, TaskPriority::FetchKeys));
-
-	if (checkpoint.getFormat() == RocksDBColumnFamily) {
+	state CheckpointFormat format = checkpoint.getFormat();
+	if (format == RocksDBColumnFamily || format == RocksDB) {
 		wait(deleteRocksCFCheckpoint(checkpoint));
-	} else if (checkpoint.getFormat() == RocksDB) {
-		throw not_implemented();
 	} else {
-		ASSERT(false);
+		throw not_implemented();
 	}
 
 	return Void();
@@ -34,13 +32,12 @@ ACTOR Future<CheckpointMetaData> fetchCheckpoint(Database cx,
                                                  std::string dir,
                                                  std::function<Future<Void>(const CheckpointMetaData&)> cFun) {
 	state CheckpointMetaData result;
-	if (initialState.getFormat() == RocksDBColumnFamily) {
+	const CheckpointFormat format = initialState.getFormat();
+	if (format == RocksDBColumnFamily || format == RocksDB) {
 		CheckpointMetaData _result = wait(fetchRocksDBCheckpoint(cx, initialState, dir, cFun));
 		result = _result;
-	} else if (initialState.getFormat() == RocksDB) {
-		throw not_implemented();
 	} else {
-		ASSERT(false);
+		throw not_implemented();
 	}
 
 	return result;
