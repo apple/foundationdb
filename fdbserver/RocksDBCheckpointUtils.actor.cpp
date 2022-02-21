@@ -38,7 +38,7 @@ static_assert((ROCKSDB_MAJOR == 6 && ROCKSDB_MINOR == 22) ? ROCKSDB_PATCH >= 1 :
 #endif // SSD_ROCKSDB_EXPERIMENTAL
 
 namespace {
-// #ifdef SSD_ROCKSDB_EXPERIMENTAL
+#ifdef SSD_ROCKSDB_EXPERIMENTAL
 
 using DB = rocksdb::DB*;
 using CF = rocksdb::ColumnFamilyHandle*;
@@ -367,7 +367,7 @@ private:
 	Future<Void> openFuture;
 };
 
-// #endif // SSD_ROCKSDB_EXPERIMENTAL
+#endif // SSD_ROCKSDB_EXPERIMENTAL
 
 class RocksDBCFCheckpointReader : public ICheckpointReader {
 public:
@@ -462,7 +462,7 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 	}
 
 	std::cout << "FetchRocksCheckpointKeyValues found ss: " << ssi.toString() << std::endl;
-	// ASSERT_EQ(ssi.id(), ssID);
+	ASSERT(ssi.id() == ssID);
 
 	state int attempt = 0;
 	state int64_t totalBytes = 0;
@@ -475,7 +475,7 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 			TraceEvent("FetchCheckpointRangeBegin")
 			    .detail("CheckpointID", metaData->checkpointID)
 			    .detail("Range", range.toString())
-			    .detail("TargetStorageServerUID", ssID.toString())
+			    .detail("TargetStorageServerUID", ssID)
 			    .detail("LocalFile", localFile)
 			    .detail("Attempt", attempt)
 			    .log();
@@ -521,7 +521,6 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 					std::cout << "Writing key: " << rep.data[i].key.toString()
 					          << ", value: " << rep.data[i].value.toString() << std::endl;
 					status = writer->Put(toSlice(rep.data[i].key), toSlice(rep.data[i].value));
-					totalBytes += rep.data[i].expectedSize();
 					if (!status.ok()) {
 						Error e = statusToError(status);
 						std::cout << "SstFileWriter put failure: " << status.ToString() << std::endl;
@@ -532,6 +531,7 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 						    .detail("Status", status.ToString());
 						throw e;
 					}
+					totalBytes += rep.data[i].expectedSize();
 				}
 			}
 		} catch (Error& e) {
@@ -553,13 +553,13 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 					break;
 				}
 			} else {
-				// TODO: This won't work since it is not transactional.
 				RocksDBCheckpoint rcp = getRocksCheckpoint(*metaData);
 				rcp.fetchedFiles.emplace_back(range, localFile);
 				metaData->serializedCheckpoint = ObjectWriter::toValue(rcp, IncludeVersion());
-				if (cFun) {
-					wait(cFun(*metaData));
-				}
+				// TODO: This won't work since it is not transactional.
+				// if (cFun) {
+				// 	wait(cFun(*metaData));
+				// }
 				TraceEvent("FetchCheckpointRangeBegin")
 				    .detail("CheckpointID", metaData->checkpointID)
 				    .detail("Range", range.toString())
@@ -578,7 +578,6 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 
 	return Void();
 }
-#endif // SSD_ROCKSDB_EXPERIMENTAL
 
 Future<Void> RocksDBCFCheckpointReader::init(StringRef token) {
 	ASSERT_EQ(this->checkpoint_.getFormat(), RocksDBColumnFamily);
@@ -708,8 +707,10 @@ ACTOR Future<Void> fetchCheckpointFile(Database cx,
 	}
 }
 
+#endif // SSD_ROCKSDB_EXPERIMENTAL
 } // namespace
 
+#ifdef SSD_ROCKSDB_EXPERIMENTAL
 ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
                                                         CheckpointMetaData initialState,
                                                         std::string dir,
@@ -733,13 +734,27 @@ ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
 			    .detail("Server", metaData->ssID.toString());
 		}
 		wait(waitForAll(fs));
-	} else {
-		throw not_implemented();
+	} else if (metaData->format == RocksDB) {
+		// RocksDBCheckpoint rcp = getRocksCheckpoint(*metaData);
+		std::string localFile = dir + "/" + metaData->checkpointID.toString() + ".sst";
+		std::shared_ptr<rocksdb::SstFileWriter> writer =
+		    std::make_shared<rocksdb::SstFileWriter>(rocksdb::EnvOptions(), rocksdb::Options());
+		wait(fetchCheckpointRange(cx, metaData, metaData->range, localFile, writer, cFun));
 	}
 
 	return *metaData;
 }
+#else
+ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
+                                                        CheckpointMetaData initialState,
+                                                        std::string dir,
+                                                        std::function<Future<Void>(const CheckpointMetaData&)> cFun) {
+	wait(delay(0));
+	return initialState;
+}
+#endif // SSD_ROCKSDB_EXPERIMENTAL
 
+#ifdef SSD_ROCKSDB_EXPERIMENTAL
 ACTOR Future<Void> deleteRocksCFCheckpoint(CheckpointMetaData checkpoint) {
 	ASSERT_EQ(checkpoint.getFormat(), RocksDBColumnFamily);
 	RocksDBColumnFamilyCheckpoint rocksCF = getRocksCF(checkpoint);
@@ -763,16 +778,22 @@ ACTOR Future<Void> deleteRocksCFCheckpoint(CheckpointMetaData checkpoint) {
 	}
 	return Void();
 }
+#else
+ACTOR Future<Void> deleteRocksCFCheckpoint(CheckpointMetaData checkpoint) {
+	wait(delay(0));
+	return Void();
+}
+#endif // SSD_ROCKSDB_EXPERIMENTAL
 
 ICheckpointReader* newRocksDBCheckpointReader(const CheckpointMetaData& checkpoint, UID logID) {
+#ifdef SSD_ROCKSDB_EXPERIMENTAL
 	const CheckpointFormat format = checkpoint.getFormat();
 	if (format == RocksDBColumnFamily) {
 		return new RocksDBCFCheckpointReader(checkpoint, logID);
 	} else if (format == RocksDB) {
-		// #ifdef SSD_ROCKSDB_EXPERIMENTAL
 		return new RocksDBCheckpointReader(checkpoint, logID);
-		// #endif // SSD_ROCKSDB_EXPERIMENTAL
 	}
+#endif // SSD_ROCKSDB_EXPERIMENTAL
 	return nullptr;
 }
 
