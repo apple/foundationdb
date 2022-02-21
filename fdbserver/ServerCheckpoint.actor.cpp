@@ -7,9 +7,9 @@ ICheckpointReader* newCheckpointReader(const CheckpointMetaData& checkpoint, UID
 	if (checkpoint.getFormat() == RocksDBColumnFamily) {
 		return newRocksDBCheckpointReader(checkpoint, logID);
 	} else if (checkpoint.getFormat() == RocksDB) {
-		throw not_implemented();
+		return newRocksDBCheckpointReader(checkpoint, logID);
 	} else {
-		ASSERT(false);
+		throw not_implemented();
 	}
 
 	return nullptr;

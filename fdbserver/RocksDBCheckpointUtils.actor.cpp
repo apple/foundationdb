@@ -38,7 +38,7 @@ static_assert((ROCKSDB_MAJOR == 6 && ROCKSDB_MINOR == 22) ? ROCKSDB_PATCH >= 1 :
 #endif // SSD_ROCKSDB_EXPERIMENTAL
 
 namespace {
-#ifdef SSD_ROCKSDB_EXPERIMENTAL
+// #ifdef SSD_ROCKSDB_EXPERIMENTAL
 
 using DB = rocksdb::DB*;
 using CF = rocksdb::ColumnFamilyHandle*;
@@ -91,7 +91,7 @@ Error statusToError(const rocksdb::Status& s) {
 	}
 }
 
-class RocksDBCheckpointReader : ICheckpointReader {
+class RocksDBCheckpointReader : public ICheckpointReader {
 private:
 	struct Reader : IThreadPoolReceiver {
 		explicit Reader(DB& db) : db(db), cf(nullptr) {
@@ -301,7 +301,7 @@ private:
 	};
 
 public:
-	explicit RocksDBCheckpointReader(const CheckpointMetaData& checkpoint, UID logID) : id(logID) {
+	RocksDBCheckpointReader(const CheckpointMetaData& checkpoint, UID logID) : id(logID) {
 		RocksDBCheckpoint rocksCheckpoint = getRocksCheckpoint(checkpoint);
 		this->path = rocksCheckpoint.checkpointDir;
 		if (g_network->isSimulated()) {
@@ -324,14 +324,12 @@ public:
 		return openFuture;
 	}
 
-	// Future<RangeResult> next(int rowLimit, int byteLimit) override {
-	// 	auto a = std::make_unique<Reader::ReadRangeAction>(rowLimit, byteLimit);
-	// 	auto res = a->result.getFuture();
-	// 	readThreads->post(a.release());
-	// 	return res;
-	// }
-
-	Future<RangeResult> nextKeyValues(const int rowLimit, const int byteLimit) override { throw not_implemented(); }
+	Future<RangeResult> nextKeyValues(const int rowLimit, const int byteLimit) override {
+		auto a = std::make_unique<Reader::ReadRangeAction>(rowLimit, byteLimit);
+		auto res = a->result.getFuture();
+		readThreads->post(a.release());
+		return res;
+	}
 
 	Future<Standalone<StringRef>> nextChunk(const int byteLimit) { throw not_implemented(); }
 
@@ -369,7 +367,7 @@ private:
 	Future<Void> openFuture;
 };
 
-#endif // SSD_ROCKSDB_EXPERIMENTAL
+// #endif // SSD_ROCKSDB_EXPERIMENTAL
 
 class RocksDBCFCheckpointReader : public ICheckpointReader {
 public:
@@ -767,7 +765,15 @@ ACTOR Future<Void> deleteRocksCFCheckpoint(CheckpointMetaData checkpoint) {
 }
 
 ICheckpointReader* newRocksDBCheckpointReader(const CheckpointMetaData& checkpoint, UID logID) {
-	return new RocksDBCFCheckpointReader(checkpoint, logID);
+	const CheckpointFormat format = checkpoint.getFormat();
+	if (format == RocksDBColumnFamily) {
+		return new RocksDBCFCheckpointReader(checkpoint, logID);
+	} else if (format == RocksDB) {
+		// #ifdef SSD_ROCKSDB_EXPERIMENTAL
+		return new RocksDBCheckpointReader(checkpoint, logID);
+		// #endif // SSD_ROCKSDB_EXPERIMENTAL
+	}
+	return nullptr;
 }
 
 RocksDBColumnFamilyCheckpoint getRocksCF(const CheckpointMetaData& checkpoint) {
