@@ -717,6 +717,7 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration(Reference<IClusterCon
 				wait(nomineeChange.onTrigger() || allActors);
 			} catch (Error& e) {
 				if (e.code() == error_code_coordinators_changed) {
+					TraceEvent("MonitorLeaderCoordinatorsChanged").suppressFor(1.0);
 					connRecord->getConnectionString().resetToUnresolved();
 					break;
 				} else {
@@ -1047,6 +1048,8 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 			index = (index + 1) % addrs.size();
 			if (index == successIndex) {
 				wait(delay(CLIENT_KNOBS->COORDINATOR_RECONNECTION_DELAY));
+				// When the client fails talking to all coordinators, we throw coordinators_changed() and let the caller
+				// re-resolve the connection string and retry.
 				throw coordinators_changed();
 			}
 		}
@@ -1076,6 +1079,7 @@ ACTOR Future<Void> monitorProxies(
 			}
 		} catch (Error& e) {
 			if (e.code() == error_code_coordinators_changed) {
+				TraceEvent("MonitorProxiesCoordinatorsChanged").suppressFor(1.0);
 				info.intermediateConnRecord->getConnectionString().resetToUnresolved();
 			} else {
 				throw e;
