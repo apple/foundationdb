@@ -147,7 +147,7 @@ def centos_image_with_fdb_helper(versioned: bool) -> Iterator[Optional[Image]]:
     container = None
     image = None
     try:
-        container = Container("centos", initd=True)
+        container = Container("centos:7", initd=True)
         for rpm in rpms:
             container.copy_to(rpm, "/opt")
         container.run(["bash", "-c", "yum update -y"])
