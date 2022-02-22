@@ -172,6 +172,7 @@ set(FDBSERVER_SRCS
   workloads/ClearSingleRange.actor.cpp
   workloads/ClientLibManagementWorkload.actor.cpp
   workloads/ClientTransactionProfileCorrectness.actor.cpp
+  workloads/ClientWorkload.actor.cpp
   workloads/TriggerRecovery.actor.cpp
   workloads/SuspendProcesses.actor.cpp
   workloads/CommitBugCheck.actor.cpp

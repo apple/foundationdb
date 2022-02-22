@@ -50,6 +50,7 @@ struct WorkloadContext {
 	int clientId, clientCount;
 	int64_t sharedRandomNumber;
 	Reference<AsyncVar<struct ServerDBInfo> const> dbInfo;
+	Reference<IClusterConnectionRecord> ccr;
 
 	WorkloadContext();
 	WorkloadContext(const WorkloadContext&);
@@ -77,6 +78,20 @@ struct TestWorkload : NonCopyable, WorkloadContext, ReferenceCounted<TestWorkloa
 	virtual double getCheckTimeout() const { return 3000; }
 
 	enum WorkloadPhase { SETUP = 1, EXECUTION = 2, CHECK = 4, METRICS = 8 };
+};
+
+struct ClientWorkloadImpl;
+struct ClientWorkload : TestWorkload {
+	ClientWorkloadImpl* impl;
+	ClientWorkload(Reference<TestWorkload> const& child, WorkloadContext const& wcx);
+	~ClientWorkload();
+	std::string description() const override;
+	Future<Void> setup(Database const& cx) override;
+	Future<Void> start(Database const& cx) override;
+	Future<bool> check(Database const& cx) override;
+	void getMetrics(std::vector<PerfMetric>& m) override;
+
+	double getCheckTimeout() const override;
 };
 
 struct KVWorkload : TestWorkload {
@@ -121,8 +136,17 @@ struct IWorkloadFactory : ReferenceCounted<IWorkloadFactory> {
 
 template <class WorkloadType>
 struct WorkloadFactory : IWorkloadFactory {
-	WorkloadFactory(const char* name) { factories()[name] = Reference<IWorkloadFactory>::addRef(this); }
-	Reference<TestWorkload> create(WorkloadContext const& wcx) override { return makeReference<WorkloadType>(wcx); }
+	bool asClient;
+	WorkloadFactory(const char* name, bool asClient = false) : asClient(asClient) { factories()[name] = Reference<IWorkloadFactory>::addRef(this); }
+	Reference<TestWorkload> create(WorkloadContext const& wcx) override {
+		if (g_network->isSimulated() && asClient) {
+			WorkloadContext clientContext = wcx;
+			clientContext.dbInfo = decltype(clientContext.dbInfo)();
+			auto child = makeReference<WorkloadType>(wcx);
+			return makeReference<ClientWorkload>(child, wcx);
+		}
+		return makeReference<WorkloadType>(wcx);
+	}
 };
 
 #define REGISTER_WORKLOAD(classname) WorkloadFactory<classname> classname##WorkloadFactory(#classname)

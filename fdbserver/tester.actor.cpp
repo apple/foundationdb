@@ -342,12 +342,14 @@ struct CompoundWorkload : TestWorkload {
 };
 
 Reference<TestWorkload> getWorkloadIface(WorkloadRequest work,
+                                         Reference<IClusterConnectionRecord> ccr,
                                          VectorRef<KeyValueRef> options,
                                          Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	Value testName = getOption(options, LiteralStringRef("testName"), LiteralStringRef("no-test-specified"));
 	WorkloadContext wcx;
 	wcx.clientId = work.clientId;
 	wcx.clientCount = work.clientCount;
+	wcx.ccr = ccr;
 	wcx.dbInfo = dbInfo;
 	wcx.options = options;
 	wcx.sharedRandomNumber = work.sharedRandomNumber;
@@ -377,14 +379,16 @@ Reference<TestWorkload> getWorkloadIface(WorkloadRequest work,
 	return workload;
 }
 
-Reference<TestWorkload> getWorkloadIface(WorkloadRequest work, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+Reference<TestWorkload> getWorkloadIface(WorkloadRequest work,
+                                         Reference<IClusterConnectionRecord> ccr,
+                                         Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	if (work.options.size() < 1) {
 		TraceEvent(SevError, "TestCreationError").detail("Reason", "No options provided");
 		fprintf(stderr, "ERROR: No options were provided for workload.\n");
 		throw test_specification_invalid();
 	}
 	if (work.options.size() == 1)
-		return getWorkloadIface(work, work.options[0], dbInfo);
+		return getWorkloadIface(work, ccr, work.options[0], dbInfo);
 
 	WorkloadContext wcx;
 	wcx.clientId = work.clientId;
@@ -394,7 +398,7 @@ Reference<TestWorkload> getWorkloadIface(WorkloadRequest work, Reference<AsyncVa
 	// getWorkloadIface()?
 	auto compound = makeReference<CompoundWorkload>(wcx);
 	for (int i = 0; i < work.options.size(); i++) {
-		compound->add(getWorkloadIface(work, work.options[i], dbInfo));
+		compound->add(getWorkloadIface(work, ccr, work.options[i], dbInfo));
 	}
 	return compound;
 }
@@ -647,7 +651,7 @@ ACTOR Future<Void> testerServerWorkload(WorkloadRequest work,
 
 		// add test for "done" ?
 		TraceEvent("WorkloadReceived", workIface.id()).detail("Title", work.title);
-		auto workload = getWorkloadIface(work, dbInfo);
+		auto workload = getWorkloadIface(work, ccr, dbInfo);
 		if (!workload) {
 			TraceEvent("TestCreationError").detail("Reason", "Workload could not be created");
 			fprintf(stderr, "ERROR: The workload could not be created.\n");
