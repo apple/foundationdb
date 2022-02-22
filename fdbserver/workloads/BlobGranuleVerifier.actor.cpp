@@ -39,6 +39,8 @@
 
 #define BGV_DEBUG true
 
+Version dbgPruneVersion = 0;
+
 /*
  * This workload is designed to verify the correctness of the blob data produced by the blob workers.
  * As a read-only validation workload, it can piggyback off of other write or read/write workloads.
@@ -406,7 +408,6 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		state double endTime = last + self->testDuration;
 		state std::map<double, OldRead> timeTravelChecks;
 		state int64_t timeTravelChecksMemory = 0;
-		state Version pruneVersion = 1;
 
 		TraceEvent("BlobGranuleVerifierStart");
 		if (BGV_DEBUG) {
@@ -432,7 +433,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 
 					try {
 						state Version newPruneVersion = deterministicRandom()->randomInt64(1, oldRead.v);
-						pruneVersion = std::max(pruneVersion, newPruneVersion);
+						dbgPruneVersion = std::max(dbgPruneVersion, newPruneVersion);
 						wait(self->pruneAtVersion(cx, oldRead.range, newPruneVersion, false));
 						std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> reReadResult =
 						    wait(self->readFromBlob(cx, self, oldRead.range, oldRead.v));
@@ -442,7 +443,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 						wait(self->killBlobWorkers(cx, self));
 						try {
 							std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> versionRead =
-							    wait(self->readFromBlob(cx, self, oldRead.range, pruneVersion));
+							    wait(self->readFromBlob(cx, self, oldRead.range, dbgPruneVersion));
 							Version minStartVer = newPruneVersion;
 							for (auto& it : versionRead.second) {
 								minStartVer = std::min(minStartVer, it.startVersion);
@@ -460,7 +461,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 						// TODO: read at some version older than pruneVersion and make sure you get txn_too_old
 						// To achieve this, the BWs are going to have to recognize latest prune versions per granules
 					} catch (Error& e) {
-						if (e.code() == error_code_blob_granule_transaction_too_old) {
+						if (e.code() == error_code_blob_granule_transaction_too_old && oldRead.v >= dbgPruneVersion) {
 							self->timeTravelTooOld++;
 							// TODO: add debugging info for when this is a failure
 						}
