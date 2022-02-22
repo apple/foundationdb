@@ -145,7 +145,6 @@ ACTOR Future<Void> fakeTLogPeek(TLogPeekRequest request, std::shared_ptr<FakeTLo
 	const auto& storageTeamEpochVersionRange =
 	    pFakeTLogContext->pTestDriverContext->commitRecord.storageTeamEpochVersionRange;
 
-	// FIXME 
 	if (storageTeamEpochVersionRange.find(storageTeamID) == std::end(storageTeamEpochVersionRange)) {
 		printTiming << "No storage team ID " << storageTeamID << " in FakeTLog" << std::endl;
 		fakeTLogPeekReplyEmpty(request, storageTeamID);

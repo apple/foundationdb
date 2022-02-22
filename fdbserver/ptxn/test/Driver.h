@@ -211,7 +211,6 @@ public:
 	friend void broadcastEmptyVersionMessage(MessageFixture&, const TLogGroupFixture&);
 };
 
-
 // Broadcasts empty version message to commit record
 void broadcastEmptyVersionMessage(MessageFixture& messageFixture, const TLogGroupFixture&);
 

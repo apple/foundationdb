@@ -712,7 +712,6 @@ void BroadcastedStorageTeamPeekCursorBase::resetImpl() {
 			++vsmIter;
 		}
 	}
-
 }
 
 #pragma endregion BroadcastedStorageTeamPeekCursorBase
