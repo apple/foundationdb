@@ -833,8 +833,9 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(
 	NetworkAddressList publicNetworkAddresses;
 	NetworkAddressList listenNetworkAddresses;
 
+	connectionRecord.resolveHostnamesBlocking();
 	auto& coordinators = connectionRecord.getConnectionString().coordinators();
-	ASSERT(coordinators.size() + connectionRecord.getConnectionString().hostnames.size() > 0);
+	ASSERT(coordinators.size() > 0);
 
 	for (int ii = 0; ii < publicAddressStrs.size(); ++ii) {
 		const std::string& publicAddressStr = publicAddressStrs[ii];
@@ -1020,6 +1021,28 @@ struct CLIOptions {
 		CLIOptions opts;
 		opts.parseArgsInternal(argc, argv);
 		return opts;
+	}
+
+	void buildNetwork(const char* name) {
+		try {
+			if (!publicAddressStrs.empty()) {
+				std::tie(publicAddresses, listenAddresses) =
+				    buildNetworkAddresses(*connectionFile, publicAddressStrs, listenAddressStrs);
+			}
+		} catch (Error&) {
+			printHelpTeaser(name);
+			flushAndExit(FDB_EXIT_ERROR);
+		}
+
+		if (role == ServerRole::ConsistencyCheck) {
+			if (!publicAddressStrs.empty()) {
+				fprintf(stderr, "ERROR: Public address cannot be specified for consistency check processes\n");
+				printHelpTeaser(name);
+				flushAndExit(FDB_EXIT_ERROR);
+			}
+			auto publicIP = determinePublicIPAutomatically(connectionFile->getConnectionString());
+			publicAddresses.address = NetworkAddress(publicIP, ::getpid());
+		}
 	}
 
 private:
@@ -1594,26 +1617,6 @@ private:
 			// failmon?
 		}
 
-		try {
-			if (!publicAddressStrs.empty()) {
-				std::tie(publicAddresses, listenAddresses) =
-				    buildNetworkAddresses(*connectionFile, publicAddressStrs, listenAddressStrs);
-			}
-		} catch (Error&) {
-			printHelpTeaser(argv[0]);
-			flushAndExit(FDB_EXIT_ERROR);
-		}
-
-		if (role == ServerRole::ConsistencyCheck) {
-			if (!publicAddressStrs.empty()) {
-				fprintf(stderr, "ERROR: Public address cannot be specified for consistency check processes\n");
-				printHelpTeaser(argv[0]);
-				flushAndExit(FDB_EXIT_ERROR);
-			}
-			auto publicIP = determinePublicIPAutomatically(connectionFile->getConnectionString());
-			publicAddresses.address = NetworkAddress(publicIP, ::getpid());
-		}
-
 		if (role == ServerRole::Simulation) {
 			Optional<bool> buggifyOverride = checkBuggifyOverride(testFile);
 			if (buggifyOverride.present())
@@ -1692,7 +1695,7 @@ int main(int argc, char* argv[]) {
 		//_set_output_format(_TWO_DIGIT_EXPONENT);
 #endif
 
-		const auto opts = CLIOptions::parseArgs(argc, argv);
+		auto opts = CLIOptions::parseArgs(argc, argv);
 		const auto role = opts.role;
 
 #ifdef _WIN32
@@ -1787,6 +1790,7 @@ int main(int argc, char* argv[]) {
 
 		if (role == ServerRole::Simulation || role == ServerRole::CreateTemplateDatabase) {
 			// startOldSimulator();
+			opts.buildNetwork(argv[0]);
 			startNewSimulator(opts.printSimTime);
 			openTraceFile(NetworkAddress(), opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace", opts.logGroup);
 			openTracer(TracerType(deterministicRandom()->randomInt(static_cast<int>(TracerType::DISABLED),
@@ -1795,6 +1799,7 @@ int main(int argc, char* argv[]) {
 			g_network = newNet2(opts.tlsConfig, opts.useThreadPool, true);
 			g_network->addStopCallback(Net2FileSystem::stop);
 			FlowTransport::createInstance(false, 1, WLTOKEN_RESERVED_COUNT);
+			opts.buildNetwork(argv[0]);
 
 			const bool expectsPublicAddress =
 			    (role == ServerRole::FDBD || role == ServerRole::NetworkTestServer || role == ServerRole::Restore);
