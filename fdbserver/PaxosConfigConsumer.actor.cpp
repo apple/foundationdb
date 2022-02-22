@@ -27,6 +27,8 @@
 #include "fdbserver/Knobs.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+using ConfigFollowerInfo = ModelInterface<ConfigFollowerInterface>;
+
 struct CommittedVersions {
 	Version secondToLastCommitted;
 	Version lastCommitted;
@@ -81,35 +83,31 @@ class GetCommittedVersionQuorum {
 
 			// Now roll node forward to match the largest committed version of
 			// the replies.
-			// TODO: Load balance over quorum. Also need to catch
-			// error_code_process_behind and retry with the next ConfigNode in
-			// the quorum.
-			state ConfigFollowerInterface quorumCfi = self->replies[target][0];
+			state Reference<ConfigFollowerInfo> quorumCfi(new ConfigFollowerInfo(self->replies[target], false));
 			try {
 				state Version lastSeenVersion = rollback.present() ? rollback.get() : nodeVersion.lastCommitted;
-				ConfigFollowerGetChangesReply reply = wait(timeoutError(
-				    quorumCfi.getChanges.getReply(ConfigFollowerGetChangesRequest{ lastSeenVersion, target }),
-				    SERVER_KNOBS->GET_COMMITTED_VERSION_TIMEOUT));
+				ConfigFollowerGetChangesReply reply =
+				    wait(timeoutError(basicLoadBalance(quorumCfi,
+				                                       &ConfigFollowerInterface::getChanges,
+				                                       ConfigFollowerGetChangesRequest{ lastSeenVersion, target }),
+				                      SERVER_KNOBS->GET_COMMITTED_VERSION_TIMEOUT));
 				wait(timeoutError(cfi.rollforward.getReply(ConfigFollowerRollforwardRequest{
 				                      rollback, nodeVersion.lastCommitted, target, reply.changes, reply.annotations }),
 				                  SERVER_KNOBS->GET_COMMITTED_VERSION_TIMEOUT));
 			} catch (Error& e) {
-				if (e.code() == error_code_version_already_compacted) {
-					TEST(true); // PaxosConfigConsumer rollforward compacted ConfigNode
-					ConfigFollowerGetSnapshotAndChangesReply reply = wait(retryBrokenPromise(
-					    quorumCfi.getSnapshotAndChanges, ConfigFollowerGetSnapshotAndChangesRequest{ target }));
-					wait(retryBrokenPromise(
-					    cfi.rollforward,
-					    ConfigFollowerRollforwardRequest{
-					        rollback, nodeVersion.lastCommitted, target, reply.changes, reply.annotations }));
-				} else if (e.code() == error_code_transaction_too_old) {
+				if (e.code() == error_code_transaction_too_old) {
 					// Seeing this trace is not necessarily a problem. There
 					// are legitimate scenarios where a ConfigNode could return
 					// transaction_too_old in response to a rollforward
 					// request.
 					TraceEvent(SevInfo, "ConfigNodeRollforwardError").error(e);
 				} else {
-					throw e;
+					// In the case of an already_compacted error, the retry
+					// loop will fetch the latest snapshot and a rollforward
+					// request will eventually be resent.
+					TEST(e.code() ==
+					     error_code_version_already_compacted); // PaxosConfigConsumer rollforward compacted ConfigNode
+					throw;
 				}
 			}
 		}
@@ -263,12 +261,14 @@ class PaxosConfigConsumerImpl {
 		loop {
 			self->resetCommittedVersionQuorum(); // TODO: This seems to fix a segfault, investigate more
 			try {
-				// TODO: Load balance
 				state Version committedVersion = wait(getCommittedVersion(self));
-				ConfigFollowerGetSnapshotAndChangesReply reply = wait(
-				    timeoutError(self->getCommittedVersionQuorum.getReadReplicas()[0].getSnapshotAndChanges.getReply(
-				                     ConfigFollowerGetSnapshotAndChangesRequest{ committedVersion }),
-				                 SERVER_KNOBS->GET_SNAPSHOT_AND_CHANGES_TIMEOUT));
+				state Reference<ConfigFollowerInfo> configNodes(
+				    new ConfigFollowerInfo(self->getCommittedVersionQuorum.getReadReplicas(), false));
+				ConfigFollowerGetSnapshotAndChangesReply reply =
+				    wait(timeoutError(basicLoadBalance(configNodes,
+				                                       &ConfigFollowerInterface::getSnapshotAndChanges,
+				                                       ConfigFollowerGetSnapshotAndChangesRequest{ committedVersion }),
+				                      SERVER_KNOBS->GET_SNAPSHOT_AND_CHANGES_TIMEOUT));
 				TraceEvent(SevDebug, "ConfigConsumerGotSnapshotAndChanges", self->id)
 				    .detail("SnapshotVersion", reply.snapshotVersion)
 				    .detail("SnapshotSize", reply.snapshot.size())
@@ -313,13 +313,14 @@ class PaxosConfigConsumerImpl {
 				// ConfigNodes changes to 1, 1, 2, the committed version
 				// returned would be 1.
 				if (committedVersion > self->lastSeenVersion) {
-					// TODO: Load balance to avoid always hitting the
-					// node at index 0 first
 					ASSERT(self->getCommittedVersionQuorum.getReadReplicas().size() >= self->cfis.size() / 2 + 1);
-					ConfigFollowerGetChangesReply reply = wait(
-					    timeoutError(self->getCommittedVersionQuorum.getReadReplicas()[0].getChanges.getReply(
+					state Reference<ConfigFollowerInfo> configNodes(
+					    new ConfigFollowerInfo(self->getCommittedVersionQuorum.getReadReplicas(), false));
+					ConfigFollowerGetChangesReply reply = wait(timeoutError(
+					    basicLoadBalance(configNodes,
+					                     &ConfigFollowerInterface::getChanges,
 					                     ConfigFollowerGetChangesRequest{ self->lastSeenVersion, committedVersion }),
-					                 SERVER_KNOBS->FETCH_CHANGES_TIMEOUT));
+					    SERVER_KNOBS->FETCH_CHANGES_TIMEOUT));
 					for (const auto& versionedMutation : reply.changes) {
 						TraceEvent te(SevDebug, "ConsumerFetchedMutation", self->id);
 						te.detail("Version", versionedMutation.version)
@@ -337,8 +338,6 @@ class PaxosConfigConsumerImpl {
 					                          committedVersion,
 					                          reply.annotations,
 					                          self->getCommittedVersionQuorum.getReadReplicas());
-					// TODO: Catch error_code_process_behind and retry with
-					// the next ConfigNode in the quorum.
 				} else if (committedVersion == self->lastSeenVersion) {
 					broadcaster->applyChanges({}, -1, {}, self->getCommittedVersionQuorum.getReadReplicas());
 				}

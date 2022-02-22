@@ -390,9 +390,9 @@ public:
 		this->coordinators = coordinators.configServers.size();
 		if (configDBType != ConfigDBType::DISABLED) {
 			if (configDBType == ConfigDBType::SIMPLE) {
-				consumer = IConfigConsumer::createSimple(coordinators, 0.5, Optional<double>{});
+				consumer = IConfigConsumer::createSimple(coordinators, 0.5, SERVER_KNOBS->COMPACTION_INTERVAL);
 			} else {
-				consumer = IConfigConsumer::createPaxos(coordinators, 0.5, Optional<double>{});
+				consumer = IConfigConsumer::createPaxos(coordinators, 0.5, SERVER_KNOBS->COMPACTION_INTERVAL);
 			}
 			TraceEvent(SevDebug, "ConfigBroadcasterStartingConsumer", id)
 			    .detail("Consumer", consumer->getID())
