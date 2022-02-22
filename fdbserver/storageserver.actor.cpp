@@ -4174,6 +4174,7 @@ static const KeyRangeRef persistFormatReadableRange(LiteralStringRef("Foundation
                                                     LiteralStringRef("FoundationDB/StorageServer/1/5"));
 static const KeyRef persistID = LiteralStringRef(PERSIST_PREFIX "ID");
 static const KeyRef persistTssPairID = LiteralStringRef(PERSIST_PREFIX "tssPairID");
+static const KeyRef persistSSPairID = LiteralStringRef(PERSIST_PREFIX "ssWithTSSPairID");
 static const KeyRef persistTssQuarantine = LiteralStringRef(PERSIST_PREFIX "tssQ");
 static const KeyRef persistClusterIdKey = LiteralStringRef(PERSIST_PREFIX "clusterId");
 
@@ -5178,6 +5179,10 @@ private:
 			if (!data->isTss() && m.type == MutationRef::ClearRange && data->ssPairID.present() &&
 			    serverTagKey == data->ssPairID.get()) {
 				data->clearSSWithTssPair();
+				// Add ss pair id change to mutation log to make durable
+				auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
+				data->addMutationToMutationLog(
+				    mLV, MutationRef(MutationRef::ClearRange, persistSSPairID, keyAfter(persistSSPairID)));
 			}
 		} else if (m.type == MutationRef::SetValue && m.param1 == rebootWhenDurablePrivateKey) {
 			data->rebootAfterDurableVersion = currentVersion;
@@ -5281,11 +5286,19 @@ private:
 			if (!data->isTss()) {
 				UID ssId = Codec<UID>::unpack(Tuple::unpack(m.param1.substr(1).removePrefix(tssMappingKeys.begin)));
 				ASSERT(ssId == data->thisServerID);
+				// Add ss pair id change to mutation log to make durable
+				auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
 				if (m.type == MutationRef::SetValue) {
 					UID tssId = Codec<UID>::unpack(Tuple::unpack(m.param2));
 					data->setSSWithTssPair(tssId);
+					data->addMutationToMutationLog(mLV,
+					                               MutationRef(MutationRef::SetValue,
+					                                           persistSSPairID,
+					                                           BinaryWriter::toValue(tssId, Unversioned())));
 				} else {
 					data->clearSSWithTssPair();
+					data->addMutationToMutationLog(
+					    mLV, MutationRef(MutationRef::ClearRange, persistSSPairID, keyAfter(persistSSPairID)));
 				}
 			}
 		} else if (m.param1.substr(1).startsWith(tssQuarantineKeys.begin) &&
@@ -6276,6 +6289,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	state Future<Optional<Value>> fID = storage->readValue(persistID);
 	state Future<Optional<Value>> fClusterID = storage->readValue(persistClusterIdKey);
 	state Future<Optional<Value>> ftssPairID = storage->readValue(persistTssPairID);
+	state Future<Optional<Value>> fssPairID = storage->readValue(persistSSPairID);
 	state Future<Optional<Value>> fTssQuarantine = storage->readValue(persistTssQuarantine);
 	state Future<Optional<Value>> fVersion = storage->readValue(persistVersion);
 	state Future<Optional<Value>> fLogProtocol = storage->readValue(persistLogProtocol);
@@ -6291,8 +6305,8 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	    restoreByteSample(data, storage, byteSampleSampleRecovered, startByteSampleRestore.getFuture());
 
 	TraceEvent("ReadingDurableState", data->thisServerID).log();
-	wait(waitForAll(
-	    std::vector{ fFormat, fID, fClusterID, ftssPairID, fTssQuarantine, fVersion, fLogProtocol, fPrimaryLocality }));
+	wait(waitForAll(std::vector{
+	    fFormat, fID, fClusterID, ftssPairID, fssPairID, fTssQuarantine, fVersion, fLogProtocol, fPrimaryLocality }));
 	wait(waitForAll(std::vector{ fShardAssigned, fShardAvailable, fChangeFeeds, fTenantMap }));
 	wait(byteSampleSampleRecovered.getFuture());
 	TraceEvent("RestoringDurableState", data->thisServerID).log();
@@ -6317,6 +6331,11 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	if (ftssPairID.get().present()) {
 		data->setTssPair(BinaryReader::fromStringRef<UID>(ftssPairID.get().get(), Unversioned()));
 		data->bytesRestored += ftssPairID.get().expectedSize();
+	}
+
+	if (fssPairID.get().present()) {
+		data->setSSWithTssPair(BinaryReader::fromStringRef<UID>(fssPairID.get().get(), Unversioned()));
+		data->bytesRestored += fssPairID.get().expectedSize();
 	}
 
 	if (fClusterID.get().present()) {
