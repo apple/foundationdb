@@ -31,6 +31,7 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/genericactors.actor.h"
 
@@ -328,19 +329,15 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				Optional<Value> oldPruneIntent = wait(tr->get(blobGranulePruneKeys.begin.withSuffix(range.begin)));
 
-				if (oldPruneIntent.present()) {
-					Version oldPruneVersion;
-					bool oldForce;
-					std::tie(oldPruneVersion, oldForce) = decodeBlobGranulePruneValue(oldPruneIntent.get());
-					if (oldPruneVersion >= version) {
-						return Void();
-					}
-				}
+				Value pruneValue = blobGranulePruneValueFor(version, range, force);
 
-				Value pruneValue = blobGranulePruneValueFor(version, force);
-				wait(krmSetRange(tr, blobGranulePruneKeys.begin, range, pruneValue));
+				Key pruneKey = KeyRef(blobGranulePruneKeys.begin.withSuffix(std::string(14, '\x00')));
+				int32_t pos = pruneKey.size() - 14;
+				pos = littleEndian32(pos);
+				uint8_t* data = mutateString(pruneKey);
+				memcpy(data + pruneKey.size() - sizeof(int32_t), &pos, sizeof(int32_t));
+				tr->atomicOp(pruneKey, pruneValue, MutationRef::SetVersionstampedKey);
 				tr->set(blobGranulePruneChangeKey, deterministicRandom()->randomUniqueID().toString());
 				wait(tr->commit());
 				if (BGV_DEBUG) {
@@ -363,11 +360,53 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		}
 	}
 
+	ACTOR Future<Void> killBlobWorkers(Database cx, BlobGranuleVerifierWorkload* self) {
+		state Transaction tr(cx);
+		state std::set<UID> knownWorkers;
+		state bool first = true;
+		loop {
+			try {
+				RangeResult r = wait(tr.getRange(blobWorkerListKeys, CLIENT_KNOBS->TOO_MANY));
+
+				state std::vector<UID> haltIds;
+				state std::vector<Future<ErrorOr<Void>>> haltRequests;
+				for (auto& it : r) {
+					BlobWorkerInterface interf = decodeBlobWorkerListValue(it.value);
+					if (first) {
+						knownWorkers.insert(interf.id());
+					}
+					if (knownWorkers.count(interf.id())) {
+						haltIds.push_back(interf.id());
+						haltRequests.push_back(interf.haltBlobWorker.tryGetReply(HaltBlobWorkerRequest(1e6, UID())));
+					}
+				}
+				first = false;
+				wait(waitForAll(haltRequests));
+				bool allPresent = true;
+				for (int i = 0; i < haltRequests.size(); i++) {
+					if (haltRequests[i].get().present()) {
+						knownWorkers.erase(haltIds[i]);
+					} else {
+						allPresent = false;
+					}
+				}
+				if (allPresent) {
+					return Void();
+				} else {
+					wait(delay(1.0));
+				}
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+
 	ACTOR Future<Void> verifyGranules(Database cx, BlobGranuleVerifierWorkload* self) {
 		state double last = now();
 		state double endTime = last + self->testDuration;
 		state std::map<double, OldRead> timeTravelChecks;
 		state int64_t timeTravelChecksMemory = 0;
+		state Version pruneVersion = 1;
 
 		TraceEvent("BlobGranuleVerifierStart");
 		if (BGV_DEBUG) {
@@ -392,11 +431,31 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 					// advance iterator before doing read, so if it gets error we don't retry it
 
 					try {
-						// TODO: before reading, prune at some version [0, readVersion)
+						state Version newPruneVersion = deterministicRandom()->randomInt64(1, oldRead.v);
+						pruneVersion = std::max(pruneVersion, newPruneVersion);
+						wait(self->pruneAtVersion(cx, oldRead.range, newPruneVersion, false));
 						std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> reReadResult =
 						    wait(self->readFromBlob(cx, self, oldRead.range, oldRead.v));
 						self->compareResult(oldRead.oldResult, reReadResult, oldRead.range, oldRead.v, false);
 						self->timeTravelReads++;
+
+						wait(self->killBlobWorkers(cx, self));
+						try {
+							std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> versionRead =
+							    wait(self->readFromBlob(cx, self, oldRead.range, pruneVersion));
+							Version minStartVer = newPruneVersion;
+							for (auto& it : versionRead.second) {
+								minStartVer = std::min(minStartVer, it.startVersion);
+							}
+							std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> versionRead =
+							    wait(self->readFromBlob(cx, self, oldRead.range, minStartVer - 1));
+							ASSERT(false);
+						} catch (Error& e) {
+							if (e.code() == error_code_actor_cancelled) {
+								throw;
+							}
+							ASSERT(e.code() == error_code_blob_granule_transaction_too_old);
+						}
 
 						// TODO: read at some version older than pruneVersion and make sure you get txn_too_old
 						// To achieve this, the BWs are going to have to recognize latest prune versions per granules
