@@ -169,7 +169,7 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 			} else if (value == "gradual") {
 				type = StorageMigrationType::GRADUAL;
 			} else {
-				printf("Error: Only disabled|aggressive|gradual are valid for storage_migration_mode.\n");
+				printf("Error: Only disabled|aggressive|gradual are valid for storage_migration_type.\n");
 				return out;
 			}
 			out[p + key] = format("%d", type);
