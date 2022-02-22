@@ -73,7 +73,7 @@ endif()
 ################################################################################
 
 find_package(Python3 COMPONENTS Interpreter)
-if (Python3_Interpreter_FOUND)
+if (Python3_Interpreter_FOUND AND NOT APPLE)
   set(WITH_DOCUMENTATION ON)
 else()
   set(WITH_DOCUMENTATION OFF)
