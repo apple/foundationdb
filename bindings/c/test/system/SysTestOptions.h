@@ -47,6 +47,8 @@ public:
 	bool blockOnFutures = false;
 	int numClientThreads = 1;
 	int numDatabases = 1;
+	std::string externalClientLibrary;
+	int numFdbThreads = 1;
 
 	bool parseArgs(int argc, char** argv);
 

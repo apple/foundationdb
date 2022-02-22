@@ -46,7 +46,9 @@ enum TesterOptionId {
 	OPT_API_VERSION,
 	OPT_BLOCK_ON_FUTURES,
 	OPT_NUM_CLIENT_THREADS,
-	OPT_NUM_DATABASES
+	OPT_NUM_DATABASES,
+	OPT_EXTERNAL_CLIENT_LIBRARY,
+	OPT_NUM_FDB_THREADS
 };
 
 CSimpleOpt::SOption TesterOptionDefs[] = //
@@ -62,7 +64,9 @@ CSimpleOpt::SOption TesterOptionDefs[] = //
 	  { OPT_API_VERSION, "--api-version", SO_REQ_SEP },
 	  { OPT_BLOCK_ON_FUTURES, "--block-on-futures", SO_NONE },
 	  { OPT_NUM_CLIENT_THREADS, "--num-client-threads", SO_REQ_SEP },
-	  { OPT_NUM_DATABASES, "--num-databases", SO_REQ_SEP } };
+	  { OPT_NUM_DATABASES, "--num-databases", SO_REQ_SEP },
+	  { OPT_EXTERNAL_CLIENT_LIBRARY, "--external-client-library", SO_REQ_SEP },
+	  { OPT_NUM_FDB_THREADS, "--num-fdb-threads", SO_REQ_SEP } };
 
 } // namespace
 
@@ -91,10 +95,14 @@ void TesterOptions::printProgramUsage(const char* execName) {
 	       "                 Changes a knob option. KNOBNAME should be lowercase.\n"
 	       "  --block-on-futures\n"
 	       "                 Use blocking waits on futures instead of scheduling callbacks.\n"
-	       "  --num-client-threads NUM_THREADS\n"
+	       "  --num-client-threads NUMBER\n"
 	       "                 Number of threads to be used for execution of client workloads.\n"
-	       "  --num-databases NUM_DB\n"
+	       "  --num-databases NUMBER\n"
 	       "                 Number of database connections to be used concurrently.\n"
+	       "  --external-client-library FILE_PATH\n"
+	       "                 Path to the external client library.\n"
+	       "  --num-fdb-threads NUMBER\n"
+	       "                 Number of FDB client threads to be created.\n"
 	       "  -h, --help     Display this help and exit.\n");
 }
 
@@ -185,6 +193,14 @@ bool TesterOptions::processArg(const CSimpleOpt& args) {
 	case OPT_NUM_DATABASES:
 		processIntArg(args, numDatabases, 1, 1000);
 		break;
+
+	case OPT_EXTERNAL_CLIENT_LIBRARY:
+		externalClientLibrary = args.OptionArg();
+		break;
+
+	case OPT_NUM_FDB_THREADS:
+		processIntArg(args, numFdbThreads, 1, 1000);
+		break;
 	}
 	return true;
 }
@@ -203,6 +219,19 @@ IWorkload* createApiCorrectnessWorkload();
 } // namespace FDBSystemTester
 
 using namespace FDBSystemTester;
+
+void applyNetworkOptions(TesterOptions& options) {
+	if (!options.externalClientLibrary.empty()) {
+		fdb_check(FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_DISABLE_LOCAL_CLIENT));
+		fdb_check(
+		    FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_EXTERNAL_CLIENT_LIBRARY, options.externalClientLibrary));
+	}
+
+	if (options.numFdbThreads > 1) {
+		fdb_check(
+		    FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_CLIENT_THREADS_PER_VERSION, options.numFdbThreads));
+	}
+}
 
 void runApiCorrectness(TesterOptions& options) {
 	TransactionExecutorOptions txExecOptions;
@@ -230,6 +259,7 @@ int main(int argc, char** argv) {
 	}
 
 	fdb_check(fdb_select_api_version(options.api_version));
+	applyNetworkOptions(options);
 	fdb_check(fdb_setup_network());
 
 	std::thread network_thread{ &fdb_run_network };

@@ -78,8 +78,24 @@ EmptyFuture Transaction::onError(fdb_error_t err) {
 	return EmptyFuture(fdb_transaction_on_error(tx_, err));
 }
 
+void Transaction::reset() {
+	fdb_transaction_reset(tx_);
+}
+
 Transaction::~Transaction() {
 	fdb_transaction_destroy(tx_);
+}
+
+fdb_error_t FdbApi::setOption(FDBNetworkOption option, std::string_view value) {
+	return fdb_network_set_option(option, reinterpret_cast<const uint8_t*>(value.data()), value.size());
+}
+
+fdb_error_t FdbApi::setOption(FDBNetworkOption option, int64_t value) {
+	return fdb_network_set_option(option, reinterpret_cast<const uint8_t*>(&value), sizeof(value));
+}
+
+fdb_error_t FdbApi::setOption(FDBNetworkOption option) {
+	return fdb_network_set_option(option, reinterpret_cast<const uint8_t*>(""), 0);
 }
 
 } // namespace FDBSystemTester

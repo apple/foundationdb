@@ -40,6 +40,9 @@ public:
 	virtual ~Future();
 
 	Future& operator=(Future&& other) {
+		if (future_) {
+			reset();
+		}
 		future_ = other.future_;
 		other.future_ = nullptr;
 		return *this;
@@ -77,9 +80,17 @@ public:
 	void set(std::string_view key, std::string_view value);
 	EmptyFuture commit();
 	EmptyFuture onError(fdb_error_t err);
+	void reset();
 
 private:
 	FDBTransaction* tx_;
+};
+
+class FdbApi {
+public:
+	static fdb_error_t setOption(FDBNetworkOption option, std::string_view value);
+	static fdb_error_t setOption(FDBNetworkOption option, int64_t value);
+	static fdb_error_t setOption(FDBNetworkOption option);
 };
 
 } // namespace FDBSystemTester
