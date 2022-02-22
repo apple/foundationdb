@@ -1433,7 +1433,6 @@ ACTOR Future<Void> servicePeekRequest(
 		wait(delay(0, TaskPriority::TLogSpilledPeekReply));
 	}
 
-	state double workStart = now();
 	Version poppedVer = poppedVersion(logData, req.storageTeamID);
 	if (poppedVer > req.beginVersion) {
 		TLogPeekReply rep;
