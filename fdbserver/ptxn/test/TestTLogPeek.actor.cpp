@@ -365,7 +365,7 @@ TEST_CASE("/fdbserver/ptxn/test/tLogPeek/cursor/advanceTo") {
 	    .initTLogGroup(options.numTLogs, /* numStorageTeams */ options.numTLogs * 3)
 	    .initPtxnTLog(ptxn::MessageTransferModel::StorageServerActivelyPull, options.numTLogs)
 	    .initMessages(options.initialVersion, options.numVersions, options.numMutationsPerVersion)
-		.broadcastEmptyVersionMessage();
+	    .broadcastEmptyVersionMessage();
 
 	for (auto pFakeTLogContext : ptxn::test::TestEnvironment::getTLogs()->tLogContexts) {
 		pFakeTLogContext->latency.enable();

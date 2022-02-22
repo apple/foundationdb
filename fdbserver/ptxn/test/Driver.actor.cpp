@@ -338,8 +338,8 @@ void broadcastEmptyVersionMessage(MessageFixture& messageFixture, const TLogGrou
 	auto& commitRecord = messageFixture.commitRecord;
 	const auto& storageTeamIDs = tLogGroupFixture.storageTeamIDs;
 
-	for(auto& [version, storageTeamMessages] : commitRecord.messages) {
-		for(const auto& storageTeamID: storageTeamIDs) {
+	for (auto& [version, storageTeamMessages] : commitRecord.messages) {
+		for (const auto& storageTeamID : storageTeamIDs) {
 			if (storageTeamMessages.count(storageTeamID) == 0) {
 				// Create a VectorRef with 0 messages, imply an empty message
 				storageTeamMessages[storageTeamID];
