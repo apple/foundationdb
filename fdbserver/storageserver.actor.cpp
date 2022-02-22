@@ -4653,39 +4653,52 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data, KeyR
 
 		if (!existing) {
 			TEST(cleanupPending); // Fetch change feed which is cleanup pending. This means there was a move away and a
-			                      // move back, this will remake the metadata
+			// move back, this will remake the metadata
 
-			Reference<ChangeFeedInfo> changeFeedInfo = Reference<ChangeFeedInfo>(new ChangeFeedInfo());
-			changeFeedInfo->range = cfEntry.range;
-			changeFeedInfo->id = cfEntry.rangeId;
+			if (cfEntry.emptyVersion < data->version.get()) {
+				Reference<ChangeFeedInfo> changeFeedInfo = Reference<ChangeFeedInfo>(new ChangeFeedInfo());
+				changeFeedInfo->range = cfEntry.range;
+				changeFeedInfo->id = cfEntry.rangeId;
 
-			changeFeedInfo->stopped = cfEntry.stopped;
-			changeFeedInfo->emptyVersion = cfEntry.emptyVersion;
-			data->uidChangeFeed[cfEntry.rangeId] = changeFeedInfo;
-			auto rs = data->keyChangeFeed.modify(cfEntry.range);
-			for (auto r = rs.begin(); r != rs.end(); ++r) {
-				r->value().push_back(changeFeedInfo);
+				changeFeedInfo->stopped = cfEntry.stopped;
+				changeFeedInfo->emptyVersion = cfEntry.emptyVersion;
+				data->uidChangeFeed[cfEntry.rangeId] = changeFeedInfo;
+				auto rs = data->keyChangeFeed.modify(cfEntry.range);
+				for (auto r = rs.begin(); r != rs.end(); ++r) {
+					r->value().push_back(changeFeedInfo);
+				}
+				data->keyChangeFeed.coalesce(cfEntry.range.contents());
+
+				auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
+				data->addMutationToMutationLog(
+				    mLV,
+				    MutationRef(MutationRef::SetValue,
+				                persistChangeFeedKeys.begin.toString() + cfEntry.rangeId.toString(),
+				                changeFeedValue(cfEntry.range,
+				                                changeFeedInfo->emptyVersion + 1,
+				                                cfEntry.stopped ? ChangeFeedStatus::CHANGE_FEED_STOP
+				                                                : ChangeFeedStatus::CHANGE_FEED_CREATE)));
+			} else {
+				// don't include in list of change feeds to fetch
+				feedIds.pop_back();
+				TraceEvent(SevDebug, "FetchedChangeFeedInfoIgnored", data->thisServerID)
+				    .detail("RangeID", cfEntry.rangeId.printable())
+				    .detail("Range", cfEntry.range.toString())
+				    .detail("FetchVersion", fetchVersion)
+				    .detail("SSVersion", data->version.get())
+				    .detail("EmptyVersion", cfEntry.emptyVersion);
 			}
-			data->keyChangeFeed.coalesce(cfEntry.range.contents());
-
-			auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
-			data->addMutationToMutationLog(
-			    mLV,
-			    MutationRef(MutationRef::SetValue,
-			                persistChangeFeedKeys.begin.toString() + cfEntry.rangeId.toString(),
-			                changeFeedValue(cfEntry.range,
-			                                changeFeedInfo->emptyVersion + 1,
-			                                cfEntry.stopped ? ChangeFeedStatus::CHANGE_FEED_STOP
-			                                                : ChangeFeedStatus::CHANGE_FEED_CREATE)));
 		} else {
 			auto changeFeedInfo = existingEntry->second;
 			auto feedCleanup = data->changeFeedCleanupDurable.find(cfEntry.rangeId);
 
-			bool writeToMutationLog = false;
 			if (feedCleanup != data->changeFeedCleanupDurable.end() && changeFeedInfo->removing) {
 				TEST(true); // re-fetching feed scheduled for deletion! Un-mark it as removing
-				changeFeedInfo->emptyVersion = cfEntry.emptyVersion;
-				changeFeedInfo->stopped = cfEntry.stopped;
+				if (cfEntry.emptyVersion < data->version.get()) {
+					changeFeedInfo->emptyVersion = cfEntry.emptyVersion;
+					changeFeedInfo->stopped = cfEntry.stopped;
+				}
+
 				changeFeedInfo->removing = false;
 				// reset fetch versions because everything previously fetched was cleaned up
 				changeFeedInfo->fetchVersion = invalidVersion;
