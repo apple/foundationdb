@@ -4686,13 +4686,6 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data, KeyR
 				// We may just want to refactor this so updateStorage does explicit deletes based on
 				// changeFeedCleanupDurable and not use the mutation log at all for the change feed metadata cleanup.
 				// Then we wouldn't have to reset anything here
-				writeToMutationLog = true;
-			} else if (changeFeedInfo->emptyVersion < cfEntry.emptyVersion) {
-				TEST(true); // Got updated CF emptyVersion from a parallel fetchChangeFeedMetadata
-				changeFeedInfo->emptyVersion = cfEntry.emptyVersion;
-				writeToMutationLog = true;
-			}
-			if (writeToMutationLog) {
 				auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
 				data->addMutationToMutationLog(
 				    mLV,
