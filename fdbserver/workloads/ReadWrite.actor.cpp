@@ -119,6 +119,7 @@ struct ReadWriteWorkload : KVWorkload {
 	typedef std::vector<std::pair<int64_t, int64_t>> IndexRangeVec;
 	// keyForIndex generate key from index. So for a shard range, recording the start and end is enough
 	std::vector<std::pair<UID, IndexRangeVec>> serverShards; // storage server and the shards it owns
+	int hotServerCount = 0;
 
 	// states of metric
 	Int64MetricHandle totalReadsMetric;
@@ -723,6 +724,7 @@ struct ReadWriteWorkload : KVWorkload {
 			state int round = 0;
 			for (; round < self->skewRound; ++round) {
 				wait(updateServerShards(cx, self));
+				self->setHotServers();
 				self->startReadWriteClients(cx, clients);
 				wait(timeout(waitForAll(clients), self->testDuration / self->skewRound, Void()));
 				clients.clear();
@@ -745,12 +747,35 @@ struct ReadWriteWorkload : KVWorkload {
 		return timeSinceStart >= metricsStart && timeSinceStart < (metricsStart + metricsDuration);
 	}
 
-	int64_t getRandomKey(uint64_t nodeCount) {
-		if (forceHotProbability && deterministicRandom()->random01() < forceHotProbability)
+	// set the last N server in serverShards as hot server
+	void setHotServers() {
+		hotServerCount = ceil(hotServerFraction * serverShards.size());
+		for (int i = serverShards.size(), j = 0; j < hotServerCount; --i, ++j) {
+			auto idx = deterministicRandom()->randomInt(0, i);
+			std::swap(serverShards[idx], serverShards[i - 1]);
+		}
+	}
+
+	int64_t getRandomKeyFromHotServer() {
+		ASSERT(hotServerCount > 0);
+		int idx, shardIdx;
+		idx = deterministicRandom()->randomInt(serverShards.size() - hotServerCount, serverShards.size());
+		shardIdx = deterministicRandom()->randomInt(0, serverShards[idx].second.size());
+		return deterministicRandom()->randomInt64(serverShards[idx].second[shardIdx].first,
+		                                          serverShards[idx].second[shardIdx].second);
+	}
+
+	int64_t getRandomKey(uint64_t nodeCount, bool hotServerRead = true) {
+		auto random = deterministicRandom()->random01();
+		if (forceHotProbability && random < forceHotProbability) {
 			return deterministicRandom()->randomInt64(0, nodeCount * hotKeyFraction) /
 			       hotKeyFraction; // spread hot keys over keyspace
-		else
-			return deterministicRandom()->randomInt64(0, nodeCount);
+		} else if (hotServerFraction > 0) {
+			if ((hotServerRead && random < hotServerReadFrac) || (!hotServerRead && random < hotServerWriteFrac)) {
+				return getRandomKeyFromHotServer();
+			}
+		}
+		return deterministicRandom()->randomInt64(0, nodeCount);
 	}
 
 	double sweepAlpha(double startTime) {
@@ -868,12 +893,12 @@ struct ReadWriteWorkload : KVWorkload {
 							break;
 
 						if (self->adjacentWrites) {
-							int64_t startKey = self->getRandomKey(self->nodeCount - writes);
+							int64_t startKey = self->getRandomKey(self->nodeCount - writes, false);
 							for (int op = 0; op < writes; op++)
 								tr.set(self->keyForIndex(startKey + op, false), values[op]);
 						} else {
 							for (int op = 0; op < writes; op++)
-								tr.set(self->keyForIndex(self->getRandomKey(self->nodeCount), false), values[op]);
+								tr.set(self->keyForIndex(self->getRandomKey(self->nodeCount, false), false), values[op]);
 						}
 						for (int op = 0; op < extra_read_conflict_ranges; op++)
 							tr.addReadConflictRange(extra_ranges[op]);
