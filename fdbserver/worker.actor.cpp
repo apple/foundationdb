@@ -2535,6 +2535,7 @@ ACTOR Future<Void> monitorLeaderWithDelayedCandidacyImplInternal(Reference<IClus
 			info = _info;
 		} catch (Error& e) {
 			if (e.code() == error_code_coordinators_changed) {
+				TraceEvent("MonitorLeaderWithDelayedCandidacyCoordinatorsChanged").suppressFor(1.0);
 				info.intermediateConnRecord->getConnectionString().resetToUnresolved();
 			} else {
 				throw e;

@@ -1023,6 +1023,7 @@ struct CLIOptions {
 		return opts;
 	}
 
+	// Determine publicAddresses and listenAddresses by calling buildNetworkAddresses().
 	void buildNetwork(const char* name) {
 		try {
 			if (!publicAddressStrs.empty()) {
