@@ -5776,7 +5776,9 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 
 	case FDBTransactionOptions::USE_GRV_CACHE:
 		validateOptionValueNotPresent(value);
-		trState->options.useGrvCache = true;
+		if (trState->options.numErrors == 0) {
+			trState->options.useGrvCache = true;
+		}
 		break;
 
 	case FDBTransactionOptions::SKIP_GRV_CACHE:
@@ -6238,6 +6240,9 @@ uint32_t Transaction::getSize() {
 }
 
 Future<Void> Transaction::onError(Error const& e) {
+	if (g_network->isSimulated() && ++trState->numErrors % 10 == 0) {
+		TraceEvent(SevWarnAlways, "TransactionTooManyRetries").detail("NumRetries", trState->numErrors);
+	}
 	if (e.code() == error_code_success) {
 		return client_invalid_operation();
 	}
@@ -6271,9 +6276,6 @@ Future<Void> Transaction::onError(Error const& e) {
 		reset();
 		return delay(std::min(CLIENT_KNOBS->FUTURE_VERSION_RETRY_DELAY, maxBackoff), trState->taskID);
 	}
-
-	if (g_network->isSimulated() && ++trState->numErrors % 10 == 0)
-		TraceEvent(SevWarnAlways, "TransactionTooManyRetries").detail("NumRetries", trState->numErrors);
 
 	return e;
 }
