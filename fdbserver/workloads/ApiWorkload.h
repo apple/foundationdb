@@ -238,7 +238,7 @@ struct ApiWorkload : TestWorkload {
 		minValueLength = getOption(options, LiteralStringRef("minValueLength"), 1);
 		maxValueLength = getOption(options, LiteralStringRef("maxValueLength"), 10000);
 
-		useExtraDB = g_simulator.extraDB != nullptr;
+		useExtraDB = g_network->isSimulated() && g_simulator.extraDB != nullptr;
 		if (useExtraDB) {
 			auto extraFile = makeReference<ClusterConnectionMemoryRecord>(*g_simulator.extraDB);
 			extraDB = Database::createDatabase(extraFile, -1);

@@ -305,8 +305,6 @@ ThreadResult<RangeResult> ThreadSafeTransaction::readBlobGranules(const KeyRange
 
 	// FIXME: prevent from calling this from another main thread!
 
-	bool doMaterialize = !granule_context.debugNoMaterialize;
-
 	ISingleThreadTransaction* tr = this->tr;
 	KeyRange r = keyRange;
 
@@ -328,10 +326,10 @@ ThreadResult<RangeResult> ThreadSafeTransaction::readBlobGranules(const KeyRange
 	Standalone<VectorRef<BlobGranuleChunkRef>> files = getFilesFuture.get();
 
 	// do this work off of fdb network threads for performance!
-	if (doMaterialize) {
-		return loadAndMaterializeBlobGranules(files, keyRange, beginVersion, readVersionOut, granule_context);
-	} else {
+	if (granule_context.debugNoMaterialize) {
 		return ThreadResult<RangeResult>(blob_granule_not_materialized());
+	} else {
+		return loadAndMaterializeBlobGranules(files, keyRange, beginVersion, readVersionOut, granule_context);
 	}
 }
 

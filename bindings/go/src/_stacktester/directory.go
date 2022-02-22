@@ -22,11 +22,12 @@ package main
 
 import (
 	"bytes"
+	"strings"
+
 	"github.com/apple/foundationdb/bindings/go/src/fdb"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/directory"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/subspace"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
-	"strings"
 )
 
 func (sm *StackMachine) popTuples(count int) []tuple.Tuple {

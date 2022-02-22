@@ -35,6 +35,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/MetricLogger.actor.h"
 #include "fdbserver/BackupInterface.h"
+#include "fdbserver/EncryptKeyProxyInterface.h"
 #include "fdbserver/RoleLineage.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/IKeyValueStore.h"
@@ -47,6 +48,7 @@
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "fdbserver/CoordinationInterface.h"
+#include "fdbserver/ConfigNode.h"
 #include "fdbserver/LocalConfiguration.h"
 #include "fdbserver/RemoteIKeyValueStore.actor.h"
 #include "fdbclient/MonitorLeader.h"
@@ -410,11 +412,20 @@ struct TLogOptions {
 			break;
 		case TLogVersion::V5:
 		case TLogVersion::V6:
+		case TLogVersion::V7:
 			toReturn = "V_" + boost::lexical_cast<std::string>(version);
 			break;
 		}
 		ASSERT_WE_THINK(FromStringRef(toReturn).get() == *this);
 		return toReturn + "-";
+	}
+
+	DiskQueueVersion getDiskQueueVersion() const {
+		if (version < TLogVersion::V3)
+			return DiskQueueVersion::V0;
+		if (version < TLogVersion::V7)
+			return DiskQueueVersion::V1;
+		return DiskQueueVersion::V2;
 	}
 };
 
@@ -432,6 +443,7 @@ TLogFn tLogFnForOptions(TLogOptions options) {
 			return oldTLog_6_2::tLog;
 	case TLogVersion::V5:
 	case TLogVersion::V6:
+	case TLogVersion::V7:
 		return tLog;
 	default:
 		ASSERT(false);
@@ -534,9 +546,11 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
                                       Reference<AsyncVar<Optional<DataDistributorInterface>> const> ddInterf,
                                       Reference<AsyncVar<Optional<RatekeeperInterface>> const> rkInterf,
                                       Reference<AsyncVar<Optional<BlobManagerInterface>> const> bmInterf,
+                                      Reference<AsyncVar<Optional<EncryptKeyProxyInterface>> const> ekpInterf,
                                       Reference<AsyncVar<bool> const> degraded,
                                       Reference<IClusterConnectionRecord> connRecord,
                                       Reference<AsyncVar<std::set<std::string>> const> issues,
+                                      Reference<ConfigNode> configNode,
                                       Reference<LocalConfiguration> localConfig,
                                       Reference<AsyncVar<ServerDBInfo>> dbInfo) {
 	// Keeps the cluster controller (as it may be re-elected) informed that this worker exists
@@ -569,6 +583,7 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 		                              ddInterf->get(),
 		                              rkInterf->get(),
 		                              bmInterf->get(),
+		                              ekpInterf->get(),
 		                              degraded->get(),
 		                              localConfig->lastSeenVersion(),
 		                              localConfig->configClassSet());
@@ -631,6 +646,7 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 			when(wait(ddInterf->onChange())) { break; }
 			when(wait(rkInterf->onChange())) { break; }
 			when(wait(bmInterf->onChange())) { break; }
+			when(wait(ekpInterf->onChange())) { break; }
 			when(wait(degraded->onChange())) { break; }
 			when(wait(FlowTransport::transport().onIncompatibleChanged())) { break; }
 			when(wait(issues->onChange())) { break; }
@@ -655,6 +671,10 @@ bool addressInDbAndPrimaryDc(const NetworkAddress& address, Reference<AsyncVar<S
 	}
 
 	if (dbi.blobManager.present() && dbi.blobManager.get().address() == address) {
+		return true;
+	}
+
+	if (dbi.encryptKeyProxy.present() && dbi.encryptKeyProxy.get().address() == address) {
 		return true;
 	}
 
@@ -715,8 +735,8 @@ TEST_CASE("/fdbserver/worker/addressInDbAndPrimaryDc") {
 
 	// Manually set up a master address.
 	NetworkAddress testAddress(IPAddress(0x13131313), 1);
-	testDbInfo.master.changeCoordinators =
-	    RequestStream<struct ChangeCoordinatorsRequest>(Endpoint({ testAddress }, UID(1, 2)));
+	testDbInfo.master.getCommitVersion =
+	    RequestStream<struct GetCommitVersionRequest>(Endpoint({ testAddress }, UID(1, 2)));
 
 	// First, create an empty TLogInterface, and check that it shouldn't be considered as in primary DC.
 	testDbInfo.logSystemConfig.tLogs.push_back(TLogSet());
@@ -1388,13 +1408,16 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
                                 std::string _coordFolder,
                                 std::string whitelistBinPaths,
                                 Reference<AsyncVar<ServerDBInfo>> dbInfo,
-                                ConfigDBType configDBType,
+                                ConfigBroadcastInterface configBroadcastInterface,
+                                Reference<ConfigNode> configNode,
                                 Reference<LocalConfiguration> localConfig) {
 	state PromiseStream<ErrorInfo> errors;
 	state Reference<AsyncVar<Optional<DataDistributorInterface>>> ddInterf(
 	    new AsyncVar<Optional<DataDistributorInterface>>());
 	state Reference<AsyncVar<Optional<RatekeeperInterface>>> rkInterf(new AsyncVar<Optional<RatekeeperInterface>>());
 	state Reference<AsyncVar<Optional<BlobManagerInterface>>> bmInterf(new AsyncVar<Optional<BlobManagerInterface>>());
+	state Reference<AsyncVar<Optional<EncryptKeyProxyInterface>>> ekpInterf(
+	    new AsyncVar<Optional<EncryptKeyProxyInterface>>());
 	state Future<Void> handleErrors = workerHandleErrors(errors.getFuture()); // Needs to be stopped last
 	state ActorCollection errorForwarders(false);
 	state Future<Void> loggingTrigger = Void();
@@ -1417,6 +1440,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	state std::string coordFolder = abspath(_coordFolder);
 
 	state WorkerInterface interf(locality);
+	interf.configBroadcastInterface = configBroadcastInterface;
 	state std::set<std::pair<UID, KeyValueStoreType>> runningStorages;
 	interf.initEndpoints();
 
@@ -1575,8 +1599,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				ASSERT_WE_THINK(abspath(parentDirectory(s.filename)) == folder);
 				// TraceEvent(SevDebug, "openRemoteKVStore").detail("storeType", "TlogData");
 				IKeyValueStore* kv = openKVStore(s.storeType, s.filename, s.storeID, memoryLimit, validateDataFiles);
-				const DiskQueueVersion dqv =
-				    s.tLogOptions.version >= TLogVersion::V3 ? DiskQueueVersion::V1 : DiskQueueVersion::V0;
+				const DiskQueueVersion dqv = s.tLogOptions.getDiskQueueVersion();
 				const int64_t diskQueueWarnSize =
 				    s.tLogOptions.spillType == TLogSpillType::VALUE ? 10 * SERVER_KNOBS->TARGET_BYTES_PER_TLOG : -1;
 				IDiskQueue* queue = openDiskQueue(joinPath(folder, logQueueBasename + s.storeID.toString() + "-"),
@@ -1673,13 +1696,15 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		                                       ddInterf,
 		                                       rkInterf,
 		                                       bmInterf,
+		                                       ekpInterf,
 		                                       degraded,
 		                                       connRecord,
 		                                       issues,
+		                                       configNode,
 		                                       localConfig,
 		                                       dbInfo));
 
-		if (configDBType != ConfigDBType::DISABLED) {
+		if (configNode.isValid()) {
 			errorForwarders.add(localConfig->consume(interf.configBroadcastInterface));
 		}
 
@@ -1708,13 +1733,17 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					           dbInfo->get().clusterInterface != ccInterface->get().get()) {
 						TraceEvent("GotServerDBInfoChange")
 						    .detail("ChangeID", localInfo.id)
+						    .detail("InfoGeneration", localInfo.infoGeneration)
 						    .detail("MasterID", localInfo.master.id())
 						    .detail("RatekeeperID",
 						            localInfo.ratekeeper.present() ? localInfo.ratekeeper.get().id() : UID())
 						    .detail("DataDistributorID",
 						            localInfo.distributor.present() ? localInfo.distributor.get().id() : UID())
 						    .detail("BlobManagerID",
-						            localInfo.blobManager.present() ? localInfo.blobManager.get().id() : UID());
+						            localInfo.blobManager.present() ? localInfo.blobManager.get().id() : UID())
+						    .detail("EncryptKeyProxyID",
+						            localInfo.encryptKeyProxy.present() ? localInfo.encryptKeyProxy.get().id() : UID());
+
 						dbInfo->set(localInfo);
 					}
 					errorForwarders.add(
@@ -1799,12 +1828,10 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				startRole(Role::MASTER, recruited.id(), interf.id());
 
 				DUMPTOKEN(recruited.waitFailure);
-				DUMPTOKEN(recruited.tlogRejoin);
-				DUMPTOKEN(recruited.changeCoordinators);
 				DUMPTOKEN(recruited.getCommitVersion);
 				DUMPTOKEN(recruited.getLiveCommittedVersion);
 				DUMPTOKEN(recruited.reportLiveCommittedVersion);
-				DUMPTOKEN(recruited.notifyBackupWorkerDone);
+				DUMPTOKEN(recruited.updateRecoveryData);
 
 				// printf("Recruited as masterServer\n");
 				Future<Void> masterProcess = masterServer(
@@ -1911,6 +1938,30 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					forwardPromise(req.reply, backupWorkerCache.get(req.reqId));
 				}
 			}
+			when(InitializeEncryptKeyProxyRequest req = waitNext(interf.encryptKeyProxy.getFuture())) {
+				LocalLineage _;
+				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::EncryptKeyProxy;
+				EncryptKeyProxyInterface recruited(locality, req.reqId);
+				recruited.initEndpoints();
+
+				if (ekpInterf->get().present()) {
+					recruited = ekpInterf->get().get();
+					TEST(true); // Recruited while already a encryptKeyProxy server.
+				} else {
+					startRole(Role::ENCRYPT_KEY_PROXY, recruited.id(), interf.id());
+					DUMPTOKEN(recruited.waitFailure);
+
+					Future<Void> encryptKeyProxyProcess = encryptKeyProxyServer(recruited, dbInfo);
+					errorForwarders.add(forwardError(
+					    errors,
+					    Role::ENCRYPT_KEY_PROXY,
+					    recruited.id(),
+					    setWhenDoneOrError(encryptKeyProxyProcess, ekpInterf, Optional<EncryptKeyProxyInterface>())));
+					ekpInterf->set(Optional<EncryptKeyProxyInterface>(recruited));
+				}
+				TraceEvent("EncryptKeyProxyReceived", req.reqId).detail("EncryptKeyProxyId", recruited.id());
+				req.reply.send(recruited);
+			}
 			when(InitializeTLogRequest req = waitNext(interf.tLog.getFuture())) {
 				// For now, there's a one-to-one mapping of spill type to TLogVersion.
 				// With future work, a particular version of the TLog can support multiple
@@ -1944,8 +1995,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					    filenameFromId(req.storeType, folder, prefix.toString() + tLogOptions.toPrefix(), logId);
 					// TraceEvent(SevDebug, "openRemoteKVStore").detail("storeType", "3");
 					IKeyValueStore* data = openKVStore(req.storeType, filename, logId, memoryLimit);
-					const DiskQueueVersion dqv =
-					    tLogOptions.version >= TLogVersion::V3 ? DiskQueueVersion::V1 : DiskQueueVersion::V0;
+					const DiskQueueVersion dqv = tLogOptions.getDiskQueueVersion();
 					IDiskQueue* queue = openDiskQueue(
 					    joinPath(folder,
 					             fileLogQueuePrefix.toString() + tLogOptions.toPrefix() + logId.toString() + "-"),
@@ -2068,7 +2118,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				} else if (storageCache.exists(req.reqId)) {
 					forwardPromise(req.reply, storageCache.get(req.reqId));
 				} else {
-					TraceEvent("AttemptedDoubleRecruitement", interf.id()).detail("ForRole", "StorageServer");
+					TraceEvent("AttemptedDoubleRecruitment", interf.id()).detail("ForRole", "StorageServer");
 					errorForwarders.add(map(delay(0.5), [reply = req.reply](Void) {
 						reply.sendError(recruitment_failed());
 						return Void();
@@ -2480,7 +2530,7 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderWithDelayedCandidacyImplOneGenerati
 						    .detail("CurrentConnectionString",
 						            info.intermediateConnRecord->getConnectionString().toString());
 					}
-					connRecord->setConnectionString(info.intermediateConnRecord->getConnectionString());
+					connRecord->setAndPersistConnectionString(info.intermediateConnRecord->getConnectionString());
 					info.intermediateConnRecord = connRecord;
 				}
 
@@ -2627,10 +2677,15 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
                         ConfigDBType configDBType) {
 	state std::vector<Future<Void>> actors;
 	state Promise<Void> recoveredDiskFiles;
+	state Reference<ConfigNode> configNode;
 	state Reference<LocalConfiguration> localConfig =
 	    makeReference<LocalConfiguration>(dataFolder, configPath, manualKnobOverrides);
 	// setupStackSignal();
 	getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::Worker;
+
+	if (configDBType != ConfigDBType::DISABLED) {
+		configNode = makeReference<ConfigNode>(dataFolder);
+	}
 
 	// FIXME: Initializing here causes simulation issues, these must be fixed
 	/*
@@ -2654,13 +2709,15 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		    .detail("CoordPath", coordFolder)
 		    .detail("WhiteListBinPath", whitelistBinPaths);
 
+		state ConfigBroadcastInterface configBroadcastInterface;
 		// SOMEDAY: start the services on the machine in a staggered fashion in simulation?
 		// Endpoints should be registered first before any process trying to connect to it.
 		// So coordinationServer actor should be the first one executed before any other.
 		if (coordFolder.size()) {
 			// SOMEDAY: remove the fileNotFound wrapper and make DiskQueue construction safe from errors setting up
 			// their files
-			actors.push_back(fileNotFoundToNever(coordinationServer(coordFolder, coordinators.ccr, configDBType)));
+			actors.push_back(fileNotFoundToNever(
+			    coordinationServer(coordFolder, coordinators.ccr, configNode, configBroadcastInterface)));
 		}
 
 		state UID processIDUid = wait(createAndLockProcessIdFile(dataFolder));
@@ -2709,7 +2766,8 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		                                                 coordFolder,
 		                                                 whitelistBinPaths,
 		                                                 dbInfo,
-		                                                 configDBType,
+		                                                 configBroadcastInterface,
+		                                                 configNode,
 		                                                 localConfig),
 		                                    "WorkerServer",
 		                                    UID(),
@@ -2748,3 +2806,4 @@ const Role Role::BLOB_WORKER("BlobWorker", "BW");
 const Role Role::STORAGE_CACHE("StorageCache", "SC");
 const Role Role::COORDINATOR("Coordinator", "CD");
 const Role Role::BACKUP("Backup", "BK");
+const Role Role::ENCRYPT_KEY_PROXY("EncryptKeyProxy", "EP");

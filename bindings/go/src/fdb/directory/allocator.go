@@ -25,10 +25,11 @@ package directory
 import (
 	"bytes"
 	"encoding/binary"
-	"github.com/apple/foundationdb/bindings/go/src/fdb"
-	"github.com/apple/foundationdb/bindings/go/src/fdb/subspace"
 	"math/rand"
 	"sync"
+
+	"github.com/apple/foundationdb/bindings/go/src/fdb"
+	"github.com/apple/foundationdb/bindings/go/src/fdb/subspace"
 )
 
 var oneBytes = []byte{0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}

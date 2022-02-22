@@ -25,6 +25,7 @@
 #include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/BlobWorkerInterface.h"
 #include "fdbclient/KeyRangeMap.h"
+#include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/BlobManagerInterface.h"
@@ -233,7 +234,8 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitRange(Reference<ReadYourWritesT
 				printf(
 				    "Splitting new range [%s - %s)\n", range.begin.printable().c_str(), range.end.printable().c_str());
 			}
-			StorageMetrics estimated = wait(tr->getTransaction().getStorageMetrics(range, CLIENT_KNOBS->TOO_MANY));
+			StorageMetrics estimated =
+			    wait(tr->getTransaction().getDatabase()->getStorageMetrics(range, CLIENT_KNOBS->TOO_MANY));
 
 			if (BM_DEBUG) {
 				fmt::print("Estimated bytes for [{0} - {1}): {2}\n",
@@ -252,7 +254,7 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitRange(Reference<ReadYourWritesT
 				splitMetrics.bytesReadPerKSecond = splitMetrics.infinity; // Don't split by readBandwidth
 
 				Standalone<VectorRef<KeyRef>> keys =
-				    wait(tr->getTransaction().splitStorageMetrics(range, splitMetrics, estimated));
+				    wait(tr->getTransaction().getDatabase()->splitStorageMetrics(range, splitMetrics, estimated));
 				return keys;
 			} else {
 				// printf("  Not splitting range\n");

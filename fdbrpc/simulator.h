@@ -165,6 +165,8 @@ public:
 				return false;
 			case ProcessClass::BackupClass:
 				return false;
+			case ProcessClass::EncryptKeyProxyClass:
+				return false;
 			default:
 				return false;
 			}

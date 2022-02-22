@@ -81,6 +81,30 @@ extern "C" DLLEXPORT fdb_bool_t fdb_error_predicate(int predicate_test, fdb_erro
 	return false;
 }
 
+#define RETURN_FUTURE_ON_ERROR(return_type, code_to_run)                                                               \
+	try {                                                                                                              \
+		code_to_run                                                                                                    \
+	} catch (Error & e) {                                                                                              \
+		if (e.code() <= 0)                                                                                             \
+			return ((FDBFuture*)(ThreadFuture<return_type>(internal_error())).extractPtr());                           \
+		else                                                                                                           \
+			return ((FDBFuture*)(ThreadFuture<return_type>(e)).extractPtr());                                          \
+	} catch (...) {                                                                                                    \
+		return ((FDBFuture*)(ThreadFuture<return_type>(unknown_error())).extractPtr());                                \
+	}
+
+#define RETURN_RESULT_ON_ERROR(return_type, code_to_run)                                                               \
+	try {                                                                                                              \
+		code_to_run                                                                                                    \
+	} catch (Error & e) {                                                                                              \
+		if (e.code() <= 0)                                                                                             \
+			return ((FDBResult*)(ThreadResult<return_type>(internal_error())).extractPtr());                           \
+		else                                                                                                           \
+			return ((FDBResult*)(ThreadResult<return_type>(e)).extractPtr());                                          \
+	} catch (...) {                                                                                                    \
+		return ((FDBResult*)(ThreadResult<return_type>(unknown_error())).extractPtr());                                \
+	}
+
 #define RETURN_ON_ERROR(code_to_run)                                                                                   \
 	try {                                                                                                              \
 		code_to_run                                                                                                    \
@@ -731,9 +755,10 @@ extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_estimated_range_size_bytes(F
                                                                                int begin_key_name_length,
                                                                                uint8_t const* end_key_name,
                                                                                int end_key_name_length) {
-	// FIXME: this can throw inverted_range()
-	KeyRangeRef range(KeyRef(begin_key_name, begin_key_name_length), KeyRef(end_key_name, end_key_name_length));
-	return (FDBFuture*)(TXN(tr)->getEstimatedRangeSizeBytes(range).extractPtr());
+	RETURN_FUTURE_ON_ERROR(
+	    int64_t,
+	    KeyRangeRef range(KeyRef(begin_key_name, begin_key_name_length), KeyRef(end_key_name, end_key_name_length));
+	    return (FDBFuture*)(TXN(tr)->getEstimatedRangeSizeBytes(range).extractPtr()););
 }
 
 extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_range_split_points(FDBTransaction* tr,
@@ -742,9 +767,10 @@ extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_range_split_points(FDBTransa
                                                                        uint8_t const* end_key_name,
                                                                        int end_key_name_length,
                                                                        int64_t chunk_size) {
-	// FIXME: this can throw inverted_range()
-	KeyRangeRef range(KeyRef(begin_key_name, begin_key_name_length), KeyRef(end_key_name, end_key_name_length));
-	return (FDBFuture*)(TXN(tr)->getRangeSplitPoints(range, chunk_size).extractPtr());
+	RETURN_FUTURE_ON_ERROR(
+	    Standalone<VectorRef<KeyRef>>,
+	    KeyRangeRef range(KeyRef(begin_key_name, begin_key_name_length), KeyRef(end_key_name, end_key_name_length));
+	    return (FDBFuture*)(TXN(tr)->getRangeSplitPoints(range, chunk_size).extractPtr()););
 }
 
 extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_blob_granule_ranges(FDBTransaction* tr,
@@ -752,9 +778,10 @@ extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_blob_granule_ranges(FDBTrans
                                                                         int begin_key_name_length,
                                                                         uint8_t const* end_key_name,
                                                                         int end_key_name_length) {
-	// FIXME: this can throw inverted_range()
-	KeyRangeRef range(KeyRef(begin_key_name, begin_key_name_length), KeyRef(end_key_name, end_key_name_length));
-	return (FDBFuture*)(TXN(tr)->getBlobGranuleRanges(range).extractPtr());
+	RETURN_FUTURE_ON_ERROR(
+	    Standalone<VectorRef<KeyRangeRef>>,
+	    KeyRangeRef range(KeyRef(begin_key_name, begin_key_name_length), KeyRef(end_key_name, end_key_name_length));
+	    return (FDBFuture*)(TXN(tr)->getBlobGranuleRanges(range).extractPtr()););
 }
 
 extern "C" DLLEXPORT FDBResult* fdb_transaction_read_blob_granules(FDBTransaction* tr,
@@ -765,23 +792,22 @@ extern "C" DLLEXPORT FDBResult* fdb_transaction_read_blob_granules(FDBTransactio
                                                                    int64_t beginVersion,
                                                                    int64_t readVersion,
                                                                    FDBReadBlobGranuleContext granule_context) {
-	// FIXME: this can throw inverted_range()
-	KeyRangeRef range(KeyRef(begin_key_name, begin_key_name_length), KeyRef(end_key_name, end_key_name_length));
+	RETURN_RESULT_ON_ERROR(
+	    RangeResult,
+	    KeyRangeRef range(KeyRef(begin_key_name, begin_key_name_length), KeyRef(end_key_name, end_key_name_length));
 
-	// FIXME: better way to convert?
-	ReadBlobGranuleContext context;
-	context.userContext = granule_context.userContext;
-	context.start_load_f = granule_context.start_load_f;
-	context.get_load_f = granule_context.get_load_f;
-	context.free_load_f = granule_context.free_load_f;
-	context.debugNoMaterialize = granule_context.debugNoMaterialize;
+	    // FIXME: better way to convert?
+	    ReadBlobGranuleContext context;
+	    context.userContext = granule_context.userContext;
+	    context.start_load_f = granule_context.start_load_f;
+	    context.get_load_f = granule_context.get_load_f;
+	    context.free_load_f = granule_context.free_load_f;
+	    context.debugNoMaterialize = granule_context.debugNoMaterialize;
 
-	Optional<Version> rv;
-	if (readVersion != invalidVersion) {
-		rv = readVersion;
-	}
+	    Optional<Version> rv;
+	    if (readVersion != invalidVersion) { rv = readVersion; }
 
-	return (FDBResult*)(TXN(tr)->readBlobGranules(range, beginVersion, rv, context).extractPtr());
+	    return (FDBResult*)(TXN(tr)->readBlobGranules(range, beginVersion, rv, context).extractPtr()););
 }
 
 #include "fdb_c_function_pointers.g.h"

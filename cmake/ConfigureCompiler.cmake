@@ -22,6 +22,9 @@ use_libcxx(_use_libcxx)
 env_set(USE_LIBCXX "${_use_libcxx}" BOOL "Use libc++")
 static_link_libcxx(_static_link_libcxx)
 env_set(STATIC_LINK_LIBCXX "${_static_link_libcxx}" BOOL "Statically link libstdcpp/libc++")
+env_set(TRACE_PC_GUARD_INSTRUMENTATION_LIB "" STRING "Path to a library containing an implementation for __sanitizer_cov_trace_pc_guard. See https://clang.llvm.org/docs/SanitizerCoverage.html for more info.")
+env_set(PROFILE_INSTR_GENERATE OFF BOOL "If set, build FDB as an instrumentation build to generate profiles")
+env_set(PROFILE_INSTR_USE "" STRING "If set, build FDB with profile")
 
 set(USE_SANITIZER OFF)
 if(USE_ASAN OR USE_VALGRIND OR USE_MSAN OR USE_TSAN OR USE_UBSAN)
@@ -155,6 +158,10 @@ else()
   # we always compile with debug symbols. CPack will strip them out
   # and create a debuginfo rpm
   add_compile_options(-ggdb -fno-omit-frame-pointer)
+  if(TRACE_PC_GUARD_INSTRUMENTATION_LIB)
+      add_compile_options(-fsanitize-coverage=trace-pc-guard)
+      link_libraries(${TRACE_PC_GUARD_INSTRUMENTATION_LIB})
+  endif()
   if(USE_ASAN)
     list(APPEND SANITIZER_COMPILE_OPTIONS
       -fsanitize=address
@@ -283,7 +290,6 @@ else()
       -Woverloaded-virtual
       -Wshift-sign-overflow
       # Here's the current set of warnings we need to explicitly disable to compile warning-free with clang 11
-      -Wno-delete-non-virtual-dtor
       -Wno-sign-compare
       -Wno-undefined-var-template
       -Wno-unknown-warning-option
@@ -294,6 +300,18 @@ else()
       add_compile_options(
         -Wno-register
         -Wno-unused-command-line-argument)
+    endif()
+    if (PROFILE_INSTR_GENERATE)
+      add_compile_options(-fprofile-instr-generate)
+      add_link_options(-fprofile-instr-generate)
+    endif()
+    if (NOT (PROFILE_INSTR_USE STREQUAL ""))
+      if (PROFILE_INSTR_GENERATE)
+          message(FATAL_ERROR "Can't set both PROFILE_INSTR_GENERATE and PROFILE_INSTR_USE")
+      endif()
+      add_compile_options(-Wno-error=profile-instr-out-of-date)
+      add_compile_options(-fprofile-instr-use=${PROFILE_INSTR_USE})
+      add_link_options(-fprofile-instr-use=${PROFILE_INSTR_USE})
     endif()
   endif()
   if (USE_WERROR)
@@ -340,9 +358,19 @@ else()
     set(DTRACE_PROBES 1)
   endif()
 
-  if(CMAKE_COMPILER_IS_GNUCXX)
-    set(USE_LTO OFF CACHE BOOL "Do link time optimization")
-    if (USE_LTO)
+  set(USE_LTO OFF CACHE BOOL "Do link time optimization")
+  if (USE_LTO)
+    if (CLANG)
+      set(CLANG_LTO_STRATEGY "Thin" CACHE STRING "LLVM LTO strategy (Thin, or Full)")
+      if (CLANG_LTO_STRATEGY STREQUAL "Full")
+        add_compile_options($<$<CONFIG:Release>:-flto=full>)
+      else()
+        add_compile_options($<$<CONFIG:Release>:-flto=thin>)
+      endif()
+      set(CMAKE_RANLIB "llvm-ranlib")
+      set(CMAKE_AR "llvm-ar")
+    endif()
+    if(CMAKE_COMPILER_IS_GNUCXX)
       add_compile_options($<$<CONFIG:Release>:-flto>)
       set(CMAKE_AR  "gcc-ar")
       set(CMAKE_C_ARCHIVE_CREATE "<CMAKE_AR> qcs <TARGET> <LINK_FLAGS> <OBJECTS>")

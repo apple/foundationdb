@@ -923,8 +923,7 @@ ThreadResult<RangeResult> MultiVersionTransaction::readBlobGranules(const KeyRan
 	if (tr.transaction) {
 		return tr.transaction->readBlobGranules(keyRange, beginVersion, readVersion, granuleContext);
 	} else {
-		// FIXME: handle abortable future + timeout properly
-		return ThreadResult<RangeResult>(transaction_cancelled());
+		return abortableTimeoutResult<RangeResult>(tr.onChange);
 	}
 }
 
@@ -1121,6 +1120,14 @@ ThreadFuture<T> MultiVersionTransaction::makeTimeout() {
 		ASSERT(v.isError());
 		return ErrorOr<T>(v.getError());
 	});
+}
+
+template <class T>
+ThreadResult<T> MultiVersionTransaction::abortableTimeoutResult(ThreadFuture<Void> abortSignal) {
+	ThreadFuture<T> timeoutFuture = makeTimeout<T>();
+	ThreadFuture<T> abortable = abortableFuture(timeoutFuture, abortSignal);
+	abortable.blockUntilReadyCheckOnMainThread();
+	return ThreadResult<T>((ThreadSingleAssignmentVar<T>*)abortable.extractPtr());
 }
 
 void MultiVersionTransaction::reset() {
@@ -2522,12 +2529,12 @@ THREAD_FUNC runSingleAssignmentVarTest(void* arg) {
 
 				if (deterministicRandom()->coinflip()) {
 					if (deterministicRandom()->coinflip()) {
-						threads.push_back(g_network->startThread(releaseMem, tfp));
+						threads.push_back(g_network->startThread(releaseMem, tfp, 0, "fdb-release-mem"));
 					}
-					threads.push_back(g_network->startThread(cancel, tfp));
+					threads.push_back(g_network->startThread(cancel, tfp, 0, "fdb-cancel"));
 					undestroyed.push_back((ThreadSingleAssignmentVar<int>*)tfp);
 				} else {
-					threads.push_back(g_network->startThread(destroy, tfp));
+					threads.push_back(g_network->startThread(destroy, tfp, 0, "fdb-destroy"));
 				}
 			}
 
@@ -2561,7 +2568,7 @@ struct AbortableTest {
 
 		if (!abort->isReady() && deterministicRandom()->coinflip()) {
 			ASSERT_EQ(abort->status, ThreadSingleAssignmentVarBase::Unset);
-			newFuture.threads.push_back(g_network->startThread(setAbort, abort));
+			newFuture.threads.push_back(g_network->startThread(setAbort, abort, 0, "fdb-abort"));
 		}
 
 		newFuture.legalErrors.insert(error_code_cluster_version_changed);

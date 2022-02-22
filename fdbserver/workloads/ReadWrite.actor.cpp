@@ -592,7 +592,7 @@ struct ReadWriteWorkload : KVWorkload {
 			try {
 				self->setupTransaction(&tr);
 				wait(self->readOp(&tr, keys, self, false));
-				wait(tr.warmRange(cx, allKeys));
+				wait(tr.warmRange(allKeys));
 				break;
 			} catch (Error& e) {
 				wait(tr.onError(e));
