@@ -176,7 +176,7 @@ ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
 	case ConfigurationResult::STORAGE_MIGRATION_DISABLED:
 		fprintf(stderr,
 		        "ERROR: Storage engine type cannot be changed because "
-		        "storage_migration_mode=disabled.\n");
+		        "storage_migration_type=disabled.\n");
 		fprintf(stderr,
 		        "Type `configure perpetual_storage_wiggle=1 storage_migration_type=gradual' to enable gradual "
 		        "migration with the perpetual wiggle, or `configure "
