@@ -2039,6 +2039,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		std::vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
 		std::set<NetworkAddress> workerAddresses;
 
+		UID uid = deterministicRandom()->randomUniqueID();
+
 		for (const auto& it : workers) {
 			NetworkAddress addr = it.interf.tLog.getEndpoint().addresses.getTLSAddress();
 			ISimulator::ProcessInfo* info = g_simulator.getProcessByAddress(addr);
@@ -2046,6 +2048,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				TraceEvent("ConsistencyCheck_FailedWorkerInList").detail("Addr", it.interf.address());
 				return false;
 			}
+			TraceEvent(SevDebug, "ConsistencyCheckWorkerList").detail("Address", addr.toString()).detail("UID", uid);
 			workerAddresses.insert(NetworkAddress(addr.ip, addr.port, true, addr.isTLS()));
 		}
 

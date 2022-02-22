@@ -51,7 +51,7 @@ void forwardPromiseVariant(ReplyPromise<T> output, Future<T> input, std::string 
 			TraceEvent(SevDebug, "ForwardPromiseSend").detail("Name", trace);
 		}
 	} catch (Error& e) {
-		TraceEvent(SevDebug, "ForwardPromiseVariantError").error(e, true);
+		TraceEvent(SevDebug, "ForwardPromiseVariantError").error(e, true).backtrace();
 		output.sendError(e.code() == error_code_actor_cancelled ? remote_kvs_cancelled() : e);
 	}
 }
@@ -66,9 +66,7 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 	state UID uid_kvs(deterministicRandom()->randomUniqueID());
 	state AfterReturn guard(kvStore, uid_kvs);
 	state Promise<Void> onClosed;
-	state uint64_t set_counter = 0;
-	state uint64_t clear_counter = 0;
-	TraceEvent(SevDebug, "RemoteKVStore").detail("Action", "initializing local store");
+	TraceEvent(SevDebug, "RemoteKVStore").detail("Action", "initializing local store").detail("UID", uid_kvs);
 	wait(kvStore->init());
 	openReq.reply.send(ikvsInterface);
 	TraceEvent(SevDebug, "RemoteKVStore").detail("IKVSInterfaceUID", ikvsInterface.id());
@@ -79,21 +77,8 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 				when(IKVSGetValueRequest getReq = waitNext(ikvsInterface.getValue.getFuture())) {
 					forwardPromise(getReq.reply, kvStore->readValue(getReq.key, getReq.type, getReq.debugID));
 				}
-				when(IKVSSetRequest req = waitNext(ikvsInterface.set.getFuture())) {
-					if (req.order != set_counter) {
-						TraceEvent(SevInfo, "IKVSSetRequestOrder")
-						    .detail("RequestOrder", req.order)
-						    .detail("ReceivedOrder", set_counter);
-					}
-					ASSERT(req.order == set_counter);
-					set_counter = req.order + 1;
-					kvStore->set(req.keyValue);
-				}
-				when(IKVSClearRequest req = waitNext(ikvsInterface.clear.getFuture())) {
-					ASSERT(req.order == clear_counter);
-					clear_counter = req.order + 1;
-					kvStore->clear(req.range);
-				}
+				when(IKVSSetRequest req = waitNext(ikvsInterface.set.getFuture())) { kvStore->set(req.keyValue); }
+				when(IKVSClearRequest req = waitNext(ikvsInterface.clear.getFuture())) { kvStore->clear(req.range); }
 				when(IKVSCommitRequest commitReq = waitNext(ikvsInterface.commit.getFuture())) {
 					sendCommitReply(commitReq, kvStore, onClosed.getFuture());
 				}

@@ -141,8 +141,8 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 	child = g_pSimulator->newProcess("remote flow process",
 	                                 self->address.ip,
 	                                 0,
-	                                 false,
-	                                 1,
+	                                 self->address.isTLS(),
+	                                 self->addresses.secondaryAddress.present() ? 2 : 1,
 	                                 self->locality,
 	                                 ProcessClass(ProcessClass::UnsetClass, ProcessClass::AutoSource),
 	                                 self->dataFolder,
@@ -162,7 +162,8 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 				role = paramList[i + 1];
 			}
 		}
-		if (role == "flowprocess") {
+		if (role == "flowprocess" && !parentShutdown.isReady()) {
+			self->hasChild = true;
 			state Future<Void> parentSSClosed = parent->onClosed();
 			FlowTransport::createInstance(false, 1, WLTOKEN_IKVS_RESERVED_COUNT);
 			FlowTransport::transport().bind(child->address, child->address);
@@ -178,6 +179,7 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 					destoryChildProcess(parentSSClosed, child, "StorageServerReceivedClosedMessage");
 				}
 				when(ISimulator::KillType killType = wait(onShutdown)) {
+					ASSERT(false);
 					TraceEvent(SevError, "ChildProcessReboot").detail("KillType", killType).log();
 					// TODO : need to make sure the close is finished before destroying the child process
 					// wait(flowProcessF);
@@ -185,6 +187,7 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 					g_pSimulator->killProcess(child, ISimulator::KillInstantly);
 				}
 				when(ISimulator::KillType killType = wait(parentShutdown)) {
+					ASSERT(false);
 					TraceEvent(SevDebug, "ParentProcessReboot").detail("KillType", killType).log();
 					// Note: failed machines are not cancelled and actors behind is just running
 					// g_pSimulator->killProcess(child, killType);

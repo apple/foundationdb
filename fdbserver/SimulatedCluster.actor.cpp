@@ -288,7 +288,7 @@ public:
 	// Refer to FDBTypes.h::TLogVersion. Defaults to the maximum supported version.
 	int maxTLogVersion = TLogVersion::MAX_SUPPORTED;
 	// Set true to simplify simulation configs for easier debugging
-	bool simpleConfig = true;
+	bool simpleConfig = false;
 	int extraMachineCountDC = 0;
 	Optional<bool> generateFearless, buggify;
 	Optional<int> datacenters, desiredTLogCount, commitProxyCount, grvProxyCount, resolverCount, storageEngineType,
@@ -1881,7 +1881,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	bool assignClasses = machineCount - dataCenters > 4 && deterministicRandom()->random01() < 0.5;
 
 	// Use SSL 5% of the time
-	bool sslEnabled = deterministicRandom()->random01() < 0.10;
+	bool sslEnabled = false;//deterministicRandom()->random01() < 0.10;
 	bool sslOnly = sslEnabled && deterministicRandom()->coinflip();
 	g_simulator.listenersPerProcess = sslEnabled && !sslOnly ? 2 : 1;
 	TEST(sslEnabled); // SSL enabled

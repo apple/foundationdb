@@ -2131,8 +2131,8 @@ KeyValueStoreSQLite::KeyValueStoreSQLite(std::string const& filename,
 	if (vfsAsyncIsOpen(filename) || vfsAsyncIsOpen(filename + "-wal")) {
 		TraceEvent(SevDebug, "SQLiteVFSFileOpened").detail("FileName", filename);
 	}
-	// ASSERT(!vfsAsyncIsOpen(filename));
-	// ASSERT(!vfsAsyncIsOpen(filename + "-wal"));
+	ASSERT(!vfsAsyncIsOpen(filename));
+	ASSERT(!vfsAsyncIsOpen(filename + "-wal"));
 
 	readCursors.resize(SERVER_KNOBS->SQLITE_READER_THREADS); //< number of read threads
 

@@ -2419,7 +2419,12 @@ ACTOR void doReboot(ISimulator::ProcessInfo* p, ISimulator::KillType kt) {
 			    .detail("Name", p->name)
 			    .detail("Address", p->address);
 			return;
+		} else if (p->isParent()) {
+			TraceEvent(SevDebug, "DoRebootFailedOnParentProcess")
+			    .detail("Address", p->address);
+			return;
 		}
+		
 		TraceEvent("RebootingProcess")
 		    .detail("KillType", kt)
 		    .detail("Address", p->address)

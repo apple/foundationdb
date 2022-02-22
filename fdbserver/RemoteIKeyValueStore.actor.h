@@ -1,4 +1,5 @@
 #pragma once
+#include "flow/Error.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_REMOTE_IKEYVALUESTORE_ACTOR_G_H)
 #define FDBSERVER_REMOTE_IKEYVALUESTORE_ACTOR_G_H
 #include "fdbserver/RemoteIKeyValueStore.actor.g.h"
@@ -150,24 +151,22 @@ struct IKVSGetValueRequest {
 struct IKVSSetRequest {
 	constexpr static FileIdentifier file_identifier = 7283948;
 	KeyValueRef keyValue;
-	uint64_t order;
 	ReplyPromise<Void> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keyValue, order, reply);
+		serializer(ar, keyValue, reply);
 	}
 };
 
 struct IKVSClearRequest {
 	constexpr static FileIdentifier file_identifier = 2838575;
 	KeyRangeRef range;
-	uint64_t order;
 	ReplyPromise<Void> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, range, order, reply);
+		serializer(ar, range, reply);
 	}
 };
 
@@ -356,10 +355,7 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 	Future<Void> initialized;
 	KeyValueStoreProcess ikvsProcess;
 	StorageBytes storageBytes;
-	uint64_t set_counter, clear_counter;
-	RemoteIKeyValueStore() : ikvsProcess(), storageBytes(0, 0, 0, 0), set_counter(0), clear_counter(0) {
-		ikvsProcess.setSSInterface(this);
-	}
+	RemoteIKeyValueStore() : ikvsProcess(), storageBytes(0, 0, 0, 0) { ikvsProcess.setSSInterface(this); }
 
 	Future<Void> init() override {
 		TraceEvent(SevInfo, "RemoteIKeyValueStoreInit").log();
@@ -383,10 +379,10 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 	KeyValueStoreType getType() const override { return interf.type(); }
 
 	void set(KeyValueRef keyValue, const Arena* arena = nullptr) override {
-		interf.set.send(IKVSSetRequest{ keyValue, set_counter++ });
+		interf.set.send(IKVSSetRequest{ keyValue });
 	}
 	void clear(KeyRangeRef range, const Arena* arena = nullptr) override {
-		interf.clear.send(IKVSClearRequest{ range, clear_counter++ });
+		interf.clear.send(IKVSClearRequest{ range });
 	}
 
 	Future<Void> commit(bool sequential = false) override {
@@ -434,18 +430,25 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 
 	ACTOR static Future<Void> getErrorImpl(const RemoteIKeyValueStore* self) {
 		wait(self->initialized);
-		try {
-			choose {
-				when(wait(self->interf.getError.getReply(IKVSGetErrorRequest{}))) {
-					TraceEvent(SevDebug, "RemoteIKVSGetError").log();
+		state Future<int> returnCodeF = self->ikvsProcess.returnCode();
+		choose {
+			when(state ErrorOr<Void> e = wait(errorOr(self->interf.getError.getReply(IKVSGetErrorRequest{})))) {
+				TraceEvent(SevDebug, "RemoteIKVSGetError")
+				    .error(e.isError() ? e.getError() : success(), true)
+				    .backtrace();
+				// if kv-store is error, we should see child process died
+				if(e.isError() && e.getError().code() == error_code_actor_cancelled) {
+					TraceEvent(SevDebug, "WaitForChildProcessFinished").log();
+					wait(success(returnCodeF));
 				}
-				when(int res = wait(self->ikvsProcess.returnCode())) {
-					TraceEvent(res < 0 ? SevError : SevInfo, "SpawnedProcessHasDied").detail("Res", res);
-				}
+				if (e.isError())
+					throw e.getError();
+				else
+					return e.get();
 			}
-		} catch (Error& e) {
-			TraceEvent(SevInfo, "GetErrorImplError").error(e, true).backtrace();
-			throw;
+			when(int res = wait(returnCodeF)) {
+				TraceEvent(res < 0 ? SevError : SevInfo, "SpawnedProcessHasDied").detail("Res", res);
+			}
 		}
 		return Void();
 	}
