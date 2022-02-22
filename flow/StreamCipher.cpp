@@ -59,7 +59,7 @@ StreamCipherKey const* StreamCipherKey::getGlobalCipherKey() {
 }
 
 void StreamCipherKey::cleanup() noexcept {
-	for (auto itr : cipherKeys) {
+	for (const auto& itr : cipherKeys) {
 		itr.second->reset();
 	}
 }
