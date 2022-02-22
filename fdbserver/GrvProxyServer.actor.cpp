@@ -656,15 +656,9 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
 			}
 		}
 
-		TraceEvent("DebugGrvProxyThrottleTimes")
-		    .detail("LastBatchThrottled", format("%.6f", stats->lastBatchQueueThrottled))
-		    .detail("BatchThrottleStart", format("%.6f", stats->batchThrottleStartTime))
-		    .detail("LastDefaultThrottled", format("%.6f", stats->lastDefaultQueueThrottled))
-		    .detail("DefaultThrottleStart", format("%.6f", stats->defaultThrottleStartTime));
 		if (stats->lastBatchQueueThrottled) {
 			// Check if this throttling has been sustained for a certain amount of time to avoid false positives
 			if (now() - stats->batchThrottleStartTime > CLIENT_KNOBS->GRV_SUSTAINED_THROTTLING_THRESHOLD) {
-				TraceEvent("DebugGrvProxyBatchThrottled").detail("StartTime", stats->batchThrottleStartTime);
 				reply.rkBatchThrottled = true;
 			}
 		}
@@ -674,7 +668,6 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
 				// Consider the batch queue throttled if the default is throttled
 				// to deal with a potential lull in activity for that priority.
 				// Avoids mistakenly thinking batch is unthrottled while default is still throttled.
-				TraceEvent("DebugGrvProxyDefaultThrottled").detail("StartTime", stats->defaultThrottleStartTime);
 				reply.rkBatchThrottled = true;
 				reply.rkDefaultThrottled = true;
 			}
@@ -876,23 +869,19 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 			requestsToStart++;
 		}
 		if (!batchQueue.empty()) {
-			TraceEvent("DebugGrvProxyBatchQueueNonEmpty").detail("Size", batchQueue.size());
 			if (!grvProxyData->stats.lastBatchQueueThrottled) {
 				grvProxyData->stats.lastBatchQueueThrottled = true;
 				grvProxyData->stats.batchThrottleStartTime = now();
 			}
 		} else {
-			TraceEvent("DebugGrvProxyBatchQueueEmpty");
 			grvProxyData->stats.lastBatchQueueThrottled = false;
 		}
 		if (!defaultQueue.empty()) {
-			TraceEvent("DebugGrvProxyDefaultQueueNonEmpty").detail("Size", defaultQueue.size());
 			if (!grvProxyData->stats.lastDefaultQueueThrottled) {
 				grvProxyData->stats.lastDefaultQueueThrottled = true;
 				grvProxyData->stats.defaultThrottleStartTime = now();
 			}
 		} else {
-			TraceEvent("DebugGrvProxyDefaultQueueEmpty");
 			grvProxyData->stats.lastDefaultQueueThrottled = false;
 		}
 
