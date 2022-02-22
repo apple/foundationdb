@@ -1185,7 +1185,7 @@ public:
 		MachineInfo& machine = machines[locality.machineId().get()];
 		if (!machine.machineId.present())
 			machine.machineId = locality.machineId();
-		if (port == 0) {
+		if (port == 0 && std::string(name) == "remote flow process") {
 			port = machine.getRandomPort();
 		}
 		for (int i = 0; i < machine.processes.size(); i++) {
