@@ -5776,7 +5776,7 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 
 	case FDBTransactionOptions::USE_GRV_CACHE:
 		validateOptionValueNotPresent(value);
-		if (trState->options.numErrors == 0) {
+		if (trState->numErrors == 0) {
 			trState->options.useGrvCache = true;
 		}
 		break;
