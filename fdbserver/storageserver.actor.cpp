@@ -371,30 +371,39 @@ struct ChangeFeedInfo : ReferenceCounted<ChangeFeedInfo> {
 	Key id;
 	AsyncTrigger newMutations;
 	NotifiedVersion durableFetchVersion;
-	Promise<Void> onMove;
 	bool stopped = false; // A stopped change feed no longer adds new mutations, but is still queriable
 	bool removing = false;
 
-	KeyRangeMap<std::vector<Promise<Void>>> moveTriggers;
+	KeyRangeMap<std::unordered_map<UID, Promise<Void>>> moveTriggers;
 
-	void triggerOnMove(KeyRange range, Promise<Void> p) {
+	void triggerOnMove(KeyRange range, UID streamUID, Promise<Void> p) {
 		auto toInsert = moveTriggers.modify(range);
 		for (auto triggerRange = toInsert.begin(); triggerRange != toInsert.end(); ++triggerRange) {
-			triggerRange->value().push_back(p);
+			triggerRange->value().insert({ streamUID, p });
 		}
 	}
 
 	void moved(KeyRange range) {
 		auto toTrigger = moveTriggers.intersectingRanges(range);
 		for (auto triggerRange : toTrigger) {
-			for (int i = 0; i < triggerRange.cvalue().size(); i++) {
-				if (triggerRange.cvalue()[i].canBeSet()) {
-					triggerRange.cvalue()[i].send(Void());
+			for (auto triggerStream : triggerRange.cvalue()) {
+				if (triggerStream.second.canBeSet()) {
+					triggerStream.second.send(Void());
 				}
 			}
 		}
 		// coalesce doesn't work with promises
-		moveTriggers.insert(range, std::vector<Promise<Void>>());
+		moveTriggers.insert(range, std::unordered_map<UID, Promise<Void>>());
+	}
+
+	void removeOnMoveTrigger(KeyRange range, UID streamUID) {
+		auto toRemove = moveTriggers.modify(range);
+		for (auto triggerRange = toRemove.begin(); triggerRange != toRemove.end(); ++triggerRange) {
+			auto streamToRemove = triggerRange->value().find(streamUID);
+			ASSERT(streamToRemove != triggerRange->cvalue().end());
+			triggerRange->value().erase(streamToRemove);
+		}
+		// TODO: could clean up on
 	}
 };
 
@@ -2206,7 +2215,7 @@ ACTOR Future<Void> localChangeFeedStream(StorageServer* data,
 }
 
 // Change feed stream must be sent an error as soon as it is moved away, or change feed can get incorrect results
-ACTOR Future<Void> stopChangeFeedOnMove(StorageServer* data, ChangeFeedStreamRequest req) {
+ACTOR Future<Void> stopChangeFeedOnMove(StorageServer* data, ChangeFeedStreamRequest req, UID streamUID) {
 	wait(delay(0, TaskPriority::DefaultEndpoint));
 
 	auto feed = data->uidChangeFeed.find(req.rangeID);
@@ -2215,21 +2224,29 @@ ACTOR Future<Void> stopChangeFeedOnMove(StorageServer* data, ChangeFeedStreamReq
 		return Void();
 	}
 	state Promise<Void> moved;
-	feed->second->triggerOnMove(req.range, moved);
-	wait(moved.getFuture());
-	printf("CF Moved! %lld - %lld. sending WSS\n", req.begin, req.end);
+	feed->second->triggerOnMove(req.range, streamUID, moved);
+	try {
+		wait(moved.getFuture());
+	} catch (Error& e) {
+		ASSERT(e.code() == error_code_operation_cancelled);
+		// remove from tracking
+
+		auto feed = data->uidChangeFeed.find(req.rangeID);
+		if (feed != data->uidChangeFeed.end()) {
+			feed->second->removeOnMoveTrigger(req.range, streamUID);
+		}
+		return Void();
+	}
+	printf("CFSQ %s Moved! %lld - %lld. sending WSS\n", streamUID.toString().substr(0, 8).c_str(), req.begin, req.end);
 	// DO NOT call req.reply.onReady before sending - we need to propagate this error through regardless of how far
 	// behind client is
 	req.reply.sendError(wrong_shard_server());
 	return Void();
 }
 
-ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamRequest req) {
+ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamRequest req, UID streamUID) {
 	state Span span("SS:getChangeFeedStream"_loc, { req.spanContext });
 	state bool atLatest = false;
-	// TODO CHANGE BACK after BG is correctness clean
-	// state UID streamUID = deterministicRandom()->randomUniqueID();
-	state UID streamUID = req.debugID;
 	state bool removeUID = false;
 	state Optional<Version> blockedVersion;
 	if (req.replyBufferSize <= 0) {
@@ -7525,7 +7542,11 @@ ACTOR Future<Void> serveChangeFeedStreamRequests(StorageServer* self,
 	loop {
 		ChangeFeedStreamRequest req = waitNext(changeFeedStream);
 		// must notify change feed that its shard is moved away ASAP
-		self->actors.add(changeFeedStreamQ(self, req) || stopChangeFeedOnMove(self, req));
+
+		// TODO CHANGE BACK after BG is correctness clean
+		// state UID streamUID = deterministicRandom()->randomUniqueID();
+		UID streamUID = req.debugID;
+		self->actors.add(changeFeedStreamQ(self, req, streamUID) || stopChangeFeedOnMove(self, req, streamUID));
 	}
 }
 
