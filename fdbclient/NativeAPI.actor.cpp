@@ -759,16 +759,18 @@ Future<Void> attemptGRVFromOldProxies(std::vector<GrvProxyInterface> oldProxies,
 
 ACTOR static Future<Void> monitorClientDBInfoChange(DatabaseContext* cx,
                                                     Reference<AsyncVar<ClientDBInfo> const> clientDBInfo,
-                                                    AsyncTrigger* proxyChangeTrigger) {
+                                                    AsyncTrigger* proxiesChangeTrigger) {
 	state std::vector<CommitProxyInterface> curCommitProxies;
 	state std::vector<GrvProxyInterface> curGrvProxies;
 	state ActorCollection actors(false);
+	state Future<Void> clientDBInfoOnChange = clientDBInfo->onChange();
 	curCommitProxies = clientDBInfo->get().commitProxies;
 	curGrvProxies = clientDBInfo->get().grvProxies;
 
 	loop {
 		choose {
-			when(wait(clientDBInfo->onChange())) {
+			when(wait(clientDBInfoOnChange)) {
+				clientDBInfoOnChange = clientDBInfo->onChange();
 				if (clientDBInfo->get().commitProxies != curCommitProxies ||
 				    clientDBInfo->get().grvProxies != curGrvProxies) {
 					// This condition is a bit complicated. Here we want to verify that we're unable to receive a read
@@ -785,7 +787,7 @@ ACTOR static Future<Void> monitorClientDBInfoChange(DatabaseContext* cx,
 					}
 					curCommitProxies = clientDBInfo->get().commitProxies;
 					curGrvProxies = clientDBInfo->get().grvProxies;
-					proxyChangeTrigger->trigger();
+					proxiesChangeTrigger->trigger();
 				}
 			}
 			when(wait(actors.getResult())) { UNSTOPPABLE_ASSERT(false); }
@@ -5806,9 +5808,10 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion(SpanID parentSpan,
 	loop {
 		try {
 			state GetReadVersionRequest req(span.context, transactionCount, priority, flags, tags, debugID);
+			state Future<Void> onProxiesChanged = cx->onProxiesChanged();
 
 			choose {
-				when(wait(cx->onProxiesChanged())) {}
+				when(wait(onProxiesChanged)) { onProxiesChanged = cx->onProxiesChanged(); }
 				when(GetReadVersionReply v =
 				         wait(basicLoadBalance(cx->getGrvProxies(UseProvisionalProxies(
 				                                   flags & GetReadVersionRequest::FLAG_USE_PROVISIONAL_PROXIES)),
@@ -7017,6 +7020,7 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion
 		throw;
 	}
 	TraceEvent("ExclusionSafetyCheckCoordinators").log();
+	wait(cx->getConnectionRecord()->resolveHostnames());
 	state ClientCoordinators coordinatorList(cx->getConnectionRecord());
 	state std::vector<Future<Optional<LeaderInfo>>> leaderServers;
 	leaderServers.reserve(coordinatorList.clientLeaderServers.size());
