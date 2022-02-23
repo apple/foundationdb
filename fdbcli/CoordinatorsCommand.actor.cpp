@@ -100,6 +100,7 @@ ACTOR Future<bool> changeCoordinators(Reference<IDatabase> db, std::vector<Strin
 				state std::vector<StringRef>::iterator t;
 				for (t = tokens.begin() + 1; t != tokens.end(); ++t) {
 					try {
+						// TODO(renxuan): add hostname parsing here.
 						auto const& addr = NetworkAddress::parse(t->toString());
 						if (new_coordinators_addresses.count(addr)) {
 							fprintf(stderr, "ERROR: passed redundant coordinators: `%s'\n", addr.toString().c_str());

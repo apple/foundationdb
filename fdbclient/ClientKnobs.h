@@ -189,6 +189,12 @@ public:
 	int32_t DEFAULT_AUTO_RESOLVERS;
 	int32_t DEFAULT_AUTO_LOGS;
 
+	// Dynamic Knobs
+	double COMMIT_QUORUM_TIMEOUT;
+	double GET_GENERATION_QUORUM_TIMEOUT;
+	double GET_KNOB_TIMEOUT;
+	double TIMEOUT_RETRY_UPPER_BOUND;
+
 	// Client Status Info
 	double CSI_SAMPLING_PROBABILITY;
 	int64_t CSI_SIZE_LIMIT;
@@ -247,10 +253,6 @@ public:
 	// busyness reporting
 	double BUSYNESS_SPIKE_START_THRESHOLD;
 	double BUSYNESS_SPIKE_SATURATED_THRESHOLD;
-
-	// multi-version client control
-	int MVC_CLIENTLIB_CHUNK_SIZE;
-	int MVC_CLIENTLIB_CHUNKS_PER_TRANSACTION;
 
 	// blob granules
 	bool ENABLE_BLOB_GRANULES;

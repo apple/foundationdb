@@ -31,6 +31,8 @@ set(FDBSERVER_SRCS
   DataDistributionTracker.actor.cpp
   DataDistributorInterface.h
   DBCoreState.h
+  DDTeamCollection.actor.cpp
+  DDTeamCollection.h
   DiskQueue.actor.cpp
   EncryptKeyProxyInterface.h
   EncryptKeyProxy.actor.cpp
@@ -88,6 +90,7 @@ set(FDBSERVER_SRCS
   QuietDatabase.actor.cpp
   QuietDatabase.h
   RadixTree.h
+  Ratekeeper.h
   Ratekeeper.actor.cpp
   RatekeeperInterface.h
   RecoveryState.h
@@ -128,7 +131,11 @@ set(FDBSERVER_SRCS
   storageserver.actor.cpp
   TagPartitionedLogSystem.actor.cpp
   TagPartitionedLogSystem.actor.h
+  TagThrottler.actor.cpp
+  TagThrottler.h
   template_fdb.h
+  TCInfo.actor.cpp
+  TCInfo.h
   tester.actor.cpp
   TesterInterface.actor.h
   TLogInterface.h
@@ -170,7 +177,6 @@ set(FDBSERVER_SRCS
   workloads/Cache.actor.cpp
   workloads/ChangeConfig.actor.cpp
   workloads/ClearSingleRange.actor.cpp
-  workloads/ClientLibManagementWorkload.actor.cpp
   workloads/ClientTransactionProfileCorrectness.actor.cpp
   workloads/ClientWorkload.actor.cpp
   workloads/TriggerRecovery.actor.cpp
