@@ -24,6 +24,7 @@
 #define SYS_TEST_WORKLOAD_H
 
 #include "SysTestTransactionExecutor.h"
+#include <atomic>
 
 namespace FDBSystemTester {
 

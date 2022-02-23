@@ -27,6 +27,7 @@
 #include "SysTestApiWrapper.h"
 #include "SysTestScheduler.h"
 #include <string_view>
+#include <memory>
 
 namespace FDBSystemTester {
 

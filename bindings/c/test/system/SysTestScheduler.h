@@ -24,6 +24,7 @@
 #define SYS_TEST_SCHEDULER_H
 
 #include <functional>
+#include <memory>
 
 namespace FDBSystemTester {
 
