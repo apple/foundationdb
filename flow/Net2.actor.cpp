@@ -24,6 +24,8 @@
 #include "flow/Platform.h"
 #include "flow/Trace.h"
 #include <algorithm>
+#include <boost/asio/read.hpp>
+#include <boost/asio/write.hpp>
 #include <memory>
 #define BOOST_SYSTEM_NO_LIB
 #define BOOST_DATE_TIME_NO_LIB
@@ -470,6 +472,37 @@ public:
 		return size;
 	}
 
+	Future<int> async_read(uint8_t* begin, uint8_t* end) override {
+		Promise<int> p;
+
+
+		++g_net2->countReads;
+		size_t toRead = end - begin;
+
+		socket.async_read_some(boost::asio::mutable_buffers_1(begin, toRead), [this, p](const boost::system::error_code& err, std::size_t size){
+			g_net2->bytesReceived += size;
+
+			if (err) {
+				if (err == boost::asio::error::would_block) {
+					++g_net2->countWouldBlock;
+					// return 0;
+					p.send(0);
+					return;
+				}
+				onReadError(err);
+
+				p.sendError(connection_failed());
+			}
+
+			ASSERT(size);
+
+			p.send(size);
+
+		});
+		
+		return p.getFuture();
+	}
+
 	// Writes as many bytes as possible from the given SendBuffer chain into the write buffer and returns the number of
 	// bytes written (might be 0)
 	int write(SendBuffer const* data, int limit) override {
@@ -502,6 +535,41 @@ public:
 		ASSERT(sent); // Make sure data was sent, and also this check will fail if the buffer chain was empty or the
 		              // limit was not > 0.
 		return sent;
+	}
+
+	Future<int> async_write(SendBuffer const* data, int limit) override {
+		Promise<int> promise;
+		++g_net2->countWrites;
+
+		boost::asio::async_write(socket, 
+			boost::iterator_range<SendBufferIterator>(SendBufferIterator(data, limit), SendBufferIterator()), [this, promise, data, limit](const boost::system::error_code& err, std::size_t sent) {
+				if (err) {
+					// Since there was an error, sent's value can't be used to infer that the buffer has data and the limit is
+					// positive so check explicitly.
+					ASSERT(limit > 0);
+					bool notEmpty = false;
+					for (auto p = data; p; p = p->next)
+						if (p->bytes_written - p->bytes_sent > 0) {
+							notEmpty = true;
+							break;
+						}
+					ASSERT(notEmpty);
+
+					if (err == boost::asio::error::would_block) {
+						++g_net2->countWouldBlock;
+						// return 0;
+						promise.send(0);
+						return;
+					}
+					onWriteError(err);
+					// throw connection_failed();
+					promise.sendError(connection_failed());
+				}
+				ASSERT(sent); // Make sure data was sent, and also this check will fail if the buffer chain was empty or the
+		              // limit was not > 0.
+				promise.send(sent);
+			});
+		return promise.getFuture();
 	}
 
 	NetworkAddress getPeerAddress() const override { return peer_address; }
@@ -1087,6 +1155,9 @@ public:
 		              // limit was not > 0.
 		return sent;
 	}
+
+	Future<int> async_read(uint8_t* begin, uint8_t* end) override {return 0;}
+	Future<int> async_write(SendBuffer const* buffer, int limit) override {return 0;}
 
 	NetworkAddress getPeerAddress() const override { return peer_address; }
 

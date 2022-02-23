@@ -304,9 +304,11 @@ if (WITH_ROCKSDB_EXPERIMENTAL)
   # statically, so find the static library here.
   find_library(lz4_STATIC_LIBRARIES
     NAMES liblz4.a REQUIRED)
-  if (WITH_LIBURING)
-    find_package(uring)
-  endif()
+endif()
+
+if (WITH_LIBURING)
+  set(LibUring_ROOT "/home/teleport-dluan/liburing/src/include")
+  find_package(uring)
 endif()
 
 # Suppress warnings in sqlite since it's third party
@@ -326,17 +328,18 @@ target_include_directories(fdbserver PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/workloads)
 if (WITH_ROCKSDB_EXPERIMENTAL)
   add_dependencies(fdbserver rocksdb)
-  if(WITH_LIBURING)
-    target_include_directories(fdbserver PRIVATE ${ROCKSDB_INCLUDE_DIR} ${uring_INCLUDE_DIR})
-    target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite ${ROCKSDB_LIBRARIES} ${uring_LIBRARIES} ${lz4_STATIC_LIBRARIES})
-    target_compile_definitions(fdbserver PRIVATE BOOST_ASIO_HAS_IO_URING=1 BOOST_ASIO_DISABLE_EPOLL=1)
-  else()
-    target_include_directories(fdbserver PRIVATE ${ROCKSDB_INCLUDE_DIR})
-    target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite ${ROCKSDB_LIBRARIES} ${lz4_STATIC_LIBRARIES})
-    target_compile_definitions(fdbserver PRIVATE)
-  endif()
+  
+  target_include_directories(fdbserver PRIVATE ${ROCKSDB_INCLUDE_DIR})
+  target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite ${ROCKSDB_LIBRARIES} ${lz4_STATIC_LIBRARIES})
+  target_compile_definitions(fdbserver PRIVATE)
 else()
   target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite)
+endif()
+
+if(WITH_LIBURING)
+  target_include_directories(fdbserver PRIVATE ${uring_INCLUDE_DIR})
+  target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite ${uring_LIBRARIES})
+  target_compile_definitions(fdbserver PRIVATE BOOST_ASIO_HAS_IO_URING=1 BOOST_ASIO_DISABLE_EPOLL=1)
 endif()
 
 target_link_libraries(fdbserver PRIVATE toml11_target jemalloc)

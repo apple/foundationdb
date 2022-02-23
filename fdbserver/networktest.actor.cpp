@@ -436,7 +436,8 @@ struct P2PNetworkTest {
 				wait(delay(stutter / 1e3));
 			}
 
-			int len = conn->read((uint8_t*)buffer.begin() + writeOffset, (uint8_t*)buffer.end());
+			// int len = conn->read((uint8_t*)buffer.begin() + writeOffset, (uint8_t*)buffer.end());
+			int len = wait(conn->async_read((uint8_t*)buffer.begin() + writeOffset, (uint8_t*)buffer.end()));
 			writeOffset += len;
 			self->bytesReceived += len;
 
@@ -456,7 +457,7 @@ struct P2PNetworkTest {
 			}
 
 			if (len == 0) {
-				wait(conn->onReadable());
+				// wait(conn->onReadable());
 				wait(delay(0, TaskPriority::ReadSocket));
 			}
 		}
@@ -473,7 +474,8 @@ struct P2PNetworkTest {
 			if (stutter > 0) {
 				wait(delay(stutter / 1e3));
 			}
-			int sent = conn->write(packets.getUnsent(), FLOW_KNOBS->MAX_PACKET_SEND_BYTES);
+			// int sent = conn->write(packets.getUnsent(), FLOW_KNOBS->MAX_PACKET_SEND_BYTES);
+			int sent = wait(conn->async_write(packets.getUnsent(), FLOW_KNOBS->MAX_PACKET_SEND_BYTES));
 
 			if (sent != 0) {
 				self->bytesSent += sent;
@@ -484,7 +486,7 @@ struct P2PNetworkTest {
 				break;
 			}
 
-			wait(conn->onWritable());
+			// wait(conn->onWritable());
 			wait(yield(TaskPriority::WriteSocket));
 		}
 
