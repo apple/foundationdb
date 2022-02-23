@@ -38,7 +38,7 @@ public:
 	virtual void join() = 0;
 };
 
-IScheduler* createScheduler(int numThreads);
+std::unique_ptr<IScheduler> createScheduler(int numThreads);
 
 } // namespace FDBSystemTester
 

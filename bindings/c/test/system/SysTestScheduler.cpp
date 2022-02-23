@@ -20,6 +20,7 @@
 
 #include "SysTestScheduler.h"
 
+#include <memory>
 #include <thread>
 #include <cassert>
 #include <boost/asio.hpp>
@@ -56,9 +57,9 @@ private:
 	any_io_executor work;
 };
 
-IScheduler* createScheduler(int numThreads) {
+std::unique_ptr<IScheduler> createScheduler(int numThreads) {
 	assert(numThreads > 0 && numThreads <= 1000);
-	return new AsioScheduler(numThreads);
+	return std::make_unique<AsioScheduler>(numThreads);
 }
 
 } // namespace FDBSystemTester

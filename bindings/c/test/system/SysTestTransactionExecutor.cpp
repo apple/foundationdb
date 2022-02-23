@@ -21,6 +21,7 @@
 #include "SysTestTransactionExecutor.h"
 #include <iostream>
 #include <cassert>
+#include <memory>
 #include <random>
 
 namespace FDBSystemTester {
@@ -176,8 +177,8 @@ private:
 	std::mt19937 random;
 };
 
-ITransactionExecutor* createTransactionExecutor() {
-	return new TransactionExecutor();
+std::unique_ptr<ITransactionExecutor> createTransactionExecutor() {
+	return std::make_unique<TransactionExecutor>();
 }
 
 } // namespace FDBSystemTester

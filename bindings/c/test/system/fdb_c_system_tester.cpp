@@ -23,6 +23,7 @@
 #include "SysTestScheduler.h"
 #include "SysTestTransactionExecutor.h"
 #include <iostream>
+#include <memory>
 #include <thread>
 #include "flow/SimpleOpt.h"
 #include "bindings/c/foundationdb/fdb_c.h"
@@ -219,7 +220,7 @@ void fdb_check(fdb_error_t e) {
 }
 } // namespace
 
-IWorkload* createApiCorrectnessWorkload();
+std::unique_ptr<IWorkload> createApiCorrectnessWorkload();
 
 } // namespace FDBSystemTester
 
@@ -243,18 +244,15 @@ void runApiCorrectness(TesterOptions& options) {
 	txExecOptions.blockOnFutures = options.blockOnFutures;
 	txExecOptions.numDatabases = options.numDatabases;
 
-	IScheduler* scheduler = createScheduler(options.numClientThreads);
-	ITransactionExecutor* txExecutor = createTransactionExecutor();
+	std::unique_ptr<IScheduler> scheduler = createScheduler(options.numClientThreads);
+	std::unique_ptr<ITransactionExecutor> txExecutor = createTransactionExecutor();
 	scheduler->start();
-	txExecutor->init(scheduler, options.clusterFile.c_str(), txExecOptions);
-	IWorkload* workload = createApiCorrectnessWorkload();
-	workload->init(txExecutor, scheduler, [scheduler]() { scheduler->stop(); });
+	txExecutor->init(scheduler.get(), options.clusterFile.c_str(), txExecOptions);
+	std::unique_ptr<IWorkload> workload = createApiCorrectnessWorkload();
+	IScheduler* schedPtr = scheduler.get();
+	workload->init(txExecutor.get(), schedPtr, [schedPtr]() { schedPtr->stop(); });
 	workload->start();
 	scheduler->join();
-
-	delete workload;
-	delete txExecutor;
-	delete scheduler;
 }
 
 int main(int argc, char** argv) {

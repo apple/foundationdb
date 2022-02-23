@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 #include "SysTestWorkload.h"
+#include <memory>
 #include <optional>
 #include <iostream>
 
@@ -73,8 +74,8 @@ private:
 	int numTxLeft;
 };
 
-IWorkload* createApiCorrectnessWorkload() {
-	return new ApiCorrectnessWorkload();
+std::unique_ptr<IWorkload> createApiCorrectnessWorkload() {
+	return std::make_unique<ApiCorrectnessWorkload>();
 }
 
 } // namespace FDBSystemTester

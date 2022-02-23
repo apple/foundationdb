@@ -76,7 +76,7 @@ public:
 	virtual void release() = 0;
 };
 
-ITransactionExecutor* createTransactionExecutor();
+std::unique_ptr<ITransactionExecutor> createTransactionExecutor();
 
 } // namespace FDBSystemTester
 
