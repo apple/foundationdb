@@ -1314,10 +1314,11 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
                                  LockAware lockAware,
                                  IsInternal internal,
                                  int apiVersion,
-                                 IsSwitchable switchable)
+                                 IsSwitchable switchable,
+                                 Optional<TenantName> defaultTenant)
   : lockAware(lockAware), switchable(switchable), connectionRecord(connectionRecord), proxyProvisional(false),
-    clientLocality(clientLocality), enableLocalityLoadBalance(enableLocalityLoadBalance), internal(internal),
-    cc("TransactionMetrics"), transactionReadVersions("ReadVersions", cc),
+    clientLocality(clientLocality), enableLocalityLoadBalance(enableLocalityLoadBalance), defaultTenant(defaultTenant),
+    internal(internal), cc("TransactionMetrics"), transactionReadVersions("ReadVersions", cc),
     transactionReadVersionsThrottled("ReadVersionsThrottled", cc),
     transactionReadVersionsCompleted("ReadVersionsCompleted", cc),
     transactionReadVersionBatches("ReadVersionBatches", cc),
@@ -4860,7 +4861,7 @@ Transaction::Transaction()
 
 Transaction::Transaction(Database const& cx, Optional<TenantName> const& tenant)
   : trState(makeReference<TransactionState>(cx,
-                                            tenant,
+                                            tenant.present() ? tenant : cx->defaultTenant,
                                             cx->taskID,
                                             generateSpanID(cx->transactionTracingSample),
                                             createTrLogInfoProbabilistically(cx))),
