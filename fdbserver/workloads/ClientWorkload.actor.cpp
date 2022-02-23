@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/simulator.h"
 
@@ -26,6 +27,7 @@
 #include "flow/actorcompiler.h" // has to be last include
 
 struct ClientWorkloadImpl {
+	UID id = deterministicRandom()->randomUniqueID();
 	Reference<TestWorkload> child;
 	ISimulator::ProcessInfo* self = g_pSimulator->getCurrentProcess();
 	ISimulator::ProcessInfo* childProcess = nullptr;
@@ -37,10 +39,11 @@ struct ClientWorkloadImpl {
 	ClientWorkloadImpl(Reference<TestWorkload> const& child) : child(child) {
 		if (self->address.isV6()) {
 			childAddress =
-			    IPAddress::parse(fmt::format("2001:fdb1:fdb2:fdb3:fdb4:fdb5:fdb6:{:40x}", child->clientId + 2)).get();
+			    IPAddress::parse(fmt::format("2001:fdb1:fdb2:fdb3:fdb4:fdb5:fdb6:{:04x}", child->clientId + 2)).get();
 		} else {
 			childAddress = IPAddress::parse(fmt::format("192.168.0.{}", child->clientId + 2)).get();
 		}
+		TraceEvent("TestClientStart", id).detail("ClusterFileLocation", child->ccr->getLocation()).log();
 		processName = fmt::format("TestClient{}", child->clientId);
 		childProcess = g_simulator.newProcess(processName.c_str(),
 		                                      childAddress,
@@ -62,6 +65,10 @@ struct ClientWorkloadImpl {
 
 	ACTOR static Future<Void> openDatabase(ClientWorkloadImpl* self) {
 		wait(g_simulator.onProcess(self->childProcess));
+		FlowTransport::createInstance(true, 1, WLTOKEN_RESERVED_COUNT);
+		Sim2FileSystem::newFileSystem();
+		TraceEvent("ClientWorkloadOpenDatabase", self->id)
+			.detail("ClusterFileLocation", self->child->ccr->getLocation());
 		self->cx = Database::createDatabase(self->child->ccr, -1);
 		wait(g_simulator.onProcess(self->self));
 		return Void();
@@ -91,7 +98,11 @@ struct ClientWorkloadImpl {
 };
 
 ClientWorkload::ClientWorkload(Reference<TestWorkload> const& child, WorkloadContext const& wcx)
-  : TestWorkload(wcx), impl(new ClientWorkloadImpl(child)) {}
+	: TestWorkload(wcx), impl(new ClientWorkloadImpl(child)) {
+	child->dbInfo = Reference<AsyncVar<ServerDBInfo>>();
+}
+
+ClientWorkload::~ClientWorkload() {}
 
 std::string ClientWorkload::description() const {
 	return impl->child->description();

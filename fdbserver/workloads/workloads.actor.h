@@ -140,8 +140,6 @@ struct WorkloadFactory : IWorkloadFactory {
 	WorkloadFactory(const char* name, bool asClient = false) : asClient(asClient) { factories()[name] = Reference<IWorkloadFactory>::addRef(this); }
 	Reference<TestWorkload> create(WorkloadContext const& wcx) override {
 		if (g_network->isSimulated() && asClient) {
-			WorkloadContext clientContext = wcx;
-			clientContext.dbInfo = decltype(clientContext.dbInfo)();
 			auto child = makeReference<WorkloadType>(wcx);
 			return makeReference<ClientWorkload>(child, wcx);
 		}
