@@ -407,9 +407,9 @@ struct ReadWriteWorkload : KVWorkload {
 				}
 			}
 		}
-		ASSERT(beginServers.begin()->first >= 0);
+		ASSERT(beginServers.size() == 0 || beginServers.begin()->first >= 0);
 		// handle the left boundary
-		if (beginServers.begin()->first > 0) {
+		if (beginServers.size() == 0 || beginServers.begin()->first > 0) {
 			beginServers[0] = leftServer;
 		}
 
