@@ -5274,6 +5274,8 @@ void StorageServer::insertTenant(TenantNameRef tenantName,
 		addMutationToMutationLog(
 		    mLV, MutationRef(MutationRef::SetValue, tenantName.withPrefix(persistTenantMapKeys.begin), value));
 	}
+
+	TraceEvent("InsertTenant", thisServerID).detail("Tenant", tenantName).detail("Version", version);
 }
 
 void StorageServer::clearTenants(TenantNameRef startTenant, TenantNameRef endTenant, Version version) {
@@ -5285,6 +5287,7 @@ void StorageServer::clearTenants(TenantNameRef startTenant, TenantNameRef endTen
 		// Trigger any watches on the prefix associated with the tenant.
 		watches.triggerRange(itr->prefix, strinc(itr->prefix));
 		tenantPrefixIndex.erase(itr->prefix);
+		TraceEvent("EraseTenant", thisServerID).detail("Tenant", itr.key()).detail("Version", version);
 	}
 
 	tenantMap.erase(startTenant, endTenant);
@@ -7132,6 +7135,10 @@ ACTOR Future<Void> initTenantMap(StorageServer* self) {
 			state Version version = wait(tr->getReadVersion());
 			RangeResult entries = wait(tr->getRange(tenantMapKeys, CLIENT_KNOBS->TOO_MANY));
 
+			TraceEvent("InitTenantMap", self->thisServerID)
+			    .detail("Version", version)
+			    .detail("NumTenants", entries.size());
+
 			for (auto kv : entries) {
 				self->insertTenant(kv.key.removePrefix(tenantMapPrefix), kv.value, version, false);
 			}
@@ -7171,8 +7178,6 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		++self.counters.kvCommits;
 
 		if (seedTag == invalidTag) {
-			wait(initTenantMap(&self));
-
 			// Might throw recruitment_failed in case of simultaneous master failure
 			std::pair<Version, Tag> verAndTag = wait(addStorageServer(self.cx, ssi));
 
@@ -7182,6 +7187,8 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 			} else {
 				self.setInitialVersion(verAndTag.first - 1);
 			}
+
+			wait(initTenantMap(&self));
 		} else {
 			self.tag = seedTag;
 		}
