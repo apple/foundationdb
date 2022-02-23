@@ -77,8 +77,8 @@ void IClusterConnectionRecord::setPersisted() {
 	connectionStringNeedsPersisted = false;
 }
 
-bool IClusterConnectionRecord::hasUnresolvedHostnames() const {
-	return cs.hasUnresolvedHostnames;
+ClusterConnectionString::ConnectionStringStatus IClusterConnectionRecord::connectionStringStatus() const {
+	return cs.status;
 }
 
 Future<Void> IClusterConnectionRecord::resolveHostnames() {
@@ -98,39 +98,56 @@ std::string ClusterConnectionString::getErrorString(std::string const& source, E
 }
 
 ACTOR Future<Void> resolveHostnamesImpl(ClusterConnectionString* self) {
-	std::vector<Future<Void>> fs;
-	for (auto const& hostName : self->hostnames) {
-		fs.push_back(map(INetworkConnections::net()->resolveTCPEndpoint(hostName.host, hostName.service),
-		                 [=](std::vector<NetworkAddress> const& addresses) -> Void {
-			                 NetworkAddress addr = addresses[deterministicRandom()->randomInt(0, addresses.size())];
-			                 addr.flags = 0; // Reset the parsed address to public
-			                 addr.fromHostname = NetworkAddressFromHostname::True;
-			                 if (hostName.isTLS) {
-				                 addr.flags |= NetworkAddress::FLAG_TLS;
-			                 }
-			                 self->addResolved(hostName, addr);
-			                 return Void();
-		                 }));
+	loop {
+		if (self->status == ClusterConnectionString::UNRESOLVED) {
+			self->status = ClusterConnectionString::RESOLVING;
+			std::vector<Future<Void>> fs;
+			for (auto const& hostname : self->hostnames) {
+				fs.push_back(map(INetworkConnections::net()->resolveTCPEndpoint(hostname.host, hostname.service),
+				                 [=](std::vector<NetworkAddress> const& addresses) -> Void {
+					                 NetworkAddress address =
+					                     addresses[deterministicRandom()->randomInt(0, addresses.size())];
+					                 address.flags = 0; // Reset the parsed address to public
+					                 address.fromHostname = NetworkAddressFromHostname::True;
+					                 if (hostname.isTLS) {
+						                 address.flags |= NetworkAddress::FLAG_TLS;
+					                 }
+					                 self->addResolved(hostname, address);
+					                 return Void();
+				                 }));
+			}
+			wait(waitForAll(fs));
+			std::sort(self->coords.begin(), self->coords.end());
+			if (std::unique(self->coords.begin(), self->coords.end()) != self->coords.end()) {
+				self->status = ClusterConnectionString::UNRESOLVED;
+				self->resolveFinish.trigger();
+				throw connection_string_invalid();
+			}
+			self->status = ClusterConnectionString::RESOLVED;
+			self->resolveFinish.trigger();
+			break;
+		} else if (self->status == ClusterConnectionString::RESOLVING) {
+			wait(self->resolveFinish.onTrigger());
+			if (self->status == ClusterConnectionString::RESOLVED) {
+				break;
+			}
+			// Otherwise, this means other threads failed on resolve, so here we go back to the loop and try to resolve
+			// again.
+		} else {
+			// status is RESOLVED, nothing to do.
+			break;
+		}
 	}
-	wait(waitForAll(fs));
-	std::sort(self->coords.begin(), self->coords.end());
-	if (std::unique(self->coords.begin(), self->coords.end()) != self->coords.end()) {
-		throw connection_string_invalid();
-	}
-	self->hasUnresolvedHostnames = false;
 	return Void();
 }
 
 Future<Void> ClusterConnectionString::resolveHostnames() {
-	if (!hasUnresolvedHostnames) {
-		return Void();
-	} else {
-		return resolveHostnamesImpl(this);
-	}
+	return resolveHostnamesImpl(this);
 }
 
 void ClusterConnectionString::resolveHostnamesBlocking() {
-	if (hasUnresolvedHostnames) {
+	if (status != RESOLVED) {
+		status = RESOLVING;
 		for (auto const& hostname : hostnames) {
 			std::vector<NetworkAddress> addresses =
 			    INetworkConnections::net()->resolveTCPEndpointBlocking(hostname.host, hostname.service);
@@ -140,14 +157,14 @@ void ClusterConnectionString::resolveHostnamesBlocking() {
 			if (hostname.isTLS) {
 				address.flags |= NetworkAddress::FLAG_TLS;
 			}
-			coords.push_back(address);
-			networkAddressToHostname.emplace(address, hostname);
+			addResolved(hostname, address);
 		}
 		std::sort(coords.begin(), coords.end());
 		if (std::unique(coords.begin(), coords.end()) != coords.end()) {
+			status = UNRESOLVED;
 			throw connection_string_invalid();
 		}
-		hasUnresolvedHostnames = false;
+		status = RESOLVED;
 	}
 }
 
@@ -156,7 +173,7 @@ void ClusterConnectionString::resetToUnresolved() {
 		coords.clear();
 		hostnames.clear();
 		networkAddressToHostname.clear();
-		hasUnresolvedHostnames = true;
+		status = UNRESOLVED;
 		parseConnString();
 	}
 }
@@ -184,7 +201,9 @@ void ClusterConnectionString::parseConnString() {
 		}
 		p = pComma + 1;
 	}
-	hasUnresolvedHostnames = hostnames.size() > 0;
+	if (hostnames.size() > 0) {
+		status = UNRESOLVED;
+	}
 	ASSERT((coords.size() + hostnames.size()) > 0);
 
 	std::sort(coords.begin(), coords.end());
@@ -256,7 +275,7 @@ TEST_CASE("/fdbclient/MonitorLeader/parseConnectionString/hostnames") {
 	{
 		input = "asdf:2345@localhost:1234";
 		ClusterConnectionString cs(input);
-		ASSERT(cs.hasUnresolvedHostnames);
+		ASSERT(cs.status == ClusterConnectionString::UNRESOLVED);
 		ASSERT(cs.hostnames.size() == 1);
 		ASSERT(input == cs.toString());
 	}
@@ -264,7 +283,7 @@ TEST_CASE("/fdbclient/MonitorLeader/parseConnectionString/hostnames") {
 	{
 		input = "0xxdeadbeef:100100100@localhost:34534,host-name:23443";
 		ClusterConnectionString cs(input);
-		ASSERT(cs.hasUnresolvedHostnames);
+		ASSERT(cs.status == ClusterConnectionString::UNRESOLVED);
 		ASSERT(cs.hostnames.size() == 2);
 		ASSERT(input == cs.toString());
 	}
@@ -277,7 +296,7 @@ TEST_CASE("/fdbclient/MonitorLeader/parseConnectionString/hostnames") {
 		commented += "# asdfasdf ##";
 
 		ClusterConnectionString cs(commented);
-		ASSERT(cs.hasUnresolvedHostnames);
+		ASSERT(cs.status == ClusterConnectionString::UNRESOLVED);
 		ASSERT(cs.hostnames.size() == 2);
 		ASSERT(input == cs.toString());
 	}
@@ -290,7 +309,7 @@ TEST_CASE("/fdbclient/MonitorLeader/parseConnectionString/hostnames") {
 		commented += "# asdfasdf ##";
 
 		ClusterConnectionString cs(commented);
-		ASSERT(cs.hasUnresolvedHostnames);
+		ASSERT(cs.status == ClusterConnectionString::UNRESOLVED);
 		ASSERT(cs.hostnames.size() == 2);
 		ASSERT(input == cs.toString());
 	}
@@ -314,16 +333,16 @@ TEST_CASE("/fdbclient/MonitorLeader/ConnectionString") {
 	INetworkConnections::net()->addMockTCPEndpoint(hn2, port2, { address2 });
 
 	state ClusterConnectionString cs(hostnames, LiteralStringRef("TestCluster:0"));
-	ASSERT(cs.hasUnresolvedHostnames);
+	ASSERT(cs.status == ClusterConnectionString::UNRESOLVED);
 	ASSERT(cs.hostnames.size() == 2);
 	ASSERT(cs.coordinators().size() == 0);
 	wait(cs.resolveHostnames());
-	ASSERT(!cs.hasUnresolvedHostnames);
+	ASSERT(cs.status == ClusterConnectionString::RESOLVED);
 	ASSERT(cs.hostnames.size() == 2);
 	ASSERT(cs.coordinators().size() == 2);
 	ASSERT(cs.toString() == connectionString);
 	cs.resetToUnresolved();
-	ASSERT(cs.hasUnresolvedHostnames);
+	ASSERT(cs.status == ClusterConnectionString::UNRESOLVED);
 	ASSERT(cs.hostnames.size() == 2);
 	ASSERT(cs.coordinators().size() == 0);
 	ASSERT(cs.toString() == connectionString);
@@ -422,7 +441,7 @@ TEST_CASE("/fdbclient/MonitorLeader/parseConnectionString/fuzz") {
 }
 
 ClusterConnectionString::ClusterConnectionString(const std::vector<NetworkAddress>& servers, Key key)
-  : coords(servers) {
+  : status(RESOLVED), coords(servers) {
 	std::string keyString = key.toString();
 	parseKey(keyString);
 	connectionString = keyString + "@";
@@ -435,7 +454,7 @@ ClusterConnectionString::ClusterConnectionString(const std::vector<NetworkAddres
 }
 
 ClusterConnectionString::ClusterConnectionString(const std::vector<Hostname>& hosts, Key key)
-  : hasUnresolvedHostnames(true), hostnames(hosts) {
+  : status(UNRESOLVED), hostnames(hosts) {
 	std::string keyString = key.toString();
 	parseKey(keyString);
 	connectionString = keyString + "@";
@@ -497,6 +516,7 @@ std::string ClusterConnectionString::toString() const {
 }
 
 ClientCoordinators::ClientCoordinators(Reference<IClusterConnectionRecord> ccr) : ccr(ccr) {
+	ASSERT(ccr->connectionStringStatus() == ClusterConnectionString::RESOLVED);
 	ClusterConnectionString cs = ccr->getConnectionString();
 	for (auto s = cs.coordinators().begin(); s != cs.coordinators().end(); ++s)
 		clientLeaderServers.push_back(ClientLeaderRegInterface(*s));
@@ -525,15 +545,44 @@ ClientLeaderRegInterface::ClientLeaderRegInterface(INetwork* local) {
 
 // Nominee is the worker among all workers that are considered as leader by one coordinator
 // This function contacts a coordinator coord to ask who is its nominee.
+// Note: for coordinators whose NetworkAddress is parsed out of a hostname, a connection failure will cause this actor
+// to throw `coordinators_changed()` error
 ACTOR Future<Void> monitorNominee(Key key,
                                   ClientLeaderRegInterface coord,
                                   AsyncTrigger* nomineeChange,
-                                  Optional<LeaderInfo>* info) {
+                                  Optional<LeaderInfo>* info,
+                                  Optional<Hostname> hostname = Optional<Hostname>()) {
 	loop {
-		state Optional<LeaderInfo> li =
-		    wait(retryBrokenPromise(coord.getLeader,
-		                            GetLeaderRequest(key, info->present() ? info->get().changeID : UID()),
-		                            TaskPriority::CoordinationReply));
+		state Optional<LeaderInfo> li;
+
+		if (coord.getLeader.getEndpoint().getPrimaryAddress().fromHostname) {
+			state ErrorOr<Optional<LeaderInfo>> rep =
+			    wait(coord.getLeader.tryGetReply(GetLeaderRequest(key, info->present() ? info->get().changeID : UID()),
+			                                     TaskPriority::CoordinationReply));
+			if (rep.isError()) {
+				// Connecting to nominee failed, most likely due to connection failed.
+				TraceEvent("MonitorNomineeError")
+				    .detail("Hostname", hostname.present() ? hostname.get().toString() : "UnknownHostname")
+				    .detail("OldAddr", coord.getLeader.getEndpoint().getPrimaryAddress().toString())
+				    .error(rep.getError());
+				if (rep.getError().code() == error_code_request_maybe_delivered) {
+					// 50 milliseconds delay to prevent tight resolving loop due to outdated DNS cache
+					wait(delay(0.05));
+					throw coordinators_changed();
+				} else {
+					throw rep.getError();
+				}
+			} else if (rep.present()) {
+				li = rep.get();
+			}
+		} else {
+			Optional<LeaderInfo> tmp =
+			    wait(retryBrokenPromise(coord.getLeader,
+			                            GetLeaderRequest(key, info->present() ? info->get().changeID : UID()),
+			                            TaskPriority::CoordinationReply));
+			li = tmp;
+		}
+
 		wait(Future<Void>(Void())); // Make sure we weren't cancelled
 
 		TraceEvent("GetLeaderReply")
@@ -608,53 +657,74 @@ Optional<std::pair<LeaderInfo, bool>> getLeader(const std::vector<Optional<Leade
 ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration(Reference<IClusterConnectionRecord> connRecord,
                                                            Reference<AsyncVar<Value>> outSerializedLeaderInfo,
                                                            MonitorLeaderInfo info) {
-	state ClientCoordinators coordinators(info.intermediateConnRecord);
-	state AsyncTrigger nomineeChange;
-	state std::vector<Optional<LeaderInfo>> nominees;
-	state Future<Void> allActors;
-
-	nominees.resize(coordinators.clientLeaderServers.size());
-
-	std::vector<Future<Void>> actors;
-	// Ask all coordinators if the worker is considered as a leader (leader nominee) by the coordinator.
-	actors.reserve(coordinators.clientLeaderServers.size());
-	for (int i = 0; i < coordinators.clientLeaderServers.size(); i++)
-		actors.push_back(
-		    monitorNominee(coordinators.clusterKey, coordinators.clientLeaderServers[i], &nomineeChange, &nominees[i]));
-	allActors = waitForAll(actors);
-
 	loop {
-		Optional<std::pair<LeaderInfo, bool>> leader = getLeader(nominees);
-		TraceEvent("MonitorLeaderChange")
-		    .detail("NewLeader", leader.present() ? leader.get().first.changeID : UID(1, 1));
-		if (leader.present()) {
-			if (leader.get().first.forward) {
-				TraceEvent("MonitorLeaderForwarding")
-				    .detail("NewConnStr", leader.get().first.serializedInfo.toString())
-				    .detail("OldConnStr", info.intermediateConnRecord->getConnectionString().toString())
-				    .trackLatest("MonitorLeaderForwarding");
-				info.intermediateConnRecord = connRecord->makeIntermediateRecord(
-				    ClusterConnectionString(leader.get().first.serializedInfo.toString()));
-				return info;
-			}
-			if (connRecord != info.intermediateConnRecord) {
-				if (!info.hasConnected) {
-					TraceEvent(SevWarnAlways, "IncorrectClusterFileContentsAtConnection")
-					    .detail("ClusterFile", connRecord->toString())
-					    .detail("StoredConnectionString", connRecord->getConnectionString().toString())
-					    .detail("CurrentConnectionString",
-					            info.intermediateConnRecord->getConnectionString().toString());
-				}
-				connRecord->setAndPersistConnectionString(info.intermediateConnRecord->getConnectionString());
-				info.intermediateConnRecord = connRecord;
-			}
+		wait(connRecord->resolveHostnames());
+		wait(info.intermediateConnRecord->resolveHostnames());
+		state ClientCoordinators coordinators(info.intermediateConnRecord);
+		state AsyncTrigger nomineeChange;
+		state std::vector<Optional<LeaderInfo>> nominees;
+		state Future<Void> allActors;
 
-			info.hasConnected = true;
-			connRecord->notifyConnected();
+		nominees.resize(coordinators.clientLeaderServers.size());
 
-			outSerializedLeaderInfo->set(leader.get().first.serializedInfo);
+		state std::vector<Future<Void>> actors;
+		// Ask all coordinators if the worker is considered as a leader (leader nominee) by the coordinator.
+		actors.reserve(coordinators.clientLeaderServers.size());
+		for (int i = 0; i < coordinators.clientLeaderServers.size(); i++) {
+			Optional<Hostname> hostname;
+			auto r = connRecord->getConnectionString().networkAddressToHostname.find(
+			    coordinators.clientLeaderServers[i].getLeader.getEndpoint().getPrimaryAddress());
+			if (r != connRecord->getConnectionString().networkAddressToHostname.end()) {
+				hostname = r->second;
+			}
+			actors.push_back(monitorNominee(
+			    coordinators.clusterKey, coordinators.clientLeaderServers[i], &nomineeChange, &nominees[i], hostname));
 		}
-		wait(nomineeChange.onTrigger() || allActors);
+		allActors = waitForAll(actors);
+
+		loop {
+			Optional<std::pair<LeaderInfo, bool>> leader = getLeader(nominees);
+			TraceEvent("MonitorLeaderChange")
+			    .detail("NewLeader", leader.present() ? leader.get().first.changeID : UID(1, 1));
+			if (leader.present()) {
+				if (leader.get().first.forward) {
+					TraceEvent("MonitorLeaderForwarding")
+					    .detail("NewConnStr", leader.get().first.serializedInfo.toString())
+					    .detail("OldConnStr", info.intermediateConnRecord->getConnectionString().toString())
+					    .trackLatest("MonitorLeaderForwarding");
+					info.intermediateConnRecord = connRecord->makeIntermediateRecord(
+					    ClusterConnectionString(leader.get().first.serializedInfo.toString()));
+					return info;
+				}
+				if (connRecord != info.intermediateConnRecord) {
+					if (!info.hasConnected) {
+						TraceEvent(SevWarnAlways, "IncorrectClusterFileContentsAtConnection")
+						    .detail("ClusterFile", connRecord->toString())
+						    .detail("StoredConnectionString", connRecord->getConnectionString().toString())
+						    .detail("CurrentConnectionString",
+						            info.intermediateConnRecord->getConnectionString().toString());
+					}
+					connRecord->setAndPersistConnectionString(info.intermediateConnRecord->getConnectionString());
+					info.intermediateConnRecord = connRecord;
+				}
+
+				info.hasConnected = true;
+				connRecord->notifyConnected();
+
+				outSerializedLeaderInfo->set(leader.get().first.serializedInfo);
+			}
+			try {
+				wait(nomineeChange.onTrigger() || allActors);
+			} catch (Error& e) {
+				if (e.code() == error_code_coordinators_changed) {
+					TraceEvent("MonitorLeaderCoordinatorsChanged").suppressFor(1.0);
+					connRecord->getConnectionString().resetToUnresolved();
+					break;
+				} else {
+					throw e;
+				}
+			}
+		}
 	}
 }
 
@@ -774,8 +844,8 @@ ACTOR Future<Void> getClientInfoFromLeader(Reference<AsyncVar<Optional<ClusterCo
 			when(ClientDBInfo ni =
 			         wait(brokenPromiseToNever(knownLeader->get().get().clientInterface.openDatabase.getReply(req)))) {
 				TraceEvent("GetClientInfoFromLeaderGotClientInfo", knownLeader->get().get().clientInterface.id())
-				    .detail("CommitProxy0", ni.commitProxies.size() ? ni.commitProxies[0].id() : UID())
-				    .detail("GrvProxy0", ni.grvProxies.size() ? ni.grvProxies[0].id() : UID())
+				    .detail("CommitProxy0", ni.commitProxies.size() ? ni.commitProxies[0].address().toString() : "")
+				    .detail("GrvProxy0", ni.grvProxies.size() ? ni.grvProxies[0].address().toString() : "")
 				    .detail("ClientID", ni.id);
 				clientData->clientInfo->set(CachedSerialization<ClientDBInfo>(ni));
 			}
@@ -787,7 +857,8 @@ ACTOR Future<Void> getClientInfoFromLeader(Reference<AsyncVar<Optional<ClusterCo
 ACTOR Future<Void> monitorLeaderAndGetClientInfo(Key clusterKey,
                                                  std::vector<NetworkAddress> coordinators,
                                                  ClientData* clientData,
-                                                 Reference<AsyncVar<Optional<LeaderInfo>>> leaderInfo) {
+                                                 Reference<AsyncVar<Optional<LeaderInfo>>> leaderInfo,
+                                                 Reference<AsyncVar<Void>> coordinatorsChanged) {
 	state std::vector<ClientLeaderRegInterface> clientLeaderServers;
 	state AsyncTrigger nomineeChange;
 	state std::vector<Optional<LeaderInfo>> nominees;
@@ -835,7 +906,14 @@ ACTOR Future<Void> monitorLeaderAndGetClientInfo(Key clusterKey,
 				leaderInfo->set(leader.get().first);
 			}
 		}
-		wait(nomineeChange.onTrigger() || allActors);
+		try {
+			wait(nomineeChange.onTrigger() || allActors);
+		} catch (Error& e) {
+			if (e.code() == error_code_coordinators_changed) {
+				coordinatorsChanged->trigger();
+			}
+			throw e;
+		}
 	}
 }
 
@@ -964,9 +1042,15 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 			successIndex = index;
 		} else {
 			TEST(rep.getError().code() == error_code_failed_to_progress); // Coordinator cant talk to cluster controller
+			if (rep.getError().code() == error_code_coordinators_changed) {
+				throw coordinators_changed();
+			}
 			index = (index + 1) % addrs.size();
 			if (index == successIndex) {
 				wait(delay(CLIENT_KNOBS->COORDINATOR_RECONNECTION_DELAY));
+				// When the client fails talking to all coordinators, we throw coordinators_changed() and let the caller
+				// re-resolve the connection string and retry.
+				throw coordinators_changed();
 			}
 		}
 	}
@@ -978,16 +1062,27 @@ ACTOR Future<Void> monitorProxies(
     Reference<AsyncVar<Optional<ClientLeaderRegInterface>>> coordinator,
     Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions,
     Key traceLogGroup) {
+	wait(connRecord->get()->resolveHostnames());
 	state MonitorLeaderInfo info(connRecord->get());
 	loop {
-		choose {
-			when(MonitorLeaderInfo _info = wait(monitorProxiesOneGeneration(
-			         connRecord->get(), clientInfo, coordinator, info, supportedVersions, traceLogGroup))) {
-				info = _info;
+		try {
+			wait(info.intermediateConnRecord->resolveHostnames());
+			choose {
+				when(MonitorLeaderInfo _info = wait(monitorProxiesOneGeneration(
+				         connRecord->get(), clientInfo, coordinator, info, supportedVersions, traceLogGroup))) {
+					info = _info;
+				}
+				when(wait(connRecord->onChange())) {
+					info.hasConnected = false;
+					info.intermediateConnRecord = connRecord->get();
+				}
 			}
-			when(wait(connRecord->onChange())) {
-				info.hasConnected = false;
-				info.intermediateConnRecord = connRecord->get();
+		} catch (Error& e) {
+			if (e.code() == error_code_coordinators_changed) {
+				TraceEvent("MonitorProxiesCoordinatorsChanged").suppressFor(1.0);
+				info.intermediateConnRecord->getConnectionString().resetToUnresolved();
+			} else {
+				throw e;
 			}
 		}
 	}
