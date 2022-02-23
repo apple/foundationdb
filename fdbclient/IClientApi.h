@@ -24,6 +24,7 @@
 
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/Tenant.h"
 
 #include "flow/ThreadHelper.actor.h"
 
@@ -109,6 +110,8 @@ public:
 	// Only if it's a MultiVersionTransaction and the underlying transaction handler is null,
 	// it will return false
 	virtual bool isValid() { return true; }
+
+	virtual Optional<TenantName> getTenant() = 0;
 };
 
 class ITenant {
@@ -126,7 +129,7 @@ class IDatabase {
 public:
 	virtual ~IDatabase() {}
 
-	virtual Reference<ITenant> openTenant(StringRef tenantName) = 0;
+	virtual Reference<ITenant> openTenant(TenantNameRef tenantName) = 0;
 	virtual Reference<ITransaction> createTransaction() = 0;
 	virtual void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) = 0;
 	virtual double getMainThreadBusyness() = 0;
@@ -138,10 +141,10 @@ public:
 	    Optional<ProtocolVersion> expectedVersion = Optional<ProtocolVersion>()) = 0;
 
 	// Registers a tenant with the given name. A prefix is automatically allocated for the tenant.
-	virtual ThreadFuture<Void> createTenant(StringRef const& tenantName) = 0;
+	virtual ThreadFuture<Void> createTenant(TenantNameRef const& tenantName) = 0;
 
 	// Deletes the tenant with the given name. The tenant must be empty.
-	virtual ThreadFuture<Void> deleteTenant(StringRef const& tenantName) = 0;
+	virtual ThreadFuture<Void> deleteTenant(TenantNameRef const& tenantName) = 0;
 
 	virtual void addref() = 0;
 	virtual void delref() = 0;

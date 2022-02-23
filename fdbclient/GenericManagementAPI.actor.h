@@ -759,7 +759,7 @@ Future<Void> deleteTenant(Reference<DB> db, TenantName name) {
 }
 
 ACTOR template <class DB>
-Future<Standalone<VectorRef<StringRef>>> listTenants(Reference<DB> db, StringRef begin, StringRef end, int limit) {
+Future<Standalone<VectorRef<TenantNameRef>>> listTenants(Reference<DB> db, StringRef begin, StringRef end, int limit) {
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
 	state KeyRange range = KeyRangeRef(begin, end).withPrefix(tenantMapPrefix);
 
@@ -770,7 +770,7 @@ Future<Standalone<VectorRef<StringRef>>> listTenants(Reference<DB> db, StringRef
 			RangeResult results = wait(safeThreadFutureToFuture(
 			    tr->getRange(firstGreaterOrEqual(range.begin), firstGreaterOrEqual(range.end), limit)));
 
-			Standalone<VectorRef<StringRef>> tenants;
+			Standalone<VectorRef<TenantNameRef>> tenants;
 			for (auto kv : results) {
 				tenants.push_back_deep(tenants.arena(), kv.key.removePrefix(tenantMapPrefix));
 			}

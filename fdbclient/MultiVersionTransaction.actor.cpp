@@ -412,7 +412,7 @@ ThreadFuture<Void> DLDatabase::onReady() {
 	return ready;
 }
 
-Reference<ITenant> DLDatabase::openTenant(StringRef tenantName) {
+Reference<ITenant> DLDatabase::openTenant(TenantNameRef tenantName) {
 	if (!api->databaseOpenTenant) {
 		throw unsupported_operation();
 	}
@@ -495,7 +495,7 @@ ThreadFuture<ProtocolVersion> DLDatabase::getServerProtocol(Optional<ProtocolVer
 }
 
 // Registers a tenant with the given name. A prefix is automatically allocated for the tenant.
-ThreadFuture<Void> DLDatabase::createTenant(StringRef const& tenantName) {
+ThreadFuture<Void> DLDatabase::createTenant(TenantNameRef const& tenantName) {
 	if (api->databaseAllocateTenant == nullptr) {
 		throw unsupported_operation();
 	}
@@ -505,7 +505,7 @@ ThreadFuture<Void> DLDatabase::createTenant(StringRef const& tenantName) {
 }
 
 // Deletes the tenant with the given name. The tenant must be empty.
-ThreadFuture<Void> DLDatabase::deleteTenant(StringRef const& tenantName) {
+ThreadFuture<Void> DLDatabase::deleteTenant(TenantNameRef const& tenantName) {
 	if (api->databaseRemoveTenant == nullptr) {
 		throw unsupported_operation();
 	}
@@ -1100,6 +1100,14 @@ ThreadFuture<Void> MultiVersionTransaction::onError(Error const& e) {
 	}
 }
 
+Optional<TenantName> MultiVersionTransaction::getTenant() {
+	if (tenant.present()) {
+		return tenant.get()->tenantName;
+	} else {
+		return Optional<TenantName>();
+	}
+}
+
 // Waits for the specified duration and signals the assignment variable with a timed out error
 // This will be canceled if a new timeout is set, in which case the tsav will not be signaled.
 ACTOR Future<Void> timeoutImpl(Reference<ThreadSingleAssignmentVar<Void>> tsav, double duration) {
@@ -1228,7 +1236,7 @@ bool MultiVersionTransaction::isValid() {
 
 // MultiVersionTenant
 MultiVersionTenant::MultiVersionTenant(Reference<MultiVersionDatabase> db, StringRef tenantName)
-  : db(db), tenantName(tenantName) {
+  : tenantName(tenantName), db(db) {
 	updateTenant();
 }
 
@@ -1333,7 +1341,7 @@ Reference<IDatabase> MultiVersionDatabase::debugCreateFromExistingDatabase(Refer
 	return Reference<IDatabase>(new MultiVersionDatabase(MultiVersionApi::api, 0, "", db, db, false));
 }
 
-Reference<ITenant> MultiVersionDatabase::openTenant(StringRef tenantName) {
+Reference<ITenant> MultiVersionDatabase::openTenant(TenantNameRef tenantName) {
 	return makeReference<MultiVersionTenant>(Reference<MultiVersionDatabase>::addRef(this), tenantName);
 }
 
@@ -1406,7 +1414,7 @@ ThreadFuture<ProtocolVersion> MultiVersionDatabase::getServerProtocol(Optional<P
 }
 
 // Registers a tenant with the given name. A prefix is automatically allocated for the tenant.
-ThreadFuture<Void> MultiVersionDatabase::createTenant(StringRef const& tenantName) {
+ThreadFuture<Void> MultiVersionDatabase::createTenant(TenantNameRef const& tenantName) {
 	Standalone<StringRef> tenantNameCopy = tenantName;
 	Reference<MultiVersionDatabase> self = Reference<MultiVersionDatabase>::addRef(this);
 
@@ -1414,7 +1422,7 @@ ThreadFuture<Void> MultiVersionDatabase::createTenant(StringRef const& tenantNam
 }
 
 // Deletes the tenant with the given name. The tenant must be empty.
-ThreadFuture<Void> MultiVersionDatabase::deleteTenant(StringRef const& tenantName) {
+ThreadFuture<Void> MultiVersionDatabase::deleteTenant(TenantNameRef const& tenantName) {
 	Standalone<StringRef> tenantNameCopy = tenantName;
 	Reference<MultiVersionDatabase> self = Reference<MultiVersionDatabase>::addRef(this);
 

@@ -191,6 +191,8 @@ public:
 	void setSpecialKeySpaceErrorMsg(const std::string& msg) { specialKeySpaceErrorMsg = msg; }
 	Transaction& getTransaction() { return tr; }
 
+	Optional<TenantName> getTenant() { return tr.getTenant(); }
+
 	// used in template functions as returned Future type
 	template <typename Type>
 	using FutureT = Future<Type>;

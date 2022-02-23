@@ -35,7 +35,7 @@ public:
 	~ThreadSafeDatabase() override;
 	static ThreadFuture<Reference<IDatabase>> createFromExistingDatabase(Database cx);
 
-	Reference<ITenant> openTenant(StringRef tenantName) override;
+	Reference<ITenant> openTenant(TenantNameRef tenantName) override;
 	Reference<ITransaction> createTransaction() override;
 
 	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
@@ -48,10 +48,10 @@ public:
 	    Optional<ProtocolVersion> expectedVersion = Optional<ProtocolVersion>()) override;
 
 	// Registers a tenant with the given name. A prefix is automatically allocated for the tenant.
-	ThreadFuture<Void> createTenant(StringRef const& name) override;
+	ThreadFuture<Void> createTenant(TenantNameRef const& name) override;
 
 	// Deletes the tenant with the given name. The tenant must be empty.
-	ThreadFuture<Void> deleteTenant(StringRef const& name) override;
+	ThreadFuture<Void> deleteTenant(TenantNameRef const& name) override;
 
 	// Returns after a majority of coordination servers are available and have reported a leader. The
 	// cluster file therefore is valid, but the database might be unavailable.
@@ -174,6 +174,8 @@ public:
 	ThreadFuture<Void> checkDeferredError();
 	ThreadFuture<Void> onError(Error const& e) override;
 
+	Optional<TenantName> getTenant() override;
+
 	// These are to permit use as state variables in actors:
 	ThreadSafeTransaction() : tr(nullptr) {}
 	void operator=(ThreadSafeTransaction&& r) noexcept;
@@ -186,6 +188,7 @@ public:
 
 private:
 	ISingleThreadTransaction* tr;
+	const Optional<TenantName> tenantName;
 };
 
 // An implementation of IClientApi that serializes operations onto the network thread and interacts with the lower-level

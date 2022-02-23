@@ -393,7 +393,7 @@ extern "C" DLLEXPORT fdb_error_t fdb_database_open_tenant(FDBDatabase* d,
                                                           int tenant_name_length,
                                                           FDBTenant** out_tenant) {
 	CATCH_AND_RETURN(*out_tenant =
-	                     (FDBTenant*)DB(d)->openTenant(StringRef(tenant_name, tenant_name_length)).extractPtr(););
+	                     (FDBTenant*)DB(d)->openTenant(TenantNameRef(tenant_name, tenant_name_length)).extractPtr(););
 }
 
 extern "C" DLLEXPORT fdb_error_t fdb_database_create_transaction(FDBDatabase* d, FDBTransaction** out_transaction) {
@@ -450,11 +450,11 @@ extern "C" DLLEXPORT FDBFuture* fdb_database_get_server_protocol(FDBDatabase* db
 }
 
 extern "C" DLLEXPORT FDBFuture* fdb_database_allocate_tenant(FDBDatabase* db, uint8_t const* name, int name_length) {
-	return (FDBFuture*)(DB(db)->createTenant(StringRef(name, name_length)).extractPtr());
+	return (FDBFuture*)(DB(db)->createTenant(TenantNameRef(name, name_length)).extractPtr());
 }
 
 extern "C" DLLEXPORT FDBFuture* fdb_database_remove_tenant(FDBDatabase* db, uint8_t const* name, int name_length) {
-	return (FDBFuture*)(DB(db)->deleteTenant(StringRef(name, name_length)).extractPtr());
+	return (FDBFuture*)(DB(db)->deleteTenant(TenantNameRef(name, name_length)).extractPtr());
 }
 
 extern "C" DLLEXPORT fdb_error_t fdb_tenant_create_transaction(FDBTenant* tenant, FDBTransaction** out_transaction) {

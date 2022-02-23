@@ -449,6 +449,7 @@ public:
 	}
 
 	Future<Key> getTenantPrefix();
+	Optional<TenantName> getTenant() { return trState->tenant; }
 
 	Reference<TransactionState> trState;
 	std::vector<Reference<Watch>> watches;

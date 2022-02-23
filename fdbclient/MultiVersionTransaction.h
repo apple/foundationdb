@@ -364,6 +364,11 @@ public:
 	ThreadFuture<Void> onError(Error const& e) override;
 	void reset() override;
 
+	Optional<TenantName> getTenant() override {
+		ASSERT(false);
+		throw internal_error();
+	}
+
 	void addref() override { ThreadSafeReferenceCounted<DLTransaction>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<DLTransaction>::delref(); }
 
@@ -405,7 +410,7 @@ public:
 
 	ThreadFuture<Void> onReady();
 
-	Reference<ITenant> openTenant(StringRef tenantName) override;
+	Reference<ITenant> openTenant(TenantNameRef tenantName) override;
 	Reference<ITransaction> createTransaction() override;
 	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
 	double getMainThreadBusyness() override;
@@ -417,10 +422,10 @@ public:
 	    Optional<ProtocolVersion> expectedVersion = Optional<ProtocolVersion>()) override;
 
 	// Registers a tenant with the given name. A prefix is automatically allocated for the tenant.
-	ThreadFuture<Void> createTenant(StringRef const& tenantName) override;
+	ThreadFuture<Void> createTenant(TenantNameRef const& tenantName) override;
 
 	// Deletes the tenant with the given name. The tenant must be empty.
-	ThreadFuture<Void> deleteTenant(StringRef const& tenantName) override;
+	ThreadFuture<Void> deleteTenant(TenantNameRef const& tenantName) override;
 
 	void addref() override { ThreadSafeReferenceCounted<DLDatabase>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<DLDatabase>::delref(); }
@@ -546,6 +551,8 @@ public:
 	ThreadFuture<Void> onError(Error const& e) override;
 	void reset() override;
 
+	Optional<TenantName> getTenant() override;
+
 	void addref() override { ThreadSafeReferenceCounted<MultiVersionTransaction>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<MultiVersionTransaction>::delref(); }
 
@@ -595,6 +602,8 @@ private:
 	void setDefaultOptions(UniqueOrderedOptionList<FDBTransactionOptions> options);
 
 	std::vector<std::pair<FDBTransactionOptions::Option, Optional<Standalone<StringRef>>>> persistentOptions;
+
+	const Optional<TenantName> tenantName;
 };
 
 struct ClientDesc {
@@ -639,10 +648,10 @@ public:
 	void delref() override { ThreadSafeReferenceCounted<MultiVersionTenant>::delref(); }
 
 	Reference<ThreadSafeAsyncVar<Reference<ITenant>>> tenantVar;
+	const Standalone<StringRef> tenantName;
 
 private:
 	Reference<MultiVersionDatabase> db;
-	const Standalone<StringRef> tenantName;
 
 	Mutex tenantLock;
 	ThreadFuture<Void> tenantUpdater;
@@ -666,7 +675,7 @@ public:
 
 	~MultiVersionDatabase() override;
 
-	Reference<ITenant> openTenant(StringRef tenantName) override;
+	Reference<ITenant> openTenant(TenantNameRef tenantName) override;
 	Reference<ITransaction> createTransaction() override;
 	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
 	double getMainThreadBusyness() override;
@@ -678,10 +687,10 @@ public:
 	    Optional<ProtocolVersion> expectedVersion = Optional<ProtocolVersion>()) override;
 
 	// Registers a tenant with the given name. A prefix is automatically allocated for the tenant.
-	ThreadFuture<Void> createTenant(StringRef const& tenantName) override;
+	ThreadFuture<Void> createTenant(TenantNameRef const& tenantName) override;
 
 	// Deletes the tenant with the given name. The tenant must be empty.
-	ThreadFuture<Void> deleteTenant(StringRef const& tenantName) override;
+	ThreadFuture<Void> deleteTenant(TenantNameRef const& tenantName) override;
 
 	void addref() override { ThreadSafeReferenceCounted<MultiVersionDatabase>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<MultiVersionDatabase>::delref(); }

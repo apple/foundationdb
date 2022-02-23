@@ -47,7 +47,7 @@ ThreadFuture<Reference<IDatabase>> ThreadSafeDatabase::createFromExistingDatabas
 	});
 }
 
-Reference<ITenant> ThreadSafeDatabase::openTenant(StringRef tenantName) {
+Reference<ITenant> ThreadSafeDatabase::openTenant(TenantNameRef tenantName) {
 	return makeReference<ThreadSafeTenant>(Reference<ThreadSafeDatabase>::addRef(this), tenantName);
 }
 
@@ -117,7 +117,7 @@ ThreadFuture<ProtocolVersion> ThreadSafeDatabase::getServerProtocol(Optional<Pro
 }
 
 // Registers a tenant with the given name. A prefix is automatically allocated for the tenant.
-ThreadFuture<Void> ThreadSafeDatabase::createTenant(StringRef const& name) {
+ThreadFuture<Void> ThreadSafeDatabase::createTenant(TenantNameRef const& name) {
 	DatabaseContext* db = this->db;
 	TenantName tenantNameCopy = name;
 	return onMainThread([db, tenantNameCopy]() -> Future<Void> {
@@ -126,7 +126,7 @@ ThreadFuture<Void> ThreadSafeDatabase::createTenant(StringRef const& name) {
 }
 
 // Deletes the tenant with the given name. The tenant must be empty.
-ThreadFuture<Void> ThreadSafeDatabase::deleteTenant(StringRef const& name) {
+ThreadFuture<Void> ThreadSafeDatabase::deleteTenant(TenantNameRef const& name) {
 	DatabaseContext* db = this->db;
 	TenantName tenantNameCopy = name;
 	return onMainThread([db, tenantNameCopy]() -> Future<Void> {
@@ -171,7 +171,8 @@ ThreadSafeTenant::~ThreadSafeTenant() {}
 
 ThreadSafeTransaction::ThreadSafeTransaction(DatabaseContext* cx,
                                              ISingleThreadTransaction::Type type,
-                                             Optional<TenantName> tenant) {
+                                             Optional<TenantName> tenant)
+  : tenantName(tenant) {
 	// Allocate memory for the transaction from this thread (so the pointer is known for subsequent method calls)
 	// but run its constructor on the main thread
 
@@ -495,6 +496,10 @@ ThreadFuture<Void> ThreadSafeTransaction::checkDeferredError() {
 ThreadFuture<Void> ThreadSafeTransaction::onError(Error const& e) {
 	ISingleThreadTransaction* tr = this->tr;
 	return onMainThread([tr, e]() { return tr->onError(e); });
+}
+
+Optional<TenantName> ThreadSafeTransaction::getTenant() {
+	return tenantName;
 }
 
 void ThreadSafeTransaction::operator=(ThreadSafeTransaction&& r) noexcept {
