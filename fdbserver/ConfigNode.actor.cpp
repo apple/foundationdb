@@ -495,7 +495,7 @@ class ConfigNodeImpl {
 	}
 
 	ACTOR static Future<Void> rollforward(ConfigNodeImpl* self, ConfigFollowerRollforwardRequest req) {
-		Version lastCompactedVersion = wait(getLastCompactedVersion(self));
+		state Version lastCompactedVersion = wait(getLastCompactedVersion(self));
 		if (req.lastKnownCommitted < lastCompactedVersion) {
 			req.reply.sendError(version_already_compacted());
 			return Void();
@@ -529,6 +529,10 @@ class ConfigNodeImpl {
 			                                 versionedAnnotationKey(currentGeneration.committedVersion + 1)));
 
 			currentGeneration.committedVersion = req.rollback.get();
+			if (req.rollback.get() < lastCompactedVersion) {
+				self->kvStore->set(
+				    KeyValueRef(lastCompactedVersionKey, BinaryWriter::toValue(req.rollback.get(), IncludeVersion())));
+			}
 			// The mutation commit loop below should persist the new generation
 			// to disk, so we don't need to do it here.
 		}
