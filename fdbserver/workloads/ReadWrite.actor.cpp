@@ -231,12 +231,12 @@ struct ReadWriteWorkload : KVWorkload {
 			hotKeyFraction = getOption(options, "hotKeyFraction"_sr, 0.0);
 			hotServerFraction = getOption(options, "hotServerFraction"_sr, 0.0);
 			skewRound = getOption(options, "skewRound"_sr, 0);
-			hotServerReadFrac = getOption(options, "hotServerReadFrac"_sr, 0.0);
+			hotServerReadFrac = getOption(options, "hotServerReadFrac"_sr, 0.8);
 			hotServerWriteFrac = getOption(options, "hotServerWriteFrac"_sr, 0.0);
 			double hotTrafficFraction = getOption(options, LiteralStringRef("hotTrafficFraction"), 0.0);
 
 			if (hotServerFraction > 0) {
-				ASSERT(hotServerReadFrac >= hotServerFraction && hotServerWriteFrac >= hotServerFraction &&
+				ASSERT((hotServerReadFrac >= hotServerFraction || hotServerWriteFrac >= hotServerFraction) &&
 				       skewRound > 0);
 			} else if (hotKeyFraction > 0) {
 				ASSERT(hotTrafficFraction <= 1);
@@ -380,13 +380,15 @@ struct ReadWriteWorkload : KVWorkload {
 			    return tr->getRange(serverKeysRange, CLIENT_KNOBS->TOO_MANY, Snapshot::True);
 		    }));
 
+		// clear self->serverShards
+		self->serverShards.clear();
+
 		// leftEdge < workloadBegin < workloadEnd
 		Key workloadBegin = self->keyForIndex(0), workloadEnd = self->keyForIndex(self->nodeCount);
 		Key leftEdge(allKeys.begin);
 		std::vector<UID> leftServer; // left server owns the range [leftEdge, workloadBegin)
 		KeyRangeRef workloadRange(workloadBegin, workloadEnd);
 		std::map<int64_t, std::vector<UID>> beginServers; // begin index to server ID
-		std::vector<int64_t> keyIndex; // shard boundary by index
 
 		for (auto kv = range.begin(); kv != range.end(); kv++) {
 			if (serverHasKey(kv->value)) {
@@ -395,7 +397,6 @@ struct ReadWriteWorkload : KVWorkload {
 				if (workloadRange.contains(key)) {
 					auto idx = self->indexForKey(key);
 					beginServers[idx].push_back(id);
-					keyIndex.push_back(idx);
 				} else if (workloadBegin > key && key > leftEdge) { // update left boundary
 					leftEdge = key;
 					leftServer.clear();
@@ -409,20 +410,21 @@ struct ReadWriteWorkload : KVWorkload {
 		ASSERT(beginServers.begin()->first >= 0);
 		// handle the left boundary
 		if (beginServers.begin()->first > 0) {
-			keyIndex.push_back(0);
-			beginServers[0] = std::move(leftServer);
+			beginServers[0] = leftServer;
 		}
 
 		// sort shard begin idx
-		ASSERT(keyIndex.size() == beginServers.size());
-		std::sort(keyIndex.begin(), keyIndex.end());
 		// build self->serverShards, starting from the left shard
 		std::map<UID, IndexRangeVec> serverShards;
-		int i = 0;
-		for (auto it = beginServers.begin(); i < keyIndex.size() && it != beginServers.end(); ++i, ++it) {
-			auto shardEnd = i < keyIndex.size() - 1 ? keyIndex[i + 1] : self->nodeCount;
-			for (auto id : it->second) {
-				serverShards[id].emplace_back(keyIndex[i], shardEnd);
+		auto nextIt = std::next(beginServers.begin());
+		for (auto it : beginServers) {
+			auto shardEnd = self->nodeCount;
+			if (nextIt != beginServers.end()) {
+				shardEnd = nextIt->first;
+				++nextIt;
+			}
+			for (auto id : it.second) {
+				serverShards[id].emplace_back(it.first, shardEnd);
 			}
 		}
 		// self->serverShards is ordered by UID
@@ -898,7 +900,8 @@ struct ReadWriteWorkload : KVWorkload {
 								tr.set(self->keyForIndex(startKey + op, false), values[op]);
 						} else {
 							for (int op = 0; op < writes; op++)
-								tr.set(self->keyForIndex(self->getRandomKey(self->nodeCount, false), false), values[op]);
+								tr.set(self->keyForIndex(self->getRandomKey(self->nodeCount, false), false),
+								       values[op]);
 						}
 						for (int op = 0; op < extra_read_conflict_ranges; op++)
 							tr.addReadConflictRange(extra_ranges[op]);
@@ -997,3 +1000,21 @@ ACTOR Future<std::vector<std::pair<uint64_t, double>>> trackInsertionCount(Datab
 }
 
 WorkloadFactory<ReadWriteWorkload> ReadWriteWorkloadFactory("ReadWrite");
+
+TEST_CASE("/KVWorkload/methods/ParseKeyForIndex") {
+	auto wk = ReadWriteWorkload(WorkloadContext());
+	for (int i = 0; i < 1000; ++i) {
+		auto idx = deterministicRandom()->randomInt64(0, wk.nodeCount);
+		Key k = wk.keyForIndex(idx);
+		auto parse = wk.indexForKey(k);
+		// std::cout << parse << " " << idx << "\n";
+		ASSERT(parse == idx);
+	}
+	for (int i = 0; i < 1000; ++i) {
+		auto idx = deterministicRandom()->randomInt64(0, wk.nodeCount);
+		Key k = wk.keyForIndex(idx, true);
+		auto parse = wk.indexForKey(k, true);
+		ASSERT(parse == idx);
+	}
+	return Void();
+}

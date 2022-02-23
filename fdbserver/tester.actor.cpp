@@ -99,14 +99,16 @@ Key KVWorkload::keyForIndex(uint64_t index) const {
 }
 
 // the reverse process of keyForIndex() without division
-int64_t KVWorkload::indexForKey(const KeyRef& key) const {
+int64_t KVWorkload::indexForKey(const KeyRef& key, bool absent) const {
 	int idx = 0;
-	if(nodePrefix > 0) {
+	if (nodePrefix > 0) {
 		ASSERT(keyBytes >= 32);
 		idx += 16;
 	}
 	ASSERT(keyBytes >= 16);
-	std::string str((char*)key.begin()+idx, key.size() - idx);
+	// extract int64_t index, the reverse process of emplaceIndex()
+	auto end = key.size() - idx - (absent ? 1 : 0);
+	std::string str((char*)key.begin() + idx, end);
 	int64_t res = std::stoll(str, nullptr, 16);
 	return res;
 }
@@ -124,9 +126,8 @@ Key KVWorkload::keyForIndex(uint64_t index, bool absent) const {
 		idx += 16;
 	}
 	ASSERT(keyBytes >= 16);
-	double d = double(index) / nodeCount;
-	emplaceIndex(data, idx, *(int64_t*)&d);
-
+	emplaceIndex(data, idx, (int64_t)index);
+	// ASSERT(indexForKey(result) == (int64_t)index); // debug assert
 	return result;
 }
 
