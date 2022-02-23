@@ -443,25 +443,6 @@ struct DataShard {
 		logShardEvent(name, ShardOp::DESTROY);
 	}
 
-	/*
-	bool crateDb() {
-	    if (db)
-	        return true;
-	    std::vector<rocksdb::ColumnFamilyDescriptor> defaultCF = { rocksdb::ColumnFamilyDescriptor{ "default",
-	                                                                                                getCFOptions() } };
-	    std::vector<rocksdb::ColumnFamilyHandle*> handle;
-	    auto options = getOptions();
-	    rocksdb::Status status = rocksdb::DB::Open(options, name, defaultCF, &handle, &db);
-	    if (!status.ok()) {
-	        logRocksDBError(status, "AddShard");
-	        logShardEvent(name, range, ShardOp::CREATE, SevError, s.ToString());
-	        a.done.sendError(statusToError(status));
-	        return false;
-	    }
-	    logShardEvent(name, range, ShardOp::CREATE);
-	    return true;
-	}*/
-
 	rocksdb::DB* db = nullptr;
 	std::unique_ptr<rocksdb::WriteBatch> writeBatch;
 	std::string name;
@@ -475,6 +456,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	using DB = rocksdb::DB*;
 	using CF = rocksdb::ColumnFamilyHandle*;
 	using ShardMap = KeyRangeMap<std::shared_ptr<DataShard>>;
+	using CommitBatchMap = std::unordered_map<std::shared_ptr<DataShard>, std::unique_ptr<rocksdb::WriteBatch>>;
 
 	struct Writer : IThreadPoolReceiver {
 		DB& db;
@@ -618,13 +600,14 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			std::string dataPath;
 			ThreadReturnPromise<Void> done;
 			ShardMap* shardMap;
-			std::set<std::shared_ptr<DataShard>>* dirtyShards;
+			std::set<std::shared_ptr<DataShard>>* uncommittedShards;
 
 			RestoreDurableStateAction(std::string path,
 			                          std::string dataPath,
 			                          ShardMap* shardMap,
-			                          std::set<std::shared_ptr<DataShard>>* dirtyShards)
-			  : path(std::move(path)), dataPath(std::move(dataPath)), shardMap(shardMap), dirtyShards(dirtyShards) {
+			                          std::set<std::shared_ptr<DataShard>>* uncommittedShards)
+			  : path(std::move(path)), dataPath(std::move(dataPath)), shardMap(shardMap),
+			    uncommittedShards(uncommittedShards) {
 				ASSERT(shardMap);
 			}
 
@@ -635,12 +618,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			ASSERT(db); // Database should have been created.
 
 			TraceEvent(SevInfo, "RocksDB").detail("Method", "RestoreDurableState");
-			if (a.dirtyShards) {
+			if (a.uncommittedShards) {
 				// Do not destroy shard
-				for (auto shard : *a.dirtyShards) {
+				for (auto shard : *a.uncommittedShards) {
 					shard->deletePending = false;
 				}
-				a.dirtyShards->clear(); // All the shards should have been closed.
+				a.uncommittedShards->clear(); // All the shards should have been closed.
 			}
 
 			// Read and reload metadata.
@@ -718,7 +701,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		};
 
 		struct CommitAction : TypedAction<Writer, CommitAction> {
-			std::unique_ptr<std::set<std::shared_ptr<DataShard>>> dirtyShards;
+			std::unique_ptr<CommitBatchMap> shardsToCommit;
 			ThreadReturnPromise<Void> done;
 			double startTime;
 			bool getHistograms;
@@ -774,10 +757,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 			rocksdb::Status s;
 			std::shared_ptr<DataShard> specialKeysShard;
+			rocksdb::WriteBatch* writeBatch;
 
-			for (auto shard : *(a.dirtyShards)) {
+			for (auto& [shard, batch] : *(a.shardsToCommit)) {
 				if (shard->isSpecialKeysShard) {
 					specialKeysShard = shard;
+					writeBatch = batch.get();
 					continue;
 				}
 
@@ -786,12 +771,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 					shard->deletePending = true;
 					continue;
 				}
-
-				/*
-				if (shard->deletePending) {
-				    // Destroy shard.
-				    continue;
-				}*/
 
 				if (!shard->db) {
 					// create db
@@ -809,8 +788,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 					logShardEvent(shard->name, ShardOp::CREATE);
 				}
 
-				s = doCommit(shard->writeBatch.get(), shard->db, a.getHistograms);
-				shard->writeBatch = std::make_unique<rocksdb::WriteBatch>();
+				s = doCommit(batch.get(), shard->db, a.getHistograms);
 				if (!s.ok()) {
 					a.done.sendError(statusToError(s));
 					return;
@@ -825,16 +803,15 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 			// System mutation needs to be committed after all other mutations.
 			if (specialKeysShard) {
-				s = doCommit(specialKeysShard->writeBatch.get(), specialKeysShard->db, a.getHistograms);
+				s = doCommit(writeBatch, specialKeysShard->db, a.getHistograms);
 				if (!s.ok()) {
 					a.done.sendError(statusToError(s));
 					return;
 				}
-				specialKeysShard->writeBatch = std::make_unique<rocksdb::WriteBatch>();
 			}
 
 			// Destroy all the delete pending shards.
-			a.dirtyShards->clear();
+			a.shardsToCommit->clear();
 			a.done.send(Void());
 		}
 
@@ -843,14 +820,14 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			std::string path;
 			std::string dataPath;
 			ShardMap* shardMap;
-			std::set<std::shared_ptr<DataShard>>* dirtyShards;
+			std::set<std::shared_ptr<DataShard>>* uncommittedShards;
 			bool deleteOnClose;
 			CloseAction(std::string path,
 			            std::string dataPath,
 			            ShardMap* shardMap,
-			            std::set<std::shared_ptr<DataShard>>* dirtyShards,
+			            std::set<std::shared_ptr<DataShard>>* uncommittedShards,
 			            bool deleteOnClose)
-			  : path(path), dataPath(dataPath), shardMap(shardMap), dirtyShards(dirtyShards),
+			  : path(path), dataPath(dataPath), shardMap(shardMap), uncommittedShards(uncommittedShards),
 			    deleteOnClose(deleteOnClose) {}
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
@@ -868,8 +845,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 						it.value()->deletePending = true;
 					}
 				}
-				if (a.dirtyShards) {
-					for (auto shard : *(a.dirtyShards)) {
+				if (a.uncommittedShards) {
+					for (auto shard : *(a.uncommittedShards)) {
 						shard->segments.clear();
 						shard->deletePending = true;
 					}
@@ -879,8 +856,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			// Close and delete shard if needed.
 			a.shardMap->clear();
 
-			if (a.dirtyShards) {
-				a.dirtyShards->clear();
+			if (a.uncommittedShards) {
+				// Delete unpersisted shards here.
+				a.uncommittedShards->clear();
 			}
 
 			TraceEvent(SevInfo, "RocksDB").detail("Path", a.path).detail("Method", "Close");
@@ -1265,7 +1243,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 	void set(KeyValueRef kv, const Arena*) override {
 		if (dirtyShards == nullptr) {
-			dirtyShards.reset(new std::set<std::shared_ptr<DataShard>>());
+			dirtyShards = std::make_unique<std::set<std::shared_ptr<DataShard>>>();
 		}
 
 		auto it = shardMap.rangeContaining(kv.key);
@@ -1292,7 +1270,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 	void clear(KeyRangeRef range, const Arena*) override {
 		if (dirtyShards == nullptr) {
-			dirtyShards.reset(new std::set<std::shared_ptr<DataShard>>());
+			dirtyShards = std::make_unique<std::set<std::shared_ptr<DataShard>>>();
 		}
 
 		auto rangeIterator = shardMap.intersectingRanges(range);
@@ -1317,10 +1295,14 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			return Void();
 		}
 
-		// std::cout << "Commit action\n";
-
 		auto a = new Writer::CommitAction();
-		a->dirtyShards = std::move(dirtyShards);
+		a->shardsToCommit = std::make_unique<CommitBatchMap>();
+		for (auto shard : *dirtyShards) {
+			a->shardsToCommit->emplace(shard, std::move(shard->writeBatch));
+			shard->writeBatch = std::make_unique<rocksdb::WriteBatch>();
+		}
+		dirtyShards = nullptr;
+
 		auto res = a->done.getFuture();
 		writeThread->post(a);
 		return res;
@@ -1465,14 +1447,25 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	}
 
 	StorageBytes getStorageBytes() const override {
-		uint64_t live = 0;
-		ASSERT(db->GetIntProperty(rocksdb::DB::Properties::kLiveSstFilesSize, &live));
+		uint64_t total_live = 0;
+		int64_t total_free = 0;
+		int64_t total_space = 0;
+		// ASSERT(db->GetIntProperty(rocksdb::DB::Properties::kLiveSstFilesSize, &live));
+		for (auto& it : shardMap.ranges()) {
+			if (!it.value() || it.value()->db == nullptr)
+				continue;
 
-		int64_t free;
-		int64_t total;
-		g_network->getDiskBytes(path, free, total);
+			uint64_t live = 0;
+			ASSERT(it.value()->db->GetIntProperty(rocksdb::DB::Properties::kLiveSstFilesSize, &live));
+			total_live += live;
 
-		return StorageBytes(free, total, live, free);
+			int64_t free, space;
+			g_network->getDiskBytes(it.value()->name, free, space);
+			total_free += free;
+			total_space += space;
+		}
+
+		return StorageBytes(total_free, total_space, total_live, total_free);
 	}
 
 	std::vector<rocksdb::DB*> getAllInstances() const {
