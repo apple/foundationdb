@@ -86,6 +86,8 @@ public:
 	// When locationCache in DatabaseContext gets to be this size, items will be evicted
 	int LOCATION_CACHE_EVICTION_SIZE;
 	int LOCATION_CACHE_EVICTION_SIZE_SIM;
+	double LOCATION_CACHE_ENDPOINT_FAILURE_GRACE_PERIOD;
+	double LOCATION_CACHE_FAILED_ENDPOINT_RETRY_INTERVAL;
 
 	int GET_RANGE_SHARD_LIMIT;
 	int WARM_RANGE_SHARD_LIMIT;
