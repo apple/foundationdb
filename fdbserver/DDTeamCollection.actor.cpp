@@ -5644,7 +5644,7 @@ public:
 
 		std::pair<Optional<Reference<IDataDistributionTeam>>, bool> resTeam = req.reply.getFuture().get();
 
-    ASSERT(!resTeam.first.present());
+		ASSERT(!resTeam.first.present());
 
 		return Void();
 	}
