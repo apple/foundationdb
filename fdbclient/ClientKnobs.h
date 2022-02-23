@@ -125,7 +125,6 @@ public:
 	double DEBUG_USE_GRV_CACHE_CHANCE; // Debug setting to change the chance for a regular GRV request to use the cache
 	bool FORCE_GRV_CACHE_OFF; // Panic button to turn off cache. Holds priority over other options.
 	double GRV_CACHE_RK_COOLDOWN; // Required number of seconds to pass after throttling to re-allow cache use
-	int GRV_THROTTLING_THRESHOLD; // Number of iterations spent in the request queue loop which is considered throttling
 	double GRV_SUSTAINED_THROTTLING_THRESHOLD; // If ALL GRV requests have been throttled in the last number of seconds
 	                                           // specified here, ratekeeper is throttling and not a false positive
 
