@@ -681,6 +681,8 @@ Future<Void> createTenant(Reference<DB> db, TenantName name) {
 					// If the tenant did not exist when we started trying to create it, then we will return success
 					// even if someone else created it simultaneously. This helps us avoid problems if the commit
 					// result for creating this tenant is unknown.
+					Version readVersion = wait(safeThreadFutureToFuture(tr->getReadVersion()));
+					TraceEvent("CreatedTenantAlready").detail("Tenant", name).detail("ReadVersion", readVersion);
 					return Void();
 				}
 			} else {
@@ -704,11 +706,21 @@ Future<Void> createTenant(Reference<DB> db, TenantName name) {
 			tr->set(tenantLastIdKey, TenantMapEntry::idToPrefix(newTenant.id));
 			tr->set(tenantMapKey, encodeTenantEntry(newTenant));
 
+			if (BUGGIFY) {
+				throw commit_unknown_result();
+			}
+
 			wait(safeThreadFutureToFuture(tr->commit()));
+
+			if (BUGGIFY) {
+				throw commit_unknown_result();
+			}
+
 			TraceEvent("CreatedTenant")
 			    .detail("Tenant", name)
-			    .detail("ID", newTenant.id)
-			    .detail("Prefix", newTenant.prefix);
+			    .detail("TenantId", newTenant.id)
+			    .detail("Prefix", newTenant.prefix)
+			    .detail("Version", tr->getCommittedVersion());
 
 			return Void();
 		} catch (Error& e) {
@@ -728,7 +740,7 @@ Future<Void> deleteTenant(Reference<DB> db, TenantName name) {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			Optional<TenantMapEntry> tenantEntry = wait(tryGetTenant(db, name));
+			state Optional<TenantMapEntry> tenantEntry = wait(tryGetTenant(db, name));
 			if (!tenantEntry.present()) {
 				if (!tenantCheckCompleted) {
 					throw tenant_not_found();
@@ -736,6 +748,8 @@ Future<Void> deleteTenant(Reference<DB> db, TenantName name) {
 					// If the tenant existed when we started trying to delete it, then we will return success
 					// even if someone else deleted it simultaneously. This helps us avoid problems if the commit
 					// result for deleting this tenant is unknown.
+					Version readVersion = wait(safeThreadFutureToFuture(tr->getReadVersion()));
+					TraceEvent("DeletedTenantAlready").detail("Tenant", name).detail("ReadVersion", readVersion);
 					return Void();
 				}
 			} else {
@@ -749,8 +763,18 @@ Future<Void> deleteTenant(Reference<DB> db, TenantName name) {
 			}
 
 			tr->clear(tenantMapKey);
+
+			if (BUGGIFY) {
+				throw commit_unknown_result();
+			}
+
 			wait(safeThreadFutureToFuture(tr->commit()));
-			TraceEvent("DeletedTenant").detail("Tenant", name);
+
+			if (BUGGIFY) {
+				throw commit_unknown_result();
+			}
+
+			TraceEvent("DeletedTenant").detail("Tenant", name).detail("Version", tr->getCommittedVersion());
 			return Void();
 		} catch (Error& e) {
 			wait(safeThreadFutureToFuture(tr->onError(e)));
