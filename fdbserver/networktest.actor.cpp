@@ -355,6 +355,8 @@ struct P2PNetworkTest {
 	// Random delay before socket writes
 	RandomIntRange waitWriteMilliseconds;
 
+	int useAsyncMethods;
+
 	double startTime;
 	int64_t bytesSent;
 	int64_t bytesReceived;
@@ -397,10 +399,11 @@ struct P2PNetworkTest {
 	               RandomIntRange requests,
 	               RandomIntRange idleMilliseconds,
 	               RandomIntRange waitReadMilliseconds,
-	               RandomIntRange waitWriteMilliseconds)
+	               RandomIntRange waitWriteMilliseconds,
+				   int useAsyncMethods)
 	  : connectionsOut(connectionsOut), requestBytes(sendMsgBytes), replyBytes(recvMsgBytes), requests(requests),
 	    idleMilliseconds(idleMilliseconds), waitReadMilliseconds(waitReadMilliseconds),
-	    waitWriteMilliseconds(waitWriteMilliseconds) {
+	    waitWriteMilliseconds(waitWriteMilliseconds), useAsyncMethods(useAsyncMethods) {
 		bytesSent = 0;
 		bytesReceived = 0;
 		sessionsIn = 0;
@@ -436,7 +439,45 @@ struct P2PNetworkTest {
 				wait(delay(stutter / 1e3));
 			}
 
-			// int len = conn->read((uint8_t*)buffer.begin() + writeOffset, (uint8_t*)buffer.end());
+			int len = conn->read((uint8_t*)buffer.begin() + writeOffset, (uint8_t*)buffer.end());
+			writeOffset += len;
+			self->bytesReceived += len;
+
+			// If buffer is complete, either process it as a header or return it
+			if (writeOffset == buffer.size()) {
+				if (gotHeader) {
+					return buffer;
+				} else {
+					gotHeader = true;
+					int msgSize = *(int*)buffer.begin();
+					if (msgSize == 0) {
+						return Standalone<StringRef>();
+					}
+					buffer = makeString(msgSize);
+					writeOffset = 0;
+				}
+			}
+
+			if (len == 0) {
+				wait(conn->onReadable());
+				wait(delay(0, TaskPriority::ReadSocket));
+			}
+		}
+	}
+
+	ACTOR static Future<Standalone<StringRef>> asyncReadMsg(P2PNetworkTest* self, Reference<IConnection> conn) {
+		state Standalone<StringRef> buffer = makeString(sizeof(int));
+		state int writeOffset = 0;
+		state bool gotHeader = false;
+
+		// Fill buffer sequentially until the initial bytesToRead is read (or more), then read
+		// intended message size and add it to bytesToRead, continue if needed until bytesToRead is 0.
+		loop {
+			int stutter = self->waitReadMilliseconds.get();
+			if (stutter > 0) {
+				wait(delay(stutter / 1e3));
+			}
+
 			int len = wait(conn->async_read((uint8_t*)buffer.begin() + writeOffset, (uint8_t*)buffer.end()));
 			writeOffset += len;
 			self->bytesReceived += len;
@@ -457,7 +498,6 @@ struct P2PNetworkTest {
 			}
 
 			if (len == 0) {
-				// wait(conn->onReadable());
 				wait(delay(0, TaskPriority::ReadSocket));
 			}
 		}
@@ -474,8 +514,8 @@ struct P2PNetworkTest {
 			if (stutter > 0) {
 				wait(delay(stutter / 1e3));
 			}
-			// int sent = conn->write(packets.getUnsent(), FLOW_KNOBS->MAX_PACKET_SEND_BYTES);
-			int sent = wait(conn->async_write(packets.getUnsent(), FLOW_KNOBS->MAX_PACKET_SEND_BYTES));
+			int sent = conn->write(packets.getUnsent(), FLOW_KNOBS->MAX_PACKET_SEND_BYTES);
+			// int sent = wait(conn->async_write(packets.getUnsent(), FLOW_KNOBS->MAX_PACKET_SEND_BYTES));
 
 			if (sent != 0) {
 				self->bytesSent += sent;
@@ -486,7 +526,34 @@ struct P2PNetworkTest {
 				break;
 			}
 
-			// wait(conn->onWritable());
+			wait(conn->onWritable());
+			wait(yield(TaskPriority::WriteSocket));
+		}
+
+		return Void();
+	}
+
+	ACTOR static Future<Void> asyncWriteMsg(P2PNetworkTest* self, Reference<IConnection> conn, StringRef msg) {
+		state UnsentPacketQueue packets;
+		PacketWriter writer(packets.getWriteBuffer(msg.size()), nullptr, Unversioned());
+		writer.serializeBinaryItem((int)msg.size());
+		writer.serializeBytes(msg);
+
+		loop {
+			int stutter = self->waitWriteMilliseconds.get();
+			if (stutter > 0) {
+				wait(delay(stutter / 1e3));
+			}
+			int sent = wait(conn->async_write(packets.getUnsent(), FLOW_KNOBS->MAX_PACKET_SEND_BYTES));
+
+			if (sent != 0) {
+				self->bytesSent += sent;
+				packets.sent(sent);
+			}
+
+			if (packets.empty()) {
+				break;
+			}
 			wait(yield(TaskPriority::WriteSocket));
 		}
 
@@ -500,29 +567,60 @@ struct P2PNetworkTest {
 			if (incoming) {
 				wait(conn->acceptHandshake());
 
+				Standalone<StringRef> buf;
 				// Read the number of requests for the session
-				Standalone<StringRef> buf = wait(readMsg(self, conn));
-				ASSERT(buf.size() == sizeof(int));
-				numRequests = *(int*)buf.begin();
+				if ( self->useAsyncMethods ){
+					Standalone<StringRef> buf = wait(asyncReadMsg(self, conn));
+
+
+					ASSERT(buf.size() == sizeof(int));
+					numRequests = *(int*)buf.begin();
+
+				} else {
+					Standalone<StringRef> buf = wait(readMsg(self, conn));
+					
+
+					ASSERT(buf.size() == sizeof(int));
+					numRequests = *(int*)buf.begin();
+				}
+
 			} else {
 				wait(conn->connectHandshake());
 
 				// Pick the number of requests for the session and send it to remote
 				numRequests = self->requests.get();
-				wait(writeMsg(self, conn, StringRef((const uint8_t*)&numRequests, sizeof(int))));
+				if ( self->useAsyncMethods )
+					wait(asyncWriteMsg(self, conn, StringRef((const uint8_t*)&numRequests, sizeof(int))));
+				else
+					wait(writeMsg(self, conn, StringRef((const uint8_t*)&numRequests, sizeof(int))));
 			}
 
 			while (numRequests > 0) {
 				if (incoming) {
-					// Wait for a request
-					wait(success(readMsg(self, conn)));
-					// Send a reply
-					wait(writeMsg(self, conn, self->msgBuffer.substr(0, self->replyBytes.get())));
+					if ( self->useAsyncMethods ){
+						// Wait for a request
+						wait(success(asyncReadMsg(self, conn)));
+						// Send a reply
+						wait(asyncWriteMsg(self, conn, self->msgBuffer.substr(0, self->replyBytes.get())));
+					} else {
+						// Wait for a request
+						wait(success(readMsg(self, conn)));
+						// Send a reply
+						wait(writeMsg(self, conn, self->msgBuffer.substr(0, self->replyBytes.get())));
+					}
 				} else {
-					// Send a request
-					wait(writeMsg(self, conn, self->msgBuffer.substr(0, self->requestBytes.get())));
-					// Wait for a reply
-					wait(success(readMsg(self, conn)));
+					if ( self->useAsyncMethods ){
+						// Send a request
+						wait(asyncWriteMsg(self, conn, self->msgBuffer.substr(0, self->requestBytes.get())));
+						// Wait for a reply
+						wait(success(asyncReadMsg(self, conn)));
+					} else {
+
+						// Send a request
+						wait(writeMsg(self, conn, self->msgBuffer.substr(0, self->requestBytes.get())));
+						// Wait for a reply
+						wait(success(readMsg(self, conn)));
+					}
 				}
 
 				if (--numRequests == 0) {
@@ -608,6 +706,7 @@ struct P2PNetworkTest {
 		printf("Delay before socket write: %s\n", self->waitWriteMilliseconds.toString().c_str());
 		printf("Delay before session close: %s\n", self->idleMilliseconds.toString().c_str());
 		printf("Send/Recv size %d bytes\n", FLOW_KNOBS->MAX_PACKET_SEND_BYTES);
+		printf("Using new async methods: %d \n", self->useAsyncMethods);
 
 		if ((self->remotes.empty() || self->connectionsOut == 0) && self->listeners.empty()) {
 			printf("No listeners and no remotes or connectionsOut, so there is nothing to do!\n");
@@ -652,7 +751,8 @@ TEST_CASE(":/network/p2ptest") {
 	                         params.get("requests").orDefault("10:10000"),
 	                         params.get("idleMilliseconds").orDefault("0"),
 	                         params.get("waitReadMilliseconds").orDefault("0"),
-	                         params.get("waitWriteMilliseconds").orDefault("0"));
+	                         params.get("waitWriteMilliseconds").orDefault("0"),
+							 params.getInt("useAsyncMethods").orDefault(1));
 
 	wait(p2p.run());
 	return Void();
