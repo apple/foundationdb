@@ -160,37 +160,22 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 			                      std::min<Version>(SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS,
 			                                        SERVER_KNOBS->VERSIONS_PER_SECOND * (t1 - self->lastVersionTime)));
 
-			if (self->referenceVersion >= 0) {
-				Version expectedVersion =
-				    g_network->timer() * SERVER_KNOBS->VERSIONS_PER_SECOND - self->referenceVersion;
-
-				// How far the new version is off from the expected version.
-				Version offset = self->version + toAdd - expectedVersion;
-				// Clamp the offset to a specific range. This prevents huge version
-				// jumps.
-				Version clamped =
-				    std::clamp(offset, -SERVER_KNOBS->MAX_VERSION_RATE_OFFSET, SERVER_KNOBS->MAX_VERSION_RATE_OFFSET);
-
-				// Translate the version offset (in the range [-1,000,000,
-				// 1,000,000]) to a value in the range [0.9, 1.1]). Note that these
-				// values are examples, and are based on the
-				// MAX_VERSION_RATE_OFFSET and MAX_VERSION_RATE_MODIFIER knobs.
-				double modifier = SERVER_KNOBS->MAX_VERSION_RATE_MODIFIER / SERVER_KNOBS->MAX_VERSION_RATE_OFFSET;
-				// Use std::pow to apply a more aggressive curve to version
-				// corrections. Versions further from the expected version will
-				// receive a larger multiplier.
-				double versionCorrection =
-				    std::clamp(std::pow((1.0 - SERVER_KNOBS->MAX_VERSION_RATE_MODIFIER) +
-				                            modifier * (-clamped + SERVER_KNOBS->MAX_VERSION_RATE_OFFSET),
-				                        2.5),
-				               1.0 - SERVER_KNOBS->MAX_VERSION_RATE_MODIFIER,
-				               1.0 + SERVER_KNOBS->MAX_VERSION_RATE_MODIFIER);
-				;
-				toAdd = std::max(static_cast<Version>(1), static_cast<Version>(toAdd * versionCorrection));
-			}
-
 			rep.prevVersion = self->version;
-			self->version += toAdd;
+			if (self->referenceVersion >= 0) {
+				Version expected = g_network->timer() * SERVER_KNOBS->VERSIONS_PER_SECOND - self->referenceVersion;
+
+				// Attempt to jump directly to the expected version. But make
+				// sure that versions are still being handed out at a rate
+				// around VERSIONS_PER_SECOND. This rate is scaled depending on
+				// how far off the calculated version is from the expected
+				// version.
+				int64_t maxOffset = std::min(static_cast<int64_t>(toAdd * SERVER_KNOBS->MAX_VERSION_RATE_MODIFIER),
+				                             SERVER_KNOBS->MAX_VERSION_RATE_OFFSET);
+				self->version =
+				    std::clamp(expected, self->version + toAdd - maxOffset, self->version + toAdd + maxOffset);
+			} else {
+				self->version = self->version + toAdd;
+			}
 
 			TEST(self->version - rep.prevVersion == 1); // Minimum possible version gap
 
