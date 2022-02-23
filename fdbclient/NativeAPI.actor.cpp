@@ -2889,6 +2889,8 @@ TenantInfo TransactionState::getTenantInfo() const {
 	if (!cx->internal && !options.rawAccess && cx->clientInfo->get().tenantMode == TenantMode::REQUIRED &&
 	    !tenant.present()) {
 		throw tenant_name_required();
+	} else if (options.rawAccess) {
+		return TenantInfo();
 	}
 
 	return TenantInfo(tenant);
@@ -3043,13 +3045,9 @@ ACTOR Future<Key> getKey(Reference<TransactionState> trState,
 		                                      // k.getKey()).detail("Offset",k.offset).detail("OrEqual",k.orEqual);
 	}
 
-	state Key resolvedTenantPrefix;
-	if (applyTenantPrefix) {
-		Key _resolvedTenantPrefix = wait(trState->tenantPrefix);
-		resolvedTenantPrefix = _resolvedTenantPrefix;
-		if (resolvedTenantPrefix.size() > 0) {
-			k = KeySelectorRef(k.getKey().withPrefix(resolvedTenantPrefix), k.orEqual, k.offset);
-		}
+	state Key resolvedTenantPrefix = wait(trState->tenantPrefix);
+	if (applyTenantPrefix && resolvedTenantPrefix.size() > 0) {
+		k = KeySelectorRef(k.getKey().withPrefix(resolvedTenantPrefix), k.orEqual, k.offset);
 	}
 
 	loop {
@@ -3679,9 +3677,11 @@ Future<RangeResultFamily> getRangeFallback(Reference<TransactionState> trState,
 	    trState, version, KeyRangeRef(b, e), mapper, limits, reverse, useTenant));
 	RangeResultFamily r = _r;
 
-	if (b == allKeys.begin && ((reverse && !r.more) || !reverse))
+	ASSERT(trState->tenantPrefix.isReady());
+
+	if (b.removePrefix(trState->tenantPrefix.get()) == allKeys.begin && ((reverse && !r.more) || !reverse))
 		r.readToBegin = true;
-	if (e == allKeys.end && ((!reverse && !r.more) || reverse))
+	if (e.removePrefix(trState->tenantPrefix.get()) == allKeys.end && ((!reverse && !r.more) || reverse))
 		r.readThroughEnd = true;
 
 	ASSERT(!limits.hasRowLimit() || r.size() <= limits.rows);
@@ -4002,6 +4002,7 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 					if (readThrough) {
 						output.arena().dependsOn(shard.arena());
 						output.readThrough = reverse ? shard.begin : shard.end;
+						ASSERT(output.readThrough.get().startsWith(tenantPrefix));
 					}
 
 					getRangeFinished(trState,
@@ -4023,6 +4024,7 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 					if (readThrough) {
 						output.arena().dependsOn(shard.arena());
 						output.readThrough = reverse ? shard.begin : shard.end;
+						ASSERT(output.readThrough.get().startsWith(tenantPrefix));
 					}
 					output.more = modifiedSelectors || limits.isReached() || rep.more;
 
@@ -4438,7 +4440,15 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
 					if (trState->debugID.present())
 						g_traceBatch.addEvent(
 						    "TransactionDebug", trState->debugID.get().first(), "NativeAPI.getExactRange.After");
-					RangeResult output(RangeResultRef(rep.data, rep.more), rep.arena);
+
+					ASSERT(trState->tenantPrefix.isReady());
+					Key tenantPrefix = trState->tenantPrefix.get();
+
+					RangeResult output;
+					output.more = rep.more;
+					for (auto rr : rep.data) {
+						output.push_back_deep(output.arena(), KeyValueRef(rr.key.removePrefix(tenantPrefix), rr.value));
+					}
 
 					if (tssDuplicateStream.present() && !tssDuplicateStream.get().done()) {
 						// shallow copy the reply with an arena depends, and send it to the duplicate stream for TSS
@@ -4446,8 +4456,8 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
 						replyCopy.version = rep.version;
 						replyCopy.more = rep.more;
 						replyCopy.cached = rep.cached;
-						replyCopy.arena.dependsOn(rep.arena);
-						replyCopy.data.append(replyCopy.arena, rep.data.begin(), rep.data.size());
+						replyCopy.arena.dependsOn(output.arena());
+						replyCopy.data.append(replyCopy.arena, output.begin(), output.size());
 						tssDuplicateStream.get().stream.send(replyCopy);
 					}
 
@@ -4461,7 +4471,7 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
 
 					// If the reply says there is more but we know that we finished the shard, then fix rep.more
 					if (reverse && output.more && rep.data.size() > 0 &&
-					    output[output.size() - 1].key == locations[shard].first.begin) {
+					    rep.data[rep.data.size() - 1].key == locations[shard].first.begin) {
 						output.more = false;
 					}
 
@@ -4481,10 +4491,10 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
 						// Make next request to the same shard with a beginning key just after the last key returned
 						if (reverse)
 							locations[shard].first =
-							    KeyRangeRef(locations[shard].first.begin, output[output.size() - 1].key);
+							    KeyRangeRef(locations[shard].first.begin, rep.data[rep.data.size() - 1].key);
 						else
 							locations[shard].first =
-							    KeyRangeRef(keyAfter(output[output.size() - 1].key), locations[shard].first.end);
+							    KeyRangeRef(keyAfter(rep.data[rep.data.size() - 1].key), locations[shard].first.end);
 					}
 
 					if (locations[shard].first.empty()) {
@@ -4525,10 +4535,10 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
 					}
 
 					ASSERT(output.size());
-					if (keys.begin == allKeys.begin && !reverse) {
+					if (keys.begin.removePrefix(tenantPrefix) == allKeys.begin && !reverse) {
 						output.readToBegin = true;
 					}
-					if (keys.end == allKeys.end && reverse) {
+					if (keys.end.removePrefix(tenantPrefix) == allKeys.end && reverse) {
 						output.readThroughEnd = true;
 					}
 					results->send(std::move(output));
@@ -5719,14 +5729,9 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 			wait(store(req.transaction.read_snapshot, readVersion));
 		}
 
-		try {
-			Key resolvedTenantPrefix = wait(trState->tenantPrefix);
-			if (!resolvedTenantPrefix.empty()) {
-				applyTenantPrefix(req, resolvedTenantPrefix);
-			}
-		} catch (Error& e) {
-			// TODO: use a different error here?
-			throw not_committed();
+		state Key resolvedTenantPrefix = wait(trState->tenantPrefix);
+		if (!resolvedTenantPrefix.empty()) {
+			applyTenantPrefix(req, resolvedTenantPrefix);
 		}
 
 		startTime = now();
@@ -5817,8 +5822,9 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 						                                        conflictingKRIndices.end());
 						for (auto const& rCRIndex : mergedIds) {
 							const KeyRangeRef kr = req.transaction.read_conflict_ranges[rCRIndex];
-							const KeyRange krWithPrefix = KeyRangeRef(kr.begin.withPrefix(conflictingKeysRange.begin),
-							                                          kr.end.withPrefix(conflictingKeysRange.begin));
+							const KeyRange krWithPrefix = KeyRangeRef(
+							    kr.begin.removePrefix(resolvedTenantPrefix).withPrefix(conflictingKeysRange.begin),
+							    kr.end.removePrefix(resolvedTenantPrefix).withPrefix(conflictingKeysRange.begin));
 							trState->conflictingKeys->insert(krWithPrefix, conflictingKeysTrue);
 						}
 					}
@@ -5861,7 +5867,8 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 		} else {
 			if (e.code() != error_code_transaction_too_old && e.code() != error_code_not_committed &&
 			    e.code() != error_code_database_locked && e.code() != error_code_proxy_memory_limit_exceeded &&
-			    e.code() != error_code_batch_transaction_throttled && e.code() != error_code_tag_throttled) {
+			    e.code() != error_code_batch_transaction_throttled && e.code() != error_code_tag_throttled &&
+			    e.code() != error_code_process_behind && e.code() != error_code_future_version) {
 				TraceEvent(SevError, "TryCommitError").error(e);
 			}
 			if (trState->trLogInfo)
@@ -6214,6 +6221,8 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 		// system key access is handled in RYW.
 		validateOptionValueNotPresent(value);
 		trState->options.rawAccess = true;
+		trState->tenant = Optional<TenantName>();
+		tr.tenantInfo = TenantInfo();
 		break;
 
 	default:
