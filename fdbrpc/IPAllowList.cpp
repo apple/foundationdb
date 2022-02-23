@@ -1,5 +1,5 @@
 /*
- * IPAllowList.h
+ * IPAllowList.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -37,7 +37,7 @@ void printIP(std::array<unsigned char, C> const& addr) {
 }
 
 template <size_t Sz>
-int hostCountImpl(std::array<unsigned char, Sz> const& addr) {
+int netmaskWeightImpl(std::array<unsigned char, Sz> const& addr) {
 	int count = 0;
 	for (int i = 0; i < addr.size() && addr[i] != 0xff; ++i) {
 		std::bitset<8> b(addr[i]);
@@ -63,26 +63,26 @@ IPAddress AuthAllowedSubnet::netmask() const {
 	}
 }
 
-int AuthAllowedSubnet::hostCount() const {
+int AuthAllowedSubnet::netmaskWeight() const {
 	if (addressMask.isV4()) {
 		boost::asio::ip::address_v4 addr(addressMask.toV4());
-		return hostCountImpl(addr.to_bytes());
+		return netmaskWeightImpl(addr.to_bytes());
 	} else {
-		return hostCountImpl(addressMask.toV6());
+		return netmaskWeightImpl(addressMask.toV6());
 	}
 }
 
 AuthAllowedSubnet AuthAllowedSubnet::fromString(std::string_view addressString) {
 	auto pos = addressString.find('/');
 	if (pos == std::string_view::npos) {
-		fmt::print("ERROR: {} is not a valid (use Network-Prefix/hostcount syntax)\n");
+		fmt::print("ERROR: {} is not a valid (use Network-Prefix/netmaskWeight syntax)\n");
 		throw invalid_option();
 	}
 	auto address = addressString.substr(0, pos);
-	auto hostCount = std::stoi(std::string(addressString.substr(pos + 1)));
+	auto netmaskWeight = std::stoi(std::string(addressString.substr(pos + 1)));
 	auto addr = boost::asio::ip::make_address(address);
 	if (addr.is_v4()) {
-		auto bM = createBitMask(addr.to_v4().to_bytes(), hostCount);
+		auto bM = createBitMask(addr.to_v4().to_bytes(), netmaskWeight);
 		// we typically would expect a base address has been passed, but to be safe we still
 		// will make the last bits 0
 		auto mask = boost::asio::ip::address_v4(bM).to_uint();
@@ -92,7 +92,7 @@ AuthAllowedSubnet AuthAllowedSubnet::fromString(std::string_view addressString) 
 		printIP("Mask:", IPAddress(mask));
 		return AuthAllowedSubnet(IPAddress(baseAddress), IPAddress(mask));
 	} else {
-		auto mask = createBitMask(addr.to_v6().to_bytes(), hostCount);
+		auto mask = createBitMask(addr.to_v6().to_bytes(), netmaskWeight);
 		auto baseAddress = addr.to_v6().to_bytes();
 		for (int i = 0; i < mask.size(); ++i) {
 			baseAddress[i] &= mask[i];
@@ -149,7 +149,8 @@ IPAddress parseAddr(std::string const& str) {
 
 struct SubNetTest {
 	AuthAllowedSubnet subnet;
-	SubNetTest(AuthAllowedSubnet&& subnet) : subnet(subnet) {}
+	SubNetTest(AuthAllowedSubnet&& subnet) : subnet(std::move(subnet)) {}
+	SubNetTest(AuthAllowedSubnet const& subnet) : subnet(subnet) {}
 	template <bool V4>
 	static SubNetTest randomSubNetImpl() {
 		constexpr int width = V4 ? 4 : 16;
@@ -162,7 +163,7 @@ struct SubNetTest {
 			}
 			binAddr[i] = rnd[i % 4];
 		}
-		auto hostCount = deterministicRandom()->randomInt(1, width);
+		auto netmaskWeight = deterministicRandom()->randomInt(1, width);
 		std::string address;
 		if constexpr (V4) {
 			address_v4 a(binAddr);
@@ -171,7 +172,7 @@ struct SubNetTest {
 			address_v6 a(binAddr);
 			address = a.to_string();
 		}
-		return SubNetTest(AuthAllowedSubnet::fromString(fmt::format("{}/{}", address, hostCount)));
+		return SubNetTest(AuthAllowedSubnet::fromString(fmt::format("{}/{}", address, netmaskWeight)));
 	}
 	static SubNetTest randomSubNet() {
 		if (deterministicRandom()->coinflip()) {
@@ -182,7 +183,7 @@ struct SubNetTest {
 	}
 
 	template <bool V4>
-	IPAddress intArrayToAddress(uint32_t* arr) {
+	static IPAddress intArrayToAddress(uint32_t* arr) {
 		if constexpr (V4) {
 			return IPAddress(arr[0]);
 		} else {
@@ -197,16 +198,22 @@ struct SubNetTest {
 		return (val & subnetMask) ^ baseAddress;
 	}
 
+	template<bool V4>
+	static IPAddress randomAddress() {
+		constexpr int width = V4 ? 4 : 16;
+		uint32_t rnd[width / 4];
+		for (int i = 0; i < width / 4; ++i) {
+			rnd[i] = deterministicRandom()->randomUInt32();
+		}
+		return intArrayToAddress<V4>(rnd);
+	}
+
 	template <bool V4>
 	IPAddress randomAddress(bool inSubnet) {
 		ASSERT(V4 == subnet.baseAddress.isV4() || !inSubnet);
 		constexpr int width = V4 ? 4 : 16;
 		for (;;) {
-			uint32_t rnd[width / 4];
-			for (int i = 0; i < width / 4; ++i) {
-				rnd[i] = deterministicRandom()->randomUInt32();
-			}
-			auto res = intArrayToAddress<V4>(rnd);
+			auto res = randomAddress<V4>();
 			if (V4 != subnet.baseAddress.isV4()) {
 				return res;
 			}
@@ -272,6 +279,42 @@ TEST_CASE("/fdbrpc/allow_list") {
 	::subnetAssert(allowList, parseAddr("5.2.1.1"), true);
 	::subnetAssert(allowList, parseAddr("128.0.1.1"), false);
 	::subnetAssert(allowList, parseAddr("192.168.3.1"), false);
+	allowList = IPAllowList();
+	allowList.addTrustedSubnet("0.0.0.0/0");
+	SubNetTest subnetTest(allowList.subnets()[0]);
+	for (int i = 0; i < 10; ++i) {
+		// All IPv4 addresses are in the allow list
+		::subnetAssert(allowList, subnetTest.randomAddress<true>(), true);
+		// No IPv6 addresses are in the allow list
+		::subnetAssert(allowList, subnetTest.randomAddress<false>(), false);
+	}
+	allowList = IPAllowList();
+	allowList.addTrustedSubnet("::/0");
+	subnetTest = SubNetTest(allowList.subnets()[0]);
+	for (int i = 0; i < 10; ++i) {
+		// All IPv6 addresses are in the allow list
+		::subnetAssert(allowList, subnetTest.randomAddress<false>(), true);
+		// No IPv4 addresses are ub the allow list
+		::subnetAssert(allowList, subnetTest.randomAddress<true>(), false);
+	}
+	allowList = IPAllowList();
+	IPAddress baseAddress = SubNetTest::randomAddress<true>();
+	allowList.addTrustedSubnet(fmt::format("{}/32", baseAddress.toString()));
+	for (int i = 0; i < 10; ++i) {
+		auto rnd = SubNetTest::randomAddress<true>();
+		::subnetAssert(allowList, rnd, rnd == baseAddress);
+		rnd = SubNetTest::randomAddress<false>();
+		::subnetAssert(allowList, rnd, false);
+	}
+	allowList = IPAllowList();
+	baseAddress = SubNetTest::randomAddress<false>();
+	allowList.addTrustedSubnet(fmt::format("{}/128", baseAddress.toString()));
+	for (int i = 0; i < 10; ++i) {
+		auto rnd = SubNetTest::randomAddress<false>();
+		::subnetAssert(allowList, rnd, rnd == baseAddress);
+		rnd = SubNetTest::randomAddress<true>();
+		::subnetAssert(allowList, rnd, false);
+	}
 	for (int i = 0; i < 100; ++i) {
 		SubNetTest subnetTest(SubNetTest::randomSubNet());
 		allowList = IPAllowList();

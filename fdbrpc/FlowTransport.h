@@ -186,7 +186,7 @@ class IPAllowList;
 
 class FlowTransport {
 public:
-	FlowTransport(uint64_t transportId, int maxWellKnownEndpoints);
+	FlowTransport(uint64_t transportId, int maxWellKnownEndpoints, IPAllowList const* allowList);
 	~FlowTransport();
 
 	// Creates a new FlowTransport and makes FlowTransport::transport() return it.  This uses g_network->global()

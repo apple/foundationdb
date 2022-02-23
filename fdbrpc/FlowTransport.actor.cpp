@@ -258,7 +258,7 @@ struct TenantAuthorizer final : NetworkMessageReceiver {
 
 class TransportData {
 public:
-	TransportData(uint64_t transportId, int maxWellKnownEndpoints);
+	TransportData(uint64_t transportId, int maxWellKnownEndpoints, IPAllowList const* allowList);
 
 	~TransportData();
 
@@ -303,6 +303,7 @@ public:
 	std::map<uint64_t, double> multiVersionConnections;
 	double lastIncompatibleMessage;
 	uint64_t transportId;
+	IPAllowList allowList;
 
 	Future<Void> multiVersionCleanup;
 	Future<Void> pingLogger;
@@ -365,9 +366,10 @@ ACTOR Future<Void> pingLatencyLogger(TransportData* self) {
 	}
 }
 
-TransportData::TransportData(uint64_t transportId, int maxWellKnownEndpoints)
+TransportData::TransportData(uint64_t transportId, int maxWellKnownEndpoints, IPAllowList const* allowList)
   : warnAlwaysForLargePacket(true), endpoints(maxWellKnownEndpoints), endpointNotFoundReceiver(endpoints),
-    pingReceiver(endpoints), numIncompatibleConnections(0), lastIncompatibleMessage(0), transportId(transportId) {
+    pingReceiver(endpoints), numIncompatibleConnections(0), lastIncompatibleMessage(0), transportId(transportId),
+    allowList(allowList == nullptr ? IPAllowList() : *allowList) {
 	degraded = makeReference<AsyncVar<bool>>(false);
 	pingLogger = pingLatencyLogger(this);
 }
@@ -946,6 +948,7 @@ ACTOR static void deliver(TransportData* self,
                           ArenaReader reader,
                           NetworkAddress peerAddress,
                           AuthorizedTenants authorizedTenants,
+						  ContextVariableMap* cvm,
                           bool inReadSocket) {
 	// We want to run the task at the right priority. If the priority is higher than the current priority (which is
 	// ReadSocket) we can just upgrade. Otherwise we'll context switch so that we don't block other tasks that might run
@@ -972,9 +975,7 @@ ACTOR static void deliver(TransportData* self,
 			StringRef data = reader.arenaReadAll();
 			ASSERT(data.size() > 8);
 			ArenaObjectReader objReader(reader.arena(), reader.arenaReadAll(), AssumeVersion(reader.protocolVersion()));
-			bool didInsert = objReader.variable<AuthorizedTenants>("AuthorizedTenants", &authorizedTenants);
-			didInsert = didInsert && objReader.variable<NetworkAddress>("PeerAddress", &peerAddress);
-			ASSERT(didInsert); // check that we could set both context variables
+			objReader.setContextVariableMap(cvm);
 			receiver->receive(objReader);
 			g_currentDeliveryPeerAddress = { NetworkAddress() };
 		} catch (Error& e) {
@@ -1012,7 +1013,8 @@ static void scanPackets(TransportData* transport,
                         const uint8_t* e,
                         Arena& arena,
                         NetworkAddress const& peerAddress,
-                        AuthorizedTenants authorizedTenants,
+                        AuthorizedTenants const& authorizedTenants,
+						ContextVariableMap* cvm,
                         ProtocolVersion peerProtocolVersion) {
 	// Find each complete packet in the given byte range and queue a ready task to deliver it.
 	// Remove the complete packets from the range by increasing unprocessed_begin.
@@ -1132,6 +1134,7 @@ static void scanPackets(TransportData* transport,
 			        std::move(reader),
 			        peerAddress,
 			        authorizedTenants,
+					cvm,
 			        true);
 		}
 
@@ -1179,6 +1182,10 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 	state NetworkAddress peerAddress;
 	state ProtocolVersion peerProtocolVersion;
 	state AuthorizedTenants authorizedTenants;
+	authorizedTenants.trusted = transport->allowList(conn->getPeerAddress().ip);
+	ContextVariableMap cvm;
+	cvm["AuthorizedTenants"] = &authorizedTenants;
+	cvm["PeerAddress"] = &peerAddress;
 
 	peerAddress = conn->getPeerAddress();
 	// TODO: check whether peers ip is in trusted range
@@ -1336,6 +1343,7 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 						            arena,
 						            peerAddress,
 						            authorizedTenants,
+									&cvm,
 						            peerProtocolVersion);
 					} else {
 						unprocessed_begin = unprocessed_end;
@@ -1473,8 +1481,8 @@ ACTOR static Future<Void> multiVersionCleanupWorker(TransportData* self) {
 	}
 }
 
-FlowTransport::FlowTransport(uint64_t transportId, int maxWellKnownEndpoints)
-  : self(new TransportData(transportId, maxWellKnownEndpoints)) {
+FlowTransport::FlowTransport(uint64_t transportId, int maxWellKnownEndpoints, IPAllowList const* allowList)
+  : self(new TransportData(transportId, maxWellKnownEndpoints, allowList)) {
 	self->multiVersionCleanup = multiVersionCleanupWorker(self);
 }
 
@@ -1594,6 +1602,7 @@ static void sendLocal(TransportData* self, ISerializeSource const& what, const E
 	// SOMEDAY: Would it be better to avoid (de)serialization by doing this check in flow?
 
 	Standalone<StringRef> copy;
+	ContextVariableMap cvm;
 	ObjectWriter wr(AssumeVersion(g_network->protocolVersion()));
 	what.serializeObjectWriter(wr);
 	copy = wr.toStringRef();
@@ -1612,6 +1621,7 @@ static void sendLocal(TransportData* self, ISerializeSource const& what, const E
 		        ArenaReader(copy.arena(), copy, AssumeVersion(currentProtocolVersion)),
 		        NetworkAddress(),
 		        authorizedTenants,
+				&cvm,
 		        false);
 	}
 }
@@ -1817,7 +1827,7 @@ void FlowTransport::createInstance(bool isClient,
                                    int maxWellKnownEndpoints,
                                    IPAllowList const* allowList) {
 	g_network->setGlobal(INetwork::enFlowTransport,
-	                     (flowGlobalType) new FlowTransport(transportId, maxWellKnownEndpoints));
+	                     (flowGlobalType) new FlowTransport(transportId, maxWellKnownEndpoints, allowList));
 	g_network->setGlobal(INetwork::enNetworkAddressFunc, (flowGlobalType)&FlowTransport::getGlobalLocalAddress);
 	g_network->setGlobal(INetwork::enNetworkAddressesFunc, (flowGlobalType)&FlowTransport::getGlobalLocalAddresses);
 	g_network->setGlobal(INetwork::enFailureMonitor, (flowGlobalType) new SimpleFailureMonitor());

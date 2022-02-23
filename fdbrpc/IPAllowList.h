@@ -37,15 +37,15 @@ struct AuthAllowedSubnet {
 	static AuthAllowedSubnet fromString(std::string_view addressString);
 
 	template <std::size_t sz>
-	static auto createBitMask(std::array<unsigned char, sz> const& addr, int hostCount)
+	static auto createBitMask(std::array<unsigned char, sz> const& addr, int netmaskWeight)
 	    -> std::array<unsigned char, sz> {
 		std::array<unsigned char, sz> res;
 		res.fill((unsigned char)0xff);
-		int idx = hostCount / 8;
-		if (hostCount % 8 > 0) {
-			// 2^(hostCount % 8) - 1 sets the last (hostCount % 8) number of bits to 1
+		int idx = netmaskWeight / 8;
+		if (netmaskWeight % 8 > 0) {
+			// 2^(netmaskWeight % 8) - 1 sets the last (netmaskWeight % 8) number of bits to 1
 			// everything else will be zero. For example: 2^3 - 1 == 7 == 0b111
-			unsigned char bitmask = (1 << (hostCount % 8)) - ((unsigned char)1);
+			unsigned char bitmask = (1 << (netmaskWeight % 8)) - ((unsigned char)1);
 			res[idx] ^= bitmask;
 			++idx;
 		}
@@ -73,7 +73,7 @@ struct AuthAllowedSubnet {
 
 	IPAddress netmask() const;
 
-	int hostCount() const;
+	int netmaskWeight() const;
 
 	// some useful helper functions if we need to debug ip masks etc
 	static void printIP(std::string_view txt, IPAddress const& address);

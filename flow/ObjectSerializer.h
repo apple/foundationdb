@@ -26,12 +26,14 @@
 
 #include <unordered_map>
 
+using ContextVariableMap = std::unordered_map<std::string_view, void*>;
+
 template <class Ar>
 struct LoadContext {
 	Ar* ar;
-	std::unordered_map<std::string_view, void*> variables;
+	ContextVariableMap* variables;
 
-	LoadContext(Ar* ar) : ar(ar) {}
+	LoadContext(Ar* ar, ContextVariableMap* variables = nullptr) : ar(ar), variables(variables) {}
 	Arena& arena() { return ar->arena(); }
 
 	ProtocolVersion protocolVersion() const { return ar->protocolVersion(); }
@@ -54,19 +56,20 @@ struct LoadContext {
 
 	template <class T>
 	bool variable(std::string_view name, T* val) {
-		auto p = variables.insert(std::make_pair(name, val));
+		auto p = variables->insert(std::make_pair(name, val));
 		return p.second;
 	}
 
 	template <class T>
 	T& variable(std::string_view name) {
-		auto res = variables.at(name);
+		auto res = variables->at(name);
 		return *reinterpret_cast<T*>(res);
 	}
 
 	template <class T>
 	T const& variable(std::string_view name) const {
-		return const_cast<LoadContext<Ar>*>(this)->variable<T>(name);
+		auto res = variables->at(name);
+		return *reinterpret_cast<T*>(res);
 	}
 };
 
@@ -96,6 +99,9 @@ public:
 	_ObjectReader() : context(static_cast<ReaderImpl*>(this)) {}
 	ProtocolVersion protocolVersion() const { return mProtocolVersion; }
 	void setProtocolVersion(ProtocolVersion v) { mProtocolVersion = v; }
+	void setContextVariableMap(ContextVariableMap* cvm) {
+		context.variables = cvm;
+	}
 
 	template <class... Items>
 	void deserialize(FileIdentifier file_identifier, Items&... items) {
