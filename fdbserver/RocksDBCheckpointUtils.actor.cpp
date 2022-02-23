@@ -758,7 +758,7 @@ ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
 ACTOR Future<Void> deleteRocksCFCheckpoint(CheckpointMetaData checkpoint) {
 	state CheckpointFormat format = checkpoint.getFormat();
 	state std::unordered_set<std::string> dirs;
-	if (format = RocksDBColumnFamily) {
+	if (format == RocksDBColumnFamily) {
 		RocksDBColumnFamilyCheckpoint rocksCF = getRocksCF(checkpoint);
 		TraceEvent("DeleteRocksColumnFamilyCheckpoint", checkpoint.checkpointID)
 		    .detail("CheckpointID", checkpoint.checkpointID)

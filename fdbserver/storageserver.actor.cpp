@@ -120,6 +120,8 @@ static const KeyRangeRef persistShardAssignedKeys =
     KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "ShardAssigned/"), LiteralStringRef(PERSIST_PREFIX "ShardAssigned0"));
 static const KeyRangeRef persistShardAvailableKeys =
     KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "ShardAvailable/"), LiteralStringRef(PERSIST_PREFIX "ShardAvailable0"));
+static const KeyRangeRef persistMoveInShardKeys =
+    KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "MoveInShard/"), LiteralStringRef(PERSIST_PREFIX "MoveInShard0"));
 static const KeyRangeRef persistByteSampleKeys =
     KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "BS/"), LiteralStringRef(PERSIST_PREFIX "BS0"));
 static const KeyRangeRef persistByteSampleSampleKeys =
@@ -183,6 +185,58 @@ struct AddingShard : NonCopyable {
 	void addMutation(Version version, bool fromFetch, MutationRef const& mutation);
 
 	bool isTransferred() const { return phase == Waiting; }
+};
+
+struct MoveInShard {
+	constexpr static FileIdentifier file_identifier = 3804366;
+
+	enum State {
+		PreWait = 0,
+		Fetching = 1,
+		Ingesting = 2,
+		ApplyingUpdates = 3,
+		Deleting = 4,
+	};
+
+	UID id;
+	Version version;
+	KeyRange range;
+	int16_t state;
+	Optional<CheckpointMetaData> checkpoint;
+	std::deque<Standalone<VerUpdateRef>> updates;
+
+	Key moveInShardKey() const {
+		BinaryWriter wr(Unversioned());
+		wr.serializeBytes(persistMoveInShardKeys.begin);
+		wr << this->id;
+		return wr.toValue();
+	}
+
+	Value moveInShardValue() const { return ObjectWriter::toValue(*this, IncludeVersion()); }
+
+	static UID decodeMoveInShardKey(const KeyRef& key) {
+		UID id;
+		BinaryReader rd(key.removePrefix(persistMoveInShardKeys.begin), Unversioned());
+		rd >> id;
+		return id;
+	}
+
+	MoveInShard decodeMoveInShardValue(const ValueRef& value) {
+		MoveInShard shard;
+		ObjectReader reader(value.begin(), IncludeVersion());
+		reader.deserialize(shard);
+		return shard;
+	}
+
+	void addMutation(Version version, bool fromFetch, MutationRef const& mutation);
+
+	State getState() const { return static_cast<State>(state); }
+	void setState(State state) { this->state = state; }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, id, version, range, state, checkpoint);
+	}
 };
 
 class ShardInfo : public ReferenceCounted<ShardInfo>, NonCopyable {
@@ -4769,12 +4823,12 @@ void changeServerKeys(StorageServer* data,
                       ChangeServerKeysContext context) {
 	ASSERT(!keys.empty());
 
-	// TraceEvent("ChangeServerKeys", data->thisServerID)
-	//     .detail("KeyBegin", keys.begin)
-	//     .detail("KeyEnd", keys.end)
-	//     .detail("NowAssigned", nowAssigned)
-	//     .detail("Version", version)
-	//     .detail("Context", changeServerKeysContextName[(int)context]);
+	TraceEvent(SevDebug, "ChangeServerKeys", data->thisServerID)
+	    .detail("KeyBegin", keys.begin)
+	    .detail("KeyEnd", keys.end)
+	    .detail("NowAssigned", nowAssigned)
+	    .detail("Version", version)
+	    .detail("Context", changeServerKeysContextName[(int)context]);
 	validate(data);
 
 	// TODO(alexmiller): Figure out how to selectively enable spammy data distribution events.

@@ -6855,7 +6855,8 @@ ACTOR template <class T>
 static Future<Void> createCheckpointImpl(T tr, KeyRangeRef range, CheckpointFormat format) {
 	TraceEvent("CreateCheckpointTransactionBegin").detail("Range", range.toString());
 
-	state RangeResult keyServers = wait(krmGetRanges(tr, keyServersPrefix, range));
+	state RangeResult keyServers = wait(krmGetRanges(
+	    tr, keyServersPrefix, range, GetRangeLimits::ROW_LIMIT_UNLIMITED, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
 	ASSERT(!keyServers.more);
 
 	state RangeResult UIDtoTagMap = wait(tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
