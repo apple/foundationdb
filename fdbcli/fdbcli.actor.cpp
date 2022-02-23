@@ -1157,7 +1157,6 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 	state bool writeMode = false;
 
-	state std::string clusterConnectString;
 	state std::map<Key, std::pair<Value, ClientLeaderRegInterface>> address_interface;
 
 	state FdbOptions globalOptions;
@@ -1171,6 +1170,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	    ClusterConnectionFile::lookupClusterFileName(opt.clusterFile);
 	try {
 		ccf = makeReference<ClusterConnectionFile>(resolvedClusterFile.first);
+		wait(ccf->resolveHostnames());
 	} catch (Error& e) {
 		fprintf(stderr, "%s\n", ClusterConnectionFile::getErrorString(resolvedClusterFile, e).c_str());
 		return 1;
