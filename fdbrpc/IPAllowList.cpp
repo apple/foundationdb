@@ -63,7 +63,6 @@ IPAddress AuthAllowedSubnet::netmask() const {
 	}
 }
 
-
 int AuthAllowedSubnet::hostCount() const {
 	if (addressMask.isV4()) {
 		boost::asio::ip::address_v4 addr(addressMask.toV4());
@@ -150,11 +149,8 @@ IPAddress parseAddr(std::string const& str) {
 
 struct SubNetTest {
 	AuthAllowedSubnet subnet;
-	SubNetTest(AuthAllowedSubnet&& subnet)
-		: subnet(subnet)
-	{
-	}
-	template<bool V4>
+	SubNetTest(AuthAllowedSubnet&& subnet) : subnet(subnet) {}
+	template <bool V4>
 	static SubNetTest randomSubNetImpl() {
 		constexpr int width = V4 ? 4 : 16;
 		std::array<unsigned char, width> binAddr;
@@ -185,7 +181,7 @@ struct SubNetTest {
 		}
 	}
 
-	template<bool V4>
+	template <bool V4>
 	IPAddress intArrayToAddress(uint32_t* arr) {
 		if constexpr (V4) {
 			return IPAddress(arr[0]);
@@ -196,7 +192,7 @@ struct SubNetTest {
 		}
 	}
 
-	template<class I>
+	template <class I>
 	I transformIntToSubnet(I val, I subnetMask, I baseAddress) {
 		return (val & subnetMask) ^ baseAddress;
 	}

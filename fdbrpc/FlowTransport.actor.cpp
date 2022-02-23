@@ -944,8 +944,8 @@ ACTOR static void deliver(TransportData* self,
                           Endpoint destination,
                           TaskPriority priority,
                           ArenaReader reader,
-						  NetworkAddress peerAddress,
-						  AuthorizedTenants authorizedTenants,
+                          NetworkAddress peerAddress,
+                          AuthorizedTenants authorizedTenants,
                           bool inReadSocket) {
 	// We want to run the task at the right priority. If the priority is higher than the current priority (which is
 	// ReadSocket) we can just upgrade. Otherwise we'll context switch so that we don't block other tasks that might run
@@ -961,8 +961,7 @@ ACTOR static void deliver(TransportData* self,
 	auto receiver = self->endpoints.get(destination.token);
 	if (receiver) {
 		if (!authorizedTenants.trusted && !receiver->isPublic()) {
-			TraceEvent(SevWarnAlways, "AttemptedRPCToPrivatePrevented")
-				.detail("From", peerAddress);
+			TraceEvent(SevWarnAlways, "AttemptedRPCToPrivatePrevented").detail("From", peerAddress);
 			throw connection_failed();
 		}
 		if (!checkCompatible(receiver->peerCompatibilityPolicy(), reader.protocolVersion())) {
@@ -1013,7 +1012,7 @@ static void scanPackets(TransportData* transport,
                         const uint8_t* e,
                         Arena& arena,
                         NetworkAddress const& peerAddress,
-						AuthorizedTenants authorizedTenants,
+                        AuthorizedTenants authorizedTenants,
                         ProtocolVersion peerProtocolVersion) {
 	// Find each complete packet in the given byte range and queue a ready task to deliver it.
 	// Remove the complete packets from the range by increasing unprocessed_begin.
@@ -1331,8 +1330,13 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 
 				if (!expectConnectPacket) {
 					if (compatible || peerProtocolVersion.hasStableInterfaces()) {
-						scanPackets(
-						    transport, unprocessed_begin, unprocessed_end, arena, peerAddress, authorizedTenants, peerProtocolVersion);
+						scanPackets(transport,
+						            unprocessed_begin,
+						            unprocessed_end,
+						            arena,
+						            peerAddress,
+						            authorizedTenants,
+						            peerProtocolVersion);
 					} else {
 						unprocessed_begin = unprocessed_end;
 						peer->resetPing.trigger();
@@ -1808,7 +1812,10 @@ bool FlowTransport::incompatibleOutgoingConnectionsPresent() {
 	return self->numIncompatibleConnections > 0;
 }
 
-void FlowTransport::createInstance(bool isClient, uint64_t transportId, int maxWellKnownEndpoints, IPAllowList const* allowList) {
+void FlowTransport::createInstance(bool isClient,
+                                   uint64_t transportId,
+                                   int maxWellKnownEndpoints,
+                                   IPAllowList const* allowList) {
 	g_network->setGlobal(INetwork::enFlowTransport,
 	                     (flowGlobalType) new FlowTransport(transportId, maxWellKnownEndpoints));
 	g_network->setGlobal(INetwork::enNetworkAddressFunc, (flowGlobalType)&FlowTransport::getGlobalLocalAddress);

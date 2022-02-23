@@ -58,23 +58,21 @@ struct ClientWorkloadImpl {
 		databaseOpened = openDatabase(this);
 	}
 
-	~ClientWorkloadImpl() {
-		g_simulator.destroyProcess(childProcess);
-	}
-
+	~ClientWorkloadImpl() { g_simulator.destroyProcess(childProcess); }
 
 	ACTOR static Future<Void> openDatabase(ClientWorkloadImpl* self) {
 		wait(g_simulator.onProcess(self->childProcess));
 		FlowTransport::createInstance(true, 1, WLTOKEN_RESERVED_COUNT);
 		Sim2FileSystem::newFileSystem();
 		TraceEvent("ClientWorkloadOpenDatabase", self->id)
-			.detail("ClusterFileLocation", self->child->ccr->getLocation());
+		    .detail("ClusterFileLocation", self->child->ccr->getLocation());
 		self->cx = Database::createDatabase(self->child->ccr, -1);
 		wait(g_simulator.onProcess(self->self));
 		return Void();
 	}
 
-	ACTOR template<class Ret, class Fun> Future<Ret> runActor(ClientWorkloadImpl* self, Fun f) {
+	ACTOR template <class Ret, class Fun>
+	Future<Ret> runActor(ClientWorkloadImpl* self, Fun f) {
 		state Optional<Error> err;
 		state Ret res;
 		wait(g_simulator.onProcess(self->childProcess));
@@ -82,7 +80,7 @@ struct ClientWorkloadImpl {
 		try {
 			Ret r = wait(f(self->cx));
 			res = r;
-		} catch(Error& e) {
+		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
 				throw;
 			}
@@ -94,11 +92,10 @@ struct ClientWorkloadImpl {
 		}
 		return res;
 	}
-
 };
 
 ClientWorkload::ClientWorkload(Reference<TestWorkload> const& child, WorkloadContext const& wcx)
-	: TestWorkload(wcx), impl(new ClientWorkloadImpl(child)) {
+  : TestWorkload(wcx), impl(new ClientWorkloadImpl(child)) {
 	child->dbInfo = Reference<AsyncVar<ServerDBInfo>>();
 }
 
@@ -108,19 +105,13 @@ std::string ClientWorkload::description() const {
 	return impl->child->description();
 }
 Future<Void> ClientWorkload::setup(Database const& cx) {
-	return impl->runActor<Void>(impl, [this](Database const& db) {
-		return impl->child->setup(db);
-	});
+	return impl->runActor<Void>(impl, [this](Database const& db) { return impl->child->setup(db); });
 }
 Future<Void> ClientWorkload::start(Database const& cx) {
-	return impl->runActor<Void>(impl, [this](Database const& db) {
-		return impl->child->start(db);
-	});
+	return impl->runActor<Void>(impl, [this](Database const& db) { return impl->child->start(db); });
 }
 Future<bool> ClientWorkload::check(Database const& cx) {
-	return impl->runActor<bool>(impl, [this](Database const& db) {
-		return impl->child->check(db);
-	});
+	return impl->runActor<bool>(impl, [this](Database const& db) { return impl->child->check(db); });
 }
 void ClientWorkload::getMetrics(std::vector<PerfMetric>& m) {
 	return impl->child->getMetrics(m);

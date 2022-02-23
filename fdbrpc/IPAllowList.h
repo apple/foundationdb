@@ -37,7 +37,8 @@ struct AuthAllowedSubnet {
 	static AuthAllowedSubnet fromString(std::string_view addressString);
 
 	template <std::size_t sz>
-	static auto createBitMask(std::array<unsigned char, sz> const& addr, int hostCount) -> std::array<unsigned char, sz> {
+	static auto createBitMask(std::array<unsigned char, sz> const& addr, int hostCount)
+	    -> std::array<unsigned char, sz> {
 		std::array<unsigned char, sz> res;
 		res.fill((unsigned char)0xff);
 		int idx = hostCount / 8;
@@ -54,7 +55,7 @@ struct AuthAllowedSubnet {
 		return res;
 	}
 
-	bool operator() (IPAddress const& address) const {
+	bool operator()(IPAddress const& address) const {
 		if (addressMask.isV4() != address.isV4()) {
 			return false;
 		}
@@ -80,20 +81,15 @@ struct AuthAllowedSubnet {
 
 class IPAllowList {
 	std::vector<AuthAllowedSubnet> subnetList;
+
 public:
-	void addTrustedSubnet(std::string_view str) {
-		subnetList.push_back(AuthAllowedSubnet::fromString(str));
-	}
+	void addTrustedSubnet(std::string_view str) { subnetList.push_back(AuthAllowedSubnet::fromString(str)); }
 
-	void addTrustedSubnet(AuthAllowedSubnet const& subnet) {
-		subnetList.push_back(subnet);
-	}
+	void addTrustedSubnet(AuthAllowedSubnet const& subnet) { subnetList.push_back(subnet); }
 
-	std::vector<AuthAllowedSubnet> const& subnets() const {
-		return subnetList;
-	}
+	std::vector<AuthAllowedSubnet> const& subnets() const { return subnetList; }
 
-	bool operator() (IPAddress address) const {
+	bool operator()(IPAddress address) const {
 		if (subnetList.empty()) {
 			return true;
 		}

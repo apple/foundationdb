@@ -137,7 +137,9 @@ struct IWorkloadFactory : ReferenceCounted<IWorkloadFactory> {
 template <class WorkloadType>
 struct WorkloadFactory : IWorkloadFactory {
 	bool asClient;
-	WorkloadFactory(const char* name, bool asClient = false) : asClient(asClient) { factories()[name] = Reference<IWorkloadFactory>::addRef(this); }
+	WorkloadFactory(const char* name, bool asClient = false) : asClient(asClient) {
+		factories()[name] = Reference<IWorkloadFactory>::addRef(this);
+	}
 	Reference<TestWorkload> create(WorkloadContext const& wcx) override {
 		if (g_network->isSimulated() && asClient) {
 			auto child = makeReference<WorkloadType>(wcx);

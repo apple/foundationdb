@@ -107,7 +107,8 @@ struct StorageServerInterface {
 			}
 			if (Ar::isDeserializing) {
 				getKey = RequestStream<struct GetKeyRequest, true>(getValue.getEndpoint().getAdjustedEndpoint(1));
-				getKeyValues = RequestStream<struct GetKeyValuesRequest, true>(getValue.getEndpoint().getAdjustedEndpoint(2));
+				getKeyValues =
+				    RequestStream<struct GetKeyValuesRequest, true>(getValue.getEndpoint().getAdjustedEndpoint(2));
 				getShardState =
 				    RequestStream<struct GetShardStateRequest>(getValue.getEndpoint().getAdjustedEndpoint(3));
 				waitMetrics = RequestStream<struct WaitMetricsRequest>(getValue.getEndpoint().getAdjustedEndpoint(4));
@@ -119,19 +120,20 @@ struct StorageServerInterface {
 				    RequestStream<struct StorageQueuingMetricsRequest>(getValue.getEndpoint().getAdjustedEndpoint(8));
 				getKeyValueStoreType =
 				    RequestStream<ReplyPromise<KeyValueStoreType>>(getValue.getEndpoint().getAdjustedEndpoint(9));
-				watchValue = RequestStream<struct WatchValueRequest, true>(getValue.getEndpoint().getAdjustedEndpoint(10));
+				watchValue =
+				    RequestStream<struct WatchValueRequest, true>(getValue.getEndpoint().getAdjustedEndpoint(10));
 				getReadHotRanges =
 				    RequestStream<struct ReadHotSubRangeRequest>(getValue.getEndpoint().getAdjustedEndpoint(11));
 				getRangeSplitPoints =
 				    RequestStream<struct SplitRangeRequest>(getValue.getEndpoint().getAdjustedEndpoint(12));
-				getKeyValuesStream =
-				    RequestStream<struct GetKeyValuesStreamRequest, true>(getValue.getEndpoint().getAdjustedEndpoint(13));
-				getKeyValuesAndFlatMap =
-				    RequestStream<struct GetKeyValuesAndFlatMapRequest, true>(getValue.getEndpoint().getAdjustedEndpoint(14));
+				getKeyValuesStream = RequestStream<struct GetKeyValuesStreamRequest, true>(
+				    getValue.getEndpoint().getAdjustedEndpoint(13));
+				getKeyValuesAndFlatMap = RequestStream<struct GetKeyValuesAndFlatMapRequest, true>(
+				    getValue.getEndpoint().getAdjustedEndpoint(14));
 				changeFeedStream =
 				    RequestStream<struct ChangeFeedStreamRequest, true>(getValue.getEndpoint().getAdjustedEndpoint(15));
-				overlappingChangeFeeds =
-				    RequestStream<struct OverlappingChangeFeedsRequest, true>(getValue.getEndpoint().getAdjustedEndpoint(16));
+				overlappingChangeFeeds = RequestStream<struct OverlappingChangeFeedsRequest, true>(
+				    getValue.getEndpoint().getAdjustedEndpoint(16));
 				changeFeedPop =
 				    RequestStream<struct ChangeFeedPopRequest, true>(getValue.getEndpoint().getAdjustedEndpoint(17));
 				changeFeedVersionUpdate = RequestStream<struct ChangeFeedVersionUpdateRequest, true>(
