@@ -23,12 +23,10 @@
 #ifndef SYS_TEST_OPTIONS_TESTER_OPTIONS_H
 #define SYSTEM_TESTER_TESTER_OPTIONS_H
 
-#include "flow/SimpleOpt.h"
 #include <string>
 #include <vector>
 
 #define FDB_API_VERSION 710
-#include "bindings/c/foundationdb/fdb_c.h"
 
 namespace FDBSystemTester {
 
@@ -49,12 +47,6 @@ public:
 	int numDatabases = 1;
 	std::string externalClientLibrary;
 	int numFdbThreads = 1;
-
-	bool parseArgs(int argc, char** argv);
-
-private:
-	bool processArg(const CSimpleOpt& args);
-	static void printProgramUsage(const char* execName);
 };
 
 } // namespace FDBSystemTester

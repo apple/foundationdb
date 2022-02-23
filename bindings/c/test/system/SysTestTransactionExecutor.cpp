@@ -19,9 +19,9 @@
  */
 
 #include "SysTestTransactionExecutor.h"
-#include "flow/IRandom.h"
 #include <iostream>
 #include <cassert>
+#include <random>
 
 namespace FDBSystemTester {
 
@@ -150,10 +150,12 @@ public:
 			fdb_check(fdb_create_database(clusterFile, &db));
 			databases.push_back(db);
 		}
+		std::random_device dev;
+		random.seed(dev());
 	}
 
 	void execute(ITransactionActor* txActor, TTaskFct cont) override {
-		int idx = deterministicRandom()->randomInt(0, options.numDatabases);
+		int idx = std::uniform_int_distribution<>(0, options.numDatabases - 1)(random);
 		FDBTransaction* tx;
 		fdb_check(fdb_database_create_transaction(databases[idx], &tx));
 		TransactionContext* ctx = new TransactionContext(tx, txActor, cont, options, scheduler);
@@ -171,6 +173,7 @@ private:
 	std::vector<FDBDatabase*> databases;
 	TransactionExecutorOptions options;
 	IScheduler* scheduler;
+	std::mt19937 random;
 };
 
 ITransactionExecutor* createTransactionExecutor() {

@@ -109,6 +109,7 @@ if(NOT WIN32 AND NOT IS_ARM_MAC)
     test/system/SysTestTransactionExecutor.h
     test/system/SysTestWorkload.cpp
     test/system/SysTestWorkload.h
+    ../../flow/SimpleOpt.h
   )
 
   if(OPEN_FOR_IDE)
@@ -154,7 +155,7 @@ if(NOT WIN32 AND NOT IS_ARM_MAC)
   target_link_libraries(fdb_c_unit_tests_version_510 PRIVATE fdb_c Threads::Threads)
   target_link_libraries(trace_partial_file_suffix_test PRIVATE fdb_c Threads::Threads)
   target_link_libraries(disconnected_timeout_unit_tests PRIVATE fdb_c Threads::Threads)
-  target_link_libraries(fdb_c_system_tester PRIVATE fdb_c flow)
+  target_link_libraries(fdb_c_system_tester PRIVATE fdb_c Threads::Threads)
 
   # do not set RPATH for mako
   set_property(TARGET mako PROPERTY SKIP_BUILD_RPATH TRUE)

@@ -20,15 +20,11 @@
 
 #include "SysTestOptions.h"
 #include "SysTestWorkload.h"
-#include "flow/Platform.h"
-#include "flow/Trace.h"
-#include "flow/ArgParseUtil.h"
-#include "test/system/SysTestScheduler.h"
-#include "test/system/SysTestTransactionExecutor.h"
+#include "SysTestScheduler.h"
+#include "SysTestTransactionExecutor.h"
 #include <iostream>
 #include <thread>
-
-#define FDB_API_VERSION 710
+#include "flow/SimpleOpt.h"
 #include "bindings/c/foundationdb/fdb_c.h"
 
 namespace FDBSystemTester {
@@ -68,17 +64,14 @@ CSimpleOpt::SOption TesterOptionDefs[] = //
 	  { OPT_EXTERNAL_CLIENT_LIBRARY, "--external-client-library", SO_REQ_SEP },
 	  { OPT_NUM_FDB_THREADS, "--num-fdb-threads", SO_REQ_SEP } };
 
-} // namespace
-
-void TesterOptions::printProgramUsage(const char* execName) {
+void printProgramUsage(const char* execName) {
 	printf("usage: %s [OPTIONS]\n"
 	       "\n",
 	       execName);
 	printf("  -C CONNFILE    The path of a file containing the connection string for the\n"
-	       "                 FoundationDB cluster. The default is first the value of the\n"
-	       "                 FDB_CLUSTER_FILE environment variable, then `./fdb.cluster',\n"
+	       "                 FoundationDB cluster. The default is `fdb.cluster',\n"
 	       "                 then `%s'.\n",
-	       platform::getDefaultClusterFilePath().c_str());
+	       "fdb.cluster");
 	printf("  --log          Enables trace file logging for the CLI session.\n"
 	       "  --log-dir PATH Specifes the output directory for trace files. If\n"
 	       "                 unspecified, defaults to the current directory. Has\n"
@@ -106,32 +99,6 @@ void TesterOptions::printProgramUsage(const char* execName) {
 	       "  -h, --help     Display this help and exit.\n");
 }
 
-bool TesterOptions::parseArgs(int argc, char** argv) {
-	// declare our options parser, pass in the arguments from main
-	// as well as our array of valid options.
-	CSimpleOpt args(argc, argv, TesterOptionDefs);
-
-	// while there are arguments left to process
-	while (args.Next()) {
-		if (args.LastError() == SO_SUCCESS) {
-			if (args.OptionId() == OPT_HELP) {
-				printProgramUsage(argv[0]);
-				return false;
-			}
-			if (!processArg(args)) {
-				return false;
-			}
-		} else {
-			printf("Invalid argument: %s\n", args.OptionText());
-			printProgramUsage(argv[0]);
-			return false;
-		}
-	}
-	return true;
-}
-
-namespace {
-
 bool processIntArg(const CSimpleOpt& args, int& res, int minVal, int maxVal) {
 	char* endptr;
 	res = strtol(args.OptionArg(), &endptr, 10);
@@ -146,66 +113,104 @@ bool processIntArg(const CSimpleOpt& args, int& res, int minVal, int maxVal) {
 	return true;
 }
 
-} // namespace
+// Extracts the key for command line arguments that are specified with a prefix (e.g. --knob-).
+// This function converts any hyphens in the extracted key to underscores.
+bool extractPrefixedArgument(std::string prefix, const std::string& arg, std::string& res) {
+	if (arg.size() <= prefix.size() || arg.find(prefix) != 0 ||
+	    (arg[prefix.size()] != '-' && arg[prefix.size()] != '_')) {
+		return false;
+	}
 
-bool TesterOptions::processArg(const CSimpleOpt& args) {
+	res = arg.substr(prefix.size() + 1);
+	std::transform(res.begin(), res.end(), res.begin(), [](int c) { return c == '-' ? '_' : c; });
+	return true;
+}
+
+bool validateTraceFormat(std::string_view format) {
+	return format == "xml" || format == "json";
+}
+
+bool processArg(TesterOptions& options, const CSimpleOpt& args) {
 	switch (args.OptionId()) {
 	case OPT_CONNFILE:
-		clusterFile = args.OptionArg();
+		options.clusterFile = args.OptionArg();
 		break;
 	case OPT_API_VERSION: {
 		// multi-version fdbcli only available after 7.0
-		processIntArg(args, api_version, 700, FDB_API_VERSION);
+		processIntArg(args, options.api_version, 700, FDB_API_VERSION);
 		break;
 	}
 	case OPT_TRACE:
-		trace = true;
+		options.trace = true;
 		break;
 	case OPT_TRACE_DIR:
-		traceDir = args.OptionArg();
+		options.traceDir = args.OptionArg();
 		break;
 	case OPT_LOGGROUP:
-		logGroup = args.OptionArg();
+		options.logGroup = args.OptionArg();
 		break;
 	case OPT_TRACE_FORMAT:
 		if (!validateTraceFormat(args.OptionArg())) {
 			fprintf(stderr, "WARNING: Unrecognized trace format `%s'\n", args.OptionArg());
 		}
-		traceFormat = args.OptionArg();
+		options.traceFormat = args.OptionArg();
 		break;
 	case OPT_KNOB: {
-		Optional<std::string> knobName = extractPrefixedArgument("--knob", args.OptionSyntax());
-		if (!knobName.present()) {
+		std::string knobName;
+		if (!extractPrefixedArgument("--knob", args.OptionSyntax(), knobName)) {
 			fprintf(stderr, "ERROR: unable to parse knob option '%s'\n", args.OptionSyntax());
 			return false;
 		}
-		knobs.emplace_back(knobName.get(), args.OptionArg());
+		options.knobs.emplace_back(knobName, args.OptionArg());
 		break;
 	}
 	case OPT_BLOCK_ON_FUTURES:
-		blockOnFutures = true;
+		options.blockOnFutures = true;
 		break;
 
 	case OPT_NUM_CLIENT_THREADS:
-		processIntArg(args, numClientThreads, 1, 1000);
+		processIntArg(args, options.numClientThreads, 1, 1000);
 		break;
 
 	case OPT_NUM_DATABASES:
-		processIntArg(args, numDatabases, 1, 1000);
+		processIntArg(args, options.numDatabases, 1, 1000);
 		break;
 
 	case OPT_EXTERNAL_CLIENT_LIBRARY:
-		externalClientLibrary = args.OptionArg();
+		options.externalClientLibrary = args.OptionArg();
 		break;
 
 	case OPT_NUM_FDB_THREADS:
-		processIntArg(args, numFdbThreads, 1, 1000);
+		processIntArg(args, options.numFdbThreads, 1, 1000);
 		break;
 	}
 	return true;
 }
 
-namespace {
+bool parseArgs(TesterOptions& options, int argc, char** argv) {
+	// declare our options parser, pass in the arguments from main
+	// as well as our array of valid options.
+	CSimpleOpt args(argc, argv, TesterOptionDefs);
+
+	// while there are arguments left to process
+	while (args.Next()) {
+		if (args.LastError() == SO_SUCCESS) {
+			if (args.OptionId() == OPT_HELP) {
+				printProgramUsage(argv[0]);
+				return false;
+			}
+			if (!processArg(options, args)) {
+				return false;
+			}
+		} else {
+			printf("Invalid argument: %s\n", args.OptionText());
+			printProgramUsage(argv[0]);
+			return false;
+		}
+	}
+	return true;
+}
+
 void fdb_check(fdb_error_t e) {
 	if (e) {
 		std::cerr << fdb_get_error(e) << std::endl;
@@ -254,7 +259,7 @@ void runApiCorrectness(TesterOptions& options) {
 
 int main(int argc, char** argv) {
 	TesterOptions options;
-	if (!options.parseArgs(argc, argv)) {
+	if (!parseArgs(options, argc, argv)) {
 		return 1;
 	}
 
