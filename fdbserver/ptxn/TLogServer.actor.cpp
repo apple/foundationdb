@@ -1152,7 +1152,7 @@ Version poppedVersion(Reference<LogGenerationData> logData, StorageTeamID teamID
 }
 
 void peekMessagesFromMemory(const TLogPeekRequest& req,
-                            std::vector<std::pair<Version, std::pair<StringRef, Arena>>>& values,
+                            std::vector<std::pair<Version, std::pair<StringRef, Arena>>>* values,
                             Optional<Version>& beginVersion,
                             Version& endVersion,
                             Reference<LogGenerationData> logData) {
@@ -1175,7 +1175,7 @@ void peekMessagesFromMemory(const TLogPeekRequest& req,
 		if (!beginVersion.present()) {
 			beginVersion = version;
 		}
-		values.push_back(result);
+		values->push_back(result);
 		++version;
 		versionCount++;
 		total += result.second.first.size();
@@ -1390,11 +1390,11 @@ ACTOR Future<Void> servicePeekRequest(
     std::shared_ptr<std::unordered_map<TLogGroupID, Reference<LogGenerationData>>> activeGeneration,
     bool reqReturnIfBlocked = false,
     bool reqOnlySpilled = false) {
-	// block until dbInfo is ready, otherwise we won't find the correct TLog group
 	state std::vector<std::pair<Version, std::pair<StringRef, Arena>>> values;
 	state TLogSubsequencedMessageSerializer serializer(req.storageTeamID); // aggregate all values from disk
 	state std::unordered_set<Version> versionsFromDisk; // store versions from disk, to avoid duplicate peek
 
+	// block until dbInfo is ready, otherwise we won't find the correct TLog group
 	while (self->dbInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
 		wait(self->dbInfo->onChange());
 	}
@@ -1461,7 +1461,7 @@ ACTOR Future<Void> servicePeekRequest(
 		if (reqOnlySpilled) {
 			endVersion = logData->persistentDataDurableVersion + 1;
 		} else {
-			peekMessagesFromMemory(req, values, beginVersion, endVersion, logData);
+			peekMessagesFromMemory(req, &values, beginVersion, endVersion, logData);
 		}
 
 		if (logData->shouldSpillByValue(req.storageTeamID)) {
@@ -1476,8 +1476,7 @@ ACTOR Future<Void> servicePeekRequest(
 				auto ver = decodeStorageTeamMessagesKey(kv.key);
 				// try decode kv.value here, who is encoded by proxy
 				versionsFromDisk.insert(ver);
-				serializer.writeSerializedVersionSection(
-				    kv.value); // if comment this line, then can read the in-memory data, so problem is here
+				serializer.writeSerializedVersionSection(kv.value);
 				if (first) {
 					beginVersion = ver;
 					first = false;
@@ -1499,16 +1498,17 @@ ACTOR Future<Void> servicePeekRequest(
 		if (reqOnlySpilled) {
 			endVersion = logData->persistentDataDurableVersion + 1;
 		} else {
-			peekMessagesFromMemory(req, values, beginVersion, endVersion, logData);
+			peekMessagesFromMemory(req, &values, beginVersion, endVersion, logData);
 			serializeMemoryData(values, serializer);
 		}
 		//TraceEvent("TLogPeekResults", self->dbgid).detail("ForAddress", replyPromise.getEndpoint().getPrimaryAddress()).detail("MessageBytes", messages.getLength()).detail("NextEpoch", next_pos.epoch).detail("NextSeq", next_pos.sequence).detail("NowSeq", self->sequence.getNextSequence());
 	}
+	auto replyData = serializer.getSerialized(); // this holds the returned arena
 
 	TLogPeekReply reply;
 	reply.maxKnownVersion = logData->version.get();
 	reply.minKnownCommittedVersion = logData->minKnownCommittedVersion;
-	reply.data = StringRef(reply.arena, serializer.getSerialized());
+	reply.data = StringRef(reply.arena, replyData);
 	reply.endVersion = endVersion;
 	reply.beginVersion = beginVersion;
 	reply.onlySpilled = onlySpilled;
