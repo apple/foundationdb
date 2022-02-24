@@ -384,10 +384,13 @@ struct SpecialTraceMetricType
 
 TRACE_METRIC_TYPE(double, double);
 
+// The BaseTraceEvent class is the parent class of TraceEvent and provides all functionality on the TraceEvent except
+// for the functionality that can be used to suppress the trace event.
+//
+// This class is not intended to be used directly. Instead, this type is returned from most calls on trace events
+// (e.g. detail). This is done to disallow calling suppression functions anywhere but first in a chained sequence of
+// trace event function calls.
 struct BaseTraceEvent {
-	BaseTraceEvent();
-	BaseTraceEvent(Severity, const char* type, UID id = UID());
-
 	BaseTraceEvent(BaseTraceEvent&& ev);
 	BaseTraceEvent& operator=(BaseTraceEvent&& ev);
 
@@ -427,6 +430,9 @@ struct BaseTraceEvent {
 	BaseTraceEvent& detailf(std::string key, const char* valueFormat, ...);
 
 protected:
+	BaseTraceEvent();
+	BaseTraceEvent(Severity, const char* type, UID id = UID());
+
 	template <class T>
 	typename std::enable_if<SpecialTraceMetricType<T>::value, void>::type addMetric(const char* key,
 	                                                                                const T& value,
@@ -514,6 +520,8 @@ protected:
 	bool init(struct TraceInterval&);
 };
 
+// The TraceEvent class provides the implementation for BaseTraceEvent. The only functions that should be implemented
+// here are those that must be called first in a trace event call sequence, such as the suppression functions.
 struct TraceEvent : public BaseTraceEvent {
 	TraceEvent() {}
 	TraceEvent(const char* type, UID id = UID()); // Assumes SevInfo severity
