@@ -41,7 +41,7 @@ TraceEvent debugMutationEnabled(const char* context, Version version, MutationRe
 
 	for (auto& labelKey : debugKeys) {
 		if (((mutation.type == mutation.ClearRange || mutation.type == mutation.DebugKeyRange) &&
-		    KeyRangeRef(mutation.param1, mutation.param2).contains(labelKey.second)) ||
+		     KeyRangeRef(mutation.param1, mutation.param2).contains(labelKey.second)) ||
 		    mutation.param1 == labelKey.second) {
 			label = labelKey.first;
 			break;
