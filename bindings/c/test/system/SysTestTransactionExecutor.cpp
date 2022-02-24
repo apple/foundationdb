@@ -40,14 +40,14 @@ void fdb_check(fdb_error_t e) {
 class TransactionContext : public ITransactionContext {
 public:
 	TransactionContext(FDBTransaction* tx,
-	                   ITransactionActor* txActor,
+	                   std::shared_ptr<ITransactionActor> txActor,
 	                   TTaskFct cont,
 	                   const TransactionExecutorOptions& options,
 	                   IScheduler* scheduler)
 	  : options(options), fdbTx(tx), txActor(txActor), contAfterDone(cont), scheduler(scheduler), finalError(0) {}
 
 	Transaction* tx() override { return &fdbTx; }
-	void continueAfter(Future& f, TTaskFct cont) override { doContinueAfter(f, cont); }
+	void continueAfter(Future f, TTaskFct cont) override { doContinueAfter(f, cont); }
 	void commit() override {
 		currFuture = fdbTx.commit();
 		doContinueAfter(currFuture, [this]() { done(); });
@@ -64,7 +64,7 @@ public:
 	}
 
 private:
-	void doContinueAfter(Future& f, TTaskFct cont) {
+	void doContinueAfter(Future f, TTaskFct cont) {
 		if (options.blockOnFutures) {
 			blockingContinueAfter(f, cont);
 		} else {
@@ -72,11 +72,10 @@ private:
 		}
 	}
 
-	void blockingContinueAfter(Future& f, TTaskFct cont) {
-		Future* fptr = &f;
-		scheduler->schedule([this, fptr, cont]() {
-			fdb_check(fdb_future_block_until_ready(fptr->fdbFuture()));
-			fdb_error_t err = fptr->getError();
+	void blockingContinueAfter(Future f, TTaskFct cont) {
+		scheduler->schedule([this, f, cont]() mutable {
+			fdb_check(fdb_future_block_until_ready(f.fdbFuture()));
+			fdb_error_t err = f.getError();
 			if (err) {
 				currFuture = fdbTx.onError(err);
 				fdb_check(fdb_future_block_until_ready(currFuture.fdbFuture()));
@@ -87,8 +86,9 @@ private:
 		});
 	}
 
-	void asyncContinueAfter(Future& f, TTaskFct cont) {
+	void asyncContinueAfter(Future f, TTaskFct cont) {
 		currCont = cont;
+		currFuture = f;
 		fdb_check(fdb_future_set_callback(f.fdbFuture(), futureReadyCallback, this));
 	}
 
@@ -104,6 +104,8 @@ private:
 			fdb_check(fdb_future_set_callback(currFuture.fdbFuture(), onErrorReadyCallback, this));
 		} else {
 			scheduler->schedule(currCont);
+			currFuture.reset();
+			currCont = TTaskFct();
 		}
 	}
 
@@ -118,6 +120,8 @@ private:
 
 	void handleOnErrorResult() {
 		fdb_error_t err = currFuture.getError();
+		currFuture.reset();
+		currCont = TTaskFct();
 		if (err) {
 			finalError = err;
 			done();
@@ -129,12 +133,12 @@ private:
 
 	const TransactionExecutorOptions& options;
 	Transaction fdbTx;
-	ITransactionActor* txActor;
+	std::shared_ptr<ITransactionActor> txActor;
 	TTaskFct currCont;
 	TTaskFct contAfterDone;
 	IScheduler* scheduler;
 	fdb_error_t finalError;
-	EmptyFuture currFuture;
+	Future currFuture;
 };
 
 class TransactionExecutor : public ITransactionExecutor {
@@ -155,7 +159,7 @@ public:
 		random.seed(dev());
 	}
 
-	void execute(ITransactionActor* txActor, TTaskFct cont) override {
+	void execute(std::shared_ptr<ITransactionActor> txActor, TTaskFct cont) override {
 		int idx = std::uniform_int_distribution<>(0, options.numDatabases - 1)(random);
 		FDBTransaction* tx;
 		fdb_check(fdb_database_create_transaction(databases[idx], &tx));

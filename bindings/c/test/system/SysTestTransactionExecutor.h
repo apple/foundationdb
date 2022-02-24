@@ -35,7 +35,7 @@ class ITransactionContext {
 public:
 	virtual ~ITransactionContext() {}
 	virtual Transaction* tx() = 0;
-	virtual void continueAfter(Future& f, TTaskFct cont) = 0;
+	virtual void continueAfter(Future f, TTaskFct cont) = 0;
 	virtual void commit() = 0;
 	virtual void done() = 0;
 	virtual std::string_view dbKey(std::string_view key) = 0;
@@ -58,9 +58,21 @@ protected:
 	Transaction* tx() { return ctx()->tx(); }
 	std::string_view dbKey(std::string_view key) { return ctx()->dbKey(key); }
 	void commit() { ctx()->commit(); }
+	void reset() override {}
 
 private:
 	ITransactionContext* context = nullptr;
+};
+
+using TTxStartFct = std::function<void(ITransactionContext*)>;
+
+class TransactionFct : public TransactionActorBase {
+public:
+	TransactionFct(TTxStartFct startFct) : startFct(startFct) {}
+	void start() override { startFct(this->ctx()); }
+
+private:
+	TTxStartFct startFct;
 };
 
 struct TransactionExecutorOptions {
@@ -73,7 +85,7 @@ class ITransactionExecutor {
 public:
 	virtual ~ITransactionExecutor() {}
 	virtual void init(IScheduler* sched, const char* clusterFile, const TransactionExecutorOptions& options) = 0;
-	virtual void execute(ITransactionActor* tx, TTaskFct cont) = 0;
+	virtual void execute(std::shared_ptr<ITransactionActor> tx, TTaskFct cont) = 0;
 	virtual void release() = 0;
 };
 

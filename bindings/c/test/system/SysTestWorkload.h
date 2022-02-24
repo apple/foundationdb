@@ -42,7 +42,10 @@ public:
 
 protected:
 	void schedule(TTaskFct task);
-	void execTransaction(ITransactionActor* tx, TTaskFct cont);
+	void execTransaction(std::shared_ptr<ITransactionActor> tx, TTaskFct cont);
+	void execTransaction(TTxStartFct start, TTaskFct cont) {
+		execTransaction(std::make_shared<TransactionFct>(start), cont);
+	}
 	void contIfDone();
 
 private:

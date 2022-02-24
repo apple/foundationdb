@@ -1,4 +1,5 @@
 #include "SysTestWorkload.h"
+#include <memory>
 
 namespace FDBSystemTester {
 
@@ -17,7 +18,7 @@ void WorkloadBase::schedule(TTaskFct task) {
 	});
 }
 
-void WorkloadBase::execTransaction(ITransactionActor* tx, TTaskFct cont) {
+void WorkloadBase::execTransaction(std::shared_ptr<ITransactionActor> tx, TTaskFct cont) {
 	txRunning++;
 	txExecutor->execute(tx, [this, cont]() {
 		txRunning--;

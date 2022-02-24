@@ -25,6 +25,7 @@
 
 #include <string_view>
 #include <optional>
+#include <memory>
 
 #define FDB_API_VERSION 710
 #include "bindings/c/foundationdb/fdb_c.h"
@@ -36,54 +37,36 @@ namespace FDBSystemTester {
 class Future {
 public:
 	Future() : future_(nullptr) {}
-	Future(FDBFuture* f) : future_(f) {}
-	virtual ~Future();
+	Future(FDBFuture* f);
 
-	Future& operator=(Future&& other) {
-		if (future_) {
-			reset();
-		}
-		future_ = other.future_;
-		other.future_ = nullptr;
-		return *this;
-	}
+	FDBFuture* fdbFuture() { return future_.get(); };
 
-	FDBFuture* fdbFuture() { return future_; };
-
-	fdb_error_t getError();
+	fdb_error_t getError() const;
 	void reset();
 
 protected:
-	FDBFuture* future_;
+	std::shared_ptr<FDBFuture> future_;
 };
 
 class ValueFuture : public Future {
 public:
 	ValueFuture() = default;
 	ValueFuture(FDBFuture* f) : Future(f) {}
-	std::optional<std::string_view> getValue();
-};
-
-class EmptyFuture : public Future {
-public:
-	EmptyFuture() = default;
-	EmptyFuture(FDBFuture* f) : Future(f) {}
+	std::optional<std::string_view> getValue() const;
 };
 
 class Transaction {
 public:
-	// Given an FDBDatabase, initializes a new transaction.
+	Transaction();
 	Transaction(FDBTransaction* tx);
-	~Transaction();
-
 	ValueFuture get(std::string_view key, fdb_bool_t snapshot);
 	void set(std::string_view key, std::string_view value);
-	EmptyFuture commit();
-	EmptyFuture onError(fdb_error_t err);
+	Future commit();
+	Future onError(fdb_error_t err);
 	void reset();
 
 private:
-	FDBTransaction* tx_;
+	std::shared_ptr<FDBTransaction> tx_;
 };
 
 class FdbApi {

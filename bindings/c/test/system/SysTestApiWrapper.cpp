@@ -34,56 +34,45 @@ void fdb_check(fdb_error_t e) {
 
 } // namespace
 
-Future::~Future() {
-	if (future_) {
-		fdb_future_destroy(future_);
-	}
-}
+Future::Future(FDBFuture* f) : future_(f, fdb_future_destroy) {}
 
 void Future::reset() {
-	if (future_) {
-		fdb_future_destroy(future_);
-		future_ = nullptr;
-	}
+	future_.reset();
 }
 
-fdb_error_t Future::getError() {
-	return fdb_future_get_error(future_);
+fdb_error_t Future::getError() const {
+	return fdb_future_get_error(future_.get());
 }
 
-std::optional<std::string_view> ValueFuture::getValue() {
+std::optional<std::string_view> ValueFuture::getValue() const {
 	int out_present;
 	const std::uint8_t* val;
 	int vallen;
-	fdb_check(fdb_future_get_value(future_, &out_present, &val, &vallen));
+	fdb_check(fdb_future_get_value(future_.get(), &out_present, &val, &vallen));
 	return out_present ? std::make_optional(std::string((const char*)val, vallen)) : std::nullopt;
 }
 
 // Given an FDBDatabase, initializes a new transaction.
-Transaction::Transaction(FDBTransaction* tx) : tx_(tx) {}
+Transaction::Transaction(FDBTransaction* tx) : tx_(tx, fdb_transaction_destroy) {}
 
 ValueFuture Transaction::get(std::string_view key, fdb_bool_t snapshot) {
-	return ValueFuture(fdb_transaction_get(tx_, (const uint8_t*)key.data(), key.size(), snapshot));
+	return ValueFuture(fdb_transaction_get(tx_.get(), (const uint8_t*)key.data(), key.size(), snapshot));
 }
 
 void Transaction::set(std::string_view key, std::string_view value) {
-	fdb_transaction_set(tx_, (const uint8_t*)key.data(), key.size(), (const uint8_t*)value.data(), value.size());
+	fdb_transaction_set(tx_.get(), (const uint8_t*)key.data(), key.size(), (const uint8_t*)value.data(), value.size());
 }
 
-EmptyFuture Transaction::commit() {
-	return EmptyFuture(fdb_transaction_commit(tx_));
+Future Transaction::commit() {
+	return Future(fdb_transaction_commit(tx_.get()));
 }
 
-EmptyFuture Transaction::onError(fdb_error_t err) {
-	return EmptyFuture(fdb_transaction_on_error(tx_, err));
+Future Transaction::onError(fdb_error_t err) {
+	return Future(fdb_transaction_on_error(tx_.get(), err));
 }
 
 void Transaction::reset() {
-	fdb_transaction_reset(tx_);
-}
-
-Transaction::~Transaction() {
-	fdb_transaction_destroy(tx_);
+	fdb_transaction_reset(tx_.get());
 }
 
 fdb_error_t FdbApi::setOption(FDBNetworkOption option, std::string_view value) {

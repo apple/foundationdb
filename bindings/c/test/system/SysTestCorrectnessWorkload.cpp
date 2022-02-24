@@ -24,28 +24,6 @@
 
 namespace FDBSystemTester {
 
-namespace {
-
-class UpdateTxActor : public TransactionActorBase {
-public:
-	ValueFuture fGet;
-
-	void start() override {
-		fGet = tx()->get(dbKey("foo"), false);
-		ctx()->continueAfter(fGet, [this]() { this->step1(); });
-	}
-
-	void step1() {
-		std::optional<std::string_view> optStr = fGet.getValue();
-		tx()->set(dbKey("foo"), optStr.value_or("bar"));
-		commit();
-	}
-
-	void reset() override { fGet.reset(); }
-};
-
-} // namespace
-
 class ApiCorrectnessWorkload : public WorkloadBase {
 public:
 	ApiCorrectnessWorkload() : numTxLeft(10) {}
@@ -56,19 +34,21 @@ public:
 
 private:
 	void nextTransaction() {
-		if (numTxLeft > 0) {
-			numTxLeft--;
-			UpdateTxActor* tx = new UpdateTxActor();
-			execTransaction(tx, [this, tx]() { transactionDone(tx); });
-			std::cout << numTxLeft << " transactions left" << std::endl;
-		} else {
-			std::cout << "Last transaction completed" << std::endl;
-		}
-	}
+		std::cout << numTxLeft << " transactions left" << std::endl;
+		if (numTxLeft == 0)
+			return;
 
-	void transactionDone(UpdateTxActor* tx) {
-		delete tx;
-		nextTransaction();
+		numTxLeft--;
+		execTransaction(
+		    [](auto ctx) {
+			    ValueFuture fGet = ctx->tx()->get(ctx->dbKey("foo"), false);
+			    ctx->continueAfter(fGet, [fGet, ctx]() {
+				    std::optional<std::string_view> optStr = fGet.getValue();
+				    ctx->tx()->set(ctx->dbKey("foo"), optStr.value_or("bar"));
+				    ctx->commit();
+			    });
+		    },
+		    [this]() { nextTransaction(); });
 	}
 
 	int numTxLeft;
