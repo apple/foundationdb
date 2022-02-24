@@ -2040,6 +2040,25 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 				// they are the same. In particular this validates the consistency of change feed data recieved from the
 				// tlog mutations vs change feed data fetched from another storage server
 				if (memoryVerifyIdx < memoryReply.mutations.size()) {
+					if (version > memoryReply.mutations[memoryVerifyIdx].version) {
+						printf("ERROR: SS %s CF %s SQ %s has mutation at %lld in memory but not on disk "
+						       "(emptyVersion=%lld, emptyBefore=%lld)!\n",
+						       data->thisServerID.toString().substr(0, 4).c_str(),
+						       req.rangeID.printable().substr(0, 6).c_str(),
+						       streamUID.toString().substr(0, 8).c_str(),
+						       memoryReply.mutations[memoryVerifyIdx].version,
+						       feedInfo->emptyVersion,
+						       emptyVersion);
+
+						printf("  Memory: (%d)\n", memoryReply.mutations[memoryVerifyIdx].mutations.size());
+						for (auto& it : memoryReply.mutations[memoryVerifyIdx].mutations) {
+							if (it.type == MutationRef::SetValue) {
+								printf("    %s=\n", it.param1.printable().c_str());
+							} else {
+								printf("    %s - %s\n", it.param1.printable().c_str(), it.param2.printable().c_str());
+							}
+						}
+					}
 					ASSERT(version <= memoryReply.mutations[memoryVerifyIdx].version);
 					if (version == memoryReply.mutations[memoryVerifyIdx].version) {
 						// TODO: we could do some validation here too, but it's complicated because clears can get split
@@ -4588,16 +4607,27 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 						}
 						lastVersion = remoteVersion;
 						versionsFetched++;
-					} else if (versionsFetched > 0) {
-						ASSERT(firstVersion != invalidVersion);
-						ASSERT(lastVersion != invalidVersion);
-						data->storage.clearRange(
-						    KeyRangeRef(changeFeedDurableKey(changeFeedInfo->id, firstVersion),
-						                changeFeedDurableKey(changeFeedInfo->id, lastVersion + 1)));
-						++data->counters.kvSystemClearRanges;
-						firstVersion = invalidVersion;
-						lastVersion = invalidVersion;
-						versionsFetched = 0;
+					} else {
+						if (MUTATION_TRACKING_ENABLED) {
+							for (auto& m : remoteResult[remoteLoc].mutations) {
+								DEBUG_MUTATION("ChangeFeedWriteMoveIgnore", remoteVersion, m, data->thisServerID)
+								    .detail("Range", range)
+								    .detail("Existing", existing)
+								    .detail("ChangeFeedID", rangeId)
+								    .detail("EmptyVersion", changeFeedInfo->emptyVersion);
+							}
+						}
+						if (versionsFetched > 0) {
+							ASSERT(firstVersion != invalidVersion);
+							ASSERT(lastVersion != invalidVersion);
+							data->storage.clearRange(
+							    KeyRangeRef(changeFeedDurableKey(changeFeedInfo->id, firstVersion),
+							                changeFeedDurableKey(changeFeedInfo->id, lastVersion + 1)));
+							++data->counters.kvSystemClearRanges;
+							firstVersion = invalidVersion;
+							lastVersion = invalidVersion;
+							versionsFetched = 0;
+						}
 					}
 					remoteLoc++;
 				}
@@ -4647,6 +4677,10 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 			                                     changeFeedDurableKey(changeFeedInfo->id, endClear)));
 			++data->counters.kvSystemClearRanges;
 		}
+		while (!changeFeedInfo->mutations.empty() &&
+		       changeFeedInfo->mutations.front().version <= changeFeedInfo->emptyVersion) {
+			changeFeedInfo->mutations.pop_front();
+		}
 	}
 
 	// TODO REMOVE?
@@ -4655,6 +4689,7 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 	    .detail("Range", range.toString())
 	    .detail("StartVersion", startVersion)
 	    .detail("EndVersion", endVersion)
+	    .detail("EmptyVersion", changeFeedInfo->emptyVersion)
 	    .detail("FirstFetchedVersion", firstVersion)
 	    .detail("LastFetchedVersion", lastVersion)
 	    .detail("VersionsFetched", versionsFetched)
