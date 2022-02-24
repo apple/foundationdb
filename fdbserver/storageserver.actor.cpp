@@ -2042,43 +2042,8 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 				if (memoryVerifyIdx < memoryReply.mutations.size()) {
 					ASSERT(version <= memoryReply.mutations[memoryVerifyIdx].version);
 					if (version == memoryReply.mutations[memoryVerifyIdx].version) {
-						// TODO REMOVE debugging eventually
-						if (m.mutations.size() != memoryReply.mutations[memoryVerifyIdx].mutations.size()) {
-							printf("ERROR: SS %s CF %s SQ %s has different sizes for mutations at %lld in memory %d vs "
-							       "on disk %d!!!\n",
-							       data->thisServerID.toString().substr(0, 4).c_str(),
-							       req.rangeID.printable().substr(0, 6).c_str(),
-							       streamUID.toString().substr(0, 8).c_str(),
-							       version,
-							       m.mutations.size(),
-							       memoryReply.mutations[memoryVerifyIdx].mutations.size());
-
-							printf("  Memory: (%d)\n", memoryReply.mutations[memoryVerifyIdx].mutations.size());
-							for (auto& it : memoryReply.mutations[memoryVerifyIdx].mutations) {
-								if (it.type == MutationRef::SetValue) {
-									printf("    %s=\n", it.param1.printable().c_str());
-								} else {
-									printf(
-									    "    %s - %s\n", it.param1.printable().c_str(), it.param2.printable().c_str());
-								}
-							}
-
-							printf("  Disk: (%d)\n", m.mutations.size());
-							for (auto& it : m.mutations) {
-								if (it.type == MutationRef::SetValue) {
-									printf("    %s=\n", it.param1.printable().c_str());
-								} else {
-									printf(
-									    "    %s - %s\n", it.param1.printable().c_str(), it.param2.printable().c_str());
-								}
-							}
-						}
-						ASSERT(m.mutations.size() == memoryReply.mutations[memoryVerifyIdx].mutations.size());
-						for (int i = 0; i < m.mutations.size(); i++) {
-							ASSERT(m.mutations[i].type == memoryReply.mutations[memoryVerifyIdx].mutations[i].type);
-							ASSERT(m.mutations[i].param1 == memoryReply.mutations[memoryVerifyIdx].mutations[i].param1);
-							ASSERT(m.mutations[i].param2 == memoryReply.mutations[memoryVerifyIdx].mutations[i].param2);
-						}
+						// TODO: we could do some validation here too, but it's complicated because clears can get split
+						// and stuff
 						memoryVerifyIdx++;
 					}
 				}
