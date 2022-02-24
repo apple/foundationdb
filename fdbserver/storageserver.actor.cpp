@@ -2229,6 +2229,8 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		}
 	}
 
+	reply.popVersion = feedInfo->emptyVersion + 1;
+
 	// If the SS's version advanced at all during any of the waits, the read from memory may have missed some
 	// mutations, so gotAll can only be true if data->version didn't change over the course of this actor
 	return std::make_pair(reply, gotAll);
@@ -4529,6 +4531,19 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 			state int remoteLoc = 0;
 
 			while (remoteLoc < remoteResult.size()) {
+				if (feedResults->popVersion - 1 > changeFeedInfo->emptyVersion) {
+					TEST(true); // CF fetched updated popped version from src SS
+					changeFeedInfo->emptyVersion = feedResults->popVersion - 1;
+					auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
+					data->addMutationToMutationLog(
+					    mLV,
+					    MutationRef(MutationRef::SetValue,
+					                persistChangeFeedKeys.begin.toString() + changeFeedInfo->id.toString(),
+					                changeFeedSSValue(changeFeedInfo->range,
+					                                  changeFeedInfo->emptyVersion + 1,
+					                                  changeFeedInfo->stopVersion)));
+				}
+
 				Version localVersion = localResult.version;
 				Version remoteVersion = remoteResult[remoteLoc].version;
 				if (remoteVersion <= localVersion) {
@@ -4607,6 +4622,18 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 		if (e.code() != error_code_end_of_stream) {
 			throw;
 		}
+	}
+
+	if (feedResults->popVersion - 1 > changeFeedInfo->emptyVersion) {
+		TEST(true); // CF fetched updated popped version from src SS at end
+		changeFeedInfo->emptyVersion = feedResults->popVersion - 1;
+		auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
+		data->addMutationToMutationLog(
+		    mLV,
+		    MutationRef(MutationRef::SetValue,
+		                persistChangeFeedKeys.begin.toString() + changeFeedInfo->id.toString(),
+		                changeFeedSSValue(
+		                    changeFeedInfo->range, changeFeedInfo->emptyVersion + 1, changeFeedInfo->stopVersion)));
 	}
 
 	// if we were popped or removed while fetching but it didn't pass the fetch version while writing, clean up here

@@ -7466,6 +7466,9 @@ ACTOR Future<Void> partialChangeFeedStream(StorageServerInterface interf,
 					if (rep.mutations.back().version > feedData->maxSeenVersion) {
 						feedData->maxSeenVersion = rep.mutations.back().version;
 					}
+					if (rep.popVersion > feedData->popVersion) {
+						feedData->popVersion = rep.popVersion;
+					}
 
 					state int resultLoc = 0;
 					while (resultLoc < rep.mutations.size()) {
@@ -7835,6 +7838,10 @@ ACTOR Future<Void> doSingleCFStream(KeyRange range,
 
 		state ChangeFeedStreamReply feedReply = waitNext(results->streams[0].getFuture());
 		*begin = feedReply.mutations.back().version + 1;
+
+		if (feedReply.popVersion > results->popVersion) {
+			results->popVersion = feedReply.popVersion;
+		}
 
 		// don't send completely empty set of mutations to promise stream
 		bool anyMutations = false;

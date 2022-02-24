@@ -1473,6 +1473,9 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 							           mutations.front().version);
 						}
 						ASSERT(mutations.front().version > metadata->waitForVersionReturned);
+
+						// If this assert trips we should have gotten change_feed_popped from SS and didn't
+						ASSERT(mutations.front().version >= metadata->activeCFData.get()->popVersion);
 					}
 					when(wait(inFlightFiles.empty() ? Never() : success(inFlightFiles.front().future))) {
 						//  TODO REMOVE

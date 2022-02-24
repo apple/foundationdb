@@ -690,6 +690,7 @@ struct ChangeFeedStreamReply : public ReplyPromiseStreamReply {
 	VectorRef<MutationsAndVersionRef> mutations;
 	bool atLatestVersion = false;
 	Version minStreamVersion = invalidVersion;
+	Version popVersion = invalidVersion;
 
 	ChangeFeedStreamReply() {}
 
@@ -703,6 +704,7 @@ struct ChangeFeedStreamReply : public ReplyPromiseStreamReply {
 		           mutations,
 		           atLatestVersion,
 		           minStreamVersion,
+		           popVersion,
 		           arena);
 	}
 };
