@@ -677,9 +677,8 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 	}
 
 	// For a given version, get the serialized messages
-	Optional<std::pair<Version, std::pair<StringRef, Arena>>> getSerializedTLogData(
-	    const Version& version,
-	    const StorageTeamID& strorageTeamID);
+	Optional<std::pair<Version, Standalone<StringRef>>> getSerializedTLogData(const Version& version,
+	                                                                          const StorageTeamID& strorageTeamID);
 
 	// only callable after getStorageTeamData returns a null reference
 	Reference<StorageTeamData> createStorageTeamData(StorageTeamID team,
@@ -1123,7 +1122,7 @@ ACTOR Future<Void> tLogCommit(Reference<TLogGroupData> self,
 	return Void();
 }
 
-Optional<std::pair<Version, std::pair<StringRef, Arena>>> LogGenerationData::getSerializedTLogData(
+Optional<std::pair<Version, Standalone<StringRef>>> LogGenerationData::getSerializedTLogData(
     const Version& version,
     const StorageTeamID& storageTeamID) {
 
@@ -1131,10 +1130,10 @@ Optional<std::pair<Version, std::pair<StringRef, Arena>>> LogGenerationData::get
 	// by lower_bound, if we pass in 10, we might get 12, and return 12
 	auto iter = pStorageTeamData->versionMessages.lower_bound(version);
 	if (iter == pStorageTeamData->versionMessages.end()) {
-		return Optional<std::pair<Version, std::pair<StringRef, Arena>>>();
+		return Optional<std::pair<Version, Standalone<StringRef>>>();
 	}
-
-	return std::make_pair(iter->first, iter->second);
+	Standalone<StringRef> data = Standalone(iter->second.first);
+	return std::make_pair(iter->first, data);
 }
 
 static const size_t TLOG_PEEK_REQUEST_REPLY_SIZE_CRITERIA = 1024 * 1024;
@@ -1151,7 +1150,7 @@ Version poppedVersion(Reference<LogGenerationData> logData, StorageTeamID teamID
 }
 
 void peekMessagesFromMemory(const TLogPeekRequest& req,
-                            std::vector<std::pair<Version, std::pair<StringRef, Arena>>>* values,
+                            std::vector<std::pair<Version, Standalone<StringRef>>>* values,
                             Optional<Version>& beginVersion,
                             Version& endVersion,
                             Reference<LogGenerationData> logData) {
@@ -1161,7 +1160,7 @@ void peekMessagesFromMemory(const TLogPeekRequest& req,
 	Optional<Version> reqEnd = req.endVersion;
 	int versionCount = 0;
 	Version version = reqBegin;
-	Optional<std::pair<Version, std::pair<StringRef, Arena>>> serializedData;
+	Optional<std::pair<Version, Standalone<StringRef>>> serializedData;
 	long total = 0;
 	while ((serializedData = logData->getSerializedTLogData(version, storageTeamID)).present()) {
 		auto result = serializedData.get();
@@ -1177,7 +1176,7 @@ void peekMessagesFromMemory(const TLogPeekRequest& req,
 		values->push_back(result);
 		++version;
 		versionCount++;
-		total += result.second.first.size();
+		total += result.second.size();
 		if (total > TLOG_PEEK_REQUEST_REPLY_SIZE_CRITERIA) {
 			break;
 		}
@@ -1366,7 +1365,7 @@ Reference<LogGenerationData> findLogData(
 	return tlogGroup->second;
 }
 
-void serializeMemoryData(const std::vector<std::pair<Version, std::pair<StringRef, Arena>>>& values,
+void serializeMemoryData(const std::vector<std::pair<Version, Standalone<StringRef>>>& values,
                          TLogSubsequencedMessageSerializer& serializer,
                          const std::unordered_set<Version>& versionsFromDisk = {}) {
 	for (auto& value : values) {
@@ -1377,7 +1376,7 @@ void serializeMemoryData(const std::vector<std::pair<Version, std::pair<StringRe
 			// thus skip it here.
 			continue;
 		}
-		serializer.writeSerializedVersionSection(value.second.first);
+		serializer.writeSerializedVersionSection(value.second);
 	}
 }
 
@@ -1389,7 +1388,7 @@ ACTOR Future<Void> servicePeekRequest(
     std::shared_ptr<std::unordered_map<TLogGroupID, Reference<LogGenerationData>>> activeGeneration,
     bool reqReturnIfBlocked = false,
     bool reqOnlySpilled = false) {
-	state std::vector<std::pair<Version, std::pair<StringRef, Arena>>> values;
+	state std::vector<std::pair<Version, Standalone<StringRef>>> values;
 	state TLogSubsequencedMessageSerializer serializer(req.storageTeamID); // aggregate all values from disk
 	state std::unordered_set<Version> versionsFromDisk; // store versions from disk, to avoid duplicate peek
 
