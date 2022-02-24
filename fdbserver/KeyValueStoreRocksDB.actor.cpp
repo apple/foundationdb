@@ -82,6 +82,8 @@ const StringRef ROCKSDB_READRANGE_NEWITERATOR_HISTOGRAM = LiteralStringRef("Rock
 const StringRef ROCKSDB_READVALUE_GET_HISTOGRAM = LiteralStringRef("RocksDBReadValueGet");
 const StringRef ROCKSDB_READPREFIX_GET_HISTOGRAM = LiteralStringRef("RocksDBReadPrefixGet");
 
+std::shared_ptr<rocksdb::Cache> rocksdb_block_cache = nullptr;
+
 rocksdb::Slice toSlice(StringRef s) {
 	return rocksdb::Slice(reinterpret_cast<const char*>(s.begin()), s.size());
 }
@@ -204,9 +206,10 @@ rocksdb::ColumnFamilyOptions getCFOptions() {
 		bbOpts.whole_key_filtering = false;
 	}
 
-	if (SERVER_KNOBS->ROCKSDB_BLOCK_CACHE_SIZE > 0) {
-		bbOpts.block_cache = rocksdb::NewLRUCache(SERVER_KNOBS->ROCKSDB_BLOCK_CACHE_SIZE);
+	if (rocksdb_block_cache == nullptr) {
+		rocksdb_block_cache = rocksdb::NewLRUCache(128);
 	}
+	bbOpts.block_cache = rocksdb_block_cache;
 
 	options.table_factory.reset(rocksdb::NewBlockBasedTableFactory(bbOpts));
 
@@ -264,7 +267,7 @@ int readRangeInDb(rocksdb::DB* db, const KeyRangeRef& range, int rowLimit, int b
 			accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
 			result->push_back_deep(result->arena(), kv);
 			// Calling `cursor->Next()` is potentially expensive, so short-circut here just in case.
-			if (accumulatedRows >= rowLimit || accumulatedBytes >= byteLimit) {
+			if (result->size() >= rowLimit || accumulatedBytes >= byteLimit) {
 				break;
 			}
 
@@ -294,7 +297,7 @@ int readRangeInDb(rocksdb::DB* db, const KeyRangeRef& range, int rowLimit, int b
 			accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
 			result->push_back_deep(result->arena(), kv);
 			// Calling `cursor->Prev()` is potentially expensive, so short-circut here just in case.
-			if (accumulatedRows >= -rowLimit || accumulatedBytes >= byteLimit) {
+			if (result->size() >= -rowLimit || accumulatedBytes >= byteLimit) {
 				break;
 			}
 			/*
@@ -1080,12 +1083,16 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 		struct ReadRangeAction : TypedAction<Reader, ReadRangeAction>, FastAllocated<ReadRangeAction> {
 			KeyRange keys;
-			std::vector<rocksdb::DB*> instances;
+			// std::vector<rocksdb::DB*> instances;
+			std::vector<std::pair<KeyRange, rocksdb::DB*>> instances;
 			int rowLimit, byteLimit;
 			double startTime;
 			bool getHistograms;
 			ThreadReturnPromise<RangeResult> result;
-			ReadRangeAction(KeyRange keys, std::vector<rocksdb::DB*> instances, int rowLimit, int byteLimit)
+			ReadRangeAction(KeyRange keys,
+			                std::vector<std::pair<KeyRange, rocksdb::DB*>> instances,
+			                int rowLimit,
+			                int byteLimit)
 			  : keys(keys), instances(instances), rowLimit(rowLimit), byteLimit(byteLimit),
 			    startTime(timer_monotonic()),
 			    getHistograms(
@@ -1127,17 +1134,21 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			// Enqueue Read(a, d), one shard could have applied ClearRange, Another may not.
 
 			int accumulatedBytes = 0;
-			for (auto* instance : a.instances) {
-				auto bytesRead = readRangeInDb(instance, a.keys, rowLimit, byteLimit, &result);
+			for (auto [range, instance] : a.instances) {
+				KeyRange readRange = KeyRange(KeyRangeRef(a.keys.begin > range.begin ? a.keys.begin : range.begin,
+				                                          a.keys.end < range.end ? a.keys.end : range.end));
+
+				auto bytesRead = readRangeInDb(instance, readRange, rowLimit, byteLimit, &result);
 				if (bytesRead < 0) {
 					// Error reading an instance.
 					a.result.sendError(internal_error());
 					return;
 				}
-				if (result.size() >= abs(a.rowLimit) || bytesRead >= byteLimit) {
+				byteLimit -= bytesRead;
+				accumulatedBytes += bytesRead;
+				if (result.size() >= abs(a.rowLimit) || accumulatedBytes >= a.byteLimit) {
 					break;
 				}
-				byteLimit -= bytesRead;
 			}
 			result.more =
 			    (result.size() == a.rowLimit) || (result.size() == -a.rowLimit) || (accumulatedBytes >= a.byteLimit);
@@ -1423,12 +1434,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 		auto rangeIterator = shardMap.intersectingRanges(keys);
 		// Get DB instances
-		std::vector<rocksdb::DB*> instances;
+		std::vector<std::pair<KeyRange, rocksdb::DB*>> instances;
 		for (auto it = rangeIterator.begin(); it != rangeIterator.end(); ++it) {
 			if (it.value() == nullptr || it.value()->db == nullptr)
 				continue;
 
-			instances.push_back(it.value()->db);
+			instances.push_back(std::make_pair(KeyRange(it.range()), it.value()->db));
 		}
 
 		if (!shouldThrottle(type, keys.begin)) {
