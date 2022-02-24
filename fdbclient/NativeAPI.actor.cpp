@@ -2511,6 +2511,7 @@ Future<std::pair<KeyRange, Reference<LocationInfo>>> getKeyLocation(Database con
 			    now() - failureInfo.get().lastRefreshTime >
 			        CLIENT_KNOBS->LOCATION_CACHE_FAILED_ENDPOINT_RETRY_INTERVAL) {
 				onlyEndpointFailedAndNeedRefresh = true;
+				cx->updateFailedEndpointRefreshTime(ssi.second->get(i, member).getEndpoint());
 			}
 		} else {
 			cx->clearFailedEndpointOnHealthyServer(endpoint);
@@ -2519,9 +2520,8 @@ Future<std::pair<KeyRange, Reference<LocationInfo>>> getKeyLocation(Database con
 
 	if (onlyEndpointFailedAndNeedRefresh) {
 		cx->invalidateCache(key);
-		for (int i = 0; i < ssi.second->size(); i++) {
-			cx->updateFailedEndpointRefreshTime(ssi.second->get(i, member).getEndpoint());
-		}
+
+		// Refresh the cache with a new getKeyLocations made to proxies.
 		return getKeyLocation_internal(cx, key, spanID, debugID, useProvisionalProxies, isBackward);
 	}
 
@@ -2620,6 +2620,7 @@ Future<std::vector<std::pair<KeyRange, Reference<LocationInfo>>>> getKeyRangeLoc
 				    now() - failureInfo.get().lastRefreshTime >
 				        CLIENT_KNOBS->LOCATION_CACHE_FAILED_ENDPOINT_RETRY_INTERVAL) {
 					onlyEndpointFailedAndNeedRefresh = true;
+					cx->updateFailedEndpointRefreshTime(locInfo->get(i, member).getEndpoint());
 				}
 			} else {
 				cx->clearFailedEndpointOnHealthyServer(endpoint);
@@ -2633,11 +2634,7 @@ Future<std::vector<std::pair<KeyRange, Reference<LocationInfo>>>> getKeyRangeLoc
 	}
 
 	if (foundFailed) {
-		for (const auto& [range, locInfo] : locations) {
-			for (int i = 0; i < locInfo->size(); i++) {
-				cx->updateFailedEndpointRefreshTime(locInfo->get(i, member).getEndpoint());
-			}
-		}
+		// Refresh the cache with a new getKeyRangeLocations made to proxies.
 		return getKeyRangeLocations_internal(cx, keys, limit, reverse, spanID, debugID, useProvisionalProxies);
 	}
 
