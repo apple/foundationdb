@@ -5097,7 +5097,7 @@ ACTOR static Future<Void> commitDummyTransaction(Reference<TransactionState> trS
 			return Void();
 		} catch (Error& e) {
 			TraceEvent("CommitDummyTransactionError")
-			    .error(e, true)
+			    .errorUnsuppressed(e)
 			    .detail("Key", range.begin)
 			    .detail("Retries", retries);
 			wait(tr.onError(e));
@@ -6849,7 +6849,7 @@ ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID sn
 			}
 		}
 	} catch (Error& e) {
-		TraceEvent("SnapCreateError").detail("SnapCmd", snapCmd.toString()).detail("UID", snapUID).error(e);
+		TraceEvent("SnapCreateError").error(e).detail("SnapCmd", snapCmd.toString()).detail("UID", snapUID);
 		throw;
 	}
 }
@@ -6877,9 +6877,9 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion
 	} catch (Error& e) {
 		if (e.code() != error_code_actor_cancelled) {
 			TraceEvent("ExclusionSafetyCheckError")
+			    .error(e)
 			    .detail("NumExclusion", exclusions.size())
-			    .detail("Exclusions", describe(exclusions))
-			    .error(e);
+			    .detail("Exclusions", describe(exclusions));
 		}
 		throw;
 	}

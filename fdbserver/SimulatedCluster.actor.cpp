@@ -601,7 +601,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 				               ? SevInfo
 				               : SevError,
 				           "SimulatedFDBDTerminated")
-				    .error(e, true)
+				    .errorUnsuppressed(e)
 				    .detail("ZoneId", localities.zoneId());
 			}
 
@@ -617,7 +617,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 				onShutdown = ISimulator::InjectFaults;
 		} catch (Error& e) {
 			TraceEvent(destructed ? SevInfo : SevError, "SimulatedFDBDRebooterError")
-			    .error(e, true)
+			    .errorUnsuppressed(e)
 			    .detail("ZoneId", localities.zoneId())
 			    .detail("RandomId", randomId);
 			onShutdown = e;

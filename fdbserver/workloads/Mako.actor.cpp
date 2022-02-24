@@ -815,7 +815,7 @@ struct MakoWorkload : TestWorkload {
 				}
 				return true;
 			} catch (Error& e) {
-				TraceEvent("FailedToCalculateChecksum").detail("ChecksumIndex", csIdx).error(e);
+				TraceEvent("FailedToCalculateChecksum").error(e).detail("ChecksumIndex", csIdx);
 				wait(tr.onError(e));
 			}
 		}

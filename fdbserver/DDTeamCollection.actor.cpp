@@ -1331,10 +1331,10 @@ public:
 		} catch (Error& e) {
 			state Error err = e;
 			TraceEvent("StorageServerTrackerCancelled", self->distributorId)
+			    .errorUnsuppressed(e)
 			    .suppressFor(1.0)
 			    .detail("Primary", self->primary)
-			    .detail("Server", server->getId())
-			    .error(e, /*includeCancelled*/ true);
+			    .detail("Server", server->getId());
 			if (e.code() != error_code_actor_cancelled && errorOut.canBeSet()) {
 				errorOut.sendError(e);
 				wait(delay(0)); // Check for cancellation, since errorOut.sendError(e) could delete self

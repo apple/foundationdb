@@ -991,7 +991,7 @@ ACTOR Future<Void> grvProxyServer(GrvProxyInterface proxy,
 		state Future<Void> core = grvProxyServerCore(proxy, req.master, req.masterLifetime, db);
 		wait(core || checkRemoved(db, req.recoveryCount, proxy));
 	} catch (Error& e) {
-		TraceEvent("GrvProxyTerminated", proxy.id()).error(e, true);
+		TraceEvent("GrvProxyTerminated", proxy.id()).errorUnsuppressed(e);
 
 		if (e.code() != error_code_worker_removed && e.code() != error_code_tlog_stopped &&
 		    e.code() != error_code_tlog_failed && e.code() != error_code_coordinators_changed &&

@@ -1690,7 +1690,7 @@ ACTOR Future<Void> cleanupStatus(Reference<ReadYourWritesTransaction> tr,
 				readMore = true;
 		} catch (Error& e) {
 			// If doc can't be parsed or isn't alive, delete it.
-			TraceEvent(SevWarn, "RemovedDeadBackupLayerStatus").detail("Key", docs[i].key).error(e, true);
+			TraceEvent(SevWarn, "RemovedDeadBackupLayerStatus").errorUnsuppressed(e).detail("Key", docs[i].key);
 			tr->clear(docs[i].key);
 			// If limit is 1 then read more.
 			if (limit == 1)
@@ -3887,9 +3887,9 @@ int main(int argc, char* argv[]) {
 				} else {
 					fprintf(stderr, "ERROR: Failed to set knob option '%s': %s\n", knobName.c_str(), e.what());
 					TraceEvent(SevError, "FailedToSetKnob")
+					    .error(e)
 					    .detail("Knob", printable(knobName))
-					    .detail("Value", printable(knobValueString))
-					    .error(e);
+					    .detail("Value", printable(knobValueString));
 					throw;
 				}
 			}
