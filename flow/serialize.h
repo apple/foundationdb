@@ -25,6 +25,7 @@
 #include <stdint.h>
 #include <array>
 #include <set>
+#include <unordered_set>
 #include "flow/ProtocolVersion.h"
 #include "flow/Error.h"
 #include "flow/Arena.h"
@@ -236,6 +237,27 @@ inline void save(Archive& ar, const std::set<T>& value) {
 }
 template <class Archive, class T>
 inline void load(Archive& ar, std::set<T>& value) {
+	int s;
+	ar >> s;
+	value.clear();
+	T currentValue;
+	for (int i = 0; i < s; i++) {
+		ar >> currentValue;
+		value.insert(currentValue);
+	}
+	ASSERT(ar.protocolVersion().isValid());
+}
+
+template <class Archive, class T>
+inline void save(Archive& ar, const std::unordered_set<T>& value) {
+	ar << (int)value.size();
+	for (auto it = value.begin(); it != value.end(); ++it)
+		ar << *it;
+	ASSERT(ar.protocolVersion().isValid());
+}
+
+template <class Archive, class T>
+inline void load(Archive& ar, std::unordered_set<T>& value) {
 	int s;
 	ar >> s;
 	value.clear();

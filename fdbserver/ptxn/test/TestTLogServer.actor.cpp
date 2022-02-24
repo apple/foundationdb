@@ -23,6 +23,7 @@
 #include <random>
 #include <vector>
 
+#include "fdbclient/FDBTypes.h"
 #include "fdbserver/IDiskQueue.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/ptxn/TLogInterface.h"
@@ -37,6 +38,11 @@
 #include "flow/actorcompiler.h" // has to be the last file included
 
 namespace {
+
+Version& increaseVersion(Version& version) {
+	version += deterministicRandom()->randomInt(5, 10);
+	return version;
+}
 
 // duplicate from worker.actor.cpp, but not seeing a good way to import that code
 std::string filenameFromId(KeyValueStoreType storeType, std::string folder, std::string prefix, UID id) {
@@ -304,6 +310,79 @@ ACTOR Future<Void> startStorageServers(std::vector<Future<Void>>* actors,
 	return Void();
 }
 
+ACTOR Future<int> fetchTeamCount(std::shared_ptr<ptxn::TLogInterfaceBase> pInterface, ptxn::TLogGroupID tLogGroupID) {
+	ptxn::TLogTestInfoReply reply =
+	    wait(pInterface->testInfo.getReply(ptxn::TLogTestInfoRequest{ .fetch_group_info = true }));
+
+	auto it = reply.groupToTeams.find(tLogGroupID);
+	ASSERT(it != reply.groupToTeams.end());
+	int numTeams = it->second.size();
+	ASSERT(numTeams > 0);
+	return numTeams;
+}
+
+ACTOR Future<Void> commitTeams(std::shared_ptr<ptxn::test::TestDriverContext> pContext) {
+	state ptxn::test::print::PrintTiming printTiming("tlog/commitTeams");
+	state ptxn::StorageTeamID storageTeamID = pContext->storageTeamIDs[0];
+	state const ptxn::TLogGroupID tLogGroupID = pContext->storageTeamIDTLogGroupIDMapper.at(storageTeamID);
+	state std::shared_ptr<ptxn::TLogInterfaceBase> pInterface = pContext->getTLogLeaderByStorageTeamID(storageTeamID);
+	ASSERT(pInterface);
+
+	// Get current info.
+	state int oldTeamCount = wait(fetchTeamCount(pInterface, tLogGroupID));
+
+	state Version currVersion = 0;
+	state Version prevVersion = currVersion;
+	state Version storageTeamVersion = 0;
+	increaseVersion(currVersion);
+	generateMutations(currVersion, ++storageTeamVersion, 1, { storageTeamID }, pContext->commitRecord);
+	auto serialized = serializeMutations(currVersion, storageTeamID, pContext->commitRecord);
+	std::unordered_map<ptxn::StorageTeamID, StringRef> messages = { { storageTeamID, serialized } };
+	state UID newTeam = pContext->storageTeamIDs[2];
+	state std::map<ptxn::StorageTeamID, std::vector<Tag>> teamToTagMap;
+	teamToTagMap.insert(std::make_pair(newTeam, std::vector<Tag>{ Tag(-1, -1) }));
+	ptxn::TLogCommitRequest request(ptxn::test::randomUID(),
+	                                tLogGroupID,
+	                                serialized.arena(),
+	                                messages,
+	                                prevVersion,
+	                                currVersion,
+	                                0,
+	                                0,
+	                                std::set<ptxn::StorageTeamID>{ newTeam },
+	                                std::set<ptxn::StorageTeamID>{},
+	                                teamToTagMap,
+	                                Optional<UID>());
+
+	state ptxn::TLogCommitReply rep = wait(pInterface->commit.getReply(request));
+	int newTeamCount = wait(fetchTeamCount(pInterface, tLogGroupID));
+	ASSERT_EQ(newTeamCount, oldTeamCount + 1);
+
+	prevVersion = currVersion;
+	currVersion = rep.version;
+	increaseVersion(currVersion);
+	generateMutations(currVersion, ++storageTeamVersion, 1, { storageTeamID }, pContext->commitRecord);
+	auto serialized = serializeMutations(currVersion, storageTeamID, pContext->commitRecord);
+	std::unordered_map<ptxn::StorageTeamID, StringRef> messages = { { storageTeamID, serialized } };
+	ptxn::TLogCommitRequest request(ptxn::test::randomUID(),
+	                                tLogGroupID,
+	                                serialized.arena(),
+	                                messages,
+	                                prevVersion,
+	                                currVersion,
+	                                0,
+	                                0,
+	                                std::set<ptxn::StorageTeamID>{},
+	                                std::set<ptxn::StorageTeamID>{ newTeam },
+	                                teamToTagMap,
+	                                Optional<UID>());
+
+	ptxn::TLogCommitReply _ = wait(pInterface->commit.getReply(request));
+	int newTeamCount = wait(fetchTeamCount(pInterface, tLogGroupID));
+	ASSERT_EQ(oldTeamCount, newTeamCount);
+	return Void();
+}
+
 } // anonymous namespace
 
 TEST_CASE("/fdbserver/ptxn/test/run_tlog_server") {
@@ -323,6 +402,23 @@ TEST_CASE("/fdbserver/ptxn/test/run_tlog_server") {
 	startFakeProxy(proxies, pContext);
 	wait(waitForAll(proxies));
 
+	platform::eraseDirectoryRecursive(folder);
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ptxn/test/tlog_server_group_teams") {
+	ptxn::test::TestDriverOptions options(params);
+	// Commit validation in real TLog is not supported for now
+	options.skipCommitValidation = true;
+	state std::vector<Future<Void>> actors;
+	state std::vector<Future<Void>> proxies;
+	state std::shared_ptr<ptxn::test::TestDriverContext> pContext = ptxn::test::initTestDriverContext(options);
+
+	state std::string folder = "simfdb/" + deterministicRandom()->randomAlphaNumeric(10);
+	platform::createDirectory(folder);
+	// start a real TLog server
+	wait(startTLogServers(&actors, pContext, folder));
+	wait(commitTeams(pContext));
 	platform::eraseDirectoryRecursive(folder);
 	return Void();
 }
@@ -347,11 +443,6 @@ TEST_CASE("/fdbserver/ptxn/test/peek_tlog_server") {
 }
 
 namespace {
-
-Version& increaseVersion(Version& version) {
-	version += deterministicRandom()->randomInt(5, 10);
-	return version;
-}
 
 Standalone<StringRef> getLogEntryContent(ptxn::TLogCommitRequest req, UID tlogId) {
 	ptxn::TLogQueueEntryRef qe;

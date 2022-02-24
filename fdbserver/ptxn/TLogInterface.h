@@ -26,6 +26,7 @@
 #include <memory>
 #include <vector>
 
+#include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/Locality.h"
@@ -420,6 +421,38 @@ struct TLogSnapRequest {
 	}
 };
 
+struct TLogTestInfoReply {
+	constexpr static FileIdentifier file_identifier = 6454633;
+
+	// Map from each TLogGroup to the corresponding group teams. Should only,
+	// include the TLogGroups that this TLog belongs to.
+	std::unordered_map<UID, std::set<ptxn::StorageTeamID>> groupToTeams;
+
+	TLogTestInfoReply() = default;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, groupToTeams);
+	}
+};
+
+struct TLogTestInfoRequest {
+	constexpr static FileIdentifier file_identifier = 6454634;
+
+	ReplyPromise<TLogTestInfoReply> reply;
+
+	// When set, returns the a map from TLogGroup of this TLog to the
+	// corresponding storage teams.
+	bool fetch_group_info = false;
+
+	TLogTestInfoRequest() = default;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, fetch_group_info, reply);
+	}
+};
+
 struct TLogInterfaceBase {
 
 	constexpr static FileIdentifier file_identifier = 4121433;
@@ -433,6 +466,7 @@ struct TLogInterfaceBase {
 	RequestStream<ReplyPromise<Void>> waitFailure;
 	RequestStream<TLogRecoveryFinishedRequest> recoveryFinished;
 	RequestStream<TLogSnapRequest> snapRequest;
+	RequestStream<TLogTestInfoRequest> testInfo;
 
 	UID id() const { return uniqueID; }
 	UID getSharedTLogID() const { return sharedTLogID; }
