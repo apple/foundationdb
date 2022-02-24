@@ -196,6 +196,12 @@ static const KeyRange persistStorageTeamMessagesKeys = prefixRange(LiteralString
 // similar to persistStorageTeamMessagesKeys
 static const KeyRange persistStorageTeamMessageRefsKeys = prefixRange(LiteralStringRef("StorageTeamMsgRef/"));
 
+// The structure of a message is:
+//   | Protocol Version | Main Header | Message Header | Message |
+// and sometimes we are only persisting Message Header + Message.
+static const size_t MESSAGE_OVERHEAD_BYTES =
+    ptxn::SerializerVersionOptionBytes + ptxn::getSerializedBytes<ptxn::details::MessageHeader>();
+
 Key persistStorageTeamMessagesKey(UID id, StorageTeamID storageTeamId, Version version) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(persistStorageTeamMessagesKeys.begin);
@@ -212,6 +218,12 @@ Key persistStorageTeamMessageRefsKey(UID id, StorageTeamID storageTeamId, Versio
 	wr << storageTeamId;
 	wr << bigEndian64(version);
 	return wr.toValue();
+}
+
+Version decodeVersionFromStorageTeamMessageRefs(KeyRef key) {
+	StringRef stripKey =
+	    key.substr(sizeof(UID) + sizeof(StorageTeamID) + persistStorageTeamMessageRefsKeys.begin.size());
+	return bigEndian64(BinaryReader::fromStringRef<Version>(stripKey, Unversioned()));
 }
 
 static Key persistStorageTeamPoppedKey(UID id, StorageTeamID storageTeamId) {
@@ -833,11 +845,6 @@ void commitMessages(Reference<TLogGroupData> self,
 	// SOMEDAY: This method of copying messages is reasonably memory efficient, but it's still a lot of bytes copied.
 	// Find a way to do the memory allocation right as we receive the messages in the network layer.
 
-	// The structure of a message is:
-	//   | Protocol Version | Main Header | Message Header | Message |
-	// and we are only persisting Message Header + Message.
-	static const size_t MESSAGE_OVERHEAD_BYTES =
-	    ptxn::SerializerVersionOptionBytes + ptxn::getSerializedBytes<ptxn::details::MessageHeader>();
 	StringRef decapitatedMessage = messages.substr(MESSAGE_OVERHEAD_BYTES);
 
 	int64_t addedBytes = 0;
@@ -1085,7 +1092,8 @@ ACTOR Future<Void> tLogCommit(Reference<TLogGroupData> self,
 		qe.messages.reserve(req.messages.size());
 		for (auto& message : req.messages) {
 			qe.storageTeams.push_back(message.first);
-			qe.messages.push_back(message.second);
+			qe.messages.push_back(
+			    message.second.substr(MESSAGE_OVERHEAD_BYTES)); // skip protocol version and main header
 		}
 		self->persistentQueue->push(qe, logData);
 
@@ -1487,9 +1495,100 @@ ACTOR Future<Void> servicePeekRequest(
 				serializeMemoryData(values, serializer, versionsFromDisk);
 			}
 		} else {
-			// TODO: make it work for spill by reference,
-			// now writing(and only writing) those in-memory data without considering on-disk data
-			serializeMemoryData(values, serializer);
+			// FIXME: Limit to approximately DESIRED_TOTATL_BYTES somehow.
+			RangeResult kvrefs = wait(tlogGroup->second->persistentData->readRange(
+			    KeyRangeRef(persistStorageTeamMessageRefsKey(logData->logId, req.storageTeamID, req.beginVersion),
+			                persistStorageTeamMessageRefsKey(
+			                    logData->logId, req.storageTeamID, logData->persistentDataDurableVersion + 1)),
+			    SERVER_KNOBS->TLOG_SPILL_REFERENCE_MAX_BATCHES_PER_PEEK + 1));
+
+			//TraceEvent("TLogPeekResults", self->dbgid).detail("ForAddress", replyPromise.getEndpoint().getPrimaryAddress()).detail("Tag1Results", s1).detail("Tag2Results", s2).detail("Tag1ResultsLim", kv1.size()).detail("Tag2ResultsLim", kv2.size()).detail("Tag1ResultsLast", kv1.size() ? kv1[0].key : "").detail("Tag2ResultsLast", kv2.size() ? kv2[0].key : "").detail("Limited", limited).detail("NextEpoch", next_pos.epoch).detail("NextSeq", next_pos.sequence).detail("NowEpoch", self->epoch()).detail("NowSeq", self->sequence.getNextSequence());
+
+			state std::vector<std::pair<IDiskQueue::location, IDiskQueue::location>> commitLocations;
+			state bool earlyEnd = false;
+			uint32_t mutationBytes = 0;
+			state uint64_t commitBytes = 0;
+			state Version firstVersion = std::numeric_limits<Version>::max();
+			for (int i = 0; i < kvrefs.size() && i < SERVER_KNOBS->TLOG_SPILL_REFERENCE_MAX_BATCHES_PER_PEEK; i++) {
+				auto& kv = kvrefs[i];
+				VectorRef<SpilledData> spilledData;
+				Version currentVersion = decodeVersionFromStorageTeamMessageRefs(kv.key);
+				versionsFromDisk.insert(currentVersion);
+				BinaryReader r(kv.value, AssumeVersion(logData->protocolVersion));
+				r >> spilledData; // here it broke
+				for (const SpilledData& sd : spilledData) {
+					if (mutationBytes >= TLOG_PEEK_REQUEST_REPLY_SIZE_CRITERIA) {
+						earlyEnd = true;
+						break;
+					}
+					if (sd.version >= req.beginVersion) {
+						firstVersion = std::min(firstVersion, sd.version);
+						const IDiskQueue::location end = sd.start.lo + sd.length;
+						commitLocations.emplace_back(sd.start, end);
+						// This isn't perfect, because we aren't accounting for page boundaries, but should be
+						// close enough.
+						commitBytes += sd.length;
+						mutationBytes += sd.mutationBytes;
+					}
+				}
+				if (earlyEnd)
+					break;
+			}
+			earlyEnd = earlyEnd || (kvrefs.size() >= SERVER_KNOBS->TLOG_SPILL_REFERENCE_MAX_BATCHES_PER_PEEK + 1);
+			wait(self->peekMemoryLimiter.take(TaskPriority::TLogSpilledPeekReply, commitBytes));
+			state FlowLock::Releaser memoryReservation(self->peekMemoryLimiter, commitBytes);
+			state std::vector<Future<Standalone<StringRef>>> messageReads;
+			messageReads.reserve(commitLocations.size());
+			for (const auto& pair : commitLocations) {
+				messageReads.push_back(
+				    tlogGroup->second->rawPersistentQueue->read(pair.first, pair.second, CheckHashes::True));
+			}
+			commitLocations.clear();
+			wait(waitForAll(messageReads));
+
+			state Version lastRefMessageVersion = 0;
+			state int index = 0;
+			loop {
+				if (index >= messageReads.size())
+					break;
+				Standalone<StringRef> queueEntryData = messageReads[index].get();
+				uint8_t valid;
+				const uint32_t length = *(uint32_t*)queueEntryData.begin();
+				queueEntryData = queueEntryData.substr(4, queueEntryData.size() - 4);
+				BinaryReader rd(queueEntryData, IncludeVersion());
+				TLogQueueEntry entry;
+				rd >> entry >> valid;
+				ASSERT(valid == 0x01);
+				ASSERT(length + sizeof(valid) == queueEntryData.size());
+				// TLogQueueEntry has messages for multiple teams(vector<StorageTeamID>, vector<StringRef>)
+				// locations stored in persistStorageTeamMessageRefsKey( is for the whole TLogQueueEntry, not a certain
+				// team
+				ASSERT(entry.storageTeams.size() == entry.messages.size());
+				int totalMessageCount = entry.messages.size();
+				for (int i = 0; i < totalMessageCount; i++) {
+					if (entry.storageTeams[i] != req.storageTeamID) {
+						// only care about this storage team.
+						continue;
+					}
+					serializer.writeSerializedVersionSection(entry.messages[i]);
+					DEBUG_TAGS_AND_MESSAGE("TLogPeekFromDisk", entry.version, entry.messages[i], logData->logId)
+					    .detail("DebugID", self->dbgid)
+					    .detail("StorageTeam", req.storageTeamID);
+				}
+
+				lastRefMessageVersion = entry.version;
+				index++;
+			}
+
+			messageReads.clear();
+			memoryReservation.release();
+
+			if (earlyEnd) {
+				endVersion = lastRefMessageVersion + 1;
+				onlySpilled = true;
+			} else {
+				serializeMemoryData(values, serializer, versionsFromDisk);
+			}
 		}
 	} else {
 		if (reqOnlySpilled) {
@@ -2436,6 +2535,8 @@ ACTOR Future<Void> updatePersistentData(Reference<TLogGroupData> self,
 			    teamData->versionMessages.lower_bound(logData->versionLocation.begin()->key);
 			state int refSpilledTagCount = 0;
 			wr = BinaryWriter(AssumeVersion(logData->protocolVersion));
+			// We prefix our spilled locations with a count, so that we can read this back out as a VectorRef.
+			wr << uint32_t(0);
 			while (msg != teamData->versionMessages.end() && msg->first <= newPersistentDataVersion) {
 				currentVersion = msg->first;
 				anyData = true;
