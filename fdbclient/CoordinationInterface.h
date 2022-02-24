@@ -93,6 +93,9 @@ public:
 	// This one should only be used when resolving asynchronously is impossible. For all other cases, resolveHostnames()
 	// should be preferred.
 	void resolveHostnamesBlocking();
+	// This function derives the member connectionString from the current key, coordinators and hostnames.
+	void resetConnectionString();
+
 	void resetToUnresolved();
 
 	ConnectionStringStatus status = RESOLVED;
