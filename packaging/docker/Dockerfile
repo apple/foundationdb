@@ -96,13 +96,13 @@ RUN curl -Ls $FDB_WEBSITE/downloads/$FDB_VERSION/linux/fdb_$FDB_VERSION.tar.gz |
 
 # Install additional FoundationDB Client Libraries
 RUN for version in $FDB_LIBRARY_VERSIONS; do \
-    curl -Ls $FDB_WEBSITE/downloads/$version/linux/libfdb_c_$version.so -o /usr/lib/fdb/multiversion/libfdb_c_${version}.so; \
+    curl -Ls $FDB_WEBSITE/downloads/$version/linux/libfdb_c_$version.so -o /usr/lib/fdb/multiversion/libfdb_c_${version%.*}.so; \
     done
 
 # Install additional FoundationDB Client Libraries (for sidecar)
 RUN mkdir -p /var/fdb/lib && \
     for version in $FDB_LIBRARY_VERSIONS; do \
-    curl -Ls $FDB_WEBSITE/downloads/$version/linux/libfdb_c_$version.so -o /var/fdb/lib/libfdb_c_${version}.so; \
+    curl -Ls $FDB_WEBSITE/downloads/$version/linux/libfdb_c_$version.so -o /var/fdb/lib/libfdb_c_${version%.*}.so; \
     done
 
 RUN curl -Ls $FDB_WEBSITE/downloads/$FDB_VERSION/linux/libfdb_c_$FDB_VERSION.so -o /usr/lib/libfdb_c.so
