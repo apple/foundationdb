@@ -1843,10 +1843,12 @@ MutationsAndVersionRef filterMutations(Arena& arena,
 // TODO REMOVE!!! when BG is correctness clean
 #define DEBUG_SS_ID ""_sr
 #define DEBUG_SS_CF_ID ""_sr
+#define DEBUG_SS_STREAM_ID ""_sr
 #define DEBUG_SS_CF_BEGIN_VERSION invalidVersion
-#define DEBUG_SS_CFM(ssId, cfId, v)                                                                                    \
-	ssId.toString().substr(0, 4) == DEBUG_SS_ID&& cfId.printable().substr(0, 6) == DEBUG_SS_CF_ID &&                   \
-	    (v >= DEBUG_SS_CF_BEGIN_VERSION || latestVersion == DEBUG_SS_CF_BEGIN_VERSION)
+#define DEBUG_SS_CFM(ssId, cfId, streamId, v)                                                                          \
+	((ssId.toString().substr(0, 4) == DEBUG_SS_ID && cfId.printable().substr(0, 6) == DEBUG_SS_CF_ID &&                \
+	  (v >= DEBUG_SS_CF_BEGIN_VERSION || latestVersion == DEBUG_SS_CF_BEGIN_VERSION)) ||                               \
+	 (streamId.toString().substr(0, 8) == DEBUG_SS_STREAM_ID))
 
 #define DO_DEBUG_CF_MISSING false
 #define DEBUG_CF_MISSING_CF ""_sr
@@ -1869,7 +1871,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 	state int remainingDurableBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
 	state Version startVersion = data->version.get();
 
-	if (DEBUG_SS_CFM(data->thisServerID, req.rangeID, req.begin)) {
+	if (DEBUG_SS_CFM(data->thisServerID, req.rangeID, streamUID, req.begin)) {
 		printf("CFM: SS %s CF %s: SQ %s [%s - %s) %lld - %lld\n",
 		       data->thisServerID.toString().substr(0, 4).c_str(),
 		       req.rangeID.printable().substr(0, 6).c_str(),
@@ -1906,7 +1908,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 
 	state Reference<ChangeFeedInfo> feedInfo = feed->second;
 
-	if (DEBUG_SS_CFM(data->thisServerID, req.rangeID, req.begin)) {
+	if (DEBUG_SS_CFM(data->thisServerID, req.rangeID, streamUID, req.begin)) {
 		printf("CFM: SS %s CF %s:   got version %lld >= %lld\n",
 		       data->thisServerID.toString().substr(0, 4).c_str(),
 		       req.rangeID.printable().substr(0, 6).c_str(),
@@ -1921,7 +1923,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 	state Version emptyVersion = feedInfo->emptyVersion;
 	Version fetchStorageVersion = std::max(feedInfo->fetchVersion, feedInfo->durableFetchVersion.get());
 
-	if (DEBUG_SS_CFM(data->thisServerID, req.rangeID, req.begin)) {
+	if (DEBUG_SS_CFM(data->thisServerID, req.rangeID, streamUID, req.begin)) {
 		printf("CFM: SS %s CF %s: SQ %s   atLatest=%s, dequeVersion=%lld, emptyVersion=%lld, storageVersion=%lld, "
 		       "durableVersion=%lld, "
 		       "fetchStorageVersion=%lld (%lld, %lld)\n",
@@ -1967,7 +1969,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 				}
 			}
 		}
-		if (DEBUG_SS_CFM(data->thisServerID, req.rangeID, req.begin)) {
+		if (DEBUG_SS_CFM(data->thisServerID, req.rangeID, streamUID, req.begin)) {
 			printf("CFM: SS %s CF %s:     got %lld - %lld (%d) from memory\n",
 			       data->thisServerID.toString().substr(0, 4).c_str(),
 			       req.rangeID.printable().substr(0, 6).c_str(),
@@ -1987,7 +1989,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 			ASSERT(req.begin <= feedInfo->fetchVersion);
 			TEST(true); // getChangeFeedMutations before fetched data durable
 
-			if (DEBUG_SS_CFM(data->thisServerID, req.rangeID, req.begin)) {
+			if (DEBUG_SS_CFM(data->thisServerID, req.rangeID, streamUID, req.begin)) {
 				printf("CFM: SS %s CF %s:     waiting on fetch durable up to %lld\n",
 				       data->thisServerID.toString().substr(0, 4).c_str(),
 				       req.rangeID.printable().substr(0, 6).c_str(),
@@ -1998,7 +2000,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 			wait(feedInfo->durableFetchVersion.whenAtLeast(feedInfo->fetchVersion));
 			// To let update storage finish
 			wait(delay(0));
-			if (DEBUG_SS_CFM(data->thisServerID, req.rangeID, req.begin)) {
+			if (DEBUG_SS_CFM(data->thisServerID, req.rangeID, streamUID, req.begin)) {
 				printf("CFM: SS %s CF %s:     got fetch durable up to %lld\n",
 				       data->thisServerID.toString().substr(0, 4).c_str(),
 				       req.rangeID.printable().substr(0, 6).c_str(),
@@ -2106,7 +2108,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 			lastVersion = version;
 			lastKnownCommitted = knownCommittedVersion;
 		}
-		if (DEBUG_SS_CFM(data->thisServerID, req.rangeID, req.begin)) {
+		if (DEBUG_SS_CFM(data->thisServerID, req.rangeID, streamUID, req.begin)) {
 			printf("CFM: SS %s CF %s:     got %lld - %lld (%d) from disk\n",
 			       data->thisServerID.toString().substr(0, 4).c_str(),
 			       req.rangeID.printable().substr(0, 6).c_str(),
@@ -2124,7 +2126,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 			}
 			reply.mutations.append(reply.arena, it, totalCount);
 		} else if (reply.mutations.empty() || reply.mutations.back().version < lastVersion) {
-			if (DEBUG_SS_CFM(data->thisServerID, req.rangeID, req.begin)) {
+			if (DEBUG_SS_CFM(data->thisServerID, req.rangeID, streamUID, req.begin)) {
 				printf("CFM: SS %s CF %s:     adding empty from disk %lld\n",
 				       data->thisServerID.toString().substr(0, 4).c_str(),
 				       req.rangeID.printable().substr(0, 6).c_str(),
@@ -2140,7 +2142,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 	Version finalVersion = std::min(req.end - 1, dequeVersion);
 	if ((reply.mutations.empty() || reply.mutations.back().version < finalVersion) && remainingLimitBytes > 0 &&
 	    remainingDurableBytes > 0) {
-		if (DEBUG_SS_CFM(data->thisServerID, req.rangeID, req.begin)) {
+		if (DEBUG_SS_CFM(data->thisServerID, req.rangeID, streamUID, req.begin)) {
 			printf("CFM: SS %s CF %s:     adding empty %lld\n",
 			       data->thisServerID.toString().substr(0, 4).c_str(),
 			       req.rangeID.printable().substr(0, 6).c_str(),
@@ -2193,7 +2195,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		}
 	}
 
-	if (DEBUG_SS_CFM(data->thisServerID, req.rangeID, req.begin)) {
+	if (DEBUG_SS_CFM(data->thisServerID, req.rangeID, streamUID, req.begin)) {
 		printf("CFM: SS %s CF %s:   result %lld - %lld (%d)\n",
 		       data->thisServerID.toString().substr(0, 4).c_str(),
 		       req.rangeID.printable().substr(0, 6).c_str(),
@@ -2347,7 +2349,7 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 	wait(delay(0, TaskPriority::DefaultEndpoint));
 
 	try {
-		if (DEBUG_SS_CFM(data->thisServerID, req.rangeID, req.begin)) {
+		if (DEBUG_SS_CFM(data->thisServerID, req.rangeID, streamUID, req.begin)) {
 			printf("CFM: SS %s CF %s: got CFSQ %s [%s - %s) %lld - %lld, crp=%s\n",
 			       data->thisServerID.toString().substr(0, 4).c_str(),
 			       req.rangeID.printable().substr(0, 6).c_str(),
@@ -2369,7 +2371,7 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 		ASSERT(emptyInitialReply.minStreamVersion == invalidVersion);
 		req.reply.send(emptyInitialReply);
 
-		if (DEBUG_SS_CFM(data->thisServerID, req.rangeID, req.begin)) {
+		if (DEBUG_SS_CFM(data->thisServerID, req.rangeID, streamUID, req.begin)) {
 			printf("CFM: SS %s CF %s: CFSQ %s send empty initial version %lld\n",
 			       data->thisServerID.toString().substr(0, 4).c_str(),
 			       req.rangeID.printable().substr(0, 6).c_str(),
