@@ -1748,6 +1748,7 @@ ACTOR Future<Void> overlappingChangeFeedsQ(StorageServer* data, OverlappingChang
 
 	// Make sure all of the stop versions we are sending aren't going to get rolled back
 	if (knownCommittedRequired != invalidVersion && knownCommittedRequired > data->knownCommittedVersion.get()) {
+		TEST(true); // overlapping change feeds waiting for stop version to be committed
 		wait(data->knownCommittedVersion.whenAtLeast(knownCommittedRequired));
 	}
 	req.reply.send(reply);
@@ -4735,7 +4736,7 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data, KeyR
 
 			addMutationToLog = true;
 		} else {
-			auto changeFeedInfo = existingEntry->second;
+			changeFeedInfo = existingEntry->second;
 			auto feedCleanup = data->changeFeedCleanupDurable.find(cfEntry.rangeId);
 
 			if (cfEntry.stopVersion < changeFeedInfo->stopVersion) {
@@ -4771,6 +4772,7 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data, KeyR
 			}
 		}
 		if (addMutationToLog) {
+			ASSERT(changeFeedInfo.isValid());
 			auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
 			data->addMutationToMutationLog(
 			    mLV,
