@@ -25,6 +25,7 @@
 #include "fdbclient/ConfigTransactionInterface.h"
 #include "fdbclient/PImpl.h"
 #include "fdbserver/ConfigFollowerInterface.h"
+#include "fdbserver/ConfigBroadcastInterface.h"
 
 class ConfigNode : public ReferenceCounted<ConfigNode> {
 	PImpl<class ConfigNodeImpl> impl;
@@ -32,10 +33,13 @@ class ConfigNode : public ReferenceCounted<ConfigNode> {
 public:
 	ConfigNode(std::string const& folder);
 	~ConfigNode();
-	Future<Void> serve(ConfigTransactionInterface const&);
-	Future<Void> serve(ConfigFollowerInterface const&);
+	Future<Void> serve(ConfigBroadcastInterface const&,
+	                   ConfigTransactionInterface const&,
+	                   ConfigFollowerInterface const&);
 
 public: // Testing
+	Future<Void> serve(ConfigTransactionInterface const&);
+	Future<Void> serve(ConfigFollowerInterface const&);
 	void close();
 	Future<Void> onClosed();
 };

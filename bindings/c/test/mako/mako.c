@@ -829,6 +829,10 @@ retryTxn:
 					}
 					docommit = 1;
 					break;
+				case OP_OVERWRITE:
+					rc = run_op_insert(transaction, keystr, valstr);
+					docommit = 1;
+					break;
 				case OP_CLEAR:
 					rc = run_op_clear(transaction, keystr);
 					docommit = 1;
@@ -1212,6 +1216,9 @@ void get_stats_file_name(char filename[], int worker_id, int thread_id, int op) 
 	case OP_INSERTRANGE:
 		strcat(filename, "INSERTRANGE");
 		break;
+	case OP_OVERWRITE:
+		strcat(filename, "OVERWRITE");
+		break;
 	case OP_CLEAR:
 		strcat(filename, "CLEAR");
 		break;
@@ -1502,7 +1509,7 @@ int worker_process_main(mako_args_t* args, int worker_id, mako_shmhdr_t* shm, pi
 
 	/*** let's party! ***/
 
-	/* set up cluster and datbase for workder threads */
+	/* set up cluster and datbase for worker threads */
 
 #if FDB_API_VERSION < 610
 	/* cluster */
@@ -1703,6 +1710,9 @@ int parse_transaction(mako_args_t* args, char* optarg) {
 			ptr += 2;
 		} else if (strncmp(ptr, "i", 1) == 0) {
 			op = OP_INSERT;
+			ptr++;
+		} else if (strncmp(ptr, "o", 1) == 0) {
+			op = OP_OVERWRITE;
 			ptr++;
 		} else if (strncmp(ptr, "cr", 2) == 0) {
 			op = OP_CLEARRANGE;
@@ -2107,6 +2117,8 @@ char* get_ops_name(int ops_code) {
 		return "INSERT";
 	case OP_INSERTRANGE:
 		return "INSERTRANGE";
+	case OP_OVERWRITE:
+		return "OVERWRITE";
 	case OP_CLEAR:
 		return "CLEAR";
 	case OP_SETCLEAR:

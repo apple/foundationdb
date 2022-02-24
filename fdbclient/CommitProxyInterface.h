@@ -116,9 +116,6 @@ struct ClientDBInfo {
 	    firstCommitProxy; // not serialized, used for commitOnFirstProxy when the commit proxies vector has been shrunk
 	Optional<Value> forward;
 	std::vector<VersionHistory> history;
-	// a counter increased every time a change of uploaded client libraries
-	// happens, the clients need to be aware of
-	uint64_t clientLibChangeCounter = 0;
 
 	ClientDBInfo() {}
 
@@ -130,7 +127,7 @@ struct ClientDBInfo {
 		if constexpr (!is_fb_function<Archive>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar, grvProxies, commitProxies, id, forward, history, clientLibChangeCounter);
+		serializer(ar, grvProxies, commitProxies, id, forward, history);
 	}
 };
 

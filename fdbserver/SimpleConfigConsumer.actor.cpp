@@ -79,7 +79,7 @@ class SimpleConfigConsumerImpl {
 						}
 					}
 					self->lastSeenVersion = committedVersion;
-					broadcaster->applyChanges(reply.changes, committedVersion, reply.annotations);
+					broadcaster->applyChanges(reply.changes, committedVersion, reply.annotations, { self->cfi });
 				}
 				wait(delayJittered(self->pollingInterval));
 			} catch (Error& e) {
@@ -107,8 +107,12 @@ class SimpleConfigConsumerImpl {
 		    .detail("AnnotationsSize", reply.annotations.size());
 		ASSERT_GE(committedVersion, self->lastSeenVersion);
 		self->lastSeenVersion = committedVersion;
-		broadcaster->applySnapshotAndChanges(
-		    std::move(reply.snapshot), reply.snapshotVersion, reply.changes, committedVersion, reply.annotations);
+		broadcaster->applySnapshotAndChanges(std::move(reply.snapshot),
+		                                     reply.snapshotVersion,
+		                                     reply.changes,
+		                                     committedVersion,
+		                                     reply.annotations,
+		                                     { self->cfi });
 		return Void();
 	}
 
