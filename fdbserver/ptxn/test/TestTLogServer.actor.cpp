@@ -452,9 +452,15 @@ Standalone<StringRef> getLogEntryContent(ptxn::TLogCommitRequest req, UID tlogId
 	qe.id = tlogId;
 	qe.storageTeams.reserve(req.messages.size());
 	qe.messages.reserve(req.messages.size());
+	// The structure of a message is:
+	//   | Protocol Version | Main Header | Message Header | Message |
+	// and sometimes we are only persisting Message Header + Message.
+	const size_t MESSAGE_OVERHEAD_BYTES =
+	    ptxn::SerializerVersionOptionBytes + ptxn::getSerializedBytes<ptxn::details::MessageHeader>();
+
 	for (auto& message : req.messages) {
 		qe.storageTeams.push_back(message.first);
-		qe.messages.push_back(message.second);
+		qe.messages.push_back(message.second.substr(MESSAGE_OVERHEAD_BYTES)); // skip protocol version and main header
 	}
 	BinaryWriter wr(Unversioned()); // outer framing is not versioned
 	wr << uint32_t(0);
@@ -962,8 +968,7 @@ TEST_CASE("/fdbserver/ptxn/test/read_tlog_spilled") {
 	    wait(commitInjectReturnVersions(pContext, storageTeamID, pContext->numCommits));
 	state std::vector<Standalone<StringRef>> expectedMessages = res.first;
 
-	// TODO: uncomment this once enable peek from disk when spill by reference
-	// wait(verifyPeek(pContext, storageTeamID, pContext->numCommits));
+	wait(verifyPeek(pContext, storageTeamID, pContext->numCommits));
 
 	// wait 1s so that actors who update persistent data can do their job.
 	wait(delay(1.5));
