@@ -307,7 +307,8 @@ if (WITH_ROCKSDB_EXPERIMENTAL)
 endif()
 
 if (WITH_LIBURING)
-  set(LibUring_ROOT "/home/teleport-dluan/liburing/src/include")
+  # libruing is not installed in the docker container, tell cmake where to find liburing
+  set(uring_ROOT "/home/teleport-dluan/liburing/src")
   find_package(uring)
 endif()
 
