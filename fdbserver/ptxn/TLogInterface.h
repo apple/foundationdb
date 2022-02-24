@@ -21,12 +21,12 @@
 #ifndef FDBSERVER_PTXN_TLOGINTERFACE_H
 #define FDBSERVER_PTXN_TLOGINTERFACE_H
 
-#include "fdbclient/CommitProxyInterface.h"
 #pragma once
 
 #include <memory>
 #include <vector>
 
+#include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/Locality.h"

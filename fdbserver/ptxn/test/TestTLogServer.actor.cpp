@@ -316,8 +316,7 @@ ACTOR Future<int> fetchTeamCount(std::shared_ptr<ptxn::TLogInterfaceBase> pInter
 	ASSERT(it != reply.groupToTeams.end());
 	int numTeams = it->second.size();
 	ASSERT(numTeams > 0);
-	ASSERT(reply.groupToTeams.count(tLogGroupID) > 0);
-	return reply.groupToTeams.find(tLogGroupID)->second.size();
+	return numTeams;
 }
 
 ACTOR Future<Void> commitTeams(std::shared_ptr<ptxn::test::TestDriverContext> pContext) {
