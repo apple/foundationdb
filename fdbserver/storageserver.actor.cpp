@@ -371,7 +371,10 @@ struct ChangeFeedInfo : ReferenceCounted<ChangeFeedInfo> {
 	Key id;
 	AsyncTrigger newMutations;
 	NotifiedVersion durableFetchVersion;
-	bool stopped = false; // A stopped change feed no longer adds new mutations, but is still queriable
+	// A stopped change feed no longer adds new mutations, but is still queriable.
+	// stopVersion = MAX_VERSION means the feed has not been stopped
+	Version stopVersion = MAX_VERSION;
+
 	bool removing = false;
 
 	KeyRangeMap<std::unordered_map<UID, Promise<Void>>> moveTriggers;
@@ -703,7 +706,7 @@ public:
 	NotifiedVersion durableVersion; // At least this version will be readable from storage after a power failure
 	Version rebootAfterDurableVersion;
 	int8_t primaryLocality;
-	Version knownCommittedVersion;
+	NotifiedVersion knownCommittedVersion;
 
 	Deque<std::pair<Version, Version>> recoveryVersionSkips;
 	int64_t versionLag; // An estimate for how many versions it takes for the data to move from the logs to this storage
@@ -1718,17 +1721,34 @@ ACTOR Future<Void> overlappingChangeFeedsQ(StorageServer* data, OverlappingChang
 		return Void();
 	}
 
+	Version knownCommittedRequired = invalidVersion;
+
 	auto ranges = data->keyChangeFeed.intersectingRanges(req.range);
-	std::map<Key, std::tuple<KeyRange, Version, bool>> rangeIds;
+	std::map<Key, std::tuple<KeyRange, Version, Version>> rangeIds;
 	for (auto r : ranges) {
 		for (auto& it : r.value()) {
-			rangeIds[it->id] = std::tuple(it->range, it->emptyVersion, it->stopped);
+			// Can't tell other SS about a stopVersion that may get rolled back, and we only need to tell it about the
+			// stopVersion if req.minVersion > stopVersion, since it will get the information from its own private
+			// mutations if it hasn't processed up to stopVersion yet
+			Version stopVersion;
+			if (it->stopVersion != MAX_VERSION && req.minVersion > it->stopVersion) {
+				stopVersion = it->stopVersion;
+				knownCommittedRequired = std::max(knownCommittedRequired, stopVersion);
+			} else {
+				stopVersion = MAX_VERSION;
+			}
+			rangeIds[it->id] = std::tuple(it->range, it->emptyVersion, stopVersion);
 		}
 	}
-	OverlappingChangeFeedsReply reply;
+	state OverlappingChangeFeedsReply reply;
 	for (auto& it : rangeIds) {
 		reply.rangeIds.push_back(OverlappingChangeFeedEntry(
 		    it.first, std::get<0>(it.second), std::get<1>(it.second), std::get<2>(it.second)));
+	}
+
+	// Make sure all of the stop versions we are sending aren't going to get rolled back
+	if (knownCommittedRequired != invalidVersion && knownCommittedRequired > data->knownCommittedVersion.get()) {
+		wait(data->knownCommittedVersion.whenAtLeast(knownCommittedRequired));
 	}
 	req.reply.send(reply);
 	return Void();
@@ -1896,7 +1916,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 	// We must copy the mutationDeque when fetching the durable bytes in case mutations are popped from memory while
 	// waiting for the results
 	state Version dequeVersion = data->version.get();
-	state Version dequeKnownCommit = data->knownCommittedVersion;
+	state Version dequeKnownCommit = data->knownCommittedVersion.get();
 	state Version emptyVersion = feedInfo->emptyVersion;
 	Version fetchStorageVersion = std::max(feedInfo->fetchVersion, feedInfo->durableFetchVersion.get());
 
@@ -1996,6 +2016,9 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 			data->checkChangeCounter(changeCounter, req.range);
 		}
 
+		// TODO eventually: only do verify in simulation?
+		int memoryVerifyIdx = 0;
+
 		Version lastVersion = req.begin - 1;
 		Version lastKnownCommitted = invalidVersion;
 		for (auto& kv : res) {
@@ -2009,6 +2032,25 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 			if (m.mutations.size()) {
 				reply.arena.dependsOn(mutations.arena());
 				reply.mutations.push_back(reply.arena, m);
+
+				// if there is overlap between the memory and disk mutations, we can do relatively cheap validation that
+				// they are the same. In particular this validates the consistency of change feed data recieved from the
+				// tlog mutations vs change feed data fetched from another storage server
+				if (memoryVerifyIdx < memoryReply.mutations.size()) {
+					ASSERT(version <= memoryReply.mutations[memoryVerifyIdx].version);
+					if (version == memoryReply.mutations[memoryVerifyIdx].version) {
+						ASSERT(m.mutations.size() == memoryReply.mutations[memoryVerifyIdx].mutations.size());
+						for (int i = 0; i < m.mutations.size(); i++) {
+							ASSERT(m.mutations[i].type == memoryReply.mutations[memoryVerifyIdx].mutations[i].type);
+							ASSERT(m.mutations[i].param1 == memoryReply.mutations[memoryVerifyIdx].mutations[i].param1);
+							ASSERT(m.mutations[i].param2 == memoryReply.mutations[memoryVerifyIdx].mutations[i].param2);
+						}
+						memoryVerifyIdx++;
+					}
+				}
+			} else if (memoryVerifyIdx < memoryReply.mutations.size() &&
+			           version == memoryReply.mutations[memoryVerifyIdx].version) {
+				ASSERT(false);
 			}
 			remainingDurableBytes -=
 			    sizeof(KeyValueRef) +
@@ -2257,19 +2299,18 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 
 	wait(delay(0, TaskPriority::DefaultEndpoint));
 
-	if (DEBUG_SS_CFM(data->thisServerID, req.rangeID, req.begin)) {
-		printf("CFM: SS %s CF %s: got CFSQ %s [%s - %s) %lld - %lld, crp=%s\n",
-		       data->thisServerID.toString().substr(0, 4).c_str(),
-		       req.rangeID.printable().substr(0, 6).c_str(),
-		       streamUID.toString().substr(0, 8).c_str(),
-		       req.range.begin.printable().c_str(),
-		       req.range.end.printable().c_str(),
-		       req.begin,
-		       req.end,
-		       req.canReadPopped ? "T" : "F");
-	}
-
 	try {
+		if (DEBUG_SS_CFM(data->thisServerID, req.rangeID, req.begin)) {
+			printf("CFM: SS %s CF %s: got CFSQ %s [%s - %s) %lld - %lld, crp=%s\n",
+			       data->thisServerID.toString().substr(0, 4).c_str(),
+			       req.rangeID.printable().substr(0, 6).c_str(),
+			       streamUID.toString().substr(0, 8).c_str(),
+			       req.range.begin.printable().c_str(),
+			       req.range.end.printable().c_str(),
+			       req.begin,
+			       req.end,
+			       req.canReadPopped ? "T" : "F");
+		}
 		data->activeFeedQueries++;
 
 		// send an empty version at begin - 1 to establish the stream quickly
@@ -4045,10 +4086,9 @@ void applyMutation(StorageServer* self,
 void applyChangeFeedMutation(StorageServer* self, MutationRef const& m, Version version) {
 	if (m.type == MutationRef::SetValue) {
 		for (auto& it : self->keyChangeFeed[m.param1]) {
-			if (!it->stopped) {
-				ASSERT(version > it->emptyVersion);
+			if (version < it->stopVersion && !it->removing && version > it->emptyVersion) {
 				if (it->mutations.empty() || it->mutations.back().version != version) {
-					it->mutations.push_back(MutationsAndVersionRef(version, self->knownCommittedVersion));
+					it->mutations.push_back(MutationsAndVersionRef(version, self->knownCommittedVersion.get()));
 				}
 				it->mutations.back().mutations.push_back_deep(it->mutations.back().arena(), m);
 				self->currentChangeFeeds.insert(it->id);
@@ -4057,23 +4097,24 @@ void applyChangeFeedMutation(StorageServer* self, MutationRef const& m, Version 
 				    .detail("Range", it->range)
 				    .detail("ChangeFeedID", it->id);
 			} else {
-				TEST(it->stopped); // Skip CF write because stopped
-				TEST(version <= it->emptyVersion); // Skip CF write because popped and SS behind
+				TEST(version <= it->emptyVersion); // Skip CF write because version <= emptyVersion
+				TEST(it->removing); // Skip CF write because removing
+				TEST(version >= it->stopVersion); // Skip CF write because stopped
 				DEBUG_MUTATION("ChangeFeedWriteSetIgnore", version, m, self->thisServerID)
 				    .detail("Range", it->range)
 				    .detail("ChangeFeedID", it->id)
-				    .detail("Stopped", it->stopped)
-				    .detail("EmptyVersion", it->emptyVersion);
+				    .detail("StopVersion", it->stopVersion)
+				    .detail("EmptyVersion", it->emptyVersion)
+				    .detail("Removing", it->removing);
 			}
 		}
 	} else if (m.type == MutationRef::ClearRange) {
 		auto ranges = self->keyChangeFeed.intersectingRanges(KeyRangeRef(m.param1, m.param2));
 		for (auto& r : ranges) {
 			for (auto& it : r.value()) {
-				if (!it->stopped) {
-					ASSERT(version > it->emptyVersion);
+				if (version < it->stopVersion && !it->removing && version > it->emptyVersion) {
 					if (it->mutations.empty() || it->mutations.back().version != version) {
-						it->mutations.push_back(MutationsAndVersionRef(version, self->knownCommittedVersion));
+						it->mutations.push_back(MutationsAndVersionRef(version, self->knownCommittedVersion.get()));
 					}
 					it->mutations.back().mutations.push_back_deep(it->mutations.back().arena(), m);
 					self->currentChangeFeeds.insert(it->id);
@@ -4081,13 +4122,15 @@ void applyChangeFeedMutation(StorageServer* self, MutationRef const& m, Version 
 					    .detail("Range", it->range)
 					    .detail("ChangeFeedID", it->id);
 				} else {
-					TEST(it->stopped); // Skip CF clear because stopped
-					TEST(version <= it->emptyVersion); // Skip CF clear because popped and SS behind
+					TEST(version <= it->emptyVersion); // Skip CF clear because version <= emptyVersion
+					TEST(it->removing); // Skip CF clear because removing
+					TEST(version >= it->stopVersion); // Skip CF clear because stopped
 					DEBUG_MUTATION("ChangeFeedWriteClearIgnore", version, m, self->thisServerID)
 					    .detail("Range", it->range)
 					    .detail("ChangeFeedID", it->id)
-					    .detail("Stopped", it->stopped)
-					    .detail("EmptyVersion", it->emptyVersion);
+					    .detail("StopVersion", it->stopVersion)
+					    .detail("EmptyVersion", it->emptyVersion)
+					    .detail("Removing", it->removing);
 				}
 			}
 		}
@@ -4328,8 +4371,29 @@ static const KeyRangeRef persistByteSampleSampleKeys =
 static const KeyRef persistLogProtocol = LiteralStringRef(PERSIST_PREFIX "LogProtocol");
 static const KeyRef persistPrimaryLocality = LiteralStringRef(PERSIST_PREFIX "PrimaryLocality");
 static const KeyRangeRef persistChangeFeedKeys =
-    KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "RF/"), LiteralStringRef(PERSIST_PREFIX "RF0"));
+    KeyRangeRef(LiteralStringRef(PERSIST_PREFIX "CF/"), LiteralStringRef(PERSIST_PREFIX "CF0"));
 // data keys are unmangled (but never start with PERSIST_PREFIX because they are always in allKeys)
+
+// We have to store the version the change feed was stopped at in the SS instead of just the stopped status
+// In addition to simplifying stopping logic, it enables communicating stopped status when fetching change feeds
+// from other SS correctly
+const Value changeFeedSSValue(KeyRangeRef const& range, Version popVersion, Version stopVersion) {
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withChangeFeed()));
+	wr << range;
+	wr << popVersion;
+	wr << stopVersion;
+	return wr.toValue();
+}
+
+std::tuple<KeyRange, Version, Version> decodeChangeFeedSSValue(ValueRef const& value) {
+	KeyRange range;
+	Version popVersion, stopVersion;
+	BinaryReader reader(value, IncludeVersion());
+	reader >> range;
+	reader >> popVersion;
+	reader >> stopVersion;
+	return std::make_tuple(range, popVersion, stopVersion);
+}
 
 ACTOR Future<Void> changeFeedPopQ(StorageServer* self, ChangeFeedPopRequest req) {
 	// if a SS restarted and is way behind, wait for it to at least have caught up through the pop version
@@ -4361,12 +4425,10 @@ ACTOR Future<Void> changeFeedPopQ(StorageServer* self, ChangeFeedPopRequest req)
 		auto& mLV = self->addVersionToMutationLog(durableVersion);
 		self->addMutationToMutationLog(
 		    mLV,
-		    MutationRef(MutationRef::SetValue,
-		                persistChangeFeedKeys.begin.toString() + feed->second->id.toString(),
-		                changeFeedValue(feed->second->range,
-		                                feed->second->emptyVersion + 1,
-		                                feed->second->stopped ? ChangeFeedStatus::CHANGE_FEED_STOP
-		                                                      : ChangeFeedStatus::CHANGE_FEED_CREATE)));
+		    MutationRef(
+		        MutationRef::SetValue,
+		        persistChangeFeedKeys.begin.toString() + feed->second->id.toString(),
+		        changeFeedSSValue(feed->second->range, feed->second->emptyVersion + 1, feed->second->stopVersion)));
 		if (feed->second->storageVersion != invalidVersion) {
 			++self->counters.kvSystemClearRanges;
 			self->addMutationToMutationLog(mLV,
@@ -4647,56 +4709,44 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data, KeyR
 		    .detail("Range", cfEntry.range.toString())
 		    .detail("FetchVersion", fetchVersion)
 		    .detail("EmptyVersion", cfEntry.emptyVersion)
-		    .detail("Stopped", cfEntry.stopped)
+		    .detail("StopVersion", cfEntry.stopVersion)
 		    .detail("Existing", existing)
 		    .detail("CleanupPendingVersion", cleanupPending ? cleanupEntry->second : invalidVersion);
+
+		bool addMutationToLog = false;
+		Reference<ChangeFeedInfo> changeFeedInfo;
 
 		if (!existing) {
 			TEST(cleanupPending); // Fetch change feed which is cleanup pending. This means there was a move away and a
 			// move back, this will remake the metadata
 
-			if (cfEntry.emptyVersion < data->version.get()) {
-				Reference<ChangeFeedInfo> changeFeedInfo = Reference<ChangeFeedInfo>(new ChangeFeedInfo());
-				changeFeedInfo->range = cfEntry.range;
-				changeFeedInfo->id = cfEntry.rangeId;
+			changeFeedInfo = Reference<ChangeFeedInfo>(new ChangeFeedInfo());
+			changeFeedInfo->range = cfEntry.range;
+			changeFeedInfo->id = cfEntry.rangeId;
 
-				changeFeedInfo->stopped = cfEntry.stopped;
-				changeFeedInfo->emptyVersion = cfEntry.emptyVersion;
-				data->uidChangeFeed[cfEntry.rangeId] = changeFeedInfo;
-				auto rs = data->keyChangeFeed.modify(cfEntry.range);
-				for (auto r = rs.begin(); r != rs.end(); ++r) {
-					r->value().push_back(changeFeedInfo);
-				}
-				data->keyChangeFeed.coalesce(cfEntry.range.contents());
-
-				auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
-				data->addMutationToMutationLog(
-				    mLV,
-				    MutationRef(MutationRef::SetValue,
-				                persistChangeFeedKeys.begin.toString() + cfEntry.rangeId.toString(),
-				                changeFeedValue(cfEntry.range,
-				                                changeFeedInfo->emptyVersion + 1,
-				                                cfEntry.stopped ? ChangeFeedStatus::CHANGE_FEED_STOP
-				                                                : ChangeFeedStatus::CHANGE_FEED_CREATE)));
-			} else {
-				// don't include in list of change feeds to fetch
-				feedIds.pop_back();
-				TraceEvent(SevDebug, "FetchedChangeFeedInfoIgnored", data->thisServerID)
-				    .detail("RangeID", cfEntry.rangeId.printable())
-				    .detail("Range", cfEntry.range.toString())
-				    .detail("FetchVersion", fetchVersion)
-				    .detail("SSVersion", data->version.get())
-				    .detail("EmptyVersion", cfEntry.emptyVersion);
+			changeFeedInfo->emptyVersion = cfEntry.emptyVersion;
+			changeFeedInfo->stopVersion = cfEntry.stopVersion;
+			data->uidChangeFeed[cfEntry.rangeId] = changeFeedInfo;
+			auto rs = data->keyChangeFeed.modify(cfEntry.range);
+			for (auto r = rs.begin(); r != rs.end(); ++r) {
+				r->value().push_back(changeFeedInfo);
 			}
+			data->keyChangeFeed.coalesce(cfEntry.range.contents());
+
+			addMutationToLog = true;
 		} else {
 			auto changeFeedInfo = existingEntry->second;
 			auto feedCleanup = data->changeFeedCleanupDurable.find(cfEntry.rangeId);
+
+			if (cfEntry.stopVersion < changeFeedInfo->stopVersion) {
+				changeFeedInfo->stopVersion = cfEntry.stopVersion;
+				addMutationToLog = true;
+			}
 
 			if (feedCleanup != data->changeFeedCleanupDurable.end() && changeFeedInfo->removing) {
 				TEST(true); // re-fetching feed scheduled for deletion! Un-mark it as removing
 				if (cfEntry.emptyVersion < data->version.get()) {
 					changeFeedInfo->emptyVersion = cfEntry.emptyVersion;
-					changeFeedInfo->stopped = cfEntry.stopped;
 				}
 
 				changeFeedInfo->removing = false;
@@ -4710,23 +4760,24 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data, KeyR
 				    .detail("FetchVersion", fetchVersion)
 				    .detail("EmptyVersion", cfEntry.emptyVersion)
 				    .detail("CleanupVersion", feedCleanup->second)
-				    .detail("Stopped", cfEntry.stopped);
+				    .detail("StopVersion", cfEntry.stopVersion);
 
 				// Since cleanup put a mutation in the log to delete the change feed data, put one in the log to restore
 				// it
 				// We may just want to refactor this so updateStorage does explicit deletes based on
 				// changeFeedCleanupDurable and not use the mutation log at all for the change feed metadata cleanup.
 				// Then we wouldn't have to reset anything here
-				auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
-				data->addMutationToMutationLog(
-				    mLV,
-				    MutationRef(MutationRef::SetValue,
-				                persistChangeFeedKeys.begin.toString() + cfEntry.rangeId.toString(),
-				                changeFeedValue(cfEntry.range,
-				                                changeFeedInfo->emptyVersion + 1,
-				                                cfEntry.stopped ? ChangeFeedStatus::CHANGE_FEED_STOP
-				                                                : ChangeFeedStatus::CHANGE_FEED_CREATE)));
+				addMutationToLog = true;
 			}
+		}
+		if (addMutationToLog) {
+			auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
+			data->addMutationToMutationLog(
+			    mLV,
+			    MutationRef(
+			        MutationRef::SetValue,
+			        persistChangeFeedKeys.begin.toString() + cfEntry.rangeId.toString(),
+			        changeFeedSSValue(cfEntry.range, changeFeedInfo->emptyVersion + 1, changeFeedInfo->stopVersion)));
 		}
 	}
 	return feedIds;
@@ -5486,7 +5537,6 @@ void changeServerKeys(StorageServer* data,
 				auto feed = data->uidChangeFeed.find(f.first);
 				if (feed != data->uidChangeFeed.end()) {
 					feed->second->emptyVersion = version - 1;
-					feed->second->stopped = true;
 					feed->second->removing = true;
 					feed->second->moved(feed->second->range);
 					feed->second->newMutations.trigger();
@@ -5664,7 +5714,7 @@ private:
 				rollback(data, rollbackVersion, currentVersion);
 			}
 			for (auto& it : data->uidChangeFeed) {
-				if (!it.second->stopped && !it.second->removing) {
+				if (!it.second->removing && currentVersion < it.second->stopVersion) {
 					it.second->mutations.push_back(MutationsAndVersionRef(currentVersion, rollbackVersion));
 					it.second->mutations.back().mutations.push_back_deep(it.second->mutations.back().arena(), m);
 					data->currentChangeFeeds.insert(it.first);
@@ -5757,7 +5807,7 @@ private:
 			}
 
 			bool addMutationToLog = false;
-			if (popVersion != invalidVersion) {
+			if (popVersion != invalidVersion && status != ChangeFeedStatus::CHANGE_FEED_DESTROY) {
 				// pop the change feed at pop version, no matter what state it is in
 				if (popVersion - 1 > feed->second->emptyVersion) {
 					feed->second->emptyVersion = popVersion - 1;
@@ -5775,22 +5825,24 @@ private:
 					}
 					addMutationToLog = true;
 				}
-				feed->second->stopped = (status == ChangeFeedStatus::CHANGE_FEED_STOP);
-			} else if (status == ChangeFeedStatus::CHANGE_FEED_CREATE) {
+
+			} else if (status == ChangeFeedStatus::CHANGE_FEED_CREATE && createdFeed) {
 				TraceEvent(SevDebug, "CreatingChangeFeed", data->thisServerID)
 				    .detail("RangeID", changeFeedId.printable())
 				    .detail("Range", changeFeedRange.toString())
 				    .detail("Version", currentVersion);
-				// no-op, already created
+				// no-op, already created metadata
 				addMutationToLog = true;
-			} else if (status == ChangeFeedStatus::CHANGE_FEED_STOP) {
+			}
+			if (status == ChangeFeedStatus::CHANGE_FEED_STOP && currentVersion < feed->second->stopVersion) {
 				TraceEvent(SevDebug, "StoppingChangeFeed", data->thisServerID)
 				    .detail("RangeID", changeFeedId.printable())
 				    .detail("Range", changeFeedRange.toString())
 				    .detail("Version", currentVersion);
-				feed->second->stopped = true;
+				feed->second->stopVersion = currentVersion;
 				addMutationToLog = true;
-			} else if (status == ChangeFeedStatus::CHANGE_FEED_DESTROY && !createdFeed) {
+			}
+			if (status == ChangeFeedStatus::CHANGE_FEED_DESTROY && !createdFeed) {
 				TraceEvent(SevDebug, "DestroyingChangeFeed", data->thisServerID)
 				    .detail("RangeID", changeFeedId.printable())
 				    .detail("Range", changeFeedRange.toString())
@@ -5808,7 +5860,7 @@ private:
 				++data->counters.kvSystemClearRanges;
 
 				feed->second->emptyVersion = currentVersion - 1;
-				feed->second->stopped = true;
+				feed->second->stopVersion = currentVersion;
 				feed->second->removing = true;
 				feed->second->moved(feed->second->range);
 				feed->second->newMutations.trigger();
@@ -5822,7 +5874,8 @@ private:
 				    mLV,
 				    MutationRef(MutationRef::SetValue,
 				                persistChangeFeedKeys.begin.toString() + changeFeedId.toString(),
-				                m.param2));
+				                changeFeedSSValue(
+				                    feed->second->range, feed->second->emptyVersion + 1, feed->second->stopVersion)));
 			}
 		} else if (m.param1.substr(1).startsWith(tssMappingKeys.begin) &&
 		           (m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange)) {
@@ -5973,7 +6026,9 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 
 		++data->counters.updateBatches;
 		data->lastTLogVersion = cursor->getMaxKnownVersion();
-		data->knownCommittedVersion = cursor->getMinKnownCommittedVersion();
+		if (cursor->getMinKnownCommittedVersion() > data->knownCommittedVersion.get()) {
+			data->knownCommittedVersion.set(cursor->getMinKnownCommittedVersion());
+		}
 		data->versionLag = std::max<int64_t>(0, data->lastTLogVersion - data->version.get());
 
 		ASSERT(*pReceivedUpdate == false);
@@ -6394,7 +6449,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 					    .detail("RangeID", info->second->id.printable())
 					    .detail("Range", info->second->range.toString())
 					    .detail("FetchVersion", info->second->fetchVersion)
-					    .detail("Stopped", info->second->stopped)
+					    .detail("StopVersion", info->second->stopVersion)
 					    .detail("Removing", info->second->removing);
 					feedFetchVersions.push_back(std::pair(info->second->id, info->second->fetchVersion));
 				}
@@ -6475,7 +6530,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 				    .detail("FetchVersion", info->second->fetchVersion)
 				    .detail("OldDurableVersion", info->second->durableFetchVersion.get())
 				    .detail("NewDurableVersion", feedFetchVersions[curFeed].second)
-				    .detail("Stopped", info->second->stopped)
+				    .detail("StopVersion", info->second->stopVersion)
 				    .detail("Removing", info->second->removing);
 				if (feedFetchVersions[curFeed].second > info->second->durableFetchVersion.get()) {
 					info->second->durableFetchVersion.set(feedFetchVersions[curFeed].second);
@@ -6995,13 +7050,12 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	for (feedLoc = 0; feedLoc < changeFeeds.size(); feedLoc++) {
 		Key changeFeedId = changeFeeds[feedLoc].key.removePrefix(persistChangeFeedKeys.begin);
 		KeyRange changeFeedRange;
-		Version popVersion;
-		ChangeFeedStatus status;
-		std::tie(changeFeedRange, popVersion, status) = decodeChangeFeedValue(changeFeeds[feedLoc].value);
+		Version popVersion, stopVersion;
+		std::tie(changeFeedRange, popVersion, stopVersion) = decodeChangeFeedSSValue(changeFeeds[feedLoc].value);
 		TraceEvent(SevDebug, "RestoringChangeFeed", data->thisServerID)
 		    .detail("RangeID", changeFeedId.printable())
 		    .detail("Range", changeFeedRange.toString())
-		    .detail("Status", status)
+		    .detail("StopVersion", stopVersion)
 		    .detail("PopVer", popVersion);
 		Reference<ChangeFeedInfo> changeFeedInfo(new ChangeFeedInfo());
 		changeFeedInfo->range = changeFeedRange;
@@ -7009,7 +7063,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 		changeFeedInfo->durableVersion = version;
 		changeFeedInfo->storageVersion = version;
 		changeFeedInfo->emptyVersion = popVersion - 1;
-		changeFeedInfo->stopped = status == ChangeFeedStatus::CHANGE_FEED_STOP;
+		changeFeedInfo->stopVersion = stopVersion;
 		data->uidChangeFeed[changeFeedId] = changeFeedInfo;
 		auto rs = data->keyChangeFeed.modify(changeFeedRange);
 		for (auto r = rs.begin(); r != rs.end(); ++r) {
