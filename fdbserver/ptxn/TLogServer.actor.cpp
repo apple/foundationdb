@@ -1508,7 +1508,7 @@ ACTOR Future<Void> servicePeekRequest(
 	TLogPeekReply reply;
 	reply.maxKnownVersion = logData->version.get();
 	reply.minKnownCommittedVersion = logData->minKnownCommittedVersion;
-	reply.data = StringRef(reply.arena, replyData);
+	reply.data = replyData;
 	reply.endVersion = endVersion;
 	reply.beginVersion = beginVersion;
 	reply.onlySpilled = onlySpilled;
