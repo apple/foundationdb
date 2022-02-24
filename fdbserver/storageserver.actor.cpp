@@ -1981,8 +1981,10 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 
 	state bool readDurable = feedInfo->durableVersion != invalidVersion && req.begin <= feedInfo->durableVersion;
 	state bool readFetched = req.begin <= fetchStorageVersion && !atLatest;
+	state bool waitFetched = false;
 	if (req.end > emptyVersion + 1 && (readDurable || readFetched)) {
 		if (readFetched && req.begin <= feedInfo->fetchVersion) {
+			waitFetched = true;
 			// Request needs data that has been written to storage by a change feed fetch, but not committed yet
 			// To not block fetchKeys making normal SS data readable on making change feed data written to storage, we
 			// wait in here instead for all fetched data to become readable from the storage engine.
@@ -2040,26 +2042,41 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 				// they are the same. In particular this validates the consistency of change feed data recieved from the
 				// tlog mutations vs change feed data fetched from another storage server
 				if (memoryVerifyIdx < memoryReply.mutations.size()) {
-					if (version > memoryReply.mutations[memoryVerifyIdx].version) {
-						printf("ERROR: SS %s CF %s SQ %s has mutation at %lld in memory but not on disk "
-						       "(emptyVersion=%lld, emptyBefore=%lld)!\n",
-						       data->thisServerID.toString().substr(0, 4).c_str(),
-						       req.rangeID.printable().substr(0, 6).c_str(),
-						       streamUID.toString().substr(0, 8).c_str(),
-						       memoryReply.mutations[memoryVerifyIdx].version,
-						       feedInfo->emptyVersion,
-						       emptyVersion);
+					while (version > memoryReply.mutations[memoryVerifyIdx].version) {
+						// there is a case where this can happen - if we wait on a fetching change feed, and the feed is
+						// popped while we wait, we could have copied the memory mutations into memoryReply before the
+						// pop, but they could have been skipped writing to disk
+						if (waitFetched && feedInfo->emptyVersion > emptyVersion && version > feedInfo->emptyVersion &&
+						    memoryReply.mutations[memoryVerifyIdx].version <= feedInfo->emptyVersion &&
+						    memoryReply.mutations[memoryVerifyIdx].version > emptyVersion) {
+							// ok
+							memoryVerifyIdx++;
+							continue;
+						} else {
+							printf(
+							    "ERROR: SS %s CF %s SQ %s has mutation at %lld in memory but not on disk (next disk is "
+							    "%lld) "
+							    "(emptyVersion=%lld, emptyBefore=%lld)!\n",
+							    data->thisServerID.toString().substr(0, 4).c_str(),
+							    req.rangeID.printable().substr(0, 6).c_str(),
+							    streamUID.toString().substr(0, 8).c_str(),
+							    memoryReply.mutations[memoryVerifyIdx].version,
+							    version,
+							    feedInfo->emptyVersion,
+							    emptyVersion);
 
-						printf("  Memory: (%d)\n", memoryReply.mutations[memoryVerifyIdx].mutations.size());
-						for (auto& it : memoryReply.mutations[memoryVerifyIdx].mutations) {
-							if (it.type == MutationRef::SetValue) {
-								printf("    %s=\n", it.param1.printable().c_str());
-							} else {
-								printf("    %s - %s\n", it.param1.printable().c_str(), it.param2.printable().c_str());
+							printf("  Memory: (%d)\n", memoryReply.mutations[memoryVerifyIdx].mutations.size());
+							for (auto& it : memoryReply.mutations[memoryVerifyIdx].mutations) {
+								if (it.type == MutationRef::SetValue) {
+									printf("    %s=\n", it.param1.printable().c_str());
+								} else {
+									printf(
+									    "    %s - %s\n", it.param1.printable().c_str(), it.param2.printable().c_str());
+								}
 							}
+							ASSERT(false);
 						}
 					}
-					ASSERT(version <= memoryReply.mutations[memoryVerifyIdx].version);
 					if (version == memoryReply.mutations[memoryVerifyIdx].version) {
 						// TODO: we could do some validation here too, but it's complicated because clears can get split
 						// and stuff
