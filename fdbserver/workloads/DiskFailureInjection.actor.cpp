@@ -106,8 +106,8 @@ struct DiskFailureInjectionWorkload : TestWorkload {
 				    .detail("OnEndpoint", worker.waitFailure.getEndpoint().addresses.address.toString());
 			} else {
 				TraceEvent(SevError, "DiskFailureInjectionFailed")
-				    .detail("OnEndpoint", worker.waitFailure.getEndpoint().addresses.address.toString())
-				    .error(err);
+				    .error(err)
+				    .detail("OnEndpoint", worker.waitFailure.getEndpoint().addresses.address.toString());
 			}
 		}
 	}

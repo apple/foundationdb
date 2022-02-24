@@ -2094,7 +2094,7 @@ public:
 				t.action.send(Void());
 				ASSERT(this->currentProcess == t.machine);
 			} catch (Error& e) {
-				TraceEvent(SevError, "UnhandledSimulationEventError").error(e, true);
+				TraceEvent(SevError, "UnhandledSimulationEventError").errorUnsuppressed(e);
 				killProcess(t.machine, KillInstantly);
 			}
 

@@ -796,7 +796,7 @@ ACTOR Future<Void> coordinationServer(std::string dataFolder,
 		     store.getError() || configDatabaseServer);
 		throw internal_error();
 	} catch (Error& e) {
-		TraceEvent("CoordinationServerError", myID).error(e, true);
+		TraceEvent("CoordinationServerError", myID).errorUnsuppressed(e);
 		throw;
 	}
 }

@@ -260,7 +260,7 @@ public:
 			std::string currentFilename =
 			    (wrappedFile.isReady() && !wrappedFile.isError()) ? wrappedFile.get()->getFilename() : actualFilename;
 			currentProcess->machine->openFiles.erase(currentFilename);
-			//TraceEvent("AsyncFileNonDurableOpenError").error(e, true).detail("Filename", filename).detail("Address", currentProcess->address).detail("Addr", g_simulator.getCurrentProcess()->address);
+			//TraceEvent("AsyncFileNonDurableOpenError").errorUnsuppressed(e).detail("Filename", filename).detail("Address", currentProcess->address).detail("Addr", g_simulator.getCurrentProcess()->address);
 			wait(g_simulator.onProcess(currentProcess, currentTaskID));
 			throw err;
 		}

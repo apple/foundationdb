@@ -2061,8 +2061,8 @@ private:
 			}
 		} catch (Error& e) {
 			TraceEvent(SevError, "KVDoCloseError", self->logID)
+			    .errorUnsuppressed(e)
 			    .detail("Filename", self->filename)
-			    .error(e, true)
 			    .detail("Reason", e.code() == error_code_platform_error ? "could not delete database" : "unknown");
 			error = e;
 		}

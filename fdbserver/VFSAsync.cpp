@@ -742,7 +742,7 @@ static int asyncSleep(sqlite3_vfs* pVfs, int microseconds) {
 		if (e.isInjectedFault()) {
 			VFSAsyncFile::setInjectedError(SQLITE_ERROR);
 		}
-		TraceEvent(SevError, "VFSAsyncSleepError").error(e, true);
+		TraceEvent(SevError, "VFSAsyncSleepError").errorUnsuppressed(e);
 		return 0;
 	}
 }

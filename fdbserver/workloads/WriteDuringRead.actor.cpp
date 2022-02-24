@@ -1055,7 +1055,7 @@ ACTOR Future<Void> randomTransaction(Database cx, WriteDuringReadWorkload* self,
 			watches.clear();
 			self->changeCount.insert(allKeys, 0);
 			doingCommit = false;
-			//TraceEvent("WDRError").error(e, true);
+			//TraceEvent("WDRError").errorUnsuppressed(e);
 			if (e.code() == error_code_database_locked) {
 				self->memoryDatabase = self->lastCommittedDatabase;
 				self->addedConflicts.insert(allKeys, false);

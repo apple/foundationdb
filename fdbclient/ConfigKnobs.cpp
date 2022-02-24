@@ -27,7 +27,7 @@ ConfigKey ConfigKeyRef::decodeKey(KeyRef const& key) {
 	try {
 		tuple = Tuple::unpack(key);
 	} catch (Error& e) {
-		TraceEvent(SevWarnAlways, "FailedToUnpackConfigKey").detail("Key", printable(key)).error(e);
+		TraceEvent(SevWarnAlways, "FailedToUnpackConfigKey").error(e).detail("Key", printable(key));
 		throw invalid_config_db_key();
 	}
 	if (tuple.size() != 2) {

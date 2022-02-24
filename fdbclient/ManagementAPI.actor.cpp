@@ -1273,7 +1273,7 @@ ACTOR Future<Void> excludeServers(Database cx, std::vector<AddressExclusion> ser
 				wait(ryw.commit());
 				return Void();
 			} catch (Error& e) {
-				TraceEvent("ExcludeServersError").error(e, true);
+				TraceEvent("ExcludeServersError").errorUnsuppressed(e);
 				wait(ryw.onError(e));
 			}
 		}
@@ -1285,7 +1285,7 @@ ACTOR Future<Void> excludeServers(Database cx, std::vector<AddressExclusion> ser
 				wait(tr.commit());
 				return Void();
 			} catch (Error& e) {
-				TraceEvent("ExcludeServersError").error(e, true);
+				TraceEvent("ExcludeServersError").errorUnsuppressed(e);
 				wait(tr.onError(e));
 			}
 		}
@@ -1336,7 +1336,7 @@ ACTOR Future<Void> excludeLocalities(Database cx, std::unordered_set<std::string
 				wait(ryw.commit());
 				return Void();
 			} catch (Error& e) {
-				TraceEvent("ExcludeLocalitiesError").error(e, true);
+				TraceEvent("ExcludeLocalitiesError").errorUnsuppressed(e);
 				wait(ryw.onError(e));
 			}
 		}
@@ -1348,7 +1348,7 @@ ACTOR Future<Void> excludeLocalities(Database cx, std::unordered_set<std::string
 				wait(tr.commit());
 				return Void();
 			} catch (Error& e) {
-				TraceEvent("ExcludeLocalitiesError").error(e, true);
+				TraceEvent("ExcludeLocalitiesError").errorUnsuppressed(e);
 				wait(tr.onError(e));
 			}
 		}
@@ -1392,7 +1392,7 @@ ACTOR Future<Void> includeServers(Database cx, std::vector<AddressExclusion> ser
 				wait(ryw.commit());
 				return Void();
 			} catch (Error& e) {
-				TraceEvent("IncludeServersError").error(e, true);
+				TraceEvent("IncludeServersError").errorUnsuppressed(e);
 				wait(ryw.onError(e));
 			}
 		}
@@ -1449,7 +1449,7 @@ ACTOR Future<Void> includeServers(Database cx, std::vector<AddressExclusion> ser
 				wait(tr.commit());
 				return Void();
 			} catch (Error& e) {
-				TraceEvent("IncludeServersError").error(e, true);
+				TraceEvent("IncludeServersError").errorUnsuppressed(e);
 				wait(tr.onError(e));
 			}
 		}
@@ -1487,7 +1487,7 @@ ACTOR Future<Void> includeLocalities(Database cx, std::vector<std::string> local
 				wait(ryw.commit());
 				return Void();
 			} catch (Error& e) {
-				TraceEvent("IncludeLocalitiesError").error(e, true);
+				TraceEvent("IncludeLocalitiesError").errorUnsuppressed(e);
 				wait(ryw.onError(e));
 			}
 		}
@@ -1535,7 +1535,7 @@ ACTOR Future<Void> includeLocalities(Database cx, std::vector<std::string> local
 				wait(tr.commit());
 				return Void();
 			} catch (Error& e) {
-				TraceEvent("IncludeLocalitiesError").error(e, true);
+				TraceEvent("IncludeLocalitiesError").errorUnsuppressed(e);
 				wait(tr.onError(e));
 			}
 		}
@@ -1907,7 +1907,7 @@ ACTOR Future<Void> mgmtSnapCreate(Database cx, Standalone<StringRef> snapCmd, UI
 		TraceEvent("SnapCreateSucceeded").detail("snapUID", snapUID);
 		return Void();
 	} catch (Error& e) {
-		TraceEvent(SevWarn, "SnapCreateFailed").detail("snapUID", snapUID).error(e);
+		TraceEvent(SevWarn, "SnapCreateFailed").error(e).detail("snapUID", snapUID);
 		throw;
 	}
 }

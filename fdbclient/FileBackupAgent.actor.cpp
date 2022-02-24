@@ -4407,9 +4407,9 @@ public:
 				break;
 			} catch (Error& e) {
 				TraceEvent(numTries > 50 ? SevError : SevInfo, "FastRestoreToolSubmitRestoreRequestsMayFail")
+				    .error(e)
 				    .detail("Reason", "DB is not properly locked")
-				    .detail("ExpectedLockID", randomUID)
-				    .error(e);
+				    .detail("ExpectedLockID", randomUID);
 				numTries++;
 				wait(tr->onError(e));
 			}
@@ -4443,8 +4443,8 @@ public:
 				break;
 			} catch (Error& e) {
 				TraceEvent(numTries > 50 ? SevError : SevInfo, "FastRestoreToolSubmitRestoreRequestsRetry")
-				    .detail("RestoreIndex", restoreIndex)
-				    .error(e);
+				    .error(e)
+				    .detail("RestoreIndex", restoreIndex);
 				numTries++;
 				wait(tr->onError(e));
 			}
@@ -5800,9 +5800,9 @@ ACTOR static Future<Void> transformDatabaseContents(Database cx,
 			break;
 		} catch (Error& e) {
 			TraceEvent("FastRestoreWorkloadTransformDatabaseContentsGetAllKeys")
+			    .error(e)
 			    .detail("Index", i)
-			    .detail("RestoreRange", restoreRanges[i])
-			    .error(e);
+			    .detail("RestoreRange", restoreRanges[i]);
 			oldData = Standalone<VectorRef<KeyValueRef>>(); // clear the vector
 			wait(tr.onError(e));
 		}

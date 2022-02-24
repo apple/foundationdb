@@ -138,7 +138,9 @@ public:
 				tr = Transaction(self->db);
 				wait(delay(SERVER_KNOBS->SERVER_LIST_DELAY));
 			} catch (Error& e) {
-				TraceEvent("RatekeeperGetSSListError", self->id).error(e).suppressFor(1.0);
+				if (e.code() != error_code_actor_cancelled) {
+					TraceEvent("RatekeeperGetSSListError", self->id).errorUnsuppressed(e).suppressFor(1.0);
+				}
 				wait(tr.onError(e));
 			}
 		}
@@ -405,7 +407,7 @@ public:
 				}
 			}
 		} catch (Error& err) {
-			TraceEvent("RatekeeperDied", rkInterf.id()).error(err, true);
+			TraceEvent("RatekeeperDied", rkInterf.id()).errorUnsuppressed(err);
 		}
 		return Void();
 	}
