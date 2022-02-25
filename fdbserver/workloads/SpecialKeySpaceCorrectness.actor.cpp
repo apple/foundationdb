@@ -1399,7 +1399,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					// check DD disabled for rebalance
 					Optional<Value> val3 = wait(tx->get(rebalanceDDIgnoreKey));
 					// default value "on"
-					ASSERT(val3.present() && val3.get() == LiteralStringRef("on"));
+					ASSERT(val3.present());
 					tx->reset();
 					break;
 				} catch (Error& e) {

@@ -486,6 +486,7 @@ extern const KeyRangeRef monitorConfKeys;
 extern const KeyRef healthyZoneKey;
 extern const StringRef ignoreSSFailuresZoneString;
 extern const KeyRef rebalanceDDIgnoreKey;
+enum DDIgnore {REBALANCE_DISK = 1, REBALANCE_READ = 2};
 
 const Value healthyZoneValue(StringRef const& zoneId, Version version);
 std::pair<Key, Version> decodeHealthyZoneValue(ValueRef const&);

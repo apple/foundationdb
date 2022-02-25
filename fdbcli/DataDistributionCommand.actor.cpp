@@ -61,13 +61,20 @@ ACTOR Future<Void> setDDMode(Reference<IDatabase> db, int mode) {
 	}
 }
 
-ACTOR Future<Void> setDDIgnoreRebalanceSwitch(Reference<IDatabase> db, bool ignoreRebalance) {
+ACTOR Future<Void> setDDIgnoreRebalanceSwitch(Reference<IDatabase> db, int DDIgnoreOption) {
 	state Reference<ITransaction> tr = db->createTransaction();
 	loop {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		try {
-			if (ignoreRebalance) {
-				tr->set(fdb_cli::ddIgnoreRebalanceSpecialKey, ValueRef());
+			if (DDIgnoreOption > 0) {
+				Optional<Value> v = wait(safeThreadFutureToFuture(tr->get(fdb_cli::ddIgnoreRebalanceSpecialKey)));
+				if (v.present() && v.get().size() > 0) {
+					int oldValue = BinaryReader::fromStringRef<int>(v.get(), Unversioned());
+					tr->set(fdb_cli::ddIgnoreRebalanceSpecialKey,
+					        BinaryWriter::toValue(DDIgnoreOption & oldValue, Unversioned()));
+				} else {
+					tr->set(fdb_cli::ddIgnoreRebalanceSpecialKey, BinaryWriter::toValue(DDIgnoreOption, Unversioned()));
+				}
 			} else {
 				tr->clear(fdb_cli::ddIgnoreRebalanceSpecialKey);
 			}
@@ -85,12 +92,13 @@ namespace fdb_cli {
 
 const KeyRef ddModeSpecialKey = LiteralStringRef("\xff\xff/management/data_distribution/mode");
 const KeyRef ddIgnoreRebalanceSpecialKey = LiteralStringRef("\xff\xff/management/data_distribution/rebalance_ignored");
-
+constexpr auto usage =
+    "Usage: datadistribution <on|off|disable <ssfailure|rebalance|rebalance_disk|rebalance_read>|enable "
+    "<ssfailure|rebalance|rebalance_disk|rebalance_read>>\n";
 ACTOR Future<bool> dataDistributionCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	state bool result = true;
 	if (tokens.size() != 2 && tokens.size() != 3) {
-		printf("Usage: datadistribution <on|off|disable <ssfailure|rebalance>|enable "
-		       "<ssfailure|rebalance>>\n");
+		printf(usage);
 		result = false;
 	} else {
 		if (tokencmp(tokens[1], "on")) {
@@ -104,11 +112,16 @@ ACTOR Future<bool> dataDistributionCommandActor(Reference<IDatabase> db, std::ve
 				wait(success((setHealthyZone(db, LiteralStringRef("IgnoreSSFailures"), 0))));
 				printf("Data distribution is disabled for storage server failures.\n");
 			} else if (tokencmp(tokens[2], "rebalance")) {
-				wait(setDDIgnoreRebalanceSwitch(db, true));
+				wait(setDDIgnoreRebalanceSwitch(db, DDIgnore::REBALANCE_DISK | DDIgnore::REBALANCE_READ));
 				printf("Data distribution is disabled for rebalance.\n");
+			} else if (tokencmp(tokens[2], "rebalance_disk")) {
+				wait(setDDIgnoreRebalanceSwitch(db, DDIgnore::REBALANCE_DISK));
+				printf("Data distribution is disabled for rebalance_disk.\n");
+			} else if (tokencmp(tokens[2], "rebalance_read")) {
+				wait(setDDIgnoreRebalanceSwitch(db, DDIgnore::REBALANCE_READ));
+				printf("Data distribution is disabled for rebalance_read.\n");
 			} else {
-				printf("Usage: datadistribution <on|off|disable <ssfailure|rebalance>|enable "
-				       "<ssfailure|rebalance>>\n");
+				printf(usage);
 				result = false;
 			}
 		} else if (tokencmp(tokens[1], "enable")) {
@@ -116,16 +129,20 @@ ACTOR Future<bool> dataDistributionCommandActor(Reference<IDatabase> db, std::ve
 				wait(success((clearHealthyZone(db, false, true))));
 				printf("Data distribution is enabled for storage server failures.\n");
 			} else if (tokencmp(tokens[2], "rebalance")) {
-				wait(setDDIgnoreRebalanceSwitch(db, false));
+				wait(setDDIgnoreRebalanceSwitch(db, 0));
 				printf("Data distribution is enabled for rebalance.\n");
+			} else if (tokencmp(tokens[2], "rebalance_disk")) {
+				wait(setDDIgnoreRebalanceSwitch(db, ~DDIgnore::REBALANCE_DISK));
+				printf("Data distribution is disabled for rebalance_disk.\n");
+			} else if (tokencmp(tokens[2], "rebalance_read")) {
+				wait(setDDIgnoreRebalanceSwitch(db, ~DDIgnore::REBALANCE_READ));
+				printf("Data distribution is disabled for rebalance_read.\n");
 			} else {
-				printf("Usage: datadistribution <on|off|disable <ssfailure|rebalance>|enable "
-				       "<ssfailure|rebalance>>\n");
+				printf(usage);
 				result = false;
 			}
 		} else {
-			printf("Usage: datadistribution <on|off|disable <ssfailure|rebalance>|enable "
-			       "<ssfailure|rebalance>>\n");
+			printf(usage);
 			result = false;
 		}
 	}
