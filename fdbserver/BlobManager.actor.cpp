@@ -2759,6 +2759,38 @@ ACTOR Future<Void> doLockChecks(Reference<BlobManagerData> bmData) {
 	}
 }
 
+ACTOR Future<Void> blobManagerExclusionSafetyCheck(Reference<BlobManagerData> self,
+                                                   BlobManagerExclusionSafetyCheckRequest req) {
+	TraceEvent("BMExclusionSafetyCheckBegin", self->id).log();
+	BlobManagerExclusionSafetyCheckReply reply(true);
+	// make sure at least one blob worker remains after exclusions
+	if (self->workersById.empty()) {
+		TraceEvent("BMExclusionSafetyCheckNoWorkers", self->id).log();
+		reply.safe = false;
+	} else {
+		// TODO REMOVE prints
+		std::set<UID> remainingWorkers;
+		for (auto& worker : self->workersById) {
+			remainingWorkers.insert(worker.first);
+		}
+		for (const AddressExclusion& excl : req.exclusions) {
+			for (auto& worker : self->workersById) {
+				if (excl.excludes(worker.second.address())) {
+					remainingWorkers.erase(worker.first);
+				}
+			}
+		}
+
+		TraceEvent("BMExclusionSafetyChecked", self->id).detail("RemainingWorkers", remainingWorkers.size()).log();
+		reply.safe = !remainingWorkers.empty();
+	}
+
+	TraceEvent("BMExclusionSafetyCheckEnd", self->id).log();
+	req.reply.send(reply);
+
+	return Void();
+}
+
 ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
                                Reference<AsyncVar<ServerDBInfo> const> dbInfo,
                                int64_t epoch) {
@@ -2813,6 +2845,10 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 				req.reply.send(Void());
 				TraceEvent("BlobGranulesHalted", bmInterf.id()).detail("ReqID", req.requesterID);
 				break;
+			}
+			when(BlobManagerExclusionSafetyCheckRequest exclCheckReq =
+			         waitNext(bmInterf.blobManagerExclCheckReq.getFuture())) {
+				self->addActor.send(blobManagerExclusionSafetyCheck(self, exclCheckReq));
 			}
 			when(wait(collection)) {
 				TraceEvent("BlobManagerActorCollectionError");

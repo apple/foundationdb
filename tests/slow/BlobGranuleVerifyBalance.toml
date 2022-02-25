@@ -31,10 +31,6 @@ testTitle = 'BlobGranuleVerifyBalance'
 
     [[test.workload]]
     testName = 'Attrition'
-    testDuration = 120.0
-
-    [[test.workload]]
-    testName = 'Attrition'
     machinesToKill = 10
     machinesToLeave = 3
     reboot = true

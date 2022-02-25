@@ -1802,11 +1802,21 @@ ACTOR Future<Void> proxyCheckSafeExclusion(Reference<AsyncVar<ServerDBInfo> cons
 		return Void();
 	}
 	try {
-		state Future<ErrorOr<DistributorExclusionSafetyCheckReply>> safeFuture =
+		state Future<ErrorOr<DistributorExclusionSafetyCheckReply>> ddSafeFuture =
 		    db->get().distributor.get().distributorExclCheckReq.tryGetReply(
 		        DistributorExclusionSafetyCheckRequest(req.exclusions));
-		DistributorExclusionSafetyCheckReply _reply = wait(throwErrorOr(safeFuture));
+		DistributorExclusionSafetyCheckReply _reply = wait(throwErrorOr(ddSafeFuture));
 		reply.safe = _reply.safe;
+		if (db->get().blobManager.present()) {
+			TraceEvent("SafetyCheckCommitProxyBM").detail("BMID", db->get().blobManager.get().id());
+			state Future<ErrorOr<BlobManagerExclusionSafetyCheckReply>> bmSafeFuture =
+			    db->get().blobManager.get().blobManagerExclCheckReq.tryGetReply(
+			        BlobManagerExclusionSafetyCheckRequest(req.exclusions));
+			BlobManagerExclusionSafetyCheckReply _reply = wait(throwErrorOr(bmSafeFuture));
+			reply.safe &= _reply.safe;
+		} else {
+			TraceEvent("SafetyCheckCommitProxyNoBM");
+		}
 	} catch (Error& e) {
 		TraceEvent("SafetyCheckCommitProxyResponseError").error(e);
 		if (e.code() != error_code_operation_cancelled) {
