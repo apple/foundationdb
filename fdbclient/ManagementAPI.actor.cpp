@@ -783,6 +783,7 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 		return CoordinatorsResult::BAD_DATABASE_STATE; // Someone deleted this key entirely?
 
 	state ClusterConnectionString old(currentKey.get().toString());
+	wait(old.resolveHostnames());
 	if (tr->getDatabase()->getConnectionRecord() &&
 	    old.clusterKeyName().toString() !=
 	        tr->getDatabase()->getConnectionRecord()->getConnectionString().clusterKeyName())
@@ -805,6 +806,7 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 		return CoordinatorsResult::INVALID_NETWORK_ADDRESSES;
 
 	std::sort(conn->coords.begin(), conn->coords.end());
+	std::sort(conn->hostnames.begin(), conn->hostnames.end());
 
 	std::string newName = change->getDesiredClusterKeyName();
 	if (newName.empty())
