@@ -31,6 +31,7 @@ struct BlobManagerInterface {
 	RequestStream<ReplyPromise<Void>> waitFailure;
 	RequestStream<struct HaltBlobManagerRequest> haltBlobManager;
 	RequestStream<struct HaltBlobGranulesRequest> haltBlobGranules;
+	RequestStream<struct BlobManagerExclusionSafetyCheckRequest> blobManagerExclCheckReq;
 	struct LocalityData locality;
 	UID myId;
 
@@ -45,7 +46,7 @@ struct BlobManagerInterface {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, waitFailure, haltBlobManager, haltBlobGranules, locality, myId);
+		serializer(ar, waitFailure, haltBlobManager, haltBlobGranules, blobManagerExclCheckReq, locality, myId);
 	}
 };
 
@@ -74,6 +75,34 @@ struct HaltBlobGranulesRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, requesterID, reply);
+	}
+};
+
+struct BlobManagerExclusionSafetyCheckReply {
+	constexpr static FileIdentifier file_identifier = 8068627;
+	bool safe;
+
+	BlobManagerExclusionSafetyCheckReply() : safe(false) {}
+	explicit BlobManagerExclusionSafetyCheckReply(bool safe) : safe(safe) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, safe);
+	}
+};
+
+struct BlobManagerExclusionSafetyCheckRequest {
+	constexpr static FileIdentifier file_identifier = 1996387;
+	std::vector<AddressExclusion> exclusions;
+	ReplyPromise<BlobManagerExclusionSafetyCheckReply> reply;
+
+	BlobManagerExclusionSafetyCheckRequest() {}
+	explicit BlobManagerExclusionSafetyCheckRequest(std::vector<AddressExclusion> exclusions)
+	  : exclusions(exclusions) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, exclusions, reply);
 	}
 };
 
