@@ -2048,8 +2048,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 						// popped while we wait, we could have copied the memory mutations into memoryReply before the
 						// pop, but they may or may not have been skipped writing to disk
 						if (waitFetched && feedInfo->emptyVersion > emptyVersion &&
-						    memoryReply.mutations[memoryVerifyIdx].version <= feedInfo->emptyVersion &&
-						    memoryReply.mutations[memoryVerifyIdx].version > emptyVersion) {
+						    memoryReply.mutations[memoryVerifyIdx].version <= feedInfo->emptyVersion) {
 							// ok
 							memoryVerifyIdx++;
 							continue;
@@ -4500,6 +4499,7 @@ ACTOR Future<Void> changeFeedPopQ(StorageServer* self, ChangeFeedPopRequest req)
 	return Void();
 }
 
+// FIXME: there's a decent amount of duplicated code around fetching and popping change feeds
 // Returns max version fetched
 ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
                                              Reference<ChangeFeedInfo> changeFeedInfo,
@@ -4572,6 +4572,11 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 				if (feedResults->popVersion - 1 > changeFeedInfo->emptyVersion) {
 					TEST(true); // CF fetched updated popped version from src SS
 					changeFeedInfo->emptyVersion = feedResults->popVersion - 1;
+					// pop mutations
+					while (!changeFeedInfo->mutations.empty() &&
+					       changeFeedInfo->mutations.front().version <= changeFeedInfo->emptyVersion) {
+						changeFeedInfo->mutations.pop_front();
+					}
 					auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
 					data->addMutationToMutationLog(
 					    mLV,
@@ -4676,6 +4681,10 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 	if (feedResults->popVersion - 1 > changeFeedInfo->emptyVersion) {
 		TEST(true); // CF fetched updated popped version from src SS at end
 		changeFeedInfo->emptyVersion = feedResults->popVersion - 1;
+		while (!changeFeedInfo->mutations.empty() &&
+		       changeFeedInfo->mutations.front().version <= changeFeedInfo->emptyVersion) {
+			changeFeedInfo->mutations.pop_front();
+		}
 		auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
 		data->addMutationToMutationLog(
 		    mLV,
@@ -4695,10 +4704,6 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 			data->storage.clearRange(KeyRangeRef(changeFeedDurableKey(changeFeedInfo->id, firstVersion),
 			                                     changeFeedDurableKey(changeFeedInfo->id, endClear)));
 			++data->counters.kvSystemClearRanges;
-		}
-		while (!changeFeedInfo->mutations.empty() &&
-		       changeFeedInfo->mutations.front().version <= changeFeedInfo->emptyVersion) {
-			changeFeedInfo->mutations.pop_front();
 		}
 	}
 
@@ -4874,6 +4879,11 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data, KeyR
 			        MutationRef::SetValue,
 			        persistChangeFeedKeys.begin.toString() + cfEntry.rangeId.toString(),
 			        changeFeedSSValue(cfEntry.range, changeFeedInfo->emptyVersion + 1, changeFeedInfo->stopVersion)));
+			// if we updated pop version, remove mutations
+			while (!changeFeedInfo->mutations.empty() &&
+			       changeFeedInfo->mutations.front().version <= changeFeedInfo->emptyVersion) {
+				changeFeedInfo->mutations.pop_front();
+			}
 		}
 	}
 	return feedIds;
