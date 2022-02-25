@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <getopt.h>
 #include <math.h>
@@ -7,11 +8,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
-#include <sys/types.h>
-#include <sys/stat.h>
 
 #if defined(__linux__)
 #include <linux/limits.h>
@@ -1350,6 +1351,11 @@ void* worker_thread(void* thread_args) {
 		char str2[1000];
 		sprintf(str2, "%s%d", TEMP_DATA_STORE, *parent_id);
 		rc = mkdir(str2, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+		if (rc < 0) {
+			int ec = errno;
+			fprintf(stderr, "Failed to make directory: %s because %s\n", str2, strerror(ec));
+			goto failExit;
+		}
 		for (op = 0; op < MAX_OP; op++) {
 			if (args->txnspec.ops[op][OP_COUNT] > 0 || op == OP_COMMIT || op == OP_TRANSACTION) {
 				FILE* fp;
@@ -1357,6 +1363,11 @@ void* worker_thread(void* thread_args) {
 				strcat(file_name, str2);
 				get_stats_file_name(file_name, worker_id, thread_id, op);
 				fp = fopen(file_name, "w");
+				if (!fp) {
+					int ec = errno;
+					fprintf(stderr, "Failed to open file: %s because %s\n", file_name, strerror(ec));
+					goto failExit;
+				}
 				lat_block_t* temp_block = ((thread_args_t*)thread_args)->block[op];
 				if (is_memory_allocated[op]) {
 					size = stats->latency_samples[op] / LAT_BLOCK_SIZE;
@@ -1376,11 +1387,11 @@ void* worker_thread(void* thread_args) {
 				fclose(fp);
 			}
 		}
-		__sync_fetch_and_add(stopcount, 1);
 	}
 
 	/* fall through */
 failExit:
+	__sync_fetch_and_add(stopcount, 1);
 	for (op = 0; op < MAX_OP; op++) {
 		lat_block_t* curr = ((thread_args_t*)thread_args)->block[op];
 		lat_block_t* prev = NULL;
