@@ -26,6 +26,7 @@
 #endif
 
 #include <errno.h>
+#include "contrib/fmt-8.0.1/include/fmt/format.h"
 #include "flow/Platform.h"
 #include "flow/Platform.actor.h"
 #include "flow/Arena.h"
@@ -3826,7 +3827,7 @@ TEST_CASE("/flow/Platform/getMemoryInfo") {
 	ASSERT(request[LiteralStringRef("SwapTotal:")] == 25165820);
 	ASSERT(request[LiteralStringRef("SwapFree:")] == 23680228);
 	for (auto& item : request) {
-		printf("%s:%lld\n", item.first.toString().c_str(), item.second);
+		fmt::print("{}:{}\n", item.first.toString().c_str(), item.second);
 	}
 
 	printf("UnitTest flow/Platform/getMemoryInfo 2\n");
@@ -3877,7 +3878,7 @@ TEST_CASE("/flow/Platform/getMemoryInfo") {
 	ASSERT(request[LiteralStringRef("SwapTotal:")] == 0);
 	ASSERT(request[LiteralStringRef("SwapFree:")] == 0);
 	for (auto& item : request) {
-		printf("%s:%lld\n", item.first.toString().c_str(), item.second);
+		fmt::print("{}:{}\n", item.first.toString().c_str(), item.second);
 	}
 
 	return Void();

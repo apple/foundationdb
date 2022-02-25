@@ -2201,7 +2201,7 @@ ACTOR Future<Void> advanceVersion(Database cx, Version v) {
 				tr.set(minRequiredCommitVersionKey, BinaryWriter::toValue(v + 1, Unversioned()));
 				wait(tr.commit());
 			} else {
-				printf("Current read version is %lld\n", rv);
+				fmt::print("Current read version is {}\n", rv);
 				return Void();
 			}
 		} catch (Error& e) {
