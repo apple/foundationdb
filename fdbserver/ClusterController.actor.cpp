@@ -2304,10 +2304,6 @@ ACTOR Future<Void> watchBlobGranulesConfigKey(ClusterControllerData* self) {
 				self->db.blobGranulesEnabled.set(blobConfig.get() == LiteralStringRef("1"));
 			}
 
-			tr->reset();
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-
 			state Future<Void> watch = tr->watch(blobGranuleConfigKey);
 			wait(tr->commit());
 			wait(watch);
