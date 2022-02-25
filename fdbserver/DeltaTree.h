@@ -1095,7 +1095,7 @@ public:
 	// DecodedNodes are stored in a contiguous vector, which sometimes must be expanded, so care
 	// must be taken to resolve DecodedNode pointers again after the DecodeCache has new entries added.
 	struct DecodeCache : FastAllocated<DecodeCache>, ReferenceCounted<DecodeCache> {
-		DecodeCache(const T& lowerBound = T(), const T& upperBound = T(), size_t* pMemoryTracker = nullptr)
+		DecodeCache(const T& lowerBound = T(), const T& upperBound = T(), int64_t* pMemoryTracker = nullptr)
 		  : lowerBound(arena, lowerBound), upperBound(arena, upperBound), lastKnownUsedMemory(0),
 		    pMemoryTracker(pMemoryTracker) {
 			decodedNodes.reserve(10);
@@ -1121,8 +1121,8 @@ public:
 		//    DecodeCache destruction
 		//    Cursor destruction
 		// as those are the most efficient times to publish an update.
-		size_t lastKnownUsedMemory;
-		size_t* pMemoryTracker;
+		int lastKnownUsedMemory;
+		int64_t* pMemoryTracker;
 
 		// Index 0 is always the root
 		std::vector<DecodedNode> decodedNodes;
@@ -1130,7 +1130,7 @@ public:
 		DecodedNode& get(int index) { return decodedNodes[index]; }
 
 		void updateUsedMemory() {
-			size_t usedNow = arena.getSize(true) + (decodedNodes.capacity() * sizeof(DecodedNode));
+			int usedNow = sizeof(DeltaTree2) + arena.getSize(true) + (decodedNodes.capacity() * sizeof(DecodedNode));
 			if (pMemoryTracker != nullptr) {
 				*pMemoryTracker += (usedNow - lastKnownUsedMemory);
 			}

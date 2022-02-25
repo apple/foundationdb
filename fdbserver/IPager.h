@@ -309,6 +309,10 @@ public:
 	// Advance the commit version and the oldest readble version and commit until the remap queue is empty.
 	virtual Future<Void> clearRemapQueue() = 0;
 
+	// If set to a valid pointer, the page cache should behave as though the page cache size limit has been
+	// reduced by the target byte count.
+	virtual int64_t* getPageCachePenaltySource() = 0;
+
 protected:
 	~IPager2() {} // Destruction should be done using close()/dispose() from the IClosable interface
 };

@@ -1673,9 +1673,6 @@ struct RedwoodMetrics {
 	Reference<Histogram> kvSizeReadByGetRange;
 	double startTime;
 
-	// Absolute counters, not reset per time interval
-	size_t decodeCacheMemory = 0;
-
 	// Return number of pages read or written, from cache or disk
 	unsigned int pageOps() const {
 		// All page reads are either a cache hit, probe hit, or a disk read
@@ -1722,112 +1719,7 @@ struct RedwoodMetrics {
 
 	// This will populate a trace event and/or a string with Redwood metrics.
 	// The string is a reasonably well formatted page of information
-	void getFields(TraceEvent* e, std::string* s = nullptr, bool skipZeroes = false) {
-		std::pair<const char*, unsigned int> metrics[] = { { "BTreePreload", metric.btreeLeafPreload },
-			                                               { "BTreePreloadExt", metric.btreeLeafPreloadExt },
-			                                               { "", 0 },
-			                                               { "OpSet", metric.opSet },
-			                                               { "OpSetKeyBytes", metric.opSetKeyBytes },
-			                                               { "OpSetValueBytes", metric.opSetValueBytes },
-			                                               { "OpClear", metric.opClear },
-			                                               { "OpClearKey", metric.opClearKey },
-			                                               { "", 0 },
-			                                               { "OpGet", metric.opGet },
-			                                               { "OpGetRange", metric.opGetRange },
-			                                               { "OpCommit", metric.opCommit },
-			                                               { "", 0 },
-			                                               { "PagerDiskWrite", metric.pagerDiskWrite },
-			                                               { "PagerDiskRead", metric.pagerDiskRead },
-			                                               { "PagerCacheHit", metric.pagerCacheHit },
-			                                               { "PagerCacheMiss", metric.pagerCacheMiss },
-			                                               { "", 0 },
-			                                               { "PagerProbeHit", metric.pagerProbeHit },
-			                                               { "PagerProbeMiss", metric.pagerProbeMiss },
-			                                               { "PagerEvictUnhit", metric.pagerEvictUnhit },
-			                                               { "PagerEvictFail", metric.pagerEvictFail },
-			                                               { "", 0 },
-			                                               { "PagerRemapFree", metric.pagerRemapFree },
-			                                               { "PagerRemapCopy", metric.pagerRemapCopy },
-			                                               { "PagerRemapSkip", metric.pagerRemapSkip },
-			                                               { "", 0 } };
-
-		double elapsed = now() - startTime;
-
-		if (e != nullptr) {
-			for (auto& m : metrics) {
-				char c = m.first[0];
-				if (c != 0 && (!skipZeroes || m.second != 0)) {
-					e->detail(m.first, m.second);
-				}
-			}
-			levels[0].metrics.events.toTraceEvent(e, 0);
-		}
-
-		if (s != nullptr) {
-			for (auto& m : metrics) {
-				if (*m.first == '\0') {
-					*s += "\n";
-				} else if (!skipZeroes || m.second != 0) {
-					*s += format("%-15s %-8u %8" PRId64 "/s  ", m.first, m.second, int64_t(m.second / elapsed));
-				}
-			}
-			*s += levels[0].metrics.events.toString(0, elapsed);
-		}
-
-		for (int i = 1; i < btreeLevels + 1; ++i) {
-			auto& metric = levels[i].metrics;
-
-			std::pair<const char*, unsigned int> metrics[] = {
-				{ "PageBuild", metric.pageBuild },
-				{ "PageBuildExt", metric.pageBuildExt },
-				{ "PageModify", metric.pageModify },
-				{ "PageModifyExt", metric.pageModifyExt },
-				{ "", 0 },
-				{ "PageRead", metric.pageRead },
-				{ "PageReadExt", metric.pageReadExt },
-				{ "PageCommitStart", metric.pageCommitStart },
-				{ "", 0 },
-				{ "LazyClearInt", metric.lazyClearRequeue },
-				{ "LazyClearIntExt", metric.lazyClearRequeueExt },
-				{ "LazyClear", metric.lazyClearFree },
-				{ "LazyClearExt", metric.lazyClearFreeExt },
-				{ "", 0 },
-				{ "ForceUpdate", metric.forceUpdate },
-				{ "DetachChild", metric.detachChild },
-				{ "", 0 },
-			};
-
-			if (e != nullptr) {
-				for (auto& m : metrics) {
-					char c = m.first[0];
-					if (c != 0 && (!skipZeroes || m.second != 0)) {
-						e->detail(format("L%d%s", i, m.first + (c == '-' ? 1 : 0)), m.second);
-					}
-				}
-				metric.events.toTraceEvent(e, i);
-			}
-
-			if (s != nullptr) {
-				*s += format("\nLevel %d\n\t", i);
-
-				for (auto& m : metrics) {
-					const char* name = m.first;
-					bool rate = elapsed != 0;
-					if (*name == '-') {
-						++name;
-						rate = false;
-					}
-
-					if (*name == '\0') {
-						*s += "\n\t";
-					} else if (!skipZeroes || m.second != 0) {
-						*s += format("%-15s %8u %8u/s  ", name, m.second, rate ? int(m.second / elapsed) : 0);
-					}
-				}
-				*s += metric.events.toString(i, elapsed);
-			}
-		}
-	}
+	void getFields(TraceEvent* e, std::string* s = nullptr, bool skipZeroes = false);
 
 	std::string toString(bool clearAfter) {
 		std::string s;
@@ -1876,6 +1768,8 @@ ACTOR Future<Void> redwoodMetricsLogger() {
 //   Future<Void> onEvictable() const;  // ready when entry can be evicted
 template <class IndexType, class ObjectType>
 class ObjectCache : NonCopyable {
+	struct Entry;
+	typedef std::unordered_map<IndexType, Entry> CacheT;
 
 	struct Entry : public boost::intrusive::list_base_hook<> {
 		Entry() : hits(0), size(0) {}
@@ -1883,23 +1777,158 @@ class ObjectCache : NonCopyable {
 		ObjectType item;
 		int hits;
 		int size;
-		bool evictionPrioritized;
+		bool ownedByEvictor;
+		CacheT* pCache;
 	};
 
-	typedef std::unordered_map<IndexType, Entry> CacheT;
 	typedef boost::intrusive::list<Entry> EvictionOrderT;
 
 public:
-	ObjectCache(int sizeLimit = 1) : sizeLimit(sizeLimit), currentSize(0) {}
+	// Object evictor, manages the eviction order for one or more ObjectCaches
+	// Not all objects tracked by the Evictor are in its evictionOrder, as ObjectCaches
+	// using this Evictor can temporarily remove entries to an external order but they
+	// must eventually give them back with moveIn() or remove them with reclaim().
+	class Evictor : NonCopyable {
+	public:
+		// Evictors are normally singletons, either one per real process or one per virtual process in simulation
+		static Evictor* getEvictor() {
+			static Evictor nonSimEvictor;
+			static std::map<NetworkAddress, Evictor> simEvictors;
 
-	int64_t getSizeUsed() const { return currentSize; }
-	int64_t getSizeLimit() const { return sizeLimit; }
+			if (g_network->isSimulated()) {
+				return &simEvictors[g_network->getLocalAddress()];
+			} else {
+				return &nonSimEvictor;
+			}
+		}
 
-	void setSizeLimit(int n) {
-		ASSERT(n > 0);
-		sizeLimit = n;
-		cache.reserve(n);
+		// Move an entry to a different eviction order, stored outside of the Evictor,
+		// but the entry size is still counted against the evictor
+		void moveOut(Entry& e, EvictionOrderT& dest) {
+			ASSERT(e.ownedByEvictor);
+			dest.splice(dest.end(), evictionOrder, EvictionOrderT::s_iterator_to(e));
+			e.ownedByEvictor = false;
+			++movedOutCount;
+		}
+
+		// Move an entry to the back of the eviction order if it is in the eviction order
+		void moveToBack(Entry& e) {
+			ASSERT(e.ownedByEvictor);
+			evictionOrder.splice(evictionOrder.end(), evictionOrder, EvictionOrderT::s_iterator_to(e));
+		}
+
+		// Move entire contents of an external eviction order containing entries whose size is part of
+		// this Evictor to the front of its eviction order.
+		void moveIn(EvictionOrderT& otherOrder) {
+			for (auto& e : otherOrder) {
+				ASSERT(!e.ownedByEvictor);
+				e.ownedByEvictor = true;
+				--movedOutCount;
+			}
+			evictionOrder.splice(evictionOrder.begin(), otherOrder);
+		}
+
+		// Add a new item to the back of the eviction order
+		void addNew(Entry& e) {
+			sizeUsed += e.size;
+			evictionOrder.push_back(e);
+			e.ownedByEvictor = true;
+		}
+
+		// Claim ownership of an entry, removing its size from the current size and removing it
+		// from the eviction order if it exists there
+		void reclaim(Entry& e) {
+			sizeUsed -= e.size;
+			// If e is in evictionOrder then remove it
+			if (e.ownedByEvictor) {
+				evictionOrder.erase(EvictionOrderT::s_iterator_to(e));
+				e.ownedByEvictor = false;
+			} else {
+				// Otherwise, it wasn't so it had to be a movedOut item so decrement the count
+				--movedOutCount;
+			}
+		}
+
+		void trim(int additionalSpaceNeeded = 0) {
+			// While the cache is too big, evict the oldest entry until the oldest entry can't be evicted.
+			while (sizeUsed > (sizeLimit - reservedSize - additionalSpaceNeeded)) {
+				Entry& toEvict = evictionOrder.front();
+
+				debug_printf("Evictor count=%" PRId64 " sizeUsed=%" PRId64 " sizeLimit=%" PRId64 " sizePenalty=%" PRId64
+				             " needed=%d  Trying to evict %s\n",
+				             evictionOrder.size(),
+				             sizeUsed,
+				             sizeLimit,
+				             reservedSize,
+				             additionalSpaceNeeded,
+				             ::toString(toEvict.index).c_str());
+
+				if (!toEvict.item.evictable()) {
+					// shift the front to the back
+					evictionOrder.shift_forward(1);
+					++g_redwoodMetrics.metric.pagerEvictFail;
+					break;
+				} else {
+					if (toEvict.hits == 0) {
+						++g_redwoodMetrics.metric.pagerEvictUnhit;
+					}
+					sizeUsed -= toEvict.size;
+					debug_printf("Evicting %s\n", ::toString(toEvict.index).c_str());
+					evictionOrder.pop_front();
+					toEvict.pCache->erase(toEvict.index);
+				}
+			}
+		}
+
+		int64_t getCountUsed() const { return evictionOrder.size() + movedOutCount; }
+		int64_t getCountMoved() const { return movedOutCount; }
+		int64_t getSizeUsed() const { return sizeUsed + reservedSize; }
+
+		// Only to be used in tests at a point where all ObjectCache instances should be destroyed.
+		bool empty() const { return reservedSize == 0 && sizeUsed == 0 && getCountUsed() == 0; }
+
+		std::string toString() const {
+			std::string s = format("Evictor {sizeLimit=%" PRId64 " sizeUsed=%" PRId64 " countUsed=%" PRId64
+			                       " sizePenalty=%" PRId64 " movedOutCount=%" PRId64,
+			                       sizeLimit,
+			                       sizeUsed,
+			                       getCountUsed(),
+			                       reservedSize,
+			                       movedOutCount);
+			for (auto& entry : evictionOrder) {
+				s += format("\n\tindex %s  size %d  evictable %d\n",
+				            ::toString(entry.index).c_str(),
+				            entry.size,
+				            entry.item.evictable());
+			}
+			s += "}\n";
+			return s;
+		}
+
+		// Any external data strutures whose memory usage should be counted as part of the object cache
+		// budget should add their usage to this total and keep it updated.
+		int64_t reservedSize = 0;
+		int64_t sizeLimit = 0;
+
+	private:
+		EvictionOrderT evictionOrder;
+		// Size of all entries in the eviction order or held in external eviction orders
+		int64_t sizeUsed = 0;
+		// Number of items that have been moveOut()'d to other evictionOrders and aren't back yet
+		int64_t movedOutCount = 0;
+	};
+
+	ObjectCache(Evictor* evictor = nullptr) : pEvictor(evictor) {
+		if (pEvictor == nullptr) {
+			pEvictor = Evictor::getEvictor();
+		}
 	}
+
+	Evictor& evictor() const { return *pEvictor; }
+
+	int64_t getCount() const { return cache.size(); }
+
+	void reserveCount(int count) { cache.reserve(count); }
 
 	// Get the object for i if it exists, else return nullptr.
 	// If the object exists, its eviction order will NOT change as this is not a cache hit.
@@ -1915,10 +1944,8 @@ public:
 	// If index is in cache and not on the prioritized eviction order list, move it there.
 	void prioritizeEviction(const IndexType& index) {
 		auto i = cache.find(index);
-		if (i != cache.end() && !i->second.evictionPrioritized) {
-			prioritizedEvictions.splice(
-			    prioritizedEvictions.end(), evictionOrder, EvictionOrderT::s_iterator_to(i->second));
-			i->second.evictionPrioritized = true;
+		if (i != cache.end() && i->second.ownedByEvictor) {
+			pEvictor->moveOut(i->second, prioritizedEvictions);
 		}
 	}
 
@@ -1929,61 +1956,27 @@ public:
 	ObjectType& get(const IndexType& index, int size, bool noHit = false) {
 		Entry& entry = cache[index];
 
-		// If entry is linked into evictionOrder then move it to the back of the order
+		// If entry is linked into an evictionOrder
 		if (entry.is_linked()) {
+			// If this access is meant to be a hit
 			if (!noHit) {
 				++entry.hits;
-				// If item eviction is not prioritized, move to back of eviction order
-				if (!entry.evictionPrioritized) {
-					evictionOrder.splice(evictionOrder.end(), evictionOrder, EvictionOrderT::s_iterator_to(entry));
+				// If item eviction is not prioritized, move to end of eviction order
+				if (entry.ownedByEvictor) {
+					pEvictor->moveToBack(entry);
 				}
 			}
 		} else {
 			// Otherwise it was a cache miss
+
 			// Finish initializing entry
 			entry.index = index;
+			entry.pCache = &cache;
 			entry.hits = 0;
 			entry.size = size;
-			currentSize += size;
-			// Insert the newly created Entry at the back of the eviction order
-			evictionOrder.push_back(entry);
-			entry.evictionPrioritized = false;
 
-			// While the cache is too big, evict the oldest entry until the oldest entry can't be evicted.
-			while (currentSize > sizeLimit) {
-				Entry& toEvict = evictionOrder.front();
-
-				// It's critical that we do not evict the item we just added because it would cause the reference
-				// returned to be invalid.  An eviction could happen with a no-hit access to a cache resident page
-				// that is currently evictable and exists in the oversized portion of the cache eviction order due
-				// to previously failed evictions.
-				if (&entry == &toEvict) {
-					debug_printf("Cannot evict target index %s\n", toString(index).c_str());
-					break;
-				}
-
-				debug_printf("currentSize is %u and input size is %u. Trying to evict %s to make room for %s\n",
-				             currentSize,
-				             size,
-				             toString(toEvict.index).c_str(),
-				             toString(index).c_str());
-
-				if (!toEvict.item.evictable()) {
-					// shift the front to the back
-					evictionOrder.shift_forward(1);
-					++g_redwoodMetrics.metric.pagerEvictFail;
-					break;
-				} else {
-					if (toEvict.hits == 0) {
-						++g_redwoodMetrics.metric.pagerEvictUnhit;
-					}
-					currentSize -= toEvict.size;
-					debug_printf(
-					    "Evicting %s to make room for %s\n", toString(toEvict.index).c_str(), toString(index).c_str());
-					evictionOrder.pop_front();
-					cache.erase(toEvict.index);
-				}
-			}
+			pEvictor->trim(entry.size);
+			pEvictor->addNew(entry);
 		}
 
 		return entry.item;
@@ -1991,52 +1984,34 @@ public:
 
 	// Clears the cache, saving the entries to second cache, then waits for each item to be evictable and evicts it.
 	ACTOR static Future<Void> clear_impl(ObjectCache* self) {
-		state ObjectCache::CacheT cache;
-		state EvictionOrderT evictionOrder;
-		state int64_t currentSize;
+		// Claim ownership of all of our cached items, removing them from the evictor's control and quota.
+		for (auto& ie : self->cache) {
+			self->pEvictor->reclaim(ie.second);
+		}
 
-		// Flush all prioritized evictions to the main eviction order
-		self->flushPrioritizedEvictions();
-		ASSERT(cache.size() == evictionOrder.size());
+		// All items are in the cache so we don't need the prioritized eviction order anymore, and the cache is about
+		// to be destroyed so the prioritizedEvictions head/tail will become invalid.
+		self->prioritizedEvictions.clear();
 
-		// Swap cache contents to local state vars
-		// After this, no more entries will be added to or read from these
-		// structures so we know for sure that no page will become unevictable
-		// after it is either evictable or onEvictable() is ready.
-		cache.swap(self->cache);
-		currentSize = self->currentSize;
-		evictionOrder.swap(self->evictionOrder);
-
-		state typename EvictionOrderT::iterator i = evictionOrder.begin();
-		state typename EvictionOrderT::iterator iEnd = evictionOrder.end();
-		while (i != iEnd) {
-			if (!i->item.evictable()) {
-				wait(i->item.onEvictable());
+		state typename CacheT::iterator i = self->cache.begin();
+		while (i != self->cache.end()) {
+			if (!i->second.item.evictable()) {
+				wait(i->second.item.onEvictable());
 			}
-			currentSize -= i->size;
-			self->currentSize -= i->size;
 			++i;
 		}
 
-		evictionOrder.clear();
-		cache.clear();
-		ASSERT(currentSize == 0);
 		return Void();
 	}
 
-	Future<Void> clear() {
-		ASSERT(evictionOrder.size() + prioritizedEvictions.size() == cache.size());
-		return clear_impl(this);
-	}
+	Future<Void> clear() { return clear_impl(this); }
 
 	// Move the prioritized evictions queued to the front of the eviction order
-	void flushPrioritizedEvictions() { evictionOrder.splice(evictionOrder.begin(), prioritizedEvictions); }
+	void flushPrioritizedEvictions() { pEvictor->moveIn(prioritizedEvictions); }
 
 private:
-	int64_t sizeLimit;
-	int64_t currentSize;
+	Evictor* pEvictor;
 	CacheT cache;
-	EvictionOrderT evictionOrder;
 	EvictionOrderT prioritizedEvictions;
 };
 
@@ -2072,6 +2047,26 @@ public:
 	typedef FIFOQueue<LogicalPageID> LogicalPageQueueT;
 	typedef std::map<Version, LogicalPageID> VersionToPageMapT;
 	typedef std::unordered_map<LogicalPageID, VersionToPageMapT> PageToVersionedMapT;
+	struct PageCacheEntry {
+		Future<Reference<ArenaPage>> readFuture;
+		Future<Void> writeFuture;
+
+		bool initialized() const { return readFuture.isValid(); }
+
+		bool reading() const { return !readFuture.isReady(); }
+
+		bool writing() const { return !writeFuture.isReady(); }
+
+		bool evictable() const {
+			// Don't evict if a page is still being read or written
+			return !reading() && !writing();
+		}
+
+		Future<Void> onEvictable() const { return ready(readFuture) && writeFuture; }
+	};
+	typedef ObjectCache<LogicalPageID, PageCacheEntry> PageCacheT;
+
+	int64_t* getPageCachePenaltySource() override { return &pageCache.evictor().reservedSize; }
 
 #pragma pack(push, 1)
 	struct DelayedFreePage {
@@ -2138,7 +2133,7 @@ public:
 
 	// If the file already exists, pageSize might be different than desiredPageSize
 	// Use pageCacheSizeBytes == 0 to use default from flow knobs
-	// If filename is empty, the pager will exist only in memory and once the cache is full writes will fail.
+	// If memoryOnly is true, the pager will exist only in memory and once the cache is full writes will fail.
 	DWALPager(int desiredPageSize,
 	          int desiredExtentSize,
 	          std::string filename,
@@ -2152,6 +2147,9 @@ public:
 	    desiredExtentSize(desiredExtentSize), filename(filename), memoryOnly(memoryOnly), errorPromise(errorPromise),
 	    remapCleanupWindow(remapCleanupWindow), concurrentExtentReads(new FlowLock(concurrentExtentReads)) {
 
+		// This sets the page cache size for all PageCacheT instances using the same evictor
+		pageCache.evictor().sizeLimit = pageCacheBytes;
+
 		if (!g_redwoodMetricsActor.isValid()) {
 			g_redwoodMetricsActor = redwoodMetricsLogger();
 		}
@@ -2161,7 +2159,8 @@ public:
 	}
 
 	void setPageSize(int size) {
-		g_redwoodMetrics.updateMaxRecordCount(315 * size / 4096);
+		// Conservative maximum for number of records that can fit in this page size
+		g_redwoodMetrics.updateMaxRecordCount(315.0 * size / 4096);
 
 		logicalPageSize = size;
 		// Physical page size is the total size of the smallest number of physical blocks needed to store
@@ -2171,7 +2170,6 @@ public:
 		if (pHeader != nullptr) {
 			pHeader->pageSize = logicalPageSize;
 		}
-		pageCache.setSizeLimit(1 + ((pageCacheBytes - 1) / physicalPageSize));
 	}
 
 	void setExtentSize(int size) {
@@ -2187,9 +2185,6 @@ public:
 		if (pHeader != nullptr) {
 			pHeader->extentSize = size;
 		}
-
-		// TODO: How should this cache be sized - not really a cache. it should hold all extentIDs?
-		extentCache.setSizeLimit(100000);
 	}
 
 	void updateCommittedHeader() {
@@ -2688,7 +2683,7 @@ public:
 		// or as a cache miss because there is no benefit to the page already being in cache
 		// Similarly, this does not count as a point lookup for reason.
 		ASSERT(pageIDs.front() != invalidLogicalPageID);
-		PageCacheEntry& cacheEntry = pageCache.get(pageIDs.front(), pageIDs.size(), true);
+		PageCacheEntry& cacheEntry = pageCache.get(pageIDs.front(), pageIDs.size() * physicalPageSize, true);
 		debug_printf("DWALPager(%s) op=write %s cached=%d reading=%d writing=%d\n",
 		             filename.c_str(),
 		             toString(pageIDs).c_str(),
@@ -3002,7 +2997,7 @@ public:
 			debug_printf("DWALPager(%s) op=readUncachedMiss %s\n", filename.c_str(), toString(pageID).c_str());
 			return forwardError(readPhysicalPage(this, pageID, priority, false), errorPromise);
 		}
-		PageCacheEntry& cacheEntry = pageCache.get(pageID, 1, noHit);
+		PageCacheEntry& cacheEntry = pageCache.get(pageID, physicalPageSize, noHit);
 		debug_printf("DWALPager(%s) op=read %s cached=%d reading=%d writing=%d noHit=%d\n",
 		             filename.c_str(),
 		             toString(pageID).c_str(),
@@ -3048,7 +3043,7 @@ public:
 			return forwardError(readPhysicalMultiPage(this, pageIDs, priority), errorPromise);
 		}
 
-		PageCacheEntry& cacheEntry = pageCache.get(pageIDs.front(), pageIDs.size(), noHit);
+		PageCacheEntry& cacheEntry = pageCache.get(pageIDs.front(), pageIDs.size() * physicalPageSize, noHit);
 		debug_printf("DWALPager(%s) op=read %s cached=%d reading=%d writing=%d noHit=%d\n",
 		             filename.c_str(),
 		             toString(pageIDs).c_str(),
@@ -3667,8 +3662,8 @@ public:
 		int64_t free;
 		int64_t total;
 		if (memoryOnly) {
-			total = pageCacheBytes;
-			free = pageCacheBytes - (pageCache.getSizeUsed() * physicalPageSize);
+			total = pageCache.evictor().sizeLimit;
+			free = pageCache.evictor().getSizeUsed();
 		} else {
 			g_network->getDiskBytes(parentDirectory(filename), free, total);
 		}
@@ -3691,9 +3686,9 @@ public:
 		return StorageBytes(free, total, pagerSize - reusable, free + reusable, temp);
 	}
 
-	int64_t getPageCacheCount() override { return pageCache.getSizeUsed(); }
+	int64_t getPageCacheCount() override { return pageCache.getCount(); }
 	int64_t getPageCount() override { return pHeader->pageCount; }
-	int64_t getExtentCacheCount() override { return extentCache.getSizeUsed(); }
+	int64_t getExtentCacheCount() override { return extentCache.getCount(); }
 
 	ACTOR static Future<Void> getUserPageCount_cleanup(DWALPager* self) {
 		// Wait for the remap eraser to finish all of its work (not triggering stop)
@@ -3780,24 +3775,6 @@ private:
 	};
 #pragma pack(pop)
 
-	struct PageCacheEntry {
-		Future<Reference<ArenaPage>> readFuture;
-		Future<Void> writeFuture;
-
-		bool initialized() const { return readFuture.isValid(); }
-
-		bool reading() const { return !readFuture.isReady(); }
-
-		bool writing() const { return !writeFuture.isReady(); }
-
-		bool evictable() const {
-			// Don't evict if a page is still being read or written
-			return !reading() && !writing();
-		}
-
-		Future<Void> onEvictable() const { return ready(readFuture) && writeFuture; }
-	};
-
 	ACTOR static Future<Void> clearRemapQueue_impl(DWALPager* self) {
 		// Wait for outstanding commit.
 		wait(self->commitFuture);
@@ -3820,6 +3797,7 @@ private:
 
 	Future<Void> clearRemapQueue() override { return clearRemapQueue_impl(this); }
 
+private:
 	// Physical page sizes will always be a multiple of 4k because AsyncFileNonDurable requires
 	// this in simulation, and it also makes sense for current SSDs.
 	// Allowing a smaller 'logical' page size is very useful for testing.
@@ -3831,7 +3809,6 @@ private:
 	int physicalExtentSize;
 	int pagesPerExtent;
 
-private:
 	PriorityMultiLock ioLock;
 
 	int64_t pageCacheBytes;
@@ -3857,11 +3834,8 @@ private:
 	std::string filename;
 	bool memoryOnly;
 
-	typedef ObjectCache<LogicalPageID, PageCacheEntry> PageCacheT;
 	PageCacheT pageCache;
-
-	typedef ObjectCache<LogicalPageID, PageCacheEntry> ExtentCacheT;
-	ExtentCacheT extentCache;
+	PageCacheT extentCache;
 
 	Promise<Void> closedPromise;
 	Promise<Void> errorPromise;
@@ -4827,6 +4801,7 @@ public:
 	VersionedBTree(IPager2* pager, std::string name)
 	  : m_pager(pager), m_pBuffer(nullptr), m_mutationCount(0), m_name(name), m_pHeader(nullptr), m_headerSpace(0) {
 
+		m_pDecodeCacheMemory = m_pager->getPageCachePenaltySource();
 		m_lazyClearActor = 0;
 		m_init = init_impl(this);
 		m_latestCommit = m_init;
@@ -4886,7 +4861,7 @@ public:
 
 				// Iterate over page entries, skipping key decoding using BTreePage::ValueTree which uses
 				// RedwoodRecordRef::DeltaValueOnly as the delta type type to skip key decoding
-				BTreePage::ValueTree::DecodeCache cache(dbBegin, dbEnd, &g_redwoodMetrics.decodeCacheMemory);
+				BTreePage::ValueTree::DecodeCache cache(dbBegin, dbEnd);
 				BTreePage::ValueTree::Cursor c(&cache, btPage.valueTree());
 				ASSERT(c.moveFirst());
 				Version v = entry.version;
@@ -5266,6 +5241,9 @@ private:
 	 */
 
 	IPager2* m_pager;
+
+	// Counter to update with DecodeCache memory usage
+	int64_t* m_pDecodeCacheMemory = nullptr;
 
 	// The mutation buffer currently being written to
 	std::unique_ptr<MutationBuffer> m_pBuffer;
@@ -5732,7 +5710,7 @@ private:
 	}
 
 	// Get cursor into a BTree node, creating decode cache from boundaries if needed
-	static BTreePage::BinaryTree::Cursor getCursor(Reference<const ArenaPage> page,
+	inline BTreePage::BinaryTree::Cursor getCursor(const ArenaPage* page,
 	                                               const RedwoodRecordRef& lowerBound,
 	                                               const RedwoodRecordRef& upperBound) {
 		if (page->userData == nullptr) {
@@ -5742,7 +5720,7 @@ private:
 			             upperBound.toString().c_str());
 
 			BTreePage::BinaryTree::DecodeCache* cache =
-			    new BTreePage::BinaryTree::DecodeCache(lowerBound, upperBound, &g_redwoodMetrics.decodeCacheMemory);
+			    new BTreePage::BinaryTree::DecodeCache(lowerBound, upperBound, m_pDecodeCacheMemory);
 			page->userData = cache;
 			page->userDataDestructor = [](void* cache) { ((BTreePage::BinaryTree::DecodeCache*)cache)->delref(); };
 		}
@@ -5752,8 +5730,7 @@ private:
 	}
 
 	// Get cursor into a BTree node from a child link
-	static BTreePage::BinaryTree::Cursor getCursor(const Reference<const ArenaPage>& page,
-	                                               const BTreePage::BinaryTree::Cursor& link) {
+	inline BTreePage::BinaryTree::Cursor getCursor(const ArenaPage* page, const BTreePage::BinaryTree::Cursor& link) {
 		if (page->userData == nullptr) {
 			return getCursor(page, link.get(), link.next().getOrUpperBound());
 		}
@@ -6200,8 +6177,9 @@ private:
 		            false, rootID, batch->snapshot->getVersion(), update->decodeLowerBound, update->decodeUpperBound)
 		        .c_str());
 
-		state BTreePage::BinaryTree::Cursor cursor =
-		    update->cBegin.valid() ? getCursor(page, update->cBegin) : getCursor(page, dbBegin, dbEnd);
+		state BTreePage::BinaryTree::Cursor cursor = update->cBegin.valid()
+		                                                 ? self->getCursor(page.getPtr(), update->cBegin)
+		                                                 : self->getCursor(page.getPtr(), dbBegin, dbEnd);
 
 		if (REDWOOD_DEBUG) {
 			debug_printf("%s ---------MUTATION BUFFER SLICE ---------------------\n", context.c_str());
@@ -7058,9 +7036,9 @@ public:
 			                    true),
 			           [=](Reference<const ArenaPage> p) {
 #if REDWOOD_DEBUG
-				           path.push_back({ p, getCursor(p, link), link.get().getChildPage() });
+				           path.push_back({ p, btree->getCursor(p.getPtr(), link), link.get().getChildPage() });
 #else
-				path.push_back({ p, getCursor(p, link) });
+				path.push_back({ p, btree->getCursor(p.getPtr(), link) });
 #endif
 				           return Void();
 			           });
@@ -7071,9 +7049,9 @@ public:
 			return map(readPage(reason, btree->m_pHeader->height, pager.getPtr(), id, ioMaxPriority, false, true),
 			           [=](Reference<const ArenaPage> p) {
 #if REDWOOD_DEBUG
-				           path.push_back({ p, getCursor(p, dbBegin, dbEnd), id });
+				           path.push_back({ p, btree->getCursor(p.getPtr(), dbBegin, dbEnd), id });
 #else
-				path.push_back({ p, getCursor(p, dbBegin, dbEnd) });
+				path.push_back({ p, btree->getCursor(p.getPtr(), dbBegin, dbEnd) });
 #endif
 				           return Void();
 			           });
@@ -8076,6 +8054,133 @@ RedwoodRecordRef randomRedwoodRecordRef(const std::string& keyBuffer, const std:
 	}
 
 	return rec;
+}
+
+void RedwoodMetrics::getFields(TraceEvent* e, std::string* s, bool skipZeroes) {
+	std::pair<const char*, unsigned int> metrics[] = { { "BTreePreload", metric.btreeLeafPreload },
+		                                               { "BTreePreloadExt", metric.btreeLeafPreloadExt },
+		                                               { "", 0 },
+		                                               { "OpSet", metric.opSet },
+		                                               { "OpSetKeyBytes", metric.opSetKeyBytes },
+		                                               { "OpSetValueBytes", metric.opSetValueBytes },
+		                                               { "OpClear", metric.opClear },
+		                                               { "OpClearKey", metric.opClearKey },
+		                                               { "", 0 },
+		                                               { "OpGet", metric.opGet },
+		                                               { "OpGetRange", metric.opGetRange },
+		                                               { "OpCommit", metric.opCommit },
+		                                               { "", 0 },
+		                                               { "PagerDiskWrite", metric.pagerDiskWrite },
+		                                               { "PagerDiskRead", metric.pagerDiskRead },
+		                                               { "PagerCacheHit", metric.pagerCacheHit },
+		                                               { "PagerCacheMiss", metric.pagerCacheMiss },
+		                                               { "", 0 },
+		                                               { "PagerProbeHit", metric.pagerProbeHit },
+		                                               { "PagerProbeMiss", metric.pagerProbeMiss },
+		                                               { "PagerEvictUnhit", metric.pagerEvictUnhit },
+		                                               { "PagerEvictFail", metric.pagerEvictFail },
+		                                               { "", 0 },
+		                                               { "PagerRemapFree", metric.pagerRemapFree },
+		                                               { "PagerRemapCopy", metric.pagerRemapCopy },
+		                                               { "PagerRemapSkip", metric.pagerRemapSkip },
+		                                               { "", 0 } };
+
+	double elapsed = now() - startTime;
+
+	if (e != nullptr) {
+		for (auto& m : metrics) {
+			char c = m.first[0];
+			if (c != 0 && (!skipZeroes || m.second != 0)) {
+				e->detail(m.first, m.second);
+			}
+		}
+		levels[0].metrics.events.toTraceEvent(e, 0);
+	}
+
+	if (s != nullptr) {
+		for (auto& m : metrics) {
+			if (*m.first == '\0') {
+				*s += "\n";
+			} else if (!skipZeroes || m.second != 0) {
+				*s += format("%-15s %-8u %8" PRId64 "/s  ", m.first, m.second, int64_t(m.second / elapsed));
+			}
+		}
+		*s += levels[0].metrics.events.toString(0, elapsed);
+	}
+
+	auto const& evictor = DWALPager::PageCacheT::Evictor::getEvictor();
+
+	std::pair<const char*, int64_t> cacheMetrics[] = { { "PageCacheCount", evictor->getCountUsed() },
+		                                               { "PageCacheMoved", evictor->getCountMoved() },
+		                                               { "PageCacheSize", evictor->getSizeUsed() },
+		                                               { "DecodeCacheSize", evictor->reservedSize } };
+
+	if (e != nullptr) {
+		for (auto& m : cacheMetrics) {
+			e->detail(m.first, m.second);
+		}
+	}
+
+	if (s != nullptr) {
+		for (auto& m : cacheMetrics) {
+			*s += format("%-15s %-14" PRId64 "       ", m.first, m.second);
+		}
+		*s += "\n";
+	}
+
+	for (int i = 1; i < btreeLevels + 1; ++i) {
+		auto& metric = levels[i].metrics;
+
+		std::pair<const char*, unsigned int> metrics[] = {
+			{ "PageBuild", metric.pageBuild },
+			{ "PageBuildExt", metric.pageBuildExt },
+			{ "PageModify", metric.pageModify },
+			{ "PageModifyExt", metric.pageModifyExt },
+			{ "", 0 },
+			{ "PageRead", metric.pageRead },
+			{ "PageReadExt", metric.pageReadExt },
+			{ "PageCommitStart", metric.pageCommitStart },
+			{ "", 0 },
+			{ "LazyClearInt", metric.lazyClearRequeue },
+			{ "LazyClearIntExt", metric.lazyClearRequeueExt },
+			{ "LazyClear", metric.lazyClearFree },
+			{ "LazyClearExt", metric.lazyClearFreeExt },
+			{ "", 0 },
+			{ "ForceUpdate", metric.forceUpdate },
+			{ "DetachChild", metric.detachChild },
+			{ "", 0 },
+		};
+
+		if (e != nullptr) {
+			for (auto& m : metrics) {
+				char c = m.first[0];
+				if (c != 0 && (!skipZeroes || m.second != 0)) {
+					e->detail(format("L%d%s", i, m.first + (c == '-' ? 1 : 0)), m.second);
+				}
+			}
+			metric.events.toTraceEvent(e, i);
+		}
+
+		if (s != nullptr) {
+			*s += format("\nLevel %d\n\t", i);
+
+			for (auto& m : metrics) {
+				const char* name = m.first;
+				bool rate = elapsed != 0;
+				if (*name == '-') {
+					++name;
+					rate = false;
+				}
+
+				if (*name == '\0') {
+					*s += "\n\t";
+				} else if (!skipZeroes || m.second != 0) {
+					*s += format("%-15s %8u %8u/s  ", name, m.second, rate ? int(m.second / elapsed) : 0);
+				}
+			}
+			*s += metric.events.toString(i, elapsed);
+		}
+	}
 }
 
 TEST_CASE("/redwood/correctness/unit/RedwoodRecordRef") {
@@ -9219,7 +9324,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 	state int64_t cacheSizeBytes =
 	    params.getInt("cacheSizeBytes")
 	        .orDefault(pagerMemoryOnly ? 2e9
-	                                   : (pageSize * deterministicRandom()->randomInt(1, (BUGGIFY ? 2 : 10000) + 1)));
+	                                   : (pageSize * deterministicRandom()->randomInt(1, (BUGGIFY ? 10 : 10000) + 1)));
 	state Version versionIncrement =
 	    params.getInt("versionIncrement").orDefault(deterministicRandom()->randomInt64(1, 1e8));
 	state Version remapCleanupWindow =
@@ -9516,6 +9621,9 @@ TEST_CASE("Lredwood/correctness/btree") {
 	btree->close();
 	debug_printf("Closing.\n");
 	wait(closedFuture);
+
+	wait(delay(0));
+	ASSERT(DWALPager::PageCacheT::Evictor::getEvictor()->empty());
 
 	return Void();
 }
@@ -9981,6 +10089,9 @@ TEST_CASE(":/redwood/performance/set") {
 	Future<Void> closedFuture = btree->onClosed();
 	btree->close();
 	wait(closedFuture);
+
+	wait(delay(0));
+	ASSERT(DWALPager::PageCacheT::Evictor::getEvictor()->empty());
 
 	return Void();
 }
