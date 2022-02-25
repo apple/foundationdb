@@ -1628,7 +1628,8 @@ Future<RangeResult> CoordinatorsImpl::getRange(ReadYourWritesTransaction* ryw, K
 
 ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
 	state Reference<IQuorumChange> change;
-	state std::vector<NetworkAddress> addressesVec;
+	state ClusterConnectionString
+	    conn; // We don't care about the Key here, it will be overrode in changeQuorumChecker().
 	state std::vector<std::string> process_address_strs;
 	state Optional<std::string> msg;
 	state int index;
@@ -1650,11 +1651,12 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 		}
 		for (index = 0; index < process_address_strs.size(); index++) {
 			try {
-				auto a = NetworkAddress::parse(process_address_strs[index]);
-				if (!a.isValid())
+				NetworkAddress a = NetworkAddress::parse(process_address_strs[index]);
+				if (!a.isValid()) {
 					parse_error = true;
-				else
-					addressesVec.push_back(a);
+				} else {
+					conn.coords.push_back(a);
+				}
 			} catch (Error& e) {
 				TraceEvent(SevDebug, "SpecialKeysNetworkParseError").error(e);
 				parse_error = true;
@@ -1670,8 +1672,9 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 		}
 	}
 
-	if (addressesVec.size())
-		change = specifiedQuorumChange(addressesVec);
+	wait(conn.resolveHostnames());
+	if (conn.coordinators().size())
+		change = specifiedQuorumChange(conn.coordinators());
 	else
 		change = noQuorumChange();
 
@@ -1693,10 +1696,10 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 	ASSERT(change.isValid());
 
 	TraceEvent(SevDebug, "SKSChangeCoordinatorsStart")
-	    .detail("NewAddresses", describe(addressesVec))
+	    .detail("NewAddresses", describe(conn.coordinators()))
 	    .detail("Description", entry.first ? entry.second.get().toString() : "");
 
-	Optional<CoordinatorsResult> r = wait(changeQuorumChecker(&ryw->getTransaction(), change, &addressesVec));
+	Optional<CoordinatorsResult> r = wait(changeQuorumChecker(&ryw->getTransaction(), change, &conn));
 
 	TraceEvent(SevDebug, "SKSChangeCoordinatorsFinish")
 	    .detail("Result", r.present() ? static_cast<int>(r.get()) : -1); // -1 means success

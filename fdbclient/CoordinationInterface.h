@@ -97,6 +97,7 @@ public:
 	void resetConnectionString();
 
 	void resetToUnresolved();
+	void parseKey(const std::string& key);
 
 	ConnectionStringStatus status = RESOLVED;
 	AsyncTrigger resolveFinish;
@@ -106,7 +107,6 @@ public:
 
 private:
 	void parseConnString();
-	void parseKey(const std::string& key);
 	Key key, keyDesc;
 	std::string connectionString;
 };
