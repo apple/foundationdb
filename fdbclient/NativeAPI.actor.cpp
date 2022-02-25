@@ -953,7 +953,7 @@ void DatabaseContext::invalidateCache(const KeyRangeRef& keys) {
 
 void DatabaseContext::setFailedEndpointOnHealthyServer(const Endpoint& endpoint) {
 	if (failedEndpointsOnHealthyServersInfo.find(endpoint) == failedEndpointsOnHealthyServersInfo.end()) {
-		failedEndpointsOnHealthyServersInfo[endpoint] = { /*startTime=*/now(), /*lastRefreshTime=*/now() };
+		failedEndpointsOnHealthyServersInfo[endpoint] = EndpointFailureInfo { startTime:now(), lastRefreshTime:now() };
 	}
 }
 
