@@ -5209,13 +5209,13 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<Void> AddAllTeams_isExhaustive() {
+	static void AddAllTeams_isExhaustive() {
 		Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
 		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
-		state int processSize = 10;
-		state int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
-		state int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
-		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(3, policy, processSize);
+		int processSize = 10;
+		int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
+		int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
+		std::unique_ptr<DDTeamCollection> collection = testTeamCollection(3, policy, processSize);
 
 		int result = collection->addTeamsBestOf(200, desiredTeams, maxTeams);
 
@@ -5223,24 +5223,20 @@ public:
 		// The maximum number of available server teams with machine locality constraint is 120 - 40, because
 		// the 40 (5*4*2) server teams whose servers come from the same machine are invalid.
 		ASSERT(result == 80);
-
-		return Void();
 	}
 
-	ACTOR static Future<Void> AddAllTeams_withLimit() {
+	static void AddAllTeams_withLimit() {
 		Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
 		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
-		state int processSize = 10;
-		state int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
-		state int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
+		int processSize = 10;
+		int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
+		int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
 
-		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(3, policy, processSize);
+		std::unique_ptr<DDTeamCollection> collection = testTeamCollection(3, policy, processSize);
 
 		int result = collection->addTeamsBestOf(10, desiredTeams, maxTeams);
 
 		ASSERT(result >= 10);
-
-		return Void();
 	}
 
 	ACTOR static Future<Void> AddTeamsBestOf_SkippingBusyServers() {
@@ -5665,12 +5661,12 @@ TEST_CASE("DataDistribution/AddTeamsBestOf/NotUseMachineID") {
 }
 
 TEST_CASE("DataDistribution/AddAllTeams/isExhaustive") {
-	wait(DDTeamCollectionUnitTest::AddAllTeams_isExhaustive());
+	DDTeamCollectionUnitTest::AddAllTeams_isExhaustive();
 	return Void();
 }
 
 TEST_CASE("/DataDistribution/AddAllTeams/withLimit") {
-	wait(DDTeamCollectionUnitTest::AddAllTeams_withLimit());
+	DDTeamCollectionUnitTest::AddAllTeams_withLimit();
 	return Void();
 }
 

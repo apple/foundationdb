@@ -413,7 +413,7 @@ ACTOR Future<Void> logThroughput(int64_t* v, Key* next) {
 	loop {
 		state int64_t last = *v;
 		wait(delay(1));
-		printf("throughput: %ld bytes/s, next: %s\n", *v - last, printable(*next).c_str());
+		printf("throughput: %lld bytes/s, next: %s\n", *v - last, printable(*next).c_str());
 	}
 }
 

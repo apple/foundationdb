@@ -61,7 +61,7 @@ class WriteToTransactionEnvironment {
 	Version lastWrittenVersion{ 0 };
 
 	static Value longToValue(int64_t v) {
-		auto s = format("%ld", v);
+		auto s = format("%lld", v);
 		return StringRef(reinterpret_cast<uint8_t const*>(s.c_str()), s.size());
 	}
 

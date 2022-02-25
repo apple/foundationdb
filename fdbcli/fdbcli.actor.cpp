@@ -1615,7 +1615,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					} else {
 						Version v = wait(makeInterruptable(
 						    safeThreadFutureToFuture(getTransaction(db, tr, options, intrans)->getReadVersion())));
-						printf("%ld\n", v);
+						printf("%lld\n", v);
 					}
 					continue;
 				}

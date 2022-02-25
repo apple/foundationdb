@@ -705,12 +705,12 @@ void printStatus(StatusObjectReader statusObj,
 										}
 									}
 									outputString += format(
-									    "  %s log epoch: %ld begin: %ld end: %s, missing "
+									    "  %s log epoch: %lld begin: %lld end: %s, missing "
 									    "log interfaces(id,address): %s\n",
 									    current ? "Current" : "Old",
 									    epoch,
 									    beginVersion,
-									    endVersion == invalidVersion ? "(unknown)" : format("%ld", endVersion).c_str(),
+									    endVersion == invalidVersion ? "(unknown)" : format("%lld", endVersion).c_str(),
 									    missing_log_interfaces.c_str());
 								}
 							}
