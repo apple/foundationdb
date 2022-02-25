@@ -6012,7 +6012,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 	try {
 		wait(details::updatePreconditioner(data));
 
-		// NOTE This is anti-intuition. A reference to the cursor is created, but it is an independent cursor -- not
+		// NOTE This is counter-intuitive. A reference to the cursor is created, but it is an independent cursor -- not
 		// impacting the origin cursor. data->logCursor holds no data even cursor->getMore() is called. Later
 		// data->logCursor will advanceTo the newest version.
 		state Reference<ILogSystem::IPeekCursor> cursor = data->logCursor;
