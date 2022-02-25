@@ -1,5 +1,5 @@
 /*
- * fdb_c_system_tester.cpp
+ * fdb_c_api_tester.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,17 +18,17 @@
  * limitations under the License.
  */
 
-#include "SysTestOptions.h"
-#include "SysTestWorkload.h"
-#include "SysTestScheduler.h"
-#include "SysTestTransactionExecutor.h"
+#include "TesterOptions.h"
+#include "TesterWorkload.h"
+#include "TesterScheduler.h"
+#include "TesterTransactionExecutor.h"
 #include <iostream>
 #include <memory>
 #include <thread>
 #include "flow/SimpleOpt.h"
 #include "bindings/c/foundationdb/fdb_c.h"
 
-namespace FDBSystemTester {
+namespace FdbApiTester {
 
 namespace {
 
@@ -222,9 +222,9 @@ void fdb_check(fdb_error_t e) {
 
 std::unique_ptr<IWorkload> createApiCorrectnessWorkload();
 
-} // namespace FDBSystemTester
+} // namespace FdbApiTester
 
-using namespace FDBSystemTester;
+using namespace FdbApiTester;
 
 void applyNetworkOptions(TesterOptions& options) {
 	if (!options.externalClientLibrary.empty()) {

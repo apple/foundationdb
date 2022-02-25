@@ -1,5 +1,5 @@
 /*
- * SysTestTransactionExecutor.h
+ * TesterTransactionExecutor.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -23,13 +23,13 @@
 #ifndef SYS_TEST_TRANSACTION_EXECUTOR_H
 #define SYS_TEST_TRANSACTION_EXECUTOR_H
 
-#include "SysTestOptions.h"
-#include "SysTestApiWrapper.h"
-#include "SysTestScheduler.h"
+#include "TesterOptions.h"
+#include "TesterApiWrapper.h"
+#include "TesterScheduler.h"
 #include <string_view>
 #include <memory>
 
-namespace FDBSystemTester {
+namespace FdbApiTester {
 
 class ITransactionContext {
 public:
@@ -91,6 +91,6 @@ public:
 
 std::unique_ptr<ITransactionExecutor> createTransactionExecutor();
 
-} // namespace FDBSystemTester
+} // namespace FdbApiTester
 
 #endif

@@ -1,5 +1,5 @@
 /*
- * SysTestScheduler.h
+ * TesterScheduler.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -26,7 +26,7 @@
 #include <functional>
 #include <memory>
 
-namespace FDBSystemTester {
+namespace FdbApiTester {
 
 using TTaskFct = std::function<void(void)>;
 
@@ -41,6 +41,6 @@ public:
 
 std::unique_ptr<IScheduler> createScheduler(int numThreads);
 
-} // namespace FDBSystemTester
+} // namespace FdbApiTester
 
 #endif

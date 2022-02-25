@@ -1,5 +1,5 @@
 /*
- * SysTestApiWrapper.h
+ * TesterApiWrapper.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -30,7 +30,7 @@
 #define FDB_API_VERSION 710
 #include "bindings/c/foundationdb/fdb_c.h"
 
-namespace FDBSystemTester {
+namespace FdbApiTester {
 
 // Wrapper parent class to manage memory of an FDBFuture pointer. Cleans up
 // FDBFuture when this instance goes out of scope.
@@ -76,6 +76,6 @@ public:
 	static fdb_error_t setOption(FDBNetworkOption option);
 };
 
-} // namespace FDBSystemTester
+} // namespace FdbApiTester
 
 #endif

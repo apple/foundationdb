@@ -1,5 +1,5 @@
 /*
- * SysTestOptions.h
+ * TesterOptions.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -28,7 +28,7 @@
 
 #define FDB_API_VERSION 710
 
-namespace FDBSystemTester {
+namespace FdbApiTester {
 
 class TesterOptions {
 public:
@@ -49,6 +49,6 @@ public:
 	int numFdbThreads = 1;
 };
 
-} // namespace FDBSystemTester
+} // namespace FdbApiTester
 
 #endif

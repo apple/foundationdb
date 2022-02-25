@@ -1,7 +1,7 @@
-#include "SysTestWorkload.h"
+#include "TesterWorkload.h"
 #include <memory>
 
-namespace FDBSystemTester {
+namespace FdbApiTester {
 
 void WorkloadBase::init(ITransactionExecutor* txExecutor, IScheduler* sched, TTaskFct cont) {
 	this->txExecutor = txExecutor;
@@ -33,4 +33,4 @@ void WorkloadBase::contIfDone() {
 	}
 }
 
-} // namespace FDBSystemTester
+} // namespace FdbApiTester

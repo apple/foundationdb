@@ -97,18 +97,18 @@ if(NOT WIN32 AND NOT IS_ARM_MAC)
     test/unit/fdb_api.cpp
     test/unit/fdb_api.hpp)
 
-  set(SYSTEM_TESTER_SRCS
-    test/system/fdb_c_system_tester.cpp
-    test/system/SysTestApiWrapper.cpp
-    test/system/SysTestApiWrapper.h
-    test/system/SysTestCorrectnessWorkload.cpp
-    test/system/SysTestOptions.h
-    test/system/SysTestScheduler.cpp
-    test/system/SysTestScheduler.h
-    test/system/SysTestTransactionExecutor.cpp
-    test/system/SysTestTransactionExecutor.h
-    test/system/SysTestWorkload.cpp
-    test/system/SysTestWorkload.h
+  set(API_TESTER_SRCS
+    test/apitester/fdb_c_api_tester.cpp
+    test/apitester/TesterApiWrapper.cpp
+    test/apitester/TesterApiWrapper.h
+    test/apitester/TesterCorrectnessWorkload.cpp
+    test/apitester/TesterOptions.h
+    test/apitester/TesterScheduler.cpp
+    test/apitester/TesterScheduler.h
+    test/apitester/TesterTransactionExecutor.cpp
+    test/apitester/TesterTransactionExecutor.h
+    test/apitester/TesterWorkload.cpp
+    test/apitester/TesterWorkload.h
     ../../flow/SimpleOpt.h
   )
 
@@ -122,7 +122,7 @@ if(NOT WIN32 AND NOT IS_ARM_MAC)
     add_library(fdb_c_unit_tests_version_510 OBJECT ${UNIT_TEST_VERSION_510_SRCS})
     add_library(trace_partial_file_suffix_test OBJECT ${TRACE_PARTIAL_FILE_SUFFIX_TEST_SRCS})
     add_library(disconnected_timeout_unit_tests OBJECT ${DISCONNECTED_TIMEOUT_UNIT_TEST_SRCS})
-    add_library(fdb_c_system_tester OBJECT ${SYSTEM_TESTER_SRCS})
+    add_library(fdb_c_api_tester OBJECT ${API_TESTER_SRCS})
   else()
     add_executable(fdb_c_performance_test test/performance_test.c test/test.h)
     add_executable(fdb_c_ryw_benchmark test/ryw_benchmark.c test/test.h)
@@ -133,7 +133,7 @@ if(NOT WIN32 AND NOT IS_ARM_MAC)
     add_executable(fdb_c_unit_tests_version_510 ${UNIT_TEST_VERSION_510_SRCS})
     add_executable(trace_partial_file_suffix_test ${TRACE_PARTIAL_FILE_SUFFIX_TEST_SRCS})
     add_executable(disconnected_timeout_unit_tests ${DISCONNECTED_TIMEOUT_UNIT_TEST_SRCS})
-    add_executable(fdb_c_system_tester ${SYSTEM_TESTER_SRCS})
+    add_executable(fdb_c_api_tester ${API_TESTER_SRCS})
     strip_debug_symbols(fdb_c_performance_test)
     strip_debug_symbols(fdb_c_ryw_benchmark)
     strip_debug_symbols(fdb_c_txn_size_test)
@@ -155,7 +155,7 @@ if(NOT WIN32 AND NOT IS_ARM_MAC)
   target_link_libraries(fdb_c_unit_tests_version_510 PRIVATE fdb_c Threads::Threads)
   target_link_libraries(trace_partial_file_suffix_test PRIVATE fdb_c Threads::Threads)
   target_link_libraries(disconnected_timeout_unit_tests PRIVATE fdb_c Threads::Threads)
-  target_link_libraries(fdb_c_system_tester PRIVATE fdb_c Threads::Threads)
+  target_link_libraries(fdb_c_api_tester PRIVATE fdb_c Threads::Threads)
 
   # do not set RPATH for mako
   set_property(TARGET mako PROPERTY SKIP_BUILD_RPATH TRUE)

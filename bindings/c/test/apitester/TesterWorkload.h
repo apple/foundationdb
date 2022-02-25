@@ -1,5 +1,5 @@
 /*
- * SysTestWorkload.h
+ * TesterWorkload.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -23,10 +23,10 @@
 #ifndef SYS_TEST_WORKLOAD_H
 #define SYS_TEST_WORKLOAD_H
 
-#include "SysTestTransactionExecutor.h"
+#include "TesterTransactionExecutor.h"
 #include <atomic>
 
-namespace FDBSystemTester {
+namespace FdbApiTester {
 
 class IWorkload {
 public:
@@ -56,6 +56,6 @@ private:
 	std::atomic<int> txRunning;
 };
 
-} // namespace FDBSystemTester
+} // namespace FdbApiTester
 
 #endif

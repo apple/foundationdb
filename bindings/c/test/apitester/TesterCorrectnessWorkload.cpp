@@ -1,5 +1,5 @@
 /*
- * SysTestCorrectnessWorkload.cpp
+ * TesterCorrectnessWorkload.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -17,12 +17,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include "SysTestWorkload.h"
+#include "TesterWorkload.h"
 #include <memory>
 #include <optional>
 #include <iostream>
 
-namespace FDBSystemTester {
+namespace FdbApiTester {
 
 class ApiCorrectnessWorkload : public WorkloadBase {
 public:
@@ -58,4 +58,4 @@ std::unique_ptr<IWorkload> createApiCorrectnessWorkload() {
 	return std::make_unique<ApiCorrectnessWorkload>();
 }
 
-} // namespace FDBSystemTester
+} // namespace FdbApiTester

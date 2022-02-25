@@ -1,5 +1,5 @@
 /*
- * SysTestTransactionExecutor.cpp
+ * TesterTransactionExecutor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,13 +18,13 @@
  * limitations under the License.
  */
 
-#include "SysTestTransactionExecutor.h"
+#include "TesterTransactionExecutor.h"
 #include <iostream>
 #include <cassert>
 #include <memory>
 #include <random>
 
-namespace FDBSystemTester {
+namespace FdbApiTester {
 
 namespace {
 
@@ -185,4 +185,4 @@ std::unique_ptr<ITransactionExecutor> createTransactionExecutor() {
 	return std::make_unique<TransactionExecutor>();
 }
 
-} // namespace FDBSystemTester
+} // namespace FdbApiTester

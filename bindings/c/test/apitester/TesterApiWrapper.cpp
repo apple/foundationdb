@@ -1,5 +1,5 @@
 /*
- * SysTestApiWrapper.cpp
+ * TesterApiWrapper.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -17,11 +17,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include "SysTestApiWrapper.h"
+#include "TesterApiWrapper.h"
 #include <cstdint>
 #include <iostream>
 
-namespace FDBSystemTester {
+namespace FdbApiTester {
 
 namespace {
 
@@ -87,4 +87,4 @@ fdb_error_t FdbApi::setOption(FDBNetworkOption option) {
 	return fdb_network_set_option(option, reinterpret_cast<const uint8_t*>(""), 0);
 }
 
-} // namespace FDBSystemTester
+} // namespace FdbApiTester

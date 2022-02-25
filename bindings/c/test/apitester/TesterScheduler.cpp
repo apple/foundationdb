@@ -1,5 +1,5 @@
 /*
- * SysTestScheduler.cpp
+ * TesterScheduler.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "SysTestScheduler.h"
+#include "TesterScheduler.h"
 
 #include <memory>
 #include <thread>
@@ -27,7 +27,7 @@
 
 using namespace boost::asio;
 
-namespace FDBSystemTester {
+namespace FdbApiTester {
 
 class AsioScheduler : public IScheduler {
 public:
@@ -62,4 +62,4 @@ std::unique_ptr<IScheduler> createScheduler(int numThreads) {
 	return std::make_unique<AsioScheduler>(numThreads);
 }
 
-} // namespace FDBSystemTester
+} // namespace FdbApiTester
