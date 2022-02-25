@@ -165,7 +165,7 @@ ACTOR Future<std::vector<VersionSubsequenceMessage>> getAllMessageFromCursor(std
 				}
 			};
 
-			// Ensure the cursor can be repeatly iterated
+			// Verify the cursor can be repeatedly iterated.
 			getAllMessages(messages);
 			pCursor->reset();
 			getAllMessages(messagesDup);
