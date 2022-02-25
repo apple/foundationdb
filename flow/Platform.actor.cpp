@@ -622,7 +622,7 @@ void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) {
 	ULARGE_INTEGER totalFreeSpace;
 	if (!GetDiskFreeSpaceEx(fullPath.c_str(), &freeSpace, &totalSpace, &totalFreeSpace)) {
 		Error e = systemErrorCodeToError();
-		TraceEvent(SevError, "DiskFreeError").detail("Path", fullPath).GetLastError().error(e);
+		TraceEvent(SevError, "DiskFreeError").error(e).detail("Path", fullPath).GetLastError();
 		throw e;
 	}
 	total = std::min((uint64_t)std::numeric_limits<int64_t>::max(), totalSpace.QuadPart);
@@ -2353,7 +2353,7 @@ bool createDirectory(std::string const& directory) {
 		}
 	}
 	Error e = systemErrorCodeToError();
-	TraceEvent(SevError, "CreateDirectory").detail("Directory", directory).GetLastError().error(e);
+	TraceEvent(SevError, "CreateDirectory").error(e).detail("Directory", directory).GetLastError();
 	throw e;
 #elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 	size_t sep = 0;
@@ -2500,7 +2500,7 @@ std::string abspath(std::string const& path, bool resolveLinks, bool mustExist) 
 	if (!GetFullPathName(path.c_str(), MAX_PATH, nameBuffer, nullptr) || (mustExist && !fileExists(nameBuffer))) {
 		Error e = systemErrorCodeToError();
 		Severity sev = e.code() == error_code_io_error ? SevError : SevWarnAlways;
-		TraceEvent(sev, "AbsolutePathError").detail("Path", path).GetLastError().error(e);
+		TraceEvent(sev, "AbsolutePathError").error(e).detail("Path", path).GetLastError();
 		throw e;
 	}
 	// Not totally obvious from the help whether GetFullPathName canonicalizes slashes, so let's do it...
