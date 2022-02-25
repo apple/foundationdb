@@ -148,6 +148,7 @@ public:
 	ACTOR static Future<Void> getTeam(DDTeamCollection* self, GetTeamRequest req) {
 		try {
 			wait(self->checkBuildTeams());
+			// report the median available space
 			if (now() - self->lastMedianAvailableSpaceUpdate > SERVER_KNOBS->AVAILABLE_SPACE_UPDATE_DELAY) {
 				self->lastMedianAvailableSpaceUpdate = now();
 				std::vector<double> teamAvailableSpace;
@@ -159,7 +160,7 @@ public:
 				}
 
 				size_t pivot = teamAvailableSpace.size() / 2;
-				if (teamAvailableSpace.size() > 1) {
+				if (teamAvailableSpace.size() >= 1) {
 					std::nth_element(
 					    teamAvailableSpace.begin(), teamAvailableSpace.begin() + pivot, teamAvailableSpace.end());
 					self->medianAvailableSpace =

@@ -1021,6 +1021,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 					                          rd.priority == SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM,
 					                          true,
 					                          false,
+					                          false,
 					                          inflightPenalty);
 					req.src = rd.src;
 					req.completeSources = rd.completeSources;
@@ -1283,6 +1284,49 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 	}
 }
 
+// Move the shard with highest read density of sourceTeam's to destTeam if sourceTeam has much more read load than
+// destTeam
+ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
+                                     int priority,
+                                     Reference<IDataDistributionTeam> sourceTeam,
+                                     Reference<IDataDistributionTeam> destTeam,
+                                     bool primary,
+                                     TraceEvent* traceEvent) {
+	if (g_network->isSimulated() && g_simulator.speedUpSimulation) {
+		traceEvent->detail("CancelingDueToSimulationSpeedup", true);
+		return false;
+	}
+
+	state std::vector<KeyRange> shards = self->shardsAffectedByTeamFailure->getShardsFor(
+	    ShardsAffectedByTeamFailure::Team(sourceTeam->getServerIDs(), primary));
+	if (!shards.size())
+		return false;
+
+	state GetMetricsRequest req(shards);
+	req.comparator = [](const StorageMetrics& a, const StorageMetrics& b) {
+		if (a.bytes > 0 && b.bytes > 0) {
+			return ((double)a.bytesReadPerKSecond / a.bytes) < ((double)b.bytesReadPerKSecond / b.bytes);
+		}
+		return a.allLessOrEqual(b);
+	};
+
+	state StorageMetrics metrics = wait(brokenPromiseToNever(self->getShardMetrics.getReply(req)));
+	if(metrics.keys.present() && metrics.bytes > 0) {
+		// Verify the shard is still in ShardsAffectedByTeamFailure
+		shards = self->shardsAffectedByTeamFailure->getShardsFor(
+		    ShardsAffectedByTeamFailure::Team(sourceTeam->getServerIDs(), primary));
+		for (int i = 0; i < shards.size(); i++) {
+			if (metrics.keys == shards[i]) {
+				traceEvent->detail("ShardStillPresent", true);
+				self->output.send(RelocateShard(metrics.keys.get(), priority));
+				return true;
+			}
+		}
+		traceEvent->detail("ShardStillPresent", false);
+	}
+	return false;
+}
+
 // Move a random shard of sourceTeam's to destTeam if sourceTeam has much more data than destTeam
 ACTOR Future<bool> rebalanceTeams(DDQueueData* self,
                                   int priority,
@@ -1504,7 +1548,7 @@ ACTOR Future<Void> BgDDValleyFiller(DDQueueData* self, int teamCollectionIndex) 
 			    SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
 				std::pair<Optional<Reference<IDataDistributionTeam>>, bool> _randomTeam =
 				    wait(brokenPromiseToNever(self->teamCollections[teamCollectionIndex].getTeam.getReply(
-				        GetTeamRequest(true, false, false, true))));
+				        GetTeamRequest(true, false, false, true, false))));
 				randomTeam = _randomTeam;
 				traceEvent.detail("SourceTeam",
 				                  printable(randomTeam.first.map<std::string>(
@@ -1513,7 +1557,7 @@ ACTOR Future<Void> BgDDValleyFiller(DDQueueData* self, int teamCollectionIndex) 
 				if (randomTeam.first.present()) {
 					std::pair<Optional<Reference<IDataDistributionTeam>>, bool> unloadedTeam =
 					    wait(brokenPromiseToNever(self->teamCollections[teamCollectionIndex].getTeam.getReply(
-					        GetTeamRequest(true, true, true, false))));
+					        GetTeamRequest(true, true, true, false, true))));
 
 					traceEvent.detail(
 					    "DestTeam",

@@ -357,6 +357,7 @@ int64_t TCTeamInfo::getMinAvailableSpace(bool includeInFlight) const {
 	return minAvailableSpace; // Could be negative
 }
 
+// return the min ratio of servers in this team
 double TCTeamInfo::getMinAvailableSpaceRatio(bool includeInFlight) const {
 	double minRatio = 1.0;
 	for (const auto& server : servers) {

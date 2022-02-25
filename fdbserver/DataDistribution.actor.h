@@ -77,10 +77,11 @@ struct IDataDistributionTeam {
 };
 
 struct GetTeamRequest {
-	bool wantsNewServers;
+	bool wantsNewServers; // In additional to servers in completeSources, try to find teams with new server
 	bool wantsTrueBest;
-	bool preferLowerUtilization;
+	bool preferLowerUtilization; // = false --> higher utilization team will be returned
 	bool teamMustHaveShards;
+	bool preferLowerReadTraffic;
 	double inflightPenalty;
 	std::vector<UID> completeSources;
 	std::vector<UID> src;
@@ -91,16 +92,18 @@ struct GetTeamRequest {
 	               bool wantsTrueBest,
 	               bool preferLowerUtilization,
 	               bool teamMustHaveShards,
+	               bool preferLowerReadTraffic = false,
 	               double inflightPenalty = 1.0)
 	  : wantsNewServers(wantsNewServers), wantsTrueBest(wantsTrueBest), preferLowerUtilization(preferLowerUtilization),
-	    teamMustHaveShards(teamMustHaveShards), inflightPenalty(inflightPenalty) {}
+	    teamMustHaveShards(teamMustHaveShards), preferLowerReadTraffic(preferLowerReadTraffic),
+	    inflightPenalty(inflightPenalty) {}
 
 	std::string getDesc() const {
 		std::stringstream ss;
 
 		ss << "WantsNewServers:" << wantsNewServers << " WantsTrueBest:" << wantsTrueBest
 		   << " PreferLowerUtilization:" << preferLowerUtilization << " teamMustHaveShards:" << teamMustHaveShards
-		   << " inflightPenalty:" << inflightPenalty << ";";
+		   << " PreferLowerReadTraffic" << preferLowerReadTraffic << " inflightPenalty:" << inflightPenalty << ";";
 		ss << "CompleteSources:";
 		for (const auto& cs : completeSources) {
 			ss << cs.toString() << ",";
@@ -111,11 +114,16 @@ struct GetTeamRequest {
 };
 
 struct GetMetricsRequest {
-	KeyRange keys;
+	// whether a < b
+	typedef std::function<bool(const StorageMetrics& a, const StorageMetrics& b)> MetricsComparator;
+	std::vector<KeyRange> keys;
 	Promise<StorageMetrics> reply;
+	Optional<MetricsComparator>
+	    comparator; // if comparator is assigned, return the largest one in keys, otherwise return the sum of metrics
 
 	GetMetricsRequest() {}
-	GetMetricsRequest(KeyRange const& keys) : keys(keys) {}
+	GetMetricsRequest(KeyRange const& keys) : keys({ keys }) {}
+	GetMetricsRequest(std::vector<KeyRange> const& keys) : keys(keys) {}
 };
 
 struct GetMetricsListRequest {

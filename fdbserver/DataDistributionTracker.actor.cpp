@@ -837,13 +837,25 @@ ACTOR Future<Void> fetchShardMetrics_impl(DataDistributionTracker* self, GetMetr
 		loop {
 			Future<Void> onChange;
 			StorageMetrics returnMetrics;
-			for (auto t : self->shards.intersectingRanges(req.keys)) {
-				auto& stats = t.value().stats;
-				if (!stats->get().present()) {
-					onChange = stats->onChange();
-					break;
+			for (auto range : req.keys) {
+				StorageMetrics metrics;
+				for (auto t : self->shards.intersectingRanges(range)) {
+					auto& stats = t.value().stats;
+					if (!stats->get().present()) {
+						onChange = stats->onChange();
+						break;
+					}
+					metrics += t.value().stats->get().get().metrics;
 				}
-				returnMetrics += t.value().stats->get().get().metrics;
+
+				if (req.comparator.present()) {
+					if (req.comparator.get()(returnMetrics, metrics)) {
+						returnMetrics = metrics;
+						returnMetrics.keys = range;
+					}
+				} else {
+					returnMetrics += metrics;
+				}
 			}
 
 			if (!onChange.isValid()) {
