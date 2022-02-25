@@ -483,7 +483,7 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 
 		StorageTeamID storageTeamId;
 		std::vector<Tag> tags;
-		std::map<Version, std::pair<StringRef, Arena>> versionMessages;
+		std::map<Version, Standalone<StringRef>> versionMessages;
 		std::map<Tag, Version> poppedTagVersions;
 		Version popped = 0; // see popped version tracking contract below
 		IDiskQueue::location poppedLocation = 0; // The location of the earliest commit with data for this tag.
@@ -550,9 +550,9 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 					// decrement the sizes of each version, so that updateStorage can see whether a certain
 					// version has been popped by looking at the corresponding size.
 					if (self->storageTeamId != txsTeam) {
-						sizes.first -= m->second.first.size();
+						sizes.first -= m->second.size();
 					} else {
-						sizes.second -= m->second.first.size();
+						sizes.second -= m->second.size();
 					}
 					self->versionMessages.erase(it);
 				}
@@ -886,7 +886,7 @@ void commitMessages(Reference<TLogGroupData> self,
 	StringRef storedMessage(block.end() - msgSize, msgSize);
 	const auto expectedStoredMessageSize = storedMessage.expectedSize();
 
-	storageTeamData->versionMessages[version] = std::make_pair(storedMessage, block.arena());
+	storageTeamData->versionMessages[version] = Standalone(storedMessage); // do memcpy to copy contents from block
 
 	if (expectedStoredMessageSize > SERVER_KNOBS->MAX_MESSAGE_SIZE) {
 		TraceEvent(SevWarnAlways, "LargeMessage").detail("Size", expectedStoredMessageSize);
@@ -1128,12 +1128,11 @@ Optional<std::pair<Version, Standalone<StringRef>>> LogGenerationData::getSerial
 
 	auto pStorageTeamData = getStorageTeamData(storageTeamID);
 	// by lower_bound, if we pass in 10, we might get 12, and return 12
-	auto iter = pStorageTeamData->versionMessages.lower_bound(version);
+	const auto iter = pStorageTeamData->versionMessages.lower_bound(version);
 	if (iter == pStorageTeamData->versionMessages.end()) {
 		return Optional<std::pair<Version, Standalone<StringRef>>>();
 	}
-	Standalone<StringRef> data = Standalone(iter->second.first);
-	return std::make_pair(iter->first, data);
+	return *iter;
 }
 
 static const size_t TLOG_PEEK_REQUEST_REPLY_SIZE_CRITERIA = 1024 * 1024;
@@ -2415,7 +2414,7 @@ ACTOR Future<Void> updatePersistentData(Reference<TLogGroupData> self,
 			// Transfer unpopped messages with version numbers less than newPersistentDataVersion to persistentData
 			// TOFIX: versions in logData->versionLocation is erased through persistentQueue->forgetBefore,
 			// however we do not erase it in teamData yet, that alone needs a PR.
-			state std::map<Version, std::pair<StringRef, Arena>>::iterator msg =
+			state std::map<Version, Standalone<StringRef>>::iterator msg =
 			    teamData->versionMessages.lower_bound(logData->versionLocation.begin()->key);
 			state int refSpilledTagCount = 0;
 			wr = BinaryWriter(AssumeVersion(logData->protocolVersion));
@@ -2429,8 +2428,8 @@ ACTOR Future<Void> updatePersistentData(Reference<TLogGroupData> self,
 					wr = BinaryWriter(Unversioned());
 					// write real data here as the value to be persisted.
 					for (; msg != teamData->versionMessages.end() && msg->first == currentVersion; ++msg) {
-						wr.serializeBytes(msg->second.first);
-						um[currentVersion] = msg->second.first.size();
+						wr.serializeBytes(msg->second);
+						um[currentVersion] = msg->second.size();
 					}
 					self->persistentData->set(KeyValueRef(
 					    persistStorageTeamMessagesKey(logData->logId, teamData->storageTeamId, currentVersion),
