@@ -46,6 +46,8 @@ struct TenantManagementWorkload : TestWorkload {
 	const Key keyName = "key"_sr;
 	const Key tenantSubspaceKey = "tenant_subspace"_sr;
 	const Value noTenantValue = "no_tenant"_sr;
+	const TenantName tenantNamePrefix = "tenant_management_workload_"_sr;
+	TenantName localTenantNamePrefix;
 
 	int maxTenants;
 	double testDuration;
@@ -53,6 +55,8 @@ struct TenantManagementWorkload : TestWorkload {
 	TenantManagementWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		maxTenants = getOption(options, "maxTenants"_sr, 1000);
 		testDuration = getOption(options, "testDuration"_sr, 60.0);
+
+		localTenantNamePrefix = format("%stenant_%d_", tenantNamePrefix.toString().c_str(), clientId);
 	}
 
 	std::string description() const override { return "TenantManagement"; }
@@ -68,6 +72,7 @@ struct TenantManagementWorkload : TestWorkload {
 					tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 					tr.set(self->keyName, self->noTenantValue);
 					tr.set(self->tenantSubspaceKey, self->tenantSubspace);
+					tr.set(tenantDataPrefixKey, self->tenantSubspace);
 					wait(tr.commit());
 					break;
 				} catch (Error& e) {
@@ -94,9 +99,10 @@ struct TenantManagementWorkload : TestWorkload {
 		return Void();
 	}
 
-	TenantName chooseTenantName() {
-		TenantName tenant(format("tenant_%d_%d", clientId, deterministicRandom()->randomInt(0, maxTenants)));
-		if (deterministicRandom()->random01() < 0.02) {
+	TenantName chooseTenantName(bool allowSystemTenant) {
+		TenantName tenant(
+		    format("%s%d", localTenantNamePrefix.toString().c_str(), deterministicRandom()->randomInt(0, maxTenants)));
+		if (allowSystemTenant && deterministicRandom()->random01() < 0.02) {
 			tenant = tenant.withPrefix("\xff"_sr);
 		}
 
@@ -104,7 +110,7 @@ struct TenantManagementWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> createTenant(Database cx, TenantManagementWorkload* self) {
-		state TenantName tenant = self->chooseTenantName();
+		state TenantName tenant = self->chooseTenantName(true);
 		state bool alreadyExists = self->createdTenants.count(tenant);
 		try {
 			wait(ManagementAPI::createTenant(cx.getReference(), tenant));
@@ -117,6 +123,7 @@ struct TenantManagementWorkload : TestWorkload {
 			ASSERT(entry.get().prefix.startsWith(self->tenantSubspace));
 
 			self->maxId = entry.get().id;
+			self->createdTenants[tenant] = TenantState(entry.get().id, true);
 
 			state bool insertData = deterministicRandom()->random01() < 0.5;
 			if (insertData) {
@@ -130,6 +137,8 @@ struct TenantManagementWorkload : TestWorkload {
 						wait(tr.onError(e));
 					}
 				}
+
+				self->createdTenants[tenant].empty = false;
 
 				tr = Transaction(cx);
 				loop {
@@ -145,14 +154,14 @@ struct TenantManagementWorkload : TestWorkload {
 				}
 			}
 
-			self->createdTenants[tenant] = TenantState(entry.get().id, insertData);
+			wait(self->checkTenant(cx, self, tenant, self->createdTenants[tenant]));
 		} catch (Error& e) {
 			if (e.code() == error_code_tenant_already_exists) {
 				ASSERT(alreadyExists);
 			} else if (e.code() == error_code_invalid_tenant_name) {
 				ASSERT(tenant.startsWith("\xff"_sr));
 			} else {
-				TraceEvent(SevError, "CreateTenantFailure").detail("TenantName", tenant).error(e);
+				TraceEvent(SevError, "CreateTenantFailure").error(e).detail("TenantName", tenant);
 			}
 		}
 
@@ -160,7 +169,7 @@ struct TenantManagementWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> deleteTenant(Database cx, TenantManagementWorkload* self) {
-		state TenantName tenant = self->chooseTenantName();
+		state TenantName tenant = self->chooseTenantName(true);
 
 		auto itr = self->createdTenants.find(tenant);
 		state bool alreadyExists = itr != self->createdTenants.end();
@@ -194,7 +203,7 @@ struct TenantManagementWorkload : TestWorkload {
 			} else if (e.code() == error_code_tenant_not_empty) {
 				ASSERT(!isEmpty);
 			} else {
-				TraceEvent(SevError, "DeleteTenantFailure").detail("TenantName", tenant).error(e);
+				TraceEvent(SevError, "DeleteTenantFailure").error(e).detail("TenantName", tenant);
 			}
 		}
 
@@ -208,7 +217,7 @@ struct TenantManagementWorkload : TestWorkload {
 		state Transaction tr(cx, tenant);
 		loop {
 			try {
-				RangeResult result = wait(tr.getRange(KeyRangeRef(""_sr, "\xff"_sr), 2));
+				state RangeResult result = wait(tr.getRange(KeyRangeRef(""_sr, "\xff"_sr), 2));
 				if (tenantState.empty) {
 					ASSERT(result.size() == 0);
 				} else {
@@ -226,7 +235,7 @@ struct TenantManagementWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> getTenant(Database cx, TenantManagementWorkload* self) {
-		state TenantName tenant = self->chooseTenantName();
+		state TenantName tenant = self->chooseTenantName(true);
 		auto itr = self->createdTenants.find(tenant);
 		state bool alreadyExists = itr != self->createdTenants.end();
 		state TenantState tenantState = itr->second;
@@ -240,7 +249,7 @@ struct TenantManagementWorkload : TestWorkload {
 			if (e.code() == error_code_tenant_not_found) {
 				ASSERT(!alreadyExists);
 			} else {
-				TraceEvent(SevError, "GetTenantFailure").detail("TenantName", tenant).error(e);
+				TraceEvent(SevError, "GetTenantFailure").error(e).detail("TenantName", tenant);
 			}
 		}
 
@@ -248,9 +257,13 @@ struct TenantManagementWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> listTenants(Database cx, TenantManagementWorkload* self) {
-		state TenantName beginTenant = self->chooseTenantName();
-		state TenantName endTenant = self->chooseTenantName();
+		state TenantName beginTenant = self->chooseTenantName(false);
+		state TenantName endTenant = self->chooseTenantName(false);
 		state int limit = std::min(CLIENT_KNOBS->TOO_MANY, deterministicRandom()->randomInt(0, self->maxTenants * 2));
+
+		if (beginTenant > endTenant) {
+			std::swap(beginTenant, endTenant);
+		}
 
 		try {
 			Standalone<VectorRef<TenantNameRef>> tenants =
@@ -259,21 +272,23 @@ struct TenantManagementWorkload : TestWorkload {
 			ASSERT(tenants.size() <= limit);
 
 			int index = 0;
-			auto itr = self->createdTenants.begin();
+			auto itr = self->createdTenants.lower_bound(beginTenant);
 			for (; index < tenants.size(); ++itr) {
 				ASSERT(itr != self->createdTenants.end());
 				ASSERT(itr->first == tenants[index++]);
 			}
 
-			ASSERT(tenants.size() == limit || itr == self->createdTenants.end());
-			if (tenants.size() == limit) {
-				ASSERT(itr == self->createdTenants.end() || itr->first >= endTenant);
+			if (!(tenants.size() == limit || itr == self->createdTenants.end())) {
+				for (auto tenant : self->createdTenants) {
+					TraceEvent("ExistingTenant").detail("Tenant", tenant.first);
+				}
 			}
+			ASSERT(tenants.size() == limit || itr == self->createdTenants.end() || itr->first >= endTenant);
 		} catch (Error& e) {
 			TraceEvent(SevError, "ListTenantFailure")
+			    .error(e)
 			    .detail("BeginTenant", beginTenant)
-			    .detail("EndTenant", endTenant)
-			    .error(e);
+			    .detail("EndTenant", endTenant);
 		}
 
 		return Void();
@@ -315,14 +330,15 @@ struct TenantManagementWorkload : TestWorkload {
 
 		state std::map<TenantName, TenantState>::iterator itr = self->createdTenants.begin();
 		state std::vector<Future<Void>> checkTenants;
-		state TenantName beginTenant = ""_sr;
+		state TenantName beginTenant = ""_sr.withPrefix(self->localTenantNamePrefix);
+		state TenantName endTenant = "\xff\xff"_sr.withPrefix(self->localTenantNamePrefix);
 
 		loop {
 			Standalone<VectorRef<TenantNameRef>> tenants =
-			    wait(ManagementAPI::listTenants(cx.getReference(), beginTenant, "\xff\xff"_sr, 1000));
+			    wait(ManagementAPI::listTenants(cx.getReference(), beginTenant, endTenant, 1000));
 
 			for (auto tenant : tenants) {
-				ASSERT(!tenant.startsWith("\xff"_sr));
+				ASSERT(itr != self->createdTenants.end());
 				ASSERT(tenant == itr->first);
 				checkTenants.push_back(self->checkTenant(cx, self, tenant, itr->second));
 				++itr;

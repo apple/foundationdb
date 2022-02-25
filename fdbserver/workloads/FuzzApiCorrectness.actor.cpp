@@ -54,7 +54,7 @@ struct ExceptionContract {
 	static occurance_t requiredIf(bool in) { return in ? Always : Never; }
 	static occurance_t possibleIf(bool in) { return in ? Possible : Never; }
 
-	void handleException(const Error& e) const {
+	void handleException(const Error& e, Reference<ITransaction> tr) const {
 		// We should always ignore these.
 		if (e.code() == error_code_used_during_commit || e.code() == error_code_transaction_too_old ||
 		    e.code() == error_code_future_version || e.code() == error_code_transaction_cancelled ||
@@ -71,6 +71,7 @@ struct ExceptionContract {
 			evt.error(e)
 			    .detail("Thrown", true)
 			    .detail("Expected", i->second == Possible ? "possible" : "always")
+			    .detail("Tenant", tr->getTenant())
 			    .backtrace();
 			if (augment)
 				augment(evt);
@@ -78,20 +79,21 @@ struct ExceptionContract {
 		}
 
 		TraceEvent evt(SevError, func.c_str());
-		evt.error(e).detail("Thrown", true).detail("Expected", "never").backtrace();
+		evt.error(e).detail("Thrown", true).detail("Expected", "never").detail("Tenant", tr->getTenant()).backtrace();
 		if (augment)
 			augment(evt);
 		throw e;
 	}
 
 	// Return true if we should have thrown, but didn't.
-	void handleNotThrown() const {
+	void handleNotThrown(Reference<ITransaction> tr) const {
 		for (auto i : expected) {
 			if (i.second == Always) {
 				TraceEvent evt(SevError, func.c_str());
 				evt.error(Error::fromUnvalidatedCode(i.first))
 				    .detail("Thrown", false)
 				    .detail("Expected", "always")
+				    .detail("Tenant", tr->getTenant())
 				    .backtrace();
 				if (augment)
 					augment(evt);
@@ -172,6 +174,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		conflictRange = KeyRangeRef(LiteralStringRef("\xfe"), LiteralStringRef("\xfe\x00"));
 		TraceEvent("FuzzApiCorrectnessConfiguration")
 		    .detail("Nodes", nodes)
+		    .detail("NumTenants", numTenants)
 		    .detail("InitialKeyDensity", initialKeyDensity)
 		    .detail("AdjacentKeys", adjacentKeys)
 		    .detail("ValueSizeMin", valueSizeRange.first)
@@ -198,7 +201,9 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	std::string description() const override { return "FuzzApiCorrectness"; }
 
 	static TenantName getTenant(int num) { return TenantNameRef(format("tenant_%d", num)); }
-	bool hasTenant(Optional<TenantName> tenant) { return !tenant.present() || createdTenants.count(tenant.get()); }
+	bool canUseTenant(Optional<TenantName> tenant) {
+		return !tenant.present() || createdTenants.count(tenant.get()) || useSystemKeys;
+	}
 
 	Future<Void> setup(Database const& cx) override {
 		if (clientId == 0) {
@@ -259,7 +264,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 	ACTOR Future<Void> loadAndRun(FuzzApiCorrectnessWorkload* self) {
 		state double startTime = now();
-		state int nodesPerTenant = self->nodes / (self->numTenants + 1);
+		state int nodesPerTenant = std::max<int>(1, self->nodes / (self->numTenants + 1));
 		state int keysPerBatch =
 		    std::min<int64_t>(1000,
 		                      1 + CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT / 2 /
@@ -270,8 +275,9 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 				for (; tenantNum < self->numTenants; ++tenantNum) {
 					state int i = 0;
 					for (; i < nodesPerTenant; i += keysPerBatch) {
-						state Reference<ITransaction> tr =
-						    tenantNum < 0 ? self->db->createTransaction() : self->tenants[i]->createTransaction();
+						state Reference<ITransaction> tr = tenantNum < 0
+						                                       ? self->db->createTransaction()
+						                                       : self->tenants[tenantNum]->createTransaction();
 						loop {
 							if (now() - startTime > self->testDuration)
 								return Void();
@@ -343,7 +349,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		state std::vector<Future<Void>> operations;
 		state int waitLocation = 0;
 
-		int tenantNum = deterministicRandom()->randomInt(-1, self->tenants.size());
+		state int tenantNum = deterministicRandom()->randomInt(-1, self->tenants.size());
 		if (tenantNum == -1) {
 			tr = self->db->createTransaction();
 		} else {
@@ -436,10 +442,10 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 			try {
 				value_type result = wait(timeoutError(BaseTest::runTest2(tr, &self), 1000));
-				self.contract.handleNotThrown();
+				self.contract.handleNotThrown(tr);
 				return self.errorCheck(tr, result);
 			} catch (Error& e) {
-				self.contract.handleException(e);
+				self.contract.handleException(e, tr);
 			}
 			return Void();
 		}
@@ -456,7 +462,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 			value_type result = wait(future);
 			if (future.isError()) {
-				self->contract.handleException(future.getError());
+				self->contract.handleException(future.getError(), tr);
 			} else {
 				ASSERT(future.isValid());
 			}
@@ -696,7 +702,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 				        LiteralStringRef("auto_coordinators")
 				            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin))),
 				std::make_pair(error_code_tenant_not_found,
-				               ExceptionContract::requiredIf(!workload->hasTenant(tr->getTenant())))
+				               ExceptionContract::possibleIf(!workload->canUseTenant(tr->getTenant())))
 			};
 		}
 
@@ -706,7 +712,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 		void augmentTrace(TraceEvent& e) const override {
 			base_type::augmentTrace(e);
-			e.detail("Key", printable(key));
+			e.detail("Key", key);
+			e.detail("Size", key.size());
 		}
 	};
 
@@ -724,7 +731,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 				         std::make_pair(error_code_client_invalid_operation, ExceptionContract::Possible),
 				         std::make_pair(error_code_accessed_unreadable, ExceptionContract::Possible),
 				         std::make_pair(error_code_tenant_not_found,
-				                        ExceptionContract::requiredIf(!workload->hasTenant(tr->getTenant()))) };
+				                        ExceptionContract::possibleIf(!workload->canUseTenant(tr->getTenant()))) };
 		}
 
 		ThreadFuture<value_type> createFuture(Reference<ITransaction> tr) override {
@@ -776,7 +783,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 				std::make_pair(error_code_special_keys_api_failure, ExceptionContract::possibleIf(isSpecialKeyRange)),
 				std::make_pair(error_code_accessed_unreadable, ExceptionContract::Possible),
 				std::make_pair(error_code_tenant_not_found,
-				               ExceptionContract::requiredIf(!workload->hasTenant(tr->getTenant())))
+				               ExceptionContract::possibleIf(!workload->canUseTenant(tr->getTenant())))
 			};
 		}
 
@@ -822,7 +829,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 				std::make_pair(error_code_special_keys_api_failure, ExceptionContract::possibleIf(isSpecialKeyRange)),
 				std::make_pair(error_code_accessed_unreadable, ExceptionContract::Possible),
 				std::make_pair(error_code_tenant_not_found,
-				               ExceptionContract::requiredIf(!workload->hasTenant(tr->getTenant())))
+				               ExceptionContract::possibleIf(!workload->canUseTenant(tr->getTenant())))
 			};
 		}
 
@@ -888,7 +895,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 				                                             autoCoordinatorSpecialKey < key2)),
 				std::make_pair(error_code_accessed_unreadable, ExceptionContract::Possible),
 				std::make_pair(error_code_tenant_not_found,
-				               ExceptionContract::requiredIf(!workload->hasTenant(tr->getTenant())))
+				               ExceptionContract::possibleIf(!workload->canUseTenant(tr->getTenant())))
 			};
 		}
 
@@ -899,7 +906,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 		void augmentTrace(TraceEvent& e) const override {
 			base_type::augmentTrace(e);
-			e.detail("Key1", printable(key1)).detail("Key2", printable(key2)).detail("Limit", limit);
+			e.detail("Key1", key1).detail("Key2", key2).detail("Limit", limit);
 		}
 	};
 
@@ -942,7 +949,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 				                                             (autoCoordinatorSpecialKey < key2))),
 				std::make_pair(error_code_accessed_unreadable, ExceptionContract::Possible),
 				std::make_pair(error_code_tenant_not_found,
-				               ExceptionContract::requiredIf(!workload->hasTenant(tr->getTenant())))
+				               ExceptionContract::possibleIf(!workload->canUseTenant(tr->getTenant())))
 			};
 		}
 
@@ -953,7 +960,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 		void augmentTrace(TraceEvent& e) const override {
 			base_type::augmentTrace(e);
-			e.detail("Key1", printable(key1)).detail("Key2", printable(key2));
+			e.detail("Key1", key1).detail("Key2", key2);
 			std::stringstream ss;
 			ss << "(" << limits.rows << ", " << limits.minRows << ", " << limits.bytes << ")";
 			e.detail("Limits", ss.str());
@@ -969,7 +976,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			key = makeKey();
 			contract = { std::make_pair(error_code_client_invalid_operation, ExceptionContract::Possible),
 				         std::make_pair(error_code_tenant_not_found,
-				                        ExceptionContract::requiredIf(!workload->hasTenant(tr->getTenant()))) };
+				                        ExceptionContract::requiredIf(!workload->canUseTenant(tr->getTenant()))) };
 		}
 
 		ThreadFuture<value_type> createFuture(Reference<ITransaction> tr) override {
@@ -978,7 +985,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 		void augmentTrace(TraceEvent& e) const override {
 			base_type::augmentTrace(e);
-			e.detail("Key", printable(key));
+			e.detail("Key", key);
 		}
 	};
 
@@ -1001,7 +1008,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 		void augmentTrace(TraceEvent& e) const override {
 			base_type::augmentTrace(e);
-			e.detail("Key1", printable(key1)).detail("Key2", printable(key2));
+			e.detail("Key1", key1).detail("Key2", key2);
 		}
 	};
 
@@ -1076,7 +1083,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 		void augmentTrace(TraceEvent& e) const override {
 			base_type::augmentTrace(e);
-			e.detail("Key", printable(key)).detail("Value", printable(value)).detail("Op", op).detail("Pos", pos);
+			e.detail("Key", key).detail("Value", value).detail("Op", op).detail("Pos", pos);
 		}
 	};
 
@@ -1115,7 +1122,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 		void augmentTrace(TraceEvent& e) const override {
 			base_type::augmentTrace(e);
-			e.detail("Key", printable(key)).detail("Value", printable(value));
+			e.detail("Key", key).detail("Value", value);
 		}
 	};
 
@@ -1154,7 +1161,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 		void augmentTrace(TraceEvent& e) const override {
 			base_type::augmentTrace(e);
-			e.detail("Key1", printable(key1)).detail("Key2", printable(key2));
+			e.detail("Key1", key1).detail("Key2", key2);
 		}
 	};
 
@@ -1193,7 +1200,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 		void augmentTrace(TraceEvent& e) const override {
 			base_type::augmentTrace(e);
-			e.detail("Key1", printable(key1)).detail("Key2", printable(key2));
+			e.detail("Key1", key1).detail("Key2", key2);
 		}
 	};
 
@@ -1222,7 +1229,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 		void augmentTrace(TraceEvent& e) const override {
 			base_type::augmentTrace(e);
-			e.detail("Key", printable(key));
+			e.detail("Key", key);
 		}
 	};
 
@@ -1246,14 +1253,14 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 				         std::make_pair(error_code_timed_out, ExceptionContract::Possible),
 				         std::make_pair(error_code_accessed_unreadable, ExceptionContract::Possible),
 				         std::make_pair(error_code_tenant_not_found,
-				                        ExceptionContract::requiredIf(!workload->hasTenant(tr->getTenant()))) };
+				                        ExceptionContract::possibleIf(!workload->canUseTenant(tr->getTenant()))) };
 		}
 
 		ThreadFuture<value_type> createFuture(Reference<ITransaction> tr) override { return tr->watch(key); }
 
 		void augmentTrace(TraceEvent& e) const override {
 			base_type::augmentTrace(e);
-			e.detail("Key", printable(key));
+			e.detail("Key", key);
 		}
 	};
 
@@ -1276,7 +1283,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 		void augmentTrace(TraceEvent& e) const override {
 			base_type::augmentTrace(e);
-			e.detail("Key1", printable(key1)).detail("Key2", printable(key2));
+			e.detail("Key1", key1).detail("Key2", key2);
 		}
 	};
 
@@ -1361,7 +1368,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 		void augmentTrace(TraceEvent& e) const override {
 			base_type::augmentTrace(e);
-			e.detail("Op", op).detail("Val", printable(val));
+			e.detail("Op", op).detail("Val", val);
 		}
 	};
 

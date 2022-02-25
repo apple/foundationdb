@@ -1502,6 +1502,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 	}
 
 	if (useDB && defaultTenant.present()) {
+		TraceEvent("CreatingDefaultTenant").detail("Tenant", defaultTenant.get());
 		wait(ManagementAPI::createTenant(cx.getReference(), defaultTenant.get()));
 	}
 
