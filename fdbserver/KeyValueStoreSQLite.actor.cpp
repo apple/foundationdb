@@ -2359,7 +2359,7 @@ ACTOR Future<Void> KVFileDump(std::string filename) {
 		k = keyAfter(kv[kv.size() - 1].key);
 	}
 	fflush(stdout);
-	fprintf(stderr, "Counted: %ld\n", count);
+	fprintf(stderr, "Counted: %lld\n", count);
 
 	if (store->getError().isError())
 		wait(store->getError());

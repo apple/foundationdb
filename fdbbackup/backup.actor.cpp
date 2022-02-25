@@ -2754,7 +2754,7 @@ ACTOR Future<Void> queryBackup(const char* name,
 			reportBackupQueryError(operationId,
 			                       result,
 			                       errorMessage =
-			                           format("the specified restorable version %ld is not valid", restoreVersion));
+			                           format("the specified restorable version %lld is not valid", restoreVersion));
 			return Void();
 		}
 		Optional<RestorableFileSet> fileSet = wait(bc->getRestoreSet(restoreVersion, keyRangesFilter));

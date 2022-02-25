@@ -1038,7 +1038,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 			if (ssLag[address] >= 60) {
 				messages.push_back(JsonString::makeMessage(
 				    "storage_server_lagging",
-				    format("Storage server lagging by %ld seconds.", (int64_t)ssLag[address]).c_str()));
+				    format("Storage server lagging by %lld seconds.", (int64_t)ssLag[address]).c_str()));
 			}
 
 			// Store the message array into the status object that represents the worker process
