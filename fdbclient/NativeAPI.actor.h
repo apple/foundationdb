@@ -252,15 +252,13 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 
 	Version committedVersion{ invalidVersion };
 
-	Future<Key> tenantPrefix;
-
 	// Used to save conflicting keys if FDBTransactionOptions::REPORT_CONFLICTING_KEYS is enabled
 	// prefix/<key1> : '1' - any keys equal or larger than this key are (probably) conflicting keys
 	// prefix/<key2> : '0' - any keys equal or larger than this key are (definitely) not conflicting keys
 	std::shared_ptr<CoalescedKeyRangeMap<Value>> conflictingKeys;
 
 	// Only available so that Transaction can have a default constructor, for use in state variables
-	TransactionState(TaskPriority taskID, SpanID spanID) : taskID(taskID), spanID(spanID), tenantPrefix(Key()) {}
+	TransactionState(TaskPriority taskID, SpanID spanID) : taskID(taskID), spanID(spanID) {}
 
 	TransactionState(Database cx,
 	                 Optional<TenantName> tenant,
@@ -448,7 +446,6 @@ public:
 		return Standalone<VectorRef<KeyRangeRef>>(tr.transaction.write_conflict_ranges, tr.arena);
 	}
 
-	Future<Key> getTenantPrefix();
 	Optional<TenantName> getTenant() { return trState->tenant; }
 
 	Reference<TransactionState> trState;

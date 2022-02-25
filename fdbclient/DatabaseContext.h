@@ -205,6 +205,16 @@ struct EndpointFailureInfo {
 	double lastRefreshTime = 0;
 };
 
+struct KeyRangeLocationInfo {
+	TenantMapEntry tenantEntry;
+	KeyRange range;
+	Reference<LocationInfo> locations;
+
+	KeyRangeLocationInfo() {}
+	KeyRangeLocationInfo(TenantMapEntry tenantEntry, KeyRange range, Reference<LocationInfo> locations)
+	  : tenantEntry(tenantEntry), range(range), locations(locations) {}
+};
+
 class DatabaseContext : public ReferenceCounted<DatabaseContext>, public FastAllocated<DatabaseContext>, NonCopyable {
 public:
 	static DatabaseContext* allocateOnForeignThread() {
@@ -239,14 +249,22 @@ public:
 		                                    switchable));
 	}
 
-	std::pair<KeyRange, Reference<LocationInfo>> getCachedLocation(const KeyRef&, Reverse isBackward = Reverse::False);
-	bool getCachedLocations(const KeyRangeRef&,
-	                        std::vector<std::pair<KeyRange, Reference<LocationInfo>>>&,
+	Optional<KeyRangeLocationInfo> getCachedLocation(const Optional<TenantName>& tenant,
+	                                                 const KeyRef&,
+	                                                 Reverse isBackward = Reverse::False);
+	bool getCachedLocations(const Optional<TenantName>& tenant,
+	                        const KeyRangeRef&,
+	                        std::vector<KeyRangeLocationInfo>&,
 	                        int limit,
 	                        Reverse reverse);
-	Reference<LocationInfo> setCachedLocation(const KeyRangeRef&, const std::vector<struct StorageServerInterface>&);
-	void invalidateCache(const KeyRef&, Reverse isBackward = Reverse::False);
-	void invalidateCache(const KeyRangeRef&);
+	void cacheTenant(const TenantName& tenant, const TenantMapEntry& tenantEntry);
+	Reference<LocationInfo> setCachedLocation(const Optional<TenantName>& tenant,
+	                                          const TenantMapEntry& tenantEntry,
+	                                          const KeyRangeRef&,
+	                                          const std::vector<struct StorageServerInterface>&);
+	void invalidateCachedTenant(const TenantNameRef& tenant);
+	void invalidateCache(const KeyRef& tenantPrefix, const KeyRef& key, Reverse isBackward = Reverse::False);
+	void invalidateCache(const KeyRef& tenantPrefix, const KeyRangeRef& keys);
 
 	// Records that `endpoint` is failed on a healthy server.
 	void setFailedEndpointOnHealthyServer(const Endpoint& endpoint);
@@ -409,8 +427,10 @@ public:
 
 	// Cache of location information
 	int locationCacheSize;
+	int tenantCacheSize;
 	CoalescedKeyRangeMap<Reference<LocationInfo>> locationCache;
 	std::unordered_map<Endpoint, EndpointFailureInfo> failedEndpointsOnHealthyServersInfo;
+	std::unordered_map<TenantName, TenantMapEntry> tenantCache;
 
 	std::map<UID, StorageServerInfo*> server_interf;
 	std::map<UID, BlobWorkerInterface> blobWorker_interf; // blob workers don't change endpoints for the same ID
