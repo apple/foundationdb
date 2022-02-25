@@ -886,7 +886,7 @@ void commitMessages(Reference<TLogGroupData> self,
 	StringRef storedMessage(block.end() - msgSize, msgSize);
 	const auto expectedStoredMessageSize = storedMessage.expectedSize();
 
-	storageTeamData->versionMessages[version] = Standalone(storedMessage); // do memcpy to copy contents from block
+	storageTeamData->versionMessages[version] = Standalone(storedMessage, block.arena());
 
 	if (expectedStoredMessageSize > SERVER_KNOBS->MAX_MESSAGE_SIZE) {
 		TraceEvent(SevWarnAlways, "LargeMessage").detail("Size", expectedStoredMessageSize);
