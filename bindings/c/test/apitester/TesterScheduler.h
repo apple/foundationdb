@@ -20,8 +20,8 @@
 
 #pragma once
 
-#ifndef SYS_TEST_SCHEDULER_H
-#define SYS_TEST_SCHEDULER_H
+#ifndef APITESTER_SCHEDULER_H
+#define APITESTER_SCHEDULER_H
 
 #include <functional>
 #include <memory>

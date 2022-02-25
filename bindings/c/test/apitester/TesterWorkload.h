@@ -20,8 +20,8 @@
 
 #pragma once
 
-#ifndef SYS_TEST_WORKLOAD_H
-#define SYS_TEST_WORKLOAD_H
+#ifndef APITESTER_WORKLOAD_H
+#define APITESTER_WORKLOAD_H
 
 #include "TesterTransactionExecutor.h"
 #include <atomic>

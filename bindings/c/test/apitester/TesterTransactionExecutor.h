@@ -20,8 +20,8 @@
 
 #pragma once
 
-#ifndef SYS_TEST_TRANSACTION_EXECUTOR_H
-#define SYS_TEST_TRANSACTION_EXECUTOR_H
+#ifndef APITESTER_TRANSACTION_EXECUTOR_H
+#define APITESTER_TRANSACTION_EXECUTOR_H
 
 #include "TesterOptions.h"
 #include "TesterApiWrapper.h"

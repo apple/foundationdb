@@ -102,6 +102,8 @@ if(NOT WIN32 AND NOT IS_ARM_MAC)
     test/apitester/TesterApiWrapper.cpp
     test/apitester/TesterApiWrapper.h
     test/apitester/TesterCorrectnessWorkload.cpp
+    test/apitester/TesterKeyValueStore.cpp
+    test/apitester/TesterKeyValueStore.h
     test/apitester/TesterOptions.h
     test/apitester/TesterScheduler.cpp
     test/apitester/TesterScheduler.h

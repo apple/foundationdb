@@ -20,8 +20,8 @@
 
 #pragma once
 
-#ifndef SYS_TEST_OPTIONS_TESTER_OPTIONS_H
-#define SYSTEM_TESTER_TESTER_OPTIONS_H
+#ifndef APITESTER_TESTER_OPTIONS_H
+#define APITESTER_TESTER_OPTIONS_H
 
 #include <string>
 #include <vector>
