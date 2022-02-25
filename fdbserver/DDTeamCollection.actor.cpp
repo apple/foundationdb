@@ -2857,7 +2857,7 @@ public:
 		state KeyBackedObjectMap<UID, StorageMetadataType, decltype(IncludeVersion())> metadataMap(
 		    serverMetadataKeys.begin, IncludeVersion());
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
-		state StorageMetadataType data(uint64_t(g_network->timer() * 1e9));
+		state StorageMetadataType data(StorageMetadataType::currentTime());
 		// printf("------ read metadata %s\n", server->getId().toString().c_str());
 		// read storage metadata
 		loop {
