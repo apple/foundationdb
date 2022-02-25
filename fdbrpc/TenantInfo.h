@@ -50,7 +50,7 @@ struct TenantInfoRef {
 	}
 };
 
-struct AuthorizedTenants {
+struct AuthorizedTenants : ReferenceCounted<AuthorizedTenants> {
 	Arena arena;
 	std::set<TenantInfoRef> authorizedTenants;
 	bool trusted = false;

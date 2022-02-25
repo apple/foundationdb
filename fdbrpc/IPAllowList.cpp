@@ -211,7 +211,6 @@ struct SubNetTest {
 	template <bool V4>
 	IPAddress randomAddress(bool inSubnet) {
 		ASSERT(V4 == subnet.baseAddress.isV4() || !inSubnet);
-		constexpr int width = V4 ? 4 : 16;
 		for (;;) {
 			auto res = randomAddress<V4>();
 			if (V4 != subnet.baseAddress.isV4()) {

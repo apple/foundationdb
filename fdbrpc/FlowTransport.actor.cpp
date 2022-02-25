@@ -947,7 +947,7 @@ ACTOR static void deliver(TransportData* self,
                           TaskPriority priority,
                           ArenaReader reader,
                           NetworkAddress peerAddress,
-                          AuthorizedTenants authorizedTenants,
+                          Reference<AuthorizedTenants> authorizedTenants,
 						  ContextVariableMap* cvm,
                           bool inReadSocket) {
 	// We want to run the task at the right priority. If the priority is higher than the current priority (which is
@@ -963,7 +963,7 @@ ACTOR static void deliver(TransportData* self,
 
 	auto receiver = self->endpoints.get(destination.token);
 	if (receiver) {
-		if (!authorizedTenants.trusted && !receiver->isPublic()) {
+		if (!authorizedTenants->trusted && !receiver->isPublic()) {
 			TraceEvent(SevWarnAlways, "AttemptedRPCToPrivatePrevented").detail("From", peerAddress);
 			throw connection_failed();
 		}
@@ -1013,7 +1013,7 @@ static void scanPackets(TransportData* transport,
                         const uint8_t* e,
                         Arena& arena,
                         NetworkAddress const& peerAddress,
-                        AuthorizedTenants const& authorizedTenants,
+                        Reference<AuthorizedTenants> const& authorizedTenants,
 						ContextVariableMap* cvm,
                         ProtocolVersion peerProtocolVersion) {
 	// Find each complete packet in the given byte range and queue a ready task to deliver it.
@@ -1181,15 +1181,14 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 	state bool incompatibleProtocolVersionNewer = false;
 	state NetworkAddress peerAddress;
 	state ProtocolVersion peerProtocolVersion;
-	state AuthorizedTenants authorizedTenants;
-	authorizedTenants.trusted = transport->allowList(conn->getPeerAddress().ip);
+	state Reference<AuthorizedTenants> authorizedTenants = makeReference<AuthorizedTenants>();
+	authorizedTenants->trusted = transport->allowList(conn->getPeerAddress().ip);
 	ContextVariableMap cvm;
 	cvm["AuthorizedTenants"] = &authorizedTenants;
 	cvm["PeerAddress"] = &peerAddress;
 
 	peerAddress = conn->getPeerAddress();
-	// TODO: check whether peers ip is in trusted range
-	authorizedTenants.trusted = true;
+	authorizedTenants->trusted = transport->allowList(peerAddress.ip);
 	if (!peer) {
 		ASSERT(!peerAddress.isPublic());
 	}
@@ -1613,8 +1612,8 @@ static void sendLocal(TransportData* self, ISerializeSource const& what, const E
 	ASSERT(copy.size() > 0);
 	TaskPriority priority = self->endpoints.getPriority(destination.token);
 	if (priority != TaskPriority::UnknownEndpoint || (destination.token.first() & TOKEN_STREAM_FLAG) != 0) {
-		AuthorizedTenants authorizedTenants;
-		authorizedTenants.trusted = true;
+		Reference<AuthorizedTenants> authorizedTenants;
+		authorizedTenants->trusted = true;
 		deliver(self,
 		        destination,
 		        priority,
