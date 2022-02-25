@@ -962,7 +962,6 @@ void DatabaseContext::updateFailedEndpointRefreshTime(const Endpoint& endpoint) 
 		// The endpoint is not failed. Nothing to update.
 		return;
 	}
-
 	failedEndpointsOnHealthyServersInfo[endpoint].lastRefreshTime = now();
 }
 
