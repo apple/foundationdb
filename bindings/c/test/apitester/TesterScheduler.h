@@ -30,6 +30,8 @@ namespace FdbApiTester {
 
 using TTaskFct = std::function<void(void)>;
 
+extern const TTaskFct NO_OP_TASK;
+
 class IScheduler {
 public:
 	virtual ~IScheduler() {}

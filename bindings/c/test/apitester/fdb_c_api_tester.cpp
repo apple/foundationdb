@@ -220,7 +220,7 @@ void fdb_check(fdb_error_t e) {
 }
 } // namespace
 
-std::unique_ptr<IWorkload> createApiCorrectnessWorkload();
+std::shared_ptr<IWorkload> createApiCorrectnessWorkload();
 
 } // namespace FdbApiTester
 
@@ -248,11 +248,13 @@ void runApiCorrectness(TesterOptions& options) {
 	std::unique_ptr<ITransactionExecutor> txExecutor = createTransactionExecutor();
 	scheduler->start();
 	txExecutor->init(scheduler.get(), options.clusterFile.c_str(), txExecOptions);
-	std::unique_ptr<IWorkload> workload = createApiCorrectnessWorkload();
-	IScheduler* schedPtr = scheduler.get();
-	workload->init(txExecutor.get(), schedPtr, [schedPtr]() { schedPtr->stop(); });
-	workload->start();
-	scheduler->join();
+
+	WorkloadManager workloadMgr(txExecutor.get(), scheduler.get());
+	for (int i = 0; i < 10; i++) {
+		std::shared_ptr<IWorkload> workload = createApiCorrectnessWorkload();
+		workloadMgr.add(workload);
+	}
+	workloadMgr.run();
 }
 
 int main(int argc, char** argv) {

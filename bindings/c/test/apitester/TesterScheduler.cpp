@@ -29,6 +29,8 @@ using namespace boost::asio;
 
 namespace FdbApiTester {
 
+const TTaskFct NO_OP_TASK = []() {};
+
 class AsioScheduler : public IScheduler {
 public:
 	AsioScheduler(int numThreads) : numThreads(numThreads) {}

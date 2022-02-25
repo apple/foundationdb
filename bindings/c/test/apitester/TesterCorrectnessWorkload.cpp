@@ -26,7 +26,7 @@ namespace FdbApiTester {
 
 class ApiCorrectnessWorkload : public WorkloadBase {
 public:
-	ApiCorrectnessWorkload() : numTxLeft(10) {}
+	ApiCorrectnessWorkload() : numTxLeft(1000) {}
 
 	void start() override {
 		schedule([this]() { nextTransaction(); });
@@ -34,7 +34,9 @@ public:
 
 private:
 	void nextTransaction() {
-		std::cout << numTxLeft << " transactions left" << std::endl;
+		if (numTxLeft % 100 == 0) {
+			std::cout << numTxLeft << " transactions left" << std::endl;
+		}
 		if (numTxLeft == 0)
 			return;
 
@@ -54,8 +56,8 @@ private:
 	int numTxLeft;
 };
 
-std::unique_ptr<IWorkload> createApiCorrectnessWorkload() {
-	return std::make_unique<ApiCorrectnessWorkload>();
+std::shared_ptr<IWorkload> createApiCorrectnessWorkload() {
+	return std::make_shared<ApiCorrectnessWorkload>();
 }
 
 } // namespace FdbApiTester

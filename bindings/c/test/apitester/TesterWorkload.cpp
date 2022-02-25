@@ -20,36 +20,65 @@
 
 #include "TesterWorkload.h"
 #include <memory>
+#include <cassert>
 
 namespace FdbApiTester {
 
-void WorkloadBase::init(ITransactionExecutor* txExecutor, IScheduler* sched, TTaskFct cont) {
-	this->txExecutor = txExecutor;
-	this->scheduler = sched;
-	this->doneCont = cont;
+void WorkloadBase::init(WorkloadManager* manager) {
+	this->manager = manager;
 }
 
 void WorkloadBase::schedule(TTaskFct task) {
 	tasksScheduled++;
-	scheduler->schedule([this, task]() {
+	manager->scheduler->schedule([this, task]() {
 		tasksScheduled--;
 		task();
-		contIfDone();
+		checkIfDone();
 	});
 }
 
 void WorkloadBase::execTransaction(std::shared_ptr<ITransactionActor> tx, TTaskFct cont) {
 	txRunning++;
-	txExecutor->execute(tx, [this, cont]() {
+	manager->txExecutor->execute(tx, [this, cont]() {
 		txRunning--;
 		cont();
-		contIfDone();
+		checkIfDone();
 	});
 }
 
-void WorkloadBase::contIfDone() {
+void WorkloadBase::checkIfDone() {
 	if (txRunning == 0 && tasksScheduled == 0) {
-		doneCont();
+		manager->workloadDone(this);
+	}
+}
+
+void WorkloadManager::add(std::shared_ptr<IWorkload> workload, TTaskFct cont) {
+	std::unique_lock<std::mutex> lock(mutex);
+	workloads[workload.get()] = WorkloadInfo{ workload, cont };
+}
+
+void WorkloadManager::run() {
+	for (auto iter : workloads) {
+		iter.first->init(this);
+	}
+	for (auto iter : workloads) {
+		iter.first->start();
+	}
+	scheduler->join();
+}
+
+void WorkloadManager::workloadDone(IWorkload* workload) {
+	std::unique_lock<std::mutex> lock(mutex);
+	auto iter = workloads.find(workload);
+	assert(iter != workloads.end());
+	lock.unlock();
+	iter->second.cont();
+	lock.lock();
+	workloads.erase(iter);
+	bool done = workloads.empty();
+	lock.unlock();
+	if (done) {
+		scheduler->stop();
 	}
 }
 

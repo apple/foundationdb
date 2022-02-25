@@ -25,20 +25,24 @@
 
 #include "TesterTransactionExecutor.h"
 #include <atomic>
+#include <unordered_map>
+#include <mutex>
 
 namespace FdbApiTester {
+
+class WorkloadManager;
 
 class IWorkload {
 public:
 	virtual ~IWorkload() {}
-	virtual void init(ITransactionExecutor* txExecutor, IScheduler* sched, TTaskFct cont) = 0;
+	virtual void init(WorkloadManager* manager) = 0;
 	virtual void start() = 0;
 };
 
 class WorkloadBase : public IWorkload {
 public:
-	WorkloadBase() : txExecutor(nullptr), scheduler(nullptr), tasksScheduled(0), txRunning(0) {}
-	void init(ITransactionExecutor* txExecutor, IScheduler* sched, TTaskFct cont) override;
+	WorkloadBase() : manager(nullptr), tasksScheduled(0), txRunning(0) {}
+	void init(WorkloadManager* manager) override;
 
 protected:
 	void schedule(TTaskFct task);
@@ -46,14 +50,37 @@ protected:
 	void execTransaction(TTxStartFct start, TTaskFct cont) {
 		execTransaction(std::make_shared<TransactionFct>(start), cont);
 	}
-	void contIfDone();
+	void checkIfDone();
 
 private:
-	ITransactionExecutor* txExecutor;
-	IScheduler* scheduler;
-	TTaskFct doneCont;
+	WorkloadManager* manager;
 	std::atomic<int> tasksScheduled;
 	std::atomic<int> txRunning;
+};
+
+class WorkloadManager {
+public:
+	WorkloadManager(ITransactionExecutor* txExecutor, IScheduler* scheduler)
+	  : txExecutor(txExecutor), scheduler(scheduler) {}
+
+	void add(std::shared_ptr<IWorkload> workload, TTaskFct cont = NO_OP_TASK);
+	void run();
+
+private:
+	friend WorkloadBase;
+
+	struct WorkloadInfo {
+		std::shared_ptr<IWorkload> ref;
+		TTaskFct cont;
+	};
+
+	void workloadDone(IWorkload* workload);
+
+	ITransactionExecutor* txExecutor;
+	IScheduler* scheduler;
+
+	std::mutex mutex;
+	std::unordered_map<IWorkload*, WorkloadInfo> workloads;
 };
 
 } // namespace FdbApiTester
