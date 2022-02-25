@@ -866,7 +866,12 @@ ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bw
 	loop {
 		loop {
 			try {
-				wait(bwData->currentManagerStatusStream.get().onReady());
+				loop {
+					choose {
+						when(wait(bwData->currentManagerStatusStream.get().onReady())) { break; }
+						when(wait(bwData->currentManagerStatusStream.onChange())) {}
+					}
+				}
 				bwData->currentManagerStatusStream.get().send(GranuleStatusReply(metadata->keyRange,
 				                                                                 true,
 				                                                                 writeHot,
@@ -877,7 +882,16 @@ ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bw
 				                                                                 reSnapshotVersion));
 				break;
 			} catch (Error& e) {
-				wait(bwData->currentManagerStatusStream.onChange());
+				if (e.code() == error_code_operation_cancelled) {
+					throw e;
+				}
+				// if we got broken promise while waiting, the old stream was killed, so we don't need to wait on
+				// change, just retry
+				if (e.code() == error_code_broken_promise) {
+					wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
+				} else {
+					wait(bwData->currentManagerStatusStream.onChange());
+				}
 			}
 		}
 
@@ -1459,6 +1473,9 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 							           mutations.front().version);
 						}
 						ASSERT(mutations.front().version > metadata->waitForVersionReturned);
+
+						// If this assert trips we should have gotten change_feed_popped from SS and didn't
+						ASSERT(mutations.front().version >= metadata->activeCFData.get()->popVersion);
 					}
 					when(wait(inFlightFiles.empty() ? Never() : success(inFlightFiles.front().future))) {
 						//  TODO REMOVE

@@ -919,11 +919,14 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 			Optional<Value> lockValue = wait(tr->get(lockKey));
 			ASSERT(lockValue.present());
 			std::tuple<int64_t, int64_t, UID> prevGranuleLock = decodeBlobGranuleLockValue(lockValue.get());
-			if (std::get<0>(prevGranuleLock) > bmData->epoch) {
+			int64_t ownerEpoch = std::get<0>(prevGranuleLock);
+			int64_t ownerSeqno = std::get<1>(prevGranuleLock);
+
+			if (ownerEpoch > bmData->epoch) {
 				if (BM_DEBUG) {
 					fmt::print("BM {0} found a higher epoch {1} than {2} for granule lock of [{3} - {4})\n",
 					           bmData->id.toString(),
-					           std::get<0>(prevGranuleLock),
+					           ownerEpoch,
 					           bmData->epoch,
 					           granuleRange.begin.printable(),
 					           granuleRange.end.printable());
@@ -934,8 +937,7 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 				}
 				return Void();
 			}
-			int64_t ownerEpoch = std::get<0>(prevGranuleLock);
-			int64_t ownerSeqno = std::get<1>(prevGranuleLock);
+
 			if (newLockSeqno == -1) {
 				newLockSeqno = bmData->seqNo;
 				bmData->seqNo++;
@@ -950,21 +952,10 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 					       ownerSeqno);
 				}
 				ASSERT(bmData->epoch > ownerEpoch || (bmData->epoch == ownerEpoch && newLockSeqno > ownerSeqno));
-			} else {
-				if (!(bmData->epoch > ownerEpoch || (bmData->epoch == ownerEpoch && newLockSeqno >= ownerSeqno))) {
-					printf("BM seqno for granule [%s - %s) out of order for lock on retry! manager: (%lld, %lld), "
-					       "owner: %lld, "
-					       "%lld)\n",
-					       granuleRange.begin.printable().c_str(),
-					       granuleRange.end.printable().c_str(),
-					       bmData->epoch,
-					       newLockSeqno,
-					       ownerEpoch,
-					       ownerSeqno);
-				}
-				// previous transaction could have succeeded but got commit_unknown_result, so use >= instead of > for
-				// seqno if epochs are equal
-				ASSERT(bmData->epoch > ownerEpoch || (bmData->epoch == ownerEpoch && newLockSeqno >= ownerSeqno));
+			} else if (bmData->epoch == ownerEpoch && newLockSeqno < ownerSeqno) {
+				// we retried, and between retries we reassigned this range elsewhere. Cancel this split
+				TEST(true); // BM maybe split cancelled by subsequent move
+				return Void();
 			}
 
 			// acquire granule lock so nobody else can make changes to this granule.
@@ -2666,6 +2657,38 @@ ACTOR Future<Void> doLockChecks(Reference<BlobManagerData> bmData) {
 	}
 }
 
+ACTOR Future<Void> blobManagerExclusionSafetyCheck(Reference<BlobManagerData> self,
+                                                   BlobManagerExclusionSafetyCheckRequest req) {
+	TraceEvent("BMExclusionSafetyCheckBegin", self->id).log();
+	BlobManagerExclusionSafetyCheckReply reply(true);
+	// make sure at least one blob worker remains after exclusions
+	if (self->workersById.empty()) {
+		TraceEvent("BMExclusionSafetyCheckNoWorkers", self->id).log();
+		reply.safe = false;
+	} else {
+		// TODO REMOVE prints
+		std::set<UID> remainingWorkers;
+		for (auto& worker : self->workersById) {
+			remainingWorkers.insert(worker.first);
+		}
+		for (const AddressExclusion& excl : req.exclusions) {
+			for (auto& worker : self->workersById) {
+				if (excl.excludes(worker.second.address())) {
+					remainingWorkers.erase(worker.first);
+				}
+			}
+		}
+
+		TraceEvent("BMExclusionSafetyChecked", self->id).detail("RemainingWorkers", remainingWorkers.size()).log();
+		reply.safe = !remainingWorkers.empty();
+	}
+
+	TraceEvent("BMExclusionSafetyCheckEnd", self->id).log();
+	req.reply.send(reply);
+
+	return Void();
+}
+
 ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
                                Reference<AsyncVar<ServerDBInfo> const> dbInfo,
                                int64_t epoch) {
@@ -2720,6 +2743,10 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 				req.reply.send(Void());
 				TraceEvent("BlobGranulesHalted", bmInterf.id()).detail("ReqID", req.requesterID);
 				break;
+			}
+			when(BlobManagerExclusionSafetyCheckRequest exclCheckReq =
+			         waitNext(bmInterf.blobManagerExclCheckReq.getFuture())) {
+				self->addActor.send(blobManagerExclusionSafetyCheck(self, exclCheckReq));
 			}
 			when(wait(collection)) {
 				TraceEvent("BlobManagerActorCollectionError");

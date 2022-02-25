@@ -200,6 +200,8 @@ struct ChangeFeedData : ReferenceCounted<ChangeFeedData> {
 	Promise<Void> refresh;
 	Version maxSeenVersion;
 	Version endVersion = invalidVersion;
+	Version popVersion =
+	    invalidVersion; // like TLog pop version, set by SS and client can check it to see if they missed data
 
 	ChangeFeedData() : notAtLatest(1) {}
 };

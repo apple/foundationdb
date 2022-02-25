@@ -690,6 +690,7 @@ struct ChangeFeedStreamReply : public ReplyPromiseStreamReply {
 	VectorRef<MutationsAndVersionRef> mutations;
 	bool atLatestVersion = false;
 	Version minStreamVersion = invalidVersion;
+	Version popVersion = invalidVersion;
 
 	ChangeFeedStreamReply() {}
 
@@ -703,6 +704,7 @@ struct ChangeFeedStreamReply : public ReplyPromiseStreamReply {
 		           mutations,
 		           atLatestVersion,
 		           minStreamVersion,
+		           popVersion,
 		           arena);
 	}
 };
@@ -750,19 +752,20 @@ struct OverlappingChangeFeedEntry {
 	Key rangeId;
 	KeyRange range;
 	Version emptyVersion;
-	bool stopped = false;
+	Version stopVersion;
 
 	bool operator==(const OverlappingChangeFeedEntry& r) const {
-		return rangeId == r.rangeId && range == r.range && stopped == r.stopped && emptyVersion == r.emptyVersion;
+		return rangeId == r.rangeId && range == r.range && emptyVersion == r.emptyVersion &&
+		       stopVersion == r.stopVersion;
 	}
 
 	OverlappingChangeFeedEntry() {}
-	OverlappingChangeFeedEntry(Key const& rangeId, KeyRange const& range, Version emptyVersion, bool stopped)
-	  : rangeId(rangeId), range(range), emptyVersion(emptyVersion), stopped(stopped) {}
+	OverlappingChangeFeedEntry(Key const& rangeId, KeyRange const& range, Version emptyVersion, Version stopVersion)
+	  : rangeId(rangeId), range(range), emptyVersion(emptyVersion), stopVersion(stopVersion) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, rangeId, range, emptyVersion, stopped);
+		serializer(ar, rangeId, range, emptyVersion, stopVersion);
 	}
 };
 
