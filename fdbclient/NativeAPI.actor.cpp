@@ -1695,7 +1695,6 @@ Future<pair<KeyRange, Reference<LocationInfo>>> getKeyLocation(Database const& c
 
 	if (onlyEndpointFailedAndNeedRefresh) {
 		cx->invalidateCache(key);
-
 		// Refresh the cache with a new getKeyLocations made to proxies.
 		return getKeyLocation_internal(cx, key, info, isBackward);
 	}
