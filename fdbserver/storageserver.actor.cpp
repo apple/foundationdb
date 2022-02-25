@@ -2042,11 +2042,12 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 				// they are the same. In particular this validates the consistency of change feed data recieved from the
 				// tlog mutations vs change feed data fetched from another storage server
 				if (memoryVerifyIdx < memoryReply.mutations.size()) {
-					while (version > memoryReply.mutations[memoryVerifyIdx].version) {
+					while (memoryVerifyIdx < memoryReply.mutations.size() &&
+					       version > memoryReply.mutations[memoryVerifyIdx].version) {
 						// there is a case where this can happen - if we wait on a fetching change feed, and the feed is
 						// popped while we wait, we could have copied the memory mutations into memoryReply before the
-						// pop, but they could have been skipped writing to disk
-						if (waitFetched && feedInfo->emptyVersion > emptyVersion && version > feedInfo->emptyVersion &&
+						// pop, but they may or may not have been skipped writing to disk
+						if (waitFetched && feedInfo->emptyVersion > emptyVersion &&
 						    memoryReply.mutations[memoryVerifyIdx].version <= feedInfo->emptyVersion &&
 						    memoryReply.mutations[memoryVerifyIdx].version > emptyVersion) {
 							// ok
@@ -2077,7 +2078,8 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 							ASSERT(false);
 						}
 					}
-					if (version == memoryReply.mutations[memoryVerifyIdx].version) {
+					if (memoryVerifyIdx < memoryReply.mutations.size() &&
+					    version == memoryReply.mutations[memoryVerifyIdx].version) {
 						// TODO: we could do some validation here too, but it's complicated because clears can get split
 						// and stuff
 						memoryVerifyIdx++;
