@@ -1972,6 +1972,96 @@ TEST_CASE("RocksDBKVS/Reopen") {
     return Void();
 }*/
 
+TEST_CASE("RocksDBKVS/ReadRangeTest") {
+	state std::string cwd = platform::getWorkingDirectory() + "/";
+	std::cout << "Working directory: " << cwd << std::endl;
+	state std::string rocksDBTestDir = "rocksdb-kvs-test-db";
+	platform::eraseDirectoryRecursive(rocksDBTestDir);
+
+	state IKeyValueStore* kvStore = new RocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
+	wait(kvStore->init());
+
+	kvStore->addShard(KeyRangeRef("0"_sr, "100"_sr), deterministicRandom()->randomUniqueID());
+
+	for (int i = 0; i < 100; ++i) {
+		kvStore->set({ format("%03d", i), std::to_string(i) });
+	}
+
+	wait(kvStore->commit(false));
+
+	// Point read
+	state int i = 0;
+	for (i = 0; i < 100; ++i) {
+		Optional<Value> val = wait(kvStore->readValue(format("%03d", i)));
+		ASSERT(val == Optional<Value>(std::to_string(i)));
+	}
+
+	// Range read
+	// Read forward full range.
+	RangeResult result =
+	    wait(kvStore->readRange(KeyRangeRef("0"_sr, "100"_sr), 1000, 10000, IKeyValueStore::ReadType::NORMAL));
+
+	ASSERT_EQ(result.size(), 100);
+
+	// Read backward full range.
+	RangeResult result =
+	    wait(kvStore->readRange(KeyRangeRef("0"_sr, "100"_sr), -1000, 10000, IKeyValueStore::ReadType::NORMAL));
+	ASSERT_EQ(result.size(), 100);
+
+	// Forward with row limit.
+	RangeResult result =
+	    wait(kvStore->readRange(KeyRangeRef("005"_sr, "080"_sr), 20, 10000, IKeyValueStore::ReadType::NORMAL));
+	ASSERT_EQ(result.size(), 20);
+
+	// Backward with row limit.
+	RangeResult result =
+	    wait(kvStore->readRange(KeyRangeRef("005"_sr, "080"_sr), -20, 10000, IKeyValueStore::ReadType::NORMAL));
+	ASSERT_EQ(result.size(), 20);
+
+	// Forward with partial range.
+	RangeResult result =
+	    wait(kvStore->readRange(KeyRangeRef("005"_sr, "015"_sr), 20, 10000, IKeyValueStore::ReadType::NORMAL));
+	ASSERT_EQ(result.size(), 10);
+
+	// Backward with partial range.
+	RangeResult result =
+	    wait(kvStore->readRange(KeyRangeRef("005"_sr, "015"_sr), -20, 10000, IKeyValueStore::ReadType::NORMAL));
+	ASSERT_EQ(result.size(), 10);
+
+	// Split shard.
+	kvStore->addShard(KeyRangeRef("050"_sr, "060"_sr), deterministicRandom()->randomUniqueID());
+	for (i = 50; i < 60; i += 2) {
+		kvStore->set({ format("%03d", i), "Val: " + std::to_string(i) });
+	}
+	wait(kvStore->commit(false));
+
+	// Forward with 2 shards.
+	RangeResult result =
+	    wait(kvStore->readRange(KeyRangeRef("040"_sr, "060"_sr), 20, 1000, IKeyValueStore::ReadType::NORMAL));
+	ASSERT_EQ(result.size(), 15);
+
+	// Backward with 2 shards.
+	RangeResult result =
+	    wait(kvStore->readRange(KeyRangeRef("050"_sr, "080"_sr), -30, 1000, IKeyValueStore::ReadType::NORMAL));
+	ASSERT_EQ(result.size(), 25);
+
+	// Forward, same shard, multiple range.
+	RangeResult result =
+	    wait(kvStore->readRange(KeyRangeRef("005"_sr, "070"_sr), 100, 10000, IKeyValueStore::ReadType::NORMAL));
+	ASSERT_EQ(result.size(), 60);
+
+	// Backward, same shard, multiple range.
+	RangeResult result =
+	    wait(kvStore->readRange(KeyRangeRef("020"_sr, "075"_sr), -100, 10000, IKeyValueStore::ReadType::NORMAL));
+	ASSERT_EQ(result.size(), 50);
+
+	Future<Void> closed = kvStore->onClosed();
+	kvStore->dispose();
+	wait(closed);
+
+	return Void();
+}
+
 TEST_CASE("RocksDBKVS/multiRocks") {
 	state std::string cwd = platform::getWorkingDirectory() + "/";
 	std::cout << "Working directory: " << cwd << std::endl;
