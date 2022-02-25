@@ -19,7 +19,7 @@
  */
 
 #include "boost/lexical_cast.hpp"
-
+#include "contrib/fmt-8.0.1/include/fmt/format.h"
 #include "fdbcli/fdbcli.actor.h"
 
 #include "fdbclient/IClientApi.h"
@@ -53,7 +53,7 @@ ACTOR Future<bool> advanceVersionCommandActor(Reference<IDatabase> db, std::vect
 						tr->set(advanceVersionSpecialKey, boost::lexical_cast<std::string>(v));
 						wait(safeThreadFutureToFuture(tr->commit()));
 					} else {
-						printf("Current read version is %lld\n", rv);
+						fmt::print("Current read version is {}\n", rv);
 						return true;
 					}
 				} catch (Error& e) {

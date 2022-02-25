@@ -3081,7 +3081,7 @@ static void addKeyRange(std::string optionValue, Standalone<VectorRef<KeyRangeRe
 
 			// Too many keys
 		default:
-			fprintf(stderr, "ERROR: Invalid key range identified with %ld keys", tokens.size());
+			fmt::print(stderr, "ERROR: Invalid key range identified with {} keys", tokens.size());
 			throw invalid_option_value();
 			break;
 		}
