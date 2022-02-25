@@ -410,6 +410,28 @@ ACTOR static Future<ResolveTransactionBatchReply> trackResolutionMetrics(Referen
 	return reply;
 }
 
+ErrorOr<Optional<TenantMapEntry>> getTenantEntry(ProxyCommitData* commitData,
+                                                 Optional<TenantNameRef> tenant,
+                                                 Version commitVersion) {
+	if (tenant.present()) {
+		auto view = commitData->tenantMap.at(commitVersion);
+		auto itr = view.find(tenant.get());
+		if (itr == view.end()) {
+			if (commitVersion != latestVersion) {
+				TraceEvent(SevWarn, "CommitProxyTenantNotFound", commitData->dbgid)
+				    .detail("Tenant", tenant.get())
+				    .detail("Version", commitVersion);
+			}
+
+			return tenant_not_found();
+		}
+
+		return ErrorOr<Optional<TenantMapEntry>>(Optional<TenantMapEntry>(*itr));
+	}
+
+	return Optional<TenantMapEntry>();
+}
+
 namespace CommitBatch {
 
 struct CommitBatchContext {
@@ -558,8 +580,8 @@ bool canReject(const std::vector<CommitTransactionRequest>& trs) {
 	for (const auto& tr : trs) {
 		if (tr.transaction.mutations.empty())
 			continue;
-		if (tr.transaction.mutations[0].param1.startsWith(LiteralStringRef("\xff")) ||
-		    tr.transaction.read_conflict_ranges.empty()) {
+		if (!tr.tenantInfo.name.present() && (tr.transaction.mutations[0].param1.startsWith(LiteralStringRef("\xff")) ||
+		                                      tr.transaction.read_conflict_ranges.empty())) {
 			return false;
 		}
 	}
@@ -670,7 +692,7 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 	state Span span("MP:getResolution"_loc, self->span.context);
 
 	ResolutionRequestBuilder requests(
-	    pProxyCommitData, self->commitVersion, self->prevVersion, pProxyCommitData->version, span);
+	    pProxyCommitData, self->commitVersion, self->prevVersion, pProxyCommitData->version.get(), span);
 	int conflictRangeCount = 0;
 	self->maxTransactionBytes = 0;
 	for (int t = 0; t < trs.size(); t++) {
@@ -837,33 +859,6 @@ void determineCommittedTransactions(CommitBatchContext* self) {
 	}
 }
 
-ErrorOr<Void> checkTenant(ProxyCommitData* commitData, CommitTransactionRequest const& tr, Version commitVersion) {
-	if (tr.tenantInfo.name.present()) {
-		auto view = commitData->tenantMap.at(commitVersion);
-		auto itr = view.find(tr.tenantInfo.name.get());
-		if (itr == view.end()) {
-			TraceEvent(SevWarn, "CommitProxyTenantNotFound", commitData->dbgid)
-			    .detail("Tenant", tr.tenantInfo.name.get());
-			return tenant_not_found();
-		}
-
-		for (auto mutation : tr.transaction.mutations) {
-			if (!mutation.param1.startsWith(itr->prefix) ||
-			    (mutation.type == MutationRef::ClearRange && !mutation.param2.startsWith(itr->prefix))) {
-				TraceEvent(SevWarn, "KeyNotInTenant", commitData->dbgid)
-				    .detail("Tenant", tr.tenantInfo.name.get())
-				    .detail("TenantPrefix", itr->prefix)
-				    .detail("Key", mutation.param1)
-				    .detail("EndKey",
-				            mutation.type == MutationRef::ClearRange ? mutation.param2 : Optional<StringRef>());
-				throw key_not_in_tenant();
-			}
-		}
-	}
-
-	return Void();
-}
-
 // This first pass through committed transactions deals with "metadata" effects (modifications of txnStateStore, changes
 // to storage servers' responsibilities)
 ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self) {
@@ -873,7 +868,8 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 	int t;
 	for (t = 0; t < trs.size() && !self->forceRecovery; t++) {
 		if (self->committed[t] == ConflictBatch::TransactionCommitted && (!self->locked || trs[t].isLockAware())) {
-			ErrorOr<Void> result = checkTenant(pProxyCommitData, trs[t], self->commitVersion);
+			ErrorOr<Optional<TenantMapEntry>> result =
+			    getTenantEntry(pProxyCommitData, trs[t].tenantInfo.name.castTo<TenantNameRef>(), self->commitVersion);
 
 			if (result.isError()) {
 				self->committed[t] = ConflictBatch::TransactionTenantFailure;
@@ -911,7 +907,7 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 
 	auto fcm = pProxyCommitData->logAdapter->getCommitMessage();
 	self->storeCommits.emplace_back(fcm, pProxyCommitData->txnStateStore->commit());
-	pProxyCommitData->version = self->commitVersion;
+	pProxyCommitData->version.set(self->commitVersion);
 	if (!pProxyCommitData->validState.isSet())
 		pProxyCommitData->validState.send(Void());
 	ASSERT(self->commitVersion);
@@ -1126,7 +1122,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		    "CommitDebug", debugID.get().first(), "CommitProxyServer.commitBatch.ProcessingMutations");
 	}
 
-	self->isMyFirstBatch = !pProxyCommitData->version;
+	self->isMyFirstBatch = !pProxyCommitData->version.get();
 	self->oldCoordinators = pProxyCommitData->txnStateStore->readValue(coordinatorsKey).get();
 
 	assertResolutionStateMutationsSizeConsistent(self->resolution);
@@ -1530,8 +1526,36 @@ ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsReques
 	wait(commitData->validState.getFuture());
 	wait(delay(0, TaskPriority::DefaultEndpoint));
 
+	state Version requestVersion = latestVersion;
+	state ErrorOr<Optional<TenantMapEntry>> tenantEntry;
+	while (tenantEntry.isError()) {
+		ErrorOr<Optional<TenantMapEntry>> _tenantEntry = getTenantEntry(commitData, req.tenant, requestVersion);
+		tenantEntry = _tenantEntry;
+
+		if (tenantEntry.isError()) {
+			if (requestVersion != latestVersion) {
+				req.reply.sendError(tenant_not_found());
+				return Void();
+			} else {
+				// If the tenant doesn't exist, wait until we are sure we've received updates from the other proxies to
+				// declare that it wasn't recently created.
+				wait(commitData->version.whenAtLeast(commitData->stats.lastCommitVersionAssigned + 1));
+				requestVersion = commitData->version.get();
+			}
+		}
+	}
+
 	std::unordered_set<UID> tssMappingsIncluded;
 	GetKeyServerLocationsReply rep;
+
+	if (tenantEntry.get().present()) {
+		rep.tenantEntry = tenantEntry.get().get();
+		req.begin = req.begin.withPrefix(rep.tenantEntry.prefix, req.arena);
+		if (req.end.present()) {
+			req.end = req.end.get().withPrefix(rep.tenantEntry.prefix, req.arena);
+		}
+	}
+
 	if (!req.end.present()) {
 		auto r = req.reverse ? commitData->keyInfo.rangeContainingKeyBefore(req.begin)
 		                     : commitData->keyInfo.rangeContaining(req.begin);
@@ -1608,7 +1632,7 @@ ACTOR static Future<Void> rejoinServer(CommitProxyInterface proxy, ProxyCommitDa
 		GetStorageServerRejoinInfoRequest req = waitNext(proxy.getStorageServerRejoinInfo.getFuture());
 		if (commitData->txnStateStore->readValue(serverListKeyFor(req.id)).get().present()) {
 			GetStorageServerRejoinInfoReply rep;
-			rep.version = commitData->version;
+			rep.version = commitData->version.get();
 			rep.tag = decodeServerTagValue(commitData->txnStateStore->readValue(serverTagKeyFor(req.id)).get().get());
 			RangeResult history = commitData->txnStateStore->readRange(serverTagHistoryRangeFor(req.id)).get();
 			for (int i = history.size() - 1; i >= 0; i--) {

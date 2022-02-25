@@ -64,14 +64,19 @@ public:
 
 	template <class Ar>
 	void serialize(Ar& ar) {
+		KeyRef subspace;
 		serializer(ar, id);
 		if (ar.isDeserializing) {
-			KeyRef subspace;
-			serializer(ar, subspace);
-			initPrefix(subspace);
+			serializer(ar, id, subspace);
+			if (id >= 0) {
+				initPrefix(subspace);
+			}
 		} else {
-			KeyRef subspace = prefix.substr(0, prefix.size() - 8);
-			serializer(ar, subspace);
+			ASSERT(prefix.size() >= 8 || (prefix.empty() && id == -1));
+			if (!prefix.empty()) {
+				subspace = prefix.substr(0, prefix.size() - 8);
+			}
+			serializer(ar, id, subspace);
 		}
 	}
 };

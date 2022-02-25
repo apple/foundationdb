@@ -97,7 +97,7 @@ struct ProxyStats {
 	}
 
 	explicit ProxyStats(UID id,
-	                    Version* pVersion,
+	                    NotifiedVersion* pVersion,
 	                    NotifiedVersion* pCommittedVersion,
 	                    int64_t* commitBatchesMemBytesCountPtr)
 	  : cc("ProxyStats", id.toString()), txnCommitIn("TxnCommitIn", cc),
@@ -146,7 +146,7 @@ struct ProxyStats {
 	                                            LiteralStringRef("ReplyCommit"),
 	                                            Histogram::Unit::microseconds)) {
 		specialCounter(cc, "LastAssignedCommitVersion", [this]() { return this->lastCommitVersionAssigned; });
-		specialCounter(cc, "Version", [pVersion]() { return *pVersion; });
+		specialCounter(cc, "Version", [pVersion]() { return pVersion->get(); });
 		specialCounter(cc, "CommittedVersion", [pCommittedVersion]() { return pCommittedVersion->get(); });
 		specialCounter(cc, "CommitBatchesMemBytesCount", [commitBatchesMemBytesCountPtr]() {
 			return *commitBatchesMemBytesCountPtr;
@@ -170,7 +170,7 @@ struct ProxyCommitData {
 	                                  // fully committed (durable)
 	Version minKnownCommittedVersion; // No version smaller than this one will be used as the known committed version
 	                                  // during recovery
-	Version version; // The version at which txnStateStore is up to date
+	NotifiedVersion version; // The version at which txnStateStore is up to date
 	Promise<Void> validState; // Set once txnStateStore and version are valid
 	double lastVersionTime;
 	KeyRangeMap<std::set<Key>> vecBackupKeys;

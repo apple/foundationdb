@@ -737,6 +737,7 @@ struct SplitRangeReply {
 		serializer(ar, splitPoints);
 	}
 };
+
 struct SplitRangeRequest {
 	constexpr static FileIdentifier file_identifier = 10725174;
 	Arena arena;
@@ -782,7 +783,6 @@ struct ChangeFeedStreamRequest {
 	constexpr static FileIdentifier file_identifier = 6795746;
 	SpanID spanContext;
 	Arena arena;
-	TenantInfo tenantInfo;
 	Key rangeID;
 	Version begin = 0;
 	Version end = 0;
@@ -792,7 +792,7 @@ struct ChangeFeedStreamRequest {
 	ChangeFeedStreamRequest() {}
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, rangeID, begin, end, range, reply, spanContext, tenantInfo, arena);
+		serializer(ar, rangeID, begin, end, range, reply, spanContext, arena);
 	}
 };
 

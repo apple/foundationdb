@@ -877,8 +877,16 @@ public:
 		Version at;
 	};
 
-	ViewAtVersion at(Version v) const { return ViewAtVersion(getRoot(v), v); }
-	ViewAtVersion atLatest() const { return ViewAtVersion(roots.back().second, latestVersion); }
+	ViewAtVersion at(Version v) const {
+		if (v == ::latestVersion) {
+			return atLatest();
+		}
+
+		return ViewAtVersion(getRoot(v), v);
+	}
+	ViewAtVersion atLatest() const {
+		return ViewAtVersion(roots.back().second, latestVersion);
+	}
 
 	bool isClearContaining(ViewAtVersion const& view, KeyRef key) {
 		auto i = view.lastLessOrEqual(key);

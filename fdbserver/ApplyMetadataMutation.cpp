@@ -585,6 +585,7 @@ private:
 				Standalone<StringRef> tenantName = m.param1.removePrefix(tenantMapPrefix);
 				TenantMapEntry tenantEntry = decodeTenantEntry(m.param2);
 
+				TraceEvent("CommitProxyInsertTenant", dbgid).detail("Tenant", tenantName).detail("Version", version);
 				tenantMap->insert(tenantName, tenantEntry);
 			}
 
@@ -941,8 +942,13 @@ private:
 				tenantMap->createNewVersion(version);
 
 				StringRef startTenant = std::max(range.begin, tenantMapPrefix).removePrefix(tenantMapPrefix);
-				StringRef endTenant = range.end.startsWith(tenantMapPrefix) ? range.end : tenantMapKeys.end;
+				StringRef endTenant = (range.end.startsWith(tenantMapPrefix) ? range.end : tenantMapKeys.end)
+				                          .removePrefix(tenantMapPrefix);
 
+				TraceEvent("CommitProxyEraseTenants", dbgid)
+				    .detail("BeginTenant", startTenant)
+				    .detail("EndTenant", endTenant)
+				    .detail("Version", version);
 				tenantMap->erase(startTenant, endTenant);
 			}
 

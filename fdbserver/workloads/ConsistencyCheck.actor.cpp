@@ -882,7 +882,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				keyServerLocationFutures.push_back(
 				    commitProxyInfo->get(i, &CommitProxyInterface::getKeyServersLocations)
 				        .getReplyUnlessFailedFor(
-				            GetKeyServerLocationsRequest(span.context, begin, end, limitKeyServers, false, Arena()),
+				            GetKeyServerLocationsRequest(
+				                span.context, Optional<TenantNameRef>(), begin, end, limitKeyServers, false, Arena()),
 				            2,
 				            0));
 

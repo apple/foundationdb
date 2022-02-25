@@ -295,6 +295,7 @@ struct GetReadVersionRequest : TimedRequest {
 struct GetKeyServerLocationsReply {
 	constexpr static FileIdentifier file_identifier = 10636023;
 	Arena arena;
+	TenantMapEntry tenantEntry;
 	std::vector<std::pair<KeyRangeRef, std::vector<StorageServerInterface>>> results;
 
 	// if any storage servers in results have a TSS pair, that mapping is in here
@@ -302,7 +303,7 @@ struct GetKeyServerLocationsReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, results, resultsTssMapping, arena);
+		serializer(ar, results, resultsTssMapping, tenantEntry, arena);
 	}
 };
 
@@ -310,6 +311,7 @@ struct GetKeyServerLocationsRequest {
 	constexpr static FileIdentifier file_identifier = 9144680;
 	Arena arena;
 	SpanID spanContext;
+	Optional<TenantNameRef> tenant;
 	KeyRef begin;
 	Optional<KeyRef> end;
 	int limit;
@@ -318,16 +320,18 @@ struct GetKeyServerLocationsRequest {
 
 	GetKeyServerLocationsRequest() : limit(0), reverse(false) {}
 	GetKeyServerLocationsRequest(SpanID spanContext,
+	                             Optional<TenantNameRef> const& tenant,
 	                             KeyRef const& begin,
 	                             Optional<KeyRef> const& end,
 	                             int limit,
 	                             bool reverse,
 	                             Arena const& arena)
-	  : arena(arena), spanContext(spanContext), begin(begin), end(end), limit(limit), reverse(reverse) {}
+	  : arena(arena), spanContext(spanContext), tenant(tenant), begin(begin), end(end), limit(limit), reverse(reverse) {
+	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, begin, end, limit, reverse, reply, spanContext, arena);
+		serializer(ar, begin, end, limit, reverse, reply, spanContext, tenant, arena);
 	}
 };
 

@@ -200,7 +200,10 @@ ERROR( client_lib_invalid_binary, 2122, "Invalid client library binary." )
 
 ERROR( tenant_name_required, 2130, "Tenant name must be specified to access data in the cluster" )
 ERROR( tenant_not_found, 2131, "Tenant not found on the cluster" )
-ERROR( key_not_in_tenant, 2132, "The specified key is not in the key-range represented by the tenant" )
+ERROR( tenant_already_exists, 2132, "A tenant with the given name already exists" )
+ERROR( tenant_not_empty, 2133, "Cannot delete a non-empty tenant" )
+ERROR( invalid_tenant_name, 2134, "Tenant name cannot begin with \\xff");
+ERROR( tenant_prefix_allocator_conflict, 2135, "The database already has keys stored at the prefix allocated for the tenant");
 
 // 2200 - errors from bindings and official APIs
 ERROR( api_version_unset, 2200, "API version is not set" )
