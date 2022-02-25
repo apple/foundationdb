@@ -447,3 +447,9 @@ TEST_CASE("/flow/FlatBuffers/Standalone") {
 	}
 	return Void();
 }
+
+// we need to make sure at least one test of each prefix exists, otherwise
+// the noSim test fails if we compile without RocksDB
+TEST_CASE("noSim/noopTest") {
+	return Void();
+}
