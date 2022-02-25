@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include <limits>
 #include <sstream>
 #include <queue>
 #include <vector>
@@ -899,9 +900,6 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 		newGranuleIDs.push_back(deterministicRandom()->randomUniqueID());
 	}
 
-	state int64_t splitSeqno = bmData->seqNo;
-	bmData->seqNo++;
-
 	// Need to split range. Persist intent to split and split metadata to DB BEFORE sending split assignments to blob
 	// workers, so that nothing is lost on blob manager recovery
 	loop {
@@ -967,17 +965,15 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 			           granuleRange.begin.printable(),
 			           granuleRange.end.printable());*/
 
-			// first key in split boundaries is special: key that doesn't occur normally to the (epoch, seqno) of split
-			tr->set(blobGranuleSplitBoundaryKeyFor(granuleID, splitBoundarySpecialKey),
-			        blobGranuleSplitBoundaryValueFor(bmData->epoch, splitSeqno));
-			for (int i = 0; i < newRanges.size() - 1; i++) {
+			// set up splits in granule mapping, but point each part to the old owner (until they get reassigned)
+			state int i;
+			for (i = 0; i < newRanges.size() - 1; i++) {
 				/*fmt::print("    {0} [{1} - {2})\n",
 				           newGranuleIDs[i].toString().substr(0, 6),
 				           newRanges[i].printable(),
 				           newRanges[i + 1].printable());*/
 
 				Key splitKey = blobGranuleSplitKeyFor(granuleID, newGranuleIDs[i]);
-				tr->set(blobGranuleSplitBoundaryKeyFor(granuleID, newRanges[i]), Value());
 
 				tr->atomicOp(splitKey,
 				             blobGranuleSplitValueFor(BlobGranuleSplitState::Initialized),
@@ -996,8 +992,15 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 				           granuleStartVersion,
 				           latestVersion);*/
 				tr->set(historyKey, blobGranuleHistoryValueFor(historyValue));
+
+				// split the assignment but still pointing to the same worker
+				// FIXME: could pick new random workers here, they'll get overridden shortly unless the BM immediately
+				// restarts
+				wait(krmSetRange(tr,
+				                 blobGranuleMappingKeys.begin,
+				                 KeyRangeRef(newRanges[i], newRanges[i + 1]),
+				                 blobGranuleMappingValueFor(currentWorkerId)));
 			}
-			tr->set(blobGranuleSplitBoundaryKeyFor(granuleID, newRanges.back()), Value());
 
 			wait(tr->commit());
 			break;
@@ -1389,7 +1392,6 @@ ACTOR Future<Void> checkBlobWorkerList(Reference<BlobManagerData> bmData, Promis
 		throw e;
 	}
 }
-
 // Shared code for handling KeyRangeMap<tuple(UID, epoch, seqno)> that is used several places in blob manager recovery
 // when there can be conflicting sources of what assignments exist or which workers owns a granule.
 // Resolves these conflicts by comparing the epoch + seqno for the range
@@ -1401,53 +1403,56 @@ static void addAssignment(KeyRangeMap<std::tuple<UID, int64_t, int64_t>>& map,
                           UID newId,
                           int64_t newEpoch,
                           int64_t newSeqno,
-                          std::vector<std::pair<UID, KeyRange>>* outOfDate = nullptr) {
+                          std::vector<std::pair<UID, KeyRange>>& outOfDate) {
 	std::vector<std::pair<KeyRange, std::tuple<UID, int64_t, int64_t>>> newer;
 	auto intersecting = map.intersectingRanges(newRange);
-	bool allNewer = true;
+	bool allExistingNewer = true;
+	bool anyConflicts = false;
 	for (auto& old : intersecting) {
 		UID oldWorker = std::get<0>(old.value());
 		int64_t oldEpoch = std::get<1>(old.value());
 		int64_t oldSeqno = std::get<2>(old.value());
 		if (oldEpoch > newEpoch || (oldEpoch == newEpoch && oldSeqno > newSeqno)) {
-			if (newId != oldWorker && newId != UID() && newEpoch == 0 && newSeqno == 1 &&
-			    old.begin() == newRange.begin && old.end() == newRange.end) {
-				// granule mapping disagrees with worker with highest value. Just do an explicit reassign to a random
-				// worker for now to ensure the conflict is resolved.
-				newer.push_back(std::pair(old.range(), std::tuple(UID(), oldEpoch, oldSeqno)));
-				allNewer = false;
-			} else {
-				newer.push_back(std::pair(old.range(), std::tuple(oldWorker, oldEpoch, oldSeqno)));
-			}
+			newer.push_back(std::pair(old.range(), std::tuple(oldWorker, oldEpoch, oldSeqno)));
 		} else {
-			allNewer = false;
+			allExistingNewer = false;
 			if (newId != UID()) {
 				// different workers can't have same epoch and seqno for granule assignment
 				ASSERT(oldEpoch != newEpoch || oldSeqno != newSeqno);
 			}
-			if (outOfDate != nullptr && oldWorker != UID() &&
-			    (oldEpoch < newEpoch || (oldEpoch == newEpoch && oldSeqno < newSeqno))) {
-				outOfDate->push_back(std::pair(oldWorker, old.range()));
+			if (newEpoch == std::numeric_limits<int64_t>::max() && (oldWorker != newId || old.range() != newRange)) {
+				// new one is from DB (source of truth on boundaries) and existing mapping disagrees on boundary or
+				// assignment, do explicit revoke and re-assign to converge
+				anyConflicts = true;
+				if (outOfDate.empty() || outOfDate.back() != std::pair(oldWorker, KeyRange(old.range()))) {
+					outOfDate.push_back(std::pair(oldWorker, old.range()));
+				}
+			} else if (oldWorker != UID() && (oldEpoch < newEpoch || (oldEpoch == newEpoch && oldSeqno < newSeqno))) {
+				// 2 blob workers reported conflicting mappings, add old one to out of date (if not already added by a
+				// previous intersecting range in the split case)
+				if (outOfDate.empty() || outOfDate.back() != std::pair(oldWorker, KeyRange(old.range()))) {
+					outOfDate.push_back(std::pair(oldWorker, old.range()));
+				}
 			}
 		}
 	}
 
-	if (!allNewer) {
+	if (!allExistingNewer) {
 		// if this range supercedes an old range insert it over that
-		map.insert(newRange, std::tuple(newId, newEpoch, newSeqno));
+		map.insert(newRange, std::tuple(anyConflicts ? UID() : newId, newEpoch, newSeqno));
 
 		// then, if there were any ranges superceded by this one, insert them over this one
 		if (newer.size()) {
-			if (outOfDate != nullptr && newId != UID()) {
-				outOfDate->push_back(std::pair(newId, newRange));
+			if (newId != UID()) {
+				outOfDate.push_back(std::pair(newId, newRange));
 			}
 			for (auto& it : newer) {
 				map.insert(it.first, it.second);
 			}
 		}
 	} else {
-		if (outOfDate != nullptr && newId != UID()) {
-			outOfDate->push_back(std::pair(newId, newRange));
+		if (newId != UID()) {
+			outOfDate.push_back(std::pair(newId, newRange));
 		}
 	}
 }
@@ -1475,13 +1480,8 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 
 	// At this point, bmData->workersById is a list of all alive blob workers, but could also include some dead BWs.
 	// The algorithm below works as follows:
-	// 1. We get the ongoing split boundaries to construct the set of granules we should have. For these splits, we
-	//    simply assign the range to the next best worker if it is not present in the assignment mapping. This is not
-	//    any worse than what the old blob manager would have done. Details: Note that this means that if a worker we
-	//    intended to give a splitted range to dies before the new BM recovers, then we'll simply assign the range to
-	//    the next best worker.
 	//
-	// 2. We get the existing granule mappings. We do this by asking all active blob workers for their current granule
+	// 1. We get the existing granule mappings. We do this by asking all active blob workers for their current granule
 	//    assignments. This guarantees a consistent snapshot of the state of that worker's assignments: Any request it
 	//    recieved and processed from the old manager before the granule assignment request will be included in the
 	//    assignments, and any request it recieves from the old manager afterwards will be rejected with
@@ -1489,7 +1489,7 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 	//    of ongoing splits to this mapping, and any ranges that are not already assigned to existing blob workers will
 	//    be reassigned.
 	//
-	// 3. For every range in our granuleAssignments, we send an assign request to the stream of requests,
+	// 2. For every range in our granuleAssignments, we send an assign request to the stream of requests,
 	//    ultimately giving every range back to some worker (trying to mimic the state of the old BM).
 	//    If the worker already had the range, this is a no-op. If the worker didn't have it, it will
 	//    begin persisting it. The worker that had the same range before will now be at a lower seqno.
@@ -1503,130 +1503,9 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 
 	if (BM_DEBUG) {
 		fmt::print("BM {0} recovering:\n", bmData->epoch);
-		fmt::print("BM {0} found in progress splits:\n", bmData->epoch);
 	}
 
-	// TODO use range stream instead
-
-	state UID currentParentID = UID();
-	state Optional<UID> nextParentID;
-	state std::vector<Key> splitBoundaries;
-	state std::pair<int64_t, int64_t>
-	    splitEpochSeqno; // used to order splits since we can have multiple splits of the same range in progress at once
-
-	state Key boundaryBeginKey = blobGranuleSplitBoundaryKeys.begin;
-	state RangeResult boundaryResult;
-	boundaryResult.readThrough = boundaryBeginKey;
-	boundaryResult.more = true;
-	state int boundaryResultIdx = 0;
-
-	// Step 2. Get the latest known split and merge state. Because we can have multiple splits in progress at the same
-	// time, and we don't know which parts of those are reflected in the current set of worker assignments we read, we
-	// have to construct the current desired set of granules from the set of ongoing splits and merges. Then, if any of
-	// those are not represented in the worker mapping, we must add them.
-	state KeyRangeMap<std::tuple<UID, int64_t, int64_t>> inProgressSplits;
-	inProgressSplits.insert(normalKeys, std::tuple(UID(), 0, 0));
-
-	tr->reset();
-	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-
-	loop {
-		// Advance boundary reader
-		loop {
-			if (boundaryResultIdx >= boundaryResult.size()) {
-				if (!boundaryResult.more) {
-					break;
-				}
-				ASSERT(boundaryResult.readThrough.present() || boundaryResult.size() > 0);
-				boundaryBeginKey = boundaryResult.readThrough.present() ? boundaryResult.readThrough.get()
-				                                                        : keyAfter(boundaryResult.back().key);
-				loop {
-					try {
-						RangeResult r = wait(
-						    tr->getRange(KeyRangeRef(boundaryBeginKey, blobGranuleSplitBoundaryKeys.end), rowLimit));
-						ASSERT(r.size() > 0 || !r.more);
-						boundaryResult = r;
-						boundaryResultIdx = 0;
-						break;
-					} catch (Error& e) {
-						if (BM_DEBUG) {
-							fmt::print("BM {0} got error advancing boundary cursor: {1}\n", bmData->epoch, e.name());
-						}
-						wait(tr->onError(e));
-						tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-						tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-					}
-				}
-				// if we got a response and there are zero rows, we are done
-				if (boundaryResult.empty()) {
-					break;
-				}
-			}
-			bool foundNext = false;
-			while (boundaryResultIdx < boundaryResult.size()) {
-				UID parentGranuleID;
-				Key boundaryKey;
-
-				std::tie(parentGranuleID, boundaryKey) =
-				    decodeBlobGranuleSplitBoundaryKey(boundaryResult[boundaryResultIdx].key);
-				if (parentGranuleID != currentParentID) {
-					// nextParentID should have already been set by split reader
-					nextParentID = parentGranuleID;
-					foundNext = true;
-					break;
-				}
-
-				if (splitBoundarySpecialKey == boundaryKey) {
-					ASSERT(splitEpochSeqno.first == 0 && splitEpochSeqno.second == 0);
-					ASSERT(boundaryResult[boundaryResultIdx].value.size() > 0);
-					splitEpochSeqno = decodeBlobGranuleSplitBoundaryValue(boundaryResult[boundaryResultIdx].value);
-					ASSERT(splitEpochSeqno.first != 0 && splitEpochSeqno.second != 0);
-				} else {
-					ASSERT(boundaryResult[boundaryResultIdx].value.size() == 0);
-					splitBoundaries.push_back(boundaryKey);
-				}
-
-				boundaryResultIdx++;
-			}
-			if (foundNext) {
-				break;
-			}
-		}
-
-		// process this split
-		if (currentParentID != UID()) {
-			std::sort(splitBoundaries.begin(), splitBoundaries.end());
-
-			if (BM_DEBUG) {
-				fmt::print("  [{0} - {1}) {2} @ ({3}, {4}):\n",
-				           splitBoundaries.front().printable(),
-				           splitBoundaries.back().printable(),
-				           currentParentID.toString().substr(0, 6),
-				           splitEpochSeqno.first,
-				           splitEpochSeqno.second);
-			}
-			for (int i = 0; i < splitBoundaries.size() - 1; i++) {
-				// if this split boundary has not been opened by a blob worker yet, or was not in the assignment list
-				// when we previously read it, we must ensure it gets assigned to one
-				KeyRange range = KeyRange(KeyRangeRef(splitBoundaries[i], splitBoundaries[i + 1]));
-				if (BM_DEBUG) {
-					fmt::print("    [{0} - {1})\n", range.begin.printable(), range.end.printable());
-				}
-				addAssignment(inProgressSplits, range, UID(), splitEpochSeqno.first, splitEpochSeqno.second);
-			}
-		}
-		splitBoundaries.clear();
-		splitEpochSeqno = std::pair(0, 0);
-
-		if (!nextParentID.present()) {
-			break;
-		}
-		currentParentID = nextParentID.get();
-		nextParentID.reset();
-	}
-
-	// Step 3. Get the latest known mapping of granules to blob workers (i.e. assignments)
+	// Step 1. Get the latest known mapping of granules to blob workers (i.e. assignments)
 	// This must happen causally AFTER reading the split boundaries, since the blob workers can clear the split
 	// boundaries for a granule as part of persisting their assignment.
 
@@ -1672,7 +1551,7 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 				              workerId,
 				              assignment.epochAssigned,
 				              assignment.seqnoAssigned,
-				              &outOfDateAssignments);
+				              outOfDateAssignments);
 			}
 			if (bmData->workerStats.count(workerId)) {
 				bmData->workerStats[workerId].numGranulesAssigned = reply.get().assignments.size();
@@ -1693,12 +1572,11 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 		fmt::print("BM {0} found old assignments:\n", bmData->epoch);
 	}
 
-	// then, read any gaps in worker assignment from FDB
-	// With a small number of blob workers, if even one is missing, doing numGranules/numWorkers small range reads from
-	// FDB is probably less efficient than just reading the whole mapping anyway
-	// Plus, we don't have a consistent snapshot of the mapping ACROSS blob workers, so we need the DB to reconcile any
+	// DB is the source of truth, so read from here, and resolve any conflicts with current worker mapping
+	// We don't have a consistent snapshot of the mapping ACROSS blob workers, so we need the DB to reconcile any
 	// differences (eg blob manager revoked from worker A, assigned to B, the revoke from A was processed but the assign
-	// to B wasn't, meaning in the snapshot nobody owns the granule)
+	// to B wasn't, meaning in the snapshot nobody owns the granule). This also handles races with a BM persisting a
+	// boundary change, then dying before notifying the workers
 	state Key beginKey = blobGranuleMappingKeys.begin;
 	loop {
 		try {
@@ -1722,7 +1600,13 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 				if (results[rangeIdx].value.size()) {
 					// note: if the old owner is dead, we handle this in rangeAssigner
 					UID existingOwner = decodeBlobGranuleMappingValue(results[rangeIdx].value);
-					addAssignment(workerAssignments, KeyRangeRef(granuleStartKey, granuleEndKey), existingOwner, 0, 1);
+					// use (max int64_t, 0) to be higher than anything that existing workers have
+					addAssignment(workerAssignments,
+					              KeyRangeRef(granuleStartKey, granuleEndKey),
+					              existingOwner,
+					              std::numeric_limits<int64_t>::max(),
+					              0,
+					              outOfDateAssignments);
 
 					bmData->knownBlobRanges.insert(KeyRangeRef(granuleStartKey, granuleEndKey), true);
 					if (BM_DEBUG) {
@@ -1752,24 +1636,7 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 		}
 	}
 
-	if (BM_DEBUG) {
-		printf("Splits overriding the following ranges:\n");
-	}
-	// Apply current granule boundaries to the assignment map. If they don't exactly match what is currently in the map,
-	// override and assign it to a new worker
-	auto splits = inProgressSplits.intersectingRanges(normalKeys);
-	for (auto& it : splits) {
-		int64_t epoch = std::get<1>(it.value());
-		int64_t seqno = std::get<2>(it.value());
-		if (epoch == 0 || seqno == 0) {
-			// no in-progress splits for this range
-			continue;
-		}
-
-		addAssignment(workerAssignments, it.range(), UID(), epoch, seqno, &outOfDateAssignments);
-	}
-
-	// Step 4. Send assign requests for all the granules and transfer assignments
+	// Step 2. Send assign requests for all the granules and transfer assignments
 	// from local workerAssignments to bmData
 	// before we take ownership of all of the ranges, check the manager lock again
 	tr->reset();

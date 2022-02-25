@@ -392,7 +392,6 @@ ACTOR Future<Void> updateGranuleSplitState(Transaction* tr,
 
 			// tr->clear(singleKeyRange(oldGranuleLockKey));
 			tr->clear(currentRange);
-			tr->clear(blobGranuleSplitBoundaryKeyRangeFor(parentGranuleID));
 		} else {
 			tr->atomicOp(myStateKey, blobGranuleSplitValueFor(newState), MutationRef::SetVersionstampedValue);
 			if (newState == BlobGranuleSplitState::Assigned && currentState == BlobGranuleSplitState::Initialized &&
