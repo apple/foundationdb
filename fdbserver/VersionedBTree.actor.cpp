@@ -7411,8 +7411,9 @@ public:
 			}
 
 			while (cur.isValid()) {
-				// Read page contents without using waits
-				BTreePage::BinaryTree::Cursor leafCursor = cur.back().cursor;
+				// Read leaf page contents without using waits by using the leaf page cursor directly
+				// and advancing it until it is no longer valid
+				BTreePage::BinaryTree::Cursor& leafCursor = cur.back().cursor;
 
 				// we can bypass the bounds check for each key in the leaf if the entire leaf is in range
 				// > because both query end and page upper bound are exclusive of the query results and page contents,
@@ -7466,8 +7467,9 @@ public:
 			}
 
 			while (cur.isValid()) {
-				// Read page contents without using waits
-				BTreePage::BinaryTree::Cursor leafCursor = cur.back().cursor;
+				// Read leaf page contents without using waits by using the leaf page cursor directly
+				// and advancing it until it is no longer valid
+				BTreePage::BinaryTree::Cursor& leafCursor = cur.back().cursor;
 
 				// we can bypass the bounds check for each key in the leaf if the entire leaf is in range
 				// < because both query begin and page lower bound are inclusive of the query results and page contents,
