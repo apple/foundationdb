@@ -1790,6 +1790,8 @@ public:
 	// must eventually give them back with moveIn() or remove them with reclaim().
 	class Evictor : NonCopyable {
 	public:
+		Evictor(int64_t sizeLimit = 0) : sizeLimit(sizeLimit) {}
+
 		// Evictors are normally singletons, either one per real process or one per virtual process in simulation
 		static Evictor* getEvictor() {
 			static Evictor nonSimEvictor;
@@ -1850,18 +1852,21 @@ public:
 		}
 
 		void trim(int additionalSpaceNeeded = 0) {
+			int attemptsLeft = FLOW_KNOBS->MAX_EVICT_ATTEMPTS;
 			// While the cache is too big, evict the oldest entry until the oldest entry can't be evicted.
-			while (sizeUsed > (sizeLimit - reservedSize - additionalSpaceNeeded)) {
+			while (attemptsLeft-- > 0 && sizeUsed > (sizeLimit - reservedSize - additionalSpaceNeeded) &&
+			       !evictionOrder.empty()) {
 				Entry& toEvict = evictionOrder.front();
 
 				debug_printf("Evictor count=%" PRId64 " sizeUsed=%" PRId64 " sizeLimit=%" PRId64 " sizePenalty=%" PRId64
-				             " needed=%d  Trying to evict %s\n",
+				             " needed=%d  Trying to evict %s evictable %d\n",
 				             evictionOrder.size(),
 				             sizeUsed,
 				             sizeLimit,
 				             reservedSize,
 				             additionalSpaceNeeded,
-				             ::toString(toEvict.index).c_str());
+				             ::toString(toEvict.index).c_str(),
+				             toEvict.item.evictable());
 
 				if (!toEvict.item.evictable()) {
 					// shift the front to the back
@@ -1908,7 +1913,7 @@ public:
 		// Any external data strutures whose memory usage should be counted as part of the object cache
 		// budget should add their usage to this total and keep it updated.
 		int64_t reservedSize = 0;
-		int64_t sizeLimit = 0;
+		int64_t sizeLimit;
 
 	private:
 		EvictionOrderT evictionOrder;
@@ -3835,7 +3840,11 @@ private:
 	bool memoryOnly;
 
 	PageCacheT pageCache;
-	PageCacheT extentCache;
+
+	// The extent cache isn't a normal cache, it isn't allowed to evict things.  It is populated
+	// during recovery with remap queue extents and then cleared.
+	PageCacheT::Evictor extentCacheDummyEvictor{ std::numeric_limits<int64_t>::max() };
+	PageCacheT extentCache{ &extentCacheDummyEvictor };
 
 	Promise<Void> closedPromise;
 	Promise<Void> errorPromise;
