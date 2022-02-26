@@ -143,8 +143,8 @@ struct StorageServerInterface {
 				checkpoint = RequestStream<struct GetCheckpointRequest>(getValue.getEndpoint().getAdjustedEndpoint(19));
 				fetchCheckpoint =
 				    RequestStream<struct FetchCheckpointRequest>(getValue.getEndpoint().getAdjustedEndpoint(20));
-				fetchCheckpointKeyValues =
-				    RequestStream<struct FetchCheckpointKeyValuesRequest>(getValue.getEndpoint().getAdjustedEndpoint(21));
+				fetchCheckpointKeyValues = RequestStream<struct FetchCheckpointKeyValuesRequest>(
+				    getValue.getEndpoint().getAdjustedEndpoint(21));
 			}
 		} else {
 			ASSERT(Ar::isDeserializing);
@@ -475,13 +475,16 @@ struct GetShardStateRequest {
 
 	KeyRange keys;
 	int32_t mode;
+	Version version;
 	ReplyPromise<GetShardStateReply> reply;
 	GetShardStateRequest() {}
 	GetShardStateRequest(KeyRange const& keys, waitMode mode) : keys(keys), mode(mode) {}
+	GetShardStateRequest(KeyRange const& keys, waitMode mode, Version version)
+	  : keys(keys), mode(mode), version(version) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keys, mode, reply);
+		serializer(ar, keys, mode, version, reply);
 	}
 };
 

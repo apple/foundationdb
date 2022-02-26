@@ -864,6 +864,8 @@ struct DDQueueData {
 			bool overlappingInFlight = false;
 			auto intersectingInFlight = inFlight.intersectingRanges(rd.keys);
 			for (auto it = intersectingInFlight.begin(); it != intersectingInFlight.end(); ++it) {
+				// FetchKeys has completed, and the actor is live, e.g., working on finishMoveKeys().
+				// They are partially overlapping, and the existing one's priority is not lower.
 				if (fetchKeysComplete.count(it->value()) && inFlightActors.liveActorAt(it->range().begin) &&
 				    !rd.keys.contains(it->range()) && it->value().priority >= rd.priority &&
 				    rd.healthPriority < SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY) {
@@ -882,7 +884,7 @@ struct DDQueueData {
 			}
 
 			// Because the busyness of a server is decreased when a superseding relocation is issued, we
-			//  need to consider what the busyness of a server WOULD be if
+			// need to consider what the busyness of a server WOULD be if
 			auto containedRanges = inFlight.containedRanges(rd.keys);
 			std::vector<RelocateData> cancellableRelocations;
 			for (auto it = containedRanges.begin(); it != containedRanges.end(); ++it) {

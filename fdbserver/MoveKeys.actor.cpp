@@ -519,6 +519,7 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 						    tr, serverKeysPrefixFor(servers[i]), currentKeys, allKeys, serverKeysTrue));
 					}
 
+					actors.push_back(createCheckpoint(tr, currentKeys, RocksDB));
 					wait(waitForAll(actors));
 
 					wait(tr->commit());

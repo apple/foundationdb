@@ -169,6 +169,8 @@ struct AddingShard : NonCopyable {
 
 	Phase phase;
 
+	AddingShard() {}
+
 	AddingShard(StorageServer* server, KeyRangeRef const& keys);
 
 	// When fetchKeys "partially completes" (splits an adding shard in two), this is used to construct the left half
@@ -191,20 +193,47 @@ struct MoveInShard {
 	constexpr static FileIdentifier file_identifier = 3804366;
 
 	enum State {
-		PreWait = 0,
+		Pending = 0,
 		Fetching = 1,
 		Ingesting = 2,
 		ApplyingUpdates = 3,
 		Deleting = 4,
+		Fail = 5,
 	};
 
 	UID id;
-	Version version;
 	KeyRange range;
-	int16_t state;
+	Version version;
+	int8_t state;
 	Optional<CheckpointMetaData> checkpoint;
-	std::deque<Standalone<VerUpdateRef>> updates;
+	Optional<Error> error;
 
+	struct StorageServer* server;
+	std::deque<Standalone<VerUpdateRef>> updates;
+	Version transferredVersion;
+
+	Future<Void> fetchClient; // holds FetchShard() actor
+	Promise<Void> fetchComplete;
+	Promise<Void> readWrite;
+	PromiseStream<Key> changeFeedRemovals;
+
+	MoveInShard() {}
+	MoveInShard(StorageServer* server, const UID& id, KeyRange range, const Version version, State state);
+	MoveInShard(StorageServer* server, const UID& id, KeyRange range, const Version version);
+	MoveInShard(StorageServer* server, KeyRange range, const Version version);
+	~MoveInShard() {
+		if (!fetchComplete.isSet()) {
+			fetchComplete.send(Void());
+		}
+		if (!readWrite.isSet()) {
+			readWrite.send(Void());
+		}
+	}
+
+	std::string toString() const {
+		return "MoveInShard:\nRange: " + range.toString() + "\nVersion: " + std::to_string(version) +
+		       "\nID: " + id.toString() + "\nState: " + std::to_string(static_cast<int>(state));
+	}
 	Key moveInShardKey() const {
 		BinaryWriter wr(Unversioned());
 		wr.serializeBytes(persistMoveInShardKeys.begin);
@@ -233,6 +262,10 @@ struct MoveInShard {
 	State getState() const { return static_cast<State>(state); }
 	void setState(State state) { this->state = state; }
 
+	bool isTransferred() const { return getState() == ApplyingUpdates; }
+
+	bool operator<(const MoveInShard& rhs) const { return range.begin < rhs.range.begin; }
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, id, version, range, state, checkpoint);
@@ -240,31 +273,66 @@ struct MoveInShard {
 };
 
 class ShardInfo : public ReferenceCounted<ShardInfo>, NonCopyable {
-	ShardInfo(KeyRange keys, std::unique_ptr<AddingShard>&& adding, StorageServer* readWrite)
-	  : adding(std::move(adding)), readWrite(readWrite), keys(keys) {}
+	ShardInfo(KeyRange keys,
+	          std::unique_ptr<AddingShard>&& adding,
+	          std::unique_ptr<MoveInShard>&& moveInShard,
+	          StorageServer* readWrite)
+	  : adding(std::move(adding)), moveInShard(std::move(moveInShard)), readWrite(readWrite), keys(keys) {}
 
 public:
-	// A shard has 3 mutual exclusive states: adding, readWrite and notAssigned.
+	// A shard has 4 mutual exclusive states: adding, readWrite and notAssigned.
 	std::unique_ptr<AddingShard> adding;
+	std::unique_ptr<MoveInShard> moveInShard;
 	struct StorageServer* readWrite;
 	KeyRange keys;
 	uint64_t changeCounter;
 
-	static ShardInfo* newNotAssigned(KeyRange keys) { return new ShardInfo(keys, nullptr, nullptr); }
-	static ShardInfo* newReadWrite(KeyRange keys, StorageServer* data) { return new ShardInfo(keys, nullptr, data); }
+	static ShardInfo* newNotAssigned(KeyRange keys) { return new ShardInfo(keys, nullptr, nullptr, nullptr); }
+	static ShardInfo* newReadWrite(KeyRange keys, StorageServer* data) {
+		return new ShardInfo(keys, nullptr, nullptr, data);
+	}
 	static ShardInfo* newAdding(StorageServer* data, KeyRange keys) {
-		return new ShardInfo(keys, std::make_unique<AddingShard>(data, keys), nullptr);
+		return new ShardInfo(keys, std::make_unique<AddingShard>(data, keys), nullptr, nullptr);
+	}
+	static ShardInfo* newMoveInShard(StorageServer* data, KeyRange keys, Version version) {
+		return new ShardInfo(keys, nullptr, std::make_unique<MoveInShard>(data, keys, version), nullptr);
+	}
+	static ShardInfo* newPendingMoveInShard(StorageServer* data, KeyRange keys, Version version) {
+		return new ShardInfo(keys,
+		                     nullptr,
+		                     std::make_unique<MoveInShard>(
+		                         data, deterministicRandom()->randomUniqueID(), keys, version, MoveInShard::Pending),
+		                     nullptr);
 	}
 	static ShardInfo* addingSplitLeft(KeyRange keys, AddingShard* oldShard) {
-		return new ShardInfo(keys, std::make_unique<AddingShard>(oldShard, keys), nullptr);
+		return new ShardInfo(keys, std::make_unique<AddingShard>(oldShard, keys), nullptr, nullptr);
 	}
 
 	bool isReadable() const { return readWrite != nullptr; }
-	bool notAssigned() const { return !readWrite && !adding; }
-	bool assigned() const { return readWrite || adding; }
-	bool isInVersionedData() const { return readWrite || (adding && adding->isTransferred()); }
+	bool notAssigned() const { return !readWrite && !adding && !moveInShard; }
+	bool assigned() const { return readWrite || adding || moveInShard; }
+	bool isInVersionedData() const {
+		return readWrite || (adding && adding->isTransferred()) || (moveInShard && moveInShard->isTransferred());
+	}
 	void addMutation(Version version, bool fromFetch, MutationRef const& mutation);
-	bool isFetched() const { return readWrite || (adding && adding->fetchComplete.isSet()); }
+	bool isFetched() const {
+		return readWrite || (adding && adding->fetchComplete.isSet()) ||
+		       (moveInShard && moveInShard->fetchComplete.isSet());
+	}
+	Optional<Error> getError() const {
+		if (moveInShard) {
+			return moveInShard->error;
+		} else {
+			return Optional<Error>();
+		}
+	}
+	Version getMoveInVersion() const {
+		if (moveInShard) {
+			return moveInShard->version;
+		} else {
+			return invalidVersion;
+		}
+	}
 
 	const char* debugDescribeState() const {
 		if (notAssigned())
@@ -515,6 +583,7 @@ private:
 public:
 	std::map<Version, std::vector<CheckpointMetaData>> pendingCheckpoints; // Pending checkpoint requests
 	std::unordered_map<UID, CheckpointMetaData> checkpoints; // Existing and deleting checkpoints
+	std::unordered_map<UID, MoveInShard> moveInShards; // Shards that are being moved in.
 
 	// Histograms
 	struct FetchKeysHistograms {
@@ -1781,8 +1850,9 @@ ACTOR Future<Void> getCheckpointQ(StorageServer* self, GetCheckpointRequest req)
 	// Wait until the desired version is durable.
 	wait(self->durableVersion.whenAtLeast(req.version + 1));
 
-	TraceEvent(SevDebug, "ServeGetCheckpointVersionSatisfied", self->thisServerID)
+	TraceEvent(SevDebug, "ServeGetCheckpointMetaDataVersionSatisfied", self->thisServerID)
 	    .detail("Version", req.version)
+	    .detail("DurableVersion",self->durableVersion.get())
 	    .detail("Range", req.range.toString())
 	    .detail("Format", static_cast<int>(req.format));
 
@@ -1833,6 +1903,14 @@ ACTOR Future<Void> deleteCheckpointQ(StorageServer* self, Version version, Check
 	    mLV, MutationRef(MutationRef::ClearRange, pendingCheckpointKey, keyAfter(pendingCheckpointKey)));
 	self->addMutationToMutationLog(
 	    mLV, MutationRef(MutationRef::ClearRange, persistCheckpointKey, keyAfter(persistCheckpointKey)));
+
+	return Void();
+}
+
+ACTOR Future<Void> deleteMoveInShardQ(StorageServer* self, Version version, MoveInShard shard) {
+	wait(self->durableVersion.whenAtLeast(version));
+
+	TraceEvent("DeleteMoveInShardBegin", self->thisServerID);
 
 	return Void();
 }
@@ -2337,15 +2415,52 @@ ACTOR Future<Void> getShardState_impl(StorageServer* data, GetShardStateRequest 
 				break;
 			}
 
-			if (req.mode == GetShardStateRequest::READABLE && !t.value()->isReadable())
-				onChange.push_back(t.value()->adding->readWrite.getFuture());
+			if (t.value()->moveInShard) {
+				std::cout << "Checking moveInShard error." << std::endl;
+				Optional<Error> err = t.value()->getError();
+				if (err.present() && t.value()->getMoveInVersion() >= req.version) {
+					std::cout << "MoveInShard error." << err.get().name() << std::endl;
+					req.reply.sendError(err.get());
+					return Void();
+				}
+			}
 
-			if (req.mode == GetShardStateRequest::FETCHING && !t.value()->isFetched())
-				onChange.push_back(t.value()->adding->fetchComplete.getFuture());
+			std::cout << "2" << std::endl;
+			if (req.mode == GetShardStateRequest::READABLE && !t.value()->isReadable()) {
+				if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+					ASSERT(t.value()->moveInShard);
+					onChange.push_back(t.value()->moveInShard->readWrite.getFuture());
+				} else {
+					onChange.push_back(t.value()->adding->readWrite.getFuture());
+				}
+			}
+
+			std::cout << "3" << std::endl;
+			if (t.value()->moveInShard) {
+				std::cout << "MoveInShard" << std::endl;
+			} else if (t.value()->adding) {
+				std::cout << "Adding" << std::endl;
+			} else if (t.value()->readWrite) {
+				std::cout << "ReadWrite" << std::endl;
+			}
+
+			if (req.mode == GetShardStateRequest::FETCHING && !t.value()->isFetched()) {
+				if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+					std::cout << "3.1" << std::endl;
+					ASSERT(t.value()->moveInShard);
+					std::cout << "3.2" << std::endl;
+					onChange.push_back(t.value()->moveInShard->fetchComplete.getFuture());
+				} else {
+					onChange.push_back(t.value()->adding->fetchComplete.getFuture());
+				}
+			}
+			std::cout << "3.3" << std::endl;
 		}
 
+		std::cout << "4" << std::endl;
 		if (!onChange.size()) {
 			req.reply.send(GetShardStateReply{ data->version.get(), data->durableVersion.get() });
+			std::cout << "5" << std::endl;
 			return Void();
 		}
 
@@ -4570,6 +4685,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					// This actor finishes committing the keys [keys.begin,nfk) that we already fetched.
 					// The remaining unfetched keys [nfk,keys.end) will become a separate AddingShard with its own
 					// fetchKeys.
+					std::cout << "Adding!!!" << std::endl;
 					shard->server->addShard(ShardInfo::addingSplitLeft(KeyRangeRef(keys.begin, nfk), shard));
 					shard->server->addShard(ShardInfo::newAdding(data, KeyRangeRef(nfk, keys.end)));
 					shard = data->shards.rangeContaining(keys.begin).value()->adding.get();
@@ -4739,6 +4855,202 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	return Void();
 };
 
+ACTOR Future<Void> fetchShard(StorageServer* data, MoveInShard* shard) {
+	wait(delay(0));
+	if (shard->getState() == MoveInShard::Pending) {
+		TraceEvent("PendingMoveInShard", data->thisServerID)
+		    .detail("ID", shard->id)
+		    .detail("MoveInShard", shard->toString());
+		return Never();
+	}
+	// state const UID fetchShardID = deterministicRandom()->randomUniqueID();
+	// state TraceInterval interval("FetchShard");
+	// state KeyRange keys = shard->range;
+	// state Future<Void> warningLogger = logFetchShardWarning(shard);
+	// state const double startTime = now();
+	state std::vector<CheckpointMetaData> records;
+	// state Version fetchVersion = invalidVersion;
+	// state FetchShardMetricReporter metricReporter(fetchShardID,
+	//                                              startTime,
+	//                                              keys,
+	//                                              data->fetchShardHistograms,
+	//                                              data->currentRunningFetchShard,
+	//                                              data->counters.bytesFetched,
+	//                                              data->counters.kvFetched);
+
+	// // delay(0) to force a return to the run loop before the work of fetchShard is started.
+	// //  This allows adding->start() to be called inline with CSK.
+	wait(data->coreStarted.getFuture() && delay(0));
+
+	shard->setState(MoveInShard::Fetching);
+
+	std::cout << "Getting CheckpointMetaData: " << shard->toString() << std::endl;
+	loop {
+		try {
+			std::vector<CheckpointMetaData> _records =
+			    wait(getCheckpointMetaData(data->cx, shard->range, shard->version, RocksDB));
+			records = std::move(_records);
+			break;
+		} catch (Error& e) {
+			std::cout << "GetCheckpointMetaData error: " << e.code() << "Name: " << e.name() << "What: " << e.what()
+			          << std::endl;
+			// if (e.code() == error_code_checkpoint_not_found) {
+			// 	throw;
+			// }
+		}
+	}
+
+	std::cout << "Got checkpoint metadata:" << std::endl;
+	for (const auto& record : records) {
+		std::cout << record.toString() << std::endl;
+	}
+	TraceEvent("FetchShardCheckpointMetaData", data->thisServerID)
+	    .detail("MoveInShardID", shard->id)
+	    .detail("MoveInShard", shard->toString())
+	    .detail("CheckpointMetaData", describe(records));
+
+	wait(delay(0));
+
+	state std::string pwd = platform::getWorkingDirectory();
+	state std::string folder = pwd + "/" + shard->id.toString();
+	platform::eraseDirectoryRecursive(folder);
+	ASSERT(platform::createDirectory(folder));
+
+	state int idx = 0;
+	state std::vector<CheckpointMetaData> localRecords;
+	localRecords.resize(records.size());
+	for (; idx < records.size(); ++idx) {
+		loop {
+			try {
+				std::cout << "Fetching checkpoint:" << records[idx].toString() << std::endl;
+				CheckpointMetaData record = wait(fetchCheckpoint(data->cx, records[idx], folder));
+				localRecords[idx] = record;
+				break;
+			} catch (Error& e) {
+				std::cout << "Getting checkpoint failure: " << e.name() << std::endl;
+				wait(delay(1));
+			}
+		}
+		TraceEvent("FetchShardFetchedCheckpoint", data->thisServerID)
+		    .detail("MoveInShardID", shard->id)
+		    .detail("MoveInShard", shard->toString())
+		    .detail("Checkpoint", localRecords[idx].toString());
+		std::cout << "Fetched checkpoint:" << localRecords[idx].toString() << std::endl;
+	}
+
+	std::vector<std::string> files = platform::listFiles(folder);
+	std::cout << "Received checkpoint files on disk: " << folder << std::endl;
+	for (auto& file : files) {
+		std::cout << file << std::endl;
+	}
+	std::cout << std::endl;
+
+	wait(data->durableVersion.whenAtLeast(shard->version + 1));
+
+	shard->setState(MoveInShard::Ingesting);
+
+	std::cout << "Restoring: " << describe(localRecords) << std::endl;
+	try {
+		wait(data->storage.restore(localRecords));
+	} catch (Error& e) {
+		std::cout << e.name() << std::endl;
+	}
+
+	TraceEvent("FetchShardIngestedCheckpoint", data->thisServerID)
+	    .detail("MoveInShardID", shard->id)
+	    .detail("MoveInShard", shard->toString())
+	    .detail("Checkpoint", describe(localRecords));
+
+	// Wait to run during update(), after a new batch of versions is received from the tlog but before eager reads
+	// take place.
+	Promise<FetchInjectionInfo*> p;
+	data->readyFetchKeys.push_back(p);
+
+	// After we add to the promise readyFetchKeys, update() would provide a pointer to FetchInjectionInfo that we
+	// can put mutation in.
+	FetchInjectionInfo* batch = wait(p.getFuture());
+	// TraceEvent(SevDebug, "FKUpdateBatch", data->thisServerID).detail("FKID", interval.pairID);
+
+	shard->setState(MoveInShard::ApplyingUpdates);
+
+	Version minVersion = shard->updates.empty() ? invalidVersion : shard->updates.front().version;
+	TraceEvent("FetchShardApplyingUpdates", data->thisServerID)
+	    .detail("MoveInShardID", shard->id)
+	    .detail("MoveInShard", shard->toString())
+	    .detail("UpdatesMinVersion", minVersion);
+
+	// Choose a transferredVersion.  This choice and timing ensure that
+	shard->transferredVersion = data->version.get() + 1;
+	data->mutableData().createNewVersion(shard->transferredVersion);
+	ASSERT(shard->transferredVersion > data->storageVersion());
+	ASSERT(shard->transferredVersion == data->data().getLatestVersion());
+
+	// TraceEvent(SevDebug, "FetchKeysHaveData", data->thisServerID)
+	//     .detail("FKID", interval.pairID)
+	//     .detail("Version", shard->transferredVersion)
+	//     .detail("StorageVersion", data->storageVersion());
+	validate(data);
+
+	// Put the updates that were collected during the FinalCommit phase into the batch at the transferredVersion.
+	// Eager reads will be done for them by update(), and the mutations will come back through
+	// AddingShard::addMutations and be applied to versionedMap and mutationLog as normal. The lie about their
+	// version is acceptable because this shard will never be read at versions < transferredVersion
+
+	for (auto i = shard->updates.begin(); i != shard->updates.end(); ++i) {
+		i->version = shard->transferredVersion;
+		batch->arena.dependsOn(i->arena());
+	}
+
+	int startSize = batch->changes.size();
+	batch->changes.resize(batch->changes.size() + shard->updates.size());
+
+	// FIXME: pass the deque back rather than copy the data
+	std::copy(shard->updates.begin(), shard->updates.end(), batch->changes.begin() + startSize);
+	Version checkv = shard->transferredVersion;
+
+	for (auto b = batch->changes.begin() + startSize; b != batch->changes.end(); ++b) {
+		ASSERT(b->version >= checkv);
+		checkv = b->version;
+		if (MUTATION_TRACKING_ENABLED) {
+			for (auto& m : b->mutations) {
+				DEBUG_MUTATION("fetchShardFinalCommitInject", batch->changes[0].version, m, data->thisServerID);
+			}
+		}
+	}
+
+	shard->updates.clear();
+
+	setAvailableStatus(data,
+	                   shard->range,
+	                   true); // keys will be available when getLatestVersion()==transferredVersion is durable
+
+	// Note that since it receives a pointer to FetchInjectionInfo, the thread does not leave this actor until this
+	// point.
+
+	// Wait for the transferredVersion (and therefore the shard data) to be committed and durable.
+	wait(data->durableVersion.whenAtLeast(shard->transferredVersion));
+
+	ASSERT(data->shards[shard->range.begin]->assigned() &&
+	       data->shards[shard->range.begin]->keys == shard->range); // We aren't changing whether the shard is assigned
+	data->newestAvailableVersion.insert(shard->range, latestVersion);
+	shard->readWrite.send(Void());
+	data->addShard(ShardInfo::newReadWrite(shard->range, data)); // invalidates shard!
+	coalesceShards(data, shard->range);
+
+	validate(data);
+
+	return Void();
+}
+
+MoveInShard::MoveInShard(StorageServer* server, const UID& id, KeyRange range, const Version version, State state)
+  : id(id), range(range), version(version), state(state), server(server) {
+	fetchClient = fetchShard(server, this);
+}
+MoveInShard::MoveInShard(StorageServer* server, const UID& id, KeyRange range, const Version version)
+  : MoveInShard(server, id, range, version, Fetching) {}
+MoveInShard::MoveInShard(StorageServer* server, KeyRange range, const Version version)
+  : MoveInShard(server, deterministicRandom()->randomUniqueID(), range, version) {}
+
 AddingShard::AddingShard(StorageServer* server, KeyRangeRef const& keys)
   : keys(keys), server(server), transferredVersion(invalidVersion), phase(WaitPrevious) {
 	fetchClient = fetchKeys(server, this);
@@ -4800,14 +5112,43 @@ void AddingShard::addMutation(Version version, bool fromFetch, MutationRef const
 		ASSERT(false);
 }
 
+void MoveInShard::addMutation(Version version, bool fromFetch, MutationRef const& mutation) {
+	server->counters.logicalBytesMoveInOverhead += mutation.expectedSize();
+	if (mutation.type == mutation.ClearRange) {
+		ASSERT(range.begin <= mutation.param1 && mutation.param2 <= range.end);
+	} else if (isSingleKeyMutation((MutationRef::Type)mutation.type)) {
+		ASSERT(range.contains(mutation.param1));
+	}
+
+	if (getState() < ApplyingUpdates) {
+		// Create a new VerUpdateRef in updates queue if it is a new version.
+		if (updates.empty() || version > updates.back().version) {
+			VerUpdateRef v;
+			v.version = version;
+			v.isPrivateData = false;
+			updates.push_back(v);
+		} else {
+			ASSERT(version == updates.back().version);
+		}
+
+		// Add the mutation to the version.
+		updates.back().mutations.push_back_deep(updates.back().arena(), mutation);
+
+	} else if (getState() == ApplyingUpdates) {
+		server->addMutation(version, fromFetch, mutation, range, server->updateEagerReads);
+	}
+}
+
 void ShardInfo::addMutation(Version version, bool fromFetch, MutationRef const& mutation) {
 	ASSERT((void*)this);
 	ASSERT(keys.contains(mutation.param1));
-	if (adding)
+	if (adding) {
 		adding->addMutation(version, fromFetch, mutation);
-	else if (readWrite)
+	} else if (moveInShard) {
+		moveInShard->addMutation(version, fromFetch, mutation);
+	} else if (readWrite) {
 		readWrite->addMutation(version, fromFetch, mutation, this->keys, readWrite->updateEagerReads);
-	else if (mutation.type != MutationRef::ClearRange) {
+	} else if (mutation.type != MutationRef::ClearRange) {
 		TraceEvent(SevError, "DeliveredToNotAssigned").detail("Version", version).detail("Mutation", mutation);
 		ASSERT(false); // Mutation delivered to notAssigned shard!
 	}
@@ -4817,10 +5158,11 @@ enum ChangeServerKeysContext { CSK_UPDATE, CSK_RESTORE, CSK_ASSIGN_EMPTY };
 const char* changeServerKeysContextName[] = { "Update", "Restore" };
 
 void changeServerKeys(StorageServer* data,
-                      const KeyRangeRef& keys,
+                      const KeyRangeRef& desiredKeys,
                       bool nowAssigned,
                       Version version,
                       ChangeServerKeysContext context) {
+	KeyRange keys(desiredKeys);
 	ASSERT(!keys.empty());
 
 	TraceEvent(SevDebug, "ChangeServerKeys", data->thisServerID)
@@ -4853,9 +5195,15 @@ void changeServerKeys(StorageServer* data,
 	// Save a backup of the ShardInfo references before we start messing with shards, in order to defer fetchKeys
 	// cancellation (and its potential call to removeDataRange()) until shards is again valid
 	std::vector<Reference<ShardInfo>> oldShards;
+	std::unordered_map<UID, MoveInShard> cancelMoveIns;
 	auto os = data->shards.intersectingRanges(keys);
-	for (auto r = os.begin(); r != os.end(); ++r)
+	for (auto r = os.begin(); r != os.end(); ++r) {
 		oldShards.push_back(r->value());
+		if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE && r->value()->moveInShard) {
+			std::cout << "Adding new canceling moveInShard: " << r->value()->moveInShard->toString() << std::endl;
+			cancelMoveIns.emplace(r->value()->moveInShard->id, *(r->value()->moveInShard));
+		}
+	}
 
 	// As addShard (called below)'s documentation requires, reinitialize any overlapping range(s)
 	auto ranges = data->shards.getAffectedRangesAfterInsertion(
@@ -4867,10 +5215,35 @@ void changeServerKeys(StorageServer* data,
 			data->addShard(ShardInfo::newNotAssigned(ranges[i]));
 		else if (ranges[i].value->isReadable())
 			data->addShard(ShardInfo::newReadWrite(ranges[i], data));
-		else {
-			ASSERT(ranges[i].value->adding);
+		else if (ranges[i].value->adding) {
+			std::cout << "Adding!!!" << std::endl;
 			data->addShard(ShardInfo::newAdding(data, ranges[i]));
 			TEST(true); // ChangeServerKeys reFetchKeys
+		} else if (ranges[i].value->moveInShard) {
+			// if (ranges[i].value->moveInShard->getState() >= MoveInShard::Ingesting) {
+			// 	removeRanges.push_back(ranges[i].value->moveInShard->range);
+			// // }
+			// if (!nowAssigned) {
+			std::cout << "Adding new pending moveInShard: " << ranges[i].toString() << std::endl;
+			data->addShard(ShardInfo::newPendingMoveInShard(data, ranges[i], version + 1));
+			// cancelMoveIns.emplace(ranges[i].value->moveInShard->id, *ranges[i].value->moveInShard);
+			// Maybe we can aggressively unassign the shard.
+			//  setAssignedStatus(data, )
+			// 	data->addShard(ShardInfo::newMoveInShard(ranges[i], ranges[i].value->moveInShard->version));
+			// } else {
+			// 	KeyRange cRange = ranges[i].value->moveInShard->range;
+			// 	if (cRange.begin <= ranges[i].begin) {
+			// 		keys = KeyRangeRef(cRange.end, keys.end);
+			// 	} else {
+			// 		keys = KeyRangeRef(keys.begin, cRange.begin);
+			// 	}
+			// 	if (keys.end <= keys.begin) {
+			// 		return;
+			// 	}
+			// }
+			TEST(true); // ChangeServerKeys cancel MoveInShard
+		} else {
+			ASSERT(false);
 		}
 	}
 
@@ -4879,8 +5252,9 @@ void changeServerKeys(StorageServer* data,
 	// SOMEDAY: Could this just use shards?  Then we could explicitly do the removeDataRange here when an
 	// adding/transferred shard is cancelled
 	auto vr = data->newestAvailableVersion.intersectingRanges(keys);
-	std::vector<std::pair<KeyRange, Version>> changeNewestAvailable;
 	std::vector<KeyRange> removeRanges;
+	std::vector<Reference<ShardInfo>> newMoveInShards;
+	std::vector<std::pair<KeyRange, Version>> changeNewestAvailable;
 	std::vector<KeyRange> newEmptyRanges;
 	for (auto r = vr.begin(); r != vr.end(); ++r) {
 		KeyRangeRef range = keys & r->range();
@@ -4919,15 +5293,25 @@ void changeServerKeys(StorageServer* data,
 				data->addShard(ShardInfo::newReadWrite(range, data));
 				setAvailableStatus(data, range, true);
 			} else {
-				auto& shard = data->shards[range.begin];
-				if (!shard->assigned() || shard->keys != range)
-					data->addShard(ShardInfo::newAdding(data, range));
+				if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+					data->addShard(ShardInfo::newMoveInShard(data, range, version + 1));
+					newMoveInShards.push_back(data->shards[range.begin]);
+					std::cout << "Adding new MoveInShard: " << data->shards[range.begin]->moveInShard->toString()
+					          << std::endl;
+				} else {
+					auto& shard = data->shards[range.begin];
+					if (!shard->assigned() || shard->keys != range) {
+						std::cout << "Adding!!!" << std::endl;
+						data->addShard(ShardInfo::newAdding(data, range));
+					}
+				}
 			}
 		} else {
 			changeNewestAvailable.emplace_back(range, latestVersion);
 			data->addShard(ShardInfo::newReadWrite(range, data));
 		}
 	}
+
 	// Update newestAvailableVersion when a shard becomes (un)available (in a separate loop to avoid invalidating vr
 	// above)
 	for (auto r = changeNewestAvailable.begin(); r != changeNewestAvailable.end(); ++r)
@@ -4942,9 +5326,36 @@ void changeServerKeys(StorageServer* data,
 	// validate())
 	oldShards.clear();
 	ranges.clear();
+
+	for (const auto& [id, moveInShard] : cancelMoveIns) {
+		if (moveInShard.getState() >= MoveInShard::Ingesting) {
+			removeRanges.push_back(moveInShard.range);
+		}
+		auto& mLV = data->addVersionToMutationLog(version);
+		KeyRange keys = singleKeyRange(moveInShard.moveInShardKey());
+		data->addMutationToMutationLog(mLV, MutationRef(MutationRef::ClearRange, keys.begin, keys.end));
+		data->actors.add(deleteMoveInShardQ(data, version, moveInShard));
+		TraceEvent("RemoveMoveInShard", data->thisServerID)
+		    .detail("Version", version)
+		    .detail("Key", keys.begin)
+		    .detail("Shard", moveInShard.toString());
+	}
+
 	for (auto r = removeRanges.begin(); r != removeRanges.end(); ++r) {
 		removeDataRange(data, data->addVersionToMutationLog(data->data().getLatestVersion()), data->shards, *r);
 		setAvailableStatus(data, *r, false);
+	}
+
+	for (const auto& shard : newMoveInShards) {
+		auto& mLV = data->addVersionToMutationLog(version);
+		data->addMutationToMutationLog(mLV,
+		                               MutationRef(MutationRef::SetValue,
+		                                           shard->moveInShard->moveInShardKey(),
+		                                           shard->moveInShard->moveInShardValue()));
+		TraceEvent("AddMoveInShard", data->thisServerID)
+		    .detail("Version", version)
+		    .detail("Key", shard->moveInShard->moveInShardKey())
+		    .detail("Shard", shard->moveInShard->toString());
 	}
 
 	// Clear the moving-in empty range, and set it available at the latestVersion.
@@ -5874,6 +6285,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			const Version cVer = data->pendingCheckpoints.begin()->first;
 			if (cVer <= desiredVersion) {
 				TraceEvent("CheckpointVersionSatisfied", data->thisServerID)
+					.detail("DurableVersion", data->durableVersion.get())
 				    .detail("DesiredVersion", desiredVersion)
 				    .detail("CheckPointVersion", cVer);
 				desiredVersion = cVer;
@@ -7210,7 +7622,6 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 			when(GetCheckpointRequest req = waitNext(ssi.checkpoint.getFuture())) {
 				if (!self->isReadable(req.range)) {
 					req.reply.sendError(wrong_shard_server());
-					continue;
 				} else {
 					self->actors.add(getCheckpointQ(self, req));
 				}

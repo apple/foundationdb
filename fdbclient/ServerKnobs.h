@@ -470,6 +470,7 @@ public:
 	                               // attempt to read a key range map
 	int MAX_SKIP_TAGS;
 	double MAX_ADDED_SOURCES_MULTIPLIER;
+	bool ENABLE_PHYSICAL_SHARD_MOVE;
 
 	// FdbServer
 	double MIN_REBOOT_TIME;
