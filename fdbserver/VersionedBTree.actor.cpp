@@ -9341,8 +9341,8 @@ TEST_CASE("Lredwood/correctness/btree") {
 	    params.getDouble("coldStartProbability").orDefault(pagerMemoryOnly ? 0 : (deterministicRandom()->random01()));
 	state double advanceOldVersionProbability =
 	    params.getDouble("advanceOldVersionProbability").orDefault(deterministicRandom()->random01());
-	state int64_t cacheSizeBytes =
-	    params.getInt("cacheSizeBytes")
+	state int64_t pageCacheBytes =
+	    params.getInt("pageCacheBytes")
 	        .orDefault(pagerMemoryOnly ? 2e9
 	                                   : (pageSize * deterministicRandom()->randomInt(1, (BUGGIFY ? 10 : 10000) + 1)));
 	state Version versionIncrement =
@@ -9380,7 +9380,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 	printf("clearPostSetProbability: %f\n", clearPostSetProbability);
 	printf("coldStartProbability: %f\n", coldStartProbability);
 	printf("advanceOldVersionProbability: %f\n", advanceOldVersionProbability);
-	printf("cacheSizeBytes: %s\n", cacheSizeBytes == 0 ? "default" : format("%" PRId64, cacheSizeBytes).c_str());
+	printf("pageCacheBytes: %s\n", pageCacheBytes == 0 ? "default" : format("%" PRId64, pageCacheBytes).c_str());
 	printf("versionIncrement: %" PRId64 "\n", versionIncrement);
 	printf("remapCleanupWindow: %" PRId64 "\n", remapCleanupWindow);
 	printf("\n");
@@ -9390,7 +9390,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 
 	printf("Initializing...\n");
 	pager = new DWALPager(
-	    pageSize, extentSize, file, cacheSizeBytes, remapCleanupWindow, concurrentExtentReads, pagerMemoryOnly);
+	    pageSize, extentSize, file, pageCacheBytes, remapCleanupWindow, concurrentExtentReads, pagerMemoryOnly);
 	state VersionedBTree* btree = new VersionedBTree(pager, file);
 	wait(btree->init());
 
@@ -9609,7 +9609,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 
 				printf("Reopening btree from disk.\n");
 				IPager2* pager = new DWALPager(
-				    pageSize, extentSize, file, cacheSizeBytes, remapCleanupWindow, concurrentExtentReads);
+				    pageSize, extentSize, file, pageCacheBytes, remapCleanupWindow, concurrentExtentReads);
 				btree = new VersionedBTree(pager, file);
 				wait(btree->init());
 
@@ -9650,7 +9650,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 	btree->close();
 	wait(closedFuture);
 	btree =
-	    new VersionedBTree(new DWALPager(pageSize, extentSize, file, cacheSizeBytes, 0, concurrentExtentReads), file);
+	    new VersionedBTree(new DWALPager(pageSize, extentSize, file, pageCacheBytes, 0, concurrentExtentReads), file);
 	wait(btree->init());
 
 	wait(btree->clearAllAndCheckSanity());
