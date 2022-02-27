@@ -10093,6 +10093,10 @@ TEST_CASE(":/redwood/performance/set") {
 		printf("StorageBytes=%s\n", btree->getStorageBytes().toString().c_str());
 	}
 
+	state Future<Void> stats =
+	    traceMetrics ? Void()
+	                 : repeatEvery(1.0, [&]() { printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str()); });
+
 	if (scans > 0) {
 		printf("Parallel scans, concurrency=%d, scans=%d, scanWidth=%d, scanPreftchBytes=%d ...\n",
 		       concurrentScans,
@@ -10104,9 +10108,6 @@ TEST_CASE(":/redwood/performance/set") {
 			    randomScans(btree, scans / concurrentScans, scanWidth, scanPrefetchBytes, firstKeyChar, lastKeyChar));
 		}
 		wait(actors.signalAndReset());
-		if (!traceMetrics) {
-			printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str());
-		}
 	}
 
 	if (seeks > 0) {
@@ -10115,10 +10116,9 @@ TEST_CASE(":/redwood/performance/set") {
 			actors.add(randomSeeks(btree, seeks / concurrentSeeks, firstKeyChar, lastKeyChar));
 		}
 		wait(actors.signalAndReset());
-		if (!traceMetrics) {
-			printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str());
-		}
 	}
+
+	stats.cancel();
 
 	if (destructiveSanityCheck) {
 		wait(btree->clearAllAndCheckSanity());
