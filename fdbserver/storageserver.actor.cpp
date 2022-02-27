@@ -1852,7 +1852,7 @@ ACTOR Future<Void> getCheckpointQ(StorageServer* self, GetCheckpointRequest req)
 
 	TraceEvent(SevDebug, "ServeGetCheckpointMetaDataVersionSatisfied", self->thisServerID)
 	    .detail("Version", req.version)
-	    .detail("DurableVersion",self->durableVersion.get())
+	    .detail("DurableVersion", self->durableVersion.get())
 	    .detail("Range", req.range.toString())
 	    .detail("Format", static_cast<int>(req.format));
 
@@ -1993,11 +1993,11 @@ ACTOR Future<Void> fetchCheckpointKeyValuesQ(StorageServer* self, FetchCheckpoin
 			FetchCheckpointKeyValuesStreamReply reply;
 			reply.arena.dependsOn(res.arena());
 			reply.data.reserve(reply.arena, res.size());
-			std::cout << "Before kvs." << reply.expectedSize() << std::endl;
+			// std::cout << "Before kvs." << reply.expectedSize() << std::endl;
 			// reply.arena.dependsOn(res.arena());
 
 			for (int i = 0; i < res.size(); ++i) {
-				std::cout << "Key:" << res[i].key.toString() << "Value: " << res[i].value.toString() << std::endl;
+				// std::cout << "Key:" << res[i].key.toString() << "Value: " << res[i].value.toString() << std::endl;
 				reply.data.push_back(reply.arena, res[i]);
 				// reply.data.push_back_deep(reply.data.arena(), res[i].key, res[i].value);
 			}
@@ -2006,10 +2006,10 @@ ACTOR Future<Void> fetchCheckpointKeyValuesQ(StorageServer* self, FetchCheckpoin
 			// 	reply.data.push_back_deep(reply.arena, *kv);
 			// }
 			std::cout << "Packed kvs." << reply.expectedSize() << std::endl;
-			for (int i = 0; i < reply.data.size(); ++i) {
-				std::cout << "Key:" << reply.data[i].key.toString() << "Value: " << reply.data[i].value.toString()
-				          << std::endl;
-			}
+			// for (int i = 0; i < reply.data.size(); ++i) {
+			// 	std::cout << "Key:" << reply.data[i].key.toString() << "Value: " << reply.data[i].value.toString()
+			// 	          << std::endl;
+			// }
 			req.reply.send(reply);
 			std::cout << "Sent." << std::endl;
 		}
@@ -2416,16 +2416,16 @@ ACTOR Future<Void> getShardState_impl(StorageServer* data, GetShardStateRequest 
 			}
 
 			if (t.value()->moveInShard) {
-				std::cout << "Checking moveInShard error." << std::endl;
+				// std::cout << "Checking moveInShard error." << std::endl;
 				Optional<Error> err = t.value()->getError();
 				if (err.present() && t.value()->getMoveInVersion() >= req.version) {
-					std::cout << "MoveInShard error." << err.get().name() << std::endl;
+					// std::cout << "MoveInShard error." << err.get().name() << std::endl;
 					req.reply.sendError(err.get());
 					return Void();
 				}
 			}
 
-			std::cout << "2" << std::endl;
+			// std::cout << "2" << std::endl;
 			if (req.mode == GetShardStateRequest::READABLE && !t.value()->isReadable()) {
 				if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
 					ASSERT(t.value()->moveInShard);
@@ -2435,32 +2435,32 @@ ACTOR Future<Void> getShardState_impl(StorageServer* data, GetShardStateRequest 
 				}
 			}
 
-			std::cout << "3" << std::endl;
+			// std::cout << "3" << std::endl;
 			if (t.value()->moveInShard) {
-				std::cout << "MoveInShard" << std::endl;
+				// std::cout << "MoveInShard" << std::endl;
 			} else if (t.value()->adding) {
-				std::cout << "Adding" << std::endl;
+				// std::cout << "Adding" << std::endl;
 			} else if (t.value()->readWrite) {
-				std::cout << "ReadWrite" << std::endl;
+				// std::cout << "ReadWrite" << std::endl;
 			}
 
 			if (req.mode == GetShardStateRequest::FETCHING && !t.value()->isFetched()) {
 				if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
-					std::cout << "3.1" << std::endl;
+					// std::cout << "3.1" << std::endl;
 					ASSERT(t.value()->moveInShard);
-					std::cout << "3.2" << std::endl;
+					// std::cout << "3.2" << std::endl;
 					onChange.push_back(t.value()->moveInShard->fetchComplete.getFuture());
 				} else {
 					onChange.push_back(t.value()->adding->fetchComplete.getFuture());
 				}
 			}
-			std::cout << "3.3" << std::endl;
+			// std::cout << "3.3" << std::endl;
 		}
 
-		std::cout << "4" << std::endl;
+		// std::cout << "4" << std::endl;
 		if (!onChange.size()) {
 			req.reply.send(GetShardStateReply{ data->version.get(), data->durableVersion.get() });
-			std::cout << "5" << std::endl;
+			// std::cout << "5" << std::endl;
 			return Void();
 		}
 
@@ -4859,7 +4859,7 @@ ACTOR Future<Void> fetchShard(StorageServer* data, MoveInShard* shard) {
 	wait(delay(0));
 	if (shard->getState() == MoveInShard::Pending) {
 		TraceEvent("PendingMoveInShard", data->thisServerID)
-		    .detail("ID", shard->id)
+		    .detail("MoveInShardID", shard->id)
 		    .detail("MoveInShard", shard->toString());
 		return Never();
 	}
@@ -5044,7 +5044,11 @@ ACTOR Future<Void> fetchShard(StorageServer* data, MoveInShard* shard) {
 
 MoveInShard::MoveInShard(StorageServer* server, const UID& id, KeyRange range, const Version version, State state)
   : id(id), range(range), version(version), state(state), server(server) {
-	fetchClient = fetchShard(server, this);
+	if (state != Pending) {
+		fetchClient = fetchShard(server, this);
+	} else {
+		fetchClient = Never();
+	}
 }
 MoveInShard::MoveInShard(StorageServer* server, const UID& id, KeyRange range, const Version version)
   : MoveInShard(server, id, range, version, Fetching) {}
@@ -5761,7 +5765,8 @@ private:
 		data->pendingCheckpoints[ver].push_back(checkpoint);
 
 		auto& mLV = data->addVersionToMutationLog(ver);
-		const Key pendingCheckpointKey(persistPendingCheckpointKeys.begin.toString() + checkpointID.toString());
+		const Key pendingCheckpointKey(persistPendingCheckpointKeys.begin.toString() +
+		                               checkpoint.checkpointID.toString());
 		data->addMutationToMutationLog(
 		    mLV, MutationRef(MutationRef::SetValue, pendingCheckpointKey, checkpointValue(checkpoint)));
 
@@ -6232,6 +6237,8 @@ ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData meta
 		data->storage.clearRange(singleKeyRange(pendingCheckpointKey));
 		data->storage.writeKeyValue(KeyValueRef(persistCheckpointKey, checkpointValue(checkpointResult)));
 		wait(data->storage.commit());
+		TraceEvent("StorageCreateCheckpointPersisted", data->thisServerID)
+		    .detail("Checkpoint", checkpointResult.toString());
 	} catch (Error& e) {
 		// If the checkpoint meta data is not persisted successfully, remove the checkpoint.
 		TraceEvent("StorageCreateCheckpointPersistFailure", data->thisServerID)
@@ -6285,7 +6292,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			const Version cVer = data->pendingCheckpoints.begin()->first;
 			if (cVer <= desiredVersion) {
 				TraceEvent("CheckpointVersionSatisfied", data->thisServerID)
-					.detail("DurableVersion", data->durableVersion.get())
+				    .detail("DurableVersion", data->durableVersion.get())
 				    .detail("DesiredVersion", desiredVersion)
 				    .detail("CheckPointVersion", cVer);
 				desiredVersion = cVer;
@@ -6358,6 +6365,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		if (requireCheckpoint) {
 			ASSERT(newOldestVersion == data->pendingCheckpoints.begin()->first);
 			std::vector<Future<Void>> createCheckpoints;
+			// TODO: Combine these checkpoints if necessary.
 			for (int idx = 0; idx < data->pendingCheckpoints.begin()->second.size(); ++idx) {
 				createCheckpoints.push_back(createCheckpoint(data, data->pendingCheckpoints.begin()->second[idx]));
 			}
@@ -6475,7 +6483,8 @@ void setAvailableStatus(StorageServer* self, KeyRangeRef keys, bool available) {
 	// When a shard is moved out, delete all related checkpoints created for data move.
 	if (!available) {
 		for (auto& [id, checkpoint] : self->checkpoints) {
-			if (checkpoint.range.intersects(keys)) {
+			// if (checkpoint.range.intersects(keys)) {
+			if (keys.contains(checkpoint.range)) {
 				Key persistCheckpointKey(persistCheckpointKeys.begin.toString() + checkpoint.checkpointID.toString());
 				checkpoint.setState(CheckpointMetaData::Deleting);
 				self->addMutationToMutationLog(
@@ -6831,7 +6840,15 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	state int pCLoc;
 	for (pCLoc = 0; pCLoc < pendingCheckpoints.size(); ++pCLoc) {
 		CheckpointMetaData metaData = decodeCheckpointValue(pendingCheckpoints[pCLoc].value);
-		data->pendingCheckpoints[metaData.version].push_back(metaData);
+		if (metaData.version < version) {
+			data->actors.add(deleteCheckpointQ(data, version, metaData));
+			TraceEvent(SevWarnAlways, "StorageRestoreStaleCheckpointRequest", data->thisServerID)
+
+			    .detail("PendingCheckpoint", metaData.toString())
+			    .detail("DurableVersion", version);
+		} else {
+			data->pendingCheckpoints[metaData.version].push_back(metaData);
+		}
 		wait(yield());
 	}
 

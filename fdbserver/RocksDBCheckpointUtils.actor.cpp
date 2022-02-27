@@ -254,7 +254,7 @@ private:
 			rocksdb::Status s;
 			while (cursor->Valid()) {
 				KeyValueRef kv(toStringRef(cursor->key()), toStringRef(cursor->value()));
-				std::cout << "Getting key " << cursor->key().ToString() << std::endl;
+				// std::cout << "Getting key " << cursor->key().ToString() << std::endl;
 				accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
 				result.push_back_deep(result.arena(), kv);
 				// Calling `cursor->Next()` is potentially expensive, so short-circut here just in case.
@@ -518,8 +518,8 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 				// wait(asyncFile->flush());
 				//  += rep.data.size();
 				for (int i = 0; i < rep.data.size(); ++i) {
-					std::cout << "Writing key: " << rep.data[i].key.toString()
-					          << ", value: " << rep.data[i].value.toString() << std::endl;
+					// std::cout << "Writing key: " << rep.data[i].key.toString()
+					//           << ", value: " << rep.data[i].value.toString() << std::endl;
 					status = writer->Put(toSlice(rep.data[i].key), toSlice(rep.data[i].value));
 					if (!status.ok()) {
 						Error e = statusToError(status);
@@ -536,9 +536,12 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 			}
 		} catch (Error& e) {
 			Error err = e;
-			status = writer->Finish();
-			if (!status.ok()) {
-				err = statusToError(status);
+			if (totalBytes > 0) {
+				status = writer->Finish();
+				if (!status.ok()) {
+					std::cout << "SstFileWriter finish error: " << status.ToString() << std::endl;
+					err = statusToError(status);
+				}
 			}
 			if (err.code() != error_code_end_of_stream) {
 				TraceEvent("FetchCheckpointFileError")
@@ -553,14 +556,16 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 					break;
 				}
 			} else {
-				RocksDBCheckpoint rcp = getRocksCheckpoint(*metaData);
-				rcp.fetchedFiles.emplace_back(range, localFile);
-				metaData->serializedCheckpoint = ObjectWriter::toValue(rcp, IncludeVersion());
+				if (totalBytes > 0) {
+					RocksDBCheckpoint rcp = getRocksCheckpoint(*metaData);
+					rcp.fetchedFiles.emplace_back(range, localFile);
+					metaData->serializedCheckpoint = ObjectWriter::toValue(rcp, IncludeVersion());
+				}
 				// TODO: This won't work since it is not transactional.
 				// if (cFun) {
 				// 	wait(cFun(*metaData));
 				// }
-				TraceEvent("FetchCheckpointRangeBegin")
+				TraceEvent("FetchCheckpointRangeEnd")
 				    .detail("CheckpointID", metaData->checkpointID)
 				    .detail("Range", range.toString())
 				    .detail("TargetStorageServerUID", ssID.toString())

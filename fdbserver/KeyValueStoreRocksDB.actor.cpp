@@ -910,6 +910,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 		void action(RestoreAction& a) {
 			TraceEvent("RocksDBServeRestoreBegin", id).detail("Path", a.path);
+			ASSERT(db != nullptr);
 
 			// TODO: Fail gracefully.
 			ASSERT(!a.checkpoints.empty());
@@ -921,11 +922,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 
 			rocksdb::Options options = getOptions();
-			rocksdb::Status status = rocksdb::DB::Open(options, a.path, &db);
+			// rocksdb::Status status = rocksdb::DB::Open(options, a.path, &db);
+			rocksdb::Status status;
 			if (!status.ok()) {
 				logRocksDBError(status, "Restore");
-				a.done.sendError(statusToError(status));
-				return;
+				// a.done.sendError(statusToError(status));
+				// return;
 			}
 
 			if (format == RocksDBColumnFamily) {
@@ -949,7 +951,11 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 					a.done.send(Void());
 				}
 			} else if (format == RocksDB) {
-				status = db->CreateColumnFamily(getCFOptions(), SERVER_KNOBS->DEFAULT_FDB_ROCKSDB_COLUMN_FAMILY, &cf);
+				// status = db->CreateColumnFamily(getCFOptions(), SERVER_KNOBS->DEFAULT_FDB_ROCKSDB_COLUMN_FAMILY,
+				// &cf);
+				TraceEvent("RocksDBServeRestoreRange", id)
+				    .detail("Path", a.path)
+				    .detail("Checkpoint", describe(a.checkpoints));
 				if (!status.ok()) {
 					logRocksDBError(status, "CreateColumnFamily");
 					a.done.sendError(statusToError(status));
@@ -960,6 +966,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				for (const auto& checkpoint : a.checkpoints) {
 					const RocksDBCheckpoint rocksCheckpoint = getRocksCheckpoint(checkpoint);
 					for (const auto& [range, file] : rocksCheckpoint.fetchedFiles) {
+						std::cout << "Rocks Restoring: " << file << std::endl;
 						sstFiles.push_back(file);
 					}
 				}
@@ -970,14 +977,20 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				// 	std::cout << "Found sstFile: " << file << std::endl;
 				// 	paths.push_back(a.checkpoint.rocksDBCheckpoint.get().checkpointDir + "/" + file);
 				// }
-				rocksdb::IngestExternalFileOptions ingestOptions;
-				ingestOptions.move_files = true;
-				status = db->IngestExternalFile(cf, sstFiles, ingestOptions);
-				if (!status.ok()) {
-					std::cout << "Ingest sst file failure: " << status.ToString() << std::endl;
-					logRocksDBError(status, "IngestExternalFile");
-					a.done.sendError(statusToError(status));
-					return;
+				if (!sstFiles.empty()) {
+					rocksdb::IngestExternalFileOptions ingestOptions;
+					ingestOptions.move_files = true;
+					status = db->IngestExternalFile(cf, sstFiles, ingestOptions);
+					if (!status.ok()) {
+						std::cout << "Ingest sst file failure: " << status.ToString() << std::endl;
+						logRocksDBError(status, "IngestExternalFile");
+						a.done.sendError(statusToError(status));
+						return;
+					}
+				} else {
+					TraceEvent(SevDebug, "RocksDBServeRestoreEmptyRange", id)
+					    .detail("Path", a.path)
+					    .detail("Checkpoint", describe(a.checkpoints));
 				}
 				a.done.send(Void());
 			} else {
