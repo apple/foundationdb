@@ -322,6 +322,7 @@ function(package_bindingtester)
     set(fdbcName "libfdb_c.dylib")
   else()
     set(fdbcName "libfdb_c.so")
+    set(cbatraceLib "libcbatracefdb_c.so")
   endif()
   set(bdir ${CMAKE_BINARY_DIR}/bindingtester)
   file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/bindingtester)
@@ -344,6 +345,7 @@ function(package_bindingtester)
     COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_BINARY_DIR}/bindingtester/tests
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/bindingtester/tests
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/bindings ${CMAKE_BINARY_DIR}/bindingtester/tests
+    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/lib/${cbatraceLib} ${CMAKE_BINARY_DIR}/bindingtester/tests/bindingtester/cbatrace
     COMMAND ${CMAKE_COMMAND} -E touch "${CMAKE_BINARY_DIR}/bindingtester.touch"
     COMMENT "Copy test files for bindingtester")
 

@@ -48,10 +48,39 @@ else()
   add_library(fdb_c SHARED ${FDB_C_SRCS} ${asm_file})
   strip_debug_symbols(fdb_c)
 endif()
+
+# cbatrace section 
+if(NOT WIN32 AND NOT APPLE)
+  # use script cbtraceSymbolify.py to generate cbatracefdb_c.g.cpp
+  set(CMAKE_CBATRACE_SOURCE_DIR ${PROJECT_SOURCE_DIR}/bindings/bindingtester/cbatrace)
+  set(cppFile ${CMAKE_CBATRACE_SOURCE_DIR}/cbatracefdb_c.g.cpp)
+  add_custom_command(OUTPUT ${cppFile}
+    COMMAND $<TARGET_FILE:Python::Interpreter> ${CMAKE_CBATRACE_SOURCE_DIR}/cbatraceSymbolify.py
+        -o ${cppFile}
+        ${CMAKE_CURRENT_SOURCE_DIR}/foundationdb/fdb_c.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/fdb_c.cpp
+    DEPENDS ${CMAKE_CBATRACE_SOURCE_DIR}/cbatraceSymbolify.py 
+            ${CMAKE_CBATRACE_SOURCE_DIR}/cbatraceSeedUtil.in.cpp 
+            ${CMAKE_CURRENT_SOURCE_DIR}/fdb_c.cpp
+    COMMENT "Generate file cbatracefdb_c.g.cpp")
+  add_custom_target(genCppFile DEPENDS ${cppFile})
+
+  # create library 
+  add_library(cbatracefdb_c SHARED ${CMAKE_CBATRACE_SOURCE_DIR}/cbatracefdb_c.g.cpp)
+  strip_debug_symbols(cbatracefdb_c)
+
+  # set include directory. Only needed to include db_c_options.g.h in cbatraceSeedUtil.in.cpp
+  target_include_directories(cbatracefdb_c PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>)
+
+  # dependencies 
+  add_dependencies(cbatracefdb_c genCppFile)
+endif()
+
 add_dependencies(fdb_c fdb_c_generated fdb_c_options)
 add_dependencies(fdbclient fdb_c_options)
 add_dependencies(fdbclient_sampling fdb_c_options)
 target_link_libraries(fdb_c PUBLIC $<BUILD_INTERFACE:fdbclient>)
+
 if(APPLE)
   set(symbols ${CMAKE_CURRENT_BINARY_DIR}/fdb_c.symbols)
   add_custom_command(OUTPUT ${symbols}
