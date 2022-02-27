@@ -7623,7 +7623,8 @@ ACTOR Future<Void> verifyRangeBTreeCursor(VersionedBTree* btree,
                                           Key start,
                                           Key end,
                                           Version v,
-                                          std::map<std::pair<std::string, Version>, Optional<std::string>>* written) {
+                                          std::map<std::pair<std::string, Version>, Optional<std::string>>* written,
+                                          int64_t* pRecordsRead) {
 	if (end <= start)
 		end = keyAfter(start);
 
@@ -7658,6 +7659,9 @@ ACTOR Future<Void> verifyRangeBTreeCursor(VersionedBTree* btree,
 	while (cur.isValid() && cur.get().key < end) {
 		// Find the next written kv pair that would be present at this version
 		while (1) {
+			// Since the written map grows, range scans become less efficient so count all records written
+			// at any version against the records read count
+			++*pRecordsRead;
 			iLast = i;
 			if (i == iEnd)
 				break;
@@ -7747,6 +7751,7 @@ ACTOR Future<Void> verifyRangeBTreeCursor(VersionedBTree* btree,
 	state std::reverse_iterator<const KeyValueRef*> r = results.rbegin();
 
 	while (cur.isValid() && cur.get().key >= start) {
+		++*pRecordsRead;
 		if (r == results.rend()) {
 			printf("VerifyRangeReverse(@%" PRId64 ", %s, %s) ERROR:BTree key '%s' vs nothing in written map.\n",
 			       v,
@@ -7793,10 +7798,11 @@ ACTOR Future<Void> verifyRangeBTreeCursor(VersionedBTree* btree,
 	return Void();
 }
 
-// Verify the result of point reads for every set or cleared key at the given version
+// Verify the result of point reads for every set or cleared key change made at exactly v
 ACTOR Future<Void> seekAllBTreeCursor(VersionedBTree* btree,
                                       Version v,
-                                      std::map<std::pair<std::string, Version>, Optional<std::string>>* written) {
+                                      std::map<std::pair<std::string, Version>, Optional<std::string>>* written,
+                                      int64_t* pRecordsRead) {
 	state std::map<std::pair<std::string, Version>, Optional<std::string>>::const_iterator i = written->cbegin();
 	state std::map<std::pair<std::string, Version>, Optional<std::string>>::const_iterator iEnd = written->cend();
 	state VersionedBTree::BTreeCursor cur;
@@ -7804,6 +7810,8 @@ ACTOR Future<Void> seekAllBTreeCursor(VersionedBTree* btree,
 	wait(btree->initBTreeCursor(&cur, v, PagerEventReasons::RangeRead));
 
 	while (i != iEnd) {
+		// Since the written map gets larger and takes longer to scan each time, count visits to all written recs
+		++*pRecordsRead;
 		state std::string key = i->first.first;
 		state Version ver = i->first.second;
 		if (ver == v) {
@@ -7852,6 +7860,7 @@ ACTOR Future<Void> seekAllBTreeCursor(VersionedBTree* btree,
 ACTOR Future<Void> verify(VersionedBTree* btree,
                           FutureStream<Version> vStream,
                           std::map<std::pair<std::string, Version>, Optional<std::string>>* written,
+                          int64_t* pRecordsRead,
                           bool serial) {
 
 	// Queue of committed versions still readable from btree
@@ -7883,8 +7892,8 @@ ACTOR Future<Void> verify(VersionedBTree* btree,
 			wait(btree->initBTreeCursor(&cur, v, PagerEventReasons::RangeRead));
 
 			debug_printf("Verifying entire key range at version %" PRId64 "\n", v);
-			state Future<Void> fRangeAll =
-			    verifyRangeBTreeCursor(btree, LiteralStringRef(""), LiteralStringRef("\xff\xff"), v, written);
+			state Future<Void> fRangeAll = verifyRangeBTreeCursor(
+			    btree, LiteralStringRef(""), LiteralStringRef("\xff\xff"), v, written, pRecordsRead);
 			if (serial) {
 				wait(fRangeAll);
 			}
@@ -7894,13 +7903,13 @@ ACTOR Future<Void> verify(VersionedBTree* btree,
 
 			debug_printf(
 			    "Verifying range (%s, %s) at version %" PRId64 "\n", toString(begin).c_str(), toString(end).c_str(), v);
-			state Future<Void> fRangeRandom = verifyRangeBTreeCursor(btree, begin, end, v, written);
+			state Future<Void> fRangeRandom = verifyRangeBTreeCursor(btree, begin, end, v, written, pRecordsRead);
 			if (serial) {
 				wait(fRangeRandom);
 			}
 
 			debug_printf("Verifying seeks to each changed key at version %" PRId64 "\n", v);
-			state Future<Void> fSeekAll = seekAllBTreeCursor(btree, v, written);
+			state Future<Void> fSeekAll = seekAllBTreeCursor(btree, v, written, pRecordsRead);
 			if (serial) {
 				wait(fSeekAll);
 			}
@@ -7918,7 +7927,7 @@ ACTOR Future<Void> verify(VersionedBTree* btree,
 }
 
 // Does a random range read, doesn't trap/report errors
-ACTOR Future<Void> randomReader(VersionedBTree* btree) {
+ACTOR Future<Void> randomReader(VersionedBTree* btree, int64_t* pRecordsRead) {
 	try {
 		state VersionedBTree::BTreeCursor cur;
 
@@ -7933,6 +7942,7 @@ ACTOR Future<Void> randomReader(VersionedBTree* btree) {
 			state int c = deterministicRandom()->randomInt(0, 100);
 			state bool direction = deterministicRandom()->coinflip();
 			while (cur.isValid() && c-- > 0) {
+				++*pRecordsRead;
 				wait(success(direction ? cur.moveNext() : cur.movePrev()));
 				wait(yield());
 			}
@@ -9310,7 +9320,6 @@ TEST_CASE("Lredwood/correctness/btree") {
 	    params.getInt("extentSize")
 	        .orDefault(deterministicRandom()->coinflip() ? SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_SIZE
 	                                                     : deterministicRandom()->randomInt(4096, 32768));
-	state int64_t targetPageOps = params.getInt("targetPageOps").orDefault(shortTest ? 50000 : 1000000);
 	state bool pagerMemoryOnly =
 	    params.getInt("pagerMemoryOnly").orDefault(shortTest && (deterministicRandom()->random01() < .001));
 	state int maxKeySize = params.getInt("maxKeySize").orDefault(deterministicRandom()->randomInt(1, pageSize * 2));
@@ -9341,13 +9350,21 @@ TEST_CASE("Lredwood/correctness/btree") {
 	state Version remapCleanupWindow =
 	    params.getInt("remapCleanupWindow")
 	        .orDefault(BUGGIFY ? 0 : deterministicRandom()->randomInt64(1, versionIncrement * 50));
-	state int maxVerificationMapEntries = params.getInt("maxVerificationMapEntries").orDefault(300e3);
 	state int concurrentExtentReads =
 	    params.getInt("concurrentExtentReads").orDefault(SERVER_KNOBS->REDWOOD_EXTENT_CONCURRENT_READS);
 
+	// These settings are an attempt to keep the test execution real reasonably short
+	state int64_t maxPageOps = params.getInt("maxPageOps").orDefault((shortTest || serialTest) ? 50e3 : 1e6);
+	state int maxVerificationMapEntries =
+	    params.getInt("maxVerificationMapEntries").orDefault((1.0 - coldStartProbability) * 300e3);
+	// Max number of records in the BTree or the versioned written map to visit
+	state int64_t maxRecordsRead = 300e6;
+
 	printf("\n");
 	printf("file: %s\n", file.c_str());
-	printf("targetPageOps: %" PRId64 "\n", targetPageOps);
+	printf("maxPageOps: %" PRId64 "\n", maxPageOps);
+	printf("maxVerificationMapEntries: %d\n", maxVerificationMapEntries);
+	printf("maxRecordsRead: %" PRId64 "\n", maxRecordsRead);
 	printf("pagerMemoryOnly: %d\n", pagerMemoryOnly);
 	printf("serialTest: %d\n", serialTest);
 	printf("shortTest: %d\n", shortTest);
@@ -9366,7 +9383,6 @@ TEST_CASE("Lredwood/correctness/btree") {
 	printf("cacheSizeBytes: %s\n", cacheSizeBytes == 0 ? "default" : format("%" PRId64, cacheSizeBytes).c_str());
 	printf("versionIncrement: %" PRId64 "\n", versionIncrement);
 	printf("remapCleanupWindow: %" PRId64 "\n", remapCleanupWindow);
-	printf("maxVerificationMapEntries: %d\n", maxVerificationMapEntries);
 	printf("\n");
 
 	printf("Deleting existing test data...\n");
@@ -9379,6 +9395,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 	wait(btree->init());
 
 	state std::map<std::pair<std::string, Version>, Optional<std::string>> written;
+	state int64_t totalRecordsRead = 0;
 	state std::set<Key> keys;
 
 	state Version lastVer = btree->getLastCommittedVersion();
@@ -9396,8 +9413,9 @@ TEST_CASE("Lredwood/correctness/btree") {
 	state int mutationBytesTargetThisCommit = randomSize(maxCommitSize);
 
 	state PromiseStream<Version> committedVersions;
-	state Future<Void> verifyTask = verify(btree, committedVersions.getFuture(), &written, serialTest);
-	state Future<Void> randomTask = serialTest ? Void() : (randomReader(btree) || btree->getError());
+	state Future<Void> verifyTask =
+	    verify(btree, committedVersions.getFuture(), &written, &totalRecordsRead, serialTest);
+	state Future<Void> randomTask = serialTest ? Void() : (randomReader(btree, &totalRecordsRead) || btree->getError());
 	committedVersions.send(lastVer);
 
 	// Sometimes do zero-change commit at last version
@@ -9408,7 +9426,13 @@ TEST_CASE("Lredwood/correctness/btree") {
 	state Future<Void> commit = Void();
 	state int64_t totalPageOps = 0;
 
-	while (totalPageOps < targetPageOps && written.size() < maxVerificationMapEntries) {
+	// Check test op limits
+	state std::function<bool()> testFinished = [=]() {
+		return !(totalPageOps < maxPageOps && written.size() < maxVerificationMapEntries &&
+		         totalRecordsRead < maxRecordsRead);
+	};
+
+	while (!testFinished()) {
 		// Sometimes increment the version
 		if (deterministicRandom()->random01() < 0.10) {
 			++version;
@@ -9510,8 +9534,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 		}
 
 		// Commit after any limits for this commit or the total test are reached
-		if (totalPageOps >= targetPageOps || written.size() >= maxVerificationMapEntries ||
-		    mutationBytesThisCommit >= mutationBytesTargetThisCommit) {
+		if (mutationBytesThisCommit >= mutationBytesTargetThisCommit || testFinished()) {
 			// Wait for previous commit to finish
 			wait(commit);
 			printf("Commit complete.  Next commit %d bytes, %" PRId64 " bytes committed so far.",
@@ -9531,17 +9554,21 @@ TEST_CASE("Lredwood/correctness/btree") {
 				        0, btree->getLastCommittedVersion() - btree->getOldestReadableVersion() + 1));
 			}
 
-			commit = map(btree->commit(version), [=, &ops = totalPageOps, v = version](Void) {
+			commit = map(btree->commit(version), [&, v = version](Void) {
 				// Update pager ops before clearing metrics
-				ops += g_redwoodMetrics.pageOps();
-				fmt::print("Committed {0} PageOps {1}/{2} ({3:.2f}) VerificationMapEntries {4}/{5} ({6:.2f})\n",
+				totalPageOps += g_redwoodMetrics.pageOps();
+				fmt::print("Committed {0} PageOps {1}/{2} ({3:.2f}%)  VerificationMapEntries {4}/{5} ({6:.2f}%)  "
+				           "RecordsRead {7}/{8} ({9:.2f}%)\n",
 				           toString(v).c_str(),
-				           ops,
-				           targetPageOps,
-				           ops * 100.0 / targetPageOps,
+				           totalPageOps,
+				           maxPageOps,
+				           totalPageOps * 100.0 / maxPageOps,
 				           written.size(),
 				           maxVerificationMapEntries,
-				           written.size() * 100.0 / maxVerificationMapEntries);
+				           written.size() * 100.0 / maxVerificationMapEntries,
+				           totalRecordsRead,
+				           maxRecordsRead,
+				           totalRecordsRead * 100.0 / maxRecordsRead);
 				printf("Committed:\n%s\n", g_redwoodMetrics.toString(true).c_str());
 
 				// Notify the background verifier that version is committed and therefore readable
@@ -9556,7 +9583,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 				debug_printf("Waiting for verification to complete.\n");
 				wait(verifyTask);
 				committedVersions = PromiseStream<Version>();
-				verifyTask = verify(btree, committedVersions.getFuture(), &written, serialTest);
+				verifyTask = verify(btree, committedVersions.getFuture(), &written, &totalRecordsRead, serialTest);
 			}
 
 			mutationBytesThisCommit = 0;
@@ -9600,9 +9627,9 @@ TEST_CASE("Lredwood/correctness/btree") {
 
 				// Create new promise stream and start the verifier again
 				committedVersions = PromiseStream<Version>();
-				verifyTask = verify(btree, committedVersions.getFuture(), &written, serialTest);
+				verifyTask = verify(btree, committedVersions.getFuture(), &written, &totalRecordsRead, serialTest);
 				if (!serialTest) {
-					randomTask = randomReader(btree) || btree->getError();
+					randomTask = randomReader(btree, &totalRecordsRead) || btree->getError();
 				}
 				committedVersions.send(version);
 			}
