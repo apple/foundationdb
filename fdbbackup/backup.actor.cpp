@@ -2754,7 +2754,7 @@ ACTOR Future<Void> queryBackup(const char* name,
 			reportBackupQueryError(operationId,
 			                       result,
 			                       errorMessage =
-			                           format("the specified restorable version %ld is not valid", restoreVersion));
+			                           format("the specified restorable version %lld is not valid", restoreVersion));
 			return Void();
 		}
 		Optional<RestorableFileSet> fileSet = wait(bc->getRestoreSet(restoreVersion, keyRangesFilter));
@@ -3081,7 +3081,7 @@ static void addKeyRange(std::string optionValue, Standalone<VectorRef<KeyRangeRe
 
 			// Too many keys
 		default:
-			fprintf(stderr, "ERROR: Invalid key range identified with %ld keys", tokens.size());
+			fmt::print(stderr, "ERROR: Invalid key range identified with {} keys", tokens.size());
 			throw invalid_option_value();
 			break;
 		}

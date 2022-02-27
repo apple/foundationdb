@@ -26,6 +26,7 @@
 #endif
 
 #include <errno.h>
+#include "contrib/fmt-8.0.1/include/fmt/format.h"
 #include "flow/Platform.h"
 #include "flow/Platform.actor.h"
 #include "flow/Arena.h"
@@ -622,7 +623,7 @@ void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) {
 	ULARGE_INTEGER totalFreeSpace;
 	if (!GetDiskFreeSpaceEx(fullPath.c_str(), &freeSpace, &totalSpace, &totalFreeSpace)) {
 		Error e = systemErrorCodeToError();
-		TraceEvent(SevError, "DiskFreeError").detail("Path", fullPath).GetLastError().error(e);
+		TraceEvent(SevError, "DiskFreeError").error(e).detail("Path", fullPath).GetLastError();
 		throw e;
 	}
 	total = std::min((uint64_t)std::numeric_limits<int64_t>::max(), totalSpace.QuadPart);
@@ -2353,7 +2354,7 @@ bool createDirectory(std::string const& directory) {
 		}
 	}
 	Error e = systemErrorCodeToError();
-	TraceEvent(SevError, "CreateDirectory").detail("Directory", directory).GetLastError().error(e);
+	TraceEvent(SevError, "CreateDirectory").error(e).detail("Directory", directory).GetLastError();
 	throw e;
 #elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 	size_t sep = 0;
@@ -2500,7 +2501,7 @@ std::string abspath(std::string const& path, bool resolveLinks, bool mustExist) 
 	if (!GetFullPathName(path.c_str(), MAX_PATH, nameBuffer, nullptr) || (mustExist && !fileExists(nameBuffer))) {
 		Error e = systemErrorCodeToError();
 		Severity sev = e.code() == error_code_io_error ? SevError : SevWarnAlways;
-		TraceEvent(sev, "AbsolutePathError").detail("Path", path).GetLastError().error(e);
+		TraceEvent(sev, "AbsolutePathError").error(e).detail("Path", path).GetLastError();
 		throw e;
 	}
 	// Not totally obvious from the help whether GetFullPathName canonicalizes slashes, so let's do it...
@@ -3826,7 +3827,7 @@ TEST_CASE("/flow/Platform/getMemoryInfo") {
 	ASSERT(request[LiteralStringRef("SwapTotal:")] == 25165820);
 	ASSERT(request[LiteralStringRef("SwapFree:")] == 23680228);
 	for (auto& item : request) {
-		printf("%s:%ld\n", item.first.toString().c_str(), item.second);
+		fmt::print("{}:{}\n", item.first.toString().c_str(), item.second);
 	}
 
 	printf("UnitTest flow/Platform/getMemoryInfo 2\n");
@@ -3877,7 +3878,7 @@ TEST_CASE("/flow/Platform/getMemoryInfo") {
 	ASSERT(request[LiteralStringRef("SwapTotal:")] == 0);
 	ASSERT(request[LiteralStringRef("SwapFree:")] == 0);
 	for (auto& item : request) {
-		printf("%s:%ld\n", item.first.toString().c_str(), item.second);
+		fmt::print("{}:{}\n", item.first.toString().c_str(), item.second);
 	}
 
 	return Void();

@@ -256,10 +256,10 @@ public:
 
 		pool->queueLock.enter();
 		TraceEvent("WorkPool_Stop")
+		    .errorUnsuppressed(e)
 		    .detail("Workers", pool->workers.size())
 		    .detail("Idle", pool->idle.size())
-		    .detail("Work", pool->work.size())
-		    .errorUnsuppressed(e);
+		    .detail("Work", pool->work.size());
 
 		for (uint32_t i = 0; i < pool->work.size(); i++)
 			pool->work[i]->cancel(); // What if cancel() does something to this?

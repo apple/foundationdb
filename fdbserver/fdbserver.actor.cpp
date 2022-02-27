@@ -1432,8 +1432,8 @@ private:
 				// parameter
 				knobs.emplace_back(
 				    "page_cache_4k",
-				    format("%ld", ti.get() / 4096 * 4096)); // The cache holds 4K pages, so we can truncate this to the
-				                                            // next smaller multiple of 4K.
+				    format("%lld", ti.get() / 4096 * 4096)); // The cache holds 4K pages, so we can truncate this to the
+				                                             // next smaller multiple of 4K.
 				break;
 			case OPT_BUGGIFY:
 				if (!strcmp(args.OptionArg(), "on"))
