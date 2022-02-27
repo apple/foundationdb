@@ -19,6 +19,7 @@
 * limitations under the License.
 */
 
+#include "contrib/fmt-8.0.1/include/fmt/format.h"
 #include "flow/flow.h"
 #include "flow/Platform.h"
 #include "flow/DeterministicRandom.h"
@@ -413,7 +414,7 @@ ACTOR Future<Void> logThroughput(int64_t* v, Key* next) {
 	loop {
 		state int64_t last = *v;
 		wait(delay(1));
-		printf("throughput: %ld bytes/s, next: %s\n", *v - last, printable(*next).c_str());
+		fmt::print("throughput: {} bytes/s, next: {}\n", *v - last, printable(*next).c_str());
 	}
 }
 

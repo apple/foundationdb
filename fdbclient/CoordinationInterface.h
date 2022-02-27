@@ -58,13 +58,28 @@ struct ClientLeaderRegInterface {
 //  - There is no address present more than once
 class ClusterConnectionString {
 public:
+	enum ConnectionStringStatus { RESOLVED, RESOLVING, UNRESOLVED };
+
 	ClusterConnectionString() {}
 	ClusterConnectionString(const std::string& connStr);
 	ClusterConnectionString(const std::vector<NetworkAddress>& coordinators, Key key);
 	ClusterConnectionString(const std::vector<Hostname>& hosts, Key key);
 
+	ClusterConnectionString(const ClusterConnectionString& rhs) { operator=(rhs); }
+	ClusterConnectionString& operator=(const ClusterConnectionString& rhs) {
+		// Copy everything except AsyncTrigger resolveFinish.
+		status = rhs.status;
+		coords = rhs.coords;
+		hostnames = rhs.hostnames;
+		networkAddressToHostname = rhs.networkAddressToHostname;
+		key = rhs.key;
+		keyDesc = rhs.keyDesc;
+		connectionString = rhs.connectionString;
+		return *this;
+	}
+
 	std::vector<NetworkAddress> const& coordinators() const { return coords; }
-	void addResolved(Hostname hostname, NetworkAddress address) {
+	void addResolved(const Hostname& hostname, const NetworkAddress& address) {
 		coords.push_back(address);
 		networkAddressToHostname.emplace(address, hostname);
 	}
@@ -78,16 +93,20 @@ public:
 	// This one should only be used when resolving asynchronously is impossible. For all other cases, resolveHostnames()
 	// should be preferred.
 	void resolveHostnamesBlocking();
-	void resetToUnresolved();
+	// This function derives the member connectionString from the current key, coordinators and hostnames.
+	void resetConnectionString();
 
-	bool hasUnresolvedHostnames = false;
+	void resetToUnresolved();
+	void parseKey(const std::string& key);
+
+	ConnectionStringStatus status = RESOLVED;
+	AsyncTrigger resolveFinish;
 	std::vector<NetworkAddress> coords;
 	std::vector<Hostname> hostnames;
+	std::unordered_map<NetworkAddress, Hostname> networkAddressToHostname;
 
 private:
 	void parseConnString();
-	void parseKey(const std::string& key);
-	std::unordered_map<NetworkAddress, Hostname> networkAddressToHostname;
 	Key key, keyDesc;
 	std::string connectionString;
 };
@@ -139,7 +158,7 @@ public:
 	// Signals to the connection record that it was successfully used to connect to a cluster.
 	void notifyConnected();
 
-	bool hasUnresolvedHostnames() const;
+	ClusterConnectionString::ConnectionStringStatus connectionStringStatus() const;
 	Future<Void> resolveHostnames();
 	// This one should only be used when resolving asynchronously is impossible. For all other cases, resolveHostnames()
 	// should be preferred.

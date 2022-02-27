@@ -1690,7 +1690,7 @@ ACTOR Future<Void> cleanupStatus(Reference<ReadYourWritesTransaction> tr,
 				readMore = true;
 		} catch (Error& e) {
 			// If doc can't be parsed or isn't alive, delete it.
-			TraceEvent(SevWarn, "RemovedDeadBackupLayerStatus").detail("Key", docs[i].key).error(e, true);
+			TraceEvent(SevWarn, "RemovedDeadBackupLayerStatus").errorUnsuppressed(e).detail("Key", docs[i].key);
 			tr->clear(docs[i].key);
 			// If limit is 1 then read more.
 			if (limit == 1)
@@ -2754,7 +2754,7 @@ ACTOR Future<Void> queryBackup(const char* name,
 			reportBackupQueryError(operationId,
 			                       result,
 			                       errorMessage =
-			                           format("the specified restorable version %ld is not valid", restoreVersion));
+			                           format("the specified restorable version %lld is not valid", restoreVersion));
 			return Void();
 		}
 		Optional<RestorableFileSet> fileSet = wait(bc->getRestoreSet(restoreVersion, keyRangesFilter));
@@ -3081,7 +3081,7 @@ static void addKeyRange(std::string optionValue, Standalone<VectorRef<KeyRangeRe
 
 			// Too many keys
 		default:
-			fprintf(stderr, "ERROR: Invalid key range identified with %ld keys", tokens.size());
+			fmt::print(stderr, "ERROR: Invalid key range identified with {} keys", tokens.size());
 			throw invalid_option_value();
 			break;
 		}
@@ -3887,9 +3887,9 @@ int main(int argc, char* argv[]) {
 				} else {
 					fprintf(stderr, "ERROR: Failed to set knob option '%s': %s\n", knobName.c_str(), e.what());
 					TraceEvent(SevError, "FailedToSetKnob")
+					    .error(e)
 					    .detail("Knob", printable(knobName))
-					    .detail("Value", printable(knobValueString))
-					    .error(e);
+					    .detail("Value", printable(knobValueString));
 					throw;
 				}
 			}
