@@ -627,8 +627,8 @@ ACTOR Future<Void> logRouterPeekStream(LogRouterData* self, TLogPeekStreamReques
 		} catch (Error& e) {
 			self->activePeekStreams--;
 			TraceEvent(SevDebug, "TLogPeekStreamEnd", self->dbgid)
-			    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress())
-			    .error(e, true);
+			    .errorUnsuppressed(e)
+			    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
 
 			if (e.code() == error_code_end_of_stream || e.code() == error_code_operation_obsolete) {
 				req.reply.sendError(e);
@@ -764,7 +764,7 @@ ACTOR Future<Void> logRouter(TLogInterface interf,
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled || e.code() == error_code_worker_removed) {
-			TraceEvent("LogRouterTerminated", interf.id()).error(e, true);
+			TraceEvent("LogRouterTerminated", interf.id()).errorUnsuppressed(e);
 			return Void();
 		}
 		throw;

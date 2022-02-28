@@ -4289,7 +4289,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				}
 				if (nfk == keys.begin) {
 					TraceEvent("FKBlockFail", data->thisServerID)
-					    .error(e, true)
+					    .errorUnsuppressed(e)
 					    .suppressFor(1.0)
 					    .detail("FKID", interval.pairID);
 
@@ -4455,7 +4455,9 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 		TraceEvent(SevDebug, interval.end(), data->thisServerID);
 	} catch (Error& e) {
-		TraceEvent(SevDebug, interval.end(), data->thisServerID).error(e, true).detail("Version", data->version.get());
+		TraceEvent(SevDebug, interval.end(), data->thisServerID)
+		    .errorUnsuppressed(e)
+		    .detail("Version", data->version.get());
 
 		if (e.code() == error_code_actor_cancelled && !data->shuttingDown && shard->phase >= AddingShard::Fetching) {
 			if (shard->phase < AddingShard::Waiting) {
@@ -6842,7 +6844,7 @@ bool storageServerTerminated(StorageServer& self, IKeyValueStore* persistentData
 
 	if (e.code() == error_code_worker_removed || e.code() == error_code_recruitment_failed ||
 	    e.code() == error_code_file_not_found || e.code() == error_code_actor_cancelled) {
-		TraceEvent("StorageServerTerminated", self.thisServerID).error(e, true);
+		TraceEvent("StorageServerTerminated", self.thisServerID).errorUnsuppressed(e);
 		return true;
 	} else
 		return false;

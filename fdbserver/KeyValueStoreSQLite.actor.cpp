@@ -19,6 +19,7 @@
  */
 
 #define SQLITE_THREADSAFE 0 // also in sqlite3.amalgamation.c!
+#include "contrib/fmt-8.0.1/include/fmt/format.h"
 #include "flow/crc32c.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/CoroFlow.h"
@@ -2061,8 +2062,8 @@ private:
 			}
 		} catch (Error& e) {
 			TraceEvent(SevError, "KVDoCloseError", self->logID)
+			    .errorUnsuppressed(e)
 			    .detail("Filename", self->filename)
-			    .error(e, true)
 			    .detail("Reason", e.code() == error_code_platform_error ? "could not delete database" : "unknown");
 			error = e;
 		}
@@ -2359,7 +2360,7 @@ ACTOR Future<Void> KVFileDump(std::string filename) {
 		k = keyAfter(kv[kv.size() - 1].key);
 	}
 	fflush(stdout);
-	fprintf(stderr, "Counted: %ld\n", count);
+	fmt::print(stderr, "Counted: {}\n", count);
 
 	if (store->getError().isError())
 		wait(store->getError());

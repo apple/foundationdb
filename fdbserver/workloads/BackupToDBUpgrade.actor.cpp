@@ -485,7 +485,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 					wait(tr2->commit());
 					break;
 				} catch (Error& e) {
-					TraceEvent("DRU_RestoreSetupError").error(e, true);
+					TraceEvent("DRU_RestoreSetupError").errorUnsuppressed(e);
 					wait(tr2->onError(e));
 				}
 			}

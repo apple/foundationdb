@@ -732,16 +732,18 @@ Future<Void> attemptGRVFromOldProxies(std::vector<GrvProxyInterface> oldProxies,
 
 ACTOR static Future<Void> monitorClientDBInfoChange(DatabaseContext* cx,
                                                     Reference<AsyncVar<ClientDBInfo> const> clientDBInfo,
-                                                    AsyncTrigger* proxyChangeTrigger) {
+                                                    AsyncTrigger* proxiesChangeTrigger) {
 	state std::vector<CommitProxyInterface> curCommitProxies;
 	state std::vector<GrvProxyInterface> curGrvProxies;
 	state ActorCollection actors(false);
+	state Future<Void> clientDBInfoOnChange = clientDBInfo->onChange();
 	curCommitProxies = clientDBInfo->get().commitProxies;
 	curGrvProxies = clientDBInfo->get().grvProxies;
 
 	loop {
 		choose {
-			when(wait(clientDBInfo->onChange())) {
+			when(wait(clientDBInfoOnChange)) {
+				clientDBInfoOnChange = clientDBInfo->onChange();
 				if (clientDBInfo->get().commitProxies != curCommitProxies ||
 				    clientDBInfo->get().grvProxies != curGrvProxies) {
 					// This condition is a bit complicated. Here we want to verify that we're unable to receive a read
@@ -758,7 +760,7 @@ ACTOR static Future<Void> monitorClientDBInfoChange(DatabaseContext* cx,
 					}
 					curCommitProxies = clientDBInfo->get().commitProxies;
 					curGrvProxies = clientDBInfo->get().grvProxies;
-					proxyChangeTrigger->trigger();
+					proxiesChangeTrigger->trigger();
 				}
 			}
 			when(wait(actors.getResult())) { UNSTOPPABLE_ASSERT(false); }
@@ -1594,6 +1596,32 @@ void DatabaseContext::invalidateCache(const KeyRangeRef& keys) {
 	Key begin = rs.begin().begin(),
 	    end = rs.end().begin(); // insert invalidates rs, so can't be passed a mere reference into it
 	locationCache.insert(KeyRangeRef(begin, end), Reference<LocationInfo>());
+}
+
+void DatabaseContext::setFailedEndpointOnHealthyServer(const Endpoint& endpoint) {
+	if (failedEndpointsOnHealthyServersInfo.find(endpoint) == failedEndpointsOnHealthyServersInfo.end()) {
+		failedEndpointsOnHealthyServersInfo[endpoint] = { /*startTime=*/now(), /*lastRefreshTime=*/now() };
+	}
+}
+
+void DatabaseContext::updateFailedEndpointRefreshTime(const Endpoint& endpoint) {
+	if (failedEndpointsOnHealthyServersInfo.find(endpoint) == failedEndpointsOnHealthyServersInfo.end()) {
+		// The endpoint is not failed. Nothing to update.
+		return;
+	}
+
+	failedEndpointsOnHealthyServersInfo[endpoint].lastRefreshTime = now();
+}
+
+Optional<EndpointFailureInfo> DatabaseContext::getEndpointFailureInfo(const Endpoint& endpoint) {
+	if (failedEndpointsOnHealthyServersInfo.find(endpoint) == failedEndpointsOnHealthyServersInfo.end()) {
+		return Optional<EndpointFailureInfo>();
+	}
+	return failedEndpointsOnHealthyServersInfo[endpoint];
+}
+
+void DatabaseContext::clearFailedEndpointOnHealthyServer(const Endpoint& endpoint) {
+	failedEndpointsOnHealthyServersInfo.erase(endpoint);
 }
 
 Future<Void> DatabaseContext::onProxiesChanged() const {
@@ -2463,12 +2491,40 @@ Future<std::pair<KeyRange, Reference<LocationInfo>>> getKeyLocation(Database con
 		return getKeyLocation_internal(cx, key, spanID, debugID, useProvisionalProxies, isBackward);
 	}
 
+	bool onlyEndpointFailedAndNeedRefresh = false;
 	for (int i = 0; i < ssi.second->size(); i++) {
-		if (IFailureMonitor::failureMonitor().onlyEndpointFailed(ssi.second->get(i, member).getEndpoint())) {
-			cx->invalidateCache(key);
-			ssi.second.clear();
-			return getKeyLocation_internal(cx, key, spanID, debugID, useProvisionalProxies, isBackward);
+		const Endpoint& endpoint = ssi.second->get(i, member).getEndpoint();
+		if (IFailureMonitor::failureMonitor().onlyEndpointFailed(endpoint)) {
+			// This endpoint is failed, but the server is still healthy. There are two cases this can happen:
+			//    - There is a recent bounce in the cluster where the endpoints in SSes get updated.
+			//    - The SS is failed and terminated on a server, but the server is kept running.
+			// To account for the first case, we invalidate the cache and issue GetKeyLocation requests to the proxy to
+			// update the cache with the new SS points. However, if the failure is caused by the second case, the
+			// requested key location will continue to be the failed endpoint until the data movement is finished. But
+			// every read will generate a GetKeyLocation request to the proxies (and still getting the failed endpoint
+			// back), which may overload the proxy and affect data movement speed. Therefore, we only refresh the
+			// location cache for short period of time, and after the initial grace period that we keep retrying
+			// resolving key location, we will slow it down to resolve it only once every
+			// `LOCATION_CACHE_FAILED_ENDPOINT_RETRY_INTERVAL`.
+			cx->setFailedEndpointOnHealthyServer(endpoint);
+			const auto& failureInfo = cx->getEndpointFailureInfo(endpoint);
+			ASSERT(failureInfo.present());
+			if (now() - failureInfo.get().startTime < CLIENT_KNOBS->LOCATION_CACHE_ENDPOINT_FAILURE_GRACE_PERIOD ||
+			    now() - failureInfo.get().lastRefreshTime >
+			        CLIENT_KNOBS->LOCATION_CACHE_FAILED_ENDPOINT_RETRY_INTERVAL) {
+				onlyEndpointFailedAndNeedRefresh = true;
+				cx->updateFailedEndpointRefreshTime(ssi.second->get(i, member).getEndpoint());
+			}
+		} else {
+			cx->clearFailedEndpointOnHealthyServer(endpoint);
 		}
+	}
+
+	if (onlyEndpointFailedAndNeedRefresh) {
+		cx->invalidateCache(key);
+
+		// Refresh the cache with a new getKeyLocations made to proxies.
+		return getKeyLocation_internal(cx, key, spanID, debugID, useProvisionalProxies, isBackward);
 	}
 
 	return ssi;
@@ -2553,21 +2609,34 @@ Future<std::vector<std::pair<KeyRange, Reference<LocationInfo>>>> getKeyRangeLoc
 
 	bool foundFailed = false;
 	for (const auto& [range, locInfo] : locations) {
-		bool onlyEndpointFailed = false;
+		bool onlyEndpointFailedAndNeedRefresh = false;
 		for (int i = 0; i < locInfo->size(); i++) {
-			if (IFailureMonitor::failureMonitor().onlyEndpointFailed(locInfo->get(i, member).getEndpoint())) {
-				onlyEndpointFailed = true;
-				break;
+			const Endpoint& endpoint = locInfo->get(i, member).getEndpoint();
+			if (IFailureMonitor::failureMonitor().onlyEndpointFailed(endpoint)) {
+				// Please refer to `getKeyLocation` about why we keep track of endpoint failure starting and refreshing
+				// time.
+				cx->setFailedEndpointOnHealthyServer(endpoint);
+				const auto& failureInfo = cx->getEndpointFailureInfo(endpoint);
+				ASSERT(failureInfo.present());
+				if (now() - failureInfo.get().startTime < CLIENT_KNOBS->LOCATION_CACHE_ENDPOINT_FAILURE_GRACE_PERIOD ||
+				    now() - failureInfo.get().lastRefreshTime >
+				        CLIENT_KNOBS->LOCATION_CACHE_FAILED_ENDPOINT_RETRY_INTERVAL) {
+					onlyEndpointFailedAndNeedRefresh = true;
+					cx->updateFailedEndpointRefreshTime(locInfo->get(i, member).getEndpoint());
+				}
+			} else {
+				cx->clearFailedEndpointOnHealthyServer(endpoint);
 			}
 		}
 
-		if (onlyEndpointFailed) {
+		if (onlyEndpointFailedAndNeedRefresh) {
 			cx->invalidateCache(range.begin);
 			foundFailed = true;
 		}
 	}
 
 	if (foundFailed) {
+		// Refresh the cache with a new getKeyRangeLocations made to proxies.
 		return getKeyRangeLocations_internal(cx, keys, limit, reverse, spanID, debugID, useProvisionalProxies);
 	}
 
@@ -5095,7 +5164,7 @@ ACTOR static Future<Void> commitDummyTransaction(Reference<TransactionState> trS
 			return Void();
 		} catch (Error& e) {
 			TraceEvent("CommitDummyTransactionError")
-			    .error(e, true)
+			    .errorUnsuppressed(e)
 			    .detail("Key", range.begin)
 			    .detail("Retries", retries);
 			wait(tr.onError(e));
@@ -5713,9 +5782,10 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion(SpanID parentSpan,
 	loop {
 		try {
 			state GetReadVersionRequest req(span.context, transactionCount, priority, flags, tags, debugID);
+			state Future<Void> onProxiesChanged = cx->onProxiesChanged();
 
 			choose {
-				when(wait(cx->onProxiesChanged())) {}
+				when(wait(onProxiesChanged)) { onProxiesChanged = cx->onProxiesChanged(); }
 				when(GetReadVersionReply v =
 				         wait(basicLoadBalance(cx->getGrvProxies(UseProvisionalProxies(
 				                                   flags & GetReadVersionRequest::FLAG_USE_PROVISIONAL_PROXIES)),
@@ -6846,7 +6916,7 @@ ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID sn
 			}
 		}
 	} catch (Error& e) {
-		TraceEvent("SnapCreateError").detail("SnapCmd", snapCmd.toString()).detail("UID", snapUID).error(e);
+		TraceEvent("SnapCreateError").error(e).detail("SnapCmd", snapCmd.toString()).detail("UID", snapUID);
 		throw;
 	}
 }
@@ -6874,13 +6944,14 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion
 	} catch (Error& e) {
 		if (e.code() != error_code_actor_cancelled) {
 			TraceEvent("ExclusionSafetyCheckError")
+			    .error(e)
 			    .detail("NumExclusion", exclusions.size())
-			    .detail("Exclusions", describe(exclusions))
-			    .error(e);
+			    .detail("Exclusions", describe(exclusions));
 		}
 		throw;
 	}
 	TraceEvent("ExclusionSafetyCheckCoordinators").log();
+	wait(cx->getConnectionRecord()->resolveHostnames());
 	state ClientCoordinators coordinatorList(cx->getConnectionRecord());
 	state std::vector<Future<Optional<LeaderInfo>>> leaderServers;
 	leaderServers.reserve(coordinatorList.clientLeaderServers.size());

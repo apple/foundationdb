@@ -802,9 +802,12 @@ void addUniversalTraceField(const std::string& name, const std::string& value) {
 	g_traceLog.addUniversalTraceField(name, value);
 }
 
-TraceEvent::TraceEvent() : initialized(true), enabled(false), logged(true) {}
+BaseTraceEvent::BaseTraceEvent() : initialized(true), enabled(false), logged(true) {}
+BaseTraceEvent::BaseTraceEvent(Severity severity, const char* type, UID id)
+  : initialized(false), enabled(g_network == nullptr || FLOW_KNOBS->MIN_TRACE_SEVERITY <= severity), logged(false),
+    severity(severity), type(type), id(id) {}
 
-TraceEvent::TraceEvent(TraceEvent&& ev) {
+BaseTraceEvent::BaseTraceEvent(BaseTraceEvent&& ev) {
 	enabled = ev.enabled;
 	err = ev.err;
 	fields = std::move(ev.fields);
@@ -830,7 +833,7 @@ TraceEvent::TraceEvent(TraceEvent&& ev) {
 	ev.logged = true;
 }
 
-TraceEvent& TraceEvent::operator=(TraceEvent&& ev) {
+BaseTraceEvent& BaseTraceEvent::operator=(BaseTraceEvent&& ev) {
 	// Note: still broken if ev and this are the same memory address.
 	enabled = ev.enabled;
 	err = ev.err;
@@ -867,36 +870,29 @@ Future<Void> pingTraceLogWriterThread() {
 	return g_traceLog.pingWriterThread();
 }
 
-TraceEvent::TraceEvent(const char* type, UID id)
-  : initialized(false), enabled(true), logged(false), severity(SevInfo), type(type), id(id) {
+TraceEvent::TraceEvent(const char* type, UID id) : BaseTraceEvent(SevInfo, type, id) {
 	setMaxFieldLength(0);
 	setMaxEventLength(0);
 }
-TraceEvent::TraceEvent(Severity severity, const char* type, UID id)
-  : initialized(false), enabled(g_network == nullptr || FLOW_KNOBS->MIN_TRACE_SEVERITY <= severity), logged(false),
-    severity(severity), type(type), id(id) {
+TraceEvent::TraceEvent(Severity severity, const char* type, UID id) : BaseTraceEvent(severity, type, id) {
 	setMaxFieldLength(0);
 	setMaxEventLength(0);
 }
-TraceEvent::TraceEvent(TraceInterval& interval, UID id)
-  : initialized(false), enabled(g_network == nullptr || FLOW_KNOBS->MIN_TRACE_SEVERITY <= interval.severity),
-    logged(false), severity(interval.severity), type(interval.type), id(id) {
+TraceEvent::TraceEvent(TraceInterval& interval, UID id) : BaseTraceEvent(interval.severity, interval.type, id) {
 	setMaxFieldLength(0);
 	setMaxEventLength(0);
 
 	init(interval);
 }
 TraceEvent::TraceEvent(Severity severity, TraceInterval& interval, UID id)
-  : initialized(false), enabled(g_network == nullptr || FLOW_KNOBS->MIN_TRACE_SEVERITY <= severity), logged(false),
-    severity(severity), type(interval.type), id(id) {
-
+  : BaseTraceEvent(severity, interval.type, id) {
 	setMaxFieldLength(0);
 	setMaxEventLength(0);
 
 	init(interval);
 }
 
-bool TraceEvent::init(TraceInterval& interval) {
+bool BaseTraceEvent::init(TraceInterval& interval) {
 	bool result = init();
 	switch (interval.count++) {
 	case 0: {
@@ -913,7 +909,7 @@ bool TraceEvent::init(TraceInterval& interval) {
 	return result;
 }
 
-bool TraceEvent::init() {
+bool BaseTraceEvent::init() {
 	ASSERT(!logged);
 	if (initialized) {
 		return enabled;
@@ -1007,7 +1003,7 @@ TraceEvent& TraceEvent::errorImpl(class Error const& error, bool includeCancelle
 	return *this;
 }
 
-TraceEvent& TraceEvent::detailImpl(std::string&& key, std::string&& value, bool writeEventMetricField) {
+BaseTraceEvent& BaseTraceEvent::detailImpl(std::string&& key, std::string&& value, bool writeEventMetricField) {
 	init();
 	if (enabled) {
 		++g_allocation_tracing_disabled;
@@ -1032,25 +1028,25 @@ TraceEvent& TraceEvent::detailImpl(std::string&& key, std::string&& value, bool 
 	return *this;
 }
 
-void TraceEvent::setField(const char* key, int64_t value) {
+void BaseTraceEvent::setField(const char* key, int64_t value) {
 	++g_allocation_tracing_disabled;
 	tmpEventMetric->setField(key, value);
 	--g_allocation_tracing_disabled;
 }
 
-void TraceEvent::setField(const char* key, double value) {
+void BaseTraceEvent::setField(const char* key, double value) {
 	++g_allocation_tracing_disabled;
 	tmpEventMetric->setField(key, value);
 	--g_allocation_tracing_disabled;
 }
 
-void TraceEvent::setField(const char* key, const std::string& value) {
+void BaseTraceEvent::setField(const char* key, const std::string& value) {
 	++g_allocation_tracing_disabled;
 	tmpEventMetric->setField(key, Standalone<StringRef>(value));
 	--g_allocation_tracing_disabled;
 }
 
-TraceEvent& TraceEvent::detailf(std::string key, const char* valueFormat, ...) {
+BaseTraceEvent& BaseTraceEvent::detailf(std::string key, const char* valueFormat, ...) {
 	if (enabled) {
 		va_list args;
 		va_start(args, valueFormat);
@@ -1063,7 +1059,7 @@ TraceEvent& TraceEvent::detailf(std::string key, const char* valueFormat, ...) {
 	}
 	return *this;
 }
-TraceEvent& TraceEvent::detailfNoMetric(std::string&& key, const char* valueFormat, ...) {
+BaseTraceEvent& BaseTraceEvent::detailfNoMetric(std::string&& key, const char* valueFormat, ...) {
 	if (enabled) {
 		va_list args;
 		va_start(args, valueFormat);
@@ -1080,15 +1076,14 @@ TraceEvent& TraceEvent::detailfNoMetric(std::string&& key, const char* valueForm
 	return *this;
 }
 
-TraceEvent& TraceEvent::trackLatest(const std::string& trackingKey) {
+BaseTraceEvent& BaseTraceEvent::trackLatest(const std::string& trackingKey) {
 	ASSERT(!logged);
 	this->trackingKey = trackingKey;
 	ASSERT(this->trackingKey.size() != 0 && this->trackingKey[0] != '/' && this->trackingKey[0] != '\\');
 	return *this;
 }
 
-TraceEvent& TraceEvent::sample(double sampleRate, bool logSampleRate) {
-	ASSERT(!logged);
+BaseTraceEvent& TraceEvent::sample(double sampleRate, bool logSampleRate) {
 	if (enabled) {
 		if (initialized) {
 			TraceEvent(g_network && g_network->isSimulated() ? SevError : SevWarnAlways,
@@ -1107,7 +1102,7 @@ TraceEvent& TraceEvent::sample(double sampleRate, bool logSampleRate) {
 	return *this;
 }
 
-TraceEvent& TraceEvent::suppressFor(double duration, bool logSuppressedEventCount) {
+BaseTraceEvent& TraceEvent::suppressFor(double duration, bool logSuppressedEventCount) {
 	ASSERT(!logged);
 	if (enabled) {
 		if (initialized) {
@@ -1126,23 +1121,25 @@ TraceEvent& TraceEvent::suppressFor(double duration, bool logSuppressedEventCoun
 				}
 			} else {
 				TraceEvent(SevWarnAlways, "SuppressionFromNonNetworkThread").detail("Event", type);
-				detail("__InvalidSuppression__",
-				       ""); // Choosing a detail name that is unlikely to collide with other names
+				// Choosing a detail name that is unlikely to collide with other names
+				detail("__InvalidSuppression__", "");
 			}
 		}
-		init(); // we do not want any future calls on this trace event to disable it, because we have already counted it
-		        // towards our suppression budget
+
+		// we do not want any future calls on this trace event to disable it, because we have already counted it
+		// towards our suppression budget
+		init();
 	}
 
 	return *this;
 }
 
-TraceEvent& TraceEvent::setErrorKind(ErrorKind errorKind) {
+BaseTraceEvent& BaseTraceEvent::setErrorKind(ErrorKind errorKind) {
 	this->errorKind = errorKind;
 	return *this;
 }
 
-TraceEvent& TraceEvent::setMaxFieldLength(int maxFieldLength) {
+BaseTraceEvent& BaseTraceEvent::setMaxFieldLength(int maxFieldLength) {
 	ASSERT(!logged);
 	if (maxFieldLength == 0) {
 		this->maxFieldLength = FLOW_KNOBS ? FLOW_KNOBS->MAX_TRACE_FIELD_LENGTH : 495;
@@ -1165,15 +1162,15 @@ uint64_t getTraceThreadId() {
 	return threadId;
 }
 
-void TraceEvent::setThreadId() {
+void BaseTraceEvent::setThreadId() {
 	this->detail("ThreadID", getTraceThreadId());
 }
 
-int TraceEvent::getMaxFieldLength() const {
+int BaseTraceEvent::getMaxFieldLength() const {
 	return maxFieldLength;
 }
 
-TraceEvent& TraceEvent::setMaxEventLength(int maxEventLength) {
+BaseTraceEvent& BaseTraceEvent::setMaxEventLength(int maxEventLength) {
 	ASSERT(!logged);
 	if (maxEventLength == 0) {
 		this->maxEventLength = FLOW_KNOBS ? FLOW_KNOBS->MAX_TRACE_EVENT_LENGTH : 4000;
@@ -1184,11 +1181,11 @@ TraceEvent& TraceEvent::setMaxEventLength(int maxEventLength) {
 	return *this;
 }
 
-int TraceEvent::getMaxEventLength() const {
+int BaseTraceEvent::getMaxEventLength() const {
 	return maxEventLength;
 }
 
-TraceEvent& TraceEvent::GetLastError() {
+BaseTraceEvent& BaseTraceEvent::GetLastError() {
 #ifdef _WIN32
 	return detailf("WinErrorCode", "%x", ::GetLastError());
 #elif defined(__unixish__)
@@ -1196,21 +1193,21 @@ TraceEvent& TraceEvent::GetLastError() {
 #endif
 }
 
-unsigned long TraceEvent::eventCounts[NUM_MAJOR_LEVELS_OF_EVENTS] = { 0, 0, 0, 0, 0 };
+unsigned long BaseTraceEvent::eventCounts[NUM_MAJOR_LEVELS_OF_EVENTS] = { 0, 0, 0, 0, 0 };
 
-unsigned long TraceEvent::CountEventsLoggedAt(Severity sev) {
+unsigned long BaseTraceEvent::CountEventsLoggedAt(Severity sev) {
 	ASSERT(sev <= SevMaxUsed);
 	return TraceEvent::eventCounts[sev / 10];
 }
 
-TraceEvent& TraceEvent::backtrace(const std::string& prefix) {
+BaseTraceEvent& BaseTraceEvent::backtrace(const std::string& prefix) {
 	ASSERT(!logged);
 	if (this->severity == SevError || !enabled)
 		return *this; // We'll backtrace this later in ~TraceEvent
 	return detail(prefix + "Backtrace", platform::get_backtrace());
 }
 
-void TraceEvent::log() {
+void BaseTraceEvent::log() {
 	if (!logged) {
 		init();
 		++g_allocation_tracing_disabled;
@@ -1256,7 +1253,7 @@ void TraceEvent::log() {
 				}
 			}
 		} catch (Error& e) {
-			TraceEvent(SevError, "TraceEventLoggingError").error(e, true);
+			TraceEvent(SevError, "TraceEventLoggingError").errorUnsuppressed(e);
 		}
 		tmpEventMetric.reset();
 		logged = true;
@@ -1264,13 +1261,13 @@ void TraceEvent::log() {
 	}
 }
 
-TraceEvent::~TraceEvent() {
+BaseTraceEvent::~BaseTraceEvent() {
 	log();
 }
 
-thread_local bool TraceEvent::networkThread = false;
+thread_local bool BaseTraceEvent::networkThread = false;
 
-void TraceEvent::setNetworkThread() {
+void BaseTraceEvent::setNetworkThread() {
 	if (!networkThread) {
 		if (FLOW_KNOBS->ALLOCATION_TRACING_ENABLED) {
 			--g_allocation_tracing_disabled;
@@ -1282,11 +1279,11 @@ void TraceEvent::setNetworkThread() {
 	}
 }
 
-bool TraceEvent::isNetworkThread() {
+bool BaseTraceEvent::isNetworkThread() {
 	return networkThread;
 }
 
-double TraceEvent::getCurrentTime() {
+double BaseTraceEvent::getCurrentTime() {
 	if (g_trace_clock.load() == TRACE_CLOCK_NOW) {
 		if (!isNetworkThread() || !g_network) {
 			return timer_monotonic();
@@ -1303,7 +1300,7 @@ double TraceEvent::getCurrentTime() {
 // This only has second-resolution for the simple reason
 // that std::put_time does not support higher resolution.
 // This is fine since we always log the flow time as well.
-std::string TraceEvent::printRealTime(double time) {
+std::string BaseTraceEvent::printRealTime(double time) {
 	using Clock = std::chrono::system_clock;
 	time_t ts = Clock::to_time_t(Clock::time_point(
 	    std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double, std::ratio<1>>(time))));
