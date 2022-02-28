@@ -27,6 +27,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 
 import com.apple.foundationdb.async.AsyncUtil;
+import com.apple.foundationdb.tuple.Tuple;
 
 class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsumer {
 	private DatabaseOptions options;
@@ -127,6 +128,11 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 	}
 
 	@Override
+	public CompletableFuture<Void> allocateTenant(Tuple tenantName) {
+		return allocateTenant(tenantName.pack());
+	}
+
+	@Override
 	public CompletableFuture<Void> deleteTenant(byte[] tenantName) {
 		pointerReadLock.lock();
 		try {
@@ -137,8 +143,23 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 	}
 
 	@Override
+	public CompletableFuture<Void> deleteTenant(Tuple tenantName) {
+		return deleteTenant(tenantName.pack());
+	}
+
+	@Override
 	public Tenant openTenant(byte[] tenantName, Executor e) {
 		return openTenant(tenantName, e, eventKeeper);
+	}
+
+	@Override
+	public Tenant openTenant(Tuple tenantName) {
+		return openTenant(tenantName.pack());
+	}
+
+	@Override
+	public Tenant openTenant(Tuple tenantName, Executor e) {
+		return openTenant(tenantName.pack(), e);
 	}
 
 	@Override
@@ -157,6 +178,11 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 		} finally {
 			pointerReadLock.unlock();
 		}
+	}
+
+	@Override
+	public Tenant openTenant(Tuple tenantName, Executor e, EventKeeper eventKeeper) {
+		return openTenant(tenantName.pack(), e, eventKeeper);
 	}
 
 	@Override

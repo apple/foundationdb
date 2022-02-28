@@ -23,6 +23,7 @@ package com.apple.foundationdb;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.function.Function;
+import com.apple.foundationdb.tuple.Tuple;
 
 /**
  * A mutable, lexicographically ordered mapping from binary keys to binary values.
@@ -50,6 +51,16 @@ public interface Database extends AutoCloseable, TransactionContext {
 	CompletableFuture<Void> allocateTenant(byte[] tenantName);
 
 	/**
+	 * Creates a new tenant in the cluster. This is a convenience method that generates the tenant name by packing a
+	 * {@code Tuple}.
+	 *
+	 * @param tenantName The name of the tenant, as a Tuple.
+	 * @return a {@code CompletableFuture} that when set without error will indicate that the tenant has
+	 * been created.
+	 */
+	CompletableFuture<Void> allocateTenant(Tuple tenantName);
+
+	/**
 	 * Deletes a tenant from the cluster.<br>
 	 * <br>
 	 * <b>Note:</b> A tenant cannot be deleted if it has any data in it. To delete a non-empty tenant, you must
@@ -62,6 +73,19 @@ public interface Database extends AutoCloseable, TransactionContext {
 	CompletableFuture<Void> deleteTenant(byte[] tenantName);
 
 	/**
+	 * Deletes a tenant from the cluster. This is a convenience method that generates the tenant name by packing a
+	 * {@code Tuple}.<br>
+	 * <br>
+	 * <b>Note:</b> A tenant cannot be deleted if it has any data in it. To delete a non-empty
+	 * tenant, you must first use a clear operation to delete all of its keys.
+	 *
+	 * @param tenantName The name of the tenant being deleted, as a Tuple.
+	 * @return a {@code CompletableFuture} that when set without error will indicate that the tenant has
+	 * been deleted.
+	 */
+	CompletableFuture<Void> deleteTenant(Tuple tenantName);
+
+	/**
 	 * Opens an existing tenant to be used for running transactions.
 	 *
 	 * @param tenantName The name of the tenant to open.
@@ -70,6 +94,15 @@ public interface Database extends AutoCloseable, TransactionContext {
 	default Tenant openTenant(byte[] tenantName) {
 		return openTenant(tenantName, getExecutor());
 	}
+
+	/**
+	 * Opens an existing tenant to be used for running transactions. This is a convenience method that generates the
+	 * tenant name by packing a {@code Tuple}.
+	 *
+	 * @param tenantName The name of the tenant to open, as a Tuple.
+	 * @return a {@link Tenant} that can be used to create transactions that will operate in the tenant's key-space.
+	 */
+	Tenant openTenant(Tuple tenantName);
 
 	/**
 	 * Opens an existing tenant to be used for running transactions.
@@ -81,6 +114,16 @@ public interface Database extends AutoCloseable, TransactionContext {
 	Tenant openTenant(byte[] tenantName, Executor e);
 
 	/**
+	 * Opens an existing tenant to be used for running transactions. This is a convenience method that generates the
+	 * tenant name by packing a {@code Tuple}.
+	 *
+	 * @param tenantName The name of the tenant to open, as a Tuple.
+	 * @param e the {@link Executor} to use when executing asynchronous callbacks.
+	 * @return a {@link Tenant} that can be used to create transactions that will operate in the tenant's key-space.
+	 */
+	Tenant openTenant(Tuple tenantName, Executor e);
+
+	/**
 	 * Opens an existing tenant to be used for running transactions.
 	 *
 	 * @param tenantName The name of the tenant to open.
@@ -89,6 +132,17 @@ public interface Database extends AutoCloseable, TransactionContext {
 	 * @return a {@link Tenant} that can be used to create transactions that will operate in the tenant's key-space.
 	 */
 	Tenant openTenant(byte[] tenantName, Executor e, EventKeeper eventKeeper);
+
+	/**
+	 * Opens an existing tenant to be used for running transactions. This is a convenience method that generates the
+	 * tenant name by packing a {@code Tuple}.
+	 *
+	 * @param tenantName The name of the tenant to open, as a Tuple.
+	 * @param e the {@link Executor} to use when executing asynchronous callbacks.
+	 * @param eventKeeper the {@link EventKeeper} to use when tracking instrumented calls for the tenant's transactions.
+	 * @return a {@link Tenant} that can be used to create transactions that will operate in the tenant's key-space.
+	 */
+	Tenant openTenant(Tuple tenantName, Executor e, EventKeeper eventKeeper);
 
 	/**
 	 * Creates a {@link Transaction} that operates on this {@code Database}. Creating a transaction
