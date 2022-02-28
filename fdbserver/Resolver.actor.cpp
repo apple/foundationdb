@@ -373,7 +373,7 @@ ACTOR Future<Void> resolver(ResolverInterface resolver,
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled || e.code() == error_code_worker_removed) {
-			TraceEvent("ResolverTerminated", resolver.id()).error(e, true);
+			TraceEvent("ResolverTerminated", resolver.id()).errorUnsuppressed(e);
 			return Void();
 		}
 		throw;

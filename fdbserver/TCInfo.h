@@ -93,6 +93,8 @@ public:
 		return (storeType == configStoreType || storeType == KeyValueStoreType::END);
 	}
 
+	bool hasHealthyAvailableSpace(double minAvailableSpaceRatio) const;
+
 	Future<Void> updateServerMetrics();
 	static Future<Void> updateServerMetrics(Reference<TCServerInfo> server);
 	Future<Void> serverMetricsPolling();
@@ -218,4 +220,6 @@ private:
 	// Calculate an "average" of the metrics replies that we received.  Penalize teams from which we did not receive all
 	// replies.
 	int64_t getLoadAverage() const;
+
+	bool allServersHaveHealthyAvailableSpace() const;
 };

@@ -1202,9 +1202,9 @@ MultiVersionDatabase::MultiVersionDatabase(MultiVersionApi* api,
 					// but we may not see trace logs from this client until a successful connection
 					// is established.
 					TraceEvent(SevWarnAlways, "FailedToInitializeExternalClient")
+					    .error(e)
 					    .detail("LibraryPath", client->libPath)
-					    .detail("ClusterFilePath", clusterFilePath)
-					    .error(e);
+					    .detail("ClusterFilePath", clusterFilePath);
 				}
 			}
 		});
@@ -1218,9 +1218,9 @@ MultiVersionDatabase::MultiVersionDatabase(MultiVersionApi* api,
 				} catch (Error& e) {
 					// This connection is discarded
 					TraceEvent(SevWarnAlways, "FailedToCreateLegacyDatabaseConnection")
+					    .error(e)
 					    .detail("LibraryPath", client->libPath)
-					    .detail("ClusterFilePath", clusterFilePath)
-					    .error(e);
+					    .detail("ClusterFilePath", clusterFilePath);
 				}
 			}
 		});
@@ -1360,8 +1360,8 @@ ThreadFuture<Void> MultiVersionDatabase::DatabaseState::monitorProtocolVersion()
 			}
 
 			TraceEvent("ErrorGettingClusterProtocolVersion")
-			    .detail("ExpectedProtocolVersion", expected)
-			    .error(cv.getError());
+			    .error(cv.getError())
+			    .detail("ExpectedProtocolVersion", expected);
 		}
 
 		ProtocolVersion clusterVersion =
@@ -1409,10 +1409,10 @@ void MultiVersionDatabase::DatabaseState::protocolVersionChanged(ProtocolVersion
 				newDb = client->api->createDatabase(clusterFilePath.c_str());
 			} catch (Error& e) {
 				TraceEvent(SevWarnAlways, "MultiVersionClientFailedToCreateDatabase")
+				    .error(e)
 				    .detail("LibraryPath", client->libPath)
 				    .detail("External", client->external)
-				    .detail("ClusterFilePath", clusterFilePath)
-				    .error(e);
+				    .detail("ClusterFilePath", clusterFilePath);
 
 				// Put the client in a disconnected state until the version changes again
 				updateDatabase(Reference<IDatabase>(), Reference<ClientInfo>());
@@ -1486,8 +1486,8 @@ void MultiVersionDatabase::DatabaseState::updateDatabase(Reference<IDatabase> ne
 				// We can't create a new database to monitor the cluster version. This means we will continue using the
 				// previous one, which should hopefully continue to work.
 				TraceEvent(SevWarnAlways, "FailedToCreateDatabaseForVersionMonitoring")
-				    .detail("ClusterFilePath", clusterFilePath)
-				    .error(e);
+				    .error(e)
+				    .detail("ClusterFilePath", clusterFilePath);
 			}
 		}
 	} else {
@@ -1499,8 +1499,8 @@ void MultiVersionDatabase::DatabaseState::updateDatabase(Reference<IDatabase> ne
 			// We can't create a new database to monitor the cluster version. This means we will continue using the
 			// previous one, which should hopefully continue to work.
 			TraceEvent(SevWarnAlways, "FailedToCreateDatabaseForVersionMonitoring")
-			    .detail("ClusterFilePath", clusterFilePath)
-			    .error(e);
+			    .error(e)
+			    .detail("ClusterFilePath", clusterFilePath);
 		}
 	}
 

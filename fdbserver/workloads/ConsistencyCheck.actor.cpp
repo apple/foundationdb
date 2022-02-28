@@ -1073,11 +1073,11 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				// If the storage server doesn't reply, then return -1
 				if (!reply.present()) {
 					TraceEvent("ConsistencyCheck_FailedToFetchMetrics")
+					    .error(reply.getError())
 					    .detail("Begin", printable(shard.begin))
 					    .detail("End", printable(shard.end))
 					    .detail("StorageServer", storageServers[i].id())
-					    .detail("IsTSS", storageServers[i].isTss() ? "True" : "False")
-					    .error(reply.getError());
+					    .detail("IsTSS", storageServers[i].isTss() ? "True" : "False");
 					estimatedBytes.push_back(-1);
 				}
 
@@ -1495,6 +1495,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 								    rangeResult.isError() ? rangeResult.getError() : rangeResult.get().error.get();
 
 								TraceEvent("ConsistencyCheck_StorageServerUnavailable")
+								    .errorUnsuppressed(e)
 								    .suppressFor(1.0)
 								    .detail("StorageServer", storageServers[j])
 								    .detail("ShardBegin", printable(range.begin))
@@ -1503,8 +1504,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 								    .detail("UID", storageServerInterfaces[j].id())
 								    .detail("GetKeyValuesToken",
 								            storageServerInterfaces[j].getKeyValues.getEndpoint().token)
-								    .detail("IsTSS", storageServerInterfaces[j].isTss() ? "True" : "False")
-								    .error(e);
+								    .detail("IsTSS", storageServerInterfaces[j].isTss() ? "True" : "False");
 
 								// All shards should be available in quiscence
 								if (self->performQuiescentChecks && !storageServerInterfaces[j].isTss()) {
