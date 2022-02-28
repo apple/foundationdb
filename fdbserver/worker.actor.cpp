@@ -216,8 +216,7 @@ ACTOR Future<Void> handleIOErrors(Future<Void> actor, IClosable* store, UID id, 
 			if (e.isError() && e.getError().code() == error_code_please_reboot) {
 				// no need to wait.
 			} else {
-				TraceEvent(SevDebug, "HandleIOErrorsActorBeforeOnClosed")
-				    .detail("IsClosed", onClosed.isReady());
+				TraceEvent(SevDebug, "HandleIOErrorsActorBeforeOnClosed").detail("IsClosed", onClosed.isReady());
 				wait(onClosed);
 				TraceEvent(SevDebug, "HandleIOErrorsActorOnClosedFinished")
 				    .detail("StoreError",
@@ -1519,7 +1518,9 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				LocalLineage _;
 				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::Storage;
 				// add a knob in fdbserver/Knobs.h for the last argument
-				TraceEvent(SevDebug, "OpenRemoteKVStore").detail("StoreType", "1");
+				TraceEvent(SevDebug, "OpenRemoteKVStore")
+				    .detail("StoreType", "1")
+				    .detail("RemoteKVStore", SERVER_KNOBS->REMOTE_KV_STORE);
 				IKeyValueStore* kv = openKVStore(s.storeType,
 				                                 s.filename,
 				                                 s.storeID,
@@ -2076,7 +2077,9 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                   isTss ? testingStoragePrefix.toString() : fileStoragePrefix.toString(),
 					                   recruited.id());
 
-					TraceEvent(SevDebug, "OpenRemoteKVStore").detail("StoreType", "4");
+					TraceEvent(SevDebug, "OpenRemoteKVStore")
+					    .detail("StoreType", "4")
+					    .detail("RemoteKVStore", SERVER_KNOBS->REMOTE_KV_STORE);
 					IKeyValueStore* data = openKVStore(req.storeType,
 					                                   filename,
 					                                   recruited.id(),

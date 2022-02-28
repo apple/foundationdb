@@ -1453,6 +1453,8 @@ public:
 			                         std::get<1>(fitness_workers.begin()->first));
 		}
 
+		TraceEvent(SevDebug, "GetWorkerForRoleInDatacenterThrow").detail("Workers", id_worker.size());
+
 		throw no_more_servers();
 	}
 

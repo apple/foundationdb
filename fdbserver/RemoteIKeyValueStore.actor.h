@@ -153,6 +153,9 @@ struct IKVSSetRequest {
 	KeyValueRef keyValue;
 	ReplyPromise<Void> reply;
 
+	IKVSSetRequest() {}
+	IKVSSetRequest(KeyValueRef keyValue) : keyValue(keyValue) {}
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, keyValue, reply);
@@ -355,7 +358,10 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 	Future<Void> initialized;
 	KeyValueStoreProcess ikvsProcess;
 	StorageBytes storageBytes;
-	RemoteIKeyValueStore() : ikvsProcess(), storageBytes(0, 0, 0, 0) { ikvsProcess.setSSInterface(this); }
+	bool stopped;
+	RemoteIKeyValueStore() : ikvsProcess(), storageBytes(0, 0, 0, 0), stopped(false) {
+		ikvsProcess.setSSInterface(this);
+	}
 
 	Future<Void> init() override {
 		TraceEvent(SevInfo, "RemoteIKeyValueStoreInit").log();
@@ -366,21 +372,21 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 	Future<Void> onClosed() const override { return onCloseImpl(this); }
 
 	void dispose() override {
-		TraceEvent(SevDebug, "RemoteIKVSDisposeRequest").backtrace();
-		interf.dispose.send(IKVSDisposeRequest{});
+		TraceEvent(SevDebug, "RemoteIKVSDisposeRequest").detail("Stopped", stopped).backtrace();
+		if (!stopped)
+			interf.dispose.send(IKVSDisposeRequest{});
 		delete this;
 	}
 	void close() override {
-		TraceEvent(SevDebug, "RemoteIKVSCloseRequest").backtrace();
-		interf.close.send(IKVSCloseRequest{});
+		TraceEvent(SevDebug, "RemoteIKVSCloseRequest").detail("Stopped", stopped).backtrace();
+		if (!stopped)
+			interf.close.send(IKVSCloseRequest{});
 		delete this;
 	}
 
 	KeyValueStoreType getType() const override { return interf.type(); }
 
-	void set(KeyValueRef keyValue, const Arena* arena = nullptr) override {
-		interf.set.send(IKVSSetRequest{ keyValue });
-	}
+	void set(KeyValueRef keyValue, const Arena* arena = nullptr) override { interf.set.send(IKVSSetRequest(keyValue)); }
 	void clear(KeyRangeRef range, const Arena* arena = nullptr) override {
 		interf.clear.send(IKVSClearRequest{ range });
 	}
@@ -437,9 +443,14 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 				    .error(e.isError() ? e.getError() : success(), true)
 				    .backtrace();
 				// if kv-store is error, we should see child process died
-				if(e.isError() && e.getError().code() == error_code_actor_cancelled) {
+				// const_cast<RemoteIKeyValueStore*>(self)->stopped = true;
+				if (e.isError() && e.getError().code() == error_code_actor_cancelled) {
 					TraceEvent(SevDebug, "WaitForChildProcessFinished").log();
 					wait(success(returnCodeF));
+				} else {
+					// fprintf(stderr, "GetErrorImpl cancelling child actor\n");
+					returnCodeF.cancel();
+					// wait(success(returnCodeF));
 				}
 				if (e.isError())
 					throw e.getError();

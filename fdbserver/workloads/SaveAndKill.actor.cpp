@@ -22,6 +22,7 @@
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/simulator.h"
+#include "boost/algorithm/string/predicate.hpp"
 
 #undef state
 #include "fdbclient/SimpleIni.h"
@@ -73,11 +74,13 @@ struct SaveAndKillWorkload : TestWorkload {
 		std::map<std::string, ISimulator::ProcessInfo*> allProcessesMap =
 		    std::map<std::string, ISimulator::ProcessInfo*>();
 		for (auto it = rebootingProcesses.begin(); it != rebootingProcesses.end(); it++) {
-			if (allProcessesMap.find(it->second->dataFolder) == allProcessesMap.end())
+			if (std::string(it->second->name) != "remote flow process" &&
+			    allProcessesMap.find(it->second->dataFolder) == allProcessesMap.end())
 				allProcessesMap[it->second->dataFolder] = it->second;
 		}
 		for (auto it = processes.begin(); it != processes.end(); it++) {
-			if (allProcessesMap.find((*it)->dataFolder) == allProcessesMap.end())
+			if (std::string((*it)->name) != "remote flow process" &&
+			    allProcessesMap.find((*it)->dataFolder) == allProcessesMap.end())
 				allProcessesMap[(*it)->dataFolder] = *it;
 		}
 		ini.SetValue("META", "processCount", format("%d", allProcessesMap.size() - 1).c_str());

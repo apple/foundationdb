@@ -2,6 +2,9 @@
 testTitle='CloggedConfigureDatabaseTest'
 clearAfterTest=false
 
+[configuration]
+disableRemoteKVS=true
+
     [[test.workload]]
     testName='ConfigureDatabase'
     testDuration=30.0

@@ -128,7 +128,7 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 					NetworkAddressList l;
 					l.address = addr;
 					flowProcessEndpoint = Endpoint(l, token);
-					std::cout << "flowProcessEndpoint: " << flowProcessEndpoint.getPrimaryAddress().toString()
+					std::cout << "flowChildProcessEndpoint: " << flowProcessEndpoint.getPrimaryAddress().ip.toString()
 					          << ", token: " << flowProcessEndpoint.token.toString() << "\n";
 				} catch (Error& e) {
 					std::cerr << "Could not parse network address " << addressArray[0] << std::endl;
@@ -138,23 +138,27 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 		}
 	}
 	state int result = 0;
-	child = g_pSimulator->newProcess("remote flow process",
-	                                 self->address.ip,
-	                                 0,
-	                                 self->address.isTLS(),
-	                                 self->addresses.secondaryAddress.present() ? 2 : 1,
-	                                 self->locality,
-	                                 ProcessClass(ProcessClass::UnsetClass, ProcessClass::AutoSource),
-	                                 self->dataFolder,
-	                                 self->coordinationFolder,
-	                                 self->protocolVersion);
+	child =
+	    g_pSimulator->newProcess("remote flow process",
+	                             self->address.ip,
+	                             0,
+	                             self->address.isTLS(),
+	                             self->addresses.secondaryAddress.present() ? 2 : 1,
+	                             self->locality,
+	                             ProcessClass(ProcessClass::UnsetClass, ProcessClass::AutoSource),
+	                             self->dataFolder,
+	                             self->coordinationFolder, // do we also need to customize this coordination folder path
+	                             self->protocolVersion);
 	wait(g_pSimulator->onProcess(child));
 	state Future<ISimulator::KillType> onShutdown = child->onShutdown();
 	state Future<ISimulator::KillType> parentShutdown = self->onShutdown();
+	state Future<Void> flowProcessF;
 
 	try {
 		// TODO: parse paramList
-		TraceEvent(SevDebug, "SpawnedChildProcess").detail("IP", child->toString());
+		TraceEvent(SevDebug, "SpawnedChildProcess")
+		    .detail("Child", child->toString())
+		    .detail("Parent", self->toString());
 		std::string role = "";
 		std::string addr = "";
 		for (int i = 0; i < paramList.size(); i++) {
@@ -164,12 +168,14 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 		}
 		if (role == "flowprocess" && !parentShutdown.isReady()) {
 			self->hasChild = true;
+			state std::string childDataFolder(std::string(child->dataFolder).append("_child"));
+			child->dataFolder = childDataFolder.c_str();
 			state Future<Void> parentSSClosed = parent->onClosed();
 			FlowTransport::createInstance(false, 1, WLTOKEN_IKVS_RESERVED_COUNT);
 			FlowTransport::transport().bind(child->address, child->address);
 			Sim2FileSystem::newFileSystem();
 			ProcessFactory<KeyValueStoreProcess>(flowProcessName.c_str());
-			state Future<Void> flowProcessF = runFlowProcess(flowProcessName, flowProcessEndpoint);
+			flowProcessF = runFlowProcess(flowProcessName, flowProcessEndpoint);
 
 			choose {
 				when(wait(flowProcessF)) {
@@ -206,10 +212,14 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 		}
 	} catch (Error& e) {
 		TraceEvent(e.code() == error_code_actor_cancelled ? SevInfo : SevError, "RemoteIKVSDied").error(e, true);
-		if (e.code() == error_code_actor_cancelled) {
-			throw;
+		state Error error(e);
+		// fprintf(stderr, "spawnSimulated is cancelling\n");
+		flowProcessF.cancel();
+		g_pSimulator->destroyProcess(child);
+		if (error.code() == error_code_actor_cancelled) {
+			throw error;
 		}
-		if (e.code() == error_code_io_timeout && !onShutdown.isReady()) {
+		if (error.code() == error_code_io_timeout && !onShutdown.isReady()) {
 			TraceEvent(SevDebug, "SpawnedProcessRebooting").log();
 			onShutdown = ISimulator::RebootProcess;
 		}

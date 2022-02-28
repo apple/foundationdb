@@ -19,7 +19,10 @@ struct AfterReturn {
 	AfterReturn() : kvStore(nullptr) {}
 	AfterReturn(IKeyValueStore* store, UID& uid) : kvStore(store), id(uid) {}
 	~AfterReturn() {
-		TraceEvent(SevDebug, "RemoteKVStoreAfterReturn").detail("UID", id).log();
+		TraceEvent(SevDebug, "RemoteKVStoreAfterReturn")
+		    .detail("Valid", kvStore != nullptr ? "True" : "False")
+		    .detail("UID", id)
+		    .log();
 		if (kvStore != nullptr) {
 			kvStore->close();
 		}
@@ -39,6 +42,21 @@ ACTOR void sendCommitReply(IKVSCommitRequest commitReq, IKeyValueStore* kvStore,
 	} catch (Error& e) {
 		TraceEvent(SevDebug, "RemoteKVSCommitReplyError").error(e, true);
 		commitReq.reply.sendError(e.code() == error_code_actor_cancelled ? remote_kvs_cancelled() : e);
+	}
+}
+
+ACTOR template <class T>
+void cancellableForwardPromise(ReplyPromise<T> output, Future<T> input, Future<Void> stop) {
+	try {
+		choose {
+			when(T value = wait(input)) { output.send(value); }
+			when(wait(stop)) {
+				// fprintf(stderr, "Cancelled Forward Promise\n");
+				return;
+			}
+		}
+	} catch (Error& e) {
+		output.sendError(e);
 	}
 }
 
@@ -75,7 +93,10 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 		try {
 			choose {
 				when(IKVSGetValueRequest getReq = waitNext(ikvsInterface.getValue.getFuture())) {
-					forwardPromise(getReq.reply, kvStore->readValue(getReq.key, getReq.type, getReq.debugID));
+					// forwardPromise(getReq.reply, kvStore->readValue(getReq.key, getReq.type, getReq.debugID));
+					cancellableForwardPromise(getReq.reply,
+					                          kvStore->readValue(getReq.key, getReq.type, getReq.debugID),
+					                          onClosed.getFuture());
 				}
 				when(IKVSSetRequest req = waitNext(ikvsInterface.set.getFuture())) { kvStore->set(req.keyValue); }
 				when(IKVSClearRequest req = waitNext(ikvsInterface.clear.getFuture())) { kvStore->clear(req.range); }
@@ -83,10 +104,15 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 					sendCommitReply(commitReq, kvStore, onClosed.getFuture());
 				}
 				when(IKVSReadValuePrefixRequest readPrefixReq = waitNext(ikvsInterface.readValuePrefix.getFuture())) {
-					forwardPromise(
+					// forwardPromise(
+					//     readPrefixReq.reply,
+					//     kvStore->readValuePrefix(
+					//         readPrefixReq.key, readPrefixReq.maxLength, readPrefixReq.type, readPrefixReq.debugID));
+					cancellableForwardPromise(
 					    readPrefixReq.reply,
 					    kvStore->readValuePrefix(
-					        readPrefixReq.key, readPrefixReq.maxLength, readPrefixReq.type, readPrefixReq.debugID));
+					        readPrefixReq.key, readPrefixReq.maxLength, readPrefixReq.type, readPrefixReq.debugID),
+					    onClosed.getFuture());
 				}
 				when(IKVSReadRangeRequest readRangeReq = waitNext(ikvsInterface.readRange.getFuture())) {
 					// forwardPromise(
@@ -95,10 +121,11 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 					//          kvStore->readRange(
 					//              readRangeReq.keys, readRangeReq.rowLimit, readRangeReq.byteLimit,
 					//              readRangeReq.type)));
-					forwardPromise(
+					cancellableForwardPromise(
 					    readRangeReq.reply,
 					    kvStore->readRange(
-					        readRangeReq.keys, readRangeReq.rowLimit, readRangeReq.byteLimit, readRangeReq.type));
+					        readRangeReq.keys, readRangeReq.rowLimit, readRangeReq.byteLimit, readRangeReq.type),
+					    onClosed.getFuture());
 				}
 				when(IKVSGetStorageByteRequest req = waitNext(ikvsInterface.getStorageBytes.getFuture())) {
 					StorageBytes storageBytes = kvStore->getStorageBytes();
@@ -111,6 +138,7 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 					forwardPromiseVariant(onClosedReq.reply, kvStore->onClosed(), "OnClosed");
 				}
 				when(IKVSDisposeRequest req = waitNext(ikvsInterface.dispose.getFuture())) {
+					TraceEvent(SevDebug, "RemoteIKVSDisposeReceivedRequest").detail("UID", uid_kvs);
 					Future<Void> f = kvStore->onClosed();
 					kvStore->dispose();
 					guard.invalidate();
@@ -120,6 +148,7 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 					return Void();
 				}
 				when(IKVSCloseRequest req = waitNext(ikvsInterface.close.getFuture())) {
+					TraceEvent(SevDebug, "RemoteIKVSCloseReceivedRequest").detail("UID", uid_kvs);
 					Future<Void> f = kvStore->onClosed();
 					kvStore->close();
 					guard.invalidate();
@@ -131,22 +160,17 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 			}
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
+				// fprintf(stderr, "RemoteIKVS cancelling\n");
 				TraceEvent(SevDebug, "RemoteKVStoreCancelled").detail("UID", uid_kvs).backtrace();
-				// TODO : do we need to wait it fully closed
-				// state Future<Void> f = kvStore->onClosed();
 				// kvStore->close();
-				guard.invalidate();
-				// wait(f);
+				// guard.invalidate();
+				onClosed.send(Void());
+				// fprintf(stderr, "RemoteIKVS cancelled\n");
 				return Void();
 			} else {
 				TraceEvent(SevError, "RemoteKVStoreError").detail("UID", uid_kvs).error(e).backtrace();
 				throw;
 			}
-			// if (e.code() == error_code_actor_cancelled) {
-			// 	throw;
-			// }
-			// throw actor_cancelled();
-			// TODO: Error handling
 		}
 	}
 }

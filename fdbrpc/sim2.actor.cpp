@@ -2430,16 +2430,13 @@ ACTOR void doReboot(ISimulator::ProcessInfo* p, ISimulator::KillType kt) {
 			    .detail("Reliable", p->isReliable());
 			return;
 		} else if (std::string(p->name) == "remote flow process") {
-			TraceEvent(SevDebug, "DoRebootFailed")
-			    .detail("Name", p->name)
-			    .detail("Address", p->address);
+			TraceEvent(SevDebug, "DoRebootFailed").detail("Name", p->name).detail("Address", p->address);
 			return;
 		} else if (p->isParent()) {
-			TraceEvent(SevDebug, "DoRebootFailedOnParentProcess")
-			    .detail("Address", p->address);
+			TraceEvent(SevDebug, "DoRebootFailedOnParentProcess").detail("Address", p->address);
 			return;
 		}
-		
+
 		TraceEvent("RebootingProcess")
 		    .detail("KillType", kt)
 		    .detail("Address", p->address)
