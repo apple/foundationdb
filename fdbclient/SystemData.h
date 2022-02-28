@@ -97,7 +97,7 @@ extern const ValueRef serverKeysTrue, serverKeysTrueEmptyRange, serverKeysFalse;
 const Key serverKeysKey(UID serverID, const KeyRef& keys);
 const Key serverKeysPrefixFor(UID serverID);
 UID serverKeysDecodeServer(const KeyRef& key);
-std::pair<UID, Key> serverKeysDecodeServerBegin(const KeyRef& key) ;
+std::pair<UID, Key> serverKeysDecodeServerBegin(const KeyRef& key);
 bool serverHasKey(ValueRef storedValue);
 
 extern const KeyRangeRef conflictingKeysRange;
@@ -486,7 +486,7 @@ extern const KeyRangeRef monitorConfKeys;
 extern const KeyRef healthyZoneKey;
 extern const StringRef ignoreSSFailuresZoneString;
 extern const KeyRef rebalanceDDIgnoreKey;
-enum DDIgnore {REBALANCE_DISK = 1, REBALANCE_READ = 2};
+enum DDIgnore { REBALANCE_DISK = 1, REBALANCE_READ = 2 };
 
 const Value healthyZoneValue(StringRef const& zoneId, Version version);
 std::pair<Key, Version> decodeHealthyZoneValue(ValueRef const&);
