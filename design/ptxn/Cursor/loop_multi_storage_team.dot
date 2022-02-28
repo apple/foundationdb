@@ -1,0 +1,26 @@
+digraph FDB {
+    {
+        node [margin=0 shape=box, width=2];
+
+        start [label="Start", shape="circle", width=0.8, style=filled]
+        remoteMoreAvailable [label="Fill up empty cursors"];
+        hasRemaining [label="All cursors same version?"];
+        get [label="Consume the current version"];
+        next [label="Move to the next version"];
+        end [label="End", shape="circle", width=0.8, style=filled]
+    }
+
+    {
+        rank="min";
+        start; end; remoteMoreAvailable;
+    }
+
+    start -> remoteMoreAvailable;
+    remoteMoreAvailable -> end [label="No more data"];
+    remoteMoreAvailable -> hasRemaining [label="Received data"];
+    hasRemaining -> get [label="Yes"];
+    hasRemaining -> remoteMoreAvailable [label="No"];
+    get -> next;
+    next -> hasRemaining;
+}
+

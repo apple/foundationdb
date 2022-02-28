@@ -1,0 +1,301 @@
+\documentclass[9pt]{beamer}
+
+\usepackage{amsmath}
+\usepackage{array}
+\usepackage{listings}
+\usepackage{multirow}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{hyperref}
+\usepackage{tabularx}
+
+\hypersetup{
+    colorlinks=true
+}
+
+\lstset{
+    language=C++,
+    basicstyle=\ttfamily\scriptsize,
+    keywordstyle=\color{blue}\ttfamily,
+    stringstyle=\color{red}\ttfamily,
+    commentstyle=\color{green}\ttfamily,
+    morecomment=[l][\color{magenta}]{\#}
+}
+
+\usetheme{Pittsburgh}
+\usefonttheme{professionalfonts}
+
+\AtBeginEnvironment{frame}{\setcounter{footnote}{0}}
+
+\begin{document}
+
+    \title{Next Generation of FoundationDB Serialization}
+    \author{Xiaoge Su}
+    \institute{Apple Inc.}
+    \begin{frame}
+        \maketitle
+    \end{frame}
+
+    \begin{frame}{Table of Content}
+        \tableofcontents
+    \end{frame}
+
+    \section{Introduction}
+
+    \begin{frame}{Introduction}
+        \begin{itemize}
+            \item \href{https://www.foundationdb.org}{FoundationDB} is a key-value database with ACID support.
+            \item Internally, the key-value pairs, or \texttt{MutationRef}s, are \alert{serialized} before transported between components.
+            \begin{align}
+                \left.
+                \begin{matrix}
+                    \mbox{\texttt{MutationRef}}\\
+                    \mbox{\texttt{MutationRef}}\\
+                    ...\\
+                    \mbox{\texttt{MutationRef}}\\
+                \end{matrix}
+                \right\}\xrightarrow{\scriptstyle \mbox{Serialization}} \mbox{Binary data}\nonumber
+            \end{align}
+            \begin{align}
+                \mbox{Proxy} \xrightarrow{\scriptstyle \mbox{Serialized data}} \mbox{TLog} \xrightarrow{\scriptstyle \mbox{Serialized data}}\mbox{Storage Server}\nonumber
+            \end{align}
+
+            \item Recently, storage teams are introduced to FoundationDB, demanding new requirements for the serialization module.
+        \end{itemize}
+    \end{frame}
+
+    \section{Motivation}
+
+    \begin{frame}{Motivation}
+        Requirement for the serializer that supports storage teams:
+        \begin{itemize}
+            \item Serializes \texttt{MutationRef}s in a storage team
+            \begin{itemize}
+                \item Storage team version
+                \item \texttt{MutationRef}s, together with subsequence number
+            \end{itemize}
+            \item Proxy: Supports serializing data among multiple storage teams simultaneously
+            \item TLog: Batches multiple versions of serialized data of the same storage team
+        \end{itemize}
+    \end{frame}    
+
+    \begin{frame}{Motivation}
+        The issues on the current serializer (\texttt{LogPushData}):
+        \begin{itemize}
+            \item Major modifications are needed to support the storage team.
+            \item {\color{gray}The serializer does not have a well-defined deserializer.}
+            \item {\color{gray}Tightly bound to \texttt{flow} and \texttt{LogSystem}.}
+            \item {\color{gray}Weakly typed.}
+            \item {\color{gray}No tests included.}
+        \end{itemize}
+        A re-implementation of serializer should address these issues.
+    \end{frame}
+
+    \section{Design}
+
+    \begin{frame}{Two-level serialization}
+        \begin{itemize}
+            \item Proxy requires packing multiple \texttt{MutationRef}s in \emph{one} version.
+            \item TLog requires packing multiple versions.
+        \end{itemize}
+
+        The requirements imply a two-level serialization model.
+    \end{frame}
+
+    \begin{frame}{Two-level serialization - Level 1}
+        Within the storage team version:
+        \begin{center}
+            \begin{tabular}{|c|c|c|c|c|}
+                \hline
+                Head & Item & Item & ... & Item \\
+                \hline
+            \end{tabular}
+        \end{center}
+        The head contains the version information, whereas the items are serialized \texttt{MutationRef}s.
+    \end{frame}
+
+    \begin{frame}{Two-level serialization - Level 2}
+        Batched storage team versions:
+        \begin{center}
+            \begin{tabular}{|c|c|c|c|c|}
+             \hline
+             Head & VersionedItem & VersionedItem & ... & VersionedItem\\
+             \hline
+            \end{tabular}
+        \end{center}
+        The head contains storage team information, whereas each versioned item is the pack of \texttt{MutationRefs} with version information, shown in the previous slide.
+    \end{frame}
+
+    \section{Implementation}
+
+    \begin{frame}{Two-level serialization Implementation}
+        \begin{itemize}
+            \item Abstract header: \texttt{MultipleItemHeaderBase}\footnote{\label{serializer}\texttt{fdbserver/ptxn/Serializer.h}}
+            \begin{itemize}
+                \item \texttt{numItems}
+                \item \texttt{length}
+            \end{itemize}
+            \item Level 1 serialization: \texttt{HeaderedItemsSerializer}\textsuperscript{\ref{serializer}}
+            \item Level 2 serialization: \texttt{TwoLevelHeaderedItemsSerializer}\textsuperscript{\ref{serializer}}
+            \item Level 2 deserialization: \texttt{TwoLevelHeaderedItemsDeserializer}\textsuperscript{\ref{serializer}}
+        \end{itemize}
+        The dependency of \texttt{flow} is restricted to this part of code.
+    \end{frame}
+
+
+    \begin{frame}{Items}
+        \begin{itemize}
+            \item \texttt{MutationRef}s are serialized as \texttt{Message}s\footnote{\label{messageTypes}\texttt{fdbserver/ptxn/MessageTypes.h}}:
+            \begin{itemize}
+                \item \texttt{MutationRef}
+                \vspace{5pt}
+                \item \texttt{SpanContextMessage}\footnote{\texttt{fdbserver/SpanContextMessage.h}}
+                \item {\color{gray}\texttt{LogProtocolMessage}}\footnote{\texttt{fdbserver/LogProtocolMessage.h}}
+                \vspace{5pt}
+                \item {\color{lightgray}\texttt{EmptyVersionMessage}}\textsuperscript{\ref{messageTypes}}
+            \end{itemize}
+
+            \item Each \texttt{Message} has a corresponding subsequence number
+
+            \item The pair (\texttt{Subsequence}, \texttt{Message}) defines an item 
+        \end{itemize}
+    \end{frame}
+
+    \begin{frame}{Headers}
+        \begin{itemize}
+            \item For each storage team version, \texttt{SubsequencedItemsHeader}\footnote{\label{messageSerializer}\texttt{fdbserver/ptxn/MessageSerializer.h}} is prefixed:
+            \begin{itemize}
+                \item \texttt{version}
+                \item \texttt{lastSubsequence}
+            \end{itemize}
+            \item For each batch of versions, \texttt{MessageHeader}\textsuperscript{\ref{messageSerializer}} is prefixed:
+            \begin{itemize}
+                \item \texttt{storageTeamID}
+                \item \texttt{firstVersion}
+                \item \texttt{lastVersion}
+            \end{itemize}
+        \end{itemize}
+    \end{frame}
+
+    \begin{frame}{Basic serializer}
+        The basic serializer, \texttt{SubsequencedMessageSerializer}\footnote{\texttt{fdbserver/ptxn/MessageSerializer.h}} supports the following operations:
+
+        \begin{center}
+        \begin{tabular}{rl}
+            \texttt{startVersionWriting} & Starts a new storage team version. \\
+            \texttt{write} & Appends a new message. \\
+            \texttt{completeVersionWriting} & Ends the current version. \\
+            \texttt{completeMessageWriting} & Ends the current batch. \\
+            \texttt{getSerialized} & Gets the serialized data.
+        \end{tabular}
+    \end{center}
+    \end{frame}
+
+    \begin{frame}[fragile]{Basic serializer}
+        \begin{lstlisting}
+SubsequencedMessageSerializer serializer(storageTeamID);
+Subsequence subsequence = 1;
+
+for (const auto& version: versions) {
+    serializer.startVersionWriting(version);
+    for (const auto& message: getMessageFromVersion(version)) {
+        serializer.write(subsequence++, message);
+    }
+    serializer.completeVersionWriting();
+}
+serializer.completeMessageWriting();
+auto serialized = serializer.getSerialized();
+        \end{lstlisting}
+    \end{frame}
+
+    \begin{frame}{Serializer for Proxy}
+        \begin{itemize}
+            \item In proxy, only \emph{one} version in one serialization step.
+            \item Messages are distributed over multiple storage teams.
+            \item \texttt{ProxySubsequencedMessageSerializer}\footnote{\texttt{fdbserver/ptxn/MessageSerializer.h}} is implemented.
+        \end{itemize}
+        \begin{center}
+            \begin{tabular}{rl}
+                \texttt{write} & Writes a new message to a given storage team. \\
+                \texttt{broadcastSpanContext} & Broadcasts a \texttt{SpanContext} to all teams. \\
+                \texttt{getAllSerialized} & Gets the serialized data.
+            \end{tabular}
+        \end{center}
+    \end{frame}
+
+    \begin{frame}[fragile]{Serializer for Proxy}
+             \begin{lstlisting}
+ProxySubsequencedMessageSerializer serializer(version);
+
+serializer.write(mutationInTeam1, storageTeamID1);
+serializer.write(mutationInTeam2, storageTeamID2);
+
+auto serialized = serializer.getAllSerialized();
+        \end{lstlisting}
+    \end{frame}
+
+    \begin{frame}{Serializer for TLog}
+        \begin{itemize}
+            \item In TLog, multiple versions of messages in \emph{one} storage team will be batched.
+            \item The data is previously serialized by proxy.
+            \item \texttt{TLogSubsequencedMessageSerializer}\footnote{\texttt{fdbserver/ptxn/MessageSerializer.h}} is implemented.
+        \end{itemize}
+        \begin{center}
+            \begin{tabular}{rl}
+                \texttt{writeSerializedVersionSection} & Writes a serialized version of messages. \\
+                \texttt{getSerialized} & Gets the serialized data
+            \end{tabular}
+        \end{center}
+    \end{frame}
+
+    \begin{frame}[fragile]{Serializer for TLog}
+        \begin{lstlisting}
+TLogSubsequencedMessageSerializer serializer(storageTeamID);
+
+for(const auto& version : versions) {
+    serializer.writeSerializedVersionSection(getDataForVersion(version));
+}
+
+auto serialized = serializer.getSerialized();
+        \end{lstlisting}
+    \end{frame}
+
+    \begin{frame}{Deserializer Interface}
+        Deserializer is implemented as \texttt{SubsequencedMessageDeserializer}\footnote{\texttt{fdbserver/ptxn/MessageSerializer.h}}.
+        \begin{itemize}
+            \item Deserialized data can be accessed via iterators.
+            \item Dereferencing the iterator will yield a \texttt{VersionSubsequenceMessage}\footnote{\texttt{fdbserver/ptxn/MessageTypes.h}} object with fields:
+            \begin{itemize}
+                \item \texttt{version}
+                \item \texttt{subsequence}
+                \item \texttt{message}
+            \end{itemize}
+            \item The \texttt{VersionSubsequenceMessage} object is sequencable.
+            \item The deserializer can be reset to accept new serialized data.
+        \end{itemize}
+    \end{frame}
+
+    \begin{frame}[fragile]{Deserializer Interface}
+        \begin{lstlisting}
+ptxn::SubsequencedMessageDeserializer deserializer(serializedData);
+for (const auto& vsm : deserializer) {
+    processMutationRef(std::get<MutationRef>(vsm.message));
+}
+
+deserializer.reset(anotherSerializedData);
+for (const auto& vsm : deserializer) {
+    processMutationRef(std::get<MutationRef>(vsm.message));
+}
+        \end{lstlisting}
+    \end{frame}
+
+    \begin{frame}{Tests}
+        For all components, tests are included:\footnote{\texttt{fdbserver/ptxn/tests/TestSerialization.cpp}}
+        \begin{itemize}
+            \item Serializer
+            \item Deserializer
+        \end{itemize}
+        The tests can also be used as examples.
+    \end{frame}
+
+\end{document}

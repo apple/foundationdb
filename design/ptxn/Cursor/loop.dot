@@ -1,0 +1,26 @@
+digraph FDB {
+    {
+        node [shape=box];
+
+        start [label="Start", shape="circle", width=0.8, style=filled]
+        remoteMoreAvailable [label="remoteMoreAvailable"];
+        hasRemaining [label="hasRemaining"];
+        get [label="get"];
+        next [label="next"];
+        end [label="End", shape="circle", width=0.8, style=filled]
+    }
+
+    {
+        rank="min";
+        start; end; remoteMoreAvailable;
+    }
+
+    start -> remoteMoreAvailable;
+    remoteMoreAvailable -> end [label="No"];
+    remoteMoreAvailable -> hasRemaining [label="Yes"];
+    hasRemaining -> get [label="Yes"];
+    hasRemaining -> remoteMoreAvailable [label="No"];
+    get -> next;
+    next -> hasRemaining;
+}
+
