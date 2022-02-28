@@ -582,6 +582,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 
 	init( MIN_AVAILABLE_SPACE,                                   1e8 );
 	init( MIN_AVAILABLE_SPACE_RATIO,                            0.05 );
+	init( MIN_AVAILABLE_SPACE_RATIO_SAFETY_BUFFER,              0.01 );
 	init( TARGET_AVAILABLE_SPACE_RATIO,                         0.30 );
 	init( AVAILABLE_SPACE_UPDATE_DELAY,                          5.0 );
 
