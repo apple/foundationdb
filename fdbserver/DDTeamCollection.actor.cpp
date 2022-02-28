@@ -245,7 +245,9 @@ public:
 					    (!req.preferLowerUtilization ||
 					     self->teams[currentIndex]->hasHealthyAvailableSpace(self->medianAvailableSpace))) {
 						int64_t loadBytes = self->teams[currentIndex]->getLoadBytes(true, req.inflightPenalty);
-						if ((!bestOption.present() || (req.preferLowerUtilization && loadBytes < bestLoadBytes) ||
+						if ((!bestOption.present() ||
+						     ((bool)req.teamSorter && req.teamSorter(bestOption.get(), self->teams[currentIndex])) ||
+						     (req.preferLowerUtilization && loadBytes < bestLoadBytes) ||
 						     (!req.preferLowerUtilization && loadBytes > bestLoadBytes)) &&
 						    (!req.teamMustHaveShards ||
 						     self->shardsAffectedByTeamFailure->hasShards(ShardsAffectedByTeamFailure::Team(

@@ -336,6 +336,20 @@ int64_t TCTeamInfo::getLoadBytes(bool includeInFlight, double inflightPenalty) c
 	return (physicalBytes + (inflightPenalty * inFlightBytes)) * availableSpaceMultiplier;
 }
 
+double TCTeamInfo::getLoadReadBandwidth() const {
+	double sum = 0;
+	int size = 0;
+	for (const auto& server : servers) {
+		if (server->serverMetricsPresent()) {
+			auto& replyValue = server->getServerMetrics();
+			ASSERT(replyValue.load.bytesReadPerKSecond >= 0);
+			sum += replyValue.load.bytesReadPerKSecond;
+			size += 1;
+		}
+	}
+	return size == 0 ? 0 : sum / size;
+}
+
 int64_t TCTeamInfo::getMinAvailableSpace(bool includeInFlight) const {
 	int64_t minAvailableSpace = std::numeric_limits<int64_t>::max();
 	for (const auto& server : servers) {

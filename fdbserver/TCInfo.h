@@ -191,6 +191,8 @@ public:
 
 	int64_t getLoadBytes(bool includeInFlight = true, double inflightPenalty = 1.0) const override;
 
+	double getLoadReadBandwidth() const override;
+
 	int64_t getMinAvailableSpace(bool includeInFlight = true) const override;
 
 	double getMinAvailableSpaceRatio(bool includeInFlight = true) const override;

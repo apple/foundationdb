@@ -47,6 +47,7 @@ struct IDataDistributionTeam {
 	virtual void addDataInFlightToTeam(int64_t delta) = 0;
 	virtual int64_t getDataInFlightToTeam() const = 0;
 	virtual int64_t getLoadBytes(bool includeInFlight = true, double inflightPenalty = 1.0) const = 0;
+	virtual double getLoadReadBandwidth() const = 0;
 	virtual int64_t getMinAvailableSpace(bool includeInFlight = true) const = 0;
 	virtual double getMinAvailableSpaceRatio(bool includeInFlight = true) const = 0;
 	virtual bool hasHealthyAvailableSpace(double minRatio) const = 0;
@@ -81,29 +82,33 @@ struct GetTeamRequest {
 	bool wantsTrueBest;
 	bool preferLowerUtilization; // = false --> higher utilization team will be returned
 	bool teamMustHaveShards;
-	bool preferLowerReadTraffic;
 	double inflightPenalty;
 	std::vector<UID> completeSources;
 	std::vector<UID> src;
 	Promise<std::pair<Optional<Reference<IDataDistributionTeam>>, bool>> reply;
+
+	// optional
+	typedef Reference<IDataDistributionTeam> TeamRef;
+	std::function<bool(TeamRef)> hardConstraint;
+	std::function<bool(TeamRef, TeamRef)>
+	    teamSorter; // => true if a.score < b.score, the reply will choose the largest one
 
 	GetTeamRequest() {}
 	GetTeamRequest(bool wantsNewServers,
 	               bool wantsTrueBest,
 	               bool preferLowerUtilization,
 	               bool teamMustHaveShards,
-	               bool preferLowerReadTraffic = false,
 	               double inflightPenalty = 1.0)
 	  : wantsNewServers(wantsNewServers), wantsTrueBest(wantsTrueBest), preferLowerUtilization(preferLowerUtilization),
-	    teamMustHaveShards(teamMustHaveShards), preferLowerReadTraffic(preferLowerReadTraffic),
-	    inflightPenalty(inflightPenalty) {}
+	    teamMustHaveShards(teamMustHaveShards), inflightPenalty(inflightPenalty) {}
 
 	std::string getDesc() const {
 		std::stringstream ss;
 
 		ss << "WantsNewServers:" << wantsNewServers << " WantsTrueBest:" << wantsTrueBest
 		   << " PreferLowerUtilization:" << preferLowerUtilization << " teamMustHaveShards:" << teamMustHaveShards
-		   << " PreferLowerReadTraffic" << preferLowerReadTraffic << " inflightPenalty:" << inflightPenalty << ";";
+		   << " inflightPenalty:" << inflightPenalty << " hardConstraint: " << (bool)hardConstraint
+		   << " teamSorter: " << (bool)teamSorter << ";";
 		ss << "CompleteSources:";
 		for (const auto& cs : completeSources) {
 			ss << cs.toString() << ",";
