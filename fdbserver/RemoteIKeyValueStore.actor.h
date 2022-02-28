@@ -20,11 +20,6 @@
 #include "flow/IRandom.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-enum RemoteIKVSWellKnownEndpoints {
-	WLTOKEN_IKVS_PROCESS_SERVER = WLTOKEN_FIRST_AVAILABLE,
-	WLTOKEN_IKVS_RESERVED_COUNT
-};
-
 struct IKVSCommitReply {
 	constexpr static FileIdentifier file_identifier = 3958189;
 	StorageBytes storeBytes;

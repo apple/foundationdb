@@ -1,6 +1,5 @@
 [configuration]
 extraMachineCountDC = 2
-disableRemoteKVS = true
 
 [[test]]
 testTitle = 'CloggedConfigureDatabaseTest'

@@ -171,7 +171,7 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 			state std::string childDataFolder(std::string(child->dataFolder).append("_child"));
 			child->dataFolder = childDataFolder.c_str();
 			state Future<Void> parentSSClosed = parent->onClosed();
-			FlowTransport::createInstance(false, 1, WLTOKEN_IKVS_RESERVED_COUNT);
+			FlowTransport::createInstance(false, 1, WLTOKEN_RESERVED_COUNT);
 			FlowTransport::transport().bind(child->address, child->address);
 			Sim2FileSystem::newFileSystem();
 			ProcessFactory<KeyValueStoreProcess>(flowProcessName.c_str());
