@@ -27,6 +27,7 @@
 #include "flow/crc32c.h"
 #include "flow/flow.h"
 
+#include <thread>
 #include <atomic>
 #include <cstdint>
 #include <unordered_map>
@@ -308,8 +309,25 @@ static int64_t getSizeCode(int i) {
 }
 #endif
 
+namespace {
+std::mutex water_mark_lock;
+uint64_t high_water_mark = 0;
+uint64_t water_mark = 0;
+} // namespace
+
+uint64_t get_high_water_mark() {
+	std::lock_guard<std::mutex> _(water_mark_lock);
+	return high_water_mark;
+}
+
 template <int Size>
 void* FastAllocator<Size>::allocate() {
+	{
+		std::lock_guard<std::mutex> _(water_mark_lock);
+		water_mark += Size;
+		high_water_mark = std::max(water_mark, high_water_mark);
+	}
+	high_water_mark = std::max(high_water_mark, water_mark);
 	if (!threadInitialized) {
 		initThread();
 	}
@@ -366,6 +384,10 @@ void* FastAllocator<Size>::allocate() {
 
 template <int Size>
 void FastAllocator<Size>::release(void* ptr) {
+	{
+		std::lock_guard<std::mutex> _(water_mark_lock);
+		water_mark -= Size;
+	}
 	if (!threadInitialized) {
 		initThread();
 	}
@@ -583,6 +605,11 @@ void FastAllocator<Size>::releaseThreadMagazines() {
 }
 
 void releaseAllThreadMagazines() {
+	static int x = []() {
+		std::cout << "releaseAllThreadMagazines called" << std::endl;
+		return 0;
+	}();
+	(void)x;
 	FastAllocator<16>::releaseThreadMagazines();
 	FastAllocator<32>::releaseThreadMagazines();
 	FastAllocator<64>::releaseThreadMagazines();

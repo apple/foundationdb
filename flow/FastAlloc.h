@@ -103,6 +103,8 @@ void recordAllocation(void* ptr, size_t size);
 void recordDeallocation(void* ptr);
 #endif
 
+uint64_t get_high_water_mark();
+
 template <int Size>
 class FastAllocator {
 public:

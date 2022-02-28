@@ -188,3 +188,6 @@ if(APPLE)
   target_link_libraries(flow PRIVATE ${IO_KIT} ${CORE_FOUNDATION})
   target_link_libraries(flow_sampling PRIVATE ${IO_KIT} ${CORE_FOUNDATION})
 endif()
+
+add_executable(fast_alloc_test fast_alloc_test.cpp ${CMAKE_SOURCE_DIR}/bindings/c/ThreadCleanup.cpp)
+target_link_libraries(fast_alloc_test PRIVATE flow)
