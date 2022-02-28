@@ -1427,7 +1427,8 @@ static void addAssignment(KeyRangeMap<std::tuple<UID, int64_t, int64_t>>& map,
 				if (outOfDate.empty() || outOfDate.back() != std::pair(oldWorker, KeyRange(old.range()))) {
 					outOfDate.push_back(std::pair(oldWorker, old.range()));
 				}
-			} else if (oldWorker != UID() && (oldEpoch < newEpoch || (oldEpoch == newEpoch && oldSeqno < newSeqno))) {
+			} else if (oldWorker != UID() && oldWorker != newId &&
+			           (oldEpoch < newEpoch || (oldEpoch == newEpoch && oldSeqno < newSeqno))) {
 				// 2 blob workers reported conflicting mappings, add old one to out of date (if not already added by a
 				// previous intersecting range in the split case)
 				if (outOfDate.empty() || outOfDate.back() != std::pair(oldWorker, KeyRange(old.range()))) {
