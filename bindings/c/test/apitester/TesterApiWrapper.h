@@ -30,6 +30,11 @@
 #define FDB_API_VERSION 710
 #include "bindings/c/foundationdb/fdb_c.h"
 
+#undef ERROR
+#define ERROR(name, number, description) enum { error_code_##name = number };
+
+#include "flow/error_definitions.h"
+
 namespace FdbApiTester {
 
 // Wrapper parent class to manage memory of an FDBFuture pointer. Cleans up

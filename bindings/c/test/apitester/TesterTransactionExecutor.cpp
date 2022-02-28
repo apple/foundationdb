@@ -66,6 +66,8 @@ public:
 	}
 	void done() override {
 		TTaskFct cont = contAfterDone;
+		ASSERT(!onErrorFuture);
+		ASSERT(waitMap.empty());
 		delete this;
 		cont();
 	}
@@ -81,17 +83,19 @@ private:
 
 	void blockingContinueAfter(Future f, TTaskFct cont) {
 		scheduler->schedule([this, f, cont]() mutable {
-			fdb_check(fdb_future_block_until_ready(f.fdbFuture()));
-			fdb_error_t err = f.getError();
-			if (err) {
-				std::unique_lock<std::mutex> lock(mutex);
-				if (!onErrorFuture) {
-					onErrorFuture = fdbTx.onError(err);
-					fdb_check(fdb_future_block_until_ready(onErrorFuture.fdbFuture()));
-					scheduler->schedule([this]() { handleOnErrorResult(); });
+			std::unique_lock<std::mutex> lock(mutex);
+			if (!onErrorFuture) {
+				fdb_check(fdb_future_block_until_ready(f.fdbFuture()));
+				fdb_error_t err = f.getError();
+				if (err) {
+					if (err != error_code_transaction_cancelled) {
+						onErrorFuture = fdbTx.onError(err);
+						fdb_check(fdb_future_block_until_ready(onErrorFuture.fdbFuture()));
+						scheduler->schedule([this]() { handleOnErrorResult(); });
+					}
+				} else {
+					scheduler->schedule([cont]() { cont(); });
 				}
-			} else {
-				scheduler->schedule([cont]() { cont(); });
 			}
 		});
 	}
@@ -120,10 +124,12 @@ private:
 		TTaskFct cont = iter->second.cont;
 		waitMap.erase(iter);
 		if (err) {
-			waitMap.clear();
-			onErrorFuture = tx()->onError(err);
-			lock.unlock();
-			fdb_check(fdb_future_set_callback(onErrorFuture.fdbFuture(), onErrorReadyCallback, this));
+			if (err != error_code_transaction_cancelled) {
+				waitMap.clear();
+				onErrorFuture = tx()->onError(err);
+				lock.unlock();
+				fdb_check(fdb_future_set_callback(onErrorFuture.fdbFuture(), onErrorReadyCallback, this));
+			}
 		} else {
 			scheduler->schedule(cont);
 		}
@@ -144,6 +150,7 @@ private:
 		onErrorFuture.reset();
 		if (err) {
 			finalError = err;
+			ASSERT(false);
 			done();
 		} else {
 			lock.unlock();

@@ -47,6 +47,7 @@ public:
 	int numDatabases = 1;
 	std::string externalClientLibrary;
 	int numFdbThreads = 1;
+	bool buggify = false;
 };
 
 } // namespace FdbApiTester
