@@ -640,7 +640,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				openShards[name] = nullptr;
 			}
 
-
 			std::shared_ptr<DataShard> specialKeysShard;
 			for (auto it : a.shardMap->ranges()) {
 				if (!it.value() || !it.value()->db)
@@ -1664,7 +1663,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		if (dirtyShards == nullptr) {
 			dirtyShards.reset(new std::set<std::shared_ptr<DataShard>>());
 		}
-
 
 		if (range.intersects(specialKeys)) {
 			std::cout << "Invalid range to dispose " << range.begin.toString() << " : " << range.end.toString() << "\n";
