@@ -34,6 +34,7 @@ import traceback
 
 import fdb
 from fdb import six
+from fdb.tuple import pack, unpack
 
 _network_thread = None
 _network_thread_reentrant_lock = threading.RLock()
@@ -1146,6 +1147,13 @@ class _TransactionCreator(_FDBBase):
                 yield None
         return TransactionCreator
 
+def process_tenant_name(name):
+    if isinstance(name, tuple):
+        return pack(name)
+    elif isinstance(name, bytes):
+        return name
+    else:
+        raise TypeError('Tenant name must be of type ' + bytes.__name__ + ' or of type ' + tuple.__name__)
 
 class Database(_TransactionCreator):
     def __init__(self, dpointer):
@@ -1160,10 +1168,9 @@ class Database(_TransactionCreator):
         self.capi.fdb_database_set_option(self.dpointer, option, param, length)
 
     def open_tenant(self, name):
-        if not isinstance(name, bytes):
-            raise TypeError('Tenant name must be of type ' + bytes.__name__)
+        tname = process_tenant_name(name)
         pointer = ctypes.c_void_p()
-        self.capi.fdb_database_open_tenant(self.dpointer, name, len(name), ctypes.byref(pointer))
+        self.capi.fdb_database_open_tenant(self.dpointer, tname, len(tname), ctypes.byref(pointer))
         return Tenant(pointer.value)
 
     def create_transaction(self):
@@ -1172,10 +1179,12 @@ class Database(_TransactionCreator):
         return Transaction(pointer.value, self)
 
     def allocate_tenant(self, name):
-        return FutureVoid(self.capi.fdb_database_allocate_tenant(self.dpointer, name, len(name)))
+        tname = process_tenant_name(name)
+        return FutureVoid(self.capi.fdb_database_allocate_tenant(self.dpointer, tname, len(tname)))
 
     def delete_tenant(self, name):
-        return FutureVoid(self.capi.fdb_database_remove_tenant(self.dpointer, name, len(name)))
+        tname = process_tenant_name(name)
+        return FutureVoid(self.capi.fdb_database_remove_tenant(self.dpointer, tname, len(tname)))
 
 
 class Tenant(_TransactionCreator):

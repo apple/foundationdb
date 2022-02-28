@@ -50,6 +50,7 @@ import com.apple.foundationdb.async.AsyncIterable;
 import com.apple.foundationdb.async.AsyncUtil;
 import com.apple.foundationdb.async.CloseableAsyncIterator;
 import com.apple.foundationdb.tuple.ByteArrayUtil;
+import com.apple.foundationdb.Tenant;
 import com.apple.foundationdb.tuple.Tuple;
 
 /**
@@ -506,6 +507,7 @@ public class StackTester {
 
 					testWatches(inst.context.db);
 					testLocality(inst.context.db);
+					testTenantTupleNames(inst.context.db);
 				}
 				catch(Exception e) {
 					throw new RuntimeException("Unit tests failed: " + e.getMessage());
@@ -755,6 +757,35 @@ public class StackTester {
 				boundaryKeys.close();
 			}
 		});
+	}
+
+	private static void testTenantTupleNames(Database db) {
+		try {
+			db.allocateTenant(Tuple.from("tenant")).join();
+			Tenant tenant = db.openTenant(Tuple.from("tenant"));
+
+			tenant.run(tr -> {
+					tr.set(Tuple.from("hello").pack(), Tuple.from("world").pack());
+					return null;
+			});
+
+			String output = tenant.read(tr -> {
+					byte[] result = tr.get(Tuple.from("hello").pack()).join();
+					return Tuple.fromBytes(result).getString(0);
+			});
+
+			assert output.equals("world");
+
+			tenant.run(tr -> {
+					tr.clear(Tuple.from("hello").pack());
+					return null;
+			});
+
+			db.deleteTenant(Tuple.from("tenant")).join();
+        }
+		catch(Exception e) {
+			e.printStackTrace();
+		}
 	}
 
 	/**
