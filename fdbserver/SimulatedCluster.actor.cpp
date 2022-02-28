@@ -269,6 +269,9 @@ class TestConfig {
 					configDBType = configDBTypeFromString(value);
 				}
 			}
+			if (attrib == "randomlyRenameZoneId") {
+				randomlyRenameZoneId = strcmp(value.c_str(), "true") == 0;
+			}
 		}
 
 		ifs.close();
@@ -306,6 +309,7 @@ public:
 	Optional<int> datacenters, desiredTLogCount, commitProxyCount, grvProxyCount, resolverCount, storageEngineType,
 	    stderrSeverity, machineCount, processesPerMachine, coordinators;
 	Optional<std::string> config;
+	bool randomlyRenameZoneId = false;
 
 	ConfigDBType getConfigDBType() const { return configDBType; }
 
@@ -357,7 +361,8 @@ public:
 		    .add("processesPerMachine", &processesPerMachine)
 		    .add("coordinators", &coordinators)
 		    .add("configDB", &configDBType)
-		    .add("extraMachineCountDC", &extraMachineCountDC);
+		    .add("extraMachineCountDC", &extraMachineCountDC)
+		    .add("randomlyRenameZoneId", &randomlyRenameZoneId);
 		try {
 			auto file = toml::parse(testFile);
 			if (file.contains("configuration") && toml::find(file, "configuration").is_table()) {
@@ -1032,6 +1037,11 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 
 	auto configDBType = testConfig.getConfigDBType();
 
+	// Randomly change data center id names to test that localities
+	// can be modified on cluster restart
+	bool renameZoneIds = testConfig.randomlyRenameZoneId ? deterministicRandom()->random01() < 0.1 : false;
+	TEST(renameZoneIds); // Zone ID names altered in restart test
+
 	// allows multiple ipAddr entries
 	ini.SetMultiKey();
 
@@ -1080,7 +1090,11 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 			if (zoneIDini == nullptr) {
 				zoneId = machineId;
 			} else {
-				zoneId = StringRef(zoneIDini);
+				auto zoneIdStr = std::string(zoneIDini);
+				if (renameZoneIds) {
+					zoneIdStr = "modified/" + zoneIdStr;
+				}
+				zoneId = Standalone<StringRef>(zoneIdStr);
 			}
 
 			ProcessClass::ClassType cType =
