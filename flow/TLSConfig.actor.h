@@ -39,6 +39,9 @@
 
 #ifndef TLS_DISABLED
 
+#if defined(HAVE_WOLFSSL)
+#include <wolfssl/options.h>
+#endif
 #include <openssl/x509.h>
 typedef int NID;
 

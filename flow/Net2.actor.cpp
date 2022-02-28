@@ -29,6 +29,12 @@
 #define BOOST_DATE_TIME_NO_LIB
 #define BOOST_REGEX_NO_LIB
 #include <boost/asio.hpp>
+#ifndef TLS_DISABLED
+#if defined(HAVE_WOLFSSL)
+#include <wolfssl/options.h>
+#endif
+#include "boost/asio/ssl.hpp"
+#endif
 #include <boost/date_time/posix_time/posix_time_types.hpp>
 #include <boost/range.hpp>
 #include <boost/algorithm/string/join.hpp>
