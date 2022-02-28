@@ -250,6 +250,11 @@ void applyNetworkOptions(TesterOptions& options) {
 	if (options.buggify) {
 		fdb_check(FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_CLIENT_BUGGIFY_ENABLE));
 	}
+
+	for (auto knob : options.knobs) {
+		FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_KNOB,
+		                  format("%s=%s", knob.first.c_str(), knob.second.c_str()));
+	}
 }
 
 void runApiCorrectness(TesterOptions& options) {
