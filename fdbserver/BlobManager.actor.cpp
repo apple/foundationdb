@@ -570,6 +570,11 @@ ACTOR Future<Void> rangeAssigner(Reference<BlobManagerData> bmData) {
 				if (bmData->workerStats.count(assignment.worker.get())) {
 					bmData->workerStats[assignment.worker.get()].numGranulesAssigned -= 1;
 				}
+				// if this revoke matches the worker assignment state, mark the range as unassigned
+				auto existingRange = bmData->workerAssignments.rangeContaining(assignment.keyRange.begin);
+				if (existingRange.range() == assignment.keyRange && existingRange.cvalue() == assignment.worker.get()) {
+					bmData->workerAssignments.insert(assignment.keyRange, UID());
+				}
 				bmData->addActor.send(doRangeAssignment(bmData, assignment, assignment.worker.get(), seqNo));
 			} else {
 				auto currentAssignments = bmData->workerAssignments.intersectingRanges(assignment.keyRange);
