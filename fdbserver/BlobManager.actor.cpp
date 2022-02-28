@@ -1416,7 +1416,7 @@ static void addAssignment(KeyRangeMap<std::tuple<UID, int64_t, int64_t>>& map,
 			newer.push_back(std::pair(old.range(), std::tuple(oldWorker, oldEpoch, oldSeqno)));
 		} else {
 			allExistingNewer = false;
-			if (newId != UID()) {
+			if (newId != UID() && newEpoch != std::numeric_limits<int64_t>::max()) {
 				// different workers can't have same epoch and seqno for granule assignment
 				ASSERT(oldEpoch != newEpoch || oldSeqno != newSeqno);
 			}
@@ -1424,6 +1424,11 @@ static void addAssignment(KeyRangeMap<std::tuple<UID, int64_t, int64_t>>& map,
 				// new one is from DB (source of truth on boundaries) and existing mapping disagrees on boundary or
 				// assignment, do explicit revoke and re-assign to converge
 				anyConflicts = true;
+				// if ranges don't match, need to explicitly reaassign all parts of old range, as it could be from a
+				// yet-unassigned split
+				if (old.range() != newRange) {
+					std::get<0>(old.value()) = UID();
+				}
 				if (outOfDate.empty() || outOfDate.back() != std::pair(oldWorker, KeyRange(old.range()))) {
 					outOfDate.push_back(std::pair(oldWorker, old.range()));
 				}
@@ -1699,11 +1704,9 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 		bmData->workerAssignments.insert(range.range(), workerId);
 
 		if (BM_DEBUG) {
-			fmt::print("  [{0} - {1}) @ ({2}, {3}): {4}\n",
+			fmt::print("  [{0} - {1}): {2}\n",
 			           range.begin().printable(),
 			           range.end().printable(),
-			           epoch,
-			           seqno,
 			           workerId == UID() || epoch == 0 ? " (?)" : workerId.toString().substr(0, 5).c_str());
 		}
 
