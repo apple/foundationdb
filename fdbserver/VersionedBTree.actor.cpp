@@ -3439,9 +3439,10 @@ public:
 		state RemappedPage cutoff(oldestRetainedVersion);
 
 		// Maximum number of remaining remap entries to keep before obeying stop command.
-		state uint64_t maxRemapEntries =
-		    self->remapCleanupWindow *
-		    (1 + (BUGGIFY ? deterministicRandom()->randomInt(0, 20) / 100.0 : SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_LAG));
+		double toleranceRatio = BUGGIFY ? deterministicRandom()->randomInt(0, 10) / 100.0
+		                                : SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_TOLERANCE_RATIO;
+		state uint64_t minRemapEntries = static_cast<uint64_t>(self->remapCleanupWindow * (1.0 - toleranceRatio));
+		state uint64_t maxRemapEntries = static_cast<uint64_t>(self->remapCleanupWindow * (1.0 + toleranceRatio));
 
 		debug_printf("DWALPager(%s) remapCleanup oldestRetainedVersion=%" PRId64 " remapCleanupWindow=%" PRId64
 		             " maxRemapEntries=%" PRId64 " items=%" PRId64 "\n",
@@ -3460,13 +3461,13 @@ public:
 			// Stop if we have cleanup enough remap entries, or if the stop flag is set and the remaining remap
 			// entries are less than that allowed by the lag.
 			int64_t remainingEntries = self->remapQueue.numEntries;
-			if (remainingEntries <= self->remapCleanupWindow ||
+			if (remainingEntries <= minRemapEntries ||
 			    (self->remapCleanupStop && remainingEntries <= maxRemapEntries)) {
-				debug_printf("DWALPager(%s) remapCleanup finished remainingEntries=%" PRId64
-				             " remapCleanupWindow=%" PRId64 " maxRemapEntries=%" PRId64,
+				debug_printf("DWALPager(%s) remapCleanup finished remainingEntries=%" PRId64 " minRemapEntries=%" PRId64
+				             " maxRemapEntries=%" PRId64,
 				             self->filename.c_str(),
 				             remainingEntries,
-				             self->remapCleanupWindow,
+				             minRemapEntries,
 				             maxRemapEntries);
 				break;
 			}
