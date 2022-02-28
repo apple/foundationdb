@@ -27,8 +27,29 @@
 #include <vector>
 #include <unordered_set>
 
-#include "flow/Arena.h"
 #include "flow/flow.h"
+
+enum class TraceFlags : uint8_t {
+	flag_unsampled = 0b00000000,
+	flag_sampled = 0b00000001,
+};
+
+inline TraceFlags operator&(TraceFlags lhs, TraceFlags rhs) {
+	return static_cast<TraceFlags>(static_cast<std::underlying_type_t<TraceFlags>>(lhs) &
+	                               static_cast<std::underlying_type_t<TraceFlags>>(rhs));
+}
+
+struct SpanContext {
+	UID traceID;
+	uint64_t spanID;
+	TraceFlags m_Flags;
+
+	SpanContext() : traceID(UID()), spanID(0), m_Flags(TraceFlags::flag_unsampled) {}
+	SpanContext(UID traceID, uint64_t spanID, TraceFlags flags) : traceID(traceID), spanID(spanID), m_Flags(flags) {}
+	SpanContext(UID traceID, uint64_t spanID) : traceID(traceID), spanID(spanID), m_Flags(TraceFlags::flag_unsampled) {}
+
+	bool isSampled() const { return (m_Flags & TraceFlags::flag_sampled) == TraceFlags::flag_sampled; }
+};
 
 typedef int64_t Version;
 typedef uint64_t LogEpoch;

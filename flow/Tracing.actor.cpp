@@ -20,6 +20,7 @@
 
 #include "flow/Tracing.h"
 
+#include "fdbclient/FDBTypes.h"
 #include "flow/Knobs.h"
 #include "flow/network.h"
 
@@ -43,6 +44,7 @@ constexpr float kQueueSizeLogInterval = 5.0;
 struct NoopTracer : ITracer {
 	TracerType type() const override { return TracerType::DISABLED; }
 	void trace(Span const& span) override {}
+	void trace(OTELSpan const& span) override {}
 };
 
 struct LogfileTracer : ITracer {
@@ -63,6 +65,7 @@ struct LogfileTracer : ITracer {
 			TraceEvent(SevInfo, "TracingSpanTag", span.context).detail("Key", key).detail("Value", value);
 		}
 	}
+	void trace(OTELSpan const& span) override {}
 };
 
 struct TraceRequest {
@@ -179,6 +182,38 @@ protected:
 		serialize_vector(span.parents, request);
 	}
 
+	void serialize_span(const OTELSpan& span, TraceRequest& request) {
+		uint8_t size = 11;
+		size = size + span.links.size() + span.events.size() + span.attributes.size();
+		if (!span.parentContext.isSampled()) {
+			size = size -3;
+		}
+		request.write_byte(size | 0b10010000); // write as array
+		serialize_value(span.context.traceID.first(), request, 0xcf); // trace id
+		serialize_value(span.context.traceID.second(), request, 0xcf); // trace id
+		serialize_value(span.context.spanID, request, 0xcf); // spanid
+		// parent value
+		if (span.parentContext.isSampled()) {
+			serialize_value(span.parentContext.traceID.first(), request, 0xcf); // trace id
+			serialize_value(span.parentContext.traceID.second(), request, 0xcf); // trace id
+			serialize_value(span.parentContext.spanID, request, 0xcf); // spanId
+		}
+		// Payload
+		serialize_string(span.location.name.toString(), request);
+		serialize_value(span.begin, request, 0xcb); // start time
+		serialize_value(span.end, request, 0xcb); // end
+		// Kind
+		serialize_value(span.kind, request, 0xcc); // end
+		// Status
+		serialize_value(span.status, request, 0xcc); // end
+		// Links
+		serialize_vector(span.links, request);
+		// Events
+		serialize_vector(span.events, request);
+		// Attributes
+		serialize_map(span.attributes, request);
+	}
+
 private:
 	// Writes the given value in big-endian format to the request. Sets the
 	// first byte to msgpack_type.
@@ -242,6 +277,54 @@ private:
 		}
 	}
 
+	// Writes the given vector of linked SpanContext's to the request. If the vector is
+	// empty, the request is not modified.
+	inline void serialize_vector(const std::vector<SpanContext>& vec, TraceRequest& request) {
+		int size = vec.size();
+		if (size == 0) {
+			return;
+		}
+
+		if (size <= 15) {
+			request.write_byte(static_cast<uint8_t>(size) | 0b10010000);
+		} else if (size <= 65535) {
+			request.write_byte(0xdc);
+			request.write_byte(reinterpret_cast<const uint8_t*>(&size)[1]);
+			request.write_byte(reinterpret_cast<const uint8_t*>(&size)[0]);
+		} else {
+			// TODO: Add support for longer vectors if necessary.
+			ASSERT(false);
+		}
+
+		for (const auto& link : vec) {
+			serialize_value(link.traceID.first(), request, 0xcf); // trace id
+			serialize_value(link.traceID.second(), request, 0xcf); // trace id
+			serialize_value(link.spanID, request, 0xcf); // spanid
+		}
+	}
+
+	// Writes the given vector of linked SpanContext's to the request. If the vector is
+	// empty, the request is not modified.
+	inline void serialize_vector(const std::vector<OTELEvent>& vec, TraceRequest& request) {
+		int size = vec.size();
+		if (size == 0) {
+			return;
+		}
+
+		if (size <= 15) {
+			request.write_byte(static_cast<uint8_t>(size) | 0b10010000);
+		} else {
+			// TODO: Add support for longer vectors if necessary.
+			ASSERT(false);
+		}
+
+		for (const auto& event : vec) {
+			serialize_string(event.name.toString(), request); // event name
+			serialize_value(event.time, request, 0xcb); // event time 
+			serialize_map(event.attributes, request);
+		}
+	}
+
 	inline void serialize_map(const std::unordered_map<StringRef, StringRef>& map, TraceRequest& request) {
 		int size = map.size();
 
@@ -291,6 +374,7 @@ struct FastUDPTracer : public UDPTracer {
 
 	TracerType type() const override { return TracerType::NETWORK_LOSSY; }
 
+	void trace(OTELSpan const& span) override {}
 	void trace(Span const& span) override {
 		static std::once_flag once;
 		std::call_once(once, [&]() {
@@ -394,11 +478,36 @@ Span& Span::operator=(Span&& o) {
 	location = o.location;
 	parents = std::move(o.parents);
 	o.begin = 0;
+	// TODO: Why no tags in assignment copy overload?
 	return *this;
 }
 
 Span::~Span() {
 	if (begin > 0.0 && context.second() > 0) {
+		end = g_network->now();
+		g_tracer->trace(*this);
+	}
+}
+
+OTELSpan& OTELSpan::operator=(OTELSpan&& o) {
+	if (begin > 0.0 && o.context.isSampled() > 0) {
+		end = g_network->now();
+		g_tracer->trace(*this);
+	}
+	context = o.context;
+	parentContext = o.parentContext;
+	begin = o.begin;
+	end = o.end;
+	location = o.location;
+	links = std::move(o.links);
+	events = std::move(o.events);
+	// TODO do we need tags?
+	o.begin = 0;
+	return *this;
+}
+
+OTELSpan::~OTELSpan() {
+	if (begin > 0.0 && context.isSampled()) {
 		end = g_network->now();
 		g_tracer->trace(*this);
 	}

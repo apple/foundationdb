@@ -21,7 +21,11 @@
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
+#include "flow/Arena.h"
 #include "flow/IRandom.h"
+#include "flow/network.h"
+#include <cstddef>
+#include <unordered_map>
 #include <unordered_set>
 #include <atomic>
 
@@ -106,6 +110,104 @@ struct Span {
 	std::unordered_map<StringRef, StringRef> tags;
 };
 
+enum class SpanKind {
+	CLIENT = 0,
+	SERVER = 1,
+	PRODUCER = 2,
+	CONSUMER = 3,
+	INTERNAL = 4,
+};
+
+enum class SpanStatus {
+	UNSET = 0,
+	OK = 1,
+	ERROR = 2,
+};
+
+struct OTELEvent {
+	StringRef name;
+	double time = 0.0;
+	std::unordered_map<StringRef, StringRef> attributes;
+};
+
+struct OTELSpan {
+	OTELSpan(SpanContext context,
+	         Location location,
+	         SpanContext parentContext,
+	         std::initializer_list<SpanContext> const& links = {})
+	  : context(context), location(location), parentContext(parentContext), links(links.begin(), links.end()),
+	    begin(g_network->now()) {
+		if (parentContext.isSampled()) {
+			context.traceID = parentContext.traceID;
+			context.m_Flags = TraceFlags::flag_sampled;
+			context.spanID = deterministicRandom()->randomUInt64();
+		} else {
+			if (context.isSampled()) {
+				// Set the TraceID if this Span is sampled but the parent was not.
+				context.traceID = UID(deterministicRandom()->randomUInt64(), deterministicRandom()->randomUInt64());
+			}
+		}
+	}
+	OTELSpan(Location location,
+	         SpanContext parent = SpanContext(),
+	         std::initializer_list<SpanContext> const& links = {})
+	  : OTELSpan(SpanContext(UID(),
+	                         deterministicRandom()->randomUInt64(),
+	                         deterministicRandom()->random01() < FLOW_KNOBS->TRACING_SAMPLE_RATE
+	                             ? TraceFlags::flag_sampled
+	                             : TraceFlags::flag_unsampled),
+	             location,
+	             parent,
+	             links) {}
+	OTELSpan(Location location, SpanContext parent, SpanContext link) : OTELSpan(location, parent, { link }) {}
+	OTELSpan(const OTELSpan&) = delete;
+	OTELSpan(OTELSpan&& o) {
+		location = o.location;
+		context = o.context;
+		kind = o.kind;
+		begin = o.begin;
+		end = o.end;
+		parentContext = std::move(o.parentContext);
+		links = std::move(o.links);
+		events = std::move(o.events);
+		attributes = std::move(o.attributes);
+		status = o.status;
+		o.context = SpanContext();
+		o.kind = SpanKind::CLIENT;
+		o.begin = 0.0;
+		o.end = 0.0;
+	}
+	OTELSpan() {}
+	~OTELSpan();
+	OTELSpan& operator=(OTELSpan&& o);
+	OTELSpan& operator=(const OTELSpan&) = delete;
+	void swap(OTELSpan& other) {
+		std::swap(context, other.context);
+		std::swap(parentContext, other.parentContext);
+		std::swap(begin, other.begin);
+		std::swap(end, other.end);
+		std::swap(location, other.location);
+		std::swap(attributes, other.attributes);
+	}
+
+	void addLink(SpanContext linkContext) { links.push_back(linkContext); }
+
+	void addEvent(OTELEvent event) { events.push_back(event); }
+
+	void addAttribute(const StringRef& key, const StringRef& value) { attributes[key] = value; }
+
+	SpanContext context;
+	Location location;
+	SpanContext parentContext;
+	SpanKind kind;
+	std::vector<SpanContext> links;
+	double begin = 0.0, end = 0.0;
+	std::unordered_map<StringRef, StringRef> attributes;
+	// Have to use vector here due to unordered_map and is_trivially_descructable?
+	std::vector<OTELEvent> events;
+	SpanStatus status;
+};
+
 // The user selects a tracer using a string passed to fdbserver on boot.
 // Clients should not refer to TracerType directly, and mappings of names to
 // values in this enum can change without notice.
@@ -121,6 +223,7 @@ struct ITracer {
 	virtual TracerType type() const = 0;
 	// passed ownership to the tracer
 	virtual void trace(Span const& span) = 0;
+	virtual void trace(OTELSpan const& span) = 0;
 };
 
 void openTracer(TracerType type);
