@@ -1,0 +1,305 @@
+\documentclass[9pt]{beamer}
+
+\usepackage{amsmath}
+\usepackage{array}
+\usepackage{algorithm2e}
+\usepackage{listings}
+\usepackage{multirow}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{hyperref}
+\usepackage{tabularx}
+\usepackage{graphicx}
+
+\hypersetup{
+    colorlinks=true
+}
+
+\lstset{
+    language=C++,
+    basicstyle=\ttfamily\scriptsize,
+    keywordstyle=\color{blue}\ttfamily,
+    stringstyle=\color{red}\ttfamily,
+    commentstyle=\color{green}\ttfamily,
+    morecomment=[l][\color{magenta}]{\#}
+}
+
+\usetheme{Pittsburgh}
+\usefonttheme{professionalfonts}
+
+\setbeamersize{description width=0.57cm}
+
+\AtBeginEnvironment{frame}{\setcounter{footnote}{0}}
+
+\begin{document}
+    
+    \title{Cursor Implementation in Partitioned Transaction FoundationDB}
+    \author{Xiaoge Su}
+    \institute{Apple Inc.}
+    \begin{frame}
+        \maketitle
+    \end{frame}
+    
+    \begin{frame}{Table of Content}
+        \tableofcontents
+    \end{frame}
+    
+    \section{Introduction}
+    
+    \begin{frame}{Introduction}
+        \begin{itemize}
+            \item \href{https://www.foundationdb.org}{FoundationDB} is a key-value database with ACID support.
+            \item Internally, the journal is stored in \texttt{TLog}, and a \texttt{cursor} is used by the \texttt{Storage Server} to extract the commits from \texttt{TLog}s.
+            \item When \emph{storage team} is introduced, the \texttt{cursor} needs to be redesigned to support this new feature.
+        \end{itemize}
+        \begin{figure}
+            \includegraphics[width=10cm]{fdb.png}
+        \end{figure}
+    \end{frame}
+    
+    \section{Design and Implementation}
+    
+    \begin{frame}{Figure: Overall design}
+        \begin{figure}
+            \includegraphics[height=6cm]{requirement_i.png}
+        \end{figure}
+    \end{frame}
+    
+    \begin{frame}{Base Class Implementation}
+        A base class \texttt{ptxn::PeekCursorBase}\footnote{\texttt{fdbserver/ptxn/TLogPeekCursor.actor.h}} is implemented with methods:
+        \begin{itemize}
+            \item \texttt{remoteMoreAvailable}
+            \item \texttt{hasRemaining}
+            \item \texttt{get}
+            \item \texttt{next}
+            \vspace{0.2em}
+            \item {\color{gray}\texttt{reset}}
+        \end{itemize}
+        An iterator interface is also implemented for ranged \texttt{for} loop.
+    \end{frame}
+    
+    
+    \begin{frame}{Requirements: Single Storage Team}
+        \begin{itemize}
+            \item For a given storage team, pulls serialized data from the corresponding \texttt{TLog} to local \texttt{Storage Server}.
+            \item Allows the \texttt{Storage Server} iteratively access received data as \texttt{MutationRef}s.
+            \item {\color{gray}The data should be re-iterable.}
+        \end{itemize}
+    \end{frame}
+    
+    \begin{frame}{Implementation: Single Storage Team}
+        To support storage team peek cursor, \texttt{ptxn::StorageTeamPeekCursor}\footnote{\texttt{fdbserver/ptxn/TLogPeekCursor.actor.h}} is introduced.
+        \begin{itemize}
+            \item Inherited from \texttt{ptxn::PeekCursorBase}
+            \item Requires
+            \begin{itemize}
+                \item Start version
+                \item Storage team ID
+                \item \texttt{TLogInterface}
+            \end{itemize}
+        \end{itemize}
+    \end{frame}
+    
+    \begin{frame}{Requirements: Multiple Storage Teams}
+        \begin{table}
+            \begin{center}
+                \begin{tabular}{ccccccccccc}
+                    Commit Version & &1 & 2 & 3 & 4 & 5 & 6 & 7 & 8 & ... \\
+                    \hline\\
+                    \multirow{3}{*}{Storage Teams} & A & * & & * & * & & * & & * & ...\\
+                    & B & * & & * & & * & * & * & & ...\\
+                    & C &  & * & * & * & & & * & * & ... \\
+                    \hspace{0.2em}\\
+                    \multicolumn{11}{l}{\footnotesize * means the storage team has \texttt{MutationRef}s for the specific commit.}
+                \end{tabular}
+            \end{center}
+            
+        \end{table}
+        
+        \hspace{1em}
+        
+        \begin{itemize}
+            \item Each commit has its commit version.
+            \item One or more storage team(s) will be involved in the commit.
+            \item Each storage team has its own storage team version.
+        \end{itemize}
+    \end{frame}
+    
+    \begin{frame}{Broadcasting Model}
+        \begin{itemize}
+            \item A commit might \textbf{not} impact \textbf{all} storage teams.
+            \item In the broadcasting model, all storage teams will be informed when a new commit is coming in.
+            \begin{itemize}
+                \item All storage teams are sharing the same storage team version.
+                \item All storage servers are sharing the same commit version/storage team version.
+                \item For each commit, the storage server will peek from \textbf{all} storage teams it is subscribing.
+            \end{itemize}
+            \item This is done by sending the storage version (without \texttt{MutationRef}) to the uninvolved teams.
+        \end{itemize}
+    \end{frame}
+    
+    \begin{frame}{Broadcasting Model II}
+        \begin{table}
+            \begin{center}
+                \begin{tabular}{ccccccccccc}
+                    Commit Version & &1 & 2 & 3 & 4 & 5 & 6 & 7 & 8 & ... \\
+                    \hline\\
+                    \multirow{3}{*}{Storage Teams} & A & * & . & * & * & . & * & . & * & ...\\
+                    & B & * & . & * & . & * & * & * & . & ...\\
+                    & C & . & * & * & * & . & . & * & * & ... \\
+                    \hspace{0.2em}\\
+                    
+                    \multicolumn{11}{l}{\footnotesize \texttt{*} means the storage team has \texttt{MutationRef}s for the specific commit.}\\
+                    
+                    \multicolumn{11}{l}{\footnotesize \texttt{.} means the storage team receives an \texttt{EmptyVersionMessage}.}
+                \end{tabular}
+            \end{center}
+        \end{table}
+    \end{frame}
+    
+    \begin{frame}{Requirements: Multiple Storage Teams (Broadcasting)}
+        \begin{itemize}
+            \item The \texttt{Storage Server} should be able to subscribe from multiple storage teams.
+            \item The received \texttt{MutationRef}s should be ordered by the version {\color{gray}and subsequence} when iterating.
+        \end{itemize}
+    \end{frame}
+    
+    \begin{frame}{Figure: Multiple Storage Teams (Broadcasting)}
+        \begin{figure}
+            \includegraphics[height=6cm]{requirement_ii.png}
+        \end{figure}
+        
+        {\footnotesize Note in the storage server context, commit version is always used.}
+    \end{frame}
+    
+    \begin{frame}{Implementation: Multiple Storage Teams (Broadcasting)}
+        \begin{algorithm}[H]
+            \SetKwFunction{Empty}{empty}
+            \SetKwFunction{Pop}{pop}
+            \SetKwFunction{GetVersion}{get\_version}
+            \SetKwFunction{GetMutationRef}{get\_mutationref}
+            \SetKwFunction{Push}{push}
+            \SetKwFunction{Yield}{yield}
+            \SetKwFunction{HasRemaining}{hasRemaining}
+            \SetKwFunction{NextVersion}{nextVersion}
+            \SetKwData{Cursor}{cursor}
+            \SetKwData{Version}{version}
+            \SetKwData{MutationRef}{mutationRef}
+            \SetKwData{Container}{container}
+            \SetKwData{EmptyCursors}{emptyCursors}
+            \SetAlgoLined
+            \BlankLine 
+            \While{!\Empty{\Container}}{
+                \Cursor $\leftarrow$ \Pop{\Container}\;
+                \MutationRef $\leftarrow$ \GetMutationRef{\Cursor}\;
+                \Yield{\MutationRef}\;
+                
+                \uIf{\GetVersion{\Cursor} == \Version} {
+                    \Push{\Container, \Cursor}\;
+                }
+                \uElse {
+                    \NextVersion{\Cursor}\;
+                    \If{!\HasRemaining{\Cursor}} {
+                        \Push{\EmptyCursors, \Cursor}\;
+                    }
+                }
+            }
+            \BlankLine
+            \KwResult{\texttt{MutationRef}s in the commit}
+            \BlankLine
+            
+            \caption{Consume the \texttt{MutationRef}s in a commit}
+        \end{algorithm}
+    \end{frame}
+    
+    \begin{frame}{Implementation: Multiple Storage Teams (Broadcasting)}
+        In namespace \texttt{ptxn::details}
+        \begin{description}
+            \item[\texttt{StorageTeamIDCursorMapper}]\footnote{\label{tlogpeekcursor_1}\texttt{fdbserver/ptxn/TLogPeekCursor.actor.h}} \hfill\\
+            \noindent Stores the storage team IDs and its corresponding \texttt{StorageTeamPeekCursor}.
+            \item[\texttt{CursorContainerBase}]\footnotemark[1]\hfill\\  %FIXME should use \ref{tlogpeekcursor_1} but not working for some weird reasons. Perhaps because \ref is not returning a number but a \href when using hyperref?
+            \noindent For the \emph{current} version, stores the cursors those still have \texttt{MutationRef}s to be consumed.
+            \begin{description}
+                \item[\texttt{OrderedCursorContainer}]\hfill\\
+                Yields \texttt{MutationRef}s in subsequence order.
+                \item[\texttt{UnorderedCursorContainer}]\hfill\\
+                Yields \texttt{MutationRef}s in storage team ID order.
+            \end{description}
+        \end{description}
+    \end{frame}
+    
+    \begin{frame}{Implementation: Multiple Storage Teams (Broadcasting)}
+        In namespace \texttt{ptxn::details}
+        \begin{description}
+            \item[\texttt{BroadcastedStorageTeamPeekCursorBase}]\footnote{\texttt{fdbserver/ptxn/TLogPeekCursor.actor.h}}\hfill\\
+            Base class supports iterating over multiple storage teams.
+            \begin{description}
+                \item[\texttt{BroadcastedStorageTeamPeekCursor\_Ordered}]\hfill\\
+                Uses \texttt{OrderedCursorContainer} as container.
+                \item[\texttt{BroadcastedStorageTeamPeekCursor\_Unordered}]\hfill\\
+                Uses \texttt{UnorderedCursorContainer} as container.
+            \end{description}
+        \end{description}
+    \end{frame}
+    
+    \begin{frame}{Requirements: Mutable Multiple Storage Teams (Broadcasting)}
+        \begin{itemize}
+            \item The \texttt{Storage Server} should be able to subscribe/unsubscribe the storage teams \emph{on the fly}.
+            \item The storage team information is provided by a special storage team, \emph{private mutation team}.
+            \item The format of data in the private mutation team:
+            \begin{description}
+                \item[Key] Prefix + Storage Server ID
+                \item[Value] Private Mutation Team ID, \{Storage Team ID, ...\}
+            \end{description}
+            \item Every commit related to storage team change will only contain \texttt{MutationRef} in private mutation team.
+        \end{itemize}
+    \end{frame}
+    
+    \begin{frame}{Mutable Multiple Storage Teams Model (Broadcasting)}
+        The cursor of the storage server will monitor the private mutation team for relevant Prefix + Storage Server ID key.
+        \begin{itemize}
+            \item New storage team added
+            \begin{itemize}
+                \item Create corresponding \texttt{StorageTeamPeekCursor} object
+                \item Set its version next to the cursor version.
+                \item Mark it as empty.
+            \end{itemize}
+            \item Existing storage team removed
+            \begin{itemize}
+                \item Remove the storage team ID from the list along with the cursor.
+            \end{itemize}
+        \end{itemize}
+    \end{frame}
+    
+    \begin{frame}{Implementation: Mutable Multiple Storage Teams (Broadcasting)}
+        In namespace \texttt{ptxn::details}
+        \begin{description}
+            \item[\texttt{MutableTeamPeekCursor}]\footnote{\texttt{fdbserver/ptxn/MutableTeamPeekCursor.actor.h}}\hfill\\ 
+            \begin{itemize}
+                \item Implement the mutable team peek cursor base on ordered/unordered boradcasted storage team peek cursor.
+            \end{itemize}
+        \end{description}
+    \end{frame}
+    
+    
+    \begin{frame}{Requirements: Re-iterable cursor}
+        Re-iterable cursor: before \texttt{remoteMoreAvailable} is called, the content of the cursor can be iterated repeatly.
+        \begin{itemize}
+            \item Single storage team cursor: only uses a deserializer, which is re-iterable already.
+            \item Broadcasted storage team cursor: after the \texttt{remoteMoreAvailable}, record the initial state of the cursor container.
+            \item Mutable storage team cursor: Also need to temporarily store the deleted cursors.
+        \end{itemize}
+        
+        The state of the cursor is able to be \texttt{reset} base on previous stored state.
+    \end{frame}
+    
+    \section{Further Developments}
+    \begin{frame}{Further Developments}
+        \begin{itemize}
+            \item Mutable team peek cursor without version broadcasting.
+            \item Decouple the RPC part and the iterate part.
+        \end{itemize}
+    \end{frame}
+    
+    
+\end{document}

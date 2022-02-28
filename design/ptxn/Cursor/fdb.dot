@@ -1,0 +1,24 @@
+digraph FDB {
+    {
+        node [margin=0 shape=box, width=2];
+
+        client [label="Client"];
+        proxy [label="Proxy"];
+        resolver [label="Resolver"];
+        tlog [label="TLog"];
+        storage [label="Storage Server", shape=cylinder];
+    }
+    
+    {
+        rankdir="LR";
+        rank="min";
+        client; proxy; tlog; storage;
+    }
+    
+    client -> proxy;
+    proxy -> resolver;
+    resolver -> proxy;
+    proxy -> tlog;
+    tlog -> storage [dir="back",label=<<FONT COLOR="red">Cursor</FONT>>, color="red"];
+}
+
