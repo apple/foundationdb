@@ -28,16 +28,22 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include <mutex>
+
+namespace FdbApiTester {
+
+struct KeyValue {
+	std::string key;
+	std::string value;
+};
 
 class KeyValueStore {
 public:
-	struct KeyValue {
-		std::string key;
-		std::string value;
-	};
-
 	// Get the value associated with a key
 	std::optional<std::string> get(std::string_view key) const;
+
+	// Checks if the key exists
+	bool exists(std::string_view key);
 
 	// Returns the key designated by a key selector
 	std::string getKey(std::string_view keyName, bool orEqual, int offset) const;
@@ -69,6 +75,9 @@ public:
 private:
 	// A map holding the key-value pairs
 	std::map<std::string, std::string, std::less<>> store;
+	mutable std::mutex mutex;
 };
+
+} // namespace FdbApiTester
 
 #endif

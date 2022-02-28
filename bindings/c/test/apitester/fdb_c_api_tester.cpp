@@ -22,6 +22,7 @@
 #include "TesterWorkload.h"
 #include "TesterScheduler.h"
 #include "TesterTransactionExecutor.h"
+#include "TesterUtil.h"
 #include <iostream>
 #include <memory>
 #include <thread>
@@ -220,7 +221,7 @@ void fdb_check(fdb_error_t e) {
 }
 } // namespace
 
-std::shared_ptr<IWorkload> createApiCorrectnessWorkload();
+std::shared_ptr<IWorkload> createApiCorrectnessWorkload(std::string_view prefix);
 
 } // namespace FdbApiTester
 
@@ -251,7 +252,7 @@ void runApiCorrectness(TesterOptions& options) {
 
 	WorkloadManager workloadMgr(txExecutor.get(), scheduler.get());
 	for (int i = 0; i < 10; i++) {
-		std::shared_ptr<IWorkload> workload = createApiCorrectnessWorkload();
+		std::shared_ptr<IWorkload> workload = createApiCorrectnessWorkload(format("workload%d/", i));
 		workloadMgr.add(workload);
 	}
 	workloadMgr.run();

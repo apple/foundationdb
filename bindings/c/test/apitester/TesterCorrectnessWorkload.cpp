@@ -18,46 +18,176 @@
  * limitations under the License.
  */
 #include "TesterWorkload.h"
+#include "TesterUtil.h"
+#include "TesterKeyValueStore.h"
+#include "test/apitester/TesterScheduler.h"
 #include <memory>
 #include <optional>
 #include <iostream>
+#include <string_view>
 
 namespace FdbApiTester {
 
 class ApiCorrectnessWorkload : public WorkloadBase {
 public:
-	ApiCorrectnessWorkload() : numTxLeft(1000) {}
+	enum OpType { OP_INSERT, OP_GET, OP_LAST = OP_GET };
+
+	// The minimum length of a key
+	int minKeyLength;
+
+	// The maximum length of a key
+	int maxKeyLength;
+
+	// The minimum length of a value
+	int minValueLength;
+
+	// The maximum length of a value
+	int maxValueLength;
+
+	// Maximum number of keys to be accessed by a transaction
+	int maxKeysPerTransaction;
+
+	// The number of operations to be executed
+	int numOperations;
+
+	// The ratio of reading existing keys
+	double readExistingKeysRatio;
+
+	// Key prefix
+	std::string keyPrefix;
+
+	ApiCorrectnessWorkload(std::string_view prefix) {
+		minKeyLength = 1;
+		maxKeyLength = 64;
+		minValueLength = 1;
+		maxValueLength = 1000;
+		maxKeysPerTransaction = 50;
+		numOperations = 1000;
+		readExistingKeysRatio = 0.9;
+		keyPrefix = prefix;
+		numOpLeft = numOperations;
+	}
 
 	void start() override {
 		schedule([this]() { nextTransaction(); });
 	}
 
-private:
-	void nextTransaction() {
-		if (numTxLeft % 100 == 0) {
-			std::cout << numTxLeft << " transactions left" << std::endl;
-		}
-		if (numTxLeft == 0)
-			return;
+	std::string randomKeyName() { return keyPrefix + random.randomStringLowerCase(minKeyLength, maxKeyLength); }
 
-		numTxLeft--;
-		execTransaction(
-		    [](auto ctx) {
-			    ValueFuture fGet = ctx->tx()->get(ctx->dbKey("foo"), false);
-			    ctx->continueAfter(fGet, [fGet, ctx]() {
-				    std::optional<std::string_view> optStr = fGet.getValue();
-				    ctx->tx()->set(ctx->dbKey("foo"), optStr.value_or("bar"));
-				    ctx->commit();
-			    });
-		    },
-		    [this]() { nextTransaction(); });
+	std::string randomValue() { return random.randomStringLowerCase(minValueLength, maxValueLength); }
+
+	std::string randomNotExistingKey() {
+		while (true) {
+			std::string key = randomKeyName();
+			if (!store.exists(key)) {
+				return key;
+			}
+		}
 	}
 
-	int numTxLeft;
+	std::string randomExistingKey() {
+		std::string genKey = randomKeyName();
+		std::string key = store.getKey(genKey, true, 1);
+		if (key != store.endKey()) {
+			return key;
+		} else {
+			return store.getKey(genKey, true, 0);
+		}
+	}
+
+	std::string randomKey(double existingKeyRatio) {
+		if (random.randomBool(existingKeyRatio)) {
+			return randomExistingKey();
+		} else {
+			return randomNotExistingKey();
+		}
+	}
+
+	void randomInsertOp(TTaskFct cont) {
+		int numKeys = random.randomInt(1, maxKeysPerTransaction);
+		auto kvPairs = std::make_shared<std::vector<KeyValue>>();
+		for (int i = 0; i < numKeys; i++) {
+			kvPairs->push_back(KeyValue{ randomNotExistingKey(), randomValue() });
+		}
+		execTransaction(
+		    [kvPairs](auto ctx) {
+			    for (const KeyValue& kv : *kvPairs) {
+				    ctx->tx()->set(kv.key, kv.value);
+			    }
+			    ctx->commit();
+		    },
+		    [this, kvPairs, cont]() {
+			    for (const KeyValue& kv : *kvPairs) {
+				    store.set(kv.key, kv.value);
+			    }
+			    cont();
+		    });
+	}
+
+	void randomGetOp(TTaskFct cont) {
+		int numKeys = random.randomInt(1, maxKeysPerTransaction);
+		auto keys = std::make_shared<std::vector<std::string>>();
+		auto results = std::make_shared<std::vector<std::optional<std::string>>>();
+		for (int i = 0; i < numKeys; i++) {
+			keys->push_back(randomKey(readExistingKeysRatio));
+		}
+		execTransaction(
+		    [keys, results](auto ctx) {
+			    auto futures = std::make_shared<std::vector<Future>>();
+			    for (const auto& key : *keys) {
+				    futures->push_back(ctx->tx()->get(key, false));
+			    }
+			    ctx->continueAfterAll(futures, [ctx, futures, results]() {
+				    for (auto& f : *futures) {
+					    results->push_back(((ValueFuture&)f).getValue());
+				    }
+				    ctx->done();
+			    });
+		    },
+		    [this, keys, results, cont]() {
+			    ASSERT(results->size() == keys->size());
+			    for (int i = 0; i < keys->size(); i++) {
+				    auto expected = store.get((*keys)[i]);
+				    if ((*results)[i] != expected) {
+					    std::cout << "randomGetOp mismatch. expected: " << expected << " actual: " << (*results)[i]
+					              << std::endl;
+				    }
+			    }
+			    cont();
+		    });
+	}
+
+	void randomOperation(TTaskFct cont) {
+		OpType txType = (OpType)random.randomInt(0, OP_LAST);
+		switch (txType) {
+		case OP_INSERT:
+			randomInsertOp(cont);
+			break;
+		case OP_GET:
+			randomGetOp(cont);
+			break;
+		}
+	}
+
+private:
+	void nextTransaction() {
+		if (numOpLeft % 100 == 0) {
+			std::cout << numOpLeft << " transactions left" << std::endl;
+		}
+		if (numOpLeft == 0)
+			return;
+
+		numOpLeft--;
+		randomOperation([this]() { schedule([this]() { nextTransaction(); }); });
+	}
+
+	int numOpLeft;
+	Random random;
+	KeyValueStore store;
 };
 
-std::shared_ptr<IWorkload> createApiCorrectnessWorkload() {
-	return std::make_shared<ApiCorrectnessWorkload>();
+std::shared_ptr<IWorkload> createApiCorrectnessWorkload(std::string_view prefix) {
+	return std::make_shared<ApiCorrectnessWorkload>(prefix);
 }
 
 } // namespace FdbApiTester

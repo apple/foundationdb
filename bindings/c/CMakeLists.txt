@@ -109,6 +109,8 @@ if(NOT WIN32 AND NOT IS_ARM_MAC)
     test/apitester/TesterScheduler.h
     test/apitester/TesterTransactionExecutor.cpp
     test/apitester/TesterTransactionExecutor.h
+    test/apitester/TesterUtil.cpp
+    test/apitester/TesterUtil.h
     test/apitester/TesterWorkload.cpp
     test/apitester/TesterWorkload.h
     ../../flow/SimpleOpt.h

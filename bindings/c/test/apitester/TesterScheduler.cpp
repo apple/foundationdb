@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2021 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,10 +19,10 @@
  */
 
 #include "TesterScheduler.h"
+#include "TesterUtil.h"
 
 #include <memory>
 #include <thread>
-#include <cassert>
 #include <boost/asio.hpp>
 
 using namespace boost::asio;
@@ -60,7 +60,7 @@ private:
 };
 
 std::unique_ptr<IScheduler> createScheduler(int numThreads) {
-	assert(numThreads > 0 && numThreads <= 1000);
+	ASSERT(numThreads > 0 && numThreads <= 1000);
 	return std::make_unique<AsioScheduler>(numThreads);
 }
 

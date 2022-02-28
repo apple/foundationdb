@@ -44,7 +44,7 @@ fdb_error_t Future::getError() const {
 	return fdb_future_get_error(future_.get());
 }
 
-std::optional<std::string_view> ValueFuture::getValue() const {
+std::optional<std::string> ValueFuture::getValue() const {
 	int out_present;
 	const std::uint8_t* val;
 	int vallen;

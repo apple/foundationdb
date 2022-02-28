@@ -42,6 +42,7 @@ public:
 	FDBFuture* fdbFuture() { return future_.get(); };
 
 	fdb_error_t getError() const;
+	explicit operator bool() const { return future_ != nullptr; };
 	void reset();
 
 protected:
@@ -52,7 +53,7 @@ class ValueFuture : public Future {
 public:
 	ValueFuture() = default;
 	ValueFuture(FDBFuture* f) : Future(f) {}
-	std::optional<std::string_view> getValue() const;
+	std::optional<std::string> getValue() const;
 };
 
 class Transaction {

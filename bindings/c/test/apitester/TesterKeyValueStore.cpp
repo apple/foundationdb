@@ -19,18 +19,29 @@
  */
 
 #include "TesterKeyValueStore.h"
+#include <iostream>
+
+namespace FdbApiTester {
 
 // Get the value associated with a key
 std::optional<std::string> KeyValueStore::get(std::string_view key) const {
-	std::map<std::string, std::string>::const_iterator value = store.find(std::string(key));
+	std::unique_lock<std::mutex> lock(mutex);
+	auto value = store.find(std::string(key));
 	if (value != store.end())
 		return value->second;
 	else
 		return std::optional<std::string>();
 }
 
+// Checks if the key exists
+bool KeyValueStore::exists(std::string_view key) {
+	std::unique_lock<std::mutex> lock(mutex);
+	return (store.find(std::string(key)) != store.end());
+}
+
 // Returns the key designated by a key selector
 std::string KeyValueStore::getKey(std::string_view keyName, bool orEqual, int offset) const {
+	std::unique_lock<std::mutex> lock(mutex);
 	// Begin by getting the start key referenced by the key selector
 	std::map<std::string, std::string>::const_iterator mapItr = store.lower_bound(keyName);
 
@@ -78,10 +89,11 @@ std::string KeyValueStore::getKey(std::string_view keyName, bool orEqual, int of
 }
 
 // Gets a range of key-value pairs, returning a maximum of <limit> results
-std::vector<KeyValueStore::KeyValue> KeyValueStore::getRange(std::string_view begin,
-                                                             std::string_view end,
-                                                             int limit,
-                                                             bool reverse) const {
+std::vector<KeyValue> KeyValueStore::getRange(std::string_view begin,
+                                              std::string_view end,
+                                              int limit,
+                                              bool reverse) const {
+	std::unique_lock<std::mutex> lock(mutex);
 	std::vector<KeyValue> results;
 	if (!reverse) {
 		std::map<std::string, std::string>::const_iterator mapItr = store.lower_bound(begin);
@@ -109,11 +121,13 @@ std::vector<KeyValueStore::KeyValue> KeyValueStore::getRange(std::string_view be
 
 // Stores a key-value pair in the database
 void KeyValueStore::set(std::string_view key, std::string_view value) {
+	std::unique_lock<std::mutex> lock(mutex);
 	store[std::string(key)] = value;
 }
 
 // Removes a key from the database
 void KeyValueStore::clear(std::string_view key) {
+	std::unique_lock<std::mutex> lock(mutex);
 	auto iter = store.find(key);
 	if (iter != store.end()) {
 		store.erase(iter);
@@ -122,11 +136,13 @@ void KeyValueStore::clear(std::string_view key) {
 
 // Removes a range of keys from the database
 void KeyValueStore::clear(std::string_view begin, std::string_view end) {
+	std::unique_lock<std::mutex> lock(mutex);
 	store.erase(store.lower_bound(begin), store.lower_bound(end));
 }
 
 // The number of keys in the database
 uint64_t KeyValueStore::size() const {
+	std::unique_lock<std::mutex> lock(mutex);
 	return store.size();
 }
 
@@ -142,8 +158,11 @@ std::string KeyValueStore::endKey() const {
 
 // Debugging function that prints all key-value pairs
 void KeyValueStore::printContents() const {
+	std::unique_lock<std::mutex> lock(mutex);
 	printf("Contents:\n");
 	std::map<std::string, std::string>::const_iterator mapItr;
 	for (mapItr = store.begin(); mapItr != store.end(); mapItr++)
 		printf("%s\n", mapItr->first.c_str());
 }
+
+} // namespace FdbApiTester

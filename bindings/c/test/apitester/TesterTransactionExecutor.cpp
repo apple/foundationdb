@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2021 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,10 +19,11 @@
  */
 
 #include "TesterTransactionExecutor.h"
+#include "TesterUtil.h"
+#include "test/apitester/TesterScheduler.h"
 #include <iostream>
-#include <cassert>
 #include <memory>
-#include <random>
+#include <unordered_map>
 
 namespace FdbApiTester {
 
@@ -37,6 +38,17 @@ void fdb_check(fdb_error_t e) {
 
 } // namespace
 
+void ITransactionContext::continueAfterAll(std::shared_ptr<std::vector<Future>> futures, TTaskFct cont) {
+	auto counter = std::make_shared<std::atomic<int>>(futures->size());
+	for (auto& f : *futures) {
+		continueAfter(f, [counter, cont]() {
+			if (--(*counter) == 0) {
+				cont();
+			}
+		});
+	}
+}
+
 class TransactionContext : public ITransactionContext {
 public:
 	TransactionContext(FDBTransaction* tx,
@@ -49,18 +61,13 @@ public:
 	Transaction* tx() override { return &fdbTx; }
 	void continueAfter(Future f, TTaskFct cont) override { doContinueAfter(f, cont); }
 	void commit() override {
-		currFuture = fdbTx.commit();
-		doContinueAfter(currFuture, [this]() { done(); });
+		Future f = fdbTx.commit();
+		doContinueAfter(f, [this]() { done(); });
 	}
 	void done() override {
 		TTaskFct cont = contAfterDone;
 		delete this;
 		cont();
-	}
-	std::string_view dbKey(std::string_view key) override {
-		std::string keyWithPrefix(options.prefix);
-		keyWithPrefix.append(key);
-		return key;
 	}
 
 private:
@@ -77,19 +84,25 @@ private:
 			fdb_check(fdb_future_block_until_ready(f.fdbFuture()));
 			fdb_error_t err = f.getError();
 			if (err) {
-				currFuture = fdbTx.onError(err);
-				fdb_check(fdb_future_block_until_ready(currFuture.fdbFuture()));
-				handleOnErrorResult();
+				std::unique_lock<std::mutex> lock(mutex);
+				if (!onErrorFuture) {
+					onErrorFuture = fdbTx.onError(err);
+					fdb_check(fdb_future_block_until_ready(onErrorFuture.fdbFuture()));
+					scheduler->schedule([this]() { handleOnErrorResult(); });
+				}
 			} else {
-				cont();
+				scheduler->schedule([cont]() { cont(); });
 			}
 		});
 	}
 
 	void asyncContinueAfter(Future f, TTaskFct cont) {
-		currCont = cont;
-		currFuture = f;
-		fdb_check(fdb_future_set_callback(f.fdbFuture(), futureReadyCallback, this));
+		std::unique_lock<std::mutex> lock(mutex);
+		if (!onErrorFuture) {
+			waitMap[f.fdbFuture()] = WaitInfo{ f, cont };
+			lock.unlock();
+			fdb_check(fdb_future_set_callback(f.fdbFuture(), futureReadyCallback, this));
+		}
 	}
 
 	static void futureReadyCallback(FDBFuture* f, void* param) {
@@ -98,14 +111,21 @@ private:
 	}
 
 	void onFutureReady(FDBFuture* f) {
+		std::unique_lock<std::mutex> lock(mutex);
+		auto iter = waitMap.find(f);
+		if (iter == waitMap.end()) {
+			return;
+		}
 		fdb_error_t err = fdb_future_get_error(f);
+		TTaskFct cont = iter->second.cont;
+		waitMap.erase(iter);
 		if (err) {
-			currFuture = tx()->onError(err);
-			fdb_check(fdb_future_set_callback(currFuture.fdbFuture(), onErrorReadyCallback, this));
+			waitMap.clear();
+			onErrorFuture = tx()->onError(err);
+			lock.unlock();
+			fdb_check(fdb_future_set_callback(onErrorFuture.fdbFuture(), onErrorReadyCallback, this));
 		} else {
-			scheduler->schedule(currCont);
-			currFuture.reset();
-			currCont = TTaskFct();
+			scheduler->schedule(cont);
 		}
 	}
 
@@ -119,26 +139,33 @@ private:
 	}
 
 	void handleOnErrorResult() {
-		fdb_error_t err = currFuture.getError();
-		currFuture.reset();
-		currCont = TTaskFct();
+		std::unique_lock<std::mutex> lock(mutex);
+		fdb_error_t err = onErrorFuture.getError();
+		onErrorFuture.reset();
 		if (err) {
 			finalError = err;
 			done();
 		} else {
+			lock.unlock();
 			txActor->reset();
 			txActor->start();
 		}
 	}
 
+	struct WaitInfo {
+		Future future;
+		TTaskFct cont;
+	};
+
 	const TransactionExecutorOptions& options;
 	Transaction fdbTx;
 	std::shared_ptr<ITransactionActor> txActor;
-	TTaskFct currCont;
+	std::mutex mutex;
+	std::unordered_map<FDBFuture*, WaitInfo> waitMap;
+	Future onErrorFuture;
 	TTaskFct contAfterDone;
 	IScheduler* scheduler;
 	fdb_error_t finalError;
-	Future currFuture;
 };
 
 class TransactionExecutor : public ITransactionExecutor {
@@ -155,12 +182,10 @@ public:
 			fdb_check(fdb_create_database(clusterFile, &db));
 			databases.push_back(db);
 		}
-		std::random_device dev;
-		random.seed(dev());
 	}
 
 	void execute(std::shared_ptr<ITransactionActor> txActor, TTaskFct cont) override {
-		int idx = std::uniform_int_distribution<>(0, options.numDatabases - 1)(random);
+		int idx = random.randomInt(0, options.numDatabases - 1);
 		FDBTransaction* tx;
 		fdb_check(fdb_database_create_transaction(databases[idx], &tx));
 		TransactionContext* ctx = new TransactionContext(tx, txActor, cont, options, scheduler);
@@ -178,7 +203,7 @@ private:
 	std::vector<FDBDatabase*> databases;
 	TransactionExecutorOptions options;
 	IScheduler* scheduler;
-	std::mt19937 random;
+	Random random;
 };
 
 std::unique_ptr<ITransactionExecutor> createTransactionExecutor() {

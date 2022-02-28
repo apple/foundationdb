@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2021 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -38,7 +38,7 @@ public:
 	virtual void continueAfter(Future f, TTaskFct cont) = 0;
 	virtual void commit() = 0;
 	virtual void done() = 0;
-	virtual std::string_view dbKey(std::string_view key) = 0;
+	virtual void continueAfterAll(std::shared_ptr<std::vector<Future>> futures, TTaskFct cont);
 };
 
 class ITransactionActor {
@@ -56,7 +56,6 @@ public:
 protected:
 	ITransactionContext* ctx() { return context; }
 	Transaction* tx() { return ctx()->tx(); }
-	std::string_view dbKey(std::string_view key) { return ctx()->dbKey(key); }
 	void commit() { ctx()->commit(); }
 	void reset() override {}
 

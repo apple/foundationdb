@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2021 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -39,31 +39,48 @@ public:
 	virtual void start() = 0;
 };
 
+// A base class for test workloads
+// Tracks if workload is active, notifies the workload manager when the workload completes
 class WorkloadBase : public IWorkload {
 public:
-	WorkloadBase() : manager(nullptr), tasksScheduled(0), txRunning(0) {}
+	WorkloadBase() : manager(nullptr), tasksScheduled(0) {}
 	void init(WorkloadManager* manager) override;
 
 protected:
+	// Schedule the a task as a part of the workload
 	void schedule(TTaskFct task);
+
+	// Execute a transaction within the workload
 	void execTransaction(std::shared_ptr<ITransactionActor> tx, TTaskFct cont);
+
+	// Execute a transaction within the workload, a convenience method for tranasactions defined by a single lambda
 	void execTransaction(TTxStartFct start, TTaskFct cont) {
 		execTransaction(std::make_shared<TransactionFct>(start), cont);
 	}
-	void checkIfDone();
 
 private:
 	WorkloadManager* manager;
+
+	// Check if workload is done and notify the workload manager
+	void checkIfDone();
+
+	// Keep track of tasks scheduled by the workload
+	// End workload when this number falls to 0
 	std::atomic<int> tasksScheduled;
-	std::atomic<int> txRunning;
 };
 
+// Workload manager
+// Keeps track of active workoads, stops the scheduler after all workloads complete
 class WorkloadManager {
 public:
 	WorkloadManager(ITransactionExecutor* txExecutor, IScheduler* scheduler)
 	  : txExecutor(txExecutor), scheduler(scheduler) {}
 
+	// Add a workload
+	// A continuation is to be specified for subworkloads
 	void add(std::shared_ptr<IWorkload> workload, TTaskFct cont = NO_OP_TASK);
+
+	// Run all workloads. Blocks until all workloads complete
 	void run();
 
 private:
