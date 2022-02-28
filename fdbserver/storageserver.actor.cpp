@@ -4585,6 +4585,12 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 					                changeFeedSSValue(changeFeedInfo->range,
 					                                  changeFeedInfo->emptyVersion + 1,
 					                                  changeFeedInfo->stopVersion)));
+					data->addMutationToMutationLog(
+					    mLV,
+					    MutationRef(MutationRef::ClearRange,
+					                changeFeedDurableKey(changeFeedInfo->id, 0),
+					                changeFeedDurableKey(changeFeedInfo->id, feedResults->popVersion)));
+					++data->counters.kvSystemClearRanges;
 				}
 
 				Version localVersion = localResult.version;
@@ -4692,6 +4698,11 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 		                persistChangeFeedKeys.begin.toString() + changeFeedInfo->id.toString(),
 		                changeFeedSSValue(
 		                    changeFeedInfo->range, changeFeedInfo->emptyVersion + 1, changeFeedInfo->stopVersion)));
+		data->addMutationToMutationLog(mLV,
+		                               MutationRef(MutationRef::ClearRange,
+		                                           changeFeedDurableKey(changeFeedInfo->id, 0),
+		                                           changeFeedDurableKey(changeFeedInfo->id, feedResults->popVersion)));
+		++data->counters.kvSystemClearRanges;
 	}
 
 	// if we were popped or removed while fetching but it didn't pass the fetch version while writing, clean up here
@@ -4700,9 +4711,11 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 		ASSERT(lastVersion != invalidVersion);
 		Version endClear = std::min(lastVersion + 1, changeFeedInfo->emptyVersion);
 		if (endClear > firstVersion) {
-
-			data->storage.clearRange(KeyRangeRef(changeFeedDurableKey(changeFeedInfo->id, firstVersion),
-			                                     changeFeedDurableKey(changeFeedInfo->id, endClear)));
+			auto& mLV2 = data->addVersionToMutationLog(data->data().getLatestVersion());
+			data->addMutationToMutationLog(mLV2,
+			                               MutationRef(MutationRef::ClearRange,
+			                                           changeFeedDurableKey(changeFeedInfo->id, firstVersion),
+			                                           changeFeedDurableKey(changeFeedInfo->id, endClear)));
 			++data->counters.kvSystemClearRanges;
 		}
 	}
@@ -5912,6 +5925,7 @@ private:
 				data->keyChangeFeed.coalesce(changeFeedRange.contents());
 			}
 
+			bool popMutationLog = false;
 			bool addMutationToLog = false;
 			if (popVersion != invalidVersion && status != ChangeFeedStatus::CHANGE_FEED_DESTROY) {
 				// pop the change feed at pop version, no matter what state it is in
@@ -5922,8 +5936,9 @@ private:
 					}
 					if (feed->second->storageVersion != invalidVersion) {
 						++data->counters.kvSystemClearRanges;
-						data->storage.clearRange(KeyRangeRef(changeFeedDurableKey(feed->second->id, 0),
-						                                     changeFeedDurableKey(feed->second->id, popVersion)));
+						// do this clear in the mutation log, as we want it to be committed consistently with the
+						// popVersion update
+						popMutationLog = true;
 						if (popVersion > feed->second->storageVersion) {
 							feed->second->storageVersion = invalidVersion;
 							feed->second->durableVersion = invalidVersion;
@@ -5982,6 +5997,13 @@ private:
 				                persistChangeFeedKeys.begin.toString() + changeFeedId.toString(),
 				                changeFeedSSValue(
 				                    feed->second->range, feed->second->emptyVersion + 1, feed->second->stopVersion)));
+				if (popMutationLog) {
+					++data->counters.kvSystemClearRanges;
+					data->addMutationToMutationLog(mLV,
+					                               MutationRef(MutationRef::ClearRange,
+					                                           changeFeedDurableKey(feed->second->id, 0),
+					                                           changeFeedDurableKey(feed->second->id, popVersion)));
+				}
 			}
 		} else if (m.param1.substr(1).startsWith(tssMappingKeys.begin) &&
 		           (m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange)) {
