@@ -236,6 +236,7 @@ def test_write(linux_container: Container, snapshot):
     linux_container.run(["fdbcli", "--exec", "writemode on; set x y"])
     assert snapshot == linux_container.run(["fdbcli", "--exec", "get x"])
 
+
 def test_execstack_permissions_libfdb_c(linux_container: Container, snapshot):
     linux_container.run(["ldconfig"])
     assert snapshot == linux_container.run(
