@@ -138,7 +138,9 @@ struct AddingShard : NonCopyable {
 	// When fetchKeys "partially completes" (splits an adding shard in two), this is used to construct the left half
 	AddingShard(AddingShard* prev, KeyRange const& keys, Version version = invalidVersion)
 	  : keys(keys), fetchClient(prev->fetchClient), server(prev->server), transferredVersion(prev->transferredVersion),
-	    phase(prev->phase), shardVersion(version) {}
+	    phase(prev->phase), shardVersion(version) {
+		TraceEvent("AddingShard").detail("Begin", keys.begin).detail("End", keys.end).detail("Reason", "SplitShard");
+	}
 	~AddingShard() {
 		if (!fetchComplete.isSet())
 			fetchComplete.send(Void());
@@ -3588,9 +3590,6 @@ void applyMutation(StorageServer* self,
                    Version version,
                    bool fromFetch) {
 
-	if (m.param1.toString() == "3fc340a2877ee4e2") {
-		std::cout << "---- Mutation Version: " << version << "\n";
-	}
 	// m is expected to be in arena already
 	// Clear split keys are added to arena
 	StorageMetrics metrics;
@@ -4129,9 +4128,10 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			wait(data->durableVersion.whenAtLeast(lastAvailable + 1));
 		}
 
-		if (shard->shardVersion != invalidVersion) {
-			wait(data->durableVersion.whenAtLeast(shard->shardVersion));
-		}
+		/* if (shard->shardVersion != invalidVersion) {
+		    wait(data->durableVersion.whenAtLeast(shard->shardVersion + 1));
+		} */
+
 		TraceEvent(SevInfo, "ShardVersion")
 		    .detail("Version", shard->shardVersion)
 		    .detail("KeyBegin", shard->keys.begin)
@@ -4141,6 +4141,9 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 		wait(data->fetchKeysParallelismLock.take(TaskPriority::DefaultYield));
 		state FlowLock::Releaser holdingFKPL(data->fetchKeysParallelismLock);
+
+		// Creates a shard in KVS in critical session.
+		data->storage.writeMutation(MutationRef(MutationRef::KVSAddShard, keys.begin, keys.end));
 
 		state double executeStart = now();
 		++data->counters.fetchWaitingCount;
@@ -4283,8 +4286,9 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 					// shard->server->storage.addDataShard(KeyRangeRef(nfk, keys.end));
 
-					auto& mLV = shard->server->addVersionToMutationLog(shard->server->data().getLatestVersion());
-					shard->server->addMutationToMutationLog(mLV, MutationRef(MutationRef::KVSAddShard, nfk, keys.end));
+					// auto& mLV = shard->server->addVersionToMutationLog(shard->server->data().getLatestVersion());
+					// shard->server->addMutationToMutationLog(mLV, MutationRef(MutationRef::KVSAddShard, nfk,
+					// keys.end));
 
 					shard = data->shards.rangeContaining(keys.begin).value()->adding.get();
 					warningLogger = logFetchKeysWarning(shard);
@@ -4399,6 +4403,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 		TraceEvent(SevDebug, "FKBeforeAvailable").detail("KeyBegin", keys.begin).detail("KeyEnd", keys.end);
 
+		// The keys could be different from the original FK range due to errors. However, the shard range in KVS remains
+		// the same. When persisting a shard, we could see range discrepancy.
 		setAvailableStatus(data,
 		                   keys,
 		                   true); // keys will be available when getLatestVersion()==transferredVersion is durable
@@ -4431,19 +4437,23 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			if (shard->phase < AddingShard::Waiting) {
 				data->storage.clearRange(keys); // Should be replaced by drop shard.
 				data->byteSampleApplyClear(keys, invalidVersion);
+				// data->storage.writeMutation(MutationRef(MutationRef::KVSDropShard, keys.begin, keys.end));
 			} else {
 				ASSERT(data->data().getLatestVersion() > data->version.get());
 				removeDataRange(
 				    data, data->addVersionToMutationLog(data->data().getLatestVersion()), data->shards, keys);
+
+				// Should not drop shard here, unless it has been persisted.
 				setAvailableStatus(data, keys, false);
-				// Drop shard metadata here.
 
 				// data->storage.disposeShard(keys);
 
-				auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
-				data->addMutationToMutationLog(mLV, MutationRef(MutationRef::KVSDropShard, keys.begin, keys.end));
+				// auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
+				// data->addMutationToMutationLog(mLV, MutationRef(MutationRef::KVSDropShard, keys.begin, keys.end));
+
 				// Prevent another, overlapping fetchKeys from entering the Fetching phase until
 				// data->data().getLatestVersion() is durable
+				// data->storage.writeMutation(MutationRef(MutationRef::KVSDropShard, keys.begin, keys.end));
 				data->newestDirtyVersion.insert(keys, data->data().getLatestVersion());
 			}
 		}
@@ -4452,7 +4462,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		    .error(e)
 		    .detail("Elapsed", now() - startTime)
 		    .detail("KeyBegin", keys.begin)
-		    .detail("KeyEnd", keys.end);
+		    .detail("KeyEnd", keys.end)
+		    .detail("Phase", shard->phase);
 		if (e.code() != error_code_actor_cancelled)
 			data->otherError.sendError(e); // Kill the storage server.  Are there any recoverable errors?
 		throw; // goes nowhere
@@ -4463,6 +4474,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 AddingShard::AddingShard(StorageServer* server, KeyRangeRef const& keys, Version version)
   : keys(keys), server(server), transferredVersion(invalidVersion), phase(WaitPrevious), shardVersion(version) {
+	TraceEvent("AddingShard").detail("Begin", keys.begin).detail("End", keys.end).detail("Reason", "NewShard");
 	fetchClient = fetchKeys(server, this);
 }
 
@@ -4535,7 +4547,7 @@ void ShardInfo::addMutation(Version version, bool fromFetch, MutationRef const& 
 }
 
 enum ChangeServerKeysContext { CSK_UPDATE, CSK_RESTORE, CSK_ASSIGN_EMPTY };
-const char* changeServerKeysContextName[] = { "Update", "Restore" };
+const char* changeServerKeysContextName[] = { "Update", "Restore", "AssignEmpty" };
 
 void changeServerKeys(StorageServer* data,
                       const KeyRangeRef& keys,
@@ -4640,14 +4652,13 @@ void changeServerKeys(StorageServer* data,
 			data->addShard(ShardInfo::newNotAssigned(range));
 			data->watches.triggerRange(range.begin, range.end);
 		} else if (!dataAvailable) {
-			std::cout << "Data not available\n";
 			// Assigning a key range to SS. Adds shard in KVS.
 
 			TraceEvent("ChangeServerKeysAddShard", data->thisServerID)
 			    .detail("Begin", range.begin)
 			    .detail("End", range.end);
-			auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
-			data->addMutationToMutationLog(mLV, MutationRef(MutationRef::KVSAddShard, range.begin, range.end));
+			// auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
+			// data->addMutationToMutationLog(mLV, MutationRef(MutationRef::KVSAddShard, range.begin, range.end));
 
 			// data->storage.addDataShard(range);
 			// SOMEDAY: Avoid restarting adding/transferred shards
@@ -4657,6 +4668,9 @@ void changeServerKeys(StorageServer* data,
 				    .detail("End", range.end);
 				changeNewestAvailable.emplace_back(range, latestVersion);
 				data->addShard(ShardInfo::newReadWrite(range, data));
+				auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
+				data->addMutationToMutationLog(mLV, MutationRef(MutationRef::KVSAddShard, range.begin, range.end));
+
 				setAvailableStatus(data, range, true);
 			} else {
 				auto& shard = data->shards[range.begin];
@@ -4665,7 +4679,6 @@ void changeServerKeys(StorageServer* data,
 				}
 			}
 		} else {
-			std::cout << "Data already exists in SS.";
 			TraceEvent(SevDebug, "CSKDataAvailable").detail("Begin", range.begin).detail("End", range.end);
 			// Data already exist in SS.
 			changeNewestAvailable.emplace_back(range, latestVersion);
@@ -5287,7 +5300,6 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			state int mutationNum = 0;
 			state VerUpdateRef* pUpdate = &fii.changes[changeNum];
 			for (; mutationNum < pUpdate->mutations.size(); mutationNum++) {
-				// std::cout << "---- Mutation Version: " << pUpdate->version << "\n";
 				updater.applyMutation(data, pUpdate->mutations[mutationNum], pUpdate->version, true);
 				mutationBytes += pUpdate->mutations[mutationNum].totalSize();
 				// data->counters.mutationBytes or data->counters.mutations should not be updated because they should
@@ -5375,7 +5387,6 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 						    .detail("Version", cloneCursor2->version().toString());
 					}
 
-					// std::cout << "---- Mutation Version: " << pUpdate->version << "\n";
 					updater.applyMutation(data, msg, ver, false);
 					mutationBytes += msg.totalSize();
 					data->counters.mutationBytes += msg.totalSize();
@@ -5766,13 +5777,13 @@ void StorageServerDisk::writeMutation(MutationRef mutation) {
 		TraceEvent("KVSDropShard");
 		storage->disposeRange(KeyRangeRef(mutation.param1, mutation.param2));
 	} else if (mutation.type == MutationRef::KVSPersistShard) {
-		TraceEvent(SevDebug, "PersistShard").detail("KeyBegin", mutation.param1).detail("KeyEnd", mutation.param2);
+		TraceEvent(SevDebug, "KVSPersistShard").detail("KeyBegin", mutation.param1).detail("KeyEnd", mutation.param2);
 		auto shardMutations = storage->getPersistShardMutations(KeyRangeRef(mutation.param1, mutation.param2));
 		for (const auto& m : shardMutations) {
 			writeMutation(m);
 		}
 	} else if (mutation.type == MutationRef::KVSDisposeShard) {
-		TraceEvent(SevDebug, "DisposeRange").detail("KeyBegin", mutation.param1).detail("KeyEnd", mutation.param2);
+		TraceEvent(SevDebug, "KVSDisposeRange").detail("KeyBegin", mutation.param1).detail("KeyEnd", mutation.param2);
 		auto shardMutations = storage->getDisposeRangeMutations(KeyRangeRef(mutation.param2, mutation.param2));
 		for (const auto& m : shardMutations) {
 			writeMutation(m);
@@ -5787,18 +5798,6 @@ void StorageServerDisk::writeMutations(const VectorRef<MutationRef>& mutations,
                                        const char* debugContext) {
 	for (const auto& m : mutations) {
 		DEBUG_MUTATION(debugContext, debugVersion, m, data->thisServerID);
-
-		/*if (m.type == MutationRef::SetValue) {
-		    storage->set(KeyValueRef(m.param1, m.param2));
-		} else if (m.type == MutationRef::ClearRange) {
-		    storage->clear(KeyRangeRef(m.param1, m.param2));
-		} else if (m.type == MutationRef::KVSAddShard) {
-		    storage->addShard(KeyRangeRef(m.param1, m.param2), deterministicRandom()->randomUniqueID());
-		} else if (m.type == MutationRef::KVSDropShard) {
-		    storage->disposeRange(KeyRangeRef(m.param1, m.param2));
-		} else {
-		    ASSERT(false); // Invalid mutation type.
-		}*/
 		writeMutation(m);
 	}
 }

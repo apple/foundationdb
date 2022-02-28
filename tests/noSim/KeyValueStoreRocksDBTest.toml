@@ -6,5 +6,5 @@ startDelay = 0
     [[test.workload]]
     testName = 'UnitTests'
     maxTestCases = 10
-    testsMatching = 'RocksDBKVS/'
+    testsMatching = 'RocksDBKVS/ReadRange'
 

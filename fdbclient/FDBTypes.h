@@ -287,7 +287,7 @@ struct KeyRangeRef {
 	KeyRangeRef() {}
 	KeyRangeRef(const KeyRef& begin, const KeyRef& end) : begin(begin), end(end) {
 		if (begin > end) {
-			TraceEvent e(SevError, "InvertedRange");
+			TraceEvent e("InvertedRange");
 			e.detail("Begin", begin).detail("End", end);
 			throw inverted_range();
 		}
