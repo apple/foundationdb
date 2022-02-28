@@ -39,6 +39,7 @@
 #include "flow/ActorCollection.h"
 #include <map>
 #include <string>
+#include <unordered_map>
 #include <vector>
 #include "fdbclient/CommitTransaction.h"
 #include "fdbserver/IKeyValueStore.h"
@@ -4610,13 +4611,6 @@ struct BTreePage {
 	}
 };
 
-static void makeEmptyRoot(Reference<ArenaPage> page) {
-	BTreePage* btpage = (BTreePage*)page->begin();
-	btpage->height = 1;
-	btpage->kvBytes = 0;
-	btpage->tree()->build(page->size(), nullptr, nullptr, nullptr, nullptr);
-}
-
 struct BoundaryRefAndPage {
 	Standalone<RedwoodRecordRef> lowerBound;
 	Reference<ArenaPage> firstPage;
@@ -4716,7 +4710,7 @@ public:
 			}
 		}
 
-		bool maybeUpdated(LogicalPageID child) { return (mask(child) & bits) != 0; }
+		bool maybeUpdated(LogicalPageID child) const { return (mask(child) & bits) != 0; }
 
 		uint32_t bits;
 		int count;
@@ -4879,8 +4873,8 @@ public:
 						BTreePageIDRef btChildPageID = c.get().getChildPage();
 						// If this page is height 2, then the children are leaves so free them directly
 						if (entry.height == 2) {
-							debug_printf("LazyClear: freeing child %s\n", toString(btChildPageID).c_str());
-							self->freeBTreePage(btChildPageID, v);
+							debug_printf("LazyClear: freeing leaf child %s\n", toString(btChildPageID).c_str());
+							self->freeBTreePage(1, btChildPageID, v);
 							freedPages += btChildPageID.size();
 							metrics.lazyClearFree += 1;
 							metrics.lazyClearFreeExt += (btChildPageID.size() - 1);
@@ -4900,7 +4894,7 @@ public:
 
 				// Free the page, now that its children have either been freed or queued
 				debug_printf("LazyClear: freeing queue entry %s\n", toString(entry.pageID).c_str());
-				self->freeBTreePage(entry.pageID, v);
+				self->freeBTreePage(entry.height, entry.pageID, v);
 				freedPages += entry.pageID.size();
 				metrics.lazyClearFree += 1;
 				metrics.lazyClearFreeExt += entry.pageID.size() - 1;
@@ -4946,7 +4940,7 @@ public:
 			self->m_pHeader->root.set(newRoot, self->m_headerSpace - sizeof(MetaKey));
 			self->m_pHeader->height = 1;
 			Reference<ArenaPage> page = self->m_pager->newPageBuffer();
-			makeEmptyRoot(page);
+			self->makeEmptyRoot(id, page);
 			self->m_pager->updatePage(PagerEventReasons::MetaData, nonBtreeLevel, newRoot, page);
 
 			LogicalPageID newQueuePage = wait(self->m_pager->newPageID());
@@ -5467,6 +5461,13 @@ private:
 		return pages;
 	}
 
+	void makeEmptyRoot(LogicalPageID id, Reference<ArenaPage> page) {
+		BTreePage* btpage = (BTreePage*)page->begin();
+		btpage->height = 1;
+		btpage->kvBytes = 0;
+		btpage->tree()->build(page->size(), nullptr, nullptr, nullptr, nullptr);
+	}
+
 	// Writes entries to 1 or more pages and return a vector of boundary keys with their ArenaPage(s)
 	ACTOR static Future<Standalone<VectorRef<RedwoodRecordRef>>> writePages(VersionedBTree* self,
 	                                                                        const RedwoodRecordRef* lowerBound,
@@ -5612,7 +5613,7 @@ private:
 
 				// Free the old IDs, but only once (before the first output record is added).
 				if (records.empty()) {
-					self->freeBTreePage(previousID, v);
+					self->freeBTreePage(height, previousID, v);
 				}
 
 				state Standalone<VectorRef<LogicalPageID>> emptyPages;
@@ -5760,15 +5761,21 @@ private:
 		}
 	}
 
-	void freeBTreePage(BTreePageIDRef btPageID, Version v) {
+	void freeBTreePage(int height, BTreePageIDRef btPageID, Version v) {
 		// Free individual pages at v
 		for (LogicalPageID id : btPageID) {
 			m_pager->freePage(id, v);
 		}
+
+		// Stop tracking child updates for deleted internal nodes
+		if (height > 1 && !btPageID.empty()) {
+			childUpdateTracker.erase(btPageID.front());
+		}
 	}
 
 	// Write new version of pageID at version v using page as its data.
-	// Attempts to reuse original id(s) in btPageID, returns BTreePageID.
+	// If oldID size is 1, attempts to keep logical page ID via an atomic page update.
+	// Returns resulting BTreePageID which might be the same as the input
 	// updateBTreePage is only called from commitSubTree function so write reason is always btree commit
 	ACTOR static Future<BTreePageIDRef> updateBTreePage(VersionedBTree* self,
 	                                                    BTreePageIDRef oldID,
@@ -5811,7 +5818,7 @@ private:
 			newID[i] = id;
 			++i;
 		}
-		self->freeBTreePage(oldID, writeVersion);
+		self->freeBTreePage(height, oldID, writeVersion);
 		return newID;
 	}
 
@@ -6458,7 +6465,7 @@ private:
 				// If the tree is now empty, delete the page
 				if (cursor.tree->numItems == 0) {
 					update->cleared();
-					self->freeBTreePage(rootID, batch->writeVersion);
+					self->freeBTreePage(height, rootID, batch->writeVersion);
 					debug_printf("%s Page updates cleared all entries, returning %s\n",
 					             context.c_str(),
 					             toString(*update).c_str());
@@ -6477,7 +6484,7 @@ private:
 			// If everything in the page was deleted then this page should be deleted as of the new version
 			if (merged.empty()) {
 				update->cleared();
-				self->freeBTreePage(rootID, batch->writeVersion);
+				self->freeBTreePage(height, rootID, batch->writeVersion);
 
 				debug_printf("%s All leaf page contents were cleared, returning %s\n",
 				             context.c_str(),
@@ -6637,7 +6644,7 @@ private:
 										debug_printf("%s: freeing child page in cleared subtree range: %s\n",
 										             context.c_str(),
 										             ::toString(rec.getChildPage()).c_str());
-										self->freeBTreePage(rec.getChildPage(), batch->writeVersion);
+										self->freeBTreePage(height, rec.getChildPage(), batch->writeVersion);
 									} else {
 										debug_printf("%s: queuing subtree deletion cleared subtree range: %s\n",
 										             context.c_str(),
@@ -6740,8 +6747,7 @@ private:
 					debug_printf("%s All internal page children were deleted so deleting this page too, returning %s\n",
 					             context.c_str(),
 					             toString(*update).c_str());
-					self->freeBTreePage(rootID, batch->writeVersion);
-					self->childUpdateTracker.erase(rootID.front());
+					self->freeBTreePage(height, rootID, batch->writeVersion);
 				} else {
 					if (modifier.updating) {
 						// Page was updated in place (or being forced to be updated in place to update child page ids)
@@ -6918,7 +6924,7 @@ private:
 				debug_printf("Writing new empty root.\n");
 				LogicalPageID newRootID = wait(self->m_pager->newPageID());
 				Reference<ArenaPage> page = self->m_pager->newPageBuffer();
-				makeEmptyRoot(page);
+				self->makeEmptyRoot(newRootID, page);
 				self->m_pHeader->height = 1;
 				VectorRef<LogicalPageID> rootID((LogicalPageID*)&newRootID, 1);
 				self->m_pager->updatePage(PagerEventReasons::Commit, self->m_pHeader->height, rootID, page);
