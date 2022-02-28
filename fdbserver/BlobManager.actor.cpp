@@ -203,6 +203,17 @@ struct BlobWorkerStats {
 	BlobWorkerStats(int numGranulesAssigned = 0) : numGranulesAssigned(numGranulesAssigned) {}
 };
 
+struct SplitEvaluation {
+	int64_t epoch;
+	int64_t seqno;
+	Version version;
+	Future<Void> inProgress;
+
+	SplitEvaluation() : epoch(0), seqno(0), version(invalidVersion) {}
+	SplitEvaluation(int64_t epoch, int64_t seqno, int64_t version, Future<Void> inProgress)
+	  : epoch(epoch), seqno(seqno), version(version), inProgress(inProgress) {}
+};
+
 struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 	UID id;
 	Database db;
@@ -218,6 +229,7 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 	std::unordered_set<UID> deadWorkers;
 	KeyRangeMap<UID> workerAssignments;
 	KeyRangeActorMap assignsInProgress;
+	KeyRangeMap<SplitEvaluation> splitEvaluations;
 	KeyRangeMap<bool> knownBlobRanges;
 
 	AsyncTrigger startRecruiting;
@@ -504,6 +516,16 @@ ACTOR Future<Void> rangeAssigner(Reference<BlobManagerData> bmData) {
 		state RangeAssignment assignment = waitNext(bmData->rangesToAssign.getFuture());
 		state int64_t seqNo = bmData->seqNo;
 		bmData->seqNo++;
+
+		if (BM_DEBUG) {
+			fmt::print("DBGRA: BM {0} {1} range [{2} - {3}) @ ({4}, {5})\n",
+			           bmData->epoch,
+			           assignment.isAssign ? "assign" : "revoke",
+			           assignment.keyRange.begin.printable(),
+			           assignment.keyRange.end.printable(),
+			           bmData->epoch,
+			           seqNo);
+		}
 
 		// modify the in-memory assignment data structures, and send request off to worker
 		state UID workerId;
@@ -1173,7 +1195,6 @@ ACTOR Future<Void> killBlobWorker(Reference<BlobManagerData> bmData, BlobWorkerI
 }
 
 ACTOR Future<Void> monitorBlobWorkerStatus(Reference<BlobManagerData> bmData, BlobWorkerInterface bwInterf) {
-	state KeyRangeMap<std::pair<int64_t, int64_t>> lastSeenSeqno;
 	// outer loop handles reconstructing stream if it got a retryable error
 	// do backoff, we can get a lot of retries in a row
 
@@ -1235,10 +1256,10 @@ ACTOR Future<Void> monitorBlobWorkerStatus(Reference<BlobManagerData> bmData, Bl
 					continue;
 				}
 
-				auto lastReqForGranule = lastSeenSeqno.rangeContaining(rep.granuleRange.begin);
-				if (rep.granuleRange.begin == lastReqForGranule.begin() &&
-				    rep.granuleRange.end == lastReqForGranule.end() && rep.epoch == lastReqForGranule.value().first &&
-				    rep.seqno == lastReqForGranule.value().second) {
+				auto lastSplitEval = bmData->splitEvaluations.rangeContaining(rep.granuleRange.begin);
+				if (rep.granuleRange.begin == lastSplitEval.begin() && rep.granuleRange.end == lastSplitEval.end() &&
+				    rep.epoch == lastSplitEval.cvalue().epoch && rep.seqno == lastSplitEval.cvalue().seqno) {
+					ASSERT(lastSplitEval.cvalue().version == rep.latestVersion);
 					if (BM_DEBUG) {
 						fmt::print("Manager {0} received repeat status for the same granule [{1} - {2}), ignoring.\n",
 						           bmData->epoch,
@@ -1246,22 +1267,45 @@ ACTOR Future<Void> monitorBlobWorkerStatus(Reference<BlobManagerData> bmData, Bl
 						           rep.granuleRange.end.printable());
 					}
 				} else {
-					if (BM_DEBUG) {
-						fmt::print("Manager {0} evaluating [{1} - {2}) @ ({3}, {4}) for split\n",
-						           bmData->epoch,
-						           rep.granuleRange.begin.printable().c_str(),
-						           rep.granuleRange.end.printable().c_str(),
-						           rep.epoch,
-						           rep.seqno);
+					ASSERT(lastSplitEval.cvalue().epoch < rep.epoch ||
+					       (lastSplitEval.cvalue().epoch == rep.epoch && lastSplitEval.cvalue().seqno < rep.seqno));
+					if (lastSplitEval.cvalue().inProgress.isValid() && !lastSplitEval.cvalue().inProgress.isReady()) {
+						TEST(true); // racing BM splits
+						// For example, one worker asked BM to split, then died, granule was moved, new worker asks to
+						// split on recovery. We need to ensure that they are semantically the same split (same range +
+						// version). We will just rely on the in-progress split to finish
+						ASSERT(lastSplitEval.cvalue().version == rep.latestVersion);
+						ASSERT(lastSplitEval.range() == rep.granuleRange);
+						if (BM_DEBUG) {
+							fmt::print("Manager {0} got split request for [{1} - {2}) @ ({3}, {4}), but already in "
+							           "progress from ({5}, {6})\n",
+							           bmData->epoch,
+							           rep.granuleRange.begin.printable().c_str(),
+							           rep.granuleRange.end.printable().c_str(),
+							           rep.epoch,
+							           rep.seqno,
+							           lastSplitEval.cvalue().epoch,
+							           lastSplitEval.cvalue().seqno);
+						}
+					} else {
+						if (BM_DEBUG) {
+							fmt::print("Manager {0} evaluating [{1} - {2}) @ ({3}, {4}) for split\n",
+							           bmData->epoch,
+							           rep.granuleRange.begin.printable().c_str(),
+							           rep.granuleRange.end.printable().c_str(),
+							           rep.epoch,
+							           rep.seqno);
+						}
+						Future<Void> doSplitEval = maybeSplitRange(bmData,
+						                                           bwInterf.id(),
+						                                           rep.granuleRange,
+						                                           rep.granuleID,
+						                                           rep.startVersion,
+						                                           rep.latestVersion,
+						                                           rep.writeHotSplit);
+						bmData->splitEvaluations.insert(
+						    rep.granuleRange, SplitEvaluation(rep.epoch, rep.seqno, rep.latestVersion, doSplitEval));
 					}
-					lastSeenSeqno.insert(rep.granuleRange, std::pair(rep.epoch, rep.seqno));
-					bmData->addActor.send(maybeSplitRange(bmData,
-					                                      bwInterf.id(),
-					                                      rep.granuleRange,
-					                                      rep.granuleID,
-					                                      rep.startVersion,
-					                                      rep.latestVersion,
-					                                      rep.writeHotSplit));
 				}
 			}
 		} catch (Error& e) {
