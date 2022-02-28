@@ -69,7 +69,7 @@ public:
 	// Each packet in the queue is
 	//    uint32_t payloadSize
 	//    uint8_t payload[payloadSize]  (begins with uint64_t protocolVersion via IncludeVersion)
-	//    uint8_t validFlag
+	//    uint8_t validFlag (defined as TLOG_QUEUE_ENTRY_VALID_FLAG)
 
 	// TLogQueue is a durable queue of TLogQueueEntry objects with an interface similar to IDiskQueue
 
@@ -201,6 +201,8 @@ static const KeyRange persistStorageTeamMessageRefsKeys = prefixRange(LiteralStr
 // and sometimes we are only persisting Message Header + Message.
 static const size_t MESSAGE_OVERHEAD_BYTES =
     ptxn::SerializerVersionOptionBytes + ptxn::getSerializedBytes<ptxn::details::MessageHeader>();
+
+static const uint8_t TLOG_QUEUE_ENTRY_VALID_FLAG = 0x01;
 
 Key persistStorageTeamMessagesKey(UID id, StorageTeamID storageTeamId, Version version) {
 	BinaryWriter wr(Unversioned());
@@ -797,7 +799,7 @@ void TLogQueue::push(TLogQueueEntry const& qe, Reference<LogGenerationData> logD
 	wr << uint32_t(0);
 	IncludeVersion(ProtocolVersion::withTLogQueueEntryRef()).write(wr); // payload is versioned
 	wr << qe;
-	wr << uint8_t(1);
+	wr << TLOG_QUEUE_ENTRY_VALID_FLAG;
 	*(uint32_t*)wr.getData() = wr.getLength() - sizeof(uint32_t) - sizeof(uint8_t);
 	const IDiskQueue::location startloc = queue->getNextPushLocation();
 	// FIXME: push shouldn't return anything.  We should call getNextPushLocation() again.
@@ -1176,10 +1178,7 @@ void peekMessagesFromMemory(const TLogPeekRequest& req,
 		if (reqEnd.present() && version > reqEnd.get()) {
 			break;
 		}
-
-		if (!beginVersion.present()) {
-			beginVersion = version;
-		}
+		firstVersion = std::min(firstVersion, version);
 		values->push_back(result);
 		++version;
 		versionCount++;
@@ -1451,7 +1450,7 @@ ACTOR Future<Void> servicePeekRequest(
 	}
 
 	state Version endVersion = logData->version.get() + 1;
-	state Optional<Version> beginVersion;
+	state Version firstVersion = std::numeric_limits<Version>::max();
 
 	state bool onlySpilled = false;
 	// persistentDataDurableVersion is the first version not popped and thus still in memory, so we need < here.
@@ -1466,7 +1465,7 @@ ACTOR Future<Void> servicePeekRequest(
 		if (reqOnlySpilled) {
 			endVersion = logData->persistentDataDurableVersion + 1;
 		} else {
-			peekMessagesFromMemory(req, &values, beginVersion, endVersion, logData);
+			peekMessagesFromMemory(req, &values, firstVersion, endVersion, logData);
 		}
 
 		if (logData->shouldSpillByValue(req.storageTeamID)) {
@@ -1476,16 +1475,12 @@ ACTOR Future<Void> servicePeekRequest(
 			                    logData->logId, req.storageTeamID, logData->persistentDataDurableVersion + 1)),
 			    TLOG_PEEK_REQUEST_REPLY_SIZE_CRITERIA,
 			    TLOG_PEEK_REQUEST_REPLY_SIZE_CRITERIA));
-			bool first = true;
 			for (auto& kv : kvs) {
 				auto ver = decodeStorageTeamMessagesKey(kv.key);
 				// try decode kv.value here, who is encoded by proxy
 				versionsFromDisk.insert(ver);
 				serializer.writeSerializedVersionSection(kv.value);
-				if (first) {
-					beginVersion = ver;
-					first = false;
-				}
+				firstVersion = std::min(firstVersion, ver);
 			}
 			if (kvs.expectedSize() >=
 			    TLOG_PEEK_REQUEST_REPLY_SIZE_CRITERIA) { // if enough from disk, not reading from memory
@@ -1508,14 +1503,13 @@ ACTOR Future<Void> servicePeekRequest(
 			state bool earlyEnd = false;
 			uint32_t mutationBytes = 0;
 			state uint64_t commitBytes = 0;
-			state Version firstVersion = std::numeric_limits<Version>::max();
 			for (int i = 0; i < kvrefs.size() && i < SERVER_KNOBS->TLOG_SPILL_REFERENCE_MAX_BATCHES_PER_PEEK; i++) {
 				auto& kv = kvrefs[i];
 				VectorRef<SpilledData> spilledData;
 				Version currentVersion = decodeVersionFromStorageTeamMessageRefs(kv.key);
 				versionsFromDisk.insert(currentVersion);
 				BinaryReader r(kv.value, AssumeVersion(logData->protocolVersion));
-				r >> spilledData; // here it broke
+				r >> spilledData;
 				for (const SpilledData& sd : spilledData) {
 					if (mutationBytes >= TLOG_PEEK_REQUEST_REPLY_SIZE_CRITERIA) {
 						earlyEnd = true;
@@ -1558,7 +1552,7 @@ ACTOR Future<Void> servicePeekRequest(
 				BinaryReader rd(queueEntryData, IncludeVersion());
 				TLogQueueEntry entry;
 				rd >> entry >> valid;
-				ASSERT(valid == 0x01);
+				ASSERT(valid == TLOG_QUEUE_ENTRY_VALID_FLAG);
 				ASSERT(length + sizeof(valid) == queueEntryData.size());
 				// TLogQueueEntry has messages for multiple teams(vector<StorageTeamID>, vector<StringRef>)
 				// locations stored in persistStorageTeamMessageRefsKey( is for the whole TLogQueueEntry, not a certain
@@ -1594,7 +1588,7 @@ ACTOR Future<Void> servicePeekRequest(
 		if (reqOnlySpilled) {
 			endVersion = logData->persistentDataDurableVersion + 1;
 		} else {
-			peekMessagesFromMemory(req, &values, beginVersion, endVersion, logData);
+			peekMessagesFromMemory(req, &values, firstVersion, endVersion, logData);
 			serializeMemoryData(values, serializer);
 		}
 		//TraceEvent("TLogPeekResults", self->dbgid).detail("ForAddress", replyPromise.getEndpoint().getPrimaryAddress()).detail("MessageBytes", messages.getLength()).detail("NextEpoch", next_pos.epoch).detail("NextSeq", next_pos.sequence).detail("NowSeq", self->sequence.getNextSequence());
@@ -1607,7 +1601,7 @@ ACTOR Future<Void> servicePeekRequest(
 	reply.data = replyData;
 	reply.arena.dependsOn(replyData.arena());
 	reply.endVersion = endVersion;
-	reply.beginVersion = beginVersion;
+	reply.beginVersion = firstVersion == std::numeric_limits<Version>::max() ? Optional<Version>() : firstVersion;
 	reply.onlySpilled = onlySpilled;
 	req.reply.send(reply);
 
