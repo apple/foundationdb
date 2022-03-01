@@ -1049,10 +1049,9 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 	}
 
 	// transaction committed, send range assignments
-	// revoke from current worker
+	// range could have been moved since split eval started, so just revoke from whoever has it
 	RangeAssignment raRevoke;
 	raRevoke.isAssign = false;
-	raRevoke.worker = currentWorkerId;
 	raRevoke.keyRange = granuleRange;
 	raRevoke.revoke = RangeRevokeData(false); // not a dispose
 	bmData->rangesToAssign.send(raRevoke);
@@ -1272,9 +1271,8 @@ ACTOR Future<Void> monitorBlobWorkerStatus(Reference<BlobManagerData> bmData, Bl
 					if (lastSplitEval.cvalue().inProgress.isValid() && !lastSplitEval.cvalue().inProgress.isReady()) {
 						TEST(true); // racing BM splits
 						// For example, one worker asked BM to split, then died, granule was moved, new worker asks to
-						// split on recovery. We need to ensure that they are semantically the same split (same range +
-						// version). We will just rely on the in-progress split to finish
-						ASSERT(lastSplitEval.cvalue().version == rep.latestVersion);
+						// split on recovery. We need to ensure that they are semantically the same split.
+						// We will just rely on the in-progress split to finish
 						ASSERT(lastSplitEval.range() == rep.granuleRange);
 						if (BM_DEBUG) {
 							fmt::print("Manager {0} got split request for [{1} - {2}) @ ({3}, {4}), but already in "

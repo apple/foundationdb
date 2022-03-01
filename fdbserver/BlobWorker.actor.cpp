@@ -1310,6 +1310,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 					}
 				}
 			}
+
 			metadata->files = startState.existingFiles.get();
 			snapshotEligible = true;
 		}
@@ -1770,10 +1771,11 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				if (snapshotEligible && metadata->bytesInNewDeltaFiles >= SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT &&
 				    metadata->pendingDeltaVersion >= startState.changeFeedStartVersion) {
 					if (BW_DEBUG && !inFlightFiles.empty()) {
-						fmt::print("Granule [{0} - {1}) ready to re-snapshot after {2} > {3} bytes, waiting for "
-						           "outstanding {4} files to finish\n",
+						fmt::print("Granule [{0} - {1}) ready to re-snapshot at {2} after {3} > {4} bytes, waiting for "
+						           "outstanding {5} files to finish\n",
 						           metadata->keyRange.begin.printable(),
 						           metadata->keyRange.end.printable(),
+						           metadata->pendingDeltaVersion,
 						           metadata->bytesInNewDeltaFiles,
 						           SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT,
 						           inFlightFiles.size());
