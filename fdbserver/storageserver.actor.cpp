@@ -2032,57 +2032,52 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 			Standalone<VectorRef<MutationRef>> mutations;
 			std::tie(id, version) = decodeChangeFeedDurableKey(kv.key);
 			std::tie(mutations, knownCommittedVersion) = decodeChangeFeedDurableValue(kv.value);
+
+			// gap validation
+			while (memoryVerifyIdx < memoryReply.mutations.size() &&
+			       version > memoryReply.mutations[memoryVerifyIdx].version) {
+				// There is a case where this can happen - if we wait on a fetching change feed, and the feed is
+				// popped while we wait, we could have copied the memory mutations into memoryReply before the
+				// pop, but they may or may not have been skipped writing to disk
+				if (waitFetched && feedInfo->emptyVersion > emptyVersion &&
+				    memoryReply.mutations[memoryVerifyIdx].version <= feedInfo->emptyVersion) {
+					memoryVerifyIdx++;
+					continue;
+				} else {
+					printf("ERROR: SS %s CF %s SQ %s has mutation at %lld in memory but not on disk (next disk is "
+					       "%lld) "
+					       "(emptyVersion=%lld, emptyBefore=%lld)!\n",
+					       data->thisServerID.toString().substr(0, 4).c_str(),
+					       req.rangeID.printable().substr(0, 6).c_str(),
+					       streamUID.toString().substr(0, 8).c_str(),
+					       memoryReply.mutations[memoryVerifyIdx].version,
+					       version,
+					       feedInfo->emptyVersion,
+					       emptyVersion);
+
+					printf("  Memory: (%d)\n", memoryReply.mutations[memoryVerifyIdx].mutations.size());
+					for (auto& it : memoryReply.mutations[memoryVerifyIdx].mutations) {
+						if (it.type == MutationRef::SetValue) {
+							printf("    %s=\n", it.param1.printable().c_str());
+						} else {
+							printf("    %s - %s\n", it.param1.printable().c_str(), it.param2.printable().c_str());
+						}
+					}
+					ASSERT(false);
+				}
+			}
+
 			auto m = filterMutations(
 			    reply.arena, MutationsAndVersionRef(mutations, version, knownCommittedVersion), req.range, inverted);
 			if (m.mutations.size()) {
 				reply.arena.dependsOn(mutations.arena());
 				reply.mutations.push_back(reply.arena, m);
 
-				// if there is overlap between the memory and disk mutations, we can do relatively cheap validation that
-				// they are the same. In particular this validates the consistency of change feed data recieved from the
-				// tlog mutations vs change feed data fetched from another storage server
-				if (memoryVerifyIdx < memoryReply.mutations.size()) {
-					while (memoryVerifyIdx < memoryReply.mutations.size() &&
-					       version > memoryReply.mutations[memoryVerifyIdx].version) {
-						// there is a case where this can happen - if we wait on a fetching change feed, and the feed is
-						// popped while we wait, we could have copied the memory mutations into memoryReply before the
-						// pop, but they may or may not have been skipped writing to disk
-						if (waitFetched && feedInfo->emptyVersion > emptyVersion &&
-						    memoryReply.mutations[memoryVerifyIdx].version <= feedInfo->emptyVersion) {
-							// ok
-							memoryVerifyIdx++;
-							continue;
-						} else {
-							printf(
-							    "ERROR: SS %s CF %s SQ %s has mutation at %lld in memory but not on disk (next disk is "
-							    "%lld) "
-							    "(emptyVersion=%lld, emptyBefore=%lld)!\n",
-							    data->thisServerID.toString().substr(0, 4).c_str(),
-							    req.rangeID.printable().substr(0, 6).c_str(),
-							    streamUID.toString().substr(0, 8).c_str(),
-							    memoryReply.mutations[memoryVerifyIdx].version,
-							    version,
-							    feedInfo->emptyVersion,
-							    emptyVersion);
-
-							printf("  Memory: (%d)\n", memoryReply.mutations[memoryVerifyIdx].mutations.size());
-							for (auto& it : memoryReply.mutations[memoryVerifyIdx].mutations) {
-								if (it.type == MutationRef::SetValue) {
-									printf("    %s=\n", it.param1.printable().c_str());
-								} else {
-									printf(
-									    "    %s - %s\n", it.param1.printable().c_str(), it.param2.printable().c_str());
-								}
-							}
-							ASSERT(false);
-						}
-					}
-					if (memoryVerifyIdx < memoryReply.mutations.size() &&
-					    version == memoryReply.mutations[memoryVerifyIdx].version) {
-						// TODO: we could do some validation here too, but it's complicated because clears can get split
-						// and stuff
-						memoryVerifyIdx++;
-					}
+				if (memoryVerifyIdx < memoryReply.mutations.size() &&
+				    version == memoryReply.mutations[memoryVerifyIdx].version) {
+					// TODO: we could do some validation here too, but it's complicated because clears can get split
+					// and stuff
+					memoryVerifyIdx++;
 				}
 			} else if (memoryVerifyIdx < memoryReply.mutations.size() &&
 			           version == memoryReply.mutations[memoryVerifyIdx].version) {
@@ -2127,6 +2122,17 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 				--totalCount;
 			}
 			reply.mutations.append(reply.arena, it, totalCount);
+			// If still empty, that means disk results were filtered out, but skipped all memory results. Add an empty,
+			// either the last version from disk
+			if (reply.mutations.empty() && res.size()) {
+				if (DEBUG_SS_CFM(data->thisServerID, req.rangeID, streamUID, req.begin)) {
+					printf("CFM: SS %s CF %s:     adding empty from disk and memory %lld\n",
+					       data->thisServerID.toString().substr(0, 4).c_str(),
+					       req.rangeID.printable().substr(0, 6).c_str(),
+					       lastVersion);
+				}
+				reply.mutations.push_back(reply.arena, MutationsAndVersionRef(lastVersion, lastKnownCommitted));
+			}
 		} else if (reply.mutations.empty() || reply.mutations.back().version < lastVersion) {
 			if (DEBUG_SS_CFM(data->thisServerID, req.rangeID, streamUID, req.begin)) {
 				printf("CFM: SS %s CF %s:     adding empty from disk %lld\n",
@@ -2403,6 +2409,14 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 			ChangeFeedStreamReply feedReply = _feedReply.first;
 			bool gotAll = _feedReply.second;
 
+			// TODO REMOVE debugging
+			if (feedReply.mutations.size() == 0) {
+				printf("CFM: SS %s CF %s: CFSQ %s empty results for begin=%lld\n",
+				       data->thisServerID.toString().substr(0, 4).c_str(),
+				       req.rangeID.printable().substr(0, 6).c_str(),
+				       streamUID.toString().substr(0, 8).c_str(),
+				       req.begin);
+			}
 			ASSERT(feedReply.mutations.size() > 0);
 			req.begin = feedReply.mutations.back().version + 1;
 			if (!atLatest && gotAll) {
@@ -4585,6 +4599,12 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 					                changeFeedSSValue(changeFeedInfo->range,
 					                                  changeFeedInfo->emptyVersion + 1,
 					                                  changeFeedInfo->stopVersion)));
+					data->addMutationToMutationLog(
+					    mLV,
+					    MutationRef(MutationRef::ClearRange,
+					                changeFeedDurableKey(changeFeedInfo->id, 0),
+					                changeFeedDurableKey(changeFeedInfo->id, feedResults->popVersion)));
+					++data->counters.kvSystemClearRanges;
 				}
 
 				Version localVersion = localResult.version;
@@ -4692,6 +4712,11 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 		                persistChangeFeedKeys.begin.toString() + changeFeedInfo->id.toString(),
 		                changeFeedSSValue(
 		                    changeFeedInfo->range, changeFeedInfo->emptyVersion + 1, changeFeedInfo->stopVersion)));
+		data->addMutationToMutationLog(mLV,
+		                               MutationRef(MutationRef::ClearRange,
+		                                           changeFeedDurableKey(changeFeedInfo->id, 0),
+		                                           changeFeedDurableKey(changeFeedInfo->id, feedResults->popVersion)));
+		++data->counters.kvSystemClearRanges;
 	}
 
 	// if we were popped or removed while fetching but it didn't pass the fetch version while writing, clean up here
@@ -4700,9 +4725,11 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 		ASSERT(lastVersion != invalidVersion);
 		Version endClear = std::min(lastVersion + 1, changeFeedInfo->emptyVersion);
 		if (endClear > firstVersion) {
-
-			data->storage.clearRange(KeyRangeRef(changeFeedDurableKey(changeFeedInfo->id, firstVersion),
-			                                     changeFeedDurableKey(changeFeedInfo->id, endClear)));
+			auto& mLV2 = data->addVersionToMutationLog(data->data().getLatestVersion());
+			data->addMutationToMutationLog(mLV2,
+			                               MutationRef(MutationRef::ClearRange,
+			                                           changeFeedDurableKey(changeFeedInfo->id, firstVersion),
+			                                           changeFeedDurableKey(changeFeedInfo->id, endClear)));
 			++data->counters.kvSystemClearRanges;
 		}
 	}
@@ -5912,6 +5939,7 @@ private:
 				data->keyChangeFeed.coalesce(changeFeedRange.contents());
 			}
 
+			bool popMutationLog = false;
 			bool addMutationToLog = false;
 			if (popVersion != invalidVersion && status != ChangeFeedStatus::CHANGE_FEED_DESTROY) {
 				// pop the change feed at pop version, no matter what state it is in
@@ -5922,8 +5950,9 @@ private:
 					}
 					if (feed->second->storageVersion != invalidVersion) {
 						++data->counters.kvSystemClearRanges;
-						data->storage.clearRange(KeyRangeRef(changeFeedDurableKey(feed->second->id, 0),
-						                                     changeFeedDurableKey(feed->second->id, popVersion)));
+						// do this clear in the mutation log, as we want it to be committed consistently with the
+						// popVersion update
+						popMutationLog = true;
 						if (popVersion > feed->second->storageVersion) {
 							feed->second->storageVersion = invalidVersion;
 							feed->second->durableVersion = invalidVersion;
@@ -5982,6 +6011,13 @@ private:
 				                persistChangeFeedKeys.begin.toString() + changeFeedId.toString(),
 				                changeFeedSSValue(
 				                    feed->second->range, feed->second->emptyVersion + 1, feed->second->stopVersion)));
+				if (popMutationLog) {
+					++data->counters.kvSystemClearRanges;
+					data->addMutationToMutationLog(mLV,
+					                               MutationRef(MutationRef::ClearRange,
+					                                           changeFeedDurableKey(feed->second->id, 0),
+					                                           changeFeedDurableKey(feed->second->id, popVersion)));
+				}
 			}
 		} else if (m.param1.substr(1).startsWith(tssMappingKeys.begin) &&
 		           (m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange)) {

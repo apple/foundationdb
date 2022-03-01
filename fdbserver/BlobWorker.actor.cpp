@@ -392,7 +392,6 @@ ACTOR Future<Void> updateGranuleSplitState(Transaction* tr,
 
 			// tr->clear(singleKeyRange(oldGranuleLockKey));
 			tr->clear(currentRange);
-			tr->clear(blobGranuleSplitBoundaryKeyRangeFor(parentGranuleID));
 		} else {
 			tr->atomicOp(myStateKey, blobGranuleSplitValueFor(newState), MutationRef::SetVersionstampedValue);
 			if (newState == BlobGranuleSplitState::Assigned && currentState == BlobGranuleSplitState::Initialized &&
@@ -672,19 +671,25 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 
 ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData> bwData,
                                                        Reference<GranuleMetadata> metadata,
-                                                       UID granuleID) {
+                                                       UID granuleID,
+                                                       Key cfKey) {
 	if (BW_DEBUG) {
 		fmt::print("Dumping snapshot from FDB for [{0} - {1})\n",
 		           metadata->keyRange.begin.printable(),
 		           metadata->keyRange.end.printable());
 	}
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bwData->db);
+	state int64_t bytesRead = 0;
+	state int retries = 0;
+	state Version lastReadVersion = invalidVersion;
+	state Version readVersion = invalidVersion;
 
 	loop {
-		state Key beginKey = metadata->keyRange.begin;
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		try {
-			state Version readVersion = wait(tr->getReadVersion());
+			Version rv = wait(tr->getReadVersion());
+			readVersion = rv;
+			ASSERT(lastReadVersion <= readVersion);
 			state PromiseStream<RangeResult> rowsStream;
 			state Future<BlobFileIndex> snapshotWriter = writeSnapshot(bwData,
 			                                                           metadata->keyRange,
@@ -694,43 +699,45 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData>
 			                                                           readVersion,
 			                                                           rowsStream,
 			                                                           true);
-
-			loop {
-				// TODO: use streaming range read
-				// TODO: inject read error
-				// TODO knob for limit?
-				int lim = BUGGIFY ? 2 : 1000;
-				RangeResult res = wait(tr->getRange(KeyRangeRef(beginKey, metadata->keyRange.end), lim));
-				bwData->stats.bytesReadFromFDBForInitialSnapshot += res.size();
-				rowsStream.send(res);
-				if (res.more) {
-					beginKey = keyAfter(res.back().key);
-				} else {
-					rowsStream.sendError(end_of_stream());
-					break;
-				}
-			}
-			BlobFileIndex f = wait(snapshotWriter);
+			Future<Void> streamFuture =
+			    tr->getTransaction().getRangeStream(rowsStream, metadata->keyRange, GetRangeLimits(), Snapshot::True);
+			wait(streamFuture);
+			state BlobFileIndex f = wait(snapshotWriter);
 			TraceEvent("BlobGranuleSnapshotFile", bwData->id)
 			    .detail("Granule", metadata->keyRange)
 			    .detail("Version", readVersion);
 			DEBUG_KEY_RANGE("BlobWorkerFDBSnapshot", readVersion, metadata->keyRange, bwData->id);
+
+			// initial snapshot is committed in fdb, we can pop the change feed up to this version
+			bwData->addActor.send(bwData->db->popChangeFeedMutations(cfKey, readVersion));
 			return f;
 		} catch (Error& e) {
 			if (e.code() == error_code_operation_cancelled) {
 				throw e;
 			}
 			if (BW_DEBUG) {
-				fmt::print("Dumping snapshot from FDB for [{0} - {1}) got error {2}\n",
+				fmt::print("Dumping snapshot {0} from FDB for [{1} - {2}) got error {3} after {4} bytes\n",
+				           retries + 1,
 				           metadata->keyRange.begin.printable(),
 				           metadata->keyRange.end.printable(),
-				           e.name());
+				           e.name(),
+				           bytesRead);
 			}
 			state Error err = e;
 			wait(tr->onError(e));
+			retries++;
 			TraceEvent(SevWarn, "BlobGranuleInitialSnapshotRetry", bwData->id)
 			    .detail("Granule", metadata->keyRange)
+			    .detail("Count", retries)
 			    .error(err);
+			bytesRead = 0;
+			lastReadVersion = readVersion;
+			// Pop change feed up to readVersion, because that data will be before the next snapshot
+			// Do this to prevent a large amount of CF data from accumulating if we have consecutive failures to
+			// snapshot
+			// Also somewhat servers as a rate limiting function and checking that the database is available for this
+			// key range
+			wait(bwData->db->popChangeFeedMutations(cfKey, readVersion));
 		}
 	}
 }
@@ -1311,6 +1318,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 					}
 				}
 			}
+
 			metadata->files = startState.existingFiles.get();
 			snapshotEligible = true;
 		}
@@ -1332,7 +1340,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				metadata->durableSnapshotVersion.set(startState.blobFilesToSnapshot.get().snapshotFiles.back().version);
 			} else {
 				ASSERT(startState.previousDurableVersion == invalidVersion);
-				BlobFileIndex fromFDB = wait(dumpInitialSnapshotFromFDB(bwData, metadata, startState.granuleID));
+				BlobFileIndex fromFDB = wait(dumpInitialSnapshotFromFDB(bwData, metadata, startState.granuleID, cfKey));
 				newSnapshotFile = fromFDB;
 				ASSERT(startState.changeFeedStartVersion <= fromFDB.version);
 				startVersion = newSnapshotFile.version;
@@ -1771,10 +1779,11 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				if (snapshotEligible && metadata->bytesInNewDeltaFiles >= SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT &&
 				    metadata->pendingDeltaVersion >= startState.changeFeedStartVersion) {
 					if (BW_DEBUG && !inFlightFiles.empty()) {
-						fmt::print("Granule [{0} - {1}) ready to re-snapshot after {2} > {3} bytes, waiting for "
-						           "outstanding {4} files to finish\n",
+						fmt::print("Granule [{0} - {1}) ready to re-snapshot at {2} after {3} > {4} bytes, waiting for "
+						           "outstanding {5} files to finish\n",
 						           metadata->keyRange.begin.printable(),
 						           metadata->keyRange.end.printable(),
+						           metadata->pendingDeltaVersion,
 						           metadata->bytesInNewDeltaFiles,
 						           SERVER_KNOBS->BG_DELTA_BYTES_BEFORE_COMPACT,
 						           inFlightFiles.size());
