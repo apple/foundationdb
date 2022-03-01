@@ -517,16 +517,6 @@ ACTOR Future<Void> rangeAssigner(Reference<BlobManagerData> bmData) {
 		state int64_t seqNo = bmData->seqNo;
 		bmData->seqNo++;
 
-		if (BM_DEBUG) {
-			fmt::print("DBGRA: BM {0} {1} range [{2} - {3}) @ ({4}, {5})\n",
-			           bmData->epoch,
-			           assignment.isAssign ? "assign" : "revoke",
-			           assignment.keyRange.begin.printable(),
-			           assignment.keyRange.end.printable(),
-			           bmData->epoch,
-			           seqNo);
-		}
-
 		// modify the in-memory assignment data structures, and send request off to worker
 		state UID workerId;
 		if (assignment.isAssign) {
