@@ -65,7 +65,6 @@ public:
 	template <class Ar>
 	void serialize(Ar& ar) {
 		KeyRef subspace;
-		serializer(ar, id);
 		if (ar.isDeserializing) {
 			serializer(ar, id, subspace);
 			if (id >= 0) {
