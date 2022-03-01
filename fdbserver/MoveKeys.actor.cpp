@@ -1599,7 +1599,9 @@ void seedShardServers(Arena& arena,
 		}
 
 		if (!seedServerSet) {
-			ASSERT(serverToTeams.size() == 1);
+			// There are 2 corner case scenarios here:
+			// 1. the cluster only has 1 SS
+			// 2. replication factor is 1
 			for (auto& [teamId, servers] : teamToServers) {
 				if (teamId != servers[0]) {
 					seedServerId = teamId;
