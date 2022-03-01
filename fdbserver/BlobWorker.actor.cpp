@@ -685,7 +685,6 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData>
 	state Version readVersion = invalidVersion;
 
 	loop {
-		state Key beginKey = metadata->keyRange.begin;
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		try {
 			Version rv = wait(tr->getReadVersion());
@@ -700,23 +699,9 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData>
 			                                                           readVersion,
 			                                                           rowsStream,
 			                                                           true);
-
-			loop {
-				// TODO: use streaming range read
-				// TODO: inject read error
-				// TODO knob for limit?
-				int lim = BUGGIFY && retries < 5 ? 2 : 10000;
-				RangeResult res = wait(tr->getRange(KeyRangeRef(beginKey, metadata->keyRange.end), lim));
-				bwData->stats.bytesReadFromFDBForInitialSnapshot += res.size();
-				bytesRead += res.expectedSize();
-				rowsStream.send(res);
-				if (res.more) {
-					beginKey = keyAfter(res.back().key);
-				} else {
-					rowsStream.sendError(end_of_stream());
-					break;
-				}
-			}
+			Future<Void> streamFuture =
+			    tr->getTransaction().getRangeStream(rowsStream, metadata->keyRange, GetRangeLimits(), Snapshot::True);
+			wait(streamFuture);
 			state BlobFileIndex f = wait(snapshotWriter);
 			TraceEvent("BlobGranuleSnapshotFile", bwData->id)
 			    .detail("Granule", metadata->keyRange)
