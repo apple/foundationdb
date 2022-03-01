@@ -231,6 +231,7 @@ public:
 	double DD_FAILURE_TIME;
 	double DD_ZERO_HEALTHY_TEAM_DELAY;
 
+	// Run storage enginee on a child process on the same machine with storage process
 	bool REMOTE_KV_STORE;
 
 	// KeyValueStore SQLITE
