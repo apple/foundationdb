@@ -2189,15 +2189,11 @@ ACTOR Future<Void> partiallyDeleteGranule(Reference<BlobManagerData> self, UID g
  * Once all this is done, we finally clear the pruneIntent key, if possible, to indicate we are done
  * processing this prune intent.
  */
-ACTOR Future<Void> pruneRange(Reference<BlobManagerData> self,
-                              KeyRef startKey,
-                              KeyRef endKey,
-                              Version pruneVersion,
-                              bool force) {
+ACTOR Future<Void> pruneRange(Reference<BlobManagerData> self, KeyRangeRef range, Version pruneVersion, bool force) {
 	if (BM_DEBUG) {
 		fmt::print("pruneRange starting for range [{0} - {1}) @ pruneVersion={2}, force={3}\n",
-		           startKey.printable(),
-		           endKey.printable(),
+		           range.begin.printable(),
+		           range.end.printable(),
 		           pruneVersion,
 		           force);
 	}
@@ -2214,8 +2210,6 @@ ACTOR Future<Void> pruneRange(Reference<BlobManagerData> self,
 	// note: (startKey, startVersion) uniquely identifies a granule
 	state std::unordered_set<std::pair<const uint8_t*, Version>, boost::hash<std::pair<const uint8_t*, Version>>>
 	    visited;
-
-	state KeyRange range(KeyRangeRef(startKey, endKey)); // range for [startKey, endKey)
 
 	// find all active granules (that comprise the range) and add to the queue
 	state KeyRangeMap<UID>::Ranges activeRanges = self->workerAssignments.intersectingRanges(range);
@@ -2234,7 +2228,7 @@ ACTOR Future<Void> pruneRange(Reference<BlobManagerData> self,
 		}
 
 		// assumption: prune boundaries must respect granule boundaries
-		if (activeRange.begin() < startKey || activeRange.end() > endKey) {
+		if (activeRange.begin() < range.begin || activeRange.end() > range.end) {
 			continue;
 		}
 
@@ -2287,7 +2281,7 @@ ACTOR Future<Void> pruneRange(Reference<BlobManagerData> self,
 
 		// get the persisted history entry for this granule
 		state Standalone<BlobGranuleHistoryValue> currHistoryNode;
-		state KeyRef historyKey = blobGranuleHistoryKeyFor(currRange, startVersion);
+		state Key historyKey = blobGranuleHistoryKeyFor(currRange, startVersion);
 		loop {
 			try {
 				Optional<Value> persistedHistory = wait(tr.get(historyKey));
@@ -2396,38 +2390,10 @@ ACTOR Future<Void> pruneRange(Reference<BlobManagerData> self,
 	// another pruneIntent that got written for this table while we were processing this one.
 	// If that is the case, we should not clear the key. Otherwise, we can just clear the key.
 
-	tr.reset();
-	if (BM_DEBUG) {
-		printf("About to clear prune intent\n");
-	}
-	loop {
-		try {
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-
-			state Key pruneIntentKey = blobGranulePruneKeys.begin.withSuffix(startKey);
-			state Optional<Value> pruneIntentValue = wait(tr.get(pruneIntentKey));
-			ASSERT(pruneIntentValue.present());
-
-			Version currPruneVersion;
-			bool currForce;
-			std::tie(currPruneVersion, currForce) = decodeBlobGranulePruneValue(pruneIntentValue.get());
-
-			if (currPruneVersion == pruneVersion && currForce == force) {
-				tr.clear(pruneIntentKey.withPrefix(blobGranulePruneKeys.begin));
-				wait(tr.commit());
-			}
-			break;
-		} catch (Error& e) {
-			fmt::print("Attempt to clear prune intent got error {}\n", e.name());
-			wait(tr.onError(e));
-		}
-	}
-
 	if (BM_DEBUG) {
 		fmt::print("Successfully pruned range [{0} - {1}) at pruneVersion={2}\n",
-		           startKey.printable(),
-		           endKey.printable(),
+		           range.begin.printable(),
+		           range.end.printable(),
 		           pruneVersion);
 	}
 	return Void();
@@ -2455,180 +2421,112 @@ ACTOR Future<Void> pruneRange(Reference<BlobManagerData> self,
  */
 ACTOR Future<Void> monitorPruneKeys(Reference<BlobManagerData> self) {
 	// setup bstore
-	try {
-		if (BM_DEBUG) {
-			fmt::print("BM constructing backup container from {}\n", SERVER_KNOBS->BG_URL.c_str());
-		}
-		self->bstore = BackupContainerFileSystem::openContainerFS(SERVER_KNOBS->BG_URL);
-		if (BM_DEBUG) {
-			printf("BM constructed backup container\n");
-		}
-	} catch (Error& e) {
-		if (BM_DEBUG) {
-			fmt::print("BM got backup container init error {0}\n", e.name());
-		}
-		throw e;
+	if (BM_DEBUG) {
+		fmt::print("BM constructing backup container from {}\n", SERVER_KNOBS->BG_URL.c_str());
+	}
+	self->bstore = BackupContainerFileSystem::openContainerFS(SERVER_KNOBS->BG_URL);
+	if (BM_DEBUG) {
+		printf("BM constructed backup container\n");
 	}
 
-	try {
-		state Value oldPruneWatchVal;
+	loop {
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->db);
+		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+		// Wait for the watch to change, or some time to expire (whichever comes first)
+		// before checking through the prune intents. We write a UID into the change key value
+		// so that we can still recognize when the watch key has been changed while we weren't
+		// monitoring it
+
+		state Key lastPruneKey = blobGranulePruneKeys.begin;
+
 		loop {
-			state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->db);
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-			// Wait for the watch to change, or some time to expire (whichever comes first)
-			// before checking through the prune intents. We write a UID into the change key value
-			// so that we can still recognize when the watch key has been changed while we weren't
-			// monitoring it
-			loop {
-				try {
-					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-
-					state Optional<Value> newPruneWatchVal = wait(tr->get(blobGranulePruneChangeKey));
-
-					// if the value at the change key has changed, that means there is new work to do
-					if (newPruneWatchVal.present() && oldPruneWatchVal != newPruneWatchVal.get()) {
-						oldPruneWatchVal = newPruneWatchVal.get();
-						if (BM_DEBUG) {
-							printf("the blobGranulePruneChangeKey changed\n");
+			state std::vector<Future<Void>> prunes;
+			state CoalescedKeyRangeMap<std::pair<Version, bool>> pruneMap;
+			pruneMap.insert(allKeys, std::make_pair<Version, bool>(0, false));
+			try {
+				// TODO: replace 10000 with a knob
+				state RangeResult pruneIntents = wait(tr->getRange(blobGranulePruneKeys, BUGGIFY ? 1 : 10000));
+				if (pruneIntents.size()) {
+					int rangeIdx = 0;
+					for (; rangeIdx < pruneIntents.size(); ++rangeIdx) {
+						Version pruneVersion;
+						KeyRange range;
+						bool force;
+						std::tie(pruneVersion, range, force) =
+						    decodeBlobGranulePruneValue(pruneIntents[rangeIdx].value);
+						auto ranges = pruneMap.intersectingRanges(range);
+						bool foundConflict = false;
+						for (auto it : ranges) {
+							if ((it.value().second && !force && it.value().first < pruneVersion) ||
+							    (!it.value().second && force && pruneVersion < it.value().first)) {
+								foundConflict = true;
+								break;
+							}
 						}
-
-						// TODO: debugging code, remove it
-						/*
-						if (newPruneWatchVal.get().toString().substr(0, 6) == "prune=") {
-						    state Reference<ReadYourWritesTransaction> dummy =
-						        makeReference<ReadYourWritesTransaction>(self->db);
-						    loop {
-						        try {
-						            dummy->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-						            dummy->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-						            std::istringstream iss(newPruneWatchVal.get().toString().substr(6));
-						            Version version;
-						            iss >> version;
-						            dummy->set(blobGranulePruneKeys.begin.withSuffix(normalKeys.begin),
-						                       blobGranulePruneValueFor(version, false));
-						            wait(dummy->commit());
-						            break;
-
-						        } catch (Error& e) {
-						            wait(dummy->onError(e));
-						        }
-						    }
+						if (foundConflict) {
+							break;
 						}
-						*/
-						break;
+						pruneMap.insert(range, std::make_pair(pruneVersion, force));
+
+						fmt::print("about to prune range [{0} - {1}) @ {2}, force={3}\n",
+						           range.begin.printable(),
+						           range.end.printable(),
+						           pruneVersion,
+						           force ? "T" : "F");
+					}
+					lastPruneKey = pruneIntents[rangeIdx - 1].key;
+
+					for (auto it : pruneMap.ranges()) {
+						if (it.value().first > 0) {
+							prunes.emplace_back(pruneRange(self, it.range(), it.value().first, it.value().second));
+						}
 					}
 
-					// otherwise, there are no changes and we should wait until the next change (or timeout)
+					// wait for this set of prunes to complete before starting the next ones since if we
+					// prune a range R at version V and while we are doing that, the time expires, we will
+					// end up trying to prune the same range again since the work isn't finished and the
+					// prunes will race
+					//
+					// TODO: this isn't that efficient though. Instead we could keep metadata as part of the
+					// BM's memory that tracks which prunes are active. Once done, we can mark that work as
+					// done. If the BM fails then all prunes will fail and so the next BM will have a clear
+					// set of metadata (i.e. no work in progress) so we will end up doing the work in the
+					// new BM
+
+					wait(waitForAll(prunes));
+					break;
+				} else {
 					state Future<Void> watchPruneIntentsChange = tr->watch(blobGranulePruneChangeKey);
 					wait(tr->commit());
-
-					if (BM_DEBUG) {
-						printf("monitorPruneKeys waiting for change or timeout\n");
-					}
-
-					choose {
-						when(wait(watchPruneIntentsChange)) {
-							if (BM_DEBUG) {
-								printf("monitorPruneKeys saw a change\n");
-							}
-							tr->reset();
-						}
-						when(wait(delay(SERVER_KNOBS->BG_PRUNE_TIMEOUT))) {
-							if (BM_DEBUG) {
-								printf("monitorPruneKeys got a timeout\n");
-							}
-							break;
-						}
-					}
-				} catch (Error& e) {
-					wait(tr->onError(e));
-				}
-			}
-
-			tr->reset();
-
-			if (BM_DEBUG) {
-				printf("Looping over prune intents\n");
-			}
-
-			// loop through all prune intentions and do prune work accordingly
-			try {
-				state KeyRef beginKey = normalKeys.begin;
-				loop {
-					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-
-					state std::vector<Future<Void>> prunes;
-					try {
-						// TODO: replace 10000 with a knob
-						KeyRange nextRange(KeyRangeRef(beginKey, normalKeys.end));
-						state RangeResult pruneIntents = wait(krmGetRanges(
-						    tr, blobGranulePruneKeys.begin, nextRange, 10000, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
-						state Key lastEndKey;
-
-						for (int rangeIdx = 0; rangeIdx < pruneIntents.size() - 1; ++rangeIdx) {
-							KeyRef rangeStartKey = pruneIntents[rangeIdx].key;
-							KeyRef rangeEndKey = pruneIntents[rangeIdx + 1].key;
-							lastEndKey = rangeEndKey;
-							if (pruneIntents[rangeIdx].value.size() == 0) {
-								continue;
-							}
-							KeyRange range(KeyRangeRef(rangeStartKey, rangeEndKey));
-							Version pruneVersion;
-							bool force;
-							std::tie(pruneVersion, force) = decodeBlobGranulePruneValue(pruneIntents[rangeIdx].value);
-
-							fmt::print("about to prune range [{0} - {1}) @ {2}, force={3}\n",
-							           rangeStartKey.printable(),
-							           rangeEndKey.printable(),
-							           pruneVersion,
-							           force ? "T" : "F");
-							prunes.emplace_back(pruneRange(self, rangeStartKey, rangeEndKey, pruneVersion, force));
-						}
-
-						// wait for this set of prunes to complete before starting the next ones since if we
-						// prune a range R at version V and while we are doing that, the time expires, we will
-						// end up trying to prune the same range again since the work isn't finished and the
-						// prunes will race
-						//
-						// TODO: this isn't that efficient though. Instead we could keep metadata as part of the
-						// BM's memory that tracks which prunes are active. Once done, we can mark that work as
-						// done. If the BM fails then all prunes will fail and so the next BM will have a clear
-						// set of metadata (i.e. no work in progress) so we will end up doing the work in the
-						// new BM
-						wait(waitForAll(prunes));
-
-						if (!pruneIntents.more) {
-							break;
-						}
-
-						beginKey = lastEndKey;
-					} catch (Error& e) {
-						wait(tr->onError(e));
-					}
+					wait(watchPruneIntentsChange);
+					tr->reset();
 				}
 			} catch (Error& e) {
-				if (e.code() == error_code_actor_cancelled) {
-					throw e;
-				}
-				if (BM_DEBUG) {
-					fmt::print("monitorPruneKeys for BM {0} saw error {1}\n", self->id.toString(), e.name());
-				}
-				// don't want to kill the blob manager for errors around pruning
-				TraceEvent("MonitorPruneKeysError", self->id).detail("Error", e.name());
-			}
-			if (BM_DEBUG) {
-				printf("Done pruning current set of prune intents.\n");
+				wait(tr->onError(e));
 			}
 		}
-	} catch (Error& e) {
+
+		tr->reset();
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr->clear(KeyRangeRef(blobGranulePruneKeys.begin, keyAfter(lastPruneKey)));
+				wait(tr->commit());
+				break;
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
+		}
+
 		if (BM_DEBUG) {
-			fmt::print("monitorPruneKeys got error {}\n", e.name());
+			printf("Done pruning current set of prune intents.\n");
 		}
-		throw e;
 	}
 }
 

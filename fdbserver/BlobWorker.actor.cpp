@@ -2430,6 +2430,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 			BlobFileIndex snapshotF = chunkFiles.snapshotFiles[i];
 			chunk.snapshotFile = BlobFilePointerRef(rep.arena, snapshotF.filename, snapshotF.offset, snapshotF.length);
 			Version snapshotVersion = chunkFiles.snapshotFiles[i].version;
+			chunk.snapshotVersion = snapshotVersion;
 
 			// handle delta files
 			// cast this to an int so i going to -1 still compares properly

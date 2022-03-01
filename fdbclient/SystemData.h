@@ -557,6 +557,7 @@ extern const KeyRangeRef blobGranuleHistoryKeys;
 
 // \xff\x02/bgp/(start,end) = (version, force)
 extern const KeyRangeRef blobGranulePruneKeys;
+extern const KeyRangeRef blobGranuleVersionKeys;
 extern const KeyRef blobGranulePruneChangeKey;
 
 const Key blobGranuleFileKeyFor(UID granuleID, uint8_t fileType, Version fileVersion);
@@ -566,8 +567,8 @@ const KeyRange blobGranuleFileKeyRangeFor(UID granuleID);
 const Value blobGranuleFileValueFor(StringRef const& filename, int64_t offset, int64_t length);
 std::tuple<Standalone<StringRef>, int64_t, int64_t> decodeBlobGranuleFileValue(ValueRef const& value);
 
-const Value blobGranulePruneValueFor(Version version, bool force);
-std::pair<Version, bool> decodeBlobGranulePruneValue(ValueRef const& value);
+const Value blobGranulePruneValueFor(Version version, KeyRange range, bool force);
+std::tuple<Version, KeyRange, bool> decodeBlobGranulePruneValue(ValueRef const& value);
 
 const Value blobGranuleMappingValueFor(UID const& workerID);
 UID decodeBlobGranuleMappingValue(ValueRef const& value);
