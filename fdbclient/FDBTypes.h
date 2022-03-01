@@ -27,6 +27,7 @@
 #include <vector>
 #include <unordered_set>
 
+#include "flow/Arena.h"
 #include "flow/flow.h"
 
 enum class TraceFlags : uint8_t {
