@@ -202,6 +202,44 @@ if(BUILD_AZURE_BACKUP)
   )
 endif()
 
+set(BUILD_AWS_BACKUP OFF CACHE BOOL "Build AWS S3 SDK backup client")
+if(BUILD_AWS_BACKUP)
+  add_compile_definitions(BUILD_AWS_BACKUP)
+
+  set(FDBCLIENT_SRCS
+    ${FDBCLIENT_SRCS}
+  # TODO ADD AT SOME POINT
+  #  BackupContainerAWSS3BlobStore.actor.cpp
+    BackupContainerAWSS3BlobStore.h)
+
+  configure_file(awss3sdk.cmake awss3sdk-download/CMakeLists.txt)
+
+  execute_process(
+    COMMAND ${CMAKE_COMMAND} -G "${CMAKE_GENERATOR}" .
+    RESULT_VARIABLE results
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/awss3sdk-download
+  )
+
+  if(results)
+    message(FATAL_ERROR "Configuration step for AWS S3 SDK has Failed. ${results}")
+  endif()
+
+  execute_process(
+    COMMAND ${CMAKE_COMMAND} --build . --config Release
+    RESULT_VARIABLE results
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/awss3sdk-download
+  )
+
+  if(results)
+    message(FATAL_ERROR "Build step for AWS S3 SDK has Failed. ${results}")
+  endif()
+
+  add_subdirectory(
+    ${CMAKE_CURRENT_BINARY_DIR}/awss3sdk-src
+    ${CMAKE_CURRENT_BINARY_DIR}/awss3sdk-build
+  )
+endif()
+
 add_flow_target(STATIC_LIBRARY NAME fdbclient SRCS ${FDBCLIENT_SRCS} ADDL_SRCS ${options_srcs})
 add_dependencies(fdbclient fdboptions)
 target_link_libraries(fdbclient PUBLIC fdbrpc msgpack)
@@ -220,4 +258,9 @@ endif()
 if(BUILD_AZURE_BACKUP)
   target_link_libraries(fdbclient PRIVATE curl uuid azure-storage-lite)
   target_link_libraries(fdbclient_sampling PRIVATE curl uuid azure-storage-lite)
+endif()
+
+if(BUILD_AWS_BACKUP)
+  target_link_libraries(fdbclient PRIVATE curl aws-s3-sdk)
+  target_link_libraries(fdbclient_sampling PRIVATE curl aws-s3-sdk)
 endif()

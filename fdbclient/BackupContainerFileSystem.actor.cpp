@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/BackupContainerAWSS3BlobStore.h"
 #include "fdbclient/BackupContainerAzureBlobStore.h"
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbclient/BackupContainerLocalDirectory.h"
@@ -1508,6 +1509,11 @@ Reference<BackupContainerFileSystem> BackupContainerFileSystem::openContainerFS(
 		return r;
 
 	try {
+// TODO DO STUFF BELOW INSTEAD WITH s3://...
+#ifdef BUILD_AWS_BACKUP
+		printf("build aws backup is set!!\n");
+		do_aws_test_stuff();
+#endif
 		StringRef u(url);
 		if (u.startsWith("file://"_sr)) {
 			r = makeReference<BackupContainerLocalDirectory>(url, encryptionKeyFileName);
