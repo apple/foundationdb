@@ -48,10 +48,10 @@ ACTOR Future<Void> changeFeedList(Database db) {
 			printf("Found %d range feeds%s\n", result.size(), result.size() == 0 ? "." : ":");
 			for (auto& it : result) {
 				auto range = std::get<0>(decodeChangeFeedValue(it.value));
-				printf("  %s: %s - %s\n",
+				printf("  %s: `%s' - `%s'\n",
 				       it.key.removePrefix(changeFeedPrefix).toString().c_str(),
-				       range.begin.toString().c_str(),
-				       range.end.toString().c_str());
+				       printable(range.begin).c_str(),
+				       printable(range.end).c_str());
 			}
 			return Void();
 		} catch (Error& e) {
@@ -115,7 +115,7 @@ ACTOR Future<bool> changeFeedCommandActor(Database localDb, std::vector<StringRe
 		Version end = std::numeric_limits<Version>::max();
 		if (tokens.size() > 3) {
 			int n = 0;
-			if (sscanf(tokens[3].toString().c_str(), "%ld%n", &begin, &n) != 1 || n != tokens[3].size()) {
+			if (sscanf(tokens[3].toString().c_str(), "%lld%n", &begin, &n) != 1 || n != tokens[3].size()) {
 				printUsage(tokens[0]);
 				return false;
 			}
@@ -168,7 +168,7 @@ ACTOR Future<bool> changeFeedCommandActor(Database localDb, std::vector<StringRe
 		}
 		Version v;
 		int n = 0;
-		if (sscanf(tokens[3].toString().c_str(), "%ld%n", &v, &n) != 1 || n != tokens[3].size()) {
+		if (sscanf(tokens[3].toString().c_str(), "%lld%n", &v, &n) != 1 || n != tokens[3].size()) {
 			printUsage(tokens[0]);
 			return false;
 		} else {

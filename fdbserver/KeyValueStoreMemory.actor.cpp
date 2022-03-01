@@ -634,7 +634,7 @@ private:
 			} catch (Error& e) {
 				bool ok = e.code() == error_code_operation_cancelled || e.code() == error_code_file_not_found ||
 				          e.code() == error_code_disk_adapter_reset;
-				TraceEvent(ok ? SevInfo : SevError, "ErrorDuringRecovery", dbgid).error(e, true);
+				TraceEvent(ok ? SevInfo : SevError, "ErrorDuringRecovery", dbgid).errorUnsuppressed(e);
 				if (e.code() != error_code_disk_adapter_reset) {
 					throw e;
 				}
@@ -887,6 +887,7 @@ IKeyValueStore* keyValueStoreMemory(std::string const& basename,
 	    .detail("MemoryLimit", memoryLimit)
 	    .detail("StoreType", storeType);
 
+	// SOMEDAY: update to use DiskQueueVersion::V2 with xxhash3 checksum for FDB >= 7.2
 	IDiskQueue* log = openDiskQueue(basename, ext, logID, DiskQueueVersion::V1);
 	if (storeType == KeyValueStoreType::MEMORY_RADIXTREE) {
 		return new KeyValueStoreMemory<radix_tree>(log, logID, memoryLimit, storeType, false, false, false);

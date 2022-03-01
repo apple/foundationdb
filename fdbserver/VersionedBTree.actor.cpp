@@ -1181,12 +1181,12 @@ public:
 					             page->getChecksum());
 					Error e = checksum_failed();
 					TraceEvent(SevError, "RedwoodChecksumFailed")
+					    .error(e)
 					    .detail("PageID", c.pageID)
 					    .detail("PageSize", self->pager->getPhysicalPageSize())
 					    .detail("Offset", c.pageID * self->pager->getPhysicalPageSize())
 					    .detail("CalculatedChecksum", page->calculateChecksum(c.pageID))
-					    .detail("ChecksumInPage", page->getChecksum())
-					    .error(e);
+					    .detail("ChecksumInPage", page->getChecksum());
 					throw e;
 				}
 
@@ -1228,9 +1228,9 @@ public:
 					if (entriesRead != self->numEntries) {
 						Error e = internal_error(); // TODO:  Something better?
 						TraceEvent(SevError, "RedwoodQueueNumEntriesMisMatch")
+						    .error(e)
 						    .detail("EntriesRead", entriesRead)
-						    .detail("ExpectedEntries", self->numEntries)
-						    .error(e);
+						    .detail("ExpectedEntries", self->numEntries);
 						throw e;
 					}
 					res.sendError(end_of_stream());
@@ -2245,7 +2245,7 @@ public:
 					}
 
 					Error e = checksum_failed();
-					TraceEvent(SevError, "RedwoodRecoveryFailed").detail("Filename", self->filename).error(e);
+					TraceEvent(SevError, "RedwoodRecoveryFailed").error(e).detail("Filename", self->filename);
 					throw e;
 				}
 				recoveredHeader = true;
@@ -2256,10 +2256,10 @@ public:
 			if (self->pHeader->formatVersion != Header::FORMAT_VERSION) {
 				Error e = unsupported_format_version();
 				TraceEvent(SevWarn, "RedwoodRecoveryFailedWrongVersion")
+				    .error(e)
 				    .detail("Filename", self->filename)
 				    .detail("Version", self->pHeader->formatVersion)
-				    .detail("ExpectedVersion", Header::FORMAT_VERSION)
-				    .error(e);
+				    .detail("ExpectedVersion", Header::FORMAT_VERSION);
 				throw e;
 			}
 
@@ -2904,13 +2904,13 @@ public:
 				if (g_network->isSimulated() && g_simulator.checkInjectedCorruption())
 					e = e.asInjectedFault();
 				TraceEvent(SevError, "RedwoodChecksumFailed")
+				    .error(e)
 				    .detail("Filename", self->filename.c_str())
 				    .detail("PageID", pageID)
 				    .detail("PageSize", self->physicalPageSize)
 				    .detail("Offset", pageID * self->physicalPageSize)
 				    .detail("CalculatedChecksum", page->calculateChecksum(pageID))
-				    .detail("ChecksumInPage", page->getChecksum())
-				    .error(e);
+				    .detail("ChecksumInPage", page->getChecksum());
 				ASSERT(false);
 				throw e;
 			}
@@ -2955,13 +2955,13 @@ public:
 			debug_printf("DWALPager(%s) checksum failed for %s\n", self->filename.c_str(), toString(pageIDs).c_str());
 			Error e = checksum_failed();
 			TraceEvent(SevError, "RedwoodChecksumFailed")
+			    .error(e)
 			    .detail("Filename", self->filename.c_str())
 			    .detail("PageID", pageIDs)
 			    .detail("PageSize", self->physicalPageSize)
 			    .detail("Offset", pageIDs.front() * self->physicalPageSize)
 			    .detail("CalculatedChecksum", page->calculateChecksum(pageIDs.front()))
-			    .detail("ChecksumInPage", page->getChecksum())
-			    .error(e);
+			    .detail("ChecksumInPage", page->getChecksum());
 			ASSERT(false);
 			throw e;
 		}
@@ -8615,7 +8615,7 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/IntIntPair") {
 	DeltaTree<IntIntPair>::Mirror r(tree, &lowerBound, &upperBound);
 
 	DeltaTree2<IntIntPair>* tree2 = (DeltaTree2<IntIntPair>*)new uint8_t[bufferSize];
-	int builtSize2 = tree2->build(bufferSize, &items[0], &items[items.size()], &lowerBound, &upperBound);
+	int builtSize2 = tree2->build(bufferSize, &items[0], &items[0] + items.size(), &lowerBound, &upperBound);
 	ASSERT(builtSize2 <= bufferSize);
 	DeltaTree2<IntIntPair>::DecodeCache cache(lowerBound, upperBound);
 	DeltaTree2<IntIntPair>::Cursor cur2(&cache, tree2);

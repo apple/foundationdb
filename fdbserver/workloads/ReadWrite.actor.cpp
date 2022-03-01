@@ -317,7 +317,7 @@ struct ReadWriteWorkload : KVWorkload {
 
 		std::vector<std::pair<uint64_t, double>>::iterator ratesItr = ratesAtKeyCounts.begin();
 		for (; ratesItr != ratesAtKeyCounts.end(); ratesItr++)
-			m.emplace_back(format("%ld keys imported bytes/sec", ratesItr->first), ratesItr->second, Averaged::False);
+			m.emplace_back(format("%lld keys imported bytes/sec", ratesItr->first), ratesItr->second, Averaged::False);
 	}
 
 	Value randomValue() {
@@ -592,7 +592,7 @@ struct ReadWriteWorkload : KVWorkload {
 			try {
 				self->setupTransaction(&tr);
 				wait(self->readOp(&tr, keys, self, false));
-				wait(tr.warmRange(cx, allKeys));
+				wait(tr.warmRange(allKeys));
 				break;
 			} catch (Error& e) {
 				wait(tr.onError(e));

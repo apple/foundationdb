@@ -43,7 +43,9 @@ double machineStartTime() {
 
 void systemMonitor() {
 	static StatisticsState statState = StatisticsState();
+#if !DEBUG_DETERMINISM
 	customSystemMonitor("ProcessMetrics", &statState, true);
+#endif
 }
 
 SystemStatistics getSystemStatistics() {
@@ -90,7 +92,9 @@ SystemStatistics customSystemMonitor(std::string const& eventName, StatisticsSta
 			    .detail("DiskQueueDepth", currentStats.processDiskQueueDepth)
 			    .detail("DiskIdleSeconds", currentStats.processDiskIdleSeconds)
 			    .detail("DiskReads", currentStats.processDiskRead)
+			    .detail("DiskReadSeconds", currentStats.processDiskReadSeconds)
 			    .detail("DiskWrites", currentStats.processDiskWrite)
+			    .detail("DiskWriteSeconds", currentStats.processDiskWriteSeconds)
 			    .detail("DiskReadsCount", currentStats.processDiskReadCount)
 			    .detail("DiskWritesCount", currentStats.processDiskWriteCount)
 			    .detail("DiskWriteSectors", currentStats.processDiskWriteSectors)

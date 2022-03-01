@@ -34,37 +34,54 @@
 
 #include <openssl/aes.h>
 #include <openssl/evp.h>
+#include <openssl/hmac.h>
 #include <string>
 #include <unordered_set>
 #include <vector>
 
-// Wrapper class for openssl implementation of AES-128-GCM
+#define AES_256_KEY_LENGTH 32
+
+// Wrapper class for openssl implementation of AES GCM
 // encryption/decryption
+class StreamCipherKey : NonCopyable {
+	static UID globalKeyId;
+	static std::unique_ptr<StreamCipherKey> globalKey;
+	static std::unordered_map<UID, StreamCipherKey*> cipherKeys;
+	UID id;
+	std::unique_ptr<uint8_t[]> arr;
+	int keySize;
+
+public:
+	StreamCipherKey(int size);
+	~StreamCipherKey();
+
+	int size() const { return keySize; }
+	uint8_t* data() const { return arr.get(); }
+	void initializeKey(uint8_t* data, int len);
+	void initializeRandomTestKey() { generateRandomData(arr.get(), keySize); }
+	void reset() { memset(arr.get(), 0, keySize); }
+
+	static bool isGlobalKeyPresent();
+	static void allocGlobalCipherKey();
+	static void initializeGlobalRandomTestKey();
+	static StreamCipherKey const* getGlobalCipherKey();
+	static void cleanup() noexcept;
+};
+
 class StreamCipher final : NonCopyable {
-	static std::unordered_set<EVP_CIPHER_CTX*> ctxs;
+	UID id;
+	static std::unordered_map<UID, EVP_CIPHER_CTX*> ctxs;
 	EVP_CIPHER_CTX* ctx;
+	HMAC_CTX* hmacCtx;
+	std::unique_ptr<StreamCipherKey> cipherKey;
 
 public:
 	StreamCipher();
+	StreamCipher(int KeySize);
 	~StreamCipher();
 	EVP_CIPHER_CTX* getCtx();
-	class Key : NonCopyable {
-		std::array<unsigned char, 16> arr;
-		static std::unique_ptr<Key> globalKey;
-		struct ConstructorTag {};
+	HMAC_CTX* getHmacCtx();
 
-	public:
-		using RawKeyType = decltype(arr);
-		Key(ConstructorTag) {}
-		Key(Key&&);
-		Key& operator=(Key&&);
-		~Key();
-		unsigned char const* data() const { return arr.data(); }
-		static void initializeKey(RawKeyType&&);
-		static void initializeRandomTestKey();
-		static const Key& getKey();
-		static void cleanup() noexcept;
-	};
 	static void cleanup() noexcept;
 	using IV = std::array<unsigned char, 16>;
 };
@@ -73,7 +90,7 @@ class EncryptionStreamCipher final : NonCopyable, public ReferenceCounted<Encryp
 	StreamCipher cipher;
 
 public:
-	EncryptionStreamCipher(const StreamCipher::Key& key, const StreamCipher::IV& iv);
+	EncryptionStreamCipher(const StreamCipherKey* key, const StreamCipher::IV& iv);
 	StringRef encrypt(unsigned char const* plaintext, int len, Arena&);
 	StringRef finish(Arena&);
 };
@@ -82,9 +99,20 @@ class DecryptionStreamCipher final : NonCopyable, public ReferenceCounted<Decryp
 	StreamCipher cipher;
 
 public:
-	DecryptionStreamCipher(const StreamCipher::Key& key, const StreamCipher::IV& iv);
+	DecryptionStreamCipher(const StreamCipherKey* key, const StreamCipher::IV& iv);
 	StringRef decrypt(unsigned char const* ciphertext, int len, Arena&);
 	StringRef finish(Arena&);
 };
+
+class HmacSha256StreamCipher final : NonCopyable, public ReferenceCounted<HmacSha256StreamCipher> {
+	StreamCipher cipher;
+
+public:
+	HmacSha256StreamCipher();
+	StringRef digest(unsigned char const* data, int len, Arena&);
+	StringRef finish(Arena&);
+};
+
+void applyHmacKeyDerivationFunc(StreamCipherKey* cipherKey, HmacSha256StreamCipher* hmacGenerator, Arena& arena);
 
 #endif // ENCRYPTION_ENABLED

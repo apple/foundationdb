@@ -36,9 +36,17 @@ static const char* storageMigrationTypes[] = { "perpetual_storage_wiggle=0 stora
 	                                           "perpetual_storage_wiggle=1",
 	                                           "perpetual_storage_wiggle=1 storage_migration_type=gradual",
 	                                           "storage_migration_type=aggressive" };
-static const char* logTypes[] = { "log_engine:=1",  "log_engine:=2",  "log_spill:=1",
-	                              "log_spill:=2",   "log_version:=2", "log_version:=3",
-	                              "log_version:=4", "log_version:=5", "log_version:=6" };
+static const char* logTypes[] = { "log_engine:=1",
+	                              "log_engine:=2",
+	                              "log_spill:=1",
+	                              "log_spill:=2",
+	                              "log_version:=2",
+	                              "log_version:=3",
+	                              "log_version:=4",
+	                              "log_version:=5",
+	                              "log_version:=6",
+	                              // downgrade incompatible log version
+	                              "log_version:=7" };
 static const char* redundancies[] = { "single", "double", "triple" };
 static const char* backupTypes[] = { "backup_worker_enabled:=0", "backup_worker_enabled:=1" };
 
@@ -220,6 +228,8 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 	int additionalDBs;
 	bool allowDescriptorChange;
 	bool allowTestStorageMigration;
+	bool waitStoreTypeCheck;
+	bool downgradeTest1; // if this is true, don't pick up downgrade incompatible config
 	std::vector<Future<Void>> clients;
 	PerfIntCounter retries;
 
@@ -229,6 +239,8 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 		    getOption(options, LiteralStringRef("allowDescriptorChange"), SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT);
 		allowTestStorageMigration =
 		    getOption(options, "allowTestStorageMigration"_sr, false) && g_simulator.allowStorageMigrationTypeChange;
+		waitStoreTypeCheck = getOption(options, "waitStoreTypeCheck"_sr, false);
+		downgradeTest1 = getOption(options, "downgradeTest1"_sr, false);
 		g_simulator.usableRegions = 1;
 	}
 
@@ -273,7 +285,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 		// only storage_migration_type=gradual && perpetual_storage_wiggle=1 need this check because in QuietDatabase
 		// perpetual wiggle will be forced to close For other cases, later ConsistencyCheck will check KV store type
 		// there
-		if (self->allowTestStorageMigration) {
+		if (self->allowTestStorageMigration || self->waitStoreTypeCheck) {
 			loop {
 				// There exists a race where the check can start before the last transaction that singleDB issued
 				// finishes, if singleDB gets actor cancelled from a timeout at the end of a test. This means the
@@ -404,8 +416,14 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				    true)));
 			} else if (randomChoice == 6) {
 				// Some configurations will be invalid, and that's fine.
-				wait(success(IssueConfigurationChange(
-				    cx, logTypes[deterministicRandom()->randomInt(0, sizeof(logTypes) / sizeof(logTypes[0]))], false)));
+				int length = sizeof(logTypes) / sizeof(logTypes[0]);
+
+				if (self->downgradeTest1) {
+					length -= 1;
+				}
+
+				wait(success(
+				    IssueConfigurationChange(cx, logTypes[deterministicRandom()->randomInt(0, length)], false)));
 			} else if (randomChoice == 7) {
 				wait(success(IssueConfigurationChange(
 				    cx,

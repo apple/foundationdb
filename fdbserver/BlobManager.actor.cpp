@@ -25,6 +25,7 @@
 #include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/BlobWorkerInterface.h"
 #include "fdbclient/KeyRangeMap.h"
+#include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/BlobManagerInterface.h"
@@ -233,7 +234,8 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitRange(Reference<ReadYourWritesT
 				printf(
 				    "Splitting new range [%s - %s)\n", range.begin.printable().c_str(), range.end.printable().c_str());
 			}
-			StorageMetrics estimated = wait(tr->getTransaction().getStorageMetrics(range, CLIENT_KNOBS->TOO_MANY));
+			StorageMetrics estimated =
+			    wait(tr->getTransaction().getDatabase()->getStorageMetrics(range, CLIENT_KNOBS->TOO_MANY));
 
 			if (BM_DEBUG) {
 				fmt::print("Estimated bytes for [{0} - {1}): {2}\n",
@@ -252,7 +254,7 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitRange(Reference<ReadYourWritesT
 				splitMetrics.bytesReadPerKSecond = splitMetrics.infinity; // Don't split by readBandwidth
 
 				Standalone<VectorRef<KeyRef>> keys =
-				    wait(tr->getTransaction().splitStorageMetrics(range, splitMetrics, estimated));
+				    wait(tr->getTransaction().getDatabase()->splitStorageMetrics(range, splitMetrics, estimated));
 				return keys;
 			} else {
 				// printf("  Not splitting range\n");
@@ -841,8 +843,8 @@ ACTOR Future<Void> monitorBlobWorkerStatus(BlobManagerData* bmData, BlobWorkerIn
 				}
 				// TODO change back from SevError?
 				TraceEvent(SevError, "BWStatusMonitoringFailed", bmData->id)
-				    .detail("BlobWorkerID", bwInterf.id())
-				    .error(e);
+				    .error(e)
+				    .detail("BlobWorkerID", bwInterf.id());
 				throw e;
 			}
 		}
@@ -875,7 +877,7 @@ ACTOR Future<Void> monitorBlobWorker(BlobManagerData* bmData, BlobWorkerInterfac
 			printf("BM got unexpected error %s monitoring BW %s\n", e.name(), bwInterf.id().toString().c_str());
 		}
 		// TODO change back from SevError?
-		TraceEvent(SevError, "BWMonitoringFailed", bmData->id).detail("BlobWorkerID", bwInterf.id()).error(e);
+		TraceEvent(SevError, "BWMonitoringFailed", bmData->id).error(e).detail("BlobWorkerID", bwInterf.id());
 		throw e;
 	}
 
@@ -1150,7 +1152,7 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 			}
 		}
 	} catch (Error& err) {
-		TraceEvent("BlobManagerDied", bmInterf.id()).error(err, true);
+		TraceEvent("BlobManagerDied", bmInterf.id()).errorUnsuppressed(err);
 	}
 	return Void();
 }

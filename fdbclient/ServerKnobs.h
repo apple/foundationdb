@@ -106,6 +106,8 @@ public:
 	double PUSH_STATS_SLOW_AMOUNT;
 	double PUSH_STATS_SLOW_RATIO;
 	int TLOG_POP_BATCH_SIZE;
+	bool PEEK_BATCHING_EMPTY_MSG;
+	double PEEK_BATCHING_EMPTY_MSG_INTERVAL;
 
 	// Data distribution queue
 	double HEALTH_POLL_TIME;
@@ -290,6 +292,12 @@ public:
 	// These histograms are in read and write path which can cause performance overhead.
 	// Set to 0 to disable histograms.
 	double ROCKSDB_HISTOGRAMS_SAMPLE_RATE;
+	double ROCKSDB_READ_RANGE_ITERATOR_REFRESH_TIME;
+	bool ROCKSDB_READ_RANGE_REUSE_ITERATORS;
+	int64_t ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC;
+	bool ROCKSDB_WRITE_RATE_LIMITER_AUTO_TUNE;
+	bool ROCKSDB_PERFCONTEXT_ENABLE; // Enable rocks perf context metrics. May cause performance overhead
+	double ROCKSDB_PERFCONTEXT_SAMPLE_RATE;
 
 	// Leader election
 	int MAX_NOTIFICATIONS;
@@ -397,6 +405,7 @@ public:
 	double WAIT_FOR_DISTRIBUTOR_JOIN_DELAY;
 	double WAIT_FOR_RATEKEEPER_JOIN_DELAY;
 	double WAIT_FOR_BLOB_MANAGER_JOIN_DELAY;
+	double WAIT_FOR_ENCRYPT_KEY_PROXY_JOIN_DELAY;
 	double WORKER_FAILURE_TIME;
 	double CHECK_OUTSTANDING_INTERVAL;
 	double INCOMPATIBLE_PEERS_LOGGING_INTERVAL;
@@ -419,6 +428,7 @@ public:
 	                                             // degraded server is considered healthy.
 	double CC_MIN_DEGRADATION_INTERVAL; // The minimum interval that a server is reported as degraded to be considered
 	                                    // as degraded by Cluster Controller.
+	double ENCRYPT_KEY_PROXY_FAILURE_TIME;
 	int CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE; // The maximum number of degraded peers when excluding a server. When the
 	                                        // number of degraded peers is more than this value, we will not exclude
 	                                        // this server since it may because of server overload.
@@ -477,6 +487,8 @@ public:
 	double DETAILED_METRIC_UPDATE_RATE;
 	double LAST_LIMITED_RATIO;
 	double RATEKEEPER_DEFAULT_LIMIT;
+	double RATEKEEPER_LIMIT_REASON_SAMPLE_RATE;
+	bool RATEKEEPER_PRINT_LIMIT_REASON;
 
 	int64_t TARGET_BYTES_PER_STORAGE_SERVER;
 	int64_t SPRING_BYTES_STORAGE_SERVER;
@@ -518,6 +530,7 @@ public:
 
 	int64_t MIN_AVAILABLE_SPACE;
 	double MIN_AVAILABLE_SPACE_RATIO;
+	double MIN_AVAILABLE_SPACE_RATIO_SAFETY_BUFFER;
 	double TARGET_AVAILABLE_SPACE_RATIO;
 	double AVAILABLE_SPACE_UPDATE_DELAY;
 
@@ -632,7 +645,10 @@ public:
 	double COORDINATOR_LEADER_CONNECTION_TIMEOUT;
 
 	// Dynamic Knobs (implementation)
+	double UPDATE_NODE_TIMEOUT;
 	double GET_COMMITTED_VERSION_TIMEOUT;
+	double GET_SNAPSHOT_AND_CHANGES_TIMEOUT;
+	double FETCH_CHANGES_TIMEOUT;
 
 	// Buggification
 	double BUGGIFIED_EVENTUAL_CONSISTENCY;
@@ -736,6 +752,12 @@ public:
 	// Server request latency measurement
 	int LATENCY_SAMPLE_SIZE;
 	double LATENCY_METRICS_LOGGING_INTERVAL;
+
+	// Cluster recovery
+	std::string CLUSTER_RECOVERY_EVENT_NAME_PREFIX;
+
+	// encrypt key proxy
+	bool ENABLE_ENCRYPT_KEY_PROXY;
 
 	// blob granule stuff
 	// FIXME: configure url with database configuration instead of knob eventually

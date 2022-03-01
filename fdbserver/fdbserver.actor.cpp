@@ -43,7 +43,7 @@
 #include "fdbclient/versions.h"
 #include "fdbclient/BuildFlags.h"
 #include "fdbclient/WellKnownEndpoints.h"
-#include "fdbmonitor/SimpleIni.h"
+#include "fdbclient/SimpleIni.h"
 #include "fdbrpc/AsyncFileCached.actor.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/PerfMetric.h"
@@ -205,7 +205,7 @@ extern void copyTest();
 extern void versionedMapTest();
 extern void createTemplateDatabase();
 // FIXME: this really belongs in a header somewhere since it is actually used.
-extern IPAddress determinePublicIPAutomatically(ClusterConnectionString const& ccs);
+extern IPAddress determinePublicIPAutomatically(ClusterConnectionString& ccs);
 
 extern const char* getSourceVersion();
 
@@ -643,11 +643,11 @@ static void printUsage(const char* name, bool devhelp) {
 	printOptionUsage("-h, -?, --help", "Display this help and exit.");
 	if (devhelp) {
 		printf("  --build-flags  Print build information and exit.\n");
-		printOptionUsage(
-		    "-r ROLE, --role ROLE",
-		    " Server role (valid options are fdbd, test, multitest,"
-		    " simulation, networktestclient, networktestserver, restore"
-		    " consistencycheck, kvfileintegritycheck, kvfilegeneratesums, unittests). The default is `fdbd'.");
+		printOptionUsage("-r ROLE, --role ROLE",
+		                 " Server role (valid options are fdbd, test, multitest,"
+		                 " simulation, networktestclient, networktestserver, restore"
+		                 " consistencycheck, kvfileintegritycheck, kvfilegeneratesums, kvfiledump, unittests)."
+		                 " The default is `fdbd'.");
 #ifdef _WIN32
 		printOptionUsage("-n, --newconsole", " Create a new console.");
 		printOptionUsage("-q, --no-dialog", " Disable error dialog on crash.");
@@ -659,9 +659,9 @@ static void printUsage(const char* name, bool devhelp) {
 		printOptionUsage("-R, --restarting", " Restart a previous simulation that was cleanly shut down.");
 		printOptionUsage("-s SEED, --seed SEED", " Random seed.");
 		printOptionUsage("-k KEY, --key KEY", "Target key for search role.");
-		printOptionUsage(
-		    "--kvfile FILE",
-		    "Input file (SQLite database file) for use by the 'kvfilegeneratesums' and 'kvfileintegritycheck' roles.");
+		printOptionUsage("--kvfile FILE",
+		                 "Input file (SQLite database file) for use by the 'kvfilegeneratesums', "
+		                 "'kvfileintegritycheck' and 'kvfiledump' roles.");
 		printOptionUsage("-b [on,off], --buggify [on,off]", " Sets Buggify system state, defaults to `off'.");
 		printOptionUsage("-fi [on,off], --fault-injection [on,off]", " Sets fault injection, defaults to `on'.");
 		printOptionUsage("--crash", "Crash on serious errors instead of continuing.");
@@ -704,6 +704,13 @@ static void printUsage(const char* name, bool devhelp) {
 		printOptionUsage("--io-trust-warn-only",
 		                 " Instead of failing when an I/O operation exceeds io_trust_seconds, just"
 		                 " log a warning to the trace log. Has no effect if io_trust_seconds is unspecified.");
+		printf("\n"
+		       "The 'kvfiledump' role dump all key-values from kvfile to stdout in binary format:\n"
+		       "{key length}{key binary}{value length}{value binary}, length is 4 bytes int\n"
+		       "(little endianness). This role takes 3 environment variables as parameters:\n"
+		       " - FDB_DUMP_STARTKEY: start key for the dump, default is empty\n"
+		       " - FDB_DUMP_ENDKEY: end key for the dump, default is \"\\xff\\xff\"\n"
+		       " - FDB_DUMP_DEBUG: print key-values to stderr in escaped format\n");
 	} else {
 		printOptionUsage("--dev-help", "Display developer-specific help and exit.");
 	}
@@ -808,7 +815,7 @@ Optional<bool> checkBuggifyOverride(const char* testFile) {
 // Takes a vector of public and listen address strings given via command line, and returns vector of NetworkAddress
 // objects.
 std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(
-    const IClusterConnectionRecord& connectionRecord,
+    IClusterConnectionRecord& connectionRecord,
     const std::vector<std::string>& publicAddressStrs,
     std::vector<std::string>& listenAddressStrs) {
 	if (listenAddressStrs.size() > 0 && publicAddressStrs.size() != listenAddressStrs.size()) {
@@ -826,6 +833,7 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(
 	NetworkAddressList publicNetworkAddresses;
 	NetworkAddressList listenNetworkAddresses;
 
+	connectionRecord.resolveHostnamesBlocking();
 	auto& coordinators = connectionRecord.getConnectionString().coordinators();
 	ASSERT(coordinators.size() > 0);
 
@@ -941,6 +949,7 @@ enum class ServerRole {
 	FDBD,
 	KVFileGenerateIOLogChecksums,
 	KVFileIntegrityCheck,
+	KVFileDump,
 	MultiTester,
 	NetworkTestClient,
 	NetworkTestServer,
@@ -1012,6 +1021,29 @@ struct CLIOptions {
 		CLIOptions opts;
 		opts.parseArgsInternal(argc, argv);
 		return opts;
+	}
+
+	// Determine publicAddresses and listenAddresses by calling buildNetworkAddresses().
+	void buildNetwork(const char* name) {
+		try {
+			if (!publicAddressStrs.empty()) {
+				std::tie(publicAddresses, listenAddresses) =
+				    buildNetworkAddresses(*connectionFile, publicAddressStrs, listenAddressStrs);
+			}
+		} catch (Error&) {
+			printHelpTeaser(name);
+			flushAndExit(FDB_EXIT_ERROR);
+		}
+
+		if (role == ServerRole::ConsistencyCheck) {
+			if (!publicAddressStrs.empty()) {
+				fprintf(stderr, "ERROR: Public address cannot be specified for consistency check processes\n");
+				printHelpTeaser(name);
+				flushAndExit(FDB_EXIT_ERROR);
+			}
+			auto publicIP = determinePublicIPAutomatically(connectionFile->getConnectionString());
+			publicAddresses.address = NetworkAddress(publicIP, ::getpid());
+		}
 	}
 
 private:
@@ -1155,6 +1187,8 @@ private:
 					role = ServerRole::KVFileIntegrityCheck;
 				else if (!strcmp(sRole, "kvfilegeneratesums"))
 					role = ServerRole::KVFileGenerateIOLogChecksums;
+				else if (!strcmp(sRole, "kvfiledump"))
+					role = ServerRole::KVFileDump;
 				else if (!strcmp(sRole, "consistencycheck"))
 					role = ServerRole::ConsistencyCheck;
 				else if (!strcmp(sRole, "unittests"))
@@ -1291,7 +1325,7 @@ private:
 					fprintf(stderr, "Could not open parent process at pid %d (error %d)", parent_pid, GetLastError());
 					throw platform_error();
 				}
-				startThread(&parentWatcher, pHandle);
+				startThread(&parentWatcher, pHandle, 0, "fdb-parentwatch");
 				break;
 			}
 			case OPT_NEWCONSOLE:
@@ -1309,7 +1343,7 @@ private:
 				auto pid_str = args.OptionArg();
 				int* parent_pid = new (int);
 				*parent_pid = atoi(pid_str);
-				startThread(&parentWatcher, parent_pid);
+				startThread(&parentWatcher, parent_pid, 0, "fdb-parentwatch");
 				break;
 			}
 #endif
@@ -1398,8 +1432,8 @@ private:
 				// parameter
 				knobs.emplace_back(
 				    "page_cache_4k",
-				    format("%ld", ti.get() / 4096 * 4096)); // The cache holds 4K pages, so we can truncate this to the
-				                                            // next smaller multiple of 4K.
+				    format("%lld", ti.get() / 4096 * 4096)); // The cache holds 4K pages, so we can truncate this to the
+				                                             // next smaller multiple of 4K.
 				break;
 			case OPT_BUGGIFY:
 				if (!strcmp(args.OptionArg(), "on"))
@@ -1546,7 +1580,7 @@ private:
 		    });
 		if ((role != ServerRole::Simulation && role != ServerRole::CreateTemplateDatabase &&
 		     role != ServerRole::KVFileIntegrityCheck && role != ServerRole::KVFileGenerateIOLogChecksums &&
-		     role != ServerRole::UnitTests) ||
+		     role != ServerRole::KVFileDump && role != ServerRole::UnitTests) ||
 		    autoPublicAddress) {
 
 			if (seedSpecified && !fileExists(connFile)) {
@@ -1582,26 +1616,6 @@ private:
 			}
 
 			// failmon?
-		}
-
-		try {
-			if (!publicAddressStrs.empty()) {
-				std::tie(publicAddresses, listenAddresses) =
-				    buildNetworkAddresses(*connectionFile, publicAddressStrs, listenAddressStrs);
-			}
-		} catch (Error&) {
-			printHelpTeaser(argv[0]);
-			flushAndExit(FDB_EXIT_ERROR);
-		}
-
-		if (role == ServerRole::ConsistencyCheck) {
-			if (!publicAddressStrs.empty()) {
-				fprintf(stderr, "ERROR: Public address cannot be specified for consistency check processes\n");
-				printHelpTeaser(argv[0]);
-				flushAndExit(FDB_EXIT_ERROR);
-			}
-			auto publicIP = determinePublicIPAutomatically(connectionFile->getConnectionString());
-			publicAddresses.address = NetworkAddress(publicIP, ::getpid());
 		}
 
 		if (role == ServerRole::Simulation) {
@@ -1682,7 +1696,7 @@ int main(int argc, char* argv[]) {
 		//_set_output_format(_TWO_DIGIT_EXPONENT);
 #endif
 
-		const auto opts = CLIOptions::parseArgs(argc, argv);
+		auto opts = CLIOptions::parseArgs(argc, argv);
 		const auto role = opts.role;
 
 #ifdef _WIN32
@@ -1731,9 +1745,9 @@ int main(int argc, char* argv[]) {
 				} else {
 					fprintf(stderr, "ERROR: Failed to set knob option '%s': %s\n", knobName.c_str(), e.what());
 					TraceEvent(SevError, "FailedToSetKnob")
+					    .error(e)
 					    .detail("Knob", printable(knobName))
-					    .detail("Value", printable(knobValueString))
-					    .error(e);
+					    .detail("Value", printable(knobValueString));
 					throw;
 				}
 			}
@@ -1777,6 +1791,7 @@ int main(int argc, char* argv[]) {
 
 		if (role == ServerRole::Simulation || role == ServerRole::CreateTemplateDatabase) {
 			// startOldSimulator();
+			opts.buildNetwork(argv[0]);
 			startNewSimulator(opts.printSimTime);
 			openTraceFile(NetworkAddress(), opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace", opts.logGroup);
 			openTracer(TracerType(deterministicRandom()->randomInt(static_cast<int>(TracerType::DISABLED),
@@ -1785,6 +1800,7 @@ int main(int argc, char* argv[]) {
 			g_network = newNet2(opts.tlsConfig, opts.useThreadPool, true);
 			g_network->addStopCallback(Net2FileSystem::stop);
 			FlowTransport::createInstance(false, 1, WLTOKEN_RESERVED_COUNT);
+			opts.buildNetwork(argv[0]);
 
 			const bool expectsPublicAddress =
 			    (role == ServerRole::FDBD || role == ServerRole::NetworkTestServer || role == ServerRole::Restore);
@@ -2122,6 +2138,9 @@ int main(int argc, char* argv[]) {
 			}
 
 			f = result;
+		} else if (role == ServerRole::KVFileDump) {
+			f = stopAfter(KVFileDump(opts.kvFile));
+			g_network->run();
 		}
 
 		int rc = FDB_EXIT_SUCCESS;

@@ -122,6 +122,9 @@ void FileTraceLogWriter::write(const StringRef& str) {
 }
 
 void FileTraceLogWriter::write(const char* str, size_t len) {
+	if (traceFileFD < 0) {
+		return;
+	}
 	auto ptr = str;
 	int remaining = len;
 	bool needsResolve = false;

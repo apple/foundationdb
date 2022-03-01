@@ -8,7 +8,10 @@ set(FDBSERVER_SRCS
   BlobManager.actor.cpp
   BlobManagerInterface.h
   BlobWorker.actor.cpp
+  ClusterController.actor.h
   ClusterController.actor.cpp
+  ClusterRecovery.actor.h
+  ClusterRecovery.actor.cpp
   ConfigBroadcaster.actor.cpp
   ConfigBroadcaster.h
   ConfigDatabaseUnitTests.actor.cpp
@@ -28,7 +31,11 @@ set(FDBSERVER_SRCS
   DataDistributionTracker.actor.cpp
   DataDistributorInterface.h
   DBCoreState.h
+  DDTeamCollection.actor.cpp
+  DDTeamCollection.h
   DiskQueue.actor.cpp
+  EncryptKeyProxyInterface.h
+  EncryptKeyProxy.actor.cpp
   fdbserver.actor.cpp
   FDBExecHelper.actor.cpp
   FDBExecHelper.actor.h
@@ -83,6 +90,7 @@ set(FDBSERVER_SRCS
   QuietDatabase.actor.cpp
   QuietDatabase.h
   RadixTree.h
+  Ratekeeper.h
   Ratekeeper.actor.cpp
   RatekeeperInterface.h
   RecoveryState.h
@@ -123,7 +131,11 @@ set(FDBSERVER_SRCS
   storageserver.actor.cpp
   TagPartitionedLogSystem.actor.cpp
   TagPartitionedLogSystem.actor.h
+  TagThrottler.actor.cpp
+  TagThrottler.h
   template_fdb.h
+  TCInfo.actor.cpp
+  TCInfo.h
   tester.actor.cpp
   TesterInterface.actor.h
   TLogInterface.h
@@ -165,7 +177,6 @@ set(FDBSERVER_SRCS
   workloads/Cache.actor.cpp
   workloads/ChangeConfig.actor.cpp
   workloads/ClearSingleRange.actor.cpp
-  workloads/ClientLibManagementWorkload.actor.cpp
   workloads/ClientTransactionProfileCorrectness.actor.cpp
   workloads/TriggerRecovery.actor.cpp
   workloads/SuspendProcesses.actor.cpp
@@ -185,6 +196,7 @@ set(FDBSERVER_SRCS
   workloads/DiskDurabilityTest.actor.cpp
   workloads/DiskFailureInjection.actor.cpp
   workloads/DummyWorkload.actor.cpp
+  workloads/EncryptionOps.actor.cpp
   workloads/ExternalWorkload.actor.cpp
   workloads/FastTriggeredWatches.actor.cpp
   workloads/FileSystem.actor.cpp
@@ -192,6 +204,7 @@ set(FDBSERVER_SRCS
   workloads/FuzzApiCorrectness.actor.cpp
   workloads/GetRangeStream.actor.cpp
   workloads/HealthMetricsApi.actor.cpp
+  workloads/HighContentionPrefixAllocatorWorkload.actor.cpp
   workloads/IncrementalBackup.actor.cpp
   workloads/Increment.actor.cpp
   workloads/IndexScan.actor.cpp

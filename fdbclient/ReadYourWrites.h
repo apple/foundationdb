@@ -168,7 +168,7 @@ public:
 
 	Database getDatabase() const { return tr.getDatabase(); }
 
-	const TransactionInfo& getTransactionInfo() const { return tr.info; }
+	Reference<const TransactionState> getTransactionState() const { return tr.trState; }
 
 	void setTransactionID(uint64_t id);
 	void setToken(uint64_t token);

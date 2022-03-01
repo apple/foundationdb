@@ -653,7 +653,7 @@ Future<Void> doOnMainThread(Future<Void> signal, F f, ThreadSingleAssignmentVar<
 		result->send(r);
 	} catch (Error& e) {
 		if (!result->canBeSet()) {
-			TraceEvent(SevError, "OnMainThreadSetTwice").error(e, true);
+			TraceEvent(SevError, "OnMainThreadSetTwice").errorUnsuppressed(e);
 		}
 		result->sendError(e);
 	}
