@@ -1160,7 +1160,7 @@ Version poppedVersion(Reference<LogGenerationData> logData, StorageTeamID teamID
 
 void peekMessagesFromMemory(const TLogPeekRequest& req,
                             std::vector<std::pair<Version, Standalone<StringRef>>>* values,
-                            Optional<Version>& beginVersion,
+                            Optional<Version>& firstVersion,
                             Version& endVersion,
                             Reference<LogGenerationData> logData) {
 	ASSERT(logData.isValid());
@@ -1178,7 +1178,9 @@ void peekMessagesFromMemory(const TLogPeekRequest& req,
 		if (reqEnd.present() && version > reqEnd.get()) {
 			break;
 		}
-		firstVersion = std::min(firstVersion, version);
+		if (!firstVersion.present()) {
+			firstVersion = version;
+		}
 		values->push_back(result);
 		++version;
 		versionCount++;
@@ -1450,7 +1452,7 @@ ACTOR Future<Void> servicePeekRequest(
 	}
 
 	state Version endVersion = logData->version.get() + 1;
-	state Version firstVersion = std::numeric_limits<Version>::max();
+	state Optional<Version> firstVersion;
 
 	state bool onlySpilled = false;
 	// persistentDataDurableVersion is the first version not popped and thus still in memory, so we need < here.
@@ -1480,7 +1482,9 @@ ACTOR Future<Void> servicePeekRequest(
 				// try decode kv.value here, who is encoded by proxy
 				versionsFromDisk.insert(ver);
 				serializer.writeSerializedVersionSection(kv.value);
-				firstVersion = std::min(firstVersion, ver);
+				if (!firstVersion.present()) {
+					firstVersion = ver;
+				}
 			}
 			if (kvs.expectedSize() >=
 			    TLOG_PEEK_REQUEST_REPLY_SIZE_CRITERIA) { // if enough from disk, not reading from memory
@@ -1516,7 +1520,9 @@ ACTOR Future<Void> servicePeekRequest(
 						break;
 					}
 					if (sd.version >= req.beginVersion) {
-						firstVersion = std::min(firstVersion, sd.version);
+						if (!firstVersion.present()) {
+							firstVersion = sd.version;
+						}
 						const IDiskQueue::location end = sd.start.lo + sd.length;
 						commitLocations.emplace_back(sd.start, end);
 						// This isn't perfect, because we aren't accounting for page boundaries, but should be
@@ -1601,7 +1607,7 @@ ACTOR Future<Void> servicePeekRequest(
 	reply.data = replyData;
 	reply.arena.dependsOn(replyData.arena());
 	reply.endVersion = endVersion;
-	reply.beginVersion = firstVersion == std::numeric_limits<Version>::max() ? Optional<Version>() : firstVersion;
+	reply.beginVersion = firstVersion;
 	reply.onlySpilled = onlySpilled;
 	req.reply.send(reply);
 
