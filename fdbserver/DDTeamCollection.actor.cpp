@@ -2245,6 +2245,11 @@ public:
 			// Ask the candidateWorker to initialize a SS only if the worker does not have a pending request
 			state UID interfaceId = deterministicRandom()->randomUniqueID();
 
+			// insert recruiting localities BEFORE actor waits, to ensure we don't send many recruitment requests to the
+			// same storage
+			self->recruitingIds.insert(interfaceId);
+			self->recruitingLocalities.insert(candidateWorker.worker.stableAddress());
+
 			UID clusterId = wait(self->getClusterId());
 
 			state InitializeStorageRequest isr;
@@ -2254,9 +2259,6 @@ public:
 			isr.reqId = deterministicRandom()->randomUniqueID();
 			isr.interfaceId = interfaceId;
 			isr.clusterId = clusterId;
-
-			self->recruitingIds.insert(interfaceId);
-			self->recruitingLocalities.insert(candidateWorker.worker.stableAddress());
 
 			// if tss, wait for pair ss to finish and add its id to isr. If pair fails, don't recruit tss
 			state bool doRecruit = true;
