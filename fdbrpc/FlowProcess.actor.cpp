@@ -43,9 +43,9 @@ ACTOR Future<int> flowProcessRunner(FlowProcess* self, Promise<Void> ready) {
 	auto token = endpoint.token;
 
 	std::string flowProcessAddr = g_network->getLocalAddress().ip.toString().append(":0");
-	std::vector<std::string> args = { "bin/fdbserver", "-r", "flowprocess", "-p", flowProcessAddr, "--process_name" };
+	std::vector<std::string> args = { "bin/fdbserver", "-r", "flowprocess", "-p", flowProcessAddr, "--process-name" };
 	args.emplace_back(self->name().toString());
-	args.emplace_back("--process_endpoint");
+	args.emplace_back("--process-endpoint");
 	args.emplace_back(format("%s,%lu,%lu", address.c_str(), token.first(), token.second()));
 
 	process = spawnProcess(path, args, -1.0, false, 0.01, self);

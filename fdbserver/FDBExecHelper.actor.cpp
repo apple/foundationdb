@@ -105,6 +105,7 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 	state std::string flowProcessName;
 	state Endpoint flowProcessEndpoint;
 	state int i = 0;
+	// fdbserver -r flowprocess --process-name ikvs --process-endpoint ip:port,token,id
 	for (; i < paramList.size(); i++) {
 		if (paramList.size() > i + 1) {
 			// temporary args parser that only supports the flowprocess role
@@ -112,13 +113,13 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 				role = paramList[i + 1];
 			} else if (paramList[i] == "-p" || paramList[i] == "--public_address") {
 				addr = paramList[i + 1];
-			} else if (paramList[i] == "--process_name") {
+			} else if (paramList[i] == "--process-name") {
 				flowProcessName = paramList[i + 1];
-			} else if (paramList[i] == "--process_endpoint") {
+			} else if (paramList[i] == "--process-endpoint") {
 				state std::vector<std::string> addressArray;
 				boost::split(addressArray, paramList[i + 1], [](char c) { return c == ','; });
 				if (addressArray.size() != 3) {
-					std::cerr << "Invalid argument, expected 3 elements in --process_endpoint got "
+					std::cerr << "Invalid argument, expected 3 elements in --process-endpoint got "
 					          << addressArray.size() << std::endl;
 					flushAndExit(FDB_EXIT_ERROR);
 				}

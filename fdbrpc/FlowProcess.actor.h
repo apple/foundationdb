@@ -100,8 +100,6 @@ private:
 
 Future<Void> runFlowProcess(std::string name, Endpoint endpoint);
 
-// fdbserver -r flowprocess --process_name ikvs --process_endpoint ip:port,token,id
-
 #include <flow/unactorcompiler.h>
 
 #endif

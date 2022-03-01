@@ -192,11 +192,11 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_CONFIG_PATH,           "--config-path",               SO_REQ_SEP },
 	{ OPT_USE_TEST_CONFIG_DB,    "--use-test-config-db",        SO_NONE },
 	{ OPT_FAULT_INJECTION,       "-fi",                         SO_REQ_SEP },
-	{ OPT_FAULT_INJECTION,       "--fault_injection",           SO_REQ_SEP },
-	{ OPT_PROFILER,	             "--profiler_",                 SO_REQ_SEP },
-	{ OPT_FLOW_PROCESS_NAME,     "--process_name",              SO_REQ_SEP },
-	{ OPT_FLOW_PROCESS_ENDPOINT, "--process_endpoint",          SO_REQ_SEP },
-	{ OPT_PRINT_SIMTIME,         "--print_sim_time",             SO_NONE },
+	{ OPT_FAULT_INJECTION,       "--fault-injection",           SO_REQ_SEP },
+	{ OPT_PROFILER,	             "--profiler-",                 SO_REQ_SEP },
+	{ OPT_PRINT_SIMTIME,         "--print-sim-time",             SO_NONE },
+	{ OPT_FLOW_PROCESS_NAME,     "--process-name",              SO_REQ_SEP },
+	{ OPT_FLOW_PROCESS_ENDPOINT, "--process-endpoint",          SO_REQ_SEP },
 
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
@@ -1543,7 +1543,7 @@ private:
 				}
 				std::cout << "\n";
 				if (strings.size() != 3) {
-					std::cerr << "Invalid argument, expected 3 elements in --process_endpoint got " << strings.size()
+					std::cerr << "Invalid argument, expected 3 elements in --process-endpoint got " << strings.size()
 					          << std::endl;
 					flushAndExit(FDB_EXIT_ERROR);
 				}
