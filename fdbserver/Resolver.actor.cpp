@@ -174,19 +174,16 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self, ResolveTransactionBatc
 
 		ResolveTransactionBatchReply& reply = proxyInfo.outstandingBatches[req.version];
 
-		vector<int> commitList;
-		vector<int> tooOldList;
+		std::vector<int> commitList;
+		std::vector<int> tooOldList;
 
 		// Detect conflicts
 		double expire = now() + SERVER_KNOBS->SAMPLE_EXPIRATION_TIME;
 		ConflictBatch conflictBatch(self->conflictSet, &reply.conflictingKeyRangeMap, &reply.arena);
-		int keys = 0;
 		for (int t = 0; t < req.transactions.size(); t++) {
 			conflictBatch.addTransaction(req.transactions[t]);
 			self->resolvedReadConflictRanges += req.transactions[t].read_conflict_ranges.size();
 			self->resolvedWriteConflictRanges += req.transactions[t].write_conflict_ranges.size();
-			keys += req.transactions[t].write_conflict_ranges.size() * 2 +
-			        req.transactions[t].read_conflict_ranges.size() * 2;
 
 			if (self->resolverCount > 1) {
 				for (auto it : req.transactions[t].write_conflict_ranges)
@@ -376,7 +373,7 @@ ACTOR Future<Void> resolver(ResolverInterface resolver,
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled || e.code() == error_code_worker_removed) {
-			TraceEvent("ResolverTerminated", resolver.id()).error(e, true);
+			TraceEvent("ResolverTerminated", resolver.id()).errorUnsuppressed(e);
 			return Void();
 		}
 		throw;

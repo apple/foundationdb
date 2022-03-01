@@ -24,9 +24,12 @@
 #elif !defined(FDBSERVER_DATA_DISTRIBUTION_ACTOR_H)
 #define FDBSERVER_DATA_DISTRIBUTION_ACTOR_H
 
+#include <boost/heap/skew_heap.hpp>
+#include <boost/heap/policies.hpp>
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/LogSystem.h"
+#include "fdbclient/RunTransaction.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct RelocateShard {
@@ -38,9 +41,9 @@ struct RelocateShard {
 };
 
 struct IDataDistributionTeam {
-	virtual vector<StorageServerInterface> getLastKnownServerInterfaces() const = 0;
+	virtual std::vector<StorageServerInterface> getLastKnownServerInterfaces() const = 0;
 	virtual int size() const = 0;
-	virtual vector<UID> const& getServerIDs() const = 0;
+	virtual std::vector<UID> const& getServerIDs() const = 0;
 	virtual void addDataInFlightToTeam(int64_t delta) = 0;
 	virtual int64_t getDataInFlightToTeam() const = 0;
 	virtual int64_t getLoadBytes(bool includeInFlight = true, double inflightPenalty = 1.0) const = 0;
@@ -57,7 +60,7 @@ struct IDataDistributionTeam {
 	virtual bool isOptimal() const = 0;
 	virtual bool isWrongConfiguration() const = 0;
 	virtual void setWrongConfiguration(bool) = 0;
-	virtual void addServers(const vector<UID>& servers) = 0;
+	virtual void addServers(const std::vector<UID>& servers) = 0;
 	virtual std::string getTeamID() const = 0;
 
 	std::string getDesc() const {
@@ -133,11 +136,11 @@ public:
 	ShardsAffectedByTeamFailure() {}
 
 	struct Team {
-		vector<UID> servers; // sorted
+		std::vector<UID> servers; // sorted
 		bool primary;
 
 		Team() : primary(true) {}
-		Team(vector<UID> const& servers, bool primary) : servers(servers), primary(primary) {}
+		Team(std::vector<UID> const& servers, bool primary) : servers(servers), primary(primary) {}
 
 		bool operator<(const Team& r) const {
 			if (servers == r.servers)
@@ -167,12 +170,12 @@ public:
 	//       intersecting shards.
 
 	int getNumberOfShards(UID ssID) const;
-	vector<KeyRange> getShardsFor(Team team);
+	std::vector<KeyRange> getShardsFor(Team team);
 	bool hasShards(Team team) const;
 
 	// The first element of the pair is either the source for non-moving shards or the destination team for in-flight
 	// shards The second element of the pair is all previous sources for in-flight shards
-	std::pair<vector<Team>, vector<Team>> getTeamsFor(KeyRangeRef keys);
+	std::pair<std::vector<Team>, std::vector<Team>> getTeamsFor(KeyRangeRef keys);
 
 	void defineShard(KeyRangeRef keys);
 	void moveShard(KeyRangeRef keys, std::vector<Team> destinationTeam);
@@ -190,7 +193,7 @@ private:
 		}
 	};
 
-	KeyRangeMap<std::pair<vector<Team>, vector<Team>>>
+	KeyRangeMap<std::pair<std::vector<Team>, std::vector<Team>>>
 	    shard_teams; // A shard can be affected by the failure of multiple teams if it is a queued merge, or when
 	                 // usable_regions > 1
 	std::set<std::pair<Team, KeyRange>, OrderByTeamKey> team_shards;
@@ -203,10 +206,10 @@ private:
 // DDShardInfo is so named to avoid link-time name collision with ShardInfo within the StorageServer
 struct DDShardInfo {
 	Key key;
-	vector<UID> primarySrc;
-	vector<UID> remoteSrc;
-	vector<UID> primaryDest;
-	vector<UID> remoteDest;
+	std::vector<UID> primarySrc;
+	std::vector<UID> remoteSrc;
+	std::vector<UID> primaryDest;
+	std::vector<UID> remoteDest;
 	bool hasDest;
 
 	explicit DDShardInfo(Key key) : key(key), hasDest(false) {}
@@ -214,10 +217,10 @@ struct DDShardInfo {
 
 struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
 	int mode;
-	vector<std::pair<StorageServerInterface, ProcessClass>> allServers;
-	std::set<vector<UID>> primaryTeams;
-	std::set<vector<UID>> remoteTeams;
-	vector<DDShardInfo> shards;
+	std::vector<std::pair<StorageServerInterface, ProcessClass>> allServers;
+	std::set<std::vector<UID>> primaryTeams;
+	std::set<std::vector<UID>> remoteTeams;
+	std::vector<DDShardInfo> shards;
 	Optional<Key> initHealthyZoneValue;
 };
 
@@ -259,7 +262,8 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
                                          FutureStream<RelocateShard> input,
                                          PromiseStream<GetMetricsRequest> getShardMetrics,
                                          Reference<AsyncVar<bool>> processingUnhealthy,
-                                         vector<TeamCollectionInterface> teamCollection,
+                                         Reference<AsyncVar<bool>> processingWiggle,
+                                         std::vector<TeamCollectionInterface> teamCollection,
                                          Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
                                          MoveKeysLock lock,
                                          PromiseStream<Promise<int64_t>> getAverageShardBytes,
@@ -287,8 +291,154 @@ ShardSizeBounds getShardSizeBounds(KeyRangeRef shard, int64_t maxShardSize);
 // Determines the maximum shard size based on the size of the database
 int64_t getMaxShardSize(double dbSizeEstimate);
 
-struct DDTeamCollection;
-ACTOR Future<vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses(Transaction* tr);
+class DDTeamCollection;
+
+struct StorageWiggleMetrics {
+	constexpr static FileIdentifier file_identifier = 4728961;
+
+	// round statistics
+	// One StorageServer wiggle round is considered 'complete', when all StorageServers with creationTime < T are
+	// wiggled
+	uint64_t last_round_start = 0; // wall timer: timer_int()
+	uint64_t last_round_finish = 0;
+	TimerSmoother smoothed_round_duration;
+	int finished_round = 0; // finished round since storage wiggle is open
+
+	// step statistics
+	// 1 wiggle step as 1 storage server is wiggled in the current round
+	uint64_t last_wiggle_start = 0; // wall timer: timer_int()
+	uint64_t last_wiggle_finish = 0;
+	TimerSmoother smoothed_wiggle_duration;
+	int finished_wiggle = 0; // finished step since storage wiggle is open
+
+	StorageWiggleMetrics() : smoothed_round_duration(20.0 * 60), smoothed_wiggle_duration(10.0 * 60) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		if (ar.isDeserializing) {
+			double step_total, round_total;
+			serializer(ar,
+			           last_wiggle_start,
+			           last_wiggle_finish,
+			           step_total,
+			           finished_wiggle,
+			           last_round_start,
+			           last_round_finish,
+			           round_total,
+			           finished_round);
+			smoothed_round_duration.reset(round_total);
+			smoothed_wiggle_duration.reset(step_total);
+		} else {
+			serializer(ar,
+			           last_wiggle_start,
+			           last_wiggle_finish,
+			           smoothed_wiggle_duration.total,
+			           finished_wiggle,
+			           last_round_start,
+			           last_round_finish,
+			           smoothed_round_duration.total,
+			           finished_round);
+		}
+	}
+
+	static Future<Void> runSetTransaction(Reference<ReadYourWritesTransaction> tr,
+	                                      bool primary,
+	                                      StorageWiggleMetrics metrics) {
+		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+		tr->set(perpetualStorageWiggleStatsPrefix.withSuffix(primary ? "primary"_sr : "remote"_sr),
+		        ObjectWriter::toValue(metrics, IncludeVersion()));
+		return Void();
+	}
+
+	static Future<Void> runSetTransaction(Database cx, bool primary, StorageWiggleMetrics metrics) {
+		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+			return runSetTransaction(tr, primary, metrics);
+		});
+	}
+
+	static Future<Optional<Value>> runGetTransaction(Reference<ReadYourWritesTransaction> tr, bool primary) {
+		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+		tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+		return tr->get(perpetualStorageWiggleStatsPrefix.withSuffix(primary ? "primary"_sr : "remote"_sr));
+	}
+
+	static Future<Optional<Value>> runGetTransaction(Database cx, bool primary) {
+		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
+			return runGetTransaction(tr, primary);
+		});
+	}
+
+	StatusObject toJSON() {
+		StatusObject result;
+		result["last_round_start_datetime"] = timerIntToGmt(last_round_start);
+		result["last_round_finish_datetime"] = timerIntToGmt(last_round_finish);
+		result["last_round_start_timestamp"] = last_round_start;
+		result["last_round_finish_timestamp"] = last_round_finish;
+		result["smoothed_round_seconds"] = smoothed_round_duration.estimate;
+		result["finished_round"] = finished_round;
+
+		result["last_wiggle_start_datetime"] = timerIntToGmt(last_wiggle_start);
+		result["last_wiggle_finish_datetime"] = timerIntToGmt(last_wiggle_finish);
+		result["last_wiggle_start_timestamp"] = last_wiggle_start;
+		result["last_wiggle_finish_timestamp"] = last_wiggle_finish;
+		result["smoothed_wiggle_seconds"] = smoothed_wiggle_duration.estimate;
+		result["finished_wiggle"] = finished_wiggle;
+		return result;
+	}
+};
+
+struct StorageWiggler : ReferenceCounted<StorageWiggler> {
+	DDTeamCollection* teamCollection;
+	StorageWiggleMetrics metrics;
+
+	// data structures
+	typedef std::pair<StorageMetadataType, UID> MetadataUIDP;
+	// sorted by (createdTime, UID), the least comes first
+	struct CompPair {
+		bool operator()(MetadataUIDP const& a, MetadataUIDP const& b) const {
+			if (a.first.createdTime == b.first.createdTime) {
+				return a.second > b.second;
+			}
+			// larger createdTime means the age is younger
+			return a.first.createdTime > b.first.createdTime;
+		}
+	};
+	boost::heap::skew_heap<MetadataUIDP, boost::heap::mutable_<true>, boost::heap::compare<CompPair>> wiggle_pq;
+	std::unordered_map<UID, decltype(wiggle_pq)::handle_type> pq_handles;
+
+	AsyncVar<bool> nonEmpty;
+
+	explicit StorageWiggler(DDTeamCollection* collection) : teamCollection(collection), nonEmpty(false){};
+	// add server to wiggling queue
+	void addServer(const UID& serverId, const StorageMetadataType& metadata);
+	// remove server from wiggling queue
+	void removeServer(const UID& serverId);
+	// update metadata and adjust priority_queue
+	void updateMetadata(const UID& serverId, const StorageMetadataType& metadata);
+	bool contains(const UID& serverId) { return pq_handles.count(serverId) > 0; }
+	bool empty() { return wiggle_pq.empty(); }
+	Optional<UID> getNextServerId();
+
+	// -- statistic update
+
+	// reset Statistic in database when perpetual wiggle is closed by user
+	Future<Void> resetStats();
+	// restore Statistic from database when the perpetual wiggle is opened
+	Future<Void> restoreStats();
+	// called when start wiggling a SS
+	Future<Void> startWiggle();
+	Future<Void> finishWiggle();
+	bool shouldStartNewRound() { return metrics.last_round_finish >= metrics.last_round_start; }
+	bool shouldFinishRound() {
+		if (wiggle_pq.empty())
+			return true;
+		return (wiggle_pq.top().first.createdTime >= metrics.last_round_start);
+	}
+};
+
+ACTOR Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses(
+    Transaction* tr);
 
 #include "flow/unactorcompiler.h"
 #endif

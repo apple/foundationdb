@@ -20,6 +20,7 @@
 
 #include <cinttypes>
 
+#include "contrib/fmt-8.0.1/include/fmt/format.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/SignalSafeUnwind.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -38,7 +39,7 @@ struct SlowTaskWorkload : TestWorkload {
 
 	Future<bool> check(Database const& cx) override { return true; }
 
-	void getMetrics(vector<PerfMetric>& m) override {}
+	void getMetrics(std::vector<PerfMetric>& m) override {}
 
 	ACTOR static Future<Void> go() {
 		wait(delay(1));
@@ -55,14 +56,14 @@ struct SlowTaskWorkload : TestWorkload {
 				do_slow_exception_thing(&exc);
 			}
 		}
-		fprintf(stderr,
-		        "Slow task complete: %" PRId64 " exceptions; %" PRId64 " calls to dl_iterate_phdr, %" PRId64
-		        " profiles deferred, %" PRId64 " profiles overflowed, %" PRId64 " profiles captured\n",
-		        exc,
-		        dl_iterate_phdr_calls - phc,
-		        getNumProfilesDeferred() - startProfilesDeferred,
-		        getNumProfilesOverflowed() - startProfilesOverflowed,
-		        getNumProfilesCaptured() - startProfilesCaptured);
+		fmt::print(stderr,
+		           "Slow task complete: {0} exceptions; {1} calls to dl_iterate_phdr, {2}"
+		           " profiles deferred, {3} profiles overflowed, {4} profiles captured\n",
+		           exc,
+		           dl_iterate_phdr_calls - phc,
+		           getNumProfilesDeferred() - startProfilesDeferred,
+		           getNumProfilesOverflowed() - startProfilesOverflowed,
+		           getNumProfilesCaptured() - startProfilesCaptured);
 
 		return Void();
 	}

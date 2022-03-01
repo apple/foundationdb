@@ -143,7 +143,7 @@ static int mvccStorageBytes(MutationRef const& m) {
 
 struct FetchInjectionInfo {
 	Arena arena;
-	vector<VerUpdateRef> changes;
+	std::vector<VerUpdateRef> changes;
 };
 
 struct StorageCacheData {
@@ -198,7 +198,7 @@ public:
 
 	FlowLock updateVersionLock;
 	FlowLock fetchKeysParallelismLock;
-	vector<Promise<FetchInjectionInfo*>> readyFetchKeys;
+	std::vector<Promise<FetchInjectionInfo*>> readyFetchKeys;
 
 	// TODO do we need otherError here?
 	Promise<Void> otherError;
@@ -1189,7 +1189,7 @@ ACTOR Future<RangeResult> tryFetchRange(Database cx,
 
 	ASSERT(!cx->switchable);
 	tr.setVersion(version);
-	tr.info.taskID = TaskPriority::FetchKeys;
+	tr.trState->taskID = TaskPriority::FetchKeys;
 	limits.minRows = 0;
 
 	try {
@@ -1375,7 +1375,7 @@ ACTOR Future<Void> fetchKeys(StorageCacheData* data, AddingCacheRange* cacheRang
 				break;
 			} catch (Error& e) {
 				TraceEvent("SCFKBlockFail", data->thisServerID)
-				    .error(e, true)
+				    .errorUnsuppressed(e)
 				    .suppressFor(1.0)
 				    .detail("FKID", interval.pairID);
 				if (e.code() == error_code_transaction_too_old) {
@@ -1507,7 +1507,7 @@ ACTOR Future<Void> fetchKeys(StorageCacheData* data, AddingCacheRange* cacheRang
 
 		// TraceEvent(SevDebug, interval.end(), data->thisServerID);
 	} catch (Error& e) {
-		// TraceEvent(SevDebug, interval.end(), data->thisServerID).error(e, true).detail("Version", data->version.get());
+		// TraceEvent(SevDebug, interval.end(), data->thisServerID).errorUnsuppressed(e).detail("Version", data->version.get());
 
 		// TODO define the shuttingDown state of cache server
 		if (e.code() == error_code_actor_cancelled &&
@@ -1612,7 +1612,7 @@ void cacheWarmup(StorageCacheData* data, const KeyRangeRef& keys, bool nowAssign
 
 	// Save a backup of the CacheRangeInfo references before we start messing with cacheRanges, in order to defer
 	// fetchKeys cancellation (and its potential call to removeDataRange()) until cacheRanges is again valid
-	vector<Reference<CacheRangeInfo>> oldCacheRanges;
+	std::vector<Reference<CacheRangeInfo>> oldCacheRanges;
 	auto ocr = data->cachedRangeMap.intersectingRanges(keys);
 	for (auto r = ocr.begin(); r != ocr.end(); ++r)
 		oldCacheRanges.push_back(r->value());

@@ -31,6 +31,7 @@
 #include "flow/ObjectSerializerTraits.h"
 #include "flow/FileIdentifier.h"
 #include <algorithm>
+#include <boost/functional/hash.hpp>
 #include <stdint.h>
 #include <string>
 #include <cstring>
@@ -282,8 +283,10 @@ public:
 	bool operator<(Optional const& o) const { return impl < o.impl; }
 
 	void reset() { impl.reset(); }
+	size_t hash() const { return hashFunc(impl); }
 
 private:
+	static inline std::hash<std::optional<T>> hashFunc{};
 	std::optional<T> impl;
 };
 
@@ -447,6 +450,7 @@ public:
 	const uint8_t* begin() const { return data; }
 	const uint8_t* end() const { return data + length; }
 	int size() const { return length; }
+	bool empty() const { return length == 0; }
 
 	uint8_t operator[](int i) const { return data[i]; }
 
@@ -549,7 +553,7 @@ public:
 	int expectedSize() const { return size(); }
 
 	int compare(StringRef const& other) const {
-		size_t minSize = std::min(size(), other.size());
+		auto minSize = static_cast<int>(std::min(size(), other.size()));
 		if (minSize != 0) {
 			int c = memcmp(begin(), other.begin(), minSize);
 			if (c != 0)
@@ -640,6 +644,36 @@ struct hash<StringRef> {
 };
 } // namespace std
 
+namespace std {
+template <>
+struct hash<Standalone<StringRef>> {
+	static constexpr std::hash<std::string_view> hashFunc{};
+	std::size_t operator()(Standalone<StringRef> const& tag) const {
+		return hashFunc(std::string_view((const char*)tag.begin(), tag.size()));
+	}
+};
+} // namespace std
+
+namespace std {
+template <class T>
+struct hash<Optional<T>> {
+	std::size_t operator()(Optional<T> const& val) const { return val.hash(); }
+};
+} // namespace std
+
+template <class T, class V = std::void_t<>>
+struct boost_hashable : std::false_type {};
+
+template <class T>
+struct boost_hashable<T, std::void_t<decltype(boost::hash_value(std::declval<T>()))>> : std::true_type {};
+
+// Using boost hash functions on types that depend on member hashes (e.g. std::pair) expect the members
+// to be boost hashable. This provides a default boost hash function based on std::hash.
+template <class T>
+std::enable_if_t<!boost_hashable<T>::value, std::size_t> hash_value(const T& v) {
+	return std::hash<T>{}(v);
+}
+
 template <>
 struct TraceableString<StringRef> {
 	static const char* begin(StringRef value) { return reinterpret_cast<const char*>(value.begin()); }
@@ -677,6 +711,10 @@ inline StringRef operator"" _sr(const char* str, size_t size) {
 	return StringRef(reinterpret_cast<const uint8_t*>(str), size);
 }
 
+inline static uintptr_t getAlignedUpperBound(uintptr_t value, uintptr_t alignment) {
+	return ((value + alignment - 1) / alignment) * alignment;
+}
+
 // makeString is used to allocate a Standalone<StringRef> of a known length for later
 // mutation (via mutateString).  If you need to append to a string of unknown length,
 // consider factoring StringBuffer from DiskQueue.actor.cpp.
@@ -690,13 +728,19 @@ inline static Standalone<StringRef> makeString(int length) {
 inline static Standalone<StringRef> makeAlignedString(int alignment, int length) {
 	Standalone<StringRef> returnString;
 	uint8_t* outData = new (returnString.arena()) uint8_t[alignment + length];
-	outData = (uint8_t*)((((uintptr_t)outData + (alignment - 1)) / alignment) * alignment);
+	outData = (uint8_t*)getAlignedUpperBound((uintptr_t)outData, alignment);
 	((StringRef&)returnString) = StringRef(outData, length);
 	return returnString;
 }
 
 inline static StringRef makeString(int length, Arena& arena) {
 	uint8_t* outData = new (arena) uint8_t[length];
+	return StringRef(outData, length);
+}
+
+inline static StringRef makeAlignedString(int alignment, int length, Arena& arena) {
+	uint8_t* outData = new (arena) uint8_t[alignment + length];
+	outData = (uint8_t*)getAlignedUpperBound((uintptr_t)outData, alignment);
 	return StringRef(outData, length);
 }
 
@@ -801,10 +845,14 @@ enum class VecSerStrategy { FlatBuffers, String };
 template <class T, VecSerStrategy>
 struct VectorRefPreserializer {
 	VectorRefPreserializer() {}
-	VectorRefPreserializer(const VectorRefPreserializer<T, VecSerStrategy::FlatBuffers>&) {}
-	VectorRefPreserializer& operator=(const VectorRefPreserializer<T, VecSerStrategy::FlatBuffers>&) { return *this; }
-	VectorRefPreserializer(const VectorRefPreserializer<T, VecSerStrategy::String>&) {}
-	VectorRefPreserializer& operator=(const VectorRefPreserializer<T, VecSerStrategy::String>&) { return *this; }
+	VectorRefPreserializer(const VectorRefPreserializer<T, VecSerStrategy::FlatBuffers>&) noexcept {}
+	VectorRefPreserializer& operator=(const VectorRefPreserializer<T, VecSerStrategy::FlatBuffers>&) noexcept {
+		return *this;
+	}
+	VectorRefPreserializer(const VectorRefPreserializer<T, VecSerStrategy::String>&) noexcept {}
+	VectorRefPreserializer& operator=(const VectorRefPreserializer<T, VecSerStrategy::String>&) noexcept {
+		return *this;
+	}
 
 	void invalidate() {}
 	void add(const T& item) {}
@@ -818,14 +866,14 @@ struct VectorRefPreserializer<T, VecSerStrategy::String> {
 	string_serialized_traits<T> _string_traits;
 
 	VectorRefPreserializer() : _cached_size(0) {}
-	VectorRefPreserializer(const VectorRefPreserializer<T, VecSerStrategy::String>& other)
+	VectorRefPreserializer(const VectorRefPreserializer<T, VecSerStrategy::String>& other) noexcept
 	  : _cached_size(other._cached_size) {}
-	VectorRefPreserializer& operator=(const VectorRefPreserializer<T, VecSerStrategy::String>& other) {
+	VectorRefPreserializer& operator=(const VectorRefPreserializer<T, VecSerStrategy::String>& other) noexcept {
 		_cached_size = other._cached_size;
 		return *this;
 	}
-	VectorRefPreserializer(const VectorRefPreserializer<T, VecSerStrategy::FlatBuffers>&) : _cached_size(-1) {}
-	VectorRefPreserializer& operator=(const VectorRefPreserializer<T, VecSerStrategy::FlatBuffers>&) {
+	VectorRefPreserializer(const VectorRefPreserializer<T, VecSerStrategy::FlatBuffers>&) noexcept : _cached_size(-1) {}
+	VectorRefPreserializer& operator=(const VectorRefPreserializer<T, VecSerStrategy::FlatBuffers>&) noexcept {
 		_cached_size = -1;
 		return *this;
 	}

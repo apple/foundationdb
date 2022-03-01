@@ -93,7 +93,7 @@ struct UnitTestWorkload : TestWorkload {
 		return Void();
 	}
 	Future<bool> check(Database const& cx) override { return testsFailed.getValue() == 0; }
-	void getMetrics(vector<PerfMetric>& m) override {
+	void getMetrics(std::vector<PerfMetric>& m) override {
 		m.push_back(testsAvailable.getMetric());
 		m.push_back(testsExecuted.getMetric());
 		m.push_back(testsFailed.getMetric());
@@ -149,7 +149,7 @@ struct UnitTestWorkload : TestWorkload {
 			self->totalWallTime += wallTime;
 			self->totalSimTime += simTime;
 			TraceEvent(result.code() != error_code_success ? SevError : SevInfo, "UnitTest")
-			    .error(result, true)
+			    .errorUnsuppressed(result)
 			    .detail("Name", test->name)
 			    .detail("File", test->file)
 			    .detail("Line", test->line)

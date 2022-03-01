@@ -34,9 +34,6 @@
 #include "fdbclient/SystemData.h"
 #include "fdbserver/ConflictSet.h"
 
-using std::max;
-using std::min;
-
 static std::vector<PerfDoubleCounter*> skc;
 
 static thread_local uint32_t g_seed = 0;
@@ -51,7 +48,7 @@ PerfDoubleCounter g_buildTest("Build", skc), g_add("Add", skc), g_detectConflict
     g_merge("D.MergeWrite", skc), g_removeBefore("D.RemoveBefore", skc);
 
 static force_inline int compare(const StringRef& a, const StringRef& b) {
-	int c = memcmp(a.begin(), b.begin(), min(a.size(), b.size()));
+	int c = memcmp(a.begin(), b.begin(), std::min(a.size(), b.size()));
 	if (c < 0)
 		return -1;
 	if (c > 0)
@@ -124,7 +121,7 @@ force_inline bool getCharacter(const KeyInfo& ki, int character, int& outputChar
 }
 
 bool operator<(const KeyInfo& lhs, const KeyInfo& rhs) {
-	int i = min(lhs.key.size(), rhs.key.size());
+	int i = std::min(lhs.key.size(), rhs.key.size());
 	int c = memcmp(lhs.key.begin(), rhs.key.begin(), i);
 	if (c != 0)
 		return c < 0;
@@ -285,7 +282,7 @@ private:
 			Node* end = getNext(level);
 			Version v = getMaxVersion(level - 1);
 			for (Node* x = getNext(level - 1); x != end; x = x->getNext(level - 1))
-				v = max(v, x->getMaxVersion(level - 1));
+				v = std::max(v, x->getMaxVersion(level - 1));
 			setMaxVersion(level, v);
 		}
 
@@ -312,7 +309,7 @@ private:
 	};
 
 	static force_inline bool less(const uint8_t* a, int aLen, const uint8_t* b, int bLen) {
-		int c = memcmp(a, b, min(aLen, bLen));
+		int c = memcmp(a, b, std::min(aLen, bLen));
 		if (c < 0)
 			return true;
 		if (c > 0)
@@ -450,7 +447,7 @@ public:
 		if (!count)
 			return;
 
-		int started = min(M, count);
+		int started = std::min(M, count);
 		for (int i = 0; i < started; i++) {
 			inProgress[i].init(ranges[i],
 			                   header,
@@ -601,7 +598,7 @@ public:
 				for (int l = 0; l <= x->level(); l++)
 					f.finger[l]->setNext(l, x->getNext(l));
 				for (int i = 1; i <= x->level(); i++)
-					f.finger[i]->setMaxVersion(i, max(f.finger[i]->getMaxVersion(i), x->getMaxVersion(i)));
+					f.finger[i]->setMaxVersion(i, std::max(f.finger[i]->getMaxVersion(i), x->getMaxVersion(i)));
 				x->destroy();
 			}
 			wasAbove = isAbove;
@@ -633,7 +630,7 @@ private:
 
 	void insert(const Finger& f, Version version) {
 		int level = randomLevel();
-		// cout << std::string((const char*)value,length) << " level: " << level << endl;
+		// std::cout << std::string((const char*)value,length) << " level: " << level << std::endl;
 		Node* x = Node::create(f.value, level);
 		x->setMaxVersion(0, version);
 		for (int i = 0; i <= level; i++) {

@@ -26,6 +26,7 @@
 #endif
 
 #include <errno.h>
+#include "contrib/fmt-8.0.1/include/fmt/format.h"
 #include "flow/Platform.h"
 #include "flow/Platform.actor.h"
 #include "flow/Arena.h"
@@ -85,7 +86,7 @@
 #include <ftw.h>
 #include <pwd.h>
 #include <sched.h>
-#ifndef __aarch64__
+#if !defined(__aarch64__) && !defined(__powerpc64__)
 #include <cpuid.h>
 #endif
 
@@ -195,9 +196,6 @@ std::string removeWhitespace(const std::string& t) {
 #else
 #error What platform is this?
 #endif
-
-using std::cout;
-using std::endl;
 
 #if defined(_WIN32)
 __int64 FiletimeAsInt64(FILETIME& t) {
@@ -595,7 +593,7 @@ void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) {
 	struct statvfs buf;
 	if (statvfs(directory.c_str(), &buf)) {
 		Error e = systemErrorCodeToError();
-		TraceEvent(SevError, "GetDiskBytesStatvfsError").detail("Directory", directory).GetLastError().error(e);
+		TraceEvent(SevError, "GetDiskBytesStatvfsError").error(e).detail("Directory", directory).GetLastError();
 		throw e;
 	}
 
@@ -604,7 +602,7 @@ void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) {
 	struct statfs buf;
 	if (statfs(directory.c_str(), &buf)) {
 		Error e = systemErrorCodeToError();
-		TraceEvent(SevError, "GetDiskBytesStatfsError").detail("Directory", directory).GetLastError().error(e);
+		TraceEvent(SevError, "GetDiskBytesStatfsError").error(e).detail("Directory", directory).GetLastError();
 		throw e;
 	}
 
@@ -625,7 +623,7 @@ void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) {
 	ULARGE_INTEGER totalFreeSpace;
 	if (!GetDiskFreeSpaceEx(fullPath.c_str(), &freeSpace, &totalSpace, &totalFreeSpace)) {
 		Error e = systemErrorCodeToError();
-		TraceEvent(SevError, "DiskFreeError").detail("Path", fullPath).GetLastError().error(e);
+		TraceEvent(SevError, "DiskFreeError").error(e).detail("Path", fullPath).GetLastError();
 		throw e;
 	}
 	total = std::min((uint64_t)std::numeric_limits<int64_t>::max(), totalSpace.QuadPart);
@@ -789,7 +787,9 @@ void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime, bool logDetails) {
 
 void getDiskStatistics(std::string const& directory,
                        uint64_t& currentIOs,
-                       uint64_t& busyTicks,
+                       uint64_t& readMilliSecs,
+                       uint64_t& writeMilliSecs,
+                       uint64_t& IOMilliSecs,
                        uint64_t& reads,
                        uint64_t& writes,
                        uint64_t& writeSectors,
@@ -875,7 +875,9 @@ void getDiskStatistics(std::string const& directory,
 			disk_stream >> aveq;
 
 			currentIOs = cur_ios;
-			busyTicks = ticks;
+			readMilliSecs = rd_ticks;
+			writeMilliSecs = wr_ticks;
+			IOMilliSecs = ticks;
 			reads = rd_ios;
 			writes = wr_ios;
 			writeSectors = wr_sectors;
@@ -1018,14 +1020,18 @@ void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime, bool logDetails) {
 
 void getDiskStatistics(std::string const& directory,
                        uint64_t& currentIOs,
-                       uint64_t& busyTicks,
+                       uint64_t& readMilliSecs,
+                       uint64_t& writeMilliSecs,
+                       uint64_t& IOMilliSecs,
                        uint64_t& reads,
                        uint64_t& writes,
                        uint64_t& writeSectors,
                        uint64_t& readSectors) {
 	INJECT_FAULT(platform_error, "getDiskStatistics"); // getting disk stats failed
 	currentIOs = 0;
-	busyTicks = 0;
+	readMilliSecs = 0; // This will not be used because we cannot get its value.
+	writeMilliSecs = 0; // This will not be used because we cannot get its value.
+	IOMilliSecs = 0;
 	reads = 0;
 	writes = 0;
 	writeSectors = 0;
@@ -1088,12 +1094,12 @@ void getDiskStatistics(std::string const& directory,
 			throw platform_error();
 		}
 
-		currentIOs = queue_len;
-		busyTicks = (u_int64_t)ms_per_transaction;
-		reads = total_transfers_read;
-		writes = total_transfers_write;
-		writeSectors = total_blocks_read;
-		readSectors = total_blocks_write;
+		currentIOs += queue_len;
+		IOMilliSecs += (u_int64_t)ms_per_transaction;
+		reads += total_transfers_read;
+		writes += total_transfers_write;
+		writeSectors += total_blocks_read;
+		readSectors += total_blocks_write;
 	}
 }
 
@@ -1198,21 +1204,25 @@ void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime, bool logDetails) {
 
 void getDiskStatistics(std::string const& directory,
                        uint64_t& currentIOs,
-                       uint64_t& busyTicks,
+                       uint64_t& readMilliSecs,
+                       uint64_t& writeMilliSecs,
+                       uint64_t& IOMilliSecs,
                        uint64_t& reads,
                        uint64_t& writes,
                        uint64_t& writeSectors,
                        uint64_t& readSectors) {
 	INJECT_FAULT(platform_error, "getDiskStatistics"); // Getting disk stats failed (macOS)
-	currentIOs = 0;
-	busyTicks = 0;
+	currentIOs = 0; // This will not be used because we cannot get its value.
+	readMilliSecs = 0;
+	writeMilliSecs = 0;
+	IOMilliSecs = 0;
 	writeSectors = 0;
 	readSectors = 0;
 
 	struct statfs buf;
 	if (statfs(directory.c_str(), &buf)) {
 		Error e = systemErrorCodeToError();
-		TraceEvent(SevError, "GetDiskStatisticsStatfsError").detail("Directory", directory).GetLastError().error(e);
+		TraceEvent(SevError, "GetDiskStatisticsStatfsError").error(e).detail("Directory", directory).GetLastError();
 		throw e;
 	}
 
@@ -1285,6 +1295,24 @@ void getDiskStatistics(std::string const& directory,
 	if ((number = (CFNumberRef)CFDictionaryGetValue(stats_dict, CFSTR(kIOBlockStorageDriverStatisticsWritesKey)))) {
 		CFNumberGetValue(number, kCFNumberSInt64Type, &writes);
 	}
+
+	uint64_t nanoSecs;
+	if ((number =
+	         (CFNumberRef)CFDictionaryGetValue(stats_dict, CFSTR(kIOBlockStorageDriverStatisticsTotalReadTimeKey)))) {
+		CFNumberGetValue(number, kCFNumberSInt64Type, &nanoSecs);
+		readMilliSecs += nanoSecs;
+		IOMilliSecs += nanoSecs;
+	}
+	if ((number =
+	         (CFNumberRef)CFDictionaryGetValue(stats_dict, CFSTR(kIOBlockStorageDriverStatisticsTotalWriteTimeKey)))) {
+		CFNumberGetValue(number, kCFNumberSInt64Type, &nanoSecs);
+		writeMilliSecs += nanoSecs;
+		IOMilliSecs += nanoSecs;
+	}
+	// nanoseconds to milliseconds
+	readMilliSecs /= 1000000;
+	writeMilliSecs /= 1000000;
+	IOMilliSecs /= 1000000;
 
 	CFRelease(disk_dict);
 	IOObjectRelease(disk);
@@ -1393,13 +1421,14 @@ struct SystemStatisticsState {
 #elif defined(__unixish__)
 	uint64_t machineLastSent, machineLastReceived;
 	uint64_t machineLastOutSegs, machineLastRetransSegs;
-	uint64_t lastBusyTicks, lastReads, lastWrites, lastWriteSectors, lastReadSectors;
+	uint64_t lastReadMilliSecs, lastWriteMilliSecs, lastIOMilliSecs, lastReads, lastWrites, lastWriteSectors,
+	    lastReadSectors;
 	uint64_t lastClockIdleTime, lastClockTotalTime;
 	SystemStatisticsState()
 	  : lastTime(0), lastClockThread(0), lastClockProcess(0), processLastSent(0), processLastReceived(0),
-	    machineLastSent(0), machineLastReceived(0), machineLastOutSegs(0), machineLastRetransSegs(0), lastBusyTicks(0),
-	    lastReads(0), lastWrites(0), lastWriteSectors(0), lastReadSectors(0), lastClockIdleTime(0),
-	    lastClockTotalTime(0) {}
+	    machineLastSent(0), machineLastReceived(0), machineLastOutSegs(0), machineLastRetransSegs(0),
+	    lastReadMilliSecs(0), lastWriteMilliSecs(0), lastIOMilliSecs(0), lastReads(0), lastWrites(0),
+	    lastWriteSectors(0), lastReadSectors(0), lastClockIdleTime(0), lastClockTotalTime(0) {}
 #else
 #error Port me!
 #endif
@@ -1678,14 +1707,24 @@ SystemStatistics getSystemStatistics(std::string const& dataFolder,
 	(*statState)->machineLastRetransSegs = machineRetransSegs;
 
 	uint64_t currentIOs;
-	uint64_t nowBusyTicks = (*statState)->lastBusyTicks;
+	uint64_t nowReadMilliSecs = (*statState)->lastReadMilliSecs;
+	uint64_t nowWriteMilliSecs = (*statState)->lastWriteMilliSecs;
+	uint64_t nowIOMilliSecs = (*statState)->lastIOMilliSecs;
 	uint64_t nowReads = (*statState)->lastReads;
 	uint64_t nowWrites = (*statState)->lastWrites;
 	uint64_t nowWriteSectors = (*statState)->lastWriteSectors;
 	uint64_t nowReadSectors = (*statState)->lastReadSectors;
 
 	if (dataFolder != "") {
-		getDiskStatistics(dataFolder, currentIOs, nowBusyTicks, nowReads, nowWrites, nowWriteSectors, nowReadSectors);
+		getDiskStatistics(dataFolder,
+		                  currentIOs,
+		                  nowReadMilliSecs,
+		                  nowWriteMilliSecs,
+		                  nowIOMilliSecs,
+		                  nowReads,
+		                  nowWrites,
+		                  nowWriteSectors,
+		                  nowReadSectors);
 		returnStats.processDiskQueueDepth = currentIOs;
 		returnStats.processDiskReadCount = nowReads;
 		returnStats.processDiskWriteCount = nowWrites;
@@ -1693,13 +1732,24 @@ SystemStatistics getSystemStatistics(std::string const& dataFolder,
 			returnStats.processDiskIdleSeconds = std::max<double>(
 			    0,
 			    returnStats.elapsed -
-			        std::min<double>(returnStats.elapsed, (nowBusyTicks - (*statState)->lastBusyTicks) / 1000.0));
+			        std::min<double>(returnStats.elapsed, (nowIOMilliSecs - (*statState)->lastIOMilliSecs) / 1000.0));
+			returnStats.processDiskReadSeconds = std::max<double>(
+			    0,
+			    returnStats.elapsed - std::min<double>(returnStats.elapsed,
+			                                           (nowReadMilliSecs - (*statState)->lastReadMilliSecs) / 1000.0));
+			returnStats.processDiskWriteSeconds =
+			    std::max<double>(0,
+			                     returnStats.elapsed -
+			                         std::min<double>(returnStats.elapsed,
+			                                          (nowWriteMilliSecs - (*statState)->lastWriteMilliSecs) / 1000.0));
 			returnStats.processDiskRead = (nowReads - (*statState)->lastReads);
 			returnStats.processDiskWrite = (nowWrites - (*statState)->lastWrites);
 			returnStats.processDiskWriteSectors = (nowWriteSectors - (*statState)->lastWriteSectors);
 			returnStats.processDiskReadSectors = (nowReadSectors - (*statState)->lastReadSectors);
 		}
-		(*statState)->lastBusyTicks = nowBusyTicks;
+		(*statState)->lastIOMilliSecs = nowIOMilliSecs;
+		(*statState)->lastReadMilliSecs = nowReadMilliSecs;
+		(*statState)->lastWriteMilliSecs = nowWriteMilliSecs;
 		(*statState)->lastReads = nowReads;
 		(*statState)->lastWrites = nowWrites;
 		(*statState)->lastWriteSectors = nowWriteSectors;
@@ -1874,6 +1924,18 @@ void getLocalTime(const time_t* timep, struct tm* result) {
 #endif
 }
 
+std::string timerIntToGmt(uint64_t timestamp) {
+	auto time = (time_t)(timestamp / 1e9); // convert to second, see timer_int() implementation
+	return getGmtTimeStr(&time);
+}
+
+std::string getGmtTimeStr(const time_t* time) {
+	char buff[50];
+	auto size = strftime(buff, 50, "%c %z", gmtime(time));
+	// printf(buff);
+	return std::string(std::begin(buff), std::begin(buff) + size);
+}
+
 void setMemoryQuota(size_t limit) {
 #if defined(USE_SANITIZER)
 	// ASAN doesn't work with memory quotas: https://github.com/google/sanitizers/wiki/AddressSanitizer#ulimit--v
@@ -1932,7 +1994,7 @@ static int ModifyPrivilege(const char* szPrivilege, bool fEnable) {
 		return ERROR_FUNCTION_FAILED;
 	}
 
-	// cout << luid.HighPart << " " << luid.LowPart << endl;
+	// std::cout << luid.HighPart << " " << luid.LowPart << std::endl;
 
 	// Assign values to the TOKEN_PRIVILEGE structure.
 	NewState.PrivilegeCount = 1;
@@ -2264,7 +2326,7 @@ bool deleteFile(std::string const& filename) {
 #error Port me!
 #endif
 	Error e = systemErrorCodeToError();
-	TraceEvent(SevError, "DeleteFile").detail("Filename", filename).GetLastError().error(e);
+	TraceEvent(SevError, "DeleteFile").error(e).detail("Filename", filename).GetLastError();
 	throw e;
 }
 
@@ -2292,7 +2354,7 @@ bool createDirectory(std::string const& directory) {
 		}
 	}
 	Error e = systemErrorCodeToError();
-	TraceEvent(SevError, "CreateDirectory").detail("Directory", directory).GetLastError().error(e);
+	TraceEvent(SevError, "CreateDirectory").error(e).detail("Directory", directory).GetLastError();
 	throw e;
 #elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 	size_t sep = 0;
@@ -2320,10 +2382,10 @@ bool createDirectory(std::string const& directory) {
 			}
 
 			TraceEvent(SevError, "CreateDirectory")
+			    .error(e)
 			    .detail("Directory", directory)
 			    .detailf("UnixErrorCode", "%x", errno)
-			    .detail("UnixError", strerror(mkdirErrno))
-			    .error(e);
+			    .detail("UnixError", strerror(mkdirErrno));
 			throw e;
 		}
 		createdDirectory();
@@ -2410,7 +2472,7 @@ std::string abspath(std::string const& path, bool resolveLinks, bool mustExist) 
 	if (path.empty()) {
 		Error e = platform_error();
 		Severity sev = e.code() == error_code_io_error ? SevError : SevWarnAlways;
-		TraceEvent(sev, "AbsolutePathError").detail("Path", path).error(e);
+		TraceEvent(sev, "AbsolutePathError").error(e).detail("Path", path);
 		throw e;
 	}
 
@@ -2428,7 +2490,7 @@ std::string abspath(std::string const& path, bool resolveLinks, bool mustExist) 
 		if (mustExist && !fileExists(clean)) {
 			Error e = systemErrorCodeToError();
 			Severity sev = e.code() == error_code_io_error ? SevError : SevWarnAlways;
-			TraceEvent(sev, "AbsolutePathError").detail("Path", path).GetLastError().error(e);
+			TraceEvent(sev, "AbsolutePathError").error(e).detail("Path", path).GetLastError();
 			throw e;
 		}
 		return clean;
@@ -2439,7 +2501,7 @@ std::string abspath(std::string const& path, bool resolveLinks, bool mustExist) 
 	if (!GetFullPathName(path.c_str(), MAX_PATH, nameBuffer, nullptr) || (mustExist && !fileExists(nameBuffer))) {
 		Error e = systemErrorCodeToError();
 		Severity sev = e.code() == error_code_io_error ? SevError : SevWarnAlways;
-		TraceEvent(sev, "AbsolutePathError").detail("Path", path).GetLastError().error(e);
+		TraceEvent(sev, "AbsolutePathError").error(e).detail("Path", path).GetLastError();
 		throw e;
 	}
 	// Not totally obvious from the help whether GetFullPathName canonicalizes slashes, so let's do it...
@@ -2466,7 +2528,7 @@ std::string abspath(std::string const& path, bool resolveLinks, bool mustExist) 
 		}
 		Error e = systemErrorCodeToError();
 		Severity sev = e.code() == error_code_io_error ? SevError : SevWarnAlways;
-		TraceEvent(sev, "AbsolutePathError").detail("Path", path).GetLastError().error(e);
+		TraceEvent(sev, "AbsolutePathError").error(e).detail("Path", path).GetLastError();
 		throw e;
 	}
 	return std::string(r);
@@ -2520,12 +2582,12 @@ bool acceptDirectory(FILE_ATTRIBUTE_DATA fileAttributes, std::string const& name
 	return (fileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
 }
 
-ACTOR Future<vector<std::string>> findFiles(std::string directory,
-                                            std::string extension,
-                                            bool directoryOnly,
-                                            bool async) {
+ACTOR Future<std::vector<std::string>> findFiles(std::string directory,
+                                                 std::string extension,
+                                                 bool directoryOnly,
+                                                 bool async) {
 	INJECT_FAULT(platform_error, "findFiles"); // findFiles failed (Win32)
-	state vector<std::string> result;
+	state std::vector<std::string> result;
 	state int64_t tsc_begin = timestampCounter();
 
 	state WIN32_FIND_DATA fd;
@@ -2577,12 +2639,12 @@ bool acceptDirectory(FILE_ATTRIBUTE_DATA fileAttributes, std::string const& name
 	return S_ISDIR(fileAttributes);
 }
 
-ACTOR Future<vector<std::string>> findFiles(std::string directory,
-                                            std::string extension,
-                                            bool directoryOnly,
-                                            bool async) {
+ACTOR Future<std::vector<std::string>> findFiles(std::string directory,
+                                                 std::string extension,
+                                                 bool directoryOnly,
+                                                 bool async) {
 	INJECT_FAULT(platform_error, "findFiles"); // findFiles failed
-	state vector<std::string> result;
+	state std::vector<std::string> result;
 	state int64_t tsc_begin = timestampCounter();
 
 	state DIR* dip = nullptr;
@@ -2635,7 +2697,7 @@ std::vector<std::string> listFiles(std::string const& directory, std::string con
 	return findFiles(directory, extension, false /* directoryOnly */, false).get();
 }
 
-Future<vector<std::string>> listFilesAsync(std::string const& directory, std::string const& extension) {
+Future<std::vector<std::string>> listFilesAsync(std::string const& directory, std::string const& extension) {
 	return findFiles(directory, extension, false /* directoryOnly */, true);
 }
 
@@ -2643,7 +2705,7 @@ std::vector<std::string> listDirectories(std::string const& directory) {
 	return findFiles(directory, "", true /* directoryOnly */, false).get();
 }
 
-Future<vector<std::string>> listDirectoriesAsync(std::string const& directory) {
+Future<std::vector<std::string>> listDirectoriesAsync(std::string const& directory) {
 	return findFiles(directory, "", true /* directoryOnly */, true);
 }
 
@@ -2661,14 +2723,14 @@ void findFilesRecursively(std::string const& path, std::vector<std::string>& out
 	}
 }
 
-ACTOR Future<Void> findFilesRecursivelyAsync(std::string path, vector<std::string>* out) {
+ACTOR Future<Void> findFilesRecursivelyAsync(std::string path, std::vector<std::string>* out) {
 	// Add files to output, prefixing path
-	state vector<std::string> files = wait(listFilesAsync(path, ""));
+	state std::vector<std::string> files = wait(listFilesAsync(path, ""));
 	for (auto const& f : files)
 		out->push_back(joinPath(path, f));
 
 	// Recurse for directories
-	state vector<std::string> directories = wait(listDirectoriesAsync(path));
+	state std::vector<std::string> directories = wait(listDirectoriesAsync(path));
 	for (auto const& dir : directories) {
 		if (dir != "." && dir != "..")
 			wait(findFilesRecursivelyAsync(joinPath(path, dir), out));
@@ -2755,7 +2817,18 @@ THREAD_HANDLE startThread(void* (*func)(void*), void* arg, int stackSize, const 
 #if defined(__linux__)
 	if (name != nullptr) {
 		// TODO: Should this just truncate?
-		ASSERT_EQ(pthread_setname_np(t, name), 0);
+		int retVal = pthread_setname_np(t, name);
+		if (!retVal)
+			return t;
+		// In simulation and unit testing a thread may return before the name can be set, this will
+		// return ENOENT or ESRCH. We'll log when ENOENT or ESRCH is encountered and continue, otherwise we'll log and
+		// throw a platform_error.
+		if (errno == ENOENT || errno == ESRCH) {
+			TraceEvent(SevWarn, "PthreadSetNameNp").detail("Name", name).detail("ReturnCode", retVal).GetLastError();
+		} else {
+			TraceEvent(SevError, "PthreadSetNameNp").detail("Name", name).detail("ReturnCode", retVal).GetLastError();
+			throw platform_error();
+		}
 	}
 #endif
 
@@ -2775,10 +2848,10 @@ void waitThread(THREAD_HANDLE thread) {
 #endif
 }
 
-void deprioritizeThread() {
+void setThreadPriority(int pri) {
 #ifdef __linux__
 	int tid = syscall(SYS_gettid);
-	setpriority(PRIO_PROCESS, tid, 10);
+	setpriority(PRIO_PROCESS, tid, pri);
 #elif defined(_WIN32)
 #endif
 }
@@ -3105,7 +3178,7 @@ int eraseDirectoryRecursive(std::string const& dir) {
 	   place */
 	if (error && errno != ENOENT) {
 		Error e = systemErrorCodeToError();
-		TraceEvent(SevError, "EraseDirectoryRecursiveError").detail("Directory", dir).GetLastError().error(e);
+		TraceEvent(SevError, "EraseDirectoryRecursiveError").error(e).detail("Directory", dir).GetLastError();
 		throw e;
 	}
 #else
@@ -3122,6 +3195,8 @@ bool isHwCrcSupported() {
 	return (info[2] & (1 << 20)) != 0;
 #elif defined(__aarch64__)
 	return true; /* force to use crc instructions */
+#elif defined(__powerpc64__)
+	return false; /* force not to use crc instructions */
 #elif defined(__unixish__)
 	uint32_t eax, ebx, ecx, edx, level = 1, count = 0;
 	__cpuid_count(level, count, eax, ebx, ecx, edx);
@@ -3178,16 +3253,9 @@ extern "C" void flushAndExit(int exitCode) {
 #include <link.h>
 #endif
 
-struct ImageInfo {
-	void* offset;
-	std::string symbolFileName;
-
-	ImageInfo() : offset(nullptr), symbolFileName("") {}
-};
-
-ImageInfo getImageInfo(const void* symbol) {
+platform::ImageInfo getImageInfo(const void* symbol) {
 	Dl_info info;
-	ImageInfo imageInfo;
+	platform::ImageInfo imageInfo;
 
 #ifdef __linux__
 	link_map* linkMap = nullptr;
@@ -3197,6 +3265,7 @@ ImageInfo getImageInfo(const void* symbol) {
 #endif
 
 	if (res != 0) {
+		imageInfo.fileName = info.dli_fname;
 		std::string imageFile = basename(info.dli_fname);
 		// If we have a client library that doesn't end in the appropriate extension, we will get the wrong debug
 		// suffix. This should only be a cosmetic problem, though.
@@ -3214,25 +3283,23 @@ ImageInfo getImageInfo(const void* symbol) {
 		else {
 			imageInfo.symbolFileName = imageFile + ".debug";
 		}
-	} else {
-		imageInfo.symbolFileName = "unknown";
 	}
 
 	return imageInfo;
 }
 
-ImageInfo getCachedImageInfo() {
+platform::ImageInfo getCachedImageInfo() {
 	// The use of "getCachedImageInfo" is arbitrary and was a best guess at a good way to get the image of the
 	//  most likely candidate for the "real" flow library or binary
-	static ImageInfo info = getImageInfo((const void*)&getCachedImageInfo);
+	static platform::ImageInfo info = getImageInfo((const void*)&getCachedImageInfo);
 	return info;
 }
 
 #include <execinfo.h>
 
 namespace platform {
-void* getImageOffset() {
-	return getCachedImageInfo().offset;
+ImageInfo getImageInfo() {
+	return getCachedImageInfo();
 }
 
 size_t raw_backtrace(void** addresses, int maxStackDepth) {
@@ -3275,8 +3342,8 @@ std::string get_backtrace() {
 std::string format_backtrace(void** addresses, int numAddresses) {
 	return std::string();
 }
-void* getImageOffset() {
-	return nullptr;
+ImageInfo getImageInfo() {
+	return ImageInfo();
 }
 } // namespace platform
 #endif
@@ -3428,6 +3495,7 @@ void crashHandler(int sig) {
 	bool error = (sig != SIGUSR2);
 
 #if (!defined(TLS_DISABLED) && !defined(_WIN32))
+	StreamCipherKey::cleanup();
 	StreamCipher::cleanup();
 #endif
 
@@ -3584,8 +3652,10 @@ void* checkThread(void* arg) {
 	int64_t lastRunLoopIterations = net2RunLoopIterations.load();
 	int64_t lastRunLoopSleeps = net2RunLoopSleeps.load();
 
+	double slowTaskStart = 0;
 	double lastSlowTaskSignal = 0;
 	double lastSaturatedSignal = 0;
+	double lastSlowTaskBlockedLog = 0;
 
 	const double minSlowTaskLogInterval =
 	    std::max(FLOW_KNOBS->SLOWTASK_PROFILING_LOG_INTERVAL, FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL);
@@ -3606,7 +3676,19 @@ void* checkThread(void* arg) {
 
 		if (slowTask) {
 			double t = timer();
-			if (lastSlowTaskSignal == 0 || t - lastSlowTaskSignal >= slowTaskLogInterval) {
+			bool newSlowTask = lastSlowTaskSignal == 0;
+
+			if (newSlowTask) {
+				slowTaskStart = t;
+			} else if (t - std::max(slowTaskStart, lastSlowTaskBlockedLog) > FLOW_KNOBS->SLOWTASK_BLOCKED_INTERVAL) {
+				lastSlowTaskBlockedLog = t;
+				// When this gets logged, it will be with a current timestamp (using timer()). If the network thread
+				// unblocks, it will log any slow task related events at an earlier timestamp. That means the order of
+				// events during this sequence will not match their timestamp order.
+				TraceEvent(SevWarnAlways, "RunLoopBlocked").detail("Duration", t - slowTaskStart);
+			}
+
+			if (newSlowTask || t - lastSlowTaskSignal >= slowTaskLogInterval) {
 				if (lastSlowTaskSignal > 0) {
 					slowTaskLogInterval = std::min(FLOW_KNOBS->SLOWTASK_PROFILING_MAX_LOG_INTERVAL,
 					                               FLOW_KNOBS->SLOWTASK_PROFILING_LOG_BACKOFF * slowTaskLogInterval);
@@ -3617,6 +3699,7 @@ void* checkThread(void* arg) {
 				pthread_kill(mainThread, SIGPROF);
 			}
 		} else {
+			slowTaskStart = 0;
 			lastSlowTaskSignal = 0;
 			lastRunLoopIterations = currentRunLoopIterations;
 			slowTaskLogInterval = minSlowTaskLogInterval;
@@ -3682,7 +3765,7 @@ void setupRunLoopProfiler() {
 		// Start a thread which will use signals to log stacks on long events
 		pthread_t* mainThread = (pthread_t*)malloc(sizeof(pthread_t));
 		*mainThread = pthread_self();
-		startThread(&checkThread, (void*)mainThread);
+		startThread(&checkThread, (void*)mainThread, 0, "fdb-loopprofile");
 	}
 #else
 	// No slow task profiling for other platforms!
@@ -3744,7 +3827,7 @@ TEST_CASE("/flow/Platform/getMemoryInfo") {
 	ASSERT(request[LiteralStringRef("SwapTotal:")] == 25165820);
 	ASSERT(request[LiteralStringRef("SwapFree:")] == 23680228);
 	for (auto& item : request) {
-		printf("%s:%ld\n", item.first.toString().c_str(), item.second);
+		fmt::print("{}:{}\n", item.first.toString().c_str(), item.second);
 	}
 
 	printf("UnitTest flow/Platform/getMemoryInfo 2\n");
@@ -3795,7 +3878,7 @@ TEST_CASE("/flow/Platform/getMemoryInfo") {
 	ASSERT(request[LiteralStringRef("SwapTotal:")] == 0);
 	ASSERT(request[LiteralStringRef("SwapFree:")] == 0);
 	for (auto& item : request) {
-		printf("%s:%ld\n", item.first.toString().c_str(), item.second);
+		fmt::print("{}:{}\n", item.first.toString().c_str(), item.second);
 	}
 
 	return Void();

@@ -35,7 +35,7 @@ struct AtomicOpsWorkload : TestWorkload {
 	bool apiVersion500 = false;
 
 	double testDuration, transactionsPerSecond;
-	vector<Future<Void>> clients;
+	std::vector<Future<Void>> clients;
 	uint64_t lbsum, ubsum; // The lower bound and upper bound sum of operations when opType = AddValue
 
 	AtomicOpsWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), opNum(0) {
@@ -133,7 +133,7 @@ struct AtomicOpsWorkload : TestWorkload {
 		return _check(cx, this);
 	}
 
-	void getMetrics(vector<PerfMetric>& m) override {}
+	void getMetrics(std::vector<PerfMetric>& m) override {}
 
 	std::pair<Key, Key> logDebugKey(int group) {
 		Key logKey(format("log%08x%08x%08x", group, clientId, opNum));

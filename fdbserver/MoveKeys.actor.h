@@ -62,14 +62,14 @@ ACTOR Future<MoveKeysLock> takeMoveKeysLock(Database cx, UID ddId);
 // This does not modify the moveKeysLock
 Future<Void> checkMoveKeysLockReadOnly(Transaction* tr, MoveKeysLock lock, const DDEnabledState* ddEnabledState);
 
-void seedShardServers(Arena& trArena, CommitTransactionRef& tr, vector<StorageServerInterface> servers);
+void seedShardServers(Arena& trArena, CommitTransactionRef& tr, std::vector<StorageServerInterface> servers);
 // Called by the master server to write the very first transaction to the database
 // establishing a set of shard servers and all invariants of the systemKeys.
 
 ACTOR Future<Void> moveKeys(Database occ,
                             KeyRange keys,
-                            vector<UID> destinationTeam,
-                            vector<UID> healthyDestinations,
+                            std::vector<UID> destinationTeam,
+                            std::vector<UID> healthyDestinations,
                             MoveKeysLock lock,
                             Promise<Void> dataMovementComplete,
                             FlowLock* startMoveKeysParallelismLock,
@@ -101,6 +101,7 @@ ACTOR Future<bool> canRemoveStorageServer(Reference<ReadYourWritesTransaction> t
 // Obviously that could change later!
 ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
                                               UID serverID,
+                                              std::vector<UID> teamForDroppedRange,
                                               MoveKeysLock lock,
                                               const DDEnabledState* ddEnabledState);
 // Directly removes serverID from serverKeys and keyServers system keyspace.

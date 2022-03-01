@@ -588,3 +588,43 @@
 .. |locality-get-addresses-for-key-blurb| replace::
 
     Returns a list of public network addresses as strings, one for each of the storage servers responsible for storing ``key`` and its associated value.
+
+.. |option-knob| replace::
+   
+   Sets internal tuning or debugging knobs. The argument to this function should be a string representing the knob name and the value, e.g. "transaction_size_limit=1000".
+
+.. |option-tls-verify-peers| replace::
+
+   Sets the peer certificate field verification criteria. 
+
+.. |option-tls-ca-bytes| replace::
+    
+   Sets the certificate authority bundle.
+
+.. |option-tls-ca-path| replace::
+
+   Sets the file from which to load the certificate authority bundle.
+
+.. |option-tls-password| replace::
+
+    Sets the passphrase for encrypted private key. Password should be set before setting the key for the password to be used.
+
+.. |option-set-disable-local-client| replace::
+
+    Prevents connections through the local client, allowing only connections through externally loaded client libraries.
+
+.. |option-set-client-threads-per-version| replace::
+   
+    Spawns multiple worker threads for each version of the client that is loaded.  Setting this to a number greater than one implies disable_local_client.
+
+.. |option-disable-client-statistics-logging| replace::
+
+    Disables logging of client statistics, such as sampled transaction activity.
+       
+.. |option-enable-run-loop-profiling| replace::
+
+    Enables debugging feature to perform run loop profiling. Requires trace logging to be enabled. WARNING: this feature is not recommended for use in production.
+
+.. |option-set-distributed-client-tracer| replace::
+
+    Sets a tracer to run on the client. Should be set to the same value as the tracer set on the server.

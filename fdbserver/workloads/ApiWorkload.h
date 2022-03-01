@@ -23,6 +23,7 @@
 #pragma once
 
 #include "fdbserver/workloads/workloads.actor.h"
+#include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "fdbserver/workloads/MemoryKeyValueStore.h"
@@ -237,9 +238,9 @@ struct ApiWorkload : TestWorkload {
 		minValueLength = getOption(options, LiteralStringRef("minValueLength"), 1);
 		maxValueLength = getOption(options, LiteralStringRef("maxValueLength"), 10000);
 
-		useExtraDB = g_simulator.extraDB != nullptr;
+		useExtraDB = g_network->isSimulated() && g_simulator.extraDB != nullptr;
 		if (useExtraDB) {
-			auto extraFile = makeReference<ClusterConnectionFile>(*g_simulator.extraDB);
+			auto extraFile = makeReference<ClusterConnectionMemoryRecord>(*g_simulator.extraDB);
 			extraDB = Database::createDatabase(extraFile, -1);
 		}
 	}

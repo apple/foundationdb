@@ -88,7 +88,7 @@ struct LowLatencyWorkload : TestWorkload {
 						}
 						break;
 					} catch (Error& e) {
-						TraceEvent("LowLatencyTransactionFailed").error(e, true);
+						TraceEvent("LowLatencyTransactionFailed").errorUnsuppressed(e);
 						wait(tr.onError(e));
 						++self->retries;
 					}
@@ -105,14 +105,14 @@ struct LowLatencyWorkload : TestWorkload {
 			}
 			return Void();
 		} catch (Error& e) {
-			TraceEvent(SevError, "LowLatencyError").error(e, true);
+			TraceEvent(SevError, "LowLatencyError").errorUnsuppressed(e);
 			throw;
 		}
 	}
 
 	Future<bool> check(Database const& cx) override { return ok; }
 
-	void getMetrics(vector<PerfMetric>& m) override {
+	void getMetrics(std::vector<PerfMetric>& m) override {
 		double duration = testDuration;
 		m.emplace_back("Operations/sec", operations.getValue() / duration, Averaged::False);
 		m.push_back(operations.getMetric());

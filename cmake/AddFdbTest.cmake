@@ -39,9 +39,6 @@ function(configure_testing)
 endfunction()
 
 function(verify_testing)
-  if(NOT ENABLE_SIMULATION_TESTS)
-    return()
-  endif()
   foreach(test_file IN LISTS fdb_test_files)
     message(SEND_ERROR "${test_file} found but it is not associated with a test")
   endforeach()
@@ -95,6 +92,10 @@ function(add_fdb_test)
   if((NOT test_name MATCHES "${TEST_INCLUDE}") OR (test_name MATCHES "${TEST_EXCLUDE}"))
     return()
   endif()
+  # We shouldn't run downgrade tests under valgrind: https://github.com/apple/foundationdb/issues/6322
+  if(USE_VALGRIND AND ${test_name} MATCHES .*to_.*)
+    return()
+  endif()
   math(EXPR test_idx "${CURRENT_TEST_INDEX} + ${NUM_TEST_FILES}")
   set(CURRENT_TEST_INDEX "${test_idx}" PARENT_SCOPE)
   # set(<var> <value> PARENT_SCOPE) doesn't set the
@@ -128,7 +129,8 @@ function(add_fdb_test)
       -n ${test_name}
       -b ${PROJECT_BINARY_DIR}
       -t ${test_type}
-      -O ${OLD_FDBSERVER_BINARY}
+      -O ${OLD_FDBSERVER_BINARY}  
+      --config "@CTEST_CONFIGURATION_TYPE@"
       --crash
       --aggregate-traces ${TEST_AGGREGATE_TRACES}
       --log-format ${TEST_LOG_FORMAT}
@@ -249,7 +251,7 @@ function(create_correctness_package)
   endif()
   set(out_dir "${CMAKE_BINARY_DIR}/correctness")
   stage_correctness_package(OUT_DIR ${out_dir} CONTEXT "correctness" OUT_FILES package_files)
-  set(tar_file ${CMAKE_BINARY_DIR}/packages/correctness-${CMAKE_PROJECT_VERSION}.tar.gz)
+  set(tar_file ${CMAKE_BINARY_DIR}/packages/correctness-${FDB_VERSION}.tar.gz)
   add_custom_command(
     OUTPUT ${tar_file}
     DEPENDS ${package_files}
@@ -284,7 +286,7 @@ function(create_valgrind_correctness_package)
   if(USE_VALGRIND)
     set(out_dir "${CMAKE_BINARY_DIR}/valgrind_correctness")
     stage_correctness_package(OUT_DIR ${out_dir} CONTEXT "valgrind correctness" OUT_FILES package_files)
-    set(tar_file ${CMAKE_BINARY_DIR}/packages/valgrind-${CMAKE_PROJECT_VERSION}.tar.gz)
+    set(tar_file ${CMAKE_BINARY_DIR}/packages/valgrind-${FDB_VERSION}.tar.gz)
     add_custom_command(
       OUTPUT ${tar_file}
       DEPENDS ${package_files}
@@ -354,14 +356,14 @@ function(package_bindingtester)
   set(generated_binding_files python/fdb/fdboptions.py)
   if(WITH_JAVA_BINDING)
     if(NOT FDB_RELEASE)
-      set(prerelease_string "-PRERELEASE")
+      set(not_fdb_release_string "-SNAPSHOT")
     else()
-      set(prerelease_string "")
+      set(not_fdb_release_string "")
     endif()
     add_custom_command(
       TARGET copy_binding_output_files
       COMMAND ${CMAKE_COMMAND} -E copy
-        ${CMAKE_BINARY_DIR}/packages/fdb-java-${CMAKE_PROJECT_VERSION}${prerelease_string}.jar
+        ${CMAKE_BINARY_DIR}/packages/fdb-java-${FDB_VERSION}${not_fdb_release_string}.jar
         ${bdir}/tests/java/foundationdb-client.jar
       COMMENT "Copy Java bindings for bindingtester")
     add_dependencies(copy_binding_output_files fat-jar)
@@ -390,7 +392,7 @@ function(package_bindingtester)
   add_custom_target(copy_bindingtester_binaries
     DEPENDS ${outfiles} "${CMAKE_BINARY_DIR}/bindingtester.touch" copy_binding_output_files)
   add_dependencies(copy_bindingtester_binaries strip_only_fdbserver strip_only_fdbcli strip_only_fdb_c)
-  set(tar_file ${CMAKE_BINARY_DIR}/packages/bindingtester-${CMAKE_PROJECT_VERSION}.tar.gz)
+  set(tar_file ${CMAKE_BINARY_DIR}/packages/bindingtester-${FDB_VERSION}.tar.gz)
   add_custom_command(
     OUTPUT ${tar_file}
     COMMAND ${CMAKE_COMMAND} -E tar czf ${tar_file} *
@@ -403,7 +405,7 @@ endfunction()
 # Creates a single cluster before running the specified command (usually a ctest test)
 function(add_fdbclient_test)
   set(options DISABLED ENABLED)
-  set(oneValueArgs NAME PROCESS_NUMBER TEST_TIMEOUT)
+  set(oneValueArgs NAME PROCESS_NUMBER TEST_TIMEOUT WORKING_DIRECTORY)
   set(multiValueArgs COMMAND)
   cmake_parse_arguments(T "${options}" "${oneValueArgs}" "${multiValueArgs}" "${ARGN}")
   if(OPEN_FOR_IDE)
@@ -411,6 +413,9 @@ function(add_fdbclient_test)
   endif()
   if(NOT T_ENABLED AND T_DISABLED)
     return()
+  endif()
+  if(NOT T_WORKING_DIRECTORY)
+    set(T_WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
   endif()
   if(NOT T_NAME)
     message(FATAL_ERROR "NAME is a required argument for add_fdbclient_test")
@@ -421,6 +426,7 @@ function(add_fdbclient_test)
   message(STATUS "Adding Client test ${T_NAME}")
   if (T_PROCESS_NUMBER)
     add_test(NAME "${T_NAME}"
+    WORKING_DIRECTORY ${T_WORKING_DIRECTORY}
     COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/TestRunner/tmp_cluster.py
             --build-dir ${CMAKE_BINARY_DIR}
             --process-number ${T_PROCESS_NUMBER}
@@ -428,11 +434,46 @@ function(add_fdbclient_test)
             ${T_COMMAND})
   else()
     add_test(NAME "${T_NAME}"
+    WORKING_DIRECTORY ${T_WORKING_DIRECTORY}
     COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/TestRunner/tmp_cluster.py
             --build-dir ${CMAKE_BINARY_DIR}
             --
             ${T_COMMAND})
   endif()
+  if (T_TEST_TIMEOUT)
+    set_tests_properties("${T_NAME}" PROPERTIES TIMEOUT ${T_TEST_TIMEOUT})
+  else()
+    # default timeout
+    set_tests_properties("${T_NAME}" PROPERTIES TIMEOUT 300)
+  endif()
+  set_tests_properties("${T_NAME}" PROPERTIES ENVIRONMENT UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1)
+endfunction()
+
+# Creates a cluster file for a nonexistent cluster before running the specified command 
+# (usually a ctest test)
+function(add_unavailable_fdbclient_test)
+  set(options DISABLED ENABLED)
+  set(oneValueArgs NAME TEST_TIMEOUT)
+  set(multiValueArgs COMMAND)
+  cmake_parse_arguments(T "${options}" "${oneValueArgs}" "${multiValueArgs}" "${ARGN}")
+  if(OPEN_FOR_IDE)
+    return()
+  endif()
+  if(NOT T_ENABLED AND T_DISABLED)
+    return()
+  endif()
+  if(NOT T_NAME)
+    message(FATAL_ERROR "NAME is a required argument for add_unavailable_fdbclient_test")
+  endif()
+  if(NOT T_COMMAND)
+    message(FATAL_ERROR "COMMAND is a required argument for add_unavailable_fdbclient_test")
+  endif()
+  message(STATUS "Adding unavailable client test ${T_NAME}")
+  add_test(NAME "${T_NAME}"
+  COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/TestRunner/fake_cluster.py
+          --output-dir ${CMAKE_BINARY_DIR}
+          --
+          ${T_COMMAND})
   if (T_TEST_TIMEOUT)
     set_tests_properties("${T_NAME}" PROPERTIES TIMEOUT ${T_TEST_TIMEOUT})
   else()

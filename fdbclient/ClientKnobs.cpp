@@ -67,14 +67,17 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( RESOURCE_CONSTRAINED_MAX_BACKOFF,       30.0 );
 	init( PROXY_COMMIT_OVERHEAD_BYTES,              23 ); //The size of serializing 7 tags (3 primary, 3 remote, 1 log router) + 2 for the tag length
 	init( SHARD_STAT_SMOOTH_AMOUNT,                5.0 );
-	init( INIT_MID_SHARD_BYTES,                 200000 ); if( randomize && BUGGIFY ) INIT_MID_SHARD_BYTES = 40000; // The same value as SERVER_KNOBS->MIN_SHARD_BYTES
+	init( INIT_MID_SHARD_BYTES,               50000000 ); if( randomize && BUGGIFY ) INIT_MID_SHARD_BYTES = 40000; else if(randomize && !BUGGIFY) INIT_MID_SHARD_BYTES = 200000; // The same value as SERVER_KNOBS->MIN_SHARD_BYTES
 
 	init( TRANSACTION_SIZE_LIMIT,                  1e7 );
 	init( KEY_SIZE_LIMIT,                          1e4 );
 	init( SYSTEM_KEY_SIZE_LIMIT,                   3e4 );
 	init( VALUE_SIZE_LIMIT,                        1e5 );
-	init( SPLIT_KEY_SIZE_LIMIT,                    KEY_SIZE_LIMIT/2 ); if( randomize && BUGGIFY ) SPLIT_KEY_SIZE_LIMIT = KEY_SIZE_LIMIT - 31;//serverKeysPrefixFor(UID()).size() - 1;
+	init( SPLIT_KEY_SIZE_LIMIT,                    KEY_SIZE_LIMIT/2 );  if( randomize && BUGGIFY ) SPLIT_KEY_SIZE_LIMIT = KEY_SIZE_LIMIT - 31;//serverKeysPrefixFor(UID()).size() - 1;
 	init( METADATA_VERSION_CACHE_SIZE,            1000 );
+	init( CHANGE_FEED_LOCATION_LIMIT,            10000 );
+	init( CHANGE_FEED_CACHE_SIZE,               100000 ); if( randomize && BUGGIFY ) CHANGE_FEED_CACHE_SIZE = 1;
+	init( CHANGE_FEED_POP_TIMEOUT,                 5.0 );
 
 	init( MAX_BATCH_SIZE,                         1000 ); if( randomize && BUGGIFY ) MAX_BATCH_SIZE = 1;
 	init( GRV_BATCH_TIMEOUT,                     0.005 ); if( randomize && BUGGIFY ) GRV_BATCH_TIMEOUT = 0.1;
@@ -83,6 +86,8 @@ void ClientKnobs::initialize(Randomize randomize) {
 
 	init( LOCATION_CACHE_EVICTION_SIZE,         600000 );
 	init( LOCATION_CACHE_EVICTION_SIZE_SIM,         10 ); if( randomize && BUGGIFY ) LOCATION_CACHE_EVICTION_SIZE_SIM = 3;
+	init( LOCATION_CACHE_ENDPOINT_FAILURE_GRACE_PERIOD,     60 );
+	init( LOCATION_CACHE_FAILED_ENDPOINT_RETRY_INTERVAL,    60 );
 
 	init( GET_RANGE_SHARD_LIMIT,                     2 );
 	init( WARM_RANGE_SHARD_LIMIT,                  100 );
@@ -97,6 +102,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( RANGESTREAM_FRAGMENT_SIZE,               1e6 );
 	init( RANGESTREAM_BUFFERED_FRAGMENTS_LIMIT,     20 );
 	init( QUARANTINE_TSS_ON_MISMATCH,             true ); if( randomize && BUGGIFY ) QUARANTINE_TSS_ON_MISMATCH = false; // if true, a tss mismatch will put the offending tss in quarantine. If false, it will just be killed
+	init( CHANGE_FEED_EMPTY_BATCH_TIME,          0.005 );
 
 	//KeyRangeMap
 	init( KRM_GET_RANGE_LIMIT,                     1e5 ); if( randomize && BUGGIFY ) KRM_GET_RANGE_LIMIT = 10;
@@ -189,6 +195,8 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( HTTP_SEND_SIZE,                      32*1024 );
 	init( HTTP_VERBOSE_LEVEL,                        0 );
 	init( HTTP_REQUEST_ID_HEADER,                   "" );
+	init( HTTP_REQUEST_AWS_V4_HEADER,             true );
+	init( BLOBSTORE_ENCRYPTION_TYPE,                "" );
 	init( BLOBSTORE_CONNECT_TRIES,                  10 );
 	init( BLOBSTORE_CONNECT_TIMEOUT,                10 );
 	init( BLOBSTORE_MAX_CONNECTION_LIFE,           120 );
@@ -217,6 +225,12 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( BLOBSTORE_READ_REQUESTS_PER_SECOND,       100 );
 	init( BLOBSTORE_DELETE_REQUESTS_PER_SECOND,     200 );
 
+	// Dynamic Knobs
+	init( COMMIT_QUORUM_TIMEOUT,                    3.0 );
+	init( GET_GENERATION_QUORUM_TIMEOUT,            3.0 );
+	init( GET_KNOB_TIMEOUT,                         3.0 );
+	init( TIMEOUT_RETRY_UPPER_BOUND,               20.0 );
+
 	// Client Status Info
 	init(CSI_SAMPLING_PROBABILITY, -1.0);
 	init(CSI_SIZE_LIMIT, std::numeric_limits<int64_t>::max());
@@ -228,8 +242,8 @@ void ClientKnobs::initialize(Randomize randomize) {
 
 	init( CONSISTENCY_CHECK_RATE_LIMIT_MAX,        50e6 ); // Limit in per sec
 	init( CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME,	7 * 24 * 60 * 60 ); // 7 days
-	
-	//fdbcli		
+
+	//fdbcli
 	init( CLI_CONNECT_PARALLELISM,                  400 );
 	init( CLI_CONNECT_TIMEOUT,                     10.0 );
 
@@ -250,6 +264,9 @@ void ClientKnobs::initialize(Randomize randomize) {
 	// busyness reporting
 	init( BUSYNESS_SPIKE_START_THRESHOLD,         0.100 );
 	init( BUSYNESS_SPIKE_SATURATED_THRESHOLD,     0.500 );
+
+	// blob granules
+	init( ENABLE_BLOB_GRANULES,                   false );
 
 	// clang-format on
 }

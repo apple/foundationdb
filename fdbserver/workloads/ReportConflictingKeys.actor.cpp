@@ -72,7 +72,7 @@ struct ReportConflictingKeysWorkload : TestWorkload {
 
 	Future<bool> check(Database const& cx) override { return invalidReports.getValue() == 0; }
 
-	void getMetrics(vector<PerfMetric>& m) override {
+	void getMetrics(std::vector<PerfMetric>& m) override {
 		m.emplace_back("Measured Duration", testDuration, Averaged::True);
 		m.push_back(xacts.getMetric());
 		m.emplace_back("Transactions/sec", xacts.getValue() / testDuration, Averaged::True);

@@ -61,7 +61,7 @@ class WriteToTransactionEnvironment {
 	Version lastWrittenVersion{ 0 };
 
 	static Value longToValue(int64_t v) {
-		auto s = format("%ld", v);
+		auto s = format("%lld", v);
 		return StringRef(reinterpret_cast<uint8_t const*>(s.c_str()), s.size());
 	}
 
@@ -107,6 +107,15 @@ public:
 	Future<Void> clear(Optional<KeyRef> configClass, KeyRef knobName) { return clear(this, configClass, knobName); }
 
 	Future<Void> compact() { return cfi.compact.getReply(ConfigFollowerCompactRequest{ lastWrittenVersion }); }
+
+	Future<Void> rollforward(Optional<Version> rollback,
+	                         Version lastKnownCommitted,
+	                         Version target,
+	                         Standalone<VectorRef<VersionedConfigMutationRef>> mutations,
+	                         Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> annotations) {
+		return cfi.rollforward.getReply(
+		    ConfigFollowerRollforwardRequest{ rollback, lastKnownCommitted, target, mutations, annotations });
+	}
 
 	void restartNode() {
 		cfiServer.cancel();
@@ -260,15 +269,15 @@ class BroadcasterToLocalConfigEnvironment {
 		wait(self->readFrom.setup());
 		self->cbi = makeReference<AsyncVar<ConfigBroadcastInterface>>();
 		self->readFrom.connectToBroadcaster(self->cbi);
-		self->broadcastServer =
-		    self->broadcaster.registerWorker(0, configClassSet, self->workerFailure.getFuture(), self->cbi->get());
+		self->broadcastServer = self->broadcaster.registerNode(
+		    WorkerInterface(), 0, configClassSet, self->workerFailure.getFuture(), self->cbi->get());
 		return Void();
 	}
 
 	void addMutation(Optional<KeyRef> configClass, KeyRef knobName, KnobValueRef value) {
 		Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations;
 		appendVersionedMutation(versionedMutations, ++lastWrittenVersion, configClass, knobName, value);
-		broadcaster.applyChanges(versionedMutations, lastWrittenVersion, {});
+		broadcaster.applyChanges(versionedMutations, lastWrittenVersion, {}, {});
 	}
 
 public:
@@ -294,8 +303,11 @@ public:
 		broadcastServer.cancel();
 		cbi->set(ConfigBroadcastInterface{});
 		readFrom.connectToBroadcaster(cbi);
-		broadcastServer = broadcaster.registerWorker(
-		    readFrom.lastSeenVersion(), readFrom.configClassSet(), workerFailure.getFuture(), cbi->get());
+		broadcastServer = broadcaster.registerNode(WorkerInterface(),
+		                                           readFrom.lastSeenVersion(),
+		                                           readFrom.configClassSet(),
+		                                           workerFailure.getFuture(),
+		                                           cbi->get());
 	}
 
 	Future<Void> restartLocalConfig(std::string const& newConfigPath) {
@@ -404,6 +416,13 @@ public:
 	}
 
 	Future<Void> compact() { return writeTo.compact(); }
+	Future<Void> rollforward(Optional<Version> rollback,
+	                         Version lastKnownCommitted,
+	                         Version target,
+	                         Standalone<VectorRef<VersionedConfigMutationRef>> mutations,
+	                         Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> annotations) {
+		return writeTo.rollforward(rollback, lastKnownCommitted, target, mutations, annotations);
+	}
 	Future<Void> getError() const { return writeTo.getError(); }
 };
 
@@ -420,8 +439,8 @@ class TransactionToLocalConfigEnvironment {
 		wait(self->readFrom.setup());
 		self->cbi = makeReference<AsyncVar<ConfigBroadcastInterface>>();
 		self->readFrom.connectToBroadcaster(self->cbi);
-		self->broadcastServer =
-		    self->broadcaster.registerWorker(0, configClassSet, self->workerFailure.getFuture(), self->cbi->get());
+		self->broadcastServer = self->broadcaster.registerNode(
+		    WorkerInterface(), 0, configClassSet, self->workerFailure.getFuture(), self->cbi->get());
 		return Void();
 	}
 
@@ -438,8 +457,11 @@ public:
 		broadcastServer.cancel();
 		cbi->set(ConfigBroadcastInterface{});
 		readFrom.connectToBroadcaster(cbi);
-		broadcastServer = broadcaster.registerWorker(
-		    readFrom.lastSeenVersion(), readFrom.configClassSet(), workerFailure.getFuture(), cbi->get());
+		broadcastServer = broadcaster.registerNode(WorkerInterface(),
+		                                           readFrom.lastSeenVersion(),
+		                                           readFrom.configClassSet(),
+		                                           workerFailure.getFuture(),
+		                                           cbi->get());
 	}
 
 	Future<Void> restartLocalConfig(std::string const& newConfigPath) {
@@ -510,6 +532,10 @@ Future<Void> compact(Env& env) {
 Future<Void> compact(BroadcasterToLocalConfigEnvironment& env) {
 	env.compact();
 	return Void();
+}
+template <class Env, class... Args>
+Future<Void> rollforward(Env& env, Args&&... args) {
+	return waitOrError(env.rollforward(std::forward<Args>(args)...), env.getError());
 }
 
 ACTOR template <class Env>
@@ -901,6 +927,69 @@ TEST_CASE("/fdbserver/ConfigDB/Transaction/CompactNode") {
 	wait(check(env, "class-A"_sr, "test_long"_sr, Optional<int64_t>{ 1 }));
 	wait(set(env, "class-A"_sr, "test_long"_sr, int64_t{ 2 }));
 	wait(check(env, "class-A"_sr, "test_long"_sr, Optional<int64_t>{ 2 }));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/Transaction/Rollforward") {
+	state TransactionEnvironment env(params.getDataDir());
+	Standalone<VectorRef<VersionedConfigMutationRef>> mutations;
+	appendVersionedMutation(
+	    mutations, 1, "class-A"_sr, "test_long_v1"_sr, KnobValueRef::create(int64_t{ 1 }).contents());
+	appendVersionedMutation(
+	    mutations, 2, "class-B"_sr, "test_long_v2"_sr, KnobValueRef::create(int64_t{ 2 }).contents());
+	Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> annotations;
+	annotations.emplace_back_deep(annotations.arena(), 1, ConfigCommitAnnotationRef{ "unit_test"_sr, now() });
+	annotations.emplace_back_deep(annotations.arena(), 2, ConfigCommitAnnotationRef{ "unit_test"_sr, now() });
+	wait(rollforward(env, Optional<Version>{}, 0, 2, mutations, annotations));
+	wait(check(env, "class-A"_sr, "test_long_v1"_sr, Optional<int64_t>{ 1 }));
+	wait(check(env, "class-B"_sr, "test_long_v2"_sr, Optional<int64_t>{ 2 }));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/Transaction/RollforwardWithExistingMutation") {
+	state TransactionEnvironment env(params.getDataDir());
+	wait(set(env, "class-A"_sr, "test_long"_sr, int64_t{ 1 }));
+	Standalone<VectorRef<VersionedConfigMutationRef>> mutations;
+	appendVersionedMutation(
+	    mutations, 2, "class-A"_sr, "test_long_v2"_sr, KnobValueRef::create(int64_t{ 2 }).contents());
+	appendVersionedMutation(
+	    mutations, 3, "class-A"_sr, "test_long_v3"_sr, KnobValueRef::create(int64_t{ 3 }).contents());
+	Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> annotations;
+	annotations.emplace_back_deep(annotations.arena(), 2, ConfigCommitAnnotationRef{ "unit_test"_sr, now() });
+	annotations.emplace_back_deep(annotations.arena(), 3, ConfigCommitAnnotationRef{ "unit_test"_sr, now() });
+	wait(rollforward(env, Optional<Version>{}, 1, 3, mutations, annotations));
+	wait(check(env, "class-A"_sr, "test_long"_sr, Optional<int64_t>{ 1 }));
+	wait(check(env, "class-A"_sr, "test_long_v2"_sr, Optional<int64_t>{ 2 }));
+	wait(check(env, "class-A"_sr, "test_long_v3"_sr, Optional<int64_t>{ 3 }));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/Transaction/RollforwardWithInvalidMutation") {
+	state TransactionEnvironment env(params.getDataDir());
+	Standalone<VectorRef<VersionedConfigMutationRef>> mutations;
+	appendVersionedMutation(
+	    mutations, 1, "class-A"_sr, "test_long_v1"_sr, KnobValueRef::create(int64_t{ 1 }).contents());
+	appendVersionedMutation(
+	    mutations, 10, "class-A"_sr, "test_long_v10"_sr, KnobValueRef::create(int64_t{ 2 }).contents());
+	Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> annotations;
+	annotations.emplace_back_deep(annotations.arena(), 1, ConfigCommitAnnotationRef{ "unit_test"_sr, now() });
+	wait(rollforward(env, Optional<Version>{}, 0, 5, mutations, annotations));
+	wait(check(env, "class-A"_sr, "test_long_v1"_sr, Optional<int64_t>{ 1 }));
+	wait(check(env, "class-A"_sr, "test_long_v10"_sr, Optional<int64_t>{}));
+	return Void();
+}
+
+TEST_CASE("/fdbserver/ConfigDB/Transaction/RollbackThenRollforward") {
+	state TransactionEnvironment env(params.getDataDir());
+	wait(set(env, "class-A"_sr, "test_long"_sr, int64_t{ 1 }));
+	Standalone<VectorRef<VersionedConfigMutationRef>> mutations;
+	appendVersionedMutation(
+	    mutations, 1, "class-B"_sr, "test_long_v1"_sr, KnobValueRef::create(int64_t{ 2 }).contents());
+	Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> annotations;
+	annotations.emplace_back_deep(annotations.arena(), 1, ConfigCommitAnnotationRef{ "unit_test"_sr, now() });
+	wait(rollforward(env, 0, 1, 1, mutations, annotations));
+	wait(check(env, "class-A"_sr, "test_long"_sr, Optional<int64_t>{}));
+	wait(check(env, "class-B"_sr, "test_long_v1"_sr, Optional<int64_t>{ 2 }));
 	return Void();
 }
 

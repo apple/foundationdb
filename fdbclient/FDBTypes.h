@@ -188,18 +188,14 @@ inline std::string describe(const int item) {
 }
 
 // Allows describeList to work on a vector of std::string
-static std::string describe(const std::string& s) {
-	return s;
-}
+std::string describe(const std::string& s);
 
 template <class T>
 std::string describe(Reference<T> const& item) {
 	return item->toString();
 }
 
-static std::string describe(UID const& item) {
-	return item.shortString();
-}
+std::string describe(UID const& item);
 
 template <class T>
 std::string describe(T const& item) {
@@ -669,6 +665,10 @@ struct RangeResultRef : VectorRef<KeyValueRef> {
 		serializer(ar, ((VectorRef<KeyValueRef>&)*this), more, readThrough, readToBegin, readThroughEnd);
 	}
 
+	int logicalSize() const {
+		return VectorRef<KeyValueRef>::expectedSize() - VectorRef<KeyValueRef>::size() * sizeof(KeyValueRef);
+	}
+
 	std::string toString() const {
 		return "more:" + std::to_string(more) +
 		       " readThrough:" + (readThrough.present() ? readThrough.get().toString() : "[unset]") +
@@ -710,7 +710,7 @@ struct KeyValueStoreType {
 		case SSD_BTREE_V2:
 			return "ssd-2";
 		case SSD_REDWOOD_V1:
-			return "ssd-redwood-experimental";
+			return "ssd-redwood-1-experimental";
 		case SSD_ROCKSDB_V1:
 			return "ssd-rocksdb-experimental";
 		case MEMORY:
@@ -740,16 +740,18 @@ struct TLogVersion {
 		// V4 changed how data gets written to satellite TLogs so that we can peek from them;
 		// V5 merged reference and value spilling
 		// V6 added span context to list of serialized mutations sent from proxy to tlogs
+		// V7 use xxhash3 for TLog checksum
 		// V1 = 1,  // 4.6 is dispatched to via 6.0
 		V2 = 2, // 6.0
 		V3 = 3, // 6.1
 		V4 = 4, // 6.2
 		V5 = 5, // 6.3
 		V6 = 6, // 7.0
+		V7 = 7, // 7.2
 		MIN_SUPPORTED = V2,
-		MAX_SUPPORTED = V6,
-		MIN_RECRUITABLE = V5,
-		DEFAULT = V5,
+		MAX_SUPPORTED = V7,
+		MIN_RECRUITABLE = V6,
+		DEFAULT = V6,
 	} version;
 
 	TLogVersion() : version(UNSET) {}
@@ -775,6 +777,8 @@ struct TLogVersion {
 			return V5;
 		if (s == LiteralStringRef("6"))
 			return V6;
+		if (s == LiteralStringRef("7"))
+			return V7;
 		return default_error_or();
 	}
 };
@@ -863,6 +867,14 @@ struct StorageBytes {
 		              available / 1e6,
 		              used / 1e6,
 		              temp / 1e6);
+	}
+
+	void toTraceEvent(TraceEvent& e) const {
+		e.detail("StorageBytesUsed", used)
+		    .detail("StorageBytesTemp", temp)
+		    .detail("StorageBytesTotal", total)
+		    .detail("StorageBytesFree", free)
+		    .detail("StorageBytesAvailable", available);
 	}
 };
 struct LogMessageVersion {
@@ -1163,4 +1175,61 @@ struct StorageMigrationType {
 	uint32_t type;
 };
 
+inline bool isValidPerpetualStorageWiggleLocality(std::string locality) {
+	int pos = locality.find(':');
+	// locality should be either 0 or in the format '<non_empty_string>:<non_empty_string>'
+	return ((pos > 0 && pos < locality.size() - 1) || locality == "0");
+}
+
+// matches what's in fdb_c.h
+struct ReadBlobGranuleContext {
+	// User context to pass along to functions
+	void* userContext;
+
+	// Returns a unique id for the load. Asynchronous to support queueing multiple in parallel.
+	int64_t (*start_load_f)(const char* filename, int filenameLength, int64_t offset, int64_t length, void* context);
+
+	// Returns data for the load. Pass the loadId returned by start_load_f
+	uint8_t* (*get_load_f)(int64_t loadId, void* context);
+
+	// Frees data from load. Pass the loadId returned by start_load_f
+	void (*free_load_f)(int64_t loadId, void* context);
+
+	// Set this to true for testing if you don't want to read the granule files,
+	// just do the request to the blob workers
+	bool debugNoMaterialize;
+};
+
+// Store metadata associated with each storage server. Now it only contains data be used in perpetual storage wiggle.
+struct StorageMetadataType {
+	constexpr static FileIdentifier file_identifier = 732123;
+	// when the SS is initialized
+	uint64_t createdTime; // comes from currentTime()
+	StorageMetadataType() : createdTime(0) {}
+	StorageMetadataType(uint64_t t) : createdTime(t) {}
+
+	static uint64_t currentTime() { return g_network->timer() * 1e9; }
+
+	// To change this serialization, ProtocolVersion::StorageMetadata must be updated, and downgrades need
+	// to be considered
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, createdTime);
+	}
+};
+
+// store metadata of wiggle action
+struct StorageWiggleValue {
+	constexpr static FileIdentifier file_identifier = 732124;
+	UID id; // storage id
+
+	StorageWiggleValue(UID id = UID(0, 0)) : id(id) {}
+
+	// To change this serialization, ProtocolVersion::PerpetualWiggleMetadata must be updated, and downgrades need
+	// to be considered
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, id);
+	}
+};
 #endif

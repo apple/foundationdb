@@ -74,6 +74,9 @@ public:
 	int64_t VALUE_SIZE_LIMIT;
 	int64_t SPLIT_KEY_SIZE_LIMIT;
 	int METADATA_VERSION_CACHE_SIZE;
+	int64_t CHANGE_FEED_LOCATION_LIMIT;
+	int64_t CHANGE_FEED_CACHE_SIZE;
+	double CHANGE_FEED_POP_TIMEOUT;
 
 	int MAX_BATCH_SIZE;
 	double GRV_BATCH_TIMEOUT;
@@ -83,6 +86,8 @@ public:
 	// When locationCache in DatabaseContext gets to be this size, items will be evicted
 	int LOCATION_CACHE_EVICTION_SIZE;
 	int LOCATION_CACHE_EVICTION_SIZE_SIM;
+	double LOCATION_CACHE_ENDPOINT_FAILURE_GRACE_PERIOD;
+	double LOCATION_CACHE_FAILED_ENDPOINT_RETRY_INTERVAL;
 
 	int GET_RANGE_SHARD_LIMIT;
 	int WARM_RANGE_SHARD_LIMIT;
@@ -97,6 +102,7 @@ public:
 	int64_t RANGESTREAM_FRAGMENT_SIZE;
 	int RANGESTREAM_BUFFERED_FRAGMENTS_LIMIT;
 	bool QUARANTINE_TSS_ON_MISMATCH;
+	double CHANGE_FEED_EMPTY_BATCH_TIME;
 
 	// KeyRangeMap
 	int KRM_GET_RANGE_LIMIT;
@@ -185,6 +191,12 @@ public:
 	int32_t DEFAULT_AUTO_RESOLVERS;
 	int32_t DEFAULT_AUTO_LOGS;
 
+	// Dynamic Knobs
+	double COMMIT_QUORUM_TIMEOUT;
+	double GET_GENERATION_QUORUM_TIMEOUT;
+	double GET_KNOB_TIMEOUT;
+	double TIMEOUT_RETRY_UPPER_BOUND;
+
 	// Client Status Info
 	double CSI_SAMPLING_PROBABILITY;
 	int64_t CSI_SIZE_LIMIT;
@@ -194,6 +206,8 @@ public:
 	int HTTP_READ_SIZE;
 	int HTTP_VERBOSE_LEVEL;
 	std::string HTTP_REQUEST_ID_HEADER;
+	bool HTTP_REQUEST_AWS_V4_HEADER; // setting this knob to true will enable AWS V4 style header.
+	std::string BLOBSTORE_ENCRYPTION_TYPE;
 	int BLOBSTORE_CONNECT_TRIES;
 	int BLOBSTORE_CONNECT_TIMEOUT;
 	int BLOBSTORE_MAX_CONNECTION_LIFE;
@@ -241,6 +255,9 @@ public:
 	// busyness reporting
 	double BUSYNESS_SPIKE_START_THRESHOLD;
 	double BUSYNESS_SPIKE_SATURATED_THRESHOLD;
+
+	// blob granules
+	bool ENABLE_BLOB_GRANULES;
 
 	ClientKnobs(Randomize randomize);
 	void initialize(Randomize randomize);

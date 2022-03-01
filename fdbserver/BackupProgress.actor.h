@@ -43,7 +43,7 @@ public:
 	// savedVersion is used.
 	void addBackupStatus(const WorkerBackupStatus& status);
 
-	// Returns a map of tuple<Epoch, endVersion, logRouterTags> : map<tag, savedVersion>, so that
+	// Returns a map of tuple<Epoch, endVersion, logRouterTags> : std::map<tag, savedVersion>, so that
 	// the backup range should be [savedVersion + 1, endVersion) for the "tag" of the "Epoch".
 	//
 	// Specifically, the backup ranges for each old epoch are:

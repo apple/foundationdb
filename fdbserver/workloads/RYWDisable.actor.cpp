@@ -28,7 +28,7 @@
 struct RYWDisableWorkload : TestWorkload {
 	int nodes, keyBytes;
 	double testDuration;
-	vector<Future<Void>> clients;
+	std::vector<Future<Void>> clients;
 
 	RYWDisableWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 600.0);
@@ -108,7 +108,7 @@ struct RYWDisableWorkload : TestWorkload {
 		return ok;
 	}
 
-	void getMetrics(vector<PerfMetric>& m) override {}
+	void getMetrics(std::vector<PerfMetric>& m) override {}
 
 	Key keyForIndex(uint64_t index) {
 		Key result = makeString(keyBytes);

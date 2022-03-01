@@ -22,6 +22,7 @@
 #include "fdbclient/BackupContainerAzureBlobStore.h"
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbclient/BackupContainerLocalDirectory.h"
+#include "fdbclient/BackupContainerS3BlobStore.h"
 #include "fdbclient/JsonBuilder.h"
 #include "flow/StreamCipher.h"
 #include "flow/UnitTest.h"
@@ -1132,8 +1133,8 @@ public:
 		    filename,
 		    IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE,
 		    0600));
-		StreamCipher::Key::RawKeyType testKey;
-		generateRandomData(testKey.data(), testKey.size());
+		StreamCipherKey testKey(AES_256_KEY_LENGTH);
+		testKey.initializeRandomTestKey();
 		keyFile->write(testKey.data(), testKey.size(), 0);
 		wait(keyFile->sync());
 		return Void();
@@ -1141,26 +1142,25 @@ public:
 
 	ACTOR static Future<Void> readEncryptionKey(std::string encryptionKeyFileName) {
 		state Reference<IAsyncFile> keyFile;
-		state StreamCipher::Key::RawKeyType key;
+		state StreamCipherKey const* cipherKey = StreamCipherKey::getGlobalCipherKey();
 		try {
 			Reference<IAsyncFile> _keyFile =
 			    wait(IAsyncFileSystem::filesystem()->open(encryptionKeyFileName, 0x0, 0400));
 			keyFile = _keyFile;
 		} catch (Error& e) {
 			TraceEvent(SevWarnAlways, "FailedToOpenEncryptionKeyFile")
-			    .detail("FileName", encryptionKeyFileName)
-			    .error(e);
+			    .error(e)
+			    .detail("FileName", encryptionKeyFileName);
 			throw e;
 		}
-		int bytesRead = wait(keyFile->read(key.data(), key.size(), 0));
-		if (bytesRead != key.size()) {
+		int bytesRead = wait(keyFile->read(cipherKey->data(), cipherKey->size(), 0));
+		if (bytesRead != cipherKey->size()) {
 			TraceEvent(SevWarnAlways, "InvalidEncryptionKeyFileSize")
-			    .detail("ExpectedSize", key.size())
+			    .detail("ExpectedSize", cipherKey->size())
 			    .detail("ActualSize", bytesRead);
 			throw invalid_encryption_key_file();
 		}
-		ASSERT_EQ(bytesRead, key.size());
-		StreamCipher::Key::initializeKey(std::move(key));
+		ASSERT_EQ(bytesRead, cipherKey->size());
 		return Void();
 	}
 #endif // ENCRYPTION_ENABLED
@@ -1377,8 +1377,8 @@ ACTOR static Future<KeyRange> getSnapshotFileKeyRange_impl(Reference<BackupConta
 			           e.code() == error_code_timed_out || e.code() == error_code_lookup_failed) {
 				// blob http request failure, retry
 				TraceEvent(SevWarnAlways, "BackupContainerGetSnapshotFileKeyRangeConnectionFailure")
-				    .detail("Retries", ++readFileRetries)
-				    .error(e);
+				    .error(e)
+				    .detail("Retries", ++readFileRetries);
 				wait(delayJittered(0.1));
 			} else {
 				TraceEvent(SevError, "BackupContainerGetSnapshotFileKeyRangeUnexpectedError").error(e);
@@ -1493,6 +1493,70 @@ Future<Void> BackupContainerFileSystem::createTestEncryptionKeyFile(std::string 
 #else
 	return Void();
 #endif
+}
+
+// Get a BackupContainerFileSystem based on a container URL string
+// TODO: refactor to not duplicate IBackupContainer::openContainer. It's the exact same
+// code but returning a different template type because you can't cast between them
+Reference<BackupContainerFileSystem> BackupContainerFileSystem::openContainerFS(
+    const std::string& url,
+    Optional<std::string> const& encryptionKeyFileName) {
+	static std::map<std::string, Reference<BackupContainerFileSystem>> m_cache;
+
+	Reference<BackupContainerFileSystem>& r = m_cache[url];
+	if (r)
+		return r;
+
+	try {
+		StringRef u(url);
+		if (u.startsWith("file://"_sr)) {
+			r = makeReference<BackupContainerLocalDirectory>(url, encryptionKeyFileName);
+		} else if (u.startsWith("blobstore://"_sr)) {
+			std::string resource;
+
+			// The URL parameters contain blobstore endpoint tunables as well as possible backup-specific options.
+			S3BlobStoreEndpoint::ParametersT backupParams;
+			Reference<S3BlobStoreEndpoint> bstore =
+			    S3BlobStoreEndpoint::fromString(url, &resource, &lastOpenError, &backupParams);
+
+			if (resource.empty())
+				throw backup_invalid_url();
+			for (auto c : resource)
+				if (!isalnum(c) && c != '_' && c != '-' && c != '.' && c != '/')
+					throw backup_invalid_url();
+			r = makeReference<BackupContainerS3BlobStore>(bstore, resource, backupParams, encryptionKeyFileName);
+		}
+#ifdef BUILD_AZURE_BACKUP
+		else if (u.startsWith("azure://"_sr)) {
+			u.eat("azure://"_sr);
+			auto accountName = u.eat("@"_sr).toString();
+			auto endpoint = u.eat("/"_sr).toString();
+			auto containerName = u.eat("/"_sr).toString();
+			r = makeReference<BackupContainerAzureBlobStore>(
+			    endpoint, accountName, containerName, encryptionKeyFileName);
+		}
+#endif
+		else {
+			lastOpenError = "invalid URL prefix";
+			throw backup_invalid_url();
+		}
+
+		r->encryptionKeyFileName = encryptionKeyFileName;
+		r->URL = url;
+		return r;
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled)
+			throw;
+
+		TraceEvent m(SevWarn, "BackupContainer");
+		m.error(e);
+		m.detail("Description", "Invalid container specification.  See help.");
+		m.detail("URL", url);
+		if (e.code() == error_code_backup_invalid_url)
+			m.detail("LastOpenError", lastOpenError);
+
+		throw;
+	}
 }
 
 namespace backup_test {
@@ -1692,7 +1756,7 @@ ACTOR Future<Void> testBackupContainer(std::string url, Optional<std::string> en
 		state Version expireVersion = listing.snapshots[i].endVersion;
 
 		// Expire everything up to but not including the snapshot end version
-		printf("EXPIRE TO %" PRId64 "\n", expireVersion);
+		fmt::print("EXPIRE TO {}\n", expireVersion);
 		state Future<Void> f = c->expireData(expireVersion);
 		wait(ready(f));
 

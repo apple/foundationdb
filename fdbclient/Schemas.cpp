@@ -24,6 +24,36 @@
 const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
 {
    "cluster":{
+       "storage_wiggler": {
+         "primary": {
+          	"last_round_start_datetime": "Wed Feb  4 09:36:37 2022 +0000",
+			"last_round_start_timestamp": 63811229797,
+			"last_round_finish_datetime": "Thu Jan  1 00:00:00 1970 +0000",
+			"last_round_finish_timestamp": 0,
+			"smoothed_round_seconds": 1,
+			"finished_round": 1,
+			"last_wiggle_start_datetime": "Wed Feb  4 09:36:37 2022 +0000",
+			"last_wiggle_start_timestamp": 63811229797,
+			"last_wiggle_finish_datetime": "Thu Jan  1 00:00:00 1970 +0000",
+			"last_wiggle_finish_timestamp": 0,
+			"smoothed_wiggle_seconds": 1,
+			"finished_wiggle": 1
+          },
+          "remote": {
+          	"last_round_start_datetime": "Wed Feb  4 09:36:37 2022 +0000",
+			"last_round_start_timestamp": 63811229797,
+			"last_round_finish_datetime": "Thu Jan  1 00:00:00 1970 +0000",
+			"last_round_finish_timestamp": 0,
+			"smoothed_round_seconds": 1,
+			"finished_round": 1,
+			"last_wiggle_start_datetime": "Wed Feb  4 09:36:37 2022 +0000",
+			"last_wiggle_start_timestamp": 63811229797,
+			"last_wiggle_finish_datetime": "Thu Jan  1 00:00:00 1970 +0000",
+			"last_wiggle_finish_timestamp": 0,
+			"smoothed_wiggle_seconds": 1,
+			"finished_wiggle": 1
+          }
+      },
       "layers":{
          "_valid":true,
          "_error":"some error description"
@@ -53,7 +83,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "grv_proxy",
                   "master",
                   "test",
-                  "storage_cache"
+                  "storage_cache",
+                  "blob_worker"
                ]
             },
             "degraded":true,
@@ -94,10 +125,17 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                         "cluster_controller",
                         "data_distributor",
                         "ratekeeper",
+                        "blob_manager",
+                        "blob_worker",
+                        "encrypt_key_proxy",
                         "storage_cache",
                         "router",
                         "coordinator"
                      ]
+                  },
+                  "storage_metadata":{
+                     "created_time_datetime":"Thu Jan  1 00:00:00 1970 +0000",
+                     "created_time_timestamp": 0
                   },
                   "data_version":12341234,
                   "durable_version":12341234,
@@ -490,8 +528,11 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
             "name":{
                "$enum":[
                   "unreachable_master_worker",
+                  "unreachable_cluster_controller_worker",
                   "unreachable_dataDistributor_worker",
                   "unreachable_ratekeeper_worker",
+                  "unreachable_blobManager_worker",
+                  "unreachable_encryptKeyProxy_worker",
                   "unreadable_configuration",
                   "full_replication_timeout",
                   "client_issues",
@@ -724,7 +765,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
              "ssd",
              "ssd-1",
              "ssd-2",
-             "ssd-redwood-experimental",
+             "ssd-redwood-1-experimental",
              "ssd-rocksdb-experimental",
              "memory",
              "memory-1",
@@ -737,7 +778,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
              "ssd",
              "ssd-1",
              "ssd-2",
-             "ssd-redwood-experimental",
+             "ssd-redwood-1-experimental",
              "ssd-rocksdb-experimental",
              "memory",
              "memory-1",
@@ -760,6 +801,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          "proxies":6,
          "backup_worker_enabled":1,
          "perpetual_storage_wiggle":0,
+         "perpetual_storage_wiggle_locality":"0",
          "storage_migration_type": {
              "$enum":[
              "disabled",

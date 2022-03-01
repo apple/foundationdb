@@ -1,23 +1,24 @@
 add_subdirectory(tutorial)
-if(WIN32)
-  return()
-endif()
-
 # build a virtualenv
 set(sphinx_dir ${CMAKE_CURRENT_SOURCE_DIR}/sphinx)
 set(venv_dir ${CMAKE_CURRENT_BINARY_DIR}/venv)
-set(EXE_SUFFIX "")
 if(WIN32)
+  set(venv_bin_dir ${CMAKE_CURRENT_BINARY_DIR}/venv/Scripts)
+  set(activate_script ${venv_bin_dir}/activate.bat)
   set(EXE_SUFFIX ".exe")
+else()
+  set(venv_bin_dir ${CMAKE_CURRENT_BINARY_DIR}/venv/bin)
+  set(activate_script . ${venv_bin_dir}/activate)
+  set(EXE_SUFFIX "")
 endif()
-set(pip_command ${venv_dir}/bin/pip${EXE_SUFFIX})
-set(python_command ${venv_dir}/bin/python${EXE_SUFFIX})
+set(python_command ${venv_bin_dir}/python${EXE_SUFFIX})
+set(pip_command ${venv_bin_dir}/pip${EXE_SUFFIX})
 
 add_custom_command(OUTPUT ${venv_dir}/venv_setup
   COMMAND ${Python3_EXECUTABLE} -m venv venv &&
           ${CMAKE_COMMAND} -E copy ${sphinx_dir}/.pip.conf ${venv_dir}/pip.conf &&
-          . ${venv_dir}/bin/activate &&
-          ${pip_command} install --upgrade pip &&
+          ${activate_script} &&
+          ${python_command} -m pip install --upgrade pip &&
           ${pip_command} install --upgrade -r ${sphinx_dir}/requirements.txt &&
           ${pip_command} install sphinx-autobuild && # somehow this is missing in requirements.txt
           ${CMAKE_COMMAND} -E touch ${venv_dir}/venv_setup
@@ -36,9 +37,9 @@ function(add_documentation_target)
     message(ERROR "GENERATOR is a required argument to add_documentation_target")
   endif()
   set(target ${ADT_GENERATOR})
-  set(SPHINX_COMMAND "${venv_dir}/bin/sphinx-build")
+  set(SPHINX_COMMAND "${venv_bin_dir}/sphinx-build${EXE_SUFFIX}")
   if(ADT_SPHINX_COMMAND)
-    set(SPHINX_COMMAND "${venv_dir}/bin/${ADT_SPHINX_COMMAND}")
+    set(SPHINX_COMMAND "${venv_bin_dir}/${ADT_SPHINX_COMMAND}")
   endif()
   set(doctree "doctree")
   if (ADT_DOCTREE)

@@ -5,7 +5,13 @@ set(FDBSERVER_SRCS
   BackupProgress.actor.cpp
   BackupProgress.actor.h
   BackupWorker.actor.cpp
+  BlobManager.actor.cpp
+  BlobManagerInterface.h
+  BlobWorker.actor.cpp
+  ClusterController.actor.h
   ClusterController.actor.cpp
+  ClusterRecovery.actor.h
+  ClusterRecovery.actor.cpp
   ConfigBroadcaster.actor.cpp
   ConfigBroadcaster.h
   ConfigDatabaseUnitTests.actor.cpp
@@ -25,7 +31,11 @@ set(FDBSERVER_SRCS
   DataDistributionTracker.actor.cpp
   DataDistributorInterface.h
   DBCoreState.h
+  DDTeamCollection.actor.cpp
+  DDTeamCollection.h
   DiskQueue.actor.cpp
+  EncryptKeyProxyInterface.h
+  EncryptKeyProxy.actor.cpp
   fdbserver.actor.cpp
   FDBExecHelper.actor.cpp
   FDBExecHelper.actor.h
@@ -80,6 +90,7 @@ set(FDBSERVER_SRCS
   QuietDatabase.actor.cpp
   QuietDatabase.h
   RadixTree.h
+  Ratekeeper.h
   Ratekeeper.actor.cpp
   RatekeeperInterface.h
   RecoveryState.h
@@ -120,7 +131,11 @@ set(FDBSERVER_SRCS
   storageserver.actor.cpp
   TagPartitionedLogSystem.actor.cpp
   TagPartitionedLogSystem.actor.h
+  TagThrottler.actor.cpp
+  TagThrottler.h
   template_fdb.h
+  TCInfo.actor.cpp
+  TCInfo.h
   tester.actor.cpp
   TesterInterface.actor.h
   TLogInterface.h
@@ -156,10 +171,12 @@ set(FDBSERVER_SRCS
   workloads/BackupToDBCorrectness.actor.cpp
   workloads/BackupToDBUpgrade.actor.cpp
   workloads/BlobStoreWorkload.h
+  workloads/BlobGranuleVerifier.actor.cpp
   workloads/BulkLoad.actor.cpp
   workloads/BulkSetup.actor.h
   workloads/Cache.actor.cpp
   workloads/ChangeConfig.actor.cpp
+  workloads/ClearSingleRange.actor.cpp
   workloads/ClientTransactionProfileCorrectness.actor.cpp
   workloads/TriggerRecovery.actor.cpp
   workloads/SuspendProcesses.actor.cpp
@@ -169,14 +186,17 @@ set(FDBSERVER_SRCS
   workloads/ConsistencyCheck.actor.cpp
   workloads/CpuProfiler.actor.cpp
   workloads/Cycle.actor.cpp
+  workloads/ChangeFeeds.actor.cpp
   workloads/DataDistributionMetrics.actor.cpp
+  workloads/DataLossRecovery.actor.cpp
   workloads/DDBalance.actor.cpp
   workloads/DDMetrics.actor.cpp
   workloads/DDMetricsExclude.actor.cpp
   workloads/DiskDurability.actor.cpp
   workloads/DiskDurabilityTest.actor.cpp
-  workloads/Downgrade.actor.cpp
+  workloads/DiskFailureInjection.actor.cpp
   workloads/DummyWorkload.actor.cpp
+  workloads/EncryptionOps.actor.cpp
   workloads/ExternalWorkload.actor.cpp
   workloads/FastTriggeredWatches.actor.cpp
   workloads/FileSystem.actor.cpp
@@ -184,6 +204,7 @@ set(FDBSERVER_SRCS
   workloads/FuzzApiCorrectness.actor.cpp
   workloads/GetRangeStream.actor.cpp
   workloads/HealthMetricsApi.actor.cpp
+  workloads/HighContentionPrefixAllocatorWorkload.actor.cpp
   workloads/IncrementalBackup.actor.cpp
   workloads/Increment.actor.cpp
   workloads/IndexScan.actor.cpp
@@ -201,7 +222,9 @@ set(FDBSERVER_SRCS
   workloads/MemoryKeyValueStore.h
   workloads/MemoryLifetime.actor.cpp
   workloads/MetricLogging.actor.cpp
+  workloads/MiniCycle.actor.cpp
   workloads/MutationLogReaderCorrectness.actor.cpp
+  workloads/GetRangeAndMap.actor.cpp
   workloads/ParallelRestore.actor.cpp
   workloads/Performance.actor.cpp
   workloads/Ping.actor.cpp
@@ -231,6 +254,7 @@ set(FDBSERVER_SRCS
   workloads/SlowTaskWorkload.actor.cpp
   workloads/SnapTest.actor.cpp
   workloads/SpecialKeySpaceCorrectness.actor.cpp
+  workloads/StreamingRangeRead.actor.cpp
   workloads/StatusWorkload.actor.cpp
   workloads/Storefront.actor.cpp
   workloads/StreamingRead.actor.cpp
@@ -260,8 +284,7 @@ set(FDBSERVER_SRCS
   workloads/WriteTagThrottling.actor.cpp
 )
 
-# ugly hack to make Windows work for now
-if(WIN32)
+if(${COROUTINE_IMPL} STREQUAL libcoro)
   list(APPEND FDBSERVER_SRCS CoroFlowCoro.actor.cpp)
 else()
   list(APPEND FDBSERVER_SRCS CoroFlow.actor.cpp)
@@ -278,14 +301,15 @@ add_library(fdb_sqlite STATIC
 
 if (WITH_ROCKSDB_EXPERIMENTAL)
   add_definitions(-DSSD_ROCKSDB_EXPERIMENTAL)
-  # Set this to 0 if you want to compile RocksDB with `-march=native`.
-  set(PORTABLE_ROCKSDB 1)
 
   include(CompileRocksDB)
   # CompileRocksDB sets `lz4_LIBRARIES` to be the shared lib, we want to link
   # statically, so find the static library here.
   find_library(lz4_STATIC_LIBRARIES
     NAMES liblz4.a REQUIRED)
+  if (WITH_LIBURING)
+    find_package(uring)
+  endif()
 endif()
 
 # Suppress warnings in sqlite since it's third party
@@ -305,8 +329,15 @@ target_include_directories(fdbserver PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/workloads)
 if (WITH_ROCKSDB_EXPERIMENTAL)
   add_dependencies(fdbserver rocksdb)
-  target_include_directories(fdbserver PRIVATE ${ROCKSDB_INCLUDE_DIR})
-  target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite ${ROCKSDB_LIBRARIES} ${lz4_STATIC_LIBRARIES})
+  if(WITH_LIBURING)
+    target_include_directories(fdbserver PRIVATE ${ROCKSDB_INCLUDE_DIR} ${uring_INCLUDE_DIR})
+    target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite ${ROCKSDB_LIBRARIES} ${uring_LIBRARIES} ${lz4_STATIC_LIBRARIES})
+    target_compile_definitions(fdbserver PRIVATE BOOST_ASIO_HAS_IO_URING=1 BOOST_ASIO_DISABLE_EPOLL=1)
+  else()
+    target_include_directories(fdbserver PRIVATE ${ROCKSDB_INCLUDE_DIR})
+    target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite ${ROCKSDB_LIBRARIES} ${lz4_STATIC_LIBRARIES})
+    target_compile_definitions(fdbserver PRIVATE)
+  endif()
 else()
   target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite)
 endif()

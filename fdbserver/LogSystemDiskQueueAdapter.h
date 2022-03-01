@@ -41,7 +41,7 @@ struct PeekTxsInfo {
 	    knownCommittedVersion(knownCommittedVersion) {}
 };
 
-class LogSystemDiskQueueAdapter : public IDiskQueue {
+class LogSystemDiskQueueAdapter final : public IDiskQueue {
 public:
 	// This adapter is designed to let KeyValueStoreMemory use ILogSystem
 	// as a backing store, so that the transaction subsystem can in
@@ -88,8 +88,8 @@ public:
 	Future<CommitMessage> getCommitMessage();
 
 	// IClosable interface
-	Future<Void> getError() override;
-	Future<Void> onClosed() override;
+	Future<Void> getError() const override;
+	Future<Void> onClosed() const override;
 	void dispose() override;
 	void close() override;
 

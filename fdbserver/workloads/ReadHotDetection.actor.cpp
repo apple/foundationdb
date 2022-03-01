@@ -30,7 +30,7 @@ struct ReadHotDetectionWorkload : TestWorkload {
 	int actorCount, keyCount;
 
 	double testDuration, transactionsPerSecond;
-	vector<Future<Void>> clients;
+	std::vector<Future<Void>> clients;
 	Future<Void> readHotCheck;
 	Key readKey;
 	KeyRange wholeRange;
@@ -98,11 +98,11 @@ struct ReadHotDetectionWorkload : TestWorkload {
 		loop {
 			state Transaction tr(cx);
 			try {
-				StorageMetrics sm = wait(tr.getStorageMetrics(self->wholeRange, 100));
+				StorageMetrics sm = wait(cx->getStorageMetrics(self->wholeRange, 100));
 				// TraceEvent("RHDCheckPhaseLog")
 				//     .detail("KeyRangeSize", sm.bytes)
 				//     .detail("KeyRangeReadBandwith", sm.bytesReadPerKSecond);
-				Standalone<VectorRef<ReadHotRangeWithMetrics>> keyRanges = wait(tr.getReadHotRanges(self->wholeRange));
+				Standalone<VectorRef<ReadHotRangeWithMetrics>> keyRanges = wait(cx->getReadHotRanges(self->wholeRange));
 				// TraceEvent("RHDCheckPhaseLog")
 				//     .detail("KeyRangesSize", keyRanges.size())
 				//     .detail("ReadKey", self->readKey.printable().c_str())
@@ -132,7 +132,7 @@ struct ReadHotDetectionWorkload : TestWorkload {
 		}
 	}
 
-	void getMetrics(vector<PerfMetric>& m) override {}
+	void getMetrics(std::vector<PerfMetric>& m) override {}
 
 	ACTOR Future<Void> keyReader(Database cx, ReadHotDetectionWorkload* self, double delay, bool useReadKey) {
 		state double lastTime = now();

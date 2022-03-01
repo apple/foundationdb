@@ -144,7 +144,7 @@ void handleRecruitRoleRequest(RestoreRecruitRoleRequest req,
 // This is done before we assign restore roles for restore workers.
 ACTOR Future<Void> collectRestoreWorkerInterface(Reference<RestoreWorkerData> self, Database cx, int min_num_workers) {
 	state Transaction tr(cx);
-	state vector<RestoreWorkerInterface> agents; // agents is cmdsInterf
+	state std::vector<RestoreWorkerInterface> agents; // agents is cmdsInterf
 
 	loop {
 		try {
@@ -264,7 +264,7 @@ ACTOR Future<Void> startRestoreWorker(Reference<RestoreWorkerData> self, Restore
 				}
 			}
 		} catch (Error& e) {
-			TraceEvent(SevWarn, "FastRestoreWorkerError").detail("RequestType", requestTypeStr).error(e, true);
+			TraceEvent(SevWarn, "FastRestoreWorkerError").errorUnsuppressed(e).detail("RequestType", requestTypeStr);
 			break;
 		}
 	}
@@ -406,11 +406,11 @@ ACTOR Future<Void> _restoreWorker(Database cx, LocalityData locality) {
 	return Void();
 }
 
-ACTOR Future<Void> restoreWorker(Reference<ClusterConnectionFile> connFile,
+ACTOR Future<Void> restoreWorker(Reference<IClusterConnectionRecord> connRecord,
                                  LocalityData locality,
                                  std::string coordFolder) {
 	try {
-		Database cx = Database::createDatabase(connFile, Database::API_VERSION_LATEST, IsInternal::True, locality);
+		Database cx = Database::createDatabase(connRecord, Database::API_VERSION_LATEST, IsInternal::True, locality);
 		wait(reportErrors(_restoreWorker(cx, locality), "RestoreWorker"));
 	} catch (Error& e) {
 		TraceEvent("FastRestoreWorker").detail("Error", e.what());

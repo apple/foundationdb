@@ -39,6 +39,12 @@ struct ConfigGeneration {
 	bool operator<(ConfigGeneration const&) const;
 	bool operator>(ConfigGeneration const&) const;
 
+	std::string toString() const {
+		std::stringstream ss;
+		ss << "liveVersion: " << liveVersion << ", committedVersion: " << committedVersion;
+		return ss.str();
+	}
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, committedVersion, liveVersion);
@@ -188,11 +194,11 @@ struct ConfigTransactionInterface {
 
 public:
 	static constexpr FileIdentifier file_identifier = 982485;
-	struct RequestStream<ConfigTransactionGetGenerationRequest> getGeneration;
-	struct RequestStream<ConfigTransactionGetRequest> get;
-	struct RequestStream<ConfigTransactionGetConfigClassesRequest> getClasses;
-	struct RequestStream<ConfigTransactionGetKnobsRequest> getKnobs;
-	struct RequestStream<ConfigTransactionCommitRequest> commit;
+	class RequestStream<ConfigTransactionGetGenerationRequest> getGeneration;
+	class RequestStream<ConfigTransactionGetRequest> get;
+	class RequestStream<ConfigTransactionGetConfigClassesRequest> getClasses;
+	class RequestStream<ConfigTransactionGetKnobsRequest> getKnobs;
+	class RequestStream<ConfigTransactionCommitRequest> commit;
 
 	ConfigTransactionInterface();
 	void setupWellKnownEndpoints();

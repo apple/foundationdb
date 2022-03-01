@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbclient/ReadYourWrites.h"
@@ -81,7 +82,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 
 		useExtraDB = g_simulator.extraDB != nullptr;
 		if (useExtraDB) {
-			auto extraFile = makeReference<ClusterConnectionFile>(*g_simulator.extraDB);
+			auto extraFile = makeReference<ClusterConnectionMemoryRecord>(*g_simulator.extraDB);
 			extraDB = Database::createDatabase(extraFile, -1);
 			useSystemKeys = false;
 		}
@@ -116,7 +117,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 
 	Future<bool> check(Database const& cx) override { return success; }
 
-	void getMetrics(vector<PerfMetric>& m) override {
+	void getMetrics(std::vector<PerfMetric>& m) override {
 		m.push_back(transactions.getMetric());
 		m.push_back(retries.getMetric());
 	}
@@ -1054,7 +1055,7 @@ ACTOR Future<Void> randomTransaction(Database cx, WriteDuringReadWorkload* self,
 			watches.clear();
 			self->changeCount.insert(allKeys, 0);
 			doingCommit = false;
-			//TraceEvent("WDRError").error(e, true);
+			//TraceEvent("WDRError").errorUnsuppressed(e);
 			if (e.code() == error_code_database_locked) {
 				self->memoryDatabase = self->lastCommittedDatabase;
 				self->addedConflicts.insert(allKeys, false);

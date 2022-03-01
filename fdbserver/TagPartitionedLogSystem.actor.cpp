@@ -461,8 +461,8 @@ ACTOR Future<Void> TagPartitionedLogSystem::onError_internal(TagPartitionedLogSy
 		changes.push_back(self->backupWorkerChanged.onTrigger());
 
 		ASSERT(failed.size() >= 1);
-		wait(quorum(changes, 1) || tagError<Void>(quorum(failed, 1), master_tlog_failed()) ||
-		     tagError<Void>(quorum(backupFailed, 1), master_backup_worker_failed()));
+		wait(quorum(changes, 1) || tagError<Void>(quorum(failed, 1), tlog_failed()) ||
+		     tagError<Void>(quorum(backupFailed, 1), backup_worker_failed()));
 	}
 }
 
@@ -510,8 +510,8 @@ Future<Version> TagPartitionedLogSystem::push(Version prevVersion,
                                               SpanID const& spanContext,
                                               Optional<UID> debugID) {
 	// FIXME: Randomize request order as in LegacyLogSystem?
-	vector<Future<Void>> quorumResults;
-	vector<Future<TLogCommitReply>> allReplies;
+	std::vector<Future<Void>> quorumResults;
+	std::vector<Future<TLogCommitReply>> allReplies;
 	int location = 0;
 	Span span("TPLS:push"_loc, spanContext);
 	for (auto& it : tLogs) {
@@ -529,7 +529,7 @@ Future<Version> TagPartitionedLogSystem::push(Version prevVersion,
 					                            Histogram::Unit::microseconds));
 				}
 			}
-			vector<Future<Void>> tLogCommitResults;
+			std::vector<Future<Void>> tLogCommitResults;
 			for (int loc = 0; loc < it->logServers.size(); loc++) {
 				Standalone<StringRef> msg = data.getMessages(location);
 				data.recordEmptyMessage(location, msg);
@@ -1505,7 +1505,7 @@ Future<Version> TagPartitionedLogSystem::getTxsPoppedVersion() {
 }
 
 ACTOR Future<Void> TagPartitionedLogSystem::confirmEpochLive_internal(Reference<LogSet> logSet, Optional<UID> debugID) {
-	state vector<Future<Void>> alive;
+	state std::vector<Future<Void>> alive;
 	int numPresent = 0;
 	for (auto& t : logSet->logServers) {
 		if (t->get().present()) {
@@ -1551,7 +1551,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::confirmEpochLive_internal(Reference<
 }
 
 Future<Void> TagPartitionedLogSystem::confirmEpochLive(Optional<UID> debugID) {
-	vector<Future<Void>> quorumResults;
+	std::vector<Future<Void>> quorumResults;
 	for (auto& it : tLogs) {
 		if (it->isLocal && it->logServers.size()) {
 			quorumResults.push_back(confirmEpochLive_internal(it, debugID));
@@ -1574,6 +1574,7 @@ Future<Void> TagPartitionedLogSystem::endEpoch() {
 Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
     RecruitFromConfigurationReply const& recr,
     Future<RecruitRemoteFromConfigurationReply> const& fRemoteWorkers,
+    UID clusterId,
     DatabaseConfiguration const& config,
     LogEpoch recoveryCount,
     int8_t primaryLocality,
@@ -1583,6 +1584,7 @@ Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 	return newEpoch(Reference<TagPartitionedLogSystem>::addRef(this),
 	                recr,
 	                fRemoteWorkers,
+	                clusterId,
 	                config,
 	                recoveryCount,
 	                primaryLocality,
@@ -1617,8 +1619,8 @@ LogSystemConfig TagPartitionedLogSystem::getLogSystemConfig() const {
 }
 
 Standalone<StringRef> TagPartitionedLogSystem::getLogsValue() const {
-	vector<std::pair<UID, NetworkAddress>> logs;
-	vector<std::pair<UID, NetworkAddress>> oldLogs;
+	std::vector<std::pair<UID, NetworkAddress>> logs;
+	std::vector<std::pair<UID, NetworkAddress>> oldLogs;
 	for (auto& t : tLogs) {
 		if (t->isLocal || remoteLogsWrittenToCoreState) {
 			for (int i = 0; i < t->logServers.size(); i++) {
@@ -2241,15 +2243,15 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 }
 
 ACTOR Future<Void> TagPartitionedLogSystem::recruitOldLogRouters(TagPartitionedLogSystem* self,
-                                                                 vector<WorkerInterface> workers,
+                                                                 std::vector<WorkerInterface> workers,
                                                                  LogEpoch recoveryCount,
                                                                  int8_t locality,
                                                                  Version startVersion,
                                                                  std::vector<LocalityData> tLogLocalities,
                                                                  Reference<IReplicationPolicy> tLogPolicy,
                                                                  bool forRemote) {
-	state vector<vector<Future<TLogInterface>>> logRouterInitializationReplies;
-	state vector<Future<TLogInterface>> allReplies;
+	state std::vector<std::vector<Future<TLogInterface>>> logRouterInitializationReplies;
+	state std::vector<Future<TLogInterface>> allReplies;
 	int nextRouter = 0;
 	state Version lastStart = std::numeric_limits<Version>::max();
 
@@ -2298,7 +2300,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::recruitOldLogRouters(TagPartitionedL
 					auto reply = transformErrors(
 					    throwErrorOr(workers[nextRouter].logRouter.getReplyUnlessFailedFor(
 					        req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
-					    master_recovery_failed());
+					    cluster_recovery_failed());
 					logRouterInitializationReplies.back().push_back(reply);
 					allReplies.push_back(reply);
 					nextRouter = (nextRouter + 1) % workers.size();
@@ -2347,7 +2349,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::recruitOldLogRouters(TagPartitionedL
 					auto reply = transformErrors(
 					    throwErrorOr(workers[nextRouter].logRouter.getReplyUnlessFailedFor(
 					        req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
-					    master_recovery_failed());
+					    cluster_recovery_failed());
 					logRouterInitializationReplies.back().push_back(reply);
 					allReplies.push_back(reply);
 					nextRouter = (nextRouter + 1) % workers.size();
@@ -2360,7 +2362,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::recruitOldLogRouters(TagPartitionedL
 
 	int nextReplies = 0;
 	lastStart = std::numeric_limits<Version>::max();
-	vector<Future<Void>> failed;
+	std::vector<Future<Void>> failed;
 
 	if (!forRemote) {
 		Version maxStart = TagPartitionedLogSystem::getMaxLocalStartVersion(self->tLogs);
@@ -2408,7 +2410,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::recruitOldLogRouters(TagPartitionedL
 
 	if (!forRemote) {
 		self->logSystemConfigChanged.trigger();
-		wait(failed.size() ? tagError<Void>(quorum(failed, 1), master_tlog_failed()) : Future<Void>(Never()));
+		wait(failed.size() ? tagError<Void>(quorum(failed, 1), tlog_failed()) : Future<Void>(Never()));
 		throw internal_error();
 	}
 	return Void();
@@ -2437,6 +2439,7 @@ std::vector<Tag> TagPartitionedLogSystem::getLocalTags(int8_t locality, const st
 ACTOR Future<Void> TagPartitionedLogSystem::newRemoteEpoch(TagPartitionedLogSystem* self,
                                                            Reference<TagPartitionedLogSystem> oldLogSystem,
                                                            Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers,
+                                                           UID clusterId,
                                                            DatabaseConfiguration configuration,
                                                            LogEpoch recoveryCount,
                                                            int8_t remoteLocality,
@@ -2471,7 +2474,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::newRemoteEpoch(TagPartitionedLogSyst
 		lockNum++;
 	}
 
-	vector<LocalityData> localities;
+	std::vector<LocalityData> localities;
 	localities.resize(remoteWorkers.remoteTLogs.size());
 	for (int i = 0; i < remoteWorkers.remoteTLogs.size(); i++) {
 		localities[i] = remoteWorkers.remoteTLogs[i].locality;
@@ -2490,7 +2493,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::newRemoteEpoch(TagPartitionedLogSyst
 		                                                                     true);
 	}
 
-	state vector<Future<TLogInterface>> logRouterInitializationReplies;
+	state std::vector<Future<TLogInterface>> logRouterInitializationReplies;
 	const Version startVersion = oldLogSystem->logRouterTags == 0
 	                                 ? oldLogSystem->recoverAt.get() + 1
 	                                 : std::max(self->tLogs[0]->startVersion, logSet->startVersion);
@@ -2506,7 +2509,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::newRemoteEpoch(TagPartitionedLogSyst
 		    throwErrorOr(
 		        remoteWorkers.logRouters[i % remoteWorkers.logRouters.size()].logRouter.getReplyUnlessFailedFor(
 		            req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
-		    master_recovery_failed()));
+		    cluster_recovery_failed()));
 	}
 
 	std::vector<Tag> localTags = TagPartitionedLogSystem::getLocalTags(remoteLocality, allTags);
@@ -2518,8 +2521,8 @@ ACTOR Future<Void> TagPartitionedLogSystem::newRemoteEpoch(TagPartitionedLogSyst
 	        .size()); // Dummy interfaces, so that logSystem->getPushLocations() below uses the correct size
 	logSet->updateLocalitySet(localities);
 
-	state vector<Future<TLogInterface>> remoteTLogInitializationReplies;
-	vector<InitializeTLogRequest> remoteTLogReqs(remoteWorkers.remoteTLogs.size());
+	state std::vector<Future<TLogInterface>> remoteTLogInitializationReplies;
+	std::vector<InitializeTLogRequest> remoteTLogReqs(remoteWorkers.remoteTLogs.size());
 
 	bool nonShardedTxs = self->getTLogVersion() < TLogVersion::V4;
 	if (oldLogSystem->logRouterTags == 0) {
@@ -2576,6 +2579,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::newRemoteEpoch(TagPartitionedLogSyst
 		req.startVersion = logSet->startVersion;
 		req.logRouterTags = 0;
 		req.txsTags = self->txsTags;
+		req.clusterId = clusterId;
 	}
 
 	remoteTLogInitializationReplies.reserve(remoteWorkers.remoteTLogs.size());
@@ -2583,7 +2587,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::newRemoteEpoch(TagPartitionedLogSyst
 		remoteTLogInitializationReplies.push_back(transformErrors(
 		    throwErrorOr(remoteWorkers.remoteTLogs[i].tLog.getReplyUnlessFailedFor(
 		        remoteTLogReqs[i], SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
-		    master_recovery_failed()));
+		    cluster_recovery_failed()));
 
 	TraceEvent("RemoteLogRecruitment_InitializingRemoteLogs")
 	    .detail("StartVersion", logSet->startVersion)
@@ -2612,7 +2616,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::newRemoteEpoch(TagPartitionedLogSyst
 		                        TLogRecoveryFinishedRequest(),
 		                        SERVER_KNOBS->TLOG_TIMEOUT,
 		                        SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
-		                    master_recovery_failed()));
+		                    cluster_recovery_failed()));
 
 	self->remoteRecoveryComplete = waitForAll(recoveryComplete);
 	self->tLogs.push_back(logSet);
@@ -2624,6 +2628,7 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
     Reference<TagPartitionedLogSystem> oldLogSystem,
     RecruitFromConfigurationReply recr,
     Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers,
+    UID clusterId,
     DatabaseConfiguration configuration,
     LogEpoch recoveryCount,
     int8_t primaryLocality,
@@ -2749,7 +2754,7 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 		lockNum++;
 	}
 
-	vector<LocalityData> localities;
+	std::vector<LocalityData> localities;
 	localities.resize(recr.tLogs.size());
 	for (int i = 0; i < recr.tLogs.size(); i++) {
 		localities[i] = recr.tLogs[i].locality;
@@ -2789,8 +2794,8 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 	std::vector<Tag> localTags = TagPartitionedLogSystem::getLocalTags(primaryLocality, allTags);
 	state LogSystemConfig oldLogSystemConfig = oldLogSystem->getLogSystemConfig();
 
-	state vector<Future<TLogInterface>> initializationReplies;
-	vector<InitializeTLogRequest> reqs(recr.tLogs.size());
+	state std::vector<Future<TLogInterface>> initializationReplies;
+	std::vector<InitializeTLogRequest> reqs(recr.tLogs.size());
 
 	logSystem->tLogs[0]->tLogLocalities.resize(recr.tLogs.size());
 	logSystem->tLogs[0]->logServers.resize(
@@ -2844,6 +2849,7 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 		req.startVersion = logSystem->tLogs[0]->startVersion;
 		req.logRouterTags = logSystem->logRouterTags;
 		req.txsTags = logSystem->txsTags;
+		req.clusterId = clusterId;
 	}
 
 	initializationReplies.reserve(recr.tLogs.size());
@@ -2851,13 +2857,13 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 		initializationReplies.push_back(transformErrors(
 		    throwErrorOr(recr.tLogs[i].tLog.getReplyUnlessFailedFor(
 		        reqs[i], SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
-		    master_recovery_failed()));
+		    cluster_recovery_failed()));
 
 	state std::vector<Future<Void>> recoveryComplete;
 
 	if (region.satelliteTLogReplicationFactor > 0 && configuration.usableRegions > 1) {
-		state vector<Future<TLogInterface>> satelliteInitializationReplies;
-		vector<InitializeTLogRequest> sreqs(recr.satelliteTLogs.size());
+		state std::vector<Future<TLogInterface>> satelliteInitializationReplies;
+		std::vector<InitializeTLogRequest> sreqs(recr.satelliteTLogs.size());
 		std::vector<Tag> satelliteTags;
 
 		if (logSystem->logRouterTags) {
@@ -2910,6 +2916,7 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 			req.startVersion = oldLogSystem->knownCommittedVersion + 1;
 			req.logRouterTags = logSystem->logRouterTags;
 			req.txsTags = logSystem->txsTags;
+			req.clusterId = clusterId;
 		}
 
 		satelliteInitializationReplies.reserve(recr.satelliteTLogs.size());
@@ -2917,7 +2924,7 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 			satelliteInitializationReplies.push_back(transformErrors(
 			    throwErrorOr(recr.satelliteTLogs[i].tLog.getReplyUnlessFailedFor(
 			        sreqs[i], SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
-			    master_recovery_failed()));
+			    cluster_recovery_failed()));
 
 		wait(waitForAll(satelliteInitializationReplies) || oldRouterRecruitment);
 
@@ -2933,7 +2940,7 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 			            TLogRecoveryFinishedRequest(),
 			            SERVER_KNOBS->TLOG_TIMEOUT,
 			            SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
-			    master_recovery_failed()));
+			    cluster_recovery_failed()));
 	}
 
 	wait(waitForAll(initializationReplies) || oldRouterRecruitment);
@@ -2948,7 +2955,7 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 	// Don't force failure of recovery if it took us a long time to recover. This avoids multiple long running
 	// recoveries causing tests to timeout
 	if (BUGGIFY && now() - startTime < 300 && g_network->isSimulated() && g_simulator.speedUpSimulation)
-		throw master_recovery_failed();
+		throw cluster_recovery_failed();
 
 	for (int i = 0; i < logSystem->tLogs[0]->logServers.size(); i++)
 		recoveryComplete.push_back(transformErrors(
@@ -2956,13 +2963,19 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 		        TLogRecoveryFinishedRequest(),
 		        SERVER_KNOBS->TLOG_TIMEOUT,
 		        SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
-		    master_recovery_failed()));
+		    cluster_recovery_failed()));
 	logSystem->recoveryComplete = waitForAll(recoveryComplete);
 
 	if (configuration.usableRegions > 1) {
 		logSystem->hasRemoteServers = true;
-		logSystem->remoteRecovery = TagPartitionedLogSystem::newRemoteEpoch(
-		    logSystem.getPtr(), oldLogSystem, fRemoteWorkers, configuration, recoveryCount, remoteLocality, allTags);
+		logSystem->remoteRecovery = TagPartitionedLogSystem::newRemoteEpoch(logSystem.getPtr(),
+		                                                                    oldLogSystem,
+		                                                                    fRemoteWorkers,
+		                                                                    clusterId,
+		                                                                    configuration,
+		                                                                    recoveryCount,
+		                                                                    remoteLocality,
+		                                                                    allTags);
 		if (oldLogSystem->tLogs.size() > 0 && oldLogSystem->tLogs[0]->locality == tagLocalitySpecial) {
 			// The wait is required so that we know both primary logs and remote logs have copied the data between
 			// the known committed version and the recovery version.
@@ -3044,7 +3057,7 @@ ACTOR Future<TLogLockResult> TagPartitionedLogSystem::lockTLog(
     UID myID,
     Reference<AsyncVar<OptionalInterface<TLogInterface>>> tlog) {
 
-	TraceEvent("TLogLockStarted", myID).detail("TLog", tlog->get().id());
+	TraceEvent("TLogLockStarted", myID).detail("TLog", tlog->get().id()).detail("InfPresent", tlog->get().present());
 	loop {
 		choose {
 			when(TLogLockResult data = wait(

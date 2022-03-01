@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "contrib/fmt-8.0.1/include/fmt/format.h"
 #include "fdbserver/NetworkTest.h"
 #include "flow/Knobs.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -25,7 +26,7 @@
 #include "flow/UnitTest.h"
 #include <inttypes.h>
 
-UID WLTOKEN_NETWORKTEST(-1, 2);
+constexpr int WLTOKEN_NETWORKTEST = WLTOKEN_FIRST_AVAILABLE;
 
 struct LatencyStats {
 	using sample = double;
@@ -55,7 +56,8 @@ struct LatencyStats {
 	double stddev() { return sqrt(x2 / n - (x / n) * (x / n)); }
 };
 
-NetworkTestInterface::NetworkTestInterface(NetworkAddress remote) : test(Endpoint({ remote }, WLTOKEN_NETWORKTEST)) {}
+NetworkTestInterface::NetworkTestInterface(NetworkAddress remote)
+  : test(Endpoint::wellKnown({ remote }, WLTOKEN_NETWORKTEST)) {}
 
 NetworkTestInterface::NetworkTestInterface(INetwork* local) {
 	test.makeWellKnownEndpoint(WLTOKEN_NETWORKTEST, TaskPriority::DefaultEndpoint);
@@ -537,8 +539,8 @@ struct P2PNetworkTest {
 		} catch (Error& e) {
 			++self->sessionErrors;
 			TraceEvent(SevError, incoming ? "P2PIncomingSessionError" : "P2POutgoingSessionError")
-			    .detail("Remote", conn->getPeerAddress())
-			    .error(e);
+			    .error(e)
+			    .detail("Remote", conn->getPeerAddress());
 		}
 
 		return Void();
@@ -555,7 +557,7 @@ struct P2PNetworkTest {
 				wait(doSession(self, conn, false));
 			} catch (Error& e) {
 				++self->connectErrors;
-				TraceEvent(SevError, "P2POutgoingError").detail("Remote", remote).error(e);
+				TraceEvent(SevError, "P2POutgoingError").error(e).detail("Remote", remote);
 				wait(delay(1));
 			}
 		}
@@ -573,7 +575,7 @@ struct P2PNetworkTest {
 				sessions.add(doSession(self, conn, true));
 			} catch (Error& e) {
 				++self->acceptErrors;
-				TraceEvent(SevError, "P2PIncomingError").detail("Listener", listener->getListenAddress()).error(e);
+				TraceEvent(SevError, "P2PIncomingError").error(e).detail("Listener", listener->getListenAddress());
 			}
 		}
 	}
@@ -583,10 +585,10 @@ struct P2PNetworkTest {
 
 		self->startTime = now();
 
-		printf("%d listeners, %d remotes, %d outgoing connections\n",
-		       self->listeners.size(),
-		       self->remotes.size(),
-		       self->connectionsOut);
+		fmt::print("{0} listeners, {1} remotes, {2} outgoing connections\n",
+		           self->listeners.size(),
+		           self->remotes.size(),
+		           self->connectionsOut);
 
 		for (auto n : self->remotes) {
 			printf("Remote: %s\n", n.toString().c_str());

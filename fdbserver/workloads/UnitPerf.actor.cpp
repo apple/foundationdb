@@ -34,7 +34,7 @@ ACTOR Future<Void> unitPerfTest() {
 	printf("\n");
 
 	state int counter = 0;
-	state vector<Future<Void>> sleepy;
+	state std::vector<Future<Void>> sleepy;
 	sleepy.reserve(100000);
 	for (int i = 0; i < 100000; i++)
 		sleepy.push_back(sleepyActor(.1, &counter));
@@ -63,7 +63,7 @@ struct UnitPerfWorkload : TestWorkload {
 		return Void();
 	}
 	Future<bool> check(Database const& cx) override { return true; }
-	void getMetrics(vector<PerfMetric>& m) override {}
+	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
 WorkloadFactory<UnitPerfWorkload> UnitPerfWorkloadFactory("UnitPerf");

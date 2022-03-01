@@ -35,7 +35,7 @@ else()
     BUILD_BYPRODUCTS "${JEMALLOC_DIR}/include/jemalloc/jemalloc.h"
     "${JEMALLOC_DIR}/lib/libjemalloc.a"
     "${JEMALLOC_DIR}/lib/libjemalloc_pic.a"
-    CONFIGURE_COMMAND ./configure --prefix=${JEMALLOC_DIR} --enable-static --disable-cxx
+    CONFIGURE_COMMAND ./configure --prefix=${JEMALLOC_DIR} --enable-static --disable-cxx --enable-prof
     BUILD_IN_SOURCE ON
     BUILD_COMMAND make
     INSTALL_DIR "${JEMALLOC_DIR}"

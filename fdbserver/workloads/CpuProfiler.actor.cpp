@@ -36,7 +36,7 @@ struct CpuProfilerWorkload : TestWorkload {
 
 	// What process classes should be profiled as part of this run?
 	// See Locality.h for the list of valid strings to provide.
-	vector<std::string> roles;
+	std::vector<std::string> roles;
 
 	// A list of worker interfaces which have had profiling turned on
 	std::vector<WorkerInterface> profilingWorkers;
@@ -44,7 +44,7 @@ struct CpuProfilerWorkload : TestWorkload {
 	CpuProfilerWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		initialDelay = getOption(options, LiteralStringRef("initialDelay"), 0.0);
 		duration = getOption(options, LiteralStringRef("duration"), -1.0);
-		roles = getOption(options, LiteralStringRef("roles"), vector<std::string>());
+		roles = getOption(options, LiteralStringRef("roles"), std::vector<std::string>());
 		success = true;
 	}
 
@@ -57,8 +57,8 @@ struct CpuProfilerWorkload : TestWorkload {
 		if (self->clientId == 0) {
 			// If we are turning the profiler on, get a list of workers in the system
 			if (enabled) {
-				vector<WorkerDetails> _workers = wait(getWorkers(self->dbInfo));
-				vector<WorkerInterface> workers;
+				std::vector<WorkerDetails> _workers = wait(getWorkers(self->dbInfo));
+				std::vector<WorkerInterface> workers;
 				for (int i = 0; i < _workers.size(); i++) {
 					if (self->roles.empty() ||
 					    std::find(self->roles.cbegin(), self->roles.cend(), _workers[i].processClass.toString()) !=
@@ -131,7 +131,7 @@ struct CpuProfilerWorkload : TestWorkload {
 		return self->success;
 	}
 
-	void getMetrics(vector<PerfMetric>& m) override {}
+	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
 WorkloadFactory<CpuProfilerWorkload> CpuProfilerWorkloadFactory("CpuProfiler");

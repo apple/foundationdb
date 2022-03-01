@@ -434,10 +434,11 @@ struct BackupData {
 			                              GetReadVersionRequest::FLAG_USE_MIN_KNOWN_COMMITTED_VERSION);
 			choose {
 				when(wait(self->cx->onProxiesChanged())) {}
-				when(GetReadVersionReply reply = wait(basicLoadBalance(self->cx->getGrvProxies(false),
-				                                                       &GrvProxyInterface::getConsistentReadVersion,
-				                                                       request,
-				                                                       self->cx->taskID))) {
+				when(GetReadVersionReply reply =
+				         wait(basicLoadBalance(self->cx->getGrvProxies(UseProvisionalProxies::False),
+				                               &GrvProxyInterface::getConsistentReadVersion,
+				                               request,
+				                               self->cx->taskID))) {
 					return reply.version;
 				}
 			}
@@ -839,6 +840,10 @@ ACTOR Future<Void> uploadData(BackupData* self) {
 			// make sure file is saved on version boundary
 			popVersion = lastVersion;
 			numMsg = lastVersionIndex;
+
+			// If we aren't able to process any messages and the lock is blocking us from
+			// queuing more, then we are stuck. This could suggest the lock capacity is too small.
+			ASSERT(numMsg > 0 || self->lock->waiters() == 0);
 		}
 		if (((numMsg > 0 || popVersion > lastPopVersion) && self->pulling) || self->pullFinished()) {
 			TraceEvent("BackupWorkerSave", self->myId)
@@ -1082,7 +1087,7 @@ ACTOR Future<Void> backupWorker(BackupInterface interf,
 				TraceEvent("BackupWorkerDone", self.myId).detail("BackupEpoch", self.backupEpoch);
 				// Notify master so that this worker can be removed from log system, then this
 				// worker (for an old epoch's unfinished work) can safely exit.
-				wait(brokenPromiseToNever(db->get().master.notifyBackupWorkerDone.getReply(
+				wait(brokenPromiseToNever(db->get().clusterInterface.notifyBackupWorkerDone.getReply(
 				    BackupWorkerDoneRequest(self.myId, self.backupEpoch))));
 				break;
 			}
@@ -1096,10 +1101,10 @@ ACTOR Future<Void> backupWorker(BackupInterface interf,
 			try {
 				wait(done);
 			} catch (Error& e) {
-				TraceEvent("BackupWorkerShutdownError", self.myId).error(e, true);
+				TraceEvent("BackupWorkerShutdownError", self.myId).errorUnsuppressed(e);
 			}
 		}
-		TraceEvent("BackupWorkerTerminated", self.myId).error(err, true);
+		TraceEvent("BackupWorkerTerminated", self.myId).errorUnsuppressed(err);
 		if (err.code() != error_code_actor_cancelled && err.code() != error_code_worker_removed) {
 			throw err;
 		}

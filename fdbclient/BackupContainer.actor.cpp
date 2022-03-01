@@ -22,6 +22,7 @@
 #include <ostream>
 
 // FIXME: Trim this down
+#include "contrib/fmt-8.0.1/include/fmt/format.h"
 #include "flow/Platform.actor.h"
 #include "fdbclient/AsyncTaskThread.h"
 #include "fdbclient/BackupContainer.h"
@@ -75,13 +76,13 @@ std::string IBackupContainer::ExpireProgress::toString() const {
 
 void BackupFileList::toStream(FILE* fout) const {
 	for (const RangeFile& f : ranges) {
-		fprintf(fout, "range %" PRId64 " %s\n", f.fileSize, f.fileName.c_str());
+		fmt::print(fout, "range {0} {1}\n", f.fileSize, f.fileName);
 	}
 	for (const LogFile& f : logs) {
-		fprintf(fout, "log %" PRId64 " %s\n", f.fileSize, f.fileName.c_str());
+		fmt::print(fout, "log {0} {1}\n", f.fileSize, f.fileName);
 	}
 	for (const KeyspaceSnapshotFile& f : snapshots) {
-		fprintf(fout, "snapshotManifest %" PRId64 " %s\n", f.totalSize, f.fileName.c_str());
+		fmt::print(fout, "snapshotManifest {0} {1}\n", f.totalSize, f.fileName);
 	}
 }
 
@@ -304,9 +305,9 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 			throw;
 
 		TraceEvent m(SevWarn, "BackupContainer");
+		m.error(e);
 		m.detail("Description", "Invalid container specification.  See help.");
 		m.detail("URL", url);
-		m.error(e);
 		if (e.code() == error_code_backup_invalid_url)
 			m.detail("LastOpenError", lastOpenError);
 
@@ -359,10 +360,9 @@ ACTOR Future<std::vector<std::string>> listContainers_impl(std::string baseURL) 
 			throw;
 
 		TraceEvent m(SevWarn, "BackupContainer");
-
+		m.error(e);
 		m.detail("Description", "Invalid backup container URL prefix.  See help.");
 		m.detail("URL", baseURL);
-		m.error(e);
 		if (e.code() == error_code_backup_invalid_url)
 			m.detail("LastOpenError", IBackupContainer::lastOpenError);
 

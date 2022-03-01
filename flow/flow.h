@@ -24,10 +24,12 @@
 #include "flow/FastRef.h"
 #pragma once
 
+#ifdef _MSC_VER
 #pragma warning(disable : 4244 4267) // SOMEDAY: Carefully check for integer overflow issues (e.g. size_t to int
 // conversions like this suppresses)
 #pragma warning(disable : 4345)
 #pragma warning(error : 4239)
+#endif
 
 #include <vector>
 #include <queue>
@@ -59,10 +61,11 @@
 #define TEST(condition)                                                                                                \
 	if (!(condition)) {                                                                                                \
 	} else {                                                                                                           \
-		static TraceEvent* __test = &(TraceEvent("CodeCoverage")                                                       \
-		                                  .detail("File", __FILE__)                                                    \
-		                                  .detail("Line", __LINE__)                                                    \
-		                                  .detail("Condition", #condition));                                           \
+		static BaseTraceEvent* __test =                                                                                \
+		    &(TraceEvent(intToSeverity(FLOW_KNOBS->CODE_COV_TRACE_EVENT_SEVERITY), "CodeCoverage")                     \
+		          .detail("File", __FILE__)                                                                            \
+		          .detail("Line", __LINE__)                                                                            \
+		          .detail("Condition", #condition));                                                                   \
 		(void)__test;                                                                                                  \
 	}
 
@@ -445,7 +448,8 @@ struct LineageProperties : LineagePropertiesBase {
 	}
 };
 
-struct ActorLineage : ThreadSafeReferenceCounted<ActorLineage> {
+class ActorLineage : public ThreadSafeReferenceCounted<ActorLineage> {
+public:
 	friend class LineageReference;
 
 	struct Property {
@@ -545,6 +549,11 @@ public:
 	LineageReference() : Reference<ActorLineage>(nullptr), actorName_(""), allocated_(false) {}
 	explicit LineageReference(ActorLineage* ptr) : Reference<ActorLineage>(ptr), actorName_(""), allocated_(false) {}
 	LineageReference(const LineageReference& r) : Reference<ActorLineage>(r), actorName_(""), allocated_(false) {}
+	LineageReference(LineageReference&& r)
+	  : Reference<ActorLineage>(std::forward<LineageReference>(r)), actorName_(r.actorName_), allocated_(r.allocated_) {
+		r.actorName_ = "";
+		r.allocated_ = false;
+	}
 
 	void setActorName(const char* name) { actorName_ = name; }
 	const char* actorName() { return actorName_; }
@@ -739,7 +748,14 @@ public:
 	int getFutureReferenceCount() const { return futures; }
 	int getPromiseReferenceCount() const { return promises; }
 
-	virtual void destroy() { delete this; }
+	// Derived classes should override destroy.
+	virtual void destroy() {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdelete-non-virtual-dtor"
+		delete this;
+#pragma clang diagnostic pop
+	}
+
 	virtual void cancel() {}
 
 	void addCallbackAndDelFutureRef(Callback<T>* cb) {
@@ -791,11 +807,11 @@ public:
 	Future(const Future<T>& rhs) : sav(rhs.sav) {
 		if (sav)
 			sav->addFutureRef();
-		// if (sav->endpoint.isValid()) cout << "Future copied for " << sav->endpoint.key << endl;
+		// if (sav->endpoint.isValid()) std::cout << "Future copied for " << sav->endpoint.key << std::endl;
 	}
 	Future(Future<T>&& rhs) noexcept : sav(rhs.sav) {
 		rhs.sav = 0;
-		// if (sav->endpoint.isValid()) cout << "Future moved for " << sav->endpoint.key << endl;
+		// if (sav->endpoint.isValid()) std::cout << "Future moved for " << sav->endpoint.key << std::endl;
 	}
 	Future(const T& presentValue) : sav(new SAV<T>(1, 0)) { sav->send(presentValue); }
 	Future(T&& presentValue) : sav(new SAV<T>(1, 0)) { sav->send(std::move(presentValue)); }
@@ -808,7 +824,7 @@ public:
 #endif
 
 	~Future() {
-		// if (sav && sav->endpoint.isValid()) cout << "Future destroyed for " << sav->endpoint.key << endl;
+		// if (sav && sav->endpoint.isValid()) std::cout << "Future destroyed for " << sav->endpoint.key << std::endl;
 		if (sav)
 			sav->delFutureRef();
 	}
@@ -854,7 +870,7 @@ public:
 	int getPromiseReferenceCount() const { return sav->getPromiseReferenceCount(); }
 
 	explicit Future(SAV<T>* sav) : sav(sav) {
-		// if (sav->endpoint.isValid()) cout << "Future created for " << sav->endpoint.key << endl;
+		// if (sav->endpoint.isValid()) std::cout << "Future created for " << sav->endpoint.key << std::endl;
 	}
 
 private:
@@ -958,6 +974,8 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 	NotifiedQueue(int futures, int promises) : promises(promises), futures(futures), onEmpty(nullptr) {
 		SingleCallback<T>::next = this;
 	}
+
+	virtual ~NotifiedQueue() = default;
 
 	bool isReady() const { return !queue.empty() || error.isValid(); }
 	bool isError() const { return queue.empty() && error.isValid(); } // the *next* thing queued is an error

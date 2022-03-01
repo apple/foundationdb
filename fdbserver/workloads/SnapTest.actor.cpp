@@ -4,7 +4,7 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/SystemData.h"
 #include "fdbrpc/ContinuousSample.h"
-#include "fdbmonitor/SimpleIni.h"
+#include "fdbclient/SimpleIni.h"
 #include "fdbserver/Status.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -21,10 +21,10 @@ void getVersionAndnumTags(TraceEventFields md, Version& version, int& numTags) {
 }
 
 void getTagAndDurableVersion(TraceEventFields md, Version version, Tag& tag, Version& durableVersion) {
-	Version verifyVersion;
 	durableVersion = -1;
 
-	verifyVersion = boost::lexical_cast<int64_t>(md.getValue("Version"));
+	// verify version:
+	boost::lexical_cast<int64_t>(md.getValue("Version"));
 	std::string tagString = md.getValue("Tag");
 	int colon = tagString.find_first_of(':');
 	std::string localityString = tagString.substr(0, colon);
@@ -40,11 +40,11 @@ void getMinAndMaxTLogVersions(TraceEventFields md,
                               Tag tag,
                               Version& minTLogVersion,
                               Version& maxTLogVersion) {
-	Version verifyVersion;
 	Tag verifyTag;
 	minTLogVersion = maxTLogVersion = -1;
 
-	verifyVersion = boost::lexical_cast<int64_t>(md.getValue("Version"));
+	// verify version:
+	boost::lexical_cast<int64_t>(md.getValue("Version"));
 	std::string tagString = md.getValue("Tag");
 	int colon = tagString.find_first_of(':');
 	std::string localityString = tagString.substr(0, colon);
@@ -155,11 +155,11 @@ public: // workload functions
 		return _check(cx, this);
 	}
 
-	void getMetrics(vector<PerfMetric>& m) override { TraceEvent("SnapTestWorkloadGetMetrics"); }
+	void getMetrics(std::vector<PerfMetric>& m) override { TraceEvent("SnapTestWorkloadGetMetrics"); }
 
 	ACTOR Future<Void> _create_keys(Database cx, std::string prefix, bool even = true) {
 		state Transaction tr(cx);
-		state vector<int64_t> keys;
+		state std::vector<int64_t> keys;
 
 		keys.reserve(1000);
 		for (int i = 0; i < 1000; i++) {

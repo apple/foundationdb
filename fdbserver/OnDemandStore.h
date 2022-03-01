@@ -41,8 +41,8 @@ public:
 	bool exists() const;
 	IKeyValueStore* operator->();
 
-	Future<Void> getError() override;
-	Future<Void> onClosed() override;
+	Future<Void> getError() const override;
+	Future<Void> onClosed() const override;
 	void dispose() override;
 	void close() override;
 };

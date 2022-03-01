@@ -19,12 +19,16 @@
  */
 
 #define SQLITE_THREADSAFE 0 // also in sqlite3.amalgamation.c!
+#include "contrib/fmt-8.0.1/include/fmt/format.h"
 #include "flow/crc32c.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/CoroFlow.h"
 #include "fdbserver/Knobs.h"
 #include "flow/Hash3.h"
 #include "flow/xxhash.h"
+
+// for unprintable
+#include "fdbclient/NativeAPI.actor.h"
 
 extern "C" {
 #include "fdbserver/sqlite/sqliteInt.h"
@@ -899,7 +903,7 @@ struct RawCursor {
 		}
 	}
 	void fastClear(KeyRangeRef keys, bool& freeTableEmpty) {
-		vector<int> clearBuffer(SERVER_KNOBS->CLEAR_BUFFER_SIZE);
+		std::vector<int> clearBuffer(SERVER_KNOBS->CLEAR_BUFFER_SIZE);
 		clearBuffer[0] = 0;
 
 		while (true) {
@@ -937,7 +941,7 @@ struct RawCursor {
 		}
 	}
 	int lazyDelete(int desiredPages) {
-		vector<int> clearBuffer(SERVER_KNOBS->CLEAR_BUFFER_SIZE);
+		std::vector<int> clearBuffer(SERVER_KNOBS->CLEAR_BUFFER_SIZE);
 		clearBuffer[0] = 0;
 
 		IntKeyCursor fc(db, db.freetable, true);
@@ -1567,8 +1571,8 @@ public:
 	void dispose() override { doClose(this, true); }
 	void close() override { doClose(this, false); }
 
-	Future<Void> getError() override { return delayed(readThreads->getError() || writeThread->getError()); }
-	Future<Void> onClosed() override { return stopped.getFuture(); }
+	Future<Void> getError() const override { return delayed(readThreads->getError() || writeThread->getError()); }
+	Future<Void> onClosed() const override { return stopped.getFuture(); }
 
 	KeyValueStoreType getType() const override { return type; }
 	StorageBytes getStorageBytes() const override;
@@ -1577,9 +1581,12 @@ public:
 	void clear(KeyRangeRef range, const Arena* arena = nullptr) override;
 	Future<Void> commit(bool sequential = false) override;
 
-	Future<Optional<Value>> readValue(KeyRef key, Optional<UID> debugID) override;
-	Future<Optional<Value>> readValuePrefix(KeyRef key, int maxLength, Optional<UID> debugID) override;
-	Future<RangeResult> readRange(KeyRangeRef keys, int rowLimit = 1 << 30, int byteLimit = 1 << 30) override;
+	Future<Optional<Value>> readValue(KeyRef key, IKeyValueStore::ReadType, Optional<UID> debugID) override;
+	Future<Optional<Value>> readValuePrefix(KeyRef key,
+	                                        int maxLength,
+	                                        IKeyValueStore::ReadType,
+	                                        Optional<UID> debugID) override;
+	Future<RangeResult> readRange(KeyRangeRef keys, int rowLimit, int byteLimit, IKeyValueStore::ReadType) override;
 
 	KeyValueStoreSQLite(std::string const& filename,
 	                    UID logID,
@@ -1611,7 +1618,7 @@ private:
 	volatile int64_t diskBytesUsed;
 	volatile int64_t freeListPages;
 
-	vector<Reference<ReadCursor>> readCursors;
+	std::vector<Reference<ReadCursor>> readCursors;
 	Reference<IAsyncFile> dbFile, walFile;
 
 	struct Reader : IThreadPoolReceiver {
@@ -1718,7 +1725,7 @@ private:
 		volatile int64_t& diskBytesUsed;
 		volatile int64_t& freeListPages;
 		UID dbgid;
-		vector<Reference<ReadCursor>>& readThreads;
+		std::vector<Reference<ReadCursor>>& readThreads;
 		bool checkAllChecksumsOnOpen;
 		bool checkIntegrityOnOpen;
 
@@ -1731,7 +1738,7 @@ private:
 		                volatile int64_t& diskBytesUsed,
 		                volatile int64_t& freeListPages,
 		                UID dbgid,
-		                vector<Reference<ReadCursor>>* pReadThreads)
+		                std::vector<Reference<ReadCursor>>* pReadThreads)
 		  : kvs(kvs), conn(kvs->filename, isBtreeV2, isBtreeV2), cursor(nullptr), commits(), setsThisCommit(),
 		    freeTableEmpty(false), writesComplete(writesComplete), springCleaningStats(springCleaningStats),
 		    diskBytesUsed(diskBytesUsed), freeListPages(freeListPages), dbgid(dbgid), readThreads(*pReadThreads),
@@ -2055,8 +2062,8 @@ private:
 			}
 		} catch (Error& e) {
 			TraceEvent(SevError, "KVDoCloseError", self->logID)
+			    .errorUnsuppressed(e)
 			    .detail("Filename", self->filename)
-			    .error(e, true)
 			    .detail("Reason", e.code() == error_code_platform_error ? "could not delete database" : "unknown");
 			error = e;
 		}
@@ -2135,6 +2142,7 @@ KeyValueStoreSQLite::KeyValueStoreSQLite(std::string const& filename,
 	                                                          // the cache sizes for individual threads?
 	TaskPriority taskId = g_network->getCurrentTask();
 	g_network->setCurrentTask(TaskPriority::DiskWrite);
+	// Note: the below is actually a coroutine and not a thread.
 	writeThread->addThread(new Writer(this,
 	                                  type == KeyValueStoreType::SSD_BTREE_V2,
 	                                  checkChecksums,
@@ -2144,7 +2152,8 @@ KeyValueStoreSQLite::KeyValueStoreSQLite(std::string const& filename,
 	                                  diskBytesUsed,
 	                                  freeListPages,
 	                                  id,
-	                                  &readCursors));
+	                                  &readCursors),
+	                       "fdb-sqlite-wr");
 	g_network->setCurrentTask(taskId);
 	auto p = new Writer::InitAction();
 	auto f = p->result.getFuture();
@@ -2171,9 +2180,16 @@ void KeyValueStoreSQLite::startReadThreads() {
 	int nReadThreads = readCursors.size();
 	TaskPriority taskId = g_network->getCurrentTask();
 	g_network->setCurrentTask(TaskPriority::DiskRead);
-	for (int i = 0; i < nReadThreads; i++)
+	for (int i = 0; i < nReadThreads; i++) {
+		std::string threadName = format("fdb-sqlite-r-%d", i);
+		if (threadName.size() > 15) {
+			threadName = "fdb-sqlite-r";
+		}
+		//  Note: the below is actually a coroutine and not a thread.
 		readThreads->addThread(
-		    new Reader(filename, type == KeyValueStoreType::SSD_BTREE_V2, readsComplete, logID, &readCursors[i]));
+		    new Reader(filename, type == KeyValueStoreType::SSD_BTREE_V2, readsComplete, logID, &readCursors[i]),
+		    threadName.c_str());
+	}
 	g_network->setCurrentTask(taskId);
 }
 
@@ -2192,21 +2208,27 @@ Future<Void> KeyValueStoreSQLite::commit(bool sequential) {
 	writeThread->post(p);
 	return f;
 }
-Future<Optional<Value>> KeyValueStoreSQLite::readValue(KeyRef key, Optional<UID> debugID) {
+Future<Optional<Value>> KeyValueStoreSQLite::readValue(KeyRef key, IKeyValueStore::ReadType, Optional<UID> debugID) {
 	++readsRequested;
 	auto p = new Reader::ReadValueAction(key, debugID);
 	auto f = p->result.getFuture();
 	readThreads->post(p);
 	return f;
 }
-Future<Optional<Value>> KeyValueStoreSQLite::readValuePrefix(KeyRef key, int maxLength, Optional<UID> debugID) {
+Future<Optional<Value>> KeyValueStoreSQLite::readValuePrefix(KeyRef key,
+                                                             int maxLength,
+                                                             IKeyValueStore::ReadType,
+                                                             Optional<UID> debugID) {
 	++readsRequested;
 	auto p = new Reader::ReadValuePrefixAction(key, maxLength, debugID);
 	auto f = p->result.getFuture();
 	readThreads->post(p);
 	return f;
 }
-Future<RangeResult> KeyValueStoreSQLite::readRange(KeyRangeRef keys, int rowLimit, int byteLimit) {
+Future<RangeResult> KeyValueStoreSQLite::readRange(KeyRangeRef keys,
+                                                   int rowLimit,
+                                                   int byteLimit,
+                                                   IKeyValueStore::ReadType) {
 	++readsRequested;
 	auto p = new Reader::ReadRangeAction(keys, rowLimit, byteLimit);
 	auto f = p->result.getFuture();
@@ -2263,6 +2285,82 @@ ACTOR Future<Void> KVFileCheck(std::string filename, bool integrity) {
 
 	// Wait for integry check to finish
 	wait(success(store->readValue(StringRef())));
+
+	if (store->getError().isError())
+		wait(store->getError());
+	Future<Void> c = store->onClosed();
+	store->close();
+	wait(c);
+
+	return Void();
+}
+
+ACTOR Future<Void> KVFileDump(std::string filename) {
+	if (!fileExists(filename))
+		throw file_not_found();
+
+	StringRef kvFile(filename);
+	KeyValueStoreType type = KeyValueStoreType::END;
+	if (kvFile.endsWith(".fdb"_sr))
+		type = KeyValueStoreType::SSD_BTREE_V1;
+	else if (kvFile.endsWith(".sqlite"_sr))
+		type = KeyValueStoreType::SSD_BTREE_V2;
+	ASSERT(type != KeyValueStoreType::END);
+
+	state IKeyValueStore* store = keyValueStoreSQLite(filename, UID(0, 0), type);
+	ASSERT(store != nullptr);
+
+	// dump
+	state int64_t count = 0;
+	state Key k;
+	state Key endk = allKeys.end;
+	state bool debug = false;
+
+	const char* startKey = getenv("FDB_DUMP_STARTKEY");
+	const char* endKey = getenv("FDB_DUMP_ENDKEY");
+	const char* debugS = getenv("FDB_DUMP_DEBUG");
+	if (startKey != NULL)
+		k = StringRef(unprintable(std::string(startKey)));
+	if (endKey != NULL)
+		endk = StringRef(unprintable(std::string(endKey)));
+	if (debugS != NULL)
+		debug = true;
+
+	fprintf(stderr,
+	        "Dump start: %s, end: %s, debug: %s\n",
+	        printable(k).c_str(),
+	        printable(endk).c_str(),
+	        debug ? "true" : "false");
+
+	while (true) {
+		RangeResult kv = wait(store->readRange(KeyRangeRef(k, endk), 1000));
+		for (auto& one : kv) {
+			int size = 0;
+			const uint8_t* data = NULL;
+
+			size = one.key.size();
+			data = one.key.begin();
+			fwrite(&size, sizeof(int), 1, stdout);
+			fwrite(data, sizeof(uint8_t), size, stdout);
+
+			size = one.value.size();
+			data = one.value.begin();
+			fwrite(&size, sizeof(int), 1, stdout);
+			fwrite(data, sizeof(uint8_t), size, stdout);
+
+			if (debug) {
+				fprintf(stderr, "key: %s\n", printable(one.key).c_str());
+				fprintf(stderr, "val: %s\n", printable(one.value).c_str());
+			}
+		}
+
+		count += kv.size();
+		if (kv.size() <= 0)
+			break;
+		k = keyAfter(kv[kv.size() - 1].key);
+	}
+	fflush(stdout);
+	fmt::print(stderr, "Counted: {}\n", count);
 
 	if (store->getError().isError())
 		wait(store->getError());

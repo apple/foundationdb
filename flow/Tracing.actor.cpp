@@ -20,6 +20,7 @@
 
 #include "flow/Tracing.h"
 
+#include "flow/Knobs.h"
 #include "flow/network.h"
 
 #include <functional>
@@ -101,7 +102,11 @@ struct TraceRequest {
 
 // A server listening for UDP trace messages, run only in simulation.
 ACTOR Future<Void> simulationStartServer() {
-	TraceEvent(SevInfo, "UDPServerStarted").detail("Port", FLOW_KNOBS->TRACING_UDP_LISTENER_PORT);
+	// We're going to force the address to be loopback regardless of FLOW_KNOBS->TRACING_UDP_LISTENER_ADDR
+	// because we're in simulation testing mode.
+	TraceEvent(SevInfo, "UDPServerStarted")
+	    .detail("Address", "127.0.0.1")
+	    .detail("Port", FLOW_KNOBS->TRACING_UDP_LISTENER_PORT);
 	state NetworkAddress localAddress =
 	    NetworkAddress::parse("127.0.0.1:" + std::to_string(FLOW_KNOBS->TRACING_UDP_LISTENER_PORT));
 	state Reference<IUDPSocket> serverSocket = wait(INetworkConnections::net()->createUDPSocket(localAddress));
@@ -122,26 +127,28 @@ ACTOR Future<Void> simulationStartServer() {
 	}
 }
 
+/*
 // Runs on an interval, printing debug information and performing other
 // connection tasks.
 ACTOR Future<Void> traceLog(int* pendingMessages, bool* sendError) {
-	state bool sendErrorReset = false;
+    state bool sendErrorReset = false;
 
-	loop {
-		TraceEvent("TracingSpanQueueSize").detail("PendingMessages", *pendingMessages);
+    loop {
+        TraceEvent("TracingSpanQueueSize").detail("PendingMessages", *pendingMessages);
 
-		// Wait at least one full loop before attempting to send messages
-		// again.
-		if (sendErrorReset) {
-			sendErrorReset = false;
-			*sendError = false;
-		} else if (*sendError) {
-			sendErrorReset = true;
-		}
+        // Wait at least one full loop before attempting to send messages
+        // again.
+        if (sendErrorReset) {
+            sendErrorReset = false;
+            *sendError = false;
+        } else if (*sendError) {
+            sendErrorReset = true;
+        }
 
-		wait(delay(kQueueSizeLogInterval));
-	}
+        wait(delay(kQueueSizeLogInterval));
+    }
 }
+*/
 
 struct UDPTracer : public ITracer {
 protected:
@@ -288,13 +295,16 @@ struct FastUDPTracer : public UDPTracer {
 		static std::once_flag once;
 		std::call_once(once, [&]() {
 			log_actor_ = fastTraceLogger(&unready_socket_messages_, &failed_messages_, &total_messages_, &send_error_);
+			std::string destAddr = FLOW_KNOBS->TRACING_UDP_LISTENER_ADDR;
 			if (g_network->isSimulated()) {
 				udp_server_actor_ = simulationStartServer();
+				// Force loopback when in simulation mode
+				destAddr = "127.0.0.1";
 			}
+			NetworkAddress destAddress =
+			    NetworkAddress::parse(destAddr + ":" + std::to_string(FLOW_KNOBS->TRACING_UDP_LISTENER_PORT));
 
-			NetworkAddress localAddress =
-			    NetworkAddress::parse("127.0.0.1:" + std::to_string(FLOW_KNOBS->TRACING_UDP_LISTENER_PORT));
-			socket_ = INetworkConnections::net()->createUDPSocket(localAddress);
+			socket_ = INetworkConnections::net()->createUDPSocket(destAddress);
 		});
 
 		if (span.location.name.size() == 0) {
@@ -373,7 +383,7 @@ void openTracer(TracerType type) {
 ITracer::~ITracer() {}
 
 Span& Span::operator=(Span&& o) {
-	if (begin > 0.0) {
+	if (begin > 0.0 && context.second() > 0) {
 		end = g_network->now();
 		g_tracer->trace(*this);
 	}
@@ -388,7 +398,7 @@ Span& Span::operator=(Span&& o) {
 }
 
 Span::~Span() {
-	if (begin > 0.0) {
+	if (begin > 0.0 && context.second() > 0) {
 		end = g_network->now();
 		g_tracer->trace(*this);
 	}

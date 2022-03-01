@@ -29,6 +29,7 @@
 #define FLOW_INDEXEDSET_ACTOR_H
 
 #include "flow/flow.h"
+#include "flow/Platform.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 ACTOR template <class Node>

@@ -24,6 +24,7 @@
 #include <stdio.h>
 #include <cinttypes>
 
+#include "contrib/fmt-8.0.1/include/fmt/format.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/SystemMonitor.h"
 #include "flow/TLSConfig.actor.h"
@@ -44,7 +45,7 @@ ACTOR Future<Void> _test() {
 	// tr->setVersion(1);
 
 	Version ver = wait(tr->getReadVersion());
-	printf("%" PRId64 "\n", ver);
+	fmt::print("{}\n", ver);
 
 	state std::vector<Future<Version>> versions;
 

@@ -244,7 +244,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 		return Void();
 	}
 
-	void getMetrics(vector<PerfMetric>& m) override {}
+	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
 WorkloadFactory<IncrementalBackupWorkload> IncrementalBackupWorkloadFactory("IncrementalBackup");

@@ -352,12 +352,14 @@ ArenaBlock* ArenaBlock::create(int dataSize, Reference<ArenaBlock>& next) {
 			b->bigSize = reqSize;
 			b->bigUsed = sizeof(ArenaBlock);
 
+#if !DEBUG_DETERMINISM
 			if (FLOW_KNOBS && g_allocation_tracing_disabled == 0 &&
 			    nondeterministicRandom()->random01() < (reqSize / FLOW_KNOBS->HUGE_ARENA_LOGGING_BYTES)) {
 				++g_allocation_tracing_disabled;
 				hugeArenaSample(reqSize);
 				--g_allocation_tracing_disabled;
 			}
+#endif
 			g_hugeArenaMemory.fetch_add(reqSize);
 
 			// If the new block has less free space than the old block, make the old block depend on it
@@ -611,5 +613,42 @@ template <class T>
 using SmallVectorRef10Proxy = SmallVectorRef<T, 10>;
 TEST_CASE("/flow/Arena/SmallVectorRef10") {
 	testVectorLike<SmallVectorRef10Proxy>();
+	return Void();
+}
+
+TEST_CASE("/flow/Arena/OptionalHash") {
+	std::hash<Optional<int>> hashFunc{};
+	Optional<int> a;
+	Optional<int> b;
+	Optional<int> c = 1;
+	Optional<int> d = 1;
+	Optional<int> e = 2;
+
+	ASSERT(hashFunc(a) == hashFunc(b));
+	ASSERT(hashFunc(a) != hashFunc(c));
+	ASSERT(hashFunc(c) == hashFunc(d));
+	ASSERT(hashFunc(c) != hashFunc(e));
+	ASSERT(hashFunc(a) == hashFunc(a));
+	ASSERT(hashFunc(c) == hashFunc(c));
+
+	return Void();
+}
+
+TEST_CASE("/flow/Arena/DefaultBoostHash") {
+	boost::hash<std::pair<Optional<int>, StringRef>> hashFunc;
+
+	auto a = std::make_pair(Optional<int>(), "foo"_sr);
+	auto b = std::make_pair(Optional<int>(), "foo"_sr);
+	auto c = std::make_pair(Optional<int>(), "bar"_sr);
+	auto d = std::make_pair(Optional<int>(1), "foo"_sr);
+	auto e = std::make_pair(Optional<int>(1), "foo"_sr);
+
+	ASSERT(hashFunc(a) == hashFunc(b));
+	ASSERT(hashFunc(a) != hashFunc(c));
+	ASSERT(hashFunc(a) != hashFunc(d));
+	ASSERT(hashFunc(d) == hashFunc(e));
+	ASSERT(hashFunc(a) == hashFunc(a));
+	ASSERT(hashFunc(d) == hashFunc(d));
+
 	return Void();
 }

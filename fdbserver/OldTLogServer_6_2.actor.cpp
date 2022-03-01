@@ -43,10 +43,8 @@
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-using std::make_pair;
 using std::max;
 using std::min;
-using std::pair;
 
 namespace oldTLog_6_2 {
 
@@ -129,8 +127,8 @@ public:
 	Future<Void> commit() { return queue->commit(); }
 
 	// Implements IClosable
-	Future<Void> getError() override { return queue->getError(); }
-	Future<Void> onClosed() override { return queue->onClosed(); }
+	Future<Void> getError() const override { return queue->getError(); }
+	Future<Void> onClosed() const override { return queue->onClosed(); }
 	void dispose() override {
 		queue->dispose();
 		delete this;
@@ -269,7 +267,7 @@ static StringRef stripTagMessagesKey(StringRef key) {
 	return key.substr(sizeof(UID) + sizeof(Tag) + persistTagMessagesKeys.begin.size());
 }
 
-static StringRef stripTagMessageRefsKey(StringRef key) {
+[[maybe_unused]] static StringRef stripTagMessageRefsKey(StringRef key) {
 	return key.substr(sizeof(UID) + sizeof(Tag) + persistTagMessageRefsKeys.begin.size());
 }
 
@@ -1168,6 +1166,9 @@ ACTOR Future<Void> updateStorage(TLogData* self) {
 				}
 
 				wait(logData->queueCommittedVersion.whenAtLeast(nextVersion));
+				if (logData->queueCommittedVersion.get() == std::numeric_limits<Version>::max()) {
+					return Void();
+				}
 				wait(delay(0, TaskPriority::UpdateStorage));
 
 				//TraceEvent("TlogUpdatePersist", self->dbgid).detail("LogId", logData->logId).detail("NextVersion", nextVersion).detail("Version", logData->version.get()).detail("PersistentDataDurableVer", logData->persistentDataDurableVersion).detail("QueueCommitVer", logData->queueCommittedVersion.get()).detail("PersistDataVer", logData->persistentDataVersion);
@@ -1220,6 +1221,9 @@ ACTOR Future<Void> updateStorage(TLogData* self) {
 		//TraceEvent("UpdateStorageVer", logData->logId).detail("NextVersion", nextVersion).detail("PersistentDataVersion", logData->persistentDataVersion).detail("TotalSize", totalSize);
 
 		wait(logData->queueCommittedVersion.whenAtLeast(nextVersion));
+		if (logData->queueCommittedVersion.get() == std::numeric_limits<Version>::max()) {
+			return Void();
+		}
 		wait(delay(0, TaskPriority::UpdateStorage));
 
 		if (nextVersion > logData->persistentDataVersion) {
@@ -1470,7 +1474,7 @@ ACTOR Future<Void> tLogPop(TLogData* self, TLogPopRequest req, Reference<LogData
 		TraceEvent("EnableTLogPlayAllIgnoredPops").log();
 		// use toBePopped and issue all the pops
 		std::map<Tag, Version>::iterator it;
-		vector<Future<Void>> ignoredPops;
+		std::vector<Future<Void>> ignoredPops;
 		self->ignorePopRequest = false;
 		self->ignorePopUid = "";
 		self->ignorePopDeadline = 0.0;
@@ -1904,8 +1908,8 @@ ACTOR Future<Void> tLogPeekStream(TLogData* self, TLogPeekStreamRequest req, Ref
 		} catch (Error& e) {
 			self->activePeekStreams--;
 			TraceEvent(SevDebug, "TLogPeekStreamEnd", logData->logId)
-			    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress())
-			    .error(e, true);
+			    .errorUnsuppressed(e)
+			    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
 
 			if (e.code() == error_code_end_of_stream || e.code() == error_code_operation_obsolete) {
 				req.reply.sendError(e);
@@ -2034,6 +2038,9 @@ ACTOR Future<Void> commitQueue(TLogData* self) {
 					       !self->largeDiskQueueCommitBytes.get()) {
 						wait(self->queueCommitEnd.whenAtLeast(self->queueCommitBegin) ||
 						     self->largeDiskQueueCommitBytes.onChange());
+					}
+					if (logData->queueCommittedVersion.get() == std::numeric_limits<Version>::max()) {
+						break;
 					}
 					self->sharedActors.send(doQueueCommit(self, logData, missingFinalCommit));
 					missingFinalCommit.clear();
@@ -2167,12 +2174,12 @@ ACTOR Future<Void> initPersistentState(TLogData* self, Reference<LogData> logDat
 	return Void();
 }
 
-ACTOR Future<Void> rejoinMasters(TLogData* self,
-                                 TLogInterface tli,
-                                 DBRecoveryCount recoveryCount,
-                                 Future<Void> registerWithMaster,
-                                 bool isPrimary) {
-	state UID lastMasterID(0, 0);
+ACTOR Future<Void> rejoinClusterController(TLogData* self,
+                                           TLogInterface tli,
+                                           DBRecoveryCount recoveryCount,
+                                           Future<Void> registerWithCC,
+                                           bool isPrimary) {
+	state LifetimeToken lastMasterLifetime;
 	loop {
 		auto const& inf = self->dbInfo->get();
 		bool isDisplaced =
@@ -2200,17 +2207,20 @@ ACTOR Future<Void> rejoinMasters(TLogData* self,
 			throw worker_removed();
 		}
 
-		if (registerWithMaster.isReady()) {
-			if (self->dbInfo->get().master.id() != lastMasterID) {
+		if (registerWithCC.isReady()) {
+			if (!lastMasterLifetime.isEqual(self->dbInfo->get().masterLifetime)) {
 				// The TLogRejoinRequest is needed to establish communications with a new master, which doesn't have our
 				// TLogInterface
 				TLogRejoinRequest req(tli);
-				TraceEvent("TLogRejoining", tli.id()).detail("Master", self->dbInfo->get().master.id());
+				TraceEvent("TLogRejoining", tli.id())
+				    .detail("ClusterController", self->dbInfo->get().clusterInterface.id())
+				    .detail("DbInfoMasterLifeTime", self->dbInfo->get().masterLifetime.toString())
+				    .detail("LastMasterLifeTime", lastMasterLifetime.toString());
 				choose {
-					when(TLogRejoinReply rep =
-					         wait(brokenPromiseToNever(self->dbInfo->get().master.tlogRejoin.getReply(req)))) {
+					when(TLogRejoinReply rep = wait(
+					         brokenPromiseToNever(self->dbInfo->get().clusterInterface.tlogRejoin.getReply(req)))) {
 						if (rep.masterIsRecovered)
-							lastMasterID = self->dbInfo->get().master.id();
+							lastMasterLifetime = self->dbInfo->get().masterLifetime;
 					}
 					when(wait(self->dbInfo->onChange())) {}
 				}
@@ -2218,7 +2228,7 @@ ACTOR Future<Void> rejoinMasters(TLogData* self,
 				wait(self->dbInfo->onChange());
 			}
 		} else {
-			wait(registerWithMaster || self->dbInfo->onChange());
+			wait(registerWithCC || self->dbInfo->onChange());
 		}
 	}
 }
@@ -2347,7 +2357,7 @@ ACTOR Future<Void> tLogSnapCreate(TLogSnapRequest snapReq, TLogData* self, Refer
 		}
 		snapReq.reply.send(Void());
 	} catch (Error& e) {
-		TraceEvent("TLogExecHelperError").error(e, true /*includeCancelled */);
+		TraceEvent("TLogExecHelperError").errorUnsuppressed(e);
 		if (e.code() != error_code_operation_cancelled) {
 			snapReq.reply.sendError(e);
 		} else {
@@ -2368,7 +2378,7 @@ ACTOR Future<Void> tLogEnablePopReq(TLogEnablePopRequest enablePopReq, TLogData*
 	TraceEvent("EnableTLogPlayAllIgnoredPops2").log();
 	// use toBePopped and issue all the pops
 	std::map<Tag, Version>::iterator it;
-	state vector<Future<Void>> ignoredPops;
+	state std::vector<Future<Void>> ignoredPops;
 	self->ignorePopRequest = false;
 	self->ignorePopDeadline = 0.0;
 	self->ignorePopUid = "";
@@ -2513,6 +2523,11 @@ void removeLog(TLogData* self, Reference<LogData> logData) {
 		return;
 	} else {
 		throw worker_removed();
+	}
+	if (logData->queueCommittingVersion == 0) {
+		// If the removed tlog never attempted a queue commit, the update storage loop could become stuck waiting for
+		// queueCommittedVersion to advance.
+		logData->queueCommittedVersion.set(std::numeric_limits<Version>::max());
 	}
 }
 
@@ -2834,7 +2849,7 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 	}
 
 	state int idx = 0;
-	state Promise<Void> registerWithMaster;
+	state Promise<Void> registerWithCC;
 	state std::map<UID, TLogInterface> id_interf;
 	state std::vector<std::pair<Version, UID>> logsByVersion;
 	for (idx = 0; idx < fVers.get().size(); idx++) {
@@ -2882,7 +2897,7 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 		logData->recoveryCount =
 		    BinaryReader::fromStringRef<DBRecoveryCount>(fRecoverCounts.get()[idx].value, Unversioned());
 		logData->removed =
-		    rejoinMasters(self, recruited, logData->recoveryCount, registerWithMaster.getFuture(), false);
+		    rejoinClusterController(self, recruited, logData->recoveryCount, registerWithCC.getFuture(), false);
 		removed.push_back(errorOr(logData->removed));
 		logsByVersion.emplace_back(ver, id1);
 
@@ -3005,8 +3020,8 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 		self->sharedActors.send(tLogCore(self, it.second, id_interf[it.first], false));
 	}
 
-	if (registerWithMaster.canBeSet())
-		registerWithMaster.send(Void());
+	if (registerWithCC.canBeSet())
+		registerWithCC.send(Void());
 	return Void();
 }
 
@@ -3023,7 +3038,7 @@ bool tlogTerminated(TLogData* self, IKeyValueStore* persistentData, TLogQueue* p
 
 	if (e.code() == error_code_worker_removed || e.code() == error_code_recruitment_failed ||
 	    e.code() == error_code_file_not_found) {
-		TraceEvent("TLogTerminated", self->dbgid).error(e, true);
+		TraceEvent("TLogTerminated", self->dbgid).errorUnsuppressed(e);
 		return true;
 	} else
 		return false;
@@ -3123,7 +3138,7 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 	self->id_data[recruited.id()] = logData;
 	logData->locality = req.locality;
 	logData->recoveryCount = req.epoch;
-	logData->removed = rejoinMasters(self, recruited, req.epoch, Future<Void>(Void()), req.isPrimary);
+	logData->removed = rejoinClusterController(self, recruited, req.epoch, Future<Void>(Void()), req.isPrimary);
 	self->popOrder.push_back(recruited.id());
 	self->spillOrder.push_back(recruited.id());
 
@@ -3321,7 +3336,7 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 		}
 	} catch (Error& e) {
 		self.terminated.send(Void());
-		TraceEvent("TLogError", tlogId).error(e, true);
+		TraceEvent("TLogError", tlogId).errorUnsuppressed(e);
 		if (recovered.canBeSet())
 			recovered.send(Void());
 
@@ -3376,7 +3391,7 @@ struct DequeAllocator : std::allocator<T> {
 	}
 };
 
-TEST_CASE("/fdbserver/tlogserver/VersionMessagesOverheadFactor") {
+TEST_CASE("Lfdbserver/tlogserver/VersionMessagesOverheadFactor") {
 
 	typedef std::pair<Version, LengthPrefixedStringRef> TestType; // type used by versionMessages
 

@@ -46,6 +46,9 @@ struct ProcessClass {
 		StorageCacheClass,
 		BackupClass,
 		GrvProxyClass,
+		BlobManagerClass,
+		BlobWorkerClass,
+		EncryptKeyProxyClass,
 		InvalidClass = -1
 	};
 
@@ -69,8 +72,11 @@ struct ProcessClass {
 		ClusterController,
 		DataDistributor,
 		Ratekeeper,
+		BlobManager,
+		BlobWorker,
 		StorageCache,
 		Backup,
+		EncryptKeyProxy,
 		Worker, // used for actor lineage tracking
 		NoRole
 	};
@@ -104,8 +110,11 @@ public:
 		else if (s=="data_distributor") _class = DataDistributorClass;
 		else if (s=="coordinator") _class = CoordinatorClass;
 		else if (s=="ratekeeper") _class = RatekeeperClass;
+		else if (s=="blob_manager") _class = BlobManagerClass;
+		else if (s=="blob_worker") _class = BlobWorkerClass;
 		else if (s=="storage_cache") _class = StorageCacheClass;
 		else if (s=="backup") _class = BackupClass;
+		else if (s=="encrypt_key_proxy") _class = EncryptKeyProxyClass;
 		else _class = InvalidClass;
 	}
 
@@ -127,12 +136,15 @@ public:
 		else if (classStr=="log") _class = LogClass;
 		else if (classStr=="router") _class = LogRouterClass;
 		else if (classStr=="cluster_controller") _class = ClusterControllerClass;
-		else if (classStr == "fast_restore") _class = FastRestoreClass;
+		else if (classStr=="fast_restore") _class = FastRestoreClass;
 		else if (classStr=="data_distributor") _class = DataDistributorClass;
 		else if (classStr=="coordinator") _class = CoordinatorClass;
 		else if (classStr=="ratekeeper") _class = RatekeeperClass;
+		else if (classStr=="blob_manager") _class = BlobManagerClass;
+		else if (classStr=="blob_worker") _class = BlobWorkerClass;
 		else if (classStr=="storage_cache") _class = StorageCacheClass;
 		else if (classStr=="backup") _class = BackupClass;
+		else if (classStr=="encrypt_key_proxy") _class = EncryptKeyProxyClass;
 		else _class = InvalidClass;
 
 		if (sourceStr=="command_line") _source = CommandLineSource;
@@ -168,8 +180,11 @@ public:
 			case DataDistributorClass: return "data_distributor";
 			case CoordinatorClass: return "coordinator";
 			case RatekeeperClass: return "ratekeeper";
+			case BlobManagerClass: return "blob_manager";
+			case BlobWorkerClass: return "blob_worker";
 			case StorageCacheClass: return "storage_cache";
 			case BackupClass: return "backup";
+			case EncryptKeyProxyClass: return "encrypt_key_proxy";
 			default: return "invalid";
 		}
 	}

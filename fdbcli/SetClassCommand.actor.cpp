@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include "contrib/fmt-8.0.1/include/fmt/format.h"
+
 #include "fdbcli/fdbcli.actor.h"
 
 #include "fdbclient/FDBOptions.g.h"
@@ -48,7 +50,7 @@ ACTOR Future<Void> printProcessClass(Reference<IDatabase> db) {
 			ASSERT(processSourceList.size() == processTypeList.size());
 			if (!processTypeList.size())
 				printf("No processes are registered in the database.\n");
-			printf("There are currently %zu processes in the database:\n", processTypeList.size());
+			fmt::print("There are currently {} processes in the database:\n", processTypeList.size());
 			for (int index = 0; index < processTypeList.size(); index++) {
 				std::string address =
 				    processTypeList[index].key.removePrefix(fdb_cli::processClassTypeSpecialKeyRange.begin).toString();
@@ -75,6 +77,13 @@ ACTOR Future<bool> setProcessClass(Reference<IDatabase> db, KeyRef network_addre
 	loop {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		try {
+			state ThreadFuture<Optional<Value>> result =
+			    tr->get(network_address.withPrefix(fdb_cli::processClassTypeSpecialKeyRange.begin));
+			Optional<Value> val = wait(safeThreadFutureToFuture(result));
+			if (!val.present()) {
+				printf("No matching addresses found\n");
+				return false;
+			}
 			tr->set(network_address.withPrefix(fdb_cli::processClassTypeSpecialKeyRange.begin), class_type);
 			wait(safeThreadFutureToFuture(tr->commit()));
 			return true;

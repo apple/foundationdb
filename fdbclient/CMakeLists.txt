@@ -20,12 +20,26 @@ set(FDBCLIENT_SRCS
   BackupContainerS3BlobStore.h
   ClientBooleanParams.cpp
   ClientBooleanParams.h
+  BlobWorkerInterface.h
+  BlobGranuleReader.actor.cpp
+  BlobGranuleReader.actor.h
+  BlobGranuleCommon.h
+  BlobGranuleFiles.cpp
+  BlobGranuleFiles.h
+  BlobWorkerCommon.h
   ClientKnobCollection.cpp
   ClientKnobCollection.h
   ClientKnobs.cpp
   ClientKnobs.h
   ClientLogEvents.h
+  ClientVersion.h
   ClientWorkerInterface.h
+  ClusterConnectionFile.actor.cpp
+  ClusterConnectionFile.h
+  ClusterConnectionKey.actor.cpp
+  ClusterConnectionKey.actor.h
+  ClusterConnectionMemoryRecord.actor.cpp
+  ClusterConnectionMemoryRecord.h
   ClusterInterface.h
   CommitProxyInterface.h
   CommitTransaction.h
@@ -33,6 +47,7 @@ set(FDBCLIENT_SRCS
   ConfigKnobs.h
   ConfigTransactionInterface.cpp
   ConfigTransactionInterface.h
+  ConvertUTF.h
   CoordinationInterface.h
   DatabaseBackupAgent.actor.cpp
   DatabaseConfiguration.cpp
@@ -44,10 +59,12 @@ set(FDBCLIENT_SRCS
   FDBTypes.h
   FluentDSampleIngestor.cpp
   FileBackupAgent.actor.cpp
+  GenericManagementAPI.actor.h
   GlobalConfig.h
   GlobalConfig.actor.h
   GlobalConfig.actor.cpp
   GrvProxyInterface.h
+  HighContentionPrefixAllocator.actor.h
   HTTP.actor.cpp
   IClientApi.h
   IConfigTransaction.cpp
@@ -62,6 +79,8 @@ set(FDBCLIENT_SRCS
   Knobs.h
   IKnobCollection.cpp
   IKnobCollection.h
+  LocalClientAPI.cpp
+  LocalClientAPI.h
   ManagementAPI.actor.cpp
   ManagementAPI.actor.h
   MonitorLeader.actor.cpp
@@ -100,6 +119,7 @@ set(FDBCLIENT_SRCS
   ServerKnobs.cpp
   ServerKnobs.h
   SimpleConfigTransaction.h
+  SimpleIni.h
   SnapshotCache.h
   SpecialKeySpace.actor.cpp
   SpecialKeySpace.actor.h
@@ -127,6 +147,7 @@ set(FDBCLIENT_SRCS
   VersionedMap.actor.h
   VersionedMap.h
   VersionedMap.cpp
+  WellKnownEndpoints.h
   WriteMap.h
   json_spirit/json_spirit_error_position.h
   json_spirit/json_spirit_reader_template.h
@@ -182,14 +203,14 @@ if(BUILD_AZURE_BACKUP)
 endif()
 
 add_flow_target(STATIC_LIBRARY NAME fdbclient SRCS ${FDBCLIENT_SRCS} ADDL_SRCS ${options_srcs})
-add_dependencies(fdbclient fdboptions fdb_c_options)
+add_dependencies(fdbclient fdboptions)
 target_link_libraries(fdbclient PUBLIC fdbrpc msgpack)
 
 # Create a separate fdbclient library with sampling enabled. This lets
 # fdbserver retain sampling functionality in client code while disabling
 # sampling for pure clients.
 add_flow_target(STATIC_LIBRARY NAME fdbclient_sampling SRCS ${FDBCLIENT_SRCS} ADDL_SRCS ${options_srcs})
-add_dependencies(fdbclient_sampling fdboptions fdb_c_options)
+add_dependencies(fdbclient_sampling fdboptions)
 target_link_libraries(fdbclient_sampling PUBLIC fdbrpc_sampling msgpack)
 target_compile_definitions(fdbclient_sampling PRIVATE -DENABLE_SAMPLING)
 if(WIN32)

@@ -113,7 +113,7 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 		return _setup(cx, this);
 	}
 	ACTOR static Future<Void> _start(Database cx, WriteTagThrottlingWorkload* self) {
-		vector<Future<Void>> clientActors;
+		std::vector<Future<Void>> clientActors;
 		int actorId;
 		for (actorId = 0; actorId < self->goodActorPerClient; ++actorId) {
 			clientActors.push_back(clientActor(false, actorId, 0, cx, self));
@@ -152,7 +152,7 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 		}
 		return true;
 	}
-	void getMetrics(vector<PerfMetric>& m) override {
+	void getMetrics(std::vector<PerfMetric>& m) override {
 		m.emplace_back("Transactions (badActor)", badActorTrNum, Averaged::False);
 		m.emplace_back("Transactions (goodActor)", goodActorTrNum, Averaged::False);
 		m.emplace_back("Avg Latency (ms, badActor)", 1000 * badActorTotalLatency / badActorTrNum, Averaged::True);
@@ -236,8 +236,8 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 				// give tag to client
 				if (self->writeThrottle) {
 					ASSERT(CLIENT_KNOBS->MAX_TAGS_PER_TRANSACTION >= MIN_TAGS_PER_TRANSACTION);
-					tr.options.tags.clear();
-					tr.options.readTags.clear();
+					tr.trState->options.tags.clear();
+					tr.trState->options.readTags.clear();
 					if (isBadActor) {
 						tr.setOption(FDBTransactionOptions::AUTO_THROTTLE_TAG, self->badTag);
 					} else if (deterministicRandom()->coinflip()) {

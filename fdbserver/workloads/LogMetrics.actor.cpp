@@ -52,8 +52,8 @@ struct LogMetricsWorkload : TestWorkload {
 	ACTOR Future<Void> setSystemRate(LogMetricsWorkload* self, Database cx, uint32_t rate) {
 		// set worker interval and ss interval
 		state BinaryWriter br(Unversioned());
-		vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
-		// vector<Future<Void>> replies;
+		std::vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
+		// std::vector<Future<Void>> replies;
 		TraceEvent("RateChangeTrigger").log();
 		SetMetricsLogRateRequest req(rate);
 		for (int i = 0; i < workers.size(); i++) {
@@ -91,7 +91,7 @@ struct LogMetricsWorkload : TestWorkload {
 	}
 
 	Future<bool> check(Database const& cx) override { return true; }
-	void getMetrics(vector<PerfMetric>& m) override {}
+	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
 WorkloadFactory<LogMetricsWorkload> LogMetricsWorkloadFactory("LogMetrics");

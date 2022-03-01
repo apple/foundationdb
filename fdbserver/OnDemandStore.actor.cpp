@@ -56,11 +56,11 @@ IKeyValueStore* OnDemandStore::operator->() {
 	return get();
 }
 
-Future<Void> OnDemandStore::getError() {
+Future<Void> OnDemandStore::getError() const {
 	return onErr(err.getFuture());
 }
 
-Future<Void> OnDemandStore::onClosed() {
+Future<Void> OnDemandStore::onClosed() const {
 	return store->onClosed();
 }
 

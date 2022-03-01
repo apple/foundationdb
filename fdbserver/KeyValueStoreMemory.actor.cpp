@@ -43,8 +43,8 @@ public:
 	                    bool exactRecovery);
 
 	// IClosable
-	Future<Void> getError() override { return log->getError(); }
-	Future<Void> onClosed() override { return log->onClosed(); }
+	Future<Void> getError() const override { return log->getError(); }
+	Future<Void> onClosed() const override { return log->onClosed(); }
 	void dispose() override {
 		recovering.cancel();
 		log->dispose();
@@ -194,7 +194,7 @@ public:
 		return c;
 	}
 
-	Future<Optional<Value>> readValue(KeyRef key, Optional<UID> debugID = Optional<UID>()) override {
+	Future<Optional<Value>> readValue(KeyRef key, IKeyValueStore::ReadType, Optional<UID> debugID) override {
 		if (recovering.isError())
 			throw recovering.getError();
 		if (!recovering.isReady())
@@ -208,7 +208,8 @@ public:
 
 	Future<Optional<Value>> readValuePrefix(KeyRef key,
 	                                        int maxLength,
-	                                        Optional<UID> debugID = Optional<UID>()) override {
+	                                        IKeyValueStore::ReadType,
+	                                        Optional<UID> debugID) override {
 		if (recovering.isError())
 			throw recovering.getError();
 		if (!recovering.isReady())
@@ -227,7 +228,7 @@ public:
 
 	// If rowLimit>=0, reads first rows sorted ascending, otherwise reads last rows sorted descending
 	// The total size of the returned value (less the last entry) will be less than byteLimit
-	Future<RangeResult> readRange(KeyRangeRef keys, int rowLimit = 1 << 30, int byteLimit = 1 << 30) override {
+	Future<RangeResult> readRange(KeyRangeRef keys, int rowLimit, int byteLimit, IKeyValueStore::ReadType) override {
 		if (recovering.isError())
 			throw recovering.getError();
 		if (!recovering.isReady())
@@ -633,7 +634,7 @@ private:
 			} catch (Error& e) {
 				bool ok = e.code() == error_code_operation_cancelled || e.code() == error_code_file_not_found ||
 				          e.code() == error_code_disk_adapter_reset;
-				TraceEvent(ok ? SevInfo : SevError, "ErrorDuringRecovery", dbgid).error(e, true);
+				TraceEvent(ok ? SevInfo : SevError, "ErrorDuringRecovery", dbgid).errorUnsuppressed(e);
 				if (e.code() != error_code_disk_adapter_reset) {
 					throw e;
 				}
@@ -826,18 +827,18 @@ private:
 
 	ACTOR static Future<Optional<Value>> waitAndReadValue(KeyValueStoreMemory* self, Key key) {
 		wait(self->recovering);
-		return self->readValue(key).get();
+		return static_cast<IKeyValueStore*>(self)->readValue(key).get();
 	}
 	ACTOR static Future<Optional<Value>> waitAndReadValuePrefix(KeyValueStoreMemory* self, Key key, int maxLength) {
 		wait(self->recovering);
-		return self->readValuePrefix(key, maxLength).get();
+		return static_cast<IKeyValueStore*>(self)->readValuePrefix(key, maxLength).get();
 	}
 	ACTOR static Future<RangeResult> waitAndReadRange(KeyValueStoreMemory* self,
 	                                                  KeyRange keys,
 	                                                  int rowLimit,
 	                                                  int byteLimit) {
 		wait(self->recovering);
-		return self->readRange(keys, rowLimit, byteLimit).get();
+		return static_cast<IKeyValueStore*>(self)->readRange(keys, rowLimit, byteLimit).get();
 	}
 	ACTOR static Future<Void> waitAndCommit(KeyValueStoreMemory* self, bool sequential) {
 		wait(self->recovering);
@@ -886,6 +887,7 @@ IKeyValueStore* keyValueStoreMemory(std::string const& basename,
 	    .detail("MemoryLimit", memoryLimit)
 	    .detail("StoreType", storeType);
 
+	// SOMEDAY: update to use DiskQueueVersion::V2 with xxhash3 checksum for FDB >= 7.2
 	IDiskQueue* log = openDiskQueue(basename, ext, logID, DiskQueueVersion::V1);
 	if (storeType == KeyValueStoreType::MEMORY_RADIXTREE) {
 		return new KeyValueStoreMemory<radix_tree>(log, logID, memoryLimit, storeType, false, false, false);

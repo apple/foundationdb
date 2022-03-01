@@ -27,7 +27,7 @@
 
 #include "flow/crc32c.h"
 
-#ifndef __aarch64__
+#if !defined(__aarch64__) && !defined(__powerpc64__)
 #include <nmmintrin.h>
 #endif
 #include <stdio.h>
@@ -37,7 +37,7 @@
 #include "flow/Platform.h"
 #include "crc32c-generated-constants.cpp"
 
-static uint32_t append_trivial(uint32_t crc, const uint8_t* input, size_t length) {
+[[maybe_unused]] static uint32_t append_trivial(uint32_t crc, const uint8_t* input, size_t length) {
 	for (size_t i = 0; i < length; ++i) {
 		crc = crc ^ input[i];
 		for (int j = 0; j < 8; j++)
@@ -49,7 +49,7 @@ static uint32_t append_trivial(uint32_t crc, const uint8_t* input, size_t length
 /* Table-driven software version as a fall-back.  This is about 15 times slower
    than using the hardware instructions.  This assumes little-endian integers,
    as is the case on Intel processors that the assembler code here is for. */
-static uint32_t append_adler_table(uint32_t crci, const uint8_t* input, size_t length) {
+[[maybe_unused]] static uint32_t append_adler_table(uint32_t crci, const uint8_t* input, size_t length) {
 	const uint8_t* next = input;
 	uint64_t crc;
 
@@ -133,10 +133,11 @@ static inline uint32_t shift_crc(uint32_t shift_table[][256], uint32_t crc) {
 }
 
 /* Compute CRC-32C using the hardware instruction. */
-#if (defined(__clang__) || defined(__GNUG__)) && (!defined(__aarch64__))
+#if (defined(__clang__) || defined(__GNUG__) && !defined(__aarch64__) && !defined(__powerpc64__))
 /* Enable SSE CEC instructions on Intel processor */
 __attribute__((target("sse4.2")))
 #endif
+#ifndef __powerpc64__
 static uint32_t
 append_hw(uint32_t crc, const uint8_t* buf, size_t len) {
 	const uint8_t* next = buf;
@@ -263,12 +264,15 @@ append_hw(uint32_t crc, const uint8_t* buf, size_t len) {
 	/* return a post-processed crc */
 	return static_cast<uint32_t>(crc0) ^ 0xffffffff;
 }
+#endif
 
 static bool hw_available = platform::isHwCrcSupported();
 
 extern "C" uint32_t crc32c_append(uint32_t crc, const uint8_t* input, size_t length) {
+#ifndef __powerpc64__
 	if (hw_available)
 		return append_hw(crc, input, length);
 	else
+#endif
 		return append_table(crc, input, length);
 }
