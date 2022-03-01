@@ -45,11 +45,6 @@
 
 #define BM_DEBUG true
 
-// DO NOT CHANGE THIS
-// Special key where the value means the epoch + sequence number of the split, instead of the actual boundary
-// Chosen because this should not be a start or end key in any split
-static Key splitBoundarySpecialKey = "\xff\xff\xff"_sr;
-
 // TODO add comments + documentation
 void handleClientBlobRange(KeyRangeMap<bool>* knownBlobRanges,
                            Arena& ar,

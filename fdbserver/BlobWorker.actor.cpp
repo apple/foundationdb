@@ -701,8 +701,7 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData>
 			                                                           true);
 			Future<Void> streamFuture =
 			    tr->getTransaction().getRangeStream(rowsStream, metadata->keyRange, GetRangeLimits(), Snapshot::True);
-			wait(streamFuture);
-			state BlobFileIndex f = wait(snapshotWriter);
+			wait(streamFuture && success(snapshotWriter));
 			TraceEvent("BlobGranuleSnapshotFile", bwData->id)
 			    .detail("Granule", metadata->keyRange)
 			    .detail("Version", readVersion);
@@ -710,7 +709,7 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData>
 
 			// initial snapshot is committed in fdb, we can pop the change feed up to this version
 			bwData->addActor.send(bwData->db->popChangeFeedMutations(cfKey, readVersion));
-			return f;
+			return snapshotWriter.get();
 		} catch (Error& e) {
 			if (e.code() == error_code_operation_cancelled) {
 				throw e;
