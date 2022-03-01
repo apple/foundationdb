@@ -3751,7 +3751,7 @@ void fdb_probe_actor_exit(const char* name, unsigned long id, int index) {
 
 void throwExecPathError(Error e, char path[]) {
 	Severity sev = e.code() == error_code_io_error ? SevError : SevWarnAlways;
-	TraceEvent(sev, "GetPathError").detail("Path", path).error(e);
+	TraceEvent(sev, "GetPathError").error(e).detail("Path", path);
 	throw e;
 }
 

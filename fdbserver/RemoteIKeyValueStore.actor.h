@@ -148,9 +148,6 @@ struct IKVSSetRequest {
 	KeyValueRef keyValue;
 	ReplyPromise<Void> reply;
 
-	IKVSSetRequest() {}
-	IKVSSetRequest(KeyValueRef keyValue) : keyValue(keyValue) {}
-
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, keyValue, reply);
@@ -334,7 +331,7 @@ struct KeyValueStoreProcess : FlowProcess {
 				}
 				when(ErrorOr<Void> e = wait(errorOr(actors.getResult()))) {
 					if (e.isError()) {
-						TraceEvent(SevDebug, "KeyValueStoreProcessRunActorError").error(e.getError(), true);
+						TraceEvent(SevDebug, "KeyValueStoreProcessRunActorError").errorUnsuppressed(e.getError());
 						throw e.getError();
 					} else {
 						TraceEvent(SevDebug, "KeyValueStoreProcessFinished").log();
@@ -381,34 +378,38 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 
 	KeyValueStoreType getType() const override { return interf.type(); }
 
-	void set(KeyValueRef keyValue, const Arena* arena = nullptr) override { interf.set.send(IKVSSetRequest(keyValue)); }
+	void set(KeyValueRef keyValue, const Arena* arena = nullptr) override {
+		interf.set.send(IKVSSetRequest{ keyValue, ReplyPromise<Void>() });
+	}
 	void clear(KeyRangeRef range, const Arena* arena = nullptr) override {
-		interf.clear.send(IKVSClearRequest{ range });
+		interf.clear.send(IKVSClearRequest{ range, ReplyPromise<Void>() });
 	}
 
 	Future<Void> commit(bool sequential = false) override {
-		Future<IKVSCommitReply> commitReply = interf.commit.getReply(IKVSCommitRequest{ sequential });
+		Future<IKVSCommitReply> commitReply =
+		    interf.commit.getReply(IKVSCommitRequest{ sequential, ReplyPromise<IKVSCommitReply>() });
 		return commitAndGetStorageBytes(this, commitReply);
 	}
 
 	Future<Optional<Value>> readValue(KeyRef key,
 	                                  ReadType type = ReadType::NORMAL,
 	                                  Optional<UID> debugID = Optional<UID>()) override {
-		return readValueImpl(this, IKVSGetValueRequest{ key, type, debugID });
+		return readValueImpl(this, IKVSGetValueRequest{ key, type, debugID, ReplyPromise<Optional<Value>>() });
 	}
 
 	Future<Optional<Value>> readValuePrefix(KeyRef key,
 	                                        int maxLength,
 	                                        ReadType type = ReadType::NORMAL,
 	                                        Optional<UID> debugID = Optional<UID>()) override {
-		return interf.readValuePrefix.getReply(IKVSReadValuePrefixRequest{ key, maxLength, type, debugID });
+		return interf.readValuePrefix.getReply(
+		    IKVSReadValuePrefixRequest{ key, maxLength, type, debugID, ReplyPromise<Optional<Value>>() });
 	}
 
 	Future<RangeResult> readRange(KeyRangeRef keys,
 	                              int rowLimit = 1 << 30,
 	                              int byteLimit = 1 << 30,
 	                              ReadType type = ReadType::NORMAL) override {
-		IKVSReadRangeRequest req{ keys, rowLimit, byteLimit, type };
+		IKVSReadRangeRequest req{ keys, rowLimit, byteLimit, type, ReplyPromise<RangeResult>() };
 		return interf.readRange.getReply(req);
 		// return fmap([](const IKVSReadRangeReply& reply) { return reply.toRangeResult(); },
 		//             interf.readRange.getReply(req));
@@ -435,7 +436,7 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 		choose {
 			when(state ErrorOr<Void> e = wait(errorOr(self->interf.getError.getReply(IKVSGetErrorRequest{})))) {
 				TraceEvent(SevDebug, "RemoteIKVSGetError")
-				    .error(e.isError() ? e.getError() : success(), true)
+				    .errorUnsuppressed(e.isError() ? e.getError() : success())
 				    .backtrace();
 				// if kv-store is error, we should see child process died
 				// const_cast<RemoteIKeyValueStore*>(self)->stopped = true;
@@ -466,7 +467,7 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 			wait(self->interf.onClosed.getReply(IKVSOnClosedRequest{}));
 			TraceEvent(SevInfo, "RemoteIKVSOnCloseImplOnClosedFinished");
 		} catch (Error& e) {
-			TraceEvent(SevInfo, "RemoteIKVSOnCloseImplError").detail("Error", e.code()).backtrace();
+			TraceEvent(SevInfo, "RemoteIKVSOnCloseImplError").errorUnsuppressed(e).backtrace();
 			throw;
 		}
 		return Void();

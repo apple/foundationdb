@@ -214,7 +214,7 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 			ASSERT(false);
 		}
 	} catch (Error& e) {
-		TraceEvent(e.code() == error_code_actor_cancelled ? SevInfo : SevError, "RemoteIKVSDied").error(e, true);
+		TraceEvent(e.code() == error_code_actor_cancelled ? SevInfo : SevError, "RemoteIKVSDied").errorUnsuppressed(e);
 		state Error error(e);
 		// fprintf(stderr, "spawnSimulated is cancelling\n");
 		flowProcessF.cancel();

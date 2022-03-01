@@ -40,7 +40,7 @@ ACTOR void sendCommitReply(IKVSCommitRequest commitReq, IKeyValueStore* kvStore,
 			}
 		}
 	} catch (Error& e) {
-		TraceEvent(SevDebug, "RemoteKVSCommitReplyError").error(e, true);
+		TraceEvent(SevDebug, "RemoteKVSCommitReplyError").errorUnsuppressed(e);
 		commitReq.reply.sendError(e.code() == error_code_actor_cancelled ? remote_kvs_cancelled() : e);
 	}
 }
@@ -69,7 +69,7 @@ void forwardPromiseVariant(ReplyPromise<T> output, Future<T> input, std::string 
 			TraceEvent(SevDebug, "ForwardPromiseSend").detail("Name", trace);
 		}
 	} catch (Error& e) {
-		TraceEvent(SevDebug, "ForwardPromiseVariantError").error(e, true).backtrace();
+		TraceEvent(SevDebug, "ForwardPromiseVariantError").errorUnsuppressed(e).backtrace();
 		output.sendError(e.code() == error_code_actor_cancelled ? remote_kvs_cancelled() : e);
 	}
 }
@@ -168,7 +168,7 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 				// fprintf(stderr, "RemoteIKVS cancelled\n");
 				return Void();
 			} else {
-				TraceEvent(SevError, "RemoteKVStoreError").detail("UID", uid_kvs).error(e).backtrace();
+				TraceEvent(SevError, "RemoteKVStoreError").error(e).detail("UID", uid_kvs).backtrace();
 				throw;
 			}
 		}
