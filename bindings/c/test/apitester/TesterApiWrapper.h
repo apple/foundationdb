@@ -70,6 +70,7 @@ public:
 	Future commit();
 	Future onError(fdb_error_t err);
 	void reset();
+	fdb_error_t setOption(FDBTransactionOption option);
 
 private:
 	std::shared_ptr<FDBTransaction> tx_;

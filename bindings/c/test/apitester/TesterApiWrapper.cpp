@@ -75,6 +75,10 @@ void Transaction::reset() {
 	fdb_transaction_reset(tx_.get());
 }
 
+fdb_error_t Transaction::setOption(FDBTransactionOption option) {
+	return fdb_transaction_set_option(tx_.get(), option, reinterpret_cast<const uint8_t*>(""), 0);
+}
+
 fdb_error_t FdbApi::setOption(FDBNetworkOption option, std::string_view value) {
 	return fdb_network_set_option(option, reinterpret_cast<const uint8_t*>(value.data()), value.size());
 }
