@@ -19,6 +19,9 @@
  */
 
 #include "flow/Tracing.h"
+#include "fdbserver/LocalConfiguration.h"
+#include "flow/IRandom.h"
+#include "flow/UnitTest.h"
 
 #include "fdbclient/FDBTypes.h"
 #include "flow/Knobs.h"
@@ -65,7 +68,21 @@ struct LogfileTracer : ITracer {
 			TraceEvent(SevInfo, "TracingSpanTag", span.context).detail("Key", key).detail("Value", value);
 		}
 	}
-	void trace(OTELSpan const& span) override {}
+	void trace(OTELSpan const& span) override {
+		TraceEvent te(SevInfo, "TracingSpan", span.context.traceID);
+		te.detail("SpanID", span.context.spanID)
+			.detail("Location", span.location.name)
+		    .detail("Begin", format("%.6f", span.begin))
+		    .detail("End", format("%.6f", span.end))
+			.detail("Kind", span.kind)
+			.detail("Status", span.status)
+			.detail("Parent Span ID", span.parentContext.spanID);
+
+		for (const auto& [key, value] : span.attributes) {
+			TraceEvent(SevInfo, "TracingSpanTag", span.context.traceID).detail("Key", key).detail("Value", value);
+		}
+		// TODO do we want links and events or is that too much noise?
+	}
 };
 
 struct TraceRequest {
@@ -186,7 +203,7 @@ protected:
 		uint8_t size = 11;
 		size = size + span.links.size() + span.events.size() + span.attributes.size();
 		if (!span.parentContext.isSampled()) {
-			size = size -3;
+			size -= 3;
 		}
 		request.write_byte(size | 0b10010000); // write as array
 		serialize_value(span.context.traceID.first(), request, 0xcf); // trace id
@@ -313,6 +330,10 @@ private:
 
 		if (size <= 15) {
 			request.write_byte(static_cast<uint8_t>(size) | 0b10010000);
+		} else if (size <= 65535) {
+			request.write_byte(0xdc);
+			request.write_byte(reinterpret_cast<const uint8_t*>(&size)[1]);
+			request.write_byte(reinterpret_cast<const uint8_t*>(&size)[0]);
 		} else {
 			// TODO: Add support for longer vectors if necessary.
 			ASSERT(false);
@@ -374,7 +395,52 @@ struct FastUDPTracer : public UDPTracer {
 
 	TracerType type() const override { return TracerType::NETWORK_LOSSY; }
 
-	void trace(OTELSpan const& span) override {}
+	// TODO - DRY this up
+	void trace(OTELSpan const& span) override {
+		static std::once_flag once;
+		std::call_once(once, [&]() {
+			log_actor_ = fastTraceLogger(&unready_socket_messages_, &failed_messages_, &total_messages_, &send_error_);
+			std::string destAddr = FLOW_KNOBS->TRACING_UDP_LISTENER_ADDR;
+			if (g_network->isSimulated()) {
+				udp_server_actor_ = simulationStartServer();
+				// Force loopback when in simulation mode
+				destAddr = "127.0.0.1";
+			}
+			NetworkAddress destAddress =
+			    NetworkAddress::parse(destAddr + ":" + std::to_string(FLOW_KNOBS->TRACING_UDP_LISTENER_PORT));
+
+			socket_ = INetworkConnections::net()->createUDPSocket(destAddress);
+		});
+
+		if (span.location.name.size() == 0) {
+			return;
+		}
+
+		++total_messages_;
+		if (!socket_.isReady()) {
+			++unready_socket_messages_;
+			return;
+		} else if (socket_fd_ == -1) {
+			socket_fd_ = socket_.get()->native_handle();
+		}
+
+		if (send_error_) {
+			return;
+		}
+
+		serialize_span(span, request_);
+
+		int bytesSent = send(socket_fd_, request_.buffer.get(), request_.data_size, MSG_DONTWAIT);
+		if (bytesSent == -1) {
+			// Will forgo checking errno here, and assume all error messages
+			// should be treated the same.
+			++failed_messages_;
+			send_error_ = true;
+		}
+		request_.reset();
+	}
+
+	// TODO - DRY this up
 	void trace(Span const& span) override {
 		static std::once_flag once;
 		std::call_once(once, [&]() {
@@ -512,3 +578,31 @@ OTELSpan::~OTELSpan() {
 		g_tracer->trace(*this);
 	}
 }
+
+TEST_CASE("/flow/Tracing/CreateOTELSpan") {
+	// Sampling disabled, no parent.
+	OTELSpan notSampled("foo"_loc);
+	ASSERT(!notSampled.context.isSampled());
+	
+	// FORCE SAMPLING
+	OTELSpan sampled("foo"_loc, [](){return 1.0;});
+	ASSERT(sampled.context.isSampled());
+
+	// Ensure child traceID matches parent
+	OTELSpan childTraceIDMatchesParent("foo"_loc, [](){return 1.0;}, SpanContext(UID(100, 101), 200, TraceFlags::flag_sampled));
+	ASSERT(childTraceIDMatchesParent.context.traceID.first() == childTraceIDMatchesParent.parentContext.traceID.first());
+	ASSERT(childTraceIDMatchesParent.context.traceID.second() == childTraceIDMatchesParent.parentContext.traceID.second());
+
+    // When the parent isn't sampled AND it has legitimate values we should not sample a child, 
+	// even if the child was randomly selected for sampling.
+	// OTELSpan parentNotSampled("foo"_loc, [](){return 1.0;}, SpanContext(UID(1, 1), 1, TraceFlags::flag_unsampled));
+	// ASSERT(!parentNotSampled.context.isSampled());
+
+    // When the parent isn't sampled AND it has zero values for traceID and spanID this means
+	// we should defer to the child as the new root of the trace as there was no actual parent.
+	// If the child was sampled we should send the trace with a null parent. 
+	// OTELSpan noParent("foo"_loc, [](){return 1.0;}, SpanContext(UID(0, 0), 0, TraceFlags::flag_unsampled));
+	// ASSERT(noParent.context.isSampled());
+
+	return Void();
+};

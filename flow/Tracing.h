@@ -22,9 +22,12 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "flow/Arena.h"
+#include "flow/Error.h"
 #include "flow/IRandom.h"
+#include "flow/Knobs.h"
 #include "flow/network.h"
 #include <cstddef>
+#include <memory>
 #include <unordered_map>
 #include <unordered_set>
 #include <atomic>
@@ -110,7 +113,7 @@ struct Span {
 	std::unordered_map<StringRef, StringRef> tags;
 };
 
-enum class SpanKind {
+enum class SpanKind : uint8_t {
 	CLIENT = 0,
 	SERVER = 1,
 	PRODUCER = 2,
@@ -118,7 +121,7 @@ enum class SpanKind {
 	INTERNAL = 4,
 };
 
-enum class SpanStatus {
+enum class SpanStatus : uint8_t {
 	UNSET = 0,
 	OK = 1,
 	ERROR = 2,
@@ -131,35 +134,52 @@ struct OTELEvent {
 };
 
 struct OTELSpan {
-	OTELSpan(SpanContext context,
-	         Location location,
-	         SpanContext parentContext,
-	         std::initializer_list<SpanContext> const& links = {})
-	  : context(context), location(location), parentContext(parentContext), links(links.begin(), links.end()),
-	    begin(g_network->now()) {
+	OTELSpan(SpanContext context, Location location, SpanContext parentContext, std::initializer_list<SpanContext> const& links = {})
+	  : context(context), location(location), parentContext(parentContext), links(links.begin(), links.end()), begin(g_network->now()) {
+		// We've greatly simplified the logic here, essentially we're now always setting trace and span ids and relying on the TraceFlags
+		// to determine if we're sampling. Therefore if the parent is sampled, we simply overwrite this span's traceID 
+		// with the parent trace id. 
 		if (parentContext.isSampled()) {
-			context.traceID = parentContext.traceID;
-			context.m_Flags = TraceFlags::flag_sampled;
-			context.spanID = deterministicRandom()->randomUInt64();
+			this->context.traceID = UID(parentContext.traceID.first(), parentContext.traceID.second());
+			this->context.m_Flags = TraceFlags::flag_sampled;
 		} else {
-			if (context.isSampled()) {
-				// Set the TraceID if this Span is sampled but the parent was not.
-				context.traceID = UID(deterministicRandom()->randomUInt64(), deterministicRandom()->randomUInt64());
+			// However there are two other cases. 
+			// 1. A legitamite parent span exists but it was not selected for tracing. 
+			// 2. There is no actual parent, just a default arg parent provided by the constructor AND the "child" span was selected for sampling.
+			// For case 1. we handle below by marking the child as unsampled. 
+			// For case 2 we needn't do anything, and can rely on the values in this OTELSpan
+		 	if (parentContext.traceID.first() != 0 && 
+		 		parentContext.traceID.second() != 0 &&
+		 		parentContext.spanID != 0) {
+				this->context.m_Flags = TraceFlags::flag_unsampled;
 			}
 		}
+		// 		}
+		// 	if(context.isSampled()) {
+		// 		// Set the TraceID if this Span is sampled but the parent was not.
+		// 		context.traceID = UID(deterministicRandom()->randomUInt64(), deterministicRandom()->randomUInt64()); 
+		// 	}
+		// }
+		this->kind = SpanKind::SERVER;
+		this->status = SpanStatus::OK;
+		this->attributes["address"_sr] = g_network->getLocalAddress().toString(); 
 	}
-	OTELSpan(Location location,
-	         SpanContext parent = SpanContext(),
-	         std::initializer_list<SpanContext> const& links = {})
-	  : OTELSpan(SpanContext(UID(),
-	                         deterministicRandom()->randomUInt64(),
-	                         deterministicRandom()->random01() < FLOW_KNOBS->TRACING_SAMPLE_RATE
-	                             ? TraceFlags::flag_sampled
-	                             : TraceFlags::flag_unsampled),
-	             location,
-	             parent,
-	             links) {}
+
+	OTELSpan(Location location, SpanContext parent = SpanContext(), std::initializer_list<SpanContext> const& links = {})
+	  : OTELSpan(SpanContext(UID(deterministicRandom()->randomUInt64(), deterministicRandom()->randomUInt64()), // traceID
+	  deterministicRandom()->randomUInt64(), // spanID 
+	  deterministicRandom()->random01() < FLOW_KNOBS->TRACING_SAMPLE_RATE // sampled or unsampled
+	  ? TraceFlags::flag_sampled : TraceFlags::flag_unsampled), location, parent, links) {}
+
 	OTELSpan(Location location, SpanContext parent, SpanContext link) : OTELSpan(location, parent, { link }) {}
+
+	// NOTE: This constructor is primarly for unit testing until we sort out how to enable/disable a Knob dynamically in a test.
+	OTELSpan(Location location, std::function<double()> rateProvider, SpanContext parent = SpanContext(), std::initializer_list<SpanContext> const& links = {})
+	  : OTELSpan(SpanContext(UID(deterministicRandom()->randomUInt64(), deterministicRandom()->randomUInt64()), 
+	  deterministicRandom()->randomUInt64(), 
+	  deterministicRandom()->random01() < rateProvider() 
+	  ? TraceFlags::flag_sampled : TraceFlags::flag_unsampled), location, parent, links) {}
+
 	OTELSpan(const OTELSpan&) = delete;
 	OTELSpan(OTELSpan&& o) {
 		location = o.location;
@@ -176,6 +196,7 @@ struct OTELSpan {
 		o.kind = SpanKind::CLIENT;
 		o.begin = 0.0;
 		o.end = 0.0;
+		o.status = SpanStatus::UNSET;
 	}
 	OTELSpan() {}
 	~OTELSpan();
@@ -183,16 +204,28 @@ struct OTELSpan {
 	OTELSpan& operator=(const OTELSpan&) = delete;
 	void swap(OTELSpan& other) {
 		std::swap(context, other.context);
+		std::swap(location, other.location);
 		std::swap(parentContext, other.parentContext);
+		std::swap(kind, other.kind);
+		// We're going to keep the swap here for links because it is somewhat equivalent to {} parents
+		// in the Span implementation.
+		std::swap(links, other.links);
 		std::swap(begin, other.begin);
 		std::swap(end, other.end);
-		std::swap(location, other.location);
+		// TODO - Should we leave out attributes and events? Attributes/tags are left out in the Span::swap.
+		// Events are an entirely new concept here, so no precedence.  
 		std::swap(attributes, other.attributes);
+		std::swap(events, other.events);
+		std::swap(status, other.status);
 	}
 
-	void addLink(SpanContext linkContext) { links.push_back(linkContext); }
+	void addLink(SpanContext linkContext) {
+		links.push_back(linkContext);
+	}
 
-	void addEvent(OTELEvent event) { events.push_back(event); }
+	void addEvent(OTELEvent event) {
+		events.push_back(event);
+	}
 
 	void addAttribute(const StringRef& key, const StringRef& value) { attributes[key] = value; }
 
@@ -200,6 +233,7 @@ struct OTELSpan {
 	Location location;
 	SpanContext parentContext;
 	SpanKind kind;
+	// TODO implement SmallVectorRef for links?
 	std::vector<SpanContext> links;
 	double begin = 0.0, end = 0.0;
 	std::unordered_map<StringRef, StringRef> attributes;
@@ -240,3 +274,18 @@ struct SpannedDeque : Deque<T> {
 		span = std::move(other.span);
 	}
 };
+
+template <class T>
+struct OTELSpannedDeque : Deque<T> {
+	OTELSpan span;
+	explicit OTELSpannedDeque(Location loc) : span(loc) {}
+	OTELSpannedDeque(OTELSpannedDeque&& other) : Deque<T>(std::move(other)), span(std::move(other.span)) {}
+	OTELSpannedDeque(OTELSpannedDeque const&) = delete;
+	OTELSpannedDeque& operator=(OTELSpannedDeque const&) = delete;
+	OTELSpannedDeque& operator=(OTELSpannedDeque&& other) {
+		*static_cast<Deque<T>*>(this) = std::move(other);
+		span = std::move(other.span);
+	}
+};
+
+
