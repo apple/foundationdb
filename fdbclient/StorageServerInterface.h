@@ -794,7 +794,7 @@ struct FetchCheckpointRequest {
 	Standalone<StringRef> token; // Serialized data specific to a particular checkpoint format.
 	ReplyPromiseStream<FetchCheckpointReply> reply;
 
-	FetchCheckpointRequest() {}
+	FetchCheckpointRequest() = default;
 	FetchCheckpointRequest(UID checkpointID, StringRef token) : checkpointID(checkpointID), token(token) {}
 
 	template <class Ar>

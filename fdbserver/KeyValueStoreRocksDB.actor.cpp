@@ -1706,6 +1706,12 @@ TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/CheckpointRestore") {
 	return Void();
 }
 
+TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/RocksDBTypes") {
+	ASSERT_EQ(sizeof(rocksdb::LiveFileMetaData), 184);
+	ASSERT_EQ(sizeof(rocksdb::ExportImportFilesMetaData), 32);
+	return Void();
+}
+
 } // namespace
 
 #endif // SSD_ROCKSDB_EXPERIMENTAL

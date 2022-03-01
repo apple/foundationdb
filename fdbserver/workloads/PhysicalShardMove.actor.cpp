@@ -147,7 +147,7 @@ struct SSCheckpointWorkload : TestWorkload {
 		try {
 			wait(kvStore->restore(records));
 		} catch (Error& e) {
-			TraceEvent("TestRestoreCheckpointError").detail("Checkpoint", records[0].toString()).error(e, true);
+			TraceEvent(SevError, "TestRestoreCheckpointError").detail("Checkpoint", describe(records)).error(e, true);
 		}
 
 		// Compare the keyrange between the original database and the one restored from checkpoint.

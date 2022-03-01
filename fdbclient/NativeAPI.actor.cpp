@@ -6913,19 +6913,10 @@ ACTOR static Future<CheckpointMetaData> getCheckpointMetaDataInternal(GetCheckpo
 	}
 
 	state Optional<Error> error;
-	choose {
-		when(wait(waitForAll(fs))) {
-			TraceEvent("GetCheckpointMetaDataInternalWaitEnd")
-			    .detail("Range", req.range.toString())
-			    .detail("Version", req.version);
-		}
-		when(wait(delay(timeout))) {
-			error = timed_out();
-			TraceEvent("GetCheckpointMetaDataInternalTimeout")
-			    .detail("Range", req.range.toString())
-			    .detail("Version", req.version);
-		}
-	}
+	wait(waitForAll(fs));
+	TraceEvent("GetCheckpointMetaDataInternalWaitEnd")
+	    .detail("Range", req.range.toString())
+	    .detail("Version", req.version);
 
 	for (i = 0; i < fs.size(); ++i) {
 		if (!fs[i].isReady()) {

@@ -1,3 +1,23 @@
+/*
+ *RocksDBCheckpointUtils.actor.cpp
+ *
+ * This source file is part of the FoundationDB open source project
+ *
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 #include "fdbserver/RocksDBCheckpointUtils.actor.h"
 
 #include "fdbclient/FDBTypes.h"
@@ -26,7 +46,7 @@ public:
 
 private:
 	ACTOR static Future<Void> doInit(RocksDBCheckpointReader* self) {
-		ASSERT_NE(self, nullptr);
+		ASSERT(self != nullptr);
 		try {
 			state Reference<IAsyncFile> _file = wait(IAsyncFileSystem::filesystem()->open(
 			    self->path_, IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_NO_AIO, 0));
@@ -42,10 +62,10 @@ private:
 		return Void();
 	}
 
-	ACTOR Future<Standalone<StringRef>> getNextChunk(RocksDBCheckpointReader* self, int byteLimit) {
-		state int transactionSize = std::min(64 * 1024, byteLimit); // Block size read from disk.
-		state Standalone<StringRef> buf = makeAlignedString(_PAGE_SIZE, transactionSize);
-		int bytesRead = wait(self->file_->read(mutateString(buf), transactionSize, self->offset_));
+	ACTOR static Future<Standalone<StringRef>> getNextChunk(RocksDBCheckpointReader* self, int byteLimit) {
+		int blockSize = std::min(64 * 1024, byteLimit); // Block size read from disk.
+		state Standalone<StringRef> buf = makeAlignedString(_PAGE_SIZE, blockSize);
+		int bytesRead = wait(self->file_->read(mutateString(buf), blockSize, self->offset_));
 		if (bytesRead == 0) {
 			throw end_of_stream();
 		}

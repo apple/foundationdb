@@ -47,9 +47,9 @@ struct CheckpointMetaData {
 	Version version;
 	KeyRange range;
 	int16_t format; // CheckpointFormat.
-	int16_t state; // CheckpointState.
-	UID checkpointID; // A unique id for this checkpoint.
 	UID ssID; // Storage server ID on which this checkpoint is created.
+	UID checkpointID; // A unique id for this checkpoint.
+	int16_t state; // CheckpointState.
 	int referenceCount; // A reference count on the checkpoint, it can only be deleted when this is 0.
 	int64_t gcTime; // Time to delete this checkpoint, a Unix timestamp in seconds.
 
