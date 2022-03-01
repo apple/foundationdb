@@ -119,7 +119,7 @@ struct ReadWriteWorkload : KVWorkload {
 	typedef std::vector<std::pair<int64_t, int64_t>> IndexRangeVec;
 	// keyForIndex generate key from index. So for a shard range, recording the start and end is enough
 	std::vector<std::pair<UID, IndexRangeVec>> serverShards; // storage server and the shards it owns
-	int hotServerCount = 0;
+	int hotServerCount = 0, currentHotRound = -1;
 
 	// states of metric
 	Int64MetricHandle totalReadsMetric;
@@ -723,8 +723,7 @@ struct ReadWriteWorkload : KVWorkload {
 			clients.push_back(tracePeriodically(self));
 
 		if (self->skewRound > 0) {
-			state int round = 0;
-			for (; round < self->skewRound; ++round) {
+			for (self->currentHotRound = 0; self->currentHotRound < self->skewRound; ++self->currentHotRound) {
 				wait(updateServerShards(cx, self));
 				self->setHotServers();
 				self->startReadWriteClients(cx, clients);
@@ -749,19 +748,17 @@ struct ReadWriteWorkload : KVWorkload {
 		return timeSinceStart >= metricsStart && timeSinceStart < (metricsStart + metricsDuration);
 	}
 
-	// set the last N server in serverShards as hot server
+	// calculate hot server count
 	void setHotServers() {
 		hotServerCount = ceil(hotServerFraction * serverShards.size());
-		for (int i = serverShards.size(), j = 0; j < hotServerCount; --i, ++j) {
-			auto idx = deterministicRandom()->randomInt(0, i);
-			std::swap(serverShards[idx], serverShards[i - 1]);
-		}
+		std::cout << "Choose " << hotServerCount << " hot servers\n";
 	}
 
 	int64_t getRandomKeyFromHotServer() {
 		ASSERT(hotServerCount > 0);
-		int idx, shardIdx;
-		idx = deterministicRandom()->randomInt(serverShards.size() - hotServerCount, serverShards.size());
+		int begin = currentHotRound * hotServerCount;
+		int shardIdx;
+		int idx = deterministicRandom()->randomInt(begin, begin + hotServerCount) % serverShards.size();
 		shardIdx = deterministicRandom()->randomInt(0, serverShards[idx].second.size());
 		return deterministicRandom()->randomInt64(serverShards[idx].second[shardIdx].first,
 		                                          serverShards[idx].second[shardIdx].second);
