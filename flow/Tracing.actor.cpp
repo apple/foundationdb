@@ -588,21 +588,21 @@ TEST_CASE("/flow/Tracing/CreateOTELSpan") {
 	OTELSpan sampled("foo"_loc, [](){return 1.0;});
 	ASSERT(sampled.context.isSampled());
 
-	// Ensure child traceID matches parent
+	// Ensure child traceID matches parent, when parent is sampled.
 	OTELSpan childTraceIDMatchesParent("foo"_loc, [](){return 1.0;}, SpanContext(UID(100, 101), 200, TraceFlags::flag_sampled));
 	ASSERT(childTraceIDMatchesParent.context.traceID.first() == childTraceIDMatchesParent.parentContext.traceID.first());
 	ASSERT(childTraceIDMatchesParent.context.traceID.second() == childTraceIDMatchesParent.parentContext.traceID.second());
 
     // When the parent isn't sampled AND it has legitimate values we should not sample a child, 
 	// even if the child was randomly selected for sampling.
-	// OTELSpan parentNotSampled("foo"_loc, [](){return 1.0;}, SpanContext(UID(1, 1), 1, TraceFlags::flag_unsampled));
-	// ASSERT(!parentNotSampled.context.isSampled());
+	OTELSpan parentNotSampled("foo"_loc, [](){return 1.0;}, SpanContext(UID(1, 1), 1, TraceFlags::flag_unsampled));
+	ASSERT(!parentNotSampled.context.isSampled());
 
     // When the parent isn't sampled AND it has zero values for traceID and spanID this means
 	// we should defer to the child as the new root of the trace as there was no actual parent.
-	// If the child was sampled we should send the trace with a null parent. 
-	// OTELSpan noParent("foo"_loc, [](){return 1.0;}, SpanContext(UID(0, 0), 0, TraceFlags::flag_unsampled));
-	// ASSERT(noParent.context.isSampled());
+	// If the child was sampled we should send the child trace with a null parent. 
+	OTELSpan noParent("foo"_loc, [](){return 1.0;}, SpanContext(UID(0, 0), 0, TraceFlags::flag_unsampled));
+	ASSERT(noParent.context.isSampled());
 
 	return Void();
 };

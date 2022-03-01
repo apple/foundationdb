@@ -136,7 +136,7 @@ struct OTELEvent {
 struct OTELSpan {
 	OTELSpan(SpanContext context, Location location, SpanContext parentContext, std::initializer_list<SpanContext> const& links = {})
 	  : context(context), location(location), parentContext(parentContext), links(links.begin(), links.end()), begin(g_network->now()) {
-		// We've greatly simplified the logic here, essentially we're now always setting trace and span ids and relying on the TraceFlags
+		// We've simplified the logic here, essentially we're now always setting trace and span ids and relying on the TraceFlags
 		// to determine if we're sampling. Therefore if the parent is sampled, we simply overwrite this span's traceID 
 		// with the parent trace id. 
 		if (parentContext.isSampled()) {
@@ -154,12 +154,6 @@ struct OTELSpan {
 				this->context.m_Flags = TraceFlags::flag_unsampled;
 			}
 		}
-		// 		}
-		// 	if(context.isSampled()) {
-		// 		// Set the TraceID if this Span is sampled but the parent was not.
-		// 		context.traceID = UID(deterministicRandom()->randomUInt64(), deterministicRandom()->randomUInt64()); 
-		// 	}
-		// }
 		this->kind = SpanKind::SERVER;
 		this->status = SpanStatus::OK;
 		this->attributes["address"_sr] = g_network->getLocalAddress().toString(); 
@@ -189,6 +183,8 @@ struct OTELSpan {
 		end = o.end;
 		parentContext = std::move(o.parentContext);
 		links = std::move(o.links);
+		// TODO - Should we move events and attributes or should we follow the previous model 
+		// where we didn't move tags?
 		events = std::move(o.events);
 		attributes = std::move(o.attributes);
 		status = o.status;
@@ -207,16 +203,16 @@ struct OTELSpan {
 		std::swap(location, other.location);
 		std::swap(parentContext, other.parentContext);
 		std::swap(kind, other.kind);
+		std::swap(status, other.status);
+		std::swap(begin, other.begin);
+		std::swap(end, other.end);
 		// We're going to keep the swap here for links because it is somewhat equivalent to {} parents
 		// in the Span implementation.
 		std::swap(links, other.links);
-		std::swap(begin, other.begin);
-		std::swap(end, other.end);
 		// TODO - Should we leave out attributes and events? Attributes/tags are left out in the Span::swap.
 		// Events are an entirely new concept here, so no precedence.  
 		std::swap(attributes, other.attributes);
 		std::swap(events, other.events);
-		std::swap(status, other.status);
 	}
 
 	void addLink(SpanContext linkContext) {
