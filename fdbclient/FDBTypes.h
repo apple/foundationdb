@@ -30,8 +30,8 @@
 #include "flow/flow.h"
 
 enum class TraceFlags : uint8_t {
-	flag_unsampled = 0b00000000,
-	flag_sampled = 0b00000001,
+	unsampled = 0b00000000,
+	sampled = 0b00000001,
 };
 
 inline TraceFlags operator&(TraceFlags lhs, TraceFlags rhs) {
@@ -44,11 +44,11 @@ struct SpanContext {
 	uint64_t spanID;
 	TraceFlags m_Flags;
 
-	SpanContext() : traceID(UID()), spanID(0), m_Flags(TraceFlags::flag_unsampled) {}
+	SpanContext() : traceID(UID()), spanID(0), m_Flags(TraceFlags::unsampled) {}
 	SpanContext(UID traceID, uint64_t spanID, TraceFlags flags) : traceID(traceID), spanID(spanID), m_Flags(flags) {}
-	SpanContext(UID traceID, uint64_t spanID) : traceID(traceID), spanID(spanID), m_Flags(TraceFlags::flag_unsampled) {}
+	SpanContext(UID traceID, uint64_t spanID) : traceID(traceID), spanID(spanID), m_Flags(TraceFlags::unsampled) {}
 
-	bool isSampled() const { return (m_Flags & TraceFlags::flag_sampled) == TraceFlags::flag_sampled; }
+	bool isSampled() const { return (m_Flags & TraceFlags::sampled) == TraceFlags::sampled; }
 };
 
 typedef int64_t Version;
