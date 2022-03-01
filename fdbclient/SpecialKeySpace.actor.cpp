@@ -340,8 +340,8 @@ ACTOR Future<RangeResult> SpecialKeySpace::getRangeAggregationActor(SpecialKeySp
 				moduleBoundary = beginIter->range();
 		} else {
 			TraceEvent(SevInfo, "SpecialKeyCrossModuleRead")
-			    .detail("Begin", begin.toString())
-			    .detail("End", end.toString())
+			    .detail("Begin", begin)
+			    .detail("End", end)
 			    .detail("BoundaryBegin", beginIter->begin())
 			    .detail("BoundaryEnd", beginIter->end());
 			throw special_keys_cross_module_read();

@@ -170,12 +170,12 @@ struct WriteDuringReadWorkload : TestWorkload {
 				res = allKeys.end;
 			if (res != memRes) {
 				TraceEvent(SevError, "WDRGetKeyWrongResult", randomID)
-				    .detail("Key", printable(key.getKey()))
+				    .detail("Key", key.getKey())
 				    .detail("Offset", key.offset)
 				    .detail("OrEqual", key.orEqual)
 				    .detail("Snapshot", snapshot)
-				    .detail("MemoryResult", printable(memRes))
-				    .detail("DbResult", printable(res));
+				    .detail("MemoryResult", memRes)
+				    .detail("DbResult", res);
 				self->success = false;
 			}
 			return Void();
@@ -197,7 +197,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 	                                                  Reverse reverse) {
 		Key beginKey = memoryGetKey(db, begin);
 		Key endKey = memoryGetKey(db, end);
-		//TraceEvent("WDRGetRange").detail("Begin", printable(beginKey)).detail("End", printable(endKey));
+		//TraceEvent("WDRGetRange").detail("Begin", beginKey).detail("End", endKey);
 		if (beginKey >= endKey)
 			return Standalone<VectorRef<KeyValueRef>>();
 
@@ -232,8 +232,8 @@ struct WriteDuringReadWorkload : TestWorkload {
 	                                      bool* doingCommit,
 	                                      int64_t* memLimit) {
 		state UID randomID = nondeterministicRandom()->randomUniqueID();
-		/*TraceEvent("WDRGetRange", randomID).detail("BeginKey", printable(begin.getKey())).detail("BeginOffset", begin.offset).detail("BeginOrEqual", begin.orEqual)
-		    .detail("EndKey", printable(end.getKey())).detail("EndOffset", end.offset).detail("EndOrEqual", end.orEqual)
+		/*TraceEvent("WDRGetRange", randomID).detail("BeginKey", begin.getKey()).detail("BeginOffset", begin.offset).detail("BeginOrEqual", begin.orEqual)
+		    .detail("EndKey", end.getKey()).detail("EndOffset", end.offset).detail("EndOrEqual", end.orEqual)
 		    .detail("Limit", limit.rows).detail("Snapshot", snapshot).detail("Reverse",
 		   reverse).detail("ReadYourWritesDisabled", readYourWritesDisabled);*/
 
@@ -277,10 +277,10 @@ struct WriteDuringReadWorkload : TestWorkload {
 			if (!limit.hasByteLimit() && systemKeyCount == 0) {
 				if (res.size() != memRes.size()) {
 					TraceEvent(SevError, "WDRGetRangeWrongResult", randomID)
-					    .detail("BeginKey", printable(begin.getKey()))
+					    .detail("BeginKey", begin.getKey())
 					    .detail("BeginOffset", begin.offset)
 					    .detail("BeginOrEqual", begin.orEqual)
-					    .detail("EndKey", printable(end.getKey()))
+					    .detail("EndKey", end.getKey())
 					    .detail("EndOffset", end.offset)
 					    .detail("EndOrEqual", end.orEqual)
 					    .detail("LimitRows", limit.rows)
@@ -298,10 +298,10 @@ struct WriteDuringReadWorkload : TestWorkload {
 				for (int i = 0; i < res.size(); i++) {
 					if (res[i] != memRes[i]) {
 						TraceEvent(SevError, "WDRGetRangeWrongResult", randomID)
-						    .detail("BeginKey", printable(begin.getKey()))
+						    .detail("BeginKey", begin.getKey())
 						    .detail("BeginOffset", begin.offset)
 						    .detail("BeginOrEqual", begin.orEqual)
-						    .detail("EndKey", printable(end.getKey()))
+						    .detail("EndKey", end.getKey())
 						    .detail("EndOffset", end.offset)
 						    .detail("EndOrEqual", end.orEqual)
 						    .detail("LimitRows", limit.rows)
@@ -310,8 +310,8 @@ struct WriteDuringReadWorkload : TestWorkload {
 						    .detail("Reverse", reverse)
 						    .detail("Size", memRes.size())
 						    .detail("WrongLocation", i)
-						    .detail("MemoryResultKey", printable(memRes[i].key))
-						    .detail("DbResultKey", printable(res[i].key))
+						    .detail("MemoryResultKey", memRes[i].key)
+						    .detail("DbResultKey", res[i].key)
 						    .detail("MemoryResultValueSize", memRes[i].value.size())
 						    .detail("DbResultValueSize", res[i].value.size())
 						    .detail("ReadYourWritesDisabled", readYourWritesDisabled);
@@ -323,10 +323,10 @@ struct WriteDuringReadWorkload : TestWorkload {
 				if (res.size() > memRes.size() || (res.size() < memRes.size() && !res.more) ||
 				    (res.size() == 0 && res.more && !resized)) {
 					TraceEvent(SevError, "WDRGetRangeWrongResult", randomID)
-					    .detail("BeginKey", printable(begin.getKey()))
+					    .detail("BeginKey", begin.getKey())
 					    .detail("BeginOffset", begin.offset)
 					    .detail("BeginOrEqual", begin.orEqual)
-					    .detail("EndKey", printable(end.getKey()))
+					    .detail("EndKey", end.getKey())
 					    .detail("EndOffset", end.offset)
 					    .detail("EndOrEqual", end.orEqual)
 					    .detail("LimitRows", limit.rows)
@@ -346,10 +346,10 @@ struct WriteDuringReadWorkload : TestWorkload {
 				for (int i = 0; i < res.size(); i++) {
 					if (res[i] != memRes[i]) {
 						TraceEvent(SevError, "WDRGetRangeWrongResult", randomID)
-						    .detail("BeginKey", printable(begin.getKey()))
+						    .detail("BeginKey", begin.getKey())
 						    .detail("BeginOffset", begin.offset)
 						    .detail("BeginOrEqual", begin.orEqual)
-						    .detail("EndKey", printable(end.getKey()))
+						    .detail("EndKey", end.getKey())
 						    .detail("EndOffset", end.offset)
 						    .detail("EndOrEqual", end.orEqual)
 						    .detail("LimitRows", limit.rows)
@@ -358,8 +358,8 @@ struct WriteDuringReadWorkload : TestWorkload {
 						    .detail("Reverse", reverse)
 						    .detail("Size", memRes.size())
 						    .detail("WrongLocation", i)
-						    .detail("MemoryResultKey", printable(memRes[i].key))
-						    .detail("DbResultKey", printable(res[i].key))
+						    .detail("MemoryResultKey", memRes[i].key)
+						    .detail("DbResultKey", res[i].key)
 						    .detail("MemoryResultValueSize", memRes[i].value.size())
 						    .detail("DbResultValueSize", res[i].value.size())
 						    .detail("ReadYourWritesDisabled", readYourWritesDisabled)
@@ -409,7 +409,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 			*memLimit += memRes.expectedSize();
 			if (res != memRes) {
 				TraceEvent(SevError, "WDRGetWrongResult", randomID)
-				    .detail("Key", printable(key))
+				    .detail("Key", key)
 				    .detail("Snapshot", snapshot)
 				    .detail("MemoryResult", memRes.present() ? memRes.get().size() : -1)
 				    .detail("DbResult", res.present() ? res.get().size() : -1)
@@ -439,7 +439,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 		if (readYourWritesDisabled) // Only tests RYW activated watches
 			return Void();
 
-		//TraceEvent("WDRWatch", randomID).detail("Key", printable(key));
+		//TraceEvent("WDRWatch", randomID).detail("Key", key);
 		try {
 			state int changeNum = self->changeCount[key];
 			state Optional<Value> memRes = self->memoryGet(&self->memoryDatabase, key);
@@ -452,7 +452,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 						if (changeNum == self->changeCount[key]) {
 							TraceEvent(SevError, "WDRWatchWrongResult", randomID)
 							    .detail("Reason", "Triggered without changing")
-							    .detail("Key", printable(key))
+							    .detail("Key", key)
 							    .detail("Value", changeNum)
 							    .detail("DuringCommit", *doingCommit);
 						}
@@ -462,9 +462,9 @@ struct WriteDuringReadWorkload : TestWorkload {
 						if (memRes != memRes2) {
 							TraceEvent(SevError, "WDRWatchWrongResult", randomID)
 							    .detail("Reason", "Changed without triggering")
-							    .detail("Key", printable(key))
-							    .detail("Value1", printable(memRes))
-							    .detail("Value2", printable(memRes2));
+							    .detail("Key", key)
+							    .detail("Value1", memRes)
+							    .detail("Value2", memRes2);
 						}
 					}
 				}
@@ -511,8 +511,8 @@ struct WriteDuringReadWorkload : TestWorkload {
 					if (transactionIter->begin() != addedIter->begin() ||
 					    transactionIter->value() != addedIter->value()) {
 						TraceEvent(SevError, "WriteConflictError")
-						    .detail("TransactionKey", printable(transactionIter->begin()))
-						    .detail("AddedKey", printable(addedIter->begin()))
+						    .detail("TransactionKey", transactionIter->begin())
+						    .detail("AddedKey", addedIter->begin())
 						    .detail("TransactionVal", transactionIter->value())
 						    .detail("AddedVal", addedIter->value());
 						failed = true;
@@ -530,12 +530,12 @@ struct WriteDuringReadWorkload : TestWorkload {
 					for (transactionIter = transactionRanges.begin(); transactionIter != transactionRanges.end();
 					     ++transactionIter) {
 						TraceEvent("WCRTransaction")
-						    .detail("Range", printable(transactionIter.range()))
+						    .detail("Range", transactionIter.range())
 						    .detail("Value", transactionIter.value());
 					}
 					for (addedIter = addedRanges.begin(); addedIter != addedRanges.end(); ++addedIter) {
 						TraceEvent("WCRAdded")
-						    .detail("Range", printable(addedIter.range()))
+						    .detail("Range", addedIter.range())
 						    .detail("Value", addedIter.value());
 					}
 				}
@@ -854,7 +854,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 								KeyRange range = self->getRandomRange(self->maxClearSize);
 								self->changeCount.insert(range, changeNum++);
 								bool noConflict = deterministicRandom()->random01() < 0.5;
-								//TraceEvent("WDRClearRange").detail("Begin", printable(range)).detail("NoConflict", noConflict);
+								//TraceEvent("WDRClearRange").detail("Begin", range).detail("NoConflict", noConflict);
 								if (noConflict)
 									tr.setOption(FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE);
 								tr.clear(range);
@@ -880,7 +880,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 								Key key = self->getRandomKey();
 								self->changeCount.insert(key, changeNum++);
 								bool noConflict = deterministicRandom()->random01() < 0.5;
-								//TraceEvent("WDRClear").detail("Key", printable(key)).detail("NoConflict", noConflict);
+								//TraceEvent("WDRClear").detail("Key", key).detail("NoConflict", noConflict);
 								if (noConflict)
 									tr.setOption(FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE);
 								tr.clear(key);
@@ -895,7 +895,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 								    &tr, self->getRandomKey(), readYourWritesDisabled, self, &doingCommit, &memLimit));
 							} else if (operationType == 7 && !disableWriteConflictRange) {
 								KeyRange range = self->getRandomRange(self->nodes);
-								//TraceEvent("WDRAddWriteConflict").detail("Range", printable(range));
+								//TraceEvent("WDRAddWriteConflict").detail("Range", range);
 								tr.addWriteConflictRange(range);
 								KeyRangeRef conflict(
 								    range.begin.substr(0,
@@ -949,7 +949,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 									                                            tr.getCachedReadVersion().orDefault(0),
 									                                            normalKeys.end);
 									self->changeCount.insert(range, changeNum++);
-									//TraceEvent("WDRVersionStamp").detail("VersionStampKey", printable(versionStampKey)).detail("Range", printable(range));
+									//TraceEvent("WDRVersionStamp").detail("VersionStampKey", versionStampKey).detail("Range", range);
 									tr.atomicOp(versionStampKey, value, MutationRef::SetVersionstampedKey);
 									tr.clear(range);
 									KeyRangeRef conflict(
@@ -1000,11 +1000,11 @@ struct WriteDuringReadWorkload : TestWorkload {
 									}
 									self->changeCount.insert(key, changeNum++);
 									bool noConflict = deterministicRandom()->random01() < 0.5;
-									//TraceEvent("WDRAtomicOp").detail("Key", printable(key)).detail("Value", value.size()).detail("NoConflict", noConflict);
+									//TraceEvent("WDRAtomicOp").detail("Key", key).detail("Value", value.size()).detail("NoConflict", noConflict);
 									if (noConflict)
 										tr.setOption(FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE);
 									tr.atomicOp(key, value, opType);
-									//TraceEvent("WDRAtomicOpSuccess").detail("Key", printable(key)).detail("Value", value.size());
+									//TraceEvent("WDRAtomicOpSuccess").detail("Key", key).detail("Value", value.size());
 									if (!noConflict && key.size() <= (key.startsWith(systemKeys.begin)
 									                                      ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT
 									                                      : CLIENT_KNOBS->KEY_SIZE_LIMIT))
@@ -1021,7 +1021,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 								Value value = self->getRandomValue();
 								self->changeCount.insert(key, changeNum++);
 								bool noConflict = deterministicRandom()->random01() < 0.5;
-								//TraceEvent("WDRSet").detail("Key", printable(key)).detail("Value", value.size()).detail("NoConflict", noConflict);
+								//TraceEvent("WDRSet").detail("Key", key).detail("Value", value.size()).detail("NoConflict", noConflict);
 								if (noConflict)
 									tr.setOption(FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE);
 								tr.set(key, value);
@@ -1029,7 +1029,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 								                                      ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT
 								                                      : CLIENT_KNOBS->KEY_SIZE_LIMIT))
 									self->addedConflicts.insert(key, true);
-								//TraceEvent("WDRSetSuccess").detail("Key", printable(key)).detail("Value", value.size());
+								//TraceEvent("WDRSetSuccess").detail("Key", key).detail("Value", value.size());
 								self->memoryDatabase[key] = value;
 							}
 						} catch (Error& e) {
