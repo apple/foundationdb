@@ -1577,7 +1577,8 @@ ACTOR Future<Void> BgDDValleyFiller(DDQueueData* self, int teamCollectionIndex) 
 					// reset loop interval
 					rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL;
 				} else if (val.present()) {
-					if (val.get().size() > 0) {
+					// FIXME: better way for upgrade? for example, using a new key to record mode
+					if (val.get().size() > sizeof(int)) {
 						int ddIgnore = BinaryReader::fromStringRef<int>(val.get(), Unversioned());
 						if (ddIgnore & DDIgnore::REBALANCE_DISK) {
 							disableReadBalance = true;

@@ -1535,6 +1535,8 @@ struct LoadConfigurationResult {
 	Optional<Key> healthyZone;
 	double healthyZoneSeconds;
 	bool rebalanceDDIgnored;
+	// FIXME: possible convert it to int if upgrade value can be resolved?
+	std::string rebalanceDDIgnoreHex; // any or combination of 0, 1, 2, see enum DDIgnore;
 	bool dataDistributionDisabled;
 
 	LoadConfigurationResult()
@@ -1609,6 +1611,9 @@ loadConfiguration(Database cx, JsonBuilderArray* messages, std::set<std::string>
 						}
 					}
 					res.rebalanceDDIgnored = rebalanceDDIgnored.get().present();
+					if (res.rebalanceDDIgnored) {
+						res.rebalanceDDIgnoreHex = rebalanceDDIgnored.get().get().toHexString();
+					}
 					if (ddModeKey.get().present()) {
 						BinaryReader rd(ddModeKey.get().get(), Unversioned());
 						int currentMode;
@@ -2955,6 +2960,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			}
 			if (loadResult.get().rebalanceDDIgnored) {
 				statusObj["data_distribution_disabled_for_rebalance"] = true;
+				statusObj["data_distribution_disabled_hex"] = loadResult.get().rebalanceDDIgnoreHex;
 			}
 			if (loadResult.get().dataDistributionDisabled) {
 				statusObj["data_distribution_disabled"] = true;
