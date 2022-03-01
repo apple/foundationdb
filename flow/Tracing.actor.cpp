@@ -71,12 +71,12 @@ struct LogfileTracer : ITracer {
 	void trace(OTELSpan const& span) override {
 		TraceEvent te(SevInfo, "TracingSpan", span.context.traceID);
 		te.detail("SpanID", span.context.spanID)
-			.detail("Location", span.location.name)
+		    .detail("Location", span.location.name)
 		    .detail("Begin", format("%.6f", span.begin))
 		    .detail("End", format("%.6f", span.end))
-			.detail("Kind", span.kind)
-			.detail("Status", span.status)
-			.detail("Parent Span ID", span.parentContext.spanID);
+		    .detail("Kind", span.kind)
+		    .detail("Status", span.status)
+		    .detail("Parent Span ID", span.parentContext.spanID);
 
 		for (const auto& [key, value] : span.attributes) {
 			TraceEvent(SevInfo, "TracingSpanTag", span.context.traceID).detail("Key", key).detail("Value", value);
@@ -336,7 +336,7 @@ private:
 
 		for (const auto& event : vec) {
 			serialize_string(event.name.toString(), request); // event name
-			serialize_value(event.time, request, 0xcb); // event time 
+			serialize_value(event.time, request, 0xcb); // event time
 			serialize_map(event.attributes, request);
 		}
 	}
@@ -578,25 +578,30 @@ TEST_CASE("/flow/Tracing/CreateOTELSpan") {
 	// Sampling disabled, no parent.
 	OTELSpan notSampled("foo"_loc);
 	ASSERT(!notSampled.context.isSampled());
-	
+
 	// FORCE SAMPLING
-	OTELSpan sampled("foo"_loc, [](){return 1.0;});
+	OTELSpan sampled("foo"_loc, []() { return 1.0; });
 	ASSERT(sampled.context.isSampled());
 
 	// Ensure child traceID matches parent, when parent is sampled.
-	OTELSpan childTraceIDMatchesParent("foo"_loc, [](){return 1.0;}, SpanContext(UID(100, 101), 200, TraceFlags::sampled));
-	ASSERT(childTraceIDMatchesParent.context.traceID.first() == childTraceIDMatchesParent.parentContext.traceID.first());
-	ASSERT(childTraceIDMatchesParent.context.traceID.second() == childTraceIDMatchesParent.parentContext.traceID.second());
+	OTELSpan childTraceIDMatchesParent(
+	    "foo"_loc, []() { return 1.0; }, SpanContext(UID(100, 101), 200, TraceFlags::sampled));
+	ASSERT(childTraceIDMatchesParent.context.traceID.first() ==
+	       childTraceIDMatchesParent.parentContext.traceID.first());
+	ASSERT(childTraceIDMatchesParent.context.traceID.second() ==
+	       childTraceIDMatchesParent.parentContext.traceID.second());
 
-    // When the parent isn't sampled AND it has legitimate values we should not sample a child, 
+	// When the parent isn't sampled AND it has legitimate values we should not sample a child,
 	// even if the child was randomly selected for sampling.
-	OTELSpan parentNotSampled("foo"_loc, [](){return 1.0;}, SpanContext(UID(1, 1), 1, TraceFlags::unsampled));
+	OTELSpan parentNotSampled(
+	    "foo"_loc, []() { return 1.0; }, SpanContext(UID(1, 1), 1, TraceFlags::unsampled));
 	ASSERT(!parentNotSampled.context.isSampled());
 
-    // When the parent isn't sampled AND it has zero values for traceID and spanID this means
+	// When the parent isn't sampled AND it has zero values for traceID and spanID this means
 	// we should defer to the child as the new root of the trace as there was no actual parent.
-	// If the child was sampled we should send the child trace with a null parent. 
-	OTELSpan noParent("foo"_loc, [](){return 1.0;}, SpanContext(UID(0, 0), 0, TraceFlags::unsampled));
+	// If the child was sampled we should send the child trace with a null parent.
+	OTELSpan noParent(
+	    "foo"_loc, []() { return 1.0; }, SpanContext(UID(0, 0), 0, TraceFlags::unsampled));
 	ASSERT(noParent.context.isSampled());
 
 	return Void();

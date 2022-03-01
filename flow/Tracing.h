@@ -113,13 +113,15 @@ struct Span {
 	std::unordered_map<StringRef, StringRef> tags;
 };
 
-// OTELSpan 
+// OTELSpan
 //
-// OTELSpan is a tracing implementation which, for the most part, complies with the W3C Trace Context specification https://www.w3.org/TR/trace-context/
-// and the OpenTelemetry API https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/api.md.
+// OTELSpan is a tracing implementation which, for the most part, complies with the W3C Trace Context specification
+// https://www.w3.org/TR/trace-context/ and the OpenTelemetry API
+// https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/api.md.
 //
-// The major differences between OTELSpan and the current Span implementation, which is based off the OpenTracing.io specification https://opentracing.io/
-// are as follows. https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/api.md#span
+// The major differences between OTELSpan and the current Span implementation, which is based off the OpenTracing.io
+// specification https://opentracing.io/ are as follows.
+// https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/api.md#span
 //
 // OTELSpans have...
 // 1. A SpanContext which consists of 3 attributes.
@@ -128,16 +130,24 @@ struct Span {
 // SpanId - A valid span identifier is an 8-byte array with at least one non-zero byte.
 // TraceFlags - 1 byte, bit field for flags.
 //
-// TraceState is not implemented, specifically we do not provide some of the following APIs https://www.w3.org/TR/trace-context/#mutating-the-tracestate-field
-// In particular APIs to delete/update a specific, arbitrary key/value pair, as this complies with the OTEL specification where SpanContexts are immutable.
+// TraceState is not implemented, specifically we do not provide some of the following APIs
+// https://www.w3.org/TR/trace-context/#mutating-the-tracestate-field In particular APIs to delete/update a specific,
+// arbitrary key/value pair, as this complies with the OTEL specification where SpanContexts are immutable.
 //
-// 2. A begin/end and those values are serialized, unlike the Span implementation which has an end but serializes with a begin and calculated duration field.
-// 3. A SpanKind https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/api.md#spankind
-// 4. A SpanStatus https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/api.md#set-status
-// 5. A singular parent SpanContext, which may optionally be null, as opposed to our Span implementation which allows for a list of parents. 
-// 6. An "attributes" rather than "tags", however the implementation is the same, a key/value map of strings. https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/common/common.md#attributes
-// 7. An optional list of linked SpanContexts. https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/api.md#specifying-links
-// 8. An optional list of timestamped Events. https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/api.md#add-events
+// 2. A begin/end and those values are serialized, unlike the Span implementation which has an end but serializes with a
+// begin and calculated duration field.
+// 3. A SpanKind
+// https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/api.md#spankind
+// 4. A SpanStatus
+// https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/api.md#set-status
+// 5. A singular parent SpanContext, which may optionally be null, as opposed to our Span implementation which allows
+// for a list of parents.
+// 6. An "attributes" rather than "tags", however the implementation is the same, a key/value map of strings.
+// https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/common/common.md#attributes
+// 7. An optional list of linked SpanContexts.
+// https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/api.md#specifying-links
+// 8. An optional list of timestamped Events.
+// https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/api.md#add-events
 
 enum class SpanKind : uint8_t {
 	CLIENT = 0,
@@ -160,45 +170,62 @@ struct OTELEvent {
 };
 
 struct OTELSpan {
-	OTELSpan(SpanContext context, Location location, SpanContext parentContext, std::initializer_list<SpanContext> const& links = {})
-	  : context(context), location(location), parentContext(parentContext), links(links.begin(), links.end()), begin(g_network->now()) {
-		// We've simplified the logic here, essentially we're now always setting trace and span ids and relying on the TraceFlags
-		// to determine if we're sampling. Therefore if the parent is sampled, we simply overwrite this span's traceID 
-		// with the parent trace id. 
+	OTELSpan(SpanContext context,
+	         Location location,
+	         SpanContext parentContext,
+	         std::initializer_list<SpanContext> const& links = {})
+	  : context(context), location(location), parentContext(parentContext), links(links.begin(), links.end()),
+	    begin(g_network->now()) {
+		// We've simplified the logic here, essentially we're now always setting trace and span ids and relying on the
+		// TraceFlags to determine if we're sampling. Therefore if the parent is sampled, we simply overwrite this
+		// span's traceID with the parent trace id.
 		if (parentContext.isSampled()) {
 			this->context.traceID = UID(parentContext.traceID.first(), parentContext.traceID.second());
 			this->context.m_Flags = TraceFlags::sampled;
 		} else {
-			// However there are two other cases. 
-			// 1. A legitamite parent span exists but it was not selected for tracing. 
-			// 2. There is no actual parent, just a default arg parent provided by the constructor AND the "child" span was selected for sampling.
-			// For case 1. we handle below by marking the child as unsampled. 
-			// For case 2 we needn't do anything, and can rely on the values in this OTELSpan
-		 	if (parentContext.traceID.first() != 0 && 
-		 		parentContext.traceID.second() != 0 &&
-		 		parentContext.spanID != 0) {
+			// However there are two other cases.
+			// 1. A legitamite parent span exists but it was not selected for tracing.
+			// 2. There is no actual parent, just a default arg parent provided by the constructor AND the "child" span
+			// was selected for sampling. For case 1. we handle below by marking the child as unsampled. For case 2 we
+			// needn't do anything, and can rely on the values in this OTELSpan
+			if (parentContext.traceID.first() != 0 && parentContext.traceID.second() != 0 &&
+			    parentContext.spanID != 0) {
 				this->context.m_Flags = TraceFlags::unsampled;
 			}
 		}
 		this->kind = SpanKind::SERVER;
 		this->status = SpanStatus::OK;
-		this->attributes["address"_sr] = g_network->getLocalAddress().toString(); 
+		this->attributes["address"_sr] = g_network->getLocalAddress().toString();
 	}
 
-	OTELSpan(Location location, SpanContext parent = SpanContext(), std::initializer_list<SpanContext> const& links = {})
-	  : OTELSpan(SpanContext(UID(deterministicRandom()->randomUInt64(), deterministicRandom()->randomUInt64()), // traceID
-	  deterministicRandom()->randomUInt64(), // spanID 
-	  deterministicRandom()->random01() < FLOW_KNOBS->TRACING_SAMPLE_RATE // sampled or unsampled
-	  ? TraceFlags::sampled : TraceFlags::unsampled), location, parent, links) {}
+	OTELSpan(Location location,
+	         SpanContext parent = SpanContext(),
+	         std::initializer_list<SpanContext> const& links = {})
+	  : OTELSpan(
+	        SpanContext(UID(deterministicRandom()->randomUInt64(), deterministicRandom()->randomUInt64()), // traceID
+	                    deterministicRandom()->randomUInt64(), // spanID
+	                    deterministicRandom()->random01() < FLOW_KNOBS->TRACING_SAMPLE_RATE // sampled or unsampled
+	                        ? TraceFlags::sampled
+	                        : TraceFlags::unsampled),
+	        location,
+	        parent,
+	        links) {}
 
 	OTELSpan(Location location, SpanContext parent, SpanContext link) : OTELSpan(location, parent, { link }) {}
 
-	// NOTE: This constructor is primarly for unit testing until we sort out how to enable/disable a Knob dynamically in a test.
-	OTELSpan(Location location, std::function<double()> rateProvider, SpanContext parent = SpanContext(), std::initializer_list<SpanContext> const& links = {})
-	  : OTELSpan(SpanContext(UID(deterministicRandom()->randomUInt64(), deterministicRandom()->randomUInt64()), 
-	  deterministicRandom()->randomUInt64(), 
-	  deterministicRandom()->random01() < rateProvider() 
-	  ? TraceFlags::sampled : TraceFlags::unsampled), location, parent, links) {}
+	// NOTE: This constructor is primarly for unit testing until we sort out how to enable/disable a Knob dynamically in
+	// a test.
+	OTELSpan(Location location,
+	         std::function<double()> rateProvider,
+	         SpanContext parent = SpanContext(),
+	         std::initializer_list<SpanContext> const& links = {})
+	  : OTELSpan(SpanContext(UID(deterministicRandom()->randomUInt64(), deterministicRandom()->randomUInt64()),
+	                         deterministicRandom()->randomUInt64(),
+	                         deterministicRandom()->random01() < rateProvider() ? TraceFlags::sampled
+	                                                                            : TraceFlags::unsampled),
+	             location,
+	             parent,
+	             links) {}
 
 	OTELSpan(const OTELSpan&) = delete;
 	OTELSpan(OTELSpan&& o) {
@@ -209,7 +236,7 @@ struct OTELSpan {
 		end = o.end;
 		parentContext = std::move(o.parentContext);
 		links = std::move(o.links);
-		// TODO - Should we move events and attributes or should we follow the previous model 
+		// TODO - Should we move events and attributes or should we follow the previous model
 		// where we didn't move tags?
 		events = std::move(o.events);
 		attributes = std::move(o.attributes);
@@ -236,18 +263,14 @@ struct OTELSpan {
 		// in the Span implementation.
 		std::swap(links, other.links);
 		// TODO - Should we leave out attributes and events? Attributes/tags are left out in the Span::swap.
-		// Events are an entirely new concept here, so no precedence.  
+		// Events are an entirely new concept here, so no precedence.
 		std::swap(attributes, other.attributes);
 		std::swap(events, other.events);
 	}
 
-	void addLink(SpanContext linkContext) {
-		links.push_back(linkContext);
-	}
+	void addLink(SpanContext linkContext) { links.push_back(linkContext); }
 
-	void addEvent(OTELEvent event) {
-		events.push_back(event);
-	}
+	void addEvent(OTELEvent event) { events.push_back(event); }
 
 	void addAttribute(const StringRef& key, const StringRef& value) { attributes[key] = value; }
 
@@ -309,5 +332,3 @@ struct OTELSpannedDeque : Deque<T> {
 		span = std::move(other.span);
 	}
 };
-
-
