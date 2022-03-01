@@ -399,6 +399,8 @@ public:
 		// Without this we would never see any trace events from that loop, and it would be more difficult to identify
 		// where the process is actually stuck.
 		if (g_network && g_network->isSimulated() && bufferLength > 1e8) {
+			fprintf(stderr, "Trace log buffer overflow\n");
+			fprintf(stderr, "Last event: %s\n", fields.toString().c_str());
 			// Setting this to 0 avoids a recurse from the assertion trace event and also prevents a situation where
 			// we roll the trace log only to log the single assertion event when using --crash.
 			bufferLength = 0;
