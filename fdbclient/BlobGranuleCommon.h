@@ -77,14 +77,14 @@ struct BlobGranuleChunkRef {
 	constexpr static FileIdentifier file_identifier = 865198;
 	KeyRangeRef keyRange;
 	Version includedVersion;
-	Version startVersion;
+	Version snapshotVersion;
 	Optional<BlobFilePointerRef> snapshotFile; // not set if it's an incremental read
 	VectorRef<BlobFilePointerRef> deltaFiles;
 	GranuleDeltas newDeltas;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keyRange, includedVersion, startVersion, snapshotFile, deltaFiles, newDeltas);
+		serializer(ar, keyRange, includedVersion, snapshotVersion, snapshotFile, deltaFiles, newDeltas);
 	}
 };
 

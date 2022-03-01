@@ -2256,7 +2256,6 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 
 			state KeyRange chunkRange;
 			state GranuleFiles chunkFiles;
-			state Version startVer;
 
 			if (metadata->initialSnapshotVersion > req.readVersion) {
 				// this is a time travel query, find previous granule
@@ -2317,7 +2316,6 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 
 				ASSERT(cur->endVersion > req.readVersion);
 				ASSERT(cur->startVersion <= req.readVersion);
-				startVer = cur->startVersion;
 
 				// lazily load files for old granule if not present
 				chunkRange = cur->range;
@@ -2352,7 +2350,6 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 				ASSERT(chunkFiles.snapshotFiles.front().version <= req.readVersion);
 			} else {
 				// this is an active granule query
-				startVer = metadata->initialSnapshotVersion;
 				loop {
 					if (!metadata->activeCFData.get().isValid() || !metadata->cancelled.canBeSet()) {
 						throw wrong_shard_server();
@@ -2408,7 +2405,6 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 			BlobGranuleChunkRef chunk;
 			// TODO change in V2
 			chunk.includedVersion = req.readVersion;
-			chunk.startVersion = startVer;
 			chunk.keyRange = KeyRangeRef(StringRef(rep.arena, chunkRange.begin), StringRef(rep.arena, chunkRange.end));
 
 			// handle snapshot files
@@ -2434,6 +2430,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 			BlobFileIndex snapshotF = chunkFiles.snapshotFiles[i];
 			chunk.snapshotFile = BlobFilePointerRef(rep.arena, snapshotF.filename, snapshotF.offset, snapshotF.length);
 			Version snapshotVersion = chunkFiles.snapshotFiles[i].version;
+			chunk.snapshotVersion = snapshotVersion;
 
 			// handle delta files
 			// cast this to an int so i going to -1 still compares properly

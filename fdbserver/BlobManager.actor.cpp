@@ -2450,7 +2450,7 @@ ACTOR Future<Void> monitorPruneKeys(Reference<BlobManagerData> self) {
 			pruneMap.insert(allKeys, std::make_pair<Version, bool>(0, false));
 			try {
 				// TODO: replace 10000 with a knob
-				state RangeResult pruneIntents = wait(tr->getRange(blobGranulePruneKeys, 10000));
+				state RangeResult pruneIntents = wait(tr->getRange(blobGranulePruneKeys, BUGGIFY ? 1 : 10000));
 				if (pruneIntents.size()) {
 					int rangeIdx = 0;
 					for (; rangeIdx < pruneIntents.size(); ++rangeIdx) {
