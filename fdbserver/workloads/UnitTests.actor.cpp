@@ -149,7 +149,7 @@ struct UnitTestWorkload : TestWorkload {
 			self->totalWallTime += wallTime;
 			self->totalSimTime += simTime;
 			TraceEvent(result.code() != error_code_success ? SevError : SevInfo, "UnitTest")
-			    .error(result, true)
+			    .errorUnsuppressed(result)
 			    .detail("Name", test->name)
 			    .detail("File", test->file)
 			    .detail("Line", test->line)

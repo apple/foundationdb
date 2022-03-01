@@ -1769,17 +1769,17 @@ ACTOR Future<Void> proxySnapCreate(ProxySnapRequest snapReq, ProxyCommitData* co
 			wait(throwErrorOr(ddSnapReq));
 		} catch (Error& e) {
 			TraceEvent("SnapCommitProxy_DDSnapResponseError")
+			    .errorUnsuppressed(e)
 			    .detail("SnapPayload", snapReq.snapPayload)
-			    .detail("SnapUID", snapReq.snapUID)
-			    .error(e, true /*includeCancelled*/);
+			    .detail("SnapUID", snapReq.snapUID);
 			throw e;
 		}
 		snapReq.reply.send(Void());
 	} catch (Error& e) {
 		TraceEvent("SnapCommitProxy_SnapReqError")
+		    .errorUnsuppressed(e)
 		    .detail("SnapPayload", snapReq.snapPayload)
-		    .detail("SnapUID", snapReq.snapUID)
-		    .error(e, true /*includeCancelled*/);
+		    .detail("SnapUID", snapReq.snapUID);
 		if (e.code() != error_code_operation_cancelled) {
 			snapReq.reply.sendError(e);
 		} else {
@@ -2188,7 +2188,7 @@ ACTOR Future<Void> commitProxyServer(CommitProxyInterface proxy,
 		                                                whitelistBinPaths);
 		wait(core || checkRemoved(db, req.recoveryCount, proxy));
 	} catch (Error& e) {
-		TraceEvent("CommitProxyTerminated", proxy.id()).error(e, true);
+		TraceEvent("CommitProxyTerminated", proxy.id()).errorUnsuppressed(e);
 
 		if (e.code() != error_code_worker_removed && e.code() != error_code_tlog_stopped &&
 		    e.code() != error_code_tlog_failed && e.code() != error_code_coordinators_changed &&

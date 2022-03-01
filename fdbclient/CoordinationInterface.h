@@ -93,17 +93,20 @@ public:
 	// This one should only be used when resolving asynchronously is impossible. For all other cases, resolveHostnames()
 	// should be preferred.
 	void resolveHostnamesBlocking();
+	// This function derives the member connectionString from the current key, coordinators and hostnames.
+	void resetConnectionString();
+
 	void resetToUnresolved();
+	void parseKey(const std::string& key);
 
 	ConnectionStringStatus status = RESOLVED;
 	AsyncTrigger resolveFinish;
 	std::vector<NetworkAddress> coords;
 	std::vector<Hostname> hostnames;
+	std::unordered_map<NetworkAddress, Hostname> networkAddressToHostname;
 
 private:
 	void parseConnString();
-	void parseKey(const std::string& key);
-	std::unordered_map<NetworkAddress, Hostname> networkAddressToHostname;
 	Key key, keyDesc;
 	std::string connectionString;
 };

@@ -50,7 +50,7 @@ Future<T> traceAfter(Future<T> what, const char* type, const char* key, X value,
 		return val;
 	} catch (Error& e) {
 		if (traceErrors)
-			TraceEvent(type).error(e, true).detail(key, value);
+			TraceEvent(type).errorUnsuppressed(e).detail(key, value);
 		throw;
 	}
 }
@@ -67,7 +67,7 @@ Future<T> traceAfterCall(Future<T> what, const char* type, const char* key, X fu
 		return val;
 	} catch (Error& e) {
 		if (traceErrors)
-			TraceEvent(type).error(e, true);
+			TraceEvent(type).errorUnsuppressed(e);
 		throw;
 	}
 }

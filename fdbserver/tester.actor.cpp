@@ -569,7 +569,7 @@ ACTOR Future<Void> runWorkloadAsync(Database cx,
 					if (e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_delete)
 						throw;
 					TraceEvent(SevError, "TestFailure", workIface.id())
-					    .error(e, true)
+					    .errorUnsuppressed(e)
 					    .detail("Reason", "Error starting workload")
 					    .detail("Workload", workload->description());
 					// ok = false;
