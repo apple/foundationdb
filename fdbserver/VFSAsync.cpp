@@ -489,7 +489,7 @@ VFSAsyncFile::~VFSAsyncFile() {
 	if (!--filename_lockCount_openCount[filename].second) {
 		filename_lockCount_openCount.erase(filename);
 
-		TraceEvent(SevDebug, "VFSAsyncFileDestroyFinished").detail("Filename", filename).backtrace();
+		TraceEvent(SevDebug, "VFSAsyncFileDestroy").detail("Filename", filename).backtrace();
 
 		// Always delete the shared memory when the last copy of the file is deleted.  In simulation, this is helpful
 		// because "killing" a file without properly closing it can result in a shared memory state that causes
@@ -742,7 +742,7 @@ static int asyncSleep(sqlite3_vfs* pVfs, int microseconds) {
 		if (e.isInjectedFault()) {
 			VFSAsyncFile::setInjectedError(SQLITE_ERROR);
 		}
-		TraceEvent(SevError, "VFSAsyncSleepError").errorUnsuppressed(e);
+		TraceEvent(SevError, "VFSAsyncSleepError").error(e, true);
 		return 0;
 	}
 }

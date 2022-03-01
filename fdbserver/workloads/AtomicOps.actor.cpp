@@ -24,7 +24,6 @@
 #include "fdbserver/workloads/BulkSetup.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 //#define SevAtomicOpDebug SevInfo
@@ -366,7 +365,6 @@ struct AtomicOpsWorkload : TestWorkload {
 			state ReadYourWritesTransaction tr(cx);
 			state RangeResult log;
 			loop {
-				TraceEvent(SevDebug, "AtomicOpsCheckLoop").detail("Index", g);
 				try {
 					{
 						// Calculate the accumulated value in the log keyspace for the group g
@@ -435,12 +433,10 @@ struct AtomicOpsWorkload : TestWorkload {
 						break;
 					}
 				} catch (Error& e) {
-					TraceEvent(SevDebug, "AtomicsOpsCheckError").error(e, true).backtrace();
 					wait(tr.onError(e));
 				}
 			}
 		}
-		TraceEvent("AtomicsOpsCheckFinished").detail("Result", ret);
 		return ret;
 	}
 };

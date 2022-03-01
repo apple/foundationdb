@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/Trace.h"
 #include "flow/flow.h"
 #include "flow/serialize.h"
 #include "flow/genericactors.actor.h"
@@ -142,7 +141,6 @@ public:
 
 	Future<int64_t> size() const override {
 		double diskDelay = getDelay();
-		TraceEvent(SevDebug, "AsyncFileChaos").detail("Filename", getFilename()).detail("DiskDelay", diskDelay);
 		if (diskDelay == 0.0)
 			return file->size();
 

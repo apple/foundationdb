@@ -22,7 +22,6 @@
 
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
 // version.
-#include "flow/Trace.h"
 #if defined(NO_INTELLISENSE) && !defined(FLOW_ASYNCFILENONDURABLE_ACTOR_G_H)
 #define FLOW_ASYNCFILENONDURABLE_ACTOR_G_H
 #include "fdbrpc/AsyncFileNonDurable.actor.g.h"
@@ -251,7 +250,7 @@ public:
 			if (shutdown.isReady())
 				throw io_error().asInjectedFault();
 
-			TraceEvent("AsyncFileNonDurableOpenComplete").detail("Filename", filename);
+			//TraceEvent("AsyncFileNonDurableOpenComplete").detail("Filename", filename);
 
 			wait(g_simulator.onProcess(currentProcess, currentTaskID));
 
@@ -261,7 +260,7 @@ public:
 			std::string currentFilename =
 			    (wrappedFile.isReady() && !wrappedFile.isError()) ? wrappedFile.get()->getFilename() : actualFilename;
 			currentProcess->machine->openFiles.erase(currentFilename);
-			//TraceEvent("AsyncFileNonDurableOpenError").errorUnsuppressed(e).detail("Filename", filename).detail("Address", currentProcess->address).detail("Addr", g_simulator.getCurrentProcess()->address);
+			//TraceEvent("AsyncFileNonDurableOpenError").error(e, true).detail("Filename", filename).detail("Address", currentProcess->address).detail("Addr", g_simulator.getCurrentProcess()->address);
 			wait(g_simulator.onProcess(currentProcess, currentTaskID));
 			throw err;
 		}
@@ -814,12 +813,7 @@ private:
 
 		try {
 			state int64_t rep = wait(onSize(self));
-			TraceEvent(SevDebug, "AsyncFileNonDurableSizeBeforeFinished")
-			    .detail("CurrentProcess", currentProcess->toString())
-			    .detail("Priority", currentTaskID);
 			wait(g_simulator.onProcess(currentProcess, currentTaskID));
-			TraceEvent(SevDebug, "AsyncFileNonDurableSizeFinished")
-			    .detail("CurrentProcess", currentProcess->toString());
 
 			return rep;
 		} catch (Error& e) {

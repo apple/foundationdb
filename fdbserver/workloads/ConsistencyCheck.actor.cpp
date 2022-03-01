@@ -22,7 +22,6 @@
 #include "boost/lexical_cast.hpp"
 
 #include "flow/IRandom.h"
-#include "flow/Trace.h"
 #include "flow/Tracing.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
@@ -308,12 +307,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					if (!usingDesiredClasses)
 						self->testFailure("Cluster has machine(s) not using requested classes");
 
-					if (g_network->isSimulated()) {
-						bool workerListCorrect = wait(self->checkWorkerList(cx, self));
-						if (!workerListCorrect) {
-							self->testFailure("Worker list incorrect");
-						}
-					}
+					bool workerListCorrect = wait(self->checkWorkerList(cx, self));
+					if (!workerListCorrect)
+						self->testFailure("Worker list incorrect");
 
 					bool coordinatorsCorrect = wait(self->checkCoordinators(cx));
 					if (!coordinatorsCorrect)
@@ -881,8 +877,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		state Span span(deterministicRandom()->randomUniqueID(), "WL:ConsistencyCheck"_loc);
 
 		while (begin < end) {
-			state Reference<CommitProxyInfo> commitProxyInfo =
-			    wait(cx->getCommitProxiesFuture(UseProvisionalProxies::False));
+			state Reference<CommitProxyInfo> commitProxyInfo = wait(cx->getCommitProxiesFuture(false));
 			keyServerLocationFutures.clear();
 			for (int i = 0; i < commitProxyInfo->size(); i++)
 				keyServerLocationFutures.push_back(
@@ -1077,11 +1072,11 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				// If the storage server doesn't reply, then return -1
 				if (!reply.present()) {
 					TraceEvent("ConsistencyCheck_FailedToFetchMetrics")
-					    .error(reply.getError())
 					    .detail("Begin", printable(shard.begin))
 					    .detail("End", printable(shard.end))
 					    .detail("StorageServer", storageServers[i].id())
-					    .detail("IsTSS", storageServers[i].isTss() ? "True" : "False");
+					    .detail("IsTSS", storageServers[i].isTss() ? "True" : "False")
+					    .error(reply.getError());
 					estimatedBytes.push_back(-1);
 				}
 
@@ -1129,7 +1124,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		loop {
 			try {
 				StorageMetrics metrics =
-				    wait(tr.getDatabase()->getStorageMetrics(KeyRangeRef(allKeys.begin, keyServersPrefix), 100000));
+				    wait(tr.getStorageMetrics(KeyRangeRef(allKeys.begin, keyServersPrefix), 100000));
 				return metrics.bytes;
 			} catch (Error& e) {
 				wait(tr.onError(e));
@@ -1499,7 +1494,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 								    rangeResult.isError() ? rangeResult.getError() : rangeResult.get().error.get();
 
 								TraceEvent("ConsistencyCheck_StorageServerUnavailable")
-								    .errorUnsuppressed(e)
 								    .suppressFor(1.0)
 								    .detail("StorageServer", storageServers[j])
 								    .detail("ShardBegin", printable(range.begin))
@@ -1508,7 +1502,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 								    .detail("UID", storageServerInterfaces[j].id())
 								    .detail("GetKeyValuesToken",
 								            storageServerInterfaces[j].getKeyValues.getEndpoint().token)
-								    .detail("IsTSS", storageServerInterfaces[j].isTss() ? "True" : "False");
+								    .detail("IsTSS", storageServerInterfaces[j].isTss() ? "True" : "False")
+								    .error(e);
 
 								// All shards should be available in quiscence
 								if (self->performQuiescentChecks && !storageServerInterfaces[j].isTss()) {
@@ -2040,8 +2035,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		std::vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
 		std::set<NetworkAddress> workerAddresses;
 
-		UID uid = deterministicRandom()->randomUniqueID();
-
 		for (const auto& it : workers) {
 			NetworkAddress addr = it.interf.tLog.getEndpoint().addresses.getTLSAddress();
 			ISimulator::ProcessInfo* info = g_simulator.getProcessByAddress(addr);
@@ -2049,7 +2042,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				TraceEvent("ConsistencyCheck_FailedWorkerInList").detail("Addr", it.interf.address());
 				return false;
 			}
-			TraceEvent(SevDebug, "ConsistencyCheckWorkerList").detail("Address", addr.toString()).detail("UID", uid);
 			workerAddresses.insert(NetworkAddress(addr.ip, addr.port, true, addr.isTLS()));
 		}
 
@@ -2373,21 +2365,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			            ? nonExcludedWorkerProcessMap[db.blobManager.get().address()].processClass.machineClassFitness(
 			                  ProcessClass::BlobManager)
 			            : -1);
-			return false;
-		}
-
-		// Check EncryptKeyProxy
-		if (SERVER_KNOBS->ENABLE_ENCRYPT_KEY_PROXY && db.encryptKeyProxy.present() &&
-		    (!nonExcludedWorkerProcessMap.count(db.encryptKeyProxy.get().address()) ||
-		     nonExcludedWorkerProcessMap[db.encryptKeyProxy.get().address()].processClass.machineClassFitness(
-		         ProcessClass::EncryptKeyProxy) > fitnessLowerBound)) {
-			TraceEvent("ConsistencyCheck_EncyrptKeyProxyNotBest")
-			    .detail("BestEncryptKeyProxyFitness", fitnessLowerBound)
-			    .detail("ExistingEncyrptKeyProxyFitness",
-			            nonExcludedWorkerProcessMap.count(db.encryptKeyProxy.get().address())
-			                ? nonExcludedWorkerProcessMap[db.encryptKeyProxy.get().address()]
-			                      .processClass.machineClassFitness(ProcessClass::EncryptKeyProxy)
-			                : -1);
 			return false;
 		}
 
