@@ -50,16 +50,6 @@ static_assert(ROCKSDB_MAJOR == 6 ? ROCKSDB_MINOR >= 27 : true,
 static_assert((ROCKSDB_MAJOR == 6 && ROCKSDB_MINOR == 27) ? ROCKSDB_PATCH >= 3 : true,
               "Unsupported rocksdb version. Update the rocksdb to 6.27.3 version");
 
-// Copied from SystemData.cpp
-// TODO: Move all constants to a header file.
-const KeyRef systemKeysPrefix = LiteralStringRef("\xff");
-const KeyRangeRef normalKeys(KeyRef(), systemKeysPrefix);
-const KeyRangeRef systemKeys(systemKeysPrefix, LiteralStringRef("\xff\xff"));
-const KeyRangeRef allKeys = KeyRangeRef(normalKeys.begin, systemKeys.end);
-const KeyRef afterAllKeys = LiteralStringRef("\xff\xff\x00");
-const KeyRangeRef specialKeys = KeyRangeRef(LiteralStringRef("\xff\xff"), LiteralStringRef("\xff\xff\xff"));
-// End System Data constants
-
 const std::string rocksDataFolderSuffix = "-data";
 const KeyRef persistShardMappingPrefix(LiteralStringRef("\xff\xff/ShardMapping/"));
 const KeyRangeRef defaultShardRange = KeyRangeRef(LiteralStringRef("\xff\xff"), LiteralStringRef("\xff\xff\xff"));
@@ -1041,7 +1031,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			// metric logger in simulation.
 			if (!g_network->isSimulated()) {
 				onMainThread([&] {
-					a.metrics = rocksDBMetricLogger(options.statistics, a.perfContextMetrics, db) &&
+					a.metrics = rocksDBMetricLogger(options.statistics, perfContextMetrics, db, readIterPool) &&
 					            flowLockLogger(a.readLock, a.fetchLock);
 					return Future<bool>(true);
 				}).blockUntilReady();
@@ -1791,7 +1781,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			return future;
 		} else {
 			auto a = std::make_unique<Writer::OpenAction>(
-			    path, dataPath, metrics, &readSemaphore, &fetchSemaphore, &shardMap);
+			    path, dataPath, metrics, &readSemaphore, &fetchSemaphore, errorListener, &shardMap);
 			openFuture = a->done.getFuture();
 			writeThread->post(a.release());
 			return openFuture;
@@ -2260,13 +2250,15 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	}
 
 	DB db = nullptr;
+	std::shared_ptr<PerfContextMetrics> perfContextMetrics;
 	std::string path;
 	const std::string dataPath;
 	UID id;
 	ShardMap shardMap;
 	Reference<IThreadPool> writeThread;
 	Reference<IThreadPool> readThreads;
-	Promise<Void> errorPromise;
+	std::shared_ptr<RocksDBErrorListener> errorListener;
+	Future<Void> errorFuture;
 	Promise<Void> closePromise;
 	Future<Void> openFuture;
 	std::unique_ptr<std::set<std::shared_ptr<DataShard>>> dirtyShards;
@@ -2275,6 +2267,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	int numReadWaiters;
 	FlowLock fetchSemaphore;
 	int numFetchWaiters;
+	std::shared_ptr<ReadIteratorPool> readIterPool;
 	Counters counters;
 };
 
