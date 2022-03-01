@@ -121,7 +121,8 @@ struct Span {
 // The major differences between OTELSpan and the current Span implementation, which is based off the OpenTracing.io specification https://opentracing.io/
 // are as follows. https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/api.md#span
 //
-// 1. OTELSpans contain a SpanContext which consists of 3 attributes.
+// OTELSpans have...
+// 1. A SpanContext which consists of 3 attributes.
 //
 // TraceId - A valid trace identifier is a 16-byte array with at least one non-zero byte.
 // SpanId - A valid span identifier is an 8-byte array with at least one non-zero byte.
@@ -130,13 +131,13 @@ struct Span {
 // TraceState is not implemented, specifically we do not provide some of the following APIs https://www.w3.org/TR/trace-context/#mutating-the-tracestate-field
 // In particular APIs to delete/update a specific, arbitrary key/value pair, as this complies with the OTEL specification where SpanContexts are immutable.
 //
-// 2. OTELSpans have a begin/end and those values are serialized, unlike the Span implementation which has an end but serializes with a begin and calculated duration field.
-// 3. OTELSpans have a SpanKind https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/api.md#spankind
-// 4. OTELSpans have a SpanStatus https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/api.md#set-status
-// 5. OTELSpans have a singular parent SpanContext, which may optionally be null, as opposed to our Span implementation which allows for a list of parents. 
-// 6. OTELSpans have "attributes" rather than "tags", however the implementation is the same, a key/value map of strings. https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/common/common.md#attributes
-// 7. OTELSpans have an optional list of linked SpanContexts. https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/api.md#specifying-links
-// 8. OTELSpans support a list of optional timestamped Events. https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/api.md#add-events
+// 2. A begin/end and those values are serialized, unlike the Span implementation which has an end but serializes with a begin and calculated duration field.
+// 3. A SpanKind https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/api.md#spankind
+// 4. A SpanStatus https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/api.md#set-status
+// 5. A singular parent SpanContext, which may optionally be null, as opposed to our Span implementation which allows for a list of parents. 
+// 6. An "attributes" rather than "tags", however the implementation is the same, a key/value map of strings. https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/common/common.md#attributes
+// 7. An optional list of linked SpanContexts. https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/api.md#specifying-links
+// 8. An optional list of timestamped Events. https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/api.md#add-events
 
 enum class SpanKind : uint8_t {
 	CLIENT = 0,
