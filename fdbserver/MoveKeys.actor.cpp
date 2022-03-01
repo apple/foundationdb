@@ -1590,12 +1590,22 @@ void seedShardServers(Arena& arena,
 			tr.set(arena, storageTeamIdKey(teamId), encodeStorageTeams(servers)); // TeamId -> Vec<StorageServers>
 			Key teamListKey = storageServerListToTeamIdKey(servers);
 			tr.set(arena, teamListKey, BinaryWriter::toValue(teamId, Unversioned())); // Vec<StorageServer> -> TeamId
-
 			if (servers.size() > 1) {
 				// Only seed team has more than one member.
 				ASSERT(!seedServerSet);
 				seedServerId = teamId;
 				seedServerSet = true;
+			}
+		}
+
+		if (!seedServerSet) {
+			ASSERT(serverToTeams.size() == 1);
+			for (auto& [teamId, servers] : teamToServers) {
+				if (teamId != servers[0]) {
+					seedServerId = teamId;
+					seedServerSet = true;
+					break;
+				}
 			}
 		}
 		ASSERT(seedServerSet);
