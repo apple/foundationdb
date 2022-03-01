@@ -884,9 +884,7 @@ public:
 
 		return ViewAtVersion(getRoot(v), v);
 	}
-	ViewAtVersion atLatest() const {
-		return ViewAtVersion(roots.back().second, latestVersion);
-	}
+	ViewAtVersion atLatest() const { return ViewAtVersion(roots.back().second, latestVersion); }
 
 	bool isClearContaining(ViewAtVersion const& view, KeyRef key) {
 		auto i = view.lastLessOrEqual(key);
