@@ -262,6 +262,25 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		// m.push_back( retries.getMetric() );
 	}
 
+	// Prevent a write only transaction whose commit was previously cancelled from being reordered after this
+	// transaction
+	ACTOR Future<Void> writeBarrier(Reference<IDatabase> db) {
+		state Reference<ITransaction> tr = db->createTransaction();
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
+				// Write-only transactions have a self-conflict in the system keys
+				tr->addWriteConflictRange(allKeys);
+				tr->clear(normalKeys);
+				wait(unsafeThreadFutureToFuture(tr->commit()));
+				return Void();
+			} catch (Error& e) {
+				wait(unsafeThreadFutureToFuture(tr->onError(e)));
+			}
+		}
+	}
+
 	ACTOR Future<Void> loadAndRun(FuzzApiCorrectnessWorkload* self) {
 		state double startTime = now();
 		state int nodesPerTenant = std::max<int>(1, self->nodes / (self->numTenants + 1));
@@ -274,6 +293,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 				state int tenantNum = -1;
 				for (; tenantNum < self->numTenants; ++tenantNum) {
 					state int i = 0;
+					wait(self->writeBarrier(self->db));
 					for (; i < nodesPerTenant; i += keysPerBatch) {
 						state Reference<ITransaction> tr = tenantNum < 0
 						                                       ? self->db->createTransaction()
@@ -283,12 +303,6 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 								return Void();
 							try {
 								if (i == 0) {
-									tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-
-									// To prevent a write only transaction whose commit was previously
-									// cancelled from being reordered after this transaction
-									tr->addWriteConflictRange(allKeys);
-
 									tr->clear(normalKeys);
 								}
 								if (self->useSystemKeys)

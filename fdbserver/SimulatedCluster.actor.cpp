@@ -2295,6 +2295,14 @@ ACTOR void setupAndRun(std::string dataFolder,
 		testConfig.storageEngineExcludeTypes.push_back(4);
 	}
 
+	// Disable the default tenant in backup and DR tests for now. This is because backup does not currently duplicate
+	// the tenant map and related state.
+	// TODO: reenable when backup/DR supports tenants.
+	if (std::string_view(testFile).find("Backup") != std::string_view::npos ||
+	    std::string_view(testFile).find("Switchover") != std::string_view::npos) {
+		allowDefaultTenant = false;
+	}
+
 	// The RocksDB engine is not always built with the rest of fdbserver. Don't try to use it if it is not included
 	// in the build.
 	if (!rocksDBEnabled) {

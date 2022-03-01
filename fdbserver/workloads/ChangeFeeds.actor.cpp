@@ -37,6 +37,8 @@
 ACTOR Future<std::pair<Standalone<VectorRef<KeyValueRef>>, Version>> readDatabase(Database cx) {
 	state Transaction tr(cx);
 	loop {
+		// Change feeds do not currently support tenant based access
+		tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 		state Standalone<VectorRef<KeyValueRef>> output;
 		state Version readVersion;
 		try {
