@@ -88,6 +88,8 @@ ACTOR void destoryChildProcess(Future<Void> parentSSClosed, ISimulator::ProcessI
 	TraceEvent(SevDebug, message.c_str()).log();
 	// This one is root cause for most failures, make sure it's okay to destory
 	g_pSimulator->destroyProcess(childInfo);
+	// Explicitly reset the connection with the child process in case re-spawn very quickly
+	FlowTransport::transport().resetConnection(childInfo->address);
 }
 
 ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
