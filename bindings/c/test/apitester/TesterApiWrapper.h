@@ -67,6 +67,8 @@ public:
 	Transaction(FDBTransaction* tx);
 	ValueFuture get(std::string_view key, fdb_bool_t snapshot);
 	void set(std::string_view key, std::string_view value);
+	void clear(std::string_view key);
+	void clearRange(std::string_view begin, std::string_view end);
 	Future commit();
 	Future onError(fdb_error_t err);
 	void reset();

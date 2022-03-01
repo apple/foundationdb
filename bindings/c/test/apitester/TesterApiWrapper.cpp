@@ -63,6 +63,15 @@ void Transaction::set(std::string_view key, std::string_view value) {
 	fdb_transaction_set(tx_.get(), (const uint8_t*)key.data(), key.size(), (const uint8_t*)value.data(), value.size());
 }
 
+void Transaction::clear(std::string_view key) {
+	fdb_transaction_clear(tx_.get(), (const uint8_t*)key.data(), key.size());
+}
+
+void Transaction::clearRange(std::string_view begin, std::string_view end) {
+	fdb_transaction_clear_range(
+	    tx_.get(), (const uint8_t*)begin.data(), begin.size(), (const uint8_t*)end.data(), end.size());
+}
+
 Future Transaction::commit() {
 	return Future(fdb_transaction_commit(tx_.get()));
 }

@@ -30,7 +30,7 @@ namespace FdbApiTester {
 
 class ApiCorrectnessWorkload : public WorkloadBase {
 public:
-	enum OpType { OP_INSERT, OP_GET, OP_COMMIT_READ, OP_LAST = OP_COMMIT_READ };
+	enum OpType { OP_INSERT, OP_GET, OP_CLEAR, OP_CLEAR_RANGE, OP_COMMIT_READ, OP_LAST = OP_COMMIT_READ };
 
 	// The minimum length of a key
 	int minKeyLength;
@@ -65,7 +65,7 @@ public:
 		minValueLength = 5;
 		maxValueLength = 10;
 		maxKeysPerTransaction = 50;
-		initialSize = 100;
+		initialSize = 1000;
 		numOperations = 1000;
 		readExistingKeysRatio = 0.9;
 		keyPrefix = prefix;
@@ -74,10 +74,13 @@ public:
 
 	void start() override {
 		schedule([this]() {
-			// 1. Populate initial data
-			populateData([this]() {
-				// 2. Generate random workload
-				randomOperations();
+			// 1. Clear data
+			clearData([this]() {
+				// 2. Populate initial data
+				populateData([this]() {
+					// 3. Generate random workload
+					randomOperations();
+				});
 			});
 		});
 	}
@@ -106,7 +109,7 @@ private:
 		if (key != store.startKey()) {
 			return key;
 		}
-		std::cout << "No existing key found, using a new random key." << std::endl;
+		std::cout << "WARNING: No existing key found, using a new random key." << std::endl;
 		return genKey;
 	}
 
@@ -219,8 +222,46 @@ private:
 		    });
 	}
 
+	void randomClearOp(TTaskFct cont) {
+		int numKeys = random.randomInt(1, maxKeysPerTransaction);
+		auto keys = std::make_shared<std::vector<std::string>>();
+		for (int i = 0; i < numKeys; i++) {
+			keys->push_back(randomExistingKey());
+		}
+		execTransaction(
+		    [keys](auto ctx) {
+			    for (const auto& key : *keys) {
+				    ctx->tx()->clear(key);
+			    }
+			    ctx->commit();
+		    },
+		    [this, keys, cont]() {
+			    for (const auto& key : *keys) {
+				    store.clear(key);
+			    }
+			    schedule(cont);
+		    });
+	}
+
+	void randomClearRangeOp(TTaskFct cont) {
+		std::string begin = randomKeyName();
+		std::string end = randomKeyName();
+		if (begin > end) {
+			std::swap(begin, end);
+		}
+		execTransaction(
+		    [begin, end](auto ctx) {
+			    ctx->tx()->clearRange(begin, end);
+			    ctx->commit();
+		    },
+		    [this, begin, end, cont]() {
+			    store.clear(begin, end);
+			    schedule(cont);
+		    });
+	}
+
 	void randomOperation(TTaskFct cont) {
-		OpType txType = (OpType)random.randomInt(0, OP_LAST);
+		OpType txType = (store.size() == 0) ? OP_INSERT : (OpType)random.randomInt(0, OP_LAST);
 		switch (txType) {
 		case OP_INSERT:
 			randomInsertOp(cont);
@@ -228,16 +269,32 @@ private:
 		case OP_GET:
 			randomGetOp(cont);
 			break;
+		case OP_CLEAR:
+			randomClearOp(cont);
+			break;
+		case OP_CLEAR_RANGE:
+			randomClearRangeOp(cont);
+			break;
 		case OP_COMMIT_READ:
 			randomCommitReadOp(cont);
 			break;
 		}
 	}
 
+	void clearData(TTaskFct cont) {
+		execTransaction(
+		    [this](auto ctx) {
+			    ctx->tx()->clearRange(keyPrefix, format("%s\xff", keyPrefix.c_str()));
+			    ctx->commit();
+		    },
+		    [this, cont]() { schedule(cont); });
+	}
+
 	void populateData(TTaskFct cont) {
 		if (store.size() < initialSize) {
 			randomInsertOp([this, cont]() { populateData(cont); });
 		} else {
+			std::cout << "Data population completed" << std::endl;
 			schedule(cont);
 		}
 	}

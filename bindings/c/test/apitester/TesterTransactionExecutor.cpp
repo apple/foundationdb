@@ -150,6 +150,7 @@ private:
 		onErrorFuture.reset();
 		if (err) {
 			finalError = err;
+			std::cout << "Fatal error: " << fdb_get_error(finalError) << std::endl;
 			ASSERT(false);
 			done();
 		} else {
