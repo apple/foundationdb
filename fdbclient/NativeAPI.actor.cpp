@@ -3113,7 +3113,10 @@ ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
 	}
 }
 
-ACTOR Future<Key> getKey(Reference<TransactionState> trState, KeySelector k, Future<Version> version) {
+ACTOR Future<Key> getKey(Reference<TransactionState> trState,
+                         KeySelector k,
+                         Future<Version> version,
+                         UseTenant useTenant = UseTenant::True) {
 	wait(success(version));
 
 	state Optional<UID> getKeyID = Optional<UID>();
@@ -3140,8 +3143,8 @@ ACTOR Future<Key> getKey(Reference<TransactionState> trState, KeySelector k, Fut
 		}
 
 		Key locationKey(k.getKey(), k.arena());
-		state KeyRangeLocationInfo locationInfo =
-		    wait(getKeyLocation(trState, locationKey, &StorageServerInterface::getKey, Reverse{ k.isBackward() }));
+		state KeyRangeLocationInfo locationInfo = wait(getKeyLocation(
+		    trState, locationKey, &StorageServerInterface::getKey, Reverse{ k.isBackward() }, useTenant));
 
 		try {
 			if (getKeyID.present())
@@ -3153,7 +3156,7 @@ ACTOR Future<Key> getKey(Reference<TransactionState> trState, KeySelector k, Fut
 			++trState->cx->transactionPhysicalReads;
 
 			GetKeyRequest req(span.context,
-			                  trState->getTenantInfo(),
+			                  useTenant ? trState->getTenantInfo() : TenantInfo(),
 			                  k,
 			                  version.get(),
 			                  trState->cx->sampleReadTags() ? trState->options.readTags : Optional<TagSet>(),
@@ -3388,7 +3391,10 @@ ACTOR Future<Void> sameVersionDiffValue(Database cx, Reference<WatchParameters> 
 	state ReadYourWritesTransaction tr(cx);
 	loop {
 		try {
-			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			if (!parameters->tenant.present() && parameters->key.startsWith(systemKeys.begin)) {
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			}
+
 			state Optional<Value> valSS = wait(tr.get(parameters->key));
 			Reference<WatchMetadata> metadata = cx->getWatchMetadata(parameters->tenant, parameters->key);
 
@@ -3703,14 +3709,17 @@ Future<RangeResultFamily> getExactRange(Reference<TransactionState> trState,
 	}
 }
 
-Future<Key> resolveKey(Reference<TransactionState> trState, KeySelector const& key, Version const& version) {
+Future<Key> resolveKey(Reference<TransactionState> trState,
+                       KeySelector const& key,
+                       Version const& version,
+                       UseTenant useTenant) {
 	if (key.isFirstGreaterOrEqual())
 		return Future<Key>(key.getKey());
 
 	if (key.isFirstGreaterThan())
 		return Future<Key>(keyAfter(key.getKey()));
 
-	return getKey(trState, key, version);
+	return getKey(trState, key, version, useTenant);
 }
 
 ACTOR template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply, class RangeResultFamily>
@@ -3731,8 +3740,8 @@ Future<RangeResultFamily> getRangeFallback(Reference<TransactionState> trState,
 		version = ver;
 	}
 
-	Future<Key> fb = resolveKey(trState, begin, version);
-	state Future<Key> fe = resolveKey(trState, end, version);
+	Future<Key> fb = resolveKey(trState, begin, version, useTenant);
+	state Future<Key> fe = resolveKey(trState, end, version, useTenant);
 
 	state Key b = wait(fb);
 	state Key e = wait(fe);
@@ -4610,8 +4619,8 @@ ACTOR Future<Void> getRangeStream(Reference<TransactionState> trState,
 	state Version version = wait(fVersion);
 	trState->cx->validateVersion(version);
 
-	Future<Key> fb = resolveKey(trState, begin, version);
-	state Future<Key> fe = resolveKey(trState, end, version);
+	Future<Key> fb = resolveKey(trState, begin, version, UseTenant::True);
+	state Future<Key> fe = resolveKey(trState, end, version, UseTenant::True);
 
 	state Key b = wait(fb);
 	state Key e = wait(fe);

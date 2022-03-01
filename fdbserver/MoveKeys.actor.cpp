@@ -20,6 +20,7 @@
 
 #include <vector>
 
+#include "fdbclient/FDBOptions.g.h"
 #include "flow/Util.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbclient/KeyBackedTypes.h"
@@ -605,6 +606,7 @@ ACTOR Future<Void> checkFetchingState(Database cx,
 
 			tr.trState->taskID = TaskPriority::MoveKeys;
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 
 			std::vector<Future<Optional<Value>>> serverListEntries;
 			serverListEntries.reserve(dest.size());
@@ -698,6 +700,7 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 
 					tr.trState->taskID = TaskPriority::MoveKeys;
 					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
 					releaser.release();
 					wait(finishMoveKeysParallelismLock->take(TaskPriority::DataDistributionLaunch));
