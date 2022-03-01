@@ -2120,7 +2120,7 @@ KeyValueStoreSQLite::KeyValueStoreSQLite(std::string const& filename,
   : type(storeType), logID(id), filename(filename), readThreads(CoroThreadPool::createThreadPool()),
     writeThread(CoroThreadPool::createThreadPool()), readsRequested(0), writesRequested(0), writesComplete(0),
     diskBytesUsed(0), freeListPages(0) {
-	TraceEvent(SevDebug, "KeyValueStoreSQLiteCreate").detail("Filename", filename);
+	TraceEvent(SevInfo, "KeyValueStoreSQLiteCreate").detail("Filename", filename);
 
 	stopOnErr = stopOnError(this);
 

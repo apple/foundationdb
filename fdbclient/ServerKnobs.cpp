@@ -366,6 +366,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_WRITE_RATE_LIMITER_AUTO_TUNE,                 true );
 	init( ROCKSDB_PERFCONTEXT_ENABLE,                          false ); if( randomize && BUGGIFY ) ROCKSDB_PERFCONTEXT_ENABLE = deterministicRandom()->coinflip() ? false : true;
 	init( ROCKSDB_PERFCONTEXT_SAMPLE_RATE, 					  0.0001 );
+	init(ROCKSDB_ENABLE_SHARDING,								 true);
 
 	// Leader election
 	bool longLeaderElection = randomize && BUGGIFY;
