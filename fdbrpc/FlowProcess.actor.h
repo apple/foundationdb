@@ -19,11 +19,13 @@
  */
 
 #pragma once
+
 #if defined(NO_INTELLISENSE) && !defined(FDBRPC_FLOW_PROCESS_ACTOR_G_H)
 #define FDBRPC_FLOW_PROCESS_ACTOR_G_H
 #include "fdbrpc/FlowProcess.actor.g.h"
 #elif !defined(FDBRPC_FLOW_PROCESS_ACTOR_H)
 #define FDBRPC_FLOW_PROCESS_ACTOR_H
+
 #include "fdbrpc/fdbrpc.h"
 
 #include <string>
@@ -101,5 +103,4 @@ private:
 Future<Void> runFlowProcess(std::string name, Endpoint endpoint);
 
 #include <flow/unactorcompiler.h>
-
 #endif
