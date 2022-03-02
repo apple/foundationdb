@@ -114,8 +114,6 @@ public:
 	static long long getApproximateMemoryUnused();
 	static long long getActiveThreads();
 
-	static void releaseThreadMagazines();
-
 #ifdef ALLOC_INSTRUMENTATION
 	static volatile int32_t pageCount;
 #endif
@@ -134,9 +132,10 @@ private:
 		void* freelist;
 		int count; // there are count items on freelist
 		void* alternate; // alternate is either a full magazine, or an empty one
+		ThreadData();
+		~ThreadData();
 	};
 	static thread_local ThreadData threadData;
-	static thread_local bool threadInitialized;
 	static GlobalData* globalData() noexcept {
 #ifdef VALGRIND
 		ANNOTATE_RWLOCK_ACQUIRED(vLock, 1);
@@ -151,7 +150,6 @@ private:
 	}
 	static void* freelist;
 
-	static void initThread();
 	static void getMagazine();
 	static void releaseMagazine(void*);
 };
@@ -160,9 +158,6 @@ extern std::atomic<int64_t> g_hugeArenaMemory;
 void hugeArenaSample(int size);
 void releaseAllThreadMagazines();
 int64_t getTotalUnusedAllocatedMemory();
-void setFastAllocatorThreadInitFunction(
-    void (*)()); // The given function will be called at least once in each thread that allocates from a FastAllocator.
-                 // Currently just one such function is tracked.
 
 inline constexpr int nextFastAllocatedSize(int x) {
 	assert(x > 0 && x <= 8192);
