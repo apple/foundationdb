@@ -82,4 +82,16 @@ void WorkloadManager::workloadDone(IWorkload* workload) {
 	}
 }
 
+std::shared_ptr<IWorkload> IWorkloadFactory::create(std::string const& name, const WorkloadConfig& config) {
+	auto it = factories().find(name);
+	if (it == factories().end())
+		return {}; // or throw?
+	return it->second->create(config);
+}
+
+std::unordered_map<std::string, IWorkloadFactory*>& IWorkloadFactory::factories() {
+	static std::unordered_map<std::string, IWorkloadFactory*> theFactories;
+	return theFactories;
+}
+
 } // namespace FdbApiTester

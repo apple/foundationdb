@@ -1,0 +1,5 @@
+[[test]]
+title = 'API Correctness Single Threaded'
+
+    [[test.workload]]
+    name = 'ApiCorrectness'

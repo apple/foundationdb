@@ -54,9 +54,22 @@ std::ostream& operator<<(std::ostream& os, const std::optional<T>& obj) {
 
 std::string format(const char* form, ...);
 
+class TesterError : public std::runtime_error {
+public:
+	explicit TesterError(const char* message) : std::runtime_error(message) {}
+	explicit TesterError(const std::string& message) : std::runtime_error(message) {}
+	TesterError(const TesterError&) = default;
+	TesterError& operator=(const TesterError&) = default;
+	TesterError(TesterError&&) = default;
+	TesterError& operator=(TesterError&&) = default;
+};
+
+void print_internal_error(const char* msg, const char* file, int line);
+
 #define ASSERT(condition)                                                                                              \
 	do {                                                                                                               \
 		if (!(condition)) {                                                                                            \
+			print_internal_error(#condition, __FILE__, __LINE__);                                                      \
 			abort();                                                                                                   \
 		}                                                                                                              \
 	} while (false) // For use in destructors, where throwing exceptions is extremely dangerous

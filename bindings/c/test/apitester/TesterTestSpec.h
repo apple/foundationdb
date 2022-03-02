@@ -1,5 +1,5 @@
 /*
- * TesterOptions.h
+ * TesterTestSpec.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,29 +20,42 @@
 
 #pragma once
 
-#ifndef APITESTER_TESTER_OPTIONS_H
-#define APITESTER_TESTER_OPTIONS_H
+#ifndef APITESTER_CONFIG_READER_H
+#define APITESTER_CONFIG_READER_H
 
-#include "TesterTestSpec.h"
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+#define FDB_API_VERSION 710
 
 namespace FdbApiTester {
 
-class TesterOptions {
-public:
-	std::string clusterFile;
-	bool trace = false;
-	std::string traceDir;
-	std::string traceFormat;
-	std::string logGroup;
-	std::string externalClientLibrary;
-	std::string testFile;
-	int numFdbThreads;
-	int numClientThreads;
-	int numDatabases;
-	int numClients;
-	std::vector<std::pair<std::string, std::string>> knobs;
-	TestSpec testSpec;
+struct WorkloadSpec {
+	std::string name;
+	std::unordered_map<std::string, std::string> options;
 };
+
+struct TestSpec {
+	std::string title;
+	// api version, using the latest version by default
+	int apiVersion = FDB_API_VERSION;
+	bool blockOnFutures = false;
+	bool multiThreaded = false;
+	bool buggify = false;
+	int minFdbThreads = 1;
+	int maxFdbThreads = 1;
+	int minClientThreads = 1;
+	int maxClientThreads = 1;
+	int minDatabases = 1;
+	int maxDatabases = 1;
+	int minClients = 1;
+	int maxClients = 10;
+	std::string testFile;
+	std::vector<WorkloadSpec> workloads;
+};
+
+TestSpec readTomlTestSpec(std::string fileName);
 
 } // namespace FdbApiTester
 

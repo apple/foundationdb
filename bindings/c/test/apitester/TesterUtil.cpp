@@ -93,4 +93,8 @@ std::string format(const char* form, ...) {
 	return str;
 }
 
+void print_internal_error(const char* msg, const char* file, int line) {
+	fprintf(stderr, "Assertion %s failed @ %s %d:\n", msg, file, line);
+}
+
 } // namespace FdbApiTester

@@ -20,6 +20,7 @@
 
 #pragma once
 
+#include <memory>
 #ifndef APITESTER_WORKLOAD_H
 #define APITESTER_WORKLOAD_H
 
@@ -37,6 +38,12 @@ public:
 	virtual ~IWorkload() {}
 	virtual void init(WorkloadManager* manager) = 0;
 	virtual void start() = 0;
+};
+
+struct WorkloadConfig {
+	int clientId;
+	int numClients;
+	std::unordered_map<std::string, std::string> options;
 };
 
 // A base class for test workloads
@@ -98,6 +105,22 @@ private:
 
 	std::mutex mutex;
 	std::unordered_map<IWorkload*, WorkloadInfo> workloads;
+};
+
+struct IWorkloadFactory {
+	static std::shared_ptr<IWorkload> create(std::string const& name, const WorkloadConfig& config);
+	static std::unordered_map<std::string, IWorkloadFactory*>& factories();
+
+	virtual ~IWorkloadFactory() = default;
+	virtual std::shared_ptr<IWorkload> create(const WorkloadConfig& config) = 0;
+};
+
+template <class WorkloadType>
+struct WorkloadFactory : IWorkloadFactory {
+	WorkloadFactory(const char* name) { factories()[name] = this; }
+	std::shared_ptr<IWorkload> create(const WorkloadConfig& config) override {
+		return std::make_shared<WorkloadType>(config);
+	}
 };
 
 } // namespace FdbApiTester

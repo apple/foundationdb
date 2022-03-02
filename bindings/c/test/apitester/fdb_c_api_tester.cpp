@@ -22,9 +22,11 @@
 #include "TesterWorkload.h"
 #include "TesterScheduler.h"
 #include "TesterTransactionExecutor.h"
+#include "TesterTestSpec.h"
 #include "TesterUtil.h"
 #include <iostream>
 #include <memory>
+#include <stdexcept>
 #include <thread>
 #include "flow/SimpleOpt.h"
 #include "bindings/c/foundationdb/fdb_c.h"
@@ -41,13 +43,8 @@ enum TesterOptionId {
 	OPT_LOGGROUP,
 	OPT_TRACE_FORMAT,
 	OPT_KNOB,
-	OPT_API_VERSION,
-	OPT_BLOCK_ON_FUTURES,
-	OPT_NUM_CLIENT_THREADS,
-	OPT_NUM_DATABASES,
 	OPT_EXTERNAL_CLIENT_LIBRARY,
-	OPT_NUM_FDB_THREADS,
-	OPT_BUGGIFY
+	OPT_TEST_FILE
 };
 
 CSimpleOpt::SOption TesterOptionDefs[] = //
@@ -60,23 +57,19 @@ CSimpleOpt::SOption TesterOptionDefs[] = //
 	  { OPT_HELP, "--help", SO_NONE },
 	  { OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
 	  { OPT_KNOB, "--knob-", SO_REQ_SEP },
-	  { OPT_API_VERSION, "--api-version", SO_REQ_SEP },
-	  { OPT_BLOCK_ON_FUTURES, "--block-on-futures", SO_NONE },
-	  { OPT_NUM_CLIENT_THREADS, "--num-client-threads", SO_REQ_SEP },
-	  { OPT_NUM_DATABASES, "--num-databases", SO_REQ_SEP },
 	  { OPT_EXTERNAL_CLIENT_LIBRARY, "--external-client-library", SO_REQ_SEP },
-	  { OPT_NUM_FDB_THREADS, "--num-fdb-threads", SO_REQ_SEP },
-	  { OPT_BUGGIFY, "--buggify", SO_NONE } };
+	  { OPT_TEST_FILE, "-f", SO_REQ_SEP },
+	  { OPT_TEST_FILE, "--test-file", SO_REQ_SEP },
+	  SO_END_OF_OPTIONS };
 
 void printProgramUsage(const char* execName) {
 	printf("usage: %s [OPTIONS]\n"
 	       "\n",
 	       execName);
-	printf("  -C CONNFILE    The path of a file containing the connection string for the\n"
-	       "                 FoundationDB cluster. The default is `fdb.cluster',\n"
-	       "                 then `%s'.\n",
-	       "fdb.cluster");
-	printf("  --log          Enables trace file logging for the CLI session.\n"
+	printf("  -C, --cluster-file FILE\n"
+	       "                 The path of a file containing the connection string for the\n"
+	       "                 FoundationDB cluster. The default is `fdb.cluster'\n"
+	       "  --log          Enables trace file logging for the CLI session.\n"
 	       "  --log-dir PATH Specifes the output directory for trace files. If\n"
 	       "                 unspecified, defaults to the current directory. Has\n"
 	       "                 no effect unless --log is specified.\n"
@@ -86,37 +79,13 @@ void printProgramUsage(const char* execName) {
 	       "  --trace-format FORMAT\n"
 	       "                 Select the format of the log files. xml (the default) and json\n"
 	       "                 are supported. Has no effect unless --log is specified.\n"
-	       "  --api-version  APIVERSION\n"
-	       "                 Specifies the version of the API for the CLI to use.\n"
 	       "  --knob-KNOBNAME KNOBVALUE\n"
 	       "                 Changes a knob option. KNOBNAME should be lowercase.\n"
-	       "  --block-on-futures\n"
-	       "                 Use blocking waits on futures instead of scheduling callbacks.\n"
-	       "  --num-client-threads NUMBER\n"
-	       "                 Number of threads to be used for execution of client workloads.\n"
-	       "  --num-databases NUMBER\n"
-	       "                 Number of database connections to be used concurrently.\n"
-	       "  --external-client-library FILE_PATH\n"
+	       "  --external-client-library FILE\n"
 	       "                 Path to the external client library.\n"
-	       "  --num-fdb-threads NUMBER\n"
-	       "                 Number of FDB client threads to be created.\n"
-	       "  --buggify\n"
-	       "                 Enable injection of client errors.\n"
+	       "  -f, --test-file FILE\n"
+	       "                 Test file to run.\n"
 	       "  -h, --help     Display this help and exit.\n");
-}
-
-bool processIntArg(const CSimpleOpt& args, int& res, int minVal, int maxVal) {
-	char* endptr;
-	res = strtol(args.OptionArg(), &endptr, 10);
-	if (*endptr != '\0') {
-		fprintf(stderr, "ERROR: invalid value %s for %s\n", args.OptionArg(), args.OptionText());
-		return false;
-	}
-	if (res < minVal || res > maxVal) {
-		fprintf(stderr, "ERROR: value for %s must be between %d and %d\n", args.OptionText(), minVal, maxVal);
-		return false;
-	}
-	return true;
 }
 
 // Extracts the key for command line arguments that are specified with a prefix (e.g. --knob-).
@@ -141,11 +110,6 @@ bool processArg(TesterOptions& options, const CSimpleOpt& args) {
 	case OPT_CONNFILE:
 		options.clusterFile = args.OptionArg();
 		break;
-	case OPT_API_VERSION: {
-		// multi-version fdbcli only available after 7.0
-		processIntArg(args, options.api_version, 700, FDB_API_VERSION);
-		break;
-	}
 	case OPT_TRACE:
 		options.trace = true;
 		break;
@@ -157,7 +121,8 @@ bool processArg(TesterOptions& options, const CSimpleOpt& args) {
 		break;
 	case OPT_TRACE_FORMAT:
 		if (!validateTraceFormat(args.OptionArg())) {
-			fprintf(stderr, "WARNING: Unrecognized trace format `%s'\n", args.OptionArg());
+			fprintf(stderr, "ERROR: Unrecognized trace format `%s'\n", args.OptionArg());
+			return false;
 		}
 		options.traceFormat = args.OptionArg();
 		break;
@@ -170,28 +135,13 @@ bool processArg(TesterOptions& options, const CSimpleOpt& args) {
 		options.knobs.emplace_back(knobName, args.OptionArg());
 		break;
 	}
-	case OPT_BLOCK_ON_FUTURES:
-		options.blockOnFutures = true;
-		break;
-
-	case OPT_NUM_CLIENT_THREADS:
-		processIntArg(args, options.numClientThreads, 1, 1000);
-		break;
-
-	case OPT_NUM_DATABASES:
-		processIntArg(args, options.numDatabases, 1, 1000);
-		break;
-
 	case OPT_EXTERNAL_CLIENT_LIBRARY:
 		options.externalClientLibrary = args.OptionArg();
 		break;
 
-	case OPT_NUM_FDB_THREADS:
-		processIntArg(args, options.numFdbThreads, 1, 1000);
-		break;
-
-	case OPT_BUGGIFY:
-		options.buggify = true;
+	case OPT_TEST_FILE:
+		options.testFile = args.OptionArg();
+		options.testSpec = readTomlTestSpec(options.testFile);
 		break;
 	}
 	return true;
@@ -227,13 +177,6 @@ void fdb_check(fdb_error_t e) {
 		std::abort();
 	}
 }
-} // namespace
-
-std::shared_ptr<IWorkload> createApiCorrectnessWorkload(std::string_view prefix);
-
-} // namespace FdbApiTester
-
-using namespace FdbApiTester;
 
 void applyNetworkOptions(TesterOptions& options) {
 	if (!options.externalClientLibrary.empty()) {
@@ -242,13 +185,18 @@ void applyNetworkOptions(TesterOptions& options) {
 		    FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_EXTERNAL_CLIENT_LIBRARY, options.externalClientLibrary));
 	}
 
-	if (options.numFdbThreads > 1) {
-		fdb_check(
-		    FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_CLIENT_THREADS_PER_VERSION, options.numFdbThreads));
+	if (options.testSpec.multiThreaded) {
+		FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_CLIENT_THREADS_PER_VERSION, options.numFdbThreads);
 	}
 
-	if (options.buggify) {
+	if (options.testSpec.buggify) {
 		fdb_check(FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_CLIENT_BUGGIFY_ENABLE));
+	}
+
+	if (options.trace) {
+		fdb_check(FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_TRACE_ENABLE, options.traceDir));
+		fdb_check(FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_TRACE_FORMAT, options.traceFormat));
+		fdb_check(FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_TRACE_LOG_GROUP, options.logGroup));
 	}
 
 	for (auto knob : options.knobs) {
@@ -257,9 +205,17 @@ void applyNetworkOptions(TesterOptions& options) {
 	}
 }
 
-void runApiCorrectness(TesterOptions& options) {
+void randomizeOptions(TesterOptions& options) {
+	Random random;
+	options.numFdbThreads = random.randomInt(options.testSpec.minFdbThreads, options.testSpec.maxFdbThreads);
+	options.numClientThreads = random.randomInt(options.testSpec.minClientThreads, options.testSpec.maxClientThreads);
+	options.numDatabases = random.randomInt(options.testSpec.minDatabases, options.testSpec.maxDatabases);
+	options.numClients = random.randomInt(options.testSpec.minClients, options.testSpec.maxClients);
+}
+
+void runWorkloads(TesterOptions& options) {
 	TransactionExecutorOptions txExecOptions;
-	txExecOptions.blockOnFutures = options.blockOnFutures;
+	txExecOptions.blockOnFutures = options.testSpec.blockOnFutures;
 	txExecOptions.numDatabases = options.numDatabases;
 
 	std::unique_ptr<IScheduler> scheduler = createScheduler(options.numClientThreads);
@@ -268,28 +224,49 @@ void runApiCorrectness(TesterOptions& options) {
 	txExecutor->init(scheduler.get(), options.clusterFile.c_str(), txExecOptions);
 
 	WorkloadManager workloadMgr(txExecutor.get(), scheduler.get());
-	for (int i = 0; i < 10; i++) {
-		std::shared_ptr<IWorkload> workload = createApiCorrectnessWorkload(format("workload%d/", i));
-		workloadMgr.add(workload);
+	for (const auto& workloadSpec : options.testSpec.workloads) {
+		for (int i = 0; i < options.numClients; i++) {
+			WorkloadConfig config;
+			config.options = workloadSpec.options;
+			config.clientId = i;
+			config.numClients = options.numClients;
+			std::shared_ptr<IWorkload> workload = IWorkloadFactory::create(workloadSpec.name, config);
+			if (!workload) {
+				throw TesterError(format("Unknown workload '%s'", workloadSpec.name.c_str()));
+			}
+			workloadMgr.add(workload);
+		}
 	}
+
 	workloadMgr.run();
 }
 
+} // namespace
+} // namespace FdbApiTester
+
+using namespace FdbApiTester;
+
 int main(int argc, char** argv) {
-	TesterOptions options;
-	if (!parseArgs(options, argc, argv)) {
+	try {
+		TesterOptions options;
+		if (!parseArgs(options, argc, argv)) {
+			return 1;
+		}
+		randomizeOptions(options);
+
+		fdb_check(fdb_select_api_version(options.testSpec.apiVersion));
+		applyNetworkOptions(options);
+		fdb_check(fdb_setup_network());
+
+		std::thread network_thread{ &fdb_run_network };
+
+		runWorkloads(options);
+
+		fdb_check(fdb_stop_network());
+		network_thread.join();
+		return 0;
+	} catch (const std::runtime_error& err) {
+		std::cerr << "ERROR: " << err.what() << std::endl;
 		return 1;
 	}
-
-	fdb_check(fdb_select_api_version(options.api_version));
-	applyNetworkOptions(options);
-	fdb_check(fdb_setup_network());
-
-	std::thread network_thread{ &fdb_run_network };
-
-	runApiCorrectness(options);
-
-	fdb_check(fdb_stop_network());
-	network_thread.join();
-	return 0;
 }

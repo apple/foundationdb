@@ -103,6 +103,8 @@ if(NOT WIN32 AND NOT IS_ARM_MAC)
     test/apitester/fdb_c_api_tester.cpp
     test/apitester/TesterApiWrapper.cpp
     test/apitester/TesterApiWrapper.h
+    test/apitester/TesterTestSpec.cpp
+    test/apitester/TesterTestSpec.h
     test/apitester/TesterCorrectnessWorkload.cpp
     test/apitester/TesterKeyValueStore.cpp
     test/apitester/TesterKeyValueStore.h
@@ -161,7 +163,7 @@ if(NOT WIN32 AND NOT IS_ARM_MAC)
   target_link_libraries(fdb_c_unit_tests_version_510 PRIVATE fdb_c Threads::Threads)
   target_link_libraries(trace_partial_file_suffix_test PRIVATE fdb_c Threads::Threads)
   target_link_libraries(disconnected_timeout_unit_tests PRIVATE fdb_c Threads::Threads)
-  target_link_libraries(fdb_c_api_tester PRIVATE fdb_c Threads::Threads)
+  target_link_libraries(fdb_c_api_tester PRIVATE fdb_c toml11_target Threads::Threads)
 
   # do not set RPATH for mako
   set_property(TARGET mako PROPERTY SKIP_BUILD_RPATH TRUE)
@@ -188,6 +190,7 @@ if(NOT WIN32 AND NOT IS_ARM_MAC)
   add_custom_target(external_client DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so)
   add_dependencies(fdb_c_unit_tests external_client)
   add_dependencies(disconnected_timeout_unit_tests external_client)
+  add_dependencies(fdb_c_api_tester external_client)
 
   add_fdbclient_test(
     NAME fdb_c_setup_tests
@@ -224,6 +227,18 @@ if(NOT WIN32 AND NOT IS_ARM_MAC)
     COMMAND $<TARGET_FILE:disconnected_timeout_unit_tests>
             @CLUSTER_FILE@
             ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so
+            )
+  add_fdbclient_test(
+    NAME fdb_c_api_tests
+    COMMAND ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/run_c_api_tests.py
+            --cluster-file
+            @CLUSTER_FILE@
+            --tester-binary
+            $<TARGET_FILE:fdb_c_api_tester>
+            --external-client-library
+            ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so
+            --test-dir
+            ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests
             )
 endif()
 

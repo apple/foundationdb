@@ -1,0 +1,14 @@
+[[test]]
+title = 'API Correctness Blocking'
+multiThreaded = true
+minFdbThreads = 2
+maxFdbThreads = 8
+minDatabases = 2
+maxDatabases = 8
+minClientThreads = 2
+maxClientThreads = 8
+buggify = true
+blockOnFutures = true
+
+    [[test.workload]]
+    name = 'ApiCorrectness'

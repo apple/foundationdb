@@ -59,7 +59,7 @@ public:
 	// Key prefix
 	std::string keyPrefix;
 
-	ApiCorrectnessWorkload(std::string_view prefix) {
+	ApiCorrectnessWorkload(const WorkloadConfig& config) {
 		minKeyLength = 1;
 		maxKeyLength = 64;
 		minValueLength = 5;
@@ -68,7 +68,7 @@ public:
 		initialSize = 1000;
 		numOperations = 1000;
 		readExistingKeysRatio = 0.9;
-		keyPrefix = prefix;
+		keyPrefix = format("ApiCorrectness%d/", config.clientId);
 		numOpLeft = numOperations;
 	}
 
@@ -315,8 +315,6 @@ private:
 	KeyValueStore store;
 };
 
-std::shared_ptr<IWorkload> createApiCorrectnessWorkload(std::string_view prefix) {
-	return std::make_shared<ApiCorrectnessWorkload>(prefix);
-}
+WorkloadFactory<ApiCorrectnessWorkload> ApiCorrectnessWorkloadFactory("ApiCorrectness");
 
 } // namespace FdbApiTester
