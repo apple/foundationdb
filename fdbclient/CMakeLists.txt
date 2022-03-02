@@ -234,11 +234,11 @@ if(BUILD_AWS_BACKUP)
     message(FATAL_ERROR "Build step for AWS S3 SDK has Failed. ${results}")
   endif()
 
-# TODO ???
-#  add_subdirectory(
-#    ${CMAKE_CURRENT_BINARY_DIR}/awss3sdk-src
-#    ${CMAKE_CURRENT_BINARY_DIR}/awss3sdk-build
-#  )
+  add_subdirectory(
+    ${CMAKE_CURRENT_BINARY_DIR}/awss3sdk-src
+    ${CMAKE_CURRENT_BINARY_DIR}/awss3sdk-build
+    EXCLUDE_FROM_ALL
+  )
 endif()
 
 add_flow_target(STATIC_LIBRARY NAME fdbclient SRCS ${FDBCLIENT_SRCS} ADDL_SRCS ${options_srcs})
@@ -262,6 +262,6 @@ if(BUILD_AZURE_BACKUP)
 endif()
 
 if(BUILD_AWS_BACKUP)
-  target_link_libraries(fdbclient PRIVATE curl aws-s3-sdk)
-  target_link_libraries(fdbclient_sampling PRIVATE curl aws-s3-sdk)
+  target_link_libraries(fdbclient PRIVATE curl aws-cpp-sdk-core)
+  target_link_libraries(fdbclient_sampling PRIVATE curl aws-cpp-sdk-core)
 endif()
