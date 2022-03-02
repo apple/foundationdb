@@ -11,3 +11,7 @@ ExternalProject_Add(awss3sdk
   TEST_COMMAND      ""
   BUILD_BYPRODUCTS  "${CMAKE_CURRENT_BINARY_DIR}/awss3sdk-build/install/lib64/libaws-cpp-sdk-core.a"
 )
+
+# TODO probably better to do something more like what FindRocksDB.cmake does
+#set (AWSS3SDK_INCLUDE_DIR "${SOURCE_DIR}/aws-cpp-sdk-core/include/")
+#message(STATUS "AWS includes: ${AWSS3SDK_INCLUDE_DIR}")

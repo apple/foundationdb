@@ -22,11 +22,29 @@
 #define FDBCLIENT_BACKUP_CONTAINER_AWSS3_BLOBSTORE_H
 #pragma once
 
-// TODO enable
 // #include "aws/core/Aws.h"
+// #include "awss3sdk-src/aws-cpp-sdk-core/include/aws/core/Aws.h"
+#include <aws/core/Aws.h>
 
 void do_aws_test_stuff() {
 	printf("hell world\n");
+
+	printf("Testing sdk code import\n");
+	Aws::SDKOptions options;
+	printf("Got AWS SDK options\n");
+
+	printf("Testing init api\n");
+	Aws::InitAPI(options);
+	printf("API Init successful!\n");
+
+	// printf("Testing client configuration\n");
+	// Aws::Client::ClientConfiguration config;
+	// config.region = "us-west-2";
+	// printf("Set region in client configuration\n");
+
+	printf("Testing API shutdown\n");
+	Aws::ShutdownAPI(options);
+	printf("Got AWS SDK shutdown\n");
 }
 
 #endif

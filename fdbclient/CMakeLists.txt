@@ -206,6 +206,9 @@ set(BUILD_AWS_BACKUP OFF CACHE BOOL "Build AWS S3 SDK backup client")
 if(BUILD_AWS_BACKUP)
   add_compile_definitions(BUILD_AWS_BACKUP)
 
+  # TODO Remove
+  set(CMAKE_VERBOSE_MAKEFILE ON CACHE BOOL "ON")
+
   set(FDBCLIENT_SRCS
     ${FDBCLIENT_SRCS}
   # TODO ADD AT SOME POINT
@@ -262,6 +265,11 @@ if(BUILD_AZURE_BACKUP)
 endif()
 
 if(BUILD_AWS_BACKUP)
+  #target_include_directories(fdbserver PRIVATE ${AWSS3SDK_INCLUDE_DIR})
+  #target_include_directories(fdbserver PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/awss3sdk-src/aws-cpp-sdk-core/include)
+
   target_link_libraries(fdbclient PRIVATE curl aws-cpp-sdk-core)
   target_link_libraries(fdbclient_sampling PRIVATE curl aws-cpp-sdk-core)
+  # target_link_libraries(fdbclient PRIVATE curl ${CMAKE_CURRENT_BINARY_DIR}/awss3sdk-build/install/lib64/libaws-cpp-sdk-core.a)
+  # target_link_libraries(fdbclient_sampling PRIVATE curl ${CMAKE_CURRENT_BINARY_DIR}/awss3sdk-build/install/lib64/libaws-cpp-sdk-core.a)
 endif()
