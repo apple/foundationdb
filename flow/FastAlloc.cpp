@@ -72,7 +72,7 @@
 #endif
 
 template <int Size>
-INIT_SEG thread_local uintptr_t FastAllocator<Size>::threadDataInit = reinterpret_cast<uintptr_t>(&threadData());
+INIT_SEG thread_local typename FastAllocator<Size>::ThreadDataInit FastAllocator<Size>::threadDataInit;
 
 template <int Size>
 typename FastAllocator<Size>::ThreadData& FastAllocator<Size>::threadData() noexcept {
