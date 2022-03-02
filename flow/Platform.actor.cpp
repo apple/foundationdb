@@ -3773,8 +3773,10 @@ std::string getExecPath() {
 		throwExecPathError(platform_error(), path);
 	}
 #elif defined(_WIN32)
-	auto len = GetModuleFileName(nullptr, path, size) if (len != 0) { return std::string(path); }
-	else {
+	auto len = GetModuleFileName(nullptr, path, size);
+	if (len != 0) {
+		return std::string(path);
+	} else {
 		throwExecPathError(platform_error(), path);
 	}
 #endif
