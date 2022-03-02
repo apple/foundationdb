@@ -1569,7 +1569,7 @@ void seedShardServers(Arena& arena,
                       const std::vector<StringRef>& keySplits) {
 
 	// Create seed teams. Initially all storage servers belong to same team.
-	ptxn::StorageTeamID seedServerId;
+	ptxn::StorageTeamID seedTeamId;
 
 	if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 		std::unordered_map<ptxn::StorageTeamID, std::vector<UID>> teamToServers;
@@ -1580,7 +1580,7 @@ void seedShardServers(Arena& arena,
 			serverToTeams[s.id()].emplace(teamId);
 		}
 
-		bool seedServerSet = false;
+		bool seedTeamSet = false;
 		ASSERT(serverToTeams.size());
 		for (auto& [ss, teams] : serverToTeams) {
 			tr.set(arena, storageServerToTeamIdKey(ss), encodeStorageServerToTeamIdValue(ss, teams));
@@ -1592,25 +1592,26 @@ void seedShardServers(Arena& arena,
 			tr.set(arena, teamListKey, BinaryWriter::toValue(teamId, Unversioned())); // Vec<StorageServer> -> TeamId
 			if (servers.size() > 1) {
 				// Only seed team has more than one member.
-				ASSERT(!seedServerSet);
-				seedServerId = teamId;
-				seedServerSet = true;
+				ASSERT(!seedTeamSet);
+				seedTeamId = teamId;
+				seedTeamSet = true;
 			}
 		}
 
-		if (!seedServerSet) {
-			// There are 2 corner case scenarios here:
+		if (!seedTeamSet) {
+			// Two corner case can reach here, serverToTeams.size() is 1 in both cases
 			// 1. the cluster only has 1 SS
-			// 2. replication factor is 1
+			// 2. replication factor is 1, in this case recruitment always return 1 SS
+			ASSERT(serverToTeams.size() == 1);
 			for (auto& [teamId, servers] : teamToServers) {
 				if (teamId != servers[0]) {
-					seedServerId = teamId;
-					seedServerSet = true;
+					seedTeamId = teamId;
+					seedTeamSet = true;
 					break;
 				}
 			}
 		}
-		ASSERT(seedServerSet);
+		ASSERT(seedTeamSet);
 	}
 
 	std::map<Optional<Value>, Tag> dcId_locality;
@@ -1678,9 +1679,8 @@ void seedShardServers(Arena& arena,
 	} else {
 		auto ksValue = CLIENT_KNOBS->TAG_ENCODE_KEY_SERVERS
 		                   ? keyServersValue(serverTags)
-		                   : keyServersValue(RangeResult(),
-		                                     std::vector<UID>(serverSrcUID.begin(), serverSrcUID.end()),
-		                                     seedServerId);
+		                   : keyServersValue(
+		                         RangeResult(), std::vector<UID>(serverSrcUID.begin(), serverSrcUID.end()), seedTeamId);
 		krmSetPreviouslyEmptyRange(
 		    tr, arena, keyServersPrefix, KeyRangeRef(KeyRef(), allKeys.end), ksValue, serverKeysFalse);
 
