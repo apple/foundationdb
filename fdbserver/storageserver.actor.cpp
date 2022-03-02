@@ -227,8 +227,10 @@ struct MoveInShardMetaData {
 struct MoveInUpdates {
 
 	MoveInUpdates() = default;
-	MoveInUpdates(UID id, Version version, IKeyValueStore* storage)
-	  : id(id), oldestVersion(version), storage(storage) {}
+	MoveInUpdates(UID id, Version version, StorageServer* data) : id(id), oldestVersion(version), data(data) {
+		range = KeyRangeRef(KeyRef(persistMoveInShardKeys.begin.toString() + "/" + id.toString() + "/"),
+		                    KeyRef(persistMoveInShardKeys.begin.toString() + "/" + id.toString() + "0"));
+	}
 
 	void addMutation(Version version, bool fromFetch, MutationRef const& mutation);
 
@@ -236,13 +238,36 @@ struct MoveInUpdates {
 
 	std::vector<Standalone<VerUpdateRef>> next(const int byteLimit);
 
+	Future<Void> restore(Version begin) { return doRestore(this, begin); }
+
+	void bufferWrite();
+
 	void clear();
 
 private:
+	ACTOR static Future<Void> doRestore(MoveInUpdates* self, Version begin) {
+		RangeResult res = wait(storage->readRange(self->range));
+		// state int i = 0;
+		for (int i = 0; i < res.size(); ++i) {
+			// BinaryReader rd(res[i].key.removePrefix(self->range.begin), Unversioned());
+			// Version version;
+			// rd >> version;
+			VerUpdateRef vur;
+			ObjectReader reader(res[i].value.begin(), IncludeVersion());
+			reader.deserialize(vur);
+			self->updates.push_back(vur);
+			// wait(yield());
+		}
+		return Void();
+	}
+
 	UID id;
 	Version oldestVersion;
 	std::deque<Standalone<VerUpdateRef>> updates;
-	IKeyValueStore* const storage;
+	std::deque<Standalone<VerUpdateRef>> newUpdates;
+	StorageServer* const data;
+	KeyRange range;
+	// std::string prefix;
 	// bool receivedUpdates = false;
 };
 
@@ -251,17 +276,51 @@ void MoveInUpdates::addMutation(Version version, bool fromFetch, MutationRef con
 	TraceEvent("MoveInUpdatesNewMutation", id).detail("Version", version).detail("Mutation", mutation);
 	if (version <= oldestVersion)
 		return;
-	if (updates.empty() || version > updates.back().version) {
+
+	// Key persistUpdateKey(.toString() + checkpoint.checkpointID.toString());
+
+	// BinaryWriter wr(Unversioned());
+	// wr.serializeBytes(persistMoveInShardKeys.begin);
+	// wr << this->id;
+	// wr << version;
+	// auto& mLV = data->addVersionToMutationLog(version);
+	// data->addMutationToMutationLog(
+	//     mLV, MutationRef(MutationRef::SetValue, wr.toValue(), ObjectWriter::toValue(mutation, IncludeVersion())));
+
+	if (newUpdates.empty() || version > newUpdates.back().version) {
 		VerUpdateRef v;
 		v.version = version;
 		v.isPrivateData = false;
-		updates.push_back(v);
+		newUpdates.push_back(v);
 	} else {
-		ASSERT(version == updates.back().version);
+		ASSERT(version == newUpdates.back().version);
 	}
 
 	// Add the mutation to the version.
-	updates.back().mutations.push_back_deep(updates.back().arena(), mutation);
+	newUpdates.back().mutations.push_back_deep(newUpdates.back().arena(), mutation);
+}
+
+void MoveInUpdates::bufferWrite() {
+	// TraceEvent("MoveInUpdatesBufferWrite", id).detail("Version", version).detail("Mutation", mutation);
+	if (newUpdates.empty())
+		return;
+
+	// Key persistUpdateKey(.toString() + checkpoint.checkpointID.toString());
+
+	while (!newUpdates.empty()) {
+		const Version version = newUpdates.front().version;
+		BinaryWriter wr(Unversioned());
+		wr.serializeBytes(range.begin);
+		wr << version;
+		auto& mLV = data->addVersionToMutationLog(version);
+		data->addMutationToMutationLog(mLV,
+		                               MutationRef(MutationRef::SetValue,
+		                                           wr.toValue(),
+		                                           ObjectWriter::toValue(newUpdates.front(), IncludeVersion())));
+
+		updates.push_back(newUpdates.front());
+		newUpdates.pop_front();
+	}
 }
 
 bool MoveInUpdates::hasNext() const {
@@ -663,6 +722,7 @@ public:
 	std::map<Version, std::vector<CheckpointMetaData>> pendingCheckpoints; // Pending checkpoint requests
 	std::unordered_map<UID, CheckpointMetaData> checkpoints; // Existing and deleting checkpoints
 	std::unordered_map<UID, MoveInShard> moveInShards; // Shards that are being moved in.
+	std::unordered_set<MoveInUpdates*> pendingMoveInUpdates; // Pending checkpoint requests
 
 	// Histograms
 	struct FetchKeysHistograms {
@@ -5219,7 +5279,7 @@ MoveInShard::MoveInShard(StorageServer* server,
                          KeyRange range,
                          const Version version,
                          MoveInShardMetaData::Phase state)
-  : meta(id, range, version, state), server(server), updates(id, version, server->storage.getKvStore()) {
+  : meta(id, range, version, state), server(server), updates(id, version, server) {
 	if (state != MoveInShardMetaData::Pending) {
 		fetchClient = fetchShard(server, this);
 	} else {
@@ -5246,6 +5306,7 @@ void MoveInShard::addMutation(Version version, bool fromFetch, MutationRef const
 
 	if (getPhase() < MoveInShardMetaData::Complete) {
 		updates.addMutation(version, fromFetch, mutation);
+		server->pendingMoveInUpdates.insert(&updates);
 		// Create a new VerUpdateRef in updates queue if it is a new version.
 		// if (updates.empty() || version > updates.back().version) {
 		// 	VerUpdateRef v;
@@ -6269,6 +6330,14 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 					    .detail("Version", cloneCursor2->version().toString());
 			}
 		}
+
+		if (!data->pendingMoveInUpdates.empty()) {
+			for (auto* miu : data->pendingMoveInUpdates) {
+				miu->bufferWrite();
+			}
+			data->pendingMoveInUpdates.clear();
+		}
+
 		data->tLogMsgsPTreeUpdatesLatencyHistogram->sampleSeconds(now() - beforeTLogMsgsUpdates);
 		if (data->currentChangeFeeds.size()) {
 			data->changeFeedVersions.emplace_back(
