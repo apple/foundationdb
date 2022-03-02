@@ -28,6 +28,7 @@ class TCMachineTeamInfo;
 
 class TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	friend class TCServerInfoImpl;
+	friend class DDTeamCollectionUnitTest;
 	UID id;
 	bool inDesiredDC;
 	DDTeamCollection* collection;
@@ -46,6 +47,9 @@ class TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	int64_t dataInFlightToServer;
 	std::vector<Reference<TCTeamInfo>> teams;
 	ErrorOr<GetStorageMetricsReply> serverMetrics;
+
+	void setServerMetrics(GetStorageMetricsReply serverMetrics) { this->serverMetrics = serverMetrics; }
+	void markTeamUnhealthy(int teamIndex);
 
 public:
 	Reference<TCMachineInfo> machine;
@@ -98,12 +102,6 @@ public:
 	Future<Void> updateServerMetrics();
 	static Future<Void> updateServerMetrics(Reference<TCServerInfo> server);
 	Future<Void> serverMetricsPolling();
-
-	// FIXME: Public for testing only:
-	void setServerMetrics(GetStorageMetricsReply serverMetrics) { this->serverMetrics = serverMetrics; }
-
-	// FIXME: Public for testing only:
-	void markTeamUnhealthy(int teamIndex);
 
 	~TCServerInfo();
 };
