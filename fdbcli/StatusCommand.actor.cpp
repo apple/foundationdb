@@ -810,6 +810,7 @@ void printStatus(StatusObjectReader statusObj,
 				outputString = outputStringCache;
 				outputString += "\n  Unable to retrieve data status";
 			}
+			// Storage Wiggle section
 
 			// Operating space section
 			outputString += "\n\nOperating space:";

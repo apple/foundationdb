@@ -6783,6 +6783,32 @@ ACTOR Future<Void> setPerpetualStorageWiggle(Database cx, bool enable, LockAware
 	return Void();
 }
 
+ACTOR Future<std::vector<std::pair<UID, StorageWiggleValue>>> readStorageWiggleValues(Database cx,
+                                                                                      bool primary,
+                                                                                      bool use_system_priority) {
+	state const Key readKey = perpetualStorageWiggleIDPrefix.withSuffix(primary ? "primary/"_sr : "remote/"_sr);
+	state KeyBackedObjectMap<UID, StorageWiggleValue, decltype(IncludeVersion())> metadataMap(readKey,
+	                                                                                          IncludeVersion());
+	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+	state std::vector<std::pair<UID, StorageWiggleValue>> res;
+	// read the wiggling pairs
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			if (use_system_priority) {
+				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			}
+			wait(store(res, metadataMap.getRange(tr, UID(0, 0), Optional<UID>(), CLIENT_KNOBS->TOO_MANY)));
+			wait(tr->commit());
+			break;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+	return res;
+}
+
 ACTOR Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(Database cx,
                                                                 KeyRange keys,
                                                                 StorageMetrics limit,
