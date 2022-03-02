@@ -106,6 +106,8 @@ std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandT
 	{ "advanceversion",
 	  singleKeyRange(LiteralStringRef("min_required_commit_version"))
 	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
+	{ "versionepoch",
+	  singleKeyRange(LiteralStringRef("version_epoch")).withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
 	{ "profile",
 	  KeyRangeRef(LiteralStringRef("profiling/"), LiteralStringRef("profiling0"))
 	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
@@ -1902,6 +1904,53 @@ Future<Optional<std::string>> AdvanceVersionImpl::commit(ReadYourWritesTransacti
 		} catch (boost::bad_lexical_cast& e) {
 			return Optional<std::string>(ManagementAPIError::toJsonString(
 			    false, "advanceversion", "Invalid version(int64_t) argument: " + minCommitVersion.get().toString()));
+		}
+	} else {
+		ryw->getTransaction().clear(minRequiredCommitVersionKey);
+	}
+	return Optional<std::string>();
+}
+
+ACTOR static Future<RangeResult> getVersionEpochActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
+	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
+	ryw->getTransaction().setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+	Optional<Value> val = wait(ryw->getTransaction().get(versionEpochKey));
+	RangeResult result;
+	int64_t versionEpoch = CLIENT_KNOBS->DEFAULT_VERSION_EPOCH;
+	if (val.present()) {
+		versionEpoch = BinaryReader::fromStringRef<Version>(val.get(), Unversioned());
+	}
+	ValueRef version(result.arena(), boost::lexical_cast<std::string>(versionEpoch));
+	result.push_back_deep(result.arena(), KeyValueRef(kr.begin, version));
+	return result;
+}
+
+VersionEpochImpl::VersionEpochImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
+
+Future<RangeResult> VersionEpochImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
+	ASSERT(kr == getKeyRange());
+	return getVersionEpochActor(ryw, kr);
+}
+
+ACTOR static Future<Optional<std::string>> versionEpochCommitActor(ReadYourWritesTransaction* ryw, Version v) {
+	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
+	ryw->getTransaction().setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	ryw->getTransaction().set(versionEpochKey, BinaryWriter::toValue(v, Unversioned()));
+	return Optional<std::string>();
+}
+
+Future<Optional<std::string>> VersionEpochImpl::commit(ReadYourWritesTransaction* ryw) {
+	// TODO: Call advanceVersion at some point
+	ryw->getTransaction().setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	auto versionEpoch =
+	    ryw->getSpecialKeySpaceWriteMap()[SpecialKeySpace::getManagementApiCommandPrefix("versionepoch")].second;
+	if (versionEpoch.present()) {
+		try {
+			int64_t v = boost::lexical_cast<int64_t>(versionEpoch.get().toString());
+			return versionEpochCommitActor(ryw, v);
+		} catch (boost::bad_lexical_cast& e) {
+			return Optional<std::string>(ManagementAPIError::toJsonString(
+			    false, "versionepoch", "Invalid epoch (int64_t) argument: " + versionEpoch.get().toString()));
 		}
 	} else {
 		ryw->getTransaction().clear(minRequiredCommitVersionKey);

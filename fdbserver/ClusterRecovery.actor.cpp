@@ -1182,7 +1182,7 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	// enable new clusters to use a version in-step with wall clock time.
 	self->versionEpoch.reset();
 	Optional<Standalone<StringRef>> versionEpochValue = wait(self->txnStateStore->readValue(versionEpochKey));
-	self->versionEpoch = SERVER_KNOBS->DEFAULT_VERSION_EPOCH;
+	self->versionEpoch = CLIENT_KNOBS->DEFAULT_VERSION_EPOCH;
 	if (versionEpochValue.present()) {
 		self->versionEpoch = BinaryReader::fromStringRef<Version>(versionEpochValue.get(), Unversioned());
 	} else if (BUGGIFY) {

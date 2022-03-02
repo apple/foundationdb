@@ -270,6 +270,9 @@ public:
 	// blob granules
 	bool ENABLE_BLOB_GRANULES;
 
+	// versions
+	int64_t DEFAULT_VERSION_EPOCH;
+
 	ClientKnobs(Randomize randomize);
 	void initialize(Randomize randomize);
 };

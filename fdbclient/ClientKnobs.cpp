@@ -278,6 +278,9 @@ void ClientKnobs::initialize(Randomize randomize) {
 	// blob granules
 	init( ENABLE_BLOB_GRANULES,                   false );
 
+	// versions
+	init( DEFAULT_VERSION_EPOCH,             1262307600 ); // 2010-01-01T01:00:00+00:00, default version reference epoch (seconds). This value itself is based off the Unix epoch, and is only used when initializing a new cluster. Existing clusters can modify the version epoch through the special key space.
+
 	// clang-format on
 }
 
