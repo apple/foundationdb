@@ -198,7 +198,7 @@ void TCServerInfo::removeTeamsContainingServer(UID removedServer) {
 	}
 }
 
-std::pair<int64_t, int64_t> TCServerInfo::spaceInBytes(bool includeInFlight) const {
+std::pair<int64_t, int64_t> TCServerInfo::spaceBytes(bool includeInFlight) const {
 	auto& metrics = getServerMetrics();
 	ASSERT(metrics.capacity.bytes >= 0);
 	ASSERT(metrics.available.bytes >= 0);
@@ -209,6 +209,10 @@ std::pair<int64_t, int64_t> TCServerInfo::spaceInBytes(bool includeInFlight) con
 	}
 
 	return std::make_pair(bytesAvailable, metrics.capacity.bytes); // bytesAvailable could be negative
+}
+
+int64_t TCServerInfo::loadBytes() const {
+	return getServerMetrics().load.bytes;
 }
 
 void TCServerInfo::removeTeam(Reference<TCTeamInfo> team) {
@@ -370,7 +374,7 @@ int64_t TCTeamInfo::getMinAvailableSpace(bool includeInFlight) const {
 	int64_t minAvailableSpace = std::numeric_limits<int64_t>::max();
 	for (const auto& server : servers) {
 		if (server->serverMetricsPresent()) {
-			const auto [bytesAvailable, bytesCapacity] = server->spaceInBytes(includeInFlight);
+			const auto [bytesAvailable, bytesCapacity] = server->spaceBytes(includeInFlight);
 			minAvailableSpace = std::min(bytesAvailable, minAvailableSpace);
 		}
 	}
@@ -382,7 +386,7 @@ double TCTeamInfo::getMinAvailableSpaceRatio(bool includeInFlight) const {
 	double minRatio = 1.0;
 	for (const auto& server : servers) {
 		if (server->serverMetricsPresent()) {
-			auto [bytesAvailable, bytesCapacity] = server->spaceInBytes(includeInFlight);
+			auto [bytesAvailable, bytesCapacity] = server->spaceBytes(includeInFlight);
 			bytesAvailable = std::max((int64_t)0, bytesAvailable);
 
 			if (bytesCapacity == 0)
@@ -437,11 +441,12 @@ void TCTeamInfo::addServers(const std::vector<UID>& servers) {
 int64_t TCTeamInfo::getLoadAverage() const {
 	int64_t bytesSum = 0;
 	int added = 0;
-	for (int i = 0; i < servers.size(); i++)
-		if (servers[i]->serverMetricsPresent()) {
+	for (const auto& server : servers) {
+		if (server->serverMetricsPresent()) {
 			added++;
-			bytesSum += servers[i]->getServerMetrics().load.bytes;
+			bytesSum += server->loadBytes();
 		}
+	}
 
 	if (added < servers.size())
 		bytesSum *= 2;
