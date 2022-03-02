@@ -37,7 +37,7 @@ public:
 			choose {
 				when(ErrorOr<GetStorageMetricsReply> rep = wait(metricsRequest)) {
 					if (rep.present()) {
-						server->serverMetrics = rep;
+						server->metrics = rep;
 						if (server->updated.canBeSet()) {
 							server->updated.send(Void());
 						}
@@ -65,27 +65,27 @@ public:
 			}
 		}
 
-		if (server->serverMetrics.get().lastUpdate < now() - SERVER_KNOBS->DD_SS_STUCK_TIME_LIMIT) {
+		if (server->metrics.get().lastUpdate < now() - SERVER_KNOBS->DD_SS_STUCK_TIME_LIMIT) {
 			if (server->ssVersionTooFarBehind.get() == false) {
 				TraceEvent("StorageServerStuck", server->collection->getDistributorId())
 				    .detail("ServerId", server->id.toString())
-				    .detail("LastUpdate", server->serverMetrics.get().lastUpdate);
+				    .detail("LastUpdate", server->metrics.get().lastUpdate);
 				server->ssVersionTooFarBehind.set(true);
 				server->collection->addLaggingStorageServer(server->lastKnownInterface.locality.zoneId().get());
 			}
-		} else if (server->serverMetrics.get().versionLag > SERVER_KNOBS->DD_SS_FAILURE_VERSIONLAG) {
+		} else if (server->metrics.get().versionLag > SERVER_KNOBS->DD_SS_FAILURE_VERSIONLAG) {
 			if (server->ssVersionTooFarBehind.get() == false) {
 				TraceEvent(SevWarn, "SSVersionDiffLarge", server->collection->getDistributorId())
 				    .detail("ServerId", server->id.toString())
-				    .detail("VersionLag", server->serverMetrics.get().versionLag);
+				    .detail("VersionLag", server->metrics.get().versionLag);
 				server->ssVersionTooFarBehind.set(true);
 				server->collection->addLaggingStorageServer(server->lastKnownInterface.locality.zoneId().get());
 			}
-		} else if (server->serverMetrics.get().versionLag < SERVER_KNOBS->DD_SS_ALLOWED_VERSIONLAG) {
+		} else if (server->metrics.get().versionLag < SERVER_KNOBS->DD_SS_ALLOWED_VERSIONLAG) {
 			if (server->ssVersionTooFarBehind.get() == true) {
 				TraceEvent("SSVersionDiffNormal", server->collection->getDistributorId())
 				    .detail("ServerId", server->id.toString())
-				    .detail("VersionLag", server->serverMetrics.get().versionLag);
+				    .detail("VersionLag", server->metrics.get().versionLag);
 				server->ssVersionTooFarBehind.set(false);
 				server->collection->removeLaggingStorageServer(server->lastKnownInterface.locality.zoneId().get());
 			}
@@ -138,9 +138,9 @@ TCServerInfo::TCServerInfo(StorageServerInterface ssi,
 }
 
 bool TCServerInfo::hasHealthyAvailableSpace(double minAvailableSpaceRatio) const {
-	ASSERT(serverMetricsPresent());
+	ASSERT(metricsPresent());
 
-	auto& metrics = getServerMetrics();
+	auto& metrics = getMetrics();
 	ASSERT(metrics.available.bytes >= 0);
 	ASSERT(metrics.capacity.bytes >= 0);
 
@@ -199,7 +199,7 @@ void TCServerInfo::removeTeamsContainingServer(UID removedServer) {
 }
 
 std::pair<int64_t, int64_t> TCServerInfo::spaceBytes(bool includeInFlight) const {
-	auto& metrics = getServerMetrics();
+	auto& metrics = getMetrics();
 	ASSERT(metrics.capacity.bytes >= 0);
 	ASSERT(metrics.available.bytes >= 0);
 
@@ -212,7 +212,7 @@ std::pair<int64_t, int64_t> TCServerInfo::spaceBytes(bool includeInFlight) const
 }
 
 int64_t TCServerInfo::loadBytes() const {
-	return getServerMetrics().load.bytes;
+	return getMetrics().load.bytes;
 }
 
 void TCServerInfo::removeTeam(Reference<TCTeamInfo> team) {
@@ -373,7 +373,7 @@ int64_t TCTeamInfo::getLoadBytes(bool includeInFlight, double inflightPenalty) c
 int64_t TCTeamInfo::getMinAvailableSpace(bool includeInFlight) const {
 	int64_t minAvailableSpace = std::numeric_limits<int64_t>::max();
 	for (const auto& server : servers) {
-		if (server->serverMetricsPresent()) {
+		if (server->metricsPresent()) {
 			const auto [bytesAvailable, bytesCapacity] = server->spaceBytes(includeInFlight);
 			minAvailableSpace = std::min(bytesAvailable, minAvailableSpace);
 		}
@@ -385,7 +385,7 @@ int64_t TCTeamInfo::getMinAvailableSpace(bool includeInFlight) const {
 double TCTeamInfo::getMinAvailableSpaceRatio(bool includeInFlight) const {
 	double minRatio = 1.0;
 	for (const auto& server : servers) {
-		if (server->serverMetricsPresent()) {
+		if (server->metricsPresent()) {
 			auto [bytesAvailable, bytesCapacity] = server->spaceBytes(includeInFlight);
 			bytesAvailable = std::max((int64_t)0, bytesAvailable);
 
@@ -404,7 +404,7 @@ bool TCTeamInfo::allServersHaveHealthyAvailableSpace() const {
 	double minAvailableSpaceRatio =
 	    SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO + SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO_SAFETY_BUFFER;
 	for (const auto& server : servers) {
-		if (!server->serverMetricsPresent() || !server->hasHealthyAvailableSpace(minAvailableSpaceRatio)) {
+		if (!server->metricsPresent() || !server->hasHealthyAvailableSpace(minAvailableSpaceRatio)) {
 			result = false;
 			break;
 		}
@@ -442,7 +442,7 @@ int64_t TCTeamInfo::getLoadAverage() const {
 	int64_t bytesSum = 0;
 	int added = 0;
 	for (const auto& server : servers) {
-		if (server->serverMetricsPresent()) {
+		if (server->metricsPresent()) {
 			added++;
 			bytesSum += server->loadBytes();
 		}

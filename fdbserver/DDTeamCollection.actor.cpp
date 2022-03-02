@@ -5333,10 +5333,10 @@ public:
 		collection->disableBuildingTeams();
 		collection->setCheckTeamDelay();
 
-		collection->server_info[UID(1, 0)]->setServerMetrics(mid_avail);
-		collection->server_info[UID(2, 0)]->setServerMetrics(high_avail);
-		collection->server_info[UID(3, 0)]->setServerMetrics(high_avail);
-		collection->server_info[UID(4, 0)]->setServerMetrics(high_avail);
+		collection->server_info[UID(1, 0)]->setMetrics(mid_avail);
+		collection->server_info[UID(2, 0)]->setMetrics(high_avail);
+		collection->server_info[UID(3, 0)]->setMetrics(high_avail);
+		collection->server_info[UID(4, 0)]->setMetrics(high_avail);
 
 		/*
 		 * Suppose  1, 2 and 3 are complete sources, i.e., they have all shards in
@@ -5389,10 +5389,10 @@ public:
 		collection->disableBuildingTeams();
 		collection->setCheckTeamDelay();
 
-		collection->server_info[UID(1, 0)]->setServerMetrics(mid_avail);
-		collection->server_info[UID(2, 0)]->setServerMetrics(high_avail);
-		collection->server_info[UID(3, 0)]->setServerMetrics(high_avail);
-		collection->server_info[UID(4, 0)]->setServerMetrics(high_avail);
+		collection->server_info[UID(1, 0)]->setMetrics(mid_avail);
+		collection->server_info[UID(2, 0)]->setMetrics(high_avail);
+		collection->server_info[UID(3, 0)]->setMetrics(high_avail);
+		collection->server_info[UID(4, 0)]->setMetrics(high_avail);
 		collection->server_info[UID(1, 0)]->markTeamUnhealthy(0);
 
 		/*
@@ -5452,10 +5452,10 @@ public:
 		 * least utilized, if the caller says they preferLowerUtilization.
 		 */
 
-		collection->server_info[UID(1, 0)]->setServerMetrics(mid_avail);
-		collection->server_info[UID(2, 0)]->setServerMetrics(high_avail);
-		collection->server_info[UID(3, 0)]->setServerMetrics(high_avail);
-		collection->server_info[UID(4, 0)]->setServerMetrics(high_avail);
+		collection->server_info[UID(1, 0)]->setMetrics(mid_avail);
+		collection->server_info[UID(2, 0)]->setMetrics(high_avail);
+		collection->server_info[UID(3, 0)]->setMetrics(high_avail);
+		collection->server_info[UID(4, 0)]->setMetrics(high_avail);
 
 		bool wantsNewServers = true;
 		bool wantsTrueBest = true;
@@ -5502,10 +5502,10 @@ public:
 		collection->disableBuildingTeams();
 		collection->setCheckTeamDelay();
 
-		collection->server_info[UID(1, 0)]->setServerMetrics(mid_avail);
-		collection->server_info[UID(2, 0)]->setServerMetrics(high_avail);
-		collection->server_info[UID(3, 0)]->setServerMetrics(high_avail);
-		collection->server_info[UID(4, 0)]->setServerMetrics(high_avail);
+		collection->server_info[UID(1, 0)]->setMetrics(mid_avail);
+		collection->server_info[UID(2, 0)]->setMetrics(high_avail);
+		collection->server_info[UID(3, 0)]->setMetrics(high_avail);
+		collection->server_info[UID(4, 0)]->setMetrics(high_avail);
 
 		/*
 		 * Among server teams that have healthy space available, pick the team that is
@@ -5556,10 +5556,10 @@ public:
 		collection->disableBuildingTeams();
 		collection->setCheckTeamDelay();
 
-		collection->server_info[UID(1, 0)]->setServerMetrics(high_avail);
-		collection->server_info[UID(2, 0)]->setServerMetrics(low_avail);
-		collection->server_info[UID(3, 0)]->setServerMetrics(high_avail);
-		collection->server_info[UID(4, 0)]->setServerMetrics(low_avail);
+		collection->server_info[UID(1, 0)]->setMetrics(high_avail);
+		collection->server_info[UID(2, 0)]->setMetrics(low_avail);
+		collection->server_info[UID(3, 0)]->setMetrics(high_avail);
+		collection->server_info[UID(4, 0)]->setMetrics(low_avail);
 		collection->server_info[UID(1, 0)]->markTeamUnhealthy(0);
 
 		/*
@@ -5616,11 +5616,11 @@ public:
 		collection->disableBuildingTeams();
 		collection->setCheckTeamDelay();
 
-		collection->server_info[UID(1, 0)]->setServerMetrics(high_avail);
-		collection->server_info[UID(2, 0)]->setServerMetrics(low_avail);
-		collection->server_info[UID(3, 0)]->setServerMetrics(high_avail);
-		collection->server_info[UID(4, 0)]->setServerMetrics(low_avail);
-		collection->server_info[UID(5, 0)]->setServerMetrics(high_avail);
+		collection->server_info[UID(1, 0)]->setMetrics(high_avail);
+		collection->server_info[UID(2, 0)]->setMetrics(low_avail);
+		collection->server_info[UID(3, 0)]->setMetrics(high_avail);
+		collection->server_info[UID(4, 0)]->setMetrics(low_avail);
+		collection->server_info[UID(5, 0)]->setMetrics(high_avail);
 		collection->server_info[UID(1, 0)]->markTeamUnhealthy(0);
 
 		/*
