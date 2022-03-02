@@ -215,8 +215,6 @@ if(BUILD_AWS_BACKUP)
   configure_file(awss3sdk.cmake awss3sdk-download/CMakeLists.txt)
 
   execute_process(
-# WITH THIS IS DOES CARE ABOUT THE BUILDONLY I PASS???
-#    COMMAND ${CMAKE_COMMAND} -G "${CMAKE_GENERATOR}" -DBUILD_ONLY=aaaaaaa .
     COMMAND ${CMAKE_COMMAND} -G "${CMAKE_GENERATOR}" .
     RESULT_VARIABLE results
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/awss3sdk-download
@@ -236,10 +234,11 @@ if(BUILD_AWS_BACKUP)
     message(FATAL_ERROR "Build step for AWS S3 SDK has Failed. ${results}")
   endif()
 
-  add_subdirectory(
-    ${CMAKE_CURRENT_BINARY_DIR}/awss3sdk-src
-    ${CMAKE_CURRENT_BINARY_DIR}/awss3sdk-build
-  )
+# TODO ???
+#  add_subdirectory(
+#    ${CMAKE_CURRENT_BINARY_DIR}/awss3sdk-src
+#    ${CMAKE_CURRENT_BINARY_DIR}/awss3sdk-build
+#  )
 endif()
 
 add_flow_target(STATIC_LIBRARY NAME fdbclient SRCS ${FDBCLIENT_SRCS} ADDL_SRCS ${options_srcs})
