@@ -3200,7 +3200,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		}
 		statusObj["active_tss_count"] = activeTSSCount;
 
-		if (!wiggleServers.empty()) {
+		if (!storageWiggler.empty()) {
 			JsonBuilderArray wiggleServerUID;
 			for (auto& id : wiggleServers)
 				wiggleServerUID.push_back(id.shortString());
