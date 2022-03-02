@@ -873,6 +873,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				    .detail("CheckpointMetaData", res.toString())
 				    .detail("RocksDBCF", getRocksCF(res).toString());
 			} else if (a.request.format == RocksDB) {
+				platform::eraseDirectoryRecursive(checkpointDir);
 				uint64_t debugCheckpointSeq = -1;
 				s = checkpoint->CreateCheckpoint(checkpointDir, /*log_size_for_flush=*/0, &debugCheckpointSeq);
 				if (!s.ok()) {

@@ -70,6 +70,7 @@ struct SSCheckpointWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> _start(SSCheckpointWorkload* self, Database cx) {
+		int ignore = wait(setDDMode(cx, 0));
 		state Key keyA = "TestKeyA"_sr;
 		state Key keyB = "TestKeyB"_sr;
 		state Key keyC = "TestKeyC"_sr;

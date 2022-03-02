@@ -6967,7 +6967,8 @@ ACTOR Future<std::vector<CheckpointMetaData>> getCheckpointMetaData(Database cx,
 
 	loop {
 		TraceEvent("GetCheckpointMetaDataBegin")
-		    .detail("Range", keys.toString())
+		    .detail("Begin", keys.begin)
+		    .detail("End", keys.end)
 		    .detail("Version", version)
 		    .detail("Format", static_cast<int>(format));
 

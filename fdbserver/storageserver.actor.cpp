@@ -205,7 +205,7 @@ struct MoveInShardMetaData {
 	UID id;
 	KeyRange range;
 	Version createVersion;
-	Version version;
+	// Version version;
 	int8_t phase;
 	std::vector<CheckpointMetaData> checkpoints;
 	Optional<Error> error;
@@ -220,11 +220,15 @@ struct MoveInShardMetaData {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id, range, createVersion, version, phase, checkpoints);
+		serializer(ar, id, range, createVersion, phase, checkpoints);
 	}
 };
 
 struct MoveInUpdates {
+
+	MoveInUpdates() = default;
+	MoveInUpdates(UID id, Version version, IKeyValueStore* storage)
+	  : id(id), oldestVersion(version), storage(storage) {}
 
 	void addMutation(Version version, bool fromFetch, MutationRef const& mutation);
 
@@ -235,13 +239,18 @@ struct MoveInUpdates {
 	void clear();
 
 private:
-	std::deque<Standalone<VerUpdateRef>> updates;
-	IKeyValueStore* disk;
+	UID id;
 	Version oldestVersion;
+	std::deque<Standalone<VerUpdateRef>> updates;
+	IKeyValueStore* const storage;
+	// bool receivedUpdates = false;
 };
 
 void MoveInUpdates::addMutation(Version version, bool fromFetch, MutationRef const& mutation) {
 	// Create a new VerUpdateRef in updates queue if it is a new version.
+	TraceEvent("MoveInUpdatesNewMutation", id).detail("Version", version).detail("Mutation", mutation);
+	if (version <= oldestVersion)
+		return;
 	if (updates.empty() || version > updates.back().version) {
 		VerUpdateRef v;
 		v.version = version;
@@ -283,7 +292,7 @@ struct MoveInShard {
 	Promise<Void> readWrite;
 	PromiseStream<Key> changeFeedRemovals;
 
-	MoveInShard() {}
+	MoveInShard() = default;
 	MoveInShard(StorageServer* server,
 	            const UID& id,
 	            KeyRange range,
@@ -301,8 +310,9 @@ struct MoveInShard {
 	}
 
 	std::string toString() const {
-		return "MoveInShardMetaData:\nRange: " + meta.range.toString() + "\nVersion: " + std::to_string(meta.version) +
-		       "\nID: " + meta.id.toString() + "\nState: " + std::to_string(static_cast<int>(meta.phase));
+		return "MoveInShardMetaData:\nRange: " + meta.range.toString() +
+		       "\nShardCreateVersion: " + std::to_string(meta.createVersion) + "\nID: " + meta.id.toString() +
+		       "\nState: " + std::to_string(static_cast<int>(meta.phase));
 	}
 
 	Key moveInShardKey() const {
@@ -395,7 +405,7 @@ public:
 	}
 	Version getMoveInVersion() const {
 		if (moveInShard) {
-			return moveInShard->meta.version;
+			return moveInShard->meta.createVersion;
 		} else {
 			return invalidVersion;
 		}
@@ -474,6 +484,8 @@ struct StorageServerDisk {
 	KeyValueStoreType getKeyValueStoreType() const { return storage->getType(); }
 	StorageBytes getStorageBytes() const { return storage->getStorageBytes(); }
 	std::tuple<size_t, size_t, size_t> getSize() const { return storage->getSize(); }
+
+	IKeyValueStore* getKvStore() const { return storage; }
 
 	// The following are pointers to the Counters in StorageServer::counters of the same names.
 	Counter* kvCommitLogicalBytes;
@@ -4941,15 +4953,22 @@ ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data, MoveInShard* shard,
 	std::cout << "Getting CheckpointMetaData: " << shard->toString() << std::endl;
 
 	// TODO: use shard->meta.checkpoints to continue the fetch.
+	state int attempt = 0;
 	loop {
+		++attempt;
 		try {
+			wait(delay(0));
 			std::vector<CheckpointMetaData> _records =
-			    wait(getCheckpointMetaData(data->cx, shard->meta.range, shard->meta.version, RocksDB));
+			    wait(getCheckpointMetaData(data->cx, shard->meta.range, shard->meta.createVersion, RocksDB));
 			records = std::move(_records);
 			break;
 		} catch (Error& e) {
 			std::cout << "GetCheckpointMetaData error: " << e.code() << "Name: " << e.name() << "What: " << e.what()
 			          << std::endl;
+			if (attempt > 10) {
+				throw e;
+			}
+			wait(delay(1, TaskPriority::FetchKeys));
 			// if (e.code() == error_code_checkpoint_not_found) {
 			// 	throw;
 			// }
@@ -5009,7 +5028,7 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data, MoveInShard* 
 	ASSERT(shard->getPhase() == MoveInShardMetaData::Ingesting);
 
 	// Is this necessary? Since the checkpoint has been fetched, the transaction must have been committed.
-	wait(data->durableVersion.whenAtLeast(shard->meta.version + 1));
+	wait(data->durableVersion.whenAtLeast(shard->meta.createVersion + 1));
 
 	std::cout << "Restoring: " << describe(shard->meta.checkpoints) << std::endl;
 	try {
@@ -5036,6 +5055,7 @@ ACTOR Future<Void> fetchShardApplyUpdates(StorageServer* data, MoveInShard* shar
 	state Version version = data->version.get() + 1;
 
 	while (shard->updates.hasNext()) {
+		// wait(delay(0, TaskPriority::FetchKeys));
 		// Wait to run during update(), after a new batch of versions is received from the tlog but before eager reads
 		// take place.
 		Promise<FetchInjectionInfo*> p;
@@ -5066,6 +5086,11 @@ ACTOR Future<Void> fetchShardApplyUpdates(StorageServer* data, MoveInShard* shar
 
 		std::vector<Standalone<VerUpdateRef>> updates =
 		    shard->updates.next(SERVER_KNOBS->FETCH_SHARD_BUFFER_BYTE_LIMIT);
+		if (!updates.empty()) {
+			TraceEvent("FetchShardApplyingUpdates", data->thisServerID)
+			    .detail("MinVerion", updates.front().version)
+			    .detail("MaxVerion", updates.back().version);
+		}
 		for (auto i = updates.begin(); i != updates.end(); ++i) {
 			i->version = version;
 			batch->arena.dependsOn(i->arena());
@@ -5087,8 +5112,6 @@ ACTOR Future<Void> fetchShardApplyUpdates(StorageServer* data, MoveInShard* shar
 				}
 			}
 		}
-
-		wait(delay(0, TaskPriority::FetchKeys));
 	}
 
 	setAvailableStatus(data,
@@ -5167,8 +5190,11 @@ ACTOR Future<Void> fetchShard(StorageServer* data, MoveInShard* shard) {
 			}
 		} catch (Error& e) {
 			std::cout << "FetchShardError: " << e.name() << std::endl;
+			throw e;
 		}
 	}
+
+	TraceEvent(SevDebug, "FetchShardComplete", data->thisServerID).detail("MoveInShard", shard->toString());
 
 	ASSERT(data->shards[shard->meta.range.begin]->assigned() &&
 	       data->shards[shard->meta.range.begin]->keys ==
@@ -5193,7 +5219,7 @@ MoveInShard::MoveInShard(StorageServer* server,
                          KeyRange range,
                          const Version version,
                          MoveInShardMetaData::Phase state)
-  : meta(id, range, version, state), server(server) {
+  : meta(id, range, version, state), server(server), updates(id, version, server->storage.getKvStore()) {
 	if (state != MoveInShardMetaData::Pending) {
 		fetchClient = fetchShard(server, this);
 	} else {
@@ -6363,7 +6389,9 @@ ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData meta
 	                            metaData.range,
 	                            static_cast<CheckpointFormat>(metaData.format),
 	                            metaData.checkpointID,
-	                            data->folder + rocksdbCheckpointDirPrefix + metaData.checkpointID.toString());
+	                            data->folder + rocksdbCheckpointDirPrefix +
+	                                deterministicRandom()->randomUniqueID().toString());
+	// data->folder + rocksdbCheckpointDirPrefix + metaData.checkpointID.toString());
 	state CheckpointMetaData checkpointResult;
 	try {
 		state CheckpointMetaData res = wait(data->storage.checkpoint(req));
