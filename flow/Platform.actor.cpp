@@ -3773,7 +3773,7 @@ std::string getExecPath() {
 		throwExecPathError(platform_error(), path);
 	}
 #elif defined(_WIN32)
-	ssize_t len = GetModuleFileName(nullptr, path, size) if (len != 0) { return std::string(path); }
+	auto len = GetModuleFileName(nullptr, path, size) if (len != 0) { return std::string(path); }
 	else {
 		throwExecPathError(platform_error(), path);
 	}
