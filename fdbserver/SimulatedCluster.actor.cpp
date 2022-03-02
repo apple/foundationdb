@@ -300,6 +300,8 @@ public:
 	    stderrSeverity, machineCount, processesPerMachine, coordinators;
 	Optional<std::string> config;
 
+	bool allowDefaultTenant = true;
+
 	ConfigDBType getConfigDBType() const { return configDBType; }
 
 	bool tomlKeyPresent(const toml::value& data, std::string key) {
@@ -350,7 +352,8 @@ public:
 		    .add("processesPerMachine", &processesPerMachine)
 		    .add("coordinators", &coordinators)
 		    .add("configDB", &configDBType)
-		    .add("extraMachineCountDC", &extraMachineCountDC);
+		    .add("extraMachineCountDC", &extraMachineCountDC)
+		    .add("allowDefaultTenant", &allowDefaultTenant);
 		try {
 			auto file = toml::parse(testFile);
 			if (file.contains("configuration") && toml::find(file, "configuration").is_table()) {
@@ -2272,10 +2275,11 @@ ACTOR void setupAndRun(std::string dataFolder,
 	state Standalone<StringRef> startingConfiguration;
 	state int testerCount = 1;
 	state TestConfig testConfig;
-	state bool allowDefaultTenant = true;
 	testConfig.readFromConfig(testFile);
 	g_simulator.hasDiffProtocolProcess = testConfig.startIncompatibleProcess;
 	g_simulator.setDiffProtocol = false;
+
+	state bool allowDefaultTenant = testConfig.allowDefaultTenant;
 
 	// The RocksDB storage engine does not support the restarting tests because you cannot consistently get a clean
 	// snapshot of the storage engine without a snapshotting file system.
@@ -2298,8 +2302,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 	// Disable the default tenant in backup and DR tests for now. This is because backup does not currently duplicate
 	// the tenant map and related state.
 	// TODO: reenable when backup/DR supports tenants.
-	if (std::string_view(testFile).find("Backup") != std::string_view::npos ||
-	    std::string_view(testFile).find("Switchover") != std::string_view::npos) {
+	if (std::string_view(testFile).find("Backup") != std::string_view::npos || testConfig.extraDB != 0) {
 		allowDefaultTenant = false;
 	}
 

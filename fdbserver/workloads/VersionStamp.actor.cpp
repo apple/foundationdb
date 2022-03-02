@@ -42,6 +42,7 @@ struct VersionStampWorkload : TestWorkload {
 	std::map<Key, std::vector<std::pair<Version, Standalone<StringRef>>>> versionStampKey_commit;
 	int apiVersion;
 	bool soleOwnerOfMetadataVersionKey;
+	bool allowMetadataVersionKey;
 
 	VersionStampWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 60.0);
@@ -74,6 +75,12 @@ struct VersionStampWorkload : TestWorkload {
 			apiVersion = Database::API_VERSION_LATEST;
 		}
 		TraceEvent("VersionStampApiVersion").detail("ApiVersion", apiVersion);
+
+		allowMetadataVersionKey = apiVersion >= 610 || apiVersion == Database::API_VERSION_LATEST;
+
+		// TODO: change this once metadata versions are supported for tenants
+		allowMetadataVersionKey = allowMetadataVersionKey && !cx->defaultTenant.present();
+
 		cx->apiVersion = apiVersion;
 		if (clientId == 0)
 			return _start(cx, this, 1 / transactionsPerSecond);
@@ -81,7 +88,7 @@ struct VersionStampWorkload : TestWorkload {
 	}
 
 	Key keyForIndex(uint64_t index) {
-		if ((apiVersion >= 610 || apiVersion == Database::API_VERSION_LATEST) && index == 0) {
+		if (allowMetadataVersionKey && index == 0) {
 			return metadataVersionKey;
 		}
 
@@ -191,8 +198,7 @@ struct VersionStampWorkload : TestWorkload {
 				RangeResult result_ = wait(tr.getRange(
 				    KeyRangeRef(self->vsValuePrefix, endOfRange(self->vsValuePrefix)), self->nodeCount + 1));
 				result = result_;
-				if ((self->apiVersion >= 610 || self->apiVersion == Database::API_VERSION_LATEST) &&
-				    self->key_commit.count(metadataVersionKey)) {
+				if (self->allowMetadataVersionKey && self->key_commit.count(metadataVersionKey)) {
 					Optional<Value> mVal = wait(tr.get(metadataVersionKey));
 					if (mVal.present()) {
 						result.push_back_deep(result.arena(), KeyValueRef(metadataVersionKey, mVal.get()));

@@ -177,7 +177,6 @@ struct ConflictRangeWorkload : TestWorkload {
 
 				if (self->testReadYourWrites) {
 					trRYOW.setVersion(readVersion);
-					trRYOW.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				} else
 					tr3.setVersion(readVersion);
 
@@ -262,7 +261,8 @@ struct ConflictRangeWorkload : TestWorkload {
 							throw not_committed();
 						}
 
-						if (originalResults[originalResults.size() - 1].key >= LiteralStringRef("\xff")) {
+						if (originalResults[originalResults.size() - 1].key >= LiteralStringRef("\xff") ||
+						    originalResults.readThroughEnd) {
 							// Results go into server keyspace, so if a key selector does not fully resolve offset, a
 							// change won't effect results
 							throw not_committed();
@@ -316,7 +316,7 @@ struct ConflictRangeWorkload : TestWorkload {
 							allKeyEntries += printable(res[i].key) + " ";
 						}
 
-						TraceEvent("ConflictRangeDump").detail("Keys", allKeyEntries);
+						TraceEvent("ConflictRangeDump").setMaxFieldLength(10000).detail("Keys", allKeyEntries);
 					}
 					throw not_committed();
 				} else {
