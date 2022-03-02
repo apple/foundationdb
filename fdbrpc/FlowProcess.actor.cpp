@@ -17,10 +17,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 #include "fdbrpc/FlowProcess.actor.h"
-#include "flow/flow.h"
-#include "fdbserver/RemoteIKeyValueStore.actor.h"
 #include "fdbrpc/simulator.h"
+#include "flow/flow.h"
 
 #include "flow/actorcompiler.h" // has to be last include
 
