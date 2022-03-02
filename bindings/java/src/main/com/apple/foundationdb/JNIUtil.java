@@ -182,7 +182,7 @@ public class JNIUtil {
 	private static OS getRunningOS() {
 		String osname = System.getProperty("os.name").toLowerCase();
 		String arch = System.getProperty("os.arch");
-		if (!arch.equals("amd64") && !arch.equals("x86_64") && !arch.equals("aarch64")) {
+		if (!arch.equals("amd64") && !arch.equals("x86_64") && !arch.equals("aarch64") && !arch.equals("ppc64le")) {
 			throw new IllegalStateException("Unknown or unsupported arch: " + arch);
 		}
 		if (osname.startsWith("windows")) {

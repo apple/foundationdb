@@ -59,7 +59,7 @@ ACTOR Future<Void> includeLocalities(Reference<IDatabase> db,
 			wait(safeThreadFutureToFuture(tr->commit()));
 			return Void();
 		} catch (Error& e) {
-			TraceEvent("IncludeLocalitiesError").error(e, true);
+			TraceEvent("IncludeLocalitiesError").errorUnsuppressed(e);
 			wait(safeThreadFutureToFuture(tr->onError(e)));
 		}
 	}
@@ -99,7 +99,7 @@ ACTOR Future<Void> includeServers(Reference<IDatabase> db, std::vector<AddressEx
 			wait(safeThreadFutureToFuture(tr->commit()));
 			return Void();
 		} catch (Error& e) {
-			TraceEvent("IncludeServersError").error(e, true);
+			TraceEvent("IncludeServersError").errorUnsuppressed(e);
 			wait(safeThreadFutureToFuture(tr->onError(e)));
 		}
 	}

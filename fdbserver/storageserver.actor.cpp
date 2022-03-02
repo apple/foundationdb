@@ -1818,9 +1818,9 @@ ACTOR Future<Void> fetchCheckpointQ(StorageServer* self, FetchCheckpointRequest 
 			    .detail("Token", req.token);
 		} else {
 			TraceEvent(SevWarnAlways, "ServerFetchCheckpointFailure")
+			    .errorUnsuppressed(e)
 			    .detail("CheckpointID", req.checkpointID)
-			    .detail("Token", req.token)
-			    .error(e, /*includeCancel=*/true);
+			    .detail("Token", req.token);
 			if (!canReplyWith(e)) {
 				throw e;
 			}
@@ -4417,7 +4417,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				}
 				if (nfk == keys.begin) {
 					TraceEvent("FKBlockFail", data->thisServerID)
-					    .error(e, true)
+					    .errorUnsuppressed(e)
 					    .suppressFor(1.0)
 					    .detail("FKID", interval.pairID);
 
@@ -4583,7 +4583,9 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 		TraceEvent(SevDebug, interval.end(), data->thisServerID);
 	} catch (Error& e) {
-		TraceEvent(SevDebug, interval.end(), data->thisServerID).error(e, true).detail("Version", data->version.get());
+		TraceEvent(SevDebug, interval.end(), data->thisServerID)
+		    .errorUnsuppressed(e)
+		    .detail("Version", data->version.get());
 
 		if (e.code() == error_code_actor_cancelled && !data->shuttingDown && shard->phase >= AddingShard::Fetching) {
 			if (shard->phase < AddingShard::Waiting) {
@@ -5699,8 +5701,8 @@ ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData meta
 	} catch (Error& e) {
 		// If the checkpoint meta data is not persisted successfully, remove the checkpoint.
 		TraceEvent("StorageCreateCheckpointPersistFailure", data->thisServerID)
-		    .detail("Checkpoint", checkpointResult.toString())
-		    .error(e, true);
+		    .errorUnsuppressed(e)
+		    .detail("Checkpoint", checkpointResult.toString());
 		data->checkpoints.erase(checkpointResult.checkpointID);
 		data->actors.add(deleteCheckpointQ(data, metaData.version, checkpointResult));
 	}
@@ -7123,7 +7125,7 @@ bool storageServerTerminated(StorageServer& self, IKeyValueStore* persistentData
 
 	if (e.code() == error_code_worker_removed || e.code() == error_code_recruitment_failed ||
 	    e.code() == error_code_file_not_found || e.code() == error_code_actor_cancelled) {
-		TraceEvent("StorageServerTerminated", self.thisServerID).error(e, true);
+		TraceEvent("StorageServerTerminated", self.thisServerID).errorUnsuppressed(e);
 		return true;
 	} else
 		return false;

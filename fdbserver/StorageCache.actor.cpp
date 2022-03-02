@@ -1375,7 +1375,7 @@ ACTOR Future<Void> fetchKeys(StorageCacheData* data, AddingCacheRange* cacheRang
 				break;
 			} catch (Error& e) {
 				TraceEvent("SCFKBlockFail", data->thisServerID)
-				    .error(e, true)
+				    .errorUnsuppressed(e)
 				    .suppressFor(1.0)
 				    .detail("FKID", interval.pairID);
 				if (e.code() == error_code_transaction_too_old) {
@@ -1507,7 +1507,7 @@ ACTOR Future<Void> fetchKeys(StorageCacheData* data, AddingCacheRange* cacheRang
 
 		// TraceEvent(SevDebug, interval.end(), data->thisServerID);
 	} catch (Error& e) {
-		// TraceEvent(SevDebug, interval.end(), data->thisServerID).error(e, true).detail("Version", data->version.get());
+		// TraceEvent(SevDebug, interval.end(), data->thisServerID).errorUnsuppressed(e).detail("Version", data->version.get());
 
 		// TODO define the shuttingDown state of cache server
 		if (e.code() == error_code_actor_cancelled &&

@@ -1331,10 +1331,10 @@ public:
 		} catch (Error& e) {
 			state Error err = e;
 			TraceEvent("StorageServerTrackerCancelled", self->distributorId)
+			    .errorUnsuppressed(e)
 			    .suppressFor(1.0)
 			    .detail("Primary", self->primary)
-			    .detail("Server", server->getId())
-			    .error(e, /*includeCancelled*/ true);
+			    .detail("Server", server->getId());
 			if (e.code() != error_code_actor_cancelled && errorOut.canBeSet()) {
 				errorOut.sendError(e);
 				wait(delay(0)); // Check for cancellation, since errorOut.sendError(e) could delete self
@@ -2245,6 +2245,11 @@ public:
 			// Ask the candidateWorker to initialize a SS only if the worker does not have a pending request
 			state UID interfaceId = deterministicRandom()->randomUniqueID();
 
+			// insert recruiting localities BEFORE actor waits, to ensure we don't send many recruitment requests to the
+			// same storage
+			self->recruitingIds.insert(interfaceId);
+			self->recruitingLocalities.insert(candidateWorker.worker.stableAddress());
+
 			UID clusterId = wait(self->getClusterId());
 
 			state InitializeStorageRequest isr;
@@ -2254,9 +2259,6 @@ public:
 			isr.reqId = deterministicRandom()->randomUniqueID();
 			isr.interfaceId = interfaceId;
 			isr.clusterId = clusterId;
-
-			self->recruitingIds.insert(interfaceId);
-			self->recruitingLocalities.insert(candidateWorker.worker.stableAddress());
 
 			// if tss, wait for pair ss to finish and add its id to isr. If pair fails, don't recruit tss
 			state bool doRecruit = true;
@@ -2857,7 +2859,7 @@ public:
 		state KeyBackedObjectMap<UID, StorageMetadataType, decltype(IncludeVersion())> metadataMap(
 		    serverMetadataKeys.begin, IncludeVersion());
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
-		state StorageMetadataType data(timer_int());
+		state StorageMetadataType data(StorageMetadataType::currentTime());
 		// printf("------ read metadata %s\n", server->getId().toString().c_str());
 		// read storage metadata
 		loop {
@@ -5060,593 +5062,648 @@ Future<Void> DDTeamCollection::printSnapshotTeamsInfo(Reference<DDTeamCollection
 	return DDTeamCollectionImpl::printSnapshotTeamsInfo(self);
 }
 
-std::unique_ptr<DDTeamCollection> testTeamCollection(int teamSize,
-                                                     Reference<IReplicationPolicy> policy,
-                                                     int processCount) {
-	Database database = DatabaseContext::create(
-	    makeReference<AsyncVar<ClientDBInfo>>(), Never(), LocalityData(), EnableLocalityLoadBalance::False);
+class DDTeamCollectionUnitTest {
+	static std::unique_ptr<DDTeamCollection> testTeamCollection(int teamSize,
+	                                                            Reference<IReplicationPolicy> policy,
+	                                                            int processCount) {
+		Database database = DatabaseContext::create(
+		    makeReference<AsyncVar<ClientDBInfo>>(), Never(), LocalityData(), EnableLocalityLoadBalance::False);
 
-	DatabaseConfiguration conf;
-	conf.storageTeamSize = teamSize;
-	conf.storagePolicy = policy;
+		DatabaseConfiguration conf;
+		conf.storageTeamSize = teamSize;
+		conf.storagePolicy = policy;
 
-	auto collection =
-	    std::unique_ptr<DDTeamCollection>(new DDTeamCollection(database,
-	                                                           UID(0, 0),
-	                                                           MoveKeysLock(),
-	                                                           PromiseStream<RelocateShard>(),
-	                                                           makeReference<ShardsAffectedByTeamFailure>(),
-	                                                           conf,
-	                                                           {},
-	                                                           {},
-	                                                           Future<Void>(Void()),
-	                                                           makeReference<AsyncVar<bool>>(true),
-	                                                           IsPrimary::True,
-	                                                           makeReference<AsyncVar<bool>>(false),
-	                                                           makeReference<AsyncVar<bool>>(false),
-	                                                           PromiseStream<GetMetricsRequest>(),
-	                                                           Promise<UID>(),
-	                                                           PromiseStream<Promise<int>>()));
+		auto collection =
+		    std::unique_ptr<DDTeamCollection>(new DDTeamCollection(database,
+		                                                           UID(0, 0),
+		                                                           MoveKeysLock(),
+		                                                           PromiseStream<RelocateShard>(),
+		                                                           makeReference<ShardsAffectedByTeamFailure>(),
+		                                                           conf,
+		                                                           {},
+		                                                           {},
+		                                                           Future<Void>(Void()),
+		                                                           makeReference<AsyncVar<bool>>(true),
+		                                                           IsPrimary::True,
+		                                                           makeReference<AsyncVar<bool>>(false),
+		                                                           makeReference<AsyncVar<bool>>(false),
+		                                                           PromiseStream<GetMetricsRequest>(),
+		                                                           Promise<UID>(),
+		                                                           PromiseStream<Promise<int>>()));
 
-	for (int id = 1; id <= processCount; ++id) {
-		UID uid(id, 0);
-		StorageServerInterface interface;
-		interface.uniqueID = uid;
-		interface.locality.set(LiteralStringRef("machineid"), Standalone<StringRef>(std::to_string(id)));
-		interface.locality.set(LiteralStringRef("zoneid"), Standalone<StringRef>(std::to_string(id % 5)));
-		interface.locality.set(LiteralStringRef("data_hall"), Standalone<StringRef>(std::to_string(id % 3)));
-		collection->server_info[uid] = makeReference<TCServerInfo>(
-		    interface, collection.get(), ProcessClass(), true, collection->storageServerSet);
-		collection->server_status.set(uid, ServerStatus(false, false, false, interface.locality));
-		collection->checkAndCreateMachine(collection->server_info[uid]);
+		for (int id = 1; id <= processCount; ++id) {
+			UID uid(id, 0);
+			StorageServerInterface interface;
+			interface.uniqueID = uid;
+			interface.locality.set(LiteralStringRef("machineid"), Standalone<StringRef>(std::to_string(id)));
+			interface.locality.set(LiteralStringRef("zoneid"), Standalone<StringRef>(std::to_string(id % 5)));
+			interface.locality.set(LiteralStringRef("data_hall"), Standalone<StringRef>(std::to_string(id % 3)));
+			collection->server_info[uid] = makeReference<TCServerInfo>(
+			    interface, collection.get(), ProcessClass(), true, collection->storageServerSet);
+			collection->server_status.set(uid, ServerStatus(false, false, false, interface.locality));
+			collection->checkAndCreateMachine(collection->server_info[uid]);
+		}
+
+		return collection;
 	}
 
-	return collection;
-}
+	static std::unique_ptr<DDTeamCollection> testMachineTeamCollection(int teamSize,
+	                                                                   Reference<IReplicationPolicy> policy,
+	                                                                   int processCount) {
+		Database database = DatabaseContext::create(
+		    makeReference<AsyncVar<ClientDBInfo>>(), Never(), LocalityData(), EnableLocalityLoadBalance::False);
 
-std::unique_ptr<DDTeamCollection> testMachineTeamCollection(int teamSize,
-                                                            Reference<IReplicationPolicy> policy,
-                                                            int processCount) {
-	Database database = DatabaseContext::create(
-	    makeReference<AsyncVar<ClientDBInfo>>(), Never(), LocalityData(), EnableLocalityLoadBalance::False);
+		DatabaseConfiguration conf;
+		conf.storageTeamSize = teamSize;
+		conf.storagePolicy = policy;
 
-	DatabaseConfiguration conf;
-	conf.storageTeamSize = teamSize;
-	conf.storagePolicy = policy;
+		auto collection =
+		    std::unique_ptr<DDTeamCollection>(new DDTeamCollection(database,
+		                                                           UID(0, 0),
+		                                                           MoveKeysLock(),
+		                                                           PromiseStream<RelocateShard>(),
+		                                                           makeReference<ShardsAffectedByTeamFailure>(),
+		                                                           conf,
+		                                                           {},
+		                                                           {},
+		                                                           Future<Void>(Void()),
+		                                                           makeReference<AsyncVar<bool>>(true),
+		                                                           IsPrimary::True,
+		                                                           makeReference<AsyncVar<bool>>(false),
+		                                                           makeReference<AsyncVar<bool>>(false),
+		                                                           PromiseStream<GetMetricsRequest>(),
+		                                                           Promise<UID>(),
+		                                                           PromiseStream<Promise<int>>()));
 
-	auto collection =
-	    std::unique_ptr<DDTeamCollection>(new DDTeamCollection(database,
-	                                                           UID(0, 0),
-	                                                           MoveKeysLock(),
-	                                                           PromiseStream<RelocateShard>(),
-	                                                           makeReference<ShardsAffectedByTeamFailure>(),
-	                                                           conf,
-	                                                           {},
-	                                                           {},
-	                                                           Future<Void>(Void()),
-	                                                           makeReference<AsyncVar<bool>>(true),
-	                                                           IsPrimary::True,
-	                                                           makeReference<AsyncVar<bool>>(false),
-	                                                           makeReference<AsyncVar<bool>>(false),
-	                                                           PromiseStream<GetMetricsRequest>(),
-	                                                           Promise<UID>(),
-	                                                           PromiseStream<Promise<int>>()));
+		for (int id = 1; id <= processCount; id++) {
+			UID uid(id, 0);
+			StorageServerInterface interface;
+			interface.uniqueID = uid;
+			int process_id = id;
+			int dc_id = process_id / 1000;
+			int data_hall_id = process_id / 100;
+			int zone_id = process_id / 10;
+			int machine_id = process_id / 5;
 
-	for (int id = 1; id <= processCount; id++) {
-		UID uid(id, 0);
-		StorageServerInterface interface;
-		interface.uniqueID = uid;
-		int process_id = id;
-		int dc_id = process_id / 1000;
-		int data_hall_id = process_id / 100;
-		int zone_id = process_id / 10;
-		int machine_id = process_id / 5;
+			printf("testMachineTeamCollection: process_id:%d zone_id:%d machine_id:%d ip_addr:%s\n",
+			       process_id,
+			       zone_id,
+			       machine_id,
+			       interface.address().toString().c_str());
+			interface.locality.set(LiteralStringRef("processid"), Standalone<StringRef>(std::to_string(process_id)));
+			interface.locality.set(LiteralStringRef("machineid"), Standalone<StringRef>(std::to_string(machine_id)));
+			interface.locality.set(LiteralStringRef("zoneid"), Standalone<StringRef>(std::to_string(zone_id)));
+			interface.locality.set(LiteralStringRef("data_hall"), Standalone<StringRef>(std::to_string(data_hall_id)));
+			interface.locality.set(LiteralStringRef("dcid"), Standalone<StringRef>(std::to_string(dc_id)));
+			collection->server_info[uid] = makeReference<TCServerInfo>(
+			    interface, collection.get(), ProcessClass(), true, collection->storageServerSet);
 
-		printf("testMachineTeamCollection: process_id:%d zone_id:%d machine_id:%d ip_addr:%s\n",
-		       process_id,
-		       zone_id,
-		       machine_id,
-		       interface.address().toString().c_str());
-		interface.locality.set(LiteralStringRef("processid"), Standalone<StringRef>(std::to_string(process_id)));
-		interface.locality.set(LiteralStringRef("machineid"), Standalone<StringRef>(std::to_string(machine_id)));
-		interface.locality.set(LiteralStringRef("zoneid"), Standalone<StringRef>(std::to_string(zone_id)));
-		interface.locality.set(LiteralStringRef("data_hall"), Standalone<StringRef>(std::to_string(data_hall_id)));
-		interface.locality.set(LiteralStringRef("dcid"), Standalone<StringRef>(std::to_string(dc_id)));
-		collection->server_info[uid] = makeReference<TCServerInfo>(
-		    interface, collection.get(), ProcessClass(), true, collection->storageServerSet);
+			collection->server_status.set(uid, ServerStatus(false, false, false, interface.locality));
+		}
 
-		collection->server_status.set(uid, ServerStatus(false, false, false, interface.locality));
+		int totalServerIndex = collection->constructMachinesFromServers();
+		printf("testMachineTeamCollection: construct machines for %d servers\n", totalServerIndex);
+
+		return collection;
 	}
 
-	int totalServerIndex = collection->constructMachinesFromServers();
-	printf("testMachineTeamCollection: construct machines for %d servers\n", totalServerIndex);
+public:
+	ACTOR static Future<Void> AddTeamsBestOf_UseMachineID() {
+		wait(Future<Void>(Void()));
 
-	return collection;
-}
+		int teamSize = 3; // replication size
+		int processSize = 60;
+		int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
+		int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
+
+		Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
+		    new PolicyAcross(teamSize, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		state std::unique_ptr<DDTeamCollection> collection = testMachineTeamCollection(teamSize, policy, processSize);
+
+		collection->addTeamsBestOf(30, desiredTeams, maxTeams);
+
+		ASSERT(collection->sanityCheckTeams() == true);
+
+		return Void();
+	}
+
+	ACTOR static Future<Void> AddTeamsBestOf_NotUseMachineID() {
+		wait(Future<Void>(Void()));
+
+		int teamSize = 3; // replication size
+		int processSize = 60;
+		int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
+		int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
+
+		Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
+		    new PolicyAcross(teamSize, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		state std::unique_ptr<DDTeamCollection> collection = testMachineTeamCollection(teamSize, policy, processSize);
+
+		if (collection == nullptr) {
+			fprintf(stderr, "collection is null\n");
+			return Void();
+		}
+
+		collection->addBestMachineTeams(30); // Create machine teams to help debug
+		collection->addTeamsBestOf(30, desiredTeams, maxTeams);
+		collection->sanityCheckTeams(); // Server team may happen to be on the same machine team, although unlikely
+
+		return Void();
+	}
+
+	static void AddAllTeams_isExhaustive() {
+		Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
+		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		int processSize = 10;
+		int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
+		int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
+		std::unique_ptr<DDTeamCollection> collection = testTeamCollection(3, policy, processSize);
+
+		int result = collection->addTeamsBestOf(200, desiredTeams, maxTeams);
+
+		// The maximum number of available server teams without considering machine locality is 120
+		// The maximum number of available server teams with machine locality constraint is 120 - 40, because
+		// the 40 (5*4*2) server teams whose servers come from the same machine are invalid.
+		ASSERT(result == 80);
+	}
+
+	static void AddAllTeams_withLimit() {
+		Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
+		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		int processSize = 10;
+		int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
+		int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
+
+		std::unique_ptr<DDTeamCollection> collection = testTeamCollection(3, policy, processSize);
+
+		int result = collection->addTeamsBestOf(10, desiredTeams, maxTeams);
+
+		ASSERT(result >= 10);
+	}
+
+	ACTOR static Future<Void> AddTeamsBestOf_SkippingBusyServers() {
+		wait(Future<Void>(Void()));
+		Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
+		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		state int processSize = 10;
+		state int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
+		state int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
+		state int teamSize = 3;
+		// state int targetTeamsPerServer = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (teamSize + 1) / 2;
+		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
+
+		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
+		collection->addTeam(std::set<UID>({ UID(1, 0), UID(3, 0), UID(4, 0) }), true);
+
+		state int result = collection->addTeamsBestOf(8, desiredTeams, maxTeams);
+
+		ASSERT(result >= 8);
+
+		for (auto process = collection->server_info.begin(); process != collection->server_info.end(); process++) {
+			auto teamCount = process->second->getTeams().size();
+			ASSERT(teamCount >= 1);
+			// ASSERT(teamCount <= targetTeamsPerServer);
+		}
+
+		return Void();
+	}
+
+	// Due to the randomness in choosing the machine team and the server team from the machine team, it is possible that
+	// we may not find the remaining several (e.g., 1 or 2) available teams.
+	// It is hard to conclude what is the minimum number of  teams the addTeamsBestOf() should create in this situation.
+	ACTOR static Future<Void> AddTeamsBestOf_NotEnoughServers() {
+		wait(Future<Void>(Void()));
+
+		Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
+		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		state int processSize = 5;
+		state int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
+		state int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
+		state int teamSize = 3;
+		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
+
+		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
+		collection->addTeam(std::set<UID>({ UID(1, 0), UID(3, 0), UID(4, 0) }), true);
+
+		collection->addBestMachineTeams(10);
+		int result = collection->addTeamsBestOf(10, desiredTeams, maxTeams);
+
+		if (collection->machineTeams.size() != 10 || result != 8) {
+			collection->traceAllInfo(true); // Debug message
+		}
+
+		// NOTE: Due to the pure randomness in selecting a machine for a machine team,
+		// we cannot guarantee that all machine teams are created.
+		// When we chnage the selectReplicas function to achieve such guarantee, we can enable the following ASSERT
+		ASSERT(collection->machineTeams.size() == 10); // Should create all machine teams
+
+		// We need to guarantee a server always have at least a team so that the server can participate in data
+		// distribution
+		for (auto process = collection->server_info.begin(); process != collection->server_info.end(); process++) {
+			auto teamCount = process->second->getTeams().size();
+			ASSERT(teamCount >= 1);
+		}
+
+		// If we find all available teams, result will be 8 because we prebuild 2 teams
+		ASSERT(result == 8);
+
+		return Void();
+	}
+
+	ACTOR static Future<Void> GetTeam_NewServersNotNeeded() {
+
+		Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
+		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		state int processSize = 5;
+		state int teamSize = 3;
+		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
+
+		GetStorageMetricsReply mid_avail;
+		mid_avail.capacity.bytes = 1000 * 1024 * 1024;
+		mid_avail.available.bytes = 400 * 1024 * 1024;
+		mid_avail.load.bytes = 100 * 1024 * 1024;
+
+		GetStorageMetricsReply high_avail;
+		high_avail.capacity.bytes = 1000 * 1024 * 1024;
+		high_avail.available.bytes = 800 * 1024 * 1024;
+		high_avail.load.bytes = 90 * 1024 * 1024;
+
+		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
+		collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), true);
+		collection->disableBuildingTeams();
+		collection->setCheckTeamDelay();
+
+		collection->server_info[UID(1, 0)]->setServerMetrics(mid_avail);
+		collection->server_info[UID(2, 0)]->setServerMetrics(high_avail);
+		collection->server_info[UID(3, 0)]->setServerMetrics(high_avail);
+		collection->server_info[UID(4, 0)]->setServerMetrics(high_avail);
+
+		/*
+		 * Suppose  1, 2 and 3 are complete sources, i.e., they have all shards in
+		 * the key range being considered for movement. If the caller says that they
+		 * don't strictly need new servers and all of these servers are healthy,
+		 * maintain status quo.
+		 */
+
+		bool wantsNewServers = false;
+		bool wantsTrueBest = true;
+		bool preferLowerUtilization = true;
+		bool teamMustHaveShards = false;
+		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
+
+		state GetTeamRequest req(wantsNewServers, wantsTrueBest, preferLowerUtilization, teamMustHaveShards);
+		req.completeSources = completeSources;
+
+		wait(collection->getTeam(req));
+
+		std::pair<Optional<Reference<IDataDistributionTeam>>, bool> resTeam = req.reply.getFuture().get();
+
+		std::set<UID> expectedServers{ UID(1, 0), UID(2, 0), UID(3, 0) };
+		ASSERT(resTeam.first.present());
+		auto servers = resTeam.first.get()->getServerIDs();
+		const std::set<UID> selectedServers(servers.begin(), servers.end());
+		ASSERT(expectedServers == selectedServers);
+
+		return Void();
+	}
+
+	ACTOR static Future<Void> GetTeam_HealthyCompleteSource() {
+		Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
+		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		state int processSize = 5;
+		state int teamSize = 3;
+		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
+
+		GetStorageMetricsReply mid_avail;
+		mid_avail.capacity.bytes = 1000 * 1024 * 1024;
+		mid_avail.available.bytes = 400 * 1024 * 1024;
+		mid_avail.load.bytes = 100 * 1024 * 1024;
+
+		GetStorageMetricsReply high_avail;
+		high_avail.capacity.bytes = 1000 * 1024 * 1024;
+		high_avail.available.bytes = 800 * 1024 * 1024;
+		high_avail.load.bytes = 90 * 1024 * 1024;
+
+		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
+		collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), true);
+		collection->disableBuildingTeams();
+		collection->setCheckTeamDelay();
+
+		collection->server_info[UID(1, 0)]->setServerMetrics(mid_avail);
+		collection->server_info[UID(2, 0)]->setServerMetrics(high_avail);
+		collection->server_info[UID(3, 0)]->setServerMetrics(high_avail);
+		collection->server_info[UID(4, 0)]->setServerMetrics(high_avail);
+		collection->server_info[UID(1, 0)]->markTeamUnhealthy(0);
+
+		/*
+		 * Suppose  1, 2, 3 and 4 are complete sources, i.e., they have all shards in
+		 * the key range being considered for movement. If the caller says that they don't
+		 * strictly need new servers but '1' is not healthy, see that the other team of
+		 * complete sources is selected.
+		 */
+
+		bool wantsNewServers = false;
+		bool wantsTrueBest = true;
+		bool preferLowerUtilization = true;
+		bool teamMustHaveShards = false;
+		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0), UID(4, 0) };
+
+		state GetTeamRequest req(wantsNewServers, wantsTrueBest, preferLowerUtilization, teamMustHaveShards);
+		req.completeSources = completeSources;
+
+		wait(collection->getTeam(req));
+
+		std::pair<Optional<Reference<IDataDistributionTeam>>, bool> resTeam = req.reply.getFuture().get();
+
+		std::set<UID> expectedServers{ UID(2, 0), UID(3, 0), UID(4, 0) };
+		ASSERT(resTeam.first.present());
+		auto servers = resTeam.first.get()->getServerIDs();
+		const std::set<UID> selectedServers(servers.begin(), servers.end());
+
+		ASSERT(expectedServers == selectedServers);
+		return Void();
+	}
+
+	ACTOR static Future<Void> GetTeam_TrueBestLeastUtilized() {
+
+		Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
+		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		state int processSize = 5;
+		state int teamSize = 3;
+		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
+
+		GetStorageMetricsReply mid_avail;
+		mid_avail.capacity.bytes = 1000 * 1024 * 1024;
+		mid_avail.available.bytes = 400 * 1024 * 1024;
+		mid_avail.load.bytes = 100 * 1024 * 1024;
+
+		GetStorageMetricsReply high_avail;
+		high_avail.capacity.bytes = 1000 * 1024 * 1024;
+		high_avail.available.bytes = 800 * 1024 * 1024;
+		high_avail.load.bytes = 90 * 1024 * 1024;
+
+		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
+		collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), true);
+		collection->disableBuildingTeams();
+		collection->setCheckTeamDelay();
+
+		/*
+		 * Among server teams that have healthy space available, pick the team that is
+		 * least utilized, if the caller says they preferLowerUtilization.
+		 */
+
+		collection->server_info[UID(1, 0)]->setServerMetrics(mid_avail);
+		collection->server_info[UID(2, 0)]->setServerMetrics(high_avail);
+		collection->server_info[UID(3, 0)]->setServerMetrics(high_avail);
+		collection->server_info[UID(4, 0)]->setServerMetrics(high_avail);
+
+		bool wantsNewServers = true;
+		bool wantsTrueBest = true;
+		bool preferLowerUtilization = true;
+		bool teamMustHaveShards = false;
+		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
+
+		state GetTeamRequest req(wantsNewServers, wantsTrueBest, preferLowerUtilization, teamMustHaveShards);
+		req.completeSources = completeSources;
+
+		wait(collection->getTeam(req));
+
+		std::pair<Optional<Reference<IDataDistributionTeam>>, bool> resTeam = req.reply.getFuture().get();
+
+		std::set<UID> expectedServers{ UID(2, 0), UID(3, 0), UID(4, 0) };
+		ASSERT(resTeam.first.present());
+		auto servers = resTeam.first.get()->getServerIDs();
+		const std::set<UID> selectedServers(servers.begin(), servers.end());
+		ASSERT(expectedServers == selectedServers);
+
+		return Void();
+	}
+
+	ACTOR static Future<Void> GetTeam_TrueBestMostUtilized() {
+
+		Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
+		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		state int processSize = 5;
+		state int teamSize = 3;
+		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
+
+		GetStorageMetricsReply mid_avail;
+		mid_avail.capacity.bytes = 1000 * 1024 * 1024;
+		mid_avail.available.bytes = 400 * 1024 * 1024;
+		mid_avail.load.bytes = 100 * 1024 * 1024;
+
+		GetStorageMetricsReply high_avail;
+		high_avail.capacity.bytes = 1000 * 1024 * 1024;
+		high_avail.available.bytes = 800 * 1024 * 1024;
+		high_avail.load.bytes = 90 * 1024 * 1024;
+
+		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
+		collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), true);
+		collection->disableBuildingTeams();
+		collection->setCheckTeamDelay();
+
+		collection->server_info[UID(1, 0)]->setServerMetrics(mid_avail);
+		collection->server_info[UID(2, 0)]->setServerMetrics(high_avail);
+		collection->server_info[UID(3, 0)]->setServerMetrics(high_avail);
+		collection->server_info[UID(4, 0)]->setServerMetrics(high_avail);
+
+		/*
+		 * Among server teams that have healthy space available, pick the team that is
+		 * most utilized, if the caller says they don't preferLowerUtilization.
+		 */
+
+		bool wantsNewServers = true;
+		bool wantsTrueBest = true;
+		bool preferLowerUtilization = false;
+		bool teamMustHaveShards = false;
+		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
+
+		state GetTeamRequest req(wantsNewServers, wantsTrueBest, preferLowerUtilization, teamMustHaveShards);
+		req.completeSources = completeSources;
+
+		wait(collection->getTeam(req));
+
+		std::pair<Optional<Reference<IDataDistributionTeam>>, bool> resTeam = req.reply.getFuture().get();
+
+		std::set<UID> expectedServers{ UID(1, 0), UID(2, 0), UID(3, 0) };
+		ASSERT(resTeam.first.present());
+		auto servers = resTeam.first.get()->getServerIDs();
+		const std::set<UID> selectedServers(servers.begin(), servers.end());
+		ASSERT(expectedServers == selectedServers);
+
+		return Void();
+	}
+
+	ACTOR static Future<Void> GetTeam_ServerUtilizationBelowCutoff() {
+		Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
+		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		state int processSize = 5;
+		state int teamSize = 3;
+		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
+
+		GetStorageMetricsReply low_avail;
+		low_avail.capacity.bytes = SERVER_KNOBS->MIN_AVAILABLE_SPACE * 20;
+		low_avail.available.bytes = SERVER_KNOBS->MIN_AVAILABLE_SPACE / 2;
+		low_avail.load.bytes = 90 * 1024 * 1024;
+
+		GetStorageMetricsReply high_avail;
+		high_avail.capacity.bytes = 2000 * 1024 * 1024;
+		high_avail.available.bytes = 800 * 1024 * 1024;
+		high_avail.load.bytes = 90 * 1024 * 1024;
+
+		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
+		collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), true);
+		collection->disableBuildingTeams();
+		collection->setCheckTeamDelay();
+
+		collection->server_info[UID(1, 0)]->setServerMetrics(high_avail);
+		collection->server_info[UID(2, 0)]->setServerMetrics(low_avail);
+		collection->server_info[UID(3, 0)]->setServerMetrics(high_avail);
+		collection->server_info[UID(4, 0)]->setServerMetrics(low_avail);
+		collection->server_info[UID(1, 0)]->markTeamUnhealthy(0);
+
+		/*
+		 * If the only available team is one where at least one server is low on
+		 * space, decline to pick that team. Every server must have some minimum
+		 * free space defined by the MIN_AVAILABLE_SPACE server knob.
+		 */
+
+		bool wantsNewServers = true;
+		bool wantsTrueBest = true;
+		bool preferLowerUtilization = true;
+		bool teamMustHaveShards = false;
+		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
+
+		state GetTeamRequest req(wantsNewServers, wantsTrueBest, preferLowerUtilization, teamMustHaveShards);
+		req.completeSources = completeSources;
+
+		wait(collection->getTeam(req));
+
+		std::pair<Optional<Reference<IDataDistributionTeam>>, bool> resTeam = req.reply.getFuture().get();
+
+		ASSERT(!resTeam.first.present());
+
+		return Void();
+	}
+
+	ACTOR static Future<Void> GetTeam_ServerUtilizationNearCutoff() {
+		Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
+		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		state int processSize = 5;
+		state int teamSize = 3;
+		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
+
+		GetStorageMetricsReply low_avail;
+		if (SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO > 0) {
+			/* Pick a capacity where MIN_AVAILABLE_SPACE_RATIO of the capacity would be higher than MIN_AVAILABLE_SPACE
+			 */
+			low_avail.capacity.bytes =
+			    SERVER_KNOBS->MIN_AVAILABLE_SPACE * (2 / SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO);
+		} else {
+			low_avail.capacity.bytes = 2000 * 1024 * 1024;
+		}
+		low_avail.available.bytes = (SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO * 1.1) * low_avail.capacity.bytes;
+		low_avail.load.bytes = 90 * 1024 * 1024;
+
+		GetStorageMetricsReply high_avail;
+		high_avail.capacity.bytes = 2000 * 1024 * 1024;
+		high_avail.available.bytes = 800 * 1024 * 1024;
+		high_avail.load.bytes = 90 * 1024 * 1024;
+
+		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
+		collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), true);
+		collection->addTeam(std::set<UID>({ UID(3, 0), UID(4, 0), UID(5, 0) }), true);
+		collection->disableBuildingTeams();
+		collection->setCheckTeamDelay();
+
+		collection->server_info[UID(1, 0)]->setServerMetrics(high_avail);
+		collection->server_info[UID(2, 0)]->setServerMetrics(low_avail);
+		collection->server_info[UID(3, 0)]->setServerMetrics(high_avail);
+		collection->server_info[UID(4, 0)]->setServerMetrics(low_avail);
+		collection->server_info[UID(5, 0)]->setServerMetrics(high_avail);
+		collection->server_info[UID(1, 0)]->markTeamUnhealthy(0);
+
+		/*
+		 * If the only available team is one where all servers are low on space,
+		 * test that each server has at least MIN_AVAILABLE_SPACE_RATIO (server knob)
+		 * percentage points of capacity free before picking that team.
+		 */
+
+		bool wantsNewServers = true;
+		bool wantsTrueBest = true;
+		bool preferLowerUtilization = true;
+		bool teamMustHaveShards = false;
+		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
+
+		state GetTeamRequest req(wantsNewServers, wantsTrueBest, preferLowerUtilization, teamMustHaveShards);
+		req.completeSources = completeSources;
+
+		wait(collection->getTeam(req));
+
+		std::pair<Optional<Reference<IDataDistributionTeam>>, bool> resTeam = req.reply.getFuture().get();
+
+		ASSERT(!resTeam.first.present());
+
+		return Void();
+	}
+};
 
 TEST_CASE("DataDistribution/AddTeamsBestOf/UseMachineID") {
-	wait(Future<Void>(Void()));
-
-	int teamSize = 3; // replication size
-	int processSize = 60;
-	int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
-	int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
-
-	Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
-	    new PolicyAcross(teamSize, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
-	state std::unique_ptr<DDTeamCollection> collection = testMachineTeamCollection(teamSize, policy, processSize);
-
-	collection->addTeamsBestOf(30, desiredTeams, maxTeams);
-
-	ASSERT(collection->sanityCheckTeams() == true);
-
+	wait(DDTeamCollectionUnitTest::AddTeamsBestOf_UseMachineID());
 	return Void();
 }
 
 TEST_CASE("DataDistribution/AddTeamsBestOf/NotUseMachineID") {
-	wait(Future<Void>(Void()));
-
-	int teamSize = 3; // replication size
-	int processSize = 60;
-	int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
-	int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
-
-	Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
-	    new PolicyAcross(teamSize, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
-	state std::unique_ptr<DDTeamCollection> collection = testMachineTeamCollection(teamSize, policy, processSize);
-
-	if (collection == nullptr) {
-		fprintf(stderr, "collection is null\n");
-		return Void();
-	}
-
-	collection->addBestMachineTeams(30); // Create machine teams to help debug
-	collection->addTeamsBestOf(30, desiredTeams, maxTeams);
-	collection->sanityCheckTeams(); // Server team may happen to be on the same machine team, although unlikely
-
+	wait(DDTeamCollectionUnitTest::AddTeamsBestOf_NotUseMachineID());
 	return Void();
 }
 
 TEST_CASE("DataDistribution/AddAllTeams/isExhaustive") {
-	Reference<IReplicationPolicy> policy =
-	    Reference<IReplicationPolicy>(new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
-	state int processSize = 10;
-	state int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
-	state int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
-	state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(3, policy, processSize);
-
-	int result = collection->addTeamsBestOf(200, desiredTeams, maxTeams);
-
-	// The maximum number of available server teams without considering machine locality is 120
-	// The maximum number of available server teams with machine locality constraint is 120 - 40, because
-	// the 40 (5*4*2) server teams whose servers come from the same machine are invalid.
-	ASSERT(result == 80);
-
+	DDTeamCollectionUnitTest::AddAllTeams_isExhaustive();
 	return Void();
 }
 
 TEST_CASE("/DataDistribution/AddAllTeams/withLimit") {
-	Reference<IReplicationPolicy> policy =
-	    Reference<IReplicationPolicy>(new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
-	state int processSize = 10;
-	state int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
-	state int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
-
-	state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(3, policy, processSize);
-
-	int result = collection->addTeamsBestOf(10, desiredTeams, maxTeams);
-
-	ASSERT(result >= 10);
-
+	DDTeamCollectionUnitTest::AddAllTeams_withLimit();
 	return Void();
 }
 
 TEST_CASE("/DataDistribution/AddTeamsBestOf/SkippingBusyServers") {
-	wait(Future<Void>(Void()));
-	Reference<IReplicationPolicy> policy =
-	    Reference<IReplicationPolicy>(new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
-	state int processSize = 10;
-	state int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
-	state int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
-	state int teamSize = 3;
-	// state int targetTeamsPerServer = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (teamSize + 1) / 2;
-	state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
-
-	collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
-	collection->addTeam(std::set<UID>({ UID(1, 0), UID(3, 0), UID(4, 0) }), true);
-
-	state int result = collection->addTeamsBestOf(8, desiredTeams, maxTeams);
-
-	ASSERT(result >= 8);
-
-	for (auto process = collection->server_info.begin(); process != collection->server_info.end(); process++) {
-		auto teamCount = process->second->getTeams().size();
-		ASSERT(teamCount >= 1);
-		// ASSERT(teamCount <= targetTeamsPerServer);
-	}
-
+	wait(DDTeamCollectionUnitTest::AddTeamsBestOf_SkippingBusyServers());
 	return Void();
 }
 
-// Due to the randomness in choosing the machine team and the server team from the machine team, it is possible that
-// we may not find the remaining several (e.g., 1 or 2) available teams.
-// It is hard to conclude what is the minimum number of  teams the addTeamsBestOf() should create in this situation.
 TEST_CASE("/DataDistribution/AddTeamsBestOf/NotEnoughServers") {
-	wait(Future<Void>(Void()));
-
-	Reference<IReplicationPolicy> policy =
-	    Reference<IReplicationPolicy>(new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
-	state int processSize = 5;
-	state int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
-	state int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
-	state int teamSize = 3;
-	state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
-
-	collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
-	collection->addTeam(std::set<UID>({ UID(1, 0), UID(3, 0), UID(4, 0) }), true);
-
-	collection->addBestMachineTeams(10);
-	int result = collection->addTeamsBestOf(10, desiredTeams, maxTeams);
-
-	if (collection->machineTeams.size() != 10 || result != 8) {
-		collection->traceAllInfo(true); // Debug message
-	}
-
-	// NOTE: Due to the pure randomness in selecting a machine for a machine team,
-	// we cannot guarantee that all machine teams are created.
-	// When we chnage the selectReplicas function to achieve such guarantee, we can enable the following ASSERT
-	ASSERT(collection->machineTeams.size() == 10); // Should create all machine teams
-
-	// We need to guarantee a server always have at least a team so that the server can participate in data distribution
-	for (auto process = collection->server_info.begin(); process != collection->server_info.end(); process++) {
-		auto teamCount = process->second->getTeams().size();
-		ASSERT(teamCount >= 1);
-	}
-
-	// If we find all available teams, result will be 8 because we prebuild 2 teams
-	ASSERT(result == 8);
-
+	wait(DDTeamCollectionUnitTest::AddTeamsBestOf_NotEnoughServers());
 	return Void();
 }
 
 TEST_CASE("/DataDistribution/GetTeam/NewServersNotNeeded") {
-
-	Reference<IReplicationPolicy> policy =
-	    Reference<IReplicationPolicy>(new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
-	state int processSize = 5;
-	state int teamSize = 3;
-	state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
-
-	GetStorageMetricsReply mid_avail;
-	mid_avail.capacity.bytes = 1000 * 1024 * 1024;
-	mid_avail.available.bytes = 400 * 1024 * 1024;
-	mid_avail.load.bytes = 100 * 1024 * 1024;
-
-	GetStorageMetricsReply high_avail;
-	high_avail.capacity.bytes = 1000 * 1024 * 1024;
-	high_avail.available.bytes = 800 * 1024 * 1024;
-	high_avail.load.bytes = 90 * 1024 * 1024;
-
-	collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
-	collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), true);
-	collection->disableBuildingTeams();
-	collection->setCheckTeamDelay();
-
-	collection->server_info[UID(1, 0)]->setServerMetrics(mid_avail);
-	collection->server_info[UID(2, 0)]->setServerMetrics(high_avail);
-	collection->server_info[UID(3, 0)]->setServerMetrics(high_avail);
-	collection->server_info[UID(4, 0)]->setServerMetrics(high_avail);
-
-	/*
-	 * Suppose  1, 2 and 3 are complete sources, i.e., they have all shards in
-	 * the key range being considered for movement. If the caller says that they
-	 * don't strictly need new servers and all of these servers are healthy,
-	 * maintain status quo.
-	 */
-
-	bool wantsNewServers = false;
-	bool wantsTrueBest = true;
-	bool preferLowerUtilization = true;
-	bool teamMustHaveShards = false;
-	std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
-
-	state GetTeamRequest req(wantsNewServers, wantsTrueBest, preferLowerUtilization, teamMustHaveShards);
-	req.completeSources = completeSources;
-
-	wait(collection->getTeam(req));
-
-	std::pair<Optional<Reference<IDataDistributionTeam>>, bool> resTeam = req.reply.getFuture().get();
-
-	std::set<UID> expectedServers{ UID(1, 0), UID(2, 0), UID(3, 0) };
-	ASSERT(resTeam.first.present());
-	auto servers = resTeam.first.get()->getServerIDs();
-	const std::set<UID> selectedServers(servers.begin(), servers.end());
-	ASSERT(expectedServers == selectedServers);
-
+	wait(DDTeamCollectionUnitTest::GetTeam_NewServersNotNeeded());
 	return Void();
 }
 
 TEST_CASE("/DataDistribution/GetTeam/HealthyCompleteSource") {
-
-	Reference<IReplicationPolicy> policy =
-	    Reference<IReplicationPolicy>(new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
-	state int processSize = 5;
-	state int teamSize = 3;
-	state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
-
-	GetStorageMetricsReply mid_avail;
-	mid_avail.capacity.bytes = 1000 * 1024 * 1024;
-	mid_avail.available.bytes = 400 * 1024 * 1024;
-	mid_avail.load.bytes = 100 * 1024 * 1024;
-
-	GetStorageMetricsReply high_avail;
-	high_avail.capacity.bytes = 1000 * 1024 * 1024;
-	high_avail.available.bytes = 800 * 1024 * 1024;
-	high_avail.load.bytes = 90 * 1024 * 1024;
-
-	collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
-	collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), true);
-	collection->disableBuildingTeams();
-	collection->setCheckTeamDelay();
-
-	collection->server_info[UID(1, 0)]->setServerMetrics(mid_avail);
-	collection->server_info[UID(2, 0)]->setServerMetrics(high_avail);
-	collection->server_info[UID(3, 0)]->setServerMetrics(high_avail);
-	collection->server_info[UID(4, 0)]->setServerMetrics(high_avail);
-	collection->server_info[UID(1, 0)]->markTeamUnhealthy(0);
-
-	/*
-	 * Suppose  1, 2, 3 and 4 are complete sources, i.e., they have all shards in
-	 * the key range being considered for movement. If the caller says that they don't
-	 * strictly need new servers but '1' is not healthy, see that the other team of
-	 * complete sources is selected.
-	 */
-
-	bool wantsNewServers = false;
-	bool wantsTrueBest = true;
-	bool preferLowerUtilization = true;
-	bool teamMustHaveShards = false;
-	std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0), UID(4, 0) };
-
-	state GetTeamRequest req(wantsNewServers, wantsTrueBest, preferLowerUtilization, teamMustHaveShards);
-	req.completeSources = completeSources;
-
-	wait(collection->getTeam(req));
-
-	std::pair<Optional<Reference<IDataDistributionTeam>>, bool> resTeam = req.reply.getFuture().get();
-
-	std::set<UID> expectedServers{ UID(2, 0), UID(3, 0), UID(4, 0) };
-	ASSERT(resTeam.first.present());
-	auto servers = resTeam.first.get()->getServerIDs();
-	const std::set<UID> selectedServers(servers.begin(), servers.end());
-
-	ASSERT(expectedServers == selectedServers);
+	wait(DDTeamCollectionUnitTest::GetTeam_HealthyCompleteSource());
 	return Void();
 }
 
 TEST_CASE("/DataDistribution/GetTeam/TrueBestLeastUtilized") {
-
-	Reference<IReplicationPolicy> policy =
-	    Reference<IReplicationPolicy>(new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
-	state int processSize = 5;
-	state int teamSize = 3;
-	state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
-
-	GetStorageMetricsReply mid_avail;
-	mid_avail.capacity.bytes = 1000 * 1024 * 1024;
-	mid_avail.available.bytes = 400 * 1024 * 1024;
-	mid_avail.load.bytes = 100 * 1024 * 1024;
-
-	GetStorageMetricsReply high_avail;
-	high_avail.capacity.bytes = 1000 * 1024 * 1024;
-	high_avail.available.bytes = 800 * 1024 * 1024;
-	high_avail.load.bytes = 90 * 1024 * 1024;
-
-	collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
-	collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), true);
-	collection->disableBuildingTeams();
-	collection->setCheckTeamDelay();
-
-	/*
-	 * Among server teams that have healthy space available, pick the team that is
-	 * least utilized, if the caller says they preferLowerUtilization.
-	 */
-
-	collection->server_info[UID(1, 0)]->setServerMetrics(mid_avail);
-	collection->server_info[UID(2, 0)]->setServerMetrics(high_avail);
-	collection->server_info[UID(3, 0)]->setServerMetrics(high_avail);
-	collection->server_info[UID(4, 0)]->setServerMetrics(high_avail);
-
-	bool wantsNewServers = true;
-	bool wantsTrueBest = true;
-	bool preferLowerUtilization = true;
-	bool teamMustHaveShards = false;
-	std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
-
-	state GetTeamRequest req(wantsNewServers, wantsTrueBest, preferLowerUtilization, teamMustHaveShards);
-	req.completeSources = completeSources;
-
-	wait(collection->getTeam(req));
-
-	std::pair<Optional<Reference<IDataDistributionTeam>>, bool> resTeam = req.reply.getFuture().get();
-
-	std::set<UID> expectedServers{ UID(2, 0), UID(3, 0), UID(4, 0) };
-	ASSERT(resTeam.first.present());
-	auto servers = resTeam.first.get()->getServerIDs();
-	const std::set<UID> selectedServers(servers.begin(), servers.end());
-	ASSERT(expectedServers == selectedServers);
-
+	wait(DDTeamCollectionUnitTest::GetTeam_TrueBestLeastUtilized());
 	return Void();
 }
 
 TEST_CASE("/DataDistribution/GetTeam/TrueBestMostUtilized") {
-
-	Reference<IReplicationPolicy> policy =
-	    Reference<IReplicationPolicy>(new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
-	state int processSize = 5;
-	state int teamSize = 3;
-	state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
-
-	GetStorageMetricsReply mid_avail;
-	mid_avail.capacity.bytes = 1000 * 1024 * 1024;
-	mid_avail.available.bytes = 400 * 1024 * 1024;
-	mid_avail.load.bytes = 100 * 1024 * 1024;
-
-	GetStorageMetricsReply high_avail;
-	high_avail.capacity.bytes = 1000 * 1024 * 1024;
-	high_avail.available.bytes = 800 * 1024 * 1024;
-	high_avail.load.bytes = 90 * 1024 * 1024;
-
-	collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
-	collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), true);
-	collection->disableBuildingTeams();
-	collection->setCheckTeamDelay();
-
-	collection->server_info[UID(1, 0)]->setServerMetrics(mid_avail);
-	collection->server_info[UID(2, 0)]->setServerMetrics(high_avail);
-	collection->server_info[UID(3, 0)]->setServerMetrics(high_avail);
-	collection->server_info[UID(4, 0)]->setServerMetrics(high_avail);
-
-	/*
-	 * Among server teams that have healthy space available, pick the team that is
-	 * most utilized, if the caller says they don't preferLowerUtilization.
-	 */
-
-	bool wantsNewServers = true;
-	bool wantsTrueBest = true;
-	bool preferLowerUtilization = false;
-	bool teamMustHaveShards = false;
-	std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
-
-	state GetTeamRequest req(wantsNewServers, wantsTrueBest, preferLowerUtilization, teamMustHaveShards);
-	req.completeSources = completeSources;
-
-	wait(collection->getTeam(req));
-
-	std::pair<Optional<Reference<IDataDistributionTeam>>, bool> resTeam = req.reply.getFuture().get();
-
-	std::set<UID> expectedServers{ UID(1, 0), UID(2, 0), UID(3, 0) };
-	ASSERT(resTeam.first.present());
-	auto servers = resTeam.first.get()->getServerIDs();
-	const std::set<UID> selectedServers(servers.begin(), servers.end());
-	ASSERT(expectedServers == selectedServers);
-
+	wait(DDTeamCollectionUnitTest::GetTeam_TrueBestMostUtilized());
 	return Void();
 }
 
 TEST_CASE("/DataDistribution/GetTeam/ServerUtilizationBelowCutoff") {
-
-	Reference<IReplicationPolicy> policy =
-	    Reference<IReplicationPolicy>(new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
-	state int processSize = 5;
-	state int teamSize = 3;
-	state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
-
-	GetStorageMetricsReply low_avail;
-	low_avail.capacity.bytes = SERVER_KNOBS->MIN_AVAILABLE_SPACE * 20;
-	low_avail.available.bytes = SERVER_KNOBS->MIN_AVAILABLE_SPACE / 2;
-	low_avail.load.bytes = 90 * 1024 * 1024;
-
-	GetStorageMetricsReply high_avail;
-	high_avail.capacity.bytes = 2000 * 1024 * 1024;
-	high_avail.available.bytes = 800 * 1024 * 1024;
-	high_avail.load.bytes = 90 * 1024 * 1024;
-
-	collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
-	collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), true);
-	collection->disableBuildingTeams();
-	collection->setCheckTeamDelay();
-
-	collection->server_info[UID(1, 0)]->setServerMetrics(high_avail);
-	collection->server_info[UID(2, 0)]->setServerMetrics(low_avail);
-	collection->server_info[UID(3, 0)]->setServerMetrics(high_avail);
-	collection->server_info[UID(4, 0)]->setServerMetrics(low_avail);
-	collection->server_info[UID(1, 0)]->markTeamUnhealthy(0);
-
-	/*
-	 * If the only available team is one where at least one server is low on
-	 * space, decline to pick that team. Every server must have some minimum
-	 * free space defined by the MIN_AVAILABLE_SPACE server knob.
-	 */
-
-	bool wantsNewServers = true;
-	bool wantsTrueBest = true;
-	bool preferLowerUtilization = true;
-	bool teamMustHaveShards = false;
-	std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
-
-	state GetTeamRequest req(wantsNewServers, wantsTrueBest, preferLowerUtilization, teamMustHaveShards);
-	req.completeSources = completeSources;
-
-	wait(collection->getTeam(req));
-
-	std::pair<Optional<Reference<IDataDistributionTeam>>, bool> resTeam = req.reply.getFuture().get();
-
-	ASSERT(!resTeam.first.present());
-
+	wait(DDTeamCollectionUnitTest::GetTeam_ServerUtilizationBelowCutoff());
 	return Void();
 }
 
 TEST_CASE("/DataDistribution/GetTeam/ServerUtilizationNearCutoff") {
-
-	Reference<IReplicationPolicy> policy =
-	    Reference<IReplicationPolicy>(new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
-	state int processSize = 5;
-	state int teamSize = 3;
-	state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
-
-	GetStorageMetricsReply low_avail;
-	if (SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO > 0) {
-		/* Pick a capacity where MIN_AVAILABLE_SPACE_RATIO of the capacity would be higher than MIN_AVAILABLE_SPACE */
-		low_avail.capacity.bytes = SERVER_KNOBS->MIN_AVAILABLE_SPACE * (2 / SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO);
-	} else {
-		low_avail.capacity.bytes = 2000 * 1024 * 1024;
-	}
-	low_avail.available.bytes = (SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO * 1.1) * low_avail.capacity.bytes;
-	low_avail.load.bytes = 90 * 1024 * 1024;
-
-	GetStorageMetricsReply high_avail;
-	high_avail.capacity.bytes = 2000 * 1024 * 1024;
-	high_avail.available.bytes = 800 * 1024 * 1024;
-	high_avail.load.bytes = 90 * 1024 * 1024;
-
-	collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
-	collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), true);
-	collection->addTeam(std::set<UID>({ UID(3, 0), UID(4, 0), UID(5, 0) }), true);
-	collection->disableBuildingTeams();
-	collection->setCheckTeamDelay();
-
-	collection->server_info[UID(1, 0)]->setServerMetrics(high_avail);
-	collection->server_info[UID(2, 0)]->setServerMetrics(low_avail);
-	collection->server_info[UID(3, 0)]->setServerMetrics(high_avail);
-	collection->server_info[UID(4, 0)]->setServerMetrics(low_avail);
-	collection->server_info[UID(5, 0)]->setServerMetrics(high_avail);
-	collection->server_info[UID(1, 0)]->markTeamUnhealthy(0);
-
-	/*
-	 * If the only available team is one where all servers are low on space,
-	 * test that each server has at least MIN_AVAILABLE_SPACE_RATIO (server knob)
-	 * percentage points of capacity free before picking that team.
-	 */
-
-	bool wantsNewServers = true;
-	bool wantsTrueBest = true;
-	bool preferLowerUtilization = true;
-	bool teamMustHaveShards = false;
-	std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
-
-	state GetTeamRequest req(wantsNewServers, wantsTrueBest, preferLowerUtilization, teamMustHaveShards);
-	req.completeSources = completeSources;
-
-	wait(collection->getTeam(req));
-
-	std::pair<Optional<Reference<IDataDistributionTeam>>, bool> resTeam = req.reply.getFuture().get();
-
-	std::set<UID> expectedServers{ UID(2, 0), UID(3, 0), UID(4, 0) };
-	ASSERT(resTeam.first.present());
-	auto servers = resTeam.first.get()->getServerIDs();
-	const std::set<UID> selectedServers(servers.begin(), servers.end());
-	ASSERT(expectedServers == selectedServers);
-
+	wait(DDTeamCollectionUnitTest::GetTeam_ServerUtilizationNearCutoff());
 	return Void();
 }

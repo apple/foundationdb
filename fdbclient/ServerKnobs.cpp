@@ -366,6 +366,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_WRITE_RATE_LIMITER_AUTO_TUNE,                 true );
 	init( DEFAULT_FDB_ROCKSDB_COLUMN_FAMILY,                    "fdb");
 
+	init( ROCKSDB_PERFCONTEXT_ENABLE,                          false ); if( randomize && BUGGIFY ) ROCKSDB_PERFCONTEXT_ENABLE = deterministicRandom()->coinflip() ? false : true;
+	init( ROCKSDB_PERFCONTEXT_SAMPLE_RATE, 					  0.0001 );
 
 	// Leader election
 	bool longLeaderElection = randomize && BUGGIFY;
@@ -582,6 +584,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 
 	init( MIN_AVAILABLE_SPACE,                                   1e8 );
 	init( MIN_AVAILABLE_SPACE_RATIO,                            0.05 );
+	init( MIN_AVAILABLE_SPACE_RATIO_SAFETY_BUFFER,              0.01 );
 	init( TARGET_AVAILABLE_SPACE_RATIO,                         0.30 );
 	init( AVAILABLE_SPACE_UPDATE_DELAY,                          5.0 );
 

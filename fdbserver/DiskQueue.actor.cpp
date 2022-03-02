@@ -492,7 +492,9 @@ public:
 			delete pageMem;
 			TEST(true); // push error
 			TEST(2 == syncFiles.size()); // push spanning both files error
-			TraceEvent(SevError, "RDQPushAndCommitError", dbgid).error(e, true).detail("InitialFilename0", filename);
+			TraceEvent(SevError, "RDQPushAndCommitError", dbgid)
+			    .errorUnsuppressed(e)
+			    .detail("InitialFilename0", filename);
 
 			if (errorPromise.canBeSet())
 				errorPromise.sendError(e);
@@ -612,7 +614,7 @@ public:
 			    .detail("File0", self->filename(0));
 		} catch (Error& e) {
 			TraceEvent(SevError, "DiskQueueShutdownError", self->dbgid)
-			    .error(e, true)
+			    .errorUnsuppressed(e)
 			    .detail("Reason", e.code() == error_code_platform_error ? "could not delete database" : "unknown");
 			error = e;
 		}
@@ -731,7 +733,7 @@ public:
 		} catch (Error& e) {
 			bool ok = e.code() == error_code_file_not_found;
 			TraceEvent(ok ? SevInfo : SevError, "RDQReadFirstAndLastPagesError", self->dbgid)
-			    .error(e, true)
+			    .errorUnsuppressed(e)
 			    .detail("File0Name", self->files[0].dbgFilename);
 			if (!self->error.isSet())
 				self->error.sendError(e);
@@ -804,7 +806,7 @@ public:
 		} catch (Error& e) {
 			TEST(true); // Read next page error
 			TraceEvent(SevError, "RDQReadNextPageError", self->dbgid)
-			    .error(e, true)
+			    .errorUnsuppressed(e)
 			    .detail("File0Name", self->files[0].dbgFilename);
 			if (!self->error.isSet())
 				self->error.sendError(e);

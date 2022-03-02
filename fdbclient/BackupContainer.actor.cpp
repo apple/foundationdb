@@ -305,9 +305,9 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 			throw;
 
 		TraceEvent m(SevWarn, "BackupContainer");
+		m.error(e);
 		m.detail("Description", "Invalid container specification.  See help.");
 		m.detail("URL", url);
-		m.error(e);
 		if (e.code() == error_code_backup_invalid_url)
 			m.detail("LastOpenError", lastOpenError);
 
@@ -360,10 +360,9 @@ ACTOR Future<std::vector<std::string>> listContainers_impl(std::string baseURL) 
 			throw;
 
 		TraceEvent m(SevWarn, "BackupContainer");
-
+		m.error(e);
 		m.detail("Description", "Invalid backup container URL prefix.  See help.");
 		m.detail("URL", baseURL);
-		m.error(e);
 		if (e.code() == error_code_backup_invalid_url)
 			m.detail("LastOpenError", IBackupContainer::lastOpenError);
 

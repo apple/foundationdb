@@ -103,9 +103,9 @@ struct SSCheckpointWorkload : TestWorkload {
 				break;
 			} catch (Error& e) {
 				TraceEvent("TestFetchCheckpointMetadataError")
+				    .errorUnsuppressed(e)
 				    .detail("Range", KeyRangeRef(key, endKey).toString())
-				    .detail("Version", version)
-				    .error(e, true);
+				    .detail("Version", version);
 
 				// The checkpoint was just created, we don't expect this error.
 				ASSERT(e.code() != error_code_checkpoint_not_found);
@@ -132,7 +132,9 @@ struct SSCheckpointWorkload : TestWorkload {
 					TraceEvent("TestCheckpointFetched").detail("Checkpoint", records[i].toString());
 					break;
 				} catch (Error& e) {
-					TraceEvent("TestFetchCheckpointError").detail("Checkpoint", records[i].toString()).error(e, true);
+					TraceEvent("TestFetchCheckpointError")
+					    .errorUnsuppressed(e)
+					    .detail("Checkpoint", records[i].toString());
 					wait(delay(1));
 				}
 			}
@@ -147,7 +149,9 @@ struct SSCheckpointWorkload : TestWorkload {
 		try {
 			wait(kvStore->restore(records));
 		} catch (Error& e) {
-			TraceEvent(SevError, "TestRestoreCheckpointError").detail("Checkpoint", describe(records)).error(e, true);
+			TraceEvent(SevError, "TestRestoreCheckpointError")
+			    .errorUnsuppressed(e)
+			    .detail("Checkpoint", describe(records));
 		}
 
 		// Compare the keyrange between the original database and the one restored from checkpoint.

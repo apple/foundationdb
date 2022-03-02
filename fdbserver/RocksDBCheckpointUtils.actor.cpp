@@ -54,8 +54,8 @@ private:
 			TraceEvent("RocksDBCheckpointReaderOpenFile").detail("File", self->path_);
 		} catch (Error& e) {
 			TraceEvent(SevWarnAlways, "ServerGetCheckpointFileFailure")
-			    .detail("File", self->path_)
-			    .error(e, /*includeCancel=*/true);
+			    .errorUnsuppressed(e)
+			    .detail("File", self->path_);
 			throw e;
 		}
 
@@ -185,11 +185,11 @@ ACTOR Future<Void> fetchCheckpointFile(Database cx,
 		} catch (Error& e) {
 			if (e.code() != error_code_end_of_stream) {
 				TraceEvent("FetchCheckpointFileError")
+				    .errorUnsuppressed(e)
 				    .detail("RemoteFile", remoteFile)
 				    .detail("StorageServer", ssi.toString())
 				    .detail("LocalFile", localFile)
-				    .detail("Attempt", attempt)
-				    .error(e, true);
+				    .detail("Attempt", attempt);
 				if (attempt >= maxRetries) {
 					throw e;
 				}

@@ -668,7 +668,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
 				ASSERT(valueObj["command"].get_str() == "exclude" && !valueObj["retriable"].get_bool());
 			} else {
-				TraceEvent(SevDebug, "UnexpectedError").detail("Command", "Exclude").error(e);
+				TraceEvent(SevDebug, "UnexpectedError").error(e).detail("Command", "Exclude");
 				wait(tx->onError(e));
 			}
 			tx->reset();
@@ -737,7 +737,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
 					ASSERT(valueObj["command"].get_str() == "setclass" && !valueObj["retriable"].get_bool());
 				} else {
-					TraceEvent(SevDebug, "UnexpectedError").detail("Command", "Setclass").error(e);
+					TraceEvent(SevDebug, "UnexpectedError").error(e).detail("Command", "Setclass");
 					wait(tx->onError(e));
 				}
 				tx->reset();
@@ -926,10 +926,11 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				    wait(tx->get(LiteralStringRef("processes")
 				                     .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("coordinators"))));
 				ASSERT(coordinator_processes_key.present());
-				std::vector<std::string> process_addresses;
+				state std::vector<std::string> process_addresses;
 				boost::split(
 				    process_addresses, coordinator_processes_key.get().toString(), [](char c) { return c == ','; });
-				ASSERT(process_addresses.size() == cs.coordinators().size());
+				ASSERT(process_addresses.size() == cs.coordinators().size() + cs.hostnames.size());
+				wait(cs.resolveHostnames());
 				// compare the coordinator process network addresses one by one
 				for (const auto& network_address : cs.coordinators()) {
 					ASSERT(std::find(process_addresses.begin(), process_addresses.end(), network_address.toString()) !=
@@ -970,16 +971,15 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					    old_coordinators_processes, processes_key.get().toString(), [](char c) { return c == ','; });
 					// pick up one non-coordinator process if possible
 					std::vector<ProcessData> workers = wait(getWorkers(&tx->getTransaction()));
+					std::string old_coordinators_processes_string = describe(old_coordinators_processes);
 					TraceEvent(SevDebug, "CoordinatorsManualChange")
-					    .detail("OldCoordinators", describe(old_coordinators_processes))
+					    .detail("OldCoordinators", old_coordinators_processes_string)
 					    .detail("WorkerSize", workers.size());
 					if (workers.size() > old_coordinators_processes.size()) {
 						loop {
 							auto worker = deterministicRandom()->randomChoice(workers);
 							new_coordinator_process = worker.address.toString();
-							if (std::find(old_coordinators_processes.begin(),
-							              old_coordinators_processes.end(),
-							              worker.address.toString()) == old_coordinators_processes.end()) {
+							if (old_coordinators_processes_string.find(new_coordinator_process) == std::string::npos) {
 								break;
 							}
 						}
@@ -1049,10 +1049,11 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 					Optional<Value> res = wait(tx->get(coordinatorsKey));
 					ASSERT(res.present()); // Otherwise, database is in a bad state
-					ClusterConnectionString cs(res.get().toString());
-					ASSERT(cs.coordinators().size() == old_coordinators_processes.size() + 1);
+					state ClusterConnectionString csNew(res.get().toString());
+					wait(csNew.resolveHostnames());
+					ASSERT(csNew.coordinators().size() == old_coordinators_processes.size() + 1);
 					// verify the coordinators' addresses
-					for (const auto& network_address : cs.coordinators()) {
+					for (const auto& network_address : csNew.coordinators()) {
 						std::string address_str = network_address.toString();
 						ASSERT(std::find(old_coordinators_processes.begin(),
 						                 old_coordinators_processes.end(),
@@ -1060,7 +1061,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 						       new_coordinator_process == address_str);
 					}
 					// verify the cluster decription
-					ASSERT(new_cluster_description == cs.clusterKeyName().toString());
+					ASSERT(new_cluster_description == csNew.clusterKeyName().toString());
 					tx->reset();
 				} catch (Error& e) {
 					wait(tx->onError(e));

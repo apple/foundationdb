@@ -94,6 +94,7 @@ set(FDBSERVER_SRCS
   QuietDatabase.actor.cpp
   QuietDatabase.h
   RadixTree.h
+  Ratekeeper.h
   Ratekeeper.actor.cpp
   RatekeeperInterface.h
   RecoveryState.h
@@ -134,6 +135,8 @@ set(FDBSERVER_SRCS
   storageserver.actor.cpp
   TagPartitionedLogSystem.actor.cpp
   TagPartitionedLogSystem.actor.h
+  TagThrottler.actor.cpp
+  TagThrottler.h
   template_fdb.h
   TCInfo.actor.cpp
   TCInfo.h
