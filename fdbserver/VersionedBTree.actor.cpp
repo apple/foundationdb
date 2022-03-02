@@ -4647,6 +4647,70 @@ struct InPlaceArray {
 };
 #pragma pack(pop)
 
+// DecodeBoundaryVerifier provides simulation-only verification of DeltaTree boundaries between
+// reads and writes by using a static structure to track boundaries used during DeltaTree generation
+// for all writes and updates across cold starts and virtual process restarts.
+struct DecodeBoundaryVerifier {
+	struct DecodeBoundaries {
+		Key lower;
+		Key upper;
+		bool empty() const { return lower.empty() && upper.empty(); }
+	};
+
+	typedef std::map<Version, DecodeBoundaries> BoundariesByVersion;
+	std::unordered_map<LogicalPageID, BoundariesByVersion> boundariesByPageID;
+
+	static DecodeBoundaryVerifier* getVerifier(std::string name) {
+		static std::map<std::string, DecodeBoundaryVerifier> verifiers;
+		return g_network->isSimulated() ? &verifiers[name] : nullptr;
+	}
+
+	void update(BTreePageIDRef id, Version v, Key lowerBound, Key upperBound) {
+		debug_printf("decodeBoundariesUpdate %s %s '%s' to '%s'\n",
+		             ::toString(id).c_str(),
+		             ::toString(v).c_str(),
+		             lowerBound.toString().c_str(),
+		             upperBound.toString().c_str());
+
+		auto& b = boundariesByPageID[id.front()][v];
+		ASSERT(b.empty());
+		b = { lowerBound, upperBound };
+	}
+
+	bool verify(LogicalPageID id, Version v, Key lowerBound, Key upperBound) {
+		auto i = boundariesByPageID.find(id);
+		ASSERT(i != boundariesByPageID.end());
+		ASSERT(!i->second.empty());
+
+		auto b = i->second.upper_bound(v);
+		--b;
+		if (b->second.lower != lowerBound || b->second.upper != upperBound) {
+			fprintf(stderr,
+			        "Boundary mismatch on %s %s\nFound   :%s %s\nExpected:%s %s\n",
+			        ::toString(id).c_str(),
+			        ::toString(v).c_str(),
+			        lowerBound.toString().c_str(),
+			        upperBound.toString().c_str(),
+			        b->second.lower.toString().c_str(),
+			        b->second.upper.toString().c_str());
+			return false;
+		}
+		return true;
+	}
+
+	void update(Version v, LogicalPageID oldID, LogicalPageID newID) {
+		debug_printf("decodeBoundariesUpdate copy %s %s to %s\n",
+		             ::toString(v).c_str(),
+		             ::toString(oldID).c_str(),
+		             ::toString(newID).c_str());
+		auto& old = boundariesByPageID[oldID];
+		ASSERT(!old.empty());
+		auto i = old.end();
+		--i;
+		boundariesByPageID[newID][v] = i->second;
+	}
+};
+
 class VersionedBTree {
 public:
 	// The first possible internal record possible in the tree
@@ -4804,6 +4868,7 @@ public:
 	VersionedBTree(IPager2* pager, std::string name)
 	  : m_pager(pager), m_pBuffer(nullptr), m_mutationCount(0), m_name(name), m_pHeader(nullptr), m_headerSpace(0) {
 
+		m_pBoundaryVerifier = DecodeBoundaryVerifier::getVerifier(name);
 		m_pDecodeCacheMemory = m_pager->getPageCachePenaltySource();
 		m_lazyClearActor = 0;
 		m_init = init_impl(this);
@@ -4940,7 +5005,7 @@ public:
 			self->m_pHeader->root.set(newRoot, self->m_headerSpace - sizeof(MetaKey));
 			self->m_pHeader->height = 1;
 			Reference<ArenaPage> page = self->m_pager->newPageBuffer();
-			self->makeEmptyRoot(id, page);
+			self->makeEmptyRoot(page);
 			self->m_pager->updatePage(PagerEventReasons::MetaData, nonBtreeLevel, newRoot, page);
 
 			LogicalPageID newQueuePage = wait(self->m_pager->newPageID());
@@ -5251,6 +5316,7 @@ private:
 	// The mutation buffer currently being written to
 	std::unique_ptr<MutationBuffer> m_pBuffer;
 	int64_t m_mutationCount;
+	DecodeBoundaryVerifier* m_pBoundaryVerifier;
 
 	struct CommitBatch {
 		Version readVersion;
@@ -5461,7 +5527,7 @@ private:
 		return pages;
 	}
 
-	void makeEmptyRoot(LogicalPageID id, Reference<ArenaPage> page) {
+	void makeEmptyRoot(Reference<ArenaPage> page) {
 		BTreePage* btpage = (BTreePage*)page->begin();
 		btpage->height = 1;
 		btpage->kvBytes = 0;
@@ -5630,6 +5696,10 @@ private:
 				}
 			}
 
+			if (self->m_pBoundaryVerifier != nullptr) {
+				self->m_pBoundaryVerifier->update(childPageID, v, pageLowerBound.key, pageUpperBound.key);
+			}
+
 			if (++sinceYield > 100) {
 				sinceYield = 0;
 				wait(yield());
@@ -5726,8 +5796,8 @@ private:
 		if (page->userData == nullptr) {
 			debug_printf("Creating DecodeCache for ptr=%p lower=%s upper=%s\n",
 			             page->begin(),
-			             lowerBound.toString().c_str(),
-			             upperBound.toString().c_str());
+			             lowerBound.toString(false).c_str(),
+			             upperBound.toString(false).c_str());
 
 			BTreePage::BinaryTree::DecodeCache* cache =
 			    new BTreePage::BinaryTree::DecodeCache(lowerBound, upperBound, m_pDecodeCacheMemory);
@@ -5818,6 +5888,11 @@ private:
 			newID[i] = id;
 			++i;
 		}
+
+		if (self->m_pBoundaryVerifier != nullptr) {
+			self->m_pBoundaryVerifier->update(writeVersion, oldID.front(), newID.front());
+		}
+
 		self->freeBTreePage(height, oldID, writeVersion);
 		return newID;
 	}
@@ -6196,6 +6271,15 @@ private:
 		state BTreePage::BinaryTree::Cursor cursor = update->cBegin.valid()
 		                                                 ? self->getCursor(page.getPtr(), update->cBegin)
 		                                                 : self->getCursor(page.getPtr(), dbBegin, dbEnd);
+
+		if (self->m_pBoundaryVerifier != nullptr) {
+			if (update->cBegin.valid()) {
+				ASSERT(self->m_pBoundaryVerifier->verify(rootID.front(),
+				                                         batch->snapshot->getVersion(),
+				                                         update->cBegin.get().key,
+				                                         update->cBegin.next().getOrUpperBound().key));
+			}
+		}
 
 		if (REDWOOD_DEBUG) {
 			debug_printf("%s ---------MUTATION BUFFER SLICE ---------------------\n", context.c_str());
@@ -6770,6 +6854,9 @@ private:
 											    self->m_pager->detachRemappedPage(p, batch->writeVersion);
 											if (newID != invalidLogicalPageID) {
 												debug_printf("%s Detach updated %u -> %u\n", context.c_str(), p, newID);
+												if (self->m_pBoundaryVerifier != nullptr) {
+													self->m_pBoundaryVerifier->update(batch->writeVersion, p, newID);
+												}
 												p = newID;
 												++stats.metrics.detachChild;
 												++detached;
@@ -6832,6 +6919,9 @@ private:
 													rec.setChildPage(newPages);
 												}
 												debug_printf("%s Detach updated %u -> %u\n", context.c_str(), p, newID);
+												if (self->m_pBoundaryVerifier != nullptr) {
+													self->m_pBoundaryVerifier->update(batch->writeVersion, p, newID);
+												}
 												newPages[i] = newID;
 												++stats.metrics.detachChild;
 											}
@@ -6924,7 +7014,7 @@ private:
 				debug_printf("Writing new empty root.\n");
 				LogicalPageID newRootID = wait(self->m_pager->newPageID());
 				Reference<ArenaPage> page = self->m_pager->newPageBuffer();
-				self->makeEmptyRoot(newRootID, page);
+				self->makeEmptyRoot(page);
 				self->m_pHeader->height = 1;
 				VectorRef<LogicalPageID> rootID((LogicalPageID*)&newRootID, 1);
 				self->m_pager->updatePage(PagerEventReasons::Commit, self->m_pHeader->height, rootID, page);
@@ -7053,8 +7143,15 @@ public:
 #if REDWOOD_DEBUG
 				           path.push_back({ p, btree->getCursor(p.getPtr(), link), link.get().getChildPage() });
 #else
-				path.push_back({ p, btree->getCursor(p.getPtr(), link) });
+							path.push_back({ p, btree->getCursor(p.getPtr(), link) });
 #endif
+
+				           if (btree->m_pBoundaryVerifier != nullptr) {
+					           ASSERT(btree->m_pBoundaryVerifier->verify(link.get().getChildPage().front(),
+					                                                     pager->getVersion(),
+					                                                     link.get().key,
+					                                                     link.next().getOrUpperBound().key));
+				           }
 				           return Void();
 			           });
 		}
