@@ -81,10 +81,10 @@ endif()
 # check later whether this works
 if(NOT WIN32 AND NOT IS_ARM_MAC)
   set(MAKO_SRCS
-    test/mako/mako.c
-    test/mako/mako.h
-    test/mako/utils.c
-    test/mako/utils.h)
+    test/mako/mako.cpp
+    test/mako/mako.hpp
+    test/mako/utils.cpp
+    test/mako/utils.hpp)
   add_subdirectory(test/unit/third_party)
   find_package(Threads REQUIRED)
   set(UNIT_TEST_SRCS
