@@ -215,6 +215,8 @@ if(BUILD_AWS_BACKUP)
   configure_file(awss3sdk.cmake awss3sdk-download/CMakeLists.txt)
 
   execute_process(
+# WITH THIS IS DOES CARE ABOUT THE BUILDONLY I PASS???
+#    COMMAND ${CMAKE_COMMAND} -G "${CMAKE_GENERATOR}" -DBUILD_ONLY=aaaaaaa .
     COMMAND ${CMAKE_COMMAND} -G "${CMAKE_GENERATOR}" .
     RESULT_VARIABLE results
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/awss3sdk-download
@@ -225,7 +227,7 @@ if(BUILD_AWS_BACKUP)
   endif()
 
   execute_process(
-    COMMAND ${CMAKE_COMMAND} --build . --config Release
+    COMMAND ${CMAKE_COMMAND} --build . --config Release --verbose
     RESULT_VARIABLE results
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/awss3sdk-download
   )
