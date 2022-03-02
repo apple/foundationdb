@@ -81,6 +81,6 @@ public:
 };
 
 typedef VersionedMap<TenantName, TenantMapEntry> TenantMap;
-typedef VersionedMap<KeyRef, TenantNameRef> TenantPrefixIndex;
+typedef VersionedMap<Key, TenantName> TenantPrefixIndex;
 
 #endif
