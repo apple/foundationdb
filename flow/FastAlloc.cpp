@@ -72,7 +72,13 @@
 #endif
 
 template <int Size>
-INIT_SEG thread_local typename FastAllocator<Size>::ThreadData FastAllocator<Size>::threadData;
+INIT_SEG thread_local uintptr_t FastAllocator<Size>::threadDataInit = reinterpret_cast<uintptr_t>(&threadData());
+
+template <int Size>
+typename FastAllocator<Size>::ThreadData& FastAllocator<Size>::threadData() noexcept {
+	static thread_local ThreadData threadData;
+	return threadData;
+}
 
 #ifdef VALGRIND
 template <int Size>
@@ -313,7 +319,7 @@ void* FastAllocator<Size>::allocate() {
 #endif
 
 #if FASTALLOC_THREAD_SAFE
-	ThreadData& thr = threadData;
+	ThreadData& thr = threadData();
 	if (!thr.freelist) {
 		ASSERT(thr.count == 0);
 		if (thr.alternate) {
@@ -364,7 +370,7 @@ void FastAllocator<Size>::release(void* ptr) {
 #endif
 
 #if FASTALLOC_THREAD_SAFE
-	ThreadData& thr = threadData;
+	ThreadData& thr = threadData();
 	if (thr.count == magazine_size) {
 		if (thr.alternate) // Two full magazines, return one
 			releaseMagazine(thr.alternate);
@@ -454,23 +460,24 @@ FastAllocator<Size>::ThreadData::ThreadData() {
 
 template <int Size>
 void FastAllocator<Size>::getMagazine() {
-	ASSERT(!threadData.freelist && !threadData.alternate && threadData.count == 0);
+	ThreadData& thr = threadData();
+	ASSERT(!thr.freelist && !thr.alternate && thr.count == 0);
 
 	EnterCriticalSection(&globalData()->mutex);
 	if (globalData()->magazines.size()) {
 		void* m = globalData()->magazines.back();
 		globalData()->magazines.pop_back();
 		LeaveCriticalSection(&globalData()->mutex);
-		threadData.freelist = m;
-		threadData.count = magazine_size;
+		thr.freelist = m;
+		thr.count = magazine_size;
 		return;
 	} else if (globalData()->partial_magazines.size()) {
 		std::pair<int, void*> p = globalData()->partial_magazines.back();
 		globalData()->partial_magazines.pop_back();
 		globalData()->partialMagazineUnallocatedMemory -= p.first * Size;
 		LeaveCriticalSection(&globalData()->mutex);
-		threadData.freelist = p.second;
-		threadData.count = p.first;
+		thr.freelist = p.second;
+		thr.count = p.first;
 		return;
 	}
 	globalData()->totalMemory.fetch_add(magazine_size * Size);
@@ -522,8 +529,8 @@ void FastAllocator<Size>::getMagazine() {
 
 	block[(magazine_size - 1) * PSize + 1] = block[(magazine_size - 1) * PSize] = nullptr;
 	check(&block[(magazine_size - 1) * PSize], false);
-	threadData.freelist = block;
-	threadData.count = magazine_size;
+	thr.freelist = block;
+	thr.count = magazine_size;
 }
 template <int Size>
 void FastAllocator<Size>::releaseMagazine(void* mag) {

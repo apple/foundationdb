@@ -135,7 +135,20 @@ private:
 		ThreadData();
 		~ThreadData();
 	};
-	static thread_local ThreadData threadData;
+	// Used to try to initialize threadData as early as possible. It's still
+	// possible that a static thread local variable (that owns fast-allocated
+	// memory) could be constructed before threadData, in which case threadData
+	// would be destroyed by the time that variable's destructor attempts to free.
+	// This is undefined behavior if this happens, which is why we want to
+	// initialize threadData as early as possible.
+	static thread_local uintptr_t threadDataInit;
+	// Used to access threadData. Returning a reference to a function-level
+	// static guarantees that threadData will be constructed before it's
+	// accessed here. Furthermore, if accessing threadData from a static thread
+	// local variable's constructor, this guarantees that threadData will
+	// outlive this object, since destruction order is the reverse of
+	// construction order.
+	static ThreadData& threadData() noexcept;
 	static GlobalData* globalData() noexcept {
 #ifdef VALGRIND
 		ANNOTATE_RWLOCK_ACQUIRED(vLock, 1);
