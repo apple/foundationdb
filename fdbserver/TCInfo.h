@@ -97,6 +97,7 @@ public:
 		return (storeType == configStoreType || storeType == KeyValueStoreType::END);
 	}
 
+	std::pair<int64_t, int64_t> spaceInBytes(bool includeInFlight = true) const;
 	bool hasHealthyAvailableSpace(double minAvailableSpaceRatio) const;
 
 	Future<Void> updateServerMetrics();
