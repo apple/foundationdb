@@ -99,6 +99,10 @@ if(NOT WIN32 AND NOT IS_ARM_MAC)
     test/unit/fdb_api.cpp
     test/unit/fdb_api.hpp)
 
+  add_library(fdb_cpp INTERFACE)
+  target_sources(fdb_cpp INTERFACE test/fdb.hpp)
+  target_include_directories(fdb_cpp INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/test)
+  target_link_libraries(fdb_cpp INTERFACE fmt::fmt)
   if(OPEN_FOR_IDE)
     add_library(fdb_c_performance_test OBJECT test/performance_test.c test/test.h)
     add_library(fdb_c_ryw_benchmark OBJECT test/ryw_benchmark.c test/test.h)
@@ -143,7 +147,7 @@ if(NOT WIN32 AND NOT IS_ARM_MAC)
 
   # do not set RPATH for mako
   set_property(TARGET mako PROPERTY SKIP_BUILD_RPATH TRUE)
-  target_link_libraries(mako PRIVATE fdb_c fdbclient)
+  target_link_libraries(mako PRIVATE fdb_c fdbclient fmt::fmt Threads::Threads fdb_cpp)
 
   if(NOT OPEN_FOR_IDE)
     # Make sure that fdb_c.h is compatible with c90
