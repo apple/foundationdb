@@ -198,6 +198,19 @@ void TCServerInfo::removeTeamsContainingServer(UID removedServer) {
 	}
 }
 
+std::pair<int64_t, int64_t> TCServerInfo::spaceInBytes(bool includeInFlight) const {
+	auto& metrics = getServerMetrics();
+	ASSERT(metrics.capacity.bytes >= 0);
+	ASSERT(metrics.available.bytes >= 0);
+
+	int64_t bytesAvailable = metrics.available.bytes;
+	if (includeInFlight) {
+		bytesAvailable -= getDataInFlightToServer();
+	}
+
+	return std::make_pair(bytesAvailable, metrics.capacity.bytes); // bytesAvailable could be negative
+}
+
 void TCServerInfo::removeTeam(Reference<TCTeamInfo> team) {
 	for (int t = 0; t < teams.size(); t++) {
 		if (teams[t] == team) {
@@ -357,16 +370,7 @@ int64_t TCTeamInfo::getMinAvailableSpace(bool includeInFlight) const {
 	int64_t minAvailableSpace = std::numeric_limits<int64_t>::max();
 	for (const auto& server : servers) {
 		if (server->serverMetricsPresent()) {
-			auto& replyValue = server->getServerMetrics();
-
-			ASSERT(replyValue.available.bytes >= 0);
-			ASSERT(replyValue.capacity.bytes >= 0);
-
-			int64_t bytesAvailable = replyValue.available.bytes;
-			if (includeInFlight) {
-				bytesAvailable -= server->getDataInFlightToServer();
-			}
-
+			const auto [bytesAvailable, bytesCapacity] = server->spaceInBytes(includeInFlight);
 			minAvailableSpace = std::min(bytesAvailable, minAvailableSpace);
 		}
 	}
@@ -378,20 +382,13 @@ double TCTeamInfo::getMinAvailableSpaceRatio(bool includeInFlight) const {
 	double minRatio = 1.0;
 	for (const auto& server : servers) {
 		if (server->serverMetricsPresent()) {
-			auto const& replyValue = server->getServerMetrics();
+			auto [bytesAvailable, bytesCapacity] = server->spaceInBytes(includeInFlight);
+			bytesAvailable = std::max((int64_t)0, bytesAvailable);
 
-			ASSERT(replyValue.available.bytes >= 0);
-			ASSERT(replyValue.capacity.bytes >= 0);
-
-			int64_t bytesAvailable = replyValue.available.bytes;
-			if (includeInFlight) {
-				bytesAvailable = std::max((int64_t)0, bytesAvailable - server->getDataInFlightToServer());
-			}
-
-			if (replyValue.capacity.bytes == 0)
+			if (bytesCapacity == 0)
 				minRatio = 0;
 			else
-				minRatio = std::min(minRatio, ((double)bytesAvailable) / replyValue.capacity.bytes);
+				minRatio = std::min(minRatio, ((double)bytesAvailable) / bytesCapacity);
 		}
 	}
 
