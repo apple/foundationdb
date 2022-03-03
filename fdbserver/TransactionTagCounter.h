@@ -23,7 +23,8 @@
 #include "fdbclient/TagThrottle.actor.h"
 #include "fdbserver/Knobs.h"
 
-struct TransactionTagCounter {
+class TransactionTagCounter {
+public:
 	struct TagInfo {
 		TransactionTag tag;
 		double rate;
@@ -33,6 +34,7 @@ struct TransactionTagCounter {
 		  : tag(tag), rate(rate), fractionalBusyness(fractionalBusyness) {}
 	};
 
+private:
 	TransactionTagMap<int64_t> intervalCounts;
 	int64_t intervalTotalSampledCount = 0;
 	TransactionTag busiestTag;
@@ -40,18 +42,13 @@ struct TransactionTagCounter {
 	double intervalStart = 0;
 
 	Optional<TagInfo> previousBusiestTag;
-
 	UID thisServerID;
-
 	Reference<EventCacheHolder> busiestReadTagEventHolder;
 
+public:
 	TransactionTagCounter(UID thisServerID);
-
 	static int64_t costFunction(int64_t bytes) { return bytes / SERVER_KNOBS->READ_COST_BYTE_FACTOR + 1; }
-
 	void addRequest(Optional<TagSet> const& tags, int64_t bytes);
-
 	void startNewInterval();
-
 	Optional<TagInfo> getBusiestTag() const { return previousBusiestTag; }
 };
