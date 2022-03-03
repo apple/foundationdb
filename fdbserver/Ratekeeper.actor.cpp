@@ -288,9 +288,7 @@ public:
 		self.addActor.send(traceRole(Role::RATEKEEPER, rkInterf.id()));
 
 		self.addActor.send(self.monitorThrottlingChanges());
-		Ratekeeper* selfPtr = &self; // let flow compiler capture self
-		self.addActor.send(recurring([selfPtr]() { selfPtr->refreshStorageServerCommitCost(); },
-		                             SERVER_KNOBS->TAG_MEASUREMENT_INTERVAL));
+		self.addActor.send(self.refreshStorageServerCommitCosts());
 
 		TraceEvent("RkTLogQueueSizeParameters", rkInterf.id())
 		    .detail("Target", SERVER_KNOBS->TARGET_BYTES_PER_TLOG)
@@ -408,6 +406,19 @@ public:
 			TraceEvent("RatekeeperDied", rkInterf.id()).errorUnsuppressed(err);
 		}
 		return Void();
+	}
+
+	ACTOR static Future<Void> refreshStorageServerCommitCosts(Ratekeeper* self) {
+		state double lastBusiestCommitTagPick;
+		loop {
+			lastBusiestCommitTagPick = now();
+			wait(delay(SERVER_KNOBS->TAG_MEASUREMENT_INTERVAL));
+			double elapsed = now() - lastBusiestCommitTagPick;
+			// for each SS, select the busiest commit tag from ssTrTagCommitCost
+			for (auto& [ssId, ssQueueInfo] : self->storageQueueInfo) {
+				ssQueueInfo.refreshCommitCost(elapsed);
+			}
+		}
 	}
 
 }; // class RatekeeperImpl
@@ -964,52 +975,46 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 	}
 }
 
-Future<Void> Ratekeeper::refreshStorageServerCommitCost() {
-	if (lastBusiestCommitTagPick == 0) { // the first call should be skipped
-		lastBusiestCommitTagPick = now();
-		return Void();
-	}
-	double elapsed = now() - lastBusiestCommitTagPick;
-	// for each SS, select the busiest commit tag from ssTrTagCommitCost
-	for (auto& [ssId, ssQueueInfo] : storageQueueInfo) {
-		ssQueueInfo.busiestWriteTags.clear();
-		TransactionTag busiestTag;
-		TransactionCommitCostEstimation maxCost;
-		double maxRate = 0, maxBusyness = 0;
-		for (const auto& [tag, cost] : ssQueueInfo.tagCostEst) {
-			double rate = cost.getCostSum() / elapsed;
-			if (rate > maxRate) {
-				busiestTag = tag;
-				maxRate = rate;
-				maxCost = cost;
-			}
-		}
-		if (maxRate > SERVER_KNOBS->MIN_TAG_WRITE_PAGES_RATE) {
-			// TraceEvent("RefreshSSCommitCost").detail("TotalWriteCost", it->value.totalWriteCost).detail("TotalWriteOps",it->value.totalWriteOps);
-			ASSERT_GT(ssQueueInfo.totalWriteCosts, 0);
-			maxBusyness = double(maxCost.getCostSum()) / ssQueueInfo.totalWriteCosts;
-			ssQueueInfo.busiestWriteTags.emplace_back(busiestTag, maxBusyness, maxRate);
-		}
-
-		TraceEvent("BusiestWriteTag", ssId)
-		    .detail("Elapsed", elapsed)
-		    .detail("Tag", printable(busiestTag))
-		    .detail("TagOps", maxCost.getOpsSum())
-		    .detail("TagCost", maxCost.getCostSum())
-		    .detail("TotalCost", ssQueueInfo.totalWriteCosts)
-		    .detail("Reported", !ssQueueInfo.busiestWriteTags.empty())
-		    .trackLatest(ssQueueInfo.busiestWriteTagEventHolder->trackingKey);
-
-		// reset statistics
-		ssQueueInfo.tagCostEst.clear();
-		ssQueueInfo.totalWriteOps = 0;
-		ssQueueInfo.totalWriteCosts = 0;
-	}
-	lastBusiestCommitTagPick = now();
-	return Void();
+Future<Void> Ratekeeper::refreshStorageServerCommitCosts() {
+	return RatekeeperImpl::refreshStorageServerCommitCosts(this);
 }
 
 ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	wait(Ratekeeper::run(rkInterf, dbInfo));
 	return Void();
+}
+
+void StorageQueueInfo::refreshCommitCost(double elapsed) {
+	busiestWriteTags.clear();
+	TransactionTag busiestTag;
+	TransactionCommitCostEstimation maxCost;
+	double maxRate = 0, maxBusyness = 0;
+	for (const auto& [tag, cost] : tagCostEst) {
+		double rate = cost.getCostSum() / elapsed;
+		if (rate > maxRate) {
+			busiestTag = tag;
+			maxRate = rate;
+			maxCost = cost;
+		}
+	}
+	if (maxRate > SERVER_KNOBS->MIN_TAG_WRITE_PAGES_RATE) {
+		// TraceEvent("RefreshSSCommitCost").detail("TotalWriteCost", totalWriteCost).detail("TotalWriteOps",totalWriteOps);
+		ASSERT_GT(totalWriteCosts, 0);
+		maxBusyness = double(maxCost.getCostSum()) / totalWriteCosts;
+		busiestWriteTags.emplace_back(busiestTag, maxBusyness, maxRate);
+	}
+
+	TraceEvent("BusiestWriteTag", id)
+	    .detail("Elapsed", elapsed)
+	    .detail("Tag", printable(busiestTag))
+	    .detail("TagOps", maxCost.getOpsSum())
+	    .detail("TagCost", maxCost.getCostSum())
+	    .detail("TotalCost", totalWriteCosts)
+	    .detail("Reported", !busiestWriteTags.empty())
+	    .trackLatest(busiestWriteTagEventHolder->trackingKey);
+
+	// reset statistics
+	tagCostEst.clear();
+	totalWriteOps = 0;
+	totalWriteCosts = 0;
 }

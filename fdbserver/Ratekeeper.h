@@ -76,6 +76,8 @@ struct StorageQueueInfo {
 		// FIXME: this is a tacky workaround for a potential uninitialized use in trackStorageServerQueueInfo
 		lastReply.instanceID = -1;
 	}
+
+	void refreshCommitCost(double elapsed);
 };
 
 struct TLogQueueInfo {
@@ -180,14 +182,12 @@ class Ratekeeper {
 
 	Future<Void> expiredTagThrottleCleanup;
 
-	double lastBusiestCommitTagPick;
-
 	Ratekeeper(UID id, Database db);
 
 	Future<Void> configurationMonitor();
 	void updateCommitCostEstimation(UIDTransactionTagMap<TransactionCommitCostEstimation> const& costEstimation);
 	void updateRate(RatekeeperLimits* limits);
-	Future<Void> refreshStorageServerCommitCost();
+	Future<Void> refreshStorageServerCommitCosts();
 	Future<Void> monitorServerListChange(PromiseStream<std::pair<UID, Optional<StorageServerInterface>>> serverChanges);
 	Future<Void> trackEachStorageServer(FutureStream<std::pair<UID, Optional<StorageServerInterface>>> serverChanges);
 
