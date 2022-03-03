@@ -73,11 +73,13 @@ TestDriverOptions::TestDriverOptions(const UnitTestParameters& params)
         params.getInt("messageTransferModel").orDefault(static_cast<int>(DEFAULT_MESSAGE_TRANSFER_MODEL)))) {}
 
 void TestDriverContext::updateServerDBInfo(Reference<AsyncVar<ServerDBInfo>> dbInfo,
+                                           LogEpoch epoch,
                                            const std::vector<ptxn::TLogInterface_PassivelyPull>& interfaces) {
 	ServerDBInfo info;
 	LogSystemConfig& lsConfig = info.logSystemConfig;
 	lsConfig.logSystemType = LogSystemType::teamPartitioned;
 	info.recoveryState = RecoveryState::FULLY_RECOVERED;
+	info.recoveryCount = epoch;
 
 	// For now, assume we only have primary TLog set
 	lsConfig.tLogs.clear();

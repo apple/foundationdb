@@ -231,6 +231,7 @@ ACTOR Future<Void> fakeTLogPeek(TLogPeekRequest request, std::shared_ptr<FakeTLo
 	state TLogPeekReply reply(request.debugID, serialized.arena(), serialized);
 	reply.beginVersion = firstVersion;
 	reply.endVersion = lastVersion;
+	reply.minKnownCommittedVersion = firstVersion;
 
 	wait(pFakeTLogContext->latency());
 	request.reply.send(reply);
