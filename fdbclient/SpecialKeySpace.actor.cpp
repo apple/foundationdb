@@ -2466,8 +2466,9 @@ Future<Optional<std::string>> DataDistributionImpl::commit(ReadYourWritesTransac
 				//					    ManagementAPIError::toJsonString(false,
 				//					                                     "datadistribution",
 				//					                                     "Value is unused for the
-				//data_distribution/rebalance_ignored " 					                                     "key, please set it to an empty value"); 				else
-				//					ryw->getTransaction().set(rebalanceDDIgnoreKey, LiteralStringRef("on"));
+				// data_distribution/rebalance_ignored " 					                                     "key, please set it
+				// to an empty value"); 				else 					ryw->getTransaction().set(rebalanceDDIgnoreKey,
+				//LiteralStringRef("on"));
 			} else {
 				msg = ManagementAPIError::toJsonString(
 				    false,
