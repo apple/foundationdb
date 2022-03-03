@@ -30,10 +30,7 @@
 #include "flow/Arena.h"
 #include "flow/flow.h"
 
-enum class TraceFlags : uint8_t {
-	unsampled = 0b00000000,
-	sampled = 0b00000001
-};
+enum class TraceFlags : uint8_t { unsampled = 0b00000000, sampled = 0b00000001 };
 
 inline TraceFlags operator&(TraceFlags lhs, TraceFlags rhs) {
 	return static_cast<TraceFlags>(static_cast<std::underlying_type_t<TraceFlags>>(lhs) &
