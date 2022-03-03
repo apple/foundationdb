@@ -204,6 +204,7 @@ ERROR( tenant_already_exists, 2132, "A tenant with the given name already exists
 ERROR( tenant_not_empty, 2133, "Cannot delete a non-empty tenant" )
 ERROR( invalid_tenant_name, 2134, "Tenant name cannot begin with \\xff");
 ERROR( tenant_prefix_allocator_conflict, 2135, "The database already has keys stored at the prefix allocated for the tenant");
+ERROR( tenants_disabled, 2136, "Tenants have been disabled in the cluster");
 
 // 2200 - errors from bindings and official APIs
 ERROR( api_version_unset, 2200, "API version is not set" )

@@ -50,7 +50,7 @@ void DatabaseConfiguration::resetInternal() {
 	perpetualStorageWiggleSpeed = 0;
 	perpetualStorageWiggleLocality = "0";
 	storageMigrationType = StorageMigrationType::DEFAULT;
-	tenantMode = TenantMode::OPTIONAL;
+	tenantMode = TenantMode::DISABLED;
 }
 
 int toInt(ValueRef const& v) {
@@ -210,7 +210,7 @@ bool DatabaseConfiguration::isValid() const {
 	      // We cannot specify regions with three_datacenter replication
 	      (perpetualStorageWiggleSpeed == 0 || perpetualStorageWiggleSpeed == 1) &&
 	      isValidPerpetualStorageWiggleLocality(perpetualStorageWiggleLocality) &&
-	      storageMigrationType != StorageMigrationType::UNSET && tenantMode >= TenantMode::OPTIONAL &&
+	      storageMigrationType != StorageMigrationType::UNSET && tenantMode >= TenantMode::DISABLED &&
 	      tenantMode < TenantMode::END)) {
 		return false;
 	}

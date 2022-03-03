@@ -745,8 +745,9 @@
          ]},
          "tenant_mode": {
              "$enum":[
-             "optional",
-             "required"
+             "disabled",
+             "optional_experimental",
+             "required_experimental"
          ]}
       },
       "data":{

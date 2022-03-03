@@ -1187,12 +1187,12 @@ struct StorageMigrationType {
 struct TenantMode {
 	// These enumerated values are stored in the database configuration, so can NEVER be changed.  Only add new ones
 	// just before END.
-	enum Mode { OPTIONAL = 0, REQUIRED = 1, END = 2 };
+	enum Mode { DISABLED = 0, OPTIONAL = 1, REQUIRED = 2, END = 3 };
 
-	TenantMode() : mode(OPTIONAL) {}
+	TenantMode() : mode(DISABLED) {}
 	TenantMode(Mode mode) : mode(mode) {
 		if ((uint32_t)mode >= END) {
-			this->mode = OPTIONAL;
+			this->mode = DISABLED;
 		}
 	}
 	operator Mode() const { return Mode(mode); }
@@ -1204,10 +1204,12 @@ struct TenantMode {
 
 	std::string toString() const {
 		switch (mode) {
+		case DISABLED:
+			return "disabled";
 		case OPTIONAL:
-			return "optional";
+			return "optional_experimental";
 		case REQUIRED:
-			return "required";
+			return "required_experimental";
 		default:
 			ASSERT(false);
 		}

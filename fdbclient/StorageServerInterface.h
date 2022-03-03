@@ -214,15 +214,17 @@ struct ServerCacheInfo {
 };
 
 struct TenantInfo {
-	Optional<TenantName> name;
+	static const int64_t INVALID_TENANT = -1;
 
-	TenantInfo() {}
-	TenantInfo(Optional<TenantName> name) : name(name) {}
-	TenantInfo(TenantName name) : name(name) {}
+	Optional<TenantName> name;
+	int64_t tenantId;
+
+	TenantInfo() : tenantId(INVALID_TENANT) {}
+	TenantInfo(TenantName name, int64_t tenantId) : name(name), tenantId(tenantId) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, name);
+		serializer(ar, name, tenantId);
 	}
 };
 

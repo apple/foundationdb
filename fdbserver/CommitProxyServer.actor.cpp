@@ -412,6 +412,7 @@ ACTOR static Future<ResolveTransactionBatchReply> trackResolutionMetrics(Referen
 
 ErrorOr<Optional<TenantMapEntry>> getTenantEntry(ProxyCommitData* commitData,
                                                  Optional<TenantNameRef> tenant,
+                                                 Optional<int64_t> tenantId,
                                                  Version commitVersion) {
 	if (tenant.present()) {
 		auto view = commitData->tenantMap.at(commitVersion);
@@ -420,6 +421,16 @@ ErrorOr<Optional<TenantMapEntry>> getTenantEntry(ProxyCommitData* commitData,
 			if (commitVersion != latestVersion) {
 				TraceEvent(SevWarn, "CommitProxyTenantNotFound", commitData->dbgid)
 				    .detail("Tenant", tenant.get())
+				    .detail("Version", commitVersion);
+			}
+
+			return tenant_not_found();
+		} else if (tenantId.present() && tenantId.get() != itr->id) {
+			if (commitVersion != latestVersion) {
+				TraceEvent(SevWarn, "CommitProxyTenantIdMismatch", commitData->dbgid)
+				    .detail("Tenant", tenant.get())
+				    .detail("TenantId", tenantId)
+				    .detail("ExistingId", itr->id)
 				    .detail("Version", commitVersion);
 			}
 
@@ -868,8 +879,10 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 	int t;
 	for (t = 0; t < trs.size() && !self->forceRecovery; t++) {
 		if (self->committed[t] == ConflictBatch::TransactionCommitted && (!self->locked || trs[t].isLockAware())) {
-			ErrorOr<Optional<TenantMapEntry>> result =
-			    getTenantEntry(pProxyCommitData, trs[t].tenantInfo.name.castTo<TenantNameRef>(), self->commitVersion);
+			ErrorOr<Optional<TenantMapEntry>> result = getTenantEntry(pProxyCommitData,
+			                                                          trs[t].tenantInfo.name.castTo<TenantNameRef>(),
+			                                                          trs[t].tenantInfo.tenantId,
+			                                                          self->commitVersion);
 
 			if (result.isError()) {
 				self->committed[t] = ConflictBatch::TransactionTenantFailure;
@@ -1529,7 +1542,8 @@ ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsReques
 	state Version requestVersion = latestVersion;
 	state ErrorOr<Optional<TenantMapEntry>> tenantEntry;
 	while (tenantEntry.isError()) {
-		ErrorOr<Optional<TenantMapEntry>> _tenantEntry = getTenantEntry(commitData, req.tenant, requestVersion);
+		ErrorOr<Optional<TenantMapEntry>> _tenantEntry =
+		    getTenantEntry(commitData, req.tenant, Optional<int64_t>(), requestVersion);
 		tenantEntry = _tenantEntry;
 
 		if (tenantEntry.isError()) {

@@ -457,7 +457,7 @@ public:
 	void insertTenant(TenantNameRef tenantName, ValueRef value, Version version, bool insertIntoMutationLog);
 	void clearTenants(TenantNameRef startTenant, TenantNameRef endTenant, Version version);
 
-	Optional<TenantMapEntry> getTenantEntry(Version version, Optional<TenantName> tenant);
+	Optional<TenantMapEntry> getTenantEntry(Version version, TenantInfo tenant);
 	KeyRangeRef clampRangeToTenant(KeyRangeRef range, Optional<TenantName> tenant, Version version, Arena& arena);
 
 	class CurrentRunningFetchKeys {
@@ -1138,7 +1138,7 @@ public:
 
 	void getSplitPoints(SplitRangeRequest const& req) {
 		try {
-			Optional<TenantMapEntry> entry = getTenantEntry(version.get(), req.tenantInfo.name);
+			Optional<TenantMapEntry> entry = getTenantEntry(version.get(), req.tenantInfo);
 			metrics.getSplitPoints(req, entry.map<Key>([](TenantMapEntry e) { return e.prefix; }));
 		} catch (Error& e) {
 			req.reply.sendError(e);
@@ -1372,12 +1372,19 @@ ACTOR Future<Version> waitForVersionNoTooOld(StorageServer* data, Version versio
 	}
 }
 
-Optional<TenantMapEntry> StorageServer::getTenantEntry(Version version, Optional<TenantName> tenantName) {
-	if (tenantName.present()) {
+Optional<TenantMapEntry> StorageServer::getTenantEntry(Version version, TenantInfo tenantInfo) {
+	if (tenantInfo.name.present()) {
 		auto view = tenantMap.at(version);
-		auto itr = view.find(tenantName.get());
+		auto itr = view.find(tenantInfo.name.get());
 		if (itr == view.end()) {
-			TraceEvent(SevWarn, "StorageTenantNotFound", thisServerID).detail("Tenant", tenantName).backtrace();
+			TraceEvent(SevWarn, "StorageTenantNotFound", thisServerID).detail("Tenant", tenantInfo.name).backtrace();
+			throw tenant_not_found();
+		} else if (itr->id != tenantInfo.tenantId) {
+			TraceEvent(SevWarn, "StorageTenantIdMismatch", thisServerID)
+			    .detail("Tenant", tenantInfo.name)
+			    .detail("TenantId", tenantInfo.tenantId)
+			    .detail("ExistingId", itr->id)
+			    .backtrace();
 			throw tenant_not_found();
 		}
 
@@ -1420,7 +1427,7 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 			                      req.debugID.get().first(),
 			                      "getValueQ.AfterVersion"); //.detail("TaskID", g_network->getCurrentTask());
 
-		Optional<TenantMapEntry> entry = data->getTenantEntry(version, req.tenantInfo.name);
+		Optional<TenantMapEntry> entry = data->getTenantEntry(version, req.tenantInfo);
 		if (entry.present()) {
 			req.key = req.key.withPrefix(entry.get().prefix);
 		}
@@ -2626,7 +2633,7 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 			g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValues.Before");
 		state Version version = wait(waitForVersion(data, req.version, span.context));
 
-		Optional<TenantMapEntry> entry = data->getTenantEntry(version, req.tenantInfo.name);
+		Optional<TenantMapEntry> entry = data->getTenantEntry(version, req.tenantInfo);
 		state Optional<Key> tenantPrefix = entry.map<Key>([](TenantMapEntry e) { return e.prefix; });
 		if (tenantPrefix.present()) {
 			req.begin = KeySelectorRef(
@@ -3135,7 +3142,7 @@ ACTOR Future<Void> getKeyValuesAndFlatMapQ(StorageServer* data, GetKeyValuesAndF
 			    "TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValuesAndFlatMap.Before");
 		state Version version = wait(waitForVersion(data, req.version, span.context));
 
-		Optional<TenantMapEntry> entry = data->getTenantEntry(req.version, req.tenantInfo.name);
+		Optional<TenantMapEntry> entry = data->getTenantEntry(req.version, req.tenantInfo);
 		state Optional<Key> tenantPrefix = entry.map<Key>([](TenantMapEntry e) { return e.prefix; });
 		if (tenantPrefix.present()) {
 			req.begin = KeySelectorRef(
@@ -3348,7 +3355,7 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 			    "TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValuesStream.Before");
 		state Version version = wait(waitForVersion(data, req.version, span.context));
 
-		Optional<TenantMapEntry> entry = data->getTenantEntry(version, req.tenantInfo.name);
+		Optional<TenantMapEntry> entry = data->getTenantEntry(version, req.tenantInfo);
 		state Optional<Key> tenantPrefix = entry.map<Key>([](TenantMapEntry e) { return e.prefix; });
 		if (tenantPrefix.present()) {
 			req.begin = KeySelectorRef(
@@ -3542,7 +3549,7 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 	try {
 		state Version version = wait(waitForVersion(data, req.version, req.spanContext));
 
-		state Optional<TenantMapEntry> tenantEntry = data->getTenantEntry(version, req.tenantInfo.name);
+		state Optional<TenantMapEntry> tenantEntry = data->getTenantEntry(version, req.tenantInfo);
 		if (tenantEntry.present()) {
 			req.sel = KeySelectorRef(
 			    req.sel.getKey().withPrefix(tenantEntry.get().prefix, req.arena), req.sel.orEqual, req.sel.offset);
@@ -6861,7 +6868,7 @@ ACTOR Future<Void> watchValueWaitForVersion(StorageServer* self,
 	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.first();
 	try {
 		wait(success(waitForVersionNoTooOld(self, req.version)));
-		Optional<TenantMapEntry> entry = self->getTenantEntry(latestVersion, req.tenantInfo.name);
+		Optional<TenantMapEntry> entry = self->getTenantEntry(latestVersion, req.tenantInfo);
 		if (entry.present()) {
 			req.key = req.key.withPrefix(entry.get().prefix);
 		}
