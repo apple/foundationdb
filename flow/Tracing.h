@@ -22,7 +22,6 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "flow/IRandom.h"
-#include <cstddef>
 #include <memory>
 #include <unordered_map>
 #include <unordered_set>
