@@ -495,7 +495,7 @@ class TagThrottlerImpl {
 		}
 	}
 
-	Optional<double> autoThrottleTag(UID id, TransactionTag tag, double busyness) {
+	Optional<double> autoThrottleTag(TransactionTag tag, double busyness) {
 		return throttledTags.autoThrottleTag(id, tag, busyness);
 	}
 
@@ -504,7 +504,7 @@ class TagThrottlerImpl {
 		// currently MIN_TAG_PAGES_RATE > MIN_TAG_COST in our default knobs.
 		if (busyness > SERVER_KNOBS->AUTO_THROTTLE_TARGET_TAG_BUSYNESS && rate > SERVER_KNOBS->MIN_TAG_COST) {
 			TEST(true); // Transaction tag auto-throttled
-			Optional<double> clientRate = autoThrottleTag(id, tag, busyness);
+			Optional<double> clientRate = autoThrottleTag(tag, busyness);
 			if (clientRate.present()) {
 				TagSet tags;
 				tags.addTag(tag);
