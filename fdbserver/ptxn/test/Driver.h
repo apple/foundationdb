@@ -127,6 +127,7 @@ struct TestDriverContext {
 
 	// Updates a ServerDBInfo object with this context.
 	void updateServerDBInfo(Reference<AsyncVar<ServerDBInfo>> dbInfo,
+	                        LogEpoch epoch,
 	                        const std::vector<ptxn::TLogInterface_PassivelyPull>& interfaces);
 
 	TLogGroup& getTLogGroup(TLogGroupID gid);

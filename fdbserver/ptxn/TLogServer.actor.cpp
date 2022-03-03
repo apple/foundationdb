@@ -656,7 +656,7 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 	NotifiedVersion version{ 0 }; // next version to commit
 
 	// The disk queue has committed up until the queueCommittedVersion version.
-	NotifiedVersion queueCommittedVersion;
+	NotifiedVersion queueCommittedVersion{ 0 };
 
 	Version queueCommittingVersion = 0;
 
@@ -718,10 +718,11 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 	                           TLogSpillType logSpillType,
 	                           std::map<ptxn::StorageTeamID, std::vector<Tag>>& storageTeams,
 	                           int8_t locality,
+	                           LogEpoch epoch,
 	                           const std::string& context)
 	  : tlogGroupData(tlogGroupData), logId(interf.id()), cc("TLog", interf.id().toString()),
 	    bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc), protocolVersion(protocolVersion),
-	    storageTeams(storageTeams), terminated(tlogGroupData->terminated.getFuture()),
+	    storageTeams(storageTeams), terminated(tlogGroupData->terminated.getFuture()), recoveryCount(epoch),
 	    logSystem(new AsyncVar<Reference<ILogSystem>>()),
 	    // These are initialized differently on init() or recovery
 	    locality(locality), recruitmentID(recruitmentID), logSpillType(logSpillType) {
@@ -2117,7 +2118,8 @@ ACTOR Future<Void> restorePersistentState(Reference<TLogGroupData> self,
 		                                           protocolVersion,
 		                                           logSpillType,
 		                                           storageTeams[id1],
-		                                           0, // TODO: find whether/why we need this parameter
+		                                           0, // TODO: find whether/why we need this parameter,
+		                                           /* recoveryCount */ 0,
 		                                           "Restored");
 		logData->locality = id_locality[id1];
 		logData->stopped = true;
@@ -2337,6 +2339,7 @@ ACTOR Future<Void> tLogStart(Reference<TLogServerData> self, InitializePtxnTLogR
 		                                                                                  req.spillType,
 		                                                                                  group.storageTeams,
 		                                                                                  req.locality,
+		                                                                                  req.epoch,
 		                                                                                  "Recruited");
 		// groups belong to the same interface(implying they have the same generation) share the same key(i.e.
 		// interface.id) it will be persisted in each group, during recovery we will aggregate it by interface.id and

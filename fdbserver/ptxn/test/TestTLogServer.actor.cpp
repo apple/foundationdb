@@ -67,9 +67,11 @@ ACTOR Future<Void> startTLogServers(std::vector<Future<Void>>* actors,
                                     std::string folder,
                                     bool mockDiskQueue = false,
                                     TLogSpillType spillType = TLogSpillType::REFERENCE) {
+	state const LogEpoch epoch = 0;
 	state ptxn::test::print::PrintTiming printTiming("startTLogServers");
 	state std::vector<ptxn::InitializePtxnTLogRequest> tLogInitializations;
 	state Reference<AsyncVar<ServerDBInfo>> dbInfo = makeReference<AsyncVar<ServerDBInfo>>();
+
 	pContext->groupsPerTLog.resize(pContext->numTLogs);
 	for (int i = 0, index = 0; i < pContext->numTLogGroups; ++i) {
 		ptxn::TLogGroup& tLogGroup = pContext->tLogGroups[i];
@@ -83,10 +85,12 @@ ACTOR Future<Void> startTLogServers(std::vector<Future<Void>>* actors,
 		PromiseStream<ptxn::InitializePtxnTLogRequest> initializeTLog;
 		Promise<Void> recovered;
 		tLogInitializations.emplace_back();
+		tLogInitializations.back().epoch = epoch;
 		tLogInitializations.back().isPrimary = true;
 		tLogInitializations.back().storeType = KeyValueStoreType::MEMORY;
 		tLogInitializations.back().tlogGroups = pContext->groupsPerTLog[i];
 		tLogInitializations.back().spillType = spillType;
+		tLogInitializations.back().locality = 0;
 		UID tlogId = ptxn::test::randomUID();
 		UID workerId = ptxn::test::randomUID();
 		StringRef fileVersionedLogDataPrefix = "log2-"_sr;
@@ -146,7 +150,7 @@ ACTOR Future<Void> startTLogServers(std::vector<Future<Void>>* actors,
 		tLogGroupLeader = pContext->tLogInterfaces[pContext->groupToLeaderId[tLogGroupID]];
 	}
 	// Update TLogGroups & TLogInterfaces in ServerDBInfo
-	pContext->updateServerDBInfo(dbInfo, interfaces);
+	pContext->updateServerDBInfo(dbInfo, epoch, interfaces);
 	return Void();
 }
 
