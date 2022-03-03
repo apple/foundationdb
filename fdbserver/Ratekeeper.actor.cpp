@@ -475,8 +475,6 @@ Ratekeeper::Ratekeeper(UID id, Database db)
                 SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE_BATCH,
                 SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS_BATCH) {
 	tagThrottler = std::make_unique<TagThrottler>(db, id);
-	expiredTagThrottleCleanup = recurring([this]() { ThrottleApi::expire(this->db.getReference()); },
-	                                      SERVER_KNOBS->TAG_THROTTLE_EXPIRED_CLEANUP_INTERVAL);
 }
 
 void Ratekeeper::updateCommitCostEstimation(

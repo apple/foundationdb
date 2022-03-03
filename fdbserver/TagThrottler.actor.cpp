@@ -383,6 +383,7 @@ class TagThrottlerImpl {
 	RkTagThrottleCollection throttledTags;
 	uint64_t throttledTagChangeId{ 0 };
 	bool autoThrottlingEnabled{ false };
+	Future<Void> expiredTagThrottleCleanup;
 
 	ACTOR static Future<Void> monitorThrottlingChanges(TagThrottlerImpl* self) {
 		state bool committed = false;
@@ -524,7 +525,10 @@ class TagThrottlerImpl {
 	}
 
 public:
-	TagThrottlerImpl(Database db, UID id) : db(db), id(id) {}
+	TagThrottlerImpl(Database db, UID id) : db(db), id(id) {
+		expiredTagThrottleCleanup = recurring([this]() { ThrottleApi::expire(this->db.getReference()); },
+		                                      SERVER_KNOBS->TAG_THROTTLE_EXPIRED_CLEANUP_INTERVAL);
+	}
 	Future<Void> monitorThrottlingChanges() { return monitorThrottlingChanges(this); }
 
 	void addRequests(TransactionTag tag, int count) { throttledTags.addRequests(tag, count); }

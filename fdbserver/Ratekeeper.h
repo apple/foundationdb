@@ -150,8 +150,6 @@ class Ratekeeper {
 	Deque<double> actualTpsHistory;
 	Optional<Key> remoteDC;
 
-	Future<Void> expiredTagThrottleCleanup;
-
 	Ratekeeper(UID id, Database db);
 
 	Future<Void> configurationMonitor();
