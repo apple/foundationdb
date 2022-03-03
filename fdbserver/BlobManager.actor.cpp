@@ -843,8 +843,8 @@ ACTOR Future<Void> monitorBlobWorkerStatus(BlobManagerData* bmData, BlobWorkerIn
 				}
 				// TODO change back from SevError?
 				TraceEvent(SevError, "BWStatusMonitoringFailed", bmData->id)
-				    .detail("BlobWorkerID", bwInterf.id())
-				    .error(e);
+				    .error(e)
+				    .detail("BlobWorkerID", bwInterf.id());
 				throw e;
 			}
 		}
@@ -877,7 +877,7 @@ ACTOR Future<Void> monitorBlobWorker(BlobManagerData* bmData, BlobWorkerInterfac
 			printf("BM got unexpected error %s monitoring BW %s\n", e.name(), bwInterf.id().toString().c_str());
 		}
 		// TODO change back from SevError?
-		TraceEvent(SevError, "BWMonitoringFailed", bmData->id).detail("BlobWorkerID", bwInterf.id()).error(e);
+		TraceEvent(SevError, "BWMonitoringFailed", bmData->id).error(e).detail("BlobWorkerID", bwInterf.id());
 		throw e;
 	}
 
@@ -1152,7 +1152,7 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 			}
 		}
 	} catch (Error& err) {
-		TraceEvent("BlobManagerDied", bmInterf.id()).error(err, true);
+		TraceEvent("BlobManagerDied", bmInterf.id()).errorUnsuppressed(err);
 	}
 	return Void();
 }

@@ -154,7 +154,7 @@ class WorkPool final : public IThreadPool, public ReferenceCounted<WorkPool<Thre
 				stopped.send(Void());
 				return;
 			} catch (Error& e) {
-				TraceEvent("WorkPoolError").error(e, true);
+				TraceEvent("WorkPoolError").errorUnsuppressed(e);
 				error.sendError(e);
 			} catch (...) {
 				TraceEvent("WorkPoolError").log();
@@ -232,10 +232,10 @@ public:
 
 		pool->queueLock.enter();
 		TraceEvent("WorkPool_Stop")
+		    .errorUnsuppressed(e)
 		    .detail("Workers", pool->workers.size())
 		    .detail("Idle", pool->idle.size())
-		    .detail("Work", pool->work.size())
-		    .error(e, true);
+		    .detail("Work", pool->work.size());
 
 		for (uint32_t i = 0; i < pool->work.size(); i++)
 			pool->work[i]->cancel(); // What if cancel() does something to this?

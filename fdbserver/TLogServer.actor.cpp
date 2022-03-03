@@ -1997,8 +1997,8 @@ ACTOR Future<Void> tLogPeekStream(TLogData* self, TLogPeekStreamRequest req, Ref
 		} catch (Error& e) {
 			self->activePeekStreams--;
 			TraceEvent(SevDebug, "TLogPeekStreamEnd", logData->logId)
-			    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress())
-			    .error(e, true);
+			    .errorUnsuppressed(e)
+			    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
 
 			if (e.code() == error_code_end_of_stream || e.code() == error_code_operation_obsolete) {
 				req.reply.sendError(e);
@@ -2469,7 +2469,7 @@ ACTOR Future<Void> tLogSnapCreate(TLogSnapRequest snapReq, TLogData* self, Refer
 		}
 		snapReq.reply.send(Void());
 	} catch (Error& e) {
-		TraceEvent("TLogExecHelperError").error(e, true /*includeCancelled */);
+		TraceEvent("TLogExecHelperError").errorUnsuppressed(e);
 		if (e.code() != error_code_operation_cancelled) {
 			snapReq.reply.sendError(e);
 		} else {
@@ -3186,7 +3186,7 @@ bool tlogTerminated(TLogData* self, IKeyValueStore* persistentData, TLogQueue* p
 
 	if (e.code() == error_code_worker_removed || e.code() == error_code_recruitment_failed ||
 	    e.code() == error_code_file_not_found || e.code() == error_code_invalid_cluster_id) {
-		TraceEvent("TLogTerminated", self->dbgid).error(e, true);
+		TraceEvent("TLogTerminated", self->dbgid).errorUnsuppressed(e);
 		return true;
 	} else
 		return false;
@@ -3537,7 +3537,7 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 		}
 	} catch (Error& e) {
 		self.terminated.send(Void());
-		TraceEvent("TLogError", tlogId).error(e, true);
+		TraceEvent("TLogError", tlogId).errorUnsuppressed(e);
 		if (recovered.canBeSet())
 			recovered.send(Void());
 

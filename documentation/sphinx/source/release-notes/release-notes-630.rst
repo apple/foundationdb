@@ -2,8 +2,16 @@
 Release Notes
 #############
 
+6.3.24
+======
+* Fixed a bug where get key location can overload proxies. `(PR #6453) <https://github.com/apple/foundationdb/pull/6453>`_ 
+* Added a mechanism that can reduce the number of empty peek reply by not always returning empty peek reply immediately. `(PR #6413) <https://github.com/apple/foundationdb/pull/6413>`_
+* Enable TLS support for Windows. `(PR #6193) <https://github.com/apple/foundationdb/pull/6193>`_
+* Fixed a bug where a shard gets merged too soon. `(PR #6115) <https://github.com/apple/foundationdb/pull/6115>`_
+
 6.3.23
 ======
+* Add AWS v4 header support for backup. `(PR #6025) <https://github.com/apple/foundationdb/pull/6025>`_
 * Fixed a bug that remoteDCIsHealthy logic is not guarded by CC_ENABLE_WORKER_HEALTH_MONITOR, which may prevent HA failback. `(PR #6106) <https://github.com/apple/foundationdb/pull/6106>`_
 * Fixed a race condition with updating the coordinated state and updating the master registration. `(PR #6088) <https://github.com/apple/foundationdb/pull/6088>`_
 * Changed dbinfo broadcast to be explicitly requested by the worker registration message. `(PR #6073) <https://github.com/apple/foundationdb/pull/6073>`_

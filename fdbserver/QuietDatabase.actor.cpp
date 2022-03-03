@@ -732,7 +732,7 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 				}
 			}
 		} catch (Error& e) {
-			TraceEvent(("QuietDatabase" + phase + "Error").c_str()).error(e, true);
+			TraceEvent(("QuietDatabase" + phase + "Error").c_str()).errorUnsuppressed(e);
 			if (e.code() != error_code_actor_cancelled && e.code() != error_code_attribute_not_found &&
 			    e.code() != error_code_timed_out)
 				TraceEvent(("QuietDatabase" + phase + "Error").c_str()).error(e);

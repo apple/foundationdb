@@ -198,6 +198,11 @@ struct ChangeFeedData : ReferenceCounted<ChangeFeedData> {
 	ChangeFeedData() : notAtLatest(1) {}
 };
 
+struct EndpointFailureInfo {
+	double startTime = 0;
+	double lastRefreshTime = 0;
+};
+
 class DatabaseContext : public ReferenceCounted<DatabaseContext>, public FastAllocated<DatabaseContext>, NonCopyable {
 public:
 	static DatabaseContext* allocateOnForeignThread() {
@@ -240,6 +245,14 @@ public:
 	Reference<LocationInfo> setCachedLocation(const KeyRangeRef&, const std::vector<struct StorageServerInterface>&);
 	void invalidateCache(const KeyRef&, Reverse isBackward = Reverse::False);
 	void invalidateCache(const KeyRangeRef&);
+
+	// Records that `endpoint` is failed on a healthy server.
+	void setFailedEndpointOnHealthyServer(const Endpoint& endpoint);
+
+	// Updates `endpoint` refresh time if the `endpoint` is a failed endpoint. If not, this does nothing.
+	void updateFailedEndpointRefreshTime(const Endpoint& endpoint);
+	Optional<EndpointFailureInfo> getEndpointFailureInfo(const Endpoint& endpoint);
+	void clearFailedEndpointOnHealthyServer(const Endpoint& endpoint);
 
 	bool sampleReadTags() const;
 	bool sampleOnCost(uint64_t cost) const;
@@ -394,6 +407,7 @@ public:
 	// Cache of location information
 	int locationCacheSize;
 	CoalescedKeyRangeMap<Reference<LocationInfo>> locationCache;
+	std::unordered_map<Endpoint, EndpointFailureInfo> failedEndpointsOnHealthyServersInfo;
 
 	std::map<UID, StorageServerInfo*> server_interf;
 	std::map<UID, BlobWorkerInterface> blobWorker_interf; // blob workers don't change endpoints for the same ID
