@@ -238,6 +238,7 @@ struct Watch : public ReferenceCounted<Watch>, NonCopyable {
 struct TransactionState : ReferenceCounted<TransactionState> {
 	Database cx;
 	Optional<TenantName> tenant;
+	int64_t tenantId = TenantInfo::INVALID_TENANT;
 	Reference<TransactionLogInfo> trLogInfo;
 	TransactionOptions options;
 

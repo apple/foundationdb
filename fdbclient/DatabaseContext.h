@@ -133,7 +133,7 @@ public:
 };
 
 struct WatchParameters : public ReferenceCounted<WatchParameters> {
-	const Optional<TenantName> tenant;
+	const TenantInfo tenant;
 	const Key key;
 	const Optional<Value> value;
 
@@ -144,7 +144,7 @@ struct WatchParameters : public ReferenceCounted<WatchParameters> {
 	const Optional<UID> debugID;
 	const UseProvisionalProxies useProvisionalProxies;
 
-	WatchParameters(Optional<TenantName> tenant,
+	WatchParameters(TenantInfo tenant,
 	                Key key,
 	                Optional<Value> value,
 	                Version version,
@@ -307,9 +307,9 @@ public:
 	void removeWatch();
 
 	// watch map operations
-	Reference<WatchMetadata> getWatchMetadata(Optional<TenantName> tenant, KeyRef key) const;
+	Reference<WatchMetadata> getWatchMetadata(int64_t tenantId, KeyRef key) const;
 	void setWatchMetadata(Reference<WatchMetadata> metadata);
-	void deleteWatchMetadata(Optional<TenantName> tenant, KeyRef key);
+	void deleteWatchMetadata(int64_t tenant, KeyRef key);
 	void clearWatchMetadata();
 
 	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value);
@@ -580,9 +580,7 @@ public:
 	EventCacheHolder connectToDatabaseEventCacheHolder;
 
 private:
-	std::unordered_map<std::pair<Optional<TenantName>, Key>,
-	                   Reference<WatchMetadata>,
-	                   boost::hash<std::pair<Optional<TenantName>, Key>>>
+	std::unordered_map<std::pair<int64_t, Key>, Reference<WatchMetadata>, boost::hash<std::pair<int64_t, Key>>>
 	    watchMap;
 };
 
