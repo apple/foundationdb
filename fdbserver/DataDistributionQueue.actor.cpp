@@ -1436,8 +1436,13 @@ ACTOR Future<Void> getSrcDestTeams(DDQueueData* self,
 	return Void();
 }
 
+// return true if a.readload > b.readload
 bool greaterReadLoad(Reference<IDataDistributionTeam> a, Reference<IDataDistributionTeam> b) {
 	return a->getLoadReadBandwidth() > b->getLoadReadBandwidth();
+}
+// return true if a.readload < b.readload
+bool lessReadLoad(Reference<IDataDistributionTeam> a, Reference<IDataDistributionTeam> b) {
+	return a->getLoadReadBandwidth() < b->getLoadReadBandwidth();
 }
 
 ACTOR Future<Void> BgDDMountainChopper(DDQueueData* self, int teamCollectionIndex) {
@@ -1505,7 +1510,8 @@ ACTOR Future<Void> BgDDMountainChopper(DDQueueData* self, int teamCollectionInde
 				srcReq = GetTeamRequest(true, true, false, true);
 				destReq = GetTeamRequest(true, false, true, false);
 				if (!disableReadBalance) {
-					srcReq.teamSorter = greaterReadLoad;
+					srcReq.teamSorter = lessReadLoad;
+					destReq.teamSorter = greaterReadLoad;
 				}
 				// clang-format off
 				wait(getSrcDestTeams(self, teamCollectionIndex, srcReq, destReq, &sourceTeam, &destTeam,
@@ -1619,6 +1625,7 @@ ACTOR Future<Void> BgDDValleyFiller(DDQueueData* self, int teamCollectionIndex) 
 				srcReq = GetTeamRequest(true, false, false, true);
 				destReq = GetTeamRequest(true, true, true, false);
 				if (!disableReadBalance) {
+					srcReq.teamSorter = lessReadLoad; // less read load map to lower score
 					destReq.teamSorter = greaterReadLoad;
 				}
 

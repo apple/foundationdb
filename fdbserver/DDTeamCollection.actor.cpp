@@ -299,7 +299,8 @@ public:
 
 				for (int i = 0; i < randomTeams.size(); i++) {
 					int64_t loadBytes = randomTeams[i]->getLoadBytes(true, req.inflightPenalty);
-					if (!bestOption.present() || !req.lessCompareByLoad(loadBytes, bestLoadBytes)) {
+					if (!bestOption.present() || req.lessCompare(bestOption.get(), randomTeams[i]) ||
+					    !req.lessCompareByLoad(loadBytes, bestLoadBytes)) {
 						bestLoadBytes = loadBytes;
 						bestOption = randomTeams[i];
 					}
