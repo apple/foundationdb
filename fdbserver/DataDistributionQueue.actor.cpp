@@ -1302,8 +1302,10 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 
 	state std::vector<KeyRange> shards = self->shardsAffectedByTeamFailure->getShardsFor(
 	    ShardsAffectedByTeamFailure::Team(sourceTeam->getServerIDs(), primary));
-	if (!shards.size())
+	if (!shards.size()) {
+		traceEvent->detail("SkipReason", "NoShardOnSource");
 		return false;
+	}
 
 	state GetMetricsRequest req(shards);
 	req.comparator = [](const StorageMetrics& a, const StorageMetrics& b) {
@@ -1320,13 +1322,13 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 		    ShardsAffectedByTeamFailure::Team(sourceTeam->getServerIDs(), primary));
 		for (int i = 0; i < shards.size(); i++) {
 			if (metrics.keys == shards[i]) {
-				traceEvent->detail("ShardStillPresent", true);
 				self->output.send(RelocateShard(metrics.keys.get(), priority));
 				return true;
 			}
 		}
-		traceEvent->detail("ShardStillPresent", false);
-	}
+		traceEvent->detail("SkipReason", "ShardNotPresent");
+	} else
+		traceEvent->detail("SkipReason", metrics.keys.present() ? "ShardZeroSize" : "ShardNoKeys");
 	return false;
 }
 
@@ -1351,8 +1353,10 @@ ACTOR Future<bool> rebalanceTeams(DDQueueData* self,
 
 	traceEvent->detail("AverageShardBytes", averageShardBytes).detail("ShardsInSource", shards.size());
 
-	if (!shards.size())
+	if (!shards.size()) {
+		traceEvent->detail("SkipReason", "NoShardOnSource");
 		return false;
+	}
 
 	state KeyRange moveShard;
 	state StorageMetrics metrics;
@@ -1382,6 +1386,7 @@ ACTOR Future<bool> rebalanceTeams(DDQueueData* self,
 	    .detail("SourceAndDestTooSimilar", sourceAndDestTooSimilar);
 
 	if (sourceAndDestTooSimilar || metrics.bytes == 0) {
+		traceEvent->detail("SkipReason", sourceAndDestTooSimilar ? "TeamTooSimilar" : "ShardZeroSize");
 		return false;
 	}
 
@@ -1390,13 +1395,12 @@ ACTOR Future<bool> rebalanceTeams(DDQueueData* self,
 	    ShardsAffectedByTeamFailure::Team(sourceTeam->getServerIDs(), primary));
 	for (int i = 0; i < shards.size(); i++) {
 		if (moveShard == shards[i]) {
-			traceEvent->detail("ShardStillPresent", true);
 			self->output.send(RelocateShard(moveShard, priority));
 			return true;
 		}
 	}
 
-	traceEvent->detail("ShardStillPresent", false);
+	traceEvent->detail("SkipReason", "ShardNotPresent");
 	return false;
 }
 
@@ -1404,8 +1408,8 @@ ACTOR Future<Void> getSrcDestTeams(DDQueueData* self,
                                    int teamCollectionIndex,
                                    GetTeamRequest srcReq,
                                    GetTeamRequest destReq,
-                                   Reference<IDataDistributionTeam> sourceTeam,
-                                   Reference<IDataDistributionTeam> destTeam,
+                                   Reference<IDataDistributionTeam>* sourceTeam,
+                                   Reference<IDataDistributionTeam>* destTeam,
                                    int priority,
                                    TraceEvent* traceEvent) {
 
@@ -1416,7 +1420,7 @@ ACTOR Future<Void> getSrcDestTeams(DDQueueData* self,
 	                       [](const Reference<IDataDistributionTeam>& team) { return team->getDesc(); })));
 
 	if (randomTeam.first.present()) {
-		destTeam = randomTeam.first.get();
+		*destTeam = randomTeam.first.get();
 		std::pair<Optional<Reference<IDataDistributionTeam>>, bool> loadedTeam =
 		    wait(brokenPromiseToNever(self->teamCollections[teamCollectionIndex].getTeam.getReply(srcReq)));
 
@@ -1425,7 +1429,7 @@ ACTOR Future<Void> getSrcDestTeams(DDQueueData* self,
 		                       [](const Reference<IDataDistributionTeam>& team) { return team->getDesc(); })));
 
 		if (loadedTeam.first.present())
-			sourceTeam = loadedTeam.first.get();
+			*sourceTeam = loadedTeam.first.get();
 	}
 	return Void();
 }
@@ -1468,10 +1472,10 @@ ACTOR Future<Void> BgDDMountainChopper(DDQueueData* self, int teamCollectionInde
 					if (val.get().size() > 0) {
 						int ddIgnore = BinaryReader::fromStringRef<int>(val.get(), Unversioned());
 						if (ddIgnore & DDIgnore::REBALANCE_DISK) {
-							disableReadBalance = true;
+							disableDiskBalance = true;
 						}
 						if (ddIgnore & DDIgnore::REBALANCE_READ) {
-							disableDiskBalance = true;
+							disableReadBalance = true;
 						}
 						skipCurrentLoop = disableReadBalance && disableDiskBalance;
 					} else {
@@ -1480,7 +1484,8 @@ ACTOR Future<Void> BgDDMountainChopper(DDQueueData* self, int teamCollectionInde
 				}
 			}
 
-			traceEvent.detail("Enabled", !skipCurrentLoop);
+			traceEvent.detail("Enabled",
+			                  skipCurrentLoop ? "None" : (disableReadBalance ? "NoReadBalance" : "NoDiskBalance"));
 
 			wait(delayF);
 			if (skipCurrentLoop) {
@@ -1501,7 +1506,7 @@ ACTOR Future<Void> BgDDMountainChopper(DDQueueData* self, int teamCollectionInde
 					srcReq.teamSorter = greaterReadLoad;
 				}
 				// clang-format off
-				wait(getSrcDestTeams(self, teamCollectionIndex, srcReq, destReq, sourceTeam, destTeam,
+				wait(getSrcDestTeams(self, teamCollectionIndex, srcReq, destReq, &sourceTeam, &destTeam,
 				                     SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM,&traceEvent));
 				if (sourceTeam.isValid() && destTeam.isValid()) {
 					if (!disableReadBalance) {
@@ -1581,10 +1586,10 @@ ACTOR Future<Void> BgDDValleyFiller(DDQueueData* self, int teamCollectionIndex) 
 					if (val.get().size() > sizeof(int)) {
 						int ddIgnore = BinaryReader::fromStringRef<int>(val.get(), Unversioned());
 						if (ddIgnore & DDIgnore::REBALANCE_DISK) {
-							disableReadBalance = true;
+							disableDiskBalance = true;
 						}
 						if (ddIgnore & DDIgnore::REBALANCE_READ) {
-							disableDiskBalance = true;
+							disableReadBalance = true;
 						}
 						skipCurrentLoop = disableReadBalance && disableDiskBalance;
 					} else {
@@ -1593,7 +1598,8 @@ ACTOR Future<Void> BgDDValleyFiller(DDQueueData* self, int teamCollectionIndex) 
 				}
 			}
 
-			traceEvent.detail("Enabled", !skipCurrentLoop);
+			traceEvent.detail("Enabled",
+			                  skipCurrentLoop ? "None" : (disableReadBalance ? "NoReadBalance" : "NoDiskBalance"));
 
 			wait(delayF);
 			if (skipCurrentLoop) {
@@ -1615,7 +1621,7 @@ ACTOR Future<Void> BgDDValleyFiller(DDQueueData* self, int teamCollectionIndex) 
 				}
 
 				// clang-format off
-				wait(getSrcDestTeams(self, teamCollectionIndex, srcReq, destReq, sourceTeam, destTeam,
+				wait(getSrcDestTeams(self, teamCollectionIndex, srcReq, destReq, &sourceTeam, &destTeam,
 				                     SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM,&traceEvent));
 				if (sourceTeam.isValid() && destTeam.isValid()) {
 					if (!disableReadBalance) {
