@@ -1798,11 +1798,14 @@ ACTOR Future<Void> serveTLogInterface_PassivelyPull(
 
 			// Update storage teams.
 			for (auto t : req.addedTeams) {
+				auto tags = req.teamToTags.find(t)->second;
+				TraceEvent("TLogAddTeam", self->dbgid).detail("Team", t).detail("Tags", describe(tags));
 				logData->storageTeams.emplace(t, req.teamToTags.find(t)->second);
 				logData->createStorageTeamData(t, logData->storageTeams[t], true, true, false);
 			}
 
 			for (auto& t : req.removedTeams) {
+				TraceEvent("TLogRemoveTeam", self->dbgid).detail("Team", t);
 				logData->removeStorageTeam(t);
 			}
 

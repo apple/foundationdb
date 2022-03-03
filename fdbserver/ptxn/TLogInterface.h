@@ -527,6 +527,7 @@ protected:
 			waitFailure = RequestStream<ReplyPromise<Void>>(commit.getEndpoint().getAdjustedEndpoint(6));
 			recoveryFinished = RequestStream<TLogRecoveryFinishedRequest>(commit.getEndpoint().getAdjustedEndpoint(7));
 			snapRequest = RequestStream<TLogSnapRequest>(commit.getEndpoint().getAdjustedEndpoint(8));
+			testInfo = RequestStream<TLogTestInfoRequest>(commit.getEndpoint().getAdjustedEndpoint(9));
 		}
 	}
 };
@@ -554,8 +555,8 @@ struct TLogInterface_PassivelyPull : public TLogInterfaceBase {
 	void serialize(Ar& ar) {
 		TLogInterfaceBase::serializeImpl(ar);
 		if (Ar::isDeserializing) {
-			disablePopRequest = RequestStream<TLogDisablePopRequest>(commit.getEndpoint().getAdjustedEndpoint(9));
-			enablePopRequest = RequestStream<TLogEnablePopRequest>(commit.getEndpoint().getAdjustedEndpoint(10));
+			disablePopRequest = RequestStream<TLogDisablePopRequest>(commit.getEndpoint().getAdjustedEndpoint(10));
+			enablePopRequest = RequestStream<TLogEnablePopRequest>(commit.getEndpoint().getAdjustedEndpoint(11));
 		}
 	}
 

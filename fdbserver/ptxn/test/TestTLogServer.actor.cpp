@@ -342,7 +342,7 @@ ACTOR Future<Void> commitTeams(std::shared_ptr<ptxn::test::TestDriverContext> pC
 	generateMutations(currVersion, ++storageTeamVersion, 1, { storageTeamID }, pContext->commitRecord);
 	auto serialized = serializeMutations(currVersion, storageTeamID, pContext->commitRecord);
 	std::unordered_map<ptxn::StorageTeamID, StringRef> messages = { { storageTeamID, serialized } };
-	state UID newTeam = pContext->storageTeamIDs[2];
+	state UID newTeam = ptxn::test::getNewStorageTeamID(); // Avoid existing teams
 	state std::map<ptxn::StorageTeamID, std::vector<Tag>> teamToTagMap;
 	teamToTagMap.insert(std::make_pair(newTeam, std::vector<Tag>{ Tag(-1, -1) }));
 	ptxn::TLogCommitRequest request(ptxn::test::randomUID(),
@@ -414,7 +414,6 @@ TEST_CASE("/fdbserver/ptxn/test/tlog_server_group_teams") {
 	// Commit validation in real TLog is not supported for now
 	options.skipCommitValidation = true;
 	state std::vector<Future<Void>> actors;
-	state std::vector<Future<Void>> proxies;
 	state std::shared_ptr<ptxn::test::TestDriverContext> pContext = ptxn::test::initTestDriverContext(options);
 
 	state std::string folder = "simfdb/" + deterministicRandom()->randomAlphaNumeric(10);
