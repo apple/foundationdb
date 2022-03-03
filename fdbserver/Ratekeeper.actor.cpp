@@ -971,12 +971,12 @@ Future<Void> Ratekeeper::refreshStorageServerCommitCost() {
 	}
 	double elapsed = now() - lastBusiestCommitTagPick;
 	// for each SS, select the busiest commit tag from ssTrTagCommitCost
-	for (auto it = storageQueueInfo.begin(); it != storageQueueInfo.end(); ++it) {
-		it->value.busiestWriteTags.clear();
+	for (auto& [ssId, ssQueueInfo] : storageQueueInfo) {
+		ssQueueInfo.busiestWriteTags.clear();
 		TransactionTag busiestTag;
 		TransactionCommitCostEstimation maxCost;
 		double maxRate = 0, maxBusyness = 0;
-		for (const auto& [tag, cost] : it->value.tagCostEst) {
+		for (const auto& [tag, cost] : ssQueueInfo.tagCostEst) {
 			double rate = cost.getCostSum() / elapsed;
 			if (rate > maxRate) {
 				busiestTag = tag;
@@ -986,24 +986,24 @@ Future<Void> Ratekeeper::refreshStorageServerCommitCost() {
 		}
 		if (maxRate > SERVER_KNOBS->MIN_TAG_WRITE_PAGES_RATE) {
 			// TraceEvent("RefreshSSCommitCost").detail("TotalWriteCost", it->value.totalWriteCost).detail("TotalWriteOps",it->value.totalWriteOps);
-			ASSERT_GT(it->value.totalWriteCosts, 0);
-			maxBusyness = double(maxCost.getCostSum()) / it->value.totalWriteCosts;
-			it->value.busiestWriteTags.emplace_back(busiestTag, maxBusyness, maxRate);
+			ASSERT_GT(ssQueueInfo.totalWriteCosts, 0);
+			maxBusyness = double(maxCost.getCostSum()) / ssQueueInfo.totalWriteCosts;
+			ssQueueInfo.busiestWriteTags.emplace_back(busiestTag, maxBusyness, maxRate);
 		}
 
-		TraceEvent("BusiestWriteTag", it->key)
+		TraceEvent("BusiestWriteTag", ssId)
 		    .detail("Elapsed", elapsed)
 		    .detail("Tag", printable(busiestTag))
 		    .detail("TagOps", maxCost.getOpsSum())
 		    .detail("TagCost", maxCost.getCostSum())
-		    .detail("TotalCost", it->value.totalWriteCosts)
-		    .detail("Reported", !it->value.busiestWriteTags.empty())
-		    .trackLatest(it->value.busiestWriteTagEventHolder->trackingKey);
+		    .detail("TotalCost", ssQueueInfo.totalWriteCosts)
+		    .detail("Reported", !ssQueueInfo.busiestWriteTags.empty())
+		    .trackLatest(ssQueueInfo.busiestWriteTagEventHolder->trackingKey);
 
 		// reset statistics
-		it->value.tagCostEst.clear();
-		it->value.totalWriteOps = 0;
-		it->value.totalWriteCosts = 0;
+		ssQueueInfo.tagCostEst.clear();
+		ssQueueInfo.totalWriteOps = 0;
+		ssQueueInfo.totalWriteCosts = 0;
 	}
 	lastBusiestCommitTagPick = now();
 	return Void();
