@@ -148,13 +148,13 @@ enum class SpanKind : uint8_t {
 	SERVER = 1,
 	PRODUCER = 2,
 	CONSUMER = 3,
-	INTERNAL = 4,
+	INTERNAL = 4
 };
 
 enum class SpanStatus : uint8_t {
 	UNSET = 0,
 	OK = 1,
-	ERROR = 2,
+	ERROR = 2
 };
 
 struct OTELEvent {

@@ -32,7 +32,7 @@
 
 enum class TraceFlags : uint8_t {
 	unsampled = 0b00000000,
-	sampled = 0b00000001,
+	sampled = 0b00000001
 };
 
 inline TraceFlags operator&(TraceFlags lhs, TraceFlags rhs) {
