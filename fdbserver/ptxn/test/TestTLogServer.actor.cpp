@@ -363,7 +363,6 @@ ACTOR Future<Void> commitTeams(std::shared_ptr<ptxn::test::TestDriverContext> pC
 	ASSERT_EQ(newTeamCount, oldTeamCount + 1);
 
 	prevVersion = currVersion;
-	currVersion = rep.version;
 	increaseVersion(currVersion);
 	generateMutations(currVersion, ++storageTeamVersion, 1, { storageTeamID }, pContext->commitRecord);
 	auto serialized = serializeMutations(currVersion, storageTeamID, pContext->commitRecord);
