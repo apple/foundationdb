@@ -7970,6 +7970,9 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 	results->id = rangeID;
 	results->endVersion = end;
 
+	state double sleepWithBackoff = CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY;
+	state Version lastBeginVersion = invalidVersion;
+
 	/*printf("CFStream %s [%s - %s): [%lld - %lld]\n",
 	       rangeID.printable().substr(0, 6).c_str(),
 	       range.begin.printable().c_str(),
@@ -7980,6 +7983,7 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 	loop {
 		state KeyRange keys;
 		try {
+			lastBeginVersion = begin;
 			KeyRange fullRange = wait(getChangeFeedRange(db, cx, rangeID, begin));
 			keys = fullRange & range;
 			state std::vector<std::pair<KeyRange, Reference<LocationInfo>>> locations =
@@ -8084,7 +8088,14 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 				// beginVersion at all before getting an error
 				db->changeFeedCache.erase(rangeID);
 				cx->invalidateCache(keys);
-				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY));
+				if (begin == lastBeginVersion) {
+					// We didn't read anything since the last failure before failing again.
+					// Do exponential backoff, up to 1 second
+					sleepWithBackoff = std::min(1.0, sleepWithBackoff * 1.5);
+				} else {
+					sleepWithBackoff = CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY;
+				}
+				wait(delay(sleepWithBackoff));
 			} else {
 				results->mutations.sendError(e);
 				results->refresh.sendError(change_feed_cancelled());
