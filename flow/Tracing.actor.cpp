@@ -19,11 +19,8 @@
  */
 
 #include "flow/Tracing.h"
-#include "fdbserver/LocalConfiguration.h"
-#include "flow/IRandom.h"
 #include "flow/UnitTest.h"
 
-#include "fdbclient/FDBTypes.h"
 #include "flow/Knobs.h"
 #include "flow/network.h"
 
