@@ -810,6 +810,28 @@ void printStatus(StatusObjectReader statusObj,
 				outputString = outputStringCache;
 				outputString += "\n  Unable to retrieve data status";
 			}
+			// Storage Wiggle section
+			StatusObjectReader storageWigglerObj;
+			std::string storageWigglerString;
+			try {
+				if (statusObjCluster.get("storage_wiggler", storageWigglerObj)) {
+					int size = 0;
+					if (storageWigglerObj.has("wiggle_server_addresses")) {
+						storageWigglerString += "\n  Wiggle server addresses-";
+						for (auto& v : storageWigglerObj.obj().at("wiggle_server_addresses").get_array()) {
+							storageWigglerString += " " + v.get_str();
+							size += 1;
+						}
+					}
+					storageWigglerString += "\n  Wiggle server count    - " + std::to_string(size);
+				}
+			} catch (std::runtime_error&) {
+				storageWigglerString += "\n  Unable to retrieve storage wiggler status";
+			}
+			if (storageWigglerString.size()) {
+				outputString += "\n\nStorage wiggle:";
+				outputString += storageWigglerString;
+			}
 
 			// Operating space section
 			outputString += "\n\nOperating space:";
