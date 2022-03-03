@@ -1772,6 +1772,7 @@ int main(int argc, char* argv[]) {
 		                                         role == ServerRole::Simulation ? IsSimulated::True
 		                                                                        : IsSimulated::False);
 		IKnobCollection::getMutableGlobalKnobCollection().setKnob("log_directory", KnobValue::create(opts.logFolder));
+		IKnobCollection::getMutableGlobalKnobCollection().setKnob("conn_file", KnobValue::create(opts.connFile));
 		if (role != ServerRole::Simulation) {
 			IKnobCollection::getMutableGlobalKnobCollection().setKnob("commit_batches_mem_bytes_hard_limit",
 			                                                          KnobValue::create(int64_t{ opts.memLimit }));

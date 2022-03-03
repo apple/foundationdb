@@ -745,8 +745,11 @@ public:
 	  : io_service(io_service), listenAddress(listenAddress), acceptor(io_service, tcpEndpoint(listenAddress)) {
 		// when port 0 is passed in, a random port will be opened
 		// set listenAddress as the address with the actual port opened instead of port 0
-		this->listenAddress = NetworkAddress::parse(acceptor.local_endpoint().address().to_string().append(":").append(
-		    std::to_string(acceptor.local_endpoint().port())));
+		if (listenAddress.port == 0) {
+			this->listenAddress =
+			    NetworkAddress::parse(acceptor.local_endpoint().address().to_string().append(":").append(
+			        std::to_string(acceptor.local_endpoint().port())));
+		}
 		platform::setCloseOnExec(acceptor.native_handle());
 	}
 

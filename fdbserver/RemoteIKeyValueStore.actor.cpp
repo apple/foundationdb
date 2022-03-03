@@ -103,10 +103,12 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 	state UID uid_kvs(deterministicRandom()->randomUniqueID());
 	state AfterReturn guard(kvStore, uid_kvs);
 	state Promise<Void> onClosed;
-	TraceEvent(SevDebug, "RemoteKVStore").detail("Action", "initializing local store").detail("UID", uid_kvs);
+	TraceEvent(SevDebug, "RemoteKVStoreInitializing")
+	    .detail("Action", "initializing local store")
+	    .detail("UID", uid_kvs);
 	wait(kvStore->init());
 	openReq.reply.send(ikvsInterface);
-	TraceEvent(SevDebug, "RemoteKVStore").detail("IKVSInterfaceUID", ikvsInterface.id());
+	TraceEvent("RemoteKVStoreInitializaed").detail("IKVSInterfaceUID", ikvsInterface.id());
 
 	loop {
 		try {
@@ -180,7 +182,7 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
 				// fprintf(stderr, "RemoteIKVS cancelling\n");
-				TraceEvent(SevDebug, "RemoteKVStoreCancelled").detail("UID", uid_kvs).backtrace();
+				TraceEvent("RemoteKVStoreCancelled").detail("UID", uid_kvs).backtrace();
 				// kvStore->close();
 				// guard.invalidate();
 				onClosed.send(Void());
@@ -194,16 +196,12 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 	}
 }
 
-ACTOR Future<Void> spawnRemoteIKVS(RemoteIKeyValueStore* self, OpenKVStoreRequest openKVSReq) {
-	state KeyValueStoreProcess process;
-	process.setSSInterface(self);
-	process.start();
-	TraceEvent(SevDebug, "WaitingOnFlowProcess").detail("StoreType", openKVSReq.storeType).log();
-	wait(process.onReady());
-	TraceEvent(SevDebug, "FlowProcessReady").log();
-	IKVSInterface ikvsInterface = wait(process.kvsIf.openKVStore.getReply(openKVSReq));
-	TraceEvent(SevDebug, "IKVSInterfaceReceived").detail("UID", ikvsInterface.id());
-	self->ikvsProcess = process;
+ACTOR static Future<Void> initializeRemoteKVStore(RemoteIKeyValueStore* self, OpenKVStoreRequest openKVSReq) {
+	TraceEvent("WaitingOnFlowProcess").detail("StoreType", openKVSReq.storeType).log();
+	wait(self->ikvsProcess.onReady());
+	TraceEvent("FlowProcessReady").log();
+	IKVSInterface ikvsInterface = wait(self->ikvsProcess.kvsIf.openKVStore.getReply(openKVSReq));
+	TraceEvent("IKVSInterfaceReceived").detail("UID", ikvsInterface.id());
 	self->interf = ikvsInterface;
 	self->interf.storeType = openKVSReq.storeType;
 	return Void();
@@ -216,7 +214,8 @@ IKeyValueStore* openRemoteKVStore(KeyValueStoreType storeType,
                                   bool checkChecksums,
                                   bool checkIntegrity) {
 	RemoteIKeyValueStore* self = new RemoteIKeyValueStore();
-	OpenKVStoreRequest request(storeType, filename, logID, memoryLimit, checkChecksums, checkIntegrity);
-	self->initialized = spawnRemoteIKVS(self, request);
+	self->ikvsProcess.start();
+	self->initialized = initializeRemoteKVStore(
+	    self, OpenKVStoreRequest(storeType, filename, logID, memoryLimit, checkChecksums, checkIntegrity));
 	return self;
 }

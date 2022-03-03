@@ -100,7 +100,7 @@ private:
 	const char* name;
 };
 
-Future<Void> runFlowProcess(std::string name, Endpoint endpoint);
+Future<Void> runFlowProcess(std::string const& name, Endpoint endpoint);
 
 #include <flow/unactorcompiler.h>
 #endif

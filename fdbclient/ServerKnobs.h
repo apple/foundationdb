@@ -479,6 +479,7 @@ public:
 	double MIN_REBOOT_TIME;
 	double MAX_REBOOT_TIME;
 	std::string LOG_DIRECTORY;
+	std::string CONN_FILE;
 	int64_t SERVER_MEM_LIMIT;
 	double SYSTEM_MONITOR_FREQUENCY;
 

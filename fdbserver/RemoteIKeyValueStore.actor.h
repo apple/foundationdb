@@ -341,20 +341,20 @@ struct KeyValueStoreProcess : FlowProcess {
 
 	ACTOR static Future<Void> _run(KeyValueStoreProcess* self) {
 		state ActorCollection actors(true);
-		TraceEvent(SevDebug, "WaitingForOpenKVStoreRequest").log();
+		TraceEvent("WaitingForOpenKVStoreRequest").log();
 		loop {
 			choose {
 				when(OpenKVStoreRequest req = waitNext(self->kvsIf.openKVStore.getFuture())) {
-					TraceEvent(SevDebug, "OpenKVStoreRequestReceived").log();
+					TraceEvent("OpenKVStoreRequestReceived").log();
 					IKVSInterface reply;
 					actors.add(runIKVS(req, reply));
 				}
 				when(ErrorOr<Void> e = wait(errorOr(actors.getResult()))) {
 					if (e.isError()) {
-						TraceEvent(SevDebug, "KeyValueStoreProcessRunActorError").errorUnsuppressed(e.getError());
+						TraceEvent("KeyValueStoreProcessRunActorError").errorUnsuppressed(e.getError());
 						throw e.getError();
 					} else {
-						TraceEvent(SevDebug, "KeyValueStoreProcessFinished").log();
+						TraceEvent("KeyValueStoreProcessFinished").log();
 						return e.get();
 					}
 				}

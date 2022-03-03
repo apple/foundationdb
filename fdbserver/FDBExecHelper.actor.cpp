@@ -309,6 +309,14 @@ ACTOR Future<int> spawnProcess(std::string path,
 		wait(delay(snapDelay));
 	}
 
+	// for FlowProcess
+	if (parent) {
+		args.emplace_back("-C");
+		args.emplace_back(SERVER_KNOBS->CONN_FILE);
+		args.emplace_back("--logdir");
+		args.emplace_back(SERVER_KNOBS->LOG_DIRECTORY);
+	}
+
 	std::vector<char*> paramList;
 	paramList.reserve(args.size());
 	for (int i = 0; i < args.size(); i++) {

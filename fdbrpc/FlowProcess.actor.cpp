@@ -43,10 +43,15 @@ ACTOR Future<int> flowProcessRunner(FlowProcess* self, Promise<Void> ready) {
 	auto token = endpoint.token;
 
 	std::string flowProcessAddr = g_network->getLocalAddress().ip.toString().append(":0");
-	std::vector<std::string> args = { "bin/fdbserver", "-r", "flowprocess", "-p", flowProcessAddr, "--process-name" };
-	args.emplace_back(self->name().toString());
-	args.emplace_back("--process-endpoint");
-	args.emplace_back(format("%s,%lu,%lu", address.c_str(), token.first(), token.second()));
+	std::vector<std::string> args = { "bin/fdbserver",
+		                              "-r",
+		                              "flowprocess",
+		                              "-p",
+		                              flowProcessAddr,
+		                              "--process-name",
+		                              self->name().toString(),
+		                              "--process-endpoint",
+		                              format("%s,%lu,%lu", address.c_str(), token.first(), token.second()) };
 
 	process = spawnProcess(path, args, -1.0, false, 0.01, self);
 	choose {
@@ -55,7 +60,7 @@ ACTOR Future<int> flowProcessRunner(FlowProcess* self, Promise<Void> ready) {
 			ready.send(Void());
 		}
 		when(int res = wait(process)) {
-			TraceEvent(SevDebug, "FlowProcessRunnerChoose2").detail("Result", res);
+			TraceEvent(SevDebug, "FlowProcessRunnerFinishedInChoose").detail("Result", res);
 			// 0 means process killed; non-zero means errors
 			if (res) {
 				ready.sendError(operation_failed());
@@ -77,7 +82,7 @@ void FlowProcess::start() {
 	returnCodePromise = flowProcessRunner(this, readyPromise);
 }
 
-Future<Void> runFlowProcess(std::string name, Endpoint endpoint) {
+Future<Void> runFlowProcess(std::string const& name, Endpoint endpoint) {
 	TraceEvent(SevDebug, "RunFlowProcessStart").log();
 	FlowProcess* self = IProcessFactory::create(name.c_str()); // it->second->create() segfaulting?
 	self->registerEndpoint(endpoint);
