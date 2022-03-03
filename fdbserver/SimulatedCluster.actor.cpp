@@ -301,6 +301,7 @@ public:
 	Optional<std::string> config;
 
 	bool allowDefaultTenant = true;
+	bool allowDisablingTenants = true;
 
 	ConfigDBType getConfigDBType() const { return configDBType; }
 
@@ -353,7 +354,8 @@ public:
 		    .add("coordinators", &coordinators)
 		    .add("configDB", &configDBType)
 		    .add("extraMachineCountDC", &extraMachineCountDC)
-		    .add("allowDefaultTenant", &allowDefaultTenant);
+		    .add("allowDefaultTenant", &allowDefaultTenant)
+		    .add("allowDisablingTenants", &allowDisablingTenants);
 		try {
 			auto file = toml::parse(testFile);
 			if (file.contains("configuration") && toml::find(file, "configuration").is_table()) {
@@ -1790,12 +1792,15 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
                           std::string whitelistBinPaths,
                           TestConfig testConfig,
                           ProtocolVersion protocolVersion,
-                          bool tenantModeRequired) {
+                          TenantMode tenantMode) {
 	// SOMEDAY: this does not test multi-interface configurations
 	SimulationConfig simconfig(testConfig);
 	if (testConfig.logAntiQuorum != -1) {
 		simconfig.db.tLogWriteAntiQuorum = testConfig.logAntiQuorum;
 	}
+
+	simconfig.db.tenantMode = tenantMode;
+
 	StatusObject startingConfigJSON = simconfig.db.toJSON(true);
 	std::string startingConfigString = "new";
 	if (testConfig.configureLocked) {
@@ -1841,10 +1846,6 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		simconfig.set_config(g_simulator.originalRegions);
 		g_simulator.startingDisabledConfiguration = startingConfigString + " " + g_simulator.disableRemote;
 		startingConfigString += " " + g_simulator.originalRegions;
-	}
-
-	if (tenantModeRequired) {
-		startingConfigString += " tenant_mode=required";
 	}
 
 	g_simulator.storagePolicy = simconfig.db.storagePolicy;
@@ -2280,6 +2281,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 	g_simulator.setDiffProtocol = false;
 
 	state bool allowDefaultTenant = testConfig.allowDefaultTenant;
+	state bool allowDisablingTenants = testConfig.allowDisablingTenants;
 
 	// The RocksDB storage engine does not support the restarting tests because you cannot consistently get a clean
 	// snapshot of the storage engine without a snapshotting file system.
@@ -2341,17 +2343,21 @@ ACTOR void setupAndRun(std::string dataFolder,
 	TEST(true); // Simulation start
 
 	state Optional<TenantName> defaultTenant;
-	state bool requireTenants = false;
+	state TenantMode tenantMode = TenantMode::DISABLED;
 	if (allowDefaultTenant && deterministicRandom()->random01() < 1.0) {
 		defaultTenant = "SimulatedDefaultTenant"_sr;
 		if (deterministicRandom()->random01() < 0.9) {
-			requireTenants = true;
+			tenantMode = TenantMode::REQUIRED;
+		} else {
+			tenantMode = TenantMode::OPTIONAL;
 		}
+	} else if (!allowDisablingTenants || deterministicRandom()->random01() < 0.5) {
+		tenantMode = TenantMode::OPTIONAL;
 	}
 
 	TraceEvent("SimulatedClusterTenantMode")
 	    .detail("UsingTenant", defaultTenant)
-	    .detail("TenantRequired", requireTenants);
+	    .detail("TenantRequired", tenantMode.toString());
 
 	try {
 		// systemActors.push_back( startSystemMonitor(dataFolder) );
@@ -2379,7 +2385,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 			                     whitelistBinPaths,
 			                     testConfig,
 			                     protocolVersion,
-			                     requireTenants);
+			                     tenantMode);
 			wait(delay(1.0)); // FIXME: WHY!!!  //wait for machines to boot
 		}
 		std::string clusterFileDir = joinPath(dataFolder, deterministicRandom()->randomUniqueID().toString());

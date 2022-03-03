@@ -212,6 +212,7 @@ struct ConflictRangeWorkload : TestWorkload {
 				wait(tr2.commit());
 
 				state bool foundConflict = false;
+				state bool readToEnd = false;
 				try {
 					// Do the generated getRange in the other transaction and commit.
 					if (self->testReadYourWrites) {
@@ -220,6 +221,7 @@ struct ConflictRangeWorkload : TestWorkload {
 						RangeResult res = wait(trRYOW.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
 						                                       KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
 						                                       randomLimit));
+						readToEnd = res.readThroughEnd;
 						wait(trRYOW.commit());
 					} else {
 						tr3.clear(StringRef(format("%010d", self->maxKeySpace + 1)));
@@ -265,6 +267,13 @@ struct ConflictRangeWorkload : TestWorkload {
 						    originalResults.readThroughEnd) {
 							// Results go into server keyspace, so if a key selector does not fully resolve offset, a
 							// change won't effect results
+							throw not_committed();
+						}
+
+						// GetRangeFallback has a conflict range that is too large if the end selector resolves to the
+						// key after the last key. In that case, we may get a spurious conflict.
+						// This check can be removed if GetRangeFallback is fixed.
+						if (readToEnd) {
 							throw not_committed();
 						}
 

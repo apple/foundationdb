@@ -3860,6 +3860,12 @@ Future<RangeResultFamily> getRangeFallback(Reference<TransactionState> trState,
 
 	if (b == allKeys.begin && ((reverse && !r.more) || !reverse))
 		r.readToBegin = true;
+
+	// TODO: this currently causes us to have a conflict range that is too large if our end key resolves to the
+	// key after the last key in the database. In that case, we don't need a conflict between the last key and
+	// the end of the database.
+	//
+	// If fixed, the ConflictRange test can be updated to stop checking for this condition.
 	if (e == allKeys.end && ((!reverse && !r.more) || reverse))
 		r.readThroughEnd = true;
 
