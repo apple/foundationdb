@@ -921,6 +921,22 @@ struct GetStorageMetricsRequest {
 };
 
 struct StorageQueuingMetricsReply {
+	struct TagInfo {
+		constexpr static FileIdentifier file_identifier = 4528694;
+		TransactionTag tag;
+		double rate{ 0.0 };
+		double fractionalBusyness{ 0.0 };
+
+		TagInfo() = default;
+		TagInfo(TransactionTag const& tag, double rate, double fractionalBusyness)
+		  : tag(tag), rate(rate), fractionalBusyness(fractionalBusyness) {}
+
+		template <class Ar>
+		void serialize(Ar& ar) {
+			serializer(ar, tag, rate, fractionalBusyness);
+		}
+	};
+
 	constexpr static FileIdentifier file_identifier = 7633366;
 	double localTime;
 	int64_t instanceID; // changes if bytesDurable and bytesInput reset
@@ -931,9 +947,7 @@ struct StorageQueuingMetricsReply {
 	double cpuUsage;
 	double diskUsage;
 	double localRateLimit;
-	Optional<TransactionTag> busiestTag;
-	double busiestTagFractionalBusyness;
-	double busiestTagRate;
+	std::vector<TagInfo> busiestTags;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -948,9 +962,7 @@ struct StorageQueuingMetricsReply {
 		           cpuUsage,
 		           diskUsage,
 		           localRateLimit,
-		           busiestTag,
-		           busiestTagFractionalBusyness,
-		           busiestTagRate);
+		           busiestTags);
 	}
 };
 

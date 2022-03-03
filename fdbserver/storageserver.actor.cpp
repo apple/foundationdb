@@ -3574,11 +3574,7 @@ void getQueuingMetrics(StorageServer* self, StorageQueuingMetricsRequest const& 
 	reply.diskUsage = self->diskUsage;
 	reply.durableVersion = self->durableVersion.get();
 
-	Optional<TransactionTagCounter::TagInfo> busiestTag = self->transactionTagCounter.getBusiestTag();
-	reply.busiestTag =
-	    busiestTag.map<TransactionTag>([](TransactionTagCounter::TagInfo tagInfo) { return tagInfo.tag; });
-	reply.busiestTagFractionalBusyness = busiestTag.present() ? busiestTag.get().fractionalBusyness : 0.0;
-	reply.busiestTagRate = busiestTag.present() ? busiestTag.get().rate : 0.0;
+	reply.busiestTags = self->transactionTagCounter.getBusiestTags();
 
 	req.reply.send(reply);
 }

@@ -180,9 +180,7 @@ public:
 						myQueueInfo->value.smoothLatestVersion.setTotal(reply.get().version);
 					}
 
-					myQueueInfo->value.busiestReadTag = reply.get().busiestTag;
-					myQueueInfo->value.busiestReadTagFractionalBusyness = reply.get().busiestTagFractionalBusyness;
-					myQueueInfo->value.busiestReadTagRate = reply.get().busiestTagRate;
+					myQueueInfo->value.busiestReadTags = reply.get().busiestTags;
 				} else {
 					if (myQueueInfo->value.valid) {
 						TraceEvent("RkStorageServerDidNotRespond", self->id).detail("StorageServer", ssi.id());
@@ -974,7 +972,7 @@ Future<Void> Ratekeeper::refreshStorageServerCommitCost() {
 	double elapsed = now() - lastBusiestCommitTagPick;
 	// for each SS, select the busiest commit tag from ssTrTagCommitCost
 	for (auto it = storageQueueInfo.begin(); it != storageQueueInfo.end(); ++it) {
-		it->value.busiestWriteTag.reset();
+		it->value.busiestWriteTags.clear();
 		TransactionTag busiestTag;
 		TransactionCommitCostEstimation maxCost;
 		double maxRate = 0, maxBusyness = 0;
@@ -987,12 +985,10 @@ Future<Void> Ratekeeper::refreshStorageServerCommitCost() {
 			}
 		}
 		if (maxRate > SERVER_KNOBS->MIN_TAG_WRITE_PAGES_RATE) {
-			it->value.busiestWriteTag = busiestTag;
 			// TraceEvent("RefreshSSCommitCost").detail("TotalWriteCost", it->value.totalWriteCost).detail("TotalWriteOps",it->value.totalWriteOps);
-			ASSERT(it->value.totalWriteCosts > 0);
+			ASSERT_GT(it->value.totalWriteCosts, 0);
 			maxBusyness = double(maxCost.getCostSum()) / it->value.totalWriteCosts;
-			it->value.busiestWriteTagFractionalBusyness = maxBusyness;
-			it->value.busiestWriteTagRate = maxRate;
+			it->value.busiestWriteTags.emplace_back(busiestTag, maxBusyness, maxRate);
 		}
 
 		TraceEvent("BusiestWriteTag", it->key)
@@ -1001,7 +997,7 @@ Future<Void> Ratekeeper::refreshStorageServerCommitCost() {
 		    .detail("TagOps", maxCost.getOpsSum())
 		    .detail("TagCost", maxCost.getCostSum())
 		    .detail("TotalCost", it->value.totalWriteCosts)
-		    .detail("Reported", it->value.busiestWriteTag.present())
+		    .detail("Reported", !it->value.busiestWriteTags.empty())
 		    .trackLatest(it->value.busiestWriteTagEventHolder->trackingKey);
 
 		// reset statistics

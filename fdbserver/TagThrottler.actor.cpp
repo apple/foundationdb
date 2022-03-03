@@ -544,16 +544,16 @@ public:
 		// the future
 		if (storageQueue > SERVER_KNOBS->AUTO_TAG_THROTTLE_STORAGE_QUEUE_BYTES ||
 		    storageDurabilityLag > SERVER_KNOBS->AUTO_TAG_THROTTLE_DURABILITY_LAG_VERSIONS) {
-			if (ss.busiestWriteTag.present()) {
-				return tryAutoThrottleTag(ss.busiestWriteTag.get(),
-				                          ss.busiestWriteTagRate,
-				                          ss.busiestWriteTagFractionalBusyness,
-				                          TagThrottledReason::BUSY_WRITE);
+			for (const auto& busiestWriteTag : ss.busiestWriteTags) {
+				return tryAutoThrottleTag(busiestWriteTag.tag,
+				                          busiestWriteTag.rate,
+				                          busiestWriteTag.fractionalBusyness,
+				                          TagThrottledReason::BUSY_READ);
 			}
-			if (ss.busiestReadTag.present()) {
-				return tryAutoThrottleTag(ss.busiestReadTag.get(),
-				                          ss.busiestReadTagRate,
-				                          ss.busiestReadTagFractionalBusyness,
+			for (const auto& busiestReadTag : ss.busiestReadTags) {
+				return tryAutoThrottleTag(busiestReadTag.tag,
+				                          busiestReadTag.rate,
+				                          busiestReadTag.fractionalBusyness,
 				                          TagThrottledReason::BUSY_READ);
 			}
 		}

@@ -44,11 +44,11 @@ void TransactionTagCounter::addRequest(Optional<TagSet> const& tags, int64_t byt
 
 void TransactionTagCounter::startNewInterval() {
 	double elapsed = now() - intervalStart;
-	previousBusiestTag.reset();
+	previousBusiestTags.clear();
 	if (intervalStart > 0 && CLIENT_KNOBS->READ_TAG_SAMPLE_RATE > 0 && elapsed > 0) {
 		double rate = busiestTagCount / CLIENT_KNOBS->READ_TAG_SAMPLE_RATE / elapsed;
 		if (rate > SERVER_KNOBS->MIN_TAG_READ_PAGES_RATE) {
-			previousBusiestTag = TagInfo(busiestTag, rate, (double)busiestTagCount / intervalTotalSampledCount);
+			previousBusiestTags.emplace_back(busiestTag, rate, (double)busiestTagCount / intervalTotalSampledCount);
 		}
 
 		TraceEvent("BusiestReadTag", thisServerID)
@@ -56,7 +56,7 @@ void TransactionTagCounter::startNewInterval() {
 		    .detail("Tag", printable(busiestTag))
 		    .detail("TagCost", busiestTagCount)
 		    .detail("TotalSampledCost", intervalTotalSampledCount)
-		    .detail("Reported", previousBusiestTag.present())
+		    .detail("Reported", !previousBusiestTags.empty())
 		    .trackLatest(busiestReadTagEventHolder->trackingKey);
 	}
 

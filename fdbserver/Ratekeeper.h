@@ -58,10 +58,7 @@ struct StorageQueueInfo {
 	Smoother smoothTotalSpace;
 	limitReason_t limitReason;
 
-	Optional<TransactionTag> busiestReadTag, busiestWriteTag;
-	double busiestReadTagFractionalBusyness = 0, busiestWriteTagFractionalBusyness = 0;
-	double busiestReadTagRate = 0, busiestWriteTagRate = 0;
-
+	std::vector<StorageQueuingMetricsReply::TagInfo> busiestReadTags, busiestWriteTags;
 	Reference<EventCacheHolder> busiestWriteTagEventHolder;
 
 	// refresh periodically
