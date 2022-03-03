@@ -80,7 +80,7 @@ struct IDataDistributionTeam {
 struct GetTeamRequest {
 	bool wantsNewServers; // In additional to servers in completeSources, try to find teams with new server
 	bool wantsTrueBest;
-	bool preferLowerUtilization; // = false --> higher utilization team will be returned
+	bool preferLowerUtilization; // if true, lower utilized team has higher score
 	bool teamMustHaveShards;
 	double inflightPenalty;
 	std::vector<UID> completeSources;
@@ -101,6 +101,27 @@ struct GetTeamRequest {
 	               double inflightPenalty = 1.0)
 	  : wantsNewServers(wantsNewServers), wantsTrueBest(wantsTrueBest), preferLowerUtilization(preferLowerUtilization),
 	    teamMustHaveShards(teamMustHaveShards), inflightPenalty(inflightPenalty) {}
+
+	// return true if a.score < b.score
+	[[nodiscard]] bool lessCompare(TeamRef a, TeamRef b) const {
+		if (teamSorter) {
+			return teamSorter(a, b);
+		}
+		return false;
+	}
+
+	// return true if scoreWithLoadBytes < bestScoreWithBestLoadBytes
+	bool lessCompareByLoad(int64_t loadBytes, int64_t bestLoadBytes) const {
+		bool lessLoad = loadBytes < bestLoadBytes;
+		return preferLowerUtilization ? !lessLoad : lessLoad;
+	}
+
+	bool eligible(TeamRef a) const {
+		if (hardConstraint) {
+			return hardConstraint(a);
+		}
+		return true;
+	}
 
 	std::string getDesc() const {
 		std::stringstream ss;

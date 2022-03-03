@@ -757,9 +757,8 @@ struct ReadWriteWorkload : KVWorkload {
 	int64_t getRandomKeyFromHotServer() {
 		ASSERT(hotServerCount > 0);
 		int begin = currentHotRound * hotServerCount;
-		int shardIdx;
 		int idx = deterministicRandom()->randomInt(begin, begin + hotServerCount) % serverShards.size();
-		shardIdx = deterministicRandom()->randomInt(0, serverShards[idx].second.size());
+		int shardIdx = deterministicRandom()->randomInt(0, serverShards[idx].second.size());
 		return deterministicRandom()->randomInt64(serverShards[idx].second[shardIdx].first,
 		                                          serverShards[idx].second[shardIdx].second);
 	}

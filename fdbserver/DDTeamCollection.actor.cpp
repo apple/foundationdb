@@ -245,13 +245,13 @@ public:
 					    (!req.preferLowerUtilization ||
 					     self->teams[currentIndex]->hasHealthyAvailableSpace(self->medianAvailableSpace))) {
 						int64_t loadBytes = self->teams[currentIndex]->getLoadBytes(true, req.inflightPenalty);
-						if ((!bestOption.present() ||
-						     ((bool)req.teamSorter && req.teamSorter(bestOption.get(), self->teams[currentIndex])) ||
-						     (req.preferLowerUtilization && loadBytes < bestLoadBytes) ||
-						     (!req.preferLowerUtilization && loadBytes > bestLoadBytes)) &&
+						if (req.eligible(self->teams[currentIndex]) && // hard constraints
 						    (!req.teamMustHaveShards ||
 						     self->shardsAffectedByTeamFailure->hasShards(ShardsAffectedByTeamFailure::Team(
-						         self->teams[currentIndex]->getServerIDs(), self->primary)))) {
+						         self->teams[currentIndex]->getServerIDs(), self->primary))) &&
+						    // sort conditions
+						    (!bestOption.present() || req.lessCompare(bestOption.get(), self->teams[currentIndex]) ||
+						     !req.lessCompareByLoad(loadBytes, bestLoadBytes))) {
 							bestLoadBytes = loadBytes;
 							bestOption = self->teams[currentIndex];
 							bestIndex = currentIndex;
@@ -299,8 +299,7 @@ public:
 
 				for (int i = 0; i < randomTeams.size(); i++) {
 					int64_t loadBytes = randomTeams[i]->getLoadBytes(true, req.inflightPenalty);
-					if (!bestOption.present() || (req.preferLowerUtilization && loadBytes < bestLoadBytes) ||
-					    (!req.preferLowerUtilization && loadBytes > bestLoadBytes)) {
+					if (!bestOption.present() || !req.lessCompareByLoad(loadBytes, bestLoadBytes)) {
 						bestLoadBytes = loadBytes;
 						bestOption = randomTeams[i];
 					}
