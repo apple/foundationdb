@@ -3231,6 +3231,10 @@ extern "C" void flushAndExit(int exitCode) {
 	flushTraceFileVoid();
 	fflush(stdout);
 	closeTraceFile();
+
+	// Flush all output streams. The original intent is to flush the outfile for contrib/debug_determinism.
+	fflush(nullptr);
+
 #ifdef USE_GCOV
 	__gcov_flush();
 #endif
