@@ -2277,15 +2277,22 @@ ACTOR Future<Void> pruneRange(Reference<BlobManagerData> self, KeyRangeRef range
 		// get the persisted history entry for this granule
 		state Standalone<BlobGranuleHistoryValue> currHistoryNode;
 		state Key historyKey = blobGranuleHistoryKeyFor(currRange, startVersion);
+		state bool foundHistory = false;
 		loop {
 			try {
 				Optional<Value> persistedHistory = wait(tr.get(historyKey));
-				ASSERT(persistedHistory.present());
-				currHistoryNode = decodeBlobGranuleHistoryValue(persistedHistory.get());
+				if (persistedHistory.present()) {
+					currHistoryNode = decodeBlobGranuleHistoryValue(persistedHistory.get());
+					foundHistory = true;
+				}
 				break;
 			} catch (Error& e) {
 				wait(tr.onError(e));
 			}
+		}
+
+		if (!foundHistory) {
+			continue;
 		}
 
 		if (BM_DEBUG) {

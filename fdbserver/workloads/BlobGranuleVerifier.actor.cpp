@@ -461,7 +461,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 							newPruneVersion = deterministicRandom()->randomInt64(prevPruneVersion, oldRead.v);
 							prevPruneVersion = std::max(prevPruneVersion, newPruneVersion);
 							dbgPruneVersion = prevPruneVersion;
-							wait(self->pruneAtVersion(cx, oldRead.range, newPruneVersion, false));
+							wait(self->pruneAtVersion(cx, normalKeys, newPruneVersion, false));
 						}
 						std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> reReadResult =
 						    wait(self->readFromBlob(cx, self, oldRead.range, oldRead.v));

@@ -2338,7 +2338,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 					           metadata->initialSnapshotVersion,
 					           chunkFiles.snapshotFiles.size());
 					for (auto& f : chunkFiles.snapshotFiles) {
-						fmt::print("    {0}}\n", f.version);
+						fmt::print("    {0}\n", f.version);
 					}
 					fmt::print("  delta files {0}:\n", chunkFiles.deltaFiles.size());
 					for (auto& f : chunkFiles.deltaFiles) {
@@ -2346,7 +2346,10 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 					}
 				}
 				ASSERT(chunkFiles.deltaFiles.back().version > req.readVersion);
-				ASSERT(chunkFiles.snapshotFiles.front().version <= req.readVersion);
+				if (chunkFiles.snapshotFiles.front().version > req.readVersion) {
+					// a snapshot file must have been pruned
+					throw blob_granule_transaction_too_old();
+				}
 			} else {
 				// this is an active granule query
 				loop {
