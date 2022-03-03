@@ -2193,6 +2193,7 @@ int main(int argc, char* argv[]) {
 				ProcessFactory<KeyValueStoreProcess>(opts.flowProcessName.c_str());
 			}
 			f = stopAfter(runFlowProcess(opts.flowProcessName, opts.flowProcessEndpoint));
+			g_network->run();
 		} else if (role == ServerRole::KVFileDump) {
 			f = stopAfter(KVFileDump(opts.kvFile));
 			g_network->run();
