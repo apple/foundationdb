@@ -133,10 +133,10 @@ ACTOR Future<bool> dataDistributionCommandActor(Reference<IDatabase> db, std::ve
 				printf("Data distribution is enabled for rebalance.\n");
 			} else if (tokencmp(tokens[2], "rebalance_disk")) {
 				wait(setDDIgnoreRebalanceSwitch(db, ~DDIgnore::REBALANCE_DISK));
-				printf("Data distribution is disabled for rebalance_disk.\n");
+				printf("Data distribution is enabled for rebalance_disk.\n");
 			} else if (tokencmp(tokens[2], "rebalance_read")) {
 				wait(setDDIgnoreRebalanceSwitch(db, ~DDIgnore::REBALANCE_READ));
-				printf("Data distribution is disabled for rebalance_read.\n");
+				printf("Data distribution is enabled for rebalance_read.\n");
 			} else {
 				printf(usage);
 				result = false;
