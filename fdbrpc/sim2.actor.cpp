@@ -1123,11 +1123,9 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> runLoop(Sim2* self) {
-		state ISimulator::ProcessInfo* callingMachine = self->currentProcess;
+	static void runLoop(Sim2* self) {
+		ISimulator::ProcessInfo* callingMachine = self->currentProcess;
 		while (!self->isStopped) {
-			wait(self->net2->yield(TaskPriority::DefaultYield));
-
 			self->mutex.enter();
 			if (self->tasks.size() == 0) {
 				self->mutex.leave();
@@ -1144,18 +1142,13 @@ public:
 			self->yielded = false;
 		}
 		self->currentProcess = callingMachine;
-		self->net2->stop();
 		for (auto& fn : self->stopCallbacks) {
 			fn();
 		}
-		return Void();
 	}
 
 	// Implement ISimulator interface
-	void run() override {
-		Future<Void> loopFuture = runLoop(this);
-		net2->run();
-	}
+	void run() override { runLoop(this); }
 	ProcessInfo* newProcess(const char* name,
 	                        IPAddress ip,
 	                        uint16_t port,
@@ -2094,7 +2087,7 @@ public:
 				t.action.send(Void());
 				ASSERT(this->currentProcess == t.machine);
 			} catch (Error& e) {
-				TraceEvent(SevError, "UnhandledSimulationEventError").error(e, true);
+				TraceEvent(SevError, "UnhandledSimulationEventError").errorUnsuppressed(e);
 				killProcess(t.machine, KillInstantly);
 			}
 

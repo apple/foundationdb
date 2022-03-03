@@ -500,7 +500,7 @@ ACTOR Future<Optional<json_spirit::mObject>> tryReadJSONFile(std::string path) {
 
 	} catch (Error& e) {
 		if (e.code() != error_code_actor_cancelled)
-			TraceEvent(SevWarn, errorEventType).error(e).suppressFor(60).detail("File", path);
+			TraceEvent(SevWarn, errorEventType).errorUnsuppressed(e).suppressFor(60).detail("File", path);
 	}
 
 	return Optional<json_spirit::mObject>();
@@ -744,7 +744,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<S3BlobStoreEndp
 
 		// Attach err to trace event if present, otherwise extract some stuff from the response
 		if (err.present()) {
-			event.error(err.get());
+			event.errorUnsuppressed(err.get());
 		}
 		event.suppressFor(60);
 		if (!err.present()) {
@@ -954,7 +954,7 @@ ACTOR Future<Void> listObjectsStream_impl(Reference<S3BlobStoreEndpoint> bstore,
 		} catch (Error& e) {
 			if (e.code() != error_code_actor_cancelled)
 				TraceEvent(SevWarn, "S3BlobStoreEndpointListResultParseError")
-				    .error(e)
+				    .errorUnsuppressed(e)
 				    .suppressFor(60)
 				    .detail("Resource", fullResource);
 			throw http_bad_response();
@@ -1080,7 +1080,7 @@ ACTOR Future<std::vector<std::string>> listBuckets_impl(Reference<S3BlobStoreEnd
 		} catch (Error& e) {
 			if (e.code() != error_code_actor_cancelled)
 				TraceEvent(SevWarn, "S3BlobStoreEndpointListBucketResultParseError")
-				    .error(e)
+				    .errorUnsuppressed(e)
 				    .suppressFor(60)
 				    .detail("Resource", fullResource);
 			throw http_bad_response();

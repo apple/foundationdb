@@ -1265,10 +1265,12 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 			}
 		}
 	} catch (Error& e) {
-		TraceEvent(relocateShardInterval.end(), distributorId).error(e, true).detail("Duration", now() - startTime);
+		TraceEvent(relocateShardInterval.end(), distributorId)
+		    .errorUnsuppressed(e)
+		    .detail("Duration", now() - startTime);
 		if (now() - startTime > 600) {
 			TraceEvent(SevWarnAlways, "RelocateShardTooLong")
-			    .error(e, true)
+			    .errorUnsuppressed(e)
 			    .detail("Duration", now() - startTime)
 			    .detail("Dest", describe(destIds))
 			    .detail("Src", describe(rd.src));
@@ -1540,8 +1542,8 @@ ACTOR Future<Void> BgDDMountainChopper(DDQueueData* self, int teamCollectionInde
 			traceEvent.detail("ResetCount", resetCount);
 			tr.reset();
 		} catch (Error& e) {
-			traceEvent.error(
-			    e, true); // Log actor_cancelled because it's not legal to suppress an event that's initialized
+			// Log actor_cancelled because it's not legal to suppress an event that's initialized
+			traceEvent.errorUnsuppressed(e);
 			wait(tr.onError(e));
 		}
 
@@ -1655,8 +1657,8 @@ ACTOR Future<Void> BgDDValleyFiller(DDQueueData* self, int teamCollectionIndex) 
 			traceEvent.detail("ResetCount", resetCount);
 			tr.reset();
 		} catch (Error& e) {
-			traceEvent.error(
-			    e, true); // Log actor_cancelled because it's not legal to suppress an event that's initialized
+			// Log actor_cancelled because it's not legal to suppress an event that's initialized
+			traceEvent.errorUnsuppressed(e);
 			wait(tr.onError(e));
 		}
 

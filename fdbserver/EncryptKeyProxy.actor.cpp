@@ -58,7 +58,7 @@ ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ekpInterface, 
 			}
 		}
 	} catch (Error& e) {
-		TraceEvent("EKP_Terminated", ekpInterface.id()).error(e, true);
+		TraceEvent("EKP_Terminated", ekpInterface.id()).errorUnsuppressed(e);
 	}
 
 	return Void();

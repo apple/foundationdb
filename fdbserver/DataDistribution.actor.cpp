@@ -865,7 +865,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 				}
 
 				bool ddEnabled = wait(isDataDistributionEnabled(cx, ddEnabledState));
-				TraceEvent("DataDistributionMoveKeysConflict").detail("DataDistributionEnabled", ddEnabled).error(err);
+				TraceEvent("DataDistributionMoveKeysConflict").error(err).detail("DataDistributionEnabled", ddEnabled);
 				if (ddEnabled) {
 					throw err;
 				}
@@ -891,7 +891,7 @@ Future<Void> sendSnapReq(RequestStream<Req> stream, Req req, Error e) {
 	ErrorOr<REPLY_TYPE(Req)> reply = wait(stream.tryGetReply(req));
 	if (reply.isError()) {
 		TraceEvent("SnapDataDistributor_ReqError")
-		    .error(reply.getError(), true)
+		    .errorUnsuppressed(reply.getError())
 		    .detail("ConvertedErrorType", e.what())
 		    .detail("Peer", stream.getEndpoint().getPrimaryAddress());
 		throw e;
@@ -1012,9 +1012,9 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 	} catch (Error& err) {
 		state Error e = err;
 		TraceEvent("SnapDataDistributor_SnapReqExit")
+		    .errorUnsuppressed(e)
 		    .detail("SnapPayload", snapReq.snapPayload)
-		    .detail("SnapUID", snapReq.snapUID)
-		    .error(e, true /*includeCancelled */);
+		    .detail("SnapUID", snapReq.snapUID);
 		if (e.code() == error_code_snap_storage_failed || e.code() == error_code_snap_tlog_failed ||
 		    e.code() == error_code_operation_cancelled || e.code() == error_code_snap_disable_tlog_pop_failed) {
 			// enable tlog pop on local tlog nodes
@@ -1072,9 +1072,9 @@ ACTOR Future<Void> ddSnapCreate(DistributorSnapRequest snapReq,
 		}
 	} catch (Error& e) {
 		TraceEvent("SnapDDCreateError")
+		    .errorUnsuppressed(e)
 		    .detail("SnapPayload", snapReq.snapPayload)
-		    .detail("SnapUID", snapReq.snapUID)
-		    .error(e, true /*includeCancelled */);
+		    .detail("SnapUID", snapReq.snapUID);
 		if (e.code() != error_code_operation_cancelled) {
 			snapReq.reply.sendError(e);
 		} else {
@@ -1251,10 +1251,10 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 		}
 	} catch (Error& err) {
 		if (normalDataDistributorErrors().count(err.code()) == 0) {
-			TraceEvent("DataDistributorError", di.id()).error(err, true);
+			TraceEvent("DataDistributorError", di.id()).errorUnsuppressed(err);
 			throw err;
 		}
-		TraceEvent("DataDistributorDied", di.id()).error(err, true);
+		TraceEvent("DataDistributorDied", di.id()).errorUnsuppressed(err);
 	}
 
 	return Void();

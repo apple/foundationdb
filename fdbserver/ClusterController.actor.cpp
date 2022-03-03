@@ -296,7 +296,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			TraceEvent(SevWarn, "DetectedFailedRecovery", cluster->id).detail("OldMaster", iMaster.id());
 		} catch (Error& e) {
 			state Error err = e;
-			TraceEvent("CCWDB", cluster->id).error(e, true).detail("Master", iMaster.id());
+			TraceEvent("CCWDB", cluster->id).errorUnsuppressed(e).detail("Master", iMaster.id());
 			if (e.code() != error_code_actor_cancelled)
 				wait(delay(0.0));
 
@@ -313,7 +313,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			TEST(err.code() == error_code_restart_cluster_controller); // Terminated due to cluster-controller restart.
 
 			if (cluster->shouldCommitSuicide || err.code() == error_code_coordinators_changed) {
-				TraceEvent("ClusterControllerTerminate", cluster->id).error(err, true);
+				TraceEvent("ClusterControllerTerminate", cluster->id).errorUnsuppressed(err);
 				throw restart_cluster_controller();
 			}
 
@@ -427,10 +427,10 @@ void checkOutstandingStorageRequests(ClusterControllerData* self) {
 		} catch (Error& e) {
 			if (e.code() == error_code_no_more_servers) {
 				TraceEvent(SevWarn, "RecruitStorageNotAvailable", self->id)
+				    .errorUnsuppressed(e)
 				    .suppressFor(1.0)
 				    .detail("OutstandingReq", i)
-				    .detail("IsCriticalRecruitment", req.first.criticalRecruitment)
-				    .error(e);
+				    .detail("IsCriticalRecruitment", req.first.criticalRecruitment);
 			} else {
 				TraceEvent(SevError, "RecruitStorageError", self->id).error(e);
 				throw;
@@ -464,9 +464,9 @@ void checkOutstandingBlobWorkerRequests(ClusterControllerData* self) {
 		} catch (Error& e) {
 			if (e.code() == error_code_no_more_servers) {
 				TraceEvent(SevWarn, "RecruitBlobWorkerNotAvailable", self->id)
+				    .errorUnsuppressed(e)
 				    .suppressFor(1.0)
-				    .detail("OutstandingReq", i)
-				    .error(e);
+				    .detail("OutstandingReq", i);
 			} else {
 				TraceEvent(SevError, "RecruitBlobWorkerError", self->id).error(e);
 				throw;
@@ -876,8 +876,8 @@ void clusterRecruitStorage(ClusterControllerData* self, RecruitStorageRequest re
 		if (e.code() == error_code_no_more_servers) {
 			self->outstandingStorageRequests.emplace_back(req, now() + SERVER_KNOBS->RECRUITMENT_TIMEOUT);
 			TraceEvent(SevWarn, "RecruitStorageNotAvailable", self->id)
-			    .detail("IsCriticalRecruitment", req.criticalRecruitment)
-			    .error(e);
+			    .error(e)
+			    .detail("IsCriticalRecruitment", req.criticalRecruitment);
 		} else {
 			TraceEvent(SevError, "RecruitStorageError", self->id).error(e);
 			throw; // Any other error will bring down the cluster controller
@@ -2599,6 +2599,7 @@ ACTOR Future<Void> clusterController(Reference<IClusterConnectionRecord> connRec
 	state bool hasConnected = false;
 	loop {
 		try {
+			wait(connRecord->resolveHostnames());
 			ServerCoordinators coordinators(connRecord);
 			wait(clusterController(coordinators, currentCC, hasConnected, asyncPriorityInfo, locality, configDBType));
 		} catch (Error& e) {
