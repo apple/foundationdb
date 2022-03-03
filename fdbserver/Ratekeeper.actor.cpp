@@ -473,8 +473,7 @@ Ratekeeper::Ratekeeper(UID id, Database db)
                 SERVER_KNOBS->TARGET_BYTES_PER_TLOG_BATCH,
                 SERVER_KNOBS->SPRING_BYTES_TLOG_BATCH,
                 SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE_BATCH,
-                SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS_BATCH),
-    lastBusiestCommitTagPick(0.0) {
+                SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS_BATCH) {
 	tagThrottler = std::make_unique<TagThrottler>(db, id);
 	expiredTagThrottleCleanup = recurring([this]() { ThrottleApi::expire(this->db.getReference()); },
 	                                      SERVER_KNOBS->TAG_THROTTLE_EXPIRED_CLEANUP_INTERVAL);
@@ -984,6 +983,17 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 	return Void();
 }
 
+StorageQueueInfo::StorageQueueInfo(UID id, LocalityData locality)
+  : valid(false), id(id), locality(locality), smoothDurableBytes(SERVER_KNOBS->SMOOTHING_AMOUNT),
+    smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
+    smoothDurableVersion(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothLatestVersion(SERVER_KNOBS->SMOOTHING_AMOUNT),
+    smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT),
+    limitReason(limitReason_t::unlimited),
+    busiestWriteTagEventHolder(makeReference<EventCacheHolder>(id.toString() + "/BusiestWriteTag")) {
+	// FIXME: this is a tacky workaround for a potential uninitialized use in trackStorageServerQueueInfo
+	lastReply.instanceID = -1;
+}
+
 void StorageQueueInfo::refreshCommitCost(double elapsed) {
 	busiestWriteTags.clear();
 	TransactionTag busiestTag;
@@ -1018,3 +1028,31 @@ void StorageQueueInfo::refreshCommitCost(double elapsed) {
 	totalWriteOps = 0;
 	totalWriteCosts = 0;
 }
+
+TLogQueueInfo::TLogQueueInfo(UID id)
+  : valid(false), id(id), smoothDurableBytes(SERVER_KNOBS->SMOOTHING_AMOUNT),
+    smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
+    smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT) {
+	// FIXME: this is a tacky workaround for a potential uninitialized use in trackTLogQueueInfo (copied from
+	// storageQueueInfO)
+	lastReply.instanceID = -1;
+}
+
+RatekeeperLimits::RatekeeperLimits(TransactionPriority priority,
+                                   std::string context,
+                                   int64_t storageTargetBytes,
+                                   int64_t storageSpringBytes,
+                                   int64_t logTargetBytes,
+                                   int64_t logSpringBytes,
+                                   double maxVersionDifference,
+                                   int64_t durabilityLagTargetVersions)
+  : tpsLimit(std::numeric_limits<double>::infinity()), tpsLimitMetric(StringRef("Ratekeeper.TPSLimit" + context)),
+    reasonMetric(StringRef("Ratekeeper.Reason" + context)), storageTargetBytes(storageTargetBytes),
+    storageSpringBytes(storageSpringBytes), logTargetBytes(logTargetBytes), logSpringBytes(logSpringBytes),
+    maxVersionDifference(maxVersionDifference),
+    durabilityLagTargetVersions(
+        durabilityLagTargetVersions +
+        SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS), // The read transaction life versions are expected to not
+    // be durable on the storage servers
+    lastDurabilityLag(0), durabilityLagLimit(std::numeric_limits<double>::infinity()), priority(priority),
+    context(context), rkUpdateEventCacheHolder(makeReference<EventCacheHolder>("RkUpdate" + context)) {}

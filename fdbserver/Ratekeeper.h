@@ -66,16 +66,7 @@ struct StorageQueueInfo {
 	uint64_t totalWriteCosts = 0;
 	int totalWriteOps = 0;
 
-	StorageQueueInfo(UID id, LocalityData locality)
-	  : valid(false), id(id), locality(locality), smoothDurableBytes(SERVER_KNOBS->SMOOTHING_AMOUNT),
-	    smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
-	    smoothDurableVersion(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothLatestVersion(SERVER_KNOBS->SMOOTHING_AMOUNT),
-	    smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT),
-	    limitReason(limitReason_t::unlimited),
-	    busiestWriteTagEventHolder(makeReference<EventCacheHolder>(id.toString() + "/BusiestWriteTag")) {
-		// FIXME: this is a tacky workaround for a potential uninitialized use in trackStorageServerQueueInfo
-		lastReply.instanceID = -1;
-	}
+	StorageQueueInfo(UID id, LocalityData locality);
 
 	void refreshCommitCost(double elapsed);
 };
@@ -88,14 +79,7 @@ struct TLogQueueInfo {
 	Smoother smoothDurableBytes, smoothInputBytes, verySmoothDurableBytes;
 	Smoother smoothFreeSpace;
 	Smoother smoothTotalSpace;
-	TLogQueueInfo(UID id)
-	  : valid(false), id(id), smoothDurableBytes(SERVER_KNOBS->SMOOTHING_AMOUNT),
-	    smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
-	    smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT) {
-		// FIXME: this is a tacky workaround for a potential uninitialized use in trackTLogQueueInfo (copied from
-		// storageQueueInfO)
-		lastReply.instanceID = -1;
-	}
+	TLogQueueInfo(UID id);
 };
 
 struct RatekeeperLimits {
@@ -125,17 +109,7 @@ struct RatekeeperLimits {
 	                 int64_t logTargetBytes,
 	                 int64_t logSpringBytes,
 	                 double maxVersionDifference,
-	                 int64_t durabilityLagTargetVersions)
-	  : tpsLimit(std::numeric_limits<double>::infinity()), tpsLimitMetric(StringRef("Ratekeeper.TPSLimit" + context)),
-	    reasonMetric(StringRef("Ratekeeper.Reason" + context)), storageTargetBytes(storageTargetBytes),
-	    storageSpringBytes(storageSpringBytes), logTargetBytes(logTargetBytes), logSpringBytes(logSpringBytes),
-	    maxVersionDifference(maxVersionDifference),
-	    durabilityLagTargetVersions(
-	        durabilityLagTargetVersions +
-	        SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS), // The read transaction life versions are expected to not
-	                                                           // be durable on the storage servers
-	    lastDurabilityLag(0), durabilityLagLimit(std::numeric_limits<double>::infinity()), priority(priority),
-	    context(context), rkUpdateEventCacheHolder(makeReference<EventCacheHolder>("RkUpdate" + context)) {}
+	                 int64_t durabilityLagTargetVersions);
 };
 
 class Ratekeeper {
@@ -143,16 +117,12 @@ class Ratekeeper {
 
 	// Differentiate from GrvProxyInfo in DatabaseContext.h
 	struct GrvProxyInfo {
-		int64_t totalTransactions;
-		int64_t batchTransactions;
-		uint64_t lastThrottledTagChangeId;
+		int64_t totalTransactions{ 0 };
+		int64_t batchTransactions{ 0 };
+		uint64_t lastThrottledTagChangeId{ 0 };
 
-		double lastUpdateTime;
-		double lastTagPushTime;
-
-		GrvProxyInfo()
-		  : totalTransactions(0), batchTransactions(0), lastThrottledTagChangeId(0), lastUpdateTime(0),
-		    lastTagPushTime(0) {}
+		double lastUpdateTime{ 0.0 };
+		double lastTagPushTime{ 0.0 };
 	};
 
 	UID id;
