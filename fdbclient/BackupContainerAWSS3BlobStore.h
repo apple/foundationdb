@@ -1,5 +1,5 @@
 /*
- * BackupContainerAzureBlobStore.h
+ * BackupContainerAWSS3BlobStore.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -23,7 +23,6 @@
 #pragma once
 
 #include "aws/core/Aws.h"
-// #include <aws/core/Aws.h>
 
 void do_aws_test_stuff() {
 	printf("hell world\n");
