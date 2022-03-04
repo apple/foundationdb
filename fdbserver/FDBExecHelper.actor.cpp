@@ -132,7 +132,8 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 					l.address = addr;
 					parentProcessEndpoint = Endpoint(l, token);
 					// TODO : remove debugging code
-					// std::cout << "flowChildProcessEndpoint: " << parentProcessEndpoint.getPrimaryAddress().ip.toString()
+					// std::cout << "flowChildProcessEndpoint: " <<
+					// parentProcessEndpoint.getPrimaryAddress().ip.toString()
 					//           << ", token: " << parentProcessEndpoint.token.toString() << "\n";
 				} catch (Error& e) {
 					std::cerr << "Could not parse network address " << addressArray[0] << std::endl;

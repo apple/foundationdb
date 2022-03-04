@@ -61,7 +61,6 @@ public:
 	virtual StringRef serializedInterface() const = 0;
 	virtual Future<Void> run() = 0;
 	virtual void registerEndpoint(Endpoint p) = 0;
-
 };
 
 struct IProcessFactory {

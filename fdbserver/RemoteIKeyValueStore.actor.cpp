@@ -31,7 +31,6 @@
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-
 StringRef KeyValueStoreProcess::_name = "KeyValueStoreProcess"_sr;
 
 // test adding a guard for guaranteed killing of machine after runIKVS returns
@@ -72,9 +71,7 @@ void cancellableForwardPromise(ReplyPromise<T> output, Future<T> input, Future<V
 	try {
 		choose {
 			when(T value = wait(input)) { output.send(value); }
-			when(wait(stop)) {
-				return;
-			}
+			when(wait(stop)) { return; }
 		}
 	} catch (Error& e) {
 		output.sendError(e);
@@ -142,8 +139,8 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 					    readRangeReq.reply,
 					    fmap([](const RangeResult& result) { return IKVSReadRangeReply(result); },
 					         kvStore->readRange(
-					             readRangeReq.keys, readRangeReq.rowLimit, readRangeReq.byteLimit,
-					             readRangeReq.type)), onClosed.getFuture());
+					             readRangeReq.keys, readRangeReq.rowLimit, readRangeReq.byteLimit, readRangeReq.type)),
+					    onClosed.getFuture());
 				}
 				when(IKVSGetStorageByteRequest req = waitNext(ikvsInterface.getStorageBytes.getFuture())) {
 					StorageBytes storageBytes = kvStore->getStorageBytes();
@@ -206,10 +203,10 @@ ACTOR static Future<int> flowProcessRunner(RemoteIKeyValueStore* self, Promise<V
 	std::vector<std::string> args = { "bin/fdbserver",
 		                              "-r",
 		                              "flowprocess",
-									  "-C",
-									  SERVER_KNOBS->CONN_FILE,
-									  "--logdir",
-									  SERVER_KNOBS->LOG_DIRECTORY,
+		                              "-C",
+		                              SERVER_KNOBS->CONN_FILE,
+		                              "--logdir",
+		                              SERVER_KNOBS->LOG_DIRECTORY,
 		                              "-p",
 		                              flowProcessAddr,
 		                              "--process-name",
