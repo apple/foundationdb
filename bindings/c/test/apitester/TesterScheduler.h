@@ -32,15 +32,27 @@ using TTaskFct = std::function<void(void)>;
 
 extern const TTaskFct NO_OP_TASK;
 
+/**
+ * Scheduler for asynchronous execution of tasks on a pool of threads
+ */
 class IScheduler {
 public:
 	virtual ~IScheduler() {}
+
+	// Create scheduler threads and begin accepting tasks
 	virtual void start() = 0;
+
+	// Schedule a task for asynchronous execution
 	virtual void schedule(TTaskFct task) = 0;
+
+	// Gracefully stop the scheduler. Waits for already running tasks to be finish
 	virtual void stop() = 0;
+
+	// Join with all threads of the scheduler
 	virtual void join() = 0;
 };
 
+// create a scheduler using given number of threads
 std::unique_ptr<IScheduler> createScheduler(int numThreads);
 
 } // namespace FdbApiTester

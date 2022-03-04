@@ -31,27 +31,55 @@
 
 namespace FdbApiTester {
 
+/**
+ * Interface to be used for implementation of a concrete transaction
+ */
 class ITransactionContext {
 public:
 	virtual ~ITransactionContext() {}
+
+	// Current FDB transaction
 	virtual Transaction* tx() = 0;
+
+	// Schedule a continuation to be executed when the future gets ready
 	virtual void continueAfter(Future f, TTaskFct cont) = 0;
+
+	// Commit the transaction
 	virtual void commit() = 0;
+
+	// Mark the transaction as completed without committing it (for read transactions)
 	virtual void done() = 0;
+
+	// A continuation to be executed when all of the given futures get ready
 	virtual void continueAfterAll(std::shared_ptr<std::vector<Future>> futures, TTaskFct cont);
 };
 
+/**
+ * Interface of an actor object implementing a concrete transaction
+ */
 class ITransactionActor {
 public:
 	virtual ~ITransactionActor() {}
+
+	// Initialize with the given transaction context
 	virtual void init(ITransactionContext* ctx) = 0;
+
+	// Start execution of the transaction, also called on retries
 	virtual void start() = 0;
+
+	// Reset the transaction state
 	virtual void reset() = 0;
+
+	// Abort the transaction with an unretriable error
 	virtual void setError(fdb_error_t err) { error = err; }
 
+	// Unretriable error, set if the transaction has failed
 	fdb_error_t error = error_code_success;
 };
 
+/**
+ * A helper base class for transaction actors
+ */
 class TransactionActorBase : public ITransactionActor {
 public:
 	void init(ITransactionContext* ctx) override { context = ctx; }
@@ -66,8 +94,12 @@ private:
 	ITransactionContext* context = nullptr;
 };
 
+// Type of the lambda functions implementing a transaction
 using TTxStartFct = std::function<void(ITransactionContext*)>;
 
+/**
+ * A wrapper class for transactions implemented by lambda functions
+ */
 class TransactionFct : public TransactionActorBase {
 public:
 	TransactionFct(TTxStartFct startFct) : startFct(startFct) {}
@@ -77,13 +109,25 @@ private:
 	TTxStartFct startFct;
 };
 
+/**
+ * Configuration of transaction execution mode
+ */
 struct TransactionExecutorOptions {
-	std::string prefix = "";
+	// Use blocking waits on futures
 	bool blockOnFutures = false;
+
+	// Create each transaction in a separate database instance
 	bool databasePerTransaction = false;
+
+	// The size of the database instance pool
 	int numDatabases = 1;
 };
 
+/**
+ * Transaction executor provides an interface for executing transactions
+ * It is responsible for instantiating FDB databases and transactions and managing their lifecycle
+ * according to the provided options
+ */
 class ITransactionExecutor {
 public:
 	virtual ~ITransactionExecutor() {}
@@ -91,6 +135,7 @@ public:
 	virtual void execute(std::shared_ptr<ITransactionActor> tx, TTaskFct cont) = 0;
 };
 
+// Create a transaction executor for the given options
 std::unique_ptr<ITransactionExecutor> createTransactionExecutor(const TransactionExecutorOptions& options);
 
 } // namespace FdbApiTester

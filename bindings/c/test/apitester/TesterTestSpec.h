@@ -31,32 +31,58 @@
 
 namespace FdbApiTester {
 
+/// Workload specification
 struct WorkloadSpec {
 	std::string name;
 	std::unordered_map<std::string, std::string> options;
 };
 
+// Test speficification loaded from a *.toml file
 struct TestSpec {
+	// Title of the test
 	std::string title;
-	// api version, using the latest version by default
+
+	// FDB API version, using the latest version by default
 	int apiVersion = FDB_API_VERSION;
+
+	// Use blocking waits on futures instead of scheduling callbacks
 	bool blockOnFutures = false;
+
+	// Use multi-threaded FDB client
 	bool multiThreaded = false;
+
+	// Enable injection of errors in FDB client
 	bool buggify = false;
+
+	// Execute future callbacks on the threads of the external FDB library
+	// rather than on the main thread of the local FDB client library
 	bool fdbCallbacksOnExternalThreads = false;
+
+	// Execute each transaction in a separate database instance
 	bool databasePerTransaction = false;
+
+	// Size of the FDB client thread pool (a random number in the [min,max] range)
 	int minFdbThreads = 1;
 	int maxFdbThreads = 1;
+
+	// Size of the thread pool for test workloads (a random number in the [min,max] range)
 	int minClientThreads = 1;
 	int maxClientThreads = 1;
+
+	// Size of the database instance pool (a random number in the [min,max] range)
+	// Each transaction is assigned randomly to one of the databases in the pool
 	int minDatabases = 1;
 	int maxDatabases = 1;
+
+	// Number of workload clients (a random number in the [min,max] range)
 	int minClients = 1;
 	int maxClients = 10;
-	std::string testFile;
+
+	// List of workloads with their options
 	std::vector<WorkloadSpec> workloads;
 };
 
+// Read the test specfication from a *.toml file
 TestSpec readTomlTestSpec(std::string fileName);
 
 } // namespace FdbApiTester

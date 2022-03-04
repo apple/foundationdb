@@ -34,19 +34,33 @@ namespace FdbApiTester {
 
 class WorkloadManager;
 
+// Workoad interface
 class IWorkload {
 public:
 	virtual ~IWorkload() {}
+
+	// Intialize the workload
 	virtual void init(WorkloadManager* manager) = 0;
+
+	// Start executing the workload
 	virtual void start() = 0;
 };
 
+// Workload configuration
 struct WorkloadConfig {
+	// Workoad name
 	std::string name;
+
+	// Client ID assigned to the workload (a number from 0 to numClients-1)
 	int clientId;
+
+	// Total number of clients
 	int numClients;
+
+	// Workload options: as key-value pairs
 	std::unordered_map<std::string, std::string> options;
 
+	// Get option of a certain type by name. Throws an exception if the values is of a wrong type
 	int getIntOption(const std::string& name, int defaultVal) const;
 	double getFloatOption(const std::string& name, double defaultVal) const;
 };
@@ -56,6 +70,8 @@ struct WorkloadConfig {
 class WorkloadBase : public IWorkload {
 public:
 	WorkloadBase(const WorkloadConfig& config);
+
+	// Initialize the workload
 	void init(WorkloadManager* manager) override;
 
 protected:
@@ -65,12 +81,12 @@ protected:
 	// Execute a transaction within the workload
 	void execTransaction(std::shared_ptr<ITransactionActor> tx, TTaskFct cont, bool failOnError = true);
 
-	// Execute a transaction within the workload, a convenience method for tranasactions defined by a single lambda
+	// Execute a transaction within the workload, a convenience method for a tranasaction defined by a lambda function
 	void execTransaction(TTxStartFct start, TTaskFct cont, bool failOnError = true) {
 		execTransaction(std::make_shared<TransactionFct>(start), cont, failOnError);
 	}
 
-	// Log an error message
+	// Log an error message, increase error counter
 	void error(const std::string& msg);
 
 	// Log an info message
@@ -85,13 +101,24 @@ private:
 	// Keep track of tasks scheduled by the workload
 	// End workload when this number falls to 0
 	std::atomic<int> tasksScheduled;
+
+	// Number of errors logged
 	std::atomic<int> numErrors;
 
 protected:
+	// Client ID assigned to the workload (a number from 0 to numClients-1)
 	int clientId;
+
+	// Total number of clients
 	int numClients;
+
+	// The maximum number of errors before stoppoing the workload
 	int maxErrors;
+
+	// Workload identifier, consisting of workload name and client ID
 	std::string workloadId;
+
+	// Workload is failed, no further transactions or continuations will be scheduled by the workload
 	std::atomic<bool> failed;
 };
 
@@ -109,6 +136,7 @@ public:
 	// Run all workloads. Blocks until all workloads complete
 	void run();
 
+	// True if at least one workload has failed
 	bool failed() {
 		std::unique_lock<std::mutex> lock(mutex);
 		return numWorkloadsFailed > 0;
@@ -117,29 +145,52 @@ public:
 private:
 	friend WorkloadBase;
 
+	// Info about a running workload
 	struct WorkloadInfo {
+		// Reference to the workoad for ownership
 		std::shared_ptr<IWorkload> ref;
+		// Continuation to be executed after completing the workload
 		TTaskFct cont;
 	};
 
+	// To be called by a workload to notify that it is done
 	void workloadDone(IWorkload* workload, bool failed);
 
+	// Transaction executor to be used by the workloads
 	ITransactionExecutor* txExecutor;
+
+	// A scheduler to be used by the workloads
 	IScheduler* scheduler;
 
+	// Mutex protects access to workloads & numWorkloadsFailed
 	std::mutex mutex;
+
+	// A map of currently running workloads
 	std::unordered_map<IWorkload*, WorkloadInfo> workloads;
+
+	// Number of workloads failed
 	int numWorkloadsFailed;
 };
 
+// A workload factory
 struct IWorkloadFactory {
+	// create a workload by name
 	static std::shared_ptr<IWorkload> create(std::string const& name, const WorkloadConfig& config);
+
+	// a singleton registry of workload factories
 	static std::unordered_map<std::string, IWorkloadFactory*>& factories();
 
+	// Interface to be implemented by a workload factory
 	virtual ~IWorkloadFactory() = default;
 	virtual std::shared_ptr<IWorkload> create(const WorkloadConfig& config) = 0;
 };
 
+/**
+ * A template for a workload factory for creating workloads of a certain type
+ *
+ * Declare a global instance of the factory for a workload type as follows:
+ * WorkloadFactory<MyWorkload> MyWorkloadFactory("myWorkload");
+ */
 template <class WorkloadType>
 struct WorkloadFactory : IWorkloadFactory {
 	WorkloadFactory(const char* name) { factories()[name] = this; }
