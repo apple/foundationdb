@@ -1058,7 +1058,7 @@ ACTOR static Future<Void> backgroundGrvUpdater(DatabaseContext* cx) {
 					    .detail("CachedReadVersion", cx->getCachedReadVersion())
 					    .detail("CachedTime", cx->getLastGrvTime());
 				} catch (Error& e) {
-					TraceEvent(SevInfo, "BackgroundGrvUpdaterTxnError").error(e, true);
+					TraceEvent(SevInfo, "BackgroundGrvUpdaterTxnError").errorUnsuppressed(e);
 					wait(tr.onError(e));
 				}
 			} else {
@@ -1069,7 +1069,7 @@ ACTOR static Future<Void> backgroundGrvUpdater(DatabaseContext* cx) {
 			}
 		}
 	} catch (Error& e) {
-		TraceEvent(SevInfo, "BackgroundGrvUpdaterFailed").error(e, true);
+		TraceEvent(SevInfo, "BackgroundGrvUpdaterFailed").errorUnsuppressed(e);
 		throw;
 	}
 }
