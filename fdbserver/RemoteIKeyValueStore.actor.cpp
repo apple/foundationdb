@@ -70,7 +70,6 @@ void cancellableForwardPromise(ReplyPromise<T> output, Future<T> input, Future<V
 		choose {
 			when(T value = wait(input)) { output.send(value); }
 			when(wait(stop)) {
-				// fprintf(stderr, "Cancelled Forward Promise\n");
 				return;
 			}
 		}
@@ -136,17 +135,12 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 					    onClosed.getFuture());
 				}
 				when(IKVSReadRangeRequest readRangeReq = waitNext(ikvsInterface.readRange.getFuture())) {
-					// forwardPromise(
-					//     readRangeReq.reply,
-					//     fmap([](const RangeResult& result) { return IKVSReadRangeReply(result); },
-					//          kvStore->readRange(
-					//              readRangeReq.keys, readRangeReq.rowLimit, readRangeReq.byteLimit,
-					//              readRangeReq.type)));
 					cancellableForwardPromise(
 					    readRangeReq.reply,
-					    kvStore->readRange(
-					        readRangeReq.keys, readRangeReq.rowLimit, readRangeReq.byteLimit, readRangeReq.type),
-					    onClosed.getFuture());
+					    fmap([](const RangeResult& result) { return IKVSReadRangeReply(result); },
+					         kvStore->readRange(
+					             readRangeReq.keys, readRangeReq.rowLimit, readRangeReq.byteLimit,
+					             readRangeReq.type)), onClosed.getFuture());
 				}
 				when(IKVSGetStorageByteRequest req = waitNext(ikvsInterface.getStorageBytes.getFuture())) {
 					StorageBytes storageBytes = kvStore->getStorageBytes();

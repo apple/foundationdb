@@ -244,7 +244,7 @@ struct IKVSReadRangeRequest {
 	int rowLimit;
 	int byteLimit;
 	IKeyValueStore::ReadType type;
-	ReplyPromise<RangeResult> reply;
+	ReplyPromise<IKVSReadRangeReply> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -429,10 +429,9 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 	                              int rowLimit = 1 << 30,
 	                              int byteLimit = 1 << 30,
 	                              ReadType type = ReadType::NORMAL) override {
-		IKVSReadRangeRequest req{ keys, rowLimit, byteLimit, type, ReplyPromise<RangeResult>() };
-		return interf.readRange.getReply(req);
-		// return fmap([](const IKVSReadRangeReply& reply) { return reply.toRangeResult(); },
-		//             interf.readRange.getReply(req));
+		IKVSReadRangeRequest req{ keys, rowLimit, byteLimit, type, ReplyPromise<IKVSReadRangeReply>() };
+		return fmap([](const IKVSReadRangeReply& reply) { return reply.toRangeResult(); },
+		            interf.readRange.getReply(req));
 	}
 
 	StorageBytes getStorageBytes() const override { return storageBytes; }
