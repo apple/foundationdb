@@ -46,53 +46,6 @@ bool Random::randomBool(double trueRatio) {
 	return std::uniform_real_distribution<double>(0.0, 1.0)(random) <= trueRatio;
 }
 
-int vsformat(std::string& outputString, const char* form, va_list args) {
-	char buf[200];
-
-	va_list args2;
-	va_copy(args2, args);
-	int size = vsnprintf(buf, sizeof(buf), form, args2);
-	va_end(args2);
-
-	if (size >= 0 && size < sizeof(buf)) {
-		outputString = std::string(buf, size);
-		return size;
-	}
-
-#ifdef _WIN32
-	// Microsoft's non-standard vsnprintf doesn't return a correct size, but just an error, so determine the necessary
-	// size
-	va_copy(args2, args);
-	size = _vscprintf(form, args2);
-	va_end(args2);
-#endif
-
-	if (size < 0) {
-		return -1;
-	}
-
-	outputString.resize(size + 1);
-	size = vsnprintf(&outputString[0], outputString.size(), form, args);
-	if (size < 0 || size >= outputString.size()) {
-		return -1;
-	}
-
-	outputString.resize(size);
-	return size;
-}
-
-std::string format(const char* form, ...) {
-	va_list args;
-	va_start(args, form);
-
-	std::string str;
-	int result = vsformat(str, form, args);
-	va_end(args);
-
-	ASSERT(result >= 0);
-	return str;
-}
-
 void print_internal_error(const char* msg, const char* file, int line) {
 	fprintf(stderr, "Assertion %s failed @ %s %d:\n", msg, file, line);
 }

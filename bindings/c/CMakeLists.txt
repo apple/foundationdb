@@ -230,6 +230,7 @@ if(NOT WIN32 AND NOT IS_ARM_MAC)
             )
   add_fdbclient_test(
     NAME fdb_c_api_tests
+    DISABLE_LOG_DUMP
     COMMAND ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/run_c_api_tests.py
             --cluster-file
             @CLUSTER_FILE@

@@ -19,7 +19,7 @@
  */
 #include "TesterApiWrapper.h"
 #include <cstdint>
-#include <iostream>
+#include <fmt/printf.h>
 
 namespace FdbApiTester {
 
@@ -27,7 +27,7 @@ namespace {
 
 void fdb_check(fdb_error_t e) {
 	if (e) {
-		std::cerr << fdb_get_error(e) << std::endl;
+		fmt::print(stderr, "Unexpected error: %s\n", fdb_get_error(e));
 		std::abort();
 	}
 }

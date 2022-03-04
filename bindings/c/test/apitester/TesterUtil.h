@@ -26,6 +26,24 @@
 #include <random>
 #include <ostream>
 #include <optional>
+#include <fmt/format.h>
+
+namespace fmt {
+
+template <typename T>
+struct formatter<std::optional<T>> : fmt::formatter<T> {
+
+	template <typename FormatContext>
+	auto format(const std::optional<T>& opt, FormatContext& ctx) {
+		if (opt) {
+			fmt::formatter<T>::format(*opt, ctx);
+			return ctx.out();
+		}
+		return fmt::format_to(ctx.out(), "<empty>");
+	}
+};
+
+} // namespace fmt
 
 namespace FdbApiTester {
 
@@ -41,18 +59,6 @@ public:
 
 	std::mt19937 random;
 };
-
-template <class T>
-std::ostream& operator<<(std::ostream& os, const std::optional<T>& obj) {
-	if (obj.has_value()) {
-		os << obj.value();
-	} else {
-		os << "<empty>";
-	}
-	return os;
-}
-
-std::string format(const char* form, ...);
 
 class TesterError : public std::runtime_error {
 public:

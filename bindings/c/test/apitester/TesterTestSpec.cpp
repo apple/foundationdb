@@ -21,7 +21,7 @@
 #include "TesterTestSpec.h"
 #include "TesterUtil.h"
 #include <toml.hpp>
-#include <iostream>
+#include <fmt/format.h>
 
 namespace FdbApiTester {
 
@@ -31,11 +31,11 @@ void processIntOption(const std::string& value, const std::string& optionName, i
 	char* endptr;
 	res = strtol(value.c_str(), &endptr, 10);
 	if (*endptr != '\0') {
-		throw TesterError(format("Invalid test file. Invalid value %s for %s\n", value.c_str(), optionName.c_str()));
+		throw TesterError(fmt::format("Invalid test file. Invalid value {} for {}", value, optionName));
 	}
 	if (res < minVal || res > maxVal) {
 		throw TesterError(
-		    format("Invalid test file. Value for %s must be between %d and %d\n", optionName.c_str(), minVal, maxVal));
+		    fmt::format("Invalid test file. Value for {} must be between {} and {}", optionName, minVal, maxVal));
 	}
 }
 
@@ -133,9 +133,8 @@ TestSpec readTomlTestSpec(std::string fileName) {
 		if (testSpecTestKeys.find(k) != testSpecTestKeys.end()) {
 			testSpecTestKeys[k](toml_to_string(v), &spec);
 		} else {
-			throw TesterError(format("Invalid test file. Unrecognized test parameter. Name: %s, value %s",
-			                         k.c_str(),
-			                         toml_to_string(v).c_str()));
+			throw TesterError(fmt::format(
+			    "Invalid test file. Unrecognized test parameter. Name: {}, value {}", k, toml_to_string(v)));
 		}
 	}
 

@@ -20,15 +20,57 @@
 
 #include "TesterWorkload.h"
 #include "TesterUtil.h"
+#include <cstdlib>
 #include <memory>
+#include <fmt/format.h>
 
 namespace FdbApiTester {
+
+int WorkloadConfig::getIntOption(const std::string& name, int defaultVal) const {
+	auto iter = options.find(name);
+	if (iter == options.end()) {
+		return defaultVal;
+	} else {
+		char* endptr;
+		int intVal = strtol(iter->second.c_str(), &endptr, 10);
+		if (*endptr != '\0') {
+			throw TesterError(
+			    fmt::format("Invalid workload configuration. Invalid value {} for {}", iter->second, name));
+		}
+		return intVal;
+	}
+}
+
+double WorkloadConfig::getFloatOption(const std::string& name, double defaultVal) const {
+	auto iter = options.find(name);
+	if (iter == options.end()) {
+		return defaultVal;
+	} else {
+		char* endptr;
+		double floatVal = strtod(iter->second.c_str(), &endptr);
+		if (*endptr != '\0') {
+			throw TesterError(
+			    fmt::format("Invalid workload configuration. Invalid value {} for {}", iter->second, name));
+		}
+		return floatVal;
+	}
+}
+
+WorkloadBase::WorkloadBase(const WorkloadConfig& config)
+  : manager(nullptr), tasksScheduled(0), numErrors(0), clientId(config.clientId), numClients(config.numClients),
+    failed(false) {
+	maxErrors = config.getIntOption("maxErrors", 10);
+	workloadId = fmt::format("{}{}", config.name, clientId);
+}
 
 void WorkloadBase::init(WorkloadManager* manager) {
 	this->manager = manager;
 }
 
 void WorkloadBase::schedule(TTaskFct task) {
+	if (failed) {
+		return;
+	}
 	tasksScheduled++;
 	manager->scheduler->schedule([this, task]() {
 		task();
@@ -37,18 +79,51 @@ void WorkloadBase::schedule(TTaskFct task) {
 	});
 }
 
-void WorkloadBase::execTransaction(std::shared_ptr<ITransactionActor> tx, TTaskFct cont) {
+void WorkloadBase::execTransaction(std::shared_ptr<ITransactionActor> tx, TTaskFct cont, bool failOnError) {
+	if (failed) {
+		return;
+	}
 	tasksScheduled++;
-	manager->txExecutor->execute(tx, [this, cont]() {
-		cont();
+	manager->txExecutor->execute(tx, [this, tx, cont, failOnError]() {
+		if (tx->error == error_code_success) {
+			cont();
+		} else {
+			std::string msg =
+			    fmt::format("Transaction failed with error: {} ({}})", tx->error, fdb_get_error(tx->error));
+			if (failOnError) {
+				error(msg);
+				failed = true;
+			} else {
+				info(msg);
+				cont();
+			}
+		}
 		tasksScheduled--;
 		checkIfDone();
 	});
 }
 
+void WorkloadBase::info(const std::string& msg) {
+	fmt::print(stderr, "[{}] {}\n", workloadId, msg);
+}
+
+void WorkloadBase::error(const std::string& msg) {
+	fmt::print(stderr, "[{}] ERROR: {}\n", workloadId, msg);
+	numErrors++;
+	if (numErrors > maxErrors && !failed) {
+		fmt::print(stderr, "[{}] ERROR: Stopping workload after {} errors\n", workloadId, numErrors);
+		failed = true;
+	}
+}
+
 void WorkloadBase::checkIfDone() {
 	if (tasksScheduled == 0) {
-		manager->workloadDone(this);
+		if (numErrors > 0) {
+			error(fmt::format("Workload failed with {} errors", numErrors.load()));
+		} else {
+			info("Workload successfully completed");
+		}
+		manager->workloadDone(this, numErrors > 0);
 	}
 }
 
@@ -65,9 +140,14 @@ void WorkloadManager::run() {
 		iter.first->start();
 	}
 	scheduler->join();
+	if (numWorkloadsFailed > 0) {
+		fmt::print(stderr, "{} workloads failed", numWorkloadsFailed);
+	} else {
+		fprintf(stderr, "All workloads succesfully completed");
+	}
 }
 
-void WorkloadManager::workloadDone(IWorkload* workload) {
+void WorkloadManager::workloadDone(IWorkload* workload, bool failed) {
 	std::unique_lock<std::mutex> lock(mutex);
 	auto iter = workloads.find(workload);
 	ASSERT(iter != workloads.end());
@@ -75,6 +155,9 @@ void WorkloadManager::workloadDone(IWorkload* workload) {
 	iter->second.cont();
 	lock.lock();
 	workloads.erase(iter);
+	if (failed) {
+		numWorkloadsFailed++;
+	}
 	bool done = workloads.empty();
 	lock.unlock();
 	if (done) {

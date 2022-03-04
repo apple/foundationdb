@@ -47,6 +47,9 @@ public:
 	virtual void init(ITransactionContext* ctx) = 0;
 	virtual void start() = 0;
 	virtual void reset() = 0;
+	virtual void setError(fdb_error_t err) { error = err; }
+
+	fdb_error_t error = error_code_success;
 };
 
 class TransactionActorBase : public ITransactionActor {

@@ -25,6 +25,7 @@
 #define APITESTER_WORKLOAD_H
 
 #include "TesterTransactionExecutor.h"
+#include "TesterUtil.h"
 #include <atomic>
 #include <unordered_map>
 #include <mutex>
@@ -41,16 +42,20 @@ public:
 };
 
 struct WorkloadConfig {
+	std::string name;
 	int clientId;
 	int numClients;
 	std::unordered_map<std::string, std::string> options;
+
+	int getIntOption(const std::string& name, int defaultVal) const;
+	double getFloatOption(const std::string& name, double defaultVal) const;
 };
 
 // A base class for test workloads
 // Tracks if workload is active, notifies the workload manager when the workload completes
 class WorkloadBase : public IWorkload {
 public:
-	WorkloadBase() : manager(nullptr), tasksScheduled(0) {}
+	WorkloadBase(const WorkloadConfig& config);
 	void init(WorkloadManager* manager) override;
 
 protected:
@@ -58,12 +63,18 @@ protected:
 	void schedule(TTaskFct task);
 
 	// Execute a transaction within the workload
-	void execTransaction(std::shared_ptr<ITransactionActor> tx, TTaskFct cont);
+	void execTransaction(std::shared_ptr<ITransactionActor> tx, TTaskFct cont, bool failOnError = true);
 
 	// Execute a transaction within the workload, a convenience method for tranasactions defined by a single lambda
-	void execTransaction(TTxStartFct start, TTaskFct cont) {
-		execTransaction(std::make_shared<TransactionFct>(start), cont);
+	void execTransaction(TTxStartFct start, TTaskFct cont, bool failOnError = true) {
+		execTransaction(std::make_shared<TransactionFct>(start), cont, failOnError);
 	}
+
+	// Log an error message
+	void error(const std::string& msg);
+
+	// Log an info message
+	void info(const std::string& msg);
 
 private:
 	WorkloadManager* manager;
@@ -74,6 +85,14 @@ private:
 	// Keep track of tasks scheduled by the workload
 	// End workload when this number falls to 0
 	std::atomic<int> tasksScheduled;
+	std::atomic<int> numErrors;
+
+protected:
+	int clientId;
+	int numClients;
+	int maxErrors;
+	std::string workloadId;
+	std::atomic<bool> failed;
 };
 
 // Workload manager
@@ -81,7 +100,7 @@ private:
 class WorkloadManager {
 public:
 	WorkloadManager(ITransactionExecutor* txExecutor, IScheduler* scheduler)
-	  : txExecutor(txExecutor), scheduler(scheduler) {}
+	  : txExecutor(txExecutor), scheduler(scheduler), numWorkloadsFailed(0) {}
 
 	// Add a workload
 	// A continuation is to be specified for subworkloads
@@ -89,6 +108,11 @@ public:
 
 	// Run all workloads. Blocks until all workloads complete
 	void run();
+
+	bool failed() {
+		std::unique_lock<std::mutex> lock(mutex);
+		return numWorkloadsFailed > 0;
+	}
 
 private:
 	friend WorkloadBase;
@@ -98,13 +122,14 @@ private:
 		TTaskFct cont;
 	};
 
-	void workloadDone(IWorkload* workload);
+	void workloadDone(IWorkload* workload, bool failed);
 
 	ITransactionExecutor* txExecutor;
 	IScheduler* scheduler;
 
 	std::mutex mutex;
 	std::unordered_map<IWorkload*, WorkloadInfo> workloads;
+	int numWorkloadsFailed;
 };
 
 struct IWorkloadFactory {

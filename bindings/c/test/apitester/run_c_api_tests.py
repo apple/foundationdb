@@ -86,7 +86,9 @@ def run_tests(args):
                   if os.path.isfile(os.path.join(args.test_dir, f)) and f.endswith(".toml")]
 
     for test_file in test_files:
+        get_logger().info('=========================================================')
         get_logger().info('Running test %s' % test_file)
+        get_logger().info('=========================================================')
         ret_code = run_tester(args, os.path.join(args.test_dir, test_file))
         if ret_code != 0:
             num_failed += 1

@@ -21,22 +21,10 @@
 #include "TesterTransactionExecutor.h"
 #include "TesterUtil.h"
 #include "test/apitester/TesterScheduler.h"
-#include <iostream>
 #include <memory>
 #include <unordered_map>
 
 namespace FdbApiTester {
-
-namespace {
-
-void fdb_check(fdb_error_t e) {
-	if (e) {
-		std::cerr << fdb_get_error(e) << std::endl;
-		std::abort();
-	}
-}
-
-} // namespace
 
 void ITransactionContext::continueAfterAll(std::shared_ptr<std::vector<Future>> futures, TTaskFct cont) {
 	auto counter = std::make_shared<std::atomic<int>>(futures->size());
@@ -56,7 +44,7 @@ public:
 	                   TTaskFct cont,
 	                   const TransactionExecutorOptions& options,
 	                   IScheduler* scheduler)
-	  : options(options), fdbTx(tx), txActor(txActor), contAfterDone(cont), scheduler(scheduler), finalError(0) {}
+	  : options(options), fdbTx(tx), txActor(txActor), contAfterDone(cont), scheduler(scheduler) {}
 
 	Transaction* tx() override { return &fdbTx; }
 	void continueAfter(Future f, TTaskFct cont) override { doContinueAfter(f, cont); }
@@ -85,12 +73,22 @@ private:
 		scheduler->schedule([this, f, cont]() mutable {
 			std::unique_lock<std::mutex> lock(mutex);
 			if (!onErrorFuture) {
-				fdb_check(fdb_future_block_until_ready(f.fdbFuture()));
-				fdb_error_t err = f.getError();
+				fdb_error_t err = fdb_future_block_until_ready(f.fdbFuture());
+				if (err) {
+					lock.unlock();
+					transactionFailed(err);
+					return;
+				}
+				err = f.getError();
 				if (err) {
 					if (err != error_code_transaction_cancelled) {
 						onErrorFuture = fdbTx.onError(err);
-						fdb_check(fdb_future_block_until_ready(onErrorFuture.fdbFuture()));
+						fdb_error_t err2 = fdb_future_block_until_ready(onErrorFuture.fdbFuture());
+						if (err2) {
+							lock.unlock();
+							transactionFailed(err2);
+							return;
+						}
 						scheduler->schedule([this]() { handleOnErrorResult(); });
 					}
 				} else {
@@ -105,7 +103,10 @@ private:
 		if (!onErrorFuture) {
 			waitMap[f.fdbFuture()] = WaitInfo{ f, cont };
 			lock.unlock();
-			fdb_check(fdb_future_set_callback(f.fdbFuture(), futureReadyCallback, this));
+			fdb_error_t err = fdb_future_set_callback(f.fdbFuture(), futureReadyCallback, this);
+			if (err) {
+				transactionFailed(err);
+			}
 		}
 	}
 
@@ -128,7 +129,10 @@ private:
 				waitMap.clear();
 				onErrorFuture = tx()->onError(err);
 				lock.unlock();
-				fdb_check(fdb_future_set_callback(onErrorFuture.fdbFuture(), onErrorReadyCallback, this));
+				fdb_error_t err = fdb_future_set_callback(onErrorFuture.fdbFuture(), onErrorReadyCallback, this);
+				if (err) {
+					transactionFailed(err);
+				}
 			}
 		} else {
 			scheduler->schedule(cont);
@@ -149,10 +153,7 @@ private:
 		fdb_error_t err = onErrorFuture.getError();
 		onErrorFuture.reset();
 		if (err) {
-			finalError = err;
-			std::cout << "Fatal error: " << fdb_get_error(finalError) << std::endl;
-			ASSERT(false);
-			done();
+			transactionFailed(err);
 		} else {
 			lock.unlock();
 			txActor->reset();
@@ -165,6 +166,15 @@ private:
 		TTaskFct cont;
 	};
 
+	void transactionFailed(fdb_error_t err) {
+		std::unique_lock<std::mutex> lock(mutex);
+		onErrorFuture.reset();
+		waitMap.clear();
+		lock.unlock();
+		txActor->setError(err);
+		done();
+	}
+
 	const TransactionExecutorOptions& options;
 	Transaction fdbTx;
 	std::shared_ptr<ITransactionActor> txActor;
@@ -173,7 +183,6 @@ private:
 	Future onErrorFuture;
 	TTaskFct contAfterDone;
 	IScheduler* scheduler;
-	fdb_error_t finalError;
 };
 
 class TransactionExecutor : public ITransactionExecutor {
@@ -187,7 +196,13 @@ public:
 		this->options = options;
 		for (int i = 0; i < options.numDatabases; i++) {
 			FDBDatabase* db;
-			fdb_check(fdb_create_database(clusterFile, &db));
+			fdb_error_t err = fdb_create_database(clusterFile, &db);
+			if (err != error_code_success) {
+				throw TesterError(fmt::format("Failed create database with the culster file '{}'. Error: {}({})",
+				                              clusterFile,
+				                              err,
+				                              fdb_get_error(err)));
+			}
 			databases.push_back(db);
 		}
 	}
@@ -195,10 +210,15 @@ public:
 	void execute(std::shared_ptr<ITransactionActor> txActor, TTaskFct cont) override {
 		int idx = random.randomInt(0, options.numDatabases - 1);
 		FDBTransaction* tx;
-		fdb_check(fdb_database_create_transaction(databases[idx], &tx));
-		TransactionContext* ctx = new TransactionContext(tx, txActor, cont, options, scheduler);
-		txActor->init(ctx);
-		txActor->start();
+		fdb_error_t err = fdb_database_create_transaction(databases[idx], &tx);
+		if (err != error_code_success) {
+			txActor->setError(err);
+			cont();
+		} else {
+			TransactionContext* ctx = new TransactionContext(tx, txActor, cont, options, scheduler);
+			txActor->init(ctx);
+			txActor->start();
+		}
 	}
 
 	void release() override {

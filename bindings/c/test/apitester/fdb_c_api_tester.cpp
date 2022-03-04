@@ -24,12 +24,13 @@
 #include "TesterTransactionExecutor.h"
 #include "TesterTestSpec.h"
 #include "TesterUtil.h"
-#include <iostream>
+#include "flow/SimpleOpt.h"
+#include "bindings/c/foundationdb/fdb_c.h"
+
 #include <memory>
 #include <stdexcept>
 #include <thread>
-#include "flow/SimpleOpt.h"
-#include "bindings/c/foundationdb/fdb_c.h"
+#include <fmt/core.h>
 
 namespace FdbApiTester {
 
@@ -121,7 +122,7 @@ bool processArg(TesterOptions& options, const CSimpleOpt& args) {
 		break;
 	case OPT_TRACE_FORMAT:
 		if (!validateTraceFormat(args.OptionArg())) {
-			fprintf(stderr, "ERROR: Unrecognized trace format `%s'\n", args.OptionArg());
+			fmt::print(stderr, "ERROR: Unrecognized trace format `{}'\n", args.OptionArg());
 			return false;
 		}
 		options.traceFormat = args.OptionArg();
@@ -129,7 +130,7 @@ bool processArg(TesterOptions& options, const CSimpleOpt& args) {
 	case OPT_KNOB: {
 		std::string knobName;
 		if (!extractPrefixedArgument("--knob", args.OptionSyntax(), knobName)) {
-			fprintf(stderr, "ERROR: unable to parse knob option '%s'\n", args.OptionSyntax());
+			fmt::print(stderr, "ERROR: unable to parse knob option '{}'\n", args.OptionSyntax());
 			return false;
 		}
 		options.knobs.emplace_back(knobName, args.OptionArg());
@@ -163,7 +164,7 @@ bool parseArgs(TesterOptions& options, int argc, char** argv) {
 				return false;
 			}
 		} else {
-			printf("Invalid argument: %s\n", args.OptionText());
+			fmt::print(stderr, "ERROR: Invalid argument: {}\n", args.OptionText());
 			printProgramUsage(argv[0]);
 			return false;
 		}
@@ -173,7 +174,7 @@ bool parseArgs(TesterOptions& options, int argc, char** argv) {
 
 void fdb_check(fdb_error_t e) {
 	if (e) {
-		std::cerr << fdb_get_error(e) << std::endl;
+		fmt::print(stderr, "Unexpected FDB error: {}({})\n", e, fdb_get_error(e));
 		std::abort();
 	}
 }
@@ -186,7 +187,8 @@ void applyNetworkOptions(TesterOptions& options) {
 	}
 
 	if (options.testSpec.multiThreaded) {
-		FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_CLIENT_THREADS_PER_VERSION, options.numFdbThreads);
+		fdb_check(
+		    FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_CLIENT_THREADS_PER_VERSION, options.numFdbThreads));
 	}
 
 	if (options.testSpec.buggify) {
@@ -200,8 +202,8 @@ void applyNetworkOptions(TesterOptions& options) {
 	}
 
 	for (auto knob : options.knobs) {
-		FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_KNOB,
-		                  format("%s=%s", knob.first.c_str(), knob.second.c_str()));
+		fdb_check(FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_KNOB,
+		                            fmt::format("{}={}", knob.first.c_str(), knob.second.c_str())));
 	}
 }
 
@@ -213,7 +215,7 @@ void randomizeOptions(TesterOptions& options) {
 	options.numClients = random.randomInt(options.testSpec.minClients, options.testSpec.maxClients);
 }
 
-void runWorkloads(TesterOptions& options) {
+bool runWorkloads(TesterOptions& options) {
 	TransactionExecutorOptions txExecOptions;
 	txExecOptions.blockOnFutures = options.testSpec.blockOnFutures;
 	txExecOptions.numDatabases = options.numDatabases;
@@ -227,18 +229,20 @@ void runWorkloads(TesterOptions& options) {
 	for (const auto& workloadSpec : options.testSpec.workloads) {
 		for (int i = 0; i < options.numClients; i++) {
 			WorkloadConfig config;
+			config.name = workloadSpec.name;
 			config.options = workloadSpec.options;
 			config.clientId = i;
 			config.numClients = options.numClients;
 			std::shared_ptr<IWorkload> workload = IWorkloadFactory::create(workloadSpec.name, config);
 			if (!workload) {
-				throw TesterError(format("Unknown workload '%s'", workloadSpec.name.c_str()));
+				throw TesterError(fmt::format("Unknown workload '{}'", workloadSpec.name));
 			}
 			workloadMgr.add(workload);
 		}
 	}
 
 	workloadMgr.run();
+	return !workloadMgr.failed();
 }
 
 } // namespace
@@ -247,6 +251,7 @@ void runWorkloads(TesterOptions& options) {
 using namespace FdbApiTester;
 
 int main(int argc, char** argv) {
+	int retCode = 0;
 	try {
 		TesterOptions options;
 		if (!parseArgs(options, argc, argv)) {
@@ -260,13 +265,15 @@ int main(int argc, char** argv) {
 
 		std::thread network_thread{ &fdb_run_network };
 
-		runWorkloads(options);
+		if (!runWorkloads(options)) {
+			retCode = 1;
+		}
 
 		fdb_check(fdb_stop_network());
 		network_thread.join();
-		return 0;
 	} catch (const std::runtime_error& err) {
-		std::cerr << "ERROR: " << err.what() << std::endl;
-		return 1;
+		fmt::print(stderr, "ERROR: {}\n", err.what());
+		retCode = 1;
 	}
+	return retCode;
 }

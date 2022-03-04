@@ -19,7 +19,6 @@
  */
 
 #include "TesterKeyValueStore.h"
-#include <iostream>
 
 namespace FdbApiTester {
 

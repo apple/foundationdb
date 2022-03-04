@@ -23,8 +23,8 @@
 #include "test/apitester/TesterScheduler.h"
 #include <memory>
 #include <optional>
-#include <iostream>
 #include <string_view>
+#include <fmt/format.h>
 
 namespace FdbApiTester {
 
@@ -51,7 +51,7 @@ public:
 	int initialSize;
 
 	// The number of operations to be executed
-	int numOperations;
+	int numRandomOperations;
 
 	// The ratio of reading existing keys
 	double readExistingKeysRatio;
@@ -59,17 +59,17 @@ public:
 	// Key prefix
 	std::string keyPrefix;
 
-	ApiCorrectnessWorkload(const WorkloadConfig& config) {
-		minKeyLength = 1;
-		maxKeyLength = 64;
-		minValueLength = 5;
-		maxValueLength = 10;
-		maxKeysPerTransaction = 50;
-		initialSize = 1000;
-		numOperations = 1000;
-		readExistingKeysRatio = 0.9;
-		keyPrefix = format("ApiCorrectness%d/", config.clientId);
-		numOpLeft = numOperations;
+	ApiCorrectnessWorkload(const WorkloadConfig& config) : WorkloadBase(config) {
+		minKeyLength = config.getIntOption("minKeyLength", 1);
+		maxKeyLength = config.getIntOption("maxKeyLength", 64);
+		minValueLength = config.getIntOption("minValueLength", 1);
+		maxValueLength = config.getIntOption("maxValueLength", 1000);
+		maxKeysPerTransaction = config.getIntOption("maxKeysPerTransaction", 50);
+		initialSize = config.getIntOption("initialSize", 1000);
+		numRandomOperations = config.getIntOption("numRandomOperations", 1000);
+		readExistingKeysRatio = config.getFloatOption("readExistingKeysRatio", 0.9);
+		keyPrefix = fmt::format("{}/", workloadId);
+		numOpLeft = numRandomOperations;
 	}
 
 	void start() override {
@@ -109,7 +109,7 @@ private:
 		if (key != store.startKey()) {
 			return key;
 		}
-		std::cout << "WARNING: No existing key found, using a new random key." << std::endl;
+		info("No existing key found, using a new random key.");
 		return genKey;
 	}
 
@@ -180,8 +180,11 @@ private:
 				        for (int i = 0; i < kvPairs->size(); i++) {
 					        auto expected = store.get((*kvPairs)[i].key);
 					        if ((*results)[i] != expected) {
-						        std::cout << "randomCommitReadOp mismatch. key: " << (*kvPairs)[i].key
-						                  << " expected: " << expected << " actual: " << (*results)[i] << std::endl;
+						        error(
+						            fmt::format("randomCommitReadOp mismatch. key: {} expected: {:.80} actual: {:.80}",
+						                        (*kvPairs)[i].key,
+						                        expected,
+						                        (*results)[i]));
 					        }
 				        }
 				        schedule(cont);
@@ -214,8 +217,10 @@ private:
 			    for (int i = 0; i < keys->size(); i++) {
 				    auto expected = store.get((*keys)[i]);
 				    if ((*results)[i] != expected) {
-					    std::cout << "randomGetOp mismatch. key :" << (*keys)[i] << " expected: " << expected
-					              << " actual: " << (*results)[i] << std::endl;
+					    error(fmt::format("randomGetOp mismatch. key: {} expected: {:.80} actual: {:.80}",
+					                      (*keys)[i],
+					                      expected,
+					                      (*results)[i]));
 				    }
 			    }
 			    schedule(cont);
@@ -284,7 +289,7 @@ private:
 	void clearData(TTaskFct cont) {
 		execTransaction(
 		    [this](auto ctx) {
-			    ctx->tx()->clearRange(keyPrefix, format("%s\xff", keyPrefix.c_str()));
+			    ctx->tx()->clearRange(keyPrefix, fmt::format("{}\xff", keyPrefix));
 			    ctx->commit();
 		    },
 		    [this, cont]() { schedule(cont); });
@@ -294,15 +299,12 @@ private:
 		if (store.size() < initialSize) {
 			randomInsertOp([this, cont]() { populateData(cont); });
 		} else {
-			std::cout << "Data population completed" << std::endl;
+			info("Data population completed");
 			schedule(cont);
 		}
 	}
 
 	void randomOperations() {
-		if (numOpLeft % 100 == 0) {
-			std::cout << numOpLeft << " transactions left" << std::endl;
-		}
 		if (numOpLeft == 0)
 			return;
 
