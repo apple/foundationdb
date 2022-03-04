@@ -212,6 +212,10 @@ struct RocksDBCheckpoint {
 		for (const std::string& file : sstFiles) {
 			res += (file + "\n");
 		}
+		res+= "\nFetched files:\n";
+		for (const auto& [range, file] : fetchedFiles) {
+			res += (range.toString() + ": " + file + "\n");
+		}
 		return res;
 	}
 

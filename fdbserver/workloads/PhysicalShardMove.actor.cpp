@@ -85,7 +85,7 @@ struct SSCheckpointWorkload : TestWorkload {
 		state std::unordered_set<UID> excludes;
 		state int teamSize = 3;
 		state std::vector<UID> teamA = wait(self->moveShard(self, cx, KeyRangeRef(keyA, keyB), teamSize, &excludes));
-		state std::vector<UID> teamB = wait(self->moveShard(self, cx, KeyRangeRef(keyB, keyC), teamSize, &excludes));
+		// state std::vector<UID> teamB = wait(self->moveShard(self, cx, KeyRangeRef(keyB, keyC), teamSize, &excludes));
 
 		wait(self->readAndVerify(self, cx, keyA, testValue));
 		wait(self->readAndVerify(self, cx, keyB, testValue));

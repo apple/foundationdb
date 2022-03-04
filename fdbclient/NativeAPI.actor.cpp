@@ -6966,6 +6966,7 @@ ACTOR Future<std::vector<CheckpointMetaData>> getCheckpointMetaData(Database cx,
 	state Span span("NAPI:GetCheckpointMetaData"_loc);
 
 	loop {
+		wait(delay(0));
 		TraceEvent("GetCheckpointMetaDataBegin")
 		    .detail("Begin", keys.begin)
 		    .detail("End", keys.end)

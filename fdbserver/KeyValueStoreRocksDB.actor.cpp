@@ -981,6 +981,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				if (!sstFiles.empty()) {
 					rocksdb::IngestExternalFileOptions ingestOptions;
 					ingestOptions.move_files = true;
+					ingestOptions.write_global_seqno = false;
+					ingestOptions.verify_checksums_before_ingest = true;
 					status = db->IngestExternalFile(cf, sstFiles, ingestOptions);
 					if (!status.ok()) {
 						std::cout << "Ingest sst file failure: " << status.ToString() << std::endl;

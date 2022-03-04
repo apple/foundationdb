@@ -40,6 +40,8 @@ static_assert((ROCKSDB_MAJOR == 6 && ROCKSDB_MINOR == 22) ? ROCKSDB_PATCH >= 1 :
 namespace {
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 
+#define PERSIST_PREFIX "\xff\xff"
+const KeyRef persistVersion = LiteralStringRef(PERSIST_PREFIX "Version");
 using DB = rocksdb::DB*;
 using CF = rocksdb::ColumnFamilyHandle*;
 
@@ -113,23 +115,25 @@ private:
 		void init() override {}
 
 		struct OpenAction : TypedAction<Reader, OpenAction> {
-			OpenAction(std::string path, KeyRange range) : path(std::move(path)), range(range) {}
+			OpenAction(std::string path, KeyRange range, Version version)
+			  : path(std::move(path)), range(range), version(version) {}
 
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 
 			const std::string path;
 			const KeyRange range;
+			const Version version;
 			ThreadReturnPromise<Void> done;
 		};
 
 		void action(OpenAction& a) {
 			ASSERT(cf == nullptr);
 
-			std::cout << "Open RocksDB Checkpoint." << std::endl;
+			// std::cout << "Open RocksDB Checkpoint." << std::endl;
 			std::vector<std::string> columnFamilies;
 			rocksdb::Options options = getOptions();
 			rocksdb::Status status = rocksdb::DB::ListColumnFamilies(options, a.path, &columnFamilies);
-			std::cout << "Open RocksDB Found Column Families: " << describe(columnFamilies) << std::endl;
+			// std::cout << "Open RocksDB Found Column Families: " << describe(columnFamilies) << std::endl;
 			if (std::find(columnFamilies.begin(), columnFamilies.end(), "default") == columnFamilies.end()) {
 				columnFamilies.push_back("default");
 			}
@@ -143,7 +147,7 @@ private:
 			std::vector<rocksdb::ColumnFamilyHandle*> handles;
 			status = rocksdb::DB::OpenForReadOnly(options, a.path, descriptors, &handles, &db);
 
-			std::cout << "Open RocksDB Checkpoint Status." << status.ToString() << std::endl;
+			// std::cout << "Open RocksDB Checkpoint Status." << status.ToString() << std::endl;
 			if (!status.ok()) {
 				logRocksDBError(status, "OpenForReadOnly");
 				a.done.sendError(statusToError(status));
@@ -157,20 +161,38 @@ private:
 				}
 			}
 
-			TraceEvent(SevInfo, "RocksDBCheckpointReader")
-			    .detail("Path", a.path)
-			    .detail("Method", "OpenForReadOnly")
-			    .detail("ColumnFamily", cf->GetName());
-
 			ASSERT(db != nullptr && cf != nullptr);
 
-			std::cout << "Init Iterator." << std::endl;
+			// std::cout << "Init Iterator." << std::endl;
 
 			begin = toSlice(a.range.begin);
 			end = toSlice(a.range.end);
 
+			TraceEvent(SevInfo, "RocksDBCheckpointReaderInit")
+			    .detail("Path", a.path)
+			    .detail("Method", "OpenForReadOnly")
+			    .detail("ColumnFamily", cf->GetName())
+			    .detail("Begin", begin.ToString())
+			    .detail("End", end.ToString());
+
+			rocksdb::PinnableSlice value;
 			rocksdb::ReadOptions readOptions = getReadOptions();
-			readOptions.iterate_upper_bound = &end;
+			status = db->Get(readOptions, cf, toSlice(persistVersion), &value);
+
+			if (!status.ok() && !status.IsNotFound()) {
+				logRocksDBError(status, "Checkpoint");
+				a.done.sendError(statusToError(status));
+				return;
+			}
+
+			const Version version = status.IsNotFound()
+			                            ? latestVersion
+			                            : BinaryReader::fromStringRef<Version>(toStringRef(value), Unversioned());
+
+			ASSERT(version == a.version);
+
+			// rocksdb::ReadOptions readOptions = getReadOptions();
+			// readOptions.iterate_upper_bound = &end;
 			cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(readOptions, cf));
 			cursor->Seek(begin);
 
@@ -212,7 +234,7 @@ private:
 				}
 			}
 
-			std::cout << "RocksDBCheckpointReader close acton done" << std::endl;
+			// std::cout << "RocksDBCheckpointReader close acton done" << std::endl;
 			TraceEvent("RocksDBCheckpointReader").detail("Path", a.path).detail("Method", "Close");
 			a.done.send(Void());
 		}
@@ -240,7 +262,7 @@ private:
 				return;
 			}
 
-			std::cout << "Reading batch" << std::endl;
+			// std::cout << "Reading batch" << std::endl;
 
 			RangeResult result;
 			if (a.rowLimit == 0 || a.byteLimit == 0) {
@@ -252,12 +274,13 @@ private:
 
 			int accumulatedBytes = 0;
 			rocksdb::Status s;
-			while (cursor->Valid()) {
+			while (cursor->Valid() && toStringRef(cursor->key()) < end) {
 				KeyValueRef kv(toStringRef(cursor->key()), toStringRef(cursor->value()));
 				// std::cout << "Getting key " << cursor->key().ToString() << std::endl;
 				accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
 				result.push_back_deep(result.arena(), kv);
 				// Calling `cursor->Next()` is potentially expensive, so short-circut here just in case.
+				cursor->Next();
 				if (result.size() >= a.rowLimit || accumulatedBytes >= a.byteLimit) {
 					break;
 				}
@@ -270,7 +293,6 @@ private:
 					delete (cursor.release());
 					return;
 				}
-				cursor->Next();
 			}
 
 			s = cursor->status();
@@ -281,7 +303,7 @@ private:
 				return;
 			}
 
-			std::cout << "Read Done." << cursor->status().ToString() << std::endl;
+			// std::cout << "Read Done." << cursor->status().ToString() << std::endl;
 			// throw end_of_stream();
 
 			if (result.empty()) {
@@ -301,7 +323,7 @@ private:
 	};
 
 public:
-	RocksDBCheckpointReader(const CheckpointMetaData& checkpoint, UID logID) : id(logID) {
+	RocksDBCheckpointReader(const CheckpointMetaData& checkpoint, UID logID) : id(logID), version(checkpoint.version) {
 		RocksDBCheckpoint rocksCheckpoint = getRocksCheckpoint(checkpoint);
 		this->path = rocksCheckpoint.checkpointDir;
 		if (g_network->isSimulated()) {
@@ -318,7 +340,7 @@ public:
 		if (openFuture.isValid()) {
 			return openFuture;
 		}
-		auto a = std::make_unique<Reader::OpenAction>(this->path, range);
+		auto a = std::make_unique<Reader::OpenAction>(this->path, range, this->version);
 		openFuture = a->done.getFuture();
 		readThreads->post(a.release());
 		return openFuture;
@@ -345,13 +367,13 @@ private:
 		self->readThreads->post(a);
 		wait(f);
 
-		std::cout << "Closed Action." << std::endl;
+		// std::cout << "Closed Action." << std::endl;
 
 		if (self != nullptr) {
 			wait(self->readThreads->stop());
 		}
 
-		std::cout << "threads stopped." << std::endl;
+		// std::cout << "threads stopped." << std::endl;
 
 		if (self != nullptr) {
 			delete self;
@@ -363,6 +385,7 @@ private:
 	DB db = nullptr;
 	std::string path;
 	const UID id;
+	Version version;
 	Reference<IThreadPool> readThreads;
 	Future<Void> openFuture;
 };
@@ -461,7 +484,7 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 		}
 	}
 
-	std::cout << "FetchRocksCheckpointKeyValues found ss: " << ssi.toString() << std::endl;
+	// std::cout << "FetchRocksCheckpointKeyValues found ss: " << ssi.toString() << std::endl;
 	ASSERT(ssi.id() == ssID);
 
 	state int attempt = 0;
@@ -503,7 +526,7 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 			state ReplyPromiseStream<FetchCheckpointKeyValuesStreamReply> stream =
 			    ssi.fetchCheckpointKeyValues.getReplyStream(
 			        FetchCheckpointKeyValuesRequest(metaData->checkpointID, range));
-			std::cout << "FetchRocksCheckpointKeyValues stream." << std::endl;
+			// std::cout << "FetchRocksCheckpointKeyValues stream." << std::endl;
 			TraceEvent("FetchCheckpointKeyValuesReceivingData")
 			    .detail("CheckpointID", metaData->checkpointID)
 			    .detail("Range", range.toString())
