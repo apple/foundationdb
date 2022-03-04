@@ -30,7 +30,7 @@
 #include <memory>
 #include <stdexcept>
 #include <thread>
-#include <fmt/core.h>
+#include <fmt/format.h>
 
 namespace FdbApiTester {
 

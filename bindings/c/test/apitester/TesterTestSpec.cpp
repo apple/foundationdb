@@ -22,6 +22,7 @@
 #include "TesterUtil.h"
 #include <toml.hpp>
 #include <fmt/format.h>
+#include <functional>
 
 namespace FdbApiTester {
 

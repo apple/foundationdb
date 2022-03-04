@@ -19,7 +19,7 @@
  */
 #include "TesterApiWrapper.h"
 #include <cstdint>
-#include <fmt/printf.h>
+#include <fmt/format.h>
 
 namespace FdbApiTester {
 
