@@ -189,10 +189,8 @@ int populate(TX tx,
 
 		/* commit every 100 inserts (default) or if this is the last key */
 		if (i == key_end || (i - key_begin + 1) % num_commit_every == 0) {
-			auto time_commit_start = timepoint_t{};
 			const auto is_sample_target = (stats.get_tx_count() % args.sampling) == 0;
-			if (is_sample_target)
-				time_commit_start = steady_clock::now();
+			auto time_commit_start = steady_clock::now();
 			auto future_commit = tx.commit();
 			const auto rc = wait_and_handle_error(tx, future_commit, "COMMIT_POPULATE_INSERT");
 			if (rc == FutureRC::OK) {
@@ -205,15 +203,15 @@ int populate(TX tx,
 				continue;
 			}
 
+			const auto time_commit_end = steady_clock::now();
 			/* xact latency stats */
+			const auto commit_latency_us = to_integer_microseconds(time_commit_end - time_commit_start);
+			const auto tx_duration_us = to_integer_microseconds(time_commit_end - time_tx_start);
+			stats.add_latency(OP_COMMIT, commit_latency_us);
+			stats.add_latency(OP_TRANSACTION, tx_duration_us);
 			if (is_sample_target) {
-				const auto time_commit_end = steady_clock::now();
-				const auto commit_latency_us = to_integer_microseconds(time_commit_end - time_commit_start);
-				const auto tx_duration_us = to_integer_microseconds(time_commit_end - time_tx_start);
 				sample_bins[OP_COMMIT].put(commit_latency_us);
 				sample_bins[OP_TRANSACTION].put(tx_duration_us);
-				stats.add_latency(OP_COMMIT, commit_latency_us);
-				stats.add_latency(OP_TRANSACTION, tx_duration_us);
 			}
 
 			time_tx_start = steady_clock::now();
@@ -440,6 +438,7 @@ const std::map<std::pair<int /*op*/, int /*sub-op step*/>,
 	      [](TX tx, mako_args_t const& args, ByteString& key, ByteString&, ByteString& value) {
 	          genkey(key, KEY_PREFIX, args, next_key(args));
 	          randstr(value, args.value_length);
+	          tx.set(key, value);
 	          return Future();
 	      } },
 	    { { OP_CLEAR, 0 },
@@ -592,7 +591,7 @@ int run_one_transaction(TX tx, mako_args_t const& args, mako_stats_t& stats, sam
 	auto key2 = ByteString{};
 	key2.reserve(args.key_length);
 	auto val = ByteString{};
-	key2.reserve(args.value_length);
+	val.reserve(args.value_length);
 
 	auto time_tx_start = steady_clock::now();
 
@@ -1615,7 +1614,7 @@ void print_stats(mako_args_t const& args, mako_stats_t const* stats, double cons
 			if (fp) {
 				fmt::print(fp, "\"{}\": {},", get_ops_name(op), ops_total_diff);
 			}
-			print_err = (current.get_error_count(op) - prev.get_error_count(op)) > 0;
+			print_err = print_err || (current.get_error_count(op) - prev.get_error_count(op)) > 0;
 		}
 	}
 	/* TPS */
@@ -1628,6 +1627,7 @@ void print_stats(mako_args_t const& args, mako_stats_t const* stats, double cons
 	/* Conflicts */
 	const auto conflicts_diff = (current.get_conflict_count() - prev.get_conflict_count()) / duration_sec;
 	put_field_f(conflicts_diff, 2);
+	fmt::print("\n");
 	if (fp) {
 		fprintf(fp, "\"conflictsPerSec\": %.2f", conflicts_diff);
 	}
@@ -1636,9 +1636,10 @@ void print_stats(mako_args_t const& args, mako_stats_t const* stats, double cons
 		put_title_r("Errors");
 		for (auto op = 0; op < MAX_OP; op++) {
 			if (args.txnspec.ops[op][OP_COUNT] > 0) {
-				put_field(current.get_error_count(op) - prev.get_error_count(op));
+				const auto errors_diff = current.get_error_count(op) - prev.get_error_count(op);
+				put_field(errors_diff);
 				if (fp) {
-					fprintf(fp, ",\"errors\": %.2f", conflicts_diff);
+					fmt::print(fp, ",\"errors\": {}", errors_diff);
 				}
 			}
 		}
@@ -1732,10 +1733,12 @@ void print_report(mako_args_t const& args,
 			break;
 		}
 	}
+	const auto tps_f = final_stats.get_tx_count() / duration_sec;
+	const auto tps_i = static_cast<uint64_t>(tps_f);
 	fmt::printf("Total Xacts:      %8lu\n", final_stats.get_tx_count());
 	fmt::printf("Total Conflicts:  %8lu\n", final_stats.get_conflict_count());
 	fmt::printf("Total Errors:     %8lu\n", final_stats.get_total_error_count());
-	fmt::printf("Overall TPS:      %8lu\n\n", final_stats.get_tx_count() / duration_sec);
+	fmt::printf("Overall TPS:      %8lu\n\n", tps_i);
 
 	if (fp) {
 		fmt::fprintf(fp, "\"results\": {");
@@ -1746,7 +1749,7 @@ void print_report(mako_args_t const& args,
 		fmt::fprintf(fp, "\"totalXacts\": %lu,", final_stats.get_tx_count());
 		fmt::fprintf(fp, "\"totalConflicts\": %lu,", final_stats.get_conflict_count());
 		fmt::fprintf(fp, "\"totalErrors\": %lu,", final_stats.get_total_error_count());
-		fmt::fprintf(fp, "\"overallTPS\": %lu,", final_stats.get_tx_count() / duration_sec);
+		fmt::fprintf(fp, "\"overallTPS\": %lu,", tps_i);
 	}
 
 	/* per-op stats */
@@ -1779,6 +1782,7 @@ void print_report(mako_args_t const& args,
 	/* Conflicts */
 	const auto conflicts_rate = final_stats.get_conflict_count() / duration_sec;
 	put_field_f(conflicts_rate, 2);
+	fmt::print("\n");
 
 	if (fp) {
 		fmt::fprintf(fp, "}, \"tps\": %.2f, \"conflictsPerSec\": %.2f, \"errors\": {", tps, conflicts_rate);

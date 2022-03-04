@@ -177,7 +177,7 @@ class alignas(64) mako_stats_t {
 public:
 	mako_stats_t() noexcept {
 		memset(this, 0, sizeof(mako_stats_t));
-		memset(latency_us_max, 0xff, sizeof(latency_us_max));
+		memset(latency_us_min, 0xff, sizeof(latency_us_min));
 	}
 
 	mako_stats_t(const mako_stats_t& other) noexcept = default;
@@ -213,7 +213,7 @@ public:
 			latency_us_total[op] += other.latency_us_total[op];
 			if (latency_us_min[op] > other.latency_us_min[op])
 				latency_us_min[op] = other.latency_us_min[op];
-			if (latency_us_min[op] < other.latency_us_min[op])
+			if (latency_us_max[op] < other.latency_us_max[op])
 				latency_us_max[op] = other.latency_us_max[op];
 		}
 	}
