@@ -598,6 +598,11 @@ func (o TransactionOptions) SetBypassUnreadable() error {
 	return o.setOpt(1100, nil)
 }
 
+// Allows this transaction to use cached GRV from the database context. Defaults to off. Upon first usage, starts a background updater to periodically update the cache to avoid stale read versions.
+func (o TransactionOptions) SetUseGrvCache() error {
+	return o.setOpt(1101, nil)
+}
+
 type StreamingMode int
 
 const (

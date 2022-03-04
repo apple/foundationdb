@@ -157,6 +157,8 @@ struct TransactionOptions {
 	bool includePort : 1;
 	bool reportConflictingKeys : 1;
 	bool expensiveClearCostEstimation : 1;
+	bool useGrvCache : 1;
+	bool skipGrvCache : 1;
 
 	TransactionPriority priority;
 

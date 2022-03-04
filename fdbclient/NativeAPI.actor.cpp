@@ -63,6 +63,7 @@
 #include "fdbrpc/LoadBalance.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/simulator.h"
+#include "fdbrpc/sim_validation.h"
 #include "flow/Arena.h"
 #include "flow/ActorCollection.h"
 #include "flow/DeterministicRandom.h"
@@ -203,6 +204,32 @@ void DatabaseContext::removeTssMapping(StorageServerInterface const& ssi) {
 		queueModel.removeTssEndpoint(ssi.getReadHotRanges.getEndpoint().token.first());
 		queueModel.removeTssEndpoint(ssi.getRangeSplitPoints.getEndpoint().token.first());
 	}
+}
+
+void DatabaseContext::updateCachedReadVersion(double t, Version v) {
+	if (v >= cachedReadVersion) {
+		TraceEvent(SevDebug, "CachedReadVersionUpdate")
+		    .detail("Version", v)
+		    .detail("GrvStartTime", t)
+		    .detail("LastVersion", cachedReadVersion)
+		    .detail("LastTime", lastGrvTime);
+		cachedReadVersion = v;
+		// Since the time is based on the start of the request, it's possible that we
+		// get a newer version with an older time.
+		// (Request started earlier, but was latest to reach the proxy)
+		// Only update time when strictly increasing (?)
+		if (t > lastGrvTime) {
+			lastGrvTime = t;
+		}
+	}
+}
+
+Version DatabaseContext::getCachedReadVersion() {
+	return cachedReadVersion;
+}
+
+double DatabaseContext::getLastGrvTime() {
+	return lastGrvTime;
 }
 
 Reference<StorageServerInfo> StorageServerInfo::getInterface(DatabaseContext* cx,
@@ -1000,6 +1027,53 @@ ACTOR static Future<Void> handleTssMismatches(DatabaseContext* cx) {
 	}
 }
 
+ACTOR static Future<Void> backgroundGrvUpdater(DatabaseContext* cx) {
+	state Transaction tr;
+	state double grvDelay = 0.001;
+	try {
+		loop {
+			if (CLIENT_KNOBS->FORCE_GRV_CACHE_OFF)
+				return Void();
+			wait(refreshTransaction(cx, &tr));
+			state double curTime = now();
+			state double lastTime = cx->getLastGrvTime();
+			state double lastProxyTime = cx->lastProxyRequestTime;
+			TraceEvent(SevDebug, "BackgroundGrvUpdaterBefore")
+			    .detail("CurTime", curTime)
+			    .detail("LastTime", lastTime)
+			    .detail("GrvDelay", grvDelay)
+			    .detail("CachedReadVersion", cx->getCachedReadVersion())
+			    .detail("CachedTime", cx->getLastGrvTime())
+			    .detail("Gap", curTime - lastTime)
+			    .detail("Bound", CLIENT_KNOBS->MAX_VERSION_CACHE_LAG - grvDelay);
+			if (curTime - lastTime >= (CLIENT_KNOBS->MAX_VERSION_CACHE_LAG - grvDelay) ||
+			    curTime - lastProxyTime > CLIENT_KNOBS->MAX_PROXY_CONTACT_LAG) {
+				try {
+					tr.setOption(FDBTransactionOptions::SKIP_GRV_CACHE);
+					wait(success(tr.getReadVersion()));
+					cx->lastProxyRequestTime = curTime;
+					grvDelay = (grvDelay + (now() - curTime)) / 2.0;
+					TraceEvent(SevDebug, "BackgroundGrvUpdaterSuccess")
+					    .detail("GrvDelay", grvDelay)
+					    .detail("CachedReadVersion", cx->getCachedReadVersion())
+					    .detail("CachedTime", cx->getLastGrvTime());
+				} catch (Error& e) {
+					TraceEvent(SevInfo, "BackgroundGrvUpdaterTxnError").error(e, true);
+					wait(tr.onError(e));
+				}
+			} else {
+				wait(
+				    delay(std::max(0.001,
+				                   std::min(CLIENT_KNOBS->MAX_PROXY_CONTACT_LAG - (curTime - lastProxyTime),
+				                            (CLIENT_KNOBS->MAX_VERSION_CACHE_LAG - grvDelay) - (curTime - lastTime)))));
+			}
+		}
+	} catch (Error& e) {
+		TraceEvent(SevInfo, "BackgroundGrvUpdaterFailed").error(e, true);
+		throw;
+	}
+}
+
 ACTOR static Future<HealthMetrics> getHealthMetricsActor(DatabaseContext* cx, bool detailed) {
 	if (now() - cx->healthMetricsLastUpdated < CLIENT_KNOBS->AGGREGATE_HEALTH_METRICS_MAX_STALENESS) {
 		if (detailed) {
@@ -1228,7 +1302,8 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
     transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
     transactionGrvFullBatches("NumGrvFullBatches", cc), transactionGrvTimedOutBatches("NumGrvTimedOutBatches", cc),
     latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000),
-    bytesPerCommit(1000), outstandingWatches(0), transactionTracingSample(false), taskID(taskID),
+    bytesPerCommit(1000), outstandingWatches(0), lastGrvTime(0.0), cachedReadVersion(0), lastRkBatchThrottleTime(0.0),
+    lastRkDefaultThrottleTime(0.0), lastProxyRequestTime(0.0), transactionTracingSample(false), taskID(taskID),
     clientInfo(clientInfo), clientInfoMonitor(clientInfoMonitor), coordinator(coordinator), apiVersion(apiVersion),
     mvCacheInsertLocation(0), healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0),
     smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
@@ -1516,6 +1591,9 @@ DatabaseContext::~DatabaseContext() {
 	clientDBInfoMonitor.cancel();
 	monitorTssInfoChange.cancel();
 	tssMismatchHandler.cancel();
+	if (grvUpdateHandler.isValid()) {
+		grvUpdateHandler.cancel();
+	}
 	for (auto it = server_interf.begin(); it != server_interf.end(); it = server_interf.erase(it))
 		it->second->notifyContextDestroyed();
 	ASSERT_ABORT(server_interf.empty());
@@ -4987,6 +5065,8 @@ void TransactionOptions::clear() {
 	readTags = TagSet{};
 	priority = TransactionPriority::DEFAULT;
 	expensiveClearCostEstimation = false;
+	useGrvCache = false;
+	skipGrvCache = false;
 }
 
 TransactionOptions::TransactionOptions() {
@@ -5317,7 +5397,7 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 			                         TaskPriority::DefaultPromiseEndpoint,
 			                         AtMostOnce::True);
 		}
-
+		state double grvTime = now();
 		choose {
 			when(wait(trState->cx->onProxiesChanged())) {
 				reply.cancel();
@@ -5329,6 +5409,7 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 					if (CLIENT_BUGGIFY) {
 						throw commit_unknown_result();
 					}
+					trState->cx->updateCachedReadVersion(grvTime, v);
 					if (debugID.present())
 						TraceEvent(interval.end()).detail("CommittedVersion", v);
 					trState->committedVersion = v;
@@ -5755,6 +5836,18 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 		trState->options.expensiveClearCostEstimation = true;
 		break;
 
+	case FDBTransactionOptions::USE_GRV_CACHE:
+		validateOptionValueNotPresent(value);
+		if (trState->numErrors == 0) {
+			trState->options.useGrvCache = true;
+		}
+		break;
+
+	case FDBTransactionOptions::SKIP_GRV_CACHE:
+		validateOptionValueNotPresent(value);
+		trState->options.skipGrvCache = true;
+		break;
+
 	default:
 		break;
 	}
@@ -5925,7 +6018,16 @@ ACTOR Future<Version> extractReadVersion(Reference<TransactionState> trState,
                                          Promise<Optional<Value>> metadataVersion) {
 	state Span span(spanContext, location, { trState->spanID });
 	GetReadVersionReply rep = wait(f);
-	double latency = now() - trState->startTime;
+	double replyTime = now();
+	double latency = replyTime - trState->startTime;
+	trState->cx->lastProxyRequestTime = trState->startTime;
+	trState->cx->updateCachedReadVersion(trState->startTime, rep.version);
+	if (rep.rkBatchThrottled) {
+		trState->cx->lastRkBatchThrottleTime = replyTime;
+	}
+	if (rep.rkDefaultThrottled) {
+		trState->cx->lastRkDefaultThrottleTime = replyTime;
+	}
 	trState->cx->GRVLatencies.addSample(latency);
 	if (trState->trLogInfo)
 		trState->trLogInfo->addLog(FdbClientLogEvents::EventGetVersion_V3(
@@ -5982,8 +6084,42 @@ ACTOR Future<Version> extractReadVersion(Reference<TransactionState> trState,
 	return rep.version;
 }
 
+bool rkThrottlingCooledDown(DatabaseContext* cx, TransactionPriority priority) {
+	if (priority == TransactionPriority::IMMEDIATE) {
+		return true;
+	} else if (priority == TransactionPriority::BATCH) {
+		if (cx->lastRkBatchThrottleTime == 0.0) {
+			return true;
+		}
+		return (now() - cx->lastRkBatchThrottleTime > CLIENT_KNOBS->GRV_CACHE_RK_COOLDOWN);
+	} else if (priority == TransactionPriority::DEFAULT) {
+		if (cx->lastRkDefaultThrottleTime == 0.0) {
+			return true;
+		}
+		return (now() - cx->lastRkDefaultThrottleTime > CLIENT_KNOBS->GRV_CACHE_RK_COOLDOWN);
+	}
+	return false;
+}
+
 Future<Version> Transaction::getReadVersion(uint32_t flags) {
 	if (!readVersion.isValid()) {
+		if (!CLIENT_KNOBS->FORCE_GRV_CACHE_OFF && !trState->options.skipGrvCache &&
+		    (deterministicRandom()->random01() <= CLIENT_KNOBS->DEBUG_USE_GRV_CACHE_CHANCE ||
+		     trState->options.useGrvCache) &&
+		    rkThrottlingCooledDown(getDatabase().getPtr(), trState->options.priority)) {
+			// Upon our first request to use cached RVs, start the background updater
+			if (!trState->cx->grvUpdateHandler.isValid()) {
+				trState->cx->grvUpdateHandler = backgroundGrvUpdater(getDatabase().getPtr());
+			}
+			Version rv = trState->cx->getCachedReadVersion();
+			double lastTime = trState->cx->getLastGrvTime();
+			double requestTime = now();
+			if (requestTime - lastTime <= CLIENT_KNOBS->MAX_VERSION_CACHE_LAG && rv != Version(0)) {
+				ASSERT(!debug_checkVersionTime(rv, requestTime, "CheckStaleness"));
+				readVersion = rv;
+				return readVersion;
+			} // else go through regular GRV path
+		}
 		++trState->cx->transactionReadVersions;
 		flags |= trState->options.getReadVersionFlags;
 		switch (trState->options.priority) {
@@ -6165,6 +6301,9 @@ uint32_t Transaction::getSize() {
 }
 
 Future<Void> Transaction::onError(Error const& e) {
+	if (g_network->isSimulated() && ++trState->numErrors % 10 == 0) {
+		TraceEvent(SevWarnAlways, "TransactionTooManyRetries").detail("NumRetries", trState->numErrors);
+	}
 	if (e.code() == error_code_success) {
 		return client_invalid_operation();
 	}
@@ -6198,9 +6337,6 @@ Future<Void> Transaction::onError(Error const& e) {
 		reset();
 		return delay(std::min(CLIENT_KNOBS->FUTURE_VERSION_RETRY_DELAY, maxBackoff), trState->taskID);
 	}
-
-	if (g_network->isSimulated() && ++trState->numErrors % 10 == 0)
-		TraceEvent(SevWarnAlways, "TransactionTooManyRetries").detail("NumRetries", trState->numErrors);
 
 	return e;
 }
