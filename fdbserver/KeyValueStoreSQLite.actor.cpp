@@ -19,7 +19,7 @@
  */
 
 #define SQLITE_THREADSAFE 0 // also in sqlite3.amalgamation.c!
-#include "contrib/fmt-8.0.1/include/fmt/format.h"
+#include "contrib/fmt-8.1.1/include/fmt/format.h"
 #include "flow/crc32c.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/CoroFlow.h"
