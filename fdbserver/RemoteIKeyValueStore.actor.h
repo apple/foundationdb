@@ -53,10 +53,10 @@ struct IKVSCommitReply {
 	}
 };
 
-struct IKVSProcessInterface {
+struct RemoteKVSProcessInterface {
 
 	constexpr static FileIdentifier file_identifier = 3491838;
-	RequestStream<struct GetIKVSProcessInterfaceRequest> getProcessInterface;
+	RequestStream<struct GetRemoteKVSProcessInterfaceRequest> getProcessInterface;
 	RequestStream<struct OpenKVStoreRequest> openKVStore;
 
 	UID uniqueID = deterministicRandom()->randomUniqueID();
@@ -113,9 +113,9 @@ struct IKVSInterface {
 	}
 };
 
-struct GetIKVSProcessInterfaceRequest {
+struct GetRemoteKVSProcessInterfaceRequest {
 	constexpr static FileIdentifier file_identifier = 8382983;
-	ReplyPromise<struct IKVSProcessInterface> reply;
+	ReplyPromise<struct RemoteKVSProcessInterface> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -284,60 +284,45 @@ struct IKVSOnClosedRequest {
 
 struct IKVSDisposeRequest {
 	constexpr static FileIdentifier file_identifier = 1235952;
-	ReplyPromise<Void> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, reply);
+		serializer(ar);
 	}
 };
 
 struct IKVSCloseRequest {
 	constexpr static FileIdentifier file_identifier = 13859172;
-	ReplyPromise<Void> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, reply);
+		serializer(ar);
 	}
 };
 
 ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterface);
 
 struct KeyValueStoreProcess : FlowProcess {
-	IKVSProcessInterface kvsIf;
+	RemoteKVSProcessInterface kvsIf;
 	Standalone<StringRef> serializedIf;
 
 	Endpoint ssProcess; // endpoint for the storage process
 	RequestStream<FlowProcessRegistrationRequest> ssRequestStream;
-	// Interface of the parent storage server
-	IKeyValueStore* ssInterface;
 
-	KeyValueStoreProcess() : ssInterface(nullptr) {
+	KeyValueStoreProcess() {
 		TraceEvent(SevDebug, "InitKeyValueStoreProcess").log();
 		ObjectWriter writer(IncludeVersion());
 		writer.serialize(kvsIf);
 		serializedIf = writer.toString();
 	}
 
-	void setSSInterface(IKeyValueStore* store) { ssInterface = store; }
-
 	void registerEndpoint(Endpoint p) override {
 		ssProcess = p;
 		ssRequestStream = RequestStream<FlowProcessRegistrationRequest>(p);
 	}
 
-	StringRef name() const override { return "KeyValueStoreProcess"_sr; }
+	StringRef name() const override { return _name; }
 	StringRef serializedInterface() const override { return serializedIf; }
-
-	Future<Void> onClosed() const override {
-		ASSERT(ssInterface && g_network->isSimulated());
-		return ssInterface->onClosed();
-	}
-
-	void consumeInterface(StringRef intf) override {
-		kvsIf = ObjectReader::fromStringRef<IKVSProcessInterface>(intf, IncludeVersion());
-	}
 
 	ACTOR static Future<Void> _run(KeyValueStoreProcess* self) {
 		state ActorCollection actors(true);
@@ -346,8 +331,8 @@ struct KeyValueStoreProcess : FlowProcess {
 			choose {
 				when(OpenKVStoreRequest req = waitNext(self->kvsIf.openKVStore.getFuture())) {
 					TraceEvent("OpenKVStoreRequestReceived").log();
-					IKVSInterface reply;
-					actors.add(runIKVS(req, reply));
+					IKVSInterface interf;
+					actors.add(runIKVS(req, interf));
 				}
 				when(ErrorOr<Void> e = wait(errorOr(actors.getResult()))) {
 					if (e.isError()) {
@@ -363,24 +348,26 @@ struct KeyValueStoreProcess : FlowProcess {
 	}
 
 	Future<Void> run() override { return _run(this); }
+
+	static StringRef _name;
 };
 
 struct RemoteIKeyValueStore : public IKeyValueStore {
+	RemoteKVSProcessInterface kvsProcess;
 	IKVSInterface interf;
 	Future<Void> initialized;
-	KeyValueStoreProcess ikvsProcess;
+	Future<int> returnCode;
 	StorageBytes storageBytes;
 	bool stopped;
-	RemoteIKeyValueStore() : ikvsProcess(), storageBytes(0, 0, 0, 0), stopped(false) {
-		ikvsProcess.setSSInterface(this);
-	}
+
+	RemoteIKeyValueStore() : storageBytes(0, 0, 0, 0), stopped(false) {}
 
 	Future<Void> init() override {
 		TraceEvent(SevInfo, "RemoteIKeyValueStoreInit").log();
 		return initialized;
 	}
 
-	Future<Void> getError() const override { return getErrorImpl(this); }
+	Future<Void> getError() const override { return getErrorImpl(this, returnCode); }
 	Future<Void> onClosed() const override { return onCloseImpl(this); }
 
 	void dispose() override {
@@ -436,6 +423,10 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 
 	StorageBytes getStorageBytes() const override { return storageBytes; }
 
+	void consumeInterface(StringRef intf) {
+		kvsProcess = ObjectReader::fromStringRef<RemoteKVSProcessInterface>(intf, IncludeVersion());
+	}
+
 	ACTOR static Future<Void> commitAndGetStorageBytes(RemoteIKeyValueStore* self,
 	                                                   Future<IKVSCommitReply> commitReplyFuture) {
 		IKVSCommitReply commitReply = wait(commitReplyFuture);
@@ -444,27 +435,25 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 	}
 
 	ACTOR static Future<Optional<Value>> readValueImpl(RemoteIKeyValueStore* self, IKVSGetValueRequest req) {
-		// wait(self->init());
 		Optional<Value> val = wait(self->interf.getValue.getReply(req));
 		return val;
 	}
 
-	ACTOR static Future<Void> getErrorImpl(const RemoteIKeyValueStore* self) {
+	ACTOR static Future<Void> getErrorImpl(const RemoteIKeyValueStore* self, Future<int> returnCode) {
 		wait(self->initialized);
-		state Future<int> returnCodeF = self->ikvsProcess.returnCode();
 		choose {
 			when(state ErrorOr<Void> e = wait(errorOr(self->interf.getError.getReply(IKVSGetErrorRequest{})))) {
 				TraceEvent(SevDebug, "RemoteIKVSGetError")
 				    .errorUnsuppressed(e.isError() ? e.getError() : success())
 				    .backtrace();
 				// if kv-store is error, we should see child process died
-				// const_cast<RemoteIKeyValueStore*>(self)->stopped = true;
+				// *(const_cast<bool*>(stopped)) = true;
 				if (e.isError() && e.getError().code() == error_code_actor_cancelled) {
 					TraceEvent(SevDebug, "WaitForChildProcessFinished").log();
-					wait(success(returnCodeF));
+					wait(success(returnCode));
 				} else {
 					// fprintf(stderr, "GetErrorImpl cancelling child actor\n");
-					returnCodeF.cancel();
+					returnCode.cancel();
 					// wait(success(returnCodeF));
 				}
 				if (e.isError())
@@ -472,7 +461,7 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 				else
 					return e.get();
 			}
-			when(int res = wait(returnCodeF)) {
+			when(int res = wait(returnCode)) {
 				TraceEvent(res < 0 ? SevError : SevInfo, "SpawnedProcessHasDied").detail("Res", res);
 			}
 		}

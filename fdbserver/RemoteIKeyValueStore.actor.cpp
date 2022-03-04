@@ -31,6 +31,9 @@
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+
+StringRef KeyValueStoreProcess::_name = "KeyValueStoreProcess"_sr;
+
 // test adding a guard for guaranteed killing of machine after runIKVS returns
 struct AfterReturn {
 	IKeyValueStore* kvStore;
@@ -190,11 +193,59 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 	}
 }
 
+ACTOR static Future<int> flowProcessRunner(RemoteIKeyValueStore* self, Promise<Void> ready) {
+	state FlowProcessInterface processInterface;
+	state Future<int> process;
+
+	auto path = abspath(getExecPath());
+	auto endpoint = processInterface.registerProcess.getEndpoint();
+	auto address = endpoint.addresses.address.toString();
+	auto token = endpoint.token;
+
+	std::string flowProcessAddr = g_network->getLocalAddress().ip.toString().append(":0");
+	std::vector<std::string> args = { "bin/fdbserver",
+		                              "-r",
+		                              "flowprocess",
+									  "-C",
+									  SERVER_KNOBS->CONN_FILE,
+									  "--logdir",
+									  SERVER_KNOBS->LOG_DIRECTORY,
+		                              "-p",
+		                              flowProcessAddr,
+		                              "--process-name",
+		                              KeyValueStoreProcess::_name.toString(),
+		                              "--process-endpoint",
+		                              format("%s,%lu,%lu", address.c_str(), token.first(), token.second()) };
+	// For remote IKV store, we need to make sure the shutdown signal is sent back until we can destroy it in the
+	// simulation
+	process = spawnProcess(path, args, -1.0, false, 0.01, self);
+	choose {
+		when(FlowProcessRegistrationRequest req = waitNext(processInterface.registerProcess.getFuture())) {
+			self->consumeInterface(req.flowProcessInterface);
+			ready.send(Void());
+		}
+		when(int res = wait(process)) {
+			TraceEvent(SevDebug, "FlowProcessRunnerFinishedInChoose").detail("Result", res);
+			// 0 means process killed; non-zero means errors
+			if (res) {
+				ready.sendError(operation_failed());
+			} else {
+				ready.sendError(shutdown_in_progress());
+			}
+			return res;
+		}
+	}
+	int res = wait(process);
+	return res;
+}
+
 ACTOR static Future<Void> initializeRemoteKVStore(RemoteIKeyValueStore* self, OpenKVStoreRequest openKVSReq) {
 	TraceEvent("WaitingOnFlowProcess").detail("StoreType", openKVSReq.storeType).log();
-	wait(self->ikvsProcess.onReady());
+	Promise<Void> ready;
+	self->returnCode = flowProcessRunner(self, ready);
+	wait(ready.getFuture());
 	TraceEvent("FlowProcessReady").log();
-	IKVSInterface ikvsInterface = wait(self->ikvsProcess.kvsIf.openKVStore.getReply(openKVSReq));
+	IKVSInterface ikvsInterface = wait(self->kvsProcess.openKVStore.getReply(openKVSReq));
 	TraceEvent("IKVSInterfaceReceived").detail("UID", ikvsInterface.id());
 	self->interf = ikvsInterface;
 	self->interf.storeType = openKVSReq.storeType;
@@ -208,7 +259,6 @@ IKeyValueStore* openRemoteKVStore(KeyValueStoreType storeType,
                                   bool checkChecksums,
                                   bool checkIntegrity) {
 	RemoteIKeyValueStore* self = new RemoteIKeyValueStore();
-	self->ikvsProcess.start();
 	self->initialized = initializeRemoteKVStore(
 	    self, OpenKVStoreRequest(storeType, filename, logID, memoryLimit, checkChecksums, checkIntegrity));
 	return self;

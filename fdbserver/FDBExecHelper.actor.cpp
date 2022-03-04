@@ -96,14 +96,14 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
                                  double maxWaitTime,
                                  bool isSync,
                                  double maxSimDelayTime,
-                                 FlowProcess* parent) {
+                                 IClosable* parent) {
 	state ISimulator::ProcessInfo* self = g_pSimulator->getCurrentProcess();
 	state ISimulator::ProcessInfo* child;
 
 	state std::string role;
 	state std::string addr;
 	state std::string flowProcessName;
-	state Endpoint flowProcessEndpoint;
+	state Endpoint parentProcessEndpoint;
 	state int i = 0;
 	// fdbserver -r flowprocess --process-name ikvs --process-endpoint ip:port,token,id
 	for (; i < paramList.size(); i++) {
@@ -130,9 +130,10 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 					UID token(fst, snd);
 					NetworkAddressList l;
 					l.address = addr;
-					flowProcessEndpoint = Endpoint(l, token);
-					std::cout << "flowChildProcessEndpoint: " << flowProcessEndpoint.getPrimaryAddress().ip.toString()
-					          << ", token: " << flowProcessEndpoint.token.toString() << "\n";
+					parentProcessEndpoint = Endpoint(l, token);
+					// TODO : remove debugging code
+					// std::cout << "flowChildProcessEndpoint: " << parentProcessEndpoint.getPrimaryAddress().ip.toString()
+					//           << ", token: " << parentProcessEndpoint.token.toString() << "\n";
 				} catch (Error& e) {
 					std::cerr << "Could not parse network address " << addressArray[0] << std::endl;
 					flushAndExit(FDB_EXIT_ERROR);
@@ -178,7 +179,7 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 			FlowTransport::transport().bind(child->address, child->address);
 			Sim2FileSystem::newFileSystem();
 			ProcessFactory<KeyValueStoreProcess>(flowProcessName.c_str());
-			flowProcessF = runFlowProcess(flowProcessName, flowProcessEndpoint);
+			flowProcessF = runFlowProcess(flowProcessName, parentProcessEndpoint);
 
 			choose {
 				when(wait(flowProcessF)) {
@@ -242,7 +243,7 @@ ACTOR Future<int> spawnProcess(std::string binPath,
                                double maxWaitTime,
                                bool isSync,
                                double maxSimDelayTime,
-                               FlowProcess* parent) {
+                               IClosable* parent) {
 	if (g_network->isSimulated() && getExecPath() == binPath) {
 		int res = wait(spawnSimulated(paramList, maxWaitTime, isSync, maxSimDelayTime, parent));
 		return res;
@@ -294,7 +295,7 @@ ACTOR Future<int> spawnProcess(std::string path,
                                double maxWaitTime,
                                bool isSync,
                                double maxSimDelayTime,
-                               FlowProcess* parent) {
+                               IClosable* parent) {
 	if (g_network->isSimulated() && getExecPath() == path) {
 		int res = wait(spawnSimulated(args, maxWaitTime, isSync, maxSimDelayTime, parent));
 		return res;
@@ -307,14 +308,6 @@ ACTOR Future<int> spawnProcess(std::string path,
 		snapDelay += deterministicRandom()->random01();
 		TraceEvent("SnapDelaySpawnProcess").detail("SnapDelay", snapDelay);
 		wait(delay(snapDelay));
-	}
-
-	// for FlowProcess
-	if (parent) {
-		args.emplace_back("-C");
-		args.emplace_back(SERVER_KNOBS->CONN_FILE);
-		args.emplace_back("--logdir");
-		args.emplace_back(SERVER_KNOBS->LOG_DIRECTORY);
 	}
 
 	std::vector<char*> paramList;

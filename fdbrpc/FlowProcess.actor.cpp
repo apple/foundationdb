@@ -24,63 +24,7 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
-ACTOR Future<int> spawnProcess(std::string binPath,
-                               std::vector<std::string> paramList,
-                               double maxWaitTime,
-                               bool isSync,
-                               double maxSimDelayTime,
-                               FlowProcess* parent);
-
-namespace {
-
-ACTOR Future<int> flowProcessRunner(FlowProcess* self, Promise<Void> ready) {
-	state FlowProcessInterface processInterface;
-	state Future<int> process;
-
-	auto path = abspath(getExecPath());
-	auto endpoint = processInterface.registerProcess.getEndpoint();
-	auto address = endpoint.addresses.address.toString();
-	auto token = endpoint.token;
-
-	std::string flowProcessAddr = g_network->getLocalAddress().ip.toString().append(":0");
-	std::vector<std::string> args = { "bin/fdbserver",
-		                              "-r",
-		                              "flowprocess",
-		                              "-p",
-		                              flowProcessAddr,
-		                              "--process-name",
-		                              self->name().toString(),
-		                              "--process-endpoint",
-		                              format("%s,%lu,%lu", address.c_str(), token.first(), token.second()) };
-
-	process = spawnProcess(path, args, -1.0, false, 0.01, self);
-	choose {
-		when(FlowProcessRegistrationRequest req = waitNext(processInterface.registerProcess.getFuture())) {
-			self->consumeInterface(req.flowProcessInterface);
-			ready.send(Void());
-		}
-		when(int res = wait(process)) {
-			TraceEvent(SevDebug, "FlowProcessRunnerFinishedInChoose").detail("Result", res);
-			// 0 means process killed; non-zero means errors
-			if (res) {
-				ready.sendError(operation_failed());
-			} else {
-				ready.sendError(shutdown_in_progress());
-			}
-			return res;
-		}
-	}
-	int res = wait(process);
-	return res;
-}
-
-} // namespace
-
 FlowProcess::~FlowProcess() {}
-
-void FlowProcess::start() {
-	returnCodePromise = flowProcessRunner(this, readyPromise);
-}
 
 Future<Void> runFlowProcess(std::string const& name, Endpoint endpoint) {
 	TraceEvent(SevDebug, "RunFlowProcessStart").log();
