@@ -1519,8 +1519,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				LocalLineage _;
 				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::Storage;
 				// add a knob in fdbserver/Knobs.h for the last argument
-				TraceEvent(SevDebug, "OpenRemoteKVStore")
-				    .detail("StoreType", "1")
+				TraceEvent(SevDebug, "OpenRemoteKVStoreReboot")
+				    .detail("StoreType", s.storeType)
 				    .detail("RemoteKVStore", SERVER_KNOBS->REMOTE_KV_STORE);
 				IKeyValueStore* kv = openKVStore(s.storeType,
 				                                 s.filename,
@@ -2078,8 +2078,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                   isTss ? testingStoragePrefix.toString() : fileStoragePrefix.toString(),
 					                   recruited.id());
 
-					TraceEvent(SevDebug, "OpenRemoteKVStore")
-					    .detail("StoreType", "4")
+					TraceEvent(SevDebug, "OpenRemoteKVStoreInitilization")
+					    .detail("StoreType", req.storeType)
 					    .detail("RemoteKVStore", SERVER_KNOBS->REMOTE_KV_STORE);
 					IKeyValueStore* data = openKVStore(req.storeType,
 					                                   filename,
@@ -2089,7 +2089,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                                   false,
 					                                   SERVER_KNOBS->REMOTE_KV_STORE);
 
-					TraceEvent(SevDebug, "OpenRemoteKVStoreComplete").detail("StoreType", "4");
 					Future<Void> kvClosed = data->onClosed();
 					filesClosed.add(kvClosed);
 					ReplyPromise<InitializeStorageReply> storageReady = req.reply;

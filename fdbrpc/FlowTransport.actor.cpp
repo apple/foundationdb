@@ -1346,6 +1346,10 @@ ACTOR static Future<Void> listen(TransportData* self, NetworkAddress listenAddr)
 	state ActorCollectionNoErrors
 	    incoming; // Actors monitoring incoming connections that haven't yet been associated with a peer
 	state Reference<IListener> listener = INetworkConnections::net()->listen(listenAddr);
+	if (!g_network->isSimulated() && self->localAddresses.address.port == 0) {
+		printf("Updating local address to the listen address: %s\n", listener->getListenAddress().toString().c_str());
+		self->localAddresses.address = listener->getListenAddress();
+	}
 	state uint64_t connectionCount = 0;
 	try {
 		loop {
