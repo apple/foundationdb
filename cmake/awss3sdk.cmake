@@ -6,19 +6,35 @@ ExternalProject_Add(awss3sdk_project
   GIT_TAG           2af3ce543c322cb259471b3b090829464f825972 # v1.9.200
   SOURCE_DIR        "${CMAKE_CURRENT_BINARY_DIR}/awss3sdk-src"
   BINARY_DIR        "${CMAKE_CURRENT_BINARY_DIR}/awss3sdk-build"
+  BUILD_COMMAND     ninja -v # TODO REMOVE
   GIT_CONFIG        advice.detachedHead=false
-  CMAKE_ARGS        -DBUILD_SHARED_LIBS=OFF -DENABLE_TESTING=OFF -DBUILD_ONLY=core -DSIMPLE_INSTALL=ON -DCMAKE_INSTALL_PREFIX=install # TODO use absolute path for install
+  CMAKE_ARGS        -DBUILD_SHARED_LIBS=OFF
+                    -DENABLE_TESTING=OFF
+                    -DBUILD_ONLY=core
+                    -DSIMPLE_INSTALL=ON
+                    -DCMAKE_INSTALL_PREFIX=install
+
+
+                    #-DCMAKE_C_COMPILER=${CMAKE_C_COMPILER} 
+                    #-DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER} 
+                    #-DCMAKE_CXX_COMPILE_FLAGS=-stdlib=libc++
+                    #-DCMAKE_CXX_FLAGS=-stdlib=libc++
+                    # -DCMAKE_STATIC_LINKER_FLAGS=${CMAKE_STATIC_LINKER_FLAGS}
+                    -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+                    -DCMAKE_VERBOSE_BUILD=ON
+                    
+                    # TODO use absolute path for install 
   TEST_COMMAND      ""
+  BUILD_ALWAYS      TRUE
   BUILD_BYPRODUCTS  "${CMAKE_CURRENT_BINARY_DIR}/awss3sdk-build/install/lib64/libaws-cpp-sdk-core.a"
 )
 
-# finds headers but libc++issue?
+# finds headers but libc++ issue?
 add_library(awss3sdk_core STATIC IMPORTED)
 add_dependencies(awss3sdk_core awss3sdk_project)
 set_target_properties(awss3sdk_core PROPERTIES IMPORTED_LOCATION "${CMAKE_CURRENT_BINARY_DIR}/awss3sdk-build/install/lib64/libaws-cpp-sdk-core.a")
 
 add_library(awss3sdk_target INTERFACE)
-# #### target_include_directories(awss3sdk_target SYSTEM INTERFACE ${SOURCE_DIR}/aws-cpp-sdk-core/include)
 target_include_directories(awss3sdk_target SYSTEM INTERFACE ${CMAKE_CURRENT_BINARY_DIR}/awss3sdk-build/install/include)
 target_link_libraries(awss3sdk_target INTERFACE awss3sdk_core)
 
