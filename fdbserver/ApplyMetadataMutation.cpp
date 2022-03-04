@@ -590,6 +590,18 @@ private:
 		TEST(true); // Recovering at a higher version.
 	}
 
+	void checkSetVersionEpochKey(MutationRef m) {
+		if (m.param1 != versionEpochKey) {
+			return;
+		}
+		int64_t versionEpoch = BinaryReader::fromStringRef<int64_t>(m.param2, Unversioned());
+		TraceEvent("VersionEpoch", dbgid).detail("Epoch", versionEpoch);
+		if (!initialCommit)
+			txnStateStore->set(KeyValueRef(m.param1, m.param2));
+		confChange = true;
+		TEST(true); // Setting version epoch
+	}
+
 	void checkSetWriteRecoverKey(MutationRef m) {
 		if (m.param1 != writeRecoveryKey) {
 			return;
@@ -1119,6 +1131,7 @@ public:
 				checkSetGlobalKeys(m);
 				checkSetWriteRecoverKey(m);
 				checkSetMinRequiredCommitVersionKey(m);
+				checkSetVersionEpochKey(m);
 				checkSetTenantMapPrefix(m);
 				checkSetOtherKeys(m);
 			} else if (m.type == MutationRef::ClearRange && isSystemKey(m.param2)) {

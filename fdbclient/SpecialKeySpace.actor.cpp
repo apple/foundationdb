@@ -1940,8 +1940,6 @@ ACTOR static Future<Optional<std::string>> versionEpochCommitActor(ReadYourWrite
 }
 
 Future<Optional<std::string>> VersionEpochImpl::commit(ReadYourWritesTransaction* ryw) {
-	// TODO: Call advanceVersion at some point
-	ryw->getTransaction().setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	auto versionEpoch =
 	    ryw->getSpecialKeySpaceWriteMap()[SpecialKeySpace::getManagementApiCommandPrefix("versionepoch")].second;
 	if (versionEpoch.present()) {
@@ -1952,8 +1950,6 @@ Future<Optional<std::string>> VersionEpochImpl::commit(ReadYourWritesTransaction
 			return Optional<std::string>(ManagementAPIError::toJsonString(
 			    false, "versionepoch", "Invalid epoch (int64_t) argument: " + versionEpoch.get().toString()));
 		}
-	} else {
-		ryw->getTransaction().clear(minRequiredCommitVersionKey);
 	}
 	return Optional<std::string>();
 }
