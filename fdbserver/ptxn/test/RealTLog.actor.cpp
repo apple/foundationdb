@@ -136,6 +136,8 @@ ACTOR Future<Void> getTLogCreateActor(std::shared_ptr<TLogDriverContext> pTLogDr
 		}
 	}
 
+	wait(delay(1.0));
+
 	// delete old disk queue files
 	deleteFile(diskQueueFilename + "0." + tLogOptions.diskQueueExtension);
 	deleteFile(diskQueueFilename + "1." + tLogOptions.diskQueueExtension);
