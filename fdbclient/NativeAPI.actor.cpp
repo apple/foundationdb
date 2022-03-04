@@ -3146,9 +3146,10 @@ ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
 			    (e.code() == error_code_transaction_too_old && ver == latestVersion)) {
 				trState->cx->invalidateCache(useTenant ? locationInfo.tenantEntry.prefix : Key(), key);
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, trState->taskID));
-			} else if (e.code() == error_code_tenant_not_found) {
+			} else if (e.code() == error_code_unknown_tenant) {
 				ASSERT(useTenant && trState->tenant.present());
 				trState->cx->invalidateCachedTenant(trState->tenant.get());
+				wait(delay(CLIENT_KNOBS->UNKNOWN_TENANT_RETRY_DELAY, trState->taskID));
 			} else {
 				if (trState->trLogInfo && recordLogInfo)
 					trState->trLogInfo->addLog(FdbClientLogEvents::EventGetError(startTimeD,
@@ -3248,9 +3249,10 @@ ACTOR Future<Key> getKey(Reference<TransactionState> trState,
 				trState->cx->invalidateCache(locationInfo.tenantEntry.prefix, k.getKey(), Reverse{ k.isBackward() });
 
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, trState->taskID));
-			} else if (e.code() == error_code_tenant_not_found) {
+			} else if (e.code() == error_code_unknown_tenant) {
 				ASSERT(useTenant && trState->tenant.present());
 				trState->cx->invalidateCachedTenant(trState->tenant.get());
+				wait(delay(CLIENT_KNOBS->UNKNOWN_TENANT_RETRY_DELAY, trState->taskID));
 			} else {
 				TraceEvent(SevInfo, "GetKeyError").error(e).detail("AtKey", k.getKey()).detail("Offset", k.offset);
 				throw e;
@@ -3371,9 +3373,10 @@ ACTOR Future<Version> watchValue(Database cx, Reference<const WatchParameters> p
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
 				cx->invalidateCache(locationInfo.tenantEntry.prefix, parameters->key);
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, parameters->taskID));
-			} else if (e.code() == error_code_tenant_not_found) {
+			} else if (e.code() == error_code_unknown_tenant) {
 				ASSERT(parameters->tenant.name.present());
 				cx->invalidateCachedTenant(parameters->tenant.name.get());
+				wait(delay(CLIENT_KNOBS->UNKNOWN_TENANT_RETRY_DELAY, parameters->taskID));
 			} else if (e.code() == error_code_watch_cancelled || e.code() == error_code_process_behind) {
 				// clang-format off
 				TEST(e.code() == error_code_watch_cancelled); // Too many watches on the storage server, poll for changes instead
@@ -3751,9 +3754,10 @@ Future<RangeResultFamily> getExactRange(Reference<TransactionState> trState,
 
 					wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, trState->taskID));
 					break;
-				} else if (e.code() == error_code_tenant_not_found) {
+				} else if (e.code() == error_code_unknown_tenant) {
 					ASSERT(useTenant && trState->tenant.present());
 					trState->cx->invalidateCachedTenant(trState->tenant.get());
+					wait(delay(CLIENT_KNOBS->UNKNOWN_TENANT_RETRY_DELAY, trState->taskID));
 					break;
 				} else {
 					TraceEvent(SevInfo, "GetExactRangeError")
@@ -4201,9 +4205,10 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 					}
 
 					wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, trState->taskID));
-				} else if (e.code() == error_code_tenant_not_found) {
+				} else if (e.code() == error_code_unknown_tenant) {
 					ASSERT(useTenant && trState->tenant.present());
 					trState->cx->invalidateCachedTenant(trState->tenant.get());
+					wait(delay(CLIENT_KNOBS->UNKNOWN_TENANT_RETRY_DELAY, trState->taskID));
 				} else {
 					if (trState->trLogInfo)
 						trState->trLogInfo->addLog(
@@ -4650,9 +4655,10 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
 
 					wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, trState->taskID));
 					break;
-				} else if (e.code() == error_code_tenant_not_found) {
+				} else if (e.code() == error_code_unknown_tenant) {
 					ASSERT(trState->tenant.present());
 					trState->cx->invalidateCachedTenant(trState->tenant.get());
+					wait(delay(CLIENT_KNOBS->UNKNOWN_TENANT_RETRY_DELAY, trState->taskID));
 					break;
 				} else {
 					results->sendError(e);
@@ -4986,12 +4992,6 @@ Future<Version> Transaction::getRawReadVersion() {
 Future<Void> Transaction::watch(Reference<Watch> watch) {
 	++trState->cx->transactionWatchRequests;
 
-	if (!trState->cx->internal && !trState->options.rawAccess &&
-	    trState->cx->clientInfo->get().tenantMode == TenantMode::REQUIRED && !trState->tenant.present()) {
-		throw tenant_name_required();
-	} else if (trState->cx->clientInfo->get().tenantMode == TenantMode::DISABLED && trState->tenant.present()) {
-		throw tenants_disabled();
-	}
 
 	trState->cx->addWatch();
 	watches.push_back(watch);
@@ -5797,10 +5797,11 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 		state Key tenantPrefix;
 		if (trState->tenant.present()) {
 			KeyRangeLocationInfo locationInfo = wait(getKeyLocation(trState, ""_sr, &StorageServerInterface::getValue));
-			req.tenantInfo = trState->getTenantInfo();
 			applyTenantPrefix(req, locationInfo.tenantEntry.prefix);
 			tenantPrefix = locationInfo.tenantEntry.prefix;
 		}
+
+		req.tenantInfo = trState->getTenantInfo();
 
 		startTime = now();
 		state Optional<UID> commitID = Optional<UID>();
@@ -5933,6 +5934,10 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 			// The user needs to be informed that we aren't sure whether the commit happened.  Standard retry loops
 			// retry it anyway (relying on transaction idempotence) but a client might do something else.
 			throw commit_unknown_result();
+		} else if (e.code() == error_code_unknown_tenant) {
+			ASSERT(trState->tenant.present());
+			trState->cx->invalidateCachedTenant(trState->tenant.get());
+			throw;
 		} else {
 			if (e.code() != error_code_transaction_too_old && e.code() != error_code_not_committed &&
 			    e.code() != error_code_database_locked && e.code() != error_code_proxy_memory_limit_exceeded &&
@@ -6788,6 +6793,11 @@ Future<Void> Transaction::onError(Error const& e) {
 		reset();
 		return delay(std::min(CLIENT_KNOBS->FUTURE_VERSION_RETRY_DELAY, maxBackoff), trState->taskID);
 	}
+	if (e.code() == error_code_unknown_tenant) {
+		double maxBackoff = trState->options.maxBackoff;
+		reset();
+		return delay(std::min(CLIENT_KNOBS->UNKNOWN_TENANT_RETRY_DELAY, maxBackoff), trState->taskID);
+	}
 
 	return e;
 }
@@ -7138,9 +7148,10 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Reference<Transa
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
 				trState->cx->invalidateCache(locations[0].tenantEntry.prefix, keys);
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
-			} else if (e.code() == error_code_tenant_not_found) {
+			} else if (e.code() == error_code_unknown_tenant) {
 				ASSERT(trState->tenant.present());
 				trState->cx->invalidateCachedTenant(trState->tenant.get());
+				wait(delay(CLIENT_KNOBS->UNKNOWN_TENANT_RETRY_DELAY, trState->taskID));
 			} else {
 				TraceEvent(SevError, "GetRangeSplitPoints").error(e);
 				throw;
