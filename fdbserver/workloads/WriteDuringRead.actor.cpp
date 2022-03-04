@@ -534,9 +534,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 						    .detail("Value", transactionIter.value());
 					}
 					for (addedIter = addedRanges.begin(); addedIter != addedRanges.end(); ++addedIter) {
-						TraceEvent("WCRAdded")
-						    .detail("Range", addedIter.range())
-						    .detail("Value", addedIter.value());
+						TraceEvent("WCRAdded").detail("Range", addedIter.range()).detail("Value", addedIter.value());
 					}
 				}
 			}
