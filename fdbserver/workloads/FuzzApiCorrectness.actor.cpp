@@ -422,7 +422,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 					wait(timeoutError(unsafeThreadFutureToFuture(tr->commit()), 30));
 				} catch (Error& e) {
 					if (e.code() == error_code_client_invalid_operation ||
-					    e.code() == error_code_transaction_too_large) {
+					    e.code() == error_code_transaction_too_large ||
+					    e.code() == error_code_unknown_tenant) {
 						throw not_committed();
 					}
 				}
