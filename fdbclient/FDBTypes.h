@@ -550,6 +550,7 @@ public:
 	KeyRef getKey() const { return key; }
 
 	void setKey(KeyRef const& key);
+	void setKeyUnlimited(KeyRef const& key);
 
 	std::string toString() const;
 

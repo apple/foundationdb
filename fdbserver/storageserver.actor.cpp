@@ -87,7 +87,7 @@ bool canReplyWith(Error e) {
 	case error_code_unknown_change_feed:
 	case error_code_server_overloaded:
 	case error_code_tenant_name_required:
-	case error_code_tenant_not_found:
+	case error_code_unknown_tenant:
 	// getRangeAndMap related exceptions that are not retriable:
 	case error_code_mapper_bad_index:
 	case error_code_mapper_no_such_key:
@@ -1377,15 +1377,15 @@ Optional<TenantMapEntry> StorageServer::getTenantEntry(Version version, TenantIn
 		auto view = tenantMap.at(version);
 		auto itr = view.find(tenantInfo.name.get());
 		if (itr == view.end()) {
-			TraceEvent(SevWarn, "StorageTenantNotFound", thisServerID).detail("Tenant", tenantInfo.name).backtrace();
-			throw tenant_not_found();
+			TraceEvent(SevWarn, "StorageUnknownTenant", thisServerID).detail("Tenant", tenantInfo.name).backtrace();
+			throw unknown_tenant();
 		} else if (itr->id != tenantInfo.tenantId) {
 			TraceEvent(SevWarn, "StorageTenantIdMismatch", thisServerID)
 			    .detail("Tenant", tenantInfo.name)
 			    .detail("TenantId", tenantInfo.tenantId)
 			    .detail("ExistingId", itr->id)
 			    .backtrace();
-			throw tenant_not_found();
+			throw unknown_tenant();
 		}
 
 		return *itr;
@@ -2636,10 +2636,8 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 		Optional<TenantMapEntry> entry = data->getTenantEntry(version, req.tenantInfo);
 		state Optional<Key> tenantPrefix = entry.map<Key>([](TenantMapEntry e) { return e.prefix; });
 		if (tenantPrefix.present()) {
-			req.begin = KeySelectorRef(
-			    req.begin.getKey().withPrefix(tenantPrefix.get(), req.arena), req.begin.orEqual, req.begin.offset);
-			req.end = KeySelectorRef(
-			    req.end.getKey().withPrefix(tenantPrefix.get(), req.arena), req.end.orEqual, req.end.offset);
+			req.begin.setKeyUnlimited(req.begin.getKey().withPrefix(tenantPrefix.get(), req.arena));
+			req.end.setKeyUnlimited(req.end.getKey().withPrefix(tenantPrefix.get(), req.arena));
 		}
 
 		state uint64_t changeCounter = data->shardChangeCounter;
@@ -3145,10 +3143,8 @@ ACTOR Future<Void> getKeyValuesAndFlatMapQ(StorageServer* data, GetKeyValuesAndF
 		Optional<TenantMapEntry> entry = data->getTenantEntry(req.version, req.tenantInfo);
 		state Optional<Key> tenantPrefix = entry.map<Key>([](TenantMapEntry e) { return e.prefix; });
 		if (tenantPrefix.present()) {
-			req.begin = KeySelectorRef(
-			    req.begin.getKey().withPrefix(tenantPrefix.get(), req.arena), req.begin.orEqual, req.begin.offset);
-			req.end = KeySelectorRef(
-			    req.end.getKey().withPrefix(tenantPrefix.get(), req.arena), req.end.orEqual, req.end.offset);
+			req.begin.setKeyUnlimited(req.begin.getKey().withPrefix(tenantPrefix.get(), req.arena));
+			req.end.setKeyUnlimited(req.end.getKey().withPrefix(tenantPrefix.get(), req.arena));
 		}
 
 		state uint64_t changeCounter = data->shardChangeCounter;
@@ -3358,10 +3354,8 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 		Optional<TenantMapEntry> entry = data->getTenantEntry(version, req.tenantInfo);
 		state Optional<Key> tenantPrefix = entry.map<Key>([](TenantMapEntry e) { return e.prefix; });
 		if (tenantPrefix.present()) {
-			req.begin = KeySelectorRef(
-			    req.begin.getKey().withPrefix(tenantPrefix.get(), req.arena), req.begin.orEqual, req.begin.offset);
-			req.end = KeySelectorRef(
-			    req.end.getKey().withPrefix(tenantPrefix.get(), req.arena), req.end.orEqual, req.end.offset);
+			req.begin.setKeyUnlimited(req.begin.getKey().withPrefix(tenantPrefix.get(), req.arena));
+			req.end.setKeyUnlimited(req.end.getKey().withPrefix(tenantPrefix.get(), req.arena));
 		}
 
 		state uint64_t changeCounter = data->shardChangeCounter;
@@ -3551,8 +3545,7 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 
 		state Optional<TenantMapEntry> tenantEntry = data->getTenantEntry(version, req.tenantInfo);
 		if (tenantEntry.present()) {
-			req.sel = KeySelectorRef(
-			    req.sel.getKey().withPrefix(tenantEntry.get().prefix, req.arena), req.sel.orEqual, req.sel.offset);
+			req.sel.setKeyUnlimited(req.sel.getKey().withPrefix(tenantEntry.get().prefix, req.arena));
 		}
 		state uint64_t changeCounter = data->shardChangeCounter;
 

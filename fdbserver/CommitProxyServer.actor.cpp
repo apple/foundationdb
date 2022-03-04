@@ -419,12 +419,12 @@ ErrorOr<Optional<TenantMapEntry>> getTenantEntry(ProxyCommitData* commitData,
 		auto itr = view.find(tenant.get());
 		if (itr == view.end()) {
 			if (commitVersion != latestVersion) {
-				TraceEvent(SevWarn, "CommitProxyTenantNotFound", commitData->dbgid)
+				TraceEvent(SevWarn, "CommitProxyUnknownTenant", commitData->dbgid)
 				    .detail("Tenant", tenant.get())
 				    .detail("Version", commitVersion);
 			}
 
-			return tenant_not_found();
+			return unknown_tenant();
 		} else if (tenantId.present() && tenantId.get() != itr->id) {
 			if (commitVersion != latestVersion) {
 				TraceEvent(SevWarn, "CommitProxyTenantIdMismatch", commitData->dbgid)
@@ -434,7 +434,7 @@ ErrorOr<Optional<TenantMapEntry>> getTenantEntry(ProxyCommitData* commitData,
 				    .detail("Version", commitVersion);
 			}
 
-			return tenant_not_found();
+			return unknown_tenant();
 		}
 
 		return ErrorOr<Optional<TenantMapEntry>>(Optional<TenantMapEntry>(*itr));
