@@ -1,7 +1,6 @@
 set(FDB_C_SRCS
   fdb_c.cpp
-  foundationdb/fdb_c.h
-  ThreadCleanup.cpp)
+  foundationdb/fdb_c.h)
 
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/foundationdb)
 
@@ -76,10 +75,8 @@ if(WIN32)
   set_property(SOURCE ${asm_file} PROPERTY LANGUAGE ASM_MASM)
 endif()
 
-# The tests don't build on windows and ARM macs
-# doctest doesn't seem to compile on ARM macs, we should
-# check later whether this works
-if(NOT WIN32 AND NOT IS_ARM_MAC)
+# The tests don't build on windows
+if(NOT WIN32)
   set(MAKO_SRCS
     test/mako/mako.c
     test/mako/mako.h
