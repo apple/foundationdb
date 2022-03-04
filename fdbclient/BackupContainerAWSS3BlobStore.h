@@ -22,9 +22,8 @@
 #define FDBCLIENT_BACKUP_CONTAINER_AWSS3_BLOBSTORE_H
 #pragma once
 
-// #include "aws/core/Aws.h"
-// #include "awss3sdk-src/aws-cpp-sdk-core/include/aws/core/Aws.h"
-#include <aws/core/Aws.h>
+#include "aws/core/Aws.h"
+// #include <aws/core/Aws.h>
 
 void do_aws_test_stuff() {
 	printf("hell world\n");

@@ -1513,6 +1513,8 @@ Reference<BackupContainerFileSystem> BackupContainerFileSystem::openContainerFS(
 #ifdef BUILD_AWS_BACKUP
 		printf("build aws backup is set!!\n");
 		do_aws_test_stuff();
+#else
+		printf("BUILD_AWS_BACKUP NOT SET!\n");
 #endif
 		StringRef u(url);
 		if (u.startsWith("file://"_sr)) {

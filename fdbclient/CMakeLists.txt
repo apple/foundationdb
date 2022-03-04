@@ -202,12 +202,9 @@ if(BUILD_AZURE_BACKUP)
   )
 endif()
 
-set(BUILD_AWS_BACKUP OFF CACHE BOOL "Build AWS S3 SDK backup client")
-if(BUILD_AWS_BACKUP)
-  add_compile_definitions(BUILD_AWS_BACKUP)
 
-  # TODO Remove
-  set(CMAKE_VERBOSE_MAKEFILE ON CACHE BOOL "ON")
+if(WITH_AWS_BACKUP)
+  add_compile_definitions(BUILD_AWS_BACKUP)
 
   set(FDBCLIENT_SRCS
     ${FDBCLIENT_SRCS}
@@ -215,33 +212,7 @@ if(BUILD_AWS_BACKUP)
   #  BackupContainerAWSS3BlobStore.actor.cpp
     BackupContainerAWSS3BlobStore.h)
 
-  configure_file(awss3sdk.cmake awss3sdk-download/CMakeLists.txt)
-
-  execute_process(
-    COMMAND ${CMAKE_COMMAND} -G "${CMAKE_GENERATOR}" .
-    RESULT_VARIABLE results
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/awss3sdk-download
-  )
-
-  if(results)
-    message(FATAL_ERROR "Configuration step for AWS S3 SDK has Failed. ${results}")
-  endif()
-
-  execute_process(
-    COMMAND ${CMAKE_COMMAND} --build . --config Release --verbose
-    RESULT_VARIABLE results
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/awss3sdk-download
-  )
-
-  if(results)
-    message(FATAL_ERROR "Build step for AWS S3 SDK has Failed. ${results}")
-  endif()
-
-  add_subdirectory(
-    ${CMAKE_CURRENT_BINARY_DIR}/awss3sdk-src
-    ${CMAKE_CURRENT_BINARY_DIR}/awss3sdk-build
-    EXCLUDE_FROM_ALL
-  )
+  include(awss3sdk)
 endif()
 
 add_flow_target(STATIC_LIBRARY NAME fdbclient SRCS ${FDBCLIENT_SRCS} ADDL_SRCS ${options_srcs})
@@ -265,11 +236,6 @@ if(BUILD_AZURE_BACKUP)
 endif()
 
 if(BUILD_AWS_BACKUP)
-  #target_include_directories(fdbserver PRIVATE ${AWSS3SDK_INCLUDE_DIR})
-  #target_include_directories(fdbserver PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/awss3sdk-src/aws-cpp-sdk-core/include)
-
-  target_link_libraries(fdbclient PRIVATE curl aws-cpp-sdk-core)
-  target_link_libraries(fdbclient_sampling PRIVATE curl aws-cpp-sdk-core)
-  # target_link_libraries(fdbclient PRIVATE curl ${CMAKE_CURRENT_BINARY_DIR}/awss3sdk-build/install/lib64/libaws-cpp-sdk-core.a)
-  # target_link_libraries(fdbclient_sampling PRIVATE curl ${CMAKE_CURRENT_BINARY_DIR}/awss3sdk-build/install/lib64/libaws-cpp-sdk-core.a)
+  target_link_libraries(fdbclient PRIVATE curl awss3sdk_target)
+  target_link_libraries(fdbclient_sampling PRIVATE curl awss3sdk_target)
 endif()
