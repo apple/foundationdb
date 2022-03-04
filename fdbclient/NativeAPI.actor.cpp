@@ -1600,7 +1600,8 @@ void DatabaseContext::invalidateCache(const KeyRangeRef& keys) {
 
 void DatabaseContext::setFailedEndpointOnHealthyServer(const Endpoint& endpoint) {
 	if (failedEndpointsOnHealthyServersInfo.find(endpoint) == failedEndpointsOnHealthyServersInfo.end()) {
-		failedEndpointsOnHealthyServersInfo[endpoint] = { /*startTime=*/now(), /*lastRefreshTime=*/now() };
+		failedEndpointsOnHealthyServersInfo[endpoint] =
+		    EndpointFailureInfo{ .startTime = now(), .lastRefreshTime = now() };
 	}
 }
 
@@ -1609,7 +1610,6 @@ void DatabaseContext::updateFailedEndpointRefreshTime(const Endpoint& endpoint) 
 		// The endpoint is not failed. Nothing to update.
 		return;
 	}
-
 	failedEndpointsOnHealthyServersInfo[endpoint].lastRefreshTime = now();
 }
 
@@ -2477,6 +2477,35 @@ ACTOR Future<std::pair<KeyRange, Reference<LocationInfo>>> getKeyLocation_intern
 	}
 }
 
+// Checks if `endpoint` is failed on a healthy server or not. Returns true if we need to refresh the location cache for
+// the endpoint.
+bool checkOnlyEndpointFailed(const Database& cx, const Endpoint& endpoint) {
+	if (IFailureMonitor::failureMonitor().onlyEndpointFailed(endpoint)) {
+		// This endpoint is failed, but the server is still healthy. There are two cases this can happen:
+		//    - There is a recent bounce in the cluster where the endpoints in SSes get updated.
+		//    - The SS is failed and terminated on a server, but the server is kept running.
+		// To account for the first case, we invalidate the cache and issue GetKeyLocation requests to the proxy to
+		// update the cache with the new SS points. However, if the failure is caused by the second case, the
+		// requested key location will continue to be the failed endpoint until the data movement is finished. But
+		// every read will generate a GetKeyLocation request to the proxies (and still getting the failed endpoint
+		// back), which may overload the proxy and affect data movement speed. Therefore, we only refresh the
+		// location cache for short period of time, and after the initial grace period that we keep retrying
+		// resolving key location, we will slow it down to resolve it only once every
+		// `LOCATION_CACHE_FAILED_ENDPOINT_RETRY_INTERVAL`.
+		cx->setFailedEndpointOnHealthyServer(endpoint);
+		const auto& failureInfo = cx->getEndpointFailureInfo(endpoint);
+		ASSERT(failureInfo.present());
+		if (now() - failureInfo.get().startTime < CLIENT_KNOBS->LOCATION_CACHE_ENDPOINT_FAILURE_GRACE_PERIOD ||
+		    now() - failureInfo.get().lastRefreshTime > CLIENT_KNOBS->LOCATION_CACHE_FAILED_ENDPOINT_RETRY_INTERVAL) {
+			cx->updateFailedEndpointRefreshTime(endpoint);
+			return true;
+		}
+	} else {
+		cx->clearFailedEndpointOnHealthyServer(endpoint);
+	}
+	return false;
+}
+
 template <class F>
 Future<std::pair<KeyRange, Reference<LocationInfo>>> getKeyLocation(Database const& cx,
                                                                     Key const& key,
@@ -2493,36 +2522,13 @@ Future<std::pair<KeyRange, Reference<LocationInfo>>> getKeyLocation(Database con
 
 	bool onlyEndpointFailedAndNeedRefresh = false;
 	for (int i = 0; i < ssi.second->size(); i++) {
-		const Endpoint& endpoint = ssi.second->get(i, member).getEndpoint();
-		if (IFailureMonitor::failureMonitor().onlyEndpointFailed(endpoint)) {
-			// This endpoint is failed, but the server is still healthy. There are two cases this can happen:
-			//    - There is a recent bounce in the cluster where the endpoints in SSes get updated.
-			//    - The SS is failed and terminated on a server, but the server is kept running.
-			// To account for the first case, we invalidate the cache and issue GetKeyLocation requests to the proxy to
-			// update the cache with the new SS points. However, if the failure is caused by the second case, the
-			// requested key location will continue to be the failed endpoint until the data movement is finished. But
-			// every read will generate a GetKeyLocation request to the proxies (and still getting the failed endpoint
-			// back), which may overload the proxy and affect data movement speed. Therefore, we only refresh the
-			// location cache for short period of time, and after the initial grace period that we keep retrying
-			// resolving key location, we will slow it down to resolve it only once every
-			// `LOCATION_CACHE_FAILED_ENDPOINT_RETRY_INTERVAL`.
-			cx->setFailedEndpointOnHealthyServer(endpoint);
-			const auto& failureInfo = cx->getEndpointFailureInfo(endpoint);
-			ASSERT(failureInfo.present());
-			if (now() - failureInfo.get().startTime < CLIENT_KNOBS->LOCATION_CACHE_ENDPOINT_FAILURE_GRACE_PERIOD ||
-			    now() - failureInfo.get().lastRefreshTime >
-			        CLIENT_KNOBS->LOCATION_CACHE_FAILED_ENDPOINT_RETRY_INTERVAL) {
-				onlyEndpointFailedAndNeedRefresh = true;
-				cx->updateFailedEndpointRefreshTime(ssi.second->get(i, member).getEndpoint());
-			}
-		} else {
-			cx->clearFailedEndpointOnHealthyServer(endpoint);
+		if (checkOnlyEndpointFailed(cx, ssi.second->get(i, member).getEndpoint())) {
+			onlyEndpointFailedAndNeedRefresh = true;
 		}
 	}
 
 	if (onlyEndpointFailedAndNeedRefresh) {
 		cx->invalidateCache(key);
-
 		// Refresh the cache with a new getKeyLocations made to proxies.
 		return getKeyLocation_internal(cx, key, spanID, debugID, useProvisionalProxies, isBackward);
 	}
@@ -2611,21 +2617,8 @@ Future<std::vector<std::pair<KeyRange, Reference<LocationInfo>>>> getKeyRangeLoc
 	for (const auto& [range, locInfo] : locations) {
 		bool onlyEndpointFailedAndNeedRefresh = false;
 		for (int i = 0; i < locInfo->size(); i++) {
-			const Endpoint& endpoint = locInfo->get(i, member).getEndpoint();
-			if (IFailureMonitor::failureMonitor().onlyEndpointFailed(endpoint)) {
-				// Please refer to `getKeyLocation` about why we keep track of endpoint failure starting and refreshing
-				// time.
-				cx->setFailedEndpointOnHealthyServer(endpoint);
-				const auto& failureInfo = cx->getEndpointFailureInfo(endpoint);
-				ASSERT(failureInfo.present());
-				if (now() - failureInfo.get().startTime < CLIENT_KNOBS->LOCATION_CACHE_ENDPOINT_FAILURE_GRACE_PERIOD ||
-				    now() - failureInfo.get().lastRefreshTime >
-				        CLIENT_KNOBS->LOCATION_CACHE_FAILED_ENDPOINT_RETRY_INTERVAL) {
-					onlyEndpointFailedAndNeedRefresh = true;
-					cx->updateFailedEndpointRefreshTime(locInfo->get(i, member).getEndpoint());
-				}
-			} else {
-				cx->clearFailedEndpointOnHealthyServer(endpoint);
+			if (checkOnlyEndpointFailed(cx, locInfo->get(i, member).getEndpoint())) {
+				onlyEndpointFailedAndNeedRefresh = true;
 			}
 		}
 
@@ -6788,6 +6781,32 @@ ACTOR Future<Void> setPerpetualStorageWiggle(Database cx, bool enable, LockAware
 		}
 	}
 	return Void();
+}
+
+ACTOR Future<std::vector<std::pair<UID, StorageWiggleValue>>> readStorageWiggleValues(Database cx,
+                                                                                      bool primary,
+                                                                                      bool use_system_priority) {
+	state const Key readKey = perpetualStorageWiggleIDPrefix.withSuffix(primary ? "primary/"_sr : "remote/"_sr);
+	state KeyBackedObjectMap<UID, StorageWiggleValue, decltype(IncludeVersion())> metadataMap(readKey,
+	                                                                                          IncludeVersion());
+	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+	state std::vector<std::pair<UID, StorageWiggleValue>> res;
+	// read the wiggling pairs
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			if (use_system_priority) {
+				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			}
+			wait(store(res, metadataMap.getRange(tr, UID(0, 0), Optional<UID>(), CLIENT_KNOBS->TOO_MANY)));
+			wait(tr->commit());
+			break;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+	return res;
 }
 
 ACTOR Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(Database cx,

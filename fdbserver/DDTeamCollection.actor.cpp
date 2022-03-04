@@ -2245,6 +2245,11 @@ public:
 			// Ask the candidateWorker to initialize a SS only if the worker does not have a pending request
 			state UID interfaceId = deterministicRandom()->randomUniqueID();
 
+			// insert recruiting localities BEFORE actor waits, to ensure we don't send many recruitment requests to the
+			// same storage
+			self->recruitingIds.insert(interfaceId);
+			self->recruitingLocalities.insert(candidateWorker.worker.stableAddress());
+
 			UID clusterId = wait(self->getClusterId());
 
 			state InitializeStorageRequest isr;
@@ -2254,9 +2259,6 @@ public:
 			isr.reqId = deterministicRandom()->randomUniqueID();
 			isr.interfaceId = interfaceId;
 			isr.clusterId = clusterId;
-
-			self->recruitingIds.insert(interfaceId);
-			self->recruitingLocalities.insert(candidateWorker.worker.stableAddress());
 
 			// if tss, wait for pair ss to finish and add its id to isr. If pair fails, don't recruit tss
 			state bool doRecruit = true;
@@ -2826,25 +2828,8 @@ public:
 
 	// read the current map of `perpetualStorageWiggleIDPrefix`, then restore wigglingId.
 	ACTOR static Future<Void> readStorageWiggleMap(DDTeamCollection* self) {
-
-		state const Key readKey =
-		    perpetualStorageWiggleIDPrefix.withSuffix(self->primary ? "primary/"_sr : "remote/"_sr);
-		state KeyBackedObjectMap<UID, StorageWiggleValue, decltype(IncludeVersion())> metadataMap(readKey,
-		                                                                                          IncludeVersion());
-		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
-		state std::vector<std::pair<UID, StorageWiggleValue>> res;
-		// read the wiggling pairs
-		loop {
-			try {
-				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-				wait(store(res, metadataMap.getRange(tr, UID(0, 0), Optional<UID>(), CLIENT_KNOBS->TOO_MANY)));
-				wait(tr->commit());
-				break;
-			} catch (Error& e) {
-				wait(tr->onError(e));
-			}
-		}
+		state std::vector<std::pair<UID, StorageWiggleValue>> res =
+		    wait(readStorageWiggleValues(self->cx, self->primary, false));
 		if (res.size() > 0) {
 			// SOMEDAY: support wiggle multiple SS at once
 			ASSERT(!self->wigglingId.present()); // only single process wiggle is allowed
@@ -5640,11 +5625,7 @@ public:
 
 		std::pair<Optional<Reference<IDataDistributionTeam>>, bool> resTeam = req.reply.getFuture().get();
 
-		std::set<UID> expectedServers{ UID(2, 0), UID(3, 0), UID(4, 0) };
-		ASSERT(resTeam.first.present());
-		auto servers = resTeam.first.get()->getServerIDs();
-		const std::set<UID> selectedServers(servers.begin(), servers.end());
-		ASSERT(expectedServers == selectedServers);
+		ASSERT(!resTeam.first.present());
 
 		return Void();
 	}
