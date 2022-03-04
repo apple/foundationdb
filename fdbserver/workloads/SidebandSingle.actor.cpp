@@ -161,7 +161,7 @@ struct SidebandSingleWorkload : TestWorkload {
 								wait(store(val2, tr2.get(messageKey)));
 								break;
 							} catch (Error& e) {
-								TraceEvent("DebugSidebandNoCacheError").error(e, true);
+								TraceEvent("DebugSidebandNoCacheError").errorUnsuppressed(e);
 								wait(tr2.onError(e));
 							}
 						}
@@ -178,7 +178,7 @@ struct SidebandSingleWorkload : TestWorkload {
 					}
 					break;
 				} catch (Error& e) {
-					TraceEvent("DebugSidebandCheckError").error(e, true);
+					TraceEvent("DebugSidebandCheckError").errorUnsuppressed(e);
 					wait(tr.onError(e));
 				}
 			}
