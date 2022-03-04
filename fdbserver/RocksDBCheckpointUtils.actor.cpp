@@ -165,15 +165,15 @@ private:
 
 			// std::cout << "Init Iterator." << std::endl;
 
-			begin = toSlice(a.range.begin);
-			end = toSlice(a.range.end);
+			begin = a.range.begin;
+			end = a.range.end;
 
 			TraceEvent(SevInfo, "RocksDBCheckpointReaderInit")
 			    .detail("Path", a.path)
 			    .detail("Method", "OpenForReadOnly")
 			    .detail("ColumnFamily", cf->GetName())
-			    .detail("Begin", begin.ToString())
-			    .detail("End", end.ToString());
+			    .detail("Begin", begin)
+			    .detail("End", end);
 
 			rocksdb::PinnableSlice value;
 			rocksdb::ReadOptions readOptions = getReadOptions();
@@ -194,7 +194,7 @@ private:
 			// rocksdb::ReadOptions readOptions = getReadOptions();
 			// readOptions.iterate_upper_bound = &end;
 			cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(readOptions, cf));
-			cursor->Seek(begin);
+			cursor->Seek(toSlice(begin));
 
 			a.done.send(Void());
 		}
@@ -316,8 +316,8 @@ private:
 
 		DB& db;
 		CF cf;
-		rocksdb::Slice begin;
-		rocksdb::Slice end;
+		Key begin;
+		Key end;
 		double readRangeTimeout;
 		std::unique_ptr<rocksdb::Iterator> cursor;
 	};
