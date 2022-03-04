@@ -297,6 +297,7 @@ public:
 	bool ROCKSDB_WRITE_RATE_LIMITER_AUTO_TUNE;
 	bool ROCKSDB_PERFCONTEXT_ENABLE; // Enable rocks perf context metrics. May cause performance overhead
 	double ROCKSDB_PERFCONTEXT_SAMPLE_RATE;
+	int ROCKSDB_MAX_SUBCOMPACTIONS;
 
 	// Leader election
 	int MAX_NOTIFICATIONS;
