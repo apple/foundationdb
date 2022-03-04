@@ -80,18 +80,18 @@ private:
 struct TransactionExecutorOptions {
 	std::string prefix = "";
 	bool blockOnFutures = false;
+	bool databasePerTransaction = false;
 	int numDatabases = 1;
 };
 
 class ITransactionExecutor {
 public:
 	virtual ~ITransactionExecutor() {}
-	virtual void init(IScheduler* sched, const char* clusterFile, const TransactionExecutorOptions& options) = 0;
+	virtual void init(IScheduler* sched, const char* clusterFile) = 0;
 	virtual void execute(std::shared_ptr<ITransactionActor> tx, TTaskFct cont) = 0;
-	virtual void release() = 0;
 };
 
-std::unique_ptr<ITransactionExecutor> createTransactionExecutor();
+std::unique_ptr<ITransactionExecutor> createTransactionExecutor(const TransactionExecutorOptions& options);
 
 } // namespace FdbApiTester
 

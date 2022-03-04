@@ -43,6 +43,8 @@ struct TestSpec {
 	bool blockOnFutures = false;
 	bool multiThreaded = false;
 	bool buggify = false;
+	bool fdbCallbacksOnExternalThreads = false;
+	bool databasePerTransaction = false;
 	int minFdbThreads = 1;
 	int maxFdbThreads = 1;
 	int minClientThreads = 1;

@@ -187,15 +187,43 @@ private:
 	IScheduler* scheduler;
 };
 
-class TransactionExecutor : public ITransactionExecutor {
+class TransactionExecutorBase : public ITransactionExecutor {
 public:
-	TransactionExecutor() : scheduler(nullptr) {}
+	TransactionExecutorBase(const TransactionExecutorOptions& options) : options(options), scheduler(nullptr) {}
 
-	~TransactionExecutor() { release(); }
-
-	void init(IScheduler* scheduler, const char* clusterFile, const TransactionExecutorOptions& options) override {
+	void init(IScheduler* scheduler, const char* clusterFile) override {
 		this->scheduler = scheduler;
-		this->options = options;
+		this->clusterFile = clusterFile;
+	}
+
+protected:
+	void executeWithDatabase(FDBDatabase* db, std::shared_ptr<ITransactionActor> txActor, TTaskFct cont) {
+		FDBTransaction* tx;
+		fdb_error_t err = fdb_database_create_transaction(db, &tx);
+		if (err != error_code_success) {
+			txActor->setError(err);
+			cont();
+		} else {
+			TransactionContext* ctx = new TransactionContext(tx, txActor, cont, options, scheduler);
+			txActor->init(ctx);
+			txActor->start();
+		}
+	}
+
+protected:
+	TransactionExecutorOptions options;
+	std::string clusterFile;
+	IScheduler* scheduler;
+};
+
+class DBPoolTransactionExecutor : public TransactionExecutorBase {
+public:
+	DBPoolTransactionExecutor(const TransactionExecutorOptions& options) : TransactionExecutorBase(options) {}
+
+	~DBPoolTransactionExecutor() override { release(); }
+
+	void init(IScheduler* scheduler, const char* clusterFile) override {
+		TransactionExecutorBase::init(scheduler, clusterFile);
 		for (int i = 0; i < options.numDatabases; i++) {
 			FDBDatabase* db;
 			fdb_error_t err = fdb_create_database(clusterFile, &db);
@@ -211,19 +239,10 @@ public:
 
 	void execute(std::shared_ptr<ITransactionActor> txActor, TTaskFct cont) override {
 		int idx = random.randomInt(0, options.numDatabases - 1);
-		FDBTransaction* tx;
-		fdb_error_t err = fdb_database_create_transaction(databases[idx], &tx);
-		if (err != error_code_success) {
-			txActor->setError(err);
-			cont();
-		} else {
-			TransactionContext* ctx = new TransactionContext(tx, txActor, cont, options, scheduler);
-			txActor->init(ctx);
-			txActor->start();
-		}
+		executeWithDatabase(databases[idx], txActor, cont);
 	}
 
-	void release() override {
+	void release() {
 		for (FDBDatabase* db : databases) {
 			fdb_database_destroy(db);
 		}
@@ -231,13 +250,33 @@ public:
 
 private:
 	std::vector<FDBDatabase*> databases;
-	TransactionExecutorOptions options;
-	IScheduler* scheduler;
 	Random random;
 };
 
-std::unique_ptr<ITransactionExecutor> createTransactionExecutor() {
-	return std::make_unique<TransactionExecutor>();
+class DBPerTransactionExecutor : public TransactionExecutorBase {
+public:
+	DBPerTransactionExecutor(const TransactionExecutorOptions& options) : TransactionExecutorBase(options) {}
+
+	void execute(std::shared_ptr<ITransactionActor> txActor, TTaskFct cont) override {
+		FDBDatabase* db = nullptr;
+		fdb_error_t err = fdb_create_database(clusterFile.c_str(), &db);
+		if (err != error_code_success) {
+			txActor->setError(err);
+			cont();
+		}
+		executeWithDatabase(db, txActor, [cont, db]() {
+			fdb_database_destroy(db);
+			cont();
+		});
+	}
+};
+
+std::unique_ptr<ITransactionExecutor> createTransactionExecutor(const TransactionExecutorOptions& options) {
+	if (options.databasePerTransaction) {
+		return std::make_unique<DBPerTransactionExecutor>(options);
+	} else {
+		return std::make_unique<DBPoolTransactionExecutor>(options);
+	}
 }
 
 } // namespace FdbApiTester

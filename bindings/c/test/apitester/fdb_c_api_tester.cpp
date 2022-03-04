@@ -191,6 +191,10 @@ void applyNetworkOptions(TesterOptions& options) {
 		    FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_CLIENT_THREADS_PER_VERSION, options.numFdbThreads));
 	}
 
+	if (options.testSpec.fdbCallbacksOnExternalThreads) {
+		fdb_check(FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_CALLBACKS_ON_EXTERNAL_THREADS));
+	}
+
 	if (options.testSpec.buggify) {
 		fdb_check(FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_CLIENT_BUGGIFY_ENABLE));
 	}
@@ -219,11 +223,12 @@ bool runWorkloads(TesterOptions& options) {
 	TransactionExecutorOptions txExecOptions;
 	txExecOptions.blockOnFutures = options.testSpec.blockOnFutures;
 	txExecOptions.numDatabases = options.numDatabases;
+	txExecOptions.databasePerTransaction = options.testSpec.databasePerTransaction;
 
 	std::unique_ptr<IScheduler> scheduler = createScheduler(options.numClientThreads);
-	std::unique_ptr<ITransactionExecutor> txExecutor = createTransactionExecutor();
+	std::unique_ptr<ITransactionExecutor> txExecutor = createTransactionExecutor(txExecOptions);
 	scheduler->start();
-	txExecutor->init(scheduler.get(), options.clusterFile.c_str(), txExecOptions);
+	txExecutor->init(scheduler.get(), options.clusterFile.c_str());
 
 	WorkloadManager workloadMgr(txExecutor.get(), scheduler.get());
 	for (const auto& workloadSpec : options.testSpec.workloads) {

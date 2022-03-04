@@ -1,6 +1,7 @@
 [[test]]
 title = 'API Correctness Multi Threaded'
 multiThreaded = true
+buggify = true
 minFdbThreads = 2
 maxFdbThreads = 8
 minDatabases = 2

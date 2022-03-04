@@ -61,6 +61,14 @@ std::unordered_map<std::string, std::function<void(const std::string& value, Tes
 	  [](const std::string& value, TestSpec* spec) { //
 	      spec->multiThreaded = (value == "true");
 	  } },
+	{ "fdbCallbacksOnExternalThreads",
+	  [](const std::string& value, TestSpec* spec) { //
+	      spec->fdbCallbacksOnExternalThreads = (value == "true");
+	  } },
+	{ "databasePerTransaction",
+	  [](const std::string& value, TestSpec* spec) { //
+	      spec->databasePerTransaction = (value == "true");
+	  } },
 	{ "minFdbThreads",
 	  [](const std::string& value, TestSpec* spec) { //
 	      processIntOption(value, "minFdbThreads", spec->minFdbThreads, 1, 1000);
