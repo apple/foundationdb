@@ -840,7 +840,7 @@ void worker_thread(thread_args_t& thread_args) {
 	           thread_id,
 	           args.num_threads,
 	           database_index,
-	           fmt::ptr(pthread_self()));
+	           reinterpret_cast<uint64_t>(pthread_self()));
 
 	const auto thread_tps =
 	    args.tpsmax == 0 ? 0
