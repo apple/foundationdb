@@ -19,7 +19,7 @@
  */
 
 #include <cinttypes>
-#include "contrib/fmt-8.0.1/include/fmt/format.h"
+#include "contrib/fmt-8.1.1/include/fmt/format.h"
 #include "fdbclient/BlobWorkerInterface.h"
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbserver/Status.h"
@@ -2928,6 +2928,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		state JsonBuilderObject qos;
 		state JsonBuilderObject dataOverlay;
 		state JsonBuilderObject storageWiggler;
+		state std::unordered_set<UID> wiggleServers;
 
 		statusObj["protocol_version"] = format("%" PRIx64, g_network->protocolVersion().version());
 		statusObj["connection_string"] = coordinators.ccr->getConnectionString().toString();
@@ -3018,8 +3019,18 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			    clusterSummaryStatisticsFetcher(pMetrics, storageServerFuture, tLogFuture, &status_incomplete_reasons));
 
 			if (configuration.get().perpetualStorageWiggleSpeed > 0) {
-				wait(store(storageWiggler, storageWigglerStatsFetcher(configuration.get(), cx, true)));
-				statusObj["storage_wiggler"] = storageWiggler;
+				state Future<std::vector<std::pair<UID, StorageWiggleValue>>> primaryWiggleValues;
+				state Future<std::vector<std::pair<UID, StorageWiggleValue>>> remoteWiggleValues;
+
+				primaryWiggleValues = readStorageWiggleValues(cx, true, true);
+				remoteWiggleValues = readStorageWiggleValues(cx, false, true);
+				wait(store(storageWiggler, storageWigglerStatsFetcher(configuration.get(), cx, true)) &&
+				     success(primaryWiggleValues) && success(remoteWiggleValues));
+
+				for (auto& p : primaryWiggleValues.get())
+					wiggleServers.insert(p.first);
+				for (auto& p : remoteWiggleValues.get())
+					wiggleServers.insert(p.first);
 			}
 
 			state std::vector<JsonBuilderObject> workerStatuses = wait(getAll(futures2));
@@ -3178,12 +3189,26 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		statusObj["datacenter_lag"] = getLagObject(datacenterVersionDifference);
 
 		int activeTSSCount = 0;
+		JsonBuilderArray wiggleServerAddress;
 		for (auto& it : storageServers) {
 			if (it.first.isTss()) {
 				activeTSSCount++;
 			}
+			if (wiggleServers.count(it.first.id())) {
+				wiggleServerAddress.push_back(it.first.address().toString());
+			}
 		}
 		statusObj["active_tss_count"] = activeTSSCount;
+
+		if (!storageWiggler.empty()) {
+			JsonBuilderArray wiggleServerUID;
+			for (auto& id : wiggleServers)
+				wiggleServerUID.push_back(id.shortString());
+
+			storageWiggler["wiggle_server_ids"] = wiggleServerUID;
+			storageWiggler["wiggle_server_addresses"] = wiggleServerAddress;
+			statusObj["storage_wiggler"] = storageWiggler;
+		}
 
 		int totalDegraded = 0;
 		for (auto& it : workers) {

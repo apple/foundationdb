@@ -195,6 +195,8 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 	bool locked;
 	Optional<Value> metadataVersion;
 	int64_t midShardSize = 0;
+	bool rkDefaultThrottled = false;
+	bool rkBatchThrottled = false;
 
 	TransactionTagMap<ClientTagThrottleLimits> tagThrottleInfo;
 
@@ -208,7 +210,9 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 		           locked,
 		           metadataVersion,
 		           tagThrottleInfo,
-		           midShardSize);
+		           midShardSize,
+		           rkDefaultThrottled,
+		           rkBatchThrottled);
 	}
 };
 

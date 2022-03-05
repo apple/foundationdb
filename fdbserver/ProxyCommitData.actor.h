@@ -113,7 +113,7 @@ struct ProxyStats {
 	                        id,
 	                        SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 	                        SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
-	    commitLatencyBands("CommitLatencyMetrics", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY),
+	    commitLatencyBands("CommitLatencyBands", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY),
 	    commitBatchingEmptyMessageRatio("CommitBatchingEmptyMessageRatio",
 	                                    id,
 	                                    SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,

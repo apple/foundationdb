@@ -88,7 +88,8 @@ struct StatusWorkload : TestWorkload {
 				schemaCoverage(spath, false);
 
 				if (skv.second.type() == json_spirit::array_type && skv.second.get_array().size()) {
-					schemaCoverageRequirements(skv.second.get_array()[0].get_obj(), spath + "[0]");
+					if (skv.second.get_array()[0].type() != json_spirit::str_type)
+						schemaCoverageRequirements(skv.second.get_array()[0].get_obj(), spath + "[0]");
 				} else if (skv.second.type() == json_spirit::obj_type) {
 					if (skv.second.get_obj().count("$enum")) {
 						for (auto& enum_item : skv.second.get_obj().at("$enum").get_array())

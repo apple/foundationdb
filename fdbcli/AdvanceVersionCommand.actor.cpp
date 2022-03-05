@@ -19,7 +19,7 @@
  */
 
 #include "boost/lexical_cast.hpp"
-#include "contrib/fmt-8.0.1/include/fmt/format.h"
+#include "contrib/fmt-8.1.1/include/fmt/format.h"
 #include "fdbcli/fdbcli.actor.h"
 
 #include "fdbclient/IClientApi.h"
@@ -40,7 +40,7 @@ ACTOR Future<bool> advanceVersionCommandActor(Reference<IDatabase> db, std::vect
 	} else {
 		state Version v;
 		int n = 0;
-		if (sscanf(tokens[1].toString().c_str(), "%lld%n", &v, &n) != 1 || n != tokens[1].size()) {
+		if (sscanf(tokens[1].toString().c_str(), "%" PRId64 "%n", &v, &n) != 1 || n != tokens[1].size()) {
 			printUsage(tokens[0]);
 			return false;
 		} else {

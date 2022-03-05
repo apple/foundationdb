@@ -26,19 +26,17 @@
 #    endif
 #    include <io.h>
 
-#    define O_CREAT _O_CREAT
-#    define O_TRUNC _O_TRUNC
-
 #    ifndef S_IRUSR
 #      define S_IRUSR _S_IREAD
 #    endif
-
 #    ifndef S_IWUSR
 #      define S_IWUSR _S_IWRITE
 #    endif
-
-#    ifdef __MINGW32__
-#      define _SH_DENYNO 0x40
+#    ifndef S_IRGRP
+#      define S_IRGRP 0
+#    endif
+#    ifndef S_IROTH
+#      define S_IROTH 0
 #    endif
 #  endif  // _WIN32
 #endif    // FMT_USE_FCNTL
@@ -213,7 +211,10 @@ int buffered_file::fileno() const {
 
 #if FMT_USE_FCNTL
 file::file(cstring_view path, int oflag) {
-  int mode = S_IRUSR | S_IWUSR;
+#  ifdef _WIN32
+  using mode_t = int;
+#  endif
+  mode_t mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
 #  if defined(_WIN32) && !defined(__MINGW32__)
   fd_ = -1;
   FMT_POSIX_CALL(sopen_s(&fd_, path.c_str(), oflag, _SH_DENYNO, mode));

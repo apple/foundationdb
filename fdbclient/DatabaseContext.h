@@ -363,6 +363,7 @@ public:
 	Future<Void> monitorTssInfoChange;
 	Future<Void> tssMismatchHandler;
 	PromiseStream<std::pair<UID, std::vector<DetailedTSSMismatch>>> tssMismatchStream;
+	Future<Void> grvUpdateHandler;
 	Reference<CommitProxyInfo> commitProxies;
 	Reference<GrvProxyInfo> grvProxies;
 	bool proxyProvisional; // Provisional commit proxy and grv proxy are used at the same time.
@@ -478,6 +479,20 @@ public:
 
 	int outstandingWatches;
 	int maxOutstandingWatches;
+
+	// GRV Cache
+	// Database-level read version cache storing the most recent successful GRV as well as the time it was requested.
+	double lastGrvTime;
+	Version cachedReadVersion;
+	void updateCachedReadVersion(double t, Version v);
+	Version getCachedReadVersion();
+	double getLastGrvTime();
+	double lastRkBatchThrottleTime;
+	double lastRkDefaultThrottleTime;
+	// Cached RVs can be updated through commits, and using cached RVs avoids the proxies altogether
+	// Because our checks for ratekeeper throttling requires communication with the proxies,
+	// we want to track the last time in order to periodically contact the proxy to check for throttling
+	double lastProxyRequestTime;
 
 	int snapshotRywEnabled;
 

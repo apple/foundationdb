@@ -144,8 +144,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			if (!self->compareRangeResult(correctResult, testResult)) {
 				TraceEvent(SevError, "TestFailure")
 				    .detail("Reason", "Results from getRange are inconsistent")
-				    .detail("Begin", begin.toString())
-				    .detail("End", end.toString())
+				    .detail("Begin", begin)
+				    .detail("End", end)
 				    .detail("LimitRows", limit.rows)
 				    .detail("LimitBytes", limit.bytes)
 				    .detail("Reverse", reverse);
@@ -185,8 +185,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			if (!self->compareRangeResult(correctRywResult, testRywResult)) {
 				TraceEvent(SevError, "TestFailure")
 				    .detail("Reason", "Results from getRange(ryw) are inconsistent")
-				    .detail("Begin", begin.toString())
-				    .detail("End", end.toString())
+				    .detail("Begin", begin)
+				    .detail("End", end)
 				    .detail("LimitRows", limit.rows)
 				    .detail("LimitBytes", limit.bytes)
 				    .detail("Reverse", reverse);
@@ -569,8 +569,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					    .detail("TestKey", test_iter->key)
 					    .detail("CorrectValue", correct_iter->value)
 					    .detail("TestValue", test_iter->value)
-					    .detail("Begin", begin.toString())
-					    .detail("End", end.toString())
+					    .detail("Begin", begin)
+					    .detail("End", end)
 					    .detail("Ryw", ryw);
 					had_error = true;
 					++self->wrongResults;
@@ -584,8 +584,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				    .detail("ConflictType", read ? "read" : "write")
 				    .detail("CorrectKey", correct_iter->key)
 				    .detail("CorrectValue", correct_iter->value)
-				    .detail("Begin", begin.toString())
-				    .detail("End", end.toString())
+				    .detail("Begin", begin)
+				    .detail("End", end)
 				    .detail("Ryw", ryw);
 				++correct_iter;
 				had_error = true;
@@ -597,8 +597,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				    .detail("ConflictType", read ? "read" : "write")
 				    .detail("TestKey", test_iter->key)
 				    .detail("TestValue", test_iter->value)
-				    .detail("Begin", begin.toString())
-				    .detail("End", end.toString())
+				    .detail("Begin", begin)
+				    .detail("End", end)
 				    .detail("Ryw", ryw);
 				++test_iter;
 				had_error = true;
