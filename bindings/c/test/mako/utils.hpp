@@ -5,9 +5,10 @@
 #include "mako.hpp"
 #include <cassert>
 #include <chrono>
-#include <fmt/format.h>
-#include <stdint.h>
+#include <cstdint>
+#include <type_traits>
 
+#include <fmt/format.h>
 /* uniform-distribution random */
 /* return a uniform random number between low and high, both inclusive */
 int urand(int low, int high);
@@ -102,24 +103,24 @@ void genkey(std::basic_string<Char>& str, std::string_view prefix, mako_args_t c
 
 // invoke user-provided callable when object goes out of scope.
 template <typename Func>
-class exit_guard {
+class ExitGuard {
 	std::decay_t<Func> fn;
 
 public:
-	exit_guard(Func&& fn) : fn(std::forward<Func>(fn)) {}
+	ExitGuard(Func&& fn) : fn(std::forward<Func>(fn)) {}
 
-	~exit_guard() { fn(); }
+	~ExitGuard() { fn(); }
 };
 
 // invoke user-provided callable when stack unwinds by exception.
 template <typename Func>
-class fail_guard {
+class FailGuard {
 	std::decay_t<Func> fn;
 
 public:
-	fail_guard(Func&& fn) : fn(std::forward<Func>(fn)) {}
+	FailGuard(Func&& fn) : fn(std::forward<Func>(fn)) {}
 
-	~fail_guard() {
+	~FailGuard() {
 		if (std::uncaught_exceptions()) {
 			fn();
 		}
@@ -127,23 +128,38 @@ public:
 };
 
 // timing helpers
-using std::chrono::steady_clock;
-using timepoint_t = decltype(steady_clock::now());
+struct start_at_ctor{};
 
-template <typename Duration>
-double to_double_seconds(Duration duration) {
-	return std::chrono::duration_cast<std::chrono::duration<double>>(duration).count();
-}
-
-template <typename Duration>
-uint64_t to_integer_seconds(Duration duration) {
-	return std::chrono::duration_cast<std::chrono::duration<uint64_t>>(duration).count();
-}
-
-template <typename Duration>
-uint64_t to_integer_microseconds(Duration duration) {
-	return std::chrono::duration_cast<std::chrono::duration<uint64_t, std::micro>>(duration).count();
-}
+class Stopwatch {
+	timepoint_t p1, p2;
+public:
+	Stopwatch() noexcept = default;
+	Stopwatch(start_at_ctor) noexcept {
+		start();
+	}
+	Stopwatch(timepoint_t start_time) noexcept : p1(start_time), p2() {}
+	Stopwatch(const Stopwatch&) noexcept = default;
+	Stopwatch& operator=(const Stopwatch&) noexcept = default;
+	timepoint_t get_start() const noexcept { return p1; }
+	timepoint_t get_stop() const noexcept { return p2; }
+	void start() noexcept {
+		p1 = steady_clock::now();
+	}
+	Stopwatch& stop() noexcept {
+		p2 = steady_clock::now();
+		return *this;
+	}
+	Stopwatch& set_stop(timepoint_t p_stop) noexcept {
+		p2 = p_stop;
+		return *this;
+	}
+	void start_from_stop() noexcept {
+		p1 = p2;
+	}
+	auto diff() const noexcept {
+		return p2 - p1;
+	}
+};
 
 // trace helpers
 constexpr const int STATS_TITLE_WIDTH = 12;

@@ -8,6 +8,8 @@
 
 #include <array>
 #include <atomic>
+#include <cassert>
+#include <chrono>
 #include <list>
 #include <vector>
 #include <string_view>
@@ -34,7 +36,7 @@ constexpr const int MODE_BUILD = 1;
 constexpr const int MODE_RUN = 2;
 
 /* size of each block to get detailed latency for each operation */
-constexpr const size_t LAT_BLOCK_SIZE = 511;
+constexpr const size_t LAT_BLOCK_SIZE = 16384;
 
 /* transaction specification */
 enum Operations {
@@ -163,6 +165,35 @@ struct mako_shmhdr_t {
 	std::atomic<int> stopcount;
 };
 
+/* per-process information */
+typedef struct {
+	int worker_id;
+	pid_t parent_id;
+	mako_args_t* args;
+	mako_shmhdr_t* shm;
+	std::vector<fdb::Database> databases;
+} process_info_t;
+
+/* time measurement helpers */
+using std::chrono::steady_clock;
+using timepoint_t = decltype(steady_clock::now());
+using timediff_t = decltype(std::declval<timepoint_t>()-std::declval<timepoint_t>());
+
+template <typename Duration>
+double to_double_seconds(Duration duration) {
+	return std::chrono::duration_cast<std::chrono::duration<double>>(duration).count();
+}
+
+template <typename Duration>
+uint64_t to_integer_seconds(Duration duration) {
+	return std::chrono::duration_cast<std::chrono::duration<uint64_t>>(duration).count();
+}
+
+template <typename Duration>
+uint64_t to_integer_microseconds(Duration duration) {
+	return std::chrono::duration_cast<std::chrono::duration<uint64_t, std::micro>>(duration).count();
+}
+
 class alignas(64) mako_stats_t {
 	uint64_t xacts;
 	uint64_t conflicts;
@@ -222,32 +253,25 @@ public:
 	void incr_conflict_count() noexcept { conflicts++; }
 
 	// non-commit write operations aren't measured for time.
-	void incr_count_immediate(int op) noexcept { ops[op]++; }
+	void incr_op_count(int op) noexcept { ops[op]++; }
 
 	void incr_error_count(int op) noexcept {
 		total_errors++;
 		errors[op]++;
 	}
 
-	void add_latency(int op, uint64_t latency_us) noexcept {
+	void add_latency(int op, timediff_t diff) noexcept {
+		const auto latency_us = to_integer_microseconds(diff);
 		latency_samples[op]++;
 		latency_us_total[op] += latency_us;
 		if (latency_us_min[op] > latency_us)
 			latency_us_min[op] = latency_us;
 		if (latency_us_max[op] < latency_us)
 			latency_us_max[op] = latency_us;
-		ops[op]++;
 	}
 };
 
-/* per-process information */
-typedef struct {
-	int worker_id;
-	pid_t parent_id;
-	mako_args_t* args;
-	mako_shmhdr_t* shm;
-	std::vector<fdb::Database> databases;
-} process_info_t;
+
 
 /* memory block allocated to each operation when collecting detailed latency */
 class lat_block_t {
@@ -259,9 +283,9 @@ class lat_block_t {
 public:
 	lat_block_t() noexcept = default;
 	bool full() const noexcept { return index >= LAT_BLOCK_SIZE; }
-	void put(uint64_t point) {
+	void put(timediff_t td) {
 		assert(!full());
-		samples[index++] = point;
+		samples[index++] = to_integer_microseconds(td);
 	}
 	// return {data block, number of samples}
 	std::pair<uint64_t const*, size_t> data() const noexcept { return { samples, index }; }
@@ -277,10 +301,10 @@ public:
 			blocks.emplace_back();
 	}
 
-	void put(uint64_t latency_us) {
+	void put(timediff_t td) {
 		if (blocks.empty() || blocks.back().full())
 			blocks.emplace_back();
-		blocks.back().put(latency_us);
+		blocks.back().put(td);
 	}
 
 	// iterate & apply for each block user function void(uint64_t const*, size_t)
