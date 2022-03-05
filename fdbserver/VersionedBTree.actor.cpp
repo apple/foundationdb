@@ -4662,7 +4662,13 @@ struct DecodeBoundaryVerifier {
 
 	static DecodeBoundaryVerifier* getVerifier(std::string name) {
 		static std::map<std::string, DecodeBoundaryVerifier> verifiers;
-		return g_network->isSimulated() ? &verifiers[name] : nullptr;
+		// Verifier disabled due to not being finished
+		//
+		// Only use verifier in a non-restarted simulation so that all page writes are captured
+		// if (g_network->isSimulated() && !g_simulator.restarted) {
+		// 	return &verifiers[name];
+		// }
+		return nullptr;
 	}
 
 	void update(BTreePageIDRef id, Version v, Key lowerBound, Key upperBound) {
