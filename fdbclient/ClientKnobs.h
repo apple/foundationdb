@@ -86,6 +86,8 @@ public:
 	// When locationCache in DatabaseContext gets to be this size, items will be evicted
 	int LOCATION_CACHE_EVICTION_SIZE;
 	int LOCATION_CACHE_EVICTION_SIZE_SIM;
+	double LOCATION_CACHE_ENDPOINT_FAILURE_GRACE_PERIOD;
+	double LOCATION_CACHE_FAILED_ENDPOINT_RETRY_INTERVAL;
 
 	int GET_RANGE_SHARD_LIMIT;
 	int WARM_RANGE_SHARD_LIMIT;
@@ -120,6 +122,13 @@ public:
 	int64_t CORE_VERSIONSPERSECOND; // This is defined within the server but used for knobs based on server value
 	int LOG_RANGE_BLOCK_SIZE;
 	int MUTATION_BLOCK_SIZE;
+	double MAX_VERSION_CACHE_LAG; // The upper bound in seconds for OK amount of staleness when using a cached RV
+	double MAX_PROXY_CONTACT_LAG; // The upper bound in seconds for how often we want a response from the GRV proxies
+	double DEBUG_USE_GRV_CACHE_CHANCE; // Debug setting to change the chance for a regular GRV request to use the cache
+	bool FORCE_GRV_CACHE_OFF; // Panic button to turn off cache. Holds priority over other options.
+	double GRV_CACHE_RK_COOLDOWN; // Required number of seconds to pass after throttling to re-allow cache use
+	double GRV_SUSTAINED_THROTTLING_THRESHOLD; // If ALL GRV requests have been throttled in the last number of seconds
+	                                           // specified here, ratekeeper is throttling and not a false positive
 
 	// Taskbucket
 	double TASKBUCKET_LOGGING_DELAY;
@@ -189,6 +198,12 @@ public:
 	int32_t DEFAULT_AUTO_RESOLVERS;
 	int32_t DEFAULT_AUTO_LOGS;
 
+	// Dynamic Knobs
+	double COMMIT_QUORUM_TIMEOUT;
+	double GET_GENERATION_QUORUM_TIMEOUT;
+	double GET_KNOB_TIMEOUT;
+	double TIMEOUT_RETRY_UPPER_BOUND;
+
 	// Client Status Info
 	double CSI_SAMPLING_PROBABILITY;
 	int64_t CSI_SIZE_LIMIT;
@@ -247,10 +262,6 @@ public:
 	// busyness reporting
 	double BUSYNESS_SPIKE_START_THRESHOLD;
 	double BUSYNESS_SPIKE_SATURATED_THRESHOLD;
-
-	// multi-version client control
-	int MVC_CLIENTLIB_CHUNK_SIZE;
-	int MVC_CLIENTLIB_CHUNKS_PER_TRANSACTION;
 
 	// blob granules
 	bool ENABLE_BLOB_GRANULES;

@@ -39,6 +39,12 @@ struct ConfigGeneration {
 	bool operator<(ConfigGeneration const&) const;
 	bool operator>(ConfigGeneration const&) const;
 
+	std::string toString() const {
+		std::stringstream ss;
+		ss << "liveVersion: " << liveVersion << ", committedVersion: " << committedVersion;
+		return ss.str();
+	}
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, committedVersion, liveVersion);

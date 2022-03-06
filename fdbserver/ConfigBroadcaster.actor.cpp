@@ -72,6 +72,7 @@ class ConfigBroadcasterImpl {
 		    broadcastInterface(broadcastInterface) {}
 	};
 
+	ConfigDBType configDBType;
 	std::map<ConfigKey, KnobValue> snapshot;
 	std::deque<VersionedConfigMutation> mutationHistory;
 	std::deque<VersionedConfigCommitAnnotation> annotationHistory;
@@ -90,6 +91,11 @@ class ConfigBroadcasterImpl {
 	Counter failedChangeRequest;
 	Counter snapshotRequest;
 	Future<Void> logger;
+
+	int coordinators = 0;
+	std::unordered_set<NetworkAddress> activeConfigNodes;
+	bool disallowUnregistered = false;
+	Promise<Void> newConfigNodesAllowed;
 
 	Future<Void> pushSnapshot(Version snapshotVersion, BroadcastClientDetails const& client) {
 		if (client.lastSeenVersion >= snapshotVersion) {
@@ -200,20 +206,92 @@ class ConfigBroadcasterImpl {
 		return Void();
 	}
 
-	ACTOR static Future<Void> waitForFailure(ConfigBroadcasterImpl* self, Future<Void> watcher, UID clientUID) {
+	ACTOR static Future<Void> waitForFailure(ConfigBroadcasterImpl* self,
+	                                         Future<Void> watcher,
+	                                         UID clientUID,
+	                                         NetworkAddress clientAddress) {
 		wait(watcher);
-		TraceEvent(SevDebug, "ConfigBroadcastClientDied", self->id).detail("ClientID", clientUID);
+		TraceEvent(SevDebug, "ConfigBroadcastClientDied", self->id)
+		    .detail("ClientID", clientUID)
+		    .detail("Address", clientAddress);
 		self->clients.erase(clientUID);
 		self->clientFailures.erase(clientUID);
+		self->activeConfigNodes.erase(clientAddress);
+		// See comment where this promise is reset below.
+		if (self->newConfigNodesAllowed.isSet()) {
+			self->newConfigNodesAllowed.reset();
+		}
 		return Void();
 	}
 
-	ACTOR static Future<Void> registerWorker(ConfigBroadcaster* self,
-	                                         ConfigBroadcasterImpl* impl,
-	                                         Version lastSeenVersion,
-	                                         ConfigClassSet configClassSet,
-	                                         Future<Void> watcher,
-	                                         ConfigBroadcastInterface broadcastInterface) {
+	// Determines whether the registering ConfigNode is allowed to start
+	// serving configuration database requests and snapshot data. In order to
+	// ensure strict serializability, some nodes may be temporarily restricted
+	// from participation until the other nodes in the system are brought up to
+	// date.
+	ACTOR static Future<Void> registerNodeInternal(ConfigBroadcasterImpl* self,
+	                                               WorkerInterface w,
+	                                               Version lastSeenVersion) {
+		if (self->configDBType == ConfigDBType::SIMPLE) {
+			wait(success(retryBrokenPromise(w.configBroadcastInterface.ready, ConfigBroadcastReadyRequest{})));
+			return Void();
+		}
+
+		state NetworkAddress address = w.address();
+
+		// Ask the registering ConfigNode whether it has registered in the past.
+		ConfigBroadcastRegisteredReply reply =
+		    wait(w.configBroadcastInterface.registered.getReply(ConfigBroadcastRegisteredRequest{}));
+		state bool registered = reply.registered;
+
+		if (self->activeConfigNodes.find(address) != self->activeConfigNodes.end()) {
+			self->activeConfigNodes.erase(address);
+			// Since a node can die and re-register before the broadcaster
+			// receives notice that the node has died, we need to check for
+			// re-registration of a node here. There are two places that can
+			// reset the promise to allow new nodes, make sure the promise is
+			// actually set before resetting it. This prevents a node from
+			// dying, registering, waiting on the promise, then the broadcaster
+			// receives the notification the node has died and resets the
+			// promise again.
+			if (self->newConfigNodesAllowed.isSet()) {
+				self->newConfigNodesAllowed.reset();
+			}
+		}
+
+		if (registered) {
+			if (!self->disallowUnregistered) {
+				self->activeConfigNodes.clear();
+			}
+			self->activeConfigNodes.insert(address);
+			self->disallowUnregistered = true;
+		} else if (self->activeConfigNodes.size() < self->coordinators / 2 + 1 && !self->disallowUnregistered) {
+			// Need to allow registration of previously unregistered nodes when
+			// the cluster first starts up.
+			self->activeConfigNodes.insert(address);
+			if (self->activeConfigNodes.size() >= self->coordinators / 2 + 1 &&
+			    self->newConfigNodesAllowed.canBeSet()) {
+				self->newConfigNodesAllowed.send(Void());
+			}
+		} else {
+			self->disallowUnregistered = true;
+		}
+
+		if (!registered) {
+			wait(self->newConfigNodesAllowed.getFuture());
+		}
+
+		wait(success(w.configBroadcastInterface.ready.getReply(ConfigBroadcastReadyRequest{})));
+		return Void();
+	}
+
+	ACTOR static Future<Void> registerNode(ConfigBroadcaster* self,
+	                                       ConfigBroadcasterImpl* impl,
+	                                       WorkerInterface w,
+	                                       Version lastSeenVersion,
+	                                       ConfigClassSet configClassSet,
+	                                       Future<Void> watcher,
+	                                       ConfigBroadcastInterface broadcastInterface) {
 		state BroadcastClientDetails client(
 		    watcher, std::move(configClassSet), lastSeenVersion, std::move(broadcastInterface));
 		if (!impl->consumerFuture.isValid()) {
@@ -227,33 +305,58 @@ class ConfigBroadcasterImpl {
 
 		TraceEvent(SevDebug, "ConfigBroadcasterRegisteringWorker", impl->id)
 		    .detail("ClientID", broadcastInterface.id())
-		    .detail("MostRecentVersion", impl->mostRecentVersion)
-		    .detail("ClientLastSeenVersion", lastSeenVersion);
+		    .detail("MostRecentVersion", impl->mostRecentVersion);
+
+		impl->actors.add(registerNodeInternal(impl, w, lastSeenVersion));
+
 		// Push full snapshot to worker if it isn't up to date.
 		wait(impl->pushSnapshot(impl->mostRecentVersion, client));
 		impl->clients[broadcastInterface.id()] = client;
-		impl->clientFailures[broadcastInterface.id()] = waitForFailure(impl, watcher, broadcastInterface.id());
+		impl->clientFailures[broadcastInterface.id()] =
+		    waitForFailure(impl, watcher, broadcastInterface.id(), w.address());
 		return Void();
 	}
 
 public:
-	Future<Void> registerWorker(ConfigBroadcaster& self,
-	                            Version lastSeenVersion,
-	                            ConfigClassSet configClassSet,
-	                            Future<Void> watcher,
-	                            ConfigBroadcastInterface broadcastInterface) {
-		return registerWorker(&self, this, lastSeenVersion, configClassSet, watcher, broadcastInterface);
+	Future<Void> registerNode(ConfigBroadcaster& self,
+	                          WorkerInterface const& w,
+	                          Version lastSeenVersion,
+	                          ConfigClassSet configClassSet,
+	                          Future<Void> watcher,
+	                          ConfigBroadcastInterface const& broadcastInterface) {
+		return registerNode(&self, this, w, lastSeenVersion, configClassSet, watcher, broadcastInterface);
+	}
+
+	// Updates the broadcasters knowledge of which replicas are fully up to
+	// date, based on data gathered by the consumer.
+	void updateKnownReplicas(std::vector<ConfigFollowerInterface> const& readReplicas) {
+		if (!newConfigNodesAllowed.canBeSet()) {
+			return;
+		}
+
+		for (const auto& cfi : readReplicas) {
+			this->activeConfigNodes.insert(cfi.address());
+		}
+		if (activeConfigNodes.size() >= coordinators / 2 + 1) {
+			disallowUnregistered = true;
+			newConfigNodesAllowed.send(Void());
+		}
 	}
 
 	void applyChanges(Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
 	                  Version mostRecentVersion,
-	                  Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> const& annotations) {
-		TraceEvent(SevDebug, "ConfigBroadcasterApplyingChanges", id)
-		    .detail("ChangesSize", changes.size())
-		    .detail("CurrentMostRecentVersion", this->mostRecentVersion)
-		    .detail("NewMostRecentVersion", mostRecentVersion)
-		    .detail("AnnotationsSize", annotations.size());
-		addChanges(changes, mostRecentVersion, annotations);
+	                  Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> const& annotations,
+	                  std::vector<ConfigFollowerInterface> const& readReplicas) {
+		if (mostRecentVersion >= 0) {
+			TraceEvent(SevDebug, "ConfigBroadcasterApplyingChanges", id)
+			    .detail("ChangesSize", changes.size())
+			    .detail("CurrentMostRecentVersion", this->mostRecentVersion)
+			    .detail("NewMostRecentVersion", mostRecentVersion)
+			    .detail("ActiveReplicas", readReplicas.size());
+			addChanges(changes, mostRecentVersion, annotations);
+		}
+
+		updateKnownReplicas(readReplicas);
 	}
 
 	template <class Snapshot>
@@ -261,23 +364,30 @@ public:
 	                             Version snapshotVersion,
 	                             Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
 	                             Version changesVersion,
-	                             Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> const& annotations) {
+	                             Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> const& annotations,
+	                             std::vector<ConfigFollowerInterface> const& readReplicas) {
 		TraceEvent(SevDebug, "ConfigBroadcasterApplyingSnapshotAndChanges", id)
 		    .detail("CurrentMostRecentVersion", this->mostRecentVersion)
 		    .detail("SnapshotSize", snapshot.size())
 		    .detail("SnapshotVersion", snapshotVersion)
 		    .detail("ChangesSize", changes.size())
 		    .detail("ChangesVersion", changesVersion)
-		    .detail("AnnotationsSize", annotations.size());
+		    .detail("ActiveReplicas", readReplicas.size());
 		actors.add(pushSnapshotAndChanges(this, snapshot, snapshotVersion, changes, changesVersion, annotations));
+
+		updateKnownReplicas(readReplicas);
 	}
 
 	ConfigBroadcasterImpl(ConfigFollowerInterface const& cfi) : ConfigBroadcasterImpl() {
+		configDBType = ConfigDBType::SIMPLE;
+		coordinators = 1;
 		consumer = IConfigConsumer::createTestSimple(cfi, 0.5, Optional<double>{});
 		TraceEvent(SevDebug, "ConfigBroadcasterStartingConsumer", id).detail("Consumer", consumer->getID());
 	}
 
 	ConfigBroadcasterImpl(ServerCoordinators const& coordinators, ConfigDBType configDBType) : ConfigBroadcasterImpl() {
+		this->configDBType = configDBType;
+		this->coordinators = coordinators.configServers.size();
 		if (configDBType != ConfigDBType::DISABLED) {
 			if (configDBType == ConfigDBType::SIMPLE) {
 				consumer = IConfigConsumer::createSimple(coordinators, 0.5, Optional<double>{});
@@ -366,17 +476,19 @@ ConfigBroadcaster& ConfigBroadcaster::operator=(ConfigBroadcaster&&) = default;
 
 ConfigBroadcaster::~ConfigBroadcaster() = default;
 
-Future<Void> ConfigBroadcaster::registerWorker(Version lastSeenVersion,
-                                               ConfigClassSet const& configClassSet,
-                                               Future<Void> watcher,
-                                               ConfigBroadcastInterface broadcastInterface) {
-	return impl->registerWorker(*this, lastSeenVersion, configClassSet, watcher, broadcastInterface);
+Future<Void> ConfigBroadcaster::registerNode(WorkerInterface const& w,
+                                             Version lastSeenVersion,
+                                             ConfigClassSet const& configClassSet,
+                                             Future<Void> watcher,
+                                             ConfigBroadcastInterface const& broadcastInterface) {
+	return impl->registerNode(*this, w, lastSeenVersion, configClassSet, watcher, broadcastInterface);
 }
 
 void ConfigBroadcaster::applyChanges(Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
                                      Version mostRecentVersion,
-                                     Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> const& annotations) {
-	impl->applyChanges(changes, mostRecentVersion, annotations);
+                                     Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> const& annotations,
+                                     std::vector<ConfigFollowerInterface> const& readReplicas) {
+	impl->applyChanges(changes, mostRecentVersion, annotations, readReplicas);
 }
 
 void ConfigBroadcaster::applySnapshotAndChanges(
@@ -384,8 +496,9 @@ void ConfigBroadcaster::applySnapshotAndChanges(
     Version snapshotVersion,
     Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
     Version changesVersion,
-    Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> const& annotations) {
-	impl->applySnapshotAndChanges(snapshot, snapshotVersion, changes, changesVersion, annotations);
+    Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> const& annotations,
+    std::vector<ConfigFollowerInterface> const& readReplicas) {
+	impl->applySnapshotAndChanges(snapshot, snapshotVersion, changes, changesVersion, annotations, readReplicas);
 }
 
 void ConfigBroadcaster::applySnapshotAndChanges(
@@ -393,8 +506,10 @@ void ConfigBroadcaster::applySnapshotAndChanges(
     Version snapshotVersion,
     Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
     Version changesVersion,
-    Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> const& annotations) {
-	impl->applySnapshotAndChanges(std::move(snapshot), snapshotVersion, changes, changesVersion, annotations);
+    Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> const& annotations,
+    std::vector<ConfigFollowerInterface> const& readReplicas) {
+	impl->applySnapshotAndChanges(
+	    std::move(snapshot), snapshotVersion, changes, changesVersion, annotations, readReplicas);
 }
 
 Future<Void> ConfigBroadcaster::getError() const {

@@ -63,7 +63,7 @@ bool IPAddress::isValid() const {
 	return std::get<uint32_t>(addr) != 0;
 }
 
-Hostname Hostname::parse(std::string const& s) {
+Hostname Hostname::parse(const std::string& s) {
 	if (s.empty()) {
 		throw connection_string_invalid();
 	}

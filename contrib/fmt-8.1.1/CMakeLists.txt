@@ -81,12 +81,13 @@ option(FMT_FUZZ "Generate the fuzz target." OFF)
 option(FMT_CUDA_TEST "Generate the cuda-test target." OFF)
 option(FMT_OS "Include core requiring OS (Windows/Posix) " ON)
 option(FMT_MODULE "Build a module instead of a traditional library." OFF)
+option(FMT_SYSTEM_HEADERS "Expose headers with marking them as system." OFF)
 
 set(FMT_CAN_MODULE OFF)
 if (CMAKE_CXX_STANDARD GREATER 17 AND
     # msvc 16.10-pre4
     MSVC AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 19.29.30035)
-  set(FMT_CAN_MODULE ON)
+  set(FMT_CAN_MODULE OFF)
 endif ()
 if (NOT FMT_CAN_MODULE)
   set(FMT_MODULE OFF)
@@ -95,6 +96,10 @@ endif ()
 if (FMT_TEST AND FMT_MODULE)
   # The tests require {fmt} to be compiled as traditional library
   message(STATUS "Testing is incompatible with build mode 'module'.")
+endif ()
+set(FMT_SYSTEM_HEADERS_ATTRIBUTE "")
+if (FMT_SYSTEM_HEADERS)
+  set(FMT_SYSTEM_HEADERS_ATTRIBUTE SYSTEM)
 endif ()
 
 # Get version from core.h
@@ -151,7 +156,7 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "GNU")
       -Wcast-align
       -Wctor-dtor-privacy -Wdisabled-optimization
       -Winvalid-pch -Woverloaded-virtual
-      -Wconversion -Wswitch-enum -Wundef
+      -Wconversion -Wundef
       -Wno-ctor-dtor-privacy -Wno-format-nonliteral)
   if (NOT CMAKE_CXX_COMPILER_VERSION VERSION_LESS 4.6)
       set(PEDANTIC_COMPILE_FLAGS ${PEDANTIC_COMPILE_FLAGS}
@@ -244,7 +249,7 @@ if (HAVE_STRTOD_L)
 endif ()
 
 if (MINGW)
-  check_cxx_compiler_flag("Wa,-mbig-obj" FMT_HAS_MBIG_OBJ)
+  check_cxx_compiler_flag("-Wa,-mbig-obj" FMT_HAS_MBIG_OBJ)
   if (${FMT_HAS_MBIG_OBJ})
     target_compile_options(fmt PUBLIC "-Wa,-mbig-obj")
   endif()
@@ -262,7 +267,7 @@ endif ()
 
 target_compile_features(fmt INTERFACE ${FMT_REQUIRED_FEATURES})
 
-target_include_directories(fmt PUBLIC
+target_include_directories(fmt ${FMT_SYSTEM_HEADERS_ATTRIBUTE} PUBLIC
   $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:${FMT_INC_DIR}>)
 
@@ -298,7 +303,7 @@ add_library(fmt::fmt-header-only ALIAS fmt-header-only)
 target_compile_definitions(fmt-header-only INTERFACE FMT_HEADER_ONLY=1)
 target_compile_features(fmt-header-only INTERFACE ${FMT_REQUIRED_FEATURES})
 
-target_include_directories(fmt-header-only INTERFACE
+target_include_directories(fmt-header-only ${FMT_SYSTEM_HEADERS_ATTRIBUTE} INTERFACE
   $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:${FMT_INC_DIR}>)
 

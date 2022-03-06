@@ -25,6 +25,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
 {
    "cluster":{
        "storage_wiggler": {
+		 "wiggle_server_ids":["0ccb4e0feddb55"],
+		 "wiggle_server_addresses": ["127.0.0.1"],
          "primary": {
           	"last_round_start_datetime": "Wed Feb  4 09:36:37 2022 +0000",
 			"last_round_start_timestamp": 63811229797,
@@ -1077,19 +1079,3 @@ const KeyRef JSONSchemas::managementApiErrorSchema = LiteralStringRef(R"""(
    "message": "The reason of the error"
 }
 )""");
-
-const KeyRef JSONSchemas::clientLibMetadataSchema = LiteralStringRef(R"""(
-{
-    "platform": "x86_64-linux",
-    "version": "7.1.0",
-    "githash": "e28fef6264d05ab0c9488238022d1ee885a30bea",
-    "type": "debug",
-    "checksum": "fcef53fb4ae86d2c4fff4dc17c7e5d08",
-    "checksumalg": "md5",
-    "apiversion": 710,
-    "protocol": "fdb00b07001001",
-    "filename": "libfdb_c.7.1.0.so",
-    "size" : 19467552,
-    "chunkcount" : 2377,
-    "status": "available"
-})""");

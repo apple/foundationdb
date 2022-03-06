@@ -224,7 +224,7 @@ ACTOR Future<Void> dispatchRequests(Reference<RestoreLoaderData> self) {
 		}
 	} catch (Error& e) {
 		if (e.code() != error_code_actor_cancelled) {
-			TraceEvent(SevError, "FastRestoreLoaderDispatchRequests").error(e, true);
+			TraceEvent(SevError, "FastRestoreLoaderDispatchRequests").errorUnsuppressed(e);
 			throw e;
 		}
 	}
@@ -301,8 +301,8 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf,
 		} catch (Error& e) {
 			bool isError = e.code() != error_code_operation_cancelled; // == error_code_broken_promise
 			TraceEvent(isError ? SevError : SevWarnAlways, "FastRestoreLoaderError", self->id())
-			    .detail("RequestType", requestTypeStr)
-			    .error(e, true);
+			    .errorUnsuppressed(e)
+			    .detail("RequestType", requestTypeStr);
 			actors.clear(false);
 			break;
 		}
@@ -513,8 +513,8 @@ ACTOR static Future<Void> parsePartitionedLogFileOnLoader(
 			           e.code() == error_code_timed_out || e.code() == error_code_lookup_failed) {
 				// blob http request failure, retry
 				TraceEvent(SevWarnAlways, "FastRestoreDecodedPartitionedLogFileConnectionFailure")
-				    .detail("Retries", ++readFileRetries)
-				    .error(e);
+				    .error(e)
+				    .detail("Retries", ++readFileRetries);
 				wait(delayJittered(0.1));
 			} else {
 				TraceEvent(SevError, "FastRestoreParsePartitionedLogFileOnLoaderUnexpectedError").error(e);
@@ -659,10 +659,10 @@ ACTOR Future<Void> handleLoadFileRequest(RestoreLoadFileRequest req, Reference<R
 	} catch (Error& e) { // In case ci.samples throws broken_promise due to unstable network
 		if (e.code() == error_code_broken_promise || e.code() == error_code_operation_cancelled) {
 			TraceEvent(SevWarnAlways, "FastRestoreLoaderPhaseLoadFileSendSamples")
-			    .detail("SamplesMessages", samplesMessages)
-			    .error(e, true);
+			    .errorUnsuppressed(e)
+			    .detail("SamplesMessages", samplesMessages);
 		} else {
-			TraceEvent(SevError, "FastRestoreLoaderPhaseLoadFileSendSamplesUnexpectedError").error(e, true);
+			TraceEvent(SevError, "FastRestoreLoaderPhaseLoadFileSendSamplesUnexpectedError").errorUnsuppressed(e);
 		}
 	}
 
@@ -1230,8 +1230,8 @@ ACTOR static Future<Void> _parseRangeFileToMutationsOnLoader(
 			           e.code() == error_code_timed_out || e.code() == error_code_lookup_failed) {
 				// blob http request failure, retry
 				TraceEvent(SevWarnAlways, "FastRestoreDecodedRangeFileConnectionFailure")
-				    .detail("Retries", ++readFileRetries)
-				    .error(e);
+				    .error(e)
+				    .detail("Retries", ++readFileRetries);
 				wait(delayJittered(0.1));
 			} else {
 				TraceEvent(SevError, "FastRestoreParseRangeFileOnLoaderUnexpectedError").error(e);
@@ -1355,8 +1355,8 @@ ACTOR static Future<Void> parseLogFileToMutationsOnLoader(NotifiedVersion* pProc
 			           e.code() == error_code_timed_out || e.code() == error_code_lookup_failed) {
 				// blob http request failure, retry
 				TraceEvent(SevWarnAlways, "FastRestoreDecodedLogFileConnectionFailure")
-				    .detail("Retries", ++readFileRetries)
-				    .error(e);
+				    .error(e)
+				    .detail("Retries", ++readFileRetries);
 				wait(delayJittered(0.1));
 			} else {
 				TraceEvent(SevError, "FastRestoreParseLogFileToMutationsOnLoaderUnexpectedError").error(e);

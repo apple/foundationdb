@@ -2585,7 +2585,7 @@ void ReadYourWritesTransaction::debugLogRetries(Optional<Error> error) {
 			{
 				TraceEvent trace = TraceEvent("LongTransaction");
 				if (error.present())
-					trace.error(error.get(), true);
+					trace.errorUnsuppressed(error.get());
 				if (!transactionDebugInfo->transactionName.empty())
 					trace.detail("TransactionName", transactionDebugInfo->transactionName);
 				trace.detail("Elapsed", elapsed).detail("Retries", retries).detail("Committed", committed);

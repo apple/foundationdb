@@ -448,6 +448,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest(Reference<IConnection> conn,
 				err = http_bad_request_id();
 
 				TraceEvent(SevError, "HTTPRequestFailedIDMismatch")
+				    .error(err.get())
 				    .detail("DebugID", conn->getDebugID())
 				    .detail("RemoteAddress", conn->getPeerAddress())
 				    .detail("Verb", verb)
@@ -456,8 +457,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest(Reference<IConnection> conn,
 				    .detail("ResponseCode", r->code)
 				    .detail("ResponseContentLen", r->contentLen)
 				    .detail("RequestIDSent", requestID)
-				    .detail("RequestIDReceived", responseID)
-				    .error(err.get());
+				    .detail("RequestIDReceived", responseID);
 			}
 		}
 
@@ -501,7 +501,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest(Reference<IConnection> conn,
 			       contentLen,
 			       total_sent);
 		}
-		event.error(e);
+		event.errorUnsuppressed(e);
 		throw;
 	}
 }
