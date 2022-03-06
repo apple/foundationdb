@@ -362,9 +362,18 @@ constexpr size_t AlignToPowerOfTwo(size_t s) {
 	}
 }
 
+template <size_t X, size_t... Xs>
+constexpr size_t max_helper() {
+	if constexpr (sizeof...(Xs) == 0) {
+		return X;
+	} else {
+		return std::max(X, max_helper<Xs...>());
+	}
+}
+
 template <class... Ts>
 constexpr auto align_helper(pack<Ts...>) {
-	return std::max({ size_t{ 1 }, AlignToPowerOfTwo(fb_scalar_size<Ts>)... });
+	return max_helper<1, AlignToPowerOfTwo(fb_scalar_size<Ts>)...>();
 }
 
 template <class... T>

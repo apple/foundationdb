@@ -593,6 +593,11 @@ inline bool selectorInRange(KeySelectorRef const& sel, KeyRangeRef const& range)
 	return sel.getKey() >= range.begin && (sel.isBackward() ? sel.getKey() <= range.end : sel.getKey() < range.end);
 }
 
+template <>
+struct Traceable<KeySelectorRef> : std::true_type {
+	static std::string toString(const KeySelectorRef& value) { return value.toString(); }
+};
+
 template <class Val>
 struct KeyRangeWith : KeyRange {
 	Val value;
@@ -1204,9 +1209,11 @@ struct ReadBlobGranuleContext {
 struct StorageMetadataType {
 	constexpr static FileIdentifier file_identifier = 732123;
 	// when the SS is initialized
-	uint64_t createdTime; // comes from Platform::timer_int()
+	uint64_t createdTime; // comes from currentTime()
 	StorageMetadataType() : createdTime(0) {}
 	StorageMetadataType(uint64_t t) : createdTime(t) {}
+
+	static uint64_t currentTime() { return g_network->timer() * 1e9; }
 
 	// To change this serialization, ProtocolVersion::StorageMetadata must be updated, and downgrades need
 	// to be considered

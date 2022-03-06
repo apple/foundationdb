@@ -163,6 +163,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/ReportConflictingKeys.toml)
   add_fdb_test(TEST_FILES fast/SelectorCorrectness.toml)
   add_fdb_test(TEST_FILES fast/Sideband.toml)
+  add_fdb_test(TEST_FILES fast/SidebandSingle.toml)
   add_fdb_test(TEST_FILES fast/SidebandWithStatus.toml)
   add_fdb_test(TEST_FILES fast/SimpleAtomicAdd.toml)
   add_fdb_test(TEST_FILES fast/SpecialKeySpaceCorrectness.toml)
@@ -179,11 +180,14 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/WriteDuringRead.toml)
   add_fdb_test(TEST_FILES fast/WriteDuringReadClean.toml)
   add_fdb_test(TEST_FILES noSim/RandomUnitTests.toml UNIT)
-  add_fdb_test(TEST_FILES noSim/KeyValueStoreRocksDBTest.toml IGNORE) # re-enable as needed for RocksDB. Breaks correctness tests if RocksDB is disabled.
+  if (SSD_ROCKSDB_EXPERIMENTAL)
+    add_fdb_test(TEST_FILES noSim/KeyValueStoreRocksDBTest.toml IGNORE) # re-enable as needed for RocksDB. Breaks correctness tests if RocksDB is disabled.
+  endif()
   add_fdb_test(TEST_FILES rare/CheckRelocation.toml)
   add_fdb_test(TEST_FILES rare/ClogUnclog.toml)
   add_fdb_test(TEST_FILES rare/CloggedCycleWithKills.toml)
   add_fdb_test(TEST_FILES rare/ConfigIncrement.toml)
+  add_fdb_test(TEST_FILES rare/ConfigIncrementWithKills.toml)
   add_fdb_test(TEST_FILES rare/ConflictRangeCheck.toml)
   add_fdb_test(TEST_FILES rare/ConflictRangeRYOWCheck.toml)
   add_fdb_test(TEST_FILES rare/CycleRollbackClogged.toml)
@@ -254,6 +258,14 @@ if(WITH_PYTHON)
   add_fdb_test(
     TEST_FILES restarting/from_7.0.0/SnapCycleRestart-1.txt
                restarting/from_7.0.0/SnapCycleRestart-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/to_7.1.0/ConfigureStorageMigrationTestRestart-1.toml
+               restarting/to_7.1.0/ConfigureStorageMigrationTestRestart-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/from_7.1.0/ConfigureStorageMigrationTestRestart-1.toml
+               restarting/from_7.1.0/ConfigureStorageMigrationTestRestart-2.toml)
+
+
   add_fdb_test(TEST_FILES slow/ApiCorrectness.toml)
   add_fdb_test(TEST_FILES slow/ApiCorrectnessAtomicRestore.toml)
   add_fdb_test(TEST_FILES slow/ApiCorrectnessSwitchover.toml)

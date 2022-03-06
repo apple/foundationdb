@@ -158,8 +158,9 @@ ACTOR Future<std::vector<WorkerInterface>> getCoordWorkers(Database cx,
 	if (!coordinators.present()) {
 		throw operation_failed();
 	}
-	std::vector<NetworkAddress> coordinatorsAddr =
-	    ClusterConnectionString(coordinators.get().toString()).coordinators();
+	state ClusterConnectionString ccs(coordinators.get().toString());
+	wait(ccs.resolveHostnames());
+	std::vector<NetworkAddress> coordinatorsAddr = ccs.coordinators();
 	std::set<NetworkAddress> coordinatorsAddrSet;
 	for (const auto& addr : coordinatorsAddr) {
 		TraceEvent(SevDebug, "CoordinatorAddress").detail("Addr", addr);
@@ -731,7 +732,7 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 				}
 			}
 		} catch (Error& e) {
-			TraceEvent(("QuietDatabase" + phase + "Error").c_str()).error(e, true);
+			TraceEvent(("QuietDatabase" + phase + "Error").c_str()).errorUnsuppressed(e);
 			if (e.code() != error_code_actor_cancelled && e.code() != error_code_attribute_not_found &&
 			    e.code() != error_code_timed_out)
 				TraceEvent(("QuietDatabase" + phase + "Error").c_str()).error(e);

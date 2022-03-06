@@ -27,6 +27,13 @@
 
 bool g_crashOnError = false;
 
+#define DEBUG_ERROR 0
+
+#if DEBUG_ERROR
+std::set<int> debugErrorSet = std::set<int>{ error_code_platform_error };
+#define SHOULD_LOG_ERROR(x) (debugErrorSet.count(x) > 0)
+#endif
+
 #include <iostream>
 
 Error Error::fromUnvalidatedCode(int code) {
@@ -122,6 +129,24 @@ Error::Error(int error_code) : error_code(error_code), flags(0) {
 			crashAndDie();
 		}
 	}
+
+#if DEBUG_ERROR
+	if (SHOULD_LOG_ERROR(error_code)) {
+		TraceEvent te(SevWarn, "DebugError");
+		te.error(*this).backtrace();
+		if (error_code == error_code_unknown_error) {
+			auto exception = std::current_exception();
+			if (exception) {
+				try {
+					std::rethrow_exception(exception);
+				} catch (std::exception& e) {
+					te.detail("StdException", e.what());
+				} catch (...) {
+				}
+			}
+		}
+	}
+#endif
 }
 
 ErrorCodeTable& Error::errorCodeTable() {
