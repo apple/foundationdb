@@ -22,6 +22,11 @@ ExternalProject_Add(awss3sdk_project
                     # -DCMAKE_STATIC_LINKER_FLAGS=${CMAKE_STATIC_LINKER_FLAGS}
                     -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
                     -DCMAKE_VERBOSE_BUILD=ON
+
+                    # does this fix crypto warning + runtime isuse?
+                    # -DUSE_OPENSSL=OFF
+                    # and/or this?
+                    -DBYO_CRYPTO=ON
                     
                     # TODO use absolute path for install 
   TEST_COMMAND      ""
@@ -40,7 +45,7 @@ ExternalProject_Add(awss3sdk_project
                     "${CMAKE_CURRENT_BINARY_DIR}/awss3sdk-build/install/lib64/libaws-c-compression.a"
                     "${CMAKE_CURRENT_BINARY_DIR}/awss3sdk-build/install/lib64/libaws-c-cal.a"
                     "${CMAKE_CURRENT_BINARY_DIR}/awss3sdk-build/install/lib64/libaws-c-common.a"
-                    "${CMAKE_CURRENT_BINARY_DIR}/awss3sdk-build/install/lib64/libs2n.a"
+                    # "${CMAKE_CURRENT_BINARY_DIR}/awss3sdk-build/install/lib64/libs2n.a"
 )
 
 add_library(awss3sdk_s3 STATIC IMPORTED)
@@ -95,12 +100,13 @@ add_library(awss3sdk_c_common STATIC IMPORTED)
 add_dependencies(awss3sdk_c_common awss3sdk_project)
 set_target_properties(awss3sdk_c_common PROPERTIES IMPORTED_LOCATION "${CMAKE_CURRENT_BINARY_DIR}/awss3sdk-build/install/lib64/libaws-c-common.a")
 
-add_library(awss3sdk_s2n STATIC IMPORTED)
-add_dependencies(awss3sdk_s2n awss3sdk_project)
-set_target_properties(awss3sdk_s2n PROPERTIES IMPORTED_LOCATION "${CMAKE_CURRENT_BINARY_DIR}/awss3sdk-build/install/lib64/libs2n.a")
+# add_library(awss3sdk_s2n STATIC IMPORTED)
+# add_dependencies(awss3sdk_s2n awss3sdk_project)
+# set_target_properties(awss3sdk_s2n PROPERTIES IMPORTED_LOCATION "${CMAKE_CURRENT_BINARY_DIR}/awss3sdk-build/install/lib64/libs2n.a")
 
 
 # link them all together in one interface target
 add_library(awss3sdk_target INTERFACE)
 target_include_directories(awss3sdk_target SYSTEM INTERFACE ${CMAKE_CURRENT_BINARY_DIR}/awss3sdk-build/install/include)
-target_link_libraries(awss3sdk_target INTERFACE awss3sdk_s3 awss3sdk_core awss3sdk_crt awss3sdk_c_s3 awss3sdk_c_auth awss3sdk_c_eventstream awss3sdk_c_http awss3sdk_c_mqtt awss3sdk_c_io awss3sdk_checksums awss3sdk_c_compression awss3sdk_c_cal awss3sdk_c_common awss3sdk_s2n crypto)
+# target_link_libraries(awss3sdk_target INTERFACE awss3sdk_s3 awss3sdk_core awss3sdk_crt awss3sdk_c_s3 awss3sdk_c_auth awss3sdk_c_eventstream awss3sdk_c_http awss3sdk_c_mqtt awss3sdk_c_io awss3sdk_checksums awss3sdk_c_compression awss3sdk_c_cal awss3sdk_c_common awss3sdk_s2n crypto)
+target_link_libraries(awss3sdk_target INTERFACE awss3sdk_s3 awss3sdk_core awss3sdk_crt awss3sdk_c_s3 awss3sdk_c_auth awss3sdk_c_eventstream awss3sdk_c_http awss3sdk_c_mqtt awss3sdk_c_io awss3sdk_checksums awss3sdk_c_compression awss3sdk_c_cal awss3sdk_c_common)

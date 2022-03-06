@@ -39,13 +39,17 @@ void do_aws_test_stuff() {
 	printf("API Init successful!\n");
 
 	// printf("Testing client configuration\n");
+	/*
 	Aws::S3Crt::ClientConfiguration config;
 	config.region = "us-west-2";
 	printf("Set region in client configuration\n");
+	*/
 
+	/*
 	printf("Testing s3 construction\n");
 	Aws::S3Crt::S3CrtClient s3Client(config);
 	printf("s3 construction complete\n");
+	*/
 
 	// TODO DO an operation
 
@@ -65,7 +69,9 @@ void do_aws_test_stuff() {
 	    printf("Error: %s\n", outcome.GetError());
 	}
 	printf("s3 get test complete\n");
+	*/
 
+	/*
 	printf("doing presign test\n");
 
 	Aws::String result = s3Client.GeneratePresignedUrl(myBucket, objectName,
