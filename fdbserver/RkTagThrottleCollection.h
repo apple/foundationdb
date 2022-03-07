@@ -60,6 +60,7 @@ public:
 	RkTagThrottleCollection(RkTagThrottleCollection&& other);
 	RkTagThrottleCollection& operator=(RkTagThrottleCollection&& other);
 
+	// Set or update an auto throttling limit for the specified tag and priority combination.
 	// Returns the TPS rate if the throttle is updated, otherwise returns an empty optional
 	Optional<double> autoThrottleTag(UID id,
 	                                 TransactionTag const& tag,
@@ -67,6 +68,7 @@ public:
 	                                 Optional<double> tpsRate = Optional<double>(),
 	                                 Optional<double> expiration = Optional<double>());
 
+	// Set or update a manual tps rate limit for the specified tag and priority combination
 	void manualThrottleTag(UID id,
 	                       TransactionTag const& tag,
 	                       TransactionPriority priority,
