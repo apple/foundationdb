@@ -52,13 +52,13 @@ class RkTagThrottleCollection : NonCopyable {
 	uint32_t busyReadTagCount = 0, busyWriteTagCount = 0;
 
 	void initializeTag(TransactionTag const& tag) { tagData.try_emplace(tag); }
+	double computeTargetTpsRate(double currentBusyness, double targetBusyness, double requestRate) const;
+	Optional<double> getRequestRate(TransactionTag const& tag);
 
 public:
 	RkTagThrottleCollection() = default;
 	RkTagThrottleCollection(RkTagThrottleCollection&& other);
 	RkTagThrottleCollection& operator=(RkTagThrottleCollection&& other);
-
-	double computeTargetTpsRate(double currentBusyness, double targetBusyness, double requestRate) const;
 
 	// Returns the TPS rate if the throttle is updated, otherwise returns an empty optional
 	Optional<double> autoThrottleTag(UID id,
@@ -79,7 +79,6 @@ public:
 
 	PrioritizedTransactionTagMap<ClientTagThrottleLimits> getClientRates(bool autoThrottlingEnabled);
 	void addRequests(TransactionTag const& tag, int requests);
-	Optional<double> getRequestRate(TransactionTag const& tag);
 	int64_t autoThrottleCount() const { return autoThrottledTags.size(); }
 	int64_t manualThrottleCount() const;
 	void updateBusyTagCount(TagThrottledReason);
