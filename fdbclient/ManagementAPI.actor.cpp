@@ -1368,9 +1368,9 @@ ACTOR Future<Void> includeServers(Database cx, std::vector<AddressExclusion> ser
 				for (auto& s : servers) {
 					if (!s.isValid()) {
 						if (failed) {
-							ryw.clear(SpecialKeySpace::getManamentApiCommandRange("failed"));
+							ryw.clear(SpecialKeySpace::getManagementApiCommandRange("failed"));
 						} else {
-							ryw.clear(SpecialKeySpace::getManamentApiCommandRange("exclude"));
+							ryw.clear(SpecialKeySpace::getManagementApiCommandRange("exclude"));
 						}
 					} else {
 						Key addr =
@@ -1470,9 +1470,9 @@ ACTOR Future<Void> includeLocalities(Database cx, std::vector<std::string> local
 				ryw.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 				if (includeAll) {
 					if (failed) {
-						ryw.clear(SpecialKeySpace::getManamentApiCommandRange("failedlocality"));
+						ryw.clear(SpecialKeySpace::getManagementApiCommandRange("failedlocality"));
 					} else {
-						ryw.clear(SpecialKeySpace::getManamentApiCommandRange("excludedlocality"));
+						ryw.clear(SpecialKeySpace::getManagementApiCommandRange("excludedlocality"));
 					}
 				} else {
 					for (const auto& l : localities) {

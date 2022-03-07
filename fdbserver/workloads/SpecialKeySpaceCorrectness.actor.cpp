@@ -429,8 +429,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		// A clear cross two ranges are forbidden
 		try {
 			tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-			tx->clear(KeyRangeRef(SpecialKeySpace::getManamentApiCommandRange("exclude").begin,
-			                      SpecialKeySpace::getManamentApiCommandRange("failed").end));
+			tx->clear(KeyRangeRef(SpecialKeySpace::getManagementApiCommandRange("exclude").begin,
+			                      SpecialKeySpace::getManagementApiCommandRange("failed").end));
 			ASSERT(false);
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled)
@@ -1274,11 +1274,11 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			try {
 				// maintenance
 				RangeResult maintenanceKVs = wait(
-				    tx->getRange(SpecialKeySpace::getManamentApiCommandRange("maintenance"), CLIENT_KNOBS->TOO_MANY));
+				    tx->getRange(SpecialKeySpace::getManagementApiCommandRange("maintenance"), CLIENT_KNOBS->TOO_MANY));
 				// By default, no maintenance is going on
 				ASSERT(!maintenanceKVs.more && !maintenanceKVs.size());
 				// datadistribution
-				RangeResult ddKVs = wait(tx->getRange(SpecialKeySpace::getManamentApiCommandRange("datadistribution"),
+				RangeResult ddKVs = wait(tx->getRange(SpecialKeySpace::getManagementApiCommandRange("datadistribution"),
 				                                      CLIENT_KNOBS->TOO_MANY));
 				// By default, data_distribution/mode := "-1"
 				ASSERT(!ddKVs.more && ddKVs.size() == 1);
