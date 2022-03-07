@@ -458,7 +458,10 @@ public:
 	void clearTenants(TenantNameRef startTenant, TenantNameRef endTenant, Version version);
 
 	Optional<TenantMapEntry> getTenantEntry(Version version, TenantInfo tenant);
-	KeyRangeRef clampRangeToTenant(KeyRangeRef range, Optional<TenantName> tenant, Version version, Arena& arena);
+	KeyRangeRef clampRangeToTenant(KeyRangeRef range,
+	                               Optional<TenantMapEntry> tenantEntry,
+	                               Version version,
+	                               Arena& arena);
 
 	class CurrentRunningFetchKeys {
 		std::unordered_map<UID, double> startTimeMap;
@@ -2464,16 +2467,14 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 }
 
 KeyRangeRef StorageServer::clampRangeToTenant(KeyRangeRef range,
-                                              Optional<TenantName> tenant,
+                                              Optional<TenantMapEntry> tenantEntry,
                                               Version version,
                                               Arena& arena) {
-	if (tenant.present()) {
-		auto view = tenantMap.at(version);
-		auto itr = view.find(tenant.get());
-		ASSERT(itr != view.end());
-
-		return KeyRangeRef(range.begin.startsWith(itr->prefix) ? range.begin : itr->prefix,
-		                   range.end.startsWith(itr->prefix) ? range.end : allKeys.end.withPrefix(itr->prefix, arena));
+	if (tenantEntry.present()) {
+		return KeyRangeRef(range.begin.startsWith(tenantEntry.get().prefix) ? range.begin : tenantEntry.get().prefix,
+		                   range.end.startsWith(tenantEntry.get().prefix)
+		                       ? range.end
+		                       : allKeys.end.withPrefix(tenantEntry.get().prefix, arena));
 	} else {
 		return range;
 	}
@@ -2633,8 +2634,8 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 			g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValues.Before");
 		state Version version = wait(waitForVersion(data, req.version, span.context));
 
-		Optional<TenantMapEntry> entry = data->getTenantEntry(version, req.tenantInfo);
-		state Optional<Key> tenantPrefix = entry.map<Key>([](TenantMapEntry e) { return e.prefix; });
+		state Optional<TenantMapEntry> tenantEntry = data->getTenantEntry(version, req.tenantInfo);
+		state Optional<Key> tenantPrefix = tenantEntry.map<Key>([](TenantMapEntry e) { return e.prefix; });
 		if (tenantPrefix.present()) {
 			req.begin.setKeyUnlimited(req.begin.getKey().withPrefix(tenantPrefix.get(), req.arena));
 			req.end.setKeyUnlimited(req.end.getKey().withPrefix(tenantPrefix.get(), req.arena));
@@ -2659,7 +2660,7 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 			throw wrong_shard_server();
 		}
 
-		KeyRangeRef searchRange = data->clampRangeToTenant(shard, req.tenantInfo.name, version, req.arena);
+		KeyRangeRef searchRange = data->clampRangeToTenant(shard, tenantEntry, version, req.arena);
 
 		state int offset1 = 0;
 		state int offset2;
@@ -3140,8 +3141,8 @@ ACTOR Future<Void> getKeyValuesAndFlatMapQ(StorageServer* data, GetKeyValuesAndF
 			    "TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValuesAndFlatMap.Before");
 		state Version version = wait(waitForVersion(data, req.version, span.context));
 
-		Optional<TenantMapEntry> entry = data->getTenantEntry(req.version, req.tenantInfo);
-		state Optional<Key> tenantPrefix = entry.map<Key>([](TenantMapEntry e) { return e.prefix; });
+		state Optional<TenantMapEntry> tenantEntry = data->getTenantEntry(req.version, req.tenantInfo);
+		state Optional<Key> tenantPrefix = tenantEntry.map<Key>([](TenantMapEntry e) { return e.prefix; });
 		if (tenantPrefix.present()) {
 			req.begin.setKeyUnlimited(req.begin.getKey().withPrefix(tenantPrefix.get(), req.arena));
 			req.end.setKeyUnlimited(req.end.getKey().withPrefix(tenantPrefix.get(), req.arena));
@@ -3166,7 +3167,7 @@ ACTOR Future<Void> getKeyValuesAndFlatMapQ(StorageServer* data, GetKeyValuesAndF
 			throw wrong_shard_server();
 		}
 
-		KeyRangeRef searchRange = data->clampRangeToTenant(shard, req.tenantInfo.name, version, req.arena);
+		KeyRangeRef searchRange = data->clampRangeToTenant(shard, tenantEntry, version, req.arena);
 
 		state int offset1 = 0;
 		state int offset2;
@@ -3351,8 +3352,8 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 			    "TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValuesStream.Before");
 		state Version version = wait(waitForVersion(data, req.version, span.context));
 
-		Optional<TenantMapEntry> entry = data->getTenantEntry(version, req.tenantInfo);
-		state Optional<Key> tenantPrefix = entry.map<Key>([](TenantMapEntry e) { return e.prefix; });
+		state Optional<TenantMapEntry> tenantEntry = data->getTenantEntry(version, req.tenantInfo);
+		state Optional<Key> tenantPrefix = tenantEntry.map<Key>([](TenantMapEntry e) { return e.prefix; });
 		if (tenantPrefix.present()) {
 			req.begin.setKeyUnlimited(req.begin.getKey().withPrefix(tenantPrefix.get(), req.arena));
 			req.end.setKeyUnlimited(req.end.getKey().withPrefix(tenantPrefix.get(), req.arena));
@@ -3377,7 +3378,7 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 			throw wrong_shard_server();
 		}
 
-		KeyRangeRef searchRange = data->clampRangeToTenant(shard, req.tenantInfo.name, version, req.arena);
+		KeyRangeRef searchRange = data->clampRangeToTenant(shard, tenantEntry, version, req.arena);
 
 		state int offset1 = 0;
 		state int offset2;
@@ -3550,7 +3551,7 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 		state uint64_t changeCounter = data->shardChangeCounter;
 
 		KeyRange shard = getShardKeyRange(data, req.sel);
-		KeyRangeRef searchRange = data->clampRangeToTenant(shard, req.tenantInfo.name, req.version, req.arena);
+		KeyRangeRef searchRange = data->clampRangeToTenant(shard, tenantEntry, req.version, req.arena);
 
 		state int offset;
 		Key absoluteKey = wait(
@@ -7226,6 +7227,8 @@ ACTOR Future<Void> initTenantMap(StorageServer* self) {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			state Version version = wait(tr->getReadVersion());
+			// This limits the number of tenants, but eventually we shouldn't need to do this at all
+			// when SSs store only the local tenants
 			RangeResult entries = wait(tr->getRange(tenantMapKeys, CLIENT_KNOBS->TOO_MANY));
 
 			TraceEvent("InitTenantMap", self->thisServerID)
