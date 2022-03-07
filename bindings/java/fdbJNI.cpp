@@ -663,50 +663,6 @@ JNIEXPORT jbyteArray JNICALL Java_com_apple_foundationdb_FutureKey_FutureKey_1ge
 	return result;
 }
 
-JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBDatabase_Database_1allocateTenant(JNIEnv* jenv,
-                                                                                         jobject,
-                                                                                         jlong dbPtr,
-                                                                                         jbyteArray tenantNameBytes) {
-	if (!dbPtr || !tenantNameBytes) {
-		throwParamNotNull(jenv);
-		return 0;
-	}
-	FDBDatabase* database = (FDBDatabase*)dbPtr;
-
-	uint8_t* barr = (uint8_t*)jenv->GetByteArrayElements(tenantNameBytes, JNI_NULL);
-	if (!barr) {
-		if (!jenv->ExceptionOccurred())
-			throwRuntimeEx(jenv, "Error getting handle to native resources");
-		return 0;
-	}
-
-	FDBFuture* f = fdb_database_allocate_tenant(database, barr, jenv->GetArrayLength(tenantNameBytes));
-	jenv->ReleaseByteArrayElements(tenantNameBytes, (jbyte*)barr, JNI_ABORT);
-	return (jlong)f;
-}
-
-JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBDatabase_Database_1deleteTenant(JNIEnv* jenv,
-                                                                                       jobject,
-                                                                                       jlong dbPtr,
-                                                                                       jbyteArray tenantNameBytes) {
-	if (!dbPtr || !tenantNameBytes) {
-		throwParamNotNull(jenv);
-		return 0;
-	}
-	FDBDatabase* database = (FDBDatabase*)dbPtr;
-
-	uint8_t* barr = (uint8_t*)jenv->GetByteArrayElements(tenantNameBytes, JNI_NULL);
-	if (!barr) {
-		if (!jenv->ExceptionOccurred())
-			throwRuntimeEx(jenv, "Error getting handle to native resources");
-		return 0;
-	}
-
-	FDBFuture* f = fdb_database_remove_tenant(database, barr, jenv->GetArrayLength(tenantNameBytes));
-	jenv->ReleaseByteArrayElements(tenantNameBytes, (jbyte*)barr, JNI_ABORT);
-	return (jlong)f;
-}
-
 JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBDatabase_Database_1openTenant(JNIEnv* jenv,
                                                                                      jobject,
                                                                                      jlong dbPtr,

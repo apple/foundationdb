@@ -23,10 +23,12 @@ package com.apple.foundationdb;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 
 import com.apple.foundationdb.async.AsyncUtil;
+import com.apple.foundationdb.tuple.ByteArrayUtil;
 import com.apple.foundationdb.tuple.Tuple;
 
 class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsumer {
@@ -119,12 +121,24 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 
 	@Override
 	public CompletableFuture<Void> allocateTenant(byte[] tenantName) {
-		pointerReadLock.lock();
-		try {
-			return new FutureVoid(Database_allocateTenant(getPtr(), tenantName), executor);
-		} finally {
-			pointerReadLock.unlock();
-		}
+		final AtomicBoolean checkedExistence = new AtomicBoolean(false);
+		final byte[] key = ByteArrayUtil.join(FDBTenant.TENANT_MAP_PREFIX, tenantName);
+		return runAsync(tr -> {
+			tr.options().setSpecialKeySpaceEnableWrites();
+			if(checkedExistence.get()) {
+				tr.set(key, new byte[0]);
+				return CompletableFuture.completedFuture(null);
+			}
+			else {
+				return tr.get(key).thenAcceptAsync(result -> {
+					checkedExistence.set(true);
+					if(result != null) {
+						throw new FDBException("A tenant with the given name already exists", 2132);
+					}
+					tr.set(key, new byte[0]);
+				});
+			}
+		});
 	}
 
 	@Override
@@ -134,12 +148,24 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 
 	@Override
 	public CompletableFuture<Void> deleteTenant(byte[] tenantName) {
-		pointerReadLock.lock();
-		try {
-			return new FutureVoid(Database_deleteTenant(getPtr(), tenantName), executor);
-		} finally {
-			pointerReadLock.unlock();
-		}
+		final AtomicBoolean checkedExistence = new AtomicBoolean(false);
+		final byte[] key = ByteArrayUtil.join(FDBTenant.TENANT_MAP_PREFIX, tenantName);
+		return runAsync(tr -> {
+			tr.options().setSpecialKeySpaceEnableWrites();
+			if(checkedExistence.get()) {
+				tr.clear(key);
+				return CompletableFuture.completedFuture(null);
+			}
+			else {
+				return tr.get(key).thenAcceptAsync(result -> {
+					checkedExistence.set(true);
+					if (result == null) {
+						throw new FDBException("Tenant does not exist", 2131);
+					}
+					tr.clear(key);
+				});
+			}
+		});
 	}
 
 	@Override

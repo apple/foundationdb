@@ -82,7 +82,7 @@ public interface Tenant extends AutoCloseable, TransactionContext {
 	 * Runs a read-only transactional function against this {@code Tenant} with retry logic.
 	 *  {@link Function#apply(Object) apply(ReadTransaction)} will be called on the
 	 *  supplied {@link Function} until a non-retryable
-	 *  {@link FDBException} (or any {@code Throwable} other than an {@code FDBException})
+	 *  FDBException (or any {@code Throwable} other than an {@code FDBException})
 	 *  is thrown. This call is blocking -- this
 	 *  method will not return until the {@code Function} has been called and completed without error.<br>
 	 *
@@ -116,7 +116,7 @@ public interface Tenant extends AutoCloseable, TransactionContext {
 	 * Runs a read-only transactional function against this {@code Tenant} with retry logic.
 	 *  {@link Function#apply(Object) apply(ReadTransaction)} will be called on the
 	 *  supplied {@link Function} until a non-retryable
-	 *  {@link FDBException} (or any {@code Throwable} other than an {@code FDBException})
+	 *  FDBException (or any {@code Throwable} other than an {@code FDBException})
 	 *  is thrown. This call is non-blocking -- this
 	 *  method will return immediately and with a {@link CompletableFuture} that will be
 	 *  set when the {@code Function} has been called and completed without error.<br>
@@ -159,7 +159,7 @@ public interface Tenant extends AutoCloseable, TransactionContext {
 	 * Runs a transactional function against this {@code Tenant} with retry logic.
 	 *  {@link Function#apply(Object) apply(Transaction)} will be called on the
 	 *  supplied {@link Function} until a non-retryable
-	 *  {@link FDBException} (or any {@code Throwable} other than an {@code FDBException})
+	 *  FDBException (or any {@code Throwable} other than an {@code FDBException})
 	 *  is thrown or {@link Transaction#commit() commit()},
 	 *  when called after {@code apply()}, returns success. This call is blocking -- this
 	 *  method will not return until {@code commit()} has been called and returned success.<br>
@@ -200,7 +200,7 @@ public interface Tenant extends AutoCloseable, TransactionContext {
 	 * Runs a transactional function against this {@code Tenant} with retry logic.
 	 *  {@link Function#apply(Object) apply(Transaction)} will be called on the
 	 *  supplied {@link Function} until a non-retryable
-	 *  {@link FDBException} (or any {@code Throwable} other than an {@code FDBException})
+	 *  FDBException (or any {@code Throwable} other than an {@code FDBException})
 	 *  is thrown or {@link Transaction#commit() commit()},
 	 *  when called after {@code apply()}, returns success. This call is non-blocking -- this
 	 *  method will return immediately and with a {@link CompletableFuture} that will be

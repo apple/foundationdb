@@ -27,12 +27,15 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 
 import com.apple.foundationdb.async.AsyncUtil;
+import com.apple.foundationdb.tuple.ByteArrayUtil;
 
 class FDBTenant extends NativeObjectWrapper implements Tenant {
 	private final Database database;
 	private final byte[] name;
 	private final Executor executor;
 	private final EventKeeper eventKeeper;
+
+	static final byte[] TENANT_MAP_PREFIX = ByteArrayUtil.join(new byte[] { (byte)255, (byte)255 }, "/management/tenant_map/".getBytes());
 
 	protected FDBTenant(long cPtr, Database database, byte[] name, Executor executor) {
 		this(cPtr, database, name, executor, null);
