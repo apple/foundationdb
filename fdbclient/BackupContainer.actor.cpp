@@ -37,7 +37,6 @@
 #include "fdbrpc/simulator.h"
 #include "flow/Platform.h"
 #include "fdbclient/AsyncFileS3BlobStore.actor.h"
-#include "fdbclient/BackupContainerAWSS3BlobStore.h"
 #include "fdbclient/BackupContainerAzureBlobStore.h"
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbclient/BackupContainerLocalDirectory.h"
@@ -260,12 +259,6 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
                                                             Optional<std::string> const& encryptionKeyFileName) {
 	static std::map<std::string, Reference<IBackupContainer>> m_cache;
 
-#ifdef BUILD_AWS_BACKUP
-	printf("build aws backup is set in BC!!\n");
-	do_aws_test_stuff();
-#else
-	printf("BUILD_AWS_BACKUP NOT SET!\n");
-#endif
 	Reference<IBackupContainer>& r = m_cache[url];
 	if (r)
 		return r;

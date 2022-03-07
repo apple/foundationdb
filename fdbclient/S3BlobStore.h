@@ -59,7 +59,7 @@ public:
 		    delete_requests_per_second, multipart_max_part_size, multipart_min_part_size, concurrent_requests,
 		    concurrent_uploads, concurrent_lists, concurrent_reads_per_file, concurrent_writes_per_file,
 		    read_block_size, read_ahead_blocks, read_cache_blocks_per_file, max_send_bytes_per_second,
-		    max_recv_bytes_per_second;
+		    max_recv_bytes_per_second, sdk_auth;
 		bool set(StringRef name, int value);
 		std::string getURLParameters() const;
 		static std::vector<std::string> getKnobDescriptions() {
@@ -91,7 +91,9 @@ public:
 				"read_cache_blocks_per_file (or rcb)   Size of the read cache for a file in blocks.",
 				"max_send_bytes_per_second (or sbps)   Max send bytes per second for all requests combined.",
 				"max_recv_bytes_per_second (or rbps)   Max receive bytes per second for all requests combined (NOT YET "
-				"USED)."
+				"USED).",
+				"sdk_auth (or sa)                      Use AWS SDK to resolve credentials. Only valid if "
+				"BUILD_AWS_BACKUP is enabled."
 			};
 		}
 	};

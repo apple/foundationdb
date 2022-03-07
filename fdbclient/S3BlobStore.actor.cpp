@@ -34,6 +34,9 @@
 #include "fdbrpc/IAsyncFile.h"
 #include "flow/UnitTest.h"
 #include "fdbclient/rapidxml/rapidxml.hpp"
+
+#include "fdbclient/BackupContainerAWSS3BlobStore.h"
+
 #include "flow/actorcompiler.h" // has to be last include
 
 using namespace rapidxml;
@@ -82,6 +85,7 @@ S3BlobStoreEndpoint::BlobKnobs::BlobKnobs() {
 	read_cache_blocks_per_file = CLIENT_KNOBS->BLOBSTORE_READ_CACHE_BLOCKS_PER_FILE;
 	max_send_bytes_per_second = CLIENT_KNOBS->BLOBSTORE_MAX_SEND_BYTES_PER_SECOND;
 	max_recv_bytes_per_second = CLIENT_KNOBS->BLOBSTORE_MAX_RECV_BYTES_PER_SECOND;
+	sdk_auth = false;
 }
 
 bool S3BlobStoreEndpoint::BlobKnobs::set(StringRef name, int value) {
@@ -118,6 +122,7 @@ bool S3BlobStoreEndpoint::BlobKnobs::set(StringRef name, int value) {
 	TRY_PARAM(read_cache_blocks_per_file, rcb);
 	TRY_PARAM(max_send_bytes_per_second, sbps);
 	TRY_PARAM(max_recv_bytes_per_second, rbps);
+	TRY_PARAM(sdk_auth, sa);
 #undef TRY_PARAM
 	return false;
 }
@@ -506,7 +511,50 @@ ACTOR Future<Optional<json_spirit::mObject>> tryReadJSONFile(std::string path) {
 	return Optional<json_spirit::mObject>();
 }
 
+// If the credentials expire, the connection will eventually fail and be discarded from the pool, and then a new
+// connection will be constructed, which will call this again to get updated credentials
+static S3BlobStoreEndpoint::Credentials getSecretSdk(bool doAuth) {
+#ifdef BUILD_AWS_BACKUP
+	// TODO REMOVE prints
+	printf("Asking aws for creds\n");
+	double elapsed = -timer_monotonic();
+	Aws::Auth::AWSCredentials awsCreds = FDBAWSCredentialsProvider::getAwsCredentials();
+	elapsed += timer_monotonic();
+	printf("got creds in %.6f seconds\n", elapsed);
+
+	if (awsCreds.IsEmpty()) {
+		printf("Got empty creds :(\n");
+		TraceEvent(SevWarn, "S3BlobStoreAWSCredsEmpty");
+		throw backup_auth_missing();
+	}
+
+	S3BlobStoreEndpoint::Credentials fdbCreds;
+	fdbCreds.key = awsCreds.GetAWSAccessKeyId();
+	fdbCreds.secret = awsCreds.GetAWSSecretKey();
+	fdbCreds.securityToken = awsCreds.GetSessionToken();
+
+	printf("FDB creds after copy:\b");
+	printf("  Access key: %s\n", fdbCreds.key.c_str());
+	printf("  Secret key: %s\n", fdbCreds.secret.c_str());
+	printf("  Session token: %s\n", fdbCreds.securityToken.c_str());
+
+	return fdbCreds;
+#else
+	TraceEvent(SevError, "S3BlobStoreNoSDK");
+	throw backup_auth_missing();
+#endif
+}
+
 ACTOR Future<Void> updateSecret_impl(Reference<S3BlobStoreEndpoint> b) {
+
+	// TODO REMOVE prints
+	printf("build aws backup is set in S3BS!!\n");
+	if (b->knobs.sdk_auth) {
+		b->credentials = getSecretSdk(b->knobs.sdk_auth);
+		return Void();
+	} else {
+		printf("sdk_auth knob not set\n");
+	}
 	std::vector<std::string>* pFiles = (std::vector<std::string>*)g_network->global(INetwork::enBlobCredentialFiles);
 	if (pFiles == nullptr)
 		return Void();
@@ -601,7 +649,7 @@ ACTOR Future<S3BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<S3B
 	    .detail("RemoteEndpoint", conn->getPeerAddress())
 	    .detail("ExpiresIn", b->knobs.max_connection_life);
 
-	if (b->lookupKey || b->lookupSecret)
+	if (b->lookupKey || b->lookupSecret || b->knobs.sdk_auth)
 		wait(b->updateSecret());
 
 	return S3BlobStoreEndpoint::ReusableConnection({ conn, now() + b->knobs.max_connection_life });

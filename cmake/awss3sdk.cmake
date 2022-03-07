@@ -48,6 +48,8 @@ ExternalProject_Add(awss3sdk_project
                     # "${CMAKE_CURRENT_BINARY_DIR}/awss3sdk-build/install/lib64/libs2n.a"
 )
 
+# TODO since we don't actually use s3 api we could just remove that one? Still need everything below that though
+
 add_library(awss3sdk_s3 STATIC IMPORTED)
 add_dependencies(awss3sdk_s3 awss3sdk_project)
 set_target_properties(awss3sdk_s3 PROPERTIES IMPORTED_LOCATION "${CMAKE_CURRENT_BINARY_DIR}/awss3sdk-build/install/lib64/libaws-cpp-sdk-s3-crt.a")
