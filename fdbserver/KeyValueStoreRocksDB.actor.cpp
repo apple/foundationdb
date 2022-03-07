@@ -1076,7 +1076,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				traceBatch.get().addEvent("GetValueDebug", a.debugID.get().first(), "Reader.Before");
 			}
 			if (readBeginTime - a.startTime > readValueTimeout) {
-				TraceEvent(SevWarn, "RocksDBError")
+				TraceEvent(SevWarn, "KVSTimeout")
 				    .detail("Error", "Read value request timedout")
 				    .detail("Method", "ReadValueAction")
 				    .detail("Timeout value", readValueTimeout);
@@ -1153,7 +1153,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				                          "Reader.Before"); //.detail("TaskID", g_network->getCurrentTask());
 			}
 			if (readBeginTime - a.startTime > readValuePrefixTimeout) {
-				TraceEvent(SevWarn, "RocksDBError")
+				TraceEvent(SevWarn, "KVSTimeout")
 				    .detail("Error", "Read value prefix request timedout")
 				    .detail("Method", "ReadValuePrefixAction")
 				    .detail("Timeout value", readValuePrefixTimeout);
@@ -1224,7 +1224,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				readRangeQueueWaitHistogram->sampleSeconds(readBeginTime - a.startTime);
 			}
 			if (readBeginTime - a.startTime > readRangeTimeout) {
-				TraceEvent(SevWarn, "RocksDBError")
+				TraceEvent(SevWarn, "KVSTimeout")
 				    .detail("Error", "Read range request timedout")
 				    .detail("Method", "ReadRangeAction")
 				    .detail("Timeout value", readRangeTimeout);
@@ -1255,7 +1255,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 						break;
 					}
 					if (timer_monotonic() - a.startTime > readRangeTimeout) {
-						TraceEvent(SevWarn, "RocksDBError")
+						TraceEvent(SevWarn, "KVSTimeout")
 						    .detail("Error", "Read range request timedout")
 						    .detail("Method", "ReadRangeAction")
 						    .detail("Timeout value", readRangeTimeout);
@@ -1286,7 +1286,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 						break;
 					}
 					if (timer_monotonic() - a.startTime > readRangeTimeout) {
-						TraceEvent(SevWarn, "RocksDBError")
+						TraceEvent(SevWarn, "KVSTimeout")
 						    .detail("Error", "Read range request timedout")
 						    .detail("Method", "ReadRangeAction")
 						    .detail("Timeout value", readRangeTimeout);
