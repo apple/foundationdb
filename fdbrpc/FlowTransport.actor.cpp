@@ -977,7 +977,8 @@ static void scanPackets(TransportData* transport,
                         const uint8_t* e,
                         Arena& arena,
                         NetworkAddress const& peerAddress,
-                        ProtocolVersion peerProtocolVersion) {
+                        ProtocolVersion peerProtocolVersion,
+                        bool disableBitsFlip) {
 	// Find each complete packet in the given byte range and queue a ready task to deliver it.
 	// Remove the complete packets from the range by increasing unprocessed_begin.
 	// There won't be more than 64K of data plus one packet, so this shouldn't take a long time.
@@ -1016,7 +1017,7 @@ static void scanPackets(TransportData* transport,
 
 		if (checksumEnabled) {
 			bool isBuggifyEnabled = false;
-			if (g_network->isSimulated() && false &&
+			if (g_network->isSimulated() && !disableBitsFlip &&
 			    g_network->now() - g_simulator.lastConnectionFailure > g_simulator.connectionFailuresDisableDuration &&
 			    BUGGIFY_WITH_PROB(0.0001)) {
 				g_simulator.lastConnectionFailure = g_network->now();
@@ -1286,8 +1287,13 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 
 				if (!expectConnectPacket) {
 					if (compatible || peerProtocolVersion.hasStableInterfaces()) {
-						scanPackets(
-						    transport, unprocessed_begin, unprocessed_end, arena, peerAddress, peerProtocolVersion);
+						scanPackets(transport,
+						            unprocessed_begin,
+						            unprocessed_end,
+						            arena,
+						            peerAddress,
+						            peerProtocolVersion,
+						            g_network->isSimulated() && conn->isBuggifyDisabled());
 					} else {
 						unprocessed_begin = unprocessed_end;
 						peer->resetPing.trigger();

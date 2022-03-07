@@ -124,18 +124,18 @@ int openCount = 0;
 struct SimClogging {
 	double getSendDelay(NetworkAddress from, NetworkAddress to) const { return halfLatency(); }
 
-	double getRecvDelay(NetworkAddress from, NetworkAddress to) {
+	double getRecvDelay(NetworkAddress from, NetworkAddress to, bool disableClogging = false) {
 		auto pair = std::make_pair(from.ip, to.ip);
 
 		double tnow = now();
 		double t = tnow + halfLatency();
-		if (!g_simulator.speedUpSimulation)
+		if (!g_simulator.speedUpSimulation && !disableClogging)
 			t += clogPairLatency[pair];
 
-		if (!g_simulator.speedUpSimulation && clogPairUntil.count(pair))
+		if (!g_simulator.speedUpSimulation && !disableClogging && clogPairUntil.count(pair))
 			t = std::max(t, clogPairUntil[pair]);
 
-		if (!g_simulator.speedUpSimulation && clogRecvUntil.count(to.ip))
+		if (!g_simulator.speedUpSimulation && !disableClogging && clogRecvUntil.count(to.ip))
 			t = std::max(t, clogRecvUntil[to.ip]);
 
 		return t - tnow;
@@ -183,8 +183,8 @@ SimClogging g_clogging;
 
 struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 	Sim2Conn(ISimulator::ProcessInfo* process)
-	  : opened(false), closedByCaller(false), process(process), dbgid(deterministicRandom()->randomUniqueID()),
-	    stopReceive(Never()) {
+	  : opened(false), closedByCaller(false), buggifyDisabled(false), process(process),
+	    dbgid(deterministicRandom()->randomUniqueID()), stopReceive(Never()) {
 		pipes = sender(this) && receiver(this);
 	}
 
@@ -203,7 +203,13 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 		                                      process->address.ip,
 		                                      FLOW_KNOBS->MAX_CLOGGING_LATENCY * deterministicRandom()->random01());
 		sendBufSize = std::max<double>(deterministicRandom()->randomInt(0, 5000000), 25e6 * (latency + .002));
-		TraceEvent("Sim2Connection").detail("SendBufSize", sendBufSize).detail("Latency", latency);
+		// buggify options like clogging or bitsflip are disabled
+		buggifyDisabled =
+		    (process->child && process->child == peerProcess) || (peerProcess->child && peerProcess->child == process);
+		TraceEvent("Sim2Connection")
+		    .detail("SendBufSize", sendBufSize)
+		    .detail("Latency", latency)
+		    .detail("BuggifyDisabled", buggifyDisabled);
 	}
 
 	~Sim2Conn() { ASSERT_ABORT(!opened || closedByCaller); }
@@ -223,7 +229,7 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 
 	bool isPeerGone() const { return !peer || peerProcess->failed; }
 
-	bool buggifyDisabled() const { return process->address.ip == peerProcess->address.ip; }
+	bool isBuggifyDisabled() const override { return buggifyDisabled; }
 
 	void peerClosed() {
 		leakedConnectionTracker = trackLeakedConnection(this);
@@ -252,7 +258,7 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 		ASSERT(limit > 0);
 
 		int toSend = 0;
-		if (BUGGIFY && !buggifyDisabled()) {
+		if (BUGGIFY && !buggifyDisabled) {
 			toSend = std::min(limit, buffer->bytes_written - buffer->bytes_sent);
 		} else {
 			for (auto p = buffer; p; p = p->next) {
@@ -265,7 +271,7 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 			}
 		}
 		ASSERT(toSend);
-		if (BUGGIFY && !buggifyDisabled())
+		if (BUGGIFY && !buggifyDisabled)
 			toSend = std::min(toSend, deterministicRandom()->randomInt(0, 1000));
 
 		if (!peer)
@@ -289,7 +295,7 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 	NetworkAddress getPeerAddress() const override { return peerEndpoint; }
 	UID getDebugID() const override { return dbgid; }
 
-	bool opened, closedByCaller;
+	bool opened, closedByCaller, buggifyDisabled;
 
 private:
 	ISimulator::ProcessInfo *process, *peerProcess;
@@ -342,8 +348,8 @@ private:
 			wait(delay(g_clogging.getSendDelay(self->process->address, self->peerProcess->address)));
 			wait(g_simulator.onProcess(self->process));
 			ASSERT(g_simulator.getCurrentProcess() == self->process);
-			if (!self->buggifyDisabled())
-				wait(delay(g_clogging.getRecvDelay(self->process->address, self->peerProcess->address)));
+			wait(delay(g_clogging.getRecvDelay(
+			    self->process->address, self->peerProcess->address, self->isBuggifyDisabled())));
 			ASSERT(g_simulator.getCurrentProcess() == self->process);
 			if (self->stopReceive.isReady()) {
 				wait(Future<Void>(Never()));
@@ -393,10 +399,9 @@ private:
 	}
 
 	void rollRandomClose() {
-		// make sure processes on the same machine doesn't get severed
-		if (buggifyDisabled())
-			return;
-		if (now() - g_simulator.lastConnectionFailure > g_simulator.connectionFailuresDisableDuration &&
+		// make sure connections between parenta and their childs are not closed
+		if (!buggifyDisabled &&
+		    now() - g_simulator.lastConnectionFailure > g_simulator.connectionFailuresDisableDuration &&
 		    deterministicRandom()->random01() < .00001) {
 			g_simulator.lastConnectionFailure = now();
 			double a = deterministicRandom()->random01(), b = deterministicRandom()->random01();
@@ -2097,7 +2102,6 @@ public:
 
 	void execTask(struct Task& t) {
 		if (t.machine->failed) {
-			// TraceEvent(SevDebug, "Sim2ExecTaskNever").detail("Address", t.machine->address.toString());
 			t.action.send(Never());
 		} else {
 			mutex.enter();
@@ -2424,7 +2428,7 @@ ACTOR void doReboot(ISimulator::ProcessInfo* p, ISimulator::KillType kt) {
 		} else if (std::string(p->name) == "remote flow process") {
 			TraceEvent(SevDebug, "DoRebootFailed").detail("Name", p->name).detail("Address", p->address);
 			return;
-		} else if (p->isParent()) {
+		} else if (p->getChild()) {
 			TraceEvent(SevDebug, "DoRebootFailedOnParentProcess").detail("Address", p->address);
 			return;
 		}

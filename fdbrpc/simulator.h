@@ -94,7 +94,7 @@ public:
 
 		ProtocolVersion protocolVersion;
 
-		bool hasChild;
+		ProcessInfo* child;
 
 		ProcessInfo(const char* name,
 		            LocalityData locality,
@@ -106,7 +106,7 @@ public:
 		  : name(name), coordinationFolder(coordinationFolder), dataFolder(dataFolder), machine(nullptr),
 		    addresses(addresses), address(addresses.address), locality(locality), startingClass(startingClass),
 		    failed(false), excluded(false), cleared(false), rebooting(false), network(net), fault_injection_r(0),
-		    fault_injection_p1(0), fault_injection_p2(0), failedDisk(false), hasChild(false) {
+		    fault_injection_p1(0), fault_injection_p2(0), failedDisk(false), child(nullptr) {
 			uid = deterministicRandom()->randomUniqueID();
 		}
 
@@ -126,7 +126,7 @@ public:
 			   << " fault_injection_p2:" << fault_injection_p2;
 			return ss.str();
 		}
-		bool isParent() const { return hasChild; }
+		ProcessInfo* getChild() const { return child; }
 
 		// Return true if the class type is suitable for stateful roles, such as tLog and StorageServer.
 		bool isAvailableClass() const {

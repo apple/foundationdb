@@ -172,7 +172,7 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 			}
 		}
 		if (role == "flowprocess" && !parentShutdown.isReady()) {
-			self->hasChild = true;
+			self->child = child;
 			state std::string childDataFolder(std::string(child->dataFolder).append("_child"));
 			child->dataFolder = childDataFolder.c_str();
 			state Future<Void> parentSSClosed = parent->onClosed();
