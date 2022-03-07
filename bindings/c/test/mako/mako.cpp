@@ -50,7 +50,7 @@ FILE* debugme; /* descriptor used for debug messages */
 enum class FutureRC { OK, RETRY, CONFLICT, ABORT };
 
 template <class FutureType>
-FutureRC wait_and_handle_for_on_error(Transaction tx, FutureType f, std::string_view operation) {
+FutureRC waitAndHandleForOnError(Transaction tx, FutureType f, std::string_view operation) {
 	assert(f);
 	auto err = Error{};
 	if ((err = f.blockUntilReady())) {
@@ -67,7 +67,7 @@ FutureRC wait_and_handle_for_on_error(Transaction tx, FutureType f, std::string_
 
 // wait on any non-immediate tx-related operation to complete. Follow up with on_error().
 template <class FutureType>
-FutureRC wait_and_handle_error(Transaction tx, FutureType f, std::string_view operation) {
+FutureRC waitAndHandleError(Transaction tx, FutureType f, std::string_view operation) {
 	assert(f);
 	auto err = Error{};
 	if ((err = f.blockUntilReady())) {
@@ -83,7 +83,7 @@ FutureRC wait_and_handle_error(Transaction tx, FutureType f, std::string_view op
 	fmt::print(fp, "ERROR: Error in {}: {}\n", operation, err.what());
 	// implicit backoff
 	auto follow_up = tx.onError(err);
-	auto rc = wait_and_handle_for_on_error(tx, f, operation);
+	auto rc = waitAndHandleForOnError(tx, f, operation);
 	if (rc == FutureRC::OK) {
 		if (err.is(1020 /*not_committed*/))
 			return FutureRC::CONFLICT;
@@ -112,7 +112,7 @@ int cleanup(Transaction tx, Arguments const& args) {
 	while (true) {
 		tx.clearRange(beginstr, endstr);
 		auto future_commit = tx.commit();
-		const auto rc = wait_and_handle_error(tx, future_commit, "COMMIT_CLEANUP");
+		const auto rc = waitAndHandleError(tx, future_commit, "COMMIT_CLEANUP");
 		if (rc == FutureRC::OK) {
 			break;
 		} else if (rc == FutureRC::RETRY || rc == FutureRC::CONFLICT) {
@@ -191,7 +191,7 @@ int populate(Transaction tx,
 			const auto do_sample = (stats.get_tx_count() % args.sampling) == 0;
 			auto watch_commit = Stopwatch(start_at_ctor{});
 			auto future_commit = tx.commit();
-			const auto rc = wait_and_handle_error(tx, future_commit, "COMMIT_POPULATE_INSERT");
+			const auto rc = waitAndHandleError(tx, future_commit, "COMMIT_POPULATE_INSERT");
 			watch_commit.stop();
 			watch_tx.set_stop(watch_commit.get_stop());
 			auto tx_restarter = ExitGuard([&watch_tx]() { watch_tx.start_from_stop(); });
@@ -311,7 +311,7 @@ void granule_free_load(int64_t loadId, void* userContext) {
 	context->data_by_id[loadId] = 0;
 }
 
-inline int next_key(Arguments const& args) {
+inline int nextKey(Arguments const& args) {
 	if (args.zipf)
 		return zipfian_next();
 	return urand(0, args.rows - 1);
@@ -327,7 +327,7 @@ const std::array<Operation, MAX_OP> opTable{
 	  { "GET",
 	    { { StepKind::READ,
 	        [](Transaction tx, Arguments const& args, ByteString& key, ByteString&, ByteString&) {
-	            const auto num = next_key(args);
+	            const auto num = nextKey(args);
 	            genKey(key, KEY_PREFIX, args, num);
 	            return tx.get(key, false /*snapshot*/).eraseType();
 	        } } },
@@ -335,7 +335,7 @@ const std::array<Operation, MAX_OP> opTable{
 	  { "GETRANGE",
 	    { { StepKind::READ,
 	        [](Transaction tx, Arguments const& args, ByteString& begin, ByteString& end, ByteString&) {
-	            const auto num_begin = next_key(args);
+	            const auto num_begin = nextKey(args);
 	            genKey(begin, KEY_PREFIX, args, num_begin);
 	            auto num_end = num_begin + args.txnspec.ops[OP_GETRANGE][OP_RANGE] - 1;
 	            if (num_end > args.rows - 1)
@@ -356,7 +356,7 @@ const std::array<Operation, MAX_OP> opTable{
 	  { "SGET",
 	    { { StepKind::READ,
 	        [](Transaction tx, Arguments const& args, ByteString& key, ByteString&, ByteString&) {
-	            const auto num = next_key(args);
+	            const auto num = nextKey(args);
 	            genKey(key, KEY_PREFIX, args, num);
 	            return tx.get(key, true /*snapshot*/).eraseType();
 	        } } },
@@ -366,7 +366,7 @@ const std::array<Operation, MAX_OP> opTable{
 
 	        StepKind::READ,
 	        [](Transaction tx, Arguments const& args, ByteString& begin, ByteString& end, ByteString&) {
-	            const auto num_begin = next_key(args);
+	            const auto num_begin = nextKey(args);
 	            genKey(begin, KEY_PREFIX, args, num_begin);
 	            auto num_end = num_begin + args.txnspec.ops[OP_SGETRANGE][OP_RANGE] - 1;
 	            if (num_end > args.rows - 1)
@@ -389,7 +389,7 @@ const std::array<Operation, MAX_OP> opTable{
 	  { "UPDATE",
 	    { { StepKind::READ,
 	        [](Transaction tx, Arguments const& args, ByteString& key, ByteString&, ByteString&) {
-	            const auto num = next_key(args);
+	            const auto num = nextKey(args);
 	            genKey(key, KEY_PREFIX, args, num);
 	            return tx.get(key, false /*snapshot*/).eraseType();
 	        } },
@@ -435,7 +435,7 @@ const std::array<Operation, MAX_OP> opTable{
 	  { "OVERWRITE",
 	    { { StepKind::IMM,
 	        [](Transaction tx, Arguments const& args, ByteString& key, ByteString&, ByteString& value) {
-	            genKey(key, KEY_PREFIX, args, next_key(args));
+	            genKey(key, KEY_PREFIX, args, nextKey(args));
 	            randomString(value, args.value_length);
 	            tx.set(key, value);
 	            return Future();
@@ -444,7 +444,7 @@ const std::array<Operation, MAX_OP> opTable{
 	  { "CLEAR",
 	    { { StepKind::IMM,
 	        [](Transaction tx, Arguments const& args, ByteString& key, ByteString&, ByteString&) {
-	            genKey(key, KEY_PREFIX, args, next_key(args));
+	            genKey(key, KEY_PREFIX, args, nextKey(args));
 	            tx.clear(key);
 	            return Future();
 	        } } },
@@ -469,7 +469,7 @@ const std::array<Operation, MAX_OP> opTable{
 	  { "CLEARRANGE",
 	    { { StepKind::IMM,
 	        [](Transaction tx, Arguments const& args, ByteString& begin, ByteString& end, ByteString&) {
-	            const auto num_begin = next_key(args);
+	            const auto num_begin = nextKey(args);
 	            genKey(begin, KEY_PREFIX, args, num_begin);
 	            const auto range = args.txnspec.ops[OP_CLEARRANGE][OP_RANGE];
 	            assert(range > 0);
@@ -516,7 +516,7 @@ const std::array<Operation, MAX_OP> opTable{
 	  { "READBLOBGRANULE",
 	    { { StepKind::ON_ERROR,
 	        [](Transaction tx, Arguments const& args, ByteString& begin, ByteString& end, ByteString&) {
-	            const auto num_begin = next_key(args);
+	            const auto num_begin = nextKey(args);
 	            genKey(begin, KEY_PREFIX, args, num_begin);
 	            const auto range = args.txnspec.ops[OP_READ_BG][OP_RANGE];
 	            assert(range > 0);
@@ -570,7 +570,7 @@ using OpIterator = std::tuple<int /*op*/, int /*count*/, int /*step*/>;
 
 constexpr const OpIterator OpEnd = OpIterator(MAX_OP, -1, -1);
 
-OpIterator get_op_begin(Arguments const& args) noexcept {
+OpIterator getOpBegin(Arguments const& args) noexcept {
 	for (auto op = 0; op < MAX_OP; op++) {
 		if (op == OP_COMMIT || op == OP_TRANSACTION || args.txnspec.ops[op][OP_COUNT] == 0)
 			continue;
@@ -579,7 +579,7 @@ OpIterator get_op_begin(Arguments const& args) noexcept {
 	return OpEnd;
 }
 
-OpIterator get_op_next(Arguments const& args, OpIterator current) noexcept {
+OpIterator getOpNext(Arguments const& args, OpIterator current) noexcept {
 	if (OpEnd == current)
 		return OpEnd;
 	auto [op, count, step] = current;
@@ -596,10 +596,10 @@ OpIterator get_op_next(Arguments const& args, OpIterator current) noexcept {
 }
 
 /* run one transaction */
-int run_one_transaction(Transaction tx,
-                        Arguments const& args,
-                        ThreadStatistics& stats,
-                        LatencySampleBinArray& sample_bins) {
+int runOneTransaction(Transaction tx,
+                      Arguments const& args,
+                      ThreadStatistics& stats,
+                      LatencySampleBinArray& sample_bins) {
 	// reuse memory for keys to avoid realloc overhead
 	auto key1 = ByteString{};
 	key1.reserve(args.key_length);
@@ -610,7 +610,7 @@ int run_one_transaction(Transaction tx,
 
 	auto watch_tx = Stopwatch(start_at_ctor{});
 
-	auto op_iter = get_op_begin(args);
+	auto op_iter = getOpBegin(args);
 	auto needs_commit = false;
 	auto watch_per_op = std::array<Stopwatch, MAX_OP>{};
 	const auto do_sample = (stats.get_tx_count() % args.sampling) == 0;
@@ -625,9 +625,9 @@ int run_one_transaction(Transaction tx,
 		auto future_rc = FutureRC::OK;
 		if (f) {
 			if (step_kind != StepKind::ON_ERROR) {
-				future_rc = wait_and_handle_error(tx, f, opTable[op].name());
+				future_rc = waitAndHandleError(tx, f, opTable[op].name());
 			} else {
-				auto followup_rc = wait_and_handle_for_on_error(tx, f, opTable[op].name());
+				auto followup_rc = waitAndHandleForOnError(tx, f, opTable[op].name());
 				if (followup_rc == FutureRC::OK) {
 					future_rc = FutureRC::RETRY;
 				}
@@ -645,7 +645,7 @@ int run_one_transaction(Transaction tx,
 				return -1;
 			}
 			// retry from first op
-			op_iter = get_op_begin(args);
+			op_iter = getOpBegin(args);
 			needs_commit = false;
 			continue;
 		}
@@ -681,13 +681,13 @@ int run_one_transaction(Transaction tx,
 			stats.incr_op_count(op);
 		}
 		// move to next op
-		op_iter = get_op_next(args, op_iter);
+		op_iter = getOpNext(args, op_iter);
 
 		// reached the end?
 		if (op_iter == OpEnd && (needs_commit || args.commit_get)) {
 			auto watch_commit = Stopwatch(start_at_ctor{});
 			auto f = tx.commit();
-			const auto rc = wait_and_handle_error(tx, f, "COMMIT_AT_TX_END");
+			const auto rc = waitAndHandleError(tx, f, "COMMIT_AT_TX_END");
 			watch_commit.stop();
 			watch_tx.set_stop(watch_commit.get_stop());
 			auto tx_resetter = ExitGuard([&watch_tx, &tx]() {
@@ -714,7 +714,7 @@ int run_one_transaction(Transaction tx,
 					return -1;
 				}
 				// restart from beginning
-				op_iter = get_op_begin(args);
+				op_iter = getOpBegin(args);
 			}
 			needs_commit = false;
 		}
@@ -725,16 +725,16 @@ int run_one_transaction(Transaction tx,
 	return 0;
 }
 
-int run_workload(Transaction tx,
-                 Arguments const& args,
-                 int const thread_tps,
-                 std::atomic<double> const& throttle_factor,
-                 int const thread_iters,
-                 std::atomic<int> const& signal,
-                 ThreadStatistics& stats,
-                 LatencySampleBinArray& sample_bins,
-                 int const dotrace,
-                 int const dotagging) {
+int runWorkload(Transaction tx,
+                Arguments const& args,
+                int const thread_tps,
+                std::atomic<double> const& throttle_factor,
+                int const thread_iters,
+                std::atomic<int> const& signal,
+                ThreadStatistics& stats,
+                LatencySampleBinArray& sample_bins,
+                int const dotrace,
+                int const dotagging) {
 	auto traceid = std::string{};
 	auto tagstr = std::string{};
 
@@ -805,9 +805,9 @@ int run_workload(Transaction tx,
 			}
 		}
 
-		rc = run_one_transaction(tx, args, stats, sample_bins);
+		rc = runOneTransaction(tx, args, stats, sample_bins);
 		if (rc) {
-			fmt::print(annoyme, "ERROR: run_one_transaction failed ({})\n", rc);
+			fmt::print(annoyme, "ERROR: runOneTransaction failed ({})\n", rc);
 		}
 
 		if (thread_iters > 0) {
@@ -825,13 +825,13 @@ int run_workload(Transaction tx,
 	return rc;
 }
 
-std::string get_stats_file_name(std::string_view dirname, int worker_id, int thread_id, int op) {
+std::string getStatsFilename(std::string_view dirname, int worker_id, int thread_id, int op) {
 
 	return fmt::format("{}/{}_{}_{}", dirname, worker_id + 1, thread_id + 1, opTable[op].name());
 }
 
 /* mako worker thread */
-void worker_thread(ThreadArgs& thread_args) {
+void workerThread(ThreadArgs& thread_args) {
 	const auto& args = *thread_args.args;
 	const auto parent_id = thread_args.parent_id;
 	const auto worker_id = thread_args.worker_id;
@@ -888,10 +888,10 @@ void worker_thread(ThreadArgs& thread_args) {
 			fmt::print(stderr, "ERROR: populate failed\n");
 		}
 	} else if (args.mode == MODE_RUN) {
-		auto rc = run_workload(
+		auto rc = runWorkload(
 		    tx, args, thread_tps, throttle_factor, thread_iters, signal, stats, sample_bins, dotrace, dotagging);
 		if (rc < 0) {
-			fmt::print(stderr, "ERROR: run_workload failed\n");
+			fmt::print(stderr, "ERROR: runWorkload failed\n");
 		}
 	}
 
@@ -904,7 +904,7 @@ void worker_thread(ThreadArgs& thread_args) {
 		}
 		for (auto op = 0; op < MAX_OP; op++) {
 			if (args.txnspec.ops[op][OP_COUNT] > 0 || op == OP_COMMIT || op == OP_TRANSACTION) {
-				const auto filename = get_stats_file_name(dirname, worker_id, thread_id, op);
+				const auto filename = getStatsFilename(dirname, worker_id, thread_id, op);
 				auto fp = fopen(filename.c_str(), "w");
 				if (!fp) {
 					fmt::print(stderr, "ERROR: fopen({}): {}\n", filename, strerror(errno));
@@ -919,7 +919,7 @@ void worker_thread(ThreadArgs& thread_args) {
 }
 
 /* mako worker process */
-int worker_process_main(Arguments const& args, int worker_id, shared_memory::Access shm, pid_t pid_main) {
+int workerProcessMain(Arguments const& args, int worker_id, shared_memory::Access shm, pid_t pid_main) {
 	fmt::print(debugme, "DEBUG: worker {} started\n", worker_id);
 
 	auto err = Error{};
@@ -1045,14 +1045,14 @@ int worker_process_main(Arguments const& args, int worker_id, shared_memory::Acc
 				this_args.sample_bins[op].reserveOneBlock();
 			}
 		}
-		worker_threads[i] = std::thread(worker_thread, std::ref(this_args));
+		worker_threads[i] = std::thread(workerThread, std::ref(this_args));
 	}
 
 	/*** party is over ***/
 
 	/* wait for everyone to finish */
 	for (auto i = 0; i < args.num_threads; i++) {
-		fmt::print(debugme, "DEBUG: worker_thread {} joining\n", i);
+		fmt::print(debugme, "DEBUG: workerThread {} joining\n", i);
 		worker_threads[i].join();
 	}
 
@@ -1071,7 +1071,7 @@ int worker_process_main(Arguments const& args, int worker_id, shared_memory::Acc
 }
 
 /* initialize the parameters with default values */
-int init_args(Arguments* args) {
+int initArguments(Arguments* args) {
 	int i;
 	if (!args)
 		return -1;
@@ -1120,7 +1120,7 @@ int init_args(Arguments* args) {
 }
 
 /* parse transaction specification */
-int parse_transaction(Arguments* args, char const* optarg) {
+int parseTransaction(Arguments* args, char const* optarg) {
 	char const* ptr = optarg;
 	int op = 0;
 	int rangeop = 0;
@@ -1293,7 +1293,7 @@ void usage() {
 }
 
 /* parse benchmark paramters */
-int parse_args(int argc, char* argv[], Arguments* args) {
+int parseArguments(int argc, char* argv[], Arguments* args) {
 	int rc;
 	int c;
 	int idx;
@@ -1384,7 +1384,7 @@ int parse_args(int argc, char* argv[], Arguments* args) {
 			args->iteration = atoi(optarg);
 			break;
 		case 'x':
-			rc = parse_transaction(args, optarg);
+			rc = parseTransaction(args, optarg);
 			if (rc < 0)
 				return -1;
 			break;
@@ -1550,13 +1550,13 @@ int parse_args(int argc, char* argv[], Arguments* args) {
 	return 0;
 }
 
-char const* get_ops_name(int ops_code) {
+char const* getOpName(int ops_code) {
 	if (ops_code >= 0 && ops_code < MAX_OP)
 		return opTable[ops_code].name().data();
 	return "";
 }
 
-int validate_args(Arguments* args) {
+int validateArguments(Arguments* args) {
 	if (args->mode == MODE_INVALID) {
 		fprintf(stderr, "ERROR: --mode has to be set\n");
 		return -1;
@@ -1619,7 +1619,7 @@ int validate_args(Arguments* args) {
 	return 0;
 }
 
-void print_stats(Arguments const& args, ThreadStatistics const* stats, double const duration_sec, FILE* fp) {
+void printStats(Arguments const& args, ThreadStatistics const* stats, double const duration_sec, FILE* fp) {
 	static ThreadStatistics prev;
 
 	auto current = ThreadStatistics{};
@@ -1639,7 +1639,7 @@ void print_stats(Arguments const& args, ThreadStatistics const* stats, double co
 			const auto ops_total_diff = current.get_op_count(op) - prev.get_op_count(op);
 			putField(ops_total_diff);
 			if (fp) {
-				fmt::print(fp, "\"{}\": {},", get_ops_name(op), ops_total_diff);
+				fmt::print(fp, "\"{}\": {},", getOpName(op), ops_total_diff);
 			}
 			print_err = print_err || (current.get_error_count(op) - prev.get_error_count(op)) > 0;
 		}
@@ -1679,13 +1679,13 @@ void print_stats(Arguments const& args, ThreadStatistics const* stats, double co
 	prev = current;
 }
 
-void print_stats_header(Arguments const& args, bool show_commit, bool is_first_header_empty, bool show_op_stats) {
+void printStatsHeader(Arguments const& args, bool show_commit, bool is_first_header_empty, bool show_op_stats) {
 	/* header */
 	if (is_first_header_empty)
 		putTitle("");
 	for (auto op = 0; op < MAX_OP; op++) {
 		if (args.txnspec.ops[op][OP_COUNT] > 0) {
-			putField(get_ops_name(op));
+			putField(getOpName(op));
 		}
 	}
 
@@ -1723,11 +1723,11 @@ void print_stats_header(Arguments const& args, bool show_commit, bool is_first_h
 	fmt::print("\n");
 }
 
-void print_report(Arguments const& args,
-                  ThreadStatistics const* stats,
-                  double const duration_sec,
-                  pid_t pid_main,
-                  FILE* fp) {
+void printReport(Arguments const& args,
+                 ThreadStatistics const* stats,
+                 double const duration_sec,
+                 pid_t pid_main,
+                 FILE* fp) {
 
 	auto final_stats = ThreadStatistics{};
 	for (auto i = 0; i < args.num_processes; i++) {
@@ -1780,7 +1780,7 @@ void print_report(Arguments const& args,
 	}
 
 	/* per-op stats */
-	print_stats_header(args, true, true, false);
+	printStatsHeader(args, true, true, false);
 
 	/* OPS */
 	putTitle("Total OPS");
@@ -1797,7 +1797,7 @@ void print_report(Arguments const& args,
 				} else {
 					fmt::fprintf(fp, ",");
 				}
-				fmt::fprintf(fp, "\"%s\": %lu", get_ops_name(op), final_stats.get_op_count(op));
+				fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), final_stats.get_op_count(op));
 			}
 		}
 	}
@@ -1827,7 +1827,7 @@ void print_report(Arguments const& args,
 				} else {
 					fmt::fprintf(fp, ",");
 				}
-				fmt::fprintf(fp, "\"%s\": %lu", get_ops_name(op), final_stats.get_error_count(op));
+				fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), final_stats.get_error_count(op));
 			}
 		}
 	}
@@ -1837,7 +1837,7 @@ void print_report(Arguments const& args,
 	fmt::print("\n\n");
 
 	fmt::print("Latency (us)");
-	print_stats_header(args, true, false, true);
+	printStatsHeader(args, true, false, true);
 
 	/* Total Samples */
 	putTitle("Samples");
@@ -1855,7 +1855,7 @@ void print_report(Arguments const& args,
 				} else {
 					fmt::fprintf(fp, ",");
 				}
-				fmt::fprintf(fp, "\"%s\": %lu", get_ops_name(op), final_stats.get_latency_sample_count(op));
+				fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), final_stats.get_latency_sample_count(op));
 			}
 		}
 	}
@@ -1880,7 +1880,7 @@ void print_report(Arguments const& args,
 					} else {
 						fmt::fprintf(fp, ",");
 					}
-					fmt::fprintf(fp, "\"%s\": %lu", get_ops_name(op), lat_min);
+					fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), lat_min);
 				}
 			}
 		}
@@ -1905,7 +1905,7 @@ void print_report(Arguments const& args,
 					} else {
 						fmt::fprintf(fp, ",");
 					}
-					fmt::fprintf(fp, "\"%s\": %lu", get_ops_name(op), lat_total / lat_samples);
+					fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), lat_total / lat_samples);
 				}
 			} else {
 				putField("N/A");
@@ -1933,7 +1933,7 @@ void print_report(Arguments const& args,
 					} else {
 						fmt::fprintf(fp, ",");
 					}
-					fmt::fprintf(fp, "\"%s\": %lu", get_ops_name(op), final_stats.get_latency_us_max(op));
+					fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), final_stats.get_latency_us_max(op));
 				}
 			}
 		}
@@ -1956,7 +1956,7 @@ void print_report(Arguments const& args,
 				for (auto i = 0; i < args.num_processes; i++) {
 					for (auto j = 0; j < args.num_threads; j++) {
 						const auto dirname = fmt::format("{}{}", TEMP_DATA_STORE, pid_main);
-						const auto filename = get_stats_file_name(dirname, i, j, op);
+						const auto filename = getStatsFilename(dirname, i, j, op);
 						auto fp = fopen(filename.c_str(), "r");
 						if (!fp) {
 							fmt::print(stderr, "ERROR: fopen({}): {}\n", filename, strerror(errno));
@@ -1989,7 +1989,7 @@ void print_report(Arguments const& args,
 					} else {
 						fmt::fprintf(fp, ",");
 					}
-					fmt::fprintf(fp, "\"%s\": %lu", get_ops_name(op), median);
+					fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), median);
 				}
 			} else {
 				putField("N/A");
@@ -2019,7 +2019,7 @@ void print_report(Arguments const& args,
 				} else {
 					fmt::fprintf(fp, ",");
 				}
-				fmt::fprintf(fp, "\"%s\": %lu", get_ops_name(op), data_points[op][point_95pct]);
+				fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), data_points[op][point_95pct]);
 			}
 		}
 	}
@@ -2046,7 +2046,7 @@ void print_report(Arguments const& args,
 				} else {
 					fmt::fprintf(fp, ",");
 				}
-				fmt::fprintf(fp, "\"%s\": %lu", get_ops_name(op), data_points[op][point_99pct]);
+				fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), data_points[op][point_99pct]);
 			}
 		}
 	}
@@ -2073,7 +2073,7 @@ void print_report(Arguments const& args,
 				} else {
 					fmt::fprintf(fp, ",");
 				}
-				fmt::fprintf(fp, "\"%s\": %lu", get_ops_name(op), data_points[op][point_99_9pct]);
+				fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), data_points[op][point_99_9pct]);
 			}
 		}
 	}
@@ -2086,12 +2086,12 @@ void print_report(Arguments const& args,
 	system(command_remove.c_str());
 }
 
-int stats_process_main(Arguments const& args,
-                       ThreadStatistics const* stats,
-                       std::atomic<double>& throttle_factor,
-                       std::atomic<int> const& signal,
-                       std::atomic<int> const& stopcount,
-                       pid_t pid_main) {
+int statsProcessMain(Arguments const& args,
+                     ThreadStatistics const* stats,
+                     std::atomic<double>& throttle_factor,
+                     std::atomic<int> const& signal,
+                     std::atomic<int> const& stopcount,
+                     pid_t pid_main) {
 	bool first_stats = true;
 
 	/* wait until the signal turn on */
@@ -2100,7 +2100,7 @@ int stats_process_main(Arguments const& args,
 	}
 
 	if (args.verbose >= VERBOSE_DEFAULT)
-		print_stats_header(args, false, true, false);
+		printStatsHeader(args, false, true, false);
 
 	FILE* fp = NULL;
 	if (args.json_output_path[0] != '\0') {
@@ -2190,7 +2190,7 @@ int stats_process_main(Arguments const& args,
 					if (fp)
 						fmt::fprintf(fp, ",");
 				}
-				print_stats(args, stats, to_double_seconds(time_now - time_prev), fp);
+				printStats(args, stats, to_double_seconds(time_now - time_prev), fp);
 			}
 			time_prev = time_now;
 		}
@@ -2206,7 +2206,7 @@ int stats_process_main(Arguments const& args,
 		while (stopcount.load() < args.num_threads * args.num_processes) {
 			usleep(10000); /* 10ms */
 		}
-		print_report(args, stats, to_double_seconds(time_now - time_start), pid_main, fp);
+		printReport(args, stats, to_double_seconds(time_now - time_start), pid_main, fp);
 	}
 
 	if (fp) {
@@ -2222,18 +2222,18 @@ int main(int argc, char* argv[]) {
 
 	auto rc = int{};
 	auto args = Arguments{};
-	rc = init_args(&args);
+	rc = initArguments(&args);
 	if (rc < 0) {
-		fmt::print(stderr, "ERROR: init_args failed\n");
+		fmt::print(stderr, "ERROR: initArguments failed\n");
 		return -1;
 	}
-	rc = parse_args(argc, argv, &args);
+	rc = parseArguments(argc, argv, &args);
 	if (rc < 0) {
 		/* usage printed */
 		return 0;
 	}
 
-	rc = validate_args(&args);
+	rc = validateArguments(&args);
 	if (rc < 0)
 		return -1;
 
@@ -2245,7 +2245,7 @@ int main(int argc, char* argv[]) {
 
 	if (args.mode == MODE_BUILD) {
 		if (args.txnspec.ops[OP_INSERT][OP_COUNT] == 0) {
-			parse_transaction(&args, "i100");
+			parseTransaction(&args, "i100");
 		}
 	}
 
@@ -2331,7 +2331,7 @@ int main(int argc, char* argv[]) {
 
 	if (proc_type == PROC_WORKER) {
 		/* worker process */
-		worker_process_main(args, worker_id, shm_access, pid_main);
+		workerProcessMain(args, worker_id, shm_access, pid_main);
 		/* worker can exit here */
 		exit(0);
 	} else if (proc_type == PROC_STATS) {
@@ -2340,7 +2340,7 @@ int main(int argc, char* argv[]) {
 			/* no stats needed for clean mode */
 			exit(0);
 		}
-		stats_process_main(
+		statsProcessMain(
 		    args, shm_access.statsConstArray(), shm_hdr.throttle_factor, shm_hdr.signal, shm_hdr.stopcount, pid_main);
 		exit(0);
 	}
