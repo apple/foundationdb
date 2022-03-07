@@ -146,8 +146,39 @@ struct alignas(64) ThreadArgs {
 	fdb::Database database; // database to work with
 };
 
+using StepFunction = fdb::Future (*)(fdb::Transaction tx,
+                                     Arguments const&,
+                                     fdb::ByteString& /*key1*/,
+                                     fdb::ByteString& /*key2*/,
+                                     fdb::ByteString& /*value*/);
+
 /* process type */
 typedef enum { PROC_MASTER = 0, PROC_WORKER, PROC_STATS } ProcKind;
+
+class Operation {
+	using Step = std::pair<StepKind, StepFunction>;
+	std::string_view name_;
+	std::vector<Step> steps_;
+	bool needs_commit_;
+
+public:
+	Operation(std::string_view name, std::vector<Step>&& steps, bool needs_commit)
+	  : name_(name), steps_(std::move(steps)), needs_commit_(needs_commit) {}
+
+	std::string_view name() const noexcept { return name_; }
+
+	StepKind stepKind(int step) const noexcept {
+		assert(step < steps());
+		return steps_[step].first;
+	}
+
+	StepFunction stepFunction(int step) const noexcept { return steps_[step].second; }
+
+	// how many steps in this op?
+	int steps() const noexcept { return static_cast<int>(steps_.size()); }
+	// does the op needs to commit some time after its final step?
+	bool needsCommit() const noexcept { return needs_commit_; }
+};
 
 } // namespace mako
 

@@ -317,240 +317,254 @@ inline int next_key(Arguments const& args) {
 	return urand(0, args.rows - 1);
 }
 
-const std::array<OpDesc, MAX_OP> op_desc{ { { "GRV", { StepKind::READ }, false },
-	                                        { "GET", { StepKind::READ }, false },
-	                                        { "GETRANGE", { StepKind::READ }, false },
-	                                        { "SGET", { StepKind::READ }, false },
-	                                        { "SGETRANGE", { StepKind::READ }, false },
-	                                        { "UPDATE", { StepKind::COMMIT, StepKind::IMM }, true },
-	                                        { "INSERT", { StepKind::IMM }, true },
-	                                        { "INSERTRANGE", { StepKind::IMM }, true },
-	                                        { "OVERWRITE", { StepKind::IMM }, true },
-	                                        { "CLEAR", { StepKind::IMM }, true },
-	                                        { "SETCLEAR", { StepKind::COMMIT, StepKind::IMM }, true },
-	                                        { "CLEARRANGE", { StepKind::IMM }, true },
-	                                        { "SETCLEARRANGE", { StepKind::COMMIT, StepKind::IMM }, true },
-	                                        { "COMMIT", { StepKind::NONE }, false },
-	                                        { "TRANSACTION", { StepKind::NONE }, false },
-	                                        { "READBLOBGRANULE", { StepKind::ON_ERROR }, false } } };
+const std::array<Operation, MAX_OP> opTable{
+	{ { "GRV",
+	    { { StepKind::READ,
+	        [](Transaction tx, Arguments const&, ByteString&, ByteString&, ByteString&) {
+	            return tx.getReadVersion().eraseType();
+	        } } },
+	    false },
+	  { "GET",
+	    { { StepKind::READ,
+	        [](Transaction tx, Arguments const& args, ByteString& key, ByteString&, ByteString&) {
+	            const auto num = next_key(args);
+	            genKey(key, KEY_PREFIX, args, num);
+	            return tx.get(key, false /*snapshot*/).eraseType();
+	        } } },
+	    false },
+	  { "GETRANGE",
+	    { { StepKind::READ,
+	        [](Transaction tx, Arguments const& args, ByteString& begin, ByteString& end, ByteString&) {
+	            const auto num_begin = next_key(args);
+	            genKey(begin, KEY_PREFIX, args, num_begin);
+	            auto num_end = num_begin + args.txnspec.ops[OP_GETRANGE][OP_RANGE] - 1;
+	            if (num_end > args.rows - 1)
+		            num_end = args.rows - 1;
+	            genKey(end, KEY_PREFIX, args, num_end);
+	            return tx
+	                .getRange<KeySelect::Inclusive, KeySelect::Inclusive>(begin,
+	                                                                      end,
+	                                                                      0 /*limit*/,
+	                                                                      0 /*target_bytes*/,
+	                                                                      args.streaming_mode,
+	                                                                      0 /*iteration*/,
+	                                                                      false /*snapshot*/,
+	                                                                      args.txnspec.ops[OP_GETRANGE][OP_REVERSE])
+	                .eraseType();
+	        } } },
+	    false },
+	  { "SGET",
+	    { { StepKind::READ,
+	        [](Transaction tx, Arguments const& args, ByteString& key, ByteString&, ByteString&) {
+	            const auto num = next_key(args);
+	            genKey(key, KEY_PREFIX, args, num);
+	            return tx.get(key, true /*snapshot*/).eraseType();
+	        } } },
+	    false },
+	  { "SGETRANGE",
+	    { {
 
-const std::map<
-    std::pair<int /*op*/, int /*sub-op step*/>,
-    Future (*)(Transaction, Arguments const&, ByteString& /*key1*/, ByteString& /*key2*/, ByteString& /*value*/)>
-    operation_fn_table{
-	    { { OP_GETREADVERSION, 0 },
-	      [](Transaction tx, Arguments const&, ByteString&, ByteString&, ByteString&) {
-	          return tx.getReadVersion().eraseType();
-	      } },
-	    { { OP_GET, 0 },
-	      [](Transaction tx, Arguments const& args, ByteString& key, ByteString&, ByteString&) {
-	          const auto num = next_key(args);
-	          genKey(key, KEY_PREFIX, args, num);
-	          return tx.get(key, false /*snapshot*/).eraseType();
-	      } },
-	    { { OP_GETRANGE, 0 },
-	      [](Transaction tx, Arguments const& args, ByteString& begin, ByteString& end, ByteString&) {
-	          const auto num_begin = next_key(args);
-	          genKey(begin, KEY_PREFIX, args, num_begin);
-	          auto num_end = num_begin + args.txnspec.ops[OP_GETRANGE][OP_RANGE] - 1;
-	          if (num_end > args.rows - 1)
-		          num_end = args.rows - 1;
-	          genKey(end, KEY_PREFIX, args, num_end);
-	          return tx
-	              .getRange<KeySelect::Inclusive, KeySelect::Inclusive>(begin,
-	                                                                    end,
-	                                                                    0 /*limit*/,
-	                                                                    0 /*target_bytes*/,
-	                                                                    args.streaming_mode,
-	                                                                    0 /*iteration*/,
-	                                                                    false /*snapshot*/,
-	                                                                    args.txnspec.ops[OP_GETRANGE][OP_REVERSE])
-	              .eraseType();
-	      } },
-	    { { OP_SGET, 0 },
-	      [](Transaction tx, Arguments const& args, ByteString& key, ByteString&, ByteString&) {
-	          const auto num = next_key(args);
-	          genKey(key, KEY_PREFIX, args, num);
-	          return tx.get(key, true /*snapshot*/).eraseType();
-	      } },
-	    { { OP_SGETRANGE, 0 },
-	      [](Transaction tx, Arguments const& args, ByteString& begin, ByteString& end, ByteString&) {
-	          const auto num_begin = next_key(args);
-	          genKey(begin, KEY_PREFIX, args, num_begin);
-	          auto num_end = num_begin + args.txnspec.ops[OP_SGETRANGE][OP_RANGE] - 1;
-	          if (num_end > args.rows - 1)
-		          num_end = args.rows - 1;
-	          genKey(end, KEY_PREFIX, args, num_end);
-	          return tx
-	              .getRange<KeySelect::Inclusive, KeySelect::Inclusive>(begin,
-	                                                                    end,
-	                                                                    0 /*limit*/,
-	                                                                    0 /*target_bytes*/,
-	                                                                    args.streaming_mode,
-	                                                                    0 /*iteration*/,
-	                                                                    true /*snapshot*/,
-	                                                                    args.txnspec.ops[OP_SGETRANGE][OP_REVERSE])
-	              .eraseType();
-	      } },
-	    { { OP_UPDATE, 0 },
-	      [](Transaction tx, Arguments const& args, ByteString& key, ByteString&, ByteString&) {
-	          const auto num = next_key(args);
-	          genKey(key, KEY_PREFIX, args, num);
-	          return tx.get(key, false /*snapshot*/).eraseType();
-	      } },
-	    { { OP_UPDATE, 1 },
-	      [](Transaction tx, Arguments const& args, ByteString& key, ByteString&, ByteString& value) {
-	          randomString(value, args.value_length);
-	          tx.set(key, value);
-	          return Future();
-	      } },
-	    { { OP_INSERT, 0 },
-	      [](Transaction tx, Arguments const& args, ByteString& key, ByteString&, ByteString& value) {
-	          genKeyPrefix(key, KEY_PREFIX, args);
-	          // concat([padding], key_prefix, random_string): reasonably unique
-	          randomString<false /*clear-before-append*/>(key, args.key_length - static_cast<int>(key.size()));
-	          randomString(value, args.value_length);
-	          tx.set(key, value);
-	          return Future();
-	      } },
-	    { { OP_INSERTRANGE, 0 },
-	      [](Transaction tx, Arguments const& args, ByteString& key, ByteString&, ByteString& value) {
-	          genKeyPrefix(key, KEY_PREFIX, args);
-	          const auto prefix_len = static_cast<int>(key.size());
-	          const auto range = args.txnspec.ops[OP_INSERTRANGE][OP_RANGE];
-	          assert(range > 0);
-	          const auto range_digits = digits(range);
-	          assert(args.key_length - prefix_len >= range_digits);
-	          const auto rand_len = args.key_length - prefix_len - range_digits;
-	          // concat([padding], prefix, random_string, range_digits)
-	          randomString<false /*clear-before-append*/>(key, rand_len);
-	          randomString(value, args.value_length);
-	          for (auto i = 0; i < range; i++) {
-		          fmt::format_to(std::back_inserter(key), "{0:0{1}d}", i, range_digits);
-		          tx.set(key, value);
-		          key.resize(key.size() - static_cast<size_t>(range_digits));
-	          }
-	          return Future();
-	      } },
-	    { { OP_OVERWRITE, 0 },
-	      [](Transaction tx, Arguments const& args, ByteString& key, ByteString&, ByteString& value) {
-	          genKey(key, KEY_PREFIX, args, next_key(args));
-	          randomString(value, args.value_length);
-	          tx.set(key, value);
-	          return Future();
-	      } },
-	    { { OP_CLEAR, 0 },
-	      [](Transaction tx, Arguments const& args, ByteString& key, ByteString&, ByteString&) {
-	          genKey(key, KEY_PREFIX, args, next_key(args));
-	          tx.clear(key);
-	          return Future();
-	      } },
-	    { { OP_SETCLEAR, 0 },
-	      [](Transaction tx, Arguments const& args, ByteString& key, ByteString&, ByteString& value) {
-	          genKeyPrefix(key, KEY_PREFIX, args);
-	          const auto prefix_len = static_cast<int>(key.size());
-	          randomString<false /*append-after-clear*/>(key, args.key_length - prefix_len);
-	          randomString(value, args.value_length);
-	          tx.set(key, value);
-	          return tx.commit().eraseType();
-	      } },
-	    { { OP_SETCLEAR, 1 },
-	      [](Transaction tx, Arguments const& args, ByteString& key, ByteString&, ByteString&) {
-	          tx.reset(); // assuming commit from step 0 worked.
-	          tx.clear(key); // key should forward unchanged from step 0
-	          return Future();
-	      } },
-	    { { OP_CLEARRANGE, 0 },
-	      [](Transaction tx, Arguments const& args, ByteString& begin, ByteString& end, ByteString&) {
-	          const auto num_begin = next_key(args);
-	          genKey(begin, KEY_PREFIX, args, num_begin);
-	          const auto range = args.txnspec.ops[OP_CLEARRANGE][OP_RANGE];
-	          assert(range > 0);
-	          genKey(end, KEY_PREFIX, args, std::min(args.rows - 1, num_begin + range - 1));
-	          tx.clearRange(begin, end);
-	          return Future();
-	      } },
-	    { { OP_SETCLEARRANGE, 0 },
-	      [](Transaction tx, Arguments const& args, ByteString& key_begin, ByteString& key, ByteString& value) {
-	          genKeyPrefix(key, KEY_PREFIX, args);
-	          const auto prefix_len = static_cast<int>(key.size());
-	          const auto range = args.txnspec.ops[OP_SETCLEARRANGE][OP_RANGE];
-	          assert(range > 0);
-	          const auto range_digits = digits(range);
-	          assert(args.key_length - prefix_len >= range_digits);
-	          const auto rand_len = args.key_length - prefix_len - range_digits;
-	          // concat([padding], prefix, random_string, range_digits)
-	          randomString<false /*clear-before-append*/>(key, rand_len);
-	          randomString(value, args.value_length);
-	          for (auto i = 0; i <= range; i++) {
-		          fmt::format_to(std::back_inserter(key), "{0:0{1}d}", i, range_digits);
-		          if (i == range)
-			          break; // preserve "exclusive last"
-		          // preserve first key for step 1
-		          if (i == 0)
-			          key_begin = key;
-		          tx.set(key, value);
-		          // preserve last key for step 1
-		          key.resize(key.size() - static_cast<size_t>(range_digits));
-	          }
-	          return tx.commit().eraseType();
-	      } },
-	    { { OP_SETCLEARRANGE, 1 },
-	      [](Transaction tx, Arguments const& args, ByteString& begin, ByteString& end, ByteString&) {
-	          tx.reset();
-	          tx.clearRange(begin, end);
-	          return Future();
-	      } },
-	    { { OP_READ_BG, 0 },
-	      [](Transaction tx, Arguments const& args, ByteString& begin, ByteString& end, ByteString&) {
-	          const auto num_begin = next_key(args);
-	          genKey(begin, KEY_PREFIX, args, num_begin);
-	          const auto range = args.txnspec.ops[OP_READ_BG][OP_RANGE];
-	          assert(range > 0);
-	          genKey(end, KEY_PREFIX, args, std::min(args.rows - 1, num_begin + range - 1));
-	          auto err = Error{};
+	        StepKind::READ,
+	        [](Transaction tx, Arguments const& args, ByteString& begin, ByteString& end, ByteString&) {
+	            const auto num_begin = next_key(args);
+	            genKey(begin, KEY_PREFIX, args, num_begin);
+	            auto num_end = num_begin + args.txnspec.ops[OP_SGETRANGE][OP_RANGE] - 1;
+	            if (num_end > args.rows - 1)
+		            num_end = args.rows - 1;
+	            genKey(end, KEY_PREFIX, args, num_end);
+	            return tx
+	                .getRange<KeySelect::Inclusive, KeySelect::Inclusive>(begin,
+	                                                                      end,
+	                                                                      0 /*limit*/,
+	                                                                      0 /*target_bytes*/,
+	                                                                      args.streaming_mode,
+	                                                                      0 /*iteration*/,
+	                                                                      true /*snapshot*/,
+	                                                                      args.txnspec.ops[OP_SGETRANGE][OP_REVERSE])
+	                .eraseType();
+	        }
 
-	          err = tx.setOptionNothrow(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE, BytesRef());
-	          if (err) {
-		          // Issuing read/writes before disabling RYW results in error.
-		          // Possible malformed workload?
-		          // As workloads execute in sequence, retrying would likely repeat this error.
-		          fmt::print(stderr, "ERROR: TR_OPTION_READ_YOUR_WRITES_DISABLE: {}", err.what());
-		          return Future();
-	          }
+	    } },
+	    false },
+	  { "UPDATE",
+	    { { StepKind::READ,
+	        [](Transaction tx, Arguments const& args, ByteString& key, ByteString&, ByteString&) {
+	            const auto num = next_key(args);
+	            genKey(key, KEY_PREFIX, args, num);
+	            return tx.get(key, false /*snapshot*/).eraseType();
+	        } },
+	      { StepKind::IMM,
+	        [](Transaction tx, Arguments const& args, ByteString& key, ByteString&, ByteString& value) {
+	            randomString(value, args.value_length);
+	            tx.set(key, value);
+	            return Future();
+	        } } },
+	    true },
+	  { "INSERT",
+	    { { StepKind::IMM,
+	        [](Transaction tx, Arguments const& args, ByteString& key, ByteString&, ByteString& value) {
+	            genKeyPrefix(key, KEY_PREFIX, args);
+	            // concat([padding], key_prefix, random_string): reasonably unique
+	            randomString<false /*clear-before-append*/>(key, args.key_length - static_cast<int>(key.size()));
+	            randomString(value, args.value_length);
+	            tx.set(key, value);
+	            return Future();
+	        } } },
+	    true },
+	  { "INSERTRANGE",
+	    { { StepKind::IMM,
+	        [](Transaction tx, Arguments const& args, ByteString& key, ByteString&, ByteString& value) {
+	            genKeyPrefix(key, KEY_PREFIX, args);
+	            const auto prefix_len = static_cast<int>(key.size());
+	            const auto range = args.txnspec.ops[OP_INSERTRANGE][OP_RANGE];
+	            assert(range > 0);
+	            const auto range_digits = digits(range);
+	            assert(args.key_length - prefix_len >= range_digits);
+	            const auto rand_len = args.key_length - prefix_len - range_digits;
+	            // concat([padding], prefix, random_string, range_digits)
+	            randomString<false /*clear-before-append*/>(key, rand_len);
+	            randomString(value, args.value_length);
+	            for (auto i = 0; i < range; i++) {
+		            fmt::format_to(std::back_inserter(key), "{0:0{1}d}", i, range_digits);
+		            tx.set(key, value);
+		            key.resize(key.size() - static_cast<size_t>(range_digits));
+	            }
+	            return Future();
+	        } } },
+	    true },
+	  { "OVERWRITE",
+	    { { StepKind::IMM,
+	        [](Transaction tx, Arguments const& args, ByteString& key, ByteString&, ByteString& value) {
+	            genKey(key, KEY_PREFIX, args, next_key(args));
+	            randomString(value, args.value_length);
+	            tx.set(key, value);
+	            return Future();
+	        } } },
+	    true },
+	  { "CLEAR",
+	    { { StepKind::IMM,
+	        [](Transaction tx, Arguments const& args, ByteString& key, ByteString&, ByteString&) {
+	            genKey(key, KEY_PREFIX, args, next_key(args));
+	            tx.clear(key);
+	            return Future();
+	        } } },
+	    true },
+	  { "SETCLEAR",
+	    { { StepKind::COMMIT,
+	        [](Transaction tx, Arguments const& args, ByteString& key, ByteString&, ByteString& value) {
+	            genKeyPrefix(key, KEY_PREFIX, args);
+	            const auto prefix_len = static_cast<int>(key.size());
+	            randomString<false /*append-after-clear*/>(key, args.key_length - prefix_len);
+	            randomString(value, args.value_length);
+	            tx.set(key, value);
+	            return tx.commit().eraseType();
+	        } },
+	      { StepKind::IMM,
+	        [](Transaction tx, Arguments const& args, ByteString& key, ByteString&, ByteString&) {
+	            tx.reset(); // assuming commit from step 0 worked.
+	            tx.clear(key); // key should forward unchanged from step 0
+	            return Future();
+	        } } },
+	    true },
+	  { "CLEARRANGE",
+	    { { StepKind::IMM,
+	        [](Transaction tx, Arguments const& args, ByteString& begin, ByteString& end, ByteString&) {
+	            const auto num_begin = next_key(args);
+	            genKey(begin, KEY_PREFIX, args, num_begin);
+	            const auto range = args.txnspec.ops[OP_CLEARRANGE][OP_RANGE];
+	            assert(range > 0);
+	            genKey(end, KEY_PREFIX, args, std::min(args.rows - 1, num_begin + range - 1));
+	            tx.clearRange(begin, end);
+	            return Future();
+	        } } },
+	    true },
+	  { "SETCLEARRANGE",
+	    { { StepKind::COMMIT,
+	        [](Transaction tx, Arguments const& args, ByteString& key_begin, ByteString& key, ByteString& value) {
+	            genKeyPrefix(key, KEY_PREFIX, args);
+	            const auto prefix_len = static_cast<int>(key.size());
+	            const auto range = args.txnspec.ops[OP_SETCLEARRANGE][OP_RANGE];
+	            assert(range > 0);
+	            const auto range_digits = digits(range);
+	            assert(args.key_length - prefix_len >= range_digits);
+	            const auto rand_len = args.key_length - prefix_len - range_digits;
+	            // concat([padding], prefix, random_string, range_digits)
+	            randomString<false /*clear-before-append*/>(key, rand_len);
+	            randomString(value, args.value_length);
+	            for (auto i = 0; i <= range; i++) {
+		            fmt::format_to(std::back_inserter(key), "{0:0{1}d}", i, range_digits);
+		            if (i == range)
+			            break; // preserve "exclusive last"
+		            // preserve first key for step 1
+		            if (i == 0)
+			            key_begin = key;
+		            tx.set(key, value);
+		            // preserve last key for step 1
+		            key.resize(key.size() - static_cast<size_t>(range_digits));
+	            }
+	            return tx.commit().eraseType();
+	        } },
+	      { StepKind::IMM,
+	        [](Transaction tx, Arguments const& args, ByteString& begin, ByteString& end, ByteString&) {
+	            tx.reset();
+	            tx.clearRange(begin, end);
+	            return Future();
+	        } } },
+	    true },
+	  { "COMMIT", { { StepKind::NONE, nullptr } }, false },
+	  { "TRANSACTION", { { StepKind::NONE, nullptr } }, false },
+	  { "READBLOBGRANULE",
+	    { { StepKind::ON_ERROR,
+	        [](Transaction tx, Arguments const& args, ByteString& begin, ByteString& end, ByteString&) {
+	            const auto num_begin = next_key(args);
+	            genKey(begin, KEY_PREFIX, args, num_begin);
+	            const auto range = args.txnspec.ops[OP_READ_BG][OP_RANGE];
+	            assert(range > 0);
+	            genKey(end, KEY_PREFIX, args, std::min(args.rows - 1, num_begin + range - 1));
+	            auto err = Error{};
 
-	          auto mem = std::unique_ptr<uint8_t*[]>(new uint8_t*[MAX_BG_IDS]);
-	          // Allocate a separate context per call to avoid multiple threads accessing
-	          BGLocalFileContext fileContext;
-	          fileContext.bgFilePath = args.bg_file_path;
-	          fileContext.nextId = 0;
-	          fileContext.data_by_id = mem.get();
-	          memset(fileContext.data_by_id, 0, MAX_BG_IDS * sizeof(uint8_t*));
+	            err = tx.setOptionNothrow(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE, BytesRef());
+	            if (err) {
+		            // Issuing read/writes before disabling RYW results in error.
+		            // Possible malformed workload?
+		            // As workloads execute in sequence, retrying would likely repeat this error.
+		            fmt::print(stderr, "ERROR: TR_OPTION_READ_YOUR_WRITES_DISABLE: {}", err.what());
+		            return Future();
+	            }
 
-	          native::FDBReadBlobGranuleContext granuleContext;
-	          granuleContext.userContext = &fileContext;
-	          granuleContext.start_load_f = &granule_start_load;
-	          granuleContext.get_load_f = &granule_get_load;
-	          granuleContext.free_load_f = &granule_free_load;
-	          granuleContext.debugNoMaterialize = !args.bg_materialize_files;
+	            auto mem = std::unique_ptr<uint8_t*[]>(new uint8_t*[MAX_BG_IDS]);
+	            // Allocate a separate context per call to avoid multiple threads accessing
+	            BGLocalFileContext fileContext;
+	            fileContext.bgFilePath = args.bg_file_path;
+	            fileContext.nextId = 0;
+	            fileContext.data_by_id = mem.get();
+	            memset(fileContext.data_by_id, 0, MAX_BG_IDS * sizeof(uint8_t*));
 
-	          auto r =
-	              tx.readBlobGranules(begin, end, 0 /*begin_version*/, -1 /*end_version, use txn's*/, granuleContext);
+	            native::FDBReadBlobGranuleContext granuleContext;
+	            granuleContext.userContext = &fileContext;
+	            granuleContext.start_load_f = &granule_start_load;
+	            granuleContext.get_load_f = &granule_get_load;
+	            granuleContext.free_load_f = &granule_free_load;
+	            granuleContext.debugNoMaterialize = !args.bg_materialize_files;
 
-	          mem.reset();
+	            auto r =
+	                tx.readBlobGranules(begin, end, 0 /*begin_version*/, -1 /*end_version, use txn's*/, granuleContext);
 
-	          auto out = Result::KeyValueArray{};
-	          err = r.getKeyValueArrayNothrow(out);
-	          if (!err || err.is(2037 /*blob_granule_not_materialized*/))
-		          return Future();
-	          const auto fp = (err.is(1020 /*not_committed*/) || err.is(1021 /*commit_unknown_result*/) ||
-	                           err.is(1213 /*tag_throttled*/))
-	                              ? annoyme
-	                              : stderr;
-	          fmt::print(fp, "ERROR: get_keyvalue_array() after readBlobGranules(): {}\n", err.what());
-	          return tx.onError(err).eraseType();
-	      } }
-    };
+	            mem.reset();
+
+	            auto out = Result::KeyValueArray{};
+	            err = r.getKeyValueArrayNothrow(out);
+	            if (!err || err.is(2037 /*blob_granule_not_materialized*/))
+		            return Future();
+	            const auto fp = (err.is(1020 /*not_committed*/) || err.is(1021 /*commit_unknown_result*/) ||
+	                             err.is(1213 /*tag_throttled*/))
+	                                ? annoyme
+	                                : stderr;
+	            fmt::print(fp, "ERROR: get_keyvalue_array() after readBlobGranules(): {}\n", err.what());
+	            return tx.onError(err).eraseType();
+	        } } },
+	    false } }
+};
 
 using OpIterator = std::tuple<int /*op*/, int /*count*/, int /*step*/>;
 
@@ -570,7 +584,7 @@ OpIterator get_op_next(Arguments const& args, OpIterator current) noexcept {
 		return OpEnd;
 	auto [op, count, step] = current;
 	assert(op < MAX_OP && op != OP_TRANSACTION && op != OP_COMMIT);
-	if (op_desc[op].steps() > step + 1)
+	if (opTable[op].steps() > step + 1)
 		return OpIterator(op, count, step + 1);
 	count++;
 	for (; op < MAX_OP; op++, count = 0) {
@@ -602,19 +616,18 @@ int run_one_transaction(Transaction tx,
 	const auto do_sample = (stats.get_tx_count() % args.sampling) == 0;
 	while (op_iter != OpEnd) {
 		const auto [op, count, step] = op_iter;
-		const auto step_kind = op_desc[op].step_kind(step);
-		const auto op_key = std::make_pair(op, step);
+		const auto step_kind = opTable[op].stepKind(step);
 		auto watch_step = Stopwatch{};
 		watch_step.start();
 		if (step == 0 /* first step */)
 			watch_per_op[op] = Stopwatch(watch_step.get_start());
-		auto f = operation_fn_table.at(op_key)(tx, args, key1, key2, val);
+		auto f = opTable[op].stepFunction(step)(tx, args, key1, key2, val);
 		auto future_rc = FutureRC::OK;
 		if (f) {
 			if (step_kind != StepKind::ON_ERROR) {
-				future_rc = wait_and_handle_error(tx, f, op_desc[op].name());
+				future_rc = wait_and_handle_error(tx, f, opTable[op].name());
 			} else {
-				auto followup_rc = wait_and_handle_for_on_error(tx, f, op_desc[op].name());
+				auto followup_rc = wait_and_handle_for_on_error(tx, f, opTable[op].name());
 				if (followup_rc == FutureRC::OK) {
 					future_rc = FutureRC::RETRY;
 				}
@@ -656,8 +669,8 @@ int run_one_transaction(Transaction tx,
 		}
 
 		// op completed successfully
-		if (step + 1 == op_desc[op].steps() /* last step */) {
-			if (op_desc[op].needs_commit())
+		if (step + 1 == opTable[op].steps() /* last step */) {
+			if (opTable[op].needsCommit())
 				needs_commit = true;
 			watch_per_op[op].set_stop(watch_step.get_stop());
 			if (do_sample) {
@@ -814,7 +827,7 @@ int run_workload(Transaction tx,
 
 std::string get_stats_file_name(std::string_view dirname, int worker_id, int thread_id, int op) {
 
-	return fmt::format("{}/{}_{}_{}", dirname, worker_id + 1, thread_id + 1, op_desc[op].name());
+	return fmt::format("{}/{}_{}_{}", dirname, worker_id + 1, thread_id + 1, opTable[op].name());
 }
 
 /* mako worker thread */
@@ -1539,7 +1552,7 @@ int parse_args(int argc, char* argv[], Arguments* args) {
 
 char const* get_ops_name(int ops_code) {
 	if (ops_code >= 0 && ops_code < MAX_OP)
-		return op_desc[ops_code].name().data();
+		return opTable[ops_code].name().data();
 	return "";
 }
 

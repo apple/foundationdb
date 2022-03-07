@@ -7,7 +7,7 @@
 namespace mako {
 
 /* transaction specification */
-enum Operations {
+enum OpKind {
 	OP_GETREADVERSION,
 	OP_GET,
 	OP_GETRANGE,
@@ -38,27 +38,6 @@ enum class StepKind {
 	READ, ///< blockable reads: get(), get_range(), get_read_version, ...
 	COMMIT, ///< self-explanatory
 	ON_ERROR ///< future is a result of tx.on_error()
-};
-
-class OpDesc {
-	std::string_view name_;
-	std::vector<StepKind> steps_;
-	bool needs_commit_;
-
-public:
-	OpDesc(std::string_view name, std::vector<StepKind>&& steps, bool needs_commit)
-	  : name_(name), steps_(std::move(steps)), needs_commit_(needs_commit) {}
-
-	std::string_view name() const noexcept { return name_; }
-	// what
-	StepKind step_kind(int step) const noexcept {
-		assert(step < steps());
-		return steps_[step];
-	}
-	// how many steps in this op?
-	int steps() const noexcept { return static_cast<int>(steps_.size()); }
-	// does the op needs to commit some time after its final step?
-	bool needs_commit() const noexcept { return needs_commit_; }
 };
 
 } // namespace mako
