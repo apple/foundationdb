@@ -32,6 +32,10 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace fdb_cli {
+
+const KeyRangeRef tenantSpecialKeyRange(LiteralStringRef("\xff\xff/management/tenant_map/"),
+                                        LiteralStringRef("\xff\xff/management/tenant_map0"));
+
 // createtenant command
 ACTOR Future<bool> createTenantCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() != 2) {
@@ -39,7 +43,35 @@ ACTOR Future<bool> createTenantCommandActor(Reference<IDatabase> db, std::vector
 		return false;
 	}
 
-	wait(ManagementAPI::createTenant(db, tokens[1]));
+	state Key tenantNameKey = fdb_cli::tenantSpecialKeyRange.begin.withSuffix(tokens[1]);
+	state Reference<ITransaction> tr = db->createTransaction();
+	state bool doneExistenceCheck = false;
+
+	loop {
+		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+		try {
+			if (!doneExistenceCheck) {
+				Optional<Value> existingTenant = wait(safeThreadFutureToFuture(tr->get(tenantNameKey)));
+				if (existingTenant.present()) {
+					throw tenant_already_exists();
+				}
+				doneExistenceCheck = true;
+			}
+
+			tr->set(tenantNameKey, ValueRef());
+			wait(safeThreadFutureToFuture(tr->commit()));
+			break;
+		} catch (Error& e) {
+			state Error err(e);
+			if (e.code() == error_code_special_keys_api_failure) {
+				std::string errorMsgStr = wait(fdb_cli::getSpecialKeysFailureErrorMessage(tr));
+				fprintf(stderr, "ERROR: %s\n", errorMsgStr.c_str());
+				return false;
+			}
+			wait(safeThreadFutureToFuture(tr->onError(err)));
+		}
+	}
+
 	printf("The tenant `%s' has been created.\n", printable(tokens[1]).c_str());
 	return true;
 }
@@ -56,7 +88,35 @@ ACTOR Future<bool> deleteTenantCommandActor(Reference<IDatabase> db, std::vector
 		return false;
 	}
 
-	wait(ManagementAPI::deleteTenant(db, tokens[1]));
+	state Key tenantNameKey = fdb_cli::tenantSpecialKeyRange.begin.withSuffix(tokens[1]);
+	state Reference<ITransaction> tr = db->createTransaction();
+	state bool doneExistenceCheck = false;
+
+	loop {
+		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+		try {
+			if (!doneExistenceCheck) {
+				Optional<Value> existingTenant = wait(safeThreadFutureToFuture(tr->get(tenantNameKey)));
+				if (!existingTenant.present()) {
+					throw tenant_not_found();
+				}
+				doneExistenceCheck = true;
+			}
+
+			tr->clear(tenantNameKey);
+			wait(safeThreadFutureToFuture(tr->commit()));
+			break;
+		} catch (Error& e) {
+			state Error err(e);
+			if (e.code() == error_code_special_keys_api_failure) {
+				std::string errorMsgStr = wait(fdb_cli::getSpecialKeysFailureErrorMessage(tr));
+				fprintf(stderr, "ERROR: %s\n", errorMsgStr.c_str());
+				return false;
+			}
+			wait(safeThreadFutureToFuture(tr->onError(err)));
+		}
+	}
+
 	printf("The tenant `%s' has been deleted.\n", printable(tokens[1]).c_str());
 	return true;
 }
@@ -75,16 +135,16 @@ ACTOR Future<bool> listTenantsCommandActor(Reference<IDatabase> db, std::vector<
 		return false;
 	}
 
-	StringRef begin = ""_sr;
-	StringRef end = "\xff\xff"_sr;
+	StringRef beginTenant = ""_sr;
+	StringRef endTenant = "\xff\xff"_sr;
 	state int limit = 100;
 
 	if (tokens.size() >= 2) {
-		begin = tokens[1];
+		beginTenant = tokens[1];
 	}
 	if (tokens.size() >= 3) {
-		end = tokens[2];
-		if (end <= begin) {
+		endTenant = tokens[2];
+		if (endTenant <= beginTenant) {
 			fprintf(stderr, "ERROR: end must be larger than begin");
 			return false;
 		}
@@ -97,22 +157,41 @@ ACTOR Future<bool> listTenantsCommandActor(Reference<IDatabase> db, std::vector<
 		}
 	}
 
-	Standalone<VectorRef<StringRef>> tenants = wait(ManagementAPI::listTenants(db, begin, end, limit));
+	state Key beginTenantKey = fdb_cli::tenantSpecialKeyRange.begin.withSuffix(beginTenant);
+	state Key endTenantKey = fdb_cli::tenantSpecialKeyRange.begin.withSuffix(endTenant);
+	state Reference<ITransaction> tr = db->createTransaction();
 
-	if (tenants.empty()) {
-		if (tokens.size() == 1) {
-			printf("The cluster has no tenants.\n");
-		} else {
-			printf("The cluster has no tenants in the specified range.\n");
+	loop {
+		try {
+			RangeResult tenants = wait(safeThreadFutureToFuture(
+			    tr->getRange(firstGreaterOrEqual(beginTenantKey), firstGreaterOrEqual(endTenantKey), limit)));
+
+			if (tenants.empty()) {
+				if (tokens.size() == 1) {
+					printf("The cluster has no tenants.\n");
+				} else {
+					printf("The cluster has no tenants in the specified range.\n");
+				}
+			}
+
+			int index = 0;
+			for (auto tenant : tenants) {
+				printf("  %d. %s\n",
+				       ++index,
+				       printable(tenant.key.removePrefix(fdb_cli::tenantSpecialKeyRange.begin)).c_str());
+			}
+
+			return true;
+		} catch (Error& e) {
+			state Error err(e);
+			if (e.code() == error_code_special_keys_api_failure) {
+				std::string errorMsgStr = wait(fdb_cli::getSpecialKeysFailureErrorMessage(tr));
+				fprintf(stderr, "ERROR: %s\n", errorMsgStr.c_str());
+				return false;
+			}
+			wait(safeThreadFutureToFuture(tr->onError(err)));
 		}
 	}
-
-	int index = 0;
-	for (auto tenant : tenants) {
-		printf("  %d. %s\n", ++index, printable(tenant).c_str());
-	}
-
-	return true;
 }
 
 CommandFactory listTenantsFactory(
@@ -129,11 +208,28 @@ ACTOR Future<bool> getTenantCommandActor(Reference<IDatabase> db, std::vector<St
 		return false;
 	}
 
-	TenantMapEntry tenant = wait(ManagementAPI::getTenant(db, tokens[1]));
-	printf("  ID: %" PRId64 "\n", tenant.id);
-	printf("  Prefix: %s\n", printable(tenant.prefix).c_str());
+	state Key tenantNameKey = fdb_cli::tenantSpecialKeyRange.begin.withSuffix(tokens[1]);
+	state Reference<ITransaction> tr = db->createTransaction();
 
-	return true;
+	loop {
+		try {
+			Optional<Value> tenant = wait(safeThreadFutureToFuture(tr->get(tenantNameKey)));
+			if (!tenant.present()) {
+				throw tenant_not_found();
+			}
+
+			printf("  %s\n", tenant.get().toString().c_str());
+			return true;
+		} catch (Error& e) {
+			state Error err(e);
+			if (e.code() == error_code_special_keys_api_failure) {
+				std::string errorMsgStr = wait(fdb_cli::getSpecialKeysFailureErrorMessage(tr));
+				fprintf(stderr, "ERROR: %s\n", errorMsgStr.c_str());
+				return false;
+			}
+			wait(safeThreadFutureToFuture(tr->onError(err)));
+		}
+	}
 }
 
 CommandFactory getTenantFactory("gettenant",
