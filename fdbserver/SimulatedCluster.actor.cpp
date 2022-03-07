@@ -1335,6 +1335,8 @@ void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
 		}
 	}
 
+	storage_engine_type = 4;
+
 	switch (storage_engine_type) {
 	case 0: {
 		TEST(true); // Simulated cluster using ssd storage engine

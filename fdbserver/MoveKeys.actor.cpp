@@ -1453,6 +1453,111 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 	return Void();
 }
 
+ACTOR Future<Void> cancelDataMove(Database occ, DataMoveMetaData dataMove, const DDEnabledState* ddEnabledState) {
+	state TraceInterval interval("CancelDataMove");
+	state std::vector<UID> target;
+	state Map<UID, VectorRef<KeyRangeRef>> shardMap;
+
+	TraceEvent(SevDebug, interval.begin(), dataMove.id).detail("DataMove", dataMove.toString());
+
+	try {
+		// RYW to optimize re-reading the same key ranges
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(occ);
+
+		loop {
+			try {
+				// Keep track of old dests that may need to have ranges removed from serverKeys
+				state std::set<UID> oldDests;
+
+				tr->getTransaction().trState->taskID = TaskPriority::MoveKeys;
+				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
+				state RangeResult old = wait(krmGetRanges(tr,
+				                                          keyServersPrefix,
+				                                          dataMove.range,
+				                                          GetRangeLimits::ROW_LIMIT_UNLIMITED,
+				                                          GetRangeLimits::BYTE_LIMIT_UNLIMITED));
+
+				state RangeResult UIDtoTagMap = wait(tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
+
+				// For each intersecting range, clear existing dest servers and checkpoints on all src servers.
+				for (int i = 0; i < old.size() - 1; ++i) {
+					KeyRangeRef rangeIntersectKeys(old[i].key, old[i + 1].key);
+					std::vector<UID> src;
+					std::vector<UID> dest;
+					decodeKeyServersValue(UIDtoTagMap, old[i].value, src, dest);
+
+					TraceEvent("CancelDataMoveShard", dataMove.id)
+					    .detail("KeyBegin", rangeIntersectKeys.begin.toString())
+					    .detail("KeyEnd", rangeIntersectKeys.end.toString())
+					    .detail("OldSrc", describe(src))
+					    .detail("OldDest", describe(dest))
+					    .detail("ReadVersion", tr->getReadVersion().get());
+
+					if (target.empty()) {
+						target = dest;
+						std::sort(target.begin(), target.end());
+					} else {
+						std::sort(dest.begin(), dest.end());
+						ASSERT(std::equal(target.begin(), target.end(), dest.begin()));
+					}
+
+					// Keep track of src shards so that we can preserve their values when we overwrite serverKeys
+					for (auto& uid : src) {
+						tr->clear(prefixRange(checkpointKeyFor(src, dataMove.id)));
+						shardMap[uid].push_back(old.arena(), rangeIntersectKeys);
+						// TraceEvent("StartMoveKeysShardMapAdd", relocationIntervalId).detail("Server", uid);
+					}
+				}
+
+				tr->clear(dataMove.id);
+
+				state std::set<UID>::iterator oldDest;
+
+				// Remove old dests from serverKeys.  In order for krmSetRangeCoalescing to work correctly in the
+				// same prefix for a single transaction, we must do most of the coalescing ourselves.  Only the
+				// shards on the boundary of currentRange are actually coalesced with the ranges outside of
+				// currentRange. For all shards internal to currentRange, we overwrite all consecutive keys whose
+				// value is or should be serverKeysFalse in a single write
+				std::vector<Future<Void>> actors;
+				for (oldDest = target.begin(); oldDest != target.end(); ++oldDest) {
+					actors.push_back(removeOldDestinations(tr, *oldDest, shardMap[*oldDest], dataMove.range));
+				}
+
+				wait(waitForAll(actors));
+
+				wait(tr->commit());
+
+				/*TraceEvent("StartMoveKeysCommitDone", relocationIntervalId)
+				    .detail("CommitVersion", tr.getCommittedVersion())
+				    .detail("ShardsInBatch", old.size() - 1);*/
+				break;
+			} catch (Error& e) {
+				wait(tr->onError(e));
+
+				// if (retries % 10 == 0) {
+				// 	TraceEvent(retries == 50 ? SevWarnAlways : SevWarn, "StartMoveKeysRetrying", relocationIntervalId)
+				// 	    .error(err)
+				// 	    .detail("Keys", keys)
+				// 	    .detail("BeginKey", begin)
+				// 	    .detail("NumTries", retries);
+				// }
+			}
+		}
+
+		// printf("Committed moving '%s'-'%s' (version %lld)\n", keys.begin.toString().c_str(),
+		// keys.end.toString().c_str(), tr->getCommittedVersion());
+		TraceEvent(SevDebug, interval.end(), dataMove.id).detail("DataMove", dataMove.toString());
+	} catch (Error& e) {
+		TraceEvent(SevDebug, interval.end(), dataMove.id).error(e, true);
+		throw;
+	}
+
+	return Void();
+}
+
 ACTOR Future<Void> moveKeys(Database cx,
                             KeyRange keys,
                             std::vector<UID> destinationTeam,

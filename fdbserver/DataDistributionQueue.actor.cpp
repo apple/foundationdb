@@ -356,6 +356,10 @@ ACTOR Future<Void> dataDistributionRelocator(struct DDQueueData* self,
                                              RelocateData rd,
                                              const DDEnabledState* ddEnabledState);
 
+ACTOR Future<Void> cancelDataMove(struct DDQueueData* self,
+                                  DataMoveMetaData dataMove,
+                                  const DDEnabledState* ddEnabledState);
+
 struct DDQueueData {
 	UID distributorId;
 	MoveKeysLock lock;

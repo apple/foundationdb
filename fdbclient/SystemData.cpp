@@ -224,6 +224,27 @@ const Key checkpointKeyFor(UID checkpointID) {
 	return wr.toValue();
 }
 
+const Key checkpointKeyFor(UID ssID, UID moveDataID, UID checkpointID) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(checkpointPrefix);
+	wr << ssID;
+	wr.serializeBytes("/"_sr);
+	wr << moveDataID;
+	wr.serializeBytes("/"_sr);
+	wr << checkpointID;
+	return wr.toValue();
+}
+
+const Key checkpointKeyFor(UID ssID, UID moveDataID) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(checkpointPrefix);
+	wr << ssID;
+	wr.serializeBytes("/"_sr);
+	wr << moveDataID;
+	wr.serializeBytes("/"_sr);
+	return wr.toValue();
+}
+
 const Value checkpointValue(const CheckpointMetaData& checkpoint) {
 	return ObjectWriter::toValue(checkpoint, IncludeVersion());
 }
@@ -240,6 +261,33 @@ CheckpointMetaData decodeCheckpointValue(const ValueRef& value) {
 	ObjectReader reader(value.begin(), IncludeVersion());
 	reader.deserialize(checkpoint);
 	return checkpoint;
+}
+
+// "\xff/dataMoves/[[UID]] := [[DataMoveMetaData]]"
+const KeyRangeRef dataMoveKeys("\xff/dataMoves/"_sr, "\xff/dataMoves0"_sr);
+const Key dataMoveKeyFor(UID dataMoveID) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(dataMoveKeys.begin);
+	wr << dataMoveID;
+	return wr.toValue();
+}
+
+const Value dataMoveValue(const DataMoveMetaData& dataMoveMetaData) {
+	return ObjectWriter::toValue(dataMoveMetaData, IncludeVersion());
+}
+
+UID decodeDataMoveKey(const KeyRef& key) {
+	UID id;
+	BinaryReader rd(key.removePrefix(dataMoveKeys.begin), Unversioned());
+	rd >> id;
+	return id;
+}
+
+DataMoveMetaData decodeDataMoveValue(const ValueRef& value) {
+	DataMoveMetaData dataMove;
+	ObjectReader reader(value.begin(), IncludeVersion());
+	reader.deserialize(dataMove);
+	return dataMove;
 }
 
 // "\xff/cacheServer/[[UID]] := StorageServerInterface"

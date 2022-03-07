@@ -85,4 +85,42 @@ struct CheckpointMetaData {
 	}
 };
 
+struct DataMoveMetaData {
+	enum Phase {
+		InvalidPhase = 0,
+		Pending = 1, // Checkpoint creation pending.
+		Complete = 2, // Checkpoint is created and ready to be read.
+		Deleting = 3, // Checkpoint deletion requested.
+		Fail = 4,
+	};
+
+	constexpr static FileIdentifier file_identifier = 13804362;
+	UID id; // A unique id for this checkpoint.
+	Version version;
+	KeyRange range;
+	std::vector<UID> src;
+	std::vector<UID> dest;
+	int16_t phase; // CheckpointState.
+
+	DataMoveMetaData() : phase(InvalidPhase) {}
+	DataMoveMetaData(UID id, Version version, KeyRange const& range) : id(id), version(version), range(range) {}
+
+	Phase getPhase() const { return static_cast<Phase>(phase); }
+
+	void setState(Phase phase) { this->phase = static_cast<int16_t>(phase); }
+
+	std::string toString() const {
+		std::string res = "DataMoveMetaData:\nID: " + id.toString() + "\nRange: " + range.toString() +
+		                  "\nVersion: " + std::to_string(version) +
+		                  "\nPhase: " + std::to_string(static_cast<int>(phase)) + "\nSource Servers: " + describe(src) +
+		                  "\nDestination Servers: " + describe(dest) + "\n";
+		return res;
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, id, version, range, phase, src, dest);
+	}
+};
+
 #endif

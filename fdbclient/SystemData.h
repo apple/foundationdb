@@ -72,9 +72,18 @@ extern const KeyRef clusterIdKey;
 // "\xff/checkpoint/[[UID]] := [[CheckpointMetaData]]"
 extern const KeyRef checkpointPrefix;
 const Key checkpointKeyFor(UID checkpointID);
+const Key checkpointKeyFor(UID ssID, UID moveDataID, UID checkpointID);
+const Key checkpointKeyFor(UID ssID, UID moveDataID);
 const Value checkpointValue(const CheckpointMetaData& checkpoint);
 UID decodeCheckpointKey(const KeyRef& key);
 CheckpointMetaData decodeCheckpointValue(const ValueRef& value);
+
+// "\xff/dataMoves/[[UID]] := [[DataMoveMetaData]]"
+extern const KeyRangeRef dataMoveKeys;
+const Key dataMoveKeyFor(UID checkpointID);
+const Value dataMoveValue(const DataMoveMetaData& checkpoint);
+UID decodeDataMoveKey(const KeyRef& key);
+DataMoveMetaData decodeDataMoveValue(const ValueRef& value);
 
 // "\xff/storageCacheServer/[[UID]] := StorageServerInterface"
 // This will be added by the cache server on initialization and removed by DD

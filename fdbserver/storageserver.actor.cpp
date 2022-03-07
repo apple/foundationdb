@@ -5626,13 +5626,21 @@ void changeServerKeys(StorageServer* data,
 				data->addShard(ShardInfo::newReadWrite(range, data));
 				setAvailableStatus(data, range, true);
 			} else {
+				auto& shard = data->shards[range.begin];
 				if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
-					data->addShard(ShardInfo::newMoveInShard(data, range, version + 1, moveInShardMetaData));
-					newMoveInShards.push_back(data->shards[range.begin]);
-					std::cout << "Adding new MoveInShard: " << data->shards[range.begin]->moveInShard->toString()
-					          << std::endl;
+					if (shard->assigned() && shard->keys == range) {
+						ASSERT(cancelMoveIns.count(shard->moveInShard->meta.id) > 0);
+						TraceEvent("ChangeServerKeysReuseMoveInShard", data->thisServerID)
+						    .detail("DataMoveRange", range.toString())
+						    .detail("MoveInShard", shard->moveInShard->toString());
+						data->addShard(ShardInfo::newAdding(data, range));
+					} else {
+						data->addShard(ShardInfo::newMoveInShard(data, range, version + 1, moveInShardMetaData));
+						newMoveInShards.push_back(data->shards[range.begin]);
+						std::cout << "Adding new MoveInShard: " << data->shards[range.begin]->moveInShard->toString()
+						          << std::endl;
+					}
 				} else {
-					auto& shard = data->shards[range.begin];
 					if (!shard->assigned() || shard->keys != range) {
 						std::cout << "Adding!!!" << std::endl;
 						data->addShard(ShardInfo::newAdding(data, range));
