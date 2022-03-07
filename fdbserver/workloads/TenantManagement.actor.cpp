@@ -49,11 +49,27 @@ struct TenantManagementWorkload : TestWorkload {
 	const TenantName tenantNamePrefix = "tenant_management_workload_"_sr;
 	TenantName localTenantNamePrefix;
 
+	const Key specialKeysTenantMapPrefix = TenantMapRangeImpl::submoduleRange.begin.withPrefix(
+	    SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin);
+
 	int maxTenants;
 	double testDuration;
 
+	enum class OperationType { SPECIAL_KEYS, MANAGEMENT_DATABASE, MANAGEMENT_TRANSACTION };
+
+	static OperationType randomOperationType() {
+		int randomNum = deterministicRandom()->randomInt(0, 3);
+		if (randomNum == 0) {
+			return OperationType::SPECIAL_KEYS;
+		} else if (randomNum == 1) {
+			return OperationType::MANAGEMENT_DATABASE;
+		} else {
+			return OperationType::MANAGEMENT_TRANSACTION;
+		}
+	}
+
 	TenantManagementWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		maxTenants = getOption(options, "maxTenants"_sr, 1000);
+		maxTenants = std::min<int>(1e8 - 1, getOption(options, "maxTenants"_sr, 1000));
 		testDuration = getOption(options, "testDuration"_sr, 60.0);
 
 		localTenantNamePrefix = format("%stenant_%d_", tenantNamePrefix.toString().c_str(), clientId);
@@ -100,8 +116,8 @@ struct TenantManagementWorkload : TestWorkload {
 	}
 
 	TenantName chooseTenantName(bool allowSystemTenant) {
-		TenantName tenant(
-		    format("%s%d", localTenantNamePrefix.toString().c_str(), deterministicRandom()->randomInt(0, maxTenants)));
+		TenantName tenant(format(
+		    "%s%08d", localTenantNamePrefix.toString().c_str(), deterministicRandom()->randomInt(0, maxTenants)));
 		if (allowSystemTenant && deterministicRandom()->random01() < 0.02) {
 			tenant = tenant.withPrefix("\xff"_sr);
 		}
@@ -112,102 +128,218 @@ struct TenantManagementWorkload : TestWorkload {
 	ACTOR Future<Void> createTenant(Database cx, TenantManagementWorkload* self) {
 		state TenantName tenant = self->chooseTenantName(true);
 		state bool alreadyExists = self->createdTenants.count(tenant);
-		try {
-			wait(ManagementAPI::createTenant(cx.getReference(), tenant));
-			ASSERT(!alreadyExists);
-			ASSERT(!tenant.startsWith("\xff"_sr));
+		state OperationType operationType = TenantManagementWorkload::randomOperationType();
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 
-			state Optional<TenantMapEntry> entry = wait(ManagementAPI::tryGetTenant(cx.getReference(), tenant));
-			ASSERT(entry.present());
-			ASSERT(entry.get().id > self->maxId);
-			ASSERT(entry.get().prefix.startsWith(self->tenantSubspace));
+		loop {
+			try {
+				if (operationType == OperationType::SPECIAL_KEYS) {
+					tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+					Key key = self->specialKeysTenantMapPrefix.withSuffix(tenant);
+					tr->set(key, ""_sr);
+					wait(tr->commit());
+				} else if (operationType == OperationType::MANAGEMENT_DATABASE) {
+					wait(ManagementAPI::createTenant(cx.getReference(), tenant));
+				} else {
+					Optional<TenantMapEntry> _ = wait(ManagementAPI::createTenantTransaction(tr, tenant));
+					wait(tr->commit());
+				}
 
-			self->maxId = entry.get().id;
-			self->createdTenants[tenant] = TenantState(entry.get().id, true);
+				if (operationType != OperationType::MANAGEMENT_DATABASE && alreadyExists) {
+					return Void();
+				}
 
-			state bool insertData = deterministicRandom()->random01() < 0.5;
-			if (insertData) {
-				state Transaction tr(cx, tenant);
-				loop {
-					try {
-						tr.set(self->keyName, tenant);
-						wait(tr.commit());
-						break;
-					} catch (Error& e) {
-						wait(tr.onError(e));
+				ASSERT(!alreadyExists);
+				ASSERT(!tenant.startsWith("\xff"_sr));
+
+				state Optional<TenantMapEntry> entry = wait(ManagementAPI::tryGetTenant(cx.getReference(), tenant));
+				ASSERT(entry.present());
+				ASSERT(entry.get().id > self->maxId);
+				ASSERT(entry.get().prefix.startsWith(self->tenantSubspace));
+
+				self->maxId = entry.get().id;
+				self->createdTenants[tenant] = TenantState(entry.get().id, true);
+
+				state bool insertData = deterministicRandom()->random01() < 0.5;
+				if (insertData) {
+					state Transaction insertTr(cx, tenant);
+					loop {
+						try {
+							insertTr.set(self->keyName, tenant);
+							wait(insertTr.commit());
+							break;
+						} catch (Error& e) {
+							wait(insertTr.onError(e));
+						}
+					}
+
+					self->createdTenants[tenant].empty = false;
+
+					state Transaction checkTr(cx);
+					loop {
+						try {
+							checkTr.setOption(FDBTransactionOptions::RAW_ACCESS);
+							Optional<Value> val = wait(checkTr.get(self->keyName.withPrefix(entry.get().prefix)));
+							ASSERT(val.present());
+							ASSERT(val.get() == tenant);
+							break;
+						} catch (Error& e) {
+							wait(checkTr.onError(e));
+						}
 					}
 				}
 
-				self->createdTenants[tenant].empty = false;
-
-				tr = Transaction(cx);
-				loop {
+				wait(self->checkTenant(cx, self, tenant, self->createdTenants[tenant]));
+				return Void();
+			} catch (Error& e) {
+				if (e.code() == error_code_invalid_tenant_name) {
+					ASSERT(tenant.startsWith("\xff"_sr));
+					return Void();
+				} else if (operationType == OperationType::MANAGEMENT_DATABASE) {
+					if (e.code() == error_code_tenant_already_exists) {
+						ASSERT(alreadyExists && operationType == OperationType::MANAGEMENT_DATABASE);
+					} else {
+						TraceEvent(SevError, "CreateTenantFailure").error(e).detail("TenantName", tenant);
+					}
+					return Void();
+				} else {
 					try {
-						tr.setOption(FDBTransactionOptions::RAW_ACCESS);
-						Optional<Value> val = wait(tr.get(self->keyName.withPrefix(entry.get().prefix)));
-						ASSERT(val.present());
-						ASSERT(val.get() == tenant);
-						break;
+						wait(tr->onError(e));
 					} catch (Error& e) {
-						wait(tr.onError(e));
+						TraceEvent(SevError, "CreateTenantFailure").error(e).detail("TenantName", tenant);
+						return Void();
 					}
 				}
-			}
-
-			wait(self->checkTenant(cx, self, tenant, self->createdTenants[tenant]));
-		} catch (Error& e) {
-			if (e.code() == error_code_tenant_already_exists) {
-				ASSERT(alreadyExists);
-			} else if (e.code() == error_code_invalid_tenant_name) {
-				ASSERT(tenant.startsWith("\xff"_sr));
-			} else {
-				TraceEvent(SevError, "CreateTenantFailure").error(e).detail("TenantName", tenant);
 			}
 		}
-
-		return Void();
 	}
 
 	ACTOR Future<Void> deleteTenant(Database cx, TenantManagementWorkload* self) {
 		state TenantName tenant = self->chooseTenantName(true);
+		state OperationType operationType = TenantManagementWorkload::randomOperationType();
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+
+		state Optional<TenantName> endTenant = operationType != OperationType::MANAGEMENT_DATABASE &&
+		                                               !tenant.startsWith("\xff"_sr) &&
+		                                               deterministicRandom()->random01() < 0.2
+		                                           ? Optional<TenantName>(self->chooseTenantName(false))
+		                                           : Optional<TenantName>();
+
+		if (endTenant.present() && endTenant < tenant) {
+			TenantName temp = tenant;
+			tenant = endTenant.get();
+			endTenant = temp;
+		}
 
 		auto itr = self->createdTenants.find(tenant);
 		state bool alreadyExists = itr != self->createdTenants.end();
-		state bool isEmpty = (itr == self->createdTenants.end() || itr->second.empty);
+		state bool isEmpty = true;
 
-		try {
-			if (alreadyExists && deterministicRandom()->random01() < 0.5) {
-				state Transaction tr(cx, tenant);
-				loop {
-					try {
-						tr.clear(self->keyName);
-						wait(tr.commit());
-						isEmpty = true;
-						auto itr = self->createdTenants.find(tenant);
-						ASSERT(itr != self->createdTenants.end());
-						itr->second.empty = true;
-						break;
-					} catch (Error& e) {
-						wait(tr.onError(e));
-					}
-				}
-			}
-
-			wait(ManagementAPI::deleteTenant(cx.getReference(), tenant));
-			ASSERT(alreadyExists);
-			ASSERT(isEmpty);
-			self->createdTenants.erase(tenant);
-		} catch (Error& e) {
-			if (e.code() == error_code_tenant_not_found) {
-				ASSERT(!alreadyExists);
-			} else if (e.code() == error_code_tenant_not_empty) {
-				ASSERT(!isEmpty);
-			} else {
-				TraceEvent(SevError, "DeleteTenantFailure").error(e).detail("TenantName", tenant);
+		state std::vector<TenantName> tenants;
+		if (!endTenant.present()) {
+			tenants.push_back(tenant);
+		} else if (endTenant.present()) {
+			for (auto itr = self->createdTenants.lower_bound(tenant);
+			     itr != self->createdTenants.end() && itr->first < endTenant.get();
+			     ++itr) {
+				tenants.push_back(itr->first);
 			}
 		}
 
-		return Void();
+		try {
+			if (alreadyExists || endTenant.present()) {
+				state int tenantIndex = 0;
+				for (; tenantIndex < tenants.size(); ++tenantIndex) {
+					if (deterministicRandom()->random01() < 0.9) {
+						state Transaction clearTr(cx, tenants[tenantIndex]);
+						loop {
+							try {
+								clearTr.clear(self->keyName);
+								wait(clearTr.commit());
+								auto itr = self->createdTenants.find(tenants[tenantIndex]);
+								ASSERT(itr != self->createdTenants.end());
+								itr->second.empty = true;
+								break;
+							} catch (Error& e) {
+								wait(clearTr.onError(e));
+							}
+						}
+					} else {
+						auto itr = self->createdTenants.find(tenants[tenantIndex]);
+						ASSERT(itr != self->createdTenants.end());
+						isEmpty = isEmpty && itr->second.empty;
+					}
+				}
+			}
+		} catch (Error& e) {
+			TraceEvent(SevError, "DeleteTenantFailure")
+			    .error(e)
+			    .detail("TenantName", tenant)
+			    .detail("EndTenant", endTenant);
+			return Void();
+		}
+
+		loop {
+			try {
+				if (operationType == OperationType::SPECIAL_KEYS) {
+					tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+					Key key = self->specialKeysTenantMapPrefix.withSuffix(tenant);
+					if (endTenant.present()) {
+						tr->clear(KeyRangeRef(key, self->specialKeysTenantMapPrefix.withSuffix(endTenant.get())));
+					} else {
+						tr->clear(key);
+					}
+					wait(tr->commit());
+				} else if (operationType == OperationType::MANAGEMENT_DATABASE) {
+					ASSERT(tenants.size() == 1);
+					for (auto tenant : tenants) {
+						wait(ManagementAPI::deleteTenant(cx.getReference(), tenant));
+					}
+				} else {
+					for (auto tenant : tenants) {
+						wait(ManagementAPI::deleteTenantTransaction(tr, tenant));
+					}
+
+					wait(tr->commit());
+				}
+
+				if (!alreadyExists && !endTenant.present() && operationType != OperationType::MANAGEMENT_DATABASE) {
+					return Void();
+				}
+
+				ASSERT(alreadyExists || endTenant.present());
+				ASSERT(isEmpty);
+				for (auto tenant : tenants) {
+					self->createdTenants.erase(tenant);
+				}
+				return Void();
+			} catch (Error& e) {
+				if (e.code() == error_code_tenant_not_empty) {
+					ASSERT(!isEmpty);
+					return Void();
+				} else if (operationType == OperationType::MANAGEMENT_DATABASE) {
+					if (e.code() == error_code_tenant_not_found) {
+						ASSERT(!alreadyExists && !endTenant.present());
+					} else {
+						TraceEvent(SevError, "DeleteTenantFailure")
+						    .error(e)
+						    .detail("TenantName", tenant)
+						    .detail("EndTenant", endTenant);
+					}
+					return Void();
+				} else {
+					try {
+						wait(tr->onError(e));
+					} catch (Error& e) {
+						TraceEvent(SevError, "DeleteTenantFailure")
+						    .error(e)
+						    .detail("TenantName", tenant)
+						    .detail("EndTenant", endTenant);
+						return Void();
+					}
+				}
+			}
+		}
 	}
 
 	ACTOR Future<Void> checkTenant(Database cx,
@@ -234,64 +366,146 @@ struct TenantManagementWorkload : TestWorkload {
 		return Void();
 	}
 
+	static TenantMapEntry jsonToTenantMapEntry(ValueRef tenantJson) {
+		json_spirit::mValue jsonObject;
+		json_spirit::read_string(tenantJson.toString(), jsonObject);
+		JSONDoc jsonDoc(jsonObject);
+
+		int64_t id;
+		std::string prefix;
+		jsonDoc.get("id", id);
+		jsonDoc.get("prefix", prefix);
+
+		Key prefixKey = KeyRef(unprintable(prefix));
+		TenantMapEntry entry(id, prefixKey.substr(0, prefixKey.size() - 8));
+
+		ASSERT(entry.prefix == prefixKey);
+		return entry;
+	}
+
 	ACTOR Future<Void> getTenant(Database cx, TenantManagementWorkload* self) {
 		state TenantName tenant = self->chooseTenantName(true);
 		auto itr = self->createdTenants.find(tenant);
 		state bool alreadyExists = itr != self->createdTenants.end();
 		state TenantState tenantState = itr->second;
+		state OperationType operationType = TenantManagementWorkload::randomOperationType();
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 
-		try {
-			TenantMapEntry entry = wait(ManagementAPI::getTenant(cx.getReference(), tenant));
-			ASSERT(alreadyExists);
-			ASSERT(entry.id == tenantState.id);
-			wait(self->checkTenant(cx, self, tenant, tenantState));
-		} catch (Error& e) {
-			if (e.code() == error_code_tenant_not_found) {
-				ASSERT(!alreadyExists);
-			} else {
-				TraceEvent(SevError, "GetTenantFailure").error(e).detail("TenantName", tenant);
+		loop {
+			try {
+				state TenantMapEntry entry;
+				if (operationType == OperationType::SPECIAL_KEYS) {
+					Key key = self->specialKeysTenantMapPrefix.withSuffix(tenant);
+					Optional<Value> value = wait(tr->get(key));
+					if (!value.present()) {
+						throw tenant_not_found();
+					}
+					entry = TenantManagementWorkload::jsonToTenantMapEntry(value.get());
+				} else if (operationType == OperationType::MANAGEMENT_DATABASE) {
+					TenantMapEntry _entry = wait(ManagementAPI::getTenant(cx.getReference(), tenant));
+					entry = _entry;
+				} else {
+					TenantMapEntry _entry = wait(ManagementAPI::getTenantTransaction(tr, tenant));
+					entry = _entry;
+				}
+				ASSERT(alreadyExists);
+				ASSERT(entry.id == tenantState.id);
+				wait(self->checkTenant(cx, self, tenant, tenantState));
+				return Void();
+			} catch (Error& e) {
+				state bool retry = true;
+				state Error error = e;
+
+				if (e.code() == error_code_tenant_not_found) {
+					ASSERT(!alreadyExists);
+					return Void();
+				} else if (operationType != OperationType::MANAGEMENT_DATABASE) {
+					try {
+						wait(tr->onError(e));
+					} catch (Error& e) {
+						error = e;
+						retry = false;
+					}
+				}
+
+				if (!retry) {
+					TraceEvent(SevError, "GetTenantFailure").error(error).detail("TenantName", tenant);
+					return Void();
+				}
 			}
 		}
-
-		return Void();
 	}
 
 	ACTOR Future<Void> listTenants(Database cx, TenantManagementWorkload* self) {
 		state TenantName beginTenant = self->chooseTenantName(false);
 		state TenantName endTenant = self->chooseTenantName(false);
-		state int limit = std::min(CLIENT_KNOBS->TOO_MANY, deterministicRandom()->randomInt(0, self->maxTenants * 2));
+		state int limit = std::min(CLIENT_KNOBS->TOO_MANY, deterministicRandom()->randomInt(1, self->maxTenants * 2));
+		state OperationType operationType = TenantManagementWorkload::randomOperationType();
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 
 		if (beginTenant > endTenant) {
 			std::swap(beginTenant, endTenant);
 		}
 
-		try {
-			Standalone<VectorRef<TenantNameRef>> tenants =
-			    wait(ManagementAPI::listTenants(cx.getReference(), beginTenant, endTenant, limit));
+		loop {
+			try {
+				state std::map<TenantName, TenantMapEntry> tenants;
+				if (operationType == OperationType::SPECIAL_KEYS) {
+					KeyRange range = KeyRangeRef(beginTenant, endTenant).withPrefix(self->specialKeysTenantMapPrefix);
+					RangeResult results = wait(tr->getRange(range, limit));
+					for (auto result : results) {
+						tenants[result.key.removePrefix(self->specialKeysTenantMapPrefix)] =
+						    TenantManagementWorkload::jsonToTenantMapEntry(result.value);
+					}
+				} else if (operationType == OperationType::MANAGEMENT_DATABASE) {
+					std::map<TenantName, TenantMapEntry> _tenants =
+					    wait(ManagementAPI::listTenants(cx.getReference(), beginTenant, endTenant, limit));
+					tenants = _tenants;
+				} else {
+					std::map<TenantName, TenantMapEntry> _tenants =
+					    wait(ManagementAPI::listTenantsTransaction(tr, beginTenant, endTenant, limit));
+					tenants = _tenants;
+				}
 
-			ASSERT(tenants.size() <= limit);
+				ASSERT(tenants.size() <= limit);
 
-			int index = 0;
-			auto itr = self->createdTenants.lower_bound(beginTenant);
-			for (; index < tenants.size(); ++itr) {
-				ASSERT(itr != self->createdTenants.end());
-				ASSERT(itr->first == tenants[index++]);
-			}
+				auto localItr = self->createdTenants.lower_bound(beginTenant);
+				auto tenantMapItr = tenants.begin();
+				for (; tenantMapItr != tenants.end(); ++tenantMapItr, ++localItr) {
+					ASSERT(localItr != self->createdTenants.end());
+					ASSERT(localItr->first == tenantMapItr->first);
+				}
 
-			if (!(tenants.size() == limit || itr == self->createdTenants.end())) {
-				for (auto tenant : self->createdTenants) {
-					TraceEvent("ExistingTenant").detail("Tenant", tenant.first);
+				if (!(tenants.size() == limit || localItr == self->createdTenants.end())) {
+					for (auto tenant : self->createdTenants) {
+						TraceEvent("ExistingTenant").detail("Tenant", tenant.first);
+					}
+				}
+				ASSERT(tenants.size() == limit || localItr == self->createdTenants.end() ||
+				       localItr->first >= endTenant);
+				return Void();
+			} catch (Error& e) {
+				state bool retry = true;
+				state Error error = e;
+				if (operationType != OperationType::MANAGEMENT_DATABASE) {
+					try {
+						wait(tr->onError(e));
+					} catch (Error& e) {
+						error = e;
+						retry = false;
+					}
+				}
+
+				if (!retry) {
+					TraceEvent(SevError, "ListTenantFailure")
+					    .error(error)
+					    .detail("BeginTenant", beginTenant)
+					    .detail("EndTenant", endTenant);
+
+					return Void();
 				}
 			}
-			ASSERT(tenants.size() == limit || itr == self->createdTenants.end() || itr->first >= endTenant);
-		} catch (Error& e) {
-			TraceEvent(SevError, "ListTenantFailure")
-			    .error(e)
-			    .detail("BeginTenant", beginTenant)
-			    .detail("EndTenant", endTenant);
 		}
-
-		return Void();
 	}
 
 	Future<Void> start(Database const& cx) override { return _start(cx, this); }
@@ -334,20 +548,22 @@ struct TenantManagementWorkload : TestWorkload {
 		state TenantName endTenant = "\xff\xff"_sr.withPrefix(self->localTenantNamePrefix);
 
 		loop {
-			Standalone<VectorRef<TenantNameRef>> tenants =
+			std::map<TenantName, TenantMapEntry> tenants =
 			    wait(ManagementAPI::listTenants(cx.getReference(), beginTenant, endTenant, 1000));
 
+			TenantNameRef lastTenant;
 			for (auto tenant : tenants) {
 				ASSERT(itr != self->createdTenants.end());
-				ASSERT(tenant == itr->first);
-				checkTenants.push_back(self->checkTenant(cx, self, tenant, itr->second));
+				ASSERT(tenant.first == itr->first);
+				checkTenants.push_back(self->checkTenant(cx, self, tenant.first, itr->second));
+				lastTenant = tenant.first;
 				++itr;
 			}
 
 			if (tenants.size() < 1000) {
 				break;
 			} else {
-				beginTenant = keyAfter(tenants[tenants.size() - 1]);
+				beginTenant = keyAfter(lastTenant);
 			}
 		}
 
