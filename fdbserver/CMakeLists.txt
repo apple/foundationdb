@@ -112,6 +112,8 @@ set(FDBSERVER_SRCS
   RestoreWorkerInterface.actor.h
   Resolver.actor.cpp
   ResolverInterface.h
+  RkTagThrottleCollection.cpp
+  RkTagThrottleCollection.h
   RoleLineage.actor.h
   RoleLineage.actor.cpp
   ServerDBInfo.actor.h
