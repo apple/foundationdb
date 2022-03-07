@@ -6,6 +6,8 @@
 #include <cstring>
 #include <fmt/format.h>
 
+namespace mako {
+
 /* uniform-distribution random */
 int urand(int low, int high) {
 	double r = rand() / (1.0 + RAND_MAX);
@@ -47,3 +49,5 @@ int digits(int num) {
 	}
 	return digits;
 }
+
+} // namespace mako

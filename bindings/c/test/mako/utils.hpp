@@ -9,6 +9,9 @@
 #include <type_traits>
 
 #include <fmt/format.h>
+
+namespace mako {
+
 /* uniform-distribution random */
 /* return a uniform random number between low and high, both inclusive */
 int urand(int low, int high);
@@ -69,7 +72,7 @@ int digits(int num);
  * (str) is appended with concat([padding], PREFIX)
  */
 template <bool Clear = true, typename Char>
-void genkeyprefix(std::basic_string<Char>& str, std::string_view prefix, mako_args_t const& args) {
+void genkeyprefix(std::basic_string<Char>& str, std::string_view prefix, args_t const& args) {
 	// concat('x' * padding_len, key_prefix)
 	if constexpr (Clear)
 		str.clear();
@@ -83,7 +86,7 @@ void genkeyprefix(std::basic_string<Char>& str, std::string_view prefix, mako_ar
 /* generate a key for a given key number */
 /* prefix is "mako" by default, prefixpadding = 1 means 'x' will be in front rather than trailing the keyname */
 template <bool Clear = true, typename Char>
-void genkey(std::basic_string<Char>& str, std::string_view prefix, mako_args_t const& args, int num) {
+void genkey(std::basic_string<Char>& str, std::string_view prefix, args_t const& args, int num) {
 	static_assert(sizeof(Char) == 1);
 	const auto pad_len = args.prefixpadding ? args.key_length - (static_cast<int>(prefix.size()) + args.row_digits) : 0;
 	assert(pad_len >= 0);
@@ -127,40 +130,6 @@ public:
 	}
 };
 
-// timing helpers
-struct start_at_ctor{};
-
-class Stopwatch {
-	timepoint_t p1, p2;
-public:
-	Stopwatch() noexcept = default;
-	Stopwatch(start_at_ctor) noexcept {
-		start();
-	}
-	Stopwatch(timepoint_t start_time) noexcept : p1(start_time), p2() {}
-	Stopwatch(const Stopwatch&) noexcept = default;
-	Stopwatch& operator=(const Stopwatch&) noexcept = default;
-	timepoint_t get_start() const noexcept { return p1; }
-	timepoint_t get_stop() const noexcept { return p2; }
-	void start() noexcept {
-		p1 = steady_clock::now();
-	}
-	Stopwatch& stop() noexcept {
-		p2 = steady_clock::now();
-		return *this;
-	}
-	Stopwatch& set_stop(timepoint_t p_stop) noexcept {
-		p2 = p_stop;
-		return *this;
-	}
-	void start_from_stop() noexcept {
-		p1 = p2;
-	}
-	auto diff() const noexcept {
-		return p2 - p1;
-	}
-};
-
 // trace helpers
 constexpr const int STATS_TITLE_WIDTH = 12;
 constexpr const int STATS_FIELD_WIDTH = 12;
@@ -192,5 +161,7 @@ template <typename Value>
 void put_field_f(Value&& value, int precision) {
 	fmt::print("{0: >{1}.{2}f} ", std::forward<Value>(value), STATS_FIELD_WIDTH, precision);
 }
+
+} // namespace mako
 
 #endif /* UTILS_HPP */
