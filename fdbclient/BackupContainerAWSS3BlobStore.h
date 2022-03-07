@@ -28,6 +28,8 @@
 #include "aws/s3-crt/S3CrtClient.h"
 #include "aws/s3-crt/model/GetObjectRequest.h"
 
+// struct AwsApi {};
+
 void do_aws_test_stuff() {
 	printf("hell world\n");
 
@@ -59,6 +61,8 @@ void do_aws_test_stuff() {
 	printf("  Access key: %s\n", creds.GetAWSAccessKeyId().c_str());
 	printf("  Secret key: %s\n", creds.GetAWSSecretKey().c_str());
 	printf("  Session token: %s\n", creds.GetSessionToken().c_str());
+	double expireTime = creds.GetExpiration().SecondsWithMSPrecision();
+	printf("  Expiration: %.3f. Now=%.3f, ExpireTime=%.3f\n", expireTime, now(), expireTime - now());
 
 	// s3
 
@@ -93,6 +97,8 @@ void do_aws_test_stuff() {
 	printf("Testing API shutdown\n");
 	Aws::ShutdownAPI(options);
 	printf("Got AWS SDK shutdown\n");*/
+
+	// the presign function just calls a common presign function, so maybe we could do that without segfaulting
 }
 
 #endif
