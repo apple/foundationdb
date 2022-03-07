@@ -421,12 +421,6 @@ public:
 	ThreadFuture<ProtocolVersion> getServerProtocol(
 	    Optional<ProtocolVersion> expectedVersion = Optional<ProtocolVersion>()) override;
 
-	// Registers a tenant with the given name. A prefix is automatically allocated for the tenant.
-	ThreadFuture<Void> createTenant(TenantNameRef const& tenantName) override;
-
-	// Deletes the tenant with the given name. The tenant must be empty.
-	ThreadFuture<Void> deleteTenant(TenantNameRef const& tenantName) override;
-
 	void addref() override { ThreadSafeReferenceCounted<DLDatabase>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<DLDatabase>::delref(); }
 
@@ -685,12 +679,6 @@ public:
 	// Note: this will never return if the server is running a protocol from FDB 5.0 or older
 	ThreadFuture<ProtocolVersion> getServerProtocol(
 	    Optional<ProtocolVersion> expectedVersion = Optional<ProtocolVersion>()) override;
-
-	// Registers a tenant with the given name. A prefix is automatically allocated for the tenant.
-	ThreadFuture<Void> createTenant(TenantNameRef const& tenantName) override;
-
-	// Deletes the tenant with the given name. The tenant must be empty.
-	ThreadFuture<Void> deleteTenant(TenantNameRef const& tenantName) override;
 
 	void addref() override { ThreadSafeReferenceCounted<MultiVersionDatabase>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<MultiVersionDatabase>::delref(); }

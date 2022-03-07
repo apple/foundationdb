@@ -1368,6 +1368,12 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 
 	smoothMidShardSize.reset(CLIENT_KNOBS->INIT_MID_SHARD_BYTES);
 
+	if (apiVersionAtLeast(710)) {
+		registerSpecialKeySpaceModule(
+		    SpecialKeySpace::MODULE::MANAGEMENT,
+		    SpecialKeySpace::IMPLTYPE::READWRITE,
+		    std::make_unique<TenantMapRangeImpl>(SpecialKeySpace::getManagementApiCommandRange("tenantmap")));
+	}
 	if (apiVersionAtLeast(700)) {
 		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::ERRORMSG,
 		                              SpecialKeySpace::IMPLTYPE::READONLY,
@@ -4991,7 +4997,6 @@ Future<Version> Transaction::getRawReadVersion() {
 
 Future<Void> Transaction::watch(Reference<Watch> watch) {
 	++trState->cx->transactionWatchRequests;
-
 
 	trState->cx->addWatch();
 	watches.push_back(watch);

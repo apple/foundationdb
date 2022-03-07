@@ -630,7 +630,7 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db,
 std::string generateErrorMessage(const CoordinatorsResult& res);
 
 ACTOR template <class Transaction>
-Future<Optional<TenantMapEntry>> tryGetTenantTransaction(Reference<Transaction> tr, TenantName name) {
+Future<Optional<TenantMapEntry>> tryGetTenantTransaction(Transaction tr, TenantName name) {
 	state Key tenantMapKey = name.withPrefix(tenantMapPrefix);
 
 	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
@@ -656,7 +656,7 @@ Future<Optional<TenantMapEntry>> tryGetTenant(Reference<DB> db, TenantName name)
 }
 
 ACTOR template <class Transaction>
-Future<TenantMapEntry> getTenantTransaction(Reference<Transaction> tr, TenantName name) {
+Future<TenantMapEntry> getTenantTransaction(Transaction tr, TenantName name) {
 	Optional<TenantMapEntry> entry = wait(tryGetTenantTransaction(tr, name));
 	if (!entry.present()) {
 		throw tenant_not_found();
@@ -676,7 +676,7 @@ Future<TenantMapEntry> getTenant(Reference<DB> db, TenantName name) {
 }
 
 ACTOR template <class Transaction>
-Future<Optional<TenantMapEntry>> createTenantTransaction(Reference<Transaction> tr, TenantName name) {
+Future<Optional<TenantMapEntry>> createTenantTransaction(Transaction tr, TenantNameRef name) {
 	state Key tenantMapKey = name.withPrefix(tenantMapPrefix);
 
 	if (name.startsWith("\xff"_sr)) {
@@ -758,7 +758,7 @@ Future<Void> createTenant(Reference<DB> db, TenantName name) {
 }
 
 ACTOR template <class Transaction>
-Future<Void> deleteTenantTransaction(Reference<Transaction> tr, TenantName name) {
+Future<Void> deleteTenantTransaction(Transaction tr, TenantNameRef name) {
 	state Key tenantMapKey = name.withPrefix(tenantMapPrefix);
 
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -816,9 +816,9 @@ Future<Void> deleteTenant(Reference<DB> db, TenantName name) {
 }
 
 ACTOR template <class Transaction>
-Future<Standalone<VectorRef<TenantNameRef>>> listTenantsTransaction(Reference<Transaction> tr,
-                                                                    StringRef begin,
-                                                                    StringRef end,
+Future<std::map<TenantName, TenantMapEntry>> listTenantsTransaction(Transaction tr,
+                                                                    TenantNameRef begin,
+                                                                    TenantNameRef end,
                                                                     int limit) {
 	state KeyRange range = KeyRangeRef(begin, end).withPrefix(tenantMapPrefix);
 
@@ -828,22 +828,24 @@ Future<Standalone<VectorRef<TenantNameRef>>> listTenantsTransaction(Reference<Tr
 	RangeResult results = wait(safeThreadFutureToFuture(
 	    tr->getRange(firstGreaterOrEqual(range.begin), firstGreaterOrEqual(range.end), limit)));
 
-	Standalone<VectorRef<TenantNameRef>> tenants;
+	std::map<TenantName, TenantMapEntry> tenants;
 	for (auto kv : results) {
-		tenants.push_back_deep(tenants.arena(), kv.key.removePrefix(tenantMapPrefix));
+		tenants[kv.key.removePrefix(tenantMapPrefix)] = decodeTenantEntry(kv.value);
 	}
 
 	return tenants;
 }
 
 ACTOR template <class DB>
-Future<Standalone<VectorRef<TenantNameRef>>> listTenants(Reference<DB> db, StringRef begin, StringRef end, int limit) {
+Future<std::map<TenantName, TenantMapEntry>> listTenants(Reference<DB> db,
+                                                         TenantName begin,
+                                                         TenantName end,
+                                                         int limit) {
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
-	state KeyRange range = KeyRangeRef(begin, end).withPrefix(tenantMapPrefix);
 
 	loop {
 		try {
-			Standalone<VectorRef<TenantNameRef>> tenants = wait(listTenantsTransaction(tr, begin, end, limit));
+			std::map<TenantName, TenantMapEntry> tenants = wait(listTenantsTransaction(tr, begin, end, limit));
 			return tenants;
 		} catch (Error& e) {
 			wait(safeThreadFutureToFuture(tr->onError(e)));

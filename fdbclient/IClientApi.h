@@ -140,12 +140,6 @@ public:
 	virtual ThreadFuture<ProtocolVersion> getServerProtocol(
 	    Optional<ProtocolVersion> expectedVersion = Optional<ProtocolVersion>()) = 0;
 
-	// Registers a tenant with the given name. A prefix is automatically allocated for the tenant.
-	virtual ThreadFuture<Void> createTenant(TenantNameRef const& tenantName) = 0;
-
-	// Deletes the tenant with the given name. The tenant must be empty.
-	virtual ThreadFuture<Void> deleteTenant(TenantNameRef const& tenantName) = 0;
-
 	virtual void addref() = 0;
 	virtual void delref() = 0;
 

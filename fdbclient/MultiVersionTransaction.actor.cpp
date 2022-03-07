@@ -494,26 +494,6 @@ ThreadFuture<ProtocolVersion> DLDatabase::getServerProtocol(Optional<ProtocolVer
 	});
 }
 
-// Registers a tenant with the given name. A prefix is automatically allocated for the tenant.
-ThreadFuture<Void> DLDatabase::createTenant(TenantNameRef const& tenantName) {
-	if (api->databaseAllocateTenant == nullptr) {
-		throw unsupported_operation();
-	}
-
-	FdbCApi::FDBFuture* f = api->databaseAllocateTenant(db, tenantName.begin(), tenantName.size());
-	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) { return Void(); });
-}
-
-// Deletes the tenant with the given name. The tenant must be empty.
-ThreadFuture<Void> DLDatabase::deleteTenant(TenantNameRef const& tenantName) {
-	if (api->databaseRemoveTenant == nullptr) {
-		throw unsupported_operation();
-	}
-
-	FdbCApi::FDBFuture* f = api->databaseRemoveTenant(db, tenantName.begin(), tenantName.size());
-	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) { return Void(); });
-}
-
 // DLApi
 
 // Loads the specified function from a dynamic library
@@ -1411,22 +1391,6 @@ double MultiVersionDatabase::getMainThreadBusyness() {
 // Note: this will never return if the server is running a protocol from FDB 5.0 or older
 ThreadFuture<ProtocolVersion> MultiVersionDatabase::getServerProtocol(Optional<ProtocolVersion> expectedVersion) {
 	return dbState->versionMonitorDb->getServerProtocol(expectedVersion);
-}
-
-// Registers a tenant with the given name. A prefix is automatically allocated for the tenant.
-ThreadFuture<Void> MultiVersionDatabase::createTenant(TenantNameRef const& tenantName) {
-	Standalone<StringRef> tenantNameCopy = tenantName;
-	Reference<MultiVersionDatabase> self = Reference<MultiVersionDatabase>::addRef(this);
-
-	return onMainThread([self, tenantNameCopy]() { return ManagementAPI::createTenant(self, tenantNameCopy); });
-}
-
-// Deletes the tenant with the given name. The tenant must be empty.
-ThreadFuture<Void> MultiVersionDatabase::deleteTenant(TenantNameRef const& tenantName) {
-	Standalone<StringRef> tenantNameCopy = tenantName;
-	Reference<MultiVersionDatabase> self = Reference<MultiVersionDatabase>::addRef(this);
-
-	return onMainThread([self, tenantNameCopy]() { return ManagementAPI::deleteTenant(self, tenantNameCopy); });
 }
 
 MultiVersionDatabase::DatabaseState::DatabaseState(std::string clusterFilePath, Reference<IDatabase> versionMonitorDb)

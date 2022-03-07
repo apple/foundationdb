@@ -47,12 +47,6 @@ public:
 	ThreadFuture<ProtocolVersion> getServerProtocol(
 	    Optional<ProtocolVersion> expectedVersion = Optional<ProtocolVersion>()) override;
 
-	// Registers a tenant with the given name. A prefix is automatically allocated for the tenant.
-	ThreadFuture<Void> createTenant(TenantNameRef const& name) override;
-
-	// Deletes the tenant with the given name. The tenant must be empty.
-	ThreadFuture<Void> deleteTenant(TenantNameRef const& name) override;
-
 	// Returns after a majority of coordination servers are available and have reported a leader. The
 	// cluster file therefore is valid, but the database might be unavailable.
 	ThreadFuture<Void> onConnected();

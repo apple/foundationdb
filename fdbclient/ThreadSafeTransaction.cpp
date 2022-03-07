@@ -116,24 +116,6 @@ ThreadFuture<ProtocolVersion> ThreadSafeDatabase::getServerProtocol(Optional<Pro
 	    [db, expectedVersion]() -> Future<ProtocolVersion> { return db->getClusterProtocol(expectedVersion); });
 }
 
-// Registers a tenant with the given name. A prefix is automatically allocated for the tenant.
-ThreadFuture<Void> ThreadSafeDatabase::createTenant(TenantNameRef const& name) {
-	DatabaseContext* db = this->db;
-	TenantName tenantNameCopy = name;
-	return onMainThread([db, tenantNameCopy]() -> Future<Void> {
-		return ManagementAPI::createTenant(Reference<DatabaseContext>::addRef(db), tenantNameCopy);
-	});
-}
-
-// Deletes the tenant with the given name. The tenant must be empty.
-ThreadFuture<Void> ThreadSafeDatabase::deleteTenant(TenantNameRef const& name) {
-	DatabaseContext* db = this->db;
-	TenantName tenantNameCopy = name;
-	return onMainThread([db, tenantNameCopy]() -> Future<Void> {
-		return ManagementAPI::deleteTenant(Reference<DatabaseContext>::addRef(db), tenantNameCopy);
-	});
-}
-
 ThreadSafeDatabase::ThreadSafeDatabase(std::string connFilename, int apiVersion) {
 	ClusterConnectionFile* connFile =
 	    new ClusterConnectionFile(ClusterConnectionFile::lookupClusterFileName(connFilename).first);
