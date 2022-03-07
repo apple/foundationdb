@@ -554,9 +554,6 @@ void DLApi::init() {
 	                   headerVersion >= 700);
 	loadClientFunction(
 	    &api->databaseGetServerProtocol, lib, fdbCPath, "fdb_database_get_server_protocol", headerVersion >= 700);
-	loadClientFunction(
-	    &api->databaseAllocateTenant, lib, fdbCPath, "fdb_database_allocate_tenant", headerVersion >= 710);
-	loadClientFunction(&api->databaseRemoveTenant, lib, fdbCPath, "fdb_database_remove_tenant", headerVersion >= 710);
 	loadClientFunction(&api->databaseDestroy, lib, fdbCPath, "fdb_database_destroy", headerVersion >= 0);
 	loadClientFunction(&api->databaseRebootWorker, lib, fdbCPath, "fdb_database_reboot_worker", headerVersion >= 700);
 	loadClientFunction(&api->databaseForceRecoveryWithDataLoss,

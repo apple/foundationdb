@@ -144,8 +144,6 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                     int snapshotCommandLength);
 	double (*databaseGetMainThreadBusyness)(FDBDatabase* database);
 	FDBFuture* (*databaseGetServerProtocol)(FDBDatabase* database, uint64_t expectedVersion);
-	FDBFuture* (*databaseAllocateTenant)(FDBDatabase* database, uint8_t const* name, int name_length);
-	FDBFuture* (*databaseRemoveTenant)(FDBDatabase* database, uint8_t const* name, int name_length);
 
 	// Tenant
 	fdb_error_t (*tenantCreateTransaction)(FDBTenant* tenant, FDBTransaction** outTransaction);

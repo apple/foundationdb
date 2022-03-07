@@ -300,14 +300,6 @@ DLLEXPORT WARN_UNUSED_RESULT double fdb_database_get_main_thread_busyness(FDBDat
 
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_get_server_protocol(FDBDatabase* db, uint64_t expected_version);
 
-DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_allocate_tenant(FDBDatabase* db,
-                                                                     uint8_t const* name,
-                                                                     int name_length);
-
-DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_remove_tenant(FDBDatabase* db,
-                                                                   uint8_t const* name,
-                                                                   int name_length);
-
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_tenant_create_transaction(FDBTenant* tenant,
                                                                        FDBTransaction** out_transaction);
 

@@ -1713,9 +1713,17 @@ bool DatabaseContext::getCachedLocations(const Optional<TenantName>& tenantName,
 }
 
 void DatabaseContext::cacheTenant(const TenantName& tenant, const TenantMapEntry& tenantEntry) {
-	int attempts = 0;
-	while (tenantCache.size() > tenantCacheSize && attempts++ < 100) {
+	if (tenantCacheSize > 0) {
+		int attempts = 0;
+		while (tenantCache.size() > tenantCacheSize && attempts++ < 100) {
+			int randomEntry = deterministicRandom()->randomInt(0, tenantCacheList.size());
+			tenantCache.erase(tenantCacheList[randomEntry]);
+			tenantCacheList[randomEntry] = tenantCacheList.back();
+			tenantCacheList.pop_back();
+		}
+
 		tenantCache[tenant] = tenantEntry;
+		tenantCacheList.push_back(tenant);
 	}
 }
 
@@ -3150,7 +3158,7 @@ ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
 			}
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
 			    (e.code() == error_code_transaction_too_old && ver == latestVersion)) {
-				trState->cx->invalidateCache(useTenant ? locationInfo.tenantEntry.prefix : Key(), key);
+				trState->cx->invalidateCache(locationInfo.tenantEntry.prefix, key);
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, trState->taskID));
 			} else if (e.code() == error_code_unknown_tenant) {
 				ASSERT(useTenant && trState->tenant.present());
@@ -4565,7 +4573,7 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
 
 					// If the reply says there is more but we know that we finished the shard, then fix rep.more
 					if (reverse && output.more && rep.data.size() > 0 &&
-					    rep.data[rep.data.size() - 1].key == locations[shard].range.begin) {
+					    output[output.size() - 1].key == locations[shard].range.begin) {
 						output.more = false;
 					}
 
@@ -4585,10 +4593,10 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
 						// Make next request to the same shard with a beginning key just after the last key returned
 						if (reverse)
 							locations[shard].range =
-							    KeyRangeRef(locations[shard].range.begin, rep.data[rep.data.size() - 1].key);
+							    KeyRangeRef(locations[shard].range.begin, output[output.size() - 1].key);
 						else
 							locations[shard].range =
-							    KeyRangeRef(keyAfter(rep.data[rep.data.size() - 1].key), locations[shard].range.end);
+							    KeyRangeRef(keyAfter(output[output.size() - 1].key), locations[shard].range.end);
 					}
 
 					if (locations[shard].range.empty()) {
