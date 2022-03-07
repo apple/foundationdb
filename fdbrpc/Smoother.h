@@ -25,9 +25,21 @@
 #include "flow/flow.h"
 #include <cmath>
 
-struct Smoother {
+class Smoother {
 	// Times (t) are expected to be nondecreasing
 
+	double eFoldingTime;
+	double time, total, estimate;
+
+	void update(double t) {
+		double elapsed = t - time;
+		if (elapsed) {
+			time = t;
+			estimate += (total - estimate) * (1 - exp(-elapsed / eFoldingTime));
+		}
+	}
+
+public:
 	explicit Smoother(double eFoldingTime) : eFoldingTime(eFoldingTime) { reset(0); }
 	void reset(double value) {
 		time = 0;
@@ -50,22 +62,21 @@ struct Smoother {
 		update(t);
 		return (total - estimate) / eFoldingTime;
 	}
-
-	void update(double t) {
-		double elapsed = t - time;
-		if (elapsed) {
-			time = t;
-			estimate += (total - estimate) * (1 - exp(-elapsed / eFoldingTime));
-		}
-	}
-
-	double eFoldingTime;
-	double time, total, estimate;
 };
 
 struct TimerSmoother {
 	// Times (t) are expected to be nondecreasing
 
+	double eFoldingTime;
+	double time, total, estimate;
+
+	void update(double t) {
+		double elapsed = t - time;
+		time = t;
+		estimate += (total - estimate) * (1 - exp(-elapsed / eFoldingTime));
+	}
+
+public:
 	explicit TimerSmoother(double eFoldingTime) : eFoldingTime(eFoldingTime) { reset(0); }
 	void reset(double value) {
 		time = 0;
@@ -88,15 +99,6 @@ struct TimerSmoother {
 		update(t);
 		return (total - estimate) / eFoldingTime;
 	}
-
-	void update(double t) {
-		double elapsed = t - time;
-		time = t;
-		estimate += (total - estimate) * (1 - exp(-elapsed / eFoldingTime));
-	}
-
-	double eFoldingTime;
-	double time, total, estimate;
 };
 
 #endif
