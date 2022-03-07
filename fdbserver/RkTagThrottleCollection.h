@@ -52,7 +52,7 @@ class RkTagThrottleCollection : NonCopyable {
 	uint32_t busyReadTagCount = 0, busyWriteTagCount = 0;
 
 	void initializeTag(TransactionTag const& tag) { tagData.try_emplace(tag); }
-	double computeTargetTpsRate(double currentBusyness, double targetBusyness, double requestRate) const;
+	static double computeTargetTpsRate(double currentBusyness, double targetBusyness, double requestRate);
 	Optional<double> getRequestRate(TransactionTag const& tag);
 
 public:

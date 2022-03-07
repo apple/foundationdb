@@ -69,8 +69,8 @@ RkTagThrottleCollection& RkTagThrottleCollection::RkTagThrottleCollection::opera
 
 double RkTagThrottleCollection::computeTargetTpsRate(double currentBusyness,
                                                      double targetBusyness,
-                                                     double requestRate) const {
-	ASSERT(currentBusyness > 0);
+                                                     double requestRate) {
+	ASSERT_GT(currentBusyness, 0);
 
 	if (targetBusyness < 1) {
 		double targetFraction = targetBusyness * (1 - currentBusyness) / ((1 - targetBusyness) * currentBusyness);
