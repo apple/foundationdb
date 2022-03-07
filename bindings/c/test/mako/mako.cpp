@@ -58,10 +58,17 @@ FutureRC waitAndHandleForOnError(Transaction tx, FutureType f, std::string_view 
 		return FutureRC::ABORT;
 	}
 	if ((err = f.error())) {
-		fmt::print(stderr, "ERROR: Unretryable on_error() error from {}: {}\n", operation, err.what());
-		return FutureRC::ABORT;
+		if (err.is(1020 /*not_committed*/)) {
+			return FutureRC::CONFLICT;
+		} else if (err.retryable()) {
+			fmt::print(debugme, "ERROR: Retryable on_error() error from {}: {}\n", operation, err.what());
+			return FutureRC::RETRY;
+		} else {
+			fmt::print(stderr, "ERROR: Unretryable on_error() error from {}: {}\n", operation, err.what());
+			return FutureRC::ABORT;
+		}
 	} else {
-		return FutureRC::OK;
+		return FutureRC::RETRY;
 	}
 }
 
@@ -83,16 +90,7 @@ FutureRC waitAndHandleError(Transaction tx, FutureType f, std::string_view opera
 	fmt::print(fp, "ERROR: Error in {}: {}\n", operation, err.what());
 	// implicit backoff
 	auto follow_up = tx.onError(err);
-	auto rc = waitAndHandleForOnError(tx, f, operation);
-	if (rc == FutureRC::OK) {
-		if (err.is(1020 /*not_committed*/))
-			return FutureRC::CONFLICT;
-		else
-			return FutureRC::RETRY;
-	} else {
-		tx.reset();
-		return rc;
-	}
+	return waitAndHandleForOnError(tx, f, operation);
 }
 
 /* cleanup database */
@@ -1052,19 +1050,19 @@ int workerProcessMain(Arguments const& args, int worker_id, shared_memory::Acces
 
 	/* wait for everyone to finish */
 	for (auto i = 0; i < args.num_threads; i++) {
-		fmt::print(debugme, "DEBUG: workerThread {} joining\n", i);
+		fmt::print(debugme, "DEBUG: waiting for worker thread {} to join\n", i);
 		worker_threads[i].join();
 	}
 
 	/* stop the network thread */
-	fmt::print(debugme, "DEBUG: fdb_stop_network\n");
+	fmt::print(debugme, "DEBUG: network::stop()\n");
 	err = network::stop();
 	if (err) {
-		fmt::print(stderr, "ERROR: stop_network(): {}\n", err.what());
+		fmt::print(stderr, "ERROR: network::stop(): {}\n", err.what());
 	}
 
 	/* wait for the network thread to join */
-	fmt::print(debugme, "DEBUG: network_thread joining\n");
+	fmt::print(debugme, "DEBUG: waiting for network thread to join\n");
 	network_thread.join();
 
 	return 0;

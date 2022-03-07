@@ -67,7 +67,7 @@ public:
 
 	explicit operator bool() const noexcept { return err != 0; }
 
-	bool is(CodeType other) const noexcept { return err != other; }
+	bool is(CodeType other) const noexcept { return err == other; }
 
 	CodeType code() const noexcept { return err; }
 
