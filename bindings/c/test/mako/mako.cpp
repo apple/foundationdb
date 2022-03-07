@@ -50,10 +50,10 @@ FILE* debugme; /* descriptor used for debug messages */
 enum class FutureRC { OK, RETRY, CONFLICT, ABORT };
 
 template <class FutureType>
-FutureRC wait_and_handle_for_on_error(TX tx, FutureType f, std::string_view operation) {
+FutureRC wait_and_handle_for_on_error(Transaction tx, FutureType f, std::string_view operation) {
 	assert(f);
 	auto err = Error{};
-	if ((err = f.block_until_ready())) {
+	if ((err = f.blockUntilReady())) {
 		fmt::print(stderr, "ERROR: Error while on_error() blocking for {}: {}\n", operation, err.what());
 		return FutureRC::ABORT;
 	}
@@ -67,10 +67,10 @@ FutureRC wait_and_handle_for_on_error(TX tx, FutureType f, std::string_view oper
 
 // wait on any non-immediate tx-related operation to complete. Follow up with on_error().
 template <class FutureType>
-FutureRC wait_and_handle_error(TX tx, FutureType f, std::string_view operation) {
+FutureRC wait_and_handle_error(Transaction tx, FutureType f, std::string_view operation) {
 	assert(f);
 	auto err = Error{};
-	if ((err = f.block_until_ready())) {
+	if ((err = f.blockUntilReady())) {
 		const auto retry = err.retryable();
 		auto fp = retry ? annoyme : stderr;
 		fmt::print(fp, "ERROR: {} error in {}: {}\n", (retry ? "Retryable" : "Unretryable"), operation, err.what());
@@ -82,7 +82,7 @@ FutureRC wait_and_handle_error(TX tx, FutureType f, std::string_view operation) 
 	auto fp = err.retryable() ? annoyme : stderr;
 	fmt::print(fp, "ERROR: Error in {}: {}\n", operation, err.what());
 	// implicit backoff
-	auto follow_up = tx.on_error(err);
+	auto follow_up = tx.onError(err);
 	auto rc = wait_and_handle_for_on_error(tx, f, operation);
 	if (rc == FutureRC::OK) {
 		if (err.is(1020 /*not_committed*/))
@@ -96,21 +96,21 @@ FutureRC wait_and_handle_error(TX tx, FutureType f, std::string_view operation) 
 }
 
 /* cleanup database */
-int cleanup(TX tx, args_t const& args) {
+int cleanup(Transaction tx, Arguments const& args) {
 	auto beginstr = ByteString{};
 	beginstr.reserve(args.key_length);
-	genkeyprefix(beginstr, KEY_PREFIX, args);
+	genKeyPrefix(beginstr, KEY_PREFIX, args);
 	beginstr.push_back(0);
 
 	auto endstr = ByteString{};
 	endstr.reserve(args.key_length);
-	genkeyprefix(endstr, KEY_PREFIX, args);
+	genKeyPrefix(endstr, KEY_PREFIX, args);
 	endstr.push_back(0xff);
 
 	auto watch = Stopwatch(start_at_ctor{});
 
 	while (true) {
-		tx.clear_range(beginstr, endstr);
+		tx.clearRange(beginstr, endstr);
 		auto future_commit = tx.commit();
 		const auto rc = wait_and_handle_error(tx, future_commit, "COMMIT_CLEANUP");
 		if (rc == FutureRC::OK) {
@@ -129,15 +129,15 @@ int cleanup(TX tx, args_t const& args) {
 }
 
 /* populate database */
-int populate(TX tx,
-             args_t const& args,
+int populate(Transaction tx,
+             Arguments const& args,
              int worker_id,
              int thread_id,
              int thread_tps,
-             stats_t& stats,
-             sample_bin_array_t& sample_bins) {
-	const auto key_begin = insert_begin(args.rows, worker_id, thread_id, args.num_processes, args.num_threads);
-	const auto key_end = insert_end(args.rows, worker_id, thread_id, args.num_processes, args.num_threads);
+             ThreadStatistics& stats,
+             LatencySampleBinArray& sample_bins) {
+	const auto key_begin = insertBegin(args.rows, worker_id, thread_id, args.num_processes, args.num_threads);
+	const auto key_end = insertEnd(args.rows, worker_id, thread_id, args.num_processes, args.num_threads);
 	auto xacts = 0;
 
 	auto keystr = ByteString{};
@@ -154,9 +154,9 @@ int populate(TX tx,
 
 	for (auto i = key_begin; i <= key_end; i++) {
 		/* sequential keys */
-		genkey(keystr, KEY_PREFIX, args, i);
+		genKey(keystr, KEY_PREFIX, args, i);
 		/* random values */
-		randstr(valstr, args.value_length);
+		randomString(valstr, args.value_length);
 
 		while (thread_tps > 0 && xacts >= thread_tps /* throttle */) {
 			if (to_integer_seconds(watch_throttle.stop().diff()) >= 1) {
@@ -169,15 +169,15 @@ int populate(TX tx,
 		if (num_seconds_trace_every) {
 			if (to_integer_seconds(watch_trace.stop().diff()) >= num_seconds_trace_every) {
 				watch_trace.start_from_stop();
-				fmt::print(debugme, "DEBUG: txn tracing {}\n", to_chars_ref(keystr));
+				fmt::print(debugme, "DEBUG: txn tracing {}\n", toCharsRef(keystr));
 				auto err = Error{};
-				err = tx.set_option_nothrow(FDB_TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER, keystr);
+				err = tx.setOptionNothrow(FDB_TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER, keystr);
 				if (err) {
-					fmt::print(stderr, "ERROR: set_option(TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER): {}\n", err.what());
+					fmt::print(stderr, "ERROR: setOption(TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER): {}\n", err.what());
 				}
-				err = tx.set_option_nothrow(FDB_TR_OPTION_LOG_TRANSACTION, BytesRef());
+				err = tx.setOptionNothrow(FDB_TR_OPTION_LOG_TRANSACTION, BytesRef());
 				if (err) {
-					fmt::print(stderr, "ERROR: set_option(TR_OPTION_LOG_TRANSACTION): {}\n", err.what());
+					fmt::print(stderr, "ERROR: setOption(TR_OPTION_LOG_TRANSACTION): {}\n", err.what());
 				}
 			}
 		}
@@ -311,7 +311,7 @@ void granule_free_load(int64_t loadId, void* userContext) {
 	context->data_by_id[loadId] = 0;
 }
 
-inline int next_key(args_t const& args) {
+inline int next_key(Arguments const& args) {
 	if (args.zipf)
 		return zipfian_next();
 	return urand(0, args.rows - 1);
@@ -334,87 +334,88 @@ const std::array<OpDesc, MAX_OP> op_desc{ { { "GRV", { StepKind::READ }, false }
 	                                        { "TRANSACTION", { StepKind::NONE }, false },
 	                                        { "READBLOBGRANULE", { StepKind::ON_ERROR }, false } } };
 
-const std::map<std::pair<int /*op*/, int /*sub-op step*/>,
-               Future (*)(TX, args_t const&, ByteString& /*key1*/, ByteString& /*key2*/, ByteString& /*value*/)>
+const std::map<
+    std::pair<int /*op*/, int /*sub-op step*/>,
+    Future (*)(Transaction, Arguments const&, ByteString& /*key1*/, ByteString& /*key2*/, ByteString& /*value*/)>
     operation_fn_table{
 	    { { OP_GETREADVERSION, 0 },
-	      [](TX tx, args_t const&, ByteString&, ByteString&, ByteString&) {
-	          return tx.get_read_version().erase_type();
+	      [](Transaction tx, Arguments const&, ByteString&, ByteString&, ByteString&) {
+	          return tx.getReadVersion().eraseType();
 	      } },
 	    { { OP_GET, 0 },
-	      [](TX tx, args_t const& args, ByteString& key, ByteString&, ByteString&) {
+	      [](Transaction tx, Arguments const& args, ByteString& key, ByteString&, ByteString&) {
 	          const auto num = next_key(args);
-	          genkey(key, KEY_PREFIX, args, num);
-	          return tx.get(key, false /*snapshot*/).erase_type();
+	          genKey(key, KEY_PREFIX, args, num);
+	          return tx.get(key, false /*snapshot*/).eraseType();
 	      } },
 	    { { OP_GETRANGE, 0 },
-	      [](TX tx, args_t const& args, ByteString& begin, ByteString& end, ByteString&) {
+	      [](Transaction tx, Arguments const& args, ByteString& begin, ByteString& end, ByteString&) {
 	          const auto num_begin = next_key(args);
-	          genkey(begin, KEY_PREFIX, args, num_begin);
+	          genKey(begin, KEY_PREFIX, args, num_begin);
 	          auto num_end = num_begin + args.txnspec.ops[OP_GETRANGE][OP_RANGE] - 1;
 	          if (num_end > args.rows - 1)
 		          num_end = args.rows - 1;
-	          genkey(end, KEY_PREFIX, args, num_end);
+	          genKey(end, KEY_PREFIX, args, num_end);
 	          return tx
-	              .get_range<key_select::inclusive, key_select::inclusive>(begin,
-	                                                                       end,
-	                                                                       0 /*limit*/,
-	                                                                       0 /*target_bytes*/,
-	                                                                       args.streaming_mode,
-	                                                                       0 /*iteration*/,
-	                                                                       false /*snapshot*/,
-	                                                                       args.txnspec.ops[OP_GETRANGE][OP_REVERSE])
-	              .erase_type();
+	              .getRange<KeySelect::Inclusive, KeySelect::Inclusive>(begin,
+	                                                                    end,
+	                                                                    0 /*limit*/,
+	                                                                    0 /*target_bytes*/,
+	                                                                    args.streaming_mode,
+	                                                                    0 /*iteration*/,
+	                                                                    false /*snapshot*/,
+	                                                                    args.txnspec.ops[OP_GETRANGE][OP_REVERSE])
+	              .eraseType();
 	      } },
 	    { { OP_SGET, 0 },
-	      [](TX tx, args_t const& args, ByteString& key, ByteString&, ByteString&) {
+	      [](Transaction tx, Arguments const& args, ByteString& key, ByteString&, ByteString&) {
 	          const auto num = next_key(args);
-	          genkey(key, KEY_PREFIX, args, num);
-	          return tx.get(key, true /*snapshot*/).erase_type();
+	          genKey(key, KEY_PREFIX, args, num);
+	          return tx.get(key, true /*snapshot*/).eraseType();
 	      } },
 	    { { OP_SGETRANGE, 0 },
-	      [](TX tx, args_t const& args, ByteString& begin, ByteString& end, ByteString&) {
+	      [](Transaction tx, Arguments const& args, ByteString& begin, ByteString& end, ByteString&) {
 	          const auto num_begin = next_key(args);
-	          genkey(begin, KEY_PREFIX, args, num_begin);
+	          genKey(begin, KEY_PREFIX, args, num_begin);
 	          auto num_end = num_begin + args.txnspec.ops[OP_SGETRANGE][OP_RANGE] - 1;
 	          if (num_end > args.rows - 1)
 		          num_end = args.rows - 1;
-	          genkey(end, KEY_PREFIX, args, num_end);
+	          genKey(end, KEY_PREFIX, args, num_end);
 	          return tx
-	              .get_range<key_select::inclusive, key_select::inclusive>(begin,
-	                                                                       end,
-	                                                                       0 /*limit*/,
-	                                                                       0 /*target_bytes*/,
-	                                                                       args.streaming_mode,
-	                                                                       0 /*iteration*/,
-	                                                                       true /*snapshot*/,
-	                                                                       args.txnspec.ops[OP_SGETRANGE][OP_REVERSE])
-	              .erase_type();
+	              .getRange<KeySelect::Inclusive, KeySelect::Inclusive>(begin,
+	                                                                    end,
+	                                                                    0 /*limit*/,
+	                                                                    0 /*target_bytes*/,
+	                                                                    args.streaming_mode,
+	                                                                    0 /*iteration*/,
+	                                                                    true /*snapshot*/,
+	                                                                    args.txnspec.ops[OP_SGETRANGE][OP_REVERSE])
+	              .eraseType();
 	      } },
 	    { { OP_UPDATE, 0 },
-	      [](TX tx, args_t const& args, ByteString& key, ByteString&, ByteString&) {
+	      [](Transaction tx, Arguments const& args, ByteString& key, ByteString&, ByteString&) {
 	          const auto num = next_key(args);
-	          genkey(key, KEY_PREFIX, args, num);
-	          return tx.get(key, false /*snapshot*/).erase_type();
+	          genKey(key, KEY_PREFIX, args, num);
+	          return tx.get(key, false /*snapshot*/).eraseType();
 	      } },
 	    { { OP_UPDATE, 1 },
-	      [](TX tx, args_t const& args, ByteString& key, ByteString&, ByteString& value) {
-	          randstr(value, args.value_length);
+	      [](Transaction tx, Arguments const& args, ByteString& key, ByteString&, ByteString& value) {
+	          randomString(value, args.value_length);
 	          tx.set(key, value);
 	          return Future();
 	      } },
 	    { { OP_INSERT, 0 },
-	      [](TX tx, args_t const& args, ByteString& key, ByteString&, ByteString& value) {
-	          genkeyprefix(key, KEY_PREFIX, args);
+	      [](Transaction tx, Arguments const& args, ByteString& key, ByteString&, ByteString& value) {
+	          genKeyPrefix(key, KEY_PREFIX, args);
 	          // concat([padding], key_prefix, random_string): reasonably unique
-	          randstr<false /*clear-before-append*/>(key, args.key_length - static_cast<int>(key.size()));
-	          randstr(value, args.value_length);
+	          randomString<false /*clear-before-append*/>(key, args.key_length - static_cast<int>(key.size()));
+	          randomString(value, args.value_length);
 	          tx.set(key, value);
 	          return Future();
 	      } },
 	    { { OP_INSERTRANGE, 0 },
-	      [](TX tx, args_t const& args, ByteString& key, ByteString&, ByteString& value) {
-	          genkeyprefix(key, KEY_PREFIX, args);
+	      [](Transaction tx, Arguments const& args, ByteString& key, ByteString&, ByteString& value) {
+	          genKeyPrefix(key, KEY_PREFIX, args);
 	          const auto prefix_len = static_cast<int>(key.size());
 	          const auto range = args.txnspec.ops[OP_INSERTRANGE][OP_RANGE];
 	          assert(range > 0);
@@ -422,8 +423,8 @@ const std::map<std::pair<int /*op*/, int /*sub-op step*/>,
 	          assert(args.key_length - prefix_len >= range_digits);
 	          const auto rand_len = args.key_length - prefix_len - range_digits;
 	          // concat([padding], prefix, random_string, range_digits)
-	          randstr<false /*clear-before-append*/>(key, rand_len);
-	          randstr(value, args.value_length);
+	          randomString<false /*clear-before-append*/>(key, rand_len);
+	          randomString(value, args.value_length);
 	          for (auto i = 0; i < range; i++) {
 		          fmt::format_to(std::back_inserter(key), "{0:0{1}d}", i, range_digits);
 		          tx.set(key, value);
@@ -432,46 +433,46 @@ const std::map<std::pair<int /*op*/, int /*sub-op step*/>,
 	          return Future();
 	      } },
 	    { { OP_OVERWRITE, 0 },
-	      [](TX tx, args_t const& args, ByteString& key, ByteString&, ByteString& value) {
-	          genkey(key, KEY_PREFIX, args, next_key(args));
-	          randstr(value, args.value_length);
+	      [](Transaction tx, Arguments const& args, ByteString& key, ByteString&, ByteString& value) {
+	          genKey(key, KEY_PREFIX, args, next_key(args));
+	          randomString(value, args.value_length);
 	          tx.set(key, value);
 	          return Future();
 	      } },
 	    { { OP_CLEAR, 0 },
-	      [](TX tx, args_t const& args, ByteString& key, ByteString&, ByteString&) {
-	          genkey(key, KEY_PREFIX, args, next_key(args));
+	      [](Transaction tx, Arguments const& args, ByteString& key, ByteString&, ByteString&) {
+	          genKey(key, KEY_PREFIX, args, next_key(args));
 	          tx.clear(key);
 	          return Future();
 	      } },
 	    { { OP_SETCLEAR, 0 },
-	      [](TX tx, args_t const& args, ByteString& key, ByteString&, ByteString& value) {
-	          genkeyprefix(key, KEY_PREFIX, args);
+	      [](Transaction tx, Arguments const& args, ByteString& key, ByteString&, ByteString& value) {
+	          genKeyPrefix(key, KEY_PREFIX, args);
 	          const auto prefix_len = static_cast<int>(key.size());
-	          randstr<false /*append-after-clear*/>(key, args.key_length - prefix_len);
-	          randstr(value, args.value_length);
+	          randomString<false /*append-after-clear*/>(key, args.key_length - prefix_len);
+	          randomString(value, args.value_length);
 	          tx.set(key, value);
-	          return tx.commit().erase_type();
+	          return tx.commit().eraseType();
 	      } },
 	    { { OP_SETCLEAR, 1 },
-	      [](TX tx, args_t const& args, ByteString& key, ByteString&, ByteString&) {
+	      [](Transaction tx, Arguments const& args, ByteString& key, ByteString&, ByteString&) {
 	          tx.reset(); // assuming commit from step 0 worked.
 	          tx.clear(key); // key should forward unchanged from step 0
 	          return Future();
 	      } },
 	    { { OP_CLEARRANGE, 0 },
-	      [](TX tx, args_t const& args, ByteString& begin, ByteString& end, ByteString&) {
+	      [](Transaction tx, Arguments const& args, ByteString& begin, ByteString& end, ByteString&) {
 	          const auto num_begin = next_key(args);
-	          genkey(begin, KEY_PREFIX, args, num_begin);
+	          genKey(begin, KEY_PREFIX, args, num_begin);
 	          const auto range = args.txnspec.ops[OP_CLEARRANGE][OP_RANGE];
 	          assert(range > 0);
-	          genkey(end, KEY_PREFIX, args, std::min(args.rows - 1, num_begin + range - 1));
-	          tx.clear_range(begin, end);
+	          genKey(end, KEY_PREFIX, args, std::min(args.rows - 1, num_begin + range - 1));
+	          tx.clearRange(begin, end);
 	          return Future();
 	      } },
 	    { { OP_SETCLEARRANGE, 0 },
-	      [](TX tx, args_t const& args, ByteString& key_begin, ByteString& key, ByteString& value) {
-	          genkeyprefix(key, KEY_PREFIX, args);
+	      [](Transaction tx, Arguments const& args, ByteString& key_begin, ByteString& key, ByteString& value) {
+	          genKeyPrefix(key, KEY_PREFIX, args);
 	          const auto prefix_len = static_cast<int>(key.size());
 	          const auto range = args.txnspec.ops[OP_SETCLEARRANGE][OP_RANGE];
 	          assert(range > 0);
@@ -479,8 +480,8 @@ const std::map<std::pair<int /*op*/, int /*sub-op step*/>,
 	          assert(args.key_length - prefix_len >= range_digits);
 	          const auto rand_len = args.key_length - prefix_len - range_digits;
 	          // concat([padding], prefix, random_string, range_digits)
-	          randstr<false /*clear-before-append*/>(key, rand_len);
-	          randstr(value, args.value_length);
+	          randomString<false /*clear-before-append*/>(key, rand_len);
+	          randomString(value, args.value_length);
 	          for (auto i = 0; i <= range; i++) {
 		          fmt::format_to(std::back_inserter(key), "{0:0{1}d}", i, range_digits);
 		          if (i == range)
@@ -492,24 +493,24 @@ const std::map<std::pair<int /*op*/, int /*sub-op step*/>,
 		          // preserve last key for step 1
 		          key.resize(key.size() - static_cast<size_t>(range_digits));
 	          }
-	          return tx.commit().erase_type();
+	          return tx.commit().eraseType();
 	      } },
 	    { { OP_SETCLEARRANGE, 1 },
-	      [](TX tx, args_t const& args, ByteString& begin, ByteString& end, ByteString&) {
+	      [](Transaction tx, Arguments const& args, ByteString& begin, ByteString& end, ByteString&) {
 	          tx.reset();
-	          tx.clear_range(begin, end);
+	          tx.clearRange(begin, end);
 	          return Future();
 	      } },
 	    { { OP_READ_BG, 0 },
-	      [](TX tx, args_t const& args, ByteString& begin, ByteString& end, ByteString&) {
+	      [](Transaction tx, Arguments const& args, ByteString& begin, ByteString& end, ByteString&) {
 	          const auto num_begin = next_key(args);
-	          genkey(begin, KEY_PREFIX, args, num_begin);
+	          genKey(begin, KEY_PREFIX, args, num_begin);
 	          const auto range = args.txnspec.ops[OP_READ_BG][OP_RANGE];
 	          assert(range > 0);
-	          genkey(end, KEY_PREFIX, args, std::min(args.rows - 1, num_begin + range - 1));
+	          genKey(end, KEY_PREFIX, args, std::min(args.rows - 1, num_begin + range - 1));
 	          auto err = Error{};
 
-	          err = tx.set_option_nothrow(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE, BytesRef());
+	          err = tx.setOptionNothrow(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE, BytesRef());
 	          if (err) {
 		          // Issuing read/writes before disabling RYW results in error.
 		          // Possible malformed workload?
@@ -534,20 +535,20 @@ const std::map<std::pair<int /*op*/, int /*sub-op step*/>,
 	          granuleContext.debugNoMaterialize = !args.bg_materialize_files;
 
 	          auto r =
-	              tx.read_blob_granules(begin, end, 0 /*begin_version*/, -1 /*end_version, use txn's*/, granuleContext);
+	              tx.readBlobGranules(begin, end, 0 /*begin_version*/, -1 /*end_version, use txn's*/, granuleContext);
 
 	          mem.reset();
 
 	          auto out = Result::KeyValueArray{};
-	          err = r.get_keyvalue_array_nothrow(out);
+	          err = r.getKeyValueArrayNothrow(out);
 	          if (!err || err.is(2037 /*blob_granule_not_materialized*/))
 		          return Future();
 	          const auto fp = (err.is(1020 /*not_committed*/) || err.is(1021 /*commit_unknown_result*/) ||
 	                           err.is(1213 /*tag_throttled*/))
 	                              ? annoyme
 	                              : stderr;
-	          fmt::print(fp, "ERROR: get_keyvalue_array() after read_blob_granules(): {}\n", err.what());
-	          return tx.on_error(err).erase_type();
+	          fmt::print(fp, "ERROR: get_keyvalue_array() after readBlobGranules(): {}\n", err.what());
+	          return tx.onError(err).eraseType();
 	      } }
     };
 
@@ -555,7 +556,7 @@ using OpIterator = std::tuple<int /*op*/, int /*count*/, int /*step*/>;
 
 constexpr const OpIterator OpEnd = OpIterator(MAX_OP, -1, -1);
 
-OpIterator get_op_begin(args_t const& args) noexcept {
+OpIterator get_op_begin(Arguments const& args) noexcept {
 	for (auto op = 0; op < MAX_OP; op++) {
 		if (op == OP_COMMIT || op == OP_TRANSACTION || args.txnspec.ops[op][OP_COUNT] == 0)
 			continue;
@@ -564,7 +565,7 @@ OpIterator get_op_begin(args_t const& args) noexcept {
 	return OpEnd;
 }
 
-OpIterator get_op_next(args_t const& args, OpIterator current) noexcept {
+OpIterator get_op_next(Arguments const& args, OpIterator current) noexcept {
 	if (OpEnd == current)
 		return OpEnd;
 	auto [op, count, step] = current;
@@ -581,7 +582,10 @@ OpIterator get_op_next(args_t const& args, OpIterator current) noexcept {
 }
 
 /* run one transaction */
-int run_one_transaction(TX tx, args_t const& args, stats_t& stats, sample_bin_array_t& sample_bins) {
+int run_one_transaction(Transaction tx,
+                        Arguments const& args,
+                        ThreadStatistics& stats,
+                        LatencySampleBinArray& sample_bins) {
 	// reuse memory for keys to avoid realloc overhead
 	auto key1 = ByteString{};
 	key1.reserve(args.key_length);
@@ -708,14 +712,14 @@ int run_one_transaction(TX tx, args_t const& args, stats_t& stats, sample_bin_ar
 	return 0;
 }
 
-int run_workload(TX tx,
-                 args_t const& args,
+int run_workload(Transaction tx,
+                 Arguments const& args,
                  int const thread_tps,
                  std::atomic<double> const& throttle_factor,
                  int const thread_iters,
                  std::atomic<int> const& signal,
-                 stats_t& stats,
-                 sample_bin_array_t& sample_bins,
+                 ThreadStatistics& stats,
+                 LatencySampleBinArray& sample_bins,
                  int const dotrace,
                  int const dotagging) {
 	auto traceid = std::string{};
@@ -763,11 +767,11 @@ int run_workload(TX tx,
 				fmt::format_to(std::back_inserter(traceid), "makotrace{:0>19d}", total_xacts);
 				fmt::print(debugme, "DEBUG: txn tracing {}\n", traceid);
 				auto err = Error{};
-				err = tx.set_option_nothrow(FDB_TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER, to_bytes_ref(traceid));
+				err = tx.setOptionNothrow(FDB_TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER, toBytesRef(traceid));
 				if (err) {
 					fmt::print(stderr, "ERROR: TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER: {}\n", err.what());
 				}
-				err = tx.set_option_nothrow(FDB_TR_OPTION_LOG_TRANSACTION, BytesRef());
+				err = tx.setOptionNothrow(FDB_TR_OPTION_LOG_TRANSACTION, BytesRef());
 				if (err) {
 					fmt::print(stderr, "ERROR: TR_OPTION_LOG_TRANSACTION: {}\n", err.what());
 				}
@@ -782,7 +786,7 @@ int run_workload(TX tx,
 			               KEY_PREFIX,
 			               args.txntagging_prefix,
 			               urand(0, args.txntagging - 1));
-			auto err = tx.set_option_nothrow(FDB_TR_OPTION_AUTO_THROTTLE_TAG, to_bytes_ref(tagstr));
+			auto err = tx.setOptionNothrow(FDB_TR_OPTION_AUTO_THROTTLE_TAG, toBytesRef(tagstr));
 			if (err) {
 				fmt::print(stderr, "ERROR: TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER: {}\n", err.what());
 			}
@@ -814,7 +818,7 @@ std::string get_stats_file_name(std::string_view dirname, int worker_id, int thr
 }
 
 /* mako worker thread */
-void worker_thread(thread_args_t& thread_args) {
+void worker_thread(ThreadArgs& thread_args) {
 	const auto& args = *thread_args.args;
 	const auto parent_id = thread_args.parent_id;
 	const auto worker_id = thread_args.worker_id;
@@ -822,14 +826,14 @@ void worker_thread(thread_args_t& thread_args) {
 	const auto dotrace = (worker_id == 0 && thread_id == 0 && args.txntrace) ? args.txntrace : 0;
 	auto database = thread_args.database;
 	const auto dotagging = args.txntagging;
-	const auto& signal = thread_args.shm.header_const().signal;
-	const auto& throttle_factor = thread_args.shm.header_const().throttle_factor;
+	const auto& signal = thread_args.shm.headerConst().signal;
+	const auto& throttle_factor = thread_args.shm.headerConst().throttle_factor;
 	auto& readycount = thread_args.shm.header().readycount;
 	auto& stopcount = thread_args.shm.header().stopcount;
-	auto& stats = thread_args.shm.stats_slot(worker_id, thread_id);
+	auto& stats = thread_args.shm.statsSlot(worker_id, thread_id);
 
 	/* init per-thread latency statistics */
-	new (&stats) stats_t();
+	new (&stats) ThreadStatistics();
 
 	fmt::print(debugme,
 	           "DEBUG: worker_id:{} ({}) thread_id:{} ({}) (tid:{})\n",
@@ -841,15 +845,15 @@ void worker_thread(thread_args_t& thread_args) {
 
 	const auto thread_tps =
 	    args.tpsmax == 0 ? 0
-	                     : compute_thread_tps(args.tpsmax, worker_id, thread_id, args.num_processes, args.num_threads);
+	                     : computeThreadTps(args.tpsmax, worker_id, thread_id, args.num_processes, args.num_threads);
 
 	const auto thread_iters =
 	    args.iteration == 0
 	        ? 0
-	        : compute_thread_iters(args.iteration, worker_id, thread_id, args.num_processes, args.num_threads);
+	        : computeThreadIters(args.iteration, worker_id, thread_id, args.num_processes, args.num_threads);
 
 	/* create my own transaction object */
-	auto tx = database.create_tx();
+	auto tx = database.createTransaction();
 
 	/* i'm ready */
 	readycount.fetch_add(1);
@@ -894,7 +898,7 @@ void worker_thread(thread_args_t& thread_args) {
 					continue;
 				}
 				auto fclose_guard = ExitGuard([fp]() { fclose(fp); });
-				thread_args.sample_bins[op].for_each_block(
+				thread_args.sample_bins[op].forEachBlock(
 				    [fp](auto ptr, auto count) { fwrite(ptr, sizeof(*ptr) * count, 1, fp); });
 			}
 		}
@@ -902,22 +906,22 @@ void worker_thread(thread_args_t& thread_args) {
 }
 
 /* mako worker process */
-int worker_process_main(args_t const& args, int worker_id, shm_access_t shm, pid_t pid_main) {
+int worker_process_main(Arguments const& args, int worker_id, shared_memory::Access shm, pid_t pid_main) {
 	fmt::print(debugme, "DEBUG: worker {} started\n", worker_id);
 
 	auto err = Error{};
 	/* Everything starts from here */
 
-	select_api_version(args.api_version);
+	selectApiVersion(args.api_version);
 
 	/* enable flatbuffers if specified */
 	if (args.flatbuffers) {
 #ifdef FDB_NET_OPTION_USE_FLATBUFFERS
 		fprintf(debugme, "DEBUG: Using flatbuffers\n");
-		err = network::set_option_nothrow(FDB_NET_OPTION_USE_FLATBUFFERS,
-		                                  BytesRef(&args.flatbuffers, sizeof(args.flatbuffers)));
+		err = network::setOptionNothrow(FDB_NET_OPTION_USE_FLATBUFFERS,
+		                                BytesRef(&args.flatbuffers, sizeof(args.flatbuffers)));
 		if (err) {
-			fmt::print(stderr, "ERROR: network_set_option(USE_FLATBUFFERS): {}\n", err.what());
+			fmt::print(stderr, "ERROR: network_setOption(USE_FLATBUFFERS): {}\n", err.what());
 		}
 #else
 		fmt::print(printme, "INFO: flatbuffers is not supported in FDB API version {}\n", FDB_API_VERSION);
@@ -926,9 +930,9 @@ int worker_process_main(args_t const& args, int worker_id, shm_access_t shm, pid
 
 	/* Set client Log group */
 	if (args.log_group[0] != '\0') {
-		err = network::set_option_nothrow(FDB_NET_OPTION_TRACE_LOG_GROUP, BytesRef(to_byte_ptr(args.log_group)));
+		err = network::setOptionNothrow(FDB_NET_OPTION_TRACE_LOG_GROUP, BytesRef(toBytePtr(args.log_group)));
 		if (err) {
-			fmt::print(stderr, "ERROR: fdb_network_set_option(FDB_NET_OPTION_TRACE_LOG_GROUP): {}\n", err.what());
+			fmt::print(stderr, "ERROR: fdb_network_setOption(FDB_NET_OPTION_TRACE_LOG_GROUP): {}\n", err.what());
 		}
 	}
 
@@ -938,14 +942,14 @@ int worker_process_main(args_t const& args, int worker_id, shm_access_t shm, pid
 		           "DEBUG: Enable Tracing in {} ({})\n",
 		           (args.traceformat == 0) ? "XML" : "JSON",
 		           (args.tracepath[0] == '\0') ? "current directory" : args.tracepath);
-		err = network::set_option_nothrow(FDB_NET_OPTION_TRACE_ENABLE, BytesRef(to_byte_ptr(args.tracepath)));
+		err = network::setOptionNothrow(FDB_NET_OPTION_TRACE_ENABLE, BytesRef(toBytePtr(args.tracepath)));
 		if (err) {
-			fmt::print(stderr, "ERROR: network_set_option(TRACE_ENABLE): {}\n", err.what());
+			fmt::print(stderr, "ERROR: network_setOption(TRACE_ENABLE): {}\n", err.what());
 		}
 		if (args.traceformat == 1) {
-			err = network::set_option_nothrow(FDB_NET_OPTION_TRACE_FORMAT, BytesRef(to_byte_ptr("json")));
+			err = network::setOptionNothrow(FDB_NET_OPTION_TRACE_FORMAT, BytesRef(toBytePtr("json")));
 			if (err) {
-				fmt::print(stderr, "ERROR: fdb_network_set_option(FDB_NET_OPTION_TRACE_FORMAT): {}\n", err.what());
+				fmt::print(stderr, "ERROR: fdb_network_setOption(FDB_NET_OPTION_TRACE_FORMAT): {}\n", err.what());
 			}
 		}
 	}
@@ -960,19 +964,19 @@ int worker_process_main(args_t const& args, int worker_id, shm_access_t shm, pid
 			if (knob.empty())
 				break;
 			fmt::print(debugme, "DEBUG: Setting client knob: {}\n", knob);
-			err = network::set_option_nothrow(FDB_NET_OPTION_KNOB, to_bytes_ref(knob));
+			err = network::setOptionNothrow(FDB_NET_OPTION_KNOB, toBytesRef(knob));
 			if (err) {
-				fmt::print(stderr, "ERROR: fdb_network_set_option({}): {}\n", knob, err.what());
+				fmt::print(stderr, "ERROR: fdb_network_setOption({}): {}\n", knob, err.what());
 			}
 			knobs.remove_prefix(knob.size());
 		}
 	}
 
 	if (args.client_threads_per_version > 0) {
-		err = network::set_option_nothrow(FDB_NET_OPTION_CLIENT_THREADS_PER_VERSION, args.client_threads_per_version);
+		err = network::setOptionNothrow(FDB_NET_OPTION_CLIENT_THREADS_PER_VERSION, args.client_threads_per_version);
 		if (err) {
 			fmt::print(stderr,
-			           "ERROR: fdb_network_set_option (FDB_NET_OPTION_CLIENT_THREADS_PER_VERSION) ({}): {}\n",
+			           "ERROR: fdb_network_setOption (FDB_NET_OPTION_CLIENT_THREADS_PER_VERSION) ({}): {}\n",
 			           args.client_threads_per_version,
 			           err.what());
 			// let's exit here since we do not want to confuse users
@@ -1003,7 +1007,7 @@ int worker_process_main(args_t const& args, int worker_id, shm_access_t shm, pid
 		databases[i] = Database(args.cluster_files[cluster_index]);
 		fmt::print(debugme, "DEBUG: creating database at cluster {}\n", args.cluster_files[cluster_index]);
 		if (args.disable_ryw) {
-			databases[i].set_option(FDB_DB_OPTION_SNAPSHOT_RYW_DISABLE, BytesRef{});
+			databases[i].setOption(FDB_DB_OPTION_SNAPSHOT_RYW_DISABLE, BytesRef{});
 		}
 	}
 
@@ -1011,7 +1015,7 @@ int worker_process_main(args_t const& args, int worker_id, shm_access_t shm, pid
 	auto worker_threads = std::vector<std::thread>(args.num_threads);
 
 	/* spawn worker threads */
-	auto thread_args = std::vector<thread_args_t>(args.num_threads);
+	auto thread_args = std::vector<ThreadArgs>(args.num_threads);
 
 	for (auto i = 0; i < args.num_threads; i++) {
 		auto& this_args = thread_args[i];
@@ -1025,7 +1029,7 @@ int worker_process_main(args_t const& args, int worker_id, shm_access_t shm, pid
 		/* for ops to run, pre-allocate one latency sample block */
 		for (auto op = 0; op < MAX_OP; op++) {
 			if (args.txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
-				this_args.sample_bins[op].reserve_one();
+				this_args.sample_bins[op].reserveOneBlock();
 			}
 		}
 		worker_threads[i] = std::thread(worker_thread, std::ref(this_args));
@@ -1054,14 +1058,14 @@ int worker_process_main(args_t const& args, int worker_id, shm_access_t shm, pid
 }
 
 /* initialize the parameters with default values */
-int init_args(args_t* args) {
+int init_args(Arguments* args) {
 	int i;
 	if (!args)
 		return -1;
-	memset(args, 0, sizeof(args_t)); /* zero-out everything */
+	memset(args, 0, sizeof(Arguments)); /* zero-out everything */
 	args->num_fdb_clusters = 0;
 	args->num_databases = 1;
-	args->api_version = max_api_version();
+	args->api_version = maxApiVersion();
 	args->json = 0;
 	args->num_processes = 1;
 	args->num_threads = 1;
@@ -1103,7 +1107,7 @@ int init_args(args_t* args) {
 }
 
 /* parse transaction specification */
-int parse_transaction(args_t* args, char const* optarg) {
+int parse_transaction(Arguments* args, char const* optarg) {
 	char const* ptr = optarg;
 	int op = 0;
 	int rangeop = 0;
@@ -1276,7 +1280,7 @@ void usage() {
 }
 
 /* parse benchmark paramters */
-int parse_args(int argc, char* argv[], args_t* args) {
+int parse_args(int argc, char* argv[], Arguments* args) {
 	int rc;
 	int c;
 	int idx;
@@ -1539,7 +1543,7 @@ char const* get_ops_name(int ops_code) {
 	return "";
 }
 
-int validate_args(args_t* args) {
+int validate_args(Arguments* args) {
 	if (args->mode == MODE_INVALID) {
 		fprintf(stderr, "ERROR: --mode has to be set\n");
 		return -1;
@@ -1602,10 +1606,10 @@ int validate_args(args_t* args) {
 	return 0;
 }
 
-void print_stats(args_t const& args, stats_t const* stats, double const duration_sec, FILE* fp) {
-	static stats_t prev;
+void print_stats(Arguments const& args, ThreadStatistics const* stats, double const duration_sec, FILE* fp) {
+	static ThreadStatistics prev;
 
-	auto current = stats_t{};
+	auto current = ThreadStatistics{};
 	for (auto i = 0; i < args.num_processes; i++) {
 		for (auto j = 0; j < args.num_threads; j++) {
 			current.combine(stats[(i * args.num_threads) + j]);
@@ -1615,12 +1619,12 @@ void print_stats(args_t const& args, stats_t const* stats, double const duration
 	if (fp) {
 		fwrite("{", 1, 1, fp);
 	}
-	put_title_r("OPS");
+	putTitleRight("OPS");
 	auto print_err = false;
 	for (auto op = 0; op < MAX_OP; op++) {
 		if (args.txnspec.ops[op][OP_COUNT] > 0) {
 			const auto ops_total_diff = current.get_op_count(op) - prev.get_op_count(op);
-			put_field(ops_total_diff);
+			putField(ops_total_diff);
 			if (fp) {
 				fmt::print(fp, "\"{}\": {},", get_ops_name(op), ops_total_diff);
 			}
@@ -1629,25 +1633,25 @@ void print_stats(args_t const& args, stats_t const* stats, double const duration
 	}
 	/* TPS */
 	const auto tps = (current.get_tx_count() - prev.get_tx_count()) / duration_sec;
-	put_field_f(tps, 2);
+	putFieldFloat(tps, 2);
 	if (fp) {
 		fprintf(fp, "\"tps\": %.2f,", tps);
 	}
 
 	/* Conflicts */
 	const auto conflicts_diff = (current.get_conflict_count() - prev.get_conflict_count()) / duration_sec;
-	put_field_f(conflicts_diff, 2);
+	putFieldFloat(conflicts_diff, 2);
 	fmt::print("\n");
 	if (fp) {
 		fprintf(fp, "\"conflictsPerSec\": %.2f", conflicts_diff);
 	}
 
 	if (print_err) {
-		put_title_r("Errors");
+		putTitleRight("Errors");
 		for (auto op = 0; op < MAX_OP; op++) {
 			if (args.txnspec.ops[op][OP_COUNT] > 0) {
 				const auto errors_diff = current.get_error_count(op) - prev.get_error_count(op);
-				put_field(errors_diff);
+				putField(errors_diff);
 				if (fp) {
 					fmt::print(fp, ",\"errors\": {}", errors_diff);
 				}
@@ -1662,53 +1666,57 @@ void print_stats(args_t const& args, stats_t const* stats, double const duration
 	prev = current;
 }
 
-void print_stats_header(args_t const& args, bool show_commit, bool is_first_header_empty, bool show_op_stats) {
+void print_stats_header(Arguments const& args, bool show_commit, bool is_first_header_empty, bool show_op_stats) {
 	/* header */
 	if (is_first_header_empty)
-		put_title("");
+		putTitle("");
 	for (auto op = 0; op < MAX_OP; op++) {
 		if (args.txnspec.ops[op][OP_COUNT] > 0) {
-			put_field(get_ops_name(op));
+			putField(get_ops_name(op));
 		}
 	}
 
 	if (show_commit)
-		put_field("COMMIT");
+		putField("COMMIT");
 	if (show_op_stats) {
-		put_field("TRANSACTION");
+		putField("TRANSACTION");
 	} else {
-		put_field("TPS");
-		put_field("Conflicts/s");
+		putField("TPS");
+		putField("Conflicts/s");
 	}
 	fmt::print("\n");
 
-	put_title_bar();
+	putTitleBar();
 	for (auto op = 0; op < MAX_OP; op++) {
 		if (args.txnspec.ops[op][OP_COUNT] > 0) {
-			put_field_bar();
+			putFieldBar();
 		}
 	}
 
 	/* COMMIT */
 	if (show_commit)
-		put_field_bar();
+		putFieldBar();
 
 	if (show_op_stats) {
 		/* TRANSACTION */
-		put_field_bar();
+		putFieldBar();
 	} else {
 		/* TPS */
-		put_field_bar();
+		putFieldBar();
 
 		/* Conflicts */
-		put_field_bar();
+		putFieldBar();
 	}
 	fmt::print("\n");
 }
 
-void print_report(args_t const& args, stats_t const* stats, double const duration_sec, pid_t pid_main, FILE* fp) {
+void print_report(Arguments const& args,
+                  ThreadStatistics const* stats,
+                  double const duration_sec,
+                  pid_t pid_main,
+                  FILE* fp) {
 
-	auto final_stats = stats_t{};
+	auto final_stats = ThreadStatistics{};
 	for (auto i = 0; i < args.num_processes; i++) {
 		for (auto j = 0; j < args.num_threads; j++) {
 			const auto idx = i * args.num_threads + j;
@@ -1762,14 +1770,14 @@ void print_report(args_t const& args, stats_t const* stats, double const duratio
 	print_stats_header(args, true, true, false);
 
 	/* OPS */
-	put_title("Total OPS");
+	putTitle("Total OPS");
 	if (fp) {
 		fmt::fprintf(fp, "\"totalOps\": {");
 	}
 	auto first_op = true;
 	for (auto op = 0; op < MAX_OP; op++) {
 		if ((args.txnspec.ops[op][OP_COUNT] > 0 && op != OP_TRANSACTION) || op == OP_COMMIT) {
-			put_field(final_stats.get_op_count(op));
+			putField(final_stats.get_op_count(op));
 			if (fp) {
 				if (first_op) {
 					first_op = 0;
@@ -1783,11 +1791,11 @@ void print_report(args_t const& args, stats_t const* stats, double const duratio
 
 	/* TPS */
 	const auto tps = final_stats.get_tx_count() / duration_sec;
-	put_field_f(tps, 2);
+	putFieldFloat(tps, 2);
 
 	/* Conflicts */
 	const auto conflicts_rate = final_stats.get_conflict_count() / duration_sec;
-	put_field_f(conflicts_rate, 2);
+	putFieldFloat(conflicts_rate, 2);
 	fmt::print("\n");
 
 	if (fp) {
@@ -1795,11 +1803,11 @@ void print_report(args_t const& args, stats_t const* stats, double const duratio
 	}
 
 	/* Errors */
-	put_title("Errors");
+	putTitle("Errors");
 	first_op = 1;
 	for (auto op = 0; op < MAX_OP; op++) {
 		if (args.txnspec.ops[op][OP_COUNT] > 0 && op != OP_TRANSACTION) {
-			put_field(final_stats.get_error_count(op));
+			putField(final_stats.get_error_count(op));
 			if (fp) {
 				if (first_op) {
 					first_op = 0;
@@ -1819,14 +1827,14 @@ void print_report(args_t const& args, stats_t const* stats, double const duratio
 	print_stats_header(args, true, false, true);
 
 	/* Total Samples */
-	put_title("Samples");
+	putTitle("Samples");
 	first_op = 1;
 	for (auto op = 0; op < MAX_OP; op++) {
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
 			if (final_stats.get_latency_us_total(op)) {
-				put_field(final_stats.get_latency_sample_count(op));
+				putField(final_stats.get_latency_sample_count(op));
 			} else {
-				put_field("N/A");
+				putField("N/A");
 			}
 			if (fp) {
 				if (first_op) {
@@ -1844,15 +1852,15 @@ void print_report(args_t const& args, stats_t const* stats, double const duratio
 	if (fp) {
 		fmt::fprintf(fp, "}, \"minLatency\": {");
 	}
-	put_title("Min");
+	putTitle("Min");
 	first_op = 1;
 	for (auto op = 0; op < MAX_OP; op++) {
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
 			const auto lat_min = final_stats.get_latency_us_min(op);
 			if (lat_min == -1) {
-				put_field("N/A");
+				putField("N/A");
 			} else {
-				put_field(lat_min);
+				putField(lat_min);
 				if (fp) {
 					if (first_op) {
 						first_op = 0;
@@ -1870,14 +1878,14 @@ void print_report(args_t const& args, stats_t const* stats, double const duratio
 	if (fp) {
 		fmt::fprintf(fp, "}, \"avgLatency\": {");
 	}
-	put_title("Avg");
+	putTitle("Avg");
 	first_op = 1;
 	for (auto op = 0; op < MAX_OP; op++) {
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
 			const auto lat_total = final_stats.get_latency_us_total(op);
 			const auto lat_samples = final_stats.get_latency_sample_count(op);
 			if (lat_total) {
-				put_field(lat_total / lat_samples);
+				putField(lat_total / lat_samples);
 				if (fp) {
 					if (first_op) {
 						first_op = 0;
@@ -1887,7 +1895,7 @@ void print_report(args_t const& args, stats_t const* stats, double const duratio
 					fmt::fprintf(fp, "\"%s\": %lu", get_ops_name(op), lat_total / lat_samples);
 				}
 			} else {
-				put_field("N/A");
+				putField("N/A");
 			}
 		}
 	}
@@ -1897,15 +1905,15 @@ void print_report(args_t const& args, stats_t const* stats, double const duratio
 	if (fp) {
 		fmt::fprintf(fp, "}, \"maxLatency\": {");
 	}
-	put_title("Max");
+	putTitle("Max");
 	first_op = 1;
 	for (auto op = 0; op < MAX_OP; op++) {
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
 			const auto lat_max = final_stats.get_latency_us_max(op);
 			if (lat_max == 0) {
-				put_field("N/A");
+				putField("N/A");
 			} else {
-				put_field(lat_max);
+				putField(lat_max);
 				if (fp) {
 					if (first_op) {
 						first_op = 0;
@@ -1925,7 +1933,7 @@ void print_report(args_t const& args, stats_t const* stats, double const duratio
 	if (fp) {
 		fmt::fprintf(fp, "}, \"medianLatency\": {");
 	}
-	put_title("Median");
+	putTitle("Median");
 	first_op = 1;
 	for (auto op = 0; op < MAX_OP; op++) {
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
@@ -1961,7 +1969,7 @@ void print_report(args_t const& args, stats_t const* stats, double const duratio
 				} else {
 					median = (data_points[op][num_points / 2] + data_points[op][num_points / 2 - 1]) >> 1;
 				}
-				put_field(median);
+				putField(median);
 				if (fp) {
 					if (first_op) {
 						first_op = 0;
@@ -1971,7 +1979,7 @@ void print_report(args_t const& args, stats_t const* stats, double const duratio
 					fmt::fprintf(fp, "\"%s\": %lu", get_ops_name(op), median);
 				}
 			} else {
-				put_field("N/A");
+				putField("N/A");
 			}
 		}
 	}
@@ -1981,17 +1989,17 @@ void print_report(args_t const& args, stats_t const* stats, double const duratio
 	if (fp) {
 		fmt::fprintf(fp, "}, \"p95Latency\": {");
 	}
-	put_title("95.0 pctile");
+	putTitle("95.0 pctile");
 	first_op = 1;
 	for (auto op = 0; op < MAX_OP; op++) {
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
 			if (data_points[op].empty() || !final_stats.get_latency_us_total(op)) {
-				put_field("N/A");
+				putField("N/A");
 				continue;
 			}
 			const auto num_points = data_points[op].size();
 			const auto point_95pct = static_cast<size_t>(std::max(0., (num_points * 0.95) - 1));
-			put_field(data_points[op][point_95pct]);
+			putField(data_points[op][point_95pct]);
 			if (fp) {
 				if (first_op) {
 					first_op = 0;
@@ -2008,17 +2016,17 @@ void print_report(args_t const& args, stats_t const* stats, double const duratio
 	if (fp) {
 		fmt::fprintf(fp, "}, \"p99Latency\": {");
 	}
-	put_title("99.0 pctile");
+	putTitle("99.0 pctile");
 	first_op = 1;
 	for (auto op = 0; op < MAX_OP; op++) {
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
 			if (data_points[op].empty() || !final_stats.get_latency_us_total(op)) {
-				put_field("N/A");
+				putField("N/A");
 				continue;
 			}
 			const auto num_points = data_points[op].size();
 			const auto point_99pct = static_cast<size_t>(std::max(0., (num_points * 0.99) - 1));
-			put_field(data_points[op][point_99pct]);
+			putField(data_points[op][point_99pct]);
 			if (fp) {
 				if (first_op) {
 					first_op = 0;
@@ -2035,17 +2043,17 @@ void print_report(args_t const& args, stats_t const* stats, double const duratio
 	if (fp) {
 		fmt::fprintf(fp, "}, \"p99.9Latency\": {");
 	}
-	put_title("99.9 pctile");
+	putTitle("99.9 pctile");
 	first_op = 1;
 	for (auto op = 0; op < MAX_OP; op++) {
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
 			if (data_points[op].empty() || !final_stats.get_latency_us_total(op)) {
-				put_field("N/A");
+				putField("N/A");
 				continue;
 			}
 			const auto num_points = data_points[op].size();
 			const auto point_99_9pct = static_cast<size_t>(std::max(0., (num_points * 0.999) - 1));
-			put_field(data_points[op][point_99_9pct]);
+			putField(data_points[op][point_99_9pct]);
 			if (fp) {
 				if (first_op) {
 					first_op = 0;
@@ -2065,8 +2073,8 @@ void print_report(args_t const& args, stats_t const* stats, double const duratio
 	system(command_remove.c_str());
 }
 
-int stats_process_main(args_t const& args,
-                       stats_t const* stats,
+int stats_process_main(Arguments const& args,
+                       ThreadStatistics const* stats,
                        std::atomic<double>& throttle_factor,
                        std::atomic<int> const& signal,
                        std::atomic<int> const& stopcount,
@@ -2200,7 +2208,7 @@ int main(int argc, char* argv[]) {
 	setlinebuf(stdout);
 
 	auto rc = int{};
-	auto args = args_t{};
+	auto args = Arguments{};
 	rc = init_args(&args);
 	if (rc < 0) {
 		fmt::print(stderr, "ERROR: init_args failed\n");
@@ -2243,7 +2251,7 @@ int main(int argc, char* argv[]) {
 	});
 
 	/* allocate */
-	const auto shmsize = shm_storage_size(args.num_processes, args.num_threads);
+	const auto shmsize = shared_memory::storageSize(args.num_processes, args.num_threads);
 	auto shm = std::add_pointer_t<void>{};
 	if (ftruncate(shmfd, shmsize) < 0) {
 		shm = MAP_FAILED;
@@ -2259,7 +2267,7 @@ int main(int argc, char* argv[]) {
 	}
 	auto munmap_guard = ExitGuard([=]() { munmap(shm, shmsize); });
 
-	auto shm_access = shm_access_t(shm, args.num_processes, args.num_threads);
+	auto shm_access = shared_memory::Access(shm, args.num_processes, args.num_threads);
 
 	/* initialize the shared memory */
 	shm_access.reset();
@@ -2271,7 +2279,7 @@ int main(int argc, char* argv[]) {
 	shm_hdr.stopcount = 0;
 	shm_hdr.throttle_factor = 1.0;
 
-	auto proc_type = proc_master;
+	auto proc_type = PROC_MASTER;
 	/* fork worker processes + 1 stats process */
 	auto worker_pids = std::vector<pid_t>(args.num_processes + 1);
 
@@ -2290,11 +2298,11 @@ int main(int argc, char* argv[]) {
 		} else {
 			if (p < args.num_processes) {
 				/* worker process */
-				proc_type = proc_worker;
+				proc_type = PROC_WORKER;
 				worker_id = p;
 			} else {
 				/* stats */
-				proc_type = proc_stats;
+				proc_type = PROC_STATS;
 			}
 			break;
 		}
@@ -2308,19 +2316,19 @@ int main(int argc, char* argv[]) {
 		zipfian_generator(args.rows);
 	}
 
-	if (proc_type == proc_worker) {
+	if (proc_type == PROC_WORKER) {
 		/* worker process */
 		worker_process_main(args, worker_id, shm_access, pid_main);
 		/* worker can exit here */
 		exit(0);
-	} else if (proc_type == proc_stats) {
+	} else if (proc_type == PROC_STATS) {
 		/* stats */
 		if (args.mode == MODE_CLEAN) {
 			/* no stats needed for clean mode */
 			exit(0);
 		}
 		stats_process_main(
-		    args, shm_access.stats_const_array(), shm_hdr.throttle_factor, shm_hdr.signal, shm_hdr.stopcount, pid_main);
+		    args, shm_access.statsConstArray(), shm_hdr.throttle_factor, shm_hdr.signal, shm_hdr.stopcount, pid_main);
 		exit(0);
 	}
 

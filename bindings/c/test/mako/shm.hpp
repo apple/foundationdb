@@ -6,70 +6,72 @@
 #include <cstdint>
 #include "stats.hpp"
 
-namespace mako {
+namespace mako::shared_memory {
 
-struct shmhdr_t {
+struct Header {
 	std::atomic<int> signal;
 	std::atomic<int> readycount;
 	std::atomic<double> throttle_factor;
 	std::atomic<int> stopcount;
 };
 
-struct shm_layout_helper {
-	shmhdr_t hdr;
-	stats_t stats;
+struct LayoutHelper {
+	Header hdr;
+	ThreadStatistics stats;
 };
 
-inline size_t shm_storage_size(int num_processes, int num_threads) noexcept {
+inline size_t storageSize(int num_processes, int num_threads) noexcept {
 	assert(num_processes >= 1 && num_threads >= 1);
-	return sizeof(shm_layout_helper) + sizeof(stats_t) * ((num_processes * num_threads) - 1);
+	return sizeof(LayoutHelper) + sizeof(ThreadStatistics) * ((num_processes * num_threads) - 1);
 }
 
-inline stats_t& shm_stats_slot(void* shm_base, int num_threads, int process_idx, int thread_idx) noexcept {
-	return (&static_cast<shm_layout_helper*>(shm_base)->stats)[process_idx * num_threads + thread_idx];
-}
-
-class shm_access_t {
-protected:
+class Access {
 	void* base;
 	int num_processes;
 	int num_threads;
 
+	static inline ThreadStatistics& statsSlot(void* shm_base,
+	                                          int num_threads,
+	                                          int process_idx,
+	                                          int thread_idx) noexcept {
+		return (&static_cast<LayoutHelper*>(shm_base)->stats)[process_idx * num_threads + thread_idx];
+	}
+
 public:
-	shm_access_t(void* shm, int num_processes, int num_threads) noexcept
+	Access(void* shm, int num_processes, int num_threads) noexcept
 	  : base(shm), num_processes(num_processes), num_threads(num_threads) {}
 
-	shm_access_t() noexcept : shm_access_t(nullptr, 0, 0) {}
+	Access() noexcept : Access(nullptr, 0, 0) {}
 
-	shm_access_t(const shm_access_t&) noexcept = default;
+	Access(const Access&) noexcept = default;
 
-	shm_access_t& operator=(const shm_access_t&) noexcept = default;
+	Access& operator=(const Access&) noexcept = default;
 
-	size_t storage_size() const noexcept { return shm_storage_size(num_processes, num_threads); }
+	size_t size() const noexcept { return storageSize(num_processes, num_threads); }
 
-	void reset() noexcept { memset(base, 0, storage_size()); }
+	void reset() noexcept { memset(base, 0, size()); }
 
-	shmhdr_t const& header_const() const noexcept { return *static_cast<shmhdr_t const*>(base); }
+	Header const& headerConst() const noexcept { return *static_cast<Header const*>(base); }
 
-	shmhdr_t& header() const noexcept { return *static_cast<shmhdr_t*>(base); }
+	Header& header() const noexcept { return *static_cast<Header*>(base); }
 
-	stats_t const* stats_const_array() const noexcept {
-		return &shm_stats_slot(base, num_threads, 0 /*process_id*/, 0 /*thread_id*/);
+	ThreadStatistics const* statsConstArray() const noexcept {
+		return &statsSlot(base, num_threads, 0 /*process_id*/, 0 /*thread_id*/);
 	}
 
-	stats_t* stats_array() const noexcept {
-		return &shm_stats_slot(base, num_threads, 0 /*process_id*/, 0 /*thread_id*/);
+	ThreadStatistics* statsArray() const noexcept {
+		return &statsSlot(base, num_threads, 0 /*process_id*/, 0 /*thread_id*/);
 	}
 
-	stats_t const& stats_const_slot(int process_idx, int thread_idx) const noexcept {
-		return shm_stats_slot(base, num_threads, process_idx, thread_idx);
+	ThreadStatistics const& statsConstSlot(int process_idx, int thread_idx) const noexcept {
+		return statsSlot(base, num_threads, process_idx, thread_idx);
 	}
 
-	stats_t& stats_slot(int process_idx, int thread_idx) const noexcept {
-		return shm_stats_slot(base, num_threads, process_idx, thread_idx);
+	ThreadStatistics& statsSlot(int process_idx, int thread_idx) const noexcept {
+		return statsSlot(base, num_threads, process_idx, thread_idx);
 	}
 };
 
-} // namespace mako
+} // namespace mako::shared_memory
 
 #endif /* MAKO_SHM_HPP */

@@ -18,7 +18,7 @@ int urand(int low, int high);
 
 /* random string */
 template <bool Clear = true, typename Char>
-void randstr(std::basic_string<Char>& str, int len) {
+void randomString(std::basic_string<Char>& str, int len) {
 	if constexpr (Clear)
 		str.clear();
 	assert(len >= 0);
@@ -30,7 +30,7 @@ void randstr(std::basic_string<Char>& str, int len) {
 
 /* random numeric string */
 template <bool Clear = true, typename Char>
-void randnumstr(std::basic_string<Char>& str, int len) {
+void randomNumericString(std::basic_string<Char>& str, int len) {
 	if constexpr (Clear)
 		str.clear();
 	assert(len >= 0);
@@ -45,25 +45,25 @@ void randnumstr(std::basic_string<Char>& str, int len) {
  * and the total number of processes, total_p, and threads, total_t,
  * returns the first row number assigned to this partition.
  */
-int insert_begin(int rows, int p_idx, int t_idx, int total_p, int total_t);
+int insertBegin(int rows, int p_idx, int t_idx, int total_p, int total_t);
 
-/* similar to insert_begin, insert_end returns the last row numer */
-int insert_end(int rows, int p_idx, int t_idx, int total_p, int total_t);
+/* similar to insertBegin, insertEnd returns the last row numer */
+int insertEnd(int rows, int p_idx, int t_idx, int total_p, int total_t);
 
 /* devide a value equally among threads */
-int compute_thread_portion(int val, int p_idx, int t_idx, int total_p, int total_t);
+int computeThreadPortion(int val, int p_idx, int t_idx, int total_p, int total_t);
 
-/* similar to insert_begin/end, compute_thread_tps computes
+/* similar to insertBegin/end, computeThreadTps computes
  * the per-thread target TPS for given configuration.
  */
-#define compute_thread_tps(val, p_idx, t_idx, total_p, total_t)                                                        \
-	compute_thread_portion(val, p_idx, t_idx, total_p, total_t)
+#define computeThreadTps(val, p_idx, t_idx, total_p, total_t)                                                        \
+	computeThreadPortion(val, p_idx, t_idx, total_p, total_t)
 
-/* similar to compute_thread_tps,
- * compute_thread_iters computs the number of iterations.
+/* similar to computeThreadTps,
+ * computeThreadIters computs the number of iterations.
  */
-#define compute_thread_iters(val, p_idx, t_idx, total_p, total_t)                                                      \
-	compute_thread_portion(val, p_idx, t_idx, total_p, total_t)
+#define computeThreadIters(val, p_idx, t_idx, total_p, total_t)                                                      \
+	computeThreadPortion(val, p_idx, t_idx, total_p, total_t)
 
 /* get the number of digits */
 int digits(int num);
@@ -72,7 +72,7 @@ int digits(int num);
  * (str) is appended with concat([padding], PREFIX)
  */
 template <bool Clear = true, typename Char>
-void genkeyprefix(std::basic_string<Char>& str, std::string_view prefix, args_t const& args) {
+void genKeyPrefix(std::basic_string<Char>& str, std::string_view prefix, Arguments const& args) {
 	// concat('x' * padding_len, key_prefix)
 	if constexpr (Clear)
 		str.clear();
@@ -86,7 +86,7 @@ void genkeyprefix(std::basic_string<Char>& str, std::string_view prefix, args_t 
 /* generate a key for a given key number */
 /* prefix is "mako" by default, prefixpadding = 1 means 'x' will be in front rather than trailing the keyname */
 template <bool Clear = true, typename Char>
-void genkey(std::basic_string<Char>& str, std::string_view prefix, args_t const& args, int num) {
+void genKey(std::basic_string<Char>& str, std::string_view prefix, Arguments const& args, int num) {
 	static_assert(sizeof(Char) == 1);
 	const auto pad_len = args.prefixpadding ? args.key_length - (static_cast<int>(prefix.size()) + args.row_digits) : 0;
 	assert(pad_len >= 0);
@@ -135,30 +135,30 @@ constexpr const int STATS_TITLE_WIDTH = 12;
 constexpr const int STATS_FIELD_WIDTH = 12;
 
 template <typename Value>
-void put_title(Value&& value) {
+void putTitle(Value&& value) {
 	fmt::print("{0: <{1}} ", std::forward<Value>(value), STATS_TITLE_WIDTH);
 }
 
 template <typename Value>
-void put_title_r(Value&& value) {
+void putTitleRight(Value&& value) {
 	fmt::print("{0: >{1}} ", std::forward<Value>(value), STATS_TITLE_WIDTH);
 }
 
-inline void put_title_bar() {
+inline void putTitleBar() {
 	fmt::print("{0:=<{1}} ", "", STATS_TITLE_WIDTH);
 }
 
 template <typename Value>
-void put_field(Value&& value) {
+void putField(Value&& value) {
 	fmt::print("{0: >{1}} ", std::forward<Value>(value), STATS_FIELD_WIDTH);
 }
 
-inline void put_field_bar() {
+inline void putFieldBar() {
 	fmt::print("{0:=>{1}} ", "", STATS_FIELD_WIDTH);
 }
 
 template <typename Value>
-void put_field_f(Value&& value, int precision) {
+void putFieldFloat(Value&& value, int precision) {
 	fmt::print("{0: >{1}.{2}f} ", std::forward<Value>(value), STATS_FIELD_WIDTH, precision);
 }
 

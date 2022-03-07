@@ -41,7 +41,7 @@ constexpr const int MODE_BUILD = 1;
 constexpr const int MODE_RUN = 2;
 
 /* for long arguments */
-enum Arguments {
+enum ArgKind {
 	ARG_KEYLEN,
 	ARG_VALLEN,
 	ARG_TPS,
@@ -71,11 +71,11 @@ enum Arguments {
 
 enum TPSChangeTypes { TPS_SIN, TPS_SQUARE, TPS_PULSE };
 
-/* we set txnspec_t and args_t only once in the master process,
+/* we set WorkloadSpec and Arguments only once in the master process,
  * and won't be touched by child processes.
  */
 
-struct txnspec_t {
+struct WorkloadSpec {
 	/* for each operation, it stores "count", "range" and "reverse" */
 	int ops[MAX_OP][3];
 };
@@ -88,7 +88,7 @@ constexpr const int NUM_DATABASES_MAX = 10;
 constexpr const int MAX_BG_IDS = 1000;
 
 /* benchmark parameters */
-struct args_t {
+struct Arguments {
 	int api_version;
 	int json;
 	int num_processes;
@@ -108,7 +108,7 @@ struct args_t {
 	int zipf;
 	int commit_get;
 	int verbose;
-	txnspec_t txnspec;
+	WorkloadSpec txnspec;
 	char cluster_files[NUM_CLUSTERS_MAX][PATH_MAX];
 	int num_fdb_clusters;
 	int num_databases;
@@ -135,20 +135,19 @@ constexpr const int SIGNAL_RED = 0;
 constexpr const int SIGNAL_GREEN = 1;
 constexpr const int SIGNAL_OFF = 2;
 
-using sample_bin_array_t = std::array<sample_bin, MAX_OP>;
 /* args for threads */
-struct alignas(64) thread_args_t {
+struct alignas(64) ThreadArgs {
 	int worker_id;
 	int thread_id;
 	pid_t parent_id;
-	sample_bin_array_t sample_bins;
-	args_t const* args;
-	shm_access_t shm;
+	LatencySampleBinArray sample_bins;
+	Arguments const* args;
+	shared_memory::Access shm;
 	fdb::Database database; // database to work with
 };
 
 /* process type */
-typedef enum { proc_master = 0, proc_worker, proc_stats } proc_type_t;
+typedef enum { PROC_MASTER = 0, PROC_WORKER, PROC_STATS } ProcKind;
 
 } // namespace mako
 

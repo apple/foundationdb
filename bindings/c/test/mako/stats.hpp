@@ -1,6 +1,7 @@
 #ifndef MAKO_STATS_HPP
 #define MAKO_STATS_HPP
 
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <list>
@@ -14,14 +15,14 @@ namespace mako {
 constexpr const size_t LAT_BLOCK_SIZE = 4095;
 
 /* memory block allocated to each operation when collecting detailed latency */
-class lat_block_t {
+class LatencySampleBlock {
 	uint64_t samples[LAT_BLOCK_SIZE]{
 		0,
 	};
 	uint32_t index{ 0 };
 
 public:
-	lat_block_t() noexcept = default;
+	LatencySampleBlock() noexcept = default;
 	bool full() const noexcept { return index >= LAT_BLOCK_SIZE; }
 	void put(timediff_t td) {
 		assert(!full());
@@ -32,11 +33,11 @@ public:
 };
 
 /* collect sampled latencies */
-class sample_bin {
-	std::list<lat_block_t> blocks;
+class LatencySampleBin {
+	std::list<LatencySampleBlock> blocks;
 
 public:
-	void reserve_one() {
+	void reserveOneBlock() {
 		if (blocks.empty())
 			blocks.emplace_back();
 	}
@@ -49,7 +50,7 @@ public:
 
 	// iterate & apply for each block user function void(uint64_t const*, size_t)
 	template <typename Func>
-	void for_each_block(Func&& fn) const {
+	void forEachBlock(Func&& fn) const {
 		for (const auto& block : blocks) {
 			auto [ptr, cnt] = block.data();
 			fn(ptr, cnt);
@@ -57,7 +58,7 @@ public:
 	}
 };
 
-class alignas(64) stats_t {
+class alignas(64) ThreadStatistics {
 	uint64_t xacts;
 	uint64_t conflicts;
 	uint64_t total_errors;
@@ -69,13 +70,13 @@ class alignas(64) stats_t {
 	uint64_t latency_us_max[MAX_OP];
 
 public:
-	stats_t() noexcept {
-		memset(this, 0, sizeof(stats_t));
+	ThreadStatistics() noexcept {
+		memset(this, 0, sizeof(ThreadStatistics));
 		memset(latency_us_min, 0xff, sizeof(latency_us_min));
 	}
 
-	stats_t(const stats_t& other) noexcept = default;
-	stats_t& operator=(const stats_t& other) noexcept = default;
+	ThreadStatistics(const ThreadStatistics& other) noexcept = default;
+	ThreadStatistics& operator=(const ThreadStatistics& other) noexcept = default;
 
 	uint64_t get_tx_count() const noexcept { return xacts; }
 
@@ -96,7 +97,7 @@ public:
 	uint64_t get_latency_us_max(int op) const noexcept { return latency_us_max[op]; }
 
 	// with 'this' as final aggregation, factor in 'other'
-	void combine(const stats_t& other) {
+	void combine(const ThreadStatistics& other) {
 		xacts += other.xacts;
 		conflicts += other.conflicts;
 		for (auto op = 0; op < MAX_OP; op++) {
@@ -133,6 +134,8 @@ public:
 			latency_us_max[op] = latency_us;
 	}
 };
+
+using LatencySampleBinArray = std::array<LatencySampleBin, MAX_OP>;
 
 } // namespace mako
 

@@ -16,19 +16,19 @@ int urand(int low, int high) {
 }
 
 /* return the first key to be inserted */
-int insert_begin(int rows, int p_idx, int t_idx, int total_p, int total_t) {
+int insertBegin(int rows, int p_idx, int t_idx, int total_p, int total_t) {
 	double interval = (double)rows / total_p / total_t;
 	return (int)(round(interval * ((p_idx * total_t) + t_idx)));
 }
 
 /* return the last key to be inserted */
-int insert_end(int rows, int p_idx, int t_idx, int total_p, int total_t) {
+int insertEnd(int rows, int p_idx, int t_idx, int total_p, int total_t) {
 	double interval = (double)rows / total_p / total_t;
 	return (int)(round(interval * ((p_idx * total_t) + t_idx + 1) - 1));
 }
 
 /* devide val equally among threads */
-int compute_thread_portion(int val, int p_idx, int t_idx, int total_p, int total_t) {
+int computeThreadPortion(int val, int p_idx, int t_idx, int total_p, int total_t) {
 	int interval = val / total_p / total_t;
 	int remaining = val - (interval * total_p * total_t);
 	if ((p_idx * total_t + t_idx) < remaining) {

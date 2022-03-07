@@ -27,28 +27,28 @@ using CharsRef = std::string_view;
 using KeyRef = BytesRef;
 using ValueRef = BytesRef;
 
-inline uint8_t const* to_byte_ptr(char const* ptr) noexcept {
+inline uint8_t const* toBytePtr(char const* ptr) noexcept {
 	return reinterpret_cast<uint8_t const*>(ptr);
 }
 
 // get bytestring view from charstring: e.g. std::basic_string{_view}<char>
 template <template <class...> class StringLike, class Char>
-BytesRef to_bytes_ref(const StringLike<Char>& s) noexcept {
+BytesRef toBytesRef(const StringLike<Char>& s) noexcept {
 	static_assert(sizeof(Char) == 1);
 	return BytesRef(reinterpret_cast<uint8_t const*>(s.data()), s.size());
 }
 
 // get charstring view from bytestring: e.g. std::basic_string{_view}<uint8_t>
 template <template <class...> class StringLike, class Char>
-CharsRef to_chars_ref(const StringLike<Char>& s) noexcept {
+CharsRef toCharsRef(const StringLike<Char>& s) noexcept {
 	static_assert(sizeof(Char) == 1);
 	return CharsRef(reinterpret_cast<char const*>(s.data()), s.size());
 }
 
-[[maybe_unused]] constexpr const bool overflow_check = false;
+[[maybe_unused]] constexpr const bool OverflowCheck = false;
 
-inline int intsize(BytesRef b) {
-	if constexpr (overflow_check) {
+inline int intSize(BytesRef b) {
+	if constexpr (OverflowCheck) {
 		if (b.size() > static_cast<size_t>(std::numeric_limits<int>::max()))
 			throw std::overflow_error("byte strlen goes beyond int bounds");
 	}
@@ -57,49 +57,49 @@ inline int intsize(BytesRef b) {
 
 class Error {
 public:
-	using code_type = native::fdb_error_t;
+	using CodeType = native::fdb_error_t;
 
 	Error() noexcept : err(0) {}
 
-	explicit Error(code_type err) noexcept : err(err) {}
+	explicit Error(CodeType err) noexcept : err(err) {}
 
 	char const* what() noexcept { return native::fdb_get_error(err); }
 
 	explicit operator bool() const noexcept { return err != 0; }
 
-	bool is(code_type other) const noexcept { return err != other; }
+	bool is(CodeType other) const noexcept { return err != other; }
 
-	code_type code() const noexcept { return err; }
+	CodeType code() const noexcept { return err; }
 
 	bool retryable() const noexcept { return native::fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, err) != 0; }
 
 private:
-	code_type err;
+	CodeType err;
 };
 
 /* Traits of value types held by ready futures.
    Holds type and value extraction function. */
 namespace future_var {
 struct None {
-	struct type {};
-	static Error extract(native::FDBFuture*, type&) noexcept { return Error(0); }
+	struct Type {};
+	static Error extract(native::FDBFuture*, Type&) noexcept { return Error(0); }
 };
 struct Int64 {
-	using type = int64_t;
-	static Error extract(native::FDBFuture* f, type& out) noexcept {
+	using Type = int64_t;
+	static Error extract(native::FDBFuture* f, Type& out) noexcept {
 		return Error(native::fdb_future_get_int64(f, &out));
 	}
 };
 struct Key {
-	using type = std::pair<uint8_t const*, int>;
-	static Error extract(native::FDBFuture* f, type& out) noexcept {
+	using Type = std::pair<uint8_t const*, int>;
+	static Error extract(native::FDBFuture* f, Type& out) noexcept {
 		auto& [out_key, out_key_length] = out;
 		return Error(native::fdb_future_get_key(f, &out_key, &out_key_length));
 	}
 };
 struct Value {
-	using type = std::tuple<bool, uint8_t const*, int>;
-	static Error extract(native::FDBFuture* f, type& out) noexcept {
+	using Type = std::tuple<bool, uint8_t const*, int>;
+	static Error extract(native::FDBFuture* f, Type& out) noexcept {
 		auto& [out_present, out_value, out_value_length] = out;
 		auto out_present_native = native::fdb_bool_t{};
 		auto err = native::fdb_future_get_value(f, &out_present_native, &out_value, &out_value_length);
@@ -108,15 +108,15 @@ struct Value {
 	}
 };
 struct StringArray {
-	using type = std::pair<const char**, int>;
-	static Error extract(native::FDBFuture* f, type& out) noexcept {
+	using Type = std::pair<const char**, int>;
+	static Error extract(native::FDBFuture* f, Type& out) noexcept {
 		auto& [out_strings, out_count] = out;
 		return Error(native::fdb_future_get_string_array(f, &out_strings, &out_count));
 	}
 };
 struct KeyValueArray {
-	using type = std::tuple<native::FDBKeyValue const*, int, bool>;
-	static Error extract(native::FDBFuture* f, type& out) noexcept {
+	using Type = std::tuple<native::FDBKeyValue const*, int, bool>;
+	static Error extract(native::FDBFuture* f, Type& out) noexcept {
 		auto& [out_kv, out_count, out_more] = out;
 		auto out_more_native = native::fdb_bool_t{};
 		auto err = native::fdb_future_get_keyvalue_array(f, &out_kv, &out_count, &out_more_native);
@@ -126,61 +126,61 @@ struct KeyValueArray {
 };
 } // namespace future_var
 
-[[noreturn]] inline void throw_error(std::string_view preamble, Error err) {
+[[noreturn]] inline void throwError(std::string_view preamble, Error err) {
 	auto msg = std::string(preamble);
 	msg.append(err.what());
 	throw std::runtime_error(msg);
 }
 
-inline int max_api_version() {
+inline int maxApiVersion() {
 	return native::fdb_get_max_api_version();
 }
 
-inline Error select_api_version_nothrow(int version) {
+inline Error selectApiVersionNothrow(int version) {
 	return Error(native::fdb_select_api_version(version));
 }
 
-inline void select_api_version(int version) {
-	if (auto err = select_api_version_nothrow(version)) {
-		throw_error(fmt::format("ERROR: fdb_select_api_version({}): ", version), err);
+inline void selectApiVersion(int version) {
+	if (auto err = selectApiVersionNothrow(version)) {
+		throwError(fmt::format("ERROR: fdb_select_api_version({}): ", version), err);
 	}
 }
 
 namespace network {
 
-inline Error set_option_nothrow(FDBNetworkOption option, BytesRef str) noexcept {
-	return Error(native::fdb_network_set_option(option, str.data(), intsize(str)));
+inline Error setOptionNothrow(FDBNetworkOption option, BytesRef str) noexcept {
+	return Error(native::fdb_network_set_option(option, str.data(), intSize(str)));
 }
 
-inline Error set_option_nothrow(FDBNetworkOption option, int64_t value) noexcept {
+inline Error setOptionNothrow(FDBNetworkOption option, int64_t value) noexcept {
 	return Error(native::fdb_network_set_option(
 	    option, reinterpret_cast<const uint8_t*>(&value), static_cast<int>(sizeof(value))));
 }
 
-inline void set_option(FDBNetworkOption option, BytesRef str) {
-	if (auto err = set_option_nothrow(option, str)) {
-		throw_error(fmt::format("ERROR: fdb_network_set_option({}): ",
-		                        static_cast<std::underlying_type_t<FDBNetworkOption>>(option)),
-		            err);
+inline void setOption(FDBNetworkOption option, BytesRef str) {
+	if (auto err = setOptionNothrow(option, str)) {
+		throwError(fmt::format("ERROR: fdb_network_set_option({}): ",
+		                       static_cast<std::underlying_type_t<FDBNetworkOption>>(option)),
+		           err);
 	}
 }
 
-inline void set_option(FDBNetworkOption option, int64_t value) {
-	if (auto err = set_option_nothrow(option, value)) {
-		throw_error(fmt::format("ERROR: fdb_network_set_option({}, {}): ",
-		                        static_cast<std::underlying_type_t<FDBNetworkOption>>(option),
-		                        value),
-		            err);
+inline void setOption(FDBNetworkOption option, int64_t value) {
+	if (auto err = setOptionNothrow(option, value)) {
+		throwError(fmt::format("ERROR: fdb_network_set_option({}, {}): ",
+		                       static_cast<std::underlying_type_t<FDBNetworkOption>>(option),
+		                       value),
+		           err);
 	}
 }
 
-inline Error setup_nothrow() noexcept {
+inline Error setupNothrow() noexcept {
 	return Error(native::fdb_setup_network());
 }
 
 inline void setup() {
-	if (auto err = setup_nothrow())
-		throw_error("ERROR: fdb_network_setup(): ", err);
+	if (auto err = setupNothrow())
+		throwError("ERROR: fdb_network_setup(): ", err);
 }
 
 inline Error run() {
@@ -193,11 +193,11 @@ inline Error stop() {
 
 } // namespace network
 
-class TX;
+class Transaction;
 class Database;
 
 class Result {
-	friend class TX;
+	friend class Transaction;
 	std::shared_ptr<native::FDBResult> r;
 
 	Result(native::FDBResult* result) {
@@ -206,9 +206,9 @@ class Result {
 	}
 
 public:
-	using KeyValueArray = future_var::KeyValueArray::type;
+	using KeyValueArray = future_var::KeyValueArray::Type;
 
-	Error get_keyvalue_array_nothrow(KeyValueArray& out) const noexcept {
+	Error getKeyValueArrayNothrow(KeyValueArray& out) const noexcept {
 		auto out_more_native = native::fdb_bool_t{};
 		auto& [out_kv, out_count, out_more] = out;
 		auto err_raw = native::fdb_result_get_keyvalue_array(r.get(), &out_kv, &out_count, &out_more_native);
@@ -216,17 +216,17 @@ public:
 		return Error(err_raw);
 	}
 
-	KeyValueArray get_keyvalue_array() const {
+	KeyValueArray getKeyValueArray() const {
 		auto ret = KeyValueArray{};
-		if (auto err = get_keyvalue_array_nothrow(ret))
-			throw_error("ERROR: result_get_keyvalue_array(): ", err);
+		if (auto err = getKeyValueArrayNothrow(ret))
+			throwError("ERROR: result_get_keyvalue_array(): ", err);
 		return ret;
 	}
 };
 
 class Future {
 protected:
-	friend class TX;
+	friend class Transaction;
 	std::shared_ptr<native::FDBFuture> f;
 
 	Future(native::FDBFuture* future) {
@@ -270,7 +270,7 @@ public:
 		return native::fdb_future_is_ready(f.get()) != 0;
 	}
 
-	Error block_until_ready() const noexcept {
+	Error blockUntilReady() const noexcept {
 		assert(valid());
 		return Error(native::fdb_future_block_until_ready(f.get()));
 	}
@@ -283,18 +283,18 @@ public:
 	void cancel() noexcept { native::fdb_future_cancel(f.get()); }
 
 	template <class VarTraits>
-	typename VarTraits::type get() const {
+	typename VarTraits::Type get() const {
 		assert(valid());
 		assert(!error());
 		auto out = typename VarTraits::Type{};
 		if (auto err = VarTraits::extract(f.get(), out)) {
-			throw_error("future_get: ", err);
+			throwError("future_get: ", err);
 		}
 		return out;
 	}
 
 	template <class VarTraits>
-	Error get_nothrow(typename VarTraits::type& var) const noexcept {
+	Error getNothrow(typename VarTraits::Type& var) const noexcept {
 		assert(valid());
 		assert(!error());
 		auto out = typename VarTraits::Type{};
@@ -309,95 +309,95 @@ public:
 
 template <typename VarTraits>
 class TypedFuture : public Future {
-	friend class TX;
-	using self_type = TypedFuture<VarTraits>;
+	friend class Transaction;
+	using SelfType = TypedFuture<VarTraits>;
 	using Future::Future;
 	// hide type-unsafe inherited functions
 	using Future::get;
-	using Future::get_nothrow;
+	using Future::getNothrow;
 	using Future::then;
 	TypedFuture(const Future& f) noexcept : Future(f) {}
 
 public:
-	using contained_type = typename VarTraits::type;
+	using ContainedType = typename VarTraits::Type;
 
-	Future erase_type() const noexcept { return static_cast<Future const&>(*this); }
+	Future eraseType() const noexcept { return static_cast<Future const&>(*this); }
 
-	contained_type get() const { return get<VarTraits>(); }
+	ContainedType get() const { return get<VarTraits>(); }
 
-	Error get_nothrow(contained_type& out) const noexcept { return get_nothrow<VarTraits>(out); }
+	Error getNothrow(ContainedType& out) const noexcept { return getNothrow<VarTraits>(out); }
 
 	template <class UserFunc>
 	void then(UserFunc&& fn) {
-		Future::then<self_type>(std::forward<UserFunc>(fn));
+		Future::then<SelfType>(std::forward<UserFunc>(fn));
 	}
 };
 
-namespace key_select {
+namespace KeySelect {
 
-struct inclusive {
+struct Inclusive {
 	static constexpr const bool value = true;
 };
 
-struct exclusive {
+struct Exclusive {
 	static constexpr const bool value = false;
 };
-} // namespace key_select
+} // namespace KeySelect
 
-class TX {
+class Transaction {
 	friend class Database;
 	std::shared_ptr<native::FDBTransaction> tr;
 
-	explicit TX(native::FDBTransaction* tr_raw) {
+	explicit Transaction(native::FDBTransaction* tr_raw) {
 		if (tr_raw)
 			tr = std::shared_ptr<native::FDBTransaction>(tr_raw, &native::fdb_transaction_destroy);
 	}
 
 public:
-	TX() noexcept : TX(nullptr) {}
-	TX(const TX&) noexcept = default;
-	TX& operator=(const TX&) noexcept = default;
+	Transaction() noexcept : Transaction(nullptr) {}
+	Transaction(const Transaction&) noexcept = default;
+	Transaction& operator=(const Transaction&) noexcept = default;
 
 	bool valid() const noexcept { return tr != nullptr; }
 
 	explicit operator bool() const noexcept { return valid(); }
 
-	Error set_option_nothrow(FDBTransactionOption option, int64_t value) noexcept {
+	Error setOptionNothrow(FDBTransactionOption option, int64_t value) noexcept {
 		return Error(native::fdb_transaction_set_option(
 		    tr.get(), option, reinterpret_cast<const uint8_t*>(&value), static_cast<int>(sizeof(value))));
 	}
 
-	Error set_option_nothrow(FDBTransactionOption option, BytesRef str) noexcept {
-		return Error(native::fdb_transaction_set_option(tr.get(), option, str.data(), intsize(str)));
+	Error setOptionNothrow(FDBTransactionOption option, BytesRef str) noexcept {
+		return Error(native::fdb_transaction_set_option(tr.get(), option, str.data(), intSize(str)));
 	}
 
-	void set_option(FDBTransactionOption option, int64_t value) {
-		if (auto err = set_option_nothrow(option, value)) {
-			throw_error(fmt::format("transaction_set_option({}, {}) returned error: ",
-			                        static_cast<std::underlying_type_t<FDBTransactionOption>>(option),
-			                        value),
-			            err);
+	void setOption(FDBTransactionOption option, int64_t value) {
+		if (auto err = setOptionNothrow(option, value)) {
+			throwError(fmt::format("transaction_set_option({}, {}) returned error: ",
+			                       static_cast<std::underlying_type_t<FDBTransactionOption>>(option),
+			                       value),
+			           err);
 		}
 	}
 
-	void set_option(FDBTransactionOption option, BytesRef str) {
-		if (auto err = set_option_nothrow(option, str)) {
-			throw_error(fmt::format("transaction_set_option({}) returned error: ",
-			                        static_cast<std::underlying_type_t<FDBTransactionOption>>(option)),
-			            err);
+	void setOption(FDBTransactionOption option, BytesRef str) {
+		if (auto err = setOptionNothrow(option, str)) {
+			throwError(fmt::format("transaction_set_option({}) returned error: ",
+			                       static_cast<std::underlying_type_t<FDBTransactionOption>>(option)),
+			           err);
 		}
 	}
 
-	TypedFuture<future_var::Int64> get_read_version() { return native::fdb_transaction_get_read_version(tr.get()); }
+	TypedFuture<future_var::Int64> getReadVersion() { return native::fdb_transaction_get_read_version(tr.get()); }
 
-	Error get_committed_version_nothrow(int64_t& out) {
+	Error getCommittedVersionNothrow(int64_t& out) {
 		return Error(native::fdb_transaction_get_committed_version(tr.get(), &out));
 	}
 
-	int64_t get_committed_version() {
+	int64_t getCommittedVersion() {
 		auto out = int64_t{};
-		if (auto err = get_committed_version_nothrow(out)) {
-			throw_error("get_committed_version: ", err);
+		if (auto err = getCommittedVersionNothrow(out)) {
+			throwError("get_committed_version: ", err);
 		}
 		return out;
 	}
@@ -406,24 +406,24 @@ public:
 	// Func should first check that retry == false and f.error() == 0
 	// before attempting to extract value from f
 	TypedFuture<future_var::Value> get(KeyRef key, bool snapshot) {
-		return native::fdb_transaction_get(tr.get(), key.data(), intsize(key), snapshot);
+		return native::fdb_transaction_get(tr.get(), key.data(), intSize(key), snapshot);
 	}
 
-	// Usage: tx.get_range<key_select::inclusive, key_select::exclusive>(begin, end, ...);
+	// Usage: tx.get_range<KeySelect::inclusive, KeySelect::exclusive>(begin, end, ...);
 	// gets key-value pairs in key range [begin, end)
 	template <class FirstInclusive, class LastInclusive>
-	TypedFuture<future_var::KeyValueArray> get_range(KeyRef begin,
-	                                                 KeyRef end,
-	                                                 int limit,
-	                                                 int target_bytes,
-	                                                 FDBStreamingMode mode,
-	                                                 int iteration,
-	                                                 bool snapshot,
-	                                                 bool reverse) {
+	TypedFuture<future_var::KeyValueArray> getRange(KeyRef begin,
+	                                                KeyRef end,
+	                                                int limit,
+	                                                int target_bytes,
+	                                                FDBStreamingMode mode,
+	                                                int iteration,
+	                                                bool snapshot,
+	                                                bool reverse) {
 		if constexpr (FirstInclusive::value && LastInclusive::value) {
 			return native::fdb_transaction_get_range(tr.get(),
-			                                         FDB_KEYSEL_FIRST_GREATER_OR_EQUAL(begin.data(), intsize(begin)),
-			                                         FDB_KEYSEL_LAST_LESS_OR_EQUAL(end.data(), intsize(end)),
+			                                         FDB_KEYSEL_FIRST_GREATER_OR_EQUAL(begin.data(), intSize(begin)),
+			                                         FDB_KEYSEL_LAST_LESS_OR_EQUAL(end.data(), intSize(end)),
 			                                         limit,
 			                                         target_bytes,
 			                                         mode,
@@ -432,8 +432,8 @@ public:
 			                                         reverse);
 		} else if constexpr (FirstInclusive::value && !LastInclusive::value) {
 			return native::fdb_transaction_get_range(tr.get(),
-			                                         FDB_KEYSEL_FIRST_GREATER_OR_EQUAL(begin.data(), intsize(begin)),
-			                                         FDB_KEYSEL_LAST_LESS_THAN(end.data(), intsize(end)),
+			                                         FDB_KEYSEL_FIRST_GREATER_OR_EQUAL(begin.data(), intSize(begin)),
+			                                         FDB_KEYSEL_LAST_LESS_THAN(end.data(), intSize(end)),
 			                                         limit,
 			                                         target_bytes,
 			                                         mode,
@@ -442,8 +442,8 @@ public:
 			                                         reverse);
 		} else if constexpr (!FirstInclusive::value && LastInclusive::value) {
 			return native::fdb_transaction_get_range(tr.get(),
-			                                         FDB_KEYSEL_FIRST_GREATER_THAN(begin.data(), intsize(begin)),
-			                                         FDB_KEYSEL_LAST_LESS_OR_EQUAL(end.data(), intsize(end)),
+			                                         FDB_KEYSEL_FIRST_GREATER_THAN(begin.data(), intSize(begin)),
+			                                         FDB_KEYSEL_LAST_LESS_OR_EQUAL(end.data(), intSize(end)),
 			                                         limit,
 			                                         target_bytes,
 			                                         mode,
@@ -452,8 +452,8 @@ public:
 			                                         reverse);
 		} else {
 			return native::fdb_transaction_get_range(tr.get(),
-			                                         FDB_KEYSEL_FIRST_GREATER_THAN(begin.data(), intsize(begin)),
-			                                         FDB_KEYSEL_LAST_LESS_THAN(end.data(), intsize(end)),
+			                                         FDB_KEYSEL_FIRST_GREATER_THAN(begin.data(), intSize(begin)),
+			                                         FDB_KEYSEL_LAST_LESS_THAN(end.data(), intSize(end)),
 			                                         limit,
 			                                         target_bytes,
 			                                         mode,
@@ -463,29 +463,29 @@ public:
 		}
 	}
 
-	Result read_blob_granules(KeyRef begin,
-	                          KeyRef end,
-	                          int64_t begin_version,
-	                          int64_t read_version,
-	                          native::FDBReadBlobGranuleContext context) {
+	Result readBlobGranules(KeyRef begin,
+	                        KeyRef end,
+	                        int64_t begin_version,
+	                        int64_t read_version,
+	                        native::FDBReadBlobGranuleContext context) {
 		return Result(native::fdb_transaction_read_blob_granules(
-		    tr.get(), begin.data(), intsize(begin), end.data(), intsize(end), begin_version, read_version, context));
+		    tr.get(), begin.data(), intSize(begin), end.data(), intSize(end), begin_version, read_version, context));
 	}
 
 	TypedFuture<future_var::None> commit() { return native::fdb_transaction_commit(tr.get()); }
 
-	TypedFuture<future_var::None> on_error(Error err) { return native::fdb_transaction_on_error(tr.get(), err.code()); }
+	TypedFuture<future_var::None> onError(Error err) { return native::fdb_transaction_on_error(tr.get(), err.code()); }
 
 	void reset() { return native::fdb_transaction_reset(tr.get()); }
 
 	void set(KeyRef key, ValueRef value) {
-		native::fdb_transaction_set(tr.get(), key.data(), intsize(key), value.data(), intsize(value));
+		native::fdb_transaction_set(tr.get(), key.data(), intSize(key), value.data(), intSize(value));
 	}
 
-	void clear(KeyRef key) { native::fdb_transaction_clear(tr.get(), key.data(), intsize(key)); }
+	void clear(KeyRef key) { native::fdb_transaction_clear(tr.get(), key.data(), intSize(key)); }
 
-	void clear_range(KeyRef begin, KeyRef end) {
-		native::fdb_transaction_clear_range(tr.get(), begin.data(), intsize(begin), end.data(), intsize(end));
+	void clearRange(KeyRef begin, KeyRef end) {
+		native::fdb_transaction_clear_range(tr.get(), begin.data(), intSize(begin), end.data(), intSize(end));
 	}
 };
 
@@ -498,45 +498,45 @@ public:
 	Database(const std::string& cluster_file_path) : db(nullptr) {
 		auto db_raw = static_cast<native::FDBDatabase*>(nullptr);
 		if (auto err = Error(native::fdb_create_database(cluster_file_path.c_str(), &db_raw)))
-			throw_error(fmt::format("Failed to create database with '{}': ", cluster_file_path), err);
+			throwError(fmt::format("Failed to create database with '{}': ", cluster_file_path), err);
 		db = std::shared_ptr<native::FDBDatabase>(db_raw, &native::fdb_database_destroy);
 	}
 	Database() noexcept : db(nullptr) {}
 
-	Error set_option_nothrow(FDBDatabaseOption option, int64_t value) noexcept {
+	Error setOptionNothrow(FDBDatabaseOption option, int64_t value) noexcept {
 		return Error(native::fdb_database_set_option(
 		    db.get(), option, reinterpret_cast<const uint8_t*>(&value), static_cast<int>(sizeof(value))));
 	}
 
-	Error set_option_nothrow(FDBDatabaseOption option, BytesRef str) noexcept {
-		return Error(native::fdb_database_set_option(db.get(), option, str.data(), intsize(str)));
+	Error setOptionNothrow(FDBDatabaseOption option, BytesRef str) noexcept {
+		return Error(native::fdb_database_set_option(db.get(), option, str.data(), intSize(str)));
 	}
 
-	void set_option(FDBDatabaseOption option, int64_t value) {
-		if (auto err = set_option_nothrow(option, value)) {
-			throw_error(fmt::format("database_set_option({}, {}) returned error: ",
-			                        static_cast<std::underlying_type_t<FDBDatabaseOption>>(option),
-			                        value),
-			            err);
+	void setOption(FDBDatabaseOption option, int64_t value) {
+		if (auto err = setOptionNothrow(option, value)) {
+			throwError(fmt::format("database_set_option({}, {}) returned error: ",
+			                       static_cast<std::underlying_type_t<FDBDatabaseOption>>(option),
+			                       value),
+			           err);
 		}
 	}
 
-	void set_option(FDBDatabaseOption option, BytesRef str) {
-		if (auto err = set_option_nothrow(option, str)) {
-			throw_error(fmt::format("database_set_option({}) returned error: ",
-			                        static_cast<std::underlying_type_t<FDBDatabaseOption>>(option)),
-			            err);
+	void setOption(FDBDatabaseOption option, BytesRef str) {
+		if (auto err = setOptionNothrow(option, str)) {
+			throwError(fmt::format("database_set_option({}) returned error: ",
+			                       static_cast<std::underlying_type_t<FDBDatabaseOption>>(option)),
+			           err);
 		}
 	}
 
-	TX create_tx() {
+	Transaction createTransaction() {
 		if (!db)
 			throw std::runtime_error("create_transaction from null database");
 		auto tx_native = static_cast<native::FDBTransaction*>(nullptr);
 		auto err = Error(native::fdb_database_create_transaction(db.get(), &tx_native));
 		if (err)
-			throw_error("Failed to create transaction: ", err);
-		return TX(tx_native);
+			throwError("Failed to create transaction: ", err);
+		return Transaction(tx_native);
 	}
 };
 
