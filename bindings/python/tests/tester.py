@@ -593,10 +593,12 @@ class Tester:
                     inst.push(b"WAITED_FOR_EMPTY")
                 elif inst.op == six.u("TENANT_CREATE"):
                     name = inst.pop()
-                    inst.push(self.db.allocate_tenant(name))
+                    self.db.allocate_tenant(name)
+                    inst.push(b"RESULT_NOT_PRESENT")
                 elif inst.op == six.u("TENANT_DELETE"):
                     name = inst.pop()
-                    inst.push(self.db.delete_tenant(name))
+                    self.db.delete_tenant(name)
+                    inst.push(b"RESULT_NOT_PRESENT")
                 elif inst.op == six.u("TENANT_SET_ACTIVE"):
                     name = inst.pop()
                     self.tenant = self.db.open_tenant(name)

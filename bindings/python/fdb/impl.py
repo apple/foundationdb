@@ -1179,12 +1179,34 @@ class Database(_TransactionCreator):
         return Transaction(pointer.value, self)
 
     def allocate_tenant(self, name):
-        tname = process_tenant_name(name)
-        return FutureVoid(self.capi.fdb_database_allocate_tenant(self.dpointer, tname, len(tname)))
+        Database.__database_allocate_tenant(self, process_tenant_name(name), [])
 
     def delete_tenant(self, name):
-        tname = process_tenant_name(name)
-        return FutureVoid(self.capi.fdb_database_remove_tenant(self.dpointer, tname, len(tname)))
+        Database.__database_delete_tenant(self, process_tenant_name(name), [])
+
+    @staticmethod
+    @transactional
+    def __database_allocate_tenant(tr, name, existence_check_marker):
+        tr.options.set_special_key_space_enable_writes()
+        key = b'\xff\xff/management/tenant_map/%s' % name
+        if not existence_check_marker:
+            existing_tenant = tr[key].wait()
+            existence_check_marker.append(None)
+            if existing_tenant != None:
+                raise fdb.FDBError(2132) # tenant_already_exists
+        tr[key] = b''
+
+    @staticmethod
+    @transactional
+    def __database_delete_tenant(tr, name, existence_check_marker):
+        tr.options.set_special_key_space_enable_writes()
+        key = b'\xff\xff/management/tenant_map/%s' % name
+        if not existence_check_marker:
+            existing_tenant = tr[key].wait()
+            existence_check_marker.append(None)
+            if existing_tenant == None:
+                raise fdb.FDBError(2131) # tenant_not_found
+        del tr[key]
 
 
 class Tenant(_TransactionCreator):
@@ -1509,12 +1531,6 @@ def init_c_api():
     _capi.fdb_database_set_option.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_int]
     _capi.fdb_database_set_option.restype = ctypes.c_int
     _capi.fdb_database_set_option.errcheck = check_error_code
-
-    _capi.fdb_database_allocate_tenant.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int]
-    _capi.fdb_database_allocate_tenant.restype = ctypes.c_void_p
-
-    _capi.fdb_database_remove_tenant.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int]
-    _capi.fdb_database_remove_tenant.restype = ctypes.c_void_p
 
     _capi.fdb_tenant_destroy.argtypes = [ctypes.c_void_p]
     _capi.fdb_tenant_destroy.restype = None

@@ -27,7 +27,7 @@ if __name__ == '__main__':
 
 def test_tenant_tuple_name(db):
     tuplename=(b'test', b'level', b'hierarchy', 3, 1.24, 'str')
-    db.allocate_tenant(tuplename).wait()
+    db.allocate_tenant(tuplename)
 
     tenant=db.open_tenant(tuplename)
     tenant[b'foo'] = b'bar'
@@ -35,7 +35,7 @@ def test_tenant_tuple_name(db):
     assert tenant[b'foo'] == b'bar'
 
     del tenant[b'foo']
-    db.delete_tenant(tuplename).wait()
+    db.delete_tenant(tuplename)
 
 # Expect a cluster file as input. This test will write to the FDB cluster, so
 # be aware of potential side effects.
