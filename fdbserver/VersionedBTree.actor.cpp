@@ -2144,14 +2144,14 @@ public:
 	          int desiredExtentSize,
 	          std::string filename,
 	          int64_t pageCacheSizeBytes,
-	          int64_t remapCleanupWindow,
+	          int64_t remapCleanupWindowBytes,
 	          int concurrentExtentReads,
 	          bool memoryOnly = false,
 	          Promise<Void> errorPromise = {})
 	  : ioLock(FLOW_KNOBS->MAX_OUTSTANDING, ioMaxPriority, FLOW_KNOBS->MAX_OUTSTANDING / 2),
 	    pageCacheBytes(pageCacheSizeBytes), pHeader(nullptr), desiredPageSize(desiredPageSize),
 	    desiredExtentSize(desiredExtentSize), filename(filename), memoryOnly(memoryOnly), errorPromise(errorPromise),
-	    remapCleanupWindow(remapCleanupWindow), concurrentExtentReads(new FlowLock(concurrentExtentReads)) {
+	    remapCleanupWindowBytes(remapCleanupWindowBytes), concurrentExtentReads(new FlowLock(concurrentExtentReads)) {
 
 		// This sets the page cache size for all PageCacheT instances using the same evictor
 		pageCache.evictor().sizeLimit = pageCacheBytes;
@@ -3441,14 +3441,20 @@ public:
 		// Maximum number of remaining remap entries to keep before obeying stop command.
 		double toleranceRatio = BUGGIFY ? deterministicRandom()->randomInt(0, 10) / 100.0
 		                                : SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_TOLERANCE_RATIO;
-		state uint64_t minRemapEntries = static_cast<uint64_t>(self->remapCleanupWindow * (1.0 - toleranceRatio));
-		state uint64_t maxRemapEntries = static_cast<uint64_t>(self->remapCleanupWindow * (1.0 + toleranceRatio));
+		// For simplicity, we assume each entry in the remap queue corresponds to one remapped page.
+		uint64_t remapCleanupWindowEntries =
+		    static_cast<uint64_t>(self->remapCleanupWindowBytes / self->pHeader->pageSize);
+		state uint64_t minRemapEntries = static_cast<uint64_t>(remapCleanupWindowEntries * (1.0 - toleranceRatio));
+		state uint64_t maxRemapEntries = static_cast<uint64_t>(remapCleanupWindowEntries * (1.0 + toleranceRatio));
 
-		debug_printf("DWALPager(%s) remapCleanup oldestRetainedVersion=%" PRId64 " remapCleanupWindow=%" PRId64
-		             " maxRemapEntries=%" PRId64 " items=%" PRId64 "\n",
+		debug_printf("DWALPager(%s) remapCleanup oldestRetainedVersion=%" PRId64 " remapCleanupWindowBytes=%" PRId64
+		             " pageSize=%" PRIu32 " minRemapEntries=%" PRId64 " maxRemapEntries=%" PRId64 " items=%" PRId64
+		             "\n",
 		             self->filename.c_str(),
 		             oldestRetainedVersion,
-		             self->remapCleanupWindow,
+		             self->remapCleanupWindowBytes,
+		             self->pHeader->pageSize,
+		             minRemapEntries,
 		             maxRemapEntries,
 		             self->remapQueue.numEntries);
 
@@ -3479,10 +3485,8 @@ public:
 
 			// Stop if we have reached the cutoff version, which is the start of the cleanup coalescing window
 			if (!p.present()) {
-				debug_printf("DWALPager(%s) remapCleanup pop failed minVer=%" PRId64 " cutoffVer=%" PRId64
-				             " items=%" PRId64 "\n",
+				debug_printf("DWALPager(%s) remapCleanup pop failed cutoffVer=%" PRId64 " items=%" PRId64 "\n",
 				             self->filename.c_str(),
-				             minStopVersion,
 				             cutoff.version,
 				             self->remapQueue.numEntries);
 				break;
@@ -3798,7 +3802,7 @@ private:
 		// by the remap cleanup window and commit
 		while (self->remapQueue.numEntries > 0) {
 			self->setOldestReadableVersion(self->getLastCommittedVersion());
-			wait(self->commit(self->getLastCommittedVersion() + self->remapCleanupWindow + 1));
+			wait(self->commit(self->getLastCommittedVersion() + self->remapCleanupWindowBytes + 1));
 		}
 
 		// One final commit because the active commit cycle may have popped from the remap queue
@@ -3875,7 +3879,7 @@ private:
 	RemapQueueT remapQueue;
 	LogicalPageQueueT extentFreeList;
 	ExtentUsedListQueueT extentUsedList;
-	uint64_t remapCleanupWindow;
+	uint64_t remapCleanupWindowBytes;
 	Reference<FlowLock> concurrentExtentReads;
 	std::unordered_set<PhysicalPageID> remapDestinationsSimOnly;
 
@@ -7415,18 +7419,15 @@ public:
 		        ? (BUGGIFY ? deterministicRandom()->randomInt(pageSize, FLOW_KNOBS->BUGGIFY_SIM_PAGE_CACHE_4K)
 		                   : FLOW_KNOBS->SIM_PAGE_CACHE_4K)
 		        : FLOW_KNOBS->PAGE_CACHE_4K;
-		// Number of entries to keep in remap queue before being cleanup.
-		// For simplicity, we assume each remap queue entry corresponds to one remapped page, i.e. ignore
-		// delete/detach entries.
-		int64_t remapCleanupWindow = (BUGGIFY ? deterministicRandom()->randomInt64(0, 100) * 1024 * 1024
-		                                      : SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_WINDOW_BYTES) /
-		                             pageSize;
+		// Rough size of pages to keep in remap cleanup queue before being cleanup.
+		int64_t remapCleanupWindowBytes = (BUGGIFY ? deterministicRandom()->randomInt64(0, 100) * 1024 * 1024
+		                                           : SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_WINDOW_BYTES);
 
 		IPager2* pager = new DWALPager(pageSize,
 		                               extentSize,
 		                               filePrefix,
 		                               pageCacheBytes,
-		                               remapCleanupWindow,
+		                               remapCleanupWindowBytes,
 		                               SERVER_KNOBS->REDWOOD_EXTENT_CONCURRENT_READS,
 		                               false,
 		                               m_error);
