@@ -52,6 +52,10 @@ void KeySelectorRef::setKey(KeyRef const& key) {
 		this->key = key;
 }
 
+void KeySelectorRef::setKeyUnlimited(KeyRef const& key) {
+	this->key = key;
+}
+
 std::string KeySelectorRef::toString() const {
 	if (offset > 0) {
 		if (orEqual)

@@ -546,6 +546,7 @@ public:
 	KeyRef getKey() const { return key; }
 
 	void setKey(KeyRef const& key);
+	void setKeyUnlimited(KeyRef const& key);
 
 	std::string toString() const;
 
@@ -1178,6 +1179,42 @@ struct StorageMigrationType {
 	}
 
 	uint32_t type;
+};
+
+struct TenantMode {
+	// These enumerated values are stored in the database configuration, so can NEVER be changed.  Only add new ones
+	// just before END.
+	// Note: OPTIONAL_TENANT is not named OPTIONAL because of a collision with a Windows macro.
+	enum Mode { DISABLED = 0, OPTIONAL_TENANT = 1, REQUIRED = 2, END = 3 };
+
+	TenantMode() : mode(DISABLED) {}
+	TenantMode(Mode mode) : mode(mode) {
+		if ((uint32_t)mode >= END) {
+			this->mode = DISABLED;
+		}
+	}
+	operator Mode() const { return Mode(mode); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, mode);
+	}
+
+	std::string toString() const {
+		switch (mode) {
+		case DISABLED:
+			return "disabled";
+		case OPTIONAL_TENANT:
+			return "optional_experimental";
+		case REQUIRED:
+			return "required_experimental";
+		default:
+			ASSERT(false);
+		}
+		return "";
+	}
+
+	uint32_t mode;
 };
 
 inline bool isValidPerpetualStorageWiggleLocality(std::string locality) {
