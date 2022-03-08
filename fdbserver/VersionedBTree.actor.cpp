@@ -4723,6 +4723,28 @@ struct DecodeBoundaryVerifier {
 		             i->second.lower.printable().c_str(),
 		             i->second.upper.printable().c_str());
 	}
+
+	void removeAfterVersion(Version version) {
+		auto i = boundariesByPageID.begin();
+		while (i != boundariesByPageID.end()) {
+			auto v = i->second.upper_bound(version);
+			while (v != i->second.end()) {
+				debug_printf("decodeBoundariesUpdate remove %s %s '%s' to '%s'\n",
+				             ::toString(v->first).c_str(),
+				             ::toString(i->first).c_str(),
+				             v->second.lower.printable().c_str(),
+				             v->second.upper.printable().c_str());
+				v = i->second.erase(v);
+			}
+
+			if (i->second.empty()) {
+				debug_printf("decodeBoundariesUpdate remove empty map for %s\n", ::toString(i->first).c_str());
+				i = boundariesByPageID.erase(i);
+			} else {
+				++i;
+			}
+		}
+	}
 };
 
 class VersionedBTree {
@@ -5007,7 +5029,13 @@ public:
 		self->m_newOldestVersion = self->m_pager->getOldestReadableVersion();
 
 		debug_printf("Recovered pager to version %" PRId64 ", oldest version is %" PRId64 "\n",
+		             self->getLastCommittedVersion(),
 		             self->m_newOldestVersion);
+
+		// Clear any changes that occurred after the latest committed version
+		if (self->m_pBoundaryVerifier != nullptr) {
+			self->m_pBoundaryVerifier->removeAfterVersion(self->getLastCommittedVersion());
+		}
 
 		state Key meta = self->m_pager->getMetaKey();
 		if (meta.size() == 0) {
