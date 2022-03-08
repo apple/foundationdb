@@ -179,7 +179,7 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 			if (value == "disabled") {
 				tenantMode = TenantMode::DISABLED;
 			} else if (value == "optional_experimental") {
-				tenantMode = TenantMode::OPTIONAL;
+				tenantMode = TenantMode::OPTIONAL_TENANT;
 			} else if (value == "required_experimental") {
 				tenantMode = TenantMode::REQUIRED;
 			} else {

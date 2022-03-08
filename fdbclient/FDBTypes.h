@@ -30,10 +30,6 @@
 #include "flow/Arena.h"
 #include "flow/flow.h"
 
-#ifdef _WIN32
-#undef OPTIONAL
-#endif
-
 typedef int64_t Version;
 typedef uint64_t LogEpoch;
 typedef uint64_t Sequence;
@@ -1188,7 +1184,8 @@ struct StorageMigrationType {
 struct TenantMode {
 	// These enumerated values are stored in the database configuration, so can NEVER be changed.  Only add new ones
 	// just before END.
-	enum Mode { DISABLED = 0, OPTIONAL = 1, REQUIRED = 2, END = 3 };
+	// Note: OPTIONAL_TENANT is not named OPTIONAL because of a collision with a Windows macro.
+	enum Mode { DISABLED = 0, OPTIONAL_TENANT = 1, REQUIRED = 2, END = 3 };
 
 	TenantMode() : mode(DISABLED) {}
 	TenantMode(Mode mode) : mode(mode) {
@@ -1207,7 +1204,7 @@ struct TenantMode {
 		switch (mode) {
 		case DISABLED:
 			return "disabled";
-		case OPTIONAL:
+		case OPTIONAL_TENANT:
 			return "optional_experimental";
 		case REQUIRED:
 			return "required_experimental";
