@@ -5947,13 +5947,15 @@ private:
 		RedwoodRecordRef decodeLowerBound;
 		RedwoodRecordRef decodeUpperBound;
 
+		// Returns true of BTree logical boundaries and DeltaTree decoding boundaries are the same.
 		bool boundariesNormal() const {
-			// If the decode upper boundary is the subtree upper boundary the pointers will be the same
-			// For the lower boundary, if the pointers are not the same there is still a possibility
-			// that the keys are the same.  This happens for the first remaining subtree of an internal page
-			// after the prior subtree(s) were cleared.
-			return (decodeUpperBound == subtreeUpperBound) &&
-			       (decodeLowerBound == subtreeLowerBound || decodeLowerBound.sameExceptValue(subtreeLowerBound));
+			// Often these strings will refer to the same memory so same() is used as a faster way of determining
+			// equality in thec common case, but if it does not match a string comparison is needed as they can
+			// still be the same.  This can happen for the first remaining subtree of an internal page
+			// after all prior subtree(s) were cleared.
+			return (
+			    (decodeUpperBound.key.same(subtreeUpperBound.key) || decodeUpperBound.key == subtreeUpperBound.key) &&
+			    (decodeLowerBound.key.same(subtreeLowerBound.key) || decodeLowerBound.key == subtreeLowerBound.key));
 		}
 
 		// The record range of the subtree slice is cBegin to cEnd
