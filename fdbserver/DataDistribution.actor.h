@@ -35,9 +35,13 @@
 struct RelocateShard {
 	KeyRange keys;
 	int priority;
+	const bool restore;
+	Optional<DataMoveMetaData> dataMove;
 
-	RelocateShard() : priority(0) {}
-	RelocateShard(KeyRange const& keys, int priority) : keys(keys), priority(priority) {}
+	RelocateShard() : priority(0), restore(false) {}
+	RelocateShard(KeyRange const& keys, int priority) : keys(keys), priority(priority), restore(false) {}
+	RelocateShard(KeyRange const& keys, int priority, bool restore)
+	  : keys(keys), priority(priority), restore(restore) {}
 };
 
 struct IDataDistributionTeam {
@@ -215,6 +219,49 @@ struct DDShardInfo {
 	explicit DDShardInfo(Key key) : key(key), hasDest(false) {}
 };
 
+struct DataMove {
+	DataMoveMetaData meta;
+	// KeyRange keys;
+	// int priority;
+	// int boundaryPriority;
+	// int healthPriority;
+	bool restore;
+	bool valid;
+
+	double startTime;
+	// UID randomId;
+	// UID dataMoveID;
+	// int workFactor;
+	std::vector<std::vector<UID>> srcTeams;
+	std::vector<UID> dest;
+
+	DataMove() : restore(false), startTime(-1), valid(false) {}
+	explicit DataMove(const DataMoveMetaData& meta, bool restore)
+	  : meta(meta), restore(restore), valid(true), startTime(now()) {}
+
+	void addShard(const DDShardInfo& shard) {
+		if (!valid) {
+			return;
+		}
+		std::set<UID> dests(shard.primaryDest.begin(), shard.primaryDest.end());
+		for (const UID& id : shard.remoteDest) {
+			dests.insert(id);
+		}
+		if (!std::equal(dests.begin(), dests.end(), this->meta.dest.end())) {
+			valid = false;
+			return;
+		}
+		for (const UID& id : shard.primarySrc) {
+			this->meta.src.insert(id);
+		}
+		for (const UID& id : shard.remoteSrc) {
+			this->meta.src.insert(id);
+		}
+		srcTeams.push_back(shard.primarySrc);
+		srcTeams.push_back(shard.remoteSrc);
+	}
+};
+
 struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
 	int mode;
 	std::vector<std::pair<StorageServerInterface, ProcessClass>> allServers;
@@ -222,6 +269,7 @@ struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
 	std::set<std::vector<UID>> remoteTeams;
 	std::vector<DDShardInfo> shards;
 	Optional<Key> initHealthyZoneValue;
+	std::vector<DataMoveMetaData> dataMoves;
 };
 
 struct ShardMetrics {

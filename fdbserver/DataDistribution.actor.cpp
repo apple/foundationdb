@@ -120,6 +120,13 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Data
 				}
 			}
 
+			RangeResult dataMoves = wait(tr.getRange(dataMoveKeys, CLIENT_KNOBS->TOO_MANY));
+			ASSERT(!dataMoves.more && dataMoves.size() < CLIENT_KNOBS->TOO_MANY);
+
+			for (int i = 0; i < dataMoves.size(); ++i) {
+				result->dataMoves.push_back(decodeDataMoveValue(dataMoves[i].value));
+			}
+
 			break;
 		} catch (Error& e) {
 			wait(tr.onError(e));
@@ -672,6 +679,25 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			state Promise<Void> readyToStart;
 			state Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure(new ShardsAffectedByTeamFailure);
 
+			state KeyRangeMap<std::shared_ptr<DataMove>> dataMoveMap;
+			if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+				for (int i = 0; i < initData->dataMoves.size(); ++i) {
+					const auto& meta = initData->dataMoves[i];
+					auto ranges = dataMoveMap.intersectingRanges(meta.range);
+					for (auto& r : ranges) {
+						ASSERT(!r.value()->valid);
+					}
+					dataMoveMap.insert(meta.range,
+					                   std::make_shared<DataMove>(DataMoveMetaData(meta.id, meta.range), true));
+					TraceEvent("DDInitFoundDataMove", self->ddId)
+					    .detail("DataMoveID", meta.id)
+					    .detail("DataMove", meta.toString());
+					// RelocateShard rs(dataMove.range, dataMove.priority, true);
+					// rs.dataMove = dataMove;
+					// output.send(rs);
+				}
+			}
+
 			state int shard = 0;
 			for (; shard < initData->shards.size() - 1; shard++) {
 				KeyRangeRef keys = KeyRangeRef(initData->shards[shard].key, initData->shards[shard + 1].key);
@@ -691,7 +717,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 				}
 
 				shardsAffectedByTeamFailure->moveShard(keys, teams);
-				if (initData->shards[shard].hasDest) {
+				if (initData->shards[shard].hasDest && !SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
 					// This shard is already in flight.  Ideally we should use dest in ShardsAffectedByTeamFailure and
 					// generate a dataDistributionRelocator directly in DataDistributionQueue to track it, but it's
 					// easier to just (with low priority) schedule it for movement.
@@ -701,6 +727,12 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 					}
 					output.send(RelocateShard(
 					    keys, unhealthy ? SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY : SERVER_KNOBS->PRIORITY_RECOVER_MOVE));
+				}
+				if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+					auto ranges = dataMoveMap.intersectingRanges(keys);
+					for (auto& r : ranges) {
+						r.value()->addShard(initData->shards[shard]);
+					}
 				}
 				wait(yield(TaskPriority::DataDistribution));
 			}

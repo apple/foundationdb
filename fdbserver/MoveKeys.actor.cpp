@@ -373,6 +373,7 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 	state bool loadedTssMapping = false;
 	state DataMoveMetaData dataMove;
 	dataMove.id = dataMoveID;
+	// state std::set<UID> allSrcServers;
 
 	TraceEvent(SevDebug, interval.begin(), relocationIntervalId);
 
@@ -504,6 +505,7 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 								CheckpointMetaData checkpoint(rangeIntersectKeys, RocksDB, uid, checkpointID);
 								checkpoint.setState(CheckpointMetaData::Pending);
 								tr->set(checkpointKeyFor(uid, dataMoveID, checkpointID), checkpointValue(checkpoint));
+								dataMove.src.insert(uid);
 								// TraceEvent("StartMoveKeysShardMapAdd", relocationIntervalId).detail("Server", uid);
 							}
 							TraceEvent("InitiatedCheckpoint")
@@ -538,6 +540,7 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 					}
 
 					dataMove.range = KeyRangeRef(keys.begin, currentKeys.end);
+					// uniquify(dataMove.src);
 					tr->set(dataMoveKeyFor(dataMoveID), dataMoveValue(dataMove));
 
 					wait(waitForAll(actors));

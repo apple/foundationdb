@@ -42,6 +42,7 @@ struct RelocateData {
 	int priority;
 	int boundaryPriority;
 	int healthPriority;
+	bool restore;
 
 	double startTime;
 	UID randomId;
@@ -51,19 +52,27 @@ struct RelocateData {
 	std::vector<UID> completeSources;
 	bool wantsNewServers;
 	TraceInterval interval;
+	Optional<DataMoveMetaData> dataMove;
 
 	RelocateData()
-	  : priority(-1), boundaryPriority(-1), healthPriority(-1), startTime(-1), workFactor(0), wantsNewServers(false),
-	    interval("QueuedRelocation") {}
+	  : priority(-1), boundaryPriority(-1), healthPriority(-1), restore(false), startTime(-1), workFactor(0),
+	    wantsNewServers(false), interval("QueuedRelocation") {}
 	explicit RelocateData(RelocateShard const& rs)
 	  : keys(rs.keys), priority(rs.priority), boundaryPriority(isBoundaryPriority(rs.priority) ? rs.priority : -1),
-	    healthPriority(isHealthPriority(rs.priority) ? rs.priority : -1), startTime(now()),
+	    healthPriority(isHealthPriority(rs.priority) ? rs.priority : -1), startTime(now()), restore(rs.restore),
 	    randomId(deterministicRandom()->randomUniqueID()), workFactor(0),
+	    // src(rs.dataMove.present() ? rs.dataMove.get().src : std::vector<UID>()),
 	    wantsNewServers(rs.priority == SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM ||
 	                    rs.priority == SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM ||
 	                    rs.priority == SERVER_KNOBS->PRIORITY_SPLIT_SHARD ||
 	                    rs.priority == SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT),
-	    interval("QueuedRelocation") {}
+	    interval("QueuedRelocation"), dataMove(rs.dataMove) {
+		if (rs.dataMove.present()) {
+			for (const UID& id : rs.dataMove.get().src) {
+				this->src.push_back(id);
+			}
+		}
+	}
 
 	static bool isHealthPriority(int priority) {
 		return priority == SERVER_KNOBS->PRIORITY_POPULATE_REGION ||
@@ -389,6 +398,7 @@ struct DDQueueData {
 	KeyRangeMap<RelocateData> inFlight;
 	// Track all actors that relocates specified keys to a good place; Key: keyRange; Value: actor
 	KeyRangeActorMap inFlightActors;
+	KeyRangeMap<std::shared_ptr<DataMove>> dataMoves;
 
 	Promise<Void> error;
 	PromiseStream<RelocateData> dataTransferComplete;
@@ -910,12 +920,14 @@ struct DDQueueData {
 			// logRelocation( rd, "LaunchingRelocation" );
 
 			//TraceEvent(rd.interval.end(), distributorId).detail("Result","Success");
-			queuedRelocations--;
-			finishRelocation(rd.priority, rd.healthPriority);
+			if (!rd.restore) {
+				queuedRelocations--;
+				finishRelocation(rd.priority, rd.healthPriority);
 
-			// now we are launching: remove this entry from the queue of all the src servers
-			for (int i = 0; i < rd.src.size(); i++) {
-				ASSERT(queue[rd.src[i]].erase(rd));
+				// now we are launching: remove this entry from the queue of all the src servers
+				for (int i = 0; i < rd.src.size(); i++) {
+					ASSERT(queue[rd.src[i]].erase(rd));
+				}
 			}
 
 			std::vector<Future<Void>> cleanup;
@@ -1012,7 +1024,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 		state StorageMetrics metrics =
 		    wait(brokenPromiseToNever(self->getShardMetrics.getReply(GetMetricsRequest(rd.keys))));
 
-		ASSERT(rd.src.size());
+		ASSERT(!rd.src.empty());
+
 		loop {
 			state int stuckCount = 0;
 			// state int bestTeamStuckThreshold = 50;
@@ -1647,10 +1660,17 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 
 			choose {
 				when(RelocateShard rs = waitNext(self.input)) {
-					bool wasEmpty = serversToLaunchFrom.empty();
-					self.queueRelocation(rs, serversToLaunchFrom);
-					if (wasEmpty && !serversToLaunchFrom.empty())
-						launchQueuedWorkTimeout = delay(0, TaskPriority::DataDistributionLaunch);
+					if (rs.restore) {
+						ASSERT(rs.dataMove.present());
+						RelocateData rd(rs);
+						// self.startRelocation(rd.priority, rd.healthPriority);
+						self.launchQueuedWork(rd, ddEnabledState);
+					} else {
+						bool wasEmpty = serversToLaunchFrom.empty();
+						self.queueRelocation(rs, serversToLaunchFrom);
+						if (wasEmpty && !serversToLaunchFrom.empty())
+							launchQueuedWorkTimeout = delay(0, TaskPriority::DataDistributionLaunch);
+					}
 				}
 				when(wait(launchQueuedWorkTimeout)) {
 					self.launchQueuedWork(serversToLaunchFrom, ddEnabledState);

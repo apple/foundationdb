@@ -98,12 +98,15 @@ struct DataMoveMetaData {
 	UID id; // A unique id for this checkpoint.
 	Version version;
 	KeyRange range;
-	std::vector<UID> src;
-	std::vector<UID> dest;
+	int priority;
+	std::set<UID> src;
+	std::set<UID> dest;
 	int16_t phase; // CheckpointState.
 
-	DataMoveMetaData() : phase(InvalidPhase) {}
-	DataMoveMetaData(UID id, Version version, KeyRange const& range) : id(id), version(version), range(range) {}
+	DataMoveMetaData() : phase(InvalidPhase), priority(0) {}
+	DataMoveMetaData(UID id, Version version, KeyRange const& range)
+	  : id(id), version(version), range(range), priority(0) {}
+	DataMoveMetaData(UID id, KeyRange const& range) : id(id), version(invalidVersion), range(range), priority(0) {}
 
 	Phase getPhase() const { return static_cast<Phase>(phase); }
 
@@ -111,10 +114,16 @@ struct DataMoveMetaData {
 
 	std::string toString() const {
 		std::string res = "DataMoveMetaData:\nID: " + id.toString() + "\nRange: " + range.toString() +
-		                  "\nVersion: " + std::to_string(version) +
+		                  "\nVersion: " + std::to_string(version) + "\nPriority: " + std::to_string(priority) +
 		                  "\nPhase: " + std::to_string(static_cast<int>(phase)) + "\nSource Servers: " + describe(src) +
 		                  "\nDestination Servers: " + describe(dest) + "\n";
 		return res;
+	}
+
+	bool operator==(const DataMoveMetaData& other) {
+		return this->range == other.range && this->id == other.id &&
+		       std::equal(this->src.begin(), this->src.end(), other.src.begin()) &&
+		       std::equal(this->dest.begin(), this->dest.end(), other.dest.begin());
 	}
 
 	template <class Ar>
