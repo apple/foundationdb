@@ -848,6 +848,11 @@ ACTOR Future<Void> fetchShardMetrics_impl(DataDistributionTracker* self, GetMetr
 					metrics += t.value().stats->get().get().metrics;
 				}
 
+				// skip if current stats is invalid
+				if (onChange.isValid()) {
+					break;
+				}
+
 				if (req.comparator.present()) {
 					if (req.comparator.get()(returnMetrics, metrics)) {
 						returnMetrics = metrics;

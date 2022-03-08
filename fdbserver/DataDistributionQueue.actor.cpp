@@ -1311,10 +1311,8 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 
 	state GetMetricsRequest req(shards);
 	req.comparator = [](const StorageMetrics& a, const StorageMetrics& b) {
-		if (a.bytes > 0 && b.bytes > 0) {
-			return ((double)a.bytesReadPerKSecond / a.bytes) < ((double)b.bytesReadPerKSecond / b.bytes);
-		}
-		return a.allLessOrEqual(b);
+		return a.bytesReadPerKSecond / std::max(a.bytes * 1.0, 1.0 * SERVER_KNOBS->MIN_SHARD_BYTES) <
+		       b.bytesReadPerKSecond / std::max(b.bytes * 1.0, 1.0 * SERVER_KNOBS->MIN_SHARD_BYTES);
 	};
 
 	state StorageMetrics metrics = wait(brokenPromiseToNever(self->getShardMetrics.getReply(req)));
@@ -1467,7 +1465,8 @@ ACTOR Future<Void> BgDDMountainChopper(DDQueueData* self, int teamCollectionInde
 		}
 
 		try {
-			state Future<Void> delayF = delay(rebalancePollingInterval, TaskPriority::DataDistributionLaunch);
+			// FIXME: change back to BG_REBALANCE_SWITCH_CHECK_INTERVAL after test
+			state Future<Void> delayF = delay(0.1, TaskPriority::DataDistributionLaunch);
 			if ((now() - lastRead) > SERVER_KNOBS->BG_REBALANCE_SWITCH_CHECK_INTERVAL) {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				Optional<Value> val = wait(tr.get(rebalanceDDIgnoreKey));
@@ -1581,7 +1580,8 @@ ACTOR Future<Void> BgDDValleyFiller(DDQueueData* self, int teamCollectionIndex) 
 		}
 
 		try {
-			state Future<Void> delayF = delay(rebalancePollingInterval, TaskPriority::DataDistributionLaunch);
+			// FIXME: change back to BG_REBALANCE_SWITCH_CHECK_INTERVAL after test
+			state Future<Void> delayF = delay(0.1, TaskPriority::DataDistributionLaunch);
 			if ((now() - lastRead) > SERVER_KNOBS->BG_REBALANCE_SWITCH_CHECK_INTERVAL) {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				Optional<Value> val = wait(tr.get(rebalanceDDIgnoreKey));

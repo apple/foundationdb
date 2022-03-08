@@ -494,19 +494,20 @@ struct StorageServerMetrics {
 	                                                      int64_t minShardReadBandwidthPerKSeconds) const {
 		std::vector<ReadHotRangeWithMetrics> toReturn;
 
-		double shardSize = (double)byteSample.getEstimate(shard);
+		int64_t shardSize = byteSample.getEstimate(shard);
 		int64_t shardReadBandwidth = bytesReadSample.getEstimate(shard);
 		if (shardReadBandwidth * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS <=
 		    minShardReadBandwidthPerKSeconds) {
 			return toReturn;
 		}
 		if (shardSize <= baseChunkSize) {
+			if (shardSize == 0)
+				shardSize = SERVER_KNOBS->BYTES_READ_UNITS_PER_SAMPLE;
 			// Shard is small, use it as is
-			if (bytesReadSample.getEstimate(shard) > (readDensityRatio * shardSize)) {
+			if (shardReadBandwidth > (readDensityRatio * shardSize)) {
 				toReturn.emplace_back(shard,
-				                      bytesReadSample.getEstimate(shard) / shardSize,
-				                      bytesReadSample.getEstimate(shard) /
-				                          SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL);
+				                      shardReadBandwidth / (double)shardSize,
+				                      shardReadBandwidth / SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL);
 			}
 			return toReturn;
 		}
@@ -525,18 +526,19 @@ struct StorageServerMetrics {
 				++endKey;
 				continue;
 			}
-			if (bytesReadSample.getEstimate(KeyRangeRef(beginKey, *endKey)) >
-			    (readDensityRatio * std::max(baseChunkSize, byteSample.getEstimate(KeyRangeRef(beginKey, *endKey))))) {
+			int64_t readBandwidth = bytesReadSample.getEstimate(KeyRangeRef(beginKey, *endKey));
+			if (readBandwidth >
+			    readDensityRatio * std::max(baseChunkSize, byteSample.getEstimate(KeyRangeRef(beginKey, *endKey)))) {
 				auto range = KeyRangeRef(beginKey, *endKey);
 				if (!toReturn.empty() && toReturn.back().keys.end == range.begin) {
 					// in case two consecutive chunks both are over the ratio, merge them.
 					range = KeyRangeRef(toReturn.back().keys.begin, *endKey);
 					toReturn.pop_back();
 				}
-				toReturn.emplace_back(
-				    range,
-				    (double)bytesReadSample.getEstimate(range) / std::max(baseChunkSize, byteSample.getEstimate(range)),
-				    bytesReadSample.getEstimate(range) / SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL);
+				readBandwidth = bytesReadSample.getEstimate(range);
+				toReturn.emplace_back(range,
+				                      (double)readBandwidth / std::max(baseChunkSize, byteSample.getEstimate(range)),
+				                      readBandwidth / SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL);
 			}
 			beginKey = *endKey;
 			endKey = byteSample.sample.index(byteSample.sample.sumTo(byteSample.sample.lower_bound(beginKey)) +
