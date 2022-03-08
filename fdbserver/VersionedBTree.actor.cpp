@@ -3504,9 +3504,11 @@ public:
 			}
 		}
 
-		debug_printf("DWALPager(%s) remapCleanup stopped stopSignal=%d free=%lld delayedFree=%lld\n",
+		debug_printf("DWALPager(%s) remapCleanup stopped stopSignal=%d remap=%" PRId64 " free=%" PRId64
+		             " delayedFree=%" PRId64 "\n",
 		             self->filename.c_str(),
 		             self->remapCleanupStop,
+		             self->remapQueue.numEntries,
 		             self->freeList.numEntries,
 		             self->delayedFreeList.numEntries);
 		signal.send(Void());
@@ -3797,19 +3799,19 @@ private:
 	ACTOR static Future<Void> clearRemapQueue_impl(DWALPager* self) {
 		// Wait for outstanding commit.
 		wait(self->commitFuture);
-		self->setOldestReadableVersion(self->getLastCommittedVersion());
-		wait(self->commit(self->getLastCommittedVersion() + 1));
-
-		wait(self->remapCleanupFuture);
 
 		// Set remap cleanup window to 0 to allow the remap queue to drain.
 		state int64_t remapCleanupWindowBytes = self->remapCleanupWindowBytes;
 		self->remapCleanupWindowBytes = 0;
 
-		while (self->remapQueue.numEntries > 0) {
-			self->remapCleanupFuture = remapCleanup(self);
-			wait(self->remapCleanupFuture);
+		// Try twice to commit and advance version. The first commit should trigger a remap cleanup actor, which picks
+		// up the new remap cleanup window being 0. The second commit waits for the remap cleanup actor to finish.
+		state int attempt = 0;
+		for (attempt = 0; attempt < 2; attempt++) {
+			self->setOldestReadableVersion(self->getLastCommittedVersion());
+			wait(self->commit(self->getLastCommittedVersion() + 1));
 		}
+		ASSERT(self->remapQueue.numEntries == 0);
 
 		// Restore remap cleanup window.
 		if (remapCleanupWindowBytes != 0)
@@ -9784,8 +9786,11 @@ TEST_CASE("Lredwood/correctness/btree") {
 	state Future<Void> closedFuture = btree->onClosed();
 	btree->close();
 	wait(closedFuture);
-	btree =
-	    new VersionedBTree(new DWALPager(pageSize, extentSize, file, pageCacheBytes, 0, concurrentExtentReads), file);
+	// If buggify, test starting with empty remap cleanup window.
+	btree = new VersionedBTree(
+	    new DWALPager(
+	        pageSize, extentSize, file, pageCacheBytes, (BUGGIFY ? 0 : remapCleanupWindowBytes), concurrentExtentReads),
+	    file);
 	wait(btree->init());
 
 	wait(btree->clearAllAndCheckSanity());
