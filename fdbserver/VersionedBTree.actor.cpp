@@ -6261,12 +6261,13 @@ private:
 			while (1) {
 				debug_printf("%s Mutation %4d '%s':  %s\n",
 				             context.c_str(),
-				             c++,
+				             c,
 				             printable(i.key()).c_str(),
 				             i.mutation().toString().c_str());
 				if (i == mEnd) {
 					break;
 				}
+				++c;
 				++i;
 			}
 		}
