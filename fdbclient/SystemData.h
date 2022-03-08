@@ -73,9 +73,10 @@ extern const KeyRef clusterIdKey;
 extern const KeyRef checkpointPrefix;
 const Key checkpointKeyFor(UID checkpointID);
 const Key checkpointKeyFor(UID ssID, UID moveDataID, UID checkpointID);
-const Key checkpointKeyFor(UID ssID, UID moveDataID);
+const Key checkpointKeyPrefixFor(UID ssID, UID moveDataID);
 const Value checkpointValue(const CheckpointMetaData& checkpoint);
 UID decodeCheckpointKey(const KeyRef& key);
+void decodeCheckpointKey(const KeyRef& key, UID& ssID, UID& dataMoveID, UID& checkpointID);
 CheckpointMetaData decodeCheckpointValue(const ValueRef& value);
 
 // "\xff/dataMoves/[[UID]] := [[DataMoveMetaData]]"

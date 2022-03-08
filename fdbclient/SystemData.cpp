@@ -235,7 +235,7 @@ const Key checkpointKeyFor(UID ssID, UID moveDataID, UID checkpointID) {
 	return wr.toValue();
 }
 
-const Key checkpointKeyFor(UID ssID, UID moveDataID) {
+const Key checkpointKeyPrefixFor(UID ssID, UID moveDataID) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(checkpointPrefix);
 	wr << ssID;
@@ -244,6 +244,8 @@ const Key checkpointKeyFor(UID ssID, UID moveDataID) {
 	wr.serializeBytes("/"_sr);
 	return wr.toValue();
 }
+
+
 
 const Value checkpointValue(const CheckpointMetaData& checkpoint) {
 	return ObjectWriter::toValue(checkpoint, IncludeVersion());
@@ -254,6 +256,15 @@ UID decodeCheckpointKey(const KeyRef& key) {
 	BinaryReader rd(key.removePrefix(checkpointPrefix), Unversioned());
 	rd >> checkpointID;
 	return checkpointID;
+}
+
+void decodeCheckpointKey(const KeyRef& key, UID& ssID, UID& dataMoveID, UID& checkpointID) {
+	BinaryReader rd(key.removePrefix(checkpointPrefix), Unversioned());
+	rd >> ssID;
+	rd.readBytes(1); // Skip "/".
+	rd >> dataMoveID;
+	rd.readBytes(1); // Skip "/".
+	rd >> checkpointID;
 }
 
 CheckpointMetaData decodeCheckpointValue(const ValueRef& value) {

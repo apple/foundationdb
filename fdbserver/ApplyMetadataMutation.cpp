@@ -542,6 +542,8 @@ private:
 		}
 		if (toCommit) {
 			CheckpointMetaData checkpoint = decodeCheckpointValue(m.param2);
+			UID ssID, dataMoveID, checkpointID;
+			decodeCheckpointKey(m.param1, ssID, dataMoveID, checkpointID);
 			Tag tag = decodeServerTagValue(txnStateStore->readValue(serverTagKeyFor(checkpoint.ssID)).get().get());
 			MutationRef privatized = m;
 			privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);

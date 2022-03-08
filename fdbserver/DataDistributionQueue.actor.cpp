@@ -45,6 +45,7 @@ struct RelocateData {
 
 	double startTime;
 	UID randomId;
+	UID dataMoveID;
 	int workFactor;
 	std::vector<UID> src;
 	std::vector<UID> completeSources;
@@ -87,7 +88,7 @@ struct RelocateData {
 		return priority == rhs.priority && boundaryPriority == rhs.boundaryPriority &&
 		       healthPriority == rhs.healthPriority && keys == rhs.keys && startTime == rhs.startTime &&
 		       workFactor == rhs.workFactor && src == rhs.src && completeSources == rhs.completeSources &&
-		       wantsNewServers == rhs.wantsNewServers && randomId == rhs.randomId;
+		       wantsNewServers == rhs.wantsNewServers && randomId == rhs.randomId && dataMoveID == rhs.dataMoveID;
 	}
 	bool operator!=(const RelocateData& rhs) const { return !(*this == rhs); }
 };
@@ -354,11 +355,8 @@ void complete(RelocateData const& relocation, std::map<UID, Busyness>& busymap) 
 
 ACTOR Future<Void> dataDistributionRelocator(struct DDQueueData* self,
                                              RelocateData rd,
+                                             Future<Void> prevCleanup,
                                              const DDEnabledState* ddEnabledState);
-
-ACTOR Future<Void> cancelDataMove(struct DDQueueData* self,
-                                  DataMoveMetaData dataMove,
-                                  const DDEnabledState* ddEnabledState);
 
 struct DDQueueData {
 	UID distributorId;
@@ -920,10 +918,15 @@ struct DDQueueData {
 				ASSERT(queue[rd.src[i]].erase(rd));
 			}
 
+			std::vector<Future<Void>> cleanup;
 			// If there is a job in flight that wants data relocation which we are about to cancel/modify,
 			//     make sure that we keep the relocation intent for the job that we launch
 			auto f = inFlight.intersectingRanges(rd.keys);
 			for (auto it = f.begin(); it != f.end(); ++it) {
+				if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+					cleanup.push_back(
+					    cleanUpDataMove(this->cx, it->value().dataMoveID, it->value().keys, true, ddEnabledState));
+				}
 				if (inFlightActors.liveActorAt(it->range().begin)) {
 					rd.wantsNewServers |= it->value().wantsNewServers;
 				}
@@ -935,15 +938,18 @@ struct DDQueueData {
 			inFlightActors.getRangesAffectedByInsertion(rd.keys, ranges);
 			inFlightActors.cancel(KeyRangeRef(ranges.front().begin, ranges.back().end));
 			inFlight.insert(rd.keys, rd);
+			Future<Void> fCleanup = SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE ? waitForAll(cleanup) : Void();
+
 			for (int r = 0; r < ranges.size(); r++) {
 				RelocateData& rrs = inFlight.rangeContaining(ranges[r].begin)->value();
 				rrs.keys = ranges[r];
+				rrs.dataMoveID = deterministicRandom()->randomUniqueID();
 
 				launch(rrs, busymap, singleRegionTeamSize);
 				activeRelocations++;
 				startRelocation(rrs.priority, rrs.healthPriority);
 				// Start the actor that relocates data in the rrs.keys
-				inFlightActors.insert(rrs.keys, dataDistributionRelocator(this, rrs, ddEnabledState));
+				inFlightActors.insert(rrs.keys, dataDistributionRelocator(this, rrs, fCleanup, ddEnabledState));
 			}
 
 			// logRelocation( rd, "LaunchedRelocation" );
@@ -964,7 +970,11 @@ struct DDQueueData {
 
 // This actor relocates the specified keys to a good place.
 // The inFlightActor key range map stores the actor for each RelocateData
-ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd, const DDEnabledState* ddEnabledState) {
+ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
+                                             RelocateData rd,
+                                             Future<Void> prevCleanup,
+                                             const DDEnabledState* ddEnabledState) {
+	wait(prevCleanup);
 	state Promise<Void> errorOut(self->error);
 	state TraceInterval relocateShardInterval("RelocateShard");
 	state PromiseStream<RelocateData> dataTransferComplete(self->dataTransferComplete);
@@ -1163,6 +1173,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 			                                         &self->finishMoveKeysParallelismLock,
 			                                         self->teamCollections.size() > 1,
 			                                         relocateShardInterval.pairID,
+			                                         rd.dataMoveID,
 			                                         ddEnabledState);
 			state Future<Void> pollHealth =
 			    signalledTransferComplete ? Never()
@@ -1186,6 +1197,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 								                      &self->finishMoveKeysParallelismLock,
 								                      self->teamCollections.size() > 1,
 								                      relocateShardInterval.pairID,
+								                      rd.dataMoveID,
 								                      ddEnabledState);
 							} else {
 								self->fetchKeysComplete.insert(rd);
