@@ -93,6 +93,10 @@ struct ConflictRangeWorkload : TestWorkload {
 			wait(timeKeeperSetDisable(cx));
 		}
 
+		// Set one key after the end of the tested range. If this key is included in the result, then
+		// we may have drifted into the system key-space and cannot evaluate the result.
+		state Key sentinelKey = StringRef(format("%010d", self->maxKeySpace));
+
 		loop {
 			randomSets = !randomSets;
 
@@ -126,6 +130,8 @@ struct ConflictRangeWorkload : TestWorkload {
 							}
 						}
 					}
+
+					tr0.set(sentinelKey, deterministicRandom()->randomUniqueID().toString());
 
 					wait(tr0.commit());
 					break;
@@ -212,7 +218,6 @@ struct ConflictRangeWorkload : TestWorkload {
 				wait(tr2.commit());
 
 				state bool foundConflict = false;
-				state bool readToEnd = false;
 				try {
 					// Do the generated getRange in the other transaction and commit.
 					if (self->testReadYourWrites) {
@@ -221,7 +226,6 @@ struct ConflictRangeWorkload : TestWorkload {
 						RangeResult res = wait(trRYOW.getRange(KeySelectorRef(StringRef(myKeyA), onEqualA, offsetA),
 						                                       KeySelectorRef(StringRef(myKeyB), onEqualB, offsetB),
 						                                       randomLimit));
-						readToEnd = res.readThroughEnd;
 						wait(trRYOW.commit());
 					} else {
 						tr3.clear(StringRef(format("%010d", self->maxKeySpace + 1)));
@@ -263,17 +267,9 @@ struct ConflictRangeWorkload : TestWorkload {
 							throw not_committed();
 						}
 
-						if (originalResults[originalResults.size() - 1].key >= LiteralStringRef("\xff") ||
-						    originalResults.readThroughEnd) {
+						if (originalResults[originalResults.size() - 1].key >= sentinelKey) {
 							// Results go into server keyspace, so if a key selector does not fully resolve offset, a
 							// change won't effect results
-							throw not_committed();
-						}
-
-						// GetRangeFallback has a conflict range that is too large if the end selector resolves to the
-						// key after the last key. In that case, we may get a spurious conflict.
-						// This check can be removed if GetRangeFallback is fixed.
-						if (readToEnd) {
 							throw not_committed();
 						}
 
