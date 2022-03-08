@@ -284,12 +284,11 @@ class TestRunner(object):
         util.get_logger().info('\nInserting test into database...')
         del self.db[:]
 
-        # TODO: use tenant list API when available
         while True:
             tr = self.db.create_transaction()
             try:
-                tr.options.set_access_system_keys()
-                del tr[b'\xff/tenantMap/' : b'\xff/tenantMap0']
+                tr.options.set_special_key_space_enable_writes()
+                del tr[b'\xff\xff/management/tenant_map/' : b'\xff\xff/management/tenant_map0']
                 tr.commit().wait()
                 break
             except fdb.FDBError as e:
