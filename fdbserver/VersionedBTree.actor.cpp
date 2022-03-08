@@ -62,7 +62,7 @@
 	{                                                                                                                  \
 		std::string prefix = format("%s %f %04d ", g_network->getLocalAddress().toString().c_str(), now(), __LINE__);  \
 		std::string msg = format(__VA_ARGS__);                                                                         \
-		writePrefixedLines(debug_printf_stream, prefix, msg);                                                          \
+		fputs(addPrefix(prefix, msg).c_str(), debug_printf_stream);                                                    \
 		fflush(debug_printf_stream);                                                                                   \
 	}
 
@@ -73,11 +73,13 @@
 			std::string prefix =                                                                                       \
 			    format("%s %f %04d ", g_network->getLocalAddress().toString().c_str(), now(), __LINE__);               \
 			std::string msg = format(__VA_ARGS__);                                                                     \
-			writePrefixedLines(debug_printf_stream, prefix, msg);                                                      \
+			fputs(addPrefix(prefix, msg).c_str(), debug_printf_stream);                                                \
 			fflush(debug_printf_stream);                                                                               \
 		}                                                                                                              \
 	}
 
+#define debug_print(str) debug_printf("%s\n", str.c_str())
+#define debug_print_always(str) debug_printf_always("%s\n", str.c_str())
 #define debug_printf_noop(...)
 
 #if defined(NO_INTELLISENSE)
@@ -97,13 +99,18 @@
 #define TRACE                                                                                                          \
 	debug_printf_always("%s: %s line %d %s\n", __FUNCTION__, __FILE__, __LINE__, platform::get_backtrace().c_str());
 
-// Writes prefix:line for each line in msg to fout
-void writePrefixedLines(FILE* fout, std::string prefix, std::string msg) {
-	StringRef m = msg;
+// Returns a string where every line in lines is prefixed with prefix
+std::string addPrefix(std::string prefix, std::string lines) {
+	StringRef m = lines;
+	std::string s;
 	while (m.size() != 0) {
 		StringRef line = m.eat("\n");
-		fprintf(fout, "%s %s\n", prefix.c_str(), line.toString().c_str());
+		s += prefix;
+		s += ' ';
+		s += line.toString();
+		s += '\n';
 	}
+	return s;
 }
 
 #define PRIORITYMULTILOCK_DEBUG 0
@@ -4550,7 +4557,7 @@ struct BTreePage {
 
 	ValueTree* valueTree() const { return (ValueTree*)(this + 1); }
 
-	std::string toString(bool write,
+	std::string toString(const char* context,
 	                     BTreePageIDRef id,
 	                     Version ver,
 	                     const RedwoodRecordRef& lowerBound,
@@ -4558,7 +4565,7 @@ struct BTreePage {
 		std::string r;
 		r += format("BTreePage op=%s %s @%" PRId64
 		            " ptr=%p height=%d count=%d kvBytes=%d\n  lowerBound: %s\n  upperBound: %s\n",
-		            write ? "write" : "read",
+		            context,
 		            ::toString(id).c_str(),
 		            ver,
 		            this,
@@ -4692,11 +4699,12 @@ struct DecodeBoundaryVerifier {
 		--b;
 		if (b->second.lower != lowerBound || b->second.upper != upperBound) {
 			fprintf(stderr,
-			        "Boundary mismatch on %s %s\nFound   :%s %s\nExpected:%s %s\n",
+			        "Boundary mismatch on %s %s\nUsing:\n\t'%s'\n\t'%s'\nWritten %s:\n\t'%s'\n\t'%s'\n",
 			        ::toString(id).c_str(),
 			        ::toString(v).c_str(),
 			        lowerBound.toString().c_str(),
 			        upperBound.toString().c_str(),
+			        ::toString(b->first).c_str(),
 			        b->second.lower.toString().c_str(),
 			        b->second.upper.toString().c_str());
 			return false;
@@ -4705,15 +4713,17 @@ struct DecodeBoundaryVerifier {
 	}
 
 	void update(Version v, LogicalPageID oldID, LogicalPageID newID) {
-		debug_printf("decodeBoundariesUpdate copy %s %s to %s\n",
-		             ::toString(v).c_str(),
-		             ::toString(oldID).c_str(),
-		             ::toString(newID).c_str());
 		auto& old = boundariesByPageID[oldID];
 		ASSERT(!old.empty());
 		auto i = old.end();
 		--i;
 		boundariesByPageID[newID][v] = i->second;
+		debug_printf("decodeBoundariesUpdate copy %s %s to %s '%s' to '%s'\n",
+		             ::toString(v).c_str(),
+		             ::toString(oldID).c_str(),
+		             ::toString(newID).c_str(),
+		             i->second.lower.toString().c_str(),
+		             i->second.upper.toString().c_str());
 	}
 };
 
@@ -5800,10 +5810,17 @@ private:
 	                                               const RedwoodRecordRef& lowerBound,
 	                                               const RedwoodRecordRef& upperBound) {
 		if (page->userData == nullptr) {
-			debug_printf("Creating DecodeCache for ptr=%p lower=%s upper=%s\n",
+			debug_printf("Creating DecodeCache for ptr=%p lower=%s upper=%s %s\n",
 			             page->begin(),
 			             lowerBound.toString(false).c_str(),
-			             upperBound.toString(false).c_str());
+			             upperBound.toString(false).c_str(),
+			             ((BTreePage*)page->begin())
+			                 ->toString("cursor",
+			                            lowerBound.value.present() ? lowerBound.getChildPage() : BTreePageIDRef(),
+			                            -1,
+			                            lowerBound,
+			                            upperBound)
+			                 .c_str());
 
 			BTreePage::BinaryTree::DecodeCache* cache =
 			    new BTreePage::BinaryTree::DecodeCache(lowerBound, upperBound, m_pDecodeCacheMemory);
@@ -5870,7 +5887,8 @@ private:
 			    ::toString(writeVersion).c_str(),
 			    cache == nullptr
 			        ? "<noDecodeCache>"
-			        : btPage->toString(true, oldID, writeVersion, cache->lowerBound, cache->upperBound).c_str());
+			        : btPage->toString("updateBTreePage", oldID, writeVersion, cache->lowerBound, cache->upperBound)
+			              .c_str());
 		}
 
 		state unsigned int height = (unsigned int)((BTreePage*)page->begin())->height;
@@ -6045,6 +6063,7 @@ private:
 			s += format("SubtreeUpper: %s\n", subtreeUpperBound.toString(false).c_str());
 			s += format("expectedUpperBound: %s\n",
 			            expectedUpperBound.present() ? expectedUpperBound.get().toString(false).c_str() : "(null)");
+			s += format("newLinks:\n");
 			for (int i = 0; i < newLinks.size(); ++i) {
 				s += format("  %i: %s\n", i, newLinks[i].toString(false).c_str());
 			}
@@ -6153,10 +6172,10 @@ private:
 
 		// This must be called for each of the InternalPageSliceUpdates in sorted order.
 		void applyUpdate(InternalPageSliceUpdate& u, const RedwoodRecordRef* nextBoundary) {
-			debug_printf("applyUpdate nextBoundary=(%p) %s  %s\n",
+			debug_printf("applyUpdate nextBoundary=(%p) %s\n",
 			             nextBoundary,
-			             (nextBoundary != nullptr) ? nextBoundary->toString(false).c_str() : "",
-			             u.toString().c_str());
+			             (nextBoundary != nullptr) ? nextBoundary->toString(false).c_str() : "");
+			debug_print(addPrefix("applyUpdate", u.toString()));
 
 			// If the children changed, replace [cBegin, cEnd) with newLinks
 			if (u.childrenChanged) {
@@ -6170,7 +6189,7 @@ private:
 					}
 
 					while (c != u.cEnd) {
-						debug_printf("internal page (updating) erasing: %s\n", c.get().toString(false).c_str());
+						debug_printf("applyUpdate (updating) erasing: %s\n", c.get().toString(false).c_str());
 						btPage()->kvBytes -= c.get().kvBytes();
 						c.erase();
 					}
@@ -6201,7 +6220,7 @@ private:
 				keep(u.cBegin, u.cEnd);
 			}
 
-			// If there is an expected upper boundary for the next range after u
+			// If there is an expected upper boundary for the next range start after u
 			if (u.expectedUpperBound.present()) {
 				// Then if it does not match the next boundary then insert a dummy record
 				if (nextBoundary == nullptr || (nextBoundary != &u.expectedUpperBound.get() &&
@@ -6228,23 +6247,28 @@ private:
 
 		state std::string context;
 		if (REDWOOD_DEBUG) {
-			context = format("CommitSubtree(root=%s): ", toString(rootID).c_str());
+			context = format("CommitSubtree(root=%s+%d %s): ",
+			                 toString(rootID.front()).c_str(),
+			                 rootID.size() - 1,
+			                 ::toString(batch->writeVersion).c_str());
 		}
-		debug_printf("%s %s\n", context.c_str(), update->toString().c_str());
+		debug_printf("%s rootID=%s\n", context.c_str(), toString(rootID).c_str());
+		debug_print(addPrefix(context, update->toString()));
+
 		if (REDWOOD_DEBUG) {
-			debug_printf("%s ---------MUTATION BUFFER SLICE ---------------------\n", context.c_str());
-			auto begin = mBegin;
+			int c = 0;
+			auto i = mBegin;
 			while (1) {
-				debug_printf("%s Mutation: '%s':  %s\n",
+				debug_printf("%s Mutation %4d '%s':  %s\n",
 				             context.c_str(),
-				             printable(begin.key()).c_str(),
-				             begin.mutation().toString().c_str());
-				if (begin == mEnd) {
+				             c++,
+				             printable(i.key()).c_str(),
+				             i.mutation().toString().c_str());
+				if (i == mEnd) {
 					break;
 				}
-				++begin;
+				++i;
 			}
-			debug_printf("%s -------------------------------------\n", context.c_str());
 		}
 
 		state Reference<const ArenaPage> page =
@@ -6266,13 +6290,13 @@ private:
 		// TryToUpdate indicates insert and erase operations should be tried on the existing page first
 		state bool tryToUpdate = btPage->tree()->numItems > 0 && update->boundariesNormal();
 
-		debug_printf(
-		    "%s commitSubtree(): %s\n",
-		    context.c_str(),
-		    btPage
-		        ->toString(
-		            false, rootID, batch->snapshot->getVersion(), update->decodeLowerBound, update->decodeUpperBound)
-		        .c_str());
+		debug_printf("%s tryToUpdate=%d\n", context.c_str(), tryToUpdate);
+		debug_print(addPrefix(context,
+		                      btPage->toString("commitSubtreeStart",
+		                                       rootID,
+		                                       batch->snapshot->getVersion(),
+		                                       update->decodeLowerBound,
+		                                       update->decodeUpperBound)));
 
 		state BTreePage::BinaryTree::Cursor cursor = update->cBegin.valid()
 		                                                 ? self->getCursor(page.getPtr(), update->cBegin)
@@ -6285,22 +6309,6 @@ private:
 				                                         update->cBegin.get().key,
 				                                         update->cBegin.next().getOrUpperBound().key));
 			}
-		}
-
-		if (REDWOOD_DEBUG) {
-			debug_printf("%s ---------MUTATION BUFFER SLICE ---------------------\n", context.c_str());
-			auto begin = mBegin;
-			while (1) {
-				debug_printf("%s Mutation: '%s':  %s\n",
-				             context.c_str(),
-				             printable(begin.key()).c_str(),
-				             begin.mutation().toString().c_str());
-				if (begin == mEnd) {
-					break;
-				}
-				++begin;
-			}
-			debug_printf("%s -------------------------------------\n", context.c_str());
 		}
 
 		// Leaf Page
@@ -6541,9 +6549,8 @@ private:
 			// No changes were actually made.  This could happen if the only mutations are clear ranges which do not
 			// match any records.
 			if (!changesMade) {
-				debug_printf("%s No changes were made during mutation merge, returning %s\n",
-				             context.c_str(),
-				             toString(*update).c_str());
+				debug_printf("%s No changes were made during mutation merge, returning slice:\n", context.c_str());
+				debug_print(addPrefix(context, update->toString()));
 				return Void();
 			} else {
 				debug_printf(
@@ -6556,17 +6563,26 @@ private:
 				if (cursor.tree->numItems == 0) {
 					update->cleared();
 					self->freeBTreePage(height, rootID, batch->writeVersion);
-					debug_printf("%s Page updates cleared all entries, returning %s\n",
-					             context.c_str(),
-					             toString(*update).c_str());
+					debug_printf("%s Page updates cleared all entries, returning slice:\n", context.c_str());
+					debug_print(addPrefix(context, update->toString()));
 				} else {
 					// Otherwise update it.
 					BTreePageIDRef newID = wait(self->updateBTreePage(
 					    self, rootID, &update->newLinks.arena(), pageCopy.castTo<ArenaPage>(), batch->writeVersion));
 
+					debug_printf("%s Leaf node updated in-place at version %s, new contents:\n",
+					             context.c_str(),
+					             toString(batch->writeVersion).c_str());
+					debug_print(addPrefix(context,
+					                      btPage->toString("updateLeafNode",
+					                                       newID,
+					                                       batch->snapshot->getVersion(),
+					                                       update->decodeLowerBound,
+					                                       update->decodeUpperBound)));
+
 					update->updatedInPlace(newID, btPage, newID.size() * self->m_blockSize);
-					debug_printf(
-					    "%s Page updated in-place, returning %s\n", context.c_str(), toString(*update).c_str());
+					debug_printf("%s Leaf node updated in-place, returning slice:\n", context.c_str());
+					debug_print(addPrefix(context, update->toString()));
 				}
 				return Void();
 			}
@@ -6576,9 +6592,8 @@ private:
 				update->cleared();
 				self->freeBTreePage(height, rootID, batch->writeVersion);
 
-				debug_printf("%s All leaf page contents were cleared, returning %s\n",
-				             context.c_str(),
-				             toString(*update).c_str());
+				debug_printf("%s All leaf page contents were cleared, returning slice:\n", context.c_str());
+				debug_print(addPrefix(context, update->toString()));
 				return Void();
 			}
 
@@ -6594,7 +6609,8 @@ private:
 			// Put new links into update and tell update that pages were rebuilt
 			update->rebuilt(entries);
 
-			debug_printf("%s Merge complete, returning %s\n", context.c_str(), toString(*update).c_str());
+			debug_printf("%s Merge complete, returning slice:\n", context.c_str());
+			debug_print(addPrefix(context, update->toString()));
 			return Void();
 		} else {
 			// Internal Page
@@ -6731,12 +6747,12 @@ private:
 								RedwoodRecordRef rec = c.get();
 								if (rec.value.present()) {
 									if (height == 2) {
-										debug_printf("%s: freeing child page in cleared subtree range: %s\n",
+										debug_printf("%s freeing child page in cleared subtree range: %s\n",
 										             context.c_str(),
 										             ::toString(rec.getChildPage()).c_str());
 										self->freeBTreePage(height, rec.getChildPage(), batch->writeVersion);
 									} else {
-										debug_printf("%s: queuing subtree deletion cleared subtree range: %s\n",
+										debug_printf("%s queuing subtree deletion cleared subtree range: %s\n",
 										             context.c_str(),
 										             ::toString(rec.getChildPage()).c_str());
 										self->m_lazyClearQueue.pushBack(LazyClearQueueEntry{
@@ -6749,9 +6765,8 @@ private:
 							// Subtree range unchanged
 						}
 
-						debug_printf("%s: MutationBuffer covers this range in a single mutation, not recursing: %s\n",
-						             context.c_str(),
-						             u.toString().c_str());
+						debug_printf("%s Not recursing, one mutation range covers this slice:\n", context.c_str());
+						debug_print(addPrefix(context, u.toString()));
 
 						// u has already been initialized with the correct result, no recursion needed, so restart the
 						// loop.
@@ -6760,6 +6775,9 @@ private:
 				}
 
 				// If this page has height of 2 then its children are leaf nodes
+				debug_printf("%s Recursing for %s\n", context.c_str(), toString(pageID).c_str());
+				debug_print(addPrefix(context, u.toString()));
+
 				recursions.push_back(self->commitSubtree(self, batch, pageID, height - 1, mBegin, mEnd, &u));
 			}
 
@@ -6798,10 +6816,11 @@ private:
 			// passed, so in the event a different upper boundary is needed it will be added to the already-modified
 			// page.  Otherwise, the decode boundary is used which will prevent this page from being modified for the
 			// sole purpose of adding a dummy upper bound record.
-			debug_printf("%s Applying final child range update. changesMade=%d  Parent update is: %s\n",
+			debug_printf("%s Applying final child range update. changesMade=%d\nSubtree Root Update:\n",
 			             context.c_str(),
-			             modifier.changesMade,
-			             update->toString().c_str());
+			             modifier.changesMade);
+			debug_print(addPrefix(context, update->toString()));
+
 			modifier.applyUpdate(*slices.back(),
 			                     modifier.changesMade ? &update->subtreeUpperBound : &update->decodeUpperBound);
 
@@ -6834,9 +6853,11 @@ private:
 			if (modifier.changesMade || forceUpdate) {
 				if (modifier.empty()) {
 					update->cleared();
-					debug_printf("%s All internal page children were deleted so deleting this page too, returning %s\n",
-					             context.c_str(),
-					             toString(*update).c_str());
+					debug_printf(
+					    "%s All internal page children were deleted so deleting this page too.  Returning slice:\n",
+					    context.c_str());
+					debug_print(addPrefix(context, update->toString()));
+
 					self->freeBTreePage(height, rootID, batch->writeVersion);
 				} else {
 					if (modifier.updating) {
@@ -6874,9 +6895,10 @@ private:
 							}
 							parentInfo->clear();
 							if (forceUpdate && detached == 0) {
-								debug_printf("%s No children detached during forced update, returning %s\n",
-								             context.c_str(),
-								             toString(*update).c_str());
+								debug_printf("%s No children detached during forced update, returning slice:\n",
+								             context.c_str());
+								debug_print(addPrefix(context, update->toString()));
+
 								return Void();
 							}
 						}
@@ -6887,21 +6909,19 @@ private:
 						                                                  pageCopy.castTo<ArenaPage>(),
 						                                                  batch->writeVersion));
 						debug_printf(
-						    "%s commitSubtree(): Internal page updated in-place at version %s, new contents: %s\n",
+						    "%s commitSubtree(): Internal node updated in-place at version %s, new contents:\n",
 						    context.c_str(),
-						    toString(batch->writeVersion).c_str(),
-						    btPage
-						        ->toString(false,
-						                   newID,
-						                   batch->snapshot->getVersion(),
-						                   update->decodeLowerBound,
-						                   update->decodeUpperBound)
-						        .c_str());
+						    toString(batch->writeVersion).c_str());
+						debug_print(addPrefix(context,
+						                      btPage->toString("updateInternalNode",
+						                                       newID,
+						                                       batch->snapshot->getVersion(),
+						                                       update->decodeLowerBound,
+						                                       update->decodeUpperBound)));
 
 						update->updatedInPlace(newID, btPage, newID.size() * self->m_blockSize);
-						debug_printf("%s Internal page updated in-place, returning %s\n",
-						             context.c_str(),
-						             toString(*update).c_str());
+						debug_printf("%s Internal node updated in-place, returning slice:\n", context.c_str());
+						debug_print(addPrefix(context, update->toString()));
 					} else {
 						// Page was rebuilt, possibly split.
 						debug_printf("%s Internal page could not be modified, rebuilding replacement(s).\n",
@@ -6948,12 +6968,13 @@ private:
 						                    rootID));
 						update->rebuilt(newChildEntries);
 
-						debug_printf(
-						    "%s Internal page rebuilt, returning %s\n", context.c_str(), toString(*update).c_str());
+						debug_printf("%s Internal page rebuilt, returning slice:\n", context.c_str());
+						debug_print(addPrefix(context, update->toString()));
 					}
 				}
 			} else {
-				debug_printf("%s Page has no changes, returning %s\n", context.c_str(), toString(*update).c_str());
+				debug_printf("%s Page has no changes, returning slice:\n", context.c_str());
+				debug_print(addPrefix(context, update->toString()));
 			}
 			return Void();
 		}
