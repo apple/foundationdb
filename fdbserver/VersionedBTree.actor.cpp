@@ -3797,16 +3797,23 @@ private:
 	ACTOR static Future<Void> clearRemapQueue_impl(DWALPager* self) {
 		// Wait for outstanding commit.
 		wait(self->commitFuture);
+		self->setOldestReadableVersion(self->getLastCommittedVersion());
+		wait(self->commit(self->getLastCommittedVersion() + 1));
 
-		// While the remap queue isn't empty, advance the commit version and oldest readable version
-		// by the remap cleanup window and commit
+		wait(self->remapCleanupFuture);
+
+		// Set remap cleanup window to 0 to allow the remap queue to drain.
+		state int64_t remapCleanupWindowBytes = self->remapCleanupWindowBytes;
+		self->remapCleanupWindowBytes = 0;
+
 		while (self->remapQueue.numEntries > 0) {
-			self->setOldestReadableVersion(self->getLastCommittedVersion());
-			wait(self->commit(self->getLastCommittedVersion() + self->remapCleanupWindowBytes + 1));
+			self->remapCleanupFuture = remapCleanup(self);
+			wait(self->remapCleanupFuture);
 		}
 
-		// One final commit because the active commit cycle may have popped from the remap queue
-		wait(self->commit(self->getLastCommittedVersion() + 1));
+		// Restore remap cleanup window.
+		if (remapCleanupWindowBytes != 0)
+			self->remapCleanupWindowBytes = remapCleanupWindowBytes;
 
 		TraceEvent e("RedwoodClearRemapQueue");
 		self->toTraceEvent(e);
