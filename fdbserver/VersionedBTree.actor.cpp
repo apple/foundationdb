@@ -7427,8 +7427,13 @@ public:
 		                   : FLOW_KNOBS->SIM_PAGE_CACHE_4K)
 		        : FLOW_KNOBS->PAGE_CACHE_4K;
 		// Rough size of pages to keep in remap cleanup queue before being cleanup.
-		int64_t remapCleanupWindowBytes = (BUGGIFY ? deterministicRandom()->randomInt64(0, 100) * 1024 * 1024
-		                                           : SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_WINDOW_BYTES);
+		int64_t remapCleanupWindowBytes =
+		    g_network->isSimulated()
+		        ? (BUGGIFY ? (deterministicRandom()->coinflip()
+		                          ? deterministicRandom()->randomInt64(0, 100 * 1024) // small window
+		                          : deterministicRandom()->randomInt64(0, 100 * 1024 * 1024)) // large window
+		                   : 100 * 1024 * 1024) // 100M
+		        : SERVER_KNOBS->REDWOOD_REMAP_CLEANUP_WINDOW_BYTES;
 
 		IPager2* pager = new DWALPager(pageSize,
 		                               extentSize,
