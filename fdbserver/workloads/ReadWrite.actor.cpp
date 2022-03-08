@@ -119,6 +119,7 @@ struct ReadWriteWorkload : KVWorkload {
 	typedef std::vector<std::pair<int64_t, int64_t>> IndexRangeVec;
 	// keyForIndex generate key from index. So for a shard range, recording the start and end is enough
 	std::vector<std::pair<UID, IndexRangeVec>> serverShards; // storage server and the shards it owns
+	std::map<UID, StorageServerInterface> serverInterfaces;
 	int hotServerCount = 0, currentHotRound = -1;
 
 	// states of metric
@@ -374,12 +375,23 @@ struct ReadWriteWorkload : KVWorkload {
 	}
 
 	ACTOR static Future<Void> updateServerShards(Database cx, ReadWriteWorkload* self) {
+		state Future<RangeResult> serverList =
+		    runRYWTransaction(cx, [](Reference<ReadYourWritesTransaction> tr) -> Future<RangeResult> {
+			    tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			    return tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
+		    });
 		state RangeResult range =
 		    wait(runRYWTransaction(cx, [](Reference<ReadYourWritesTransaction> tr) -> Future<RangeResult> {
 			    tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			    return tr->getRange(serverKeysRange, CLIENT_KNOBS->TOO_MANY, Snapshot::True);
 		    }));
-
+		wait(success(serverList));
+		// decode server interfaces
+		self->serverInterfaces.clear();
+		for (int i = 0; i < serverList.get().size(); i++) {
+			auto ssi = decodeServerListValue(serverList.get()[i].value);
+			self->serverInterfaces.emplace(ssi.id(), ssi);
+		}
 		// clear self->serverShards
 		self->serverShards.clear();
 
@@ -751,7 +763,13 @@ struct ReadWriteWorkload : KVWorkload {
 	// calculate hot server count
 	void setHotServers() {
 		hotServerCount = ceil(hotServerFraction * serverShards.size());
-		std::cout << "Choose " << hotServerCount << " hot servers\n";
+		std::cout << "Choose " << hotServerCount << " hot servers: [";
+		int begin = currentHotRound * hotServerCount;
+		for (int i = 0; i < hotServerCount; ++i) {
+			int idx = (begin + i) % serverShards.size();
+			std::cout << serverInterfaces.at(serverShards[idx].first).address().toString() << ",";
+		}
+		std::cout << "]\n";
 	}
 
 	int64_t getRandomKeyFromHotServer() {
