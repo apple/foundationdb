@@ -76,6 +76,7 @@ ACTOR Future<Void> moveKeys(Database occ,
                             FlowLock* finishMoveKeysParallelismLock,
                             bool hasRemote,
                             UID relocationIntervalId, // for logging only
+                            UID dataMoveID, // for logging only
                             const DDEnabledState* ddEnabledState);
 // Eventually moves the given keys to the given destination team
 // Caller is responsible for cancelling it before issuing an overlapping move,

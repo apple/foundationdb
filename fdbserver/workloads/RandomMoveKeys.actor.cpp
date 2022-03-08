@@ -150,6 +150,7 @@ struct MoveKeysWorkload : TestWorkload {
 			              &fl2,
 			              false,
 			              relocateShardInterval.pairID,
+						  UID(),
 			              &ddEnabledState));
 			TraceEvent(relocateShardInterval.end()).detail("Result", "Success");
 			return Void();

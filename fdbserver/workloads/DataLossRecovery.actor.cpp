@@ -211,6 +211,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 				              &self->finishMoveKeysParallelismLock,
 				              false,
 				              UID(), // for logging only
+				              UID(),
 				              &ddEnabledState));
 				break;
 			} catch (Error& e) {

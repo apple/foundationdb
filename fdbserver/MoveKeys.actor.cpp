@@ -355,15 +355,15 @@ ACTOR Future<Void> logWarningAfter(const char* context, double duration, std::ve
 // subrange of keys that the server did not already have, complete for each subrange that it already has Set
 // serverKeys[dest][keys] = "" for the dest servers of each existing shard in keys (unless that destination is a member
 // of servers OR if the source list is sufficiently degraded)
-ACTOR static Future<UID> startMoveKeys(Database occ,
-                                       KeyRange keys,
-                                       std::vector<UID> servers,
-                                       MoveKeysLock lock,
-                                       FlowLock* startMoveKeysLock,
-                                       UID relocationIntervalId,
-                                       UID dataMoveID,
-                                       std::map<UID, StorageServerInterface>* tssMapping,
-                                       const DDEnabledState* ddEnabledState) {
+ACTOR static Future<Void> startMoveKeys(Database occ,
+                                        KeyRange keys,
+                                        std::vector<UID> servers,
+                                        MoveKeysLock lock,
+                                        FlowLock* startMoveKeysLock,
+                                        UID relocationIntervalId,
+                                        UID dataMoveID,
+                                        std::map<UID, StorageServerInterface>* tssMapping,
+                                        const DDEnabledState* ddEnabledState) {
 	state TraceInterval interval("RelocateShard_StartMoveKeys");
 	state Future<Void> warningLogger = logWarningAfter("StartMoveKeysTooLong", 600, servers);
 	// state TraceInterval waitInterval("");
@@ -545,9 +545,9 @@ ACTOR static Future<UID> startMoveKeys(Database occ,
 					wait(tr->commit());
 
 					TraceEvent("DataMoveMetaDataCommit", dataMove.id)
-					    .detail("CommitVersion", tr.getCommittedVersion())
-					    .detail("DeltaRange", currentKeys.toString());
-					.detail("Range", dataMove.range.toString());
+					    .detail("CommitVersion", tr->getCommittedVersion())
+					    .detail("DeltaRange", currentKeys.toString())
+					    .detail("Range", dataMove.range.toString());
 
 					/*TraceEvent("StartMoveKeysCommitDone", relocationIntervalId)
 					    .detail("CommitVersion", tr.getCommittedVersion())
@@ -823,9 +823,10 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 						decodeKeyServersValue(UIDtoTagMap, keyServers[currentIndex].value, src2, dest2);
 
 						std::set<UID> srcSet;
-						for (int s = 0; s < src2.size(); s++)
+						for (int s = 0; s < src2.size(); s++) {
 							allSrcServers.insert(src[s]);
-						srcSet.insert(src2[s]);
+							srcSet.insert(src2[s]);
+						}
 
 						for (int i = 0; i < completeSrc.size(); i++) {
 							if (!srcSet.count(completeSrc[i])) {
@@ -1580,10 +1581,13 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 				    .detail("ShardsInBatch", old.size() - 1);*/
 				break;
 			} catch (Error& e) {
+				state Error err = e;
 				wait(tr->onError(e));
 
 				// if (retries % 10 == 0) {
-				TraceEvent(SevWarn, "CleanUpDataMoveError", id).error(err).detail("DataMoveRange", range.toString());
+				TraceEvent(SevWarn, "CleanUpDataMoveRetriableError", id)
+				    .error(err)
+				    .detail("DataMoveRange", range.toString());
 				// }
 			}
 		}
@@ -1622,7 +1626,7 @@ ACTOR Future<Void> moveKeys(Database cx,
 	                   lock,
 	                   startMoveKeysParallelismLock,
 	                   relocationIntervalId,
-					   dataMoveID,
+	                   dataMoveID,
 	                   &tssMapping,
 	                   ddEnabledState));
 

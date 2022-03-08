@@ -974,7 +974,6 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
                                              RelocateData rd,
                                              Future<Void> prevCleanup,
                                              const DDEnabledState* ddEnabledState) {
-	wait(prevCleanup);
 	state Promise<Void> errorOut(self->error);
 	state TraceInterval relocateShardInterval("RelocateShard");
 	state PromiseStream<RelocateData> dataTransferComplete(self->dataTransferComplete);
@@ -1007,6 +1006,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 			self->lastInterval = now();
 			self->suppressIntervals = 0;
 		}
+
+		wait(prevCleanup);
 
 		state StorageMetrics metrics =
 		    wait(brokenPromiseToNever(self->getShardMetrics.getReply(GetMetricsRequest(rd.keys))));
