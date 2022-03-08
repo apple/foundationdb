@@ -4680,8 +4680,8 @@ struct DecodeBoundaryVerifier {
 		debug_printf("decodeBoundariesUpdate %s %s '%s' to '%s'\n",
 		             ::toString(id).c_str(),
 		             ::toString(v).c_str(),
-		             lowerBound.toString().c_str(),
-		             upperBound.toString().c_str());
+		             lowerBound.printable().c_str(),
+		             upperBound.printable().c_str());
 
 		auto& b = boundariesByPageID[id.front()][v];
 		ASSERT(b.empty());
@@ -4700,11 +4700,11 @@ struct DecodeBoundaryVerifier {
 			        "Boundary mismatch on %s %s\nUsing:\n\t'%s'\n\t'%s'\nWritten %s:\n\t'%s'\n\t'%s'\n",
 			        ::toString(id).c_str(),
 			        ::toString(v).c_str(),
-			        lowerBound.toString().c_str(),
-			        upperBound.toString().c_str(),
+			        lowerBound.printable().c_str(),
+			        upperBound.printable().c_str(),
 			        ::toString(b->first).c_str(),
-			        b->second.lower.toString().c_str(),
-			        b->second.upper.toString().c_str());
+			        b->second.lower.printable().c_str(),
+			        b->second.upper.printable().c_str());
 			return false;
 		}
 		return true;
@@ -4720,8 +4720,8 @@ struct DecodeBoundaryVerifier {
 		             ::toString(v).c_str(),
 		             ::toString(oldID).c_str(),
 		             ::toString(newID).c_str(),
-		             i->second.lower.toString().c_str(),
-		             i->second.upper.toString().c_str());
+		             i->second.lower.printable().c_str(),
+		             i->second.upper.printable().c_str());
 	}
 };
 
