@@ -36,6 +36,19 @@
 class SpecialKeyRangeReadImpl {
 public:
 	// Each derived class only needs to implement this simple version of getRange
+	//
+	// limitsHint can be used to reduce the amount of reading that the underlying
+	// implementation needs to do.
+	//
+	// NOTE: care needs to be taken when using limitsHint. If the range in question
+	// supports it, it is possible that some of the results may be removed when
+	// merged with mutations from the same transaction. If that happens, the final
+	// result may have fewer elements than the limit or even none at all if you didn't
+	// read the entire range.
+	//
+	// TODO: implement the range reading in a loop so that the underlying implementation
+	// can more naively fetch items up to the limit. If the merging deletes any entries,
+	// then the next set of entries can be read.
 	virtual Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
 	                                     KeyRangeRef kr,
 	                                     GetRangeLimits limitsHint) const = 0;
