@@ -2545,13 +2545,18 @@ ACTOR Future<std::pair<KeyRange, Reference<LocationInfo>>> getKeyLocation_intern
 		++cx->transactionKeyServerLocationRequests;
 		choose {
 			when(wait(cx->onProxiesChanged())) {}
-			when(
-			    GetKeyServerLocationsReply rep = wait(basicLoadBalance(
-			        cx->getCommitProxies(useProvisionalProxies),
-			        &CommitProxyInterface::getKeyServersLocations,
-			        GetKeyServerLocationsRequest(
-			            span.context, Optional<TenantNameRef>(), key, Optional<KeyRef>(), 100, isBackward, key.arena()),
-			        TaskPriority::DefaultPromiseEndpoint))) {
+			when(GetKeyServerLocationsReply rep =
+			         wait(basicLoadBalance(cx->getCommitProxies(useProvisionalProxies),
+			                               &CommitProxyInterface::getKeyServersLocations,
+			                               GetKeyServerLocationsRequest(span.context,
+			                                                            Optional<TenantNameRef>(),
+			                                                            key,
+			                                                            Optional<KeyRef>(),
+			                                                            100,
+			                                                            isBackward,
+			                                                            latestVersion,
+			                                                            key.arena()),
+			                               TaskPriority::DefaultPromiseEndpoint))) {
 				++cx->transactionKeyServerLocationRequestsCompleted;
 				if (debugID.present())
 					g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getKeyLocation.After");
@@ -2649,12 +2654,18 @@ ACTOR Future<std::vector<std::pair<KeyRange, Reference<LocationInfo>>>> getKeyRa
 		++cx->transactionKeyServerLocationRequests;
 		choose {
 			when(wait(cx->onProxiesChanged())) {}
-			when(GetKeyServerLocationsReply _rep = wait(basicLoadBalance(
-			         cx->getCommitProxies(useProvisionalProxies),
-			         &CommitProxyInterface::getKeyServersLocations,
-			         GetKeyServerLocationsRequest(
-			             span.context, Optional<TenantNameRef>(), keys.begin, keys.end, limit, reverse, keys.arena()),
-			         TaskPriority::DefaultPromiseEndpoint))) {
+			when(GetKeyServerLocationsReply _rep =
+			         wait(basicLoadBalance(cx->getCommitProxies(useProvisionalProxies),
+			                               &CommitProxyInterface::getKeyServersLocations,
+			                               GetKeyServerLocationsRequest(span.context,
+			                                                            Optional<TenantNameRef>(),
+			                                                            keys.begin,
+			                                                            keys.end,
+			                                                            limit,
+			                                                            reverse,
+			                                                            latestVersion,
+			                                                            keys.arena()),
+			                               TaskPriority::DefaultPromiseEndpoint))) {
 				++cx->transactionKeyServerLocationRequestsCompleted;
 				state GetKeyServerLocationsReply rep = _rep;
 				if (debugID.present())

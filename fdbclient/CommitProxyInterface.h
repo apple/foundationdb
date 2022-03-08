@@ -318,20 +318,27 @@ struct GetKeyServerLocationsRequest {
 	bool reverse;
 	ReplyPromise<GetKeyServerLocationsReply> reply;
 
-	GetKeyServerLocationsRequest() : limit(0), reverse(false) {}
+	// This version is used to specify the minimum metadata version a proxy must have in order to declare that
+	// a tenant is not present. If the metadata version is lower, the proxy must wait in case the tenant gets
+	// created. If latestVersion is specified, then the proxy will wait until it is sure that it has received
+	// updates from other proxies before answering.
+	Version minTenantVersion;
+
+	GetKeyServerLocationsRequest() : limit(0), reverse(false), minTenantVersion(latestVersion) {}
 	GetKeyServerLocationsRequest(SpanID spanContext,
 	                             Optional<TenantNameRef> const& tenant,
 	                             KeyRef const& begin,
 	                             Optional<KeyRef> const& end,
 	                             int limit,
 	                             bool reverse,
+	                             Version minTenantVersion,
 	                             Arena const& arena)
-	  : arena(arena), spanContext(spanContext), tenant(tenant), begin(begin), end(end), limit(limit), reverse(reverse) {
-	}
+	  : arena(arena), spanContext(spanContext), tenant(tenant), begin(begin), end(end), limit(limit), reverse(reverse),
+	    minTenantVersion(minTenantVersion) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, begin, end, limit, reverse, reply, spanContext, tenant, arena);
+		serializer(ar, begin, end, limit, reverse, reply, spanContext, tenant, minTenantVersion, arena);
 	}
 };
 

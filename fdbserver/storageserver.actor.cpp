@@ -2463,9 +2463,7 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 	return result;
 }
 
-KeyRangeRef StorageServer::clampRangeToTenant(KeyRangeRef range,
-                                              Optional<TenantMapEntry> tenantEntry,
-                                              Arena& arena) {
+KeyRangeRef StorageServer::clampRangeToTenant(KeyRangeRef range, Optional<TenantMapEntry> tenantEntry, Arena& arena) {
 	if (tenantEntry.present()) {
 		return KeyRangeRef(range.begin.startsWith(tenantEntry.get().prefix) ? range.begin : tenantEntry.get().prefix,
 		                   range.end.startsWith(tenantEntry.get().prefix)

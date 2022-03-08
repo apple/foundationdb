@@ -118,7 +118,7 @@ private:
 	std::map<Tag, Version>* tag_popped = nullptr;
 	std::unordered_map<UID, StorageServerInterface>* tssMapping = nullptr;
 
-	TenantMap* tenantMap = nullptr;
+	std::map<TenantName, TenantMapEntry>* tenantMap = nullptr;
 
 	// true if the mutations were already written to the txnStateStore as part of recovery
 	bool initialCommit = false;
@@ -581,12 +581,11 @@ private:
 		if (m.param1.startsWith(tenantMapPrefix)) {
 			if (tenantMap) {
 				ASSERT(version != invalidVersion);
-				tenantMap->createNewVersion(version);
 				Standalone<StringRef> tenantName = m.param1.removePrefix(tenantMapPrefix);
 				TenantMapEntry tenantEntry = decodeTenantEntry(m.param2);
 
 				TraceEvent("CommitProxyInsertTenant", dbgid).detail("Tenant", tenantName).detail("Version", version);
-				tenantMap->insert(tenantName, tenantEntry);
+				(*tenantMap)[tenantName] = tenantEntry;
 			}
 
 			if (!initialCommit) {
@@ -939,7 +938,6 @@ private:
 		if (tenantMapKeys.intersects(range)) {
 			if (tenantMap) {
 				ASSERT(version != invalidVersion);
-				tenantMap->createNewVersion(version);
 
 				StringRef startTenant = std::max(range.begin, tenantMapPrefix).removePrefix(tenantMapPrefix);
 				StringRef endTenant = (range.end.startsWith(tenantMapPrefix) ? range.end : tenantMapKeys.end)
@@ -949,7 +947,10 @@ private:
 				    .detail("BeginTenant", startTenant)
 				    .detail("EndTenant", endTenant)
 				    .detail("Version", version);
-				tenantMap->erase(startTenant, endTenant);
+
+				auto startItr = tenantMap->lower_bound(startTenant);
+				auto endItr = tenantMap->lower_bound(endTenant);
+				tenantMap->erase(startItr, endItr);
 			}
 
 			if (!initialCommit) {

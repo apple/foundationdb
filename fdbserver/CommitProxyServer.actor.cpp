@@ -413,31 +413,27 @@ ACTOR static Future<ResolveTransactionBatchReply> trackResolutionMetrics(Referen
 ErrorOr<Optional<TenantMapEntry>> getTenantEntry(ProxyCommitData* commitData,
                                                  Optional<TenantNameRef> tenant,
                                                  Optional<int64_t> tenantId,
-                                                 Version commitVersion) {
+                                                 bool logOnFailure) {
 	if (tenant.present()) {
-		auto view = commitData->tenantMap.at(commitVersion);
-		auto itr = view.find(tenant.get());
-		if (itr == view.end()) {
-			if (commitVersion != latestVersion) {
-				TraceEvent(SevWarn, "CommitProxyUnknownTenant", commitData->dbgid)
-				    .detail("Tenant", tenant.get())
-				    .detail("Version", commitVersion);
+		auto itr = commitData->tenantMap.find(tenant.get());
+		if (itr == commitData->tenantMap.end()) {
+			if (logOnFailure) {
+				TraceEvent(SevWarn, "CommitProxyUnknownTenant", commitData->dbgid).detail("Tenant", tenant.get());
 			}
 
 			return unknown_tenant();
-		} else if (tenantId.present() && tenantId.get() != itr->id) {
-			if (commitVersion != latestVersion) {
+		} else if (tenantId.present() && tenantId.get() != itr->second.id) {
+			if (logOnFailure) {
 				TraceEvent(SevWarn, "CommitProxyTenantIdMismatch", commitData->dbgid)
 				    .detail("Tenant", tenant.get())
 				    .detail("TenantId", tenantId)
-				    .detail("ExistingId", itr->id)
-				    .detail("Version", commitVersion);
+				    .detail("ExistingId", itr->second.id);
 			}
 
 			return unknown_tenant();
 		}
 
-		return ErrorOr<Optional<TenantMapEntry>>(Optional<TenantMapEntry>(*itr));
+		return ErrorOr<Optional<TenantMapEntry>>(Optional<TenantMapEntry>(itr->second));
 	}
 
 	return Optional<TenantMapEntry>();
@@ -879,10 +875,8 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 	int t;
 	for (t = 0; t < trs.size() && !self->forceRecovery; t++) {
 		if (self->committed[t] == ConflictBatch::TransactionCommitted && (!self->locked || trs[t].isLockAware())) {
-			ErrorOr<Optional<TenantMapEntry>> result = getTenantEntry(pProxyCommitData,
-			                                                          trs[t].tenantInfo.name.castTo<TenantNameRef>(),
-			                                                          trs[t].tenantInfo.tenantId,
-			                                                          self->commitVersion);
+			ErrorOr<Optional<TenantMapEntry>> result = getTenantEntry(
+			    pProxyCommitData, trs[t].tenantInfo.name.castTo<TenantNameRef>(), trs[t].tenantInfo.tenantId, true);
 
 			if (result.isError()) {
 				self->committed[t] = ConflictBatch::TransactionTenantFailure;
@@ -1539,22 +1533,36 @@ ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsReques
 	wait(commitData->validState.getFuture());
 	wait(delay(0, TaskPriority::DefaultEndpoint));
 
-	state Version requestVersion = latestVersion;
 	state ErrorOr<Optional<TenantMapEntry>> tenantEntry;
+	state Version minTenantVersion =
+	    req.minTenantVersion == latestVersion ? commitData->stats.lastCommitVersionAssigned + 1 : req.minTenantVersion;
+
+	// If a large minTenantVersion is specified, we limit how long we wait for it to be available
+	state Future<Void> futureVersionDelay = minTenantVersion > commitData->stats.lastCommitVersionAssigned + 1
+	                                            ? delay(SERVER_KNOBS->FUTURE_VERSION_DELAY)
+	                                            : Never();
+
 	while (tenantEntry.isError()) {
+		bool finalQuery = commitData->version.get() >= minTenantVersion;
 		ErrorOr<Optional<TenantMapEntry>> _tenantEntry =
-		    getTenantEntry(commitData, req.tenant, Optional<int64_t>(), requestVersion);
+		    getTenantEntry(commitData, req.tenant, Optional<int64_t>(), finalQuery);
 		tenantEntry = _tenantEntry;
 
 		if (tenantEntry.isError()) {
-			if (requestVersion != latestVersion) {
+			if (finalQuery) {
 				req.reply.sendError(tenant_not_found());
 				return Void();
 			} else {
-				// If the tenant doesn't exist, wait until we are sure we've received updates from the other proxies to
-				// declare that it wasn't recently created.
-				wait(commitData->version.whenAtLeast(commitData->stats.lastCommitVersionAssigned + 1));
-				requestVersion = commitData->version.get();
+				choose {
+					// Wait until we are sure that we've received metadata updates through minTenantVersion
+					// If latestVersion is specified, this will wait until we have definitely received
+					// updates through the version at the time we received the request
+					when(wait(commitData->version.whenAtLeast(minTenantVersion))) {}
+					when(wait(futureVersionDelay)) {
+						req.reply.sendError(future_version());
+						return Void();
+					}
+				}
 			}
 		}
 	}
