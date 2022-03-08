@@ -2349,10 +2349,10 @@ ACTOR void setupAndRun(std::string dataFolder,
 		if (deterministicRandom()->random01() < 0.9) {
 			tenantMode = TenantMode::REQUIRED;
 		} else {
-			tenantMode = TenantMode::OPTIONAL;
+			tenantMode = TenantMode::OPTIONAL_TENANT;
 		}
 	} else if (!allowDisablingTenants || deterministicRandom()->random01() < 0.5) {
-		tenantMode = TenantMode::OPTIONAL;
+		tenantMode = TenantMode::OPTIONAL_TENANT;
 	}
 
 	TraceEvent("SimulatedClusterTenantMode")
