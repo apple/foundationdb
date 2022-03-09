@@ -28,6 +28,7 @@
 #include <unordered_map>
 
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/Knobs.h"
 
 struct VersionVector {
 	std::unordered_map<Tag, Version> versions;
@@ -88,18 +89,22 @@ struct VersionVector {
 			return; // rerurn an invalid version vector
 		}
 
-		std::map<Version, std::set<Tag>> tmpVersionMap; // order versions
-		for (const auto& [tag, version] : versions) {
-			if (version > refVersion) {
-				tmpVersionMap[version].insert(tag);
+		if (CLIENT_KNOBS->SEND_ENTIRE_VERSION_VECTOR) {
+			delta = *this;
+		} else {
+			std::map<Version, std::set<Tag>> tmpVersionMap; // order versions
+			for (const auto& [tag, version] : versions) {
+				if (version > refVersion) {
+					tmpVersionMap[version].insert(tag);
+				}
 			}
-		}
 
-		for (auto& [version, tags] : tmpVersionMap) {
-			delta.setVersion(tags, version);
-		}
+			for (auto& [version, tags] : tmpVersionMap) {
+				delta.setVersion(tags, version);
+			}
 
-		delta.maxVersion = maxVersion;
+			delta.maxVersion = maxVersion;
+		}
 	}
 
 	// @note this method, together with method getDelta(), helps minimize
@@ -114,18 +119,22 @@ struct VersionVector {
 			return;
 		}
 
-		std::map<Version, std::set<Tag>> tmpVersionMap; // order versions
-		for (const auto& [tag, version] : delta.versions) {
-			if (version > maxVersion) {
-				tmpVersionMap[version].insert(tag);
+		if (CLIENT_KNOBS->SEND_ENTIRE_VERSION_VECTOR) {
+			*this = delta;
+		} else {
+			std::map<Version, std::set<Tag>> tmpVersionMap; // order versions
+			for (const auto& [tag, version] : delta.versions) {
+				if (version > maxVersion) {
+					tmpVersionMap[version].insert(tag);
+				}
 			}
-		}
 
-		for (auto& [version, tags] : tmpVersionMap) {
-			setVersion(tags, version);
-		}
+			for (auto& [version, tags] : tmpVersionMap) {
+				setVersion(tags, version);
+			}
 
-		maxVersion = delta.maxVersion;
+			maxVersion = delta.maxVersion;
+		}
 	}
 
 	std::string toString() const {
