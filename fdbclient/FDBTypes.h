@@ -740,7 +740,7 @@ struct MappedKeyValueRef : KeyValueRef {
 
 	MappedReqAndResultRef reqAndResult;
 
-	MappedKeyValueRef() {}
+	MappedKeyValueRef() = default;
 	MappedKeyValueRef(Arena& a, const MappedKeyValueRef& copyFrom) : KeyValueRef(a, copyFrom) {
 		const auto& reqAndResultCopyFrom = copyFrom.reqAndResult;
 		if (std::holds_alternative<GetValueReqAndResultRef>(reqAndResultCopyFrom)) {

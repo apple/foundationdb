@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,12 +24,12 @@
 #include "fdbrpc/simulator.h"
 #include "fdbclient/MutationLogReader.actor.h"
 #include "fdbclient/Tuple.h"
+#include "fdbserver/workloads/ApiWorkload.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/Knobs.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/flow.h"
-#include "ApiWorkload.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 const Value EMPTY = Tuple().pack();
@@ -94,12 +94,11 @@ struct GetMappedRangeWorkload : ApiWorkload {
 	static Value recordValue(int i, int split) { return Tuple().append(dataOfRecord(i, split)).pack(); }
 
 	ACTOR Future<Void> fillInRecords(Database cx, int n, GetMappedRangeWorkload* self) {
+		state Transaction tr(cx);
 		loop {
 			std::cout << "start fillInRecords n=" << n << std::endl;
 			// TODO: When n is large, split into multiple transactions.
-			state Transaction tr(cx);
 			try {
-				tr.reset();
 				for (int i = 0; i < n; i++) {
 					if (self->SPLIT_RECORDS) {
 						for (int split = 0; split < SPLIT_SIZE; split++) {
@@ -132,12 +131,15 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		std::cout << "start scanRange " << range.toString() << std::endl;
 		// TODO: When n is large, split into multiple transactions.
 		state Transaction tr(cx);
-		try {
-			tr.reset();
-			RangeResult result = wait(tr.getRange(range, CLIENT_KNOBS->TOO_MANY));
-			//			showResult(result);
-		} catch (Error& e) {
-			wait(tr.onError(e));
+		loop {
+			try {
+				tr.reset();
+				RangeResult result = wait(tr.getRange(range, CLIENT_KNOBS->TOO_MANY));
+				//			showResult(result);
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
 		}
 		std::cout << "finished scanRange" << std::endl;
 		return Void();

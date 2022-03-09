@@ -180,7 +180,7 @@ struct GetMappedRangeResult {
 	                       std::string, // end
 	                       std::vector<std::pair<std::string, std::string>> // range results
 	                       >>
-	    kvms;
+	    mkvs;
 	// True if values remain in the key range requested.
 	bool more;
 	// Set to a non-zero value if an error occurred during the transaction.
@@ -282,36 +282,36 @@ GetMappedRangeResult get_mapped_range(fdb::Transaction& tr,
 		return GetMappedRangeResult{ {}, false, err };
 	}
 
-	const FDBMappedKeyValue* out_kvm;
+	const FDBMappedKeyValue* out_mkv;
 	int out_count;
 	fdb_bool_t out_more;
 
-	fdb_check(f1.get(&out_kvm, &out_count, &out_more));
+	fdb_check(f1.get(&out_mkv, &out_count, &out_more));
 
 	GetMappedRangeResult result;
 	result.more = (out_more != 0);
 	result.err = 0;
 
-	//	std::cout << "out_count:" << out_count << " out_more:" << out_more << " out_kvm:" << (void*)out_kvm <<
+	//	std::cout << "out_count:" << out_count << " out_more:" << out_more << " out_mkv:" << (void*)out_mkv <<
 	// std::endl;
 
 	for (int i = 0; i < out_count; ++i) {
-		FDBMappedKeyValue kvm = out_kvm[i];
-		auto key = extractString(kvm.key);
-		auto value = extractString(kvm.value);
-		auto begin = extractString(kvm.getRange.begin.key);
-		auto end = extractString(kvm.getRange.end.key);
+		FDBMappedKeyValue mkv = out_mkv[i];
+		auto key = extractString(mkv.key);
+		auto value = extractString(mkv.value);
+		auto begin = extractString(mkv.getRange.begin.key);
+		auto end = extractString(mkv.getRange.end.key);
 		//		std::cout << "key:" << key << " value:" << value << " begin:" << begin << " end:" << end << std::endl;
 
 		std::vector<std::pair<std::string, std::string>> range_results;
-		for (int i = 0; i < kvm.getRange.m_size; ++i) {
-			auto kv = kvm.getRange.data[i];
+		for (int i = 0; i < mkv.getRange.m_size; ++i) {
+			const auto& kv = mkv.getRange.data[i];
 			std::string k((const char*)kv.key, kv.key_length);
 			std::string v((const char*)kv.value, kv.value_length);
 			range_results.emplace_back(k, v);
-			//			std::cout << "[" << i << "]" << k << " -> " << v << std::endl;
+			// std::cout << "[" << i << "]" << k << " -> " << v << std::endl;
 		}
-		result.kvms.emplace_back(key, value, begin, end, range_results);
+		result.mkvs.emplace_back(key, value, begin, end, range_results);
 	}
 	return result;
 }
@@ -969,7 +969,8 @@ GetMappedRangeResult getMappedIndexEntries(int beginId, int endId, fdb::Transact
 }
 
 TEST_CASE("fdb_transaction_get_mapped_range") {
-	fillInRecords(20);
+	const int TOTAL_RECORDS = 20;
+	fillInRecords(TOTAL_RECORDS);
 
 	fdb::Transaction tr(db);
 	// RYW should be enabled.
@@ -985,12 +986,12 @@ TEST_CASE("fdb_transaction_get_mapped_range") {
 		}
 
 		int expectSize = endId - beginId;
-		CHECK(result.kvms.size() == expectSize);
+		CHECK(result.mkvs.size() == expectSize);
 		CHECK(!result.more);
 
 		int id = beginId;
 		for (int i = 0; i < expectSize; i++, id++) {
-			const auto& [key, value, begin, end, range_results] = result.kvms[i];
+			const auto& [key, value, begin, end, range_results] = result.mkvs[i];
 			CHECK(indexEntryKey(id).compare(key) == 0);
 			CHECK(EMPTY.compare(value) == 0);
 			CHECK(range_results.size() == SPLIT_SIZE);

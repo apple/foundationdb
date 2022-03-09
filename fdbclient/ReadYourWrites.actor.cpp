@@ -1175,36 +1175,7 @@ public:
 			}
 		}
 	}
-	/*    template <bool backwards>
-	    static void addConflictRangeAndMustUnmodified(ReadYourWritesTransaction* ryw,
-	                                                  GetMappedRangeReq<backwards> read,
-	                                                  WriteMap::iterator* it,
-	                                                  MappedRangeResult* result) {
-	        // Primary getRange.
-	        addConflictRange<true, MappedRangeResult>(
-	            ryw, GetRangeReq<backwards>(read.begin, read.end, read.limits), *it, *result);
 
-	        // Secondary getValue/getRanges.
-	        for (const auto& mappedKeyValue : *result) {
-	            const auto& reqAndResult = mappedKeyValue.reqAndResult;
-	            if (std::holds_alternative<GetValueReqAndResultRef>(reqAndResult)) {
-	                auto getValue = std::get<GetValueReqAndResultRef>(reqAndResult);
-	                // GetValueReq variation of addConflictRange require it to point at the right segment.
-	                it->skip(getValue.key);
-	                // The result is not used in GetValueReq variation of addConflictRange. Let's just pass in a
-	                // placeholder.
-	                addConflictRange<true>(ryw, GetValueReq(getValue.key), *it, Optional<Value>());
-	            } else if (std::holds_alternative<GetRangeReqAndResultRef>(reqAndResult)) {
-	                auto getRange = std::get<GetRangeReqAndResultRef>(reqAndResult);
-	                // We only support forward scan for secondary getRange requests.
-	                // The limits are not used in addConflictRange. Let's just pass in a placeholder.
-	                addConflictRange<true>(
-	                    ryw, GetRangeReq<false>(getRange.begin, getRange.end, GetRangeLimits()), *it, getRange.result);
-	            } else {
-	                throw internal_error();
-	            }
-	        }
-	    }*/
 	// For Snapshot::True and NOT readYourWritesDisabled.
 	ACTOR template <bool backwards>
 	static Future<MappedRangeResult> readWithConflictRangeRYW(ReadYourWritesTransaction* ryw,

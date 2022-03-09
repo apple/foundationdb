@@ -2206,12 +2206,10 @@ void merge(Arena& arena,
 static inline void copyOptionalValue(Arena* a,
                                      GetValueReqAndResultRef& getValue,
                                      const Optional<Value>& optionalValue) {
+	std::function<StringRef(Value)> contents = [](Value value) { return value.contents(); };
+	getValue.result = optionalValue.map(contents);
 	if (optionalValue.present()) {
-		const Value& value = optionalValue.get();
-		a->dependsOn(value.arena());
-		getValue.result = value;
-	} else {
-		getValue.result.reset(); // Is it default to be empty?
+		a->dependsOn(optionalValue.get().arena());
 	}
 }
 ACTOR Future<GetValueReqAndResultRef> quickGetValue(StorageServer* data,
@@ -2835,18 +2833,6 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 			// Convert GetKeyValuesReply to RangeResult.
 			a->dependsOn(reply.arena);
 			getRange.result = RangeResultRef(reply.data, reply.more);
-			//			std::cout << "quickGetKeyValues begin:" << getRange.begin.toString() << ", end:" <<
-			// getRange.end.toString()
-			//			          << ", result:" << getRange.result.size() << std::endl;
-			//			for (auto it = getRange.result.begin(); it != getRange.result.end(); it++) {
-			//				KeyValueRef kv = *it;
-			//				std::cout << ">>key:" << printable(kv.key) << ", value:" << printable(kv.value) <<
-			// std::endl;
-			//			}
-			//			for (int i = 0; i < getRange.result.size(); i++) {
-			//				KeyValueRef kv = getRange.result[i];
-			//				std::cout << ">key:" << printable(kv.key) << ", value:" << printable(kv.value) << std::endl;
-			//			}
 			return getRange;
 		}
 		// Otherwise fallback.
@@ -3089,9 +3075,6 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
                                                    Optional<Key> tenantPrefix) {
 	state GetMappedKeyValuesReply result;
 	result.version = input.version;
-	//	if (input.more) {
-	//		throw get_mapped_key_values_has_more();
-	//	}
 	result.more = input.more;
 	result.cached = input.cached;
 	result.arena.dependsOn(input.arena);

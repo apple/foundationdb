@@ -3627,15 +3627,11 @@ Future<RangeResultFamily> getRangeFallback(Reference<TransactionState> trState,
 	return r;
 }
 
-int64_t inline getRangeResultBytes(RangeResultRef result) {
-	int64_t bytes = 0;
-	for (const KeyValueRef& kv : result) {
-		bytes += kv.expectedSize();
-	}
-	return bytes;
+int64_t inline getRangeResultFamilyBytes(RangeResultRef result) {
+	return result.expectedSize();
 }
 
-int64_t inline getRangeResultBytes(MappedRangeResultRef result) {
+int64_t inline getRangeResultFamilyBytes(MappedRangeResultRef result) {
 	int64_t bytes = 0;
 	for (const MappedKeyValueRef& mappedKeyValue : result) {
 		bytes += mappedKeyValue.key.size() + mappedKeyValue.value.size();
@@ -3646,13 +3642,14 @@ int64_t inline getRangeResultBytes(MappedRangeResultRef result) {
 			bytes += getValue.expectedSize();
 		} else if (std::holds_alternative<GetRangeReqAndResultRef>(reqAndResult)) {
 			auto getRange = std::get<GetRangeReqAndResultRef>(reqAndResult);
-			bytes += getRangeResultBytes(getRange.result);
+			bytes += getRange.result.expectedSize();
 		} else {
 			throw internal_error();
 		}
 	}
 	return bytes;
 }
+
 // TODO: Client should add mapped keys to conflict ranges.
 ACTOR template <class RangeResultFamily> // RangeResult or MappedRangeResult
 void getRangeFinished(Reference<TransactionState> trState,
@@ -3663,7 +3660,7 @@ void getRangeFinished(Reference<TransactionState> trState,
                       Promise<std::pair<Key, Key>> conflictRange,
                       Reverse reverse,
                       RangeResultFamily result) {
-	int64_t bytes = getRangeResultBytes(result);
+	int64_t bytes = getRangeResultFamilyBytes(result);
 
 	trState->cx->transactionBytesRead += bytes;
 	trState->cx->transactionKeysRead += result.size();
