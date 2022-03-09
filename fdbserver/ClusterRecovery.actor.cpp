@@ -1208,6 +1208,9 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 		self->recoveryTransactionVersion = g_network->timer() * SERVER_KNOBS->VERSIONS_PER_SECOND;
 		if (!g_network->isSimulated()) {
 			self->recoveryTransactionVersion -= SERVER_KNOBS->DEFAULT_VERSION_EPOCH * SERVER_KNOBS->VERSIONS_PER_SECOND;
+		} else {
+			// Since the clock always start at 0 in simulation, add a random offset.
+			self->recoveryTransactionVersion += deterministicRandom()->randomInt64(0, 10000000);
 		}
 	} else {
 		if (self->forceRecovery) {
