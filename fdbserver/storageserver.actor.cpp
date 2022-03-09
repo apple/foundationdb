@@ -2817,6 +2817,7 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 		req.end = getRange.end;
 		req.version = version;
 		// TODO: Validate when the underlying range query exceeds the limit.
+		// TODO: Use remainingLimit, remainingLimitBytes rather than separate knobs.
 		req.limit = SERVER_KNOBS->QUICK_GET_KEY_VALUES_LIMIT;
 		req.limitBytes = SERVER_KNOBS->QUICK_GET_KEY_VALUES_LIMIT_BYTES;
 		req.isFetchKeys = false;
