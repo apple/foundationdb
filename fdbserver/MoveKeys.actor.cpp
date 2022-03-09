@@ -558,7 +558,7 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 		    .detail("Shards", shards)
 		    .detail("MaxRetries", maxRetries);
 	} catch (Error& e) {
-		TraceEvent(SevDebug, interval.end(), relocationIntervalId).error(e, true);
+		TraceEvent(SevDebug, interval.end(), relocationIntervalId).errorUnsuppressed(e);
 		throw;
 	}
 
@@ -992,7 +992,7 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 
 		TraceEvent(SevDebug, interval.end(), relocationIntervalId);
 	} catch (Error& e) {
-		TraceEvent(SevDebug, interval.end(), relocationIntervalId).error(e, true);
+		TraceEvent(SevDebug, interval.end(), relocationIntervalId).errorUnsuppressed(e);
 		throw;
 	}
 	return Void();
@@ -1151,7 +1151,7 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServe
 				tr->addReadConflictRange(conflictRange);
 				tr->addWriteConflictRange(conflictRange);
 
-				StorageMetadataType metadata(timer_int());
+				StorageMetadataType metadata(StorageMetadataType::currentTime());
 				metadataMap.set(tr, server.id(), metadata);
 
 				if (SERVER_KNOBS->TSS_HACK_IDENTITY_MAPPING) {
@@ -1521,7 +1521,7 @@ void seedShardServers(Arena& arena, CommitTransactionRef& tr, std::vector<Storag
 	tr.read_conflict_ranges.push_back_deep(arena, allKeys);
 	KeyBackedObjectMap<UID, StorageMetadataType, decltype(IncludeVersion())> metadataMap(serverMetadataKeys.begin,
 	                                                                                     IncludeVersion());
-	StorageMetadataType metadata(timer_int());
+	StorageMetadataType metadata(StorageMetadataType::currentTime());
 
 	for (auto& s : servers) {
 		tr.set(arena, serverTagKeyFor(s.id()), serverTagValue(server_tag[s.id()]));

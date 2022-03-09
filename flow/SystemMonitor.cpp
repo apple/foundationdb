@@ -43,7 +43,9 @@ double machineStartTime() {
 
 void systemMonitor() {
 	static StatisticsState statState = StatisticsState();
+#if !DEBUG_DETERMINISM
 	customSystemMonitor("ProcessMetrics", &statState, true);
+#endif
 }
 
 SystemStatistics getSystemStatistics() {

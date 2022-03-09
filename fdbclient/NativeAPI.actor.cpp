@@ -28,7 +28,7 @@
 #include <utility>
 #include <vector>
 
-#include "contrib/fmt-8.0.1/include/fmt/format.h"
+#include "contrib/fmt-8.1.1/include/fmt/format.h"
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/FailureMonitor.h"
@@ -63,6 +63,7 @@
 #include "fdbrpc/LoadBalance.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/simulator.h"
+#include "fdbrpc/sim_validation.h"
 #include "flow/Arena.h"
 #include "flow/ActorCollection.h"
 #include "flow/DeterministicRandom.h"
@@ -203,6 +204,32 @@ void DatabaseContext::removeTssMapping(StorageServerInterface const& ssi) {
 		queueModel.removeTssEndpoint(ssi.getReadHotRanges.getEndpoint().token.first());
 		queueModel.removeTssEndpoint(ssi.getRangeSplitPoints.getEndpoint().token.first());
 	}
+}
+
+void DatabaseContext::updateCachedReadVersion(double t, Version v) {
+	if (v >= cachedReadVersion) {
+		TraceEvent(SevDebug, "CachedReadVersionUpdate")
+		    .detail("Version", v)
+		    .detail("GrvStartTime", t)
+		    .detail("LastVersion", cachedReadVersion)
+		    .detail("LastTime", lastGrvTime);
+		cachedReadVersion = v;
+		// Since the time is based on the start of the request, it's possible that we
+		// get a newer version with an older time.
+		// (Request started earlier, but was latest to reach the proxy)
+		// Only update time when strictly increasing (?)
+		if (t > lastGrvTime) {
+			lastGrvTime = t;
+		}
+	}
+}
+
+Version DatabaseContext::getCachedReadVersion() {
+	return cachedReadVersion;
+}
+
+double DatabaseContext::getLastGrvTime() {
+	return lastGrvTime;
 }
 
 Reference<StorageServerInfo> StorageServerInfo::getInterface(DatabaseContext* cx,
@@ -382,6 +409,84 @@ void traceTSSErrors(const char* name, UID tssId, const std::unordered_map<int, u
 	}
 }
 
+/*
+    For each request type, this will produce
+    <Type>Count
+    <Type>{SS,TSS}{Mean,P50,P90,P99}
+    Example:
+    GetValueLatencySSMean
+*/
+void traceSSOrTSSPercentiles(TraceEvent& ev, const std::string name, ContinuousSample<double>& sample) {
+	ev.detail(name + "Mean", sample.mean());
+	// don't log the larger percentiles unless we actually have enough samples to log the accurate percentile instead of
+	// the largest sample in this window
+	if (sample.getPopulationSize() >= 3) {
+		ev.detail(name + "P50", sample.median());
+	}
+	if (sample.getPopulationSize() >= 10) {
+		ev.detail(name + "P90", sample.percentile(0.90));
+	}
+	if (sample.getPopulationSize() >= 100) {
+		ev.detail(name + "P99", sample.percentile(0.99));
+	}
+}
+
+void traceTSSPercentiles(TraceEvent& ev,
+                         const std::string name,
+                         ContinuousSample<double>& ssSample,
+                         ContinuousSample<double>& tssSample) {
+	ASSERT(ssSample.getPopulationSize() == tssSample.getPopulationSize());
+	ev.detail(name + "Count", ssSample.getPopulationSize());
+	if (ssSample.getPopulationSize() > 0) {
+		traceSSOrTSSPercentiles(ev, name + "SS", ssSample);
+		traceSSOrTSSPercentiles(ev, name + "TSS", tssSample);
+	}
+}
+
+ACTOR Future<Void> tssLogger(DatabaseContext* cx) {
+	state double lastLogged = 0;
+	loop {
+		wait(delay(CLIENT_KNOBS->TSS_METRICS_LOGGING_INTERVAL, TaskPriority::FlushTrace));
+
+		// Log each TSS pair separately
+		for (const auto& it : cx->tssMetrics) {
+			if (it.second->mismatches.getIntervalDelta()) {
+				cx->tssMismatchStream.send(
+				    std::pair<UID, std::vector<DetailedTSSMismatch>>(it.first, it.second->detailedMismatches));
+			}
+
+			// Do error histograms as separate event
+			if (it.second->ssErrorsByCode.size()) {
+				traceTSSErrors("TSS_SSErrors", it.first, it.second->ssErrorsByCode);
+			}
+
+			if (it.second->tssErrorsByCode.size()) {
+				traceTSSErrors("TSS_TSSErrors", it.first, it.second->tssErrorsByCode);
+			}
+
+			TraceEvent tssEv("TSSClientMetrics", cx->dbId);
+			tssEv.detail("TSSID", it.first)
+			    .detail("Elapsed", (lastLogged == 0) ? 0 : now() - lastLogged)
+			    .detail("Internal", cx->internal);
+
+			it.second->cc.logToTraceEvent(tssEv);
+
+			traceTSSPercentiles(tssEv, "GetValueLatency", it.second->SSgetValueLatency, it.second->TSSgetValueLatency);
+			traceTSSPercentiles(
+			    tssEv, "GetKeyValuesLatency", it.second->SSgetKeyValuesLatency, it.second->TSSgetKeyValuesLatency);
+			traceTSSPercentiles(tssEv, "GetKeyLatency", it.second->SSgetKeyLatency, it.second->TSSgetKeyLatency);
+			traceTSSPercentiles(tssEv,
+			                    "GetKeyValuesAndFlatMapLatency",
+			                    it.second->SSgetKeyValuesAndFlatMapLatency,
+			                    it.second->TSSgetKeyValuesAndFlatMapLatency);
+
+			it.second->clear();
+		}
+
+		lastLogged = now();
+	}
+}
+
 ACTOR Future<Void> databaseLogger(DatabaseContext* cx) {
 	state double lastLogged = 0;
 	loop {
@@ -427,63 +532,6 @@ ACTOR Future<Void> databaseLogger(DatabaseContext* cx) {
 		cx->commitLatencies.clear();
 		cx->mutationsPerCommit.clear();
 		cx->bytesPerCommit.clear();
-
-		for (const auto& it : cx->tssMetrics) {
-			// TODO could skip this whole thing if tss if request counter is zero?
-			// That would potentially complicate elapsed calculation though
-			if (it.second->mismatches.getIntervalDelta()) {
-				cx->tssMismatchStream.send(
-				    std::pair<UID, std::vector<DetailedTSSMismatch>>(it.first, it.second->detailedMismatches));
-			}
-
-			// do error histograms as separate event
-			if (it.second->ssErrorsByCode.size()) {
-				traceTSSErrors("TSS_SSErrors", it.first, it.second->ssErrorsByCode);
-			}
-
-			if (it.second->tssErrorsByCode.size()) {
-				traceTSSErrors("TSS_TSSErrors", it.first, it.second->tssErrorsByCode);
-			}
-
-			TraceEvent tssEv("TSSClientMetrics", cx->dbId);
-			tssEv.detail("TSSID", it.first)
-			    .detail("Elapsed", (lastLogged == 0) ? 0 : now() - lastLogged)
-			    .detail("Internal", cx->internal);
-
-			it.second->cc.logToTraceEvent(tssEv);
-
-			tssEv.detail("MeanSSGetValueLatency", it.second->SSgetValueLatency.mean())
-			    .detail("MedianSSGetValueLatency", it.second->SSgetValueLatency.median())
-			    .detail("SSGetValueLatency90", it.second->SSgetValueLatency.percentile(0.90))
-			    .detail("SSGetValueLatency99", it.second->SSgetValueLatency.percentile(0.99));
-
-			tssEv.detail("MeanTSSGetValueLatency", it.second->TSSgetValueLatency.mean())
-			    .detail("MedianTSSGetValueLatency", it.second->TSSgetValueLatency.median())
-			    .detail("TSSGetValueLatency90", it.second->TSSgetValueLatency.percentile(0.90))
-			    .detail("TSSGetValueLatency99", it.second->TSSgetValueLatency.percentile(0.99));
-
-			tssEv.detail("MeanSSGetKeyLatency", it.second->SSgetKeyLatency.mean())
-			    .detail("MedianSSGetKeyLatency", it.second->SSgetKeyLatency.median())
-			    .detail("SSGetKeyLatency90", it.second->SSgetKeyLatency.percentile(0.90))
-			    .detail("SSGetKeyLatency99", it.second->SSgetKeyLatency.percentile(0.99));
-
-			tssEv.detail("MeanTSSGetKeyLatency", it.second->TSSgetKeyLatency.mean())
-			    .detail("MedianTSSGetKeyLatency", it.second->TSSgetKeyLatency.median())
-			    .detail("TSSGetKeyLatency90", it.second->TSSgetKeyLatency.percentile(0.90))
-			    .detail("TSSGetKeyLatency99", it.second->TSSgetKeyLatency.percentile(0.99));
-
-			tssEv.detail("MeanSSGetKeyValuesLatency", it.second->SSgetKeyValuesLatency.mean())
-			    .detail("MedianSSGetKeyValuesLatency", it.second->SSgetKeyValuesLatency.median())
-			    .detail("SSGetKeyValuesLatency90", it.second->SSgetKeyValuesLatency.percentile(0.90))
-			    .detail("SSGetKeyValuesLatency99", it.second->SSgetKeyValuesLatency.percentile(0.99));
-
-			tssEv.detail("MeanTSSGetKeyValuesLatency", it.second->TSSgetKeyValuesLatency.mean())
-			    .detail("MedianTSSGetKeyValuesLatency", it.second->TSSgetKeyValuesLatency.median())
-			    .detail("TSSGetKeyValuesLatency90", it.second->TSSgetKeyValuesLatency.percentile(0.90))
-			    .detail("TSSGetKeyValuesLatency99", it.second->TSSgetKeyValuesLatency.percentile(0.99));
-
-			it.second->clear();
-		}
 
 		lastLogged = now();
 	}
@@ -1000,6 +1048,53 @@ ACTOR static Future<Void> handleTssMismatches(DatabaseContext* cx) {
 	}
 }
 
+ACTOR static Future<Void> backgroundGrvUpdater(DatabaseContext* cx) {
+	state Transaction tr;
+	state double grvDelay = 0.001;
+	try {
+		loop {
+			if (CLIENT_KNOBS->FORCE_GRV_CACHE_OFF)
+				return Void();
+			wait(refreshTransaction(cx, &tr));
+			state double curTime = now();
+			state double lastTime = cx->getLastGrvTime();
+			state double lastProxyTime = cx->lastProxyRequestTime;
+			TraceEvent(SevDebug, "BackgroundGrvUpdaterBefore")
+			    .detail("CurTime", curTime)
+			    .detail("LastTime", lastTime)
+			    .detail("GrvDelay", grvDelay)
+			    .detail("CachedReadVersion", cx->getCachedReadVersion())
+			    .detail("CachedTime", cx->getLastGrvTime())
+			    .detail("Gap", curTime - lastTime)
+			    .detail("Bound", CLIENT_KNOBS->MAX_VERSION_CACHE_LAG - grvDelay);
+			if (curTime - lastTime >= (CLIENT_KNOBS->MAX_VERSION_CACHE_LAG - grvDelay) ||
+			    curTime - lastProxyTime > CLIENT_KNOBS->MAX_PROXY_CONTACT_LAG) {
+				try {
+					tr.setOption(FDBTransactionOptions::SKIP_GRV_CACHE);
+					wait(success(tr.getReadVersion()));
+					cx->lastProxyRequestTime = curTime;
+					grvDelay = (grvDelay + (now() - curTime)) / 2.0;
+					TraceEvent(SevDebug, "BackgroundGrvUpdaterSuccess")
+					    .detail("GrvDelay", grvDelay)
+					    .detail("CachedReadVersion", cx->getCachedReadVersion())
+					    .detail("CachedTime", cx->getLastGrvTime());
+				} catch (Error& e) {
+					TraceEvent(SevInfo, "BackgroundGrvUpdaterTxnError").errorUnsuppressed(e);
+					wait(tr.onError(e));
+				}
+			} else {
+				wait(
+				    delay(std::max(0.001,
+				                   std::min(CLIENT_KNOBS->MAX_PROXY_CONTACT_LAG - (curTime - lastProxyTime),
+				                            (CLIENT_KNOBS->MAX_VERSION_CACHE_LAG - grvDelay) - (curTime - lastTime)))));
+			}
+		}
+	} catch (Error& e) {
+		TraceEvent(SevInfo, "BackgroundGrvUpdaterFailed").errorUnsuppressed(e);
+		throw;
+	}
+}
+
 ACTOR static Future<HealthMetrics> getHealthMetricsActor(DatabaseContext* cx, bool detailed) {
 	if (now() - cx->healthMetricsLastUpdated < CLIENT_KNOBS->AGGREGATE_HEALTH_METRICS_MAX_STALENESS) {
 		if (detailed) {
@@ -1049,7 +1144,9 @@ ACTOR Future<RangeResult> getWorkerInterfaces(Reference<IClusterConnectionRecord
 ACTOR Future<Optional<Value>> getJSON(Database db);
 
 struct WorkerInterfacesSpecialKeyImpl : SpecialKeyRangeReadImpl {
-	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override {
+	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
+	                             KeyRangeRef kr,
+	                             GetRangeLimits limitsHint) const override {
 		if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionRecord()) {
 			Key prefix = Key(getKeyRange().begin);
 			return map(getWorkerInterfaces(ryw->getDatabase()->getConnectionRecord()),
@@ -1073,7 +1170,9 @@ struct WorkerInterfacesSpecialKeyImpl : SpecialKeyRangeReadImpl {
 };
 
 struct SingleSpecialKeyImpl : SpecialKeyRangeReadImpl {
-	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override {
+	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
+	                             KeyRangeRef kr,
+	                             GetRangeLimits limitsHint) const override {
 		ASSERT(kr.contains(k));
 		return map(f(ryw), [k = k](Optional<Value> v) {
 			RangeResult result;
@@ -1095,7 +1194,9 @@ private:
 class HealthMetricsRangeImpl : public SpecialKeyRangeAsyncImpl {
 public:
 	explicit HealthMetricsRangeImpl(KeyRangeRef kr);
-	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
+	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
+	                             KeyRangeRef kr,
+	                             GetRangeLimits limitsHint) const override;
 };
 
 static RangeResult healthMetricsToKVPairs(const HealthMetrics& metrics, KeyRangeRef kr) {
@@ -1180,7 +1281,9 @@ ACTOR static Future<RangeResult> healthMetricsGetRangeActor(ReadYourWritesTransa
 
 HealthMetricsRangeImpl::HealthMetricsRangeImpl(KeyRangeRef kr) : SpecialKeyRangeAsyncImpl(kr) {}
 
-Future<RangeResult> HealthMetricsRangeImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
+Future<RangeResult> HealthMetricsRangeImpl::getRange(ReadYourWritesTransaction* ryw,
+                                                     KeyRangeRef kr,
+                                                     GetRangeLimits limitsHint) const {
 	return healthMetricsGetRangeActor(ryw, kr);
 }
 
@@ -1228,7 +1331,8 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
     transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
     transactionGrvFullBatches("NumGrvFullBatches", cc), transactionGrvTimedOutBatches("NumGrvTimedOutBatches", cc),
     latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000),
-    bytesPerCommit(1000), outstandingWatches(0), transactionTracingSample(false), taskID(taskID),
+    bytesPerCommit(1000), outstandingWatches(0), lastGrvTime(0.0), cachedReadVersion(0), lastRkBatchThrottleTime(0.0),
+    lastRkDefaultThrottleTime(0.0), lastProxyRequestTime(0.0), transactionTracingSample(false), taskID(taskID),
     clientInfo(clientInfo), clientInfoMonitor(clientInfoMonitor), coordinator(coordinator), apiVersion(apiVersion),
     mvCacheInsertLocation(0), healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0),
     smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
@@ -1244,7 +1348,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 
 	snapshotRywEnabled = apiVersionAtLeast(300) ? 1 : 0;
 
-	logger = databaseLogger(this);
+	logger = databaseLogger(this) && tssLogger(this);
 	locationCacheSize = g_network->isSimulated() ? CLIENT_KNOBS->LOCATION_CACHE_EVICTION_SIZE_SIM
 	                                             : CLIENT_KNOBS->LOCATION_CACHE_EVICTION_SIZE;
 
@@ -1278,19 +1382,19 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 		registerSpecialKeySpaceModule(
 		    SpecialKeySpace::MODULE::MANAGEMENT,
 		    SpecialKeySpace::IMPLTYPE::READWRITE,
-		    std::make_unique<ExcludeServersRangeImpl>(SpecialKeySpace::getManamentApiCommandRange("exclude")));
+		    std::make_unique<ExcludeServersRangeImpl>(SpecialKeySpace::getManagementApiCommandRange("exclude")));
 		registerSpecialKeySpaceModule(
 		    SpecialKeySpace::MODULE::MANAGEMENT,
 		    SpecialKeySpace::IMPLTYPE::READWRITE,
-		    std::make_unique<FailedServersRangeImpl>(SpecialKeySpace::getManamentApiCommandRange("failed")));
+		    std::make_unique<FailedServersRangeImpl>(SpecialKeySpace::getManagementApiCommandRange("failed")));
 		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::MANAGEMENT,
 		                              SpecialKeySpace::IMPLTYPE::READWRITE,
 		                              std::make_unique<ExcludedLocalitiesRangeImpl>(
-		                                  SpecialKeySpace::getManamentApiCommandRange("excludedlocality")));
-		registerSpecialKeySpaceModule(
-		    SpecialKeySpace::MODULE::MANAGEMENT,
-		    SpecialKeySpace::IMPLTYPE::READWRITE,
-		    std::make_unique<FailedLocalitiesRangeImpl>(SpecialKeySpace::getManamentApiCommandRange("failedlocality")));
+		                                  SpecialKeySpace::getManagementApiCommandRange("excludedlocality")));
+		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::MANAGEMENT,
+		                              SpecialKeySpace::IMPLTYPE::READWRITE,
+		                              std::make_unique<FailedLocalitiesRangeImpl>(
+		                                  SpecialKeySpace::getManagementApiCommandRange("failedlocality")));
 		registerSpecialKeySpaceModule(
 		    SpecialKeySpace::MODULE::MANAGEMENT,
 		    SpecialKeySpace::IMPLTYPE::READONLY,
@@ -1516,6 +1620,9 @@ DatabaseContext::~DatabaseContext() {
 	clientDBInfoMonitor.cancel();
 	monitorTssInfoChange.cancel();
 	tssMismatchHandler.cancel();
+	if (grvUpdateHandler.isValid()) {
+		grvUpdateHandler.cancel();
+	}
 	for (auto it = server_interf.begin(); it != server_interf.end(); it = server_interf.erase(it))
 		it->second->notifyContextDestroyed();
 	ASSERT_ABORT(server_interf.empty());
@@ -1596,6 +1703,32 @@ void DatabaseContext::invalidateCache(const KeyRangeRef& keys) {
 	Key begin = rs.begin().begin(),
 	    end = rs.end().begin(); // insert invalidates rs, so can't be passed a mere reference into it
 	locationCache.insert(KeyRangeRef(begin, end), Reference<LocationInfo>());
+}
+
+void DatabaseContext::setFailedEndpointOnHealthyServer(const Endpoint& endpoint) {
+	if (failedEndpointsOnHealthyServersInfo.find(endpoint) == failedEndpointsOnHealthyServersInfo.end()) {
+		failedEndpointsOnHealthyServersInfo[endpoint] =
+		    EndpointFailureInfo{ .startTime = now(), .lastRefreshTime = now() };
+	}
+}
+
+void DatabaseContext::updateFailedEndpointRefreshTime(const Endpoint& endpoint) {
+	if (failedEndpointsOnHealthyServersInfo.find(endpoint) == failedEndpointsOnHealthyServersInfo.end()) {
+		// The endpoint is not failed. Nothing to update.
+		return;
+	}
+	failedEndpointsOnHealthyServersInfo[endpoint].lastRefreshTime = now();
+}
+
+Optional<EndpointFailureInfo> DatabaseContext::getEndpointFailureInfo(const Endpoint& endpoint) {
+	if (failedEndpointsOnHealthyServersInfo.find(endpoint) == failedEndpointsOnHealthyServersInfo.end()) {
+		return Optional<EndpointFailureInfo>();
+	}
+	return failedEndpointsOnHealthyServersInfo[endpoint];
+}
+
+void DatabaseContext::clearFailedEndpointOnHealthyServer(const Endpoint& endpoint) {
+	failedEndpointsOnHealthyServersInfo.erase(endpoint);
 }
 
 Future<Void> DatabaseContext::onProxiesChanged() const {
@@ -2433,11 +2566,18 @@ ACTOR Future<std::pair<KeyRange, Reference<LocationInfo>>> getKeyLocation_intern
 		++cx->transactionKeyServerLocationRequests;
 		choose {
 			when(wait(cx->onProxiesChanged())) {}
-			when(GetKeyServerLocationsReply rep = wait(basicLoadBalance(
-			         cx->getCommitProxies(useProvisionalProxies),
-			         &CommitProxyInterface::getKeyServersLocations,
-			         GetKeyServerLocationsRequest(span.context, key, Optional<KeyRef>(), 100, isBackward, key.arena()),
-			         TaskPriority::DefaultPromiseEndpoint))) {
+			when(GetKeyServerLocationsReply rep =
+			         wait(basicLoadBalance(cx->getCommitProxies(useProvisionalProxies),
+			                               &CommitProxyInterface::getKeyServersLocations,
+			                               GetKeyServerLocationsRequest(span.context,
+			                                                            Optional<TenantNameRef>(),
+			                                                            key,
+			                                                            Optional<KeyRef>(),
+			                                                            100,
+			                                                            isBackward,
+			                                                            latestVersion,
+			                                                            key.arena()),
+			                               TaskPriority::DefaultPromiseEndpoint))) {
 				++cx->transactionKeyServerLocationRequestsCompleted;
 				if (debugID.present())
 					g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getKeyLocation.After");
@@ -2449,6 +2589,35 @@ ACTOR Future<std::pair<KeyRange, Reference<LocationInfo>>> getKeyLocation_intern
 			}
 		}
 	}
+}
+
+// Checks if `endpoint` is failed on a healthy server or not. Returns true if we need to refresh the location cache for
+// the endpoint.
+bool checkOnlyEndpointFailed(const Database& cx, const Endpoint& endpoint) {
+	if (IFailureMonitor::failureMonitor().onlyEndpointFailed(endpoint)) {
+		// This endpoint is failed, but the server is still healthy. There are two cases this can happen:
+		//    - There is a recent bounce in the cluster where the endpoints in SSes get updated.
+		//    - The SS is failed and terminated on a server, but the server is kept running.
+		// To account for the first case, we invalidate the cache and issue GetKeyLocation requests to the proxy to
+		// update the cache with the new SS points. However, if the failure is caused by the second case, the
+		// requested key location will continue to be the failed endpoint until the data movement is finished. But
+		// every read will generate a GetKeyLocation request to the proxies (and still getting the failed endpoint
+		// back), which may overload the proxy and affect data movement speed. Therefore, we only refresh the
+		// location cache for short period of time, and after the initial grace period that we keep retrying
+		// resolving key location, we will slow it down to resolve it only once every
+		// `LOCATION_CACHE_FAILED_ENDPOINT_RETRY_INTERVAL`.
+		cx->setFailedEndpointOnHealthyServer(endpoint);
+		const auto& failureInfo = cx->getEndpointFailureInfo(endpoint);
+		ASSERT(failureInfo.present());
+		if (now() - failureInfo.get().startTime < CLIENT_KNOBS->LOCATION_CACHE_ENDPOINT_FAILURE_GRACE_PERIOD ||
+		    now() - failureInfo.get().lastRefreshTime > CLIENT_KNOBS->LOCATION_CACHE_FAILED_ENDPOINT_RETRY_INTERVAL) {
+			cx->updateFailedEndpointRefreshTime(endpoint);
+			return true;
+		}
+	} else {
+		cx->clearFailedEndpointOnHealthyServer(endpoint);
+	}
+	return false;
 }
 
 template <class F>
@@ -2465,12 +2634,17 @@ Future<std::pair<KeyRange, Reference<LocationInfo>>> getKeyLocation(Database con
 		return getKeyLocation_internal(cx, key, spanID, debugID, useProvisionalProxies, isBackward);
 	}
 
+	bool onlyEndpointFailedAndNeedRefresh = false;
 	for (int i = 0; i < ssi.second->size(); i++) {
-		if (IFailureMonitor::failureMonitor().onlyEndpointFailed(ssi.second->get(i, member).getEndpoint())) {
-			cx->invalidateCache(key);
-			ssi.second.clear();
-			return getKeyLocation_internal(cx, key, spanID, debugID, useProvisionalProxies, isBackward);
+		if (checkOnlyEndpointFailed(cx, ssi.second->get(i, member).getEndpoint())) {
+			onlyEndpointFailedAndNeedRefresh = true;
 		}
+	}
+
+	if (onlyEndpointFailedAndNeedRefresh) {
+		cx->invalidateCache(key);
+		// Refresh the cache with a new getKeyLocations made to proxies.
+		return getKeyLocation_internal(cx, key, spanID, debugID, useProvisionalProxies, isBackward);
 	}
 
 	return ssi;
@@ -2501,11 +2675,18 @@ ACTOR Future<std::vector<std::pair<KeyRange, Reference<LocationInfo>>>> getKeyRa
 		++cx->transactionKeyServerLocationRequests;
 		choose {
 			when(wait(cx->onProxiesChanged())) {}
-			when(GetKeyServerLocationsReply _rep = wait(basicLoadBalance(
-			         cx->getCommitProxies(useProvisionalProxies),
-			         &CommitProxyInterface::getKeyServersLocations,
-			         GetKeyServerLocationsRequest(span.context, keys.begin, keys.end, limit, reverse, keys.arena()),
-			         TaskPriority::DefaultPromiseEndpoint))) {
+			when(GetKeyServerLocationsReply _rep =
+			         wait(basicLoadBalance(cx->getCommitProxies(useProvisionalProxies),
+			                               &CommitProxyInterface::getKeyServersLocations,
+			                               GetKeyServerLocationsRequest(span.context,
+			                                                            Optional<TenantNameRef>(),
+			                                                            keys.begin,
+			                                                            keys.end,
+			                                                            limit,
+			                                                            reverse,
+			                                                            latestVersion,
+			                                                            keys.arena()),
+			                               TaskPriority::DefaultPromiseEndpoint))) {
 				++cx->transactionKeyServerLocationRequestsCompleted;
 				state GetKeyServerLocationsReply rep = _rep;
 				if (debugID.present())
@@ -2555,21 +2736,21 @@ Future<std::vector<std::pair<KeyRange, Reference<LocationInfo>>>> getKeyRangeLoc
 
 	bool foundFailed = false;
 	for (const auto& [range, locInfo] : locations) {
-		bool onlyEndpointFailed = false;
+		bool onlyEndpointFailedAndNeedRefresh = false;
 		for (int i = 0; i < locInfo->size(); i++) {
-			if (IFailureMonitor::failureMonitor().onlyEndpointFailed(locInfo->get(i, member).getEndpoint())) {
-				onlyEndpointFailed = true;
-				break;
+			if (checkOnlyEndpointFailed(cx, locInfo->get(i, member).getEndpoint())) {
+				onlyEndpointFailedAndNeedRefresh = true;
 			}
 		}
 
-		if (onlyEndpointFailed) {
+		if (onlyEndpointFailedAndNeedRefresh) {
 			cx->invalidateCache(range.begin);
 			foundFailed = true;
 		}
 	}
 
 	if (foundFailed) {
+		// Refresh the cache with a new getKeyRangeLocations made to proxies.
 		return getKeyRangeLocations_internal(cx, keys, limit, reverse, spanID, debugID, useProvisionalProxies);
 	}
 
@@ -2713,6 +2894,7 @@ ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
 					         ssi.second,
 					         &StorageServerInterface::getValue,
 					         GetValueRequest(span.context,
+					                         TenantInfo(),
 					                         key,
 					                         ver,
 					                         trState->cx->sampleReadTags() ? trState->options.readTags
@@ -2818,6 +3000,7 @@ ACTOR Future<Key> getKey(Reference<TransactionState> trState, KeySelector k, Fut
 			++trState->cx->transactionPhysicalReads;
 
 			GetKeyRequest req(span.context,
+			                  TenantInfo(),
 			                  k,
 			                  version.get(),
 			                  trState->cx->sampleReadTags() ? trState->options.readTags : Optional<TagSet>(),
@@ -2950,6 +3133,7 @@ ACTOR Future<Version> watchValue(Database cx, Reference<const WatchParameters> p
 				                     ssi.second,
 				                     &StorageServerInterface::watchValue,
 				                     WatchValueRequest(span.context,
+				                                       TenantInfo(),
 				                                       parameters->key,
 				                                       parameters->value,
 				                                       ver,
@@ -4317,7 +4501,8 @@ Transaction::Transaction(Database const& cx)
                                             cx->taskID,
                                             generateSpanID(cx->transactionTracingSample),
                                             createTrLogInfoProbabilistically(cx))),
-    span(trState->spanID, "Transaction"_loc), backoff(CLIENT_KNOBS->DEFAULT_BACKOFF), tr(trState->spanID) {
+    span(trState->spanID, "Transaction"_loc), backoff(CLIENT_KNOBS->DEFAULT_BACKOFF),
+    tr(TenantInfo(), trState->spanID) {
 	if (DatabaseContext::debugUseTags) {
 		debugAddTags(trState);
 	}
@@ -4927,6 +5112,8 @@ void TransactionOptions::clear() {
 	readTags = TagSet{};
 	priority = TransactionPriority::DEFAULT;
 	expensiveClearCostEstimation = false;
+	useGrvCache = false;
+	skipGrvCache = false;
 }
 
 TransactionOptions::TransactionOptions() {
@@ -4944,7 +5131,7 @@ void TransactionOptions::reset(Database const& cx) {
 void Transaction::resetImpl(bool generateNewSpan) {
 	flushTrLogsIfEnabled();
 	trState = trState->cloneAndReset(createTrLogInfoProbabilistically(trState->cx), generateNewSpan);
-	tr = CommitTransactionRequest(trState->spanID);
+	tr = CommitTransactionRequest(TenantInfo(), trState->spanID);
 	readVersion = Future<Version>();
 	metadataVersion = Promise<Optional<Key>>();
 	extraConflictRanges.clear();
@@ -5097,7 +5284,7 @@ ACTOR static Future<Void> commitDummyTransaction(Reference<TransactionState> trS
 			return Void();
 		} catch (Error& e) {
 			TraceEvent("CommitDummyTransactionError")
-			    .error(e, true)
+			    .errorUnsuppressed(e)
 			    .detail("Key", range.begin)
 			    .detail("Retries", retries);
 			wait(tr.onError(e));
@@ -5257,7 +5444,7 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 			                         TaskPriority::DefaultPromiseEndpoint,
 			                         AtMostOnce::True);
 		}
-
+		state double grvTime = now();
 		choose {
 			when(wait(trState->cx->onProxiesChanged())) {
 				reply.cancel();
@@ -5269,6 +5456,7 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 					if (CLIENT_BUGGIFY) {
 						throw commit_unknown_result();
 					}
+					trState->cx->updateCachedReadVersion(grvTime, v);
 					if (debugID.present())
 						TraceEvent(interval.end()).detail("CommittedVersion", v);
 					trState->committedVersion = v;
@@ -5695,6 +5883,18 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 		trState->options.expensiveClearCostEstimation = true;
 		break;
 
+	case FDBTransactionOptions::USE_GRV_CACHE:
+		validateOptionValueNotPresent(value);
+		if (trState->numErrors == 0) {
+			trState->options.useGrvCache = true;
+		}
+		break;
+
+	case FDBTransactionOptions::SKIP_GRV_CACHE:
+		validateOptionValueNotPresent(value);
+		trState->options.skipGrvCache = true;
+		break;
+
 	default:
 		break;
 	}
@@ -5865,7 +6065,16 @@ ACTOR Future<Version> extractReadVersion(Reference<TransactionState> trState,
                                          Promise<Optional<Value>> metadataVersion) {
 	state Span span(spanContext, location, { trState->spanID });
 	GetReadVersionReply rep = wait(f);
-	double latency = now() - trState->startTime;
+	double replyTime = now();
+	double latency = replyTime - trState->startTime;
+	trState->cx->lastProxyRequestTime = trState->startTime;
+	trState->cx->updateCachedReadVersion(trState->startTime, rep.version);
+	if (rep.rkBatchThrottled) {
+		trState->cx->lastRkBatchThrottleTime = replyTime;
+	}
+	if (rep.rkDefaultThrottled) {
+		trState->cx->lastRkDefaultThrottleTime = replyTime;
+	}
 	trState->cx->GRVLatencies.addSample(latency);
 	if (trState->trLogInfo)
 		trState->trLogInfo->addLog(FdbClientLogEvents::EventGetVersion_V3(
@@ -5922,8 +6131,42 @@ ACTOR Future<Version> extractReadVersion(Reference<TransactionState> trState,
 	return rep.version;
 }
 
+bool rkThrottlingCooledDown(DatabaseContext* cx, TransactionPriority priority) {
+	if (priority == TransactionPriority::IMMEDIATE) {
+		return true;
+	} else if (priority == TransactionPriority::BATCH) {
+		if (cx->lastRkBatchThrottleTime == 0.0) {
+			return true;
+		}
+		return (now() - cx->lastRkBatchThrottleTime > CLIENT_KNOBS->GRV_CACHE_RK_COOLDOWN);
+	} else if (priority == TransactionPriority::DEFAULT) {
+		if (cx->lastRkDefaultThrottleTime == 0.0) {
+			return true;
+		}
+		return (now() - cx->lastRkDefaultThrottleTime > CLIENT_KNOBS->GRV_CACHE_RK_COOLDOWN);
+	}
+	return false;
+}
+
 Future<Version> Transaction::getReadVersion(uint32_t flags) {
 	if (!readVersion.isValid()) {
+		if (!CLIENT_KNOBS->FORCE_GRV_CACHE_OFF && !trState->options.skipGrvCache &&
+		    (deterministicRandom()->random01() <= CLIENT_KNOBS->DEBUG_USE_GRV_CACHE_CHANCE ||
+		     trState->options.useGrvCache) &&
+		    rkThrottlingCooledDown(getDatabase().getPtr(), trState->options.priority)) {
+			// Upon our first request to use cached RVs, start the background updater
+			if (!trState->cx->grvUpdateHandler.isValid()) {
+				trState->cx->grvUpdateHandler = backgroundGrvUpdater(getDatabase().getPtr());
+			}
+			Version rv = trState->cx->getCachedReadVersion();
+			double lastTime = trState->cx->getLastGrvTime();
+			double requestTime = now();
+			if (requestTime - lastTime <= CLIENT_KNOBS->MAX_VERSION_CACHE_LAG && rv != Version(0)) {
+				ASSERT(!debug_checkVersionTime(rv, requestTime, "CheckStaleness"));
+				readVersion = rv;
+				return readVersion;
+			} // else go through regular GRV path
+		}
 		++trState->cx->transactionReadVersions;
 		flags |= trState->options.getReadVersionFlags;
 		switch (trState->options.priority) {
@@ -6105,6 +6348,9 @@ uint32_t Transaction::getSize() {
 }
 
 Future<Void> Transaction::onError(Error const& e) {
+	if (g_network->isSimulated() && ++trState->numErrors % 10 == 0) {
+		TraceEvent(SevWarnAlways, "TransactionTooManyRetries").detail("NumRetries", trState->numErrors);
+	}
 	if (e.code() == error_code_success) {
 		return client_invalid_operation();
 	}
@@ -6138,9 +6384,6 @@ Future<Void> Transaction::onError(Error const& e) {
 		reset();
 		return delay(std::min(CLIENT_KNOBS->FUTURE_VERSION_RETRY_DELAY, maxBackoff), trState->taskID);
 	}
-
-	if (g_network->isSimulated() && ++trState->numErrors % 10 == 0)
-		TraceEvent(SevWarnAlways, "TransactionTooManyRetries").detail("NumRetries", trState->numErrors);
 
 	return e;
 }
@@ -6459,7 +6702,7 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Reference<Transa
 			for (int i = 0; i < nLocs; i++) {
 				partBegin = (i == 0) ? keys.begin : locations[i].first.begin;
 				partEnd = (i == nLocs - 1) ? keys.end : locations[i].first.end;
-				SplitRangeRequest req(KeyRangeRef(partBegin, partEnd), chunkSize);
+				SplitRangeRequest req(TenantInfo(), KeyRangeRef(partBegin, partEnd), chunkSize);
 				fReplies[i] = loadBalance(locations[i].second->locations(),
 				                          &StorageServerInterface::getRangeSplitPoints,
 				                          req,
@@ -6723,6 +6966,32 @@ ACTOR Future<Void> setPerpetualStorageWiggle(Database cx, bool enable, LockAware
 	return Void();
 }
 
+ACTOR Future<std::vector<std::pair<UID, StorageWiggleValue>>> readStorageWiggleValues(Database cx,
+                                                                                      bool primary,
+                                                                                      bool use_system_priority) {
+	state const Key readKey = perpetualStorageWiggleIDPrefix.withSuffix(primary ? "primary/"_sr : "remote/"_sr);
+	state KeyBackedObjectMap<UID, StorageWiggleValue, decltype(IncludeVersion())> metadataMap(readKey,
+	                                                                                          IncludeVersion());
+	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+	state std::vector<std::pair<UID, StorageWiggleValue>> res;
+	// read the wiggling pairs
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			if (use_system_priority) {
+				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			}
+			wait(store(res, metadataMap.getRange(tr, UID(0, 0), Optional<UID>(), CLIENT_KNOBS->TOO_MANY)));
+			wait(tr->commit());
+			break;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+	return res;
+}
+
 ACTOR Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(Database cx,
                                                                 KeyRange keys,
                                                                 StorageMetrics limit,
@@ -6849,7 +7118,7 @@ ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID sn
 			}
 		}
 	} catch (Error& e) {
-		TraceEvent("SnapCreateError").detail("SnapCmd", snapCmd.toString()).detail("UID", snapUID).error(e);
+		TraceEvent("SnapCreateError").error(e).detail("SnapCmd", snapCmd.toString()).detail("UID", snapUID);
 		throw;
 	}
 }
@@ -6877,9 +7146,9 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion
 	} catch (Error& e) {
 		if (e.code() != error_code_actor_cancelled) {
 			TraceEvent("ExclusionSafetyCheckError")
+			    .error(e)
 			    .detail("NumExclusion", exclusions.size())
-			    .detail("Exclusions", describe(exclusions))
-			    .error(e);
+			    .detail("Exclusions", describe(exclusions));
 		}
 		throw;
 	}

@@ -198,6 +198,15 @@ ERROR( client_lib_not_found, 2120, "Client library for the given identifier not 
 ERROR( client_lib_not_available, 2121, "Client library exists, but is not available for download." )
 ERROR( client_lib_invalid_binary, 2122, "Invalid client library binary." )
 
+ERROR( tenant_name_required, 2130, "Tenant name must be specified to access data in the cluster" )
+ERROR( tenant_not_found, 2131, "Tenant does not exist" )
+ERROR( tenant_already_exists, 2132, "A tenant with the given name already exists" )
+ERROR( tenant_not_empty, 2133, "Cannot delete a non-empty tenant" )
+ERROR( invalid_tenant_name, 2134, "Tenant name cannot begin with \\xff");
+ERROR( tenant_prefix_allocator_conflict, 2135, "The database already has keys stored at the prefix allocated for the tenant");
+ERROR( tenants_disabled, 2136, "Tenants have been disabled in the cluster");
+ERROR( unknown_tenant, 2137, "Tenant is not available from this server")
+
 // 2200 - errors from bindings and official APIs
 ERROR( api_version_unset, 2200, "API version is not set" )
 ERROR( api_version_already_set, 2201, "API version may be set only once" )

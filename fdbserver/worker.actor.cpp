@@ -224,7 +224,7 @@ ACTOR Future<Void> handleIOErrors(Future<Void> actor, IClosable* store, UID id, 
 				return e.get();
 		}
 		when(ErrorOr<Void> e = wait(storeError)) {
-			TraceEvent("WorkerTerminatingByIOError", id).error(e.getError(), true);
+			TraceEvent("WorkerTerminatingByIOError", id).errorUnsuppressed(e.getError());
 			actor.cancel();
 			// file_not_found can occur due to attempting to open a partially deleted DiskQueue, which should not be
 			// reported SevError.
@@ -1232,7 +1232,7 @@ void endRole(const Role& role, UID id, std::string reason, bool ok, Error e) {
 	{
 		TraceEvent ev("Role", id);
 		if (e.code() != invalid_error_code)
-			ev.error(e, true);
+			ev.errorUnsuppressed(e);
 		ev.detail("Transition", "End").detail("As", role.roleName).detail("Reason", reason);
 
 		ev.trackLatest(id.shortString() + ".Role");
@@ -1243,7 +1243,7 @@ void endRole(const Role& role, UID id, std::string reason, bool ok, Error e) {
 
 		TraceEvent err(SevError, type.c_str(), id);
 		if (e.code() != invalid_error_code) {
-			err.error(e, true);
+			err.errorUnsuppressed(e);
 		}
 		err.detail("Reason", reason);
 	}
@@ -1288,7 +1288,7 @@ ACTOR Future<Void> workerSnapCreate(WorkerSnapRequest snapReq, Standalone<String
 		}
 		snapReq.reply.send(Void());
 	} catch (Error& e) {
-		TraceEvent("ExecHelperError").error(e, true /*includeCancelled*/);
+		TraceEvent("ExecHelperError").errorUnsuppressed(e);
 		if (e.code() != error_code_operation_cancelled) {
 			snapReq.reply.sendError(e);
 		} else {

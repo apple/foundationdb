@@ -546,6 +546,7 @@ public:
 	KeyRef getKey() const { return key; }
 
 	void setKey(KeyRef const& key);
+	void setKeyUnlimited(KeyRef const& key);
 
 	std::string toString() const;
 
@@ -592,6 +593,11 @@ inline bool selectorInRange(KeySelectorRef const& sel, KeyRangeRef const& range)
 	// Returns true if the given range suffices to at least begin to resolve the given KeySelectorRef
 	return sel.getKey() >= range.begin && (sel.isBackward() ? sel.getKey() <= range.end : sel.getKey() < range.end);
 }
+
+template <>
+struct Traceable<KeySelectorRef> : std::true_type {
+	static std::string toString(const KeySelectorRef& value) { return value.toString(); }
+};
 
 template <class Val>
 struct KeyRangeWith : KeyRange {
@@ -1175,6 +1181,42 @@ struct StorageMigrationType {
 	uint32_t type;
 };
 
+struct TenantMode {
+	// These enumerated values are stored in the database configuration, so can NEVER be changed.  Only add new ones
+	// just before END.
+	// Note: OPTIONAL_TENANT is not named OPTIONAL because of a collision with a Windows macro.
+	enum Mode { DISABLED = 0, OPTIONAL_TENANT = 1, REQUIRED = 2, END = 3 };
+
+	TenantMode() : mode(DISABLED) {}
+	TenantMode(Mode mode) : mode(mode) {
+		if ((uint32_t)mode >= END) {
+			this->mode = DISABLED;
+		}
+	}
+	operator Mode() const { return Mode(mode); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, mode);
+	}
+
+	std::string toString() const {
+		switch (mode) {
+		case DISABLED:
+			return "disabled";
+		case OPTIONAL_TENANT:
+			return "optional_experimental";
+		case REQUIRED:
+			return "required_experimental";
+		default:
+			ASSERT(false);
+		}
+		return "";
+	}
+
+	uint32_t mode;
+};
+
 inline bool isValidPerpetualStorageWiggleLocality(std::string locality) {
 	int pos = locality.find(':');
 	// locality should be either 0 or in the format '<non_empty_string>:<non_empty_string>'
@@ -1204,9 +1246,11 @@ struct ReadBlobGranuleContext {
 struct StorageMetadataType {
 	constexpr static FileIdentifier file_identifier = 732123;
 	// when the SS is initialized
-	uint64_t createdTime; // comes from Platform::timer_int()
+	uint64_t createdTime; // comes from currentTime()
 	StorageMetadataType() : createdTime(0) {}
 	StorageMetadataType(uint64_t t) : createdTime(t) {}
+
+	static uint64_t currentTime() { return g_network->timer() * 1e9; }
 
 	// To change this serialization, ProtocolVersion::StorageMetadata must be updated, and downgrades need
 	// to be considered

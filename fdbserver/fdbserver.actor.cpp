@@ -1447,8 +1447,8 @@ private:
 				// parameter
 				knobs.emplace_back(
 				    "page_cache_4k",
-				    format("%ld", ti.get() / 4096 * 4096)); // The cache holds 4K pages, so we can truncate this to the
-				                                            // next smaller multiple of 4K.
+				    format("%lld", ti.get() / 4096 * 4096)); // The cache holds 4K pages, so we can truncate this to the
+				                                             // next smaller multiple of 4K.
 				break;
 			case OPT_BUGGIFY:
 				if (!strcmp(args.OptionArg(), "on"))
@@ -1760,9 +1760,9 @@ int main(int argc, char* argv[]) {
 				} else {
 					fprintf(stderr, "ERROR: Failed to set knob option '%s': %s\n", knobName.c_str(), e.what());
 					TraceEvent(SevError, "FailedToSetKnob")
+					    .error(e)
 					    .detail("Knob", printable(knobName))
-					    .detail("Value", printable(knobValueString))
-					    .error(e);
+					    .detail("Value", printable(knobValueString));
 					throw;
 				}
 			}
