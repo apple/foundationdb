@@ -19,11 +19,14 @@
  */
 
 #include "flow/Tracing.h"
+#include "fdbclient/FDBTypes.h"
+#include "flow/Arena.h"
 #include "flow/UnitTest.h"
 
 #include "flow/Knobs.h"
 #include "flow/network.h"
 
+#include <boost/container/small_vector.hpp>
 #include <functional>
 #include <iomanip>
 #include <memory>
@@ -262,6 +265,10 @@ private:
 		serialize_string(reinterpret_cast<const uint8_t*>(str.data()), str.size(), request);
 	}
 
+	inline void serialize_string_ref(const StringRef& str, TraceRequest& request) {
+		serialize_string(reinterpret_cast<const uint8_t*>(str.toString().data()), str.size(), request);
+	}
+
 	// Writes the given vector of SpanIDs to the request. If the vector is
 	// empty, the request is not modified.
 	inline void serialize_vector(const SmallVectorRef<SpanID>& vec, TraceRequest& request) {
@@ -269,7 +276,6 @@ private:
 		if (size == 0) {
 			return;
 		}
-
 		if (size <= 15) {
 			request.write_byte(static_cast<uint8_t>(size) | 0b10010000);
 		} else if (size <= 65535) {
@@ -288,12 +294,13 @@ private:
 
 	// Writes the given vector of linked SpanContext's to the request. If the vector is
 	// empty, the request is not modified.
-	inline void serialize_vector(const std::vector<SpanContext>& vec, TraceRequest& request) {
+	inline void serialize_vector(const SmallVectorRef<SpanContext>& vec, TraceRequest& request) {
 		int size = vec.size();
-		if (size == 0) {
-			return;
-		}
-
+		// I don't think we can just return here, we'll want an empty vector as there are elements to
+		// send afterwards, i.e. events and attributes. Optionally we can serialize a nil.
+		// if (size == 0) {
+		//	return;
+		// }
 		if (size <= 15) {
 			request.write_byte(static_cast<uint8_t>(size) | 0b10010000);
 		} else if (size <= 65535) {
@@ -314,12 +321,13 @@ private:
 
 	// Writes the given vector of linked SpanContext's to the request. If the vector is
 	// empty, the request is not modified.
-	inline void serialize_vector(const std::vector<OTELEvent>& vec, TraceRequest& request) {
+	inline void serialize_vector(const SmallVectorRef<OTELEvent>& vec, TraceRequest& request) {
 		int size = vec.size();
-		if (size == 0) {
-			return;
-		}
-
+		// I don't think we can just return here, we'll want an empty vector as there are elements to
+		// send afterwards, i.e. events and attributes. Optionally we can serialize a nil.
+		// if (size == 0) {
+		//	return;
+		// }
 		if (size <= 15) {
 			request.write_byte(static_cast<uint8_t>(size) | 0b10010000);
 		} else if (size <= 65535) {
@@ -334,7 +342,24 @@ private:
 		for (const auto& event : vec) {
 			serialize_string(event.name.toString(), request); // event name
 			serialize_value(event.time, request, 0xcb); // event time
-			serialize_map(event.attributes, request);
+			serialize_vector(event.attributes, request);
+		}
+	}
+
+	inline void serialize_vector(const SmallVectorRef<KeyValueRef>& vals, TraceRequest& request) {
+		int size = vals.size();
+		if (size <= 15) {
+			// N.B. We're actually writing this out as a fixmap here in messagepack format!
+			// fixmap	1000xxxx	0x80 - 0x8f
+			request.write_byte(static_cast<uint8_t>(size) | 0b10000000);
+		} else {
+			// TODO: Add support for longer maps if necessary.
+			ASSERT(false);
+		}
+
+		for (const auto& kv : vals) {
+			serialize_string_ref(kv.key, request);
+			serialize_string_ref(kv.value, request);
 		}
 	}
 

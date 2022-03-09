@@ -21,10 +21,12 @@
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
+#include "flow/Arena.h"
 #include "flow/IRandom.h"
 #include <unordered_map>
 #include <unordered_set>
 #include <atomic>
+#include <boost/container/small_vector.hpp>
 
 struct Location {
 	StringRef name;
@@ -136,21 +138,22 @@ struct Span {
 // https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/api.md#set-status
 // 5. A singular parent SpanContext, which may optionally be null, as opposed to our Span implementation which allows
 // for a list of parents.
-// 6. An "attributes" rather than "tags", however the implementation is the same, a key/value map of strings.
+// 6. An "attributes" rather than "tags", however the implementation is essentially the same, a set of key/value of
+// strings, stored here as a SmallVectorRef<KeyValueRef> rather than map as a convenience.
 // https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/common/common.md#attributes
 // 7. An optional list of linked SpanContexts.
 // https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/api.md#specifying-links
 // 8. An optional list of timestamped Events.
 // https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/api.md#add-events
 
-enum class SpanKind : uint8_t { CLIENT = 0, SERVER = 1, PRODUCER = 2, CONSUMER = 3, INTERNAL = 4 };
+enum class SpanKind : uint8_t { INTERNAL = 0, CLIENT = 1, SERVER = 2, PRODUCER = 3, CONSUMER = 4 };
 
 enum class SpanStatus : uint8_t { UNSET = 0, OK = 1, ERR = 2 };
 
 struct OTELEvent {
 	StringRef name;
 	double time = 0.0;
-	std::unordered_map<StringRef, StringRef> attributes;
+	SmallVectorRef<KeyValueRef> attributes;
 };
 
 struct OTELSpan {
@@ -158,7 +161,7 @@ struct OTELSpan {
 	         Location location,
 	         SpanContext parentContext,
 	         std::initializer_list<SpanContext> const& links = {})
-	  : context(context), location(location), parentContext(parentContext), links(links.begin(), links.end()),
+	  : context(context), location(location), parentContext(parentContext), links(arena, links.begin(), links.end()),
 	    begin(g_network->now()) {
 		// We've simplified the logic here, essentially we're now always setting trace and span ids and relying on the
 		// TraceFlags to determine if we're sampling. Therefore if the parent is sampled, we simply overwrite this
@@ -226,7 +229,7 @@ struct OTELSpan {
 		attributes = std::move(o.attributes);
 		status = o.status;
 		o.context = SpanContext();
-		o.kind = SpanKind::CLIENT;
+		o.kind = SpanKind::INTERNAL;
 		o.begin = 0.0;
 		o.end = 0.0;
 		o.status = SpanStatus::UNSET;
@@ -252,22 +255,21 @@ struct OTELSpan {
 		std::swap(events, other.events);
 	}
 
-	void addLink(SpanContext linkContext) { links.push_back(linkContext); }
+	void addLink(SpanContext linkContext) { links.push_back(arena, linkContext); }
 
-	void addEvent(OTELEvent event) { events.push_back(event); }
+	void addEvent(OTELEvent event) { events.push_back(arena, event); }
 
 	void addAttribute(const StringRef& key, const StringRef& value) { attributes[key] = value; }
 
+	Arena arena;
 	SpanContext context;
 	Location location;
 	SpanContext parentContext;
 	SpanKind kind;
-	// TODO implement SmallVectorRef for links?
-	std::vector<SpanContext> links;
+	SmallVectorRef<SpanContext> links;
 	double begin = 0.0, end = 0.0;
 	std::unordered_map<StringRef, StringRef> attributes;
-	// Have to use vector here due to unordered_map and is_trivially_descructable?
-	std::vector<OTELEvent> events;
+	SmallVectorRef<OTELEvent> events;
 	SpanStatus status;
 };
 

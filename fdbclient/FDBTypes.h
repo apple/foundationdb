@@ -41,11 +41,11 @@ struct SpanContext {
 	UID traceID;
 	uint64_t spanID;
 	TraceFlags m_Flags;
-
 	SpanContext() : traceID(UID()), spanID(0), m_Flags(TraceFlags::unsampled) {}
 	SpanContext(UID traceID, uint64_t spanID, TraceFlags flags) : traceID(traceID), spanID(spanID), m_Flags(flags) {}
 	SpanContext(UID traceID, uint64_t spanID) : traceID(traceID), spanID(spanID), m_Flags(TraceFlags::unsampled) {}
-
+	SpanContext(Arena arena, const SpanContext& span)
+	  : traceID(span.traceID), spanID(span.spanID), m_Flags(span.m_Flags) {}
 	bool isSampled() const { return (m_Flags & TraceFlags::sampled) == TraceFlags::sampled; }
 };
 
