@@ -366,7 +366,7 @@ struct ReadWriteWorkload : KVWorkload {
 
 	void debugPrintServerShards() const {
 		for (auto it : this->serverShards) {
-			std::cout << it.first.toString() << ": [";
+			std::cout << serverInterfaces.at(it.first).address().toString() << ": [";
 			for (auto p : it.second) {
 				std::cout << "[" << p.first << "," << p.second << "), ";
 			}
@@ -443,7 +443,9 @@ struct ReadWriteWorkload : KVWorkload {
 		for (auto it : serverShards) {
 			self->serverShards.emplace_back(it);
 		}
-		// self->debugPrintServerShards();
+		// if (self->clientId == 0) {
+		//	self->debugPrintServerShards();
+		// }
 		return Void();
 	}
 

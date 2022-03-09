@@ -159,6 +159,22 @@ ACTOR Future<std::vector<std::pair<uint64_t, double>>> trackInsertionCount(Datab
                                                                            double checkInterval);
 
 ACTOR template <class T>
+Future<Void> waitForLowInFlight(Database cx, T* workload) {
+	loop {
+		int64_t inFlight = wait(getDataInFlight(cx, workload->dbInfo));
+		TraceEvent("DynamicWarming").detail("InFlight", inFlight);
+		if (inFlight > 1e6) { // Wait for just 1 MB to be in flight
+			wait(delay(1.0));
+		} else {
+			wait(delay(1.0));
+			TraceEvent("DynamicWarmingDone").log();
+			break;
+		}
+	}
+	return Void();
+}
+
+ACTOR template <class T>
 Future<Void> bulkSetup(Database cx,
                        T* workload,
                        uint64_t nodeCount,
@@ -279,17 +295,7 @@ Future<Void> bulkSetup(Database cx,
 	if (postSetupWarming != 0) {
 		try {
 			wait(delay(5.0)); // Wait for the data distribution in a small test to start
-			loop {
-				int64_t inFlight = wait(getDataInFlight(cx, workload->dbInfo));
-				TraceEvent("DynamicWarming").detail("InFlight", inFlight);
-				if (inFlight > 1e6) { // Wait for just 1 MB to be in flight
-					wait(delay(1.0));
-				} else {
-					wait(delay(1.0));
-					TraceEvent("DynamicWarmingDone").log();
-					break;
-				}
-			}
+			wait(timeoutError(waitForLowInFlight(cx, workload), postSetupWarming));
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled)
 				throw;
