@@ -726,9 +726,9 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData>
 			wait(tr->onError(e));
 			retries++;
 			TraceEvent(SevWarn, "BlobGranuleInitialSnapshotRetry", bwData->id)
+			    .error(err)
 			    .detail("Granule", metadata->keyRange)
-			    .detail("Count", retries)
-			    .error(err);
+			    .detail("Count", retries);
 			bytesRead = 0;
 			lastReadVersion = readVersion;
 			// Pop change feed up to readVersion, because that data will be before the next snapshot

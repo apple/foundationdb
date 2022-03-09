@@ -1368,7 +1368,7 @@ ACTOR Future<Void> monitorBlobWorker(Reference<BlobManagerData> bmData, BlobWork
 				fmt::print("BM got unexpected error {0} monitoring BW {1}\n", e.name(), bwInterf.id().toString());
 			}
 			// TODO change back from SevError?
-			TraceEvent(SevError, "BWMonitoringFailed", bmData->id).detail("BlobWorkerID", bwInterf.id()).error(e);
+			TraceEvent(SevError, "BWMonitoringFailed", bmData->id).error(e).detail("BlobWorkerID", bwInterf.id());
 			throw e;
 		}
 	}

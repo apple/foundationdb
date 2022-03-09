@@ -186,7 +186,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 					// reset the range and restart the read at a higher version
 					TraceEvent(SevDebug, "BGVFDBReadReset").detail("ReadVersion", v);
 					TEST(true); // BGV transaction reset
-					printf("Resetting BGV GRV {0} -> {1}\n", v, grv);
+					fmt::print("Resetting BGV GRV {0} -> {1}\n", v, grv);
 					first = true;
 					out = RangeResult();
 					currentRange = range;
