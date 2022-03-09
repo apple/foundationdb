@@ -173,6 +173,7 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 				                             SERVER_KNOBS->MAX_VERSION_RATE_OFFSET);
 				self->version =
 				    std::clamp(expected, self->version + toAdd - maxOffset, self->version + toAdd + maxOffset);
+				ASSERT_GT(self->version, rep.prevVersion);
 			} else {
 				self->version = self->version + toAdd;
 			}

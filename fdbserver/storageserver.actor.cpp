@@ -5957,6 +5957,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			proposedOldestVersion = std::min(proposedOldestVersion, data->version.get() - 1);
 			proposedOldestVersion = std::max(proposedOldestVersion, data->oldestVersion.get());
 			proposedOldestVersion = std::max(proposedOldestVersion, data->desiredOldestVersion.get());
+			proposedOldestVersion = std::max(proposedOldestVersion, data->initialClusterVersion);
 
 			//TraceEvent("StorageServerUpdated", data->thisServerID).detail("Ver", ver).detail("DataVersion", data->version.get())
 			//	.detail("LastTLogVersion", data->lastTLogVersion).detail("NewOldest",
