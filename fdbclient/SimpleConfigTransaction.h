@@ -59,12 +59,12 @@ public:
 	                             GetRangeLimits limits,
 	                             Snapshot = Snapshot::False,
 	                             Reverse = Reverse::False) override;
-	Future<RangeResult> getRangeAndFlatMap(KeySelector begin,
-	                                       KeySelector end,
-	                                       Key mapper,
-	                                       GetRangeLimits limits,
-	                                       Snapshot = Snapshot::False,
-	                                       Reverse = Reverse::False) override {
+	Future<MappedRangeResult> getMappedRange(KeySelector begin,
+	                                         KeySelector end,
+	                                         Key mapper,
+	                                         GetRangeLimits limits,
+	                                         Snapshot = Snapshot::False,
+	                                         Reverse = Reverse::False) override {
 		throw client_invalid_operation();
 	}
 	Future<Void> commit() override;

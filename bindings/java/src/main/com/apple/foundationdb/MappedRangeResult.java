@@ -1,5 +1,5 @@
 /*
- * RangeResultSummary.java
+ * MappedRangeResult.java
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -22,22 +22,41 @@ package com.apple.foundationdb;
 
 import com.apple.foundationdb.tuple.ByteArrayUtil;
 
-class RangeResultSummary {
-	final byte[] lastKey;
-	final int keyCount;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+
+class MappedRangeResult {
+	final List<MappedKeyValue> values;
 	final boolean more;
 
-	RangeResultSummary(byte[] lastKey, int keyCount, boolean more) {
-		this.lastKey = lastKey;
-		this.keyCount = keyCount;
+	public MappedRangeResult(MappedKeyValue[] values, boolean more) {
+		this.values = Arrays.asList(values);
 		this.more = more;
+	}
+
+	MappedRangeResult(MappedRangeResultDirectBufferIterator iterator) {
+		iterator.readResultsSummary();
+		more = iterator.hasMore();
+
+		int count = iterator.count();
+		values = new ArrayList<>(count);
+
+		for (int i = 0; i < count; ++i) {
+			values.add(iterator.next());
+		}
+	}
+
+	public RangeResultSummary getSummary() {
+		final int keyCount = values.size();
+		final byte[] lastKey = keyCount > 0 ? values.get(keyCount - 1).getKey() : null;
+		return new RangeResultSummary(lastKey, keyCount, more);
 	}
 
 	@Override
 	public String toString() {
-		final StringBuilder sb = new StringBuilder("RangeResultSummary{");
-		sb.append("lastKey=").append(ByteArrayUtil.printable(lastKey));
-		sb.append(", keyCount=").append(keyCount);
+		final StringBuilder sb = new StringBuilder("MappedRangeResult{");
+		sb.append("values=").append(values);
 		sb.append(", more=").append(more);
 		sb.append('}');
 		return sb.toString();
