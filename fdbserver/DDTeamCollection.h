@@ -171,6 +171,7 @@ typedef AsyncMap<UID, ServerStatus> ServerStatusMap;
 
 class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	friend class DDTeamCollectionImpl;
+	friend class DDTeamCollectionUnitTest;
 
 	enum class Status { NONE = 0, WIGGLING = 1, EXCLUDED = 2, FAILED = 3 };
 
@@ -521,6 +522,37 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 
 	void noHealthyTeams() const;
 
+	// To enable verbose debug info, set shouldPrint to true
+	void traceAllInfo(bool shouldPrint = false) const;
+
+	// Check if the server belongs to a machine; if not, create the machine.
+	// Establish the two-direction link between server and machine
+	Reference<TCMachineInfo> checkAndCreateMachine(Reference<TCServerInfo> server);
+
+	// Group storage servers (process) based on their machineId in LocalityData
+	// All created machines are healthy
+	// Return The number of healthy servers we grouped into machines
+	int constructMachinesFromServers();
+
+	// Create machineTeamsToBuild number of machine teams
+	// No operation if machineTeamsToBuild is 0
+	// Note: The creation of machine teams should not depend on server teams:
+	// No matter how server teams will be created, we will create the same set of machine teams;
+	// We should never use server team number in building machine teams.
+	//
+	// Five steps to create each machine team, which are document in the function
+	// Reuse ReplicationPolicy selectReplicas func to select machine team
+	// return number of added machine teams
+	int addBestMachineTeams(int machineTeamsToBuild);
+
+	// Sanity check the property of teams in unit test
+	// Return true if all server teams belong to machine teams
+	bool sanityCheckTeams() const;
+
+	void disableBuildingTeams() { doBuildTeams = false; }
+
+	void setCheckTeamDelay() { this->checkTeamDelay = Void(); }
+
 public:
 	Database cx;
 
@@ -595,39 +627,6 @@ public:
 
 	void addTeam(std::set<UID> const& team, bool isInitialTeam) { addTeam(team.begin(), team.end(), isInitialTeam); }
 
-	// FIXME: Public for testing only
-	void disableBuildingTeams() { doBuildTeams = false; }
-
-	// FIXME: Public for testing only
-	void setCheckTeamDelay() { this->checkTeamDelay = Void(); }
-
-	// FIXME: Public for testing only
-	// Group storage servers (process) based on their machineId in LocalityData
-	// All created machines are healthy
-	// Return The number of healthy servers we grouped into machines
-	int constructMachinesFromServers();
-
-	// FIXME: Public for testing only
-	// To enable verbose debug info, set shouldPrint to true
-	void traceAllInfo(bool shouldPrint = false) const;
-
-	// FIXME: Public for testing only
-	// Create machineTeamsToBuild number of machine teams
-	// No operation if machineTeamsToBuild is 0
-	// Note: The creation of machine teams should not depend on server teams:
-	// No matter how server teams will be created, we will create the same set of machine teams;
-	// We should never use server team number in building machine teams.
-	//
-	// Five steps to create each machine team, which are document in the function
-	// Reuse ReplicationPolicy selectReplicas func to select machine team
-	// return number of added machine teams
-	int addBestMachineTeams(int machineTeamsToBuild);
-
-	// FIXME: Public for testing only
-	// Sanity check the property of teams in unit test
-	// Return true if all server teams belong to machine teams
-	bool sanityCheckTeams() const;
-
 	// Create server teams based on machine teams
 	// Before the number of machine teams reaches the threshold, build a machine team for each server team
 	// When it reaches the threshold, first try to build a server team with existing machine teams; if failed,
@@ -641,11 +640,6 @@ public:
 	               DDEnabledState const& ddEnabledState);
 
 	bool removeTeam(Reference<TCTeamInfo> team);
-
-	// FIXME: Public for testing only
-	// Check if the server belongs to a machine; if not, create the machine.
-	// Establish the two-direction link between server and machine
-	Reference<TCMachineInfo> checkAndCreateMachine(Reference<TCServerInfo> server);
 
 	void removeTSS(UID removedServer);
 

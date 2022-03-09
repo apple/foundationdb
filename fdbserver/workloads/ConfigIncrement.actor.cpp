@@ -83,8 +83,8 @@ class ConfigIncrementWorkload : public TestWorkload {
 						break;
 					} catch (Error& e) {
 						TraceEvent(SevDebug, "ConfigIncrementError")
-						    .detail("LastKnownValue", self->lastKnownValue)
-						    .error(e, true /* include cancelled  */);
+						    .errorUnsuppressed(e)
+						    .detail("LastKnownValue", self->lastKnownValue);
 						wait(tr->onError(e));
 						++self->retries;
 					}

@@ -24,7 +24,7 @@
 #include <vector>
 #include <unordered_map>
 
-#include "contrib/fmt-8.0.1/include/fmt/format.h"
+#include "contrib/fmt-8.1.1/include/fmt/format.h"
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/BlobWorkerInterface.h"
@@ -1325,8 +1325,8 @@ ACTOR Future<Void> monitorBlobWorkerStatus(Reference<BlobManagerData> bmData, Bl
 				}
 				// TODO change back from SevError?
 				TraceEvent(SevError, "BWStatusMonitoringFailed", bmData->id)
-				    .detail("BlobWorkerID", bwInterf.id())
-				    .error(e);
+				    .error(e)
+				    .detail("BlobWorkerID", bwInterf.id());
 				throw e;
 			}
 		}
@@ -2658,7 +2658,7 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 			}
 		}
 	} catch (Error& err) {
-		TraceEvent("BlobManagerDied", bmInterf.id()).error(err, true);
+		TraceEvent("BlobManagerDied", bmInterf.id()).errorUnsuppressed(err);
 	}
 	return Void();
 }

@@ -441,6 +441,8 @@ inline static uint64_t timestampCounter() {
 	asm volatile("mrs %0, cntvct_el0" : "=r"(timer));
 	return timer;
 }
+#elif defined(_powerpc64_)
+#include <emmintrin.h>
 #elif defined(__linux__)
 #include <x86intrin.h>
 #define timestampCounter() __rdtsc()
@@ -467,6 +469,12 @@ inline static uint64_t __rdtsc() {
 	return (lo | (hi << 32));
 }
 #endif
+#elif defined(__powerpc64__) || defined(__ppc64__)
+inline static uint64_t __rdtsc() {
+	uint64_t tb;
+	__asm__ volatile("mfspr %0, 268" : "=r"(tb));
+	return tb;
+}
 #endif
 
 #if defined(__linux__)
@@ -826,13 +834,15 @@ static inline uint64_t hwCrc32cU64(uint64_t crc, uint64_t v) {
 	return ret;
 }
 #else
+#ifndef __powerpc64__
 // Intel
 #define hwCrc32cU8(c, v) _mm_crc32_u8(c, v)
 #define hwCrc32cU32(c, v) _mm_crc32_u32(c, v)
 #define hwCrc32cU64(c, v) _mm_crc32_u64(c, v)
 #endif
+#endif
 
-#ifdef __aarch64__
+#if defined(__aarch64__)
 #define _MM_HINT_T0 0 /* dummy -- not used */
 #endif
 

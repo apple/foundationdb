@@ -59,9 +59,10 @@ def write_windows_asm(asmfile, functions):
 
 
 def write_unix_asm(asmfile, functions, prefix):
-    if cpu != "aarch64":
+    if cpu != "aarch64" and cpu!= "ppc64le":
         asmfile.write(".intel_syntax noprefix\n")
 
+    i = 0
     if os == 'linux' or os == 'freebsd':
         asmfile.write("\n.data\n")
         for f in functions:
@@ -70,8 +71,13 @@ def write_unix_asm(asmfile, functions, prefix):
         if os == 'linux' or os == 'freebsd':
             asmfile.write("\n.text\n")
             for f in functions:
+                if cpu == "ppc64le":
+                    asmfile.write("\n.LC%d:\n" % (i))
+                    asmfile.write("\t.quad \tfdb_api_ptr_%s\n" % (f))
+                    asmfile.write("\t.align 2\n")
+                    i = i + 1
                 asmfile.write("\t.global %s\n\t.type %s, @function\n" % (f, f))
-
+    i = 0
     for f in functions:
         asmfile.write("\n.globl %s%s\n" % (prefix, f))
         if cpu == 'aarch64' and os == 'osx':
@@ -118,6 +124,46 @@ def write_unix_asm(asmfile, functions, prefix):
                 assert False, '{} not supported for Arm yet'.format(os)
             asmfile.write("\tldr x8, [x8]\n")
             asmfile.write("\tbr x8\n")
+        elif cpu == "ppc64le":
+            asmfile.write("\n.LCF%d:\n" % (i))
+            asmfile.write("\taddis 2,12,.TOC.-.LCF%d@ha\n" % (i))
+            asmfile.write("\taddi 2,2,.TOC.-.LCF%d@l\n" % (i))
+            asmfile.write("\tmflr 0\n")
+            asmfile.write("\tstd 31, -8(1)\n")
+            asmfile.write("\tstd     0,16(1)\n")
+            asmfile.write("\tstdu    1,-192(1)\n")
+            #asmfile.write("\tstd 2,24(1)\n")
+            asmfile.write("\taddis 11,2,.LC%d@toc@ha\n" % (i))
+            asmfile.write("\tld 11,.LC%d@toc@l(11)\n" % (i))
+            asmfile.write("\tld 12,0(11)\n")
+            asmfile.write("\tstd 2,24(1)\n")
+            asmfile.write("\tlwa 11,344(1)\n")
+            asmfile.write("\tmtctr 12\n")
+            asmfile.write("\tstd 11,152(1)\n")
+            asmfile.write("\tlwa 11,352(1)\n")
+            asmfile.write("\tstd 11,160(1)\n")
+            asmfile.write("\tlwa 11,336(1)\n")
+            asmfile.write("\tstd 11,144(1)\n")
+            asmfile.write("\tlwa 11,328(1)\n")
+            asmfile.write("\tstd 11,136(1)\n")
+            asmfile.write("\tlwa 11,320(1)\n")
+            asmfile.write("\tstd 11,128(1)\n")
+            asmfile.write("\tlwa 11,312(1)\n")
+            asmfile.write("\tstd 11,120(1)\n")
+            asmfile.write("\tlwa 11,304(1)\n")
+            asmfile.write("\tstd 11,112(1)\n")
+            asmfile.write("\tld 11,296(1)\n")
+            asmfile.write("\tstd 11,104(1)\n")
+            asmfile.write("\tlwa 11,288(1)\n")
+            asmfile.write("\tstd 11,96(1)\n")
+            asmfile.write("\tbctrl\n")
+            asmfile.write("\tld 2,24(1)\n")
+            asmfile.write("\taddi 1,1,192\n")
+            asmfile.write("\tld 0,16(1)\n")
+            asmfile.write("\tld 31, -8(1)\n")
+            asmfile.write("\tmtlr 0\n")
+            asmfile.write("\tblr\n")
+            i = i + 1
         else:
             asmfile.write(
                 "\tmov r11, qword ptr [%sfdb_api_ptr_%s@GOTPCREL+rip]\n" % (prefix, f))

@@ -136,7 +136,7 @@ ACTOR Future<Void> startRestoreController(Reference<RestoreWorkerData> controlle
 		wait(startProcessRestoreRequests(self, cx) || error);
 	} catch (Error& e) {
 		if (e.code() != error_code_operation_cancelled) {
-			TraceEvent(SevError, "FastRestoreControllerStart").detail("Reason", "Unexpected unhandled error").error(e);
+			TraceEvent(SevError, "FastRestoreControllerStart").error(e).detail("Reason", "Unexpected unhandled error");
 		}
 	}
 

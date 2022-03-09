@@ -22,7 +22,7 @@
 #include <utility>
 #include <vector>
 
-#include "contrib/fmt-8.0.1/include/fmt/format.h"
+#include "contrib/fmt-8.1.1/include/fmt/format.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/BackupContainerFileSystem.h"
@@ -1917,7 +1917,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				           metadata->keyRange.end.printable(),
 				           e.name());
 			}
-			TraceEvent(SevWarn, "GranuleFileUpdaterError", bwData->id).detail("Granule", metadata->keyRange).error(e);
+			TraceEvent(SevWarn, "GranuleFileUpdaterError", bwData->id).error(e).detail("Granule", metadata->keyRange);
 
 			if (granuleCanRetry(e)) {
 				// explicitly cancel all outstanding write futures BEFORE updating promise stream, to ensure they
@@ -3274,7 +3274,7 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 		if (BW_DEBUG) {
 			printf("Blob worker got error %s. Exiting...\n", e.name());
 		}
-		TraceEvent("BlobWorkerDied", self->id).error(e, true);
+		TraceEvent("BlobWorkerDied", self->id).errorUnsuppressed(e);
 	}
 
 	wait(self->granuleMetadata.clearAsync());

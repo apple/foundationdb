@@ -106,6 +106,7 @@ void TSS_traceMismatch(TraceEvent& event, const GetKeyRequest& req, const GetKey
 	event
 	    .detail("KeySelector",
 	            format("%s%s:%d", req.sel.orEqual ? "=" : "", req.sel.getKey().printable().c_str(), req.sel.offset))
+	    .detail("Tenant", req.tenantInfo.name)
 	    .detail("Version", req.version)
 	    .detail("SSReply",
 	            format("%s%s:%d", src.sel.orEqual ? "=" : "", src.sel.getKey().printable().c_str(), src.sel.offset))
@@ -144,6 +145,7 @@ void TSS_traceMismatch(TraceEvent& event,
 	        format("%s%s:%d", req.begin.orEqual ? "=" : "", req.begin.getKey().printable().c_str(), req.begin.offset))
 	    .detail("End",
 	            format("%s%s:%d", req.end.orEqual ? "=" : "", req.end.getKey().printable().c_str(), req.end.offset))
+	    .detail("Tenant", req.tenantInfo.name)
 	    .detail("Version", req.version)
 	    .detail("Limit", req.limit)
 	    .detail("LimitBytes", req.limitBytes)
@@ -183,6 +185,7 @@ void TSS_traceMismatch(TraceEvent& event,
 	        format("%s%s:%d", req.begin.orEqual ? "=" : "", req.begin.getKey().printable().c_str(), req.begin.offset))
 	    .detail("End",
 	            format("%s%s:%d", req.end.orEqual ? "=" : "", req.end.getKey().printable().c_str(), req.end.offset))
+	    .detail("Tenant", req.tenantInfo.name)
 	    .detail("Version", req.version)
 	    .detail("Limit", req.limit)
 	    .detail("LimitBytes", req.limitBytes)
@@ -223,6 +226,7 @@ void TSS_traceMismatch(TraceEvent& event,
 	        format("%s%s:%d", req.begin.orEqual ? "=" : "", req.begin.getKey().printable().c_str(), req.begin.offset))
 	    .detail("End",
 	            format("%s%s:%d", req.end.orEqual ? "=" : "", req.end.getKey().printable().c_str(), req.end.offset))
+	    .detail("Tenant", req.tenantInfo.name)
 	    .detail("Version", req.version)
 	    .detail("Limit", req.limit)
 	    .detail("LimitBytes", req.limitBytes)

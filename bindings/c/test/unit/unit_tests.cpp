@@ -2358,6 +2358,19 @@ TEST_CASE("commit_does_not_reset") {
 	}
 }
 
+TEST_CASE("Fast alloc thread cleanup") {
+	// Try to cause an OOM if thread cleanup doesn't work
+	for (int i = 0; i < 50000; ++i) {
+		auto thread = std::thread([]() {
+			fdb::Transaction tr(db);
+			for (int s = 0; s < 11; ++s) {
+				tr.set(key("foo"), std::string(8 << s, '\x00'));
+			}
+		});
+		thread.join();
+	}
+}
+
 int main(int argc, char** argv) {
 	if (argc < 3) {
 		std::cout << "Unit tests for the FoundationDB C API.\n"
