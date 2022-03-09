@@ -796,10 +796,9 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 	}
 
 	Future<Void> start(Database const& cx) override {
-		// TODO need to make thing that waits for granules to exist before ANY of the actors start!
-		// Then can reuse that for final checks or something?
 		clients.reserve(3 * directories.size());
 		for (auto& it : directories) {
+			// Wait for blob worker to initialize snapshot before starting test for that range
 			Future<Void> start = waitFirstSnapshot(this, cx, it, true);
 			clients.push_back(timeout(writeWorker(this, start, cx, it), testDuration, Void()));
 			clients.push_back(timeout(readWorker(this, start, cx, it), testDuration, Void()));

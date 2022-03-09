@@ -470,7 +470,7 @@ ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
 			bmData->rangesToAssign.send(revokeOld);
 
 			// send assignment back to queue as is, clearing designated worker if present
-			// if we failed to send continue or reassign to the worker we thought owned the shard, it should be retried
+			// if we failed to send continue to the worker we thought owned the shard, it should be retried
 			// as a normal assign
 			ASSERT(assignment.assign.present());
 			assignment.assign.get().type = AssignRequestType::Normal;
@@ -952,14 +952,14 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 				newLockSeqno = bmData->seqNo;
 				bmData->seqNo++;
 				if (!(bmData->epoch > ownerEpoch || (bmData->epoch == ownerEpoch && newLockSeqno > ownerSeqno))) {
-					printf("BM seqno for granule [%s - %s) out of order for lock! manager: (%lld, %lld), owner: %lld, "
-					       "%lld)\n",
-					       granuleRange.begin.printable().c_str(),
-					       granuleRange.end.printable().c_str(),
-					       bmData->epoch,
-					       newLockSeqno,
-					       ownerEpoch,
-					       ownerSeqno);
+					fmt::print("BM seqno for granule [{0} - {1}) out of order for lock! manager: ({2}, {3}), owner: "
+					           "({4}, {5}})\n",
+					           granuleRange.begin.printable().c_str(),
+					           granuleRange.end.printable().c_str(),
+					           bmData->epoch,
+					           newLockSeqno,
+					           ownerEpoch,
+					           ownerSeqno);
 				}
 				ASSERT(bmData->epoch > ownerEpoch || (bmData->epoch == ownerEpoch && newLockSeqno > ownerSeqno));
 			} else if (bmData->epoch == ownerEpoch && newLockSeqno < ownerSeqno) {

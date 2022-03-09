@@ -1927,7 +1927,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 					inFlightFiles[i].future.cancel();
 				}
 
-				// if we retry and re-open, we need to use a normal request (no continue or reassign) and update the
+				// if we retry and re-open, we need to use a normal request (no continue) and update the
 				// seqno
 				metadata->originalReq.managerEpoch = metadata->continueEpoch;
 				metadata->originalReq.managerSeqno = metadata->continueSeqno;
@@ -2785,20 +2785,6 @@ static bool changeBlobRange(Reference<BlobWorkerData> bwData,
 		bool thisAssignmentNewer = newerRangeAssignment(r.value(), epoch, seqno);
 		if (BW_DEBUG) {
 			fmt::print("thisAssignmentNewer={}\n", thisAssignmentNewer ? "true" : "false");
-		}
-
-		// if this granule already has it, and this was a special assignment (i.e. a new blob manager is
-		// trying to reassign granules), then just continue
-
-		// TODO this needs to also have the condition
-		if (active && assignType.get() == AssignRequestType::Reassign && r.value().activeMetadata.isValid() &&
-		    r.begin() == keyRange.begin && r.end() == keyRange.end) {
-			r.value().lastEpoch = epoch;
-			r.value().lastSeqno = seqno;
-			r.value().activeMetadata->continueEpoch = epoch;
-			r.value().activeMetadata->continueSeqno = seqno;
-			alreadyAssigned = true;
-			break;
 		}
 
 		if (BW_DEBUG) {

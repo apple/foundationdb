@@ -1138,7 +1138,6 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
 		DUMPTOKEN(recruited.getKeyValueStoreType);
 		DUMPTOKEN(recruited.watchValue);
 		DUMPTOKEN(recruited.getKeyValuesStream);
-		DUMPTOKEN(recruited.getKeyValuesAndFlatMap);
 
 		prevStorageServer =
 		    storageServer(store, recruited, db, folder, Promise<Void>(), Reference<IClusterConnectionRecord>(nullptr));
@@ -1880,15 +1879,17 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 
 					TEST(true); // Recruited while already a blob manager.
 				} else {
-					// TODO: it'd be more optimal to halt the last manager here, but it will figure it out via the epoch
-					// check
-					// Also, not halting lets us handle the case here where the last BM had a higher epoch and somehow
-					// the epochs got out of order by a delayed initialize request. The one we start here will just halt
-					// on the lock check.
+					// TODO: it'd be more optimal to halt the last manager if present here, but it will figure it out
+					// via the epoch check
+					// Also, not halting lets us handle the case here where the last BM had a higher
+					// epoch and somehow the epochs got out of order by a delayed initialize request. The one we start
+					// here will just halt on the lock check.
 					myBMEpoch = req.epoch;
 					startRole(Role::BLOB_MANAGER, recruited.id(), interf.id());
 					DUMPTOKEN(recruited.waitFailure);
 					DUMPTOKEN(recruited.haltBlobManager);
+					DUMPTOKEN(recruited.haltBlobGranules);
+					DUMPTOKEN(recruited.blobManagerExclCheckReq);
 
 					Future<Void> blobManagerProcess = blobManager(recruited, dbInfo, req.epoch);
 					errorForwarders.add(forwardError(
@@ -2106,9 +2107,18 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					recruited.initEndpoints();
 					startRole(Role::BLOB_WORKER, recruited.id(), interf.id());
 
+					DUMPTOKEN(recruited.waitFailure);
+					DUMPTOKEN(recruited.blobGranuleFileRequest);
+					DUMPTOKEN(recruited.assignBlobRangeRequest);
+					DUMPTOKEN(recruited.revokeBlobRangeRequest);
+					DUMPTOKEN(recruited.granuleAssignmentsRequest);
+					DUMPTOKEN(recruited.granuleStatusStreamRequest);
+					DUMPTOKEN(recruited.haltBlobWorker);
+
 					ReplyPromise<InitializeBlobWorkerReply> blobWorkerReady = req.reply;
 					Future<Void> bw = blobWorker(recruited, blobWorkerReady, dbInfo);
 					errorForwarders.add(forwardError(errors, Role::BLOB_WORKER, recruited.id(), bw));
+
 				} else {
 					forwardPromise(req.reply, blobWorkerCache.get(req.reqId));
 				}

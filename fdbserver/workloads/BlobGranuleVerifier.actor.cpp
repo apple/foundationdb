@@ -327,7 +327,6 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	// utility to prune <range> at pruneVersion=<version> with the <force> flag
 	ACTOR Future<Void> pruneAtVersion(Database cx, KeyRange range, Version version, bool force) {
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
-		state Version commitVersion = 0;
 		state Key pruneKey;
 		loop {
 			try {
@@ -343,19 +342,19 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 				Standalone<StringRef> vs = wait(fTrVs);
 				pruneKey = blobGranulePruneKeys.begin.withSuffix(vs);
 				if (BGV_DEBUG) {
-					printf("pruneAtVersion for range [%s-%s) at version %lld succeeded\n",
-					       range.begin.printable().c_str(),
-					       range.end.printable().c_str(),
-					       version);
+					fmt::print("pruneAtVersion for range [{0} - {1}) at version {2} succeeded\n",
+					           range.begin.printable(),
+					           range.end.printable(),
+					           version);
 				}
 				break;
 			} catch (Error& e) {
 				if (BGV_DEBUG) {
-					printf("pruneAtVersion for range [%s-%s) at version %lld encountered error %s\n",
-					       range.begin.printable().c_str(),
-					       range.end.printable().c_str(),
-					       version,
-					       e.name());
+					fmt::print("pruneAtVersion for range [{0} - {1}) at version {2} encountered error {3}\n",
+					           range.begin.printable(),
+					           range.end.printable(),
+					           version,
+					           e.name());
 				}
 				wait(tr->onError(e));
 			}
@@ -487,9 +486,6 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 								ASSERT(e.code() == error_code_blob_granule_transaction_too_old);
 							}
 						}
-
-						// TODO: read at some version older than pruneVersion and make sure you get txn_too_old
-						// To achieve this, the BWs are going to have to recognize latest prune versions per granules
 					} catch (Error& e) {
 						if (e.code() == error_code_blob_granule_transaction_too_old && oldRead.v >= dbgPruneVersion) {
 							self->timeTravelTooOld++;
@@ -556,8 +552,6 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 				Version readVersion = wait(tr->getReadVersion());
 				return readVersion;
 			} catch (Error& e) {
-				// TODO REMOVE print
-				printf("BGV GRV got error %s\n", e.name());
 				wait(tr->onError(e));
 			}
 		}
@@ -566,7 +560,6 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	ACTOR Future<bool> _check(Database cx, BlobGranuleVerifierWorkload* self) {
 		// check error counts, and do an availability check at the end
 
-		// TODO need to have retry loop for getReadVersion, it's throwing tag throttled for some reason?
 		state Transaction tr(cx);
 		state Version readVersion = wait(self->doGrv(&tr));
 		state Version startReadVersion = readVersion;

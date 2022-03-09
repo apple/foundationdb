@@ -114,12 +114,10 @@ struct RevokeBlobRangeRequest {
 };
 
 /*
- * Continue: when a worker should continue handling a granule that was evaluated for a split
- * Reassign: when a new blob manager takes over, it sends Reassign requests to workers to redistribute granules
- * Normal: Neither continue nor reassign
+ * Continue: Blob worker should continue handling a granule that was evaluated for a split
+ * Normal: Blob worker should open the granule and start processing it
  */
-// TODO REMOVE reassign now!
-enum AssignRequestType { Normal = 0, Continue = 1, Reassign = 2 };
+enum AssignRequestType { Normal = 0, Continue = 1 };
 
 struct AssignBlobRangeRequest {
 	constexpr static FileIdentifier file_identifier = 905381;

@@ -7427,46 +7427,19 @@ ACTOR Future<Void> storageFeedVersionUpdater(StorageServerInterface interf, Chan
 	state Promise<Void> destroyed = self->destroyed;
 	loop {
 		if (destroyed.isSet()) {
-			if (self->debug) {
-				fmt::print("CFSD {0}: destroyed\n", self->id.toString().substr(0, 4));
-			}
 			return Void();
 		}
 		if (self->version.get() < self->desired.get()) {
-			if (self->debug) {
-				fmt::print("CFSD {0}: update waiting {1} < {2}\n",
-				           self->id.toString().substr(0, 4),
-				           self->version.get(),
-				           self->desired.get());
-			}
 			wait(delay(CLIENT_KNOBS->CHANGE_FEED_EMPTY_BATCH_TIME) || self->version.whenAtLeast(self->desired.get()));
 			if (destroyed.isSet()) {
-				if (self->debug) {
-					fmt::print("CFSD {0}: destroyed2\n", self->id.toString().substr(0, 4));
-				}
 				return Void();
 			}
-			if (self->debug) {
-				fmt::print("CFSD {0}: updated {1} < {2}\n",
-				           self->id.toString().substr(0, 4),
-				           self->version.get(),
-				           self->desired.get());
-			}
 			if (self->version.get() < self->desired.get()) {
-				if (self->debug) {
-					fmt::print("CFSD {0}: requesting {1}\n", self->id.toString().substr(0, 4), self->desired.get());
-				}
 				try {
 					ChangeFeedVersionUpdateReply rep = wait(brokenPromiseToNever(
 					    interf.changeFeedVersionUpdate.getReply(ChangeFeedVersionUpdateRequest(self->desired.get()))));
 
-					if (self->debug) {
-						fmt::print("CFSD {0}: got {1}\n", self->id.toString().substr(0, 4), rep.version);
-					}
 					if (rep.version > self->version.get()) {
-						if (self->debug) {
-							fmt::print("CFSD {0}: V={1} (req)\n", self->id.toString().substr(0, 4), rep.version);
-						}
 						self->version.set(rep.version);
 					}
 				} catch (Error& e) {
@@ -7481,9 +7454,6 @@ ACTOR Future<Void> storageFeedVersionUpdater(StorageServerInterface interf, Chan
 				}
 			}
 		} else {
-			if (self->debug) {
-				fmt::print("CFSD {0}: desired.WAL({1})\n", self->id.toString().substr(0, 4), self->version.get() + 1);
-			}
 			wait(self->desired.whenAtLeast(self->version.get() + 1));
 		}
 	}
@@ -7505,36 +7475,8 @@ Reference<ChangeFeedStorageData> DatabaseContext::getStorageData(StorageServerIn
 }
 
 Version ChangeFeedData::getVersion() {
-	// FIXME: add back in smarter version check later
-	/*if (notAtLatest.get() == 0 && mutations.isEmpty()) {
-	    Version v = storageData[0]->version.get();
-	    for (int i = 1; i < storageData.size(); i++) {
-	        if (storageData[i]->version.get() < v) {
-	            v = storageData[i]->version.get();
-	        }
-	    }
-	    return std::max(v, lastReturnedVersion.get());
-	}
-	*/
 	return lastReturnedVersion.get();
 }
-
-// TODO REMOVE when BG is correctness clean
-// To debug a waitLatest at wait_version returning early, set wait_version to the version, and start+end to a version
-// range that surrounds wait_version enough to figure out what's going on
-// DEBUG_CF_ID is optional
-#define DEBUG_CF_ID ""_sr
-#define DEBUG_CF_START_VERSION invalidVersion
-#define DEBUG_CF_END_VERSION invalidVersion
-#define DEBUG_CF_WAIT_VERSION invalidVersion
-#define DEBUG_CF_VERSION(cfId, v)                                                                                      \
-	DEBUG_CF_START_VERSION <= v&& v <= DEBUG_CF_END_VERSION && (""_sr == DEBUG_CF_ID || cfId.printable() == DEBUG_CF_ID)
-
-#define DEBUG_CF_VERSION_RANGE(cfId, vStart, vEnd)                                                                     \
-	DEBUG_CF_START_VERSION <= vEnd&& vStart <= DEBUG_CF_END_VERSION &&                                                 \
-	    (""_sr == DEBUG_CF_ID || cfId.printable() == DEBUG_CF_ID)
-
-#define DEBUG_CF_WAIT(cfId, v) DEBUG_CF_WAIT_VERSION == v && (""_sr == DEBUG_CF_ID || cfId.printable() == DEBUG_CF_ID)
 
 // This function is essentially bubbling the information about what has been processed from the server through the
 // change feed client. First it makes sure the server has returned all mutations up through the target version, the
@@ -7548,22 +7490,11 @@ ACTOR Future<Void> changeFeedWaitLatest(Reference<ChangeFeedData> self, Version 
 		if (it->version.get() < version) {
 			waiting++;
 			if (version > it->desired.get()) {
-				if (DEBUG_CF_WAIT(self->id, version)) {
-					it->debug = true;
-				}
 				it->desired.set(version);
 				desired++;
 			}
 			allAtLeast.push_back(it->version.whenAtLeast(version));
 		}
-	}
-
-	if (DEBUG_CF_WAIT(self->id, version)) {
-		fmt::print("CFW {0})     WaitLatest: waiting for {1}/{2} ss ({3} < desired)\n",
-		           version,
-		           waiting,
-		           self->storageData.size(),
-		           desired);
 	}
 
 	wait(waitForAll(allAtLeast));
@@ -7574,10 +7505,6 @@ ACTOR Future<Void> changeFeedWaitLatest(Reference<ChangeFeedData> self, Version 
 		if (!it.isEmpty()) {
 			onEmpty.push_back(it.onEmpty());
 		}
-	}
-
-	if (DEBUG_CF_WAIT(self->id, version)) {
-		fmt::print("CFW {0})     WaitLatest: waiting for {1} ss onEmpty\n", version, onEmpty.size());
 	}
 
 	if (onEmpty.size()) {
@@ -7592,41 +7519,19 @@ ACTOR Future<Void> changeFeedWaitLatest(Reference<ChangeFeedData> self, Version 
 	// done processing or we have up through the desired version
 	while (self->lastReturnedVersion.get() < self->maxSeenVersion && self->lastReturnedVersion.get() < version) {
 		Version target = std::min(self->maxSeenVersion, version);
-		if (DEBUG_CF_WAIT(self->id, version)) {
-			fmt::print("CFW {0})     WaitLatest: waiting merge lastReturned >= {1}\n", version, target);
-		}
 		wait(self->lastReturnedVersion.whenAtLeast(target));
-		if (DEBUG_CF_WAIT(self->id, version)) {
-			fmt::print(
-			    "CFW {0})     WaitLatest: got merge lastReturned {1}\n", version, self->lastReturnedVersion.get());
-		}
 	}
 
 	// then, wait for client to have consumed up through version
 	if (self->maxSeenVersion >= version) {
 		// merge cursor may have something buffered but has not yet sent it to self->mutations, just wait for
 		// lastReturnedVersion
-		if (DEBUG_CF_WAIT(self->id, version)) {
-			fmt::print("CFW {0})     WaitLatest: maxSeenVersion -> waiting lastReturned\n", version);
-		}
-
 		wait(self->lastReturnedVersion.whenAtLeast(version));
-
-		if (DEBUG_CF_WAIT(self->id, version)) {
-			fmt::print("CFW {0})     WaitLatest: maxSeenVersion -> got lastReturned\n", version);
-		}
 	} else {
 		// all mutations <= version are in self->mutations, wait for empty
 		while (!self->mutations.isEmpty()) {
-			if (DEBUG_CF_WAIT(self->id, version)) {
-				fmt::print("CFW {0})     WaitLatest: waiting for client onEmpty\n", version);
-			}
 			wait(self->mutations.onEmpty());
 			wait(delay(0));
-		}
-
-		if (DEBUG_CF_WAIT(self->id, version)) {
-			fmt::print("CFW {0})     WaitLatest: done\n", version);
 		}
 	}
 
@@ -7635,28 +7540,14 @@ ACTOR Future<Void> changeFeedWaitLatest(Reference<ChangeFeedData> self, Version 
 
 ACTOR Future<Void> changeFeedWhenAtLatest(Reference<ChangeFeedData> self, Version version) {
 	if (version >= self->endVersion) {
-		if (DEBUG_CF_WAIT(self->id, version)) {
-			fmt::print(
-			    "CFW {0}) WhenAtLeast: After CF end version {1}, returning Never()\n", version, self->endVersion);
-		}
 		return Never();
 	}
-
-	if (DEBUG_CF_WAIT(self->id, version)) {
-		fmt::print("CFW {0}) WhenAtLeast: LR={1}\n", version, self->lastReturnedVersion.get());
-	}
 	if (version <= self->getVersion()) {
-		if (DEBUG_CF_WAIT(self->id, version)) {
-			fmt::print("CFW {0}) WhenAtLeast: Already done\n", version, self->lastReturnedVersion.get());
-		}
 		return Void();
 	}
 	state Future<Void> lastReturned = self->lastReturnedVersion.whenAtLeast(version);
 
 	loop {
-		if (DEBUG_CF_WAIT(self->id, version)) {
-			fmt::print("CFW {0})   WhenAtLeast: NotAtLatest={1}\n", version, self->notAtLatest.get());
-		}
 		// only allowed to use empty versions if you're caught up
 		Future<Void> waitEmptyVersion = (self->notAtLatest.get() == 0) ? changeFeedWaitLatest(self, version) : Never();
 		choose {
@@ -7665,10 +7556,6 @@ ACTOR Future<Void> changeFeedWhenAtLatest(Reference<ChangeFeedData> self, Versio
 			when(wait(self->refresh.getFuture())) {}
 			when(wait(self->notAtLatest.onChange())) {}
 		}
-	}
-
-	if (DEBUG_CF_VERSION(self->id, version)) {
-		fmt::print("CFLR (WAL): {0}\n", version);
 	}
 
 	if (self->lastReturnedVersion.get() < version) {
@@ -7688,10 +7575,7 @@ ACTOR Future<Void> partialChangeFeedStream(StorageServerInterface interf,
                                            Version begin,
                                            Version end,
                                            Reference<ChangeFeedData> feedData,
-                                           Reference<ChangeFeedStorageData> storageData,
-                                           int idx /* TODO REMOVE this param after correctness clean */,
-                                           KeyRange range /* TODO REMOVE this param after correctness clean */,
-                                           UID debugID /*TODO REMOVE this param after correctness clean*/) {
+                                           Reference<ChangeFeedStorageData> storageData) {
 
 	// calling lastReturnedVersion's callbacks could cause us to be cancelled
 	state Promise<Void> refresh = feedData->refresh;
@@ -7700,34 +7584,11 @@ ACTOR Future<Void> partialChangeFeedStream(StorageServerInterface interf,
 	try {
 		loop {
 			if (nextVersion >= end) {
-				if (DEBUG_CF_VERSION(feedData->id, end)) {
-					fmt::print("  single {0} {1} [{2} - {3}): sending EOS\n",
-					           idx,
-					           interf.id().toString().substr(0, 4),
-					           range.begin.printable(),
-					           range.end.printable());
-				}
 				results.sendError(end_of_stream());
 				return Void();
 			}
 			choose {
 				when(state ChangeFeedStreamReply rep = waitNext(replyStream.getFuture())) {
-					if (DEBUG_CF_VERSION_RANGE(
-					        feedData->id, rep.mutations.front().version, rep.mutations.back().version)) {
-						fmt::print("  single {0} {1} {2}: response {3} - {4} ({5}), atLatest={6}, rep.atLatest={7}, "
-						           "notAtLatest={8}, minSV={9}\n",
-						           idx,
-						           interf.id().toString().substr(0, 4),
-						           debugID.toString().substr(0, 8).c_str(),
-						           rep.mutations.front().version,
-						           rep.mutations.back().version,
-						           rep.mutations.size(),
-						           atLatestVersion ? "T" : "F",
-						           rep.atLatestVersion ? "T" : "F",
-						           feedData->notAtLatest.get(),
-						           rep.minStreamVersion);
-					}
-
 					// handle first empty mutation on stream establishment explicitly
 					if (nextVersion == begin && rep.mutations.size() == 1 && rep.mutations[0].mutations.size() == 0 &&
 					    rep.mutations[0].version == begin - 1) {
@@ -7744,39 +7605,9 @@ ACTOR Future<Void> partialChangeFeedStream(StorageServerInterface interf,
 					state int resultLoc = 0;
 					while (resultLoc < rep.mutations.size()) {
 						wait(results.onEmpty());
-						if (DEBUG_CF_VERSION(feedData->id, rep.mutations[resultLoc].version)) {
-							fmt::print("  single {0} {1} [{2} - {3}):   sending {4}/{5} {6} ({7})\n",
-							           idx,
-							           interf.id().toString().substr(0, 4),
-							           range.begin.printable(),
-							           range.end.printable(),
-							           resultLoc,
-							           rep.mutations.size(),
-							           rep.mutations[resultLoc].version,
-							           rep.mutations[resultLoc].mutations.size());
-						}
 						if (rep.mutations[resultLoc].version >= nextVersion) {
 							results.send(rep.mutations[resultLoc]);
 						} else {
-							// TODO REMOVE eventually, useful for debugging for now
-							if (!rep.mutations[resultLoc].mutations.empty()) {
-								fmt::print("non-empty mutations ({0}), but versions out of order from {1} for {2} cf "
-								           "{3}! mv={4}, nv={5}\n",
-								           rep.mutations.size(),
-								           interf.id().toString().substr(0, 4),
-								           idx,
-								           feedData->id.toString().substr(0, 6),
-								           rep.mutations[resultLoc].version,
-								           nextVersion);
-								for (auto& it : rep.mutations[resultLoc].mutations) {
-									if (it.type == MutationRef::SetValue) {
-										printf("  %s=", it.param1.printable().c_str());
-									} else {
-										printf(
-										    "  %s - %s", it.param1.printable().c_str(), it.param2.printable().c_str());
-									}
-								}
-							}
 							ASSERT(rep.mutations[resultLoc].mutations.empty());
 						}
 						resultLoc++;
@@ -7807,37 +7638,16 @@ ACTOR Future<Void> partialChangeFeedStream(StorageServerInterface interf,
 				when(wait(atLatestVersion && replyStream.isEmpty() && results.isEmpty()
 				              ? storageData->version.whenAtLeast(nextVersion)
 				              : Future<Void>(Never()))) {
-					if (DEBUG_CF_VERSION(feedData->id, nextVersion)) {
-						fmt::print("  single {0} {1}:   WAL {2}, sending empty {3})\n",
-						           idx,
-						           interf.id().toString().substr(0, 4),
-						           nextVersion,
-						           storageData->version.get());
-					}
 					MutationsAndVersionRef empty;
 					empty.version = storageData->version.get();
 					results.send(empty);
 					nextVersion = storageData->version.get() + 1;
 				}
 				when(wait(atLatestVersion && replyStream.isEmpty() && !results.isEmpty() ? results.onEmpty()
-				                                                                         : Future<Void>(Never()))) {
-					if (DEBUG_CF_VERSION(feedData->id, nextVersion)) {
-						fmt::print("  single {0} {1}:   got onEmpty\n", idx, interf.id().toString().substr(0, 4));
-					}
-				}
+				                                                                         : Future<Void>(Never()))) {}
 			}
 		}
 	} catch (Error& e) {
-		// TODO REMOVE eventually, useful for debugging for now
-		// if (DEBUG_CF_VERSION(feedData->id, nextVersion)) {
-		fmt::print("  single {0} {1} {2} [{3} - {4}): CFError {5}\n",
-		           idx,
-		           interf.id().toString().substr(0, 4),
-		           debugID.toString().substr(0, 8).c_str(),
-		           range.begin.printable(),
-		           range.end.printable(),
-		           e.name());
-		// }
 		if (e.code() == error_code_actor_cancelled) {
 			throw;
 		}
@@ -7846,14 +7656,11 @@ ACTOR Future<Void> partialChangeFeedStream(StorageServerInterface interf,
 	}
 }
 
-// TODO better name
-ACTOR Future<Void> doCFMerge(Reference<ChangeFeedData> results,
-                             std::vector<std::pair<StorageServerInterface, KeyRange>> interfs,
-                             std::vector<MutationAndVersionStream> streams,
-                             Version* begin,
-                             Version end) {
-	// TODO REMOVE, a sanity check
-	state int eosCount = 0;
+ACTOR Future<Void> mergeChangeFeedStreamInternal(Reference<ChangeFeedData> results,
+                                                 std::vector<std::pair<StorageServerInterface, KeyRange>> interfs,
+                                                 std::vector<MutationAndVersionStream> streams,
+                                                 Version* begin,
+                                                 Version end) {
 	state Promise<Void> refresh = results->refresh;
 	// with empty version handling in the partial cursor, all streams will always have a next element with version >=
 	// the minimum version of any stream's next element
@@ -7872,8 +7679,6 @@ ACTOR Future<Void> doCFMerge(Reference<ChangeFeedData> results,
 
 	state int interfNum = 0;
 
-	// TODO minor optimization - could make this just a vector of indexes if each MutationAndVersionStream remembered
-	// its version index
 	state std::vector<MutationAndVersionStream> streamsUsed;
 	// initially, pull from all streams
 	for (auto& stream : streams) {
@@ -7893,12 +7698,9 @@ ACTOR Future<Void> doCFMerge(Reference<ChangeFeedData> results,
 				if (e.code() != error_code_end_of_stream) {
 					throw e;
 				}
-				eosCount++;
 			}
 			interfNum++;
 		}
-
-		ASSERT(streams.size() - mutations.size() == eosCount);
 
 		if (mutations.empty()) {
 			throw end_of_stream();
@@ -7932,20 +7734,11 @@ ACTOR Future<Void> doCFMerge(Reference<ChangeFeedData> results,
 		ASSERT(nextVersion >= *begin);
 
 		*begin = nextVersion + 1;
-		if (DEBUG_CF_VERSION(results->id, nextOut.back().version)) {
-			fmt::print("CFNA (merged): {0} ({1})\n", nextOut.back().version, nextOut.back().mutations.size());
-		}
 
 		// send mutations at nextVersion to the client
 		if (nextOut.back().mutations.empty()) {
 			ASSERT(results->mutations.isEmpty());
 		} else {
-			// TODO REMOVE, for debugging
-			if (nextOut.back().version <= results->lastReturnedVersion.get()) {
-				fmt::print("ERROR: merge cursor got mutations {0} <= lastReturnedVersion {1}",
-				           nextOut.back().version,
-				           results->lastReturnedVersion.get());
-			}
 			ASSERT(nextOut.back().version > results->lastReturnedVersion.get());
 
 			results->mutations.send(nextOut);
@@ -7953,9 +7746,6 @@ ACTOR Future<Void> doCFMerge(Reference<ChangeFeedData> results,
 			wait(delay(0));
 		}
 
-		if (DEBUG_CF_VERSION(results->id, nextVersion)) {
-			fmt::print("CFLR (merged): {0}\n", nextVersion);
-		}
 		if (nextVersion > results->lastReturnedVersion.get()) {
 			results->lastReturnedVersion.set(nextVersion);
 		}
@@ -7964,12 +7754,7 @@ ACTOR Future<Void> doCFMerge(Reference<ChangeFeedData> results,
 
 ACTOR Future<Void> onCFErrors(std::vector<Future<Void>> onErrors) {
 	wait(waitForAny(onErrors));
-	// propagate error - TODO better way?
-	for (auto& f : onErrors) {
-		if (f.isError()) {
-			throw f.getError();
-		}
-	}
+	// TODO: just do waitForAny and remove onCFErrors if this doesn't trip
 	ASSERT(false);
 	return Void();
 }
@@ -7986,7 +7771,9 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 	state std::vector<Future<Void>> onErrors(interfs.size());
 	state std::vector<MutationAndVersionStream> streams(interfs.size());
 
-	std::vector<UID> debugIDs;
+	TEST(interfs.size() > 10); // Large change feed merge cursor
+	TEST(interfs.size() > 100); // Very large change feed merge cursor
+
 	results->streams.clear();
 	for (auto& it : interfs) {
 		ChangeFeedStreamRequest req;
@@ -8000,9 +7787,6 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 		if (replyBufferSize != -1 && req.replyBufferSize < CLIENT_KNOBS->CHANGE_FEED_STREAM_MIN_BYTES) {
 			req.replyBufferSize = CLIENT_KNOBS->CHANGE_FEED_STREAM_MIN_BYTES;
 		}
-		UID debugID = deterministicRandom()->randomUniqueID();
-		debugIDs.push_back(debugID);
-		req.debugID = debugID;
 		results->streams.push_back(it.first.changeFeedStream.getReplyStream(req));
 	}
 
@@ -8021,31 +7805,13 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 	results->notAtLatest.set(interfs.size());
 	refresh.send(Void());
 
-	if (DEBUG_CF_START_VERSION != invalidVersion) {
-		fmt::print("Starting merge cursor for {0} @ {1} - {2}\n", interfs.size(), *begin, end);
-	}
 	for (int i = 0; i < interfs.size(); i++) {
 		onErrors[i] = results->streams[i].onError();
-		fetchers[i] = partialChangeFeedStream(interfs[i].first,
-		                                      streams[i].results,
-		                                      results->streams[i],
-		                                      *begin,
-		                                      end,
-		                                      results,
-		                                      results->storageData[i],
-		                                      i,
-		                                      interfs[i].second,
-		                                      debugIDs[i]);
-		if (DEBUG_CF_START_VERSION != invalidVersion) {
-			fmt::print("    [{0} - {1}): {2} {3}\n",
-			           interfs[i].second.begin.printable(),
-			           interfs[i].second.end.printable(),
-			           i,
-			           debugIDs[i].toString().substr(0, 8));
-		}
+		fetchers[i] = partialChangeFeedStream(
+		    interfs[i].first, streams[i].results, results->streams[i], *begin, end, results, results->storageData[i]);
 	}
 
-	wait(onCFErrors(onErrors) || doCFMerge(results, interfs, streams, begin, end));
+	wait(onCFErrors(onErrors) || mergeChangeFeedStreamInternal(results, interfs, streams, begin, end));
 
 	return Void();
 }
@@ -8084,12 +7850,11 @@ ACTOR Future<KeyRange> getChangeFeedRange(Reference<DatabaseContext> db, Databas
 	}
 }
 
-ACTOR Future<Void> doSingleCFStream(KeyRange range,
-                                    Reference<ChangeFeedData> results,
-                                    Key rangeID,
-                                    Version* begin,
-                                    Version end,
-                                    UID debugID /*TODO REMOVE this parameter once BG is correctness clean*/) {
+ACTOR Future<Void> singleChangeFeedStreamInternal(KeyRange range,
+                                                  Reference<ChangeFeedData> results,
+                                                  Key rangeID,
+                                                  Version* begin,
+                                                  Version end) {
 
 	state Promise<Void> refresh = results->refresh;
 	ASSERT(results->streams.size() == 1);
@@ -8125,15 +7890,6 @@ ACTOR Future<Void> doSingleCFStream(KeyRange range,
 		if (anyMutations) {
 			// empty versions can come out of order, as we sometimes send explicit empty versions when restarting a
 			// stream. Anything with mutations should be strictly greater than lastReturnedVersion
-			if (feedReply.mutations.front().version <= results->lastReturnedVersion.get()) {
-				fmt::print("out of order mutation for CF {0} Req {1} from ({2}) {3}! {4} < {5}\n",
-				           rangeID.toString().substr(0, 6),
-				           debugID.toString().substr(0, 8),
-				           results->storageData.size(),
-				           results->storageData[0]->id.toString().substr(0, 4).c_str(),
-				           feedReply.mutations.front().version,
-				           results->lastReturnedVersion.get());
-			}
 			ASSERT(feedReply.mutations.front().version > results->lastReturnedVersion.get());
 
 			results->mutations.send(
@@ -8144,16 +7900,6 @@ ACTOR Future<Void> doSingleCFStream(KeyRange range,
 			wait(delay(0));
 		}
 
-		if (DEBUG_CF_VERSION(rangeID, feedReply.mutations.back().version)) {
-			fmt::print("CFLR (single) {0}: {1} ({2}), atLatest={3}, rep.atLatest={4}, notAtLatest={5}, minSV={6}\n",
-			           debugID.toString().substr(0, 8),
-			           feedReply.mutations.back().version,
-			           feedReply.mutations.size(),
-			           atLatest ? "T" : "F",
-			           feedReply.atLatestVersion ? "T" : "F",
-			           results->notAtLatest.get(),
-			           feedReply.minStreamVersion);
-		}
 		// check refresh.canBeSet so that, if we are killed after calling one of these callbacks, we just
 		// skip to the next wait and get actor_cancelled
 		if (feedReply.mutations.back().version > results->lastReturnedVersion.get()) {
@@ -8165,11 +7911,6 @@ ACTOR Future<Void> doSingleCFStream(KeyRange range,
 			results->notAtLatest.set(0);
 		}
 		if (refresh.canBeSet() && feedReply.minStreamVersion > results->storageData[0]->version.get()) {
-			if (results->storageData[0]->debug) {
-				fmt::print("CFSD {0}: V={1} (CFLR)\n",
-				           results->storageData[0]->id.toString().substr(0, 4),
-				           results->storageData[0]->version.get());
-			}
 			results->storageData[0]->version.set(feedReply.minStreamVersion);
 		}
 	}
@@ -8186,14 +7927,12 @@ ACTOR Future<Void> singleChangeFeedStream(Reference<DatabaseContext> db,
                                           bool canReadPopped) {
 	state Database cx(db);
 	state ChangeFeedStreamRequest req;
-	state UID debugID = deterministicRandom()->randomUniqueID();
 	req.rangeID = rangeID;
 	req.begin = *begin;
 	req.end = end;
 	req.range = range;
 	req.canReadPopped = canReadPopped;
 	req.replyBufferSize = replyBufferSize;
-	req.debugID = debugID;
 
 	results->streams.clear();
 
@@ -8212,17 +7951,7 @@ ACTOR Future<Void> singleChangeFeedStream(Reference<DatabaseContext> db,
 	results->notAtLatest.set(1);
 	refresh.send(Void());
 
-	if (DEBUG_CF_START_VERSION != invalidVersion) {
-		fmt::print("Starting single cursor {0} for [{1} - {2}) @ {3} - {4} from {5}\n",
-		           debugID.toString().substr(0, 8),
-		           range.begin.printable(),
-		           range.end.printable(),
-		           *begin,
-		           end,
-		           interf.id().toString().c_str());
-	}
-
-	wait(results->streams[0].onError() || doSingleCFStream(range, results, rangeID, begin, end, debugID));
+	wait(results->streams[0].onError() || singleChangeFeedStreamInternal(range, results, rangeID, begin, end));
 
 	return Void();
 }
@@ -8238,18 +7967,10 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 	state Database cx(db);
 	state Span span("NAPI:GetChangeFeedStream"_loc);
 
-	results->id = rangeID;
 	results->endVersion = end;
 
 	state double sleepWithBackoff = CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY;
 	state Version lastBeginVersion = invalidVersion;
-
-	/*printf("CFStream %s [%s - %s): [%lld - %lld]\n",
-	       rangeID.printable().substr(0, 6).c_str(),
-	       range.begin.printable().c_str(),
-	       range.end.printable().c_str(),
-	       begin,
-	       end);*/
 
 	loop {
 		state KeyRange keys;
@@ -8319,17 +8040,19 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 					interfs.emplace_back(locations[i].second->getInterface(chosenLocations[i]),
 					                     locations[i].first & range);
 				}
+				TEST(true); // Change feed merge cursor
+				// TODO (jslocum): validate connectionFileChanged behavior
 				wait(
 				    mergeChangeFeedStream(db, interfs, results, rangeID, &begin, end, replyBufferSize, canReadPopped) ||
 				    cx->connectionFileChanged());
 			} else {
+				TEST(true); // Change feed single cursor
 				StorageServerInterface interf = locations[0].second->getInterface(chosenLocations[0]);
 				wait(singleChangeFeedStream(
 				         db, interf, range, results, rangeID, &begin, end, replyBufferSize, canReadPopped) ||
 				     cx->connectionFileChanged());
 			}
 		} catch (Error& e) {
-			fmt::print("CFNA error {}\n", e.name());
 			if (e.code() == error_code_actor_cancelled || e.code() == error_code_change_feed_popped) {
 				for (auto& it : results->storageData) {
 					if (it->debugGetReferenceCount() == 2) {
@@ -8339,6 +8062,7 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 				results->streams.clear();
 				results->storageData.clear();
 				if (e.code() == error_code_change_feed_popped) {
+					TEST(true); // getChangeFeedStreamActor got popped
 					results->mutations.sendError(e);
 					results->refresh.sendError(e);
 				} else {
@@ -8346,8 +8070,6 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 				}
 				throw;
 			}
-			// TODO REMOVE
-			// fmt::print("CFNA error {}\n", e.name());
 			if (results->notAtLatest.get() == 0) {
 				results->notAtLatest.set(1);
 			}
@@ -8355,8 +8077,6 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
 			    e.code() == error_code_connection_failed || e.code() == error_code_unknown_change_feed ||
 			    e.code() == error_code_broken_promise) {
-				// TODO: add some exponential backoff (with a reasonable cap) when retrying if we didn't advance
-				// beginVersion at all before getting an error
 				db->changeFeedCache.erase(rangeID);
 				cx->invalidateCache(keys);
 				if (begin == lastBeginVersion) {
