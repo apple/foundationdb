@@ -19,14 +19,11 @@
  */
 
 #include "flow/Tracing.h"
-#include "fdbclient/FDBTypes.h"
-#include "flow/Arena.h"
 #include "flow/UnitTest.h"
 
 #include "flow/Knobs.h"
 #include "flow/network.h"
 
-#include <boost/container/small_vector.hpp>
 #include <functional>
 #include <iomanip>
 #include <memory>
@@ -76,7 +73,7 @@ struct LogfileTracer : ITracer {
 		    .detail("End", format("%.6f", span.end))
 		    .detail("Kind", span.kind)
 		    .detail("Status", span.status)
-		    .detail("Parent Span ID", span.parentContext.spanID);
+		    .detail("ParentSpanID", span.parentContext.spanID);
 
 		for (const auto& [key, value] : span.attributes) {
 			TraceEvent(SevInfo, "TracingSpanTag", span.context.traceID).detail("Key", key).detail("Value", value);
