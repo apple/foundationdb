@@ -133,7 +133,6 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		state Transaction tr(cx);
 		loop {
 			try {
-				tr.reset();
 				RangeResult result = wait(tr.getRange(range, CLIENT_KNOBS->TOO_MANY));
 				//			showResult(result);
 				break;
