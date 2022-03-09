@@ -212,7 +212,7 @@ void applyNetworkOptions(TesterOptions& options) {
 }
 
 void randomizeOptions(TesterOptions& options) {
-	Random random;
+	Random& random = Random::get();
 	options.numFdbThreads = random.randomInt(options.testSpec.minFdbThreads, options.testSpec.maxFdbThreads);
 	options.numClientThreads = random.randomInt(options.testSpec.minClientThreads, options.testSpec.maxClientThreads);
 	options.numDatabases = random.randomInt(options.testSpec.minDatabases, options.testSpec.maxDatabases);

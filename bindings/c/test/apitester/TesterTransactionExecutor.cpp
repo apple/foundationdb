@@ -238,7 +238,7 @@ public:
 	}
 
 	void execute(std::shared_ptr<ITransactionActor> txActor, TTaskFct cont) override {
-		int idx = random.randomInt(0, options.numDatabases - 1);
+		int idx = Random::get().randomInt(0, options.numDatabases - 1);
 		executeWithDatabase(databases[idx], txActor, cont);
 	}
 
@@ -250,7 +250,6 @@ public:
 
 private:
 	std::vector<FDBDatabase*> databases;
-	Random random;
 };
 
 class DBPerTransactionExecutor : public TransactionExecutorBase {

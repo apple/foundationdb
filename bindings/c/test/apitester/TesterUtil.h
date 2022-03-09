@@ -51,6 +51,8 @@ class Random {
 public:
 	Random();
 
+	static Random& get();
+
 	int randomInt(int min, int max);
 
 	std::string randomStringLowerCase(int minLength, int maxLength);

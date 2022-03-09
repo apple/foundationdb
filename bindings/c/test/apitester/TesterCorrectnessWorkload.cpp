@@ -86,9 +86,9 @@ public:
 	}
 
 private:
-	std::string randomKeyName() { return keyPrefix + random.randomStringLowerCase(minKeyLength, maxKeyLength); }
+	std::string randomKeyName() { return keyPrefix + Random::get().randomStringLowerCase(minKeyLength, maxKeyLength); }
 
-	std::string randomValue() { return random.randomStringLowerCase(minValueLength, maxValueLength); }
+	std::string randomValue() { return Random::get().randomStringLowerCase(minValueLength, maxValueLength); }
 
 	std::string randomNotExistingKey() {
 		while (true) {
@@ -114,7 +114,7 @@ private:
 	}
 
 	std::string randomKey(double existingKeyRatio) {
-		if (random.randomBool(existingKeyRatio)) {
+		if (Random::get().randomBool(existingKeyRatio)) {
 			return randomExistingKey();
 		} else {
 			return randomNotExistingKey();
@@ -122,7 +122,7 @@ private:
 	}
 
 	void randomInsertOp(TTaskFct cont) {
-		int numKeys = random.randomInt(1, maxKeysPerTransaction);
+		int numKeys = Random::get().randomInt(1, maxKeysPerTransaction);
 		auto kvPairs = std::make_shared<std::vector<KeyValue>>();
 		for (int i = 0; i < numKeys; i++) {
 			kvPairs->push_back(KeyValue{ randomNotExistingKey(), randomValue() });
@@ -143,7 +143,7 @@ private:
 	}
 
 	void randomCommitReadOp(TTaskFct cont) {
-		int numKeys = random.randomInt(1, maxKeysPerTransaction);
+		int numKeys = Random::get().randomInt(1, maxKeysPerTransaction);
 		auto kvPairs = std::make_shared<std::vector<KeyValue>>();
 		for (int i = 0; i < numKeys; i++) {
 			kvPairs->push_back(KeyValue{ randomKey(readExistingKeysRatio), randomValue() });
@@ -193,7 +193,7 @@ private:
 	}
 
 	void randomGetOp(TTaskFct cont) {
-		int numKeys = random.randomInt(1, maxKeysPerTransaction);
+		int numKeys = Random::get().randomInt(1, maxKeysPerTransaction);
 		auto keys = std::make_shared<std::vector<std::string>>();
 		auto results = std::make_shared<std::vector<std::optional<std::string>>>();
 		for (int i = 0; i < numKeys; i++) {
@@ -228,7 +228,7 @@ private:
 	}
 
 	void randomClearOp(TTaskFct cont) {
-		int numKeys = random.randomInt(1, maxKeysPerTransaction);
+		int numKeys = Random::get().randomInt(1, maxKeysPerTransaction);
 		auto keys = std::make_shared<std::vector<std::string>>();
 		for (int i = 0; i < numKeys; i++) {
 			keys->push_back(randomExistingKey());
@@ -266,7 +266,7 @@ private:
 	}
 
 	void randomOperation(TTaskFct cont) {
-		OpType txType = (store.size() == 0) ? OP_INSERT : (OpType)random.randomInt(0, OP_LAST);
+		OpType txType = (store.size() == 0) ? OP_INSERT : (OpType)Random::get().randomInt(0, OP_LAST);
 		switch (txType) {
 		case OP_INSERT:
 			randomInsertOp(cont);
@@ -313,7 +313,6 @@ private:
 	}
 
 	int numOpLeft;
-	Random random;
 	KeyValueStore store;
 };
 

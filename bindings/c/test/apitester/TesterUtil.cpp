@@ -32,6 +32,11 @@ int Random::randomInt(int min, int max) {
 	return std::uniform_int_distribution<int>(min, max)(random);
 }
 
+Random& Random::get() {
+	static thread_local Random random;
+	return random;
+}
+
 std::string Random::randomStringLowerCase(int minLength, int maxLength) {
 	int length = randomInt(minLength, maxLength);
 	std::string str;
