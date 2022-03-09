@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -59,7 +59,7 @@ struct GranuleStartState {
 	Optional<GranuleHistory> history;
 };
 
-// TODO add global byte limit for pending and buffered deltas
+// FIXME: add global byte limit for pending and buffered deltas
 struct GranuleMetadata : NonCopyable, ReferenceCounted<GranuleMetadata> {
 	KeyRange keyRange;
 
@@ -103,7 +103,6 @@ struct GranuleMetadata : NonCopyable, ReferenceCounted<GranuleMetadata> {
 	}
 };
 
-// TODO: rename this struct
 struct GranuleRangeMetadata {
 	int64_t lastEpoch;
 	int64_t lastSeqno;
@@ -149,6 +148,7 @@ struct GranuleHistoryEntry : NonCopyable, ReferenceCounted<GranuleHistoryEntry> 
 	  : range(range), granuleID(granuleID), startVersion(startVersion), endVersion(endVersion) {}
 };
 
+// TODO: add limit on active fdb initial snapshots we can do at once per worker (knob + flow lock)
 struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	UID id;
 	Database db;
@@ -320,10 +320,16 @@ ACTOR Future<Void> updateGranuleSplitState(Transaction* tr,
                                            BlobGranuleSplitState newState) {
 	state KeyRange currentRange = blobGranuleSplitKeyRangeFor(parentGranuleID);
 
-	RangeResult totalState = wait(tr->getRange(currentRange, 100));
+	state RangeResult totalState = wait(tr->getRange(currentRange, SERVER_KNOBS->BG_MAX_SPLIT_FANOUT + 2));
 	// TODO is this explicit conflit range necessary with the above read?
 	tr->addWriteConflictRange(currentRange);
-	ASSERT(!totalState.more);
+	ASSERT_WE_THINK(!totalState.more && totalState.size() <= SERVER_KNOBS->BG_MAX_SPLIT_FANOUT + 1);
+	// maybe someone decreased the knob, we should gracefully handle it not in simulation
+	if (totalState.more || totalState.size() > SERVER_KNOBS->BG_MAX_SPLIT_FANOUT + 1) {
+		RangeResult tryAgain = wait(tr->getRange(currentRange, 10000));
+		ASSERT(!tryAgain.more);
+		totalState = tryAgain;
+	}
 
 	if (totalState.empty()) {
 		ASSERT(newState == BlobGranuleSplitState::Done);

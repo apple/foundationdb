@@ -191,7 +191,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 				// set up directory with its own randomness
 				uint32_t dirId = i * clientCount + clientId;
 				if (BGW_DEBUG) {
-					printf("Client %d/%d creating directory %d\n", clientId, clientCount, dirId);
+					fmt::print("Client {0}/{1} creating directory {2}\n", clientId, clientCount, dirId);
 				}
 				directories.push_back(makeReference<ThreadData>(dirId, targetByteRate));
 				targetByteRate /= skewMultiplier;
@@ -306,8 +306,6 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 				Version readVersion = wait(tr->getReadVersion());
 				return readVersion;
 			} catch (Error& e) {
-				// TODO REMOVE print
-				printf("BGV GRV got error %s\n", e.name());
 				wait(tr->onError(e));
 			}
 		}
@@ -325,10 +323,10 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 				state Version readVersion = rv;
 				std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> blob =
 				    wait(self->readFromBlob(cx, self, threadData->directoryRange, readVersion));
-				printf("Directory %d got %s RV %lld\n",
-				       threadData->directoryID,
-				       doSetup ? "initial" : "final",
-				       readVersion);
+				fmt::print("Directory {0} got {1} RV {2}\n",
+				           threadData->directoryID,
+				           doSetup ? "initial" : "final",
+				           readVersion);
 				threadData->minSuccessfulReadVersion = readVersion;
 				return Void();
 			} catch (Error& e) {
@@ -370,7 +368,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		           format("%08x", endKey),
 		           readVersion);
 		if (lastMatching.present()) {
-			printf("    last correct: %s\n", lastMatching.get().printable().c_str());
+			fmt::print("    last correct: {}\n", lastMatching.get().printable());
 		}
 		if (expectedValue.present() || blobValue.present()) {
 			// value mismatch
@@ -386,17 +384,17 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 			fmt::print("      Actual Key: {0}\n", blobKey.present() ? blobKey.get().printable() : "<missing>");
 		}
 
-		printf("Chunks:\n");
+		fmt::print("Chunks:\n");
 		for (auto& chunk : blob.second) {
-			printf("[%s - %s)\n", chunk.keyRange.begin.printable().c_str(), chunk.keyRange.end.printable().c_str());
+			fmt::print("[{0} - {1})\n", chunk.keyRange.begin.printable(), chunk.keyRange.end.printable());
 
-			printf("  SnapshotFile:\n    %s\n",
-			       chunk.snapshotFile.present() ? chunk.snapshotFile.get().toString().c_str() : "<none>");
-			printf("  DeltaFiles:\n");
+			fmt::print("  SnapshotFile:\n    {}\n",
+			           chunk.snapshotFile.present() ? chunk.snapshotFile.get().toString().c_str() : "<none>");
+			fmt::print("  DeltaFiles:\n");
 			for (auto& df : chunk.deltaFiles) {
-				printf("    %s\n", df.toString().c_str());
+				fmt::print("    {}\n", df.toString());
 			}
-			printf("  Deltas: (%d)", chunk.newDeltas.size());
+			fmt::print("  Deltas: ({})", chunk.newDeltas.size());
 			if (chunk.newDeltas.size() > 0) {
 				fmt::print(" with version [{0} - {1}]",
 				           chunk.newDeltas[0].version,
@@ -410,9 +408,6 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 	Value genVal(uint32_t val, uint16_t valLen) {
 		std::string v(valLen, 'x');
 		auto valFormatted = format("%08x", val);
-		if (valFormatted.size() > v.size()) {
-			printf("valFormatted=%d, v.size=%d\n", valFormatted.size(), v.size());
-		}
 		ASSERT(valFormatted.size() <= v.size());
 
 		for (int i = 0; i < valFormatted.size(); i++) {

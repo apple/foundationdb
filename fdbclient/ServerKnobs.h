@@ -780,6 +780,11 @@ public:
 	double BLOB_WORKER_TIMEOUT; // Blob Manager's reaction time to a blob worker failure
 	double BLOB_WORKER_REQUEST_TIMEOUT; // Blob Worker's server-side request timeout
 	double BLOB_WORKERLIST_FETCH_INTERVAL;
+	int BG_MAX_SPLIT_FANOUT; // Decreasing this knob can be unsafe
+
+	double BLOB_MANAGER_STATUS_EXP_BACKOFF_MIN;
+	double BLOB_MANAGER_STATUS_EXP_BACKOFF_MAX;
+	double BLOB_MANAGER_STATUS_EXP_BACKOFF_EXPONENT;
 
 	ServerKnobs(Randomize, ClientKnobs*, IsSimulated);
 	void initialize(Randomize, ClientKnobs*, IsSimulated);

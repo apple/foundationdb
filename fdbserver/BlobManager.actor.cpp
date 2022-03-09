@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -43,9 +43,12 @@
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // has to be last include
 
+/*
+ * The Blob Manager is responsible for managing range granules, and recruiting and monitoring Blob Workers.
+ */
+
 #define BM_DEBUG false
 
-// TODO add comments + documentation
 void handleClientBlobRange(KeyRangeMap<bool>* knownBlobRanges,
                            Arena& ar,
                            VectorRef<KeyRangeRef>* rangesToAdd,
@@ -103,7 +106,7 @@ void updateClientBlobRanges(KeyRangeMap<bool>* knownBlobRanges,
 	// worker. for any range that isn't set in results that is set in ranges, revoke the range from the
 	// worker. and, update ranges to match results as you go
 
-	// FIXME: could change this to O(N) instead of O(NLogN) by doing a sorted merge instead of requesting the
+	// SOMEDAY: could change this to O(N) instead of O(NLogN) by doing a sorted merge instead of requesting the
 	// intersection for each insert, but this operation is pretty infrequent so it's probably not necessary
 	if (dbBlobRanges.size() == 0) {
 		// special case. Nothing in the DB, reset knownBlobRanges and revoke all existing ranges from workers
@@ -191,7 +194,7 @@ struct RangeAssignment {
 	Optional<RangeRevokeData> revoke;
 };
 
-// TODO: track worker's reads/writes eventually
+// SOMEDAY: track worker's reads/writes eventually
 struct BlobWorkerStats {
 	int numGranulesAssigned;
 
@@ -246,87 +249,82 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 	BlobManagerData(UID id, Database db, Optional<Key> dcId)
 	  : id(id), db(db), dcId(dcId), knownBlobRanges(false, normalKeys.end),
 	    restartRecruiting(SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY), recruitingStream(0) {}
-
-	// TODO REMOVE
-	~BlobManagerData() {
-		if (BM_DEBUG) {
-			fmt::print("Destroying blob manager data for {0} {1}\n", epoch, id.toString());
-		}
-	}
 };
 
-ACTOR Future<Standalone<VectorRef<KeyRef>>> splitRange(Reference<ReadYourWritesTransaction> tr,
+ACTOR Future<Standalone<VectorRef<KeyRef>>> splitRange(Reference<BlobManagerData> bmData,
                                                        KeyRange range,
                                                        bool writeHot) {
-	// TODO is it better to just pass empty metrics to estimated?
-	// redo split if previous txn failed to calculate it
-	loop {
-		try {
-			if (BM_DEBUG) {
-				fmt::print("Splitting new range [{0} - {1}): {2}\n",
-				           range.begin.printable(),
-				           range.end.printable(),
-				           writeHot ? "hot" : "normal");
-			}
-			state StorageMetrics estimated =
-			    wait(tr->getTransaction().getDatabase()->getStorageMetrics(range, CLIENT_KNOBS->TOO_MANY));
-
-			if (BM_DEBUG) {
-				fmt::print("Estimated bytes for [{0} - {1}): {2}\n",
-				           range.begin.printable(),
-				           range.end.printable(),
-				           estimated.bytes);
-			}
-
-			if (estimated.bytes > SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES || writeHot) {
-				// only split on bytes and write rate
-				state StorageMetrics splitMetrics;
-				splitMetrics.bytes = SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES;
-				splitMetrics.bytesPerKSecond = SERVER_KNOBS->SHARD_SPLIT_BYTES_PER_KSEC;
-				if (writeHot) {
-					splitMetrics.bytesPerKSecond =
-					    std::min(splitMetrics.bytesPerKSecond, estimated.bytesPerKSecond / 2);
-					splitMetrics.bytesPerKSecond =
-					    std::max(splitMetrics.bytesPerKSecond, SERVER_KNOBS->SHARD_MIN_BYTES_PER_KSEC);
-				}
-				splitMetrics.iosPerKSecond = splitMetrics.infinity;
-				splitMetrics.bytesReadPerKSecond = splitMetrics.infinity;
-
-				state PromiseStream<Key> resultStream;
-				state Standalone<VectorRef<KeyRef>> keys;
-				state Future<Void> streamFuture = tr->getTransaction().getDatabase()->splitStorageMetricsStream(
-				    resultStream, range, splitMetrics, estimated);
-				loop {
-					try {
-						Key k = waitNext(resultStream.getFuture());
-						keys.push_back_deep(keys.arena(), k);
-					} catch (Error& e) {
-						if (e.code() != error_code_end_of_stream) {
-							throw;
-						}
-						break;
-					}
-				}
-
-				ASSERT(keys.size() >= 2);
-				ASSERT(keys.front() == range.begin);
-				ASSERT(keys.back() == range.end);
-				return keys;
-			} else {
-				if (BM_DEBUG) {
-					printf("Not splitting range\n");
-				}
-				Standalone<VectorRef<KeyRef>> keys;
-				keys.push_back_deep(keys.arena(), range.begin);
-				keys.push_back_deep(keys.arena(), range.end);
-				return keys;
-			}
-		} catch (Error& e) {
-			if (BM_DEBUG) {
-				printf("Splitting range got error %s\n", e.name());
-			}
-			wait(tr->onError(e));
+	try {
+		if (BM_DEBUG) {
+			fmt::print("Splitting new range [{0} - {1}): {2}\n",
+			           range.begin.printable(),
+			           range.end.printable(),
+			           writeHot ? "hot" : "normal");
 		}
+		state StorageMetrics estimated = wait(bmData->db->getStorageMetrics(range, CLIENT_KNOBS->TOO_MANY));
+
+		if (BM_DEBUG) {
+			fmt::print("Estimated bytes for [{0} - {1}): {2}\n",
+			           range.begin.printable(),
+			           range.end.printable(),
+			           estimated.bytes);
+		}
+
+		if (estimated.bytes > SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES || writeHot) {
+			// only split on bytes and write rate
+			state StorageMetrics splitMetrics;
+			splitMetrics.bytes = SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES;
+			splitMetrics.bytesPerKSecond = SERVER_KNOBS->SHARD_SPLIT_BYTES_PER_KSEC;
+			if (writeHot) {
+				splitMetrics.bytesPerKSecond = std::min(splitMetrics.bytesPerKSecond, estimated.bytesPerKSecond / 2);
+				splitMetrics.bytesPerKSecond =
+				    std::max(splitMetrics.bytesPerKSecond, SERVER_KNOBS->SHARD_MIN_BYTES_PER_KSEC);
+			}
+			splitMetrics.iosPerKSecond = splitMetrics.infinity;
+			splitMetrics.bytesReadPerKSecond = splitMetrics.infinity;
+
+			state PromiseStream<Key> resultStream;
+			state Standalone<VectorRef<KeyRef>> keys;
+			state Future<Void> streamFuture =
+			    bmData->db->splitStorageMetricsStream(resultStream, range, splitMetrics, estimated);
+			loop {
+				try {
+					Key k = waitNext(resultStream.getFuture());
+					keys.push_back_deep(keys.arena(), k);
+				} catch (Error& e) {
+					if (e.code() != error_code_end_of_stream) {
+						throw;
+					}
+					break;
+				}
+			}
+
+			ASSERT(keys.size() >= 2);
+			ASSERT(keys.front() == range.begin);
+			ASSERT(keys.back() == range.end);
+			return keys;
+		} else {
+			if (BM_DEBUG) {
+				printf("Not splitting range\n");
+			}
+			Standalone<VectorRef<KeyRef>> keys;
+			keys.push_back_deep(keys.arena(), range.begin);
+			keys.push_back_deep(keys.arena(), range.end);
+			return keys;
+		}
+	} catch (Error& e) {
+		if (e.code() == error_code_operation_cancelled) {
+			throw e;
+		}
+		// SplitStorageMetrics explicitly has a SevError if it gets an error, so no errors should propagate here
+		TraceEvent(SevError, "BlobManagerUnexpectedErrorSplitRange", bmData->id)
+		    .error(e)
+		    .detail("Epoch", bmData->epoch);
+		ASSERT_WE_THINK(false);
+
+		// if not simulation, kill the BM
+		bmData->iAmReplaced.sendError(e);
+		throw e;
 	}
 }
 
@@ -335,7 +333,6 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitRange(Reference<ReadYourWritesT
 ACTOR Future<UID> pickWorkerForAssign(Reference<BlobManagerData> bmData) {
 	// wait until there are BWs to pick from
 	while (bmData->workerStats.size() == 0) {
-		// TODO REMOVE
 		if (BM_DEBUG) {
 			fmt::print("BM {0} waiting for blob workers before assigning granules\n", bmData->epoch);
 		}
@@ -450,8 +447,17 @@ ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
 			return Void();
 		}
 
-		// TODO confirm: using reliable delivery this should only trigger if the worker is marked as failed, right?
-		// So assignment needs to be retried elsewhere, and a revoke is trivially complete
+		if (e.code() != error_code_broken_promise && e.code() != error_code_no_more_servers) {
+			TraceEvent(SevWarn, "BlobManagerUnexpectedErrorDoRangeAssignment", bmData->id)
+			    .error(e)
+			    .detail("Epoch", bmData->epoch);
+			ASSERT_WE_THINK(false);
+			bmData->iAmReplaced.sendError(e);
+			throw;
+		}
+
+		// We use reliable delivery (getReply), so the broken_promise means the worker is dead, and we may need to retry
+		// somewhere else
 		if (assignment.isAssign) {
 			if (BM_DEBUG) {
 				fmt::print("BM got error {0} assigning range [{1} - {2}) to worker {3}, requeueing\n",
@@ -567,8 +573,6 @@ ACTOR Future<Void> rangeAssigner(Reference<BlobManagerData> bmData) {
 				bmData->workerStats[workerId].numGranulesAssigned += 1;
 			}
 
-			// FIXME: if range is assign, have some sort of semaphore for outstanding assignments so we don't assign
-			// a ton ranges at once and blow up FDB with reading initial snapshots.
 			bmData->assignsInProgress.insert(assignment.keyRange,
 			                                 doRangeAssignment(bmData, assignment, workerId, seqNo));
 		} else {
@@ -647,13 +651,6 @@ ACTOR Future<Void> writeInitialGranuleMapping(Reference<BlobManagerData> bmData,
 				tr->setOption(FDBTransactionOptions::Option::ACCESS_SYSTEM_KEYS);
 				wait(checkManagerLock(tr, bmData));
 				while (i + j < boundaries.size() - 1 && j < transactionChunkSize) {
-					// TODO REMOVE
-					if (BM_DEBUG) {
-						fmt::print("BM {0} Persisting initial mapping for [{1} - {2})\n",
-						           bmData->epoch,
-						           boundaries[i + j].printable(),
-						           boundaries[i + j + 1].printable());
-					}
 					// set to empty UID - no worker assigned yet
 					wait(krmSetRange(tr,
 					                 blobGranuleMappingKeys.begin,
@@ -662,19 +659,8 @@ ACTOR Future<Void> writeInitialGranuleMapping(Reference<BlobManagerData> bmData,
 					j++;
 				}
 				wait(tr->commit());
-				if (BM_DEBUG) {
-					for (int k = 0; k < j; k++) {
-						fmt::print("BM {0} Persisted initial mapping for [{1} - {2})\n",
-						           bmData->epoch,
-						           boundaries[i + k].printable(),
-						           boundaries[i + k + 1].printable());
-					}
-				}
 				break;
 			} catch (Error& e) {
-				if (BM_DEBUG) {
-					fmt::print("BM {} Persisting initial mapping got error {}\n", bmData->epoch, e.name());
-				}
 				wait(tr->onError(e));
 				j = 0;
 			}
@@ -684,8 +670,6 @@ ACTOR Future<Void> writeInitialGranuleMapping(Reference<BlobManagerData> bmData,
 	return Void();
 }
 
-// FIXME: this does all logic in one transaction. Adding a giant range to an existing database to blobify would
-// require doing a ton of storage metrics calls, which we should split up across multiple transactions likely.
 ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 	state Optional<Value> lastChangeKeyValue;
 	state bool needToCoalesce = bmData->epoch > 1;
@@ -703,10 +687,20 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 				// read change key at this point along with ranges
 				state Optional<Value> ckvBegin = wait(tr->get(blobRangeChangeKey));
 
-				// TODO probably knobs here? This should always be pretty small though
-				RangeResult results = wait(krmGetRanges(
-				    tr, blobRangeKeys.begin, KeyRange(normalKeys), 10000, GetRangeLimits::BYTE_LIMIT_UNLIMITED));
-				ASSERT(!results.more && results.size() < CLIENT_KNOBS->TOO_MANY);
+				state RangeResult results = wait(krmGetRanges(tr,
+				                                              blobRangeKeys.begin,
+				                                              KeyRange(normalKeys),
+				                                              CLIENT_KNOBS->TOO_MANY,
+				                                              GetRangeLimits::BYTE_LIMIT_UNLIMITED));
+				ASSERT_WE_THINK(!results.more && results.size() < CLIENT_KNOBS->TOO_MANY);
+				if (results.more || results.size() >= CLIENT_KNOBS->TOO_MANY) {
+					TraceEvent(SevError, "BlobManagerTooManyClientRanges", bmData->id)
+					    .detail("Epoch", bmData->epoch)
+					    .detail("ClientRanges", results.size() - 1);
+					wait(delay(600));
+					bmData->iAmReplaced.sendError(internal_error());
+					throw internal_error();
+				}
 
 				state Arena ar;
 				ar.dependsOn(results.arena());
@@ -743,7 +737,7 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 				state std::vector<Future<Standalone<VectorRef<KeyRef>>>> splitFutures;
 				// Divide new ranges up into equal chunks by using SS byte sample
 				for (KeyRangeRef range : rangesToAdd) {
-					splitFutures.push_back(splitRange(tr, range, false));
+					splitFutures.push_back(splitRange(bmData, range, false));
 				}
 
 				for (auto f : splitFutures) {
@@ -847,7 +841,7 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 	state int64_t newLockSeqno = -1;
 
 	// first get ranges to split
-	Standalone<VectorRef<KeyRef>> _newRanges = wait(splitRange(tr, granuleRange, writeHot));
+	Standalone<VectorRef<KeyRef>> _newRanges = wait(splitRange(bmData, granuleRange, writeHot));
 	newRanges = _newRanges;
 
 	ASSERT(newRanges.size() >= 2);
@@ -868,10 +862,9 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 		return Void();
 	}
 
-	// TODO KNOB for this.
-	// Enforce max split fanout of 10 for performance reasons
-	int maxSplitFanout = 10;
-	if (newRanges.size() >= maxSplitFanout + 2) { // +2 because this is boundaries, so N keys would have N+1 bounaries.
+	// Enforce max split fanout for performance reasons. This mainly happens when a blob worker is behind.
+	if (newRanges.size() >=
+	    SERVER_KNOBS->BG_MAX_SPLIT_FANOUT + 2) { // +2 because this is boundaries, so N keys would have N+1 bounaries.
 		TEST(true); // downsampling granule split because fanout too high
 		Standalone<VectorRef<KeyRef>> coalescedRanges;
 		coalescedRanges.arena().dependsOn(newRanges.arena());
@@ -879,15 +872,17 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 
 		// since we include start + end boundaries here, only need maxSplitFanout-1 split boundaries to produce
 		// maxSplitFanout granules
-		downsampleSplit(newRanges, coalescedRanges, 1, newRanges.size() - 1, maxSplitFanout - 1);
+		downsampleSplit(newRanges, coalescedRanges, 1, newRanges.size() - 1, SERVER_KNOBS->BG_MAX_SPLIT_FANOUT - 1);
 
 		coalescedRanges.push_back(coalescedRanges.arena(), newRanges.back());
-		ASSERT(coalescedRanges.size() == maxSplitFanout + 1);
+		ASSERT(coalescedRanges.size() == SERVER_KNOBS->BG_MAX_SPLIT_FANOUT + 1);
 		if (BM_DEBUG) {
-			fmt::print("Downsampled split from {0} -> {1} granules", newRanges.size() - 1, maxSplitFanout);
+			fmt::print(
+			    "Downsampled split from {0} -> {1} granules", newRanges.size() - 1, SERVER_KNOBS->BG_MAX_SPLIT_FANOUT);
 		}
 
 		newRanges = coalescedRanges;
+		ASSERT(newRanges.size() <= SERVER_KNOBS->BG_MAX_SPLIT_FANOUT + 1);
 	}
 
 	if (BM_DEBUG) {
@@ -971,20 +966,9 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 			// acquire granule lock so nobody else can make changes to this granule.
 			tr->set(lockKey, blobGranuleLockValueFor(bmData->epoch, newLockSeqno, std::get<2>(prevGranuleLock)));
 
-			// set up split metadata
-			/*fmt::print("Persisting granule split {0} [{1} - {2})\n",
-			           granuleID.toString().substr(0, 6),
-			           granuleRange.begin.printable(),
-			           granuleRange.end.printable());*/
-
 			// set up splits in granule mapping, but point each part to the old owner (until they get reassigned)
 			state int i;
 			for (i = 0; i < newRanges.size() - 1; i++) {
-				/*fmt::print("    {0} [{1} - {2})\n",
-				           newGranuleIDs[i].toString().substr(0, 6),
-				           newRanges[i].printable(),
-				           newRanges[i + 1].printable());*/
-
 				Key splitKey = blobGranuleSplitKeyFor(granuleID, newGranuleIDs[i]);
 
 				tr->atomicOp(splitKey,
@@ -998,11 +982,6 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 				historyValue.parentGranules.push_back(historyValue.arena(),
 				                                      std::pair(granuleRange, granuleStartVersion));
 
-				/*fmt::print("Creating history entry [{0} - {1}) - [{2} - {3})\n",
-				           newRanges[i].printable(),
-				           newRanges[i + 1].printable(),
-				           granuleStartVersion,
-				           latestVersion);*/
 				tr->set(historyKey, blobGranuleHistoryValueFor(historyValue));
 
 				// split the assignment but still pointing to the same worker
@@ -1090,11 +1069,6 @@ ACTOR Future<Void> haltBlobWorker(Reference<BlobManagerData> bmData, BlobWorkerI
 			if (e.code() == error_code_operation_cancelled) {
 				throw;
 			}
-			// TODO REMOVE
-			fmt::print("BM {0} got error {1} trying to halt blob worker {2}\n",
-			           bmData->epoch,
-			           e.name(),
-			           bwInterf.id().toString());
 			if (e.code() != error_code_blob_manager_replaced) {
 				break;
 			}
@@ -1185,8 +1159,7 @@ ACTOR Future<Void> monitorBlobWorkerStatus(Reference<BlobManagerData> bmData, Bl
 	// wait for blob manager to be done recovering, so it has initial granule mapping and worker data
 	wait(bmData->doneRecovering.getFuture());
 
-	// TODO knob?
-	state double backoff = 0.1;
+	state double backoff = SERVER_KNOBS->BLOB_MANAGER_STATUS_EXP_BACKOFF_MIN;
 	loop {
 		try {
 			state ReplyPromiseStream<GranuleStatusReply> statusStream =
@@ -1207,7 +1180,7 @@ ACTOR Future<Void> monitorBlobWorkerStatus(Reference<BlobManagerData> bmData, Bl
 					           rep.writeHotSplit ? "hot" : "normal");
 				}
 				// if we get a reply from the stream, reset backoff
-				backoff = 0.1;
+				backoff = SERVER_KNOBS->BLOB_MANAGER_STATUS_EXP_BACKOFF_MIN;
 				if (rep.epoch > bmData->epoch) {
 					if (BM_DEBUG) {
 						fmt::print("BM heard from BW {0} that there is a new manager with higher epoch\n",
@@ -1218,7 +1191,7 @@ ACTOR Future<Void> monitorBlobWorkerStatus(Reference<BlobManagerData> bmData, Bl
 					}
 				}
 
-				// TODO maybe this won't be true eventually, but right now the only time the blob worker reports
+				// This won't be true eventually, but right now the only time the blob worker reports
 				// back is to split the range.
 				ASSERT(rep.doSplit);
 
@@ -1316,17 +1289,16 @@ ACTOR Future<Void> monitorBlobWorkerStatus(Reference<BlobManagerData> bmData, Bl
 			ASSERT(e.code() != error_code_end_of_stream);
 			if (e.code() == error_code_request_maybe_delivered || e.code() == error_code_connection_failed) {
 				wait(delay(backoff));
-				backoff = std::min(backoff * 1.5, 5.0);
+				backoff = std::min(backoff * SERVER_KNOBS->BLOB_MANAGER_STATUS_EXP_BACKOFF_EXPONENT,
+				                   SERVER_KNOBS->BLOB_MANAGER_STATUS_EXP_BACKOFF_MAX);
 				continue;
 			} else {
-				if (BM_DEBUG) {
-					fmt::print(
-					    "BM got unexpected error {0} monitoring BW {1} status\n", e.name(), bwInterf.id().toString());
-				}
-				// TODO change back from SevError?
-				TraceEvent(SevError, "BWStatusMonitoringFailed", bmData->id)
+				TraceEvent(SevError, "BlobManagerUnexpectedErrorStatusMonitoring", bmData->id)
 				    .error(e)
-				    .detail("BlobWorkerID", bwInterf.id());
+				    .detail("Epoch", bmData->epoch);
+				ASSERT_WE_THINK(false);
+				// if not simulation, kill the BM
+				bmData->iAmReplaced.sendError(e);
 				throw e;
 			}
 		}
@@ -1361,14 +1333,17 @@ ACTOR Future<Void> monitorBlobWorker(Reference<BlobManagerData> bmData, BlobWork
 			    "BM {0} got monitoring error {1} from BW {2}\n", bmData->epoch, e.name(), bwInterf.id().toString());
 		}
 
-		// TODO: re-evaluate the expected errors here once wait failure issue is resolved
 		// Expected errors here are: [broken_promise]
 		if (e.code() != error_code_broken_promise) {
 			if (BM_DEBUG) {
 				fmt::print("BM got unexpected error {0} monitoring BW {1}\n", e.name(), bwInterf.id().toString());
 			}
-			// TODO change back from SevError?
-			TraceEvent(SevError, "BWMonitoringFailed", bmData->id).error(e).detail("BlobWorkerID", bwInterf.id());
+			TraceEvent(SevError, "BlobManagerUnexpectedErrorMonitorBW", bmData->id)
+			    .error(e)
+			    .detail("Epoch", bmData->epoch);
+			ASSERT_WE_THINK(false);
+			// if not simulation, kill the BM
+			bmData->iAmReplaced.sendError(e);
 			throw e;
 		}
 	}
@@ -1536,7 +1511,7 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 	workerAssignments.insert(normalKeys, std::tuple(UID(), 0, 0));
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
 
-	// TODO KNOB
+	// FIXME: use range stream instead
 	state int rowLimit = BUGGIFY ? deterministicRandom()->randomInt(2, 10) : 10000;
 
 	if (BM_DEBUG) {
@@ -1559,13 +1534,11 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 		aliveAssignments.push_back(timeout(brokenPromiseToNever(it.granuleAssignmentsRequest.getReply(req)),
 		                                   SERVER_KNOBS->BLOB_WORKER_TIMEOUT));
 	}
-	waitForAll(aliveAssignments);
 
 	state std::vector<std::pair<UID, KeyRange>> outOfDateAssignments;
 	state int successful = 0;
 	state int assignIdx = 0;
 
-	// FIXME: more CPU efficient to do sorted merge of assignments?
 	for (; assignIdx < aliveAssignments.size(); assignIdx++) {
 		Optional<GetGranuleAssignmentsReply> reply = wait(aliveAssignments[assignIdx]);
 		UID workerId = startingWorkers[assignIdx].id();
@@ -1595,7 +1568,7 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 				bmData->workerStats[workerId].numGranulesAssigned = reply.get().assignments.size();
 			}
 		} else {
-			// TODO mark as failed and kill it
+			// SOMEDAY: mark as failed and kill it
 			if (BM_DEBUG) {
 				fmt::print("  Worker {}: failed\n", workerId.toString().substr(0, 5));
 			}
@@ -1621,7 +1594,6 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-			// TODO: replace row limit with knob
 			KeyRange nextRange(KeyRangeRef(beginKey, blobGranuleMappingKeys.end));
 			// using the krm functions can produce incorrect behavior here as it does weird stuff with beginKey
 			state GetRangeLimits limits(rowLimit, GetRangeLimits::BYTE_LIMIT_UNLIMITED);
@@ -1630,9 +1602,6 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 
 			// Add the mappings to our in memory key range map
 			for (int rangeIdx = 0; rangeIdx < results.size() - 1; rangeIdx++) {
-				// TODO REMOVE asserts eventually
-				ASSERT(results[rangeIdx].key.startsWith(blobGranuleMappingKeys.begin));
-				ASSERT(results[rangeIdx + 1].key.startsWith(blobGranuleMappingKeys.begin));
 				Key granuleStartKey = results[rangeIdx].key.removePrefix(blobGranuleMappingKeys.begin);
 				Key granuleEndKey = results[rangeIdx + 1].key.removePrefix(blobGranuleMappingKeys.begin);
 				if (results[rangeIdx].value.size()) {
@@ -1726,9 +1695,6 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 		int64_t epoch = std::get<1>(range.value());
 		int64_t seqno = std::get<2>(range.value());
 		if (epoch == 0 && seqno == 0) {
-			/*if (BM_DEBUG) {
-			    fmt::print("  [{0} - {1}) invalid\n", range.begin().printable(), range.end().printable());
-			}*/
 			continue;
 		}
 
@@ -1983,7 +1949,6 @@ ACTOR Future<Void> haltBlobGranules(Reference<BlobManagerData> bmData) {
 	std::vector<BlobWorkerInterface> blobWorkers = wait(getBlobWorkers(bmData->db));
 	std::vector<Future<Void>> deregisterBlobWorkers;
 	for (auto& worker : blobWorkers) {
-		// TODO: send a special req to blob workers so they clean up granules/CFs
 		bmData->addActor.send(haltBlobWorker(bmData, worker));
 		deregisterBlobWorkers.emplace_back(deregisterBlobWorker(bmData, worker));
 	}
@@ -2010,7 +1975,7 @@ ACTOR Future<GranuleFiles> loadHistoryFiles(Reference<BlobManagerData> bmData, U
 /*
  * Deletes all files pertaining to the granule with id granuleId and
  * also removes the history entry for this granule from the system keyspace
- * TODO ensure cannot fully delete granule that is still splitting!
+ * TODO: ensure cannot fully delete granule that is still splitting!
  */
 ACTOR Future<Void> fullyDeleteGranule(Reference<BlobManagerData> self, UID granuleId, KeyRef historyKey) {
 	if (BM_DEBUG) {
@@ -2194,7 +2159,6 @@ ACTOR Future<Void> pruneRange(Reference<BlobManagerData> self, KeyRangeRef range
 	}
 
 	// queue of <range, startVersion, endVersion> for BFS traversal of history
-	// TODO: consider using GranuleHistoryEntry, but that also makes it a little messy
 	state std::queue<std::tuple<KeyRange, Version, Version>> historyEntryQueue;
 
 	// stacks of <granuleId, historyKey> and <granuleId> to track which granules to delete
@@ -2569,7 +2533,6 @@ ACTOR Future<Void> blobManagerExclusionSafetyCheck(Reference<BlobManagerData> se
 		TraceEvent("BMExclusionSafetyCheckNoWorkers", self->id).log();
 		reply.safe = false;
 	} else {
-		// TODO REMOVE prints
 		std::set<UID> remainingWorkers;
 		for (auto& worker : self->workersById) {
 			remainingWorkers.insert(worker.first);
@@ -2627,7 +2590,6 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 		self->addActor.send(chaosRangeMover(self));
 	}
 
-	// TODO probably other things here eventually
 	try {
 		loop choose {
 			when(wait(self->iAmReplaced.getFuture())) {
