@@ -95,8 +95,9 @@ protected:
 private:
 	WorkloadManager* manager;
 
-	// Check if workload is done and notify the workload manager
-	void checkIfDone();
+	// Decrease scheduled task counter, notify the workload manager
+	// that the task is done if no more tasks schedule
+	void scheduledTaskDone();
 
 	// Keep track of tasks scheduled by the workload
 	// End workload when this number falls to 0

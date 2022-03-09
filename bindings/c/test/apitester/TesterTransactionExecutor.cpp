@@ -228,7 +228,7 @@ public:
 			FDBDatabase* db;
 			fdb_error_t err = fdb_create_database(clusterFile, &db);
 			if (err != error_code_success) {
-				throw TesterError(fmt::format("Failed create database with the culster file '{}'. Error: {}({})",
+				throw TesterError(fmt::format("Failed create database with the cluster file '{}'. Error: {}({})",
 				                              clusterFile,
 				                              err,
 				                              fdb_get_error(err)));

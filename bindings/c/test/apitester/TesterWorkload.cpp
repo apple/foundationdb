@@ -20,9 +20,11 @@
 
 #include "TesterWorkload.h"
 #include "TesterUtil.h"
+#include "test/apitester/TesterScheduler.h"
 #include <cstdlib>
 #include <memory>
 #include <fmt/format.h>
+#include <vector>
 
 namespace FdbApiTester {
 
@@ -74,8 +76,7 @@ void WorkloadBase::schedule(TTaskFct task) {
 	tasksScheduled++;
 	manager->scheduler->schedule([this, task]() {
 		task();
-		tasksScheduled--;
-		checkIfDone();
+		scheduledTaskDone();
 	});
 }
 
@@ -98,8 +99,7 @@ void WorkloadBase::execTransaction(std::shared_ptr<ITransactionActor> tx, TTaskF
 				cont();
 			}
 		}
-		tasksScheduled--;
-		checkIfDone();
+		scheduledTaskDone();
 	});
 }
 
@@ -116,8 +116,8 @@ void WorkloadBase::error(const std::string& msg) {
 	}
 }
 
-void WorkloadBase::checkIfDone() {
-	if (tasksScheduled == 0) {
+void WorkloadBase::scheduledTaskDone() {
+	if (--tasksScheduled == 0) {
 		if (numErrors > 0) {
 			error(fmt::format("Workload failed with {} errors", numErrors.load()));
 		} else {
@@ -133,14 +133,18 @@ void WorkloadManager::add(std::shared_ptr<IWorkload> workload, TTaskFct cont) {
 }
 
 void WorkloadManager::run() {
+	std::vector<std::shared_ptr<IWorkload>> initialWorkloads;
 	for (auto iter : workloads) {
-		iter.first->init(this);
+		initialWorkloads.push_back(iter.second.ref);
 	}
-	for (auto iter : workloads) {
-		iter.first->start();
+	for (auto iter : initialWorkloads) {
+		iter->init(this);
+	}
+	for (auto iter : initialWorkloads) {
+		iter->start();
 	}
 	scheduler->join();
-	if (numWorkloadsFailed > 0) {
+	if (failed()) {
 		fmt::print(stderr, "{} workloads failed", numWorkloadsFailed);
 	} else {
 		fprintf(stderr, "All workloads succesfully completed");
