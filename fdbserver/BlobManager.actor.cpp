@@ -43,7 +43,7 @@
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // has to be last include
 
-#define BM_DEBUG true
+#define BM_DEBUG false
 
 // TODO add comments + documentation
 void handleClientBlobRange(KeyRangeMap<bool>* knownBlobRanges,
