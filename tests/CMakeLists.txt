@@ -179,6 +179,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/WriteDuringRead.toml)
   add_fdb_test(TEST_FILES fast/WriteDuringReadClean.toml)
   add_fdb_test(TEST_FILES noSim/RandomUnitTests.toml UNIT)
+  add_fdb_test(TEST_FILES noSim/ReadSkewReadWrite.toml IGNORE)
   if (SSD_ROCKSDB_EXPERIMENTAL)
     add_fdb_test(TEST_FILES noSim/KeyValueStoreRocksDBTest.toml IGNORE) # re-enable as needed for RocksDB. Breaks correctness tests if RocksDB is disabled.
   endif()
