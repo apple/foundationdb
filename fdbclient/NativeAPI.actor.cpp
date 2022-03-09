@@ -476,7 +476,7 @@ ACTOR Future<Void> tssLogger(DatabaseContext* cx) {
 			    tssEv, "GetKeyValuesLatency", it.second->SSgetKeyValuesLatency, it.second->TSSgetKeyValuesLatency);
 			traceTSSPercentiles(tssEv, "GetKeyLatency", it.second->SSgetKeyLatency, it.second->TSSgetKeyLatency);
 			traceTSSPercentiles(tssEv,
-			                    "getMappedKeyValuesLatency",
+			                    "GetMappedKeyValuesLatency",
 			                    it.second->SSgetMappedKeyValuesLatency,
 			                    it.second->TSSgetMappedKeyValuesLatency);
 
