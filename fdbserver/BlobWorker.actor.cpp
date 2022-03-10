@@ -979,13 +979,15 @@ ACTOR Future<Void> handleCompletedDeltaFile(Reference<BlobWorkerData> bwData,
 		wait(popFuture);
 	}
 	while (!rollbacksCompleted->empty() && completedDeltaFile.version >= rollbacksCompleted->front().second) {
-		fmt::print("Granule [{0} - {1}) on BW {2} completed rollback {3} -> {4} with delta file {5}\n",
-		           metadata->keyRange.begin.printable().c_str(),
-		           metadata->keyRange.end.printable().c_str(),
-		           bwData->id.toString().substr(0, 5).c_str(),
-		           rollbacksCompleted->front().second,
-		           rollbacksCompleted->front().first,
-		           completedDeltaFile.version);
+		if (BW_DEBUG) {
+			fmt::print("Granule [{0} - {1}) on BW {2} completed rollback {3} -> {4} with delta file {5}\n",
+			           metadata->keyRange.begin.printable().c_str(),
+			           metadata->keyRange.end.printable().c_str(),
+			           bwData->id.toString().substr(0, 5).c_str(),
+			           rollbacksCompleted->front().second,
+			           rollbacksCompleted->front().first,
+			           completedDeltaFile.version);
+		}
 		rollbacksCompleted->pop_front();
 	}
 	return Void();

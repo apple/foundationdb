@@ -1476,7 +1476,6 @@ ACTOR Future<Void> checkBlobWorkerList(Reference<BlobManagerData> bmData, Promis
 // Resolves these conflicts by comparing the epoch + seqno for the range
 // Special epoch/seqnos:
 //   (0,0): range is not mapped
-//   (0,1): range is mapped, but worker is unknown
 static void addAssignment(KeyRangeMap<std::tuple<UID, int64_t, int64_t>>& map,
                           const KeyRangeRef& newRange,
                           UID newId,
@@ -1493,6 +1492,10 @@ static void addAssignment(KeyRangeMap<std::tuple<UID, int64_t, int64_t>>& map,
 		int64_t oldSeqno = std::get<2>(old.value());
 		if (oldEpoch > newEpoch || (oldEpoch == newEpoch && oldSeqno > newSeqno)) {
 			newer.push_back(std::pair(old.range(), std::tuple(oldWorker, oldEpoch, oldSeqno)));
+			if (old.range() != newRange) {
+				TEST(true); // BM Recovery: BWs disagree on range boundaries
+				anyConflicts = true;
+			}
 		} else {
 			allExistingNewer = false;
 			if (newId != UID() && newEpoch != std::numeric_limits<int64_t>::max()) {
@@ -1500,6 +1503,7 @@ static void addAssignment(KeyRangeMap<std::tuple<UID, int64_t, int64_t>>& map,
 				ASSERT(oldEpoch != newEpoch || oldSeqno != newSeqno);
 			}
 			if (newEpoch == std::numeric_limits<int64_t>::max() && (oldWorker != newId || old.range() != newRange)) {
+				TEST(true); // BM Recovery: DB disagrees with workers
 				// new one is from DB (source of truth on boundaries) and existing mapping disagrees on boundary or
 				// assignment, do explicit revoke and re-assign to converge
 				anyConflicts = true;
@@ -1508,8 +1512,9 @@ static void addAssignment(KeyRangeMap<std::tuple<UID, int64_t, int64_t>>& map,
 				if (old.range() != newRange) {
 					std::get<0>(old.value()) = UID();
 				}
-				if (outOfDate.empty() || outOfDate.back() != std::pair(oldWorker, KeyRange(old.range()))) {
-					TEST(true); // BM Recovery: DB disagrees with workers
+				if (oldWorker != UID() &&
+				    (outOfDate.empty() || outOfDate.back() != std::pair(oldWorker, KeyRange(old.range())))) {
+
 					outOfDate.push_back(std::pair(oldWorker, old.range()));
 				}
 			} else if (oldWorker != UID() && oldWorker != newId &&
