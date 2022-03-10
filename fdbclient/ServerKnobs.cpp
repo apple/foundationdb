@@ -814,7 +814,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init ( CLUSTER_RECOVERY_EVENT_NAME_PREFIX,               "Master");
 
     // encrypt key proxy
-    init( ENABLE_ENCRYPT_KEY_PROXY,                            false );
+    init( ENABLE_ENCRYPTION,                                   false );
 
 	// Blob granlues
 	init( BG_URL,                                                 "" ); // TODO: store in system key space, eventually
