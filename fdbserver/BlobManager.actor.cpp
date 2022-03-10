@@ -323,7 +323,9 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitRange(Reference<BlobManagerData
 		ASSERT_WE_THINK(false);
 
 		// if not simulation, kill the BM
-		bmData->iAmReplaced.sendError(e);
+		if (bmData->iAmReplaced.canBeSet()) {
+			bmData->iAmReplaced.sendError(e);
+		}
 		throw e;
 	}
 }
@@ -452,7 +454,9 @@ ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
 			    .error(e)
 			    .detail("Epoch", bmData->epoch);
 			ASSERT_WE_THINK(false);
-			bmData->iAmReplaced.sendError(e);
+			if (bmData->iAmReplaced.canBeSet()) {
+				bmData->iAmReplaced.sendError(e);
+			}
 			throw;
 		}
 
@@ -698,7 +702,9 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 					    .detail("Epoch", bmData->epoch)
 					    .detail("ClientRanges", results.size() - 1);
 					wait(delay(600));
-					bmData->iAmReplaced.sendError(internal_error());
+					if (bmData->iAmReplaced.canBeSet()) {
+						bmData->iAmReplaced.sendError(internal_error());
+					}
 					throw internal_error();
 				}
 
@@ -1041,6 +1047,7 @@ ACTOR Future<Void> deregisterBlobWorker(Reference<BlobManagerData> bmData, BlobW
 		try {
 			wait(checkManagerLock(tr, bmData));
 			Key blobWorkerListKey = blobWorkerListKeyFor(interf.id());
+			// FIXME: should be able to remove this conflict range
 			tr->addReadConflictRange(singleKeyRange(blobWorkerListKey));
 			tr->clear(blobWorkerListKey);
 
@@ -1298,7 +1305,9 @@ ACTOR Future<Void> monitorBlobWorkerStatus(Reference<BlobManagerData> bmData, Bl
 				    .detail("Epoch", bmData->epoch);
 				ASSERT_WE_THINK(false);
 				// if not simulation, kill the BM
-				bmData->iAmReplaced.sendError(e);
+				if (bmData->iAmReplaced.canBeSet()) {
+					bmData->iAmReplaced.sendError(e);
+				}
 				throw e;
 			}
 		}
@@ -1343,7 +1352,9 @@ ACTOR Future<Void> monitorBlobWorker(Reference<BlobManagerData> bmData, BlobWork
 			    .detail("Epoch", bmData->epoch);
 			ASSERT_WE_THINK(false);
 			// if not simulation, kill the BM
-			bmData->iAmReplaced.sendError(e);
+			if (bmData->iAmReplaced.canBeSet()) {
+				bmData->iAmReplaced.sendError(e);
+			}
 			throw e;
 		}
 	}
