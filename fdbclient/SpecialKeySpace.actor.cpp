@@ -1916,12 +1916,11 @@ ACTOR static Future<RangeResult> getVersionEpochActor(ReadYourWritesTransaction*
 	ryw->getTransaction().setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 	Optional<Value> val = wait(ryw->getTransaction().get(versionEpochKey));
 	RangeResult result;
-	int64_t versionEpoch = CLIENT_KNOBS->DEFAULT_VERSION_EPOCH;
 	if (val.present()) {
-		versionEpoch = BinaryReader::fromStringRef<Version>(val.get(), Unversioned());
+		int64_t versionEpoch = BinaryReader::fromStringRef<Version>(val.get(), Unversioned());
+		ValueRef version(result.arena(), boost::lexical_cast<std::string>(versionEpoch));
+		result.push_back_deep(result.arena(), KeyValueRef(kr.begin, version));
 	}
-	ValueRef version(result.arena(), boost::lexical_cast<std::string>(versionEpoch));
-	result.push_back_deep(result.arena(), KeyValueRef(kr.begin, version));
 	return result;
 }
 

@@ -33,13 +33,13 @@ namespace fdb_cli {
 
 const KeyRef versionEpochSpecialKey = LiteralStringRef("\xff\xff/management/version_epoch");
 
-ACTOR static Future<int64_t> getVersionEpoch(Reference<IDatabase> db) {
+ACTOR static Future<Optional<int64_t>> getVersionEpoch(Reference<IDatabase> db) {
 	state Reference<ITransaction> tr = db->createTransaction();
 	loop {
 		try {
 			Optional<Value> versionEpochVal = wait(safeThreadFutureToFuture(tr->get(versionEpochSpecialKey)));
-			ASSERT(versionEpochVal.present()); // should always return a default value
-			return boost::lexical_cast<int64_t>(versionEpochVal.get().toString());
+			return versionEpochVal.present() ? boost::lexical_cast<int64_t>(versionEpochVal.get().toString())
+			                                 : Optional<int64_t>();
 		} catch (Error& e) {
 			wait(safeThreadFutureToFuture(tr->onError(e)));
 		}
@@ -49,8 +49,12 @@ ACTOR static Future<int64_t> getVersionEpoch(Reference<IDatabase> db) {
 ACTOR Future<bool> versionEpochCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() == 1 || tokens.size() == 3) {
 		if (tokens.size() == 1) {
-			int64_t versionEpoch = wait(getVersionEpoch(db));
-			printf("Current version epoch is %" PRId64 "\n", versionEpoch);
+			Optional<int64_t> versionEpoch = wait(getVersionEpoch(db));
+			if (versionEpoch.present()) {
+				printf("Current version epoch is %" PRId64 "\n", versionEpoch.get());
+			} else {
+				printf("Version epoch is unset\n");
+			}
 			return true;
 		} else if (tokens.size() == 3) {
 			state int64_t v;
@@ -64,8 +68,8 @@ ACTOR Future<bool> versionEpochCommandActor(Reference<IDatabase> db, std::vector
 			if (tokencmp(tokens[1], "set")) {
 				newVersionEpoch = v;
 			} else if (tokencmp(tokens[1], "add")) {
-				int64_t versionEpoch = wait(getVersionEpoch(db));
-				newVersionEpoch = versionEpoch + v;
+				Optional<int64_t> versionEpoch = wait(getVersionEpoch(db));
+				newVersionEpoch = versionEpoch.orDefault(CLIENT_KNOBS->DEFAULT_VERSION_EPOCH) + v;
 			} else {
 				printUsage(tokens[0]);
 				return false;
@@ -75,8 +79,8 @@ ACTOR Future<bool> versionEpochCommandActor(Reference<IDatabase> db, std::vector
 			loop {
 				tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 				try {
-					int64_t versionEpoch = wait(getVersionEpoch(db));
-					if (newVersionEpoch != versionEpoch) {
+					Optional<int64_t> versionEpoch = wait(getVersionEpoch(db));
+					if (!versionEpoch.present() || newVersionEpoch != versionEpoch.get()) {
 						// Since this transaction causes a recovery, it will
 						// almost certainly receive commit_unknown_result.
 						// Re-read the version epoch on each loop to check
@@ -84,7 +88,7 @@ ACTOR Future<bool> versionEpochCommandActor(Reference<IDatabase> db, std::vector
 						tr->set(versionEpochSpecialKey, boost::lexical_cast<std::string>(newVersionEpoch));
 						wait(safeThreadFutureToFuture(tr->commit()));
 					} else {
-						printf("Current version epoch is %" PRId64 "\n", versionEpoch);
+						printf("Current version epoch is %" PRId64 "\n", versionEpoch.get());
 						return true;
 					}
 				} catch (Error& e) {
