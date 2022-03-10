@@ -171,8 +171,8 @@ void DatabaseContext::addTssMapping(StorageServerInterface const& ssi, StorageSe
 		                             TSSEndpointData(tssi.id(), tssi.getKey.getEndpoint(), metrics));
 		queueModel.updateTssEndpoint(ssi.getKeyValues.getEndpoint().token.first(),
 		                             TSSEndpointData(tssi.id(), tssi.getKeyValues.getEndpoint(), metrics));
-		queueModel.updateTssEndpoint(ssi.getKeyValuesAndFlatMap.getEndpoint().token.first(),
-		                             TSSEndpointData(tssi.id(), tssi.getKeyValuesAndFlatMap.getEndpoint(), metrics));
+		queueModel.updateTssEndpoint(ssi.getMappedKeyValues.getEndpoint().token.first(),
+		                             TSSEndpointData(tssi.id(), tssi.getMappedKeyValues.getEndpoint(), metrics));
 		queueModel.updateTssEndpoint(ssi.getKeyValuesStream.getEndpoint().token.first(),
 		                             TSSEndpointData(tssi.id(), tssi.getKeyValuesStream.getEndpoint(), metrics));
 
@@ -196,7 +196,7 @@ void DatabaseContext::removeTssMapping(StorageServerInterface const& ssi) {
 		queueModel.removeTssEndpoint(ssi.getValue.getEndpoint().token.first());
 		queueModel.removeTssEndpoint(ssi.getKey.getEndpoint().token.first());
 		queueModel.removeTssEndpoint(ssi.getKeyValues.getEndpoint().token.first());
-		queueModel.removeTssEndpoint(ssi.getKeyValuesAndFlatMap.getEndpoint().token.first());
+		queueModel.removeTssEndpoint(ssi.getMappedKeyValues.getEndpoint().token.first());
 		queueModel.removeTssEndpoint(ssi.getKeyValuesStream.getEndpoint().token.first());
 
 		queueModel.removeTssEndpoint(ssi.watchValue.getEndpoint().token.first());
@@ -476,9 +476,9 @@ ACTOR Future<Void> tssLogger(DatabaseContext* cx) {
 			    tssEv, "GetKeyValuesLatency", it.second->SSgetKeyValuesLatency, it.second->TSSgetKeyValuesLatency);
 			traceTSSPercentiles(tssEv, "GetKeyLatency", it.second->SSgetKeyLatency, it.second->TSSgetKeyLatency);
 			traceTSSPercentiles(tssEv,
-			                    "GetKeyValuesAndFlatMapLatency",
-			                    it.second->SSgetKeyValuesAndFlatMapLatency,
-			                    it.second->TSSgetKeyValuesAndFlatMapLatency);
+			                    "GetMappedKeyValuesLatency",
+			                    it.second->SSgetMappedKeyValuesLatency,
+			                    it.second->TSSgetMappedKeyValuesLatency);
 
 			it.second->clear();
 		}
@@ -1314,7 +1314,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
     transactionPhysicalReadsCompleted("PhysicalReadRequestsCompleted", cc),
     transactionGetKeyRequests("GetKeyRequests", cc), transactionGetValueRequests("GetValueRequests", cc),
     transactionGetRangeRequests("GetRangeRequests", cc),
-    transactionGetRangeAndFlatMapRequests("GetRangeAndFlatMapRequests", cc),
+    transactionGetMappedRangeRequests("GetMappedRangeRequests", cc),
     transactionGetRangeStreamRequests("GetRangeStreamRequests", cc), transactionWatchRequests("WatchRequests", cc),
     transactionGetAddressesForKeyRequests("GetAddressesForKeyRequests", cc), transactionBytesRead("BytesRead", cc),
     transactionKeysRead("KeysRead", cc), transactionMetadataVersionReads("MetadataVersionReads", cc),
@@ -1572,7 +1572,7 @@ DatabaseContext::DatabaseContext(const Error& err)
     transactionPhysicalReadsCompleted("PhysicalReadRequestsCompleted", cc),
     transactionGetKeyRequests("GetKeyRequests", cc), transactionGetValueRequests("GetValueRequests", cc),
     transactionGetRangeRequests("GetRangeRequests", cc),
-    transactionGetRangeAndFlatMapRequests("GetRangeAndFlatMapRequests", cc),
+    transactionGetMappedRangeRequests("GetMappedRangeRequests", cc),
     transactionGetRangeStreamRequests("GetRangeStreamRequests", cc), transactionWatchRequests("WatchRequests", cc),
     transactionGetAddressesForKeyRequests("GetAddressesForKeyRequests", cc), transactionBytesRead("BytesRead", cc),
     transactionKeysRead("KeysRead", cc), transactionMetadataVersionReads("MetadataVersionReads", cc),
@@ -2424,6 +2424,30 @@ void GetRangeLimits::decrement(KeyValueRef const& data) {
 	minRows = std::max(0, minRows - 1);
 	if (rows != GetRangeLimits::ROW_LIMIT_UNLIMITED)
 		rows--;
+	if (bytes != GetRangeLimits::BYTE_LIMIT_UNLIMITED)
+		bytes = std::max(0, bytes - (int)8 - (int)data.expectedSize());
+}
+
+void GetRangeLimits::decrement(VectorRef<MappedKeyValueRef> const& data) {
+	if (rows != GetRangeLimits::ROW_LIMIT_UNLIMITED) {
+		ASSERT(data.size() <= rows);
+		rows -= data.size();
+	}
+
+	minRows = std::max(0, minRows - data.size());
+
+	// TODO: For now, expectedSize only considers the size of the original key values, but not the underlying queries or
+	// results. Also, double check it is correct when dealing with sizeof(MappedKeyValueRef).
+	if (bytes != GetRangeLimits::BYTE_LIMIT_UNLIMITED)
+		bytes = std::max(0, bytes - (int)data.expectedSize() - (8 - (int)sizeof(MappedKeyValueRef)) * data.size());
+}
+
+void GetRangeLimits::decrement(MappedKeyValueRef const& data) {
+	minRows = std::max(0, minRows - 1);
+	if (rows != GetRangeLimits::ROW_LIMIT_UNLIMITED)
+		rows--;
+	// TODO: For now, expectedSize only considers the size of the original key values, but not the underlying queries or
+	// results. Also, double check it is correct when dealing with sizeof(MappedKeyValueRef).
 	if (bytes != GetRangeLimits::BYTE_LIMIT_UNLIMITED)
 		bytes = std::max(0, bytes - (int)8 - (int)data.expectedSize());
 }
@@ -3355,21 +3379,21 @@ template <class GetKeyValuesFamilyRequest>
 RequestStream<GetKeyValuesFamilyRequest> StorageServerInterface::*getRangeRequestStream() {
 	if constexpr (std::is_same<GetKeyValuesFamilyRequest, GetKeyValuesRequest>::value) {
 		return &StorageServerInterface::getKeyValues;
-	} else if (std::is_same<GetKeyValuesFamilyRequest, GetKeyValuesAndFlatMapRequest>::value) {
-		return &StorageServerInterface::getKeyValuesAndFlatMap;
+	} else if (std::is_same<GetKeyValuesFamilyRequest, GetMappedKeyValuesRequest>::value) {
+		return &StorageServerInterface::getMappedKeyValues;
 	} else {
 		UNREACHABLE();
 	}
 }
 
-ACTOR template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply>
-Future<RangeResult> getExactRange(Reference<TransactionState> trState,
-                                  Version version,
-                                  KeyRange keys,
-                                  Key mapper,
-                                  GetRangeLimits limits,
-                                  Reverse reverse) {
-	state RangeResult output;
+ACTOR template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply, class RangeResultFamily>
+Future<RangeResultFamily> getExactRange(Reference<TransactionState> trState,
+                                        Version version,
+                                        KeyRange keys,
+                                        Key mapper,
+                                        GetRangeLimits limits,
+                                        Reverse reverse) {
+	state RangeResultFamily output;
 	state Span span("NAPI:getExactRange"_loc, trState->spanID);
 
 	// printf("getExactRange( '%s', '%s' )\n", keys.begin.toString().c_str(), keys.end.toString().c_str());
@@ -3547,14 +3571,14 @@ Future<Key> resolveKey(Reference<TransactionState> trState, KeySelector const& k
 	return getKey(trState, key, version);
 }
 
-ACTOR template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply>
-Future<RangeResult> getRangeFallback(Reference<TransactionState> trState,
-                                     Version version,
-                                     KeySelector begin,
-                                     KeySelector end,
-                                     Key mapper,
-                                     GetRangeLimits limits,
-                                     Reverse reverse) {
+ACTOR template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply, class RangeResultFamily>
+Future<RangeResultFamily> getRangeFallback(Reference<TransactionState> trState,
+                                           Version version,
+                                           KeySelector begin,
+                                           KeySelector end,
+                                           Key mapper,
+                                           GetRangeLimits limits,
+                                           Reverse reverse) {
 	if (version == latestVersion) {
 		state Transaction transaction(trState->cx);
 		transaction.setOption(FDBTransactionOptions::CAUSAL_READ_RISKY);
@@ -3570,16 +3594,16 @@ Future<RangeResult> getRangeFallback(Reference<TransactionState> trState,
 	state Key b = wait(fb);
 	state Key e = wait(fe);
 	if (b >= e) {
-		return RangeResult();
+		return RangeResultFamily();
 	}
 
 	// if e is allKeys.end, we have read through the end of the database
 	// if b is allKeys.begin, we have either read through the beginning of the database,
 	// or allKeys.begin exists in the database and will be part of the conflict range anyways
 
-	RangeResult _r = wait(getExactRange<GetKeyValuesFamilyRequest, GetKeyValuesFamilyReply>(
+	RangeResultFamily _r = wait(getExactRange<GetKeyValuesFamilyRequest, GetKeyValuesFamilyReply, RangeResultFamily>(
 	    trState, version, KeyRangeRef(b, e), mapper, limits, reverse));
-	RangeResult r = _r;
+	RangeResultFamily r = _r;
 
 	if (b == allKeys.begin && ((reverse && !r.more) || !reverse))
 		r.readToBegin = true;
@@ -3603,7 +3627,31 @@ Future<RangeResult> getRangeFallback(Reference<TransactionState> trState,
 	return r;
 }
 
+int64_t inline getRangeResultFamilyBytes(RangeResultRef result) {
+	return result.expectedSize();
+}
+
+int64_t inline getRangeResultFamilyBytes(MappedRangeResultRef result) {
+	int64_t bytes = 0;
+	for (const MappedKeyValueRef& mappedKeyValue : result) {
+		bytes += mappedKeyValue.key.size() + mappedKeyValue.value.size();
+
+		auto& reqAndResult = mappedKeyValue.reqAndResult;
+		if (std::holds_alternative<GetValueReqAndResultRef>(reqAndResult)) {
+			auto getValue = std::get<GetValueReqAndResultRef>(reqAndResult);
+			bytes += getValue.expectedSize();
+		} else if (std::holds_alternative<GetRangeReqAndResultRef>(reqAndResult)) {
+			auto getRange = std::get<GetRangeReqAndResultRef>(reqAndResult);
+			bytes += getRange.result.expectedSize();
+		} else {
+			throw internal_error();
+		}
+	}
+	return bytes;
+}
+
 // TODO: Client should add mapped keys to conflict ranges.
+ACTOR template <class RangeResultFamily> // RangeResult or MappedRangeResult
 void getRangeFinished(Reference<TransactionState> trState,
                       double startTime,
                       KeySelector begin,
@@ -3611,11 +3659,8 @@ void getRangeFinished(Reference<TransactionState> trState,
                       Snapshot snapshot,
                       Promise<std::pair<Key, Key>> conflictRange,
                       Reverse reverse,
-                      RangeResult result) {
-	int64_t bytes = 0;
-	for (const KeyValueRef& kv : result) {
-		bytes += kv.key.size() + kv.value.size();
-	}
+                      RangeResultFamily result) {
+	int64_t bytes = getRangeResultFamilyBytes(result);
 
 	trState->cx->transactionBytesRead += bytes;
 	trState->cx->transactionKeysRead += result.size();
@@ -3657,24 +3702,26 @@ void getRangeFinished(Reference<TransactionState> trState,
 	}
 }
 
-// GetKeyValuesFamilyRequest: GetKeyValuesRequest or GetKeyValuesAndFlatMapRequest
-// GetKeyValuesFamilyReply: GetKeyValuesReply or GetKeyValuesAndFlatMapReply
-// Sadly we need GetKeyValuesFamilyReply because cannot do something like: state
-// REPLY_TYPE(GetKeyValuesFamilyRequest) rep;
-ACTOR template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply>
-Future<RangeResult> getRange(Reference<TransactionState> trState,
-                             Future<Version> fVersion,
-                             KeySelector begin,
-                             KeySelector end,
-                             Key mapper,
-                             GetRangeLimits limits,
-                             Promise<std::pair<Key, Key>> conflictRange,
-                             Snapshot snapshot,
-                             Reverse reverse) {
+ACTOR template <class GetKeyValuesFamilyRequest, // GetKeyValuesRequest or GetMappedKeyValuesRequest
+                class GetKeyValuesFamilyReply, // GetKeyValuesReply or GetMappedKeyValuesReply (It would be nice if
+                                               // we could use REPLY_TYPE(GetKeyValuesFamilyRequest) instead of specify
+                                               // it as a separate template element)
+                class RangeResultFamily // RangeResult or MappedRangeResult
+                >
+Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
+                                   Future<Version> fVersion,
+                                   KeySelector begin,
+                                   KeySelector end,
+                                   Key mapper,
+                                   GetRangeLimits limits,
+                                   Promise<std::pair<Key, Key>> conflictRange,
+                                   Snapshot snapshot,
+                                   Reverse reverse) {
+	//	state using RangeResultRefFamily = typename RangeResultFamily::RefType;
 	state GetRangeLimits originalLimits(limits);
 	state KeySelector originalBegin = begin;
 	state KeySelector originalEnd = end;
-	state RangeResult output;
+	state RangeResultFamily output;
 	state Span span("NAPI:getRange"_loc, trState->spanID);
 
 	try {
@@ -3822,15 +3869,16 @@ Future<RangeResult> getRange(Reference<TransactionState> trState,
 					bool readToBegin = output.readToBegin;
 					bool readThroughEnd = output.readThroughEnd;
 
-					output = RangeResult(RangeResultRef(rep.data, modifiedSelectors || limits.isReached() || rep.more),
-					                     rep.arena);
+					using RangeResultRefFamily = typename RangeResultFamily::RefType;
+					output = RangeResultFamily(
+					    RangeResultRefFamily(rep.data, modifiedSelectors || limits.isReached() || rep.more), rep.arena);
 					output.readToBegin = readToBegin;
 					output.readThroughEnd = readThroughEnd;
 
 					if (BUGGIFY && limits.hasByteLimit() && output.size() > std::max(1, originalLimits.minRows)) {
 						// Copy instead of resizing because TSS maybe be using output's arena for comparison. This only
 						// happens in simulation so it's fine
-						RangeResult copy;
+						RangeResultFamily copy;
 						int newSize =
 						    deterministicRandom()->randomInt(std::max(1, originalLimits.minRows), output.size());
 						for (int i = 0; i < newSize; i++) {
@@ -3876,8 +3924,9 @@ Future<RangeResult> getRange(Reference<TransactionState> trState,
 					TEST(true); // !GetKeyValuesFamilyReply.more and modifiedSelectors in getRange
 
 					if (!rep.data.size()) {
-						RangeResult result = wait(getRangeFallback<GetKeyValuesFamilyRequest, GetKeyValuesFamilyReply>(
-						    trState, version, originalBegin, originalEnd, mapper, originalLimits, reverse));
+						RangeResultFamily result = wait(
+						    getRangeFallback<GetKeyValuesFamilyRequest, GetKeyValuesFamilyReply, RangeResultFamily>(
+						        trState, version, originalBegin, originalEnd, mapper, originalLimits, reverse));
 						getRangeFinished(
 						    trState, startTime, originalBegin, originalEnd, snapshot, conflictRange, reverse, result);
 						return result;
@@ -3907,8 +3956,9 @@ Future<RangeResult> getRange(Reference<TransactionState> trState,
 					                             Reverse{ reverse ? (end - 1).isBackward() : begin.isBackward() });
 
 					if (e.code() == error_code_wrong_shard_server) {
-						RangeResult result = wait(getRangeFallback<GetKeyValuesFamilyRequest, GetKeyValuesFamilyReply>(
-						    trState, version, originalBegin, originalEnd, mapper, originalLimits, reverse));
+						RangeResultFamily result = wait(
+						    getRangeFallback<GetKeyValuesFamilyRequest, GetKeyValuesFamilyReply, RangeResultFamily>(
+						        trState, version, originalBegin, originalEnd, mapper, originalLimits, reverse));
 						getRangeFinished(
 						    trState, startTime, originalBegin, originalEnd, snapshot, conflictRange, reverse, result);
 						return result;
@@ -4461,7 +4511,7 @@ Future<RangeResult> getRange(Reference<TransactionState> const& trState,
                              KeySelector const& end,
                              GetRangeLimits const& limits,
                              Reverse const& reverse) {
-	return getRange<GetKeyValuesRequest, GetKeyValuesReply>(
+	return getRange<GetKeyValuesRequest, GetKeyValuesReply, RangeResult>(
 	    trState, fVersion, begin, end, ""_sr, limits, Promise<std::pair<Key, Key>>(), Snapshot::True, reverse);
 }
 
@@ -4755,25 +4805,25 @@ template <class GetKeyValuesFamilyRequest>
 void increaseCounterForRequest(Database cx) {
 	if constexpr (std::is_same<GetKeyValuesFamilyRequest, GetKeyValuesRequest>::value) {
 		++cx->transactionGetRangeRequests;
-	} else if (std::is_same<GetKeyValuesFamilyRequest, GetKeyValuesAndFlatMapRequest>::value) {
-		++cx->transactionGetRangeAndFlatMapRequests;
+	} else if (std::is_same<GetKeyValuesFamilyRequest, GetMappedKeyValuesRequest>::value) {
+		++cx->transactionGetMappedRangeRequests;
 	} else {
 		UNREACHABLE();
 	}
 }
 
-template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply>
-Future<RangeResult> Transaction::getRangeInternal(const KeySelector& begin,
-                                                  const KeySelector& end,
-                                                  const Key& mapper,
-                                                  GetRangeLimits limits,
-                                                  Snapshot snapshot,
-                                                  Reverse reverse) {
+template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply, class RangeResultFamily>
+Future<RangeResultFamily> Transaction::getRangeInternal(const KeySelector& begin,
+                                                        const KeySelector& end,
+                                                        const Key& mapper,
+                                                        GetRangeLimits limits,
+                                                        Snapshot snapshot,
+                                                        Reverse reverse) {
 	++trState->cx->transactionLogicalReads;
 	increaseCounterForRequest<GetKeyValuesFamilyRequest>(trState->cx);
 
 	if (limits.isReached())
-		return RangeResult();
+		return RangeResultFamily();
 
 	if (!limits.isValid())
 		return range_limits_invalid();
@@ -4794,15 +4844,21 @@ Future<RangeResult> Transaction::getRangeInternal(const KeySelector& begin,
 
 	if (b.offset >= e.offset && b.getKey() >= e.getKey()) {
 		TEST(true); // Native range inverted
-		return RangeResult();
+		return RangeResultFamily();
 	}
 
+	if (!snapshot && !std::is_same_v<GetKeyValuesFamilyRequest, GetKeyValuesRequest>) {
+		// Currently, NativeAPI does not support serialization for getMappedRange. You should consider use
+		// ReadYourWrites APIs which wraps around NativeAPI and provides serialization for getMappedRange. (Even if
+		// you don't want RYW, you may use ReadYourWrites APIs with RYW disabled.)
+		throw unsupported_operation();
+	}
 	Promise<std::pair<Key, Key>> conflictRange;
 	if (!snapshot) {
 		extraConflictRanges.push_back(conflictRange.getFuture());
 	}
 
-	return ::getRange<GetKeyValuesFamilyRequest, GetKeyValuesFamilyReply>(
+	return ::getRange<GetKeyValuesFamilyRequest, GetKeyValuesFamilyReply, RangeResultFamily>(
 	    trState, getReadVersion(), b, e, mapper, limits, conflictRange, snapshot, reverse);
 }
 
@@ -4811,16 +4867,17 @@ Future<RangeResult> Transaction::getRange(const KeySelector& begin,
                                           GetRangeLimits limits,
                                           Snapshot snapshot,
                                           Reverse reverse) {
-	return getRangeInternal<GetKeyValuesRequest, GetKeyValuesReply>(begin, end, ""_sr, limits, snapshot, reverse);
+	return getRangeInternal<GetKeyValuesRequest, GetKeyValuesReply, RangeResult>(
+	    begin, end, ""_sr, limits, snapshot, reverse);
 }
 
-Future<RangeResult> Transaction::getRangeAndFlatMap(const KeySelector& begin,
-                                                    const KeySelector& end,
-                                                    const Key& mapper,
-                                                    GetRangeLimits limits,
-                                                    Snapshot snapshot,
-                                                    Reverse reverse) {
-	return getRangeInternal<GetKeyValuesAndFlatMapRequest, GetKeyValuesAndFlatMapReply>(
+Future<MappedRangeResult> Transaction::getMappedRange(const KeySelector& begin,
+                                                      const KeySelector& end,
+                                                      const Key& mapper,
+                                                      GetRangeLimits limits,
+                                                      Snapshot snapshot,
+                                                      Reverse reverse) {
+	return getRangeInternal<GetMappedKeyValuesRequest, GetMappedKeyValuesReply, MappedRangeResult>(
 	    begin, end, mapper, limits, snapshot, reverse);
 }
 

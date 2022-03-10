@@ -146,38 +146,39 @@ ThreadFuture<RangeResult> DLTransaction::getRange(const KeyRangeRef& keys,
 	return getRange(firstGreaterOrEqual(keys.begin), firstGreaterOrEqual(keys.end), limits, snapshot, reverse);
 }
 
-ThreadFuture<RangeResult> DLTransaction::getRangeAndFlatMap(const KeySelectorRef& begin,
-                                                            const KeySelectorRef& end,
-                                                            const StringRef& mapper,
-                                                            GetRangeLimits limits,
-                                                            bool snapshot,
-                                                            bool reverse) {
-	FdbCApi::FDBFuture* f = api->transactionGetRangeAndFlatMap(tr,
-	                                                           begin.getKey().begin(),
-	                                                           begin.getKey().size(),
-	                                                           begin.orEqual,
-	                                                           begin.offset,
-	                                                           end.getKey().begin(),
-	                                                           end.getKey().size(),
-	                                                           end.orEqual,
-	                                                           end.offset,
-	                                                           mapper.begin(),
-	                                                           mapper.size(),
-	                                                           limits.rows,
-	                                                           limits.bytes,
-	                                                           FDB_STREAMING_MODE_EXACT,
-	                                                           0,
-	                                                           snapshot,
-	                                                           reverse);
-	return toThreadFuture<RangeResult>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
-		const FdbCApi::FDBKeyValue* kvs;
+ThreadFuture<MappedRangeResult> DLTransaction::getMappedRange(const KeySelectorRef& begin,
+                                                              const KeySelectorRef& end,
+                                                              const StringRef& mapper,
+                                                              GetRangeLimits limits,
+                                                              bool snapshot,
+                                                              bool reverse) {
+	FdbCApi::FDBFuture* f = api->transactionGetMappedRange(tr,
+	                                                       begin.getKey().begin(),
+	                                                       begin.getKey().size(),
+	                                                       begin.orEqual,
+	                                                       begin.offset,
+	                                                       end.getKey().begin(),
+	                                                       end.getKey().size(),
+	                                                       end.orEqual,
+	                                                       end.offset,
+	                                                       mapper.begin(),
+	                                                       mapper.size(),
+	                                                       limits.rows,
+	                                                       limits.bytes,
+	                                                       FDB_STREAMING_MODE_EXACT,
+	                                                       0,
+	                                                       snapshot,
+	                                                       reverse);
+	return toThreadFuture<MappedRangeResult>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		const FdbCApi::FDBMappedKeyValue* kvms;
 		int count;
 		FdbCApi::fdb_bool_t more;
-		FdbCApi::fdb_error_t error = api->futureGetKeyValueArray(f, &kvs, &count, &more);
+		FdbCApi::fdb_error_t error = api->futureGetMappedKeyValueArray(f, &kvms, &count, &more);
 		ASSERT(!error);
 
 		// The memory for this is stored in the FDBFuture and is released when the future gets destroyed
-		return RangeResult(RangeResultRef(VectorRef<KeyValueRef>((KeyValueRef*)kvs, count), more), Arena());
+		return MappedRangeResult(
+		    MappedRangeResultRef(VectorRef<MappedKeyValueRef>((MappedKeyValueRef*)kvms, count), more), Arena());
 	});
 }
 
@@ -555,11 +556,8 @@ void DLApi::init() {
 	                   "fdb_transaction_get_addresses_for_key",
 	                   headerVersion >= 0);
 	loadClientFunction(&api->transactionGetRange, lib, fdbCPath, "fdb_transaction_get_range", headerVersion >= 0);
-	loadClientFunction(&api->transactionGetRangeAndFlatMap,
-	                   lib,
-	                   fdbCPath,
-	                   "fdb_transaction_get_range_and_flat_map",
-	                   headerVersion >= 700);
+	loadClientFunction(
+	    &api->transactionGetMappedRange, lib, fdbCPath, "fdb_transaction_get_mapped_range", headerVersion >= 700);
 	loadClientFunction(
 	    &api->transactionGetVersionstamp, lib, fdbCPath, "fdb_transaction_get_versionstamp", headerVersion >= 410);
 	loadClientFunction(&api->transactionSet, lib, fdbCPath, "fdb_transaction_set", headerVersion >= 0);
@@ -616,6 +614,8 @@ void DLApi::init() {
 	loadClientFunction(&api->futureGetKeyArray, lib, fdbCPath, "fdb_future_get_key_array", headerVersion >= 700);
 	loadClientFunction(
 	    &api->futureGetKeyValueArray, lib, fdbCPath, "fdb_future_get_keyvalue_array", headerVersion >= 0);
+	loadClientFunction(
+	    &api->futureGetMappedKeyValueArray, lib, fdbCPath, "fdb_future_get_mappedkeyvalue_array", headerVersion >= 700);
 	loadClientFunction(&api->futureSetCallback, lib, fdbCPath, "fdb_future_set_callback", headerVersion >= 0);
 	loadClientFunction(&api->futureCancel, lib, fdbCPath, "fdb_future_cancel", headerVersion >= 0);
 	loadClientFunction(&api->futureDestroy, lib, fdbCPath, "fdb_future_destroy", headerVersion >= 0);
@@ -861,15 +861,15 @@ ThreadFuture<RangeResult> MultiVersionTransaction::getRange(const KeyRangeRef& k
 	return abortableFuture(f, tr.onChange);
 }
 
-ThreadFuture<RangeResult> MultiVersionTransaction::getRangeAndFlatMap(const KeySelectorRef& begin,
-                                                                      const KeySelectorRef& end,
-                                                                      const StringRef& mapper,
-                                                                      GetRangeLimits limits,
-                                                                      bool snapshot,
-                                                                      bool reverse) {
+ThreadFuture<MappedRangeResult> MultiVersionTransaction::getMappedRange(const KeySelectorRef& begin,
+                                                                        const KeySelectorRef& end,
+                                                                        const StringRef& mapper,
+                                                                        GetRangeLimits limits,
+                                                                        bool snapshot,
+                                                                        bool reverse) {
 	auto tr = getTransaction();
-	auto f = tr.transaction ? tr.transaction->getRangeAndFlatMap(begin, end, mapper, limits, snapshot, reverse)
-	                        : makeTimeout<RangeResult>();
+	auto f = tr.transaction ? tr.transaction->getMappedRange(begin, end, mapper, limits, snapshot, reverse)
+	                        : makeTimeout<MappedRangeResult>();
 	return abortableFuture(f, tr.onChange);
 }
 

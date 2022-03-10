@@ -67,7 +67,7 @@ struct StorageServerInterface {
 	// Throws a wrong_shard_server if the keys in the request or result depend on data outside this server OR if a large
 	// selector offset prevents all data from being read in one range read
 	RequestStream<struct GetKeyValuesRequest> getKeyValues;
-	RequestStream<struct GetKeyValuesAndFlatMapRequest> getKeyValuesAndFlatMap;
+	RequestStream<struct GetMappedKeyValuesRequest> getMappedKeyValues;
 
 	RequestStream<struct GetShardStateRequest> getShardState;
 	RequestStream<struct WaitMetricsRequest> waitMetrics;
@@ -127,8 +127,8 @@ struct StorageServerInterface {
 				    RequestStream<struct SplitRangeRequest>(getValue.getEndpoint().getAdjustedEndpoint(12));
 				getKeyValuesStream =
 				    RequestStream<struct GetKeyValuesStreamRequest>(getValue.getEndpoint().getAdjustedEndpoint(13));
-				getKeyValuesAndFlatMap =
-				    RequestStream<struct GetKeyValuesAndFlatMapRequest>(getValue.getEndpoint().getAdjustedEndpoint(14));
+				getMappedKeyValues =
+				    RequestStream<struct GetMappedKeyValuesRequest>(getValue.getEndpoint().getAdjustedEndpoint(14));
 				changeFeedStream =
 				    RequestStream<struct ChangeFeedStreamRequest>(getValue.getEndpoint().getAdjustedEndpoint(15));
 				overlappingChangeFeeds =
@@ -179,7 +179,7 @@ struct StorageServerInterface {
 		streams.push_back(getReadHotRanges.getReceiver());
 		streams.push_back(getRangeSplitPoints.getReceiver());
 		streams.push_back(getKeyValuesStream.getReceiver(TaskPriority::LoadBalancedEndpoint));
-		streams.push_back(getKeyValuesAndFlatMap.getReceiver(TaskPriority::LoadBalancedEndpoint));
+		streams.push_back(getMappedKeyValues.getReceiver(TaskPriority::LoadBalancedEndpoint));
 		streams.push_back(changeFeedStream.getReceiver());
 		streams.push_back(overlappingChangeFeeds.getReceiver());
 		streams.push_back(changeFeedPop.getReceiver());
@@ -362,15 +362,17 @@ struct GetKeyValuesRequest : TimedRequest {
 	}
 };
 
-struct GetKeyValuesAndFlatMapReply : public LoadBalancedReply {
+struct GetMappedKeyValuesReply : public LoadBalancedReply {
 	constexpr static FileIdentifier file_identifier = 1783067;
 	Arena arena;
-	VectorRef<KeyValueRef, VecSerStrategy::String> data;
+	// MappedKeyValueRef is not string_serialized_traits, so we have to use FlatBuffers.
+	VectorRef<MappedKeyValueRef, VecSerStrategy::FlatBuffers> data;
+
 	Version version; // useful when latestVersion was requested
 	bool more;
 	bool cached = false;
 
-	GetKeyValuesAndFlatMapReply() : version(invalidVersion), more(false), cached(false) {}
+	GetMappedKeyValuesReply() : version(invalidVersion), more(false), cached(false) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -378,7 +380,7 @@ struct GetKeyValuesAndFlatMapReply : public LoadBalancedReply {
 	}
 };
 
-struct GetKeyValuesAndFlatMapRequest : TimedRequest {
+struct GetMappedKeyValuesRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 6795747;
 	SpanID spanContext;
 	Arena arena;
@@ -390,10 +392,9 @@ struct GetKeyValuesAndFlatMapRequest : TimedRequest {
 	bool isFetchKeys;
 	Optional<TagSet> tags;
 	Optional<UID> debugID;
-	ReplyPromise<GetKeyValuesAndFlatMapReply> reply;
+	ReplyPromise<GetMappedKeyValuesReply> reply;
 
-	GetKeyValuesAndFlatMapRequest() : isFetchKeys(false) {}
-
+	GetMappedKeyValuesRequest() : isFetchKeys(false) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar,

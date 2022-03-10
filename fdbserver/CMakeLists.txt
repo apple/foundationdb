@@ -224,7 +224,7 @@ set(FDBSERVER_SRCS
   workloads/MetricLogging.actor.cpp
   workloads/MiniCycle.actor.cpp
   workloads/MutationLogReaderCorrectness.actor.cpp
-  workloads/GetRangeAndMap.actor.cpp
+  workloads/GetMappedRange.actor.cpp
   workloads/ParallelRestore.actor.cpp
   workloads/Performance.actor.cpp
   workloads/Ping.actor.cpp
