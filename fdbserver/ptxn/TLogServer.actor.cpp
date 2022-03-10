@@ -1176,7 +1176,7 @@ void peekMessagesFromMemory(const TLogPeekRequest& req,
 		auto result = serializedData.get();
 		version = result.first;
 
-		if (reqEnd.present() && version > reqEnd.get()) {
+		if (reqEnd.present() && reqEnd.get() != invalidVersion && version > reqEnd.get()) {
 			break;
 		}
 		if (!firstVersion.present()) {
