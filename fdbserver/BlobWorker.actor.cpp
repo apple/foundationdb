@@ -1810,7 +1810,15 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 		}
 
 		if (e.code() == error_code_granule_assignment_conflict) {
-			TraceEvent(SevInfo, "GranuleAssignmentConflict", bwData->id).detail("Granule", metadata->keyRange);
+			TraceEvent(SevInfo, "GranuleAssignmentConflict", bwData->id)
+			    .detail("Granule", metadata->keyRange)
+			    .detail("GranuleID", startState.granuleID);
+			return Void();
+		}
+		if (e.code() == error_code_change_feed_popped) {
+			TraceEvent(SevInfo, "GranuleGotChangeFeedPopped", bwData->id)
+			    .detail("Granule", metadata->keyRange)
+			    .detail("GranuleID", startState.granuleID);
 			return Void();
 		}
 		++bwData->stats.granuleUpdateErrors;
