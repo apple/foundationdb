@@ -7884,7 +7884,9 @@ ACTOR Future<Void> serveChangeFeedStreamRequests(StorageServer* self,
 		ChangeFeedStreamRequest req = waitNext(changeFeedStream);
 		// must notify change feed that its shard is moved away ASAP
 
-		UID streamUID = deterministicRandom()->randomUniqueID();
+		// TODO CHANGE BACK
+		// UID streamUID = deterministicRandom()->randomUniqueID();
+		UID streamUID = req.debugUID;
 		self->actors.add(changeFeedStreamQ(self, req, streamUID) || stopChangeFeedOnMove(self, req, streamUID));
 	}
 }

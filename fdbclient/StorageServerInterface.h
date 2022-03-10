@@ -793,13 +793,15 @@ struct ChangeFeedStreamRequest {
 	KeyRange range;
 	int replyBufferSize = -1;
 	bool canReadPopped = true;
+	// TODO REMOVE
+	UID debugUID;
 
 	ReplyPromiseStream<ChangeFeedStreamReply> reply;
 
 	ChangeFeedStreamRequest() {}
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, rangeID, begin, end, range, reply, spanContext, replyBufferSize, canReadPopped, arena);
+		serializer(ar, rangeID, begin, end, range, reply, spanContext, replyBufferSize, canReadPopped, debugUID, arena);
 	}
 };
 

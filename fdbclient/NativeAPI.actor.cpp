@@ -7788,6 +7788,9 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 		if (replyBufferSize != -1 && req.replyBufferSize < CLIENT_KNOBS->CHANGE_FEED_STREAM_MIN_BYTES) {
 			req.replyBufferSize = CLIENT_KNOBS->CHANGE_FEED_STREAM_MIN_BYTES;
 		}
+		// TODO REMOVE
+		req.debugUID = deterministicRandom()->randomUniqueID();
+
 		results->streams.push_back(it.first.changeFeedStream.getReplyStream(req));
 	}
 
@@ -7934,6 +7937,8 @@ ACTOR Future<Void> singleChangeFeedStream(Reference<DatabaseContext> db,
 	req.range = range;
 	req.canReadPopped = canReadPopped;
 	req.replyBufferSize = replyBufferSize;
+	// TODO REMOVE
+	req.debugUID = deterministicRandom()->randomUniqueID();
 
 	results->streams.clear();
 
