@@ -2125,7 +2125,6 @@ ACTOR Future<int64_t> getNextBMEpoch(ClusterControllerData* self) {
 			wait(tr->commit());
 			return newEpoch;
 		} catch (Error& e) {
-			printf("Acquiring blob manager lock got error %s\n", e.name());
 			wait(tr->onError(e));
 		}
 	}

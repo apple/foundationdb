@@ -329,12 +329,12 @@ ACTOR Future<Void> updateGranuleSplitState(Transaction* tr,
                                            BlobGranuleSplitState newState) {
 	state KeyRange currentRange = blobGranuleSplitKeyRangeFor(parentGranuleID);
 
-	state RangeResult totalState = wait(tr->getRange(currentRange, SERVER_KNOBS->BG_MAX_SPLIT_FANOUT + 2));
+	state RangeResult totalState = wait(tr->getRange(currentRange, SERVER_KNOBS->BG_MAX_SPLIT_FANOUT + 1));
 	// FIXME: remove above conflict range?
 	tr->addWriteConflictRange(currentRange);
-	ASSERT_WE_THINK(!totalState.more && totalState.size() <= SERVER_KNOBS->BG_MAX_SPLIT_FANOUT + 1);
+	ASSERT_WE_THINK(!totalState.more && totalState.size() <= SERVER_KNOBS->BG_MAX_SPLIT_FANOUT);
 	// maybe someone decreased the knob, we should gracefully handle it not in simulation
-	if (totalState.more || totalState.size() > SERVER_KNOBS->BG_MAX_SPLIT_FANOUT + 1) {
+	if (totalState.more || totalState.size() > SERVER_KNOBS->BG_MAX_SPLIT_FANOUT) {
 		RangeResult tryAgain = wait(tr->getRange(currentRange, 10000));
 		ASSERT(!tryAgain.more);
 		totalState = tryAgain;
