@@ -114,7 +114,7 @@ ACTOR Future<bool> peekRemote(PeekRemoteContext peekRemoteContext) {
 	        .pTLogInterfaces[deterministicRandom()->randomInt(0, peekRemoteContext.pTLogInterfaces.size())];
 
 	request.debugID = peekRemoteContext.debugID;
-	request.beginVersion = *peekRemoteContext.pLastVersion + 1;
+	request.beginVersion = *peekRemoteContext.pLastVersion;
 	request.endVersion = invalidVersion; // we *ALWAYS* try to extract *ALL* data
 	request.storageTeamID = peekRemoteContext.storageTeamID;
 
