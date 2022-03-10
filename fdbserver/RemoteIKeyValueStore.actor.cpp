@@ -133,7 +133,7 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 				when(IKVSOnClosedRequest onClosedReq = waitNext(ikvsInterface.onClosed.getFuture())) {
 					actors.add(cancellableForwardPromise(onClosedReq.reply, kvStore->onClosed()));
 				}
-				when(waitNext(ikvsInterface.dispose.getFuture())) {
+				when(IKVSDisposeRequest disposeReq = waitNext(ikvsInterface.dispose.getFuture())) {
 					TraceEvent(SevDebug, "RemoteIKVSDisposeReceivedRequest").detail("UID", uid_kvs);
 					Future<Void> f = kvStore->onClosed();
 					kvStore->dispose();
@@ -141,7 +141,7 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 					onClosed.send(Void());
 					return Void();
 				}
-				when(waitNext(ikvsInterface.close.getFuture())) {
+				when(IKVSCloseRequest closeReq = waitNext(ikvsInterface.close.getFuture())) {
 					TraceEvent(SevDebug, "RemoteIKVSCloseReceivedRequest").detail("UID", uid_kvs);
 					Future<Void> f = kvStore->onClosed();
 					kvStore->close();

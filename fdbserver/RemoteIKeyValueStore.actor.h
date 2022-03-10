@@ -210,6 +210,7 @@ struct IKVSReadValuePrefixRequest {
 	}
 };
 
+// Use this instead of RangeResult as reply for better serialization performance
 struct IKVSReadRangeReply {
 	constexpr static FileIdentifier file_identifier = 6682449;
 	Arena arena;
