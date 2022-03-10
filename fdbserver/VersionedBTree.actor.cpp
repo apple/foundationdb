@@ -929,7 +929,7 @@ public:
 		// The next page will be waited for if load is true
 		// Only mutex holders will wait on the page read.
 		ACTOR static Future<Optional<T>> waitThenReadNext(Cursor* self,
-		                                                  Optional<T> upperBound,
+		                                                  Optional<T> upperLimit,
 		                                                  FlowMutex::Lock* lock,
 		                                                  bool load) {
 			state FlowMutex::Lock localLock;
@@ -947,7 +947,7 @@ public:
 				wait(success(self->nextPageReader));
 			}
 
-			state Optional<T> result = wait(self->readNext(upperBound, &localLock));
+			state Optional<T> result = wait(self->readNext(upperLimit, &localLock));
 
 			// If a lock was not passed in, so this actor locked the mutex above, then unlock it
 			if (lock == nullptr) {
@@ -966,10 +966,10 @@ public:
 			return result;
 		}
 
-		// Read the next item at the cursor (if < upperBound), moving to a new page first if the current page is
-		// exhausted If locked is true, this call owns the mutex, which would have been locked by readNext() before a
+		// Read the next item at the cursor (if <= upperLimit), moving to a new page first if the current page is
+		// exhausted.  If locked is true, this call owns the mutex, which would have been locked by readNext() before a
 		// recursive call
-		Future<Optional<T>> readNext(const Optional<T>& upperBound = {}, FlowMutex::Lock* lock = nullptr) {
+		Future<Optional<T>> readNext(const Optional<T>& upperLimit = {}, FlowMutex::Lock* lock = nullptr) {
 			if ((mode != POP && mode != READONLY) || pageID == invalidLogicalPageID || pageID == endPageID) {
 				debug_printf("FIFOQueue::Cursor(%s) readNext returning nothing\n", toString().c_str());
 				return Optional<T>();
@@ -977,7 +977,7 @@ public:
 
 			// If we don't have a lock and the mutex isn't available then acquire it
 			if (lock == nullptr && isBusy()) {
-				return waitThenReadNext(this, upperBound, lock, false);
+				return waitThenReadNext(this, upperLimit, lock, false);
 			}
 
 			// We now know pageID is valid and should be used, but page might not point to it yet
@@ -993,7 +993,7 @@ public:
 				}
 
 				if (!nextPageReader.isReady()) {
-					return waitThenReadNext(this, upperBound, lock, true);
+					return waitThenReadNext(this, upperLimit, lock, true);
 				}
 
 				page = nextPageReader.get();
@@ -1014,11 +1014,11 @@ public:
 			int bytesRead;
 			const T result = Codec::readFromBytes(p->begin() + offset, bytesRead);
 
-			if (upperBound.present() && upperBound.get() < result) {
+			if (upperLimit.present() && upperLimit.get() < result) {
 				debug_printf("FIFOQueue::Cursor(%s) not popping %s, exceeds upper bound %s\n",
 				             toString().c_str(),
 				             ::toString(result).c_str(),
-				             ::toString(upperBound.get()).c_str());
+				             ::toString(upperLimit.get()).c_str());
 
 				return Optional<T>();
 			}
@@ -1066,10 +1066,10 @@ public:
 				}
 			}
 
-			debug_printf("FIFOQueue(%s) %s(upperBound=%s) -> %s\n",
+			debug_printf("FIFOQueue(%s) %s(upperLimit=%s) -> %s\n",
 			             queue->name.c_str(),
 			             (mode == POP ? "pop" : "peek"),
-			             ::toString(upperBound).c_str(),
+			             ::toString(upperLimit).c_str(),
 			             ::toString(result).c_str());
 			return Optional<T>(result);
 		}
@@ -1297,8 +1297,8 @@ public:
 
 	Future<Optional<T>> peek() { return peek_impl(this); }
 
-	// Pop the next item on front of queue if it is <= upperBound or if upperBound is not present
-	Future<Optional<T>> pop(Optional<T> upperBound = {}) { return headReader.readNext(upperBound); }
+	// Pop the next item on front of queue if it is <= upperLimit or if upperLimit is not present
+	Future<Optional<T>> pop(Optional<T> upperLimit = {}) { return headReader.readNext(upperLimit); }
 
 	QueueState getState() const {
 		QueueState s;
@@ -2764,6 +2764,8 @@ public:
 		return f;
 	}
 
+	// Free pageID as of version v.  This means that once the oldest readable pager snapshot is at version v, pageID is
+	// not longer in use by any structure so it can be used to write new data.
 	void freeUnmappedPage(PhysicalPageID pageID, Version v) {
 		// If v is older than the oldest version still readable then mark pageID as free as of the next commit
 		if (v < effectiveOldestVersion()) {
@@ -2829,7 +2831,7 @@ public:
 
 	void freePage(LogicalPageID pageID, Version v) override {
 		// If pageID has been remapped, then it can't be freed until all existing remaps for that page have been undone,
-		// so queue it for later deletion
+		// so queue it for later deletion during remap cleanup
 		auto i = remappedPages.find(pageID);
 		if (i != remappedPages.end()) {
 			debug_printf("DWALPager(%s) op=freeRemapped %s @%" PRId64 " oldestVersion=%" PRId64 "\n",
@@ -3337,7 +3339,11 @@ public:
 		// Since the next item can be arbitrarily ahead in the queue, secondType is determined by
 		// looking at the remappedPages structure.
 		//
-		// R == Remap    F == Free   D == Detach   | == oldestRetaineedVersion
+		// R == Remap    F == Free   D == Detach   | == oldestRetainedVersion
+		//
+		// oldestRetainedVersion is the oldest version being maintained as readable, either because it is explicitly the
+		// oldest readable version set or because there is an active snapshot for the version even though it is older
+		// than the explicitly set oldest readable version.
 		//
 		//   R R |  free new ID
 		//   R F |  free new ID if R and D are at different versions
@@ -5908,7 +5914,7 @@ private:
 			BTreePage* btPage = (BTreePage*)page->begin();
 			BTreePage::BinaryTree::DecodeCache* cache = (BTreePage::BinaryTree::DecodeCache*)page->userData;
 			debug_printf_always(
-			    "updateBTreePage(%s, %s) %s\n",
+			    "updateBTreePage(%s, %s) start, page:\n%s\n",
 			    ::toString(oldID).c_str(),
 			    ::toString(writeVersion).c_str(),
 			    cache == nullptr
@@ -5931,7 +5937,11 @@ private:
 			LogicalPageID id = wait(self->m_pager->newPageID());
 			emptyPages[i] = id;
 		}
-		debug_printf("updateBTreePage: newPages %s", toString(emptyPages).c_str());
+		debug_printf("updateBTreePage(%s, %s): newPages %s",
+		             ::toString(oldID).c_str(),
+		             ::toString(writeVersion).c_str(),
+		             toString(emptyPages).c_str());
+
 		self->m_pager->updatePage(PagerEventReasons::Commit, height, emptyPages, page);
 		i = 0;
 		for (const LogicalPageID id : emptyPages) {
