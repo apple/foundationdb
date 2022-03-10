@@ -924,12 +924,15 @@ public:
 			}
 		}
 
-		// If readNext() cannot complete immediately, it will route to here
-		// The mutex will be taken if locked is false
-		// The next page will be waited for if load is true
+		// If readNext() cannot complete immediately because it must wait for IO, it will route to here.
+		// The purpose of this function is to serialize simultaneous readers on self while letting the
+		// common case (>99.8% of the time) be handled with low overhead by the non-actor readNext() function.
+		//
+		// The mutex will be taken if locked is false.
+		// The next page will be waited for if load is true.
 		// Only mutex holders will wait on the page read.
 		ACTOR static Future<Optional<T>> waitThenReadNext(Cursor* self,
-		                                                  Optional<T> upperLimit,
+		                                                  Optional<T> inclusiveMaximum,
 		                                                  FlowMutex::Lock* lock,
 		                                                  bool load) {
 			state FlowMutex::Lock localLock;
@@ -947,7 +950,7 @@ public:
 				wait(success(self->nextPageReader));
 			}
 
-			state Optional<T> result = wait(self->readNext(upperLimit, &localLock));
+			state Optional<T> result = wait(self->readNext(inclusiveMaximum, &localLock));
 
 			// If a lock was not passed in, so this actor locked the mutex above, then unlock it
 			if (lock == nullptr) {
@@ -966,10 +969,12 @@ public:
 			return result;
 		}
 
-		// Read the next item at the cursor (if <= upperLimit), moving to a new page first if the current page is
-		// exhausted.  If locked is true, this call owns the mutex, which would have been locked by readNext() before a
-		// recursive call
-		Future<Optional<T>> readNext(const Optional<T>& upperLimit = {}, FlowMutex::Lock* lock = nullptr) {
+		// Read the next item from the cursor, possibly moving to and waiting for a new page if the prior page was
+		// exhausted. If the item is <= inclusiveMaximum, then return it after advancing the cursor to the next item.
+		// Otherwise, return nothing and do not advance the cursor.
+		// If locked is true, this call owns the mutex, which would have been locked by readNext() before a recursive
+		// call. See waitThenReadNext() for more detail.
+		Future<Optional<T>> readNext(const Optional<T>& inclusiveMaximum = {}, FlowMutex::Lock* lock = nullptr) {
 			if ((mode != POP && mode != READONLY) || pageID == invalidLogicalPageID || pageID == endPageID) {
 				debug_printf("FIFOQueue::Cursor(%s) readNext returning nothing\n", toString().c_str());
 				return Optional<T>();
@@ -977,7 +982,7 @@ public:
 
 			// If we don't have a lock and the mutex isn't available then acquire it
 			if (lock == nullptr && isBusy()) {
-				return waitThenReadNext(this, upperLimit, lock, false);
+				return waitThenReadNext(this, inclusiveMaximum, lock, false);
 			}
 
 			// We now know pageID is valid and should be used, but page might not point to it yet
@@ -993,7 +998,7 @@ public:
 				}
 
 				if (!nextPageReader.isReady()) {
-					return waitThenReadNext(this, upperLimit, lock, true);
+					return waitThenReadNext(this, inclusiveMaximum, lock, true);
 				}
 
 				page = nextPageReader.get();
@@ -1014,11 +1019,11 @@ public:
 			int bytesRead;
 			const T result = Codec::readFromBytes(p->begin() + offset, bytesRead);
 
-			if (upperLimit.present() && upperLimit.get() < result) {
+			if (inclusiveMaximum.present() && inclusiveMaximum.get() < result) {
 				debug_printf("FIFOQueue::Cursor(%s) not popping %s, exceeds upper bound %s\n",
 				             toString().c_str(),
 				             ::toString(result).c_str(),
-				             ::toString(upperLimit.get()).c_str());
+				             ::toString(inclusiveMaximum.get()).c_str());
 
 				return Optional<T>();
 			}
@@ -1066,10 +1071,10 @@ public:
 				}
 			}
 
-			debug_printf("FIFOQueue(%s) %s(upperLimit=%s) -> %s\n",
+			debug_printf("FIFOQueue(%s) %s(inclusiveMaximum=%s) -> %s\n",
 			             queue->name.c_str(),
 			             (mode == POP ? "pop" : "peek"),
-			             ::toString(upperLimit).c_str(),
+			             ::toString(inclusiveMaximum).c_str(),
 			             ::toString(result).c_str());
 			return Optional<T>(result);
 		}
@@ -1297,8 +1302,8 @@ public:
 
 	Future<Optional<T>> peek() { return peek_impl(this); }
 
-	// Pop the next item on front of queue if it is <= upperLimit or if upperLimit is not present
-	Future<Optional<T>> pop(Optional<T> upperLimit = {}) { return headReader.readNext(upperLimit); }
+	// Pop the next item on front of queue if it is <= inclusiveMaximum or if inclusiveMaximum is not present
+	Future<Optional<T>> pop(Optional<T> inclusiveMaximum = {}) { return headReader.readNext(inclusiveMaximum); }
 
 	QueueState getState() const {
 		QueueState s;
