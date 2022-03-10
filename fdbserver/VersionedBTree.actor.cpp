@@ -3423,13 +3423,32 @@ public:
 		}
 
 		if (freeNewID) {
-			debug_printf("DWALPager(%s) remapCleanup freeNew %s\n", self->filename.c_str(), p.toString().c_str());
-			self->freeUnmappedPage(p.newPageID, 0);
+			debug_printf("DWALPager(%s) remapCleanup freeNew %s %s\n",
+			             self->filename.c_str(),
+			             p.toString().c_str(),
+			             toString(self->getLastCommittedVersion()).c_str());
+
+			// newID must be freed at the latest committed version to avoid a read race between caching and non-caching
+			// readers. It is possible that there are readers of newID in flight right now that either
+			//  - Did not read through the page cache
+			//  - Did read through the page cache but there was no entry for the page at the time, so one was created
+			//  and the read future is still pending
+			// In either case the physical read of newID from disk can happen at some time after right now and after the
+			// current commit is finished.
+			//
+			// If newID is freed immediately, meaning as of the end of the current commit, then it could be reused in
+			// the next commit which could be before any reads fitting the above description have completed, causing
+			// those reads to the new write which is incorrect.  Since such readers could be using pager snapshots at
+			// versions up to and including the latest committed version, newID must be freed *after* that version is no
+			// longer readable.
+			self->freeUnmappedPage(p.newPageID, self->getLastCommittedVersion() + 1);
 			++g_redwoodMetrics.metric.pagerRemapFree;
 		}
 
 		if (freeOriginalID) {
 			debug_printf("DWALPager(%s) remapCleanup freeOriginal %s\n", self->filename.c_str(), p.toString().c_str());
+			// originalID can be freed immediately because it is already the case that there are no readers at a version
+			// prior to oldestRetainedVersion so no reader will need originalID.
 			self->freeUnmappedPage(p.originalPageID, 0);
 			++g_redwoodMetrics.metric.pagerRemapFree;
 		}
