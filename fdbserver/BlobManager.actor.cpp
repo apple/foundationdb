@@ -945,10 +945,11 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 				// Something was previously committed, we must go with that decision.
 				// Read its boundaries and override our planned split boundaries
 				TEST(true); // Overriding split ranges with existing ones from DB
-				RangeResult existingBoundaries = wait(tr->getRange(
-				    KeyRangeRef(granuleRange.begin.withPrefix(blobGranuleMappingKeys.begin),
-				                keyAfter(granuleRange.end).withPrefix(blobGranuleMappingKeys.begin)),
-				    existingState.size() + 1)); // +1 because this is boundaries and existingState was granules
+				RangeResult existingBoundaries =
+				    wait(tr->getRange(KeyRangeRef(granuleRange.begin.withPrefix(blobGranuleMappingKeys.begin),
+				                                  keyAfter(granuleRange.end).withPrefix(blobGranuleMappingKeys.begin)),
+				                      existingState.size() + 2));
+				// +2 because this is boundaries and existingState was granules, and to ensure it doesn't set more
 				ASSERT(!existingBoundaries.more);
 				ASSERT(existingBoundaries.size() == existingState.size() + 1);
 				newRanges.clear();
