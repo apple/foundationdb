@@ -6718,8 +6718,8 @@ private:
 					if (!cursor.get().value.present()) {
 						// If the upper bound is provided by a dummy record in [cBegin, cEnd) then there is no
 						// requirement on the next subtree range or the parent page to have a specific upper boundary
-						// for decoding the subtree.
-						u.expectedUpperBound.reset();
+						// for decoding the subtree.  The expected upper bound has not yet been set so it can remain
+						// empty.
 						cursor.moveNext();
 						// If there is another record after the null child record, it must have a child page value
 						ASSERT(!cursor.valid() || cursor.get().value.present());
