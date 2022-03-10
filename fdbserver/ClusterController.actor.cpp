@@ -599,7 +599,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	}
 
 	WorkerDetails newEKPWorker;
-	if (SERVER_KNOBS->ENABLE_ENCRYPT_KEY_PROXY) {
+	if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
 		newEKPWorker = findNewProcessForSingleton(self, ProcessClass::EncryptKeyProxy, id_used);
 	}
 
@@ -613,7 +613,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	}
 
 	ProcessClass::Fitness bestFitnessForEKP;
-	if (SERVER_KNOBS->ENABLE_ENCRYPT_KEY_PROXY) {
+	if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
 		bestFitnessForEKP = findBestFitnessForSingleton(self, newEKPWorker, ProcessClass::EncryptKeyProxy);
 	}
 
@@ -638,7 +638,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	}
 
 	bool ekpHealthy = true;
-	if (SERVER_KNOBS->ENABLE_ENCRYPT_KEY_PROXY) {
+	if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
 		ekpHealthy = isHealthySingleton<EncryptKeyProxyInterface>(
 		    self, newEKPWorker, ekpSingleton, bestFitnessForEKP, self->recruitingEncryptKeyProxyID);
 	}
@@ -662,7 +662,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	}
 
 	Optional<Standalone<StringRef>> currEKPProcessId, newEKPProcessId;
-	if (SERVER_KNOBS->ENABLE_ENCRYPT_KEY_PROXY) {
+	if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
 		currEKPProcessId = ekpSingleton.interface.get().locality.processId();
 		newEKPProcessId = newEKPWorker.interf.locality.processId();
 	}
@@ -674,7 +674,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 		newPids.emplace_back(newBMProcessId);
 	}
 
-	if (SERVER_KNOBS->ENABLE_ENCRYPT_KEY_PROXY) {
+	if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
 		currPids.emplace_back(currEKPProcessId);
 		newPids.emplace_back(newEKPProcessId);
 	}
@@ -689,7 +689,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	}
 
 	// if the knob is disabled, the EKP coloc counts should have no affect on the coloc counts check below
-	if (!SERVER_KNOBS->ENABLE_ENCRYPT_KEY_PROXY) {
+	if (!SERVER_KNOBS->ENABLE_ENCRYPTION) {
 		ASSERT(currColocMap[currEKPProcessId] == 0);
 		ASSERT(newColocMap[newEKPProcessId] == 0);
 	}
@@ -706,8 +706,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 			ddSingleton.recruit(self);
 		} else if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES && newColocMap[newBMProcessId] < currColocMap[currBMProcessId]) {
 			bmSingleton.recruit(self);
-		} else if (SERVER_KNOBS->ENABLE_ENCRYPT_KEY_PROXY &&
-		           newColocMap[newEKPProcessId] < currColocMap[currEKPProcessId]) {
+		} else if (SERVER_KNOBS->ENABLE_ENCRYPTION && newColocMap[newEKPProcessId] < currColocMap[currEKPProcessId]) {
 			ekpSingleton.recruit(self);
 		}
 	}
@@ -1240,7 +1239,7 @@ void registerWorker(RegisterWorkerRequest req,
 		    self, w, currSingleton, registeringSingleton, self->recruitingBlobManagerID);
 	}
 
-	if (SERVER_KNOBS->ENABLE_ENCRYPT_KEY_PROXY && req.encryptKeyProxyInterf.present()) {
+	if (SERVER_KNOBS->ENABLE_ENCRYPTION && req.encryptKeyProxyInterf.present()) {
 		auto currSingleton = EncryptKeyProxySingleton(self->db.serverInfo->get().encryptKeyProxy);
 		auto registeringSingleton = EncryptKeyProxySingleton(req.encryptKeyProxyInterf);
 		haltRegisteringOrCurrentSingleton<EncryptKeyProxyInterface>(
@@ -2416,7 +2415,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	state Future<ErrorOr<Void>> error = errorOr(actorCollection(self.addActor.getFuture()));
 
 	// EncryptKeyProxy is necessary for TLog recovery, recruit it as the first process
-	if (SERVER_KNOBS->ENABLE_ENCRYPT_KEY_PROXY) {
+	if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
 		self.addActor.send(monitorEncryptKeyProxy(&self));
 	}
 	self.addActor.send(clusterWatchDatabase(&self, &self.db, coordinators, leaderFail)); // Start the master database

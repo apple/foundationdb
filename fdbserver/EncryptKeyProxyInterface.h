@@ -20,6 +20,7 @@
 
 #ifndef FDBSERVER_ENCRYPTKEYPROXYINTERFACE_H
 #define FDBSERVER_ENCRYPTKEYPROXYINTERFACE_H
+#include "flow/FileIdentifier.h"
 #include "flow/network.h"
 #pragma once
 
