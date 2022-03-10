@@ -36,6 +36,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 
 	init( SYSTEM_MONITOR_INTERVAL,                 5.0 );
 	init( NETWORK_BUSYNESS_MONITOR_INTERVAL,       1.0 );
+	init( TSS_METRICS_LOGGING_INTERVAL,          120.0 ); // 2 minutes by default
 
 	init( FAILURE_MAX_DELAY,                       5.0 );
 	init( FAILURE_MIN_DELAY,                       4.0 ); if( randomize && BUGGIFY ) FAILURE_MIN_DELAY = 1.0;
@@ -119,6 +120,12 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( CORE_VERSIONSPERSECOND,		           1e6 );
 	init( LOG_RANGE_BLOCK_SIZE, CORE_VERSIONSPERSECOND );
 	init( MUTATION_BLOCK_SIZE,	            	  10000);
+	init( MAX_VERSION_CACHE_LAG,                    0.1 );
+	init( MAX_PROXY_CONTACT_LAG,                    0.2 );
+	init( DEBUG_USE_GRV_CACHE_CHANCE,              -1.0 ); // For 100% chance at 1.0, this means 0.0 is not 0%. We don't want the default to be 0. 
+	init( FORCE_GRV_CACHE_OFF,                    false );
+	init( GRV_CACHE_RK_COOLDOWN,                   60.0 );
+	init( GRV_SUSTAINED_THROTTLING_THRESHOLD,       0.1 );
 
 	// TaskBucket
 	init( TASKBUCKET_LOGGING_DELAY,                5.0 );

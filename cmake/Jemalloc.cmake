@@ -8,6 +8,7 @@ if(USE_SANITIZER OR WIN32 OR (CMAKE_SYSTEM_NAME STREQUAL "FreeBSD") OR APPLE)
   return()
 endif()
 
+add_definitions(-DUSE_JEMALLOC)
 find_path(JEMALLOC_INCLUDE_DIR
   NAMES
   jemalloc/jemalloc.h

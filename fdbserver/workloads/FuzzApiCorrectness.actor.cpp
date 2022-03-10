@@ -675,7 +675,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 		void augmentTrace(TraceEvent& e) const override {
 			base_type::augmentTrace(e);
-			e.detail("KeySel", keysel.toString());
+			e.detail("KeySel", keysel);
 		}
 	};
 
@@ -726,7 +726,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 		void augmentTrace(TraceEvent& e) const override {
 			base_type::augmentTrace(e);
-			e.detail("KeySel1", keysel1.toString()).detail("KeySel2", keysel2.toString()).detail("Limit", limit);
+			e.detail("KeySel1", keysel1).detail("KeySel2", keysel2).detail("Limit", limit);
 		}
 	};
 
@@ -769,7 +769,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 		void augmentTrace(TraceEvent& e) const override {
 			base_type::augmentTrace(e);
-			e.detail("KeySel1", keysel1.toString()).detail("KeySel2", keysel2.toString());
+			e.detail("KeySel1", keysel1).detail("KeySel2", keysel2);
 			std::stringstream ss;
 			ss << "(" << limits.rows << ", " << limits.minRows << ", " << limits.bytes << ")";
 			e.detail("Limits", ss.str());

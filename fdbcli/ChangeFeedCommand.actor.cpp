@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "contrib/fmt-8.0.1/include/fmt/format.h"
+#include "contrib/fmt-8.1.1/include/fmt/format.h"
 
 #include "fdbcli/fdbcli.actor.h"
 
@@ -115,7 +115,7 @@ ACTOR Future<bool> changeFeedCommandActor(Database localDb, std::vector<StringRe
 		Version end = std::numeric_limits<Version>::max();
 		if (tokens.size() > 3) {
 			int n = 0;
-			if (sscanf(tokens[3].toString().c_str(), "%lld%n", &begin, &n) != 1 || n != tokens[3].size()) {
+			if (sscanf(tokens[3].toString().c_str(), "%" PRId64 "%n", &begin, &n) != 1 || n != tokens[3].size()) {
 				printUsage(tokens[0]);
 				return false;
 			}
@@ -168,7 +168,7 @@ ACTOR Future<bool> changeFeedCommandActor(Database localDb, std::vector<StringRe
 		}
 		Version v;
 		int n = 0;
-		if (sscanf(tokens[3].toString().c_str(), "%lld%n", &v, &n) != 1 || n != tokens[3].size()) {
+		if (sscanf(tokens[3].toString().c_str(), "%" PRId64 "%n", &v, &n) != 1 || n != tokens[3].size()) {
 			printUsage(tokens[0]);
 			return false;
 		} else {

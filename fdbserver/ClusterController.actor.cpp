@@ -226,6 +226,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			dbInfo.latencyBandConfig = db->serverInfo->get().latencyBandConfig;
 			dbInfo.myLocality = db->serverInfo->get().myLocality;
 			dbInfo.client = ClientDBInfo();
+			dbInfo.client.tenantMode = db->config.tenantMode;
 
 			TraceEvent("CCWDB", cluster->id)
 			    .detail("NewMaster", dbInfo.master.id().toString())
@@ -980,19 +981,23 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 
 	// Construct the client information
 	if (db->clientInfo->get().commitProxies != req.commitProxies ||
-	    db->clientInfo->get().grvProxies != req.grvProxies) {
+	    db->clientInfo->get().grvProxies != req.grvProxies ||
+	    db->clientInfo->get().tenantMode != db->config.tenantMode) {
 		TraceEvent("PublishNewClientInfo", self->id)
 		    .detail("Master", dbInfo.master.id())
 		    .detail("GrvProxies", db->clientInfo->get().grvProxies)
 		    .detail("ReqGrvProxies", req.grvProxies)
 		    .detail("CommitProxies", db->clientInfo->get().commitProxies)
-		    .detail("ReqCPs", req.commitProxies);
+		    .detail("ReqCPs", req.commitProxies)
+		    .detail("TenantMode", db->clientInfo->get().tenantMode.toString())
+		    .detail("ReqTenantMode", db->config.tenantMode.toString());
 		isChanged = true;
 		// TODO why construct a new one and not just copy the old one and change proxies + id?
 		ClientDBInfo clientInfo;
 		clientInfo.id = deterministicRandom()->randomUniqueID();
 		clientInfo.commitProxies = req.commitProxies;
 		clientInfo.grvProxies = req.grvProxies;
+		clientInfo.tenantMode = db->config.tenantMode;
 		db->clientInfo->set(clientInfo);
 		dbInfo.client = db->clientInfo->get();
 	}
