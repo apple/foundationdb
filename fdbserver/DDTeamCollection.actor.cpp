@@ -2277,7 +2277,6 @@ public:
 			isr.reqId = deterministicRandom()->randomUniqueID();
 			isr.interfaceId = interfaceId;
 			isr.clusterId = clusterId;
-			// TODO: Set initial cluster version in InitializeStorageRequest
 
 			// if tss, wait for pair ss to finish and add its id to isr. If pair fails, don't recruit tss
 			state bool doRecruit = true;
