@@ -47,6 +47,44 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 #include "flow/serialize.h"
 
+void DataMove::addShard(const DDShardInfo& shard) {
+	if (!valid) {
+		return;
+	}
+	if (!shard.hasDest) {
+		valid = false;
+		return;
+	}
+	// Assume the dest servers are sorted.
+	if (this->primaryDest.empty() && this->remoteDest.empty()) {
+		this->primaryDest = shard.primaryDest;
+		this->remoteDest = shard.remoteDest;
+		std::sort(this->primaryDest.begin(), this->primaryDest.end());
+		std::sort(this->remoteDest.begin(), this->remoteDest.end());
+	} else {
+		std::vector<UID> ss = shard.primaryDest;
+		std::sort(ss.begin(), ss.end());
+		if (!std::equal(this->primaryDest.begin(), this->primaryDest.end(), ss.begin())) {
+			valid = false;
+			return;
+		}
+		ss = shard.remoteDest;
+		std::sort(ss.begin(), ss.end());
+		if (!std::equal(this->remoteDest.begin(), this->remoteDest.end(), ss.begin())) {
+			valid = false;
+			return;
+		}
+	}
+
+	// for (const UID& id : shard.primarySrc) {
+	// 	this->meta.src.insert(id);
+	// }
+	// for (const UID& id : shard.remoteSrc) {
+	// 	this->meta.src.insert(id);
+	// }
+	this->primarySrc.push_back(shard.primarySrc);
+	this->remoteSrc.push_back(shard.remoteSrc);
+}
 // Read keyservers, return unique set of teams
 ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Database cx,
                                                                             UID distributorId,
@@ -684,11 +722,11 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 				for (int i = 0; i < initData->dataMoves.size(); ++i) {
 					const auto& meta = initData->dataMoves[i];
 					auto ranges = dataMoveMap.intersectingRanges(meta.range);
+					// ASSERT(ranges.size() == 1);
 					for (auto& r : ranges) {
 						ASSERT(!r.value()->valid);
 					}
-					dataMoveMap.insert(meta.range,
-					                   std::make_shared<DataMove>(DataMoveMetaData(meta.id, meta.range), true));
+					dataMoveMap.insert(meta.range, std::make_shared<DataMove>(meta, true));
 					TraceEvent("DDInitFoundDataMove", self->ddId)
 					    .detail("DataMoveID", meta.id)
 					    .detail("DataMove", meta.toString());
@@ -728,13 +766,36 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 					output.send(RelocateShard(
 					    keys, unhealthy ? SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY : SERVER_KNOBS->PRIORITY_RECOVER_MOVE));
 				}
+
 				if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
-					auto ranges = dataMoveMap.intersectingRanges(keys);
-					for (auto& r : ranges) {
-						r.value()->addShard(initData->shards[shard]);
-					}
+					// auto ranges = dataMoveMap.intersectingRanges(keys);
+					// ASSERT(ranges.size() == 1);
+					// for (auto& r : ranges) {
+					dataMoveMap[keys.begin]->addShard(initData->shards[shard]);
+					// }
 				}
+
 				wait(yield(TaskPriority::DataDistribution));
+			}
+
+			if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+				state int idx = 0;
+				for (; idx < initData->dataMoves.size(); ++idx) {
+					const auto& meta = initData->dataMoves[idx];
+					// auto ranges = dataMoveMap.intersectingRanges(meta.range);
+					// ASSERT(ranges.size() == 1);
+					if (dataMoveMap[meta.range.begin]->valid) {
+						RelocateShard rs(meta.range, meta.priority, true);
+						rs.dataMove = dataMoveMap[meta.range.begin];
+						TraceEvent("DDInitRestoredDataMove", self->ddId)
+						    .detail("DataMoveID", dataMoveMap[meta.range.begin]->meta.id)
+						    .detail("DataMove", dataMoveMap[meta.range.begin]->meta.toString());
+						output.send(rs);
+					} else {
+						ASSERT(false);
+					}
+					wait(yield(TaskPriority::DataDistribution));
+				}
 			}
 
 			std::vector<TeamCollectionInterface> tcis;

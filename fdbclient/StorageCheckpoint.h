@@ -120,11 +120,11 @@ struct DataMoveMetaData {
 		return res;
 	}
 
-	bool operator==(const DataMoveMetaData& other) {
-		return this->range == other.range && this->id == other.id &&
-		       std::equal(this->src.begin(), this->src.end(), other.src.begin()) &&
-		       std::equal(this->dest.begin(), this->dest.end(), other.dest.begin());
-	}
+	// bool operator==(const DataMoveMetaData& other) {
+	// 	return this->range == other.range && this->id == other.id &&
+	// 	       std::equal(this->src.begin(), this->src.end(), other.src.begin()) &&
+	// 	       std::equal(this->dest.begin(), this->dest.end(), other.dest.begin());
+	// }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
