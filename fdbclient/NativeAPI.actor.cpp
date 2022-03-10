@@ -6747,6 +6747,7 @@ Future<Standalone<VectorRef<KeyRef>>> Transaction::getRangeSplitPoints(KeyRange 
 	return ::getRangeSplitPoints(trState, keys, chunkSize);
 }
 
+// TODO REMOVE when correctness clean
 #define BG_REQUEST_DEBUG false
 
 // the blob granule requests are a bit funky because they piggyback off the existing transaction to read from the system

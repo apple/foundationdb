@@ -2043,7 +2043,7 @@ ACTOR Future<GranuleFiles> loadHistoryFiles(Reference<BlobManagerData> bmData, U
 	state GranuleFiles files;
 	loop {
 		try {
-			wait(readGranuleFiles(&tr, &startKey, range.end, &files, granuleID, BM_DEBUG));
+			wait(readGranuleFiles(&tr, &startKey, range.end, &files, granuleID));
 			return files;
 		} catch (Error& e) {
 			wait(tr.onError(e));
@@ -2062,7 +2062,7 @@ ACTOR Future<Void> fullyDeleteGranule(Reference<BlobManagerData> self, UID granu
 	}
 
 	// get files
-	GranuleFiles files = wait(loadHistoryFiles(self->db, granuleId, BM_DEBUG));
+	GranuleFiles files = wait(loadHistoryFiles(self->db, granuleId));
 
 	std::vector<Future<Void>> deletions;
 	std::vector<std::string> filesToDelete; // TODO: remove, just for debugging
@@ -2134,7 +2134,7 @@ ACTOR Future<Void> partiallyDeleteGranule(Reference<BlobManagerData> self, UID g
 	}
 
 	// get files
-	GranuleFiles files = wait(loadHistoryFiles(self->db, granuleId, BM_DEBUG));
+	GranuleFiles files = wait(loadHistoryFiles(self->db, granuleId));
 
 	// represents the version of the latest snapshot file in this granule with G.version < pruneVersion
 	Version latestSnapshotVersion = invalidVersion;
@@ -2605,8 +2605,8 @@ ACTOR Future<Void> doLockChecks(Reference<BlobManagerData> bmData) {
 	}
 }
 
-ACTOR Future<Void> blobManagerExclusionSafetyCheck(Reference<BlobManagerData> self,
-                                                   BlobManagerExclusionSafetyCheckRequest req) {
+static void blobManagerExclusionSafetyCheck(Reference<BlobManagerData> self,
+                                            BlobManagerExclusionSafetyCheckRequest req) {
 	TraceEvent("BMExclusionSafetyCheckBegin", self->id).log();
 	BlobManagerExclusionSafetyCheckReply reply(true);
 	// make sure at least one blob worker remains after exclusions
@@ -2632,8 +2632,6 @@ ACTOR Future<Void> blobManagerExclusionSafetyCheck(Reference<BlobManagerData> se
 
 	TraceEvent("BMExclusionSafetyCheckEnd", self->id).log();
 	req.reply.send(reply);
-
-	return Void();
 }
 
 ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
@@ -2692,7 +2690,7 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 			}
 			when(BlobManagerExclusionSafetyCheckRequest exclCheckReq =
 			         waitNext(bmInterf.blobManagerExclCheckReq.getFuture())) {
-				self->addActor.send(blobManagerExclusionSafetyCheck(self, exclCheckReq));
+				blobManagerExclusionSafetyCheck(self, exclCheckReq);
 			}
 			when(wait(collection)) {
 				TraceEvent("BlobManagerActorCollectionError");

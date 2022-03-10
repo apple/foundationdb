@@ -45,12 +45,7 @@ ACTOR Future<Optional<GranuleHistory>> getLatestGranuleHistory(Transaction* tr, 
 
 // Gets the files based on the file key range [startKey, endKey)
 // and populates the files object accordingly
-ACTOR Future<Void> readGranuleFiles(Transaction* tr,
-                                    Key* startKey,
-                                    Key endKey,
-                                    GranuleFiles* files,
-                                    UID granuleID,
-                                    bool debug) {
+ACTOR Future<Void> readGranuleFiles(Transaction* tr, Key* startKey, Key endKey, GranuleFiles* files, UID granuleID) {
 
 	loop {
 		int lim = BUGGIFY ? 2 : 1000;
@@ -85,18 +80,12 @@ ACTOR Future<Void> readGranuleFiles(Transaction* tr,
 			break;
 		}
 	}
-	if (debug) {
-		printf("Loaded %d snapshot and %d delta files for %s\n",
-		       files->snapshotFiles.size(),
-		       files->deltaFiles.size(),
-		       granuleID.toString().c_str());
-	}
 	return Void();
 }
 
 // Wrapper around readGranuleFiles
 // Gets all files belonging to the granule with id granule ID
-ACTOR Future<GranuleFiles> loadHistoryFiles(Database cx, UID granuleID, bool debug) {
+ACTOR Future<GranuleFiles> loadHistoryFiles(Database cx, UID granuleID) {
 	state KeyRange range = blobGranuleFileKeyRangeFor(granuleID);
 	state Key startKey = range.begin;
 	state GranuleFiles files;
@@ -106,7 +95,7 @@ ACTOR Future<GranuleFiles> loadHistoryFiles(Database cx, UID granuleID, bool deb
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			wait(readGranuleFiles(&tr, &startKey, range.end, &files, granuleID, debug));
+			wait(readGranuleFiles(&tr, &startKey, range.end, &files, granuleID));
 			return files;
 		} catch (Error& e) {
 			wait(tr.onError(e));

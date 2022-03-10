@@ -281,7 +281,7 @@ ACTOR Future<GranuleFiles> loadHistoryFiles(Reference<BlobWorkerData> bwData, UI
 	state GranuleFiles files;
 	loop {
 		try {
-			wait(readGranuleFiles(&tr, &startKey, range.end, &files, granuleID, BW_DEBUG));
+			wait(readGranuleFiles(&tr, &startKey, range.end, &files, granuleID));
 			return files;
 		} catch (Error& e) {
 			wait(tr.onError(e));
@@ -296,7 +296,7 @@ ACTOR Future<GranuleFiles> loadPreviousFiles(Transaction* tr, UID granuleID) {
 	// no need to add conflict range for read b/c of granule lock
 	state Key startKey = range.begin;
 	state GranuleFiles files;
-	wait(readGranuleFiles(tr, &startKey, range.end, &files, granuleID, BW_DEBUG));
+	wait(readGranuleFiles(tr, &startKey, range.end, &files, granuleID));
 	return files;
 }
 
@@ -967,7 +967,9 @@ ACTOR Future<Void> handleCompletedDeltaFile(Reference<BlobWorkerData> bwData,
 
 	if (completedDeltaFile.version > cfStartVersion) {
 		if (BW_DEBUG) {
-			fmt::print("Popping change feed {0} at {1}\n", cfKey.printable(), completedDeltaFile.version);
+			fmt::print("Popping change feed {0} at {1}\n",
+			           cfKeyToGranuleID(cfKey).toString().c_str(),
+			           completedDeltaFile.version);
 		}
 		// FIXME: for a write-hot shard, we could potentially batch these and only pop the largest one after several
 		// have completed
@@ -1595,7 +1597,8 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 
 								DEBUG_MUTATION("BlobWorkerBuffer", deltas.version, delta, bwData->id)
 								    .detail("Granule", metadata->keyRange)
-								    .detail("ChangeFeedID", readOldChangeFeed ? oldCFKey.get() : cfKey)
+								    .detail("ChangeFeedID",
+								            cfKeyToGranuleID(readOldChangeFeed ? oldCFKey.get() : cfKey))
 								    .detail("OldChangeFeed", readOldChangeFeed ? "T" : "F");
 							}
 							metadata->currentDeltas.push_back_deep(metadata->currentDeltas.arena(), deltas);
@@ -1990,6 +1993,16 @@ ACTOR Future<Void> waitForVersion(Reference<GranuleMetadata> metadata, Version v
 	// if we don't have to wait for change feed version to catch up or wait for any pending file writes to complete,
 	// nothing to do
 
+	if (BW_REQUEST_DEBUG) {
+		printf("WFV %lld) CF=%lld, pendingD=%lld, durableD=%lld, pendingS=%lld, durableS=%lld\n",
+		       v,
+		       metadata->activeCFData.get()->getVersion(),
+		       metadata->pendingDeltaVersion,
+		       metadata->durableDeltaVersion.get(),
+		       metadata->pendingSnapshotVersion,
+		       metadata->durableSnapshotVersion.get());
+	}
+
 	ASSERT(metadata->activeCFData.get().isValid());
 
 	if (v <= metadata->activeCFData.get()->getVersion() &&
@@ -2163,7 +2176,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 				// lazily load files for old granule if not present
 				chunkRange = cur->range;
 				if (!cur->files.isValid() || cur->files.isError()) {
-					cur->files = loadHistoryFiles(bwData->db, cur->granuleID, BW_DEBUG);
+					cur->files = loadHistoryFiles(bwData->db, cur->granuleID);
 				}
 
 				choose {

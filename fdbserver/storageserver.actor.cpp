@@ -1204,7 +1204,10 @@ public:
 		auto& clientVersions = changeFeedClientVersions[addr];
 		Version minVersion = version.get();
 		for (auto& it : clientVersions) {
-			// fmt::print("Blocked client {0} @ {1}\n", it.first.toString().substr(0, 8), it.second);
+			/*fmt::print("SS {0} Blocked client {1} @ {2}\n",
+			           thisServerID.toString().substr(0, 4),
+			           it.first.toString().substr(0, 8),
+			           it.second);*/
 			minVersion = std::min(minVersion, it.second);
 		}
 		return minVersion;
