@@ -1175,12 +1175,11 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	self->txnStateStore =
 	    keyValueStoreLogSystem(self->txnStateLogAdapter, self->dbgid, self->memoryLimit, false, false, true);
 
-	// TODO: Think about how to handle clusters being upgraded. They should
-	// continue to use the old method of calculating versions until explicitly
-	// upgraded!
 	// Version 0 occurs at the version epoch. The version epoch can be set
 	// through the management API, otherwise a default timestamp is used. The
 	// version epoch is the number of seconds since the Unix epoch.
+	// TODO: Set `versionEpochKey` to the default value on new clusters to
+	// enable new clusters to use a version in-step with wall clock time.
 	Optional<Standalone<StringRef>> versionEpochValue = wait(self->txnStateStore->readValue(versionEpochKey));
 	self->versionEpoch = SERVER_KNOBS->DEFAULT_VERSION_EPOCH;
 	if (versionEpochValue.present()) {
@@ -1201,14 +1200,20 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	// Recover version info
 	self->lastEpochEnd = oldLogSystem->getEnd() - 1;
 	if (self->lastEpochEnd == 0) {
-		// Set the initial cluster version equal to the current timestamp in
-		// microseconds, relative to a defined epoch. Versions advance at
-		// roughtly one million versions per second, so one version equals one
-		// microsecond.
-		self->recoveryTransactionVersion = g_network->timer() * SERVER_KNOBS->VERSIONS_PER_SECOND;
-		if (!g_network->isSimulated()) {
-			self->recoveryTransactionVersion -= SERVER_KNOBS->DEFAULT_VERSION_EPOCH * SERVER_KNOBS->VERSIONS_PER_SECOND;
+		if (self->versionEpoch != invalidVersion) {
+			// Set the initial cluster version equal to the current timestamp in
+			// microseconds, relative to a defined epoch. Versions advance at
+			// roughtly one million versions per second, so one version equals one
+			// microsecond.
+			self->recoveryTransactionVersion = g_network->timer() * SERVER_KNOBS->VERSIONS_PER_SECOND;
+			if (!g_network->isSimulated()) {
+				self->recoveryTransactionVersion -= self->versionEpoch * SERVER_KNOBS->VERSIONS_PER_SECOND;
+			}
 		} else {
+			self->recoveryTransactionVersion = 1;
+		}
+
+		if (BUGGIFY) {
 			// Since the clock always start at 0 in simulation, add a random offset.
 			self->recoveryTransactionVersion += deterministicRandom()->randomInt64(0, 10000000);
 		}
@@ -1217,6 +1222,11 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 			self->recoveryTransactionVersion = self->lastEpochEnd + SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT_FORCED;
 		} else {
 			self->recoveryTransactionVersion = self->lastEpochEnd + SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT;
+		}
+
+		if (self->versionEpoch != invalidVersion) {
+			self->recoveryTransactionVersion =
+			    (g_network->timer() - self->versionEpoch) * SERVER_KNOBS->VERSIONS_PER_SECOND;
 		}
 
 		if (BUGGIFY) {
