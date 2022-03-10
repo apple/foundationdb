@@ -31,7 +31,7 @@
 #include "fdbclient/Knobs.h"
 
 struct VersionVector {
-	std::unordered_map<Tag, Version> versions;
+	std::map<Tag, Version> versions;
 	Version maxVersion; // Specifies the max version in this version vector. (Note:
 	                    // there may or may not be a corresponding entry for this
 	                    // version in the "versions" map.)
@@ -39,6 +39,12 @@ struct VersionVector {
 	VersionVector() : maxVersion(invalidVersion) {}
 	VersionVector(Version version) : maxVersion(version) {}
 
+private:
+	inline void setVersionNoCheck(const Tag& tag, Version version) {
+		versions[tag] = version;
+	}
+
+public:
 	Version getMaxVersion() const { return maxVersion; }
 
 	int size() const { return versions.size(); }
@@ -92,17 +98,11 @@ struct VersionVector {
 		if (CLIENT_KNOBS->SEND_ENTIRE_VERSION_VECTOR) {
 			delta = *this;
 		} else {
-			std::map<Version, std::set<Tag>> tmpVersionMap; // order versions
 			for (const auto& [tag, version] : versions) {
 				if (version > refVersion) {
-					tmpVersionMap[version].insert(tag);
+					delta.setVersionNoCheck(tag, version);
 				}
 			}
-
-			for (auto& [version, tags] : tmpVersionMap) {
-				delta.setVersion(tags, version);
-			}
-
 			delta.maxVersion = maxVersion;
 		}
 	}
