@@ -2032,6 +2032,13 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 			// gap validation
 			while (memoryVerifyIdx < memoryReply.mutations.size() &&
 			       version > memoryReply.mutations[memoryVerifyIdx].version) {
+				if (req.canReadPopped) {
+					// There are weird cases where SS fetching mixed with SS durability and popping can mean there are
+					// gaps before the popped version temporarily
+					memoryVerifyIdx++;
+					continue;
+				}
+
 				// There is a case where this can happen - if we wait on a fetching change feed, and the feed is
 				// popped while we wait, we could have copied the memory mutations into memoryReply before the
 				// pop, but they may or may not have been skipped writing to disk
