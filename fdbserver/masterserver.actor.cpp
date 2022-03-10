@@ -292,8 +292,10 @@ ACTOR Future<Void> updateRecoveryData(Reference<MasterData> self) {
 						self->lastCommitProxyVersionReplies[p.id()] = CommitProxyVersionReplies();
 					}
 				}
-				self->referenceVersion =
-				    !g_network->isSimulated() ? req.versionEpoch * SERVER_KNOBS->VERSIONS_PER_SECOND : 0;
+				if (req.versionEpoch >= 0) {
+					self->referenceVersion =
+					    !g_network->isSimulated() ? req.versionEpoch * SERVER_KNOBS->VERSIONS_PER_SECOND : 0;
+				}
 				req.reply.send(Void());
 			}
 		}
