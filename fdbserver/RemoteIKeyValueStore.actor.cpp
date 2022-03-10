@@ -33,7 +33,7 @@
 
 StringRef KeyValueStoreProcess::_name = "KeyValueStoreProcess"_sr;
 
-// test adding a guard for guaranteed killing of machine after runIKVS returns
+// A guard for guaranteed killing of machine after runIKVS returns
 struct AfterReturn {
 	IKeyValueStore* kvStore;
 	UID id;
@@ -48,6 +48,7 @@ struct AfterReturn {
 			kvStore->close();
 		}
 	}
+	// called when we already explicitly closed the kv store
 	void invalidate() { kvStore = nullptr; }
 };
 
@@ -67,29 +68,15 @@ ACTOR void sendCommitReply(IKVSCommitRequest commitReq, IKeyValueStore* kvStore,
 }
 
 ACTOR template <class T>
-void cancellableForwardPromise(ReplyPromise<T> output, Future<T> input, Future<Void> stop) {
-	try {
-		choose {
-			when(T value = wait(input)) { output.send(value); }
-			when(wait(stop)) { return; }
-		}
-	} catch (Error& e) {
-		output.sendError(e);
-	}
-}
-
-ACTOR template <class T>
-void forwardPromiseVariant(ReplyPromise<T> output, Future<T> input, std::string trace = "") {
+Future<Void> cancellableForwardPromise(ReplyPromise<T> output, Future<T> input) {
 	try {
 		T value = wait(input);
 		output.send(value);
-		if (trace.size()) {
-			TraceEvent(SevDebug, "ForwardPromiseSend").detail("Name", trace);
-		}
 	} catch (Error& e) {
-		TraceEvent(SevDebug, "ForwardPromiseVariantError").errorUnsuppressed(e).backtrace();
+		TraceEvent(SevDebug, "CancellableForwardPromiseError").errorUnsuppressed(e).backtrace();
 		output.sendError(e.code() == error_code_actor_cancelled ? remote_kvs_cancelled() : e);
 	}
+	return Void();
 }
 
 ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterface) {
@@ -100,6 +87,7 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 	                                            openReq.checkChecksums,
 	                                            openReq.checkIntegrity);
 	state UID uid_kvs(deterministicRandom()->randomUniqueID());
+	state ActorCollection actors(false);
 	state AfterReturn guard(kvStore, uid_kvs);
 	state Promise<Void> onClosed;
 	TraceEvent(SevDebug, "RemoteKVStoreInitializing")
@@ -113,10 +101,8 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 		try {
 			choose {
 				when(IKVSGetValueRequest getReq = waitNext(ikvsInterface.getValue.getFuture())) {
-					// forwardPromise(getReq.reply, kvStore->readValue(getReq.key, getReq.type, getReq.debugID));
-					cancellableForwardPromise(getReq.reply,
-					                          kvStore->readValue(getReq.key, getReq.type, getReq.debugID),
-					                          onClosed.getFuture());
+					actors.add(cancellableForwardPromise(getReq.reply,
+					                                     kvStore->readValue(getReq.key, getReq.type, getReq.debugID)));
 				}
 				when(IKVSSetRequest req = waitNext(ikvsInterface.set.getFuture())) { kvStore->set(req.keyValue); }
 				when(IKVSClearRequest req = waitNext(ikvsInterface.clear.getFuture())) { kvStore->clear(req.range); }
@@ -124,63 +110,50 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 					sendCommitReply(commitReq, kvStore, onClosed.getFuture());
 				}
 				when(IKVSReadValuePrefixRequest readPrefixReq = waitNext(ikvsInterface.readValuePrefix.getFuture())) {
-					// forwardPromise(
-					//     readPrefixReq.reply,
-					//     kvStore->readValuePrefix(
-					//         readPrefixReq.key, readPrefixReq.maxLength, readPrefixReq.type, readPrefixReq.debugID));
-					cancellableForwardPromise(
+					actors.add(cancellableForwardPromise(
 					    readPrefixReq.reply,
 					    kvStore->readValuePrefix(
-					        readPrefixReq.key, readPrefixReq.maxLength, readPrefixReq.type, readPrefixReq.debugID),
-					    onClosed.getFuture());
+					        readPrefixReq.key, readPrefixReq.maxLength, readPrefixReq.type, readPrefixReq.debugID)));
 				}
 				when(IKVSReadRangeRequest readRangeReq = waitNext(ikvsInterface.readRange.getFuture())) {
-					cancellableForwardPromise(
+					actors.add(cancellableForwardPromise(
 					    readRangeReq.reply,
-					    fmap([](const RangeResult& result) { return IKVSReadRangeReply(result); },
-					         kvStore->readRange(
-					             readRangeReq.keys, readRangeReq.rowLimit, readRangeReq.byteLimit, readRangeReq.type)),
-					    onClosed.getFuture());
+					    fmap(
+					        [](const RangeResult& result) { return IKVSReadRangeReply(result); },
+					        kvStore->readRange(
+					            readRangeReq.keys, readRangeReq.rowLimit, readRangeReq.byteLimit, readRangeReq.type))));
 				}
 				when(IKVSGetStorageByteRequest req = waitNext(ikvsInterface.getStorageBytes.getFuture())) {
 					StorageBytes storageBytes = kvStore->getStorageBytes();
 					req.reply.send(storageBytes);
 				}
 				when(IKVSGetErrorRequest getFutureReq = waitNext(ikvsInterface.getError.getFuture())) {
-					forwardPromiseVariant(getFutureReq.reply, kvStore->getError());
+					actors.add(cancellableForwardPromise(getFutureReq.reply, kvStore->getError()));
 				}
 				when(IKVSOnClosedRequest onClosedReq = waitNext(ikvsInterface.onClosed.getFuture())) {
-					forwardPromiseVariant(onClosedReq.reply, kvStore->onClosed(), "OnClosed");
+					actors.add(cancellableForwardPromise(onClosedReq.reply, kvStore->onClosed()));
 				}
-				when(IKVSDisposeRequest req = waitNext(ikvsInterface.dispose.getFuture())) {
+				when(waitNext(ikvsInterface.dispose.getFuture())) {
 					TraceEvent(SevDebug, "RemoteIKVSDisposeReceivedRequest").detail("UID", uid_kvs);
 					Future<Void> f = kvStore->onClosed();
 					kvStore->dispose();
 					guard.invalidate();
 					onClosed.send(Void());
-					wait(f);
-					TraceEvent(SevDebug, "RemoteIKVSDispose").detail("UID", uid_kvs);
 					return Void();
 				}
-				when(IKVSCloseRequest req = waitNext(ikvsInterface.close.getFuture())) {
+				when(waitNext(ikvsInterface.close.getFuture())) {
 					TraceEvent(SevDebug, "RemoteIKVSCloseReceivedRequest").detail("UID", uid_kvs);
 					Future<Void> f = kvStore->onClosed();
 					kvStore->close();
 					guard.invalidate();
 					onClosed.send(Void());
-					wait(f);
-					TraceEvent(SevDebug, "RemoteIKVSClose").detail("UID", uid_kvs);
 					return Void();
 				}
 			}
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
-				// fprintf(stderr, "RemoteIKVS cancelling\n");
 				TraceEvent("RemoteKVStoreCancelled").detail("UID", uid_kvs).backtrace();
-				// kvStore->close();
-				// guard.invalidate();
 				onClosed.send(Void());
-				// fprintf(stderr, "RemoteIKVS cancelled\n");
 				return Void();
 			} else {
 				TraceEvent(SevError, "RemoteKVStoreError").error(e).detail("UID", uid_kvs).backtrace();
@@ -199,6 +172,7 @@ ACTOR static Future<int> flowProcessRunner(RemoteIKeyValueStore* self, Promise<V
 	auto address = endpoint.addresses.address.toString();
 	auto token = endpoint.token;
 
+	// port 0 means we will find a random available port number for it
 	std::string flowProcessAddr = g_network->getLocalAddress().ip.toString().append(":0");
 	std::vector<std::string> args = { "bin/fdbserver",
 		                              "-r",
@@ -215,20 +189,15 @@ ACTOR static Future<int> flowProcessRunner(RemoteIKeyValueStore* self, Promise<V
 		                              format("%s,%lu,%lu", address.c_str(), token.first(), token.second()) };
 	// For remote IKV store, we need to make sure the shutdown signal is sent back until we can destroy it in the
 	// simulation
-	process = spawnProcess(path, args, -1.0, false, 0.01, self);
+	process = spawnProcess(path, args, -1.0, false, 0.01 /*not used*/, self);
 	choose {
 		when(FlowProcessRegistrationRequest req = waitNext(processInterface.registerProcess.getFuture())) {
 			self->consumeInterface(req.flowProcessInterface);
 			ready.send(Void());
 		}
 		when(int res = wait(process)) {
-			TraceEvent(SevDebug, "FlowProcessRunnerFinishedInChoose").detail("Result", res);
-			// 0 means process killed; non-zero means errors
-			if (res) {
-				ready.sendError(operation_failed());
-			} else {
-				ready.sendError(shutdown_in_progress());
-			}
+			// 0 means process normally shut down; non-zero means errors
+			ASSERT(res); // process should not shut down normally before not ready
 			return res;
 		}
 	}

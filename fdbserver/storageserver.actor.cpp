@@ -6843,7 +6843,8 @@ bool storageServerTerminated(StorageServer& self, IKeyValueStore* persistentData
 	}
 
 	if (e.code() == error_code_worker_removed || e.code() == error_code_recruitment_failed ||
-	    e.code() == error_code_file_not_found || e.code() == error_code_actor_cancelled) {
+	    e.code() == error_code_file_not_found || e.code() == error_code_actor_cancelled ||
+	    e.code() == error_code_remote_kvs_cancelled) {
 		TraceEvent("StorageServerTerminated", self.thisServerID).errorUnsuppressed(e);
 		return true;
 	} else

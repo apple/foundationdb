@@ -42,10 +42,7 @@ void networkSender(Future<T> input, Endpoint endpoint) {
 			return;
 		}
 		ASSERT(err.code() != error_code_actor_cancelled);
-		Error e(err);
-		if (e.code() == error_code_remote_kvs_cancelled)
-			e = actor_cancelled();
-		FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<EnsureTable<T>>>(e), endpoint, false);
+		FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<EnsureTable<T>>>(err), endpoint, false);
 	}
 }
 #include "flow/unactorcompiler.h"

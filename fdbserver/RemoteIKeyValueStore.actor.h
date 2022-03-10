@@ -358,9 +358,8 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 	Future<Void> initialized;
 	Future<int> returnCode;
 	StorageBytes storageBytes;
-	bool stopped;
 
-	RemoteIKeyValueStore() : storageBytes(0, 0, 0, 0), stopped(false) {}
+	RemoteIKeyValueStore() : storageBytes(0, 0, 0, 0) {}
 
 	Future<Void> init() override {
 		TraceEvent(SevInfo, "RemoteIKeyValueStoreInit").log();
@@ -371,15 +370,17 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 	Future<Void> onClosed() const override { return onCloseImpl(this); }
 
 	void dispose() override {
-		TraceEvent(SevDebug, "RemoteIKVSDisposeRequest").detail("Stopped", stopped).backtrace();
-		if (!stopped)
-			interf.dispose.send(IKVSDisposeRequest{});
+		TraceEvent(SevDebug, "RemoteIKVSDisposeRequest").backtrace();
+		interf.dispose.send(IKVSDisposeRequest{});
+		// hold the future to not cancel the spawned process
+		uncancellable(returnCode);
 		delete this;
 	}
 	void close() override {
-		TraceEvent(SevDebug, "RemoteIKVSCloseRequest").detail("Stopped", stopped).backtrace();
-		if (!stopped)
-			interf.close.send(IKVSCloseRequest{});
+		TraceEvent(SevDebug, "RemoteIKVSCloseRequest").backtrace();
+		interf.close.send(IKVSCloseRequest{});
+		// hold the future to not cancel the spawned process
+		uncancellable(returnCode);
 		delete this;
 	}
 
@@ -446,23 +447,13 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 				TraceEvent(SevDebug, "RemoteIKVSGetError")
 				    .errorUnsuppressed(e.isError() ? e.getError() : success())
 				    .backtrace();
-				// if kv-store is error, we should see child process died
-				// *(const_cast<bool*>(stopped)) = true;
-				if (e.isError() && e.getError().code() == error_code_actor_cancelled) {
-					TraceEvent(SevDebug, "WaitForChildProcessFinished").log();
-					wait(success(returnCode));
-				} else {
-					// fprintf(stderr, "GetErrorImpl cancelling child actor\n");
-					returnCode.cancel();
-					// wait(success(returnCodeF));
-				}
 				if (e.isError())
 					throw e.getError();
 				else
 					return e.get();
 			}
 			when(int res = wait(returnCode)) {
-				TraceEvent(res < 0 ? SevError : SevInfo, "SpawnedProcessHasDied").detail("Res", res);
+				TraceEvent(res != 0 ? SevError : SevInfo, "SpawnedProcessDied").detail("Res", res);
 			}
 		}
 		return Void();
@@ -471,9 +462,8 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 	ACTOR static Future<Void> onCloseImpl(const RemoteIKeyValueStore* self) {
 		try {
 			wait(self->initialized);
-			TraceEvent(SevInfo, "RemoteIKVSOnCloseImplInitialized");
 			wait(self->interf.onClosed.getReply(IKVSOnClosedRequest{}));
-			TraceEvent(SevInfo, "RemoteIKVSOnCloseImplOnClosedFinished");
+			TraceEvent(SevDebug, "RemoteIKVSOnCloseImplOnClosedFinished");
 		} catch (Error& e) {
 			TraceEvent(SevInfo, "RemoteIKVSOnCloseImplError").errorUnsuppressed(e).backtrace();
 			throw;

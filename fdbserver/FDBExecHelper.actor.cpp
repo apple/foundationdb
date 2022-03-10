@@ -152,7 +152,7 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 	                             self->locality,
 	                             ProcessClass(ProcessClass::UnsetClass, ProcessClass::AutoSource),
 	                             self->dataFolder,
-	                             self->coordinationFolder, // do we also need to customize this coordination folder path
+	                             self->coordinationFolder, // do we need to customize this coordination folder path
 	                             self->protocolVersion);
 	wait(g_pSimulator->onProcess(child));
 	state Future<ISimulator::KillType> onShutdown = child->onShutdown();
@@ -198,7 +198,7 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 					g_pSimulator->killProcess(child, ISimulator::KillInstantly);
 				}
 				when(ISimulator::KillType killType = wait(parentShutdown)) {
-					ASSERT(false);
+					// ASSERT(false);
 					TraceEvent(SevDebug, "ParentProcessReboot").detail("KillType", killType).log();
 					// Note: failed machines are not cancelled and actors behind is just running
 					// g_pSimulator->killProcess(child, killType);
@@ -206,8 +206,8 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 						ASSERT(false);
 					} else {
 						// wait(delay(0));
+						flowProcessF.cancel();
 						destoryChildProcess(flowProcessF, child, "ChildClosedAfterParentShutdown");
-						// flowProcessF.cancel();
 						// g_pSimulator->destroyProcess(child);
 					}
 				}
@@ -216,22 +216,7 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 			ASSERT(false);
 		}
 	} catch (Error& e) {
-		TraceEvent(e.code() == error_code_actor_cancelled ? SevInfo : SevError, "RemoteIKVSDied").errorUnsuppressed(e);
-		state Error error(e);
-		// fprintf(stderr, "spawnSimulated is cancelling\n");
-		flowProcessF.cancel();
-		g_pSimulator->destroyProcess(child);
-		if (error.code() == error_code_actor_cancelled) {
-			throw error;
-		}
-		if (error.code() == error_code_io_timeout && !onShutdown.isReady()) {
-			TraceEvent(SevDebug, "SpawnedProcessRebooting").log();
-			onShutdown = ISimulator::RebootProcess;
-		}
-		if (onShutdown.isReady() && onShutdown.isError()) {
-			TraceEvent(SevDebug, "SpawnedProcessError").log();
-			throw onShutdown.getError();
-		}
+		TraceEvent(SevError, "RemoteIKVSDied").errorUnsuppressed(e);
 		result = -1;
 	}
 

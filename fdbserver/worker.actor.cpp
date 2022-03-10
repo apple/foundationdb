@@ -258,6 +258,7 @@ ACTOR Future<Void> workerHandleErrors(FutureStream<ErrorInfo> errors) {
 			ErrorInfo err = _err;
 			bool ok = err.error.code() == error_code_success || err.error.code() == error_code_please_reboot ||
 			          err.error.code() == error_code_actor_cancelled ||
+					  err.error.code() == error_code_remote_kvs_cancelled ||
 			          err.error.code() == error_code_coordinators_changed || // The worker server was cancelled
 			          err.error.code() == error_code_shutdown_in_progress;
 
