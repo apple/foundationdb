@@ -431,7 +431,6 @@ public:
 	CoalescedKeyRangeMap<Reference<LocationInfo>> locationCache;
 	std::unordered_map<Endpoint, EndpointFailureInfo> failedEndpointsOnHealthyServersInfo;
 	std::unordered_map<TenantName, TenantMapEntry> tenantCache;
-	std::vector<TenantNameRef> tenantCacheList;
 
 	std::map<UID, StorageServerInfo*> server_interf;
 	std::map<UID, BlobWorkerInterface> blobWorker_interf; // blob workers don't change endpoints for the same ID

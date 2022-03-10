@@ -643,7 +643,6 @@ Future<Optional<TenantMapEntry>> tryGetTenantTransaction(Transaction tr, TenantN
 ACTOR template <class DB>
 Future<Optional<TenantMapEntry>> tryGetTenant(Reference<DB> db, TenantName name) {
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
-	state Key tenantMapKey = name.withPrefix(tenantMapPrefix);
 
 	loop {
 		try {
@@ -675,6 +674,7 @@ Future<TenantMapEntry> getTenant(Reference<DB> db, TenantName name) {
 	return entry.get();
 }
 
+// Creates a tenant with the given name. If the tenant already exists, an empty optional will be returned.
 ACTOR template <class Transaction>
 Future<Optional<TenantMapEntry>> createTenantTransaction(Transaction tr, TenantNameRef name) {
 	state Key tenantMapKey = name.withPrefix(tenantMapPrefix);
@@ -686,10 +686,9 @@ Future<Optional<TenantMapEntry>> createTenantTransaction(Transaction tr, TenantN
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-	state Optional<TenantMapEntry> tenantEntry = wait(tryGetTenantTransaction(tr, name));
-	if (tenantEntry.present()) {
-		return Optional<TenantMapEntry>();
-	}
+	state Future<Optional<TenantMapEntry>> tenantEntryFuture = tryGetTenantTransaction(tr, name);
+	state Future<Optional<Value>> tenantDataPrefixFuture = safeThreadFutureToFuture(tr->get(tenantDataPrefixKey));
+	state Future<Optional<Value>> lastIdFuture = safeThreadFutureToFuture(tr->get(tenantLastIdKey));
 
 	Optional<Value> tenantMode = wait(safeThreadFutureToFuture(tr->get(configKeysPrefix.withSuffix("tenant_mode"_sr))));
 
@@ -697,9 +696,12 @@ Future<Optional<TenantMapEntry>> createTenantTransaction(Transaction tr, TenantN
 		throw tenants_disabled();
 	}
 
-	state Future<Optional<Value>> tenantDataPrefixFuture = safeThreadFutureToFuture(tr->get(tenantDataPrefixKey));
+	Optional<TenantMapEntry> tenantEntry = wait(tenantEntryFuture);
+	if (tenantEntry.present()) {
+		return Optional<TenantMapEntry>();
+	}
 
-	state Optional<Value> lastIdVal = wait(safeThreadFutureToFuture(tr->get(tenantLastIdKey)));
+	state Optional<Value> lastIdVal = wait(lastIdFuture);
 	Optional<Value> tenantDataPrefix = wait(tenantDataPrefixFuture);
 
 	state TenantMapEntry newTenant(lastIdVal.present() ? TenantMapEntry::prefixToId(lastIdVal.get()) + 1 : 0,

@@ -1714,16 +1714,13 @@ bool DatabaseContext::getCachedLocations(const Optional<TenantName>& tenantName,
 
 void DatabaseContext::cacheTenant(const TenantName& tenant, const TenantMapEntry& tenantEntry) {
 	if (tenantCacheSize > 0) {
-		int attempts = 0;
-		while (tenantCache.size() > tenantCacheSize && attempts++ < 100) {
-			int randomEntry = deterministicRandom()->randomInt(0, tenantCacheList.size());
-			tenantCache.erase(tenantCacheList[randomEntry]);
-			tenantCacheList[randomEntry] = tenantCacheList.back();
-			tenantCacheList.pop_back();
+		// Naive cache eviction just erases the entire cache when it gets full.
+		// We don't expect a single client to fill the tenant cache typically, so this should work reasonably well.
+		if (tenantCache.size() > tenantCacheSize) {
+			tenantCache.clear();
 		}
 
 		tenantCache[tenant] = tenantEntry;
-		tenantCacheList.push_back(tenant);
 	}
 }
 
@@ -4924,7 +4921,11 @@ Future<Optional<Value>> Transaction::get(const Key& key, Snapshot snapshot) {
 	if (!snapshot)
 		tr.transaction.read_conflict_ranges.push_back(tr.arena, singleKeyRange(key, tr.arena));
 
+	UseTenant useTenant = UseTenant::True;
 	if (key == metadataVersionKey) {
+		// It is legal to read the metadata version key inside of a tenant.
+		// This will return the global metadata version key.
+		useTenant = UseTenant::False;
 		++trState->cx->transactionMetadataVersionReads;
 		if (!ver.isReady() || metadataVersion.isSet()) {
 			return metadataVersion.getFuture();
@@ -4958,7 +4959,7 @@ Future<Optional<Value>> Transaction::get(const Key& key, Snapshot snapshot) {
 		}
 	}
 
-	return getValue(trState, key, ver);
+	return getValue(trState, key, ver, useTenant);
 }
 
 void Watch::setWatch(Future<Void> watchFuture) {
@@ -4968,14 +4969,13 @@ void Watch::setWatch(Future<Void> watchFuture) {
 	onSetWatchTrigger.send(Void());
 }
 
-ACTOR Future<TenantInfo> getTenantMetadata(Reference<TransactionState> trState, Key key, Future<Version> fVersion) {
-	state Version version = wait(fVersion);
+ACTOR Future<TenantInfo> getTenantMetadata(Reference<TransactionState> trState, Key key, Version version) {
 	KeyRangeLocationInfo locationInfo =
 	    wait(getKeyLocation(trState, key, &StorageServerInterface::getValue, Reverse::False, UseTenant::True, version));
 	return trState->getTenantInfo();
 }
 
-Future<TenantInfo> populateAndGetTenant(Reference<TransactionState> trState, Key const& key, Future<Version> version) {
+Future<TenantInfo> populateAndGetTenant(Reference<TransactionState> trState, Key const& key, Version version) {
 	if (!trState->tenant.present()) {
 		return TenantInfo();
 	} else if (trState->tenantId != TenantInfo::INVALID_TENANT) {
@@ -5048,7 +5048,8 @@ Future<Void> Transaction::watch(Reference<Watch> watch) {
 	return ::watch(
 	    watch,
 	    trState->cx,
-	    populateAndGetTenant(trState, watch->key, readVersion.isValid() ? readVersion : Future<Version>(latestVersion)),
+	    populateAndGetTenant(
+	        trState, watch->key, readVersion.isValid() && readVersion.isReady() ? readVersion.get() : latestVersion),
 	    trState->options.readTags,
 	    trState->spanID,
 	    trState->taskID,
