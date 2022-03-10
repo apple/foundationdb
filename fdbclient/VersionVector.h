@@ -40,9 +40,9 @@ struct VersionVector {
 	VersionVector(Version version) : maxVersion(version) {}
 
 private:
-	inline void setVersionNoCheck(const Tag& tag, Version version) {
-		versions[tag] = version;
-	}
+	// Only invoked by getDelta() and applyDelta(), where tag has been validated
+	// and version is guaranteed to be larger than the existing value.
+	inline void setVersionNoCheck(const Tag& tag, Version version) { versions[tag] = version; }
 
 public:
 	Version getMaxVersion() const { return maxVersion; }
@@ -122,17 +122,11 @@ public:
 		if (CLIENT_KNOBS->SEND_ENTIRE_VERSION_VECTOR) {
 			*this = delta;
 		} else {
-			std::map<Version, std::set<Tag>> tmpVersionMap; // order versions
 			for (const auto& [tag, version] : delta.versions) {
 				if (version > maxVersion) {
-					tmpVersionMap[version].insert(tag);
+					setVersionNoCheck(tag, version);
 				}
 			}
-
-			for (auto& [version, tags] : tmpVersionMap) {
-				setVersion(tags, version);
-			}
-
 			maxVersion = delta.maxVersion;
 		}
 	}
