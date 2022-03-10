@@ -270,6 +270,7 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitRange(Reference<BlobManagerData
 			           estimated.bytes);
 		}
 
+		TEST(writeHot); // Change feed write hot split
 		if (estimated.bytes > SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES || writeHot) {
 			// only split on bytes and write rate
 			state StorageMetrics splitMetrics;
@@ -335,6 +336,7 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitRange(Reference<BlobManagerData
 ACTOR Future<UID> pickWorkerForAssign(Reference<BlobManagerData> bmData) {
 	// wait until there are BWs to pick from
 	while (bmData->workerStats.size() == 0) {
+		TEST(true); // BM wants to assign range, but no workers available
 		if (BM_DEBUG) {
 			fmt::print("BM {0} waiting for blob workers before assigning granules\n", bmData->epoch);
 		}
@@ -460,6 +462,8 @@ ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
 			throw;
 		}
 
+		TEST(true); // BM retrying range assign
+
 		// We use reliable delivery (getReply), so the broken_promise means the worker is dead, and we may need to retry
 		// somewhere else
 		if (assignment.isAssign) {
@@ -533,6 +537,7 @@ ACTOR Future<Void> rangeAssigner(Reference<BlobManagerData> bmData) {
 				if (assignment.assign.get().type == AssignRequestType::Continue) {
 					ASSERT(assignment.worker.present());
 					if (i.range() != assignment.keyRange || i.cvalue() != assignment.worker.get()) {
+						TEST(true); // BM assignment out of date
 						if (BM_DEBUG) {
 							fmt::print("Out of date re-assign for ({0}, {1}). Assignment must have changed while "
 							           "checking split.\n  Reassign: [{2} - {3}): {4}\n  Existing: [{5} - {6}): {7}\n",
@@ -1087,8 +1092,8 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 		bmData->rangesToAssign.send(raAssignSplit);
 	}
 
-	// ensure the new assignments actually got processed and the split boundaries are reflected in the granule mapping
-	// before returning
+	// Ensure the new assignments actually got processed and the split boundaries are reflected in the granule mapping
+	// before returning. This prevents a race with a subsequent split evaluation
 	wait(bmData->rangesToAssign.onEmpty());
 
 	return Void();
@@ -1350,6 +1355,7 @@ ACTOR Future<Void> monitorBlobWorkerStatus(Reference<BlobManagerData> bmData, Bl
 			// if it is permanent, the failure monitor will eventually trip.
 			ASSERT(e.code() != error_code_end_of_stream);
 			if (e.code() == error_code_request_maybe_delivered || e.code() == error_code_connection_failed) {
+				TEST(true); // BM retrying BW monitoring
 				wait(delay(backoff));
 				backoff = std::min(backoff * SERVER_KNOBS->BLOB_MANAGER_STATUS_EXP_BACKOFF_EXPONENT,
 				                   SERVER_KNOBS->BLOB_MANAGER_STATUS_EXP_BACKOFF_MAX);
@@ -1503,6 +1509,7 @@ static void addAssignment(KeyRangeMap<std::tuple<UID, int64_t, int64_t>>& map,
 					std::get<0>(old.value()) = UID();
 				}
 				if (outOfDate.empty() || outOfDate.back() != std::pair(oldWorker, KeyRange(old.range()))) {
+					TEST(true); // BM Recovery: DB disagrees with workers
 					outOfDate.push_back(std::pair(oldWorker, old.range()));
 				}
 			} else if (oldWorker != UID() && oldWorker != newId &&
@@ -1510,6 +1517,7 @@ static void addAssignment(KeyRangeMap<std::tuple<UID, int64_t, int64_t>>& map,
 				// 2 blob workers reported conflicting mappings, add old one to out of date (if not already added by a
 				// previous intersecting range in the split case)
 				if (outOfDate.empty() || outOfDate.back() != std::pair(oldWorker, KeyRange(old.range()))) {
+					TEST(true); // BM Recovery: Two workers claim ownership of same granule
 					outOfDate.push_back(std::pair(oldWorker, old.range()));
 				}
 			}
@@ -1554,6 +1562,8 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 		bmData->doneRecovering.send(Void());
 		return Void();
 	}
+
+	TEST(true); // BM doing recovery
 
 	wait(delay(0));
 
@@ -1634,6 +1644,7 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 				bmData->workerStats[workerId].numGranulesAssigned = reply.get().assignments.size();
 			}
 		} else {
+			TEST(true); // BM Recovery: BW didn't respond to assignments request
 			// SOMEDAY: mark as failed and kill it
 			if (BM_DEBUG) {
 				fmt::print("  Worker {}: failed\n", workerId.toString().substr(0, 5));
@@ -1804,6 +1815,7 @@ ACTOR Future<Void> chaosRangeMover(Reference<BlobManagerData> bmData) {
 	// KeyRange isn't hashable and this is only for simulation, so just use toString of range
 	state std::unordered_set<std::string> alreadyMoved;
 	ASSERT(g_network->isSimulated());
+	TEST(true); // BM chaos range mover enabled
 	loop {
 		wait(delay(30.0));
 
@@ -1906,6 +1918,7 @@ ACTOR Future<Void> initializeBlobWorker(Reference<BlobManagerData> self, Recruit
 		// if it failed in an expected way, add some delay before we try to recruit again
 		// on this worker
 		if (newBlobWorker.isError()) {
+			TEST(true); // BM got error recruiting BW
 			TraceEvent(SevWarn, "BMRecruitmentError").error(newBlobWorker.getError());
 			if (!newBlobWorker.isError(error_code_recruitment_failed) &&
 			    !newBlobWorker.isError(error_code_request_maybe_delivered)) {
@@ -2560,6 +2573,8 @@ ACTOR Future<Void> doLockChecks(Reference<BlobManagerData> bmData) {
 		Promise<Void> check = bmData->doLockCheck;
 		wait(check.getFuture());
 		wait(delay(0.5)); // don't do this too often if a lot of conflict
+
+		TEST(true); // BM doing lock checks after getting conflicts
 
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
 

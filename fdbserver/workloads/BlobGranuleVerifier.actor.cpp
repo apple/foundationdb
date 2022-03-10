@@ -535,6 +535,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		for (int i = 0; i < threads; i++) {
 			clients.push_back(
 			    timeout(reportErrors(
+			                // TODO change back
 			                verifyGranules(
 			                    cx, this, false /*clientId == 0 && i == 0 && deterministicRandom()->random01() < 0.5*/),
 			                "BlobGranuleVerifier"),

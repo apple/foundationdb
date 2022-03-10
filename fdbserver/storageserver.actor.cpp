@@ -2118,9 +2118,11 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 			// If still empty, that means disk results were filtered out, but skipped all memory results. Add an empty,
 			// either the last version from disk
 			if (reply.mutations.empty() && res.size()) {
+				TEST(true); // Change feed adding empty version after disk + memory filtered
 				reply.mutations.push_back(reply.arena, MutationsAndVersionRef(lastVersion, lastKnownCommitted));
 			}
 		} else if (reply.mutations.empty() || reply.mutations.back().version < lastVersion) {
+			TEST(true); // Change feed adding empty version after disk filtered
 			reply.mutations.push_back(reply.arena, MutationsAndVersionRef(lastVersion, lastKnownCommitted));
 		}
 	} else {
@@ -2131,6 +2133,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 	Version finalVersion = std::min(req.end - 1, dequeVersion);
 	if ((reply.mutations.empty() || reply.mutations.back().version < finalVersion) && remainingLimitBytes > 0 &&
 	    remainingDurableBytes > 0) {
+		TEST(true); // Change feed adding empty version after empty results
 		reply.mutations.push_back(
 		    reply.arena, MutationsAndVersionRef(finalVersion, finalVersion == dequeVersion ? dequeKnownCommit : 0));
 		// if we add empty mutation after the last thing in memory, and didn't read from disk, gotAll is true
@@ -2305,6 +2308,7 @@ ACTOR Future<Void> stopChangeFeedOnMove(StorageServer* data, ChangeFeedStreamReq
 		}
 		return Void();
 	}
+	TEST(true); // Change feed moved away cancelling queries
 	// DO NOT call req.reply.onReady before sending - we need to propagate this error through regardless of how far
 	// behind client is
 	req.reply.sendError(wrong_shard_server());
@@ -4759,6 +4763,7 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 						lastVersion = remoteVersion;
 						versionsFetched++;
 					} else {
+						TEST(true); // Change feed ignoring write on move because it was popped concurrently
 						if (MUTATION_TRACKING_ENABLED) {
 							for (auto& m : remoteResult[remoteLoc].mutations) {
 								DEBUG_MUTATION("ChangeFeedWriteMoveIgnore", remoteVersion, m, data->thisServerID)
@@ -4827,6 +4832,7 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 
 	// if we were popped or removed while fetching but it didn't pass the fetch version while writing, clean up here
 	if (versionsFetched > 0 && startVersion < changeFeedInfo->emptyVersion) {
+		TEST(true); // Change feed cleaning up popped data after move
 		ASSERT(firstVersion != invalidVersion);
 		ASSERT(lastVersion != invalidVersion);
 		Version endClear = std::min(lastVersion + 1, changeFeedInfo->emptyVersion);
@@ -4872,6 +4878,7 @@ ACTOR Future<Version> fetchChangeFeed(StorageServer* data,
 
 	auto cleanupPending = data->changeFeedCleanupDurable.find(changeFeedInfo->id);
 	if (cleanupPending != data->changeFeedCleanupDurable.end()) {
+		TEST(true); // Change feed waiting for dirty previous move to finish
 		TraceEvent(SevDebug, "FetchChangeFeedWaitCleanup", data->thisServerID)
 		    .detail("RangeID", changeFeedInfo->id.printable())
 		    .detail("Range", changeFeedInfo->range.toString())
@@ -4964,6 +4971,7 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data, KeyR
 			auto feedCleanup = data->changeFeedCleanupDurable.find(cfEntry.rangeId);
 
 			if (cfEntry.stopVersion < changeFeedInfo->stopVersion) {
+				TEST(true); // Change feed updated stop version from fetch metadata
 				changeFeedInfo->stopVersion = cfEntry.stopVersion;
 				addMutationToLog = true;
 			}
@@ -5363,6 +5371,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		std::unordered_set<Key> newChangeFeeds;
 		for (auto& r : ranges) {
 			for (auto& cfInfo : r.value()) {
+				TEST(true); // SS fetching new change feed that didn't exist when fetch started
 				newChangeFeeds.insert(cfInfo->id);
 			}
 		}
