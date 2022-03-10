@@ -1077,7 +1077,7 @@ public:
 
 		Node* node(DeltaTree2* tree) const { return tree->nodeAt(nodeOffset); }
 
-		std::string toString() {
+		std::string toString() const {
 			return format("DecodedNode{nodeOffset=%d leftChildIndex=%d rightChildIndex=%d leftParentIndex=%d "
 			              "rightParentIndex=%d}",
 			              (int)nodeOffset,
@@ -1153,6 +1153,19 @@ public:
 			upperBound = T(a, upperBound);
 			arena = a;
 			updateUsedMemory();
+		}
+
+		std::string toString() const {
+			std::string s = format("DecodeCache{%p\n", this);
+			s += format("upperBound %s\n", upperBound.toString().c_str());
+			s += format("lowerBound %s\n", lowerBound.toString().c_str());
+			s += format("arenaSize %d\n", arena.getSize());
+			s += format("decodedNodes %d {\n", decodedNodes.size());
+			for (auto const& n : decodedNodes) {
+				s += format("  %s\n", n.toString().c_str());
+			}
+			s += format("}}\n");
+			return s;
 		}
 	};
 
