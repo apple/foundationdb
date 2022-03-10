@@ -4691,6 +4691,9 @@ struct DecodeBoundaryVerifier {
 
 	typedef std::map<Version, DecodeBoundaries> BoundariesByVersion;
 	std::unordered_map<LogicalPageID, BoundariesByVersion> boundariesByPageID;
+	std::vector<Key> boundarySamples;
+	int boundarySampleSize = 1000;
+	int boundaryPopulation = 0;
 
 	static DecodeBoundaryVerifier* getVerifier(std::string name) {
 		static std::map<std::string, DecodeBoundaryVerifier> verifiers;
@@ -4701,7 +4704,25 @@ struct DecodeBoundaryVerifier {
 		return nullptr;
 	}
 
+	void sampleBoundary(Key b) {
+		if (boundaryPopulation <= boundarySampleSize) {
+			boundarySamples.push_back(b);
+		} else if (deterministicRandom()->random01() < ((double)boundarySampleSize / boundaryPopulation)) {
+			boundarySamples[deterministicRandom()->randomInt(0, boundarySampleSize)] = b;
+		}
+		++boundaryPopulation;
+	}
+
+	Key getSample() const {
+		if (boundarySamples.empty()) {
+			return Key();
+		}
+		return boundarySamples[deterministicRandom()->randomInt(0, boundarySamples.size())];
+	}
+
 	void update(BTreePageIDRef id, Version v, Key lowerBound, Key upperBound) {
+		sampleBoundary(lowerBound);
+		sampleBoundary(upperBound);
 		debug_printf("decodeBoundariesUpdate %s %s '%s' to '%s'\n",
 		             ::toString(id).c_str(),
 		             ::toString(v).c_str(),
@@ -9521,9 +9542,11 @@ TEST_CASE("Lredwood/correctness/btree") {
 	state double clearProbability =
 	    params.getDouble("clearProbability").orDefault(deterministicRandom()->random01() * .1);
 	state double clearExistingBoundaryProbability =
-	    params.getDouble("clearProbability").orDefault(deterministicRandom()->random01() * .5);
+	    params.getDouble("clearExistingBoundaryProbability").orDefault(deterministicRandom()->random01() * .5);
 	state double clearSingleKeyProbability =
-	    params.getDouble("clearSingleKeyProbability").orDefault(deterministicRandom()->random01());
+	    params.getDouble("clearSingleKeyProbability").orDefault(deterministicRandom()->random01() * .1);
+	state double clearKnownNodeBoundaryProbability =
+	    params.getDouble("clearKnownNodeBoundaryProbability").orDefault(deterministicRandom()->random01() * .1);
 	state double clearPostSetProbability =
 	    params.getDouble("clearPostSetProbability").orDefault(deterministicRandom()->random01() * .1);
 	state double coldStartProbability =
@@ -9544,10 +9567,11 @@ TEST_CASE("Lredwood/correctness/btree") {
 
 	// These settings are an attempt to keep the test execution real reasonably short
 	state int64_t maxPageOps = params.getInt("maxPageOps").orDefault((shortTest || serialTest) ? 50e3 : 1e6);
-	state int maxVerificationMapEntries =
-	    params.getInt("maxVerificationMapEntries").orDefault((1.0 - coldStartProbability) * 300e3);
+	state int maxVerificationMapEntries = params.getInt("maxVerificationMapEntries").orDefault(300e3);
+	state int maxColdStarts = params.getInt("maxColdStarts").orDefault(300);
+
 	// Max number of records in the BTree or the versioned written map to visit
-	state int64_t maxRecordsRead = 300e6;
+	state int64_t maxRecordsRead = params.getInt("maxRecordsRead").orDefault(300e6);
 
 	printf("\n");
 	printf("file: %s\n", file.c_str());
@@ -9565,9 +9589,11 @@ TEST_CASE("Lredwood/correctness/btree") {
 	printf("setExistingKeyProbability: %f\n", setExistingKeyProbability);
 	printf("clearProbability: %f\n", clearProbability);
 	printf("clearExistingBoundaryProbability: %f\n", clearExistingBoundaryProbability);
+	printf("clearKnownNodeBoundaryProbability: %f\n", clearKnownNodeBoundaryProbability);
 	printf("clearSingleKeyProbability: %f\n", clearSingleKeyProbability);
 	printf("clearPostSetProbability: %f\n", clearPostSetProbability);
 	printf("coldStartProbability: %f\n", coldStartProbability);
+	printf("maxColdStarts: %d\n", maxColdStarts);
 	printf("advanceOldVersionProbability: %f\n", advanceOldVersionProbability);
 	printf("pageCacheBytes: %s\n", pageCacheBytes == 0 ? "default" : format("%" PRId64, pageCacheBytes).c_str());
 	printf("versionIncrement: %" PRId64 "\n", versionIncrement);
@@ -9583,9 +9609,11 @@ TEST_CASE("Lredwood/correctness/btree") {
 	state VersionedBTree* btree = new VersionedBTree(pager, file);
 	wait(btree->init());
 
+	state DecodeBoundaryVerifier* pBoundaries = DecodeBoundaryVerifier::getVerifier(file);
 	state std::map<std::pair<std::string, Version>, Optional<std::string>> written;
 	state int64_t totalRecordsRead = 0;
 	state std::set<Key> keys;
+	state int coldStarts = 0;
 
 	state Version lastVer = btree->getLastCommittedVersion();
 	printf("Starting from version: %" PRId64 "\n", lastVer);
@@ -9642,6 +9670,21 @@ TEST_CASE("Lredwood/correctness/btree") {
 				auto i = keys.upper_bound(end);
 				if (i != keys.end())
 					end = *i;
+			}
+
+			if (!pBoundaries->boundarySamples.empty() &&
+			    deterministicRandom()->random01() < clearKnownNodeBoundaryProbability) {
+				start = pBoundaries->getSample();
+
+				// Can't allow the end boundary to be a start, so just convert to empty string.
+				if (start == VersionedBTree::dbEnd.key) {
+					start = Key();
+				}
+			}
+
+			if (!pBoundaries->boundarySamples.empty() &&
+			    deterministicRandom()->random01() < clearKnownNodeBoundaryProbability) {
+				end = pBoundaries->getSample();
 			}
 
 			// Do a single key clear based on probability or end being randomly chosen to be the same as begin
@@ -9779,7 +9822,9 @@ TEST_CASE("Lredwood/correctness/btree") {
 			mutationBytesTargetThisCommit = randomSize(maxCommitSize);
 
 			// Recover from disk at random
-			if (!pagerMemoryOnly && deterministicRandom()->random01() < coldStartProbability) {
+			if (!pagerMemoryOnly && coldStarts < maxColdStarts &&
+			    deterministicRandom()->random01() < coldStartProbability) {
+				++coldStarts;
 				printf("Recovering from disk after next commit.\n");
 
 				// Wait for outstanding commit
