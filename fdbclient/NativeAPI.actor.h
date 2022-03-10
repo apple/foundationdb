@@ -157,6 +157,8 @@ struct TransactionOptions {
 	bool includePort : 1;
 	bool reportConflictingKeys : 1;
 	bool expensiveClearCostEstimation : 1;
+	bool useGrvCache : 1;
+	bool skipGrvCache : 1;
 
 	TransactionPriority priority;
 
@@ -307,13 +309,23 @@ public:
 		                reverse);
 	}
 
-	[[nodiscard]] Future<RangeResult> getRangeAndFlatMap(const KeySelector& begin,
-	                                                     const KeySelector& end,
-	                                                     const Key& mapper,
-	                                                     GetRangeLimits limits,
-	                                                     Snapshot = Snapshot::False,
-	                                                     Reverse = Reverse::False);
+	[[nodiscard]] Future<MappedRangeResult> getMappedRange(const KeySelector& begin,
+	                                                       const KeySelector& end,
+	                                                       const Key& mapper,
+	                                                       GetRangeLimits limits,
+	                                                       Snapshot = Snapshot::False,
+	                                                       Reverse = Reverse::False);
 
+private:
+	template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply, class RangeResultFamily>
+	Future<RangeResultFamily> getRangeInternal(const KeySelector& begin,
+	                                           const KeySelector& end,
+	                                           const Key& mapper,
+	                                           GetRangeLimits limits,
+	                                           Snapshot snapshot,
+	                                           Reverse reverse);
+
+public:
 	// A method for streaming data from the storage server that is more efficient than getRange when reading large
 	// amounts of data
 	[[nodiscard]] Future<Void> getRangeStream(const PromiseStream<Standalone<RangeResultRef>>& results,

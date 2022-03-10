@@ -430,9 +430,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			if (serverIndices.size()) {
 				KeyRangeRef range(cacheKey[k].key, (k < cacheKey.size() - 1) ? cacheKey[k + 1].key : allKeys.end);
 				cachedKeysLocationMap.insert(range, cacheServerInterfaces);
-				TraceEvent(SevDebug, "CheckCacheConsistency")
-				    .detail("CachedRange", range.toString())
-				    .detail("Index", k);
+				TraceEvent(SevDebug, "CheckCacheConsistency").detail("CachedRange", range).detail("Index", k);
 			}
 		}
 		// Second, insert corresponding storage servers into the list
@@ -545,8 +543,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 					wait(waitForAll(keyValueFutures));
 					TraceEvent(SevDebug, "CheckCacheConsistencyComparison")
-					    .detail("Begin", req.begin.toString())
-					    .detail("End", req.end.toString())
+					    .detail("Begin", req.begin)
+					    .detail("End", req.end)
 					    .detail("SSInterfaces", describe(iter_ss));
 
 					// Read the resulting entries
@@ -712,7 +710,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 						begin = firstGreaterThan(result[result.size() - 1].key);
 						ASSERT(begin.getKey() != allKeys.end);
 						lastStartSampleKey = lastSampleKey;
-						TraceEvent(SevDebug, "CacheConsistencyCheckNextBeginKey").detail("Key", begin.toString());
+						TraceEvent(SevDebug, "CacheConsistencyCheckNextBeginKey").detail("Key", begin);
 					} else
 						break;
 				} catch (Error& e) {
@@ -883,10 +881,16 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			for (int i = 0; i < commitProxyInfo->size(); i++)
 				keyServerLocationFutures.push_back(
 				    commitProxyInfo->get(i, &CommitProxyInterface::getKeyServersLocations)
-				        .getReplyUnlessFailedFor(
-				            GetKeyServerLocationsRequest(span.context, begin, end, limitKeyServers, false, Arena()),
-				            2,
-				            0));
+				        .getReplyUnlessFailedFor(GetKeyServerLocationsRequest(span.context,
+				                                                              Optional<TenantNameRef>(),
+				                                                              begin,
+				                                                              end,
+				                                                              limitKeyServers,
+				                                                              false,
+				                                                              latestVersion,
+				                                                              Arena()),
+				                                 2,
+				                                 0));
 
 			state bool keyServersInsertedForThisIteration = false;
 			choose {

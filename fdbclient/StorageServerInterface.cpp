@@ -106,6 +106,7 @@ void TSS_traceMismatch(TraceEvent& event, const GetKeyRequest& req, const GetKey
 	event
 	    .detail("KeySelector",
 	            format("%s%s:%d", req.sel.orEqual ? "=" : "", req.sel.getKey().printable().c_str(), req.sel.offset))
+	    .detail("Tenant", req.tenantInfo.name)
 	    .detail("Version", req.version)
 	    .detail("SSReply",
 	            format("%s%s:%d", src.sel.orEqual ? "=" : "", src.sel.getKey().printable().c_str(), src.sel.offset))
@@ -144,6 +145,7 @@ void TSS_traceMismatch(TraceEvent& event,
 	        format("%s%s:%d", req.begin.orEqual ? "=" : "", req.begin.getKey().printable().c_str(), req.begin.offset))
 	    .detail("End",
 	            format("%s%s:%d", req.end.orEqual ? "=" : "", req.end.getKey().printable().c_str(), req.end.offset))
+	    .detail("Tenant", req.tenantInfo.name)
 	    .detail("Version", req.version)
 	    .detail("Limit", req.limit)
 	    .detail("LimitBytes", req.limitBytes)
@@ -154,20 +156,20 @@ void TSS_traceMismatch(TraceEvent& event,
 
 // range reads and flat map
 template <>
-bool TSS_doCompare(const GetKeyValuesAndFlatMapReply& src, const GetKeyValuesAndFlatMapReply& tss) {
+bool TSS_doCompare(const GetMappedKeyValuesReply& src, const GetMappedKeyValuesReply& tss) {
 	return src.more == tss.more && src.data == tss.data;
 }
 
 template <>
-const char* TSS_mismatchTraceName(const GetKeyValuesAndFlatMapRequest& req) {
-	return "TSSMismatchGetKeyValuesAndFlatMap";
+const char* TSS_mismatchTraceName(const GetMappedKeyValuesRequest& req) {
+	return "TSSMismatchGetMappedKeyValues";
 }
 
 template <>
 void TSS_traceMismatch(TraceEvent& event,
-                       const GetKeyValuesAndFlatMapRequest& req,
-                       const GetKeyValuesAndFlatMapReply& src,
-                       const GetKeyValuesAndFlatMapReply& tss) {
+                       const GetMappedKeyValuesRequest& req,
+                       const GetMappedKeyValuesReply& src,
+                       const GetMappedKeyValuesReply& tss) {
 	std::string ssResultsString = format("(%d)%s:\n", src.data.size(), src.more ? "+" : "");
 	for (auto& it : src.data) {
 		ssResultsString += "\n" + it.key.printable() + "=" + traceChecksumValue(it.value);
@@ -183,6 +185,7 @@ void TSS_traceMismatch(TraceEvent& event,
 	        format("%s%s:%d", req.begin.orEqual ? "=" : "", req.begin.getKey().printable().c_str(), req.begin.offset))
 	    .detail("End",
 	            format("%s%s:%d", req.end.orEqual ? "=" : "", req.end.getKey().printable().c_str(), req.end.offset))
+	    .detail("Tenant", req.tenantInfo.name)
 	    .detail("Version", req.version)
 	    .detail("Limit", req.limit)
 	    .detail("LimitBytes", req.limitBytes)
@@ -223,6 +226,7 @@ void TSS_traceMismatch(TraceEvent& event,
 	        format("%s%s:%d", req.begin.orEqual ? "=" : "", req.begin.getKey().printable().c_str(), req.begin.offset))
 	    .detail("End",
 	            format("%s%s:%d", req.end.orEqual ? "=" : "", req.end.getKey().printable().c_str(), req.end.offset))
+	    .detail("Tenant", req.tenantInfo.name)
 	    .detail("Version", req.version)
 	    .detail("Limit", req.limit)
 	    .detail("LimitBytes", req.limitBytes)
@@ -396,9 +400,9 @@ void TSSMetrics::recordLatency(const GetKeyValuesRequest& req, double ssLatency,
 }
 
 template <>
-void TSSMetrics::recordLatency(const GetKeyValuesAndFlatMapRequest& req, double ssLatency, double tssLatency) {
-	SSgetKeyValuesAndFlatMapLatency.addSample(ssLatency);
-	TSSgetKeyValuesAndFlatMapLatency.addSample(tssLatency);
+void TSSMetrics::recordLatency(const GetMappedKeyValuesRequest& req, double ssLatency, double tssLatency) {
+	SSgetMappedKeyValuesLatency.addSample(ssLatency);
+	TSSgetMappedKeyValuesLatency.addSample(tssLatency);
 }
 
 template <>

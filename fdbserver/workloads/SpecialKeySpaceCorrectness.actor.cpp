@@ -144,8 +144,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			if (!self->compareRangeResult(correctResult, testResult)) {
 				TraceEvent(SevError, "TestFailure")
 				    .detail("Reason", "Results from getRange are inconsistent")
-				    .detail("Begin", begin.toString())
-				    .detail("End", end.toString())
+				    .detail("Begin", begin)
+				    .detail("End", end)
 				    .detail("LimitRows", limit.rows)
 				    .detail("LimitBytes", limit.bytes)
 				    .detail("Reverse", reverse);
@@ -185,8 +185,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			if (!self->compareRangeResult(correctRywResult, testRywResult)) {
 				TraceEvent(SevError, "TestFailure")
 				    .detail("Reason", "Results from getRange(ryw) are inconsistent")
-				    .detail("Begin", begin.toString())
-				    .detail("End", end.toString())
+				    .detail("Begin", begin)
+				    .detail("End", end)
 				    .detail("LimitRows", limit.rows)
 				    .detail("LimitBytes", limit.bytes)
 				    .detail("Reverse", reverse);
@@ -429,8 +429,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		// A clear cross two ranges are forbidden
 		try {
 			tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-			tx->clear(KeyRangeRef(SpecialKeySpace::getManamentApiCommandRange("exclude").begin,
-			                      SpecialKeySpace::getManamentApiCommandRange("failed").end));
+			tx->clear(KeyRangeRef(SpecialKeySpace::getManagementApiCommandRange("exclude").begin,
+			                      SpecialKeySpace::getManagementApiCommandRange("failed").end));
 			ASSERT(false);
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled)
@@ -569,8 +569,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					    .detail("TestKey", test_iter->key)
 					    .detail("CorrectValue", correct_iter->value)
 					    .detail("TestValue", test_iter->value)
-					    .detail("Begin", begin.toString())
-					    .detail("End", end.toString())
+					    .detail("Begin", begin)
+					    .detail("End", end)
 					    .detail("Ryw", ryw);
 					had_error = true;
 					++self->wrongResults;
@@ -584,8 +584,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				    .detail("ConflictType", read ? "read" : "write")
 				    .detail("CorrectKey", correct_iter->key)
 				    .detail("CorrectValue", correct_iter->value)
-				    .detail("Begin", begin.toString())
-				    .detail("End", end.toString())
+				    .detail("Begin", begin)
+				    .detail("End", end)
 				    .detail("Ryw", ryw);
 				++correct_iter;
 				had_error = true;
@@ -597,8 +597,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				    .detail("ConflictType", read ? "read" : "write")
 				    .detail("TestKey", test_iter->key)
 				    .detail("TestValue", test_iter->value)
-				    .detail("Begin", begin.toString())
-				    .detail("End", end.toString())
+				    .detail("Begin", begin)
+				    .detail("End", end)
 				    .detail("Ryw", ryw);
 				++test_iter;
 				had_error = true;
@@ -1274,11 +1274,11 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			try {
 				// maintenance
 				RangeResult maintenanceKVs = wait(
-				    tx->getRange(SpecialKeySpace::getManamentApiCommandRange("maintenance"), CLIENT_KNOBS->TOO_MANY));
+				    tx->getRange(SpecialKeySpace::getManagementApiCommandRange("maintenance"), CLIENT_KNOBS->TOO_MANY));
 				// By default, no maintenance is going on
 				ASSERT(!maintenanceKVs.more && !maintenanceKVs.size());
 				// datadistribution
-				RangeResult ddKVs = wait(tx->getRange(SpecialKeySpace::getManamentApiCommandRange("datadistribution"),
+				RangeResult ddKVs = wait(tx->getRange(SpecialKeySpace::getManagementApiCommandRange("datadistribution"),
 				                                      CLIENT_KNOBS->TOO_MANY));
 				// By default, data_distribution/mode := "-1"
 				ASSERT(!ddKVs.more && ddKVs.size() == 1);

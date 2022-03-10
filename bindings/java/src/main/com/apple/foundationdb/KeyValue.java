@@ -20,6 +20,8 @@
 
 package com.apple.foundationdb;
 
+import com.apple.foundationdb.tuple.ByteArrayUtil;
+
 import java.util.Arrays;
 
 /**
@@ -76,5 +78,14 @@ public class KeyValue {
 	@Override
 	public int hashCode() {
 		return 17 + (37 * Arrays.hashCode(key) + Arrays.hashCode(value));
+	}
+
+	@Override
+	public String toString() {
+		final StringBuilder sb = new StringBuilder("KeyValue{");
+		sb.append("key=").append(ByteArrayUtil.printable(key));
+		sb.append(", value=").append(ByteArrayUtil.printable(value));
+		sb.append('}');
+		return sb.toString();
 	}
 }

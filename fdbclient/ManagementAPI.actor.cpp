@@ -22,7 +22,7 @@
 #include <string>
 #include <vector>
 
-#include "contrib/fmt-8.0.1/include/fmt/format.h"
+#include "contrib/fmt-8.1.1/include/fmt/format.h"
 #include "fdbclient/Knobs.h"
 #include "flow/Arena.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
@@ -173,6 +173,20 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 				return out;
 			}
 			out[p + key] = format("%d", type);
+		}
+		if (key == "tenant_mode") {
+			TenantMode tenantMode;
+			if (value == "disabled") {
+				tenantMode = TenantMode::DISABLED;
+			} else if (value == "optional_experimental") {
+				tenantMode = TenantMode::OPTIONAL_TENANT;
+			} else if (value == "required_experimental") {
+				tenantMode = TenantMode::REQUIRED;
+			} else {
+				printf("Error: Only disabled|optional_experimental|required_experimental are valid for tenant_mode.\n");
+				return out;
+			}
+			out[p + key] = format("%d", tenantMode);
 		}
 		return out;
 	}
@@ -1368,9 +1382,9 @@ ACTOR Future<Void> includeServers(Database cx, std::vector<AddressExclusion> ser
 				for (auto& s : servers) {
 					if (!s.isValid()) {
 						if (failed) {
-							ryw.clear(SpecialKeySpace::getManamentApiCommandRange("failed"));
+							ryw.clear(SpecialKeySpace::getManagementApiCommandRange("failed"));
 						} else {
-							ryw.clear(SpecialKeySpace::getManamentApiCommandRange("exclude"));
+							ryw.clear(SpecialKeySpace::getManagementApiCommandRange("exclude"));
 						}
 					} else {
 						Key addr =
@@ -1470,9 +1484,9 @@ ACTOR Future<Void> includeLocalities(Database cx, std::vector<std::string> local
 				ryw.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 				if (includeAll) {
 					if (failed) {
-						ryw.clear(SpecialKeySpace::getManamentApiCommandRange("failedlocality"));
+						ryw.clear(SpecialKeySpace::getManagementApiCommandRange("failedlocality"));
 					} else {
-						ryw.clear(SpecialKeySpace::getManamentApiCommandRange("excludedlocality"));
+						ryw.clear(SpecialKeySpace::getManagementApiCommandRange("excludedlocality"));
 					}
 				} else {
 					for (const auto& l : localities) {
