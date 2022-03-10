@@ -17,109 +17,30 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include "TesterWorkload.h"
+#include "TesterApiWorkload.h"
 #include "TesterUtil.h"
-#include "TesterKeyValueStore.h"
-#include "test/apitester/TesterScheduler.h"
 #include <memory>
-#include <optional>
-#include <string_view>
 #include <fmt/format.h>
 
 namespace FdbApiTester {
 
-class ApiCorrectnessWorkload : public WorkloadBase {
+class ApiCorrectnessWorkload : public ApiWorkload {
 public:
+	ApiCorrectnessWorkload(const WorkloadConfig& config) : ApiWorkload(config) {
+		numRandomOperations = config.getIntOption("numRandomOperations", 1000);
+		numOpLeft = numRandomOperations;
+	}
+
+	void runTests() override { randomOperations(); }
+
+private:
 	enum OpType { OP_INSERT, OP_GET, OP_CLEAR, OP_CLEAR_RANGE, OP_COMMIT_READ, OP_LAST = OP_COMMIT_READ };
-
-	// The minimum length of a key
-	int minKeyLength;
-
-	// The maximum length of a key
-	int maxKeyLength;
-
-	// The minimum length of a value
-	int minValueLength;
-
-	// The maximum length of a value
-	int maxValueLength;
-
-	// Maximum number of keys to be accessed by a transaction
-	int maxKeysPerTransaction;
-
-	// Initial data size (number of key-value pairs)
-	int initialSize;
 
 	// The number of operations to be executed
 	int numRandomOperations;
 
-	// The ratio of reading existing keys
-	double readExistingKeysRatio;
-
-	// Key prefix
-	std::string keyPrefix;
-
-	ApiCorrectnessWorkload(const WorkloadConfig& config) : WorkloadBase(config) {
-		minKeyLength = config.getIntOption("minKeyLength", 1);
-		maxKeyLength = config.getIntOption("maxKeyLength", 64);
-		minValueLength = config.getIntOption("minValueLength", 1);
-		maxValueLength = config.getIntOption("maxValueLength", 1000);
-		maxKeysPerTransaction = config.getIntOption("maxKeysPerTransaction", 50);
-		initialSize = config.getIntOption("initialSize", 1000);
-		numRandomOperations = config.getIntOption("numRandomOperations", 1000);
-		readExistingKeysRatio = config.getFloatOption("readExistingKeysRatio", 0.9);
-		keyPrefix = fmt::format("{}/", workloadId);
-		numOpLeft = numRandomOperations;
-	}
-
-	void start() override {
-		schedule([this]() {
-			// 1. Clear data
-			clearData([this]() {
-				// 2. Populate initial data
-				populateData([this]() {
-					// 3. Generate random workload
-					randomOperations();
-				});
-			});
-		});
-	}
-
-private:
-	std::string randomKeyName() { return keyPrefix + Random::get().randomStringLowerCase(minKeyLength, maxKeyLength); }
-
-	std::string randomValue() { return Random::get().randomStringLowerCase(minValueLength, maxValueLength); }
-
-	std::string randomNotExistingKey() {
-		while (true) {
-			std::string key = randomKeyName();
-			if (!store.exists(key)) {
-				return key;
-			}
-		}
-	}
-
-	std::string randomExistingKey() {
-		std::string genKey = randomKeyName();
-		std::string key = store.getKey(genKey, true, 1);
-		if (key != store.endKey()) {
-			return key;
-		}
-		key = store.getKey(genKey, true, 0);
-		if (key != store.startKey()) {
-			return key;
-		}
-		info("No existing key found, using a new random key.");
-		return genKey;
-	}
-
-	std::string randomKey(double existingKeyRatio) {
-		if (Random::get().randomBool(existingKeyRatio)) {
-			return randomExistingKey();
-		} else {
-			return randomNotExistingKey();
-		}
-	}
+	// Operations counter
+	int numOpLeft;
 
 	void randomInsertOp(TTaskFct cont) {
 		int numKeys = Random::get().randomInt(1, maxKeysPerTransaction);
@@ -169,6 +90,7 @@ private:
 					        futures->push_back(ctx->tx()->get(kv.key, false));
 				        }
 				        ctx->continueAfterAll(futures, [ctx, futures, results]() {
+					        results->clear();
 					        for (auto& f : *futures) {
 						        results->push_back(((ValueFuture&)f).getValue());
 					        }
@@ -206,6 +128,7 @@ private:
 				    futures->push_back(ctx->tx()->get(key, false));
 			    }
 			    ctx->continueAfterAll(futures, [ctx, futures, results]() {
+				    results->clear();
 				    for (auto& f : *futures) {
 					    results->push_back(((ValueFuture&)f).getValue());
 				    }
@@ -286,24 +209,6 @@ private:
 		}
 	}
 
-	void clearData(TTaskFct cont) {
-		execTransaction(
-		    [this](auto ctx) {
-			    ctx->tx()->clearRange(keyPrefix, fmt::format("{}\xff", keyPrefix));
-			    ctx->commit();
-		    },
-		    [this, cont]() { schedule(cont); });
-	}
-
-	void populateData(TTaskFct cont) {
-		if (store.size() < initialSize) {
-			randomInsertOp([this, cont]() { populateData(cont); });
-		} else {
-			info("Data population completed");
-			schedule(cont);
-		}
-	}
-
 	void randomOperations() {
 		if (numOpLeft == 0)
 			return;
@@ -311,9 +216,6 @@ private:
 		numOpLeft--;
 		randomOperation([this]() { randomOperations(); });
 	}
-
-	int numOpLeft;
-	KeyValueStore store;
 };
 
 WorkloadFactory<ApiCorrectnessWorkload> ApiCorrectnessWorkloadFactory("ApiCorrectness");

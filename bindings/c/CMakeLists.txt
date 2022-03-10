@@ -101,10 +101,13 @@ if(NOT WIN32 AND NOT IS_ARM_MAC)
 
   set(API_TESTER_SRCS
     test/apitester/fdb_c_api_tester.cpp
+    test/apitester/TesterApiWorkload.cpp
+    test/apitester/TesterApiWorkload.h
     test/apitester/TesterApiWrapper.cpp
     test/apitester/TesterApiWrapper.h
     test/apitester/TesterTestSpec.cpp
     test/apitester/TesterTestSpec.h
+    test/apitester/TesterCancelTransactionWorkload.cpp
     test/apitester/TesterCorrectnessWorkload.cpp
     test/apitester/TesterKeyValueStore.cpp
     test/apitester/TesterKeyValueStore.h

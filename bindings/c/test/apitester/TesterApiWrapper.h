@@ -41,7 +41,7 @@ namespace FdbApiTester {
 // FDBFuture when this instance goes out of scope.
 class Future {
 public:
-	Future() : future_(nullptr) {}
+	Future() = default;
 	Future(FDBFuture* f);
 
 	FDBFuture* fdbFuture() { return future_.get(); };
@@ -49,6 +49,7 @@ public:
 	fdb_error_t getError() const;
 	explicit operator bool() const { return future_ != nullptr; };
 	void reset();
+	void cancel();
 
 protected:
 	std::shared_ptr<FDBFuture> future_;
@@ -63,7 +64,7 @@ public:
 
 class Transaction {
 public:
-	Transaction();
+	Transaction() = default;
 	Transaction(FDBTransaction* tx);
 	ValueFuture get(std::string_view key, fdb_bool_t snapshot);
 	void set(std::string_view key, std::string_view value);

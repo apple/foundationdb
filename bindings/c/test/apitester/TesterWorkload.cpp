@@ -86,11 +86,11 @@ void WorkloadBase::execTransaction(std::shared_ptr<ITransactionActor> tx, TTaskF
 	}
 	tasksScheduled++;
 	manager->txExecutor->execute(tx, [this, tx, cont, failOnError]() {
-		if (tx->error == error_code_success) {
+		fdb_error_t err = tx->getErrorCode();
+		if (tx->getErrorCode() == error_code_success) {
 			cont();
 		} else {
-			std::string msg =
-			    fmt::format("Transaction failed with error: {} ({}})", tx->error, fdb_get_error(tx->error));
+			std::string msg = fmt::format("Transaction failed with error: {} ({}})", err, fdb_get_error(err));
 			if (failOnError) {
 				error(msg);
 				failed = true;

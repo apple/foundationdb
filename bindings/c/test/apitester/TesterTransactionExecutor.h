@@ -44,7 +44,7 @@ public:
 	// Schedule a continuation to be executed when the future gets ready
 	virtual void continueAfter(Future f, TTaskFct cont) = 0;
 
-	// Commit the transaction
+	// Complete the transaction with a commit
 	virtual void commit() = 0;
 
 	// Mark the transaction as completed without committing it (for read transactions)
@@ -62,19 +62,16 @@ public:
 	virtual ~ITransactionActor() {}
 
 	// Initialize with the given transaction context
-	virtual void init(ITransactionContext* ctx) = 0;
+	virtual void init(std::shared_ptr<ITransactionContext> ctx) = 0;
 
 	// Start execution of the transaction, also called on retries
 	virtual void start() = 0;
 
-	// Reset the transaction state
-	virtual void reset() = 0;
+	// Transaction completion result (error_code_success in case of success)
+	virtual fdb_error_t getErrorCode() = 0;
 
-	// Abort the transaction with an unretriable error
-	virtual void setError(fdb_error_t err) { error = err; }
-
-	// Unretriable error, set if the transaction has failed
-	fdb_error_t error = error_code_success;
+	// Notification about the completion of the transaction
+	virtual void complete(fdb_error_t err) = 0;
 };
 
 /**
@@ -82,20 +79,20 @@ public:
  */
 class TransactionActorBase : public ITransactionActor {
 public:
-	void init(ITransactionContext* ctx) override { context = ctx; }
+	void init(std::shared_ptr<ITransactionContext> ctx) override { context = ctx; }
+	fdb_error_t getErrorCode() override { return error; }
+	void complete(fdb_error_t err) override;
 
 protected:
-	ITransactionContext* ctx() { return context; }
-	Transaction* tx() { return ctx()->tx(); }
-	void commit() { ctx()->commit(); }
-	void reset() override {}
+	std::shared_ptr<ITransactionContext> ctx() { return context; }
 
 private:
-	ITransactionContext* context = nullptr;
+	std::shared_ptr<ITransactionContext> context;
+	fdb_error_t error = error_code_success;
 };
 
 // Type of the lambda functions implementing a transaction
-using TTxStartFct = std::function<void(ITransactionContext*)>;
+using TTxStartFct = std::function<void(std::shared_ptr<ITransactionContext>)>;
 
 /**
  * A wrapper class for transactions implemented by lambda functions

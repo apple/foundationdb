@@ -40,6 +40,10 @@ void Future::reset() {
 	future_.reset();
 }
 
+void Future::cancel() {
+	fdb_future_cancel(future_.get());
+}
+
 fdb_error_t Future::getError() const {
 	return fdb_future_get_error(future_.get());
 }

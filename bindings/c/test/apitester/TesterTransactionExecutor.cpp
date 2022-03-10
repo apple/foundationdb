@@ -25,8 +25,15 @@
 #include <unordered_map>
 #include <mutex>
 #include <atomic>
+#include <chrono>
+#include <thread>
 
 namespace FdbApiTester {
+
+void TransactionActorBase::complete(fdb_error_t err) {
+	error = err;
+	context = {};
+}
 
 void ITransactionContext::continueAfterAll(std::shared_ptr<std::vector<Future>> futures, TTaskFct cont) {
 	auto counter = std::make_shared<std::atomic<int>>(futures->size());
@@ -39,154 +46,295 @@ void ITransactionContext::continueAfterAll(std::shared_ptr<std::vector<Future>> 
 	}
 }
 
-class TransactionContext : public ITransactionContext {
+/**
+ * Transaction context base class, containing reusable functionality
+ */
+class TransactionContextBase : public ITransactionContext, public std::enable_shared_from_this<TransactionContextBase> {
 public:
-	TransactionContext(FDBTransaction* tx,
-	                   std::shared_ptr<ITransactionActor> txActor,
-	                   TTaskFct cont,
-	                   const TransactionExecutorOptions& options,
-	                   IScheduler* scheduler)
-	  : options(options), fdbTx(tx), txActor(txActor), contAfterDone(cont), scheduler(scheduler) {}
+	TransactionContextBase(FDBTransaction* tx,
+	                       std::shared_ptr<ITransactionActor> txActor,
+	                       TTaskFct cont,
+	                       IScheduler* scheduler)
+	  : fdbTx(tx), txActor(txActor), contAfterDone(cont), scheduler(scheduler), txState(TxState::IN_PROGRESS) {}
+
+	// A state machine:
+	// IN_PROGRESS -> (ON_ERROR -> IN_PROGRESS)* [-> ON_ERROR] -> DONE
+	enum class TxState { IN_PROGRESS, ON_ERROR, DONE };
 
 	Transaction* tx() override { return &fdbTx; }
+
+	// Set a continuation to be executed when a future gets ready
 	void continueAfter(Future f, TTaskFct cont) override { doContinueAfter(f, cont); }
+
+	// Complete the transaction with a commit
 	void commit() override {
-		Future f = fdbTx.commit();
-		doContinueAfter(f, [this]() { done(); });
-	}
-	void done() override {
-		TTaskFct cont = contAfterDone;
-		ASSERT(!onErrorFuture);
-		ASSERT(waitMap.empty());
-		delete this;
-		cont();
-	}
-
-private:
-	void doContinueAfter(Future f, TTaskFct cont) {
-		if (options.blockOnFutures) {
-			blockingContinueAfter(f, cont);
-		} else {
-			asyncContinueAfter(f, cont);
-		}
-	}
-
-	void blockingContinueAfter(Future f, TTaskFct cont) {
-		scheduler->schedule([this, f, cont]() mutable {
-			std::unique_lock<std::mutex> lock(mutex);
-			if (!onErrorFuture) {
-				fdb_error_t err = fdb_future_block_until_ready(f.fdbFuture());
-				if (err) {
-					lock.unlock();
-					transactionFailed(err);
-					return;
-				}
-				err = f.getError();
-				if (err) {
-					if (err != error_code_transaction_cancelled) {
-						onErrorFuture = fdbTx.onError(err);
-						fdb_error_t err2 = fdb_future_block_until_ready(onErrorFuture.fdbFuture());
-						if (err2) {
-							lock.unlock();
-							transactionFailed(err2);
-							return;
-						}
-						scheduler->schedule([this]() { handleOnErrorResult(); });
-					}
-				} else {
-					scheduler->schedule([cont]() { cont(); });
-				}
-			}
-		});
-	}
-
-	void asyncContinueAfter(Future f, TTaskFct cont) {
 		std::unique_lock<std::mutex> lock(mutex);
-		if (!onErrorFuture) {
-			waitMap[f.fdbFuture()] = WaitInfo{ f, cont };
-			lock.unlock();
-			fdb_error_t err = fdb_future_set_callback(f.fdbFuture(), futureReadyCallback, this);
-			if (err) {
-				transactionFailed(err);
-			}
-		}
-	}
-
-	static void futureReadyCallback(FDBFuture* f, void* param) {
-		TransactionContext* txCtx = (TransactionContext*)param;
-		txCtx->onFutureReady(f);
-	}
-
-	void onFutureReady(FDBFuture* f) {
-		std::unique_lock<std::mutex> lock(mutex);
-		auto iter = waitMap.find(f);
-		if (iter == waitMap.end()) {
+		if (txState != TxState::IN_PROGRESS) {
 			return;
 		}
-		fdb_error_t err = fdb_future_get_error(f);
-		TTaskFct cont = iter->second.cont;
-		waitMap.erase(iter);
-		if (err) {
-			if (err != error_code_transaction_cancelled) {
-				waitMap.clear();
-				onErrorFuture = tx()->onError(err);
-				lock.unlock();
-				fdb_error_t err = fdb_future_set_callback(onErrorFuture.fdbFuture(), onErrorReadyCallback, this);
-				if (err) {
-					transactionFailed(err);
-				}
-			}
-		} else {
-			scheduler->schedule(cont);
-		}
+		lock.unlock();
+		Future f = fdbTx.commit();
+		auto thisRef = shared_from_this();
+		doContinueAfter(f, [thisRef]() { thisRef->done(); });
 	}
 
-	static void onErrorReadyCallback(FDBFuture* f, void* param) {
-		TransactionContext* txCtx = (TransactionContext*)param;
-		txCtx->onErrorReady(f);
-	}
-
-	void onErrorReady(FDBFuture* f) {
-		scheduler->schedule([this]() { handleOnErrorResult(); });
-	}
-
-	void handleOnErrorResult() {
+	// Complete the transaction without a commit (for read transactions)
+	void done() override {
 		std::unique_lock<std::mutex> lock(mutex);
+		if (txState != TxState::IN_PROGRESS) {
+			return;
+		}
+		txState = TxState::DONE;
+		lock.unlock();
+		txActor->complete(error_code_success);
+		cleanUp();
+		contAfterDone();
+	}
+
+protected:
+	virtual void doContinueAfter(Future f, TTaskFct cont) = 0;
+
+	// Clean up transaction state after completing the transaction
+	// Note that the object may live longer, because it is referenced
+	// by not yet triggered callbacks
+	virtual void cleanUp() {
+		ASSERT(txState == TxState::DONE);
+		ASSERT(!onErrorFuture);
+		txActor = {};
+		fdbTx = {};
+	}
+
+	// Complete the transaction with an (unretriable) error
+	void transactionFailed(fdb_error_t err) {
+		ASSERT(err != error_code_success);
+		std::unique_lock<std::mutex> lock(mutex);
+		if (txState == TxState::DONE) {
+			return;
+		}
+		txState = TxState::DONE;
+		lock.unlock();
+		txActor->complete(err);
+		cleanUp();
+		contAfterDone();
+	}
+
+	// Handle result of an a transaction onError call
+	void handleOnErrorResult() {
+		ASSERT(txState == TxState::ON_ERROR);
 		fdb_error_t err = onErrorFuture.getError();
-		onErrorFuture.reset();
+		onErrorFuture = {};
 		if (err) {
 			transactionFailed(err);
 		} else {
+			std::unique_lock<std::mutex> lock(mutex);
+			txState = TxState::IN_PROGRESS;
 			lock.unlock();
-			txActor->reset();
 			txActor->start();
 		}
 	}
 
-	struct WaitInfo {
-		Future future;
-		TTaskFct cont;
-	};
-
-	void transactionFailed(fdb_error_t err) {
-		std::unique_lock<std::mutex> lock(mutex);
-		onErrorFuture.reset();
-		waitMap.clear();
-		lock.unlock();
-		txActor->setError(err);
-		done();
-	}
-
-	const TransactionExecutorOptions& options;
+	// FDB transaction
 	Transaction fdbTx;
+
+	// Actor implementing the transaction worklflow
 	std::shared_ptr<ITransactionActor> txActor;
+
+	// Mutex protecting access to shared mutable state
 	std::mutex mutex;
-	std::unordered_map<FDBFuture*, WaitInfo> waitMap;
-	Future onErrorFuture;
+
+	// Continuation to be called after completion of the transaction
 	TTaskFct contAfterDone;
+
+	// Reference to the scheduler
 	IScheduler* scheduler;
+
+	// Transaction execution state
+	TxState txState;
+
+	// onError future used in ON_ERROR state
+	Future onErrorFuture;
 };
 
+/**
+ *  Transaction context using blocking waits to implement continuations on futures
+ */
+class BlockingTransactionContext : public TransactionContextBase {
+public:
+	BlockingTransactionContext(FDBTransaction* tx,
+	                           std::shared_ptr<ITransactionActor> txActor,
+	                           TTaskFct cont,
+	                           IScheduler* scheduler)
+	  : TransactionContextBase(tx, txActor, cont, scheduler) {}
+
+protected:
+	void doContinueAfter(Future f, TTaskFct cont) override {
+		auto thisRef = std::static_pointer_cast<BlockingTransactionContext>(shared_from_this());
+		scheduler->schedule([thisRef, f, cont]() mutable { thisRef->blockingContinueAfter(f, cont); });
+	}
+
+	void blockingContinueAfter(Future f, TTaskFct cont) {
+		std::unique_lock<std::mutex> lock(mutex);
+		if (txState != TxState::IN_PROGRESS) {
+			return;
+		}
+		lock.unlock();
+		fdb_error_t err = fdb_future_block_until_ready(f.fdbFuture());
+		if (err) {
+			transactionFailed(err);
+			return;
+		}
+		err = f.getError();
+		if (err == error_code_transaction_cancelled) {
+			return;
+		}
+		if (err == error_code_success) {
+			scheduler->schedule([cont]() { cont(); });
+			return;
+		}
+
+		lock.lock();
+		if (txState != TxState::IN_PROGRESS) {
+			// Ignore further errors, if the transaction is in the error handing mode or completed
+			return;
+		}
+		txState = TxState::ON_ERROR;
+		lock.unlock();
+
+		ASSERT(!onErrorFuture);
+		onErrorFuture = fdbTx.onError(err);
+		fdb_error_t err2 = fdb_future_block_until_ready(onErrorFuture.fdbFuture());
+		if (err2) {
+			transactionFailed(err2);
+			return;
+		}
+		auto thisRef = std::static_pointer_cast<BlockingTransactionContext>(shared_from_this());
+		scheduler->schedule([thisRef]() { thisRef->handleOnErrorResult(); });
+	}
+};
+
+/**
+ *  Transaction context using callbacks to implement continuations on futures
+ */
+class AsyncTransactionContext : public TransactionContextBase {
+public:
+	AsyncTransactionContext(FDBTransaction* tx,
+	                        std::shared_ptr<ITransactionActor> txActor,
+	                        TTaskFct cont,
+	                        IScheduler* scheduler)
+	  : TransactionContextBase(tx, txActor, cont, scheduler) {}
+
+protected:
+	void doContinueAfter(Future f, TTaskFct cont) override {
+		std::unique_lock<std::mutex> lock(mutex);
+		if (txState != TxState::IN_PROGRESS) {
+			return;
+		}
+		callbackMap[f.fdbFuture()] = CallbackInfo{ f, cont, shared_from_this() };
+		lock.unlock();
+		fdb_error_t err = fdb_future_set_callback(f.fdbFuture(), futureReadyCallback, this);
+		if (err) {
+			lock.lock();
+			callbackMap.erase(f.fdbFuture());
+			lock.unlock();
+			transactionFailed(err);
+		}
+	}
+
+	static void futureReadyCallback(FDBFuture* f, void* param) {
+		AsyncTransactionContext* txCtx = (AsyncTransactionContext*)param;
+		txCtx->onFutureReady(f);
+	}
+
+	void onFutureReady(FDBFuture* f) {
+		injectRandomSleep();
+		std::unique_lock<std::mutex> lock(mutex);
+		auto iter = callbackMap.find(f);
+		ASSERT(iter != callbackMap.end());
+		CallbackInfo cbInfo = iter->second;
+		callbackMap.erase(iter);
+		if (txState != TxState::IN_PROGRESS) {
+			return;
+		}
+		lock.unlock();
+		fdb_error_t err = fdb_future_get_error(f);
+		if (err == error_code_transaction_cancelled) {
+			return;
+		}
+		if (err == error_code_success) {
+			scheduler->schedule(cbInfo.cont);
+			return;
+		}
+
+		lock.lock();
+		if (txState != TxState::IN_PROGRESS) {
+			// Ignore further errors, if the transaction is in the error handing mode or completed
+			return;
+		}
+		txState = TxState::ON_ERROR;
+		lock.unlock();
+
+		ASSERT(!onErrorFuture);
+		onErrorFuture = tx()->onError(err);
+		onErrorThisRef = std::static_pointer_cast<AsyncTransactionContext>(shared_from_this());
+		fdb_error_t err2 = fdb_future_set_callback(onErrorFuture.fdbFuture(), onErrorReadyCallback, this);
+		if (err2) {
+			onErrorFuture = {};
+			transactionFailed(err2);
+		}
+	}
+
+	static void onErrorReadyCallback(FDBFuture* f, void* param) {
+		AsyncTransactionContext* txCtx = (AsyncTransactionContext*)param;
+		txCtx->onErrorReady(f);
+	}
+
+	void onErrorReady(FDBFuture* f) {
+		injectRandomSleep();
+		auto thisRef = onErrorThisRef;
+		onErrorThisRef = {};
+		scheduler->schedule([thisRef]() { thisRef->handleOnErrorResult(); });
+	}
+
+	void cleanUp() override {
+		TransactionContextBase::cleanUp();
+
+		// Cancel all pending operations
+		// Note that the callbacks of the cancelled futures will still be called
+		std::unique_lock<std::mutex> lock(mutex);
+		std::vector<Future> futures;
+		for (auto& iter : callbackMap) {
+			futures.push_back(iter.second.future);
+		}
+		lock.unlock();
+		for (auto& f : futures) {
+			f.cancel();
+		}
+	}
+
+	// Inject a random sleep with a low probability
+	void injectRandomSleep() {
+		if (Random::get().randomBool(0.01)) {
+			std::this_thread::sleep_for(std::chrono::milliseconds(Random::get().randomInt(1, 5)));
+		}
+	}
+
+	// Object references for a future callback
+	struct CallbackInfo {
+		Future future;
+		TTaskFct cont;
+		std::shared_ptr<ITransactionContext> thisRef;
+	};
+
+	// Map for keeping track of future waits and holding necessary object references
+	std::unordered_map<FDBFuture*, CallbackInfo> callbackMap;
+
+	// Holding reference to this for onError future C callback
+	std::shared_ptr<AsyncTransactionContext> onErrorThisRef;
+};
+
+/**
+ * Transaction executor base class, containing reusable functionality
+ */
 class TransactionExecutorBase : public ITransactionExecutor {
 public:
 	TransactionExecutorBase(const TransactionExecutorOptions& options) : options(options), scheduler(nullptr) {}
@@ -197,14 +345,20 @@ public:
 	}
 
 protected:
-	void executeWithDatabase(FDBDatabase* db, std::shared_ptr<ITransactionActor> txActor, TTaskFct cont) {
+	// Execute the transaction on the given database instance
+	void executeOnDatabase(FDBDatabase* db, std::shared_ptr<ITransactionActor> txActor, TTaskFct cont) {
 		FDBTransaction* tx;
 		fdb_error_t err = fdb_database_create_transaction(db, &tx);
 		if (err != error_code_success) {
-			txActor->setError(err);
+			txActor->complete(err);
 			cont();
 		} else {
-			TransactionContext* ctx = new TransactionContext(tx, txActor, cont, options, scheduler);
+			std::shared_ptr<ITransactionContext> ctx;
+			if (options.blockOnFutures) {
+				ctx = std::make_shared<BlockingTransactionContext>(tx, txActor, cont, scheduler);
+			} else {
+				ctx = std::make_shared<AsyncTransactionContext>(tx, txActor, cont, scheduler);
+			}
 			txActor->init(ctx);
 			txActor->start();
 		}
@@ -216,6 +370,9 @@ protected:
 	IScheduler* scheduler;
 };
 
+/**
+ * Transaction executor load balancing transactions over a fixed pool of databases
+ */
 class DBPoolTransactionExecutor : public TransactionExecutorBase {
 public:
 	DBPoolTransactionExecutor(const TransactionExecutorOptions& options) : TransactionExecutorBase(options) {}
@@ -239,7 +396,7 @@ public:
 
 	void execute(std::shared_ptr<ITransactionActor> txActor, TTaskFct cont) override {
 		int idx = Random::get().randomInt(0, options.numDatabases - 1);
-		executeWithDatabase(databases[idx], txActor, cont);
+		executeOnDatabase(databases[idx], txActor, cont);
 	}
 
 	void release() {
@@ -252,6 +409,9 @@ private:
 	std::vector<FDBDatabase*> databases;
 };
 
+/**
+ * Transaction executor executing each transaction on a separate database
+ */
 class DBPerTransactionExecutor : public TransactionExecutorBase {
 public:
 	DBPerTransactionExecutor(const TransactionExecutorOptions& options) : TransactionExecutorBase(options) {}
@@ -260,10 +420,10 @@ public:
 		FDBDatabase* db = nullptr;
 		fdb_error_t err = fdb_create_database(clusterFile.c_str(), &db);
 		if (err != error_code_success) {
-			txActor->setError(err);
+			txActor->complete(err);
 			cont();
 		}
-		executeWithDatabase(db, txActor, [cont, db]() {
+		executeOnDatabase(db, txActor, [cont, db]() {
 			fdb_database_destroy(db);
 			cont();
 		});
