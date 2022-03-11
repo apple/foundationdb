@@ -28,7 +28,7 @@ class TagThrottler {
 
 public:
 	TagThrottler(Database db, UID id);
-	~ITagThrottler();
+	~TagThrottler();
 
 	// Poll the system keyspace looking for updates made through the tag throttling API
 	Future<Void> monitorThrottlingChanges();
@@ -36,7 +36,7 @@ public:
 	// Increment the number of known requests associated with the specified tag
 	void addRequests(TransactionTag tag, int count);
 
-	// This throttled tag change ID is used to coordinate updates with the
+	// This throttled tag change ID is used to coordinate updates with the GRV proxies
 	uint64_t getThrottledTagChangeId() const;
 
 	// For each tag and priority combination, return the throughput limit and expiration time
@@ -50,5 +50,5 @@ public:
 
 	// Based on the busiest read and write tags in the provided storage queue info, update
 	// tag throttling limits.
-	Future<Void> tryAutoThrottleTag(StorageQueueInfo&, int64_t storageQueue, int64_t storageDurabilityLag);
+	Future<Void> tryUpdateAutoThrottling(StorageQueueInfo const&);
 };
