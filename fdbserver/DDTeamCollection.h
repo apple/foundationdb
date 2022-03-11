@@ -53,8 +53,6 @@ class TCTeamInfo;
 class TCMachineInfo;
 class TCMachineTeamInfo;
 
-FDB_DECLARE_BOOLEAN_PARAM(IsPrimary);
-
 // All state that represents an ongoing tss pair recruitment
 struct TSSPairState : ReferenceCounted<TSSPairState>, NonCopyable {
 	Promise<Optional<std::pair<UID, Version>>>
@@ -168,6 +166,12 @@ public:
 	bool excludeOnRecruit() const { return !isFailed && !isWrongConfiguration; }
 };
 typedef AsyncMap<UID, ServerStatus> ServerStatusMap;
+
+FDB_DECLARE_BOOLEAN_PARAM(IsPrimary);
+FDB_DECLARE_BOOLEAN_PARAM(IsInitialTeam);
+FDB_DECLARE_BOOLEAN_PARAM(IsRedundantTeam);
+FDB_DECLARE_BOOLEAN_PARAM(IsBadTeam);
+FDB_DECLARE_BOOLEAN_PARAM(WaitWiggle);
 
 class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	friend class DDTeamCollectionImpl;
@@ -402,8 +406,8 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	void includeStorageServersForWiggle();
 
 	// Track a team and issue RelocateShards when the level of degradation changes
-	// A badTeam can be unhealthy or just a redundantTeam removed by machineTeamRemover() or serverTeamRemover()
-	Future<Void> teamTracker(Reference<TCTeamInfo> team, bool badTeam, bool redundantTeam);
+	// A bad team can be unhealthy or just a redundant team removed by machineTeamRemover() or serverTeamRemover()
+	Future<Void> teamTracker(Reference<TCTeamInfo> team, IsBadTeam, IsRedundantTeam);
 
 	// Check the status of a storage server.
 	// Apply all requirements to the server and mark it as excluded if it fails to satisfies these requirements
@@ -418,7 +422,7 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 
 	// NOTE: this actor returns when the cluster is healthy and stable (no server is expected to be removed in a period)
 	// processingWiggle and processingUnhealthy indicate that some servers are going to be removed.
-	Future<Void> waitUntilHealthy(double extraDelay = 0, bool waitWiggle = false) const;
+	Future<Void> waitUntilHealthy(double extraDelay = 0, WaitWiggle = WaitWiggle::False) const;
 
 	bool isCorrectDC(TCServerInfo const& server) const;
 
@@ -562,7 +566,7 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	// isIntialTeam : False when the team is added by addTeamsBestOf(); True otherwise, e.g.,
 	// when the team added at init() when we recreate teams by looking up DB
 	template <class InputIt>
-	void addTeam(InputIt begin, InputIt end, bool isInitialTeam) {
+	void addTeam(InputIt begin, InputIt end, IsInitialTeam isInitialTeam) {
 		std::vector<Reference<TCServerInfo>> newTeamServers;
 		for (auto i = begin; i != end; ++i) {
 			if (server_info.find(*i) != server_info.end()) {
@@ -574,10 +578,12 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 	}
 
 	void addTeam(const std::vector<Reference<TCServerInfo>>& newTeamServers,
-	             bool isInitialTeam,
-	             bool redundantTeam = false);
+	             IsInitialTeam,
+	             IsRedundantTeam = IsRedundantTeam::False);
 
-	void addTeam(std::set<UID> const& team, bool isInitialTeam) { addTeam(team.begin(), team.end(), isInitialTeam); }
+	void addTeam(std::set<UID> const& team, IsInitialTeam isInitialTeam) {
+		addTeam(team.begin(), team.end(), isInitialTeam);
+	}
 
 public:
 	Database cx;
