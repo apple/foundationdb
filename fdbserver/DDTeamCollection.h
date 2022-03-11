@@ -585,6 +585,12 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 		addTeam(team.begin(), team.end(), isInitialTeam);
 	}
 
+	// Create server teams based on machine teams
+	// Before the number of machine teams reaches the threshold, build a machine team for each server team
+	// When it reaches the threshold, first try to build a server team with existing machine teams; if failed,
+	// build an extra machine team and record the event in trace
+	int addTeamsBestOf(int teamsToBuild, int desiredTeams, int maxTeams);
+
 public:
 	Database cx;
 
@@ -632,12 +638,6 @@ public:
 	Future<Void> getTeam(GetTeamRequest);
 
 	Future<Void> init(Reference<InitialDataDistribution> initTeams, DDEnabledState const& ddEnabledState);
-
-	// Create server teams based on machine teams
-	// Before the number of machine teams reaches the threshold, build a machine team for each server team
-	// When it reaches the threshold, first try to build a server team with existing machine teams; if failed,
-	// build an extra machine team and record the event in trace
-	int addTeamsBestOf(int teamsToBuild, int desiredTeams, int maxTeams);
 
 	void addServer(StorageServerInterface newServer,
 	               ProcessClass processClass,
