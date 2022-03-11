@@ -1,5 +1,5 @@
 /*
- * RangeAndFlatMapQueryIntegrationTest.java
+ * MappedRangeQueryIntegrationTest.java
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -40,7 +40,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
 @ExtendWith(RequiresDatabase.class)
-class RangeAndFlatMapQueryIntegrationTest {
+class MappedRangeQueryIntegrationTest {
 	private static final FDB fdb = FDB.selectAPIVersion(710);
 	public String databaseArg = null;
 	private Database openFDB() { return fdb.open(databaseArg); }
@@ -67,16 +67,27 @@ class RangeAndFlatMapQueryIntegrationTest {
 	static private String indexKey(int i) { return String.format("index-key-of-record-%08d", i); }
 	static private String dataOfRecord(int i) { return String.format("data-of-record-%08d", i); }
 
-	static byte[] MAPPER = Tuple.from(PREFIX, RECORD, "{K[3]}").pack();
+	static byte[] MAPPER = Tuple.from(PREFIX, RECORD, "{K[3]}", "{...}").pack();
+	static int SPLIT_SIZE = 3;
+
 	static private byte[] indexEntryKey(final int i) {
 		return Tuple.from(PREFIX, INDEX, indexKey(i), primaryKey(i)).pack();
 	}
-	static private byte[] recordKey(final int i) { return Tuple.from(PREFIX, RECORD, primaryKey(i)).pack(); }
-	static private byte[] recordValue(final int i) { return Tuple.from(dataOfRecord(i)).pack(); }
+	static private byte[] recordKeyPrefix(final int i) {
+		return Tuple.from(PREFIX, RECORD, primaryKey(i)).pack();
+	}
+	static private byte[] recordKey(final int i, final int split) {
+		return Tuple.from(PREFIX, RECORD, primaryKey(i), split).pack();
+	}
+	static private byte[] recordValue(final int i, final int split) {
+		return Tuple.from(dataOfRecord(i), split).pack();
+	}
 
 	static private void insertRecordWithIndex(final Transaction tr, final int i) {
 		tr.set(indexEntryKey(i), EMPTY);
-		tr.set(recordKey(i), recordValue(i));
+		for (int split = 0; split < SPLIT_SIZE; split++) {
+			tr.set(recordKey(i, split), recordValue(i, split));
+		}
 	}
 
 	private static String getArgFromEnv() {
@@ -86,7 +97,7 @@ class RangeAndFlatMapQueryIntegrationTest {
 		return cluster;
 	}
 	public static void main(String[] args) throws Exception {
-		final RangeAndFlatMapQueryIntegrationTest test = new RangeAndFlatMapQueryIntegrationTest();
+		final MappedRangeQueryIntegrationTest test = new MappedRangeQueryIntegrationTest();
 		test.databaseArg = getArgFromEnv();
 		test.clearDatabase();
 		test.comparePerformance();
@@ -94,21 +105,21 @@ class RangeAndFlatMapQueryIntegrationTest {
 	}
 
 	int numRecords = 10000;
-	int numQueries = 10000;
+	int numQueries = 1;
 	int numRecordsPerQuery = 100;
-	boolean validate = false;
+	boolean validate = true;
 	@Test
 	void comparePerformance() {
 		FDB fdb = FDB.selectAPIVersion(710);
 		try (Database db = openFDB()) {
 			insertRecordsWithIndexes(numRecords, db);
-			instrument(rangeQueryAndGet, "rangeQueryAndGet", db);
-			instrument(rangeQueryAndFlatMap, "rangeQueryAndFlatMap", db);
+			instrument(rangeQueryAndThenRangeQueries, "rangeQueryAndThenRangeQueries", db);
+			instrument(mappedRangeQuery, "mappedRangeQuery", db);
 		}
 	}
 
 	private void instrument(final RangeQueryWithIndex query, final String name, final Database db) {
-		System.out.printf("Starting %s (numQueries:%d, numRecordsPerQuery:%d)\n", name, numQueries, numRecordsPerQuery);
+		System.out.printf("Starting %s (numQueries:%d, numRecordsPerQuery:%d, validation:%s)\n", name, numQueries, numRecordsPerQuery, validate ? "on" : "off");
 		long startTime = System.currentTimeMillis();
 		for (int queryId = 0; queryId < numQueries; queryId++) {
 			int begin = ThreadLocalRandom.current().nextInt(numRecords - numRecordsPerQuery);
@@ -140,7 +151,7 @@ class RangeAndFlatMapQueryIntegrationTest {
 		void run(int begin, int end, Database db);
 	}
 
-	RangeQueryWithIndex rangeQueryAndGet = (int begin, int end, Database db) -> db.run(tr -> {
+	RangeQueryWithIndex rangeQueryAndThenRangeQueries = (int begin, int end, Database db) -> db.run(tr -> {
 		try {
 			List<KeyValue> kvs = tr.getRange(KeySelector.firstGreaterOrEqual(indexEntryKey(begin)),
 			                                 KeySelector.firstGreaterOrEqual(indexEntryKey(end)),
@@ -150,22 +161,25 @@ class RangeAndFlatMapQueryIntegrationTest {
 			Assertions.assertEquals(end - begin, kvs.size());
 
 			// Get the records of each index entry IN PARALLEL.
-			List<CompletableFuture<byte[]>> resultFutures = new ArrayList<>();
+			List<CompletableFuture<List<KeyValue>>> resultFutures = new ArrayList<>();
 			// In reality, we need to get the record key by parsing the index entry key. But considering this is a
 			// performance test, we just ignore the returned key and simply generate it from recordKey.
 			for (int id = begin; id < end; id++) {
-				resultFutures.add(tr.get(recordKey(id)));
+				resultFutures.add(tr.getRange(Range.startsWith(recordKeyPrefix(id)),
+				                              ReadTransaction.ROW_LIMIT_UNLIMITED, false, StreamingMode.WANT_ALL).asList());
 			}
 			AsyncUtil.whenAll(resultFutures).get();
 
 			if (validate) {
 				final Iterator<KeyValue> indexes = kvs.iterator();
-				final Iterator<CompletableFuture<byte[]>> records = resultFutures.iterator();
+				final Iterator<CompletableFuture<List<KeyValue>>> records = resultFutures.iterator();
 				for (int id = begin; id < end; id++) {
 					Assertions.assertTrue(indexes.hasNext());
 					assertByteArrayEquals(indexEntryKey(id), indexes.next().getKey());
+
 					Assertions.assertTrue(records.hasNext());
-					assertByteArrayEquals(recordValue(id), records.next().get());
+					List<KeyValue> rangeResult = records.next().get();
+					validateRangeResult(id, rangeResult);
 				}
 				Assertions.assertFalse(indexes.hasNext());
 				Assertions.assertFalse(records.hasNext());
@@ -176,23 +190,32 @@ class RangeAndFlatMapQueryIntegrationTest {
 		return null;
 	});
 
-	RangeQueryWithIndex rangeQueryAndFlatMap = (int begin, int end, Database db) -> db.run(tr -> {
+	RangeQueryWithIndex mappedRangeQuery = (int begin, int end, Database db) -> db.run(tr -> {
 		try {
-			tr.options().setReadYourWritesDisable();
-			List<KeyValue> kvs =
-			    tr.snapshot()
-			        .getRangeAndFlatMap(KeySelector.firstGreaterOrEqual(indexEntryKey(begin)),
-			                            KeySelector.firstGreaterOrEqual(indexEntryKey(end)), MAPPER,
-			                            ReadTransaction.ROW_LIMIT_UNLIMITED, false, StreamingMode.WANT_ALL)
+			List<MappedKeyValue> kvs =
+			    tr.getMappedRange(KeySelector.firstGreaterOrEqual(indexEntryKey(begin)),
+			                          KeySelector.firstGreaterOrEqual(indexEntryKey(end)), MAPPER,
+			                          ReadTransaction.ROW_LIMIT_UNLIMITED, false, StreamingMode.WANT_ALL)
 			        .asList()
 			        .get();
 			Assertions.assertEquals(end - begin, kvs.size());
 
 			if (validate) {
-				final Iterator<KeyValue> results = kvs.iterator();
+				final Iterator<MappedKeyValue> results = kvs.iterator();
 				for (int id = begin; id < end; id++) {
 					Assertions.assertTrue(results.hasNext());
-					assertByteArrayEquals(recordValue(id), results.next().getValue());
+					MappedKeyValue mappedKeyValue = results.next();
+					assertByteArrayEquals(indexEntryKey(id), mappedKeyValue.getKey());
+					assertByteArrayEquals(EMPTY, mappedKeyValue.getValue());
+					assertByteArrayEquals(indexEntryKey(id), mappedKeyValue.getKey());
+
+					byte[] prefix = recordKeyPrefix(id);
+					assertByteArrayEquals(prefix, mappedKeyValue.getRangeBegin());
+					prefix[prefix.length - 1] = (byte)0x01;
+					assertByteArrayEquals(prefix, mappedKeyValue.getRangeEnd());
+
+					List<KeyValue> rangeResult = mappedKeyValue.getRangeResult();
+					validateRangeResult(id, rangeResult);
 				}
 				Assertions.assertFalse(results.hasNext());
 			}
@@ -202,55 +225,16 @@ class RangeAndFlatMapQueryIntegrationTest {
 		return null;
 	});
 
-	void assertByteArrayEquals(byte[] expected, byte[] actual) {
-		Assertions.assertEquals(ByteArrayUtil.printable(expected), ByteArrayUtil.printable(actual));
+	void validateRangeResult(int id, List<KeyValue> rangeResult) {
+		Assertions.assertEquals(rangeResult.size(), SPLIT_SIZE);
+		for (int split = 0; split < SPLIT_SIZE; split++) {
+			KeyValue keyValue = rangeResult.get(split);
+			assertByteArrayEquals(recordKey(id, split), keyValue.getKey());
+			assertByteArrayEquals(recordValue(id, split), keyValue.getValue());
+		}
 	}
 
-	@Test
-	void rangeAndFlatMapQueryOverMultipleRows() throws Exception {
-		try (Database db = openFDB()) {
-			insertRecordsWithIndexes(3, db);
-
-			List<byte[]> expected_data_of_records = new ArrayList<>();
-			for (int i = 0; i <= 1; i++) {
-				expected_data_of_records.add(recordValue(i));
-			}
-
-			db.run(tr -> {
-				// getRangeAndFlatMap is only support without RYW. This is a must!!!
-				tr.options().setReadYourWritesDisable();
-
-				// getRangeAndFlatMap is only supported with snapshot.
-				Iterator<KeyValue> kvs =
-				    tr.snapshot()
-				        .getRangeAndFlatMap(KeySelector.firstGreaterOrEqual(indexEntryKey(0)),
-				                            KeySelector.firstGreaterThan(indexEntryKey(1)), MAPPER,
-				                            ReadTransaction.ROW_LIMIT_UNLIMITED, false, StreamingMode.WANT_ALL)
-				        .iterator();
-				Iterator<byte[]> expected_data_of_records_iter = expected_data_of_records.iterator();
-				while (expected_data_of_records_iter.hasNext()) {
-					Assertions.assertTrue(kvs.hasNext(), "iterator ended too early");
-					KeyValue kv = kvs.next();
-					byte[] actual_data_of_record = kv.getValue();
-					byte[] expected_data_of_record = expected_data_of_records_iter.next();
-
-					// System.out.println("result key:" + ByteArrayUtil.printable(kv.getKey()) + " value:" +
-					// ByteArrayUtil.printable(kv.getValue())); Output:
-					// result
-					// key:\x02prefix\x00\x02INDEX\x00\x02index-key-of-record-0\x00\x02primary-key-of-record-0\x00
-					// value:\x02data-of-record-0\x00
-					// result
-					// key:\x02prefix\x00\x02INDEX\x00\x02index-key-of-record-1\x00\x02primary-key-of-record-1\x00
-					// value:\x02data-of-record-1\x00
-
-					// For now, we don't guarantee what that the returned keys mean.
-					Assertions.assertArrayEquals(expected_data_of_record, actual_data_of_record,
-					                             "Incorrect data of record!");
-				}
-				Assertions.assertFalse(kvs.hasNext(), "Iterator returned too much data");
-
-				return null;
-			});
-		}
+	void assertByteArrayEquals(byte[] expected, byte[] actual) {
+		Assertions.assertEquals(ByteArrayUtil.printable(expected), ByteArrayUtil.printable(actual));
 	}
 }

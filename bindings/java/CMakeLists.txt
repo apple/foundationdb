@@ -27,6 +27,8 @@ set(JAVA_BINDING_SRCS
   src/main/com/apple/foundationdb/directory/package-info.java
   src/main/com/apple/foundationdb/directory/PathUtil.java
   src/main/com/apple/foundationdb/DirectBufferIterator.java
+  src/main/com/apple/foundationdb/RangeResultDirectBufferIterator.java
+  src/main/com/apple/foundationdb/MappedRangeResultDirectBufferIterator.java
   src/main/com/apple/foundationdb/DirectBufferPool.java
   src/main/com/apple/foundationdb/FDB.java
   src/main/com/apple/foundationdb/FDBDatabase.java
@@ -36,11 +38,13 @@ set(JAVA_BINDING_SRCS
   src/main/com/apple/foundationdb/FutureKeyArray.java
   src/main/com/apple/foundationdb/FutureResult.java
   src/main/com/apple/foundationdb/FutureResults.java
+  src/main/com/apple/foundationdb/FutureMappedResults.java
   src/main/com/apple/foundationdb/FutureStrings.java
   src/main/com/apple/foundationdb/FutureVoid.java
   src/main/com/apple/foundationdb/JNIUtil.java
   src/main/com/apple/foundationdb/KeySelector.java
   src/main/com/apple/foundationdb/KeyValue.java
+  src/main/com/apple/foundationdb/MappedKeyValue.java
   src/main/com/apple/foundationdb/LocalityUtil.java
   src/main/com/apple/foundationdb/NativeFuture.java
   src/main/com/apple/foundationdb/NativeObjectWrapper.java
@@ -49,9 +53,12 @@ set(JAVA_BINDING_SRCS
   src/main/com/apple/foundationdb/package-info.java
   src/main/com/apple/foundationdb/Range.java
   src/main/com/apple/foundationdb/RangeQuery.java
+  src/main/com/apple/foundationdb/MappedRangeQuery.java
   src/main/com/apple/foundationdb/KeyArrayResult.java
   src/main/com/apple/foundationdb/RangeResult.java
+  src/main/com/apple/foundationdb/MappedRangeResult.java
   src/main/com/apple/foundationdb/RangeResultInfo.java
+  src/main/com/apple/foundationdb/MappedRangeResultInfo.java
   src/main/com/apple/foundationdb/RangeResultSummary.java
   src/main/com/apple/foundationdb/ReadTransaction.java
   src/main/com/apple/foundationdb/ReadTransactionContext.java

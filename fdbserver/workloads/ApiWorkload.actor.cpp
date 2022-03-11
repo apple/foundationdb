@@ -287,6 +287,7 @@ Value ApiWorkload::generateValue() {
 // Creates a random transaction factory to produce transaction of one of the TransactionType choices
 ACTOR Future<Void> chooseTransactionFactory(Database cx, std::vector<TransactionType> choices, ApiWorkload* self) {
 	TransactionType transactionType = deterministicRandom()->randomChoice(choices);
+	self->transactionType = transactionType;
 
 	if (transactionType == NATIVE) {
 		printf("client %d: Running NativeAPI Transactions\n", self->clientPrefixInt);
