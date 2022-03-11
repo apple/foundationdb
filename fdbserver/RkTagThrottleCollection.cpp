@@ -45,7 +45,7 @@ Optional<double> RkTagThrottleCollection::RkTagThrottleData::updateAndGetClientR
 		}
 
 		double rate = clientRate.smoothTotal();
-		ASSERT(rate >= 0);
+		ASSERT_GE(rate, 0);
 		return rate;
 	} else {
 		TEST(true); // Get throttle rate for expired throttle
@@ -323,8 +323,8 @@ void RkTagThrottleCollection::addRequests(TransactionTag const& tag, int request
 
 		auto manualItr = manualThrottledTags.find(tag);
 		if (manualItr != manualThrottledTags.end()) {
-			for (auto priorityItr = manualItr->second.begin(); priorityItr != manualItr->second.end(); ++priorityItr) {
-				priorityItr->second.updateAndGetClientRate(requestRate);
+			for (auto& [priority, tagThrottleData] : manualItr->second) {
+				tagThrottleData.updateAndGetClientRate(requestRate);
 			}
 		}
 	}

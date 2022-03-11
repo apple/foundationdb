@@ -137,16 +137,19 @@ class TagThrottlerImpl {
 		}
 	}
 
+	/*
 	Optional<double> autoThrottleTag(TransactionTag tag, double busyness) {
-		return throttledTags.autoThrottleTag(id, tag, busyness);
+	    return throttledTags.autoThrottleTag(id, tag, busyness);
 	}
+	*/
 
-	Future<Void> tryAutoThrottleTag(TransactionTag tag, double rate, double busyness, TagThrottledReason reason) {
+	Future<Void> tryUpdateAutoThrottling(TransactionTag tag, double rate, double busyness, TagThrottledReason reason) {
 		// NOTE: before the comparison with MIN_TAG_COST, the busiest tag rate also compares with MIN_TAG_PAGES_RATE
 		// currently MIN_TAG_PAGES_RATE > MIN_TAG_COST in our default knobs.
 		if (busyness > SERVER_KNOBS->AUTO_THROTTLE_TARGET_TAG_BUSYNESS && rate > SERVER_KNOBS->MIN_TAG_COST) {
 			TEST(true); // Transaction tag auto-throttled
-			Optional<double> clientRate = autoThrottleTag(tag, busyness);
+			Optional<double> clientRate =
+			    throttledTags.autoThrottleTag(id, tag, busyness); // autoThrottleTag(tag, busyness);
 			if (clientRate.present()) {
 				TagSet tags;
 				tags.addTag(tag);
@@ -183,23 +186,23 @@ public:
 	int64_t manualThrottleCount() const { return throttledTags.manualThrottleCount(); }
 	bool isAutoThrottlingEnabled() const { return autoThrottlingEnabled; }
 
-	Future<Void> tryAutoThrottleTag(StorageQueueInfo& ss, int64_t storageQueue, int64_t storageDurabilityLag) {
+	Future<Void> tryUpdateAutoThrottling(StorageQueueInfo const& ss) {
 		// NOTE: we just keep it simple and don't differentiate write-saturation and read-saturation at the moment. In
 		// most of situation, this works. More indicators besides queue size and durability lag could be investigated in
 		// the future
+		auto storageQueue = ss.getStorageQueueBytes();
+		auto storageDurabilityLag = ss.getDurabilityLag();
 		if (storageQueue > SERVER_KNOBS->AUTO_TAG_THROTTLE_STORAGE_QUEUE_BYTES ||
 		    storageDurabilityLag > SERVER_KNOBS->AUTO_TAG_THROTTLE_DURABILITY_LAG_VERSIONS) {
-			for (const auto& busiestWriteTag : ss.busiestWriteTags) {
-				return tryAutoThrottleTag(busiestWriteTag.tag,
-				                          busiestWriteTag.rate,
-				                          busiestWriteTag.fractionalBusyness,
-				                          TagThrottledReason::BUSY_READ);
+			for (const auto& busyWriteTag : ss.busiestWriteTags) {
+				return tryUpdateAutoThrottling(busyWriteTag.tag,
+				                               busyWriteTag.rate,
+				                               busyWriteTag.fractionalBusyness,
+				                               TagThrottledReason::BUSY_READ);
 			}
-			for (const auto& busiestReadTag : ss.busiestReadTags) {
-				return tryAutoThrottleTag(busiestReadTag.tag,
-				                          busiestReadTag.rate,
-				                          busiestReadTag.fractionalBusyness,
-				                          TagThrottledReason::BUSY_READ);
+			for (const auto& busyReadTag : ss.busiestReadTags) {
+				return tryUpdateAutoThrottling(
+				    busyReadTag.tag, busyReadTag.rate, busyReadTag.fractionalBusyness, TagThrottledReason::BUSY_READ);
 			}
 		}
 		return Void();
@@ -236,8 +239,6 @@ int64_t TagThrottler::manualThrottleCount() const {
 bool TagThrottler::isAutoThrottlingEnabled() const {
 	return impl->isAutoThrottlingEnabled();
 }
-Future<Void> TagThrottler::tryAutoThrottleTag(StorageQueueInfo& ss,
-                                              int64_t storageQueue,
-                                              int64_t storageDurabilityLag) {
-	return impl->tryAutoThrottleTag(ss, storageQueue, storageDurabilityLag);
+Future<Void> TagThrottler::tryUpdateAutoThrottling(StorageQueueInfo const& ss) {
+	return impl->tryUpdateAutoThrottling(ss);
 }

@@ -29,9 +29,10 @@ class Smoother {
 	// Times (t) are expected to be nondecreasing
 
 	double eFoldingTime;
-	double time, total, estimate;
+	double total;
+	mutable double time, estimate;
 
-	void update(double t) {
+	void update(double t) const {
 		double elapsed = t - time;
 		if (elapsed) {
 			time = t;
@@ -53,12 +54,12 @@ public:
 		total += delta;
 	}
 	// smoothTotal() is a continuous (under)estimate of the sum of all addDeltas()
-	double smoothTotal(double t = now()) {
+	double smoothTotal(double t = now()) const {
 		update(t);
 		return estimate;
 	}
 	// smoothRate() is d/dt[smoothTotal], and is NOT continuous
-	double smoothRate(double t = now()) {
+	double smoothRate(double t = now()) const {
 		update(t);
 		return (total - estimate) / eFoldingTime;
 	}

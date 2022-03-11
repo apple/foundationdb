@@ -69,6 +69,8 @@ struct StorageQueueInfo {
 	StorageQueueInfo(UID id, LocalityData locality);
 
 	void refreshCommitCost(double elapsed);
+	int64_t getStorageQueueBytes() const { return lastReply.bytesInput - smoothDurableBytes.smoothTotal(); }
+	int64_t getDurabilityLag() const { return smoothLatestVersion.smoothTotal() - smoothDurableVersion.smoothTotal(); }
 };
 
 struct TLogQueueInfo {

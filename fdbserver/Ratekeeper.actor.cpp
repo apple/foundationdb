@@ -564,10 +564,10 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 			}
 		}
 
-		int64_t storageQueue = ss.lastReply.bytesInput - ss.smoothDurableBytes.smoothTotal();
+		int64_t storageQueue = ss.getStorageQueueBytes();
 		worstStorageQueueStorageServer = std::max(worstStorageQueueStorageServer, storageQueue);
 
-		int64_t storageDurabilityLag = ss.smoothLatestVersion.smoothTotal() - ss.smoothDurableVersion.smoothTotal();
+		int64_t storageDurabilityLag = ss.getDurabilityLag();
 		worstDurabilityLag = std::max(worstDurabilityLag, storageDurabilityLag);
 
 		storageDurabilityLagReverseIndex.insert(std::make_pair(-1 * storageDurabilityLag, &ss));
@@ -581,7 +581,7 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 		double targetRateRatio = std::min((storageQueue - targetBytes + springBytes) / (double)springBytes, 2.0);
 
 		if (limits->priority == TransactionPriority::DEFAULT) {
-			addActor.send(tagThrottler->tryAutoThrottleTag(ss, storageQueue, storageDurabilityLag));
+			addActor.send(tagThrottler->tryUpdateAutoThrottling(ss));
 		}
 
 		double inputRate = ss.smoothInputBytes.smoothRate();
