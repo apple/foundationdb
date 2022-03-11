@@ -6359,10 +6359,12 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 		// System key access implies raw access. Native API handles the raw access,
 		// system key access is handled in RYW.
 		validateOptionValueNotPresent(value);
+		if (trState->tenant.present()) {
+			Error e = invalid_option();
+			TraceEvent(SevWarn, "TenantTransactionRawAccess").error(e).detail("Tenant", trState->tenant);
+			throw e;
+		}
 		trState->options.rawAccess = true;
-		trState->tenant = Optional<TenantName>();
-		trState->tenantId = TenantInfo::INVALID_TENANT;
-		tr.tenantInfo = TenantInfo();
 		break;
 
 	default:
