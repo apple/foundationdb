@@ -107,13 +107,13 @@ public:
 
 	void addReleased(int released) { smoothReleased.addDelta(released); }
 
-	bool expired() { return expiration <= now(); }
+	bool expired() const { return expiration <= now(); }
 
 	void updateChecked() { lastCheck = now(); }
 
-	bool canRecheck() { return lastCheck < now() - CLIENT_KNOBS->TAG_THROTTLE_RECHECK_INTERVAL; }
+	bool canRecheck() const { return lastCheck < now() - CLIENT_KNOBS->TAG_THROTTLE_RECHECK_INTERVAL; }
 
-	double throttleDuration() {
+	double throttleDuration() const {
 		if (expiration <= now()) {
 			return 0.0;
 		}

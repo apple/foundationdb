@@ -38,7 +38,7 @@ class RkTagThrottleCollection : NonCopyable {
 
 		RkTagThrottleData() : clientRate(CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW) {}
 
-		double getTargetRate(Optional<double> requestRate) {
+		double getTargetRate(Optional<double> requestRate) const {
 			if (limits.tpsRate == 0.0 || !requestRate.present() || requestRate.get() == 0.0 || !rateSet) {
 				return limits.tpsRate;
 			} else {
