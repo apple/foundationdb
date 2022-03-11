@@ -51,7 +51,7 @@ public:
 	virtual void done() = 0;
 
 	// A continuation to be executed when all of the given futures get ready
-	virtual void continueAfterAll(std::shared_ptr<std::vector<Future>> futures, TTaskFct cont);
+	virtual void continueAfterAll(std::vector<Future> futures, TTaskFct cont);
 };
 
 /**

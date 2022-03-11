@@ -27,6 +27,7 @@
 #include <atomic>
 #include <chrono>
 #include <thread>
+#include <fmt/format.h>
 
 namespace FdbApiTester {
 
@@ -35,9 +36,9 @@ void TransactionActorBase::complete(fdb_error_t err) {
 	context = {};
 }
 
-void ITransactionContext::continueAfterAll(std::shared_ptr<std::vector<Future>> futures, TTaskFct cont) {
-	auto counter = std::make_shared<std::atomic<int>>(futures->size());
-	for (auto& f : *futures) {
+void ITransactionContext::continueAfterAll(std::vector<Future> futures, TTaskFct cont) {
+	auto counter = std::make_shared<std::atomic<int>>(futures.size());
+	for (auto& f : futures) {
 		continueAfter(f, [counter, cont]() {
 			if (--(*counter) == 0) {
 				cont();

@@ -89,11 +89,12 @@ private:
 				        for (const auto& kv : *kvPairs) {
 					        futures->push_back(ctx->tx()->get(kv.key, false));
 				        }
-				        ctx->continueAfterAll(futures, [ctx, futures, results]() {
+				        ctx->continueAfterAll(*futures, [ctx, futures, results]() {
 					        results->clear();
 					        for (auto& f : *futures) {
 						        results->push_back(((ValueFuture&)f).getValue());
 					        }
+					        ASSERT(results->size() == futures->size());
 					        ctx->done();
 				        });
 			        },
@@ -127,11 +128,12 @@ private:
 			    for (const auto& key : *keys) {
 				    futures->push_back(ctx->tx()->get(key, false));
 			    }
-			    ctx->continueAfterAll(futures, [ctx, futures, results]() {
+			    ctx->continueAfterAll(*futures, [ctx, futures, results]() {
 				    results->clear();
 				    for (auto& f : *futures) {
 					    results->push_back(((ValueFuture&)f).getValue());
 				    }
+				    ASSERT(results->size() == futures->size());
 				    ctx->done();
 			    });
 		    },
