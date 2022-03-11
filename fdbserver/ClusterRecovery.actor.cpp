@@ -1180,10 +1180,13 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	// version epoch is the number of seconds since the Unix epoch.
 	// TODO: Set `versionEpochKey` to the default value on new clusters to
 	// enable new clusters to use a version in-step with wall clock time.
+	self->versionEpoch = invalidVersion;
 	Optional<Standalone<StringRef>> versionEpochValue = wait(self->txnStateStore->readValue(versionEpochKey));
 	self->versionEpoch = SERVER_KNOBS->DEFAULT_VERSION_EPOCH;
 	if (versionEpochValue.present()) {
 		self->versionEpoch = BinaryReader::fromStringRef<Version>(versionEpochValue.get(), Unversioned());
+	} else if (BUGGIFY) {
+		self->versionEpoch = 0;
 	}
 
 	// Versionstamped operations (particularly those applied from DR) define a minimum commit version
@@ -1212,11 +1215,6 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 		} else {
 			self->recoveryTransactionVersion = 1;
 		}
-
-		if (BUGGIFY) {
-			// Since the clock always start at 0 in simulation, add a random offset.
-			self->recoveryTransactionVersion += deterministicRandom()->randomInt64(0, 10000000);
-		}
 	} else {
 		if (self->forceRecovery) {
 			self->recoveryTransactionVersion = self->lastEpochEnd + SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT_FORCED;
@@ -1225,16 +1223,17 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 		}
 
 		if (self->versionEpoch != invalidVersion) {
-			self->recoveryTransactionVersion =
-			    (g_network->timer() - self->versionEpoch) * SERVER_KNOBS->VERSIONS_PER_SECOND;
+			self->recoveryTransactionVersion = std::max(
+			    self->recoveryTransactionVersion,
+			    static_cast<Version>((g_network->timer() - self->versionEpoch) * SERVER_KNOBS->VERSIONS_PER_SECOND));
 		}
 
-		if (BUGGIFY) {
-			self->recoveryTransactionVersion +=
-			    deterministicRandom()->randomInt64(0, SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT);
-		}
 		if (self->recoveryTransactionVersion < minRequiredCommitVersion)
 			self->recoveryTransactionVersion = minRequiredCommitVersion;
+	}
+
+	if (BUGGIFY) {
+		self->recoveryTransactionVersion += deterministicRandom()->randomInt64(0, 10000000);
 	}
 
 	TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_RECOVERED_EVENT_NAME).c_str(),
