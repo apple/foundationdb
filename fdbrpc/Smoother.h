@@ -18,14 +18,13 @@
  * limitations under the License.
  */
 
-#ifndef FLOW_SMOOTHER_H
-#define FLOW_SMOOTHER_H
 #pragma once
 
 #include "flow/flow.h"
 #include <cmath>
 
-class Smoother {
+template <class T>
+class SmootherImpl {
 	// Times (t) are expected to be nondecreasing
 
 	double eFoldingTime;
@@ -40,64 +39,27 @@ class Smoother {
 		}
 	}
 
+protected:
+	explicit SmootherImpl(double eFoldingTime) : eFoldingTime(eFoldingTime) { reset(0); }
+
 public:
-	explicit Smoother(double eFoldingTime) : eFoldingTime(eFoldingTime) { reset(0); }
 	void reset(double value) {
 		time = 0;
 		total = value;
 		estimate = value;
 	}
-
-	void setTotal(double total, double t = now()) { addDelta(total - this->total, t); }
-	void addDelta(double delta, double t = now()) {
+	void setTotal(double total, double t = T::now()) { addDelta(total - this->total, t); }
+	void addDelta(double delta, double t = T::now()) {
 		update(t);
 		total += delta;
 	}
 	// smoothTotal() is a continuous (under)estimate of the sum of all addDeltas()
-	double smoothTotal(double t = now()) const {
+	double smoothTotal(double t = T::now()) const {
 		update(t);
 		return estimate;
 	}
 	// smoothRate() is d/dt[smoothTotal], and is NOT continuous
-	double smoothRate(double t = now()) const {
-		update(t);
-		return (total - estimate) / eFoldingTime;
-	}
-};
-
-class TimerSmoother {
-	// Times (t) are expected to be nondecreasing
-
-	double eFoldingTime;
-	double total;
-	mutable double time, estimate;
-
-	void update(double t) const {
-		double elapsed = t - time;
-		time = t;
-		estimate += (total - estimate) * (1 - exp(-elapsed / eFoldingTime));
-	}
-
-public:
-	explicit TimerSmoother(double eFoldingTime) : eFoldingTime(eFoldingTime) { reset(0); }
-	void reset(double value) {
-		time = 0;
-		total = value;
-		estimate = value;
-	}
-
-	void setTotal(double total, double t = timer()) { addDelta(total - this->total, t); }
-	void addDelta(double delta, double t = timer()) {
-		update(t);
-		total += delta;
-	}
-	// smoothTotal() is a continuous (under)estimate of the sum of all addDeltas()
-	double smoothTotal(double t = timer()) const {
-		update(t);
-		return estimate;
-	}
-	// smoothRate() is d/dt[smoothTotal], and is NOT continuous
-	double smoothRate(double t = timer()) const {
+	double smoothRate(double t = T::now()) const {
 		update(t);
 		return (total - estimate) / eFoldingTime;
 	}
@@ -105,4 +67,13 @@ public:
 	double getTotal() const { return total; }
 };
 
-#endif
+class Smoother : public SmootherImpl<Smoother> {
+public:
+	static double now() { return ::now(); }
+	explicit Smoother(double eFoldingTime) : SmootherImpl<Smoother>(eFoldingTime) {}
+};
+class TimerSmoother : public SmootherImpl<TimerSmoother> {
+public:
+	static double now() { return timer(); }
+	explicit TimerSmoother(double eFoldingTime) : SmootherImpl<TimerSmoother>(eFoldingTime) {}
+};
