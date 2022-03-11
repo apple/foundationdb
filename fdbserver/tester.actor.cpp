@@ -52,6 +52,21 @@ WorkloadContext::WorkloadContext(const WorkloadContext& r)
 WorkloadContext::~WorkloadContext() {}
 
 const char HEX_CHAR_LOOKUP[16] = { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f' };
+// clang-format off
+struct HexTable {
+	long long tab[128];
+	constexpr HexTable() : tab {} {
+		tab['1'] = 1; tab['2'] = 2; tab['3'] = 3; tab['4'] = 4; tab['5'] = 5; tab['6'] = 6; tab['7'] = 7; tab['8'] = 8;
+		tab['9'] = 9; tab['a'] = 10; tab['A'] = 10; tab['b'] = 11; tab['B'] = 11; tab['c'] = 12; tab['C'] = 12;
+		tab['d'] = 13; tab['D'] = 13; tab['e'] = 14; tab['E'] = 14; tab['f'] = 15; tab['F'] = 15;
+	}
+	constexpr long long operator[](char const idx) const { return tab[(std::size_t) idx]; }
+} constexpr hexTable;
+// clang-format on
+
+constexpr int64_t hexToInt(char number) {
+	return hexTable[(std::size_t)number];
+}
 
 void emplaceIndex(uint8_t* data, int offset, int64_t index) {
 	for (int i = 0; i < 16; i++) {
@@ -102,10 +117,10 @@ Key KVWorkload::keyForIndex(uint64_t index) const {
 int64_t KVWorkload::indexForKey(const KeyRef& key, bool absent) const {
 	int idx = 0;
 	if (nodePrefix > 0) {
-		ASSERT(keyBytes >= 32);
+		ASSERT(key.size() >= 32);
 		idx += 16;
 	}
-	ASSERT(keyBytes >= 16);
+	ASSERT(key.size() >= 16);
 	// extract int64_t index, the reverse process of emplaceIndex()
 	auto end = key.size() - idx - (absent ? 1 : 0);
 	std::string str((char*)key.begin() + idx, end);
