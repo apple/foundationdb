@@ -1074,6 +1074,14 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 		}
 	}
 
+	if (BM_DEBUG) {
+		fmt::print("Splitting range [{0} - {1}) into {2} granules @ {3} done, sending assignments:\n",
+		           granuleRange.begin.printable(),
+		           granuleRange.end.printable(),
+		           newRanges.size() - 1,
+		           latestVersion);
+	}
+
 	// transaction committed, send range assignments
 	// range could have been moved since split eval started, so just revoke from whoever has it
 	RangeAssignment raRevoke;
@@ -1092,9 +1100,26 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 		bmData->rangesToAssign.send(raAssignSplit);
 	}
 
+	if (BM_DEBUG) {
+		fmt::print(
+		    "Splitting range [{0} - {1}) into {2} granules @ {3} sent assignments, waiting for them to be processed:\n",
+		    granuleRange.begin.printable(),
+		    granuleRange.end.printable(),
+		    newRanges.size() - 1,
+		    latestVersion);
+	}
+
 	// Ensure the new assignments actually got processed and the split boundaries are reflected in the granule mapping
 	// before returning. This prevents a race with a subsequent split evaluation
 	wait(bmData->rangesToAssign.onEmpty());
+
+	if (BM_DEBUG) {
+		fmt::print("Splitting range [{0} - {1}) into {2} granules @ {3} got assignments processed\n",
+		           granuleRange.begin.printable(),
+		           granuleRange.end.printable(),
+		           newRanges.size() - 1,
+		           latestVersion);
+	}
 
 	return Void();
 }
@@ -1268,18 +1293,21 @@ ACTOR Future<Void> monitorBlobWorkerStatus(Reference<BlobManagerData> bmData, Bl
 				      currGranuleAssignment.end() == rep.granuleRange.end &&
 				      currGranuleAssignment.cvalue() == bwInterf.id())) {
 					if (BM_DEBUG) {
-						fmt::print(
-						    "Manager {0} ignoring status from BW {1} for granule [{2} - {3}) since BW {4} owns it.\n",
-						    bmData->epoch,
-						    bwInterf.id().toString().substr(0, 5),
-						    rep.granuleRange.begin.printable(),
-						    rep.granuleRange.end.printable(),
-						    currGranuleAssignment.cvalue().toString().substr(0, 5));
+						fmt::print("Manager {0} ignoring status from BW {1} for granule [{2} - {3}) since BW {4} owns "
+						           "[{5} - {6}).\n",
+						           bmData->epoch,
+						           bwInterf.id().toString().substr(0, 5),
+						           rep.granuleRange.begin.printable(),
+						           rep.granuleRange.end.printable(),
+						           currGranuleAssignment.cvalue().toString().substr(0, 5),
+						           currGranuleAssignment.begin().printable(),
+						           currGranuleAssignment.end().printable());
 					}
 					// FIXME: could send revoke request
 					continue;
 				}
 
+				// FIXME: We will need to go over all splits in the range once we're doing merges, instead of first one
 				auto lastSplitEval = bmData->splitEvaluations.rangeContaining(rep.granuleRange.begin);
 				if (rep.granuleRange.begin == lastSplitEval.begin() && rep.granuleRange.end == lastSplitEval.end() &&
 				    rep.epoch == lastSplitEval.cvalue().epoch && rep.seqno == lastSplitEval.cvalue().seqno) {
@@ -1298,18 +1326,20 @@ ACTOR Future<Void> monitorBlobWorkerStatus(Reference<BlobManagerData> bmData, Bl
 						// For example, one worker asked BM to split, then died, granule was moved, new worker asks to
 						// split on recovery. We need to ensure that they are semantically the same split.
 						// We will just rely on the in-progress split to finish
-						ASSERT(lastSplitEval.range() == rep.granuleRange);
 						if (BM_DEBUG) {
 							fmt::print("Manager {0} got split request for [{1} - {2}) @ ({3}, {4}), but already in "
-							           "progress from ({5}, {6})\n",
+							           "progress from [{5} - {6}) @ ({7}, {8})\n",
 							           bmData->epoch,
 							           rep.granuleRange.begin.printable().c_str(),
 							           rep.granuleRange.end.printable().c_str(),
 							           rep.epoch,
 							           rep.seqno,
+							           lastSplitEval.begin().printable().c_str(),
+							           lastSplitEval.end().printable().c_str(),
 							           lastSplitEval.cvalue().epoch,
 							           lastSplitEval.cvalue().seqno);
 						}
+						// ignore the request, they will retry
 					} else {
 						if (BM_DEBUG) {
 							fmt::print("Manager {0} evaluating [{1} - {2}) @ ({3}, {4}) for split\n",
