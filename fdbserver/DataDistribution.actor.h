@@ -170,7 +170,7 @@ public:
 	//       intersecting shards.
 
 	int getNumberOfShards(UID ssID) const;
-	std::vector<KeyRange> getShardsFor(Team team);
+	std::vector<KeyRange> getShardsFor(Team team) const;
 	bool hasShards(Team team) const;
 
 	// The first element of the pair is either the source for non-moving shards or the destination team for in-flight
@@ -180,7 +180,7 @@ public:
 	void defineShard(KeyRangeRef keys);
 	void moveShard(KeyRangeRef keys, std::vector<Team> destinationTeam);
 	void finishMove(KeyRangeRef keys);
-	void check();
+	void check() const;
 
 private:
 	struct OrderByTeamKey {
@@ -363,7 +363,7 @@ struct StorageWiggleMetrics {
 		});
 	}
 
-	StatusObject toJSON() {
+	StatusObject toJSON() const {
 		StatusObject result;
 		result["last_round_start_datetime"] = timerIntToGmt(last_round_start);
 		result["last_round_finish_datetime"] = timerIntToGmt(last_round_finish);
@@ -383,7 +383,7 @@ struct StorageWiggleMetrics {
 };
 
 struct StorageWiggler : ReferenceCounted<StorageWiggler> {
-	DDTeamCollection* teamCollection;
+	DDTeamCollection const* teamCollection;
 	StorageWiggleMetrics metrics;
 
 	// data structures
@@ -410,8 +410,8 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 	void removeServer(const UID& serverId);
 	// update metadata and adjust priority_queue
 	void updateMetadata(const UID& serverId, const StorageMetadataType& metadata);
-	bool contains(const UID& serverId) { return pq_handles.count(serverId) > 0; }
-	bool empty() { return wiggle_pq.empty(); }
+	bool contains(const UID& serverId) const { return pq_handles.count(serverId) > 0; }
+	bool empty() const { return wiggle_pq.empty(); }
 	Optional<UID> getNextServerId();
 
 	// -- statistic update
@@ -423,8 +423,8 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 	// called when start wiggling a SS
 	Future<Void> startWiggle();
 	Future<Void> finishWiggle();
-	bool shouldStartNewRound() { return metrics.last_round_finish >= metrics.last_round_start; }
-	bool shouldFinishRound() {
+	bool shouldStartNewRound() const { return metrics.last_round_finish >= metrics.last_round_start; }
+	bool shouldFinishRound() const {
 		if (wiggle_pq.empty())
 			return true;
 		return (wiggle_pq.top().first.createdTime >= metrics.last_round_start);
