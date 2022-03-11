@@ -25,9 +25,22 @@
 #include "flow/flow.h"
 #include <cmath>
 
-struct Smoother {
+class Smoother {
 	// Times (t) are expected to be nondecreasing
 
+	double eFoldingTime;
+	double total;
+	mutable double time, estimate;
+
+	void update(double t) const {
+		double elapsed = t - time;
+		if (elapsed) {
+			time = t;
+			estimate += (total - estimate) * (1 - exp(-elapsed / eFoldingTime));
+		}
+	}
+
+public:
 	explicit Smoother(double eFoldingTime) : eFoldingTime(eFoldingTime) { reset(0); }
 	void reset(double value) {
 		time = 0;
@@ -41,28 +54,18 @@ struct Smoother {
 		total += delta;
 	}
 	// smoothTotal() is a continuous (under)estimate of the sum of all addDeltas()
-	double smoothTotal(double t = now()) {
+	double smoothTotal(double t = now()) const {
 		update(t);
 		return estimate;
 	}
 	// smoothRate() is d/dt[smoothTotal], and is NOT continuous
-	double smoothRate(double t = now()) {
+	double smoothRate(double t = now()) const {
 		update(t);
 		return (total - estimate) / eFoldingTime;
 	}
-
-	void update(double t) {
-		double elapsed = t - time;
-		if (elapsed) {
-			time = t;
-			estimate += (total - estimate) * (1 - exp(-elapsed / eFoldingTime));
-		}
-	}
-
-	double eFoldingTime;
-	double time, total, estimate;
 };
 
+// TODO: Improve encapsulation
 struct TimerSmoother {
 	// Times (t) are expected to be nondecreasing
 
