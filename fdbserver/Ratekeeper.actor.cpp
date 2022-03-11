@@ -511,8 +511,8 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 	int64_t limitingStorageQueueStorageServer = 0;
 	int64_t worstDurabilityLag = 0;
 
-	std::multimap<double, StorageQueueInfo*> storageTpsLimitReverseIndex;
-	std::multimap<int64_t, StorageQueueInfo*> storageDurabilityLagReverseIndex;
+	std::multimap<double, StorageQueueInfo const*> storageTpsLimitReverseIndex;
+	std::multimap<int64_t, StorageQueueInfo const*> storageDurabilityLagReverseIndex;
 
 	std::map<UID, limitReason_t> ssReasons;
 
@@ -522,7 +522,7 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 
 	// Look at each storage server's write queue and local rate, compute and store the desired rate ratio
 	for (auto i = storageQueueInfo.begin(); i != storageQueueInfo.end(); ++i) {
-		auto& ss = i->value;
+		auto const& ss = i->value;
 		if (!ss.valid || (remoteDC.present() && ss.locality.dcId() == remoteDC))
 			continue;
 		++sscount;
@@ -779,7 +779,7 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 	int64_t worstStorageQueueTLog = 0;
 	int tlcount = 0;
 	for (auto& it : tlogQueueInfo) {
-		auto& tl = it.value;
+		auto const& tl = it.value;
 		if (!tl.valid)
 			continue;
 		++tlcount;
