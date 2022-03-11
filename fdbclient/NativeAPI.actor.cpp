@@ -7570,13 +7570,16 @@ Future<Void> ChangeFeedData::whenAtLeast(Version version) {
 	return changeFeedWhenAtLatest(Reference<ChangeFeedData>::addRef(this), version);
 }
 
+#define DEBUG_CF_CLIENT_TRACE false
+
 ACTOR Future<Void> partialChangeFeedStream(StorageServerInterface interf,
                                            PromiseStream<Standalone<MutationsAndVersionRef>> results,
                                            ReplyPromiseStream<ChangeFeedStreamReply> replyStream,
                                            Version begin,
                                            Version end,
                                            Reference<ChangeFeedData> feedData,
-                                           Reference<ChangeFeedStorageData> storageData) {
+                                           Reference<ChangeFeedStorageData> storageData,
+                                           UID debugUID /* TODO REMOVE */) {
 
 	// calling lastReturnedVersion's callbacks could cause us to be cancelled
 	state Promise<Void> refresh = feedData->refresh;
@@ -7649,6 +7652,9 @@ ACTOR Future<Void> partialChangeFeedStream(StorageServerInterface interf,
 			}
 		}
 	} catch (Error& e) {
+		if (DEBUG_CF_CLIENT_TRACE) {
+			TraceEvent(SevDebug, "TraceChangeFeedClientMergeCursorError", debugUID).errorUnsuppressed(e);
+		}
 		if (e.code() == error_code_actor_cancelled) {
 			throw;
 		}
@@ -7775,6 +7781,7 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 	TEST(interfs.size() > 10); // Large change feed merge cursor
 	TEST(interfs.size() > 100); // Very large change feed merge cursor
 
+	state std::vector<UID> debugUIDs;
 	results->streams.clear();
 	for (auto& it : interfs) {
 		ChangeFeedStreamRequest req;
@@ -7790,6 +7797,17 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 		}
 		// TODO REMOVE
 		req.debugUID = deterministicRandom()->randomUniqueID();
+		debugUIDs.push_back(req.debugUID);
+
+		if (DEBUG_CF_CLIENT_TRACE) {
+			TraceEvent(SevDebug, "TraceChangeFeedClientMergeCursor", req.debugUID)
+			    .detail("FeedID", rangeID)
+			    .detail("MergeRange", KeyRangeRef(interfs.front().second.begin, interfs.back().second.end))
+			    .detail("PartialRange", it.second)
+			    .detail("Begin", *begin)
+			    .detail("End", end)
+			    .detail("CanReadPopped", true);
+		}
 
 		results->streams.push_back(it.first.changeFeedStream.getReplyStream(req));
 	}
@@ -7811,8 +7829,14 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 
 	for (int i = 0; i < interfs.size(); i++) {
 		onErrors[i] = results->streams[i].onError();
-		fetchers[i] = partialChangeFeedStream(
-		    interfs[i].first, streams[i].results, results->streams[i], *begin, end, results, results->storageData[i]);
+		fetchers[i] = partialChangeFeedStream(interfs[i].first,
+		                                      streams[i].results,
+		                                      results->streams[i],
+		                                      *begin,
+		                                      end,
+		                                      results,
+		                                      results->storageData[i],
+		                                      debugUIDs[i]);
 	}
 
 	wait(onCFErrors(onErrors) || mergeChangeFeedStreamInternal(results, interfs, streams, begin, end));
@@ -7939,6 +7963,15 @@ ACTOR Future<Void> singleChangeFeedStream(Reference<DatabaseContext> db,
 	req.replyBufferSize = replyBufferSize;
 	// TODO REMOVE
 	req.debugUID = deterministicRandom()->randomUniqueID();
+
+	if (DEBUG_CF_CLIENT_TRACE) {
+		TraceEvent(SevDebug, "TraceChangeFeedClientSingleCursor", req.debugUID)
+		    .detail("FeedID", rangeID)
+		    .detail("Range", range)
+		    .detail("Begin", *begin)
+		    .detail("End", end)
+		    .detail("CanReadPopped", true);
+	}
 
 	results->streams.clear();
 

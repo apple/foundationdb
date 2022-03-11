@@ -2333,7 +2333,7 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 
 	try {
 		if (DEBUG_CF_TRACE) {
-			TraceEvent(SevDebug, "TraceChangeFeedMutationsBegin", data->thisServerID)
+			TraceEvent(SevDebug, "TraceChangeFeedStreamStart", data->thisServerID)
 			    .detail("FeedID", req.rangeID)
 			    .detail("StreamUID", streamUID)
 			    .detail("Range", req.range)
@@ -2352,11 +2352,32 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 		ASSERT(emptyInitialReply.minStreamVersion == invalidVersion);
 		req.reply.send(emptyInitialReply);
 
+		if (DEBUG_CF_TRACE) {
+			TraceEvent(SevDebug, "TraceChangeFeedStreamSentInitialEmpty", data->thisServerID)
+			    .detail("FeedID", req.rangeID)
+			    .detail("StreamUID", streamUID)
+			    .detail("Range", req.range)
+			    .detail("Begin", req.begin)
+			    .detail("End", req.end)
+			    .detail("CanReadPopped", req.canReadPopped)
+			    .detail("Version", req.begin - 1);
+		}
+
 		loop {
 			Future<Void> onReady = req.reply.onReady();
 			if (atLatest && !onReady.isReady() && !removeUID) {
 				data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()][streamUID] =
 				    blockedVersion.present() ? blockedVersion.get() : data->prevVersion;
+				if (DEBUG_CF_TRACE) {
+					TraceEvent(SevDebug, "TraceChangeFeedStreamBlockedOnReady", data->thisServerID)
+					    .detail("FeedID", req.rangeID)
+					    .detail("StreamUID", streamUID)
+					    .detail("Range", req.range)
+					    .detail("Begin", req.begin)
+					    .detail("End", req.end)
+					    .detail("CanReadPopped", req.canReadPopped)
+					    .detail("Version", blockedVersion.present() ? blockedVersion.get() : data->prevVersion);
+				}
 				removeUID = true;
 			}
 			wait(onReady);
@@ -2367,6 +2388,16 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 				data->changeFeedClientVersions[req.reply.getEndpoint().getPrimaryAddress()][streamUID] =
 				    blockedVersion.present() ? blockedVersion.get() : data->prevVersion;
 				removeUID = true;
+				if (DEBUG_CF_TRACE) {
+					TraceEvent(SevDebug, "TraceChangeFeedStreamBlockedMutations", data->thisServerID)
+					    .detail("FeedID", req.rangeID)
+					    .detail("StreamUID", streamUID)
+					    .detail("Range", req.range)
+					    .detail("Begin", req.begin)
+					    .detail("End", req.end)
+					    .detail("CanReadPopped", req.canReadPopped)
+					    .detail("Version", blockedVersion.present() ? blockedVersion.get() : data->prevVersion);
+				}
 			}
 			std::pair<ChangeFeedStreamReply, bool> _feedReply = wait(feedReplyFuture);
 			ChangeFeedStreamReply feedReply = _feedReply.first;
