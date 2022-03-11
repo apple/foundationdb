@@ -23,15 +23,14 @@
 
 #pragma once
 
-#include <map>
+#include <boost/container/flat_map.hpp>
 #include <set>
-#include <unordered_map>
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Knobs.h"
 
 struct VersionVector {
-	std::unordered_map<Tag, Version> versions;
+	boost::container::flat_map<Tag, Version> versions;
 	Version maxVersion; // Specifies the max version in this version vector. (Note:
 	                    // there may or may not be a corresponding entry for this
 	                    // version in the "versions" map.)
@@ -39,6 +38,12 @@ struct VersionVector {
 	VersionVector() : maxVersion(invalidVersion) {}
 	VersionVector(Version version) : maxVersion(version) {}
 
+private:
+	// Only invoked by getDelta() and applyDelta(), where tag has been validated
+	// and version is guaranteed to be larger than the existing value.
+	inline void setVersionNoCheck(const Tag& tag, Version version) { versions[tag] = version; }
+
+public:
 	Version getMaxVersion() const { return maxVersion; }
 
 	int size() const { return versions.size(); }
@@ -92,17 +97,11 @@ struct VersionVector {
 		if (CLIENT_KNOBS->SEND_ENTIRE_VERSION_VECTOR) {
 			delta = *this;
 		} else {
-			std::map<Version, std::set<Tag>> tmpVersionMap; // order versions
 			for (const auto& [tag, version] : versions) {
 				if (version > refVersion) {
-					tmpVersionMap[version].insert(tag);
+					delta.setVersionNoCheck(tag, version);
 				}
 			}
-
-			for (auto& [version, tags] : tmpVersionMap) {
-				delta.setVersion(tags, version);
-			}
-
 			delta.maxVersion = maxVersion;
 		}
 	}
@@ -122,17 +121,11 @@ struct VersionVector {
 		if (CLIENT_KNOBS->SEND_ENTIRE_VERSION_VECTOR) {
 			*this = delta;
 		} else {
-			std::map<Version, std::set<Tag>> tmpVersionMap; // order versions
 			for (const auto& [tag, version] : delta.versions) {
 				if (version > maxVersion) {
-					tmpVersionMap[version].insert(tag);
+					setVersionNoCheck(tag, version);
 				}
 			}
-
-			for (auto& [version, tags] : tmpVersionMap) {
-				setVersion(tags, version);
-			}
-
 			maxVersion = delta.maxVersion;
 		}
 	}
