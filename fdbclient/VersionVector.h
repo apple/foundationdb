@@ -23,15 +23,14 @@
 
 #pragma once
 
-#include <map>
+#include <boost/container/flat_map.hpp>
 #include <set>
-#include <unordered_map>
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Knobs.h"
 
 struct VersionVector {
-	std::map<Tag, Version> versions;
+	boost::container::flat_map<Tag, Version> versions;
 	Version maxVersion; // Specifies the max version in this version vector. (Note:
 	                    // there may or may not be a corresponding entry for this
 	                    // version in the "versions" map.)
