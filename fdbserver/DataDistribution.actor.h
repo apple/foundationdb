@@ -315,29 +315,23 @@ struct StorageWiggleMetrics {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
+		double step_total, round_total;
+		if (!ar.isDeserializing) {
+			step_total = smoothed_wiggle_duration.getTotal();
+			round_total = smoothed_round_duration.getTotal();
+		}
+		serializer(ar,
+		           last_wiggle_start,
+		           last_wiggle_finish,
+		           step_total,
+		           finished_wiggle,
+		           last_round_start,
+		           last_round_finish,
+		           round_total,
+		           finished_round);
 		if (ar.isDeserializing) {
-			double step_total, round_total;
-			serializer(ar,
-			           last_wiggle_start,
-			           last_wiggle_finish,
-			           step_total,
-			           finished_wiggle,
-			           last_round_start,
-			           last_round_finish,
-			           round_total,
-			           finished_round);
 			smoothed_round_duration.reset(round_total);
 			smoothed_wiggle_duration.reset(step_total);
-		} else {
-			serializer(ar,
-			           last_wiggle_start,
-			           last_wiggle_finish,
-			           smoothed_wiggle_duration.total,
-			           finished_wiggle,
-			           last_round_start,
-			           last_round_finish,
-			           smoothed_round_duration.total,
-			           finished_round);
 		}
 	}
 
@@ -375,14 +369,14 @@ struct StorageWiggleMetrics {
 		result["last_round_finish_datetime"] = timerIntToGmt(last_round_finish);
 		result["last_round_start_timestamp"] = last_round_start;
 		result["last_round_finish_timestamp"] = last_round_finish;
-		result["smoothed_round_seconds"] = smoothed_round_duration.estimate;
+		result["smoothed_round_seconds"] = smoothed_round_duration.smoothTotal();
 		result["finished_round"] = finished_round;
 
 		result["last_wiggle_start_datetime"] = timerIntToGmt(last_wiggle_start);
 		result["last_wiggle_finish_datetime"] = timerIntToGmt(last_wiggle_finish);
 		result["last_wiggle_start_timestamp"] = last_wiggle_start;
 		result["last_wiggle_finish_timestamp"] = last_wiggle_finish;
-		result["smoothed_wiggle_seconds"] = smoothed_wiggle_duration.estimate;
+		result["smoothed_wiggle_seconds"] = smoothed_wiggle_duration.smoothTotal();
 		result["finished_wiggle"] = finished_wiggle;
 		return result;
 	}

@@ -65,10 +65,20 @@ public:
 	}
 };
 
-// TODO: Improve encapsulation
-struct TimerSmoother {
+class TimerSmoother {
 	// Times (t) are expected to be nondecreasing
 
+	double eFoldingTime;
+	double total;
+	mutable double time, estimate;
+
+	void update(double t) const {
+		double elapsed = t - time;
+		time = t;
+		estimate += (total - estimate) * (1 - exp(-elapsed / eFoldingTime));
+	}
+
+public:
 	explicit TimerSmoother(double eFoldingTime) : eFoldingTime(eFoldingTime) { reset(0); }
 	void reset(double value) {
 		time = 0;
@@ -82,24 +92,17 @@ struct TimerSmoother {
 		total += delta;
 	}
 	// smoothTotal() is a continuous (under)estimate of the sum of all addDeltas()
-	double smoothTotal(double t = timer()) {
+	double smoothTotal(double t = timer()) const {
 		update(t);
 		return estimate;
 	}
 	// smoothRate() is d/dt[smoothTotal], and is NOT continuous
-	double smoothRate(double t = timer()) {
+	double smoothRate(double t = timer()) const {
 		update(t);
 		return (total - estimate) / eFoldingTime;
 	}
 
-	void update(double t) {
-		double elapsed = t - time;
-		time = t;
-		estimate += (total - estimate) * (1 - exp(-elapsed / eFoldingTime));
-	}
-
-	double eFoldingTime;
-	double time, total, estimate;
+	double getTotal() const { return total; }
 };
 
 #endif
