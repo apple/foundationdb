@@ -54,7 +54,7 @@ using BlobCipherChecksum = XXH64_hash_t;
 typedef enum { BLOB_CIPHER_ENCRYPT_MODE_NONE = 0, BLOB_CIPHER_ENCRYPT_MODE_AES_256_CTR = 1 } BlockCipherEncryptMode;
 
 // BlobCipher Encryption header format
-// The header is persisted as 'plaintext' for encrypted block containing sufficient information for encyrption key
+// The header is persisted as 'plaintext' for encrypted block containing sufficient information for encryption key
 // regeneration to assit decryption on reads. The total space overhead is 40 bytes.
 
 #pragma pack(push, 1) // exact fit - no padding
@@ -79,12 +79,12 @@ typedef struct BlobCipherEncryptHeader {
 #pragma pack(pop)
 
 // This interface is in-memory representation of CipherKey used for encryption/decryption information. It caches base
-// encyrption key properties as well as apply HMAC_SHA_256 derivation technique to generate a new encryption key.
+// encryption key properties as well as apply HMAC_SHA_256 derivation technique to generate a new encryption key.
 
 class BlobCipherKey : public ReferenceCounted<BlobCipherKey>, NonCopyable {
 	// Encryption domain boundary identifier
 	BlobCipherDomainId encryptDomainId;
-	// Base encyrption cipher key properties
+	// Base encryption cipher key properties
 	std::unique_ptr<uint8_t[]> baseCipher;
 	int baseCipherLen;
 	BlobCipherBaseKeyId baseCipherId;
@@ -92,7 +92,7 @@ class BlobCipherKey : public ReferenceCounted<BlobCipherKey>, NonCopyable {
 	BlobCipherRandomSalt randomSalt;
 	// Creation timestamp for the derived encryption cipher key
 	uint64_t creationTime;
-	// Derived encyrption cipher key
+	// Derived encryption cipher key
 	std::unique_ptr<uint8_t[]> cipher;
 
 	void initKey(const BlobCipherDomainId& domainId,
@@ -119,16 +119,16 @@ public:
 	void reset();
 };
 
-// This interface allows FDB processes participating in encyrption to store and index recently used encyption cipher
+// This interface allows FDB processes participating in encryption to store and index recently used encyption cipher
 // keys. FDB encryption has three dimensions:
-// 1. Mapping on cipher encyrption keys per "encryption domains"
+// 1. Mapping on cipher encryption keys per "encryption domains"
 // 2. Per encryption domain, the cipher keys are index using "baseCipherKeyId"
 // 3. Within baseCipherKey ids indexed encryption keys, cipher keys are indexed based on the "randomSalt" used to apply
 // HMAC-SHA256 derivation.
 //                  { encryptionDomain -> { baseCipherId -> { randomSalt, cipherKey } } }
 //
 // Supported cache lookups schemes:
-// 1. Lookup cipher based on { encyrptionDomainId, baseCipherKeyId } tuple.
+// 1. Lookup cipher based on { encryptionDomainId, baseCipherKeyId } tuple.
 // 2. Lookup cipher based on BlobCipherEncryptionHeader
 //
 // Client is responsible to handle cache-miss usecase, the corrective operation might vary based on the
@@ -177,7 +177,7 @@ using BlobCipherDomainCacheMap = std::unordered_map<BlobCipherDomainId, BlobCiph
 
 class BlobCipherKeyCache : NonCopyable {
 	BlobCipherDomainCacheMap domainCacheMap;
-	static constexpr uint64_t CIPHER_KEY_CACHE_TTL_NS = 10 * 60 * 1000 * 1000 * 1;
+	static constexpr uint64_t CIPHER_KEY_CACHE_TTL_SEC = 10 * 60L;
 
 	BlobCipherKeyCache() {}
 
@@ -200,7 +200,7 @@ public:
 	static void cleanup() noexcept;
 };
 
-// This interface enables data block encyrption. An invocation to encrypt() will do two things: a) generate
+// This interface enables data block encryption. An invocation to encrypt() will do two things: a) generate
 // encrypted ciphertext for given plaintext input. b) generate BlobCipherEncryptHeader (including the 'tag') persiting
 // for decryption on reads.
 
