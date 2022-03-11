@@ -1,6 +1,8 @@
 storageEngineExcludeTypes=-1,-2
 maxTLogVersion=6
 disableTss=true
+disableHostname=true
+
 testTitle=Clogged
     clearAfterTest=false
     testName=Cycle
