@@ -553,6 +553,32 @@ class DDTeamCollection : public ReferenceCounted<DDTeamCollection> {
 
 	void setCheckTeamDelay() { this->checkTeamDelay = Void(); }
 
+	// Assume begin to end is sorted by std::sort
+	// Assume InputIt is iterator to UID
+	// Note: We must allow creating empty teams because empty team is created when a remote DB is initialized.
+	// The empty team is used as the starting point to move data to the remote DB
+	// begin : the start of the team member ID
+	// end : end of the team member ID
+	// isIntialTeam : False when the team is added by addTeamsBestOf(); True otherwise, e.g.,
+	// when the team added at init() when we recreate teams by looking up DB
+	template <class InputIt>
+	void addTeam(InputIt begin, InputIt end, bool isInitialTeam) {
+		std::vector<Reference<TCServerInfo>> newTeamServers;
+		for (auto i = begin; i != end; ++i) {
+			if (server_info.find(*i) != server_info.end()) {
+				newTeamServers.push_back(server_info[*i]);
+			}
+		}
+
+		addTeam(newTeamServers, isInitialTeam);
+	}
+
+	void addTeam(const std::vector<Reference<TCServerInfo>>& newTeamServers,
+	             bool isInitialTeam,
+	             bool redundantTeam = false);
+
+	void addTeam(std::set<UID> const& team, bool isInitialTeam) { addTeam(team.begin(), team.end(), isInitialTeam); }
+
 public:
 	Database cx;
 
@@ -600,32 +626,6 @@ public:
 	Future<Void> getTeam(GetTeamRequest);
 
 	Future<Void> init(Reference<InitialDataDistribution> initTeams, DDEnabledState const& ddEnabledState);
-
-	// Assume begin to end is sorted by std::sort
-	// Assume InputIt is iterator to UID
-	// Note: We must allow creating empty teams because empty team is created when a remote DB is initialized.
-	// The empty team is used as the starting point to move data to the remote DB
-	// begin : the start of the team member ID
-	// end : end of the team member ID
-	// isIntialTeam : False when the team is added by addTeamsBestOf(); True otherwise, e.g.,
-	// when the team added at init() when we recreate teams by looking up DB
-	template <class InputIt>
-	void addTeam(InputIt begin, InputIt end, bool isInitialTeam) {
-		std::vector<Reference<TCServerInfo>> newTeamServers;
-		for (auto i = begin; i != end; ++i) {
-			if (server_info.find(*i) != server_info.end()) {
-				newTeamServers.push_back(server_info[*i]);
-			}
-		}
-
-		addTeam(newTeamServers, isInitialTeam);
-	}
-
-	void addTeam(const std::vector<Reference<TCServerInfo>>& newTeamServers,
-	             bool isInitialTeam,
-	             bool redundantTeam = false);
-
-	void addTeam(std::set<UID> const& team, bool isInitialTeam) { addTeam(team.begin(), team.end(), isInitialTeam); }
 
 	// Create server teams based on machine teams
 	// Before the number of machine teams reaches the threshold, build a machine team for each server team
