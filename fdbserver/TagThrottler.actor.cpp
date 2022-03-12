@@ -187,11 +187,14 @@ public:
 		auto storageDurabilityLag = ss.getDurabilityLag();
 		if (storageQueue > SERVER_KNOBS->AUTO_TAG_THROTTLE_STORAGE_QUEUE_BYTES ||
 		    storageDurabilityLag > SERVER_KNOBS->AUTO_TAG_THROTTLE_DURABILITY_LAG_VERSIONS) {
+			// TODO: Update once size is potentially > 1
+			ASSERT_WE_THINK(ss.busiestWriteTags.size() <= 1);
+			ASSERT_WE_THINK(ss.busiestReadTags.size() <= 1);
 			for (const auto& busyWriteTag : ss.busiestWriteTags) {
 				return tryUpdateAutoThrottling(busyWriteTag.tag,
 				                               busyWriteTag.rate,
 				                               busyWriteTag.fractionalBusyness,
-				                               TagThrottledReason::BUSY_READ);
+				                               TagThrottledReason::BUSY_WRITE);
 			}
 			for (const auto& busyReadTag : ss.busiestReadTags) {
 				return tryUpdateAutoThrottling(
