@@ -69,6 +69,7 @@
 #include "flow/Error.h"
 #include "flow/FastRef.h"
 #include "flow/IRandom.h"
+#include "flow/Trace.h"
 #include "flow/flow.h"
 #include "flow/genericactors.actor.h"
 #include "flow/Knobs.h"
@@ -224,10 +225,16 @@ void DatabaseContext::getLatestCommitVersions(const Reference<LocationInfo>& loc
 	}
 
 	if (ssVersionVectorCache.getMaxVersion() != invalidVersion && readVersion > ssVersionVectorCache.getMaxVersion()) {
-		TraceEvent(SevError, "GetLatestCommitVersions")
+		// This can happen after a recovery, GRV proxy change is detected and
+		// version cache is cleared. However, an old GRV response is processed
+		// to update the version cache with a relatively old version. Then
+		// another transaction with a newer read version from the old GRV proxy
+		// issues a read, which can trigger the condition here. Throw here to
+		// restart the transaction that will get a new GRV from the new proxy.
+		TraceEvent(SevWarn, "GetLatestCommitVersions")
 		    .detail("ReadVersion", readVersion)
-		    .detail("Version vector", ssVersionVectorCache.toString());
-		ASSERT(false);
+		    .detail("VersionVector", ssVersionVectorCache.toString());
+		throw transaction_too_old();
 	}
 
 	std::map<Version, std::set<Tag>> versionMap; // order the versions to be returned
