@@ -51,7 +51,6 @@ struct StorageQueueInfo {
 	UID id;
 	LocalityData locality;
 	StorageQueuingMetricsReply lastReply;
-	StorageQueuingMetricsReply prevReply;
 	Smoother smoothDurableBytes, smoothInputBytes, verySmoothDurableBytes;
 	Smoother smoothDurableVersion, smoothLatestVersion;
 	Smoother smoothFreeSpace;
@@ -71,6 +70,7 @@ struct StorageQueueInfo {
 	void refreshCommitCost(double elapsed);
 	int64_t getStorageQueueBytes() const { return lastReply.bytesInput - smoothDurableBytes.smoothTotal(); }
 	int64_t getDurabilityLag() const { return smoothLatestVersion.smoothTotal() - smoothDurableVersion.smoothTotal(); }
+	void update(StorageQueuingMetricsReply const&, Smoother& smoothTotalDurableBytes);
 };
 
 struct TLogQueueInfo {

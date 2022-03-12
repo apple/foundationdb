@@ -157,30 +157,7 @@ public:
 				ErrorOr<StorageQueuingMetricsReply> reply = wait(ssi.getQueuingMetrics.getReplyUnlessFailedFor(
 				    StorageQueuingMetricsRequest(), 0, 0)); // SOMEDAY: or tryGetReply?
 				if (reply.present()) {
-					myQueueInfo->value.valid = true;
-					myQueueInfo->value.prevReply = myQueueInfo->value.lastReply;
-					myQueueInfo->value.lastReply = reply.get();
-					if (myQueueInfo->value.prevReply.instanceID != reply.get().instanceID) {
-						myQueueInfo->value.smoothDurableBytes.reset(reply.get().bytesDurable);
-						myQueueInfo->value.verySmoothDurableBytes.reset(reply.get().bytesDurable);
-						myQueueInfo->value.smoothInputBytes.reset(reply.get().bytesInput);
-						myQueueInfo->value.smoothFreeSpace.reset(reply.get().storageBytes.available);
-						myQueueInfo->value.smoothTotalSpace.reset(reply.get().storageBytes.total);
-						myQueueInfo->value.smoothDurableVersion.reset(reply.get().durableVersion);
-						myQueueInfo->value.smoothLatestVersion.reset(reply.get().version);
-					} else {
-						self->smoothTotalDurableBytes.addDelta(reply.get().bytesDurable -
-						                                       myQueueInfo->value.prevReply.bytesDurable);
-						myQueueInfo->value.smoothDurableBytes.setTotal(reply.get().bytesDurable);
-						myQueueInfo->value.verySmoothDurableBytes.setTotal(reply.get().bytesDurable);
-						myQueueInfo->value.smoothInputBytes.setTotal(reply.get().bytesInput);
-						myQueueInfo->value.smoothFreeSpace.setTotal(reply.get().storageBytes.available);
-						myQueueInfo->value.smoothTotalSpace.setTotal(reply.get().storageBytes.total);
-						myQueueInfo->value.smoothDurableVersion.setTotal(reply.get().durableVersion);
-						myQueueInfo->value.smoothLatestVersion.setTotal(reply.get().version);
-					}
-
-					myQueueInfo->value.busiestReadTags = reply.get().busiestTags;
+					myQueueInfo->value.update(reply.get(), self->smoothTotalDurableBytes);
 				} else {
 					if (myQueueInfo->value.valid) {
 						TraceEvent("RkStorageServerDidNotRespond", self->id).detail("StorageServer", ssi.id());
@@ -973,6 +950,32 @@ StorageQueueInfo::StorageQueueInfo(UID id, LocalityData locality)
     busiestWriteTagEventHolder(makeReference<EventCacheHolder>(id.toString() + "/BusiestWriteTag")) {
 	// FIXME: this is a tacky workaround for a potential uninitialized use in trackStorageServerQueueInfo
 	lastReply.instanceID = -1;
+}
+
+void StorageQueueInfo::update(StorageQueuingMetricsReply const& reply, Smoother& smoothTotalDurableBytes) {
+	valid = true;
+	auto prevReply = std::move(lastReply);
+	lastReply = reply;
+	if (prevReply.instanceID != reply.instanceID) {
+		smoothDurableBytes.reset(reply.bytesDurable);
+		verySmoothDurableBytes.reset(reply.bytesDurable);
+		smoothInputBytes.reset(reply.bytesInput);
+		smoothFreeSpace.reset(reply.storageBytes.available);
+		smoothTotalSpace.reset(reply.storageBytes.total);
+		smoothDurableVersion.reset(reply.durableVersion);
+		smoothLatestVersion.reset(reply.version);
+	} else {
+		smoothTotalDurableBytes.addDelta(reply.bytesDurable - prevReply.bytesDurable);
+		smoothDurableBytes.setTotal(reply.bytesDurable);
+		verySmoothDurableBytes.setTotal(reply.bytesDurable);
+		smoothInputBytes.setTotal(reply.bytesInput);
+		smoothFreeSpace.setTotal(reply.storageBytes.available);
+		smoothTotalSpace.setTotal(reply.storageBytes.total);
+		smoothDurableVersion.setTotal(reply.durableVersion);
+		smoothLatestVersion.setTotal(reply.version);
+	}
+
+	busiestReadTags = reply.busiestTags;
 }
 
 void StorageQueueInfo::refreshCommitCost(double elapsed) {
