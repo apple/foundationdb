@@ -2705,7 +2705,7 @@ public:
 		// future reads of the version are not allowed) and the write of the next newest version over top
 		// of the original page begins.
 		if (!cacheEntry.initialized()) {
-			cacheEntry.writeFuture = writePhysicalPage(reason, level, pageIDs, data);
+			cacheEntry.writeFuture = detach(writePhysicalPage(reason, level, pageIDs, data));
 		} else if (cacheEntry.reading()) {
 			// Wait for the read to finish, then start the write.
 			cacheEntry.writeFuture = map(success(cacheEntry.readFuture), [=](Void) {
@@ -2721,7 +2721,7 @@ public:
 				return Void();
 			});
 		} else {
-			cacheEntry.writeFuture = writePhysicalPage(reason, level, pageIDs, data);
+			cacheEntry.writeFuture = detach(writePhysicalPage(reason, level, pageIDs, data));
 		}
 
 		// Always update the page contents immediately regardless of what happened above.

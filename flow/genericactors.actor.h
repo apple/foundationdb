@@ -1119,6 +1119,12 @@ Future<T> tagError(Future<Void> future, Error e) {
 	throw e;
 }
 
+ACTOR template <class T>
+Future<T> detach(Future<T> f) {
+	T x = wait(f);
+	return x;
+}
+
 // If the future is ready, yields and returns. Otherwise, returns when future is set.
 template <class T>
 Future<T> orYield(Future<T> f) {
