@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 #include "TesterApiWrapper.h"
+#include "TesterUtil.h"
 #include <cstdint>
 #include <fmt/format.h>
 
@@ -41,14 +42,17 @@ void Future::reset() {
 }
 
 void Future::cancel() {
+	ASSERT(future_);
 	fdb_future_cancel(future_.get());
 }
 
 fdb_error_t Future::getError() const {
+	ASSERT(future_);
 	return fdb_future_get_error(future_.get());
 }
 
 std::optional<std::string> ValueFuture::getValue() const {
+	ASSERT(future_);
 	int out_present;
 	const std::uint8_t* val;
 	int vallen;
@@ -60,35 +64,48 @@ std::optional<std::string> ValueFuture::getValue() const {
 Transaction::Transaction(FDBTransaction* tx) : tx_(tx, fdb_transaction_destroy) {}
 
 ValueFuture Transaction::get(std::string_view key, fdb_bool_t snapshot) {
+	ASSERT(tx_);
 	return ValueFuture(fdb_transaction_get(tx_.get(), (const uint8_t*)key.data(), key.size(), snapshot));
 }
 
 void Transaction::set(std::string_view key, std::string_view value) {
+	ASSERT(tx_);
 	fdb_transaction_set(tx_.get(), (const uint8_t*)key.data(), key.size(), (const uint8_t*)value.data(), value.size());
 }
 
 void Transaction::clear(std::string_view key) {
+	ASSERT(tx_);
 	fdb_transaction_clear(tx_.get(), (const uint8_t*)key.data(), key.size());
 }
 
 void Transaction::clearRange(std::string_view begin, std::string_view end) {
+	ASSERT(tx_);
 	fdb_transaction_clear_range(
 	    tx_.get(), (const uint8_t*)begin.data(), begin.size(), (const uint8_t*)end.data(), end.size());
 }
 
 Future Transaction::commit() {
+	ASSERT(tx_);
 	return Future(fdb_transaction_commit(tx_.get()));
 }
 
+void Transaction::cancel() {
+	ASSERT(tx_);
+	fdb_transaction_cancel(tx_.get());
+}
+
 Future Transaction::onError(fdb_error_t err) {
+	ASSERT(tx_);
 	return Future(fdb_transaction_on_error(tx_.get(), err));
 }
 
 void Transaction::reset() {
+	ASSERT(tx_);
 	fdb_transaction_reset(tx_.get());
 }
 
 fdb_error_t Transaction::setOption(FDBTransactionOption option) {
+	ASSERT(tx_);
 	return fdb_transaction_set_option(tx_.get(), option, reinterpret_cast<const uint8_t*>(""), 0);
 }
 

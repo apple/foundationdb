@@ -71,6 +71,7 @@ public:
 	void clear(std::string_view key);
 	void clearRange(std::string_view begin, std::string_view end);
 	Future commit();
+	void cancel();
 	Future onError(fdb_error_t err);
 	void reset();
 	fdb_error_t setOption(FDBTransactionOption option);

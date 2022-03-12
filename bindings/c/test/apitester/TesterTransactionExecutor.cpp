@@ -87,6 +87,9 @@ public:
 		}
 		txState = TxState::DONE;
 		lock.unlock();
+		// cancel transaction so that any pending operations on it
+		// fail gracefully
+		fdbTx.cancel();
 		txActor->complete(error_code_success);
 		cleanUp();
 		contAfterDone();
@@ -102,7 +105,6 @@ protected:
 		ASSERT(txState == TxState::DONE);
 		ASSERT(!onErrorFuture);
 		txActor = {};
-		fdbTx = {};
 	}
 
 	// Complete the transaction with an (unretriable) error

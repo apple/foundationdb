@@ -145,9 +145,9 @@ void WorkloadManager::run() {
 	}
 	scheduler->join();
 	if (failed()) {
-		fmt::print(stderr, "{} workloads failed", numWorkloadsFailed);
+		fmt::print(stderr, "{} workloads failed\n", numWorkloadsFailed);
 	} else {
-		fprintf(stderr, "All workloads succesfully completed");
+		fprintf(stderr, "All workloads succesfully completed\n");
 	}
 }
 
