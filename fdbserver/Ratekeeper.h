@@ -46,7 +46,15 @@ enum limitReason_t {
 	limitReason_t_end
 };
 
-struct StorageQueueInfo {
+class StorageQueueInfo {
+	uint64_t totalWriteCosts{ 0 };
+	int totalWriteOps{ 0 };
+	Reference<EventCacheHolder> busiestWriteTagEventHolder;
+
+	// refresh periodically
+	TransactionTagMap<TransactionCommitCostEstimation> tagCostEst;
+
+public:
 	bool valid;
 	UID id;
 	LocalityData locality;
@@ -56,21 +64,14 @@ struct StorageQueueInfo {
 	Smoother smoothFreeSpace;
 	Smoother smoothTotalSpace;
 	limitReason_t limitReason;
-
 	std::vector<StorageQueuingMetricsReply::TagInfo> busiestReadTags, busiestWriteTags;
-	Reference<EventCacheHolder> busiestWriteTagEventHolder;
-
-	// refresh periodically
-	TransactionTagMap<TransactionCommitCostEstimation> tagCostEst;
-	uint64_t totalWriteCosts = 0;
-	int totalWriteOps = 0;
 
 	StorageQueueInfo(UID id, LocalityData locality);
-
 	void refreshCommitCost(double elapsed);
 	int64_t getStorageQueueBytes() const { return lastReply.bytesInput - smoothDurableBytes.smoothTotal(); }
 	int64_t getDurabilityLag() const { return smoothLatestVersion.smoothTotal() - smoothDurableVersion.smoothTotal(); }
 	void update(StorageQueuingMetricsReply const&, Smoother& smoothTotalDurableBytes);
+	void addCommitCost(TransactionTagRef tagName, TransactionCommitCostEstimation const& cost);
 };
 
 struct TLogQueueInfo {

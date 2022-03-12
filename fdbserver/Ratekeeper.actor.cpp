@@ -444,9 +444,7 @@ void Ratekeeper::updateCommitCostEstimation(
 		if (tagCostIt == costEstimation.end())
 			continue;
 		for (const auto& [tagName, cost] : tagCostIt->second) {
-			it->value.tagCostEst[tagName] += cost;
-			it->value.totalWriteCosts += cost.getCostSum();
-			it->value.totalWriteOps += cost.getOpsSum();
+			it->value.addCommitCost(tagName, cost);
 		}
 	}
 }
@@ -942,14 +940,20 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 }
 
 StorageQueueInfo::StorageQueueInfo(UID id, LocalityData locality)
-  : valid(false), id(id), locality(locality), smoothDurableBytes(SERVER_KNOBS->SMOOTHING_AMOUNT),
+  : busiestWriteTagEventHolder(makeReference<EventCacheHolder>(id.toString() + "/BusiestWriteTag")), valid(false),
+    id(id), locality(locality), smoothDurableBytes(SERVER_KNOBS->SMOOTHING_AMOUNT),
     smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
     smoothDurableVersion(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothLatestVersion(SERVER_KNOBS->SMOOTHING_AMOUNT),
     smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT),
-    limitReason(limitReason_t::unlimited),
-    busiestWriteTagEventHolder(makeReference<EventCacheHolder>(id.toString() + "/BusiestWriteTag")) {
+    limitReason(limitReason_t::unlimited) {
 	// FIXME: this is a tacky workaround for a potential uninitialized use in trackStorageServerQueueInfo
 	lastReply.instanceID = -1;
+}
+
+void StorageQueueInfo::addCommitCost(TransactionTagRef tagName, TransactionCommitCostEstimation const& cost) {
+	tagCostEst[tagName] += cost;
+	totalWriteCosts += cost.getCostSum();
+	totalWriteOps += cost.getOpsSum();
 }
 
 void StorageQueueInfo::update(StorageQueuingMetricsReply const& reply, Smoother& smoothTotalDurableBytes) {
