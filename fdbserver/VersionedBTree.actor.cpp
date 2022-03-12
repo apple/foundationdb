@@ -2343,7 +2343,8 @@ public:
 				wait(self->writeHeaderPage(0, self->headerPage));
 
 				// Wait for all outstanding writes to complete
-				wait(self->operations.signalAndCollapse());
+				wait(waitForAll(self->operations));
+				self->operations.clear();
 				// Sync header
 				wait(self->pageFile->sync());
 				debug_printf("DWALPager(%s) Header recovery complete.\n", self->filename.c_str());
@@ -2662,7 +2663,7 @@ public:
 		Future<Void> f;
 		if (pageIDs.size() == 1) {
 			f = writePhysicalPage_impl(this, (Void*)page->mutate(), reason, level, pageIDs.front(), blockSize, header);
-			operations.add(f);
+			operations.push_back(f);
 			return f;
 		}
 		std::vector<Future<Void>> writers;
@@ -2672,7 +2673,7 @@ public:
 			writers.push_back(p);
 		}
 		f = waitForAll(writers);
-		operations.add(f);
+		operations.push_back(f);
 		return f;
 	}
 
@@ -3560,7 +3561,8 @@ public:
 
 		// Wait for all outstanding writes to complete
 		debug_printf("DWALPager(%s) waiting for outstanding writes\n", self->filename.c_str());
-		wait(self->operations.signalAndCollapse());
+		wait(waitForAll(self->operations));
+		self->operations.clear();
 		debug_printf("DWALPager(%s) Syncing\n", self->filename.c_str());
 
 		// Sync everything except the header
@@ -3633,7 +3635,8 @@ public:
 		// Must wait for pending operations to complete, canceling them can cause a crash because the underlying
 		// operations may be uncancellable and depend on memory from calling scope's page reference
 		debug_printf("DWALPager(%s) shutdown wait for operations\n", self->filename.c_str());
-		wait(self->operations.signal());
+		wait(waitForAll(self->operations));
+		self->operations.clear();
 
 		debug_printf("DWALPager(%s) shutdown destroy page cache\n", self->filename.c_str());
 		wait(self->pageCache.clear());
@@ -3850,7 +3853,7 @@ private:
 	Promise<Void> closedPromise;
 	Promise<Void> errorPromise;
 	Future<Void> commitFuture;
-	SignalableActorCollection operations;
+	std::vector<Future<Void>> operations;
 	Future<Void> recoverFuture;
 	Future<Void> remapCleanupFuture;
 	bool remapCleanupStop;
