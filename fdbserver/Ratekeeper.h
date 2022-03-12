@@ -74,14 +74,16 @@ struct StorageQueueInfo {
 };
 
 struct TLogQueueInfo {
+	TLogQueuingMetricsReply lastReply;
 	bool valid;
 	UID id;
-	TLogQueuingMetricsReply lastReply;
-	TLogQueuingMetricsReply prevReply;
 	Smoother smoothDurableBytes, smoothInputBytes, verySmoothDurableBytes;
 	Smoother smoothFreeSpace;
 	Smoother smoothTotalSpace;
+
 	TLogQueueInfo(UID id);
+	Version getLastCommittedVersion() const { return lastReply.v; }
+	void update(TLogQueuingMetricsReply const& reply, Smoother& smoothTotalDurableBytes);
 };
 
 struct RatekeeperLimits {

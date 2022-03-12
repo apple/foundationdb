@@ -208,24 +208,7 @@ public:
 				ErrorOr<TLogQueuingMetricsReply> reply = wait(tli.getQueuingMetrics.getReplyUnlessFailedFor(
 				    TLogQueuingMetricsRequest(), 0, 0)); // SOMEDAY: or tryGetReply?
 				if (reply.present()) {
-					myQueueInfo->value.valid = true;
-					myQueueInfo->value.prevReply = myQueueInfo->value.lastReply;
-					myQueueInfo->value.lastReply = reply.get();
-					if (myQueueInfo->value.prevReply.instanceID != reply.get().instanceID) {
-						myQueueInfo->value.smoothDurableBytes.reset(reply.get().bytesDurable);
-						myQueueInfo->value.verySmoothDurableBytes.reset(reply.get().bytesDurable);
-						myQueueInfo->value.smoothInputBytes.reset(reply.get().bytesInput);
-						myQueueInfo->value.smoothFreeSpace.reset(reply.get().storageBytes.available);
-						myQueueInfo->value.smoothTotalSpace.reset(reply.get().storageBytes.total);
-					} else {
-						self->smoothTotalDurableBytes.addDelta(reply.get().bytesDurable -
-						                                       myQueueInfo->value.prevReply.bytesDurable);
-						myQueueInfo->value.smoothDurableBytes.setTotal(reply.get().bytesDurable);
-						myQueueInfo->value.verySmoothDurableBytes.setTotal(reply.get().bytesDurable);
-						myQueueInfo->value.smoothInputBytes.setTotal(reply.get().bytesInput);
-						myQueueInfo->value.smoothFreeSpace.setTotal(reply.get().storageBytes.available);
-						myQueueInfo->value.smoothTotalSpace.setTotal(reply.get().storageBytes.total);
-					}
+					myQueueInfo->value.update(reply.get(), self->smoothTotalDurableBytes);
 				} else {
 					if (myQueueInfo->value.valid) {
 						TraceEvent("RkTLogDidNotRespond", self->id).detail("TransactionLog", tli.id());
@@ -769,11 +752,11 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 			auto& tl = it.value;
 			if (!tl.valid)
 				continue;
-			maxTLVer = std::max(maxTLVer, tl.lastReply.v);
+			maxTLVer = std::max(maxTLVer, tl.getLastCommittedVersion());
 		}
 
 		if (minSSVer != std::numeric_limits<Version>::max() && maxTLVer != std::numeric_limits<Version>::min()) {
-			// writeToReadLatencyLimit: 0 = infinte speed; 1 = TL durable speed ; 2 = half TL durable speed
+			// writeToReadLatencyLimit: 0 = infinite speed; 1 = TL durable speed ; 2 = half TL durable speed
 			writeToReadLatencyLimit =
 			    ((maxTLVer - minLimitingSSVer) - limits->maxVersionDifference / 2) / (limits->maxVersionDifference / 4);
 			worstVersionLag = std::max((Version)0, maxTLVer - minSSVer);
@@ -1034,6 +1017,26 @@ TLogQueueInfo::TLogQueueInfo(UID id)
 	// FIXME: this is a tacky workaround for a potential uninitialized use in trackTLogQueueInfo (copied from
 	// storageQueueInfO)
 	lastReply.instanceID = -1;
+}
+
+void TLogQueueInfo::update(TLogQueuingMetricsReply const& reply, Smoother& smoothTotalDurableBytes) {
+	valid = true;
+	auto prevReply = std::move(lastReply);
+	lastReply = reply;
+	if (prevReply.instanceID != reply.instanceID) {
+		smoothDurableBytes.reset(reply.bytesDurable);
+		verySmoothDurableBytes.reset(reply.bytesDurable);
+		smoothInputBytes.reset(reply.bytesInput);
+		smoothFreeSpace.reset(reply.storageBytes.available);
+		smoothTotalSpace.reset(reply.storageBytes.total);
+	} else {
+		smoothTotalDurableBytes.addDelta(reply.bytesDurable - prevReply.bytesDurable);
+		smoothDurableBytes.setTotal(reply.bytesDurable);
+		verySmoothDurableBytes.setTotal(reply.bytesDurable);
+		smoothInputBytes.setTotal(reply.bytesInput);
+		smoothFreeSpace.setTotal(reply.storageBytes.available);
+		smoothTotalSpace.setTotal(reply.storageBytes.total);
+	}
 }
 
 RatekeeperLimits::RatekeeperLimits(TransactionPriority priority,
