@@ -365,13 +365,38 @@ struct ReadWriteWorkload : KVWorkload {
 	}
 
 	void debugPrintServerShards() const {
+		std::cout << std::hex;
 		for (auto it : this->serverShards) {
 			std::cout << serverInterfaces.at(it.first).address().toString() << ": [";
 			for (auto p : it.second) {
-				std::cout << "[" << p.first << "," << p.second << "), ";
+				std::cout << "[" << p.first << "," << p.second << "], ";
 			}
 			std::cout << "] \n";
 		}
+	}
+
+	// for each boundary except the last one in boundaries, found the first existed key generated from keyForIndex as
+	// beginIdx, found the last existed key generated from keyForIndex the endIdx.
+	ACTOR static Future<IndexRangeVec> convertKeyBoundaryToIndexShard(Database cx,
+	                                                                  ReadWriteWorkload* self,
+	                                                                  Standalone<VectorRef<KeyRef>> boundaries) {
+		state IndexRangeVec res;
+		state int i = 0;
+		for (; i < boundaries.size() - 1; ++i) {
+			KeyRangeRef currentShard = KeyRangeRef(boundaries[i], boundaries[i+1]);
+			// std::cout << currentShard.toString() << "\n";
+			std::vector<RangeResult> ranges = wait(runRYWTransaction(cx, [currentShard](Reference<ReadYourWritesTransaction> tr) -> Future<std::vector<RangeResult>> {
+				std::vector<Future<RangeResult>> f;
+				f.push_back(tr->getRange(currentShard, 1, Snapshot::False, Reverse::False));
+				f.push_back(tr->getRange(currentShard, 1, Snapshot::False, Reverse::True));
+				return getAll(f);
+			}));
+			ASSERT(ranges[0].size() == 1 && ranges[1].size() == 1);
+			res.emplace_back(self->indexForKey(ranges[0][0].key), self->indexForKey(ranges[1][0].key));
+		}
+
+		ASSERT(res.size() == boundaries.size() - 1);
+		return res;
 	}
 
 	ACTOR static Future<Void> updateServerShards(Database cx, ReadWriteWorkload* self) {
@@ -383,7 +408,7 @@ struct ReadWriteWorkload : KVWorkload {
 		state RangeResult range =
 		    wait(runRYWTransaction(cx, [](Reference<ReadYourWritesTransaction> tr) -> Future<RangeResult> {
 			    tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			    return tr->getRange(serverKeysRange, CLIENT_KNOBS->TOO_MANY, Snapshot::True);
+			    return tr->getRange(serverKeysRange, CLIENT_KNOBS->TOO_MANY);
 		    }));
 		wait(success(serverList));
 		// decode server interfaces
@@ -400,15 +425,14 @@ struct ReadWriteWorkload : KVWorkload {
 		Key leftEdge(allKeys.begin);
 		std::vector<UID> leftServer; // left server owns the range [leftEdge, workloadBegin)
 		KeyRangeRef workloadRange(workloadBegin, workloadEnd);
-		std::map<int64_t, std::vector<UID>> beginServers; // begin index to server ID
+		state std::map<Key, std::vector<UID>> beginServers; // begin index to server ID
 
 		for (auto kv = range.begin(); kv != range.end(); kv++) {
 			if (serverHasKey(kv->value)) {
 				auto [id, key] = serverKeysDecodeServerBegin(kv->key);
 
 				if (workloadRange.contains(key)) {
-					auto idx = self->indexForKey(key);
-					beginServers[idx].push_back(id);
+					beginServers[key].push_back(id);
 				} else if (workloadBegin > key && key > leftEdge) { // update left boundary
 					leftEdge = key;
 					leftServer.clear();
@@ -419,33 +443,37 @@ struct ReadWriteWorkload : KVWorkload {
 				}
 			}
 		}
-		ASSERT(beginServers.size() == 0 || beginServers.begin()->first >= 0);
+		ASSERT(beginServers.size() == 0 || beginServers.begin()->first >= workloadBegin);
 		// handle the left boundary
-		if (beginServers.size() == 0 || beginServers.begin()->first > 0) {
-			beginServers[0] = leftServer;
+		if (beginServers.size() == 0 || beginServers.begin()->first > workloadBegin) {
+			beginServers[workloadBegin] = leftServer;
 		}
+		Standalone<VectorRef<KeyRef>> keyBegins;
+		for(auto p = beginServers.begin(); p != beginServers.end(); ++ p) {
+			keyBegins.push_back(keyBegins.arena(), p->first);
+		}
+		// deep count because wait below will destruct workloadEnd
+		keyBegins.push_back_deep(keyBegins.arena(), workloadEnd);
 
+		IndexRangeVec indexShards = wait(convertKeyBoundaryToIndexShard(cx, self, keyBegins));
+		ASSERT(beginServers.size() == indexShards.size());
 		// sort shard begin idx
 		// build self->serverShards, starting from the left shard
 		std::map<UID, IndexRangeVec> serverShards;
-		auto nextIt = std::next(beginServers.begin());
-		for (auto it : beginServers) {
-			auto shardEnd = self->nodeCount;
-			if (nextIt != beginServers.end()) {
-				shardEnd = nextIt->first;
-				++nextIt;
+		int i = 0;
+		for(auto p = beginServers.begin(); p != beginServers.end(); ++ p) {
+			for(int j = 0; j < p->second.size(); ++ j) {
+				serverShards[p->second[j]].emplace_back(indexShards[i]);
 			}
-			for (auto id : it.second) {
-				serverShards[id].emplace_back(it.first, shardEnd);
-			}
+			++ i;
 		}
 		// self->serverShards is ordered by UID
 		for (auto it : serverShards) {
 			self->serverShards.emplace_back(it);
 		}
-		// if (self->clientId == 0) {
-		//	self->debugPrintServerShards();
-		// }
+		if (self->clientId == 0) {
+			self->debugPrintServerShards();
+		}
 		return Void();
 	}
 
@@ -737,12 +765,13 @@ struct ReadWriteWorkload : KVWorkload {
 			clients.push_back(tracePeriodically(self));
 
 		if (self->skewRound > 0) {
+			wait(updateServerShards(cx, self));
 			for (self->currentHotRound = 0; self->currentHotRound < self->skewRound; ++self->currentHotRound) {
-				wait(updateServerShards(cx, self));
 				self->setHotServers();
 				self->startReadWriteClients(cx, clients);
 				wait(timeout(waitForAll(clients), self->testDuration / self->skewRound, Void()));
 				clients.clear();
+				wait(delay(5.0) >> updateServerShards(cx, self));
 			}
 		} else {
 			self->startReadWriteClients(cx, clients);
@@ -778,9 +807,9 @@ struct ReadWriteWorkload : KVWorkload {
 		ASSERT(hotServerCount > 0);
 		int begin = currentHotRound * hotServerCount;
 		int idx = deterministicRandom()->randomInt(begin, begin + hotServerCount) % serverShards.size();
-		int shardIdx = deterministicRandom()->randomInt(0, serverShards[idx].second.size());
+		int shardIdx =  deterministicRandom()->randomInt(0, serverShards[idx].second.size());
 		return deterministicRandom()->randomInt64(serverShards[idx].second[shardIdx].first,
-		                                          serverShards[idx].second[shardIdx].second);
+		                                          serverShards[idx].second[shardIdx].second + 1);
 	}
 
 	int64_t getRandomKey(uint64_t nodeCount, bool hotServerRead = true) {
