@@ -655,7 +655,7 @@ struct NullDescriptor {
 };
 
 // Descriptor must have the methods name() and typeName().  They can be either static or member functions (such as for
-// runtime configurability). Descriptor is inherited so that syntatically Descriptor::fn() works in either case and so
+// runtime configurability). Descriptor is inherited so that syntactically Descriptor::fn() works in either case and so
 // that an empty Descriptor with static methods will take up 0 space.  EventField() accepts an optional Descriptor
 // instance.
 template <class T, class Descriptor = NullDescriptor, class FieldLevelType = FieldLevel<T>>

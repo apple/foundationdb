@@ -132,7 +132,7 @@ extern bool isAssertDisabled(int line);
 
 enum assert_op { EQ, NE, LT, GT, LE, GE };
 
-// TODO: magic so this works even if const-ness doesn not match.
+// TODO: magic so this works even if const-ness doesn't not match.
 template <typename T, typename U>
 void assert_num_impl(char const* a_nm,
                      T const& a,

@@ -2061,7 +2061,7 @@ class DWALPagerSnapshot;
 // oldest pager version being maintained the remap can be "undone" by popping it from the remap queue,
 // copying the alternate page ID's data over top of the original page ID's data, and deleting the remap from memory.
 // This process basically describes a "Delayed" Write-Ahead-Log (DWAL) because the remap queue and the newly allocated
-// alternate pages it references basically serve as a write ahead log for pages that will eventially be copied
+// alternate pages it references basically serve as a write ahead log for pages that will eventually be copied
 // back to their original location once the original version is no longer needed.
 class DWALPager final : public IPager2 {
 public:

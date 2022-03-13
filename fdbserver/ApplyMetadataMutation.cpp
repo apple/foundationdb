@@ -703,7 +703,7 @@ private:
 				}
 			}
 			// Might be a tss removal, which doesn't store a tag there.
-			// Chained if is a little verbose, but avoids unecessary work
+			// Chained if is a little verbose, but avoids unnecessary work
 			if (toCommit && !initialCommit && !serverKeysCleared.size()) {
 				KeyRangeRef maybeTssRange = range & serverTagKeys;
 				if (maybeTssRange.singleKeyRange()) {
