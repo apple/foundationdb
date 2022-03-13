@@ -102,12 +102,14 @@ private:
 				        ASSERT(results->size() == kvPairs->size());
 				        for (int i = 0; i < kvPairs->size(); i++) {
 					        auto expected = store.get((*kvPairs)[i].key);
-					        if ((*results)[i] != expected) {
+					        auto actual = (*results)[i];
+					        if (actual != expected) {
 						        error(
 						            fmt::format("randomCommitReadOp mismatch. key: {} expected: {:.80} actual: {:.80}",
 						                        (*kvPairs)[i].key,
 						                        expected,
-						                        (*results)[i]));
+						                        actual));
+						        ASSERT(false);
 					        }
 				        }
 				        schedule(cont);

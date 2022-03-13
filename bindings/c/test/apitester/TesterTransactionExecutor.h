@@ -34,7 +34,7 @@ namespace FdbApiTester {
 /**
  * Interface to be used for implementation of a concrete transaction
  */
-class ITransactionContext {
+class ITransactionContext : public std::enable_shared_from_this<ITransactionContext> {
 public:
 	virtual ~ITransactionContext() {}
 
@@ -42,10 +42,15 @@ public:
 	virtual Transaction* tx() = 0;
 
 	// Schedule a continuation to be executed when the future gets ready
-	virtual void continueAfter(Future f, TTaskFct cont) = 0;
+	// retryOnError controls whether transaction is retried in case of an error instead
+	// of calling the continuation
+	virtual void continueAfter(Future f, TTaskFct cont, bool retryOnError = true) = 0;
 
 	// Complete the transaction with a commit
 	virtual void commit() = 0;
+
+	// retry transaction on error
+	virtual void onError(fdb_error_t err) = 0;
 
 	// Mark the transaction as completed without committing it (for read transactions)
 	virtual void done() = 0;
