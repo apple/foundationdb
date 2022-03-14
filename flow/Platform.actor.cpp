@@ -26,6 +26,7 @@
 #endif
 
 #include <errno.h>
+#include "contrib/fmt-8.1.1/include/fmt/format.h"
 #include "flow/Platform.h"
 #include "flow/Platform.actor.h"
 #include "flow/Arena.h"
@@ -3230,6 +3231,10 @@ extern "C" void flushAndExit(int exitCode) {
 	flushTraceFileVoid();
 	fflush(stdout);
 	closeTraceFile();
+
+	// Flush all output streams. The original intent is to flush the outfile for contrib/debug_determinism.
+	fflush(nullptr);
+
 #ifdef USE_GCOV
 	__gcov_flush();
 #endif
@@ -3826,7 +3831,7 @@ TEST_CASE("/flow/Platform/getMemoryInfo") {
 	ASSERT(request[LiteralStringRef("SwapTotal:")] == 25165820);
 	ASSERT(request[LiteralStringRef("SwapFree:")] == 23680228);
 	for (auto& item : request) {
-		printf("%s:%ld\n", item.first.toString().c_str(), item.second);
+		fmt::print("{}:{}\n", item.first.toString().c_str(), item.second);
 	}
 
 	printf("UnitTest flow/Platform/getMemoryInfo 2\n");
@@ -3877,7 +3882,7 @@ TEST_CASE("/flow/Platform/getMemoryInfo") {
 	ASSERT(request[LiteralStringRef("SwapTotal:")] == 0);
 	ASSERT(request[LiteralStringRef("SwapFree:")] == 0);
 	for (auto& item : request) {
-		printf("%s:%ld\n", item.first.toString().c_str(), item.second);
+		fmt::print("{}:{}\n", item.first.toString().c_str(), item.second);
 	}
 
 	return Void();

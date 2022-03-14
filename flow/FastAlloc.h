@@ -114,8 +114,6 @@ public:
 	static long long getApproximateMemoryUnused();
 	static long long getActiveThreads();
 
-	static void releaseThreadMagazines();
-
 #ifdef ALLOC_INSTRUMENTATION
 	static volatile int32_t pageCount;
 #endif
@@ -134,9 +132,26 @@ private:
 		void* freelist;
 		int count; // there are count items on freelist
 		void* alternate; // alternate is either a full magazine, or an empty one
+		ThreadData();
+		~ThreadData();
 	};
-	static thread_local ThreadData threadData;
-	static thread_local bool threadInitialized;
+	struct ThreadDataInit {
+		ThreadDataInit() { threadData(); }
+	};
+	// Used to try to initialize threadData as early as possible. It's still
+	// possible that a static thread local variable (that owns fast-allocated
+	// memory) could be constructed before threadData, in which case threadData
+	// would be destroyed by the time that variable's destructor attempts to free.
+	// This is undefined behavior if this happens, which is why we want to
+	// initialize threadData as early as possible.
+	static thread_local ThreadDataInit threadDataInit;
+	// Used to access threadData. Returning a reference to a function-level
+	// static guarantees that threadData will be constructed before it's
+	// accessed here. Furthermore, if accessing threadData from a static thread
+	// local variable's constructor, this guarantees that threadData will
+	// outlive this object, since destruction order is the reverse of
+	// construction order.
+	static ThreadData& threadData() noexcept;
 	static GlobalData* globalData() noexcept {
 #ifdef VALGRIND
 		ANNOTATE_RWLOCK_ACQUIRED(vLock, 1);
@@ -151,7 +166,6 @@ private:
 	}
 	static void* freelist;
 
-	static void initThread();
 	static void getMagazine();
 	static void releaseMagazine(void*);
 };
@@ -160,9 +174,6 @@ extern std::atomic<int64_t> g_hugeArenaMemory;
 void hugeArenaSample(int size);
 void releaseAllThreadMagazines();
 int64_t getTotalUnusedAllocatedMemory();
-void setFastAllocatorThreadInitFunction(
-    void (*)()); // The given function will be called at least once in each thread that allocates from a FastAllocator.
-                 // Currently just one such function is tracked.
 
 inline constexpr int nextFastAllocatedSize(int x) {
 	assert(x > 0 && x <= 8192);
@@ -267,6 +278,7 @@ inline void freeFast(int size, void* ptr) {
 }
 
 [[nodiscard]] inline void* allocateFast4kAligned(int size) {
+#if !defined(USE_JEMALLOC)
 	// Use FastAllocator for sizes it supports to avoid internal fragmentation in some implementations of aligned_alloc
 	if (size <= 4096)
 		return FastAllocator<4096>::allocate();
@@ -274,10 +286,12 @@ inline void freeFast(int size, void* ptr) {
 		return FastAllocator<8192>::allocate();
 	if (size <= 16384)
 		return FastAllocator<16384>::allocate();
+#endif
 	return aligned_alloc(4096, size);
 }
 
 inline void freeFast4kAligned(int size, void* ptr) {
+#if !defined(USE_JEMALLOC)
 	// Sizes supported by FastAllocator must be release via FastAllocator
 	if (size <= 4096)
 		return FastAllocator<4096>::release(ptr);
@@ -285,6 +299,7 @@ inline void freeFast4kAligned(int size, void* ptr) {
 		return FastAllocator<8192>::release(ptr);
 	if (size <= 16384)
 		return FastAllocator<16384>::release(ptr);
+#endif
 	aligned_free(ptr);
 }
 

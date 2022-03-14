@@ -349,6 +349,8 @@ struct union_like_traits<Optional<T>> : std::true_type {
 template <class T>
 class Standalone : private Arena, public T {
 public:
+	using RefType = T;
+
 	// T must have no destructor
 	Arena& arena() { return *(Arena*)this; }
 	const Arena& arena() const { return *(const Arena*)this; }

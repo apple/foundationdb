@@ -1322,6 +1322,21 @@ BlobWorkerInterface decodeBlobWorkerListValue(ValueRef const& value) {
 	return interf;
 }
 
+Value encodeTenantEntry(TenantMapEntry const& tenantEntry) {
+	return ObjectWriter::toValue(tenantEntry, IncludeVersion());
+}
+
+TenantMapEntry decodeTenantEntry(ValueRef const& value) {
+	TenantMapEntry entry;
+	ObjectReader reader(value.begin(), IncludeVersion());
+	reader.deserialize(entry);
+	return entry;
+}
+
+const KeyRangeRef tenantMapKeys("\xff/tenantMap/"_sr, "\xff/tenantMap0"_sr);
+const KeyRef tenantMapPrefix = tenantMapKeys.begin;
+const KeyRef tenantMapPrivatePrefix = "\xff\xff/tenantMap/"_sr;
+
 // for tests
 void testSSISerdes(StorageServerInterface const& ssi, bool useFB) {
 	printf("ssi=\nid=%s\nlocality=%s\nisTss=%s\ntssId=%s\naddress=%s\ngetValue=%s\n\n\n",
