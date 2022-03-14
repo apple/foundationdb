@@ -84,8 +84,8 @@ ACTOR Future<Void> moveKeys(Database occ,
 // it returns (since it needs to execute the finishMoveKeys transaction).
 
 ACTOR Future<Void> cleanUpDataMove(Database occ,
-                                   //    DataMoveMetaData dataMove,
-                                   UID id,
+                                   UID dataMoveID,
+                                   MoveKeysLock lock,
                                    KeyRange range,
                                    bool removeFromDest,
                                    const DDEnabledState* ddEnabledState);

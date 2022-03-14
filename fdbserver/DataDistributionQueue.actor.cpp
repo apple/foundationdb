@@ -937,8 +937,8 @@ struct DDQueueData {
 					rd.wantsNewServers |= it->value().wantsNewServers;
 					if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
 						// dataMoves[i->value().keys.begin] is the corresponding dataMove.
-						cleanup.push_back(
-						    cleanUpDataMove(this->cx, it->value().dataMoveID, it->value().keys, true, ddEnabledState));
+						cleanup.push_back(cleanUpDataMove(
+						    this->cx, it->value().dataMoveID, this->lock, it->value().keys, true, ddEnabledState));
 					}
 				}
 			}
@@ -1040,7 +1040,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 				bestTeams.clear();
 				// Get team from teamCollections in different DCs and find the best one
 				while (tciIndex < self->teamCollections.size()) {
-					if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+					if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE && rd.restore) {
 						auto req = GetTeamRequest(tciIndex == 0 ? rd.dataMove->primaryDest : rd.dataMove->remoteDest);
 						Future<std::pair<Optional<Reference<IDataDistributionTeam>>, bool>> fbestTeam =
 						    brokenPromiseToNever(self->teamCollections[tciIndex].getTeam.getReply(req));
@@ -1049,7 +1049,10 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 							// self->shardsAffectedByTeamFailure->moveShard must be called without any waits after
 							// getting the destination team or we could miss failure notifications for the storage
 							// servers in the destination team
-							TraceEvent("BestTeamNotReady");
+							TraceEvent("BestTeamNotReady")
+							    .detail("TeamCollectionIndex", tciIndex)
+							    .detail("RestoreDataMoveForDest",
+							            describe(tciIndex == 0 ? rd.dataMove->primaryDest : rd.dataMove->remoteDest));
 							foundTeams = false;
 							break;
 						}

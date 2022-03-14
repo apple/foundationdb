@@ -995,6 +995,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 					    .detail("Path", a.path)
 					    .detail("Checkpoint", describe(a.checkpoints));
 				}
+				TraceEvent("RocksDBServeRestoreEnd", id)
+				    .detail("Path", a.path)
+				    .detail("Checkpoint", describe(a.checkpoints));
 				a.done.send(Void());
 			} else {
 				throw not_implemented();

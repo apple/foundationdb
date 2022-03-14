@@ -48,6 +48,7 @@ struct CheckpointMetaData {
 	KeyRange range;
 	int16_t format; // CheckpointFormat.
 	int16_t state; // CheckpointState.
+	UID dataMoveID;
 	UID checkpointID; // A unique id for this checkpoint.
 	UID ssID; // Storage server ID on which this checkpoint is created.
 	int referenceCount; // A reference count on the checkpoint, it can only be deleted when this is 0.
@@ -73,15 +74,15 @@ struct CheckpointMetaData {
 
 	std::string toString() const {
 		std::string res = "Checkpoint MetaData:\nRange: " + range.toString() + "\nVersion: " + std::to_string(version) +
-		                  "\nFormat: " + std::to_string(format) + "\nServer: " + ssID.toString() +
-		                  "\nID: " + checkpointID.toString() + "\nState: " + std::to_string(static_cast<int>(state)) +
-		                  "\n";
+		                  "\nFormat: " + std::to_string(format) + "\nID: " + checkpointID.toString() +
+		                  "\nDataMoveID: " + dataMoveID.toString() + "\nServer: " + ssID.toString() +
+		                  "\nState: " + std::to_string(static_cast<int>(state)) + "\n";
 		return res;
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, range, format, state, checkpointID, ssID, gcTime, serializedCheckpoint);
+		serializer(ar, version, range, format, state, dataMoveID, checkpointID, ssID, gcTime, serializedCheckpoint);
 	}
 };
 

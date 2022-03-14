@@ -717,7 +717,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			state Promise<Void> readyToStart;
 			state Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure(new ShardsAffectedByTeamFailure);
 
-			state KeyRangeMap<std::shared_ptr<DataMove>> dataMoveMap;
+			state KeyRangeMap<std::shared_ptr<DataMove>> dataMoveMap(std::make_shared<DataMove>());
 			if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
 				for (int i = 0; i < initData->dataMoves.size(); ++i) {
 					const auto& meta = initData->dataMoves[i];

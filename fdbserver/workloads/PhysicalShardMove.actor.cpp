@@ -415,14 +415,26 @@ struct SSCheckpointWorkload : TestWorkload {
 		state Transaction tr(cx);
 
 		loop {
+			TraceEvent("TestMoveShard").detail("Range", keys.toString());
 			try {
 				BinaryWriter wrMyOwner(Unversioned());
 				wrMyOwner << owner;
 				tr.set(moveKeysLockOwnerKey, wrMyOwner.toValue());
+				state RangeResult dataMoves = wait(tr.getRange(dataMoveKeys, CLIENT_KNOBS->TOO_MANY));
 				wait(tr.commit());
 
-				MoveKeysLock moveKeysLock;
+				state MoveKeysLock moveKeysLock;
 				moveKeysLock.myOwner = owner;
+
+				state int i = 0;
+				for (; i < dataMoves.size(); ++i) {
+					UID dataMoveID = decodeDataMoveKey(dataMoves[i].key);
+					state DataMoveMetaData dataMove = decodeDataMoveValue(dataMoves[i].value);
+					ASSERT(dataMoveID == dataMove.id);
+					TraceEvent("TestCancelDataMoveBegin").detail("DataMove", dataMove.toString());
+					wait(cleanUpDataMove(cx, dataMoveID, moveKeysLock, dataMove.range, true, &ddEnabledState));
+					TraceEvent("TestCancelDataMoveEnd").detail("DataMove", dataMove.toString());
+				}
 
 				wait(moveKeys(cx,
 				              keys,
@@ -433,8 +445,8 @@ struct SSCheckpointWorkload : TestWorkload {
 				              &self->startMoveKeysParallelismLock,
 				              &self->finishMoveKeysParallelismLock,
 				              false,
-				              UID(), // for logging only
-				              UID(), 
+				              deterministicRandom()->randomUniqueID(), // for logging only
+				              deterministicRandom()->randomUniqueID(),
 				              &ddEnabledState));
 				break;
 			} catch (Error& e) {
