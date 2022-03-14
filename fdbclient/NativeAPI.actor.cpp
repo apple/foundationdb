@@ -7596,7 +7596,7 @@ Future<Void> ChangeFeedData::whenAtLeast(Version version) {
 	return changeFeedWhenAtLatest(Reference<ChangeFeedData>::addRef(this), version);
 }
 
-#define DEBUG_CF_CLIENT_TRACE true
+#define DEBUG_CF_CLIENT_TRACE false
 
 ACTOR Future<Void> partialChangeFeedStream(StorageServerInterface interf,
                                            PromiseStream<Standalone<MutationsAndVersionRef>> results,
