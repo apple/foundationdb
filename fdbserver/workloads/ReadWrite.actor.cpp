@@ -383,14 +383,15 @@ struct ReadWriteWorkload : KVWorkload {
 		state IndexRangeVec res;
 		state int i = 0;
 		for (; i < boundaries.size() - 1; ++i) {
-			KeyRangeRef currentShard = KeyRangeRef(boundaries[i], boundaries[i+1]);
+			KeyRangeRef currentShard = KeyRangeRef(boundaries[i], boundaries[i + 1]);
 			// std::cout << currentShard.toString() << "\n";
-			std::vector<RangeResult> ranges = wait(runRYWTransaction(cx, [currentShard](Reference<ReadYourWritesTransaction> tr) -> Future<std::vector<RangeResult>> {
-				std::vector<Future<RangeResult>> f;
-				f.push_back(tr->getRange(currentShard, 1, Snapshot::False, Reverse::False));
-				f.push_back(tr->getRange(currentShard, 1, Snapshot::False, Reverse::True));
-				return getAll(f);
-			}));
+			std::vector<RangeResult> ranges = wait(runRYWTransaction(
+			    cx, [currentShard](Reference<ReadYourWritesTransaction> tr) -> Future<std::vector<RangeResult>> {
+				    std::vector<Future<RangeResult>> f;
+				    f.push_back(tr->getRange(currentShard, 1, Snapshot::False, Reverse::False));
+				    f.push_back(tr->getRange(currentShard, 1, Snapshot::False, Reverse::True));
+				    return getAll(f);
+			    }));
 			ASSERT(ranges[0].size() == 1 && ranges[1].size() == 1);
 			res.emplace_back(self->indexForKey(ranges[0][0].key), self->indexForKey(ranges[1][0].key));
 		}
@@ -449,7 +450,7 @@ struct ReadWriteWorkload : KVWorkload {
 			beginServers[workloadBegin] = leftServer;
 		}
 		Standalone<VectorRef<KeyRef>> keyBegins;
-		for(auto p = beginServers.begin(); p != beginServers.end(); ++ p) {
+		for (auto p = beginServers.begin(); p != beginServers.end(); ++p) {
 			keyBegins.push_back(keyBegins.arena(), p->first);
 		}
 		// deep count because wait below will destruct workloadEnd
@@ -461,19 +462,19 @@ struct ReadWriteWorkload : KVWorkload {
 		// build self->serverShards, starting from the left shard
 		std::map<UID, IndexRangeVec> serverShards;
 		int i = 0;
-		for(auto p = beginServers.begin(); p != beginServers.end(); ++ p) {
-			for(int j = 0; j < p->second.size(); ++ j) {
+		for (auto p = beginServers.begin(); p != beginServers.end(); ++p) {
+			for (int j = 0; j < p->second.size(); ++j) {
 				serverShards[p->second[j]].emplace_back(indexShards[i]);
 			}
-			++ i;
+			++i;
 		}
 		// self->serverShards is ordered by UID
 		for (auto it : serverShards) {
 			self->serverShards.emplace_back(it);
 		}
-		if (self->clientId == 0) {
-			self->debugPrintServerShards();
-		}
+		//		if (self->clientId == 0) {
+		//			self->debugPrintServerShards();
+		//		}
 		return Void();
 	}
 
@@ -807,7 +808,7 @@ struct ReadWriteWorkload : KVWorkload {
 		ASSERT(hotServerCount > 0);
 		int begin = currentHotRound * hotServerCount;
 		int idx = deterministicRandom()->randomInt(begin, begin + hotServerCount) % serverShards.size();
-		int shardIdx =  deterministicRandom()->randomInt(0, serverShards[idx].second.size());
+		int shardIdx = deterministicRandom()->randomInt(0, serverShards[idx].second.size());
 		return deterministicRandom()->randomInt64(serverShards[idx].second[shardIdx].first,
 		                                          serverShards[idx].second[shardIdx].second + 1);
 	}

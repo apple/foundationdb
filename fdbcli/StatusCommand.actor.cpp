@@ -1108,6 +1108,10 @@ void printStatus(StatusObjectReader statusObj,
 				if (statusObjCluster.has("data_distribution_disabled_for_rebalance")) {
 					outputString += "\n\nWARNING: Data distribution is currently turned on but shard size balancing is "
 					                "currently disabled.";
+					// data_distribution_disabled_hex
+					if (statusObjCluster.has("data_distribution_disabled_hex")) {
+						outputString += " Ignore code: " + statusObjCluster["data_distribution_disabled_hex"].get_str();
+					}
 				}
 			}
 

@@ -1474,6 +1474,7 @@ ACTOR Future<Void> BgDDMountainChopper(DDQueueData* self, int teamCollectionInde
 				if (skipCurrentLoop && !val.present()) {
 					// reset loop interval
 					rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL;
+					skipCurrentLoop = false;
 				} else if (val.present()) {
 					if (val.get().size() > 0) {
 						int ddIgnore = BinaryReader::fromStringRef<int>(val.get(), Unversioned());
