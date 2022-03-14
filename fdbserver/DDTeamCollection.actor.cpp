@@ -2245,6 +2245,11 @@ public:
 			// Ask the candidateWorker to initialize a SS only if the worker does not have a pending request
 			state UID interfaceId = deterministicRandom()->randomUniqueID();
 
+			// insert recruiting localities BEFORE actor waits, to ensure we don't send many recruitment requests to the
+			// same storage
+			self->recruitingIds.insert(interfaceId);
+			self->recruitingLocalities.insert(candidateWorker.worker.stableAddress());
+
 			UID clusterId = wait(self->getClusterId());
 
 			state InitializeStorageRequest isr;
@@ -2254,9 +2259,6 @@ public:
 			isr.reqId = deterministicRandom()->randomUniqueID();
 			isr.interfaceId = interfaceId;
 			isr.clusterId = clusterId;
-
-			self->recruitingIds.insert(interfaceId);
-			self->recruitingLocalities.insert(candidateWorker.worker.stableAddress());
 
 			// if tss, wait for pair ss to finish and add its id to isr. If pair fails, don't recruit tss
 			state bool doRecruit = true;
@@ -2826,25 +2828,8 @@ public:
 
 	// read the current map of `perpetualStorageWiggleIDPrefix`, then restore wigglingId.
 	ACTOR static Future<Void> readStorageWiggleMap(DDTeamCollection* self) {
-
-		state const Key readKey =
-		    perpetualStorageWiggleIDPrefix.withSuffix(self->primary ? "primary/"_sr : "remote/"_sr);
-		state KeyBackedObjectMap<UID, StorageWiggleValue, decltype(IncludeVersion())> metadataMap(readKey,
-		                                                                                          IncludeVersion());
-		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
-		state std::vector<std::pair<UID, StorageWiggleValue>> res;
-		// read the wiggling pairs
-		loop {
-			try {
-				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-				wait(store(res, metadataMap.getRange(tr, UID(0, 0), Optional<UID>(), CLIENT_KNOBS->TOO_MANY)));
-				wait(tr->commit());
-				break;
-			} catch (Error& e) {
-				wait(tr->onError(e));
-			}
-		}
+		state std::vector<std::pair<UID, StorageWiggleValue>> res =
+		    wait(readStorageWiggleValues(self->cx, self->primary, false));
 		if (res.size() > 0) {
 			// SOMEDAY: support wiggle multiple SS at once
 			ASSERT(!self->wigglingId.present()); // only single process wiggle is allowed
@@ -5209,13 +5194,13 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<Void> AddAllTeams_isExhaustive() {
+	static void AddAllTeams_isExhaustive() {
 		Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
 		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
-		state int processSize = 10;
-		state int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
-		state int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
-		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(3, policy, processSize);
+		int processSize = 10;
+		int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
+		int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
+		std::unique_ptr<DDTeamCollection> collection = testTeamCollection(3, policy, processSize);
 
 		int result = collection->addTeamsBestOf(200, desiredTeams, maxTeams);
 
@@ -5223,24 +5208,20 @@ public:
 		// The maximum number of available server teams with machine locality constraint is 120 - 40, because
 		// the 40 (5*4*2) server teams whose servers come from the same machine are invalid.
 		ASSERT(result == 80);
-
-		return Void();
 	}
 
-	ACTOR static Future<Void> AddAllTeams_withLimit() {
+	static void AddAllTeams_withLimit() {
 		Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
 		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
-		state int processSize = 10;
-		state int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
-		state int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
+		int processSize = 10;
+		int desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * processSize;
+		int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER * processSize;
 
-		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(3, policy, processSize);
+		std::unique_ptr<DDTeamCollection> collection = testTeamCollection(3, policy, processSize);
 
 		int result = collection->addTeamsBestOf(10, desiredTeams, maxTeams);
 
 		ASSERT(result >= 10);
-
-		return Void();
 	}
 
 	ACTOR static Future<Void> AddTeamsBestOf_SkippingBusyServers() {
@@ -5644,11 +5625,7 @@ public:
 
 		std::pair<Optional<Reference<IDataDistributionTeam>>, bool> resTeam = req.reply.getFuture().get();
 
-		std::set<UID> expectedServers{ UID(2, 0), UID(3, 0), UID(4, 0) };
-		ASSERT(resTeam.first.present());
-		auto servers = resTeam.first.get()->getServerIDs();
-		const std::set<UID> selectedServers(servers.begin(), servers.end());
-		ASSERT(expectedServers == selectedServers);
+		ASSERT(!resTeam.first.present());
 
 		return Void();
 	}
@@ -5665,12 +5642,12 @@ TEST_CASE("DataDistribution/AddTeamsBestOf/NotUseMachineID") {
 }
 
 TEST_CASE("DataDistribution/AddAllTeams/isExhaustive") {
-	wait(DDTeamCollectionUnitTest::AddAllTeams_isExhaustive());
+	DDTeamCollectionUnitTest::AddAllTeams_isExhaustive();
 	return Void();
 }
 
 TEST_CASE("/DataDistribution/AddAllTeams/withLimit") {
-	wait(DDTeamCollectionUnitTest::AddAllTeams_withLimit());
+	DDTeamCollectionUnitTest::AddAllTeams_withLimit();
 	return Void();
 }
 

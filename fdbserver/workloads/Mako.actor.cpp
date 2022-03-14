@@ -183,7 +183,7 @@ struct MakoWorkload : TestWorkload {
 			auto ratesItr = ratesAtKeyCounts.begin();
 			for (; ratesItr != ratesAtKeyCounts.end(); ratesItr++) {
 				m.emplace_back(
-				    format("%ld keys imported bytes/sec", ratesItr->first), ratesItr->second, Averaged::False);
+				    format("%lld keys imported bytes/sec", ratesItr->first), ratesItr->second, Averaged::False);
 			}
 		}
 		// benchmark

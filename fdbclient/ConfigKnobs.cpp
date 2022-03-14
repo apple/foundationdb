@@ -96,7 +96,7 @@ public:
 
 struct ToStringFunc {
 	std::string operator()(int v) const { return format("int:%d", v); }
-	std::string operator()(int64_t v) const { return format("int64_t:%ld", v); }
+	std::string operator()(int64_t v) const { return format("int64_t:%lld", v); }
 	std::string operator()(bool v) const { return format("bool:%d", v); }
 	std::string operator()(ValueRef v) const { return "string:" + v.toString(); }
 	std::string operator()(double v) const { return format("double:%lf", v); }

@@ -149,6 +149,12 @@ rocksdb::ColumnFamilyOptions getCFOptions() {
 	if (SERVER_KNOBS->ROCKSDB_PERIODIC_COMPACTION_SECONDS > 0) {
 		options.periodic_compaction_seconds = SERVER_KNOBS->ROCKSDB_PERIODIC_COMPACTION_SECONDS;
 	}
+	if (SERVER_KNOBS->ROCKSDB_SOFT_PENDING_COMPACT_BYTES_LIMIT > 0) {
+		options.soft_pending_compaction_bytes_limit = SERVER_KNOBS->ROCKSDB_SOFT_PENDING_COMPACT_BYTES_LIMIT;
+	}
+	if (SERVER_KNOBS->ROCKSDB_HARD_PENDING_COMPACT_BYTES_LIMIT > 0) {
+		options.hard_pending_compaction_bytes_limit = SERVER_KNOBS->ROCKSDB_HARD_PENDING_COMPACT_BYTES_LIMIT;
+	}
 	// Compact sstables when there's too much deleted stuff.
 	options.table_properties_collector_factories = { rocksdb::NewCompactOnDeletionCollectorFactory(128, 1) };
 
@@ -193,6 +199,9 @@ rocksdb::Options getOptions() {
 	options.create_if_missing = true;
 	if (SERVER_KNOBS->ROCKSDB_BACKGROUND_PARALLELISM > 0) {
 		options.IncreaseParallelism(SERVER_KNOBS->ROCKSDB_BACKGROUND_PARALLELISM);
+	}
+	if (SERVER_KNOBS->ROCKSDB_MAX_SUBCOMPACTIONS > 0) {
+		options.max_subcompactions = SERVER_KNOBS->ROCKSDB_MAX_SUBCOMPACTIONS;
 	}
 
 	options.statistics = rocksdb::CreateDBStatistics();
@@ -1073,7 +1082,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				traceBatch.get().addEvent("GetValueDebug", a.debugID.get().first(), "Reader.Before");
 			}
 			if (readBeginTime - a.startTime > readValueTimeout) {
-				TraceEvent(SevWarn, "RocksDBError")
+				TraceEvent(SevWarn, "KVSTimeout")
 				    .detail("Error", "Read value request timedout")
 				    .detail("Method", "ReadValueAction")
 				    .detail("Timeout value", readValueTimeout);
@@ -1150,7 +1159,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				                          "Reader.Before"); //.detail("TaskID", g_network->getCurrentTask());
 			}
 			if (readBeginTime - a.startTime > readValuePrefixTimeout) {
-				TraceEvent(SevWarn, "RocksDBError")
+				TraceEvent(SevWarn, "KVSTimeout")
 				    .detail("Error", "Read value prefix request timedout")
 				    .detail("Method", "ReadValuePrefixAction")
 				    .detail("Timeout value", readValuePrefixTimeout);
@@ -1221,7 +1230,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				readRangeQueueWaitHistogram->sampleSeconds(readBeginTime - a.startTime);
 			}
 			if (readBeginTime - a.startTime > readRangeTimeout) {
-				TraceEvent(SevWarn, "RocksDBError")
+				TraceEvent(SevWarn, "KVSTimeout")
 				    .detail("Error", "Read range request timedout")
 				    .detail("Method", "ReadRangeAction")
 				    .detail("Timeout value", readRangeTimeout);
@@ -1252,7 +1261,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 						break;
 					}
 					if (timer_monotonic() - a.startTime > readRangeTimeout) {
-						TraceEvent(SevWarn, "RocksDBError")
+						TraceEvent(SevWarn, "KVSTimeout")
 						    .detail("Error", "Read range request timedout")
 						    .detail("Method", "ReadRangeAction")
 						    .detail("Timeout value", readRangeTimeout);
@@ -1283,7 +1292,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 						break;
 					}
 					if (timer_monotonic() - a.startTime > readRangeTimeout) {
-						TraceEvent(SevWarn, "RocksDBError")
+						TraceEvent(SevWarn, "KVSTimeout")
 						    .detail("Error", "Read range request timedout")
 						    .detail("Method", "ReadRangeAction")
 						    .detail("Timeout value", readRangeTimeout);
@@ -1434,6 +1443,22 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			writeBatch->DeleteRange(toSlice(keyRange.begin), toSlice(keyRange.end));
 		}
 	}
+
+	// Checks and waits for few seconds if rocskdb is overloaded.
+	ACTOR Future<Void> checkRocksdbState(RocksDBKeyValueStore* self) {
+		state uint64_t estPendCompactBytes;
+		state int count = SERVER_KNOBS->ROCKSDB_CAN_COMMIT_DELAY_TIMES_ON_OVERLOAD;
+		self->db->GetIntProperty(rocksdb::DB::Properties::kEstimatePendingCompactionBytes, &estPendCompactBytes);
+		while (count && estPendCompactBytes > SERVER_KNOBS->ROCKSDB_CAN_COMMIT_COMPACT_BYTES_LIMIT) {
+			wait(delay(SERVER_KNOBS->ROCKSDB_CAN_COMMIT_DELAY_ON_OVERLOAD));
+			count--;
+			self->db->GetIntProperty(rocksdb::DB::Properties::kEstimatePendingCompactionBytes, &estPendCompactBytes);
+		}
+
+		return Void();
+	}
+
+	Future<Void> canCommit() override { return checkRocksdbState(this); }
 
 	Future<Void> commit(bool) override {
 		// If there is nothing to write, don't write.

@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "contrib/fmt-8.0.1/include/fmt/format.h"
+#include "contrib/fmt-8.1.1/include/fmt/format.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/DatabaseContext.h"
@@ -87,7 +87,7 @@ std::string secondsToTimeFormat(int64_t seconds) {
 	else if (seconds >= 60)
 		return format("%.2f minute(s)", seconds / 60.0);
 	else
-		return format("%ld second(s)", seconds);
+		return format("%lld second(s)", seconds);
 }
 
 const Key FileBackupAgent::keyLastRestorable = LiteralStringRef("last_restorable");
@@ -5183,7 +5183,7 @@ public:
 						else
 							statusText += "The initial snapshot is still running.\n";
 
-						statusText += format("\nDetails:\n LogBytes written - %ld\n RangeBytes written - %ld\n "
+						statusText += format("\nDetails:\n LogBytes written - %lld\n RangeBytes written - %lld\n "
 						                     "Last complete log version and timestamp        - %s, %s\n "
 						                     "Last complete snapshot version and timestamp   - %s, %s\n "
 						                     "Current Snapshot start version and timestamp   - %s, %s\n "
