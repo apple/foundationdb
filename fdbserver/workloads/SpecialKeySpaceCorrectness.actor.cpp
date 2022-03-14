@@ -500,9 +500,9 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		if (!ryw) {
 			tx->setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
 		}
+		referenceTx->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		referenceTx->setVersion(100); // Prevent this from doing a GRV or committing
 		referenceTx->clear(normalKeys);
-		referenceTx->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		int numKeys = deterministicRandom()->randomInt(1, self->conflictRangeSizeFactor) * 4;
 		state std::vector<std::string> keys; // Must all be distinct
 		keys.resize(numKeys);
@@ -805,6 +805,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					                                            // class source will be changed
 					wait(tx->commit());
 					tx->reset();
+					tx->setOption(FDBTransactionOptions::RAW_ACCESS);
 					Optional<Value> class_source = wait(tx->get(
 					    Key("process/class_source/" + address)
 					        .withPrefix(
@@ -864,6 +865,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		// if database locked, fdb read should get database_locked error
 		try {
 			tx->reset();
+			tx->setOption(FDBTransactionOptions::RAW_ACCESS);
 			RangeResult res = wait(tx->getRange(normalKeys, 1));
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled)
@@ -883,6 +885,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				TraceEvent(SevDebug, "DatabaseUnlocked").log();
 				tx->reset();
 				// read should be successful
+				tx->setOption(FDBTransactionOptions::RAW_ACCESS);
 				RangeResult res = wait(tx->getRange(normalKeys, 1));
 				tx->reset();
 				break;
@@ -1484,11 +1487,12 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			state Reference<ReadYourWritesTransaction> tr2(new ReadYourWritesTransaction(cx));
 			loop {
 				try {
-					Version readVersion = wait(tr1->getReadVersion());
-					tr2->setVersion(readVersion);
 					tr1->setOption(FDBTransactionOptions::RAW_ACCESS);
 					tr1->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 					tr2->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+
+					Version readVersion = wait(tr1->getReadVersion());
+					tr2->setVersion(readVersion);
 					KeyRef ddPrefix = SpecialKeySpace::getManagementApiCommandPrefix("datadistribution");
 					tr1->set(LiteralStringRef("mode").withPrefix(ddPrefix), LiteralStringRef("1"));
 					wait(tr1->commit());
