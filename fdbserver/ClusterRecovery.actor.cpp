@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/SystemData.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/BackupProgress.actor.h"
@@ -1717,6 +1718,10 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	if (!clusterIdExists) {
 		tr.set(recoveryCommitRequest.arena, clusterIdKey, BinaryWriter::toValue(self->clusterId, Unversioned()));
 	}
+
+	tr.set(recoveryCommitRequest.arena,
+	       latestServerVersionKey,
+	       BinaryWriter::toValue(currentProtocolVersion.version(), Unversioned()));
 
 	applyMetadataMutations(SpanID(),
 	                       self->dbgid,
