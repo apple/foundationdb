@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2020 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,10 +23,10 @@
 #include "fdbclient/FDBTypes.h"
 #include "flow/Arena.h"
 #include "flow/IRandom.h"
+#include <initializer_list>
 #include <unordered_map>
 #include <unordered_set>
 #include <atomic>
-#include <boost/container/small_vector.hpp>
 
 struct Location {
 	StringRef name;
@@ -129,7 +129,6 @@ struct Span {
 // TraceState is not implemented, specifically we do not provide some of the following APIs
 // https://www.w3.org/TR/trace-context/#mutating-the-tracestate-field In particular APIs to delete/update a specific,
 // arbitrary key/value pair, as this complies with the OTEL specification where SpanContexts are immutable.
-//
 // 2. A begin/end and those values are serialized, unlike the Span implementation which has an end but serializes with a
 // begin and calculated duration field.
 // 3. A SpanKind
@@ -151,12 +150,16 @@ enum class SpanKind : uint8_t { INTERNAL = 0, CLIENT = 1, SERVER = 2, PRODUCER =
 enum class SpanStatus : uint8_t { UNSET = 0, OK = 1, ERR = 2 };
 
 struct OTELEvent {
+	OTELEvent() {}
+	OTELEvent(const StringRef& name, const double& time, Arena& arena, const std::initializer_list<KeyValueRef>& attributes = {}) : 
+		name(name), time(time), attributes(arena, attributes.begin(), attributes.end()) {}
 	StringRef name;
 	double time = 0.0;
 	SmallVectorRef<KeyValueRef> attributes;
 };
 
-struct OTELSpan {
+class OTELSpan {
+public:
 	OTELSpan(SpanContext context,
 	         Location location,
 	         SpanContext parentContext,
@@ -216,19 +219,19 @@ struct OTELSpan {
 
 	OTELSpan(const OTELSpan&) = delete;
 	OTELSpan(OTELSpan&& o) {
-		location = o.location;
+		arena = std::move(o.arena);
 		context = o.context;
+		location = o.location;
+		parentContext = std::move(o.parentContext);
 		kind = o.kind;
 		begin = o.begin;
 		end = o.end;
-		parentContext = std::move(o.parentContext);
 		links = std::move(o.links);
-		// TODO - Should we move events and attributes or should we follow the previous model
-		// where we didn't move tags?
 		events = std::move(o.events);
-		attributes = std::move(o.attributes);
 		status = o.status;
+		// TODO not moving attributes as we didn't move tags in Span impl
 		o.context = SpanContext();
+		o.parentContext = SpanContext();
 		o.kind = SpanKind::INTERNAL;
 		o.begin = 0.0;
 		o.end = 0.0;
@@ -239,6 +242,7 @@ struct OTELSpan {
 	OTELSpan& operator=(OTELSpan&& o);
 	OTELSpan& operator=(const OTELSpan&) = delete;
 	void swap(OTELSpan& other) {
+		std::swap(arena, other.arena);
 		std::swap(context, other.context);
 		std::swap(location, other.location);
 		std::swap(parentContext, other.parentContext);
@@ -249,16 +253,46 @@ struct OTELSpan {
 		// We're going to keep the swap here for links because it is somewhat equivalent to {} parents
 		// in the Span implementation.
 		std::swap(links, other.links);
-		// TODO - Should we leave out attributes and events? Attributes/tags are left out in the Span::swap.
-		// Events are an entirely new concept here, so no precedence.
-		std::swap(attributes, other.attributes);
+		// Also swapping events as it shares the same arena
 		std::swap(events, other.events);
+		// TODO - Should we leave out attributes? We did in the Span impl.
+		//std::swap(attributes, other.attributes);
 	}
 
-	void addLink(SpanContext linkContext) { links.push_back(arena, linkContext); }
+	OTELSpan& addLink(const SpanContext& linkContext) { 
+		links.push_back(arena, linkContext); 
+		return *this;
+	}
 
-	void addEvent(OTELEvent event) { events.push_back(arena, event); }
+	OTELSpan& addLinks(const std::initializer_list<SpanContext>& linkContexts = {}) {
+		// No insert on SmallVectorRef? Do we need vector_like_traits from Arena.h line 1450?
+		for (auto const &sc : linkContexts) {
+			links.push_back(arena, sc); 
+		}
+		return *this;
+	}
 
+	OTELSpan& addEvent(const std::string& name, const double& time, const std::initializer_list<KeyValueRef>& attrs = {}) { 
+		return addEvent(StringRef(arena, name), time, attrs);
+	}
+
+    // TODO - Should we remove this. Potentially dangerous if the OTELEvent SmallVectorRef of attributes
+	// uses a different Arena than the OTELSpan?
+	OTELSpan& addEvent(const OTELEvent& event) { events.push_back(arena, event); return *this; }
+
+	// TODO - Should we remove this. Potentially dangerous if the StrinRef uses a different Arena than the OTELSpan?	
+	OTELSpan& addEvent(const StringRef& name, const double& time, const std::initializer_list<KeyValueRef>& attrs = {}) { 
+		return addEvent(OTELEvent(name, time, this->arena, attrs));
+	}
+
+	void addAttribute(const std::string& key, const std::string& value) { 
+		auto k = StringRef(this->arena, key);
+		auto v = StringRef(this->arena, value);
+		attributes[k] = v; 
+	}
+	
+    // TODO - Should we remove this. Potentially dangerous if the StringRef Arena goes out of scope
+	// as it's not tied to this Arena?
 	void addAttribute(const StringRef& key, const StringRef& value) { attributes[key] = value; }
 
 	Arena arena;
