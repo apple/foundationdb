@@ -23,7 +23,6 @@
 #include "fdbclient/FDBTypes.h"
 #include "flow/Arena.h"
 #include "flow/IRandom.h"
-#include <initializer_list>
 #include <unordered_map>
 #include <unordered_set>
 #include <atomic>
@@ -160,10 +159,10 @@ struct OTELEvent {
 
 class OTELSpan {
 public:
-	OTELSpan(SpanContext context,
-	         Location location,
-	         SpanContext parentContext,
-	         std::initializer_list<SpanContext> const& links = {})
+	OTELSpan(const SpanContext& context,
+	         const Location& location,
+	         const SpanContext& parentContext,
+	         const std::initializer_list<SpanContext>& links = {})
 	  : context(context), location(location), parentContext(parentContext), links(arena, links.begin(), links.end()),
 	    begin(g_network->now()) {
 		// We've simplified the logic here, essentially we're now always setting trace and span ids and relying on the
@@ -188,9 +187,9 @@ public:
 		this->attributes["address"_sr] = g_network->getLocalAddress().toString();
 	}
 
-	OTELSpan(Location location,
-	         SpanContext parent = SpanContext(),
-	         std::initializer_list<SpanContext> const& links = {})
+	OTELSpan(const Location& location,
+	         const SpanContext& parent = SpanContext(),
+	         const std::initializer_list<SpanContext>& links = {})
 	  : OTELSpan(
 	        SpanContext(UID(deterministicRandom()->randomUInt64(), deterministicRandom()->randomUInt64()), // traceID
 	                    deterministicRandom()->randomUInt64(), // spanID
@@ -201,14 +200,14 @@ public:
 	        parent,
 	        links) {}
 
-	OTELSpan(Location location, SpanContext parent, SpanContext link) : OTELSpan(location, parent, { link }) {}
+	OTELSpan(const Location& location, const SpanContext parent, const SpanContext& link) : OTELSpan(location, parent, { link }) {}
 
 	// NOTE: This constructor is primarly for unit testing until we sort out how to enable/disable a Knob dynamically in
 	// a test.
-	OTELSpan(Location location,
-	         std::function<double()> rateProvider,
-	         SpanContext parent = SpanContext(),
-	         std::initializer_list<SpanContext> const& links = {})
+	OTELSpan(const Location& location,
+	         const std::function<double()>& rateProvider,
+	         const SpanContext& parent = SpanContext(),
+	         const std::initializer_list<SpanContext>& links = {})
 	  : OTELSpan(SpanContext(UID(deterministicRandom()->randomUInt64(), deterministicRandom()->randomUInt64()),
 	                         deterministicRandom()->randomUInt64(),
 	                         deterministicRandom()->random01() < rateProvider() ? TraceFlags::sampled
@@ -285,15 +284,19 @@ public:
 		return addEvent(OTELEvent(name, time, this->arena, attrs));
 	}
 
-	void addAttribute(const std::string& key, const std::string& value) { 
+	OTELSpan& addAttribute(const std::string& key, const std::string& value) { 
 		auto k = StringRef(this->arena, key);
 		auto v = StringRef(this->arena, value);
 		attributes[k] = v; 
+		return *this;
 	}
 	
     // TODO - Should we remove this. Potentially dangerous if the StringRef Arena goes out of scope
 	// as it's not tied to this Arena?
-	void addAttribute(const StringRef& key, const StringRef& value) { attributes[key] = value; }
+	OTELSpan& addAttribute(const StringRef& key, const StringRef& value) { 
+		attributes[key] = value; 
+		return *this;
+	}
 
 	Arena arena;
 	SpanContext context;

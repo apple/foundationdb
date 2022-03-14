@@ -19,6 +19,7 @@
  */
 
 #include "flow/Tracing.h"
+#include "flow/ITrace.h"
 #include "flow/UnitTest.h"
 
 #include "flow/Knobs.h"
@@ -671,6 +672,17 @@ TEST_CASE("/flow/Tracing/AddAttributes") {
 	auto s2Arena = span2.arena;
 	span2.addAttribute("operation", "ss:update");
 	ASSERT(span2.attributes[StringRef(s2Arena, "operation")].toString() == "ss:update");
+
+	OTELSpan span3("span_with_attrs"_loc);
+	span3.addAttribute("a", "1")
+	.addAttribute("b", "2")
+	.addAttribute("c", "3");
+
+	auto s3Arena = span3.arena;
+	ASSERT(span3.attributes.size() == 4); // Includes default attribute of "address"
+	ASSERT(span3.attributes[StringRef(s3Arena, "a")].toString() == "1"); // Includes default attribute of "address"
+
+
 	return Void();
 };
 
