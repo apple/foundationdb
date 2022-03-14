@@ -170,6 +170,8 @@ public:
 struct MutationAndVersionStream {
 	Standalone<MutationsAndVersionRef> next;
 	PromiseStream<Standalone<MutationsAndVersionRef>> results;
+	// TODO REMOVE, for debugging
+	int idx = -1;
 	bool operator<(MutationAndVersionStream const& rhs) const { return next.version > rhs.next.version; }
 };
 
