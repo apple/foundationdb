@@ -392,6 +392,9 @@ ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
 			fmt::print("Chose BW {0} for seqno {1} in BM {2}\n", _workerId.toString(), seqNo, bmData->epoch);
 		}
 		workerID = _workerId;
+		// We don't have to check for races with an overlapping assignment because it would insert over us in the actor
+		// map, cancelling this actor before it got here
+		bmData->workerAssignments.insert(assignment.keyRange, workerID.get());
 	}
 
 	if (BM_DEBUG) {
