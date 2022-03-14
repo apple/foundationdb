@@ -485,9 +485,6 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          "transaction_start_seconds":0.0,
          "commit_seconds":0.02
       },
-      "serverVersion":{
-         "latest_server_version" : "fdb00a400050001",
-      }
       "clients":{
          "count":1,
          "supported_versions":[
@@ -696,6 +693,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
       },
       "cluster_controller_timestamp":1415650089,
       "protocol_version":"fdb00a400050001",
+      "latest_server_version":"fdb00a500040001",
       "connection_string":"a:a@127.0.0.1:4000",
       "full_replication":true,
       "maintenance_zone":"0ccb4e0fdbdb5583010f6b77d9d10ece",

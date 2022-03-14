@@ -392,12 +392,6 @@ static JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics,
 	return machineMap;
 }
 
-JsonBuilderObject getServerVersionObject(int64_t serverVersion) {
-	JsonBuilderObject serverVersionObj;
-	serverVersionObj["latest_server_version"] = serverVersion;
-	return serverVersionObj;
-}
-
 JsonBuilderObject getLagObject(int64_t versions) {
 	JsonBuilderObject lag;
 	lag["versions"] = versions;
@@ -3199,7 +3193,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		statusObj["datacenter_lag"] = getLagObject(datacenterVersionDifference);
 
 		ProtocolVersion latestServerVersion = wait(getLatestSoftwareVersion(cx));
-		statusObj["server_version"] = getServerVersionObject(latestServerVersion.version());
+		statusObj["latest_server_version"] = format("%" PRIx64, latestServerVersion.version());
 
 		int activeTSSCount = 0;
 		for (auto& it : storageServers) {
