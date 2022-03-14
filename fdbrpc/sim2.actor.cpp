@@ -122,20 +122,24 @@ void ISimulator::displayWorkers() const {
 int openCount = 0;
 
 struct SimClogging {
-	double getSendDelay(NetworkAddress from, NetworkAddress to) const { return halfLatency(); }
+	double getSendDelay(NetworkAddress from, NetworkAddress to, bool stableConnection = false) const {
+		// stable connection here means it's a local connection between processes on the same machine
+		// we expect it to have much lower latency
+		return (stableConnection ? 0.1 : 1.0) * halfLatency();
+	}
 
-	double getRecvDelay(NetworkAddress from, NetworkAddress to, bool disableClogging = false) {
+	double getRecvDelay(NetworkAddress from, NetworkAddress to, bool stableConnection = false) {
 		auto pair = std::make_pair(from.ip, to.ip);
 
 		double tnow = now();
-		double t = tnow + halfLatency();
-		if (!g_simulator.speedUpSimulation && !disableClogging)
+		double t = tnow + (stableConnection ? 0.1 : 1.0) * halfLatency();
+		if (!g_simulator.speedUpSimulation && !stableConnection)
 			t += clogPairLatency[pair];
 
-		if (!g_simulator.speedUpSimulation && !disableClogging && clogPairUntil.count(pair))
+		if (!g_simulator.speedUpSimulation && !stableConnection && clogPairUntil.count(pair))
 			t = std::max(t, clogPairUntil[pair]);
 
-		if (!g_simulator.speedUpSimulation && !disableClogging && clogRecvUntil.count(to.ip))
+		if (!g_simulator.speedUpSimulation && !stableConnection && clogRecvUntil.count(to.ip))
 			t = std::max(t, clogRecvUntil[to.ip]);
 
 		return t - tnow;
@@ -229,7 +233,7 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 
 	bool isPeerGone() const { return !peer || peerProcess->failed; }
 
-	bool isBuggifyDisabled() const override { return buggifyDisabled; }
+	bool isStableConnection() const override { return buggifyDisabled; }
 
 	void peerClosed() {
 		leakedConnectionTracker = trackLeakedConnection(this);
@@ -345,11 +349,12 @@ private:
 			    deterministicRandom()->random01() < .5
 			        ? self->sentBytes.get()
 			        : deterministicRandom()->randomInt64(self->receivedBytes.get(), self->sentBytes.get() + 1);
-			wait(delay(g_clogging.getSendDelay(self->process->address, self->peerProcess->address)));
+			wait(delay(g_clogging.getSendDelay(
+			    self->process->address, self->peerProcess->address, self->isStableConnection())));
 			wait(g_simulator.onProcess(self->process));
 			ASSERT(g_simulator.getCurrentProcess() == self->process);
 			wait(delay(g_clogging.getRecvDelay(
-			    self->process->address, self->peerProcess->address, self->isBuggifyDisabled())));
+			    self->process->address, self->peerProcess->address, self->isStableConnection())));
 			ASSERT(g_simulator.getCurrentProcess() == self->process);
 			if (self->stopReceive.isReady()) {
 				wait(Future<Void>(Never()));

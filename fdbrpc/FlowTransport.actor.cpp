@@ -1293,7 +1293,7 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 						            arena,
 						            peerAddress,
 						            peerProtocolVersion,
-						            g_network->isSimulated() && conn->isBuggifyDisabled());
+						            g_network->isSimulated() && conn->isStableConnection());
 					} else {
 						unprocessed_begin = unprocessed_end;
 						peer->resetPing.trigger();
