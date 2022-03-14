@@ -2719,9 +2719,8 @@ ACTOR Future<RangeResult> getTenantList(ReadYourWritesTransaction* ryw, KeyRange
 	for (auto tenant : tenants) {
 		json_spirit::mObject tenantEntry;
 		tenantEntry["id"] = tenant.second.id;
-		tenantEntry["prefix"] = printable(tenant.second.prefix);
-		std::string tenantEntryString =
-		    json_spirit::write_string(json_spirit::mValue(tenantEntry), json_spirit::Output_options::raw_utf8);
+		tenantEntry["prefix"] = tenant.second.prefix.toString();
+		std::string tenantEntryString = json_spirit::write_string(json_spirit::mValue(tenantEntry));
 		ValueRef tenantEntryBytes(results.arena(), tenantEntryString);
 		results.push_back(results.arena(),
 		                  KeyValueRef(tenant.first.withPrefix(managementPrefix, results.arena()), tenantEntryBytes));

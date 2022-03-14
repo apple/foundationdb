@@ -765,7 +765,7 @@ void DLApi::addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParame
 MultiVersionTransaction::MultiVersionTransaction(Reference<MultiVersionDatabase> db,
                                                  Optional<Reference<MultiVersionTenant>> tenant,
                                                  UniqueOrderedOptionList<FDBTransactionOptions> defaultOptions)
-  : db(db), startTime(timer_monotonic()), timeoutTsav(new ThreadSingleAssignmentVar<Void>()) {
+  : db(db), tenant(tenant), startTime(timer_monotonic()), timeoutTsav(new ThreadSingleAssignmentVar<Void>()) {
 	setDefaultOptions(defaultOptions);
 	updateTransaction();
 }
@@ -1213,7 +1213,7 @@ bool MultiVersionTransaction::isValid() {
 
 // MultiVersionTenant
 MultiVersionTenant::MultiVersionTenant(Reference<MultiVersionDatabase> db, StringRef tenantName)
-  : tenantName(tenantName), db(db) {
+  : tenantVar(new ThreadSafeAsyncVar<Reference<ITenant>>(Reference<ITenant>(nullptr))), tenantName(tenantName), db(db) {
 	updateTenant();
 }
 
