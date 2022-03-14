@@ -200,8 +200,9 @@ public:
 			}
 
 			int64_t bestLoadBytes = 0;
+			bool wigglingBestOption = false; // best option contains server in paused wiggle state
 			Optional<Reference<IDataDistributionTeam>> bestOption;
-			std::vector<Reference<IDataDistributionTeam>> randomTeams;
+			std::vector<Reference<TCTeamInfo>> randomTeams;
 			const std::set<UID> completeSources(req.completeSources.begin(), req.completeSources.end());
 
 			// Note: this block does not apply any filters from the request
@@ -249,9 +250,18 @@ public:
 						    (!req.teamMustHaveShards ||
 						     self->shardsAffectedByTeamFailure->hasShards(ShardsAffectedByTeamFailure::Team(
 						         self->teams[currentIndex]->getServerIDs(), self->primary)))) {
+
+							// bestOption doesn't contain wiggling SS while current team does. Don't replace bestOption
+							// in this case
+							if (bestOption.present() && !wigglingBestOption &&
+							    self->teams[currentIndex]->hasWigglePausedServer()) {
+								continue;
+							}
+
 							bestLoadBytes = loadBytes;
 							bestOption = self->teams[currentIndex];
 							bestIndex = currentIndex;
+							wigglingBestOption = self->teams[bestIndex]->hasWigglePausedServer();
 						}
 					}
 				}
@@ -262,7 +272,7 @@ public:
 				while (randomTeams.size() < SERVER_KNOBS->BEST_TEAM_OPTION_COUNT &&
 				       nTries < SERVER_KNOBS->BEST_TEAM_MAX_TEAM_TRIES) {
 					// If unhealthy team is majority, we may not find an ok dest in this while loop
-					Reference<IDataDistributionTeam> dest = deterministicRandom()->randomChoice(self->teams);
+					Reference<TCTeamInfo> dest = deterministicRandom()->randomChoice(self->teams);
 
 					bool ok = dest->isHealthy() && (!req.preferLowerUtilization ||
 					                                dest->hasHealthyAvailableSpace(self->medianAvailableSpace));
@@ -298,8 +308,16 @@ public:
 					int64_t loadBytes = randomTeams[i]->getLoadBytes(true, req.inflightPenalty);
 					if (!bestOption.present() || (req.preferLowerUtilization && loadBytes < bestLoadBytes) ||
 					    (!req.preferLowerUtilization && loadBytes > bestLoadBytes)) {
+
+						// bestOption doesn't contain wiggling SS while current team does. Don't replace bestOption
+						// in this case
+						if (bestOption.present() && !wigglingBestOption && randomTeams[i]->hasWigglePausedServer()) {
+							continue;
+						}
+
 						bestLoadBytes = loadBytes;
 						bestOption = randomTeams[i];
+						wigglingBestOption = randomTeams[i]->hasWigglePausedServer();
 					}
 				}
 			}
@@ -3609,6 +3627,10 @@ void DDTeamCollection::removeLaggingStorageServer(Key zoneId) {
 		lagging_zones.erase(iter);
 	if (lagging_zones.size() <= std::max(1, configuration.storageTeamSize - 1) && disableFailingLaggingServers.get())
 		disableFailingLaggingServers.set(false);
+}
+
+bool DDTeamCollection::isWigglePausedServer(const UID& server) const {
+	return pauseWiggle && pauseWiggle->get() && wigglingId == server;
 }
 
 std::vector<UID> DDTeamCollection::getRandomHealthyTeam(const UID& excludeServer) {
