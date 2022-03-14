@@ -41,10 +41,6 @@
 namespace {
 const std::string kTracingTransactionIdKey = "transaction_id";
 const std::string kTracingTokenKey = "token";
-// Max version we can set for minRequiredCommitVersionKey,
-// making sure the cluster can still be alive for 1000 years after the recovery
-const Version maxAllowedVerion =
-    std::numeric_limits<int64_t>::max() - 1 - CLIENT_KNOBS->VERSIONS_PER_SECOND * 3600 * 24 * 365 * 1000;
 
 static bool isAlphaNumeric(const std::string& key) {
 	// [A-Za-z0-9_]+
@@ -1865,6 +1861,11 @@ Future<RangeResult> AdvanceVersionImpl::getRange(ReadYourWritesTransaction* ryw,
 }
 
 ACTOR static Future<Optional<std::string>> advanceVersionCommitActor(ReadYourWritesTransaction* ryw, Version v) {
+	// Max version we can set for minRequiredCommitVersionKey,
+	// making sure the cluster can still be alive for 1000 years after the recovery
+	static const Version maxAllowedVerion =
+	    std::numeric_limits<int64_t>::max() - 1 - CLIENT_KNOBS->VERSIONS_PER_SECOND * 3600 * 24 * 365 * 1000;
+
 	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
 	ryw->getTransaction().setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	TraceEvent(SevDebug, "AdvanceVersion").detail("MaxAllowedVersion", maxAllowedVerion);
