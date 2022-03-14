@@ -1995,6 +1995,11 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					bool _result = wait(makeInterruptable(deleteTenantCommandActor(db, tokens)));
 					if (!_result)
 						is_error = true;
+					else if (tenantName.present() && tokens[1] == tenantName.get()) {
+						printAtCol("WARNING: the active tenant was deleted. Use the `usetenant' or `defaulttenant' "
+						           "command to choose a new tenant.\n",
+						           80);
+					}
 					continue;
 				}
 

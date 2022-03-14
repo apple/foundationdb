@@ -72,7 +72,7 @@ ACTOR Future<bool> createTenantCommandActor(Reference<IDatabase> db, std::vector
 		}
 	}
 
-	printf("The tenant `%s' has been created.\n", printable(tokens[1]).c_str());
+	printf("The tenant `%s' has been created\n", printable(tokens[1]).c_str());
 	return true;
 }
 
@@ -117,7 +117,7 @@ ACTOR Future<bool> deleteTenantCommandActor(Reference<IDatabase> db, std::vector
 		}
 	}
 
-	printf("The tenant `%s' has been deleted.\n", printable(tokens[1]).c_str());
+	printf("The tenant `%s' has been deleted\n", printable(tokens[1]).c_str());
 	return true;
 }
 
@@ -151,7 +151,7 @@ ACTOR Future<bool> listTenantsCommandActor(Reference<IDatabase> db, std::vector<
 	}
 	if (tokens.size() == 4) {
 		int n = 0;
-		if (sscanf(tokens[3].toString().c_str(), "%d%n", &limit, &n) != 1 || n != tokens[4].size()) {
+		if (sscanf(tokens[3].toString().c_str(), "%d%n", &limit, &n) != 1 || n != tokens[3].size()) {
 			fprintf(stderr, "ERROR: invalid limit %s\n", tokens[3].toString().c_str());
 			return false;
 		}
@@ -168,9 +168,9 @@ ACTOR Future<bool> listTenantsCommandActor(Reference<IDatabase> db, std::vector<
 
 			if (tenants.empty()) {
 				if (tokens.size() == 1) {
-					printf("The cluster has no tenants.\n");
+					printf("The cluster has no tenants\n");
 				} else {
-					printf("The cluster has no tenants in the specified range.\n");
+					printf("The cluster has no tenants in the specified range\n");
 				}
 			}
 
@@ -218,7 +218,17 @@ ACTOR Future<bool> getTenantCommandActor(Reference<IDatabase> db, std::vector<St
 				throw tenant_not_found();
 			}
 
-			printf("  %s\n", tenant.get().toString().c_str());
+			json_spirit::mValue jsonObject;
+			json_spirit::read_string(tenant.get().toString(), jsonObject);
+			JSONDoc doc(jsonObject);
+
+			int64_t id;
+			std::string prefix;
+			doc.get("id", id);
+			doc.get("prefix", prefix);
+
+			printf("  id: %" PRId64 "\n", id);
+			printf("  prefix: %s\n", printable(prefix).c_str());
 			return true;
 		} catch (Error& e) {
 			state Error err(e);
