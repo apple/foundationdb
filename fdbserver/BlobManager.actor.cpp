@@ -795,7 +795,6 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 						ra.assign = RangeAssignmentData(); // type=normal
 						bmData->rangesToAssign.send(ra);
 					}
-					ASSERT(bmData->rangesToAssign.isEmpty());
 				}
 
 				lastChangeKeyValue =
@@ -1134,10 +1133,6 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 		bmData->rangesToAssign.send(raAssignSplit);
 	}
 
-	// Ensure the new assignments actually got processed and the split boundaries are reflected in the granule mapping
-	// before returning. This prevents a race with a subsequent split evaluation
-	ASSERT(bmData->rangesToAssign.isEmpty());
-
 	if (BM_DEBUG) {
 		fmt::print("Splitting range [{0} - {1}) into {2} granules @ {3} got assignments processed\n",
 		           granuleRange.begin.printable(),
@@ -1245,8 +1240,6 @@ ACTOR Future<Void> killBlobWorker(Reference<BlobManagerData> bmData, BlobWorkerI
 		raAssign.assign = RangeAssignmentData(); // not a continue
 		bmData->rangesToAssign.send(raAssign);
 	}
-
-	ASSERT(bmData->rangesToAssign.isEmpty());
 
 	// Send halt to blob worker, with no expectation of hearing back
 	if (BM_DEBUG) {
