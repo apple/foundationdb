@@ -506,7 +506,7 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 				wait(readAndCheckGranuleLock(tr, keyRange, epoch, seqno));
 				numIterations++;
 
-				Key dfKey = blobGranuleFileKeyFor(granuleID, 'D', currentDeltaVersion);
+				Key dfKey = blobGranuleFileKeyFor(granuleID, currentDeltaVersion, 'D');
 				Value dfValue = blobGranuleFileValueFor(fname, 0, serializedSize);
 				tr->set(dfKey, dfValue);
 
@@ -643,7 +643,7 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 			try {
 				wait(readAndCheckGranuleLock(tr, keyRange, epoch, seqno));
 				numIterations++;
-				Key snapshotFileKey = blobGranuleFileKeyFor(granuleID, 'S', version);
+				Key snapshotFileKey = blobGranuleFileKeyFor(granuleID, version, 'S');
 				Key snapshotFileValue = blobGranuleFileValueFor(fname, 0, serializedSize);
 				tr->set(snapshotFileKey, snapshotFileValue);
 				// create granule history at version if this is a new granule with the initial dump from FDB
@@ -904,8 +904,7 @@ ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bw
 				                                                                 statusEpoch,
 				                                                                 statusSeqno,
 				                                                                 granuleID,
-				                                                                 metadata->initialSnapshotVersion,
-				                                                                 reSnapshotVersion));
+				                                                                 metadata->initialSnapshotVersion));
 				break;
 			} catch (Error& e) {
 				if (e.code() == error_code_operation_cancelled) {
@@ -1900,6 +1899,12 @@ ACTOR Future<Void> blobGranuleLoadHistory(Reference<BlobWorkerData> bwData,
 					try {
 						Optional<Value> v = wait(tr.get(blobGranuleHistoryKeyFor(
 						    curHistory.value.parentGranules[0].first, curHistory.value.parentGranules[0].second)));
+						if (!v.present()) {
+							printf("No granule history present for [%s - %s) @ %lld!!\n",
+							       curHistory.value.parentGranules[0].first.begin.printable().c_str(),
+							       curHistory.value.parentGranules[0].first.end.printable().c_str(),
+							       curHistory.value.parentGranules[0].first);
+						}
 						ASSERT(v.present());
 						next = GranuleHistory(curHistory.value.parentGranules[0].first,
 						                      curHistory.value.parentGranules[0].second,

@@ -47,7 +47,7 @@
  * The Blob Manager is responsible for managing range granules, and recruiting and monitoring Blob Workers.
  */
 
-#define BM_DEBUG false
+#define BM_DEBUG true
 
 void handleClientBlobRange(KeyRangeMap<bool>* knownBlobRanges,
                            Arena& ar,
@@ -204,12 +204,11 @@ struct BlobWorkerStats {
 struct SplitEvaluation {
 	int64_t epoch;
 	int64_t seqno;
-	Version version;
 	Future<Void> inProgress;
 
-	SplitEvaluation() : epoch(0), seqno(0), version(invalidVersion) {}
-	SplitEvaluation(int64_t epoch, int64_t seqno, int64_t version, Future<Void> inProgress)
-	  : epoch(epoch), seqno(seqno), version(version), inProgress(inProgress) {}
+	SplitEvaluation() : epoch(0), seqno(0) {}
+	SplitEvaluation(int64_t epoch, int64_t seqno, Future<Void> inProgress)
+	  : epoch(epoch), seqno(seqno), inProgress(inProgress) {}
 };
 
 struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
@@ -386,7 +385,7 @@ ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
 	}
 
 	if (!workerID.present()) {
-		ASSERT(assignment.isAssign);
+		ASSERT(assignment.isAssign && assignment.assign.get().type != AssignRequestType::Continue);
 		UID _workerId = wait(pickWorkerForAssign(bmData));
 		if (BM_DEBUG) {
 			fmt::print("Chose BW {0} for seqno {1} in BM {2}\n", _workerId.toString(), seqNo, bmData->epoch);
@@ -395,6 +394,10 @@ ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
 		// We don't have to check for races with an overlapping assignment because it would insert over us in the actor
 		// map, cancelling this actor before it got here
 		bmData->workerAssignments.insert(assignment.keyRange, workerID.get());
+
+		if (bmData->workerStats.count(workerID.get())) {
+			bmData->workerStats[workerID.get()].numGranulesAssigned += 1;
+		}
 	}
 
 	if (BM_DEBUG) {
@@ -589,16 +592,16 @@ ACTOR Future<Void> rangeAssigner(Reference<BlobManagerData> bmData) {
 				bmData->workerAssignments.insert(assignment.keyRange, workerId);
 				bmData->assignsInProgress.insert(assignment.keyRange,
 				                                 doRangeAssignment(bmData, assignment, workerId, seqNo));
+				// If we know about the worker and this is not a continue, then this is a new range for the worker
+				if (bmData->workerStats.count(workerId) &&
+				    assignment.assign.get().type != AssignRequestType::Continue) {
+					bmData->workerStats[workerId].numGranulesAssigned += 1;
+				}
 			} else {
 				// Ensure the key boundaries are updated before we pick a worker
 				bmData->workerAssignments.insert(assignment.keyRange, UID());
 				bmData->assignsInProgress.insert(assignment.keyRange,
 				                                 doRangeAssignment(bmData, assignment, Optional<UID>(), seqNo));
-			}
-
-			// If we know about the worker and this is not a continue, then this is a new range for the worker
-			if (bmData->workerStats.count(workerId) && assignment.assign.get().type != AssignRequestType::Continue) {
-				bmData->workerStats[workerId].numGranulesAssigned += 1;
 			}
 
 		} else {
@@ -861,7 +864,6 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
                                    KeyRange granuleRange,
                                    UID granuleID,
                                    Version granuleStartVersion,
-                                   Version latestVersion,
                                    bool writeHot) {
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
 	state Standalone<VectorRef<KeyRef>> newRanges;
@@ -925,17 +927,18 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 	}
 
 	if (BM_DEBUG) {
-		fmt::print("Splitting range [{0} - {1}) into {2} granules @ {3}:\n",
+		fmt::print("Splitting range [{0} - {1}) into {2} granules:\n",
 		           granuleRange.begin.printable(),
 		           granuleRange.end.printable(),
-		           newRanges.size() - 1,
-		           latestVersion);
+		           newRanges.size() - 1);
 		for (int i = 0; i < newRanges.size(); i++) {
 			fmt::print("    {}:{}\n",
 			           (i < newGranuleIDs.size() ? newGranuleIDs[i] : UID()).toString().substr(0, 6).c_str(),
 			           newRanges[i].printable());
 		}
 	}
+
+	state Version splitVersion;
 
 	// Need to split range. Persist intent to split and split metadata to DB BEFORE sending split assignments to blob
 	// workers, so that nothing is lost on blob manager recovery
@@ -1018,7 +1021,7 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 			if (ownerEpoch > bmData->epoch) {
 				if (BM_DEBUG) {
 					fmt::print("BM {0} found a higher epoch {1} than {2} for granule lock of [{3} - {4})\n",
-					           bmData->id.toString(),
+					           bmData->epoch,
 					           ownerEpoch,
 					           bmData->epoch,
 					           granuleRange.begin.printable(),
@@ -1039,6 +1042,23 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 			        blobGranuleLockValueFor(
 			            bmData->epoch, std::numeric_limits<int64_t>::max(), std::get<2>(prevGranuleLock)));
 
+			// get last delta file version written, to make that the split version
+			RangeResult lastDeltaFile =
+			    wait(tr->getRange(blobGranuleFileKeyRangeFor(granuleID), 1, Snapshot::False, Reverse::True));
+			ASSERT(lastDeltaFile.size() == 1);
+			std::tuple<UID, Version, uint8_t> k = decodeBlobGranuleFileKey(lastDeltaFile[0].key);
+			ASSERT(std::get<0>(k) == granuleID);
+			ASSERT(std::get<2>(k) == 'D');
+			splitVersion = std::get<1>(k);
+
+			if (BM_DEBUG) {
+				fmt::print("BM {0} found version {1} for splitting [{2} - {3})\n",
+				           bmData->epoch,
+				           splitVersion,
+				           granuleRange.begin.printable(),
+				           granuleRange.end.printable());
+			}
+
 			// set up splits in granule mapping, but point each part to the old owner (until they get reassigned)
 			state int i;
 			for (i = 0; i < newRanges.size() - 1; i++) {
@@ -1048,7 +1068,7 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 				             blobGranuleSplitValueFor(BlobGranuleSplitState::Initialized),
 				             MutationRef::SetVersionstampedValue);
 
-				Key historyKey = blobGranuleHistoryKeyFor(KeyRangeRef(newRanges[i], newRanges[i + 1]), latestVersion);
+				Key historyKey = blobGranuleHistoryKeyFor(KeyRangeRef(newRanges[i], newRanges[i + 1]), splitVersion);
 
 				Standalone<BlobGranuleHistoryValue> historyValue;
 				historyValue.granuleID = newGranuleIDs[i];
@@ -1090,7 +1110,7 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 		           granuleRange.begin.printable(),
 		           granuleRange.end.printable(),
 		           newRanges.size() - 1,
-		           latestVersion);
+		           splitVersion);
 	}
 
 	// transaction committed, send range assignments
@@ -1116,7 +1136,7 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 		           granuleRange.begin.printable(),
 		           granuleRange.end.printable(),
 		           newRanges.size() - 1,
-		           latestVersion);
+		           splitVersion);
 	}
 
 	return Void();
@@ -1306,7 +1326,6 @@ ACTOR Future<Void> monitorBlobWorkerStatus(Reference<BlobManagerData> bmData, Bl
 				auto lastSplitEval = bmData->splitEvaluations.rangeContaining(rep.granuleRange.begin);
 				if (rep.granuleRange.begin == lastSplitEval.begin() && rep.granuleRange.end == lastSplitEval.end() &&
 				    rep.epoch == lastSplitEval.cvalue().epoch && rep.seqno == lastSplitEval.cvalue().seqno) {
-					ASSERT(lastSplitEval.cvalue().version == rep.latestVersion);
 					if (BM_DEBUG) {
 						fmt::print("Manager {0} received repeat status for the same granule [{1} - {2}), ignoring.\n",
 						           bmData->epoch,
@@ -1349,10 +1368,9 @@ ACTOR Future<Void> monitorBlobWorkerStatus(Reference<BlobManagerData> bmData, Bl
 						                                           rep.granuleRange,
 						                                           rep.granuleID,
 						                                           rep.startVersion,
-						                                           rep.latestVersion,
 						                                           rep.writeHotSplit);
-						bmData->splitEvaluations.insert(
-						    rep.granuleRange, SplitEvaluation(rep.epoch, rep.seqno, rep.latestVersion, doSplitEval));
+						bmData->splitEvaluations.insert(rep.granuleRange,
+						                                SplitEvaluation(rep.epoch, rep.seqno, doSplitEval));
 					}
 				}
 			}
@@ -2179,7 +2197,7 @@ ACTOR Future<Void> partiallyDeleteGranule(Reference<BlobManagerData> self, UID g
 		if (latestSnapshotVersion != invalidVersion) {
 			std::string fname = files.snapshotFiles[idx].filename;
 			deletions.emplace_back(self->bstore->deleteFile(fname));
-			deletedFileKeys.emplace_back(blobGranuleFileKeyFor(granuleId, 'S', files.snapshotFiles[idx].version));
+			deletedFileKeys.emplace_back(blobGranuleFileKeyFor(granuleId, files.snapshotFiles[idx].version, 'S'));
 			filesToDelete.emplace_back(fname);
 		} else if (files.snapshotFiles[idx].version <= pruneVersion) {
 			// otherwise if this is the FIRST snapshot file with version < pruneVersion,
@@ -2202,7 +2220,7 @@ ACTOR Future<Void> partiallyDeleteGranule(Reference<BlobManagerData> self, UID g
 		// == should also be deleted because the last delta file before a snapshot would have the same version
 		std::string fname = deltaFile.filename;
 		deletions.emplace_back(self->bstore->deleteFile(fname));
-		deletedFileKeys.emplace_back(blobGranuleFileKeyFor(granuleId, 'D', deltaFile.version));
+		deletedFileKeys.emplace_back(blobGranuleFileKeyFor(granuleId, deltaFile.version, 'D'));
 		filesToDelete.emplace_back(fname);
 	}
 

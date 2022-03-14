@@ -561,8 +561,8 @@ extern const KeyRangeRef blobGranulePruneKeys;
 extern const KeyRangeRef blobGranuleVersionKeys;
 extern const KeyRef blobGranulePruneChangeKey;
 
-const Key blobGranuleFileKeyFor(UID granuleID, uint8_t fileType, Version fileVersion);
-std::tuple<UID, uint8_t, Version> decodeBlobGranuleFileKey(KeyRef const& key);
+const Key blobGranuleFileKeyFor(UID granuleID, Version fileVersion, uint8_t fileType);
+std::tuple<UID, Version, uint8_t> decodeBlobGranuleFileKey(KeyRef const& key);
 const KeyRange blobGranuleFileKeyRangeFor(UID granuleID);
 
 const Value blobGranuleFileValueFor(StringRef const& filename, int64_t offset, int64_t length);

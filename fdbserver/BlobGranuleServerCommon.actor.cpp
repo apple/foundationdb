@@ -59,7 +59,7 @@ ACTOR Future<Void> readGranuleFiles(Transaction* tr, Key* startKey, Key endKey, 
 			int64_t offset;
 			int64_t length;
 
-			std::tie(gid, fileType, version) = decodeBlobGranuleFileKey(it.key);
+			std::tie(gid, version, fileType) = decodeBlobGranuleFileKey(it.key);
 			ASSERT(gid == granuleID);
 
 			std::tie(filename, offset, length) = decodeBlobGranuleFileValue(it.value);

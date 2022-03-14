@@ -152,7 +152,6 @@ struct GranuleStatusReply : public ReplyPromiseStreamReply {
 	int64_t seqno;
 	UID granuleID;
 	Version startVersion;
-	Version latestVersion;
 
 	GranuleStatusReply() {}
 	explicit GranuleStatusReply(KeyRange range,
@@ -161,10 +160,9 @@ struct GranuleStatusReply : public ReplyPromiseStreamReply {
 	                            int64_t epoch,
 	                            int64_t seqno,
 	                            UID granuleID,
-	                            Version startVersion,
-	                            Version latestVersion)
+	                            Version startVersion)
 	  : granuleRange(range), doSplit(doSplit), writeHotSplit(writeHotSplit), epoch(epoch), seqno(seqno),
-	    granuleID(granuleID), startVersion(startVersion), latestVersion(latestVersion) {}
+	    granuleID(granuleID), startVersion(startVersion) {}
 
 	int expectedSize() const { return sizeof(GranuleStatusReply) + granuleRange.expectedSize(); }
 
@@ -179,8 +177,7 @@ struct GranuleStatusReply : public ReplyPromiseStreamReply {
 		           epoch,
 		           seqno,
 		           granuleID,
-		           startVersion,
-		           latestVersion);
+		           startVersion);
 	}
 };
 
