@@ -3046,6 +3046,7 @@ Reference<TransactionState> TransactionState::cloneAndReset(Reference<Transactio
 	newState->startTime = startTime;
 	newState->committedVersion = committedVersion;
 	newState->conflictingKeys = conflictingKeys;
+	newState->tenantSet = tenantSet;
 
 	return newState;
 }

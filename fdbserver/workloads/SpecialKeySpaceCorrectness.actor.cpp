@@ -1145,6 +1145,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		}
 		// advanceversion
 		try {
+			tx->setOption(FDBTransactionOptions::RAW_ACCESS);
 			Version v1 = wait(tx->getReadVersion());
 			TraceEvent(SevDebug, "InitialReadVersion").detail("Version", v1);
 			state Version v2 = 2 * v1;

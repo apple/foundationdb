@@ -130,10 +130,24 @@ EmptyFuture Database::create_snapshot(FDBDatabase* db,
 	return EmptyFuture(fdb_database_create_snapshot(db, uid, uid_length, snap_command, snap_command_length));
 }
 
-// Transaction
+// Tenant
+Tenant::Tenant(FDBDatabase* db, const uint8_t* name, int name_length) {
+	if (fdb_error_t err = fdb_database_open_tenant(db, name, name_length, &tenant)) {
+		std::cerr << fdb_get_error(err) << std::endl;
+		std::abort();
+	}
+}
 
+// Transaction
 Transaction::Transaction(FDBDatabase* db) {
 	if (fdb_error_t err = fdb_database_create_transaction(db, &tr_)) {
+		std::cerr << fdb_get_error(err) << std::endl;
+		std::abort();
+	}
+}
+
+Transaction::Transaction(Tenant tenant) {
+	if (fdb_error_t err = fdb_tenant_create_transaction(tenant.tenant, &tr_)) {
 		std::cerr << fdb_get_error(err) << std::endl;
 		std::abort();
 	}

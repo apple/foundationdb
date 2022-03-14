@@ -376,7 +376,7 @@ struct TenantManagementWorkload : TestWorkload {
 		jsonDoc.get("id", id);
 		jsonDoc.get("prefix", prefix);
 
-		Key prefixKey = KeyRef(unprintable(prefix));
+		Key prefixKey = KeyRef(prefix);
 		TenantMapEntry entry(id, prefixKey.substr(0, prefixKey.size() - 8));
 
 		ASSERT(entry.prefix == prefixKey);
