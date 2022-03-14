@@ -1550,7 +1550,7 @@ static void addAssignment(KeyRangeMap<std::tuple<UID, int64_t, int64_t>>& map,
 				// new one is from DB (source of truth on boundaries) and existing mapping disagrees on boundary or
 				// assignment, do explicit revoke and re-assign to converge
 				anyConflicts = true;
-				// if ranges don't match, need to explicitly reaassign all parts of old range, as it could be from a
+				// if ranges don't match, need to explicitly reassign all parts of old range, as it could be from a
 				// yet-unassigned split
 				if (old.range() != newRange) {
 					std::get<0>(old.value()) = UID();
@@ -1564,6 +1564,11 @@ static void addAssignment(KeyRangeMap<std::tuple<UID, int64_t, int64_t>>& map,
 			           (oldEpoch < newEpoch || (oldEpoch == newEpoch && oldSeqno < newSeqno))) {
 				// 2 blob workers reported conflicting mappings, add old one to out of date (if not already added by a
 				// previous intersecting range in the split case)
+				// if ranges don't match, need to explicitly reassign all parts of old range, as it could be from a
+				// partially-assigned split
+				if (old.range() != newRange) {
+					std::get<0>(old.value()) = UID();
+				}
 				if (outOfDate.empty() || outOfDate.back() != std::pair(oldWorker, KeyRange(old.range()))) {
 					TEST(true); // BM Recovery: Two workers claim ownership of same granule
 					outOfDate.push_back(std::pair(oldWorker, old.range()));
