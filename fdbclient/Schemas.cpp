@@ -485,6 +485,9 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
          "transaction_start_seconds":0.0,
          "commit_seconds":0.02
       },
+      "serverVersion":{
+         "latest_server_version" : "fdb00a400050001",
+      }
       "clients":{
          "count":1,
          "supported_versions":[

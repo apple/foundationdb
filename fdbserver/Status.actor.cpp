@@ -392,6 +392,12 @@ static JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics,
 	return machineMap;
 }
 
+JsonBuilderObject getServerVersionObject(int64_t serverVersion) {
+	JsonBuilderObject serverVersionObj;
+	serverVersionObj["latest_server_version"] = serverVersion;
+	return serverVersionObj;
+}
+
 JsonBuilderObject getLagObject(int64_t versions) {
 	JsonBuilderObject lag;
 	lag["versions"] = versions;
@@ -1540,6 +1546,21 @@ struct LoadConfigurationResult {
 	LoadConfigurationResult()
 	  : fullReplication(true), healthyZoneSeconds(0), rebalanceDDIgnored(false), dataDistributionDisabled(false) {}
 };
+
+ACTOR Future<ProtocolVersion> getLatestSoftwareVersion(Database cx) {
+	state ReadYourWritesTransaction tr(cx);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			Optional<Value> latestServerVersion = wait(tr.get(latestServerVersionKey));
+			ASSERT(latestServerVersion.present());
+			return BinaryReader::fromStringRef<ProtocolVersion>(latestServerVersion.get(), Unversioned());
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
 
 ACTOR static Future<std::pair<Optional<DatabaseConfiguration>, Optional<LoadConfigurationResult>>>
 loadConfiguration(Database cx, JsonBuilderArray* messages, std::set<std::string>* status_incomplete_reasons) {
@@ -3176,6 +3197,9 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		}
 		statusObj["incompatible_connections"] = incompatibleConnectionsArray;
 		statusObj["datacenter_lag"] = getLagObject(datacenterVersionDifference);
+
+		ProtocolVersion latestServerVersion = wait(getLatestSoftwareVersion(cx));
+		statusObj["server_version"] = getServerVersionObject(latestServerVersion.version());
 
 		int activeTSSCount = 0;
 		for (auto& it : storageServers) {
