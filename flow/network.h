@@ -509,8 +509,8 @@ public:
 	virtual UID getDebugID() const = 0;
 
 	// At present, implemented by Sim2Conn where we want to disable bits flip for connections between parent process and
-	// child process
-	virtual bool isBuggifyDisabled() const { throw unsupported_operation(); }
+	// child process, also reduce latency for this kind of connection
+	virtual bool isStableConnection() const { throw unsupported_operation(); }
 };
 
 class IListener {
