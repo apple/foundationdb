@@ -21,7 +21,7 @@
 #include <cinttypes>
 
 #include "boost/lexical_cast.hpp"
-#include "contrib/fmt-8.0.1/include/fmt/format.h"
+#include "contrib/fmt-8.1.1/include/fmt/format.h"
 
 #include "fdbcli/fdbcli.actor.h"
 

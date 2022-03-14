@@ -113,6 +113,64 @@ typedef struct keyvalue {
 	int value_length;
 } FDBKeyValue;
 #endif
+
+#pragma pack(pop)
+
+/* Memory layout of KeySelectorRef. */
+typedef struct keyselector {
+	FDBKey key;
+	/* orEqual and offset have not be tested in C binding. Just a placeholder. */
+	fdb_bool_t orEqual;
+	int offset;
+} FDBKeySelector;
+
+/* Memory layout of GetRangeReqAndResultRef. */
+typedef struct getrangereqandresult {
+	FDBKeySelector begin;
+	FDBKeySelector end;
+	FDBKeyValue* data;
+	int m_size, m_capacity;
+} FDBGetRangeReqAndResult;
+
+/* Memory layout of MappedKeyValueRef.
+
+Total 112 bytes
+- key (12 bytes)
+:74:8F:8E:5F:AE:7F:00:00
+:4A:00:00:00
+- value (12 bytes)
+:70:8F:8E:5F:AE:7F:00:00
+:00:00:00:00
+- begin selector (20 bytes)
+:30:8F:8E:5F:AE:7F:00:00
+:2D:00:00:00
+:00:7F:00:00
+:01:00:00:00
+- end selector (20 bytes)
+:EC:8E:8E:5F:AE:7F:00:00
+:2D:00:00:00
+:00:2B:3C:60
+:01:00:00:00
+- vector (16 bytes)
+:74:94:8E:5F:AE:7F:00:00
+:01:00:00:00
+:01:00:00:00
+- buffer (32 bytes)
+:00:20:D1:61:00:00:00:00
+:00:00:00:00:00:00:00:00
+:00:00:00:00:00:00:00:00
+:01:00:00:00:AE:7F:00:00
+*/
+typedef struct mappedkeyvalue {
+	FDBKey key;
+	FDBKey value;
+	/* It's complicated to map a std::variant to C. For now we assume the underlying requests are always getRange and
+	 * take the shortcut. */
+	FDBGetRangeReqAndResult getRange;
+	unsigned char buffer[32];
+} FDBMappedKeyValue;
+
+#pragma pack(push, 4)
 typedef struct keyrange {
 	const uint8_t* begin_key;
 	int begin_key_length;
@@ -176,6 +234,12 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_keyvalue_array(FDBFuture
                                                                        int* out_count,
                                                                        fdb_bool_t* out_more);
 #endif
+
+DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_mappedkeyvalue_array(FDBFuture* f,
+                                                                             FDBMappedKeyValue const** out_kv,
+                                                                             int* out_count,
+                                                                             fdb_bool_t* out_more);
+
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_key_array(FDBFuture* f,
                                                                   FDBKey const** out_key_array,
                                                                   int* out_count);
@@ -283,23 +347,23 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_range(FDBTransaction
                                                                   fdb_bool_t reverse);
 #endif
 
-DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_range_and_flat_map(FDBTransaction* tr,
-                                                                               uint8_t const* begin_key_name,
-                                                                               int begin_key_name_length,
-                                                                               fdb_bool_t begin_or_equal,
-                                                                               int begin_offset,
-                                                                               uint8_t const* end_key_name,
-                                                                               int end_key_name_length,
-                                                                               fdb_bool_t end_or_equal,
-                                                                               int end_offset,
-                                                                               uint8_t const* mapper_name,
-                                                                               int mapper_name_length,
-                                                                               int limit,
-                                                                               int target_bytes,
-                                                                               FDBStreamingMode mode,
-                                                                               int iteration,
-                                                                               fdb_bool_t snapshot,
-                                                                               fdb_bool_t reverse);
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_mapped_range(FDBTransaction* tr,
+                                                                         uint8_t const* begin_key_name,
+                                                                         int begin_key_name_length,
+                                                                         fdb_bool_t begin_or_equal,
+                                                                         int begin_offset,
+                                                                         uint8_t const* end_key_name,
+                                                                         int end_key_name_length,
+                                                                         fdb_bool_t end_or_equal,
+                                                                         int end_offset,
+                                                                         uint8_t const* mapper_name,
+                                                                         int mapper_name_length,
+                                                                         int limit,
+                                                                         int target_bytes,
+                                                                         FDBStreamingMode mode,
+                                                                         int iteration,
+                                                                         fdb_bool_t snapshot,
+                                                                         fdb_bool_t reverse);
 
 DLLEXPORT void fdb_transaction_set(FDBTransaction* tr,
                                    uint8_t const* key_name,
