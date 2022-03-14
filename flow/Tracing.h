@@ -150,8 +150,11 @@ enum class SpanStatus : uint8_t { UNSET = 0, OK = 1, ERR = 2 };
 
 struct OTELEvent {
 	OTELEvent() {}
-	OTELEvent(const StringRef& name, const double& time, Arena& arena, const std::initializer_list<KeyValueRef>& attributes = {}) : 
-		name(name), time(time), attributes(arena, attributes.begin(), attributes.end()) {}
+	OTELEvent(const StringRef& name,
+	          const double& time,
+	          Arena& arena,
+	          const std::initializer_list<KeyValueRef>& attributes = {})
+	  : name(name), time(time), attributes(arena, attributes.begin(), attributes.end()) {}
 	StringRef name;
 	double time = 0.0;
 	SmallVectorRef<KeyValueRef> attributes;
@@ -200,7 +203,8 @@ public:
 	        parent,
 	        links) {}
 
-	OTELSpan(const Location& location, const SpanContext parent, const SpanContext& link) : OTELSpan(location, parent, { link }) {}
+	OTELSpan(const Location& location, const SpanContext parent, const SpanContext& link)
+	  : OTELSpan(location, parent, { link }) {}
 
 	// NOTE: This constructor is primarly for unit testing until we sort out how to enable/disable a Knob dynamically in
 	// a test.
@@ -255,46 +259,53 @@ public:
 		// Also swapping events as it shares the same arena
 		std::swap(events, other.events);
 		// TODO - Should we leave out attributes? We did in the Span impl.
-		//std::swap(attributes, other.attributes);
+		// std::swap(attributes, other.attributes);
 	}
 
-	OTELSpan& addLink(const SpanContext& linkContext) { 
-		links.push_back(arena, linkContext); 
+	OTELSpan& addLink(const SpanContext& linkContext) {
+		links.push_back(arena, linkContext);
 		return *this;
 	}
 
 	OTELSpan& addLinks(const std::initializer_list<SpanContext>& linkContexts = {}) {
 		// No insert on SmallVectorRef? Do we need vector_like_traits from Arena.h line 1450?
-		for (auto const &sc : linkContexts) {
-			links.push_back(arena, sc); 
+		for (auto const& sc : linkContexts) {
+			links.push_back(arena, sc);
 		}
 		return *this;
 	}
 
-	OTELSpan& addEvent(const std::string& name, const double& time, const std::initializer_list<KeyValueRef>& attrs = {}) { 
+	OTELSpan& addEvent(const std::string& name,
+	                   const double& time,
+	                   const std::initializer_list<KeyValueRef>& attrs = {}) {
 		return addEvent(StringRef(arena, name), time, attrs);
 	}
 
-    // TODO - Should we remove this. Potentially dangerous if the OTELEvent SmallVectorRef of attributes
+	// TODO - Should we remove this. Potentially dangerous if the OTELEvent SmallVectorRef of attributes
 	// uses a different Arena than the OTELSpan?
-	OTELSpan& addEvent(const OTELEvent& event) { events.push_back(arena, event); return *this; }
+	OTELSpan& addEvent(const OTELEvent& event) {
+		events.push_back(arena, event);
+		return *this;
+	}
 
-	// TODO - Should we remove this. Potentially dangerous if the StrinRef uses a different Arena than the OTELSpan?	
-	OTELSpan& addEvent(const StringRef& name, const double& time, const std::initializer_list<KeyValueRef>& attrs = {}) { 
+	// TODO - Should we remove this. Potentially dangerous if the StrinRef uses a different Arena than the OTELSpan?
+	OTELSpan& addEvent(const StringRef& name,
+	                   const double& time,
+	                   const std::initializer_list<KeyValueRef>& attrs = {}) {
 		return addEvent(OTELEvent(name, time, this->arena, attrs));
 	}
 
-	OTELSpan& addAttribute(const std::string& key, const std::string& value) { 
+	OTELSpan& addAttribute(const std::string& key, const std::string& value) {
 		auto k = StringRef(this->arena, key);
 		auto v = StringRef(this->arena, value);
-		attributes[k] = v; 
+		attributes[k] = v;
 		return *this;
 	}
-	
-    // TODO - Should we remove this. Potentially dangerous if the StringRef Arena goes out of scope
+
+	// TODO - Should we remove this. Potentially dangerous if the StringRef Arena goes out of scope
 	// as it's not tied to this Arena?
-	OTELSpan& addAttribute(const StringRef& key, const StringRef& value) { 
-		attributes[key] = value; 
+	OTELSpan& addAttribute(const StringRef& key, const StringRef& value) {
+		attributes[key] = value;
 		return *this;
 	}
 

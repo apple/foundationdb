@@ -649,7 +649,7 @@ TEST_CASE("/flow/Tracing/AddEvents") {
 	auto s3Arena = span3.arena;
 	auto s3Attr = KeyValueRef(KeyRef(s3Arena, "xyz"), ValueRef(s3Arena, "123"));
 	span3.addEvent(OTELEvent(StringRef(s3Arena, "commit_fail"), 1234567.100, s3Arena, { s3Attr }))
-	.addEvent(OTELEvent(StringRef(s3Arena, "commit_succeed"), 1111.001, s3Arena));
+	    .addEvent(OTELEvent(StringRef(s3Arena, "commit_succeed"), 1111.001, s3Arena));
 	ASSERT(span3.events[0].name.toString() == "commit_fail");
 	ASSERT(span3.events[0].time == 1234567.100);
 	ASSERT(span3.events[0].attributes.begin()->key.toString() == "xyz");
@@ -674,14 +674,11 @@ TEST_CASE("/flow/Tracing/AddAttributes") {
 	ASSERT(span2.attributes[StringRef(s2Arena, "operation")].toString() == "ss:update");
 
 	OTELSpan span3("span_with_attrs"_loc);
-	span3.addAttribute("a", "1")
-	.addAttribute("b", "2")
-	.addAttribute("c", "3");
+	span3.addAttribute("a", "1").addAttribute("b", "2").addAttribute("c", "3");
 
 	auto s3Arena = span3.arena;
 	ASSERT(span3.attributes.size() == 4); // Includes default attribute of "address"
 	ASSERT(span3.attributes[StringRef(s3Arena, "a")].toString() == "1"); // Includes default attribute of "address"
-
 
 	return Void();
 };
@@ -690,7 +687,7 @@ TEST_CASE("/flow/Tracing/AddLinks") {
 	OTELSpan span1("span_with_links"_loc);
 	span1.addLink(SpanContext(UID(100, 101), 200, TraceFlags::sampled));
 	span1.addLink(SpanContext(UID(200, 201), 300, TraceFlags::unsampled))
-	.addLink(SpanContext(UID(300, 301), 400, TraceFlags::sampled));
+	    .addLink(SpanContext(UID(300, 301), 400, TraceFlags::sampled));
 
 	ASSERT(span1.links[0].traceID == UID(100, 101));
 	ASSERT(span1.links[0].spanID == 200);
@@ -706,8 +703,7 @@ TEST_CASE("/flow/Tracing/AddLinks") {
 	auto link1 = SpanContext(UID(1, 1), 1, TraceFlags::sampled);
 	auto link2 = SpanContext(UID(2, 2), 2, TraceFlags::sampled);
 	auto link3 = SpanContext(UID(3, 3), 3, TraceFlags::sampled);
-	span2.addLinks({link1, link2})
-		 .addLinks({link3});
+	span2.addLinks({ link1, link2 }).addLinks({ link3 });
 	ASSERT(span2.links[0].traceID == UID(1, 1));
 	ASSERT(span2.links[0].spanID == 1);
 	ASSERT(span2.links[0].m_Flags == TraceFlags::sampled);
