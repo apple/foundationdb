@@ -865,7 +865,6 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
                                    bool writeHot) {
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bmData->db);
 	state Standalone<VectorRef<KeyRef>> newRanges;
-	state int64_t newLockSeqno = -1;
 
 	// first get ranges to split
 	Standalone<VectorRef<KeyRef>> _newRanges = wait(splitRange(bmData, granuleRange, writeHot));
@@ -1015,7 +1014,6 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 			ASSERT(lockValue.present());
 			std::tuple<int64_t, int64_t, UID> prevGranuleLock = decodeBlobGranuleLockValue(lockValue.get());
 			int64_t ownerEpoch = std::get<0>(prevGranuleLock);
-			int64_t ownerSeqno = std::get<1>(prevGranuleLock);
 
 			if (ownerEpoch > bmData->epoch) {
 				if (BM_DEBUG) {
@@ -1033,33 +1031,13 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 				return Void();
 			}
 
-			if (newLockSeqno == -1) {
-				newLockSeqno = bmData->seqNo;
-				bmData->seqNo++;
-				if (!(bmData->epoch > ownerEpoch || (bmData->epoch == ownerEpoch && newLockSeqno > ownerSeqno))) {
-					fmt::print("BM seqno for granule [{0} - {1}) out of order for lock! manager: ({2}, {3}), owner: "
-					           "({4}, {5}})\n",
-					           granuleRange.begin.printable(),
-					           granuleRange.end.printable(),
-					           bmData->epoch,
-					           newLockSeqno,
-					           ownerEpoch,
-					           ownerSeqno);
-				}
-				ASSERT(bmData->epoch > ownerEpoch || (bmData->epoch == ownerEpoch && newLockSeqno > ownerSeqno));
-			} else if (bmData->epoch == ownerEpoch && newLockSeqno < ownerSeqno) {
-				// we retried, and between retries we reassigned this range elsewhere. Cancel this split
-				TEST(true); // BM maybe split cancelled by subsequent move
-				if (BM_DEBUG) {
-					fmt::print("Splitting range [{0} - {1}) cancelled by move elsewhere!\n",
-					           granuleRange.begin.printable(),
-					           granuleRange.end.printable());
-				}
-				return Void();
-			}
-
-			// acquire granule lock so nobody else can make changes to this granule.
-			tr->set(lockKey, blobGranuleLockValueFor(bmData->epoch, newLockSeqno, std::get<2>(prevGranuleLock)));
+			// Set lock to max value for this manager, so other reassignments can't race with this transaction
+			// and existing owner can't modify it further.
+			// FIXME: Implementing merging may require us to make lock go backwards if we later merge other granules
+			// back to this same range, but I think that's fine
+			tr->set(lockKey,
+			        blobGranuleLockValueFor(
+			            bmData->epoch, std::numeric_limits<int64_t>::max(), std::get<2>(prevGranuleLock)));
 
 			// set up splits in granule mapping, but point each part to the old owner (until they get reassigned)
 			state int i;
