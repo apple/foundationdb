@@ -1291,6 +1291,16 @@ Future<RangeResult> HealthMetricsRangeImpl::getRange(ReadYourWritesTransaction* 
 	return healthMetricsGetRangeActor(ryw, kr);
 }
 
+KeyRangeRef toRelativeRange(KeyRangeRef range, KeyRef prefix) {
+	if (prefix.empty()) {
+		return range;
+	} else {
+		KeyRef begin = range.begin.startsWith(prefix) ? range.begin.removePrefix(prefix) : allKeys.begin;
+		KeyRef end = range.end.startsWith(prefix) ? range.end.removePrefix(prefix) : allKeys.end;
+		return KeyRangeRef(begin, end);
+	}
+}
+
 DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnectionRecord>>> connectionRecord,
                                  Reference<AsyncVar<ClientDBInfo>> clientInfo,
                                  Reference<AsyncVar<Optional<ClientLeaderRegInterface>> const> coordinator,
@@ -1661,7 +1671,7 @@ Optional<KeyRangeLocationInfo> DatabaseContext::getCachedLocation(const Optional
 	auto range =
 	    isBackward ? locationCache.rangeContainingKeyBefore(resolvedKey) : locationCache.rangeContaining(resolvedKey);
 	if (range->value()) {
-		return KeyRangeLocationInfo(tenantEntry, range->range(), range->value());
+		return KeyRangeLocationInfo(tenantEntry, toRelativeRange(range->range(), tenantEntry.prefix), range->value());
 	}
 
 	return Optional<KeyRangeLocationInfo>();
@@ -1698,7 +1708,7 @@ bool DatabaseContext::getCachedLocations(const Optional<TenantName>& tenantName,
 			result.clear();
 			return false;
 		}
-		result.emplace_back(tenantEntry, r->range() & resolvedRange, r->value());
+		result.emplace_back(tenantEntry, toRelativeRange(r->range() & resolvedRange, tenantEntry.prefix), r->value());
 		if (result.size() == limit || begin == end) {
 			break;
 		}
@@ -2644,16 +2654,6 @@ void updateTssMappings(Database cx, const GetKeyServerLocationsReply& reply) {
 	// if SS didn't have a mapping above, it's still in the ssiById map, so remove its tss mapping
 	for (const auto& it : ssiById) {
 		cx->removeTssMapping(*it.second);
-	}
-}
-
-KeyRangeRef toRelativeRange(KeyRangeRef range, KeyRef prefix) {
-	if (prefix.empty()) {
-		return range;
-	} else {
-		KeyRef begin = range.begin.startsWith(prefix) ? range.begin.removePrefix(prefix) : allKeys.begin;
-		KeyRef end = range.end.startsWith(prefix) ? range.end.removePrefix(prefix) : allKeys.end;
-		return KeyRangeRef(begin, end);
 	}
 }
 
