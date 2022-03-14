@@ -1449,10 +1449,11 @@ ACTOR Future<Void> BgDDMountainChopper(DDQueueData* self, int teamCollectionInde
 	state Transaction tr(self->cx);
 	state double lastRead = 0;
 	state bool skipCurrentLoop = false;
+	state bool disableReadBalance = false;
+	state bool disableDiskBalance = false;
+
 	loop {
 		state bool moved = false;
-		state bool disableReadBalance = false;
-		state bool disableDiskBalance = false;
 		state Reference<IDataDistributionTeam> sourceTeam;
 		state Reference<IDataDistributionTeam> destTeam;
 		state GetTeamRequest srcReq;
@@ -1471,19 +1472,19 @@ ACTOR Future<Void> BgDDMountainChopper(DDQueueData* self, int teamCollectionInde
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				Optional<Value> val = wait(tr.get(rebalanceDDIgnoreKey));
 				lastRead = now();
-				if (skipCurrentLoop && !val.present()) {
+				if (!val.present()) {
 					// reset loop interval
-					rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL;
+					if (skipCurrentLoop) {
+						rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL;
+					}
 					skipCurrentLoop = false;
-				} else if (val.present()) {
+					disableReadBalance = false;
+					disableDiskBalance = false;
+				} else {
 					if (val.get().size() > 0) {
 						int ddIgnore = BinaryReader::fromStringRef<int>(val.get(), Unversioned());
-						if (ddIgnore & DDIgnore::REBALANCE_DISK) {
-							disableDiskBalance = true;
-						}
-						if (ddIgnore & DDIgnore::REBALANCE_READ) {
-							disableReadBalance = true;
-						}
+						disableDiskBalance = (ddIgnore & DDIgnore::REBALANCE_DISK) > 0;
+						disableReadBalance = (ddIgnore & DDIgnore::REBALANCE_READ) > 0;
 						skipCurrentLoop = disableReadBalance && disableDiskBalance;
 					} else {
 						skipCurrentLoop = true;
@@ -1564,11 +1565,11 @@ ACTOR Future<Void> BgDDValleyFiller(DDQueueData* self, int teamCollectionIndex) 
 	state Transaction tr(self->cx);
 	state double lastRead = 0;
 	state bool skipCurrentLoop = false;
+	state bool disableReadBalance = false;
+	state bool disableDiskBalance = false;
 
 	loop {
 		state bool moved = false;
-		state bool disableReadBalance = false;
-		state bool disableDiskBalance = false;
 		state Reference<IDataDistributionTeam> sourceTeam;
 		state Reference<IDataDistributionTeam> destTeam;
 		state GetTeamRequest srcReq;
@@ -1587,19 +1588,19 @@ ACTOR Future<Void> BgDDValleyFiller(DDQueueData* self, int teamCollectionIndex) 
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				Optional<Value> val = wait(tr.get(rebalanceDDIgnoreKey));
 				lastRead = now();
-				if (skipCurrentLoop && !val.present()) {
+				if (!val.present()) {
 					// reset loop interval
-					rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL;
+					if (skipCurrentLoop) {
+						rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL;
+					}
+					skipCurrentLoop = false;
+					disableReadBalance = false;
+					disableDiskBalance = false;
 				} else if (val.present()) {
-					// FIXME: better way for upgrade? for example, using a new key to record mode
-					if (val.get().size() > sizeof(int)) {
+					if (val.get().size() > 0) {
 						int ddIgnore = BinaryReader::fromStringRef<int>(val.get(), Unversioned());
-						if (ddIgnore & DDIgnore::REBALANCE_DISK) {
-							disableDiskBalance = true;
-						}
-						if (ddIgnore & DDIgnore::REBALANCE_READ) {
-							disableReadBalance = true;
-						}
+						disableDiskBalance = (ddIgnore & DDIgnore::REBALANCE_DISK) > 0;
+						disableReadBalance = (ddIgnore & DDIgnore::REBALANCE_READ) > 0;
 						skipCurrentLoop = disableReadBalance && disableDiskBalance;
 					} else {
 						skipCurrentLoop = true;
