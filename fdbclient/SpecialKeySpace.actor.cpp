@@ -2568,7 +2568,7 @@ void includeLocalities(ReadYourWritesTransaction* ryw) {
 	}
 }
 
-// Reads the excludedlocality and failed locality keys using managment api,
+// Reads the excludedlocality and failed locality keys using management api,
 // parses them and returns the list.
 bool parseLocalitiesFromKeys(ReadYourWritesTransaction* ryw,
                              bool failed,

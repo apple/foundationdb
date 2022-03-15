@@ -555,7 +555,7 @@ ACTOR static Future<Void> transactionInfoCommitActor(Transaction* tr, std::vecto
 			for (auto& chunk : *chunks) {
 				tr->atomicOp(chunk.key, chunk.value, MutationRef::SetVersionstampedKey);
 				numCommitBytes += chunk.key.size() + chunk.value.size() -
-				                  4; // subtract number of bytes of key that denotes verstion stamp index
+				                  4; // subtract number of bytes of key that denotes version stamp index
 			}
 			tr->atomicOp(clientLatencyAtomicCtr, StringRef((uint8_t*)&numCommitBytes, 8), MutationRef::AddValue);
 			wait(tr->commit());
@@ -3263,7 +3263,7 @@ ACTOR Future<Void> sameVersionDiffValue(Database cx, Reference<WatchParameters> 
 			state Optional<Value> valSS = wait(tr.get(parameters->key));
 			Reference<WatchMetadata> metadata = cx->getWatchMetadata(parameters->key.contents());
 
-			// val_3 != val_1 (storage server value doesnt match value in map)
+			// val_3 != val_1 (storage server value doesn't match value in map)
 			if (metadata.isValid() && valSS != metadata->parameters->value) {
 				cx->deleteWatchMetadata(parameters->key.contents());
 
@@ -6582,9 +6582,9 @@ ACTOR Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> getReadHotRanges(Da
 		                              UseProvisionalProxies::False));
 		try {
 			// TODO: how to handle this?
-			// This function is called whenever a shard becomes read-hot. But somehow the shard was splitted across more
-			// than one storage server after become read-hot and before this function is called, i.e. a race condition.
-			// Should we abort and wait the newly splitted shards to be hot again?
+			// This function is called whenever a shard becomes read-hot. But somehow the shard was split across more
+			// than one storage server after becoming read-hot and before this function is called, i.e. a race
+			// condition. Should we abort and wait for the newly split shards to be hot again?
 			state int nLocs = locations.size();
 			// if (nLocs > 1) {
 			// 	TraceEvent("RHDDebug")

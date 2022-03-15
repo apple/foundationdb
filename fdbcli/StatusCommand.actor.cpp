@@ -1201,7 +1201,7 @@ void printStatus(StatusObjectReader statusObj,
 
 // "db" is the handler to the multiversion database
 // localDb is the native Database object
-// localDb is rarely needed except the "db" has not establised a connection to the cluster where the operation will
+// localDb is rarely needed except the "db" has not established a connection to the cluster where the operation will
 // return Never as we expect status command to always return, we use "localDb" to return the default result
 ACTOR Future<bool> statusCommandActor(Reference<IDatabase> db,
                                       Database localDb,

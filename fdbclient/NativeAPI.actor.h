@@ -132,12 +132,12 @@ void setupNetwork(uint64_t transportId = 0, UseMetrics = UseMetrics::False);
 //  call stopNetwork (from a non-networking thread) can cause the runNetwork() call to
 //  return.
 //
-// Throws network_already_setup if g_network has already been initalized
+// Throws network_already_setup if g_network has already been initialized
 void runNetwork();
 
 // See above.  Can be called from a thread that is not the "networking thread"
 //
-// Throws network_not_setup if g_network has not been initalized
+// Throws network_not_setup if g_network has not been initialized
 void stopNetwork();
 
 struct StorageMetrics;
