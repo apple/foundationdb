@@ -73,4 +73,4 @@ public:
 	static ConfigMutationRef createClearMutation(Arena, KeyRef);
 };
 
-#endif	// FDBCLIENT_IKNOBCOLLECTION_H
+#endif // FDBCLIENT_IKNOBCOLLECTION_H
