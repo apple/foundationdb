@@ -70,16 +70,19 @@ public:
 	                           Reference<ILogSystem> logSystem_,
 	                           LogPushData* toCommit_,
 	                           bool& confChange_,
+	                           Version version,
 	                           Version popVersion_,
 	                           bool initialCommit_)
 	  : spanContext(spanContext_), dbgid(proxyCommitData_.dbgid), arena(arena_), mutations(mutations_),
 	    txnStateStore(proxyCommitData_.txnStateStore), toCommit(toCommit_), confChange(confChange_),
-	    logSystem(logSystem_), popVersion(popVersion_), vecBackupKeys(&proxyCommitData_.vecBackupKeys),
-	    keyInfo(&proxyCommitData_.keyInfo), cacheInfo(&proxyCommitData_.cacheInfo),
+	    logSystem(logSystem_), version(version), popVersion(popVersion_),
+	    vecBackupKeys(&proxyCommitData_.vecBackupKeys), keyInfo(&proxyCommitData_.keyInfo),
+	    cacheInfo(&proxyCommitData_.cacheInfo),
 	    uid_applyMutationsData(proxyCommitData_.firstProxy ? &proxyCommitData_.uid_applyMutationsData : nullptr),
-	    commit(proxyCommitData_.commit), cx(proxyCommitData_.cx), commitVersion(&proxyCommitData_.committedVersion),
+	    commit(proxyCommitData_.commit), cx(proxyCommitData_.cx), committedVersion(&proxyCommitData_.committedVersion),
 	    storageCache(&proxyCommitData_.storageCache), tag_popped(&proxyCommitData_.tag_popped),
-	    tssMapping(&proxyCommitData_.tssMapping), initialCommit(initialCommit_) {}
+	    tssMapping(&proxyCommitData_.tssMapping), tenantMap(&proxyCommitData_.tenantMap),
+	    initialCommit(initialCommit_) {}
 
 private:
 	// The following variables are incoming parameters
@@ -102,6 +105,7 @@ private:
 	bool& confChange;
 
 	Reference<ILogSystem> logSystem = Reference<ILogSystem>();
+	Version version = invalidVersion;
 	Version popVersion = 0;
 	KeyRangeMap<std::set<Key>>* vecBackupKeys = nullptr;
 	KeyRangeMap<ServerCacheInfo>* keyInfo = nullptr;
@@ -109,10 +113,12 @@ private:
 	std::map<Key, ApplyMutationsData>* uid_applyMutationsData = nullptr;
 	RequestStream<CommitTransactionRequest> commit = RequestStream<CommitTransactionRequest>();
 	Database cx = Database();
-	NotifiedVersion* commitVersion = nullptr;
+	NotifiedVersion* committedVersion = nullptr;
 	std::map<UID, Reference<StorageInfo>>* storageCache = nullptr;
 	std::map<Tag, Version>* tag_popped = nullptr;
 	std::unordered_map<UID, StorageServerInterface>* tssMapping = nullptr;
+
+	std::map<TenantName, TenantMapEntry>* tenantMap = nullptr;
 
 	// true if the mutations were already written to the txnStateStore as part of recovery
 	bool initialCommit = false;
@@ -445,7 +451,7 @@ private:
 		    beginValue.present() ? BinaryReader::fromStringRef<Version>(beginValue.get(), Unversioned()) : 0,
 		    &p.endVersion,
 		    commit,
-		    commitVersion,
+		    committedVersion,
 		    p.keyVersion);
 	}
 
@@ -569,6 +575,41 @@ private:
 		if (!initialCommit)
 			txnStateStore->set(KeyValueRef(m.param1, m.param2));
 		TEST(true); // Snapshot created, setting writeRecoveryKey in txnStateStore
+	}
+
+	void checkSetTenantMapPrefix(MutationRef m) {
+		if (m.param1.startsWith(tenantMapPrefix)) {
+			if (tenantMap) {
+				ASSERT(version != invalidVersion);
+				Standalone<StringRef> tenantName = m.param1.removePrefix(tenantMapPrefix);
+				TenantMapEntry tenantEntry = decodeTenantEntry(m.param2);
+
+				TraceEvent("CommitProxyInsertTenant", dbgid).detail("Tenant", tenantName).detail("Version", version);
+				(*tenantMap)[tenantName] = tenantEntry;
+			}
+
+			if (!initialCommit) {
+				txnStateStore->set(KeyValueRef(m.param1, m.param2));
+			}
+
+			// For now, this goes to all storage servers.
+			// Eventually, we can have each SS store tenants that apply only to the data stored on it.
+			if (toCommit) {
+				std::set<Tag> allTags;
+				auto allServers = txnStateStore->readRange(serverTagKeys).get();
+				for (auto& kv : allServers) {
+					allTags.insert(decodeServerTagValue(kv.value));
+				}
+
+				toCommit->addTags(allTags);
+
+				MutationRef privatized = m;
+				privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
+				toCommit->writeTypedMessage(privatized);
+			}
+
+			TEST(true); // Tenant added to map
+		}
 	}
 
 	void checkClearKeyServerKeys(KeyRangeRef range) {
@@ -893,6 +934,51 @@ private:
 		}
 	}
 
+	void checkClearTenantMapPrefix(KeyRangeRef range) {
+		if (tenantMapKeys.intersects(range)) {
+			if (tenantMap) {
+				ASSERT(version != invalidVersion);
+
+				StringRef startTenant = std::max(range.begin, tenantMapPrefix).removePrefix(tenantMapPrefix);
+				StringRef endTenant = (range.end.startsWith(tenantMapPrefix) ? range.end : tenantMapKeys.end)
+				                          .removePrefix(tenantMapPrefix);
+
+				TraceEvent("CommitProxyEraseTenants", dbgid)
+				    .detail("BeginTenant", startTenant)
+				    .detail("EndTenant", endTenant)
+				    .detail("Version", version);
+
+				auto startItr = tenantMap->lower_bound(startTenant);
+				auto endItr = tenantMap->lower_bound(endTenant);
+				tenantMap->erase(startItr, endItr);
+			}
+
+			if (!initialCommit) {
+				txnStateStore->clear(range);
+			}
+
+			// For now, this goes to all storage servers.
+			// Eventually, we can have each SS store tenants that apply only to the data stored on it.
+			if (toCommit) {
+				std::set<Tag> allTags;
+				auto allServers = txnStateStore->readRange(serverTagKeys).get();
+				for (auto& kv : allServers) {
+					allTags.insert(decodeServerTagValue(kv.value));
+				}
+
+				toCommit->addTags(allTags);
+
+				MutationRef privatized;
+				privatized.type = MutationRef::ClearRange;
+				privatized.param1 = range.begin.withPrefix(systemKeys.begin, arena);
+				privatized.param2 = range.end.withPrefix(systemKeys.begin, arena);
+				toCommit->writeTypedMessage(privatized);
+			}
+
+			TEST(true); // Tenant cleared from map
+		}
+	}
+
 	void checkClearMiscRangeKeys(KeyRangeRef range) {
 		if (initialCommit) {
 			return;
@@ -1009,6 +1095,7 @@ public:
 				checkSetGlobalKeys(m);
 				checkSetWriteRecoverKey(m);
 				checkSetMinRequiredCommitVersionKey(m);
+				checkSetTenantMapPrefix(m);
 				checkSetOtherKeys(m);
 			} else if (m.type == MutationRef::ClearRange && isSystemKey(m.param2)) {
 				KeyRangeRef range(m.param1, m.param2);
@@ -1024,6 +1111,7 @@ public:
 				checkClearLogRangesRange(range);
 				checkClearTssMappingKeys(m, range);
 				checkClearTssQuarantineKeys(m, range);
+				checkClearTenantMapPrefix(range);
 				checkClearMiscRangeKeys(range);
 			}
 		}
@@ -1052,11 +1140,20 @@ void applyMetadataMutations(SpanID const& spanContext,
                             const VectorRef<MutationRef>& mutations,
                             LogPushData* toCommit,
                             bool& confChange,
+                            Version version,
                             Version popVersion,
                             bool initialCommit) {
 
-	ApplyMetadataMutationsImpl(
-	    spanContext, arena, mutations, proxyCommitData, logSystem, toCommit, confChange, popVersion, initialCommit)
+	ApplyMetadataMutationsImpl(spanContext,
+	                           arena,
+	                           mutations,
+	                           proxyCommitData,
+	                           logSystem,
+	                           toCommit,
+	                           confChange,
+	                           version,
+	                           popVersion,
+	                           initialCommit)
 	    .apply();
 }
 

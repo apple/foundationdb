@@ -446,7 +446,7 @@ public:
 	Counter transactionGetKeyRequests;
 	Counter transactionGetValueRequests;
 	Counter transactionGetRangeRequests;
-	Counter transactionGetRangeAndFlatMapRequests;
+	Counter transactionGetMappedRangeRequests;
 	Counter transactionGetRangeStreamRequests;
 	Counter transactionWatchRequests;
 	Counter transactionGetAddressesForKeyRequests;

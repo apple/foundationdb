@@ -41,10 +41,6 @@
 namespace {
 const std::string kTracingTransactionIdKey = "transaction_id";
 const std::string kTracingTokenKey = "token";
-// Max version we can set for minRequiredCommitVersionKey,
-// making sure the cluster can still be alive for 1000 years after the recovery
-const Version maxAllowedVerion =
-    std::numeric_limits<int64_t>::max() - 1 - CLIENT_KNOBS->VERSIONS_PER_SECOND * 3600 * 24 * 365 * 1000;
 
 static bool isAlphaNumeric(const std::string& key) {
 	// [A-Za-z0-9_]+
@@ -146,8 +142,11 @@ ACTOR Future<Void> moveKeySelectorOverRangeActor(const SpecialKeyRangeReadImpl* 
                                                  ReadYourWritesTransaction* ryw,
                                                  KeySelector* ks,
                                                  Optional<RangeResult>* cache) {
-	ASSERT(!ks->orEqual); // should be removed before calling
-	ASSERT(ks->offset != 1); // never being called if KeySelector is already normalized
+	// should be removed before calling
+	ASSERT(!ks->orEqual);
+
+	// never being called if KeySelector is already normalized
+	ASSERT(ks->offset != 1);
 
 	state Key startKey(skrImpl->getKeyRange().begin);
 	state Key endKey(skrImpl->getKeyRange().end);
@@ -162,7 +161,9 @@ ACTOR Future<Void> moveKeySelectorOverRangeActor(const SpecialKeyRangeReadImpl* 
 		if (skrImpl->getKeyRange().contains(ks->getKey()))
 			startKey = ks->getKey();
 	}
-	ASSERT(startKey < endKey); // Note : startKey never equals endKey here
+
+	// Note : startKey never equals endKey here
+	ASSERT(startKey < endKey);
 
 	TraceEvent(SevDebug, "NormalizeKeySelector")
 	    .detail("OriginalKey", ks->getKey())
@@ -170,12 +171,14 @@ ACTOR Future<Void> moveKeySelectorOverRangeActor(const SpecialKeyRangeReadImpl* 
 	    .detail("SpecialKeyRangeStart", skrImpl->getKeyRange().begin)
 	    .detail("SpecialKeyRangeEnd", skrImpl->getKeyRange().end);
 
+	GetRangeLimits limitsHint(ks->offset >= 1 ? ks->offset : 1 - ks->offset);
+
 	if (skrImpl->isAsync()) {
 		const SpecialKeyRangeAsyncImpl* ptr = dynamic_cast<const SpecialKeyRangeAsyncImpl*>(skrImpl);
-		RangeResult result_ = wait(ptr->getRange(ryw, KeyRangeRef(startKey, endKey), cache));
+		RangeResult result_ = wait(ptr->getRange(ryw, KeyRangeRef(startKey, endKey), limitsHint, cache));
 		result = result_;
 	} else {
-		RangeResult result_ = wait(skrImpl->getRange(ryw, KeyRangeRef(startKey, endKey)));
+		RangeResult result_ = wait(skrImpl->getRange(ryw, KeyRangeRef(startKey, endKey), limitsHint));
 		result = result_;
 	}
 
@@ -197,9 +200,8 @@ ACTOR Future<Void> moveKeySelectorOverRangeActor(const SpecialKeyRangeReadImpl* 
 			ks->setKey(KeyRef(ks->arena(), result[ks->offset - 1].key));
 			ks->offset = 1;
 		} else {
-			ks->setKey(KeyRef(
-			    ks->arena(),
-			    keyAfter(result[result.size() - 1].key))); // TODO : the keyAfter will just return if key == \xff\xff
+			// TODO : the keyAfter will just return if key == \xff\xff
+			ks->setKey(KeyRef(ks->arena(), keyAfter(result[result.size() - 1].key)));
 			ks->offset -= result.size();
 		}
 	}
@@ -277,8 +279,10 @@ SpecialKeySpace::SpecialKeySpace(KeyRef spaceStartKey, KeyRef spaceEndKey, bool 
 	// Default begin of KeyRangeMap is Key(), insert the range to update start key
 	readImpls.insert(range, nullptr);
 	writeImpls.insert(range, nullptr);
-	if (!testOnly)
-		modulesBoundaryInit(); // testOnly is used in the correctness workload
+	if (!testOnly) {
+		// testOnly is used in the correctness workload
+		modulesBoundaryInit();
+	}
 }
 
 void SpecialKeySpace::modulesBoundaryInit() {
@@ -376,10 +380,10 @@ ACTOR Future<RangeResult> SpecialKeySpace::getRangeAggregationActor(SpecialKeySp
 			KeyRef keyEnd = kr.contains(end.getKey()) ? end.getKey() : kr.end;
 			if (iter->value()->isAsync() && cache.present()) {
 				const SpecialKeyRangeAsyncImpl* ptr = dynamic_cast<const SpecialKeyRangeAsyncImpl*>(iter->value());
-				RangeResult pairs_ = wait(ptr->getRange(ryw, KeyRangeRef(keyStart, keyEnd), &cache));
+				RangeResult pairs_ = wait(ptr->getRange(ryw, KeyRangeRef(keyStart, keyEnd), limits, &cache));
 				pairs = pairs_;
 			} else {
-				RangeResult pairs_ = wait(iter->value()->getRange(ryw, KeyRangeRef(keyStart, keyEnd)));
+				RangeResult pairs_ = wait(iter->value()->getRange(ryw, KeyRangeRef(keyStart, keyEnd), limits));
 				pairs = pairs_;
 			}
 			result.arena().dependsOn(pairs.arena());
@@ -407,10 +411,10 @@ ACTOR Future<RangeResult> SpecialKeySpace::getRangeAggregationActor(SpecialKeySp
 			KeyRef keyEnd = kr.contains(end.getKey()) ? end.getKey() : kr.end;
 			if (iter->value()->isAsync() && cache.present()) {
 				const SpecialKeyRangeAsyncImpl* ptr = dynamic_cast<const SpecialKeyRangeAsyncImpl*>(iter->value());
-				RangeResult pairs_ = wait(ptr->getRange(ryw, KeyRangeRef(keyStart, keyEnd), &cache));
+				RangeResult pairs_ = wait(ptr->getRange(ryw, KeyRangeRef(keyStart, keyEnd), limits, &cache));
 				pairs = pairs_;
 			} else {
-				RangeResult pairs_ = wait(iter->value()->getRange(ryw, KeyRangeRef(keyStart, keyEnd)));
+				RangeResult pairs_ = wait(iter->value()->getRange(ryw, KeyRangeRef(keyStart, keyEnd), limits));
 				pairs = pairs_;
 			}
 			result.arena().dependsOn(pairs.arena());
@@ -543,15 +547,17 @@ void SpecialKeySpace::registerKeyRange(SpecialKeySpace::MODULE module,
 		ASSERT(normalKeys.contains(kr));
 	} else {
 		ASSERT(moduleToBoundary.at(module).contains(kr));
-		ASSERT(validateSnakeCaseNaming(kr.begin) &&
-		       validateSnakeCaseNaming(kr.end)); // validate keys follow snake case naming style
+		// validate keys follow snake case naming style
+		ASSERT(validateSnakeCaseNaming(kr.begin) && validateSnakeCaseNaming(kr.end));
 	}
 	// make sure the registered range is not overlapping with existing ones
 	// Note: kr.end should not be the same as another range's begin, although it should work even they are the same
 	for (auto iter = readImpls.rangeContaining(kr.begin); true; ++iter) {
 		ASSERT(iter->value() == nullptr);
-		if (iter == readImpls.rangeContaining(kr.end))
-			break; // Note: relax the condition that the end can be another range's start, if needed
+		if (iter == readImpls.rangeContaining(kr.end)) {
+			// Note: relax the condition that the end can be another range's start, if needed
+			break;
+		}
 	}
 	readImpls.insert(kr, impl);
 	// if rw, it means the module can do both read and write
@@ -601,7 +607,7 @@ ACTOR Future<Void> commitActor(SpecialKeySpace* sks, ReadYourWritesTransaction* 
 		Optional<std::string> msg = wait((*it)->commit(ryw));
 		if (msg.present()) {
 			ryw->setSpecialKeySpaceErrorMsg(msg.get());
-			TraceEvent(SevDebug, "SpecialKeySpaceManagemetnAPIError")
+			TraceEvent(SevDebug, "SpecialKeySpaceManagementAPIError")
 			    .detail("Reason", msg.get())
 			    .detail("Range", (*it)->getKeyRange().toString());
 			throw special_keys_api_failure();
@@ -616,7 +622,9 @@ Future<Void> SpecialKeySpace::commit(ReadYourWritesTransaction* ryw) {
 
 SKSCTestImpl::SKSCTestImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
 
-Future<RangeResult> SKSCTestImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
+Future<RangeResult> SKSCTestImpl::getRange(ReadYourWritesTransaction* ryw,
+                                           KeyRangeRef kr,
+                                           GetRangeLimits limitsHint) const {
 	ASSERT(range.contains(kr));
 	auto resultFuture = ryw->getRange(kr, CLIENT_KNOBS->TOO_MANY);
 	// all keys are written to RYW, since GRV is set, the read should happen locally
@@ -639,19 +647,25 @@ ACTOR static Future<RangeResult> getReadConflictRangeImpl(ReadYourWritesTransact
 	return ryw->getReadConflictRangeIntersecting(kr);
 }
 
-Future<RangeResult> ReadConflictRangeImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
+Future<RangeResult> ReadConflictRangeImpl::getRange(ReadYourWritesTransaction* ryw,
+                                                    KeyRangeRef kr,
+                                                    GetRangeLimits limitsHint) const {
 	return getReadConflictRangeImpl(ryw, kr);
 }
 
 WriteConflictRangeImpl::WriteConflictRangeImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
 
-Future<RangeResult> WriteConflictRangeImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
+Future<RangeResult> WriteConflictRangeImpl::getRange(ReadYourWritesTransaction* ryw,
+                                                     KeyRangeRef kr,
+                                                     GetRangeLimits limitsHint) const {
 	return ryw->getWriteConflictRangeIntersecting(kr);
 }
 
 ConflictingKeysImpl::ConflictingKeysImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
 
-Future<RangeResult> ConflictingKeysImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
+Future<RangeResult> ConflictingKeysImpl::getRange(ReadYourWritesTransaction* ryw,
+                                                  KeyRangeRef kr,
+                                                  GetRangeLimits limitsHint) const {
 	RangeResult result;
 	if (ryw->getTransactionState()->conflictingKeys) {
 		auto krMapPtr = ryw->getTransactionState()->conflictingKeys.get();
@@ -702,7 +716,9 @@ ACTOR Future<RangeResult> ddMetricsGetRangeActor(ReadYourWritesTransaction* ryw,
 
 DDStatsRangeImpl::DDStatsRangeImpl(KeyRangeRef kr) : SpecialKeyRangeAsyncImpl(kr) {}
 
-Future<RangeResult> DDStatsRangeImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
+Future<RangeResult> DDStatsRangeImpl::getRange(ReadYourWritesTransaction* ryw,
+                                               KeyRangeRef kr,
+                                               GetRangeLimits limitsHint) const {
 	return ddMetricsGetRangeActor(ryw, kr);
 }
 
@@ -715,7 +731,9 @@ Key SpecialKeySpace::getManagementApiCommandOptionSpecialKey(const std::string& 
 
 ManagementCommandsOptionsImpl::ManagementCommandsOptionsImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
 
-Future<RangeResult> ManagementCommandsOptionsImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
+Future<RangeResult> ManagementCommandsOptionsImpl::getRange(ReadYourWritesTransaction* ryw,
+                                                            KeyRangeRef kr,
+                                                            GetRangeLimits limitsHint) const {
 	RangeResult result;
 	// Since we only have limit number of options, a brute force loop here is enough
 	for (const auto& option : SpecialKeySpace::getManagementApiOptionsSet()) {
@@ -822,7 +840,9 @@ ACTOR Future<RangeResult> rwModuleWithMappingGetRangeActor(ReadYourWritesTransac
 
 ExcludeServersRangeImpl::ExcludeServersRangeImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
 
-Future<RangeResult> ExcludeServersRangeImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
+Future<RangeResult> ExcludeServersRangeImpl::getRange(ReadYourWritesTransaction* ryw,
+                                                      KeyRangeRef kr,
+                                                      GetRangeLimits limitsHint) const {
 	ryw->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 	return rwModuleWithMappingGetRangeActor(ryw, this, kr);
 }
@@ -847,8 +867,8 @@ bool parseNetWorkAddrFromKeys(ReadYourWritesTransaction* ryw,
                               std::vector<AddressExclusion>& addresses,
                               std::set<AddressExclusion>& exclusions,
                               Optional<std::string>& msg) {
-	KeyRangeRef range = failed ? SpecialKeySpace::getManamentApiCommandRange("failed")
-	                           : SpecialKeySpace::getManamentApiCommandRange("exclude");
+	KeyRangeRef range = failed ? SpecialKeySpace::getManagementApiCommandRange("failed")
+	                           : SpecialKeySpace::getManagementApiCommandRange("exclude");
 	auto ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(range);
 	auto iter = ranges.begin();
 	while (iter != ranges.end()) {
@@ -1009,7 +1029,7 @@ void includeServers(ReadYourWritesTransaction* ryw) {
 	std::string versionKey = deterministicRandom()->randomUniqueID().toString();
 	// for exluded servers
 	auto ranges =
-	    ryw->getSpecialKeySpaceWriteMap().containedRanges(SpecialKeySpace::getManamentApiCommandRange("exclude"));
+	    ryw->getSpecialKeySpaceWriteMap().containedRanges(SpecialKeySpace::getManagementApiCommandRange("exclude"));
 	auto iter = ranges.begin();
 	Transaction& tr = ryw->getTransaction();
 	while (iter != ranges.end()) {
@@ -1022,7 +1042,7 @@ void includeServers(ReadYourWritesTransaction* ryw) {
 		++iter;
 	}
 	// for failed servers
-	ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(SpecialKeySpace::getManamentApiCommandRange("failed"));
+	ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(SpecialKeySpace::getManagementApiCommandRange("failed"));
 	iter = ranges.begin();
 	while (iter != ranges.end()) {
 		auto entry = iter->value();
@@ -1063,7 +1083,9 @@ Future<Optional<std::string>> ExcludeServersRangeImpl::commit(ReadYourWritesTran
 
 FailedServersRangeImpl::FailedServersRangeImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
 
-Future<RangeResult> FailedServersRangeImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
+Future<RangeResult> FailedServersRangeImpl::getRange(ReadYourWritesTransaction* ryw,
+                                                     KeyRangeRef kr,
+                                                     GetRangeLimits limitsHint) const {
 	ryw->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 	return rwModuleWithMappingGetRangeActor(ryw, this, kr);
 }
@@ -1144,7 +1166,9 @@ ACTOR Future<RangeResult> ExclusionInProgressActor(ReadYourWritesTransaction* ry
 
 ExclusionInProgressRangeImpl::ExclusionInProgressRangeImpl(KeyRangeRef kr) : SpecialKeyRangeAsyncImpl(kr) {}
 
-Future<RangeResult> ExclusionInProgressRangeImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
+Future<RangeResult> ExclusionInProgressRangeImpl::getRange(ReadYourWritesTransaction* ryw,
+                                                           KeyRangeRef kr,
+                                                           GetRangeLimits limitsHint) const {
 	return ExclusionInProgressActor(ryw, getKeyRange().begin, kr);
 }
 
@@ -1211,7 +1235,9 @@ ACTOR Future<Optional<std::string>> processClassCommitActor(ReadYourWritesTransa
 
 ProcessClassRangeImpl::ProcessClassRangeImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
 
-Future<RangeResult> ProcessClassRangeImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
+Future<RangeResult> ProcessClassRangeImpl::getRange(ReadYourWritesTransaction* ryw,
+                                                    KeyRangeRef kr,
+                                                    GetRangeLimits limitsHint) const {
 	return getProcessClassActor(ryw, getKeyRange().begin, kr);
 }
 
@@ -1287,7 +1313,9 @@ ACTOR Future<RangeResult> getProcessClassSourceActor(ReadYourWritesTransaction* 
 
 ProcessClassSourceRangeImpl::ProcessClassSourceRangeImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
 
-Future<RangeResult> ProcessClassSourceRangeImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
+Future<RangeResult> ProcessClassSourceRangeImpl::getRange(ReadYourWritesTransaction* ryw,
+                                                          KeyRangeRef kr,
+                                                          GetRangeLimits limitsHint) const {
 	return getProcessClassSourceActor(ryw, getKeyRange().begin, kr);
 }
 
@@ -1305,7 +1333,9 @@ ACTOR Future<RangeResult> getLockedKeyActor(ReadYourWritesTransaction* ryw, KeyR
 
 LockDatabaseImpl::LockDatabaseImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
 
-Future<RangeResult> LockDatabaseImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
+Future<RangeResult> LockDatabaseImpl::getRange(ReadYourWritesTransaction* ryw,
+                                               KeyRangeRef kr,
+                                               GetRangeLimits limitsHint) const {
 	// single key range, the queried range should always be the same as the underlying range
 	ASSERT(kr == getKeyRange());
 	auto lockEntry = ryw->getSpecialKeySpaceWriteMap()[SpecialKeySpace::getManagementApiCommandPrefix("lock")];
@@ -1386,7 +1416,9 @@ ACTOR Future<RangeResult> getConsistencyCheckKeyActor(ReadYourWritesTransaction*
 
 ConsistencyCheckImpl::ConsistencyCheckImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
 
-Future<RangeResult> ConsistencyCheckImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
+Future<RangeResult> ConsistencyCheckImpl::getRange(ReadYourWritesTransaction* ryw,
+                                                   KeyRangeRef kr,
+                                                   GetRangeLimits limitsHint) const {
 	// single key range, the queried range should always be the same as the underlying range
 	ASSERT(kr == getKeyRange());
 	auto entry = ryw->getSpecialKeySpaceWriteMap()[SpecialKeySpace::getManagementApiCommandPrefix("consistencycheck")];
@@ -1419,7 +1451,9 @@ GlobalConfigImpl::GlobalConfigImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {
 // framework within the range specified. The special-key-space getrange
 // function should only be used for informational purposes. All values are
 // returned as strings regardless of their true type.
-Future<RangeResult> GlobalConfigImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
+Future<RangeResult> GlobalConfigImpl::getRange(ReadYourWritesTransaction* ryw,
+                                               KeyRangeRef kr,
+                                               GetRangeLimits limitsHint) const {
 	RangeResult result;
 
 	auto& globalConfig = GlobalConfig::globalConfig();
@@ -1540,7 +1574,9 @@ void GlobalConfigImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) 
 
 TracingOptionsImpl::TracingOptionsImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
 
-Future<RangeResult> TracingOptionsImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
+Future<RangeResult> TracingOptionsImpl::getRange(ReadYourWritesTransaction* ryw,
+                                                 KeyRangeRef kr,
+                                                 GetRangeLimits limitsHint) const {
 	RangeResult result;
 	for (const auto& option : SpecialKeySpace::getTracingOptions()) {
 		auto key = getKeyRange().begin.withSuffix(option);
@@ -1599,7 +1635,9 @@ void TracingOptionsImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& key
 
 CoordinatorsImpl::CoordinatorsImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
 
-Future<RangeResult> CoordinatorsImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
+Future<RangeResult> CoordinatorsImpl::getRange(ReadYourWritesTransaction* ryw,
+                                               KeyRangeRef kr,
+                                               GetRangeLimits limitsHint) const {
 	RangeResult result;
 	KeyRef prefix(getKeyRange().begin);
 	auto cs = ryw->getDatabase()->getConnectionRecord()->getConnectionString();
@@ -1781,7 +1819,9 @@ ACTOR static Future<RangeResult> CoordinatorsAutoImplActor(ReadYourWritesTransac
 	return res;
 }
 
-Future<RangeResult> CoordinatorsAutoImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
+Future<RangeResult> CoordinatorsAutoImpl::getRange(ReadYourWritesTransaction* ryw,
+                                                   KeyRangeRef kr,
+                                                   GetRangeLimits limitsHint) const {
 	// single key range, the queried range should always be the same as the underlying range
 	ASSERT(kr == getKeyRange());
 	return CoordinatorsAutoImplActor(ryw, kr);
@@ -1802,7 +1842,9 @@ ACTOR static Future<RangeResult> getMinCommitVersionActor(ReadYourWritesTransact
 
 AdvanceVersionImpl::AdvanceVersionImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
 
-Future<RangeResult> AdvanceVersionImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
+Future<RangeResult> AdvanceVersionImpl::getRange(ReadYourWritesTransaction* ryw,
+                                                 KeyRangeRef kr,
+                                                 GetRangeLimits limitsHint) const {
 	// single key range, the queried range should always be the same as the underlying range
 	ASSERT(kr == getKeyRange());
 	auto entry = ryw->getSpecialKeySpaceWriteMap()[SpecialKeySpace::getManagementApiCommandPrefix("advanceversion")];
@@ -1819,6 +1861,11 @@ Future<RangeResult> AdvanceVersionImpl::getRange(ReadYourWritesTransaction* ryw,
 }
 
 ACTOR static Future<Optional<std::string>> advanceVersionCommitActor(ReadYourWritesTransaction* ryw, Version v) {
+	// Max version we can set for minRequiredCommitVersionKey,
+	// making sure the cluster can still be alive for 1000 years after the recovery
+	static const Version maxAllowedVerion =
+	    std::numeric_limits<int64_t>::max() - 1 - CLIENT_KNOBS->VERSIONS_PER_SECOND * 3600 * 24 * 365 * 1000;
+
 	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
 	ryw->getTransaction().setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	TraceEvent(SevDebug, "AdvanceVersion").detail("MaxAllowedVersion", maxAllowedVerion);
@@ -1871,7 +1918,8 @@ ACTOR static Future<RangeResult> ClientProfilingGetRangeActor(ReadYourWritesTran
 	if (kr.contains(sampleRateKey)) {
 		auto entry = ryw->getSpecialKeySpaceWriteMap()[sampleRateKey];
 		if (!ryw->readYourWritesDisabled() && entry.first) {
-			ASSERT(entry.second.present()); // clear is forbidden
+			// clear is forbidden
+			ASSERT(entry.second.present());
 			result.push_back_deep(result.arena(), KeyValueRef(sampleRateKey, entry.second.get()));
 		} else {
 			Optional<Value> f = wait(ryw->getTransaction().get(fdbClientInfoTxnSampleRate));
@@ -1890,7 +1938,8 @@ ACTOR static Future<RangeResult> ClientProfilingGetRangeActor(ReadYourWritesTran
 	if (kr.contains(txnSizeLimitKey)) {
 		auto entry = ryw->getSpecialKeySpaceWriteMap()[txnSizeLimitKey];
 		if (!ryw->readYourWritesDisabled() && entry.first) {
-			ASSERT(entry.second.present()); // clear is forbidden
+			// clear is forbidden
+			ASSERT(entry.second.present());
 			result.push_back_deep(result.arena(), KeyValueRef(txnSizeLimitKey, entry.second.get()));
 		} else {
 			Optional<Value> f = wait(ryw->getTransaction().get(fdbClientInfoTxnSizeLimit));
@@ -1908,7 +1957,9 @@ ACTOR static Future<RangeResult> ClientProfilingGetRangeActor(ReadYourWritesTran
 }
 
 // TODO : add limitation on set operation
-Future<RangeResult> ClientProfilingImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
+Future<RangeResult> ClientProfilingImpl::getRange(ReadYourWritesTransaction* ryw,
+                                                  KeyRangeRef kr,
+                                                  GetRangeLimits limitsHint) const {
 	return ClientProfilingGetRangeActor(ryw, getKeyRange().begin, kr);
 }
 
@@ -2195,7 +2246,9 @@ ACTOR static Future<RangeResult> actorLineageGetRangeActor(ReadYourWritesTransac
 	return result;
 }
 
-Future<RangeResult> ActorLineageImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
+Future<RangeResult> ActorLineageImpl::getRange(ReadYourWritesTransaction* ryw,
+                                               KeyRangeRef kr,
+                                               GetRangeLimits limitsHint) const {
 	return actorLineageGetRangeActor(ryw, getKeyRange().begin, kr);
 }
 
@@ -2208,7 +2261,9 @@ std::string_view to_string_view(StringRef sr) {
 ActorProfilerConf::ActorProfilerConf(KeyRangeRef kr)
   : SpecialKeyRangeRWImpl(kr), config(ProfilerConfig::instance().getConfig()) {}
 
-Future<RangeResult> ActorProfilerConf::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
+Future<RangeResult> ActorProfilerConf::getRange(ReadYourWritesTransaction* ryw,
+                                                KeyRangeRef kr,
+                                                GetRangeLimits limitsHint) const {
 	RangeResult res;
 	std::string_view begin(to_string_view(kr.begin.removePrefix(range.begin))),
 	    end(to_string_view(kr.end.removePrefix(range.begin)));
@@ -2297,7 +2352,9 @@ ACTOR static Future<RangeResult> MaintenanceGetRangeActor(ReadYourWritesTransact
 	return rywGetRange(ryw, kr, result);
 }
 
-Future<RangeResult> MaintenanceImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
+Future<RangeResult> MaintenanceImpl::getRange(ReadYourWritesTransaction* ryw,
+                                              KeyRangeRef kr,
+                                              GetRangeLimits limitsHint) const {
 	return MaintenanceGetRangeActor(ryw, getKeyRange().begin, kr);
 }
 
@@ -2401,7 +2458,9 @@ ACTOR static Future<RangeResult> DataDistributionGetRangeActor(ReadYourWritesTra
 	return rywGetRange(ryw, kr, result);
 }
 
-Future<RangeResult> DataDistributionImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
+Future<RangeResult> DataDistributionImpl::getRange(ReadYourWritesTransaction* ryw,
+                                                   KeyRangeRef kr,
+                                                   GetRangeLimits limitsHint) const {
 	return DataDistributionGetRangeActor(ryw, getKeyRange().begin, kr);
 }
 
@@ -2486,7 +2545,7 @@ void includeLocalities(ReadYourWritesTransaction* ryw) {
 	std::string versionKey = deterministicRandom()->randomUniqueID().toString();
 	// for excluded localities
 	auto ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(
-	    SpecialKeySpace::getManamentApiCommandRange("excludedlocality"));
+	    SpecialKeySpace::getManagementApiCommandRange("excludedlocality"));
 	Transaction& tr = ryw->getTransaction();
 	for (auto& iter : ranges) {
 		auto entry = iter.value();
@@ -2498,7 +2557,7 @@ void includeLocalities(ReadYourWritesTransaction* ryw) {
 	}
 	// for failed localities
 	ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(
-	    SpecialKeySpace::getManamentApiCommandRange("failedlocality"));
+	    SpecialKeySpace::getManagementApiCommandRange("failedlocality"));
 	for (auto& iter : ranges) {
 		auto entry = iter.value();
 		if (entry.first && !entry.second.present()) {
@@ -2518,8 +2577,8 @@ bool parseLocalitiesFromKeys(ReadYourWritesTransaction* ryw,
                              std::set<AddressExclusion>& exclusions,
                              std::vector<ProcessData>& workers,
                              Optional<std::string>& msg) {
-	KeyRangeRef range = failed ? SpecialKeySpace::getManamentApiCommandRange("failedlocality")
-	                           : SpecialKeySpace::getManamentApiCommandRange("excludedlocality");
+	KeyRangeRef range = failed ? SpecialKeySpace::getManagementApiCommandRange("failedlocality")
+	                           : SpecialKeySpace::getManagementApiCommandRange("excludedlocality");
 	auto ranges = ryw->getSpecialKeySpaceWriteMap().containedRanges(range);
 	auto iter = ranges.begin();
 	while (iter != ranges.end()) {
@@ -2583,7 +2642,9 @@ ACTOR Future<Optional<std::string>> excludeLocalityCommitActor(ReadYourWritesTra
 
 ExcludedLocalitiesRangeImpl::ExcludedLocalitiesRangeImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
 
-Future<RangeResult> ExcludedLocalitiesRangeImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
+Future<RangeResult> ExcludedLocalitiesRangeImpl::getRange(ReadYourWritesTransaction* ryw,
+                                                          KeyRangeRef kr,
+                                                          GetRangeLimits limitsHint) const {
 	ryw->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 	return rwModuleWithMappingGetRangeActor(ryw, this, kr);
 }
@@ -2610,7 +2671,9 @@ Future<Optional<std::string>> ExcludedLocalitiesRangeImpl::commit(ReadYourWrites
 
 FailedLocalitiesRangeImpl::FailedLocalitiesRangeImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
 
-Future<RangeResult> FailedLocalitiesRangeImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
+Future<RangeResult> FailedLocalitiesRangeImpl::getRange(ReadYourWritesTransaction* ryw,
+                                                        KeyRangeRef kr,
+                                                        GetRangeLimits limitsHint) const {
 	ryw->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 	return rwModuleWithMappingGetRangeActor(ryw, this, kr);
 }
