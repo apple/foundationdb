@@ -1889,30 +1889,33 @@ ACTOR Future<Void> blobGranuleLoadHistory(Reference<BlobWorkerData> bwData,
 			stopVersion = prev.value().isValid() ? prev.value()->startVersion : invalidVersion;
 
 			state std::vector<Reference<GranuleHistoryEntry>> historyEntryStack;
+			state bool foundHistory = true;
 
 			// while the start version of the current granule's parent not past the last known start version,
 			// walk backwards
 			while (curHistory.value.parentGranules.size() > 0 &&
 			       curHistory.value.parentGranules[0].second >= stopVersion) {
 				state GranuleHistory next;
+
 				loop {
 					try {
 						Optional<Value> v = wait(tr.get(blobGranuleHistoryKeyFor(
 						    curHistory.value.parentGranules[0].first, curHistory.value.parentGranules[0].second)));
 						if (!v.present()) {
-							printf("No granule history present for [%s - %s) @ %lld!!\n",
-							       curHistory.value.parentGranules[0].first.begin.printable().c_str(),
-							       curHistory.value.parentGranules[0].first.end.printable().c_str(),
-							       curHistory.value.parentGranules[0].first);
+							foundHistory = false;
+						} else {
+							next = GranuleHistory(curHistory.value.parentGranules[0].first,
+							                      curHistory.value.parentGranules[0].second,
+							                      decodeBlobGranuleHistoryValue(v.get()));
 						}
-						ASSERT(v.present());
-						next = GranuleHistory(curHistory.value.parentGranules[0].first,
-						                      curHistory.value.parentGranules[0].second,
-						                      decodeBlobGranuleHistoryValue(v.get()));
+
 						break;
 					} catch (Error& e) {
 						wait(tr.onError(e));
 					}
+				}
+				if (!foundHistory) {
+					break;
 				}
 
 				ASSERT(next.version != invalidVersion);
@@ -1924,8 +1927,14 @@ ACTOR Future<Void> blobGranuleLoadHistory(Reference<BlobWorkerData> bwData,
 
 			if (!historyEntryStack.empty()) {
 				Version oldestStartVersion = historyEntryStack.back()->startVersion;
+				if (!foundHistory && stopVersion != invalidVersion) {
+					stopVersion = oldestStartVersion;
+				}
 				ASSERT(stopVersion == oldestStartVersion || stopVersion == invalidVersion);
 			} else {
+				if (!foundHistory && stopVersion != invalidVersion) {
+					stopVersion = invalidVersion;
+				}
 				ASSERT(stopVersion == invalidVersion);
 			}
 
@@ -1947,11 +1956,13 @@ ACTOR Future<Void> blobGranuleLoadHistory(Reference<BlobWorkerData> bwData,
 			while (i >= 0) {
 				auto prevRanges = bwData->granuleHistory.rangeContaining(historyEntryStack[i]->range.begin);
 
-				// sanity check
-				ASSERT(!prevRanges.value().isValid() ||
-				       prevRanges.value()->endVersion == historyEntryStack[i]->startVersion);
+				if (prevRanges.value().isValid() &&
+				    prevRanges.value()->endVersion != historyEntryStack[i]->startVersion) {
+					historyEntryStack[i]->parentGranule = Reference<GranuleHistoryEntry>();
+				} else {
+					historyEntryStack[i]->parentGranule = prevRanges.value();
+				}
 
-				historyEntryStack[i]->parentGranule = prevRanges.value();
 				bwData->granuleHistory.insert(historyEntryStack[i]->range, historyEntryStack[i]);
 				i--;
 			}
@@ -2199,10 +2210,17 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 					when(wait(metadata->cancelled.getFuture())) { throw wrong_shard_server(); }
 				}
 
-				ASSERT(!chunkFiles.snapshotFiles.empty());
+				if (chunkFiles.snapshotFiles.empty()) {
+					// a snapshot file must have been pruned
+					throw blob_granule_transaction_too_old();
+				}
+
 				ASSERT(!chunkFiles.deltaFiles.empty());
 				ASSERT(chunkFiles.deltaFiles.back().version > req.readVersion);
-				ASSERT(chunkFiles.snapshotFiles.front().version <= req.readVersion);
+				if (chunkFiles.snapshotFiles.front().version > req.readVersion) {
+					// a snapshot file must have been pruned
+					throw blob_granule_transaction_too_old();
+				}
 			} else {
 				TEST(true); // Granule Active Read
 				// this is an active granule query
