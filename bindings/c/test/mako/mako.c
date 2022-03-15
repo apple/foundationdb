@@ -1351,7 +1351,7 @@ void* worker_thread(void* thread_args) {
 		char str2[1000];
 		sprintf(str2, "%s%d", TEMP_DATA_STORE, *parent_id);
 		rc = mkdir(str2, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
-		if (rc < 0) {
+		if (rc < 0 && errno != EEXIST) {
 			int ec = errno;
 			fprintf(stderr, "Failed to make directory: %s because %s\n", str2, strerror(ec));
 			goto failExit;

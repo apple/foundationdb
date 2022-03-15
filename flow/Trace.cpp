@@ -1022,7 +1022,7 @@ BaseTraceEvent& BaseTraceEvent::detailImpl(std::string&& key, std::string&& valu
 		if (maxEventLength >= 0 && fields.sizeBytes() > maxEventLength) {
 			TraceEvent(g_network && g_network->isSimulated() ? SevError : SevWarnAlways, "TraceEventOverflow")
 			    .setMaxEventLength(1000)
-			    .detail("TraceFirstBytes", fields.toString().substr(300));
+			    .detail("TraceFirstBytes", fields.toString().substr(0, 300));
 			enabled = false;
 		}
 		--g_allocation_tracing_disabled;
