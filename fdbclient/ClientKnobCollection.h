@@ -49,4 +49,4 @@ public:
 	bool isAtomic(std::string const& knobName) const override;
 };
 
-#endif 	// FDBCLIENT_CLIENTKNOBCCOLLECTION_H
+#endif // FDBCLIENT_CLIENTKNOBCCOLLECTION_H
