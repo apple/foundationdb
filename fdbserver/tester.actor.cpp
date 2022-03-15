@@ -1348,15 +1348,17 @@ std::vector<TestSpec> readTOMLTests_(std::string fileName) {
 		try {
 			const toml::array& overrideKnobs = toml::find(test, "knobs").as_array();
 			for (const toml::value& knob : overrideKnobs) {
-				for (const auto& [key_, value_] : knob.as_table()) {
-					const std::string key = key_;
+				for (const auto& [key, value_] : knob.as_table()) {
 					const std::string& value = toml_to_string(value_);
 					ParsedKnobValue parsedValue = CLIENT_KNOBS->parseKnobValue(key, value);
 					if (std::get_if<NoKnobFound>(&parsedValue)) {
 						parsedValue = SERVER_KNOBS->parseKnobValue(key, value);
 					}
 					if (std::get_if<NoKnobFound>(&parsedValue)) {
-						ASSERT(false);
+						TraceEvent(SevErrro, "TestSpecUnrecognizedKnob")
+							.detail("KnobName", key)
+							.detail("OverrideValue", value);
+						continue;
 					}
 					spec.overrideKnobs.set(key, parsedValue);
 				}
