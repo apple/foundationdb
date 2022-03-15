@@ -141,6 +141,7 @@ struct TenantManagementWorkload : TestWorkload {
 				} else if (operationType == OperationType::MANAGEMENT_DATABASE) {
 					wait(ManagementAPI::createTenant(cx.getReference(), tenant));
 				} else {
+					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					Optional<TenantMapEntry> _ = wait(ManagementAPI::createTenantTransaction(tr, tenant));
 					wait(tr->commit());
 				}
@@ -296,6 +297,7 @@ struct TenantManagementWorkload : TestWorkload {
 						wait(ManagementAPI::deleteTenant(cx.getReference(), tenant));
 					}
 				} else {
+					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					for (auto tenant : tenants) {
 						wait(ManagementAPI::deleteTenantTransaction(tr, tenant));
 					}
@@ -405,6 +407,7 @@ struct TenantManagementWorkload : TestWorkload {
 					TenantMapEntry _entry = wait(ManagementAPI::getTenant(cx.getReference(), tenant));
 					entry = _entry;
 				} else {
+					tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 					TenantMapEntry _entry = wait(ManagementAPI::getTenantTransaction(tr, tenant));
 					entry = _entry;
 				}
@@ -462,6 +465,7 @@ struct TenantManagementWorkload : TestWorkload {
 					    wait(ManagementAPI::listTenants(cx.getReference(), beginTenant, endTenant, limit));
 					tenants = _tenants;
 				} else {
+					tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 					std::map<TenantName, TenantMapEntry> _tenants =
 					    wait(ManagementAPI::listTenantsTransaction(tr, beginTenant, endTenant, limit));
 					tenants = _tenants;
