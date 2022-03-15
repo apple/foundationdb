@@ -169,7 +169,7 @@ ACTOR Future<Void> traceLog(int* pendingMessages, bool* sendError) {
 */
 
 struct UDPTracer : public ITracer {
-protected:
+public:
 	// Serializes span fields as an array into the supplied TraceRequest
 	// buffer.
 	void serialize_span(const Span& span, TraceRequest& request) {
@@ -198,9 +198,19 @@ protected:
 	}
 
 	void serialize_span(const OTELSpan& span, TraceRequest& request) {
-		uint8_t size = 11;
+		uint16_t size = 11;
 		size = size + span.links.size() + span.events.size() + span.attributes.size();
-		request.write_byte(size | 0b10010000); // write as array
+		if (size <= 15) {
+			request.write_byte(size | 0b10010000); // write as array
+		} else if (size <= 65535) { 
+			request.write_byte(0xdc);
+			uint8_t partA = static_cast<uint8_t>((size & 0xFF00) >> 8);
+			uint8_t partB = static_cast<uint8_t>(size & 0x00FF);
+			request.write_byte(partA);
+			request.write_byte(partB);
+		} else {
+			ASSERT(false);
+		}
 		serialize_value(span.context.traceID.first(), request, 0xcf); // trace id
 		serialize_value(span.context.traceID.second(), request, 0xcf); // trace id
 		serialize_value(span.context.spanID, request, 0xcf); // spanid
@@ -623,7 +633,6 @@ TEST_CASE("/flow/Tracing/CreateOTELSpan") {
 	OTELSpan noParent(
 	    "foo"_loc, []() { return 1.0; }, SpanContext(UID(0, 0), 0, TraceFlags::unsampled));
 	ASSERT(noParent.context.isSampled());
-
 	return Void();
 };
 
@@ -649,7 +658,7 @@ TEST_CASE("/flow/Tracing/AddEvents") {
 	auto s3Arena = span3.arena;
 	auto s3Attr = KeyValueRef(KeyRef(s3Arena, "xyz"), ValueRef(s3Arena, "123"));
 	span3.addEvent(OTELEvent(StringRef(s3Arena, "commit_fail"), 1234567.100, s3Arena, { s3Attr }))
-	    .addEvent(OTELEvent(StringRef(s3Arena, "commit_succeed"), 1111.001, s3Arena));
+	.addEvent(OTELEvent(StringRef(s3Arena, "commit_succeed"), 1111.001, s3Arena));
 	ASSERT(span3.events[0].name.toString() == "commit_fail");
 	ASSERT(span3.events[0].time == 1234567.100);
 	ASSERT(span3.events[0].attributes.begin()->key.toString() == "xyz");
@@ -674,12 +683,15 @@ TEST_CASE("/flow/Tracing/AddAttributes") {
 	ASSERT(span2.attributes[StringRef(s2Arena, "operation")].toString() == "ss:update");
 
 	OTELSpan span3("span_with_attrs"_loc);
-	span3.addAttribute("a", "1").addAttribute("b", "2").addAttribute("c", "3");
+	span3.addAttribute("a", "1")
+	.addAttribute("b", "2")
+	.addAttribute("c", "3");
 
 	auto s3Arena = span3.arena;
 	ASSERT(span3.attributes.size() == 4); // Includes default attribute of "address"
 	ASSERT(span3.attributes[StringRef(s3Arena, "a")].toString() == "1"); // Includes default attribute of "address"
-
+	ASSERT(span3.attributes[StringRef(s3Arena, "b")].toString() == "2"); // Includes default attribute of "address"
+	ASSERT(span3.attributes[StringRef(s3Arena, "c")].toString() == "3"); // Includes default attribute of "address"
 	return Void();
 };
 
@@ -687,7 +699,7 @@ TEST_CASE("/flow/Tracing/AddLinks") {
 	OTELSpan span1("span_with_links"_loc);
 	span1.addLink(SpanContext(UID(100, 101), 200, TraceFlags::sampled));
 	span1.addLink(SpanContext(UID(200, 201), 300, TraceFlags::unsampled))
-	    .addLink(SpanContext(UID(300, 301), 400, TraceFlags::sampled));
+	.addLink(SpanContext(UID(300, 301), 400, TraceFlags::sampled));
 
 	ASSERT(span1.links[0].traceID == UID(100, 101));
 	ASSERT(span1.links[0].spanID == 200);
@@ -703,7 +715,8 @@ TEST_CASE("/flow/Tracing/AddLinks") {
 	auto link1 = SpanContext(UID(1, 1), 1, TraceFlags::sampled);
 	auto link2 = SpanContext(UID(2, 2), 2, TraceFlags::sampled);
 	auto link3 = SpanContext(UID(3, 3), 3, TraceFlags::sampled);
-	span2.addLinks({ link1, link2 }).addLinks({ link3 });
+	span2.addLinks({link1, link2})
+		 .addLinks({link3});
 	ASSERT(span2.links[0].traceID == UID(1, 1));
 	ASSERT(span2.links[0].spanID == 1);
 	ASSERT(span2.links[0].m_Flags == TraceFlags::sampled);
@@ -713,6 +726,30 @@ TEST_CASE("/flow/Tracing/AddLinks") {
 	ASSERT(span2.links[2].traceID == UID(3, 3));
 	ASSERT(span2.links[2].spanID == 3);
 	ASSERT(span2.links[2].m_Flags == TraceFlags::sampled);
-
 	return Void();
+};
+
+ TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
+	OTELSpan span1("encoded_span"_loc);
+	auto request = TraceRequest{ .buffer = std::make_unique<uint8_t[]>(kTraceBufferSize),
+			                     .data_size = 0,
+			                     .buffer_size = kTraceBufferSize };
+	auto tracer = FastUDPTracer();
+	tracer.serialize_span(span1, request);
+	auto data = request.buffer.get();
+	ASSERT(data[0] == 0b10011100); // base size of 11 elements + 1 for default attribute
+
+	request.reset();
+
+	OTELSpan span2("encoded_span"_loc);
+	span2.addLink(SpanContext(UID(100, 100), 1, TraceFlags::sampled))
+		.addLink(SpanContext(UID(200, 200), 2, TraceFlags::sampled))
+		.addEvent("commit_succeed", 1234567.100)
+		.addAttribute("foo", "bar");
+	tracer.serialize_span(span2, request);
+	data = request.buffer.get();
+	ASSERT(data[0] == 0xdc); // array size between 16 <= 65535 
+	ASSERT(data[1] == 0b00000000);  
+	ASSERT(data[2] == 0b00010000); // <^ the value "16" big-endian encoded in a uint_16t (2 bytes wide).
+ 	return Void();	
 };
