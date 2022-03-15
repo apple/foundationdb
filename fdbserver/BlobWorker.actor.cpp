@@ -2872,6 +2872,12 @@ ACTOR Future<Void> registerBlobWorker(Reference<BlobWorkerData> bwData, BlobWork
 			tr->addReadConflictRange(singleKeyRange(blobWorkerListKey));
 			tr->set(blobWorkerListKey, blobWorkerListValue(interf));
 
+			// Get manager lock from DB
+			Optional<Value> currentLockValue = wait(tr->get(blobManagerEpochKey));
+			ASSERT(currentLockValue.present());
+			int64_t currentEpoch = decodeBlobManagerEpochValue(currentLockValue.get());
+			bwData->managerEpochOk(currentEpoch);
+
 			wait(tr->commit());
 
 			if (BW_DEBUG) {
