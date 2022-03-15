@@ -308,7 +308,7 @@ public:
 		attributes[key] = value;
 		return *this;
 	}
-	
+
 	Arena arena;
 	SpanContext context;
 	Location location;
