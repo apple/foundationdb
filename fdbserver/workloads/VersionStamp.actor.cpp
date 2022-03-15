@@ -78,9 +78,6 @@ struct VersionStampWorkload : TestWorkload {
 
 		allowMetadataVersionKey = apiVersion >= 610 || apiVersion == Database::API_VERSION_LATEST;
 
-		// TODO: change this once metadata versions are supported for tenants
-		allowMetadataVersionKey = allowMetadataVersionKey && !cx->defaultTenant.present();
-
 		cx->apiVersion = apiVersion;
 		if (clientId == 0)
 			return _start(cx, this, 1 / transactionsPerSecond);
@@ -320,6 +317,7 @@ struct VersionStampWorkload : TestWorkload {
 			extraDB = Database::createDatabase(extraFile, -1);
 		}
 
+		state Future<Void> metadataWatch = Void();
 		loop {
 			wait(poisson(&lastTime, delay));
 			bool oldVSFormat = !cx->apiVersionAtLeast(520);
@@ -356,6 +354,7 @@ struct VersionStampWorkload : TestWorkload {
 				state Error err;
 				//TraceEvent("VST_CommitBegin").detail("Key", printable(key)).detail("VsKey", printable(versionStampKey)).detail("Clear", printable(range));
 				state Key testKey;
+				state Future<Void> nextMetadataWatch;
 				try {
 					tr.atomicOp(key, versionStampValue, MutationRef::SetVersionstampedValue);
 					if (key == metadataVersionKey) {
@@ -364,12 +363,21 @@ struct VersionStampWorkload : TestWorkload {
 					}
 					tr.clear(range);
 					tr.atomicOp(versionStampKey, value, MutationRef::SetVersionstampedKey);
+					if (key == metadataVersionKey) {
+						nextMetadataWatch = tr.watch(versionStampKey);
+					}
 					state Future<Standalone<StringRef>> fTrVs = tr.getVersionstamp();
 					wait(tr.commit());
 
 					committedVersion = tr.getCommittedVersion();
 					Standalone<StringRef> committedVersionStamp_ = wait(fTrVs);
 					committedVersionStamp = committedVersionStamp_;
+
+					if (key == metadataVersionKey) {
+						wait(timeoutError(metadataWatch, 30));
+						nextMetadataWatch = metadataWatch;
+					}
+
 				} catch (Error& e) {
 					err = e;
 					if (err.code() == error_code_database_locked && g_simulator.extraDB != nullptr) {
