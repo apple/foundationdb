@@ -2234,30 +2234,30 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 			if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 
 				// the highest version that cannot be recovered.
-				Version maxUncommittedVersion = invalidVersion;
+				Version maxUncommittedVersion = std::numeric_limits<Version>::max();
 
 				for (auto& logGroupResults : results) {
 					std::unordered_map<Version, int> versionRepCount;
+					std::unordered_map<Version, int> versionTLogCount;
 					for (auto& tLogResult : std::get<1>(logGroupResults)) {
 						for (int i = 0; i < tLogResult.unknownCommittedVersions.size(); i++) {
 							Version k = std::get<0>(tLogResult.unknownCommittedVersions[i]);
 							versionRepCount[k]++;
+							versionTLogCount[k] = std::get<1>(tLogResult.unknownCommittedVersions[i]);
 						}
 					}
 					for (auto& tLogResult : std::get<1>(logGroupResults)) {
 						for (int i = 0; i < tLogResult.unknownCommittedVersions.size(); i++) {
 							Version k = std::get<0>(tLogResult.unknownCommittedVersions[i]);
 							Reference<LogSet> logSet = logServers[std::get<0>(logGroupResults)];
-							if (versionRepCount[k] >= logSet->logServers.size() - logSet->tLogReplicationFactor + 1) {
+							if (versionRepCount[k] >= versionTLogCount[k] - logSet->tLogReplicationFactor + 1) {
 								Version rv = rvLogs.find(tLogResult.id) != rvLogs.end() ? rvLogs[tLogResult.id] : 0;
 								if (k > rv && k > knownCommittedVersion) {
 									rvLogs[tLogResult.id] = k;
 								}
 							} else {
 								if (k > minEnd) {
-									maxUncommittedVersion = maxUncommittedVersion == invalidVersion
-									                            ? k
-									                            : std::min(maxUncommittedVersion, k);
+									maxUncommittedVersion = std::min(maxUncommittedVersion, k);
 								}
 							}
 						}
@@ -2270,9 +2270,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 					logSystem->recoverAt =
 					    logSystem->recoverAt == minEnd ? maxRvLogs : std::min(logSystem->recoverAt.get(), maxRvLogs);
 				}
-				if (maxUncommittedVersion != invalidVersion) {
-					logSystem->recoverAt = std::min(logSystem->recoverAt.get(), maxUncommittedVersion);
-				}
+				logSystem->recoverAt = std::min(logSystem->recoverAt.get(), maxUncommittedVersion);
 				TraceEvent("RecoveryVersionInfo").detail("RecoverAt", logSystem->recoverAt);
 			}
 
