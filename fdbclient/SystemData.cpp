@@ -215,6 +215,33 @@ const KeyRangeRef writeConflictRangeKeysRange =
 
 const KeyRef clusterIdKey = LiteralStringRef("\xff/clusterId");
 
+const KeyRef checkpointPrefix = "\xff/checkpoint/"_sr;
+
+const Key checkpointKeyFor(UID checkpointID) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(checkpointPrefix);
+	wr << checkpointID;
+	return wr.toValue();
+}
+
+const Value checkpointValue(const CheckpointMetaData& checkpoint) {
+	return ObjectWriter::toValue(checkpoint, IncludeVersion());
+}
+
+UID decodeCheckpointKey(const KeyRef& key) {
+	UID checkpointID;
+	BinaryReader rd(key.removePrefix(checkpointPrefix), Unversioned());
+	rd >> checkpointID;
+	return checkpointID;
+}
+
+CheckpointMetaData decodeCheckpointValue(const ValueRef& value) {
+	CheckpointMetaData checkpoint;
+	ObjectReader reader(value.begin(), IncludeVersion());
+	reader.deserialize(checkpoint);
+	return checkpoint;
+}
+
 // "\xff/cacheServer/[[UID]] := StorageServerInterface"
 const KeyRangeRef storageCacheServerKeys(LiteralStringRef("\xff/cacheServer/"), LiteralStringRef("\xff/cacheServer0"));
 const KeyRef storageCacheServersPrefix = storageCacheServerKeys.begin;
