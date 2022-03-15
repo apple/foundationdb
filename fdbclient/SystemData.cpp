@@ -373,6 +373,7 @@ bool serverHasKey(ValueRef storedValue) {
 }
 
 const KeyRef storageTeamIdKeyPrefix = "\xff/storageTeams/"_sr;
+// in ASCII 0 comes after '/', thus we get the total range for a certain key this way.
 const KeyRangeRef storageTeamIdKeyRange("\xff/storageTeams/"_sr, "\xff/storageTeams0"_sr);
 
 const Key storageTeamIdKey(ptxn::StorageTeamID teamId) {
@@ -482,20 +483,6 @@ std::vector<UID> decodeStorageTeams(const ValueRef& value) {
 }
 
 const KeyRef storageTeamIdToTLogGroupPrefix = "\xff/storageTeamIdToTLogGroup/"_sr;
-const KeyRangeRef storageTeamIdToTLogGroupRange("\xff/storageTeamIdToTLogGroup/"_sr,
-                                                "\xff/storageTeamIdToTLogGroup0"_sr);
-const Key storageTeamIdToTLogGroupKey(ptxn::StorageTeamID teamId) {
-	BinaryWriter wr(Unversioned());
-	wr.serializeBytes(storageTeamIdToTLogGroupPrefix);
-	wr << teamId;
-	return wr.toValue();
-}
-const ptxn::StorageTeamID decodeStorageTeamIdToTLogGroupKey(const KeyRef& k) {
-	BinaryReader br(k.removePrefix(storageTeamIdToTLogGroupPrefix), Unversioned());
-	ptxn::StorageTeamID teamId;
-	br >> teamId;
-	return teamId;
-}
 
 const KeyRef cacheKeysPrefix = LiteralStringRef("\xff\x02/cacheKeys/");
 

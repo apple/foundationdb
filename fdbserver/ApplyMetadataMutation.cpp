@@ -319,10 +319,6 @@ private:
 
 		if (tLogGroupCollection->tryAddStorageTeam(teamid, team)) {
 			auto group = tLogGroupCollection->assignStorageTeam(teamid);
-			// TODO: This may be unnessary, as ApplyMetadataMutation case for this key-range
-			//     should do the assignment.
-			txnStateStore->set(
-			    KeyValueRef(storageTeamIdToTLogGroupKey(teamid), BinaryWriter::toValue(group->id(), Unversioned())));
 		}
 
 		// Storage Team ID to Storage Server List
@@ -330,27 +326,6 @@ private:
 			// TODO: read m.param1 from txnStateStore and decodes existing teams.
 			// Then add the new team into the list.
 			// txnStateStore->set(KeyValueRef(m.param1, m.param2));
-		}
-	}
-
-	void checkSetStorageTeamIDToTLogGroupPrefix(MutationRef m) {
-		if (!m.param1.startsWith(storageTeamIdToTLogGroupPrefix)) {
-			return;
-		}
-		ASSERT_WE_THINK(tLogGroupCollection.isValid());
-		auto teamid = decodeStorageTeamIdToTLogGroupKey(m.param1);
-		auto group = BinaryReader::fromStringRef<UID>(m.param2, Unversioned());
-		tLogGroupCollection->assignStorageTeam(teamid, group);
-
-		if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
-			(*changedTeams)[group].push_back(std::make_pair(teamid, true));
-			// TODO (Vishesh) Check if team already exists. Create entry for deleting it from old group.
-		}
-
-		// Storage Team ID to TLogGroup
-		// TODO: Update proxy state
-		if (!initialCommit) {
-			txnStateStore->set(KeyValueRef(m.param1, m.param2));
 		}
 	}
 
