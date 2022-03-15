@@ -181,8 +181,6 @@ struct ChangeFeedStorageData : ReferenceCounted<ChangeFeedStorageData> {
 	Promise<Void> destroyed;
 	UID interfToken;
 
-	bool debug = false; // TODO REMOVE
-
 	~ChangeFeedStorageData() { destroyed.send(Void()); }
 };
 
@@ -193,7 +191,6 @@ struct ChangeFeedData : ReferenceCounted<ChangeFeedData> {
 	Version getVersion();
 	Future<Void> whenAtLeast(Version version);
 
-	Key id; // TODO REMOVE eventually? for debugging
 	NotifiedVersion lastReturnedVersion;
 	std::vector<Reference<ChangeFeedStorageData>> storageData;
 	AsyncVar<int> notAtLatest;
@@ -204,6 +201,11 @@ struct ChangeFeedData : ReferenceCounted<ChangeFeedData> {
 	    invalidVersion; // like TLog pop version, set by SS and client can check it to see if they missed data
 
 	ChangeFeedData() : notAtLatest(1) {}
+};
+
+struct EndpointFailureInfo {
+	double startTime = 0;
+	double lastRefreshTime = 0;
 };
 
 class DatabaseContext : public ReferenceCounted<DatabaseContext>, public FastAllocated<DatabaseContext>, NonCopyable {
@@ -248,6 +250,14 @@ public:
 	Reference<LocationInfo> setCachedLocation(const KeyRangeRef&, const std::vector<struct StorageServerInterface>&);
 	void invalidateCache(const KeyRef&, Reverse isBackward = Reverse::False);
 	void invalidateCache(const KeyRangeRef&);
+
+	// Records that `endpoint` is failed on a healthy server.
+	void setFailedEndpointOnHealthyServer(const Endpoint& endpoint);
+
+	// Updates `endpoint` refresh time if the `endpoint` is a failed endpoint. If not, this does nothing.
+	void updateFailedEndpointRefreshTime(const Endpoint& endpoint);
+	Optional<EndpointFailureInfo> getEndpointFailureInfo(const Endpoint& endpoint);
+	void clearFailedEndpointOnHealthyServer(const Endpoint& endpoint);
 
 	bool sampleReadTags() const;
 	bool sampleOnCost(uint64_t cost) const;
@@ -364,6 +374,7 @@ public:
 	Future<Void> monitorTssInfoChange;
 	Future<Void> tssMismatchHandler;
 	PromiseStream<std::pair<UID, std::vector<DetailedTSSMismatch>>> tssMismatchStream;
+	Future<Void> grvUpdateHandler;
 	Reference<CommitProxyInfo> commitProxies;
 	Reference<GrvProxyInfo> grvProxies;
 	bool proxyProvisional; // Provisional commit proxy and grv proxy are used at the same time.
@@ -408,6 +419,7 @@ public:
 	// Cache of location information
 	int locationCacheSize;
 	CoalescedKeyRangeMap<Reference<LocationInfo>> locationCache;
+	std::unordered_map<Endpoint, EndpointFailureInfo> failedEndpointsOnHealthyServersInfo;
 
 	std::map<UID, StorageServerInfo*> server_interf;
 	std::map<UID, BlobWorkerInterface> blobWorker_interf; // blob workers don't change endpoints for the same ID
@@ -478,6 +490,20 @@ public:
 
 	int outstandingWatches;
 	int maxOutstandingWatches;
+
+	// GRV Cache
+	// Database-level read version cache storing the most recent successful GRV as well as the time it was requested.
+	double lastGrvTime;
+	Version cachedReadVersion;
+	void updateCachedReadVersion(double t, Version v);
+	Version getCachedReadVersion();
+	double getLastGrvTime();
+	double lastRkBatchThrottleTime;
+	double lastRkDefaultThrottleTime;
+	// Cached RVs can be updated through commits, and using cached RVs avoids the proxies altogether
+	// Because our checks for ratekeeper throttling requires communication with the proxies,
+	// we want to track the last time in order to periodically contact the proxy to check for throttling
+	double lastProxyRequestTime;
 
 	int snapshotRywEnabled;
 

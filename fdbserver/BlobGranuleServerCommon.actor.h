@@ -64,12 +64,7 @@ struct GranuleFiles {
 
 class Transaction;
 ACTOR Future<Optional<GranuleHistory>> getLatestGranuleHistory(Transaction* tr, KeyRange range);
-ACTOR Future<Void> readGranuleFiles(Transaction* tr,
-                                    Key* startKey,
-                                    Key endKey,
-                                    GranuleFiles* files,
-                                    UID granuleID,
-                                    bool debug);
+ACTOR Future<Void> readGranuleFiles(Transaction* tr, Key* startKey, Key endKey, GranuleFiles* files, UID granuleID);
 
-ACTOR Future<GranuleFiles> loadHistoryFiles(Database cx, UID granuleID, bool debug);
+ACTOR Future<GranuleFiles> loadHistoryFiles(Database cx, UID granuleID);
 #endif

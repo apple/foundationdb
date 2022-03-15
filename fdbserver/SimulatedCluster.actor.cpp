@@ -610,7 +610,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 				               ? SevInfo
 				               : SevError,
 				           "SimulatedFDBDTerminated")
-				    .error(e, true)
+				    .errorUnsuppressed(e)
 				    .detail("ZoneId", localities.zoneId());
 			}
 
@@ -626,7 +626,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 				onShutdown = ISimulator::InjectFaults;
 		} catch (Error& e) {
 			TraceEvent(destructed ? SevInfo : SevError, "SimulatedFDBDRebooterError")
-			    .error(e, true)
+			    .errorUnsuppressed(e)
 			    .detail("ZoneId", localities.zoneId())
 			    .detail("RandomId", randomId);
 			onShutdown = e;
@@ -1344,11 +1344,6 @@ void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
 		}
 	}
 
-	// TODO CHANGE BACK BEFORE MERGING!!
-	// Avoid memory storage engines for now to avoid extra memory pressure of change feeds, and redwood is ocasionally
-	// hitting a root too large issue with change feeds
-	storage_engine_type = 0;
-
 	switch (storage_engine_type) {
 	case 0: {
 		TEST(true); // Simulated cluster using ssd storage engine
@@ -1825,7 +1820,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		if (kv.second.type() == json_spirit::int_type) {
 			startingConfigString += kv.first + ":=" + format("%d", kv.second.get_int());
 		} else if (kv.second.type() == json_spirit::str_type) {
-			if ("storage_migration_type" == kv.first) {
+			if ("storage_migration_type" == kv.first || "tenant_mode" == kv.first) {
 				startingConfigString += kv.first + "=" + kv.second.get_str();
 			} else {
 				startingConfigString += kv.second.get_str();
@@ -1919,8 +1914,8 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	TEST(useIPv6); // Use IPv6
 	TEST(!useIPv6); // Use IPv4
 
-	// TODO(renxuan): Use hostname 25% of the time, unless it is disabled
-	bool useHostname = false; // !testConfig.disableHostname && deterministicRandom()->random01() < 0.25;
+	// Use hostname 25% of the time, unless it is disabled
+	bool useHostname = !testConfig.disableHostname && deterministicRandom()->random01() < 0.25;
 	TEST(useHostname); // Use hostname
 	TEST(!useHostname); // Use IP address
 	NetworkAddressFromHostname fromHostname =

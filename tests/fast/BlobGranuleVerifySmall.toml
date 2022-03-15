@@ -1,5 +1,6 @@
 [configuration]
 blobGranulesEnabled = true 
+storageEngineExcludeTypes = [3] # FIXME: exclude redwood because WriteDuringRead can write massive KV pairs and we don't chunk change feed data on disk yet
 
 [[test]]
 testTitle = 'BlobGranuleVerifySmall'

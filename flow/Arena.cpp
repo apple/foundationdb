@@ -352,12 +352,14 @@ ArenaBlock* ArenaBlock::create(int dataSize, Reference<ArenaBlock>& next) {
 			b->bigSize = reqSize;
 			b->bigUsed = sizeof(ArenaBlock);
 
+#if !DEBUG_DETERMINISM
 			if (FLOW_KNOBS && g_allocation_tracing_disabled == 0 &&
 			    nondeterministicRandom()->random01() < (reqSize / FLOW_KNOBS->HUGE_ARENA_LOGGING_BYTES)) {
 				++g_allocation_tracing_disabled;
 				hugeArenaSample(reqSize);
 				--g_allocation_tracing_disabled;
 			}
+#endif
 			g_hugeArenaMemory.fetch_add(reqSize);
 
 			// If the new block has less free space than the old block, make the old block depend on it

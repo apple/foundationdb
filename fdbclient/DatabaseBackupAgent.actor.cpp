@@ -2142,7 +2142,7 @@ struct StartFullBackupTaskFunc : TaskFuncBase {
 				wait(tr->commit());
 				break;
 			} catch (Error& e) {
-				TraceEvent("SetDestUidOrBeginVersionError").error(e, true);
+				TraceEvent("SetDestUidOrBeginVersionError").errorUnsuppressed(e);
 				wait(tr->onError(e));
 			}
 		}
@@ -2907,7 +2907,7 @@ public:
 				TraceEvent("DBA_Abort").detail("CommitVersion", tr->getCommittedVersion());
 				break;
 			} catch (Error& e) {
-				TraceEvent("DBA_AbortError").error(e, true);
+				TraceEvent("DBA_AbortError").errorUnsuppressed(e);
 				wait(tr->onError(e));
 			}
 		}

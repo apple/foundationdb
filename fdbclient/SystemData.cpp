@@ -1133,26 +1133,26 @@ const KeyRef blobGranulePruneChangeKey = LiteralStringRef("\xff\x02/bgpChange");
 const uint8_t BG_FILE_TYPE_DELTA = 'D';
 const uint8_t BG_FILE_TYPE_SNAPSHOT = 'S';
 
-const Key blobGranuleFileKeyFor(UID granuleID, uint8_t fileType, Version fileVersion) {
+const Key blobGranuleFileKeyFor(UID granuleID, Version fileVersion, uint8_t fileType) {
 	ASSERT(fileType == 'D' || fileType == 'S');
 	BinaryWriter wr(AssumeVersion(ProtocolVersion::withBlobGranule()));
 	wr.serializeBytes(blobGranuleFileKeys.begin);
 	wr << granuleID;
-	wr << fileType;
 	wr << bigEndian64(fileVersion);
+	wr << fileType;
 	return wr.toValue();
 }
 
-std::tuple<UID, uint8_t, Version> decodeBlobGranuleFileKey(KeyRef const& key) {
+std::tuple<UID, Version, uint8_t> decodeBlobGranuleFileKey(KeyRef const& key) {
 	UID granuleID;
-	uint8_t fileType;
 	Version fileVersion;
+	uint8_t fileType;
 	BinaryReader reader(key.removePrefix(blobGranuleFileKeys.begin), AssumeVersion(ProtocolVersion::withBlobGranule()));
 	reader >> granuleID;
-	reader >> fileType;
 	reader >> fileVersion;
+	reader >> fileType;
 	ASSERT(fileType == 'D' || fileType == 'S');
-	return std::tuple(granuleID, fileType, bigEndian64(fileVersion));
+	return std::tuple(granuleID, bigEndian64(fileVersion), fileType);
 }
 
 const KeyRange blobGranuleFileKeyRangeFor(UID granuleID) {
@@ -1344,6 +1344,21 @@ BlobWorkerInterface decodeBlobWorkerListValue(ValueRef const& value) {
 	reader.deserialize(interf);
 	return interf;
 }
+
+Value encodeTenantEntry(TenantMapEntry const& tenantEntry) {
+	return ObjectWriter::toValue(tenantEntry, IncludeVersion());
+}
+
+TenantMapEntry decodeTenantEntry(ValueRef const& value) {
+	TenantMapEntry entry;
+	ObjectReader reader(value.begin(), IncludeVersion());
+	reader.deserialize(entry);
+	return entry;
+}
+
+const KeyRangeRef tenantMapKeys("\xff/tenantMap/"_sr, "\xff/tenantMap0"_sr);
+const KeyRef tenantMapPrefix = tenantMapKeys.begin;
+const KeyRef tenantMapPrivatePrefix = "\xff\xff/tenantMap/"_sr;
 
 // for tests
 void testSSISerdes(StorageServerInterface const& ssi, bool useFB) {

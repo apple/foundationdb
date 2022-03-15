@@ -114,12 +114,10 @@ struct RevokeBlobRangeRequest {
 };
 
 /*
- * Continue: when a worker should continue handling a granule that was evaluated for a split
- * Reassign: when a new blob manager takes over, it sends Reassign requests to workers to redistribute granules
- * Normal: Neither continue nor reassign
+ * Continue: Blob worker should continue handling a granule that was evaluated for a split
+ * Normal: Blob worker should open the granule and start processing it
  */
-// TODO REMOVE reassign now!
-enum AssignRequestType { Normal = 0, Continue = 1, Reassign = 2 };
+enum AssignRequestType { Normal = 0, Continue = 1 };
 
 struct AssignBlobRangeRequest {
 	constexpr static FileIdentifier file_identifier = 905381;
@@ -154,7 +152,6 @@ struct GranuleStatusReply : public ReplyPromiseStreamReply {
 	int64_t seqno;
 	UID granuleID;
 	Version startVersion;
-	Version latestVersion;
 
 	GranuleStatusReply() {}
 	explicit GranuleStatusReply(KeyRange range,
@@ -163,10 +160,9 @@ struct GranuleStatusReply : public ReplyPromiseStreamReply {
 	                            int64_t epoch,
 	                            int64_t seqno,
 	                            UID granuleID,
-	                            Version startVersion,
-	                            Version latestVersion)
+	                            Version startVersion)
 	  : granuleRange(range), doSplit(doSplit), writeHotSplit(writeHotSplit), epoch(epoch), seqno(seqno),
-	    granuleID(granuleID), startVersion(startVersion), latestVersion(latestVersion) {}
+	    granuleID(granuleID), startVersion(startVersion) {}
 
 	int expectedSize() const { return sizeof(GranuleStatusReply) + granuleRange.expectedSize(); }
 
@@ -181,8 +177,7 @@ struct GranuleStatusReply : public ReplyPromiseStreamReply {
 		           epoch,
 		           seqno,
 		           granuleID,
-		           startVersion,
-		           latestVersion);
+		           startVersion);
 	}
 };
 

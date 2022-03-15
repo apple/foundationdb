@@ -449,9 +449,6 @@ public:
 		}
 	}
 
-	// TODO REMOVE
-	const void* debugAddr() const { return queue; }
-
 	template <class E>
 	void sendError(const E& exc) const {
 		if (queue->isRemoteEndpoint()) {
@@ -770,7 +767,6 @@ public:
 			} else {
 				Reference<Peer> peer =
 				    FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(), true);
-				// FIXME: defer sending the message until we know the connection is established
 				endStreamOnDisconnect(disc, p, getEndpoint(), peer);
 			}
 			return p;

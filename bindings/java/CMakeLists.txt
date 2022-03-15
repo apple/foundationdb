@@ -154,6 +154,7 @@ endif()
 set_target_properties(java_workloads PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/share/foundationdb")
 target_link_libraries(java_workloads PUBLIC fdb_c ${JNI_LIBRARIES})
+target_link_libraries(java_workloads PRIVATE flow) # mostly for boost
 target_include_directories(java_workloads PUBLIC ${JNI_INCLUDE_DIRS})
 
 set(CMAKE_JAVA_COMPILE_FLAGS "-source" "1.8" "-target" "1.8" "-XDignore.symbol.file")
@@ -228,6 +229,8 @@ if(NOT OPEN_FOR_IDE)
   else()
    if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
      set(lib_destination "linux/aarch64")
+   elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64le")
+     set(lib_destination "linux/ppc64le")
    else()
      set(lib_destination "linux/amd64")
     endif()

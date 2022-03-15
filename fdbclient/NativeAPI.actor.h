@@ -157,6 +157,8 @@ struct TransactionOptions {
 	bool includePort : 1;
 	bool reportConflictingKeys : 1;
 	bool expensiveClearCostEstimation : 1;
+	bool useGrvCache : 1;
+	bool skipGrvCache : 1;
 
 	TransactionPriority priority;
 
@@ -479,6 +481,10 @@ inline uint64_t getWriteOperationCost(uint64_t bytes) {
 // Create a transaction to set the value of system key \xff/conf/perpetual_storage_wiggle. If enable == true, the value
 // will be 1. Otherwise, the value will be 0.
 ACTOR Future<Void> setPerpetualStorageWiggle(Database cx, bool enable, LockAware lockAware = LockAware::False);
+
+ACTOR Future<std::vector<std::pair<UID, StorageWiggleValue>>> readStorageWiggleValues(Database cx,
+                                                                                      bool primary,
+                                                                                      bool use_system_priority);
 
 #include "flow/unactorcompiler.h"
 #endif

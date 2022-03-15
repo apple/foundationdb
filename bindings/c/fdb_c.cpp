@@ -76,7 +76,8 @@ extern "C" DLLEXPORT fdb_bool_t fdb_error_predicate(int predicate_test, fdb_erro
 		return code == error_code_not_committed || code == error_code_transaction_too_old ||
 		       code == error_code_future_version || code == error_code_database_locked ||
 		       code == error_code_proxy_memory_limit_exceeded || code == error_code_batch_transaction_throttled ||
-		       code == error_code_process_behind || code == error_code_tag_throttled;
+		       code == error_code_process_behind || code == error_code_tag_throttled ||
+		       code == error_code_unknown_tenant;
 	}
 	return false;
 }

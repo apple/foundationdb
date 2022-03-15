@@ -27,6 +27,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/BlobWorkerInterface.h" // TODO move the functions that depend on this out of here and into BlobWorkerInterface.h to remove this depdendency
 #include "fdbclient/StorageServerInterface.h"
+#include "Tenant.h"
 
 // Don't warn on constants being defined in this file.
 #pragma clang diagnostic push
@@ -560,8 +561,8 @@ extern const KeyRangeRef blobGranulePruneKeys;
 extern const KeyRangeRef blobGranuleVersionKeys;
 extern const KeyRef blobGranulePruneChangeKey;
 
-const Key blobGranuleFileKeyFor(UID granuleID, uint8_t fileType, Version fileVersion);
-std::tuple<UID, uint8_t, Version> decodeBlobGranuleFileKey(KeyRef const& key);
+const Key blobGranuleFileKeyFor(UID granuleID, Version fileVersion, uint8_t fileType);
+std::tuple<UID, Version, uint8_t> decodeBlobGranuleFileKey(KeyRef const& key);
 const KeyRange blobGranuleFileKeyRangeFor(UID granuleID);
 
 const Value blobGranuleFileValueFor(StringRef const& filename, int64_t offset, int64_t length);
@@ -600,6 +601,14 @@ const Key blobWorkerListKeyFor(UID workerID);
 UID decodeBlobWorkerListKey(KeyRef const& key);
 const Value blobWorkerListValue(BlobWorkerInterface const& interface);
 BlobWorkerInterface decodeBlobWorkerListValue(ValueRef const& value);
+
+// State for the tenant map
+extern const KeyRangeRef tenantMapKeys;
+extern const KeyRef tenantMapPrefix;
+extern const KeyRef tenantMapPrivatePrefix;
+
+Value encodeTenantEntry(TenantMapEntry const& tenantEntry);
+TenantMapEntry decodeTenantEntry(ValueRef const& value);
 
 #pragma clang diagnostic pop
 

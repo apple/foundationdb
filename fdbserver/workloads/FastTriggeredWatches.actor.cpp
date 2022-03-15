@@ -149,7 +149,7 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 			}
 			return Void();
 		} catch (Error& e) {
-			TraceEvent(SevError, "FastWatchError").error(e, true);
+			TraceEvent(SevError, "FastWatchError").errorUnsuppressed(e);
 			throw;
 		}
 	}

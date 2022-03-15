@@ -51,6 +51,7 @@ void DatabaseConfiguration::resetInternal() {
 	perpetualStorageWiggleLocality = "0";
 	storageMigrationType = StorageMigrationType::DEFAULT;
 	blobGranulesEnabled = false;
+	tenantMode = TenantMode::DISABLED;
 }
 
 int toInt(ValueRef const& v) {
@@ -210,7 +211,8 @@ bool DatabaseConfiguration::isValid() const {
 	      // We cannot specify regions with three_datacenter replication
 	      (perpetualStorageWiggleSpeed == 0 || perpetualStorageWiggleSpeed == 1) &&
 	      isValidPerpetualStorageWiggleLocality(perpetualStorageWiggleLocality) &&
-	      storageMigrationType != StorageMigrationType::UNSET)) {
+	      storageMigrationType != StorageMigrationType::UNSET && tenantMode >= TenantMode::DISABLED &&
+	      tenantMode < TenantMode::END)) {
 		return false;
 	}
 	std::set<Key> dcIds;
@@ -404,6 +406,7 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 	result["perpetual_storage_wiggle_locality"] = perpetualStorageWiggleLocality;
 	result["storage_migration_type"] = storageMigrationType.toString();
 	result["blob_granules_enabled"] = (int32_t)blobGranulesEnabled;
+	result["tenant_mode"] = tenantMode.toString();
 	return result;
 }
 
@@ -627,6 +630,9 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	} else if (ck == LiteralStringRef("storage_migration_type")) {
 		parse((&type), value);
 		storageMigrationType = (StorageMigrationType::MigrationType)type;
+	} else if (ck == LiteralStringRef("tenant_mode")) {
+		parse((&type), value);
+		tenantMode = (TenantMode::Mode)type;
 	} else if (ck == LiteralStringRef("proxies")) {
 		overwriteProxiesCount();
 	} else if (ck == LiteralStringRef("blob_granules_enabled")) {
