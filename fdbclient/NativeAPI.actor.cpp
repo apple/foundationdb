@@ -6958,7 +6958,8 @@ Future<Void> createCheckpoint(Transaction* tr, KeyRangeRef range, CheckpointForm
 	return createCheckpointImpl(tr, range, format);
 }
 
-// Fetch a single sst file from storage server. If the file is fetch successfully, it will be recorded via cFun.
+// Gets CheckpointMetaData of the specific keyrange, version and format from one of the storage servers, if none of the
+// servers have the checkpoint, a checkpoint_not_found error is returned.
 ACTOR static Future<CheckpointMetaData> getCheckpointMetaDataInternal(GetCheckpointRequest req,
                                                                       Reference<LocationInfo> alternatives,
                                                                       double timeout) {
