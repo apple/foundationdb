@@ -2828,25 +2828,8 @@ public:
 
 	// read the current map of `perpetualStorageWiggleIDPrefix`, then restore wigglingId.
 	ACTOR static Future<Void> readStorageWiggleMap(DDTeamCollection* self) {
-
-		state const Key readKey =
-		    perpetualStorageWiggleIDPrefix.withSuffix(self->primary ? "primary/"_sr : "remote/"_sr);
-		state KeyBackedObjectMap<UID, StorageWiggleValue, decltype(IncludeVersion())> metadataMap(readKey,
-		                                                                                          IncludeVersion());
-		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
-		state std::vector<std::pair<UID, StorageWiggleValue>> res;
-		// read the wiggling pairs
-		loop {
-			try {
-				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-				wait(store(res, metadataMap.getRange(tr, UID(0, 0), Optional<UID>(), CLIENT_KNOBS->TOO_MANY)));
-				wait(tr->commit());
-				break;
-			} catch (Error& e) {
-				wait(tr->onError(e));
-			}
-		}
+		state std::vector<std::pair<UID, StorageWiggleValue>> res =
+		    wait(readStorageWiggleValues(self->cx, self->primary, false));
 		if (res.size() > 0) {
 			// SOMEDAY: support wiggle multiple SS at once
 			ASSERT(!self->wigglingId.present()); // only single process wiggle is allowed
@@ -5333,10 +5316,10 @@ public:
 		collection->disableBuildingTeams();
 		collection->setCheckTeamDelay();
 
-		collection->server_info[UID(1, 0)]->setServerMetrics(mid_avail);
-		collection->server_info[UID(2, 0)]->setServerMetrics(high_avail);
-		collection->server_info[UID(3, 0)]->setServerMetrics(high_avail);
-		collection->server_info[UID(4, 0)]->setServerMetrics(high_avail);
+		collection->server_info[UID(1, 0)]->setMetrics(mid_avail);
+		collection->server_info[UID(2, 0)]->setMetrics(high_avail);
+		collection->server_info[UID(3, 0)]->setMetrics(high_avail);
+		collection->server_info[UID(4, 0)]->setMetrics(high_avail);
 
 		/*
 		 * Suppose  1, 2 and 3 are complete sources, i.e., they have all shards in
@@ -5389,10 +5372,10 @@ public:
 		collection->disableBuildingTeams();
 		collection->setCheckTeamDelay();
 
-		collection->server_info[UID(1, 0)]->setServerMetrics(mid_avail);
-		collection->server_info[UID(2, 0)]->setServerMetrics(high_avail);
-		collection->server_info[UID(3, 0)]->setServerMetrics(high_avail);
-		collection->server_info[UID(4, 0)]->setServerMetrics(high_avail);
+		collection->server_info[UID(1, 0)]->setMetrics(mid_avail);
+		collection->server_info[UID(2, 0)]->setMetrics(high_avail);
+		collection->server_info[UID(3, 0)]->setMetrics(high_avail);
+		collection->server_info[UID(4, 0)]->setMetrics(high_avail);
 		collection->server_info[UID(1, 0)]->markTeamUnhealthy(0);
 
 		/*
@@ -5452,10 +5435,10 @@ public:
 		 * least utilized, if the caller says they preferLowerUtilization.
 		 */
 
-		collection->server_info[UID(1, 0)]->setServerMetrics(mid_avail);
-		collection->server_info[UID(2, 0)]->setServerMetrics(high_avail);
-		collection->server_info[UID(3, 0)]->setServerMetrics(high_avail);
-		collection->server_info[UID(4, 0)]->setServerMetrics(high_avail);
+		collection->server_info[UID(1, 0)]->setMetrics(mid_avail);
+		collection->server_info[UID(2, 0)]->setMetrics(high_avail);
+		collection->server_info[UID(3, 0)]->setMetrics(high_avail);
+		collection->server_info[UID(4, 0)]->setMetrics(high_avail);
 
 		bool wantsNewServers = true;
 		bool wantsTrueBest = true;
@@ -5502,10 +5485,10 @@ public:
 		collection->disableBuildingTeams();
 		collection->setCheckTeamDelay();
 
-		collection->server_info[UID(1, 0)]->setServerMetrics(mid_avail);
-		collection->server_info[UID(2, 0)]->setServerMetrics(high_avail);
-		collection->server_info[UID(3, 0)]->setServerMetrics(high_avail);
-		collection->server_info[UID(4, 0)]->setServerMetrics(high_avail);
+		collection->server_info[UID(1, 0)]->setMetrics(mid_avail);
+		collection->server_info[UID(2, 0)]->setMetrics(high_avail);
+		collection->server_info[UID(3, 0)]->setMetrics(high_avail);
+		collection->server_info[UID(4, 0)]->setMetrics(high_avail);
 
 		/*
 		 * Among server teams that have healthy space available, pick the team that is
@@ -5556,10 +5539,10 @@ public:
 		collection->disableBuildingTeams();
 		collection->setCheckTeamDelay();
 
-		collection->server_info[UID(1, 0)]->setServerMetrics(high_avail);
-		collection->server_info[UID(2, 0)]->setServerMetrics(low_avail);
-		collection->server_info[UID(3, 0)]->setServerMetrics(high_avail);
-		collection->server_info[UID(4, 0)]->setServerMetrics(low_avail);
+		collection->server_info[UID(1, 0)]->setMetrics(high_avail);
+		collection->server_info[UID(2, 0)]->setMetrics(low_avail);
+		collection->server_info[UID(3, 0)]->setMetrics(high_avail);
+		collection->server_info[UID(4, 0)]->setMetrics(low_avail);
 		collection->server_info[UID(1, 0)]->markTeamUnhealthy(0);
 
 		/*
@@ -5616,11 +5599,11 @@ public:
 		collection->disableBuildingTeams();
 		collection->setCheckTeamDelay();
 
-		collection->server_info[UID(1, 0)]->setServerMetrics(high_avail);
-		collection->server_info[UID(2, 0)]->setServerMetrics(low_avail);
-		collection->server_info[UID(3, 0)]->setServerMetrics(high_avail);
-		collection->server_info[UID(4, 0)]->setServerMetrics(low_avail);
-		collection->server_info[UID(5, 0)]->setServerMetrics(high_avail);
+		collection->server_info[UID(1, 0)]->setMetrics(high_avail);
+		collection->server_info[UID(2, 0)]->setMetrics(low_avail);
+		collection->server_info[UID(3, 0)]->setMetrics(high_avail);
+		collection->server_info[UID(4, 0)]->setMetrics(low_avail);
+		collection->server_info[UID(5, 0)]->setMetrics(high_avail);
 		collection->server_info[UID(1, 0)]->markTeamUnhealthy(0);
 
 		/*

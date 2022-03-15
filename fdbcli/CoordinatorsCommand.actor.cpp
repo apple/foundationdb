@@ -132,7 +132,7 @@ ACTOR Future<bool> changeCoordinators(Reference<IDatabase> db, std::vector<Strin
 						throw;
 					}
 				}
-				std::string new_coordinators_str = boost::algorithm::join(newCoordinatorslist, ", ");
+				std::string new_coordinators_str = boost::algorithm::join(newCoordinatorslist, ",");
 				tr->set(fdb_cli::coordinatorsProcessSpecialKey, new_coordinators_str);
 			}
 			wait(safeThreadFutureToFuture(tr->commit()));

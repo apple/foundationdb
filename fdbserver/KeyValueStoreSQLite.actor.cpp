@@ -19,7 +19,7 @@
  */
 
 #define SQLITE_THREADSAFE 0 // also in sqlite3.amalgamation.c!
-#include "contrib/fmt-8.0.1/include/fmt/format.h"
+#include "contrib/fmt-8.1.1/include/fmt/format.h"
 #include "flow/crc32c.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/CoroFlow.h"
@@ -706,6 +706,7 @@ struct RawCursor {
 	BtCursor* cursor;
 	KeyInfo keyInfo;
 	bool valid;
+	int64_t kvBytesRead = 0;
 
 	operator bool() const { return valid; }
 
@@ -1105,6 +1106,7 @@ struct RawCursor {
 			if (r == 0) {
 				Value result;
 				((ValueRef&)result) = decodeKVFragment(getEncodedRow(result.arena())).get().value;
+				kvBytesRead += key.size() + result.size();
 				return result;
 			}
 
@@ -1115,12 +1117,14 @@ struct RawCursor {
 			DefragmentingReader i(*this, m, true);
 			if (i.peek() == key) {
 				Optional<KeyValueRef> kv = i.getNext();
+				kvBytesRead += key.size() + kv.get().value.size();
 				return Value(kv.get().value, m);
 			}
 		} else if (r == 0) {
 			Value result;
 			KeyValueRef kv = decodeKV(getEncodedRow(result.arena()));
 			((ValueRef&)result) = kv.value;
+			kvBytesRead += key.size() + result.size();
 			return result;
 		}
 
@@ -1135,6 +1139,7 @@ struct RawCursor {
 			DefragmentingReader i(*this, m, getEncodedKVFragmentSize(key.size(), maxLength));
 			if (i.peek() == key) {
 				Optional<KeyValueRef> kv = i.getNext();
+				kvBytesRead += key.size() + kv.get().value.size();
 				return Value(kv.get().value, m);
 			}
 		} else if (!moveTo(key)) {
@@ -1145,6 +1150,7 @@ struct RawCursor {
 			int maxEncodedSize = getEncodedSize(key.size(), maxLength);
 			KeyValueRef kv = decodeKVPrefix(getEncodedRowPrefix(result.arena(), maxEncodedSize), maxLength);
 			((ValueRef&)result) = kv.value;
+			kvBytesRead += key.size() + result.size();
 			return result;
 		}
 		return Optional<Value>();
@@ -1221,6 +1227,8 @@ struct RawCursor {
 			ASSERT(result.size() > 0);
 			result.readThrough = result[result.size() - 1].key;
 		}
+		// AccumulatedBytes includes KeyValueRef overhead so subtract it
+		kvBytesRead += (accumulatedBytes - result.size() * sizeof(KeyValueRef));
 		return result;
 	}
 
@@ -1639,7 +1647,7 @@ private:
 
 		Reference<ReadCursor> getCursor() {
 			Reference<ReadCursor> cursor = *ppReadCursor;
-			if (!cursor) {
+			if (!cursor || cursor->get().kvBytesRead > SERVER_KNOBS->SQLITE_CURSOR_MAX_LIFETIME_BYTES) {
 				*ppReadCursor = cursor = makeReference<ReadCursor>();
 				cursor->init(conn);
 			}

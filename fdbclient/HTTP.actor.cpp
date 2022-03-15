@@ -207,7 +207,7 @@ ACTOR Future<Void> read_http_response_headers(Reference<IConnection> conn,
 
 // Reads an HTTP response from a network connection
 // If the connection fails while being read the exception will emitted
-// If the response is not parseable or complete in some way, http_bad_response will be thrown
+// If the response is not parsable or complete in some way, http_bad_response will be thrown
 ACTOR Future<Void> read_http_response(Reference<HTTP::Response> r, Reference<IConnection> conn, bool header_only) {
 	state std::string buf;
 	state size_t pos = 0;

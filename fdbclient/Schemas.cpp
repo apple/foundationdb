@@ -25,6 +25,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
 {
    "cluster":{
        "storage_wiggler": {
+		 "wiggle_server_ids":["0ccb4e0feddb55"],
+		 "wiggle_server_addresses": ["127.0.0.1"],
          "primary": {
           	"last_round_start_datetime": "Wed Feb  4 09:36:37 2022 +0000",
 			"last_round_start_timestamp": 63811229797,
@@ -807,6 +809,12 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
              "disabled",
              "aggressive",
              "gradual"
+         ]},
+         "tenant_mode": {
+             "$enum":[
+             "disabled",
+             "optional_experimental",
+             "required_experimental"
          ]}
       },
       "data":{

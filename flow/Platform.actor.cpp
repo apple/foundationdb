@@ -26,7 +26,7 @@
 #endif
 
 #include <errno.h>
-#include "contrib/fmt-8.0.1/include/fmt/format.h"
+#include "contrib/fmt-8.1.1/include/fmt/format.h"
 #include "flow/Platform.h"
 #include "flow/Platform.actor.h"
 #include "flow/Arena.h"
@@ -3231,6 +3231,10 @@ extern "C" void flushAndExit(int exitCode) {
 	flushTraceFileVoid();
 	fflush(stdout);
 	closeTraceFile();
+
+	// Flush all output streams. The original intent is to flush the outfile for contrib/debug_determinism.
+	fflush(nullptr);
+
 #ifdef USE_GCOV
 	__gcov_flush();
 #endif
