@@ -26,6 +26,7 @@
 #include "fdbclient/MultiVersionTransaction.h"
 #include "fdbclient/MultiVersionAssignmentVars.h"
 #include "foundationdb/fdb_c.h"
+#include "foundationdb/fdb_c_internal.h"
 
 int g_api_version = 0;
 
@@ -414,6 +415,14 @@ extern "C" DLLEXPORT FDBFuture* fdb_database_create_snapshot(FDBDatabase* db,
 	return (FDBFuture*)(DB(db)
 	                        ->createSnapshot(StringRef(uid, uid_length), StringRef(snap_command, snap_command_length))
 	                        .extractPtr());
+}
+
+extern "C" DLLEXPORT DatabaseSharedState* fdb_database_create_shared_state(FDBDatabase* db) {
+	return (DatabaseSharedState*)(DB(db)->createSharedState());
+}
+
+extern "C" DLLEXPORT void fdb_database_set_shared_state(FDBDatabase* db, DatabaseSharedState* p) {
+	(DB(db)->setSharedState(p));
 }
 
 // Get network thread busyness (updated every 1s)

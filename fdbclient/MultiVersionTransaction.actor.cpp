@@ -447,6 +447,19 @@ ThreadFuture<Void> DLDatabase::createSnapshot(const StringRef& uid, const String
 	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) { return Void(); });
 }
 
+DatabaseSharedState* DLDatabase::createSharedState() {
+	if (!api->databaseCreateSharedState) {
+		return nullptr;
+	}
+	return api->databaseCreateSharedState(db);
+}
+
+void DLDatabase::setSharedState(DatabaseSharedState* p) {
+	if (api->databaseSetSharedState) {
+		api->databaseSetSharedState(db, p);
+	}
+}
+
 // Get network thread busyness
 double DLDatabase::getMainThreadBusyness() {
 	if (api->databaseGetMainThreadBusyness != nullptr) {
@@ -723,6 +736,7 @@ Reference<IDatabase> DLApi::createDatabase609(const char* clusterFilePath) {
 Reference<IDatabase> DLApi::createDatabase(const char* clusterFilePath) {
 	if (headerVersion >= 610) {
 		FdbCApi::FDBDatabase* db;
+		// can the FdbCApi wrapper signature be changed to add this ptr?
 		throwIfError(api->createDatabase(clusterFilePath, &db));
 		return Reference<IDatabase>(new DLDatabase(api, db));
 	} else {
@@ -1177,7 +1191,13 @@ MultiVersionDatabase::MultiVersionDatabase(MultiVersionApi* api,
   : dbState(new DatabaseState(clusterFilePath, versionMonitorDb)) {
 	dbState->db = db;
 	dbState->dbVar->set(db);
-
+	auto stateMapKey = clusterFilePath;
+	if (api->clusterSharedStateMap.find(stateMapKey) == api->clusterSharedStateMap.end()) {
+		DatabaseSharedState* p = db->createSharedState();
+		api->clusterSharedStateMap[stateMapKey] = p;
+	} else {
+		db->setSharedState(api->clusterSharedStateMap[stateMapKey]);
+	}
 	if (openConnectors) {
 		if (!api->localClientDisabled) {
 			dbState->addClient(api->getLocalClient());
@@ -1285,6 +1305,19 @@ ThreadFuture<Void> MultiVersionDatabase::forceRecoveryWithDataLoss(const StringR
 ThreadFuture<Void> MultiVersionDatabase::createSnapshot(const StringRef& uid, const StringRef& snapshot_command) {
 	auto f = dbState->db ? dbState->db->createSnapshot(uid, snapshot_command) : ThreadFuture<Void>(Never());
 	return abortableFuture(f, dbState->dbVar->get().onChange);
+}
+
+DatabaseSharedState* MultiVersionDatabase::createSharedState() {
+	if (dbState->db) {
+		return dbState->db->createSharedState();
+	}
+	return nullptr;
+}
+
+void MultiVersionDatabase::setSharedState(DatabaseSharedState* p) {
+	if (dbState->db) {
+		dbState->db->setSharedState(p);
+	}
 }
 
 // Get network thread busyness
@@ -1504,6 +1537,14 @@ void MultiVersionDatabase::DatabaseState::updateDatabase(Reference<IDatabase> ne
 		}
 	}
 
+	auto stateMapKey = clusterFilePath;
+	if (MultiVersionApi::api->clusterSharedStateMap.find(stateMapKey) ==
+	    MultiVersionApi::api->clusterSharedStateMap.end()) {
+		DatabaseSharedState* p = db->createSharedState();
+		MultiVersionApi::api->clusterSharedStateMap[stateMapKey] = p;
+	} else {
+		db->setSharedState(MultiVersionApi::api->clusterSharedStateMap[stateMapKey]);
+	}
 	dbVar->set(db);
 
 	ASSERT(protocolVersionMonitor.isValid());

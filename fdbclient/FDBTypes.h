@@ -1329,6 +1329,21 @@ struct TenantMode {
 
 	uint32_t mode;
 };
+struct GRVCacheSpace {
+	Version cachedReadVersion;
+	double lastGrvTime;
+
+	GRVCacheSpace() : cachedReadVersion(Version(0)), lastGrvTime(0.0) {}
+};
+
+// This structure can be extended in the future to include additional features that required a shared state
+struct DatabaseSharedState {
+	Mutex mutexLock;
+	GRVCacheSpace grvCacheSpace;
+	int refCount;
+
+	DatabaseSharedState() : mutexLock(Mutex()), grvCacheSpace(GRVCacheSpace()), refCount(0) {}
+};
 
 inline bool isValidPerpetualStorageWiggleLocality(std::string locality) {
 	int pos = locality.find(':');
