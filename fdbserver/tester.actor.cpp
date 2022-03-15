@@ -1355,9 +1355,9 @@ std::vector<TestSpec> readTOMLTests_(std::string fileName) {
 						parsedValue = SERVER_KNOBS->parseKnobValue(key, value);
 					}
 					if (std::get_if<NoKnobFound>(&parsedValue)) {
-						TraceEvent(SevErrro, "TestSpecUnrecognizedKnob")
-							.detail("KnobName", key)
-							.detail("OverrideValue", value);
+						TraceEvent(SevError, "TestSpecUnrecognizedKnob")
+						    .detail("KnobName", key)
+						    .detail("OverrideValue", value);
 						continue;
 					}
 					spec.overrideKnobs.set(key, parsedValue);
