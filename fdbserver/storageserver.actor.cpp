@@ -2469,7 +2469,14 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 		else
 			readBegin = range.begin;
 
-		vCurrent = view.lower_bound(readBegin);
+		if (vCurrent) {
+			// We can get first greater or equal from the result of lastLassOrEqual
+			if (vCurrent.key() != readBegin) {
+				++vCurrent;
+			}
+		} else {
+			vCurrent = view.lower_bound(readBegin);
+		}
 
 		while (limit > 0 && *pLimitBytes > 0 && readBegin < range.end) {
 			ASSERT(!vCurrent || vCurrent.key() >= readBegin);
