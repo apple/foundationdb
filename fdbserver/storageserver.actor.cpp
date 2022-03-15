@@ -5321,8 +5321,13 @@ ACTOR Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 
 	TraceEvent(SevDebug, "FetchShardComplete", data->thisServerID).detail("MoveInShard", shard->toString());
 
-	ASSERT(data->shards[shard->range.begin]->assigned() &&
-	       data->shards[shard->range.begin]->keys == shard->range); // We aren't changing whether the shard is assigned
+	wait(delay(1, TaskPriority::FetchKeys));
+
+	const Reference<ShardInfo>& currentShard = data->shards[shard->range.begin];
+	if (!currentShard->moveInShard || currentShard->moveInShard->meta->id != shard->id) {
+		throw operation_cancelled();
+	}
+
 	data->newestAvailableVersion.insert(shard->range, latestVersion);
 	moveInShard->readWrite.send(Void());
 	// TODO: Delete MoveInShard.
