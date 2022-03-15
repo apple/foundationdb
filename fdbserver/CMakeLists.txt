@@ -117,6 +117,8 @@ set(FDBSERVER_SRCS
   ServerDBInfo.actor.h
   ServerDBInfo.h
   SigStack.cpp
+  SimEncryptVaultProxy.actor.h
+  SimEncryptVaultProxy.actor.cpp
   SimpleConfigConsumer.actor.cpp
   SimpleConfigConsumer.h
   SimulatedCluster.actor.cpp

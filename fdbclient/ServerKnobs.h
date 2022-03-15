@@ -615,6 +615,8 @@ public:
 	bool ENABLE_CLEAR_RANGE_EAGER_READS;
 	bool QUICK_GET_VALUE_FALLBACK;
 	bool QUICK_GET_KEY_VALUES_FALLBACK;
+	int QUICK_GET_KEY_VALUES_LIMIT;
+	int QUICK_GET_KEY_VALUES_LIMIT_BYTES;
 
 	// Wait Failure
 	int MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS;
@@ -763,7 +765,7 @@ public:
 	std::string CLUSTER_RECOVERY_EVENT_NAME_PREFIX;
 
 	// encrypt key proxy
-	bool ENABLE_ENCRYPT_KEY_PROXY;
+	bool ENABLE_ENCRYPTION;
 
 	// blob granule stuff
 	// FIXME: configure url with database configuration instead of knob eventually

@@ -1,9 +1,9 @@
 /*
- * folly_memcpy.h
+ * MappedRangeResultInfo.java
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,16 +18,12 @@
  * limitations under the License.
  */
 
-#ifndef FLOW_FOLLY_MEMCPY_H
-#define FLOW_FOLLY_MEMCPY_H
-#pragma once
+package com.apple.foundationdb;
 
-#if (defined(__linux__) || defined(__FreeBSD__)) && defined(__AVX__)
+class MappedRangeResultInfo {
+	MappedRangeResult get() { return f.getResults(); }
 
-extern "C" {
-void* folly_memcpy(void* dst, const void* src, uint32_t length);
+	MappedRangeResultInfo(FutureMappedResults f) { this.f = f; }
+
+	private FutureMappedResults f;
 }
-
-#endif // linux or bsd and avx
-
-#endif

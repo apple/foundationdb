@@ -475,6 +475,7 @@ using KeyRange = Standalone<KeyRangeRef>;
 using KeyValue = Standalone<KeyValueRef>;
 using KeySelector = Standalone<struct KeySelectorRef>;
 using RangeResult = Standalone<struct RangeResultRef>;
+using MappedRangeResult = Standalone<struct MappedRangeResultRef>;
 
 enum { invalidVersion = -1, latestVersion = -2, MAX_VERSION = std::numeric_limits<int64_t>::max() };
 
@@ -616,6 +617,8 @@ KeyRangeWith<Val> keyRangeWith(const KeyRangeRef& range, const Val& value) {
 	return KeyRangeWith<Val>(range, value);
 }
 
+struct MappedKeyValueRef;
+
 struct GetRangeLimits {
 	enum { ROW_LIMIT_UNLIMITED = -1, BYTE_LIMIT_UNLIMITED = -1 };
 
@@ -629,6 +632,8 @@ struct GetRangeLimits {
 
 	void decrement(VectorRef<KeyValueRef> const& data);
 	void decrement(KeyValueRef const& data);
+	void decrement(VectorRef<MappedKeyValueRef> const& data);
+	void decrement(MappedKeyValueRef const& data);
 
 	// True if either the row or byte limit has been reached
 	bool isReached();
@@ -686,6 +691,114 @@ template <>
 struct Traceable<RangeResultRef> : std::true_type {
 	static std::string toString(const RangeResultRef& value) {
 		return Traceable<VectorRef<KeyValueRef>>::toString(value);
+	}
+};
+
+// Similar to KeyValueRef, but result can be empty.
+struct GetValueReqAndResultRef {
+	KeyRef key;
+	Optional<ValueRef> result;
+
+	GetValueReqAndResultRef() {}
+	GetValueReqAndResultRef(Arena& a, const GetValueReqAndResultRef& copyFrom)
+	  : key(a, copyFrom.key), result(a, copyFrom.result) {}
+
+	bool operator==(const GetValueReqAndResultRef& rhs) const { return key == rhs.key && result == rhs.result; }
+	bool operator!=(const GetValueReqAndResultRef& rhs) const { return !(rhs == *this); }
+	int expectedSize() const { return key.expectedSize() + result.expectedSize(); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, key, result);
+	}
+};
+
+struct GetRangeReqAndResultRef {
+	KeySelectorRef begin, end;
+	RangeResultRef result;
+
+	GetRangeReqAndResultRef() {}
+	//	KeyValueRef(const KeyRef& key, const ValueRef& value) : key(key), value(value) {}
+	GetRangeReqAndResultRef(Arena& a, const GetRangeReqAndResultRef& copyFrom)
+	  : begin(a, copyFrom.begin), end(a, copyFrom.end), result(a, copyFrom.result) {}
+
+	bool operator==(const GetRangeReqAndResultRef& rhs) const {
+		return begin == rhs.begin && end == rhs.end && result == rhs.result;
+	}
+	bool operator!=(const GetRangeReqAndResultRef& rhs) const { return !(rhs == *this); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, begin, end, result);
+	}
+};
+
+using MappedReqAndResultRef = std::variant<GetValueReqAndResultRef, GetRangeReqAndResultRef>;
+
+struct MappedKeyValueRef : KeyValueRef {
+	// Save the original key value at the base (KeyValueRef).
+
+	MappedReqAndResultRef reqAndResult;
+
+	MappedKeyValueRef() = default;
+	MappedKeyValueRef(Arena& a, const MappedKeyValueRef& copyFrom) : KeyValueRef(a, copyFrom) {
+		const auto& reqAndResultCopyFrom = copyFrom.reqAndResult;
+		if (std::holds_alternative<GetValueReqAndResultRef>(reqAndResultCopyFrom)) {
+			auto getValue = std::get<GetValueReqAndResultRef>(reqAndResultCopyFrom);
+			reqAndResult = GetValueReqAndResultRef(a, getValue);
+		} else if (std::holds_alternative<GetRangeReqAndResultRef>(reqAndResultCopyFrom)) {
+			auto getRange = std::get<GetRangeReqAndResultRef>(reqAndResultCopyFrom);
+			reqAndResult = GetRangeReqAndResultRef(a, getRange);
+		} else {
+			throw internal_error();
+		}
+	}
+
+	bool operator==(const MappedKeyValueRef& rhs) const {
+		return static_cast<const KeyValueRef&>(*this) == static_cast<const KeyValueRef&>(rhs) &&
+		       reqAndResult == rhs.reqAndResult;
+	}
+	bool operator!=(const MappedKeyValueRef& rhs) const { return !(rhs == *this); }
+
+	// It relies on the base to provide the expectedSize. TODO: Consider add the underlying request and key values into
+	// expected size?
+	//	int expectedSize() const { return ((KeyValueRef*)this)->expectedSisze() + reqA }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, ((KeyValueRef&)*this), reqAndResult);
+	}
+};
+
+struct MappedRangeResultRef : VectorRef<MappedKeyValueRef> {
+	// Additional information on range result. See comments on RangeResultRef.
+	bool more;
+	Optional<KeyRef> readThrough;
+	bool readToBegin;
+	bool readThroughEnd;
+
+	MappedRangeResultRef() : more(false), readToBegin(false), readThroughEnd(false) {}
+	MappedRangeResultRef(Arena& p, const MappedRangeResultRef& toCopy)
+	  : VectorRef<MappedKeyValueRef>(p, toCopy), more(toCopy.more),
+	    readThrough(toCopy.readThrough.present() ? KeyRef(p, toCopy.readThrough.get()) : Optional<KeyRef>()),
+	    readToBegin(toCopy.readToBegin), readThroughEnd(toCopy.readThroughEnd) {}
+	MappedRangeResultRef(const VectorRef<MappedKeyValueRef>& value,
+	                     bool more,
+	                     Optional<KeyRef> readThrough = Optional<KeyRef>())
+	  : VectorRef<MappedKeyValueRef>(value), more(more), readThrough(readThrough), readToBegin(false),
+	    readThroughEnd(false) {}
+	MappedRangeResultRef(bool readToBegin, bool readThroughEnd)
+	  : more(false), readToBegin(readToBegin), readThroughEnd(readThroughEnd) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, ((VectorRef<MappedKeyValueRef>&)*this), more, readThrough, readToBegin, readThroughEnd);
+	}
+
+	std::string toString() const {
+		return "more:" + std::to_string(more) +
+		       " readThrough:" + (readThrough.present() ? readThrough.get().toString() : "[unset]") +
+		       " readToBegin:" + std::to_string(readToBegin) + " readThroughEnd:" + std::to_string(readThroughEnd);
 	}
 };
 

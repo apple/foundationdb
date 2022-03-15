@@ -37,7 +37,7 @@ set(FDBRPC_SRCS
   TraceFileIO.cpp
   TSSComparison.h)
 
-if(WITH_TLS AND NOT WIN32)
+if(WITH_TLS)
   set(FDBRPC_SRCS
     ${FDBRPC_SRCS}
     AsyncFileEncrypted.actor.cpp)

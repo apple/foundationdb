@@ -51,12 +51,12 @@ struct TSSMetrics : ReferenceCounted<TSSMetrics>, NonCopyable {
 	ContinuousSample<double> SSgetValueLatency;
 	ContinuousSample<double> SSgetKeyLatency;
 	ContinuousSample<double> SSgetKeyValuesLatency;
-	ContinuousSample<double> SSgetKeyValuesAndFlatMapLatency;
+	ContinuousSample<double> SSgetMappedKeyValuesLatency;
 
 	ContinuousSample<double> TSSgetValueLatency;
 	ContinuousSample<double> TSSgetKeyLatency;
 	ContinuousSample<double> TSSgetKeyValuesLatency;
-	ContinuousSample<double> TSSgetKeyValuesAndFlatMapLatency;
+	ContinuousSample<double> TSSgetMappedKeyValuesLatency;
 
 	std::unordered_map<int, uint64_t> ssErrorsByCode;
 	std::unordered_map<int, uint64_t> tssErrorsByCode;
@@ -90,12 +90,12 @@ struct TSSMetrics : ReferenceCounted<TSSMetrics>, NonCopyable {
 		SSgetValueLatency.clear();
 		SSgetKeyLatency.clear();
 		SSgetKeyValuesLatency.clear();
-		SSgetKeyValuesAndFlatMapLatency.clear();
+		SSgetMappedKeyValuesLatency.clear();
 
 		TSSgetValueLatency.clear();
 		TSSgetKeyLatency.clear();
 		TSSgetKeyValuesLatency.clear();
-		TSSgetKeyValuesAndFlatMapLatency.clear();
+		TSSgetMappedKeyValuesLatency.clear();
 
 		tssErrorsByCode.clear();
 		ssErrorsByCode.clear();
@@ -107,8 +107,8 @@ struct TSSMetrics : ReferenceCounted<TSSMetrics>, NonCopyable {
 	  : cc("TSSClientMetrics"), requests("Requests", cc), streamComparisons("StreamComparisons", cc),
 	    ssErrors("SSErrors", cc), tssErrors("TSSErrors", cc), tssTimeouts("TSSTimeouts", cc),
 	    mismatches("Mismatches", cc), SSgetValueLatency(1000), SSgetKeyLatency(1000), SSgetKeyValuesLatency(1000),
-	    SSgetKeyValuesAndFlatMapLatency(1000), TSSgetValueLatency(1000), TSSgetKeyLatency(1000),
-	    TSSgetKeyValuesLatency(1000), TSSgetKeyValuesAndFlatMapLatency(1000) {}
+	    SSgetMappedKeyValuesLatency(1000), TSSgetValueLatency(1000), TSSgetKeyLatency(1000),
+	    TSSgetKeyValuesLatency(1000), TSSgetMappedKeyValuesLatency(1000) {}
 };
 
 template <class Rep>

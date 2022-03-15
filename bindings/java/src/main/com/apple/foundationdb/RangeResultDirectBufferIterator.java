@@ -1,5 +1,5 @@
 /*
- * DirectBufferIterator.java
+ * RangeResultDirectBufferIterator.java
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -28,61 +28,35 @@ import java.util.NoSuchElementException;
 
 /**
  * Holds the direct buffer that is shared with JNI wrapper. A typical usage is as follows:
- * 
+ *
  * The serialization format of result is =>
  *     [int keyCount, boolean more, ListOf<(int keyLen, int valueLen, byte[] key, byte[] value)>]
  */
-abstract class DirectBufferIterator implements AutoCloseable {
-	protected ByteBuffer byteBuffer;
-	protected int current = 0;
-	protected int keyCount = -1;
-	protected boolean more = false;
+class RangeResultDirectBufferIterator extends DirectBufferIterator implements Iterator<KeyValue> {
 
-	public DirectBufferIterator(ByteBuffer buffer) {
-		byteBuffer = buffer;
-		byteBuffer.order(ByteOrder.nativeOrder());
+	RangeResultDirectBufferIterator(ByteBuffer buffer) { super(buffer); }
+
+	@Override
+	public boolean hasNext() {
+		return super.hasNext();
 	}
 
 	@Override
-	public void close() {
-		if (byteBuffer != null) {
-			DirectBufferPool.getInstance().add(byteBuffer);
-			byteBuffer = null;
+	public KeyValue next() {
+		assert (hasResultReady()); // Must be called once its ready.
+		if (!hasNext()) {
+			throw new NoSuchElementException();
 		}
-	}
 
-	public boolean hasResultReady() {
-		return keyCount > -1;
-	}
+		final int keyLen = byteBuffer.getInt();
+		final int valueLen = byteBuffer.getInt();
+		byte[] key = new byte[keyLen];
+		byteBuffer.get(key);
 
-	public boolean hasNext() {
-		assert (hasResultReady());
-		return current < keyCount;
-	}
+		byte[] value = new byte[valueLen];
+		byteBuffer.get(value);
 
-	public ByteBuffer getBuffer() {
-		return byteBuffer;
-	}
-
-	public int count() {
-		assert (hasResultReady());
-		return keyCount;
-	}
-
-	public boolean hasMore() {
-		assert (hasResultReady());
-		return more;
-	}
-
-	public int currentIndex() {
-		return current;
-	}
-
-	public void readResultsSummary() {
-		byteBuffer.rewind();
-		byteBuffer.position(0);
-
-		keyCount = byteBuffer.getInt();
-		more = byteBuffer.getInt() > 0;
+		current += 1;
+		return new KeyValue(key, value);
 	}
 }
