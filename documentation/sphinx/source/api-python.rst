@@ -7,6 +7,7 @@
 .. |database-type| replace:: ``Database``
 .. |database-class| replace:: :class:`Database`
 .. |database-auto| replace:: the :func:`@fdb.transactional <transactional>` decorator
+.. |tenant-type| replace:: FIXME
 .. |transaction-class| replace:: :class:`Transaction`
 .. |get-key-func| replace:: :func:`Transaction.get_key`
 .. |get-range-func| replace:: :func:`Transaction.get_range`

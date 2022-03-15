@@ -8,6 +8,7 @@
 .. |database-type| replace:: ``Database``
 .. |database-class| replace:: ``Database``
 .. |database-auto| replace:: FIXME
+.. |tenant-type| replace:: FIXME
 .. |transaction-class| replace:: ``Transaction``
 .. |get-key-func| replace:: get_key()
 .. |get-range-func| replace:: get_range()

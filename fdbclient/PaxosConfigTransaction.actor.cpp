@@ -461,6 +461,6 @@ PaxosConfigTransaction::PaxosConfigTransaction() = default;
 
 PaxosConfigTransaction::~PaxosConfigTransaction() = default;
 
-void PaxosConfigTransaction::setDatabase(Database const& cx) {
+void PaxosConfigTransaction::construct(Database const& cx) {
 	impl = PImpl<PaxosConfigTransactionImpl>::create(cx);
 }

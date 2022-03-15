@@ -4450,7 +4450,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 		// FIXME: The client cache does not notice when servers are added to a team. To read from a local storage server
 		// we must refresh the cache manually.
-		data->cx->invalidateCache(keys);
+		data->cx->invalidateCache(Key(), keys);
 
 		loop {
 			state Transaction tr(data->cx);
