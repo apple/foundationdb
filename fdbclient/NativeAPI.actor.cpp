@@ -3900,7 +3900,7 @@ int64_t inline getRangeResultFamilyBytes(MappedRangeResultRef result) {
 }
 
 // TODO: Client should add mapped keys to conflict ranges.
-ACTOR template <class RangeResultFamily> // RangeResult or MappedRangeResult
+template <class RangeResultFamily> // RangeResult or MappedRangeResult
 void getRangeFinished(Reference<TransactionState> trState,
                       double startTime,
                       KeySelector begin,

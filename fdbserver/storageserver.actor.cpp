@@ -2385,8 +2385,12 @@ ACTOR Future<GetValueReqAndResultRef> quickGetValue(StorageServer* data,
 	if (data->shards[key]->isReadable()) {
 		try {
 			// TODO: Use a lower level API may be better? Or tweak priorities?
-			GetValueRequest req(
-			    pOriginalReq->spanContext, TenantInfo(), key, version, pOriginalReq->tags, pOriginalReq->debugID);
+			GetValueRequest req(pOriginalReq->spanContext,
+			                    pOriginalReq->tenantInfo,
+			                    key,
+			                    version,
+			                    pOriginalReq->tags,
+			                    pOriginalReq->debugID);
 			// Note that it does not use readGuard to avoid server being overloaded here. Throttling is enforced at the
 			// original request level, rather than individual underlying lookups. The reason is that throttle any
 			// individual underlying lookup will fail the original request, which is not productive.
@@ -2406,7 +2410,7 @@ ACTOR Future<GetValueReqAndResultRef> quickGetValue(StorageServer* data,
 
 	++data->counters.quickGetValueMiss;
 	if (SERVER_KNOBS->QUICK_GET_VALUE_FALLBACK) {
-		state Transaction tr(data->cx);
+		state Transaction tr(data->cx, pOriginalReq->tenantInfo.name);
 		tr.setVersion(version);
 		// TODO: is DefaultPromiseEndpoint the best priority for this?
 		tr.trState->taskID = TaskPriority::DefaultPromiseEndpoint;
@@ -2977,6 +2981,7 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 		req.begin = getRange.begin;
 		req.end = getRange.end;
 		req.version = version;
+		req.tenantInfo = pOriginalReq->tenantInfo;
 		// TODO: Validate when the underlying range query exceeds the limit.
 		// TODO: Use remainingLimit, remainingLimitBytes rather than separate knobs.
 		req.limit = SERVER_KNOBS->QUICK_GET_KEY_VALUES_LIMIT;
@@ -3004,7 +3009,7 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 
 	++data->counters.quickGetKeyValuesMiss;
 	if (SERVER_KNOBS->QUICK_GET_KEY_VALUES_FALLBACK) {
-		state Transaction tr(data->cx);
+		state Transaction tr(data->cx, pOriginalReq->tenantInfo.name);
 		tr.setVersion(version);
 		// TODO: is DefaultPromiseEndpoint the best priority for this?
 		tr.trState->taskID = TaskPriority::DefaultPromiseEndpoint;
@@ -3019,10 +3024,7 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 	}
 };
 
-Key constructMappedKey(KeyValueRef* keyValue,
-                       Tuple& mappedKeyFormatTuple,
-                       bool& isRangeQuery,
-                       Optional<Key> tenantPrefix) {
+Key constructMappedKey(KeyValueRef* keyValue, Tuple& mappedKeyFormatTuple, bool& isRangeQuery) {
 	// Lazily parse key and/or value to tuple because they may not need to be a tuple if not used.
 	Optional<Tuple> keyTuple;
 	Optional<Tuple> valueTuple;
@@ -3112,13 +3114,7 @@ Key constructMappedKey(KeyValueRef* keyValue,
 		}
 	}
 
-	KeyRef mappedKey = mappedKeyTuple.pack();
-
-	if (tenantPrefix.present()) {
-		return mappedKey.withPrefix(tenantPrefix.get());
-	}
-
-	return mappedKey;
+	return mappedKeyTuple.pack();
 }
 
 TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
@@ -3134,7 +3130,7 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 		                        .append("{...}"_sr);
 
 		bool isRangeQuery = false;
-		Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery, Optional<Key>());
+		Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery);
 
 		Key expectedMappedKey = Tuple()
 		                            .append("normal"_sr)
@@ -3147,32 +3143,10 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 		ASSERT(isRangeQuery == true);
 	}
 	{
-		Tuple mapperTuple = Tuple()
-		                        .append("normal"_sr)
-		                        .append("{{escaped}}"_sr)
-		                        .append("{K[2]}"_sr)
-		                        .append("{V[0]}"_sr)
-		                        .append("{...}"_sr);
-
-		bool isRangeQuery = false;
-		Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery, TenantMapEntry(1, "foo"_sr).prefix);
-
-		Key expectedMappedKey = Tuple()
-		                            .append("normal"_sr)
-		                            .append("{escaped}"_sr)
-		                            .append("key-2"_sr)
-		                            .append("value-0"_sr)
-		                            .getDataAsStandalone()
-		                            .withPrefix("foo\x00\x00\x00\x00\x00\x00\x00\x01"_sr);
-		//		std::cout << printable(mappedKey) << " == " << printable(expectedMappedKey) << std::endl;
-		ASSERT(mappedKey.compare(expectedMappedKey) == 0);
-		ASSERT(isRangeQuery == true);
-	}
-	{
 		Tuple mapperTuple = Tuple().append("{{{{}}"_sr).append("}}"_sr);
 
 		bool isRangeQuery = false;
-		Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery, Optional<Key>());
+		Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery);
 
 		Key expectedMappedKey = Tuple().append("{{}"_sr).append("}"_sr).getDataAsStandalone();
 		//		std::cout << printable(mappedKey) << " == " << printable(expectedMappedKey) << std::endl;
@@ -3183,7 +3157,7 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 		Tuple mapperTuple = Tuple().append("{{{{}}"_sr).append("}}"_sr);
 
 		bool isRangeQuery = false;
-		Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery, Optional<Key>());
+		Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery);
 
 		Key expectedMappedKey = Tuple().append("{{}"_sr).append("}"_sr).getDataAsStandalone();
 		//		std::cout << printable(mappedKey) << " == " << printable(expectedMappedKey) << std::endl;
@@ -3195,7 +3169,7 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 		bool isRangeQuery = false;
 		state bool throwException = false;
 		try {
-			Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery, Optional<Key>());
+			Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery);
 		} catch (Error& e) {
 			ASSERT(e.code() == error_code_mapper_bad_index);
 			throwException = true;
@@ -3207,7 +3181,7 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 		bool isRangeQuery = false;
 		state bool throwException2 = false;
 		try {
-			Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery, Optional<Key>());
+			Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery);
 		} catch (Error& e) {
 			ASSERT(e.code() == error_code_mapper_bad_range_decriptor);
 			throwException2 = true;
@@ -3219,7 +3193,7 @@ TEST_CASE("/fdbserver/storageserver/constructMappedKey") {
 		bool isRangeQuery = false;
 		state bool throwException3 = false;
 		try {
-			Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery, Optional<Key>());
+			Key mappedKey = constructMappedKey(&kvr, mapperTuple, isRangeQuery);
 		} catch (Error& e) {
 			ASSERT(e.code() == error_code_mapper_bad_index);
 			throwException3 = true;
@@ -3251,7 +3225,7 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 		kvm.value = it->value;
 
 		state bool isRangeQuery = false;
-		state Key mappedKey = constructMappedKey(it, mappedKeyFormatTuple, isRangeQuery, tenantPrefix);
+		state Key mappedKey = constructMappedKey(it, mappedKeyFormatTuple, isRangeQuery);
 		// Make sure the mappedKey is always available, so that it's good even we want to get key asynchronously.
 		result.arena.dependsOn(mappedKey.arena());
 
@@ -3262,12 +3236,10 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 			// Use the mappedKey as the prefix of the range query.
 			GetRangeReqAndResultRef getRange =
 			    wait(quickGetKeyValues(data, mappedKey, input.version, &(result.arena), pOriginalReq));
-			// TODO: Remove tenant prefixes in the keys if they haven't been removed?
 			kvm.reqAndResult = getRange;
 		} else {
 			GetValueReqAndResultRef getValue =
 			    wait(quickGetValue(data, mappedKey, input.version, &(result.arena), pOriginalReq));
-			// TODO: Remove tenant prefixes in the keys if they haven't been removed?
 			kvm.reqAndResult = getValue;
 		}
 		result.data.push_back(result.arena, kvm);
