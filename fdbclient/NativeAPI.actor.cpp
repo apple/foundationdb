@@ -234,7 +234,7 @@ void DatabaseContext::getLatestCommitVersions(const Reference<LocationInfo>& loc
 		TraceEvent(SevWarn, "GetLatestCommitVersions")
 		    .detail("ReadVersion", readVersion)
 		    .detail("VersionVector", ssVersionVectorCache.toString());
-		throw transaction_too_old();
+		throw stale_version_vector();
 	}
 
 	std::map<Version, std::set<Tag>> versionMap; // order the versions to be returned
@@ -1279,11 +1279,11 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
     transactionsProcessBehind("ProcessBehind", cc), transactionsThrottled("Throttled", cc),
     transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
     transactionGrvFullBatches("NumGrvFullBatches", cc), transactionGrvTimedOutBatches("NumGrvTimedOutBatches", cc),
-    latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000),
-    bytesPerCommit(1000), outstandingWatches(0), transactionTracingSample(false), taskID(taskID),
-    clientInfo(clientInfo), clientInfoMonitor(clientInfoMonitor), coordinator(coordinator), apiVersion(apiVersion),
-    mvCacheInsertLocation(0), healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0),
-    smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
+    transactionsStaleVersionVectors("NumStaleVersionVectors", cc), latencies(1000), readLatencies(1000),
+    commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), outstandingWatches(0),
+    transactionTracingSample(false), taskID(taskID), clientInfo(clientInfo), clientInfoMonitor(clientInfoMonitor),
+    coordinator(coordinator), apiVersion(apiVersion), mvCacheInsertLocation(0), healthMetricsLastUpdated(0),
+    detailedHealthMetricsLastUpdated(0), smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
     specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)),
     connectToDatabaseEventCacheHolder(format("ConnectToDatabase/%s", dbId.toString().c_str())) {
 	dbId = deterministicRandom()->randomUniqueID();
@@ -1536,8 +1536,9 @@ DatabaseContext::DatabaseContext(const Error& err)
     transactionsProcessBehind("ProcessBehind", cc), transactionsThrottled("Throttled", cc),
     transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
     transactionGrvFullBatches("NumGrvFullBatches", cc), transactionGrvTimedOutBatches("NumGrvTimedOutBatches", cc),
-    latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000),
-    bytesPerCommit(1000), transactionTracingSample(false), smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
+    transactionsStaleVersionVectors("NumStaleVersionVectors", cc), latencies(1000), readLatencies(1000),
+    commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000),
+    transactionTracingSample(false), smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
     connectToDatabaseEventCacheHolder(format("ConnectToDatabase/%s", dbId.toString().c_str())) {}
 
 // Static constructor used by server processes to create a DatabaseContext
@@ -6227,11 +6228,14 @@ Future<Void> Transaction::onError(Error const& e) {
 		reset();
 		return delay(backoff, trState->taskID);
 	}
-	if (e.code() == error_code_transaction_too_old || e.code() == error_code_future_version) {
+	if (e.code() == error_code_transaction_too_old || e.code() == error_code_future_version ||
+	    e.code() == error_code_stale_version_vector) {
 		if (e.code() == error_code_transaction_too_old)
 			++trState->cx->transactionsTooOld;
 		else if (e.code() == error_code_future_version)
 			++trState->cx->transactionsFutureVersions;
+		else if (e.code() == error_code_stale_version_vector)
+			++trState->cx->transactionsStaleVersionVectors;
 
 		double maxBackoff = trState->options.maxBackoff;
 		reset();
