@@ -2092,7 +2092,7 @@ ACTOR Future<GranuleFiles> loadHistoryFiles(Reference<BlobManagerData> bmData, U
  * also removes the history entry for this granule from the system keyspace
  * TODO: ensure cannot fully delete granule that is still splitting!
  */
-ACTOR Future<Void> fullyDeleteGranule(Reference<BlobManagerData> self, UID granuleId, KeyRef historyKey) {
+ACTOR Future<Void> fullyDeleteGranule(Reference<BlobManagerData> self, UID granuleId, Key historyKey) {
 	if (BM_DEBUG) {
 		fmt::print("Fully deleting granule {0}: init\n", granuleId.toString());
 	}
@@ -2194,8 +2194,9 @@ ACTOR Future<Void> partiallyDeleteGranule(Reference<BlobManagerData> self, UID g
 		}
 	}
 
-	// we would have only partially deleted the granule if such a snapshot existed
-	ASSERT(latestSnapshotVersion != invalidVersion);
+	if (latestSnapshotVersion == invalidVersion) {
+		return Void();
+	}
 
 	// delete all delta files older than latestSnapshotVersion
 	for (auto deltaFile : files.deltaFiles) {
@@ -2277,7 +2278,7 @@ ACTOR Future<Void> pruneRange(Reference<BlobManagerData> self, KeyRangeRef range
 	state std::queue<std::tuple<KeyRange, Version, Version>> historyEntryQueue;
 
 	// stacks of <granuleId, historyKey> and <granuleId> to track which granules to delete
-	state std::vector<std::tuple<UID, KeyRef>> toFullyDelete;
+	state std::vector<std::tuple<UID, Key>> toFullyDelete;
 	state std::vector<UID> toPartiallyDelete;
 
 	// track which granules we have already added to traversal
@@ -2443,7 +2444,7 @@ ACTOR Future<Void> pruneRange(Reference<BlobManagerData> self, KeyRangeRef range
 	}
 	for (i = toFullyDelete.size() - 1; i >= 0; --i) {
 		UID granuleId;
-		KeyRef historyKey;
+		Key historyKey;
 		std::tie(granuleId, historyKey) = toFullyDelete[i];
 		// FIXME: consider batching into a single txn (need to take care of txn size limit)
 		if (BM_DEBUG) {

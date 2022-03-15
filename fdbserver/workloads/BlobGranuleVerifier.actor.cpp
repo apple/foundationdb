@@ -39,8 +39,6 @@
 
 #define BGV_DEBUG true
 
-Version dbgPruneVersion = 0;
-
 /*
  * This workload is designed to verify the correctness of the blob data produced by the blob workers.
  * As a read-only validation workload, it can piggyback off of other write or read/write workloads.
@@ -64,6 +62,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	int64_t rowsRead = 0;
 	int64_t bytesRead = 0;
 	std::vector<Future<Void>> clients;
+	bool enablePruning;
 
 	DatabaseConfiguration config;
 
@@ -79,6 +78,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		timeTravelLimit = getOption(options, LiteralStringRef("timeTravelLimit"), testDuration);
 		timeTravelBufferSize = getOption(options, LiteralStringRef("timeTravelBufferSize"), 100000000);
 		threads = getOption(options, LiteralStringRef("threads"), 1);
+		enablePruning = getOption(options, LiteralStringRef("enablePruning"), false /*sharedRandomNumber % 2 == 0*/);
 		ASSERT(threads >= 1);
 
 		if (BGV_DEBUG) {
@@ -454,13 +454,19 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 
 					try {
 						state Version newPruneVersion = 0;
-						state bool doPruning =
-						    allowPruning && prevPruneVersion < oldRead.v && deterministicRandom()->random01() < 0.5;
+						state bool doPruning = allowPruning && deterministicRandom()->random01() < 0.5;
 						if (doPruning) {
-							newPruneVersion = deterministicRandom()->randomInt64(prevPruneVersion, oldRead.v);
-							prevPruneVersion = std::max(prevPruneVersion, newPruneVersion);
-							dbgPruneVersion = prevPruneVersion;
-							wait(self->pruneAtVersion(cx, normalKeys, newPruneVersion, false));
+							Version maxPruneVersion = oldRead.v;
+							for (auto& it : timeTravelChecks) {
+								maxPruneVersion = std::min(it.second.v, maxPruneVersion);
+							}
+							if (prevPruneVersion < maxPruneVersion) {
+								newPruneVersion = deterministicRandom()->randomInt64(prevPruneVersion, maxPruneVersion);
+								prevPruneVersion = std::max(prevPruneVersion, newPruneVersion);
+								wait(self->pruneAtVersion(cx, normalKeys, newPruneVersion, false));
+							} else {
+								doPruning = false;
+							}
 						}
 						std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> reReadResult =
 						    wait(self->readFromBlob(cx, self, oldRead.range, oldRead.v));
@@ -487,7 +493,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 							}
 						}
 					} catch (Error& e) {
-						if (e.code() == error_code_blob_granule_transaction_too_old && oldRead.v >= dbgPruneVersion) {
+						if (e.code() == error_code_blob_granule_transaction_too_old) {
 							self->timeTravelTooOld++;
 							// TODO: add debugging info for when this is a failure
 						}
@@ -532,15 +538,14 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	Future<Void> start(Database const& cx) override {
 		clients.reserve(threads + 1);
 		clients.push_back(timeout(findGranules(cx, this), testDuration, Void()));
-		for (int i = 0; i < threads; i++) {
+		if (enablePruning && clientId == 0) {
 			clients.push_back(
-			    timeout(reportErrors(
-			                // TODO change back
-			                verifyGranules(
-			                    cx, this, false /*clientId == 0 && i == 0 && deterministicRandom()->random01() < 0.5*/),
-			                "BlobGranuleVerifier"),
-			            testDuration,
-			            Void()));
+			    timeout(reportErrors(verifyGranules(cx, this, true), "BlobGranuleVerifier"), testDuration, Void()));
+		} else if (!enablePruning) {
+			for (int i = 0; i < threads; i++) {
+				clients.push_back(timeout(
+				    reportErrors(verifyGranules(cx, this, false), "BlobGranuleVerifier"), testDuration, Void()));
+			}
 		}
 		return delay(testDuration);
 	}
