@@ -23,6 +23,7 @@
 
 #include <fmt/printf.h>
 #include <fmt/format.h>
+#include <bitset>
 
 namespace {
 
