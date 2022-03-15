@@ -7893,8 +7893,7 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 		                                      debugUIDs[i]);
 	}
 
-	wait(waitForAny(onErrors) ||
-	     mergeChangeFeedStreamInternal(results, interfs, streams, begin, end, mergeCursorUID));
+	wait(waitForAny(onErrors) || mergeChangeFeedStreamInternal(results, interfs, streams, begin, end, mergeCursorUID));
 
 	return Void();
 }
