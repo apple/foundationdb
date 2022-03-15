@@ -881,10 +881,16 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			for (int i = 0; i < commitProxyInfo->size(); i++)
 				keyServerLocationFutures.push_back(
 				    commitProxyInfo->get(i, &CommitProxyInterface::getKeyServersLocations)
-				        .getReplyUnlessFailedFor(
-				            GetKeyServerLocationsRequest(span.context, begin, end, limitKeyServers, false, Arena()),
-				            2,
-				            0));
+				        .getReplyUnlessFailedFor(GetKeyServerLocationsRequest(span.context,
+				                                                              Optional<TenantNameRef>(),
+				                                                              begin,
+				                                                              end,
+				                                                              limitKeyServers,
+				                                                              false,
+				                                                              latestVersion,
+				                                                              Arena()),
+				                                 2,
+				                                 0));
 
 			state bool keyServersInsertedForThisIteration = false;
 			choose {
@@ -2368,7 +2374,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		}
 
 		// Check EncryptKeyProxy
-		if (SERVER_KNOBS->ENABLE_ENCRYPT_KEY_PROXY && db.encryptKeyProxy.present() &&
+		if (SERVER_KNOBS->ENABLE_ENCRYPTION && db.encryptKeyProxy.present() &&
 		    (!nonExcludedWorkerProcessMap.count(db.encryptKeyProxy.get().address()) ||
 		     nonExcludedWorkerProcessMap[db.encryptKeyProxy.get().address()].processClass.machineClassFitness(
 		         ProcessClass::EncryptKeyProxy) > fitnessLowerBound)) {

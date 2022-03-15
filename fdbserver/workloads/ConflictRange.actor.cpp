@@ -328,7 +328,8 @@ struct ConflictRangeWorkload : TestWorkload {
 
 					if (res.size() == originalResults.size()) {
 						for (int i = 0; i < res.size(); i++) {
-							if (res[i] != originalResults[i]) {
+							if (res[i] != originalResults[i] &&
+							    !(res[i].key.startsWith("\xff"_sr) && originalResults[i].key.startsWith("\xff"_sr))) {
 								TraceEvent(SevError, "ConflictRangeError")
 								    .detail("Info", "No conflict returned, however results do not match")
 								    .detail("Original",

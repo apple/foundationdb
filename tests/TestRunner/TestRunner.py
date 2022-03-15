@@ -409,7 +409,7 @@ def run_simulation_test(basedir, options):
     if len(os.listdir(wd)) == 0:
         print("Delete {} - empty".format(wd))
         os.rmdir(wd)
-    return res
+    return res and proc.returncode == 0
 
 
 if __name__ == '__main__':

@@ -250,6 +250,8 @@ struct DatabaseConfiguration {
 	// Storage Migration Type
 	StorageMigrationType storageMigrationType;
 
+	TenantMode tenantMode;
+
 	// Excluded servers (no state should be here)
 	bool isExcludedServer(NetworkAddressList) const;
 	bool isExcludedLocality(const LocalityData& locality) const;
