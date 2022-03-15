@@ -5257,6 +5257,8 @@ ACTOR Future<Void> fetchShardApplyUpdates(StorageServer* data,
 }
 
 ACTOR Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
+	state std::shared_ptr<MoveInShardMetaData> shard = moveInShard->meta;
+	state std::shared_ptr<MoveInUpdates> moveInUpdates = moveInShard->updates;
 	std::cout << "0" << std::endl;
 	ASSERT(moveInShard->getPhase() != MoveInShardMetaData::Pending);
 	// if (shard->getPhase() == MoveInShardMetaData::Pending) {
@@ -5273,10 +5275,8 @@ ACTOR Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 	// state std::vector<CheckpointMetaData> localRecords;
 	std::cout << "1" << std::endl;
 	state std::string pwd = platform::getWorkingDirectory();
-	state std::string dir = pwd + "/" + moveInShard->meta->id.toString();
+	state std::string dir = pwd + "/" + shard->id.toString();
 	state MoveInShardMetaData::Phase phase;
-	state std::shared_ptr<MoveInShardMetaData> shard = moveInShard->meta;
-	state std::shared_ptr<MoveInUpdates> moveInUpdates = moveInShard->updates;
 
 	std::cout << "2" << std::endl;
 	// wait(delay(0));
