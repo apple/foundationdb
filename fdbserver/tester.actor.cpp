@@ -31,6 +31,7 @@
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
+#include "fdbserver/KnobProtectiveGroups.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
@@ -1317,7 +1318,7 @@ std::vector<TestSpec> readTOMLTests_(std::string fileName) {
 
 		// First handle all test-level settings
 		for (const auto& [k, v] : test.as_table()) {
-			if (k == "workload") {
+			if (k == "workload" || k == "knobs") {
 				continue;
 			}
 			if (testSpecTestKeys.find(k) != testSpecTestKeys.end()) {
@@ -1341,6 +1342,27 @@ std::vector<TestSpec> readTOMLTests_(std::string fileName) {
 				TraceEvent("TestParserOption").detail("ParsedKey", attrib).detail("ParsedValue", value);
 			}
 			spec.options.push_back_deep(spec.options.arena(), workloadOptions);
+		}
+
+		// And then copy the knob attributes to spec.overrideKnobs
+		try {
+			const toml::array& overrideKnobs = toml::find(test, "knobs").as_array();
+			for (const toml::value& knob : overrideKnobs) {
+				for (const auto& [key_, value_] : knob.as_table()) {
+					const std::string key = key_;
+					const std::string& value = toml_to_string(value_);
+					ParsedKnobValue parsedValue = CLIENT_KNOBS->parseKnobValue(key, value);
+					if (std::get_if<NoKnobFound>(&parsedValue)) {
+						parsedValue = SERVER_KNOBS->parseKnobValue(key, value);
+					}
+					if (std::get_if<NoKnobFound>(&parsedValue)) {
+						ASSERT(false);
+					}
+					spec.overrideKnobs.set(key, parsedValue);
+				}
+			}
+		} catch (const std::out_of_range&) {
+			// no knob overridden
 		}
 
 		result.push_back(spec);
@@ -1521,9 +1543,12 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 
 	TraceEvent("TestsExpectedToPass").detail("Count", tests.size());
 	state int idx = 0;
+	state std::unique_ptr<KnobProtectiveGroup> knobProtectiveGroup;
 	for (; idx < tests.size(); idx++) {
 		printf("%f Run test:%s start\n", now(), tests[idx].title.toString().c_str());
-		wait(success(runTest(cx, testers, tests[idx], dbInfo)));
+		knobProtectiveGroup = std::make_unique<KnobProtectiveGroup>(tests[idx].overrideKnobs);
+		wait(success(runTest(cx, testers, tests[idx], dbInfo, defaultTenant)));
+		knobProtectiveGroup.reset(nullptr);
 		printf("%f Run test:%s Done.\n", now(), tests[idx].title.toString().c_str());
 		// do we handle a failure here?
 	}
