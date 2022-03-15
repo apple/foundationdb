@@ -6747,7 +6747,6 @@ Future<Standalone<VectorRef<KeyRef>>> Transaction::getRangeSplitPoints(KeyRange 
 	return ::getRangeSplitPoints(trState, keys, chunkSize);
 }
 
-// TODO REMOVE when correctness clean
 #define BG_REQUEST_DEBUG false
 
 // the blob granule requests are a bit funky because they piggyback off the existing transaction to read from the system
@@ -7479,9 +7478,6 @@ Version ChangeFeedData::getVersion() {
 	return lastReturnedVersion.get();
 }
 
-// TODO REMOVE
-#define DEBUG_CF_WAIT_VERSION invalidVersion
-
 // This function is essentially bubbling the information about what has been processed from the server through the
 // change feed client. First it makes sure the server has returned all mutations up through the target version, the
 // native api has consumed and processed, them, and then the fdb client has consumed all of the mutations.
@@ -7489,37 +7485,16 @@ ACTOR Future<Void> changeFeedWaitLatest(Reference<ChangeFeedData> self, Version 
 	// wait on SS to have sent up through version
 	int desired = 0;
 	int waiting = 0;
-	if (version == DEBUG_CF_WAIT_VERSION) {
-		fmt::print("WFV {}) waitLatest\n", version);
-	}
 	std::vector<Future<Void>> allAtLeast;
 	for (auto& it : self->storageData) {
 		if (it->version.get() < version) {
 			waiting++;
-			if (version == DEBUG_CF_WAIT_VERSION) {
-				fmt::print("WFV {0})   SS {1} {2} < {3}\n",
-				           version,
-				           it->id.toString().substr(0, 4),
-				           it->version.get(),
-				           version);
-			}
 			if (version > it->desired.get()) {
-				if (version == DEBUG_CF_WAIT_VERSION) {
-					fmt::print("WFV {0})   SS {1} desired {2} -> {3}\n",
-					           version,
-					           it->id.toString().substr(0, 4),
-					           it->desired.get(),
-					           version);
-				}
 				it->desired.set(version);
 				desired++;
 			}
 			allAtLeast.push_back(it->version.whenAtLeast(version));
 		}
-	}
-
-	if (version == DEBUG_CF_WAIT_VERSION) {
-		fmt::print("WFV {0}) waiting for {1}/{2} ({3} desired)\n", version, waiting, self->storageData.size(), desired);
 	}
 
 	wait(waitForAll(allAtLeast));
@@ -7571,9 +7546,6 @@ ACTOR Future<Void> changeFeedWhenAtLatest(Reference<ChangeFeedData> self, Versio
 		return Void();
 	}
 	state Future<Void> lastReturned = self->lastReturnedVersion.whenAtLeast(version);
-	if (version == DEBUG_CF_WAIT_VERSION) {
-		fmt::print("WFV {0}) notAtLatest={1}\n", version, self->notAtLatest.get());
-	}
 	loop {
 		// only allowed to use empty versions if you're caught up
 		Future<Void> waitEmptyVersion = (self->notAtLatest.get() == 0) ? changeFeedWaitLatest(self, version) : Never();
@@ -7605,7 +7577,7 @@ ACTOR Future<Void> partialChangeFeedStream(StorageServerInterface interf,
                                            Version end,
                                            Reference<ChangeFeedData> feedData,
                                            Reference<ChangeFeedStorageData> storageData,
-                                           UID debugUID /* TODO REMOVE */) {
+                                           UID debugUID) {
 
 	// calling lastReturnedVersion's callbacks could cause us to be cancelled
 	state Promise<Void> refresh = feedData->refresh;
@@ -7778,25 +7750,12 @@ ACTOR Future<Void> mergeChangeFeedStreamInternal(Reference<ChangeFeedData> resul
 		interfNum = 0;
 		while (interfNum < streamsUsed.size()) {
 			try {
-				if (DEBUG_CF_CLIENT_TRACE) {
-					TraceEvent(SevDebug, "TraceChangeFeedClientMergeCursorWait", mergeCursorUID)
-					    .detail("Idx", streamsUsed[interfNum].idx);
-				}
 				Standalone<MutationsAndVersionRef> res = waitNext(streamsUsed[interfNum].results.getFuture());
 				streamsUsed[interfNum].next = res;
 				mutations.push(streamsUsed[interfNum]);
-				if (DEBUG_CF_CLIENT_TRACE) {
-					TraceEvent(SevDebug, "TraceChangeFeedClientMergeCursorGot", mergeCursorUID)
-					    .detail("Idx", streamsUsed[interfNum].idx)
-					    .detail("Version", res.version);
-				}
 			} catch (Error& e) {
 				if (e.code() != error_code_end_of_stream) {
 					throw e;
-				}
-				if (DEBUG_CF_CLIENT_TRACE) {
-					TraceEvent(SevDebug, "TraceChangeFeedClientMergeCursorEOS", mergeCursorUID)
-					    .detail("Idx", streamsUsed[interfNum].idx);
 				}
 			}
 			interfNum++;
@@ -7858,13 +7817,6 @@ ACTOR Future<Void> mergeChangeFeedStreamInternal(Reference<ChangeFeedData> resul
 	}
 }
 
-ACTOR Future<Void> onCFErrors(std::vector<Future<Void>> onErrors) {
-	wait(waitForAny(onErrors));
-	// TODO: just do waitForAny and remove onCFErrors if this doesn't trip
-	ASSERT(false);
-	return Void();
-}
-
 ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
                                          std::vector<std::pair<StorageServerInterface, KeyRange>> interfs,
                                          Reference<ChangeFeedData> results,
@@ -7880,7 +7832,6 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 	TEST(interfs.size() > 10); // Large change feed merge cursor
 	TEST(interfs.size() > 100); // Very large change feed merge cursor
 
-	// TODO REMOVE eventually, useful for debugging for now
 	state UID mergeCursorUID = UID();
 	state std::vector<UID> debugUIDs;
 	results->streams.clear();
@@ -7896,7 +7847,6 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 		if (replyBufferSize != -1 && req.replyBufferSize < CLIENT_KNOBS->CHANGE_FEED_STREAM_MIN_BYTES) {
 			req.replyBufferSize = CLIENT_KNOBS->CHANGE_FEED_STREAM_MIN_BYTES;
 		}
-		// TODO REMOVE
 		req.debugUID = deterministicRandom()->randomUniqueID();
 		debugUIDs.push_back(req.debugUID);
 		mergeCursorUID =
@@ -7932,7 +7882,6 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 			    .detail("End", end)
 			    .detail("CanReadPopped", canReadPopped);
 		}
-		streams[i].idx = i;
 		onErrors[i] = results->streams[i].onError();
 		fetchers[i] = partialChangeFeedStream(interfs[i].first,
 		                                      streams[i].results,
@@ -7944,7 +7893,8 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 		                                      debugUIDs[i]);
 	}
 
-	wait(onCFErrors(onErrors) || mergeChangeFeedStreamInternal(results, interfs, streams, begin, end, mergeCursorUID));
+	wait(waitForAny(onErrors) ||
+	     mergeChangeFeedStreamInternal(results, interfs, streams, begin, end, mergeCursorUID));
 
 	return Void();
 }
@@ -8066,7 +8016,6 @@ ACTOR Future<Void> singleChangeFeedStream(Reference<DatabaseContext> db,
 	req.range = range;
 	req.canReadPopped = canReadPopped;
 	req.replyBufferSize = replyBufferSize;
-	// TODO REMOVE
 	req.debugUID = deterministicRandom()->randomUniqueID();
 
 	if (DEBUG_CF_CLIENT_TRACE) {

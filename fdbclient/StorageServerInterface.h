@@ -793,8 +793,9 @@ struct ChangeFeedStreamRequest {
 	KeyRange range;
 	int replyBufferSize = -1;
 	bool canReadPopped = true;
-	// TODO REMOVE
-	UID debugUID;
+	UID debugUID; // This is only used for debugging and tracing, but being able to link a client + server side stream
+	              // is so useful for testing, and this is such small overhead compared to streaming large amounts of
+	              // change feed data, it is left in the interface
 
 	ReplyPromiseStream<ChangeFeedStreamReply> reply;
 

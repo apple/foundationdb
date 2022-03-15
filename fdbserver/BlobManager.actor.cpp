@@ -47,7 +47,7 @@
  * The Blob Manager is responsible for managing range granules, and recruiting and monitoring Blob Workers.
  */
 
-#define BM_DEBUG true
+#define BM_DEBUG false
 
 void handleClientBlobRange(KeyRangeMap<bool>* knownBlobRanges,
                            Arena& ar,
@@ -974,23 +974,6 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 				                      existingState.size() + 2));
 				// +2 because this is boundaries and existingState was granules, and to ensure it doesn't set more
 				ASSERT(!existingBoundaries.more);
-				// TODO remove debugging printf
-				if (existingBoundaries.size() != existingState.size() + 1) {
-					printf("DBG: EB=%d, ES=%d for [%s - %s)\n",
-					       existingBoundaries.size(),
-					       existingState.size(),
-					       granuleRange.begin.printable().c_str(),
-					       granuleRange.end.printable().c_str());
-					printf("Boundaries:\n");
-					for (auto& it : existingBoundaries) {
-						printf("  %s\n", it.key.removePrefix(blobGranuleMappingKeys.begin).printable().c_str());
-					}
-					printf("State:\n");
-					for (auto& it : existingState) {
-						std::pair<UID, UID> k = decodeBlobGranuleSplitKey(it.key);
-						printf("  %s\n", k.second.toString().substr(0, 6).c_str());
-					}
-				}
 				ASSERT(existingBoundaries.size() == existingState.size() + 1);
 				newRanges.clear();
 				newRanges.arena().dependsOn(existingBoundaries.arena());

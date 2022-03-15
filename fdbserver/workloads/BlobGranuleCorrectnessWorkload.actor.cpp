@@ -121,8 +121,7 @@ struct ThreadData : ReferenceCounted<ThreadData>, NonCopyable {
 	Key getKey(uint32_t key, uint32_t id) { return StringRef(format("%08x/%08x/%08x", directoryID, key, id)); }
 };
 
-// TODO REMOVE eventually?
-//  For debugging mismatches on what data should be and why
+// For debugging mismatches on what data should be and why
 // set mismatch to true, dir id and key id to the directory and key id that are wrong, and rv to read version that read
 // the wrong value
 #define DEBUG_MISMATCH false

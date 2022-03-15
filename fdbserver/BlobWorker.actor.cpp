@@ -1495,9 +1495,9 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 								if (metadata->pendingDeltaVersion <= rollbackVersion &&
 								    (metadata->currentDeltas.empty() ||
 								     metadata->currentDeltas.back().version <= rollbackVersion)) {
+									TEST(true); // Granule ignoring rollback
 
 									if (BW_DEBUG) {
-										TEST(true); // Granule ignoring rollback
 										fmt::print(
 										    "Granule [{0} - {1}) on BW {2} skipping rollback {3} -> {4} completely\n",
 										    metadata->keyRange.begin.printable().c_str(),
