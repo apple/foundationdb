@@ -4976,7 +4976,7 @@ ACTOR Future<TenantInfo> getTenantMetadata(Reference<TransactionState> trState, 
 }
 
 Future<TenantInfo> populateAndGetTenant(Reference<TransactionState> trState, Key const& key, Version version) {
-	if (!trState->tenant.present()) {
+	if (!trState->tenant.present() || key == metadataVersionKey) {
 		return TenantInfo();
 	} else if (trState->tenantId != TenantInfo::INVALID_TENANT) {
 		return trState->getTenantInfo();
@@ -5812,22 +5812,28 @@ ACTOR Future<Optional<ClientTrCommitCostEstimation>> estimateCommitCosts(Referen
 // through to the storage servers
 void applyTenantPrefix(CommitTransactionRequest& req, Key tenantPrefix) {
 	for (auto& m : req.transaction.mutations) {
-		m.param1 = m.param1.withPrefix(tenantPrefix, req.arena);
-		if (m.type == MutationRef::ClearRange) {
-			m.param2 = m.param2.withPrefix(tenantPrefix, req.arena);
-		} else if (m.type == MutationRef::SetVersionstampedKey) {
-			uint8_t* key = mutateString(m.param1);
-			int* offset = reinterpret_cast<int*>(&key[m.param1.size() - 4]);
-			*offset += tenantPrefix.size();
+		if (m.param1 != metadataVersionKey) {
+			m.param1 = m.param1.withPrefix(tenantPrefix, req.arena);
+			if (m.type == MutationRef::ClearRange) {
+				m.param2 = m.param2.withPrefix(tenantPrefix, req.arena);
+			} else if (m.type == MutationRef::SetVersionstampedKey) {
+				uint8_t* key = mutateString(m.param1);
+				int* offset = reinterpret_cast<int*>(&key[m.param1.size() - 4]);
+				*offset += tenantPrefix.size();
+			}
 		}
 	}
 
 	for (auto& rc : req.transaction.read_conflict_ranges) {
-		rc = rc.withPrefix(tenantPrefix, req.arena);
+		if (rc.begin != metadataVersionKey) {
+			rc = rc.withPrefix(tenantPrefix, req.arena);
+		}
 	}
 
 	for (auto& wc : req.transaction.write_conflict_ranges) {
-		wc = wc.withPrefix(tenantPrefix, req.arena);
+		if (wc.begin != metadataVersionKey) {
+			wc = wc.withPrefix(tenantPrefix, req.arena);
+		}
 	}
 }
 
