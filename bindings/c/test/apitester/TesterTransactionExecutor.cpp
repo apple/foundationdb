@@ -270,6 +270,9 @@ protected:
 
 	void onFutureReady(FDBFuture* f) {
 		injectRandomSleep();
+		// Hold a reference to this to avoid it to be
+		// destroyed before releasing the mutex
+		auto thisRef = shared_from_this();
 		std::unique_lock<std::mutex> lock(mutex);
 		auto iter = callbackMap.find(f);
 		ASSERT(iter != callbackMap.end());
@@ -287,7 +290,6 @@ protected:
 			scheduler->schedule(cbInfo.cont);
 			return;
 		}
-
 		onError(err);
 	}
 
