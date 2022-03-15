@@ -29,31 +29,33 @@
 // A list of knob key value pairs
 class KnobKeyValuePairs {
 public:
-    using container_t = std::unordered_map<std::string, ParsedKnobValue>;
+	using container_t = std::unordered_map<std::string, ParsedKnobValue>;
+
 private:
-    // Here the knob value is directly stored, unlike KnobValue, for simplicity
-    container_t knobs;
+	// Here the knob value is directly stored, unlike KnobValue, for simplicity
+	container_t knobs;
 
 public:
-    // Sets a value for a given knob
-    void set(const std::string& name, const ParsedKnobValue value);
+	// Sets a value for a given knob
+	void set(const std::string& name, const ParsedKnobValue value);
 
-    // Gets a list of knobs for given type
-    const container_t& getKnobs() const;
+	// Gets a list of knobs for given type
+	const container_t& getKnobs() const;
 };
 
-// For knobs, temporarily change the values, the original values will be recovered 
+// For knobs, temporarily change the values, the original values will be recovered
 class KnobProtectiveGroup {
-    KnobKeyValuePairs overriddenKnobs;
-    KnobKeyValuePairs originalKnobs;
+	KnobKeyValuePairs overriddenKnobs;
+	KnobKeyValuePairs originalKnobs;
 
-    // Snapshots the current knob values base on those knob keys in overriddenKnobs
-    void snapshotOriginalKnobs();
+	// Snapshots the current knob values base on those knob keys in overriddenKnobs
+	void snapshotOriginalKnobs();
 
-    void assignKnobs(const KnobKeyValuePairs& overrideKnobs);
+	void assignKnobs(const KnobKeyValuePairs& overrideKnobs);
+
 public:
-    KnobProtectiveGroup(const KnobKeyValuePairs& overridenKnobs_);
-    ~KnobProtectiveGroup();
+	KnobProtectiveGroup(const KnobKeyValuePairs& overridenKnobs_);
+	~KnobProtectiveGroup();
 };
 
-#endif  // FDBSERVER_KNOBPROTECTIVEGROUPS_H
+#endif // FDBSERVER_KNOBPROTECTIVEGROUPS_H
