@@ -1829,8 +1829,8 @@ ACTOR Future<Void> deleteCheckpointQ(StorageServer* self, Version version, Check
 
 	state Key persistCheckpointKey(persistCheckpointKeys.begin.toString() + checkpoint.checkpointID.toString());
 	state Key pendingCheckpointKey(persistPendingCheckpointKeys.begin.toString() + checkpoint.checkpointID.toString());
-	Version version = self->data().getLatestVersion();
-	auto& mLV = self->addVersionToMutationLog(version);
+	Version latestVersion = self->data().getLatestVersion();
+	auto& mLV = self->addVersionToMutationLog(latestVersion);
 	self->addMutationToMutationLog(
 	    mLV, MutationRef(MutationRef::ClearRange, pendingCheckpointKey, keyAfter(pendingCheckpointKey)));
 	self->addMutationToMutationLog(
@@ -1855,8 +1855,10 @@ ACTOR Future<Void> fetchCheckpointQ(StorageServer* self, FetchCheckpointRequest 
 		return Void();
 	}
 
+	state ICheckpointReader* reader;
+
 	try {
-		state ICheckpointReader* reader = newCheckpointReader(it->second, deterministicRandom()->randomUniqueID());
+		reader = newCheckpointReader(it->second, deterministicRandom()->randomUniqueID());
 		wait(reader->init(req.token));
 
 		loop {
@@ -2207,8 +2209,9 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 					                                                         : data->version.whenAtLeast(req.end))) {}
 					when(wait(delay(5.0))) {} // TODO REMOVE this once empty version logic is fully implemented
 				}
-				auto feed = data->uidChangeFeed.find(req.rangeID);
-				if (feed == data->uidChangeFeed.end() || feed->second->removing) {
+
+				auto feed2 = data->uidChangeFeed.find(req.rangeID);
+				if (feed2 == data->uidChangeFeed.end() || feed2->second->removing) {
 					req.reply.sendError(unknown_change_feed());
 					return Void();
 				}
