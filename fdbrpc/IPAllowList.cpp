@@ -198,7 +198,7 @@ struct SubNetTest {
 		return (val & subnetMask) ^ baseAddress;
 	}
 
-	template<bool V4>
+	template <bool V4>
 	static IPAddress randomAddress() {
 		constexpr int width = V4 ? 4 : 16;
 		uint32_t rnd[width / 4];
@@ -255,7 +255,7 @@ struct SubNetTest {
 		if (subnet.addressMask.isV4()) {
 			return randomAddress<true>(inSubnet);
 		} else {
-			return randomAddress<true>(inSubnet);
+			return randomAddress<false>(inSubnet);
 		}
 	}
 };

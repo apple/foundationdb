@@ -31,7 +31,7 @@ using ContextVariableMap = std::unordered_map<std::string_view, void*>;
 template <class Ar>
 struct LoadContext {
 	Ar* ar;
-	ContextVariableMap* variables;
+	ContextVariableMap* variables = nullptr;
 
 	LoadContext(Ar* ar, ContextVariableMap* variables = nullptr) : ar(ar), variables(variables) {}
 	Arena& arena() { return ar->arena(); }
@@ -92,16 +92,15 @@ struct SaveContext {
 template <class ReaderImpl>
 class _ObjectReader {
 protected:
-	ProtocolVersion mProtocolVersion;
+	Optional<ProtocolVersion> mProtocolVersion;
+	bool versionSet = false;
 	LoadContext<ReaderImpl> context;
 
 public:
 	_ObjectReader() : context(static_cast<ReaderImpl*>(this)) {}
-	ProtocolVersion protocolVersion() const { return mProtocolVersion; }
+	ProtocolVersion protocolVersion() const { return mProtocolVersion.get(); }
 	void setProtocolVersion(ProtocolVersion v) { mProtocolVersion = v; }
-	void setContextVariableMap(ContextVariableMap* cvm) {
-		context.variables = cvm;
-	}
+	void setContextVariableMap(ContextVariableMap* cvm) { context.variables = cvm; }
 
 	template <class... Items>
 	void deserialize(FileIdentifier file_identifier, Items&... items) {
@@ -109,7 +108,7 @@ public:
 		if (read_file_identifier(data) != file_identifier) {
 			// Some file identifiers are changed in 7.0, so file identifier mismatches
 			// are expected during a downgrade from 7.0 to 6.3
-			bool expectMismatch = mProtocolVersion >= ProtocolVersion(0x0FDB00B070000000LL);
+			bool expectMismatch = mProtocolVersion.get() >= ProtocolVersion(0x0FDB00B070000000LL);
 			{
 				TraceEvent te(expectMismatch ? SevInfo : SevError, "MismatchedFileIdentifier");
 				if (expectMismatch) {

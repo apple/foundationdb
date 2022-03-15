@@ -838,6 +838,11 @@ private:
 	NetNotifiedQueue<T, IsPublic>* queue;
 };
 
+template <class T>
+using PrivateRequestStream = RequestStream<T, false>;
+template <class T>
+using PublicRequestStream = RequestStream<T, true>;
+
 template <class Ar, class T, bool P>
 void save(Ar& ar, const RequestStream<T, P>& value) {
 	auto const& ep = value.getEndpoint();

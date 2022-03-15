@@ -35,6 +35,7 @@ struct ClientWorkloadImpl {
 	std::string processName;
 	Database cx;
 	Future<Void> databaseOpened;
+	std::string dataFolder;
 
 	ClientWorkloadImpl(Reference<TestWorkload> const& child) : child(child) {
 		if (self->address.isV6()) {
@@ -45,16 +46,21 @@ struct ClientWorkloadImpl {
 		}
 		TraceEvent("TestClientStart", id).detail("ClusterFileLocation", child->ccr->getLocation()).log();
 		processName = fmt::format("TestClient{}", child->clientId);
+		Standalone<StringRef> newZoneId(deterministicRandom()->randomUniqueID().toString());
+		auto locality = LocalityData(Optional<Standalone<StringRef>>(), newZoneId, newZoneId, self->locality.dcId());
+		dataFolder = joinPath(popPath(self->dataFolder), deterministicRandom()->randomUniqueID().toString());
+		platform::createDirectory(dataFolder);
 		childProcess = g_simulator.newProcess(processName.c_str(),
 		                                      childAddress,
-		                                      0,
+		                                      1,
 		                                      self->address.isTLS(),
 		                                      1,
-		                                      self->locality,
+		                                      locality,
 		                                      ProcessClass(ProcessClass::TesterClass, ProcessClass::AutoSource),
-		                                      self->dataFolder,
+		                                      dataFolder.c_str(),
 		                                      self->coordinationFolder,
 		                                      self->protocolVersion);
+		childProcess->excludeFromRestarts = true;
 		databaseOpened = openDatabase(this);
 	}
 

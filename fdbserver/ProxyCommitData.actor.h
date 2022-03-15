@@ -193,8 +193,8 @@ struct ProxyCommitData {
 	NotifiedVersion latestLocalCommitBatchResolving;
 	NotifiedVersion latestLocalCommitBatchLogging;
 
-	RequestStream<GetReadVersionRequest, true> getConsistentReadVersion;
-	RequestStream<CommitTransactionRequest, true> commit;
+	PublicRequestStream<GetReadVersionRequest> getConsistentReadVersion;
+	PublicRequestStream<CommitTransactionRequest> commit;
 	Database cx;
 	Reference<AsyncVar<ServerDBInfo> const> db;
 	EventMetricHandle<SingleKeyMutation> singleKeyMutationEvent;
@@ -273,9 +273,9 @@ struct ProxyCommitData {
 
 	ProxyCommitData(UID dbgid,
 	                MasterInterface master,
-	                RequestStream<GetReadVersionRequest, true> getConsistentReadVersion,
+	                PublicRequestStream<GetReadVersionRequest> getConsistentReadVersion,
 	                Version recoveryTransactionVersion,
-	                RequestStream<CommitTransactionRequest, true> commit,
+	                PublicRequestStream<CommitTransactionRequest> commit,
 	                Reference<AsyncVar<ServerDBInfo> const> db,
 	                bool firstProxy)
 	  : dbgid(dbgid), commitBatchesMemBytesCount(0),

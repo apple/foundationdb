@@ -1,0 +1,5 @@
+[[test]]
+testTitle = 'PrivateEndpoints'
+
+[[test.workload]]
+testName = 'PrivateEndpoints'

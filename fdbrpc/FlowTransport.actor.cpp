@@ -235,6 +235,9 @@ struct PingReceiver final : NetworkMessageReceiver {
 };
 
 struct TenantAuthorizer final : NetworkMessageReceiver {
+	TenantAuthorizer(EndpointMap& endpoints) {
+		endpoints.insertWellKnown(this, Endpoint::wellKnownToken(WLTOKEN_AUTH_TENANT), TaskPriority::ReadSocket);
+	}
 	void receive(ArenaObjectReader& reader) override {
 		AuthorizationRequest req;
 		try {
@@ -289,6 +292,7 @@ public:
 	EndpointMap endpoints;
 	EndpointNotFoundReceiver endpointNotFoundReceiver{ endpoints };
 	PingReceiver pingReceiver{ endpoints };
+	TenantAuthorizer tenantReceiver{ endpoints };
 
 	Int64MetricHandle bytesSent;
 	Int64MetricHandle countPacketsReceived;
@@ -948,7 +952,7 @@ ACTOR static void deliver(TransportData* self,
                           ArenaReader reader,
                           NetworkAddress peerAddress,
                           Reference<AuthorizedTenants> authorizedTenants,
-						  ContextVariableMap* cvm,
+                          ContextVariableMap* cvm,
                           bool inReadSocket) {
 	// We want to run the task at the right priority. If the priority is higher than the current priority (which is
 	// ReadSocket) we can just upgrade. Otherwise we'll context switch so that we don't block other tasks that might run
@@ -1014,7 +1018,7 @@ static void scanPackets(TransportData* transport,
                         Arena& arena,
                         NetworkAddress const& peerAddress,
                         Reference<AuthorizedTenants> const& authorizedTenants,
-						ContextVariableMap* cvm,
+                        ContextVariableMap* cvm,
                         ProtocolVersion peerProtocolVersion) {
 	// Find each complete packet in the given byte range and queue a ready task to deliver it.
 	// Remove the complete packets from the range by increasing unprocessed_begin.
@@ -1134,7 +1138,7 @@ static void scanPackets(TransportData* transport,
 			        std::move(reader),
 			        peerAddress,
 			        authorizedTenants,
-					cvm,
+			        cvm,
 			        true);
 		}
 
@@ -1182,12 +1186,12 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 	state NetworkAddress peerAddress;
 	state ProtocolVersion peerProtocolVersion;
 	state Reference<AuthorizedTenants> authorizedTenants = makeReference<AuthorizedTenants>();
+	state ContextVariableMap cvm;
+	peerAddress = conn->getPeerAddress();
 	authorizedTenants->trusted = transport->allowList(conn->getPeerAddress().ip);
-	ContextVariableMap cvm;
 	cvm["AuthorizedTenants"] = &authorizedTenants;
 	cvm["PeerAddress"] = &peerAddress;
 
-	peerAddress = conn->getPeerAddress();
 	authorizedTenants->trusted = transport->allowList(peerAddress.ip);
 	if (!peer) {
 		ASSERT(!peerAddress.isPublic());
@@ -1342,7 +1346,7 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 						            arena,
 						            peerAddress,
 						            authorizedTenants,
-									&cvm,
+						            &cvm,
 						            peerProtocolVersion);
 					} else {
 						unprocessed_begin = unprocessed_end;
@@ -1614,7 +1618,7 @@ static void sendLocal(TransportData* self, ISerializeSource const& what, const E
 	ASSERT(copy.size() > 0);
 	TaskPriority priority = self->endpoints.getPriority(destination.token);
 	if (priority != TaskPriority::UnknownEndpoint || (destination.token.first() & TOKEN_STREAM_FLAG) != 0) {
-		Reference<AuthorizedTenants> authorizedTenants;
+		Reference<AuthorizedTenants> authorizedTenants = makeReference<AuthorizedTenants>();
 		authorizedTenants->trusted = true;
 		deliver(self,
 		        destination,
@@ -1622,7 +1626,7 @@ static void sendLocal(TransportData* self, ISerializeSource const& what, const E
 		        ArenaReader(copy.arena(), copy, AssumeVersion(currentProtocolVersion)),
 		        NetworkAddress(),
 		        authorizedTenants,
-				&cvm,
+		        &cvm,
 		        false);
 	}
 }

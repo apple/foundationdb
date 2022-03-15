@@ -92,6 +92,7 @@ public:
 		UID uid;
 
 		ProtocolVersion protocolVersion;
+		bool excludeFromRestarts = false;
 
 		ProcessInfo(const char* name,
 		            LocalityData locality,
