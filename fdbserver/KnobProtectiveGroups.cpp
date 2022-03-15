@@ -56,7 +56,7 @@ void KnobProtectiveGroup::snapshotOriginalKnobs() {
 			ASSERT(false);
 		}
 		originalKnobs.set(name, value);
-		TraceEvent("SnapshotKnobValue")
+		TraceEvent(SevInfo, "SnapshotKnobValue")
 		    .detail("KnobName", name)
 		    .detail("KnobValue", KnobValueRef::create(value).toString());
 	}
@@ -68,6 +68,6 @@ void KnobProtectiveGroup::assignKnobs(const KnobKeyValuePairs& overrideKnobs) {
 	for (const auto& [name, value] : overrideKnobs.getKnobs()) {
 		Standalone<KnobValueRef> valueRef = KnobValueRef::create(value);
 		ASSERT(mutableServerKnobs.trySetKnob(name, valueRef));
-		TraceEvent("AssignKnobValue").detail("KnobName", name).detail("KnobValue", valueRef.toString());
+		TraceEvent(SevInfo, "AssignKnobValue").detail("KnobName", name).detail("KnobValue", valueRef.toString());
 	}
 }
