@@ -225,16 +225,10 @@ void DatabaseContext::getLatestCommitVersions(const Reference<LocationInfo>& loc
 	}
 
 	if (ssVersionVectorCache.getMaxVersion() != invalidVersion && readVersion > ssVersionVectorCache.getMaxVersion()) {
-		// This can happen after a recovery, GRV proxy change is detected and
-		// version cache is cleared. However, an old GRV response is processed
-		// to update the version cache with a relatively old version. Then
-		// another transaction with a newer read version from the old GRV proxy
-		// issues a read, which can trigger the condition here. Throw here to
-		// restart the transaction that will get a new GRV from the new proxy.
-		TraceEvent(SevWarn, "GetLatestCommitVersions")
+		TraceEvent(SevError, "GetLatestCommitVersions")
 		    .detail("ReadVersion", readVersion)
 		    .detail("VersionVector", ssVersionVectorCache.toString());
-		throw stale_version_vector();
+		ASSERT(false);
 	}
 
 	std::map<Version, std::set<Tag>> versionMap; // order the versions to be returned
@@ -2313,6 +2307,15 @@ Reference<GrvProxyInfo> DatabaseContext::getGrvProxies(UseProvisionalProxies use
 	return grvProxies;
 }
 
+bool DatabaseContext::isCurrentGrvProxy(UID proxyId) const {
+	for (const auto& proxy : clientInfo->get().grvProxies) {
+		if (proxy.id() == proxyId)
+			return true;
+	}
+	TEST(true); // stale GRV proxy detected
+	return false;
+}
+
 // Actor which will wait until the MultiInterface<CommitProxyInterface> returned by the DatabaseContext cx is not
 // nullptr
 ACTOR Future<Reference<CommitProxyInfo>> getCommitProxiesFuture(DatabaseContext* cx,
@@ -2954,7 +2957,11 @@ ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version, Span
 					cx->minAcceptableReadVersion = std::min(cx->minAcceptableReadVersion, v.version);
 					if (v.midShardSize > 0)
 						cx->smoothMidShardSize.setTotal(v.midShardSize);
-					cx->ssVersionVectorCache.applyDelta(v.ssVersionVectorDelta);
+					if (cx->isCurrentGrvProxy(v.proxyId)) {
+						cx->ssVersionVectorCache.applyDelta(v.ssVersionVectorDelta);
+					} else {
+						throw stale_version_vector();
+					}
 					if (v.version >= version)
 						return v.version;
 					// SOMEDAY: Do the wait on the server side, possibly use less expensive source of committed version
@@ -2982,7 +2989,11 @@ ACTOR Future<Version> getRawVersion(Reference<TransactionState> trState) {
 			                                                     TransactionPriority::IMMEDIATE,
 			                                                     trState->cx->ssVersionVectorCache.getMaxVersion()),
 			                               trState->cx->taskID))) {
-				trState->cx->ssVersionVectorCache.applyDelta(v.ssVersionVectorDelta);
+				if (trState->cx->isCurrentGrvProxy(v.proxyId)) {
+					trState->cx->ssVersionVectorCache.applyDelta(v.ssVersionVectorDelta);
+				} else {
+					throw stale_version_vector();
+				}
 				return v.version;
 			}
 		}
@@ -5845,7 +5856,11 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion(SpanID parentSpan,
 						    "TransactionDebug", debugID.get().first(), "NativeAPI.getConsistentReadVersion.After");
 					ASSERT(v.version > 0);
 					cx->minAcceptableReadVersion = std::min(cx->minAcceptableReadVersion, v.version);
-					cx->ssVersionVectorCache.applyDelta(v.ssVersionVectorDelta);
+					if (cx->isCurrentGrvProxy(v.proxyId)) {
+						cx->ssVersionVectorCache.applyDelta(v.ssVersionVectorDelta);
+					} else {
+						continue; // stale GRV reply, retry
+					}
 					return v;
 				}
 			}
@@ -6018,7 +6033,11 @@ ACTOR Future<Version> extractReadVersion(Reference<TransactionState> trState,
 	}
 
 	metadataVersion.send(rep.metadataVersion);
-	trState->cx->ssVersionVectorCache.applyDelta(rep.ssVersionVectorDelta);
+	if (trState->cx->isCurrentGrvProxy(rep.proxyId)) {
+		trState->cx->ssVersionVectorCache.applyDelta(rep.ssVersionVectorDelta);
+	} else {
+		throw stale_version_vector();
+	}
 	return rep.version;
 }
 
