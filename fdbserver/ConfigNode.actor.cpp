@@ -540,13 +540,15 @@ class ConfigNodeImpl {
 		// committed version and rollforward version.
 		ASSERT_GT(req.mutations[0].version, currentGeneration.committedVersion);
 		wait(commitMutations(self, req.mutations, req.annotations, req.target));
+
 		req.reply.send(Void());
 		return Void();
 	}
 
 	ACTOR static Future<Void> getCommittedVersion(ConfigNodeImpl* self, ConfigFollowerGetCommittedVersionRequest req) {
+		state Version lastCompacted = wait(getLastCompactedVersion(self));
 		ConfigGeneration generation = wait(getGeneration(self));
-		req.reply.send(ConfigFollowerGetCommittedVersionReply{ generation.committedVersion });
+		req.reply.send(ConfigFollowerGetCommittedVersionReply{ lastCompacted, generation.committedVersion });
 		return Void();
 	}
 

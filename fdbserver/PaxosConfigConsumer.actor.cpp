@@ -45,6 +45,9 @@ class GetCommittedVersionQuorum {
 	std::map<Version, std::vector<ConfigFollowerInterface>> replies;
 	std::map<Version, Version> priorVersions;
 	std::map<NetworkAddress, Version> committed;
+	// Need to know the largest compacted version on any node to avoid asking
+	// for changes that have already been compacted.
+	Version largestCompactedResponse{ 0 };
 	// Last durably committed version.
 	Version lastSeenVersion;
 	size_t totalRepliesReceived{ 0 };
@@ -61,6 +64,7 @@ class GetCommittedVersionQuorum {
 	ACTOR static Future<Void> updateNode(GetCommittedVersionQuorum* self,
 	                                     CommittedVersions nodeVersion,
 	                                     CommittedVersions quorumVersion,
+	                                     Version lastCompacted,
 	                                     ConfigFollowerInterface cfi) {
 		state Version target = quorumVersion.lastCommitted;
 		if (nodeVersion.lastCommitted == target) {
@@ -82,11 +86,23 @@ class GetCommittedVersionQuorum {
 				rollback = std::max(nodeVersion.lastCommitted - 1, Version{ 0 });
 			}
 
+			if (rollback.present()) {
+				// When a new ConfigBroadcaster is created, it may not know
+				// about the last committed version on the ConfigNodes. If
+				// compaction has occurred, this can cause change requests to
+				// be sent to nodes asking for version 0 when the node has
+				// already compacted that version, causing an error. Make sure
+				// the rollback version is at least set to the last compacted
+				// version to prevent this issue.
+				rollback = std::max(rollback.get(), lastCompacted);
+			}
+
 			// Now roll node forward to match the largest committed version of
 			// the replies.
 			state Reference<ConfigFollowerInfo> quorumCfi(new ConfigFollowerInfo(self->replies[target], false));
 			try {
-				state Version lastSeenVersion = rollback.present() ? rollback.get() : nodeVersion.lastCommitted;
+				state Version lastSeenVersion = std::max(
+				    rollback.present() ? rollback.get() : nodeVersion.lastCommitted, self->largestCompactedResponse);
 				ConfigFollowerGetChangesReply reply =
 				    wait(timeoutError(basicLoadBalance(quorumCfi,
 				                                       &ConfigFollowerInterface::getChanges,
@@ -96,40 +112,12 @@ class GetCommittedVersionQuorum {
 				                      rollback, nodeVersion.lastCommitted, target, reply.changes, reply.annotations }),
 				                  SERVER_KNOBS->GET_COMMITTED_VERSION_TIMEOUT));
 			} catch (Error& e) {
-				if (e.code() == error_code_version_already_compacted || e.code() == error_code_process_behind) {
-					// In the case of an already_compacted or process_behind
-					// error, fetch the latest snapshot and attempt to roll the
-					// node forward.
-					TEST(true); // PaxosConfigConsumer rollforward compacted or behind ConfigNode
-
-					try {
-						ConfigFollowerGetSnapshotAndChangesReply reply =
-						    wait(timeoutError(basicLoadBalance(quorumCfi,
-						                                       &ConfigFollowerInterface::getSnapshotAndChanges,
-						                                       ConfigFollowerGetSnapshotAndChangesRequest{ target }),
-						                      SERVER_KNOBS->GET_SNAPSHOT_AND_CHANGES_TIMEOUT));
-						if (reply.changes.size() == 0 || reply.changes[reply.changes.size() - 1].version < target) {
-							return Void();
-						}
-
-						int64_t rollbackTo = reply.changes[0].version - 1;
-						if (rollback.present()) {
-							rollbackTo = std::min(rollbackTo, rollback.get());
-						}
-						wait(timeoutError(
-						    cfi.rollforward.getReply(ConfigFollowerRollforwardRequest{
-						        rollbackTo, nodeVersion.lastCommitted, target, reply.changes, reply.annotations }),
-						    SERVER_KNOBS->GET_COMMITTED_VERSION_TIMEOUT));
-					} catch (Error& e2) {
-						if (e2.code() != error_code_transaction_too_old) {
-							throw;
-						}
-					}
-				} else if (e.code() == error_code_transaction_too_old) {
+				if (e.code() == error_code_transaction_too_old) {
 					// Seeing this trace is not necessarily a problem. There
 					// are legitimate scenarios where a ConfigNode could return
-					// transaction_too_old in response to a rollforward
-					// request.
+					// one of these errors in response to a get changes or
+					// rollforward request. The retry loop should handle this
+					// case.
 					TraceEvent(SevInfo, "ConfigNodeRollforwardError").error(e);
 				} else {
 					throw;
@@ -144,9 +132,10 @@ class GetCommittedVersionQuorum {
 			ConfigFollowerGetCommittedVersionReply reply =
 			    wait(timeoutError(cfi.getCommittedVersion.getReply(ConfigFollowerGetCommittedVersionRequest{}),
 			                      SERVER_KNOBS->GET_COMMITTED_VERSION_TIMEOUT));
-			self->committed[cfi.address()] = reply.lastCommitted;
 
 			++self->totalRepliesReceived;
+			self->largestCompactedResponse = std::max(self->largestCompactedResponse, reply.lastCompacted);
+			state Version lastCompacted = reply.lastCompacted;
 			self->largestCommitted = std::max(self->largestCommitted, reply.lastCommitted);
 			state CommittedVersions committedVersions = CommittedVersions{ self->lastSeenVersion, reply.lastCommitted };
 			if (self->priorVersions.find(committedVersions.lastCommitted) == self->priorVersions.end()) {
@@ -160,14 +149,15 @@ class GetCommittedVersionQuorum {
 				if (self->quorumVersion.canBeSet()) {
 					self->quorumVersion.send(QuorumVersion{ committedVersions, true });
 				}
-				wait(self->updateNode(self, committedVersions, self->quorumVersion.getFuture().get().versions, cfi));
+				wait(self->updateNode(
+				    self, committedVersions, self->quorumVersion.getFuture().get().versions, lastCompacted, cfi));
 			} else if (self->maxAgreement >= self->cfis.size() / 2 + 1) {
 				// A quorum of ConfigNodes agree on the latest committed version,
 				// but the node we just got a reply from is not one of them. We may
 				// need to roll it forward or back.
 				QuorumVersion quorumVersion = wait(self->quorumVersion.getFuture());
 				ASSERT(committedVersions.lastCommitted != quorumVersion.versions.lastCommitted);
-				wait(self->updateNode(self, committedVersions, quorumVersion.versions, cfi));
+				wait(self->updateNode(self, committedVersions, quorumVersion.versions, lastCompacted, cfi));
 			} else if (self->maxAgreement + (self->cfis.size() - self->totalRepliesReceived) <
 			           (self->cfis.size() / 2 + 1)) {
 				// It is impossible to reach a quorum of ConfigNodes that agree
@@ -182,12 +172,13 @@ class GetCommittedVersionQuorum {
 					self->quorumVersion.send(
 					    QuorumVersion{ CommittedVersions{ largestCommittedPrior, largestCommitted }, false });
 				}
-				wait(self->updateNode(self, committedVersions, self->quorumVersion.getFuture().get().versions, cfi));
+				wait(self->updateNode(
+				    self, committedVersions, self->quorumVersion.getFuture().get().versions, lastCompacted, cfi));
 			} else {
 				// Still building up responses; don't have enough data to act on
 				// yet, so wait until we do.
 				QuorumVersion quorumVersion = wait(self->quorumVersion.getFuture());
-				wait(self->updateNode(self, committedVersions, quorumVersion.versions, cfi));
+				wait(self->updateNode(self, committedVersions, quorumVersion.versions, lastCompacted, cfi));
 			}
 		} catch (Error& e) {
 			// Count a timeout as a reply.
@@ -196,8 +187,10 @@ class GetCommittedVersionQuorum {
 				if (self->quorumVersion.canBeSet()) {
 					self->quorumVersion.sendError(e);
 				}
-			} else if (e.code() != error_code_timed_out) {
-				throw;
+			} else if (e.code() != error_code_timed_out && e.code() != error_code_broken_promise) {
+				if (self->quorumVersion.canBeSet()) {
+					self->quorumVersion.sendError(e);
+				}
 			} else if (self->totalRepliesReceived == self->cfis.size() && self->quorumVersion.canBeSet() &&
 			           !self->quorumVersion.isError()) {
 				size_t nonTimeoutReplies =
@@ -206,14 +199,10 @@ class GetCommittedVersionQuorum {
 				    });
 				if (nonTimeoutReplies >= self->cfis.size() / 2 + 1) {
 					// Make sure to trigger the quorumVersion if a timeout
-					// occurred, a quorum disagree on the committed version, and
-					// there are no more incoming responses. Note that this means
-					// that it is impossible to reach a quorum, so send back the
-					// largest committed version seen. We also need to store the
-					// interface for the timed out server for future communication
-					// attempts.
-					auto& nodes = self->replies[self->largestCommitted];
-					nodes.push_back(cfi);
+					// occurred, a quorum disagree on the committed version,
+					// and there are no more incoming responses. Note that this
+					// means that it is impossible to reach a quorum, so send
+					// back the largest committed version seen.
 					self->quorumVersion.send(
 					    QuorumVersion{ CommittedVersions{ self->lastSeenVersion, self->largestCommitted }, false });
 				} else if (!self->quorumVersion.isSet()) {
@@ -333,7 +322,8 @@ class PaxosConfigConsumerImpl {
 			} catch (Error& e) {
 				if (e.code() == error_code_failed_to_reach_quorum) {
 					wait(self->getCommittedVersionQuorum.complete());
-				} else if (e.code() != error_code_timed_out && e.code() != error_code_broken_promise) {
+				} else if (e.code() != error_code_timed_out && e.code() != error_code_broken_promise &&
+				           e.code() != error_code_version_already_compacted && e.code() != error_code_process_behind) {
 					throw;
 				}
 				wait(delayJittered(0.1));
@@ -391,7 +381,8 @@ class PaxosConfigConsumerImpl {
 				wait(delayJittered(self->pollingInterval));
 			} catch (Error& e) {
 				if (e.code() == error_code_version_already_compacted || e.code() == error_code_timed_out ||
-				    e.code() == error_code_failed_to_reach_quorum) {
+				    e.code() == error_code_failed_to_reach_quorum || e.code() == error_code_version_already_compacted ||
+				    e.code() == error_code_process_behind) {
 					TEST(true); // PaxosConfigConsumer get version_already_compacted error
 					if (e.code() == error_code_failed_to_reach_quorum) {
 						try {
@@ -411,7 +402,7 @@ class PaxosConfigConsumerImpl {
 					self->resetCommittedVersionQuorum();
 					continue;
 				} else {
-					throw e;
+					throw;
 				}
 			}
 			try {
