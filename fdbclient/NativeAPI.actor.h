@@ -132,12 +132,12 @@ void setupNetwork(uint64_t transportId = 0, UseMetrics = UseMetrics::False);
 //  call stopNetwork (from a non-networking thread) can cause the runNetwork() call to
 //  return.
 //
-// Throws network_already_setup if g_network has already been initalized
+// Throws network_already_setup if g_network has already been initialized
 void runNetwork();
 
 // See above.  Can be called from a thread that is not the "networking thread"
 //
-// Throws network_not_setup if g_network has not been initalized
+// Throws network_not_setup if g_network has not been initialized
 void stopNetwork();
 
 struct StorageMetrics;
@@ -260,6 +260,8 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 
 	TransactionState(Database cx, TaskPriority taskID, SpanID spanID, Reference<TransactionLogInfo> trLogInfo)
 	  : cx(cx), trLogInfo(trLogInfo), options(cx), taskID(taskID), spanID(spanID) {}
+
+	Reference<TransactionState> cloneAndReset(Reference<TransactionLogInfo> newTrLogInfo, bool generateNewSpan) const;
 };
 
 class Transaction : NonCopyable {
@@ -307,13 +309,23 @@ public:
 		                reverse);
 	}
 
-	[[nodiscard]] Future<RangeResult> getRangeAndFlatMap(const KeySelector& begin,
-	                                                     const KeySelector& end,
-	                                                     const Key& mapper,
-	                                                     GetRangeLimits limits,
-	                                                     Snapshot = Snapshot::False,
-	                                                     Reverse = Reverse::False);
+	[[nodiscard]] Future<MappedRangeResult> getMappedRange(const KeySelector& begin,
+	                                                       const KeySelector& end,
+	                                                       const Key& mapper,
+	                                                       GetRangeLimits limits,
+	                                                       Snapshot = Snapshot::False,
+	                                                       Reverse = Reverse::False);
 
+private:
+	template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply, class RangeResultFamily>
+	Future<RangeResultFamily> getRangeInternal(const KeySelector& begin,
+	                                           const KeySelector& end,
+	                                           const Key& mapper,
+	                                           GetRangeLimits limits,
+	                                           Snapshot snapshot,
+	                                           Reverse reverse);
+
+public:
 	// A method for streaming data from the storage server that is more efficient than getRange when reading large
 	// amounts of data
 	[[nodiscard]] Future<Void> getRangeStream(const PromiseStream<Standalone<RangeResultRef>>& results,
@@ -443,6 +455,8 @@ private:
 	                                     Snapshot snapshot,
 	                                     Reverse reverse);
 
+	void resetImpl(bool generateNewSpan);
+
 	double backoff;
 	CommitTransactionRequest tr;
 	Future<Version> readVersion;
@@ -477,6 +491,10 @@ inline uint64_t getWriteOperationCost(uint64_t bytes) {
 // Create a transaction to set the value of system key \xff/conf/perpetual_storage_wiggle. If enable == true, the value
 // will be 1. Otherwise, the value will be 0.
 ACTOR Future<Void> setPerpetualStorageWiggle(Database cx, bool enable, LockAware lockAware = LockAware::False);
+
+ACTOR Future<std::vector<std::pair<UID, StorageWiggleValue>>> readStorageWiggleValues(Database cx,
+                                                                                      bool primary,
+                                                                                      bool use_system_priority);
 
 #include "flow/unactorcompiler.h"
 #endif

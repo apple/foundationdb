@@ -24,6 +24,38 @@
 const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
 {
    "cluster":{
+       "storage_wiggler": {
+		 "wiggle_server_ids":["0ccb4e0feddb55"],
+		 "wiggle_server_addresses": ["127.0.0.1"],
+         "primary": {
+          	"last_round_start_datetime": "Wed Feb  4 09:36:37 2022 +0000",
+			"last_round_start_timestamp": 63811229797,
+			"last_round_finish_datetime": "Thu Jan  1 00:00:00 1970 +0000",
+			"last_round_finish_timestamp": 0,
+			"smoothed_round_seconds": 1,
+			"finished_round": 1,
+			"last_wiggle_start_datetime": "Wed Feb  4 09:36:37 2022 +0000",
+			"last_wiggle_start_timestamp": 63811229797,
+			"last_wiggle_finish_datetime": "Thu Jan  1 00:00:00 1970 +0000",
+			"last_wiggle_finish_timestamp": 0,
+			"smoothed_wiggle_seconds": 1,
+			"finished_wiggle": 1
+          },
+          "remote": {
+          	"last_round_start_datetime": "Wed Feb  4 09:36:37 2022 +0000",
+			"last_round_start_timestamp": 63811229797,
+			"last_round_finish_datetime": "Thu Jan  1 00:00:00 1970 +0000",
+			"last_round_finish_timestamp": 0,
+			"smoothed_round_seconds": 1,
+			"finished_round": 1,
+			"last_wiggle_start_datetime": "Wed Feb  4 09:36:37 2022 +0000",
+			"last_wiggle_start_timestamp": 63811229797,
+			"last_wiggle_finish_datetime": "Thu Jan  1 00:00:00 1970 +0000",
+			"last_wiggle_finish_timestamp": 0,
+			"smoothed_wiggle_seconds": 1,
+			"finished_wiggle": 1
+          }
+      },
       "layers":{
          "_valid":true,
          "_error":"some error description"
@@ -97,10 +129,15 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                         "ratekeeper",
                         "blob_manager",
                         "blob_worker",
+                        "encrypt_key_proxy",
                         "storage_cache",
                         "router",
                         "coordinator"
                      ]
+                  },
+                  "storage_metadata":{
+                     "created_time_datetime":"Thu Jan  1 00:00:00 1970 +0000",
+                     "created_time_timestamp": 0
                   },
                   "data_version":12341234,
                   "durable_version":12341234,
@@ -497,6 +534,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "unreachable_dataDistributor_worker",
                   "unreachable_ratekeeper_worker",
                   "unreachable_blobManager_worker",
+                  "unreachable_encryptKeyProxy_worker",
                   "unreadable_configuration",
                   "full_replication_timeout",
                   "client_issues",
@@ -771,6 +809,12 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
              "disabled",
              "aggressive",
              "gradual"
+         ]},
+         "tenant_mode": {
+             "$enum":[
+             "disabled",
+             "optional_experimental",
+             "required_experimental"
          ]}
       },
       "data":{
@@ -1041,19 +1085,3 @@ const KeyRef JSONSchemas::managementApiErrorSchema = LiteralStringRef(R"""(
    "message": "The reason of the error"
 }
 )""");
-
-const KeyRef JSONSchemas::clientLibMetadataSchema = LiteralStringRef(R"""(
-{
-    "platform": "x86_64-linux",
-    "version": "7.1.0",
-    "githash": "e28fef6264d05ab0c9488238022d1ee885a30bea",
-    "type": "debug",
-    "checksum": "fcef53fb4ae86d2c4fff4dc17c7e5d08",
-    "checksumalg": "md5",
-    "apiversion": 710,
-    "protocol": "fdb00b07001001",
-    "filename": "libfdb_c.7.1.0.so",
-    "size" : 19467552,
-    "chunkcount" : 2377,
-    "status": "available"
-})""");

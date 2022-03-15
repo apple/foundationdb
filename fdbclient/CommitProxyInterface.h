@@ -115,9 +115,8 @@ struct ClientDBInfo {
 	    firstCommitProxy; // not serialized, used for commitOnFirstProxy when the commit proxies vector has been shrunk
 	Optional<Value> forward;
 	std::vector<VersionHistory> history;
-	// a counter increased every time a change of uploaded client libraries
-	// happens, the clients need to be aware of
-	uint64_t clientLibChangeCounter = 0;
+
+	TenantMode tenantMode;
 
 	ClientDBInfo() {}
 
@@ -129,7 +128,7 @@ struct ClientDBInfo {
 		if constexpr (!is_fb_function<Archive>) {
 			ASSERT(ar.protocolVersion().isValid());
 		}
-		serializer(ar, grvProxies, commitProxies, id, forward, history, clientLibChangeCounter);
+		serializer(ar, grvProxies, commitProxies, id, forward, history, tenantMode);
 	}
 };
 
@@ -170,12 +169,16 @@ struct CommitTransactionRequest : TimedRequest {
 	Optional<ClientTrCommitCostEstimation> commitCostEstimation;
 	Optional<TagSet> tagSet;
 
-	CommitTransactionRequest() : CommitTransactionRequest(SpanID()) {}
-	CommitTransactionRequest(SpanID const& context) : spanContext(context), flags(0) {}
+	TenantInfo tenantInfo;
+
+	CommitTransactionRequest() : CommitTransactionRequest(TenantInfo(), SpanID()) {}
+	CommitTransactionRequest(TenantInfo const& tenantInfo, SpanID const& context)
+	  : spanContext(context), flags(0), tenantInfo(tenantInfo) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, transaction, reply, arena, flags, debugID, commitCostEstimation, tagSet, spanContext);
+		serializer(
+		    ar, transaction, reply, arena, flags, debugID, commitCostEstimation, tagSet, spanContext, tenantInfo);
 	}
 };
 
@@ -198,12 +201,12 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 	bool locked;
 	Optional<Value> metadataVersion;
 	int64_t midShardSize = 0;
-	uint32_t queueIterations = 0;
-	bool rkThrottled;
+	bool rkDefaultThrottled = false;
+	bool rkBatchThrottled = false;
 
 	TransactionTagMap<ClientTagThrottleLimits> tagThrottleInfo;
 
-	GetReadVersionReply() : version(invalidVersion), locked(false), rkThrottled(false) {}
+	GetReadVersionReply() : version(invalidVersion), locked(false) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -214,8 +217,8 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 		           metadataVersion,
 		           tagThrottleInfo,
 		           midShardSize,
-		           queueIterations,
-		           rkThrottled);
+		           rkDefaultThrottled,
+		           rkBatchThrottled);
 	}
 };
 
@@ -238,22 +241,21 @@ struct GetReadVersionRequest : TimedRequest {
 	uint32_t transactionCount;
 	uint32_t flags;
 	TransactionPriority priority;
-	uint32_t queueIterations;
 
 	TransactionTagMap<uint32_t> tags;
 
 	Optional<UID> debugID;
 	ReplyPromise<GetReadVersionReply> reply;
 
-	GetReadVersionRequest() : transactionCount(1), flags(0), queueIterations(0) {}
+	GetReadVersionRequest() : transactionCount(1), flags(0) {}
 	GetReadVersionRequest(SpanID spanContext,
 	                      uint32_t transactionCount,
 	                      TransactionPriority priority,
 	                      uint32_t flags = 0,
 	                      TransactionTagMap<uint32_t> tags = TransactionTagMap<uint32_t>(),
 	                      Optional<UID> debugID = Optional<UID>())
-	  : spanContext(spanContext), transactionCount(transactionCount), flags(flags), priority(priority),
-	    queueIterations(0), tags(tags), debugID(debugID) {
+	  : spanContext(spanContext), transactionCount(transactionCount), flags(flags), priority(priority), tags(tags),
+	    debugID(debugID) {
 		flags = flags & ~FLAG_PRIORITY_MASK;
 		switch (priority) {
 		case TransactionPriority::BATCH:
@@ -274,7 +276,7 @@ struct GetReadVersionRequest : TimedRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, transactionCount, flags, tags, debugID, reply, spanContext, queueIterations);
+		serializer(ar, transactionCount, flags, tags, debugID, reply, spanContext);
 
 		if (ar.isDeserializing) {
 			if ((flags & PRIORITY_SYSTEM_IMMEDIATE) == PRIORITY_SYSTEM_IMMEDIATE) {
@@ -293,6 +295,7 @@ struct GetReadVersionRequest : TimedRequest {
 struct GetKeyServerLocationsReply {
 	constexpr static FileIdentifier file_identifier = 10636023;
 	Arena arena;
+	TenantMapEntry tenantEntry;
 	std::vector<std::pair<KeyRangeRef, std::vector<StorageServerInterface>>> results;
 
 	// if any storage servers in results have a TSS pair, that mapping is in here
@@ -300,7 +303,7 @@ struct GetKeyServerLocationsReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, results, resultsTssMapping, arena);
+		serializer(ar, results, resultsTssMapping, tenantEntry, arena);
 	}
 };
 
@@ -308,24 +311,34 @@ struct GetKeyServerLocationsRequest {
 	constexpr static FileIdentifier file_identifier = 9144680;
 	Arena arena;
 	SpanID spanContext;
+	Optional<TenantNameRef> tenant;
 	KeyRef begin;
 	Optional<KeyRef> end;
 	int limit;
 	bool reverse;
 	ReplyPromise<GetKeyServerLocationsReply> reply;
 
-	GetKeyServerLocationsRequest() : limit(0), reverse(false) {}
+	// This version is used to specify the minimum metadata version a proxy must have in order to declare that
+	// a tenant is not present. If the metadata version is lower, the proxy must wait in case the tenant gets
+	// created. If latestVersion is specified, then the proxy will wait until it is sure that it has received
+	// updates from other proxies before answering.
+	Version minTenantVersion;
+
+	GetKeyServerLocationsRequest() : limit(0), reverse(false), minTenantVersion(latestVersion) {}
 	GetKeyServerLocationsRequest(SpanID spanContext,
+	                             Optional<TenantNameRef> const& tenant,
 	                             KeyRef const& begin,
 	                             Optional<KeyRef> const& end,
 	                             int limit,
 	                             bool reverse,
+	                             Version minTenantVersion,
 	                             Arena const& arena)
-	  : arena(arena), spanContext(spanContext), begin(begin), end(end), limit(limit), reverse(reverse) {}
+	  : arena(arena), spanContext(spanContext), tenant(tenant), begin(begin), end(end), limit(limit), reverse(reverse),
+	    minTenantVersion(minTenantVersion) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, begin, end, limit, reverse, reply, spanContext, arena);
+		serializer(ar, begin, end, limit, reverse, reply, spanContext, tenant, minTenantVersion, arena);
 	}
 };
 

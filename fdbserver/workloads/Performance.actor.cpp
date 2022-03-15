@@ -175,7 +175,9 @@ struct PerformanceWorkload : TestWorkload {
 				DistributedTestResults r = wait(runWorkload(cx, self->testers, spec));
 				results = r;
 			} catch (Error& e) {
-				TraceEvent("PerformanceRunError").error(e, true).detail("Workload", printable(self->probeWorkload));
+				TraceEvent("PerformanceRunError")
+				    .errorUnsuppressed(e)
+				    .detail("Workload", printable(self->probeWorkload));
 				break;
 			}
 			PerfMetric tpsMetric = self->getNamedMetric("Transactions/sec", results.metrics);

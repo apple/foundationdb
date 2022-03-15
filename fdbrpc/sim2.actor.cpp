@@ -21,7 +21,7 @@
 #include <cinttypes>
 #include <memory>
 
-#include "contrib/fmt-8.0.1/include/fmt/format.h"
+#include "contrib/fmt-8.1.1/include/fmt/format.h"
 #include "fdbrpc/simulator.h"
 #define BOOST_SYSTEM_NO_LIB
 #define BOOST_DATE_TIME_NO_LIB
@@ -865,7 +865,7 @@ public:
 
 		if (!ordered && !currentProcess->rebooting && machine == currentProcess &&
 		    !currentProcess->shutdownSignal.isSet() && FLOW_KNOBS->MAX_BUGGIFIED_DELAY > 0 &&
-		    deterministicRandom()->random01() < 0.25) { // FIXME: why doesnt this work when we are changing machines?
+		    deterministicRandom()->random01() < 0.25) { // FIXME: why doesn't this work when we are changing machines?
 			seconds += FLOW_KNOBS->MAX_BUGGIFIED_DELAY * pow(deterministicRandom()->random01(), 1000.0);
 		}
 
@@ -959,6 +959,14 @@ public:
 			return mockDNS.getTCPEndpoint(host, service);
 		}
 		return SimExternalConnection::resolveTCPEndpoint(host, service);
+	}
+	std::vector<NetworkAddress> resolveTCPEndpointBlocking(const std::string& host,
+	                                                       const std::string& service) override {
+		// If a <hostname, vector<NetworkAddress>> pair was injected to mock DNS, use it.
+		if (mockDNS.findMockTCPEndpoint(host, service)) {
+			return mockDNS.getTCPEndpoint(host, service);
+		}
+		return SimExternalConnection::resolveTCPEndpointBlocking(host, service);
 	}
 	ACTOR static Future<Reference<IConnection>> onConnect(Future<Void> ready, Reference<Sim2Conn> conn) {
 		wait(ready);
@@ -1115,11 +1123,9 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> runLoop(Sim2* self) {
-		state ISimulator::ProcessInfo* callingMachine = self->currentProcess;
+	static void runLoop(Sim2* self) {
+		ISimulator::ProcessInfo* callingMachine = self->currentProcess;
 		while (!self->isStopped) {
-			wait(self->net2->yield(TaskPriority::DefaultYield));
-
 			self->mutex.enter();
 			if (self->tasks.size() == 0) {
 				self->mutex.leave();
@@ -1136,18 +1142,13 @@ public:
 			self->yielded = false;
 		}
 		self->currentProcess = callingMachine;
-		self->net2->stop();
 		for (auto& fn : self->stopCallbacks) {
 			fn();
 		}
-		return Void();
 	}
 
 	// Implement ISimulator interface
-	void run() override {
-		Future<Void> loopFuture = runLoop(this);
-		net2->run();
-	}
+	void run() override { runLoop(this); }
 	ProcessInfo* newProcess(const char* name,
 	                        IPAddress ip,
 	                        uint16_t port,
@@ -2086,7 +2087,7 @@ public:
 				t.action.send(Void());
 				ASSERT(this->currentProcess == t.machine);
 			} catch (Error& e) {
-				TraceEvent(SevError, "UnhandledSimulationEventError").error(e, true);
+				TraceEvent(SevError, "UnhandledSimulationEventError").errorUnsuppressed(e);
 				killProcess(t.machine, KillInstantly);
 			}
 

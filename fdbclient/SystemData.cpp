@@ -228,9 +228,9 @@ const Key storageCacheServerKey(UID id) {
 }
 
 const Value storageCacheServerValue(const StorageServerInterface& ssi) {
-	BinaryWriter wr(IncludeVersion());
-	wr << ssi;
-	return wr.toValue();
+	auto protocolVersion = currentProtocolVersion;
+	protocolVersion.addObjectSerializerFlag();
+	return ObjectWriter::toValue(ssi, IncludeVersion(protocolVersion));
 }
 
 const KeyRangeRef ddStatsRange = KeyRangeRef(LiteralStringRef("\xff\xff/metrics/data_distribution_stats/"),
@@ -368,6 +368,9 @@ UID decodeTssQuarantineKey(KeyRef const& key) {
 }
 
 const KeyRangeRef tssMismatchKeys(LiteralStringRef("\xff/tssMismatch/"), LiteralStringRef("\xff/tssMismatch0"));
+
+const KeyRangeRef serverMetadataKeys(LiteralStringRef("\xff/serverMetadata/"),
+                                     LiteralStringRef("\xff/serverMetadata0"));
 
 const KeyRangeRef serverTagKeys(LiteralStringRef("\xff/serverTag/"), LiteralStringRef("\xff/serverTag0"));
 
@@ -633,7 +636,10 @@ const KeyRef configKeysPrefix = configKeys.begin;
 
 const KeyRef perpetualStorageWiggleKey(LiteralStringRef("\xff/conf/perpetual_storage_wiggle"));
 const KeyRef perpetualStorageWiggleLocalityKey(LiteralStringRef("\xff/conf/perpetual_storage_wiggle_locality"));
-const KeyRef wigglingStorageServerKey(LiteralStringRef("\xff/storageWigglePID"));
+const KeyRef perpetualStorageWiggleIDPrefix(
+    LiteralStringRef("\xff/storageWiggleID/")); // withSuffix /primary or /remote
+const KeyRef perpetualStorageWiggleStatsPrefix(
+    LiteralStringRef("\xff/storageWiggleStats/")); // withSuffix /primary or /remote
 
 const KeyRef triggerDDTeamInfoPrintKey(LiteralStringRef("\xff/triggerDDTeamInfoPrint"));
 
@@ -1027,16 +1033,6 @@ std::pair<Key, Version> decodeHealthyZoneValue(ValueRef const& value) {
 	return std::make_pair(zoneId, version);
 }
 
-const KeyRangeRef clientLibMetadataKeys(LiteralStringRef("\xff\x02/clientlib/meta/"),
-                                        LiteralStringRef("\xff\x02/clientlib/meta0"));
-const KeyRef clientLibMetadataPrefix = clientLibMetadataKeys.begin;
-
-const KeyRangeRef clientLibBinaryKeys(LiteralStringRef("\xff\x02/clientlib/bin/"),
-                                      LiteralStringRef("\xff\x02/clientlib/bin0"));
-const KeyRef clientLibBinaryPrefix = clientLibBinaryKeys.begin;
-
-const KeyRef clientLibChangeCounterKey = "\xff\x02/clientlib/changeCounter"_sr;
-
 const KeyRangeRef testOnlyTxnStateStorePrefixRange(LiteralStringRef("\xff/TESTONLYtxnStateStore/"),
                                                    LiteralStringRef("\xff/TESTONLYtxnStateStore0"));
 
@@ -1325,6 +1321,21 @@ BlobWorkerInterface decodeBlobWorkerListValue(ValueRef const& value) {
 	reader.deserialize(interf);
 	return interf;
 }
+
+Value encodeTenantEntry(TenantMapEntry const& tenantEntry) {
+	return ObjectWriter::toValue(tenantEntry, IncludeVersion());
+}
+
+TenantMapEntry decodeTenantEntry(ValueRef const& value) {
+	TenantMapEntry entry;
+	ObjectReader reader(value.begin(), IncludeVersion());
+	reader.deserialize(entry);
+	return entry;
+}
+
+const KeyRangeRef tenantMapKeys("\xff/tenantMap/"_sr, "\xff/tenantMap0"_sr);
+const KeyRef tenantMapPrefix = tenantMapKeys.begin;
+const KeyRef tenantMapPrivatePrefix = "\xff\xff/tenantMap/"_sr;
 
 // for tests
 void testSSISerdes(StorageServerInterface const& ssi, bool useFB) {

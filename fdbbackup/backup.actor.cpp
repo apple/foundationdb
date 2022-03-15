@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "contrib/fmt-8.0.1/include/fmt/format.h"
+#include "contrib/fmt-8.1.1/include/fmt/format.h"
 #include "fdbbackup/BackupTLSConfig.h"
 #include "fdbclient/JsonBuilder.h"
 #include "flow/Arena.h"
@@ -95,7 +95,8 @@ enum class BackupType {
 	LIST,
 	QUERY,
 	DUMP,
-	CLEANUP
+	CLEANUP,
+	TAGS,
 };
 
 enum class DBType { UNDEFINED = 0, START, STATUS, SWITCH, ABORT, PAUSE, RESUME };
@@ -599,6 +600,24 @@ CSimpleOpt::SOption g_rgBackupDumpOptions[] = {
 	    SO_END_OF_OPTIONS
 };
 
+CSimpleOpt::SOption g_rgBackupTagsOptions[] = {
+#ifdef _WIN32
+	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
+#endif
+	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
+	{ OPT_CLUSTERFILE, "--cluster-file", SO_REQ_SEP },
+	{ OPT_TRACE, "--log", SO_NONE },
+	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
+	{ OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
+	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
+	{ OPT_QUIET, "-q", SO_NONE },
+	{ OPT_QUIET, "--quiet", SO_NONE },
+#ifndef TLS_DISABLED
+	TLS_OPTION_FLAGS
+#endif
+	    SO_END_OF_OPTIONS
+};
+
 CSimpleOpt::SOption g_rgBackupListOptions[] = {
 #ifdef _WIN32
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
@@ -998,7 +1017,7 @@ void printBackupContainerInfo() {
 static void printBackupUsage(bool devhelp) {
 	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
 	printf("Usage: %s [TOP_LEVEL_OPTIONS] (start | status | abort | wait | discontinue | pause | resume | expire | "
-	       "delete | describe | list | query | cleanup) [ACTION_OPTIONS]\n\n",
+	       "delete | describe | list | query | cleanup | tags) [ACTION_OPTIONS]\n\n",
 	       exeBackup.toString().c_str());
 	printf(" TOP LEVEL OPTIONS:\n");
 	printf("  --build-flags  Print build information and exit.\n");
@@ -1424,6 +1443,7 @@ BackupType getBackupType(std::string backupType) {
 		values["query"] = BackupType::QUERY;
 		values["dump"] = BackupType::DUMP;
 		values["modify"] = BackupType::MODIFY;
+		values["tags"] = BackupType::TAGS;
 	}
 
 	auto i = values.find(backupType);
@@ -1641,7 +1661,7 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 	return json;
 }
 
-// Check for unparseable or expired statuses and delete them.
+// Check for unparsable or expired statuses and delete them.
 // First checks the first doc in the key range, and if it is valid, alive and not "me" then
 // returns.  Otherwise, checks the rest of the range as well.
 ACTOR Future<Void> cleanupStatus(Reference<ReadYourWritesTransaction> tr,
@@ -1670,7 +1690,7 @@ ACTOR Future<Void> cleanupStatus(Reference<ReadYourWritesTransaction> tr,
 				readMore = true;
 		} catch (Error& e) {
 			// If doc can't be parsed or isn't alive, delete it.
-			TraceEvent(SevWarn, "RemovedDeadBackupLayerStatus").detail("Key", docs[i].key).error(e, true);
+			TraceEvent(SevWarn, "RemovedDeadBackupLayerStatus").errorUnsuppressed(e).detail("Key", docs[i].key);
 			tr->clear(docs[i].key);
 			// If limit is 1 then read more.
 			if (limit == 1)
@@ -2734,7 +2754,7 @@ ACTOR Future<Void> queryBackup(const char* name,
 			reportBackupQueryError(operationId,
 			                       result,
 			                       errorMessage =
-			                           format("the specified restorable version %ld is not valid", restoreVersion));
+			                           format("the specified restorable version %lld is not valid", restoreVersion));
 			return Void();
 		}
 		Optional<RestorableFileSet> fileSet = wait(bc->getRestoreSet(restoreVersion, keyRangesFilter));
@@ -2810,6 +2830,23 @@ ACTOR Future<Void> listBackup(std::string baseUrl) {
 	}
 
 	return Void();
+}
+
+ACTOR Future<Void> listBackupTags(Database cx) {
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			std::vector<KeyBackedTag> tags = wait(getAllBackupTags(tr));
+			for (const auto& tag : tags) {
+				printf("%s\n", tag.tagName.c_str());
+			}
+			return Void();
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
 }
 
 struct BackupModifyOptions {
@@ -3044,7 +3081,7 @@ static void addKeyRange(std::string optionValue, Standalone<VectorRef<KeyRangeRe
 
 			// Too many keys
 		default:
-			fprintf(stderr, "ERROR: Invalid key range identified with %ld keys", tokens.size());
+			fmt::print(stderr, "ERROR: Invalid key range identified with {} keys", tokens.size());
 			throw invalid_option_value();
 			break;
 		}
@@ -3213,6 +3250,10 @@ int main(int argc, char* argv[]) {
 				case BackupType::MODIFY:
 					args = std::make_unique<CSimpleOpt>(
 					    argc - 1, &argv[1], g_rgBackupModifyOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
+					break;
+				case BackupType::TAGS:
+					args = std::make_unique<CSimpleOpt>(
+					    argc - 1, &argv[1], g_rgBackupTagsOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
 					break;
 				case BackupType::UNDEFINED:
 				default:
@@ -3846,9 +3887,9 @@ int main(int argc, char* argv[]) {
 				} else {
 					fprintf(stderr, "ERROR: Failed to set knob option '%s': %s\n", knobName.c_str(), e.what());
 					TraceEvent(SevError, "FailedToSetKnob")
+					    .error(e)
 					    .detail("Knob", printable(knobName))
-					    .detail("Value", printable(knobValueString))
-					    .error(e);
+					    .detail("Value", printable(knobValueString));
 					throw;
 				}
 			}
@@ -4028,6 +4069,12 @@ int main(int argc, char* argv[]) {
 			case BackupType::LIST:
 				initTraceFile();
 				f = stopAfter(listBackup(baseUrl));
+				break;
+
+			case BackupType::TAGS:
+				if (!initCluster())
+					return FDB_EXIT_ERROR;
+				f = stopAfter(listBackupTags(db));
 				break;
 
 			case BackupType::QUERY:

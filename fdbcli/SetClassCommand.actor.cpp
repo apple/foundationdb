@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "contrib/fmt-8.0.1/include/fmt/format.h"
+#include "contrib/fmt-8.1.1/include/fmt/format.h"
 
 #include "fdbcli/fdbcli.actor.h"
 
@@ -77,6 +77,13 @@ ACTOR Future<bool> setProcessClass(Reference<IDatabase> db, KeyRef network_addre
 	loop {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		try {
+			state ThreadFuture<Optional<Value>> result =
+			    tr->get(network_address.withPrefix(fdb_cli::processClassTypeSpecialKeyRange.begin));
+			Optional<Value> val = wait(safeThreadFutureToFuture(result));
+			if (!val.present()) {
+				printf("No matching addresses found\n");
+				return false;
+			}
 			tr->set(network_address.withPrefix(fdb_cli::processClassTypeSpecialKeyRange.begin), class_type);
 			wait(safeThreadFutureToFuture(tr->commit()));
 			return true;

@@ -31,6 +31,7 @@
 #include "flow/ObjectSerializerTraits.h"
 #include "flow/FileIdentifier.h"
 #include <algorithm>
+#include <boost/functional/hash.hpp>
 #include <stdint.h>
 #include <string>
 #include <cstring>
@@ -282,8 +283,10 @@ public:
 	bool operator<(Optional const& o) const { return impl < o.impl; }
 
 	void reset() { impl.reset(); }
+	size_t hash() const { return hashFunc(impl); }
 
 private:
+	static inline std::hash<std::optional<T>> hashFunc{};
 	std::optional<T> impl;
 };
 
@@ -346,6 +349,8 @@ struct union_like_traits<Optional<T>> : std::true_type {
 template <class T>
 class Standalone : private Arena, public T {
 public:
+	using RefType = T;
+
 	// T must have no destructor
 	Arena& arena() { return *(Arena*)this; }
 	const Arena& arena() const { return *(const Arena*)this; }
@@ -550,7 +555,7 @@ public:
 	int expectedSize() const { return size(); }
 
 	int compare(StringRef const& other) const {
-		size_t minSize = std::min(size(), other.size());
+		auto minSize = static_cast<int>(std::min(size(), other.size()));
 		if (minSize != 0) {
 			int c = memcmp(begin(), other.begin(), minSize);
 			if (c != 0)
@@ -650,6 +655,26 @@ struct hash<Standalone<StringRef>> {
 	}
 };
 } // namespace std
+
+namespace std {
+template <class T>
+struct hash<Optional<T>> {
+	std::size_t operator()(Optional<T> const& val) const { return val.hash(); }
+};
+} // namespace std
+
+template <class T, class V = std::void_t<>>
+struct boost_hashable : std::false_type {};
+
+template <class T>
+struct boost_hashable<T, std::void_t<decltype(boost::hash_value(std::declval<T>()))>> : std::true_type {};
+
+// Using boost hash functions on types that depend on member hashes (e.g. std::pair) expect the members
+// to be boost hashable. This provides a default boost hash function based on std::hash.
+template <class T>
+std::enable_if_t<!boost_hashable<T>::value, std::size_t> hash_value(const T& v) {
+	return std::hash<T>{}(v);
+}
 
 template <>
 struct TraceableString<StringRef> {
@@ -822,10 +847,14 @@ enum class VecSerStrategy { FlatBuffers, String };
 template <class T, VecSerStrategy>
 struct VectorRefPreserializer {
 	VectorRefPreserializer() {}
-	VectorRefPreserializer(const VectorRefPreserializer<T, VecSerStrategy::FlatBuffers>&) {}
-	VectorRefPreserializer& operator=(const VectorRefPreserializer<T, VecSerStrategy::FlatBuffers>&) { return *this; }
-	VectorRefPreserializer(const VectorRefPreserializer<T, VecSerStrategy::String>&) {}
-	VectorRefPreserializer& operator=(const VectorRefPreserializer<T, VecSerStrategy::String>&) { return *this; }
+	VectorRefPreserializer(const VectorRefPreserializer<T, VecSerStrategy::FlatBuffers>&) noexcept {}
+	VectorRefPreserializer& operator=(const VectorRefPreserializer<T, VecSerStrategy::FlatBuffers>&) noexcept {
+		return *this;
+	}
+	VectorRefPreserializer(const VectorRefPreserializer<T, VecSerStrategy::String>&) noexcept {}
+	VectorRefPreserializer& operator=(const VectorRefPreserializer<T, VecSerStrategy::String>&) noexcept {
+		return *this;
+	}
 
 	void invalidate() {}
 	void add(const T& item) {}
@@ -839,14 +868,14 @@ struct VectorRefPreserializer<T, VecSerStrategy::String> {
 	string_serialized_traits<T> _string_traits;
 
 	VectorRefPreserializer() : _cached_size(0) {}
-	VectorRefPreserializer(const VectorRefPreserializer<T, VecSerStrategy::String>& other)
+	VectorRefPreserializer(const VectorRefPreserializer<T, VecSerStrategy::String>& other) noexcept
 	  : _cached_size(other._cached_size) {}
-	VectorRefPreserializer& operator=(const VectorRefPreserializer<T, VecSerStrategy::String>& other) {
+	VectorRefPreserializer& operator=(const VectorRefPreserializer<T, VecSerStrategy::String>& other) noexcept {
 		_cached_size = other._cached_size;
 		return *this;
 	}
-	VectorRefPreserializer(const VectorRefPreserializer<T, VecSerStrategy::FlatBuffers>&) : _cached_size(-1) {}
-	VectorRefPreserializer& operator=(const VectorRefPreserializer<T, VecSerStrategy::FlatBuffers>&) {
+	VectorRefPreserializer(const VectorRefPreserializer<T, VecSerStrategy::FlatBuffers>&) noexcept : _cached_size(-1) {}
+	VectorRefPreserializer& operator=(const VectorRefPreserializer<T, VecSerStrategy::FlatBuffers>&) noexcept {
 		_cached_size = -1;
 		return *this;
 	}

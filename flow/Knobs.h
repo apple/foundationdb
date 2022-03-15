@@ -33,7 +33,7 @@
 #include <optional>
 
 // Helper macros to allow the init macro to be called with an optional third
-// paramater, used to explicit set atomicity of knobs.
+// parameter, used to explicit set atomicity of knobs.
 #define KNOB_FN(_1, _2, _3, FN, ...) FN
 #define INIT_KNOB(knob, value) initKnob(knob, value, #knob)
 #define INIT_ATOMIC_KNOB(knob, value, atomic) initKnob(knob, value, #knob, atomic)
@@ -122,6 +122,7 @@ public:
 
 	bool WRITE_TRACING_ENABLED;
 	double TRACING_SAMPLE_RATE;
+	std::string TRACING_UDP_LISTENER_ADDR;
 	int TRACING_UDP_LISTENER_PORT;
 
 	// run loop profiling
@@ -226,6 +227,7 @@ public:
 	double MIN_LOGGED_PRIORITY_BUSY_FRACTION;
 	int CERT_FILE_MAX_SIZE;
 	int READY_QUEUE_RESERVED_SIZE;
+	int ITERATIONS_PER_REACTOR_CHECK;
 
 	// Network
 	int64_t PACKET_LIMIT;
@@ -265,6 +267,7 @@ public:
 	int MAX_TRACE_FIELD_LENGTH;
 	int MAX_TRACE_EVENT_LENGTH;
 	bool ALLOCATION_TRACING_ENABLED;
+	int CODE_COV_TRACE_EVENT_SEVERITY;
 
 	// TDMetrics
 	int64_t MAX_METRIC_SIZE;

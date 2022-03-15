@@ -2142,7 +2142,7 @@ struct StartFullBackupTaskFunc : TaskFuncBase {
 				wait(tr->commit());
 				break;
 			} catch (Error& e) {
-				TraceEvent("SetDestUidOrBeginVersionError").error(e, true);
+				TraceEvent("SetDestUidOrBeginVersionError").errorUnsuppressed(e);
 				wait(tr->onError(e));
 			}
 		}
@@ -2366,7 +2366,7 @@ std::string getDRMutationStreamId(StatusObjectReader statusObj, const char* cont
 bool getLockedStatus(StatusObjectReader statusObj) {
 	try {
 		StatusObjectReader statusObjCluster = statusObj["cluster"].get_obj();
-		return statusObjCluster["database_locked"].get_bool();
+		return statusObjCluster["database_lock_state.locked"].get_bool();
 	} catch (std::runtime_error& e) {
 		TraceEvent(SevWarn, "DBA_GetLockedStatusFail").detail("Error", e.what());
 		throw backup_error();
@@ -2907,7 +2907,7 @@ public:
 				TraceEvent("DBA_Abort").detail("CommitVersion", tr->getCommittedVersion());
 				break;
 			} catch (Error& e) {
-				TraceEvent("DBA_AbortError").error(e, true);
+				TraceEvent("DBA_AbortError").errorUnsuppressed(e);
 				wait(tr->onError(e));
 			}
 		}

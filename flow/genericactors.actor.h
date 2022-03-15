@@ -50,7 +50,7 @@ Future<T> traceAfter(Future<T> what, const char* type, const char* key, X value,
 		return val;
 	} catch (Error& e) {
 		if (traceErrors)
-			TraceEvent(type).error(e, true).detail(key, value);
+			TraceEvent(type).errorUnsuppressed(e).detail(key, value);
 		throw;
 	}
 }
@@ -67,7 +67,7 @@ Future<T> traceAfterCall(Future<T> what, const char* type, const char* key, X fu
 		return val;
 	} catch (Error& e) {
 		if (traceErrors)
-			TraceEvent(type).error(e, true);
+			TraceEvent(type).errorUnsuppressed(e);
 		throw;
 	}
 }
@@ -1202,17 +1202,17 @@ Future<T> brokenPromiseToMaybeDelivered(Future<T> in) {
 	}
 }
 
-ACTOR template <class T>
-void tagAndForward(Promise<T>* pOutputPromise, T value, Future<Void> signal) {
+ACTOR template <class T, class U>
+void tagAndForward(Promise<T>* pOutputPromise, U value, Future<Void> signal) {
 	state Promise<T> out(std::move(*pOutputPromise));
 	wait(signal);
-	out.send(value);
+	out.send(std::move(value));
 }
 
 ACTOR template <class T>
 void tagAndForward(PromiseStream<T>* pOutput, T value, Future<Void> signal) {
 	wait(signal);
-	pOutput->send(value);
+	pOutput->send(std::move(value));
 }
 
 ACTOR template <class T>

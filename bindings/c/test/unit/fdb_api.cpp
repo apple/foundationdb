@@ -90,6 +90,14 @@ void Future::cancel() {
 	return fdb_future_get_keyvalue_array(future_, out_kv, out_count, out_more);
 }
 
+// MappedKeyValueArrayFuture
+
+[[nodiscard]] fdb_error_t MappedKeyValueArrayFuture::get(const FDBMappedKeyValue** out_kv,
+                                                         int* out_count,
+                                                         fdb_bool_t* out_more) {
+	return fdb_future_get_mappedkeyvalue_array(future_, out_kv, out_count, out_more);
+}
+
 // Result
 
 Result::~Result() {
@@ -210,7 +218,7 @@ KeyValueArrayFuture Transaction::get_range(const uint8_t* begin_key_name,
 	                                                     reverse));
 }
 
-KeyValueArrayFuture Transaction::get_range_and_flat_map(const uint8_t* begin_key_name,
+MappedKeyValueArrayFuture Transaction::get_mapped_range(const uint8_t* begin_key_name,
                                                         int begin_key_name_length,
                                                         fdb_bool_t begin_or_equal,
                                                         int begin_offset,
@@ -226,7 +234,7 @@ KeyValueArrayFuture Transaction::get_range_and_flat_map(const uint8_t* begin_key
                                                         int iteration,
                                                         fdb_bool_t snapshot,
                                                         fdb_bool_t reverse) {
-	return KeyValueArrayFuture(fdb_transaction_get_range_and_flat_map(tr_,
+	return MappedKeyValueArrayFuture(fdb_transaction_get_mapped_range(tr_,
 	                                                                  begin_key_name,
 	                                                                  begin_key_name_length,
 	                                                                  begin_or_equal,

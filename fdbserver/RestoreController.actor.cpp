@@ -136,7 +136,7 @@ ACTOR Future<Void> startRestoreController(Reference<RestoreWorkerData> controlle
 		wait(startProcessRestoreRequests(self, cx) || error);
 	} catch (Error& e) {
 		if (e.code() != error_code_operation_cancelled) {
-			TraceEvent(SevError, "FastRestoreControllerStart").detail("Reason", "Unexpected unhandled error").error(e);
+			TraceEvent(SevError, "FastRestoreControllerStart").error(e).detail("Reason", "Unexpected unhandled error");
 		}
 	}
 
@@ -1140,7 +1140,7 @@ ACTOR static Future<Void> signalRestoreCompleted(Reference<RestoreControllerData
 }
 
 /*
-// Update the most recent time when controller receives hearbeat from each loader and applier
+// Update the most recent time when controller receives heartbeat from each loader and applier
 // TODO: Replace the heartbeat mechanism with FDB failure monitoring mechanism
 ACTOR static Future<Void> updateHeartbeatTime(Reference<RestoreControllerData> self) {
     wait(self->recruitedRoles.getFuture());

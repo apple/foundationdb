@@ -465,7 +465,7 @@ ACTOR Future<Void> databaseWarmer(Database cx) {
 	}
 }
 
-// Tries indefinitly to commit a simple, self conflicting transaction
+// Tries indefinitely to commit a simple, self conflicting transaction
 ACTOR Future<Void> pingDatabase(Database cx) {
 	state Transaction tr(cx);
 	loop {
@@ -569,7 +569,7 @@ ACTOR Future<Void> runWorkloadAsync(Database cx,
 					if (e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_delete)
 						throw;
 					TraceEvent(SevError, "TestFailure", workIface.id())
-					    .error(e, true)
+					    .errorUnsuppressed(e)
 					    .detail("Reason", "Error starting workload")
 					    .detail("Workload", workload->description());
 					// ok = false;

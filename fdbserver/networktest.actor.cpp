@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "contrib/fmt-8.0.1/include/fmt/format.h"
+#include "contrib/fmt-8.1.1/include/fmt/format.h"
 #include "fdbserver/NetworkTest.h"
 #include "flow/Knobs.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -539,8 +539,8 @@ struct P2PNetworkTest {
 		} catch (Error& e) {
 			++self->sessionErrors;
 			TraceEvent(SevError, incoming ? "P2PIncomingSessionError" : "P2POutgoingSessionError")
-			    .detail("Remote", conn->getPeerAddress())
-			    .error(e);
+			    .error(e)
+			    .detail("Remote", conn->getPeerAddress());
 		}
 
 		return Void();
@@ -557,7 +557,7 @@ struct P2PNetworkTest {
 				wait(doSession(self, conn, false));
 			} catch (Error& e) {
 				++self->connectErrors;
-				TraceEvent(SevError, "P2POutgoingError").detail("Remote", remote).error(e);
+				TraceEvent(SevError, "P2POutgoingError").error(e).detail("Remote", remote);
 				wait(delay(1));
 			}
 		}
@@ -575,7 +575,7 @@ struct P2PNetworkTest {
 				sessions.add(doSession(self, conn, true));
 			} catch (Error& e) {
 				++self->acceptErrors;
-				TraceEvent(SevError, "P2PIncomingError").detail("Listener", listener->getListenAddress()).error(e);
+				TraceEvent(SevError, "P2PIncomingError").error(e).detail("Listener", listener->getListenAddress());
 			}
 		}
 	}

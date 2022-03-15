@@ -274,7 +274,7 @@ struct AcknowledgementReply {
 	}
 };
 
-// Registered on the server to recieve acknowledgements that the client has received stream data. This prevents the
+// Registered on the server to receive acknowledgements that the client has received stream data. This prevents the
 // server from sending too much data to the client if the client is not consuming it.
 struct AcknowledgementReceiver final : FlowReceiver, FastAllocated<AcknowledgementReceiver> {
 	using FastAllocated<AcknowledgementReceiver>::operator new;

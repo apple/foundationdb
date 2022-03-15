@@ -146,38 +146,39 @@ ThreadFuture<RangeResult> DLTransaction::getRange(const KeyRangeRef& keys,
 	return getRange(firstGreaterOrEqual(keys.begin), firstGreaterOrEqual(keys.end), limits, snapshot, reverse);
 }
 
-ThreadFuture<RangeResult> DLTransaction::getRangeAndFlatMap(const KeySelectorRef& begin,
-                                                            const KeySelectorRef& end,
-                                                            const StringRef& mapper,
-                                                            GetRangeLimits limits,
-                                                            bool snapshot,
-                                                            bool reverse) {
-	FdbCApi::FDBFuture* f = api->transactionGetRangeAndFlatMap(tr,
-	                                                           begin.getKey().begin(),
-	                                                           begin.getKey().size(),
-	                                                           begin.orEqual,
-	                                                           begin.offset,
-	                                                           end.getKey().begin(),
-	                                                           end.getKey().size(),
-	                                                           end.orEqual,
-	                                                           end.offset,
-	                                                           mapper.begin(),
-	                                                           mapper.size(),
-	                                                           limits.rows,
-	                                                           limits.bytes,
-	                                                           FDB_STREAMING_MODE_EXACT,
-	                                                           0,
-	                                                           snapshot,
-	                                                           reverse);
-	return toThreadFuture<RangeResult>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
-		const FdbCApi::FDBKeyValue* kvs;
+ThreadFuture<MappedRangeResult> DLTransaction::getMappedRange(const KeySelectorRef& begin,
+                                                              const KeySelectorRef& end,
+                                                              const StringRef& mapper,
+                                                              GetRangeLimits limits,
+                                                              bool snapshot,
+                                                              bool reverse) {
+	FdbCApi::FDBFuture* f = api->transactionGetMappedRange(tr,
+	                                                       begin.getKey().begin(),
+	                                                       begin.getKey().size(),
+	                                                       begin.orEqual,
+	                                                       begin.offset,
+	                                                       end.getKey().begin(),
+	                                                       end.getKey().size(),
+	                                                       end.orEqual,
+	                                                       end.offset,
+	                                                       mapper.begin(),
+	                                                       mapper.size(),
+	                                                       limits.rows,
+	                                                       limits.bytes,
+	                                                       FDB_STREAMING_MODE_EXACT,
+	                                                       0,
+	                                                       snapshot,
+	                                                       reverse);
+	return toThreadFuture<MappedRangeResult>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		const FdbCApi::FDBMappedKeyValue* kvms;
 		int count;
 		FdbCApi::fdb_bool_t more;
-		FdbCApi::fdb_error_t error = api->futureGetKeyValueArray(f, &kvs, &count, &more);
+		FdbCApi::fdb_error_t error = api->futureGetMappedKeyValueArray(f, &kvms, &count, &more);
 		ASSERT(!error);
 
 		// The memory for this is stored in the FDBFuture and is released when the future gets destroyed
-		return RangeResult(RangeResultRef(VectorRef<KeyValueRef>((KeyValueRef*)kvs, count), more), Arena());
+		return MappedRangeResult(
+		    MappedRangeResultRef(VectorRef<MappedKeyValueRef>((MappedKeyValueRef*)kvms, count), more), Arena());
 	});
 }
 
@@ -446,19 +447,6 @@ ThreadFuture<Void> DLDatabase::createSnapshot(const StringRef& uid, const String
 	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) { return Void(); });
 }
 
-DatabaseSharedState* DLDatabase::createSharedState() {
-	if (!api->databaseCreateSharedState) {
-		return nullptr;
-	}
-	return api->databaseCreateSharedState(db);
-}
-
-void DLDatabase::setSharedState(DatabaseSharedState* p) {
-	if (api->databaseSetSharedState) {
-		api->databaseSetSharedState(db, p);
-	}
-}
-
 // Get network thread busyness
 double DLDatabase::getMainThreadBusyness() {
 	if (api->databaseGetMainThreadBusyness != nullptr) {
@@ -568,11 +556,8 @@ void DLApi::init() {
 	                   "fdb_transaction_get_addresses_for_key",
 	                   headerVersion >= 0);
 	loadClientFunction(&api->transactionGetRange, lib, fdbCPath, "fdb_transaction_get_range", headerVersion >= 0);
-	loadClientFunction(&api->transactionGetRangeAndFlatMap,
-	                   lib,
-	                   fdbCPath,
-	                   "fdb_transaction_get_range_and_flat_map",
-	                   headerVersion >= 700);
+	loadClientFunction(
+	    &api->transactionGetMappedRange, lib, fdbCPath, "fdb_transaction_get_mapped_range", headerVersion >= 700);
 	loadClientFunction(
 	    &api->transactionGetVersionstamp, lib, fdbCPath, "fdb_transaction_get_versionstamp", headerVersion >= 410);
 	loadClientFunction(&api->transactionSet, lib, fdbCPath, "fdb_transaction_set", headerVersion >= 0);
@@ -629,6 +614,8 @@ void DLApi::init() {
 	loadClientFunction(&api->futureGetKeyArray, lib, fdbCPath, "fdb_future_get_key_array", headerVersion >= 700);
 	loadClientFunction(
 	    &api->futureGetKeyValueArray, lib, fdbCPath, "fdb_future_get_keyvalue_array", headerVersion >= 0);
+	loadClientFunction(
+	    &api->futureGetMappedKeyValueArray, lib, fdbCPath, "fdb_future_get_mappedkeyvalue_array", headerVersion >= 700);
 	loadClientFunction(&api->futureSetCallback, lib, fdbCPath, "fdb_future_set_callback", headerVersion >= 0);
 	loadClientFunction(&api->futureCancel, lib, fdbCPath, "fdb_future_cancel", headerVersion >= 0);
 	loadClientFunction(&api->futureDestroy, lib, fdbCPath, "fdb_future_destroy", headerVersion >= 0);
@@ -736,7 +723,6 @@ Reference<IDatabase> DLApi::createDatabase609(const char* clusterFilePath) {
 Reference<IDatabase> DLApi::createDatabase(const char* clusterFilePath) {
 	if (headerVersion >= 610) {
 		FdbCApi::FDBDatabase* db;
-		// can the FdbCApi wrapper signature be changed to add this ptr?
 		throwIfError(api->createDatabase(clusterFilePath, &db));
 		return Reference<IDatabase>(new DLDatabase(api, db));
 	} else {
@@ -875,15 +861,15 @@ ThreadFuture<RangeResult> MultiVersionTransaction::getRange(const KeyRangeRef& k
 	return abortableFuture(f, tr.onChange);
 }
 
-ThreadFuture<RangeResult> MultiVersionTransaction::getRangeAndFlatMap(const KeySelectorRef& begin,
-                                                                      const KeySelectorRef& end,
-                                                                      const StringRef& mapper,
-                                                                      GetRangeLimits limits,
-                                                                      bool snapshot,
-                                                                      bool reverse) {
+ThreadFuture<MappedRangeResult> MultiVersionTransaction::getMappedRange(const KeySelectorRef& begin,
+                                                                        const KeySelectorRef& end,
+                                                                        const StringRef& mapper,
+                                                                        GetRangeLimits limits,
+                                                                        bool snapshot,
+                                                                        bool reverse) {
 	auto tr = getTransaction();
-	auto f = tr.transaction ? tr.transaction->getRangeAndFlatMap(begin, end, mapper, limits, snapshot, reverse)
-	                        : makeTimeout<RangeResult>();
+	auto f = tr.transaction ? tr.transaction->getMappedRange(begin, end, mapper, limits, snapshot, reverse)
+	                        : makeTimeout<MappedRangeResult>();
 	return abortableFuture(f, tr.onChange);
 }
 
@@ -1191,14 +1177,7 @@ MultiVersionDatabase::MultiVersionDatabase(MultiVersionApi* api,
   : dbState(new DatabaseState(clusterFilePath, versionMonitorDb)) {
 	dbState->db = db;
 	dbState->dbVar->set(db);
-	auto stateMapKey = std::make_pair(clusterFilePath, dbState->dbProtocolVersion.get());
-	if (api->clusterSharedStateMap.find(stateMapKey) == api->clusterSharedStateMap.end() ||
-	    api->clusterSharedStateMap[stateMapKey] == nullptr) {
-		DatabaseSharedState* p = db->createSharedState();
-		api->clusterSharedStateMap[stateMapKey] = p;
-	} else {
-		db->setSharedState(api->clusterSharedStateMap[stateMapKey]);
-	}
+
 	if (openConnectors) {
 		if (!api->localClientDisabled) {
 			dbState->addClient(api->getLocalClient());
@@ -1223,9 +1202,9 @@ MultiVersionDatabase::MultiVersionDatabase(MultiVersionApi* api,
 					// but we may not see trace logs from this client until a successful connection
 					// is established.
 					TraceEvent(SevWarnAlways, "FailedToInitializeExternalClient")
+					    .error(e)
 					    .detail("LibraryPath", client->libPath)
-					    .detail("ClusterFilePath", clusterFilePath)
-					    .error(e);
+					    .detail("ClusterFilePath", clusterFilePath);
 				}
 			}
 		});
@@ -1239,9 +1218,9 @@ MultiVersionDatabase::MultiVersionDatabase(MultiVersionApi* api,
 				} catch (Error& e) {
 					// This connection is discarded
 					TraceEvent(SevWarnAlways, "FailedToCreateLegacyDatabaseConnection")
+					    .error(e)
 					    .detail("LibraryPath", client->libPath)
-					    .detail("ClusterFilePath", clusterFilePath)
-					    .error(e);
+					    .detail("ClusterFilePath", clusterFilePath);
 				}
 			}
 		});
@@ -1306,19 +1285,6 @@ ThreadFuture<Void> MultiVersionDatabase::forceRecoveryWithDataLoss(const StringR
 ThreadFuture<Void> MultiVersionDatabase::createSnapshot(const StringRef& uid, const StringRef& snapshot_command) {
 	auto f = dbState->db ? dbState->db->createSnapshot(uid, snapshot_command) : ThreadFuture<Void>(Never());
 	return abortableFuture(f, dbState->dbVar->get().onChange);
-}
-
-DatabaseSharedState* MultiVersionDatabase::createSharedState() {
-	if (dbState->db) {
-		return dbState->db->createSharedState();
-	}
-	return nullptr;
-}
-
-void MultiVersionDatabase::setSharedState(DatabaseSharedState* p) {
-	if (dbState->db) {
-		dbState->db->setSharedState(p);
-	}
 }
 
 // Get network thread busyness
@@ -1394,8 +1360,8 @@ ThreadFuture<Void> MultiVersionDatabase::DatabaseState::monitorProtocolVersion()
 			}
 
 			TraceEvent("ErrorGettingClusterProtocolVersion")
-			    .detail("ExpectedProtocolVersion", expected)
-			    .error(cv.getError());
+			    .error(cv.getError())
+			    .detail("ExpectedProtocolVersion", expected);
 		}
 
 		ProtocolVersion clusterVersion =
@@ -1443,10 +1409,10 @@ void MultiVersionDatabase::DatabaseState::protocolVersionChanged(ProtocolVersion
 				newDb = client->api->createDatabase(clusterFilePath.c_str());
 			} catch (Error& e) {
 				TraceEvent(SevWarnAlways, "MultiVersionClientFailedToCreateDatabase")
+				    .error(e)
 				    .detail("LibraryPath", client->libPath)
 				    .detail("External", client->external)
-				    .detail("ClusterFilePath", clusterFilePath)
-				    .error(e);
+				    .detail("ClusterFilePath", clusterFilePath);
 
 				// Put the client in a disconnected state until the version changes again
 				updateDatabase(Reference<IDatabase>(), Reference<ClientInfo>());
@@ -1520,8 +1486,8 @@ void MultiVersionDatabase::DatabaseState::updateDatabase(Reference<IDatabase> ne
 				// We can't create a new database to monitor the cluster version. This means we will continue using the
 				// previous one, which should hopefully continue to work.
 				TraceEvent(SevWarnAlways, "FailedToCreateDatabaseForVersionMonitoring")
-				    .detail("ClusterFilePath", clusterFilePath)
-				    .error(e);
+				    .error(e)
+				    .detail("ClusterFilePath", clusterFilePath);
 			}
 		}
 	} else {
@@ -1533,20 +1499,11 @@ void MultiVersionDatabase::DatabaseState::updateDatabase(Reference<IDatabase> ne
 			// We can't create a new database to monitor the cluster version. This means we will continue using the
 			// previous one, which should hopefully continue to work.
 			TraceEvent(SevWarnAlways, "FailedToCreateDatabaseForVersionMonitoring")
-			    .detail("ClusterFilePath", clusterFilePath)
-			    .error(e);
+			    .error(e)
+			    .detail("ClusterFilePath", clusterFilePath);
 		}
 	}
 
-	auto stateMapKey = std::make_pair(clusterFilePath, dbProtocolVersion.get());
-	if (MultiVersionApi::api->clusterSharedStateMap.find(stateMapKey) ==
-	        MultiVersionApi::api->clusterSharedStateMap.end() ||
-	    MultiVersionApi::api->clusterSharedStateMap[stateMapKey] == nullptr) {
-		DatabaseSharedState* p = db->createSharedState();
-		MultiVersionApi::api->clusterSharedStateMap[stateMapKey] = p;
-	} else {
-		db->setSharedState(MultiVersionApi::api->clusterSharedStateMap[stateMapKey]);
-	}
 	dbVar->set(db);
 
 	ASSERT(protocolVersionMonitor.isValid());
@@ -2572,12 +2529,12 @@ THREAD_FUNC runSingleAssignmentVarTest(void* arg) {
 
 				if (deterministicRandom()->coinflip()) {
 					if (deterministicRandom()->coinflip()) {
-						threads.push_back(g_network->startThread(releaseMem, tfp));
+						threads.push_back(g_network->startThread(releaseMem, tfp, 0, "fdb-release-mem"));
 					}
-					threads.push_back(g_network->startThread(cancel, tfp));
+					threads.push_back(g_network->startThread(cancel, tfp, 0, "fdb-cancel"));
 					undestroyed.push_back((ThreadSingleAssignmentVar<int>*)tfp);
 				} else {
-					threads.push_back(g_network->startThread(destroy, tfp));
+					threads.push_back(g_network->startThread(destroy, tfp, 0, "fdb-destroy"));
 				}
 			}
 
@@ -2611,7 +2568,7 @@ struct AbortableTest {
 
 		if (!abort->isReady() && deterministicRandom()->coinflip()) {
 			ASSERT_EQ(abort->status, ThreadSingleAssignmentVarBase::Unset);
-			newFuture.threads.push_back(g_network->startThread(setAbort, abort));
+			newFuture.threads.push_back(g_network->startThread(setAbort, abort, 0, "fdb-abort"));
 		}
 
 		newFuture.legalErrors.insert(error_code_cluster_version_changed);

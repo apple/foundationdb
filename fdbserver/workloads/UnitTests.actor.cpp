@@ -34,6 +34,7 @@ void forceLinkStreamCipherTests();
 void forceLinkParallelStreamTests();
 void forceLinkSimExternalConnectionTests();
 void forceLinkMutationLogReaderTests();
+void forceLinkSimEncryptVaultProxyTests();
 void forceLinkIThreadPoolTests();
 
 struct UnitTestWorkload : TestWorkload {
@@ -79,6 +80,7 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkParallelStreamTests();
 		forceLinkSimExternalConnectionTests();
 		forceLinkMutationLogReaderTests();
+		forceLinkSimEncryptVaultProxyTests();
 		forceLinkIThreadPoolTests();
 	}
 
@@ -149,7 +151,7 @@ struct UnitTestWorkload : TestWorkload {
 			self->totalWallTime += wallTime;
 			self->totalSimTime += simTime;
 			TraceEvent(result.code() != error_code_success ? SevError : SevInfo, "UnitTest")
-			    .error(result, true)
+			    .errorUnsuppressed(result)
 			    .detail("Name", test->name)
 			    .detail("File", test->file)
 			    .detail("Line", test->line)

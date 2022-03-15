@@ -204,6 +204,8 @@ struct SystemStatistics {
 	uint64_t processDiskFreeBytes;
 	double processDiskQueueDepth;
 	double processDiskIdleSeconds;
+	double processDiskReadSeconds;
+	double processDiskWriteSeconds;
 	double processDiskRead;
 	double processDiskWrite;
 	uint64_t processDiskReadCount;
@@ -222,10 +224,11 @@ struct SystemStatistics {
 	SystemStatistics()
 	  : initialized(false), elapsed(0), processCPUSeconds(0), mainThreadCPUSeconds(0), processMemory(0),
 	    processResidentMemory(0), processDiskTotalBytes(0), processDiskFreeBytes(0), processDiskQueueDepth(0),
-	    processDiskIdleSeconds(0), processDiskRead(0), processDiskWrite(0), processDiskReadCount(0),
-	    processDiskWriteCount(0), processDiskWriteSectors(0), processDiskReadSectors(0), machineMegabitsSent(0),
-	    machineMegabitsReceived(0), machineOutSegs(0), machineRetransSegs(0), machineCPUSeconds(0), machineTotalRAM(0),
-	    machineCommittedRAM(0), machineAvailableRAM(0) {}
+	    processDiskIdleSeconds(0), processDiskReadSeconds(0), processDiskWriteSeconds(0), processDiskRead(0),
+	    processDiskWrite(0), processDiskReadCount(0), processDiskWriteCount(0), processDiskWriteSectors(0),
+	    processDiskReadSectors(0), machineMegabitsSent(0), machineMegabitsReceived(0), machineOutSegs(0),
+	    machineRetransSegs(0), machineCPUSeconds(0), machineTotalRAM(0), machineCommittedRAM(0),
+	    machineAvailableRAM(0) {}
 };
 
 struct SystemStatisticsState;
@@ -259,7 +262,9 @@ void getNetworkTraffic(uint64_t& bytesSent, uint64_t& bytesReceived, uint64_t& o
 
 void getDiskStatistics(std::string const& directory,
                        uint64_t& currentIOs,
-                       uint64_t& busyTicks,
+                       uint64_t& readMilliSecs,
+                       uint64_t& writeMilliSecs,
+                       uint64_t& IOMilliSecs,
                        uint64_t& reads,
                        uint64_t& writes,
                        uint64_t& writeSectors);
@@ -273,6 +278,11 @@ double timer_monotonic(); // Returns a high precision monotonic clock which is a
 uint64_t timer_int(); // Return timer as uint64_t
 
 void getLocalTime(const time_t* timep, struct tm* result);
+
+// convert timestamp returned by timer_int() to Gmt format string
+std::string timerIntToGmt(uint64_t timestamp);
+
+std::string getGmtTimeStr(const time_t* time);
 
 void setMemoryQuota(size_t limit);
 
@@ -431,6 +441,8 @@ inline static uint64_t timestampCounter() {
 	asm volatile("mrs %0, cntvct_el0" : "=r"(timer));
 	return timer;
 }
+#elif defined(_powerpc64_)
+#include <emmintrin.h>
 #elif defined(__linux__)
 #include <x86intrin.h>
 #define timestampCounter() __rdtsc()
@@ -457,6 +469,12 @@ inline static uint64_t __rdtsc() {
 	return (lo | (hi << 32));
 }
 #endif
+#elif defined(__powerpc64__) || defined(__ppc64__)
+inline static uint64_t __rdtsc() {
+	uint64_t tb;
+	__asm__ volatile("mfspr %0, 268" : "=r"(tb));
+	return tb;
+}
 #endif
 
 #if defined(__linux__)
@@ -816,13 +834,15 @@ static inline uint64_t hwCrc32cU64(uint64_t crc, uint64_t v) {
 	return ret;
 }
 #else
+#ifndef __powerpc64__
 // Intel
 #define hwCrc32cU8(c, v) _mm_crc32_u8(c, v)
 #define hwCrc32cU32(c, v) _mm_crc32_u32(c, v)
 #define hwCrc32cU64(c, v) _mm_crc32_u64(c, v)
 #endif
+#endif
 
-#ifdef __aarch64__
+#if defined(__aarch64__)
 #define _MM_HINT_T0 0 /* dummy -- not used */
 #endif
 

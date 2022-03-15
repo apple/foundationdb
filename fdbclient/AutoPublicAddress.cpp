@@ -28,13 +28,15 @@
 
 #include "fdbclient/CoordinationInterface.h"
 
-IPAddress determinePublicIPAutomatically(ClusterConnectionString const& ccs) {
+// Determine public IP address by calling the first coordinator.
+IPAddress determinePublicIPAutomatically(ClusterConnectionString& ccs) {
 	try {
 		using namespace boost::asio;
 
 		io_service ioService;
 		ip::udp::socket socket(ioService);
 
+		ccs.resolveHostnamesBlocking();
 		const auto& coordAddr = ccs.coordinators()[0];
 		const auto boostIp = coordAddr.ip.isV6() ? ip::address(ip::address_v6(coordAddr.ip.toV6()))
 		                                         : ip::address(ip::address_v4(coordAddr.ip.toV4()));

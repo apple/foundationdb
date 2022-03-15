@@ -36,6 +36,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 
 	init( SYSTEM_MONITOR_INTERVAL,                 5.0 );
 	init( NETWORK_BUSYNESS_MONITOR_INTERVAL,       1.0 );
+	init( TSS_METRICS_LOGGING_INTERVAL,          120.0 ); // 2 minutes by default
 
 	init( FAILURE_MAX_DELAY,                       5.0 );
 	init( FAILURE_MIN_DELAY,                       4.0 ); if( randomize && BUGGIFY ) FAILURE_MIN_DELAY = 1.0;
@@ -86,6 +87,8 @@ void ClientKnobs::initialize(Randomize randomize) {
 
 	init( LOCATION_CACHE_EVICTION_SIZE,         600000 );
 	init( LOCATION_CACHE_EVICTION_SIZE_SIM,         10 ); if( randomize && BUGGIFY ) LOCATION_CACHE_EVICTION_SIZE_SIM = 3;
+	init( LOCATION_CACHE_ENDPOINT_FAILURE_GRACE_PERIOD,     60 );
+	init( LOCATION_CACHE_FAILED_ENDPOINT_RETRY_INTERVAL,    60 );
 
 	init( GET_RANGE_SHARD_LIMIT,                     2 );
 	init( WARM_RANGE_SHARD_LIMIT,                  100 );
@@ -118,12 +121,11 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( LOG_RANGE_BLOCK_SIZE, CORE_VERSIONSPERSECOND );
 	init( MUTATION_BLOCK_SIZE,	            	  10000);
 	init( MAX_VERSION_CACHE_LAG,                    0.1 );
-	init( MAX_PROXY_CONTACT_LAG,                    1.0 );
+	init( MAX_PROXY_CONTACT_LAG,                    0.2 );
 	init( DEBUG_USE_GRV_CACHE_CHANCE,              -1.0 ); // For 100% chance at 1.0, this means 0.0 is not 0%. We don't want the default to be 0. 
 	init( FORCE_GRV_CACHE_OFF,                    false );
 	init( GRV_CACHE_RK_COOLDOWN,                   60.0 );
-	init( GRV_THROTTLING_THRESHOLD,                   2 );
-	init( GRV_SUSTAINED_THROTTLING_THRESHOLD,       1.0 );
+	init( GRV_SUSTAINED_THROTTLING_THRESHOLD,       0.1 );
 
 	// TaskBucket
 	init( TASKBUCKET_LOGGING_DELAY,                5.0 );
@@ -200,6 +202,8 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( HTTP_SEND_SIZE,                      32*1024 );
 	init( HTTP_VERBOSE_LEVEL,                        0 );
 	init( HTTP_REQUEST_ID_HEADER,                   "" );
+	init( HTTP_REQUEST_AWS_V4_HEADER,             true );
+	init( BLOBSTORE_ENCRYPTION_TYPE,                "" );
 	init( BLOBSTORE_CONNECT_TRIES,                  10 );
 	init( BLOBSTORE_CONNECT_TIMEOUT,                10 );
 	init( BLOBSTORE_MAX_CONNECTION_LIFE,           120 );
@@ -227,6 +231,12 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( BLOBSTORE_WRITE_REQUESTS_PER_SECOND,       50 );
 	init( BLOBSTORE_READ_REQUESTS_PER_SECOND,       100 );
 	init( BLOBSTORE_DELETE_REQUESTS_PER_SECOND,     200 );
+
+	// Dynamic Knobs
+	init( COMMIT_QUORUM_TIMEOUT,                    3.0 );
+	init( GET_GENERATION_QUORUM_TIMEOUT,            3.0 );
+	init( GET_KNOB_TIMEOUT,                         3.0 );
+	init( TIMEOUT_RETRY_UPPER_BOUND,               20.0 );
 
 	// Client Status Info
 	init(CSI_SAMPLING_PROBABILITY, -1.0);
@@ -261,10 +271,6 @@ void ClientKnobs::initialize(Randomize randomize) {
 	// busyness reporting
 	init( BUSYNESS_SPIKE_START_THRESHOLD,         0.100 );
 	init( BUSYNESS_SPIKE_SATURATED_THRESHOLD,     0.500 );
-
-	// multi-version client control
-	init( MVC_CLIENTLIB_CHUNK_SIZE,              8*1024 );
-	init( MVC_CLIENTLIB_CHUNKS_PER_TRANSACTION,      32 );
 
 	// blob granules
 	init( ENABLE_BLOB_GRANULES,                   false );

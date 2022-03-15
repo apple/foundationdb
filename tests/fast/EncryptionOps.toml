@@ -1,0 +1,17 @@
+[[test]]
+testTitle = 'EncryptDecrypt'
+
+    [[test.workload]]
+    testName = 'EncryptionOps'
+    pageSize = 4096
+    maxBufSize = 524288
+    numIterations = 25000
+    fixedSize = 1
+
+    [[test.workload]]
+    testName = 'EncryptionOps'
+    pageSize = 4096
+    maxBufSize = 524288
+    numIterations = 400
+    fixedSize = 0
+

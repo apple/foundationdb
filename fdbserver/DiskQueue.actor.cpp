@@ -25,6 +25,7 @@
 #include "flow/crc32c.h"
 #include "flow/genericactors.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/xxhash.h"
 
 typedef bool (*compare_pages)(void*, void*);
 typedef int64_t loc_t;
@@ -491,7 +492,9 @@ public:
 			delete pageMem;
 			TEST(true); // push error
 			TEST(2 == syncFiles.size()); // push spanning both files error
-			TraceEvent(SevError, "RDQPushAndCommitError", dbgid).error(e, true).detail("InitialFilename0", filename);
+			TraceEvent(SevError, "RDQPushAndCommitError", dbgid)
+			    .errorUnsuppressed(e)
+			    .detail("InitialFilename0", filename);
 
 			if (errorPromise.canBeSet())
 				errorPromise.sendError(e);
@@ -611,7 +614,7 @@ public:
 			    .detail("File0", self->filename(0));
 		} catch (Error& e) {
 			TraceEvent(SevError, "DiskQueueShutdownError", self->dbgid)
-			    .error(e, true)
+			    .errorUnsuppressed(e)
 			    .detail("Reason", e.code() == error_code_platform_error ? "could not delete database" : "unknown");
 			error = e;
 		}
@@ -730,7 +733,7 @@ public:
 		} catch (Error& e) {
 			bool ok = e.code() == error_code_file_not_found;
 			TraceEvent(ok ? SevInfo : SevError, "RDQReadFirstAndLastPagesError", self->dbgid)
-			    .error(e, true)
+			    .errorUnsuppressed(e)
 			    .detail("File0Name", self->files[0].dbgFilename);
 			if (!self->error.isSet())
 				self->error.sendError(e);
@@ -803,7 +806,7 @@ public:
 		} catch (Error& e) {
 			TEST(true); // Read next page error
 			TraceEvent(SevError, "RDQReadNextPageError", self->dbgid)
-			    .error(e, true)
+			    .errorUnsuppressed(e)
 			    .detail("File0Name", self->files[0].dbgFilename);
 			if (!self->error.isSet())
 				self->error.sendError(e);
@@ -1044,8 +1047,13 @@ private:
 		union {
 			UID hash;
 			struct {
-				uint32_t hash32;
-				uint32_t _unused;
+				union {
+					uint64_t hash64;
+					struct {
+						uint32_t hash32;
+						uint32_t _unused;
+					};
+				};
 				uint16_t magic;
 				uint16_t implementationVersion;
 			};
@@ -1073,15 +1081,22 @@ private:
 		uint32_t checksum_crc32c() const {
 			return crc32c_append(0xfdbeefdb, (uint8_t*)&_unused, sizeof(Page) - sizeof(uint32_t));
 		}
+		uint64_t checksum_xxhash3() const {
+			return XXH3_64bits(static_cast<const void*>(&magic), sizeof(Page) - sizeof(uint64_t));
+		}
 		void updateHash() {
 			switch (diskQueueVersion()) {
 			case DiskQueueVersion::V0: {
 				hash = checksum_hashlittle2();
 				return;
 			}
-			case DiskQueueVersion::V1:
-			default: {
+			case DiskQueueVersion::V1: {
 				hash32 = checksum_crc32c();
+				return;
+			}
+			case DiskQueueVersion::V2:
+			default: {
+				hash64 = checksum_xxhash3();
 				return;
 			}
 			}
@@ -1093,6 +1108,9 @@ private:
 			}
 			case DiskQueueVersion::V1: {
 				return hash32 == checksum_crc32c();
+			}
+			case DiskQueueVersion::V2: {
+				return hash64 == checksum_xxhash3();
 			}
 			default:
 				return false;
@@ -1128,6 +1146,9 @@ private:
 			break;
 		case DiskQueueVersion::V1:
 			p.implementationVersion = 1;
+			break;
+		case DiskQueueVersion::V2:
+			p.implementationVersion = 2;
 			break;
 		}
 		p.payloadSize = 0;

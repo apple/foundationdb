@@ -100,7 +100,7 @@ set(FLOW_SRCS
   xxhash.c
   xxhash.h)
 
-if(WITH_TLS AND NOT WIN32)
+if(WITH_TLS)
   set(FLOW_SRCS
     ${FLOW_SRCS}
     StreamCipher.cpp)

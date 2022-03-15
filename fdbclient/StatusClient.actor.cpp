@@ -306,6 +306,7 @@ ACTOR Future<Optional<StatusObject>> clientCoordinatorsStatusFetcher(Reference<I
                                                                      bool* quorum_reachable,
                                                                      int* coordinatorsFaultTolerance) {
 	try {
+		wait(connRecord->resolveHostnames());
 		state ClientCoordinators coord(connRecord);
 		state StatusObject statusObj;
 

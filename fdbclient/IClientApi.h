@@ -59,12 +59,12 @@ public:
 	                                           GetRangeLimits limits,
 	                                           bool snapshot = false,
 	                                           bool reverse = false) = 0;
-	virtual ThreadFuture<RangeResult> getRangeAndFlatMap(const KeySelectorRef& begin,
-	                                                     const KeySelectorRef& end,
-	                                                     const StringRef& mapper,
-	                                                     GetRangeLimits limits,
-	                                                     bool snapshot = false,
-	                                                     bool reverse = false) = 0;
+	virtual ThreadFuture<MappedRangeResult> getMappedRange(const KeySelectorRef& begin,
+	                                                       const KeySelectorRef& end,
+	                                                       const StringRef& mapper,
+	                                                       GetRangeLimits limits,
+	                                                       bool snapshot = false,
+	                                                       bool reverse = false) = 0;
 	virtual ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key) = 0;
 	virtual ThreadFuture<Standalone<StringRef>> getVersionstamp() = 0;
 
@@ -136,10 +136,6 @@ public:
 	virtual ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) = 0;
 	// Management API, create snapshot
 	virtual ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) = 0;
-
-	// Interface to manage shared state across multiple connections to the same Database
-	virtual DatabaseSharedState* createSharedState() = 0;
-	virtual void setSharedState(DatabaseSharedState* p) = 0;
 
 	// used in template functions as the Transaction type that can be created through createTransaction()
 	using TransactionT = ITransaction;

@@ -189,7 +189,7 @@ description is not currently required but encouraged.
             description="The read version will be committed, and usually will be the latest committed, but might not be the latest committed in the event of a simultaneous fault and misbehaving clock."
             defaultFor="20"/>
     <Option name="transaction_include_port_in_address" code="505"
-            description="Addresses returned by get_addresses_for_key include the port when enabled. As of api version 630, this option is enabled by default and setting this has no effect."
+            description="Deprecated. Addresses returned by get_addresses_for_key include the port when enabled. As of api version 630, this option is enabled by default and setting this has no effect."
             defaultFor="23"/>
     <Option name="transaction_bypass_unreadable" code="700"
             description="Allows ``get`` operations to read from sections of keyspace that have become unreadable because of versionstamp operations. This sets the ``bypass_unreadable`` option of each transaction created by this database. See the transaction option description for more information."
@@ -293,9 +293,10 @@ description is not currently required but encouraged.
     <Option name="bypass_unreadable" code="1100"
                 description="Allows ``get`` operations to read from sections of keyspace that have become unreadable because of versionstamp operations. These reads will view versionstamp operations as if they were set operations that did not fill in the versionstamp." />            
     <Option name="use_grv_cache" code="1101"
-            description="Allows this transaction to use cached GRV from the database context." />
+            description="Allows this transaction to use cached GRV from the database context. Defaults to off. Upon first usage, starts a background updater to periodically update the cache to avoid stale read versions." />
     <Option name="skip_grv_cache" code="1102"
-            description="Specifically instruct this transaction to NOT use cached GRV." />
+            description="Specifically instruct this transaction to NOT use cached GRV. Primarily used for the read version cache's background updater to avoid attempting to read a cached entry in specific situations."
+            hidden="true"/>
   </Scope>
 
   <!-- The enumeration values matter - do not change them without

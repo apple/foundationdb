@@ -1,9 +1,6 @@
 set(FDB_C_SRCS
   fdb_c.cpp
-  foundationdb/fdb_c.h
-  foundationdb/fdb_c_internal.h
-  foundationdb/fdb_c_types.h
-  ThreadCleanup.cpp)
+  foundationdb/fdb_c.h)
 
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/foundationdb)
 
@@ -20,6 +17,8 @@ endif()
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64" OR CMAKE_SYSTEM_PROCESSOR MATCHES "arm64")
   set(cpu "aarch64")
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(ppc64le|powerpc64le)")
+  set(cpu "ppc64le")
 endif()
 
 set(IS_ARM_MAC NO)
@@ -51,7 +50,7 @@ endif()
 add_dependencies(fdb_c fdb_c_generated fdb_c_options)
 add_dependencies(fdbclient fdb_c_options)
 add_dependencies(fdbclient_sampling fdb_c_options)
-target_link_libraries(fdb_c PUBLIC $<BUILD_INTERFACE:fdbclient>)
+target_link_libraries(fdb_c PRIVATE $<BUILD_INTERFACE:fdbclient>)
 if(APPLE)
   set(symbols ${CMAKE_CURRENT_BINARY_DIR}/fdb_c.symbols)
   add_custom_command(OUTPUT ${symbols}
@@ -76,10 +75,8 @@ if(WIN32)
   set_property(SOURCE ${asm_file} PROPERTY LANGUAGE ASM_MASM)
 endif()
 
-# The tests don't build on windows and ARM macs
-# doctest doesn't seem to compile on ARM macs, we should
-# check later whether this works
-if(NOT WIN32 AND NOT IS_ARM_MAC)
+# The tests don't build on windows
+if(NOT WIN32)
   set(MAKO_SRCS
     test/mako/mako.c
     test/mako/mako.h
@@ -123,9 +120,9 @@ if(NOT WIN32 AND NOT IS_ARM_MAC)
     strip_debug_symbols(fdb_c_ryw_benchmark)
     strip_debug_symbols(fdb_c_txn_size_test)
   endif()
-  target_link_libraries(fdb_c_performance_test PRIVATE fdb_c)
-  target_link_libraries(fdb_c_ryw_benchmark PRIVATE fdb_c)
-  target_link_libraries(fdb_c_txn_size_test PRIVATE fdb_c)
+  target_link_libraries(fdb_c_performance_test PRIVATE fdb_c Threads::Threads)
+  target_link_libraries(fdb_c_ryw_benchmark PRIVATE fdb_c Threads::Threads)
+  target_link_libraries(fdb_c_txn_size_test PRIVATE fdb_c Threads::Threads)
 
   add_dependencies(fdb_c_setup_tests doctest)
   add_dependencies(fdb_c_unit_tests doctest)
@@ -136,14 +133,14 @@ if(NOT WIN32 AND NOT IS_ARM_MAC)
   target_include_directories(fdb_c_unit_tests_version_510 PUBLIC ${DOCTEST_INCLUDE_DIR})
   target_include_directories(disconnected_timeout_unit_tests PUBLIC ${DOCTEST_INCLUDE_DIR})
   target_link_libraries(fdb_c_setup_tests PRIVATE fdb_c Threads::Threads)
-  target_link_libraries(fdb_c_unit_tests PRIVATE fdb_c Threads::Threads)
+  target_link_libraries(fdb_c_unit_tests PRIVATE fdb_c Threads::Threads fdbclient)
   target_link_libraries(fdb_c_unit_tests_version_510 PRIVATE fdb_c Threads::Threads)
-  target_link_libraries(trace_partial_file_suffix_test PRIVATE fdb_c Threads::Threads)
+  target_link_libraries(trace_partial_file_suffix_test PRIVATE fdb_c Threads::Threads flow)
   target_link_libraries(disconnected_timeout_unit_tests PRIVATE fdb_c Threads::Threads)
 
   # do not set RPATH for mako
   set_property(TARGET mako PROPERTY SKIP_BUILD_RPATH TRUE)
-  target_link_libraries(mako PRIVATE fdb_c)
+  target_link_libraries(mako PRIVATE fdb_c fdbclient)
 
   if(NOT OPEN_FOR_IDE)
     # Make sure that fdb_c.h is compatible with c90

@@ -19,8 +19,9 @@
  */
 
 #include <cinttypes>
-#include "contrib/fmt-8.0.1/include/fmt/format.h"
+#include "contrib/fmt-8.1.1/include/fmt/format.h"
 #include "fdbclient/BlobWorkerInterface.h"
+#include "fdbclient/KeyBackedTypes.h"
 #include "fdbserver/Status.h"
 #include "flow/ITrace.h"
 #include "flow/Trace.h"
@@ -586,6 +587,15 @@ struct RolesInfo {
 					obj["busiest_write_tag"] = busiestWriteTagObj;
 				}
 			}
+
+			if (!iface.isTss()) { // only storage server has Metadata field
+				TraceEventFields const& metadata = metrics.at("Metadata");
+				JsonBuilderObject metadataObj;
+				metadataObj["created_time_datetime"] = metadata.getValue("CreatedTimeDatetime");
+				metadataObj["created_time_timestamp"] = metadata.getUint64("CreatedTimeTimestamp");
+				obj["storage_metadata"] = metadataObj;
+			}
+
 		} catch (Error& e) {
 			if (e.code() != error_code_attribute_not_found)
 				throw e;
@@ -801,6 +811,10 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 
 	if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES && db->get().blobManager.present()) {
 		roles.addRole("blob_manager", db->get().blobManager.get());
+	}
+
+	if (SERVER_KNOBS->ENABLE_ENCRYPTION && db->get().encryptKeyProxy.present()) {
+		roles.addRole("encrypt_key_proxy", db->get().encryptKeyProxy.get());
 	}
 
 	for (auto& tLogSet : db->get().logSystemConfig.tLogs) {
@@ -1024,7 +1038,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 			if (ssLag[address] >= 60) {
 				messages.push_back(JsonString::makeMessage(
 				    "storage_server_lagging",
-				    format("Storage server lagging by %ld seconds.", (int64_t)ssLag[address]).c_str()));
+				    format("Storage server lagging by %lld seconds.", (int64_t)ssLag[address]).c_str()));
 			}
 
 			// Store the message array into the status object that represents the worker process
@@ -1869,6 +1883,37 @@ static Future<std::vector<TraceEventFields>> getServerBusiestWriteTags(
 	return result;
 }
 
+ACTOR
+static Future<std::vector<Optional<StorageMetadataType>>> getServerMetadata(std::vector<StorageServerInterface> servers,
+                                                                            Database cx,
+                                                                            bool use_system_priority) {
+	state KeyBackedObjectMap<UID, StorageMetadataType, decltype(IncludeVersion())> metadataMap(serverMetadataKeys.begin,
+	                                                                                           IncludeVersion());
+	state std::vector<Optional<StorageMetadataType>> res(servers.size());
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			if (use_system_priority) {
+				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			}
+			state int i = 0;
+			for (i = 0; i < servers.size(); ++i) {
+				Optional<StorageMetadataType> metadata = wait(metadataMap.get(tr, servers[i].id(), Snapshot::True));
+				// TraceEvent(SevDebug, "MetadataAppear", servers[i].id()).detail("Present", metadata.present());
+				res[i] = metadata;
+			}
+			wait(tr->commit());
+			break;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+	return res;
+}
+
 ACTOR static Future<std::vector<std::pair<StorageServerInterface, EventMap>>> getStorageServersAndMetrics(
     Database cx,
     std::unordered_map<NetworkAddress, WorkerInterface> address_workers,
@@ -1876,16 +1921,32 @@ ACTOR static Future<std::vector<std::pair<StorageServerInterface, EventMap>>> ge
 	state std::vector<StorageServerInterface> servers = wait(timeoutError(getStorageServers(cx, true), 5.0));
 	state std::vector<std::pair<StorageServerInterface, EventMap>> results;
 	state std::vector<TraceEventFields> busiestWriteTags;
+	state std::vector<Optional<StorageMetadataType>> metadata;
 	wait(store(results,
 	           getServerMetrics(servers,
 	                            address_workers,
 	                            std::vector<std::string>{
 	                                "StorageMetrics", "ReadLatencyMetrics", "ReadLatencyBands", "BusiestReadTag" })) &&
-	     store(busiestWriteTags, getServerBusiestWriteTags(servers, address_workers, rkWorker)));
+	     store(busiestWriteTags, getServerBusiestWriteTags(servers, address_workers, rkWorker)) &&
+	     store(metadata, getServerMetadata(servers, cx, true)));
 
-	ASSERT(busiestWriteTags.size() == results.size());
-	for (int i = 0; i < busiestWriteTags.size(); ++i) {
+	ASSERT(busiestWriteTags.size() == results.size() && metadata.size() == results.size());
+	for (int i = 0; i < results.size(); ++i) {
 		results[i].second.emplace("BusiestWriteTag", busiestWriteTags[i]);
+
+		// FIXME: it's possible that a SS is removed between `getStorageServers` and `getServerMetadata`. Maybe we can
+		// read StorageServer and Metadata in an atomic transaction?
+		if (metadata[i].present()) {
+			TraceEventFields metadataField;
+			metadataField.addField("CreatedTimeTimestamp", std::to_string(metadata[i].get().createdTime));
+			metadataField.addField("CreatedTimeDatetime", timerIntToGmt(metadata[i].get().createdTime));
+			results[i].second.emplace("Metadata", metadataField);
+		} else if (!servers[i].isTss()) {
+			TraceEventFields metadataField;
+			metadataField.addField("CreatedTimeTimestamp", "0");
+			metadataField.addField("CreatedTimeDatetime", "[removed]");
+			results[i].second.emplace("Metadata", metadataField);
+		}
 	}
 
 	return results;
@@ -1923,8 +1984,8 @@ ACTOR static Future<std::vector<std::pair<GrvProxyInterface, EventMap>>> getGrvP
 	return results;
 }
 
-// Returns the number of zones eligble for recruiting new tLogs after zone failures, to maintain the current replication
-// factor.
+// Returns the number of zones eligible for recruiting new tLogs after zone failures, to maintain the current
+// replication factor.
 static int getExtraTLogEligibleZones(const std::vector<WorkerDetails>& workers,
                                      const DatabaseConfiguration& configuration) {
 	std::set<StringRef> allZones;
@@ -2701,6 +2762,36 @@ ACTOR Future<Optional<Value>> getActivePrimaryDC(Database cx, int* fullyReplicat
 	}
 }
 
+// read storageWigglerStats through Read-only tx, then convert it to JSON field
+ACTOR Future<JsonBuilderObject> storageWigglerStatsFetcher(DatabaseConfiguration conf,
+                                                           Database cx,
+                                                           bool use_system_priority) {
+	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+	state Optional<Value> primaryV;
+	state Optional<Value> remoteV;
+	loop {
+		try {
+			if (use_system_priority) {
+				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			}
+			wait(store(primaryV, StorageWiggleMetrics::runGetTransaction(tr, true)) &&
+			     store(remoteV, StorageWiggleMetrics::runGetTransaction(tr, false)));
+			wait(tr->commit());
+			break;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+
+	JsonBuilderObject res;
+	if (primaryV.present()) {
+		res["primary"] = ObjectReader::fromStringRef<StorageWiggleMetrics>(primaryV.get(), IncludeVersion()).toJSON();
+	}
+	if (conf.regions.size() > 1 && remoteV.present()) {
+		res["remote"] = ObjectReader::fromStringRef<StorageWiggleMetrics>(remoteV.get(), IncludeVersion()).toJSON();
+	}
+	return res;
+}
 // constructs the cluster section of the json status output
 ACTOR Future<StatusReply> clusterGetStatus(
     Reference<AsyncVar<ServerDBInfo>> db,
@@ -2835,7 +2926,9 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		state std::vector<std::pair<GrvProxyInterface, EventMap>> grvProxies;
 		state std::vector<BlobWorkerInterface> blobWorkers;
 		state JsonBuilderObject qos;
-		state JsonBuilderObject data_overlay;
+		state JsonBuilderObject dataOverlay;
+		state JsonBuilderObject storageWiggler;
+		state std::unordered_set<UID> wiggleServers;
 
 		statusObj["protocol_version"] = format("%" PRIx64, g_network->protocolVersion().version());
 		statusObj["connection_string"] = coordinators.ccr->getConnectionString().toString();
@@ -2914,15 +3007,32 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 			state int minStorageReplicasRemaining = -1;
 			state int fullyReplicatedRegions = -1;
+			// NOTE: here we should start all the transaction before wait in order to overlay latency
 			state Future<Optional<Value>> primaryDCFO = getActivePrimaryDC(cx, &fullyReplicatedRegions, &messages);
-			std::vector<Future<JsonBuilderObject>> futures2;
+			state std::vector<Future<JsonBuilderObject>> futures2;
 			futures2.push_back(dataStatusFetcher(ddWorker, configuration.get(), &minStorageReplicasRemaining));
 			futures2.push_back(workloadStatusFetcher(
-			    db, workers, mWorker, rkWorker, &qos, &data_overlay, &status_incomplete_reasons, storageServerFuture));
+			    db, workers, mWorker, rkWorker, &qos, &dataOverlay, &status_incomplete_reasons, storageServerFuture));
 			futures2.push_back(layerStatusFetcher(cx, &messages, &status_incomplete_reasons));
 			futures2.push_back(lockedStatusFetcher(db, &messages, &status_incomplete_reasons));
 			futures2.push_back(
 			    clusterSummaryStatisticsFetcher(pMetrics, storageServerFuture, tLogFuture, &status_incomplete_reasons));
+
+			if (configuration.get().perpetualStorageWiggleSpeed > 0) {
+				state Future<std::vector<std::pair<UID, StorageWiggleValue>>> primaryWiggleValues;
+				state Future<std::vector<std::pair<UID, StorageWiggleValue>>> remoteWiggleValues;
+
+				primaryWiggleValues = readStorageWiggleValues(cx, true, true);
+				remoteWiggleValues = readStorageWiggleValues(cx, false, true);
+				wait(store(storageWiggler, storageWigglerStatsFetcher(configuration.get(), cx, true)) &&
+				     success(primaryWiggleValues) && success(remoteWiggleValues));
+
+				for (auto& p : primaryWiggleValues.get())
+					wiggleServers.insert(p.first);
+				for (auto& p : remoteWiggleValues.get())
+					wiggleServers.insert(p.first);
+			}
+
 			state std::vector<JsonBuilderObject> workerStatuses = wait(getAll(futures2));
 			wait(success(primaryDCFO));
 
@@ -2954,7 +3064,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			}
 
 			// workloadStatusFetcher returns the workload section but also optionally writes the qos section and adds to
-			// the data_overlay object
+			// the dataOverlay object
 			if (!workerStatuses[1].empty())
 				statusObj["workload"] = workerStatuses[1];
 
@@ -2970,12 +3080,12 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			if (!qos.empty())
 				statusObj["qos"] = qos;
 
-			// Merge data_overlay into data
+			// Merge dataOverlay into data
 			JsonBuilderObject& clusterDataSection = workerStatuses[0];
 
 			// TODO:  This probably is no longer possible as there is no ability to merge json objects with an
 			// output-only model
-			clusterDataSection.addContents(data_overlay);
+			clusterDataSection.addContents(dataOverlay);
 
 			// If data section not empty, add it to statusObj
 			if (!clusterDataSection.empty())
@@ -3079,12 +3189,26 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		statusObj["datacenter_lag"] = getLagObject(datacenterVersionDifference);
 
 		int activeTSSCount = 0;
+		JsonBuilderArray wiggleServerAddress;
 		for (auto& it : storageServers) {
 			if (it.first.isTss()) {
 				activeTSSCount++;
 			}
+			if (wiggleServers.count(it.first.id())) {
+				wiggleServerAddress.push_back(it.first.address().toString());
+			}
 		}
 		statusObj["active_tss_count"] = activeTSSCount;
+
+		if (!storageWiggler.empty()) {
+			JsonBuilderArray wiggleServerUID;
+			for (auto& id : wiggleServers)
+				wiggleServerUID.push_back(id.shortString());
+
+			storageWiggler["wiggle_server_ids"] = wiggleServerUID;
+			storageWiggler["wiggle_server_addresses"] = wiggleServerAddress;
+			statusObj["storage_wiggler"] = storageWiggler;
+		}
 
 		int totalDegraded = 0;
 		for (auto& it : workers) {

@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,35 +24,19 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-struct SidebandMessage {
-	constexpr static FileIdentifier file_identifier = 11862047;
-	uint64_t key;
-	Version commitVersion;
-
-	SidebandMessage() {}
-	SidebandMessage(uint64_t key, Version commitVersion) : key(key), commitVersion(commitVersion) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, key, commitVersion);
-	}
-};
-
-struct SidebandInterface {
-	constexpr static FileIdentifier file_identifier = 15950545;
-	RequestStream<SidebandMessage> updates;
-
-	UID id() const { return updates.getEndpoint().token; }
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, updates);
-	}
-};
+/*
+ * This workload is modelled off the Sideband workload, except it uses a single
+ * mutator and checker rather than several. In addition to ordinary consistency checks,
+ * it also checks the consistency of the cached read versions when using the
+ * USE_GRV_CACHE transaction option, specifically when commit_unknown_result
+ * produces a maybe/maybe-not written scenario. It makes sure that a cached read of an
+ * unknown result matches the regular read of that same key and is not too stale.
+ */
 
 struct SidebandSingleWorkload : TestWorkload {
 	double testDuration, operationsPerSecond;
-	SidebandInterface interf;
+	// Pair represents <Key, commitVersion>
+	PromiseStream<std::pair<uint64_t, Version>> interf;
 
 	std::vector<Future<Void>> clients;
 	PerfIntCounter messages, consistencyErrors, keysUnexpectedlyPresent;
@@ -65,11 +49,7 @@ struct SidebandSingleWorkload : TestWorkload {
 	}
 
 	std::string description() const override { return "SidebandSingleWorkload"; }
-	Future<Void> setup(Database const& cx) override {
-		if (clientId != 0)
-			return Void();
-		return persistInterface(this, cx);
-	}
+	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override {
 		if (clientId != 0)
 			return Void();
@@ -99,51 +79,7 @@ struct SidebandSingleWorkload : TestWorkload {
 		m.push_back(keysUnexpectedlyPresent.getMetric());
 	}
 
-	ACTOR Future<Void> persistInterface(SidebandSingleWorkload* self, Database cx) {
-		state Transaction tr(cx);
-		BinaryWriter wr(IncludeVersion());
-		wr << self->interf;
-		state Standalone<StringRef> serializedInterface = wr.toValue();
-		loop {
-			try {
-				Optional<Value> val = wait(tr.get(StringRef(format("Sideband/Client/%d", self->clientId))));
-				if (val.present()) {
-					if (val.get() != serializedInterface)
-						throw operation_failed();
-					break;
-				}
-				tr.set(format("Sideband/Client/%d", self->clientId), serializedInterface);
-				wait(tr.commit());
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
-		TraceEvent("SidebandPersisted", self->interf.id()).detail("ClientIdx", self->clientId);
-		return Void();
-	}
-
-	ACTOR Future<SidebandInterface> fetchSideband(SidebandSingleWorkload* self, Database cx) {
-		state Transaction tr(cx);
-		loop {
-			try {
-				Optional<Value> val = wait(tr.get(StringRef(format("Sideband/Client/%d", self->clientId))));
-				if (!val.present()) {
-					throw operation_failed();
-				}
-				SidebandInterface sideband;
-				BinaryReader br(val.get(), IncludeVersion());
-				br >> sideband;
-				TraceEvent("SidebandFetched", sideband.id()).detail("ClientIdx", self->clientId);
-				return sideband;
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
-	}
-
 	ACTOR Future<Void> mutator(SidebandSingleWorkload* self, Database cx) {
-		state SidebandInterface checker = wait(self->fetchSideband(self, cx));
 		state double lastTime = now();
 		state Version commitVersion;
 		state bool unknown = false;
@@ -168,19 +104,15 @@ struct SidebandSingleWorkload : TestWorkload {
 			// second set, the checker should see this, no retries on unknown result
 			loop {
 				try {
-					// tr.setOption(FDBTransactionOptions::CAUSAL_WRITE_RISKY);
 					tr.set(messageKey, LiteralStringRef("deadbeef"));
-					TraceEvent("DebugSidebandBeforeCommit");
 					wait(tr.commit());
 					commitVersion = tr.getCommittedVersion();
-					TraceEvent("DebugSidebandAfterCommit").detail("CommitVersion", commitVersion);
 					break;
 				} catch (Error& e) {
 					if (e.code() == error_code_commit_unknown_result) {
-						TraceEvent("DebugSidebandUnknownResult");
 						unknown = true;
 						++self->messages;
-						checker.updates.send(SidebandMessage(key, invalidVersion));
+						self->interf.send(std::pair(key, invalidVersion));
 						break;
 					}
 					wait(tr.onError(e));
@@ -191,50 +123,54 @@ struct SidebandSingleWorkload : TestWorkload {
 				continue;
 			}
 			++self->messages;
-			checker.updates.send(SidebandMessage(key, commitVersion));
+			self->interf.send(std::pair(key, commitVersion));
 		}
 	}
 
 	ACTOR Future<Void> checker(SidebandSingleWorkload* self, Database cx) {
 		loop {
-			state SidebandMessage message = waitNext(self->interf.updates.getFuture());
-			state Standalone<StringRef> messageKey(format("Sideband/Message/%llx", message.key));
+			// Pair represents <Key, commitVersion>
+			state std::pair<uint64_t, Version> message = waitNext(self->interf.getFuture());
+			state Standalone<StringRef> messageKey(format("Sideband/Message/%llx", message.first));
 			state Transaction tr(cx);
 			loop {
 				try {
-					TraceEvent("DebugSidebandCacheGetBefore");
 					tr.setOption(FDBTransactionOptions::USE_GRV_CACHE);
 					state Optional<Value> val = wait(tr.get(messageKey));
-					TraceEvent("DebugSidebandCacheGetAfter");
 					if (!val.present()) {
-						TraceEvent(SevError, "CausalConsistencyError1", self->interf.id())
+						TraceEvent(SevError, "CausalConsistencyError1")
 						    .detail("MessageKey", messageKey.toString().c_str())
-						    .detail("RemoteCommitVersion", message.commitVersion)
+						    .detail("RemoteCommitVersion", message.second)
 						    .detail("LocalReadVersion",
 						            tr.getReadVersion().get()); // will assert that ReadVersion is set
 						++self->consistencyErrors;
 					} else if (val.get() != LiteralStringRef("deadbeef")) {
-						TraceEvent("DebugSidebandOldBeef");
+						// If we read something NOT "deadbeef" and there was no commit_unknown_result,
+						// the cache somehow read a stale version of our key
+						if (message.second != invalidVersion) {
+							TraceEvent(SevError, "CausalConsistencyError2")
+							    .detail("MessageKey", messageKey.toString().c_str());
+							++self->consistencyErrors;
+							break;
+						}
 						// check again without cache, and if it's the same, that's expected
 						state Transaction tr2(cx);
 						state Optional<Value> val2;
 						loop {
 							try {
-								TraceEvent("DebugSidebandNoCacheGetBefore");
 								wait(store(val2, tr2.get(messageKey)));
-								TraceEvent("DebugSidebandNoCacheGetAfter");
 								break;
 							} catch (Error& e) {
-								TraceEvent("DebugSidebandNoCacheError").error(e, true);
+								TraceEvent("DebugSidebandNoCacheError").errorUnsuppressed(e);
 								wait(tr2.onError(e));
 							}
 						}
 						if (val != val2) {
-							TraceEvent(SevError, "CausalConsistencyError2", self->interf.id())
+							TraceEvent(SevError, "CausalConsistencyError3")
 							    .detail("MessageKey", messageKey.toString().c_str())
 							    .detail("Val1", val)
 							    .detail("Val2", val2)
-							    .detail("RemoteCommitVersion", message.commitVersion)
+							    .detail("RemoteCommitVersion", message.second)
 							    .detail("LocalReadVersion",
 							            tr.getReadVersion().get()); // will assert that ReadVersion is set
 							++self->consistencyErrors;
@@ -242,7 +178,7 @@ struct SidebandSingleWorkload : TestWorkload {
 					}
 					break;
 				} catch (Error& e) {
-					TraceEvent("DebugSidebandCheckError").error(e, true);
+					TraceEvent("DebugSidebandCheckError").errorUnsuppressed(e);
 					wait(tr.onError(e));
 				}
 			}

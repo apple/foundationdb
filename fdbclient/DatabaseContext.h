@@ -198,6 +198,11 @@ struct ChangeFeedData : ReferenceCounted<ChangeFeedData> {
 	ChangeFeedData() : notAtLatest(1) {}
 };
 
+struct EndpointFailureInfo {
+	double startTime = 0;
+	double lastRefreshTime = 0;
+};
+
 class DatabaseContext : public ReferenceCounted<DatabaseContext>, public FastAllocated<DatabaseContext>, NonCopyable {
 public:
 	static DatabaseContext* allocateOnForeignThread() {
@@ -241,6 +246,14 @@ public:
 	void invalidateCache(const KeyRef&, Reverse isBackward = Reverse::False);
 	void invalidateCache(const KeyRangeRef&);
 
+	// Records that `endpoint` is failed on a healthy server.
+	void setFailedEndpointOnHealthyServer(const Endpoint& endpoint);
+
+	// Updates `endpoint` refresh time if the `endpoint` is a failed endpoint. If not, this does nothing.
+	void updateFailedEndpointRefreshTime(const Endpoint& endpoint);
+	Optional<EndpointFailureInfo> getEndpointFailureInfo(const Endpoint& endpoint);
+	void clearFailedEndpointOnHealthyServer(const Endpoint& endpoint);
+
 	bool sampleReadTags() const;
 	bool sampleOnCost(uint64_t cost) const;
 
@@ -249,7 +262,6 @@ public:
 	Future<Reference<CommitProxyInfo>> getCommitProxiesFuture(UseProvisionalProxies useProvisionalProxies);
 	Reference<GrvProxyInfo> getGrvProxies(UseProvisionalProxies useProvisionalProxies);
 	Future<Void> onProxiesChanged() const;
-	Future<Void> onClientLibStatusChanged() const;
 	Future<HealthMetrics> getHealthMetrics(bool detailed);
 	// Pass a negative value for `shardLimit` to indicate no limit on the shard number.
 	Future<StorageMetrics> getStorageMetrics(KeyRange const& keys, int shardLimit);
@@ -347,7 +359,6 @@ public:
 	// Key DB-specific information
 	Reference<AsyncVar<Reference<IClusterConnectionRecord>>> connectionRecord;
 	AsyncTrigger proxiesChangeTrigger;
-	AsyncTrigger clientLibChangeTrigger;
 	Future<Void> clientDBInfoMonitor;
 	Future<Void> monitorTssInfoChange;
 	Future<Void> tssMismatchHandler;
@@ -397,6 +408,7 @@ public:
 	// Cache of location information
 	int locationCacheSize;
 	CoalescedKeyRangeMap<Reference<LocationInfo>> locationCache;
+	std::unordered_map<Endpoint, EndpointFailureInfo> failedEndpointsOnHealthyServersInfo;
 
 	std::map<UID, StorageServerInfo*> server_interf;
 	std::map<UID, BlobWorkerInterface> blobWorker_interf; // blob workers don't change endpoints for the same ID
@@ -434,7 +446,7 @@ public:
 	Counter transactionGetKeyRequests;
 	Counter transactionGetValueRequests;
 	Counter transactionGetRangeRequests;
-	Counter transactionGetRangeAndFlatMapRequests;
+	Counter transactionGetMappedRangeRequests;
 	Counter transactionGetRangeStreamRequests;
 	Counter transactionWatchRequests;
 	Counter transactionGetAddressesForKeyRequests;
@@ -468,23 +480,19 @@ public:
 	int outstandingWatches;
 	int maxOutstandingWatches;
 
-	// Manage any shared state that may be used by MVC
-	DatabaseSharedState* sharedStatePtr;
-	DatabaseSharedState* initSharedState();
-	void setSharedState(DatabaseSharedState* p);
-
 	// GRV Cache
 	// Database-level read version cache storing the most recent successful GRV as well as the time it was requested.
-	double lastTimedGrv;
-	Version cachedRv;
-	void updateCachedRV(double t, Version v);
-	Version getCachedRV();
-	double getLastTimedGRV();
-	double lastTimedRkThrottle;
+	double lastGrvTime;
+	Version cachedReadVersion;
+	void updateCachedReadVersion(double t, Version v);
+	Version getCachedReadVersion();
+	double getLastGrvTime();
+	double lastRkBatchThrottleTime;
+	double lastRkDefaultThrottleTime;
 	// Cached RVs can be updated through commits, and using cached RVs avoids the proxies altogether
 	// Because our checks for ratekeeper throttling requires communication with the proxies,
 	// we want to track the last time in order to periodically contact the proxy to check for throttling
-	double lastProxyRequest;
+	double lastProxyRequestTime;
 
 	int snapshotRywEnabled;
 
