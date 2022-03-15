@@ -1551,13 +1551,14 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 		// RYW to optimize re-reading the same key ranges
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(occ);
 
-		tr->getTransaction().trState->taskID = TaskPriority::MoveKeys;
-		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		wait(checkMoveKeysLock(&(tr->getTransaction()), lock, ddEnabledState));
-
 		loop {
 			try {
+				tr->getTransaction().trState->taskID = TaskPriority::MoveKeys;
+				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
+				wait(checkMoveKeysLock(&(tr->getTransaction()), lock, ddEnabledState));
+
 				Optional<Value> val = wait(tr->get(dataMoveKeyFor(dataMoveID)));
 				if (val.present()) {
 					state DataMoveMetaData dataMove = decodeDataMoveValue(val.get());
@@ -1576,9 +1577,9 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 				// Keep track of old dests that may need to have ranges removed from serverKeys
 				state std::set<UID> oldDests;
 
-				tr->getTransaction().trState->taskID = TaskPriority::MoveKeys;
-				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				// tr->getTransaction().trState->taskID = TaskPriority::MoveKeys;
+				// tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				// tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
 				state RangeResult old =
 				    wait(krmGetRanges(tr, keyServersPrefix, range, CLIENT_KNOBS->TOO_MANY, CLIENT_KNOBS->TOO_MANY));
@@ -1617,6 +1618,12 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 					// 	oldDests.insert(*s);
 					// TraceEvent("StartMoveKeysOldDestAdd", relocationIntervalId).detail("Server", *s);
 					// }
+
+					krmSetPreviouslyEmptyRange(&(tr->getTransaction()),
+					                           keyServersPrefix,
+					                           rangeIntersectKeys,
+					                           keyServersValue(UIDtoTagMap, src, {}),
+					                           old[i + 1].value);
 
 					// Keep track of src shards so that we can preserve their values when we overwrite serverKeys
 					for (auto& uid : src) {
