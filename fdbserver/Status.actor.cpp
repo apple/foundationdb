@@ -1984,8 +1984,8 @@ ACTOR static Future<std::vector<std::pair<GrvProxyInterface, EventMap>>> getGrvP
 	return results;
 }
 
-// Returns the number of zones eligble for recruiting new tLogs after zone failures, to maintain the current replication
-// factor.
+// Returns the number of zones eligible for recruiting new tLogs after zone failures, to maintain the current
+// replication factor.
 static int getExtraTLogEligibleZones(const std::vector<WorkerDetails>& workers,
                                      const DatabaseConfiguration& configuration) {
 	std::set<StringRef> allZones;

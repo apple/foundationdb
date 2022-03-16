@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/FDBOptions.g.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/ManagementAPI.actor.h"
@@ -50,6 +51,7 @@ struct MoveKeysWorkload : TestWorkload {
 			// Get the database configuration so as to use proper team size
 			state Transaction tr(cx);
 			loop {
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				try {
 					RangeResult res = wait(tr.getRange(configKeys, 1000));
 					ASSERT(res.size() < 1000);

@@ -68,10 +68,11 @@ class ReadYourWritesTransaction final : NonCopyable,
                                         public ISingleThreadTransaction,
                                         public FastAllocated<ReadYourWritesTransaction> {
 public:
-	explicit ReadYourWritesTransaction(Database const& cx);
+	explicit ReadYourWritesTransaction(Database const& cx, Optional<TenantName> tenant = Optional<TenantName>());
 	~ReadYourWritesTransaction();
 
-	void setDatabase(Database const&) override;
+	void construct(Database const&) override;
+	void construct(Database const&, TenantName const& tenant) override;
 	void setVersion(Version v) override { tr.setVersion(v); }
 	Future<Version> getReadVersion() override;
 	Optional<Version> getCachedReadVersion() const override { return tr.getCachedReadVersion(); }
@@ -189,6 +190,8 @@ public:
 	const Optional<std::string>& getSpecialKeySpaceErrorMsg() { return specialKeySpaceErrorMsg; }
 	void setSpecialKeySpaceErrorMsg(const std::string& msg) { specialKeySpaceErrorMsg = msg; }
 	Transaction& getTransaction() { return tr; }
+
+	Optional<TenantName> getTenant() { return tr.getTenant(); }
 
 	// used in template functions as returned Future type
 	template <typename Type>

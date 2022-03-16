@@ -104,7 +104,13 @@ public:
 
 	void dependsOn(const Arena& p);
 	void* allocate4kAlignedBuffer(uint32_t size);
-	size_t getSize() const;
+
+	// If fastInaccurateEstimate is true this operation is O(1) but it is inaccurate in that it
+	// will omit memory added to this Arena's block tree using Arena handles which reference
+	// non-root nodes in this Arena's block tree.
+	// When fastInaccurateEstimate is false, all estimates in the block tree will be updated to
+	// be accurate.
+	size_t getSize(bool fastInaccurateEstimate = false) const;
 
 	bool hasFree(size_t size, const void* address);
 
@@ -156,6 +162,7 @@ struct ArenaBlock : NonCopyable, ThreadSafeReferenceCounted<ArenaBlock> {
 	// if tinySize != NOT_TINY, following variables aren't used
 	uint32_t bigSize, bigUsed; // include block header
 	uint32_t nextBlockOffset;
+	mutable size_t totalSizeEstimate; // Estimate of the minimum total size of arena blocks this one reaches
 
 	void addref();
 	void delref();
@@ -165,7 +172,8 @@ struct ArenaBlock : NonCopyable, ThreadSafeReferenceCounted<ArenaBlock> {
 	int unused() const;
 	const void* getData() const;
 	const void* getNextData() const;
-	size_t totalSize();
+	size_t totalSize() const;
+	size_t estimatedTotalSize() const;
 	// just for debugging:
 	void getUniqueBlocks(std::set<ArenaBlock*>& a);
 	int addUsed(int bytes);

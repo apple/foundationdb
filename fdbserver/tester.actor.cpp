@@ -465,7 +465,7 @@ ACTOR Future<Void> databaseWarmer(Database cx) {
 	}
 }
 
-// Tries indefinitly to commit a simple, self conflicting transaction
+// Tries indefinitely to commit a simple, self conflicting transaction
 ACTOR Future<Void> pingDatabase(Database cx) {
 	state Transaction tr(cx);
 	loop {
