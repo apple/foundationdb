@@ -482,8 +482,6 @@ std::vector<UID> decodeStorageTeams(const ValueRef& value) {
 	                                                     IncludeVersion(ProtocolVersion::withPartitionTransaction()));
 }
 
-const KeyRef storageTeamIdToTLogGroupPrefix = "\xff/storageTeamIdToTLogGroup/"_sr;
-
 const KeyRef cacheKeysPrefix = LiteralStringRef("\xff\x02/cacheKeys/");
 
 const Key cacheKeysKey(uint16_t idx, const KeyRef& key) {
