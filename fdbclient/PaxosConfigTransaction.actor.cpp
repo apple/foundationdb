@@ -227,7 +227,7 @@ class PaxosConfigTransactionImpl {
 			try {
 				ConfigGeneration generation = wait(self->getGenerationQuorum.getGeneration());
 				state Reference<ConfigTransactionInfo> configNodes(
-				    new ConfigTransactionInfo(self->getGenerationQuorum.getReadReplicas(), false));
+				    new ConfigTransactionInfo(self->getGenerationQuorum.getReadReplicas()));
 				ConfigTransactionGetReply reply =
 				    wait(timeoutError(basicLoadBalance(configNodes,
 				                                       &ConfigTransactionInterface::get,
@@ -250,7 +250,7 @@ class PaxosConfigTransactionImpl {
 	ACTOR static Future<RangeResult> getConfigClasses(PaxosConfigTransactionImpl* self) {
 		ConfigGeneration generation = wait(self->getGenerationQuorum.getGeneration());
 		state Reference<ConfigTransactionInfo> configNodes(
-		    new ConfigTransactionInfo(self->getGenerationQuorum.getReadReplicas(), false));
+		    new ConfigTransactionInfo(self->getGenerationQuorum.getReadReplicas()));
 		ConfigTransactionGetConfigClassesReply reply =
 		    wait(basicLoadBalance(configNodes,
 		                          &ConfigTransactionInterface::getClasses,
@@ -266,7 +266,7 @@ class PaxosConfigTransactionImpl {
 	ACTOR static Future<RangeResult> getKnobs(PaxosConfigTransactionImpl* self, Optional<Key> configClass) {
 		ConfigGeneration generation = wait(self->getGenerationQuorum.getGeneration());
 		state Reference<ConfigTransactionInfo> configNodes(
-		    new ConfigTransactionInfo(self->getGenerationQuorum.getReadReplicas(), false));
+		    new ConfigTransactionInfo(self->getGenerationQuorum.getReadReplicas()));
 		ConfigTransactionGetKnobsReply reply =
 		    wait(basicLoadBalance(configNodes,
 		                          &ConfigTransactionInterface::getKnobs,

@@ -99,7 +99,7 @@ class GetCommittedVersionQuorum {
 
 			// Now roll node forward to match the largest committed version of
 			// the replies.
-			state Reference<ConfigFollowerInfo> quorumCfi(new ConfigFollowerInfo(self->replies[target], false));
+			state Reference<ConfigFollowerInfo> quorumCfi(new ConfigFollowerInfo(self->replies[target]));
 			try {
 				state Version lastSeenVersion = std::max(
 				    rollback.present() ? rollback.get() : nodeVersion.lastCommitted, self->largestCompactedResponse);
@@ -295,7 +295,7 @@ class PaxosConfigConsumerImpl {
 			try {
 				state Version committedVersion = wait(getCommittedVersion(self));
 				state Reference<ConfigFollowerInfo> configNodes(
-				    new ConfigFollowerInfo(self->getCommittedVersionQuorum.getReadReplicas(), false));
+				    new ConfigFollowerInfo(self->getCommittedVersionQuorum.getReadReplicas()));
 				ConfigFollowerGetSnapshotAndChangesReply reply =
 				    wait(timeoutError(basicLoadBalance(configNodes,
 				                                       &ConfigFollowerInterface::getSnapshotAndChanges,
@@ -350,7 +350,7 @@ class PaxosConfigConsumerImpl {
 				if (committedVersion > self->lastSeenVersion) {
 					ASSERT(self->getCommittedVersionQuorum.getReadReplicas().size() >= self->cfis.size() / 2 + 1);
 					state Reference<ConfigFollowerInfo> configNodes(
-					    new ConfigFollowerInfo(self->getCommittedVersionQuorum.getReadReplicas(), false));
+					    new ConfigFollowerInfo(self->getCommittedVersionQuorum.getReadReplicas()));
 					ConfigFollowerGetChangesReply reply = wait(timeoutError(
 					    basicLoadBalance(configNodes,
 					                     &ConfigFollowerInterface::getChanges,
