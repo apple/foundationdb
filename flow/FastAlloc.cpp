@@ -519,7 +519,7 @@ void FastAllocator<Size>::getMagazine() {
 		--g_allocation_tracing_disabled;
 	}
 #endif
-	block = (void**)::allocate(magazine_size * Size, false);
+	block = (void**)::aligned_alloc(4096, magazine_size * Size);
 #endif
 
 	// void** block = new void*[ magazine_size * PSize ];
