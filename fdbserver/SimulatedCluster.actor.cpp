@@ -2344,7 +2344,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 
 	state Optional<TenantName> defaultTenant;
 	state TenantMode tenantMode = TenantMode::DISABLED;
-	if (allowDefaultTenant && deterministicRandom()->random01() < 1.0) {
+	if (allowDefaultTenant && deterministicRandom()->random01() < 0.5) {
 		defaultTenant = "SimulatedDefaultTenant"_sr;
 		if (deterministicRandom()->random01() < 0.9) {
 			tenantMode = TenantMode::REQUIRED;

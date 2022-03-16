@@ -2418,11 +2418,9 @@ TEST_CASE("Tenant create, access, and delete") {
 	fdb::Transaction tr(db);
 	while (1) {
 		fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, nullptr, 0));
-		fprintf(stderr, "Create tenant\n");
 		tr.set("\xff\xff/management/tenant_map/" + tenantName, "");
 		fdb::EmptyFuture commitFuture = tr.commit();
 		fdb_error_t err = wait_future(commitFuture);
-		fprintf(stderr, "Got error: %d\n", err);
 		if (err) {
 			fdb::EmptyFuture f = tr.on_error(err);
 			fdb_check(wait_future(f));
@@ -2436,11 +2434,9 @@ TEST_CASE("Tenant create, access, and delete") {
 	fdb::Transaction tr2(tenant);
 
 	while (1) {
-		fprintf(stderr, "Set tenant key\n");
 		tr2.set(testKey, testValue);
 		fdb::EmptyFuture commitFuture = tr2.commit();
 		fdb_error_t err = wait_future(commitFuture);
-		fprintf(stderr, "Got error: %d\n", err);
 		if (err) {
 			fdb::EmptyFuture f = tr2.on_error(err);
 			fdb_check(wait_future(f));
@@ -2451,10 +2447,8 @@ TEST_CASE("Tenant create, access, and delete") {
 	}
 
 	while (1) {
-		fprintf(stderr, "Get tenant key\n");
 		fdb::ValueFuture f1 = tr2.get(testKey, false);
 		fdb_error_t err = wait_future(f1);
-		fprintf(stderr, "Got error: %d\n", err);
 		if (err) {
 			fdb::EmptyFuture f2 = tr.on_error(err);
 			fdb_check(wait_future(f2));
@@ -2472,7 +2466,6 @@ TEST_CASE("Tenant create, access, and delete") {
 		tr2.clear(testKey);
 		fdb::EmptyFuture commitFuture = tr2.commit();
 		err = wait_future(commitFuture);
-		fprintf(stderr, "Got error: %d\n", err);
 		if (err) {
 			fdb::EmptyFuture f = tr2.on_error(err);
 			fdb_check(wait_future(f));
@@ -2485,11 +2478,9 @@ TEST_CASE("Tenant create, access, and delete") {
 
 	while (1) {
 		fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, nullptr, 0));
-		fprintf(stderr, "Delete tenant\n");
 		tr.clear("\xff\xff/management/tenant_map/" + tenantName);
 		fdb::EmptyFuture commitFuture = tr.commit();
 		fdb_error_t err = wait_future(commitFuture);
-		fprintf(stderr, "Got error: %d\n", err);
 		if (err) {
 			fdb::EmptyFuture f = tr.on_error(err);
 			fdb_check(wait_future(f));
@@ -2500,10 +2491,8 @@ TEST_CASE("Tenant create, access, and delete") {
 	}
 
 	while (1) {
-		fprintf(stderr, "Get tenant after delete\n");
 		fdb::ValueFuture f1 = tr2.get(testKey, false);
 		fdb_error_t err = wait_future(f1);
-		fprintf(stderr, "Got error: %d\n", err);
 		if (err == error_code_tenant_not_found) {
 			tr2.reset();
 			break;
