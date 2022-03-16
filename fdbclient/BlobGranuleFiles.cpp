@@ -172,7 +172,7 @@ RangeResult materializeBlobGranule(const BlobGranuleChunkRef& chunk,
                                    Version readVersion,
                                    Optional<StringRef> snapshotData,
                                    StringRef deltaFileData[]) {
-	// TODO REMOVE with V2 of protocol
+	// TODO REMOVE with early replying
 	ASSERT(readVersion == chunk.includedVersion);
 	ASSERT(chunk.snapshotFile.present());
 	ASSERT(snapshotData.present());
@@ -278,8 +278,7 @@ ErrorOr<RangeResult> loadAndMaterializeBlobGranules(const Standalone<VectorRef<B
 	}
 }
 
-// FIXME: re-enable test!
-TEST_CASE(":/blobgranule/files/applyDelta") {
+TEST_CASE("/blobgranule/files/applyDelta") {
 	printf("Testing blob granule delta applying\n");
 	Arena a;
 

@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include <limits>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -43,8 +44,9 @@
 #include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
-#include "flow/actorcompiler.h" // has to be last include
 #include "flow/network.h"
+
+#include "flow/actorcompiler.h" // has to be last include
 
 #define BW_DEBUG false
 #define BW_REQUEST_DEBUG false
@@ -2100,9 +2102,13 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 		           req.readVersion);
 	}
 
+	state bool didCollapse = false;
 	try {
-		// TODO REMOVE in api V2
-		ASSERT(req.beginVersion == 0);
+		// TODO remove requirement for canCollapseBegin once we implement early replying
+		ASSERT(req.beginVersion == 0 || req.canCollapseBegin);
+		if (req.beginVersion != 0) {
+			ASSERT(req.beginVersion > 0);
+		}
 		state BlobGranuleFileReply rep;
 		state std::vector<Reference<GranuleMetadata>> granules;
 
@@ -2150,6 +2156,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 				continue;
 			}
 			state Reference<GranuleMetadata> metadata = m;
+			state Version granuleBeginVersion = req.beginVersion;
 
 			choose {
 				when(wait(metadata->readable.getFuture())) {}
@@ -2290,67 +2297,25 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 			// granule is up to date, do read
 			ASSERT(metadata->cancelled.canBeSet());
 
+			// Right now we force a collapse if the version range crosses granule boundaries, for simplicity
+			if (chunkFiles.snapshotFiles.front().version < granuleBeginVersion) {
+				didCollapse = true;
+				granuleBeginVersion = 0;
+			}
 			BlobGranuleChunkRef chunk;
-			// TODO change in V2
+			// TODO change with early reply
 			chunk.includedVersion = req.readVersion;
 			chunk.keyRange = KeyRangeRef(StringRef(rep.arena, chunkRange.begin), StringRef(rep.arena, chunkRange.end));
 
-			// handle snapshot files
-			// TODO refactor the "find snapshot file" logic to GranuleFiles?
-			// FIXME: binary search instead of linear search, especially when file count is large
-			int i = chunkFiles.snapshotFiles.size() - 1;
-			while (i >= 0 && chunkFiles.snapshotFiles[i].version > req.readVersion) {
-				i--;
-			}
-			// because of granule history, we should always be able to find the desired snapshot
-			// version, and have thrown blob_granule_transaction_too_old earlier if not possible.
-			if (i < 0) {
-				fmt::print("req @ {0} >= initial snapshot {1} but can't find snapshot in ({2}) files:\n",
-				           req.readVersion,
-				           metadata->initialSnapshotVersion,
-				           chunkFiles.snapshotFiles.size());
-				for (auto& f : chunkFiles.snapshotFiles) {
-					fmt::print("  {0}", f.version);
-				}
-			}
-			ASSERT(i >= 0);
-
-			BlobFileIndex snapshotF = chunkFiles.snapshotFiles[i];
-			chunk.snapshotFile = BlobFilePointerRef(rep.arena, snapshotF.filename, snapshotF.offset, snapshotF.length);
-			Version snapshotVersion = chunkFiles.snapshotFiles[i].version;
-			chunk.snapshotVersion = snapshotVersion;
-
-			// handle delta files
-			// cast this to an int so i going to -1 still compares properly
-			int lastDeltaFileIdx = chunkFiles.deltaFiles.size() - 1;
-			i = lastDeltaFileIdx;
-			// skip delta files that are too new
-			while (i >= 0 && chunkFiles.deltaFiles[i].version > req.readVersion) {
-				i--;
-			}
-			if (i < lastDeltaFileIdx) {
-				// we skipped one file at the end with a larger read version, this will actually contain
-				// our query version, so add it back.
-				i++;
-			}
-			// only include delta files after the snapshot file
-			int j = i;
-			while (j >= 0 && chunkFiles.deltaFiles[j].version > snapshotVersion) {
-				j--;
-			}
-			j++;
-			while (j <= i) {
-				BlobFileIndex deltaF = chunkFiles.deltaFiles[j];
-				chunk.deltaFiles.emplace_back_deep(rep.arena, deltaF.filename, deltaF.offset, deltaF.length);
-				bwData->stats.readReqDeltaBytesReturned += deltaF.length;
-				j++;
+			chunkFiles.getFiles(granuleBeginVersion, req.readVersion, req.canCollapseBegin, chunk, rep.arena);
+			if (granuleBeginVersion > 0 && chunk.snapshotFile.present()) {
+				didCollapse = true;
 			}
 
 			// new deltas (if version is larger than version of last delta file)
 			// FIXME: do trivial key bounds here if key range is not fully contained in request key
 			// range
-
-			if (req.readVersion > metadata->durableDeltaVersion.get()) {
+			if (req.readVersion > metadata->durableDeltaVersion.get() && metadata->currentDeltas.size()) {
 				if (metadata->durableDeltaVersion.get() != metadata->pendingDeltaVersion) {
 					fmt::print("real-time read [{0} - {1}) @ {2} doesn't have mutations!! durable={3}, pending={4}\n",
 					           metadata->keyRange.begin.printable(),
@@ -2359,13 +2324,31 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 					           metadata->durableDeltaVersion.get(),
 					           metadata->pendingDeltaVersion);
 				}
+
+				// prune mutations based on begin version, if possible
 				ASSERT(metadata->durableDeltaVersion.get() == metadata->pendingDeltaVersion);
 				rep.arena.dependsOn(metadata->currentDeltas.arena());
-				for (auto& delta : metadata->currentDeltas) {
-					if (delta.version > req.readVersion) {
+				MutationsAndVersionRef* mutationIt = metadata->currentDeltas.begin();
+				if (granuleBeginVersion > metadata->currentDeltas.back().version) {
+					TEST(true); // beginVersion pruning all in-memory mutations
+					mutationIt = metadata->currentDeltas.end();
+				} else if (granuleBeginVersion > metadata->currentDeltas.front().version) {
+					// binary search for beginVersion
+					TEST(true); // beginVersion pruning some in-memory mutations
+					mutationIt = std::lower_bound(metadata->currentDeltas.begin(),
+					                              metadata->currentDeltas.end(),
+					                              MutationsAndVersionRef(granuleBeginVersion, 0),
+					                              MutationsAndVersionRef::OrderByVersion());
+				}
+
+				// add mutations to response
+				while (mutationIt != metadata->currentDeltas.end()) {
+					if (mutationIt->version > req.readVersion) {
+						TEST(true); // readVersion pruning some in-memory mutations
 						break;
 					}
-					chunk.newDeltas.push_back_deep(rep.arena, delta);
+					chunk.newDeltas.push_back_deep(rep.arena, *mutationIt);
+					mutationIt++;
 				}
 			}
 
@@ -2376,11 +2359,19 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 
 			wait(yield(TaskPriority::DefaultEndpoint));
 		}
+		// do these together to keep them synchronous
+		if (req.beginVersion != 0) {
+			++bwData->stats.readRequestsWithBegin;
+		}
+		if (didCollapse) {
+			++bwData->stats.readRequestsCollapsed;
+		}
 		ASSERT(!req.reply.isSet());
 		req.reply.send(rep);
 		--bwData->stats.activeReadRequests;
 	} catch (Error& e) {
-		// fmt::print("Error in BGFRequest {0}\n", e.name());
+		// TODO REMOVE
+		fmt::print("Error in BGFRequest {0}\n", e.name());
 		if (e.code() == error_code_operation_cancelled) {
 			req.reply.sendError(wrong_shard_server());
 			throw;
