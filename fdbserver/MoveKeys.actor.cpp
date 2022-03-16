@@ -20,6 +20,7 @@
 
 #include <vector>
 
+#include "fdbclient/FDBOptions.g.h"
 #include "flow/Util.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbclient/KeyBackedTypes.h"
@@ -65,6 +66,7 @@ ACTOR Future<MoveKeysLock> takeMoveKeysLock(Database cx, UID ddId) {
 			state MoveKeysLock lock;
 			state UID txnId;
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			if (!g_network->isSimulated()) {
 				txnId = deterministicRandom()->randomUniqueID();
 				tr.debugTransaction(txnId);
@@ -99,6 +101,7 @@ ACTOR static Future<Void> checkMoveKeysLock(Transaction* tr,
                                             MoveKeysLock lock,
                                             const DDEnabledState* ddEnabledState,
                                             bool isWrite = true) {
+	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 	if (!ddEnabledState->isDDEnabled()) {
 		TraceEvent(SevDebug, "DDDisabledByInMemoryCheck").log();
 		throw movekeys_conflict();
@@ -605,6 +608,7 @@ ACTOR Future<Void> checkFetchingState(Database cx,
 
 			tr.trState->taskID = TaskPriority::MoveKeys;
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 
 			std::vector<Future<Optional<Value>>> serverListEntries;
 			serverListEntries.reserve(dest.size());
@@ -698,6 +702,7 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 
 					tr.trState->taskID = TaskPriority::MoveKeys;
 					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
 					releaser.release();
 					wait(finishMoveKeysParallelismLock->take(TaskPriority::DataDistributionLaunch));
@@ -1332,6 +1337,7 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 			try {
 				tr.trState->taskID = TaskPriority::MoveKeys;
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				wait(checkMoveKeysLock(&tr, lock, ddEnabledState));
 				TraceEvent("RemoveKeysFromFailedServerLocked")
 				    .detail("ServerID", serverID)

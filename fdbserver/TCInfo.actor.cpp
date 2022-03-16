@@ -154,6 +154,10 @@ bool TCServerInfo::hasHealthyAvailableSpace(double minAvailableSpaceRatio) const
 	return availableSpaceRatio >= minAvailableSpaceRatio;
 }
 
+bool TCServerInfo::isWigglePausedServer() const {
+	return collection && collection->isWigglePausedServer(id);
+}
+
 Future<Void> TCServerInfo::updateServerMetrics() {
 	return TCServerInfoImpl::updateServerMetrics(this);
 }
@@ -429,6 +433,14 @@ bool TCTeamInfo::isOptimal() const {
 
 bool TCTeamInfo::hasServer(const UID& server) const {
 	return std::find(serverIDs.begin(), serverIDs.end(), server) != serverIDs.end();
+}
+
+bool TCTeamInfo::hasWigglePausedServer() const {
+	for (const auto& server : servers) {
+		if (server->isWigglePausedServer())
+			return true;
+	}
+	return false;
 }
 
 void TCTeamInfo::addServers(const std::vector<UID>& servers) {

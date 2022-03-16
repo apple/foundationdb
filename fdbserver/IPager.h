@@ -309,6 +309,11 @@ public:
 	// Advance the commit version and the oldest readble version and commit until the remap queue is empty.
 	virtual Future<Void> clearRemapQueue() = 0;
 
+	// Get a pointer to an integer representing a byte count penalty the pager should apply against usable page cache
+	// memory. This is used to track significant memory usage external to the pager.  Such usages should
+	// increment/decrement the value at this pointer based on their memory footprint.
+	virtual int64_t* getPageCachePenaltySource() = 0;
+
 protected:
 	~IPager2() {} // Destruction should be done using close()/dispose() from the IClosable interface
 };

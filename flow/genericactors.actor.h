@@ -2042,6 +2042,15 @@ private:
 	Reference<UnsafeWeakFutureReferenceData> data;
 };
 
+// Call a lambda every <interval> seconds
+ACTOR template <typename Fn>
+Future<Void> repeatEvery(double interval, Fn fn) {
+	loop {
+		wait(delay(interval));
+		fn();
+	}
+}
+
 #include "flow/unactorcompiler.h"
 
 #endif

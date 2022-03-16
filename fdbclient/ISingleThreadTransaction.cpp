@@ -48,6 +48,21 @@ Reference<ISingleThreadTransaction> ISingleThreadTransaction::create(Type type, 
 	} else {
 		result = makeReference<PaxosConfigTransaction>();
 	}
-	result->setDatabase(cx);
+	result->construct(cx);
+	return result;
+}
+
+Reference<ISingleThreadTransaction> ISingleThreadTransaction::create(Type type,
+                                                                     Database const& cx,
+                                                                     TenantName const& tenant) {
+	Reference<ISingleThreadTransaction> result;
+	if (type == Type::RYW) {
+		result = makeReference<ReadYourWritesTransaction>();
+	} else if (type == Type::SIMPLE_CONFIG) {
+		result = makeReference<SimpleConfigTransaction>();
+	} else {
+		result = makeReference<PaxosConfigTransaction>();
+	}
+	result->construct(cx, tenant);
 	return result;
 }
