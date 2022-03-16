@@ -29,6 +29,7 @@
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "flow/serialize.h"
+
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct CycleWorkload : TestWorkload {

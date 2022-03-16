@@ -28,6 +28,7 @@
 #include "flow/Trace.h"
 #include "flow/serialize.h"
 #include <cstring>
+
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct MiniCycleWorkload : TestWorkload {

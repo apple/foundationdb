@@ -34,6 +34,7 @@
 #include "fdbserver/RestoreApplier.actor.h"
 
 #include "flow/network.h"
+
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMutationsRequest req,

@@ -28,6 +28,7 @@
 #include "fdbclient/json_spirit/json_spirit_reader_template.h"
 #include "fdbrpc/genericactors.actor.h"
 #include <cstdint>
+
 #include "flow/actorcompiler.h" // has to be last include
 
 json_spirit::mValue readJSONStrictly(const std::string& s) {
