@@ -129,6 +129,9 @@ Future<REPLY_TYPE(Request)> loadBalance(
 FDB_BOOLEAN_PARAM(TransactionRecordLogInfo);
 FDB_DEFINE_BOOLEAN_PARAM(UseProvisionalProxies);
 
+// Used to determine whether or not client will load balance based on the number of GRVs released by each proxy
+FDB_DEFINE_BOOLEAN_PARAM(BalanceOnRequests);
+
 // Whether or not a request should include the tenant name
 FDB_BOOLEAN_PARAM(UseTenant);
 
@@ -1875,9 +1878,9 @@ void DatabaseContext::setOption(FDBDatabaseOptions::Option option, Optional<Stri
 			                 clientLocality.machineId(),
 			                 clientLocality.dcId());
 			if (clientInfo->get().commitProxies.size())
-				commitProxies = makeReference<CommitProxyInfo>(clientInfo->get().commitProxies, false);
+				commitProxies = makeReference<CommitProxyInfo>(clientInfo->get().commitProxies);
 			if (clientInfo->get().grvProxies.size())
-				grvProxies = makeReference<GrvProxyInfo>(clientInfo->get().grvProxies, true);
+				grvProxies = makeReference<GrvProxyInfo>(clientInfo->get().grvProxies, BalanceOnRequests::True);
 			server_interf.clear();
 			locationCache.insert(allKeys, Reference<LocationInfo>());
 			break;
@@ -1891,9 +1894,9 @@ void DatabaseContext::setOption(FDBDatabaseOptions::Option option, Optional<Stri
 			                 clientLocality.machineId(),
 			                 value.present() ? Standalone<StringRef>(value.get()) : Optional<Standalone<StringRef>>());
 			if (clientInfo->get().commitProxies.size())
-				commitProxies = makeReference<CommitProxyInfo>(clientInfo->get().commitProxies, false);
+				commitProxies = makeReference<CommitProxyInfo>(clientInfo->get().commitProxies);
 			if (clientInfo->get().grvProxies.size())
-				grvProxies = makeReference<GrvProxyInfo>(clientInfo->get().grvProxies, true);
+				grvProxies = makeReference<GrvProxyInfo>(clientInfo->get().grvProxies, BalanceOnRequests::True);
 			server_interf.clear();
 			locationCache.insert(allKeys, Reference<LocationInfo>());
 			break;
@@ -2448,11 +2451,11 @@ void DatabaseContext::updateProxies() {
 	grvProxies.clear();
 	bool commitProxyProvisional = false, grvProxyProvisional = false;
 	if (clientInfo->get().commitProxies.size()) {
-		commitProxies = makeReference<CommitProxyInfo>(clientInfo->get().commitProxies, false);
+		commitProxies = makeReference<CommitProxyInfo>(clientInfo->get().commitProxies);
 		commitProxyProvisional = clientInfo->get().commitProxies[0].provisional;
 	}
 	if (clientInfo->get().grvProxies.size()) {
-		grvProxies = makeReference<GrvProxyInfo>(clientInfo->get().grvProxies, true);
+		grvProxies = makeReference<GrvProxyInfo>(clientInfo->get().grvProxies, BalanceOnRequests::True);
 		grvProxyProvisional = clientInfo->get().grvProxies[0].provisional;
 	}
 	if (clientInfo->get().commitProxies.size() && clientInfo->get().grvProxies.size()) {
