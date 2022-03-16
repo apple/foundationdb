@@ -94,6 +94,7 @@ struct StorageServerInterface {
 	NetworkAddress address() const { return getValue.getEndpoint().getPrimaryAddress(); }
 	NetworkAddress stableAddress() const { return getValue.getEndpoint().getStableAddress(); }
 	Optional<NetworkAddress> secondaryAddress() const { return getValue.getEndpoint().addresses.secondaryAddress; }
+	bool readyForTraffic;
 	UID id() const { return uniqueID; }
 	bool isTss() const { return tssPairID.present(); }
 	std::string toString() const { return id().shortString(); }
