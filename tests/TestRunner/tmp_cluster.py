@@ -18,7 +18,8 @@ class TempCluster:
         assert self.build_dir.is_dir(), "{} is not a directory".format(build_dir)
         tmp_dir = self.build_dir.joinpath(
             "tmp",
-            "".join(choice(LocalCluster.valid_letters_for_secret) for i in range(16)),
+            "".join(choice(LocalCluster.valid_letters_for_secret)
+                    for i in range(16)),
         )
         tmp_dir.mkdir(parents=True)
         self.cluster = LocalCluster(
@@ -75,13 +76,19 @@ if __name__ == "__main__":
         help="FDB build directory",
         required=True,
     )
-    parser.add_argument("cmd", metavar="COMMAND", nargs="+", help="The command to run")
+    parser.add_argument("cmd", metavar="COMMAND",
+                        nargs="+", help="The command to run")
     parser.add_argument(
         "--process-number",
         "-p",
         help="Number of fdb processes running",
         type=int,
         default=1,
+    )
+    parser.add_argument(
+        '--disable-log-dump',
+        help='Do not dump cluster log on error',
+        action="store_true"
     )
     args = parser.parse_args()
     errcode = 1
@@ -128,7 +135,7 @@ if __name__ == "__main__":
             errcode = 1
             break
 
-        if errcode:
+        if errcode and not args.disable_log_dump:
             for etc_file in glob.glob(os.path.join(cluster.etc, "*")):
                 print(">>>>>>>>>>>>>>>>>>>> Contents of {}:".format(etc_file))
                 with open(etc_file, "r") as f:
