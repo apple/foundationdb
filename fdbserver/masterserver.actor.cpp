@@ -65,7 +65,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	Version version; // The last version assigned to a proxy by getVersion()
 	double lastVersionTime;
 	IKeyValueStore* txnStateStore;
-	Version referenceVersion = invalidVersion;
+	Optional<Version> referenceVersion;
 
 	std::vector<CommitProxyInterface> commitProxies;
 	std::map<UID, CommitProxyVersionReplies> lastCommitProxyVersionReplies;
@@ -161,8 +161,9 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 			                                        SERVER_KNOBS->VERSIONS_PER_SECOND * (t1 - self->lastVersionTime)));
 
 			rep.prevVersion = self->version;
-			if (self->referenceVersion >= 0) {
-				Version expected = g_network->timer() * SERVER_KNOBS->VERSIONS_PER_SECOND - self->referenceVersion;
+			if (self->referenceVersion.present()) {
+				Version expected =
+				    g_network->timer() * SERVER_KNOBS->VERSIONS_PER_SECOND - self->referenceVersion.get();
 
 				// Attempt to jump directly to the expected version. But make
 				// sure that versions are still being handed out at a rate
@@ -292,9 +293,9 @@ ACTOR Future<Void> updateRecoveryData(Reference<MasterData> self) {
 						self->lastCommitProxyVersionReplies[p.id()] = CommitProxyVersionReplies();
 					}
 				}
-				if (req.versionEpoch >= 0) {
+				if (req.versionEpoch.present()) {
 					self->referenceVersion =
-					    !g_network->isSimulated() ? req.versionEpoch * SERVER_KNOBS->VERSIONS_PER_SECOND : 0;
+					    !g_network->isSimulated() ? req.versionEpoch.get() * SERVER_KNOBS->VERSIONS_PER_SECOND : 0;
 				}
 				req.reply.send(Void());
 			}

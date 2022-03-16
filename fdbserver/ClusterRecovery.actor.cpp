@@ -1180,7 +1180,7 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	// version epoch is the number of seconds since the Unix epoch.
 	// TODO: Set `versionEpochKey` to the default value on new clusters to
 	// enable new clusters to use a version in-step with wall clock time.
-	self->versionEpoch = invalidVersion;
+	self->versionEpoch.reset();
 	Optional<Standalone<StringRef>> versionEpochValue = wait(self->txnStateStore->readValue(versionEpochKey));
 	self->versionEpoch = SERVER_KNOBS->DEFAULT_VERSION_EPOCH;
 	if (versionEpochValue.present()) {
@@ -1203,14 +1203,14 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	// Recover version info
 	self->lastEpochEnd = oldLogSystem->getEnd() - 1;
 	if (self->lastEpochEnd == 0) {
-		if (self->versionEpoch != invalidVersion) {
+		if (self->versionEpoch.present()) {
 			// Set the initial cluster version equal to the current timestamp in
 			// microseconds, relative to a defined epoch. Versions advance at
 			// roughtly one million versions per second, so one version equals one
 			// microsecond.
 			self->recoveryTransactionVersion = g_network->timer() * SERVER_KNOBS->VERSIONS_PER_SECOND;
 			if (!g_network->isSimulated()) {
-				self->recoveryTransactionVersion -= self->versionEpoch * SERVER_KNOBS->VERSIONS_PER_SECOND;
+				self->recoveryTransactionVersion -= self->versionEpoch.get() * SERVER_KNOBS->VERSIONS_PER_SECOND;
 			}
 		} else {
 			self->recoveryTransactionVersion = 1;
@@ -1222,10 +1222,11 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 			self->recoveryTransactionVersion = self->lastEpochEnd + SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT;
 		}
 
-		if (self->versionEpoch != invalidVersion) {
-			self->recoveryTransactionVersion = std::max(
-			    self->recoveryTransactionVersion,
-			    static_cast<Version>((g_network->timer() - self->versionEpoch) * SERVER_KNOBS->VERSIONS_PER_SECOND));
+		if (self->versionEpoch.present()) {
+			self->recoveryTransactionVersion =
+			    std::max(self->recoveryTransactionVersion,
+			             static_cast<Version>((g_network->timer() - self->versionEpoch.get()) *
+			                                  SERVER_KNOBS->VERSIONS_PER_SECOND));
 		}
 
 		if (self->recoveryTransactionVersion < minRequiredCommitVersion)
