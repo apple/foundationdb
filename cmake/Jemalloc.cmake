@@ -15,7 +15,12 @@ ExternalProject_add(Jemalloc_project
   "${JEMALLOC_DIR}/lib/libjemalloc.a"
   "${JEMALLOC_DIR}/lib/libjemalloc_pic.a"
   PATCH_COMMAND patch -p1 < ${CMAKE_SOURCE_DIR}/cmake/jemalloc.patch
-  CONFIGURE_COMMAND ./configure --prefix=${JEMALLOC_DIR} --enable-static --disable-cxx --enable-prof
+  CONFIGURE_COMMAND ./configure
+    --disable-cxx
+    --enable-prof
+    --enable-static
+    --enable-stats
+    --prefix=${JEMALLOC_DIR}
   BUILD_IN_SOURCE ON
   BUILD_COMMAND make
   INSTALL_DIR "${JEMALLOC_DIR}"
