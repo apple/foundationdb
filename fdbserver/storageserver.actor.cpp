@@ -1855,7 +1855,7 @@ ACTOR Future<Void> fetchCheckpointQ(StorageServer* self, FetchCheckpointRequest 
 		return Void();
 	}
 
-	state ICheckpointReader* reader;
+	state ICheckpointReader* reader = nullptr;
 
 	try {
 		reader = newCheckpointReader(it->second, deterministicRandom()->randomUniqueID());
