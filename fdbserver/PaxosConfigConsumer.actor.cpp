@@ -244,7 +244,7 @@ public:
 			}
 			return smallest;
 		}
-		return invalidVersion;
+		return ::invalidVersion;
 	}
 	Future<Void> complete() const { return waitForAll(actors); }
 };
