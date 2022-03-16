@@ -200,6 +200,7 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 	TransactionTagMap<ClientTagThrottleLimits> tagThrottleInfo;
 
 	VersionVector ssVersionVectorDelta;
+	UID proxyId; // GRV proxy ID to detect old GRV proxies at client side
 
 	GetReadVersionReply() : version(invalidVersion), locked(false) {}
 
@@ -212,7 +213,8 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 		           metadataVersion,
 		           tagThrottleInfo,
 		           midShardSize,
-		           ssVersionVectorDelta);
+		           ssVersionVectorDelta,
+		           proxyId);
 	}
 };
 

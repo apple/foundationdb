@@ -240,7 +240,9 @@ struct vector_like_traits<boost::container::flat_map<Key, T, Compare, Allocator>
 		return v.size();
 	}
 	template <class Context>
-	static void reserve(Vec& v, size_t size, Context&) {}
+	static void reserve(Vec& v, size_t size, Context&) {
+		v.reserve(size);
+	}
 
 	template <class Context>
 	static insert_iterator insert(Vec& v, Context&) {

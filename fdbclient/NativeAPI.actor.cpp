@@ -69,6 +69,7 @@
 #include "flow/Error.h"
 #include "flow/FastRef.h"
 #include "flow/IRandom.h"
+#include "flow/Trace.h"
 #include "flow/flow.h"
 #include "flow/genericactors.actor.h"
 #include "flow/Knobs.h"
@@ -226,7 +227,7 @@ void DatabaseContext::getLatestCommitVersions(const Reference<LocationInfo>& loc
 	if (ssVersionVectorCache.getMaxVersion() != invalidVersion && readVersion > ssVersionVectorCache.getMaxVersion()) {
 		TraceEvent(SevError, "GetLatestCommitVersions")
 		    .detail("ReadVersion", readVersion)
-		    .detail("Version vector", ssVersionVectorCache.toString());
+		    .detail("VersionVector", ssVersionVectorCache.toString());
 		ASSERT(false);
 	}
 
@@ -1272,11 +1273,11 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
     transactionsProcessBehind("ProcessBehind", cc), transactionsThrottled("Throttled", cc),
     transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
     transactionGrvFullBatches("NumGrvFullBatches", cc), transactionGrvTimedOutBatches("NumGrvTimedOutBatches", cc),
-    latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000),
-    bytesPerCommit(1000), outstandingWatches(0), transactionTracingSample(false), taskID(taskID),
-    clientInfo(clientInfo), clientInfoMonitor(clientInfoMonitor), coordinator(coordinator), apiVersion(apiVersion),
-    mvCacheInsertLocation(0), healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0),
-    smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
+    transactionsStaleVersionVectors("NumStaleVersionVectors", cc), latencies(1000), readLatencies(1000),
+    commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), outstandingWatches(0),
+    transactionTracingSample(false), taskID(taskID), clientInfo(clientInfo), clientInfoMonitor(clientInfoMonitor),
+    coordinator(coordinator), apiVersion(apiVersion), mvCacheInsertLocation(0), healthMetricsLastUpdated(0),
+    detailedHealthMetricsLastUpdated(0), smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
     specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)),
     connectToDatabaseEventCacheHolder(format("ConnectToDatabase/%s", dbId.toString().c_str())) {
 	dbId = deterministicRandom()->randomUniqueID();
@@ -1529,8 +1530,9 @@ DatabaseContext::DatabaseContext(const Error& err)
     transactionsProcessBehind("ProcessBehind", cc), transactionsThrottled("Throttled", cc),
     transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
     transactionGrvFullBatches("NumGrvFullBatches", cc), transactionGrvTimedOutBatches("NumGrvTimedOutBatches", cc),
-    latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000),
-    bytesPerCommit(1000), transactionTracingSample(false), smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
+    transactionsStaleVersionVectors("NumStaleVersionVectors", cc), latencies(1000), readLatencies(1000),
+    commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000),
+    transactionTracingSample(false), smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
     connectToDatabaseEventCacheHolder(format("ConnectToDatabase/%s", dbId.toString().c_str())) {}
 
 // Static constructor used by server processes to create a DatabaseContext
@@ -2305,6 +2307,15 @@ Reference<GrvProxyInfo> DatabaseContext::getGrvProxies(UseProvisionalProxies use
 	return grvProxies;
 }
 
+bool DatabaseContext::isCurrentGrvProxy(UID proxyId) const {
+	for (const auto& proxy : clientInfo->get().grvProxies) {
+		if (proxy.id() == proxyId)
+			return true;
+	}
+	TEST(true); // stale GRV proxy detected
+	return false;
+}
+
 // Actor which will wait until the MultiInterface<CommitProxyInterface> returned by the DatabaseContext cx is not
 // nullptr
 ACTOR Future<Reference<CommitProxyInfo>> getCommitProxiesFuture(DatabaseContext* cx,
@@ -2946,7 +2957,11 @@ ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version, Span
 					cx->minAcceptableReadVersion = std::min(cx->minAcceptableReadVersion, v.version);
 					if (v.midShardSize > 0)
 						cx->smoothMidShardSize.setTotal(v.midShardSize);
-					cx->ssVersionVectorCache.applyDelta(v.ssVersionVectorDelta);
+					if (cx->isCurrentGrvProxy(v.proxyId)) {
+						cx->ssVersionVectorCache.applyDelta(v.ssVersionVectorDelta);
+					} else {
+						throw stale_version_vector();
+					}
 					if (v.version >= version)
 						return v.version;
 					// SOMEDAY: Do the wait on the server side, possibly use less expensive source of committed version
@@ -2974,7 +2989,11 @@ ACTOR Future<Version> getRawVersion(Reference<TransactionState> trState) {
 			                                                     TransactionPriority::IMMEDIATE,
 			                                                     trState->cx->ssVersionVectorCache.getMaxVersion()),
 			                               trState->cx->taskID))) {
-				trState->cx->ssVersionVectorCache.applyDelta(v.ssVersionVectorDelta);
+				if (trState->cx->isCurrentGrvProxy(v.proxyId)) {
+					trState->cx->ssVersionVectorCache.applyDelta(v.ssVersionVectorDelta);
+				} else {
+					throw stale_version_vector();
+				}
 				return v.version;
 			}
 		}
@@ -5837,7 +5856,11 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion(SpanID parentSpan,
 						    "TransactionDebug", debugID.get().first(), "NativeAPI.getConsistentReadVersion.After");
 					ASSERT(v.version > 0);
 					cx->minAcceptableReadVersion = std::min(cx->minAcceptableReadVersion, v.version);
-					cx->ssVersionVectorCache.applyDelta(v.ssVersionVectorDelta);
+					if (cx->isCurrentGrvProxy(v.proxyId)) {
+						cx->ssVersionVectorCache.applyDelta(v.ssVersionVectorDelta);
+					} else {
+						continue; // stale GRV reply, retry
+					}
 					return v;
 				}
 			}
@@ -6010,7 +6033,11 @@ ACTOR Future<Version> extractReadVersion(Reference<TransactionState> trState,
 	}
 
 	metadataVersion.send(rep.metadataVersion);
-	trState->cx->ssVersionVectorCache.applyDelta(rep.ssVersionVectorDelta);
+	if (trState->cx->isCurrentGrvProxy(rep.proxyId)) {
+		trState->cx->ssVersionVectorCache.applyDelta(rep.ssVersionVectorDelta);
+	} else {
+		throw stale_version_vector();
+	}
 	return rep.version;
 }
 
@@ -6220,11 +6247,14 @@ Future<Void> Transaction::onError(Error const& e) {
 		reset();
 		return delay(backoff, trState->taskID);
 	}
-	if (e.code() == error_code_transaction_too_old || e.code() == error_code_future_version) {
+	if (e.code() == error_code_transaction_too_old || e.code() == error_code_future_version ||
+	    e.code() == error_code_stale_version_vector) {
 		if (e.code() == error_code_transaction_too_old)
 			++trState->cx->transactionsTooOld;
 		else if (e.code() == error_code_future_version)
 			++trState->cx->transactionsFutureVersions;
+		else if (e.code() == error_code_stale_version_vector)
+			++trState->cx->transactionsStaleVersionVectors;
 
 		double maxBackoff = trState->options.maxBackoff;
 		reset();
