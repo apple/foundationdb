@@ -468,6 +468,9 @@ public:
 	int MOVE_KEYS_KRM_LIMIT_BYTES; // This must be sufficiently larger than CLIENT_KNOBS->KEY_SIZE_LIMIT
 	                               // (fdbclient/Knobs.h) to ensure that at least two entries will be returned from an
 	                               // attempt to read a key range map
+	int PHYSICAL_SHARD_MOVE_KRM_ROW_LIMIT;
+	int PHYSICAL_SHARD_MOVE_KRM_BYTE_LIMIT;
+
 	int MAX_SKIP_TAGS;
 	double MAX_ADDED_SOURCES_MULTIPLIER;
 	bool ENABLE_PHYSICAL_SHARD_MOVE;

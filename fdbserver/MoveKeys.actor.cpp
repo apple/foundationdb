@@ -470,11 +470,13 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 					// iteration of the outer loop)
 					state KeyRange currentKeys = KeyRangeRef(begin, keys.end);
 
-					state RangeResult old = wait(krmGetRanges(tr,
-					                                          keyServersPrefix,
-					                                          currentKeys,
-					                                          SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT,
-					                                          SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES));
+					const int rowLimit = SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE
+					                         ? SERVER_KNOBS->PHYSICAL_SHARD_MOVE_KRM_ROW_LIMIT
+					                         : SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT;
+					const int byteLimit = SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE
+					                          ? SERVER_KNOBS->PHYSICAL_SHARD_MOVE_KRM_BYTE_LIMIT
+					                          : SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES;
+					state RangeResult old = wait(krmGetRanges(tr, keyServersPrefix, currentKeys, rowLimit, byteLimit));
 
 					// Determine the last processed key (which will be the beginning for the next iteration)
 					state Key endKey = old.end()[-1].key;
@@ -502,12 +504,12 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 						std::vector<UID> dest;
 						decodeKeyServersValue(UIDtoTagMap, old[i].value, src, dest);
 
-						// TraceEvent("StartMoveKeysOldRange", relocationIntervalId)
-						//     .detail("KeyBegin", rangeIntersectKeys.begin.toString())
-						//     .detail("KeyEnd", rangeIntersectKeys.end.toString())
-						//     .detail("OldSrc", describe(src))
-						//     .detail("OldDest", describe(dest))
-						//     .detail("ReadVersion", tr->getReadVersion().get());
+						TraceEvent("StartMoveKeysOldRange", relocationIntervalId)
+						    .detail("KeyBegin", rangeIntersectKeys.begin.toString())
+						    .detail("KeyEnd", rangeIntersectKeys.end.toString())
+						    .detail("OldSrc", describe(src))
+						    .detail("OldDest", describe(dest))
+						    .detail("ReadVersion", tr->getReadVersion().get());
 
 						for (auto& uid : addAsSource[i]) {
 							src.push_back(uid);
@@ -584,6 +586,7 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 					wait(tr->commit());
 
 					TraceEvent("DataMoveMetaDataCommit", dataMove.id)
+					    .detail("DataMoveID", dataMoveID)
 					    .detail("CommitVersion", tr->getCommittedVersion())
 					    .detail("DeltaRange", currentKeys.toString())
 					    .detail("Range", dataMove.range.toString());
@@ -1556,7 +1559,6 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 				tr->getTransaction().trState->taskID = TaskPriority::MoveKeys;
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-
 				wait(checkMoveKeysLock(&(tr->getTransaction()), lock, ddEnabledState));
 
 				Optional<Value> val = wait(tr->get(dataMoveKeyFor(dataMoveID)));
