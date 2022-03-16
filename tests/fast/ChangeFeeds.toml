@@ -1,6 +1,8 @@
+[configuration]
+allowDefaultTenant = false
+
 [[test]]
 testTitle = 'ChangeFeed'
-allowDefaultTenant = false
 
     [[test.workload]]
     testName = 'Cycle'
