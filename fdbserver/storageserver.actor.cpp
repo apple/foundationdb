@@ -2470,12 +2470,15 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 			readBegin = range.begin;
 
 		if (vCurrent) {
-			// We can get first greater or equal from the result of lastLassOrEqual
+			// We can get first greater or equal from the result of lastLessOrEqual
 			if (vCurrent.key() != readBegin) {
 				++vCurrent;
 			}
 		} else {
-			vCurrent = view.lower_bound(readBegin);
+			// There's nothing less than or equal to readBegin in view, so
+			// begin() is the first thing greater than readBegin, or end().
+			// Either way that's the correct result for lower_bound.
+			vCurrent = view.begin();
 		}
 
 		while (limit > 0 && *pLimitBytes > 0 && readBegin < range.end) {
