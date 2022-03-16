@@ -93,7 +93,7 @@ public:
 	// 	 - futureVersion: indicates whether there was "future version" error or
 	//					  not.
 	void endRequest(uint64_t id, double latency, double penalty, double delta, bool clean, bool futureVersion);
-	QueueData& getMeasurement(uint64_t id);
+	QueueData const& getMeasurement(uint64_t id);
 
 	// Starts a new request to storage server with `id`. If the storage
 	// server contains a penalty, add it to the queue size, and return the

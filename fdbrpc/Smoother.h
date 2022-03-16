@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,14 +18,13 @@
  * limitations under the License.
  */
 
-#ifndef FLOW_SMOOTHER_H
-#define FLOW_SMOOTHER_H
 #pragma once
 
 #include "flow/flow.h"
 #include <cmath>
 
-class Smoother {
+template <class T>
+class SmootherImpl {
 	// Times (t) are expected to be nondecreasing
 
 	double eFoldingTime;
@@ -40,66 +39,41 @@ class Smoother {
 		}
 	}
 
+protected:
+	explicit SmootherImpl(double eFoldingTime) : eFoldingTime(eFoldingTime) { reset(0); }
+
 public:
-	explicit Smoother(double eFoldingTime) : eFoldingTime(eFoldingTime) { reset(0); }
 	void reset(double value) {
 		time = 0;
 		total = value;
 		estimate = value;
 	}
-
-	void setTotal(double total, double t = now()) { addDelta(total - this->total, t); }
-	void addDelta(double delta, double t = now()) {
+	void setTotal(double total, double t = T::now()) { addDelta(total - this->total, t); }
+	void addDelta(double delta, double t = T::now()) {
 		update(t);
 		total += delta;
 	}
 	// smoothTotal() is a continuous (under)estimate of the sum of all addDeltas()
-	double smoothTotal(double t = now()) const {
+	double smoothTotal(double t = T::now()) const {
 		update(t);
 		return estimate;
 	}
 	// smoothRate() is d/dt[smoothTotal], and is NOT continuous
-	double smoothRate(double t = now()) const {
+	double smoothRate(double t = T::now()) const {
 		update(t);
 		return (total - estimate) / eFoldingTime;
 	}
+
+	double getTotal() const { return total; }
 };
 
-struct TimerSmoother {
-	// Times (t) are expected to be nondecreasing
-
-	double eFoldingTime;
-	double time, total, estimate;
-
-	void update(double t) {
-		double elapsed = t - time;
-		time = t;
-		estimate += (total - estimate) * (1 - exp(-elapsed / eFoldingTime));
-	}
-
+class Smoother : public SmootherImpl<Smoother> {
 public:
-	explicit TimerSmoother(double eFoldingTime) : eFoldingTime(eFoldingTime) { reset(0); }
-	void reset(double value) {
-		time = 0;
-		total = value;
-		estimate = value;
-	}
-
-	void setTotal(double total, double t = timer()) { addDelta(total - this->total, t); }
-	void addDelta(double delta, double t = timer()) {
-		update(t);
-		total += delta;
-	}
-	// smoothTotal() is a continuous (under)estimate of the sum of all addDeltas()
-	double smoothTotal(double t = timer()) {
-		update(t);
-		return estimate;
-	}
-	// smoothRate() is d/dt[smoothTotal], and is NOT continuous
-	double smoothRate(double t = timer()) {
-		update(t);
-		return (total - estimate) / eFoldingTime;
-	}
+	static double now() { return ::now(); }
+	explicit Smoother(double eFoldingTime) : SmootherImpl<Smoother>(eFoldingTime) {}
 };
-
-#endif
+class TimerSmoother : public SmootherImpl<TimerSmoother> {
+public:
+	static double now() { return timer(); }
+	explicit TimerSmoother(double eFoldingTime) : SmootherImpl<TimerSmoother>(eFoldingTime) {}
+};
