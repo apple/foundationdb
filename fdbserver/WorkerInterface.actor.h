@@ -569,7 +569,6 @@ struct InitializeTLogRequest {
 	Version startVersion;
 	int logRouterTags;
 	int txsTags;
-	std::map<UID, Version> rvLogs;
 	UID clusterId;
 
 	ReplyPromise<struct TLogInterface> reply;
@@ -596,7 +595,6 @@ struct InitializeTLogRequest {
 		           logVersion,
 		           spillType,
 		           txsTags,
-		           rvLogs,
 		           clusterId);
 	}
 };
