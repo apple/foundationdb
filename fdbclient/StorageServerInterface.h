@@ -24,6 +24,7 @@
 
 #include <ostream>
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/StorageCheckpoint.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/fdbrpc.h"
@@ -85,6 +86,8 @@ struct StorageServerInterface {
 	RequestStream<struct OverlappingChangeFeedsRequest> overlappingChangeFeeds;
 	RequestStream<struct ChangeFeedPopRequest> changeFeedPop;
 	RequestStream<struct ChangeFeedVersionUpdateRequest> changeFeedVersionUpdate;
+	RequestStream<struct GetCheckpointRequest> checkpoint;
+	RequestStream<struct FetchCheckpointRequest> fetchCheckpoint;
 
 	explicit StorageServerInterface(UID uid) : uniqueID(uid) {}
 	StorageServerInterface() : uniqueID(deterministicRandom()->randomUniqueID()) {}
@@ -137,6 +140,9 @@ struct StorageServerInterface {
 				    RequestStream<struct ChangeFeedPopRequest>(getValue.getEndpoint().getAdjustedEndpoint(17));
 				changeFeedVersionUpdate = RequestStream<struct ChangeFeedVersionUpdateRequest>(
 				    getValue.getEndpoint().getAdjustedEndpoint(18));
+				checkpoint = RequestStream<struct GetCheckpointRequest>(getValue.getEndpoint().getAdjustedEndpoint(19));
+				fetchCheckpoint =
+				    RequestStream<struct FetchCheckpointRequest>(getValue.getEndpoint().getAdjustedEndpoint(20));
 			}
 		} else {
 			ASSERT(Ar::isDeserializing);
@@ -184,6 +190,8 @@ struct StorageServerInterface {
 		streams.push_back(overlappingChangeFeeds.getReceiver());
 		streams.push_back(changeFeedPop.getReceiver());
 		streams.push_back(changeFeedVersionUpdate.getReceiver());
+		streams.push_back(checkpoint.getReceiver());
+		streams.push_back(fetchCheckpoint.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -813,6 +821,60 @@ struct ChangeFeedPopRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, rangeID, version, range, reply);
+	}
+};
+
+// Request to search for a checkpoint for a minimum keyrange: `range`, at the specific version,
+// in the specific format.
+// A CheckpointMetaData will be returned if the specific checkpoint is found.
+struct GetCheckpointRequest {
+	constexpr static FileIdentifier file_identifier = 13804343;
+	Version version; // The FDB version at which the checkpoint is created.
+	KeyRange range;
+	int16_t format; // CheckpointFormat.
+	Optional<UID> checkpointID; // When present, look for the checkpoint with the exact UID.
+	ReplyPromise<CheckpointMetaData> reply;
+
+	GetCheckpointRequest() {}
+	GetCheckpointRequest(Version version, KeyRange const& range, CheckpointFormat format)
+	  : version(version), range(range), format(format) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, version, range, format, checkpointID, reply);
+	}
+};
+
+// Reply to FetchCheckpointRequest, transfers checkpoint back to client.
+struct FetchCheckpointReply : public ReplyPromiseStreamReply {
+	constexpr static FileIdentifier file_identifier = 13804345;
+	Standalone<StringRef> token; // Serialized data specific to a particular checkpoint format.
+	Standalone<StringRef> data;
+
+	FetchCheckpointReply() {}
+	FetchCheckpointReply(StringRef token) : token(token) {}
+
+	int expectedSize() const { return data.expectedSize(); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, ReplyPromiseStreamReply::acknowledgeToken, ReplyPromiseStreamReply::sequence, token, data);
+	}
+};
+
+// Request to fetch checkpoint from a storage server.
+struct FetchCheckpointRequest {
+	constexpr static FileIdentifier file_identifier = 13804344;
+	UID checkpointID;
+	Standalone<StringRef> token; // Serialized data specific to a particular checkpoint format.
+	ReplyPromiseStream<FetchCheckpointReply> reply;
+
+	FetchCheckpointRequest() = default;
+	FetchCheckpointRequest(UID checkpointID, StringRef token) : checkpointID(checkpointID), token(token) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, checkpointID, token, reply);
 	}
 };
 

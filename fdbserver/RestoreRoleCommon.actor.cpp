@@ -105,7 +105,7 @@ void updateProcessStats(Reference<RestoreRoleData> self) {
 	}
 }
 
-// An actor is schedulable to run if the current worker has enough resourc, i.e.,
+// An actor is schedulable to run if the current worker has enough resources, i.e.,
 // the worker's memory usage is below the threshold;
 // Exception: If the actor is working on the current version batch, we have to schedule
 // the actor to run to avoid dead-lock.

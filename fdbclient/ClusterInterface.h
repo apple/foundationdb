@@ -308,7 +308,7 @@ struct SplitShardReply {
 };
 
 // Split keyrange [shard.begin, shard.end) into num shards.
-// Split points are chosen as the arithmeticlly equal division points of the given range.
+// Split points are chosen as the arithmetically equal division points of the given range.
 struct SplitShardRequest {
 	constexpr static FileIdentifier file_identifier = 1384443;
 	KeyRange shard;

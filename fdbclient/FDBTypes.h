@@ -656,7 +656,7 @@ struct RangeResultRef : VectorRef<KeyValueRef> {
 	           // limits requested) False implies that no such values remain
 	Optional<KeyRef> readThrough; // Only present when 'more' is true. When present, this value represent the end (or
 	                              // beginning if reverse) of the range which was read to produce these results. This is
-	                              // guarenteed to be less than the requested range.
+	                              // guaranteed to be less than the requested range.
 	bool readToBegin;
 	bool readThroughEnd;
 

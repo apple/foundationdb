@@ -1179,6 +1179,8 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 			    json_spirit::write_string(json_spirit::mValue(regionArr), json_spirit::Output_options::none);
 		}
 
+		g_simulator.restarted = true;
+
 		TraceEvent("RestartSimulatorSettings")
 		    .detail("DesiredCoordinators", g_simulator.desiredCoordinators)
 		    .detail("ProcessesPerMachine", g_simulator.processesPerMachine)
@@ -2244,7 +2246,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 
 using namespace std::literals;
 
-#if defined(SSD_ROCKSDB_EXPERIMENTAL) && !VALGRIND
+#if defined(SSD_ROCKSDB_EXPERIMENTAL)
 bool rocksDBEnabled = true;
 #else
 bool rocksDBEnabled = false;
