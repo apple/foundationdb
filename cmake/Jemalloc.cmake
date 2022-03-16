@@ -11,7 +11,6 @@ if(NOT USE_JEMALLOC)
   return()
 endif()
 
-add_definitions(-DUSE_JEMALLOC)
 add_library(im_jemalloc_pic STATIC IMPORTED)
 add_library(im_jemalloc STATIC IMPORTED)
 include(ExternalProject)
