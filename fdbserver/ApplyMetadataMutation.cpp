@@ -297,25 +297,57 @@ private:
 		}
 	}
 
-	void checkSetStorageTeamIDKeyPrefix(MutationRef m) {
-		if (!m.param1.startsWith(storageTeamIdKeyPrefix) || !SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
+	void checkSetStorageServerToTeamIDKeyPrefix(MutationRef m) {
+		if (!m.param1.startsWith(storageServerToTeamIdKeyPrefix) || !SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 			return;
 		}
 		ASSERT_WE_THINK(tLogGroupCollection.isValid());
 		ASSERT(ssToStorageTeam != nullptr);
 
+		UID serverID = decodeStorageServerToTeamIdKey(m.param1);
+		ptxn::StorageServerStorageTeams teams(m.param2);
+
+		auto it = ssToStorageTeam->find(serverID);
+		if (it != ssToStorageTeam->end()) {
+			TraceEvent("ReplaceSSTeams", dbgid)
+			    .detail("SS", serverID)
+			    .detail("Teams", describe(teams.getStorageTeams()));
+			ssToStorageTeam->erase(it);
+		} else {
+			TraceEvent("AssignSSTeams", dbgid)
+			    .detail("SS", serverID)
+			    .detail("Teams", describe(teams.getStorageTeams()));
+		}
+		ssToStorageTeam->emplace(serverID, teams);
+
+		if (toCommit) {
+			MutationRef privatized = m;
+			privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
+
+			TraceEvent("SendingPrivatized_ServerToTeam", dbgid)
+			    .detail("Server", serverID)
+			    .detail("Teams", describe(teams.getStorageTeams()));
+			toCommit->writeToStorageTeams(
+			    tLogGroupCollection, { teams.getPrivateMutationsStorageTeamID() }, LogProtocolMessage());
+			toCommit->writeToStorageTeams(
+			    tLogGroupCollection, { teams.getPrivateMutationsStorageTeamID() }, privatized);
+		}
+
+		auto newTeams = teams.getStorageTeams();
+		for (ptxn::StorageTeamID newTeam : newTeams) {
+			allTeams.insert(newTeam);
+		}
+		txnStateStore->set(KeyValueRef(m.param1, m.param2));
+	}
+
+	void checkSetStorageTeamIDKeyPrefix(MutationRef m) {
+		if (!m.param1.startsWith(storageTeamIdKeyPrefix) || !SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
+			return;
+		}
+		ASSERT_WE_THINK(tLogGroupCollection.isValid());
+
 		auto teamid = decodeStorageTeamIdKey(m.param1);
 		auto team = decodeStorageTeams(m.param2);
-		TraceEvent("AddSSTeam", dbgid).detail("SS", describe(team)).detail("Team", teamid);
-		for (auto& ss : team) {
-			auto teamSet = (teamid == ss) ? std::set<UID>() : std::set<UID>({ teamid });
-			auto it = ssToStorageTeam->find(ss);
-			if (it == ssToStorageTeam->end()) {
-				ssToStorageTeam->emplace(ss, ptxn::StorageServerStorageTeams(ss, teamSet));
-			} else {
-				it->second.insert(teamSet);
-			}
-		}
 
 		if (tLogGroupCollection->tryAddStorageTeam(teamid, team)) {
 			auto group = tLogGroupCollection->assignStorageTeam(teamid);
@@ -1229,6 +1261,7 @@ public:
 				checkSetKeyServersPrefix(m);
 				checkSetServerKeysPrefix(m);
 				checkSetStorageTeamIDKeyPrefix(m);
+				checkSetStorageServerToTeamIDKeyPrefix(m);
 				checkSetServerTagsPrefix(m);
 				checkSetStorageCachePrefix(m);
 				checkSetCacheKeysPrefix(m);
