@@ -1585,8 +1585,9 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 				// tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				// tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-				state RangeResult old =
+				state RangeResult old;
 				    wait(krmGetRanges(tr, keyServersPrefix, range, CLIENT_KNOBS->TOO_MANY, CLIENT_KNOBS->TOO_MANY));
+				ASSERT(!old.more && old.size() < CLIENT_KNOBS->TOO_MANY);
 
 				state RangeResult UIDtoTagMap = wait(tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);

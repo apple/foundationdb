@@ -1697,6 +1697,7 @@ ACTOR Future<Version> waitForVersionNoTooOld(StorageServer* data, Version versio
 }
 
 ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
+	TraceEvent("GetValueQBegin", data->thisServerID).log();
 	state int64_t resultSize = 0;
 	Span span("SS:getValue"_loc, { req.spanContext });
 	span.addTag("key"_sr, req.key);
@@ -1852,6 +1853,7 @@ ACTOR Future<Version> watchWaitForValueChange(StorageServer* data, SpanID parent
 			TEST(latest >= minVersion &&
 			     latest < data->data().latestVersion); // Starting watch loop with latestVersion > data->version
 			GetValueRequest getReq(span.context, metadata->key, latest, metadata->tags, metadata->debugID);
+			TraceEvent("GetValueQ1", data->thisServerID).log();
 			state Future<Void> getValue = getValueQ(
 			    data, getReq); // we are relying on the delay zero at the top of getValueQ, if removed we need one here
 			GetValueReply reply = wait(getReq.reply.getFuture());
@@ -2730,6 +2732,7 @@ ACTOR Future<Optional<Value>> quickGetValue(StorageServer* data,
 			// Note that it does not use readGuard to avoid server being overloaded here. Throttling is enforced at the
 			// original request level, rather than individual underlying lookups. The reason is that throttle any
 			// individual underlying lookup will fail the original request, which is not productive.
+			TraceEvent("GetValueQ2", data->thisServerID).log();
 			data->actors.add(getValueQ(data, req));
 			GetValueReply reply = wait(req.reply.getFuture());
 			if (!reply.error.present()) {
@@ -5668,7 +5671,6 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 	// Save a backup of the ShardInfo references before we start messing with shards, in order to defer fetchKeys
 	// cancellation (and its potential call to removeDataRange()) until shards is again valid
 	// std::vector<Reference<ShardInfo>> oldShards;
-	std::unordered_map<UID, MoveInShard> cancelMoveIns;
 	// auto os = data->shards.intersectingRanges(keys);
 	// for (auto r = os.begin(); r != os.end(); ++r) {
 	// 	oldShards.push_back(r->value());
@@ -5712,6 +5714,10 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 	// adding/transferred shard is cancelled
 	auto overlappingShards = data->shards.intersectingRanges(keys);
 	std::vector<KeyRange> removeRanges;
+	std::vector<KeyRange> readWriteRanges;
+	std::vector<KeyRange> notAssignedRanges;
+	std::vector<KeyRange> moveInRanges;
+	std::unordered_map<UID, MoveInShard> cancelMoveIns;
 	std::vector<Reference<ShardInfo>> newMoveInShards;
 	std::vector<std::pair<KeyRange, Version>> changeNewestAvailable;
 	std::vector<KeyRange> newEmptyRanges;
@@ -5730,7 +5736,8 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 			    .detail("Begin", range.begin)
 			    .detail("End", range.end);
 			newEmptyRanges.push_back(range);
-			data->addShard(ShardInfo::newReadWrite(range, data));
+			readWriteRanges.push_back(range);
+			// data->addShard(ShardInfo::newReadWrite(range, data));
 		} else if (!nowAssigned) {
 			if (dataAvailable) {
 				// ASSERT(r->value() ==
@@ -5744,15 +5751,17 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 				r->value()->moveInShard->updates->shardRemoved = true;
 				cancelMoveIns.emplace(r->value()->moveInShard->meta->id, *(r->value()->moveInShard));
 			}
-			data->addShard(ShardInfo::newNotAssigned(range));
-			data->watches.triggerRange(range.begin, range.end);
+			notAssignedRanges.push_back(range);
+			// data->addShard(ShardInfo::newNotAssigned(range));
+			// data->watches.triggerRange(range.begin, range.end);
 		} else if (!dataAvailable) {
 			if (version == 0) { // bypass fetchkeys; shard is known empty at version 0
 				TraceEvent("ChangeServerKeysInitialRange", data->thisServerID)
 				    .detail("Begin", range.begin)
 				    .detail("End", range.end);
 				changeNewestAvailable.emplace_back(range, latestVersion);
-				data->addShard(ShardInfo::newReadWrite(range, data));
+				// data->addShard(ShardInfo::newReadWrite(range, data));
+				readWriteRanges.push_back(range);
 				setAvailableStatus(data, range, true);
 			} else {
 				auto& shard = data->shards[range.begin];
@@ -5764,16 +5773,29 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 				// 	data->addShard(ShardInfo::newAdding(data, range));
 				// } else {
 				if (!shard->assigned()) {
-					data->addShard(ShardInfo::newMoveInShard(data, range, version + 1, moveInShardMetaData));
-					newMoveInShards.push_back(data->shards[range.begin]);
-					std::cout << "Adding new MoveInShard: " << data->shards[range.begin]->moveInShard->toString()
-					          << std::endl;
+					// data->addShard(ShardInfo::newMoveInShard(data, range, version + 1, moveInShardMetaData));
+					moveInRanges.push_back(range);
+					// newMoveInShards.push_back(data->shards[range.begin]);
 				}
 			}
 		} else {
 			changeNewestAvailable.emplace_back(range, latestVersion);
-			data->addShard(ShardInfo::newReadWrite(range, data));
+			readWriteRanges.push_back(range);
+			// data->addShard(ShardInfo::newReadWrite(range, data));
 		}
+	}
+
+	for (const auto& range : readWriteRanges) {
+		data->addShard(ShardInfo::newReadWrite(range, data));
+	}
+	for (const auto& range : notAssignedRanges) {
+		data->addShard(ShardInfo::newNotAssigned(range));
+		data->watches.triggerRange(range.begin, range.end);
+	}
+	for (const auto& range : moveInRanges) {
+		data->addShard(ShardInfo::newMoveInShard(data, range, version + 1, moveInShardMetaData));
+		newMoveInShards.push_back(data->shards[range.begin]);
+		std::cout << "Adding new MoveInShard: " << data->shards[range.begin]->moveInShard->toString() << std::endl;
 	}
 
 	// Update newestAvailableVersion when a shard becomes (un)available (in a separate loop to avoid invalidating vr
@@ -8107,6 +8129,7 @@ ACTOR Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream
 				try {
 					state Version latest = self->version.get();
 					GetValueRequest getReq(span.context, metadata->key, latest, metadata->tags, metadata->debugID);
+					TraceEvent("GetValueQ3", self->thisServerID).log();
 					state Future<Void> getValue = getValueQ(self, getReq);
 					GetValueReply reply = wait(getReq.reply.getFuture());
 					metadata = self->getWatchMetadata(req.key.contents());

@@ -466,6 +466,7 @@ public:
 						self->addActor.send(self->checkInvalidLocalities);
 					}
 				}
+				TraceEvent(SevDebug, "DDTeamCollectionInitAddServer");
 				self->addServer(server.first, server.second, self->serverTrackerErrorOut, 0, *ddEnabledState);
 			}
 		}
@@ -2375,6 +2376,7 @@ public:
 				UID id = newServer.get().interf.id();
 				if (!self->server_and_tss_info.count(id)) {
 					if (!recruitTss || tssState->tssRecruitSuccess()) {
+						TraceEvent(SevDebug, "DDRecruitingAddServer");
 						self->addServer(newServer.get().interf,
 						                candidateWorker.processClass,
 						                self->serverTrackerErrorOut,
@@ -2760,6 +2762,7 @@ public:
 									currentInterfaceChanged.send(std::make_pair(ssi, processClass));
 								}
 							} else if (!self->recruitingIds.count(ssi.id())) {
+								TraceEvent(SevDebug, "DDServerListChangeAddServer");
 								self->addServer(ssi,
 								                processClass,
 								                self->serverTrackerErrorOut,
@@ -2898,6 +2901,7 @@ public:
 		if (self->storageWiggler->contains(server->getId())) {
 			self->storageWiggler->updateMetadata(server->getId(), data);
 		} else {
+			TraceEvent("ReadOrCreateStorageServerAddServer");
 			self->storageWiggler->addServer(server->getId(), data);
 		}
 
