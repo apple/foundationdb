@@ -68,7 +68,7 @@ struct StorageServerInterface {
 	// Throws a wrong_shard_server if the keys in the request or result depend on data outside this server OR if a large
 	// selector offset prevents all data from being read in one range read
 	PublicRequestStream<struct GetKeyValuesRequest> getKeyValues;
-	PublicRequestStream<struct GetKeyValuesAndFlatMapRequest> getKeyValuesAndFlatMap;
+	PublicRequestStream<struct GetMappedKeyValuesRequest> getMappedKeyValues;
 
 	RequestStream<struct GetShardStateRequest> getShardState;
 	RequestStream<struct WaitMetricsRequest> waitMetrics;
@@ -132,7 +132,7 @@ struct StorageServerInterface {
 				    RequestStream<struct SplitRangeRequest>(getValue.getEndpoint().getAdjustedEndpoint(12));
 				getKeyValuesStream = PublicRequestStream<struct GetKeyValuesStreamRequest>(
 				    getValue.getEndpoint().getAdjustedEndpoint(13));
-				getKeyValuesAndFlatMap = PublicRequestStream<struct GetKeyValuesAndFlatMapRequest>(
+				getMappedKeyValues = PublicRequestStream<struct GetMappedKeyValuesRequest>(
 				    getValue.getEndpoint().getAdjustedEndpoint(14));
 				changeFeedStream =
 				    PublicRequestStream<struct ChangeFeedStreamRequest>(getValue.getEndpoint().getAdjustedEndpoint(15));
@@ -142,9 +142,10 @@ struct StorageServerInterface {
 				    PublicRequestStream<struct ChangeFeedPopRequest>(getValue.getEndpoint().getAdjustedEndpoint(17));
 				changeFeedVersionUpdate = PublicRequestStream<struct ChangeFeedVersionUpdateRequest>(
 				    getValue.getEndpoint().getAdjustedEndpoint(18));
-				checkpoint = RequestStream<struct GetCheckpointRequest>(getValue.getEndpoint().getAdjustedEndpoint(19));
+				checkpoint =
+				    PublicRequestStream<struct GetCheckpointRequest>(getValue.getEndpoint().getAdjustedEndpoint(19));
 				fetchCheckpoint =
-				    RequestStream<struct FetchCheckpointRequest>(getValue.getEndpoint().getAdjustedEndpoint(20));
+				    PublicRequestStream<struct FetchCheckpointRequest>(getValue.getEndpoint().getAdjustedEndpoint(20));
 			}
 		} else {
 			ASSERT(Ar::isDeserializing);
@@ -187,7 +188,6 @@ struct StorageServerInterface {
 		streams.push_back(getReadHotRanges.getReceiver());
 		streams.push_back(getRangeSplitPoints.getReceiver());
 		streams.push_back(getKeyValuesStream.getReceiver(TaskPriority::LoadBalancedEndpoint));
-		streams.push_back(getMappedKeyValues.getReceiver(TaskPriority::LoadBalancedEndpoint));
 		streams.push_back(changeFeedStream.getReceiver());
 		streams.push_back(overlappingChangeFeeds.getReceiver());
 		streams.push_back(changeFeedPop.getReceiver());
