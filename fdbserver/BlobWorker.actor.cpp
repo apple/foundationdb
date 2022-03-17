@@ -834,7 +834,7 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 			                                                           rowsStream,
 			                                                           false);
 			RangeResult newGranule =
-			    wait(readBlobGranule(chunk, metadata->keyRange, version, bwData->bstore, &bwData->stats));
+			    wait(readBlobGranule(chunk, metadata->keyRange, 0, version, bwData->bstore, &bwData->stats));
 
 			bwData->stats.bytesReadFromS3ForCompaction += compactBytesRead;
 			rowsStream.send(std::move(newGranule));
@@ -2095,11 +2095,16 @@ ACTOR Future<Void> waitForVersion(Reference<GranuleMetadata> metadata, Version v
 
 ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, BlobGranuleFileRequest req) {
 	if (BW_REQUEST_DEBUG) {
-		fmt::print("BW {0} processing blobGranuleFileRequest for range [{1} - {2}) @ {3}\n",
+		fmt::print("BW {0} processing blobGranuleFileRequest for range [{1} - {2}) @ ",
 		           bwData->id.toString(),
 		           req.keyRange.begin.printable(),
 		           req.keyRange.end.printable(),
 		           req.readVersion);
+		if (req.beginVersion > 0) {
+			fmt::print("{0} - {1}\n", req.beginVersion, req.readVersion);
+		} else {
+			fmt::print("{}", req.readVersion);
+		}
 	}
 
 	state bool didCollapse = false;
@@ -2298,7 +2303,8 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 			ASSERT(metadata->cancelled.canBeSet());
 
 			// Right now we force a collapse if the version range crosses granule boundaries, for simplicity
-			if (chunkFiles.snapshotFiles.front().version < granuleBeginVersion) {
+			if (granuleBeginVersion <= chunkFiles.snapshotFiles.front().version) {
+				TEST(true); // collapsed begin version request because of boundaries
 				didCollapse = true;
 				granuleBeginVersion = 0;
 			}
@@ -2309,13 +2315,14 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 
 			chunkFiles.getFiles(granuleBeginVersion, req.readVersion, req.canCollapseBegin, chunk, rep.arena);
 			if (granuleBeginVersion > 0 && chunk.snapshotFile.present()) {
+				TEST(true); // collapsed begin version request for efficiency
 				didCollapse = true;
 			}
 
 			// new deltas (if version is larger than version of last delta file)
 			// FIXME: do trivial key bounds here if key range is not fully contained in request key
 			// range
-			if (req.readVersion > metadata->durableDeltaVersion.get() && metadata->currentDeltas.size()) {
+			if (req.readVersion > metadata->durableDeltaVersion.get() && !metadata->currentDeltas.empty()) {
 				if (metadata->durableDeltaVersion.get() != metadata->pendingDeltaVersion) {
 					fmt::print("real-time read [{0} - {1}) @ {2} doesn't have mutations!! durable={3}, pending={4}\n",
 					           metadata->keyRange.begin.printable(),
@@ -2327,6 +2334,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 
 				// prune mutations based on begin version, if possible
 				ASSERT(metadata->durableDeltaVersion.get() == metadata->pendingDeltaVersion);
+				// FIXME: I think we can remove this dependsOn since we are doing push_back_deep
 				rep.arena.dependsOn(metadata->currentDeltas.arena());
 				MutationsAndVersionRef* mutationIt = metadata->currentDeltas.begin();
 				if (granuleBeginVersion > metadata->currentDeltas.back().version) {

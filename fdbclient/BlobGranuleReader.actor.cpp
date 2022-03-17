@@ -28,6 +28,7 @@
 #include "fdbclient/BlobGranuleReader.actor.h"
 #include "fdbclient/BlobWorkerCommon.h"
 #include "fdbclient/BlobWorkerInterface.h"
+#include "fdbclient/FDBTypes.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // TODO more efficient data structure besides std::map? PTree is unnecessary since this isn't versioned, but some other
@@ -63,22 +64,25 @@ ACTOR Future<Standalone<StringRef>> readFile(Reference<BackupContainerFileSystem
 // sub-functions that BlobGranuleFiles actually exposes?
 ACTOR Future<RangeResult> readBlobGranule(BlobGranuleChunkRef chunk,
                                           KeyRangeRef keyRange,
+                                          Version beginVersion,
                                           Version readVersion,
                                           Reference<BackupContainerFileSystem> bstore,
                                           Optional<BlobWorkerStats*> stats) {
 
 	// TODO REMOVE with early replying
 	ASSERT(readVersion == chunk.includedVersion);
-	ASSERT(chunk.snapshotFile.present());
 
 	state Arena arena;
 
 	try {
-		Future<Standalone<StringRef>> readSnapshotFuture = readFile(bstore, chunk.snapshotFile.get());
-		state std::vector<Future<Standalone<StringRef>>> readDeltaFutures;
-		if (stats.present()) {
-			++stats.get()->s3GetReqs;
+		Future<Standalone<StringRef>> readSnapshotFuture;
+		if (chunk.snapshotFile.present()) {
+			readSnapshotFuture = readFile(bstore, chunk.snapshotFile.get());
+			if (stats.present()) {
+				++stats.get()->s3GetReqs;
+			}
 		}
+		state std::vector<Future<Standalone<StringRef>>> readDeltaFutures;
 
 		readDeltaFutures.reserve(chunk.deltaFiles.size());
 		for (BlobFilePointerRef deltaFile : chunk.deltaFiles) {
@@ -88,8 +92,12 @@ ACTOR Future<RangeResult> readBlobGranule(BlobGranuleChunkRef chunk,
 			}
 		}
 
-		state Standalone<StringRef> snapshotData = wait(readSnapshotFuture);
-		arena.dependsOn(snapshotData.arena());
+		state Optional<StringRef> snapshotData; // not present if snapshotFile isn't present
+		if (chunk.snapshotFile.present()) {
+			state Standalone<StringRef> s = wait(readSnapshotFuture);
+			arena.dependsOn(s.arena());
+			snapshotData = s;
+		}
 
 		state int numDeltaFiles = chunk.deltaFiles.size();
 		state StringRef* deltaData = new (arena) StringRef[numDeltaFiles];
@@ -102,7 +110,7 @@ ACTOR Future<RangeResult> readBlobGranule(BlobGranuleChunkRef chunk,
 			arena.dependsOn(data.arena());
 		}
 
-		return materializeBlobGranule(chunk, keyRange, readVersion, snapshotData, deltaData);
+		return materializeBlobGranule(chunk, keyRange, beginVersion, readVersion, snapshotData, deltaData);
 
 	} catch (Error& e) {
 		throw e;
@@ -119,8 +127,8 @@ ACTOR Future<Void> readBlobGranules(BlobGranuleFileRequest request,
 	try {
 		state int i;
 		for (i = 0; i < reply.chunks.size(); i++) {
-			RangeResult chunkResult =
-			    wait(readBlobGranule(reply.chunks[i], request.keyRange, request.readVersion, bstore));
+			RangeResult chunkResult = wait(
+			    readBlobGranule(reply.chunks[i], request.keyRange, request.beginVersion, request.readVersion, bstore));
 			results.send(std::move(chunkResult));
 		}
 		results.sendError(end_of_stream());
