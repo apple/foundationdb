@@ -287,7 +287,11 @@ inline void freeFast(int size, void* ptr) {
 	if (size <= 16384)
 		return FastAllocator<16384>::allocate();
 #endif
-	return aligned_alloc(4096, size);
+	auto* result = aligned_alloc(4096, size);
+	if (result == nullptr) {
+		platform::outOfMemory();
+	}
+	return result;
 }
 
 inline void freeFast4kAligned(int size, void* ptr) {
