@@ -103,6 +103,8 @@ void recordAllocation(void* ptr, size_t size);
 void recordDeallocation(void* ptr);
 #endif
 
+inline constexpr auto kFastAllocMagazineBytes = 128 << 10;
+
 template <int Size>
 class FastAllocator {
 public:
@@ -125,7 +127,7 @@ private:
 	static unsigned long vLock;
 #endif
 
-	static const int magazine_size = (128 << 10) / Size;
+	static const int magazine_size = kFastAllocMagazineBytes / Size;
 	static const int PSize = Size / sizeof(void*);
 	struct GlobalData;
 	struct ThreadData {
