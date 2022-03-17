@@ -2678,9 +2678,23 @@ static void blobManagerExclusionSafetyCheck(Reference<BlobManagerData> self,
 	req.reply.send(reply);
 }
 
+// Simulation validation that multiple blob managers aren't started with the same epoch
+static std::map<int64_t, UID> managerEpochsSeen;
+
 ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
                                Reference<AsyncVar<ServerDBInfo> const> dbInfo,
                                int64_t epoch) {
+	if (g_network->isSimulated()) {
+		bool managerEpochAlreadySeen = managerEpochsSeen.count(epoch);
+		if (managerEpochAlreadySeen) {
+			TraceEvent(SevError, "DuplicateBlobManagersAtEpoch")
+			    .detail("Epoch", epoch)
+			    .detail("BMID1", bmInterf.id())
+			    .detail("BMID2", managerEpochsSeen.at(epoch));
+		}
+		ASSERT(!managerEpochAlreadySeen);
+		managerEpochsSeen[epoch] = bmInterf.id();
+	}
 	state Reference<BlobManagerData> self =
 	    makeReference<BlobManagerData>(deterministicRandom()->randomUniqueID(),
 	                                   openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True),
