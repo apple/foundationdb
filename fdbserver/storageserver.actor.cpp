@@ -32,6 +32,7 @@
 #include "flow/IRandom.h"
 #include "flow/IndexedSet.h"
 #include "flow/SystemMonitor.h"
+#include "flow/Trace.h"
 #include "flow/Tracing.h"
 #include "flow/Util.h"
 #include "fdbclient/Atomic.h"
@@ -7607,6 +7608,8 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		wait(self.storage.commit());
 		++self.counters.kvCommits;
 
+		ssi.startAcceptingRequests();
+
 		TraceEvent("StorageServerInit", ssi.id())
 		    .detail("Version", self.version.get())
 		    .detail("SeedTag", seedTag.toString())
@@ -7832,6 +7835,8 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 
 		if (recovered.canBeSet())
 			recovered.send(Void());
+
+		ssi.startAcceptingRequests();
 
 		try {
 			if (self.isTss()) {

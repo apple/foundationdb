@@ -255,7 +255,7 @@ public:
 			when(state std::pair<UID, Optional<StorageServerInterface>> change = waitNext(serverChanges)) {
 				wait(delay(0)); // prevent storageServerTracker from getting cancelled while on the call stack
 				if (change.second.present()) {
-					if (!change.second.get().isTss()) {
+					if (!change.second.get().isTss() && change.second.get().isAcceptingRequests()) {
 						auto& a = actors[change.first];
 						a = Future<Void>();
 						a = splitError(trackStorageServerQueueInfo(self, change.second.get()), err);

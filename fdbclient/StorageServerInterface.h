@@ -89,12 +89,16 @@ struct StorageServerInterface {
 	RequestStream<struct GetCheckpointRequest> checkpoint;
 	RequestStream<struct FetchCheckpointRequest> fetchCheckpoint;
 
+	bool acceptingRequests;
+
 	explicit StorageServerInterface(UID uid) : uniqueID(uid) {}
 	StorageServerInterface() : uniqueID(deterministicRandom()->randomUniqueID()) {}
 	NetworkAddress address() const { return getValue.getEndpoint().getPrimaryAddress(); }
 	NetworkAddress stableAddress() const { return getValue.getEndpoint().getStableAddress(); }
 	Optional<NetworkAddress> secondaryAddress() const { return getValue.getEndpoint().addresses.secondaryAddress; }
 	UID id() const { return uniqueID; }
+	bool isAcceptingRequests() const { return acceptingRequests; }
+	void startAcceptingRequests() { acceptingRequests = true; }
 	bool isTss() const { return tssPairID.present(); }
 	std::string toString() const { return id().shortString(); }
 	template <class Ar>
@@ -105,9 +109,9 @@ struct StorageServerInterface {
 
 		if (ar.protocolVersion().hasSmallEndpoints()) {
 			if (ar.protocolVersion().hasTSS()) {
-				serializer(ar, uniqueID, locality, getValue, tssPairID);
+				serializer(ar, uniqueID, locality, getValue, tssPairID, acceptingRequests);
 			} else {
-				serializer(ar, uniqueID, locality, getValue);
+				serializer(ar, uniqueID, locality, getValue, acceptingRequests);
 			}
 			if (Ar::isDeserializing) {
 				getKey = RequestStream<struct GetKeyRequest>(getValue.getEndpoint().getAdjustedEndpoint(1));
@@ -161,7 +165,8 @@ struct StorageServerInterface {
 			           getStorageMetrics,
 			           waitFailure,
 			           getQueuingMetrics,
-			           getKeyValueStoreType);
+			           getKeyValueStoreType,
+			           acceptingRequests);
 			if (ar.protocolVersion().hasWatches()) {
 				serializer(ar, watchValue);
 			}
