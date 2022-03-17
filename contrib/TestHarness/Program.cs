@@ -835,11 +835,6 @@ namespace SummarizeTest
                                     new XAttribute("TestFile", ev.Details.TestFile));
                                 testFile = ev.Details.TestFile.Substring(ev.Details.TestFile.IndexOf("tests"));
                             }
-                            if (ev.Type == "ActualRun")
-                            {
-                                xout.Add(
-                                    new XAttribute("TestFile", ev.Details.RunID));
-                            }
                             if (ev.Type == "ElapsedTime" && !testEndFound)
                             {
                                 testEndFound = true;
