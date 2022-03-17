@@ -2735,17 +2735,18 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 				if (BM_DEBUG) {
 					fmt::print("BM {} exiting because it is replaced\n", self->epoch);
 				}
+				TraceEvent("BlobManagerReplaced", bmInterf.id()).detail("Epoch", epoch);
 				break;
 			}
 			when(HaltBlobManagerRequest req = waitNext(bmInterf.haltBlobManager.getFuture())) {
 				req.reply.send(Void());
-				TraceEvent("BlobManagerHalted", bmInterf.id()).detail("ReqID", req.requesterID);
+				TraceEvent("BlobManagerHalted", bmInterf.id()).detail("Epoch", epoch).detail("ReqID", req.requesterID);
 				break;
 			}
 			when(state HaltBlobGranulesRequest req = waitNext(bmInterf.haltBlobGranules.getFuture())) {
 				wait(haltBlobGranules(self));
 				req.reply.send(Void());
-				TraceEvent("BlobGranulesHalted", bmInterf.id()).detail("ReqID", req.requesterID);
+				TraceEvent("BlobGranulesHalted", bmInterf.id()).detail("Epoch", epoch).detail("ReqID", req.requesterID);
 				break;
 			}
 			when(BlobManagerExclusionSafetyCheckRequest exclCheckReq =
@@ -2753,7 +2754,7 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 				blobManagerExclusionSafetyCheck(self, exclCheckReq);
 			}
 			when(wait(collection)) {
-				TraceEvent("BlobManagerActorCollectionError");
+				TraceEvent(SevError, "BlobManagerActorCollectionError");
 				ASSERT(false);
 				throw internal_error();
 			}

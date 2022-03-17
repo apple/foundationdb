@@ -2123,6 +2123,7 @@ ACTOR Future<int64_t> getNextBMEpoch(ClusterControllerData* self) {
 			tr->set(blobManagerEpochKey, blobManagerEpochValueFor(newEpoch));
 
 			wait(tr->commit());
+			TraceEvent(SevDebug, "CCNextBlobManagerEpoch", self->id).detail("Epoch", newEpoch);
 			return newEpoch;
 		} catch (Error& e) {
 			wait(tr->onError(e));
