@@ -91,13 +91,16 @@ struct AlternativeInfo {
 	bool operator==(double const& r) const { return cumulativeProbability == r; }
 };
 
+FDB_DECLARE_BOOLEAN_PARAM(BalanceOnRequests);
+
 template <class T>
 class ModelInterface : public ReferenceCounted<ModelInterface<T>> {
 public:
 	// If balanceOnRequests is true, the client will load balance based on the number of GRVs released by each proxy
 	// If balanceOnRequests is false, the client will load balance based on the CPU usage of each proxy
 	// Only requests which take from the GRV budget on the proxy should set balanceOnRequests to true
-	ModelInterface(const std::vector<T>& v, bool balanceOnRequests) : balanceOnRequests(balanceOnRequests) {
+	explicit ModelInterface(const std::vector<T>& v, BalanceOnRequests balanceOnRequests = BalanceOnRequests::False)
+	  : balanceOnRequests(balanceOnRequests) {
 		for (int i = 0; i < v.size(); i++) {
 			alternatives.push_back(AlternativeInfo(v[i], 1.0 / v.size(), (i + 1.0) / v.size()));
 		}

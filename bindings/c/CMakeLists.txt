@@ -91,10 +91,34 @@ if(NOT WIN32)
 
   set(UNIT_TEST_VERSION_510_SRCS test/unit/unit_tests_version_510.cpp)
   set(TRACE_PARTIAL_FILE_SUFFIX_TEST_SRCS test/unit/trace_partial_file_suffix_test.cpp)
-  set(DISCONNECTED_TIMEOUT_UNIT_TEST_SRCS 
+  set(DISCONNECTED_TIMEOUT_UNIT_TEST_SRCS
     test/unit/disconnected_timeout_tests.cpp
     test/unit/fdb_api.cpp
     test/unit/fdb_api.hpp)
+
+  set(API_TESTER_SRCS
+    test/apitester/fdb_c_api_tester.cpp
+    test/apitester/TesterApiWorkload.cpp
+    test/apitester/TesterApiWorkload.h
+    test/apitester/TesterApiWrapper.cpp
+    test/apitester/TesterApiWrapper.h
+    test/apitester/TesterTestSpec.cpp
+    test/apitester/TesterTestSpec.h
+    test/apitester/TesterCancelTransactionWorkload.cpp
+    test/apitester/TesterCorrectnessWorkload.cpp
+    test/apitester/TesterKeyValueStore.cpp
+    test/apitester/TesterKeyValueStore.h
+    test/apitester/TesterOptions.h
+    test/apitester/TesterScheduler.cpp
+    test/apitester/TesterScheduler.h
+    test/apitester/TesterTransactionExecutor.cpp
+    test/apitester/TesterTransactionExecutor.h
+    test/apitester/TesterUtil.cpp
+    test/apitester/TesterUtil.h
+    test/apitester/TesterWorkload.cpp
+    test/apitester/TesterWorkload.h
+    ../../flow/SimpleOpt.h
+  )
 
   if(OPEN_FOR_IDE)
     add_library(fdb_c_performance_test OBJECT test/performance_test.c test/test.h)
@@ -106,6 +130,7 @@ if(NOT WIN32)
     add_library(fdb_c_unit_tests_version_510 OBJECT ${UNIT_TEST_VERSION_510_SRCS})
     add_library(trace_partial_file_suffix_test OBJECT ${TRACE_PARTIAL_FILE_SUFFIX_TEST_SRCS})
     add_library(disconnected_timeout_unit_tests OBJECT ${DISCONNECTED_TIMEOUT_UNIT_TEST_SRCS})
+    add_library(fdb_c_api_tester OBJECT ${API_TESTER_SRCS})
   else()
     add_executable(fdb_c_performance_test test/performance_test.c test/test.h)
     add_executable(fdb_c_ryw_benchmark test/ryw_benchmark.c test/test.h)
@@ -116,6 +141,7 @@ if(NOT WIN32)
     add_executable(fdb_c_unit_tests_version_510 ${UNIT_TEST_VERSION_510_SRCS})
     add_executable(trace_partial_file_suffix_test ${TRACE_PARTIAL_FILE_SUFFIX_TEST_SRCS})
     add_executable(disconnected_timeout_unit_tests ${DISCONNECTED_TIMEOUT_UNIT_TEST_SRCS})
+    add_executable(fdb_c_api_tester ${API_TESTER_SRCS})
     strip_debug_symbols(fdb_c_performance_test)
     strip_debug_symbols(fdb_c_ryw_benchmark)
     strip_debug_symbols(fdb_c_txn_size_test)
@@ -137,6 +163,12 @@ if(NOT WIN32)
   target_link_libraries(fdb_c_unit_tests_version_510 PRIVATE fdb_c Threads::Threads)
   target_link_libraries(trace_partial_file_suffix_test PRIVATE fdb_c Threads::Threads flow)
   target_link_libraries(disconnected_timeout_unit_tests PRIVATE fdb_c Threads::Threads)
+
+if(USE_SANITIZER)
+  target_link_libraries(fdb_c_api_tester PRIVATE fdb_c toml11_target Threads::Threads fmt::fmt boost_asan)
+else()
+  target_link_libraries(fdb_c_api_tester PRIVATE fdb_c toml11_target Threads::Threads fmt::fmt boost_target)
+endif()
 
   # do not set RPATH for mako
   set_property(TARGET mako PROPERTY SKIP_BUILD_RPATH TRUE)
@@ -163,6 +195,7 @@ if(NOT WIN32)
   add_custom_target(external_client DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so)
   add_dependencies(fdb_c_unit_tests external_client)
   add_dependencies(disconnected_timeout_unit_tests external_client)
+  add_dependencies(fdb_c_api_tester external_client)
 
   add_fdbclient_test(
     NAME fdb_c_setup_tests
@@ -199,6 +232,19 @@ if(NOT WIN32)
     COMMAND $<TARGET_FILE:disconnected_timeout_unit_tests>
             @CLUSTER_FILE@
             ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so
+            )
+  add_fdbclient_test(
+    NAME fdb_c_api_tests
+    DISABLE_LOG_DUMP
+    COMMAND ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/run_c_api_tests.py
+            --cluster-file
+            @CLUSTER_FILE@
+            --tester-binary
+            $<TARGET_FILE:fdb_c_api_tester>
+            --external-client-library
+            ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so
+            --test-dir
+            ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests
             )
 endif()
 
