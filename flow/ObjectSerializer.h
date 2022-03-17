@@ -31,7 +31,7 @@ using ContextVariableMap = std::unordered_map<std::string_view, void*>;
 template <class Ar>
 struct LoadContext {
 	Ar* ar;
-	ContextVariableMap* variables = nullptr;
+	std::shared_ptr<ContextVariableMap> variables = nullptr;
 
 	LoadContext(Ar* ar, ContextVariableMap* variables = nullptr) : ar(ar), variables(variables) {}
 	Arena& arena() { return ar->arena(); }
@@ -100,7 +100,7 @@ public:
 	_ObjectReader() : context(static_cast<ReaderImpl*>(this)) {}
 	ProtocolVersion protocolVersion() const { return mProtocolVersion.get(); }
 	void setProtocolVersion(ProtocolVersion v) { mProtocolVersion = v; }
-	void setContextVariableMap(ContextVariableMap* cvm) { context.variables = cvm; }
+	void setContextVariableMap(std::shared_ptr<ContextVariableMap> cvm) { context.variables = cvm; }
 
 	template <class... Items>
 	void deserialize(FileIdentifier file_identifier, Items&... items) {

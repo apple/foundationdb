@@ -308,6 +308,7 @@ public:
 	double lastIncompatibleMessage;
 	uint64_t transportId;
 	IPAllowList allowList;
+	std::shared_ptr<ContextVariableMap> localCVM = std::make_shared<ContextVariableMap>(); // for local delivery
 
 	Future<Void> multiVersionCleanup;
 	Future<Void> pingLogger;
@@ -952,7 +953,7 @@ ACTOR static void deliver(TransportData* self,
                           ArenaReader reader,
                           NetworkAddress peerAddress,
                           Reference<AuthorizedTenants> authorizedTenants,
-                          ContextVariableMap* cvm,
+                          std::shared_ptr<ContextVariableMap> cvm,
                           bool inReadSocket) {
 	// We want to run the task at the right priority. If the priority is higher than the current priority (which is
 	// ReadSocket) we can just upgrade. Otherwise we'll context switch so that we don't block other tasks that might run
@@ -1018,7 +1019,7 @@ static void scanPackets(TransportData* transport,
                         Arena& arena,
                         NetworkAddress const& peerAddress,
                         Reference<AuthorizedTenants> const& authorizedTenants,
-                        ContextVariableMap* cvm,
+                        std::shared_ptr<ContextVariableMap> cvm,
                         ProtocolVersion peerProtocolVersion) {
 	// Find each complete packet in the given byte range and queue a ready task to deliver it.
 	// Remove the complete packets from the range by increasing unprocessed_begin.
@@ -1186,11 +1187,11 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 	state NetworkAddress peerAddress;
 	state ProtocolVersion peerProtocolVersion;
 	state Reference<AuthorizedTenants> authorizedTenants = makeReference<AuthorizedTenants>();
-	state ContextVariableMap cvm;
+	state std::shared_ptr<ContextVariableMap> cvm = std::make_shared<ContextVariableMap>();
 	peerAddress = conn->getPeerAddress();
 	authorizedTenants->trusted = transport->allowList(conn->getPeerAddress().ip);
-	cvm["AuthorizedTenants"] = &authorizedTenants;
-	cvm["PeerAddress"] = &peerAddress;
+	(*cvm)["AuthorizedTenants"] = &authorizedTenants;
+	(*cvm)["PeerAddress"] = &peerAddress;
 
 	authorizedTenants->trusted = transport->allowList(peerAddress.ip);
 	if (!peer) {
@@ -1346,7 +1347,7 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 						            arena,
 						            peerAddress,
 						            authorizedTenants,
-						            &cvm,
+						            cvm,
 						            peerProtocolVersion);
 					} else {
 						unprocessed_begin = unprocessed_end;
@@ -1607,7 +1608,6 @@ static void sendLocal(TransportData* self, ISerializeSource const& what, const E
 	// SOMEDAY: Would it be better to avoid (de)serialization by doing this check in flow?
 
 	Standalone<StringRef> copy;
-	ContextVariableMap cvm;
 	ObjectWriter wr(AssumeVersion(g_network->protocolVersion()));
 	what.serializeObjectWriter(wr);
 	copy = wr.toStringRef();
@@ -1626,7 +1626,7 @@ static void sendLocal(TransportData* self, ISerializeSource const& what, const E
 		        ArenaReader(copy.arena(), copy, AssumeVersion(currentProtocolVersion)),
 		        NetworkAddress(),
 		        authorizedTenants,
-		        &cvm,
+		        self->localCVM,
 		        false);
 	}
 }
