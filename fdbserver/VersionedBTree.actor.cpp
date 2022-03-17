@@ -45,9 +45,9 @@
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/DeltaTree.h"
 #include <string.h>
-#include "flow/actorcompiler.h"
 #include <cinttypes>
 #include <boost/intrusive/list.hpp>
+#include "flow/actorcompiler.h" // must be last include
 
 #define REDWOOD_DEBUG 0
 

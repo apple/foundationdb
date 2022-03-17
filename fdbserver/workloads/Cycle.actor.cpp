@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <cstring>
+
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
@@ -26,9 +28,9 @@
 #include "flow/Arena.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 #include "flow/serialize.h"
-#include <cstring>
+
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct CycleWorkload : TestWorkload {
 	int actorCount, nodeCount;
