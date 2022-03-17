@@ -674,7 +674,7 @@ TEST_CASE("/flow/Arena/DefaultBoostHash") {
 	return Void();
 }
 
-TEST_CASE("/flow/Arena/Size") {
+TEST_CASE(":/flow/Arena/Size") {
 	Arena a;
 
 	// Size estimates are accurate unless dependencies are added to an Arena via another Arena
