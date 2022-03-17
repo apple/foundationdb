@@ -26,9 +26,10 @@
 #include "flow/Arena.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 #include "flow/serialize.h"
 #include <cstring>
+
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct MiniCycleWorkload : TestWorkload {
 	int actorCount, nodeCount;

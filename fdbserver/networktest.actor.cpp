@@ -21,10 +21,11 @@
 #include "contrib/fmt-8.1.1/include/fmt/format.h"
 #include "fdbserver/NetworkTest.h"
 #include "flow/Knobs.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 #include "flow/ActorCollection.h"
 #include "flow/UnitTest.h"
 #include <inttypes.h>
+
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 constexpr int WLTOKEN_NETWORKTEST = WLTOKEN_FIRST_AVAILABLE;
 

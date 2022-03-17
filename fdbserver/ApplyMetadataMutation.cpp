@@ -541,6 +541,29 @@ private:
 		toCommit->writeTypedMessage(privatized);
 	}
 
+	// Generates private mutations for the target storage server, instructing it to create a checkpoint.
+	void checkSetCheckpointKeys(MutationRef m) {
+		if (!m.param1.startsWith(checkpointPrefix)) {
+			return;
+		}
+		if (toCommit) {
+			CheckpointMetaData checkpoint = decodeCheckpointValue(m.param2);
+			Tag tag = decodeServerTagValue(txnStateStore->readValue(serverTagKeyFor(checkpoint.ssID)).get().get());
+			MutationRef privatized = m;
+			privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
+			TraceEvent("SendingPrivateMutationCheckpoint", dbgid)
+			    .detail("Original", m)
+			    .detail("Privatized", privatized)
+			    .detail("Server", checkpoint.ssID)
+			    .detail("TagKey", serverTagKeyFor(checkpoint.ssID))
+			    .detail("Tag", tag.toString())
+			    .detail("Checkpoint", checkpoint.toString());
+
+			toCommit->addTag(tag);
+			toCommit->writeTypedMessage(privatized);
+		}
+	}
+
 	void checkSetOtherKeys(MutationRef m) {
 		if (initialCommit)
 			return;
@@ -703,7 +726,7 @@ private:
 				}
 			}
 			// Might be a tss removal, which doesn't store a tag there.
-			// Chained if is a little verbose, but avoids unecessary work
+			// Chained if is a little verbose, but avoids unnecessary work
 			if (toCommit && !initialCommit && !serverKeysCleared.size()) {
 				KeyRangeRef maybeTssRange = range & serverTagKeys;
 				if (maybeTssRange.singleKeyRange()) {
@@ -1081,6 +1104,7 @@ public:
 			if (m.type == MutationRef::SetValue && isSystemKey(m.param1)) {
 				checkSetKeyServersPrefix(m);
 				checkSetServerKeysPrefix(m);
+				checkSetCheckpointKeys(m);
 				checkSetServerTagsPrefix(m);
 				checkSetStorageCachePrefix(m);
 				checkSetCacheKeysPrefix(m);

@@ -207,7 +207,10 @@ public:
 	ISimulator::BackupAgentType simDrAgents;
 };
 
-ACTOR Future<DistributedTestResults> runWorkload(Database cx, std::vector<TesterInterface> testers, TestSpec spec);
+ACTOR Future<DistributedTestResults> runWorkload(Database cx,
+                                                 std::vector<TesterInterface> testers,
+                                                 TestSpec spec,
+                                                 Optional<TenantName> defaultTenant);
 
 void logMetrics(std::vector<PerfMetric> metrics);
 

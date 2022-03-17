@@ -24,6 +24,7 @@
 #include "flow/Trace.h"
 #include "flow/Error.h"
 #include "flow/Knobs.h"
+#include "flow/UnitTest.h"
 #include "flow/crc32c.h"
 #include "flow/flow.h"
 
@@ -588,3 +589,20 @@ template class FastAllocator<2048>;
 template class FastAllocator<4096>;
 template class FastAllocator<8192>;
 template class FastAllocator<16384>;
+
+#ifdef USE_JEMALLOC
+#include <jemalloc/jemalloc.h>
+TEST_CASE("/jemalloc/4k_aligned_usable_size") {
+	for (int i = 1; i < 4; ++i) {
+		auto* ptr = aligned_alloc(4096, i * 4096);
+		try {
+			ASSERT_EQ(malloc_usable_size(ptr), i * 4096);
+		} catch (...) {
+			aligned_free(ptr);
+			throw;
+		}
+		aligned_free(ptr);
+	}
+	return Void();
+}
+#endif

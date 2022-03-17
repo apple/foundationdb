@@ -30,6 +30,7 @@
 
 #include "contrib/fmt-8.1.1/include/fmt/format.h"
 
+#include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/MultiInterface.h"
@@ -127,6 +128,12 @@ Future<REPLY_TYPE(Request)> loadBalance(
 
 FDB_BOOLEAN_PARAM(TransactionRecordLogInfo);
 FDB_DEFINE_BOOLEAN_PARAM(UseProvisionalProxies);
+
+// Used to determine whether or not client will load balance based on the number of GRVs released by each proxy
+FDB_DEFINE_BOOLEAN_PARAM(BalanceOnRequests);
+
+// Whether or not a request should include the tenant name
+FDB_BOOLEAN_PARAM(UseTenant);
 
 NetworkOptions networkOptions;
 TLSConfig tlsConfig(TLSEndpointType::CLIENT);
@@ -555,7 +562,7 @@ ACTOR static Future<Void> transactionInfoCommitActor(Transaction* tr, std::vecto
 			for (auto& chunk : *chunks) {
 				tr->atomicOp(chunk.key, chunk.value, MutationRef::SetVersionstampedKey);
 				numCommitBytes += chunk.key.size() + chunk.value.size() -
-				                  4; // subtract number of bytes of key that denotes verstion stamp index
+				                  4; // subtract number of bytes of key that denotes version stamp index
 			}
 			tr->atomicOp(clientLatencyAtomicCtr, StringRef((uint8_t*)&numCommitBytes, 8), MutationRef::AddValue);
 			wait(tr->commit());
@@ -1287,6 +1294,16 @@ Future<RangeResult> HealthMetricsRangeImpl::getRange(ReadYourWritesTransaction* 
 	return healthMetricsGetRangeActor(ryw, kr);
 }
 
+KeyRangeRef toRelativeRange(KeyRangeRef range, KeyRef prefix) {
+	if (prefix.empty()) {
+		return range;
+	} else {
+		KeyRef begin = range.begin.startsWith(prefix) ? range.begin.removePrefix(prefix) : allKeys.begin;
+		KeyRef end = range.end.startsWith(prefix) ? range.end.removePrefix(prefix) : allKeys.end;
+		return KeyRangeRef(begin, end);
+	}
+}
+
 DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnectionRecord>>> connectionRecord,
                                  Reference<AsyncVar<ClientDBInfo>> clientInfo,
                                  Reference<AsyncVar<Optional<ClientLeaderRegInterface>> const> coordinator,
@@ -1297,10 +1314,11 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
                                  LockAware lockAware,
                                  IsInternal internal,
                                  int apiVersion,
-                                 IsSwitchable switchable)
+                                 IsSwitchable switchable,
+                                 Optional<TenantName> defaultTenant)
   : lockAware(lockAware), switchable(switchable), connectionRecord(connectionRecord), proxyProvisional(false),
-    clientLocality(clientLocality), enableLocalityLoadBalance(enableLocalityLoadBalance), internal(internal),
-    cc("TransactionMetrics"), transactionReadVersions("ReadVersions", cc),
+    clientLocality(clientLocality), enableLocalityLoadBalance(enableLocalityLoadBalance), defaultTenant(defaultTenant),
+    internal(internal), cc("TransactionMetrics"), transactionReadVersions("ReadVersions", cc),
     transactionReadVersionsThrottled("ReadVersionsThrottled", cc),
     transactionReadVersionsCompleted("ReadVersionsCompleted", cc),
     transactionReadVersionBatches("ReadVersionBatches", cc),
@@ -1351,6 +1369,8 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 	logger = databaseLogger(this) && tssLogger(this);
 	locationCacheSize = g_network->isSimulated() ? CLIENT_KNOBS->LOCATION_CACHE_EVICTION_SIZE_SIM
 	                                             : CLIENT_KNOBS->LOCATION_CACHE_EVICTION_SIZE;
+	tenantCacheSize = g_network->isSimulated() ? CLIENT_KNOBS->TENANT_CACHE_EVICTION_SIZE_SIM
+	                                           : CLIENT_KNOBS->TENANT_CACHE_EVICTION_SIZE;
 
 	getValueSubmitted.init(LiteralStringRef("NativeAPI.GetValueSubmitted"));
 	getValueCompleted.init(LiteralStringRef("NativeAPI.GetValueCompleted"));
@@ -1362,6 +1382,12 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 
 	smoothMidShardSize.reset(CLIENT_KNOBS->INIT_MID_SHARD_BYTES);
 
+	if (apiVersionAtLeast(710)) {
+		registerSpecialKeySpaceModule(
+		    SpecialKeySpace::MODULE::MANAGEMENT,
+		    SpecialKeySpace::IMPLTYPE::READWRITE,
+		    std::make_unique<TenantMapRangeImpl>(SpecialKeySpace::getManagementApiCommandRange("tenantmap")));
+	}
 	if (apiVersionAtLeast(700)) {
 		registerSpecialKeySpaceModule(SpecialKeySpace::MODULE::ERRORMSG,
 		                              SpecialKeySpace::IMPLTYPE::READONLY,
@@ -1629,24 +1655,55 @@ DatabaseContext::~DatabaseContext() {
 	locationCache.insert(allKeys, Reference<LocationInfo>());
 }
 
-std::pair<KeyRange, Reference<LocationInfo>> DatabaseContext::getCachedLocation(const KeyRef& key, Reverse isBackward) {
-	if (isBackward) {
-		auto range = locationCache.rangeContainingKeyBefore(key);
-		return std::make_pair(range->range(), range->value());
-	} else {
-		auto range = locationCache.rangeContaining(key);
-		return std::make_pair(range->range(), range->value());
+Optional<KeyRangeLocationInfo> DatabaseContext::getCachedLocation(const Optional<TenantName>& tenantName,
+                                                                  const KeyRef& key,
+                                                                  Reverse isBackward) {
+	TenantMapEntry tenantEntry;
+	Arena arena;
+	KeyRef resolvedKey = key;
+
+	if (tenantName.present()) {
+		auto itr = tenantCache.find(tenantName.get());
+		if (itr != tenantCache.end()) {
+			tenantEntry = itr->second;
+			resolvedKey = resolvedKey.withPrefix(tenantEntry.prefix, arena);
+		} else {
+			return Optional<KeyRangeLocationInfo>();
+		}
 	}
+
+	auto range =
+	    isBackward ? locationCache.rangeContainingKeyBefore(resolvedKey) : locationCache.rangeContaining(resolvedKey);
+	if (range->value()) {
+		return KeyRangeLocationInfo(tenantEntry, toRelativeRange(range->range(), tenantEntry.prefix), range->value());
+	}
+
+	return Optional<KeyRangeLocationInfo>();
 }
 
-bool DatabaseContext::getCachedLocations(const KeyRangeRef& range,
-                                         std::vector<std::pair<KeyRange, Reference<LocationInfo>>>& result,
+bool DatabaseContext::getCachedLocations(const Optional<TenantName>& tenantName,
+                                         const KeyRangeRef& range,
+                                         std::vector<KeyRangeLocationInfo>& result,
                                          int limit,
                                          Reverse reverse) {
 	result.clear();
 
-	auto begin = locationCache.rangeContaining(range.begin);
-	auto end = locationCache.rangeContainingKeyBefore(range.end);
+	TenantMapEntry tenantEntry;
+	Arena arena;
+	KeyRangeRef resolvedRange = range;
+
+	if (tenantName.present()) {
+		auto itr = tenantCache.find(tenantName.get());
+		if (itr != tenantCache.end()) {
+			tenantEntry = itr->second;
+			resolvedRange = resolvedRange.withPrefix(tenantEntry.prefix, arena);
+		} else {
+			return false;
+		}
+	}
+
+	auto begin = locationCache.rangeContaining(resolvedRange.begin);
+	auto end = locationCache.rangeContainingKeyBefore(resolvedRange.end);
 
 	loop {
 		auto r = reverse ? end : begin;
@@ -1655,7 +1712,7 @@ bool DatabaseContext::getCachedLocations(const KeyRangeRef& range,
 			result.clear();
 			return false;
 		}
-		result.emplace_back(r->range() & range, r->value());
+		result.emplace_back(tenantEntry, toRelativeRange(r->range() & resolvedRange, tenantEntry.prefix), r->value());
 		if (result.size() == limit || begin == end) {
 			break;
 		}
@@ -1669,8 +1726,26 @@ bool DatabaseContext::getCachedLocations(const KeyRangeRef& range,
 	return true;
 }
 
-Reference<LocationInfo> DatabaseContext::setCachedLocation(const KeyRangeRef& keys,
+void DatabaseContext::cacheTenant(const TenantName& tenant, const TenantMapEntry& tenantEntry) {
+	if (tenantCacheSize > 0) {
+		// Naive cache eviction just erases the entire cache when it gets full.
+		// We don't expect a single client to fill the tenant cache typically, so this should work reasonably well.
+		if (tenantCache.size() > tenantCacheSize) {
+			tenantCache.clear();
+		}
+
+		tenantCache[tenant] = tenantEntry;
+	}
+}
+
+Reference<LocationInfo> DatabaseContext::setCachedLocation(const Optional<TenantName>& tenant,
+                                                           const TenantMapEntry& tenantEntry,
+                                                           const KeyRangeRef& absoluteKeys,
                                                            const std::vector<StorageServerInterface>& servers) {
+	if (tenant.present()) {
+		cacheTenant(tenant.get(), tenantEntry);
+	}
+
 	std::vector<Reference<ReferencedInterface<StorageServerInterface>>> serverRefs;
 	serverRefs.reserve(servers.size());
 	for (const auto& interf : servers) {
@@ -1686,20 +1761,36 @@ Reference<LocationInfo> DatabaseContext::setCachedLocation(const KeyRangeRef& ke
 		Key begin = r.begin(), end = r.end(); // insert invalidates r, so can't be passed a mere reference into it
 		locationCache.insert(KeyRangeRef(begin, end), Reference<LocationInfo>());
 	}
-	locationCache.insert(keys, loc);
+	locationCache.insert(absoluteKeys, loc);
 	return loc;
 }
 
-void DatabaseContext::invalidateCache(const KeyRef& key, Reverse isBackward) {
+void DatabaseContext::invalidateCachedTenant(const TenantNameRef& tenant) {
+	tenantCache.erase(tenant);
+}
+
+void DatabaseContext::invalidateCache(const KeyRef& tenantPrefix, const KeyRef& key, Reverse isBackward) {
+	Arena arena;
+	KeyRef resolvedKey = key;
+	if (!tenantPrefix.empty()) {
+		resolvedKey = resolvedKey.withPrefix(tenantPrefix, arena);
+	}
+
 	if (isBackward) {
-		locationCache.rangeContainingKeyBefore(key)->value() = Reference<LocationInfo>();
+		locationCache.rangeContainingKeyBefore(resolvedKey)->value() = Reference<LocationInfo>();
 	} else {
-		locationCache.rangeContaining(key)->value() = Reference<LocationInfo>();
+		locationCache.rangeContaining(resolvedKey)->value() = Reference<LocationInfo>();
 	}
 }
 
-void DatabaseContext::invalidateCache(const KeyRangeRef& keys) {
-	auto rs = locationCache.intersectingRanges(keys);
+void DatabaseContext::invalidateCache(const KeyRef& tenantPrefix, const KeyRangeRef& keys) {
+	Arena arena;
+	KeyRangeRef resolvedKeys = keys;
+	if (!tenantPrefix.empty()) {
+		resolvedKeys = resolvedKeys.withPrefix(tenantPrefix, arena);
+	}
+
+	auto rs = locationCache.intersectingRanges(resolvedKeys);
 	Key begin = rs.begin().begin(),
 	    end = rs.end().begin(); // insert invalidates rs, so can't be passed a mere reference into it
 	locationCache.insert(KeyRangeRef(begin, end), Reference<LocationInfo>());
@@ -1788,9 +1879,9 @@ void DatabaseContext::setOption(FDBDatabaseOptions::Option option, Optional<Stri
 			                 clientLocality.machineId(),
 			                 clientLocality.dcId());
 			if (clientInfo->get().commitProxies.size())
-				commitProxies = makeReference<CommitProxyInfo>(clientInfo->get().commitProxies, false);
+				commitProxies = makeReference<CommitProxyInfo>(clientInfo->get().commitProxies);
 			if (clientInfo->get().grvProxies.size())
-				grvProxies = makeReference<GrvProxyInfo>(clientInfo->get().grvProxies, true);
+				grvProxies = makeReference<GrvProxyInfo>(clientInfo->get().grvProxies, BalanceOnRequests::True);
 			server_interf.clear();
 			locationCache.insert(allKeys, Reference<LocationInfo>());
 			break;
@@ -1804,9 +1895,9 @@ void DatabaseContext::setOption(FDBDatabaseOptions::Option option, Optional<Stri
 			                 clientLocality.machineId(),
 			                 value.present() ? Standalone<StringRef>(value.get()) : Optional<Standalone<StringRef>>());
 			if (clientInfo->get().commitProxies.size())
-				commitProxies = makeReference<CommitProxyInfo>(clientInfo->get().commitProxies, false);
+				commitProxies = makeReference<CommitProxyInfo>(clientInfo->get().commitProxies);
 			if (clientInfo->get().grvProxies.size())
-				grvProxies = makeReference<GrvProxyInfo>(clientInfo->get().grvProxies, true);
+				grvProxies = makeReference<GrvProxyInfo>(clientInfo->get().grvProxies, BalanceOnRequests::True);
 			server_interf.clear();
 			locationCache.insert(allKeys, Reference<LocationInfo>());
 			break;
@@ -1858,7 +1949,8 @@ ACTOR static Future<Void> switchConnectionRecordImpl(Reference<IClusterConnectio
 	self->commitProxies.clear();
 	self->grvProxies.clear();
 	self->minAcceptableReadVersion = std::numeric_limits<Version>::max();
-	self->invalidateCache(allKeys);
+	self->tenantCache.clear();
+	self->invalidateCache(Key(), allKeys);
 
 	auto clearedClientInfo = self->clientInfo->get();
 	clearedClientInfo.commitProxies.clear();
@@ -2041,20 +2133,19 @@ Database Database::createDatabase(std::string connFileName,
 	return Database::createDatabase(rccr, apiVersion, internal, clientLocality);
 }
 
-Reference<WatchMetadata> DatabaseContext::getWatchMetadata(KeyRef key) const {
-	const auto it = watchMap.find(key);
+Reference<WatchMetadata> DatabaseContext::getWatchMetadata(int64_t tenantId, KeyRef key) const {
+	const auto it = watchMap.find(std::make_pair(tenantId, key));
 	if (it == watchMap.end())
 		return Reference<WatchMetadata>();
 	return it->second;
 }
 
-Key DatabaseContext::setWatchMetadata(Reference<WatchMetadata> metadata) {
-	watchMap[metadata->parameters->key] = metadata;
-	return metadata->parameters->key;
+void DatabaseContext::setWatchMetadata(Reference<WatchMetadata> metadata) {
+	watchMap[std::make_pair(metadata->parameters->tenant.tenantId, metadata->parameters->key)] = metadata;
 }
 
-void DatabaseContext::deleteWatchMetadata(KeyRef key) {
-	watchMap.erase(key);
+void DatabaseContext::deleteWatchMetadata(int64_t tenantId, KeyRef key) {
+	watchMap.erase(std::make_pair(tenantId, key));
 }
 
 void DatabaseContext::clearWatchMetadata() {
@@ -2361,11 +2452,11 @@ void DatabaseContext::updateProxies() {
 	grvProxies.clear();
 	bool commitProxyProvisional = false, grvProxyProvisional = false;
 	if (clientInfo->get().commitProxies.size()) {
-		commitProxies = makeReference<CommitProxyInfo>(clientInfo->get().commitProxies, false);
+		commitProxies = makeReference<CommitProxyInfo>(clientInfo->get().commitProxies);
 		commitProxyProvisional = clientInfo->get().commitProxies[0].provisional;
 	}
 	if (clientInfo->get().grvProxies.size()) {
-		grvProxies = makeReference<GrvProxyInfo>(clientInfo->get().grvProxies, true);
+		grvProxies = makeReference<GrvProxyInfo>(clientInfo->get().grvProxies, BalanceOnRequests::True);
 		grvProxyProvisional = clientInfo->get().grvProxies[0].provisional;
 	}
 	if (clientInfo->get().commitProxies.size() && clientInfo->get().grvProxies.size()) {
@@ -2502,19 +2593,23 @@ AddressExclusion AddressExclusion::parse(StringRef const& key) {
 Future<Optional<Value>> getValue(Reference<TransactionState> const& trState,
                                  Key const& key,
                                  Future<Version> const& version,
-                                 TransactionRecordLogInfo const& recordLogInfo);
+                                 UseTenant const& useTenant = UseTenant::True,
+                                 TransactionRecordLogInfo const& recordLogInfo = TransactionRecordLogInfo::True);
 
 Future<RangeResult> getRange(Reference<TransactionState> const& trState,
                              Future<Version> const& fVersion,
                              KeySelector const& begin,
                              KeySelector const& end,
                              GetRangeLimits const& limits,
-                             Reverse const& reverse);
+                             Reverse const& reverse,
+                             UseTenant const& useTenant);
 
 ACTOR Future<Optional<StorageServerInterface>> fetchServerInterface(Reference<TransactionState> trState,
                                                                     Future<Version> ver,
                                                                     UID id) {
-	Optional<Value> val = wait(getValue(trState, serverListKeyFor(id), ver, TransactionRecordLogInfo::False));
+	Optional<Value> val =
+	    wait(getValue(trState, serverListKeyFor(id), ver, UseTenant::False, TransactionRecordLogInfo::False));
+
 	if (!val.present()) {
 		// A storage server has been removed from serverList since we read keyServers
 		return Optional<StorageServerInterface>();
@@ -2568,13 +2663,14 @@ void updateTssMappings(Database cx, const GetKeyServerLocationsReply& reply) {
 
 // If isBackward == true, returns the shard containing the key before 'key' (an infinitely long, inexpressible key).
 // Otherwise returns the shard containing key
-ACTOR Future<std::pair<KeyRange, Reference<LocationInfo>>> getKeyLocation_internal(
-    Database cx,
-    Key key,
-    SpanID spanID,
-    Optional<UID> debugID,
-    UseProvisionalProxies useProvisionalProxies,
-    Reverse isBackward) {
+ACTOR Future<KeyRangeLocationInfo> getKeyLocation_internal(Database cx,
+                                                           Optional<TenantName> tenant,
+                                                           Key key,
+                                                           SpanID spanID,
+                                                           Optional<UID> debugID,
+                                                           UseProvisionalProxies useProvisionalProxies,
+                                                           Reverse isBackward,
+                                                           Version version) {
 
 	state Span span("NAPI:getKeyLocation"_loc, spanID);
 	if (isBackward) {
@@ -2586,32 +2682,47 @@ ACTOR Future<std::pair<KeyRange, Reference<LocationInfo>>> getKeyLocation_intern
 	if (debugID.present())
 		g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getKeyLocation.Before");
 
-	loop {
-		++cx->transactionKeyServerLocationRequests;
-		choose {
-			when(wait(cx->onProxiesChanged())) {}
-			when(GetKeyServerLocationsReply rep =
-			         wait(basicLoadBalance(cx->getCommitProxies(useProvisionalProxies),
-			                               &CommitProxyInterface::getKeyServersLocations,
-			                               GetKeyServerLocationsRequest(span.context,
-			                                                            Optional<TenantNameRef>(),
-			                                                            key,
-			                                                            Optional<KeyRef>(),
-			                                                            100,
-			                                                            isBackward,
-			                                                            latestVersion,
-			                                                            key.arena()),
-			                               TaskPriority::DefaultPromiseEndpoint))) {
-				++cx->transactionKeyServerLocationRequestsCompleted;
-				if (debugID.present())
-					g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getKeyLocation.After");
-				ASSERT(rep.results.size() == 1);
+	try {
+		loop {
+			++cx->transactionKeyServerLocationRequests;
+			choose {
+				when(wait(cx->onProxiesChanged())) {}
+				when(GetKeyServerLocationsReply rep =
+				         wait(basicLoadBalance(cx->getCommitProxies(useProvisionalProxies),
+				                               &CommitProxyInterface::getKeyServersLocations,
+				                               GetKeyServerLocationsRequest(span.context,
+				                                                            tenant.castTo<TenantNameRef>(),
+				                                                            key,
+				                                                            Optional<KeyRef>(),
+				                                                            100,
+				                                                            isBackward,
+				                                                            version,
+				                                                            key.arena()),
+				                               TaskPriority::DefaultPromiseEndpoint))) {
+					++cx->transactionKeyServerLocationRequestsCompleted;
+					if (debugID.present())
+						g_traceBatch.addEvent(
+						    "TransactionDebug", debugID.get().first(), "NativeAPI.getKeyLocation.After");
+					ASSERT(rep.results.size() == 1);
 
-				auto locationInfo = cx->setCachedLocation(rep.results[0].first, rep.results[0].second);
-				updateTssMappings(cx, rep);
-				return std::make_pair(KeyRange(rep.results[0].first, rep.arena), locationInfo);
+					auto locationInfo =
+					    cx->setCachedLocation(tenant, rep.tenantEntry, rep.results[0].first, rep.results[0].second);
+					updateTssMappings(cx, rep);
+
+					return KeyRangeLocationInfo(
+					    rep.tenantEntry,
+					    KeyRange(toRelativeRange(rep.results[0].first, rep.tenantEntry.prefix), rep.arena),
+					    locationInfo);
+				}
 			}
 		}
+	} catch (Error& e) {
+		if (e.code() == error_code_tenant_not_found) {
+			ASSERT(tenant.present());
+			cx->invalidateCachedTenant(tenant.get());
+		}
+
+		throw;
 	}
 }
 
@@ -2645,92 +2756,128 @@ bool checkOnlyEndpointFailed(const Database& cx, const Endpoint& endpoint) {
 }
 
 template <class F>
-Future<std::pair<KeyRange, Reference<LocationInfo>>> getKeyLocation(Database const& cx,
-                                                                    Key const& key,
-                                                                    F StorageServerInterface::*member,
-                                                                    SpanID spanID,
-                                                                    Optional<UID> debugID,
-                                                                    UseProvisionalProxies useProvisionalProxies,
-                                                                    Reverse isBackward = Reverse::False) {
+Future<KeyRangeLocationInfo> getKeyLocation(Database const& cx,
+                                            Optional<TenantName> const& tenant,
+                                            Key const& key,
+                                            F StorageServerInterface::*member,
+                                            SpanID spanID,
+                                            Optional<UID> debugID,
+                                            UseProvisionalProxies useProvisionalProxies,
+                                            Reverse isBackward,
+                                            Version version) {
 	// we first check whether this range is cached
-	auto ssi = cx->getCachedLocation(key, isBackward);
-	if (!ssi.second) {
-		return getKeyLocation_internal(cx, key, spanID, debugID, useProvisionalProxies, isBackward);
+	Optional<KeyRangeLocationInfo> locationInfo = cx->getCachedLocation(tenant, key, isBackward);
+	if (!locationInfo.present()) {
+		return getKeyLocation_internal(cx, tenant, key, spanID, debugID, useProvisionalProxies, isBackward, version);
 	}
 
 	bool onlyEndpointFailedAndNeedRefresh = false;
-	for (int i = 0; i < ssi.second->size(); i++) {
-		if (checkOnlyEndpointFailed(cx, ssi.second->get(i, member).getEndpoint())) {
+	for (int i = 0; i < locationInfo.get().locations->size(); i++) {
+		if (checkOnlyEndpointFailed(cx, locationInfo.get().locations->get(i, member).getEndpoint())) {
 			onlyEndpointFailedAndNeedRefresh = true;
 		}
 	}
 
 	if (onlyEndpointFailedAndNeedRefresh) {
-		cx->invalidateCache(key);
+		cx->invalidateCache(locationInfo.get().tenantEntry.prefix, key);
+
 		// Refresh the cache with a new getKeyLocations made to proxies.
-		return getKeyLocation_internal(cx, key, spanID, debugID, useProvisionalProxies, isBackward);
+		return getKeyLocation_internal(cx, tenant, key, spanID, debugID, useProvisionalProxies, isBackward, version);
 	}
 
-	return ssi;
+	return locationInfo.get();
 }
 
 template <class F>
-Future<std::pair<KeyRange, Reference<LocationInfo>>> getKeyLocation(Reference<TransactionState> trState,
-                                                                    Key const& key,
-                                                                    F StorageServerInterface::*member,
-                                                                    Reverse isBackward = Reverse::False) {
-	return getKeyLocation(
-	    trState->cx, key, member, trState->spanID, trState->debugID, trState->useProvisionalProxies, isBackward);
+Future<KeyRangeLocationInfo> getKeyLocation(Reference<TransactionState> trState,
+                                            Key const& key,
+                                            F StorageServerInterface::*member,
+                                            Reverse isBackward,
+                                            UseTenant useTenant,
+                                            Version version) {
+	auto f = getKeyLocation(trState->cx,
+	                        useTenant ? trState->tenant() : Optional<TenantName>(),
+	                        key,
+	                        member,
+	                        trState->spanID,
+	                        trState->debugID,
+	                        trState->useProvisionalProxies,
+	                        isBackward,
+	                        version);
+
+	if (trState->tenant().present() && useTenant) {
+		return map(f, [trState](const KeyRangeLocationInfo& locationInfo) {
+			trState->tenantId = locationInfo.tenantEntry.id;
+			return locationInfo;
+		});
+	} else {
+		return f;
+	}
 }
 
-ACTOR Future<std::vector<std::pair<KeyRange, Reference<LocationInfo>>>> getKeyRangeLocations_internal(
+ACTOR Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations_internal(
     Database cx,
+    Optional<TenantName> tenant,
     KeyRange keys,
     int limit,
     Reverse reverse,
     SpanID spanID,
     Optional<UID> debugID,
-    UseProvisionalProxies useProvisionalProxies) {
+    UseProvisionalProxies useProvisionalProxies,
+    Version version) {
 	state Span span("NAPI:getKeyRangeLocations"_loc, spanID);
 	if (debugID.present())
 		g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getKeyLocations.Before");
 
-	loop {
-		++cx->transactionKeyServerLocationRequests;
-		choose {
-			when(wait(cx->onProxiesChanged())) {}
-			when(GetKeyServerLocationsReply _rep =
-			         wait(basicLoadBalance(cx->getCommitProxies(useProvisionalProxies),
-			                               &CommitProxyInterface::getKeyServersLocations,
-			                               GetKeyServerLocationsRequest(span.context,
-			                                                            Optional<TenantNameRef>(),
-			                                                            keys.begin,
-			                                                            keys.end,
-			                                                            limit,
-			                                                            reverse,
-			                                                            latestVersion,
-			                                                            keys.arena()),
-			                               TaskPriority::DefaultPromiseEndpoint))) {
-				++cx->transactionKeyServerLocationRequestsCompleted;
-				state GetKeyServerLocationsReply rep = _rep;
-				if (debugID.present())
-					g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getKeyLocations.After");
-				ASSERT(rep.results.size());
+	try {
+		loop {
+			++cx->transactionKeyServerLocationRequests;
+			choose {
+				when(wait(cx->onProxiesChanged())) {}
+				when(GetKeyServerLocationsReply _rep =
+				         wait(basicLoadBalance(cx->getCommitProxies(useProvisionalProxies),
+				                               &CommitProxyInterface::getKeyServersLocations,
+				                               GetKeyServerLocationsRequest(span.context,
+				                                                            tenant.castTo<TenantNameRef>(),
+				                                                            keys.begin,
+				                                                            keys.end,
+				                                                            limit,
+				                                                            reverse,
+				                                                            version,
+				                                                            keys.arena()),
+				                               TaskPriority::DefaultPromiseEndpoint))) {
+					++cx->transactionKeyServerLocationRequestsCompleted;
+					state GetKeyServerLocationsReply rep = _rep;
+					if (debugID.present())
+						g_traceBatch.addEvent(
+						    "TransactionDebug", debugID.get().first(), "NativeAPI.getKeyLocations.After");
+					ASSERT(rep.results.size());
 
-				state std::vector<std::pair<KeyRange, Reference<LocationInfo>>> results;
-				state int shard = 0;
-				for (; shard < rep.results.size(); shard++) {
-					// FIXME: these shards are being inserted into the map sequentially, it would be much more CPU
-					// efficient to save the map pairs and insert them all at once.
-					results.emplace_back(rep.results[shard].first & keys,
-					                     cx->setCachedLocation(rep.results[shard].first, rep.results[shard].second));
-					wait(yield());
+					state std::vector<KeyRangeLocationInfo> results;
+					state int shard = 0;
+					for (; shard < rep.results.size(); shard++) {
+						// FIXME: these shards are being inserted into the map sequentially, it would be much more CPU
+						// efficient to save the map pairs and insert them all at once.
+						results.emplace_back(
+						    rep.tenantEntry,
+						    (toRelativeRange(rep.results[shard].first, rep.tenantEntry.prefix) & keys),
+						    cx->setCachedLocation(
+						        tenant, rep.tenantEntry, rep.results[shard].first, rep.results[shard].second));
+						wait(yield());
+					}
+					updateTssMappings(cx, rep);
+
+					return results;
 				}
-				updateTssMappings(cx, rep);
-
-				return results;
 			}
 		}
+	} catch (Error& e) {
+		if (e.code() == error_code_tenant_not_found) {
+			ASSERT(tenant.present());
+			cx->invalidateCachedTenant(tenant.get());
+		}
+
+		throw;
 	}
 }
 
@@ -2741,80 +2888,107 @@ ACTOR Future<std::vector<std::pair<KeyRange, Reference<LocationInfo>>>> getKeyRa
 // Example: If query the function with  key range (b, d), the returned list of pairs could be something like:
 // [([a, b1), locationInfo), ([b1, c), locationInfo), ([c, d1), locationInfo)].
 template <class F>
-Future<std::vector<std::pair<KeyRange, Reference<LocationInfo>>>> getKeyRangeLocations(
-    Database const& cx,
-    KeyRange const& keys,
-    int limit,
-    Reverse reverse,
-    F StorageServerInterface::*member,
-    SpanID const& spanID,
-    Optional<UID> const& debugID,
-    UseProvisionalProxies useProvisionalProxies) {
+Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations(Database const& cx,
+                                                               Optional<TenantName> tenant,
+                                                               KeyRange const& keys,
+                                                               int limit,
+                                                               Reverse reverse,
+                                                               F StorageServerInterface::*member,
+                                                               SpanID const& spanID,
+                                                               Optional<UID> const& debugID,
+                                                               UseProvisionalProxies useProvisionalProxies,
+                                                               Version version) {
 
 	ASSERT(!keys.empty());
 
-	std::vector<std::pair<KeyRange, Reference<LocationInfo>>> locations;
-	if (!cx->getCachedLocations(keys, locations, limit, reverse)) {
-		return getKeyRangeLocations_internal(cx, keys, limit, reverse, spanID, debugID, useProvisionalProxies);
+	std::vector<KeyRangeLocationInfo> locations;
+	if (!cx->getCachedLocations(tenant, keys, locations, limit, reverse)) {
+		return getKeyRangeLocations_internal(
+		    cx, tenant, keys, limit, reverse, spanID, debugID, useProvisionalProxies, version);
 	}
 
 	bool foundFailed = false;
-	for (const auto& [range, locInfo] : locations) {
+	for (const auto& locationInfo : locations) {
 		bool onlyEndpointFailedAndNeedRefresh = false;
-		for (int i = 0; i < locInfo->size(); i++) {
-			if (checkOnlyEndpointFailed(cx, locInfo->get(i, member).getEndpoint())) {
+		for (int i = 0; i < locationInfo.locations->size(); i++) {
+			if (checkOnlyEndpointFailed(cx, locationInfo.locations->get(i, member).getEndpoint())) {
 				onlyEndpointFailedAndNeedRefresh = true;
 			}
 		}
 
 		if (onlyEndpointFailedAndNeedRefresh) {
-			cx->invalidateCache(range.begin);
+			cx->invalidateCache(locationInfo.tenantEntry.prefix, locationInfo.range.begin);
 			foundFailed = true;
 		}
 	}
 
 	if (foundFailed) {
 		// Refresh the cache with a new getKeyRangeLocations made to proxies.
-		return getKeyRangeLocations_internal(cx, keys, limit, reverse, spanID, debugID, useProvisionalProxies);
+		return getKeyRangeLocations_internal(
+		    cx, tenant, keys, limit, reverse, spanID, debugID, useProvisionalProxies, version);
 	}
 
 	return locations;
 }
 
 template <class F>
-Future<std::vector<std::pair<KeyRange, Reference<LocationInfo>>>> getKeyRangeLocations(
-    Reference<TransactionState> trState,
-    KeyRange const& keys,
-    int limit,
-    Reverse reverse,
-    F StorageServerInterface::*member) {
-	return getKeyRangeLocations(
-	    trState->cx, keys, limit, reverse, member, trState->spanID, trState->debugID, trState->useProvisionalProxies);
+Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations(Reference<TransactionState> trState,
+                                                               KeyRange const& keys,
+                                                               int limit,
+                                                               Reverse reverse,
+                                                               F StorageServerInterface::*member,
+                                                               UseTenant useTenant,
+                                                               Version version) {
+	auto f = getKeyRangeLocations(trState->cx,
+	                              useTenant ? trState->tenant() : Optional<TenantName>(),
+	                              keys,
+	                              limit,
+	                              reverse,
+	                              member,
+	                              trState->spanID,
+	                              trState->debugID,
+	                              trState->useProvisionalProxies,
+	                              version);
+
+	if (trState->tenant().present() && useTenant) {
+		return map(f, [trState](const std::vector<KeyRangeLocationInfo>& locationInfo) {
+			ASSERT(!locationInfo.empty());
+			trState->tenantId = locationInfo[0].tenantEntry.id;
+			return locationInfo;
+		});
+	} else {
+		return f;
+	}
 }
 
-ACTOR Future<Void> warmRange_impl(Reference<TransactionState> trState, KeyRange keys) {
+ACTOR Future<Void> warmRange_impl(Reference<TransactionState> trState, KeyRange keys, Future<Version> fVersion) {
 	state int totalRanges = 0;
 	state int totalRequests = 0;
+
+	state Version version = wait(fVersion);
+
 	loop {
-		std::vector<std::pair<KeyRange, Reference<LocationInfo>>> locations =
+		std::vector<KeyRangeLocationInfo> locations =
 		    wait(getKeyRangeLocations_internal(trState->cx,
+		                                       trState->tenant(),
 		                                       keys,
 		                                       CLIENT_KNOBS->WARM_RANGE_SHARD_LIMIT,
 		                                       Reverse::False,
 		                                       trState->spanID,
 		                                       trState->debugID,
-		                                       trState->useProvisionalProxies));
+		                                       trState->useProvisionalProxies,
+		                                       version));
 		totalRanges += CLIENT_KNOBS->WARM_RANGE_SHARD_LIMIT;
 		totalRequests++;
 		if (locations.size() == 0 || totalRanges >= trState->cx->locationCacheSize ||
-		    locations[locations.size() - 1].first.end >= keys.end)
+		    locations[locations.size() - 1].range.end >= keys.end)
 			break;
 
-		keys = KeyRangeRef(locations[locations.size() - 1].first.end, keys.end);
+		keys = KeyRangeRef(locations[locations.size() - 1].range.end, keys.end);
 
 		if (totalRequests % 20 == 0) {
 			// To avoid blocking the proxies from starting other transactions, occasionally get a read version.
-			state Transaction tr(trState->cx);
+			state Transaction tr(trState->cx, trState->tenant());
 			loop {
 				try {
 					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -2849,11 +3023,20 @@ SpanID generateSpanID(bool transactionTracingSample, SpanID parentContext = Span
 	}
 }
 
+TransactionState::TransactionState(Database cx,
+                                   Optional<TenantName> tenant,
+                                   TaskPriority taskID,
+                                   SpanID spanID,
+                                   Reference<TransactionLogInfo> trLogInfo)
+  : cx(cx), trLogInfo(trLogInfo), options(cx), taskID(taskID), spanID(spanID), tenant_(tenant),
+    tenantSet(tenant.present()) {}
+
 Reference<TransactionState> TransactionState::cloneAndReset(Reference<TransactionLogInfo> newTrLogInfo,
                                                             bool generateNewSpan) const {
 
 	SpanID newSpanID = generateNewSpan ? generateSpanID(cx->transactionTracingSample) : spanID;
-	Reference<TransactionState> newState = makeReference<TransactionState>(cx, cx->taskID, newSpanID, newTrLogInfo);
+	Reference<TransactionState> newState =
+	    makeReference<TransactionState>(cx, tenant_, cx->taskID, newSpanID, newTrLogInfo);
 
 	if (!cx->apiVersionAtLeast(16)) {
 		newState->options = options;
@@ -2863,26 +3046,66 @@ Reference<TransactionState> TransactionState::cloneAndReset(Reference<Transactio
 	newState->startTime = startTime;
 	newState->committedVersion = committedVersion;
 	newState->conflictingKeys = conflictingKeys;
+	newState->tenantSet = tenantSet;
 
 	return newState;
 }
 
+TenantInfo TransactionState::getTenantInfo() {
+	Optional<TenantName> const& t = tenant();
+
+	if (options.rawAccess) {
+		return TenantInfo();
+	} else if (!cx->internal && cx->clientInfo->get().tenantMode == TenantMode::REQUIRED && !t.present()) {
+		throw tenant_name_required();
+	} else if (!t.present()) {
+		return TenantInfo();
+	} else if (cx->clientInfo->get().tenantMode == TenantMode::DISABLED && t.present()) {
+		throw tenants_disabled();
+	}
+
+	ASSERT(tenantId != TenantInfo::INVALID_TENANT);
+	return TenantInfo(t.get(), tenantId);
+}
+
+Optional<TenantName> const& TransactionState::tenant() {
+	if (tenantSet) {
+		return tenant_;
+	} else {
+		if (!tenant_.present() && !options.rawAccess) {
+			tenant_ = cx->defaultTenant;
+		}
+		tenantSet = true;
+		return tenant_;
+	}
+}
+
+bool TransactionState::hasTenant() const {
+	return tenantSet && tenant_.present();
+}
+
 Future<Void> Transaction::warmRange(KeyRange keys) {
-	return warmRange_impl(trState, keys);
+	return warmRange_impl(trState, keys, getReadVersion());
 }
 
 ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
                                        Key key,
                                        Future<Version> version,
-                                       TransactionRecordLogInfo recordLogInfo = TransactionRecordLogInfo::True) {
+                                       UseTenant useTenant,
+                                       TransactionRecordLogInfo recordLogInfo) {
 	state Version ver = wait(version);
 	state Span span("NAPI:getValue"_loc, trState->spanID);
+	if (useTenant && trState->tenant().present()) {
+		span.addTag("tenant"_sr, trState->tenant().get());
+	}
+
 	span.addTag("key"_sr, key);
 	trState->cx->validateVersion(ver);
 
 	loop {
-		state std::pair<KeyRange, Reference<LocationInfo>> ssi =
-		    wait(getKeyLocation(trState, key, &StorageServerInterface::getValue));
+		state KeyRangeLocationInfo locationInfo =
+		    wait(getKeyLocation(trState, key, &StorageServerInterface::getValue, Reverse::False, useTenant, ver));
+
 		state Optional<UID> getValueID = Optional<UID>();
 		state uint64_t startTime;
 		state double startTimeD;
@@ -2915,10 +3138,10 @@ ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
 					when(wait(trState->cx->connectionFileChanged())) { throw transaction_too_old(); }
 					when(GetValueReply _reply = wait(loadBalance(
 					         trState->cx.getPtr(),
-					         ssi.second,
+					         locationInfo.locations,
 					         &StorageServerInterface::getValue,
 					         GetValueRequest(span.context,
-					                         TenantInfo(),
+					                         useTenant ? trState->getTenantInfo() : TenantInfo(),
 					                         key,
 					                         ver,
 					                         trState->cx->sampleReadTags() ? trState->options.readTags
@@ -2941,7 +3164,7 @@ ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
 			if (trState->trLogInfo && recordLogInfo) {
 				int valueSize = reply.value.present() ? reply.value.get().size() : 0;
 				trState->trLogInfo->addLog(FdbClientLogEvents::EventGet(
-				    startTimeD, trState->cx->clientLocality.dcId(), latency, valueSize, key));
+				    startTimeD, trState->cx->clientLocality.dcId(), latency, valueSize, key, trState->tenant()));
 			}
 			trState->cx->getValueCompleted->latency = timer_int() - startTime;
 			trState->cx->getValueCompleted->log();
@@ -2973,19 +3196,29 @@ ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
 			}
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
 			    (e.code() == error_code_transaction_too_old && ver == latestVersion)) {
-				trState->cx->invalidateCache(key);
+				trState->cx->invalidateCache(locationInfo.tenantEntry.prefix, key);
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, trState->taskID));
+			} else if (e.code() == error_code_unknown_tenant) {
+				ASSERT(useTenant && trState->tenant().present());
+				trState->cx->invalidateCachedTenant(trState->tenant().get());
+				wait(delay(CLIENT_KNOBS->UNKNOWN_TENANT_RETRY_DELAY, trState->taskID));
 			} else {
 				if (trState->trLogInfo && recordLogInfo)
-					trState->trLogInfo->addLog(FdbClientLogEvents::EventGetError(
-					    startTimeD, trState->cx->clientLocality.dcId(), static_cast<int>(e.code()), key));
+					trState->trLogInfo->addLog(FdbClientLogEvents::EventGetError(startTimeD,
+					                                                             trState->cx->clientLocality.dcId(),
+					                                                             static_cast<int>(e.code()),
+					                                                             key,
+					                                                             trState->tenant()));
 				throw e;
 			}
 		}
 	}
 }
 
-ACTOR Future<Key> getKey(Reference<TransactionState> trState, KeySelector k, Future<Version> version) {
+ACTOR Future<Key> getKey(Reference<TransactionState> trState,
+                         KeySelector k,
+                         Future<Version> version,
+                         UseTenant useTenant = UseTenant::True) {
 	wait(success(version));
 
 	state Optional<UID> getKeyID = Optional<UID>();
@@ -3003,16 +3236,21 @@ ACTOR Future<Key> getKey(Reference<TransactionState> trState, KeySelector k, Fut
 
 	loop {
 		if (k.getKey() == allKeys.end) {
-			if (k.offset > 0)
+			if (k.offset > 0) {
 				return allKeys.end;
+			}
 			k.orEqual = false;
 		} else if (k.getKey() == allKeys.begin && k.offset <= 0) {
 			return Key();
 		}
 
 		Key locationKey(k.getKey(), k.arena());
-		state std::pair<KeyRange, Reference<LocationInfo>> ssi =
-		    wait(getKeyLocation(trState, locationKey, &StorageServerInterface::getKey, Reverse{ k.isBackward() }));
+		state KeyRangeLocationInfo locationInfo = wait(getKeyLocation(trState,
+		                                                              locationKey,
+		                                                              &StorageServerInterface::getKey,
+		                                                              Reverse{ k.isBackward() },
+		                                                              useTenant,
+		                                                              version.get()));
 
 		try {
 			if (getKeyID.present())
@@ -3024,7 +3262,7 @@ ACTOR Future<Key> getKey(Reference<TransactionState> trState, KeySelector k, Fut
 			++trState->cx->transactionPhysicalReads;
 
 			GetKeyRequest req(span.context,
-			                  TenantInfo(),
+			                  useTenant ? trState->getTenantInfo() : TenantInfo(),
 			                  k,
 			                  version.get(),
 			                  trState->cx->sampleReadTags() ? trState->options.readTags : Optional<TagSet>(),
@@ -3037,7 +3275,7 @@ ACTOR Future<Key> getKey(Reference<TransactionState> trState, KeySelector k, Fut
 					when(wait(trState->cx->connectionFileChanged())) { throw transaction_too_old(); }
 					when(GetKeyReply _reply = wait(loadBalance(
 					         trState->cx.getPtr(),
-					         ssi.second,
+					         locationInfo.locations,
 					         &StorageServerInterface::getKey,
 					         req,
 					         TaskPriority::DefaultPromiseEndpoint,
@@ -3064,9 +3302,13 @@ ACTOR Future<Key> getKey(Reference<TransactionState> trState, KeySelector k, Fut
 			if (getKeyID.present())
 				g_traceBatch.addEvent("GetKeyDebug", getKeyID.get().first(), "NativeAPI.getKey.Error");
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
-				trState->cx->invalidateCache(k.getKey(), Reverse{ k.isBackward() });
+				trState->cx->invalidateCache(locationInfo.tenantEntry.prefix, k.getKey(), Reverse{ k.isBackward() });
 
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, trState->taskID));
+			} else if (e.code() == error_code_unknown_tenant) {
+				ASSERT(useTenant && trState->tenant().present());
+				trState->cx->invalidateCachedTenant(trState->tenant().get());
+				wait(delay(CLIENT_KNOBS->UNKNOWN_TENANT_RETRY_DELAY, trState->taskID));
 			} else {
 				TraceEvent(SevInfo, "GetKeyError").error(e).detail("AtKey", k.getKey()).detail("Offset", k.offset);
 				throw e;
@@ -3131,13 +3373,15 @@ ACTOR Future<Version> watchValue(Database cx, Reference<const WatchParameters> p
 	ASSERT(parameters->version != latestVersion);
 
 	loop {
-		state std::pair<KeyRange, Reference<LocationInfo>> ssi =
-		    wait(getKeyLocation(cx,
-		                        parameters->key,
-		                        &StorageServerInterface::watchValue,
-		                        parameters->spanID,
-		                        parameters->debugID,
-		                        parameters->useProvisionalProxies));
+		state KeyRangeLocationInfo locationInfo = wait(getKeyLocation(cx,
+		                                                              parameters->tenant.name,
+		                                                              parameters->key,
+		                                                              &StorageServerInterface::watchValue,
+		                                                              parameters->spanID,
+		                                                              parameters->debugID,
+		                                                              parameters->useProvisionalProxies,
+		                                                              Reverse::False,
+		                                                              parameters->version));
 
 		try {
 			state Optional<UID> watchValueID = Optional<UID>();
@@ -3154,10 +3398,10 @@ ACTOR Future<Version> watchValue(Database cx, Reference<const WatchParameters> p
 			choose {
 				when(WatchValueReply r = wait(
 				         loadBalance(cx.getPtr(),
-				                     ssi.second,
+				                     locationInfo.locations,
 				                     &StorageServerInterface::watchValue,
 				                     WatchValueRequest(span.context,
-				                                       TenantInfo(),
+				                                       parameters->tenant,
 				                                       parameters->key,
 				                                       parameters->value,
 				                                       ver,
@@ -3185,8 +3429,12 @@ ACTOR Future<Version> watchValue(Database cx, Reference<const WatchParameters> p
 			ver = v;
 		} catch (Error& e) {
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
-				cx->invalidateCache(parameters->key);
+				cx->invalidateCache(locationInfo.tenantEntry.prefix, parameters->key);
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, parameters->taskID));
+			} else if (e.code() == error_code_unknown_tenant) {
+				ASSERT(parameters->tenant.name.present());
+				cx->invalidateCachedTenant(parameters->tenant.name.get());
+				wait(delay(CLIENT_KNOBS->UNKNOWN_TENANT_RETRY_DELAY, parameters->taskID));
 			} else if (e.code() == error_code_watch_cancelled || e.code() == error_code_process_behind) {
 				// clang-format off
 				TEST(e.code() == error_code_watch_cancelled); // Too many watches on the storage server, poll for changes instead
@@ -3206,22 +3454,22 @@ ACTOR Future<Version> watchValue(Database cx, Reference<const WatchParameters> p
 	}
 }
 
-ACTOR Future<Void> watchStorageServerResp(Key key, Database cx) {
+ACTOR Future<Void> watchStorageServerResp(int64_t tenantId, Key key, Database cx) {
 	loop {
 		try {
-			state Reference<WatchMetadata> metadata = cx->getWatchMetadata(key);
+			state Reference<WatchMetadata> metadata = cx->getWatchMetadata(tenantId, key);
 			if (!metadata.isValid())
 				return Void();
 
 			Version watchVersion = wait(watchValue(cx, metadata->parameters));
 
-			metadata = cx->getWatchMetadata(key);
+			metadata = cx->getWatchMetadata(tenantId, key);
 			if (!metadata.isValid())
 				return Void();
 
 			// case 1: version_1 (SS) >= version_2 (map)
 			if (watchVersion >= metadata->parameters->version) {
-				cx->deleteWatchMetadata(key);
+				cx->deleteWatchMetadata(tenantId, key);
 				if (metadata->watchPromise.canBeSet())
 					metadata->watchPromise.send(watchVersion);
 			}
@@ -3231,7 +3479,7 @@ ACTOR Future<Void> watchStorageServerResp(Key key, Database cx) {
 
 				// case 2: version_1 < version_2 and future_count == 1
 				if (metadata->watchPromise.getFutureReferenceCount() == 1) {
-					cx->deleteWatchMetadata(key);
+					cx->deleteWatchMetadata(tenantId, key);
 				}
 			}
 		} catch (Error& e) {
@@ -3239,16 +3487,16 @@ ACTOR Future<Void> watchStorageServerResp(Key key, Database cx) {
 				throw e;
 			}
 
-			Reference<WatchMetadata> metadata = cx->getWatchMetadata(key);
+			Reference<WatchMetadata> metadata = cx->getWatchMetadata(tenantId, key);
 			if (!metadata.isValid()) {
 				return Void();
 			} else if (metadata->watchPromise.getFutureReferenceCount() == 1) {
-				cx->deleteWatchMetadata(key);
+				cx->deleteWatchMetadata(tenantId, key);
 				return Void();
 			} else if (e.code() == error_code_future_version) {
 				continue;
 			}
-			cx->deleteWatchMetadata(key);
+			cx->deleteWatchMetadata(tenantId, key);
 			metadata->watchPromise.sendError(e);
 			throw e;
 		}
@@ -3256,27 +3504,30 @@ ACTOR Future<Void> watchStorageServerResp(Key key, Database cx) {
 }
 
 ACTOR Future<Void> sameVersionDiffValue(Database cx, Reference<WatchParameters> parameters) {
-	state ReadYourWritesTransaction tr(cx);
+	state ReadYourWritesTransaction tr(cx, parameters->tenant.name);
 	loop {
 		try {
-			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			state Optional<Value> valSS = wait(tr.get(parameters->key));
-			Reference<WatchMetadata> metadata = cx->getWatchMetadata(parameters->key.contents());
+			if (!parameters->tenant.name.present()) {
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			}
 
-			// val_3 != val_1 (storage server value doesnt match value in map)
+			state Optional<Value> valSS = wait(tr.get(parameters->key));
+			Reference<WatchMetadata> metadata = cx->getWatchMetadata(parameters->tenant.tenantId, parameters->key);
+
+			// val_3 != val_1 (storage server value doesn't match value in map)
 			if (metadata.isValid() && valSS != metadata->parameters->value) {
-				cx->deleteWatchMetadata(parameters->key.contents());
+				cx->deleteWatchMetadata(parameters->tenant.tenantId, parameters->key);
 
 				metadata->watchPromise.send(parameters->version);
 				metadata->watchFutureSS.cancel();
 			}
 
 			// val_3 == val_2 (storage server value matches value passed into the function -> new watch)
-			if (valSS == parameters->value) {
+			if (valSS == parameters->value && tr.getTransactionState()->tenantId == parameters->tenant.tenantId) {
 				metadata = makeReference<WatchMetadata>(parameters);
-				Key key = cx->setWatchMetadata(metadata);
+				cx->setWatchMetadata(metadata);
 
-				metadata->watchFutureSS = watchStorageServerResp(key, cx);
+				metadata->watchFutureSS = watchStorageServerResp(parameters->tenant.tenantId, parameters->key, cx);
 			}
 
 			// if val_3 != val_2
@@ -3294,14 +3545,14 @@ ACTOR Future<Void> sameVersionDiffValue(Database cx, Reference<WatchParameters> 
 }
 
 Future<Void> getWatchFuture(Database cx, Reference<WatchParameters> parameters) {
-	Reference<WatchMetadata> metadata = cx->getWatchMetadata(parameters->key.contents());
+	Reference<WatchMetadata> metadata = cx->getWatchMetadata(parameters->tenant.tenantId, parameters->key);
 
 	// case 1: key not in map
 	if (!metadata.isValid()) {
 		metadata = makeReference<WatchMetadata>(parameters);
-		Key key = cx->setWatchMetadata(metadata);
+		cx->setWatchMetadata(metadata);
 
-		metadata->watchFutureSS = watchStorageServerResp(key, cx);
+		metadata->watchFutureSS = watchStorageServerResp(parameters->tenant.tenantId, parameters->key, cx);
 		return success(metadata->watchPromise.getFuture());
 	}
 	// case 2: val_1 == val_2 (received watch with same value as key already in the map so just update)
@@ -3316,15 +3567,15 @@ Future<Void> getWatchFuture(Database cx, Reference<WatchParameters> parameters) 
 	// recreate in SS)
 	else if (parameters->version > metadata->parameters->version) {
 		TEST(true); // Setting a watch that has a different value than the one in the map but a higher version (newer)
-		cx->deleteWatchMetadata(parameters->key);
+		cx->deleteWatchMetadata(parameters->tenant.tenantId, parameters->key);
 
 		metadata->watchPromise.send(parameters->version);
 		metadata->watchFutureSS.cancel();
 
 		metadata = makeReference<WatchMetadata>(parameters);
-		Key key = cx->setWatchMetadata(metadata);
+		cx->setWatchMetadata(metadata);
 
-		metadata->watchFutureSS = watchStorageServerResp(key, cx);
+		metadata->watchFutureSS = watchStorageServerResp(parameters->tenant.tenantId, parameters->key, cx);
 
 		return success(metadata->watchPromise.getFuture());
 	}
@@ -3340,6 +3591,7 @@ Future<Void> getWatchFuture(Database cx, Reference<WatchParameters> parameters) 
 }
 
 ACTOR Future<Void> watchValueMap(Future<Version> version,
+                                 TenantInfo tenant,
                                  Key key,
                                  Optional<Value> value,
                                  Database cx,
@@ -3349,8 +3601,11 @@ ACTOR Future<Void> watchValueMap(Future<Version> version,
                                  Optional<UID> debugID,
                                  UseProvisionalProxies useProvisionalProxies) {
 	state Version ver = wait(version);
+
 	wait(getWatchFuture(
-	    cx, makeReference<WatchParameters>(key, value, ver, tags, spanID, taskID, debugID, useProvisionalProxies)));
+	    cx,
+	    makeReference<WatchParameters>(tenant, key, value, ver, tags, spanID, taskID, debugID, useProvisionalProxies)));
+
 	return Void();
 }
 
@@ -3392,34 +3647,42 @@ Future<RangeResultFamily> getExactRange(Reference<TransactionState> trState,
                                         KeyRange keys,
                                         Key mapper,
                                         GetRangeLimits limits,
-                                        Reverse reverse) {
+                                        Reverse reverse,
+                                        UseTenant useTenant) {
 	state RangeResultFamily output;
 	state Span span("NAPI:getExactRange"_loc, trState->spanID);
 
+	if (useTenant && trState->tenant().present()) {
+		span.addTag("tenant"_sr, trState->tenant().get());
+	}
+
 	// printf("getExactRange( '%s', '%s' )\n", keys.begin.toString().c_str(), keys.end.toString().c_str());
 	loop {
-		state std::vector<std::pair<KeyRange, Reference<LocationInfo>>> locations =
+		state std::vector<KeyRangeLocationInfo> locations =
 		    wait(getKeyRangeLocations(trState,
 		                              keys,
 		                              CLIENT_KNOBS->GET_RANGE_SHARD_LIMIT,
 		                              reverse,
-		                              getRangeRequestStream<GetKeyValuesFamilyRequest>()));
+		                              getRangeRequestStream<GetKeyValuesFamilyRequest>(),
+		                              useTenant,
+		                              version));
 		ASSERT(locations.size());
 		state int shard = 0;
 		loop {
-			const KeyRangeRef& range = locations[shard].first;
+			const KeyRangeRef& range = locations[shard].range;
 
 			GetKeyValuesFamilyRequest req;
 			req.mapper = mapper;
 			req.arena.dependsOn(mapper.arena());
 
+			req.tenantInfo = useTenant ? trState->getTenantInfo() : TenantInfo();
 			req.version = version;
 			req.begin = firstGreaterOrEqual(range.begin);
 			req.end = firstGreaterOrEqual(range.end);
 			req.spanContext = span.context;
 
 			// keep shard's arena around in case of async tss comparison
-			req.arena.dependsOn(locations[shard].first.arena());
+			req.arena.dependsOn(locations[shard].range.arena());
 
 			transformRangeLimits(limits, reverse, req);
 			ASSERT(req.limitBytes > 0 && req.limit != 0 && req.limit < 0 == reverse);
@@ -3448,7 +3711,7 @@ Future<RangeResultFamily> getExactRange(Reference<TransactionState> trState,
 						when(wait(trState->cx->connectionFileChanged())) { throw transaction_too_old(); }
 						when(GetKeyValuesFamilyReply _rep = wait(loadBalance(
 						         trState->cx.getPtr(),
-						         locations[shard].second,
+						         locations[shard].locations,
 						         getRangeRequestStream<GetKeyValuesFamilyRequest>(),
 						         req,
 						         TaskPriority::DefaultPromiseEndpoint,
@@ -3484,7 +3747,7 @@ Future<RangeResultFamily> getExactRange(Reference<TransactionState> trState,
 				bool more = rep.more;
 				// If the reply says there is more but we know that we finished the shard, then fix rep.more
 				if (reverse && more && rep.data.size() > 0 &&
-				    output[output.size() - 1].key == locations[shard].first.begin)
+				    output[output.size() - 1].key == locations[shard].range.begin)
 					more = false;
 
 				if (more) {
@@ -3502,17 +3765,17 @@ Future<RangeResultFamily> getExactRange(Reference<TransactionState> trState,
 					TEST(true); // GetKeyValuesFamilyReply.more in getExactRange
 					// Make next request to the same shard with a beginning key just after the last key returned
 					if (reverse)
-						locations[shard].first =
-						    KeyRangeRef(locations[shard].first.begin, output[output.size() - 1].key);
+						locations[shard].range =
+						    KeyRangeRef(locations[shard].range.begin, output[output.size() - 1].key);
 					else
-						locations[shard].first =
-						    KeyRangeRef(keyAfter(output[output.size() - 1].key), locations[shard].first.end);
+						locations[shard].range =
+						    KeyRangeRef(keyAfter(output[output.size() - 1].key), locations[shard].range.end);
 				}
 
-				if (!more || locations[shard].first.empty()) {
+				if (!more || locations[shard].range.empty()) {
 					TEST(true); // getExactrange (!more || locations[shard].first.empty())
 					if (shard == locations.size() - 1) {
-						const KeyRangeRef& range = locations[shard].first;
+						const KeyRangeRef& range = locations[shard].range;
 						KeyRef begin = reverse ? keys.begin : range.end;
 						KeyRef end = reverse ? range.begin : keys.end;
 
@@ -3539,21 +3802,28 @@ Future<RangeResultFamily> getExactRange(Reference<TransactionState> trState,
 
 			} catch (Error& e) {
 				if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
-					const KeyRangeRef& range = locations[shard].first;
+					const KeyRangeRef& range = locations[shard].range;
 
 					if (reverse)
 						keys = KeyRangeRef(keys.begin, range.end);
 					else
 						keys = KeyRangeRef(range.begin, keys.end);
 
-					trState->cx->invalidateCache(keys);
+					trState->cx->invalidateCache(locations[0].tenantEntry.prefix, keys);
+
 					wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, trState->taskID));
+					break;
+				} else if (e.code() == error_code_unknown_tenant) {
+					ASSERT(useTenant && trState->tenant().present());
+					trState->cx->invalidateCachedTenant(trState->tenant().get());
+					wait(delay(CLIENT_KNOBS->UNKNOWN_TENANT_RETRY_DELAY, trState->taskID));
 					break;
 				} else {
 					TraceEvent(SevInfo, "GetExactRangeError")
 					    .error(e)
-					    .detail("ShardBegin", locations[shard].first.begin)
-					    .detail("ShardEnd", locations[shard].first.end);
+					    .detail("Tenant", trState->tenant())
+					    .detail("ShardBegin", locations[shard].range.begin)
+					    .detail("ShardEnd", locations[shard].range.end);
 					throw;
 				}
 			}
@@ -3561,14 +3831,17 @@ Future<RangeResultFamily> getExactRange(Reference<TransactionState> trState,
 	}
 }
 
-Future<Key> resolveKey(Reference<TransactionState> trState, KeySelector const& key, Version const& version) {
+Future<Key> resolveKey(Reference<TransactionState> trState,
+                       KeySelector const& key,
+                       Version const& version,
+                       UseTenant useTenant) {
 	if (key.isFirstGreaterOrEqual())
 		return Future<Key>(key.getKey());
 
 	if (key.isFirstGreaterThan())
 		return Future<Key>(keyAfter(key.getKey()));
 
-	return getKey(trState, key, version);
+	return getKey(trState, key, version, useTenant);
 }
 
 ACTOR template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply, class RangeResultFamily>
@@ -3578,7 +3851,8 @@ Future<RangeResultFamily> getRangeFallback(Reference<TransactionState> trState,
                                            KeySelector end,
                                            Key mapper,
                                            GetRangeLimits limits,
-                                           Reverse reverse) {
+                                           Reverse reverse,
+                                           UseTenant useTenant) {
 	if (version == latestVersion) {
 		state Transaction transaction(trState->cx);
 		transaction.setOption(FDBTransactionOptions::CAUSAL_READ_RISKY);
@@ -3588,8 +3862,8 @@ Future<RangeResultFamily> getRangeFallback(Reference<TransactionState> trState,
 		version = ver;
 	}
 
-	Future<Key> fb = resolveKey(trState, begin, version);
-	state Future<Key> fe = resolveKey(trState, end, version);
+	Future<Key> fb = resolveKey(trState, begin, version, useTenant);
+	state Future<Key> fe = resolveKey(trState, end, version, useTenant);
 
 	state Key b = wait(fb);
 	state Key e = wait(fe);
@@ -3597,16 +3871,22 @@ Future<RangeResultFamily> getRangeFallback(Reference<TransactionState> trState,
 		return RangeResultFamily();
 	}
 
-	// if e is allKeys.end, we have read through the end of the database
-	// if b is allKeys.begin, we have either read through the beginning of the database,
-	// or allKeys.begin exists in the database and will be part of the conflict range anyways
+	// if e is allKeys.end, we have read through the end of the database/tenant
+	// if b is allKeys.begin, we have either read through the beginning of the database/tenant,
+	// or allKeys.begin exists in the database/tenant and will be part of the conflict range anyways
 
 	RangeResultFamily _r = wait(getExactRange<GetKeyValuesFamilyRequest, GetKeyValuesFamilyReply, RangeResultFamily>(
-	    trState, version, KeyRangeRef(b, e), mapper, limits, reverse));
+	    trState, version, KeyRangeRef(b, e), mapper, limits, reverse, useTenant));
 	RangeResultFamily r = _r;
 
 	if (b == allKeys.begin && ((reverse && !r.more) || !reverse))
 		r.readToBegin = true;
+
+	// TODO: this currently causes us to have a conflict range that is too large if our end key resolves to the
+	// key after the last key in the database. In that case, we don't need a conflict between the last key and
+	// the end of the database.
+	//
+	// If fixed, the ConflictRange test can be updated to stop checking for this condition.
 	if (e == allKeys.end && ((!reverse && !r.more) || reverse))
 		r.readThroughEnd = true;
 
@@ -3651,7 +3931,7 @@ int64_t inline getRangeResultFamilyBytes(MappedRangeResultRef result) {
 }
 
 // TODO: Client should add mapped keys to conflict ranges.
-ACTOR template <class RangeResultFamily> // RangeResult or MappedRangeResult
+template <class RangeResultFamily> // RangeResult or MappedRangeResult
 void getRangeFinished(Reference<TransactionState> trState,
                       double startTime,
                       KeySelector begin,
@@ -3666,8 +3946,13 @@ void getRangeFinished(Reference<TransactionState> trState,
 	trState->cx->transactionKeysRead += result.size();
 
 	if (trState->trLogInfo) {
-		trState->trLogInfo->addLog(FdbClientLogEvents::EventGetRange(
-		    startTime, trState->cx->clientLocality.dcId(), now() - startTime, bytes, begin.getKey(), end.getKey()));
+		trState->trLogInfo->addLog(FdbClientLogEvents::EventGetRange(startTime,
+		                                                             trState->cx->clientLocality.dcId(),
+		                                                             now() - startTime,
+		                                                             bytes,
+		                                                             begin.getKey(),
+		                                                             end.getKey(),
+		                                                             trState->tenant()));
 	}
 
 	if (!snapshot) {
@@ -3716,13 +4001,17 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
                                    GetRangeLimits limits,
                                    Promise<std::pair<Key, Key>> conflictRange,
                                    Snapshot snapshot,
-                                   Reverse reverse) {
+                                   Reverse reverse,
+                                   UseTenant useTenant = UseTenant::True) {
 	//	state using RangeResultRefFamily = typename RangeResultFamily::RefType;
 	state GetRangeLimits originalLimits(limits);
 	state KeySelector originalBegin = begin;
 	state KeySelector originalEnd = end;
 	state RangeResultFamily output;
 	state Span span("NAPI:getRange"_loc, trState->spanID);
+	if (useTenant && trState->tenant().present()) {
+		span.addTag("tenant"_sr, trState->tenant().get());
+	}
 
 	try {
 		state Version version = wait(fVersion);
@@ -3751,14 +4040,20 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 
 			Key locationKey = reverse ? Key(end.getKey(), end.arena()) : Key(begin.getKey(), begin.arena());
 			Reverse locationBackward{ reverse ? (end - 1).isBackward() : begin.isBackward() };
-			state std::pair<KeyRange, Reference<LocationInfo>> beginServer = wait(getKeyLocation(
-			    trState, locationKey, getRangeRequestStream<GetKeyValuesFamilyRequest>(), locationBackward));
-			state KeyRange shard = beginServer.first;
+			state KeyRangeLocationInfo beginServer =
+			    wait(getKeyLocation(trState,
+			                        locationKey,
+			                        getRangeRequestStream<GetKeyValuesFamilyRequest>(),
+			                        locationBackward,
+			                        useTenant,
+			                        version));
+			state KeyRange shard = beginServer.range;
 			state bool modifiedSelectors = false;
 			state GetKeyValuesFamilyRequest req;
 			req.mapper = mapper;
 			req.arena.dependsOn(mapper.arena());
 
+			req.tenantInfo = useTenant ? trState->getTenantInfo() : TenantInfo();
 			req.isFetchKeys = (trState->taskID == TaskPriority::FetchKeys);
 			req.version = readVersion;
 
@@ -3826,7 +4121,7 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 					// state AnnotateActor annotation(currentLineage);
 					GetKeyValuesFamilyReply _rep =
 					    wait(loadBalance(trState->cx.getPtr(),
-					                     beginServer.second,
+					                     beginServer.locations,
 					                     getRangeRequestStream<GetKeyValuesFamilyRequest>(),
 					                     req,
 					                     TaskPriority::DefaultPromiseEndpoint,
@@ -3926,7 +4221,14 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 					if (!rep.data.size()) {
 						RangeResultFamily result = wait(
 						    getRangeFallback<GetKeyValuesFamilyRequest, GetKeyValuesFamilyReply, RangeResultFamily>(
-						        trState, version, originalBegin, originalEnd, mapper, originalLimits, reverse));
+						        trState,
+						        version,
+						        originalBegin,
+						        originalEnd,
+						        mapper,
+						        originalLimits,
+						        reverse,
+						        useTenant));
 						getRangeFinished(
 						    trState, startTime, originalBegin, originalEnd, snapshot, conflictRange, reverse, result);
 						return result;
@@ -3952,19 +4254,31 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 				}
 				if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
 				    (e.code() == error_code_transaction_too_old && readVersion == latestVersion)) {
-					trState->cx->invalidateCache(reverse ? end.getKey() : begin.getKey(),
+					trState->cx->invalidateCache(beginServer.tenantEntry.prefix,
+					                             reverse ? end.getKey() : begin.getKey(),
 					                             Reverse{ reverse ? (end - 1).isBackward() : begin.isBackward() });
 
 					if (e.code() == error_code_wrong_shard_server) {
 						RangeResultFamily result = wait(
 						    getRangeFallback<GetKeyValuesFamilyRequest, GetKeyValuesFamilyReply, RangeResultFamily>(
-						        trState, version, originalBegin, originalEnd, mapper, originalLimits, reverse));
+						        trState,
+						        version,
+						        originalBegin,
+						        originalEnd,
+						        mapper,
+						        originalLimits,
+						        reverse,
+						        useTenant));
 						getRangeFinished(
 						    trState, startTime, originalBegin, originalEnd, snapshot, conflictRange, reverse, result);
 						return result;
 					}
 
 					wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, trState->taskID));
+				} else if (e.code() == error_code_unknown_tenant) {
+					ASSERT(useTenant && trState->tenant().present());
+					trState->cx->invalidateCachedTenant(trState->tenant().get());
+					wait(delay(CLIENT_KNOBS->UNKNOWN_TENANT_RETRY_DELAY, trState->taskID));
 				} else {
 					if (trState->trLogInfo)
 						trState->trLogInfo->addLog(
@@ -3972,7 +4286,8 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 						                                           trState->cx->clientLocality.dcId(),
 						                                           static_cast<int>(e.code()),
 						                                           begin.getKey(),
-						                                           end.getKey()));
+						                                           end.getKey(),
+						                                           trState->tenant()));
 
 					throw e;
 				}
@@ -4165,15 +4480,22 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
                                           Reverse reverse,
                                           SpanID spanContext) {
 	loop {
-		state std::vector<std::pair<KeyRange, Reference<LocationInfo>>> locations = wait(getKeyRangeLocations(
-		    trState, keys, CLIENT_KNOBS->GET_RANGE_SHARD_LIMIT, reverse, &StorageServerInterface::getKeyValuesStream));
+		state std::vector<KeyRangeLocationInfo> locations =
+		    wait(getKeyRangeLocations(trState,
+		                              keys,
+		                              CLIENT_KNOBS->GET_RANGE_SHARD_LIMIT,
+		                              reverse,
+		                              &StorageServerInterface::getKeyValuesStream,
+		                              UseTenant::True,
+		                              version));
 		ASSERT(locations.size());
 		state int shard = 0;
 		loop {
-			const KeyRange& range = locations[shard].first;
+			const KeyRange& range = locations[shard].range;
 
 			state Optional<TSSDuplicateStreamData<GetKeyValuesStreamReply>> tssDuplicateStream;
 			state GetKeyValuesStreamRequest req;
+			req.tenantInfo = trState->getTenantInfo();
 			req.version = version;
 			req.begin = firstGreaterOrEqual(range.begin);
 			req.end = firstGreaterOrEqual(range.end);
@@ -4198,7 +4520,7 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
 				++trState->cx->transactionPhysicalReads;
 				state GetKeyValuesStreamReply rep;
 
-				if (locations[shard].second->size() == 0) {
+				if (locations[shard].locations->size() == 0) {
 					wait(trState->cx->connectionFileChanged());
 					results->sendError(transaction_too_old());
 					return Void();
@@ -4210,10 +4532,10 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
 					// FIXME: create a load balance function for this code so future users of reply streams do not have
 					// to duplicate this code
 					int count = 0;
-					for (int i = 0; i < locations[shard].second->size(); i++) {
+					for (int i = 0; i < locations[shard].locations->size(); i++) {
 						if (!IFailureMonitor::failureMonitor()
 						         .getState(locations[shard]
-						                       .second->get(i, &StorageServerInterface::getKeyValuesStream)
+						                       .locations->get(i, &StorageServerInterface::getKeyValuesStream)
 						                       .getEndpoint())
 						         .failed) {
 							if (deterministicRandom()->random01() <= 1.0 / ++count) {
@@ -4226,10 +4548,12 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
 						break;
 					}
 
-					std::vector<Future<Void>> ok(locations[shard].second->size());
+					std::vector<Future<Void>> ok(locations[shard].locations->size());
 					for (int i = 0; i < ok.size(); i++) {
 						ok[i] = IFailureMonitor::failureMonitor().onStateEqual(
-						    locations[shard].second->get(i, &StorageServerInterface::getKeyValuesStream).getEndpoint(),
+						    locations[shard]
+						        .locations->get(i, &StorageServerInterface::getKeyValuesStream)
+						        .getEndpoint(),
 						    FailureStatus(false));
 					}
 
@@ -4237,7 +4561,7 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
 					if (now() - g_network->networkInfo.newestAlternativesFailure > 1 ||
 					    deterministicRandom()->random01() < 0.01) {
 						TraceEvent("AllAlternativesFailed")
-						    .detail("Alternatives", locations[shard].second->description());
+						    .detail("Alternatives", locations[shard].locations->description());
 					}
 
 					wait(allAlternativesFailedDelay(quorum(ok, 1)));
@@ -4245,13 +4569,13 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
 
 				state ReplyPromiseStream<GetKeyValuesStreamReply> replyStream =
 				    locations[shard]
-				        .second->get(useIdx, &StorageServerInterface::getKeyValuesStream)
+				        .locations->get(useIdx, &StorageServerInterface::getKeyValuesStream)
 				        .getReplyStream(req);
 
 				tssDuplicateStream = maybeDuplicateTSSStreamFragment(
 				    req,
 				    trState->cx->enableLocalityLoadBalance ? &trState->cx->queueModel : nullptr,
-				    &locations[shard].second->get(useIdx, &StorageServerInterface::getKeyValuesStream));
+				    &locations[shard].locations->get(useIdx, &StorageServerInterface::getKeyValuesStream));
 
 				state bool breakAgain = false;
 				loop {
@@ -4311,7 +4635,7 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
 
 					// If the reply says there is more but we know that we finished the shard, then fix rep.more
 					if (reverse && output.more && rep.data.size() > 0 &&
-					    output[output.size() - 1].key == locations[shard].first.begin) {
+					    output[output.size() - 1].key == locations[shard].range.begin) {
 						output.more = false;
 					}
 
@@ -4330,19 +4654,19 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
 						TEST(true); // GetKeyValuesStreamReply.more in getRangeStream
 						// Make next request to the same shard with a beginning key just after the last key returned
 						if (reverse)
-							locations[shard].first =
-							    KeyRangeRef(locations[shard].first.begin, output[output.size() - 1].key);
+							locations[shard].range =
+							    KeyRangeRef(locations[shard].range.begin, output[output.size() - 1].key);
 						else
-							locations[shard].first =
-							    KeyRangeRef(keyAfter(output[output.size() - 1].key), locations[shard].first.end);
+							locations[shard].range =
+							    KeyRangeRef(keyAfter(output[output.size() - 1].key), locations[shard].range.end);
 					}
 
-					if (locations[shard].first.empty()) {
+					if (locations[shard].range.empty()) {
 						output.more = false;
 					}
 
 					if (!output.more) {
-						const KeyRange& range = locations[shard].first;
+						const KeyRange& range = locations[shard].range;
 						if (shard == locations.size() - 1) {
 							KeyRef begin = reverse ? keys.begin : range.end;
 							KeyRef end = reverse ? range.begin : keys.end;
@@ -4396,15 +4720,21 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
 				}
 				if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
 				    e.code() == error_code_connection_failed) {
-					const KeyRangeRef& range = locations[shard].first;
+					const KeyRangeRef& range = locations[shard].range;
 
 					if (reverse)
 						keys = KeyRangeRef(keys.begin, range.end);
 					else
 						keys = KeyRangeRef(range.begin, keys.end);
 
-					trState->cx->invalidateCache(keys);
+					trState->cx->invalidateCache(locations[0].tenantEntry.prefix, keys);
+
 					wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, trState->taskID));
+					break;
+				} else if (e.code() == error_code_unknown_tenant) {
+					ASSERT(trState->tenant().present());
+					trState->cx->invalidateCachedTenant(trState->tenant().get());
+					wait(delay(CLIENT_KNOBS->UNKNOWN_TENANT_RETRY_DELAY, trState->taskID));
 					break;
 				} else {
 					results->sendError(e);
@@ -4417,7 +4747,8 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
 
 ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Reference<TransactionState> trState,
                                                                 KeyRange keys,
-                                                                int64_t chunkSize);
+                                                                int64_t chunkSize,
+                                                                Version version);
 
 static KeyRange intersect(KeyRangeRef lhs, KeyRangeRef rhs) {
 	return KeyRange(KeyRangeRef(std::max(lhs.begin, rhs.begin), std::min(lhs.end, rhs.end)));
@@ -4443,8 +4774,8 @@ ACTOR Future<Void> getRangeStream(Reference<TransactionState> trState,
 	state Version version = wait(fVersion);
 	trState->cx->validateVersion(version);
 
-	Future<Key> fb = resolveKey(trState, begin, version);
-	state Future<Key> fe = resolveKey(trState, end, version);
+	Future<Key> fb = resolveKey(trState, begin, version, UseTenant::True);
+	state Future<Key> fe = resolveKey(trState, end, version, UseTenant::True);
 
 	state Key b = wait(fb);
 	state Key e = wait(fe);
@@ -4466,11 +4797,11 @@ ACTOR Future<Void> getRangeStream(Reference<TransactionState> trState,
 
 	state std::vector<Future<Void>> outstandingRequests;
 	while (b < e) {
-		state std::pair<KeyRange, Reference<LocationInfo>> ssi =
-		    wait(getKeyLocation(trState, reverse ? e : b, &StorageServerInterface::getKeyValuesStream, reverse));
-		state KeyRange shardIntersection = intersect(ssi.first, KeyRangeRef(b, e));
+		state KeyRangeLocationInfo locationInfo = wait(getKeyLocation(
+		    trState, reverse ? e : b, &StorageServerInterface::getKeyValuesStream, reverse, UseTenant::True, version));
+		state KeyRange shardIntersection = intersect(locationInfo.range, KeyRangeRef(b, e));
 		state Standalone<VectorRef<KeyRef>> splitPoints =
-		    wait(getRangeSplitPoints(trState, shardIntersection, CLIENT_KNOBS->RANGESTREAM_FRAGMENT_SIZE));
+		    wait(getRangeSplitPoints(trState, shardIntersection, CLIENT_KNOBS->RANGESTREAM_FRAGMENT_SIZE, version));
 		state std::vector<KeyRange> toSend;
 		// state std::vector<Future<std::list<KeyRangeRef>::iterator>> outstandingRequests;
 
@@ -4510,9 +4841,18 @@ Future<RangeResult> getRange(Reference<TransactionState> const& trState,
                              KeySelector const& begin,
                              KeySelector const& end,
                              GetRangeLimits const& limits,
-                             Reverse const& reverse) {
-	return getRange<GetKeyValuesRequest, GetKeyValuesReply, RangeResult>(
-	    trState, fVersion, begin, end, ""_sr, limits, Promise<std::pair<Key, Key>>(), Snapshot::True, reverse);
+                             Reverse const& reverse,
+                             UseTenant const& useTenant) {
+	return getRange<GetKeyValuesRequest, GetKeyValuesReply, RangeResult>(trState,
+	                                                                     fVersion,
+	                                                                     begin,
+	                                                                     end,
+	                                                                     ""_sr,
+	                                                                     limits,
+	                                                                     Promise<std::pair<Key, Key>>(),
+	                                                                     Snapshot::True,
+	                                                                     reverse,
+	                                                                     useTenant);
 }
 
 bool DatabaseContext::debugUseTags = false;
@@ -4546,13 +4886,13 @@ void debugAddTags(Reference<TransactionState> trState) {
 Transaction::Transaction()
   : trState(makeReference<TransactionState>(TaskPriority::DefaultEndpoint, generateSpanID(false))) {}
 
-Transaction::Transaction(Database const& cx)
+Transaction::Transaction(Database const& cx, Optional<TenantName> const& tenant)
   : trState(makeReference<TransactionState>(cx,
+                                            tenant,
                                             cx->taskID,
                                             generateSpanID(cx->transactionTracingSample),
                                             createTrLogInfoProbabilistically(cx))),
-    span(trState->spanID, "Transaction"_loc), backoff(CLIENT_KNOBS->DEFAULT_BACKOFF),
-    tr(TenantInfo(), trState->spanID) {
+    span(trState->spanID, "Transaction"_loc), backoff(CLIENT_KNOBS->DEFAULT_BACKOFF), tr(trState->spanID) {
 	if (DatabaseContext::debugUseTags) {
 		debugAddTags(trState);
 	}
@@ -4612,7 +4952,11 @@ Future<Optional<Value>> Transaction::get(const Key& key, Snapshot snapshot) {
 	if (!snapshot)
 		tr.transaction.read_conflict_ranges.push_back(tr.arena, singleKeyRange(key, tr.arena));
 
+	UseTenant useTenant = UseTenant::True;
 	if (key == metadataVersionKey) {
+		// It is legal to read the metadata version key inside of a tenant.
+		// This will return the global metadata version key.
+		useTenant = UseTenant::False;
 		++trState->cx->transactionMetadataVersionReads;
 		if (!ver.isReady() || metadataVersion.isSet()) {
 			return metadataVersion.getFuture();
@@ -4646,7 +4990,7 @@ Future<Optional<Value>> Transaction::get(const Key& key, Snapshot snapshot) {
 		}
 	}
 
-	return getValue(trState, key, ver);
+	return getValue(trState, key, ver, useTenant);
 }
 
 void Watch::setWatch(Future<Void> watchFuture) {
@@ -4656,9 +5000,26 @@ void Watch::setWatch(Future<Void> watchFuture) {
 	onSetWatchTrigger.send(Void());
 }
 
+ACTOR Future<TenantInfo> getTenantMetadata(Reference<TransactionState> trState, Key key, Version version) {
+	KeyRangeLocationInfo locationInfo =
+	    wait(getKeyLocation(trState, key, &StorageServerInterface::getValue, Reverse::False, UseTenant::True, version));
+	return trState->getTenantInfo();
+}
+
+Future<TenantInfo> populateAndGetTenant(Reference<TransactionState> trState, Key const& key, Version version) {
+	if (!trState->tenant().present() || key == metadataVersionKey) {
+		return TenantInfo();
+	} else if (trState->tenantId != TenantInfo::INVALID_TENANT) {
+		return trState->getTenantInfo();
+	} else {
+		return getTenantMetadata(trState, key, version);
+	}
+}
+
 // FIXME: This seems pretty horrible. Now a Database can't die until all of its watches do...
 ACTOR Future<Void> watch(Reference<Watch> watch,
                          Database cx,
+                         Future<TenantInfo> tenant,
                          TagSet tags,
                          SpanID spanID,
                          TaskPriority taskID,
@@ -4673,6 +5034,7 @@ ACTOR Future<Void> watch(Reference<Watch> watch,
 			// NativeAPI finished commit and updated watchFuture
 			when(wait(watch->onSetWatchTrigger.getFuture())) {
 
+				state TenantInfo tenantInfo = wait(tenant);
 				loop {
 					choose {
 						// NativeAPI watchValue future finishes or errors
@@ -4682,6 +5044,7 @@ ACTOR Future<Void> watch(Reference<Watch> watch,
 							TEST(true); // Recreated a watch after switch
 							cx->clearWatchMetadata();
 							watch->watchFuture = watchValueMap(cx->minAcceptableReadVersion,
+							                                   tenantInfo,
 							                                   watch->key,
 							                                   watch->value,
 							                                   cx,
@@ -4710,15 +5073,19 @@ Future<Version> Transaction::getRawReadVersion() {
 
 Future<Void> Transaction::watch(Reference<Watch> watch) {
 	++trState->cx->transactionWatchRequests;
+
 	trState->cx->addWatch();
 	watches.push_back(watch);
-	return ::watch(watch,
-	               trState->cx,
-	               trState->options.readTags,
-	               trState->spanID,
-	               trState->taskID,
-	               trState->debugID,
-	               trState->useProvisionalProxies);
+	return ::watch(
+	    watch,
+	    trState->cx,
+	    populateAndGetTenant(
+	        trState, watch->key, readVersion.isValid() && readVersion.isReady() ? readVersion.get() : latestVersion),
+	    trState->options.readTags,
+	    trState->spanID,
+	    trState->taskID,
+	    trState->debugID,
+	    trState->useProvisionalProxies);
 }
 
 ACTOR Future<Standalone<VectorRef<const char*>>> getAddressesForKeyActor(Reference<TransactionState> trState,
@@ -4726,18 +5093,32 @@ ACTOR Future<Standalone<VectorRef<const char*>>> getAddressesForKeyActor(Referen
                                                                          Key key) {
 	state std::vector<StorageServerInterface> ssi;
 
+	state Key resolvedKey = key;
+	if (trState->tenant().present()) {
+		state Version version = wait(ver);
+		KeyRangeLocationInfo locationInfo = wait(getKeyLocation(
+		    trState, ""_sr, &StorageServerInterface::getValue, Reverse::False, UseTenant::True, version));
+		resolvedKey = key.withPrefix(locationInfo.tenantEntry.prefix);
+	}
+
 	// If key >= allKeys.end, then getRange will return a kv-pair with an empty value. This will result in our
 	// serverInterfaces vector being empty, which will cause us to return an empty addresses list.
-	state Key ksKey = keyServersKey(key);
+	state Key ksKey = keyServersKey(resolvedKey);
 	state RangeResult serverTagResult = wait(getRange(trState,
 	                                                  ver,
 	                                                  lastLessOrEqual(serverTagKeys.begin),
 	                                                  firstGreaterThan(serverTagKeys.end),
 	                                                  GetRangeLimits(CLIENT_KNOBS->TOO_MANY),
-	                                                  Reverse::False));
+	                                                  Reverse::False,
+	                                                  UseTenant::False));
 	ASSERT(!serverTagResult.more && serverTagResult.size() < CLIENT_KNOBS->TOO_MANY);
-	Future<RangeResult> futureServerUids =
-	    getRange(trState, ver, lastLessOrEqual(ksKey), firstGreaterThan(ksKey), GetRangeLimits(1), Reverse::False);
+	Future<RangeResult> futureServerUids = getRange(trState,
+	                                                ver,
+	                                                lastLessOrEqual(ksKey),
+	                                                firstGreaterThan(ksKey),
+	                                                GetRangeLimits(1),
+	                                                Reverse::False,
+	                                                UseTenant::False);
 	RangeResult serverUids = wait(futureServerUids);
 
 	ASSERT(serverUids.size()); // every shard needs to have a team
@@ -5171,6 +5552,7 @@ void TransactionOptions::clear() {
 	expensiveClearCostEstimation = false;
 	useGrvCache = false;
 	skipGrvCache = false;
+	rawAccess = false;
 }
 
 TransactionOptions::TransactionOptions() {
@@ -5188,7 +5570,7 @@ void TransactionOptions::reset(Database const& cx) {
 void Transaction::resetImpl(bool generateNewSpan) {
 	flushTrLogsIfEnabled();
 	trState = trState->cloneAndReset(createTrLogInfoProbabilistically(trState->cx), generateNewSpan);
-	tr = CommitTransactionRequest(TenantInfo(), trState->spanID);
+	tr = CommitTransactionRequest(trState->spanID);
 	readVersion = Future<Version>();
 	metadataVersion = Promise<Optional<Key>>();
 	extraConflictRanges.clear();
@@ -5265,7 +5647,6 @@ ACTOR void checkWrites(Reference<TransactionState> trState,
 
 	wait(delay(deterministicRandom()->random01())); // delay between 0 and 1 seconds
 
-	// Future<Optional<Version>> version, Database cx, CommitTransactionRequest req ) {
 	state KeyRangeMap<MutationBlock> expectedValues;
 
 	auto& mutations = req.transaction.mutations;
@@ -5364,6 +5745,7 @@ void Transaction::setupWatches() {
 
 		for (int i = 0; i < watches.size(); ++i)
 			watches[i]->setWatch(watchValueMap(watchVersion,
+			                                   trState->getTenantInfo(),
 			                                   watches[i]->key,
 			                                   watches[i]->value,
 			                                   trState->cx,
@@ -5402,8 +5784,14 @@ ACTOR Future<Optional<ClientTrCommitCostEstimation>> estimateCommitCosts(Referen
 				++trCommitCosts.expensiveCostEstCount;
 				++trState->cx->transactionsExpensiveClearCostEstCount;
 			} else {
-				std::vector<std::pair<KeyRange, Reference<LocationInfo>>> locations = wait(getKeyRangeLocations(
-				    trState, keyRange, CLIENT_KNOBS->TOO_MANY, Reverse::False, &StorageServerInterface::getShardState));
+				std::vector<KeyRangeLocationInfo> locations =
+				    wait(getKeyRangeLocations(trState,
+				                              keyRange,
+				                              CLIENT_KNOBS->TOO_MANY,
+				                              Reverse::False,
+				                              &StorageServerInterface::getShardState,
+				                              UseTenant::True,
+				                              latestVersion));
 				if (locations.empty()) {
 					continue;
 				}
@@ -5451,6 +5839,35 @@ ACTOR Future<Optional<ClientTrCommitCostEstimation>> estimateCommitCosts(Referen
 	return trCommitCosts;
 }
 
+// TODO: send the prefix as part of the commit request and ship it all the way
+// through to the storage servers
+void applyTenantPrefix(CommitTransactionRequest& req, Key tenantPrefix) {
+	for (auto& m : req.transaction.mutations) {
+		if (m.param1 != metadataVersionKey) {
+			m.param1 = m.param1.withPrefix(tenantPrefix, req.arena);
+			if (m.type == MutationRef::ClearRange) {
+				m.param2 = m.param2.withPrefix(tenantPrefix, req.arena);
+			} else if (m.type == MutationRef::SetVersionstampedKey) {
+				uint8_t* key = mutateString(m.param1);
+				int* offset = reinterpret_cast<int*>(&key[m.param1.size() - 4]);
+				*offset += tenantPrefix.size();
+			}
+		}
+	}
+
+	for (auto& rc : req.transaction.read_conflict_ranges) {
+		if (rc.begin != metadataVersionKey) {
+			rc = rc.withPrefix(tenantPrefix, req.arena);
+		}
+	}
+
+	for (auto& wc : req.transaction.write_conflict_ranges) {
+		if (wc.begin != metadataVersionKey) {
+			wc = wc.withPrefix(tenantPrefix, req.arena);
+		}
+	}
+}
+
 ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
                                     CommitTransactionRequest req,
                                     Future<Version> readVersion) {
@@ -5473,6 +5890,20 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 		} else {
 			wait(store(req.transaction.read_snapshot, readVersion));
 		}
+
+		state Key tenantPrefix;
+		if (trState->tenant().present()) {
+			KeyRangeLocationInfo locationInfo = wait(getKeyLocation(trState,
+			                                                        ""_sr,
+			                                                        &StorageServerInterface::getValue,
+			                                                        Reverse::False,
+			                                                        UseTenant::True,
+			                                                        req.transaction.read_snapshot));
+			applyTenantPrefix(req, locationInfo.tenantEntry.prefix);
+			tenantPrefix = locationInfo.tenantEntry.prefix;
+		}
+
+		req.tenantInfo = trState->getTenantInfo();
 
 		startTime = now();
 		state Optional<UID> commitID = Optional<UID>();
@@ -5547,7 +5978,8 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 						                                       req.transaction.mutations.size(),
 						                                       req.transaction.mutations.expectedSize(),
 						                                       ci.version,
-						                                       req));
+						                                       req,
+						                                       trState->tenant()));
 					return Void();
 				} else {
 					// clear the RYW transaction which contains previous conflicting keys
@@ -5562,8 +5994,9 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 						                                        conflictingKRIndices.end());
 						for (auto const& rCRIndex : mergedIds) {
 							const KeyRangeRef kr = req.transaction.read_conflict_ranges[rCRIndex];
-							const KeyRange krWithPrefix = KeyRangeRef(kr.begin.withPrefix(conflictingKeysRange.begin),
-							                                          kr.end.withPrefix(conflictingKeysRange.begin));
+							const KeyRange krWithPrefix =
+							    KeyRangeRef(kr.begin.removePrefix(tenantPrefix).withPrefix(conflictingKeysRange.begin),
+							                kr.end.removePrefix(tenantPrefix).withPrefix(conflictingKeysRange.begin));
 							trState->conflictingKeys->insert(krWithPrefix, conflictingKeysTrue);
 						}
 					}
@@ -5603,15 +6036,21 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
 			// The user needs to be informed that we aren't sure whether the commit happened.  Standard retry loops
 			// retry it anyway (relying on transaction idempotence) but a client might do something else.
 			throw commit_unknown_result();
+		} else if (e.code() == error_code_unknown_tenant) {
+			ASSERT(trState->tenant().present());
+			trState->cx->invalidateCachedTenant(trState->tenant().get());
+			throw;
 		} else {
 			if (e.code() != error_code_transaction_too_old && e.code() != error_code_not_committed &&
 			    e.code() != error_code_database_locked && e.code() != error_code_proxy_memory_limit_exceeded &&
-			    e.code() != error_code_batch_transaction_throttled && e.code() != error_code_tag_throttled) {
+			    e.code() != error_code_batch_transaction_throttled && e.code() != error_code_tag_throttled &&
+			    e.code() != error_code_process_behind && e.code() != error_code_future_version &&
+			    e.code() != error_code_tenant_not_found) {
 				TraceEvent(SevError, "TryCommitError").error(e);
 			}
 			if (trState->trLogInfo)
 				trState->trLogInfo->addLog(FdbClientLogEvents::EventCommitError(
-				    startTime, trState->cx->clientLocality.dcId(), static_cast<int>(e.code()), req));
+				    startTime, trState->cx->clientLocality.dcId(), static_cast<int>(e.code()), req, trState->tenant()));
 			throw;
 		}
 	}
@@ -5951,6 +6390,19 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 		validateOptionValueNotPresent(value);
 		trState->options.skipGrvCache = true;
 		break;
+	case FDBTransactionOptions::READ_SYSTEM_KEYS:
+	case FDBTransactionOptions::ACCESS_SYSTEM_KEYS:
+	case FDBTransactionOptions::RAW_ACCESS:
+		// System key access implies raw access. Native API handles the raw access,
+		// system key access is handled in RYW.
+		validateOptionValueNotPresent(value);
+		if (trState->hasTenant()) {
+			Error e = invalid_option();
+			TraceEvent(SevWarn, "TenantTransactionRawAccess").error(e).detail("Tenant", trState->tenant());
+			throw e;
+		}
+		trState->options.rawAccess = true;
+		break;
 
 	default:
 		break;
@@ -6134,8 +6586,12 @@ ACTOR Future<Version> extractReadVersion(Reference<TransactionState> trState,
 	}
 	trState->cx->GRVLatencies.addSample(latency);
 	if (trState->trLogInfo)
-		trState->trLogInfo->addLog(FdbClientLogEvents::EventGetVersion_V3(
-		    trState->startTime, trState->cx->clientLocality.dcId(), latency, trState->options.priority, rep.version));
+		trState->trLogInfo->addLog(FdbClientLogEvents::EventGetVersion_V3(trState->startTime,
+		                                                                  trState->cx->clientLocality.dcId(),
+		                                                                  latency,
+		                                                                  trState->options.priority,
+		                                                                  rep.version,
+		                                                                  trState->tenant()));
 	if (rep.locked && !trState->options.lockAware)
 		throw database_locked();
 
@@ -6441,6 +6897,11 @@ Future<Void> Transaction::onError(Error const& e) {
 		reset();
 		return delay(std::min(CLIENT_KNOBS->FUTURE_VERSION_RETRY_DELAY, maxBackoff), trState->taskID);
 	}
+	if (e.code() == error_code_unknown_tenant) {
+		double maxBackoff = trState->options.maxBackoff;
+		reset();
+		return delay(std::min(CLIENT_KNOBS->UNKNOWN_TENANT_RETRY_DELAY, maxBackoff), trState->taskID);
+	}
 
 	return e;
 }
@@ -6461,7 +6922,7 @@ ACTOR Future<StorageMetrics> doGetStorageMetrics(Database cx, KeyRange keys, Ref
 				throw;
 			}
 			wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
-			cx->invalidateCache(keys);
+			cx->invalidateCache(Key(), keys);
 			StorageMetrics m = wait(getStorageMetricsLargeKeyRange(cx, keys));
 			return m;
 		}
@@ -6470,23 +6931,24 @@ ACTOR Future<StorageMetrics> doGetStorageMetrics(Database cx, KeyRange keys, Ref
 
 ACTOR Future<StorageMetrics> getStorageMetricsLargeKeyRange(Database cx, KeyRange keys) {
 	state Span span("NAPI:GetStorageMetricsLargeKeyRange"_loc);
-	std::vector<std::pair<KeyRange, Reference<LocationInfo>>> locations =
-	    wait(getKeyRangeLocations(cx,
-	                              keys,
-	                              std::numeric_limits<int>::max(),
-	                              Reverse::False,
-	                              &StorageServerInterface::waitMetrics,
-	                              span.context,
-	                              Optional<UID>(),
-	                              UseProvisionalProxies::False));
+	std::vector<KeyRangeLocationInfo> locations = wait(getKeyRangeLocations(cx,
+	                                                                        Optional<TenantName>(),
+	                                                                        keys,
+	                                                                        std::numeric_limits<int>::max(),
+	                                                                        Reverse::False,
+	                                                                        &StorageServerInterface::waitMetrics,
+	                                                                        span.context,
+	                                                                        Optional<UID>(),
+	                                                                        UseProvisionalProxies::False,
+	                                                                        latestVersion));
 	state int nLocs = locations.size();
 	state std::vector<Future<StorageMetrics>> fx(nLocs);
 	state StorageMetrics total;
 	KeyRef partBegin, partEnd;
 	for (int i = 0; i < nLocs; i++) {
-		partBegin = (i == 0) ? keys.begin : locations[i].first.begin;
-		partEnd = (i == nLocs - 1) ? keys.end : locations[i].first.end;
-		fx[i] = doGetStorageMetrics(cx, KeyRangeRef(partBegin, partEnd), locations[i].second);
+		partBegin = (i == 0) ? keys.begin : locations[i].range.begin;
+		partEnd = (i == nLocs - 1) ? keys.end : locations[i].range.end;
+		fx[i] = doGetStorageMetrics(cx, KeyRangeRef(partBegin, partEnd), locations[i].locations);
 	}
 	wait(waitForAll(fx));
 	for (int i = 0; i < nLocs; i++) {
@@ -6513,11 +6975,10 @@ ACTOR Future<Void> trackBoundedStorageMetrics(KeyRange keys,
 	}
 }
 
-ACTOR Future<StorageMetrics> waitStorageMetricsMultipleLocations(
-    std::vector<std::pair<KeyRange, Reference<LocationInfo>>> locations,
-    StorageMetrics min,
-    StorageMetrics max,
-    StorageMetrics permittedError) {
+ACTOR Future<StorageMetrics> waitStorageMetricsMultipleLocations(std::vector<KeyRangeLocationInfo> locations,
+                                                                 StorageMetrics min,
+                                                                 StorageMetrics max,
+                                                                 StorageMetrics permittedError) {
 	state int nLocs = locations.size();
 	state std::vector<Future<StorageMetrics>> fx(nLocs);
 	state StorageMetrics total;
@@ -6528,10 +6989,10 @@ ACTOR Future<StorageMetrics> waitStorageMetricsMultipleLocations(
 	state StorageMetrics minMinus = min - halfErrorPerMachine * (nLocs - 1);
 
 	for (int i = 0; i < nLocs; i++) {
-		WaitMetricsRequest req(locations[i].first, StorageMetrics(), StorageMetrics());
+		WaitMetricsRequest req(locations[i].range, StorageMetrics(), StorageMetrics());
 		req.min.bytes = 0;
 		req.max.bytes = -1;
-		fx[i] = loadBalance(locations[i].second->locations(),
+		fx[i] = loadBalance(locations[i].locations->locations(),
 		                    &StorageServerInterface::waitMetrics,
 		                    req,
 		                    TaskPriority::DataDistribution);
@@ -6549,7 +7010,7 @@ ACTOR Future<StorageMetrics> waitStorageMetricsMultipleLocations(
 
 	for (int i = 0; i < nLocs; i++)
 		wx[i] = trackBoundedStorageMetrics(
-		    locations[i].first, locations[i].second, fx[i].get(), halfErrorPerMachine, deltas);
+		    locations[i].range, locations[i].locations, fx[i].get(), halfErrorPerMachine, deltas);
 
 	loop {
 		StorageMetrics delta = waitNext(deltas.getFuture());
@@ -6571,20 +7032,22 @@ ACTOR Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> getReadHotRanges(Da
 	loop {
 		int64_t shardLimit = 100; // Shard limit here does not really matter since this function is currently only used
 		                          // to find the read-hot sub ranges within a read-hot shard.
-		std::vector<std::pair<KeyRange, Reference<LocationInfo>>> locations =
+		std::vector<KeyRangeLocationInfo> locations =
 		    wait(getKeyRangeLocations(cx,
+		                              Optional<TenantName>(),
 		                              keys,
 		                              shardLimit,
 		                              Reverse::False,
 		                              &StorageServerInterface::getReadHotRanges,
 		                              span.context,
 		                              Optional<UID>(),
-		                              UseProvisionalProxies::False));
+		                              UseProvisionalProxies::False,
+		                              latestVersion));
 		try {
 			// TODO: how to handle this?
-			// This function is called whenever a shard becomes read-hot. But somehow the shard was splitted across more
-			// than one storage server after become read-hot and before this function is called, i.e. a race condition.
-			// Should we abort and wait the newly splitted shards to be hot again?
+			// This function is called whenever a shard becomes read-hot. But somehow the shard was split across more
+			// than one storage server after becoming read-hot and before this function is called, i.e. a race
+			// condition. Should we abort and wait for the newly split shards to be hot again?
 			state int nLocs = locations.size();
 			// if (nLocs > 1) {
 			// 	TraceEvent("RHDDebug")
@@ -6595,10 +7058,10 @@ ACTOR Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> getReadHotRanges(Da
 			state std::vector<Future<ReadHotSubRangeReply>> fReplies(nLocs);
 			KeyRef partBegin, partEnd;
 			for (int i = 0; i < nLocs; i++) {
-				partBegin = (i == 0) ? keys.begin : locations[i].first.begin;
-				partEnd = (i == nLocs - 1) ? keys.end : locations[i].first.end;
+				partBegin = (i == 0) ? keys.begin : locations[i].range.begin;
+				partEnd = (i == nLocs - 1) ? keys.end : locations[i].range.end;
 				ReadHotSubRangeRequest req(KeyRangeRef(partBegin, partEnd));
-				fReplies[i] = loadBalance(locations[i].second->locations(),
+				fReplies[i] = loadBalance(locations[i].locations->locations(),
 				                          &StorageServerInterface::getReadHotRanges,
 				                          req,
 				                          TaskPriority::DataDistribution);
@@ -6626,7 +7089,7 @@ ACTOR Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> getReadHotRanges(Da
 				TraceEvent(SevError, "GetReadHotSubRangesError").error(e);
 				throw;
 			}
-			cx->invalidateCache(keys);
+			cx->invalidateCache(Key(), keys);
 			wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
 		}
 	}
@@ -6641,15 +7104,16 @@ ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(Databa
                                                                           int expectedShardCount) {
 	state Span span("NAPI:WaitStorageMetrics"_loc, generateSpanID(cx->transactionTracingSample));
 	loop {
-		std::vector<std::pair<KeyRange, Reference<LocationInfo>>> locations =
-		    wait(getKeyRangeLocations(cx,
-		                              keys,
-		                              shardLimit,
-		                              Reverse::False,
-		                              &StorageServerInterface::waitMetrics,
-		                              span.context,
-		                              Optional<UID>(),
-		                              UseProvisionalProxies::False));
+		std::vector<KeyRangeLocationInfo> locations = wait(getKeyRangeLocations(cx,
+		                                                                        Optional<TenantName>(),
+		                                                                        keys,
+		                                                                        shardLimit,
+		                                                                        Reverse::False,
+		                                                                        &StorageServerInterface::waitMetrics,
+		                                                                        span.context,
+		                                                                        Optional<UID>(),
+		                                                                        UseProvisionalProxies::False,
+		                                                                        latestVersion));
 		if (expectedShardCount >= 0 && locations.size() != expectedShardCount) {
 			return std::make_pair(Optional<StorageMetrics>(), locations.size());
 		}
@@ -6663,7 +7127,7 @@ ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(Databa
 					fx = waitStorageMetricsMultipleLocations(locations, min, max, permittedError);
 				} else {
 					WaitMetricsRequest req(keys, min, max);
-					fx = loadBalance(locations[0].second->locations(),
+					fx = loadBalance(locations[0].locations->locations(),
 					                 &StorageServerInterface::waitMetrics,
 					                 req,
 					                 TaskPriority::DataDistribution);
@@ -6675,7 +7139,7 @@ ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(Databa
 					TraceEvent(SevError, "WaitStorageMetricsError").error(e);
 					throw;
 				}
-				cx->invalidateCache(keys);
+				cx->invalidateCache(Key(), keys);
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
 			}
 		} else {
@@ -6685,7 +7149,7 @@ ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(Databa
 			    .detail("JitteredSecondsOfPenitence", CLIENT_KNOBS->STORAGE_METRICS_TOO_MANY_SHARDS_DELAY);
 			wait(delayJittered(CLIENT_KNOBS->STORAGE_METRICS_TOO_MANY_SHARDS_DELAY, TaskPriority::DataDistribution));
 			// make sure that the next getKeyRangeLocations() call will actually re-fetch the range
-			cx->invalidateCache(keys);
+			cx->invalidateCache(Key(), keys);
 		}
 	}
 }
@@ -6747,20 +7211,28 @@ Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> DatabaseContext::getReadH
 
 ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Reference<TransactionState> trState,
                                                                 KeyRange keys,
-                                                                int64_t chunkSize) {
+                                                                int64_t chunkSize,
+                                                                Version version) {
 	state Span span("NAPI:GetRangeSplitPoints"_loc, trState->spanID);
+
 	loop {
-		state std::vector<std::pair<KeyRange, Reference<LocationInfo>>> locations = wait(getKeyRangeLocations(
-		    trState, keys, CLIENT_KNOBS->TOO_MANY, Reverse::False, &StorageServerInterface::getRangeSplitPoints));
+		state std::vector<KeyRangeLocationInfo> locations =
+		    wait(getKeyRangeLocations(trState,
+		                              keys,
+		                              CLIENT_KNOBS->TOO_MANY,
+		                              Reverse::False,
+		                              &StorageServerInterface::getRangeSplitPoints,
+		                              UseTenant::True,
+		                              version));
 		try {
 			state int nLocs = locations.size();
 			state std::vector<Future<SplitRangeReply>> fReplies(nLocs);
 			KeyRef partBegin, partEnd;
 			for (int i = 0; i < nLocs; i++) {
-				partBegin = (i == 0) ? keys.begin : locations[i].first.begin;
-				partEnd = (i == nLocs - 1) ? keys.end : locations[i].first.end;
-				SplitRangeRequest req(TenantInfo(), KeyRangeRef(partBegin, partEnd), chunkSize);
-				fReplies[i] = loadBalance(locations[i].second->locations(),
+				partBegin = (i == 0) ? keys.begin : locations[i].range.begin;
+				partEnd = (i == nLocs - 1) ? keys.end : locations[i].range.end;
+				SplitRangeRequest req(trState->getTenantInfo(), KeyRangeRef(partBegin, partEnd), chunkSize);
+				fReplies[i] = loadBalance(locations[i].locations->locations(),
 				                          &StorageServerInterface::getRangeSplitPoints,
 				                          req,
 				                          TaskPriority::DataDistribution);
@@ -6772,7 +7244,8 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Reference<Transa
 			results.push_back_deep(results.arena(), keys.begin);
 			for (int i = 0; i < nLocs; i++) {
 				if (i > 0) {
-					results.push_back_deep(results.arena(), locations[i].first.begin); // Need this shard boundary
+					results.push_back_deep(results.arena(),
+					                       locations[i].range.begin); // Need this shard boundary
 				}
 				if (fReplies[i].get().splitPoints.size() > 0) {
 					results.append(
@@ -6786,18 +7259,24 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Reference<Transa
 
 			return results;
 		} catch (Error& e) {
-			if (e.code() != error_code_wrong_shard_server && e.code() != error_code_all_alternatives_failed) {
+			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
+				trState->cx->invalidateCache(locations[0].tenantEntry.prefix, keys);
+				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
+			} else if (e.code() == error_code_unknown_tenant) {
+				ASSERT(trState->tenant().present());
+				trState->cx->invalidateCachedTenant(trState->tenant().get());
+				wait(delay(CLIENT_KNOBS->UNKNOWN_TENANT_RETRY_DELAY, trState->taskID));
+			} else {
 				TraceEvent(SevError, "GetRangeSplitPoints").error(e);
 				throw;
 			}
-			trState->cx->invalidateCache(keys);
-			wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
 		}
 	}
 }
 
 Future<Standalone<VectorRef<KeyRef>>> Transaction::getRangeSplitPoints(KeyRange const& keys, int64_t chunkSize) {
-	return ::getRangeSplitPoints(trState, keys, chunkSize);
+	return ::getRangeSplitPoints(
+	    trState, keys, chunkSize, readVersion.isValid() && readVersion.isReady() ? readVersion.get() : latestVersion);
 }
 
 #define BG_REQUEST_DEBUG false
@@ -7055,15 +7534,17 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(Database cx,
                                                                 StorageMetrics estimated) {
 	state Span span("NAPI:SplitStorageMetrics"_loc);
 	loop {
-		state std::vector<std::pair<KeyRange, Reference<LocationInfo>>> locations =
+		state std::vector<KeyRangeLocationInfo> locations =
 		    wait(getKeyRangeLocations(cx,
+		                              Optional<TenantName>(),
 		                              keys,
 		                              CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT,
 		                              Reverse::False,
 		                              &StorageServerInterface::splitMetrics,
 		                              span.context,
 		                              Optional<UID>(),
-		                              UseProvisionalProxies::False));
+		                              UseProvisionalProxies::False,
+		                              latestVersion));
 		state StorageMetrics used;
 		state Standalone<VectorRef<KeyRef>> results;
 
@@ -7071,7 +7552,7 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(Database cx,
 		// solution to this.
 		if (locations.size() == CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT) {
 			wait(delay(CLIENT_KNOBS->STORAGE_METRICS_TOO_MANY_SHARDS_DELAY, TaskPriority::DataDistribution));
-			cx->invalidateCache(keys);
+			cx->invalidateCache(Key(), keys);
 		} else {
 			results.push_back_deep(results.arena(), keys.begin);
 			try {
@@ -7079,8 +7560,8 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(Database cx,
 
 				state int i = 0;
 				for (; i < locations.size(); i++) {
-					SplitMetricsRequest req(locations[i].first, limit, used, estimated, i == locations.size() - 1);
-					SplitMetricsReply res = wait(loadBalance(locations[i].second->locations(),
+					SplitMetricsRequest req(locations[i].range, limit, used, estimated, i == locations.size() - 1);
+					SplitMetricsReply res = wait(loadBalance(locations[i].locations->locations(),
 					                                         &StorageServerInterface::splitMetrics,
 					                                         req,
 					                                         TaskPriority::DataDistribution));
@@ -7111,7 +7592,7 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(Database cx,
 					TraceEvent(SevError, "SplitStorageMetricsError").error(e);
 					throw;
 				}
-				cx->invalidateCache(keys);
+				cx->invalidateCache(Key(), keys);
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
 			}
 		}
@@ -7178,6 +7659,167 @@ ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID sn
 		TraceEvent("SnapCreateError").error(e).detail("SnapCmd", snapCmd.toString()).detail("UID", snapUID);
 		throw;
 	}
+}
+
+ACTOR template <class T>
+static Future<Void> createCheckpointImpl(T tr, KeyRangeRef range, CheckpointFormat format) {
+	ASSERT(!tr->getTenant().present());
+	TraceEvent("CreateCheckpointTransactionBegin").detail("Range", range);
+
+	state RangeResult keyServers = wait(krmGetRanges(tr, keyServersPrefix, range));
+	ASSERT(!keyServers.more);
+
+	state RangeResult UIDtoTagMap = wait(tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+	ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
+
+	for (int i = 0; i < keyServers.size() - 1; ++i) {
+		KeyRangeRef shard(keyServers[i].key, keyServers[i + 1].key);
+		std::vector<UID> src;
+		std::vector<UID> dest;
+		decodeKeyServersValue(UIDtoTagMap, keyServers[i].value, src, dest);
+
+		// The checkpoint request is sent to all replicas, in case any of them is unhealthy.
+		// An alternative is to choose a healthy replica.
+		const UID checkpointID = deterministicRandom()->randomUniqueID();
+		for (int idx = 0; idx < src.size(); ++idx) {
+			CheckpointMetaData checkpoint(shard & range, format, src[idx], checkpointID);
+			checkpoint.setState(CheckpointMetaData::Pending);
+			tr->set(checkpointKeyFor(checkpointID), checkpointValue(checkpoint));
+		}
+
+		TraceEvent("CreateCheckpointTransactionShard")
+		    .detail("Shard", shard)
+		    .detail("SrcServers", describe(src))
+		    .detail("ServerSelected", describe(src))
+		    .detail("CheckpointKey", checkpointKeyFor(checkpointID))
+		    .detail("ReadVersion", tr->getReadVersion().get());
+	}
+
+	return Void();
+}
+
+Future<Void> createCheckpoint(Reference<ReadYourWritesTransaction> tr, KeyRangeRef range, CheckpointFormat format) {
+	return holdWhile(tr, createCheckpointImpl(tr, range, format));
+}
+
+Future<Void> createCheckpoint(Transaction* tr, KeyRangeRef range, CheckpointFormat format) {
+	return createCheckpointImpl(tr, range, format);
+}
+
+// Gets CheckpointMetaData of the specific keyrange, version and format from one of the storage servers, if none of the
+// servers have the checkpoint, a checkpoint_not_found error is returned.
+ACTOR static Future<CheckpointMetaData> getCheckpointMetaDataInternal(GetCheckpointRequest req,
+                                                                      Reference<LocationInfo> alternatives,
+                                                                      double timeout) {
+	TraceEvent("GetCheckpointMetaDataInternalBegin")
+	    .detail("Range", req.range)
+	    .detail("Version", req.version)
+	    .detail("Format", static_cast<int>(req.format))
+	    .detail("Locations", alternatives->description());
+
+	state std::vector<Future<ErrorOr<CheckpointMetaData>>> futures;
+	state int index = 0;
+	for (index = 0; index < alternatives->size(); ++index) {
+		// For each shard, all storage servers are checked, only one is required.
+		futures.push_back(errorOr(timeoutError(alternatives->getInterface(index).checkpoint.getReply(req), timeout)));
+	}
+
+	state Optional<Error> error;
+	wait(waitForAll(futures));
+	TraceEvent("GetCheckpointMetaDataInternalWaitEnd").detail("Range", req.range).detail("Version", req.version);
+
+	for (index = 0; index < futures.size(); ++index) {
+		if (!futures[index].isReady()) {
+			error = timed_out();
+			TraceEvent("GetCheckpointMetaDataInternalSSTimeout")
+			    .detail("Range", req.range)
+			    .detail("Version", req.version)
+			    .detail("StorageServer", alternatives->getInterface(index).uniqueID);
+			continue;
+		}
+
+		if (futures[index].get().isError()) {
+			const Error& e = futures[index].get().getError();
+			TraceEvent("GetCheckpointMetaDataInternalError")
+			    .errorUnsuppressed(e)
+			    .detail("Range", req.range)
+			    .detail("Version", req.version)
+			    .detail("StorageServer", alternatives->getInterface(index).uniqueID);
+			if (e.code() != error_code_checkpoint_not_found || !error.present()) {
+				error = e;
+			}
+		} else {
+			return futures[index].get().get();
+		}
+	}
+
+	ASSERT(error.present());
+	throw error.get();
+}
+
+ACTOR Future<std::vector<CheckpointMetaData>> getCheckpointMetaData(Database cx,
+                                                                    KeyRange keys,
+                                                                    Version version,
+                                                                    CheckpointFormat format,
+                                                                    double timeout) {
+	state Span span("NAPI:GetCheckpoint"_loc);
+	state int index = 0;
+	state std::vector<Future<CheckpointMetaData>> futures;
+
+	loop {
+		TraceEvent("GetCheckpointBegin")
+		    .detail("Range", keys.toString())
+		    .detail("Version", version)
+		    .detail("Format", static_cast<int>(format));
+
+		try {
+			state std::vector<KeyRangeLocationInfo> locations =
+			    wait(getKeyRangeLocations(cx,
+			                              Optional<TenantName>(),
+			                              keys,
+			                              CLIENT_KNOBS->TOO_MANY,
+			                              Reverse::False,
+			                              &StorageServerInterface::checkpoint,
+			                              span.context,
+			                              Optional<UID>(),
+			                              UseProvisionalProxies::False,
+			                              latestVersion));
+
+			futures.clear();
+			for (index = 0; index < locations.size(); ++index) {
+				futures.push_back(getCheckpointMetaDataInternal(
+				    GetCheckpointRequest(version, keys, format), locations[index].locations, timeout));
+				TraceEvent("GetCheckpointShardBegin")
+				    .detail("Range", locations[index].range)
+				    .detail("Version", version)
+				    .detail("StorageServers", locations[index].locations->description());
+			}
+
+			choose {
+				when(wait(cx->connectionFileChanged())) { cx->invalidateCache(KeyRef(), keys); }
+				when(wait(waitForAll(futures))) { break; }
+				when(wait(delay(timeout))) {
+					TraceEvent("GetCheckpointTimeout").detail("Range", keys).detail("Version", version);
+				}
+			}
+		} catch (Error& e) {
+			TraceEvent("GetCheckpointError").errorUnsuppressed(e).detail("Range", keys.toString());
+			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
+			    e.code() == error_code_connection_failed || e.code() == error_code_broken_promise) {
+				cx->invalidateCache(KeyRef(), keys);
+				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY));
+			} else {
+				throw;
+			}
+		}
+	}
+
+	std::vector<CheckpointMetaData> res;
+	for (index = 0; index < futures.size(); ++index) {
+		TraceEvent("GetCheckpointShardEnd").detail("Checkpoint", futures[index].get().toString());
+		res.push_back(futures[index].get());
+	}
+	return res;
 }
 
 ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion> exclusions) {
@@ -7639,15 +8281,17 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 		try {
 			KeyRange fullRange = wait(getChangeFeedRange(db, cx, rangeID, begin));
 			keys = fullRange & range;
-			state std::vector<std::pair<KeyRange, Reference<LocationInfo>>> locations =
+			state std::vector<KeyRangeLocationInfo> locations =
 			    wait(getKeyRangeLocations(cx,
+			                              Optional<TenantName>(),
 			                              keys,
 			                              CLIENT_KNOBS->CHANGE_FEED_LOCATION_LIMIT,
 			                              Reverse::False,
 			                              &StorageServerInterface::changeFeedStream,
 			                              span.context,
 			                              Optional<UID>(),
-			                              UseProvisionalProxies::False));
+			                              UseProvisionalProxies::False,
+			                              latestVersion));
 
 			if (locations.size() >= CLIENT_KNOBS->CHANGE_FEED_LOCATION_LIMIT) {
 				ASSERT_WE_THINK(false);
@@ -7661,10 +8305,11 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 				// to duplicate this code
 				int count = 0;
 				int useIdx = -1;
-				for (int i = 0; i < locations[loc].second->size(); i++) {
+				for (int i = 0; i < locations[loc].locations->size(); i++) {
 					if (!IFailureMonitor::failureMonitor()
-					         .getState(
-					             locations[loc].second->get(i, &StorageServerInterface::changeFeedStream).getEndpoint())
+					         .getState(locations[loc]
+					                       .locations->get(i, &StorageServerInterface::changeFeedStream)
+					                       .getEndpoint())
 					         .failed) {
 						if (deterministicRandom()->random01() <= 1.0 / ++count) {
 							useIdx = i;
@@ -7678,17 +8323,17 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 					continue;
 				}
 
-				std::vector<Future<Void>> ok(locations[loc].second->size());
+				std::vector<Future<Void>> ok(locations[loc].locations->size());
 				for (int i = 0; i < ok.size(); i++) {
 					ok[i] = IFailureMonitor::failureMonitor().onStateEqual(
-					    locations[loc].second->get(i, &StorageServerInterface::changeFeedStream).getEndpoint(),
+					    locations[loc].locations->get(i, &StorageServerInterface::changeFeedStream).getEndpoint(),
 					    FailureStatus(false));
 				}
 
 				// Making this SevWarn means a lot of clutter
 				if (now() - g_network->networkInfo.newestAlternativesFailure > 1 ||
 				    deterministicRandom()->random01() < 0.01) {
-					TraceEvent("AllAlternativesFailed").detail("Alternatives", locations[0].second->description());
+					TraceEvent("AllAlternativesFailed").detail("Alternatives", locations[0].locations->description());
 				}
 
 				wait(allAlternativesFailedDelay(quorum(ok, 1)));
@@ -7698,8 +8343,8 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 			if (locations.size() > 1) {
 				std::vector<std::pair<StorageServerInterface, KeyRange>> interfs;
 				for (int i = 0; i < locations.size(); i++) {
-					interfs.emplace_back(locations[i].second->getInterface(chosenLocations[i]),
-					                     locations[i].first & range);
+					interfs.emplace_back(locations[i].locations->getInterface(chosenLocations[i]),
+					                     locations[i].range & range);
 				}
 				wait(mergeChangeFeedStream(db, interfs, results, rangeID, &begin, end) || cx->connectionFileChanged());
 			} else {
@@ -7708,7 +8353,7 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 				req.begin = begin;
 				req.end = end;
 				req.range = range;
-				StorageServerInterface interf = locations[0].second->getInterface(chosenLocations[0]);
+				StorageServerInterface interf = locations[0].locations->getInterface(chosenLocations[0]);
 				state ReplyPromiseStream<ChangeFeedStreamReply> replyStream =
 				    interf.changeFeedStream.getReplyStream(req);
 				for (auto& it : results->storageData) {
@@ -7764,7 +8409,7 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 			    e.code() == error_code_connection_failed || e.code() == error_code_unknown_change_feed ||
 			    e.code() == error_code_broken_promise) {
 				db->changeFeedCache.erase(rangeID);
-				cx->invalidateCache(keys);
+				cx->invalidateCache(Key(), keys);
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY));
 			} else {
 				results->mutations.sendError(e);
@@ -7817,20 +8462,21 @@ ACTOR Future<std::vector<OverlappingChangeFeedEntry>> getOverlappingChangeFeedsA
                                                                                      KeyRangeRef range,
                                                                                      Version minVersion) {
 	state Database cx(db);
-	state Transaction tr(cx);
 	state Span span("NAPI:GetOverlappingChangeFeeds"_loc);
 
 	loop {
 		try {
-			state std::vector<std::pair<KeyRange, Reference<LocationInfo>>> locations =
+			state std::vector<KeyRangeLocationInfo> locations =
 			    wait(getKeyRangeLocations(cx,
+			                              Optional<TenantName>(),
 			                              range,
 			                              CLIENT_KNOBS->CHANGE_FEED_LOCATION_LIMIT,
 			                              Reverse::False,
 			                              &StorageServerInterface::overlappingChangeFeeds,
 			                              span.context,
 			                              Optional<UID>(),
-			                              UseProvisionalProxies::False));
+			                              UseProvisionalProxies::False,
+			                              latestVersion));
 
 			if (locations.size() >= CLIENT_KNOBS->CHANGE_FEED_LOCATION_LIMIT) {
 				TraceEvent(SevError, "OverlappingRangeTooLarge")
@@ -7843,7 +8489,7 @@ ACTOR Future<std::vector<OverlappingChangeFeedEntry>> getOverlappingChangeFeedsA
 			state std::vector<Future<std::vector<OverlappingChangeFeedEntry>>> allOverlappingRequests;
 			for (auto& it : locations) {
 				allOverlappingRequests.push_back(
-				    singleLocationOverlappingChangeFeeds(cx, it.second, it.first & range, minVersion));
+				    singleLocationOverlappingChangeFeeds(cx, it.locations, it.range & range, minVersion));
 			}
 			wait(waitForAll(allOverlappingRequests));
 
@@ -7856,7 +8502,7 @@ ACTOR Future<std::vector<OverlappingChangeFeedEntry>> getOverlappingChangeFeedsA
 			return result;
 		} catch (Error& e) {
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
-				cx->invalidateCache(range);
+				cx->invalidateCache(Key(), range);
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY));
 			} else {
 				throw e;
@@ -7903,15 +8549,17 @@ ACTOR Future<Void> popChangeFeedMutationsActor(Reference<DatabaseContext> db, Ke
 
 	state KeyRange keys = wait(getChangeFeedRange(db, cx, rangeID));
 
-	state std::vector<std::pair<KeyRange, Reference<LocationInfo>>> locations =
+	state std::vector<KeyRangeLocationInfo> locations =
 	    wait(getKeyRangeLocations(cx,
+	                              Optional<TenantName>(),
 	                              keys,
 	                              3,
 	                              Reverse::False,
 	                              &StorageServerInterface::changeFeedPop,
 	                              span.context,
 	                              Optional<UID>(),
-	                              UseProvisionalProxies::False));
+	                              UseProvisionalProxies::False,
+	                              latestVersion));
 
 	if (locations.size() > 2) {
 		wait(popChangeFeedBackup(cx, rangeID, version));
@@ -7920,9 +8568,9 @@ ACTOR Future<Void> popChangeFeedMutationsActor(Reference<DatabaseContext> db, Ke
 
 	bool foundFailed = false;
 	for (int i = 0; i < locations.size() && !foundFailed; i++) {
-		for (int j = 0; j < locations[i].second->size() && !foundFailed; j++) {
+		for (int j = 0; j < locations[i].locations->size() && !foundFailed; j++) {
 			if (IFailureMonitor::failureMonitor()
-			        .getState(locations[i].second->get(j, &StorageServerInterface::changeFeedPop).getEndpoint())
+			        .getState(locations[i].locations->get(j, &StorageServerInterface::changeFeedPop).getEndpoint())
 			        .isFailed()) {
 				foundFailed = true;
 			}
@@ -7938,9 +8586,9 @@ ACTOR Future<Void> popChangeFeedMutationsActor(Reference<DatabaseContext> db, Ke
 		// FIXME: lookup both the src and dest shards as of the pop version to ensure all locations are popped
 		std::vector<Future<Void>> popRequests;
 		for (int i = 0; i < locations.size(); i++) {
-			for (int j = 0; j < locations[i].second->size(); j++) {
-				popRequests.push_back(locations[i].second->getInterface(j).changeFeedPop.getReply(
-				    ChangeFeedPopRequest(rangeID, version, locations[i].first)));
+			for (int j = 0; j < locations[i].locations->size(); j++) {
+				popRequests.push_back(locations[i].locations->getInterface(j).changeFeedPop.getReply(
+				    ChangeFeedPopRequest(rangeID, version, locations[i].range)));
 			}
 		}
 		choose {
@@ -7955,7 +8603,7 @@ ACTOR Future<Void> popChangeFeedMutationsActor(Reference<DatabaseContext> db, Ke
 			throw;
 		}
 		db->changeFeedCache.erase(rangeID);
-		cx->invalidateCache(keys);
+		cx->invalidateCache(Key(), keys);
 		wait(popChangeFeedBackup(cx, rangeID, version));
 	}
 	return Void();

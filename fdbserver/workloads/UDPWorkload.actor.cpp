@@ -27,7 +27,6 @@
 #include "flow/IRandom.h"
 #include "flow/flow.h"
 #include "flow/network.h"
-#include "flow/actorcompiler.h" // has to be last include
 #include "flow/serialize.h"
 #include <functional>
 #include <limits>
@@ -35,6 +34,8 @@
 #include <vector>
 #include <memory>
 #include <functional>
+
+#include "flow/actorcompiler.h" // has to be last include
 
 namespace {
 

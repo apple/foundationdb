@@ -1,0 +1,13 @@
+[configuration]
+config = 'triple'
+storageEngineType = 4
+processesPerMachine = 1
+coordinators = 3
+machineCount = 15
+
+[[test]]
+testTitle = 'PhysicalShardMove'
+useDB = true
+
+    [[test.workload]]
+    testName = 'SSCheckpointWorkload'

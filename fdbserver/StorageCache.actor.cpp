@@ -2223,6 +2223,25 @@ ACTOR Future<Void> storageCacheServer(StorageServerInterface ssi,
 			when(ReplyPromise<KeyValueStoreType> reply = waitNext(ssi.getKeyValueStoreType.getFuture())) {
 				ASSERT(false);
 			}
+
+			when(GetMappedKeyValuesRequest req = waitNext(ssi.getMappedKeyValues.getFuture())) { ASSERT(false); }
+			when(WaitMetricsRequest req = waitNext(ssi.waitMetrics.getFuture())) { ASSERT(false); }
+			when(SplitMetricsRequest req = waitNext(ssi.splitMetrics.getFuture())) { ASSERT(false); }
+			when(GetStorageMetricsRequest req = waitNext(ssi.getStorageMetrics.getFuture())) { ASSERT(false); }
+			when(ReadHotSubRangeRequest req = waitNext(ssi.getReadHotRanges.getFuture())) { ASSERT(false); }
+			when(SplitRangeRequest req = waitNext(ssi.getRangeSplitPoints.getFuture())) { ASSERT(false); }
+			when(GetKeyValuesStreamRequest req = waitNext(ssi.getKeyValuesStream.getFuture())) { ASSERT(false); }
+			when(ChangeFeedStreamRequest req = waitNext(ssi.changeFeedStream.getFuture())) { ASSERT(false); }
+			when(OverlappingChangeFeedsRequest req = waitNext(ssi.overlappingChangeFeeds.getFuture())) {
+				// Simulate endpoint not found so that the requester will try another endpoint
+				// This is a workaround to the fact that storage servers do not have an easy way to enforce this
+				// request goes only to other storage servers, and in simulation we manage to trigger this behavior
+				req.reply.sendError(broken_promise());
+			}
+			when(ChangeFeedPopRequest req = waitNext(ssi.changeFeedPop.getFuture())) { ASSERT(false); }
+			when(ChangeFeedVersionUpdateRequest req = waitNext(ssi.changeFeedVersionUpdate.getFuture())) {
+				ASSERT(false);
+			}
 			when(wait(actors.getResult())) {}
 		}
 	}

@@ -35,6 +35,7 @@ public:
 	~ThreadSafeDatabase() override;
 	static ThreadFuture<Reference<IDatabase>> createFromExistingDatabase(Database cx);
 
+	Reference<ITenant> openTenant(TenantNameRef tenantName) override;
 	Reference<ITransaction> createTransaction() override;
 
 	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
@@ -58,6 +59,7 @@ public:
 	ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) override;
 
 private:
+	friend class ThreadSafeTenant;
 	friend class ThreadSafeTransaction;
 	bool isConfigDB{ false };
 	DatabaseContext* db;
@@ -68,11 +70,28 @@ public: // Internal use only
 	DatabaseContext* unsafeGetPtr() const { return db; }
 };
 
+class ThreadSafeTenant : public ITenant, ThreadSafeReferenceCounted<ThreadSafeTenant>, NonCopyable {
+public:
+	ThreadSafeTenant(Reference<ThreadSafeDatabase> db, StringRef name) : db(db), name(name) {}
+	~ThreadSafeTenant() override;
+
+	Reference<ITransaction> createTransaction() override;
+
+	void addref() override { ThreadSafeReferenceCounted<ThreadSafeTenant>::addref(); }
+	void delref() override { ThreadSafeReferenceCounted<ThreadSafeTenant>::delref(); }
+
+private:
+	Reference<ThreadSafeDatabase> db;
+	Standalone<StringRef> name;
+};
+
 // An implementation of ITransaction that serializes operations onto the network thread and interacts with the
 // lower-level client APIs exposed by ISingleThreadTransaction
 class ThreadSafeTransaction : public ITransaction, ThreadSafeReferenceCounted<ThreadSafeTransaction>, NonCopyable {
 public:
-	explicit ThreadSafeTransaction(DatabaseContext* cx, ISingleThreadTransaction::Type type);
+	explicit ThreadSafeTransaction(DatabaseContext* cx,
+	                               ISingleThreadTransaction::Type type,
+	                               Optional<TenantName> tenant);
 	~ThreadSafeTransaction() override;
 
 	// Note: used while refactoring fdbcli, need to be removed later
@@ -149,6 +168,8 @@ public:
 	ThreadFuture<Void> checkDeferredError();
 	ThreadFuture<Void> onError(Error const& e) override;
 
+	Optional<TenantName> getTenant() override;
+
 	// These are to permit use as state variables in actors:
 	ThreadSafeTransaction() : tr(nullptr) {}
 	void operator=(ThreadSafeTransaction&& r) noexcept;
@@ -161,6 +182,7 @@ public:
 
 private:
 	ISingleThreadTransaction* tr;
+	const Optional<TenantName> tenantName;
 };
 
 // An implementation of IClientApi that serializes operations onto the network thread and interacts with the lower-level

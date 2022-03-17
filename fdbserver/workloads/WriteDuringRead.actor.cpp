@@ -583,9 +583,29 @@ struct WriteDuringReadWorkload : TestWorkload {
 		    std::string(deterministicRandom()->randomInt(valueSizeRange.first, valueSizeRange.second + 1), 'x'));
 	}
 
+	// Prevent a write only transaction whose commit was previously cancelled from being reordered after this
+	// transaction
+	ACTOR Future<Void> writeBarrier(Database cx) {
+		state Transaction tr(cx);
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
+				// Write-only transactions have a self-conflict in the system keys
+				tr.addWriteConflictRange(allKeys);
+				wait(tr.commit());
+				return Void();
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+
 	ACTOR Future<Void> loadAndRun(Database cx, WriteDuringReadWorkload* self) {
 		state double startTime = now();
 		loop {
+			wait(self->writeBarrier(cx));
+
 			state int i = 0;
 			state int keysPerBatch =
 			    std::min<int64_t>(1000,
@@ -595,18 +615,15 @@ struct WriteDuringReadWorkload : TestWorkload {
 			for (; i < self->nodes; i += keysPerBatch) {
 				state Transaction tr(cx);
 				loop {
-					if (now() - startTime > self->testDuration)
-						return Void();
 					try {
-						if (i == 0) {
-							tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-							tr.addWriteConflictRange(
-							    allKeys); // To prevent a write only transaction whose commit was previously cancelled
-							              // from being reordered after this transaction
-							tr.clear(normalKeys);
-						}
+						if (now() - startTime > self->testDuration)
+							return Void();
 						if (self->useSystemKeys)
 							tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
+						if (i == 0) {
+							tr.clear(normalKeys);
+						}
 
 						int end = std::min(self->nodes, i + keysPerBatch);
 						tr.clear(KeyRangeRef(self->getKeyForIndex(i), self->getKeyForIndex(end)));

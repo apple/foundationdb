@@ -66,6 +66,7 @@ struct WorkloadRequest {
 	double databasePingDelay;
 	int64_t sharedRandomNumber;
 	bool useDatabase;
+	Optional<TenantNameRef> defaultTenant;
 
 	// The vector of option lists are to construct compound workloads.  If there
 	//  is only one workload to be run...pass just one list of options!
@@ -96,6 +97,7 @@ struct WorkloadRequest {
 		           clientId,
 		           clientCount,
 		           reply,
+		           defaultTenant,
 		           arena);
 	}
 };
@@ -127,7 +129,8 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
                             std::string fileName = std::string(),
                             StringRef startingConfiguration = StringRef(),
                             LocalityData locality = LocalityData(),
-                            UnitTestParameters testOptions = UnitTestParameters());
+                            UnitTestParameters testOptions = UnitTestParameters(),
+                            Optional<TenantName> defaultTenant = Optional<TenantName>());
 
 #include "flow/unactorcompiler.h"
 #endif

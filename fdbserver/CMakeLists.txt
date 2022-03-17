@@ -50,6 +50,10 @@ set(FDBSERVER_SRCS
   KeyValueStoreMemory.actor.cpp
   KeyValueStoreRocksDB.actor.cpp
   KeyValueStoreSQLite.actor.cpp
+  ServerCheckpoint.actor.cpp
+  ServerCheckpoint.actor.h
+  RocksDBCheckpointUtils.actor.cpp
+  RocksDBCheckpointUtils.actor.h
   Knobs.h
   LatencyBandConfig.cpp
   LatencyBandConfig.h
@@ -191,6 +195,7 @@ set(FDBSERVER_SRCS
   workloads/ChangeFeeds.actor.cpp
   workloads/DataDistributionMetrics.actor.cpp
   workloads/DataLossRecovery.actor.cpp
+  workloads/PhysicalShardMove.actor.cpp
   workloads/DDBalance.actor.cpp
   workloads/DDMetrics.actor.cpp
   workloads/DDMetricsExclude.actor.cpp
@@ -265,6 +270,7 @@ set(FDBSERVER_SRCS
   workloads/TagThrottleApi.actor.cpp
   workloads/TargetedKill.actor.cpp
   workloads/TaskBucketCorrectness.actor.cpp
+  workloads/TenantManagement.actor.cpp
   workloads/ThreadSafety.actor.cpp
   workloads/Throttling.actor.cpp
   workloads/Throughput.actor.cpp

@@ -300,6 +300,9 @@ public:
 	    stderrSeverity, machineCount, processesPerMachine, coordinators;
 	Optional<std::string> config;
 
+	bool allowDefaultTenant = true;
+	bool allowDisablingTenants = true;
+
 	ConfigDBType getConfigDBType() const { return configDBType; }
 
 	bool tomlKeyPresent(const toml::value& data, std::string key) {
@@ -350,7 +353,9 @@ public:
 		    .add("processesPerMachine", &processesPerMachine)
 		    .add("coordinators", &coordinators)
 		    .add("configDB", &configDBType)
-		    .add("extraMachineCountDC", &extraMachineCountDC);
+		    .add("extraMachineCountDC", &extraMachineCountDC)
+		    .add("allowDefaultTenant", &allowDefaultTenant)
+		    .add("allowDisablingTenants", &allowDisablingTenants);
 		try {
 			auto file = toml::parse(testFile);
 			if (file.contains("configuration") && toml::find(file, "configuration").is_table()) {
@@ -1179,6 +1184,8 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 			    json_spirit::write_string(json_spirit::mValue(regionArr), json_spirit::Output_options::none);
 		}
 
+		g_simulator.restarted = true;
+
 		TraceEvent("RestartSimulatorSettings")
 		    .detail("DesiredCoordinators", g_simulator.desiredCoordinators)
 		    .detail("ProcessesPerMachine", g_simulator.processesPerMachine)
@@ -1784,12 +1791,16 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
                           Standalone<StringRef>* pStartingConfiguration,
                           std::string whitelistBinPaths,
                           TestConfig testConfig,
-                          ProtocolVersion protocolVersion) {
+                          ProtocolVersion protocolVersion,
+                          TenantMode tenantMode) {
 	// SOMEDAY: this does not test multi-interface configurations
 	SimulationConfig simconfig(testConfig);
 	if (testConfig.logAntiQuorum != -1) {
 		simconfig.db.tLogWriteAntiQuorum = testConfig.logAntiQuorum;
 	}
+
+	simconfig.db.tenantMode = tenantMode;
+
 	StatusObject startingConfigJSON = simconfig.db.toJSON(true);
 	std::string startingConfigString = "new";
 	if (testConfig.configureLocked) {
@@ -1882,7 +1893,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 
 	ASSERT(g_simulator.storagePolicy && g_simulator.tLogPolicy);
 	ASSERT(!g_simulator.hasSatelliteReplication || g_simulator.satelliteTLogPolicy);
-	TraceEvent("SimulatorConfig").detail("ConfigString", StringRef(startingConfigString));
+	TraceEvent("SimulatorConfig").setMaxFieldLength(10000).detail("ConfigString", StringRef(startingConfigString));
 
 	const int dataCenters = simconfig.datacenters;
 	const int machineCount = simconfig.machine_count;
@@ -2244,7 +2255,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 
 using namespace std::literals;
 
-#if defined(SSD_ROCKSDB_EXPERIMENTAL) && !VALGRIND
+#if defined(SSD_ROCKSDB_EXPERIMENTAL)
 bool rocksDBEnabled = true;
 #else
 bool rocksDBEnabled = false;
@@ -2269,11 +2280,18 @@ ACTOR void setupAndRun(std::string dataFolder,
 	g_simulator.hasDiffProtocolProcess = testConfig.startIncompatibleProcess;
 	g_simulator.setDiffProtocol = false;
 
+	state bool allowDefaultTenant = testConfig.allowDefaultTenant;
+	state bool allowDisablingTenants = testConfig.allowDisablingTenants;
+
 	// The RocksDB storage engine does not support the restarting tests because you cannot consistently get a clean
 	// snapshot of the storage engine without a snapshotting file system.
 	// https://github.com/apple/foundationdb/issues/5155
 	if (std::string_view(testFile).find("restarting") != std::string_view::npos) {
 		testConfig.storageEngineExcludeTypes.push_back(4);
+
+		// Disable the default tenant in restarting tests for now
+		// TODO: persist the chosen default tenant in the restartInfo.ini file for the second test
+		allowDefaultTenant = false;
 	}
 
 	// TODO: Currently backup and restore related simulation tests are failing when run with rocksDB storage engine
@@ -2281,6 +2299,13 @@ ACTOR void setupAndRun(std::string dataFolder,
 	// Re-enable the backup and restore related simulation tests when the tests are passing again.
 	if (std::string_view(testFile).find("Backup") != std::string_view::npos) {
 		testConfig.storageEngineExcludeTypes.push_back(4);
+	}
+
+	// Disable the default tenant in backup and DR tests for now. This is because backup does not currently duplicate
+	// the tenant map and related state.
+	// TODO: reenable when backup/DR supports tenants.
+	if (std::string_view(testFile).find("Backup") != std::string_view::npos || testConfig.extraDB != 0) {
+		allowDefaultTenant = false;
 	}
 
 	// The RocksDB engine is not always built with the rest of fdbserver. Don't try to use it if it is not included
@@ -2317,6 +2342,23 @@ ACTOR void setupAndRun(std::string dataFolder,
 	FlowTransport::createInstance(true, 1, WLTOKEN_RESERVED_COUNT);
 	TEST(true); // Simulation start
 
+	state Optional<TenantName> defaultTenant;
+	state TenantMode tenantMode = TenantMode::DISABLED;
+	if (allowDefaultTenant && deterministicRandom()->random01() < 0.5) {
+		defaultTenant = "SimulatedDefaultTenant"_sr;
+		if (deterministicRandom()->random01() < 0.9) {
+			tenantMode = TenantMode::REQUIRED;
+		} else {
+			tenantMode = TenantMode::OPTIONAL_TENANT;
+		}
+	} else if (!allowDisablingTenants || deterministicRandom()->random01() < 0.5) {
+		tenantMode = TenantMode::OPTIONAL_TENANT;
+	}
+
+	TraceEvent("SimulatedClusterTenantMode")
+	    .detail("UsingTenant", defaultTenant)
+	    .detail("TenantRequired", tenantMode.toString());
+
 	try {
 		// systemActors.push_back( startSystemMonitor(dataFolder) );
 		if (rebooting) {
@@ -2342,7 +2384,8 @@ ACTOR void setupAndRun(std::string dataFolder,
 			                     &startingConfiguration,
 			                     whitelistBinPaths,
 			                     testConfig,
-			                     protocolVersion);
+			                     protocolVersion,
+			                     tenantMode);
 			wait(delay(1.0)); // FIXME: WHY!!!  //wait for machines to boot
 		}
 		std::string clusterFileDir = joinPath(dataFolder, deterministicRandom()->randomUniqueID().toString());
@@ -2353,7 +2396,10 @@ ACTOR void setupAndRun(std::string dataFolder,
 		                           TEST_ON_TESTERS,
 		                           testerCount,
 		                           testFile,
-		                           startingConfiguration),
+		                           startingConfiguration,
+		                           LocalityData(),
+		                           UnitTestParameters(),
+		                           defaultTenant),
 		                  isBuggifyEnabled(BuggifyType::General) ? 36000.0 : 5400.0));
 	} catch (Error& e) {
 		TraceEvent(SevError, "SetupAndRunError").error(e);

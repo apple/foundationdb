@@ -598,7 +598,7 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(SpanID parentSpan,
 	return rep;
 }
 
-// Returns the current read version (or minimum known committed verison if requested),
+// Returns the current read version (or minimum known committed version if requested),
 // to each request in the provided list. Also check if the request should be throttled.
 // Update GRV statistics according to the request's priority.
 ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,

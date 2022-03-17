@@ -594,6 +594,9 @@ public:
 
 	void removeLaggingStorageServer(Key zoneId);
 
+	// whether server is under wiggling proces, but wiggle is paused for some healthy compliance.
+	bool isWigglePausedServer(const UID& server) const;
+
 	// Returns a random healthy team, which does not contain excludeServer.
 	std::vector<UID> getRandomHealthyTeam(const UID& excludeServer);
 
