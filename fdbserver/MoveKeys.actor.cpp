@@ -1555,6 +1555,8 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(occ);
 
 		loop {
+			shardMap.clear();
+			target.clear();
 			try {
 				tr->getTransaction().trState->taskID = TaskPriority::MoveKeys;
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -1652,6 +1654,10 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 					// currentRange. For all shards internal to currentRange, we overwrite all consecutive keys whose
 					// value is or should be serverKeysFalse in a single write
 					for (oldDest = target.begin(); oldDest != target.end(); ++oldDest) {
+						TraceEvent("CleanUpDataMoveDestRange", dataMoveID)
+						    .detail("DataMoveID", dataMoveID)
+						    .detail("Range", range)
+						    .detail("DestServer", *oldDest);
 						actors.push_back(removeOldDestinations(tr, *oldDest, shardMap[*oldDest], range));
 					}
 				}

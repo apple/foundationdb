@@ -146,8 +146,6 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Data
 			for (int i = 0; i < workers.get().size(); i++)
 				id_data[workers.get()[i].locality.processId()] = workers.get()[i];
 
-			succeeded = true;
-
 			for (int i = 0; i < serverList.get().size(); i++) {
 				auto ssi = decodeServerListValue(serverList.get()[i].value);
 				if (!ssi.isTss()) {
@@ -161,12 +159,15 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Data
 			RangeResult dataMoves = wait(tr.getRange(dataMoveKeys, CLIENT_KNOBS->TOO_MANY));
 			ASSERT(!dataMoves.more && dataMoves.size() < CLIENT_KNOBS->TOO_MANY);
 
+			succeeded = true;
+
 			for (int i = 0; i < dataMoves.size(); ++i) {
 				result->dataMoves.push_back(decodeDataMoveValue(dataMoves[i].value));
 			}
 
 			break;
 		} catch (Error& e) {
+			TraceEvent("GetInitialTeamsError", distributorId).error(e, true).log();
 			wait(tr.onError(e));
 
 			ASSERT(!succeeded); // We shouldn't be retrying if we have already started modifying result in this loop
@@ -787,6 +788,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 					if (dataMoveMap[meta.range.begin]->valid) {
 						RelocateShard rs(meta.range, meta.priority, true);
 						rs.dataMove = dataMoveMap[meta.range.begin];
+						// TODO: Persist priority in DataMoveMetaData.
+						rs.priority = SERVER_KNOBS->PRIORITY_RECOVER_MOVE;
 						TraceEvent("DDInitRestoredDataMove", self->ddId)
 						    .detail("DataMoveID", dataMoveMap[meta.range.begin]->meta.id)
 						    .detail("DataMove", dataMoveMap[meta.range.begin]->meta.toString());
