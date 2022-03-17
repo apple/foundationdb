@@ -625,9 +625,11 @@ void CommitBatchContext::evaluateBatchSize() {
 void CommitBatchContext::trackStorageTeams(const std::set<ptxn::StorageTeamID>& storageTeams) {
 	ASSERT(!pProxyCommitData->tLogGroupCollection->groups().empty());
 	auto tLogGroupId = pProxyCommitData->tLogGroupCollection->assignStorageTeam(*storageTeams.begin())->id();
+	auto allStorageTeamIDs = pProxyCommitData->getAllStorageTeamIDs();
 	if (!pGroupMessageBuilders.count(tLogGroupId)) {
-		pGroupMessageBuilders.emplace(tLogGroupId,
-		                              std::make_shared<ptxn::BroadcastedSubsequencedMessageSerializer>(commitVersion, std::vector<ptxn::StorageTeamID>{}));
+		pGroupMessageBuilders.emplace(
+		    tLogGroupId,
+		    std::make_shared<ptxn::BroadcastedSubsequencedMessageSerializer>(commitVersion, allStorageTeamIDs));
 	}
 }
 
@@ -662,9 +664,11 @@ void CommitBatchContext::findOverlappingTLogGroups() {
 		TraceEvent("EmptyCommits", pProxyCommitData->dbgid);
 		// This is an empty commit controlled by MAX_COMMIT_BATCH_INTERVAL.
 		// We force writing to all groups.
+		auto allStorageTeamIDs = pProxyCommitData->getAllStorageTeamIDs();
 		for (const auto& groupRef : pProxyCommitData->tLogGroupCollection->groups()) {
-			pGroupMessageBuilders.emplace(groupRef->id(),
-			                              std::make_shared<ptxn::BroadcastedSubsequencedMessageSerializer>(commitVersion, std::vector<ptxn::StorageTeamID>{}));
+			pGroupMessageBuilders.emplace(
+			    groupRef->id(),
+			    std::make_shared<ptxn::BroadcastedSubsequencedMessageSerializer>(commitVersion, allStorageTeamIDs));
 		}
 	}
 }
@@ -862,10 +866,11 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 	// add empty txn here
 	ASSERT(self->resolution.size());
 	self->previousCommitVersionByGroup.swap(self->resolution[0].previousCommitVersions);
+	auto allStorageTeamIDs = self->pProxyCommitData->getAllStorageTeamIDs();
 	for (auto& it : self->previousCommitVersionByGroup) {
 		if (self->pGroupMessageBuilders.count(it.first) == 0) {
-			self->pGroupMessageBuilders[it.first] =
-			    std::make_shared<ptxn::BroadcastedSubsequencedMessageSerializer>(self->commitVersion, std::vector<ptxn::StorageTeamID>{});
+			self->pGroupMessageBuilders[it.first] = std::make_shared<ptxn::BroadcastedSubsequencedMessageSerializer>(
+			    self->commitVersion, allStorageTeamIDs);
 		}
 	}
 

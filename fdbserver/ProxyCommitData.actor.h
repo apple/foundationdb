@@ -225,6 +225,18 @@ struct ProxyCommitData {
 	// Each storage server's own team.
 	std::unordered_map<UID, ptxn::StorageServerStorageTeams> ssToStorageTeam;
 
+	// FIXME: This function should be replaced/removed when we do not do broadcasting
+	std::set<ptxn::StorageTeamID> getAllStorageTeamIDs() const {
+		std::set<ptxn::StorageTeamID> result;
+		for (const auto& [_, teams] : ssToStorageTeam) {
+			result.insert(teams.getPrivateMutationsStorageTeamID());
+			std::copy(std::begin(teams.getStorageTeams()),
+			          std::end(teams.getStorageTeams()),
+			          std::inserter(result, std::end(result)));
+		}
+		return result;
+	}
+
 	// List of added/removed storage teams in given TLogGroup.
 	std::unordered_map<UID, std::vector<std::pair<ptxn::StorageTeamID, bool>>> changedTeams;
 
