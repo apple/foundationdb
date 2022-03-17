@@ -44,7 +44,9 @@ public:
 	Deque(Deque const& r) : arr(nullptr), begin(0), end(r.size()), mask(r.mask) {
 		if (r.capacity() > 0) {
 			arr = (T*)aligned_alloc(std::max(__alignof(T), sizeof(void*)), capacity() * sizeof(T));
-			ASSERT(arr != nullptr);
+			if (arr == nullptr) {
+				platform::outOfMemory();
+			}
 		}
 		ASSERT(capacity() >= end || end == 0);
 		if (r.end < r.capacity()) {
@@ -67,7 +69,9 @@ public:
 		mask = r.mask;
 		if (r.capacity() > 0) {
 			arr = (T*)aligned_alloc(std::max(__alignof(T), sizeof(void*)), capacity() * sizeof(T));
-			ASSERT(arr != nullptr);
+			if (arr == nullptr) {
+				platform::outOfMemory();
+			}
 		}
 		ASSERT(capacity() >= end || end == 0);
 		if (r.end < r.capacity()) {
@@ -193,7 +197,9 @@ private:
 		// printf("Growing to %lld (%u-%u mask %u)\n", (long long)newSize, begin, end, mask);
 		T* newArr = (T*)aligned_alloc(std::max(__alignof(T), sizeof(void*)),
 		                              newSize * sizeof(T)); // SOMEDAY: FastAllocator
-		ASSERT(newArr != nullptr);
+		if (newArr == nullptr) {
+			platform::outOfMemory();
+		}
 		for (int i = begin; i != end; i++) {
 			try {
 				new (&newArr[i - begin]) T(std::move_if_noexcept(arr[i & mask]));
