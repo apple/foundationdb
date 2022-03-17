@@ -972,10 +972,10 @@ ACTOR Future<Void> handleCompletedDeltaFile(Reference<BlobWorkerData> bwData,
 		}
 		// FIXME: for a write-hot shard, we could potentially batch these and only pop the largest one after several
 		// have completed
-		// FIXME: also have these be async, have each pop change feed wait on the prior one, wait on them before
-		// re-snapshotting
 		Future<Void> popFuture = bwData->db->popChangeFeedMutations(cfKey, completedDeltaFile.version);
-		wait(popFuture);
+		// Do pop asynchronously
+		// FIXME: this means we could have permanently unpopped data in the case of blob worker failure
+		bwData->addActor.send(popFuture);
 	}
 	while (!rollbacksCompleted->empty() && completedDeltaFile.version >= rollbacksCompleted->front().second) {
 		if (BW_DEBUG) {
