@@ -119,12 +119,6 @@ ptxn::StorageTeamID decodeStorageTeamIdKey(const KeyRef& key);
 std::vector<UID> decodeStorageTeams(const ValueRef& value);
 const Value encodeStorageTeams(const std::vector<UID>& value);
 
-// Map from storage teamId to TLogGroup
-extern const KeyRef storageTeamIdToTLogGroupPrefix;
-extern const KeyRangeRef storageTeamIdToTLogGroupRange;
-const ptxn::StorageTeamID decodeStorageTeamIdToTLogGroupKey(const KeyRef& k);
-const Key storageTeamIdToTLogGroupKey(ptxn::StorageTeamID teamId);
-
 // A map from a storage server ID to a list of teams associated with that SS.
 // The format of the key/value pair is:
 //    Key:   Storage server ID

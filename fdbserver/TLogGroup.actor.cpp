@@ -223,13 +223,6 @@ void TLogGroupCollection::storeState(CommitTransactionRequest* recoveryCommitReq
 		    .detail("Size", group->size())
 		    .detail("Group", group->toString());
 	}
-
-	for (const auto& [teamId, group] : storageTeamToTLogGroupMap) {
-		tr.set(recoveryCommitReq->arena,
-		       storageTeamIdToTLogGroupKey(teamId),
-		       BinaryWriter::toValue(group->id(), Unversioned()));
-		TraceEvent("TLogGroupSSTeamAssignSave").detail("GroupID", group->id()).detail("SSTeamId", teamId);
-	}
 }
 
 void TLogGroupCollection::loadState(const Standalone<RangeResultRef>& store) {
@@ -269,7 +262,6 @@ void TLogGroupCollection::seedTLogGroupAssignment(
 		// Step 3: Assign the storage team to a TLogGroup (Storage Team -> TLogGroup).
 		TLogGroupRef group = assignStorageTeam(teamId);
 		TraceEvent("TLogGroupSeedTeam").detail("StorageTeamId", teamId);
-		tr.set(arena, storageTeamIdToTLogGroupKey(teamId), encodeStorageServerToTeamIdValue(teamId, {}));
 		storageTeams[teamId] = serverSrcUID;
 	}
 }

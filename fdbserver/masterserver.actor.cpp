@@ -975,7 +975,6 @@ ACTOR Future<Void> readTransactionSystemState(Reference<MasterData> self,
 
 	// Clear previous TLogGroupCollection state
 	self->txnStateStore->clear(tLogGroupKeys);
-	self->txnStateStore->clear(storageTeamIdToTLogGroupRange);
 
 	// Load storage teams from \xff keyspace to tLogGroupCollection.
 	RangeResult ssTeams = wait(self->txnStateStore->readRange(storageTeamIdKeyRange));
