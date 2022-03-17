@@ -135,7 +135,6 @@ ERROR( file_corrupt, 1522, "A structurally corrupt data file was detected" )
 ERROR( http_request_failed, 1523, "HTTP response code not received or indicated failure" )
 ERROR( http_auth_failed, 1524, "HTTP request failed due to bad credentials" )
 ERROR( http_bad_request_id, 1525, "HTTP response contained an unexpected X-Request-ID header" )
-ERROR( encrypt_ops_error, 1526, "Encryption/Decryption operation failed" )
 
 // 2xxx Attempt (presumably by a _client_) to do something illegal.  If an error is known to
 // be internally caused, it should be 41xx
@@ -284,6 +283,15 @@ ERROR( snap_not_fully_recovered_unsupported, 2506, "Unsupported when the cluster
 ERROR( snap_log_anti_quorum_unsupported, 2507, "Unsupported when log anti quorum is configured")
 ERROR( snap_with_recovery_unsupported, 2508, "Cluster recovery during snapshot operation not supported")
 ERROR( snap_invalid_uid_string, 2509, "The given uid string is not a 32-length hex string")
+
+// 3XXX - Encryption operations errors
+ERROR( encrypt_ops_error, 3000, "Encryption operation error")
+ERROR( encrypt_header_metadata_mismatch, 3001, "Encryption header metadata mismatch")
+ERROR( encrypt_key_not_found, 3002, "Expected encryption key is missing")
+ERROR( encrypt_key_ttl_expired, 3003, "Expected encryption key TTL has expired")
+ERROR( encrypt_header_checksum_mismatch, 3004, "Encryption header checksum mismatch")
+ERROR( encrypt_update_cipher, 3005, "Attempt to update encryption cipher key")
+ERROR( encrypt_invalid_id, 3006, "Invalid encyrption domainId or encyrption cipher key id")
 
 // 4xxx Internal errors (those that should be generated only by bugs) are decimal 4xxx
 ERROR( unknown_error, 4000, "An unknown error occurred" )  // C++ exception not of type Error
