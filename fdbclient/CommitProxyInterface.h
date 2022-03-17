@@ -171,9 +171,8 @@ struct CommitTransactionRequest : TimedRequest {
 
 	TenantInfo tenantInfo;
 
-	CommitTransactionRequest() : CommitTransactionRequest(TenantInfo(), SpanID()) {}
-	CommitTransactionRequest(TenantInfo const& tenantInfo, SpanID const& context)
-	  : spanContext(context), flags(0), tenantInfo(tenantInfo) {}
+	CommitTransactionRequest() : CommitTransactionRequest(SpanID()) {}
+	CommitTransactionRequest(SpanID const& context) : spanContext(context), flags(0) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

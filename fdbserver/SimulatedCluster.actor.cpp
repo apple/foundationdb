@@ -1184,6 +1184,8 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 			    json_spirit::write_string(json_spirit::mValue(regionArr), json_spirit::Output_options::none);
 		}
 
+		g_simulator.restarted = true;
+
 		TraceEvent("RestartSimulatorSettings")
 		    .detail("DesiredCoordinators", g_simulator.desiredCoordinators)
 		    .detail("ProcessesPerMachine", g_simulator.processesPerMachine)

@@ -19,17 +19,18 @@
  */
 
 #include <set>
-#include <sstream>
+
+#include "fdbclient/DatabaseContext.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Knobs.h"
-#include "fdbclient/StorageServerInterface.h"
-#include "fdbclient/SystemData.h"
-#include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/RunTransaction.actor.h"
+#include "fdbclient/StorageServerInterface.h"
+#include "fdbclient/SystemData.h"
 #include "fdbrpc/Replication.h"
 #include "fdbserver/DataDistribution.actor.h"
+#include "fdbserver/DDTeamCollection.h"
 #include "fdbserver/FDBExecHelper.actor.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
@@ -38,14 +39,14 @@
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/WaitFailure.h"
-#include "fdbserver/DDTeamCollection.h"
 #include "flow/ActorCollection.h"
 #include "flow/Arena.h"
 #include "flow/BooleanParam.h"
+#include "flow/serialize.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
+
 #include "flow/actorcompiler.h" // This must be the last #include.
-#include "flow/serialize.h"
 
 // Read keyservers, return unique set of teams
 ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Database cx,
@@ -494,7 +495,7 @@ ACTOR Future<Void> monitorBatchLimitedTime(Reference<AsyncVar<ServerDBInfo> cons
 	loop {
 		wait(delay(SERVER_KNOBS->METRIC_UPDATE_RATE));
 
-		state Reference<GrvProxyInfo> grvProxies(new GrvProxyInfo(db->get().client.grvProxies, false));
+		state Reference<GrvProxyInfo> grvProxies(new GrvProxyInfo(db->get().client.grvProxies));
 
 		choose {
 			when(wait(db->onChange())) {}

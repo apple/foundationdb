@@ -149,7 +149,7 @@ Format
 ------
 | One operation type is defined as ``<Type><Count>`` or ``<Type><Count>:<Range>``.
 | When Count is omitted, it's equivalent to setting it to 1.  (e.g. ``g`` is equivalent to ``g1``)
-| Multiple operation types within the same trancaction can be concatenated.  (e.g. ``g9u1`` = 9 GETs and 1 update)
+| Multiple operation types within the same transaction can be concatenated.  (e.g. ``g9u1`` = 9 GETs and 1 update)
 
 Transaction Specification Examples
 ----------------------------------

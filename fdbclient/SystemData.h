@@ -70,6 +70,13 @@ void decodeKeyServersValue(std::map<Tag, UID> const& tag_uid,
 
 extern const KeyRef clusterIdKey;
 
+// "\xff/checkpoint/[[UID]] := [[CheckpointMetaData]]"
+extern const KeyRef checkpointPrefix;
+const Key checkpointKeyFor(UID checkpointID);
+const Value checkpointValue(const CheckpointMetaData& checkpoint);
+UID decodeCheckpointKey(const KeyRef& key);
+CheckpointMetaData decodeCheckpointValue(const ValueRef& value);
+
 // "\xff/storageCacheServer/[[UID]] := StorageServerInterface"
 // This will be added by the cache server on initialization and removed by DD
 // TODO[mpilman]: We will need a way to map uint16_t ids to UIDs in a future
@@ -490,7 +497,7 @@ const Value healthyZoneValue(StringRef const& zoneId, Version version);
 std::pair<Key, Version> decodeHealthyZoneValue(ValueRef const&);
 
 // All mutations done to this range are blindly copied into txnStateStore.
-// Used to create artifically large txnStateStore instances in testing.
+// Used to create artificially large txnStateStore instances in testing.
 extern const KeyRangeRef testOnlyTxnStateStorePrefixRange;
 
 // Snapshot + Incremental Restore
@@ -598,6 +605,8 @@ BlobWorkerInterface decodeBlobWorkerListValue(ValueRef const& value);
 extern const KeyRangeRef tenantMapKeys;
 extern const KeyRef tenantMapPrefix;
 extern const KeyRef tenantMapPrivatePrefix;
+extern const KeyRef tenantLastIdKey;
+extern const KeyRef tenantDataPrefixKey;
 
 Value encodeTenantEntry(TenantMapEntry const& tenantEntry);
 TenantMapEntry decodeTenantEntry(ValueRef const& value);

@@ -281,7 +281,7 @@ public:
 
 // Use special key prefix "\xff\xff/transaction/conflicting_keys/<some_key>",
 // to retrieve keys which caused latest not_committed(conflicting with another transaction) error.
-// The returned key value pairs are interpretted as :
+// The returned key value pairs are interpreted as :
 // prefix/<key1> : '1' - any keys equal or larger than this key are (probably) conflicting keys
 // prefix/<key2> : '0' - any keys equal or larger than this key are (definitely) not conflicting keys
 // Currently, the conflicting keyranges returned are original read_conflict_ranges or union of them.
@@ -522,6 +522,17 @@ public:
 class DataDistributionImpl : public SpecialKeyRangeRWImpl {
 public:
 	explicit DataDistributionImpl(KeyRangeRef kr);
+	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
+	                             KeyRangeRef kr,
+	                             GetRangeLimits limitsHint) const override;
+	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
+};
+
+class TenantMapRangeImpl : public SpecialKeyRangeRWImpl {
+public:
+	const static KeyRangeRef submoduleRange;
+
+	explicit TenantMapRangeImpl(KeyRangeRef kr);
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;

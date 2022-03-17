@@ -286,7 +286,7 @@ void SimpleConfigTransaction::checkDeferredError() const {
 	impl->checkDeferredError(deferredError);
 }
 
-void SimpleConfigTransaction::setDatabase(Database const& cx) {
+void SimpleConfigTransaction::construct(Database const& cx) {
 	impl = PImpl<SimpleConfigTransactionImpl>::create(cx);
 }
 

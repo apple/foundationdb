@@ -893,8 +893,8 @@ ACTOR Future<Void> sendMutationsToApplier(
 					UID applierID = nodeIDs[splitMutationIndex];
 					DEBUG_MUTATION("RestoreLoaderSplitMutation", commitVersion.version, mutation)
 					    .detail("CommitVersion", commitVersion.toString());
-					// CAREFUL: The splitted mutations' lifetime is shorter than the for-loop
-					// Must use deep copy for splitted mutations
+					// CAREFUL: The split mutations' lifetime is shorter than the for-loop
+					// Must use deep copy for split mutations
 					applierVersionedMutationsBuffer[applierID].push_back_deep(
 					    applierVersionedMutationsBuffer[applierID].arena(), VersionedMutation(mutation, commitVersion));
 					msgSize += mutation.expectedSize();
@@ -986,7 +986,7 @@ ACTOR Future<Void> sendMutationsToApplier(
 	return Void();
 }
 
-// Splits a clear range mutation for Appliers and puts results of splitted mutations and
+// Splits a clear range mutation for Appliers and puts results of split mutations and
 // Applier IDs into "mvector" and "nodeIDs" on return.
 void splitMutation(const KeyRangeMap<UID>& krMap,
                    MutationRef m,
@@ -1180,7 +1180,7 @@ void _parseSerializedMutation(KeyRangeMap<Version>* pRangeVersions,
 }
 
 // Parsing the data blocks in a range file
-// kvOpsIter: saves the parsed versioned-mutations for the sepcific LoadingParam;
+// kvOpsIter: saves the parsed versioned-mutations for the specific LoadingParam;
 // samplesIter: saves the sampled mutations from the parsed versioned-mutations;
 // bc: backup container to read the backup file
 // version: the version the parsed mutations should be at
