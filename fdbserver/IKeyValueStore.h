@@ -24,6 +24,22 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/Knobs.h"
+#include "fdbclient/StorageCheckpoint.h"
+
+struct CheckpointRequest {
+	const Version version; // The FDB version at which the checkpoint is created.
+	const KeyRange range; // Keyrange this checkpoint must contain.
+	const CheckpointFormat format;
+	const UID checkpointID;
+	const std::string checkpointDir; // The local directory where the checkpoint file will be created.
+
+	CheckpointRequest(const Version version,
+	                  const KeyRange& range,
+	                  const CheckpointFormat format,
+	                  const UID& id,
+	                  const std::string& checkpointDir)
+	  : version(version), range(range), format(format), checkpointID(id), checkpointDir(checkpointDir) {}
+};
 
 class IClosable {
 public:
@@ -86,6 +102,15 @@ public:
 	virtual void resyncLog() {}
 
 	virtual void enableSnapshot() {}
+
+	// Create a checkpoint.
+	virtual Future<CheckpointMetaData> checkpoint(const CheckpointRequest& request) { throw not_implemented(); }
+
+	// Restore from a checkpoint.
+	virtual Future<Void> restore(const std::vector<CheckpointMetaData>& checkpoints) { throw not_implemented(); }
+
+	// Delete a checkpoint.
+	virtual Future<Void> deleteCheckpoint(const CheckpointMetaData& checkpoint) { throw not_implemented(); }
 
 	/*
 	Concurrency contract

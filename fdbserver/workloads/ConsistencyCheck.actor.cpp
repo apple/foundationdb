@@ -36,8 +36,9 @@
 #include "flow/DeterministicRandom.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/StorageServerInterface.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 #include "flow/network.h"
+
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 //#define SevCCheckInfo SevVerbose
 #define SevCCheckInfo SevInfo
@@ -2373,7 +2374,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		}
 
 		// Check EncryptKeyProxy
-		if (SERVER_KNOBS->ENABLE_ENCRYPT_KEY_PROXY && db.encryptKeyProxy.present() &&
+		if (SERVER_KNOBS->ENABLE_ENCRYPTION && db.encryptKeyProxy.present() &&
 		    (!nonExcludedWorkerProcessMap.count(db.encryptKeyProxy.get().address()) ||
 		     nonExcludedWorkerProcessMap[db.encryptKeyProxy.get().address()].processClass.machineClassFitness(
 		         ProcessClass::EncryptKeyProxy) > fitnessLowerBound)) {

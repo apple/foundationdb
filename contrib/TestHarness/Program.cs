@@ -359,7 +359,7 @@ namespace SummarizeTest
             }
 
             int result = 0;
-            bool unseedCheck = random.NextDouble() < unseedRatio;
+            bool unseedCheck = !noSim && random.NextDouble() < unseedRatio;
             for (int i = 0; i < maxTries; ++i)
             {
                 bool logOnRetryableError = i == maxTries - 1;

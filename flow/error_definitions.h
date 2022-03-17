@@ -175,7 +175,9 @@ ERROR( quick_get_value_miss, 2034, "Found a mapped key that is not served in the
 ERROR( quick_get_key_values_miss, 2035, "Found a mapped range that is not served in the same SS" )
 ERROR( blob_granule_no_ryw, 2036, "Blob Granule Read Transactions must be specified as ryw-disabled" )
 ERROR( blob_granule_not_materialized, 2037, "Blob Granule Read was not materialized" )
-ERROR( get_key_values_and_map_has_more, 2038, "getRangeAndFlatMap does not support continuation for now" )
+ERROR( get_mapped_key_values_has_more, 2038, "getMappedRange does not support continuation for now" )
+ERROR( get_mapped_range_reads_your_writes, 2039, "getMappedRange tries to read data that were previously written in the transaction" )
+ERROR( checkpoint_not_found, 2040, "Checkpoint not found" )
 
 ERROR( incompatible_protocol_version, 2100, "Incompatible protocol version" )
 ERROR( transaction_too_large, 2101, "Transaction exceeds byte limit" )
@@ -285,6 +287,7 @@ ERROR( snap_invalid_uid_string, 2509, "The given uid string is not a 32-length h
 // 4xxx Internal errors (those that should be generated only by bugs) are decimal 4xxx
 ERROR( unknown_error, 4000, "An unknown error occurred" )  // C++ exception not of type Error
 ERROR( internal_error, 4100, "An internal error occurred" )
+ERROR( not_implemented, 4200, "Not implemented yet" )
 // clang-format on
 
 #undef ERROR

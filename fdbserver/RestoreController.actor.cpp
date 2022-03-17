@@ -1140,7 +1140,7 @@ ACTOR static Future<Void> signalRestoreCompleted(Reference<RestoreControllerData
 }
 
 /*
-// Update the most recent time when controller receives hearbeat from each loader and applier
+// Update the most recent time when controller receives heartbeat from each loader and applier
 // TODO: Replace the heartbeat mechanism with FDB failure monitoring mechanism
 ACTOR static Future<Void> updateHeartbeatTime(Reference<RestoreControllerData> self) {
     wait(self->recruitedRoles.getFuture());

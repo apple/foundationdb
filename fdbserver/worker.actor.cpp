@@ -1128,7 +1128,7 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
 		DUMPTOKEN(recruited.getValue);
 		DUMPTOKEN(recruited.getKey);
 		DUMPTOKEN(recruited.getKeyValues);
-		DUMPTOKEN(recruited.getKeyValuesAndFlatMap);
+		DUMPTOKEN(recruited.getMappedKeyValues);
 		DUMPTOKEN(recruited.getShardState);
 		DUMPTOKEN(recruited.waitMetrics);
 		DUMPTOKEN(recruited.splitMetrics);
@@ -1140,6 +1140,9 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
 		DUMPTOKEN(recruited.getKeyValueStoreType);
 		DUMPTOKEN(recruited.watchValue);
 		DUMPTOKEN(recruited.getKeyValuesStream);
+		DUMPTOKEN(recruited.changeFeedStream);
+		DUMPTOKEN(recruited.changeFeedPop);
+		DUMPTOKEN(recruited.changeFeedVersionUpdate);
 
 		prevStorageServer =
 		    storageServer(store, recruited, db, folder, Promise<Void>(), Reference<IClusterConnectionRecord>(nullptr));
@@ -1550,6 +1553,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				DUMPTOKEN(recruited.getValue);
 				DUMPTOKEN(recruited.getKey);
 				DUMPTOKEN(recruited.getKeyValues);
+				DUMPTOKEN(recruited.getMappedKeyValues);
 				DUMPTOKEN(recruited.getShardState);
 				DUMPTOKEN(recruited.waitMetrics);
 				DUMPTOKEN(recruited.splitMetrics);
@@ -1561,7 +1565,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				DUMPTOKEN(recruited.getKeyValueStoreType);
 				DUMPTOKEN(recruited.watchValue);
 				DUMPTOKEN(recruited.getKeyValuesStream);
-				DUMPTOKEN(recruited.getKeyValuesAndFlatMap);
 				DUMPTOKEN(recruited.changeFeedStream);
 				DUMPTOKEN(recruited.changeFeedPop);
 				DUMPTOKEN(recruited.changeFeedVersionUpdate);
@@ -1660,7 +1663,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			DUMPTOKEN(recruited.getValue);
 			DUMPTOKEN(recruited.getKey);
 			DUMPTOKEN(recruited.getKeyValues);
-			DUMPTOKEN(recruited.getKeyValuesAndFlatMap);
+			DUMPTOKEN(recruited.getMappedKeyValues);
 			DUMPTOKEN(recruited.getShardState);
 			DUMPTOKEN(recruited.waitMetrics);
 			DUMPTOKEN(recruited.splitMetrics);
@@ -2061,6 +2064,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					DUMPTOKEN(recruited.getValue);
 					DUMPTOKEN(recruited.getKey);
 					DUMPTOKEN(recruited.getKeyValues);
+					DUMPTOKEN(recruited.getMappedKeyValues);
 					DUMPTOKEN(recruited.getShardState);
 					DUMPTOKEN(recruited.waitMetrics);
 					DUMPTOKEN(recruited.splitMetrics);
@@ -2072,7 +2076,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					DUMPTOKEN(recruited.getKeyValueStoreType);
 					DUMPTOKEN(recruited.watchValue);
 					DUMPTOKEN(recruited.getKeyValuesStream);
-					DUMPTOKEN(recruited.getKeyValuesAndFlatMap);
 					DUMPTOKEN(recruited.changeFeedStream);
 					DUMPTOKEN(recruited.changeFeedPop);
 					DUMPTOKEN(recruited.changeFeedVersionUpdate);

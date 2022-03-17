@@ -251,7 +251,7 @@ struct RestoreControllerInterface : RestoreRoleInterface {
 
 // RestoreAsset uniquely identifies the work unit done by restore roles;
 // It is used to ensure exact-once processing on restore loader and applier;
-// By combining all RestoreAssets across all verstion batches, restore should process all mutations in
+// By combining all RestoreAssets across all version batches, restore should process all mutations in
 // backup range and log files up to the target restore version.
 struct RestoreAsset {
 	UID uid;

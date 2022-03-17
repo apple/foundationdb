@@ -48,6 +48,7 @@ struct RelocateData {
 	int workFactor;
 	std::vector<UID> src;
 	std::vector<UID> completeSources;
+	std::vector<UID> completeDests;
 	bool wantsNewServers;
 	TraceInterval interval;
 
@@ -87,7 +88,7 @@ struct RelocateData {
 		return priority == rhs.priority && boundaryPriority == rhs.boundaryPriority &&
 		       healthPriority == rhs.healthPriority && keys == rhs.keys && startTime == rhs.startTime &&
 		       workFactor == rhs.workFactor && src == rhs.src && completeSources == rhs.completeSources &&
-		       wantsNewServers == rhs.wantsNewServers && randomId == rhs.randomId;
+		       completeDests == rhs.completeDests && wantsNewServers == rhs.wantsNewServers && randomId == rhs.randomId;
 	}
 	bool operator!=(const RelocateData& rhs) const { return !(*this == rhs); }
 };
@@ -262,7 +263,7 @@ struct Busyness {
 
 	Busyness() : ledger(10, 0) {}
 
-	bool canLaunch(int prio, int work) {
+	bool canLaunch(int prio, int work) const {
 		ASSERT(prio > 0 && prio < 1000);
 		return ledger[prio / 100] <= WORK_FULL_UTILIZATION - work; // allow for rounding errors in double division
 	}
@@ -281,7 +282,8 @@ struct Busyness {
 			if (i != 1)
 				result += ", ";
 			result += i + 1 == j ? format("%03d", i * 100) : format("%03d/%03d", i * 100, (j - 1) * 100);
-			result += format("=%1.02f", (float)ledger[i] / WORK_FULL_UTILIZATION);
+			result +=
+			    format("=%1.02f (%d/%d)", (float)ledger[i] / WORK_FULL_UTILIZATION, ledger[i], WORK_FULL_UTILIZATION);
 			i = j;
 		}
 		return result;
@@ -289,7 +291,7 @@ struct Busyness {
 };
 
 // find the "workFactor" for this, were it launched now
-int getWorkFactor(RelocateData const& relocation, int singleRegionTeamSize) {
+int getSrcWorkFactor(RelocateData const& relocation, int singleRegionTeamSize) {
 	if (relocation.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_1_LEFT ||
 	    relocation.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT)
 		return WORK_FULL_UTILIZATION / SERVER_KNOBS->RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
@@ -299,21 +301,26 @@ int getWorkFactor(RelocateData const& relocation, int singleRegionTeamSize) {
 		return WORK_FULL_UTILIZATION / singleRegionTeamSize / SERVER_KNOBS->RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
 }
 
-// Data movement's resource control: Do not overload source servers used for the RelocateData
+int getDestWorkFactor() {
+	// Work of moving a shard is even across destination servers
+	return WORK_FULL_UTILIZATION / SERVER_KNOBS->RELOCATION_PARALLELISM_PER_DEST_SERVER;
+}
+
+// Data movement's resource control: Do not overload servers used for the RelocateData
 // return true if servers are not too busy to launch the relocation
 // This ensure source servers will not be overloaded.
-bool canLaunch(RelocateData& relocation,
-               int teamSize,
-               int singleRegionTeamSize,
-               std::map<UID, Busyness>& busymap,
-               std::vector<RelocateData> cancellableRelocations) {
+bool canLaunchSrc(RelocateData& relocation,
+                  int teamSize,
+                  int singleRegionTeamSize,
+                  std::map<UID, Busyness>& busymap,
+                  std::vector<RelocateData> cancellableRelocations) {
 	// assert this has not already been launched
 	ASSERT(relocation.workFactor == 0);
 	ASSERT(relocation.src.size() != 0);
 	ASSERT(teamSize >= singleRegionTeamSize);
 
 	// find the "workFactor" for this, were it launched now
-	int workFactor = getWorkFactor(relocation, singleRegionTeamSize);
+	int workFactor = getSrcWorkFactor(relocation, singleRegionTeamSize);
 	int neededServers = std::min<int>(relocation.src.size(), teamSize - singleRegionTeamSize + 1);
 	if (SERVER_KNOBS->USE_OLD_NEEDED_SERVERS) {
 		neededServers = std::max(1, (int)relocation.src.size() - teamSize + 1);
@@ -338,18 +345,55 @@ bool canLaunch(RelocateData& relocation,
 	return false;
 }
 
+// candidateTeams is a vector containing one team per datacenter, the team(s) DD is planning on moving the shard to.
+bool canLaunchDest(const std::vector<std::pair<Reference<IDataDistributionTeam>, bool>>& candidateTeams,
+                   int priority,
+                   std::map<UID, Busyness>& busymapDest) {
+	// fail switch if this is causing issues
+	if (SERVER_KNOBS->RELOCATION_PARALLELISM_PER_DEST_SERVER <= 0) {
+		return true;
+	}
+	int workFactor = getDestWorkFactor();
+	for (auto& team : candidateTeams) {
+		for (UID id : team.first->getServerIDs()) {
+			if (!busymapDest[id].canLaunch(priority, workFactor)) {
+				return false;
+			}
+		}
+	}
+	return true;
+}
+
 // update busyness for each server
 void launch(RelocateData& relocation, std::map<UID, Busyness>& busymap, int singleRegionTeamSize) {
 	// if we are here this means that we can launch and should adjust all the work the servers can do
-	relocation.workFactor = getWorkFactor(relocation, singleRegionTeamSize);
+	relocation.workFactor = getSrcWorkFactor(relocation, singleRegionTeamSize);
 	for (int i = 0; i < relocation.src.size(); i++)
 		busymap[relocation.src[i]].addWork(relocation.priority, relocation.workFactor);
 }
 
-void complete(RelocateData const& relocation, std::map<UID, Busyness>& busymap) {
+void launchDest(RelocateData& relocation,
+                const std::vector<std::pair<Reference<IDataDistributionTeam>, bool>>& candidateTeams,
+                std::map<UID, Busyness>& destBusymap) {
+	ASSERT(relocation.completeDests.empty());
+	int destWorkFactor = getDestWorkFactor();
+	for (auto& team : candidateTeams) {
+		for (UID id : team.first->getServerIDs()) {
+			relocation.completeDests.push_back(id);
+			destBusymap[id].addWork(relocation.priority, destWorkFactor);
+		}
+	}
+}
+
+void complete(RelocateData const& relocation, std::map<UID, Busyness>& busymap, std::map<UID, Busyness>& destBusymap) {
 	ASSERT(relocation.workFactor > 0);
 	for (int i = 0; i < relocation.src.size(); i++)
 		busymap[relocation.src[i]].removeWork(relocation.priority, relocation.workFactor);
+
+	int destWorkFactor = getDestWorkFactor();
+	for (UID id : relocation.completeDests) {
+		destBusymap[id].removeWork(relocation.priority, destWorkFactor);
+	}
 }
 
 ACTOR Future<Void> dataDistributionRelocator(struct DDQueueData* self,
@@ -376,6 +420,7 @@ struct DDQueueData {
 	int singleRegionTeamSize;
 
 	std::map<UID, Busyness> busymap; // UID is serverID
+	std::map<UID, Busyness> destBusymap; // UID is serverID
 
 	KeyRangeMap<RelocateData> queueMap;
 	std::set<RelocateData, std::greater<RelocateData>> fetchingSourcesQueue;
@@ -546,15 +591,22 @@ struct DDQueueData {
 						    .detail("Problem", "relocate data that is inFlight is not also in the queue");
 				}
 
+				for (int i = 0; i < it->value().completeDests.size(); i++) {
+					// each server in the inFlight map is in the dest busymap
+					if (!destBusymap.count(it->value().completeDests[i]))
+						TraceEvent(SevError, "DDQueueValidateError10")
+						    .detail("Problem", "each server in the inFlight map is in the destBusymap");
+				}
+
 				// in flight relocates have source servers
 				if (it->value().startTime != -1 && !it->value().src.size())
-					TraceEvent(SevError, "DDQueueValidateError10")
+					TraceEvent(SevError, "DDQueueValidateError11")
 					    .detail("Problem", "in flight relocates have source servers");
 
 				if (inFlightActors.liveActorAt(it->range().begin)) {
 					// the key range in the inFlight map matches the key range in the RelocateData message
 					if (it->value().keys != it->range())
-						TraceEvent(SevError, "DDQueueValidateError11")
+						TraceEvent(SevError, "DDQueueValidateError12")
 						    .detail(
 						        "Problem",
 						        "the key range in the inFlight map matches the key range in the RelocateData message");
@@ -564,13 +616,29 @@ struct DDQueueData {
 			for (auto it = busymap.begin(); it != busymap.end(); ++it) {
 				for (int i = 0; i < it->second.ledger.size() - 1; i++) {
 					if (it->second.ledger[i] < it->second.ledger[i + 1])
-						TraceEvent(SevError, "DDQueueValidateError12")
+						TraceEvent(SevError, "DDQueueValidateError13")
 						    .detail("Problem", "ascending ledger problem")
 						    .detail("LedgerLevel", i)
 						    .detail("LedgerValueA", it->second.ledger[i])
 						    .detail("LedgerValueB", it->second.ledger[i + 1]);
 					if (it->second.ledger[i] < 0.0)
-						TraceEvent(SevError, "DDQueueValidateError13")
+						TraceEvent(SevError, "DDQueueValidateError14")
+						    .detail("Problem", "negative ascending problem")
+						    .detail("LedgerLevel", i)
+						    .detail("LedgerValue", it->second.ledger[i]);
+				}
+			}
+
+			for (auto it = destBusymap.begin(); it != destBusymap.end(); ++it) {
+				for (int i = 0; i < it->second.ledger.size() - 1; i++) {
+					if (it->second.ledger[i] < it->second.ledger[i + 1])
+						TraceEvent(SevError, "DDQueueValidateError15")
+						    .detail("Problem", "ascending ledger problem")
+						    .detail("LedgerLevel", i)
+						    .detail("LedgerValueA", it->second.ledger[i])
+						    .detail("LedgerValueB", it->second.ledger[i + 1]);
+					if (it->second.ledger[i] < 0.0)
+						TraceEvent(SevError, "DDQueueValidateError16")
 						    .detail("Problem", "negative ascending problem")
 						    .detail("LedgerLevel", i)
 						    .detail("LedgerValue", it->second.ledger[i]);
@@ -895,7 +963,7 @@ struct DDQueueData {
 			// SOMEDAY: the list of source servers may be outdated since they were fetched when the work was put in the
 			// queue
 			// FIXME: we need spare capacity even when we're just going to be cancelling work via TEAM_HEALTHY
-			if (!canLaunch(rd, teamSize, singleRegionTeamSize, busymap, cancellableRelocations)) {
+			if (!canLaunchSrc(rd, teamSize, singleRegionTeamSize, busymap, cancellableRelocations)) {
 				// logRelocation( rd, "SkippingQueuedRelocation" );
 				continue;
 			}
@@ -956,6 +1024,18 @@ struct DDQueueData {
 	}
 };
 
+static std::string destServersString(std::vector<std::pair<Reference<IDataDistributionTeam>, bool>> const& bestTeams) {
+	std::stringstream ss;
+
+	for (auto& tc : bestTeams) {
+		for (const auto& id : tc.first->getServerIDs()) {
+			ss << id.toString() << " ";
+		}
+	}
+
+	return std::move(ss).str();
+}
+
 // This actor relocates the specified keys to a good place.
 // The inFlightActor key range map stores the actor for each RelocateData
 ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd, const DDEnabledState* ddEnabledState) {
@@ -970,6 +1050,9 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 	state bool anyHealthy = false;
 	state bool allHealthy = true;
 	state bool anyWithSource = false;
+	state bool anyDestOverloaded = false;
+	state int destOverloadedCount = 0;
+	state int stuckCount = 0;
 	state std::vector<std::pair<Reference<IDataDistributionTeam>, bool>> bestTeams;
 	state double startTime = now();
 	state std::vector<UID> destIds;
@@ -997,7 +1080,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 
 		ASSERT(rd.src.size());
 		loop {
-			state int stuckCount = 0;
+			destOverloadedCount = 0;
+			stuckCount = 0;
 			// state int bestTeamStuckThreshold = 50;
 			loop {
 				state int tciIndex = 0;
@@ -1005,6 +1089,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 				anyHealthy = false;
 				allHealthy = true;
 				anyWithSource = false;
+				anyDestOverloaded = false;
 				bestTeams.clear();
 				// Get team from teamCollections in different DCs and find the best one
 				while (tciIndex < self->teamCollections.size()) {
@@ -1058,18 +1143,41 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 					bestTeams.emplace_back(bestTeam.first.get(), bestTeam.second);
 					tciIndex++;
 				}
-				if (foundTeams && anyHealthy) {
+				// once we've found healthy candidate teams, make sure they're not overloaded with outstanding moves
+				// already
+				anyDestOverloaded = !canLaunchDest(bestTeams, rd.priority, self->destBusymap);
+
+				if (foundTeams && anyHealthy && !anyDestOverloaded) {
+					ASSERT(rd.completeDests.empty());
 					break;
 				}
 
-				TEST(true); // did not find a healthy destination team on the first attempt
-				stuckCount++;
-				TraceEvent(stuckCount > 50 ? SevWarnAlways : SevWarn, "BestTeamStuck", distributorId)
-				    .suppressFor(1.0)
-				    .detail("Count", stuckCount)
-				    .detail("TeamCollectionId", tciIndex)
-				    .detail("NumOfTeamCollections", self->teamCollections.size());
-				wait(delay(SERVER_KNOBS->BEST_TEAM_STUCK_DELAY, TaskPriority::DataDistributionLaunch));
+				if (anyDestOverloaded) {
+					TEST(true); // Destination overloaded throttled move
+					destOverloadedCount++;
+					TraceEvent(destOverloadedCount > 50 ? SevInfo : SevDebug, "DestSSBusy", distributorId)
+					    .suppressFor(1.0)
+					    .detail("StuckCount", stuckCount)
+					    .detail("DestOverloadedCount", destOverloadedCount)
+					    .detail("TeamCollectionId", tciIndex)
+					    .detail("AnyDestOverloaded", anyDestOverloaded)
+					    .detail("NumOfTeamCollections", self->teamCollections.size())
+					    .detail("Servers", destServersString(bestTeams));
+					wait(delay(SERVER_KNOBS->DEST_OVERLOADED_DELAY, TaskPriority::DataDistributionLaunch));
+				} else {
+					TEST(true); // did not find a healthy destination team on the first attempt
+					stuckCount++;
+					TraceEvent(stuckCount > 50 ? SevWarnAlways : SevWarn, "BestTeamStuck", distributorId)
+					    .suppressFor(1.0)
+					    .detail("StuckCount", stuckCount)
+					    .detail("DestOverloadedCount", destOverloadedCount)
+					    .detail("TeamCollectionId", tciIndex)
+					    .detail("AnyDestOverloaded", anyDestOverloaded)
+					    .detail("NumOfTeamCollections", self->teamCollections.size());
+					wait(delay(SERVER_KNOBS->BEST_TEAM_STUCK_DELAY, TaskPriority::DataDistributionLaunch));
+				}
+
+				// TODO different trace event + knob for overloaded? Could wait on an async var for done moves
 			}
 
 			destIds.clear();
@@ -1122,6 +1230,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 
 			// FIXME: do not add data in flight to servers that were already in the src.
 			healthyDestinations.addDataInFlightToTeam(+metrics.bytes);
+
+			launchDest(rd, bestTeams, self->destBusymap);
 
 			if (SERVER_KNOBS->DD_ENABLE_VERBOSE_TRACING) {
 				// StorageMetrics is the rd shard's metrics, e.g., bytes and write bandwidth
@@ -1646,7 +1756,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 					launchData = results;
 				}
 				when(RelocateData done = waitNext(self.dataTransferComplete.getFuture())) {
-					complete(done, self.busymap);
+					complete(done, self.busymap, self.destBusymap);
 					if (serversToLaunchFrom.empty() && !done.src.empty())
 						launchQueuedWorkTimeout = delay(0, TaskPriority::DataDistributionLaunch);
 					serversToLaunchFrom.insert(done.src.begin(), done.src.end());
