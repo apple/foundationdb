@@ -33,6 +33,7 @@ ErrorOr<RangeResult> loadAndMaterializeBlobGranules(const Standalone<VectorRef<B
 
 RangeResult materializeBlobGranule(const BlobGranuleChunkRef& chunk,
                                    KeyRangeRef keyRange,
+                                   Version beginVersion,
                                    Version readVersion,
                                    Optional<StringRef> snapshotData,
                                    StringRef deltaFileData[]);

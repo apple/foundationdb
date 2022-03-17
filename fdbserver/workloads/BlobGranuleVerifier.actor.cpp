@@ -225,7 +225,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		}
 
 		for (const BlobGranuleChunkRef& chunk : chunks) {
-			RangeResult chunkRows = wait(readBlobGranule(chunk, range, version, self->bstore));
+			RangeResult chunkRows = wait(readBlobGranule(chunk, range, 0, version, self->bstore));
 			out.arena().dependsOn(chunkRows.arena());
 			out.append(out.arena(), chunkRows.begin(), chunkRows.size());
 		}

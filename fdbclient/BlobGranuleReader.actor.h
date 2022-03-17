@@ -40,6 +40,7 @@
 // the request
 ACTOR Future<RangeResult> readBlobGranule(BlobGranuleChunkRef chunk,
                                           KeyRangeRef keyRange,
+                                          Version beginVersion,
                                           Version readVersion,
                                           Reference<BackupContainerFileSystem> bstore,
                                           Optional<BlobWorkerStats*> stats = Optional<BlobWorkerStats*>());
