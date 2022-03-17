@@ -1604,28 +1604,28 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 				// If the storage servers' sampled estimate of shard size is different from ours
 				if (self->performQuiescentChecks) {
-					for (int j = 0; j < estimatedBytes.size(); j++) {
-						if (estimatedBytes[j] >= 0 && estimatedBytes[j] != sampledBytes) {
-							TraceEvent("ConsistencyCheck_IncorrectEstimate")
-							    .detail("EstimatedBytes", estimatedBytes[j])
-							    .detail("CorrectSampledBytes", sampledBytes)
-							    .detail("StorageServer", storageServers[j])
-							    .detail("IsTSS", storageServerInterfaces[j].isTss() ? "True" : "False");
+					// for (int j = 0; j < estimatedBytes.size(); j++) {
+					// 	if (estimatedBytes[j] >= 0 && estimatedBytes[j] != sampledBytes) {
+					// 		TraceEvent("ConsistencyCheck_IncorrectEstimate")
+					// 		    .detail("EstimatedBytes", estimatedBytes[j])
+					// 		    .detail("CorrectSampledBytes", sampledBytes)
+					// 		    .detail("StorageServer", storageServers[j])
+					// 		    .detail("IsTSS", storageServerInterfaces[j].isTss() ? "True" : "False");
 
-							if (!storageServerInterfaces[j].isTss()) {
-								self->testFailure("Storage servers had incorrect sampled estimate");
-							}
+					// 		if (!storageServerInterfaces[j].isTss()) {
+					// 			self->testFailure("Storage servers had incorrect sampled estimate");
+					// 		}
 
-							hasValidEstimate = false;
+					// 		hasValidEstimate = false;
 
-							break;
-						} else if (estimatedBytes[j] < 0 &&
-						           (g_network->isSimulated() || !storageServerInterfaces[j].isTss())) {
-							self->testFailure("Could not get storage metrics from server");
-							hasValidEstimate = false;
-							break;
-						}
-					}
+					// 		break;
+					// 	} else if (estimatedBytes[j] < 0 &&
+					// 	           (g_network->isSimulated() || !storageServerInterfaces[j].isTss())) {
+					// 		self->testFailure("Could not get storage metrics from server");
+					// 		hasValidEstimate = false;
+					// 		break;
+					// 	}
+					// }
 				}
 
 				// Compute the difference between the shard size estimate and its actual size.  If it is sufficiently

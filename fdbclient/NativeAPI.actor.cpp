@@ -6901,7 +6901,7 @@ ACTOR static Future<CheckpointMetaData> getCheckpointMetaDataInternal(GetCheckpo
                                                                       Reference<LocationInfo> alternatives,
                                                                       double timeout) {
 	TraceEvent("GetCheckpointMetaDataInternalBegin")
-	    .detail("Range", req.range.toString())
+	    .detail("Range", req.range)
 	    .detail("Version", req.version)
 	    .detail("Format", static_cast<int>(req.format))
 	    .detail("Locations", alternatives->description());
@@ -6918,13 +6918,13 @@ ACTOR static Future<CheckpointMetaData> getCheckpointMetaDataInternal(GetCheckpo
 	choose {
 		when(wait(waitForAll(fs))) {
 			TraceEvent("GetCheckpointMetaDataInternalWaitEnd")
-			    .detail("Range", req.range.toString())
+			    .detail("Range", req.range)
 			    .detail("Version", req.version);
 		}
 		when(wait(delay(timeout))) {
 			error = timed_out();
 			TraceEvent("GetCheckpointMetaDataInternalTimeout")
-			    .detail("Range", req.range.toString())
+			    .detail("Range", req.range)
 			    .detail("Version", req.version);
 		}
 	}
@@ -6933,7 +6933,7 @@ ACTOR static Future<CheckpointMetaData> getCheckpointMetaDataInternal(GetCheckpo
 		if (!fs[i].isReady()) {
 			error = timed_out();
 			TraceEvent("GetCheckpointMetaDataInternalSSTimeout")
-			    .detail("Range", req.range.toString())
+			    .detail("Range", req.range)
 			    .detail("Version", req.version)
 			    .detail("StorageServer", alternatives->getInterface(i).uniqueID);
 			continue;
@@ -6942,7 +6942,7 @@ ACTOR static Future<CheckpointMetaData> getCheckpointMetaDataInternal(GetCheckpo
 		if (fs[i].get().isError()) {
 			const Error& e = fs[i].get().getError();
 			TraceEvent("GetCheckpointMetaDataInternalError")
-			    .detail("Range", req.range.toString())
+			    .detail("Range", req.range)
 			    .detail("Version", req.version)
 			    .detail("StorageServer", alternatives->getInterface(i).uniqueID)
 			    .error(e, true);
@@ -7004,7 +7004,7 @@ ACTOR Future<std::vector<CheckpointMetaData>> getCheckpointMetaData(Database cx,
 			TraceEvent("GetCheckpointMetaDataError").detail("Range", keys.toString()).error(e, true);
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
 			    e.code() == error_code_connection_failed || e.code() == error_code_broken_promise) {
-				cx->invalidateCache(keys);
+				cx->invalidateCache(allKeys);
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY));
 			} else {
 				throw;
