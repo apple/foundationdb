@@ -829,7 +829,7 @@ namespace SummarizeTest
                                 if (ev.DDetails.ContainsKey("FaultInjectionEnabled"))
                                     xout.Add(new XAttribute("FaultInjectionEnabled", ev.Details.FaultInjectionEnabled));
                             }
-                            if (ev.Type == "Simulation")
+                            if (ev.Type == "Simulation" || ev.Type == "NonSimulationTest")
                             {
                                 xout.Add(
                                     new XAttribute("TestFile", ev.Details.TestFile));
