@@ -333,9 +333,7 @@ struct NetNotifiedQueueWithAcknowledgements final : NotifiedQueue<T>,
 	NetNotifiedQueueWithAcknowledgements(int futures, int promises, const Endpoint& remoteEndpoint)
 	  : NotifiedQueue<T>(futures, promises), FlowReceiver(remoteEndpoint, true), onConnect(nullptr) {
 		// A ReplyPromiseStream will be terminated on the server side if the network connection with the client breaks
-		acknowledgements.failures = tagError<Void>(
-		    makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnect(remoteEndpoint.getPrimaryAddress()),
-		    operation_obsolete());
+		acknowledgements.failures = tagError<Void>(FlowTransport::transport().loadedDisconnect(), operation_obsolete());
 	}
 
 	void destroy() override { delete this; }
