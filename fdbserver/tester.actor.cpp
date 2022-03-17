@@ -642,6 +642,7 @@ ACTOR Future<Void> testerServerWorkload(WorkloadRequest work,
 
 		if (work.useDatabase) {
 			cx = Database::createDatabase(ccr, -1, IsInternal::True, locality);
+			cx->defaultTenant = work.defaultTenant.castTo<TenantName>();
 			wait(delay(1.0));
 		}
 
@@ -779,7 +780,10 @@ void throwIfError(const std::vector<Future<ErrorOr<T>>>& futures, std::string er
 	}
 }
 
-ACTOR Future<DistributedTestResults> runWorkload(Database cx, std::vector<TesterInterface> testers, TestSpec spec) {
+ACTOR Future<DistributedTestResults> runWorkload(Database cx,
+                                                 std::vector<TesterInterface> testers,
+                                                 TestSpec spec,
+                                                 Optional<TenantName> defaultTenant) {
 	TraceEvent("TestRunning")
 	    .detail("WorkloadTitle", spec.title)
 	    .detail("TesterCount", testers.size())
@@ -803,6 +807,7 @@ ACTOR Future<DistributedTestResults> runWorkload(Database cx, std::vector<Tester
 		req.clientId = i;
 		req.clientCount = testers.size();
 		req.sharedRandomNumber = sharedRandom;
+		req.defaultTenant = defaultTenant.castTo<TenantNameRef>();
 		workRequests.push_back(testers[i].recruitments.getReply(req));
 	}
 
@@ -894,7 +899,7 @@ ACTOR Future<Void> changeConfiguration(Database cx, std::vector<TesterInterface>
 	options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("configMode"), configMode));
 	spec.options.push_back_deep(spec.options.arena(), options);
 
-	DistributedTestResults testResults = wait(runWorkload(cx, testers, spec));
+	DistributedTestResults testResults = wait(runWorkload(cx, testers, spec, Optional<TenantName>()));
 
 	return Void();
 }
@@ -949,7 +954,7 @@ ACTOR Future<Void> checkConsistency(Database cx,
 	state double start = now();
 	state bool lastRun = false;
 	loop {
-		DistributedTestResults testResults = wait(runWorkload(cx, testers, spec));
+		DistributedTestResults testResults = wait(runWorkload(cx, testers, spec, Optional<TenantName>()));
 		if (testResults.ok() || lastRun) {
 			if (g_network->isSimulated()) {
 				g_simulator.connectionFailuresDisableDuration = connectionFailures;
@@ -969,11 +974,12 @@ ACTOR Future<Void> checkConsistency(Database cx,
 ACTOR Future<bool> runTest(Database cx,
                            std::vector<TesterInterface> testers,
                            TestSpec spec,
-                           Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+                           Reference<AsyncVar<ServerDBInfo>> dbInfo,
+                           Optional<TenantName> defaultTenant) {
 	state DistributedTestResults testResults;
 
 	try {
-		Future<DistributedTestResults> fTestResults = runWorkload(cx, testers, spec);
+		Future<DistributedTestResults> fTestResults = runWorkload(cx, testers, spec, defaultTenant);
 		if (spec.timeout > 0) {
 			fTestResults = timeoutError(fTestResults, spec.timeout);
 		}
@@ -1418,7 +1424,8 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
                             std::vector<TesterInterface> testers,
                             std::vector<TestSpec> tests,
                             StringRef startingConfiguration,
-                            LocalityData locality) {
+                            LocalityData locality,
+                            Optional<TenantName> defaultTenant) {
 	state Database cx;
 	state Reference<AsyncVar<ServerDBInfo>> dbInfo(new AsyncVar<ServerDBInfo>);
 	state Future<Void> ccMonitor = monitorServerDBInfo(cc, LocalityData(), dbInfo); // FIXME: locality
@@ -1466,6 +1473,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 
 	if (useDB) {
 		cx = openDBOnServer(dbInfo);
+		cx->defaultTenant = defaultTenant;
 	}
 
 	state Future<Void> disabler = disableConnectionFailuresAfter(FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS, "Tester");
@@ -1493,6 +1501,11 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 		}
 	}
 
+	if (useDB && defaultTenant.present()) {
+		TraceEvent("CreatingDefaultTenant").detail("Tenant", defaultTenant.get());
+		wait(ManagementAPI::createTenant(cx.getReference(), defaultTenant.get()));
+	}
+
 	if (useDB && waitForQuiescenceBegin) {
 		TraceEvent("TesterStartingPreTestChecks")
 		    .detail("DatabasePingDelay", databasePingDelay)
@@ -1518,7 +1531,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 	state int idx = 0;
 	for (; idx < tests.size(); idx++) {
 		printf("Run test:%s start\n", tests[idx].title.toString().c_str());
-		wait(success(runTest(cx, testers, tests[idx], dbInfo)));
+		wait(success(runTest(cx, testers, tests[idx], dbInfo, defaultTenant)));
 		printf("Run test:%s Done.\n", tests[idx].title.toString().c_str());
 		// do we handle a failure here?
 	}
@@ -1568,7 +1581,8 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
                             test_location_t at,
                             int minTestersExpected,
                             StringRef startingConfiguration,
-                            LocalityData locality) {
+                            LocalityData locality,
+                            Optional<TenantName> defaultTenant) {
 	state int flags = (at == TEST_ON_SERVERS ? 0 : GetWorkersRequest::TESTER_CLASS_ONLY) |
 	                  GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY;
 	state Future<Void> testerTimeout = delay(600.0); // wait 600 sec for testers to show up
@@ -1599,7 +1613,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 	for (int i = 0; i < workers.size(); i++)
 		ts.push_back(workers[i].interf.testerInterface);
 
-	wait(runTests(cc, ci, ts, tests, startingConfiguration, locality));
+	wait(runTests(cc, ci, ts, tests, startingConfiguration, locality, defaultTenant));
 	return Void();
 }
 
@@ -1636,7 +1650,8 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
                             std::string fileName,
                             StringRef startingConfiguration,
                             LocalityData locality,
-                            UnitTestParameters testOptions) {
+                            UnitTestParameters testOptions,
+                            Optional<TenantName> defaultTenant) {
 	state std::vector<TestSpec> testSpecs;
 	auto cc = makeReference<AsyncVar<Optional<ClusterControllerFullInterface>>>();
 	auto ci = makeReference<AsyncVar<Optional<ClusterInterface>>>();
@@ -1718,10 +1733,11 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 		actors.push_back(
 		    reportErrors(monitorServerDBInfo(cc, LocalityData(), db), "MonitorServerDBInfo")); // FIXME: Locality
 		actors.push_back(reportErrors(testerServerCore(iTesters[0], connRecord, db, locality), "TesterServerCore"));
-		tests = runTests(cc, ci, iTesters, testSpecs, startingConfiguration, locality);
+		tests = runTests(cc, ci, iTesters, testSpecs, startingConfiguration, locality, defaultTenant);
 	} else {
-		tests = reportErrors(runTests(cc, ci, testSpecs, at, minTestersExpected, startingConfiguration, locality),
-		                     "RunTests");
+		tests = reportErrors(
+		    runTests(cc, ci, testSpecs, at, minTestersExpected, startingConfiguration, locality, defaultTenant),
+		    "RunTests");
 	}
 
 	choose {
