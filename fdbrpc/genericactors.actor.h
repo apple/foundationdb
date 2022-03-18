@@ -213,6 +213,9 @@ void endStreamOnDisconnect(Future<Void> signal,
 	try {
 		choose {
 			when(wait(signal)) { stream.sendError(connection_failed()); }
+			when(wait(peer.isValid() ? peer->disconnect.getFuture() : Never())) {
+				stream.sendError(connection_failed());
+			}
 			when(wait(stream.getErrorFutureAndDelPromiseRef())) {}
 		}
 	} catch (Error& e) {

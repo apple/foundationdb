@@ -8724,7 +8724,7 @@ ACTOR Future<Void> singleChangeFeedStream(Reference<DatabaseContext> db,
 		    .detail("Range", range)
 		    .detail("Begin", *begin)
 		    .detail("End", end)
-		    .detail("CanReadPopped", true);
+		    .detail("CanReadPopped", canReadPopped);
 	}
 
 	results->streams.clear();
