@@ -1186,7 +1186,10 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	if (versionEpochValue.present()) {
 		self->versionEpoch = BinaryReader::fromStringRef<Version>(versionEpochValue.get(), Unversioned());
 	} else if (BUGGIFY) {
-		self->versionEpoch = 0;
+		// Cannot use a positive version epoch in simulation because of the
+		// clock starting at 0. A positive version epoch would mean the initial
+		// cluster version was negative.
+		self->versionEpoch = deterministicRandom()->randomInt64(-1e6, 0);
 	}
 
 	// Versionstamped operations (particularly those applied from DR) define a minimum commit version
@@ -1203,18 +1206,14 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	// Recover version info
 	self->lastEpochEnd = oldLogSystem->getEnd() - 1;
 	if (self->lastEpochEnd == 0) {
-		if (self->versionEpoch.present()) {
-			// Set the initial cluster version equal to the current timestamp in
-			// microseconds, relative to a defined epoch. Versions advance at
-			// roughtly one million versions per second, so one version equals one
-			// microsecond.
-			self->recoveryTransactionVersion = g_network->timer() * SERVER_KNOBS->VERSIONS_PER_SECOND;
-			if (!g_network->isSimulated()) {
-				self->recoveryTransactionVersion -= self->versionEpoch.get() * SERVER_KNOBS->VERSIONS_PER_SECOND;
-			}
-		} else {
-			self->recoveryTransactionVersion = 1;
-		}
+		// Set the initial cluster version equal to the current timestamp in
+		// microseconds, relative to a defined epoch. Versions advance at
+		// roughtly one million versions per second, so one version equals one
+		// microsecond.
+		self->recoveryTransactionVersion =
+		    self->versionEpoch.present()
+		        ? (g_network->timer() - self->versionEpoch.get()) * SERVER_KNOBS->VERSIONS_PER_SECOND
+		        : 1;
 	} else {
 		if (self->forceRecovery) {
 			self->recoveryTransactionVersion = self->lastEpochEnd + SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT_FORCED;
@@ -1749,6 +1748,11 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	// Write cluster ID into txnStateStore if it is missing.
 	if (!clusterIdExists) {
 		tr.set(recoveryCommitRequest.arena, clusterIdKey, BinaryWriter::toValue(self->clusterId, Unversioned()));
+	}
+	if (self->versionEpoch.present()) {
+		tr.set(recoveryCommitRequest.arena,
+		       versionEpochKey,
+		       BinaryWriter::toValue(self->versionEpoch.get(), Unversioned()));
 	}
 
 	applyMetadataMutations(SpanID(),
