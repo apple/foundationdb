@@ -112,8 +112,9 @@ struct ReadWriteWorkload : KVWorkload {
 	double hotKeyFraction, forceHotProbability = 0; // key based hot traffic setting
 	// server based hot traffic setting
 	int skewRound = 0; // skewDuration = ceil(testDuration / skewRound)
-	double hotServerFraction = 0; // set > 0 to issue hot key based on shard map
+	double hotServerFraction = 0, hotServerShardFraction = 1.0; // set > 0 to issue hot key based on shard map
 	double hotServerReadFrac, hotServerWriteFrac; // hot many traffic goes to hot servers
+	double hotReadWriteServerOverlap; // the portion of intersection of write and hot server
 
 	// hot server state
 	typedef std::vector<std::pair<int64_t, int64_t>> IndexRangeVec;
@@ -231,6 +232,8 @@ struct ReadWriteWorkload : KVWorkload {
 			//   of hot keys, else it is directed to a disjoint set of cold keys
 			hotKeyFraction = getOption(options, "hotKeyFraction"_sr, 0.0);
 			hotServerFraction = getOption(options, "hotServerFraction"_sr, 0.0);
+			hotServerShardFraction = getOption(options, "hotServerShardFraction"_sr, 1.0);
+			hotReadWriteServerOverlap = getOption(options, "hotReadWriteServerOverlap"_sr, 0.0);
 			skewRound = getOption(options, "skewRound"_sr, 0);
 			hotServerReadFrac = getOption(options, "hotServerReadFrac"_sr, 0.8);
 			hotServerWriteFrac = getOption(options, "hotServerWriteFrac"_sr, 0.0);
@@ -804,11 +807,16 @@ struct ReadWriteWorkload : KVWorkload {
 		std::cout << "]\n";
 	}
 
-	int64_t getRandomKeyFromHotServer() {
+	int64_t getRandomKeyFromHotServer(bool hotServerRead = true) {
 		ASSERT(hotServerCount > 0);
 		int begin = currentHotRound * hotServerCount;
+		if (!hotServerRead) {
+			begin += hotServerCount * (1.0 - hotReadWriteServerOverlap); // calculate non-overlap part offset
+		}
 		int idx = deterministicRandom()->randomInt(begin, begin + hotServerCount) % serverShards.size();
-		int shardIdx = deterministicRandom()->randomInt(0, serverShards[idx].second.size());
+		int shardMax = std::min(serverShards[idx].second.size(),
+		                        (size_t)ceil(serverShards[idx].second.size() * hotServerShardFraction));
+		int shardIdx = deterministicRandom()->randomInt(0, shardMax);
 		return deterministicRandom()->randomInt64(serverShards[idx].second[shardIdx].first,
 		                                          serverShards[idx].second[shardIdx].second + 1);
 	}
@@ -820,7 +828,7 @@ struct ReadWriteWorkload : KVWorkload {
 			       hotKeyFraction; // spread hot keys over keyspace
 		} else if (hotServerFraction > 0) {
 			if ((hotServerRead && random < hotServerReadFrac) || (!hotServerRead && random < hotServerWriteFrac)) {
-				return getRandomKeyFromHotServer();
+				return getRandomKeyFromHotServer(hotServerRead);
 			}
 		}
 		return deterministicRandom()->randomInt64(0, nodeCount);
