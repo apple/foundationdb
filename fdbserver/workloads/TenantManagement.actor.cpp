@@ -82,7 +82,9 @@ struct TenantManagementWorkload : TestWorkload {
 		state Transaction tr(cx);
 		if (self->clientId == 0) {
 			self->tenantSubspace = makeString(deterministicRandom()->randomInt(0, 10));
-			generateRandomData(mutateString(self->tenantSubspace), self->tenantSubspace.size());
+			while (self->tenantSubspace.startsWith(systemKeys.begin)) {
+				generateRandomData(mutateString(self->tenantSubspace), self->tenantSubspace.size());
+			}
 			loop {
 				try {
 					tr.setOption(FDBTransactionOptions::RAW_ACCESS);
