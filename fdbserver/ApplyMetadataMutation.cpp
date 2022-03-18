@@ -969,6 +969,16 @@ private:
 		}
 	}
 
+	void checkClearVersionEpochKeys(MutationRef m, KeyRangeRef range) {
+		if (!range.contains(versionEpochKey)) {
+			return;
+		}
+		if (!initialCommit)
+			txnStateStore->clear(singleKeyRange(versionEpochKey));
+		TraceEvent("MutationRequiresRestart", dbgid).detail("M", m);
+		confChange = true;
+	}
+
 	void checkClearTenantMapPrefix(KeyRangeRef range) {
 		if (tenantMapKeys.intersects(range)) {
 			if (tenantMap) {
@@ -1032,6 +1042,9 @@ private:
 		}
 		if (range.contains(writeRecoveryKey)) {
 			txnStateStore->clear(singleKeyRange(writeRecoveryKey));
+		}
+		if (range.contains(versionEpochKey)) {
+			txnStateStore->clear(singleKeyRange(versionEpochKey));
 		}
 		if (range.intersects(testOnlyTxnStateStorePrefixRange)) {
 			txnStateStore->clear(range & testOnlyTxnStateStorePrefixRange);
@@ -1148,6 +1161,7 @@ public:
 				checkClearLogRangesRange(range);
 				checkClearTssMappingKeys(m, range);
 				checkClearTssQuarantineKeys(m, range);
+				checkClearVersionEpochKeys(m, range);
 				checkClearTenantMapPrefix(range);
 				checkClearMiscRangeKeys(range);
 			}

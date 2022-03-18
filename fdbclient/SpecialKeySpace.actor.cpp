@@ -1949,6 +1949,8 @@ Future<Optional<std::string>> VersionEpochImpl::commit(ReadYourWritesTransaction
 			return Optional<std::string>(ManagementAPIError::toJsonString(
 			    false, "versionepoch", "Invalid epoch (int64_t) argument: " + versionEpoch.get().toString()));
 		}
+	} else {
+		ryw->getTransaction().clear(versionEpochKey);
 	}
 	return Optional<std::string>();
 }

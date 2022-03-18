@@ -47,7 +47,7 @@ ACTOR static Future<Optional<int64_t>> getVersionEpoch(Reference<IDatabase> db) 
 }
 
 ACTOR Future<bool> versionEpochCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
-	if (tokens.size() == 1 || tokens.size() == 3) {
+	if (tokens.size() <= 3) {
 		if (tokens.size() == 1) {
 			Optional<int64_t> versionEpoch = wait(getVersionEpoch(db));
 			if (versionEpoch.present()) {
@@ -56,6 +56,25 @@ ACTOR Future<bool> versionEpochCommandActor(Reference<IDatabase> db, std::vector
 				printf("Version epoch is unset\n");
 			}
 			return true;
+		} else if (tokens.size() == 2 && tokencmp(tokens[1], "clear")) {
+			// Clearing the version epoch means versions will no longer attempt
+			// to advance at the same rate as the clock. The current version
+			// will remain unchanged.
+			state Reference<ITransaction> clearTr = db->createTransaction();
+			loop {
+				clearTr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+				try {
+					Optional<int64_t> versionEpoch = wait(getVersionEpoch(db));
+					if (!versionEpoch.present()) {
+						return true;
+					} else {
+						clearTr->clear(versionEpochSpecialKey);
+						wait(safeThreadFutureToFuture(clearTr->commit()));
+					}
+				} catch (Error& e) {
+					wait(safeThreadFutureToFuture(clearTr->onError(e)));
+				}
+			}
 		} else if (tokens.size() == 3) {
 			state int64_t v;
 			int n = 0;
