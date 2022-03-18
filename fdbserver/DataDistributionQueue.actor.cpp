@@ -42,6 +42,7 @@ struct RelocateData {
 	int priority;
 	int boundaryPriority;
 	int healthPriority;
+	RelocateReason reason;
 
 	double startTime;
 	UID randomId;
@@ -52,11 +53,11 @@ struct RelocateData {
 	TraceInterval interval;
 
 	RelocateData()
-	  : priority(-1), boundaryPriority(-1), healthPriority(-1), startTime(-1), workFactor(0), wantsNewServers(false),
-	    interval("QueuedRelocation") {}
+	  : priority(-1), boundaryPriority(-1), healthPriority(-1), reason(RelocateReason::INVALID), startTime(-1),
+	    workFactor(0), wantsNewServers(false), interval("QueuedRelocation") {}
 	explicit RelocateData(RelocateShard const& rs)
 	  : keys(rs.keys), priority(rs.priority), boundaryPriority(isBoundaryPriority(rs.priority) ? rs.priority : -1),
-	    healthPriority(isHealthPriority(rs.priority) ? rs.priority : -1), startTime(now()),
+	    healthPriority(isHealthPriority(rs.priority) ? rs.priority : -1), reason(rs.reason), startTime(now()),
 	    randomId(deterministicRandom()->randomUniqueID()), workFactor(0),
 	    wantsNewServers(rs.priority == SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM ||
 	                    rs.priority == SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM ||
@@ -960,6 +961,16 @@ struct DDQueueData {
 	}
 };
 
+// return true if a.readload > b.readload
+bool greaterReadLoad(Reference<IDataDistributionTeam> a, Reference<IDataDistributionTeam> b) {
+	return a->getLoadReadBandwidth() > b->getLoadReadBandwidth();
+}
+
+// return true if a.readload < b.readload
+bool lessReadLoad(Reference<IDataDistributionTeam> a, Reference<IDataDistributionTeam> b) {
+	return a->getLoadReadBandwidth() < b->getLoadReadBandwidth();
+}
+
 // This actor relocates the specified keys to a good place.
 // The inFlightActor key range map stores the actor for each RelocateData
 ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd, const DDEnabledState* ddEnabledState) {
@@ -1028,6 +1039,10 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 					                          inflightPenalty);
 					req.src = rd.src;
 					req.completeSources = rd.completeSources;
+
+					if(rd.reason == RelocateReason::REBALANCE_READ) {
+						req.teamSorter = greaterReadLoad;
+					}
 					// bestTeam.second = false if the bestTeam in the teamCollection (in the DC) does not have any
 					// server that hosts the relocateData. This is possible, for example, in a fearless configuration
 					// when the remote DC is just brought up.
@@ -1322,7 +1337,7 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 		    ShardsAffectedByTeamFailure::Team(sourceTeam->getServerIDs(), primary));
 		for (int i = 0; i < shards.size(); i++) {
 			if (metrics.keys == shards[i]) {
-				self->output.send(RelocateShard(metrics.keys.get(), priority));
+				self->output.send(RelocateShard(metrics.keys.get(), priority, RelocateReason::REBALANCE_READ));
 				return true;
 			}
 		}
@@ -1395,7 +1410,7 @@ ACTOR Future<bool> rebalanceTeams(DDQueueData* self,
 	    ShardsAffectedByTeamFailure::Team(sourceTeam->getServerIDs(), primary));
 	for (int i = 0; i < shards.size(); i++) {
 		if (moveShard == shards[i]) {
-			self->output.send(RelocateShard(moveShard, priority));
+			self->output.send(RelocateShard(moveShard, priority, RelocateReason::REBALANCE_DISK));
 			return true;
 		}
 	}
@@ -1432,15 +1447,6 @@ ACTOR Future<Void> getSrcDestTeams(DDQueueData* self,
 			*sourceTeam = loadedTeam.first.get();
 	}
 	return Void();
-}
-
-// return true if a.readload > b.readload
-bool greaterReadLoad(Reference<IDataDistributionTeam> a, Reference<IDataDistributionTeam> b) {
-	return a->getLoadReadBandwidth() > b->getLoadReadBandwidth();
-}
-// return true if a.readload < b.readload
-bool lessReadLoad(Reference<IDataDistributionTeam> a, Reference<IDataDistributionTeam> b) {
-	return a->getLoadReadBandwidth() < b->getLoadReadBandwidth();
 }
 
 ACTOR Future<Void> BgDDMountainChopper(DDQueueData* self, int teamCollectionIndex) {

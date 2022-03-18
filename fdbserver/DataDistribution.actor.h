@@ -32,12 +32,15 @@
 #include "fdbclient/RunTransaction.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+enum class RelocateReason { INVALID = -1, OTHER, REBALANCE_DISK, REBALANCE_READ };
+
 struct RelocateShard {
 	KeyRange keys;
 	int priority;
-
-	RelocateShard() : priority(0) {}
-	RelocateShard(KeyRange const& keys, int priority) : keys(keys), priority(priority) {}
+	RelocateReason reason;
+	RelocateShard() : priority(0), reason(RelocateReason::INVALID) {}
+	RelocateShard(KeyRange const& keys, int priority, RelocateReason reason)
+	  : keys(keys), priority(priority), reason(reason) {}
 };
 
 struct IDataDistributionTeam {

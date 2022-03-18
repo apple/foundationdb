@@ -699,8 +699,10 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 					if (!unhealthy && configuration.usableRegions > 1) {
 						unhealthy = initData->shards[shard].remoteSrc.size() != configuration.storageTeamSize;
 					}
-					output.send(RelocateShard(
-					    keys, unhealthy ? SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY : SERVER_KNOBS->PRIORITY_RECOVER_MOVE));
+					output.send(RelocateShard(keys,
+					                          unhealthy ? SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY
+					                                    : SERVER_KNOBS->PRIORITY_RECOVER_MOVE,
+					                          RelocateReason::OTHER));
 				}
 				wait(yield(TaskPriority::DataDistribution));
 			}
