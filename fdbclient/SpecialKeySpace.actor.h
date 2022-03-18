@@ -479,7 +479,9 @@ public:
 class VersionEpochImpl : public SpecialKeyRangeRWImpl {
 public:
 	explicit VersionEpochImpl(KeyRangeRef kr);
-	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const override;
+	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
+	                             KeyRangeRef kr,
+	                             GetRangeLimits limitsHint) const override;
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
 };
 

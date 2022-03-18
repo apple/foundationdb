@@ -1913,7 +1913,7 @@ Future<Optional<std::string>> AdvanceVersionImpl::commit(ReadYourWritesTransacti
 
 ACTOR static Future<RangeResult> getVersionEpochActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
 	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
-	ryw->getTransaction().setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+	ryw->getTransaction().setOption(FDBTransactionOptions::RAW_ACCESS);
 	Optional<Value> val = wait(ryw->getTransaction().get(versionEpochKey));
 	RangeResult result;
 	if (val.present()) {
@@ -1926,7 +1926,9 @@ ACTOR static Future<RangeResult> getVersionEpochActor(ReadYourWritesTransaction*
 
 VersionEpochImpl::VersionEpochImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
 
-Future<RangeResult> VersionEpochImpl::getRange(ReadYourWritesTransaction* ryw, KeyRangeRef kr) const {
+Future<RangeResult> VersionEpochImpl::getRange(ReadYourWritesTransaction* ryw,
+                                               KeyRangeRef kr,
+                                               GetRangeLimits limitsHint) const {
 	ASSERT(kr == getKeyRange());
 	return getVersionEpochActor(ryw, kr);
 }
