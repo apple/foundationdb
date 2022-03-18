@@ -310,7 +310,7 @@ public:
 		touchStorageTeamIDs(storageTeamIDs);
 	}
 
-	template<typename Container_t>
+	template <typename Container_t>
 	void touchStorageTeamIDs(const Container_t& storageTeamIDs) {
 		for (const auto& storageTeamID : storageTeamIDs) {
 			if (serializers.count(storageTeamID) == 0) {
