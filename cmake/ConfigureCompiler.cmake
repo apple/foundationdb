@@ -13,6 +13,7 @@ env_set(USE_TSAN OFF BOOL "Compile with thread sanitizer. It is recommended to d
 env_set(USE_UBSAN OFF BOOL "Compile with undefined behavior sanitizer")
 env_set(FDB_RELEASE_CANDIDATE OFF BOOL "This is a building of a release candidate")
 env_set(FDB_RELEASE OFF BOOL "This is a building of a final release")
+env_set(FDB_PRERELEASE_VER OFF BOOL "Build using pre-release versioning scheme")
 env_set(USE_CCACHE OFF BOOL "Use ccache for compilation if available")
 env_set(RELATIVE_DEBUG_PATHS OFF BOOL "Use relative file paths in debug info")
 env_set(USE_WERROR OFF BOOL "Compile with -Werror. Recommended for local development and CI.")
