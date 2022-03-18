@@ -779,6 +779,9 @@ public:
 	Promise<Void> coreStarted;
 	bool shuttingDown;
 
+	Promise<bool> registerInterfaceAcceptingRequests;
+	Future<Void> interfaceRegistered;
+
 	bool behind;
 	bool versionBehind;
 
@@ -5565,6 +5568,12 @@ ACTOR Future<Void> tssDelayForever() {
 ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 	state double start;
 	try {
+
+		if (data->registerInterfaceAcceptingRequests.canBeSet()) {
+			data->registerInterfaceAcceptingRequests.send(true);
+			wait(data->interfaceRegistered);
+		}
+
 		// If we are disk bound and durableVersion is very old, we need to block updates or we could run out of
 		// memory. This is often referred to as the storage server e-brake (emergency brake)
 
@@ -7582,6 +7591,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 	self.sk = serverKeysPrefixFor(self.tssPairID.present() ? self.tssPairID.get() : self.thisServerID)
 	              .withPrefix(systemKeys.begin); // FFFF/serverKeys/[this server]/
 	self.folder = folder;
+	self.registerInterfaceAcceptingRequests.send(false);
 
 	try {
 		wait(self.storage.init());
@@ -7781,7 +7791,14 @@ ACTOR Future<Void> replaceTSSInterface(StorageServer* self, StorageServerInterfa
 	return Void();
 }
 
-ACTOR Future<Void> storageInterfaceRegistration(StorageServer* self, StorageServerInterface ssi) {
+ACTOR Future<Void> storageInterfaceRegistration(StorageServer* self,
+                                                StorageServerInterface ssi,
+                                                Future<bool> interfaceAcceptingRequests) {
+	bool acceptingRequests = wait(interfaceAcceptingRequests);
+
+	if (acceptingRequests)
+		ssi.startAcceptingRequests();
+
 	try {
 		if (self->isTss()) {
 			wait(replaceTSSInterface(self, ssi));
@@ -7868,10 +7885,13 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		if (recovered.canBeSet())
 			recovered.send(Void());
 
-		ssi.startAcceptingRequests();
-
-		auto f = storageInterfaceRegistration(&self, ssi);
+		Promise<bool> acceptingRequests;
+		auto f = storageInterfaceRegistration(&self, ssi, acceptingRequests.getFuture());
+		acceptingRequests.send(false);
 		wait(f);
+
+		self.interfaceRegistered =
+		    storageInterfaceRegistration(&self, ssi, self.registerInterfaceAcceptingRequests.getFuture());
 
 		TraceEvent("StorageServerStartingCore", self.thisServerID).detail("TimeTaken", now() - start);
 
