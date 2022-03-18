@@ -306,6 +306,7 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 				rep.resolverChangesVersion = self->resolverChangesVersion;
 				self->resolverNeedingChanges.erase(req.requestingProxy);
 
+				TEST(!rep.resolverChanges.empty()); // resolution balancing moves keyranges
 				if (self->resolverNeedingChanges.empty())
 					self->resolverChanges.set(Standalone<VectorRef<ResolverMoveRef>>());
 			}
