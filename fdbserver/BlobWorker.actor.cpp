@@ -954,12 +954,12 @@ ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bw
 	return reSnapshotIdx;
 }
 
-ACTOR Future<Void> handleCompletedDeltaFile(Reference<BlobWorkerData> bwData,
-                                            Reference<GranuleMetadata> metadata,
-                                            BlobFileIndex completedDeltaFile,
-                                            Key cfKey,
-                                            Version cfStartVersion,
-                                            std::deque<std::pair<Version, Version>>* rollbacksCompleted) {
+static void handleCompletedDeltaFile(Reference<BlobWorkerData> bwData,
+                                     Reference<GranuleMetadata> metadata,
+                                     BlobFileIndex completedDeltaFile,
+                                     Key cfKey,
+                                     Version cfStartVersion,
+                                     std::deque<std::pair<Version, Version>>* rollbacksCompleted) {
 	metadata->files.deltaFiles.push_back(completedDeltaFile);
 	ASSERT(metadata->durableDeltaVersion.get() < completedDeltaFile.version);
 	metadata->durableDeltaVersion.set(completedDeltaFile.version);
@@ -972,9 +972,11 @@ ACTOR Future<Void> handleCompletedDeltaFile(Reference<BlobWorkerData> bwData,
 		}
 		// FIXME: for a write-hot shard, we could potentially batch these and only pop the largest one after several
 		// have completed
+		// FIXME: we actually want to pop at this version + 1 because pop is exclusive?
+		// FIXME: since this is async, and worker could die, new blob worker that opens granule should probably kick off
+		// an async pop at its previousDurableVersion after opening the granule to guarantee it is eventually popped?
 		Future<Void> popFuture = bwData->db->popChangeFeedMutations(cfKey, completedDeltaFile.version);
 		// Do pop asynchronously
-		// FIXME: this means we could have permanently unpopped data in the case of blob worker failure
 		bwData->addActor.send(popFuture);
 	}
 	while (!rollbacksCompleted->empty() && completedDeltaFile.version >= rollbacksCompleted->front().second) {
@@ -989,7 +991,6 @@ ACTOR Future<Void> handleCompletedDeltaFile(Reference<BlobWorkerData> bwData,
 		}
 		rollbacksCompleted->pop_front();
 	}
-	return Void();
 }
 
 // if we get an i/o error updating files, or a rollback, reassign the granule to ourselves and start fresh
@@ -1368,12 +1369,12 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 						metadata->durableSnapshotVersion.set(completedFile.version);
 						pendingSnapshots--;
 					} else {
-						wait(handleCompletedDeltaFile(bwData,
-						                              metadata,
-						                              completedFile,
-						                              cfKey,
-						                              startState.changeFeedStartVersion,
-						                              &rollbacksCompleted));
+						handleCompletedDeltaFile(bwData,
+						                         metadata,
+						                         completedFile,
+						                         cfKey,
+						                         startState.changeFeedStartVersion,
+						                         &rollbacksCompleted);
 					}
 
 					inFlightFiles.pop_front();
@@ -1762,12 +1763,12 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 								metadata->durableSnapshotVersion.set(completedFile.version);
 								pendingSnapshots--;
 							} else {
-								wait(handleCompletedDeltaFile(bwData,
-								                              metadata,
-								                              completedFile,
-								                              cfKey,
-								                              startState.changeFeedStartVersion,
-								                              &rollbacksCompleted));
+								handleCompletedDeltaFile(bwData,
+								                         metadata,
+								                         completedFile,
+								                         cfKey,
+								                         startState.changeFeedStartVersion,
+								                         &rollbacksCompleted);
 							}
 
 							inFlightFiles.pop_front();
@@ -2020,13 +2021,13 @@ ACTOR Future<Void> waitForVersion(Reference<GranuleMetadata> metadata, Version v
 	// nothing to do
 
 	if (BW_REQUEST_DEBUG) {
-		printf("WFV %lld) CF=%lld, pendingD=%lld, durableD=%lld, pendingS=%lld, durableS=%lld\n",
-		       v,
-		       metadata->activeCFData.get()->getVersion(),
-		       metadata->pendingDeltaVersion,
-		       metadata->durableDeltaVersion.get(),
-		       metadata->pendingSnapshotVersion,
-		       metadata->durableSnapshotVersion.get());
+		fmt::print("WFV {0}) CF={1}, pendingD={2}, durableD={3}, pendingS={4}, durableS={5}\n",
+		           v,
+		           metadata->activeCFData.get()->getVersion(),
+		           metadata->pendingDeltaVersion,
+		           metadata->durableDeltaVersion.get(),
+		           metadata->pendingSnapshotVersion,
+		           metadata->durableSnapshotVersion.get());
 	}
 
 	ASSERT(metadata->activeCFData.get().isValid());
