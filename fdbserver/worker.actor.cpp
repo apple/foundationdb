@@ -1019,6 +1019,9 @@ void runHeapProfiler(const char* msg) {
 #endif
 }
 
+// fdbserver starts profiling by default
+const char* malloc_conf = "prof:true";
+
 ACTOR Future<Void> runProfiler(ProfilerRequest req) {
 	if (req.type == ProfilerRequest::Type::GPROF_HEAP) {
 		runHeapProfiler("User triggered heap dump");
@@ -1722,6 +1725,10 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					errorForwarders.add(
 					    success(broadcastDBInfoRequest(req, SERVER_KNOBS->DBINFO_SEND_AMOUNT, notUpdated, true)));
 				}
+			}
+			when(HeapProfileRequest req = waitNext(interf.clientInterface.heapProfile.getFuture())) {
+				printf("HeapProfileRequest\n");
+				forwardPromise(req.reply, holdWhile(req.arena, dumpHeapProfile(req.file)));
 			}
 			when(RebootRequest req = waitNext(interf.clientInterface.reboot.getFuture())) {
 				state RebootRequest rebootReq = req;

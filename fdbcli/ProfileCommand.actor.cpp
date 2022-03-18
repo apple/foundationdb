@@ -35,7 +35,10 @@
 
 namespace fdb_cli {
 
-ACTOR Future<bool> profileCommandActor(Reference<ITransaction> tr, std::vector<StringRef> tokens, bool intrans) {
+ACTOR Future<bool> profileCommandActor(Reference<IDatabase> db,
+                                       Reference<ITransaction> tr,
+                                       std::vector<StringRef> tokens,
+                                       bool intrans) {
 	state bool result = true;
 	if (tokens.size() == 1) {
 		printUsage(tokens[0]);
@@ -125,6 +128,12 @@ ACTOR Future<bool> profileCommandActor(Reference<ITransaction> tr, std::vector<S
 			        .removePrefix(LiteralStringRef("\xff\xff/worker_interfaces/"));
 			printf("%s\n", printable(ip_port).c_str());
 		}
+	} else if (tokencmp(tokens[1], "heap")) {
+		if (tokens.size() != 4) {
+			fprintf(stderr, "ERROR: Usage: profile heap <address> <filename>\n");
+			return false;
+		}
+		wait(safeThreadFutureToFuture(db->heapProfileWorker(tokens[2], tokens[3])));
 	} else {
 		fprintf(stderr, "ERROR: Unknown type: %s\n", printable(tokens[1]).c_str());
 		result = false;

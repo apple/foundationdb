@@ -35,6 +35,7 @@ struct ClientWorkerInterface {
 	RequestStream<struct RebootRequest> reboot;
 	RequestStream<struct ProfilerRequest> profiler;
 	RequestStream<struct SetFailureInjection> setFailureInjection;
+	RequestStream<struct HeapProfileRequest> heapProfile;
 
 	bool operator==(ClientWorkerInterface const& r) const { return id() == r.id(); }
 	bool operator!=(ClientWorkerInterface const& r) const { return id() != r.id(); }
@@ -45,7 +46,7 @@ struct ClientWorkerInterface {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, reboot, profiler, setFailureInjection);
+		serializer(ar, reboot, profiler, setFailureInjection, heapProfile);
 	}
 };
 
@@ -61,6 +62,18 @@ struct RebootRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, deleteData, checkData, waitForDuration);
+	}
+};
+
+struct HeapProfileRequest {
+	constexpr static FileIdentifier file_identifier = 9632120;
+	Arena arena;
+	StringRef file;
+	ReplyPromise<Void> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, file, reply, /*must be last in serializer call*/ arena);
 	}
 };
 

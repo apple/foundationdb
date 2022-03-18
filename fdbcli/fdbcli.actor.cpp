@@ -1667,7 +1667,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 				if (tokencmp(tokens[0], "profile")) {
 					getTransaction(db, tr, options, intrans);
-					bool _result = wait(makeInterruptable(profileCommandActor(tr, tokens, intrans)));
+					bool _result = wait(makeInterruptable(profileCommandActor(db, tr, tokens, intrans)));
 					if (!_result)
 						is_error = true;
 					continue;

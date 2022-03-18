@@ -286,6 +286,12 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_reboot_worker(FDBDatabase* 
                                                                    fdb_bool_t check,
                                                                    int duration);
 
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_heap_profile_worker(FDBDatabase* db,
+                                                                         uint8_t const* address,
+                                                                         int address_length,
+                                                                         uint8_t const* fileName,
+                                                                         int fileNameLength);
+
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_force_recovery_with_data_loss(FDBDatabase* db,
                                                                                    uint8_t const* dcid,
                                                                                    int dcid_length);

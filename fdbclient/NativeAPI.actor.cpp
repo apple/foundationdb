@@ -7951,8 +7951,38 @@ ACTOR static Future<int64_t> rebootWorkerActor(DatabaseContext* cx, ValueRef add
 	return 1;
 }
 
+ACTOR static Future<Void> heapProfileWorkerActor(DatabaseContext* cx, StringRef addr, StringRef fileName) {
+	// fetch the addresses of all workers
+	state std::map<Key, std::pair<Value, ClientLeaderRegInterface>> address_interface;
+	if (!cx->getConnectionRecord()) {
+		throw unsupported_operation();
+	}
+	RangeResult kvs = wait(getWorkerInterfaces(cx->getConnectionRecord()));
+	ASSERT(!kvs.more);
+	// Note: reuse this knob from fdbcli, change it if necessary
+	Reference<FlowLock> connectLock(new FlowLock(CLIENT_KNOBS->CLI_CONNECT_PARALLELISM));
+	std::vector<Future<Void>> addInterfs;
+	for (const auto& it : kvs) {
+		addInterfs.push_back(addInterfaceActor(&address_interface, connectLock, it));
+	}
+	wait(waitForAll(addInterfs));
+	if (!address_interface.count(addr)) {
+		throw worker_address_not_found();
+	}
+
+	HeapProfileRequest req;
+	req.file = StringRef(req.arena, fileName);
+	wait(BinaryReader::fromStringRef<ClientWorkerInterface>(address_interface[addr].first, IncludeVersion())
+	         .heapProfile.getReply(req));
+	return Void();
+}
+
 Future<int64_t> DatabaseContext::rebootWorker(StringRef addr, bool check, int duration) {
 	return rebootWorkerActor(this, addr, check, duration);
+}
+
+Future<Void> DatabaseContext::heapProfileWorker(StringRef addr, StringRef fileName) {
+	return heapProfileWorkerActor(this, addr, fileName);
 }
 
 Future<Void> DatabaseContext::forceRecoveryWithDataLoss(StringRef dcId) {

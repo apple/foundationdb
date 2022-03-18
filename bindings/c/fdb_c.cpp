@@ -410,6 +410,16 @@ extern "C" DLLEXPORT FDBFuture* fdb_database_reboot_worker(FDBDatabase* db,
 	return (FDBFuture*)(DB(db)->rebootWorker(StringRef(address, address_length), check, duration).extractPtr());
 }
 
+extern "C" DLLEXPORT FDBFuture* fdb_database_heap_profile_worker(FDBDatabase* db,
+                                                                 uint8_t const* address,
+                                                                 int address_length,
+                                                                 uint8_t const* fileName,
+                                                                 int fileNameLength) {
+	return (FDBFuture*)(DB(db)
+	                        ->heapProfileWorker(StringRef(address, address_length), StringRef(fileName, fileNameLength))
+	                        .extractPtr());
+}
+
 extern "C" DLLEXPORT FDBFuture* fdb_database_force_recovery_with_data_loss(FDBDatabase* db,
                                                                            uint8_t const* dcid,
                                                                            int dcid_length) {

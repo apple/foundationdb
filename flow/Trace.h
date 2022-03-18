@@ -638,6 +638,13 @@ class Future;
 class Void;
 Future<Void> pingTraceLogWriterThread();
 
+// Write a heap profile to |file| that can be visualized with jeprof:
+// https://github.com/jemalloc/jemalloc/wiki/Use-Case%3A-Leak-Checking
+//
+// Performs the dump on the network thread to avoid SlowTasks. |file| must remain valid until the returned future is
+// ready.
+Future<Void> dumpHeapProfile(StringRef file);
+
 enum trace_clock_t { TRACE_CLOCK_NOW, TRACE_CLOCK_REALTIME };
 extern std::atomic<trace_clock_t> g_trace_clock;
 extern TraceBatch g_traceBatch;

@@ -345,6 +345,8 @@ public:
 
 	// Management API, Attempt to kill or suspend a process, return 1 for request sent out, 0 for failure
 	Future<int64_t> rebootWorker(StringRef address, bool check = false, int duration = 0);
+	// Management API, instruct worker to dump a heap profile to fileName
+	Future<Void> heapProfileWorker(StringRef addr, StringRef fileName);
 	// Management API, force the database to recover into DCID, causing the database to lose the most recently committed
 	// mutations
 	Future<Void> forceRecoveryWithDataLoss(StringRef dcId);

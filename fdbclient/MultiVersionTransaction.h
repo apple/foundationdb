@@ -136,6 +136,11 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                   int addressLength,
 	                                   fdb_bool_t check,
 	                                   int duration);
+	FDBFuture* (*databaseHeapProfileWorker)(FDBDatabase* database,
+	                                        uint8_t const* address,
+	                                        int addressLength,
+	                                        uint8_t const* fileName,
+	                                        int fileNameLength);
 	FDBFuture* (*databaseForceRecoveryWithDataLoss)(FDBDatabase* database, uint8_t const* dcid, int dcidLength);
 	FDBFuture* (*databaseCreateSnapshot)(FDBDatabase* database,
 	                                     uint8_t const* uid,
@@ -423,6 +428,7 @@ public:
 	void delref() override { ThreadSafeReferenceCounted<DLDatabase>::delref(); }
 
 	ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration) override;
+	ThreadFuture<Void> heapProfileWorker(const StringRef& address, const StringRef& fileName) override;
 	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
 	ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) override;
 
@@ -686,6 +692,7 @@ public:
 	static Reference<IDatabase> debugCreateFromExistingDatabase(Reference<IDatabase> db);
 
 	ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration) override;
+	ThreadFuture<Void> heapProfileWorker(const StringRef& address, const StringRef& file_name) override;
 	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
 	ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) override;
 

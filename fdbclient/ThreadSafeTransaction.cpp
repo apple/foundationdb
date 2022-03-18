@@ -88,6 +88,14 @@ ThreadFuture<int64_t> ThreadSafeDatabase::rebootWorker(const StringRef& address,
 	});
 }
 
+ThreadFuture<Void> ThreadSafeDatabase::heapProfileWorker(const StringRef& address, const StringRef& fileName) {
+	DatabaseContext* db = this->db;
+	Key addressKey = address;
+	Key fileNameKey = fileName;
+	return onMainThread(
+	    [db, addressKey, fileNameKey]() -> Future<Void> { return db->heapProfileWorker(addressKey, fileNameKey); });
+}
+
 ThreadFuture<Void> ThreadSafeDatabase::forceRecoveryWithDataLoss(const StringRef& dcid) {
 	DatabaseContext* db = this->db;
 	Key dcidKey = dcid;

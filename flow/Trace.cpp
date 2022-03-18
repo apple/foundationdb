@@ -38,6 +38,13 @@
 #include "flow/TDMetric.actor.h"
 #include "flow/MetricSample.h"
 
+#ifdef USE_JEMALLOC
+#include <jemalloc/jemalloc.h>
+// Not all binaries link to jemalloc, so we'll make this a weak symbol so that
+// we can tell if we're linked to jemalloc at run time.
+__attribute__((weak)) int mallctl(const char* name, void* oldp, size_t* oldlenp, void* newp, size_t newlen);
+#endif
+
 #ifdef _WIN32
 #include <windows.h>
 #undef max
@@ -273,6 +280,28 @@ public:
 				ping.ack.send(Void());
 			} catch (Error& e) {
 				TraceEvent(SevError, "CrashDebugPingActionFailed").error(e);
+				throw;
+			}
+		}
+
+		struct HeapDump final : TypedAction<WriterThread, HeapDump> {
+			ThreadReturnPromise<Void> ack;
+			StringRef file;
+
+			explicit HeapDump(StringRef file) : file(file) {}
+			double getTimeEstimate() const override { return 0.005; }
+		};
+		void action(HeapDump& heapDump) {
+			try {
+				auto fileString = heapDump.file.toString();
+#ifdef USE_JEMALLOC
+				const char* file = fileString.c_str();
+				ASSERT(mallctl);
+				mallctl("prof.dump", nullptr, nullptr, &file, sizeof(file));
+#endif
+				heapDump.ack.send(Void());
+			} catch (Error& e) {
+				TraceEvent(SevError, "CrashHeapDumpFailed").error(e);
 				throw;
 			}
 		}
@@ -561,6 +590,13 @@ public:
 
 	Future<Void> pingWriterThread() {
 		auto ping = new WriterThread::Ping;
+		auto f = ping->ack.getFuture();
+		writer->post(ping);
+		return f;
+	}
+
+	Future<Void> heapDump(StringRef file) {
+		auto ping = new WriterThread::HeapDump(file);
 		auto f = ping->ack.getFuture();
 		writer->post(ping);
 		return f;
@@ -870,6 +906,15 @@ void retrieveTraceLogIssues(std::set<std::string>& out) {
 
 Future<Void> pingTraceLogWriterThread() {
 	return g_traceLog.pingWriterThread();
+}
+
+Future<Void> dumpHeapProfile(StringRef file) {
+#ifdef USE_JEMALLOC
+	return g_traceLog.heapDump(file);
+#else
+	TraceEvent(SevWarnAlways, "HeapProfileNotAvailable").detail("Reason", "Not built with jemalloc");
+	return unsupported_operation();
+#endif
 }
 
 TraceEvent::TraceEvent(const char* type, UID id) : BaseTraceEvent(SevInfo, type, id) {

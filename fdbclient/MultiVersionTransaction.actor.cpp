@@ -449,6 +449,16 @@ ThreadFuture<int64_t> DLDatabase::rebootWorker(const StringRef& address, bool ch
 	});
 }
 
+ThreadFuture<Void> DLDatabase::heapProfileWorker(const StringRef& address, const StringRef& fileName) {
+	if (!api->databaseHeapProfileWorker) {
+		return unsupported_operation();
+	}
+
+	FdbCApi::FDBFuture* f =
+	    api->databaseHeapProfileWorker(db, address.begin(), address.size(), fileName.begin(), fileName.size());
+	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) { return Void(); });
+}
+
 ThreadFuture<Void> DLDatabase::forceRecoveryWithDataLoss(const StringRef& dcid) {
 	if (!api->databaseForceRecoveryWithDataLoss) {
 		return unsupported_operation();
@@ -655,6 +665,8 @@ void DLApi::init() {
 	loadClientFunction(&api->clusterCreateDatabase, lib, fdbCPath, "fdb_cluster_create_database", headerVersion < 610);
 	loadClientFunction(&api->clusterDestroy, lib, fdbCPath, "fdb_cluster_destroy", headerVersion < 610);
 	loadClientFunction(&api->futureGetCluster, lib, fdbCPath, "fdb_future_get_cluster", headerVersion < 610);
+	loadClientFunction(
+	    &api->databaseHeapProfileWorker, lib, fdbCPath, "fdb_database_heap_profile_worker", headerVersion >= 710);
 }
 
 void DLApi::selectApiVersion(int apiVersion) {
@@ -1357,6 +1369,11 @@ ThreadFuture<int64_t> MultiVersionDatabase::rebootWorker(const StringRef& addres
 		return dbState->db->rebootWorker(address, check, duration);
 	}
 	return false;
+}
+
+ThreadFuture<Void> MultiVersionDatabase::heapProfileWorker(const StringRef& address, const StringRef& fileName) {
+	auto f = dbState->db ? dbState->db->heapProfileWorker(address, fileName) : ThreadFuture<Void>(Never());
+	return abortableFuture(f, dbState->dbVar->get().onChange);
 }
 
 ThreadFuture<Void> MultiVersionDatabase::forceRecoveryWithDataLoss(const StringRef& dcid) {
