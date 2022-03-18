@@ -259,6 +259,38 @@ def suspend(logger):
     assert get_value_from_status_json(False, 'client', 'database_status', 'available')
 
 
+def extract_version_epoch(cli_output):
+    return cli_output.split(" ")[-1]
+
+
+@enable_logging()
+def targetversion(logger):
+    version1 = run_fdbcli_command('targetversion getepoch')
+    assert version1 == "Version epoch is unset"
+    version2 = int(run_fdbcli_command('getversion'))
+    logger.debug("read version: {}".format(version2))
+    assert version2 >= 0
+    # set the version epoch to the default value
+    logger.debug("setting version epoch to default")
+    versionepoch1 = extract_version_epoch(run_fdbcli_command('targetversion add 0'))
+    # make sure the version epoch matches what was just set
+    versionepoch2 = int(extract_version_epoch(run_fdbcli_command('targetversion getepoch')))
+    logger.debug("version epoch: {}".format(versionepoch2))
+    assert versionepoch1 == versionepoch2
+    # make sure the version increased
+    version3 = int(run_fdbcli_command('getversion'))
+    logger.debug("read version: {}".format(version3))
+    assert version3 >= version2
+    # slightly increase the version epoch
+    versionepoch3 = int(extract_version_epoch(run_fdbcli_command("targetversion set {}".format(versionepoch2 + 1000000))))
+    logger.debug("version epoch: {}".format(versionepoch3))
+    assert versionepoch3 == versionepoch2 + 1000000
+    # clear the version epoch and make sure it is now unset
+    run_fdbcli_command("targetversion clearepoch")
+    version4 = run_fdbcli_command('targetversion getepoch')
+    assert version4 == "Version epoch is unset"
+
+
 def get_value_from_status_json(retry, *args):
     while True:
         result = json.loads(run_fdbcli_command('status', 'json'))
@@ -583,6 +615,7 @@ if __name__ == '__main__':
         maintenance()
         profile()
         suspend()
+        targetversion()
         transaction()
         throttle()
         triggerddteaminfolog()
