@@ -350,7 +350,7 @@ extern const KeyRef minRequiredCommitVersionKey;
 
 //	"\xff/versionEpochKey" = "[[uint64_t]]"
 //	Defines the base epoch representing version 0. The value itself is the
-//	number of seconds since the Unix epoch.
+//	number of microseconds since the Unix epoch.
 extern const KeyRef versionEpochKey;
 
 const Value logsValue(const std::vector<std::pair<UID, NetworkAddress>>& logs,

@@ -613,7 +613,7 @@ ACTOR Future<int64_t> getVersionOffset(Database cx,
 				return 0;
 			}
 			int64_t versionEpoch = BinaryReader::fromStringRef<Version>(versionEpochValue.get(), Unversioned());
-			int64_t versionOffset = abs(rv - (g_network->timer() - versionEpoch) * SERVER_KNOBS->VERSIONS_PER_SECOND);
+			int64_t versionOffset = abs(rv - (g_network->timer() * SERVER_KNOBS->VERSIONS_PER_SECOND - versionEpoch));
 			return versionOffset;
 		} catch (Error& e) {
 			wait(tr.onError(e));

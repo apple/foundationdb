@@ -294,7 +294,7 @@ ACTOR Future<Void> updateRecoveryData(Reference<MasterData> self) {
 					}
 				}
 				if (req.versionEpoch.present()) {
-					self->referenceVersion = req.versionEpoch.get() * SERVER_KNOBS->VERSIONS_PER_SECOND;
+					self->referenceVersion = req.versionEpoch.get();
 				}
 				req.reply.send(Void());
 			}
