@@ -93,7 +93,7 @@ public:
 	    storageCache(&proxyCommitData_.storageCache), tag_popped(&proxyCommitData_.tag_popped),
 	    tssMapping(&proxyCommitData_.tssMapping), tLogGroupCollection(proxyCommitData_.tLogGroupCollection),
 	    initialCommit(initialCommit_), tagToServer(&proxyCommitData_.tagToServer),
-	    ssToStorageTeam(&proxyCommitData_.ssToStorageTeam) {
+	    ssToStorageTeam(&proxyCommitData_.ssToStorageTeam) /* unused , changedTeams(&proxyCommitData_.changedTeams) */ {
 
 		for (const auto& [ss, teams] : proxyCommitData_.ssToStorageTeam) {
 			TraceEvent(SevDebug, "SSTeam", dbgid).detail("SS", ss).detail("Teams", describe(teams.getStorageTeams()));
@@ -110,7 +110,9 @@ public:
 	    confChange(*resolverData_.confChanges), logSystem(resolverData_.logSystem),
 	    popVersion(resolverData_.popVersion), keyInfo(resolverData_.keyInfo), storageCache(resolverData_.storageCache),
 	    tLogGroupCollection(resolverData_.tLogGroupCollection), initialCommit(resolverData_.initialCommit),
-	    forResolver(true), tagToServer(&resolverData_.tagToServer), ssToStorageTeam(resolverData_.ssToStorageTeam) {}
+	    forResolver(true), tagToServer(&resolverData_.tagToServer), ssToStorageTeam(resolverData_.ssToStorageTeam) /* unused
+	    , changedTeams(&resolverData_.changedTeams) */
+	{}
 
 private:
 	// The following variables are incoming parameters
@@ -170,6 +172,9 @@ private:
 
 	std::map<Tag, UID>* tagToServer = nullptr;
 	std::unordered_map<UID, ptxn::StorageServerStorageTeams>* ssToStorageTeam = nullptr;
+
+	// FIXME This is unused.
+	// std::unordered_map<UID, std::vector<std::pair<ptxn::StorageTeamID, bool>>>* changedTeams = nullptr;
 
 	// All SSes' own teams, populated from ssToStorageTeam mapping.
 	std::set<ptxn::StorageTeamID> allTeams;

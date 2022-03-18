@@ -307,8 +307,15 @@ public:
 	BroadcastedSubsequencedMessageSerializer(const Version& storageTeamVersion, const Container_t& storageTeamIDs)
 	  : ProxySubsequencedMessageSerializer(storageTeamVersion) {
 
+		touchStorageTeamIDs(storageTeamIDs);
+	}
+
+	template<typename Container_t>
+	void touchStorageTeamIDs(const Container_t& storageTeamIDs) {
 		for (const auto& storageTeamID : storageTeamIDs) {
-			prepareWriteMessage(storageTeamID);
+			if (serializers.count(storageTeamID) == 0) {
+				prepareWriteMessage(storageTeamID);
+			}
 		}
 	}
 };
