@@ -1616,12 +1616,12 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 
 	recoverAndEndEpoch.cancel();
 
-	ASSERT(self->commitProxies.size() <= self->configuration.getDesiredCommitProxies());
-	ASSERT(self->commitProxies.size() >= 1);
-	ASSERT(self->grvProxies.size() <= self->configuration.getDesiredGrvProxies());
-	ASSERT(self->grvProxies.size() >= 1);
-	ASSERT(self->resolvers.size() <= self->configuration.getDesiredResolvers());
-	ASSERT(self->resolvers.size() >= 1);
+	ASSERT_LE(self->commitProxies.size(), self->configuration.getDesiredCommitProxies());
+	ASSERT_GE(self->commitProxies.size(), 1);
+	ASSERT_LE(self->grvProxies.size(), self->configuration.getDesiredGrvProxies());
+	ASSERT_GE(self->grvProxies.size(), 1);
+	ASSERT_LE(self->resolvers.size(), self->configuration.getDesiredResolvers());
+	ASSERT_GE(self->resolvers.size(), 1);
 
 	self->recoveryState = RecoveryState::RECOVERY_TRANSACTION;
 	TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_STATE_EVENT_NAME).c_str(), self->dbgid)
