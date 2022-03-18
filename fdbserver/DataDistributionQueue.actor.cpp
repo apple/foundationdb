@@ -1395,11 +1395,11 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 	}
 }
 
-// Move a random shard of sourceTeam's to destTeam if sourceTeam has much more data than destTeam
+// Move a random shard from sourceTeam if sourceTeam has much more data than provided destTeam
 ACTOR static Future<bool> rebalanceTeams(DDQueueData* self,
                                          int priority,
-                                         Reference<IDataDistributionTeam> sourceTeam,
-                                         int64_t destBytes,
+                                         Reference<IDataDistributionTeam const> sourceTeam,
+                                         Reference<IDataDistributionTeam const> destTeam,
                                          bool primary,
                                          TraceEvent* traceEvent) {
 	if (g_network->isSimulated() && g_simulator.speedUpSimulation) {
@@ -1437,6 +1437,7 @@ ACTOR static Future<bool> rebalanceTeams(DDQueueData* self,
 	}
 
 	int64_t sourceBytes = sourceTeam->getLoadBytes(false);
+	int64_t destBytes = destTeam->getLoadBytes();
 
 	bool sourceAndDestTooSimilar =
 	    sourceBytes - destBytes <= 3 * std::max<int64_t>(SERVER_KNOBS->MIN_SHARD_BYTES, metrics.bytes);
@@ -1529,7 +1530,7 @@ ACTOR Future<Void> BgDDMountainChopper(DDQueueData* self, int teamCollectionInde
 						bool _moved = wait(rebalanceTeams(self,
 						                                  SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM,
 						                                  loadedTeam.first.get(),
-						                                  randomTeam.first.get()->getLoadBytes(),
+						                                  randomTeam.first.get(),
 						                                  teamCollectionIndex == 0,
 						                                  &traceEvent));
 						moved = _moved;
@@ -1635,7 +1636,7 @@ ACTOR Future<Void> BgDDValleyFiller(DDQueueData* self, int teamCollectionIndex) 
 						bool _moved = wait(rebalanceTeams(self,
 						                                  SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM,
 						                                  randomTeam.first.get(),
-						                                  unloadedTeam.first.get()->getLoadBytes(),
+						                                  unloadedTeam.first.get(),
 						                                  teamCollectionIndex == 0,
 						                                  &traceEvent));
 						moved = _moved;
