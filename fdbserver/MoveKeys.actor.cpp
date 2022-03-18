@@ -754,13 +754,15 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 	try {
 		TraceEvent(SevDebug, interval.begin(), relocationIntervalId)
 		    .detail("KeyBegin", keys.begin)
-		    .detail("KeyEnd", keys.end);
+		    .detail("KeyEnd", keys.end)
+		    .detail("DataMoveID", dataMoveID);
 
 		if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
 			Optional<DataMoveMetaData> md = wait(getDataMoveMetaData(occ, dataMoveID));
 			ASSERT(md.present());
 			dataMove = md.get();
 			ASSERT(dataMove.range == keys);
+			TraceEvent(SevDebug, interval.begin(), relocationIntervalId).detail("FoundDataMove", dataMove.toString());
 		}
 
 		// This process can be split up into multiple transactions if there are too many existing overlapping shards
@@ -1051,6 +1053,14 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 						}
 
 						wait(tr.commit());
+
+						if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+							TraceEvent(SevDebug, interval.begin(), relocationIntervalId)
+							    .detail("DataMoveID", dataMoveID)
+							    .detail("CleanUpCheckpointFromSrc", describe(dataMove.src))
+							    .detail("DataMove", dataMove.toString())
+							    .detail("CommitVersion", tr.getCommittedVersion());
+						}
 
 						begin = endKey;
 						break;
@@ -1586,7 +1596,15 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 				// tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
 				state RangeResult old;
-				    wait(krmGetRanges(tr, keyServersPrefix, range, CLIENT_KNOBS->TOO_MANY, CLIENT_KNOBS->TOO_MANY));
+				old.clear();
+				loop {
+					RangeResult res =
+					    wait(krmGetRanges(tr, keyServersPrefix, range, CLIENT_KNOBS->TOO_MANY, CLIENT_KNOBS->TOO_MANY));
+					old.append_deep(old.arena(), res.begin(), res.size());
+					if (!res.more) {
+						break;
+					}
+				}
 				ASSERT(!old.more && old.size() < CLIENT_KNOBS->TOO_MANY);
 
 				state RangeResult UIDtoTagMap = wait(tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));

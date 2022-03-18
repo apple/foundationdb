@@ -52,6 +52,15 @@ void DataMove::addShard(const DDShardInfo& shard) {
 		return;
 	}
 	if (!shard.hasDest) {
+		if (valid) {
+			TraceEvent("DataMoveAddInValidShard")
+			    .detail("DataMoveID", this->meta.id)
+			    .detail("DataMoveMetaData", this->meta.toString())
+			    .detail("DataMovePrimaryDest", describe(this->primaryDest))
+			    .detail("DataMoveRemoteDest", describe(this->remoteDest))
+			    .detail("ShardPrimaryDest", describe(shard.primaryDest))
+			    .detail("ShardRemoteDest", describe(shard.remoteDest));
+		}
 		valid = false;
 		return;
 	}
@@ -65,12 +74,26 @@ void DataMove::addShard(const DDShardInfo& shard) {
 		std::vector<UID> ss = shard.primaryDest;
 		std::sort(ss.begin(), ss.end());
 		if (!std::equal(this->primaryDest.begin(), this->primaryDest.end(), ss.begin())) {
+			TraceEvent("DataMoveAddInValidShard")
+			    .detail("DataMoveID", this->meta.id)
+			    .detail("DataMoveMetaData", this->meta.toString())
+			    .detail("DataMovePrimaryDest", describe(this->primaryDest))
+			    .detail("DataMoveRemoteDest", describe(this->remoteDest))
+			    .detail("ShardPrimaryDest", describe(shard.primaryDest))
+			    .detail("ShardRemoteDest", describe(shard.remoteDest));
 			valid = false;
 			return;
 		}
 		ss = shard.remoteDest;
 		std::sort(ss.begin(), ss.end());
 		if (!std::equal(this->remoteDest.begin(), this->remoteDest.end(), ss.begin())) {
+			TraceEvent("DataMoveAddInValidShard")
+			    .detail("DataMoveID", this->meta.id)
+			    .detail("DataMoveMetaData", this->meta.toString())
+			    .detail("DataMovePrimaryDest", describe(this->primaryDest))
+			    .detail("DataMoveRemoteDest", describe(this->remoteDest))
+			    .detail("ShardPrimaryDest", describe(shard.primaryDest))
+			    .detail("ShardRemoteDest", describe(shard.remoteDest));
 			valid = false;
 			return;
 		}
@@ -156,8 +179,10 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Data
 				}
 			}
 
-			RangeResult dataMoves = wait(tr.getRange(dataMoveKeys, CLIENT_KNOBS->TOO_MANY));
+			state RangeResult dataMoves = wait(tr.getRange(dataMoveKeys, CLIENT_KNOBS->TOO_MANY));
 			ASSERT(!dataMoves.more && dataMoves.size() < CLIENT_KNOBS->TOO_MANY);
+			Version readVersion = wait(tr.getReadVersion());
+			TraceEvent("GetInitialDataMove", distributorId).detail("ReadVersion", readVersion);
 
 			succeeded = true;
 
@@ -786,10 +811,10 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 					// auto ranges = dataMoveMap.intersectingRanges(meta.range);
 					// ASSERT(ranges.size() == 1);
 					if (dataMoveMap[meta.range.begin]->valid) {
-						RelocateShard rs(meta.range, meta.priority, true);
+						RelocateShard rs(meta.range, SERVER_KNOBS->PRIORITY_RECOVER_MOVE, true);
 						rs.dataMove = dataMoveMap[meta.range.begin];
 						// TODO: Persist priority in DataMoveMetaData.
-						rs.priority = SERVER_KNOBS->PRIORITY_RECOVER_MOVE;
+						// rs.priority = SERVER_KNOBS->PRIORITY_RECOVER_MOVE;
 						TraceEvent("DDInitRestoredDataMove", self->ddId)
 						    .detail("DataMoveID", dataMoveMap[meta.range.begin]->meta.id)
 						    .detail("DataMove", dataMoveMap[meta.range.begin]->meta.toString());

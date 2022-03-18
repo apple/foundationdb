@@ -458,7 +458,6 @@ public:
 			return new ShardInfo(
 			    keys, nullptr, std::make_unique<MoveInShard>(data, moveInShardMetaData.get()), nullptr);
 		} else {
-			std::cout << keys.toString() << std::endl;
 			return new ShardInfo(keys, nullptr, std::make_unique<MoveInShard>(data, keys, version), nullptr);
 		}
 	}
@@ -5795,7 +5794,7 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 	for (const auto& range : moveInRanges) {
 		data->addShard(ShardInfo::newMoveInShard(data, range, version + 1, moveInShardMetaData));
 		newMoveInShards.push_back(data->shards[range.begin]);
-		std::cout << "Adding new MoveInShard: " << data->shards[range.begin]->moveInShard->toString() << std::endl;
+		std::cout << std::endl << "Adding new MoveInShard: " << data->shards[range.begin]->moveInShard->toString() << std::endl;
 	}
 
 	// Update newestAvailableVersion when a shard becomes (un)available (in a separate loop to avoid invalidating vr

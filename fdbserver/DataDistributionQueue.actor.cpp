@@ -956,7 +956,12 @@ struct DDQueueData {
 			for (int r = 0; r < ranges.size(); r++) {
 				RelocateData& rrs = inFlight.rangeContaining(ranges[r].begin)->value();
 				rrs.keys = ranges[r];
-				rrs.dataMoveID = deterministicRandom()->randomUniqueID();
+				if (rd.keys == ranges[r] && rd.restore) {
+					ASSERT(rd.dataMove != nullptr);
+					rrs.dataMoveID = rd.dataMove->meta.id;
+				} else {
+					rrs.dataMoveID = deterministicRandom()->randomUniqueID();
+				}
 
 				launch(rrs, busymap, singleRegionTeamSize);
 				activeRelocations++;
