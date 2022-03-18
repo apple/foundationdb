@@ -240,8 +240,8 @@ public:
 			(*it)->setPriority(p);
 		}
 	}
-	void addref() override { ReferenceCounted<ParallelTCInfo>::addref(); }
-	void delref() override { ReferenceCounted<ParallelTCInfo>::delref(); }
+	void addref() const override { ReferenceCounted<ParallelTCInfo>::addref(); }
+	void delref() const override { ReferenceCounted<ParallelTCInfo>::delref(); }
 
 	void addServers(const std::vector<UID>& servers) override {
 		ASSERT(!teams.empty());

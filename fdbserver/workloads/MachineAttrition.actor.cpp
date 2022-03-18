@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbserver/TesterInterface.actor.h"
@@ -48,6 +49,7 @@ ACTOR Future<bool> ignoreSSFailuresForDuration(Database cx, double duration) {
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.clear(healthyZoneKey);
 			wait(tr.commit());
 			TraceEvent("IgnoreSSFailureComplete").log();

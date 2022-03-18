@@ -593,15 +593,25 @@ template class FastAllocator<16384>;
 #ifdef USE_JEMALLOC
 #include <jemalloc/jemalloc.h>
 TEST_CASE("/jemalloc/4k_aligned_usable_size") {
-	for (int i = 1; i < 4; ++i) {
-		auto* ptr = aligned_alloc(4096, i * 4096);
-		try {
+	void* ptr;
+	try {
+		// Check that we can allocate 4k aligned up to 16k with no internal
+		// fragmentation
+		for (int i = 1; i < 4; ++i) {
+			ptr = aligned_alloc(4096, i * 4096);
 			ASSERT_EQ(malloc_usable_size(ptr), i * 4096);
-		} catch (...) {
 			aligned_free(ptr);
-			throw;
+			ptr = nullptr;
 		}
+		// Also check that we can allocate magazines with no internal
+		// fragmentation, should we decide to do that.
+		ptr = aligned_alloc(4096, kFastAllocMagazineBytes);
+		ASSERT_EQ(malloc_usable_size(ptr), kFastAllocMagazineBytes);
 		aligned_free(ptr);
+		ptr = nullptr;
+	} catch (...) {
+		aligned_free(ptr);
+		throw;
 	}
 	return Void();
 }

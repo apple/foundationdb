@@ -28,10 +28,11 @@
 #include "flow/Arena.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 #include "flow/serialize.h"
 #include <cstring>
 #include <limits>
+
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 ACTOR Future<std::pair<Standalone<VectorRef<KeyValueRef>>, Version>> readDatabase(Database cx) {
 	state Transaction tr(cx);

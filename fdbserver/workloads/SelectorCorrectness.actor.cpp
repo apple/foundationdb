@@ -118,8 +118,6 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 			state Transaction tr(cx);
 			state ReadYourWritesTransaction trRYOW(cx);
 
-			trRYOW.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-
 			if (self->testReadYourWrites) {
 				myValue = StringRef(format("%010d", deterministicRandom()->randomInt(0, 10000000)));
 				for (int i = 2; i < self->maxKeySpace; i += 4)

@@ -140,6 +140,7 @@ ACTOR Future<Void> fetchCheckpointFile(Database cx,
 	state StorageServerInterface ssi;
 	loop {
 		try {
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			Optional<Value> ss = wait(tr.get(serverListKeyFor(ssID)));
 			if (!ss.present()) {
 				throw checkpoint_not_found();
