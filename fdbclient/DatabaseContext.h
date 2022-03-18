@@ -246,7 +246,8 @@ public:
 		                                    lockAware,
 		                                    internal,
 		                                    apiVersion,
-		                                    switchable));
+		                                    switchable,
+		                                    defaultTenant));
 	}
 
 	Optional<KeyRangeLocationInfo> getCachedLocation(const Optional<TenantName>& tenant,
@@ -370,7 +371,8 @@ public:
 	                         LockAware,
 	                         IsInternal = IsInternal::True,
 	                         int apiVersion = Database::API_VERSION_LATEST,
-	                         IsSwitchable = IsSwitchable::False);
+	                         IsSwitchable = IsSwitchable::False,
+	                         Optional<TenantName> defaultTenant = Optional<TenantName>());
 
 	explicit DatabaseContext(const Error& err);
 
@@ -391,6 +393,10 @@ public:
 	LocalityData clientLocality;
 	QueueModel queueModel;
 	EnableLocalityLoadBalance enableLocalityLoadBalance{ EnableLocalityLoadBalance::False };
+
+	// The tenant used when none is specified for a transaction. Ordinarily this is unspecified, in which case the raw
+	// key-space is used.
+	Optional<TenantName> defaultTenant;
 
 	struct VersionRequest {
 		SpanID spanContext;

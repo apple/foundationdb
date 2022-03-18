@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <cstdint>
+
 #include "fdbclient/ConfigTransactionInterface.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/ConfigNode.h"
@@ -31,9 +33,9 @@
 #include "flow/UnitTest.h"
 #include "flow/IndexedSet.h"
 #include "fdbclient/MonitorLeader.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 #include "flow/network.h"
-#include <cstdint>
+
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 // This module implements coordinationServer() and the interfaces in CoordinationInterface.h
 

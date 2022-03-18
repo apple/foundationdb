@@ -2085,6 +2085,7 @@ int main(int argc, char* argv[]) {
 			                       opts.localities));
 			g_network->run();
 		} else if (role == ServerRole::Test) {
+			TraceEvent("NonSimulationTest").detail("TestFile", opts.testFile);
 			setupRunLoopProfiler();
 			auto m = startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId);
 			f = stopAfter(runTests(

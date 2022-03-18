@@ -359,7 +359,7 @@ namespace SummarizeTest
             }
 
             int result = 0;
-            bool unseedCheck = random.NextDouble() < unseedRatio;
+            bool unseedCheck = !noSim && random.NextDouble() < unseedRatio;
             for (int i = 0; i < maxTries; ++i)
             {
                 bool logOnRetryableError = i == maxTries - 1;
@@ -829,16 +829,11 @@ namespace SummarizeTest
                                 if (ev.DDetails.ContainsKey("FaultInjectionEnabled"))
                                     xout.Add(new XAttribute("FaultInjectionEnabled", ev.Details.FaultInjectionEnabled));
                             }
-                            if (ev.Type == "Simulation")
+                            if (ev.Type == "Simulation" || ev.Type == "NonSimulationTest")
                             {
                                 xout.Add(
                                     new XAttribute("TestFile", ev.Details.TestFile));
                                 testFile = ev.Details.TestFile.Substring(ev.Details.TestFile.IndexOf("tests"));
-                            }
-                            if (ev.Type == "ActualRun")
-                            {
-                                xout.Add(
-                                    new XAttribute("TestFile", ev.Details.RunID));
                             }
                             if (ev.Type == "ElapsedTime" && !testEndFound)
                             {

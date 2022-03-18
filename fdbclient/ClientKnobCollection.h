@@ -18,6 +18,9 @@
  * limitations under the License.
  */
 
+#ifndef FDBCLIENT_CLIENTKNOBCOLLECTION_H
+#define FDBCLIENT_CLIENTKNOBCOLLECTION_H
+
 #pragma once
 
 #include "fdbclient/ClientKnobs.h"
@@ -45,3 +48,5 @@ public:
 	bool trySetKnob(std::string const& knobName, KnobValueRef const& knobValue) override;
 	bool isAtomic(std::string const& knobName) const override;
 };
+
+#endif // FDBCLIENT_CLIENTKNOBCCOLLECTION_H
