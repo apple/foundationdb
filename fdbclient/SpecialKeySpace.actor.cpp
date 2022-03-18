@@ -1935,7 +1935,7 @@ Future<RangeResult> VersionEpochImpl::getRange(ReadYourWritesTransaction* ryw,
 
 ACTOR static Future<Optional<std::string>> versionEpochCommitActor(ReadYourWritesTransaction* ryw, Version v) {
 	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
-	ryw->getTransaction().setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	ryw->getTransaction().setOption(FDBTransactionOptions::RAW_ACCESS);
 	ryw->getTransaction().set(versionEpochKey, BinaryWriter::toValue(v, Unversioned()));
 	return Optional<std::string>();
 }

@@ -1627,8 +1627,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					continue;
 				}
 
-				if (tokencmp(tokens[0], "versionepoch")) {
-					bool _result = wait(makeInterruptable(versionEpochCommandActor(db, tokens)));
+				if (tokencmp(tokens[0], "targetversion")) {
+					bool _result = wait(makeInterruptable(targetVersionCommandActor(db, tokens)));
 					if (!_result)
 						is_error = true;
 					continue;

@@ -197,8 +197,8 @@ ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<Str
 ACTOR Future<bool> triggerddteaminfologCommandActor(Reference<IDatabase> db);
 // tssq command
 ACTOR Future<bool> tssqCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
-// versionepoch command
-ACTOR Future<bool> versionEpochCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
+// targetversion command
+ACTOR Future<bool> targetVersionCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 
 } // namespace fdb_cli
 

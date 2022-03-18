@@ -1,5 +1,5 @@
 /*
- * VersionEpochCommand.actor.cpp
+ * TargetVersionCommand.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -33,6 +33,31 @@ namespace fdb_cli {
 
 const KeyRef versionEpochSpecialKey = LiteralStringRef("\xff\xff/management/version_epoch");
 
+struct VersionInfo {
+	int64_t version;
+	int64_t expectedVersion;
+};
+
+ACTOR static Future<Optional<VersionInfo>> getVersionInfo(Reference<IDatabase> db) {
+	state Reference<ITransaction> tr = db->createTransaction();
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			state Version rv = wait(safeThreadFutureToFuture(tr->getReadVersion()));
+			Optional<Standalone<StringRef>> versionEpochValue =
+			    wait(safeThreadFutureToFuture(tr->get(versionEpochKey)));
+			if (!versionEpochValue.present()) {
+				return Optional<VersionInfo>();
+			}
+			int64_t versionEpoch = BinaryReader::fromStringRef<Version>(versionEpochValue.get(), Unversioned());
+			int64_t expected = g_network->timer() * CLIENT_KNOBS->CORE_VERSIONSPERSECOND - versionEpoch;
+			return VersionInfo{ rv, expected };
+		} catch (Error& e) {
+			wait(safeThreadFutureToFuture(tr->onError(e)));
+		}
+	}
+}
+
 ACTOR static Future<Optional<int64_t>> getVersionEpoch(Reference<IDatabase> db) {
 	state Reference<ITransaction> tr = db->createTransaction();
 	loop {
@@ -46,9 +71,19 @@ ACTOR static Future<Optional<int64_t>> getVersionEpoch(Reference<IDatabase> db) 
 	}
 }
 
-ACTOR Future<bool> versionEpochCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
+ACTOR Future<bool> targetVersionCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() <= 3) {
 		if (tokens.size() == 1) {
+			Optional<VersionInfo> versionInfo = wait(getVersionInfo(db));
+			if (versionInfo.present()) {
+				printf("Version:    %" PRId64 "\n", versionInfo.get().version);
+				printf("Expected:   %" PRId64 "\n", versionInfo.get().expectedVersion);
+				printf("Difference: %" PRId64 "\n", versionInfo.get().expectedVersion - versionInfo.get().version);
+			} else {
+				printf("Version epoch is unset\n");
+			}
+			return true;
+		} else if (tokens.size() == 2 && tokencmp(tokens[1], "getepoch")) {
 			Optional<int64_t> versionEpoch = wait(getVersionEpoch(db));
 			if (versionEpoch.present()) {
 				printf("Current version epoch is %" PRId64 "\n", versionEpoch.get());
@@ -56,7 +91,7 @@ ACTOR Future<bool> versionEpochCommandActor(Reference<IDatabase> db, std::vector
 				printf("Version epoch is unset\n");
 			}
 			return true;
-		} else if (tokens.size() == 2 && tokencmp(tokens[1], "clear")) {
+		} else if (tokens.size() == 2 && tokencmp(tokens[1], "clearepoch")) {
 			// Clearing the version epoch means versions will no longer attempt
 			// to advance at the same rate as the clock. The current version
 			// will remain unchanged.
@@ -84,7 +119,7 @@ ACTOR Future<bool> versionEpochCommandActor(Reference<IDatabase> db, std::vector
 			}
 
 			state int64_t newVersionEpoch = -1;
-			if (tokencmp(tokens[1], "set")) {
+			if (tokencmp(tokens[1], "setepoch")) {
 				newVersionEpoch = v;
 			} else if (tokencmp(tokens[1], "add")) {
 				Optional<int64_t> versionEpoch = wait(getVersionEpoch(db));
@@ -122,11 +157,14 @@ ACTOR Future<bool> versionEpochCommandActor(Reference<IDatabase> db, std::vector
 }
 
 CommandFactory versionEpochFactory(
-    "versionepoch",
-    CommandHelp("versionepoch [{set|add} EPOCH]",
+    "targetversion",
+    CommandHelp("targetversion [<getepoch|clearepoch|setepoch|add> [EPOCH]]",
                 "Read or write the version epoch",
-                "Reads the version epoch of the cluster if no arguments are specified. Otherwise, sets the absolute "
-                "version epoch or updates the existing epoch. If the new version epoch is lower than the "
-                "current version epoch, the cluster version will be advanced. Otherwise, versions will be "
-                "given out slower until the cluster version is synchronized with wall clock time."));
+                "If no arguments are specified, reports the offset between the expected version "
+                "and the actual version. Otherwise, reads, clears, or sets the version epoch. "
+                "The add command adds the number of versions specified to the current version "
+                "(value can be negative). If the version of the cluster will increase as a result "
+                "of this command, a recovery will occur and a one time jump to the larger version "
+                "made. Otherwise, the rate at which versions are given out will be decreased until "
+                "the cluster version is synchronized with the new target."));
 } // namespace fdb_cli
