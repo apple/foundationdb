@@ -24,6 +24,7 @@
 #include <iterator>
 #pragma once
 
+#include "flow/BooleanParam.h"
 #include "flow/FastAlloc.h"
 #include "flow/FastRef.h"
 #include "flow/Error.h"
@@ -88,6 +89,8 @@ protected:
 	NonCopyable& operator=(const NonCopyable&) = delete;
 };
 
+FDB_DECLARE_BOOLEAN_PARAM(FastInaccurateEstimate);
+
 // An Arena is a custom allocator that consists of a set of ArenaBlocks.  Allocation is performed by bumping a pointer
 // on the most recent ArenaBlock until the block is unable to service the next allocation request.  When the current
 // ArenaBlock is full, a new (larger) one is added to the Arena.  Deallocation is not directly supported.  Instead,
@@ -110,7 +113,7 @@ public:
 	// non-root nodes in this Arena's block tree.
 	// When fastInaccurateEstimate is false, all estimates in the block tree will be updated to
 	// be accurate.
-	size_t getSize(bool fastInaccurateEstimate = false) const;
+	size_t getSize(FastInaccurateEstimate = FastInaccurateEstimate::False) const;
 
 	bool hasFree(size_t size, const void* address);
 

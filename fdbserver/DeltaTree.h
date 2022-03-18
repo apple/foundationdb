@@ -1130,7 +1130,8 @@ public:
 		DecodedNode& get(int index) { return decodedNodes[index]; }
 
 		void updateUsedMemory() {
-			int usedNow = sizeof(DeltaTree2) + arena.getSize(true) + (decodedNodes.capacity() * sizeof(DecodedNode));
+			int usedNow = sizeof(DeltaTree2) + arena.getSize(FastInaccurateEstimate::True) +
+			              (decodedNodes.capacity() * sizeof(DecodedNode));
 			if (pMemoryTracker != nullptr) {
 				*pMemoryTracker += (usedNow - lastKnownUsedMemory);
 			}
