@@ -33,6 +33,8 @@
 
 namespace fdb_cli {
 
+static constexpr int defaultThrottleListLimit = 100;
+
 ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 
 	if (tokens.size() == 1) {
@@ -40,10 +42,9 @@ ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<Str
 		return false;
 	} else if (tokencmp(tokens[1], "list")) {
 		if (tokens.size() > 4) {
-			printf("Usage: throttle list [throttled|recommended|all] [LIMIT]\n");
-			printf("\n");
-			printf("Lists tags that are currently throttled.\n");
-			printf("The default LIMIT is 100 tags.\n");
+			fmt::print("Usage: throttle list [throttled|recommended|all] [LIMIT]\n\n");
+			fmt::print("Lists tags that are currently throttled.\n");
+			fmt::print("The default LIMIT is {} tags.\n", defaultThrottleListLimit);
 			return false;
 		}
 
@@ -62,7 +63,7 @@ ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<Str
 			}
 		}
 
-		state int throttleListLimit = 100;
+		state int throttleListLimit = defaultThrottleListLimit;
 		if (tokens.size() >= 4) {
 			char* end;
 			throttleListLimit = std::strtol((const char*)tokens[3].begin(), &end, 10);
