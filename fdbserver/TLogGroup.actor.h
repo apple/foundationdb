@@ -187,7 +187,7 @@ public:
 	int size() const;
 
 	// Return set of storage team ids managed by this group.
-	const std::unordered_set<UID>& storageTeams();
+	const std::unordered_set<UID>& storageTeams() const { return storageTeamSet; }
 
 	// Helpers to assign and remove a team from group by its ID.
 	void assignStorageTeam(const UID& teamId);
