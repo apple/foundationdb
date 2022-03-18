@@ -82,8 +82,11 @@ struct TenantManagementWorkload : TestWorkload {
 		state Transaction tr(cx);
 		if (self->clientId == 0) {
 			self->tenantSubspace = makeString(deterministicRandom()->randomInt(0, 10));
-			while (self->tenantSubspace.startsWith(systemKeys.begin)) {
+			loop {
 				generateRandomData(mutateString(self->tenantSubspace), self->tenantSubspace.size());
+				if (!self->tenantSubspace.startsWith(systemKeys.begin)) {
+					break;
+				}
 			}
 			loop {
 				try {
