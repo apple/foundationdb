@@ -248,6 +248,8 @@ ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<Str
 				}
 				tagSet.addTag(tokens[nextIndex + 1]);
 				nextIndex += 2;
+			} else {
+				is_error = true;
 			}
 		}
 
