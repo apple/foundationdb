@@ -310,9 +310,9 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 		state Reference<DatabaseContext> db = cx.getReference();
 		loop {
 			wait(delay(1.0));
-			wait(store(tags, ThrottleApi::getThrottledTags(db, CLIENT_KNOBS->TOO_MANY, true)));
+			wait(store(tags, ThrottleApi::getThrottledTags(db, CLIENT_KNOBS->TOO_MANY, ContainsRecommended::True)));
 			self->recordThrottledTags(tags);
-		};
+		}
 	}
 
 	static std::string setToString(const std::set<std::string>& myset) {

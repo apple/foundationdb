@@ -110,3 +110,5 @@ TagThrottleValue TagThrottleValue::fromValue(const ValueRef& value) {
 	reader >> throttleValue;
 	return throttleValue;
 }
+
+FDB_DEFINE_BOOLEAN_PARAM(ContainsRecommended);

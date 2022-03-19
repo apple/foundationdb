@@ -75,7 +75,7 @@ ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<Str
 
 		state std::vector<TagThrottleInfo> tags;
 		if (reportThrottled && reportRecommended) {
-			wait(store(tags, ThrottleApi::getThrottledTags(db, throttleListLimit, true)));
+			wait(store(tags, ThrottleApi::getThrottledTags(db, throttleListLimit, ContainsRecommended::True)));
 		} else if (reportThrottled) {
 			wait(store(tags, ThrottleApi::getThrottledTags(db, throttleListLimit)));
 		} else if (reportRecommended) {
