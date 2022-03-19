@@ -111,7 +111,7 @@ struct DataMoveMetaData {
 
 	Phase getPhase() const { return static_cast<Phase>(phase); }
 
-	void setState(Phase phase) { this->phase = static_cast<int16_t>(phase); }
+	void setPhase(Phase phase) { this->phase = static_cast<int16_t>(phase); }
 
 	std::string toString() const {
 		std::string res = "DataMoveMetaData:\nID: " + id.toString() + "\nRange: " + range.toString() +

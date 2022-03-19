@@ -1558,74 +1558,68 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 	    .detail("DataMoveID", dataMoveID)
 	    .detail("DataMoveRange", range.toString());
 	state std::vector<UID> target;
-	state Map<UID, VectorRef<KeyRangeRef>> shardMap;
 
 	try {
-		// RYW to optimize re-reading the same key ranges
-		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(occ);
+		state Key begin = range.begin;
+		while (begin < range.end) {
+			// RYW to optimize re-reading the same key ranges
+			state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(occ);
 
-		loop {
-			shardMap.clear();
-			target.clear();
-			try {
-				tr->getTransaction().trState->taskID = TaskPriority::MoveKeys;
-				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				wait(checkMoveKeysLock(&(tr->getTransaction()), lock, ddEnabledState));
+			loop {
+				target.clear();
+				try {
+					state Map<UID, VectorRef<KeyRangeRef>> shardMap;
+					tr->getTransaction().trState->taskID = TaskPriority::MoveKeys;
+					tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					wait(checkMoveKeysLock(&(tr->getTransaction()), lock, ddEnabledState));
 
-				Optional<Value> val = wait(tr->get(dataMoveKeyFor(dataMoveID)));
-				if (val.present()) {
-					state DataMoveMetaData dataMove = decodeDataMoveValue(val.get());
-					ASSERT(dataMove.range == range);
-				} else {
-					TraceEvent(SevDebug, "CleanUpDataMoveNotExist", dataMoveID)
-					    .detail("DataMoveID", dataMoveID)
-					    .detail("DataMoveRange", range.toString());
-					break;
-				}
-
-				TraceEvent(SevDebug, "CleanUpDataMoveMetaData", dataMoveID)
-				    .detail("DataMoveID", dataMoveID)
-				    .detail("DataMoveMetaData", dataMove.toString());
-
-				// Keep track of old dests that may need to have ranges removed from serverKeys
-				state std::set<UID> oldDests;
-
-				// tr->getTransaction().trState->taskID = TaskPriority::MoveKeys;
-				// tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				// tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-
-				state RangeResult old;
-				old.clear();
-				loop {
-					RangeResult res =
-					    wait(krmGetRanges(tr, keyServersPrefix, range, CLIENT_KNOBS->TOO_MANY, CLIENT_KNOBS->TOO_MANY));
-					old.append_deep(old.arena(), res.begin(), res.size());
-					if (!res.more) {
+					Optional<Value> val = wait(tr->get(dataMoveKeyFor(dataMoveID)));
+					if (val.present()) {
+						state DataMoveMetaData dataMove = decodeDataMoveValue(val.get());
+						ASSERT(dataMove.range == KeyRangeRef(begin, range.end));
+					} else {
+						TraceEvent(SevDebug, "CleanUpDataMoveNotExist", dataMoveID)
+						    .detail("DataMoveID", dataMoveID)
+						    .detail("DataMoveRange", range.toString());
+						begin = range.end;
 						break;
 					}
-				}
-				ASSERT(!old.more && old.size() < CLIENT_KNOBS->TOO_MANY);
+					dataMove.setPhase(DataMoveMetaData::Deleting);
 
-				state RangeResult UIDtoTagMap = wait(tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
-				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
-
-				// For each intersecting range, clear existing dest servers and checkpoints on all src servers.
-				for (int i = 0; i < old.size() - 1; ++i) {
-					KeyRangeRef rangeIntersectKeys(old[i].key, old[i + 1].key);
-					std::vector<UID> src;
-					std::vector<UID> dest;
-					decodeKeyServersValue(UIDtoTagMap, old[i].value, src, dest);
-
-					TraceEvent("CleanUpDataMoveShard", dataMoveID)
+					TraceEvent(SevDebug, "CleanUpDataMoveMetaData", dataMoveID)
 					    .detail("DataMoveID", dataMoveID)
-					    .detail("KeyBegin", rangeIntersectKeys.begin.toString())
-					    .detail("KeyEnd", rangeIntersectKeys.end.toString())
-					    .detail("OldSrc", describe(src))
-					    .detail("OldDest", describe(dest))
-					    .detail("ReadVersion", tr->getReadVersion().get());
+					    .detail("DataMoveMetaData", dataMove.toString());
 
-					if (removeFromDest) {
+					// Keep track of old dests that may need to have ranges removed from serverKeys
+					state std::set<UID> oldDests;
+					state KeyRange currentRange = KeyRangeRef(begin, range.end);
+					state RangeResult currentShards =
+					    wait(krmGetRanges(tr,
+					                      keyServersPrefix,
+					                      currentRange,
+					                      SERVER_KNOBS->PHYSICAL_SHARD_MOVE_KRM_ROW_LIMIT,
+					                      SERVER_KNOBS->PHYSICAL_SHARD_MOVE_KRM_BYTE_LIMIT));
+					ASSERT(!currentShards.empty());
+					currentRange = KeyRangeRef(begin, currentShards.back().key);
+
+					state RangeResult UIDtoTagMap = wait(tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+					ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
+
+					// For each intersecting range, clear existing dest servers and checkpoints on all src servers.
+					for (int i = 0; i < currentShards.size() - 1; ++i) {
+						KeyRangeRef rangeIntersectKeys(currentShards[i].key, currentShards[i + 1].key);
+						std::vector<UID> src;
+						std::vector<UID> dest;
+						decodeKeyServersValue(UIDtoTagMap, currentShards[i].value, src, dest);
+
+						TraceEvent("CleanUpDataMoveShard", dataMoveID)
+						    .detail("DataMoveID", dataMoveID)
+						    .detail("ShardRange", rangeIntersectKeys)
+						    .detail("Src", describe(src))
+						    .detail("Dest", describe(dest))
+						    .detail("ReadVersion", tr->getReadVersion().get());
+
 						if (target.empty()) {
 							target = dest;
 							std::sort(target.begin(), target.end());
@@ -1633,76 +1627,68 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 							std::sort(dest.begin(), dest.end());
 							ASSERT(std::equal(target.begin(), target.end(), dest.begin()));
 						}
+
+						krmSetPreviouslyEmptyRange(&(tr->getTransaction()),
+						                           keyServersPrefix,
+						                           rangeIntersectKeys,
+						                           keyServersValue(UIDtoTagMap, src, {}),
+						                           currentShards[i + 1].value);
+
+						// Keep track of src shards so that we can preserve their values when we overwrite serverKeys
+						for (auto& uid : src) {
+							shardMap[uid].push_back(currentShards.arena(), rangeIntersectKeys);
+						}
 					}
 
-					// Track old destination servers.  They may be removed from serverKeys soon, since they are
-					// about to be overwritten in keyServers
-					// for (auto s = dest.begin(); s != dest.end(); ++s) {
-					// 	oldDests.insert(*s);
-					// TraceEvent("StartMoveKeysOldDestAdd", relocationIntervalId).detail("Server", *s);
-					// }
-
-					krmSetPreviouslyEmptyRange(&(tr->getTransaction()),
-					                           keyServersPrefix,
-					                           rangeIntersectKeys,
-					                           keyServersValue(UIDtoTagMap, src, {}),
-					                           old[i + 1].value);
-
-					// Keep track of src shards so that we can preserve their values when we overwrite serverKeys
-					for (auto& uid : src) {
-						shardMap[uid].push_back(old.arena(), rangeIntersectKeys);
-						// TraceEvent("StartMoveKeysShardMapAdd", relocationIntervalId).detail("Server", uid);
-					}
-				}
-
-				for (const UID& ssID : dataMove.src) {
-					tr->clear(prefixRange(checkpointKeyPrefixFor(ssID, dataMoveID)));
-				}
-				tr->clear(dataMoveKeyFor(dataMoveID));
-				TraceEvent("CleanUpDataMoveCheckpoint", dataMoveID)
-				    .detail("DataMoveID", dataMoveID)
-				    .detail("SrcServers", describe(dataMove.src));
-
-				std::vector<Future<Void>> actors;
-				if (removeFromDest) {
+					std::vector<Future<Void>> actors;
 					state std::vector<UID>::iterator oldDest;
 
-					// Remove old dests from serverKeys.  In order for krmSetRangeCoalescing to work correctly in the
-					// same prefix for a single transaction, we must do most of the coalescing ourselves.  Only the
-					// shards on the boundary of currentRange are actually coalesced with the ranges outside of
-					// currentRange. For all shards internal to currentRange, we overwrite all consecutive keys whose
-					// value is or should be serverKeysFalse in a single write
+					// Remove current dests from serverKeys.  In order for krmSetRangeCoalescing to work correctly
+					// in the same prefix for a single transaction, we must do most of the coalescing ourselves.
+					// Only the shards on the boundary of currentRange are actually coalesced with the ranges
+					// outside of currentRange. For all shards internal to currentRange, we overwrite all
+					// consecutive keys whose value is or should be serverKeysFalse in a single write
 					for (oldDest = target.begin(); oldDest != target.end(); ++oldDest) {
 						TraceEvent("CleanUpDataMoveDestRange", dataMoveID)
 						    .detail("DataMoveID", dataMoveID)
 						    .detail("Range", range)
 						    .detail("DestServer", *oldDest);
-						actors.push_back(removeOldDestinations(tr, *oldDest, shardMap[*oldDest], range));
+						actors.push_back(removeOldDestinations(tr, *oldDest, shardMap[*oldDest], currentRange));
 					}
+
+					wait(waitForAll(actors));
+
+					if (currentRange.end == range.end) {
+						for (const UID& ssID : dataMove.src) {
+							tr->clear(prefixRange(checkpointKeyPrefixFor(ssID, dataMoveID)));
+						}
+						tr->clear(dataMoveKeyFor(dataMoveID));
+						TraceEvent("CleanUpDataMoveCheckpoint", dataMoveID)
+						    .detail("DataMoveID", dataMoveID)
+						    .detail("SrcServers", describe(dataMove.src));
+					} else {
+						dataMove.range = KeyRangeRef(currentRange.end, range.end);
+						tr->set(dataMoveKeyFor(dataMoveID), dataMoveValue(dataMove));
+					}
+
+					wait(tr->commit());
+
+					TraceEvent("CleanUpDataMoveCommitted", dataMoveID)
+					    .detail("DataMoveID", dataMoveID)
+					    .detail("Range", currentRange)
+					    .detail("DestServer", *oldDest);
+					begin = currentRange.end;
+					break;
+				} catch (Error& e) {
+					state Error err = e;
+					wait(tr->onError(e));
+
+					TraceEvent(SevWarn, "CleanUpDataMoveRetriableError", dataMoveID)
+					    .error(err)
+					    .detail("DataMoveRange", range.toString());
 				}
-
-				wait(waitForAll(actors));
-
-				wait(tr->commit());
-
-				/*TraceEvent("StartMoveKeysCommitDone", relocationIntervalId)
-				    .detail("CommitVersion", tr.getCommittedVersion())
-				    .detail("ShardsInBatch", old.size() - 1);*/
-				break;
-			} catch (Error& e) {
-				state Error err = e;
-				wait(tr->onError(e));
-
-				// if (retries % 10 == 0) {
-				TraceEvent(SevWarn, "CleanUpDataMoveRetriableError", dataMoveID)
-				    .error(err)
-				    .detail("DataMoveRange", range.toString());
-				// }
 			}
 		}
-
-		// printf("Committed moving '%s'-'%s' (version %lld)\n", keys.begin.toString().c_str(),
-		// keys.end.toString().c_str(), tr->getCommittedVersion());
 	} catch (Error& e) {
 		TraceEvent(SevDebug, "CleanUpDataMoveError", dataMoveID).error(e, true);
 		throw;
