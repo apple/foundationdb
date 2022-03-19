@@ -26,7 +26,7 @@ public:
 	bool full() const noexcept { return index >= LAT_BLOCK_SIZE; }
 	void put(timediff_t td) {
 		assert(!full());
-		samples[index++] = to_integer_microseconds(td);
+		samples[index++] = toIntegerMicroseconds(td);
 	}
 	// return {data block, number of samples}
 	std::pair<uint64_t const*, size_t> data() const noexcept { return { samples, index }; }
@@ -59,7 +59,7 @@ public:
 };
 
 class alignas(64) ThreadStatistics {
-	uint64_t xacts;
+	uint64_t tasks;
 	uint64_t conflicts;
 	uint64_t total_errors;
 	uint64_t ops[MAX_OP];
@@ -78,27 +78,27 @@ public:
 	ThreadStatistics(const ThreadStatistics& other) noexcept = default;
 	ThreadStatistics& operator=(const ThreadStatistics& other) noexcept = default;
 
-	uint64_t get_tx_count() const noexcept { return xacts; }
+	uint64_t getTaskCount() const noexcept { return tasks; }
 
-	uint64_t get_conflict_count() const noexcept { return conflicts; }
+	uint64_t getConflictCount() const noexcept { return conflicts; }
 
-	uint64_t get_op_count(int op) const noexcept { return ops[op]; }
+	uint64_t getOpCount(int op) const noexcept { return ops[op]; }
 
-	uint64_t get_error_count(int op) const noexcept { return errors[op]; }
+	uint64_t getErrorCount(int op) const noexcept { return errors[op]; }
 
-	uint64_t get_total_error_count() const noexcept { return total_errors; }
+	uint64_t getTotalErrorCount() const noexcept { return total_errors; }
 
-	uint64_t get_latency_sample_count(int op) const noexcept { return latency_samples[op]; }
+	uint64_t getLatencySampleCount(int op) const noexcept { return latency_samples[op]; }
 
-	uint64_t get_latency_us_total(int op) const noexcept { return latency_us_total[op]; }
+	uint64_t getLatencyUsTotal(int op) const noexcept { return latency_us_total[op]; }
 
-	uint64_t get_latency_us_min(int op) const noexcept { return latency_us_min[op]; }
+	uint64_t getLatencyUsMin(int op) const noexcept { return latency_us_min[op]; }
 
-	uint64_t get_latency_us_max(int op) const noexcept { return latency_us_max[op]; }
+	uint64_t getLatencyUsMax(int op) const noexcept { return latency_us_max[op]; }
 
 	// with 'this' as final aggregation, factor in 'other'
 	void combine(const ThreadStatistics& other) {
-		xacts += other.xacts;
+		tasks += other.tasks;
 		conflicts += other.conflicts;
 		for (auto op = 0; op < MAX_OP; op++) {
 			ops[op] += other.ops[op];
@@ -113,19 +113,19 @@ public:
 		}
 	}
 
-	void incr_tx_count() noexcept { xacts++; }
-	void incr_conflict_count() noexcept { conflicts++; }
+	void incrTaskCount() noexcept { tasks++; }
+	void incrConflictCount() noexcept { conflicts++; }
 
 	// non-commit write operations aren't measured for time.
-	void incr_op_count(int op) noexcept { ops[op]++; }
+	void incrOpCount(int op) noexcept { ops[op]++; }
 
-	void incr_error_count(int op) noexcept {
+	void incrErrorCount(int op) noexcept {
 		total_errors++;
 		errors[op]++;
 	}
 
-	void add_latency(int op, timediff_t diff) noexcept {
-		const auto latency_us = to_integer_microseconds(diff);
+	void addLatency(int op, timediff_t diff) noexcept {
+		const auto latency_us = toIntegerMicroseconds(diff);
 		latency_samples[op]++;
 		latency_us_total[op] += latency_us;
 		if (latency_us_min[op] > latency_us)

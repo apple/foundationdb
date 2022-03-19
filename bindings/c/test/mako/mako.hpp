@@ -30,11 +30,6 @@
 
 namespace mako {
 
-constexpr const int VERBOSE_NONE = 0;
-constexpr const int VERBOSE_DEFAULT = 1;
-constexpr const int VERBOSE_ANNOYING = 2;
-constexpr const int VERBOSE_DEBUG = 3;
-
 constexpr const int MODE_INVALID = -1;
 constexpr const int MODE_CLEAN = 0;
 constexpr const int MODE_BUILD = 1;
@@ -151,9 +146,6 @@ using StepFunction = fdb::Future (*)(fdb::Transaction tx,
                                      fdb::ByteString& /*key1*/,
                                      fdb::ByteString& /*key2*/,
                                      fdb::ByteString& /*value*/);
-
-/* process type */
-typedef enum { PROC_MASTER = 0, PROC_WORKER, PROC_STATS } ProcKind;
 
 class Operation {
 	using Step = std::pair<StepKind, StepFunction>;

@@ -33,7 +33,9 @@
 #include <fmt/printf.h>
 #include <fdb.hpp>
 #include "fdbclient/zipf.h"
+#include "logger.hpp"
 #include "mako.hpp"
+#include "process.hpp"
 #include "utils.hpp"
 
 using namespace fdb;
@@ -42,29 +44,26 @@ using namespace mako;
 const std::string KEY_PREFIX{ "mako" };
 const std::string TEMP_DATA_STORE{ "/tmp/makoTemp" };
 
-/* global variables */
-FILE* printme; /* descriptor used for default messages */
-FILE* annoyme; /* descriptor used for annoying messages */
-FILE* debugme; /* descriptor used for debug messages */
+thread_local Logger logr = Logger(MainProcess{}, VERBOSE_DEFAULT);
 
 enum class FutureRC { OK, RETRY, CONFLICT, ABORT };
 
 template <class FutureType>
-FutureRC waitAndHandleForOnError(Transaction tx, FutureType f, std::string_view operation) {
+FutureRC waitAndHandleForOnError(Transaction tx, FutureType f, std::string_view step) {
 	assert(f);
 	auto err = Error{};
 	if ((err = f.blockUntilReady())) {
-		fmt::print(stderr, "ERROR: Error while on_error() blocking for {}: {}\n", operation, err.what());
+		logr.error("'{}' found while waiting for on_error() future, step: {}", err.what(), step);
 		return FutureRC::ABORT;
 	}
 	if ((err = f.error())) {
 		if (err.is(1020 /*not_committed*/)) {
 			return FutureRC::CONFLICT;
 		} else if (err.retryable()) {
-			fmt::print(debugme, "ERROR: Retryable on_error() error from {}: {}\n", operation, err.what());
+			logr.warn("Retryable error '{}' found at on_error(), step: {}", err.what(), step);
 			return FutureRC::RETRY;
 		} else {
-			fmt::print(stderr, "ERROR: Unretryable on_error() error from {}: {}\n", operation, err.what());
+			logr.error("Unretryable error '{}' found at on_error(), step: {}", err.what(), step);
 			return FutureRC::ABORT;
 		}
 	} else {
@@ -72,25 +71,27 @@ FutureRC waitAndHandleForOnError(Transaction tx, FutureType f, std::string_view 
 	}
 }
 
-// wait on any non-immediate tx-related operation to complete. Follow up with on_error().
+// wait on any non-immediate tx-related step to complete. Follow up with on_error().
 template <class FutureType>
-FutureRC waitAndHandleError(Transaction tx, FutureType f, std::string_view operation) {
+FutureRC waitAndHandleError(Transaction tx, FutureType f, std::string_view step) {
 	assert(f);
 	auto err = Error{};
 	if ((err = f.blockUntilReady())) {
 		const auto retry = err.retryable();
-		auto fp = retry ? annoyme : stderr;
-		fmt::print(fp, "ERROR: {} error in {}: {}\n", (retry ? "Retryable" : "Unretryable"), operation, err.what());
+		logr.error("{} error '{}' found during step: {}", (retry ? "Retryable" : "Unretryable"), err.what(), step);
 		return retry ? FutureRC::RETRY : FutureRC::ABORT;
 	}
 	err = f.error();
 	if (!err)
 		return FutureRC::OK;
-	auto fp = err.retryable() ? annoyme : stderr;
-	fmt::print(fp, "ERROR: Error in {}: {}\n", operation, err.what());
+	if (err.retryable()) {
+		logr.warn("step {} returned '{}'", step, err.what());
+	} else {
+		logr.error("step {} returned '{}'", step, err.what());
+	}
 	// implicit backoff
 	auto follow_up = tx.onError(err);
-	return waitAndHandleForOnError(tx, f, operation);
+	return waitAndHandleForOnError(tx, f, step);
 }
 
 /* cleanup database */
@@ -105,7 +106,7 @@ int cleanup(Transaction tx, Arguments const& args) {
 	genKeyPrefix(endstr, KEY_PREFIX, args);
 	endstr.push_back(0xff);
 
-	auto watch = Stopwatch(start_at_ctor{});
+	auto watch = Stopwatch(StartAtCtor{});
 
 	while (true) {
 		tx.clearRange(beginstr, endstr);
@@ -122,7 +123,7 @@ int cleanup(Transaction tx, Arguments const& args) {
 	}
 
 	tx.reset();
-	fmt::print(printme, "INFO: Clear range: {:6.3f} sec\n", to_double_seconds(watch.stop().diff()));
+	logr.info("Clear range: {:6.3f} sec\n", toDoubleSeconds(watch.stop().diff()));
 	return 0;
 }
 
@@ -144,10 +145,10 @@ int populate(Transaction tx,
 	valstr.reserve(args.value_length);
 	const auto num_commit_every = args.txnspec.ops[OP_INSERT][OP_COUNT];
 	const auto num_seconds_trace_every = args.txntrace;
-	auto watch_total = Stopwatch(start_at_ctor{});
-	auto watch_throttle = Stopwatch(watch_total.get_start());
-	auto watch_tx = Stopwatch(watch_total.get_start());
-	auto watch_trace = Stopwatch(watch_total.get_start());
+	auto watch_total = Stopwatch(StartAtCtor{});
+	auto watch_throttle = Stopwatch(watch_total.getStart());
+	auto watch_tx = Stopwatch(watch_total.getStart());
+	auto watch_trace = Stopwatch(watch_total.getStart());
 	auto key_checkpoint = key_begin; // in case of commit failure, restart from this key
 
 	for (auto i = key_begin; i <= key_end; i++) {
@@ -157,42 +158,42 @@ int populate(Transaction tx,
 		randomString(valstr, args.value_length);
 
 		while (thread_tps > 0 && xacts >= thread_tps /* throttle */) {
-			if (to_integer_seconds(watch_throttle.stop().diff()) >= 1) {
+			if (toIntegerSeconds(watch_throttle.stop().diff()) >= 1) {
 				xacts = 0;
-				watch_throttle.start_from_stop();
+				watch_throttle.startFromStop();
 			} else {
 				usleep(1000);
 			}
 		}
 		if (num_seconds_trace_every) {
-			if (to_integer_seconds(watch_trace.stop().diff()) >= num_seconds_trace_every) {
-				watch_trace.start_from_stop();
-				fmt::print(debugme, "DEBUG: txn tracing {}\n", toCharsRef(keystr));
+			if (toIntegerSeconds(watch_trace.stop().diff()) >= num_seconds_trace_every) {
+				watch_trace.startFromStop();
+				logr.debug("txn tracing {}", toCharsRef(keystr));
 				auto err = Error{};
 				err = tx.setOptionNothrow(FDB_TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER, keystr);
 				if (err) {
-					fmt::print(stderr, "ERROR: setOption(TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER): {}\n", err.what());
+					logr.error("setOption(TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER): {}", err.what());
 				}
 				err = tx.setOptionNothrow(FDB_TR_OPTION_LOG_TRANSACTION, BytesRef());
 				if (err) {
-					fmt::print(stderr, "ERROR: setOption(TR_OPTION_LOG_TRANSACTION): {}\n", err.what());
+					logr.error("setOption(TR_OPTION_LOG_TRANSACTION): {}", err.what());
 				}
 			}
 		}
 
 		/* insert (SET) */
 		tx.set(keystr, valstr);
-		stats.incr_op_count(OP_INSERT);
+		stats.incrOpCount(OP_INSERT);
 
 		/* commit every 100 inserts (default) or if this is the last key */
 		if (i == key_end || (i - key_begin + 1) % num_commit_every == 0) {
-			const auto do_sample = (stats.get_tx_count() % args.sampling) == 0;
-			auto watch_commit = Stopwatch(start_at_ctor{});
+			const auto do_sample = (stats.getTaskCount() % args.sampling) == 0;
+			auto watch_commit = Stopwatch(StartAtCtor{});
 			auto future_commit = tx.commit();
 			const auto rc = waitAndHandleError(tx, future_commit, "COMMIT_POPULATE_INSERT");
 			watch_commit.stop();
-			watch_tx.set_stop(watch_commit.get_stop());
-			auto tx_restarter = ExitGuard([&watch_tx]() { watch_tx.start_from_stop(); });
+			watch_tx.setStop(watch_commit.getStop());
+			auto tx_restarter = ExitGuard([&watch_tx]() { watch_tx.startFromStop(); });
 			if (rc == FutureRC::OK) {
 				key_checkpoint = i + 1; // restart on failures from next key
 				tx.reset();
@@ -206,24 +207,23 @@ int populate(Transaction tx,
 			if (do_sample) {
 				const auto commit_latency = watch_commit.diff();
 				const auto tx_duration = watch_tx.diff();
-				stats.add_latency(OP_COMMIT, commit_latency);
-				stats.add_latency(OP_TRANSACTION, tx_duration);
+				stats.addLatency(OP_COMMIT, commit_latency);
+				stats.addLatency(OP_TRANSACTION, tx_duration);
 				sample_bins[OP_COMMIT].put(commit_latency);
 				sample_bins[OP_TRANSACTION].put(tx_duration);
 			}
-			stats.incr_op_count(OP_COMMIT);
-			stats.incr_op_count(OP_TRANSACTION);
+			stats.incrOpCount(OP_COMMIT);
+			stats.incrOpCount(OP_TRANSACTION);
 
-			stats.incr_tx_count();
+			stats.incrTaskCount();
 			xacts++; /* for throttling */
 		}
 	}
-	fmt::print(debugme,
-	           "DEBUG: Populated {} rows [{}, {}]: {:6.3f} sec\n",
+	logr.debug("Populated {} rows [{}, {}]: {:6.3f} sec\n",
 	           key_end - key_begin + 1,
 	           key_begin,
 	           key_end,
-	           to_double_seconds(watch_total.stop().diff()));
+	           toDoubleSeconds(watch_total.stop().diff()));
 
 	return 0;
 }
@@ -253,27 +253,27 @@ int64_t granule_start_load(const char* filename,
 
 	loadId = context->nextId;
 	if (context->data_by_id[loadId] != 0) {
-		fmt::print(stderr, "ERROR: too many granule file loads at once: {}\n", MAX_BG_IDS);
+		logr.error("too many granule file loads at once: {}", MAX_BG_IDS);
 		return -1;
 	}
 	context->nextId = (context->nextId + 1) % MAX_BG_IDS;
 
 	int ret = snprintf(full_fname, PATH_MAX, "%s%s", context->bgFilePath, filename);
 	if (ret < 0 || ret >= PATH_MAX) {
-		fmt::print(stderr, "ERROR: BG filename too long: {}{}\n", context->bgFilePath, filename);
+		logr.error("BG filename too long: {}{}", context->bgFilePath, filename);
 		return -1;
 	}
 
 	fp = fopen(full_fname, "r");
 	if (!fp) {
-		fmt::print(stderr, "ERROR: BG could not open file: {}\n", full_fname);
+		logr.error("BG could not open file: {}", full_fname);
 		return -1;
 	}
 
 	// don't seek if offset == 0
 	if (offset && fseek(fp, offset, SEEK_SET)) {
 		// if fseek was non-zero, it failed
-		fmt::print(stderr, "ERROR: BG could not seek to %{} in file {}\n", offset, full_fname);
+		logr.error("BG could not seek to %{} in file {}", offset, full_fname);
 		fclose(fp);
 		return -1;
 	}
@@ -283,7 +283,7 @@ int64_t granule_start_load(const char* filename,
 	fclose(fp);
 
 	if (readSize != length) {
-		fmt::print(stderr, "ERROR: BG could not read {} bytes from file: {}\n", length, full_fname);
+		logr.error("BG could not read {} bytes from file: {}", length, full_fname);
 		return -1;
 	}
 
@@ -294,7 +294,7 @@ int64_t granule_start_load(const char* filename,
 uint8_t* granule_get_load(int64_t loadId, void* userContext) {
 	BGLocalFileContext* context = (BGLocalFileContext*)userContext;
 	if (context->data_by_id[loadId] == 0) {
-		fmt::print(stderr, "ERROR: BG loadId invalid for get_load: {}\n", loadId);
+		logr.error("BG loadId invalid for get_load: {}", loadId);
 		return 0;
 	}
 	return context->data_by_id[loadId];
@@ -303,7 +303,7 @@ uint8_t* granule_get_load(int64_t loadId, void* userContext) {
 void granule_free_load(int64_t loadId, void* userContext) {
 	BGLocalFileContext* context = (BGLocalFileContext*)userContext;
 	if (context->data_by_id[loadId] == 0) {
-		fmt::print(stderr, "ERROR: BG loadId invalid for free_load: {}\n", loadId);
+		logr.error("BG loadId invalid for free_load: {}", loadId);
 	}
 	delete[] context->data_by_id[loadId];
 	context->data_by_id[loadId] = 0;
@@ -340,14 +340,14 @@ const std::array<Operation, MAX_OP> opTable{
 		            num_end = args.rows - 1;
 	            genKey(end, KEY_PREFIX, args, num_end);
 	            return tx
-	                .getRange<KeySelect::Inclusive, KeySelect::Inclusive>(begin,
-	                                                                      end,
-	                                                                      0 /*limit*/,
-	                                                                      0 /*target_bytes*/,
-	                                                                      args.streaming_mode,
-	                                                                      0 /*iteration*/,
-	                                                                      false /*snapshot*/,
-	                                                                      args.txnspec.ops[OP_GETRANGE][OP_REVERSE])
+	                .getRange<key_select::Inclusive, key_select::Inclusive>(begin,
+	                                                                        end,
+	                                                                        0 /*limit*/,
+	                                                                        0 /*target_bytes*/,
+	                                                                        args.streaming_mode,
+	                                                                        0 /*iteration*/,
+	                                                                        false /*snapshot*/,
+	                                                                        args.txnspec.ops[OP_GETRANGE][OP_REVERSE])
 	                .eraseType();
 	        } } },
 	    false },
@@ -371,14 +371,14 @@ const std::array<Operation, MAX_OP> opTable{
 		            num_end = args.rows - 1;
 	            genKey(end, KEY_PREFIX, args, num_end);
 	            return tx
-	                .getRange<KeySelect::Inclusive, KeySelect::Inclusive>(begin,
-	                                                                      end,
-	                                                                      0 /*limit*/,
-	                                                                      0 /*target_bytes*/,
-	                                                                      args.streaming_mode,
-	                                                                      0 /*iteration*/,
-	                                                                      true /*snapshot*/,
-	                                                                      args.txnspec.ops[OP_SGETRANGE][OP_REVERSE])
+	                .getRange<key_select::Inclusive, key_select::Inclusive>(begin,
+	                                                                        end,
+	                                                                        0 /*limit*/,
+	                                                                        0 /*target_bytes*/,
+	                                                                        args.streaming_mode,
+	                                                                        0 /*iteration*/,
+	                                                                        true /*snapshot*/,
+	                                                                        args.txnspec.ops[OP_SGETRANGE][OP_REVERSE])
 	                .eraseType();
 	        }
 
@@ -554,11 +554,11 @@ const std::array<Operation, MAX_OP> opTable{
 	            err = r.getKeyValueArrayNothrow(out);
 	            if (!err || err.is(2037 /*blob_granule_not_materialized*/))
 		            return Future();
-	            const auto fp = (err.is(1020 /*not_committed*/) || err.is(1021 /*commit_unknown_result*/) ||
-	                             err.is(1213 /*tag_throttled*/))
-	                                ? annoyme
-	                                : stderr;
-	            fmt::print(fp, "ERROR: get_keyvalue_array() after readBlobGranules(): {}\n", err.what());
+	            const auto level = (err.is(1020 /*not_committed*/) || err.is(1021 /*commit_unknown_result*/) ||
+	                                err.is(1213 /*tag_throttled*/))
+	                                   ? VERBOSE_WARN
+	                                   : VERBOSE_NONE;
+	            logr.printWithLogLevel(level, "ERROR", "get_keyvalue_array() after readBlobGranules(): {}", err.what());
 	            return tx.onError(err).eraseType();
 	        } } },
 	    false } }
@@ -606,19 +606,19 @@ int runOneTransaction(Transaction tx,
 	auto val = ByteString{};
 	val.reserve(args.value_length);
 
-	auto watch_tx = Stopwatch(start_at_ctor{});
+	auto watch_tx = Stopwatch(StartAtCtor{});
 
 	auto op_iter = getOpBegin(args);
 	auto needs_commit = false;
 	auto watch_per_op = std::array<Stopwatch, MAX_OP>{};
-	const auto do_sample = (stats.get_tx_count() % args.sampling) == 0;
+	const auto do_sample = (stats.getTaskCount() % args.sampling) == 0;
 	while (op_iter != OpEnd) {
 		const auto [op, count, step] = op_iter;
 		const auto step_kind = opTable[op].stepKind(step);
 		auto watch_step = Stopwatch{};
 		watch_step.start();
 		if (step == 0 /* first step */)
-			watch_per_op[op] = Stopwatch(watch_step.get_start());
+			watch_per_op[op] = Stopwatch(watch_step.getStart());
 		auto f = opTable[op].stepFunction(step)(tx, args, key1, key2, val);
 		auto future_rc = FutureRC::OK;
 		if (f) {
@@ -634,9 +634,9 @@ int runOneTransaction(Transaction tx,
 		watch_step.stop();
 		if (future_rc != FutureRC::OK) {
 			if (future_rc == FutureRC::CONFLICT) {
-				stats.incr_conflict_count();
+				stats.incrConflictCount();
 			} else if (future_rc == FutureRC::RETRY) {
-				stats.incr_error_count(op);
+				stats.incrErrorCount(op);
 			} else {
 				// abort
 				tx.reset();
@@ -651,18 +651,18 @@ int runOneTransaction(Transaction tx,
 		if (step_kind == StepKind::COMMIT) {
 			// reset transaction boundary
 			const auto step_latency = watch_step.diff();
-			watch_tx.set_stop(watch_step.get_stop());
+			watch_tx.setStop(watch_step.getStop());
 			if (do_sample) {
 				const auto tx_duration = watch_tx.diff();
-				stats.add_latency(OP_COMMIT, step_latency);
-				stats.add_latency(OP_TRANSACTION, tx_duration);
+				stats.addLatency(OP_COMMIT, step_latency);
+				stats.addLatency(OP_TRANSACTION, tx_duration);
 				sample_bins[OP_COMMIT].put(step_latency);
 				sample_bins[OP_TRANSACTION].put(tx_duration);
 			}
 			tx.reset();
-			watch_tx.start_from_stop(); // new tx begins
-			stats.incr_op_count(OP_COMMIT);
-			stats.incr_op_count(OP_TRANSACTION);
+			watch_tx.startFromStop(); // new tx begins
+			stats.incrOpCount(OP_COMMIT);
+			stats.incrOpCount(OP_TRANSACTION);
 			needs_commit = false;
 		}
 
@@ -670,44 +670,44 @@ int runOneTransaction(Transaction tx,
 		if (step + 1 == opTable[op].steps() /* last step */) {
 			if (opTable[op].needsCommit())
 				needs_commit = true;
-			watch_per_op[op].set_stop(watch_step.get_stop());
+			watch_per_op[op].setStop(watch_step.getStop());
 			if (do_sample) {
 				const auto op_latency = watch_per_op[op].diff();
-				stats.add_latency(op, op_latency);
+				stats.addLatency(op, op_latency);
 				sample_bins[op].put(op_latency);
 			}
-			stats.incr_op_count(op);
+			stats.incrOpCount(op);
 		}
 		// move to next op
 		op_iter = getOpNext(args, op_iter);
 
 		// reached the end?
 		if (op_iter == OpEnd && (needs_commit || args.commit_get)) {
-			auto watch_commit = Stopwatch(start_at_ctor{});
+			auto watch_commit = Stopwatch(StartAtCtor{});
 			auto f = tx.commit();
 			const auto rc = waitAndHandleError(tx, f, "COMMIT_AT_TX_END");
 			watch_commit.stop();
-			watch_tx.set_stop(watch_commit.get_stop());
+			watch_tx.setStop(watch_commit.getStop());
 			auto tx_resetter = ExitGuard([&watch_tx, &tx]() {
 					tx.reset();
-					watch_tx.start_from_stop();
+				    watch_tx.startFromStop();
 				});
 			if (rc == FutureRC::OK) {
 				if (do_sample) {
 					const auto commit_latency = watch_commit.diff();
 					const auto tx_duration = watch_tx.diff();
-					stats.add_latency(OP_COMMIT, commit_latency);
-					stats.add_latency(OP_TRANSACTION, tx_duration);
+					stats.addLatency(OP_COMMIT, commit_latency);
+					stats.addLatency(OP_TRANSACTION, tx_duration);
 					sample_bins[OP_COMMIT].put(commit_latency);
 					sample_bins[OP_TRANSACTION].put(tx_duration);
 				}
-				stats.incr_op_count(OP_COMMIT);
-				stats.incr_op_count(OP_TRANSACTION);
+				stats.incrOpCount(OP_COMMIT);
+				stats.incrOpCount(OP_TRANSACTION);
 			} else {
 				if (rc == FutureRC::CONFLICT)
-					stats.incr_conflict_count();
+					stats.incrConflictCount();
 				else
-					stats.incr_error_count(OP_COMMIT);
+					stats.incrErrorCount(OP_COMMIT);
 				if (rc == FutureRC::ABORT) {
 					return -1;
 				}
@@ -717,7 +717,7 @@ int runOneTransaction(Transaction tx,
 			needs_commit = false;
 		}
 	}
-	stats.incr_tx_count();
+	stats.incrTaskCount();
 	/* make sure to reset transaction */
 	tx.reset();
 	return 0;
@@ -758,7 +758,7 @@ int runWorkload(Transaction tx,
 		while ((thread_tps > 0) && (xacts >= current_tps)) {
 			/* throttle on */
 			const auto time_now = steady_clock::now();
-			if (to_double_seconds(time_now - time_prev) >= 1.0) {
+			if (toDoubleSeconds(time_now - time_prev) >= 1.0) {
 				/* more than 1 second passed, no need to throttle */
 				xacts = 0;
 				time_prev = time_now;
@@ -772,19 +772,19 @@ int runWorkload(Transaction tx,
 		/* enable transaction trace */
 		if (dotrace) {
 			const auto time_now = steady_clock::now();
-			if (to_integer_seconds(time_now - time_last_trace) >= 1) {
+			if (toIntegerSeconds(time_now - time_last_trace) >= 1) {
 				time_last_trace = time_now;
 				traceid.clear();
 				fmt::format_to(std::back_inserter(traceid), "makotrace{:0>19d}", total_xacts);
-				fmt::print(debugme, "DEBUG: txn tracing {}\n", traceid);
+				logr.debug("txn tracing {}", traceid);
 				auto err = Error{};
 				err = tx.setOptionNothrow(FDB_TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER, toBytesRef(traceid));
 				if (err) {
-					fmt::print(stderr, "ERROR: TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER: {}\n", err.what());
+					logr.error("TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER: {}", err.what());
 				}
 				err = tx.setOptionNothrow(FDB_TR_OPTION_LOG_TRANSACTION, BytesRef());
 				if (err) {
-					fmt::print(stderr, "ERROR: TR_OPTION_LOG_TRANSACTION: {}\n", err.what());
+					logr.error("TR_OPTION_LOG_TRANSACTION: {}", err.what());
 				}
 			}
 		}
@@ -799,13 +799,13 @@ int runWorkload(Transaction tx,
 			               urand(0, args.txntagging - 1));
 			auto err = tx.setOptionNothrow(FDB_TR_OPTION_AUTO_THROTTLE_TAG, toBytesRef(tagstr));
 			if (err) {
-				fmt::print(stderr, "ERROR: TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER: {}\n", err.what());
+				logr.error("TR_OPTION_DEBUG_TRANSACTION_IDENTIFIER: {}", err.what());
 			}
 		}
 
 		rc = runOneTransaction(tx, args, stats, sample_bins);
 		if (rc) {
-			fmt::print(annoyme, "ERROR: runOneTransaction failed ({})\n", rc);
+			logr.warn("runOneTransaction failed ({})", rc);
 		}
 
 		if (thread_iters > 0) {
@@ -842,17 +842,12 @@ void workerThread(ThreadArgs& thread_args) {
 	auto& readycount = thread_args.shm.header().readycount;
 	auto& stopcount = thread_args.shm.header().stopcount;
 	auto& stats = thread_args.shm.statsSlot(worker_id, thread_id);
+	logr = Logger(WorkerProcess{}, args.verbose, worker_id, thread_id);
 
 	/* init per-thread latency statistics */
 	new (&stats) ThreadStatistics();
 
-	fmt::print(debugme,
-	           "DEBUG: worker_id:{} ({}) thread_id:{} ({}) (tid:{})\n",
-	           worker_id,
-	           args.num_processes,
-	           thread_id,
-	           args.num_threads,
-	           reinterpret_cast<uint64_t>(pthread_self()));
+	logr.debug("started, tid: {}", reinterpret_cast<uint64_t>(pthread_self()));
 
 	const auto thread_tps =
 	    args.tpsmax == 0 ? 0
@@ -878,18 +873,18 @@ void workerThread(ThreadArgs& thread_args) {
 	if (args.mode == MODE_CLEAN) {
 		auto rc = cleanup(tx, args);
 		if (rc < 0) {
-			fmt::print(stderr, "ERROR: cleanup failed\n");
+			logr.error("cleanup failed");
 		}
 	} else if (args.mode == MODE_BUILD) {
 		auto rc = populate(tx, args, worker_id, thread_id, thread_tps, stats, sample_bins);
 		if (rc < 0) {
-			fmt::print(stderr, "ERROR: populate failed\n");
+			logr.error("populate failed");
 		}
 	} else if (args.mode == MODE_RUN) {
 		auto rc = runWorkload(
 		    tx, args, thread_tps, throttle_factor, thread_iters, signal, stats, sample_bins, dotrace, dotagging);
 		if (rc < 0) {
-			fmt::print(stderr, "ERROR: runWorkload failed\n");
+			logr.error("runWorkload failed");
 		}
 	}
 
@@ -897,7 +892,7 @@ void workerThread(ThreadArgs& thread_args) {
 		const auto dirname = fmt::format("{}{}", TEMP_DATA_STORE, parent_id);
 		const auto rc = mkdir(dirname.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
 		if (rc < 0 && errno != EEXIST) {
-			fmt::print(stderr, "ERROR: mkdir {}: {}\n", dirname, strerror(errno));
+			logr.error("mkdir {}: {}", dirname, strerror(errno));
 			return;
 		}
 		for (auto op = 0; op < MAX_OP; op++) {
@@ -905,7 +900,7 @@ void workerThread(ThreadArgs& thread_args) {
 				const auto filename = getStatsFilename(dirname, worker_id, thread_id, op);
 				auto fp = fopen(filename.c_str(), "w");
 				if (!fp) {
-					fmt::print(stderr, "ERROR: fopen({}): {}\n", filename, strerror(errno));
+					logr.error("fopen({}): {}", filename, strerror(errno));
 					continue;
 				}
 				auto fclose_guard = ExitGuard([fp]() { fclose(fp); });
@@ -918,7 +913,7 @@ void workerThread(ThreadArgs& thread_args) {
 
 /* mako worker process */
 int workerProcessMain(Arguments const& args, int worker_id, shared_memory::Access shm, pid_t pid_main) {
-	fmt::print(debugme, "DEBUG: worker {} started\n", worker_id);
+	logr.debug("started");
 
 	auto err = Error{};
 	/* Everything starts from here */
@@ -928,14 +923,14 @@ int workerProcessMain(Arguments const& args, int worker_id, shared_memory::Acces
 	/* enable flatbuffers if specified */
 	if (args.flatbuffers) {
 #ifdef FDB_NET_OPTION_USE_FLATBUFFERS
-		fprintf(debugme, "DEBUG: Using flatbuffers\n");
+		logr.debug("Using flatbuffers");
 		err = network::setOptionNothrow(FDB_NET_OPTION_USE_FLATBUFFERS,
 		                                BytesRef(&args.flatbuffers, sizeof(args.flatbuffers)));
 		if (err) {
-			fmt::print(stderr, "ERROR: network_setOption(USE_FLATBUFFERS): {}\n", err.what());
+			logr.error("network::setOption(USE_FLATBUFFERS): {}", err.what());
 		}
 #else
-		fmt::print(printme, "INFO: flatbuffers is not supported in FDB API version {}\n", FDB_API_VERSION);
+		logr.info("flatbuffers is not supported in FDB API version {}", FDB_API_VERSION);
 #endif
 	}
 
@@ -943,24 +938,23 @@ int workerProcessMain(Arguments const& args, int worker_id, shared_memory::Acces
 	if (args.log_group[0] != '\0') {
 		err = network::setOptionNothrow(FDB_NET_OPTION_TRACE_LOG_GROUP, BytesRef(toBytePtr(args.log_group)));
 		if (err) {
-			fmt::print(stderr, "ERROR: fdb_network_setOption(FDB_NET_OPTION_TRACE_LOG_GROUP): {}\n", err.what());
+			logr.error("network::setOption(FDB_NET_OPTION_TRACE_LOG_GROUP): {}", err.what());
 		}
 	}
 
 	/* enable tracing if specified */
 	if (args.trace) {
-		fmt::print(debugme,
-		           "DEBUG: Enable Tracing in {} ({})\n",
+		logr.debug("Enable Tracing in {} ({})",
 		           (args.traceformat == 0) ? "XML" : "JSON",
 		           (args.tracepath[0] == '\0') ? "current directory" : args.tracepath);
 		err = network::setOptionNothrow(FDB_NET_OPTION_TRACE_ENABLE, BytesRef(toBytePtr(args.tracepath)));
 		if (err) {
-			fmt::print(stderr, "ERROR: network_setOption(TRACE_ENABLE): {}\n", err.what());
+			logr.error("network::setOption(TRACE_ENABLE): {}", err.what());
 		}
 		if (args.traceformat == 1) {
 			err = network::setOptionNothrow(FDB_NET_OPTION_TRACE_FORMAT, BytesRef(toBytePtr("json")));
 			if (err) {
-				fmt::print(stderr, "ERROR: fdb_network_setOption(FDB_NET_OPTION_TRACE_FORMAT): {}\n", err.what());
+				logr.error("network::setOption(FDB_NET_OPTION_TRACE_FORMAT): {}", err.what());
 			}
 		}
 	}
@@ -974,10 +968,10 @@ int workerProcessMain(Arguments const& args, int worker_id, shared_memory::Acces
 			auto knob = knobs.substr(0, knobs.find_first_of(delim));
 			if (knob.empty())
 				break;
-			fmt::print(debugme, "DEBUG: Setting client knob: {}\n", knob);
+			logr.debug("Setting client knob: {}", knob);
 			err = network::setOptionNothrow(FDB_NET_OPTION_KNOB, toBytesRef(knob));
 			if (err) {
-				fmt::print(stderr, "ERROR: fdb_network_setOption({}): {}\n", knob, err.what());
+				logr.error("network::setOption({}): {}", knob, err.what());
 			}
 			knobs.remove_prefix(knob.size());
 		}
@@ -986,8 +980,7 @@ int workerProcessMain(Arguments const& args, int worker_id, shared_memory::Acces
 	if (args.client_threads_per_version > 0) {
 		err = network::setOptionNothrow(FDB_NET_OPTION_CLIENT_THREADS_PER_VERSION, args.client_threads_per_version);
 		if (err) {
-			fmt::print(stderr,
-			           "ERROR: fdb_network_setOption (FDB_NET_OPTION_CLIENT_THREADS_PER_VERSION) ({}): {}\n",
+			logr.error("network::setOption (FDB_NET_OPTION_CLIENT_THREADS_PER_VERSION) ({}): {}\n",
 			           args.client_threads_per_version,
 			           err.what());
 			// let's exit here since we do not want to confuse users
@@ -997,15 +990,15 @@ int workerProcessMain(Arguments const& args, int worker_id, shared_memory::Acces
 	}
 
 	/* Network thread must be setup before doing anything */
-	fprintf(debugme, "DEBUG: fdb_setup_network\n");
+	logr.debug("network::setup()");
 	network::setup();
 
 	/* Each worker process will have its own network thread */
-	fprintf(debugme, "DEBUG: creating network thread\n");
+	logr.debug("creating network thread");
 	auto network_thread = std::thread([]() {
-		fmt::print(debugme, "DEBUG: network thread started\n");
+		logr.debug("network thread started");
 		if (auto err = network::run()) {
-			fmt::print(stderr, "ERROR: fdb_run_network: {}\n", err.what());
+			logr.error("network::run(): {}", err.what());
 		}
 	});
 
@@ -1016,13 +1009,13 @@ int workerProcessMain(Arguments const& args, int worker_id, shared_memory::Acces
 	for (auto i = 0; i < args.num_databases; i++) {
 		size_t cluster_index = args.num_fdb_clusters <= 1 ? 0 : i % args.num_fdb_clusters;
 		databases[i] = Database(args.cluster_files[cluster_index]);
-		fmt::print(debugme, "DEBUG: creating database at cluster {}\n", args.cluster_files[cluster_index]);
+		logr.debug("creating database at cluster {}", args.cluster_files[cluster_index]);
 		if (args.disable_ryw) {
 			databases[i].setOption(FDB_DB_OPTION_SNAPSHOT_RYW_DISABLE, BytesRef{});
 		}
 	}
 
-	fmt::print(debugme, "DEBUG: creating {} worker threads\n", args.num_threads);
+	logr.debug("creating {} worker threads", args.num_threads);
 	auto worker_threads = std::vector<std::thread>(args.num_threads);
 
 	/* spawn worker threads */
@@ -1050,75 +1043,72 @@ int workerProcessMain(Arguments const& args, int worker_id, shared_memory::Acces
 
 	/* wait for everyone to finish */
 	for (auto i = 0; i < args.num_threads; i++) {
-		fmt::print(debugme, "DEBUG: waiting for worker thread {} to join\n", i);
+		logr.debug("waiting for worker thread {} to join", i + 1);
 		worker_threads[i].join();
 	}
 
 	/* stop the network thread */
-	fmt::print(debugme, "DEBUG: network::stop()\n");
+	logr.debug("network::stop()");
 	err = network::stop();
 	if (err) {
-		fmt::print(stderr, "ERROR: network::stop(): {}\n", err.what());
+		logr.error("network::stop(): {}", err.what());
 	}
 
 	/* wait for the network thread to join */
-	fmt::print(debugme, "DEBUG: waiting for network thread to join\n");
+	logr.debug("waiting for network thread to join");
 	network_thread.join();
 
 	return 0;
 }
 
 /* initialize the parameters with default values */
-int initArguments(Arguments* args) {
-	int i;
-	if (!args)
-		return -1;
-	memset(args, 0, sizeof(Arguments)); /* zero-out everything */
-	args->num_fdb_clusters = 0;
-	args->num_databases = 1;
-	args->api_version = maxApiVersion();
-	args->json = 0;
-	args->num_processes = 1;
-	args->num_threads = 1;
-	args->mode = MODE_INVALID;
-	args->rows = 100000;
-	args->row_digits = digits(args->rows);
-	args->seconds = 30;
-	args->iteration = 0;
-	args->tpsmax = 0;
-	args->tpsmin = -1;
-	args->tpsinterval = 10;
-	args->tpschange = TPS_SIN;
-	args->sampling = 1000;
-	args->key_length = 32;
-	args->value_length = 16;
-	args->zipf = 0;
-	args->commit_get = 0;
-	args->verbose = 1;
-	args->flatbuffers = 0; /* internal */
-	args->knobs[0] = '\0';
-	args->log_group[0] = '\0';
-	args->prefixpadding = 0;
-	args->trace = 0;
-	args->tracepath[0] = '\0';
-	args->traceformat = 0; /* default to client's default (XML) */
-	args->streaming_mode = FDB_STREAMING_MODE_WANT_ALL;
-	args->txntrace = 0;
-	args->txntagging = 0;
-	memset(args->txntagging_prefix, 0, TAGPREFIXLENGTH_MAX);
-	for (i = 0; i < MAX_OP; i++) {
-		args->txnspec.ops[i][OP_COUNT] = 0;
+int initArguments(Arguments& args) {
+	memset(&args, 0, sizeof(Arguments)); /* zero-out everything */
+	args.num_fdb_clusters = 0;
+	args.num_databases = 1;
+	args.api_version = maxApiVersion();
+	args.json = 0;
+	args.num_processes = 1;
+	args.num_threads = 1;
+	args.mode = MODE_INVALID;
+	args.rows = 100000;
+	args.row_digits = digits(args.rows);
+	args.seconds = 30;
+	args.iteration = 0;
+	args.tpsmax = 0;
+	args.tpsmin = -1;
+	args.tpsinterval = 10;
+	args.tpschange = TPS_SIN;
+	args.sampling = 1000;
+	args.key_length = 32;
+	args.value_length = 16;
+	args.zipf = 0;
+	args.commit_get = 0;
+	args.verbose = 1;
+	args.flatbuffers = 0; /* internal */
+	args.knobs[0] = '\0';
+	args.log_group[0] = '\0';
+	args.prefixpadding = 0;
+	args.trace = 0;
+	args.tracepath[0] = '\0';
+	args.traceformat = 0; /* default to client's default (XML) */
+	args.streaming_mode = FDB_STREAMING_MODE_WANT_ALL;
+	args.txntrace = 0;
+	args.txntagging = 0;
+	memset(args.txntagging_prefix, 0, TAGPREFIXLENGTH_MAX);
+	for (auto i = 0; i < MAX_OP; i++) {
+		args.txnspec.ops[i][OP_COUNT] = 0;
 	}
-	args->client_threads_per_version = 0;
-	args->disable_ryw = 0;
-	args->json_output_path[0] = '\0';
-	args->bg_materialize_files = false;
-	args->bg_file_path[0] = '\0';
+	args.client_threads_per_version = 0;
+	args.disable_ryw = 0;
+	args.json_output_path[0] = '\0';
+	args.bg_materialize_files = false;
+	args.bg_file_path[0] = '\0';
 	return 0;
 }
 
 /* parse transaction specification */
-int parseTransaction(Arguments* args, char const* optarg) {
+int parseTransaction(Arguments& args, char const* optarg) {
 	char const* ptr = optarg;
 	int op = 0;
 	int rangeop = 0;
@@ -1126,8 +1116,8 @@ int parseTransaction(Arguments* args, char const* optarg) {
 	int error = 0;
 
 	for (op = 0; op < MAX_OP; op++) {
-		args->txnspec.ops[op][OP_COUNT] = 0;
-		args->txnspec.ops[op][OP_RANGE] = 0;
+		args.txnspec.ops[op][OP_COUNT] = 0;
+		args.txnspec.ops[op][OP_RANGE] = 0;
 	}
 
 	op = 0;
@@ -1181,7 +1171,7 @@ int parseTransaction(Arguments* args, char const* optarg) {
 			rangeop = 1;
 			ptr += 2;
 		} else {
-			fprintf(debugme, "Error: Invalid transaction spec: %s\n", ptr);
+			logr.error("Invalid transaction spec: {}", ptr);
 			error = 1;
 			break;
 		}
@@ -1198,7 +1188,7 @@ int parseTransaction(Arguments* args, char const* optarg) {
 			}
 		}
 		/* set count */
-		args->txnspec.ops[op][OP_COUNT] = num;
+		args.txnspec.ops[op][OP_COUNT] = num;
 
 		if (rangeop) {
 			if (*ptr != ':') {
@@ -1208,10 +1198,10 @@ int parseTransaction(Arguments* args, char const* optarg) {
 				ptr++; /* skip ':' */
 				/* check negative '-' sign */
 				if (*ptr == '-') {
-					args->txnspec.ops[op][OP_REVERSE] = 1;
+					args.txnspec.ops[op][OP_REVERSE] = 1;
 					ptr++;
 				} else {
-					args->txnspec.ops[op][OP_REVERSE] = 0;
+					args.txnspec.ops[op][OP_REVERSE] = 0;
 				}
 				num = 0;
 				if ((*ptr < '0') || (*ptr > '9')) {
@@ -1223,20 +1213,20 @@ int parseTransaction(Arguments* args, char const* optarg) {
 					ptr++;
 				}
 				/* set range */
-				args->txnspec.ops[op][OP_RANGE] = num;
+				args.txnspec.ops[op][OP_RANGE] = num;
 			}
 		}
 		rangeop = 0;
 	}
 
 	if (error) {
-		fprintf(stderr, "ERROR: invalid transaction specification %s\n", optarg);
+		logr.error("invalid transaction specification {}", optarg);
 		return -1;
 	}
 
-	if (args->verbose == VERBOSE_DEBUG) {
+	if (args.verbose == VERBOSE_DEBUG) {
 		for (op = 0; op < MAX_OP; op++) {
-			fprintf(debugme, "DEBUG: OP: %d: %d: %d\n", op, args->txnspec.ops[op][0], args->txnspec.ops[op][1]);
+			logr.debug("OP: {}: {}: {}", op, args.txnspec.ops[op][0], args.txnspec.ops[op][1]);
 		}
 	}
 
@@ -1269,7 +1259,7 @@ void usage() {
 	printf("%-24s %s\n", "-m, --mode=MODE", "Specify the mode (build, run, clean)");
 	printf("%-24s %s\n", "-z, --zipf", "Use zipfian distribution instead of uniform distribution");
 	printf("%-24s %s\n", "    --commitget", "Commit GETs");
-	printf("%-24s %s\n", "    --loggroup=LOGGROUP", "Set client log group");
+	printf("%-24s %s\n", "    --loggroup=LOGGROUP", "Set client logr group");
 	printf("%-24s %s\n", "    --prefix_padding", "Pad key by prefixing data (Default: postfix padding)");
 	printf("%-24s %s\n", "    --trace", "Enable tracing");
 	printf("%-24s %s\n", "    --tracepath=PATH", "Set trace file path");
@@ -1291,7 +1281,7 @@ void usage() {
 }
 
 /* parse benchmark paramters */
-int parseArguments(int argc, char* argv[], Arguments* args) {
+int parseArguments(int argc, char* argv[], Arguments& args) {
 	int rc;
 	int c;
 	int idx;
@@ -1351,35 +1341,35 @@ int parseArguments(int argc, char* argv[], Arguments* args) {
 			usage();
 			return -1;
 		case 'a':
-			args->api_version = atoi(optarg);
+			args.api_version = atoi(optarg);
 			break;
 		case 'c': {
 			const char delim[] = ",";
 			char* cluster_file = strtok(optarg, delim);
 			while (cluster_file != NULL) {
-				strcpy(args->cluster_files[args->num_fdb_clusters++], cluster_file);
+				strcpy(args.cluster_files[args.num_fdb_clusters++], cluster_file);
 				cluster_file = strtok(NULL, delim);
 			}
 			break;
 		}
 		case 'd':
-			args->num_databases = atoi(optarg);
+			args.num_databases = atoi(optarg);
 			break;
 		case 'p':
-			args->num_processes = atoi(optarg);
+			args.num_processes = atoi(optarg);
 			break;
 		case 't':
-			args->num_threads = atoi(optarg);
+			args.num_threads = atoi(optarg);
 			break;
 		case 'r':
-			args->rows = atoi(optarg);
-			args->row_digits = digits(args->rows);
+			args.rows = atoi(optarg);
+			args.row_digits = digits(args.rows);
 			break;
 		case 's':
-			args->seconds = atoi(optarg);
+			args.seconds = atoi(optarg);
 			break;
 		case 'i':
-			args->iteration = atoi(optarg);
+			args.iteration = atoi(optarg);
 			break;
 		case 'x':
 			rc = parseTransaction(args, optarg);
@@ -1387,162 +1377,146 @@ int parseArguments(int argc, char* argv[], Arguments* args) {
 				return -1;
 			break;
 		case 'v':
-			args->verbose = atoi(optarg);
+			args.verbose = atoi(optarg);
 			break;
 		case 'z':
-			args->zipf = 1;
+			args.zipf = 1;
 			break;
 		case 'm':
 			if (strcmp(optarg, "clean") == 0) {
-				args->mode = MODE_CLEAN;
+				args.mode = MODE_CLEAN;
 			} else if (strcmp(optarg, "build") == 0) {
-				args->mode = MODE_BUILD;
+				args.mode = MODE_BUILD;
 			} else if (strcmp(optarg, "run") == 0) {
-				args->mode = MODE_RUN;
+				args.mode = MODE_RUN;
 			}
 			break;
 		case ARG_KEYLEN:
-			args->key_length = atoi(optarg);
+			args.key_length = atoi(optarg);
 			break;
 		case ARG_VALLEN:
-			args->value_length = atoi(optarg);
+			args.value_length = atoi(optarg);
 			break;
 		case ARG_TPS:
 		case ARG_TPSMAX:
-			args->tpsmax = atoi(optarg);
+			args.tpsmax = atoi(optarg);
 			break;
 		case ARG_TPSMIN:
-			args->tpsmin = atoi(optarg);
+			args.tpsmin = atoi(optarg);
 			break;
 		case ARG_TPSINTERVAL:
-			args->tpsinterval = atoi(optarg);
+			args.tpsinterval = atoi(optarg);
 			break;
 		case ARG_TPSCHANGE:
 			if (strcmp(optarg, "sin") == 0)
-				args->tpschange = TPS_SIN;
+				args.tpschange = TPS_SIN;
 			else if (strcmp(optarg, "square") == 0)
-				args->tpschange = TPS_SQUARE;
+				args.tpschange = TPS_SQUARE;
 			else if (strcmp(optarg, "pulse") == 0)
-				args->tpschange = TPS_PULSE;
+				args.tpschange = TPS_PULSE;
 			else {
-				fprintf(stderr, "--tpschange must be sin, square or pulse\n");
+				logr.error("--tpschange must be sin, square or pulse");
 				return -1;
 			}
 			break;
 		case ARG_SAMPLING:
-			args->sampling = atoi(optarg);
+			args.sampling = atoi(optarg);
 			break;
 		case ARG_VERSION:
-			fprintf(stderr, "Version: %d\n", FDB_API_VERSION);
+			logr.error("Version: {}\n", FDB_API_VERSION);
 			exit(0);
 			break;
 		case ARG_COMMITGET:
-			args->commit_get = 1;
+			args.commit_get = 1;
 			break;
 		case ARG_FLATBUFFERS:
-			args->flatbuffers = 1;
+			args.flatbuffers = 1;
 			break;
 		case ARG_KNOBS:
-			memcpy(args->knobs, optarg, strlen(optarg) + 1);
+			memcpy(args.knobs, optarg, strlen(optarg) + 1);
 			break;
 		case ARG_LOGGROUP:
-			memcpy(args->log_group, optarg, strlen(optarg) + 1);
+			memcpy(args.log_group, optarg, strlen(optarg) + 1);
 			break;
 		case ARG_PREFIXPADDING:
-			args->prefixpadding = 1;
+			args.prefixpadding = 1;
 			break;
 		case ARG_TRACE:
-			args->trace = 1;
+			args.trace = 1;
 			break;
 		case ARG_TRACEPATH:
-			args->trace = 1;
-			memcpy(args->tracepath, optarg, strlen(optarg) + 1);
+			args.trace = 1;
+			memcpy(args.tracepath, optarg, strlen(optarg) + 1);
 			break;
 		case ARG_TRACEFORMAT:
 			if (strncmp(optarg, "json", 5) == 0) {
-				args->traceformat = 1;
+				args.traceformat = 1;
 			} else if (strncmp(optarg, "xml", 4) == 0) {
-				args->traceformat = 0;
+				args.traceformat = 0;
 			} else {
-				fprintf(stderr, "Error: Invalid trace_format %s\n", optarg);
+				logr.error("Invalid trace_format {}\n", optarg);
 				return -1;
 			}
 			break;
 		case ARG_STREAMING_MODE:
 			if (strncmp(optarg, "all", 3) == 0) {
-				args->streaming_mode = FDB_STREAMING_MODE_WANT_ALL;
+				args.streaming_mode = FDB_STREAMING_MODE_WANT_ALL;
 			} else if (strncmp(optarg, "iterator", 8) == 0) {
-				args->streaming_mode = FDB_STREAMING_MODE_ITERATOR;
+				args.streaming_mode = FDB_STREAMING_MODE_ITERATOR;
 			} else if (strncmp(optarg, "small", 5) == 0) {
-				args->streaming_mode = FDB_STREAMING_MODE_SMALL;
+				args.streaming_mode = FDB_STREAMING_MODE_SMALL;
 			} else if (strncmp(optarg, "medium", 6) == 0) {
-				args->streaming_mode = FDB_STREAMING_MODE_MEDIUM;
+				args.streaming_mode = FDB_STREAMING_MODE_MEDIUM;
 			} else if (strncmp(optarg, "large", 5) == 0) {
-				args->streaming_mode = FDB_STREAMING_MODE_LARGE;
+				args.streaming_mode = FDB_STREAMING_MODE_LARGE;
 			} else if (strncmp(optarg, "serial", 6) == 0) {
-				args->streaming_mode = FDB_STREAMING_MODE_SERIAL;
+				args.streaming_mode = FDB_STREAMING_MODE_SERIAL;
 			} else {
-				fprintf(stderr, "Error: Invalid streaming mode %s\n", optarg);
+				logr.error("Invalid streaming mode {}", optarg);
 				return -1;
 			}
 			break;
 		case ARG_TXNTRACE:
-			args->txntrace = atoi(optarg);
+			args.txntrace = atoi(optarg);
 			break;
 
 		case ARG_TXNTAGGING:
-			args->txntagging = atoi(optarg);
-			if (args->txntagging > 1000) {
-				args->txntagging = 1000;
+			args.txntagging = atoi(optarg);
+			if (args.txntagging > 1000) {
+				args.txntagging = 1000;
 			}
 			break;
 		case ARG_TXNTAGGINGPREFIX:
 			if (strlen(optarg) > TAGPREFIXLENGTH_MAX) {
-				fprintf(stderr, "Error: the length of txntagging_prefix is larger than %d\n", TAGPREFIXLENGTH_MAX);
+				logr.error("the length of txntagging_prefix is larger than {}", TAGPREFIXLENGTH_MAX);
 				exit(0);
 			}
-			memcpy(args->txntagging_prefix, optarg, strlen(optarg));
+			memcpy(args.txntagging_prefix, optarg, strlen(optarg));
 			break;
 		case ARG_CLIENT_THREADS_PER_VERSION:
-			args->client_threads_per_version = atoi(optarg);
+			args.client_threads_per_version = atoi(optarg);
 			break;
 		case ARG_DISABLE_RYW:
-			args->disable_ryw = 1;
+			args.disable_ryw = 1;
 			break;
 		case ARG_JSON_REPORT:
 			if (optarg == NULL && (argv[optind] == NULL || (argv[optind] != NULL && argv[optind][0] == '-'))) {
 				// if --report_json is the last option and no file is specified
 				// or --report_json is followed by another option
 				char default_file[] = "mako.json";
-				strncpy(args->json_output_path, default_file, strlen(default_file));
+				strncpy(args.json_output_path, default_file, strlen(default_file));
 			} else {
-				strncpy(args->json_output_path, optarg, strlen(optarg) + 1);
+				strncpy(args.json_output_path, optarg, strlen(optarg) + 1);
 			}
 			break;
 		case ARG_BG_FILE_PATH:
-			args->bg_materialize_files = true;
-			strncpy(args->bg_file_path, optarg, strlen(optarg) + 1);
+			args.bg_materialize_files = true;
+			strncpy(args.bg_file_path, optarg, strlen(optarg) + 1);
 		}
 	}
 
-	if ((args->tpsmin == -1) || (args->tpsmin > args->tpsmax)) {
-		args->tpsmin = args->tpsmax;
-	}
-
-	if (args->verbose >= VERBOSE_DEFAULT) {
-		printme = stdout;
-	} else {
-		printme = fopen("/dev/null", "w");
-	}
-	if (args->verbose >= VERBOSE_ANNOYING) {
-		annoyme = stdout;
-	} else {
-		annoyme = fopen("/dev/null", "w");
-	}
-	if (args->verbose >= VERBOSE_DEBUG) {
-		debugme = stdout;
-	} else {
-		debugme = fopen("/dev/null", "w");
+	if ((args.tpsmin == -1) || (args.tpsmin > args.tpsmax)) {
+		args.tpsmin = args.tpsmax;
 	}
 
 	return 0;
@@ -1554,63 +1528,60 @@ char const* getOpName(int ops_code) {
 	return "";
 }
 
-int validateArguments(Arguments* args) {
-	if (args->mode == MODE_INVALID) {
-		fprintf(stderr, "ERROR: --mode has to be set\n");
+int validateArguments(Arguments const& args) {
+	if (args.mode == MODE_INVALID) {
+		logr.error("--mode has to be set");
 		return -1;
 	}
-	if (args->rows <= 0) {
-		fprintf(stderr, "ERROR: --rows must be a positive integer\n");
+	if (args.verbose < VERBOSE_NONE || args.verbose > VERBOSE_DEBUG) {
+		logr.error("--verbose must be between 0 and 3");
 		return -1;
 	}
-	if (args->key_length < 0) {
-		fprintf(stderr, "ERROR: --keylen must be a positive integer\n");
+	if (args.rows <= 0) {
+		logr.error("--rows must be a positive integer");
 		return -1;
 	}
-	if (args->value_length < 0) {
-		fprintf(stderr, "ERROR: --vallen must be a positive integer\n");
+	if (args.key_length < 0) {
+		logr.error("--keylen must be a positive integer");
 		return -1;
 	}
-	if (args->num_fdb_clusters > NUM_CLUSTERS_MAX) {
-		fprintf(stderr, "ERROR: Mako is not supported to do work to more than %d clusters\n", NUM_CLUSTERS_MAX);
+	if (args.value_length < 0) {
+		logr.error("--vallen must be a positive integer");
 		return -1;
 	}
-	if (args->num_databases > NUM_DATABASES_MAX) {
-		fprintf(stderr, "ERROR: Mako is not supported to do work to more than %d databases\n", NUM_DATABASES_MAX);
+	if (args.num_fdb_clusters > NUM_CLUSTERS_MAX) {
+		logr.error("Mako is not supported to do work to more than {} clusters", NUM_CLUSTERS_MAX);
 		return -1;
 	}
-	if (args->num_databases < args->num_fdb_clusters) {
-		fprintf(stderr,
-		        "ERROR: --num_databases (%d) must be >= number of clusters(%d)\n",
-		        args->num_databases,
-		        args->num_fdb_clusters);
+	if (args.num_databases > NUM_DATABASES_MAX) {
+		logr.error("Mako is not supported to do work to more than {} databases", NUM_DATABASES_MAX);
 		return -1;
 	}
-	if (args->num_threads < args->num_databases) {
-		fprintf(stderr,
-		        "ERROR: --threads (%d) must be >= number of databases (%d)\n",
-		        args->num_threads,
-		        args->num_databases);
+	if (args.num_databases < args.num_fdb_clusters) {
+		logr.error("--num_databases ({}) must be >= number of clusters({})", args.num_databases, args.num_fdb_clusters);
 		return -1;
 	}
-	if (args->key_length < 4 /* "mako" */ + args->row_digits) {
-		fprintf(stderr,
-		        "ERROR: --keylen must be larger than %d to store \"mako\" prefix "
-		        "and maximum row number\n",
-		        4 + args->row_digits);
+	if (args.num_threads < args.num_databases) {
+		logr.error("--threads ({}) must be >= number of databases ({})", args.num_threads, args.num_databases);
 		return -1;
 	}
-	if (args->mode == MODE_RUN) {
-		if ((args->seconds > 0) && (args->iteration > 0)) {
-			fprintf(stderr, "ERROR: Cannot specify seconds and iteration together\n");
+	if (args.key_length < 4 /* "mako" */ + args.row_digits) {
+		logr.error("--keylen must be larger than {} to store \"mako\" prefix "
+		           "and maximum row number",
+		           4 + args.row_digits);
+		return -1;
+	}
+	if (args.mode == MODE_RUN) {
+		if ((args.seconds > 0) && (args.iteration > 0)) {
+			logr.error("Cannot specify seconds and iteration together");
 			return -1;
 		}
-		if ((args->seconds == 0) && (args->iteration == 0)) {
-			fprintf(stderr, "ERROR: Must specify either seconds or iteration\n");
+		if ((args.seconds == 0) && (args.iteration == 0)) {
+			logr.error("Must specify either seconds or iteration");
 			return -1;
 		}
-		if (args->txntagging < 0) {
-			fprintf(stderr, "ERROR: --txntagging must be a non-negative integer\n");
+		if (args.txntagging < 0) {
+			logr.error("--txntagging must be a non-negative integer");
 			return -1;
 		}
 	}
@@ -1634,23 +1605,23 @@ void printStats(Arguments const& args, ThreadStatistics const* stats, double con
 	auto print_err = false;
 	for (auto op = 0; op < MAX_OP; op++) {
 		if (args.txnspec.ops[op][OP_COUNT] > 0) {
-			const auto ops_total_diff = current.get_op_count(op) - prev.get_op_count(op);
+			const auto ops_total_diff = current.getOpCount(op) - prev.getOpCount(op);
 			putField(ops_total_diff);
 			if (fp) {
 				fmt::print(fp, "\"{}\": {},", getOpName(op), ops_total_diff);
 			}
-			print_err = print_err || (current.get_error_count(op) - prev.get_error_count(op)) > 0;
+			print_err = print_err || (current.getErrorCount(op) - prev.getErrorCount(op)) > 0;
 		}
 	}
 	/* TPS */
-	const auto tps = (current.get_tx_count() - prev.get_tx_count()) / duration_sec;
+	const auto tps = (current.getTaskCount() - prev.getTaskCount()) / duration_sec;
 	putFieldFloat(tps, 2);
 	if (fp) {
 		fprintf(fp, "\"tps\": %.2f,", tps);
 	}
 
 	/* Conflicts */
-	const auto conflicts_diff = (current.get_conflict_count() - prev.get_conflict_count()) / duration_sec;
+	const auto conflicts_diff = (current.getConflictCount() - prev.getConflictCount()) / duration_sec;
 	putFieldFloat(conflicts_diff, 2);
 	fmt::print("\n");
 	if (fp) {
@@ -1661,7 +1632,7 @@ void printStats(Arguments const& args, ThreadStatistics const* stats, double con
 		putTitleRight("Errors");
 		for (auto op = 0; op < MAX_OP; op++) {
 			if (args.txnspec.ops[op][OP_COUNT] > 0) {
-				const auto errors_diff = current.get_error_count(op) - prev.get_error_count(op);
+				const auto errors_diff = current.getErrorCount(op) - prev.getErrorCount(op);
 				putField(errors_diff);
 				if (fp) {
 					fmt::print(fp, ",\"errors\": {}", errors_diff);
@@ -1758,11 +1729,11 @@ void printReport(Arguments const& args,
 			break;
 		}
 	}
-	const auto tps_f = final_stats.get_tx_count() / duration_sec;
+	const auto tps_f = final_stats.getTaskCount() / duration_sec;
 	const auto tps_i = static_cast<uint64_t>(tps_f);
-	fmt::printf("Total Xacts:      %8lu\n", final_stats.get_tx_count());
-	fmt::printf("Total Conflicts:  %8lu\n", final_stats.get_conflict_count());
-	fmt::printf("Total Errors:     %8lu\n", final_stats.get_total_error_count());
+	fmt::printf("Total Xacts:      %8lu\n", final_stats.getTaskCount());
+	fmt::printf("Total Conflicts:  %8lu\n", final_stats.getConflictCount());
+	fmt::printf("Total Errors:     %8lu\n", final_stats.getTotalErrorCount());
 	fmt::printf("Overall TPS:      %8lu\n\n", tps_i);
 
 	if (fp) {
@@ -1771,9 +1742,9 @@ void printReport(Arguments const& args,
 		fmt::fprintf(fp, "\"totalProcesses\": %d,", args.num_processes);
 		fmt::fprintf(fp, "\"totalThreads\": %d,", args.num_threads);
 		fmt::fprintf(fp, "\"targetTPS\": %d,", args.tpsmax);
-		fmt::fprintf(fp, "\"totalXacts\": %lu,", final_stats.get_tx_count());
-		fmt::fprintf(fp, "\"totalConflicts\": %lu,", final_stats.get_conflict_count());
-		fmt::fprintf(fp, "\"totalErrors\": %lu,", final_stats.get_total_error_count());
+		fmt::fprintf(fp, "\"totalXacts\": %lu,", final_stats.getTaskCount());
+		fmt::fprintf(fp, "\"totalConflicts\": %lu,", final_stats.getConflictCount());
+		fmt::fprintf(fp, "\"totalErrors\": %lu,", final_stats.getTotalErrorCount());
 		fmt::fprintf(fp, "\"overallTPS\": %lu,", tps_i);
 	}
 
@@ -1788,24 +1759,24 @@ void printReport(Arguments const& args,
 	auto first_op = true;
 	for (auto op = 0; op < MAX_OP; op++) {
 		if ((args.txnspec.ops[op][OP_COUNT] > 0 && op != OP_TRANSACTION) || op == OP_COMMIT) {
-			putField(final_stats.get_op_count(op));
+			putField(final_stats.getOpCount(op));
 			if (fp) {
 				if (first_op) {
 					first_op = 0;
 				} else {
 					fmt::fprintf(fp, ",");
 				}
-				fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), final_stats.get_op_count(op));
+				fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), final_stats.getOpCount(op));
 			}
 		}
 	}
 
 	/* TPS */
-	const auto tps = final_stats.get_tx_count() / duration_sec;
+	const auto tps = final_stats.getTaskCount() / duration_sec;
 	putFieldFloat(tps, 2);
 
 	/* Conflicts */
-	const auto conflicts_rate = final_stats.get_conflict_count() / duration_sec;
+	const auto conflicts_rate = final_stats.getConflictCount() / duration_sec;
 	putFieldFloat(conflicts_rate, 2);
 	fmt::print("\n");
 
@@ -1818,14 +1789,14 @@ void printReport(Arguments const& args,
 	first_op = 1;
 	for (auto op = 0; op < MAX_OP; op++) {
 		if (args.txnspec.ops[op][OP_COUNT] > 0 && op != OP_TRANSACTION) {
-			putField(final_stats.get_error_count(op));
+			putField(final_stats.getErrorCount(op));
 			if (fp) {
 				if (first_op) {
 					first_op = 0;
 				} else {
 					fmt::fprintf(fp, ",");
 				}
-				fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), final_stats.get_error_count(op));
+				fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), final_stats.getErrorCount(op));
 			}
 		}
 	}
@@ -1842,8 +1813,8 @@ void printReport(Arguments const& args,
 	first_op = 1;
 	for (auto op = 0; op < MAX_OP; op++) {
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
-			if (final_stats.get_latency_us_total(op)) {
-				putField(final_stats.get_latency_sample_count(op));
+			if (final_stats.getLatencyUsTotal(op)) {
+				putField(final_stats.getLatencySampleCount(op));
 			} else {
 				putField("N/A");
 			}
@@ -1853,7 +1824,7 @@ void printReport(Arguments const& args,
 				} else {
 					fmt::fprintf(fp, ",");
 				}
-				fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), final_stats.get_latency_sample_count(op));
+				fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), final_stats.getLatencySampleCount(op));
 			}
 		}
 	}
@@ -1867,7 +1838,7 @@ void printReport(Arguments const& args,
 	first_op = 1;
 	for (auto op = 0; op < MAX_OP; op++) {
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
-			const auto lat_min = final_stats.get_latency_us_min(op);
+			const auto lat_min = final_stats.getLatencyUsMin(op);
 			if (lat_min == -1) {
 				putField("N/A");
 			} else {
@@ -1893,8 +1864,8 @@ void printReport(Arguments const& args,
 	first_op = 1;
 	for (auto op = 0; op < MAX_OP; op++) {
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
-			const auto lat_total = final_stats.get_latency_us_total(op);
-			const auto lat_samples = final_stats.get_latency_sample_count(op);
+			const auto lat_total = final_stats.getLatencyUsTotal(op);
+			const auto lat_samples = final_stats.getLatencySampleCount(op);
 			if (lat_total) {
 				putField(lat_total / lat_samples);
 				if (fp) {
@@ -1920,7 +1891,7 @@ void printReport(Arguments const& args,
 	first_op = 1;
 	for (auto op = 0; op < MAX_OP; op++) {
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
-			const auto lat_max = final_stats.get_latency_us_max(op);
+			const auto lat_max = final_stats.getLatencyUsMax(op);
 			if (lat_max == 0) {
 				putField("N/A");
 			} else {
@@ -1931,7 +1902,7 @@ void printReport(Arguments const& args,
 					} else {
 						fmt::fprintf(fp, ",");
 					}
-					fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), final_stats.get_latency_us_max(op));
+					fmt::fprintf(fp, "\"%s\": %lu", getOpName(op), final_stats.getLatencyUsMax(op));
 				}
 			}
 		}
@@ -1948,8 +1919,8 @@ void printReport(Arguments const& args,
 	first_op = 1;
 	for (auto op = 0; op < MAX_OP; op++) {
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
-			const auto lat_total = final_stats.get_latency_us_total(op);
-			const auto lat_samples = final_stats.get_latency_sample_count(op);
+			const auto lat_total = final_stats.getLatencyUsTotal(op);
+			const auto lat_samples = final_stats.getLatencySampleCount(op);
 			if (lat_total && lat_samples) {
 				for (auto i = 0; i < args.num_processes; i++) {
 					for (auto j = 0; j < args.num_threads; j++) {
@@ -1957,7 +1928,7 @@ void printReport(Arguments const& args,
 						const auto filename = getStatsFilename(dirname, i, j, op);
 						auto fp = fopen(filename.c_str(), "r");
 						if (!fp) {
-							fmt::print(stderr, "ERROR: fopen({}): {}\n", filename, strerror(errno));
+							logr.error("fopen({}): {}\n", filename, strerror(errno));
 							continue;
 						}
 						auto fclose_guard = ExitGuard([fp]() { fclose(fp); });
@@ -2004,7 +1975,7 @@ void printReport(Arguments const& args,
 	first_op = 1;
 	for (auto op = 0; op < MAX_OP; op++) {
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
-			if (data_points[op].empty() || !final_stats.get_latency_us_total(op)) {
+			if (data_points[op].empty() || !final_stats.getLatencyUsTotal(op)) {
 				putField("N/A");
 				continue;
 			}
@@ -2031,7 +2002,7 @@ void printReport(Arguments const& args,
 	first_op = 1;
 	for (auto op = 0; op < MAX_OP; op++) {
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
-			if (data_points[op].empty() || !final_stats.get_latency_us_total(op)) {
+			if (data_points[op].empty() || !final_stats.getLatencyUsTotal(op)) {
 				putField("N/A");
 				continue;
 			}
@@ -2058,7 +2029,7 @@ void printReport(Arguments const& args,
 	first_op = 1;
 	for (auto op = 0; op < MAX_OP; op++) {
 		if (args.txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
-			if (data_points[op].empty() || !final_stats.get_latency_us_total(op)) {
+			if (data_points[op].empty() || !final_stats.getLatencyUsTotal(op)) {
 				putField("N/A");
 				continue;
 			}
@@ -2145,14 +2116,14 @@ int statsProcessMain(Arguments const& args,
 		auto time_now = steady_clock::now();
 
 		/* print stats every (roughly) 1 sec */
-		if (to_double_seconds(time_now - time_prev) >= 1.0) {
+		if (toDoubleSeconds(time_now - time_prev) >= 1.0) {
 
 			/* adjust throttle rate if needed */
 			if (args.tpsmax != args.tpsmin) {
 				const auto tpsinterval = static_cast<double>(args.tpsinterval);
 				const auto tpsmin = static_cast<double>(args.tpsmin);
 				const auto tpsmax = static_cast<double>(args.tpsmax);
-				const auto pos = fmod(to_double_seconds(time_now - time_start), tpsinterval);
+				const auto pos = fmod(toDoubleSeconds(time_now - time_start), tpsinterval);
 				auto sin_factor = 0.;
 				/* set the throttle factor between 0.0 and 1.0 */
 				switch (args.tpschange) {
@@ -2188,7 +2159,7 @@ int statsProcessMain(Arguments const& args,
 					if (fp)
 						fmt::fprintf(fp, ",");
 				}
-				printStats(args, stats, to_double_seconds(time_now - time_prev), fp);
+				printStats(args, stats, toDoubleSeconds(time_now - time_prev), fp);
 			}
 			time_prev = time_now;
 		}
@@ -2204,7 +2175,7 @@ int statsProcessMain(Arguments const& args,
 		while (stopcount.load() < args.num_threads * args.num_processes) {
 			usleep(10000); /* 10ms */
 		}
-		printReport(args, stats, to_double_seconds(time_now - time_start), pid_main, fp);
+		printReport(args, stats, toDoubleSeconds(time_now - time_start), pid_main, fp);
 	}
 
 	if (fp) {
@@ -2220,20 +2191,21 @@ int main(int argc, char* argv[]) {
 
 	auto rc = int{};
 	auto args = Arguments{};
-	rc = initArguments(&args);
+	rc = initArguments(args);
 	if (rc < 0) {
-		fmt::print(stderr, "ERROR: initArguments failed\n");
+		logr.error("initArguments failed\n");
 		return -1;
 	}
-	rc = parseArguments(argc, argv, &args);
+	rc = parseArguments(argc, argv, args);
 	if (rc < 0) {
 		/* usage printed */
 		return 0;
 	}
 
-	rc = validateArguments(&args);
+	rc = validateArguments(args);
 	if (rc < 0)
 		return -1;
+	logr.setVerbosity(args.verbose);
 
 	if (args.mode == MODE_CLEAN) {
 		/* cleanup will be done from a single thread */
@@ -2243,7 +2215,7 @@ int main(int argc, char* argv[]) {
 
 	if (args.mode == MODE_BUILD) {
 		if (args.txnspec.ops[OP_INSERT][OP_COUNT] == 0) {
-			parseTransaction(&args, "i100");
+			parseTransaction(args, "i100");
 		}
 	}
 
@@ -2252,7 +2224,7 @@ int main(int argc, char* argv[]) {
 	const auto shmpath = fmt::format("mako{}", pid_main);
 	auto shmfd = shm_open(shmpath.c_str(), O_CREAT | O_RDWR, S_IRUSR | S_IWUSR);
 	if (shmfd < 0) {
-		fmt::print(stderr, "ERROR: shm_open failed\n");
+		logr.error("shm_open failed: {}", strerror(errno));
 		return -1;
 	}
 	auto shmfd_guard = ExitGuard([shmfd, &shmpath]() {
@@ -2266,14 +2238,14 @@ int main(int argc, char* argv[]) {
 	auto shm = std::add_pointer_t<void>{};
 	if (ftruncate(shmfd, shmsize) < 0) {
 		shm = MAP_FAILED;
-		fmt::print(stderr, "ERROR: ftruncate (fd:{} size:{}) failed\n", shmfd, shmsize);
+		logr.error("ftruncate (fd:{} size:{}) failed", shmfd, shmsize);
 		return -1;
 	}
 
 	/* map it */
 	shm = mmap(NULL, shmsize, PROT_READ | PROT_WRITE, MAP_SHARED, shmfd, 0);
 	if (shm == MAP_FAILED) {
-		fmt::print(stderr, "ERROR: mmap (fd:{} size:{}) failed\n", shmfd, shmsize);
+		logr.error("mmap (fd:{} size:{}) failed", shmfd, shmsize);
 		return -1;
 	}
 	auto munmap_guard = ExitGuard([=]() { munmap(shm, shmsize); });
@@ -2290,7 +2262,7 @@ int main(int argc, char* argv[]) {
 	shm_hdr.stopcount = 0;
 	shm_hdr.throttle_factor = 1.0;
 
-	auto proc_type = PROC_MASTER;
+	auto proc_type = ProcKind::MAIN;
 	/* fork worker processes + 1 stats process */
 	auto worker_pids = std::vector<pid_t>(args.num_processes + 1);
 
@@ -2304,16 +2276,18 @@ int main(int argc, char* argv[]) {
 			/* master */
 			worker_pids[p] = pid;
 			if (args.verbose == VERBOSE_DEBUG) {
-				printf("DEBUG: worker %d (PID:%d) forked\n", p, worker_pids[p]);
+				logr.debug("worker {} (PID:{}) forked", p + 1, worker_pids[p]);
 			}
 		} else {
 			if (p < args.num_processes) {
 				/* worker process */
-				proc_type = PROC_WORKER;
+				logr = Logger(WorkerProcess{}, args.verbose, p);
+				proc_type = ProcKind::WORKER;
 				worker_id = p;
 			} else {
 				/* stats */
-				proc_type = PROC_STATS;
+				logr = Logger(StatsProcess{}, args.verbose);
+				proc_type = ProcKind::STATS;
 			}
 			break;
 		}
@@ -2327,12 +2301,12 @@ int main(int argc, char* argv[]) {
 		zipfian_generator(args.rows);
 	}
 
-	if (proc_type == PROC_WORKER) {
+	if (proc_type == ProcKind::WORKER) {
 		/* worker process */
 		workerProcessMain(args, worker_id, shm_access, pid_main);
 		/* worker can exit here */
 		exit(0);
-	} else if (proc_type == PROC_STATS) {
+	} else if (proc_type == ProcKind::STATS) {
 		/* stats */
 		if (args.mode == MODE_CLEAN) {
 			/* no stats needed for clean mode */
@@ -2356,19 +2330,15 @@ int main(int argc, char* argv[]) {
 		/* if seconds is specified, stop child processes after the specified
 		 * duration */
 		if (args.seconds > 0) {
-			if (args.verbose == VERBOSE_DEBUG) {
-				printf("DEBUG: master sleeping for %d seconds\n", args.seconds);
-			}
+			logr.debug("master sleeping for {} seconds", args.seconds);
 
 			auto time_start = steady_clock::now();
 			while (1) {
 				usleep(100000); /* sleep for 100ms */
 				auto time_now = steady_clock::now();
 				/* doesn't have to be precise */
-				if (to_double_seconds(time_now - time_start) > args.seconds) {
-					if (args.verbose == VERBOSE_DEBUG) {
-						printf("DEBUG: time's up (%d seconds)\n", args.seconds);
-					}
+				if (toDoubleSeconds(time_now - time_start) > args.seconds) {
+					logr.debug("time's up ({} seconds)", args.seconds);
 					break;
 				}
 			}
@@ -2381,16 +2351,12 @@ int main(int argc, char* argv[]) {
 	auto status = int{};
 	/* wait for worker processes to exit */
 	for (auto p = 0; p < args.num_processes; p++) {
-		if (args.verbose == VERBOSE_DEBUG) {
-			fmt::print("DEBUG: waiting worker {} (PID:{}) to exit\n", p, worker_pids[p]);
-		}
+		logr.debug("waiting for worker process {} (PID:{}) to exit", p + 1, worker_pids[p]);
 		auto pid = waitpid(worker_pids[p], &status, 0 /* or what? */);
 		if (pid < 0) {
-			fmt::print(stderr, "ERROR: waitpid failed for worker process PID {}\n", worker_pids[p]);
+			logr.error("waitpid failed for worker process PID {}", worker_pids[p]);
 		}
-		if (args.verbose == VERBOSE_DEBUG) {
-			fmt::print("DEBUG: worker {} (PID:{}) exited\n", p, worker_pids[p]);
-		}
+		logr.debug("worker {} (PID:{}) exited", p + 1, worker_pids[p]);
 	}
 
 	/* all worker threads finished, stop the stats */
@@ -2401,7 +2367,7 @@ int main(int argc, char* argv[]) {
 	/* wait for stats to stop */
 	auto pid = waitpid(worker_pids[args.num_processes], &status, 0 /* or what? */);
 	if (pid < 0) {
-		fmt::print(stderr, "ERROR: waitpid failed for stats process PID {}\n", worker_pids[args.num_processes]);
+		logr.error("waitpid failed for stats process PID {}", worker_pids[args.num_processes]);
 	}
 
 	return 0;

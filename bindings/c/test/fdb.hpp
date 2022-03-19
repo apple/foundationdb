@@ -333,7 +333,7 @@ public:
 	}
 };
 
-namespace KeySelect {
+namespace key_select {
 
 struct Inclusive {
 	static constexpr const bool value = true;
@@ -342,7 +342,7 @@ struct Inclusive {
 struct Exclusive {
 	static constexpr const bool value = false;
 };
-} // namespace KeySelect
+} // namespace key_select
 
 class Transaction {
 	friend class Database;
@@ -402,14 +402,11 @@ public:
 		return out;
 	}
 
-	// Func should have signature void(Future f, bool need_retry)
-	// Func should first check that retry == false and f.error() == 0
-	// before attempting to extract value from f
 	TypedFuture<future_var::Value> get(KeyRef key, bool snapshot) {
 		return native::fdb_transaction_get(tr.get(), key.data(), intSize(key), snapshot);
 	}
 
-	// Usage: tx.get_range<KeySelect::inclusive, KeySelect::exclusive>(begin, end, ...);
+	// Usage: tx.getRange<key_select::Inclusive, key_select::Exclusive>(begin, end, ...);
 	// gets key-value pairs in key range [begin, end)
 	template <class FirstInclusive, class LastInclusive>
 	TypedFuture<future_var::KeyValueArray> getRange(KeyRef begin,

@@ -6,6 +6,7 @@
 #include <cstdint>
 #include "stats.hpp"
 
+// controlled, safer access to shared memory
 namespace mako::shared_memory {
 
 struct Header {
