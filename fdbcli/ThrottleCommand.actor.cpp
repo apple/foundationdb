@@ -178,14 +178,14 @@ ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<Str
 			}
 		}
 
-		TagSet tags;
-		tags.addTag(tokens[3]);
+		TagSet tagSet;
+		tagSet.addTag(tokens[3]);
 
-		wait(ThrottleApi::throttleTags(db, tags, tpsRate, duration, TagThrottleType::MANUAL, priority));
+		wait(ThrottleApi::throttleTags(db, tagSet, tpsRate, duration, TagThrottleType::MANUAL, priority));
 		printf("Tag `%s' has been throttled\n", tokens[3].toString().c_str());
 	} else if (tokencmp(tokens[1], "off")) {
 		int nextIndex = 2;
-		TagSet tags;
+		TagSet tagSet;
 		bool throttleTypeSpecified = false;
 		bool is_error = false;
 		Optional<TagThrottleType> throttleType = TagThrottleType::MANUAL;
@@ -242,11 +242,11 @@ ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<Str
 				priority = TransactionPriority::BATCH;
 				++nextIndex;
 			} else if (tokencmp(tokens[nextIndex], "tag")) {
-				if (tags.size() > 0 || nextIndex == tokens.size() - 1) {
+				if (tagSet.size() > 0 || nextIndex == tokens.size() - 1) {
 					is_error = true;
 					continue;
 				}
-				tags.addTag(tokens[nextIndex + 1]);
+				tagSet.addTag(tokens[nextIndex + 1]);
 				nextIndex += 2;
 			}
 		}
@@ -257,8 +257,8 @@ ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<Str
 			state std::string priorityString =
 			    priority.present() ? format(" at %s priority", transactionPriorityToString(priority.get(), false)) : "";
 
-			if (tags.size() > 0) {
-				bool success = wait(ThrottleApi::unthrottleTags(db, tags, throttleType, priority));
+			if (tagSet.size() > 0) {
+				bool success = wait(ThrottleApi::unthrottleTags(db, tagSet, throttleType, priority));
 				if (success) {
 					printf("Unthrottled tag `%s'%s\n", tokens[3].toString().c_str(), priorityString.c_str());
 				} else {
