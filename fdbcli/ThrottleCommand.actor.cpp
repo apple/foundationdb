@@ -185,7 +185,7 @@ ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<Str
 		printf("Tag `%s' has been throttled\n", tokens[3].toString().c_str());
 	} else if (tokencmp(tokens[1], "off")) {
 		int nextIndex = 2;
-		TagSet tagSet;
+		state TagSet tagSet;
 		bool throttleTypeSpecified = false;
 		bool is_error = false;
 		Optional<TagThrottleType> throttleType = TagThrottleType::MANUAL;
@@ -260,12 +260,12 @@ ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<Str
 			if (tagSet.size() > 0) {
 				bool success = wait(ThrottleApi::unthrottleTags(db, tagSet, throttleType, priority));
 				if (success) {
-					printf("Unthrottled tag `%s'%s\n", tokens[3].toString().c_str(), priorityString.c_str());
+					fmt::print("Unthrottled {0}{1}\n", tagSet.toString(), priorityString);
 				} else {
-					printf("Tag `%s' was not %sthrottled%s\n",
-					       tokens[3].toString().c_str(),
-					       throttleTypeString,
-					       priorityString.c_str());
+					fmt::print("{0} was not {1}throttled{2}\n",
+					           tagSet.toString(Capitalize::True),
+					           throttleTypeString,
+					           priorityString);
 				}
 			} else {
 				bool unthrottled = wait(ThrottleApi::unthrottleAll(db, throttleType, priority));

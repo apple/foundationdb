@@ -41,6 +41,7 @@ typedef StringRef TransactionTagRef;
 typedef Standalone<TransactionTagRef> TransactionTag;
 
 FDB_DECLARE_BOOLEAN_PARAM(ContainsRecommended);
+FDB_DECLARE_BOOLEAN_PARAM(Capitalize);
 
 class TagSet {
 public:
@@ -96,6 +97,9 @@ public:
 	size_t getBytes() const { return bytes; }
 
 	const Arena& getArena() const { return arena; }
+
+	// Used by fdbcli commands
+	std::string toString(Capitalize = Capitalize::False) const;
 
 private:
 	size_t bytes;
