@@ -233,6 +233,7 @@ set(FDBSERVER_SRCS
   workloads/MiniCycle.actor.cpp
   workloads/MutationLogReaderCorrectness.actor.cpp
   workloads/PrivateEndpoints.actor.cpp
+  workloads/GetRangeStream.actor.cpp
   workloads/ParallelRestore.actor.cpp
   workloads/Performance.actor.cpp
   workloads/Ping.actor.cpp

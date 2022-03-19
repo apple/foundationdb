@@ -967,11 +967,7 @@ ACTOR static void deliver(TransportData* self,
 	}
 
 	auto receiver = self->endpoints.get(destination.token);
-	if (receiver) {
-		if (!authorizedTenants->trusted && !receiver->isPublic()) {
-			TraceEvent(SevWarnAlways, "AttemptedRPCToPrivatePrevented").detail("From", peerAddress);
-			throw connection_failed();
-		}
+	if (receiver && (authorizedTenants->trusted || receiver->isPublic())) {
 		if (!checkCompatible(receiver->peerCompatibilityPolicy(), reader.protocolVersion())) {
 			return;
 		}
@@ -996,6 +992,9 @@ ACTOR static void deliver(TransportData* self,
 		}
 	} else if (destination.token.first() & TOKEN_STREAM_FLAG) {
 		// We don't have the (stream) endpoint 'token', notify the remote machine
+		if (receiver) {
+			TraceEvent(SevWarnAlways, "AttemptedRPCToPrivatePrevented").detail("From", peerAddress);
+		}
 		if (destination.token.first() != -1) {
 			if (self->isLocalAddress(destination.getPrimaryAddress())) {
 				sendLocal(self,

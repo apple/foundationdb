@@ -31,9 +31,9 @@ using ContextVariableMap = std::unordered_map<std::string_view, void*>;
 template <class Ar>
 struct LoadContext {
 	Ar* ar;
-	std::shared_ptr<ContextVariableMap> variables = nullptr;
 
-	LoadContext(Ar* ar, ContextVariableMap* variables = nullptr) : ar(ar), variables(variables) {}
+	LoadContext(Ar* ar) : ar(ar) {}
+
 	Arena& arena() { return ar->arena(); }
 
 	ProtocolVersion protocolVersion() const { return ar->protocolVersion(); }
@@ -53,24 +53,6 @@ struct LoadContext {
 	void addArena(Arena& arena) { arena = ar->arena(); }
 
 	LoadContext& context() { return *this; }
-
-	template <class T>
-	bool variable(std::string_view name, T* val) {
-		auto p = variables->insert(std::make_pair(name, val));
-		return p.second;
-	}
-
-	template <class T>
-	T& variable(std::string_view name) {
-		auto res = variables->at(name);
-		return *reinterpret_cast<T*>(res);
-	}
-
-	template <class T>
-	T const& variable(std::string_view name) const {
-		auto res = variables->at(name);
-		return *reinterpret_cast<T*>(res);
-	}
 };
 
 template <class Ar, class Allocator>
@@ -93,22 +75,22 @@ template <class ReaderImpl>
 class _ObjectReader {
 protected:
 	Optional<ProtocolVersion> mProtocolVersion;
-	bool versionSet = false;
-	LoadContext<ReaderImpl> context;
+	std::shared_ptr<ContextVariableMap> variables;
 
 public:
-	_ObjectReader() : context(static_cast<ReaderImpl*>(this)) {}
 	ProtocolVersion protocolVersion() const { return mProtocolVersion.get(); }
 	void setProtocolVersion(ProtocolVersion v) { mProtocolVersion = v; }
-	void setContextVariableMap(std::shared_ptr<ContextVariableMap> cvm) { context.variables = cvm; }
+	void setContextVariableMap(std::shared_ptr<ContextVariableMap> const& cvm) { variables = cvm; }
 
 	template <class... Items>
 	void deserialize(FileIdentifier file_identifier, Items&... items) {
+		LoadContext<ReaderImpl> context(static_cast<ReaderImpl*>(this));
 		const uint8_t* data = static_cast<ReaderImpl*>(this)->data();
 		if (read_file_identifier(data) != file_identifier) {
 			// Some file identifiers are changed in 7.0, so file identifier mismatches
 			// are expected during a downgrade from 7.0 to 6.3
-			bool expectMismatch = mProtocolVersion.get() >= ProtocolVersion(0x0FDB00B070000000LL);
+			bool expectMismatch = mProtocolVersion.get() >= ProtocolVersion(0x0FDB00B070000000LL) &&
+			                      currentProtocolVersion < ProtocolVersion(0x0FDB00B070000000LL);
 			{
 				TraceEvent te(expectMismatch ? SevInfo : SevError, "MismatchedFileIdentifier");
 				if (expectMismatch) {
@@ -130,17 +112,20 @@ public:
 
 	template <class T>
 	bool variable(std::string_view name, T* val) {
-		return context.template variable<T>(name, val);
+		auto p = variables->insert(std::make_pair(name, val));
+		return p.second;
 	}
 
 	template <class T>
 	T& variable(std::string_view name) {
-		return context.template variable<T>(name);
+		auto res = variables->at(name);
+		return *reinterpret_cast<T*>(res);
 	}
 
 	template <class T>
 	T const& variable(std::string_view name) const {
-		return context.template variable<T>(name);
+		auto res = variables->at(name);
+		return *reinterpret_cast<T*>(res);
 	}
 };
 
