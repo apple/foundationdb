@@ -1050,6 +1050,10 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 								tr.clear(prefixRange(checkpointKeyPrefixFor(uid, dataMoveID)));
 							}
 							tr.clear(dataMoveKeyFor(dataMoveID));
+							TraceEvent(SevDebug, interval.begin(), relocationIntervalId)
+							    .detail("DataMoveID", dataMoveID)
+							    .detail("CleanUpCheckpointFromSrc", describe(dataMove.src))
+							    .detail("DataMove", dataMove.toString());
 						}
 
 						wait(tr.commit());

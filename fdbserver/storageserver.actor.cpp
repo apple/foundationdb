@@ -5055,6 +5055,7 @@ ACTOR Future<Void> persistMoveInShardMetaData(StorageServer* data, MoveInShardMe
 }
 
 ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data,
+
                                         std::shared_ptr<MoveInShardMetaData> shard,
                                         std::string dir) {
 	state std::vector<CheckpointMetaData> records;
@@ -5814,9 +5815,9 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 	ranges.clear();
 
 	for (const auto& [id, moveInShard] : cancelMoveIns) {
-		if (moveInShard.getPhase() >= MoveInShardMetaData::Ingesting) {
+		// if (moveInShard.getPhase() >= MoveInShardMetaData::Ingesting) {
 			removeRanges.push_back(moveInShard.meta->range);
-		}
+		// }
 		auto& mLV = data->addVersionToMutationLog(version + 1);
 		KeyRange keys = singleKeyRange(moveInShard.moveInShardKey());
 		data->addMutationToMutationLog(mLV, MutationRef(MutationRef::ClearRange, keys.begin, keys.end));
