@@ -4817,13 +4817,14 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 
 	ASSERT(startVersion >= 0);
 
-	if (startVersion >= endVersion) {
+	if (startVersion >= endVersion || (changeFeedInfo->removing)) {
 		TEST(true); // Change Feed popped before fetch
 		TraceEvent(SevDebug, "FetchChangeFeedNoOp", data->thisServerID)
 		    .detail("RangeID", rangeId.printable())
 		    .detail("Range", range.toString())
 		    .detail("StartVersion", startVersion)
-		    .detail("EndVersion", endVersion);
+		    .detail("EndVersion", endVersion)
+		    .detail("Removing", changeFeedInfo->removing);
 		return invalidVersion;
 	}
 
