@@ -27,9 +27,10 @@
 #include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 #include "flow/serialize.h"
 #include <cstring>
+
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 ACTOR Future<Void> streamUsingGetRange(PromiseStream<RangeResult> results, Transaction* tr, KeyRange keys) {
 	state KeySelectorRef begin = firstGreaterOrEqual(keys.begin);

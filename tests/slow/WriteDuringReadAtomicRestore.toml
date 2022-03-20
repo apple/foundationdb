@@ -1,5 +1,6 @@
 [configuration]
 StderrSeverity = 30
+allowDefaultTenant = false
 
 [[test]]
 testTitle = 'WriteDuringReadTest'

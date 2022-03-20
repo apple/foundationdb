@@ -1101,10 +1101,10 @@ ACTOR Future<Void> backupWorker(BackupInterface interf,
 			try {
 				wait(done);
 			} catch (Error& e) {
-				TraceEvent("BackupWorkerShutdownError", self.myId).error(e, true);
+				TraceEvent("BackupWorkerShutdownError", self.myId).errorUnsuppressed(e);
 			}
 		}
-		TraceEvent("BackupWorkerTerminated", self.myId).error(err, true);
+		TraceEvent("BackupWorkerTerminated", self.myId).errorUnsuppressed(err);
 		if (err.code() != error_code_actor_cancelled && err.code() != error_code_worker_removed) {
 			throw err;
 		}

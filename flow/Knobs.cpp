@@ -172,7 +172,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( MIN_LOGGED_PRIORITY_BUSY_FRACTION,                  0.05 );
 	init( CERT_FILE_MAX_SIZE,                      5 * 1024 * 1024 );
 	init( READY_QUEUE_RESERVED_SIZE,                          8192 );
-	init( ITERATIONS_PER_REACTOR_CHECK,                          5 );
+	init( ITERATIONS_PER_REACTOR_CHECK,                        100 );
 
 	//Network
 	init( PACKET_LIMIT,                                  100LL<<20 );
@@ -344,6 +344,26 @@ bool Knobs::setKnob(std::string const& knob, std::string const& value) {
 	*string_knobs[knob].value = value;
 	explicitlySetKnobs.insert(toLower(knob));
 	return true;
+}
+
+ParsedKnobValue Knobs::getKnob(const std::string& name) const {
+	if (double_knobs.count(name) > 0) {
+		return ParsedKnobValue{ *double_knobs.at(name).value };
+	}
+	if (int64_knobs.count(name) > 0) {
+		return ParsedKnobValue{ *int64_knobs.at(name).value };
+	}
+	if (int_knobs.count(name) > 0) {
+		return ParsedKnobValue{ *int_knobs.at(name).value };
+	}
+	if (string_knobs.count(name) > 0) {
+		return ParsedKnobValue{ *string_knobs.at(name).value };
+	}
+	if (bool_knobs.count(name) > 0) {
+		return ParsedKnobValue{ *bool_knobs.at(name).value };
+	}
+
+	return ParsedKnobValue{ NoKnobFound() };
 }
 
 bool Knobs::isAtomic(std::string const& knob) const {

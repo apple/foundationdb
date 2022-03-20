@@ -732,13 +732,13 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 
 			if (self->compatible) {
 				TraceEvent(ok ? SevInfo : SevWarnAlways, "ConnectionClosed", conn ? conn->getDebugID() : UID())
-				    .error(e, true)
+				    .errorUnsuppressed(e)
 				    .suppressFor(1.0)
 				    .detail("PeerAddr", self->destination);
 			} else {
 				TraceEvent(
 				    ok ? SevInfo : SevWarnAlways, "IncompatibleConnectionClosed", conn ? conn->getDebugID() : UID())
-				    .error(e, true)
+				    .errorUnsuppressed(e)
 				    .suppressFor(1.0)
 				    .detail("PeerAddr", self->destination);
 			}
@@ -783,7 +783,7 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 
 			if (self->peerReferences <= 0 && self->reliable.empty() && self->unsent.empty() &&
 			    self->outstandingReplies == 0) {
-				TraceEvent("PeerDestroy").error(e).suppressFor(1.0).detail("PeerAddr", self->destination);
+				TraceEvent("PeerDestroy").errorUnsuppressed(e).suppressFor(1.0).detail("PeerAddr", self->destination);
 				self->connect.cancel();
 				self->transport->peers.erase(self->destination);
 				self->transport->orderedAddresses.erase(self->destination);
@@ -921,7 +921,7 @@ ACTOR static void deliver(TransportData* self,
                           bool inReadSocket) {
 	// We want to run the task at the right priority. If the priority is higher than the current priority (which is
 	// ReadSocket) we can just upgrade. Otherwise we'll context switch so that we don't block other tasks that might run
-	// with a higher priority. ReplyPromiseStream needs to guarentee that messages are recieved in the order they were
+	// with a higher priority. ReplyPromiseStream needs to guarantee that messages are received in the order they were
 	// sent, so we are using orderedDelay.
 	// NOTE: don't skip delay(0) when it's local deliver since it could cause out of order object deconstruction.
 	if (priority < TaskPriority::ReadSocket || !inReadSocket) {
@@ -1330,10 +1330,12 @@ ACTOR static Future<Void> connectionIncoming(TransportData* self, Reference<ICon
 		}
 		return Void();
 	} catch (Error& e) {
-		TraceEvent("IncomingConnectionError", conn->getDebugID())
-		    .error(e)
-		    .suppressFor(1.0)
-		    .detail("FromAddress", conn->getPeerAddress());
+		if (e.code() != error_code_actor_cancelled) {
+			TraceEvent("IncomingConnectionError", conn->getDebugID())
+			    .errorUnsuppressed(e)
+			    .suppressFor(1.0)
+			    .detail("FromAddress", conn->getPeerAddress());
+		}
 		conn->close();
 		return Void();
 	}

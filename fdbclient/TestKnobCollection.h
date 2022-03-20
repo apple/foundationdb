@@ -18,6 +18,9 @@
  * limitations under the License.
  */
 
+#ifndef FDBCLIENT_TESTKNOBCOLLECTION_H
+#define FDBCLIENT_TESTKNOBCOLLECTION_H
+
 #pragma once
 
 #include "fdbclient/IKnobCollection.h"
@@ -67,3 +70,5 @@ public:
 	bool trySetKnob(std::string const& knobName, KnobValueRef const& knobValue) override;
 	bool isAtomic(std::string const& knobName) const override;
 };
+
+#endif // FDBCLIENT_TESTKNOBCOLLECTION_H

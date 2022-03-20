@@ -18,7 +18,9 @@
  * limitations under the License.
  */
 
+#include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/GenericManagementAPI.actor.h"
 #include "fdbclient/MultiVersionTransaction.h"
 #include "fdbclient/MultiVersionAssignmentVars.h"
 #include "fdbclient/ClientVersion.h"
@@ -146,38 +148,39 @@ ThreadFuture<RangeResult> DLTransaction::getRange(const KeyRangeRef& keys,
 	return getRange(firstGreaterOrEqual(keys.begin), firstGreaterOrEqual(keys.end), limits, snapshot, reverse);
 }
 
-ThreadFuture<RangeResult> DLTransaction::getRangeAndFlatMap(const KeySelectorRef& begin,
-                                                            const KeySelectorRef& end,
-                                                            const StringRef& mapper,
-                                                            GetRangeLimits limits,
-                                                            bool snapshot,
-                                                            bool reverse) {
-	FdbCApi::FDBFuture* f = api->transactionGetRangeAndFlatMap(tr,
-	                                                           begin.getKey().begin(),
-	                                                           begin.getKey().size(),
-	                                                           begin.orEqual,
-	                                                           begin.offset,
-	                                                           end.getKey().begin(),
-	                                                           end.getKey().size(),
-	                                                           end.orEqual,
-	                                                           end.offset,
-	                                                           mapper.begin(),
-	                                                           mapper.size(),
-	                                                           limits.rows,
-	                                                           limits.bytes,
-	                                                           FDB_STREAMING_MODE_EXACT,
-	                                                           0,
-	                                                           snapshot,
-	                                                           reverse);
-	return toThreadFuture<RangeResult>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
-		const FdbCApi::FDBKeyValue* kvs;
+ThreadFuture<MappedRangeResult> DLTransaction::getMappedRange(const KeySelectorRef& begin,
+                                                              const KeySelectorRef& end,
+                                                              const StringRef& mapper,
+                                                              GetRangeLimits limits,
+                                                              bool snapshot,
+                                                              bool reverse) {
+	FdbCApi::FDBFuture* f = api->transactionGetMappedRange(tr,
+	                                                       begin.getKey().begin(),
+	                                                       begin.getKey().size(),
+	                                                       begin.orEqual,
+	                                                       begin.offset,
+	                                                       end.getKey().begin(),
+	                                                       end.getKey().size(),
+	                                                       end.orEqual,
+	                                                       end.offset,
+	                                                       mapper.begin(),
+	                                                       mapper.size(),
+	                                                       limits.rows,
+	                                                       limits.bytes,
+	                                                       FDB_STREAMING_MODE_EXACT,
+	                                                       0,
+	                                                       snapshot,
+	                                                       reverse);
+	return toThreadFuture<MappedRangeResult>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		const FdbCApi::FDBMappedKeyValue* kvms;
 		int count;
 		FdbCApi::fdb_bool_t more;
-		FdbCApi::fdb_error_t error = api->futureGetKeyValueArray(f, &kvs, &count, &more);
+		FdbCApi::fdb_error_t error = api->futureGetMappedKeyValueArray(f, &kvms, &count, &more);
 		ASSERT(!error);
 
 		// The memory for this is stored in the FDBFuture and is released when the future gets destroyed
-		return RangeResult(RangeResultRef(VectorRef<KeyValueRef>((KeyValueRef*)kvs, count), more), Arena());
+		return MappedRangeResult(
+		    MappedRangeResultRef(VectorRef<MappedKeyValueRef>((MappedKeyValueRef*)kvms, count), more), Arena());
 	});
 }
 
@@ -381,6 +384,15 @@ void DLTransaction::reset() {
 	api->transactionReset(tr);
 }
 
+// DLTenant
+Reference<ITransaction> DLTenant::createTransaction() {
+	ASSERT(api->tenantCreateTransaction != nullptr);
+
+	FdbCApi::FDBTransaction* tr;
+	api->tenantCreateTransaction(tenant, &tr);
+	return Reference<ITransaction>(new DLTransaction(api, tr));
+}
+
 // DLDatabase
 DLDatabase::DLDatabase(Reference<FdbCApi> api, ThreadFuture<FdbCApi::FDBDatabase*> dbFuture) : api(api), db(nullptr) {
 	addref();
@@ -400,9 +412,19 @@ ThreadFuture<Void> DLDatabase::onReady() {
 	return ready;
 }
 
+Reference<ITenant> DLDatabase::openTenant(TenantNameRef tenantName) {
+	if (!api->databaseOpenTenant) {
+		throw unsupported_operation();
+	}
+
+	FdbCApi::FDBTenant* tenant;
+	throwIfError(api->databaseOpenTenant(db, tenantName.begin(), tenantName.size(), &tenant));
+	return makeReference<DLTenant>(api, tenant);
+}
+
 Reference<ITransaction> DLDatabase::createTransaction() {
 	FdbCApi::FDBTransaction* tr;
-	api->databaseCreateTransaction(db, &tr);
+	throwIfError(api->databaseCreateTransaction(db, &tr));
 	return Reference<ITransaction>(new DLTransaction(api, tr));
 }
 
@@ -521,6 +543,7 @@ void DLApi::init() {
 	loadClientFunction(&api->stopNetwork, lib, fdbCPath, "fdb_stop_network", headerVersion >= 0);
 	loadClientFunction(&api->createDatabase, lib, fdbCPath, "fdb_create_database", headerVersion >= 610);
 
+	loadClientFunction(&api->databaseOpenTenant, lib, fdbCPath, "fdb_database_open_tenant", headerVersion >= 710);
 	loadClientFunction(
 	    &api->databaseCreateTransaction, lib, fdbCPath, "fdb_database_create_transaction", headerVersion >= 0);
 	loadClientFunction(&api->databaseSetOption, lib, fdbCPath, "fdb_database_set_option", headerVersion >= 0);
@@ -541,6 +564,10 @@ void DLApi::init() {
 	loadClientFunction(
 	    &api->databaseCreateSnapshot, lib, fdbCPath, "fdb_database_create_snapshot", headerVersion >= 700);
 
+	loadClientFunction(
+	    &api->tenantCreateTransaction, lib, fdbCPath, "fdb_tenant_create_transaction", headerVersion >= 710);
+	loadClientFunction(&api->tenantDestroy, lib, fdbCPath, "fdb_tenant_destroy", headerVersion >= 710);
+
 	loadClientFunction(&api->transactionSetOption, lib, fdbCPath, "fdb_transaction_set_option", headerVersion >= 0);
 	loadClientFunction(&api->transactionDestroy, lib, fdbCPath, "fdb_transaction_destroy", headerVersion >= 0);
 	loadClientFunction(
@@ -555,11 +582,8 @@ void DLApi::init() {
 	                   "fdb_transaction_get_addresses_for_key",
 	                   headerVersion >= 0);
 	loadClientFunction(&api->transactionGetRange, lib, fdbCPath, "fdb_transaction_get_range", headerVersion >= 0);
-	loadClientFunction(&api->transactionGetRangeAndFlatMap,
-	                   lib,
-	                   fdbCPath,
-	                   "fdb_transaction_get_range_and_flat_map",
-	                   headerVersion >= 700);
+	loadClientFunction(
+	    &api->transactionGetMappedRange, lib, fdbCPath, "fdb_transaction_get_mapped_range", headerVersion >= 700);
 	loadClientFunction(
 	    &api->transactionGetVersionstamp, lib, fdbCPath, "fdb_transaction_get_versionstamp", headerVersion >= 410);
 	loadClientFunction(&api->transactionSet, lib, fdbCPath, "fdb_transaction_set", headerVersion >= 0);
@@ -616,6 +640,8 @@ void DLApi::init() {
 	loadClientFunction(&api->futureGetKeyArray, lib, fdbCPath, "fdb_future_get_key_array", headerVersion >= 700);
 	loadClientFunction(
 	    &api->futureGetKeyValueArray, lib, fdbCPath, "fdb_future_get_keyvalue_array", headerVersion >= 0);
+	loadClientFunction(
+	    &api->futureGetMappedKeyValueArray, lib, fdbCPath, "fdb_future_get_mappedkeyvalue_array", headerVersion >= 700);
 	loadClientFunction(&api->futureSetCallback, lib, fdbCPath, "fdb_future_set_callback", headerVersion >= 0);
 	loadClientFunction(&api->futureCancel, lib, fdbCPath, "fdb_future_cancel", headerVersion >= 0);
 	loadClientFunction(&api->futureDestroy, lib, fdbCPath, "fdb_future_destroy", headerVersion >= 0);
@@ -737,8 +763,9 @@ void DLApi::addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParame
 
 // MultiVersionTransaction
 MultiVersionTransaction::MultiVersionTransaction(Reference<MultiVersionDatabase> db,
+                                                 Optional<Reference<MultiVersionTenant>> tenant,
                                                  UniqueOrderedOptionList<FDBTransactionOptions> defaultOptions)
-  : db(db), startTime(timer_monotonic()), timeoutTsav(new ThreadSingleAssignmentVar<Void>()) {
+  : db(db), tenant(tenant), startTime(timer_monotonic()), timeoutTsav(new ThreadSingleAssignmentVar<Void>()) {
 	setDefaultOptions(defaultOptions);
 	updateTransaction();
 }
@@ -749,18 +776,29 @@ void MultiVersionTransaction::setDefaultOptions(UniqueOrderedOptionList<FDBTrans
 }
 
 void MultiVersionTransaction::updateTransaction() {
-	auto currentDb = db->dbState->dbVar->get();
-
 	TransactionInfo newTr;
-	if (currentDb.value) {
-		newTr.transaction = currentDb.value->createTransaction();
+	if (tenant.present()) {
+		ASSERT(tenant.get());
+		auto currentTenant = tenant.get()->tenantVar->get();
+		if (currentTenant.value) {
+			newTr.transaction = currentTenant.value->createTransaction();
+		}
+
+		newTr.onChange = currentTenant.onChange;
+	} else {
+		auto currentDb = db->dbState->dbVar->get();
+		if (currentDb.value) {
+			newTr.transaction = currentDb.value->createTransaction();
+		}
+
+		newTr.onChange = currentDb.onChange;
 	}
 
 	Optional<StringRef> timeout;
 	for (auto option : persistentOptions) {
 		if (option.first == FDBTransactionOptions::TIMEOUT) {
 			timeout = option.second.castTo<StringRef>();
-		} else if (currentDb.value) {
+		} else if (newTr.transaction) {
 			newTr.transaction->setOption(option.first, option.second.castTo<StringRef>());
 		}
 	}
@@ -770,12 +808,10 @@ void MultiVersionTransaction::updateTransaction() {
 	// that might inadvertently fail the transaction.
 	if (timeout.present()) {
 		setTimeout(timeout);
-		if (currentDb.value) {
+		if (newTr.transaction) {
 			newTr.transaction->setOption(FDBTransactionOptions::TIMEOUT, timeout);
 		}
 	}
-
-	newTr.onChange = currentDb.onChange;
 
 	lock.enter();
 	transaction = newTr;
@@ -861,15 +897,15 @@ ThreadFuture<RangeResult> MultiVersionTransaction::getRange(const KeyRangeRef& k
 	return abortableFuture(f, tr.onChange);
 }
 
-ThreadFuture<RangeResult> MultiVersionTransaction::getRangeAndFlatMap(const KeySelectorRef& begin,
-                                                                      const KeySelectorRef& end,
-                                                                      const StringRef& mapper,
-                                                                      GetRangeLimits limits,
-                                                                      bool snapshot,
-                                                                      bool reverse) {
+ThreadFuture<MappedRangeResult> MultiVersionTransaction::getMappedRange(const KeySelectorRef& begin,
+                                                                        const KeySelectorRef& end,
+                                                                        const StringRef& mapper,
+                                                                        GetRangeLimits limits,
+                                                                        bool snapshot,
+                                                                        bool reverse) {
 	auto tr = getTransaction();
-	auto f = tr.transaction ? tr.transaction->getRangeAndFlatMap(begin, end, mapper, limits, snapshot, reverse)
-	                        : makeTimeout<RangeResult>();
+	auto f = tr.transaction ? tr.transaction->getMappedRange(begin, end, mapper, limits, snapshot, reverse)
+	                        : makeTimeout<MappedRangeResult>();
 	return abortableFuture(f, tr.onChange);
 }
 
@@ -1041,6 +1077,14 @@ ThreadFuture<Void> MultiVersionTransaction::onError(Error const& e) {
 	}
 }
 
+Optional<TenantName> MultiVersionTransaction::getTenant() {
+	if (tenant.present()) {
+		return tenant.get()->tenantName;
+	} else {
+		return Optional<TenantName>();
+	}
+}
+
 // Waits for the specified duration and signals the assignment variable with a timed out error
 // This will be canceled if a new timeout is set, in which case the tsav will not be signaled.
 ACTOR Future<Void> timeoutImpl(Reference<ThreadSingleAssignmentVar<Void>> tsav, double duration) {
@@ -1167,6 +1211,39 @@ bool MultiVersionTransaction::isValid() {
 	return tr.transaction.isValid();
 }
 
+// MultiVersionTenant
+MultiVersionTenant::MultiVersionTenant(Reference<MultiVersionDatabase> db, StringRef tenantName)
+  : tenantVar(new ThreadSafeAsyncVar<Reference<ITenant>>(Reference<ITenant>(nullptr))), tenantName(tenantName), db(db) {
+	updateTenant();
+}
+
+MultiVersionTenant::~MultiVersionTenant() {}
+
+Reference<ITransaction> MultiVersionTenant::createTransaction() {
+	return Reference<ITransaction>(new MultiVersionTransaction(
+	    db, Reference<MultiVersionTenant>::addRef(this), db->dbState->transactionDefaultOptions));
+}
+
+// Creates a new underlying tenant object whenever the database connection changes. This change is signaled
+// to open transactions via an AsyncVar.
+void MultiVersionTenant::updateTenant() {
+	Reference<ITenant> tenant;
+	auto currentDb = db->dbState->dbVar->get();
+	if (currentDb.value) {
+		tenant = currentDb.value->openTenant(tenantName);
+	} else {
+		tenant = Reference<ITenant>(nullptr);
+	}
+
+	tenantVar->set(tenant);
+
+	MutexHolder holder(tenantLock);
+	tenantUpdater = mapThreadFuture<Void, Void>(currentDb.onChange, [this](ErrorOr<Void> result) {
+		updateTenant();
+		return Void();
+	});
+}
+
 // MultiVersionDatabase
 MultiVersionDatabase::MultiVersionDatabase(MultiVersionApi* api,
                                            int threadIdx,
@@ -1202,9 +1279,9 @@ MultiVersionDatabase::MultiVersionDatabase(MultiVersionApi* api,
 					// but we may not see trace logs from this client until a successful connection
 					// is established.
 					TraceEvent(SevWarnAlways, "FailedToInitializeExternalClient")
+					    .error(e)
 					    .detail("LibraryPath", client->libPath)
-					    .detail("ClusterFilePath", clusterFilePath)
-					    .error(e);
+					    .detail("ClusterFilePath", clusterFilePath);
 				}
 			}
 		});
@@ -1218,9 +1295,9 @@ MultiVersionDatabase::MultiVersionDatabase(MultiVersionApi* api,
 				} catch (Error& e) {
 					// This connection is discarded
 					TraceEvent(SevWarnAlways, "FailedToCreateLegacyDatabaseConnection")
+					    .error(e)
 					    .detail("LibraryPath", client->libPath)
-					    .detail("ClusterFilePath", clusterFilePath)
-					    .error(e);
+					    .detail("ClusterFilePath", clusterFilePath);
 				}
 			}
 		});
@@ -1241,9 +1318,14 @@ Reference<IDatabase> MultiVersionDatabase::debugCreateFromExistingDatabase(Refer
 	return Reference<IDatabase>(new MultiVersionDatabase(MultiVersionApi::api, 0, "", db, db, false));
 }
 
+Reference<ITenant> MultiVersionDatabase::openTenant(TenantNameRef tenantName) {
+	return makeReference<MultiVersionTenant>(Reference<MultiVersionDatabase>::addRef(this), tenantName);
+}
+
 Reference<ITransaction> MultiVersionDatabase::createTransaction() {
-	return Reference<ITransaction>(
-	    new MultiVersionTransaction(Reference<MultiVersionDatabase>::addRef(this), dbState->transactionDefaultOptions));
+	return Reference<ITransaction>(new MultiVersionTransaction(Reference<MultiVersionDatabase>::addRef(this),
+	                                                           Optional<Reference<MultiVersionTenant>>(),
+	                                                           dbState->transactionDefaultOptions));
 }
 
 void MultiVersionDatabase::setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value) {
@@ -1360,8 +1442,8 @@ ThreadFuture<Void> MultiVersionDatabase::DatabaseState::monitorProtocolVersion()
 			}
 
 			TraceEvent("ErrorGettingClusterProtocolVersion")
-			    .detail("ExpectedProtocolVersion", expected)
-			    .error(cv.getError());
+			    .error(cv.getError())
+			    .detail("ExpectedProtocolVersion", expected);
 		}
 
 		ProtocolVersion clusterVersion =
@@ -1409,10 +1491,10 @@ void MultiVersionDatabase::DatabaseState::protocolVersionChanged(ProtocolVersion
 				newDb = client->api->createDatabase(clusterFilePath.c_str());
 			} catch (Error& e) {
 				TraceEvent(SevWarnAlways, "MultiVersionClientFailedToCreateDatabase")
+				    .error(e)
 				    .detail("LibraryPath", client->libPath)
 				    .detail("External", client->external)
-				    .detail("ClusterFilePath", clusterFilePath)
-				    .error(e);
+				    .detail("ClusterFilePath", clusterFilePath);
 
 				// Put the client in a disconnected state until the version changes again
 				updateDatabase(Reference<IDatabase>(), Reference<ClientInfo>());
@@ -1486,8 +1568,8 @@ void MultiVersionDatabase::DatabaseState::updateDatabase(Reference<IDatabase> ne
 				// We can't create a new database to monitor the cluster version. This means we will continue using the
 				// previous one, which should hopefully continue to work.
 				TraceEvent(SevWarnAlways, "FailedToCreateDatabaseForVersionMonitoring")
-				    .detail("ClusterFilePath", clusterFilePath)
-				    .error(e);
+				    .error(e)
+				    .detail("ClusterFilePath", clusterFilePath);
 			}
 		}
 	} else {
@@ -1499,8 +1581,8 @@ void MultiVersionDatabase::DatabaseState::updateDatabase(Reference<IDatabase> ne
 			// We can't create a new database to monitor the cluster version. This means we will continue using the
 			// previous one, which should hopefully continue to work.
 			TraceEvent(SevWarnAlways, "FailedToCreateDatabaseForVersionMonitoring")
-			    .detail("ClusterFilePath", clusterFilePath)
-			    .error(e);
+			    .error(e)
+			    .detail("ClusterFilePath", clusterFilePath);
 		}
 	}
 

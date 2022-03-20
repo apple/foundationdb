@@ -1,3 +1,23 @@
+/*
+ *RocksDBCheckpointUtils.actor.cpp
+ *
+ * This source file is part of the FoundationDB open source project
+ *
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 #include "fdbserver/RocksDBCheckpointUtils.actor.h"
 
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
@@ -14,6 +34,7 @@
 #include <rocksdb/version.h>
 
 #endif // SSD_ROCKSDB_EXPERIMENTAL
+#include "fdbserver/RocksDBCheckpointUtils.actor.h"
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.actor.h"
@@ -418,8 +439,8 @@ private:
 			TraceEvent("RocksDBCheckpointReaderOpenFile").detail("File", self->path_);
 		} catch (Error& e) {
 			TraceEvent(SevWarnAlways, "ServerGetCheckpointFileFailure")
-			    .detail("File", self->path_)
-			    .error(e, /*includeCancel=*/true);
+			    .errorUnsuppressed(e)
+			    .detail("File", self->path_);
 			throw e;
 		}
 
@@ -660,6 +681,7 @@ ACTOR Future<Void> fetchCheckpointFile(Database cx,
 	state StorageServerInterface ssi;
 	loop {
 		try {
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			Optional<Value> ss = wait(tr.get(serverListKeyFor(ssID)));
 			if (!ss.present()) {
 				throw checkpoint_not_found();
@@ -705,11 +727,11 @@ ACTOR Future<Void> fetchCheckpointFile(Database cx,
 		} catch (Error& e) {
 			if (e.code() != error_code_end_of_stream) {
 				TraceEvent("FetchCheckpointFileError")
+				    .errorUnsuppressed(e)
 				    .detail("RemoteFile", remoteFile)
 				    .detail("StorageServer", ssi.toString())
 				    .detail("LocalFile", localFile)
-				    .detail("Attempt", attempt)
-				    .error(e, true);
+				    .detail("Attempt", attempt);
 				if (attempt >= maxRetries) {
 					throw e;
 				}
@@ -783,7 +805,7 @@ ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
 #endif // SSD_ROCKSDB_EXPERIMENTAL
 
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
-ACTOR Future<Void> deleteRocksCFCheckpoint(CheckpointMetaData checkpoint) {
+ACTOR Future<Void> deleteRocksCheckpoint(CheckpointMetaData checkpoint) {
 	state CheckpointFormat format = checkpoint.getFormat();
 	state std::unordered_set<std::string> dirs;
 	if (format == RocksDBColumnFamily) {
@@ -818,7 +840,7 @@ ACTOR Future<Void> deleteRocksCFCheckpoint(CheckpointMetaData checkpoint) {
 	return Void();
 }
 #else
-ACTOR Future<Void> deleteRocksCFCheckpoint(CheckpointMetaData checkpoint) {
+ACTOR Future<Void> deleteRocksCheckpoint(CheckpointMetaData checkpoint) {
 	wait(delay(0));
 	return Void();
 }

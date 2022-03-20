@@ -20,6 +20,7 @@
 
 #include <vector>
 
+#include "fdbclient/FDBOptions.g.h"
 #include "flow/Util.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbclient/KeyBackedTypes.h"
@@ -89,6 +90,7 @@ ACTOR Future<MoveKeysLock> takeMoveKeysLock(Database cx, UID ddId) {
 			state MoveKeysLock lock;
 			state UID txnId;
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			if (!g_network->isSimulated()) {
 				txnId = deterministicRandom()->randomUniqueID();
 				tr.debugTransaction(txnId);
@@ -123,6 +125,7 @@ ACTOR static Future<Void> checkMoveKeysLock(Transaction* tr,
                                             MoveKeysLock lock,
                                             const DDEnabledState* ddEnabledState,
                                             bool isWrite = true) {
+	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 	if (!ddEnabledState->isDDEnabled()) {
 		TraceEvent(SevDebug, "DDDisabledByInMemoryCheck").log();
 		throw movekeys_conflict();
@@ -626,7 +629,7 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 		    .detail("Shards", shards)
 		    .detail("MaxRetries", maxRetries);
 	} catch (Error& e) {
-		TraceEvent(SevDebug, interval.end(), relocationIntervalId).error(e, true);
+		TraceEvent(SevDebug, interval.end(), relocationIntervalId).errorUnsuppressed(e);
 		throw;
 	}
 
@@ -673,6 +676,7 @@ ACTOR Future<Void> checkFetchingState(Database cx,
 
 			tr.trState->taskID = TaskPriority::MoveKeys;
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 
 			std::vector<Future<Optional<Value>>> serverListEntries;
 			serverListEntries.reserve(dest.size());
@@ -1547,7 +1551,7 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServe
 				tr->addReadConflictRange(conflictRange);
 				tr->addWriteConflictRange(conflictRange);
 
-				StorageMetadataType metadata(timer_int());
+				StorageMetadataType metadata(StorageMetadataType::currentTime());
 				metadataMap.set(tr, server.id(), metadata);
 
 				if (SERVER_KNOBS->TSS_HACK_IDENTITY_MAPPING) {
@@ -1728,6 +1732,7 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 			try {
 				tr.trState->taskID = TaskPriority::MoveKeys;
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				wait(checkMoveKeysLock(&tr, lock, ddEnabledState));
 				TraceEvent("RemoveKeysFromFailedServerLocked")
 				    .detail("ServerID", serverID)
@@ -2072,7 +2077,7 @@ void seedShardServers(Arena& arena, CommitTransactionRef& tr, std::vector<Storag
 	tr.read_conflict_ranges.push_back_deep(arena, allKeys);
 	KeyBackedObjectMap<UID, StorageMetadataType, decltype(IncludeVersion())> metadataMap(serverMetadataKeys.begin,
 	                                                                                     IncludeVersion());
-	StorageMetadataType metadata(timer_int());
+	StorageMetadataType metadata(StorageMetadataType::currentTime());
 
 	for (auto& s : servers) {
 		tr.set(arena, serverTagKeyFor(s.id()), serverTagValue(server_tag[s.id()]));

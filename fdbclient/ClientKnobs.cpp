@@ -36,6 +36,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 
 	init( SYSTEM_MONITOR_INTERVAL,                 5.0 );
 	init( NETWORK_BUSYNESS_MONITOR_INTERVAL,       1.0 );
+	init( TSS_METRICS_LOGGING_INTERVAL,          120.0 ); // 2 minutes by default
 
 	init( FAILURE_MAX_DELAY,                       5.0 );
 	init( FAILURE_MIN_DELAY,                       4.0 ); if( randomize && BUGGIFY ) FAILURE_MIN_DELAY = 1.0;
@@ -60,6 +61,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 
 	init( WRONG_SHARD_SERVER_DELAY,                .01 ); if( randomize && BUGGIFY ) WRONG_SHARD_SERVER_DELAY = deterministicRandom()->random01(); // FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY; // SOMEDAY: This delay can limit performance of retrieving data when the cache is mostly wrong (e.g. dumping the database after a test)
 	init( FUTURE_VERSION_RETRY_DELAY,              .01 ); if( randomize && BUGGIFY ) FUTURE_VERSION_RETRY_DELAY = deterministicRandom()->random01();// FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY;
+	init( UNKNOWN_TENANT_RETRY_DELAY,              0.0 ); if( randomize && BUGGIFY ) UNKNOWN_TENANT_RETRY_DELAY = deterministicRandom()->random01();
 	init( REPLY_BYTE_LIMIT,                      80000 );
 	init( DEFAULT_BACKOFF,                         .01 ); if( randomize && BUGGIFY ) DEFAULT_BACKOFF = deterministicRandom()->random01();
 	init( DEFAULT_MAX_BACKOFF,                     1.0 );
@@ -86,6 +88,10 @@ void ClientKnobs::initialize(Randomize randomize) {
 
 	init( LOCATION_CACHE_EVICTION_SIZE,         600000 );
 	init( LOCATION_CACHE_EVICTION_SIZE_SIM,         10 ); if( randomize && BUGGIFY ) LOCATION_CACHE_EVICTION_SIZE_SIM = 3;
+	init( LOCATION_CACHE_ENDPOINT_FAILURE_GRACE_PERIOD,     60 );
+	init( LOCATION_CACHE_FAILED_ENDPOINT_RETRY_INTERVAL,    60 );
+	init( TENANT_CACHE_EVICTION_SIZE,           100000 );
+	init( TENANT_CACHE_EVICTION_SIZE_SIM,           10 ); if( randomize && BUGGIFY ) TENANT_CACHE_EVICTION_SIZE_SIM = 3;
 
 	init( GET_RANGE_SHARD_LIMIT,                     2 );
 	init( WARM_RANGE_SHARD_LIMIT,                  100 );
@@ -117,6 +123,12 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( CORE_VERSIONSPERSECOND,		           1e6 );
 	init( LOG_RANGE_BLOCK_SIZE, CORE_VERSIONSPERSECOND );
 	init( MUTATION_BLOCK_SIZE,	            	  10000);
+	init( MAX_VERSION_CACHE_LAG,                    0.1 );
+	init( MAX_PROXY_CONTACT_LAG,                    0.2 );
+	init( DEBUG_USE_GRV_CACHE_CHANCE,              -1.0 ); // For 100% chance at 1.0, this means 0.0 is not 0%. We don't want the default to be 0. 
+	init( FORCE_GRV_CACHE_OFF,                    false );
+	init( GRV_CACHE_RK_COOLDOWN,                   60.0 );
+	init( GRV_SUSTAINED_THROTTLING_THRESHOLD,       0.1 );
 
 	// TaskBucket
 	init( TASKBUCKET_LOGGING_DELAY,                5.0 );

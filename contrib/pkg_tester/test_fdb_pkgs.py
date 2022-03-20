@@ -147,7 +147,7 @@ def centos_image_with_fdb_helper(versioned: bool) -> Iterator[Optional[Image]]:
     container = None
     image = None
     try:
-        container = Container("centos", initd=True)
+        container = Container("centos:7", initd=True)
         for rpm in rpms:
             container.copy_to(rpm, "/opt")
         container.run(["bash", "-c", "yum update -y"])
@@ -235,10 +235,6 @@ def test_db_available(linux_container: Container):
 def test_write(linux_container: Container, snapshot):
     linux_container.run(["fdbcli", "--exec", "writemode on; set x y"])
     assert snapshot == linux_container.run(["fdbcli", "--exec", "get x"])
-
-
-def test_fdbcli_help_text(linux_container: Container, snapshot):
-    assert snapshot == linux_container.run(["fdbcli", "--help"])
 
 
 def test_execstack_permissions_libfdb_c(linux_container: Container, snapshot):

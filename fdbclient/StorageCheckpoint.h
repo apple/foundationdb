@@ -57,12 +57,13 @@ struct CheckpointMetaData {
 	// A serialized metadata associated with format, this data can be understood by the corresponding KVS.
 	Standalone<StringRef> serializedCheckpoint;
 
-	CheckpointMetaData() : format(InvalidFormat), state(InvalidState), referenceCount(0) {}
+	CheckpointMetaData() = default;
 	CheckpointMetaData(KeyRange const& range, CheckpointFormat format, UID const& ssID, UID const& checkpointID)
 	  : version(invalidVersion), range(range), format(format), ssID(ssID), checkpointID(checkpointID), state(Pending),
-	    referenceCount(0) {}
+	    referenceCount(0), gcTime(0) {}
 	CheckpointMetaData(Version version, KeyRange const& range, CheckpointFormat format, UID checkpointID)
-	  : version(version), range(range), format(format), checkpointID(checkpointID), referenceCount(0) {}
+	  : version(version), range(range), format(format), ssID(UID()), checkpointID(checkpointID), state(Pending),
+	    referenceCount(0), gcTime(0) {}
 
 	CheckpointState getState() const { return static_cast<CheckpointState>(state); }
 

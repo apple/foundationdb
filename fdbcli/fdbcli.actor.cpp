@@ -19,7 +19,7 @@
  */
 
 #include "boost/lexical_cast.hpp"
-#include "contrib/fmt-8.0.1/include/fmt/format.h"
+#include "contrib/fmt-8.1.1/include/fmt/format.h"
 #include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/FDBTypes.h"
@@ -1014,9 +1014,9 @@ struct CLIOptions {
 				} else {
 					fprintf(stderr, "ERROR: Failed to set knob option '%s': %s\n", knobName.c_str(), e.what());
 					TraceEvent(SevError, "FailedToSetKnob")
+					    .error(e)
 					    .detail("Knob", printable(knobName))
-					    .detail("Value", printable(knobValueString))
-					    .error(e);
+					    .detail("Value", printable(knobValueString));
 					exit_code = FDB_EXIT_ERROR;
 				}
 			}
@@ -1157,7 +1157,6 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 	state bool writeMode = false;
 
-	state std::string clusterConnectString;
 	state std::map<Key, std::pair<Value, ClientLeaderRegInterface>> address_interface;
 
 	state FdbOptions globalOptions;
@@ -1171,6 +1170,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	    ClusterConnectionFile::lookupClusterFileName(opt.clusterFile);
 	try {
 		ccf = makeReference<ClusterConnectionFile>(resolvedClusterFile.first);
+		wait(ccf->resolveHostnames());
 	} catch (Error& e) {
 		fprintf(stderr, "%s\n", ClusterConnectionFile::getErrorString(resolvedClusterFile, e).c_str());
 		return 1;
@@ -1615,7 +1615,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					} else {
 						Version v = wait(makeInterruptable(
 						    safeThreadFutureToFuture(getTransaction(db, tr, options, intrans)->getReadVersion())));
-						printf("%ld\n", v);
+						fmt::print("{}\n", v);
 					}
 					continue;
 				}

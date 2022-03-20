@@ -226,6 +226,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			dbInfo.latencyBandConfig = db->serverInfo->get().latencyBandConfig;
 			dbInfo.myLocality = db->serverInfo->get().myLocality;
 			dbInfo.client = ClientDBInfo();
+			dbInfo.client.tenantMode = db->config.tenantMode;
 
 			TraceEvent("CCWDB", cluster->id)
 			    .detail("NewMaster", dbInfo.master.id().toString())
@@ -296,7 +297,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			TraceEvent(SevWarn, "DetectedFailedRecovery", cluster->id).detail("OldMaster", iMaster.id());
 		} catch (Error& e) {
 			state Error err = e;
-			TraceEvent("CCWDB", cluster->id).error(e, true).detail("Master", iMaster.id());
+			TraceEvent("CCWDB", cluster->id).errorUnsuppressed(e).detail("Master", iMaster.id());
 			if (e.code() != error_code_actor_cancelled)
 				wait(delay(0.0));
 
@@ -313,7 +314,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			TEST(err.code() == error_code_restart_cluster_controller); // Terminated due to cluster-controller restart.
 
 			if (cluster->shouldCommitSuicide || err.code() == error_code_coordinators_changed) {
-				TraceEvent("ClusterControllerTerminate", cluster->id).error(err, true);
+				TraceEvent("ClusterControllerTerminate", cluster->id).errorUnsuppressed(err);
 				throw restart_cluster_controller();
 			}
 
@@ -427,10 +428,10 @@ void checkOutstandingStorageRequests(ClusterControllerData* self) {
 		} catch (Error& e) {
 			if (e.code() == error_code_no_more_servers) {
 				TraceEvent(SevWarn, "RecruitStorageNotAvailable", self->id)
+				    .errorUnsuppressed(e)
 				    .suppressFor(1.0)
 				    .detail("OutstandingReq", i)
-				    .detail("IsCriticalRecruitment", req.first.criticalRecruitment)
-				    .error(e);
+				    .detail("IsCriticalRecruitment", req.first.criticalRecruitment);
 			} else {
 				TraceEvent(SevError, "RecruitStorageError", self->id).error(e);
 				throw;
@@ -464,9 +465,9 @@ void checkOutstandingBlobWorkerRequests(ClusterControllerData* self) {
 		} catch (Error& e) {
 			if (e.code() == error_code_no_more_servers) {
 				TraceEvent(SevWarn, "RecruitBlobWorkerNotAvailable", self->id)
+				    .errorUnsuppressed(e)
 				    .suppressFor(1.0)
-				    .detail("OutstandingReq", i)
-				    .error(e);
+				    .detail("OutstandingReq", i);
 			} else {
 				TraceEvent(SevError, "RecruitBlobWorkerError", self->id).error(e);
 				throw;
@@ -598,7 +599,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	}
 
 	WorkerDetails newEKPWorker;
-	if (SERVER_KNOBS->ENABLE_ENCRYPT_KEY_PROXY) {
+	if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
 		newEKPWorker = findNewProcessForSingleton(self, ProcessClass::EncryptKeyProxy, id_used);
 	}
 
@@ -612,7 +613,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	}
 
 	ProcessClass::Fitness bestFitnessForEKP;
-	if (SERVER_KNOBS->ENABLE_ENCRYPT_KEY_PROXY) {
+	if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
 		bestFitnessForEKP = findBestFitnessForSingleton(self, newEKPWorker, ProcessClass::EncryptKeyProxy);
 	}
 
@@ -637,7 +638,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	}
 
 	bool ekpHealthy = true;
-	if (SERVER_KNOBS->ENABLE_ENCRYPT_KEY_PROXY) {
+	if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
 		ekpHealthy = isHealthySingleton<EncryptKeyProxyInterface>(
 		    self, newEKPWorker, ekpSingleton, bestFitnessForEKP, self->recruitingEncryptKeyProxyID);
 	}
@@ -661,7 +662,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	}
 
 	Optional<Standalone<StringRef>> currEKPProcessId, newEKPProcessId;
-	if (SERVER_KNOBS->ENABLE_ENCRYPT_KEY_PROXY) {
+	if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
 		currEKPProcessId = ekpSingleton.interface.get().locality.processId();
 		newEKPProcessId = newEKPWorker.interf.locality.processId();
 	}
@@ -673,7 +674,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 		newPids.emplace_back(newBMProcessId);
 	}
 
-	if (SERVER_KNOBS->ENABLE_ENCRYPT_KEY_PROXY) {
+	if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
 		currPids.emplace_back(currEKPProcessId);
 		newPids.emplace_back(newEKPProcessId);
 	}
@@ -688,7 +689,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	}
 
 	// if the knob is disabled, the EKP coloc counts should have no affect on the coloc counts check below
-	if (!SERVER_KNOBS->ENABLE_ENCRYPT_KEY_PROXY) {
+	if (!SERVER_KNOBS->ENABLE_ENCRYPTION) {
 		ASSERT(currColocMap[currEKPProcessId] == 0);
 		ASSERT(newColocMap[newEKPProcessId] == 0);
 	}
@@ -705,8 +706,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 			ddSingleton.recruit(self);
 		} else if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES && newColocMap[newBMProcessId] < currColocMap[currBMProcessId]) {
 			bmSingleton.recruit(self);
-		} else if (SERVER_KNOBS->ENABLE_ENCRYPT_KEY_PROXY &&
-		           newColocMap[newEKPProcessId] < currColocMap[currEKPProcessId]) {
+		} else if (SERVER_KNOBS->ENABLE_ENCRYPTION && newColocMap[newEKPProcessId] < currColocMap[currEKPProcessId]) {
 			ekpSingleton.recruit(self);
 		}
 	}
@@ -876,8 +876,8 @@ void clusterRecruitStorage(ClusterControllerData* self, RecruitStorageRequest re
 		if (e.code() == error_code_no_more_servers) {
 			self->outstandingStorageRequests.emplace_back(req, now() + SERVER_KNOBS->RECRUITMENT_TIMEOUT);
 			TraceEvent(SevWarn, "RecruitStorageNotAvailable", self->id)
-			    .detail("IsCriticalRecruitment", req.criticalRecruitment)
-			    .error(e);
+			    .error(e)
+			    .detail("IsCriticalRecruitment", req.criticalRecruitment);
 		} else {
 			TraceEvent(SevError, "RecruitStorageError", self->id).error(e);
 			throw; // Any other error will bring down the cluster controller
@@ -980,19 +980,23 @@ void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest co
 
 	// Construct the client information
 	if (db->clientInfo->get().commitProxies != req.commitProxies ||
-	    db->clientInfo->get().grvProxies != req.grvProxies) {
+	    db->clientInfo->get().grvProxies != req.grvProxies ||
+	    db->clientInfo->get().tenantMode != db->config.tenantMode) {
 		TraceEvent("PublishNewClientInfo", self->id)
 		    .detail("Master", dbInfo.master.id())
 		    .detail("GrvProxies", db->clientInfo->get().grvProxies)
 		    .detail("ReqGrvProxies", req.grvProxies)
 		    .detail("CommitProxies", db->clientInfo->get().commitProxies)
-		    .detail("ReqCPs", req.commitProxies);
+		    .detail("ReqCPs", req.commitProxies)
+		    .detail("TenantMode", db->clientInfo->get().tenantMode.toString())
+		    .detail("ReqTenantMode", db->config.tenantMode.toString());
 		isChanged = true;
 		// TODO why construct a new one and not just copy the old one and change proxies + id?
 		ClientDBInfo clientInfo;
 		clientInfo.id = deterministicRandom()->randomUniqueID();
 		clientInfo.commitProxies = req.commitProxies;
 		clientInfo.grvProxies = req.grvProxies;
+		clientInfo.tenantMode = db->config.tenantMode;
 		db->clientInfo->set(clientInfo);
 		dbInfo.client = db->clientInfo->get();
 	}
@@ -1235,7 +1239,7 @@ void registerWorker(RegisterWorkerRequest req,
 		    self, w, currSingleton, registeringSingleton, self->recruitingBlobManagerID);
 	}
 
-	if (SERVER_KNOBS->ENABLE_ENCRYPT_KEY_PROXY && req.encryptKeyProxyInterf.present()) {
+	if (SERVER_KNOBS->ENABLE_ENCRYPTION && req.encryptKeyProxyInterf.present()) {
 		auto currSingleton = EncryptKeyProxySingleton(self->db.serverInfo->get().encryptKeyProxy);
 		auto registeringSingleton = EncryptKeyProxySingleton(req.encryptKeyProxyInterf);
 		haltRegisteringOrCurrentSingleton<EncryptKeyProxyInterface>(
@@ -2411,7 +2415,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 	state Future<ErrorOr<Void>> error = errorOr(actorCollection(self.addActor.getFuture()));
 
 	// EncryptKeyProxy is necessary for TLog recovery, recruit it as the first process
-	if (SERVER_KNOBS->ENABLE_ENCRYPT_KEY_PROXY) {
+	if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
 		self.addActor.send(monitorEncryptKeyProxy(&self));
 	}
 	self.addActor.send(clusterWatchDatabase(&self, &self.db, coordinators, leaderFail)); // Start the master database
@@ -2599,6 +2603,7 @@ ACTOR Future<Void> clusterController(Reference<IClusterConnectionRecord> connRec
 	state bool hasConnected = false;
 	loop {
 		try {
+			wait(connRecord->resolveHostnames());
 			ServerCoordinators coordinators(connRecord);
 			wait(clusterController(coordinators, currentCC, hasConnected, asyncPriorityInfo, locality, configDBType));
 		} catch (Error& e) {

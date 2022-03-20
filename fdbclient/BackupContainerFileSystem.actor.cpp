@@ -1149,8 +1149,8 @@ public:
 			keyFile = _keyFile;
 		} catch (Error& e) {
 			TraceEvent(SevWarnAlways, "FailedToOpenEncryptionKeyFile")
-			    .detail("FileName", encryptionKeyFileName)
-			    .error(e);
+			    .error(e)
+			    .detail("FileName", encryptionKeyFileName);
 			throw e;
 		}
 		int bytesRead = wait(keyFile->read(cipherKey->data(), cipherKey->size(), 0));
@@ -1377,8 +1377,8 @@ ACTOR static Future<KeyRange> getSnapshotFileKeyRange_impl(Reference<BackupConta
 			           e.code() == error_code_timed_out || e.code() == error_code_lookup_failed) {
 				// blob http request failure, retry
 				TraceEvent(SevWarnAlways, "BackupContainerGetSnapshotFileKeyRangeConnectionFailure")
-				    .detail("Retries", ++readFileRetries)
-				    .error(e);
+				    .error(e)
+				    .detail("Retries", ++readFileRetries);
 				wait(delayJittered(0.1));
 			} else {
 				TraceEvent(SevError, "BackupContainerGetSnapshotFileKeyRangeUnexpectedError").error(e);
@@ -1549,9 +1549,9 @@ Reference<BackupContainerFileSystem> BackupContainerFileSystem::openContainerFS(
 			throw;
 
 		TraceEvent m(SevWarn, "BackupContainer");
+		m.error(e);
 		m.detail("Description", "Invalid container specification.  See help.");
 		m.detail("URL", url);
-		m.error(e);
 		if (e.code() == error_code_backup_invalid_url)
 			m.detail("LastOpenError", lastOpenError);
 

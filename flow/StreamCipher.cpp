@@ -20,12 +20,14 @@
 
 #include "flow/StreamCipher.h"
 #include "flow/Arena.h"
+#include "flow/IRandom.h"
 #include "flow/ITrace.h"
 #include "flow/UnitTest.h"
 #include <memory>
 
-std::unordered_set<EVP_CIPHER_CTX*> StreamCipher::ctxs;
-std::unordered_set<StreamCipherKey*> StreamCipherKey::cipherKeys;
+UID StreamCipherKey::globalKeyId;
+std::unordered_map<UID, EVP_CIPHER_CTX*> StreamCipher::ctxs;
+std::unordered_map<UID, StreamCipherKey*> StreamCipherKey::cipherKeys;
 std::unique_ptr<StreamCipherKey> StreamCipherKey::globalKey;
 
 bool StreamCipherKey::isGlobalKeyPresent() {
@@ -36,8 +38,9 @@ void StreamCipherKey::allocGlobalCipherKey() {
 	if (StreamCipherKey::isGlobalKeyPresent()) {
 		return;
 	}
+	StreamCipherKey::globalKeyId = deterministicRandom()->randomUniqueID();
 	StreamCipherKey::globalKey = std::make_unique<StreamCipherKey>(AES_256_KEY_LENGTH);
-	StreamCipherKey::cipherKeys.insert(StreamCipherKey::globalKey.get());
+	StreamCipherKey::cipherKeys[StreamCipherKey::globalKeyId] = StreamCipherKey::globalKey.get();
 }
 
 void StreamCipherKey::initializeGlobalRandomTestKey() {
@@ -56,8 +59,8 @@ StreamCipherKey const* StreamCipherKey::getGlobalCipherKey() {
 }
 
 void StreamCipherKey::cleanup() noexcept {
-	for (auto cipherKey : cipherKeys) {
-		cipherKey->reset();
+	for (const auto& itr : cipherKeys) {
+		itr.second->reset();
 	}
 }
 
@@ -67,31 +70,33 @@ void StreamCipherKey::initializeKey(uint8_t* data, int len) {
 	memcpy(arr.get(), data, copyLen);
 }
 
-StreamCipherKey::StreamCipherKey(int size) : arr(std::make_unique<uint8_t[]>(size)), keySize(size) {
+StreamCipherKey::StreamCipherKey(int size)
+  : id(deterministicRandom()->randomUniqueID()), arr(std::make_unique<uint8_t[]>(size)), keySize(size) {
 	memset(arr.get(), 0, keySize);
-	cipherKeys.insert(this);
+	cipherKeys[id] = this;
 }
 
 StreamCipherKey::~StreamCipherKey() {
 	reset();
-	cipherKeys.erase(this);
+	cipherKeys.erase(this->id);
 }
 
 StreamCipher::StreamCipher(int keySize)
-  : ctx(EVP_CIPHER_CTX_new()), hmacCtx(HMAC_CTX_new()), cipherKey(std::make_unique<StreamCipherKey>(keySize)) {
-	ctxs.insert(ctx);
+  : id(deterministicRandom()->randomUniqueID()), ctx(EVP_CIPHER_CTX_new()), hmacCtx(HMAC_CTX_new()),
+    cipherKey(std::make_unique<StreamCipherKey>(keySize)) {
+	ctxs[id] = ctx;
 }
 
 StreamCipher::StreamCipher()
-  : ctx(EVP_CIPHER_CTX_new()), hmacCtx(HMAC_CTX_new()),
+  : id(deterministicRandom()->randomUniqueID()), ctx(EVP_CIPHER_CTX_new()), hmacCtx(HMAC_CTX_new()),
     cipherKey(std::make_unique<StreamCipherKey>(AES_256_KEY_LENGTH)) {
-	ctxs.insert(ctx);
+	ctxs[id] = ctx;
 }
 
 StreamCipher::~StreamCipher() {
 	HMAC_CTX_free(hmacCtx);
 	EVP_CIPHER_CTX_free(ctx);
-	ctxs.erase(ctx);
+	ctxs.erase(id);
 }
 
 EVP_CIPHER_CTX* StreamCipher::getCtx() {
@@ -103,8 +108,8 @@ HMAC_CTX* StreamCipher::getHmacCtx() {
 }
 
 void StreamCipher::cleanup() noexcept {
-	for (auto ctx : ctxs) {
-		EVP_CIPHER_CTX_free(ctx);
+	for (auto itr : ctxs) {
+		EVP_CIPHER_CTX_free(itr.second);
 	}
 }
 

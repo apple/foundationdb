@@ -224,7 +224,7 @@ ACTOR Future<Void> handleIOErrors(Future<Void> actor, IClosable* store, UID id, 
 				return e.get();
 		}
 		when(ErrorOr<Void> e = wait(storeError)) {
-			TraceEvent("WorkerTerminatingByIOError", id).error(e.getError(), true);
+			TraceEvent("WorkerTerminatingByIOError", id).errorUnsuppressed(e.getError());
 			actor.cancel();
 			// file_not_found can occur due to attempting to open a partially deleted DiskQueue, which should not be
 			// reported SevError.
@@ -1126,7 +1126,7 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
 		DUMPTOKEN(recruited.getValue);
 		DUMPTOKEN(recruited.getKey);
 		DUMPTOKEN(recruited.getKeyValues);
-		DUMPTOKEN(recruited.getKeyValuesAndFlatMap);
+		DUMPTOKEN(recruited.getMappedKeyValues);
 		DUMPTOKEN(recruited.getShardState);
 		DUMPTOKEN(recruited.waitMetrics);
 		DUMPTOKEN(recruited.splitMetrics);
@@ -1138,7 +1138,7 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
 		DUMPTOKEN(recruited.getKeyValueStoreType);
 		DUMPTOKEN(recruited.watchValue);
 		DUMPTOKEN(recruited.getKeyValuesStream);
-		DUMPTOKEN(recruited.getKeyValuesAndFlatMap);
+		DUMPTOKEN(recruited.getMappedKeyValues);
 
 		prevStorageServer =
 		    storageServer(store, recruited, db, folder, Promise<Void>(), Reference<IClusterConnectionRecord>(nullptr));
@@ -1232,7 +1232,7 @@ void endRole(const Role& role, UID id, std::string reason, bool ok, Error e) {
 	{
 		TraceEvent ev("Role", id);
 		if (e.code() != invalid_error_code)
-			ev.error(e, true);
+			ev.errorUnsuppressed(e);
 		ev.detail("Transition", "End").detail("As", role.roleName).detail("Reason", reason);
 
 		ev.trackLatest(id.shortString() + ".Role");
@@ -1243,7 +1243,7 @@ void endRole(const Role& role, UID id, std::string reason, bool ok, Error e) {
 
 		TraceEvent err(SevError, type.c_str(), id);
 		if (e.code() != invalid_error_code) {
-			err.error(e, true);
+			err.errorUnsuppressed(e);
 		}
 		err.detail("Reason", reason);
 	}
@@ -1288,7 +1288,7 @@ ACTOR Future<Void> workerSnapCreate(WorkerSnapRequest snapReq, Standalone<String
 		}
 		snapReq.reply.send(Void());
 	} catch (Error& e) {
-		TraceEvent("ExecHelperError").error(e, true /*includeCancelled*/);
+		TraceEvent("ExecHelperError").errorUnsuppressed(e);
 		if (e.code() != error_code_operation_cancelled) {
 			snapReq.reply.sendError(e);
 		} else {
@@ -1540,7 +1540,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				DUMPTOKEN(recruited.getKeyValueStoreType);
 				DUMPTOKEN(recruited.watchValue);
 				DUMPTOKEN(recruited.getKeyValuesStream);
-				DUMPTOKEN(recruited.getKeyValuesAndFlatMap);
+				DUMPTOKEN(recruited.getMappedKeyValues);
 
 				Promise<Void> recovery;
 				Future<Void> f = storageServer(kv, recruited, dbInfo, folder, recovery, connRecord);
@@ -1636,7 +1636,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			DUMPTOKEN(recruited.getValue);
 			DUMPTOKEN(recruited.getKey);
 			DUMPTOKEN(recruited.getKeyValues);
-			DUMPTOKEN(recruited.getKeyValuesAndFlatMap);
+			DUMPTOKEN(recruited.getMappedKeyValues);
 			DUMPTOKEN(recruited.getShardState);
 			DUMPTOKEN(recruited.waitMetrics);
 			DUMPTOKEN(recruited.splitMetrics);
@@ -2039,7 +2039,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					DUMPTOKEN(recruited.getKeyValueStoreType);
 					DUMPTOKEN(recruited.watchValue);
 					DUMPTOKEN(recruited.getKeyValuesStream);
-					DUMPTOKEN(recruited.getKeyValuesAndFlatMap);
+					DUMPTOKEN(recruited.getMappedKeyValues);
 					// printf("Recruited as storageServer\n");
 
 					std::string filename =
@@ -2308,10 +2308,11 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 ACTOR Future<Void> extractClusterInterface(Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> in,
                                            Reference<AsyncVar<Optional<ClusterInterface>>> out) {
 	loop {
-		if (in->get().present())
+		if (in->get().present()) {
 			out->set(in->get().get().clientInterface);
-		else
+		} else {
 			out->set(Optional<ClusterInterface>());
+		}
 		wait(in->onChange());
 	}
 }
@@ -2509,9 +2510,14 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderWithDelayedCandidacyImplOneGenerati
 			}
 			successIndex = index;
 		} else {
+			if (leader.isError() && leader.getError().code() == error_code_coordinators_changed) {
+				info.intermediateConnRecord->getConnectionString().resetToUnresolved();
+				throw coordinators_changed();
+			}
 			index = (index + 1) % addrs.size();
 			if (index == successIndex) {
 				wait(delay(CLIENT_KNOBS->COORDINATOR_RECONNECTION_DELAY));
+				throw coordinators_changed();
 			}
 		}
 	}
@@ -2519,11 +2525,22 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderWithDelayedCandidacyImplOneGenerati
 
 ACTOR Future<Void> monitorLeaderWithDelayedCandidacyImplInternal(Reference<IClusterConnectionRecord> connRecord,
                                                                  Reference<AsyncVar<Value>> outSerializedLeaderInfo) {
+	wait(connRecord->resolveHostnames());
 	state MonitorLeaderInfo info(connRecord);
 	loop {
-		MonitorLeaderInfo _info =
-		    wait(monitorLeaderWithDelayedCandidacyImplOneGeneration(connRecord, outSerializedLeaderInfo, info));
-		info = _info;
+		try {
+			wait(info.intermediateConnRecord->resolveHostnames());
+			MonitorLeaderInfo _info =
+			    wait(monitorLeaderWithDelayedCandidacyImplOneGeneration(connRecord, outSerializedLeaderInfo, info));
+			info = _info;
+		} catch (Error& e) {
+			if (e.code() == error_code_coordinators_changed) {
+				TraceEvent("MonitorLeaderWithDelayedCandidacyCoordinatorsChanged").suppressFor(1.0);
+				info.intermediateConnRecord->getConnectionString().resetToUnresolved();
+			} else {
+				throw e;
+			}
+		}
 	}
 }
 
@@ -2657,6 +2674,7 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 	actors.push_back(serveProcess());
 
 	try {
+		wait(connRecord->resolveHostnames());
 		ServerCoordinators coordinators(connRecord);
 		if (g_network->isSimulated()) {
 			whitelistBinPaths = ",, random_path,  /bin/snap_create.sh,,";
