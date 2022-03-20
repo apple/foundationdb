@@ -233,6 +233,9 @@ public:
 
 	// Run storage enginee on a child process on the same machine with storage process
 	bool REMOTE_KV_STORE;
+	// A delay to avoid race on file resources if the new kv store process started immediately after the previous kv
+	// store process died
+	double REMOTE_KV_STORE_INIT_DELAY;
 
 	// KeyValueStore SQLITE
 	int CLEAR_BUFFER_SIZE;

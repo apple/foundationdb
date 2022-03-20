@@ -84,6 +84,7 @@
 #if defined(__linux__) || defined(__FreeBSD__)
 #include <execinfo.h>
 #include <signal.h>
+#include <sys/prctl.h>
 #ifdef ALLOC_INSTRUMENTATION
 #include <cxxabi.h>
 #endif
@@ -2190,6 +2191,12 @@ int main(int argc, char* argv[]) {
 			f = result;
 		} else if (role == ServerRole::FlowProcess) {
 			TraceEvent(SevDebug, "StartingFlowProcess").detail("From", "fdbserver");
+#if defined(__linux__) || defined(__FreeBSD__)
+			prctl(PR_SET_PDEATHSIG, SIGTERM);
+			if (getppid() == 1) /* parent already died before prctl */
+				flushAndExit(FDB_EXIT_SUCCESS);
+#endif
+
 			if (opts.flowProcessName == "KeyValueStoreProcess") {
 				ProcessFactory<KeyValueStoreProcess>(opts.flowProcessName.c_str());
 			}

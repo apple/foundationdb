@@ -56,7 +56,7 @@ struct FlowProcessRegistrationRequest {
 class FlowProcess {
 
 public:
-	virtual ~FlowProcess();
+	virtual ~FlowProcess() {}
 	virtual StringRef name() const = 0;
 	virtual StringRef serializedInterface() const = 0;
 	virtual Future<Void> run() = 0;
@@ -89,8 +89,6 @@ struct ProcessFactory : IProcessFactory {
 private:
 	const char* name;
 };
-
-Future<Void> runFlowProcess(std::string const& name, Endpoint endpoint);
 
 #include <flow/unactorcompiler.h>
 #endif

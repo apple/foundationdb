@@ -230,3 +230,21 @@ IKeyValueStore* openRemoteKVStore(KeyValueStoreType storeType,
 	    self, OpenKVStoreRequest(storeType, filename, logID, memoryLimit, checkChecksums, checkIntegrity));
 	return self;
 }
+
+ACTOR static Future<Void> delayFlowProcessRunAction(FlowProcess* self, double time) {
+	wait(delay(time));
+	wait(self->run());
+	return Void();
+}
+
+Future<Void> runFlowProcess(std::string const& name, Endpoint endpoint) {
+	TraceEvent(SevDebug, "RunFlowProcessStart").log();
+	FlowProcess* self = IProcessFactory::create(name.c_str());
+	self->registerEndpoint(endpoint);
+	RequestStream<FlowProcessRegistrationRequest> registerProcess(endpoint);
+	FlowProcessRegistrationRequest req;
+	req.flowProcessInterface = self->serializedInterface();
+	registerProcess.send(req);
+	TraceEvent(SevDebug, "FlowProcessInitFinished").log();
+	return delayFlowProcessRunAction(self, g_network->isSimulated() ? 0 : SERVER_KNOBS->REMOTE_KV_STORE_INIT_DELAY);
+}

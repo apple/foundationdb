@@ -473,5 +473,7 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 	}
 };
 
+Future<Void> runFlowProcess(std::string const& name, Endpoint endpoint);
+
 #include "flow/unactorcompiler.h"
 #endif
