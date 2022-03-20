@@ -410,22 +410,28 @@ struct SSCheckpointWorkload : TestWorkload {
 		}
 
 		state UID owner = deterministicRandom()->randomUniqueID();
+		// state Key ownerKey = "\xff/moveKeysLock/Owner"_sr;
 		state DDEnabledState ddEnabledState;
 
 		state Transaction tr(cx);
 
 		loop {
-			TraceEvent("TestMoveShard").detail("Range", keys.toString());
 			try {
-				BinaryWriter wrMyOwner(Unversioned());
-				wrMyOwner << owner;
-				tr.set(moveKeysLockOwnerKey, wrMyOwner.toValue());
+				// BinaryWriter wrMyOwner(Unversioned());
+				// wrMyOwner << owner;
+				// tr.set(ownerKey, wrMyOwner.toValue());
+				TraceEvent("TestMoveShard").detail("Range", keys.toString());
+				// DEBUG_MUTATION("TestMoveShard", self->commitVersion, m, pProxyCommitData->dbgid).detail("To", tags);
+
+				state MoveKeysLock moveKeysLock = wait(takeMoveKeysLock(cx, owner));
+
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				state RangeResult dataMoves = wait(tr.getRange(dataMoveKeys, CLIENT_KNOBS->TOO_MANY));
-				wait(tr.commit());
-
-				state MoveKeysLock moveKeysLock;
-				moveKeysLock.myOwner = owner;
-
+				Version readVersion = wait(tr.getReadVersion());
+				TraceEvent("TestMoveShardReadDataMoves")
+				    .detail("dataMoves", dataMoves.size())
+				    .detail("ReadVersion", readVersion);
+				// wait(tr.commit());
 				state int i = 0;
 				for (; i < dataMoves.size(); ++i) {
 					UID dataMoveID = decodeDataMoveKey(dataMoves[i].key);

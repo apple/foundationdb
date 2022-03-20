@@ -590,6 +590,7 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 
 					TraceEvent("DataMoveMetaDataCommit", dataMove.id)
 					    .detail("DataMoveID", dataMoveID)
+					    .detail("DataMoveKey", dataMoveKeyFor(dataMoveID))
 					    .detail("CommitVersion", tr->getCommittedVersion())
 					    .detail("DeltaRange", currentKeys.toString())
 					    .detail("Range", dataMove.range.toString());
@@ -1063,6 +1064,9 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 					if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
 						Optional<Value> val = wait(tr.get(dataMoveKeyFor(dataMoveID)));
 						if (val.present()) {
+							TraceEvent(SevDebug, "FinishMoveKeysFoundDataMove", relocationIntervalId)
+							    .detail("DataMoveID", dataMoveID)
+							    .detail("DataMove", dataMove.toString());
 							dataMove = decodeDataMoveValue(val.get());
 							if (dataMove.getPhase() == DataMoveMetaData::Deleting) {
 								TraceEvent(SevWarn, interval.end(), relocationIntervalId)

@@ -62,7 +62,7 @@ struct CheckpointMetaData {
 	  : version(invalidVersion), range(range), format(format), dataMoveID(UID()), checkpointID(checkpointID),
 	    ssID(ssID), state(Pending), referenceCount(0), gcTime(0) {}
 	CheckpointMetaData(Version version, KeyRange const& range, CheckpointFormat format, UID checkpointID)
-	  : version(invalidVersion), range(range), format(format), dataMoveID(UID()), checkpointID(checkpointID),
+	  : version(version), range(range), format(format), dataMoveID(UID()), checkpointID(checkpointID),
 	    ssID(UID()), state(Pending), referenceCount(0), gcTime(0) {}
 
 	CheckpointState getState() const { return static_cast<CheckpointState>(state); }

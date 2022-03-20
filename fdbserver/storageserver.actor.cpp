@@ -7146,7 +7146,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			// TODO(alexmiller): Update to version tracking.
 			// DEBUG_KEY_RANGE("SSUpdate", ver, KeyRangeRef());
 
-			TraceEvent(SevWarn, "StorageServerUpdateBegin", data->thisServerID)
+			TraceEvent(SevWarn, "StorageServerApplyUpdateBegin", data->thisServerID)
 			    .detail("Version", ver)
 			    .detail("DataVersion", data->version.get());
 			data->mutableData().createNewVersion(ver);
@@ -7248,6 +7248,7 @@ ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData meta
 		state CheckpointMetaData res = wait(data->storage.checkpoint(req));
 		checkpointResult = res;
 		checkpointResult.ssID = data->thisServerID;
+		checkpointResult.dataMoveID = metaData.dataMoveID;
 		ASSERT(checkpointResult.getState() == CheckpointMetaData::Complete);
 		data->checkpoints[checkpointResult.checkpointID] = checkpointResult;
 		TraceEvent("StorageCreatedCheckpoint", data->thisServerID).detail("Checkpoint", checkpointResult.toString());
