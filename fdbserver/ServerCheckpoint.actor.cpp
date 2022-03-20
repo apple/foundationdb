@@ -39,7 +39,7 @@ ACTOR Future<Void> deleteCheckpoint(CheckpointMetaData checkpoint) {
 	wait(delay(0, TaskPriority::FetchKeys));
 	state CheckpointFormat format = checkpoint.getFormat();
 	if (format == RocksDBColumnFamily || format == RocksDB) {
-		wait(deleteRocksCFCheckpoint(checkpoint));
+		wait(deleteRocksCheckpoint(checkpoint));
 	} else {
 		throw not_implemented();
 	}

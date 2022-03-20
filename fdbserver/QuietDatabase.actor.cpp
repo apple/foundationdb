@@ -447,8 +447,6 @@ ACTOR Future<bool> getTeamCollectionValid(Database cx, WorkerInterface dataDistr
 				return true;
 			}
 
-			cx->invalidateCache(allKeys);
-
 			TraceEvent("GetTeamCollectionValid").detail("Stage", "ContactingMaster");
 
 			TraceEventFields teamCollectionInfoMessage = wait(timeoutError(

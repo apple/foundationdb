@@ -5524,7 +5524,7 @@ ACTOR Future<Void> fetchShardApplyUpdates(StorageServer* data,
 		TraceEvent("FetchShardApplyUpdatesSuccess", data->thisServerID).detail("MoveInShard", shard->toString());
 	} catch (Error& e) {
 		TraceEvent("FetchShardApplyUpdatesFailure", data->thisServerID)
-		    .errorUnsuppressed(e, true)
+		    .errorUnsuppressed(e)
 		    .detail("MoveInShard", shard->toString());
 		throw e;
 	}

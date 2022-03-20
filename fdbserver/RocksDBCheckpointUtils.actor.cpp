@@ -589,12 +589,12 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 			}
 			if (err.code() != error_code_end_of_stream) {
 				TraceEvent("FetchCheckpointFileError")
+				    .errorUnsuppressed(err)
 				    .detail("CheckpointID", metaData->checkpointID)
 				    .detail("Range", range.toString())
 				    .detail("TargetStorageServerUID", ssID.toString())
 				    .detail("LocalFile", localFile)
-				    .detail("Attempt", attempt)
-				    .error(err, true);
+				    .detail("Attempt", attempt);
 				if (attempt >= maxRetries) {
 					error = err;
 					break;

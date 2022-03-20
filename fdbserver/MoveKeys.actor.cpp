@@ -1392,7 +1392,7 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 
 		TraceEvent(SevDebug, interval.end(), relocationIntervalId);
 	} catch (Error& e) {
-		TraceEvent(SevWarnAlways, "FinishMoveKeysError", relocationIntervalId).error(e, true);
+		TraceEvent(SevWarnAlways, "FinishMoveKeysError", relocationIntervalId).errorUnsuppressed(e);
 		throw;
 	}
 	return Void();
@@ -1994,7 +1994,7 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 			}
 		}
 	} catch (Error& e) {
-		TraceEvent(SevDebug, "CleanUpDataMoveError", dataMoveID).error(e, true);
+		TraceEvent(SevDebug, "CleanUpDataMoveError", dataMoveID).errorUnsuppressed(e);
 		throw;
 	}
 

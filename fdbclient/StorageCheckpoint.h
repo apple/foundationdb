@@ -59,11 +59,11 @@ struct CheckpointMetaData {
 
 	CheckpointMetaData() = default;
 	CheckpointMetaData(KeyRange const& range, CheckpointFormat format, UID const& ssID, UID const& checkpointID)
-	  : version(invalidVersion), range(range), format(format), ssID(ssID), checkpointID(checkpointID), state(Pending),
-	    referenceCount(0), gcTime(0) {}
+	  : version(invalidVersion), range(range), format(format), dataMoveID(UID()), checkpointID(checkpointID),
+	    ssID(ssID), state(Pending), referenceCount(0), gcTime(0) {}
 	CheckpointMetaData(Version version, KeyRange const& range, CheckpointFormat format, UID checkpointID)
-	  : version(version), range(range), format(format), ssID(UID()), checkpointID(checkpointID), state(Pending),
-	    referenceCount(0), gcTime(0) {}
+	  : version(invalidVersion), range(range), format(format), dataMoveID(UID()), checkpointID(checkpointID),
+	    ssID(UID()), state(Pending), referenceCount(0), gcTime(0) {}
 
 	CheckpointState getState() const { return static_cast<CheckpointState>(state); }
 
@@ -90,22 +90,21 @@ struct CheckpointMetaData {
 struct DataMoveMetaData {
 	enum Phase {
 		InvalidPhase = 0,
-		Pending = 1, // Checkpoint creation pending.
-		Complete = 2, // Checkpoint is created and ready to be read.
-		Deleting = 3, // Checkpoint deletion requested.
-		Fail = 4,
+		Running = 1, // System keyspace has been modified, data move in action.
+		Completing = 2, // Data transfer has finished, finalizing system keyspace.
+		Deleting = 3, // Data move is cancelled.
 	};
 
 	constexpr static FileIdentifier file_identifier = 13804362;
-	UID id; // A unique id for this checkpoint.
+	UID id; // A unique id for this data move.
 	Version version;
 	KeyRange range;
 	int priority;
 	std::set<UID> src;
 	std::set<UID> dest;
-	int16_t phase; // CheckpointState.
+	int16_t phase; // DataMoveMetaData::Phase.
 
-	DataMoveMetaData() : phase(InvalidPhase), priority(0) {}
+	DataMoveMetaData() = default;
 	DataMoveMetaData(UID id, Version version, KeyRange const& range)
 	  : id(id), version(version), range(range), priority(0) {}
 	DataMoveMetaData(UID id, KeyRange const& range) : id(id), version(invalidVersion), range(range), priority(0) {}
@@ -116,17 +115,11 @@ struct DataMoveMetaData {
 
 	std::string toString() const {
 		std::string res = "DataMoveMetaData:\nID: " + id.toString() + "\nRange: " + range.toString() +
-		                  "\nVersion: " + std::to_string(version) + "\nPriority: " + std::to_string(priority) +
+		                  //   "\nVersion: " + std::to_string(version) + "\nPriority: " + std::to_string(priority) +
 		                  "\nPhase: " + std::to_string(static_cast<int>(phase)) + "\nSource Servers: " + describe(src) +
 		                  "\nDestination Servers: " + describe(dest) + "\n";
 		return res;
 	}
-
-	// bool operator==(const DataMoveMetaData& other) {
-	// 	return this->range == other.range && this->id == other.id &&
-	// 	       std::equal(this->src.begin(), this->src.end(), other.src.begin()) &&
-	// 	       std::equal(this->dest.begin(), this->dest.end(), other.dest.begin());
-	// }
 
 	template <class Ar>
 	void serialize(Ar& ar) {

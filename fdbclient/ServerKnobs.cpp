@@ -545,8 +545,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( REMOVE_RETRY_DELAY,                                    1.0 );
 	init( MOVE_KEYS_KRM_LIMIT,                                  2000 ); if( randomize && BUGGIFY ) MOVE_KEYS_KRM_LIMIT = 2;
 	init( MOVE_KEYS_KRM_LIMIT_BYTES,                             1e5 ); if( randomize && BUGGIFY ) MOVE_KEYS_KRM_LIMIT_BYTES = 5e4; //This must be sufficiently larger than CLIENT_KNOBS->KEY_SIZE_LIMIT (fdbclient/Knobs.h) to ensure that at least two entries will be returned from an attempt to read a key range map
-	init( MOVE_SHARD_KRM_ROW_LIMIT,                   20000 );
-	init( MOVE_SHARD_KRM_BYTE_LIMIT,                    1e6 );
+	init( MOVE_SHARD_KRM_ROW_LIMIT,                            20000 );
+	init( MOVE_SHARD_KRM_BYTE_LIMIT,                             1e6 );
 	init( MAX_SKIP_TAGS,                                           1 ); //The TLogs require tags to be densely packed to be memory efficient, so be careful increasing this knob
 	init( MAX_ADDED_SOURCES_MULTIPLIER,                          2.0 );
 	init( ENABLE_PHYSICAL_SHARD_MOVE,                           true );
