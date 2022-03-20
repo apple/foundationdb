@@ -5795,7 +5795,8 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 	for (const auto& range : moveInRanges) {
 		data->addShard(ShardInfo::newMoveInShard(data, range, version + 1, moveInShardMetaData));
 		newMoveInShards.push_back(data->shards[range.begin]);
-		std::cout << std::endl << "Adding new MoveInShard: " << data->shards[range.begin]->moveInShard->toString() << std::endl;
+		std::cout << std::endl
+		          << "Adding new MoveInShard: " << data->shards[range.begin]->moveInShard->toString() << std::endl;
 	}
 
 	// Update newestAvailableVersion when a shard becomes (un)available (in a separate loop to avoid invalidating vr
@@ -5816,7 +5817,7 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 
 	for (const auto& [id, moveInShard] : cancelMoveIns) {
 		// if (moveInShard.getPhase() >= MoveInShardMetaData::Ingesting) {
-			removeRanges.push_back(moveInShard.meta->range);
+		removeRanges.push_back(moveInShard.meta->range);
 		// }
 		auto& mLV = data->addVersionToMutationLog(version + 1);
 		KeyRange keys = singleKeyRange(moveInShard.moveInShardKey());
@@ -6464,6 +6465,11 @@ ACTOR Future<Void> tssDelayForever() {
 }
 
 ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
+	TraceEvent(SevWarn, "StorageServerUpdateBegin", data->thisServerID)
+	    .detail("Version", data->version.get())
+	    .detail("DurableVersion", data->durableVersion.get())
+	    .detail("DesiredOldestVersion", data->desiredOldestVersion.get())
+	    .detail("QueueSize", data->queueSize());
 	state double start;
 	try {
 		// If we are disk bound and durableVersion is very old, we need to block updates or we could run out of
@@ -6539,6 +6545,9 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		data->lastTLogVersion = cursor->getMaxKnownVersion();
 		data->knownCommittedVersion = cursor->getMinKnownCommittedVersion();
 		data->versionLag = std::max<int64_t>(0, data->lastTLogVersion - data->version.get());
+		TraceEvent(SevWarn, "StorageServerUpdateCursor", data->thisServerID)
+		    .detail("Version", data->version.get())
+		    .detail("MaxKnownVersion", data->lastTLogVersion);
 
 		ASSERT(*pReceivedUpdate == false);
 		*pReceivedUpdate = true;
@@ -6627,6 +6636,8 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		}
 		data->eagerReadsLatencyHistogram->sampleSeconds(now() - start);
 
+		TraceEvent(SevWarn, "StorageServerUpdateLoop1", data->thisServerID);
+
 		if (now() - start > 0.1)
 			TraceEvent("SSSlowTakeLock2", data->thisServerID)
 			    .detailf("From", "%016llx", debug_lastLoadBalanceResultEndpointToken)
@@ -6662,6 +6673,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			}
 		}
 		data->fetchKeysPTreeUpdatesLatencyHistogram->sampleSeconds(now() - beforeFetchKeysUpdates);
+		TraceEvent(SevWarn, "StorageServerUpdateAppliedFetch", data->thisServerID);
 
 		state Version ver = invalidVersion;
 		cloneCursor2->setProtocolVersion(data->logProtocol);
@@ -6669,6 +6681,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		state double beforeTLogMsgsUpdates = now();
 		state std::set<Key> updatedChangeFeeds;
 		for (; cloneCursor2->hasMessage(); cloneCursor2->nextMessage()) {
+			TraceEvent(SevWarn, "StorageServerUpdateLoop2Begin", data->thisServerID);
 			if (mutationBytes > SERVER_KNOBS->DESIRED_UPDATE_BYTES) {
 				mutationBytes = 0;
 				// Instead of just yielding, leave time for the storage server to respond to reads
@@ -6769,6 +6782,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 					    .detail("Mutation", msg)
 					    .detail("Version", cloneCursor2->version().toString());
 			}
+			TraceEvent(SevWarn, "StorageServerUpdateLoop2End", data->thisServerID);
 		}
 
 		// if (!data->pendingMoveInUpdates.empty()) {
@@ -6807,6 +6821,9 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			// TODO(alexmiller): Update to version tracking.
 			// DEBUG_KEY_RANGE("SSUpdate", ver, KeyRangeRef());
 
+			TraceEvent(SevWarn, "StorageServerUpdateBegin", data->thisServerID)
+			    .detail("Version", ver)
+			    .detail("DataVersion", data->version.get());
 			data->mutableData().createNewVersion(ver);
 			if (data->otherError.getFuture().isReady())
 				data->otherError.getFuture().get();

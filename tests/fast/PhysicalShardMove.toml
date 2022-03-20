@@ -1,6 +1,7 @@
 [configuration]
 config = 'triple'
 generateFearless = false
+disableTss = true
 storageEngineType = 4
 processesPerMachine = 1
 coordinators = 3

@@ -360,6 +360,11 @@ void complete(RelocateData const& relocation, std::map<UID, Busyness>& busymap) 
 		busymap[relocation.src[i]].removeWork(relocation.priority, relocation.workFactor);
 }
 
+ACTOR Future<Void> cancelDataMove(struct DDQueueData* self,
+                                  UID dataMoveID,
+                                  KeyRange range,
+                                  const DDEnabledState* ddEnabledState);
+
 ACTOR Future<Void> dataDistributionRelocator(struct DDQueueData* self,
                                              RelocateData rd,
                                              Future<Void> prevCleanup,
@@ -396,7 +401,7 @@ struct DDQueueData {
 	KeyRangeMap<RelocateData> inFlight;
 	// Track all actors that relocates specified keys to a good place; Key: keyRange; Value: actor
 	KeyRangeActorMap inFlightActors;
-	KeyRangeMap<std::shared_ptr<DataMove>> dataMoves;
+	KeyRangeMap<UID> dataMoves;
 
 	Promise<Void> error;
 	PromiseStream<RelocateData> dataTransferComplete;
@@ -985,6 +990,31 @@ struct DDQueueData {
 		validate();
 	}
 };
+
+ACTOR Future<Void> cancelDataMove(struct DDQueueData* self,
+                                  UID dataMoveID,
+                                  KeyRange range,
+                                  const DDEnabledState* ddEnabledState) {
+	ASSERT(SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE);
+	std::vector<Future<Void>> cleanup;
+	auto f = self->dataMoves.intersectingRanges(range);
+	for (auto it = f.begin(); it != f.end(); ++it) {
+		if (it->value().isValid()) {
+			cleanup.push_back(cleanUpDataMove(self->cx,
+			                                  it->value(),
+			                                  self->lock,
+			                                  KeyRangeRef(it->range().begin, it->range().end),
+			                                  true,
+			                                  ddEnabledState));
+		}
+	}
+	wait(waitForAll(cleanup));
+	auto ranges = self->dataMoves.getAffectedRangesAfterInsertion(range);
+	if (!ranges.empty()) {
+		self->dataMoves.insert(KeyRangeRef(ranges.front().begin, ranges.back().end), UID());
+	}
+	return Void();
+}
 
 // This actor relocates the specified keys to a good place.
 // The inFlightActor key range map stores the actor for each RelocateData
