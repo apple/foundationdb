@@ -889,15 +889,22 @@ ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bw
 	// FIXME: If a rollback happens, this could incorrectly identify a hot granule as not hot. This should be rare
 	// though and is just less efficient.
 	state bool writeHot = versionsSinceLastSnapshot <= SERVER_KNOBS->BG_HOT_SNAPSHOT_VERSIONS;
+	// FIXME: could probably refactor all of this logic into one large choose/when state machine that's less complex
 	loop {
 		loop {
 			try {
+				// wait for manager stream to become ready, and send a message
 				loop {
 					choose {
 						when(wait(bwData->currentManagerStatusStream.get().onReady())) { break; }
 						when(wait(bwData->currentManagerStatusStream.onChange())) {}
+						when(wait(metadata->resumeSnapshot.getFuture())) { break; }
 					}
 				}
+				if (metadata->resumeSnapshot.isSet()) {
+					break;
+				}
+
 				bwData->currentManagerStatusStream.get().send(GranuleStatusReply(metadata->keyRange,
 				                                                                 true,
 				                                                                 writeHot,
@@ -921,6 +928,8 @@ ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bw
 			}
 		}
 
+		// wait for manager reply (which will either cancel this future or call resumeSnapshot), or re-send on manager
+		// change/no response
 		choose {
 			when(wait(bwData->currentManagerStatusStream.onChange())) {}
 			when(wait(metadata->resumeSnapshot.getFuture())) { break; }
@@ -3061,9 +3070,16 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 					// endpoint as failed
 					self->currentManagerStatusStream.get().sendError(connection_failed());
 
+					// hold a copy of the previous stream if it exists, so any waiting send calls don't get
+					// proken_promise before onChange
+					ReplyPromiseStream<GranuleStatusReply> copy;
+					if (self->statusStreamInitialized) {
+						copy = self->currentManagerStatusStream.get();
+					}
 					// TODO: pick a reasonable byte limit instead of just piggy-backing
 					req.reply.setByteLimit(SERVER_KNOBS->BLOBWORKERSTATUSSTREAM_LIMIT_BYTES);
 					self->statusStreamInitialized = true;
+
 					self->currentManagerStatusStream.set(req.reply);
 				} else {
 					req.reply.sendError(blob_manager_replaced());
