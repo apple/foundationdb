@@ -779,7 +779,7 @@ public:
 	Promise<Void> coreStarted;
 	bool shuttingDown;
 
-	Promise<bool> registerInterfaceAcceptingRequests;
+	Promise<Void> registerInterfaceAcceptingRequests;
 	Future<Void> interfaceRegistered;
 
 	bool behind;
@@ -5569,10 +5569,10 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 	state double start;
 	try {
 
-		if (data->registerInterfaceAcceptingRequests.canBeSet()) {
-			data->registerInterfaceAcceptingRequests.send(true);
-			wait(data->interfaceRegistered);
-		}
+		// if (data->registerInterfaceAcceptingRequests.canBeSet()) {
+		// 	data->registerInterfaceAcceptingRequests.send(true);
+		// 	wait(data->interfaceRegistered);
+		// }
 
 		// If we are disk bound and durableVersion is very old, we need to block updates or we could run out of
 		// memory. This is often referred to as the storage server e-brake (emergency brake)
@@ -7591,12 +7591,14 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 	self.sk = serverKeysPrefixFor(self.tssPairID.present() ? self.tssPairID.get() : self.thisServerID)
 	              .withPrefix(systemKeys.begin); // FFFF/serverKeys/[this server]/
 	self.folder = folder;
-	self.registerInterfaceAcceptingRequests.send(false);
+	self.registerInterfaceAcceptingRequests.send(Void());
 
 	try {
 		wait(self.storage.init());
 		wait(self.storage.commit());
 		++self.counters.kvCommits;
+
+		ssi.startAcceptingRequests();
 
 		if (seedTag == invalidTag) {
 			// Might throw recruitment_failed in case of simultaneous master failure
@@ -7617,8 +7619,6 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		self.storage.makeNewStorageServerDurable();
 		wait(self.storage.commit());
 		++self.counters.kvCommits;
-
-		ssi.startAcceptingRequests();
 
 		TraceEvent("StorageServerInit", ssi.id())
 		    .detail("Version", self.version.get())
@@ -7793,11 +7793,8 @@ ACTOR Future<Void> replaceTSSInterface(StorageServer* self, StorageServerInterfa
 
 ACTOR Future<Void> storageInterfaceRegistration(StorageServer* self,
                                                 StorageServerInterface ssi,
-                                                Future<bool> interfaceAcceptingRequests) {
-	bool acceptingRequests = wait(interfaceAcceptingRequests);
-
-	if (acceptingRequests)
-		ssi.startAcceptingRequests();
+                                                Future<Void> interfaceAcceptingRequests) {
+	wait(interfaceAcceptingRequests);
 
 	try {
 		if (self->isTss()) {
@@ -7885,13 +7882,12 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		if (recovered.canBeSet())
 			recovered.send(Void());
 
-		Promise<bool> acceptingRequests;
-		auto f = storageInterfaceRegistration(&self, ssi, acceptingRequests.getFuture());
-		acceptingRequests.send(false);
-		wait(f);
-
+		ssi.startAcceptingRequests();
 		self.interfaceRegistered =
 		    storageInterfaceRegistration(&self, ssi, self.registerInterfaceAcceptingRequests.getFuture());
+		wait(delay(0));
+		self.registerInterfaceAcceptingRequests.send(Void());
+		wait(self.interfaceRegistered);
 
 		TraceEvent("StorageServerStartingCore", self.thisServerID).detail("TimeTaken", now() - start);
 
