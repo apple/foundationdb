@@ -1368,28 +1368,31 @@ const KeyRef tenantDataPrefixKey = "\xff/tenantDataPrefix"_sr;
 
 // for tests
 void testSSISerdes(StorageServerInterface const& ssi, bool useFB) {
-	printf("ssi=\nid=%s\nlocality=%s\nisTss=%s\ntssId=%s\naddress=%s\ngetValue=%s\n\n\n",
+	printf("ssi=\nid=%s\nlocality=%s\nisTss=%s\ntssId=%s\nacceptingRequests=%s\naddress=%s\ngetValue=%s\n\n\n",
 	       ssi.id().toString().c_str(),
 	       ssi.locality.toString().c_str(),
 	       ssi.isTss() ? "true" : "false",
 	       ssi.isTss() ? ssi.tssPairID.get().toString().c_str() : "",
+	       ssi.acceptingRequests ? "true" : "false",
 	       ssi.address().toString().c_str(),
 	       ssi.getValue.getEndpoint().token.toString().c_str());
 
 	StorageServerInterface ssi2 =
 	    (useFB) ? decodeServerListValueFB(serverListValueFB(ssi)) : decodeServerListValue(serverListValue(ssi));
 
-	printf("ssi2=\nid=%s\nlocality=%s\nisTss=%s\ntssId=%s\naddress=%s\ngetValue=%s\n\n\n",
+	printf("ssi2=\nid=%s\nlocality=%s\nisTss=%s\ntssId=%s\nacceptingRequests=%s\naddress=%s\ngetValue=%s\n\n\n",
 	       ssi2.id().toString().c_str(),
 	       ssi2.locality.toString().c_str(),
 	       ssi2.isTss() ? "true" : "false",
 	       ssi2.isTss() ? ssi2.tssPairID.get().toString().c_str() : "",
+	       ssi2.acceptingRequests ? "true" : "false",
 	       ssi2.address().toString().c_str(),
 	       ssi2.getValue.getEndpoint().token.toString().c_str());
 
 	ASSERT(ssi.id() == ssi2.id());
 	ASSERT(ssi.locality == ssi2.locality);
 	ASSERT(ssi.isTss() == ssi2.isTss());
+	ASSERT(ssi.acceptingRequests == ssi2.acceptingRequests);
 	if (ssi.isTss()) {
 		ASSERT(ssi2.tssPairID.get() == ssi2.tssPairID.get());
 	}
