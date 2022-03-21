@@ -51,8 +51,8 @@ struct IDataDistributionTeam {
 	virtual double getMinAvailableSpaceRatio(bool includeInFlight = true) const = 0;
 	virtual bool hasHealthyAvailableSpace(double minRatio) const = 0;
 	virtual Future<Void> updateStorageMetrics() = 0;
-	virtual void addref() = 0;
-	virtual void delref() = 0;
+	virtual void addref() const = 0;
+	virtual void delref() const = 0;
 	virtual bool isHealthy() const = 0;
 	virtual void setHealthy(bool) = 0;
 	virtual int getPriority() const = 0;
