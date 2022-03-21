@@ -1040,7 +1040,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 					req.src = rd.src;
 					req.completeSources = rd.completeSources;
 
-					if(rd.reason == RelocateReason::REBALANCE_READ) {
+					if (rd.reason == RelocateReason::REBALANCE_READ) {
 						req.teamSorter = greaterReadLoad;
 					}
 					// bestTeam.second = false if the bestTeam in the teamCollection (in the DC) does not have any
@@ -1323,15 +1323,20 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 		traceEvent->detail("SkipReason", "NoShardOnSource");
 		return false;
 	}
-
+	// state Future<HealthMetrics> healthMetrics = self->cx->getHealthMetrics(true);
 	state GetMetricsRequest req(shards);
 	req.comparator = [](const StorageMetrics& a, const StorageMetrics& b) {
 		return a.bytesReadPerKSecond / std::max(a.bytes * 1.0, 1.0 * SERVER_KNOBS->MIN_SHARD_BYTES) <
 		       b.bytesReadPerKSecond / std::max(b.bytes * 1.0, 1.0 * SERVER_KNOBS->MIN_SHARD_BYTES);
 	};
-
 	state StorageMetrics metrics = wait(brokenPromiseToNever(self->getShardMetrics.getReply(req)));
 	if (metrics.keys.present() && metrics.bytes > 0) {
+		auto srcLoad = sourceTeam->getLoadReadBandwidth(), destLoad = destTeam->getLoadReadBandwidth();
+		if (abs(srcLoad - destLoad) <=
+		    3 * std::max(metrics.bytesReadPerKSecond, SERVER_KNOBS->SHARD_READ_HOT_BANDWITH_MIN_PER_KSECONDS)) {
+			traceEvent->detail("SkipReason", "TeamTooSimilar");
+			return false;
+		}
 		// Verify the shard is still in ShardsAffectedByTeamFailure
 		shards = self->shardsAffectedByTeamFailure->getShardsFor(
 		    ShardsAffectedByTeamFailure::Team(sourceTeam->getServerIDs(), primary));
