@@ -26,6 +26,8 @@ FoundationDB supports language bindings for application development using the or
 
 * :doc:`known-limitations` describes both long-term design limitations of FoundationDB and short-term limitations applicable to the current version.
 
+* :doc:`tenants` describes the use of the tenants feature to define named transaction domains.
+
 .. toctree::
     :maxdepth: 1
     :titlesonly:
@@ -42,3 +44,4 @@ FoundationDB supports language bindings for application development using the or
     known-limitations
     transaction-profiler-analyzer
     api-version-upgrade-guide
+    tenants
