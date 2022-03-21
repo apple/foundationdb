@@ -5372,6 +5372,7 @@ void Transaction::set(const KeyRef& key, const ValueRef& value, AddConflictRange
 	auto r = singleKeyRange(key, req.arena);
 	auto v = ValueRef(req.arena, value);
 	t.mutations.emplace_back(req.arena, MutationRef::SetValue, r.begin, v);
+	TraceEvent("TransactionSet").detail("Key", r.begin);
 
 	if (addConflictRange) {
 		t.write_conflict_ranges.push_back(req.arena, r);
