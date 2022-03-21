@@ -90,9 +90,10 @@ struct CheckpointMetaData {
 struct DataMoveMetaData {
 	enum Phase {
 		InvalidPhase = 0,
-		Running = 1, // System keyspace has been modified, data move in action.
-		Completing = 2, // Data transfer has finished, finalizing system keyspace.
-		Deleting = 3, // Data move is cancelled.
+		Prepare= 1, // System keyspace has been modified, data move in action.
+		Running = 2, // System keyspace has been modified, data move in action.
+		Completing = 3, // Data transfer has finished, finalizing system keyspace.
+		Deleting = 4, // Data move is cancelled.
 	};
 
 	constexpr static FileIdentifier file_identifier = 13804362;

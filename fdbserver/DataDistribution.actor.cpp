@@ -109,6 +109,7 @@ void DataMove::addShard(const DDShardInfo& shard) {
 	this->primarySrc.push_back(shard.primarySrc);
 	this->remoteSrc.push_back(shard.remoteSrc);
 }
+
 // Read keyservers, return unique set of teams
 ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Database cx,
                                                                             UID distributorId,
@@ -795,11 +796,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 				}
 
 				if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
-					// auto ranges = dataMoveMap.intersectingRanges(keys);
-					// ASSERT(ranges.size() == 1);
-					// for (auto& r : ranges) {
 					dataMoveMap[keys.begin]->addShard(initData->shards[shard]);
-					// }
 				}
 
 				wait(yield(TaskPriority::DataDistribution));

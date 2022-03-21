@@ -400,17 +400,17 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 	state bool loadedTssMapping = false;
 	state DataMoveMetaData dataMove;
 
-	if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
-		Optional<DataMoveMetaData> md = wait(getDataMoveMetaData(occ, dataMoveID));
-		if (md.present()) {
-			ASSERT(md.get().range == keys);
-			TraceEvent("StartMoveKeysDataMoveExists")
-			    .detail("DataMoveID", dataMoveID)
-			    .detail("DataMoveMetaData", md.get().toString());
-			return Void();
-		}
-		dataMove.id = dataMoveID;
-	}
+	// if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+	// 	Optional<DataMoveMetaData> md = wait(getDataMoveMetaData(occ, dataMoveID));
+	// 	if (md.present()) {
+	// 		ASSERT(md.get().range == keys);
+	// 		TraceEvent("StartMoveKeysDataMoveExists")
+	// 		    .detail("DataMoveID", dataMoveID)
+	// 		    .detail("DataMoveMetaData", md.get().toString());
+	// 		return Void();
+	// 	}
+	// 	dataMove.id = dataMoveID;
+	// }
 
 	TraceEvent(SevDebug, interval.begin(), relocationIntervalId);
 
@@ -447,6 +447,31 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 
 					wait(checkMoveKeysLock(&(tr->getTransaction()), lock, ddEnabledState));
 
+					if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+						Optional<Value> val = wait(tr->get(dataMoveKeyFor(dataMoveID)));
+						if (val.present()) {
+							DataMoveMetaData _dataMove = decodeDataMoveValue(val.get());
+							dataMove = _dataMove;
+							TraceEvent(SevDebug, "StartMoveKeysFoundDataMove", relocationIntervalId)
+							    .detail("DataMoveID", dataMoveID)
+							    .detail("DataMove", dataMove.toString());
+							if (dataMove.getPhase() == DataMoveMetaData::Deleting) {
+								TraceEvent(SevWarn, interval.end(), relocationIntervalId)
+								    .detail("DataMoveBeingDeleted", dataMoveID);
+								throw operation_cancelled();
+							}
+							if (dataMove.getPhase() == DataMoveMetaData::Running) {
+								TraceEvent(SevWarn, interval.end(), relocationIntervalId)
+								    .detail("DataMoveCommitted", dataMoveID);
+								return Void();
+							}
+							ASSERT(dataMove.range.end == begin);
+						} else {
+							dataMove.id = dataMoveID;
+							TraceEvent(SevDebug, "StartMoveKeysNewDataMove", relocationIntervalId)
+							    .detail("DataMoveID", dataMoveID);
+						}
+					}
 					if (!loadedTssMapping) {
 						// share transaction for loading tss mapping with the rest of start move keys
 						wait(readTSSMappingRYW(tr, tssMapping));
@@ -582,6 +607,19 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 
 					dataMove.range = KeyRangeRef(keys.begin, currentKeys.end);
 					dataMove.dest.insert(servers.begin(), servers.end());
+					if (currentKeys.end == keys.end) {
+						dataMove.setPhase(DataMoveMetaData::Running);
+						TraceEvent(SevDebug, "StartMoveKeysDataMoveComplete", dataMoveID)
+						    .detail("DataMoveID", dataMoveID)
+						    .detail("DataMove", dataMove.toString());
+					} else {
+						dataMove.setPhase(DataMoveMetaData::Prepare);
+						TraceEvent("StartMoveKeysDataMovePartial", dataMoveID)
+						    .detail("DataMoveID", dataMoveID)
+						    .detail("CurrentRange", currentKeys)
+						    .detail("DataMoveRange", keys)
+						    .detail("NewDataMoveMetaData", dataMove.toString());
+					}
 					tr->set(dataMoveKeyFor(dataMoveID), dataMoveValue(dataMove));
 
 					wait(waitForAll(actors));
@@ -1976,6 +2014,7 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 						    .detail("SrcServers", describe(dataMove.src));
 					} else {
 						dataMove.range = KeyRangeRef(currentRange.end, range.end);
+						dataMove.setPhase(DataMoveMetaData::Deleting);
 						tr->set(dataMoveKeyFor(dataMoveID), dataMoveValue(dataMove));
 					}
 

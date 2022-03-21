@@ -7787,8 +7787,10 @@ ACTOR Future<std::vector<CheckpointMetaData>> getCheckpointMetaData(Database cx,
 
 			futures.clear();
 			for (index = 0; index < locations.size(); ++index) {
-				futures.push_back(getCheckpointMetaDataInternal(
-				    GetCheckpointRequest(version, keys, format), locations[index].locations, timeout));
+				futures.push_back(
+				    getCheckpointMetaDataInternal(GetCheckpointRequest(version, locations[index].range, format),
+				                                  locations[index].locations,
+				                                  timeout));
 				TraceEvent("GetCheckpointShardBegin")
 				    .detail("Range", locations[index].range)
 				    .detail("Version", version)

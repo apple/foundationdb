@@ -1112,7 +1112,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			TraceEvent("RocksDB").detail("Path", a.path).detail("Method", "Close");
 			a.done.send(Void());
 		}
-
 		struct CheckpointAction : TypedAction<Writer, CheckpointAction> {
 			CheckpointAction(const CheckpointRequest& request) : request(request) {}
 
@@ -1271,7 +1270,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				for (const auto& checkpoint : a.checkpoints) {
 					const RocksDBCheckpoint rocksCheckpoint = getRocksCheckpoint(checkpoint);
 					for (const auto& [range, file] : rocksCheckpoint.fetchedFiles) {
-						std::cout << "Rocks Restoring: " << file << std::endl;
+						// std::cout << "Rocks Restoring: " << file << std::endl;
+						TraceEvent("RocksDBRestoreFile", id)
+						    .detail("Checkpoint", rocksCheckpoint.toString())
+						    .detail("File", file);
 						sstFiles.push_back(file);
 					}
 				}

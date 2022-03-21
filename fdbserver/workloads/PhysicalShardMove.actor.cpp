@@ -70,7 +70,7 @@ struct SSCheckpointWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> _start(SSCheckpointWorkload* self, Database cx) {
-		int ignore = wait(setDDMode(cx, 0));
+		// int ignore = wait(setDDMode(cx, 0));
 		state Key keyA = "TestKeyA"_sr;
 		state Key keyB = "TestKeyB"_sr;
 		state Key keyC = "TestKeyC"_sr;
@@ -80,7 +80,8 @@ struct SSCheckpointWorkload : TestWorkload {
 		{ Version ignore = wait(self->writeAndVerify(self, cx, keyB, testValue)); }
 		{ Version ignore = wait(self->writeAndVerify(self, cx, keyC, testValue)); }
 
-		std::cout << "Initialized" << std::endl;
+		TraceEvent("TestValueWritten").log();
+		// std::cout << "Initiadata->shards[range.begin]lized" << std::endl;
 
 		state std::unordered_set<UID> excludes;
 		state int teamSize = 3;
@@ -90,7 +91,8 @@ struct SSCheckpointWorkload : TestWorkload {
 		wait(self->readAndVerify(self, cx, keyA, testValue));
 		wait(self->readAndVerify(self, cx, keyB, testValue));
 		wait(self->readAndVerify(self, cx, keyC, testValue));
-		std::cout << "Verified." << std::endl;
+		// std::cout << "Verified." << std::endl;
+		TraceEvent("TestValueVerified").log();
 
 		int ignore = wait(setDDMode(cx, 1));
 		return Void();
@@ -346,6 +348,7 @@ struct SSCheckpointWorkload : TestWorkload {
 
 		loop {
 			try {
+				state Version readVersion = wait(tr.getReadVersion());
 				state Optional<Value> res = wait(timeoutError(tr.get(key), 30.0));
 				const bool equal = !expectedValue.isError() && res == expectedValue.get();
 				if (!equal) {
@@ -353,12 +356,15 @@ struct SSCheckpointWorkload : TestWorkload {
 				}
 				break;
 			} catch (Error& e) {
+				TraceEvent("TestReadError").errorUnsuppressed(e);
 				if (expectedValue.isError() && expectedValue.getError().code() == e.code()) {
 					break;
 				}
 				wait(tr.onError(e));
 			}
 		}
+
+		TraceEvent("TestReadSuccess").detail("Version", readVersion);
 
 		return Void();
 	}
@@ -377,9 +383,12 @@ struct SSCheckpointWorkload : TestWorkload {
 				version = tr.getCommittedVersion();
 				break;
 			} catch (Error& e) {
+				TraceEvent("TestCommitError").errorUnsuppressed(e);
 				wait(tr.onError(e));
 			}
 		}
+
+		TraceEvent("TestCommitSuccess").detail("CommitVersion", tr.getCommittedVersion());
 
 		wait(self->readAndVerify(self, cx, key, value));
 
@@ -429,7 +438,7 @@ struct SSCheckpointWorkload : TestWorkload {
 				state RangeResult dataMoves = wait(tr.getRange(dataMoveKeys, CLIENT_KNOBS->TOO_MANY));
 				Version readVersion = wait(tr.getReadVersion());
 				TraceEvent("TestMoveShardReadDataMoves")
-				    .detail("dataMoves", dataMoves.size())
+				    .detail("DataMoves", dataMoves.size())
 				    .detail("ReadVersion", readVersion);
 				// wait(tr.commit());
 				state int i = 0;

@@ -5309,7 +5309,6 @@ ACTOR Future<Void> persistMoveInShardMetaData(StorageServer* data, MoveInShardMe
 }
 
 ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data,
-
                                         std::shared_ptr<MoveInShardMetaData> shard,
                                         std::string dir) {
 	state std::vector<CheckpointMetaData> records;
@@ -5318,7 +5317,10 @@ ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data,
 
 	ASSERT(shard->getPhase() == MoveInShardMetaData::Fetching);
 
-	std::cout << "Getting CheckpointMetaData: " << shard->toString() << std::endl;
+	// std::cout << "Getting CheckpointMetaData: " << shard->toString() << std::endl;
+	TraceEvent("FetchShardCheckpointMetaDataBegin", data->thisServerID)
+	    .detail("MoveInShardID", shard->id)
+	    .detail("MoveInShard", shard->toString());
 
 	// TODO: use shard->meta->checkpoints to continue the fetch.
 	state int attempt = 0;
@@ -5332,9 +5334,13 @@ ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data,
 			records = std::move(_records);
 			break;
 		} catch (Error& e) {
-			std::cout << "GetCheckpointMetaData error: " << e.code() << "Name: " << e.name() << "What: " << e.what()
-			          << std::endl
-			          << shard->toString() << std::endl;
+			TraceEvent("FetchShardCheckpointMetaDataError", data->thisServerID)
+			    .errorUnsuppressed(e)
+			    .detail("MoveInShardID", shard->id)
+			    .detail("MoveInShard", shard->toString());
+			// std::cout << "GetCheckpointMetaData error: " << e.code() << "Name: " << e.name() << "What: " << e.what()
+			//           << std::endl
+			//           << shard->toString() << std::endl;
 			if (attempt > 10) {
 				throw e;
 			}
@@ -5352,12 +5358,12 @@ ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data,
 		}
 	}
 
-	std::cout << "Got checkpoint metadata:" << std::endl;
-	for (const auto& record : records) {
-		std::cout << record.toString() << std::endl;
-	}
+	// std::cout << "Got checkpoint metadata:" << std::endl;
+	// for (const auto& record : records) {
+	// 	std::cout << record.toString() << std::endl;
+	// }
 	TraceEvent("FetchShardCheckpointMetaData", data->thisServerID)
-	    // .detail("MoveInShardID", shard->id)
+	    .detail("MoveInShardID", shard->id)
 	    .detail("MoveInShard", shard->toString())
 	    .detail("CheckpointMetaData", describe(records));
 
@@ -5370,28 +5376,35 @@ ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data,
 	for (; idx < records.size(); ++idx) {
 		loop {
 			try {
-				std::cout << "Fetching checkpoint:" << records[idx].toString() << std::endl;
+				TraceEvent("FetchShardFetchCheckpointBegin", data->thisServerID)
+				    .detail("MoveInShardID", shard->id)
+				    .detail("CheckpointMetaData", records[idx].toString());
+				// std::cout << "Fetching checkpoint:" << records[idx].toString() << std::endl;
 				CheckpointMetaData record = wait(fetchCheckpoint(data->cx, records[idx], dir));
 				localRecords[idx] = record;
 				break;
 			} catch (Error& e) {
-				std::cout << "Getting checkpoint failure: " << e.name() << std::endl;
+				TraceEvent("FetchShardFetchCheckpointError", data->thisServerID)
+				    .errorUnsuppressed(e)
+				    .detail("MoveInShardID", shard->id)
+				    .detail("CheckpointMetaData", records[idx].toString());
+				// std::cout << "Getting checkpoint failure: " << e.name() << std::endl;
 				wait(delay(1));
 			}
 		}
 		TraceEvent("FetchShardFetchedCheckpoint", data->thisServerID)
-		    // .detail("MoveInShardID", shard->id)
+		    .detail("MoveInShardID", shard->id)
 		    .detail("MoveInShard", shard->toString())
 		    .detail("Checkpoint", localRecords[idx].toString());
-		std::cout << "Fetched checkpoint:" << localRecords[idx].toString() << std::endl;
+		// std::cout << "Fetched checkpoint:" << localRecords[idx].toString() << std::endl;
 	}
 
-	std::vector<std::string> files = platform::listFiles(dir);
-	std::cout << "Received checkpoint files on disk: " << dir << std::endl;
-	for (auto& file : files) {
-		std::cout << file << std::endl;
-	}
-	std::cout << std::endl;
+	// std::vector<std::string> files = platform::listFiles(dir);
+	// std::cout << "Received checkpoint files on disk: " << dir << std::endl;
+	// for (auto& file : files) {
+	// 	std::cout << file << std::endl;
+	// }
+	// std::cout << std::endl;
 
 	shard->checkpoints = std::move(localRecords);
 	shard->setPhase(MoveInShardMetaData::Ingesting);
@@ -5404,7 +5417,10 @@ ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data,
 ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data, std::shared_ptr<MoveInShardMetaData> shard) {
 	ASSERT(shard->getPhase() == MoveInShardMetaData::Ingesting);
 
-	std::cout << "Restoring: " << describe(shard->checkpoints) << std::endl;
+	TraceEvent("FetchShardIngestCheckpointBegin", data->thisServerID)
+	    .detail("MoveInShardID", shard->id)
+	    .detail("Checkpoint", describe(shard->checkpoints));
+	// std::cout << "Restoring: " << describe(shard->checkpoints) << std::endl;
 	try {
 		wait(data->storage.restore(shard->checkpoints));
 	} catch (Error& e) {
@@ -5412,7 +5428,7 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data, std::shared_p
 	}
 
 	TraceEvent("FetchShardIngestedCheckpoint", data->thisServerID)
-	    // .detail("MoveInShardID", shard->id)
+	    .detail("MoveInShardID", shard->id)
 	    .detail("MoveInShard", shard->toString())
 	    .detail("Checkpoint", describe(shard->checkpoints));
 
@@ -5585,7 +5601,12 @@ ACTOR Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 				break;
 			}
 		} catch (Error& e) {
-			std::cout << "FetchShardError: " << e.name() << std::endl;
+			// std::cout << "FetchShardError: " << e.name() << std::endl;
+			TraceEvent("FetchShardError", data->thisServerID)
+			    .errorUnsuppressed(e)
+			    .detail("MoveInShardID", shard->id)
+			    .detail("MoveInShard", shard->toString());
+			// .detail("Checkpoint", describe(shard->checkpoints));
 			throw e;
 		}
 		wait(delay(1, TaskPriority::FetchKeys));
@@ -6005,7 +6026,9 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 				removeRanges.push_back(range);
 			}
 			if (r->value()->moveInShard) {
-				std::cout << "Adding new canceling moveInShard: " << r->value()->moveInShard->toString() << std::endl;
+				TraceEvent(SevDebug, "ChangeServerKeysCancelMoveInShard", data->thisServerID)
+				    .detail("Version", version + 1)
+				    .detail("MoveInShard", r->value()->moveInShard->toString());
 				r->value()->moveInShard->updates->shardRemoved = true;
 				cancelMoveIns.emplace(r->value()->moveInShard->meta->id, *(r->value()->moveInShard));
 			}
@@ -6053,8 +6076,10 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 	for (const auto& range : moveInRanges) {
 		data->addShard(ShardInfo::newMoveInShard(data, range, version + 1, moveInShardMetaData));
 		newMoveInShards.push_back(data->shards[range.begin]);
-		std::cout << std::endl
-		          << "Adding new MoveInShard: " << data->shards[range.begin]->moveInShard->toString() << std::endl;
+		TraceEvent(SevDebug, "ChangeServerKeysAddNewMoveInShard", data->thisServerID)
+		    .detail("MoveInShard", data->shards[range.begin]->moveInShard->toString());
+		// std::cout << std::endl
+		//           << "Adding new MoveInShard: " << data->shards[range.begin]->moveInShard->toString() << std::endl;
 	}
 
 	// Update newestAvailableVersion when a shard becomes (un)available (in a separate loop to avoid invalidating vr
@@ -7822,7 +7847,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	wait(waitForAll(std::vector{
 	    fFormat, fID, fClusterID, ftssPairID, fssPairID, fTssQuarantine, fVersion, fLogProtocol, fPrimaryLocality }));
 	wait(waitForAll(std::vector{
-	    fShardAssigned, fShardAvailable, fChangeFeeds, fPendingCheckpoints, fCheckpoints, fMoveInShards, fTenantMap}));
+	    fShardAssigned, fShardAvailable, fChangeFeeds, fPendingCheckpoints, fCheckpoints, fMoveInShards, fTenantMap }));
 	wait(byteSampleSampleRecovered.getFuture());
 	TraceEvent("RestoringDurableState", data->thisServerID).log();
 

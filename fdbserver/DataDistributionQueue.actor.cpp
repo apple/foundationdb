@@ -96,7 +96,8 @@ struct RelocateData {
 		return priority == rhs.priority && boundaryPriority == rhs.boundaryPriority &&
 		       healthPriority == rhs.healthPriority && keys == rhs.keys && startTime == rhs.startTime &&
 		       workFactor == rhs.workFactor && src == rhs.src && completeSources == rhs.completeSources &&
-		       completeDests == rhs.completeDests && wantsNewServers == rhs.wantsNewServers && randomId == rhs.randomId;
+		       completeDests == rhs.completeDests && wantsNewServers == rhs.wantsNewServers &&
+		       randomId == rhs.randomId && dataMoveID == rhs.dataMoveID;
 	}
 	bool operator!=(const RelocateData& rhs) const { return !(*this == rhs); }
 };
