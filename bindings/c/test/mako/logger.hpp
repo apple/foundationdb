@@ -61,7 +61,7 @@ public:
 	template <typename... Args>
 	void printWithLogLevel(int log_level, std::string_view header, Args&&... args) {
 		assert(log_level >= VERBOSE_NONE && log_level <= VERBOSE_DEBUG);
-		if (log_level >= verbosity) {
+		if (log_level <= verbosity) {
 			const auto fp = log_level == VERBOSE_NONE ? stderr : stdout;
 			// 500B inline buffer
 			auto buf = fmt::memory_buffer{};
@@ -83,7 +83,7 @@ public:
 
 	template <typename... Args>
 	void warn(Args&&... args) {
-		printWithLogLevel(VERBOSE_WARN, "WARN", std::forward<Args>(args)...);
+		printWithLogLevel(VERBOSE_WARN, "WARNING", std::forward<Args>(args)...);
 	}
 
 	template <typename... Args>

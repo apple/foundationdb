@@ -40,6 +40,7 @@ enum ArgKind {
 	ARG_KEYLEN,
 	ARG_VALLEN,
 	ARG_TPS,
+	ARG_ASYNC,
 	ARG_COMMITGET,
 	ARG_SAMPLING,
 	ARG_VERSION,
@@ -81,6 +82,8 @@ constexpr const int TAGPREFIXLENGTH_MAX = 8;
 constexpr const int NUM_CLUSTERS_MAX = 3;
 constexpr const int NUM_DATABASES_MAX = 10;
 constexpr const int MAX_BG_IDS = 1000;
+constexpr const std::string_view KEY_PREFIX{ "mako" };
+constexpr const std::string_view TEMP_DATA_STORE{ "/tmp/makoTemp" };
 
 /* benchmark parameters */
 struct Arguments {
@@ -88,6 +91,7 @@ struct Arguments {
 	int json;
 	int num_processes;
 	int num_threads;
+	int async_xacts;
 	int mode;
 	int rows; /* is 2 billion enough? */
 	int row_digits;

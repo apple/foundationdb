@@ -1,5 +1,6 @@
-#include <cmath>
+
 #include <cassert>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -29,6 +30,7 @@
 #include <limits.h>
 #endif
 
+#include <boost/asio.hpp>
 #include <fmt/format.h>
 #include <fmt/printf.h>
 #include <fdb.hpp>
@@ -41,12 +43,27 @@
 using namespace fdb;
 using namespace mako;
 
-const std::string KEY_PREFIX{ "mako" };
-const std::string TEMP_DATA_STORE{ "/tmp/makoTemp" };
-
 thread_local Logger logr = Logger(MainProcess{}, VERBOSE_DEFAULT);
 
 enum class FutureRC { OK, RETRY, CONFLICT, ABORT };
+
+template <class FutureType>
+FutureRC handleForOnError(Transaction tx, FutureType f, std::string_view step) {
+	if (auto err = f.error()) {
+		if (err.is(1020 /*not_committed*/)) {
+			return FutureRC::CONFLICT;
+		} else if (err.retryable()) {
+			logr.warn("Retryable error '{}' found at on_error(), step: {}", err.what(), step);
+			return FutureRC::RETRY;
+		} else {
+			logr.error("Unretryable error '{}' found at on_error(), step: {}", err.what(), step);
+			tx.reset();
+			return FutureRC::ABORT;
+		}
+	} else {
+		return FutureRC::RETRY;
+	}
+}
 
 template <class FutureType>
 FutureRC waitAndHandleForOnError(Transaction tx, FutureType f, std::string_view step) {
@@ -56,19 +73,7 @@ FutureRC waitAndHandleForOnError(Transaction tx, FutureType f, std::string_view 
 		logr.error("'{}' found while waiting for on_error() future, step: {}", err.what(), step);
 		return FutureRC::ABORT;
 	}
-	if ((err = f.error())) {
-		if (err.is(1020 /*not_committed*/)) {
-			return FutureRC::CONFLICT;
-		} else if (err.retryable()) {
-			logr.warn("Retryable error '{}' found at on_error(), step: {}", err.what(), step);
-			return FutureRC::RETRY;
-		} else {
-			logr.error("Unretryable error '{}' found at on_error(), step: {}", err.what(), step);
-			return FutureRC::ABORT;
-		}
-	} else {
-		return FutureRC::RETRY;
-	}
+	return handleForOnError(tx, f, step);
 }
 
 // wait on any non-immediate tx-related step to complete. Follow up with on_error().
@@ -123,7 +128,7 @@ int cleanup(Transaction tx, Arguments const& args) {
 	}
 
 	tx.reset();
-	logr.info("Clear range: {:6.3f} sec\n", toDoubleSeconds(watch.stop().diff()));
+	logr.info("Clear range: {:6.3f} sec", toDoubleSeconds(watch.stop().diff()));
 	return 0;
 }
 
@@ -187,7 +192,7 @@ int populate(Transaction tx,
 
 		/* commit every 100 inserts (default) or if this is the last key */
 		if (i == key_end || (i - key_begin + 1) % num_commit_every == 0) {
-			const auto do_sample = (stats.getTaskCount() % args.sampling) == 0;
+			const auto do_sample = (stats.getOpCount(OP_TASK) % args.sampling) == 0;
 			auto watch_commit = Stopwatch(StartAtCtor{});
 			auto future_commit = tx.commit();
 			const auto rc = waitAndHandleError(tx, future_commit, "COMMIT_POPULATE_INSERT");
@@ -215,11 +220,11 @@ int populate(Transaction tx,
 			stats.incrOpCount(OP_COMMIT);
 			stats.incrOpCount(OP_TRANSACTION);
 
-			stats.incrTaskCount();
+			stats.incrOpCount(OP_TASK);
 			xacts++; /* for throttling */
 		}
 	}
-	logr.debug("Populated {} rows [{}, {}]: {:6.3f} sec\n",
+	logr.debug("Populated {} rows [{}, {}]: {:6.3f} sec",
 	           key_end - key_begin + 1,
 	           key_begin,
 	           key_end,
@@ -511,6 +516,7 @@ const std::array<Operation, MAX_OP> opTable{
 	    true },
 	  { "COMMIT", { { StepKind::NONE, nullptr } }, false },
 	  { "TRANSACTION", { { StepKind::NONE, nullptr } }, false },
+	  { "TASK", { { StepKind::NONE, nullptr } }, false },
 	  { "READBLOBGRANULE",
 	    { { StepKind::ON_ERROR,
 	        [](Transaction tx, Arguments const& args, ByteString& begin, ByteString& end, ByteString&) {
@@ -564,13 +570,19 @@ const std::array<Operation, MAX_OP> opTable{
 	    false } }
 };
 
+char const* getOpName(int ops_code) {
+	if (ops_code >= 0 && ops_code < MAX_OP)
+		return opTable[ops_code].name().data();
+	return "";
+}
+
 using OpIterator = std::tuple<int /*op*/, int /*count*/, int /*step*/>;
 
 constexpr const OpIterator OpEnd = OpIterator(MAX_OP, -1, -1);
 
 OpIterator getOpBegin(Arguments const& args) noexcept {
 	for (auto op = 0; op < MAX_OP; op++) {
-		if (op == OP_COMMIT || op == OP_TRANSACTION || args.txnspec.ops[op][OP_COUNT] == 0)
+		if (isAbstractOp(op) || args.txnspec.ops[op][OP_COUNT] == 0)
 			continue;
 		return OpIterator(op, 0, 0);
 	}
@@ -581,12 +593,12 @@ OpIterator getOpNext(Arguments const& args, OpIterator current) noexcept {
 	if (OpEnd == current)
 		return OpEnd;
 	auto [op, count, step] = current;
-	assert(op < MAX_OP && op != OP_TRANSACTION && op != OP_COMMIT);
+	assert(op < MAX_OP && !isAbstractOp(op));
 	if (opTable[op].steps() > step + 1)
 		return OpIterator(op, count, step + 1);
 	count++;
 	for (; op < MAX_OP; op++, count = 0) {
-		if (op == OP_COMMIT || op == OP_TRANSACTION || args.txnspec.ops[op][OP_COUNT] <= count)
+		if (isAbstractOp(op) || args.txnspec.ops[op][OP_COUNT] <= count)
 			continue;
 		return OpIterator(op, count, 0);
 	}
@@ -594,10 +606,7 @@ OpIterator getOpNext(Arguments const& args, OpIterator current) noexcept {
 }
 
 /* run one transaction */
-int runOneTransaction(Transaction tx,
-                      Arguments const& args,
-                      ThreadStatistics& stats,
-                      LatencySampleBinArray& sample_bins) {
+int runOneTask(Transaction tx, Arguments const& args, ThreadStatistics& stats, LatencySampleBinArray& sample_bins) {
 	// reuse memory for keys to avoid realloc overhead
 	auto key1 = ByteString{};
 	key1.reserve(args.key_length);
@@ -607,11 +616,12 @@ int runOneTransaction(Transaction tx,
 	val.reserve(args.value_length);
 
 	auto watch_tx = Stopwatch(StartAtCtor{});
+	auto watch_task = Stopwatch(watch_tx.getStart());
 
 	auto op_iter = getOpBegin(args);
 	auto needs_commit = false;
 	auto watch_per_op = std::array<Stopwatch, MAX_OP>{};
-	const auto do_sample = (stats.getTaskCount() % args.sampling) == 0;
+	const auto do_sample = (stats.getOpCount(OP_TASK) % args.sampling) == 0;
 	while (op_iter != OpEnd) {
 		const auto [op, count, step] = op_iter;
 		const auto step_kind = opTable[op].stepKind(step);
@@ -625,10 +635,7 @@ int runOneTransaction(Transaction tx,
 			if (step_kind != StepKind::ON_ERROR) {
 				future_rc = waitAndHandleError(tx, f, opTable[op].name());
 			} else {
-				auto followup_rc = waitAndHandleForOnError(tx, f, opTable[op].name());
-				if (followup_rc == FutureRC::OK) {
-					future_rc = FutureRC::RETRY;
-				}
+				future_rc = waitAndHandleForOnError(tx, f, opTable[op].name());
 			}
 		}
 		watch_step.stop();
@@ -717,7 +724,13 @@ int runOneTransaction(Transaction tx,
 			needs_commit = false;
 		}
 	}
-	stats.incrTaskCount();
+	// one task iteration has completed successfully
+	const auto task_duration = watch_task.stop().diff();
+	if (stats.getOpCount(OP_TASK) % args.sampling == 0) {
+		sample_bins[OP_TASK].put(task_duration);
+		stats.addLatency(OP_TASK, task_duration);
+	}
+	stats.incrOpCount(OP_TASK);
 	/* make sure to reset transaction */
 	tx.reset();
 	return 0;
@@ -803,13 +816,13 @@ int runWorkload(Transaction tx,
 			}
 		}
 
-		rc = runOneTransaction(tx, args, stats, sample_bins);
+		rc = runOneTask(tx, args, stats, sample_bins);
 		if (rc) {
-			logr.warn("runOneTransaction failed ({})", rc);
+			logr.warn("runOneTask failed ({})", rc);
 		}
 
-		if (thread_iters > 0) {
-			if (thread_iters == xacts) {
+		if (thread_iters != -1) {
+			if (thread_iters >= xacts) {
 				/* xact limit reached */
 				break;
 			}
@@ -826,6 +839,474 @@ int runWorkload(Transaction tx,
 std::string getStatsFilename(std::string_view dirname, int worker_id, int thread_id, int op) {
 
 	return fmt::format("{}/{}_{}_{}", dirname, worker_id + 1, thread_id + 1, opTable[op].name());
+}
+
+void dumpThreadSamples(Arguments const& args,
+                       pid_t parent_id,
+                       int worker_id,
+                       int thread_id,
+                       const LatencySampleBinArray& sample_bins,
+                       bool overwrite = true) {
+	const auto dirname = fmt::format("{}{}", TEMP_DATA_STORE, parent_id);
+	const auto rc = mkdir(dirname.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+	if (rc < 0 && errno != EEXIST) {
+		logr.error("mkdir {}: {}", dirname, strerror(errno));
+		return;
+	}
+	for (auto op = 0; op < MAX_OP; op++) {
+		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
+			const auto filename = getStatsFilename(dirname, worker_id, thread_id, op);
+			auto fp = fopen(filename.c_str(), overwrite ? "w" : "a");
+			if (!fp) {
+				logr.error("fopen({}): {}", filename, strerror(errno));
+				continue;
+			}
+			auto fclose_guard = ExitGuard([fp]() { fclose(fp); });
+			sample_bins[op].forEachBlock([fp](auto ptr, auto count) { fwrite(ptr, sizeof(*ptr) * count, 1, fp); });
+		}
+	}
+}
+
+// as we don't have coroutines yet, we need to store in heap the complete state of execution,
+// such that we can reconstruct and resume exactly where we were from last database op.
+struct ResumableStateForPopulate {
+	Logger logr;
+	Database db;
+	Transaction tx;
+	boost::asio::io_context& io_context;
+	Arguments const& args;
+	ThreadStatistics& stats;
+	std::atomic<int>& stopcount;
+	LatencySampleBinArray sample_bins;
+	int key_begin;
+	int key_end;
+	int key_checkpoint;
+	ByteString keystr;
+	ByteString valstr;
+	Stopwatch watch_tx;
+	Stopwatch watch_commit;
+	Stopwatch watch_total;
+};
+
+using PopulateStateHandle = std::shared_ptr<ResumableStateForPopulate>;
+
+// avoid redeclaring each variable for each continuation after async op
+#define UNPACK_RESUMABLE_STATE_FOR_POPULATE(p_state)                                                                   \
+	[[maybe_unused]] auto& [logr,                                                                                      \
+	                        db,                                                                                        \
+	                        tx,                                                                                        \
+	                        io_context,                                                                                \
+	                        args,                                                                                      \
+	                        stats,                                                                                     \
+	                        stopcount,                                                                                 \
+	                        sample_bins,                                                                               \
+	                        key_begin,                                                                                 \
+	                        key_end,                                                                                   \
+	                        key_checkpoint,                                                                            \
+	                        keystr,                                                                                    \
+	                        valstr,                                                                                    \
+	                        watch_tx,                                                                                  \
+	                        watch_commit,                                                                              \
+	                        watch_total] = *p_state
+
+void resumablePopulate(PopulateStateHandle state) {
+	UNPACK_RESUMABLE_STATE_FOR_POPULATE(state);
+	const auto num_commit_every = args.txnspec.ops[OP_INSERT][OP_COUNT];
+	for (auto i = key_checkpoint; i <= key_end; i++) {
+		genKey(keystr, KEY_PREFIX, args, i);
+		randomString(valstr, args.value_length);
+		tx.set(keystr, valstr);
+		stats.incrOpCount(OP_INSERT);
+		if (i == key_end || (i - key_begin + 1) % num_commit_every == 0) {
+			watch_commit.start();
+			auto f = tx.commit();
+			f.then([state, i](Future f) {
+				UNPACK_RESUMABLE_STATE_FOR_POPULATE(state);
+				if (auto err = f.error()) {
+					logr.printWithLogLevel(err.retryable() ? VERBOSE_WARN : VERBOSE_NONE,
+					                       "ERROR",
+					                       "commit for populate returned '{}'",
+					                       err.what());
+					auto err_f = tx.onError(err);
+					err_f.then([state](Future f) {
+						UNPACK_RESUMABLE_STATE_FOR_POPULATE(state);
+						const auto f_rc = handleForOnError(tx, f, "ON_ERROR_FOR_POPULATE");
+						if (f_rc == FutureRC::ABORT) {
+							stopcount.fetch_add(1);
+							return;
+						} else {
+							boost::asio::post(io_context, [state]() { resumablePopulate(state); });
+						}
+					});
+				} else {
+					// successfully committed
+					watch_commit.stop();
+					watch_tx.setStop(watch_commit.getStop());
+					if (stats.getOpCount(OP_TASK) % args.sampling == 0) {
+						const auto commit_latency = watch_commit.diff();
+						const auto tx_duration = watch_tx.diff();
+						stats.addLatency(OP_COMMIT, commit_latency);
+						stats.addLatency(OP_TRANSACTION, tx_duration);
+						stats.addLatency(OP_TASK, tx_duration);
+						sample_bins[OP_COMMIT].put(commit_latency);
+						sample_bins[OP_TRANSACTION].put(tx_duration);
+						sample_bins[OP_TASK].put(tx_duration);
+					}
+					stats.incrOpCount(OP_COMMIT);
+					stats.incrOpCount(OP_TRANSACTION);
+					stats.incrOpCount(OP_TASK);
+					tx.reset();
+					watch_tx.startFromStop();
+					key_checkpoint = i + 1;
+					if (i != key_end) {
+						boost::asio::post(io_context, [state]() { resumablePopulate(state); });
+					} else {
+						logr.debug("Populated {} rows [{}, {}]: {:6.3f} sec",
+						           key_end - key_begin + 1,
+						           key_begin,
+						           key_end,
+						           toDoubleSeconds(watch_total.stop().diff()));
+						stopcount.fetch_add(1);
+						return;
+					}
+				}
+			});
+			break;
+		}
+	}
+}
+
+struct ResumableStateForRunWorkload {
+	Logger logr;
+	Database db;
+	Transaction tx;
+	boost::asio::io_context& io_context;
+	Arguments const& args;
+	ThreadStatistics& stats;
+	std::atomic<int>& stopcount;
+	std::atomic<int> const& signal;
+	int max_iters;
+	OpIterator op_iter;
+	LatencySampleBinArray sample_bins;
+	ByteString key1;
+	ByteString key2;
+	ByteString val;
+	std::array<Stopwatch, MAX_OP> watch_per_op;
+	Stopwatch watch_step;
+	Stopwatch watch_commit;
+	Stopwatch watch_tx;
+	Stopwatch watch_task;
+	bool needs_commit;
+	void signalEnd() noexcept { stopcount.fetch_add(1); }
+	bool ended() noexcept {
+		return (max_iters != -1 && max_iters >= stats.getOpCount(OP_TASK)) || signal.load() == SIGNAL_RED;
+	}
+};
+
+using RunWorkloadStateHandle = std::shared_ptr<ResumableStateForRunWorkload>;
+
+#define UNPACK_RESUMABLE_STATE_FOR_RUN_WORKLOAD(p_state)                                                               \
+	[[maybe_unused]] auto& [logr,                                                                                      \
+	                        db,                                                                                        \
+	                        tx,                                                                                        \
+	                        io_context,                                                                                \
+	                        args,                                                                                      \
+	                        stats,                                                                                     \
+	                        stopcount,                                                                                 \
+	                        signal,                                                                                    \
+	                        max_iters,                                                                                 \
+	                        op_iter,                                                                                   \
+	                        sample_bins,                                                                               \
+	                        key1,                                                                                      \
+	                        key2,                                                                                      \
+	                        val,                                                                                       \
+	                        watch_per_op,                                                                              \
+	                        watch_step,                                                                                \
+	                        watch_commit,                                                                              \
+	                        watch_tx,                                                                                  \
+	                        watch_task,                                                                                \
+	                        needs_commit] = *p_state;                                                                  \
+	[[maybe_unused]] auto& [op, count, step] = op_iter;                                                                \
+	[[maybe_unused]] const auto step_kind = opTable[op].stepKind(step)
+
+void resumableRunWorkload(RunWorkloadStateHandle state);
+
+void onStepSuccess(RunWorkloadStateHandle state) {
+	UNPACK_RESUMABLE_STATE_FOR_RUN_WORKLOAD(state);
+	logr.debug("Step {}:{} succeeded", getOpName(op), step);
+	// step successful
+	watch_step.stop();
+	const auto do_sample = stats.getOpCount(OP_TASK) % args.sampling == 0;
+	if (step_kind == StepKind::COMMIT) {
+		// reset transaction boundary
+		const auto step_latency = watch_step.diff();
+		watch_tx.setStop(watch_step.getStop());
+		if (do_sample) {
+			const auto tx_duration = watch_tx.diff();
+			stats.addLatency(OP_COMMIT, step_latency);
+			stats.addLatency(OP_TRANSACTION, tx_duration);
+			sample_bins[OP_COMMIT].put(step_latency);
+			sample_bins[OP_TRANSACTION].put(tx_duration);
+		}
+		tx.reset();
+		watch_tx.startFromStop();
+		stats.incrOpCount(OP_COMMIT);
+		stats.incrOpCount(OP_TRANSACTION);
+		needs_commit = false;
+	}
+	// op completed successfully
+	if (step + 1 == opTable[op].steps()) {
+		if (opTable[op].needsCommit())
+			needs_commit = true;
+		watch_per_op[op].setStop(watch_step.getStop());
+		if (do_sample) {
+			const auto op_latency = watch_per_op[op].diff();
+			stats.addLatency(op, op_latency);
+			sample_bins[op].put(op_latency);
+		}
+		stats.incrOpCount(op);
+	}
+	op_iter = getOpNext(args, op_iter);
+	if (op_iter == OpEnd) {
+		if (needs_commit || args.commit_get) {
+			// task completed, need to commit before finish
+			watch_commit.start();
+			auto f = tx.commit().eraseType();
+			f.then([state](Future f) {
+				UNPACK_RESUMABLE_STATE_FOR_RUN_WORKLOAD(state);
+				if (auto err = f.error()) {
+					// commit had errors
+					logr.printWithLogLevel(err.retryable() ? VERBOSE_WARN : VERBOSE_NONE,
+					                       "ERROR",
+					                       "Post-iteration commit returned error: {}",
+					                       err.what());
+					tx.onError(err).then([state](Future f) {
+						UNPACK_RESUMABLE_STATE_FOR_RUN_WORKLOAD(state);
+						const auto rc = handleForOnError(tx, f, "ON_ERROR");
+						if (rc == FutureRC::CONFLICT)
+							stats.incrConflictCount();
+						else
+							stats.incrErrorCount(OP_COMMIT);
+						if (rc == FutureRC::ABORT) {
+							state->signalEnd();
+							return;
+						}
+						op_iter = getOpBegin(args);
+						needs_commit = false;
+						boost::asio::post(io_context, [state]() { resumableRunWorkload(state); });
+					});
+				} else {
+					// commit successful
+					watch_commit.stop();
+					watch_tx.setStop(watch_commit.getStop());
+					watch_task.setStop(watch_commit.getStop());
+					if (stats.getOpCount(OP_TASK) % args.sampling == 0) {
+						const auto commit_latency = watch_commit.diff();
+						const auto tx_duration = watch_tx.diff();
+						const auto task_duration = watch_task.diff();
+						stats.addLatency(OP_COMMIT, commit_latency);
+						stats.addLatency(OP_TRANSACTION, commit_latency);
+						stats.addLatency(OP_TASK, task_duration);
+						sample_bins[OP_COMMIT].put(commit_latency);
+						sample_bins[OP_TRANSACTION].put(tx_duration);
+						sample_bins[OP_TASK].put(task_duration);
+					}
+					stats.incrOpCount(OP_COMMIT);
+					stats.incrOpCount(OP_TRANSACTION);
+					stats.incrOpCount(OP_TASK);
+					tx.reset();
+					watch_tx.startFromStop();
+					watch_task.startFromStop();
+					if (state->ended()) {
+						state->signalEnd();
+						return;
+					}
+					// start next iteration
+					op_iter = getOpBegin(args);
+					boost::asio::post(io_context, [state]() { resumableRunWorkload(state); });
+				}
+			});
+		} else {
+			// task completed but no need to commit
+			watch_task.stop();
+			if (stats.getOpCount(OP_TASK) % args.sampling == 0) {
+				const auto task_duration = watch_task.diff();
+				stats.addLatency(OP_TASK, task_duration);
+				sample_bins[OP_TASK].put(task_duration);
+			}
+			stats.incrOpCount(OP_TASK);
+			watch_tx.startFromStop();
+			watch_task.startFromStop();
+			tx.reset();
+			if (state->ended()) {
+				state->signalEnd();
+				return;
+			}
+			op_iter = getOpBegin(args);
+			// run next iteration
+			boost::asio::post(io_context, [state]() { resumableRunWorkload(state); });
+		}
+	} else {
+		boost::asio::post(io_context, [state]() { resumableRunWorkload(state); });
+	}
+}
+
+void resumableRunWorkload(RunWorkloadStateHandle state) {
+	UNPACK_RESUMABLE_STATE_FOR_RUN_WORKLOAD(state);
+	assert(op_iter != OpEnd);
+	watch_step.start();
+	if (step == 0 /* first step */) {
+		watch_per_op[op] = Stopwatch(watch_step.getStart());
+	}
+	auto f = opTable[op].stepFunction(step)(tx, args, key1, key2, val);
+	if (!f) {
+		// immediately completed client-side ops: e.g. set, setrange, clear, clearrange, ...
+		onStepSuccess(state);
+	} else {
+		f.then([state](Future f) {
+			UNPACK_RESUMABLE_STATE_FOR_RUN_WORKLOAD(state);
+			if (step_kind != StepKind::ON_ERROR) {
+				if (auto err = f.error()) {
+					logr.printWithLogLevel(err.retryable() ? VERBOSE_WARN : VERBOSE_NONE,
+					                       "ERROR",
+					                       "step {} of op {} returned '{}'",
+					                       step,
+					                       opTable[op].name(),
+					                       err.what());
+					tx.onError(err).then([state](Future f) {
+						UNPACK_RESUMABLE_STATE_FOR_RUN_WORKLOAD(state);
+						const auto rc = handleForOnError(tx, f, fmt::format("{}_STEP_{}", opTable[op].name(), step));
+						if (rc == FutureRC::RETRY) {
+							stats.incrErrorCount(op);
+						} else if (rc == FutureRC::CONFLICT) {
+							stats.incrConflictCount();
+						} else if (rc == FutureRC::ABORT) {
+							tx.reset();
+							stopcount.fetch_add(1);
+							return;
+						}
+						op_iter = getOpBegin(args);
+						needs_commit = false;
+						// restart this iteration from beginning
+						boost::asio::post(io_context, [state]() { resumableRunWorkload(state); });
+					});
+					return;
+				}
+			} else {
+				auto rc = handleForOnError(tx, f, "BG_ON_ERROR");
+				if (rc == FutureRC::RETRY) {
+					stats.incrErrorCount(op);
+				} else if (rc == FutureRC::CONFLICT) {
+					stats.incrConflictCount();
+				} else if (rc == FutureRC::ABORT) {
+					tx.reset();
+					stopcount.fetch_add(1);
+					return;
+				}
+				op_iter = getOpBegin(args);
+				needs_commit = false;
+				// restart this iteration from beginning
+				boost::asio::post(io_context, [state]() { resumableRunWorkload(state); });
+				return;
+			}
+			onStepSuccess(state);
+		});
+	}
+}
+
+void runAsyncWorkload(Arguments const& args,
+                      pid_t pid_main,
+                      int worker_id,
+                      shared_memory::Access shm,
+                      boost::asio::io_context& io_context,
+                      std::vector<Database>& databases) {
+	auto dump_samples = [&args, pid_main, worker_id](auto&& states) {
+		auto overwrite = true; /* overwrite or append */
+		for (const auto& state : states) {
+			dumpThreadSamples(args, pid_main, worker_id, 0 /*thread_id*/, state->sample_bins, overwrite);
+			overwrite = false;
+		}
+	};
+	std::atomic<int> stopcount = ATOMIC_VAR_INIT(0);
+	if (args.mode == MODE_BUILD) {
+		auto states = std::vector<PopulateStateHandle>(args.async_xacts);
+		for (auto i = 0; i < args.async_xacts; i++) {
+			const auto key_begin = insertBegin(args.rows, worker_id, i, args.num_processes, args.async_xacts);
+			const auto key_end = insertEnd(args.rows, worker_id, i, args.num_processes, args.async_xacts);
+			auto db = databases[i % args.num_databases];
+			auto state =
+			    PopulateStateHandle(new ResumableStateForPopulate{ Logger(WorkerProcess{}, args.verbose, worker_id, i),
+			                                                       db,
+			                                                       db.createTransaction(),
+			                                                       io_context,
+			                                                       args,
+			                                                       shm.statsSlot(worker_id, i),
+			                                                       stopcount,
+			                                                       LatencySampleBinArray(),
+			                                                       key_begin,
+			                                                       key_end,
+			                                                       key_begin,
+			                                                       ByteString{},
+			                                                       ByteString{},
+			                                                       Stopwatch(StartAtCtor{}),
+			                                                       Stopwatch(),
+			                                                       Stopwatch(StartAtCtor{}) });
+			states[i] = state;
+			state->keystr.reserve(args.key_length);
+			state->valstr.reserve(args.value_length);
+		}
+		while (shm.headerConst().signal.load() != SIGNAL_GREEN)
+			usleep(1000);
+		// launch [async_xacts] concurrent transactions
+		for (auto state : states)
+			boost::asio::post(io_context, [state]() { resumablePopulate(state); });
+		while (stopcount.load() != args.async_xacts)
+			usleep(1000);
+		dump_samples(states);
+	} else if (args.mode == MODE_RUN) {
+		auto states = std::vector<RunWorkloadStateHandle>(args.async_xacts);
+		for (auto i = 0; i < args.async_xacts; i++) {
+			auto db = databases[i % args.num_databases];
+			const auto max_iters =
+			    args.iteration == 0
+			        ? -1
+			        : computeThreadIters(args.iteration, worker_id, i, args.num_processes, args.async_xacts);
+			auto state = RunWorkloadStateHandle(
+			    new ResumableStateForRunWorkload{ Logger(WorkerProcess{}, args.verbose, worker_id, i),
+			                                      db,
+			                                      db.createTransaction(),
+			                                      io_context,
+			                                      args,
+			                                      shm.statsSlot(worker_id, i),
+			                                      stopcount,
+			                                      shm.headerConst().signal,
+			                                      max_iters,
+			                                      getOpBegin(args),
+			                                      LatencySampleBinArray(),
+			                                      ByteString{},
+			                                      ByteString{},
+			                                      ByteString{},
+			                                      std::array<Stopwatch, MAX_OP>{},
+			                                      Stopwatch() /*watch_step*/,
+			                                      Stopwatch() /*watch_commit*/,
+			                                      Stopwatch(StartAtCtor{}) /*watch_tx*/,
+			                                      Stopwatch(StartAtCtor{}) /*watch_task*/,
+			                                      false /*needs_commit*/ });
+			states[i] = state;
+			state->key1.reserve(args.key_length);
+			state->key2.reserve(args.key_length);
+			state->val.reserve(args.value_length);
+		}
+		while (shm.headerConst().signal.load() != SIGNAL_GREEN)
+			usleep(1000);
+		for (auto state : states)
+			boost::asio::post(io_context, [state]() { resumableRunWorkload(state); });
+		logr.debug("Launched {} concurrent transactions", states.size());
+		while (stopcount.load() != args.async_xacts)
+			usleep(1000);
+		logr.debug("All transactions completed");
+		dump_samples(states);
+	}
 }
 
 /* mako worker thread */
@@ -855,7 +1336,7 @@ void workerThread(ThreadArgs& thread_args) {
 
 	const auto thread_iters =
 	    args.iteration == 0
-	        ? 0
+	        ? -1
 	        : computeThreadIters(args.iteration, worker_id, thread_id, args.num_processes, args.num_threads);
 
 	/* create my own transaction object */
@@ -889,25 +1370,7 @@ void workerThread(ThreadArgs& thread_args) {
 	}
 
 	if (args.mode == MODE_BUILD || args.mode == MODE_RUN) {
-		const auto dirname = fmt::format("{}{}", TEMP_DATA_STORE, parent_id);
-		const auto rc = mkdir(dirname.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
-		if (rc < 0 && errno != EEXIST) {
-			logr.error("mkdir {}: {}", dirname, strerror(errno));
-			return;
-		}
-		for (auto op = 0; op < MAX_OP; op++) {
-			if (args.txnspec.ops[op][OP_COUNT] > 0 || op == OP_COMMIT || op == OP_TRANSACTION) {
-				const auto filename = getStatsFilename(dirname, worker_id, thread_id, op);
-				auto fp = fopen(filename.c_str(), "w");
-				if (!fp) {
-					logr.error("fopen({}): {}", filename, strerror(errno));
-					continue;
-				}
-				auto fclose_guard = ExitGuard([fp]() { fclose(fp); });
-				thread_args.sample_bins[op].forEachBlock(
-				    [fp](auto ptr, auto count) { fwrite(ptr, sizeof(*ptr) * count, 1, fp); });
-			}
-		}
+		dumpThreadSamples(args, parent_id, worker_id, thread_id, sample_bins);
 	}
 }
 
@@ -934,7 +1397,7 @@ int workerProcessMain(Arguments const& args, int worker_id, shared_memory::Acces
 #endif
 	}
 
-	/* Set client Log group */
+	/* Set client logr group */
 	if (args.log_group[0] != '\0') {
 		err = network::setOptionNothrow(FDB_NET_OPTION_TRACE_LOG_GROUP, BytesRef(toBytePtr(args.log_group)));
 		if (err) {
@@ -980,7 +1443,7 @@ int workerProcessMain(Arguments const& args, int worker_id, shared_memory::Acces
 	if (args.client_threads_per_version > 0) {
 		err = network::setOptionNothrow(FDB_NET_OPTION_CLIENT_THREADS_PER_VERSION, args.client_threads_per_version);
 		if (err) {
-			logr.error("network::setOption (FDB_NET_OPTION_CLIENT_THREADS_PER_VERSION) ({}): {}\n",
+			logr.error("network::setOption (FDB_NET_OPTION_CLIENT_THREADS_PER_VERSION) ({}): {}",
 			           args.client_threads_per_version,
 			           err.what());
 			// let's exit here since we do not want to confuse users
@@ -995,7 +1458,8 @@ int workerProcessMain(Arguments const& args, int worker_id, shared_memory::Acces
 
 	/* Each worker process will have its own network thread */
 	logr.debug("creating network thread");
-	auto network_thread = std::thread([]() {
+	auto network_thread = std::thread([parent_logr = logr]() {
+		logr = parent_logr;
 		logr.debug("network thread started");
 		if (auto err = network::run()) {
 			logr.error("network::run(): {}", err.what());
@@ -1015,36 +1479,55 @@ int workerProcessMain(Arguments const& args, int worker_id, shared_memory::Acces
 		}
 	}
 
-	logr.debug("creating {} worker threads", args.num_threads);
-	auto worker_threads = std::vector<std::thread>(args.num_threads);
+	if (!args.async_xacts) {
+		logr.debug("creating {} worker threads", args.num_threads);
+		auto worker_threads = std::vector<std::thread>(args.num_threads);
 
-	/* spawn worker threads */
-	auto thread_args = std::vector<ThreadArgs>(args.num_threads);
+		/* spawn worker threads */
+		auto thread_args = std::vector<ThreadArgs>(args.num_threads);
 
-	for (auto i = 0; i < args.num_threads; i++) {
-		auto& this_args = thread_args[i];
-		this_args.worker_id = worker_id;
-		this_args.thread_id = i;
-		this_args.parent_id = pid_main;
-		this_args.args = &args;
-		this_args.shm = shm;
-		this_args.database = databases[i % args.num_databases];
+		for (auto i = 0; i < args.num_threads; i++) {
+			auto& this_args = thread_args[i];
+			this_args.worker_id = worker_id;
+			this_args.thread_id = i;
+			this_args.parent_id = pid_main;
+			this_args.args = &args;
+			this_args.shm = shm;
+			this_args.database = databases[i % args.num_databases];
 
-		/* for ops to run, pre-allocate one latency sample block */
-		for (auto op = 0; op < MAX_OP; op++) {
-			if (args.txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
-				this_args.sample_bins[op].reserveOneBlock();
+			/* for ops to run, pre-allocate one latency sample block */
+			for (auto op = 0; op < MAX_OP; op++) {
+				if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
+					this_args.sample_bins[op].reserveOneBlock();
+				}
 			}
+			worker_threads[i] = std::thread(workerThread, std::ref(this_args));
 		}
-		worker_threads[i] = std::thread(workerThread, std::ref(this_args));
-	}
-
-	/*** party is over ***/
-
-	/* wait for everyone to finish */
-	for (auto i = 0; i < args.num_threads; i++) {
-		logr.debug("waiting for worker thread {} to join", i + 1);
-		worker_threads[i].join();
+		/* wait for everyone to finish */
+		for (auto i = 0; i < args.num_threads; i++) {
+			logr.debug("waiting for worker thread {} to join", i + 1);
+			worker_threads[i].join();
+		}
+	} else {
+		logr.debug("running async mode with {} concurrent transactions", args.async_xacts);
+		boost::asio::io_context ctx;
+		using WorkGuard = boost::asio::executor_work_guard<boost::asio::io_context::executor_type>;
+		auto wg = WorkGuard(ctx.get_executor());
+		auto worker_threads = std::vector<std::thread>(args.num_threads);
+		for (auto i = 0; i < args.num_threads; i++) {
+			worker_threads[i] = std::thread([&ctx, &args, worker_id, i]() {
+				logr = Logger(WorkerProcess{}, args.verbose, worker_id);
+				logr.debug("Async-mode worker thread {} started", i + 1);
+				ctx.run();
+				logr.debug("Async-mode worker thread {} finished", i + 1);
+			});
+		}
+		shm.header().readycount.fetch_add(args.num_threads);
+		runAsyncWorkload(args, pid_main, worker_id, shm, ctx, databases);
+		wg.reset();
+		for (auto& thread : worker_threads)
+			thread.join();
+		shm.header().stopcount.fetch_add(args.num_threads);
 	}
 
 	/* stop the network thread */
@@ -1070,6 +1553,7 @@ int initArguments(Arguments& args) {
 	args.json = 0;
 	args.num_processes = 1;
 	args.num_threads = 1;
+	args.async_xacts = 0;
 	args.mode = MODE_INVALID;
 	args.rows = 100000;
 	args.row_digits = digits(args.rows);
@@ -1243,6 +1727,7 @@ void usage() {
 	printf("%-24s %s\n", "-d, --num_databases=NUM_DATABASES", "Specify number of databases");
 	printf("%-24s %s\n", "-p, --procs=PROCS", "Specify number of worker processes");
 	printf("%-24s %s\n", "-t, --threads=THREADS", "Specify number of worker threads");
+	printf("%-24s %s\n", "    --async_xacts", "Specify number of concurrent transactions to be run in async mode");
 	printf("%-24s %s\n", "-r, --rows=ROWS", "Specify number of records");
 	printf("%-24s %s\n", "-s, --seconds=SECONDS", "Specify the test duration in seconds\n");
 	printf("%-24s %s\n", "", "This option cannot be specified with --iteration.");
@@ -1294,6 +1779,7 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			{ "num_databases", optional_argument, NULL, 'd' },
 			{ "procs", required_argument, NULL, 'p' },
 			{ "threads", required_argument, NULL, 't' },
+			{ "async_xacts", required_argument, NULL, ARG_ASYNC },
 			{ "rows", required_argument, NULL, 'r' },
 			{ "seconds", required_argument, NULL, 's' },
 			{ "iteration", required_argument, NULL, 'i' },
@@ -1391,6 +1877,9 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 				args.mode = MODE_RUN;
 			}
 			break;
+		case ARG_ASYNC:
+			args.async_xacts = atoi(optarg);
+			break;
 		case ARG_KEYLEN:
 			args.key_length = atoi(optarg);
 			break;
@@ -1423,7 +1912,7 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			args.sampling = atoi(optarg);
 			break;
 		case ARG_VERSION:
-			logr.error("Version: {}\n", FDB_API_VERSION);
+			logr.error("Version: {}", FDB_API_VERSION);
 			exit(0);
 			break;
 		case ARG_COMMITGET:
@@ -1454,7 +1943,7 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 			} else if (strncmp(optarg, "xml", 4) == 0) {
 				args.traceformat = 0;
 			} else {
-				logr.error("Invalid trace_format {}\n", optarg);
+				logr.error("Invalid trace_format {}", optarg);
 				return -1;
 			}
 			break;
@@ -1522,12 +2011,6 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 	return 0;
 }
 
-char const* getOpName(int ops_code) {
-	if (ops_code >= 0 && ops_code < MAX_OP)
-		return opTable[ops_code].name().data();
-	return "";
-}
-
 int validateArguments(Arguments const& args) {
 	if (args.mode == MODE_INVALID) {
 		logr.error("--mode has to be set");
@@ -1591,10 +2074,11 @@ int validateArguments(Arguments const& args) {
 void printStats(Arguments const& args, ThreadStatistics const* stats, double const duration_sec, FILE* fp) {
 	static ThreadStatistics prev;
 
+	const auto num_effective_threads = args.async_xacts > 0 ? args.async_xacts : args.num_threads;
 	auto current = ThreadStatistics{};
 	for (auto i = 0; i < args.num_processes; i++) {
 		for (auto j = 0; j < args.num_threads; j++) {
-			current.combine(stats[(i * args.num_threads) + j]);
+			current.combine(stats[(i * num_effective_threads) + j]);
 		}
 	}
 
@@ -1614,7 +2098,7 @@ void printStats(Arguments const& args, ThreadStatistics const* stats, double con
 		}
 	}
 	/* TPS */
-	const auto tps = (current.getTaskCount() - prev.getTaskCount()) / duration_sec;
+	const auto tps = (current.getOpCount(OP_TASK) - prev.getOpCount(OP_TASK)) / duration_sec;
 	putFieldFloat(tps, 2);
 	if (fp) {
 		fprintf(fp, "\"tps\": %.2f,", tps);
@@ -1699,24 +2183,26 @@ void printReport(Arguments const& args,
                  FILE* fp) {
 
 	auto final_stats = ThreadStatistics{};
+	const auto num_effective_threads = args.async_xacts > 0 ? args.async_xacts : args.num_threads;
 	for (auto i = 0; i < args.num_processes; i++) {
-		for (auto j = 0; j < args.num_threads; j++) {
-			const auto idx = i * args.num_threads + j;
+		for (auto j = 0; j < num_effective_threads; j++) {
+			const auto idx = i * num_effective_threads + j;
 			final_stats.combine(stats[idx]);
 		}
 	}
 
 	/* overall stats */
 	fmt::printf("\n====== Total Duration %6.3f sec ======\n\n", duration_sec);
-	fmt::printf("Total Processes:  %8d\n", args.num_processes);
-	fmt::printf("Total Threads:    %8d\n", args.num_threads);
+	fmt::printf("Total Processes:   %8d\n", args.num_processes);
+	fmt::printf("Total Threads:     %8d\n", args.num_threads);
+	fmt::printf("Total Async Xacts: %8d\n", args.async_xacts);
 	if (args.tpsmax == args.tpsmin)
-		fmt::printf("Target TPS:       %8d\n", args.tpsmax);
+		fmt::printf("Target TPS:        %8d\n", args.tpsmax);
 	else {
-		fmt::printf("Target TPS (MAX): %8d\n", args.tpsmax);
-		fmt::printf("Target TPS (MIN): %8d\n", args.tpsmin);
-		fmt::printf("TPS Interval:     %8d\n", args.tpsinterval);
-		fmt::printf("TPS Change:       ");
+		fmt::printf("Target TPS (MAX):  %8d\n", args.tpsmax);
+		fmt::printf("Target TPS (MIN):  %8d\n", args.tpsmin);
+		fmt::printf("TPS Interval:      %8d\n", args.tpsinterval);
+		fmt::printf("TPS Change:        ");
 		switch (args.tpschange) {
 		case TPS_SIN:
 			fmt::printf("%8s\n", "SIN");
@@ -1729,20 +2215,21 @@ void printReport(Arguments const& args,
 			break;
 		}
 	}
-	const auto tps_f = final_stats.getTaskCount() / duration_sec;
+	const auto tps_f = final_stats.getOpCount(OP_TASK) / duration_sec;
 	const auto tps_i = static_cast<uint64_t>(tps_f);
-	fmt::printf("Total Xacts:      %8lu\n", final_stats.getTaskCount());
-	fmt::printf("Total Conflicts:  %8lu\n", final_stats.getConflictCount());
-	fmt::printf("Total Errors:     %8lu\n", final_stats.getTotalErrorCount());
-	fmt::printf("Overall TPS:      %8lu\n\n", tps_i);
+	fmt::printf("Total Xacts:       %8lu\n", final_stats.getOpCount(OP_TASK));
+	fmt::printf("Total Conflicts:   %8lu\n", final_stats.getConflictCount());
+	fmt::printf("Total Errors:      %8lu\n", final_stats.getTotalErrorCount());
+	fmt::printf("Overall TPS:       %8lu\n\n", tps_i);
 
 	if (fp) {
 		fmt::fprintf(fp, "\"results\": {");
 		fmt::fprintf(fp, "\"totalDuration\": %6.3f,", duration_sec);
 		fmt::fprintf(fp, "\"totalProcesses\": %d,", args.num_processes);
 		fmt::fprintf(fp, "\"totalThreads\": %d,", args.num_threads);
+		fmt::fprintf(fp, "\"totalAsyncXacts\": %d,", args.async_xacts);
 		fmt::fprintf(fp, "\"targetTPS\": %d,", args.tpsmax);
-		fmt::fprintf(fp, "\"totalXacts\": %lu,", final_stats.getTaskCount());
+		fmt::fprintf(fp, "\"totalXacts\": %lu,", final_stats.getOpCount(OP_TASK));
 		fmt::fprintf(fp, "\"totalConflicts\": %lu,", final_stats.getConflictCount());
 		fmt::fprintf(fp, "\"totalErrors\": %lu,", final_stats.getTotalErrorCount());
 		fmt::fprintf(fp, "\"overallTPS\": %lu,", tps_i);
@@ -1758,7 +2245,7 @@ void printReport(Arguments const& args,
 	}
 	auto first_op = true;
 	for (auto op = 0; op < MAX_OP; op++) {
-		if ((args.txnspec.ops[op][OP_COUNT] > 0 && op != OP_TRANSACTION) || op == OP_COMMIT) {
+		if ((args.txnspec.ops[op][OP_COUNT] > 0 && op != OP_TASK && op != OP_TRANSACTION) || op == OP_COMMIT) {
 			putField(final_stats.getOpCount(op));
 			if (fp) {
 				if (first_op) {
@@ -1772,7 +2259,7 @@ void printReport(Arguments const& args,
 	}
 
 	/* TPS */
-	const auto tps = final_stats.getTaskCount() / duration_sec;
+	const auto tps = final_stats.getOpCount(OP_TASK) / duration_sec;
 	putFieldFloat(tps, 2);
 
 	/* Conflicts */
@@ -1812,7 +2299,7 @@ void printReport(Arguments const& args,
 	putTitle("Samples");
 	first_op = 1;
 	for (auto op = 0; op < MAX_OP; op++) {
-		if (args.txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
+		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
 			if (final_stats.getLatencyUsTotal(op)) {
 				putField(final_stats.getLatencySampleCount(op));
 			} else {
@@ -1837,7 +2324,7 @@ void printReport(Arguments const& args,
 	putTitle("Min");
 	first_op = 1;
 	for (auto op = 0; op < MAX_OP; op++) {
-		if (args.txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
+		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
 			const auto lat_min = final_stats.getLatencyUsMin(op);
 			if (lat_min == -1) {
 				putField("N/A");
@@ -1863,7 +2350,7 @@ void printReport(Arguments const& args,
 	putTitle("Avg");
 	first_op = 1;
 	for (auto op = 0; op < MAX_OP; op++) {
-		if (args.txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
+		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
 			const auto lat_total = final_stats.getLatencyUsTotal(op);
 			const auto lat_samples = final_stats.getLatencySampleCount(op);
 			if (lat_total) {
@@ -1890,7 +2377,7 @@ void printReport(Arguments const& args,
 	putTitle("Max");
 	first_op = 1;
 	for (auto op = 0; op < MAX_OP; op++) {
-		if (args.txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
+		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
 			const auto lat_max = final_stats.getLatencyUsMax(op);
 			if (lat_max == 0) {
 				putField("N/A");
@@ -1918,29 +2405,37 @@ void printReport(Arguments const& args,
 	putTitle("Median");
 	first_op = 1;
 	for (auto op = 0; op < MAX_OP; op++) {
-		if (args.txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
+		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
 			const auto lat_total = final_stats.getLatencyUsTotal(op);
 			const auto lat_samples = final_stats.getLatencySampleCount(op);
+			data_points[op].reserve(lat_samples);
 			if (lat_total && lat_samples) {
 				for (auto i = 0; i < args.num_processes; i++) {
-					for (auto j = 0; j < args.num_threads; j++) {
+					auto load_sample = [pid_main, op, &data_points](int process_id, int thread_id) {
 						const auto dirname = fmt::format("{}{}", TEMP_DATA_STORE, pid_main);
-						const auto filename = getStatsFilename(dirname, i, j, op);
+						const auto filename = getStatsFilename(dirname, process_id, thread_id, op);
 						auto fp = fopen(filename.c_str(), "r");
 						if (!fp) {
-							logr.error("fopen({}): {}\n", filename, strerror(errno));
-							continue;
+							logr.error("fopen({}): {}", filename, strerror(errno));
+							return;
 						}
 						auto fclose_guard = ExitGuard([fp]() { fclose(fp); });
 						fseek(fp, 0, SEEK_END);
 						const auto num_points = ftell(fp) / sizeof(uint64_t);
-						data_points[op].reserve(num_points);
 						fseek(fp, 0, 0);
 						for (auto index = 0u; index < num_points; index++) {
 							auto value = uint64_t{};
 							fread(&value, sizeof(uint64_t), 1, fp);
 							data_points[op].push_back(value);
 						}
+					};
+					if (args.async_xacts == 0) {
+						for (auto j = 0; j < args.num_threads; j++) {
+							load_sample(i, j);
+						}
+					} else {
+						// async mode uses only one file per process
+						load_sample(i, 0);
 					}
 				}
 				std::sort(data_points[op].begin(), data_points[op].end());
@@ -1974,7 +2469,7 @@ void printReport(Arguments const& args,
 	putTitle("95.0 pctile");
 	first_op = 1;
 	for (auto op = 0; op < MAX_OP; op++) {
-		if (args.txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
+		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
 			if (data_points[op].empty() || !final_stats.getLatencyUsTotal(op)) {
 				putField("N/A");
 				continue;
@@ -2001,7 +2496,7 @@ void printReport(Arguments const& args,
 	putTitle("99.0 pctile");
 	first_op = 1;
 	for (auto op = 0; op < MAX_OP; op++) {
-		if (args.txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
+		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
 			if (data_points[op].empty() || !final_stats.getLatencyUsTotal(op)) {
 				putField("N/A");
 				continue;
@@ -2028,7 +2523,7 @@ void printReport(Arguments const& args,
 	putTitle("99.9 pctile");
 	first_op = 1;
 	for (auto op = 0; op < MAX_OP; op++) {
-		if (args.txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION || op == OP_COMMIT) {
+		if (args.txnspec.ops[op][OP_COUNT] > 0 || isAbstractOp(op)) {
 			if (data_points[op].empty() || !final_stats.getLatencyUsTotal(op)) {
 				putField("N/A");
 				continue;
@@ -2079,6 +2574,7 @@ int statsProcessMain(Arguments const& args,
 		fmt::fprintf(fp, "\"json\": %d,", args.json);
 		fmt::fprintf(fp, "\"num_processes\": %d,", args.num_processes);
 		fmt::fprintf(fp, "\"num_threads\": %d,", args.num_threads);
+		fmt::fprintf(fp, "\"async_xacts\": %d,", args.async_xacts);
 		fmt::fprintf(fp, "\"mode\": %d,", args.mode);
 		fmt::fprintf(fp, "\"rows\": %d,", args.rows);
 		fmt::fprintf(fp, "\"seconds\": %d,", args.seconds);
@@ -2193,7 +2689,7 @@ int main(int argc, char* argv[]) {
 	auto args = Arguments{};
 	rc = initArguments(args);
 	if (rc < 0) {
-		logr.error("initArguments failed\n");
+		logr.error("initArguments failed");
 		return -1;
 	}
 	rc = parseArguments(argc, argv, args);
@@ -2233,8 +2729,11 @@ int main(int argc, char* argv[]) {
 		unlink(shmpath.c_str());
 	});
 
+	const auto async_mode = args.async_xacts > 0;
+	const auto nthreads_for_shm = async_mode ? args.async_xacts : args.num_threads;
 	/* allocate */
-	const auto shmsize = shared_memory::storageSize(args.num_processes, args.num_threads);
+	const auto shmsize = shared_memory::storageSize(args.num_processes, nthreads_for_shm);
+
 	auto shm = std::add_pointer_t<void>{};
 	if (ftruncate(shmfd, shmsize) < 0) {
 		shm = MAP_FAILED;
@@ -2250,7 +2749,7 @@ int main(int argc, char* argv[]) {
 	}
 	auto munmap_guard = ExitGuard([=]() { munmap(shm, shmsize); });
 
-	auto shm_access = shared_memory::Access(shm, args.num_processes, args.num_threads);
+	auto shm_access = shared_memory::Access(shm, args.num_processes, nthreads_for_shm);
 
 	/* initialize the shared memory */
 	shm_access.reset();

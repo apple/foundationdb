@@ -1,10 +1,13 @@
 #include "utils.hpp"
 #include "mako.hpp"
-#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <fmt/format.h>
+
+namespace math {
+#include <cmath>
+}
 
 namespace mako {
 

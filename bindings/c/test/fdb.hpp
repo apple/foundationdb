@@ -253,7 +253,9 @@ protected:
 		auto cb = [fut = FutureType(*this), fn = std::forward<UserFunc>(fn)]() { fn(fut); };
 		using cb_type = std::decay_t<decltype(cb)>;
 		auto fp = new cb_type(std::move(cb));
-		native::fdb_future_set_callback(f.get(), &callback<cb_type>, fp);
+		if (auto err = Error(native::fdb_future_set_callback(f.get(), &callback<cb_type>, fp))) {
+			throwError("ERROR: future_set_callback: ", err);
+		}
 	}
 
 public:
@@ -309,6 +311,7 @@ public:
 
 template <typename VarTraits>
 class TypedFuture : public Future {
+	friend class Future;
 	friend class Transaction;
 	using SelfType = TypedFuture<VarTraits>;
 	using Future::Future;

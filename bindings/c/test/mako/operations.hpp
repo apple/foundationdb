@@ -23,6 +23,7 @@ enum OpKind {
 	OP_SETCLEARRANGE,
 	OP_COMMIT,
 	OP_TRANSACTION, /* pseudo-operation - cumulative time for the operation + commit */
+	OP_TASK, /* pseudo-operation - cumulative time for each iteraton in run_workload */
 	OP_READ_BG,
 	MAX_OP /* must be the last item */
 };
@@ -39,6 +40,11 @@ enum class StepKind {
 	COMMIT, ///< self-explanatory
 	ON_ERROR ///< future is a result of tx.on_error()
 };
+
+// Ops that doesn't have concrete steps to execute and are there for measurements only
+inline bool isAbstractOp(int op) noexcept {
+	return op == OP_COMMIT || op == OP_TRANSACTION; // || op == OP_TASK;
+}
 
 } // namespace mako
 

@@ -59,7 +59,6 @@ public:
 };
 
 class alignas(64) ThreadStatistics {
-	uint64_t tasks;
 	uint64_t conflicts;
 	uint64_t total_errors;
 	uint64_t ops[MAX_OP];
@@ -77,8 +76,6 @@ public:
 
 	ThreadStatistics(const ThreadStatistics& other) noexcept = default;
 	ThreadStatistics& operator=(const ThreadStatistics& other) noexcept = default;
-
-	uint64_t getTaskCount() const noexcept { return tasks; }
 
 	uint64_t getConflictCount() const noexcept { return conflicts; }
 
@@ -98,7 +95,6 @@ public:
 
 	// with 'this' as final aggregation, factor in 'other'
 	void combine(const ThreadStatistics& other) {
-		tasks += other.tasks;
 		conflicts += other.conflicts;
 		for (auto op = 0; op < MAX_OP; op++) {
 			ops[op] += other.ops[op];
@@ -113,7 +109,6 @@ public:
 		}
 	}
 
-	void incrTaskCount() noexcept { tasks++; }
 	void incrConflictCount() noexcept { conflicts++; }
 
 	// non-commit write operations aren't measured for time.
