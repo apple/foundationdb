@@ -279,6 +279,8 @@ inline void freeFast(int size, void* ptr) {
 	delete[](uint8_t*) ptr;
 }
 
+// Allocate a block of memory aligned to 4096 bytes. Size must be a multiple of
+// 4096. Guaranteed not to return null. Use freeFast4kAligned to free.
 [[nodiscard]] inline void* allocateFast4kAligned(int size) {
 #if !defined(USE_JEMALLOC)
 	// Use FastAllocator for sizes it supports to avoid internal fragmentation in some implementations of aligned_alloc
@@ -296,6 +298,7 @@ inline void freeFast(int size, void* ptr) {
 	return result;
 }
 
+// Free a pointer returned from allocateFast4kAligned(size)
 inline void freeFast4kAligned(int size, void* ptr) {
 #if !defined(USE_JEMALLOC)
 	// Sizes supported by FastAllocator must be release via FastAllocator
