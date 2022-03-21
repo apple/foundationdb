@@ -91,8 +91,8 @@ struct StorageServerInterface {
 
 	bool acceptingRequests;
 
-	explicit StorageServerInterface(UID uid) : uniqueID(uid) {}
-	StorageServerInterface() : uniqueID(deterministicRandom()->randomUniqueID()) {}
+	explicit StorageServerInterface(UID uid) : uniqueID(uid) { acceptingRequests = false; }
+	StorageServerInterface() : uniqueID(deterministicRandom()->randomUniqueID()) { acceptingRequests = false; }
 	NetworkAddress address() const { return getValue.getEndpoint().getPrimaryAddress(); }
 	NetworkAddress stableAddress() const { return getValue.getEndpoint().getStableAddress(); }
 	Optional<NetworkAddress> secondaryAddress() const { return getValue.getEndpoint().addresses.secondaryAddress; }
