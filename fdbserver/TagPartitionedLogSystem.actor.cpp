@@ -515,8 +515,19 @@ Future<Version> TagPartitionedLogSystem::push(Version prevVersion,
 	std::vector<Future<TLogCommitReply>> allReplies;
 	int location = 0;
 	Span span("TPLS:push"_loc, spanContext);
-	int tLogCount = tpcvMap.present() ? tpcvMap.get().size() : 0;
 
+	std::unordered_map<int, int> tLogCount;
+	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+		int location = 0;
+		for (auto& it : tLogs) {
+			for (int loc = 0; loc < it->logServers.size(); loc++) {
+				if (tpcvMap.get().find(location) != tpcvMap.get().end()) {
+					tLogCount[loc]++;
+				}
+				location++;
+			}
+		}
+	}
 	for (auto& it : tLogs) {
 		if (it->isLocal && it->logServers.size()) {
 			if (it->connectionResetTrackers.size() == 0) {
@@ -555,7 +566,7 @@ Future<Version> TagPartitionedLogSystem::push(Version prevVersion,
 				                                                                          knownCommittedVersion,
 				                                                                          minKnownCommittedVersion,
 				                                                                          msg,
-				                                                                          tLogCount,
+				                                                                          tLogCount[loc],
 				                                                                          debugID),
 				                                                        TaskPriority::ProxyTLogCommitReply)));
 				Future<Void> commitSuccess = success(allReplies.back());
@@ -1948,6 +1959,44 @@ ACTOR Future<Void> TagPartitionedLogSystem::getDurableVersionChanged(LogLockInfo
 	return Void();
 }
 
+// If VERSION_VECTOR_UNICAST is enabled, one tLog's DV may advance far beyond the min(DV) over all tLogs.
+// This function finds the highest recoverable version for each tLog group over all log groups.
+// All versions prior must also be recoverable.
+// TODO: unit tests stressing UNICAST, changes to peekTxn logic.
+Version getRecoverVersionUnicast(std::vector<std::vector<TLogLockResult>>& logGroupResults,
+                                 Version minEnd,
+                                 int replicationFactor) {
+	Version minLogGroup = std::numeric_limits<Version>::max();
+	for (auto& logGroupResult : logGroupResults) {
+		std::unordered_map<Version, int> versionRepCount;
+		std::map<Version, int> versionTLogCount;
+		for (auto& tLogResult : logGroupResult) {
+			bool logGroupCandidate = false;
+			for (auto& unknownCommittedVersion : tLogResult.unknownCommittedVersions) {
+				Version k = std::get<0>(unknownCommittedVersion);
+				if (k > minEnd) {
+					versionRepCount[k]++;
+					versionTLogCount[k] = std::get<1>(unknownCommittedVersion);
+					logGroupCandidate = true;
+				}
+			}
+			if (!logGroupCandidate) {
+				return minEnd;
+			}
+		}
+		Version minTLogs = minEnd;
+		for (auto const& [version, tLogCount] : versionTLogCount) {
+			if (versionRepCount[version] >= tLogCount - replicationFactor + 1) {
+				minTLogs = version;
+			} else {
+				break;
+			}
+		}
+		minLogGroup = std::min(minLogGroup, minTLogs);
+	}
+	return minLogGroup;
+}
+
 ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Reference<ILogSystem>>> outLogSystem,
                                                      UID dbgid,
                                                      DBCoreState prevState,
@@ -2229,35 +2278,8 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 
 			logSystem->recoverAt = minEnd;
 			if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-				Version minUncommittedVersion = std::numeric_limits<Version>::max();
-				Version minLogGroup = std::numeric_limits<Version>::max();
-				int replicationFactor = logServers[0]->tLogReplicationFactor;
-				for (auto& logGroupResult : logGroupResults) {
-					std::unordered_map<Version, int> versionRepCount;
-					std::unordered_map<Version, int> versionTLogCount;
-					for (auto& tLogResult : logGroupResult) {
-						for (auto& unknownCommittedVersion : tLogResult.unknownCommittedVersions) {
-							Version k = std::get<0>(unknownCommittedVersion);
-							if (k > minEnd) {
-								versionRepCount[k]++;
-								versionTLogCount[k] = std::get<1>(unknownCommittedVersion);
-							}
-						}
-					}
-					Version maxTLogs = minEnd;
-					for (auto& tLogResult : logGroupResult) {
-						for (auto& unknownCommittedVersion : tLogResult.unknownCommittedVersions) {
-							Version k = std::get<0>(unknownCommittedVersion);
-							if (versionRepCount[k] >= versionTLogCount[k] - replicationFactor + 1) {
-								maxTLogs = std::max(k, maxTLogs);
-							} else {
-								minUncommittedVersion = std::min(minUncommittedVersion, k);
-							}
-						}
-					}
-					minLogGroup = std::min(minLogGroup, maxTLogs);
-				}
-				logSystem->recoverAt = std::min(minLogGroup, minUncommittedVersion);
+				logSystem->recoverAt =
+				    getRecoverVersionUnicast(logGroupResults, minEnd, logServers[0]->tLogReplicationFactor);
 				TraceEvent("RecoveryVersionInfo").detail("RecoverAt", logSystem->recoverAt);
 			}
 
