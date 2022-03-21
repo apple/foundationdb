@@ -18,6 +18,9 @@
  * limitations under the License.
  */
 
+#ifndef FDBCLIENT_IKNOBCOLLECTION_H
+#define FDBCLIENT_IKNOBCOLLECTION_H
+
 #pragma once
 
 #include <memory>
@@ -69,3 +72,5 @@ public:
 	static ConfigMutationRef createSetMutation(Arena, KeyRef, ValueRef);
 	static ConfigMutationRef createClearMutation(Arena, KeyRef);
 };
+
+#endif // FDBCLIENT_IKNOBCOLLECTION_H

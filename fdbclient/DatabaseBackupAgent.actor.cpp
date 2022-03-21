@@ -32,9 +32,10 @@
 #include <numeric>
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/KeyBackedTypes.h"
-#include "flow/actorcompiler.h" // has to be last include
 #include <inttypes.h>
 #include <map>
+
+#include "flow/actorcompiler.h" // has to be last include
 
 const Key DatabaseBackupAgent::keyAddPrefix = LiteralStringRef("add_prefix");
 const Key DatabaseBackupAgent::keyRemovePrefix = LiteralStringRef("remove_prefix");

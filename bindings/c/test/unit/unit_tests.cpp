@@ -2410,6 +2410,101 @@ TEST_CASE("Fast alloc thread cleanup") {
 	}
 }
 
+TEST_CASE("Tenant create, access, and delete") {
+	std::string tenantName = "tenant";
+	std::string testKey = "foo";
+	std::string testValue = "bar";
+
+	fdb::Transaction tr(db);
+	while (1) {
+		fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, nullptr, 0));
+		tr.set("\xff\xff/management/tenant_map/" + tenantName, "");
+		fdb::EmptyFuture commitFuture = tr.commit();
+		fdb_error_t err = wait_future(commitFuture);
+		if (err) {
+			fdb::EmptyFuture f = tr.on_error(err);
+			fdb_check(wait_future(f));
+			continue;
+		}
+		tr.reset();
+		break;
+	}
+
+	fdb::Tenant tenant(db, reinterpret_cast<const uint8_t*>(tenantName.c_str()), tenantName.size());
+	fdb::Transaction tr2(tenant);
+
+	while (1) {
+		tr2.set(testKey, testValue);
+		fdb::EmptyFuture commitFuture = tr2.commit();
+		fdb_error_t err = wait_future(commitFuture);
+		if (err) {
+			fdb::EmptyFuture f = tr2.on_error(err);
+			fdb_check(wait_future(f));
+			continue;
+		}
+		tr2.reset();
+		break;
+	}
+
+	while (1) {
+		fdb::ValueFuture f1 = tr2.get(testKey, false);
+		fdb_error_t err = wait_future(f1);
+		if (err) {
+			fdb::EmptyFuture f2 = tr.on_error(err);
+			fdb_check(wait_future(f2));
+			continue;
+		}
+
+		int out_present;
+		char* val;
+		int vallen;
+		fdb_check(f1.get(&out_present, (const uint8_t**)&val, &vallen));
+		CHECK(out_present == 1);
+		CHECK(vallen == testValue.size());
+		CHECK(testValue == val);
+
+		tr2.clear(testKey);
+		fdb::EmptyFuture commitFuture = tr2.commit();
+		err = wait_future(commitFuture);
+		if (err) {
+			fdb::EmptyFuture f = tr2.on_error(err);
+			fdb_check(wait_future(f));
+			continue;
+		}
+
+		tr2.reset();
+		break;
+	}
+
+	while (1) {
+		fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, nullptr, 0));
+		tr.clear("\xff\xff/management/tenant_map/" + tenantName);
+		fdb::EmptyFuture commitFuture = tr.commit();
+		fdb_error_t err = wait_future(commitFuture);
+		if (err) {
+			fdb::EmptyFuture f = tr.on_error(err);
+			fdb_check(wait_future(f));
+			continue;
+		}
+		tr.reset();
+		break;
+	}
+
+	while (1) {
+		fdb::ValueFuture f1 = tr2.get(testKey, false);
+		fdb_error_t err = wait_future(f1);
+		if (err == error_code_tenant_not_found) {
+			tr2.reset();
+			break;
+		}
+		if (err) {
+			fdb::EmptyFuture f2 = tr.on_error(err);
+			fdb_check(wait_future(f2));
+			continue;
+		}
+	}
+}
+
 int main(int argc, char** argv) {
 	if (argc < 3) {
 		std::cout << "Unit tests for the FoundationDB C API.\n"
