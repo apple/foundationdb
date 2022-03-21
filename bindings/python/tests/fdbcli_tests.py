@@ -545,52 +545,41 @@ def triggerddteaminfolog(logger):
 @enable_logging()
 def tenants(logger):
     output = run_fdbcli_command('listtenants')
-    print(output)
     assert output == 'The cluster has no tenants'
 
     output = run_fdbcli_command('createtenant tenant')
-    print(output)
     assert output == 'The tenant `tenant\' has been created'
 
     output = run_fdbcli_command('createtenant tenant2')
-    print(output)
     assert output == 'The tenant `tenant2\' has been created'
 
     output = run_fdbcli_command('listtenants')
-    print(output)
     assert output == '1. tenant\n  2. tenant2'
 
     output = run_fdbcli_command('listtenants a z 1')
-    print(output)
     assert output == '1. tenant'
 
     output = run_fdbcli_command('listtenants a tenant2')
-    print(output)
     assert output == '1. tenant'
 
     output = run_fdbcli_command('listtenants tenant2 z')
-    print(output)
     assert output == '1. tenant2'
 
     output = run_fdbcli_command('gettenant tenant')
-    print(output)
     lines = output.split('\n')
     assert len(lines) == 2
     assert lines[0].strip().startswith('id: ')
     assert lines[1].strip().startswith('prefix: ')
     
     output = run_fdbcli_command('usetenant')
-    print(output)
     assert output == 'Using the default tenant'
 
     output = run_fdbcli_command_and_get_error('usetenant tenant3')
-    print(output)
     assert output == 'ERROR: Tenant `tenant3\' does not exist'
 
     # Test writing keys to different tenants and make sure they all work correctly
     run_fdbcli_command('writemode on; set tenant_test default_tenant')
     output = run_fdbcli_command('get tenant_test')
-    print(output)
     assert output == '`tenant_test\' is `default_tenant\''
 
     process = subprocess.Popen(command_template[:-1], stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=fdbcli_env)
@@ -598,7 +587,6 @@ def tenants(logger):
     output, _ = process.communicate(input='\n'.join(cmd_sequence).encode())
 
     lines = output.decode().strip().split('\n')[-3:]
-    print(lines)
     assert lines[0] == 'Using tenant `tenant\''
     assert lines[1] == '`tenant_test\': not found'
     assert lines[2].startswith('Committed')
@@ -608,7 +596,6 @@ def tenants(logger):
     output, _ = process.communicate(input='\n'.join(cmd_sequence).encode())
 
     lines = output.decode().strip().split('\n')[-4:]
-    print(lines)
     assert lines[0] == 'Using tenant `tenant2\''
     assert lines[1] == '`tenant_test\': not found'
     assert lines[2].startswith('Committed')
@@ -619,7 +606,6 @@ def tenants(logger):
     output, _ = process.communicate(input='\n'.join(cmd_sequence).encode())
 
     lines = output.decode().strip().split('\n')[-4:]
-    print(lines)
     assert lines[0] == 'Using tenant `tenant\''
     assert lines[1] == '`tenant_test\' is `tenant\''
     assert lines[2] == 'Using the default tenant'
@@ -631,8 +617,6 @@ def tenants(logger):
 
     lines = output.decode().strip().split('\n')[-7:]
     error_lines = error_output.decode().strip().split('\n')[-2:]
-    print(lines)
-    print(error_lines)
     assert lines[0] == 'Using tenant `tenant\''
     assert lines[1].startswith('Committed')
     assert lines[2] == 'The tenant `tenant\' has been deleted'
@@ -648,8 +632,6 @@ def tenants(logger):
 
     lines = output.decode().strip().split('\n')[-4:]
     error_lines = error_output.decode().strip().split('\n')[-1:]
-    print(lines)
-    print(error_lines)
     assert error_lines[0] == 'ERROR: Cannot delete a non-empty tenant (2133)'
     assert lines[0] == 'Using tenant `tenant2\''
     assert lines[1].startswith('Committed')
