@@ -7,7 +7,7 @@
 .. |database-type| replace:: ``Database``
 .. |database-class| replace:: :class:`Database`
 .. |database-auto| replace:: the :func:`@fdb.transactional <transactional>` decorator
-.. |tenant-type| replace:: FIXME
+.. |tenant-type| replace:: :class:`Tenant`
 .. |transaction-class| replace:: :class:`Transaction`
 .. |get-key-func| replace:: :func:`Transaction.get_key`
 .. |get-range-func| replace:: :func:`Transaction.get_range`
@@ -316,8 +316,28 @@ A |database-blurb1| |database-blurb2|
 
     Returns a new :class:`Transaction` object.  Consider using the :func:`@fdb.transactional <transactional>` decorator to create transactions instead, since it will automatically provide you with appropriate retry behavior.
 
+.. method:: Database.open_tenant(tenant_name)
+
+    Opens an existing tenant to be used for running transactions and returns it as a :class`Tenant` object. 
+
+    The tenant name can be either a byte string or a tuple. If a tuple is provided, the tuple will be packed using the tuple layer to generate the byte string tenant name.
+
 .. |sync-read| replace:: This read is fully synchronous.
 .. |sync-write| replace:: This change will be committed immediately, and is fully synchronous.
+
+.. method:: Database.allocate_tenant(tenant_name):
+
+    Creates a new tenant in the cluster. |sync-write|
+
+    The tenant name can be either a byte string or a tuple and cannot start with the ``\xff`` byte. If a tuple is provided, the tuple will be packed using the tuple layer to generate the byte string tenant name.
+
+.. method:: Database.delete_tenant(tenant_name):
+
+    Delete a tenant from the cluster. |sync-write|
+
+    The tenant name can be either a byte string or a tuple. If a tuple is provided, the tuple will be packed using the tuple layer to generate the byte string tenant name.
+
+    It is an error to delete a tenant that still has data. To delete a non-empty tenant, first clear all of the keys in the tenant.
 
 .. method:: Database.get(key)
 
@@ -460,6 +480,17 @@ Database options
 .. method:: Database.options.set_snapshot_ryw_disable()
 
     |option-db-snapshot-ryw-disable-blurb|
+    
+Tenant objects
+==============
+
+.. class:: Tenant
+
+|tenant-blurb1|
+
+.. method:: Tenant.create_transaction()
+
+    Returns a new :class:`Transaction` object.  Consider using the :func:`@fdb.transactional <transactional>` decorator to create transactions instead, since it will automatically provide you with appropriate retry behavior.
 
 .. _api-python-transactional-decorator:
 
