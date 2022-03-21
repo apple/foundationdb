@@ -23,6 +23,7 @@
 #include "flow/ITrace.h"
 #include "flow/Trace.h"
 #include "flow/genericactors.actor.h"
+#include "flow/UnitTest.h"
 
 DatabaseConfiguration::DatabaseConfiguration() {
 	resetInternal();
@@ -819,4 +820,22 @@ bool DatabaseConfiguration::isOverridden(std::string key) const {
 	}
 
 	return false;
+}
+
+TEST_CASE("/fdbclient/databaseConfiguration/overwriteCommitProxy") {
+	DatabaseConfiguration conf1;
+	conf1.applyMutation(MutationRef(MutationRef::SetValue, "\xff/conf/grv_proxies"_sr, "5"_sr));
+	conf1.applyMutation(MutationRef(MutationRef::SetValue, "\xff/conf/proxies"_sr, "10"_sr));
+	conf1.applyMutation(MutationRef(MutationRef::SetValue, "\xff/conf/grv_proxies"_sr, "-1"_sr));
+	conf1.applyMutation(MutationRef(MutationRef::SetValue, "\xff/conf/commit_proxies"_sr, "-1"_sr));
+
+	DatabaseConfiguration conf2;
+	conf2.applyMutation(MutationRef(MutationRef::SetValue, "\xff/conf/proxies"_sr, "10"_sr));
+	conf2.applyMutation(MutationRef(MutationRef::SetValue, "\xff/conf/grv_proxies"_sr, "-1"_sr));
+	conf2.applyMutation(MutationRef(MutationRef::SetValue, "\xff/conf/commit_proxies"_sr, "-1"_sr));
+
+	ASSERT(conf1 == conf2);
+	ASSERT(conf1.getDesiredCommitProxies() == conf2.getDesiredCommitProxies());
+
+	return Void();
 }
