@@ -63,7 +63,6 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 
 	Version version; // The last version assigned to a proxy by getVersion()
 	double lastVersionTime;
-	IKeyValueStore* txnStateStore;
 
 	std::vector<CommitProxyInterface> commitProxies;
 	std::map<UID, CommitProxyVersionReplies> lastCommitProxyVersionReplies;
@@ -96,8 +95,8 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 
 	  : dbgid(myInterface.id()), lastEpochEnd(invalidVersion), recoveryTransactionVersion(invalidVersion),
 	    liveCommittedVersion(invalidVersion), databaseLocked(false), minKnownCommittedVersion(invalidVersion),
-	    coordinators(coordinators), version(invalidVersion), lastVersionTime(0), txnStateStore(nullptr),
-	    addActor(addActor), myInterface(myInterface), forceRecovery(forceRecovery), cc("Master", dbgid.toString()),
+	    coordinators(coordinators), version(invalidVersion), lastVersionTime(0), addActor(addActor),
+	    myInterface(myInterface), forceRecovery(forceRecovery), cc("Master", dbgid.toString()),
 	    getCommitVersionRequests("GetCommitVersionRequests", cc),
 	    getLiveCommittedVersionRequests("GetLiveCommittedVersionRequests", cc),
 	    reportLiveCommittedVersionRequests("ReportLiveCommittedVersionRequests", cc) {
@@ -107,10 +106,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 			forceRecovery = false;
 		}
 	}
-	~MasterData() {
-		if (txnStateStore)
-			txnStateStore->close();
-	}
+	~MasterData() = default;
 };
 
 static std::pair<KeyRangeRef, bool> findRange(CoalescedKeyRangeMap<int>& key_resolver,
