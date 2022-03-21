@@ -430,6 +430,10 @@ struct ChangeFeedInfo : ReferenceCounted<ChangeFeedInfo> {
 	// stopVersion = MAX_VERSION means the feed has not been stopped
 	Version stopVersion = MAX_VERSION;
 
+	// We need to track the version the change feed metadata was created by private mutation, so that if it is rolled
+	// back, we can avoid notifying other SS of change feeds that don't durably exist
+	Version metadataCreateVersion = invalidVersion;
+
 	bool removing = false;
 
 	KeyRangeMap<std::unordered_map<UID, Promise<Void>>> moveTriggers;
@@ -1945,9 +1949,11 @@ ACTOR Future<Void> overlappingChangeFeedsQ(StorageServer* data, OverlappingChang
 	std::map<Key, std::tuple<KeyRange, Version, Version>> rangeIds;
 	for (auto r : ranges) {
 		for (auto& it : r.value()) {
-			// Can't tell other SS about a stopVersion that may get rolled back, and we only need to tell it about the
-			// stopVersion if req.minVersion > stopVersion, since it will get the information from its own private
-			// mutations if it hasn't processed up to stopVersion yet
+			// Can't tell other SS about a change feed create or stopVersion that may get rolled back, and we only need
+			// to tell it about the metadata if req.minVersion > metadataVersion, since it will get the information from
+			// its own private mutations if it hasn't processed up that version yet
+			knownCommittedRequired = std::max(knownCommittedRequired, it->metadataCreateVersion);
+
 			Version stopVersion;
 			if (it->stopVersion != MAX_VERSION && req.minVersion > it->stopVersion) {
 				stopVersion = it->stopVersion;
@@ -1955,6 +1961,7 @@ ACTOR Future<Void> overlappingChangeFeedsQ(StorageServer* data, OverlappingChang
 			} else {
 				stopVersion = MAX_VERSION;
 			}
+
 			rangeIds[it->id] = std::tuple(it->range, it->emptyVersion, stopVersion);
 		}
 	}
@@ -4884,6 +4891,7 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 
 				Version localVersion = localResult.version;
 				Version remoteVersion = remoteResult[remoteLoc].version;
+
 				if (remoteVersion <= localVersion) {
 					if (remoteVersion > changeFeedInfo->emptyVersion) {
 						// merge if same version
@@ -4967,6 +4975,11 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 			wait(yield());
 		}
 	} catch (Error& e) {
+		TraceEvent(SevDebug, "FetchChangeFeedError", data->thisServerID)
+		    .errorUnsuppressed(e)
+		    .detail("RangeID", rangeId.printable())
+		    .detail("Range", range.toString())
+		    .detail("EndVersion", endVersion);
 		if (e.code() != error_code_end_of_stream) {
 			throw;
 		}
@@ -6102,9 +6115,17 @@ private:
 				    .detail("FromVersion", fromVersion)
 				    .detail("ToVersion", rollbackVersion)
 				    .detail("AtVersion", currentVersion)
+				    .detail("RestoredVersion", restoredVersion)
 				    .detail("StorageVersion", data->storageVersion());
 				ASSERT(rollbackVersion >= data->storageVersion());
 				rollback(data, rollbackVersion, currentVersion);
+			} else {
+				TraceEvent(SevDebug, "RollbackSkip", data->thisServerID)
+				    .detail("FromVersion", fromVersion)
+				    .detail("ToVersion", rollbackVersion)
+				    .detail("AtVersion", currentVersion)
+				    .detail("RestoredVersion", restoredVersion)
+				    .detail("StorageVersion", data->storageVersion());
 			}
 			for (auto& it : data->uidChangeFeed) {
 				if (!it.second->removing && currentVersion < it.second->stopVersion) {
@@ -6185,6 +6206,7 @@ private:
 					TEST(true); // SS got non-create change feed private mutation before move created its metadata
 					changeFeedInfo->emptyVersion = invalidVersion;
 				}
+				changeFeedInfo->metadataCreateVersion = currentVersion;
 				data->uidChangeFeed[changeFeedId] = changeFeedInfo;
 
 				feed = data->uidChangeFeed.find(changeFeedId);
