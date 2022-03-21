@@ -510,9 +510,9 @@ Transactional decoration
 
     The ``@fdb.transactional`` decorator makes ``simple_function`` a transactional function.  All functions using this decorator must have an argument **named** ``tr``.  This specially named argument is passed a transaction that the function can use to do reads and writes.
 
-    A caller of a transactionally decorated function can pass a :class:`Database` instead of a transaction for the ``tr`` parameter.  Then a transaction will be created automatically, and automatically committed before returning to the caller.  The decorator will retry calling the decorated function until the transaction successfully commits.
+    A caller of a transactionally decorated function can pass a :class:`Database` or :class:`Tenant` instead of a transaction for the ``tr`` parameter.  Then a transaction will be created automatically, and automatically committed before returning to the caller.  The decorator will retry calling the decorated function until the transaction successfully commits.
 
-    If ``db`` is a :class:`Database`, a call like ::
+    If ``db`` is a :class:`Database` or :class:`Tenant`, a call like ::
 
         simple_function(db, 'a', 'b')
 
@@ -775,7 +775,7 @@ Committing
 
 .. decorator:: transactional()
 
-    The ``transactional`` decorator makes it easy to write transactional functions which accept either a :class:`Database` or a :class:`Transaction` as a parameter and automatically commit. See :func:`@fdb.transactional <transactional>` for explanation and examples.
+    The ``transactional`` decorator makes it easy to write transactional functions which accept a :class:`Database`, :class`Tenant`, or :class:`Transaction` as a parameter and automatically commit. See :func:`@fdb.transactional <transactional>` for explanation and examples.
 
 .. method :: Transaction.commit()
 
@@ -785,7 +785,7 @@ Committing
 
     |commit-outstanding-reads-blurb|
 
-    .. note :: Consider using the :func:`@fdb.transactional <transactional>` decorator, which not only calls :meth:`Database.create_transaction` and :meth:`Transaction.commit()` for you but also implements the required error handling and retry logic for transactions.
+    .. note :: Consider using the :func:`@fdb.transactional <transactional>` decorator, which not only calls :meth:`Database.create_transaction` or :meth`Tenant.create_transaction` and :meth:`Transaction.commit()` for you but also implements the required error handling and retry logic for transactions.
 
     .. warning :: |used-during-commit-blurb|
 
