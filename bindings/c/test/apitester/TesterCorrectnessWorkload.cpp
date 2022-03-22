@@ -26,21 +26,10 @@ namespace FdbApiTester {
 
 class ApiCorrectnessWorkload : public ApiWorkload {
 public:
-	ApiCorrectnessWorkload(const WorkloadConfig& config) : ApiWorkload(config) {
-		numRandomOperations = config.getIntOption("numRandomOperations", 1000);
-		numOpLeft = numRandomOperations;
-	}
-
-	void runTests() override { randomOperations(); }
+	ApiCorrectnessWorkload(const WorkloadConfig& config) : ApiWorkload(config) {}
 
 private:
 	enum OpType { OP_INSERT, OP_GET, OP_CLEAR, OP_CLEAR_RANGE, OP_COMMIT_READ, OP_LAST = OP_COMMIT_READ };
-
-	// The number of operations to be executed
-	int numRandomOperations;
-
-	// Operations counter
-	int numOpLeft;
 
 	void randomInsertOp(TTaskFct cont) {
 		int numKeys = Random::get().randomInt(1, maxKeysPerTransaction);
@@ -211,14 +200,6 @@ private:
 			randomCommitReadOp(cont);
 			break;
 		}
-	}
-
-	void randomOperations() {
-		if (numOpLeft == 0)
-			return;
-
-		numOpLeft--;
-		randomOperation([this]() { randomOperations(); });
 	}
 };
 

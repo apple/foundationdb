@@ -32,7 +32,24 @@ ApiWorkload::ApiWorkload(const WorkloadConfig& config) : WorkloadBase(config) {
 	maxKeysPerTransaction = config.getIntOption("maxKeysPerTransaction", 50);
 	initialSize = config.getIntOption("initialSize", 1000);
 	readExistingKeysRatio = config.getFloatOption("readExistingKeysRatio", 0.9);
+	runUntilStop = config.getBoolOption("runUntilStop", false);
+	numRandomOperations = config.getIntOption("numRandomOperations", 1000);
 	keyPrefix = fmt::format("{}/", workloadId);
+	numRandomOpLeft = 0;
+	stopReceived = false;
+}
+
+IWorkloadControlIfc* ApiWorkload::getControlIfc() {
+	if (runUntilStop) {
+		return this;
+	} else {
+		return nullptr;
+	}
+}
+
+void ApiWorkload::stop() {
+	ASSERT(runUntilStop);
+	stopReceived = true;
 }
 
 void ApiWorkload::start() {
@@ -46,6 +63,30 @@ void ApiWorkload::start() {
 			});
 		});
 	});
+}
+
+void ApiWorkload::runTests() {
+	if (!runUntilStop) {
+		numRandomOpLeft = numRandomOperations;
+	}
+	randomOperations();
+}
+
+void ApiWorkload::randomOperations() {
+	if (runUntilStop) {
+		if (stopReceived)
+			return;
+	} else {
+		if (numRandomOpLeft == 0)
+			return;
+		numRandomOpLeft--;
+	}
+	randomOperation([this]() { randomOperations(); });
+}
+
+void ApiWorkload::randomOperation(TTaskFct cont) {
+	// Must be overridden if used
+	ASSERT(false);
 }
 
 std::string ApiWorkload::randomKeyName() {

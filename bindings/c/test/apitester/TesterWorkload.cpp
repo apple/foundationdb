@@ -20,11 +20,13 @@
 
 #include "TesterWorkload.h"
 #include "TesterUtil.h"
+#include "fmt/core.h"
 #include "test/apitester/TesterScheduler.h"
 #include <cstdlib>
 #include <memory>
 #include <fmt/format.h>
 #include <vector>
+#include <iostream>
 
 namespace FdbApiTester {
 
@@ -55,6 +57,23 @@ double WorkloadConfig::getFloatOption(const std::string& name, double defaultVal
 			    fmt::format("Invalid workload configuration. Invalid value {} for {}", iter->second, name));
 		}
 		return floatVal;
+	}
+}
+
+bool WorkloadConfig::getBoolOption(const std::string& name, bool defaultVal) const {
+	auto iter = options.find(name);
+	if (iter == options.end()) {
+		return defaultVal;
+	} else {
+		std::string val = lower_case(iter->second);
+		if (val == "true") {
+			return true;
+		} else if (val == "false") {
+			return false;
+		} else {
+			throw TesterError(
+			    fmt::format("Invalid workload configuration. Invalid value {} for {}", iter->second, name));
+		}
 	}
 }
 
@@ -129,7 +148,8 @@ void WorkloadBase::scheduledTaskDone() {
 
 void WorkloadManager::add(std::shared_ptr<IWorkload> workload, TTaskFct cont) {
 	std::unique_lock<std::mutex> lock(mutex);
-	workloads[workload.get()] = WorkloadInfo{ workload, cont };
+	workloads[workload.get()] = WorkloadInfo{ workload, cont, workload->getControlIfc() };
+	fmt::print(stderr, "Workload {} added\n", workload->getWorkloadId());
 }
 
 void WorkloadManager::run() {
@@ -144,6 +164,13 @@ void WorkloadManager::run() {
 		iter->start();
 	}
 	scheduler->join();
+	if (ctrlInputThread.joinable()) {
+		ctrlInputThread.join();
+	}
+	if (outputPipe.is_open()) {
+		outputPipe << "DONE" << std::endl;
+		outputPipe.close();
+	}
 	if (failed()) {
 		fmt::print(stderr, "{} workloads failed\n", numWorkloadsFailed);
 	} else {
@@ -166,6 +193,35 @@ void WorkloadManager::workloadDone(IWorkload* workload, bool failed) {
 	lock.unlock();
 	if (done) {
 		scheduler->stop();
+	}
+}
+
+void WorkloadManager::openControlPipes(const std::string& inputPipeName, const std::string& outputPipeName) {
+	if (!inputPipeName.empty()) {
+		ctrlInputThread = std::thread(&WorkloadManager::readControlInput, this, inputPipeName);
+	}
+	if (!outputPipeName.empty()) {
+		fmt::print(stderr, "Opening pipe {} for writing\n", outputPipeName);
+		outputPipe.open(outputPipeName, std::ofstream::out);
+	}
+}
+
+void WorkloadManager::readControlInput(std::string pipeName) {
+	fmt::print(stderr, "Opening pipe {} for reading\n", pipeName);
+	std::ifstream inputPipe(pipeName);
+	while (!inputPipe.eof()) {
+		std::string line;
+		std::getline(inputPipe, line);
+		if (line == "STOP") {
+			fmt::print(stderr, "Received STOP command\n");
+			std::unique_lock<std::mutex> lock(mutex);
+			for (auto iter : workloads) {
+				IWorkloadControlIfc* controlIfc = iter.second.controlIfc;
+				if (controlIfc) {
+					controlIfc->stop();
+				}
+			}
+		}
 	}
 }
 

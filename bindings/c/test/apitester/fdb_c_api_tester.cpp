@@ -46,7 +46,9 @@ enum TesterOptionId {
 	OPT_KNOB,
 	OPT_EXTERNAL_CLIENT_LIBRARY,
 	OPT_EXTERNAL_CLIENT_DIRECTORY,
-	OPT_TEST_FILE
+	OPT_TEST_FILE,
+	OPT_INPUT_PIPE,
+	OPT_OUTPUT_PIPE
 };
 
 CSimpleOpt::SOption TesterOptionDefs[] = //
@@ -63,6 +65,8 @@ CSimpleOpt::SOption TesterOptionDefs[] = //
 	  { OPT_EXTERNAL_CLIENT_DIRECTORY, "--external-client-dir", SO_REQ_SEP },
 	  { OPT_TEST_FILE, "-f", SO_REQ_SEP },
 	  { OPT_TEST_FILE, "--test-file", SO_REQ_SEP },
+	  { OPT_INPUT_PIPE, "--input-pipe", SO_REQ_SEP },
+	  { OPT_OUTPUT_PIPE, "--output-pipe", SO_REQ_SEP },
 	  SO_END_OF_OPTIONS };
 
 void printProgramUsage(const char* execName) {
@@ -88,6 +92,10 @@ void printProgramUsage(const char* execName) {
 	       "                 Path to the external client library.\n"
 	       "  --external-client-dir DIR\n"
 	       "                 Directory containing external client libraries.\n"
+	       "  --input-pipe NAME\n"
+	       "                 Name of the input pipe for communication with the test controller.\n"
+	       "  --output-pipe NAME\n"
+	       "                 Name of the output pipe for communication with the test controller.\n"
 	       "  -f, --test-file FILE\n"
 	       "                 Test file to run.\n"
 	       "  -h, --help     Display this help and exit.\n");
@@ -149,6 +157,12 @@ bool processArg(TesterOptions& options, const CSimpleOpt& args) {
 	case OPT_TEST_FILE:
 		options.testFile = args.OptionArg();
 		options.testSpec = readTomlTestSpec(options.testFile);
+		break;
+	case OPT_INPUT_PIPE:
+		options.inputPipeName = args.OptionArg();
+		break;
+	case OPT_OUTPUT_PIPE:
+		options.outputPipeName = args.OptionArg();
 		break;
 	}
 	return true;
@@ -230,34 +244,42 @@ void randomizeOptions(TesterOptions& options) {
 }
 
 bool runWorkloads(TesterOptions& options) {
-	TransactionExecutorOptions txExecOptions;
-	txExecOptions.blockOnFutures = options.testSpec.blockOnFutures;
-	txExecOptions.numDatabases = options.numDatabases;
-	txExecOptions.databasePerTransaction = options.testSpec.databasePerTransaction;
+	try {
+		TransactionExecutorOptions txExecOptions;
+		txExecOptions.blockOnFutures = options.testSpec.blockOnFutures;
+		txExecOptions.numDatabases = options.numDatabases;
+		txExecOptions.databasePerTransaction = options.testSpec.databasePerTransaction;
 
-	std::unique_ptr<IScheduler> scheduler = createScheduler(options.numClientThreads);
-	std::unique_ptr<ITransactionExecutor> txExecutor = createTransactionExecutor(txExecOptions);
-	scheduler->start();
-	txExecutor->init(scheduler.get(), options.clusterFile.c_str());
+		std::unique_ptr<IScheduler> scheduler = createScheduler(options.numClientThreads);
+		std::unique_ptr<ITransactionExecutor> txExecutor = createTransactionExecutor(txExecOptions);
+		txExecutor->init(scheduler.get(), options.clusterFile.c_str());
 
-	WorkloadManager workloadMgr(txExecutor.get(), scheduler.get());
-	for (const auto& workloadSpec : options.testSpec.workloads) {
-		for (int i = 0; i < options.numClients; i++) {
-			WorkloadConfig config;
-			config.name = workloadSpec.name;
-			config.options = workloadSpec.options;
-			config.clientId = i;
-			config.numClients = options.numClients;
-			std::shared_ptr<IWorkload> workload = IWorkloadFactory::create(workloadSpec.name, config);
-			if (!workload) {
-				throw TesterError(fmt::format("Unknown workload '{}'", workloadSpec.name));
+		WorkloadManager workloadMgr(txExecutor.get(), scheduler.get());
+		for (const auto& workloadSpec : options.testSpec.workloads) {
+			for (int i = 0; i < options.numClients; i++) {
+				WorkloadConfig config;
+				config.name = workloadSpec.name;
+				config.options = workloadSpec.options;
+				config.clientId = i;
+				config.numClients = options.numClients;
+				std::shared_ptr<IWorkload> workload = IWorkloadFactory::create(workloadSpec.name, config);
+				if (!workload) {
+					throw TesterError(fmt::format("Unknown workload '{}'", workloadSpec.name));
+				}
+				workloadMgr.add(workload);
 			}
-			workloadMgr.add(workload);
 		}
-	}
+		if (!options.inputPipeName.empty() || !options.outputPipeName.empty()) {
+			workloadMgr.openControlPipes(options.inputPipeName, options.outputPipeName);
+		}
 
-	workloadMgr.run();
-	return !workloadMgr.failed();
+		scheduler->start();
+		workloadMgr.run();
+		return !workloadMgr.failed();
+	} catch (const std::runtime_error& err) {
+		fmt::print(stderr, "ERROR: {}\n", err.what());
+		return false;
+	}
 }
 
 } // namespace

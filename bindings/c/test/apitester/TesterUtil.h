@@ -30,6 +30,7 @@
 
 namespace fmt {
 
+// fmt::format formatting for std::optional<T>
 template <typename T>
 struct formatter<std::optional<T>> : fmt::formatter<T> {
 
@@ -46,6 +47,8 @@ struct formatter<std::optional<T>> : fmt::formatter<T> {
 } // namespace fmt
 
 namespace FdbApiTester {
+
+std::string lower_case(const std::string& str);
 
 class Random {
 public:

@@ -37,6 +37,8 @@ public:
 	std::string externalClientLibrary;
 	std::string externalClientDir;
 	std::string testFile;
+	std::string inputPipeName;
+	std::string outputPipeName;
 	int numFdbThreads;
 	int numClientThreads;
 	int numDatabases;

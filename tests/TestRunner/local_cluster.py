@@ -198,9 +198,12 @@ logdir = {logdir}
     def __exit__(self, xc_type, exc_value, traceback):
         self.stop_cluster()
 
-    def create_database(self, storage='ssd'):
-        args = [self.fdbcli_binary, '-C', self.cluster_file, '--exec',
-                'configure new single {} tenant_mode=optional_experimental'.format(storage)]
+    def create_database(self, storage='ssd', enable_tenants=True):
+        db_config = 'configure new single {}'.format(storage)
+        if (enable_tenants):
+            db_config += " tenant_mode=optional_experimental"
+        args = [self.fdbcli_binary, '-C',
+                self.cluster_file, '--exec', db_config]
         res = subprocess.run(args, env=self.process_env())
         assert res.returncode == 0, "Create database failed with {}".format(
             res.returncode)

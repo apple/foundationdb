@@ -246,6 +246,14 @@ endif()
             --test-dir
             ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests
             )
+
+  add_test(NAME fdb_c_upgrade_test
+      COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+            --build-dir ${CMAKE_BINARY_DIR}
+            --disable-log-dump
+            --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
+            --upgrade-path "6.2.30" "6.3.23" "7.1.0"
+    )
 endif()
 
 set(c_workloads_srcs

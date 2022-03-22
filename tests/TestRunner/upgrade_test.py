@@ -5,6 +5,7 @@ import glob
 import os
 from pathlib import Path
 import platform
+import random
 import shutil
 import stat
 import subprocess
@@ -33,6 +34,13 @@ def make_executable(path):
     os.chmod(path, st.st_mode | stat.S_IEXEC)
 
 
+def remove_file_no_fail(filename):
+    try:
+        os.remove(filename)
+    except OSError:
+        pass
+
+
 def version_from_str(ver_str):
     ver = [int(s) for s in ver_str.split(".")]
     assert len(ver) == 3, "Invalid version string {}".format(ver_str)
@@ -41,6 +49,12 @@ def version_from_str(ver_str):
 
 def version_before(ver_str1, ver_str2):
     return version_from_str(ver_str1) < version_from_str(ver_str2)
+
+
+def random_sleep(minSec, maxSec):
+    timeSec = random.uniform(minSec, maxSec)
+    print("Sleeping for {0:.3f}s".format(timeSec))
+    time.sleep(timeSec)
 
 
 class UpgradeTest:
@@ -179,7 +193,7 @@ class UpgradeTest:
     def __enter__(self):
         print("Starting cluster version {}".format(self.cluster_version))
         self.cluster.start_cluster()
-        self.cluster.create_database()
+        self.cluster.create_database(enable_tenants=False)
         return self
 
     def __exit__(self, xc_type, exc_value, traceback):
@@ -190,26 +204,67 @@ class UpgradeTest:
         cmd_args = [self.tester_bin,
                     '--cluster-file', self.cluster.cluster_file,
                     '--test-file', test_file,
-                    '--external-client-dir', self.external_lib_dir]
+                    '--external-client-dir', self.external_lib_dir,
+                    '--input-pipe', self.input_pipe_path,
+                    '--output-pipe', self.output_pipe_path]
+        print("Executing test command: {}".format(
+            " ".join([str(c) for c in cmd_args])))
+
         retcode = subprocess.run(
             cmd_args, stdout=sys.stdout, stderr=sys.stderr,
         ).returncode
+
+        if (retcode != 0):
+            print("Tester failed with return code {}".format(retcode))
         return retcode
 
+    def close_output_pipe(self):
+        try:
+            # Finish reading the pipe to avoid broken pipe errors
+            while True:
+                data = self.output_pipe.read()
+                if len(data) == 0:
+                    break
+            self.output_pipe.close()
+        except:
+            pass
+
     def exec_upgrade_test(self):
-        self.health_check()
-        for version in self.upgrade_path[1:]:
-            self.upgrade_to(version)
+        print("Opening pipe {} for writing".format(self.input_pipe_path))
+        self.input_pipe = open(self.input_pipe_path, 'w')
+        print("Opening pipe {} for reading".format(self.output_pipe_path))
+        self.output_pipe = open(self.output_pipe_path, 'r')
+        try:
             self.health_check()
+            for version in self.upgrade_path[1:]:
+                random_sleep(0.0, 5.0)
+                self.upgrade_to(version)
+                self.health_check()
+            random_sleep(0.0, 2.0)
+        finally:
+            self.input_pipe.write("STOP\n")
+            self.input_pipe.close()
+            self.close_output_pipe()
 
     def exec_test(self, args):
         self.tester_bin = self.build_dir.joinpath("bin", "fdb_c_api_tester")
         assert self.tester_bin.exists(), "{} does not exist".format(self.tester_bin)
 
-        thread = Thread(target=self.exec_workload, args=(args.test_file))
-        thread.start()
-        self.exec_upgrade_test()
-        retcode = thread.join()
+        try:
+            self.input_pipe_path = self.tmp_dir.joinpath(
+                "input.{}".format(random_secret_string(8)))
+            self.output_pipe_path = self.tmp_dir.joinpath(
+                "output.{}".format(random_secret_string(8)))
+            os.mkfifo(self.input_pipe_path)
+            os.mkfifo(self.output_pipe_path)
+
+            thread = Thread(target=self.exec_workload, args=(args.test_file))
+            thread.start()
+            self.exec_upgrade_test()
+            retcode = thread.join()
+        finally:
+            remove_file_no_fail(self.input_pipe_path)
+            remove_file_no_fail(self.output_pipe_path)
         return retcode
 
     def check_cluster_logs(self, error_limit=100):
