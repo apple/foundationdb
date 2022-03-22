@@ -35,6 +35,7 @@ public:
 	std::string traceFormat;
 	std::string logGroup;
 	std::string externalClientLibrary;
+	std::string externalClientDir;
 	std::string testFile;
 	int numFdbThreads;
 	int numClientThreads;

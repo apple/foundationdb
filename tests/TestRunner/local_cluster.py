@@ -1,9 +1,11 @@
+import json
 from pathlib import Path
 import random
 import string
 import subprocess
 import os
 import socket
+import time
 
 
 def _get_free_port_internal():
@@ -22,6 +24,12 @@ def get_free_port():
         port = _get_free_port_internal()
     _used_ports.add(port)
     return port
+
+
+def is_port_in_use(port):
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        return s.connect_ex(('localhost', port)) == 0
 
 
 valid_letters_for_secret = string.ascii_letters + string.digits
@@ -98,9 +106,11 @@ logdir = {logdir}
                              for _ in range(self.process_number)]
         self.cluster_desc = random_secret_string(8)
         self.cluster_secret = random_secret_string(8)
+        self.env_vars = {}
         self.running = False
         self.process = None
         self.fdbmonitor_logfile = None
+        self.use_legacy_conf_syntax = False
         if create_config:
             self.create_cluster_file()
             self.save_config()
@@ -115,7 +125,10 @@ logdir = {logdir}
     def save_config(self):
         new_conf_file = self.conf_file.parent / (self.conf_file.name + '.new')
         with open(new_conf_file, 'x') as f:
-            f.write(LocalCluster.configuration_template.format(
+            conf_template = LocalCluster.configuration_template
+            if (self.use_legacy_conf_syntax):
+                conf_template = conf_template.replace("-", "_")
+            f.write(conf_template.format(
                 etcdir=self.etc,
                 fdbserver_bin=self.fdbserver_binary,
                 datadir=self.data,
@@ -154,14 +167,29 @@ logdir = {logdir}
         self.fdbmonitor_logfile = open(
             self.log.joinpath('fdbmonitor.log'), 'w')
         self.process = subprocess.Popen(
-            args, stdout=self.fdbmonitor_logfile, stderr=self.fdbmonitor_logfile)
+            args, stdout=self.fdbmonitor_logfile, stderr=self.fdbmonitor_logfile, env=self.process_env())
         self.running = True
 
     def stop_cluster(self):
         assert self.running, "Server is not running"
         if self.process.poll() is None:
             self.process.terminate()
-        self.running = True
+        self.running = False
+
+    def ensure_ports_released(self, timeout_sec=5):
+        sec = 0
+        while (sec < timeout_sec):
+            in_use = False
+            for port in self.server_ports:
+                if is_port_in_use(port):
+                    print("Port {} in use. Waiting for it to be released".format(port))
+                    in_use = True
+                    break
+            if not in_use:
+                return
+            time.sleep(0.5)
+            sec += 0.5
+        assert False, "Failed to release ports in {}s".format(timeout_sec)
 
     def __enter__(self):
         self.start_cluster()
@@ -169,9 +197,27 @@ logdir = {logdir}
 
     def __exit__(self, xc_type, exc_value, traceback):
         self.stop_cluster()
-        self.running = False
 
     def create_database(self, storage='ssd'):
         args = [self.fdbcli_binary, '-C', self.cluster_file, '--exec',
                 'configure new single {}'.format(storage)]
-        subprocess.run(args)
+        res = subprocess.run(args, env=self.process_env())
+        assert res.returncode == 0, "Create database failed with {}".format(
+            res.returncode)
+
+    def get_status(self):
+        args = [self.fdbcli_binary, '-C', self.cluster_file, '--exec',
+                'status json']
+        res = subprocess.run(args, env=self.process_env(),
+                             stdout=subprocess.PIPE)
+        assert res.returncode == 0, "Get status failed with {}".format(
+            res.returncode)
+        return json.loads(res.stdout)
+
+    def process_env(self):
+        env = dict(os.environ)
+        env.update(self.env_vars)
+        return env
+
+    def set_env_var(self, var_name, var_val):
+        self.env_vars[var_name] = var_val
