@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -68,7 +68,7 @@ public:
 				"connect_tries (or ct)                 Number of times to try to connect for each request.",
 				"connect_timeout (or cto)              Number of seconds to wait for a connect request to succeed.",
 				"max_connection_life (or mcl)          Maximum number of seconds to use a single TCP connection.",
-				"request_tries (or rt)                 Number of times to try each request until a parseable HTTP "
+				"request_tries (or rt)                 Number of times to try each request until a parsable HTTP "
 				"response other than 429 is received.",
 				"request_timeout_min (or rtom)         Number of seconds to wait for a request to succeed after a "
 				"connection is established.",

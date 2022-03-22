@@ -31,6 +31,14 @@ if(USE_ASAN OR USE_VALGRIND OR USE_MSAN OR USE_TSAN OR USE_UBSAN)
   set(USE_SANITIZER ON)
 endif()
 
+set(jemalloc_default ON)
+# We don't want to use jemalloc on Windows
+# Nor on FreeBSD, where jemalloc is the default system allocator
+if(USE_SANITIZER OR WIN32 OR (CMAKE_SYSTEM_NAME STREQUAL "FreeBSD") OR APPLE)
+  set(jemalloc_default OFF)
+endif()
+env_set(USE_JEMALLOC ${jemalloc_default} BOOL "Link with jemalloc")
+
 if(USE_LIBCXX AND STATIC_LINK_LIBCXX AND NOT USE_LD STREQUAL "LLD")
   message(FATAL_ERROR "Unsupported configuration: STATIC_LINK_LIBCXX with libc++ only works if USE_LD=LLD")
 endif()

@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -492,12 +492,7 @@ struct RolesInfo {
 			obj.setKeyRawNumber("query_queue_max", storageMetrics.getValue("QueryQueueMax"));
 			obj["total_queries"] = StatusCounter(storageMetrics.getValue("QueryQueue")).getStatus();
 			obj["finished_queries"] = StatusCounter(storageMetrics.getValue("FinishedQueries")).getStatus();
-			try { // FIXME: This field was added in a patch release, the try-catch can be removed for the 7.0 release
-				obj["low_priority_queries"] = StatusCounter(storageMetrics.getValue("LowPriorityQueries")).getStatus();
-			} catch (Error& e) {
-				if (e.code() != error_code_attribute_not_found)
-					throw e;
-			}
+			obj["low_priority_queries"] = StatusCounter(storageMetrics.getValue("LowPriorityQueries")).getStatus();
 			obj["bytes_queried"] = StatusCounter(storageMetrics.getValue("BytesQueried")).getStatus();
 			obj["keys_queried"] = StatusCounter(storageMetrics.getValue("RowsQueried")).getStatus();
 			obj["mutation_bytes"] = StatusCounter(storageMetrics.getValue("MutationBytes")).getStatus();
@@ -813,7 +808,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		roles.addRole("blob_manager", db->get().blobManager.get());
 	}
 
-	if (SERVER_KNOBS->ENABLE_ENCRYPT_KEY_PROXY && db->get().encryptKeyProxy.present()) {
+	if (SERVER_KNOBS->ENABLE_ENCRYPTION && db->get().encryptKeyProxy.present()) {
 		roles.addRole("encrypt_key_proxy", db->get().encryptKeyProxy.get());
 	}
 
@@ -1984,8 +1979,8 @@ ACTOR static Future<std::vector<std::pair<GrvProxyInterface, EventMap>>> getGrvP
 	return results;
 }
 
-// Returns the number of zones eligble for recruiting new tLogs after zone failures, to maintain the current replication
-// factor.
+// Returns the number of zones eligible for recruiting new tLogs after zone failures, to maintain the current
+// replication factor.
 static int getExtraTLogEligibleZones(const std::vector<WorkerDetails>& workers,
                                      const DatabaseConfiguration& configuration) {
 	std::set<StringRef> allZones;
@@ -2257,6 +2252,7 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(
 				reads.updateValues(StatusCounter(storageMetrics.getValue("FinishedQueries")));
 				readKeys.updateValues(StatusCounter(storageMetrics.getValue("RowsQueried")));
 				readBytes.updateValues(StatusCounter(storageMetrics.getValue("BytesQueried")));
+				lowPriorityReads.updateValues(StatusCounter(storageMetrics.getValue("LowPriorityQueries")));
 			}
 		}
 
@@ -2264,21 +2260,7 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(
 		operationsObj["reads"] = reads.getStatus();
 		keysObj["read"] = readKeys.getStatus();
 		bytesObj["read"] = readBytes.getStatus();
-
-		try {
-			for (auto& ss : storageServers.get()) {
-				TraceEventFields const& storageMetrics = ss.second.at("StorageMetrics");
-
-				if (storageMetrics.size() > 0) {
-					// FIXME: This field was added in a patch release, for the 7.0 release move this to above loop
-					lowPriorityReads.updateValues(StatusCounter(storageMetrics.getValue("LowPriorityQueries")));
-				}
-			}
-			operationsObj["low_priority_reads"] = lowPriorityReads.getStatus();
-		} catch (Error& e) {
-			if (e.code() != error_code_attribute_not_found)
-				throw e;
-		}
+		operationsObj["low_priority_reads"] = lowPriorityReads.getStatus();
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
 			throw;

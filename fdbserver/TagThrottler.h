@@ -38,5 +38,5 @@ public:
 	uint32_t busyWriteTagCount() const;
 	int64_t manualThrottleCount() const;
 	bool isAutoThrottlingEnabled() const;
-	Future<Void> tryAutoThrottleTag(StorageQueueInfo&, int64_t storageQueue, int64_t storageDurabilityLag);
+	Future<Void> tryAutoThrottleTag(StorageQueueInfo const&, int64_t storageQueue, int64_t storageDurabilityLag);
 };

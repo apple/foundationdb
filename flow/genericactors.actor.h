@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1117,6 +1117,12 @@ ACTOR template <class T>
 Future<T> tagError(Future<Void> future, Error e) {
 	wait(future);
 	throw e;
+}
+
+ACTOR template <class T>
+Future<T> detach(Future<T> f) {
+	T x = wait(f);
+	return x;
 }
 
 // If the future is ready, yields and returns. Otherwise, returns when future is set.
