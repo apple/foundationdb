@@ -25,9 +25,13 @@
 #include "flow/Knobs.h"
 #include "flow/network.h"
 
+#include <cstring>
 #include <functional>
 #include <iomanip>
 #include <memory>
+
+#define __STDC_FORMAT_MACROS
+#include <inttypes.h>
 
 #include "flow/actorcompiler.h" // has to be last include
 
@@ -198,19 +202,8 @@ public:
 	}
 
 	void serialize_span(const OTELSpan& span, TraceRequest& request) {
-		uint16_t size = 11;
-		size = size + span.links.size() + span.events.size() + span.attributes.size();
-		if (size <= 15) {
-			request.write_byte(size | 0b10010000); // write as array
-		} else if (size <= 65535) {
-			request.write_byte(0xdc);
-			uint8_t partA = static_cast<uint8_t>((size & 0xFF00) >> 8);
-			uint8_t partB = static_cast<uint8_t>(size & 0x00FF);
-			request.write_byte(partA);
-			request.write_byte(partB);
-		} else {
-			ASSERT(false);
-		}
+		uint16_t size = 14;
+		request.write_byte(size | 0b10010000); // write as array
 		serialize_value(span.context.traceID.first(), request, 0xcf); // trace id
 		serialize_value(span.context.traceID.second(), request, 0xcf); // trace id
 		serialize_value(span.context.spanID, request, 0xcf); // spanid
@@ -304,11 +297,6 @@ private:
 	// empty, the request is not modified.
 	inline void serialize_vector(const SmallVectorRef<SpanContext>& vec, TraceRequest& request) {
 		int size = vec.size();
-		// I don't think we can just return here, we'll want an empty vector as there are elements to
-		// send afterwards, i.e. events and attributes. Optionally we can serialize a nil.
-		// if (size == 0) {
-		//	return;
-		// }
 		if (size <= 15) {
 			request.write_byte(static_cast<uint8_t>(size) | 0b10010000);
 		} else if (size <= 65535) {
@@ -331,11 +319,6 @@ private:
 	// empty, the request is not modified.
 	inline void serialize_vector(const SmallVectorRef<OTELEvent>& vec, TraceRequest& request) {
 		int size = vec.size();
-		// I don't think we can just return here, we'll want an empty vector as there are elements to
-		// send afterwards, i.e. events and attributes. Optionally we can serialize a nil.
-		// if (size == 0) {
-		//	return;
-		// }
 		if (size <= 15) {
 			request.write_byte(static_cast<uint8_t>(size) | 0b10010000);
 		} else if (size <= 65535) {
@@ -604,6 +587,12 @@ OTELSpan::~OTELSpan() {
 	}
 }
 
+void swapBinary(uint64_t &value) {
+    value = ((value & 0x00000000FFFFFFFFull) << 32) | ((value & 0xFFFFFFFF00000000ull) >> 32);
+    value = ((value & 0x0000FFFF0000FFFFull) << 16) | ((value & 0xFFFF0000FFFF0000ull) >> 16);
+    value = ((value & 0x00FF00FF00FF00FFull) << 8)  | ((value & 0xFF00FF00FF00FF00ull) >> 8);
+}
+
 TEST_CASE("/flow/Tracing/CreateOTELSpan") {
 	// Sampling disabled, no parent.
 	OTELSpan notSampled("foo"_loc);
@@ -726,6 +715,19 @@ TEST_CASE("/flow/Tracing/AddLinks") {
 	return Void();
 };
 
+uint64_t swapUint64BE(uint8_t* index) {
+	uint64_t value; 
+	memcpy(&value, index, sizeof(value));
+	return fromBigEndian64(value);
+}
+
+std::string readMPString(uint8_t* index, int len) {
+    uint8_t data[len + 1];
+    std::copy(index, index + len, data);
+	data[len] = '\0';
+	return reinterpret_cast<char *>(data);
+}
+
 TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
 	OTELSpan span1("encoded_span"_loc);
 	auto request = TraceRequest{ .buffer = std::make_unique<uint8_t[]>(kTraceBufferSize),
@@ -734,19 +736,53 @@ TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
 	auto tracer = FastUDPTracer();
 	tracer.serialize_span(span1, request);
 	auto data = request.buffer.get();
-	ASSERT(data[0] == 0b10011100); // base size of 11 elements + 1 for default attribute
-
+	ASSERT(data[0] == 0b10011110); // Default array size.
 	request.reset();
 
-	OTELSpan span2("encoded_span"_loc);
-	span2.addLink(SpanContext(UID(100, 100), 1, TraceFlags::sampled))
-	    .addLink(SpanContext(UID(200, 200), 2, TraceFlags::sampled))
-	    .addEvent("commit_succeed", 1234567.100)
-	    .addAttribute("foo", "bar");
+	// Test - constructor OTELSpan(const Location& location, const SpanContext parent, const SpanContext& link)
+	// Will delegate to other constructors.
+	OTELSpan span2("encoded_span"_loc, SpanContext(UID(100, 101), 1, TraceFlags::sampled), SpanContext(UID(200, 201), 2, TraceFlags::sampled));
 	tracer.serialize_span(span2, request);
 	data = request.buffer.get();
-	ASSERT(data[0] == 0xdc); // array size between 16 <= 65535
-	ASSERT(data[1] == 0b00000000);
-	ASSERT(data[2] == 0b00010000); // <^ the value "16" big-endian encoded in a uint_16t (2 bytes wide).
+	ASSERT(data[0] == 0b10011110); // 14 element array.
+	// Verify the Parent Trace ID overwrites this spans Trace ID
+	ASSERT(data[1] == 0xcf);
+	ASSERT(swapUint64BE(&data[2]) == 100);
+	ASSERT(data[10] == 0xcf);
+	ASSERT(swapUint64BE(&data[11]) == 101);
+	ASSERT(data[19] == 0xcf);
+	// We don't care about the next 8 bytes, they are the ID for the span itself and will be random. 
+	// Parent TraceID and Parent SpanID.
+	ASSERT(data[28] == 0xcf);
+	ASSERT(swapUint64BE(&data[29]) == 100);
+	ASSERT(data[37] == 0xcf); 
+	ASSERT(swapUint64BE(&data[38]) == 101);
+	ASSERT(data[46] == 0xcf); 
+	ASSERT(swapUint64BE(&data[47]) == 1);
+	// Read and verify span name
+	ASSERT(data[55] == (0b10100000 | strlen("encoded_span")));
+	ASSERT(strncmp(readMPString(&data[56], strlen("encoded_span")).c_str(), "encoded_span", strlen("encoded_span")) == 0);
+	// Verify begin/end is encoded, we don't care about the values
+	ASSERT(data[68] == 0xcb);
+	ASSERT(data[77] == 0xcb);
+	// SpanKind
+	ASSERT(data[86] == 0xcc); 
+	ASSERT(data[87] == static_cast<uint8_t>(SpanKind::SERVER)); 
+	// Status
+	ASSERT(data[88] == 0xcc); 
+	ASSERT(data[89] == static_cast<uint8_t>(SpanStatus::OK)); 
+	// Linked SpanContext
+	ASSERT(data[90] == 0b10010001);
+	ASSERT(data[91] == 0xcf);
+	ASSERT(swapUint64BE(&data[92]) == 200);
+	ASSERT(data[100] == 0xcf); 
+	ASSERT(swapUint64BE(&data[101]) == 201);
+	ASSERT(data[109] == 0xcf); 
+	ASSERT(swapUint64BE(&data[110]) == 2);
+	// Events
+	ASSERT(data[118] == 0b10010000); // empty
+	// Attributes
+	ASSERT(data[119] == 0b10000001); // single k/v pair
+	ASSERT(data[120] == 0b10100111); // length of key string "address" == 7
 	return Void();
 };
