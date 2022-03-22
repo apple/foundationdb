@@ -299,7 +299,7 @@ public:
 		return addEvent(OTELEvent(name, time, this->arena, attrs));
 	}
 
-    // TODO: Same ambiguity issue as above. Will check with team on preference.
+	// TODO: Same ambiguity issue as above. Will check with team on preference.
 	// OTELSpan& addAttribute(const std::string& key, const std::string& value) {
 	// 	auto k = StringRef(this->arena, key);
 	// 	auto v = StringRef(this->arena, value);
