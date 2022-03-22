@@ -587,12 +587,6 @@ OTELSpan::~OTELSpan() {
 	}
 }
 
-void swapBinary(uint64_t& value) {
-	value = ((value & 0x00000000FFFFFFFFull) << 32) | ((value & 0xFFFFFFFF00000000ull) >> 32);
-	value = ((value & 0x0000FFFF0000FFFFull) << 16) | ((value & 0xFFFF0000FFFF0000ull) >> 16);
-	value = ((value & 0x00FF00FF00FF00FFull) << 8) | ((value & 0xFF00FF00FF00FF00ull) >> 8);
-}
-
 TEST_CASE("/flow/Tracing/CreateOTELSpan") {
 	// Sampling disabled, no parent.
 	OTELSpan notSampled("foo"_loc);
