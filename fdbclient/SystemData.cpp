@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -214,6 +214,33 @@ const KeyRangeRef writeConflictRangeKeysRange =
                 LiteralStringRef("\xff\xff/transaction/write_conflict_range/\xff\xff"));
 
 const KeyRef clusterIdKey = LiteralStringRef("\xff/clusterId");
+
+const KeyRef checkpointPrefix = "\xff/checkpoint/"_sr;
+
+const Key checkpointKeyFor(UID checkpointID) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(checkpointPrefix);
+	wr << checkpointID;
+	return wr.toValue();
+}
+
+const Value checkpointValue(const CheckpointMetaData& checkpoint) {
+	return ObjectWriter::toValue(checkpoint, IncludeVersion());
+}
+
+UID decodeCheckpointKey(const KeyRef& key) {
+	UID checkpointID;
+	BinaryReader rd(key.removePrefix(checkpointPrefix), Unversioned());
+	rd >> checkpointID;
+	return checkpointID;
+}
+
+CheckpointMetaData decodeCheckpointValue(const ValueRef& value) {
+	CheckpointMetaData checkpoint;
+	ObjectReader reader(value.begin(), IncludeVersion());
+	reader.deserialize(checkpoint);
+	return checkpoint;
+}
 
 // "\xff/cacheServer/[[UID]] := StorageServerInterface"
 const KeyRangeRef storageCacheServerKeys(LiteralStringRef("\xff/cacheServer/"), LiteralStringRef("\xff/cacheServer0"));
@@ -1336,6 +1363,8 @@ TenantMapEntry decodeTenantEntry(ValueRef const& value) {
 const KeyRangeRef tenantMapKeys("\xff/tenantMap/"_sr, "\xff/tenantMap0"_sr);
 const KeyRef tenantMapPrefix = tenantMapKeys.begin;
 const KeyRef tenantMapPrivatePrefix = "\xff\xff/tenantMap/"_sr;
+const KeyRef tenantLastIdKey = "\xff/tenantLastId/"_sr;
+const KeyRef tenantDataPrefixKey = "\xff/tenantDataPrefix"_sr;
 
 // for tests
 void testSSISerdes(StorageServerInterface const& ssi, bool useFB) {

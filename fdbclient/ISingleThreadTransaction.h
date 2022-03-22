@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -45,8 +45,15 @@ public:
 	};
 
 	static ISingleThreadTransaction* allocateOnForeignThread(Type);
+
 	static Reference<ISingleThreadTransaction> create(Type, Database const&);
-	virtual void setDatabase(Database const&) = 0;
+	static Reference<ISingleThreadTransaction> create(Type, Database const&, TenantName const&);
+
+	virtual void construct(Database const&) = 0;
+	virtual void construct(Database const&, TenantName const&) {
+		// By default, a transaction implementation does not support tenants.
+		ASSERT(false);
+	}
 
 	virtual void setVersion(Version v) = 0;
 	virtual Future<Version> getReadVersion() = 0;
