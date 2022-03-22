@@ -275,11 +275,15 @@ public:
 		return *this;
 	}
 
-	OTELSpan& addEvent(const std::string& name,
-	                   const double& time,
-	                   const std::initializer_list<KeyValueRef>& attrs = {}) {
-		return addEvent(StringRef(arena, name), time, attrs);
-	}
+	// TODO: causes ambiguity as StringRef has a std::string based constructor.
+	// Need to discuss with the team whether we want const std::string& or allow
+	// allow users to pass StringRef as first arg and let them deal with any lifecycle/memory issue.
+
+	// OTELSpan& addEvent(const std::string& name,
+	//                    const double& time,
+	//                    const std::initializer_list<KeyValueRef>& attrs = {}) {
+	// 	return addEvent(StringRef(arena, name), time, attrs);
+	// }
 
 	// TODO - Should we remove this. Potentially dangerous if the OTELEvent SmallVectorRef of attributes
 	// uses a different Arena than the OTELSpan?
@@ -295,12 +299,13 @@ public:
 		return addEvent(OTELEvent(name, time, this->arena, attrs));
 	}
 
-	OTELSpan& addAttribute(const std::string& key, const std::string& value) {
-		auto k = StringRef(this->arena, key);
-		auto v = StringRef(this->arena, value);
-		attributes[k] = v;
-		return *this;
-	}
+    // TODO: Same ambiguity issue as above. Will check with team on preference.
+	// OTELSpan& addAttribute(const std::string& key, const std::string& value) {
+	// 	auto k = StringRef(this->arena, key);
+	// 	auto v = StringRef(this->arena, value);
+	// 	attributes[k] = v;
+	// 	return *this;
+	// }
 
 	// TODO - Should we remove this. Potentially dangerous if the StringRef Arena goes out of scope
 	// as it's not tied to this Arena?
