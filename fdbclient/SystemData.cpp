@@ -465,7 +465,7 @@ const KeyRef storageServerListToTeamIdKeyPrefix = "\xff/storageServerListToTeamI
 const Key storageServerListToTeamIdKey(std::vector<UID> servers) {
 	BinaryWriter wr(Unversioned());
 	std::sort(servers.begin(), servers.end());
-	wr.serializeBytes(storageServerToTeamIdKeyPrefix);
+	wr.serializeBytes(storageServerListToTeamIdKeyPrefix);
 	wr << static_cast<int>(servers.size());
 	for (auto& s : servers) {
 		wr << s;
