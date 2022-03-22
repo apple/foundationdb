@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -240,8 +240,8 @@ public:
 			(*it)->setPriority(p);
 		}
 	}
-	void addref() override { ReferenceCounted<ParallelTCInfo>::addref(); }
-	void delref() override { ReferenceCounted<ParallelTCInfo>::delref(); }
+	void addref() const override { ReferenceCounted<ParallelTCInfo>::addref(); }
+	void delref() const override { ReferenceCounted<ParallelTCInfo>::delref(); }
 
 	void addServers(const std::vector<UID>& servers) override {
 		ASSERT(!teams.empty());
@@ -1395,13 +1395,13 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 	}
 }
 
-// Move a random shard of sourceTeam's to destTeam if sourceTeam has much more data than destTeam
-ACTOR Future<bool> rebalanceTeams(DDQueueData* self,
-                                  int priority,
-                                  Reference<IDataDistributionTeam> sourceTeam,
-                                  Reference<IDataDistributionTeam> destTeam,
-                                  bool primary,
-                                  TraceEvent* traceEvent) {
+// Move a random shard from sourceTeam if sourceTeam has much more data than provided destTeam
+ACTOR static Future<bool> rebalanceTeams(DDQueueData* self,
+                                         int priority,
+                                         Reference<IDataDistributionTeam const> sourceTeam,
+                                         Reference<IDataDistributionTeam const> destTeam,
+                                         bool primary,
+                                         TraceEvent* traceEvent) {
 	if (g_network->isSimulated() && g_simulator.speedUpSimulation) {
 		traceEvent->detail("CancelingDueToSimulationSpeedup", true);
 		return false;

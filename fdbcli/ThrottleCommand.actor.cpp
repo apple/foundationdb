@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2021 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,6 +33,8 @@
 
 namespace fdb_cli {
 
+static constexpr int defaultThrottleListLimit = 100;
+
 ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 
 	if (tokens.size() == 1) {
@@ -40,10 +42,9 @@ ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<Str
 		return false;
 	} else if (tokencmp(tokens[1], "list")) {
 		if (tokens.size() > 4) {
-			printf("Usage: throttle list [throttled|recommended|all] [LIMIT]\n");
-			printf("\n");
-			printf("Lists tags that are currently throttled.\n");
-			printf("The default LIMIT is 100 tags.\n");
+			fmt::print("Usage: throttle list [throttled|recommended|all] [LIMIT]\n\n");
+			fmt::print("Lists tags that are currently throttled.\n");
+			fmt::print("The default LIMIT is {} tags.\n", defaultThrottleListLimit);
 			return false;
 		}
 
@@ -62,7 +63,7 @@ ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<Str
 			}
 		}
 
-		state int throttleListLimit = 100;
+		state int throttleListLimit = defaultThrottleListLimit;
 		if (tokens.size() >= 4) {
 			char* end;
 			throttleListLimit = std::strtol((const char*)tokens[3].begin(), &end, 10);
@@ -74,7 +75,7 @@ ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<Str
 
 		state std::vector<TagThrottleInfo> tags;
 		if (reportThrottled && reportRecommended) {
-			wait(store(tags, ThrottleApi::getThrottledTags(db, throttleListLimit, true)));
+			wait(store(tags, ThrottleApi::getThrottledTags(db, throttleListLimit, ContainsRecommended::True)));
 		} else if (reportThrottled) {
 			wait(store(tags, ThrottleApi::getThrottledTags(db, throttleListLimit)));
 		} else if (reportRecommended) {
@@ -177,14 +178,14 @@ ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<Str
 			}
 		}
 
-		TagSet tags;
-		tags.addTag(tokens[3]);
+		TagSet tagSet;
+		tagSet.addTag(tokens[3]);
 
-		wait(ThrottleApi::throttleTags(db, tags, tpsRate, duration, TagThrottleType::MANUAL, priority));
+		wait(ThrottleApi::throttleTags(db, tagSet, tpsRate, duration, TagThrottleType::MANUAL, priority));
 		printf("Tag `%s' has been throttled\n", tokens[3].toString().c_str());
 	} else if (tokencmp(tokens[1], "off")) {
 		int nextIndex = 2;
-		TagSet tags;
+		state TagSet tagSet;
 		bool throttleTypeSpecified = false;
 		bool is_error = false;
 		Optional<TagThrottleType> throttleType = TagThrottleType::MANUAL;
@@ -241,12 +242,14 @@ ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<Str
 				priority = TransactionPriority::BATCH;
 				++nextIndex;
 			} else if (tokencmp(tokens[nextIndex], "tag")) {
-				if (tags.size() > 0 || nextIndex == tokens.size() - 1) {
+				if (tagSet.size() > 0 || nextIndex == tokens.size() - 1) {
 					is_error = true;
 					continue;
 				}
-				tags.addTag(tokens[nextIndex + 1]);
+				tagSet.addTag(tokens[nextIndex + 1]);
 				nextIndex += 2;
+			} else {
+				is_error = true;
 			}
 		}
 
@@ -256,15 +259,15 @@ ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<Str
 			state std::string priorityString =
 			    priority.present() ? format(" at %s priority", transactionPriorityToString(priority.get(), false)) : "";
 
-			if (tags.size() > 0) {
-				bool success = wait(ThrottleApi::unthrottleTags(db, tags, throttleType, priority));
+			if (tagSet.size() > 0) {
+				bool success = wait(ThrottleApi::unthrottleTags(db, tagSet, throttleType, priority));
 				if (success) {
-					printf("Unthrottled tag `%s'%s\n", tokens[3].toString().c_str(), priorityString.c_str());
+					fmt::print("Unthrottled {0}{1}\n", tagSet.toString(), priorityString);
 				} else {
-					printf("Tag `%s' was not %sthrottled%s\n",
-					       tokens[3].toString().c_str(),
-					       throttleTypeString,
-					       priorityString.c_str());
+					fmt::print("{0} was not {1}throttled{2}\n",
+					           tagSet.toString(Capitalize::True),
+					           throttleTypeString,
+					           priorityString);
 				}
 			} else {
 				bool unthrottled = wait(ThrottleApi::unthrottleAll(db, throttleType, priority));

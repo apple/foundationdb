@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2020 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -106,7 +106,9 @@ void* Arena::allocate4kAlignedBuffer(uint32_t size) {
 	return ArenaBlock::dependOn4kAlignedBuffer(impl, size);
 }
 
-size_t Arena::getSize(bool fastInaccurateEstimate) const {
+FDB_DEFINE_BOOLEAN_PARAM(FastInaccurateEstimate);
+
+size_t Arena::getSize(FastInaccurateEstimate fastInaccurateEstimate) const {
 	if (impl) {
 		allowAccess(impl.getPtr());
 		size_t result;
@@ -684,12 +686,12 @@ TEST_CASE("/flow/Arena/Size") {
 	// Note that the ASSERT argument order matters, the estimate must be calculated first as
 	// the full accurate calculation will update the estimate
 	makeString(40, a);
-	fastSize = a.getSize(true);
+	fastSize = a.getSize(FastInaccurateEstimate::True);
 	slowSize = a.getSize();
 	ASSERT_EQ(fastSize, slowSize);
 
 	makeString(700, a);
-	fastSize = a.getSize(true);
+	fastSize = a.getSize(FastInaccurateEstimate::True);
 	slowSize = a.getSize();
 	ASSERT_EQ(fastSize, slowSize);
 
@@ -702,37 +704,37 @@ TEST_CASE("/flow/Arena/Size") {
 
 	makeString(1000, a);
 	makeString(1000, a);
-	fastSize = a.getSize(true);
+	fastSize = a.getSize(FastInaccurateEstimate::True);
 	slowSize = a.getSize();
 	ASSERT_EQ(fastSize, slowSize);
 
 	Standalone<StringRef> s = makeString(500);
 	a.dependsOn(s.arena());
-	fastSize = a.getSize(true);
+	fastSize = a.getSize(FastInaccurateEstimate::True);
 	slowSize = a.getSize();
 	ASSERT_EQ(fastSize, slowSize);
 
 	Standalone<StringRef> s2 = makeString(500);
 	a.dependsOn(s2.arena());
-	fastSize = a.getSize(true);
+	fastSize = a.getSize(FastInaccurateEstimate::True);
 	slowSize = a.getSize();
 	ASSERT_EQ(fastSize, slowSize);
 
 	// Add a dependency to b, which will fit in b's root and update b's size estimate
 	Standalone<StringRef> s3 = makeString(100);
 	b.dependsOn(s3.arena());
-	fastSize = b.getSize(true);
+	fastSize = b.getSize(FastInaccurateEstimate::True);
 	slowSize = b.getSize();
 	ASSERT_EQ(fastSize, slowSize);
 
 	// But now a's size estimate is out of date because the new reference in b's root is still
 	// in a's tree
-	fastSize = a.getSize(true);
+	fastSize = a.getSize(FastInaccurateEstimate::True);
 	slowSize = a.getSize();
 	ASSERT_LT(fastSize, slowSize);
 
 	// Now that a full size calc has been done on a, the estimate is up to date.
-	fastSize = a.getSize(true);
+	fastSize = a.getSize(FastInaccurateEstimate::True);
 	slowSize = a.getSize();
 	ASSERT_EQ(fastSize, slowSize);
 
@@ -741,10 +743,10 @@ TEST_CASE("/flow/Arena/Size") {
 	// unchanged and the same.  The size and estimate of c will also match.
 	Standalone<StringRef> s4 = makeString(100);
 	c.dependsOn(s4.arena());
-	fastSize = c.getSize(true);
+	fastSize = c.getSize(FastInaccurateEstimate::True);
 	slowSize = c.getSize();
 	ASSERT_EQ(fastSize, slowSize);
-	fastSize = a.getSize(true);
+	fastSize = a.getSize(FastInaccurateEstimate::True);
 	slowSize = a.getSize();
 	ASSERT_EQ(fastSize, slowSize);
 
