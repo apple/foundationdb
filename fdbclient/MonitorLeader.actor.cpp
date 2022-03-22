@@ -169,7 +169,7 @@ void ClusterConnectionString::resolveHostnamesBlocking() {
 }
 
 void ClusterConnectionString::resetToUnresolved() {
-	if (hostnames.size() > 0) {
+	if (status == RESOLVED && hostnames.size() > 0) {
 		coords.clear();
 		hostnames.clear();
 		networkAddressToHostname.clear();
@@ -589,7 +589,6 @@ ACTOR Future<Void> monitorNominee(Key key,
 
 			if (li.present() && li.get().forward)
 				wait(Future<Void>(Never()));
-			wait(Future<Void>(Void()));
 		}
 	}
 }
