@@ -587,10 +587,10 @@ OTELSpan::~OTELSpan() {
 	}
 }
 
-void swapBinary(uint64_t &value) {
-    value = ((value & 0x00000000FFFFFFFFull) << 32) | ((value & 0xFFFFFFFF00000000ull) >> 32);
-    value = ((value & 0x0000FFFF0000FFFFull) << 16) | ((value & 0xFFFF0000FFFF0000ull) >> 16);
-    value = ((value & 0x00FF00FF00FF00FFull) << 8)  | ((value & 0xFF00FF00FF00FF00ull) >> 8);
+void swapBinary(uint64_t& value) {
+	value = ((value & 0x00000000FFFFFFFFull) << 32) | ((value & 0xFFFFFFFF00000000ull) >> 32);
+	value = ((value & 0x0000FFFF0000FFFFull) << 16) | ((value & 0xFFFF0000FFFF0000ull) >> 16);
+	value = ((value & 0x00FF00FF00FF00FFull) << 8) | ((value & 0xFF00FF00FF00FF00ull) >> 8);
 }
 
 TEST_CASE("/flow/Tracing/CreateOTELSpan") {
@@ -716,16 +716,16 @@ TEST_CASE("/flow/Tracing/AddLinks") {
 };
 
 uint64_t swapUint64BE(uint8_t* index) {
-	uint64_t value; 
+	uint64_t value;
 	memcpy(&value, index, sizeof(value));
 	return fromBigEndian64(value);
 }
 
 std::string readMPString(uint8_t* index, int len) {
-    uint8_t data[len + 1];
-    std::copy(index, index + len, data);
+	uint8_t data[len + 1];
+	std::copy(index, index + len, data);
 	data[len] = '\0';
-	return reinterpret_cast<char *>(data);
+	return reinterpret_cast<char*>(data);
 }
 
 TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
@@ -741,7 +741,9 @@ TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
 
 	// Test - constructor OTELSpan(const Location& location, const SpanContext parent, const SpanContext& link)
 	// Will delegate to other constructors.
-	OTELSpan span2("encoded_span"_loc, SpanContext(UID(100, 101), 1, TraceFlags::sampled), SpanContext(UID(200, 201), 2, TraceFlags::sampled));
+	OTELSpan span2("encoded_span"_loc,
+	               SpanContext(UID(100, 101), 1, TraceFlags::sampled),
+	               SpanContext(UID(200, 201), 2, TraceFlags::sampled));
 	tracer.serialize_span(span2, request);
 	data = request.buffer.get();
 	ASSERT(data[0] == 0b10011110); // 14 element array.
@@ -751,33 +753,34 @@ TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
 	ASSERT(data[10] == 0xcf);
 	ASSERT(swapUint64BE(&data[11]) == 101);
 	ASSERT(data[19] == 0xcf);
-	// We don't care about the next 8 bytes, they are the ID for the span itself and will be random. 
+	// We don't care about the next 8 bytes, they are the ID for the span itself and will be random.
 	// Parent TraceID and Parent SpanID.
 	ASSERT(data[28] == 0xcf);
 	ASSERT(swapUint64BE(&data[29]) == 100);
-	ASSERT(data[37] == 0xcf); 
+	ASSERT(data[37] == 0xcf);
 	ASSERT(swapUint64BE(&data[38]) == 101);
-	ASSERT(data[46] == 0xcf); 
+	ASSERT(data[46] == 0xcf);
 	ASSERT(swapUint64BE(&data[47]) == 1);
 	// Read and verify span name
 	ASSERT(data[55] == (0b10100000 | strlen("encoded_span")));
-	ASSERT(strncmp(readMPString(&data[56], strlen("encoded_span")).c_str(), "encoded_span", strlen("encoded_span")) == 0);
+	ASSERT(strncmp(readMPString(&data[56], strlen("encoded_span")).c_str(), "encoded_span", strlen("encoded_span")) ==
+	       0);
 	// Verify begin/end is encoded, we don't care about the values
 	ASSERT(data[68] == 0xcb);
 	ASSERT(data[77] == 0xcb);
 	// SpanKind
-	ASSERT(data[86] == 0xcc); 
-	ASSERT(data[87] == static_cast<uint8_t>(SpanKind::SERVER)); 
+	ASSERT(data[86] == 0xcc);
+	ASSERT(data[87] == static_cast<uint8_t>(SpanKind::SERVER));
 	// Status
-	ASSERT(data[88] == 0xcc); 
-	ASSERT(data[89] == static_cast<uint8_t>(SpanStatus::OK)); 
+	ASSERT(data[88] == 0xcc);
+	ASSERT(data[89] == static_cast<uint8_t>(SpanStatus::OK));
 	// Linked SpanContext
 	ASSERT(data[90] == 0b10010001);
 	ASSERT(data[91] == 0xcf);
 	ASSERT(swapUint64BE(&data[92]) == 200);
-	ASSERT(data[100] == 0xcf); 
+	ASSERT(data[100] == 0xcf);
 	ASSERT(swapUint64BE(&data[101]) == 201);
-	ASSERT(data[109] == 0xcf); 
+	ASSERT(data[109] == 0xcf);
 	ASSERT(swapUint64BE(&data[110]) == 2);
 	// Events
 	ASSERT(data[118] == 0b10010000); // empty
