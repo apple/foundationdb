@@ -779,7 +779,7 @@ public:
 	Promise<Void> coreStarted;
 	bool shuttingDown;
 
-	Promise<Void> registerInterfaceAcceptingRequests;
+	Promise<bool> registerInterfaceAcceptingRequests;
 	Future<Void> interfaceRegistered;
 
 	bool behind;
@@ -7382,6 +7382,11 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 
 	self->coreStarted.send(Void());
 
+	// if (self->registerInterfaceAcceptingRequests.canBeSet()) {
+	// 	self->registerInterfaceAcceptingRequests.send(true);
+	// 	wait(self->interfaceRegistered);
+	// }
+
 	loop {
 		++self->counters.loops;
 
@@ -7591,7 +7596,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 	self.sk = serverKeysPrefixFor(self.tssPairID.present() ? self.tssPairID.get() : self.thisServerID)
 	              .withPrefix(systemKeys.begin); // FFFF/serverKeys/[this server]/
 	self.folder = folder;
-	self.registerInterfaceAcceptingRequests.send(Void());
+	self.registerInterfaceAcceptingRequests.send(false);
 
 	try {
 		wait(self.storage.init());
@@ -7793,8 +7798,14 @@ ACTOR Future<Void> replaceTSSInterface(StorageServer* self, StorageServerInterfa
 
 ACTOR Future<Void> storageInterfaceRegistration(StorageServer* self,
                                                 StorageServerInterface ssi,
-                                                Future<Void> interfaceAcceptingRequests) {
-	wait(interfaceAcceptingRequests);
+                                                Future<bool> interfaceAcceptingRequests) {
+
+	bool acceptingRequests = wait(interfaceAcceptingRequests);
+	if (acceptingRequests) {
+		ssi.startAcceptingRequests();
+	} else {
+		ssi.stopAcceptingRequests();
+	}
 
 	try {
 		if (self->isTss()) {
@@ -7882,16 +7893,25 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		if (recovered.canBeSet())
 			recovered.send(Void());
 
-		ssi.startAcceptingRequests();
+		state Promise<bool> registerInterface;
+		state Future<Void> f = storageInterfaceRegistration(&self, ssi, registerInterface.getFuture());
+		wait(delay(0));
+		registerInterface.send(false);
+		wait(f);
+
 		self.interfaceRegistered =
 		    storageInterfaceRegistration(&self, ssi, self.registerInterfaceAcceptingRequests.getFuture());
 		wait(delay(0));
-		self.registerInterfaceAcceptingRequests.send(Void());
-		wait(self.interfaceRegistered);
+
+		ASSERT(self.registerInterfaceAcceptingRequests.canBeSet());
+
+		if (self.registerInterfaceAcceptingRequests.canBeSet()) {
+			self.registerInterfaceAcceptingRequests.send(true);
+			wait(self.interfaceRegistered);
+		}
 
 		TraceEvent("StorageServerStartingCore", self.thisServerID).detail("TimeTaken", now() - start);
 
-		// wait( delay(0) );  // To make sure self->zkMasterInfo.onChanged is available to wait on
 		ssCore = storageServerCore(&self, ssi);
 		wait(ssCore);
 

@@ -99,6 +99,7 @@ struct StorageServerInterface {
 	UID id() const { return uniqueID; }
 	bool isAcceptingRequests() const { return acceptingRequests; }
 	void startAcceptingRequests() { acceptingRequests = true; }
+	void stopAcceptingRequests() { acceptingRequests = false; }
 	bool isTss() const { return tssPairID.present(); }
 	std::string toString() const { return id().shortString(); }
 	template <class Ar>
