@@ -250,6 +250,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( DD_ZERO_HEALTHY_TEAM_DELAY,                            1.0 );
 	init( REMOTE_KV_STORE,                                      true );
 	init( REMOTE_KV_STORE_INIT_DELAY,                            0.1 );
+	init( REMOTE_KV_STORE_MAX_INIT_DURATION,                    10.0 );
 	init( REBALANCE_MAX_RETRIES,                                 100 );
 	init( DD_OVERLAP_PENALTY,                                  10000 );
 	init( DD_EXCLUDE_MIN_REPLICAS,                                 1 );

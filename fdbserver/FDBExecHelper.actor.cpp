@@ -151,7 +151,7 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 	                                 self->locality,
 	                                 ProcessClass(ProcessClass::UnsetClass, ProcessClass::AutoSource),
 	                                 self->dataFolder,
-	                                 self->coordinationFolder, // do we need to customize this coordination folder path
+	                                 self->coordinationFolder, // do we need to customize this coordination folder path?
 	                                 self->protocolVersion);
 	wait(g_pSimulator->onProcess(child));
 	state Future<ISimulator::KillType> onShutdown = child->onShutdown();
@@ -159,7 +159,6 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 	state Future<Void> flowProcessF;
 
 	try {
-		// TODO: parse paramList
 		TraceEvent(SevDebug, "SpawnedChildProcess")
 		    .detail("Child", child->toString())
 		    .detail("Parent", self->toString());
@@ -171,7 +170,8 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 			}
 		}
 		if (role == "flowprocess" && !parentShutdown.isReady()) {
-			self->child = child;
+			self->childs.push_back(child);
+			// TODO: remove this
 			state std::string childDataFolder(std::string(child->dataFolder).append("_child"));
 			child->dataFolder = childDataFolder.c_str();
 			state Future<Void> parentSSClosed = parent->onClosed();
@@ -197,17 +197,15 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 					g_pSimulator->killProcess(child, ISimulator::KillInstantly);
 				}
 				when(ISimulator::KillType killType = wait(parentShutdown)) {
-					// ASSERT(false);
+					ASSERT(false);
 					TraceEvent(SevDebug, "ParentProcessReboot").detail("KillType", killType).log();
 					// Note: failed machines are not cancelled and actors behind is just running
 					// g_pSimulator->killProcess(child, killType);
 					if (killType < ISimulator::RebootAndDelete) {
 						ASSERT(false);
 					} else {
-						// wait(delay(0));
 						flowProcessF.cancel();
 						destoryChildProcess(flowProcessF, child, "ChildClosedAfterParentShutdown");
-						// g_pSimulator->destroyProcess(child);
 					}
 				}
 			}

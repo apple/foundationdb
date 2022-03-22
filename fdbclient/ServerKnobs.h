@@ -236,6 +236,8 @@ public:
 	// A delay to avoid race on file resources if the new kv store process started immediately after the previous kv
 	// store process died
 	double REMOTE_KV_STORE_INIT_DELAY;
+	// max waiting time for the remote kv store to initialize
+	double REMOTE_KV_STORE_MAX_INIT_DURATION;
 
 	// KeyValueStore SQLITE
 	int CLEAR_BUFFER_SIZE;

@@ -269,6 +269,7 @@ ACTOR Future<Void> workerHandleErrors(FutureStream<ErrorInfo> errors) {
 			endRole(err.role, err.id, "Error", ok, err.error);
 
 			if (err.error.code() == error_code_please_reboot ||
+			    err.error.code() == error_code_please_reboot_remote_kv_store ||
 			    (err.role == Role::SHARED_TRANSACTION_LOG &&
 			     (err.error.code() == error_code_io_error || err.error.code() == error_code_io_timeout)))
 				throw err.error;
@@ -2094,7 +2095,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					filesClosed.add(kvClosed);
 					ReplyPromise<InitializeStorageReply> storageReady = req.reply;
 					storageCache.set(req.reqId, storageReady.getFuture());
-					TraceEvent(SevDebug, "OpeningStorageServer").detail("StoreType", "4");
 					Future<Void> s = storageServer(data,
 					                               recruited,
 					                               req.seedTag,
@@ -2103,7 +2103,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                               storageReady,
 					                               dbInfo,
 					                               folder);
-					TraceEvent(SevDebug, "StorageServerOpened").detail("StoreType", "4");
 					s = handleIOErrors(s, data, recruited.id(), kvClosed);
 					s = storageCache.removeOnReady(req.reqId, s);
 					s = storageServerRollbackRebooter(&runningStorages,
@@ -2331,15 +2330,20 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			f.cancel();
 		state Error e = err;
 		bool ok = e.code() == error_code_please_reboot || e.code() == error_code_actor_cancelled ||
-		          e.code() == error_code_please_reboot_delete;
+		          e.code() == error_code_please_reboot_delete || e.code() == error_code_please_reboot_remote_kv_store;
 
 		endRole(Role::WORKER, interf.id(), "WorkerError", ok, e);
 		errorForwarders.clear(false);
 		sharedLogs.clear();
 
-		if (e.code() !=
-		    error_code_actor_cancelled) { // We get cancelled e.g. when an entire simulation times out, but in that case
-			                              // we won't be restarted and don't need to wait for shutdown
+		if (e.code() != error_code_actor_cancelled && e.code() != error_code_please_reboot_remote_kv_store) {
+			// actor_cancelled:
+			// We get cancelled e.g. when an entire simulation times out, but in that case
+			// we won't be restarted and don't need to wait for shutdown
+			// reboot_remote_kv_store:
+			// The child process running the storage engine died abnormally,
+			// the current solution is to reboot the worker.
+			// Some refactoring work in the future can make it only reboot the storage server
 			stopping.send(Void());
 			wait(filesClosed.getResult()); // Wait for complete shutdown of KV stores
 			wait(delay(0.0)); // Unwind the callstack to make sure that IAsyncFile references are all gone

@@ -32,10 +32,12 @@
 #include "fdbrpc/FlowTransport.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/FDBExecHelper.actor.h"
+#include "fdbserver/Knobs.h"
 #include "flow/ActorCollection.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
 #include "flow/network.h"
+#include "flow/Knobs.h"
 
 #include "flow/IRandom.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -442,9 +444,17 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 	}
 
 	ACTOR static Future<Void> getErrorImpl(const RemoteIKeyValueStore* self, Future<int> returnCode) {
-		wait(self->initialized);
 		choose {
-			when(state ErrorOr<Void> e = wait(errorOr(self->interf.getError.getReply(IKVSGetErrorRequest{})))) {
+			when(wait(self->initialized)) {}
+			when(wait(delay(SERVER_KNOBS->REMOTE_KV_STORE_MAX_INIT_DURATION))) {
+				TraceEvent(SevError, "RemoteIKVSInitTooLong").detail("TimeLimit", SERVER_KNOBS->REMOTE_KV_STORE_MAX_INIT_DURATION);
+				throw please_reboot_remote_kv_store();
+			}
+		}
+		state Future<Void> connectionCheckingDelay = delay(FLOW_KNOBS->FAILURE_DETECTION_DELAY);
+		state Future<ErrorOr<Void>> storeError = errorOr(self->interf.getError.getReply(IKVSGetErrorRequest{}));
+		loop choose {
+			when(ErrorOr<Void> e = wait(storeError)) {
 				TraceEvent(SevDebug, "RemoteIKVSGetError")
 				    .errorUnsuppressed(e.isError() ? e.getError() : success())
 				    .backtrace();
@@ -455,9 +465,23 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 			}
 			when(int res = wait(returnCode)) {
 				TraceEvent(res != 0 ? SevError : SevInfo, "SpawnedProcessDied").detail("Res", res);
+				if (res)
+					throw please_reboot_remote_kv_store(); // this will reboot the worker
+				else
+					return Void();
+			}
+			when(wait(connectionCheckingDelay)) {
+				// for the corner case where the child process stuck and waitpid also does not give update on it
+				// In this scenario, we need to manually reboot the storage engine process
+				if (IFailureMonitor::failureMonitor()
+				        .getState(self->interf.getError.getEndpoint().getPrimaryAddress())
+				        .isFailed()) {
+					TraceEvent(SevError, "RemoteKVStoreConnectionStuck").log();
+					throw please_reboot_remote_kv_store(); // this will reboot the worker
+				}
+				connectionCheckingDelay = delay(FLOW_KNOBS->FAILURE_DETECTION_DELAY);
 			}
 		}
-		return Void();
 	}
 
 	ACTOR static Future<Void> onCloseImpl(const RemoteIKeyValueStore* self) {

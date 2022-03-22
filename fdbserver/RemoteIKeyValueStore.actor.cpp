@@ -198,7 +198,8 @@ ACTOR static Future<int> flowProcessRunner(RemoteIKeyValueStore* self, Promise<V
 		}
 		when(int res = wait(process)) {
 			// 0 means process normally shut down; non-zero means errors
-			ASSERT(res); // process should not shut down normally before not ready
+			// process should not shut down normally before not ready
+			ASSERT(res);
 			return res;
 		}
 	}
