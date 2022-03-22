@@ -211,8 +211,8 @@ public:
 	void setHealthy(bool h) override { healthy = h; }
 	int getPriority() const override { return priority; }
 	void setPriority(int p) override { priority = p; }
-	void addref() override { ReferenceCounted<TCTeamInfo>::addref(); }
-	void delref() override { ReferenceCounted<TCTeamInfo>::delref(); }
+	void addref() const override { ReferenceCounted<TCTeamInfo>::addref(); }
+	void delref() const override { ReferenceCounted<TCTeamInfo>::delref(); }
 
 	bool hasServer(const UID& server) const;
 	bool hasWigglePausedServer() const;

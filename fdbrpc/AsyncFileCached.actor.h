@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -84,6 +84,9 @@ struct EvictablePageCache : ReferenceCounted<EvictablePageCache> {
 #else
 		page->data = pageSize == 4096 ? FastAllocator<4096>::allocate() : aligned_alloc(4096, pageSize);
 #endif
+		if (page->data == nullptr) {
+			platform::outOfMemory();
+		}
 		if (RANDOM == cacheEvictionType) {
 			page->index = pages.size();
 			pages.push_back(page);
@@ -396,6 +399,9 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 #else
 		data = pageCache->pageSize == 4096 ? FastAllocator<4096>::allocate() : aligned_alloc(4096, pageCache->pageSize);
 #endif
+		if (data == nullptr) {
+			platform::outOfMemory();
+		}
 	}
 
 	Future<Void> write(void const* data, int length, int offset) {
