@@ -132,6 +132,8 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Data
 	loop {
 		server_dc.clear();
 		succeeded = false;
+		result->allServers.clear();
+		result->dataMoves.clear();
 		try {
 
 			// Read healthyZone value which is later used to determine on/off of failure triggered DD
@@ -173,6 +175,12 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Data
 
 			for (int i = 0; i < serverList.get().size(); i++) {
 				auto ssi = decodeServerListValue(serverList.get()[i].value);
+				UID ssID = decodeServerListKey(serverList.get()[i].key);
+				TraceEvent("DDInitDataServer", distributorId)
+					.detail("TotalServers", serverList.get().size())
+				    .detail("Server", ssi.id())
+				    .detail("KeyID", ssID)
+				    .detail("IsTss", ssi.isTss());
 				if (!ssi.isTss()) {
 					result->allServers.emplace_back(ssi, id_data[ssi.locality.processId()].processClass);
 					server_dc[ssi.id()] = ssi.locality.dcId();
@@ -181,16 +189,17 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Data
 				}
 			}
 
-			state RangeResult dataMoves = wait(tr.getRange(dataMoveKeys, CLIENT_KNOBS->TOO_MANY));
-			ASSERT(!dataMoves.more && dataMoves.size() < CLIENT_KNOBS->TOO_MANY);
-			Version readVersion = wait(tr.getReadVersion());
-			TraceEvent("GetInitialDataMove", distributorId).detail("ReadVersion", readVersion);
+			if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+				RangeResult dataMoves = wait(tr.getRange(dataMoveKeys, CLIENT_KNOBS->TOO_MANY));
+				ASSERT(!dataMoves.more && dataMoves.size() < CLIENT_KNOBS->TOO_MANY);
+				for (int i = 0; i < dataMoves.size(); ++i) {
+					result->dataMoves.push_back(decodeDataMoveValue(dataMoves[i].value));
+				}
+				Version readVersion = wait(tr.getReadVersion());
+				TraceEvent("GetInitialDataMove", distributorId).detail("ReadVersion", readVersion);
+			}
 
 			succeeded = true;
-
-			for (int i = 0; i < dataMoves.size(); ++i) {
-				result->dataMoves.push_back(decodeDataMoveValue(dataMoves[i].value));
-			}
 
 			break;
 		} catch (Error& e) {

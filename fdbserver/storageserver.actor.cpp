@@ -515,7 +515,7 @@ public:
 		else if (adding)
 			return "AddingTransferred";
 		else if (moveInShard)
-			return moveInShard->toString().c_str();
+			return "MoveInShard";
 		else
 			return "ReadWrite";
 	}
@@ -5975,11 +5975,11 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 			data->addShard(ShardInfo::newReadWrite(ranges[i], data));
 		else if (ranges[i].value->moveInShard) {
 			// TEST(true); // ChangeServerKeys cancel MoveInShard
-			TraceEvent(SevError, "NonAllignedMoveInShards", data->thisServerID)
+			TraceEvent(SevWarn, "NonAllignedMoveInShards", data->thisServerID)
 			    .detail("NewRange", keys)
 			    .detail("ExistingMoveInShard", ranges[i].value->moveInShard->toString())
 			    .detail("NowAssigned", nowAssigned);
-			ASSERT(false);
+			ASSERT(!nowAssigned);
 			// std::cout << "Adding new pending moveInShard: " << ranges[i].toString() << std::endl;
 			// data->addShard(ShardInfo::newPendingMoveInShard(data, ranges[i], version + 1));
 		} else {
@@ -5995,7 +5995,8 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 	std::vector<KeyRange> removeRanges;
 	std::vector<KeyRange> readWriteRanges;
 	std::vector<KeyRange> notAssignedRanges;
-	std::vector<KeyRange> moveInRanges;
+	// [KeyRange, isPending], if isPending, add a new PendingMoveInShard.
+	std::vector<std::pair<KeyRange, bool>> moveInRanges;
 	std::unordered_map<UID, MoveInShard> cancelMoveIns;
 	std::vector<Reference<ShardInfo>> newMoveInShards;
 	std::vector<std::pair<KeyRange, Version>> changeNewestAvailable;
@@ -6027,42 +6028,33 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 			}
 			if (r->value()->moveInShard) {
 				TraceEvent(SevDebug, "ChangeServerKeysCancelMoveInShard", data->thisServerID)
+				    .detail("TargetRange", keys)
 				    .detail("Version", version + 1)
 				    .detail("MoveInShard", r->value()->moveInShard->toString());
 				r->value()->moveInShard->updates->shardRemoved = true;
 				cancelMoveIns.emplace(r->value()->moveInShard->meta->id, *(r->value()->moveInShard));
+				if (r->range().end > range.end) {
+					moveInRanges.emplace_back(KeyRangeRef(range.end, r->range().end), true);
+				}
 			}
 			notAssignedRanges.push_back(range);
-			// data->addShard(ShardInfo::newNotAssigned(range));
-			// data->watches.triggerRange(range.begin, range.end);
 		} else if (!dataAvailable) {
 			if (version == 0) { // bypass fetchkeys; shard is known empty at version 0
 				TraceEvent("ChangeServerKeysInitialRange", data->thisServerID)
 				    .detail("Begin", range.begin)
 				    .detail("End", range.end);
 				changeNewestAvailable.emplace_back(range, latestVersion);
-				// data->addShard(ShardInfo::newReadWrite(range, data));
 				readWriteRanges.push_back(range);
 				setAvailableStatus(data, range, true);
 			} else {
 				auto& shard = data->shards[range.begin];
-				// if (shard->assigned() && shard->keys == range) {
-				// 	ASSERT(cancelMoveIns.count(shard->moveInShard->meta->id) > 0);
-				// 	TraceEvent("ChangeServerKeysReuseMoveInShard", data->thisServerID)
-				// 	    .detail("DataMoveRange", range.toString())
-				// 	    .detail("MoveInShard", shard->moveInShard->toString());
-				// 	data->addShard(ShardInfo::newAdding(data, range));
-				// } else {
 				if (!shard->assigned()) {
-					// data->addShard(ShardInfo::newMoveInShard(data, range, version + 1, moveInShardMetaData));
-					moveInRanges.push_back(range);
-					// newMoveInShards.push_back(data->shards[range.begin]);
+					moveInRanges.emplace_back(range, false);
 				}
 			}
 		} else {
 			changeNewestAvailable.emplace_back(range, latestVersion);
 			readWriteRanges.push_back(range);
-			// data->addShard(ShardInfo::newReadWrite(range, data));
 		}
 	}
 
@@ -6073,13 +6065,15 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 		data->addShard(ShardInfo::newNotAssigned(range));
 		data->watches.triggerRange(range.begin, range.end);
 	}
-	for (const auto& range : moveInRanges) {
-		data->addShard(ShardInfo::newMoveInShard(data, range, version + 1, moveInShardMetaData));
+	for (const auto& [range, pending] : moveInRanges) {
+		if (!pending) {
+			data->addShard(ShardInfo::newMoveInShard(data, range, version + 1, moveInShardMetaData));
+		} else {
+			data->addShard(ShardInfo::newPendingMoveInShard(data, range, version + 1));
+		}
 		newMoveInShards.push_back(data->shards[range.begin]);
 		TraceEvent(SevDebug, "ChangeServerKeysAddNewMoveInShard", data->thisServerID)
 		    .detail("MoveInShard", data->shards[range.begin]->moveInShard->toString());
-		// std::cout << std::endl
-		//           << "Adding new MoveInShard: " << data->shards[range.begin]->moveInShard->toString() << std::endl;
 	}
 
 	// Update newestAvailableVersion when a shard becomes (un)available (in a separate loop to avoid invalidating vr

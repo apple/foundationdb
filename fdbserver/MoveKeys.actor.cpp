@@ -458,7 +458,7 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 							if (dataMove.getPhase() == DataMoveMetaData::Deleting) {
 								TraceEvent(SevWarn, interval.end(), relocationIntervalId)
 								    .detail("DataMoveBeingDeleted", dataMoveID);
-								throw operation_cancelled();
+								throw data_move_cancelled();
 							}
 							if (dataMove.getPhase() == DataMoveMetaData::Running) {
 								TraceEvent(SevWarn, interval.end(), relocationIntervalId)
@@ -1389,6 +1389,7 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 								    .detail("SrcServers", describe(dataMove.src));
 							} else {
 								dataMove.range = KeyRangeRef(currentKeys.end, keys.end);
+								dataMove.setPhase(DataMoveMetaData::Deleting);
 								tr.set(dataMoveKeyFor(dataMoveID), dataMoveValue(dataMove));
 								TraceEvent("CleanUpDataMovePartial", dataMoveID)
 								    .detail("DataMoveID", dataMoveID)
@@ -1924,7 +1925,7 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 					Optional<Value> val = wait(tr->get(dataMoveKeyFor(dataMoveID)));
 					if (val.present()) {
 						state DataMoveMetaData dataMove = decodeDataMoveValue(val.get());
-						ASSERT(dataMove.range == KeyRangeRef(begin, range.end));
+						// ASSERT(dataMove.range == KeyRangeRef(begin, range.end));
 					} else {
 						TraceEvent(SevDebug, "CleanUpDataMoveNotExist", dataMoveID)
 						    .detail("DataMoveID", dataMoveID)
@@ -1997,7 +1998,8 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 					for (oldDest = target.begin(); oldDest != target.end(); ++oldDest) {
 						TraceEvent("CleanUpDataMoveDestRange", dataMoveID)
 						    .detail("DataMoveID", dataMoveID)
-						    .detail("Range", range)
+						    .detail("Range", currentRange)
+						    .detail("TargetRange", range)
 						    .detail("DestServer", *oldDest);
 						actors.push_back(removeOldDestinations(tr, *oldDest, shardMap[*oldDest], currentRange));
 					}
@@ -2016,6 +2018,11 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 						dataMove.range = KeyRangeRef(currentRange.end, range.end);
 						dataMove.setPhase(DataMoveMetaData::Deleting);
 						tr->set(dataMoveKeyFor(dataMoveID), dataMoveValue(dataMove));
+						TraceEvent("CleanUpDataMovePartial", dataMoveID)
+						    .detail("DataMoveID", dataMoveID)
+						    .detail("CurrentRange", currentRange)
+						    .detail("TargetRange", range)
+						    .detail("NewDataMove", dataMove.toString());
 					}
 
 					wait(tr->commit());
@@ -2065,15 +2072,24 @@ ACTOR Future<Void> moveKeys(Database cx,
 
 	state std::map<UID, StorageServerInterface> tssMapping;
 
-	wait(startMoveKeys(cx,
-	                   keys,
-	                   destinationTeam,
-	                   lock,
-	                   startMoveKeysParallelismLock,
-	                   relocationIntervalId,
-	                   dataMoveID,
-	                   &tssMapping,
-	                   ddEnabledState));
+	try {
+		wait(startMoveKeys(cx,
+		                   keys,
+		                   destinationTeam,
+		                   lock,
+		                   startMoveKeysParallelismLock,
+		                   relocationIntervalId,
+		                   dataMoveID,
+		                   &tssMapping,
+		                   ddEnabledState));
+	} catch (Error& e) {
+		state Error err = e;
+		TraceEvent("StartMoveKeysError", relocationIntervalId).errorUnsuppressed(err);
+		if (err.code() == error_code_data_move_cancelled) {
+			wait(cleanUpDataMove(cx, dataMoveID, lock, keys, true, ddEnabledState));
+		}
+		throw err;
+	}
 
 	state Future<Void> completionSignaller =
 	    checkFetchingState(cx, healthyDestinations, keys, dataMovementComplete, relocationIntervalId, tssMapping);

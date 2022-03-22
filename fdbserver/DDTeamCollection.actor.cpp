@@ -474,7 +474,7 @@ public:
 		for (auto& server : initTeams->allServers) {
 			if (self->shouldHandleServer(server.first)) {
 				if (!self->isValidLocality(self->configuration.storagePolicy, server.first.locality)) {
-					TraceEvent(SevWarnAlways, "MissingLocality")
+					TraceEvent(SevWarnAlways, "MissingLocalit")
 					    .detail("Server", server.first.uniqueID)
 					    .detail("Locality", server.first.locality.toString());
 					auto addr = server.first.stableAddress();
@@ -484,7 +484,7 @@ public:
 						self->addActor.send(self->checkInvalidLocalities);
 					}
 				}
-				TraceEvent(SevDebug, "DDTeamCollectionInitAddServer");
+				TraceEvent(SevDebug, "DDTeamCollectionInitAddServer").detail("Server", server.first.id());
 				self->addServer(server.first, server.second, self->serverTrackerErrorOut, 0, *ddEnabledState);
 			}
 		}
@@ -2396,7 +2396,7 @@ public:
 				UID id = newServer.get().interf.id();
 				if (!self->server_and_tss_info.count(id)) {
 					if (!recruitTss || tssState->tssRecruitSuccess()) {
-						TraceEvent(SevDebug, "DDRecruitingAddServer");
+						TraceEvent(SevDebug, "DDRecruitingAddServer").detail("Server", newServer.get().interf.id());
 						self->addServer(newServer.get().interf,
 						                candidateWorker.processClass,
 						                self->serverTrackerErrorOut,
@@ -2782,7 +2782,7 @@ public:
 									currentInterfaceChanged.send(std::make_pair(ssi, processClass));
 								}
 							} else if (!self->recruitingIds.count(ssi.id())) {
-								TraceEvent(SevDebug, "DDServerListChangeAddServer");
+								TraceEvent(SevDebug, "DDServerListChangeAddServer").detail("Server", ssi.id());
 								self->addServer(ssi,
 								                processClass,
 								                self->serverTrackerErrorOut,
@@ -2904,7 +2904,7 @@ public:
 		if (self->storageWiggler->contains(server->getId())) {
 			self->storageWiggler->updateMetadata(server->getId(), data);
 		} else {
-			TraceEvent("ReadOrCreateStorageServerAddServer");
+			TraceEvent("ReadOrCreateStorageServerAddServer").detail("Server", server->getId());
 			self->storageWiggler->addServer(server->getId(), data);
 		}
 
@@ -3715,7 +3715,18 @@ bool DDTeamCollection::isValidLocality(Reference<IReplicationPolicy> storagePoli
 void DDTeamCollection::evaluateTeamQuality() const {
 	int teamCount = teams.size(), serverCount = allServers.size();
 	double teamsPerServer = (double)teamCount * configuration.storageTeamSize / serverCount;
-
+	if (serverCount != server_info.size()) {
+		std::vector<UID> serversAllServers(allServers);
+		std::vector<UID> serversServerInfo;
+		for (const auto& [id, _] : server_info) {
+			serversServerInfo.push_back(id);
+		}
+		std::sort(serversAllServers.begin(), serversAllServers.end());
+		std::sort(serversServerInfo.begin(), serversServerInfo.end());
+		TraceEvent("ServerDiff")
+		    .detail("AllServers", describe(serversAllServers))
+		    .detail("ServerInfo", describe(serversServerInfo));
+	}
 	ASSERT_EQ(serverCount, server_info.size());
 
 	int minTeams = std::numeric_limits<int>::max();
