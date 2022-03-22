@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -117,8 +117,6 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 
 			state Transaction tr(cx);
 			state ReadYourWritesTransaction trRYOW(cx);
-
-			trRYOW.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 
 			if (self->testReadYourWrites) {
 				myValue = StringRef(format("%010d", deterministicRandom()->randomInt(0, 10000000)));

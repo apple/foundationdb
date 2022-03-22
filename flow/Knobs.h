@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -76,11 +76,24 @@ protected:
 	std::set<std::string> explicitlySetKnobs;
 
 public:
+	// Sets an integer value to an integer knob, returns false if the knob does not exist or type mismatch
 	bool setKnob(std::string const& name, int value);
+
+	// Sets a boolean value to a bool knob, returns false if the knob does not exist or type mismatch
 	bool setKnob(std::string const& name, bool value);
+
+	// Sets an int64_t value to an int64_t knob, returns false if the knob does not exist or type mismatch
 	bool setKnob(std::string const& name, int64_t value);
+
+	// Sets a double value to a double knob, returns false if the knob does not exist or type mismatch
 	bool setKnob(std::string const& name, double value);
+
+	// Sets a string value to a string knob, returns false if the knob does not exist or type mismatch
 	bool setKnob(std::string const& name, std::string const& value);
+
+	// Gets the value of knob
+	ParsedKnobValue getKnob(const std::string& name) const;
+
 	ParsedKnobValue parseKnobValue(std::string const& name, std::string const& value) const;
 	bool isAtomic(std::string const& knob) const;
 	void trace() const;

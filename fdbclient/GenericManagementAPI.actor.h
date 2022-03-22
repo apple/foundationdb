@@ -633,7 +633,7 @@ ACTOR template <class Transaction>
 Future<Optional<TenantMapEntry>> tryGetTenantTransaction(Transaction tr, TenantName name) {
 	state Key tenantMapKey = name.withPrefix(tenantMapPrefix);
 
-	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 	tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 
 	Optional<Value> val = wait(safeThreadFutureToFuture(tr->get(tenantMapKey)));
@@ -646,6 +646,7 @@ Future<Optional<TenantMapEntry>> tryGetTenant(Reference<DB> db, TenantName name)
 
 	loop {
 		try {
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			Optional<TenantMapEntry> entry = wait(tryGetTenantTransaction(tr, name));
 			return entry;
 		} catch (Error& e) {
@@ -683,7 +684,7 @@ Future<Optional<TenantMapEntry>> createTenantTransaction(Transaction tr, TenantN
 		throw invalid_tenant_name();
 	}
 
-	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 	state Future<Optional<TenantMapEntry>> tenantEntryFuture = tryGetTenantTransaction(tr, name);
@@ -725,6 +726,8 @@ Future<Void> createTenant(Reference<DB> db, TenantName name) {
 	state bool firstTry = true;
 	loop {
 		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
 			if (firstTry) {
 				Optional<TenantMapEntry> entry = wait(tryGetTenantTransaction(tr, name));
 				if (entry.present()) {
@@ -763,7 +766,7 @@ ACTOR template <class Transaction>
 Future<Void> deleteTenantTransaction(Transaction tr, TenantNameRef name) {
 	state Key tenantMapKey = name.withPrefix(tenantMapPrefix);
 
-	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 	state Optional<TenantMapEntry> tenantEntry = wait(tryGetTenantTransaction(tr, name));
@@ -788,6 +791,8 @@ Future<Void> deleteTenant(Reference<DB> db, TenantName name) {
 	state bool firstTry = true;
 	loop {
 		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
 			if (firstTry) {
 				Optional<TenantMapEntry> entry = wait(tryGetTenantTransaction(tr, name));
 				if (!entry.present()) {
@@ -824,7 +829,7 @@ Future<std::map<TenantName, TenantMapEntry>> listTenantsTransaction(Transaction 
                                                                     int limit) {
 	state KeyRange range = KeyRangeRef(begin, end).withPrefix(tenantMapPrefix);
 
-	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 	tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 
 	RangeResult results = wait(safeThreadFutureToFuture(
@@ -847,6 +852,7 @@ Future<std::map<TenantName, TenantMapEntry>> listTenants(Reference<DB> db,
 
 	loop {
 		try {
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			std::map<TenantName, TenantMapEntry> tenants = wait(listTenantsTransaction(tr, begin, end, limit));
 			return tenants;
 		} catch (Error& e) {

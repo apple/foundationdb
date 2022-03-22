@@ -1,0 +1,13 @@
+[configuration]
+allowDisablingTenants = false
+
+[[test]]
+testTitle = 'TenantManagementTest'
+clearAfterTest = true
+timeout = 2100
+runSetup = true
+
+    [[test.workload]]
+    testName = 'TenantManagement'
+	maxTenants = 1000
+	testDuration = 60

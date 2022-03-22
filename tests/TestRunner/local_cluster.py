@@ -200,7 +200,7 @@ logdir = {logdir}
 
     def create_database(self, storage='ssd'):
         args = [self.fdbcli_binary, '-C', self.cluster_file, '--exec',
-                'configure new single {}'.format(storage)]
+                'configure new single {} tenant_mode=optional_experimental'.format(storage)]
         res = subprocess.run(args, env=self.process_env())
         assert res.returncode == 0, "Create database failed with {}".format(
             res.returncode)

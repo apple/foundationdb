@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,8 +24,9 @@
 #include "fdbrpc/simulator.h"
 #include "flow/crc32c.h"
 #include "flow/genericactors.actor.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 #include "flow/xxhash.h"
+
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 typedef bool (*compare_pages)(void*, void*);
 typedef int64_t loc_t;
