@@ -71,7 +71,8 @@ struct GranuleMetadata : NonCopyable, ReferenceCounted<GranuleMetadata> {
 	KeyRange keyRange;
 
 	GranuleFiles files;
-	Standalone<GranuleDeltas> currentDeltas; // only contain deltas in pendingDeltaVersion + 1, bufferedDeltaVersion
+	Standalone<GranuleDeltas>
+	    currentDeltas; // only contain deltas in pendingDeltaVersion + 1 through bufferedDeltaVersion
 
 	uint64_t bytesInNewDeltaFiles = 0;
 	uint64_t bufferedDeltaBytes = 0;
