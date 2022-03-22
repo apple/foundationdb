@@ -25,10 +25,10 @@
 #include "fdbserver/CoordinationInterface.h" // copy constructors for ServerCoordinators class
 #include "fdbserver/Knobs.h"
 #include "fdbserver/MasterInterface.h"
+#include "fdbserver/ResolutionBalancer.actor.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "flow/ActorCollection.h"
 #include "flow/Trace.h"
-#include "flow/genericactors.actor.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -48,16 +48,11 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	Version version; // The last version assigned to a proxy by getVersion()
 	double lastVersionTime;
 
-	std::vector<CommitProxyInterface> commitProxies;
 	std::map<UID, CommitProxyVersionReplies> lastCommitProxyVersionReplies;
-	std::vector<ResolverInterface> resolvers;
 
 	MasterInterface myInterface;
 
-	AsyncVar<Standalone<VectorRef<ResolverMoveRef>>> resolverChanges;
-	Version resolverChangesVersion;
-	std::set<UID> resolverNeedingChanges;
-	AsyncTrigger triggerResolution;
+	ResolutionBalancer resolutionBalancer;
 
 	bool forceRecovery;
 
@@ -67,6 +62,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	Counter reportLiveCommittedVersionRequests;
 
 	Future<Void> logger;
+	Future<Void> balancer;
 
 	MasterData(Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
 	           MasterInterface const& myInterface,
@@ -78,7 +74,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	  : dbgid(myInterface.id()), lastEpochEnd(invalidVersion), recoveryTransactionVersion(invalidVersion),
 	    liveCommittedVersion(invalidVersion), databaseLocked(false), minKnownCommittedVersion(invalidVersion),
 	    coordinators(coordinators), version(invalidVersion), lastVersionTime(0), myInterface(myInterface),
-	    forceRecovery(forceRecovery), cc("Master", dbgid.toString()),
+	    resolutionBalancer(&version), forceRecovery(forceRecovery), cc("Master", dbgid.toString()),
 	    getCommitVersionRequests("GetCommitVersionRequests", cc),
 	    getLiveCommittedVersionRequests("GetLiveCommittedVersionRequests", cc),
 	    reportLiveCommittedVersionRequests("ReportLiveCommittedVersionRequests", cc) {
@@ -87,150 +83,10 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 			TraceEvent(SevError, "ForcedRecoveryRequiresDcID").log();
 			forceRecovery = false;
 		}
+		balancer = resolutionBalancer.resolutionBalancing();
 	}
 	~MasterData() = default;
 };
-
-static std::pair<KeyRangeRef, bool> findRange(CoalescedKeyRangeMap<int>& key_resolver,
-                                              Standalone<VectorRef<ResolverMoveRef>>& movedRanges,
-                                              int src,
-                                              int dest) {
-	auto ranges = key_resolver.ranges();
-	auto prev = ranges.begin();
-	auto it = ranges.begin();
-	++it;
-	if (it == ranges.end()) {
-		if (ranges.begin().value() != src ||
-		    std::find(movedRanges.begin(), movedRanges.end(), ResolverMoveRef(ranges.begin()->range(), dest)) !=
-		        movedRanges.end())
-			throw operation_failed();
-		return std::make_pair(ranges.begin().range(), true);
-	}
-
-	std::set<int> borders;
-	// If possible expand an existing boundary between the two resolvers
-	for (; it != ranges.end(); ++it) {
-		if (it->value() == src && prev->value() == dest &&
-		    std::find(movedRanges.begin(), movedRanges.end(), ResolverMoveRef(it->range(), dest)) ==
-		        movedRanges.end()) {
-			return std::make_pair(it->range(), true);
-		}
-		if (it->value() == dest && prev->value() == src &&
-		    std::find(movedRanges.begin(), movedRanges.end(), ResolverMoveRef(prev->range(), dest)) ==
-		        movedRanges.end()) {
-			return std::make_pair(prev->range(), false);
-		}
-		if (it->value() == dest)
-			borders.insert(prev->value());
-		if (prev->value() == dest)
-			borders.insert(it->value());
-		++prev;
-	}
-
-	prev = ranges.begin();
-	it = ranges.begin();
-	++it;
-	// If possible create a new boundry which doesn't exist yet
-	for (; it != ranges.end(); ++it) {
-		if (it->value() == src && !borders.count(prev->value()) &&
-		    std::find(movedRanges.begin(), movedRanges.end(), ResolverMoveRef(it->range(), dest)) ==
-		        movedRanges.end()) {
-			return std::make_pair(it->range(), true);
-		}
-		if (prev->value() == src && !borders.count(it->value()) &&
-		    std::find(movedRanges.begin(), movedRanges.end(), ResolverMoveRef(prev->range(), dest)) ==
-		        movedRanges.end()) {
-			return std::make_pair(prev->range(), false);
-		}
-		++prev;
-	}
-
-	it = ranges.begin();
-	for (; it != ranges.end(); ++it) {
-		if (it->value() == src &&
-		    std::find(movedRanges.begin(), movedRanges.end(), ResolverMoveRef(it->range(), dest)) ==
-		        movedRanges.end()) {
-			return std::make_pair(it->range(), true);
-		}
-	}
-	throw operation_failed(); // we are already attempting to move all of the data one resolver is assigned, so do not
-	                          // move anything
-}
-
-// Balance key ranges among resolvers so that their load are evenly distributed.
-ACTOR Future<Void> resolutionBalancing(Reference<MasterData> self) {
-	wait(self->triggerResolution.onTrigger());
-
-	state CoalescedKeyRangeMap<int> key_resolver;
-	key_resolver.insert(allKeys, 0);
-	loop {
-		wait(delay(SERVER_KNOBS->MIN_BALANCE_TIME, TaskPriority::ResolutionMetrics));
-		while (self->resolverChanges.get().size())
-			wait(self->resolverChanges.onChange());
-		state std::vector<Future<ResolutionMetricsReply>> futures;
-		for (auto& p : self->resolvers)
-			futures.push_back(
-			    brokenPromiseToNever(p.metrics.getReply(ResolutionMetricsRequest(), TaskPriority::ResolutionMetrics)));
-		wait(waitForAll(futures));
-		state IndexedSet<std::pair<int64_t, int>, NoMetric> metrics;
-
-		int64_t total = 0;
-		for (int i = 0; i < futures.size(); i++) {
-			total += futures[i].get().value;
-			metrics.insert(std::make_pair(futures[i].get().value, i), NoMetric());
-			//TraceEvent("ResolverMetric").detail("I", i).detail("Metric", futures[i].get());
-		}
-		if (metrics.lastItem()->first - metrics.begin()->first > SERVER_KNOBS->MIN_BALANCE_DIFFERENCE) {
-			try {
-				state int src = metrics.lastItem()->second;
-				state int dest = metrics.begin()->second;
-				state int64_t amount = std::min(metrics.lastItem()->first - total / self->resolvers.size(),
-				                                total / self->resolvers.size() - metrics.begin()->first) /
-				                       2;
-				state Standalone<VectorRef<ResolverMoveRef>> movedRanges;
-
-				loop {
-					state std::pair<KeyRangeRef, bool> range = findRange(key_resolver, movedRanges, src, dest);
-
-					ResolutionSplitRequest req;
-					req.front = range.second;
-					req.offset = amount;
-					req.range = range.first;
-
-					ResolutionSplitReply split =
-					    wait(brokenPromiseToNever(self->resolvers[metrics.lastItem()->second].split.getReply(
-					        req, TaskPriority::ResolutionMetrics)));
-					KeyRangeRef moveRange = range.second ? KeyRangeRef(range.first.begin, split.key)
-					                                     : KeyRangeRef(split.key, range.first.end);
-					movedRanges.push_back_deep(movedRanges.arena(), ResolverMoveRef(moveRange, dest));
-					TraceEvent("MovingResolutionRange")
-					    .detail("Src", src)
-					    .detail("Dest", dest)
-					    .detail("Amount", amount)
-					    .detail("StartRange", range.first)
-					    .detail("MoveRange", moveRange)
-					    .detail("Used", split.used)
-					    .detail("KeyResolverRanges", key_resolver.size());
-					amount -= split.used;
-					if (moveRange != range.first || amount <= 0)
-						break;
-				}
-				for (auto& it : movedRanges)
-					key_resolver.insert(it.range, it.dest);
-				// for(auto& it : key_resolver.ranges())
-				//	TraceEvent("KeyResolver").detail("Range", it.range()).detail("Value", it.value());
-
-				self->resolverChangesVersion = self->version + 1;
-				for (auto& p : self->commitProxies)
-					self->resolverNeedingChanges.insert(p.id());
-				self->resolverChanges.set(movedRanges);
-			} catch (Error& e) {
-				if (e.code() != error_code_operation_failed)
-					throw;
-			}
-		}
-	}
-}
 
 ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionRequest req) {
 	state Span span("M:getVersion"_loc, { req.spanContext });
@@ -281,15 +137,7 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 			TEST(maxVersionGap); // Maximum possible version gap
 			self->lastVersionTime = t1;
 
-			if (self->resolverNeedingChanges.count(req.requestingProxy)) {
-				rep.resolverChanges = self->resolverChanges.get();
-				rep.resolverChangesVersion = self->resolverChangesVersion;
-				self->resolverNeedingChanges.erase(req.requestingProxy);
-
-				TEST(!rep.resolverChanges.empty()); // resolution balancing moves keyranges
-				if (self->resolverNeedingChanges.empty())
-					self->resolverChanges.set(Standalone<VectorRef<ResolverMoveRef>>());
-			}
+			self->resolutionBalancer.setChangesInReply(req.requestingProxy, rep);
 		}
 
 		rep.version = self->version;
@@ -311,16 +159,11 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 ACTOR Future<Void> provideVersions(Reference<MasterData> self) {
 	state ActorCollection versionActors(false);
 
-	for (auto& p : self->commitProxies)
-		self->lastCommitProxyVersionReplies[p.id()] = CommitProxyVersionReplies();
-
-	loop {
-		choose {
-			when(GetCommitVersionRequest req = waitNext(self->myInterface.getCommitVersion.getFuture())) {
-				versionActors.add(getVersion(self, req));
-			}
-			when(wait(versionActors.getResult())) {}
+	loop choose {
+		when(GetCommitVersionRequest req = waitNext(self->myInterface.getCommitVersion.getFuture())) {
+			versionActors.add(getVersion(self, req));
 		}
+		when(wait(versionActors.getResult())) {}
 	}
 }
 
@@ -381,17 +224,15 @@ ACTOR Future<Void> updateRecoveryData(Reference<MasterData> self) {
 			self->lastEpochEnd = req.lastEpochEnd;
 		}
 		if (req.commitProxies.size() > 0) {
-			self->commitProxies = req.commitProxies;
 			self->lastCommitProxyVersionReplies.clear();
 
-			for (auto& p : self->commitProxies) {
+			for (auto& p : req.commitProxies) {
 				self->lastCommitProxyVersionReplies[p.id()] = CommitProxyVersionReplies();
 			}
 		}
 
-		self->resolvers = req.resolvers;
-		if (req.resolvers.size() > 1)
-			self->triggerResolution.trigger();
+		self->resolutionBalancer.setCommitProxies(req.commitProxies);
+		self->resolutionBalancer.setResolvers(req.resolvers);
 
 		req.reply.send(Void());
 	}
@@ -446,7 +287,6 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
 	addActor.send(provideVersions(self));
 	addActor.send(serveLiveCommittedVersion(self));
 	addActor.send(updateRecoveryData(self));
-	addActor.send(resolutionBalancing(self));
 
 	TEST(!lifetime.isStillValid(db->get().masterLifetime, mi.id() == db->get().master.id())); // Master born doomed
 	TraceEvent("MasterLifetime", self->dbgid).detail("LifetimeToken", lifetime.toString());

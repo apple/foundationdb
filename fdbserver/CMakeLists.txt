@@ -96,6 +96,8 @@ set(FDBSERVER_SRCS
   Ratekeeper.h
   RatekeeperInterface.h
   RecoveryState.h
+  ResolutionBalancer.actor.cpp
+  ResolutionBalancer.actor.h
   Resolver.actor.cpp
   ResolverInterface.h
   RestoreApplier.actor.cpp
