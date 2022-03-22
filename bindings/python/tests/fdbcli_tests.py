@@ -274,18 +274,18 @@ def targetversion(logger):
     logger.debug("setting version epoch to default")
     run_fdbcli_command('targetversion add 0')
     # get the version epoch
-    versionepoch1 = int(extract_version_epoch(run_fdbcli_command('targetversion getepoch')))
+    versionepoch1 = extract_version_epoch(run_fdbcli_command('targetversion getepoch'))
     logger.debug("version epoch: {}".format(versionepoch1))
     # make sure the version increased
     version3 = int(run_fdbcli_command('getversion'))
     logger.debug("read version: {}".format(version3))
     assert version3 >= version2
     # slightly increase the version epoch
-    versionepoch2 = int(extract_version_epoch(run_fdbcli_command("targetversion setepoch {}".format(versionepoch1 + 1000000))))
+    versionepoch2 = extract_version_epoch(run_fdbcli_command("targetversion setepoch {}".format(versionepoch1 + 1000000)))
     logger.debug("version epoch: {}".format(versionepoch2))
     assert versionepoch2 == versionepoch1 + 1000000
     # slightly decrease the version epoch
-    versionepoch3 = int(extract_version_epoch(run_fdbcli_command("targetversion add {}".format(versionepoch2 - 1000000))))
+    versionepoch3 = extract_version_epoch(run_fdbcli_command("targetversion add {}".format(-1000000)))
     logger.debug("version epoch: {}".format(versionepoch3))
     assert versionepoch3 == versionepoch2 - 1000000 == versionepoch1
     # the versions should still be increasing
@@ -627,7 +627,7 @@ if __name__ == '__main__':
         triggerddteaminfolog()
         # TODO: similar to advanceversion, this seems to cause some issues, so disable for now
         # This must go last, otherwise the version advancement can mess with the other tests
-        # targetversion()
+        targetversion()
     else:
         assert args.process_number > 1, "Process number should be positive"
         coordinators()

@@ -1917,7 +1917,7 @@ ACTOR static Future<RangeResult> getVersionEpochActor(ReadYourWritesTransaction*
 	Optional<Value> val = wait(ryw->getTransaction().get(versionEpochKey));
 	RangeResult result;
 	if (val.present()) {
-		int64_t versionEpoch = BinaryReader::fromStringRef<Version>(val.get(), Unversioned());
+		int64_t versionEpoch = BinaryReader::fromStringRef<int64_t>(val.get(), Unversioned());
 		ValueRef version(result.arena(), boost::lexical_cast<std::string>(versionEpoch));
 		result.push_back_deep(result.arena(), KeyValueRef(kr.begin, version));
 	}
@@ -1933,7 +1933,7 @@ Future<RangeResult> VersionEpochImpl::getRange(ReadYourWritesTransaction* ryw,
 	return getVersionEpochActor(ryw, kr);
 }
 
-ACTOR static Future<Optional<std::string>> versionEpochCommitActor(ReadYourWritesTransaction* ryw, Version v) {
+ACTOR static Future<Optional<std::string>> versionEpochCommitActor(ReadYourWritesTransaction* ryw, int64_t v) {
 	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
 	ryw->getTransaction().setOption(FDBTransactionOptions::RAW_ACCESS);
 	ryw->getTransaction().set(versionEpochKey, BinaryWriter::toValue(v, Unversioned()));
