@@ -522,7 +522,7 @@ Future<Version> TagPartitionedLogSystem::push(Version prevVersion,
 		for (auto& it : tLogs) {
 			for (int loc = 0; loc < it->logServers.size(); loc++) {
 				if (tpcvMap.get().find(location) != tpcvMap.get().end()) {
-					tLogCount[loc]++;
+					tLogCount[location];
 				}
 				location++;
 			}
@@ -566,7 +566,7 @@ Future<Version> TagPartitionedLogSystem::push(Version prevVersion,
 				                                                                          knownCommittedVersion,
 				                                                                          minKnownCommittedVersion,
 				                                                                          msg,
-				                                                                          tLogCount[loc],
+				                                                                          tLogCount[location],
 				                                                                          debugID),
 				                                                        TaskPriority::ProxyTLogCommitReply)));
 				Future<Void> commitSuccess = success(allReplies.back());
