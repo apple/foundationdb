@@ -2097,52 +2097,53 @@ TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/RocksDBReopen") {
 	return Void();
 }
 
-TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/CheckpointRestoreColumnFamily") {
-	state std::string cwd = platform::getWorkingDirectory() + "/";
-	state std::string rocksDBTestDir = "rocksdb-kvstore-br-test-db";
-	platform::eraseDirectoryRecursive(rocksDBTestDir);
+// TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/CheckpointRestoreColumnFamily") {
+// 	state std::string cwd = platform::getWorkingDirectory() + "/";
+// 	state std::string rocksDBTestDir = "rocksdb-kvstore-br-test-db";
+// 	platform::eraseDirectoryRecursive(rocksDBTestDir);
 
-	state IKeyValueStore* kvStore = new RocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
-	wait(kvStore->init());
+// 	state IKeyValueStore* kvStore = new RocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
+// 	wait(kvStore->init());
 
-	kvStore->set({ LiteralStringRef("foo"), LiteralStringRef("bar") });
-	wait(kvStore->commit(false));
+// 	kvStore->set({ LiteralStringRef("foo"), LiteralStringRef("bar") });
+// 	wait(kvStore->commit(false));
 
-	Optional<Value> val = wait(kvStore->readValue(LiteralStringRef("foo")));
-	ASSERT(Optional<Value>(LiteralStringRef("bar")) == val);
+// 	Optional<Value> val = wait(kvStore->readValue(LiteralStringRef("foo")));
+// 	ASSERT(Optional<Value>(LiteralStringRef("bar")) == val);
 
-	platform::eraseDirectoryRecursive("checkpoint");
-	state std::string checkpointDir = cwd + "checkpoint";
+// 	state std::string rocksDBRestoreDir = "rocksdb-kvstore-br-restore-db";
+// 	platform::eraseDirectoryRecursive(rocksDBRestoreDir);
 
-	CheckpointRequest request(
-	    latestVersion, allKeys, RocksDBColumnFamily, deterministicRandom()->randomUniqueID(), checkpointDir);
-	CheckpointMetaData metaData = wait(kvStore->checkpoint(request));
+// 	state IKeyValueStore* kvStoreCopy =
+// 	    new RocksDBKeyValueStore(rocksDBRestoreDir, deterministicRandom()->randomUniqueID());
+// 	wait(kvStoreCopy->init());
 
-	state std::string rocksDBRestoreDir = "rocksdb-kvstore-br-restore-db";
-	platform::eraseDirectoryRecursive(rocksDBRestoreDir);
+// 	platform::eraseDirectoryRecursive("checkpoint");
+// 	state std::string checkpointDir = cwd + "checkpoint";
 
-	state IKeyValueStore* kvStoreCopy =
-	    new RocksDBKeyValueStore(rocksDBRestoreDir, deterministicRandom()->randomUniqueID());
+// 	CheckpointRequest request(
+// 	    latestVersion, allKeys, RocksDBColumnFamily, deterministicRandom()->randomUniqueID(), checkpointDir);
+// 	CheckpointMetaData metaData = wait(kvStore->checkpoint(request));
 
-	std::vector<CheckpointMetaData> checkpoints;
-	checkpoints.push_back(metaData);
-	wait(kvStoreCopy->restore(checkpoints));
+// 	std::vector<CheckpointMetaData> checkpoints;
+// 	checkpoints.push_back(metaData);
+// 	wait(kvStoreCopy->restore(checkpoints));
 
-	Optional<Value> val = wait(kvStoreCopy->readValue(LiteralStringRef("foo")));
-	ASSERT(Optional<Value>(LiteralStringRef("bar")) == val);
+// 	Optional<Value> val = wait(kvStoreCopy->readValue(LiteralStringRef("foo")));
+// 	ASSERT(Optional<Value>(LiteralStringRef("bar")) == val);
 
-	std::vector<Future<Void>> closes;
-	closes.push_back(kvStore->onClosed());
-	closes.push_back(kvStoreCopy->onClosed());
-	kvStore->close();
-	kvStoreCopy->close();
-	wait(waitForAll(closes));
+// 	std::vector<Future<Void>> closes;
+// 	closes.push_back(kvStore->onClosed());
+// 	closes.push_back(kvStoreCopy->onClosed());
+// 	kvStore->close();
+// 	kvStoreCopy->close();
+// 	wait(waitForAll(closes));
 
-	platform::eraseDirectoryRecursive(rocksDBTestDir);
-	platform::eraseDirectoryRecursive(rocksDBRestoreDir);
+// 	platform::eraseDirectoryRecursive(rocksDBTestDir);
+// 	platform::eraseDirectoryRecursive(rocksDBRestoreDir);
 
-	return Void();
-}
+// 	return Void();
+// }
 
 TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/CheckpointRestoreKeyValues") {
 	state std::string cwd = platform::getWorkingDirectory() + "/";

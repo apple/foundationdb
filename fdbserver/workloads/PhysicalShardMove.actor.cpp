@@ -132,7 +132,7 @@ struct SSCheckpointWorkload : TestWorkload {
 		loop {
 			state UID debugID = deterministicRandom()->randomUniqueID();
 			try {
-				tr.setOption(FDBTransactionOptions::DEBUG_DUMP);
+				// tr.setOption(FDBTransactionOptions::DEBUG_DUMP);
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.debugTransaction(debugID);
 				if (value.present()) {

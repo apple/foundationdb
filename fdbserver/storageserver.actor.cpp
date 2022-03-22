@@ -5915,8 +5915,7 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
                                         const KeyRangeRef& desiredKeys,
                                         bool nowAssigned,
                                         Version version,
-                                        ChangeServerKeysContext context,
-                                        Optional<MoveInShardMetaData> moveInShardMetaData) {
+                                        ChangeServerKeysContext context) {
 	KeyRange keys(desiredKeys);
 	ASSERT(!keys.empty());
 
@@ -6067,7 +6066,7 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 	}
 	for (const auto& [range, pending] : moveInRanges) {
 		if (!pending) {
-			data->addShard(ShardInfo::newMoveInShard(data, range, version + 1, moveInShardMetaData));
+			data->addShard(ShardInfo::newMoveInShard(data, range, version + 1, Optional<MoveInShardMetaData>()));
 		} else {
 			data->addShard(ShardInfo::newPendingMoveInShard(data, range, version + 1));
 		}
@@ -6187,11 +6186,6 @@ void changeServerKeys(StorageServer* data,
                       Version version,
                       ChangeServerKeysContext context,
                       Optional<MoveInShardMetaData> moveInShardMetaData = Optional<MoveInShardMetaData>()) {
-	if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
-		changeServerKeysWithPhysicalShards(data, keys, nowAssigned, version, context, moveInShardMetaData);
-		return;
-	}
-
 	ASSERT(!keys.empty());
 
 	// TraceEvent("ChangeServerKeys", data->thisServerID)
@@ -6495,7 +6489,11 @@ private:
 				// If emptyRange, treat the shard as empty, see removeKeysFromFailedServer() for more details about this
 				// scenario.
 				const ChangeServerKeysContext context = emptyRange ? CSK_ASSIGN_EMPTY : CSK_UPDATE;
-				changeServerKeys(data, keys, nowAssigned, currentVersion - 1, context);
+				if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+					changeServerKeysWithPhysicalShards(data, keys, nowAssigned, currentVersion - 1, context);
+				} else {
+					changeServerKeys(data, keys, nowAssigned, currentVersion - 1, context);
+				}
 			}
 
 			processedStartKey = false;

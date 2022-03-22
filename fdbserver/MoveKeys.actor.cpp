@@ -631,7 +631,8 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 					    .detail("DataMoveKey", dataMoveKeyFor(dataMoveID))
 					    .detail("CommitVersion", tr->getCommittedVersion())
 					    .detail("DeltaRange", currentKeys.toString())
-					    .detail("Range", dataMove.range.toString());
+					    .detail("Range", dataMove.range.toString())
+					    .detail("DataMove", dataMove.toString());
 
 					/*TraceEvent("StartMoveKeysCommitDone", relocationIntervalId)
 					    .detail("CommitVersion", tr.getCommittedVersion())
@@ -1102,10 +1103,10 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 					if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
 						Optional<Value> val = wait(tr.get(dataMoveKeyFor(dataMoveID)));
 						if (val.present()) {
+							dataMove = decodeDataMoveValue(val.get());
 							TraceEvent(SevDebug, "FinishMoveKeysFoundDataMove", relocationIntervalId)
 							    .detail("DataMoveID", dataMoveID)
 							    .detail("DataMove", dataMove.toString());
-							dataMove = decodeDataMoveValue(val.get());
 							if (dataMove.getPhase() == DataMoveMetaData::Deleting) {
 								TraceEvent(SevWarn, interval.end(), relocationIntervalId)
 								    .detail("DataMoveBeingDeleted", dataMoveID);
@@ -1389,7 +1390,7 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 								    .detail("SrcServers", describe(dataMove.src));
 							} else {
 								dataMove.range = KeyRangeRef(currentKeys.end, keys.end);
-								dataMove.setPhase(DataMoveMetaData::Deleting);
+								// dataMove.setPhase(DataMoveMetaData::Deleting);
 								tr.set(dataMoveKeyFor(dataMoveID), dataMoveValue(dataMove));
 								TraceEvent("CleanUpDataMovePartial", dataMoveID)
 								    .detail("DataMoveID", dataMoveID)
@@ -1414,6 +1415,7 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 					}
 					tr.reset();
 				} catch (Error& error) {
+					TraceEvent(SevWarnAlways, "TryFinishMoveKeysError", relocationIntervalId).errorUnsuppressed(error);
 					if (error.code() == error_code_actor_cancelled)
 						throw;
 					state Error err = error;

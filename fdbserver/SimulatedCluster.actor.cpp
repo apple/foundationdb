@@ -1314,6 +1314,9 @@ void SimulationConfig::setDatacenters(const TestConfig& testConfig) {
 		// overwrite whatever decision we made before
 		generateFearless = testConfig.generateFearless.get();
 	}
+	if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+		generateFearless = false;
+	}
 	datacenters =
 	    testConfig.simpleConfig
 	        ? 1

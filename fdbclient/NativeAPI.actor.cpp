@@ -6121,7 +6121,8 @@ Future<Void> Transaction::commitMutations() {
 			    tr.arena, tr.transaction.write_conflict_ranges.begin(), tr.transaction.write_conflict_ranges.size());
 		}
 
-		if (trState->options.debugDump) {
+		{
+			// if (trState->options.debugDump) {
 			UID u = nondeterministicRandom()->randomUniqueID();
 			TraceEvent("TransactionDump", u).log();
 			for (auto i = tr.transaction.mutations.begin(); i != tr.transaction.mutations.end(); ++i)

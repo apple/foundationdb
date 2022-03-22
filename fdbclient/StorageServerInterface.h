@@ -257,12 +257,12 @@ struct GetValueReply : public LoadBalancedReply {
 struct GetValueRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 8454530;
 	SpanID spanContext;
-	TenantInfo tenantInfo;
 	Key key;
 	Version version;
 	Optional<TagSet> tags;
 	Optional<UID> debugID;
 	ReplyPromise<GetValueReply> reply;
+	TenantInfo tenantInfo;
 
 	GetValueRequest() {}
 	GetValueRequest(SpanID spanContext,
