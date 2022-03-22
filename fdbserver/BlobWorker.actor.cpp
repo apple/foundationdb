@@ -1261,7 +1261,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			           metadata->keyRange.end.printable(),
 			           metadata->originalEpoch,
 			           metadata->originalSeqno);
-			fmt::print("  CFID: {}\n", startState.granuleID.toString());
+			fmt::print("  CFID: {} ({})\n", startState.granuleID.toString(), cfKey.printable());
 			fmt::print("  CF Start Version: {}\n", startState.changeFeedStartVersion);
 			fmt::print("  Previous Durable Version: {}\n", startState.previousDurableVersion);
 			fmt::print("  doSnapshot={}\n", startState.doSnapshot ? "T" : "F");
@@ -2427,6 +2427,7 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 	ASSERT(req.type != AssignRequestType::Continue);
 	state Transaction tr(bwData->db);
 	state Key lockKey = blobGranuleLockKeyFor(req.keyRange);
+	state UID newGranuleID = deterministicRandom()->randomUniqueID();
 
 	if (BW_DEBUG) {
 		fmt::print("{0} [{1} - {2}) opening\n",
@@ -2491,8 +2492,8 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 					info.granuleID = info.history.get().value.granuleID;
 				} else {
 					// FIXME: could avoid max uid for granule ids here
-					// if this granule is not derived from a split or merge, create the granule id here
-					info.granuleID = deterministicRandom()->randomUniqueID();
+					// if this granule is not derived from a split or merge, use new granule id
+					info.granuleID = newGranuleID;
 				}
 				wait(updateChangeFeed(
 				    &tr, granuleIDToCFKey(info.granuleID), ChangeFeedStatus::CHANGE_FEED_CREATE, req.keyRange));

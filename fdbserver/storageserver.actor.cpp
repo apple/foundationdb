@@ -1943,7 +1943,7 @@ ACTOR Future<Void> overlappingChangeFeedsQ(StorageServer* data, OverlappingChang
 		return Void();
 	}
 
-	Version knownCommittedRequired = invalidVersion;
+	Version metadataVersion = invalidVersion;
 
 	auto ranges = data->keyChangeFeed.intersectingRanges(req.range);
 	std::map<Key, std::tuple<KeyRange, Version, Version>> rangeIds;
@@ -1952,12 +1952,12 @@ ACTOR Future<Void> overlappingChangeFeedsQ(StorageServer* data, OverlappingChang
 			// Can't tell other SS about a change feed create or stopVersion that may get rolled back, and we only need
 			// to tell it about the metadata if req.minVersion > metadataVersion, since it will get the information from
 			// its own private mutations if it hasn't processed up that version yet
-			knownCommittedRequired = std::max(knownCommittedRequired, it->metadataCreateVersion);
+			metadataVersion = std::max(metadataVersion, it->metadataCreateVersion);
 
 			Version stopVersion;
 			if (it->stopVersion != MAX_VERSION && req.minVersion > it->stopVersion) {
 				stopVersion = it->stopVersion;
-				knownCommittedRequired = std::max(knownCommittedRequired, stopVersion);
+				metadataVersion = std::max(metadataVersion, stopVersion);
 			} else {
 				stopVersion = MAX_VERSION;
 			}
@@ -1971,10 +1971,10 @@ ACTOR Future<Void> overlappingChangeFeedsQ(StorageServer* data, OverlappingChang
 		    it.first, std::get<0>(it.second), std::get<1>(it.second), std::get<2>(it.second)));
 	}
 
-	// Make sure all of the stop versions we are sending aren't going to get rolled back
-	if (knownCommittedRequired != invalidVersion && knownCommittedRequired > data->knownCommittedVersion.get()) {
-		TEST(true); // overlapping change feeds waiting for stop version to be committed
-		wait(data->knownCommittedVersion.whenAtLeast(knownCommittedRequired));
+	// Make sure all of the metadata we are sending won't get rolled back
+	if (metadataVersion != invalidVersion && metadataVersion > data->knownCommittedVersion.get()) {
+		TEST(true); // overlapping change feeds waiting for metadata version to be committed
+		wait(data->desiredOldestVersion.whenAtLeast(metadataVersion));
 	}
 	req.reply.send(reply);
 	return Void();
