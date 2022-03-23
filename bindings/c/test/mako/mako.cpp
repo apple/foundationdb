@@ -1993,14 +1993,14 @@ int parseArguments(int argc, char* argv[], Arguments& args) {
 				// if --report_json is the last option and no file is specified
 				// or --report_json is followed by another option
 				char default_file[] = "mako.json";
-				strncpy(args.json_output_path, default_file, strlen(default_file));
+				strncpy(args.json_output_path, default_file, sizeof(default_file));
 			} else {
-				strncpy(args.json_output_path, optarg, strlen(optarg) + 1);
+				strncpy(args.json_output_path, optarg, std::min(sizeof(args.json_output_path), strlen(optarg) + 1));
 			}
 			break;
 		case ARG_BG_FILE_PATH:
 			args.bg_materialize_files = true;
-			strncpy(args.bg_file_path, optarg, strlen(optarg) + 1);
+			strncpy(args.bg_file_path, optarg, std::min(sizeof(args.bg_file_path), strlen(optarg) + 1));
 		}
 	}
 
