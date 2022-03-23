@@ -1,5 +1,5 @@
 /*
- * TagThrottler.h
+ * GlobalTagThrottler.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -19,6 +19,7 @@
  */
 
 #include "fdbserver/TagThrottler.h"
+#include "flow/actorcompiler.h" // must be last include
 
 class GlobalTagThrottlerImpl {
 	Database db;

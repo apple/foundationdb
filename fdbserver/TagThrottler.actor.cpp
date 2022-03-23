@@ -21,6 +21,7 @@
 
 #include "fdbserver/TagThrottler.h"
 #include "fdbserver/RkTagThrottleCollection.h"
+#include "flow/actorcompiler.h" // must be last include
 
 class TagThrottlerImpl {
 	Database db;
