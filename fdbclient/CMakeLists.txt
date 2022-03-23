@@ -134,6 +134,7 @@ set(FDBCLIENT_SRCS
   StackLineage.cpp
   SystemData.cpp
   SystemData.h
+  TagQuota.h
   TagThrottle.actor.cpp
   TagThrottle.actor.h
   TaskBucket.actor.cpp

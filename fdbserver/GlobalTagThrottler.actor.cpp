@@ -18,16 +18,52 @@
  * limitations under the License.
  */
 
+#include "fdbclient/FDBTypes.h"
+#include "fdbclient/TagQuota.h"
 #include "fdbserver/TagThrottler.h"
 #include "flow/actorcompiler.h" // must be last include
 
 class GlobalTagThrottlerImpl {
+	struct QuotaAndCounter {
+		TagQuotaValue quota;
+		int64_t counter;
+	};
+
 	Database db;
 	UID id;
+	std::map<TransactionTag, QuotaAndCounter> throttledTags;
+
+	ACTOR static Future<Void> monitorThrottlingChanges(GlobalTagThrottlerImpl* self) {
+		loop {
+			state ReadYourWritesTransaction tr(self->db);
+
+			loop {
+				try {
+					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+					state RangeResult currentQuotas = wait(tr.getRange(tagQuotaKeys, CLIENT_KNOBS->TOO_MANY));
+					for (auto const kv : currentQuotas) {
+						auto tag = kv.key.removePrefix(tagQuotaPrefix);
+						auto quota = ObjectReader::fromStringRef<TagQuotaValue>(kv.value, IncludeVersion());
+						self->throttledTags[tag].quota = quota;
+					}
+
+					wait(tr.watch(tagThrottleSignalKey));
+					TraceEvent("GlobalTagThrottlerChangeSignaled");
+					TEST(true); // Global tag throttler detected quota changes
+					break;
+				} catch (Error& e) {
+					TraceEvent("GlobalTagThrottlerMonitoringChangesError", self->id).error(e);
+					wait(tr.onError(e));
+				}
+			}
+		}
+	}
 
 public:
 	GlobalTagThrottlerImpl(Database db, UID id) : db(db), id(id) {}
-	Future<Void> monitorThrottlingChanges() { return Void(); }
+	Future<Void> monitorThrottlingChanges() { return monitorThrottlingChanges(this); }
 	void addRequests(TransactionTag tag, int count) {}
 	uint64_t getThrottledTagChangeId() const { return 0; }
 	PrioritizedTransactionTagMap<ClientTagThrottleLimits> getClientRates() { return {}; }
