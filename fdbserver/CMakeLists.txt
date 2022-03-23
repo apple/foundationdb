@@ -118,6 +118,8 @@ set(FDBSERVER_SRCS
   RestoreWorker.actor.h
   RestoreWorkerInterface.actor.cpp
   RestoreWorkerInterface.actor.h
+  RkTagThrottleCollection.cpp
+  RkTagThrottleCollection.h
   RocksDBCheckpointUtils.actor.cpp
   RocksDBCheckpointUtils.actor.h
   RoleLineage.actor.cpp
@@ -152,6 +154,8 @@ set(FDBSERVER_SRCS
   TesterInterface.actor.h
   TLogInterface.h
   TLogServer.actor.cpp
+  TransactionTagCounter.cpp
+  TransactionTagCounter.h
   TSSMappingUtil.actor.cpp
   TSSMappingUtil.actor.h
   VersionedBTree.actor.cpp
