@@ -132,7 +132,7 @@ struct GranuleRangeMetadata {
 	  : lastEpoch(epoch), lastSeqno(seqno), activeMetadata(activeMetadata) {}
 };
 
-// represents a previous version of a granule, and optionally the files that compose it
+// represents a previous version of a granule, and optionally the files that compose it.
 struct GranuleHistoryEntry : NonCopyable, ReferenceCounted<GranuleHistoryEntry> {
 	KeyRange range;
 	UID granuleID;
