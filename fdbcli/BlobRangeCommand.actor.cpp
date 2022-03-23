@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2021 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -62,12 +62,27 @@ ACTOR Future<Void> setBlobRange(Database db, Key startKey, Key endKey, Value val
 
 namespace fdb_cli {
 
-ACTOR Future<bool> blobRangeCommandActor(Database localDb, std::vector<StringRef> tokens) {
+ACTOR Future<bool> blobRangeCommandActor(Database localDb,
+                                         Optional<TenantMapEntry> tenantEntry,
+                                         std::vector<StringRef> tokens) {
 	// enables blob writing for the given range
 	if (tokens.size() != 4) {
 		printUsage(tokens[0]);
 		return false;
-	} else if (tokens[3] > LiteralStringRef("\xff")) {
+	}
+
+	Key begin;
+	Key end;
+
+	if (tenantEntry.present()) {
+		begin = tokens[2].withPrefix(tenantEntry.get().prefix);
+		end = tokens[3].withPrefix(tenantEntry.get().prefix);
+	} else {
+		begin = tokens[2];
+		end = tokens[3];
+	}
+
+	if (end > LiteralStringRef("\xff")) {
 		// TODO is this something we want?
 		printf("Cannot blobbify system keyspace! Problematic End Key: %s\n", tokens[3].printable().c_str());
 		return false;
@@ -78,12 +93,12 @@ ACTOR Future<bool> blobRangeCommandActor(Database localDb, std::vector<StringRef
 			printf("Starting blobbify range for [%s - %s)\n",
 			       tokens[2].printable().c_str(),
 			       tokens[3].printable().c_str());
-			wait(setBlobRange(localDb, tokens[2], tokens[3], LiteralStringRef("1")));
+			wait(setBlobRange(localDb, begin, end, LiteralStringRef("1")));
 		} else if (tokencmp(tokens[1], "stop")) {
 			printf("Stopping blobbify range for [%s - %s)\n",
 			       tokens[2].printable().c_str(),
 			       tokens[3].printable().c_str());
-			wait(setBlobRange(localDb, tokens[2], tokens[3], StringRef()));
+			wait(setBlobRange(localDb, begin, end, StringRef()));
 		} else {
 			printUsage(tokens[0]);
 			printf("Usage: blobrange <start|stop> <startkey> <endkey>");

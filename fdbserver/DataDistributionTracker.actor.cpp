@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -973,7 +973,7 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
 	}
 }
 
-std::vector<KeyRange> ShardsAffectedByTeamFailure::getShardsFor(Team team) {
+std::vector<KeyRange> ShardsAffectedByTeamFailure::getShardsFor(Team team) const {
 	std::vector<KeyRange> r;
 	for (auto it = team_shards.lower_bound(std::pair<Team, KeyRange>(team, KeyRangeRef()));
 	     it != team_shards.end() && it->first == team;
@@ -1106,7 +1106,7 @@ void ShardsAffectedByTeamFailure::finishMove(KeyRangeRef keys) {
 	}
 }
 
-void ShardsAffectedByTeamFailure::check() {
+void ShardsAffectedByTeamFailure::check() const {
 	if (EXPENSIVE_VALIDATION) {
 		for (auto t = team_shards.begin(); t != team_shards.end(); ++t) {
 			auto i = shard_teams.rangeContaining(t->second.begin);
@@ -1115,8 +1115,8 @@ void ShardsAffectedByTeamFailure::check() {
 			}
 		}
 		auto rs = shard_teams.ranges();
-		for (auto i = rs.begin(); i != rs.end(); ++i)
-			for (std::vector<Team>::iterator t = i->value().first.begin(); t != i->value().first.end(); ++t)
+		for (auto i = rs.begin(); i != rs.end(); ++i) {
+			for (auto t = i->value().first.begin(); t != i->value().first.end(); ++t) {
 				if (!team_shards.count(std::make_pair(*t, i->range()))) {
 					std::string teamDesc, shards;
 					for (int k = 0; k < t->servers.size(); k++)
@@ -1132,5 +1132,7 @@ void ShardsAffectedByTeamFailure::check() {
 					    .detail("Shards", shards);
 					ASSERT(false);
 				}
+			}
+		}
 	}
 }

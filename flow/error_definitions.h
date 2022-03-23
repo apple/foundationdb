@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -84,6 +84,9 @@ ERROR( change_feed_not_registered, 1060, "Change feed not registered" )
 ERROR( granule_assignment_conflict, 1061, "Conflicting attempts to assign blob granules" )
 ERROR( change_feed_cancelled, 1062, "Change feed was cancelled" )
 ERROR( blob_granule_file_load_error, 1063, "Error loading a blob file during granule materialization" )
+ERROR( blob_granule_transaction_too_old, 1064, "Read version is older than blob granule history supports" )
+ERROR( blob_manager_replaced, 1065, "This blob manager has been replaced." )
+ERROR( change_feed_popped, 1066, "Tried to read a version older than what has been popped from the change feed" )
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )
@@ -171,7 +174,7 @@ ERROR( quick_get_key_values_has_more, 2033, "One of the mapped range queries is 
 ERROR( quick_get_value_miss, 2034, "Found a mapped key that is not served in the same SS" )
 ERROR( quick_get_key_values_miss, 2035, "Found a mapped range that is not served in the same SS" )
 ERROR( blob_granule_no_ryw, 2036, "Blob Granule Read Transactions must be specified as ryw-disabled" )
-ERROR( blob_granule_not_materialized, 2037, "Blob Granule Read Transactions must be specified as ryw-disabled" )
+ERROR( blob_granule_not_materialized, 2037, "Blob Granule Read was not materialized" )
 ERROR( get_mapped_key_values_has_more, 2038, "getMappedRange does not support continuation for now" )
 ERROR( get_mapped_range_reads_your_writes, 2039, "getMappedRange tries to read data that were previously written in the transaction" )
 ERROR( checkpoint_not_found, 2040, "Checkpoint not found" )

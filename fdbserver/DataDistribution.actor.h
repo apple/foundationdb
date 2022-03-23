@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -51,8 +51,8 @@ struct IDataDistributionTeam {
 	virtual double getMinAvailableSpaceRatio(bool includeInFlight = true) const = 0;
 	virtual bool hasHealthyAvailableSpace(double minRatio) const = 0;
 	virtual Future<Void> updateStorageMetrics() = 0;
-	virtual void addref() = 0;
-	virtual void delref() = 0;
+	virtual void addref() const = 0;
+	virtual void delref() const = 0;
 	virtual bool isHealthy() const = 0;
 	virtual void setHealthy(bool) = 0;
 	virtual int getPriority() const = 0;
@@ -170,7 +170,7 @@ public:
 	//       intersecting shards.
 
 	int getNumberOfShards(UID ssID) const;
-	std::vector<KeyRange> getShardsFor(Team team);
+	std::vector<KeyRange> getShardsFor(Team team) const;
 	bool hasShards(Team team) const;
 
 	// The first element of the pair is either the source for non-moving shards or the destination team for in-flight
@@ -180,7 +180,7 @@ public:
 	void defineShard(KeyRangeRef keys);
 	void moveShard(KeyRangeRef keys, std::vector<Team> destinationTeam);
 	void finishMove(KeyRangeRef keys);
-	void check();
+	void check() const;
 
 private:
 	struct OrderByTeamKey {
@@ -315,29 +315,23 @@ struct StorageWiggleMetrics {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
+		double step_total, round_total;
+		if (!ar.isDeserializing) {
+			step_total = smoothed_wiggle_duration.getTotal();
+			round_total = smoothed_round_duration.getTotal();
+		}
+		serializer(ar,
+		           last_wiggle_start,
+		           last_wiggle_finish,
+		           step_total,
+		           finished_wiggle,
+		           last_round_start,
+		           last_round_finish,
+		           round_total,
+		           finished_round);
 		if (ar.isDeserializing) {
-			double step_total, round_total;
-			serializer(ar,
-			           last_wiggle_start,
-			           last_wiggle_finish,
-			           step_total,
-			           finished_wiggle,
-			           last_round_start,
-			           last_round_finish,
-			           round_total,
-			           finished_round);
 			smoothed_round_duration.reset(round_total);
 			smoothed_wiggle_duration.reset(step_total);
-		} else {
-			serializer(ar,
-			           last_wiggle_start,
-			           last_wiggle_finish,
-			           smoothed_wiggle_duration.total,
-			           finished_wiggle,
-			           last_round_start,
-			           last_round_finish,
-			           smoothed_round_duration.total,
-			           finished_round);
 		}
 	}
 
@@ -369,27 +363,27 @@ struct StorageWiggleMetrics {
 		});
 	}
 
-	StatusObject toJSON() {
+	StatusObject toJSON() const {
 		StatusObject result;
 		result["last_round_start_datetime"] = timerIntToGmt(last_round_start);
 		result["last_round_finish_datetime"] = timerIntToGmt(last_round_finish);
 		result["last_round_start_timestamp"] = last_round_start;
 		result["last_round_finish_timestamp"] = last_round_finish;
-		result["smoothed_round_seconds"] = smoothed_round_duration.estimate;
+		result["smoothed_round_seconds"] = smoothed_round_duration.smoothTotal();
 		result["finished_round"] = finished_round;
 
 		result["last_wiggle_start_datetime"] = timerIntToGmt(last_wiggle_start);
 		result["last_wiggle_finish_datetime"] = timerIntToGmt(last_wiggle_finish);
 		result["last_wiggle_start_timestamp"] = last_wiggle_start;
 		result["last_wiggle_finish_timestamp"] = last_wiggle_finish;
-		result["smoothed_wiggle_seconds"] = smoothed_wiggle_duration.estimate;
+		result["smoothed_wiggle_seconds"] = smoothed_wiggle_duration.smoothTotal();
 		result["finished_wiggle"] = finished_wiggle;
 		return result;
 	}
 };
 
 struct StorageWiggler : ReferenceCounted<StorageWiggler> {
-	DDTeamCollection* teamCollection;
+	DDTeamCollection const* teamCollection;
 	StorageWiggleMetrics metrics;
 
 	// data structures
@@ -416,8 +410,8 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 	void removeServer(const UID& serverId);
 	// update metadata and adjust priority_queue
 	void updateMetadata(const UID& serverId, const StorageMetadataType& metadata);
-	bool contains(const UID& serverId) { return pq_handles.count(serverId) > 0; }
-	bool empty() { return wiggle_pq.empty(); }
+	bool contains(const UID& serverId) const { return pq_handles.count(serverId) > 0; }
+	bool empty() const { return wiggle_pq.empty(); }
 	Optional<UID> getNextServerId();
 
 	// -- statistic update
@@ -429,8 +423,8 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 	// called when start wiggling a SS
 	Future<Void> startWiggle();
 	Future<Void> finishWiggle();
-	bool shouldStartNewRound() { return metrics.last_round_finish >= metrics.last_round_start; }
-	bool shouldFinishRound() {
+	bool shouldStartNewRound() const { return metrics.last_round_finish >= metrics.last_round_start; }
+	bool shouldFinishRound() const {
 		if (wiggle_pq.empty())
 			return true;
 		return (wiggle_pq.top().first.createdTime >= metrics.last_round_start);

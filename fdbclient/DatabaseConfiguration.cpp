@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -50,6 +50,7 @@ void DatabaseConfiguration::resetInternal() {
 	perpetualStorageWiggleSpeed = 0;
 	perpetualStorageWiggleLocality = "0";
 	storageMigrationType = StorageMigrationType::DEFAULT;
+	blobGranulesEnabled = false;
 	tenantMode = TenantMode::DISABLED;
 }
 
@@ -404,6 +405,7 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 	result["perpetual_storage_wiggle"] = perpetualStorageWiggleSpeed;
 	result["perpetual_storage_wiggle_locality"] = perpetualStorageWiggleLocality;
 	result["storage_migration_type"] = storageMigrationType.toString();
+	result["blob_granules_enabled"] = (int32_t)blobGranulesEnabled;
 	result["tenant_mode"] = tenantMode.toString();
 	return result;
 }
@@ -633,6 +635,9 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 		tenantMode = (TenantMode::Mode)type;
 	} else if (ck == LiteralStringRef("proxies")) {
 		overwriteProxiesCount();
+	} else if (ck == LiteralStringRef("blob_granules_enabled")) {
+		parse((&type), value);
+		blobGranulesEnabled = (type != 0);
 	} else {
 		return false;
 	}

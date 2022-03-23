@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2019 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -457,7 +457,8 @@ ACTOR Future<Void> process_file(Reference<IBackupContainer> container, LogFile f
 					print = m.param1.startsWith(StringRef(params.prefix));
 				} else if (m.type == MutationRef::ClearRange) {
 					KeyRange range(KeyRangeRef(m.param1, m.param2));
-					print = range.contains(StringRef(params.prefix));
+					KeyRange range2 = prefixRange(StringRef(params.prefix));
+					print = range.intersects(range2);
 				} else {
 					ASSERT(false);
 				}

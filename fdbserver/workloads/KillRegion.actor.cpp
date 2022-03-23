@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -107,7 +107,10 @@ struct KillRegionWorkload : TestWorkload {
 
 		DatabaseConfiguration conf = wait(getDatabaseConfiguration(cx));
 
-		TraceEvent("ForceRecovery_GotConfig").detail("Conf", conf.toString());
+		TraceEvent("ForceRecovery_GotConfig")
+		    .setMaxEventLength(11000)
+		    .setMaxFieldLength(10000)
+		    .detail("Conf", conf.toString());
 
 		if (conf.usableRegions > 1) {
 			loop {

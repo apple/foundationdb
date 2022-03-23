@@ -1,0 +1,9 @@
+[configuration]
+blobGranulesEnabled = true 
+
+[[test]]
+testTitle = 'BlobGranuleCorrectness'
+
+    [[test.workload]]
+    testName = 'BlobGranuleCorrectnessWorkload'
+    testDuration = 120.0
