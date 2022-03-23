@@ -552,6 +552,7 @@ public:
 	int64_t TLOG_RECOVER_MEMORY_LIMIT;
 	double TLOG_IGNORE_POP_AUTO_ENABLE_DELAY;
 
+	// Tag throttling
 	int64_t MAX_MANUAL_THROTTLED_TRANSACTION_TAGS;
 	int64_t MAX_AUTO_THROTTLED_TRANSACTION_TAGS;
 	double MIN_TAG_COST;
@@ -564,6 +565,9 @@ public:
 	double AUTO_TAG_THROTTLE_UPDATE_FREQUENCY;
 	double TAG_THROTTLE_EXPIRED_CLEANUP_INTERVAL;
 	bool AUTO_TAG_THROTTLING_ENABLED;
+	// Use global tag throttling strategy. i.e. throttle based on the cluster-wide
+	// throughput for tags and their associated quotas.
+	bool GLOBAL_TAG_THROTTLING;
 
 	double MAX_TRANSACTIONS_PER_BYTE;
 

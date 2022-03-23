@@ -436,7 +436,11 @@ Ratekeeper::Ratekeeper(UID id, Database db)
                 SERVER_KNOBS->SPRING_BYTES_TLOG_BATCH,
                 SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE_BATCH,
                 SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS_BATCH) {
-	tagThrottler = std::make_unique<TagThrottler>(db, id);
+	if (SERVER_KNOBS->GLOBAL_TAG_THROTTLING) {
+		tagThrottler = std::make_unique<GlobalTagThrottler>(db, id);
+	} else {
+		tagThrottler = std::make_unique<TagThrottler>(db, id);
+	}
 }
 
 void Ratekeeper::updateCommitCostEstimation(
