@@ -44,6 +44,7 @@ set(FDBSERVER_SRCS
   FDBExecHelper.actor.cpp
   FDBExecHelper.actor.h
   fdbserver.actor.cpp
+  GlobalTagThrottler.actor.cpp
   GrvProxyServer.actor.cpp
   IConfigConsumer.cpp
   IConfigConsumer.h

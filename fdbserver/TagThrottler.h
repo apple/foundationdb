@@ -23,32 +23,68 @@
 #include "fdbclient/PImpl.h"
 #include "fdbserver/Ratekeeper.h"
 
-class TagThrottler {
+class ITagThrottler {
+public:
+	virtual ~ITagThrottler() = default;
+
+	// Poll the system keyspace looking for updates made through the tag throttling API
+	virtual Future<Void> monitorThrottlingChanges() = 0;
+
+	// Increment the number of known requests associated with the specified tag
+	virtual void addRequests(TransactionTag tag, int count) = 0;
+
+	// This throttled tag change ID is used to coordinate updates with the GRV proxies
+	virtual uint64_t getThrottledTagChangeId() const = 0;
+
+	// For each tag and priority combination, return the throughput limit and expiration time
+	// Also, erase expired tags
+	virtual PrioritizedTransactionTagMap<ClientTagThrottleLimits> getClientRates() = 0;
+
+	virtual int64_t autoThrottleCount() const = 0;
+	virtual uint32_t busyReadTagCount() const = 0;
+	virtual uint32_t busyWriteTagCount() const = 0;
+	virtual int64_t manualThrottleCount() const = 0;
+	virtual bool isAutoThrottlingEnabled() const = 0;
+
+	// Based on the busiest read and write tags in the provided storage queue info, update
+	// tag throttling limits.
+	virtual Future<Void> tryUpdateAutoThrottling(StorageQueueInfo const&) = 0;
+};
+
+class TagThrottler : public ITagThrottler {
 	PImpl<class TagThrottlerImpl> impl;
 
 public:
 	TagThrottler(Database db, UID id);
 	~TagThrottler();
 
-	// Poll the system keyspace looking for updates made through the tag throttling API
-	Future<Void> monitorThrottlingChanges();
+	Future<Void> monitorThrottlingChanges() override;
+	void addRequests(TransactionTag tag, int count) override;
+	uint64_t getThrottledTagChangeId() const override;
+	PrioritizedTransactionTagMap<ClientTagThrottleLimits> getClientRates() override;
+	int64_t autoThrottleCount() const override;
+	uint32_t busyReadTagCount() const override;
+	uint32_t busyWriteTagCount() const override;
+	int64_t manualThrottleCount() const override;
+	bool isAutoThrottlingEnabled() const override;
+	Future<Void> tryUpdateAutoThrottling(StorageQueueInfo const&) override;
+};
 
-	// Increment the number of known requests associated with the specified tag
-	void addRequests(TransactionTag tag, int count);
+class GlobalTagThrottler : public ITagThrottler {
+	PImpl<class GlobalTagThrottlerImpl> impl;
 
-	// This throttled tag change ID is used to coordinate updates with the GRV proxies
-	uint64_t getThrottledTagChangeId() const;
+public:
+	GlobalTagThrottler(Database db, UID id);
+	~GlobalTagThrottler();
 
-	// For each tag and priority combination, return the throughput limit and expiration time
-	PrioritizedTransactionTagMap<ClientTagThrottleLimits> getClientRates();
-
-	int64_t autoThrottleCount() const;
-	uint32_t busyReadTagCount() const;
-	uint32_t busyWriteTagCount() const;
-	int64_t manualThrottleCount() const;
-	bool isAutoThrottlingEnabled() const;
-
-	// Based on the busiest read and write tags in the provided storage queue info, update
-	// tag throttling limits.
-	Future<Void> tryUpdateAutoThrottling(StorageQueueInfo const&);
+	Future<Void> monitorThrottlingChanges() override;
+	void addRequests(TransactionTag tag, int count) override;
+	uint64_t getThrottledTagChangeId() const override;
+	PrioritizedTransactionTagMap<ClientTagThrottleLimits> getClientRates() override;
+	int64_t autoThrottleCount() const override;
+	uint32_t busyReadTagCount() const override;
+	uint32_t busyWriteTagCount() const override;
+	int64_t manualThrottleCount() const override;
+	bool isAutoThrottlingEnabled() const override;
+	Future<Void> tryUpdateAutoThrottling(StorageQueueInfo const&) override;
 };
