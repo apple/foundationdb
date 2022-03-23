@@ -1584,10 +1584,8 @@ ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsReques
 		std::vector<StorageServerInterface> ssis;
 		ssis.reserve(r.value().src_info.size());
 		for (auto& it : r.value().src_info) {
-			if (it->interf.isAcceptingRequests()) {
-				ssis.push_back(it->interf);
-				maybeAddTssMapping(rep, commitData, tssMappingsIncluded, it->interf.id());
-			}
+			ssis.push_back(it->interf);
+			maybeAddTssMapping(rep, commitData, tssMappingsIncluded, it->interf.id());
 		}
 		rep.results.emplace_back(r.range(), ssis);
 	} else if (!req.reverse) {
@@ -1598,10 +1596,8 @@ ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsReques
 			std::vector<StorageServerInterface> ssis;
 			ssis.reserve(r.value().src_info.size());
 			for (auto& it : r.value().src_info) {
-				if (it->interf.isAcceptingRequests()) {
-					ssis.push_back(it->interf);
-					maybeAddTssMapping(rep, commitData, tssMappingsIncluded, it->interf.id());
-				}
+				ssis.push_back(it->interf);
+				maybeAddTssMapping(rep, commitData, tssMappingsIncluded, it->interf.id());
 			}
 			rep.results.emplace_back(r.range(), ssis);
 			count++;
@@ -1613,10 +1609,8 @@ ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsReques
 			std::vector<StorageServerInterface> ssis;
 			ssis.reserve(r.value().src_info.size());
 			for (auto& it : r.value().src_info) {
-				if (it->interf.isAcceptingRequests()) {
-					ssis.push_back(it->interf);
-					maybeAddTssMapping(rep, commitData, tssMappingsIncluded, it->interf.id());
-				}
+				ssis.push_back(it->interf);
+				maybeAddTssMapping(rep, commitData, tssMappingsIncluded, it->interf.id());
 			}
 			rep.results.emplace_back(r.range(), ssis);
 			if (r == commitData->keyInfo.ranges().begin()) {
