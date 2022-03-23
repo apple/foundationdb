@@ -820,8 +820,10 @@ ACTOR Future<Void> rocksDBMetricLogger(std::shared_ptr<rocksdb::Statistics> stat
 	}
 }
 
-void logRocksDBError(const rocksdb::Status& status, const std::string& method) {
-	auto level = status.IsTimedOut() ? SevWarn : SevError;
+void logRocksDBError(const rocksdb::Status& status,
+                     const std::string& method,
+                     Optional<Severity> sev = Optional<Severity>()) {
+	Severity level = sev.present() ? sev.get() : (status.IsTimedOut() ? SevWarn : SevError);
 	TraceEvent e(level, "RocksDBError");
 	e.detail("Error", status.ToString()).detail("Method", method).detail("RocksDBSeverity", status.severity());
 	if (status.IsIOError()) {
@@ -1312,7 +1314,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 					status = db->IngestExternalFile(cf, sstFiles, ingestOptions);
 					if (!status.ok()) {
 						std::cout << "Ingest sst file failure: " << status.ToString() << std::endl;
-						logRocksDBError(status, "IngestExternalFile");
+						logRocksDBError(status, "IngestExternalFile", SevWarnAlways);
 						a.done.sendError(statusToError(status));
 						return;
 					}

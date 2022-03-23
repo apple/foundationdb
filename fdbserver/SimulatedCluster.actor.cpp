@@ -1310,12 +1310,12 @@ void SimulationConfig::setSpecificConfig(const TestConfig& testConfig) {
 void SimulationConfig::setDatacenters(const TestConfig& testConfig) {
 	generateFearless =
 	    testConfig.simpleConfig ? false : (testConfig.minimumRegions > 1 || deterministicRandom()->random01() < 0.5);
+	// if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+	// 	generateFearless = false;
+	// }
 	if (testConfig.generateFearless.present()) {
 		// overwrite whatever decision we made before
 		generateFearless = testConfig.generateFearless.get();
-	}
-	if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
-		generateFearless = false;
 	}
 	datacenters =
 	    testConfig.simpleConfig
@@ -2350,6 +2350,10 @@ ACTOR void setupAndRun(std::string dataFolder,
 
 	state Optional<TenantName> defaultTenant;
 	state TenantMode tenantMode = TenantMode::DISABLED;
+
+	if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+		allowDefaultTenant = false;
+	}
 	if (allowDefaultTenant && deterministicRandom()->random01() < 0.5) {
 		defaultTenant = "SimulatedDefaultTenant"_sr;
 		if (deterministicRandom()->random01() < 0.9) {
@@ -2359,6 +2363,9 @@ ACTOR void setupAndRun(std::string dataFolder,
 		}
 	} else if (!allowDisablingTenants || deterministicRandom()->random01() < 0.5) {
 		tenantMode = TenantMode::OPTIONAL_TENANT;
+	}
+	if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+		tenantMode = TenantMode::DISABLED;
 	}
 
 	TraceEvent("SimulatedClusterTenantMode")

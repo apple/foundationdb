@@ -609,14 +609,24 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 				// if (cFun) {
 				// 	wait(cFun(*metaData));
 				// }
-				TraceEvent("FetchCheckpointRangeEnd")
-				    .detail("CheckpointID", metaData->checkpointID)
-				    .detail("Range", range.toString())
-				    .detail("TargetStorageServerUID", ssID.toString())
-				    .detail("LocalFile", localFile)
-				    .detail("Attempt", attempt)
-				    .detail("TotalBytes", totalBytes);
-				break;
+				if (!fileExists(localFile)) {
+					TraceEvent("FetchCheckpointRangeEndFileNotFound")
+					    .detail("CheckpointID", metaData->checkpointID)
+					    .detail("Range", range.toString())
+					    .detail("TargetStorageServerUID", ssID.toString())
+					    .detail("LocalFile", localFile)
+					    .detail("Attempt", attempt)
+					    .detail("TotalBytes", totalBytes);
+				} else {
+					TraceEvent("FetchCheckpointRangeEnd")
+					    .detail("CheckpointID", metaData->checkpointID)
+					    .detail("Range", range.toString())
+					    .detail("TargetStorageServerUID", ssID.toString())
+					    .detail("LocalFile", localFile)
+					    .detail("Attempt", attempt)
+					    .detail("TotalBytes", totalBytes);
+					break;
+				}
 			}
 		}
 	}

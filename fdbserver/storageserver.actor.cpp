@@ -5424,7 +5424,12 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data, std::shared_p
 	try {
 		wait(data->storage.restore(shard->checkpoints));
 	} catch (Error& e) {
-		std::cout << e.name() << std::endl;
+		TraceEvent("FetchShardIngestedCheckpointError", data->thisServerID)
+		    .errorUnsuppressed(e)
+		    .detail("MoveInShardID", shard->id)
+		    .detail("MoveInShard", shard->toString())
+		    .detail("Checkpoint", describe(shard->checkpoints));
+		throw;
 	}
 
 	TraceEvent("FetchShardIngestedCheckpoint", data->thisServerID)
@@ -5587,7 +5592,9 @@ ACTOR Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 	// //  This allows adding->start() to be called inline with CSK.
 	wait(data->coreStarted.getFuture() && delay(0));
 
+	state int attempt = 0;
 	loop {
+		++attempt;
 		phase = shard->getPhase();
 		try {
 			// Pending = 0, Fetching = 1, Ingesting = 2, ApplyingUpdates = 3, Complete = 4, Deleting = 4, Fail = 6,
@@ -5601,13 +5608,16 @@ ACTOR Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 				break;
 			}
 		} catch (Error& e) {
-			// std::cout << "FetchShardError: " << e.name() << std::endl;
 			TraceEvent("FetchShardError", data->thisServerID)
 			    .errorUnsuppressed(e)
 			    .detail("MoveInShardID", shard->id)
 			    .detail("MoveInShard", shard->toString());
-			// .detail("Checkpoint", describe(shard->checkpoints));
-			throw e;
+			if (attempt >= 3) {
+				throw e;
+			} else {
+				shard->setPhase(MoveInShardMetaData::Fetching);
+				wait(persistMoveInShardMetaData(data, shard.get()));
+			}
 		}
 		wait(delay(1, TaskPriority::FetchKeys));
 	}
@@ -5666,7 +5676,7 @@ Key MoveInUpdates::getPersistKey(const Version version, const int idx) {
 
 void MoveInUpdates::addMutation(Version version, bool fromFetch, MutationRef const& mutation) {
 	// Create a new VerUpdateRef in updates queue if it is a new version.
-	TraceEvent("MoveInUpdatesAddMutation", id).detail("Version", version).detail("Mutation", mutation);
+	// TraceEvent("MoveInUpdatesAddMutation", id).detail("Version", version).detail("Mutation", mutation);
 	if (version <= oldestVersion)
 		return;
 
@@ -6091,6 +6101,7 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 	// validate())
 	ranges.clear();
 
+	ASSERT(data->data().getLatestVersion() == version + 1);
 	for (const auto& [id, moveInShard] : cancelMoveIns) {
 		// if (moveInShard.getPhase() >= MoveInShardMetaData::Ingesting) {
 		removeRanges.push_back(moveInShard.meta->range);
@@ -6807,11 +6818,11 @@ ACTOR Future<Void> tssDelayForever() {
 }
 
 ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
-	TraceEvent(SevWarn, "StorageServerUpdateBegin", data->thisServerID)
-	    .detail("Version", data->version.get())
-	    .detail("DurableVersion", data->durableVersion.get())
-	    .detail("DesiredOldestVersion", data->desiredOldestVersion.get())
-	    .detail("QueueSize", data->queueSize());
+	// TraceEvent(SevWarn, "StorageServerUpdateBegin", data->thisServerID)
+	//     .detail("Version", data->version.get())
+	//     .detail("DurableVersion", data->durableVersion.get())
+	//     .detail("DesiredOldestVersion", data->desiredOldestVersion.get())
+	//     .detail("QueueSize", data->queueSize());
 	state double start;
 	try {
 		// If we are disk bound and durableVersion is very old, we need to block updates or we could run out of
@@ -6887,9 +6898,9 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		data->lastTLogVersion = cursor->getMaxKnownVersion();
 		data->knownCommittedVersion = cursor->getMinKnownCommittedVersion();
 		data->versionLag = std::max<int64_t>(0, data->lastTLogVersion - data->version.get());
-		TraceEvent(SevWarn, "StorageServerUpdateCursor", data->thisServerID)
-		    .detail("Version", data->version.get())
-		    .detail("MaxKnownVersion", data->lastTLogVersion);
+		// TraceEvent(SevWarn, "StorageServerUpdateCursor", data->thisServerID)
+		//     .detail("Version", data->version.get())
+		//     .detail("MaxKnownVersion", data->lastTLogVersion);
 
 		ASSERT(*pReceivedUpdate == false);
 		*pReceivedUpdate = true;
@@ -6978,7 +6989,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		}
 		data->eagerReadsLatencyHistogram->sampleSeconds(now() - start);
 
-		TraceEvent(SevWarn, "StorageServerUpdateLoop1", data->thisServerID);
+		// TraceEvent(SevWarn, "StorageServerUpdateLoop1", data->thisServerID);
 
 		if (now() - start > 0.1)
 			TraceEvent("SSSlowTakeLock2", data->thisServerID)
@@ -7015,7 +7026,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			}
 		}
 		data->fetchKeysPTreeUpdatesLatencyHistogram->sampleSeconds(now() - beforeFetchKeysUpdates);
-		TraceEvent(SevWarn, "StorageServerUpdateAppliedFetch", data->thisServerID);
+		// TraceEvent(SevWarn, "StorageServerUpdateAppliedFetch", data->thisServerID);
 
 		state Version ver = invalidVersion;
 		cloneCursor2->setProtocolVersion(data->logProtocol);
@@ -7023,7 +7034,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		state double beforeTLogMsgsUpdates = now();
 		state std::set<Key> updatedChangeFeeds;
 		for (; cloneCursor2->hasMessage(); cloneCursor2->nextMessage()) {
-			TraceEvent(SevWarn, "StorageServerUpdateLoop2Begin", data->thisServerID);
+			// TraceEvent(SevWarn, "StorageServerUpdateLoop2Begin", data->thisServerID);
 			if (mutationBytes > SERVER_KNOBS->DESIRED_UPDATE_BYTES) {
 				mutationBytes = 0;
 				// Instead of just yielding, leave time for the storage server to respond to reads
@@ -7124,7 +7135,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 					    .detail("Mutation", msg)
 					    .detail("Version", cloneCursor2->version().toString());
 			}
-			TraceEvent(SevWarn, "StorageServerUpdateLoop2End", data->thisServerID);
+			// TraceEvent(SevWarn, "StorageServerUpdateLoop2End", data->thisServerID);
 		}
 
 		// if (!data->pendingMoveInUpdates.empty()) {
@@ -7163,9 +7174,12 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			// TODO(alexmiller): Update to version tracking.
 			// DEBUG_KEY_RANGE("SSUpdate", ver, KeyRangeRef());
 
-			TraceEvent(SevWarn, "StorageServerApplyUpdateBegin", data->thisServerID)
-			    .detail("Version", ver)
-			    .detail("DataVersion", data->version.get());
+			// TraceEvent(SevWarn, "StorageServerApplyUpdateBegin", data->thisServerID)
+			//     .detail("Version", ver)
+			//     .detail("DurableVersion", data->durableVersion.get())
+			//     .detail("DesiredOldestVersion", data->desiredOldestVersion.get())
+			//     .detail("QueueSize", data->queueSize())
+			//     .detail("DataVersion", data->version.get());
 			data->mutableData().createNewVersion(ver);
 			if (data->otherError.getFuture().isReady())
 				data->otherError.getFuture().get();
@@ -7418,14 +7432,20 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 		debug_advanceMinCommittedVersion(data->thisServerID, newOldestVersion);
 
 		if (requireCheckpoint) {
-			ASSERT(newOldestVersion == data->pendingCheckpoints.begin()->first);
-			std::vector<Future<Void>> createCheckpoints;
-			// TODO: Combine these checkpoints if necessary.
-			for (int idx = 0; idx < data->pendingCheckpoints.begin()->second.size(); ++idx) {
-				createCheckpoints.push_back(createCheckpoint(data, data->pendingCheckpoints.begin()->second[idx]));
+			TraceEvent("CheckpointVersionDurable", data->thisServerID)
+			    .detail("NewDurableVersion", newOldestVersion)
+			    .detail("DesiredVersion", desiredVersion)
+			    .detail("SmallestCheckPointVersion", data->pendingCheckpoints.begin()->first);
+			ASSERT(newOldestVersion <= data->pendingCheckpoints.begin()->first);
+			if (newOldestVersion == data->pendingCheckpoints.begin()->first) {
+				std::vector<Future<Void>> createCheckpoints;
+				// TODO: Combine these checkpoints if necessary.
+				for (int idx = 0; idx < data->pendingCheckpoints.begin()->second.size(); ++idx) {
+					createCheckpoints.push_back(createCheckpoint(data, data->pendingCheckpoints.begin()->second[idx]));
+				}
+				wait(waitForAll(createCheckpoints));
+				data->pendingCheckpoints.erase(data->pendingCheckpoints.begin());
 			}
-			wait(waitForAll(createCheckpoints));
-			data->pendingCheckpoints.erase(data->pendingCheckpoints.begin());
 			requireCheckpoint = false;
 		}
 
@@ -8651,6 +8671,7 @@ ACTOR Future<Void> reportStorageServerState(StorageServer* self) {
 }
 
 ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface ssi) {
+	TraceEvent(SevDebug, "StorageServerCore", self->thisServerID).detail("VersionOverhead", VERSION_OVERHEAD);
 	state Future<Void> doUpdate = Void();
 	state bool updateReceived = false; // true iff the current update() actor assigned to doUpdate has already
 	                                   // received an update from the tlog

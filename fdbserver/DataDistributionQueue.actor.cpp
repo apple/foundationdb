@@ -1165,6 +1165,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 						auto req = GetTeamRequest(tciIndex == 0 ? rd.dataMove->primaryDest : rd.dataMove->remoteDest);
 						Future<std::pair<Optional<Reference<IDataDistributionTeam>>, bool>> fbestTeam =
 						    brokenPromiseToNever(self->teamCollections[tciIndex].getTeam.getReply(req));
+						bestTeamReady = fbestTeam.isReady();
 						std::pair<Optional<Reference<IDataDistributionTeam>>, bool> bestTeam = wait(fbestTeam);
 						if (tciIndex > 0 && !bestTeamReady) {
 							// self->shardsAffectedByTeamFailure->moveShard must be called without any waits after
@@ -1205,6 +1206,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 						// configuration when the remote DC is just brought up.
 						Future<std::pair<Optional<Reference<IDataDistributionTeam>>, bool>> fbestTeam =
 						    brokenPromiseToNever(self->teamCollections[tciIndex].getTeam.getReply(req));
+						bestTeamReady = fbestTeam.isReady();
 						std::pair<Optional<Reference<IDataDistributionTeam>>, bool> bestTeam = wait(fbestTeam);
 						if (tciIndex > 0 && !bestTeamReady) {
 							// self->shardsAffectedByTeamFailure->moveShard must be called without any waits after

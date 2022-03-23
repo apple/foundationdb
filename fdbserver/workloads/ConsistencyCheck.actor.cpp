@@ -1665,8 +1665,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				// Min and max shard sizes have a 3 * shardBounds.permittedError.bytes cushion for error since shard
 				// sizes are not precise Shard splits ignore the first key in a shard, so its size shouldn't be
 				// considered when checking the upper bound 0xff shards are not checked
-				if (canSplit && sampledKeys > 5 && self->performQuiescentChecks &&
-				    !range.begin.startsWith(keyServersPrefix) &&
+				if (!SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE && canSplit && sampledKeys > 5 &&
+				    self->performQuiescentChecks && !range.begin.startsWith(keyServersPrefix) &&
 				    (sampledBytes < shardBounds.min.bytes - 3 * shardBounds.permittedError.bytes ||
 				     sampledBytes - firstKeySampledBytes >
 				         shardBounds.max.bytes + 3 * shardBounds.permittedError.bytes)) {
