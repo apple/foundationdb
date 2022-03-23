@@ -380,6 +380,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// Set ROCKSDB_CAN_COMMIT_DELAY_TIMES_ON_OVERLOAD to 0, to disable
 	init( ROCKSDB_CAN_COMMIT_DELAY_ON_OVERLOAD,                    1 );
 	init( ROCKSDB_CAN_COMMIT_DELAY_TIMES_ON_OVERLOAD,              5 );
+	init( ROCKSDB_COMPACTION_READAHEAD_SIZE,                   32768 ); // 32 KB, performs bigger reads when doing compaction.
 
 	// Leader election
 	bool longLeaderElection = randomize && BUGGIFY;
