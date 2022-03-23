@@ -217,9 +217,11 @@ void updateCachedReadVersionShared(double t, Version v, DatabaseSharedState* p) 
 	    .detail("CurTime", t)
 	    .detail("LastVersion", p->grvCacheSpace.cachedReadVersion)
 	    .detail("LastTime", p->grvCacheSpace.lastGrvTime);
-	p->grvCacheSpace.cachedReadVersion = v;
-	if (t > p->grvCacheSpace.lastGrvTime) {
-		p->grvCacheSpace.lastGrvTime = t;
+	if (v >= p->grvCacheSpace.cachedReadVersion) {
+		p->grvCacheSpace.cachedReadVersion = v;
+		if (t > p->grvCacheSpace.lastGrvTime) {
+			p->grvCacheSpace.lastGrvTime = t;
+		}
 	}
 }
 
@@ -7974,15 +7976,18 @@ Future<Void> DatabaseContext::createSnapshot(StringRef uid, StringRef snapshot_c
 	return createSnapshotActor(this, UID::fromString(uid_str), snapshot_command);
 }
 
-DatabaseSharedState* DatabaseContext::initSharedState() {
+Future<DatabaseSharedState*> DatabaseContext::initSharedState() {
+	ASSERT(!sharedStatePtr); // Don't re-initialize shared state if a pointer already exists
 	DatabaseSharedState* newState = new DatabaseSharedState();
 	setSharedState(newState);
 	return newState;
 }
 
-void DatabaseContext::setSharedState(DatabaseSharedState* p) {
+Future<Void> DatabaseContext::setSharedState(DatabaseSharedState* p) {
+	MutexHolder holder(p->mutexLock);
 	sharedStatePtr = p;
 	sharedStatePtr->refCount++;
+	return Void();
 }
 
 ACTOR Future<Void> storageFeedVersionUpdater(StorageServerInterface interf, ChangeFeedStorageData* self) {

@@ -84,7 +84,7 @@ private:
 			    execTransaction(
 			        [kvPairs, results](auto ctx) {
 				        // TODO: Enable after merging with GRV caching
-				        // ctx->tx()->setOption(FDB_TR_OPTION_USE_GRV_CACHE);
+				        ctx->tx()->setOption(FDB_TR_OPTION_USE_GRV_CACHE);
 				        auto futures = std::make_shared<std::vector<Future>>();
 				        for (const auto& kv : *kvPairs) {
 					        futures->push_back(ctx->tx()->get(kv.key, false));

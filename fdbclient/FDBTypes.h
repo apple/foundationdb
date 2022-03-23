@@ -28,6 +28,7 @@
 #include <unordered_set>
 
 #include "flow/Arena.h"
+#include "flow/FastRef.h"
 #include "flow/flow.h"
 
 typedef int64_t Version;

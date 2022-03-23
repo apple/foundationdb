@@ -26,6 +26,10 @@
 #define DLLEXPORT
 #endif
 
+#ifndef WARN_UNUSED_RESULT
+#define WARN_UNUSED_RESULT
+#endif
+
 #include "fdb_c_types.h"
 
 #ifdef __cplusplus
@@ -35,9 +39,11 @@ extern "C" {
 // forward declaration and typedef
 typedef struct DatabaseSharedState DatabaseSharedState;
 
-DLLEXPORT DatabaseSharedState* fdb_database_create_shared_state(FDBDatabase* db);
+DLLEXPORT FDBFuture* fdb_database_create_shared_state(FDBDatabase* db);
 
-DLLEXPORT void fdb_database_set_shared_state(FDBDatabase* db, DatabaseSharedState* p);
+DLLEXPORT FDBFuture* fdb_database_set_shared_state(FDBDatabase* db, DatabaseSharedState* p);
+
+DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_shared_state(FDBFuture* f, DatabaseSharedState** outPtr);
 
 #ifdef __cplusplus
 }

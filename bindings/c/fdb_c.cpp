@@ -294,6 +294,10 @@ extern "C" DLLEXPORT fdb_error_t fdb_future_get_mappedkeyvalue_array(FDBFuture* 
 	                 *out_more = rrr.more;);
 }
 
+extern "C" DLLEXPORT fdb_error_t fdb_future_get_shared_state(FDBFuture* f, DatabaseSharedState** outPtr) {
+	CATCH_AND_RETURN(*outPtr = (DatabaseSharedState*)((TSAV(DatabaseSharedState*, f)->get())););
+}
+
 extern "C" DLLEXPORT fdb_error_t fdb_future_get_string_array(FDBFuture* f, const char*** out_strings, int* out_count) {
 	CATCH_AND_RETURN(Standalone<VectorRef<const char*>> na = TSAV(Standalone<VectorRef<const char*>>, f)->get();
 	                 *out_strings = (const char**)na.begin();
@@ -427,12 +431,12 @@ extern "C" DLLEXPORT FDBFuture* fdb_database_create_snapshot(FDBDatabase* db,
 	                        .extractPtr());
 }
 
-extern "C" DLLEXPORT DatabaseSharedState* fdb_database_create_shared_state(FDBDatabase* db) {
-	return (DatabaseSharedState*)(DB(db)->createSharedState());
+extern "C" DLLEXPORT FDBFuture* fdb_database_create_shared_state(FDBDatabase* db) {
+	return (FDBFuture*)(DB(db)->createSharedState().extractPtr());
 }
 
-extern "C" DLLEXPORT void fdb_database_set_shared_state(FDBDatabase* db, DatabaseSharedState* p) {
-	(DB(db)->setSharedState(p));
+extern "C" DLLEXPORT FDBFuture* fdb_database_set_shared_state(FDBDatabase* db, DatabaseSharedState* p) {
+	return (FDBFuture*)(DB(db)->setSharedState(p).extractPtr());
 }
 
 // Get network thread busyness (updated every 1s)

@@ -468,17 +468,25 @@ ThreadFuture<Void> DLDatabase::createSnapshot(const StringRef& uid, const String
 	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) { return Void(); });
 }
 
-DatabaseSharedState* DLDatabase::createSharedState() {
+ThreadFuture<DatabaseSharedState*> DLDatabase::createSharedState() {
 	if (!api->databaseCreateSharedState) {
-		return nullptr;
+		return unsupported_operation();
 	}
-	return api->databaseCreateSharedState(db);
+	FdbCApi::FDBFuture* f = api->databaseCreateSharedState(db);
+	return toThreadFuture<DatabaseSharedState*>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		DatabaseSharedState* res;
+		FdbCApi::fdb_error_t error = api->futureGetSharedState(f, &res);
+		ASSERT(!error);
+		return res;
+	});
 }
 
-void DLDatabase::setSharedState(DatabaseSharedState* p) {
-	if (api->databaseSetSharedState) {
-		api->databaseSetSharedState(db, p);
+ThreadFuture<Void> DLDatabase::setSharedState(DatabaseSharedState* p) {
+	if (!api->databaseSetSharedState) {
+		return unsupported_operation();
 	}
+	FdbCApi::FDBFuture* f = api->databaseSetSharedState(db, p);
+	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) { return Void(); });
 }
 
 // Get network thread busyness
@@ -557,6 +565,10 @@ void DLApi::init() {
 	loadClientFunction(&api->createDatabase, lib, fdbCPath, "fdb_create_database", headerVersion >= 610);
 
 	loadClientFunction(&api->databaseOpenTenant, lib, fdbCPath, "fdb_database_open_tenant", headerVersion >= 710);
+	loadClientFunction(
+	    &api->databaseCreateSharedState, lib, fdbCPath, "fdb_database_create_shared_state", headerVersion >= 710);
+	loadClientFunction(
+	    &api->databaseSetSharedState, lib, fdbCPath, "fdb_database_set_shared_state", headerVersion >= 710);
 	loadClientFunction(
 	    &api->databaseCreateTransaction, lib, fdbCPath, "fdb_database_create_transaction", headerVersion >= 0);
 	loadClientFunction(&api->databaseSetOption, lib, fdbCPath, "fdb_database_set_option", headerVersion >= 0);
@@ -655,6 +667,7 @@ void DLApi::init() {
 	    &api->futureGetKeyValueArray, lib, fdbCPath, "fdb_future_get_keyvalue_array", headerVersion >= 0);
 	loadClientFunction(
 	    &api->futureGetMappedKeyValueArray, lib, fdbCPath, "fdb_future_get_mappedkeyvalue_array", headerVersion >= 700);
+	loadClientFunction(&api->futureGetSharedState, lib, fdbCPath, "fdb_future_get_shared_state", headerVersion >= 710);
 	loadClientFunction(&api->futureSetCallback, lib, fdbCPath, "fdb_future_set_callback", headerVersion >= 0);
 	loadClientFunction(&api->futureCancel, lib, fdbCPath, "fdb_future_cancel", headerVersion >= 0);
 	loadClientFunction(&api->futureDestroy, lib, fdbCPath, "fdb_future_destroy", headerVersion >= 0);
@@ -1268,13 +1281,6 @@ MultiVersionDatabase::MultiVersionDatabase(MultiVersionApi* api,
   : dbState(new DatabaseState(clusterFilePath, versionMonitorDb)) {
 	dbState->db = db;
 	dbState->dbVar->set(db);
-	auto stateMapKey = clusterFilePath;
-	if (api->clusterSharedStateMap.find(stateMapKey) == api->clusterSharedStateMap.end()) {
-		DatabaseSharedState* p = db->createSharedState();
-		api->clusterSharedStateMap[stateMapKey] = p;
-	} else {
-		db->setSharedState(api->clusterSharedStateMap[stateMapKey]);
-	}
 	if (openConnectors) {
 		if (!api->localClientDisabled) {
 			dbState->addClient(api->getLocalClient());
@@ -1389,17 +1395,14 @@ ThreadFuture<Void> MultiVersionDatabase::createSnapshot(const StringRef& uid, co
 	return abortableFuture(f, dbState->dbVar->get().onChange);
 }
 
-DatabaseSharedState* MultiVersionDatabase::createSharedState() {
-	if (dbState->db) {
-		return dbState->db->createSharedState();
-	}
-	return nullptr;
+ThreadFuture<DatabaseSharedState*> MultiVersionDatabase::createSharedState() {
+	auto f = dbState->db ? dbState->db->createSharedState() : ThreadFuture<DatabaseSharedState*>(Never());
+	return abortableFuture(f, dbState->dbVar->get().onChange);
 }
 
-void MultiVersionDatabase::setSharedState(DatabaseSharedState* p) {
-	if (dbState->db) {
-		dbState->db->setSharedState(p);
-	}
+ThreadFuture<Void> MultiVersionDatabase::setSharedState(DatabaseSharedState* p) {
+	auto f = dbState->db ? dbState->db->setSharedState(p) : ThreadFuture<Void>(Never());
+	return abortableFuture(f, dbState->dbVar->get().onChange);
 }
 
 // Get network thread busyness
@@ -1618,16 +1621,15 @@ void MultiVersionDatabase::DatabaseState::updateDatabase(Reference<IDatabase> ne
 			    .detail("ClusterFilePath", clusterFilePath);
 		}
 	}
-
-	auto stateMapKey = clusterFilePath;
-	if (MultiVersionApi::api->clusterSharedStateMap.find(stateMapKey) ==
-	    MultiVersionApi::api->clusterSharedStateMap.end()) {
-		DatabaseSharedState* p = db->createSharedState();
-		MultiVersionApi::api->clusterSharedStateMap[stateMapKey] = p;
+	if (db.isValid()) {
+		auto updateResult = MultiVersionApi::api->updateClusterSharedStateMap(clusterFilePath, db);
+		auto handler = mapThreadFuture<Void, Void>(updateResult, [this](ErrorOr<Void> result) {
+			dbVar->set(db);
+			return ErrorOr<Void>(Void());
+		});
 	} else {
-		db->setSharedState(MultiVersionApi::api->clusterSharedStateMap[stateMapKey]);
+		dbVar->set(db);
 	}
-	dbVar->set(db);
 
 	ASSERT(protocolVersionMonitor.isValid());
 	protocolVersionMonitor.cancel();
@@ -2281,6 +2283,24 @@ void MultiVersionApi::updateSupportedVersions() {
 		setNetworkOption(FDBNetworkOptions::SUPPORTED_CLIENT_VERSIONS,
 		                 StringRef(versionStr.begin(), versionStr.size()));
 	}
+}
+
+ThreadFuture<Void> MultiVersionApi::updateClusterSharedStateMap(std::string clusterFilePath, Reference<IDatabase> db) {
+	MutexHolder holder(lock);
+	if (clusterSharedStateMap.find(clusterFilePath) == clusterSharedStateMap.end()) {
+		clusterSharedStateMap[clusterFilePath] = db->createSharedState();
+	} else {
+		ThreadFuture<DatabaseSharedState*> entry = clusterSharedStateMap[clusterFilePath];
+		return mapThreadFuture<DatabaseSharedState*, Void>(entry, [db](ErrorOr<DatabaseSharedState*> result) {
+			if (result.isError()) {
+				return ErrorOr<Void>(result.getError());
+			}
+			auto ssPtr = result.get();
+			db->setSharedState(ssPtr);
+			return ErrorOr<Void>(Void());
+		});
+	}
+	return Void();
 }
 
 std::vector<std::string> parseOptionValues(std::string valueStr) {

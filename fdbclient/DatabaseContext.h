@@ -505,8 +505,8 @@ public:
 
 	// Manage any shared state that may be used by MVC
 	DatabaseSharedState* sharedStatePtr;
-	DatabaseSharedState* initSharedState();
-	void setSharedState(DatabaseSharedState* p);
+	Future<DatabaseSharedState*> initSharedState();
+	Future<Void> setSharedState(DatabaseSharedState* p);
 
 	// GRV Cache
 	// Database-level read version cache storing the most recent successful GRV as well as the time it was requested.

@@ -58,8 +58,8 @@ public:
 	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
 	ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) override;
 
-	DatabaseSharedState* createSharedState() override;
-	void setSharedState(DatabaseSharedState* p) override;
+	ThreadFuture<DatabaseSharedState*> createSharedState() override;
+	ThreadFuture<Void> setSharedState(DatabaseSharedState* p) override;
 
 private:
 	friend class ThreadSafeTenant;
