@@ -346,7 +346,7 @@ function createDatabase
 
   # Configure the database.
   else
-    "${BINDIR}/fdbcli" -C "${FDBCONF}" --exec 'configure new single memory; status' --timeout "${CONFIGUREWAIT}" --log --log-dir "${LOGDIR}" &>> "${LOGDIR}/fdbclient.log"
+    "${BINDIR}/fdbcli" -C "${FDBCONF}" --exec 'configure new single memory tenant_mode=optional_experimental; status' --timeout "${CONFIGUREWAIT}" --log --log-dir "${LOGDIR}" &>> "${LOGDIR}/fdbclient.log"
 
     if ! displayMessage "Checking if config succeeded"
     then

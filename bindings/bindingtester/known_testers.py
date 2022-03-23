@@ -26,7 +26,7 @@ ALL_TYPES = COMMON_TYPES + ['versionstamp']
 
 
 class Tester:
-    def __init__(self, name, cmd, max_int_bits=64, min_api_version=0, max_api_version=MAX_API_VERSION, threads_enabled=True, types=COMMON_TYPES, directory_snapshot_ops_enabled=True):
+    def __init__(self, name, cmd, max_int_bits=64, min_api_version=0, max_api_version=MAX_API_VERSION, threads_enabled=True, types=COMMON_TYPES, directory_snapshot_ops_enabled=True, tenants_enabled=False):
         self.name = name
         self.cmd = cmd
         self.max_int_bits = max_int_bits
@@ -35,6 +35,7 @@ class Tester:
         self.threads_enabled = threads_enabled
         self.types = types
         self.directory_snapshot_ops_enabled = directory_snapshot_ops_enabled
+        self.tenants_enabled = tenants_enabled
 
     def supports_api_version(self, api_version):
         return api_version >= self.min_api_version and api_version <= self.max_api_version
