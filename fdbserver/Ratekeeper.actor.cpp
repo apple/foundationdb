@@ -999,7 +999,7 @@ void StorageQueueInfo::refreshCommitCost(double elapsed) {
 		// TraceEvent("RefreshSSCommitCost").detail("TotalWriteCost", totalWriteCost).detail("TotalWriteOps",totalWriteOps);
 		ASSERT_GT(totalWriteCosts, 0);
 		maxBusyness = double(maxCost.getCostSum()) / totalWriteCosts;
-		busiestWriteTags.emplace_back(busiestTag, maxBusyness, maxRate);
+		busiestWriteTags.emplace_back(busiestTag, maxRate, maxBusyness);
 	}
 
 	TraceEvent("BusiestWriteTag", id)
