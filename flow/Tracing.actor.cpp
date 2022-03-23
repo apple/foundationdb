@@ -683,38 +683,38 @@ TEST_CASE("/flow/Tracing/AddAttributes") {
 	return Void();
 };
 
-// TEST_CASE("/flow/Tracing/AddLinks") {
-// 	OTELSpan span1("span_with_links"_loc);
-// 	span1.addLink(SpanContext(UID(100, 101), 200, TraceFlags::sampled));
-// 	span1.addLink(SpanContext(UID(200, 201), 300, TraceFlags::unsampled))
-// 	    .addLink(SpanContext(UID(300, 301), 400, TraceFlags::sampled));
+TEST_CASE("/flow/Tracing/AddLinks") {
+	OTELSpan span1("span_with_links"_loc);
+	span1.addLink(SpanContext(UID(100, 101), 200, TraceFlags::sampled));
+	span1.addLink(SpanContext(UID(200, 201), 300, TraceFlags::unsampled))
+	    .addLink(SpanContext(UID(300, 301), 400, TraceFlags::sampled));
 
-// 	ASSERT(span1.links[0].traceID == UID(100, 101));
-// 	ASSERT(span1.links[0].spanID == 200);
-// 	ASSERT(span1.links[0].m_Flags == TraceFlags::sampled);
-// 	ASSERT(span1.links[1].traceID == UID(200, 201));
-// 	ASSERT(span1.links[1].spanID == 300);
-// 	ASSERT(span1.links[1].m_Flags == TraceFlags::unsampled);
-// 	ASSERT(span1.links[2].traceID == UID(300, 301));
-// 	ASSERT(span1.links[2].spanID == 400);
-// 	ASSERT(span1.links[2].m_Flags == TraceFlags::sampled);
+	ASSERT(span1.links[0].traceID == UID(100, 101));
+	ASSERT(span1.links[0].spanID == 200);
+	ASSERT(span1.links[0].m_Flags == TraceFlags::sampled);
+	ASSERT(span1.links[1].traceID == UID(200, 201));
+	ASSERT(span1.links[1].spanID == 300);
+	ASSERT(span1.links[1].m_Flags == TraceFlags::unsampled);
+	ASSERT(span1.links[2].traceID == UID(300, 301));
+	ASSERT(span1.links[2].spanID == 400);
+	ASSERT(span1.links[2].m_Flags == TraceFlags::sampled);
 
-// 	OTELSpan span2("span_with_links"_loc);
-// 	auto link1 = SpanContext(UID(1, 1), 1, TraceFlags::sampled);
-// 	auto link2 = SpanContext(UID(2, 2), 2, TraceFlags::sampled);
-// 	auto link3 = SpanContext(UID(3, 3), 3, TraceFlags::sampled);
-// 	span2.addLinks({ link1, link2 }).addLinks({ link3 });
-// 	ASSERT(span2.links[0].traceID == UID(1, 1));
-// 	ASSERT(span2.links[0].spanID == 1);
-// 	ASSERT(span2.links[0].m_Flags == TraceFlags::sampled);
-// 	ASSERT(span2.links[1].traceID == UID(2, 2));
-// 	ASSERT(span2.links[1].spanID == 2);
-// 	ASSERT(span2.links[1].m_Flags == TraceFlags::sampled);
-// 	ASSERT(span2.links[2].traceID == UID(3, 3));
-// 	ASSERT(span2.links[2].spanID == 3);
-// 	ASSERT(span2.links[2].m_Flags == TraceFlags::sampled);
-// 	return Void();
-// };
+	OTELSpan span2("span_with_links"_loc);
+	auto link1 = SpanContext(UID(1, 1), 1, TraceFlags::sampled);
+	auto link2 = SpanContext(UID(2, 2), 2, TraceFlags::sampled);
+	auto link3 = SpanContext(UID(3, 3), 3, TraceFlags::sampled);
+	span2.addLinks({ link1, link2 }).addLinks({ link3 });
+	ASSERT(span2.links[0].traceID == UID(1, 1));
+	ASSERT(span2.links[0].spanID == 1);
+	ASSERT(span2.links[0].m_Flags == TraceFlags::sampled);
+	ASSERT(span2.links[1].traceID == UID(2, 2));
+	ASSERT(span2.links[1].spanID == 2);
+	ASSERT(span2.links[1].m_Flags == TraceFlags::sampled);
+	ASSERT(span2.links[2].traceID == UID(3, 3));
+	ASSERT(span2.links[2].spanID == 3);
+	ASSERT(span2.links[2].m_Flags == TraceFlags::sampled);
+	return Void();
+};
 
 uint64_t swapUint64BE(uint8_t* index) {
 	uint64_t value;
