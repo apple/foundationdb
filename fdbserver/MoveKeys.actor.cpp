@@ -641,6 +641,11 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 					shards += old.size() - 1;
 					break;
 				} catch (Error& e) {
+					TraceEvent(SevDebug, "StartMoveKeysError", dataMoveID)
+					    .errorUnsuppressed(e)
+					    .detail("DataMoveID", dataMoveID)
+					    .detail("DataMoveRange", keys)
+					    .detail("NewDataMoveMetaData", dataMove.toString());
 					state Error err = e;
 					if (err.code() == error_code_move_to_removed_server)
 						throw;

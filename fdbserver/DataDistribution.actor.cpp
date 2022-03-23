@@ -758,15 +758,15 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
 				for (int i = 0; i < initData->dataMoves.size(); ++i) {
 					const auto& meta = initData->dataMoves[i];
+					TraceEvent("DDInitFoundDataMove", self->ddId)
+					    .detail("DataMoveID", meta.id)
+					    .detail("DataMove", meta.toString());
 					auto ranges = dataMoveMap.intersectingRanges(meta.range);
 					// ASSERT(ranges.size() == 1);
 					for (auto& r : ranges) {
 						ASSERT(!r.value()->valid);
 					}
 					dataMoveMap.insert(meta.range, std::make_shared<DataMove>(meta, true));
-					TraceEvent("DDInitFoundDataMove", self->ddId)
-					    .detail("DataMoveID", meta.id)
-					    .detail("DataMove", meta.toString());
 					// RelocateShard rs(dataMove.range, dataMove.priority, true);
 					// rs.dataMove = dataMove;
 					// output.send(rs);
