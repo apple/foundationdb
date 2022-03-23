@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -2398,7 +2398,17 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
 		else
 			readBegin = range.begin;
 
-		vCurrent = view.lower_bound(readBegin);
+		if (vCurrent) {
+			// We can get first greater or equal from the result of lastLessOrEqual
+			if (vCurrent.key() != readBegin) {
+				++vCurrent;
+			}
+		} else {
+			// There's nothing less than or equal to readBegin in view, so
+			// begin() is the first thing greater than readBegin, or end().
+			// Either way that's the correct result for lower_bound.
+			vCurrent = view.begin();
+		}
 
 		while (limit > 0 && *pLimitBytes > 0 && readBegin < range.end) {
 			ASSERT(!vCurrent || vCurrent.key() >= readBegin);
