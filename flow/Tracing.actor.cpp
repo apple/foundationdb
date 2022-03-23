@@ -729,9 +729,9 @@ std::string readMPString(uint8_t* index, int len) {
 	return reinterpret_cast<char*>(data);
 }
 
-TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
 // Windows doesn't like lack of header and declaration of constructor for FastUDPTracer
 #ifndef WIN32
+TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
 	OTELSpan span1("encoded_span"_loc);
 	auto request = TraceRequest{ .buffer = std::make_unique<uint8_t[]>(kTraceBufferSize),
 		                         .data_size = 0,
@@ -790,6 +790,6 @@ TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
 	// Attributes
 	ASSERT(data[119] == 0b10000001); // single k/v pair
 	ASSERT(data[120] == 0b10100111); // length of key string "address" == 7
-#endif
 	return Void();
 };
+#endif
