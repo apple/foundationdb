@@ -45,7 +45,7 @@ class GlobalTagThrottlerImpl {
 					state RangeResult currentQuotas = wait(tr.getRange(tagQuotaKeys, CLIENT_KNOBS->TOO_MANY));
 					for (auto const kv : currentQuotas) {
 						auto tag = kv.key.removePrefix(tagQuotaPrefix);
-						auto quota = ObjectReader::fromStringRef<TagQuotaValue>(kv.value, IncludeVersion());
+						auto quota = TagQuotaValue::fromValue(kv.value);
 						self->throttledTags[tag].quota = quota;
 					}
 

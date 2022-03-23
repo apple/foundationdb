@@ -1,5 +1,5 @@
 /*
- * TagQuota.h
+ * TagQuota.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,18 +18,21 @@
  * limitations under the License.
  */
 
-#pragma once
+#include "fdbclient/TagQuota.h"
+#include "fdbclient/Tuple.h"
 
-#include "fdbclient/FDBTypes.h"
-#include "flow/serialize.h"
+Value TagQuotaValue::toValue() const {
+	Tuple tuple;
+	tuple.appendDouble(reservedQuota);
+	tuple.appendDouble(totalQuota);
+	return tuple.pack();
+}
 
-KeyRangeRef const tagQuotaKeys = KeyRangeRef("tagQuota/"_sr, "tagQuota0"_sr);
-KeyRef const tagQuotaPrefix = tagQuotaKeys.begin;
-
-class TagQuotaValue {
-public:
-	double reservedQuota{ 0.0 };
-	double totalQuota{ 0.0 };
-	Value toValue() const;
-	static TagQuotaValue fromValue(ValueRef);
-};
+TagQuotaValue TagQuotaValue::fromValue(ValueRef value) {
+	auto tuple = Tuple::unpack(value);
+	ASSERT_EQ(tuple.size(), 2);
+	TagQuotaValue result;
+	result.reservedQuota = tuple.getDouble(0);
+	result.totalQuota = tuple.getDouble(1);
+	return result;
+}
