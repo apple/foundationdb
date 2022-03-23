@@ -635,7 +635,7 @@ TEST_CASE("/flow/Tracing/AddEvents") {
 	span2.addEvent(StringRef(span2.arena, LiteralStringRef("commit_succeed")), 1234567.100);
 	ASSERT(span2.events.begin()->name.toString() == "commit_succeed");
 	ASSERT(span2.events.begin()->time == 1234567.100);
-	ASSERT(span2.attributes.size()== 0);
+	ASSERT(span2.attributes.size() == 0);
 
 	// Add fully constructed OTELEvent to OTELSpan passed by value.
 	OTELSpan span3("span_with_event"_loc);
@@ -661,20 +661,25 @@ TEST_CASE("/flow/Tracing/AddAttributes") {
 	ASSERT(span1.attributes[StringRef(arena, LiteralStringRef("foo"))].toString() == "bar");
 	ASSERT(span1.attributes[StringRef(arena, LiteralStringRef("operation"))].toString() == "grv");
 
-    // TODO - Commented out for now until we agree on const std::string& vs. passing in StringRef
+	// TODO - Commented out for now until we agree on const std::string& vs. passing in StringRef
 	// OTELSpan span2("span_with_attrs"_loc);
- 	// auto s2Arena = span2.arena;
- 	// span2.addAttribute("operation", "ss:update");
- 	// ASSERT(span2.attributes[StringRef(s2Arena, "operation")].toString() == "ss:update");
+	// auto s2Arena = span2.arena;
+	// span2.addAttribute("operation", "ss:update");
+	// ASSERT(span2.attributes[StringRef(s2Arena, "operation")].toString() == "ss:update");
 
 	OTELSpan span3("span_with_attrs"_loc);
 	auto s3Arena = span3.arena;
-	span3.addAttribute(StringRef(s3Arena, LiteralStringRef("a")), StringRef(s3Arena, LiteralStringRef("1"))).addAttribute(StringRef(s3Arena, LiteralStringRef("b")), LiteralStringRef("2")).addAttribute(StringRef(s3Arena, LiteralStringRef("c")), LiteralStringRef("3"));
+	span3.addAttribute(StringRef(s3Arena, LiteralStringRef("a")), StringRef(s3Arena, LiteralStringRef("1")))
+	    .addAttribute(StringRef(s3Arena, LiteralStringRef("b")), LiteralStringRef("2"))
+	    .addAttribute(StringRef(s3Arena, LiteralStringRef("c")), LiteralStringRef("3"));
 
 	ASSERT(span3.attributes.size() == 4); // Includes default attribute of "address"
-	ASSERT(span3.attributes[StringRef(s3Arena, LiteralStringRef("a"))].toString() == "1"); // Includes default attribute of "address"
-	ASSERT(span3.attributes[StringRef(s3Arena, LiteralStringRef("b"))].toString() == "2"); // Includes default attribute of "address"
-	ASSERT(span3.attributes[StringRef(s3Arena, LiteralStringRef("c"))].toString() == "3"); // Includes default attribute of "address"
+	ASSERT(span3.attributes[StringRef(s3Arena, LiteralStringRef("a"))].toString() ==
+	       "1"); // Includes default attribute of "address"
+	ASSERT(span3.attributes[StringRef(s3Arena, LiteralStringRef("b"))].toString() ==
+	       "2"); // Includes default attribute of "address"
+	ASSERT(span3.attributes[StringRef(s3Arena, LiteralStringRef("c"))].toString() ==
+	       "3"); // Includes default attribute of "address"
 	return Void();
 };
 
@@ -725,6 +730,8 @@ std::string readMPString(uint8_t* index, int len) {
 }
 
 TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
+// Windows doesn't like lack of header and declaration of constructor for FastUDPTracer
+#ifndef WIN32
 	OTELSpan span1("encoded_span"_loc);
 	auto request = TraceRequest{ .buffer = std::make_unique<uint8_t[]>(kTraceBufferSize),
 		                         .data_size = 0,
@@ -783,5 +790,6 @@ TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
 	// Attributes
 	ASSERT(data[119] == 0b10000001); // single k/v pair
 	ASSERT(data[120] == 0b10100111); // length of key string "address" == 7
+#endif
 	return Void();
 };
