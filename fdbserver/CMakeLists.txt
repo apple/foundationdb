@@ -5,6 +5,8 @@ set(FDBSERVER_SRCS
   BackupProgress.actor.cpp
   BackupProgress.actor.h
   BackupWorker.actor.cpp
+  BlobGranuleServerCommon.actor.cpp
+  BlobGranuleServerCommon.actor.h
   BlobManager.actor.cpp
   BlobManagerInterface.h
   BlobWorker.actor.cpp
@@ -178,6 +180,7 @@ set(FDBSERVER_SRCS
   workloads/BackupToDBAbort.actor.cpp
   workloads/BackupToDBCorrectness.actor.cpp
   workloads/BackupToDBUpgrade.actor.cpp
+  workloads/BlobGranuleCorrectnessWorkload.actor.cpp
   workloads/BlobGranuleVerifier.actor.cpp
   workloads/BlobStoreWorkload.h
   workloads/BulkLoad.actor.cpp

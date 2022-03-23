@@ -70,6 +70,10 @@ namespace {
 
 const int MACHINE_REBOOT_TIME = 10;
 
+// The max number of extra blob worker machines we might (i.e. randomly) add to the simulated cluster.
+// Note that this is in addition to the two we always have.
+const int NUM_EXTRA_BW_MACHINES = 5;
+
 bool destructed = false;
 
 // Configuration details specified in workload test files that change the simulation
@@ -262,6 +266,9 @@ class TestConfig {
 					configDBType = configDBTypeFromString(value);
 				}
 			}
+			if (attrib == "blobGranulesEnabled") {
+				blobGranulesEnabled = strcmp(value.c_str(), "true") == 0;
+			}
 		}
 
 		ifs.close();
@@ -298,6 +305,7 @@ public:
 	Optional<bool> generateFearless, buggify;
 	Optional<int> datacenters, desiredTLogCount, commitProxyCount, grvProxyCount, resolverCount, storageEngineType,
 	    stderrSeverity, machineCount, processesPerMachine, coordinators;
+	bool blobGranulesEnabled = false;
 	Optional<std::string> config;
 
 	bool allowDefaultTenant = true;
@@ -354,6 +362,7 @@ public:
 		    .add("coordinators", &coordinators)
 		    .add("configDB", &configDBType)
 		    .add("extraMachineCountDC", &extraMachineCountDC)
+		    .add("blobGranulesEnabled", &blobGranulesEnabled)
 		    .add("allowDefaultTenant", &allowDefaultTenant)
 		    .add("allowDisablingTenants", &allowDisablingTenants);
 		try {
@@ -2085,16 +2094,20 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		       coordinatorCount);
 		ASSERT_LE(dcCoordinators, machines);
 
-		// FIXME: temporarily code to test storage cache
+		// FIXME: we hardcode some machines to specifically test storage cache and blob workers
 		// TODO: caching disabled for this merge
-		if (dc == 0) {
-			machines++;
+		int storageCacheMachines = dc == 0 ? 1 : 0;
+		int blobWorkerMachines = 0;
+		if (testConfig.blobGranulesEnabled) {
+			int blobWorkerProcesses = 1 + deterministicRandom()->randomInt(0, NUM_EXTRA_BW_MACHINES + 1);
+			blobWorkerMachines = std::max(1, blobWorkerProcesses / processesPerMachine);
 		}
 
-		int useSeedForMachine = deterministicRandom()->randomInt(0, machines);
+		int totalMachines = machines + storageCacheMachines + blobWorkerMachines;
+		int useSeedForMachine = deterministicRandom()->randomInt(0, totalMachines);
 		Standalone<StringRef> zoneId;
 		Standalone<StringRef> newZoneId;
-		for (int machine = 0; machine < machines; machine++) {
+		for (int machine = 0; machine < totalMachines; machine++) {
 			Standalone<StringRef> machineId(deterministicRandom()->randomUniqueID().toString());
 			if (machine == 0 || machineCount - dataCenters <= 4 || assignedMachines != 4 ||
 			    simconfig.db.regions.size() || deterministicRandom()->random01() < 0.5) {
@@ -2124,11 +2137,19 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 				}
 			}
 
-			// FIXME: temporarily code to test storage cache
+			// FIXME: hack to add machines specifically to test storage cache and blob workers
 			// TODO: caching disabled for this merge
-			if (machine == machines - 1 && dc == 0) {
-				processClass = ProcessClass(ProcessClass::StorageCacheClass, ProcessClass::CommandLineSource);
-				nonVersatileMachines++;
+			// `machines` here is the normal (non-temporary) machines that totalMachines comprises of
+			if (machine >= machines) {
+				if (storageCacheMachines > 0 && dc == 0) {
+					processClass = ProcessClass(ProcessClass::StorageCacheClass, ProcessClass::CommandLineSource);
+					nonVersatileMachines++;
+					storageCacheMachines--;
+				} else if (blobWorkerMachines > 0) { // add blob workers to every DC
+					processClass = ProcessClass(ProcessClass::BlobWorkerClass, ProcessClass::CommandLineSource);
+					nonVersatileMachines++;
+					blobWorkerMachines--;
+				}
 			}
 
 			std::vector<IPAddress> ips;
@@ -2303,8 +2324,9 @@ ACTOR void setupAndRun(std::string dataFolder,
 
 	// Disable the default tenant in backup and DR tests for now. This is because backup does not currently duplicate
 	// the tenant map and related state.
-	// TODO: reenable when backup/DR supports tenants.
-	if (std::string_view(testFile).find("Backup") != std::string_view::npos || testConfig.extraDB != 0) {
+	// TODO: reenable when backup/DR or BlobGranule supports tenants.
+	if (std::string_view(testFile).find("Backup") != std::string_view::npos ||
+	    std::string_view(testFile).find("BlobGranule") != std::string_view::npos || testConfig.extraDB != 0) {
 		allowDefaultTenant = false;
 	}
 

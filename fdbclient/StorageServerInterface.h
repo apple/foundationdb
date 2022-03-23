@@ -773,6 +773,7 @@ struct ChangeFeedStreamReply : public ReplyPromiseStreamReply {
 	VectorRef<MutationsAndVersionRef> mutations;
 	bool atLatestVersion = false;
 	Version minStreamVersion = invalidVersion;
+	Version popVersion = invalidVersion;
 
 	ChangeFeedStreamReply() {}
 
@@ -786,6 +787,7 @@ struct ChangeFeedStreamReply : public ReplyPromiseStreamReply {
 		           mutations,
 		           atLatestVersion,
 		           minStreamVersion,
+		           popVersion,
 		           arena);
 	}
 };
@@ -798,12 +800,18 @@ struct ChangeFeedStreamRequest {
 	Version begin = 0;
 	Version end = 0;
 	KeyRange range;
+	int replyBufferSize = -1;
+	bool canReadPopped = true;
+	UID debugUID; // This is only used for debugging and tracing, but being able to link a client + server side stream
+	              // is so useful for testing, and this is such small overhead compared to streaming large amounts of
+	              // change feed data, it is left in the interface
+
 	ReplyPromiseStream<ChangeFeedStreamReply> reply;
 
 	ChangeFeedStreamRequest() {}
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, rangeID, begin, end, range, reply, spanContext, arena);
+		serializer(ar, rangeID, begin, end, range, reply, spanContext, replyBufferSize, canReadPopped, debugUID, arena);
 	}
 };
 
@@ -881,19 +889,21 @@ struct FetchCheckpointRequest {
 struct OverlappingChangeFeedEntry {
 	Key rangeId;
 	KeyRange range;
-	bool stopped = false;
+	Version emptyVersion;
+	Version stopVersion;
 
 	bool operator==(const OverlappingChangeFeedEntry& r) const {
-		return rangeId == r.rangeId && range == r.range && stopped == r.stopped;
+		return rangeId == r.rangeId && range == r.range && emptyVersion == r.emptyVersion &&
+		       stopVersion == r.stopVersion;
 	}
 
 	OverlappingChangeFeedEntry() {}
-	OverlappingChangeFeedEntry(Key const& rangeId, KeyRange const& range, bool stopped)
-	  : rangeId(rangeId), range(range), stopped(stopped) {}
+	OverlappingChangeFeedEntry(Key const& rangeId, KeyRange const& range, Version emptyVersion, Version stopVersion)
+	  : rangeId(rangeId), range(range), emptyVersion(emptyVersion), stopVersion(stopVersion) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, rangeId, range, stopped);
+		serializer(ar, rangeId, range, emptyVersion, stopVersion);
 	}
 };
 
