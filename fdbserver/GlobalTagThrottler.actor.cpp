@@ -32,6 +32,7 @@ class GlobalTagThrottlerImpl {
 	Database db;
 	UID id;
 	std::map<TransactionTag, QuotaAndCounter> throttledTags;
+	uint64_t throttledTagChangeId{ 0 };
 
 	ACTOR static Future<Void> monitorThrottlingChanges(GlobalTagThrottlerImpl* self) {
 		loop {
@@ -49,6 +50,7 @@ class GlobalTagThrottlerImpl {
 						self->throttledTags[tag].quota = quota;
 					}
 
+					++self->throttledTagChangeId;
 					wait(tr.watch(tagThrottleSignalKey));
 					TraceEvent("GlobalTagThrottlerChangeSignaled");
 					TEST(true); // Global tag throttler detected quota changes
@@ -65,7 +67,7 @@ public:
 	GlobalTagThrottlerImpl(Database db, UID id) : db(db), id(id) {}
 	Future<Void> monitorThrottlingChanges() { return monitorThrottlingChanges(this); }
 	void addRequests(TransactionTag tag, int count) {}
-	uint64_t getThrottledTagChangeId() const { return 0; }
+	uint64_t getThrottledTagChangeId() const { return throttledTagChangeId; }
 	PrioritizedTransactionTagMap<ClientTagThrottleLimits> getClientRates() { return {}; }
 	int64_t autoThrottleCount() const { return 0; }
 	uint32_t busyReadTagCount() const { return 0; }
