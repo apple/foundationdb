@@ -635,6 +635,7 @@ TEST_CASE("/flow/Tracing/AddEvents") {
 	span2.addEvent(StringRef(span2.arena, LiteralStringRef("commit_succeed")), 1234567.100);
 	ASSERT(span2.events.begin()->name.toString() == "commit_succeed");
 	ASSERT(span2.events.begin()->time == 1234567.100);
+	ASSERT(span2.attributes.size()== 0);
 
 	// Add fully constructed OTELEvent to OTELSpan passed by value.
 	OTELSpan span3("span_with_event"_loc);
@@ -652,29 +653,30 @@ TEST_CASE("/flow/Tracing/AddEvents") {
 	return Void();
 };
 
-// TEST_CASE("/flow/Tracing/AddAttributes") {
-// 	OTELSpan span1("span_with_attrs"_loc);
-// 	auto arena = span1.arena;
-// 	span1.addAttribute(StringRef(arena, "foo"), StringRef(arena, "bar"));
-// 	span1.addAttribute(StringRef(arena, "operation"), StringRef(arena, "grv"));
-// 	ASSERT(span1.attributes[StringRef(arena, "foo")].toString() == "bar");
-// 	ASSERT(span1.attributes[StringRef(arena, "operation")].toString() == "grv");
+TEST_CASE("/flow/Tracing/AddAttributes") {
+	OTELSpan span1("span_with_attrs"_loc);
+	auto arena = span1.arena;
+	span1.addAttribute(StringRef(arena, LiteralStringRef("foo")), StringRef(arena, LiteralStringRef("bar")));
+	span1.addAttribute(StringRef(arena, LiteralStringRef("operation")), StringRef(arena, LiteralStringRef("grv")));
+	ASSERT(span1.attributes[StringRef(arena, LiteralStringRef("foo"))].toString() == "bar");
+	ASSERT(span1.attributes[StringRef(arena, LiteralStringRef("operation"))].toString() == "grv");
 
-// 	OTELSpan span2("span_with_attrs"_loc);
-// 	auto s2Arena = span2.arena;
-// 	span2.addAttribute("operation", "ss:update");
-// 	ASSERT(span2.attributes[StringRef(s2Arena, "operation")].toString() == "ss:update");
+    // TODO - Commented out for now until we agree on const std::string& vs. passing in StringRef
+	// OTELSpan span2("span_with_attrs"_loc);
+ 	// auto s2Arena = span2.arena;
+ 	// span2.addAttribute("operation", "ss:update");
+ 	// ASSERT(span2.attributes[StringRef(s2Arena, "operation")].toString() == "ss:update");
 
-// 	OTELSpan span3("span_with_attrs"_loc);
-// 	span3.addAttribute("a", "1").addAttribute("b", "2").addAttribute("c", "3");
+	OTELSpan span3("span_with_attrs"_loc);
+	auto s3Arena = span3.arena;
+	span3.addAttribute(StringRef(s3Arena, LiteralStringRef("a")), StringRef(s3Arena, LiteralStringRef("1"))).addAttribute(StringRef(s3Arena, LiteralStringRef("b")), LiteralStringRef("2")).addAttribute(StringRef(s3Arena, LiteralStringRef("c")), LiteralStringRef("3"));
 
-// 	auto s3Arena = span3.arena;
-// 	ASSERT(span3.attributes.size() == 4); // Includes default attribute of "address"
-// 	ASSERT(span3.attributes[StringRef(s3Arena, "a")].toString() == "1"); // Includes default attribute of "address"
-// 	ASSERT(span3.attributes[StringRef(s3Arena, "b")].toString() == "2"); // Includes default attribute of "address"
-// 	ASSERT(span3.attributes[StringRef(s3Arena, "c")].toString() == "3"); // Includes default attribute of "address"
-// 	return Void();
-// };
+	ASSERT(span3.attributes.size() == 4); // Includes default attribute of "address"
+	ASSERT(span3.attributes[StringRef(s3Arena, LiteralStringRef("a"))].toString() == "1"); // Includes default attribute of "address"
+	ASSERT(span3.attributes[StringRef(s3Arena, LiteralStringRef("b"))].toString() == "2"); // Includes default attribute of "address"
+	ASSERT(span3.attributes[StringRef(s3Arena, LiteralStringRef("c"))].toString() == "3"); // Includes default attribute of "address"
+	return Void();
+};
 
 // TEST_CASE("/flow/Tracing/AddLinks") {
 // 	OTELSpan span1("span_with_links"_loc);
