@@ -216,7 +216,7 @@ void DatabaseContext::removeTssMapping(StorageServerInterface const& ssi) {
 
 void updateCachedReadVersionShared(double t, Version v, DatabaseSharedState* p) {
 	MutexHolder mutex(p->mutexLock);
-	TraceEvent("CheckpointCacheUpdateShared")
+	TraceEvent(SevDebug, "CacheReadVersionUpdate")
 	    .detail("Version", v)
 	    .detail("CurTime", t)
 	    .detail("LastVersion", p->grvCacheSpace.cachedReadVersion)
