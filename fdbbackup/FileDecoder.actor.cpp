@@ -457,7 +457,8 @@ ACTOR Future<Void> process_file(Reference<IBackupContainer> container, LogFile f
 					print = m.param1.startsWith(StringRef(params.prefix));
 				} else if (m.type == MutationRef::ClearRange) {
 					KeyRange range(KeyRangeRef(m.param1, m.param2));
-					print = range.contains(StringRef(params.prefix));
+					KeyRange range2 = prefixRange(StringRef(params.prefix));
+					print = range.intersects(range2);
 				} else {
 					ASSERT(false);
 				}
