@@ -538,7 +538,7 @@ ACTOR Future<Void> updateSecret_impl(Reference<S3BlobStoreEndpoint> b) {
 			JSONDoc accounts(doc.last().get_obj());
 			if (accounts.has(credentialsFileKey, false) && accounts.last().type() == json_spirit::obj_type) {
 				JSONDoc account(accounts.last());
-				S3BlobStoreEndpoint::Credentials creds;
+				S3BlobStoreEndpoint::Credentials creds = b->credentials.get();
 				if (b->lookupKey) {
 					std::string apiKey;
 					if (account.tryGet("api_key", apiKey))
