@@ -107,7 +107,7 @@ class TagThrottlerImpl {
 							if (tagKey.throttleType == TagThrottleType::AUTO) {
 								updatedTagThrottles.autoThrottleTag(
 								    self->id, tag, 0, tagValue.tpsRate, tagValue.expirationTime);
-								updatedTagThrottles.updateBusyTagCount(tagValue.reason);
+								updatedTagThrottles.incrementBusyTagCount(tagValue.reason);
 							} else {
 								updatedTagThrottles.manualThrottleTag(self->id,
 								                                      tag,
@@ -144,6 +144,7 @@ class TagThrottlerImpl {
 		if (busyness > SERVER_KNOBS->AUTO_THROTTLE_TARGET_TAG_BUSYNESS && rate > SERVER_KNOBS->MIN_TAG_COST) {
 			TEST(true); // Transaction tag auto-throttled
 			Optional<double> clientRate = throttledTags.autoThrottleTag(id, tag, busyness);
+			// TODO: Increment tag throttle counts here?
 			if (clientRate.present()) {
 				TagSet tags;
 				tags.addTag(tag);

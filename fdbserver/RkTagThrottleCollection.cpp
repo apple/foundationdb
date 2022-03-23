@@ -347,10 +347,12 @@ int64_t RkTagThrottleCollection::manualThrottleCount() const {
 	return count;
 }
 
-void RkTagThrottleCollection::updateBusyTagCount(TagThrottledReason reason) {
+void RkTagThrottleCollection::incrementBusyTagCount(TagThrottledReason reason) {
 	if (reason == TagThrottledReason::BUSY_READ) {
 		++busyReadTagCount;
 	} else if (reason == TagThrottledReason::BUSY_WRITE) {
 		++busyWriteTagCount;
+	} else {
+		ASSERT(false);
 	}
 }

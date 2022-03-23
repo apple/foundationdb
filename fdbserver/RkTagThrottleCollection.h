@@ -83,7 +83,7 @@ public:
 	void addRequests(TransactionTag const& tag, int requests);
 	int64_t autoThrottleCount() const { return autoThrottledTags.size(); }
 	int64_t manualThrottleCount() const;
-	void updateBusyTagCount(TagThrottledReason);
+	void incrementBusyTagCount(TagThrottledReason);
 	auto getBusyReadTagCount() const { return busyReadTagCount; }
 	auto getBusyWriteTagCount() const { return busyWriteTagCount; }
 };
