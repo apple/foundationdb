@@ -178,6 +178,10 @@ ERROR( blob_granule_not_materialized, 2037, "Blob Granule Read was not materiali
 ERROR( get_mapped_key_values_has_more, 2038, "getMappedRange does not support continuation for now" )
 ERROR( get_mapped_range_reads_your_writes, 2039, "getMappedRange tries to read data that were previously written in the transaction" )
 ERROR( checkpoint_not_found, 2040, "Checkpoint not found" )
+ERROR( key_not_tuple, 2041, "The key cannot be parsed as a tuple" );
+ERROR( value_not_tuple, 2042, "The key cannot be parsed as a tuple" );
+ERROR( mapper_not_tuple, 2043, "The mapper cannot be parsed as a tuple" );
+
 
 ERROR( incompatible_protocol_version, 2100, "Incompatible protocol version" )
 ERROR( transaction_too_large, 2101, "Transaction exceeds byte limit" )

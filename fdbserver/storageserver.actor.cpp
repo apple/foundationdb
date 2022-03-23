@@ -3437,14 +3437,24 @@ Key constructMappedKey(KeyValueRef* keyValue, Tuple& mappedKeyFormatTuple, bool&
 					// Use keyTuple as reference.
 					if (!keyTuple.present()) {
 						// May throw exception if the key is not parsable as a tuple.
-						keyTuple = Tuple::unpack(keyValue->key);
+						try {
+							keyTuple = Tuple::unpack(keyValue->key);
+						} catch (Error& e) {
+							TraceEvent(SevError, "KeyNotTuple").detail("Key", keyValue->key.printable());
+							throw key_not_tuple();
+						}
 					}
 					referenceTuple = &keyTuple.get();
 				} else if (s[1] == 'V') {
 					// Use valueTuple as reference.
 					if (!valueTuple.present()) {
 						// May throw exception if the value is not parsable as a tuple.
-						valueTuple = Tuple::unpack(keyValue->value);
+						try {
+							valueTuple = Tuple::unpack(keyValue->value);
+						} catch (Error& e) {
+							TraceEvent(SevError, "ValueNotTuple").detail("Value", keyValue->value.printable());
+							throw value_not_tuple();
+						}
 					}
 					referenceTuple = &valueTuple.get();
 				} else {
@@ -3578,7 +3588,13 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 
 	result.data.reserve(result.arena, input.data.size());
 
-	state Tuple mappedKeyFormatTuple = Tuple::unpack(mapper);
+	state Tuple mappedKeyFormatTuple;
+	try {
+		mappedKeyFormatTuple = Tuple::unpack(mapper);
+	} catch (Error& e) {
+		TraceEvent(SevError, "MapperNotTuple").detail("Mapper", mapper.printable());
+		throw mapper_not_tuple();
+	}
 	state KeyValueRef* it = input.data.begin();
 	for (; it != input.data.end(); it++) {
 		state MappedKeyValueRef kvm;
