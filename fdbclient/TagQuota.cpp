@@ -23,16 +23,20 @@
 
 Value TagQuotaValue::toValue() const {
 	Tuple tuple;
-	tuple.appendDouble(reservedQuota);
-	tuple.appendDouble(totalQuota);
+	tuple.appendDouble(reservedReadQuota);
+	tuple.appendDouble(totalReadQuota);
+	tuple.appendDouble(reservedWriteQuota);
+	tuple.appendDouble(totalWriteQuota);
 	return tuple.pack();
 }
 
 TagQuotaValue TagQuotaValue::fromValue(ValueRef value) {
 	auto tuple = Tuple::unpack(value);
-	ASSERT_EQ(tuple.size(), 2);
+	ASSERT_EQ(tuple.size(), 4);
 	TagQuotaValue result;
-	result.reservedQuota = tuple.getDouble(0);
-	result.totalQuota = tuple.getDouble(1);
+	result.reservedReadQuota = tuple.getDouble(0);
+	result.totalReadQuota = tuple.getDouble(1);
+	result.reservedWriteQuota = tuple.getDouble(2);
+	result.totalWriteQuota = tuple.getDouble(3);
 	return result;
 }

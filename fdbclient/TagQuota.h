@@ -28,8 +28,10 @@ KeyRef const tagQuotaPrefix = tagQuotaKeys.begin;
 
 class TagQuotaValue {
 public:
-	double reservedQuota{ 0.0 };
-	double totalQuota{ 0.0 };
+	double reservedReadQuota{ 0.0 };
+	double totalReadQuota{ 0.0 };
+	double reservedWriteQuota{ 0.0 };
+	double totalWriteQuota{ 0.0 };
 	Value toValue() const;
 	static TagQuotaValue fromValue(ValueRef);
 };
