@@ -696,9 +696,9 @@ int runOneTask(Transaction tx, Arguments const& args, ThreadStatistics& stats, L
 			watch_commit.stop();
 			watch_tx.setStop(watch_commit.getStop());
 			auto tx_resetter = ExitGuard([&watch_tx, &tx]() {
-					tx.reset();
-				    watch_tx.startFromStop();
-				});
+				tx.reset();
+				watch_tx.startFromStop();
+			});
 			if (rc == FutureRC::OK) {
 				if (do_sample) {
 					const auto commit_latency = watch_commit.diff();

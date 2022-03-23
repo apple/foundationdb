@@ -56,13 +56,12 @@ int computeThreadPortion(int val, int p_idx, int t_idx, int total_p, int total_t
 /* similar to insertBegin/end, computeThreadTps computes
  * the per-thread target TPS for given configuration.
  */
-#define computeThreadTps(val, p_idx, t_idx, total_p, total_t)                                                        \
-	computeThreadPortion(val, p_idx, t_idx, total_p, total_t)
+#define computeThreadTps(val, p_idx, t_idx, total_p, total_t) computeThreadPortion(val, p_idx, t_idx, total_p, total_t)
 
 /* similar to computeThreadTps,
  * computeThreadIters computs the number of iterations.
  */
-#define computeThreadIters(val, p_idx, t_idx, total_p, total_t)                                                      \
+#define computeThreadIters(val, p_idx, t_idx, total_p, total_t)                                                        \
 	computeThreadPortion(val, p_idx, t_idx, total_p, total_t)
 
 /* get the number of digits */
