@@ -625,17 +625,17 @@ TEST_CASE("/flow/Tracing/AddEvents") {
 	auto arena = span1.arena;
 	auto attr = KeyValueRef(arena, KeyValueRef(LiteralStringRef("foo"), LiteralStringRef("bar")));
 	span1.addEvent(StringRef(arena, LiteralStringRef("read_version")), 1.0, { attr });
-	ASSERT(span1.events.begin()->name.toString() == "read_version");
-	ASSERT(span1.events.begin()->time == 1.0);
-	ASSERT(span1.events.begin()->attributes.begin()->key.toString() == "foo");
-	ASSERT(span1.events.begin()->attributes.begin()->value.toString() == "bar");
+	ASSERT(span1.events[0].name.toString() == "read_version");
+	ASSERT(span1.events[0].time == 1.0);
+	ASSERT(span1.events[0].attributes.begin()->key.toString() == "foo");
+	ASSERT(span1.events[0].attributes.begin()->value.toString() == "bar");
 
 	// Use helper method to add an OTELEvent with no attributes to an OTELSpan
 	OTELSpan span2("span_with_event"_loc);
 	span2.addEvent(StringRef(span2.arena, LiteralStringRef("commit_succeed")), 1234567.100);
-	ASSERT(span2.events.begin()->name.toString() == "commit_succeed");
-	ASSERT(span2.events.begin()->time == 1234567.100);
-	ASSERT(span2.attributes.size() == 0);
+	ASSERT(span2.events[0].name.toString() == "commit_succeed");
+	ASSERT(span2.events[0].time == 1234567.100);
+	ASSERT(span2.events[0].attributes.size() == 0);
 
 	// Add fully constructed OTELEvent to OTELSpan passed by value.
 	OTELSpan span3("span_with_event"_loc);
@@ -793,3 +793,4 @@ TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
 	return Void();
 };
 #endif
+
