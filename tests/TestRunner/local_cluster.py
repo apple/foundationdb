@@ -101,7 +101,7 @@ logdir = {logdir}
         self.ip_address = '127.0.0.1' if ip_address is None else ip_address
         self.first_port = port
         if (self.first_port is not None):
-            self.last_used_port = self.first_port-1
+            self.last_used_port = int(self.first_port)-1
         self.server_ports = [self.__next_port()
                              for _ in range(self.process_number)]
         self.cluster_desc = random_secret_string(8)
