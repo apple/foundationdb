@@ -56,7 +56,7 @@ using BlobCipherChecksum = uint64_t;
 typedef enum { BLOB_CIPHER_ENCRYPT_MODE_NONE = 0, BLOB_CIPHER_ENCRYPT_MODE_AES_256_CTR = 1 } BlockCipherEncryptMode;
 
 // Encryption operations buffer management
-// Approach limits number of copies needed during encyrption or decryption operations.
+// Approach limits number of copies needed during encryption or decryption operations.
 // For encryption EncryptBuf is allocated using client supplied Arena and provided to AES library to capture
 // the ciphertext. Similarly, on decryption EncryptBuf is allocated using client supplied Arena and provided
 // to the AES library to capture decipher text and passed back to the clients. Given the object passed around

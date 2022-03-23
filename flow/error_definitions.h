@@ -291,7 +291,7 @@ ERROR( encrypt_key_not_found, 3002, "Expected encryption key is missing")
 ERROR( encrypt_key_ttl_expired, 3003, "Expected encryption key TTL has expired")
 ERROR( encrypt_header_checksum_mismatch, 3004, "Encryption header checksum mismatch")
 ERROR( encrypt_update_cipher, 3005, "Attempt to update encryption cipher key")
-ERROR( encrypt_invalid_id, 3006, "Invalid encyrption domainId or encyrption cipher key id")
+ERROR( encrypt_invalid_id, 3006, "Invalid encryption domainId or encryption cipher key id")
 
 // 4xxx Internal errors (those that should be generated only by bugs) are decimal 4xxx
 ERROR( unknown_error, 4000, "An unknown error occurred" )  // C++ exception not of type Error

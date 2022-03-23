@@ -583,7 +583,7 @@ TEST_CASE("flow/BlobCipher") {
 
 	TraceEvent("BlobCipherTest_DecryptDone").log();
 
-	// induce encyrption header corruption - headerVersion corrupted
+	// induce encryption header corruption - headerVersion corrupted
 	header.flags.headerVersion += 1;
 	try {
 		decrypted = decryptor.decrypt(encrypted->begin(), bufLen, header, arena);
@@ -594,7 +594,7 @@ TEST_CASE("flow/BlobCipher") {
 		header.flags.headerVersion -= 1;
 	}
 
-	// induce encyrption header corruption - encryptionMode corrupted
+	// induce encryption header corruption - encryptionMode corrupted
 	header.flags.encryptMode += 1;
 	try {
 		decrypted = decryptor.decrypt(encrypted->begin(), bufLen, header, arena);
@@ -605,7 +605,7 @@ TEST_CASE("flow/BlobCipher") {
 		header.flags.encryptMode -= 1;
 	}
 
-	// induce encyrption header corruption - checksum mismatch
+	// induce encryption header corruption - checksum mismatch
 	header.ciphertextChecksum += 1;
 	try {
 		decrypted = decryptor.decrypt(encrypted->begin(), bufLen, header, arena);
