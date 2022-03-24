@@ -97,6 +97,7 @@ public:
 		// If a storage server does not reply its storeType, it will be tracked by failure monitor and removed.
 		return (storeType == configStoreType || storeType == KeyValueStoreType::END);
 	}
+	bool isWigglePausedServer() const;
 
 	std::pair<int64_t, int64_t> spaceBytes(bool includeInFlight = true) const;
 	int64_t loadBytes() const;
@@ -210,10 +211,11 @@ public:
 	void setHealthy(bool h) override { healthy = h; }
 	int getPriority() const override { return priority; }
 	void setPriority(int p) override { priority = p; }
-	void addref() override { ReferenceCounted<TCTeamInfo>::addref(); }
-	void delref() override { ReferenceCounted<TCTeamInfo>::delref(); }
+	void addref() const override { ReferenceCounted<TCTeamInfo>::addref(); }
+	void delref() const override { ReferenceCounted<TCTeamInfo>::delref(); }
 
 	bool hasServer(const UID& server) const;
+	bool hasWigglePausedServer() const;
 
 	void addServers(const std::vector<UID>& servers) override;
 

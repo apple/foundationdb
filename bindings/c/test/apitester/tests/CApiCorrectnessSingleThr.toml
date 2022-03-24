@@ -1,0 +1,16 @@
+[[test]]
+title = 'API Correctness Single Threaded'
+minClients = 1
+maxClients = 3
+multiThreaded = false
+
+    [[test.workload]]
+    name = 'ApiCorrectness'
+    minKeyLength = 1
+	maxKeyLength = 64
+	minValueLength = 1
+	maxValueLength = 1000
+	maxKeysPerTransaction = 50
+	initialSize = 100
+	numRandomOperations = 100
+	readExistingKeysRatio = 0.9

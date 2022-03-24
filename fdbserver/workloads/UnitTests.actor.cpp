@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,6 +30,7 @@ void forceLinkMemcpyTests();
 void forceLinkMemcpyPerfTests();
 #if (!defined(TLS_DISABLED) && !defined(_WIN32))
 void forceLinkStreamCipherTests();
+void forceLinkBLockCiherTests();
 #endif
 void forceLinkParallelStreamTests();
 void forceLinkSimExternalConnectionTests();
@@ -76,6 +77,7 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkMemcpyPerfTests();
 #if (!defined(TLS_DISABLED) && !defined(_WIN32))
 		forceLinkStreamCipherTests();
+		void forceLinkBlobCipherTests();
 #endif
 		forceLinkParallelStreamTests();
 		forceLinkSimExternalConnectionTests();

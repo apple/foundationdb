@@ -6,6 +6,7 @@
 .. |database-type| replace:: ``FDBDatabase``
 .. |database-class| replace:: :type:`FDBDatabase`
 .. |database-auto| replace:: FIXME
+.. |tenant-type| replace:: ``FDBTenant``
 .. |transaction-class| replace:: FIXME
 .. |get-key-func| replace:: :func:`fdb_transaction_get_key()`
 .. |get-range-func| replace:: :func:`fdb_transaction_get_range()`
@@ -419,9 +420,20 @@ An |database-blurb1| Modifications to a database are performed via transactions.
 
    |option-doc|
 
+.. function:: fdb_error_t fdb_database_open_tenant(FDBDatabase* database, uint8_t const* tenant_name, int tenant_name_length, FDBTenant** out_tenant)
+
+   Opens a tenant on the given database. All transactions created by this tenant will operate on the tenant's key-space. The caller assumes ownership of the :type:`FDBTenant` object and must destroy it with :func:`fdb_tenant_destroy()`.
+
+   ``tenant_name``
+      The name of the tenant being accessed, as a byte string.
+   ``tenant_name_length``
+      The length of the tenant name byte string.
+   ``*out_tenant``
+      Set to point to the newly created :type:`FDBTenant`.
+
 .. function:: fdb_error_t fdb_database_create_transaction(FDBDatabase* database, FDBTransaction** out_transaction)
 
-   Creates a new transaction on the given database. The caller assumes ownership of the :type:`FDBTransaction` object and must destroy it with :func:`fdb_transaction_destroy()`.
+   Creates a new transaction on the given database without using a tenant, meaning that it will operate on the entire database key-space. The caller assumes ownership of the :type:`FDBTransaction` object and must destroy it with :func:`fdb_transaction_destroy()`.
 
    ``*out_transaction``
       Set to point to the newly created :type:`FDBTransaction`.
@@ -454,7 +466,7 @@ An |database-blurb1| Modifications to a database are performed via transactions.
    
    The function will change the region configuration to have a positive priority for the chosen dcId, and a negative priority for all other dcIds.
 
-   In particular, no error will be thrown if the given dcId does not exist. It will just not attemp to force a recovery.
+   In particular, no error will be thrown if the given dcId does not exist. It will just not attempt to force a recovery.
    
    If the database has already recovered, the function does nothing. Thus it's safe to call it multiple times.
 
@@ -485,6 +497,26 @@ An |database-blurb1| Modifications to a database are performed via transactions.
 .. function:: double fdb_database_get_main_thread_busyness(FDBDatabase* database)
 
    Returns a value where 0 indicates that the client is idle and 1 (or larger) indicates that the client is saturated. By default, this value is updated every second.
+
+Tenant
+======
+
+|tenant-blurb1|
+
+.. type:: FDBTenant
+
+   An opaque type that represents a tenant in the FoundationDB C API.
+
+.. function:: void fdb_tenant_destroy(FDBTenant* tenant)
+
+   Destroys an :type:`FDBTenant` object. It must be called exactly once for each successful call to :func:`fdb_database_create_tenant()`. This function only destroys a handle to the tenant -- the tenant and its data will be fine!
+
+.. function:: fdb_error_t fdb_tenant_create_transaction(FDBTenant* tenant, FDBTronsaction **out_transaction)
+
+   Creates a new transaction on the given tenant. This transaction will operate within the tenant's key-space and cannot access data outside the tenant. The caller assumes ownership of the :type:`FDBTransaction` object and must destroy it with :func:`fdb_transaction_destroy()`.
+
+   ``*out_transaction``
+      Set to point to the newly created :type:`FDBTransaction`.
 
 Transaction
 ===========

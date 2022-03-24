@@ -26,7 +26,7 @@ ALL_TYPES = COMMON_TYPES + ['versionstamp']
 
 
 class Tester:
-    def __init__(self, name, cmd, max_int_bits=64, min_api_version=0, max_api_version=MAX_API_VERSION, threads_enabled=True, types=COMMON_TYPES, directory_snapshot_ops_enabled=True):
+    def __init__(self, name, cmd, max_int_bits=64, min_api_version=0, max_api_version=MAX_API_VERSION, threads_enabled=True, types=COMMON_TYPES, directory_snapshot_ops_enabled=True, tenants_enabled=False):
         self.name = name
         self.cmd = cmd
         self.max_int_bits = max_int_bits
@@ -35,6 +35,7 @@ class Tester:
         self.threads_enabled = threads_enabled
         self.types = types
         self.directory_snapshot_ops_enabled = directory_snapshot_ops_enabled
+        self.tenants_enabled = tenants_enabled
 
     def supports_api_version(self, api_version):
         return api_version >= self.min_api_version and api_version <= self.max_api_version
@@ -57,8 +58,8 @@ _java_cmd = 'java -ea -cp %s:%s com.apple.foundationdb.test.' % (
 
 # We could set min_api_version lower on some of these if the testers were updated to support them
 testers = {
-    'python': Tester('python', 'python ' + _absolute_path('python/tests/tester.py'), 2040, 23, MAX_API_VERSION, types=ALL_TYPES),
-    'python3': Tester('python3', 'python3 ' + _absolute_path('python/tests/tester.py'), 2040, 23, MAX_API_VERSION, types=ALL_TYPES),
+    'python': Tester('python', 'python ' + _absolute_path('python/tests/tester.py'), 2040, 23, MAX_API_VERSION, types=ALL_TYPES, tenants_enabled=True),
+    'python3': Tester('python3', 'python3 ' + _absolute_path('python/tests/tester.py'), 2040, 23, MAX_API_VERSION, types=ALL_TYPES, tenants_enabled=True),
     'ruby': Tester('ruby', _absolute_path('ruby/tests/tester.rb'), 2040, 23, MAX_API_VERSION),
     'java': Tester('java', _java_cmd + 'StackTester', 2040, 510, MAX_API_VERSION, types=ALL_TYPES),
     'java_async': Tester('java', _java_cmd + 'AsyncStackTester', 2040, 510, MAX_API_VERSION, types=ALL_TYPES),
