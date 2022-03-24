@@ -566,17 +566,22 @@ bool serverHasKey(ValueRef storedValue) {
 }
 
 const Value serverKeysValue(const UID& id) {
-	BinaryWriter wr(IncludeVersion(ProtocolVersion::withTeamEncodedLocationMetaData()));
+	// BinaryWriter wr(IncludeVersion(ProtocolVersion::withTeamEncodedLocationMetaData()));
+	BinaryWriter wr(Unversioned());
 	wr << id;
 	return wr.toValue();
 }
 
 void decodeServerKeysValue(const ValueRef& value, UID& id) {
-	BinaryReader rd(value, IncludeVersion());
-	if (!rd.protocolVersion().hasTeamEncodedLocationMetaData()) {
+	BinaryReader rd(value, Unversioned());
+	if (value.size() == 0) {
 		id = UID();
 		return;
 	}
+	// if (!rd.protocolVersion().hasTeamEncodedLocationMetaData()) {
+	// 	id = UID();
+	// 	return;
+	// }
 	rd >> id;
 }
 

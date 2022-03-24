@@ -705,7 +705,9 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 						}
 					}
 
-					ASSERT(dataMove.range.begin == keys.begin);
+					if (dataMove.getPhase() == DataMoveMetaData::Prepare) {
+						ASSERT(dataMove.range.begin == keys.begin);
+					}
 					dataMove.range = KeyRangeRef(keys.begin, currentKeys.end);
 					dataMove.dest.insert(servers.begin(), servers.end());
 					if (currentKeys.end == keys.end) {

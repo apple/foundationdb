@@ -358,7 +358,9 @@ struct KeyRangeRef {
 		}
 	};
 
-	std::string toString() const { return "Begin:" + begin.printable() + "End:" + end.printable(); }
+	std::string toString() const;
+
+	// std::string prettyString() const;
 };
 
 template <>
@@ -376,6 +378,10 @@ struct Traceable<KeyRangeRef> : std::true_type {
 		return result;
 	}
 };
+
+std::string KeyRangeRef::toString() const {
+	return Traceable<KeyRangeRef>::toString(*this);
+}
 
 inline KeyRangeRef operator&(const KeyRangeRef& lhs, const KeyRangeRef& rhs) {
 	KeyRef b = std::max(lhs.begin, rhs.begin), e = std::min(lhs.end, rhs.end);
