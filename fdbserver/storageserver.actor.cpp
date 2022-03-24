@@ -6513,8 +6513,16 @@ private:
 			// We can also ignore clearRanges, because they are always accompanied by such a pair of sets with the same
 			// keys
 			startKey = m.param1;
-			nowAssigned = m.param2 != serverKeysFalse;
-			emptyRange = m.param2 == serverKeysTrueEmptyRange;
+
+			if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+				UID shardId;
+				decodeServerKeysValue(m.param2, shardId);
+				nowAssigned = shardId.isValid();
+				emptyRange = m.param2 == serverKeysTrueEmptyRange;
+			} else {
+				nowAssigned = m.param2 != serverKeysFalse;
+				emptyRange = m.param2 == serverKeysTrueEmptyRange;
+			}
 			processedStartKey = true;
 		} else if (m.type == MutationRef::SetValue && m.param1 == lastEpochEndPrivateKey) {
 			// lastEpochEnd transactions are guaranteed by the master to be alone in their own batch (version)

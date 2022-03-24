@@ -87,10 +87,59 @@ const Value keyServersValue(RangeResult result, const std::vector<UID>& src, con
 
 	return keyServersValue(srcTag, destTag);
 }
+
+const Value keyServersValue(RangeResult result,
+                            const std::vector<UID>& src,
+                            const std::vector<UID>& dest,
+                            const UID& srcID,
+                            const UID& destID) {
+	std::vector<Tag> srcTag;
+	std::vector<Tag> destTag;
+
+	bool foundOldLocality = false;
+	for (const KeyValueRef& kv : result) {
+		UID uid = decodeServerTagKey(kv.key);
+		if (std::find(src.begin(), src.end(), uid) != src.end()) {
+			srcTag.push_back(decodeServerTagValue(kv.value));
+			if (srcTag.back().locality == tagLocalityUpgraded) {
+				foundOldLocality = true;
+				break;
+			}
+		}
+		if (std::find(dest.begin(), dest.end(), uid) != dest.end()) {
+			destTag.push_back(decodeServerTagValue(kv.value));
+			if (destTag.back().locality == tagLocalityUpgraded) {
+				foundOldLocality = true;
+				break;
+			}
+		}
+	}
+
+	if (foundOldLocality || src.size() != srcTag.size() || dest.size() != destTag.size()) {
+		ASSERT_WE_THINK(foundOldLocality);
+		BinaryWriter wr(IncludeVersion(ProtocolVersion::withKeyServerValue()));
+		wr << src << dest;
+		return wr.toValue();
+	}
+
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withTeamEncodedLocationMetaData()));
+	wr << srcTag << destTag << srcID << destID;
+
+	return wr.toValue();
+}
+
 const Value keyServersValue(const std::vector<Tag>& srcTag, const std::vector<Tag>& destTag) {
 	// src and dest are expected to be sorted
 	BinaryWriter wr(IncludeVersion(ProtocolVersion::withKeyServerValueV2()));
 	wr << srcTag << destTag;
+	return wr.toValue();
+}
+
+const Value keyServersValue(const std::vector<Tag>& srcTag, const UID& id) {
+	std::vector<Tag> destTag;
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withTeamEncodedLocationMetaData()));
+	wr << srcTag << destTag << id << UID();
+
 	return wr.toValue();
 }
 
@@ -99,6 +148,12 @@ void decodeKeyServersValue(RangeResult result,
                            std::vector<UID>& src,
                            std::vector<UID>& dest,
                            bool missingIsError) {
+	if (CLIENT_KNOBS->TEAM_ENCODE_LOCATION_METADATA) {
+		UID srcId, destId;
+		decodeKeyServersValue(result, value, src, dest, srcId, destId, missingIsError);
+		return;
+	}
+
 	if (value.size() == 0) {
 		src.clear();
 		dest.clear();
@@ -145,10 +200,70 @@ void decodeKeyServersValue(RangeResult result,
 	}
 }
 
+void decodeKeyServersValue(RangeResult result,
+                           const ValueRef& value,
+                           std::vector<UID>& src,
+                           std::vector<UID>& dest,
+                           UID& srcID,
+                           UID& destID,
+                           bool missingIsError) {
+	if (value.size() == 0) {
+		src.clear();
+		dest.clear();
+		srcID = UID();
+		destID = UID();
+		return;
+	}
+
+	BinaryReader rd(value, IncludeVersion());
+	// if (!rd.protocolVersion().hasTeamEncodedLocationMetaData()) {
+	// 	decodeKeyServersValue(result, value, src, dest, missingIsError);
+	// 	return;
+	// }
+
+	std::vector<Tag> srcTag, destTag;
+	rd >> srcTag >> destTag >> srcID >> destID;
+
+	src.clear();
+	dest.clear();
+
+	for (const KeyValueRef& kv : result) {
+		Tag tag = decodeServerTagValue(kv.value);
+		if (std::find(srcTag.begin(), srcTag.end(), tag) != srcTag.end()) {
+			src.push_back(decodeServerTagKey(kv.key));
+		}
+		if (std::find(destTag.begin(), destTag.end(), tag) != destTag.end()) {
+			dest.push_back(decodeServerTagKey(kv.key));
+		}
+	}
+	std::sort(src.begin(), src.end());
+	std::sort(dest.begin(), dest.end());
+	if (missingIsError && (src.size() != srcTag.size() || dest.size() != destTag.size())) {
+		TraceEvent(SevError, "AttemptedToDecodeMissingTag").log();
+		for (const KeyValueRef& kv : result) {
+			Tag tag = decodeServerTagValue(kv.value);
+			UID serverID = decodeServerTagKey(kv.key);
+			TraceEvent("TagUIDMap").detail("Tag", tag.toString()).detail("UID", serverID.toString());
+		}
+		for (auto& it : srcTag) {
+			TraceEvent("SrcTag").detail("Tag", it.toString());
+		}
+		for (auto& it : destTag) {
+			TraceEvent("DestTag").detail("Tag", it.toString());
+		}
+		ASSERT(false);
+	}
+}
+
 void decodeKeyServersValue(std::map<Tag, UID> const& tag_uid,
                            const ValueRef& value,
                            std::vector<UID>& src,
                            std::vector<UID>& dest) {
+	if (CLIENT_KNOBS->TEAM_ENCODE_LOCATION_METADATA) {
+		UID srcId, destId;
+		decodeKeyServersValue(tag_uid, value, src, dest, srcId, destId);
+		return;
+	}
 	static std::vector<Tag> srcTag, destTag;
 	src.clear();
 	dest.clear();
@@ -174,6 +289,67 @@ void decodeKeyServersValue(std::map<Tag, UID> const& tag_uid,
 	srcTag.clear();
 	destTag.clear();
 	rd >> srcTag >> destTag;
+
+	for (auto t : srcTag) {
+		auto itr = tag_uid.find(t);
+		if (itr != tag_uid.end()) {
+			src.push_back(itr->second);
+		} else {
+			TraceEvent(SevError, "AttemptedToDecodeMissingSrcTag").detail("Tag", t.toString());
+			ASSERT(false);
+		}
+	}
+
+	for (auto t : destTag) {
+		auto itr = tag_uid.find(t);
+		if (itr != tag_uid.end()) {
+			dest.push_back(itr->second);
+		} else {
+			TraceEvent(SevError, "AttemptedToDecodeMissingDestTag").detail("Tag", t.toString());
+			ASSERT(false);
+		}
+	}
+
+	std::sort(src.begin(), src.end());
+	std::sort(dest.begin(), dest.end());
+}
+
+void decodeKeyServersValue(std::map<Tag, UID> const& tag_uid,
+                           const ValueRef& value,
+                           std::vector<UID>& src,
+                           std::vector<UID>& dest,
+                           UID& srcID,
+                           UID& destID) {
+	static std::vector<Tag> srcTag, destTag;
+	src.clear();
+	dest.clear();
+	if (value.size() == 0) {
+		return;
+	}
+
+	BinaryReader rd(value, IncludeVersion());
+	// if (!rd.protocolVersion().hasTeamEncodedLocationMetaData()) {
+	// 	decodeKeyServersValue(tag_uid, value, src, dest);
+	// 	return;
+	// }
+
+	// rd.checkpoint();
+	// int srcLen, destLen;
+	// rd >> srcLen;
+	// rd.readBytes(srcLen * sizeof(Tag));
+	// rd >> destLen;
+	// rd.rewind();
+
+	// if (value.size() !=
+	//     sizeof(ProtocolVersion) + sizeof(int) + srcLen * sizeof(Tag) + sizeof(int) + destLen * sizeof(Tag)) {
+	// 	rd >> src >> dest;
+	// 	rd.assertEnd();
+	// 	return;
+	// }
+
+	srcTag.clear();
+	destTag.clear();
+	rd >> srcTag >> destTag >> srcID >> destID;
 
 	for (auto t : srcTag) {
 		auto itr = tag_uid.find(t);
@@ -244,8 +420,6 @@ const Key checkpointKeyPrefixFor(UID ssID, UID moveDataID) {
 	wr.serializeBytes("/"_sr);
 	return wr.toValue();
 }
-
-
 
 const Value checkpointValue(const CheckpointMetaData& checkpoint) {
 	return ObjectWriter::toValue(checkpoint, IncludeVersion());
@@ -389,6 +563,21 @@ UID serverKeysDecodeServer(const KeyRef& key) {
 }
 bool serverHasKey(ValueRef storedValue) {
 	return storedValue == serverKeysTrue || storedValue == serverKeysTrueEmptyRange;
+}
+
+const Value serverKeysValue(const UID& id) {
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withTeamEncodedLocationMetaData()));
+	wr << id;
+	return wr.toValue();
+}
+
+void decodeServerKeysValue(const ValueRef& value, UID& id) {
+	BinaryReader rd(value, IncludeVersion());
+	if (!rd.protocolVersion().hasTeamEncodedLocationMetaData()) {
+		id = UID();
+		return;
+	}
+	rd >> id;
 }
 
 const KeyRef cacheKeysPrefix = LiteralStringRef("\xff\x02/cacheKeys/");
