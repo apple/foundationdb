@@ -5654,34 +5654,32 @@ public:
 		Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
 		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
 		state int processSize = 5;
-		state int teamSize = 3;
+		state int teamSize = 1;
 		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
-		GetStorageMetricsReply mid_read;
-		mid_read.capacity.bytes = 1000 * 1024 * 1024;
-		mid_read.available.bytes = 400 * 1024 * 1024;
-		mid_read.load.bytes = 800 * 1024 * 1024; // high load bytes
-		mid_read.load.bytesReadPerKSecond = 200 * 1024 * 1024; // low read load
-
-		GetStorageMetricsReply high_read;
-		high_read.capacity.bytes = 1000 * 1024 * 1024;
-		high_read.available.bytes = 800 * 1024 * 1024;
-		high_read.load.bytesReadPerKSecond = 800 * 1024 * 1024;
-		high_read.load.bytes = 400 * 1024 * 1024;
-
-		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
-		collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), true);
 		collection->disableBuildingTeams();
 		collection->setCheckTeamDelay();
+
+		int64_t capacity = 1000 * 1024 * 1024;
+		std::vector<int64_t> read_bandwidths{
+			100 * 1024 * 1024, 300 * 1024 * 1024, 500 * 1024 * 1024, 700 * 1024 * 1024, 900 * 1024 * 1024
+		};
+		std::vector<int64_t> load_bytes{
+			50 * 1024 * 1024, 200 * 1024 * 1024, 400 * 1024 * 1024, 600 * 1024 * 1024, 800 * 1024 * 1024
+		};
+		GetStorageMetricsReply metrics[5];
+		for (int i = 0; i < 5; ++i) {
+			metrics[i].capacity.bytes = capacity;
+			metrics[i].available.bytes = deterministicRandom()->randomChoice(load_bytes);
+			metrics[i].load.bytesReadPerKSecond = read_bandwidths[i];
+			metrics[i].load.bytes = deterministicRandom()->randomChoice(load_bytes);
+			collection->addTeam(std::set<UID>({ UID(i + 1, 0) }), true);
+			collection->server_info[UID(i + 1, 0)]->setServerMetrics(metrics[i]);
+		}
 
 		/*
 		 * Among server teams that have healthy space available, pick the team that is
 		 * least utilized, if the caller says they preferLowerUtilization.
 		 */
-
-		collection->server_info[UID(1, 0)]->setServerMetrics(mid_read);
-		collection->server_info[UID(2, 0)]->setServerMetrics(mid_read);
-		collection->server_info[UID(3, 0)]->setServerMetrics(mid_read);
-		collection->server_info[UID(4, 0)]->setServerMetrics(high_read);
 
 		bool wantsNewServers = true;
 		bool wantsTrueBest = true;
@@ -5699,7 +5697,7 @@ public:
 
 		std::pair<Optional<Reference<IDataDistributionTeam>>, bool> resTeam = req.reply.getFuture().get();
 
-		std::set<UID> expectedServers{ UID(1, 0), UID(2, 0), UID(3, 0) };
+		std::set<UID> expectedServers{ UID(1, 0) };
 		ASSERT(resTeam.first.present());
 		auto servers = resTeam.first.get()->getServerIDs();
 		const std::set<UID> selectedServers(servers.begin(), servers.end());
@@ -5769,6 +5767,6 @@ TEST_CASE("/DataDistribution/GetTeam/ServerUtilizationNearCutoff") {
 	return Void();
 }
 TEST_CASE("/DataDistribution/GetTeam/TrueBestLeastReadBandwidth") {
-	wait(DDTeamCollectionUnitTest::GetTeam_TrueBestLeastReadBandwidth());
+	wait(timeout(recurring(DDTeamCollectionUnitTest::GetTeam_TrueBestLeastReadBandwidth(), 0.1), 10));
 	return Void();
 }
