@@ -29,10 +29,12 @@ namespace FdbApiTester {
 
 class TesterOptions {
 public:
+	// FDB API version, using the latest version by default
+	int apiVersion = FDB_API_VERSION;
 	std::string clusterFile;
 	bool trace = false;
 	std::string traceDir;
-	std::string traceFormat;
+	std::string traceFormat = "xml";
 	std::string logGroup;
 	std::string externalClientLibrary;
 	std::string externalClientDir;

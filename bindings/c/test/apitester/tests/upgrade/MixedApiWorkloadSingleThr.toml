@@ -1,10 +1,8 @@
 [[test]]
-title = 'Mixed Workload for Upgrade Tests with a Multi-Threaded Client'
-multiThreaded = true
+title = 'Mixed Workload for Upgrade Tests with a Single FDB Thread'
+multiThreaded = false
 buggify = true
 databasePerTransaction = false
-minFdbThreads = 2
-maxFdbThreads = 8
 minDatabases = 2
 maxDatabases = 8
 minClientThreads = 2

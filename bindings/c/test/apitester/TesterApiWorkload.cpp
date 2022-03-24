@@ -34,7 +34,7 @@ ApiWorkload::ApiWorkload(const WorkloadConfig& config) : WorkloadBase(config) {
 	readExistingKeysRatio = config.getFloatOption("readExistingKeysRatio", 0.9);
 	runUntilStop = config.getBoolOption("runUntilStop", false);
 	numRandomOperations = config.getIntOption("numRandomOperations", 1000);
-	numOperationsForProgressCheck = config.getIntOption("numTransactionsForProgressCheck", 10);
+	numOperationsForProgressCheck = config.getIntOption("numOperationsForProgressCheck", 10);
 	keyPrefix = fmt::format("{}/", workloadId);
 	numRandomOpLeft = 0;
 	stopReceived = false;

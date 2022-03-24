@@ -48,7 +48,8 @@ enum TesterOptionId {
 	OPT_EXTERNAL_CLIENT_DIRECTORY,
 	OPT_TEST_FILE,
 	OPT_INPUT_PIPE,
-	OPT_OUTPUT_PIPE
+	OPT_OUTPUT_PIPE,
+	OPT_FDB_API_VERSION
 };
 
 CSimpleOpt::SOption TesterOptionDefs[] = //
@@ -67,6 +68,7 @@ CSimpleOpt::SOption TesterOptionDefs[] = //
 	  { OPT_TEST_FILE, "--test-file", SO_REQ_SEP },
 	  { OPT_INPUT_PIPE, "--input-pipe", SO_REQ_SEP },
 	  { OPT_OUTPUT_PIPE, "--output-pipe", SO_REQ_SEP },
+	  { OPT_FDB_API_VERSION, "--api-version", SO_REQ_SEP },
 	  SO_END_OF_OPTIONS };
 
 void printProgramUsage(const char* execName) {
@@ -96,9 +98,12 @@ void printProgramUsage(const char* execName) {
 	       "                 Name of the input pipe for communication with the test controller.\n"
 	       "  --output-pipe NAME\n"
 	       "                 Name of the output pipe for communication with the test controller.\n"
+	       "  --api-version VERSION\n"
+	       "                 Required FDB API version (default %d).\n"
 	       "  -f, --test-file FILE\n"
 	       "                 Test file to run.\n"
-	       "  -h, --help     Display this help and exit.\n");
+	       "  -h, --help     Display this help and exit.\n",
+	       FDB_API_VERSION);
 }
 
 // Extracts the key for command line arguments that are specified with a prefix (e.g. --knob-).
@@ -116,6 +121,20 @@ bool extractPrefixedArgument(std::string prefix, const std::string& arg, std::st
 
 bool validateTraceFormat(std::string_view format) {
 	return format == "xml" || format == "json";
+}
+
+const int MIN_TESTABLE_API_VERSION = 400;
+
+void processApiVersionOption(const std::string& optionName, const std::string& value, int& res) {
+	char* endptr;
+	res = strtol(value.c_str(), &endptr, 10);
+	if (*endptr != '\0') {
+		throw TesterError(fmt::format("Invalid value {} for {}", value, optionName));
+	}
+	if (res < MIN_TESTABLE_API_VERSION || res > FDB_API_VERSION) {
+		throw TesterError(fmt::format(
+		    "Value for {} must be between {} and {}", optionName, MIN_TESTABLE_API_VERSION, FDB_API_VERSION));
+	}
 }
 
 bool processArg(TesterOptions& options, const CSimpleOpt& args) {
@@ -163,6 +182,9 @@ bool processArg(TesterOptions& options, const CSimpleOpt& args) {
 		break;
 	case OPT_OUTPUT_PIPE:
 		options.outputPipeName = args.OptionArg();
+		break;
+	case OPT_FDB_API_VERSION:
+		processApiVersionOption(args.OptionText(), args.OptionArg(), options.apiVersion);
 		break;
 	}
 	return true;
@@ -296,7 +318,7 @@ int main(int argc, char** argv) {
 		}
 		randomizeOptions(options);
 
-		fdb_check(fdb_select_api_version(options.testSpec.apiVersion));
+		fdb_check(fdb_select_api_version(options.apiVersion));
 		applyNetworkOptions(options);
 		fdb_check(fdb_setup_network());
 

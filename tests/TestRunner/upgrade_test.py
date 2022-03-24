@@ -11,6 +11,7 @@ import stat
 import subprocess
 import sys
 from threading import Thread, Event
+import traceback
 import time
 from urllib import request
 
@@ -18,7 +19,7 @@ from local_cluster import LocalCluster, random_secret_string
 
 
 SUPPORTED_PLATFORMS = ["x86_64"]
-SUPPORTED_VERSIONS = ["7.1.0", "6.3.23",
+SUPPORTED_VERSIONS = ["7.1.0", "7.0.0", "6.3.23",
                       "6.3.22", "6.3.18", "6.3.17", "6.3.16", "6.3.15", "6.3.13", "6.3.12", "6.3.9", "6.2.30",
                       "6.2.29", "6.2.28", "6.2.27", "6.2.26", "6.2.25", "6.2.24", "6.2.23", "6.2.22", "6.2.21",
                       "6.2.20", "6.2.19", "6.2.18", "6.2.17", "6.2.16", "6.2.15", "6.2.10", "6.1.13", "6.1.12",
@@ -27,11 +28,10 @@ SUPPORTED_VERSIONS = ["7.1.0", "6.3.23",
 FDB_DOWNLOAD_ROOT = "https://github.com/apple/foundationdb/releases/download/"
 CURRENT_VERSION = "7.1.0"
 HEALTH_CHECK_TIMEOUT_SEC = 5
-PROGRESS_CHECK_TIMEOUT_SEC = 5
+PROGRESS_CHECK_TIMEOUT_SEC = 500
 
 
 def make_executable(path):
-    mode = os.stat(path).st_mode
     st = os.stat(path)
     os.chmod(path, st.st_mode | stat.S_IEXEC)
 
@@ -47,6 +47,11 @@ def version_from_str(ver_str):
     ver = [int(s) for s in ver_str.split(".")]
     assert len(ver) == 3, "Invalid version string {}".format(ver_str)
     return ver
+
+
+def api_version_from_str(ver_str):
+    ver_tuple = version_from_str(ver_str)
+    return ver_tuple[0]*100+ver_tuple[1]*10
 
 
 def version_before(ver_str1, ver_str2):
@@ -217,27 +222,44 @@ class UpgradeTest:
         self.cluster.stop_cluster()
         shutil.rmtree(self.tmp_dir)
 
+     # Determine FDB API version matching the upgrade path
+    def determine_api_version(self):
+        self.api_version = api_version_from_str(CURRENT_VERSION)
+        for version in self.upgrade_path:
+            self.api_version = min(
+                api_version_from_str(version), self.api_version)
+
     # Start the tester to generate the workload specified by the test file
     def exec_workload(self, test_file):
-        cmd_args = [self.tester_bin,
-                    '--cluster-file', self.cluster.cluster_file,
-                    '--test-file', test_file,
-                    '--external-client-dir', self.external_lib_dir,
-                    '--input-pipe', self.input_pipe_path,
-                    '--output-pipe', self.output_pipe_path]
-        print("Executing test command: {}".format(
-            " ".join([str(c) for c in cmd_args])))
+        self.tester_retcode = 1
+        try:
+            self.determine_api_version()
+            cmd_args = [self.tester_bin,
+                        '--cluster-file', self.cluster.cluster_file,
+                        '--test-file', test_file,
+                        '--external-client-dir', self.external_lib_dir,
+                        '--input-pipe', self.input_pipe_path,
+                        '--output-pipe', self.output_pipe_path,
+                        '--api-version', str(self.api_version),
+                        '--log',
+                        '--log-dir', self.log]
+            print("Executing test command: {}".format(
+                " ".join([str(c) for c in cmd_args])))
 
-        self.tester_proc = subprocess.Popen(
-            cmd_args, stdout=sys.stdout, stderr=sys.stderr)
-        retcode = self.tester_proc.wait()
-        self.tester_proc = None
+            self.tester_proc = subprocess.Popen(
+                cmd_args, stdout=sys.stdout, stderr=sys.stderr)
+            self.tester_retcode = self.tester_proc.wait()
+            self.tester_proc = None
 
-        if (retcode != 0):
-            print("Tester failed with return code {}".format(retcode))
-        return retcode
+            if (self.tester_retcode != 0):
+                print("Tester failed with return code {}".format(
+                    self.tester_retcode))
+        except Exception:
+            print("Execution of test workload failed")
+            print(traceback.format_exc())
 
     # Perform a progress check: Trigger it and wait until it is completed
+
     def progress_check(self, ctrl_pipe):
         self.progress_event.clear()
         os.write(ctrl_pipe, b"CHECK\n")
@@ -262,6 +284,7 @@ class UpgradeTest:
             self.output_pipe.close()
         except Exception as e:
             print("Error while reading output pipe", e)
+            print(traceback.format_exc())
 
     # Execute the upgrade test workflow according to the specified
     # upgrade path: perform the upgrade steps and check success after each step
@@ -272,7 +295,7 @@ class UpgradeTest:
             self.health_check()
             self.progress_check(ctrl_pipe)
             for version in self.upgrade_path[1:]:
-                random_sleep(0.0, 5.0)
+                random_sleep(0.0, 2.0)
                 self.upgrade_to(version)
                 self.health_check()
                 self.progress_check(ctrl_pipe)
@@ -280,33 +303,48 @@ class UpgradeTest:
         finally:
             os.close(ctrl_pipe)
 
+    # Kill the tester process if it is still alive
+    def kill_tester_if_alive(self, workload_thread):
+        if not workload_thread.is_alive():
+            return
+        if self.tester_proc is not None:
+            try:
+                print("Killing the tester process")
+                self.tester_proc.kill()
+                workload_thread.join(5)
+            except:
+                print("Failed to kill the tester process")
+
     # The main method implementing the test:
     # - Start a thread for generating the workload using a tester binary
     # - Start a thread for reading notifications from the tester
     # - Trigger the upgrade steps and checks in the main thread
-
     def exec_test(self, args):
         self.tester_bin = self.build_dir.joinpath("bin", "fdb_c_api_tester")
         assert self.tester_bin.exists(), "{} does not exist".format(self.tester_bin)
         self.tester_proc = None
-
+        test_retcode = 1
         try:
-            workloadThread = Thread(
+            workload_thread = Thread(
                 target=self.exec_workload, args=(args.test_file))
-            workloadThread.start()
+            workload_thread.start()
 
-            readerThread = Thread(target=self.output_pipe_reader)
-            readerThread.start()
+            reader_thread = Thread(target=self.output_pipe_reader)
+            reader_thread.start()
 
             self.exec_upgrade_test()
-            readerThread.join()
-            retcode = workloadThread.join()
+            test_retcode = 0
+        except Exception:
+            print("Upgrade test failed")
+            print(traceback.format_exc())
+            self.kill_tester_if_alive(workload_thread)
         finally:
-            if self.tester_proc is not None:
-                self.tester_proc.kill()
-            remove_file_no_fail(self.input_pipe_path)
-            remove_file_no_fail(self.output_pipe_path)
-        return retcode
+            workload_thread.join(5)
+            reader_thread.join(5)
+            self.kill_tester_if_alive(workload_thread)
+            if test_retcode == 0:
+                test_retcode = self.tester_retcode
+        return test_retcode
 
     # Check the cluster log for errors
     def check_cluster_logs(self, error_limit=100):
@@ -380,9 +418,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--process-number",
         "-p",
-        help="Number of fdb processes running",
+        help="Number of fdb processes running (default: 0 - random)",
         type=int,
-        default=1,
+        default=0,
     )
     parser.add_argument(
         '--disable-log-dump',
@@ -390,6 +428,9 @@ if __name__ == "__main__":
         action="store_true"
     )
     args = parser.parse_args()
+    if (args.process_number == 0):
+        args.process_number = random.randint(1, 5)
+        print("Testing with {} processes".format(args.process_number))
 
     errcode = 1
     with UpgradeTest(args.build_dir, args.upgrade_path, args.process_number) as test:
