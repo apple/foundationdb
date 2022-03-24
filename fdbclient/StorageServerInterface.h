@@ -110,9 +110,13 @@ struct StorageServerInterface {
 
 		if (ar.protocolVersion().hasSmallEndpoints()) {
 			if (ar.protocolVersion().hasTSS()) {
-				serializer(ar, uniqueID, locality, getValue, tssPairID, acceptingRequests);
+				if (ar.protocolVersion().hasStorageInterfaceReadiness()) {
+					serializer(ar, uniqueID, locality, getValue, tssPairID, acceptingRequests);
+				} else {
+					serializer(ar, uniqueID, locality, getValue, tssPairID);
+				}
 			} else {
-				serializer(ar, uniqueID, locality, getValue, acceptingRequests);
+				serializer(ar, uniqueID, locality, getValue);
 			}
 			if (Ar::isDeserializing) {
 				getKey = RequestStream<struct GetKeyRequest>(getValue.getEndpoint().getAdjustedEndpoint(1));
@@ -166,8 +170,7 @@ struct StorageServerInterface {
 			           getStorageMetrics,
 			           waitFailure,
 			           getQueuingMetrics,
-			           getKeyValueStoreType,
-			           acceptingRequests);
+			           getKeyValueStoreType);
 			if (ar.protocolVersion().hasWatches()) {
 				serializer(ar, watchValue);
 			}
