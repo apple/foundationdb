@@ -197,6 +197,7 @@ ERROR( client_lib_already_exists, 2119, "Client library with same identifier alr
 ERROR( client_lib_not_found, 2120, "Client library for the given identifier not found." )
 ERROR( client_lib_not_available, 2121, "Client library exists, but is not available for download." )
 ERROR( client_lib_invalid_binary, 2122, "Invalid client library binary." )
+ERROR( dsa_error, 2123, "Digital signature algorithm error" )
 
 // 2200 - errors from bindings and official APIs
 ERROR( api_version_unset, 2200, "API version is not set" )
