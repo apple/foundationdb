@@ -2505,6 +2505,152 @@ TEST_CASE("Tenant create, access, and delete") {
 	}
 }
 
+int64_t granule_start_load_fail(const char* filename,
+                                int filenameLength,
+                                int64_t offset,
+                                int64_t length,
+                                int64_t fullFileLength,
+                                void* userContext) {
+	CHECK(false);
+	return -1;
+}
+
+uint8_t* granule_get_load_fail(int64_t loadId, void* userContext) {
+	CHECK(false);
+	return nullptr;
+}
+
+void granule_free_load_fail(int64_t loadId, void* userContext) {
+	CHECK(false);
+}
+
+TEST_CASE("Blob Granule Functions") {
+	auto confValue =
+	    get_value("\xff/conf/blob_granules_enabled", /* snapshot */ false, { FDB_TR_OPTION_READ_SYSTEM_KEYS });
+	if (!confValue.has_value() || confValue.value() != "1") {
+		return;
+	}
+
+	// write some data
+
+	insert_data(db, create_data({ { "bg1", "a" }, { "bg2", "b" }, { "bg3", "c" } }));
+
+	// because wiring up files is non-trivial, just test the calls complete with the expected no_materialize error
+	FDBReadBlobGranuleContext granuleContext;
+	granuleContext.userContext = nullptr;
+	granuleContext.start_load_f = &granule_start_load_fail;
+	granuleContext.get_load_f = &granule_get_load_fail;
+	granuleContext.free_load_f = &granule_free_load_fail;
+	granuleContext.debugNoMaterialize = true;
+	granuleContext.granuleParallelism = 1;
+
+	// dummy values
+	FDBKeyValue const* out_kv;
+	int out_count;
+	int out_more;
+
+	fdb::Transaction tr(db);
+	int64_t originalReadVersion = -1;
+
+	// test no materialize gets error but completes, save read version
+	while (1) {
+		fdb_check(tr.set_option(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE, nullptr, 0));
+		// -2 is latest version
+		fdb::KeyValueArrayResult r = tr.read_blob_granules(key("bg"), key("bh"), 0, -2, granuleContext);
+		fdb_error_t err = r.get(&out_kv, &out_count, &out_more);
+		if (err && err != 2037 /* blob_granule_not_materialized */) {
+			fdb::EmptyFuture f2 = tr.on_error(err);
+			fdb_check(wait_future(f2));
+			continue;
+		}
+
+		CHECK(err == 2037 /* blob_granule_not_materialized */);
+
+		// If read done, save read version. Should have already used read version so this shouldn't error
+		fdb::Int64Future grvFuture = tr.get_read_version();
+		fdb_error_t grvErr = wait_future(grvFuture);
+		CHECK(!grvErr);
+		CHECK(!grvFuture.get(&originalReadVersion));
+
+		CHECK(originalReadVersion > 0);
+
+		tr.reset();
+		break;
+	}
+
+	// test with begin version > 0
+	while (1) {
+		fdb_check(tr.set_option(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE, nullptr, 0));
+		// -2 is latest version, read version should be >= originalReadVersion
+		fdb::KeyValueArrayResult r =
+		    tr.read_blob_granules(key("bg"), key("bh"), originalReadVersion, -2, granuleContext);
+		fdb_error_t err = r.get(&out_kv, &out_count, &out_more);
+		;
+		if (err && err != 2037 /* blob_granule_not_materialized */) {
+			fdb::EmptyFuture f2 = tr.on_error(err);
+			fdb_check(wait_future(f2));
+			continue;
+		}
+
+		CHECK(err == 2037 /* blob_granule_not_materialized */);
+
+		tr.reset();
+		break;
+	}
+
+	// test with prior read version completes after delay larger than normal MVC window
+	// TODO: should we not do this?
+	std::this_thread::sleep_for(std::chrono::milliseconds(6000));
+	while (1) {
+		fdb_check(tr.set_option(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE, nullptr, 0));
+		fdb::KeyValueArrayResult r =
+		    tr.read_blob_granules(key("bg"), key("bh"), 0, originalReadVersion, granuleContext);
+		fdb_error_t err = r.get(&out_kv, &out_count, &out_more);
+		if (err && err != 2037 /* blob_granule_not_materialized */) {
+			fdb::EmptyFuture f2 = tr.on_error(err);
+			fdb_check(wait_future(f2));
+			continue;
+		}
+
+		CHECK(err == 2037 /* blob_granule_not_materialized */);
+
+		tr.reset();
+		break;
+	}
+
+	// test ranges
+
+	while (1) {
+		fdb::KeyRangeArrayFuture f = tr.get_blob_granule_ranges(key("bg"), key("bh"));
+		fdb_error_t err = wait_future(f);
+		if (err) {
+			fdb::EmptyFuture f2 = tr.on_error(err);
+			fdb_check(wait_future(f2));
+			continue;
+		}
+
+		const FDBKeyRange* out_kr;
+		int out_count;
+		fdb_check(f.get(&out_kr, &out_count));
+
+		CHECK(out_count >= 1);
+		// check key ranges are in order
+		for (int i = 0; i < out_count; i++) {
+			// key range start < end
+			CHECK(std::string((const char*)out_kr[i].begin_key, out_kr[i].begin_key_length) <
+			      std::string((const char*)out_kr[i].end_key, out_kr[i].end_key_length));
+		}
+		// Ranges themselves are sorted
+		for (int i = 0; i < out_count - 1; i++) {
+			CHECK(std::string((const char*)out_kr[i].end_key, out_kr[i].end_key_length) <=
+			      std::string((const char*)out_kr[i + 1].begin_key, out_kr[i + 1].begin_key_length));
+		}
+
+		tr.reset();
+		break;
+	}
+}
+
 int main(int argc, char** argv) {
 	if (argc < 3) {
 		std::cout << "Unit tests for the FoundationDB C API.\n"
