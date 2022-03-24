@@ -18,9 +18,12 @@
  * limitations under the License.
  */
 
+#include <vector>
+
 #include "contrib/fmt-8.1.1/include/fmt/format.h"
 #include "flow/serialize.h"
 #include "fdbclient/BlobGranuleFiles.h"
+#include "fdbclient/Knobs.h"
 #include "fdbclient/SystemData.h" // for allKeys unit test - could remove
 #include "flow/UnitTest.h"
 
@@ -211,50 +214,82 @@ RangeResult materializeBlobGranule(const BlobGranuleChunkRef& chunk,
 	return ret;
 }
 
+struct GranuleLoadIds {
+	Optional<int64_t> snapshotId;
+	std::vector<int64_t> deltaIds;
+};
+
+static void startLoad(const ReadBlobGranuleContext granuleContext,
+                      const BlobGranuleChunkRef& chunk,
+                      GranuleLoadIds& loadIds) {
+
+	// Start load process for all files in chunk
+	if (chunk.snapshotFile.present()) {
+		std::string snapshotFname = chunk.snapshotFile.get().filename.toString();
+		loadIds.snapshotId = granuleContext.start_load_f(snapshotFname.c_str(),
+		                                                 snapshotFname.size(),
+		                                                 chunk.snapshotFile.get().offset,
+		                                                 chunk.snapshotFile.get().length,
+		                                                 granuleContext.userContext);
+	}
+	loadIds.deltaIds.reserve(chunk.deltaFiles.size());
+	for (int deltaFileIdx = 0; deltaFileIdx < chunk.deltaFiles.size(); deltaFileIdx++) {
+		std::string deltaFName = chunk.deltaFiles[deltaFileIdx].filename.toString();
+		int64_t deltaLoadId = granuleContext.start_load_f(deltaFName.c_str(),
+		                                                  deltaFName.size(),
+		                                                  chunk.deltaFiles[deltaFileIdx].offset,
+		                                                  chunk.deltaFiles[deltaFileIdx].length,
+		                                                  granuleContext.userContext);
+		loadIds.deltaIds.push_back(deltaLoadId);
+	}
+}
+
 ErrorOr<RangeResult> loadAndMaterializeBlobGranules(const Standalone<VectorRef<BlobGranuleChunkRef>>& files,
                                                     const KeyRangeRef& keyRange,
                                                     Version beginVersion,
                                                     Version readVersion,
                                                     ReadBlobGranuleContext granuleContext) {
+	int64_t parallelism = granuleContext.granuleParallelism;
+	if (parallelism < 1) {
+		parallelism = 1;
+	}
+	if (parallelism >= CLIENT_KNOBS->BG_MAX_GRANULE_PARALLELISM) {
+		parallelism = CLIENT_KNOBS->BG_MAX_GRANULE_PARALLELISM;
+	}
+
+	GranuleLoadIds loadIds[files.size()];
+
+	// Kick off first file reads if parallelism > 1
+	for (int i = 0; i < parallelism - 1 && i < files.size(); i++) {
+		startLoad(granuleContext, files[i], loadIds[i]);
+	}
+
 	try {
 		RangeResult results;
-		// FIXME: could submit multiple chunks to start_load_f in parallel?
-		for (const BlobGranuleChunkRef& chunk : files) {
+		for (int chunkIdx = 0; chunkIdx < files.size(); chunkIdx++) {
+			// Kick off files for this granule if parallelism == 1, or future granule if parallelism > 1
+			if (chunkIdx + parallelism - 1 < files.size()) {
+				startLoad(granuleContext, files[chunkIdx + parallelism - 1], loadIds[chunkIdx + parallelism - 1]);
+			}
+
 			RangeResult chunkRows;
 
-			int64_t snapshotLoadId;
-			int64_t deltaLoadIds[chunk.deltaFiles.size()];
-
-			// Start load process for all files in chunk
-			// In V1 of api snapshot is required, optional is just for forward compatibility
-			ASSERT(chunk.snapshotFile.present());
-			std::string snapshotFname = chunk.snapshotFile.get().filename.toString();
-			snapshotLoadId = granuleContext.start_load_f(snapshotFname.c_str(),
-			                                             snapshotFname.size(),
-			                                             chunk.snapshotFile.get().offset,
-			                                             chunk.snapshotFile.get().length,
-			                                             granuleContext.userContext);
-			int64_t deltaLoadLengths[chunk.deltaFiles.size()];
-			StringRef deltaData[chunk.deltaFiles.size()];
-			for (int deltaFileIdx = 0; deltaFileIdx < chunk.deltaFiles.size(); deltaFileIdx++) {
-				std::string deltaFName = chunk.deltaFiles[deltaFileIdx].filename.toString();
-				deltaLoadIds[deltaFileIdx] = granuleContext.start_load_f(deltaFName.c_str(),
-				                                                         deltaFName.size(),
-				                                                         chunk.deltaFiles[deltaFileIdx].offset,
-				                                                         chunk.deltaFiles[deltaFileIdx].length,
-				                                                         granuleContext.userContext);
-				deltaLoadLengths[deltaFileIdx] = chunk.deltaFiles[deltaFileIdx].length;
-			}
-
 			// once all loads kicked off, load data for chunk
-			StringRef snapshotData(granuleContext.get_load_f(snapshotLoadId, granuleContext.userContext),
-			                       chunk.snapshotFile.get().length);
-			if (!snapshotData.begin()) {
-				return ErrorOr<RangeResult>(blob_granule_file_load_error());
+			Optional<StringRef> snapshotData;
+			if (files[chunkIdx].snapshotFile.present()) {
+				snapshotData =
+				    StringRef(granuleContext.get_load_f(loadIds[chunkIdx].snapshotId.get(), granuleContext.userContext),
+				              files[chunkIdx].snapshotFile.get().length);
+				if (!snapshotData.get().begin()) {
+					return ErrorOr<RangeResult>(blob_granule_file_load_error());
+				}
 			}
-			for (int i = 0; i < chunk.deltaFiles.size(); i++) {
-				deltaData[i] = StringRef(granuleContext.get_load_f(deltaLoadIds[i], granuleContext.userContext),
-				                         chunk.deltaFiles[i].length);
+
+			StringRef deltaData[files[chunkIdx].deltaFiles.size()];
+			for (int i = 0; i < files[chunkIdx].deltaFiles.size(); i++) {
+				deltaData[i] =
+				    StringRef(granuleContext.get_load_f(loadIds[chunkIdx].deltaIds[i], granuleContext.userContext),
+				              files[chunkIdx].deltaFiles[i].length);
 				// null data is error
 				if (!deltaData[i].begin()) {
 					return ErrorOr<RangeResult>(blob_granule_file_load_error());
@@ -262,14 +297,16 @@ ErrorOr<RangeResult> loadAndMaterializeBlobGranules(const Standalone<VectorRef<B
 			}
 
 			// materialize rows from chunk
-			chunkRows = materializeBlobGranule(chunk, keyRange, readVersion, snapshotData, deltaData);
+			chunkRows = materializeBlobGranule(files[chunkIdx], keyRange, readVersion, snapshotData, deltaData);
 
 			results.arena().dependsOn(chunkRows.arena());
 			results.append(results.arena(), chunkRows.begin(), chunkRows.size());
 
-			granuleContext.free_load_f(snapshotLoadId, granuleContext.userContext);
-			for (int i = 0; i < chunk.deltaFiles.size(); i++) {
-				granuleContext.free_load_f(deltaLoadIds[i], granuleContext.userContext);
+			if (loadIds[chunkIdx].snapshotId.present()) {
+				granuleContext.free_load_f(loadIds[chunkIdx].snapshotId.get(), granuleContext.userContext);
+			}
+			for (int i = 0; i < loadIds[chunkIdx].deltaIds.size(); i++) {
+				granuleContext.free_load_f(loadIds[chunkIdx].deltaIds[i], granuleContext.userContext);
 			}
 		}
 		return ErrorOr<RangeResult>(results);
@@ -277,6 +314,8 @@ ErrorOr<RangeResult> loadAndMaterializeBlobGranules(const Standalone<VectorRef<B
 		return ErrorOr<RangeResult>(e);
 	}
 }
+
+// FIXME: add unit tests for materializeGranule and loadAndMaterializeGranules
 
 // FIXME: re-enable test!
 TEST_CASE(":/blobgranule/files/applyDelta") {

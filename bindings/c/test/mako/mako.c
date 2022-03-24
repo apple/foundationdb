@@ -682,6 +682,7 @@ int run_op_read_blob_granules(FDBTransaction* transaction,
 	granuleContext.get_load_f = &granule_get_load;
 	granuleContext.free_load_f = &granule_free_load;
 	granuleContext.debugNoMaterialize = !doMaterialize;
+	granuleContext.granuleParallelism = 2; // TODO make knob or setting for changing this?
 
 	r = fdb_transaction_read_blob_granules(transaction,
 	                                       (uint8_t*)keystr,
@@ -689,7 +690,7 @@ int run_op_read_blob_granules(FDBTransaction* transaction,
 	                                       (uint8_t*)keystr2,
 	                                       strlen(keystr2),
 	                                       0 /* beginVersion*/,
-	                                       -1, /* endVersion. -1 is use txn read version */
+	                                       -2, /* endVersion. -2 (latestVersion) is use txn read version */
 	                                       granuleContext);
 
 	free(fileContext.data_by_id);

@@ -1353,6 +1353,9 @@ struct ReadBlobGranuleContext {
 	// Set this to true for testing if you don't want to read the granule files,
 	// just do the request to the blob workers
 	bool debugNoMaterialize;
+
+	// number of granules to load in parallel (default 1)
+	int granuleParallelism = 1;
 };
 
 // Store metadata associated with each storage server. Now it only contains data be used in perpetual storage wiggle.

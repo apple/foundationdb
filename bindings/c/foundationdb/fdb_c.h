@@ -196,6 +196,9 @@ typedef struct readgranulecontext {
 	/* Set this to true for testing if you don't want to read the granule files,
 	   just do the request to the blob workers */
 	fdb_bool_t debugNoMaterialize;
+
+	/* Number of granules to load in parallel */
+	int granuleParallelism;
 } FDBReadBlobGranuleContext;
 
 DLLEXPORT void fdb_future_cancel(FDBFuture* f);
@@ -447,7 +450,7 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_blob_granule_ranges(
                                                                                 uint8_t const* end_key_name,
                                                                                 int end_key_name_length);
 
-/* InvalidVersion (-1) for readVersion means get read version from transaction
+/* LatestVersion (-2) for readVersion means get read version from transaction
    Separated out as optional because BG reads can support longer-lived reads than normal FDB transactions */
 DLLEXPORT WARN_UNUSED_RESULT FDBResult* fdb_transaction_read_blob_granules(FDBTransaction* db,
                                                                            uint8_t const* begin_key_name,

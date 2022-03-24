@@ -107,6 +107,9 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 		// set this to true for testing if you don't want to read the granule files, just
 		// do the request to the blob workers
 		fdb_bool_t debugNoMaterialize;
+
+		// number of granules to load in parallel (default 1)
+		int granuleParallelism;
 	} FDBReadBlobGranuleContext;
 
 	typedef void (*FDBCallback)(FDBFuture* future, void* callback_parameter);

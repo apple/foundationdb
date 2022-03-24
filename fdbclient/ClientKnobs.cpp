@@ -280,6 +280,9 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( MVC_CLIENTLIB_CHUNK_SIZE,              8*1024 );
 	init( MVC_CLIENTLIB_CHUNKS_PER_TRANSACTION,      32 );
 
+	// Blob granules
+	init( BG_MAX_GRANULE_PARALLELISM,                10 );
+
 	// clang-format on
 }
 
