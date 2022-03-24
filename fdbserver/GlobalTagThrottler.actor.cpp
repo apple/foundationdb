@@ -20,13 +20,15 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/TagQuota.h"
+#include "fdbrpc/Smoother.h"
 #include "fdbserver/TagThrottler.h"
 #include "flow/actorcompiler.h" // must be last include
 
 class GlobalTagThrottlerImpl {
 	struct QuotaAndCounter {
 		TagQuotaValue quota;
-		int64_t counter;
+		Smoother readCostCounter;
+		QuotaAndCounter() : readCostCounter(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT) {}
 	};
 
 	Database db;
@@ -66,7 +68,7 @@ class GlobalTagThrottlerImpl {
 public:
 	GlobalTagThrottlerImpl(Database db, UID id) : db(db), id(id) {}
 	Future<Void> monitorThrottlingChanges() { return monitorThrottlingChanges(this); }
-	void addRequests(TransactionTag tag, int count) {}
+	void addRequests(TransactionTag tag, int count) { throttledTags[tag].readCostCounter.addDelta(count); }
 	uint64_t getThrottledTagChangeId() const { return throttledTagChangeId; }
 	PrioritizedTransactionTagMap<ClientTagThrottleLimits> getClientRates() { return {}; }
 	int64_t autoThrottleCount() const { return 0; }
