@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@
 // This file, similar to `type_traits` in the standard library, contains utility types that can be used for template
 // metaprogramming. While they can be very useful and simplify certain things, please be aware that their use will
 // increase compilation times significantly. Therefore it is not recommended to use them in header file if not
-// absosultely necessary.
+// absolutely necessary.
 #pragma once
 #include <variant>
 
@@ -50,6 +50,6 @@ struct variant_map_t<std::variant<Args...>, Fun> {
 };
 
 // Helper definition for variant_map_t. Instead of using `typename variant_map<...>::type` one can simple use
-// `varirant_map<...>` which is equivalent but shorter.
+// `variant_map<...>` which is equivalent but shorter.
 template <class T, template <class> class Fun>
 using variant_map = typename variant_map_t<T, Fun>::type;

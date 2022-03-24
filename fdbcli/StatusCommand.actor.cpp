@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2021 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1201,7 +1201,7 @@ void printStatus(StatusObjectReader statusObj,
 
 // "db" is the handler to the multiversion database
 // localDb is the native Database object
-// localDb is rarely needed except the "db" has not establised a connection to the cluster where the operation will
+// localDb is rarely needed except the "db" has not established a connection to the cluster where the operation will
 // return Never as we expect status command to always return, we use "localDb" to return the default result
 ACTOR Future<bool> statusCommandActor(Reference<IDatabase> db,
                                       Database localDb,

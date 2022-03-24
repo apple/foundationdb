@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -274,7 +274,7 @@ struct AcknowledgementReply {
 	}
 };
 
-// Registered on the server to recieve acknowledgements that the client has received stream data. This prevents the
+// Registered on the server to receive acknowledgements that the client has received stream data. This prevents the
 // server from sending too much data to the client if the client is not consuming it.
 struct AcknowledgementReceiver final : FlowReceiver, FastAllocated<AcknowledgementReceiver> {
 	using FastAllocated<AcknowledgementReceiver>::operator new;
@@ -333,9 +333,7 @@ struct NetNotifiedQueueWithAcknowledgements final : NotifiedQueue<T>,
 	NetNotifiedQueueWithAcknowledgements(int futures, int promises, const Endpoint& remoteEndpoint)
 	  : NotifiedQueue<T>(futures, promises), FlowReceiver(remoteEndpoint, true), onConnect(nullptr) {
 		// A ReplyPromiseStream will be terminated on the server side if the network connection with the client breaks
-		acknowledgements.failures = tagError<Void>(
-		    makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnect(remoteEndpoint.getPrimaryAddress()),
-		    operation_obsolete());
+		acknowledgements.failures = tagError<Void>(FlowTransport::transport().loadedDisconnect(), operation_obsolete());
 	}
 
 	void destroy() override { delete this; }

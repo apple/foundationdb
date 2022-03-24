@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2020 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -598,7 +598,7 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(SpanID parentSpan,
 	return rep;
 }
 
-// Returns the current read version (or minimum known committed verison if requested),
+// Returns the current read version (or minimum known committed version if requested),
 // to each request in the provided list. Also check if the request should be throttled.
 // Update GRV statistics according to the request's priority.
 ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,

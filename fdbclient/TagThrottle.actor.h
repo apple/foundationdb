@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2020 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,6 +27,7 @@
 
 #pragma once
 
+#include "contrib/fmt-8.1.1/include/fmt/format.h"
 #include "flow/Error.h"
 #include "flow/flow.h"
 #include "flow/network.h"
@@ -38,6 +39,9 @@
 
 typedef StringRef TransactionTagRef;
 typedef Standalone<TransactionTagRef> TransactionTag;
+
+FDB_DECLARE_BOOLEAN_PARAM(ContainsRecommended);
+FDB_DECLARE_BOOLEAN_PARAM(Capitalize);
 
 class TagSet {
 public:
@@ -58,7 +62,7 @@ public:
 	}
 
 	template <class Context>
-	void save(uint8_t* out, Context& c) const {
+	void save(uint8_t* out, Context&) const {
 		uint8_t* start = out;
 		for (const auto& tag : *this) {
 			*(out++) = (uint8_t)tag.size();
@@ -93,6 +97,9 @@ public:
 	size_t getBytes() const { return bytes; }
 
 	const Arena& getArena() const { return arena; }
+
+	// Used by fdbcli commands
+	std::string toString(Capitalize = Capitalize::False) const;
 
 private:
 	size_t bytes;
@@ -295,13 +302,14 @@ Future<std::vector<TagThrottleInfo>> getRecommendedTags(Reference<DB> db, int li
 }
 
 ACTOR template <class DB>
-Future<std::vector<TagThrottleInfo>> getThrottledTags(Reference<DB> db, int limit, bool containsRecommend = false) {
+Future<std::vector<TagThrottleInfo>>
+getThrottledTags(Reference<DB> db, int limit, ContainsRecommended containsRecommended = ContainsRecommended::False) {
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
-	state bool reportAuto = containsRecommend;
+	state bool reportAuto = containsRecommended;
 	loop {
 		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		try {
-			if (!containsRecommend) {
+			if (!containsRecommended) {
 				wait(store(reportAuto, getValidAutoEnabled(tr)));
 			}
 			state typename DB::TransactionT::template FutureT<RangeResult> f = tr->getRange(

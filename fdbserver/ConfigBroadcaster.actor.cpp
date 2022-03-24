@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -94,6 +94,7 @@ class ConfigBroadcasterImpl {
 
 	int coordinators = 0;
 	std::unordered_set<NetworkAddress> activeConfigNodes;
+	std::unordered_set<NetworkAddress> registrationResponses;
 	bool disallowUnregistered = false;
 	Promise<Void> newConfigNodesAllowed;
 
@@ -217,6 +218,7 @@ class ConfigBroadcasterImpl {
 		self->clients.erase(clientUID);
 		self->clientFailures.erase(clientUID);
 		self->activeConfigNodes.erase(clientAddress);
+		self->registrationResponses.erase(clientAddress);
 		// See comment where this promise is reset below.
 		if (self->newConfigNodesAllowed.isSet()) {
 			self->newConfigNodesAllowed.reset();
@@ -258,6 +260,7 @@ class ConfigBroadcasterImpl {
 				self->newConfigNodesAllowed.reset();
 			}
 		}
+		self->registrationResponses.insert(address);
 
 		if (registered) {
 			if (!self->disallowUnregistered) {
@@ -265,9 +268,18 @@ class ConfigBroadcasterImpl {
 			}
 			self->activeConfigNodes.insert(address);
 			self->disallowUnregistered = true;
-		} else if (self->activeConfigNodes.size() < self->coordinators / 2 + 1 && !self->disallowUnregistered) {
-			// Need to allow registration of previously unregistered nodes when
-			// the cluster first starts up.
+		} else if ((self->activeConfigNodes.size() < self->coordinators / 2 + 1 && !self->disallowUnregistered) ||
+		           self->coordinators - self->registrationResponses.size() <=
+		               self->coordinators / 2 + 1 - self->activeConfigNodes.size()) {
+			// Received a registration request from an unregistered node. There
+			// are two cases where we want to allow unregistered nodes to
+			// register:
+			// 	 * the cluster is just starting and no nodes are registered
+			// 	 * a minority of nodes are registered and a majority are
+			// 	   unregistered. This situation should only occur in rare
+			// 	   circumstances where the cluster controller dies with only a
+			// 	   minority of config nodes having received a
+			// 	   ConfigBroadcastReadyRequest
 			self->activeConfigNodes.insert(address);
 			if (self->activeConfigNodes.size() >= self->coordinators / 2 + 1 &&
 			    self->newConfigNodesAllowed.canBeSet()) {
@@ -390,9 +402,9 @@ public:
 		this->coordinators = coordinators.configServers.size();
 		if (configDBType != ConfigDBType::DISABLED) {
 			if (configDBType == ConfigDBType::SIMPLE) {
-				consumer = IConfigConsumer::createSimple(coordinators, 0.5, Optional<double>{});
+				consumer = IConfigConsumer::createSimple(coordinators, 0.5, SERVER_KNOBS->COMPACTION_INTERVAL);
 			} else {
-				consumer = IConfigConsumer::createPaxos(coordinators, 0.5, Optional<double>{});
+				consumer = IConfigConsumer::createPaxos(coordinators, 0.5, SERVER_KNOBS->COMPACTION_INTERVAL);
 			}
 			TraceEvent(SevDebug, "ConfigBroadcasterStartingConsumer", id)
 			    .detail("Consumer", consumer->getID())

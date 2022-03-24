@@ -41,10 +41,10 @@ def print_stacks(stack_count, sort_by_count):
 
     sort_dict = counts if sort_by_count else sizes
     ordered_list = [(val, backtrace) for (backtrace, val) in sort_dict.items()]
-    ordered_list.sort(reverse=True)
+    ordered_list.sort()
 
     if stack_count:
-        ordered_list = ordered_list[:stack_count]
+        ordered_list = ordered_list[-stack_count:]
 
     for size, backtrace in ordered_list:
         print(str.format('bytes={0:<10} count={1:<8} {2}', sizes[backtrace], counts[backtrace], backtrace))

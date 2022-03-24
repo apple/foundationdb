@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -175,7 +175,9 @@ ERROR( quick_get_value_miss, 2034, "Found a mapped key that is not served in the
 ERROR( quick_get_key_values_miss, 2035, "Found a mapped range that is not served in the same SS" )
 ERROR( blob_granule_no_ryw, 2036, "Blob Granule Read Transactions must be specified as ryw-disabled" )
 ERROR( blob_granule_not_materialized, 2037, "Blob Granule Read was not materialized" )
-ERROR( get_key_values_and_map_has_more, 2038, "getRangeAndFlatMap does not support continuation for now" )
+ERROR( get_mapped_key_values_has_more, 2038, "getMappedRange does not support continuation for now" )
+ERROR( get_mapped_range_reads_your_writes, 2039, "getMappedRange tries to read data that were previously written in the transaction" )
+ERROR( checkpoint_not_found, 2040, "Checkpoint not found" )
 
 ERROR( incompatible_protocol_version, 2100, "Incompatible protocol version" )
 ERROR( transaction_too_large, 2101, "Transaction exceeds byte limit" )
@@ -282,9 +284,19 @@ ERROR( snap_log_anti_quorum_unsupported, 2507, "Unsupported when log anti quorum
 ERROR( snap_with_recovery_unsupported, 2508, "Cluster recovery during snapshot operation not supported")
 ERROR( snap_invalid_uid_string, 2509, "The given uid string is not a 32-length hex string")
 
+// 3XXX - Encryption operations errors
+ERROR( encrypt_ops_error, 3000, "Encryption operation error")
+ERROR( encrypt_header_metadata_mismatch, 3001, "Encryption header metadata mismatch")
+ERROR( encrypt_key_not_found, 3002, "Expected encryption key is missing")
+ERROR( encrypt_key_ttl_expired, 3003, "Expected encryption key TTL has expired")
+ERROR( encrypt_header_checksum_mismatch, 3004, "Encryption header checksum mismatch")
+ERROR( encrypt_update_cipher, 3005, "Attempt to update encryption cipher key")
+ERROR( encrypt_invalid_id, 3006, "Invalid encryption domainId or encryption cipher key id")
+
 // 4xxx Internal errors (those that should be generated only by bugs) are decimal 4xxx
 ERROR( unknown_error, 4000, "An unknown error occurred" )  // C++ exception not of type Error
 ERROR( internal_error, 4100, "An internal error occurred" )
+ERROR( not_implemented, 4200, "Not implemented yet" )
 // clang-format on
 
 #undef ERROR

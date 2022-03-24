@@ -73,7 +73,8 @@ struct GranuleMetadata : NonCopyable, ReferenceCounted<GranuleMetadata> {
 	KeyRange keyRange;
 
 	GranuleFiles files;
-	Standalone<GranuleDeltas> currentDeltas; // only contain deltas in pendingDeltaVersion + 1, bufferedDeltaVersion
+	Standalone<GranuleDeltas>
+	    currentDeltas; // only contain deltas in pendingDeltaVersion + 1 through bufferedDeltaVersion
 
 	uint64_t bytesInNewDeltaFiles = 0;
 	uint64_t bufferedDeltaBytes = 0;
@@ -125,6 +126,7 @@ struct GranuleRangeMetadata {
 		activeMetadata.clear();
 		assignFuture.cancel();
 		historyLoaderFuture.cancel();
+		fileUpdaterFuture.cancel();
 	}
 
 	GranuleRangeMetadata() : lastEpoch(0), lastSeqno(0) {}
@@ -132,7 +134,7 @@ struct GranuleRangeMetadata {
 	  : lastEpoch(epoch), lastSeqno(seqno), activeMetadata(activeMetadata) {}
 };
 
-// represents a previous version of a granule, and optionally the files that compose it
+// represents a previous version of a granule, and optionally the files that compose it.
 struct GranuleHistoryEntry : NonCopyable, ReferenceCounted<GranuleHistoryEntry> {
 	KeyRange range;
 	UID granuleID;
@@ -454,7 +456,7 @@ ACTOR Future<std::pair<BlobGranuleSplitState, Version>> getGranuleSplitState(Tra
 }
 
 // writeDelta file writes speculatively in the common case to optimize throughput. It creates the s3 object even though
-// the data in it may not yet be committed, and even though previous delta fiels with lower versioned data may still be
+// the data in it may not yet be committed, and even though previous delta files with lower versioned data may still be
 // in flight. The synchronization happens after the s3 file is written, but before we update the FDB index of what files
 // exist. Before updating FDB, we ensure the version is committed and all previous delta files have updated FDB.
 ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
@@ -891,15 +893,22 @@ ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bw
 	// FIXME: If a rollback happens, this could incorrectly identify a hot granule as not hot. This should be rare
 	// though and is just less efficient.
 	state bool writeHot = versionsSinceLastSnapshot <= SERVER_KNOBS->BG_HOT_SNAPSHOT_VERSIONS;
+	// FIXME: could probably refactor all of this logic into one large choose/when state machine that's less complex
 	loop {
 		loop {
 			try {
+				// wait for manager stream to become ready, and send a message
 				loop {
 					choose {
 						when(wait(bwData->currentManagerStatusStream.get().onReady())) { break; }
 						when(wait(bwData->currentManagerStatusStream.onChange())) {}
+						when(wait(metadata->resumeSnapshot.getFuture())) { break; }
 					}
 				}
+				if (metadata->resumeSnapshot.isSet()) {
+					break;
+				}
+
 				bwData->currentManagerStatusStream.get().send(GranuleStatusReply(metadata->keyRange,
 				                                                                 true,
 				                                                                 writeHot,
@@ -923,6 +932,8 @@ ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bw
 			}
 		}
 
+		// wait for manager reply (which will either cancel this future or call resumeSnapshot), or re-send on manager
+		// change/no response
 		choose {
 			when(wait(bwData->currentManagerStatusStream.onChange())) {}
 			when(wait(metadata->resumeSnapshot.getFuture())) { break; }
@@ -956,12 +967,12 @@ ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bw
 	return reSnapshotIdx;
 }
 
-ACTOR Future<Void> handleCompletedDeltaFile(Reference<BlobWorkerData> bwData,
-                                            Reference<GranuleMetadata> metadata,
-                                            BlobFileIndex completedDeltaFile,
-                                            Key cfKey,
-                                            Version cfStartVersion,
-                                            std::deque<std::pair<Version, Version>>* rollbacksCompleted) {
+static void handleCompletedDeltaFile(Reference<BlobWorkerData> bwData,
+                                     Reference<GranuleMetadata> metadata,
+                                     BlobFileIndex completedDeltaFile,
+                                     Key cfKey,
+                                     Version cfStartVersion,
+                                     std::deque<std::pair<Version, Version>>* rollbacksCompleted) {
 	metadata->files.deltaFiles.push_back(completedDeltaFile);
 	ASSERT(metadata->durableDeltaVersion.get() < completedDeltaFile.version);
 	metadata->durableDeltaVersion.set(completedDeltaFile.version);
@@ -974,10 +985,12 @@ ACTOR Future<Void> handleCompletedDeltaFile(Reference<BlobWorkerData> bwData,
 		}
 		// FIXME: for a write-hot shard, we could potentially batch these and only pop the largest one after several
 		// have completed
-		// FIXME: also have these be async, have each pop change feed wait on the prior one, wait on them before
-		// re-snapshotting
+		// FIXME: we actually want to pop at this version + 1 because pop is exclusive?
+		// FIXME: since this is async, and worker could die, new blob worker that opens granule should probably kick off
+		// an async pop at its previousDurableVersion after opening the granule to guarantee it is eventually popped?
 		Future<Void> popFuture = bwData->db->popChangeFeedMutations(cfKey, completedDeltaFile.version);
-		wait(popFuture);
+		// Do pop asynchronously
+		bwData->addActor.send(popFuture);
 	}
 	while (!rollbacksCompleted->empty() && completedDeltaFile.version >= rollbacksCompleted->front().second) {
 		if (BW_DEBUG) {
@@ -991,7 +1004,6 @@ ACTOR Future<Void> handleCompletedDeltaFile(Reference<BlobWorkerData> bwData,
 		}
 		rollbacksCompleted->pop_front();
 	}
-	return Void();
 }
 
 // if we get an i/o error updating files, or a rollback, reassign the granule to ourselves and start fresh
@@ -1252,7 +1264,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			           metadata->keyRange.end.printable(),
 			           metadata->originalEpoch,
 			           metadata->originalSeqno);
-			fmt::print("  CFID: {}\n", startState.granuleID.toString());
+			fmt::print("  CFID: {} ({})\n", startState.granuleID.toString(), cfKey.printable());
 			fmt::print("  CF Start Version: {}\n", startState.changeFeedStartVersion);
 			fmt::print("  Previous Durable Version: {}\n", startState.previousDurableVersion);
 			fmt::print("  doSnapshot={}\n", startState.doSnapshot ? "T" : "F");
@@ -1370,12 +1382,12 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 						metadata->durableSnapshotVersion.set(completedFile.version);
 						pendingSnapshots--;
 					} else {
-						wait(handleCompletedDeltaFile(bwData,
-						                              metadata,
-						                              completedFile,
-						                              cfKey,
-						                              startState.changeFeedStartVersion,
-						                              &rollbacksCompleted));
+						handleCompletedDeltaFile(bwData,
+						                         metadata,
+						                         completedFile,
+						                         cfKey,
+						                         startState.changeFeedStartVersion,
+						                         &rollbacksCompleted);
 					}
 
 					inFlightFiles.pop_front();
@@ -1764,12 +1776,12 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 								metadata->durableSnapshotVersion.set(completedFile.version);
 								pendingSnapshots--;
 							} else {
-								wait(handleCompletedDeltaFile(bwData,
-								                              metadata,
-								                              completedFile,
-								                              cfKey,
-								                              startState.changeFeedStartVersion,
-								                              &rollbacksCompleted));
+								handleCompletedDeltaFile(bwData,
+								                         metadata,
+								                         completedFile,
+								                         cfKey,
+								                         startState.changeFeedStartVersion,
+								                         &rollbacksCompleted);
 							}
 
 							inFlightFiles.pop_front();
@@ -2022,13 +2034,13 @@ ACTOR Future<Void> waitForVersion(Reference<GranuleMetadata> metadata, Version v
 	// nothing to do
 
 	if (BW_REQUEST_DEBUG) {
-		printf("WFV %lld) CF=%lld, pendingD=%lld, durableD=%lld, pendingS=%lld, durableS=%lld\n",
-		       v,
-		       metadata->activeCFData.get()->getVersion(),
-		       metadata->pendingDeltaVersion,
-		       metadata->durableDeltaVersion.get(),
-		       metadata->pendingSnapshotVersion,
-		       metadata->durableSnapshotVersion.get());
+		fmt::print("WFV {0}) CF={1}, pendingD={2}, durableD={3}, pendingS={4}, durableS={5}\n",
+		           v,
+		           metadata->activeCFData.get()->getVersion(),
+		           metadata->pendingDeltaVersion,
+		           metadata->durableDeltaVersion.get(),
+		           metadata->pendingSnapshotVersion,
+		           metadata->durableSnapshotVersion.get());
 	}
 
 	ASSERT(metadata->activeCFData.get().isValid());
@@ -2416,6 +2428,7 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 	ASSERT(req.type != AssignRequestType::Continue);
 	state Transaction tr(bwData->db);
 	state Key lockKey = blobGranuleLockKeyFor(req.keyRange);
+	state UID newGranuleID = deterministicRandom()->randomUniqueID();
 
 	if (BW_DEBUG) {
 		fmt::print("{0} [{1} - {2}) opening\n",
@@ -2480,8 +2493,8 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 					info.granuleID = info.history.get().value.granuleID;
 				} else {
 					// FIXME: could avoid max uid for granule ids here
-					// if this granule is not derived from a split or merge, create the granule id here
-					info.granuleID = deterministicRandom()->randomUniqueID();
+					// if this granule is not derived from a split or merge, use new granule id
+					info.granuleID = newGranuleID;
 				}
 				wait(updateChangeFeed(
 				    &tr, granuleIDToCFKey(info.granuleID), ChangeFeedStatus::CHANGE_FEED_CREATE, req.keyRange));
@@ -3060,9 +3073,16 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 					// endpoint as failed
 					self->currentManagerStatusStream.get().sendError(connection_failed());
 
+					// hold a copy of the previous stream if it exists, so any waiting send calls don't get
+					// proken_promise before onChange
+					ReplyPromiseStream<GranuleStatusReply> copy;
+					if (self->statusStreamInitialized) {
+						copy = self->currentManagerStatusStream.get();
+					}
 					// TODO: pick a reasonable byte limit instead of just piggy-backing
 					req.reply.setByteLimit(SERVER_KNOBS->BLOBWORKERSTATUSSTREAM_LIMIT_BYTES);
 					self->statusStreamInitialized = true;
+
 					self->currentManagerStatusStream.set(req.reply);
 				} else {
 					req.reply.sendError(blob_manager_replaced());

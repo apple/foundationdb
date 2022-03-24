@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@
 
 #include <ostream>
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/StorageCheckpoint.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/fdbrpc.h"
@@ -67,7 +68,7 @@ struct StorageServerInterface {
 	// Throws a wrong_shard_server if the keys in the request or result depend on data outside this server OR if a large
 	// selector offset prevents all data from being read in one range read
 	RequestStream<struct GetKeyValuesRequest> getKeyValues;
-	RequestStream<struct GetKeyValuesAndFlatMapRequest> getKeyValuesAndFlatMap;
+	RequestStream<struct GetMappedKeyValuesRequest> getMappedKeyValues;
 
 	RequestStream<struct GetShardStateRequest> getShardState;
 	RequestStream<struct WaitMetricsRequest> waitMetrics;
@@ -85,6 +86,8 @@ struct StorageServerInterface {
 	RequestStream<struct OverlappingChangeFeedsRequest> overlappingChangeFeeds;
 	RequestStream<struct ChangeFeedPopRequest> changeFeedPop;
 	RequestStream<struct ChangeFeedVersionUpdateRequest> changeFeedVersionUpdate;
+	RequestStream<struct GetCheckpointRequest> checkpoint;
+	RequestStream<struct FetchCheckpointRequest> fetchCheckpoint;
 
 	explicit StorageServerInterface(UID uid) : uniqueID(uid) {}
 	StorageServerInterface() : uniqueID(deterministicRandom()->randomUniqueID()) {}
@@ -127,8 +130,8 @@ struct StorageServerInterface {
 				    RequestStream<struct SplitRangeRequest>(getValue.getEndpoint().getAdjustedEndpoint(12));
 				getKeyValuesStream =
 				    RequestStream<struct GetKeyValuesStreamRequest>(getValue.getEndpoint().getAdjustedEndpoint(13));
-				getKeyValuesAndFlatMap =
-				    RequestStream<struct GetKeyValuesAndFlatMapRequest>(getValue.getEndpoint().getAdjustedEndpoint(14));
+				getMappedKeyValues =
+				    RequestStream<struct GetMappedKeyValuesRequest>(getValue.getEndpoint().getAdjustedEndpoint(14));
 				changeFeedStream =
 				    RequestStream<struct ChangeFeedStreamRequest>(getValue.getEndpoint().getAdjustedEndpoint(15));
 				overlappingChangeFeeds =
@@ -137,6 +140,9 @@ struct StorageServerInterface {
 				    RequestStream<struct ChangeFeedPopRequest>(getValue.getEndpoint().getAdjustedEndpoint(17));
 				changeFeedVersionUpdate = RequestStream<struct ChangeFeedVersionUpdateRequest>(
 				    getValue.getEndpoint().getAdjustedEndpoint(18));
+				checkpoint = RequestStream<struct GetCheckpointRequest>(getValue.getEndpoint().getAdjustedEndpoint(19));
+				fetchCheckpoint =
+				    RequestStream<struct FetchCheckpointRequest>(getValue.getEndpoint().getAdjustedEndpoint(20));
 			}
 		} else {
 			ASSERT(Ar::isDeserializing);
@@ -179,11 +185,13 @@ struct StorageServerInterface {
 		streams.push_back(getReadHotRanges.getReceiver());
 		streams.push_back(getRangeSplitPoints.getReceiver());
 		streams.push_back(getKeyValuesStream.getReceiver(TaskPriority::LoadBalancedEndpoint));
-		streams.push_back(getKeyValuesAndFlatMap.getReceiver(TaskPriority::LoadBalancedEndpoint));
+		streams.push_back(getMappedKeyValues.getReceiver(TaskPriority::LoadBalancedEndpoint));
 		streams.push_back(changeFeedStream.getReceiver());
 		streams.push_back(overlappingChangeFeeds.getReceiver());
 		streams.push_back(changeFeedPop.getReceiver());
 		streams.push_back(changeFeedVersionUpdate.getReceiver());
+		streams.push_back(checkpoint.getReceiver());
+		streams.push_back(fetchCheckpoint.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -362,15 +370,17 @@ struct GetKeyValuesRequest : TimedRequest {
 	}
 };
 
-struct GetKeyValuesAndFlatMapReply : public LoadBalancedReply {
+struct GetMappedKeyValuesReply : public LoadBalancedReply {
 	constexpr static FileIdentifier file_identifier = 1783067;
 	Arena arena;
-	VectorRef<KeyValueRef, VecSerStrategy::String> data;
+	// MappedKeyValueRef is not string_serialized_traits, so we have to use FlatBuffers.
+	VectorRef<MappedKeyValueRef, VecSerStrategy::FlatBuffers> data;
+
 	Version version; // useful when latestVersion was requested
 	bool more;
 	bool cached = false;
 
-	GetKeyValuesAndFlatMapReply() : version(invalidVersion), more(false), cached(false) {}
+	GetMappedKeyValuesReply() : version(invalidVersion), more(false), cached(false) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -378,7 +388,7 @@ struct GetKeyValuesAndFlatMapReply : public LoadBalancedReply {
 	}
 };
 
-struct GetKeyValuesAndFlatMapRequest : TimedRequest {
+struct GetMappedKeyValuesRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 6795747;
 	SpanID spanContext;
 	Arena arena;
@@ -390,10 +400,9 @@ struct GetKeyValuesAndFlatMapRequest : TimedRequest {
 	bool isFetchKeys;
 	Optional<TagSet> tags;
 	Optional<UID> debugID;
-	ReplyPromise<GetKeyValuesAndFlatMapReply> reply;
+	ReplyPromise<GetMappedKeyValuesReply> reply;
 
-	GetKeyValuesAndFlatMapRequest() : isFetchKeys(false) {}
-
+	GetMappedKeyValuesRequest() : isFetchKeys(false) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar,
@@ -823,6 +832,60 @@ struct ChangeFeedPopRequest {
 	}
 };
 
+// Request to search for a checkpoint for a minimum keyrange: `range`, at the specific version,
+// in the specific format.
+// A CheckpointMetaData will be returned if the specific checkpoint is found.
+struct GetCheckpointRequest {
+	constexpr static FileIdentifier file_identifier = 13804343;
+	Version version; // The FDB version at which the checkpoint is created.
+	KeyRange range;
+	int16_t format; // CheckpointFormat.
+	Optional<UID> checkpointID; // When present, look for the checkpoint with the exact UID.
+	ReplyPromise<CheckpointMetaData> reply;
+
+	GetCheckpointRequest() {}
+	GetCheckpointRequest(Version version, KeyRange const& range, CheckpointFormat format)
+	  : version(version), range(range), format(format) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, version, range, format, checkpointID, reply);
+	}
+};
+
+// Reply to FetchCheckpointRequest, transfers checkpoint back to client.
+struct FetchCheckpointReply : public ReplyPromiseStreamReply {
+	constexpr static FileIdentifier file_identifier = 13804345;
+	Standalone<StringRef> token; // Serialized data specific to a particular checkpoint format.
+	Standalone<StringRef> data;
+
+	FetchCheckpointReply() {}
+	FetchCheckpointReply(StringRef token) : token(token) {}
+
+	int expectedSize() const { return data.expectedSize(); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, ReplyPromiseStreamReply::acknowledgeToken, ReplyPromiseStreamReply::sequence, token, data);
+	}
+};
+
+// Request to fetch checkpoint from a storage server.
+struct FetchCheckpointRequest {
+	constexpr static FileIdentifier file_identifier = 13804344;
+	UID checkpointID;
+	Standalone<StringRef> token; // Serialized data specific to a particular checkpoint format.
+	ReplyPromiseStream<FetchCheckpointReply> reply;
+
+	FetchCheckpointRequest() = default;
+	FetchCheckpointRequest(UID checkpointID, StringRef token) : checkpointID(checkpointID), token(token) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, checkpointID, token, reply);
+	}
+};
+
 struct OverlappingChangeFeedEntry {
 	Key rangeId;
 	KeyRange range;
@@ -930,6 +993,22 @@ struct GetStorageMetricsRequest {
 };
 
 struct StorageQueuingMetricsReply {
+	struct TagInfo {
+		constexpr static FileIdentifier file_identifier = 4528694;
+		TransactionTag tag;
+		double rate{ 0.0 };
+		double fractionalBusyness{ 0.0 };
+
+		TagInfo() = default;
+		TagInfo(TransactionTag const& tag, double rate, double fractionalBusyness)
+		  : tag(tag), rate(rate), fractionalBusyness(fractionalBusyness) {}
+
+		template <class Ar>
+		void serialize(Ar& ar) {
+			serializer(ar, tag, rate, fractionalBusyness);
+		}
+	};
+
 	constexpr static FileIdentifier file_identifier = 7633366;
 	double localTime;
 	int64_t instanceID; // changes if bytesDurable and bytesInput reset
@@ -940,9 +1019,7 @@ struct StorageQueuingMetricsReply {
 	double cpuUsage;
 	double diskUsage;
 	double localRateLimit;
-	Optional<TransactionTag> busiestTag;
-	double busiestTagFractionalBusyness;
-	double busiestTagRate;
+	std::vector<TagInfo> busiestTags;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -957,9 +1034,7 @@ struct StorageQueuingMetricsReply {
 		           cpuUsage,
 		           diskUsage,
 		           localRateLimit,
-		           busiestTag,
-		           busiestTagFractionalBusyness,
-		           busiestTagRate);
+		           busiestTags);
 	}
 };
 

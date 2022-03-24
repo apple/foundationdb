@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -524,20 +524,21 @@ std::vector<DiskStore> getDiskStores(std::string folder) {
 
 // Register the worker interf to cluster controller (cc) and
 // re-register the worker when key roles interface, e.g., cc, dd, ratekeeper, change.
-ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
-                                      WorkerInterface interf,
-                                      Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
-                                      ProcessClass initialClass,
-                                      Reference<AsyncVar<Optional<DataDistributorInterface>> const> ddInterf,
-                                      Reference<AsyncVar<Optional<RatekeeperInterface>> const> rkInterf,
-                                      Reference<AsyncVar<Optional<BlobManagerInterface>> const> bmInterf,
-                                      Reference<AsyncVar<Optional<EncryptKeyProxyInterface>> const> ekpInterf,
-                                      Reference<AsyncVar<bool> const> degraded,
-                                      Reference<IClusterConnectionRecord> connRecord,
-                                      Reference<AsyncVar<std::set<std::string>> const> issues,
-                                      Reference<ConfigNode> configNode,
-                                      Reference<LocalConfiguration> localConfig,
-                                      Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+ACTOR Future<Void> registrationClient(
+    Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
+    WorkerInterface interf,
+    Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
+    ProcessClass initialClass,
+    Reference<AsyncVar<Optional<DataDistributorInterface>> const> ddInterf,
+    Reference<AsyncVar<Optional<RatekeeperInterface>> const> rkInterf,
+    Reference<AsyncVar<Optional<std::pair<int64_t, BlobManagerInterface>>> const> bmInterf,
+    Reference<AsyncVar<Optional<EncryptKeyProxyInterface>> const> ekpInterf,
+    Reference<AsyncVar<bool> const> degraded,
+    Reference<IClusterConnectionRecord> connRecord,
+    Reference<AsyncVar<std::set<std::string>> const> issues,
+    Reference<ConfigNode> configNode,
+    Reference<LocalConfiguration> localConfig,
+    Reference<AsyncVar<ServerDBInfo>> dbInfo) {
 	// Keeps the cluster controller (as it may be re-elected) informed that this worker exists
 	// The cluster controller uses waitFailureClient to find out if we die, and returns from registrationReply
 	// (requiring us to re-register) The registration request piggybacks optional distributor interface if it exists.
@@ -567,7 +568,8 @@ ACTOR Future<Void> registrationClient(Reference<AsyncVar<Optional<ClusterControl
 		                              requestGeneration++,
 		                              ddInterf->get(),
 		                              rkInterf->get(),
-		                              bmInterf->get(),
+		                              bmInterf->get().present() ? bmInterf->get().get().second
+		                                                        : Optional<BlobManagerInterface>(),
 		                              ekpInterf->get(),
 		                              degraded->get(),
 		                              localConfig->lastSeenVersion(),
@@ -1126,7 +1128,7 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
 		DUMPTOKEN(recruited.getValue);
 		DUMPTOKEN(recruited.getKey);
 		DUMPTOKEN(recruited.getKeyValues);
-		DUMPTOKEN(recruited.getKeyValuesAndFlatMap);
+		DUMPTOKEN(recruited.getMappedKeyValues);
 		DUMPTOKEN(recruited.getShardState);
 		DUMPTOKEN(recruited.waitMetrics);
 		DUMPTOKEN(recruited.splitMetrics);
@@ -1138,6 +1140,9 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
 		DUMPTOKEN(recruited.getKeyValueStoreType);
 		DUMPTOKEN(recruited.watchValue);
 		DUMPTOKEN(recruited.getKeyValuesStream);
+		DUMPTOKEN(recruited.changeFeedStream);
+		DUMPTOKEN(recruited.changeFeedPop);
+		DUMPTOKEN(recruited.changeFeedVersionUpdate);
 
 		prevStorageServer =
 		    storageServer(store, recruited, db, folder, Promise<Void>(), Reference<IClusterConnectionRecord>(nullptr));
@@ -1374,6 +1379,24 @@ ACTOR Future<Void> chaosMetricsLogger() {
 	}
 }
 
+// like genericactors setWhenDoneOrError, but we need to take into account the bm epoch. We don't want to reset it if
+// this manager was replaced by a later manager (with a higher epoch) on this worker
+ACTOR Future<Void> resetBlobManagerWhenDoneOrError(
+    Future<Void> blobManagerProcess,
+    Reference<AsyncVar<Optional<std::pair<int64_t, BlobManagerInterface>>>> var,
+    int64_t epoch) {
+	try {
+		wait(blobManagerProcess);
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled)
+			throw;
+	}
+	if (var->get().present() && var->get().get().first == epoch) {
+		var->set(Optional<std::pair<int64_t, BlobManagerInterface>>());
+	}
+	return Void();
+}
+
 ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
                                 Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
                                 LocalityData locality,
@@ -1395,8 +1418,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	state Reference<AsyncVar<Optional<DataDistributorInterface>>> ddInterf(
 	    new AsyncVar<Optional<DataDistributorInterface>>());
 	state Reference<AsyncVar<Optional<RatekeeperInterface>>> rkInterf(new AsyncVar<Optional<RatekeeperInterface>>());
-	state Reference<AsyncVar<Optional<BlobManagerInterface>>> bmInterf(new AsyncVar<Optional<BlobManagerInterface>>());
-	state int64_t myBMEpoch = -1;
+	state Reference<AsyncVar<Optional<std::pair<int64_t, BlobManagerInterface>>>> bmEpochAndInterf(
+	    new AsyncVar<Optional<std::pair<int64_t, BlobManagerInterface>>>());
 	state Reference<AsyncVar<Optional<EncryptKeyProxyInterface>>> ekpInterf(
 	    new AsyncVar<Optional<EncryptKeyProxyInterface>>());
 	state Future<Void> handleErrors = workerHandleErrors(errors.getFuture()); // Needs to be stopped last
@@ -1530,6 +1553,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				DUMPTOKEN(recruited.getValue);
 				DUMPTOKEN(recruited.getKey);
 				DUMPTOKEN(recruited.getKeyValues);
+				DUMPTOKEN(recruited.getMappedKeyValues);
 				DUMPTOKEN(recruited.getShardState);
 				DUMPTOKEN(recruited.waitMetrics);
 				DUMPTOKEN(recruited.splitMetrics);
@@ -1541,7 +1565,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				DUMPTOKEN(recruited.getKeyValueStoreType);
 				DUMPTOKEN(recruited.watchValue);
 				DUMPTOKEN(recruited.getKeyValuesStream);
-				DUMPTOKEN(recruited.getKeyValuesAndFlatMap);
 				DUMPTOKEN(recruited.changeFeedStream);
 				DUMPTOKEN(recruited.changeFeedPop);
 				DUMPTOKEN(recruited.changeFeedVersionUpdate);
@@ -1640,7 +1663,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			DUMPTOKEN(recruited.getValue);
 			DUMPTOKEN(recruited.getKey);
 			DUMPTOKEN(recruited.getKeyValues);
-			DUMPTOKEN(recruited.getKeyValuesAndFlatMap);
+			DUMPTOKEN(recruited.getMappedKeyValues);
 			DUMPTOKEN(recruited.getShardState);
 			DUMPTOKEN(recruited.waitMetrics);
 			DUMPTOKEN(recruited.splitMetrics);
@@ -1672,7 +1695,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		                                       initialClass,
 		                                       ddInterf,
 		                                       rkInterf,
-		                                       bmInterf,
+		                                       bmEpochAndInterf,
 		                                       ekpInterf,
 		                                       degraded,
 		                                       connRecord,
@@ -1874,8 +1897,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				BlobManagerInterface recruited(locality, req.reqId);
 				recruited.initEndpoints();
 
-				if (bmInterf->get().present() && myBMEpoch == req.epoch) {
-					recruited = bmInterf->get().get();
+				if (bmEpochAndInterf->get().present() && bmEpochAndInterf->get().get().first == req.epoch) {
+					recruited = bmEpochAndInterf->get().get().second;
 
 					TEST(true); // Recruited while already a blob manager.
 				} else {
@@ -1884,7 +1907,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					// Also, not halting lets us handle the case here where the last BM had a higher
 					// epoch and somehow the epochs got out of order by a delayed initialize request. The one we start
 					// here will just halt on the lock check.
-					myBMEpoch = req.epoch;
 					startRole(Role::BLOB_MANAGER, recruited.id(), interf.id());
 					DUMPTOKEN(recruited.waitFailure);
 					DUMPTOKEN(recruited.haltBlobManager);
@@ -1892,12 +1914,13 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					DUMPTOKEN(recruited.blobManagerExclCheckReq);
 
 					Future<Void> blobManagerProcess = blobManager(recruited, dbInfo, req.epoch);
-					errorForwarders.add(forwardError(
-					    errors,
-					    Role::BLOB_MANAGER,
-					    recruited.id(),
-					    setWhenDoneOrError(blobManagerProcess, bmInterf, Optional<BlobManagerInterface>())));
-					bmInterf->set(Optional<BlobManagerInterface>(recruited));
+					errorForwarders.add(
+					    forwardError(errors,
+					                 Role::BLOB_MANAGER,
+					                 recruited.id(),
+					                 resetBlobManagerWhenDoneOrError(blobManagerProcess, bmEpochAndInterf, req.epoch)));
+					bmEpochAndInterf->set(
+					    Optional<std::pair<int64_t, BlobManagerInterface>>(std::pair(req.epoch, recruited)));
 				}
 				TraceEvent("BlobManagerReceived", req.reqId).detail("BlobManagerId", recruited.id());
 				req.reply.send(recruited);
@@ -2041,6 +2064,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					DUMPTOKEN(recruited.getValue);
 					DUMPTOKEN(recruited.getKey);
 					DUMPTOKEN(recruited.getKeyValues);
+					DUMPTOKEN(recruited.getMappedKeyValues);
 					DUMPTOKEN(recruited.getShardState);
 					DUMPTOKEN(recruited.waitMetrics);
 					DUMPTOKEN(recruited.splitMetrics);
@@ -2052,7 +2076,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					DUMPTOKEN(recruited.getKeyValueStoreType);
 					DUMPTOKEN(recruited.watchValue);
 					DUMPTOKEN(recruited.getKeyValuesStream);
-					DUMPTOKEN(recruited.getKeyValuesAndFlatMap);
 					DUMPTOKEN(recruited.changeFeedStream);
 					DUMPTOKEN(recruited.changeFeedPop);
 					DUMPTOKEN(recruited.changeFeedVersionUpdate);

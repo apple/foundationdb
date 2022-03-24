@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -103,6 +103,8 @@ void recordAllocation(void* ptr, size_t size);
 void recordDeallocation(void* ptr);
 #endif
 
+inline constexpr auto kFastAllocMagazineBytes = 128 << 10;
+
 template <int Size>
 class FastAllocator {
 public:
@@ -125,7 +127,7 @@ private:
 	static unsigned long vLock;
 #endif
 
-	static const int magazine_size = (128 << 10) / Size;
+	static const int magazine_size = kFastAllocMagazineBytes / Size;
 	static const int PSize = Size / sizeof(void*);
 	struct GlobalData;
 	struct ThreadData {
@@ -278,6 +280,7 @@ inline void freeFast(int size, void* ptr) {
 }
 
 [[nodiscard]] inline void* allocateFast4kAligned(int size) {
+#if !defined(USE_JEMALLOC)
 	// Use FastAllocator for sizes it supports to avoid internal fragmentation in some implementations of aligned_alloc
 	if (size <= 4096)
 		return FastAllocator<4096>::allocate();
@@ -285,10 +288,16 @@ inline void freeFast(int size, void* ptr) {
 		return FastAllocator<8192>::allocate();
 	if (size <= 16384)
 		return FastAllocator<16384>::allocate();
-	return aligned_alloc(4096, size);
+#endif
+	auto* result = aligned_alloc(4096, size);
+	if (result == nullptr) {
+		platform::outOfMemory();
+	}
+	return result;
 }
 
 inline void freeFast4kAligned(int size, void* ptr) {
+#if !defined(USE_JEMALLOC)
 	// Sizes supported by FastAllocator must be release via FastAllocator
 	if (size <= 4096)
 		return FastAllocator<4096>::release(ptr);
@@ -296,6 +305,7 @@ inline void freeFast4kAligned(int size, void* ptr) {
 		return FastAllocator<8192>::release(ptr);
 	if (size <= 16384)
 		return FastAllocator<16384>::release(ptr);
+#endif
 	aligned_free(ptr);
 }
 

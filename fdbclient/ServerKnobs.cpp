@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -113,10 +113,12 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// Data distribution queue
 	init( HEALTH_POLL_TIME,                                      1.0 );
 	init( BEST_TEAM_STUCK_DELAY,                                 1.0 );
+	init( DEST_OVERLOADED_DELAY,                                 0.2 );
 	init( BG_REBALANCE_POLLING_INTERVAL,                        10.0 );
 	init( BG_REBALANCE_SWITCH_CHECK_INTERVAL,                    5.0 ); if (randomize && BUGGIFY) BG_REBALANCE_SWITCH_CHECK_INTERVAL = 1.0;
 	init( DD_QUEUE_LOGGING_INTERVAL,                             5.0 );
 	init( RELOCATION_PARALLELISM_PER_SOURCE_SERVER,                2 ); if( randomize && BUGGIFY ) RELOCATION_PARALLELISM_PER_SOURCE_SERVER = 1;
+	init( RELOCATION_PARALLELISM_PER_DEST_SERVER,                 10 ); if( randomize && BUGGIFY ) RELOCATION_PARALLELISM_PER_DEST_SERVER = 1; // Note: if this is smaller than FETCH_KEYS_PARALLELISM, this will artificially reduce performance. The current default of 10 is probably too high but is set conservatively for now.
 	init( DD_QUEUE_MAX_KEY_SERVERS,                              100 ); if( randomize && BUGGIFY ) DD_QUEUE_MAX_KEY_SERVERS = 1;
 	init( DD_REBALANCE_PARALLELISM,                               50 );
 	init( DD_REBALANCE_RESET_AMOUNT,                              30 );
@@ -365,6 +367,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC,                0 );
 	// If true, enables dynamic adjustment of ROCKSDB_WRITE_RATE_LIMITER_BYTES according to the recent demand of background IO.
 	init( ROCKSDB_WRITE_RATE_LIMITER_AUTO_TUNE,                 true );
+	init( DEFAULT_FDB_ROCKSDB_COLUMN_FAMILY,                    "fdb");
+
 	init( ROCKSDB_PERFCONTEXT_ENABLE,                          false ); if( randomize && BUGGIFY ) ROCKSDB_PERFCONTEXT_ENABLE = deterministicRandom()->coinflip() ? false : true;
 	init( ROCKSDB_PERFCONTEXT_SAMPLE_RATE, 					  0.0001 );
 	init( ROCKSDB_MAX_SUBCOMPACTIONS,                              2 );
@@ -376,6 +380,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// Set ROCKSDB_CAN_COMMIT_DELAY_TIMES_ON_OVERLOAD to 0, to disable
 	init( ROCKSDB_CAN_COMMIT_DELAY_ON_OVERLOAD,                    1 );
 	init( ROCKSDB_CAN_COMMIT_DELAY_TIMES_ON_OVERLOAD,              5 );
+	init( ROCKSDB_COMPACTION_READAHEAD_SIZE,                   32768 ); // 32 KB, performs bigger reads when doing compaction.
 
 	// Leader election
 	bool longLeaderElection = randomize && BUGGIFY;
@@ -680,8 +685,11 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( CHANGEFEEDSTREAM_LIMIT_BYTES,                          1e6 ); if( randomize && BUGGIFY ) CHANGEFEEDSTREAM_LIMIT_BYTES = 1;
 	init( BLOBWORKERSTATUSSTREAM_LIMIT_BYTES,                    1e4 ); if( randomize && BUGGIFY ) BLOBWORKERSTATUSSTREAM_LIMIT_BYTES = 1;
 	init( ENABLE_CLEAR_RANGE_EAGER_READS,                       true );
-	init( QUICK_GET_VALUE_FALLBACK,                             false );
-	init( QUICK_GET_KEY_VALUES_FALLBACK,                        false );
+	init( CHECKPOINT_TRANSFER_BLOCK_BYTES,                      40e6 );
+	init( QUICK_GET_VALUE_FALLBACK,                             true );
+	init( QUICK_GET_KEY_VALUES_FALLBACK,                        true );
+	init( QUICK_GET_KEY_VALUES_LIMIT,                           2000 );
+	init( QUICK_GET_KEY_VALUES_LIMIT_BYTES,                      1e7 );
 
 	//Wait Failure
 	init( MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS,                 250 ); if( randomize && BUGGIFY ) MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS = 2;
@@ -716,6 +724,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( COORDINATOR_LEADER_CONNECTION_TIMEOUT,                20.0 );
 
 	// Dynamic Knobs (implementation)
+	init( COMPACTION_INTERVAL,             isSimulated ? 5.0 : 300.0 );
 	init( UPDATE_NODE_TIMEOUT,                                   3.0 );
 	init( GET_COMMITTED_VERSION_TIMEOUT,                         3.0 );
 	init( GET_SNAPSHOT_AND_CHANGES_TIMEOUT,                      3.0 );
@@ -803,8 +812,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( REDWOOD_LAZY_CLEAR_BATCH_SIZE_PAGES,                    10 );
 	init( REDWOOD_LAZY_CLEAR_MIN_PAGES,                            0 );
 	init( REDWOOD_LAZY_CLEAR_MAX_PAGES,                          1e6 );
-	init( REDWOOD_REMAP_CLEANUP_WINDOW,                           50 );
-	init( REDWOOD_REMAP_CLEANUP_LAG,                             0.1 );
+	init( REDWOOD_REMAP_CLEANUP_WINDOW_BYTES, 4LL * 1024 * 1024 * 1024 );
+	init( REDWOOD_REMAP_CLEANUP_TOLERANCE_RATIO,                0.05 );
 	init( REDWOOD_PAGEFILE_GROWTH_SIZE_PAGES,                  20000 ); if( randomize && BUGGIFY ) { REDWOOD_PAGEFILE_GROWTH_SIZE_PAGES = deterministicRandom()->randomInt(200, 1000); }
 	init( REDWOOD_METRICS_INTERVAL,                              5.0 );
 	init( REDWOOD_HISTOGRAM_INTERVAL,                           30.0 );
@@ -818,7 +827,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init ( CLUSTER_RECOVERY_EVENT_NAME_PREFIX,               "Master");
 
     // encrypt key proxy
-    init( ENABLE_ENCRYPT_KEY_PROXY,                            false );
+    init( ENABLE_ENCRYPTION,                                   false );
+    init( ENCRYPTION_MODE,                              "AES-256-CTR");
 
 	// Blob granlues
 	init( BG_URL,               isSimulated ? "file://fdbblob/" : "" ); // TODO: store in system key space or something, eventually

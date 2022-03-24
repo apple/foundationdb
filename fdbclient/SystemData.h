@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -69,6 +69,13 @@ void decodeKeyServersValue(std::map<Tag, UID> const& tag_uid,
                            std::vector<UID>& dest);
 
 extern const KeyRef clusterIdKey;
+
+// "\xff/checkpoint/[[UID]] := [[CheckpointMetaData]]"
+extern const KeyRef checkpointPrefix;
+const Key checkpointKeyFor(UID checkpointID);
+const Value checkpointValue(const CheckpointMetaData& checkpoint);
+UID decodeCheckpointKey(const KeyRef& key);
+CheckpointMetaData decodeCheckpointValue(const ValueRef& value);
 
 // "\xff/storageCacheServer/[[UID]] := StorageServerInterface"
 // This will be added by the cache server on initialization and removed by DD
@@ -490,7 +497,7 @@ const Value healthyZoneValue(StringRef const& zoneId, Version version);
 std::pair<Key, Version> decodeHealthyZoneValue(ValueRef const&);
 
 // All mutations done to this range are blindly copied into txnStateStore.
-// Used to create artifically large txnStateStore instances in testing.
+// Used to create artificially large txnStateStore instances in testing.
 extern const KeyRangeRef testOnlyTxnStateStorePrefixRange;
 
 // Snapshot + Incremental Restore
@@ -606,6 +613,8 @@ BlobWorkerInterface decodeBlobWorkerListValue(ValueRef const& value);
 extern const KeyRangeRef tenantMapKeys;
 extern const KeyRef tenantMapPrefix;
 extern const KeyRef tenantMapPrivatePrefix;
+extern const KeyRef tenantLastIdKey;
+extern const KeyRef tenantDataPrefixKey;
 
 Value encodeTenantEntry(TenantMapEntry const& tenantEntry);
 TenantMapEntry decodeTenantEntry(ValueRef const& value);
