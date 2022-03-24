@@ -50,8 +50,8 @@ ACTOR Future<Void> submitCandidacy(Key key,
 				    .detail("Hostname", hostname.present() ? hostname.get().toString() : "UnknownHostname")
 				    .detail("OldAddr", coord.candidacy.getEndpoint().getPrimaryAddress().toString());
 				if (rep.getError().code() == error_code_request_maybe_delivered) {
-					// 50 milliseconds delay to prevent tight resolving loop due to outdated DNS cache
-					wait(delay(0.05));
+					// Delay to prevent tight resolving loop due to outdated DNS cache
+					wait(delay(CLIENT_KNOBS->COORDINATOR_HOSTNAME_RESOLVE_DELAY));
 					throw coordinators_changed();
 				} else {
 					throw rep.getError();
