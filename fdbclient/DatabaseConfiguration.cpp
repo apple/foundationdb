@@ -23,6 +23,7 @@
 #include "flow/ITrace.h"
 #include "flow/Trace.h"
 #include "flow/genericactors.actor.h"
+#include "flow/UnitTest.h"
 
 DatabaseConfiguration::DatabaseConfiguration() {
 	resetInternal();
@@ -490,9 +491,9 @@ void DatabaseConfiguration::overwriteProxiesCount() {
 	Optional<ValueRef> optGrvProxies = DatabaseConfiguration::get(grvProxiesKey);
 	Optional<ValueRef> optProxies = DatabaseConfiguration::get(proxiesKey);
 
-	const int mutableGrvProxyCount = optGrvProxies.present() ? toInt(optGrvProxies.get()) : 0;
-	const int mutableCommitProxyCount = optCommitProxies.present() ? toInt(optCommitProxies.get()) : 0;
-	const int mutableProxiesCount = optProxies.present() ? toInt(optProxies.get()) : 0;
+	const int mutableGrvProxyCount = optGrvProxies.present() ? toInt(optGrvProxies.get()) : -1;
+	const int mutableCommitProxyCount = optCommitProxies.present() ? toInt(optCommitProxies.get()) : -1;
+	const int mutableProxiesCount = optProxies.present() ? toInt(optProxies.get()) : -1;
 
 	if (mutableProxiesCount > 1) {
 		TraceEvent(SevDebug, "OverwriteProxiesCount")
@@ -502,23 +503,23 @@ void DatabaseConfiguration::overwriteProxiesCount() {
 		    .detail("MutableGrvCPCount", mutableGrvProxyCount)
 		    .detail("MutableProxiesCount", mutableProxiesCount);
 
-		if (grvProxyCount == -1 && commitProxyCount > 0) {
-			if (mutableProxiesCount > commitProxyCount) {
-				grvProxyCount = mutableProxiesCount - commitProxyCount;
+		if (mutableGrvProxyCount == -1 && mutableCommitProxyCount > 0) {
+			if (mutableProxiesCount > mutableCommitProxyCount) {
+				grvProxyCount = mutableProxiesCount - mutableCommitProxyCount;
 			} else {
 				// invalid configuration; provision min GrvProxies
 				grvProxyCount = 1;
 				commitProxyCount = mutableProxiesCount - 1;
 			}
-		} else if (grvProxyCount > 0 && commitProxyCount == -1) {
-			if (mutableProxiesCount > grvProxyCount) {
+		} else if (mutableGrvProxyCount > 0 && mutableCommitProxyCount == -1) {
+			if (mutableProxiesCount > mutableGrvProxyCount) {
 				commitProxyCount = mutableProxiesCount - grvProxyCount;
 			} else {
 				// invalid configuration; provision min CommitProxies
 				commitProxyCount = 1;
 				grvProxyCount = mutableProxiesCount - 1;
 			}
-		} else if (grvProxyCount == -1 && commitProxyCount == -1) {
+		} else if (mutableGrvProxyCount == -1 && mutableCommitProxyCount == -1) {
 			// Use DEFAULT_COMMIT_GRV_PROXIES_RATIO to split proxies between Grv & Commit proxies
 			const int derivedGrvProxyCount =
 			    std::max(1,
@@ -824,4 +825,22 @@ bool DatabaseConfiguration::isOverridden(std::string key) const {
 	}
 
 	return false;
+}
+
+TEST_CASE("/fdbclient/databaseConfiguration/overwriteCommitProxy") {
+	DatabaseConfiguration conf1;
+	conf1.applyMutation(MutationRef(MutationRef::SetValue, "\xff/conf/grv_proxies"_sr, "5"_sr));
+	conf1.applyMutation(MutationRef(MutationRef::SetValue, "\xff/conf/proxies"_sr, "10"_sr));
+	conf1.applyMutation(MutationRef(MutationRef::SetValue, "\xff/conf/grv_proxies"_sr, "-1"_sr));
+	conf1.applyMutation(MutationRef(MutationRef::SetValue, "\xff/conf/commit_proxies"_sr, "-1"_sr));
+
+	DatabaseConfiguration conf2;
+	conf2.applyMutation(MutationRef(MutationRef::SetValue, "\xff/conf/proxies"_sr, "10"_sr));
+	conf2.applyMutation(MutationRef(MutationRef::SetValue, "\xff/conf/grv_proxies"_sr, "-1"_sr));
+	conf2.applyMutation(MutationRef(MutationRef::SetValue, "\xff/conf/commit_proxies"_sr, "-1"_sr));
+
+	ASSERT(conf1 == conf2);
+	ASSERT(conf1.getDesiredCommitProxies() == conf2.getDesiredCommitProxies());
+
+	return Void();
 }
