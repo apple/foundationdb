@@ -117,9 +117,11 @@ void GranuleFiles::getFiles(Version beginVersion,
                             Version readVersion,
                             bool canCollapse,
                             BlobGranuleChunkRef& chunk,
-                            Arena& replyArena) const {
+                            Arena& replyArena,
+                            int64_t& deltaBytesCounter) const {
 	BlobFileIndex dummyIndex; // for searching
 
+	// if beginVersion == 0 or we can collapse, find the latest snapshot <= readVersion
 	auto snapshotF = snapshotFiles.end();
 	if (beginVersion == 0 || canCollapse) {
 		dummyIndex.version = readVersion;
@@ -138,7 +140,8 @@ void GranuleFiles::getFiles(Version beginVersion,
 		deltaF = std::lower_bound(deltaFiles.begin(), deltaFiles.end(), dummyIndex);
 		if (canCollapse) {
 			ASSERT(snapshotF != snapshotFiles.end());
-			// see if delta files up to snapshotVersion are smaller or larger than snapshotBytes in total
+			// If we can collapse, see if delta files up to snapshotVersion are smaller or larger than snapshotBytes in
+			// total
 			auto deltaFCopy = deltaF;
 			int64_t snapshotBytes = snapshotF->length;
 			while (deltaFCopy != deltaFiles.end() && deltaFCopy->version <= snapshotF->version && snapshotBytes > 0) {
@@ -171,10 +174,9 @@ void GranuleFiles::getFiles(Version beginVersion,
 		chunk.snapshotVersion = invalidVersion;
 	}
 
-	int64_t deltaBytes = 0;
 	while (deltaF != deltaFiles.end() && deltaF->version < readVersion) {
 		chunk.deltaFiles.emplace_back_deep(replyArena, deltaF->filename, deltaF->offset, deltaF->length);
-		deltaBytes += deltaF->length;
+		deltaBytesCounter += deltaF->length;
 		ASSERT(lastIncluded < deltaF->version);
 		lastIncluded = deltaF->version;
 		deltaF++;
@@ -182,12 +184,9 @@ void GranuleFiles::getFiles(Version beginVersion,
 	// include last delta file that passes readVersion, if it exists
 	if (deltaF != deltaFiles.end() && lastIncluded < readVersion) {
 		chunk.deltaFiles.emplace_back_deep(replyArena, deltaF->filename, deltaF->offset, deltaF->length);
-		deltaBytes += deltaF->length;
+		deltaBytesCounter += deltaF->length;
 		lastIncluded = deltaF->version;
 	}
-
-	// TODO wire this up,
-	// bwData->stats.readReqDeltaBytesReturned += deltaBytes;
 }
 
 static std::string makeTestFileName(Version v) {
@@ -210,8 +209,9 @@ static void checkFiles(const GranuleFiles& f,
                        std::vector<int> expectedDeltaVersions) {
 	Arena a;
 	BlobGranuleChunkRef chunk;
-	f.getFiles(beginVersion, readVersion, canCollapse, chunk, a);
-	fmt::print("results({0}, {1}, {2}):\nEXPECTED:    snapshot={3}\n    deltas ({4}):\n",
+	int64_t deltaBytes = 0;
+	f.getFiles(beginVersion, readVersion, canCollapse, chunk, a, deltaBytes);
+	fmt::print("results({0}, {1}, {2}):\nEXPECTED:\n    snapshot={3}\n    deltas ({4}):\n",
 	           beginVersion,
 	           readVersion,
 	           canCollapse ? "T" : "F",

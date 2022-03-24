@@ -69,7 +69,8 @@ struct GranuleFiles {
 	              Version readVersion,
 	              bool canCollapse,
 	              BlobGranuleChunkRef& chunk,
-	              Arena& replyArena) const;
+	              Arena& replyArena,
+	              int64_t& deltaBytesCounter) const;
 };
 
 class Transaction;

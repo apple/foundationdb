@@ -2313,7 +2313,10 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 			chunk.includedVersion = req.readVersion;
 			chunk.keyRange = KeyRangeRef(StringRef(rep.arena, chunkRange.begin), StringRef(rep.arena, chunkRange.end));
 
-			chunkFiles.getFiles(granuleBeginVersion, req.readVersion, req.canCollapseBegin, chunk, rep.arena);
+			int64_t deltaBytes = 0;
+			chunkFiles.getFiles(
+			    granuleBeginVersion, req.readVersion, req.canCollapseBegin, chunk, rep.arena, deltaBytes);
+			bwData->stats.readReqDeltaBytesReturned += deltaBytes;
 			if (granuleBeginVersion > 0 && chunk.snapshotFile.present()) {
 				TEST(true); // collapsed begin version request for efficiency
 				didCollapse = true;
@@ -2378,8 +2381,6 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 		req.reply.send(rep);
 		--bwData->stats.activeReadRequests;
 	} catch (Error& e) {
-		// TODO REMOVE
-		fmt::print("Error in BGFRequest {0}\n", e.name());
 		if (e.code() == error_code_operation_cancelled) {
 			req.reply.sendError(wrong_shard_server());
 			throw;
