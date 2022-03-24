@@ -427,6 +427,7 @@ public:
 	bool speedUpSimulation;
 	BackupAgentType backupAgents;
 	BackupAgentType drAgents;
+	bool restarted = false;
 
 	bool hasDiffProtocolProcess; // true if simulator is testing a process with a different version
 	bool setDiffProtocol; // true if a process with a different protocol version has been started

@@ -810,6 +810,28 @@ void printStatus(StatusObjectReader statusObj,
 				outputString = outputStringCache;
 				outputString += "\n  Unable to retrieve data status";
 			}
+			// Storage Wiggle section
+			StatusObjectReader storageWigglerObj;
+			std::string storageWigglerString;
+			try {
+				if (statusObjCluster.get("storage_wiggler", storageWigglerObj)) {
+					int size = 0;
+					if (storageWigglerObj.has("wiggle_server_addresses")) {
+						storageWigglerString += "\n  Wiggle server addresses-";
+						for (auto& v : storageWigglerObj.obj().at("wiggle_server_addresses").get_array()) {
+							storageWigglerString += " " + v.get_str();
+							size += 1;
+						}
+					}
+					storageWigglerString += "\n  Wiggle server count    - " + std::to_string(size);
+				}
+			} catch (std::runtime_error&) {
+				storageWigglerString += "\n  Unable to retrieve storage wiggler status";
+			}
+			if (storageWigglerString.size()) {
+				outputString += "\n\nStorage wiggle:";
+				outputString += storageWigglerString;
+			}
 
 			// Operating space section
 			outputString += "\n\nOperating space:";
@@ -1183,7 +1205,7 @@ void printStatus(StatusObjectReader statusObj,
 
 // "db" is the handler to the multiversion database
 // localDb is the native Database object
-// localDb is rarely needed except the "db" has not establised a connection to the cluster where the operation will
+// localDb is rarely needed except the "db" has not established a connection to the cluster where the operation will
 // return Never as we expect status command to always return, we use "localDb" to return the default result
 ACTOR Future<bool> statusCommandActor(Reference<IDatabase> db,
                                       Database localDb,

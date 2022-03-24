@@ -215,6 +215,33 @@ const KeyRangeRef writeConflictRangeKeysRange =
 
 const KeyRef clusterIdKey = LiteralStringRef("\xff/clusterId");
 
+const KeyRef checkpointPrefix = "\xff/checkpoint/"_sr;
+
+const Key checkpointKeyFor(UID checkpointID) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(checkpointPrefix);
+	wr << checkpointID;
+	return wr.toValue();
+}
+
+const Value checkpointValue(const CheckpointMetaData& checkpoint) {
+	return ObjectWriter::toValue(checkpoint, IncludeVersion());
+}
+
+UID decodeCheckpointKey(const KeyRef& key) {
+	UID checkpointID;
+	BinaryReader rd(key.removePrefix(checkpointPrefix), Unversioned());
+	rd >> checkpointID;
+	return checkpointID;
+}
+
+CheckpointMetaData decodeCheckpointValue(const ValueRef& value) {
+	CheckpointMetaData checkpoint;
+	ObjectReader reader(value.begin(), IncludeVersion());
+	reader.deserialize(checkpoint);
+	return checkpoint;
+}
+
 // "\xff/cacheServer/[[UID]] := StorageServerInterface"
 const KeyRangeRef storageCacheServerKeys(LiteralStringRef("\xff/cacheServer/"), LiteralStringRef("\xff/cacheServer0"));
 const KeyRef storageCacheServersPrefix = storageCacheServerKeys.begin;
@@ -1336,6 +1363,23 @@ BlobWorkerInterface decodeBlobWorkerListValue(ValueRef const& value) {
 	reader.deserialize(interf);
 	return interf;
 }
+
+Value encodeTenantEntry(TenantMapEntry const& tenantEntry) {
+	return ObjectWriter::toValue(tenantEntry, IncludeVersion());
+}
+
+TenantMapEntry decodeTenantEntry(ValueRef const& value) {
+	TenantMapEntry entry;
+	ObjectReader reader(value.begin(), IncludeVersion());
+	reader.deserialize(entry);
+	return entry;
+}
+
+const KeyRangeRef tenantMapKeys("\xff/tenantMap/"_sr, "\xff/tenantMap0"_sr);
+const KeyRef tenantMapPrefix = tenantMapKeys.begin;
+const KeyRef tenantMapPrivatePrefix = "\xff\xff/tenantMap/"_sr;
+const KeyRef tenantLastIdKey = "\xff/tenantLastId/"_sr;
+const KeyRef tenantDataPrefixKey = "\xff/tenantDataPrefix"_sr;
 
 // for tests
 void testSSISerdes(StorageServerInterface const& ssi, bool useFB) {

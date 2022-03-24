@@ -115,7 +115,7 @@ Here is a complete list of valid parameters:
 
  *request_timeout_min* (or *rtom*) - Minimum number of seconds to wait for a request to succeed after a connection is established.
 
- *request_tries* (or *rt*) - Number of times to try each request until a parseable HTTP response other than 429 is received.
+ *request_tries* (or *rt*) - Number of times to try each request until a parsable HTTP response other than 429 is received.
 
  *requests_per_second* (or *rps*) - Max number of requests to start per second.
 

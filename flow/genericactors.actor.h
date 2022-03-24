@@ -1127,6 +1127,12 @@ Future<T> tagError(Future<Void> future, Error e) {
 	throw e;
 }
 
+ACTOR template <class T>
+Future<T> detach(Future<T> f) {
+	T x = wait(f);
+	return x;
+}
+
 // If the future is ready, yields and returns. Otherwise, returns when future is set.
 template <class T>
 Future<T> orYield(Future<T> f) {
@@ -2049,6 +2055,15 @@ private:
 
 	Reference<UnsafeWeakFutureReferenceData> data;
 };
+
+// Call a lambda every <interval> seconds
+ACTOR template <typename Fn>
+Future<Void> repeatEvery(double interval, Fn fn) {
+	loop {
+		wait(delay(interval));
+		fn();
+	}
+}
 
 #include "flow/unactorcompiler.h"
 

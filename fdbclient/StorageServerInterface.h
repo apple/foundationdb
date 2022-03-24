@@ -24,6 +24,7 @@
 
 #include <ostream>
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/StorageCheckpoint.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/fdbrpc.h"
@@ -33,6 +34,7 @@
 #include "fdbrpc/TSSComparison.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/TagThrottle.actor.h"
+#include "fdbclient/Tenant.h"
 #include "flow/UnitTest.h"
 
 // Dead code, removed in the next protocol version
@@ -66,7 +68,7 @@ struct StorageServerInterface {
 	// Throws a wrong_shard_server if the keys in the request or result depend on data outside this server OR if a large
 	// selector offset prevents all data from being read in one range read
 	RequestStream<struct GetKeyValuesRequest> getKeyValues;
-	RequestStream<struct GetKeyValuesAndFlatMapRequest> getKeyValuesAndFlatMap;
+	RequestStream<struct GetMappedKeyValuesRequest> getMappedKeyValues;
 
 	RequestStream<struct GetShardStateRequest> getShardState;
 	RequestStream<struct WaitMetricsRequest> waitMetrics;
@@ -84,6 +86,8 @@ struct StorageServerInterface {
 	RequestStream<struct OverlappingChangeFeedsRequest> overlappingChangeFeeds;
 	RequestStream<struct ChangeFeedPopRequest> changeFeedPop;
 	RequestStream<struct ChangeFeedVersionUpdateRequest> changeFeedVersionUpdate;
+	RequestStream<struct GetCheckpointRequest> checkpoint;
+	RequestStream<struct FetchCheckpointRequest> fetchCheckpoint;
 
 	explicit StorageServerInterface(UID uid) : uniqueID(uid) {}
 	StorageServerInterface() : uniqueID(deterministicRandom()->randomUniqueID()) {}
@@ -126,8 +130,8 @@ struct StorageServerInterface {
 				    RequestStream<struct SplitRangeRequest>(getValue.getEndpoint().getAdjustedEndpoint(12));
 				getKeyValuesStream =
 				    RequestStream<struct GetKeyValuesStreamRequest>(getValue.getEndpoint().getAdjustedEndpoint(13));
-				getKeyValuesAndFlatMap =
-				    RequestStream<struct GetKeyValuesAndFlatMapRequest>(getValue.getEndpoint().getAdjustedEndpoint(14));
+				getMappedKeyValues =
+				    RequestStream<struct GetMappedKeyValuesRequest>(getValue.getEndpoint().getAdjustedEndpoint(14));
 				changeFeedStream =
 				    RequestStream<struct ChangeFeedStreamRequest>(getValue.getEndpoint().getAdjustedEndpoint(15));
 				overlappingChangeFeeds =
@@ -136,6 +140,9 @@ struct StorageServerInterface {
 				    RequestStream<struct ChangeFeedPopRequest>(getValue.getEndpoint().getAdjustedEndpoint(17));
 				changeFeedVersionUpdate = RequestStream<struct ChangeFeedVersionUpdateRequest>(
 				    getValue.getEndpoint().getAdjustedEndpoint(18));
+				checkpoint = RequestStream<struct GetCheckpointRequest>(getValue.getEndpoint().getAdjustedEndpoint(19));
+				fetchCheckpoint =
+				    RequestStream<struct FetchCheckpointRequest>(getValue.getEndpoint().getAdjustedEndpoint(20));
 			}
 		} else {
 			ASSERT(Ar::isDeserializing);
@@ -178,11 +185,13 @@ struct StorageServerInterface {
 		streams.push_back(getReadHotRanges.getReceiver());
 		streams.push_back(getRangeSplitPoints.getReceiver());
 		streams.push_back(getKeyValuesStream.getReceiver(TaskPriority::LoadBalancedEndpoint));
-		streams.push_back(getKeyValuesAndFlatMap.getReceiver(TaskPriority::LoadBalancedEndpoint));
+		streams.push_back(getMappedKeyValues.getReceiver(TaskPriority::LoadBalancedEndpoint));
 		streams.push_back(changeFeedStream.getReceiver());
 		streams.push_back(overlappingChangeFeeds.getReceiver());
 		streams.push_back(changeFeedPop.getReceiver());
 		streams.push_back(changeFeedVersionUpdate.getReceiver());
+		streams.push_back(checkpoint.getReceiver());
+		streams.push_back(fetchCheckpoint.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -212,6 +221,21 @@ struct ServerCacheInfo {
 	}
 };
 
+struct TenantInfo {
+	static const int64_t INVALID_TENANT = -1;
+
+	Optional<TenantName> name;
+	int64_t tenantId;
+
+	TenantInfo() : tenantId(INVALID_TENANT) {}
+	TenantInfo(TenantName name, int64_t tenantId) : name(name), tenantId(tenantId) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, name, tenantId);
+	}
+};
+
 struct GetValueReply : public LoadBalancedReply {
 	constexpr static FileIdentifier file_identifier = 1378929;
 	Optional<Value> value;
@@ -229,6 +253,7 @@ struct GetValueReply : public LoadBalancedReply {
 struct GetValueRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 8454530;
 	SpanID spanContext;
+	TenantInfo tenantInfo;
 	Key key;
 	Version version;
 	Optional<TagSet> tags;
@@ -236,12 +261,17 @@ struct GetValueRequest : TimedRequest {
 	ReplyPromise<GetValueReply> reply;
 
 	GetValueRequest() {}
-	GetValueRequest(SpanID spanContext, const Key& key, Version ver, Optional<TagSet> tags, Optional<UID> debugID)
-	  : spanContext(spanContext), key(key), version(ver), tags(tags), debugID(debugID) {}
+	GetValueRequest(SpanID spanContext,
+	                const TenantInfo& tenantInfo,
+	                const Key& key,
+	                Version ver,
+	                Optional<TagSet> tags,
+	                Optional<UID> debugID)
+	  : spanContext(spanContext), tenantInfo(tenantInfo), key(key), version(ver), tags(tags), debugID(debugID) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, key, version, tags, debugID, reply, spanContext);
+		serializer(ar, key, version, tags, debugID, reply, spanContext, tenantInfo);
 	}
 };
 
@@ -262,6 +292,7 @@ struct WatchValueReply {
 struct WatchValueRequest {
 	constexpr static FileIdentifier file_identifier = 14747733;
 	SpanID spanContext;
+	TenantInfo tenantInfo;
 	Key key;
 	Optional<Value> value;
 	Version version;
@@ -270,17 +301,20 @@ struct WatchValueRequest {
 	ReplyPromise<WatchValueReply> reply;
 
 	WatchValueRequest() {}
+
 	WatchValueRequest(SpanID spanContext,
+	                  TenantInfo tenantInfo,
 	                  const Key& key,
 	                  Optional<Value> value,
 	                  Version ver,
 	                  Optional<TagSet> tags,
 	                  Optional<UID> debugID)
-	  : spanContext(spanContext), key(key), value(value), version(ver), tags(tags), debugID(debugID) {}
+	  : spanContext(spanContext), tenantInfo(tenantInfo), key(key), value(value), version(ver), tags(tags),
+	    debugID(debugID) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, key, value, version, tags, debugID, reply, spanContext);
+		serializer(ar, key, value, version, tags, debugID, reply, spanContext, tenantInfo);
 	}
 };
 
@@ -304,6 +338,7 @@ struct GetKeyValuesRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 6795746;
 	SpanID spanContext;
 	Arena arena;
+	TenantInfo tenantInfo;
 	KeySelectorRef begin, end;
 	// This is a dummy field there has never been used.
 	// TODO: Get rid of this by constexpr or other template magic in getRange
@@ -316,21 +351,36 @@ struct GetKeyValuesRequest : TimedRequest {
 	ReplyPromise<GetKeyValuesReply> reply;
 
 	GetKeyValuesRequest() : isFetchKeys(false) {}
+
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, begin, end, version, limit, limitBytes, isFetchKeys, tags, debugID, reply, spanContext, arena);
+		serializer(ar,
+		           begin,
+		           end,
+		           version,
+		           limit,
+		           limitBytes,
+		           isFetchKeys,
+		           tags,
+		           debugID,
+		           reply,
+		           spanContext,
+		           tenantInfo,
+		           arena);
 	}
 };
 
-struct GetKeyValuesAndFlatMapReply : public LoadBalancedReply {
+struct GetMappedKeyValuesReply : public LoadBalancedReply {
 	constexpr static FileIdentifier file_identifier = 1783067;
 	Arena arena;
-	VectorRef<KeyValueRef, VecSerStrategy::String> data;
+	// MappedKeyValueRef is not string_serialized_traits, so we have to use FlatBuffers.
+	VectorRef<MappedKeyValueRef, VecSerStrategy::FlatBuffers> data;
+
 	Version version; // useful when latestVersion was requested
 	bool more;
 	bool cached = false;
 
-	GetKeyValuesAndFlatMapReply() : version(invalidVersion), more(false), cached(false) {}
+	GetMappedKeyValuesReply() : version(invalidVersion), more(false), cached(false) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -338,10 +388,11 @@ struct GetKeyValuesAndFlatMapReply : public LoadBalancedReply {
 	}
 };
 
-struct GetKeyValuesAndFlatMapRequest : TimedRequest {
+struct GetMappedKeyValuesRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 6795747;
 	SpanID spanContext;
 	Arena arena;
+	TenantInfo tenantInfo;
 	KeySelectorRef begin, end;
 	KeyRef mapper;
 	Version version; // or latestVersion
@@ -349,13 +400,25 @@ struct GetKeyValuesAndFlatMapRequest : TimedRequest {
 	bool isFetchKeys;
 	Optional<TagSet> tags;
 	Optional<UID> debugID;
-	ReplyPromise<GetKeyValuesAndFlatMapReply> reply;
+	ReplyPromise<GetMappedKeyValuesReply> reply;
 
-	GetKeyValuesAndFlatMapRequest() : isFetchKeys(false) {}
+	GetMappedKeyValuesRequest() : isFetchKeys(false) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(
-		    ar, begin, end, mapper, version, limit, limitBytes, isFetchKeys, tags, debugID, reply, spanContext, arena);
+		serializer(ar,
+		           begin,
+		           end,
+		           mapper,
+		           version,
+		           limit,
+		           limitBytes,
+		           isFetchKeys,
+		           tags,
+		           debugID,
+		           reply,
+		           spanContext,
+		           tenantInfo,
+		           arena);
 	}
 };
 
@@ -390,6 +453,7 @@ struct GetKeyValuesStreamRequest {
 	constexpr static FileIdentifier file_identifier = 6795746;
 	SpanID spanContext;
 	Arena arena;
+	TenantInfo tenantInfo;
 	KeySelectorRef begin, end;
 	Version version; // or latestVersion
 	int limit, limitBytes;
@@ -399,9 +463,22 @@ struct GetKeyValuesStreamRequest {
 	ReplyPromiseStream<GetKeyValuesStreamReply> reply;
 
 	GetKeyValuesStreamRequest() : isFetchKeys(false) {}
+
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, begin, end, version, limit, limitBytes, isFetchKeys, tags, debugID, reply, spanContext, arena);
+		serializer(ar,
+		           begin,
+		           end,
+		           version,
+		           limit,
+		           limitBytes,
+		           isFetchKeys,
+		           tags,
+		           debugID,
+		           reply,
+		           spanContext,
+		           tenantInfo,
+		           arena);
 	}
 };
 
@@ -423,6 +500,7 @@ struct GetKeyRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 10457870;
 	SpanID spanContext;
 	Arena arena;
+	TenantInfo tenantInfo;
 	KeySelectorRef sel;
 	Version version; // or latestVersion
 	Optional<TagSet> tags;
@@ -430,16 +508,18 @@ struct GetKeyRequest : TimedRequest {
 	ReplyPromise<GetKeyReply> reply;
 
 	GetKeyRequest() {}
+
 	GetKeyRequest(SpanID spanContext,
+	              TenantInfo tenantInfo,
 	              KeySelectorRef const& sel,
 	              Version version,
 	              Optional<TagSet> tags,
 	              Optional<UID> debugID)
-	  : spanContext(spanContext), sel(sel), version(version), debugID(debugID) {}
+	  : spanContext(spanContext), tenantInfo(tenantInfo), sel(sel), version(version), debugID(debugID) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, sel, version, tags, debugID, reply, spanContext, arena);
+		serializer(ar, sel, version, tags, debugID, reply, spanContext, tenantInfo, arena);
 	}
 };
 
@@ -669,19 +749,22 @@ struct SplitRangeReply {
 		serializer(ar, splitPoints);
 	}
 };
+
 struct SplitRangeRequest {
 	constexpr static FileIdentifier file_identifier = 10725174;
 	Arena arena;
+	TenantInfo tenantInfo;
 	KeyRangeRef keys;
 	int64_t chunkSize;
 	ReplyPromise<SplitRangeReply> reply;
 
 	SplitRangeRequest() {}
-	SplitRangeRequest(KeyRangeRef const& keys, int64_t chunkSize) : keys(arena, keys), chunkSize(chunkSize) {}
+	SplitRangeRequest(TenantInfo tenantInfo, KeyRangeRef const& keys, int64_t chunkSize)
+	  : tenantInfo(tenantInfo), keys(arena, keys), chunkSize(chunkSize) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keys, chunkSize, reply, arena);
+		serializer(ar, keys, chunkSize, reply, tenantInfo, arena);
 	}
 };
 
@@ -739,6 +822,60 @@ struct ChangeFeedPopRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, rangeID, version, range, reply);
+	}
+};
+
+// Request to search for a checkpoint for a minimum keyrange: `range`, at the specific version,
+// in the specific format.
+// A CheckpointMetaData will be returned if the specific checkpoint is found.
+struct GetCheckpointRequest {
+	constexpr static FileIdentifier file_identifier = 13804343;
+	Version version; // The FDB version at which the checkpoint is created.
+	KeyRange range;
+	int16_t format; // CheckpointFormat.
+	Optional<UID> checkpointID; // When present, look for the checkpoint with the exact UID.
+	ReplyPromise<CheckpointMetaData> reply;
+
+	GetCheckpointRequest() {}
+	GetCheckpointRequest(Version version, KeyRange const& range, CheckpointFormat format)
+	  : version(version), range(range), format(format) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, version, range, format, checkpointID, reply);
+	}
+};
+
+// Reply to FetchCheckpointRequest, transfers checkpoint back to client.
+struct FetchCheckpointReply : public ReplyPromiseStreamReply {
+	constexpr static FileIdentifier file_identifier = 13804345;
+	Standalone<StringRef> token; // Serialized data specific to a particular checkpoint format.
+	Standalone<StringRef> data;
+
+	FetchCheckpointReply() {}
+	FetchCheckpointReply(StringRef token) : token(token) {}
+
+	int expectedSize() const { return data.expectedSize(); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, ReplyPromiseStreamReply::acknowledgeToken, ReplyPromiseStreamReply::sequence, token, data);
+	}
+};
+
+// Request to fetch checkpoint from a storage server.
+struct FetchCheckpointRequest {
+	constexpr static FileIdentifier file_identifier = 13804344;
+	UID checkpointID;
+	Standalone<StringRef> token; // Serialized data specific to a particular checkpoint format.
+	ReplyPromiseStream<FetchCheckpointReply> reply;
+
+	FetchCheckpointRequest() = default;
+	FetchCheckpointRequest(UID checkpointID, StringRef token) : checkpointID(checkpointID), token(token) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, checkpointID, token, reply);
 	}
 };
 
