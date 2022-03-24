@@ -45,6 +45,8 @@ void throwIfError(FdbCApi::fdb_error_t e) {
 	}
 }
 
+thread_local bool MultiVersionApi::networkThread = false;
+
 // DLTransaction
 void DLTransaction::cancel() {
 	api->transactionCancel(tr);
@@ -1031,6 +1033,11 @@ ThreadResult<RangeResult> MultiVersionTransaction::readBlobGranules(const KeyRan
                                                                     Version beginVersion,
                                                                     Optional<Version> readVersion,
                                                                     ReadBlobGranuleContext granuleContext) {
+	if (MultiVersionApi::isNetworkThread()) {
+		// Check to avoid synchronous ThreadResult call when already on another main thread, which would cause a
+		// deadlock
+		throw blocked_from_network_thread();
+	}
 	auto tr = getTransaction();
 	if (tr.transaction) {
 		return tr.transaction->readBlobGranules(keyRange, beginVersion, readVersion, granuleContext);
@@ -2256,6 +2263,7 @@ void MultiVersionApi::setupNetwork() {
 }
 
 THREAD_FUNC_RETURN runNetworkThread(void* param) {
+	MultiVersionApi::setNetworkThread();
 	try {
 		((ClientInfo*)param)->api->runNetwork();
 	} catch (Error& e) {
@@ -2278,6 +2286,8 @@ void MultiVersionApi::runNetwork() {
 	}
 
 	lock.leave();
+
+	MultiVersionApi::setNetworkThread();
 
 	std::vector<THREAD_HANDLE> handles;
 	if (!bypassMultiClientApi) {
@@ -2528,6 +2538,14 @@ MultiVersionApi::MultiVersionApi()
     envOptionsLoaded(false) {}
 
 MultiVersionApi* MultiVersionApi::api = new MultiVersionApi();
+
+void MultiVersionApi::setNetworkThread() {
+	networkThread = true;
+}
+
+bool MultiVersionApi::isNetworkThread() {
+	return networkThread;
+}
 
 // ClientInfo
 void ClientInfo::loadVersion() {

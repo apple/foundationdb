@@ -866,6 +866,9 @@ public:
 
 	static bool apiVersionAtLeast(int minVersion);
 
+	static void setNetworkThread();
+	static bool isNetworkThread();
+
 private:
 	MultiVersionApi();
 
@@ -899,6 +902,8 @@ private:
 	int nextThread = 0;
 	int threadCount;
 	std::string tmpDir;
+
+	static thread_local bool networkThread;
 
 	Mutex lock;
 	std::vector<std::pair<FDBNetworkOptions::Option, Optional<Standalone<StringRef>>>> options;
