@@ -34,9 +34,11 @@ ApiWorkload::ApiWorkload(const WorkloadConfig& config) : WorkloadBase(config) {
 	readExistingKeysRatio = config.getFloatOption("readExistingKeysRatio", 0.9);
 	runUntilStop = config.getBoolOption("runUntilStop", false);
 	numRandomOperations = config.getIntOption("numRandomOperations", 1000);
+	numOperationsForProgressCheck = config.getIntOption("numTransactionsForProgressCheck", 10);
 	keyPrefix = fmt::format("{}/", workloadId);
 	numRandomOpLeft = 0;
 	stopReceived = false;
+	checkingProgress = false;
 }
 
 IWorkloadControlIfc* ApiWorkload::getControlIfc() {
@@ -50,6 +52,12 @@ IWorkloadControlIfc* ApiWorkload::getControlIfc() {
 void ApiWorkload::stop() {
 	ASSERT(runUntilStop);
 	stopReceived = true;
+}
+
+void ApiWorkload::checkProgress() {
+	ASSERT(runUntilStop);
+	numRandomOpLeft = numOperationsForProgressCheck;
+	checkingProgress = true;
 }
 
 void ApiWorkload::start() {
@@ -76,10 +84,17 @@ void ApiWorkload::randomOperations() {
 	if (runUntilStop) {
 		if (stopReceived)
 			return;
+		if (checkingProgress) {
+			int numLeft = numRandomOpLeft--;
+			if (numLeft == 0) {
+				checkingProgress = false;
+				confirmProgress();
+			}
+		}
 	} else {
-		if (numRandomOpLeft == 0)
+		int numLeft = numRandomOpLeft--;
+		if (numLeft == 0)
 			return;
-		numRandomOpLeft--;
 	}
 	randomOperation([this]() { randomOperations(); });
 }

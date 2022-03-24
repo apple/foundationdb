@@ -10,7 +10,7 @@ import shutil
 import stat
 import subprocess
 import sys
-from threading import Thread
+from threading import Thread, Event
 import time
 from urllib import request
 
@@ -26,6 +26,8 @@ SUPPORTED_VERSIONS = ["7.1.0", "6.3.23",
                       "5.1.7", "5.1.6"]
 FDB_DOWNLOAD_ROOT = "https://github.com/apple/foundationdb/releases/download/"
 CURRENT_VERSION = "7.1.0"
+HEALTH_CHECK_TIMEOUT_SEC = 5
+PROGRESS_CHECK_TIMEOUT_SEC = 5
 
 
 def make_executable(path):
@@ -95,6 +97,13 @@ class UpgradeTest:
         self.log = self.cluster.log
         self.etc = self.cluster.etc
         self.data = self.cluster.data
+        self.input_pipe_path = self.tmp_dir.joinpath(
+            "input.{}".format(random_secret_string(8)))
+        self.output_pipe_path = self.tmp_dir.joinpath(
+            "output.{}".format(random_secret_string(8)))
+        os.mkfifo(self.input_pipe_path)
+        os.mkfifo(self.output_pipe_path)
+        self.progress_event = Event()
 
     def binary_path(self, version, bin_name):
         if version == CURRENT_VERSION:
@@ -108,7 +117,8 @@ class UpgradeTest:
         else:
             return self.download_dir.joinpath(version)
 
-    def download_old_binary(self, version, target_bin_name, remote_bin_name, executable):
+    # Download an old binary of a given version from a remote repository
+    def download_old_binary(self, version, target_bin_name, remote_bin_name, makeExecutable):
         local_file = self.binary_path(version, target_bin_name)
         if (local_file.exists()):
             return
@@ -120,9 +130,10 @@ class UpgradeTest:
         request.urlretrieve(remote_file, local_file)
         print("Download complete")
         assert local_file.exists(), "{} does not exist".format(local_file)
-        if executable:
+        if makeExecutable:
             make_executable(local_file)
 
+    # Download all old binaries required for testing the specified upgrade path
     def download_old_binaries(self):
         for version in self.upgrade_path:
             if version == CURRENT_VERSION:
@@ -136,6 +147,8 @@ class UpgradeTest:
             self.download_old_binary(version,
                                      "libfdb_c.so", "libfdb_c.{}.so".format(self.platform), False)
 
+    # Create a directory for external client libraries for MVC and fill it
+    # with the libraries necessary for the specified upgrade path
     def create_external_lib_dir(self):
         self.external_lib_dir = self.tmp_dir.joinpath("client_libs")
         self.external_lib_dir.mkdir(parents=True)
@@ -146,7 +159,9 @@ class UpgradeTest:
                 "libfdb_c.{}.so".format(version))
             shutil.copyfile(src_file_path, target_file_path)
 
-    def health_check(self, timeout_sec=5):
+    # Perform a health check of the cluster: Use fdbcli status command to check if the number of
+    # server processes and their versions are as expected
+    def health_check(self, timeout_sec=HEALTH_CHECK_TIMEOUT_SEC):
         retries = 0
         while retries < timeout_sec:
             retries += 1
@@ -171,6 +186,7 @@ class UpgradeTest:
             return
         assert False, "Health check: Failed"
 
+    # Create and save a cluster configuration for the given version
     def configure_version(self, version):
         self.cluster.fdbmonitor_binary = self.binary_path(
             version, "fdbmonitor")
@@ -182,6 +198,7 @@ class UpgradeTest:
         self.cluster.save_config()
         self.cluster_version = version
 
+    # Upgrade the cluster to the given version
     def upgrade_to(self, version):
         print("Upgrading to version {}".format(version))
         self.cluster.stop_cluster()
@@ -200,6 +217,7 @@ class UpgradeTest:
         self.cluster.stop_cluster()
         shutil.rmtree(self.tmp_dir)
 
+    # Start the tester to generate the workload specified by the test file
     def exec_workload(self, test_file):
         cmd_args = [self.tester_bin,
                     '--cluster-file', self.cluster.cluster_file,
@@ -210,63 +228,87 @@ class UpgradeTest:
         print("Executing test command: {}".format(
             " ".join([str(c) for c in cmd_args])))
 
-        retcode = subprocess.run(
-            cmd_args, stdout=sys.stdout, stderr=sys.stderr,
-        ).returncode
+        self.tester_proc = subprocess.Popen(
+            cmd_args, stdout=sys.stdout, stderr=sys.stderr)
+        retcode = self.tester_proc.wait()
+        self.tester_proc = None
 
         if (retcode != 0):
             print("Tester failed with return code {}".format(retcode))
         return retcode
 
-    def close_output_pipe(self):
-        try:
-            # Finish reading the pipe to avoid broken pipe errors
-            while True:
-                data = self.output_pipe.read()
-                if len(data) == 0:
-                    break
-            self.output_pipe.close()
-        except:
-            pass
+    # Perform a progress check: Trigger it and wait until it is completed
+    def progress_check(self, ctrl_pipe):
+        self.progress_event.clear()
+        os.write(ctrl_pipe, b"CHECK\n")
+        self.progress_event.wait(PROGRESS_CHECK_TIMEOUT_SEC)
+        if (self.progress_event.is_set()):
+            print("Progress check: OK")
+        else:
+            assert False, "Progress check failed after upgrade to version {}".format(
+                self.cluster_version)
 
+    # The main function of a thread for reading and processing
+    # the notifications received from the tester
+    def output_pipe_reader(self):
+        try:
+            print("Opening pipe {} for reading".format(self.output_pipe_path))
+            self.output_pipe = open(self.output_pipe_path, 'r')
+            for line in self.output_pipe:
+                msg = line.strip()
+                print("Received {}".format(msg))
+                if (msg == "CHECK_OK"):
+                    self.progress_event.set()
+            self.output_pipe.close()
+        except Exception as e:
+            print("Error while reading output pipe", e)
+
+    # Execute the upgrade test workflow according to the specified
+    # upgrade path: perform the upgrade steps and check success after each step
     def exec_upgrade_test(self):
         print("Opening pipe {} for writing".format(self.input_pipe_path))
-        self.input_pipe = open(self.input_pipe_path, 'w')
-        print("Opening pipe {} for reading".format(self.output_pipe_path))
-        self.output_pipe = open(self.output_pipe_path, 'r')
+        ctrl_pipe = os.open(self.input_pipe_path, os.O_WRONLY)
         try:
             self.health_check()
+            self.progress_check(ctrl_pipe)
             for version in self.upgrade_path[1:]:
                 random_sleep(0.0, 5.0)
                 self.upgrade_to(version)
                 self.health_check()
-            random_sleep(0.0, 2.0)
+                self.progress_check(ctrl_pipe)
+            os.write(ctrl_pipe, b"STOP\n")
         finally:
-            self.input_pipe.write("STOP\n")
-            self.input_pipe.close()
-            self.close_output_pipe()
+            os.close(ctrl_pipe)
+
+    # The main method implementing the test:
+    # - Start a thread for generating the workload using a tester binary
+    # - Start a thread for reading notifications from the tester
+    # - Trigger the upgrade steps and checks in the main thread
 
     def exec_test(self, args):
         self.tester_bin = self.build_dir.joinpath("bin", "fdb_c_api_tester")
         assert self.tester_bin.exists(), "{} does not exist".format(self.tester_bin)
+        self.tester_proc = None
 
         try:
-            self.input_pipe_path = self.tmp_dir.joinpath(
-                "input.{}".format(random_secret_string(8)))
-            self.output_pipe_path = self.tmp_dir.joinpath(
-                "output.{}".format(random_secret_string(8)))
-            os.mkfifo(self.input_pipe_path)
-            os.mkfifo(self.output_pipe_path)
+            workloadThread = Thread(
+                target=self.exec_workload, args=(args.test_file))
+            workloadThread.start()
 
-            thread = Thread(target=self.exec_workload, args=(args.test_file))
-            thread.start()
+            readerThread = Thread(target=self.output_pipe_reader)
+            readerThread.start()
+
             self.exec_upgrade_test()
-            retcode = thread.join()
+            readerThread.join()
+            retcode = workloadThread.join()
         finally:
+            if self.tester_proc is not None:
+                self.tester_proc.kill()
             remove_file_no_fail(self.input_pipe_path)
             remove_file_no_fail(self.output_pipe_path)
         return retcode
 
+    # Check the cluster log for errors
     def check_cluster_logs(self, error_limit=100):
         sev40s = (
             subprocess.getoutput(
@@ -279,7 +321,8 @@ class UpgradeTest:
 
         err_cnt = 0
         for line in sev40s:
-            # When running ASAN we expect to see this message. Boost coroutine should be using the correct asan annotations so that it shouldn't produce any false positives.
+            # When running ASAN we expect to see this message. Boost coroutine should be using the
+            # correct asan annotations so that it shouldn't produce any false positives.
             if line.endswith(
                 "WARNING: ASan doesn't fully support makecontext/swapcontext functions and may produce false positives in some cases!"
             ):
@@ -293,6 +336,7 @@ class UpgradeTest:
                     ">>>>>>>>>>>>>>>>>>>> Found {} severity 40 events - the test fails", err_cnt)
             return err_cnt == 0
 
+    # Dump the last cluster configuration and cluster logs
     def dump_cluster_logs(self):
         for etc_file in glob.glob(os.path.join(self.cluster.etc, "*")):
             print(">>>>>>>>>>>>>>>>>>>> Contents of {}:".format(etc_file))
@@ -308,7 +352,10 @@ if __name__ == "__main__":
     parser = ArgumentParser(
         formatter_class=RawDescriptionHelpFormatter,
         description="""
-        TBD
+        A script for testing FDB multi-version client in upgrade scenarios. Creates a local cluster,
+        generates a workload using fdb_c_api_tester with a specified test file, and performs
+        cluster upgrade according to the specified upgrade path. Checks if the workload successfully
+        progresses after each upgrade step.
         """,
     )
     parser.add_argument(
@@ -329,7 +376,6 @@ if __name__ == "__main__":
         nargs='+',
         help='A .toml file describing a test workload to be generated with fdb_c_api_tester',
         required=True,
-        default=[CURRENT_VERSION]
     )
     parser.add_argument(
         "--process-number",

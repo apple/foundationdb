@@ -40,6 +40,10 @@ class IWorkloadControlIfc {
 public:
 	// Stop the workload
 	virtual void stop() = 0;
+
+	// Check and if the test is progressing from the point of calling
+	// Progress must be confirmed by calling confirmProgress on the workload manager
+	virtual void checkProgress() = 0;
 };
 
 // Workoad interface
@@ -111,6 +115,9 @@ protected:
 	// Log an info message
 	void info(const std::string& msg);
 
+	// Confirm a successfull progress check
+	void confirmProgress();
+
 private:
 	WorkloadManager* manager;
 
@@ -174,14 +181,26 @@ private:
 		std::shared_ptr<IWorkload> ref;
 		// Continuation to be executed after completing the workload
 		TTaskFct cont;
+		// Control interface of the workload (optional)
 		IWorkloadControlIfc* controlIfc;
+		// Progress check confirmation status
+		bool progressConfirmed;
 	};
 
 	// To be called by a workload to notify that it is done
 	void workloadDone(IWorkload* workload, bool failed);
 
+	// To be called by a workload to confirm a successfull progress check
+	void confirmProgress(IWorkload* workload);
+
 	// Receive and handing control commands from the input pipe
 	void readControlInput(std::string pipeName);
+
+	// Handle STOP command received from the test controller
+	void handleStopCommand();
+
+	// Handle CHECK command received from the test controller
+	void handleCheckCommand();
 
 	// Transaction executor to be used by the workloads
 	ITransactionExecutor* txExecutor;
