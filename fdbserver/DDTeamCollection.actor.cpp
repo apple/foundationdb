@@ -5659,8 +5659,8 @@ public:
 		GetStorageMetricsReply mid_read;
 		mid_read.capacity.bytes = 1000 * 1024 * 1024;
 		mid_read.available.bytes = 400 * 1024 * 1024;
-		mid_read.load.bytes = 200 * 1024 * 1024;
-		mid_read.load.bytesReadPerKSecond = 200 * 1024 * 1024;
+		mid_read.load.bytes = 800 * 1024 * 1024; // high load bytes
+		mid_read.load.bytesReadPerKSecond = 200 * 1024 * 1024; // low read load
 
 		GetStorageMetricsReply high_read;
 		high_read.capacity.bytes = 1000 * 1024 * 1024;
