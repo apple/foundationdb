@@ -7454,6 +7454,7 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 		req.keyRange = KeyRangeRef(StringRef(req.arena, granuleStartKey), StringRef(req.arena, granuleEndKey));
 		req.beginVersion = begin;
 		req.readVersion = rv;
+		req.canCollapseBegin = true; // TODO make this a parameter once we support it
 
 		std::vector<Reference<ReferencedInterface<BlobWorkerInterface>>> v;
 		v.push_back(

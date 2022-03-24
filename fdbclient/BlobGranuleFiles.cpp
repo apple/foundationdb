@@ -122,29 +122,43 @@ static void applyDelta(KeyRangeRef keyRange, MutationRef m, std::map<KeyRef, Val
 
 static void applyDeltas(const GranuleDeltas& deltas,
                         KeyRangeRef keyRange,
+                        Version beginVersion,
                         Version readVersion,
                         Version& lastFileEndVersion,
                         std::map<KeyRef, ValueRef>& dataMap) {
-	if (!deltas.empty()) {
-		// check that consecutive delta file versions are disjoint
-		ASSERT(lastFileEndVersion < deltas.front().version);
+	if (deltas.empty()) {
+		return;
 	}
-	for (const MutationsAndVersionRef& delta : deltas) {
-		if (delta.version > readVersion) {
+	// check that consecutive delta file versions are disjoint
+	ASSERT(lastFileEndVersion < deltas.front().version);
+
+	const MutationsAndVersionRef* mutationIt = deltas.begin();
+	// prune beginVersion if necessary
+	if (beginVersion > deltas.front().version) {
+		ASSERT(beginVersion <= deltas.back().version);
+		// binary search for beginVersion
+		mutationIt = std::lower_bound(deltas.begin(),
+		                              deltas.end(),
+		                              MutationsAndVersionRef(beginVersion, 0),
+		                              MutationsAndVersionRef::OrderByVersion());
+	}
+
+	while (mutationIt != deltas.end()) {
+		if (mutationIt->version > readVersion) {
 			lastFileEndVersion = readVersion;
 			return;
 		}
-		for (auto& m : delta.mutations) {
+		for (auto& m : mutationIt->mutations) {
 			applyDelta(keyRange, m, dataMap);
 		}
+		mutationIt++;
 	}
-	if (!deltas.empty()) {
-		lastFileEndVersion = deltas.back().version;
-	}
+	lastFileEndVersion = deltas.back().version;
 }
 
 static Arena loadDeltaFile(StringRef deltaData,
                            KeyRangeRef keyRange,
+                           Version beginVersion,
                            Version readVersion,
                            Version& lastFileEndVersion,
                            std::map<KeyRef, ValueRef>& dataMap) {
@@ -154,7 +168,7 @@ static Arena loadDeltaFile(StringRef deltaData,
 	reader.deserialize(FileIdentifierFor<GranuleDeltas>::value, deltas, parseArena);
 
 	if (BG_READ_DEBUG) {
-		fmt::print("Parsed {}} deltas from file\n", deltas.size());
+		fmt::print("Parsed {} deltas from file\n", deltas.size());
 	}
 
 	// TODO REMOVE sanity check
@@ -166,19 +180,18 @@ static Arena loadDeltaFile(StringRef deltaData,
 		ASSERT(deltas[i].version <= deltas[i + 1].version);
 	}
 
-	applyDeltas(deltas, keyRange, readVersion, lastFileEndVersion, dataMap);
+	applyDeltas(deltas, keyRange, beginVersion, readVersion, lastFileEndVersion, dataMap);
 	return parseArena;
 }
 
 RangeResult materializeBlobGranule(const BlobGranuleChunkRef& chunk,
                                    KeyRangeRef keyRange,
+                                   Version beginVersion,
                                    Version readVersion,
                                    Optional<StringRef> snapshotData,
                                    StringRef deltaFileData[]) {
-	// TODO REMOVE with V2 of protocol
+	// TODO REMOVE with early replying
 	ASSERT(readVersion == chunk.includedVersion);
-	ASSERT(chunk.snapshotFile.present());
-	ASSERT(snapshotData.present());
 
 	// Arena to hold all allocations for applying deltas. Most of it, and the arenas produced by reading the files,
 	// will likely be tossed if there are a significant number of mutations, so we copy at the end instead of doing a
@@ -198,13 +211,14 @@ RangeResult materializeBlobGranule(const BlobGranuleChunkRef& chunk,
 		fmt::print("Applying {} delta files\n", chunk.deltaFiles.size());
 	}
 	for (int deltaIdx = 0; deltaIdx < chunk.deltaFiles.size(); deltaIdx++) {
-		Arena deltaArena = loadDeltaFile(deltaFileData[deltaIdx], keyRange, readVersion, lastFileEndVersion, dataMap);
+		Arena deltaArena =
+		    loadDeltaFile(deltaFileData[deltaIdx], keyRange, beginVersion, readVersion, lastFileEndVersion, dataMap);
 		arena.dependsOn(deltaArena);
 	}
 	if (BG_READ_DEBUG) {
 		fmt::print("Applying {} memory deltas\n", chunk.newDeltas.size());
 	}
-	applyDeltas(chunk.newDeltas, keyRange, readVersion, lastFileEndVersion, dataMap);
+	applyDeltas(chunk.newDeltas, keyRange, beginVersion, readVersion, lastFileEndVersion, dataMap);
 
 	RangeResult ret;
 	for (auto& it : dataMap) {
@@ -300,7 +314,8 @@ ErrorOr<RangeResult> loadAndMaterializeBlobGranules(const Standalone<VectorRef<B
 			}
 
 			// materialize rows from chunk
-			chunkRows = materializeBlobGranule(files[chunkIdx], keyRange, readVersion, snapshotData, deltaData);
+			chunkRows =
+			    materializeBlobGranule(files[chunkIdx], keyRange, beginVersion, readVersion, snapshotData, deltaData);
 
 			results.arena().dependsOn(chunkRows.arena());
 			results.append(results.arena(), chunkRows.begin(), chunkRows.size());
@@ -318,10 +333,7 @@ ErrorOr<RangeResult> loadAndMaterializeBlobGranules(const Standalone<VectorRef<B
 	}
 }
 
-// FIXME: add unit tests for materializeGranule and loadAndMaterializeGranules
-
-// FIXME: re-enable test!
-TEST_CASE(":/blobgranule/files/applyDelta") {
+TEST_CASE("/blobgranule/files/applyDelta") {
 	printf("Testing blob granule delta applying\n");
 	Arena a;
 
