@@ -1,9 +1,9 @@
 [[test]]
-testTitle = 'BlobGranuleServerCommonUnit'
+testTitle = 'BlobManagerUnit'
 useDB = false
 startDelay = 0
 
     [[test.workload]]
     testName = 'UnitTests'
     maxTestCases = 0
-    testsMatching = /blobgranule/server/common/
+    testsMatching = /blobmanager/

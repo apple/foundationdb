@@ -132,13 +132,6 @@ static void applyDeltas(const GranuleDeltas& deltas,
 	const MutationsAndVersionRef* mutationIt = deltas.begin();
 	// prune beginVersion if necessary
 	if (beginVersion > deltas.front().version) {
-		if (beginVersion > deltas.back().version) {
-			printf("beginVersion=%lld, deltas.front=%lld, deltas.back=%lld, deltas.size=%d\n",
-			       beginVersion,
-			       deltas.front().version,
-			       deltas.back().version,
-			       deltas.size());
-		}
 		ASSERT(beginVersion <= deltas.back().version);
 		// binary search for beginVersion
 		mutationIt = std::lower_bound(deltas.begin(),
@@ -172,7 +165,7 @@ static Arena loadDeltaFile(StringRef deltaData,
 	reader.deserialize(FileIdentifierFor<GranuleDeltas>::value, deltas, parseArena);
 
 	if (BG_READ_DEBUG) {
-		fmt::print("Parsed {}} deltas from file\n", deltas.size());
+		fmt::print("Parsed {} deltas from file\n", deltas.size());
 	}
 
 	// TODO REMOVE sanity check

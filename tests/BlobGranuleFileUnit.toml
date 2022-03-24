@@ -1,9 +1,10 @@
 [[test]]
-testTitle = 'BlobGranuleServerCommonUnit'
+testTitle = 'BlobGranuleFileUnit'
 useDB = false
 startDelay = 0
 
     [[test.workload]]
     testName = 'UnitTests'
     maxTestCases = 0
-    testsMatching = /blobgranule/server/common/
+    testsMatching = /blobgranule/files/
+
