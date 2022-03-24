@@ -155,6 +155,12 @@ Here is a complete list of valid parameters:
  
   **Example**: The URL parameter *header=x-amz-storage-class:REDUCED_REDUNDANCY* would send the HTTP header required to use the reduced redundancy storage option in the S3 API.
 
+Signing Protocol
+=================
+
+AWS signature version 4 is the default signing protocol choice. This boolean knob ``--knob_http_request_aws_v4_header`` can be used to select between v4 style and v2 style signatures.
+If the knob is set to ``true`` then v4 signature will be used and if set to ``false`` then v2 signature will be used.
+
 .. _blob-credential-files:
 
 Blob Credential Files
