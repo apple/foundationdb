@@ -49,7 +49,9 @@ public:
 	auto te = TraceEvent(SevWarnAlways, type);
 	te.suppressFor(60);
 	if (auto err = ::ERR_get_error()) {
-		char buf[256]{0,};
+		char buf[256]{
+			0,
+		};
 		::ERR_error_string_n(err, buf, sizeof(buf));
 		te.detail("OpenSSLError", buf);
 	}
@@ -114,9 +116,7 @@ KeyPair generateEcdsaKeyPair() {
 SignedToken signToken(Token token, StringRef keyName, StringRef privateKeyDer) {
 	auto ret = SignedToken{};
 	auto& arena = ret.arena;
-	auto writer = ObjectWriter(
-			[&arena](size_t len) { return new (arena) uint8_t[len]; },
-			IncludeVersion());
+	auto writer = ObjectWriter([&arena](size_t len) { return new (arena) uint8_t[len]; }, IncludeVersion());
 	writer.serialize(token);
 	ret.token = writer.toStringRef();
 
@@ -130,7 +130,7 @@ SignedToken signToken(Token token, StringRef keyName, StringRef privateKeyDer) {
 	if (!mdctx)
 		traceAndThrow("SignTokenInitFail");
 	auto guard_mdctx = ExitGuard([mdctx]() { ::EVP_MD_CTX_free(mdctx); });
-	if (1 != ::EVP_DigestSignInit(mdctx, nullptr, ::EVP_sha256()/*Parameterize?*/, nullptr, key))
+	if (1 != ::EVP_DigestSignInit(mdctx, nullptr, ::EVP_sha256() /*Parameterize?*/, nullptr, key))
 		traceAndThrow("SignTokenInitFail");
 	if (1 != ::EVP_DigestSignUpdate(mdctx, ret.token.begin(), ret.token.size()))
 		traceAndThrow("SignTokenUpdateFail");
@@ -163,7 +163,9 @@ bool verifyToken(SignedToken signedToken, StringRef publicKeyDer) {
 		auto te = TraceEvent(SevInfo, "VerifyTokenFail");
 		te.suppressFor(30);
 		if (auto err = ::ERR_get_error()) {
-			char buf[256]{0,};
+			char buf[256]{
+				0,
+			};
 			::ERR_error_string_n(err, buf, sizeof(buf));
 			te.detail("OpenSSLError", buf);
 		}
@@ -184,11 +186,12 @@ TEST_CASE("/fdbrpc/token_sign") {
 			token.ipAddress = IPAddress(rng.randomUInt32());
 		} else {
 			auto v6 = std::array<uint8_t, 16>{};
-			for (auto& byte : v6) byte = rng.randomUInt32() & 255;
+			for (auto& byte : v6)
+				byte = rng.randomUInt32() & 255;
 			token.ipAddress = IPAddress(v6);
 		}
 	}
-	auto getRandomStringRef = [&arena=token.arena, &rng]() {
+	auto getRandomStringRef = [&arena = token.arena, &rng]() {
 		const auto len = rng.randomInt(1, 21);
 		auto s_raw = new (arena) uint8_t[len];
 		for (auto i = 0; i < len; i++)
@@ -199,7 +202,7 @@ TEST_CASE("/fdbrpc/token_sign") {
 	for (auto i = 0; i < num_tenants; i++) {
 		token.tenants.push_back(token.arena, getRandomStringRef());
 	}
-	auto signedToken = signToken(token, getRandomStringRef()/*keyName*/, key_pair.privateKey);
+	auto signedToken = signToken(token, getRandomStringRef() /*keyName*/, key_pair.privateKey);
 	const auto verify_ok = verifyToken(signedToken, key_pair.publicKey);
 	ASSERT(verify_ok);
 	return Void();
