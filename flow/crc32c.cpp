@@ -27,6 +27,10 @@
 
 #include "flow/crc32c.h"
 
+#ifdef __powerpc64__
+#include "flow/crc32_wrapper.c"
+#endif
+
 #if !defined(__aarch64__) && !defined(__powerpc64__)
 #include <nmmintrin.h>
 #endif
@@ -266,13 +270,22 @@ append_hw(uint32_t crc, const uint8_t* buf, size_t len) {
 }
 #endif
 
+#ifdef __powerpc64__
+uint32_t ppc_hw(uint32_t crc, unsigned char* input, unsigned long length){
+	return crc32_vpmsum(crc,input,length);
+}
+#endif
+
 static bool hw_available = platform::isHwCrcSupported();
 
 extern "C" uint32_t crc32c_append(uint32_t crc, const uint8_t* input, size_t length) {
-#ifndef __powerpc64__
-	if (hw_available)
+if (hw_available){
+	#ifdef __powerpc64__
+		return ppc_hw(0, (unsigned char*)input, (unsigned long)length);
+	#else
 		return append_hw(crc, input, length);
-	else
-#endif
-		return append_table(crc, input, length);
+	#endif
+}
+else
+	return append_table(crc, input, length);
 }
