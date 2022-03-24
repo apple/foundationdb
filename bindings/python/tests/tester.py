@@ -49,6 +49,7 @@ from cancellation_timeout_tests import test_db_retry_limits
 from cancellation_timeout_tests import test_combinations
 
 from size_limit_tests import test_size_limit_option, test_get_approximate_size
+from tenant_tests import test_tenants
 
 random.seed(0)
 
@@ -112,12 +113,13 @@ class Stack:
 
 
 class Instruction:
-    def __init__(self, tr, stack, op, index, isDatabase=False, isSnapshot=False):
+    def __init__(self, tr, stack, op, index, isDatabase=False, isTenant=False, isSnapshot=False):
         self.tr = tr
         self.stack = stack
         self.op = op
         self.index = index
         self.isDatabase = isDatabase
+        self.isTenant = isTenant
         self.isSnapshot = isSnapshot
 
     def pop(self, count=None, with_idx=False):
@@ -277,6 +279,7 @@ class Tester:
 
     def __init__(self, db, prefix):
         self.db = db
+        self.tenant = None
 
         self.instructions = self.db[fdb.tuple.range((prefix,))]
 
@@ -317,7 +320,8 @@ class Tester:
 
     def new_transaction(self):
         with Tester.tr_map_lock:
-            Tester.tr_map[self.tr_name] = self.db.create_transaction()
+            tr_source = self.tenant if self.tenant is not None else self.db
+            Tester.tr_map[self.tr_name] = tr_source.create_transaction()
 
     def switch_transaction(self, name):
         self.tr_name = name
@@ -335,18 +339,22 @@ class Tester:
             #     print("%d. Instruction is %s" % (idx, op))
 
             isDatabase = op.endswith(six.u('_DATABASE'))
+            isTenant = op.endswith(six.u('_TENANT'))
             isSnapshot = op.endswith(six.u('_SNAPSHOT'))
 
             if isDatabase:
                 op = op[:-9]
                 obj = self.db
+            elif isTenant:
+                op = op[:-7]
+                obj = self.tenant if self.tenant else self.db
             elif isSnapshot:
                 op = op[:-9]
                 obj = self.current_transaction().snapshot
             else:
                 obj = self.current_transaction()
 
-            inst = Instruction(obj, self.stack, op, idx, isDatabase, isSnapshot)
+            inst = Instruction(obj, self.stack, op, idx, isDatabase, isTenant, isSnapshot)
 
             try:
                 if inst.op == six.u("PUSH"):
@@ -583,6 +591,19 @@ class Tester:
                     prefix = inst.pop()
                     Tester.wait_empty(self.db, prefix)
                     inst.push(b"WAITED_FOR_EMPTY")
+                elif inst.op == six.u("TENANT_CREATE"):
+                    name = inst.pop()
+                    self.db.allocate_tenant(name)
+                    inst.push(b"RESULT_NOT_PRESENT")
+                elif inst.op == six.u("TENANT_DELETE"):
+                    name = inst.pop()
+                    self.db.delete_tenant(name)
+                    inst.push(b"RESULT_NOT_PRESENT")
+                elif inst.op == six.u("TENANT_SET_ACTIVE"):
+                    name = inst.pop()
+                    self.tenant = self.db.open_tenant(name)
+                elif inst.op == six.u("TENANT_CLEAR_ACTIVE"):
+                    self.tenant = None
                 elif inst.op == six.u("UNIT_TESTS"):
                     try:
                         test_db_options(db)
@@ -599,6 +620,8 @@ class Tester:
 
                         test_size_limit_option(db)
                         test_get_approximate_size(db)
+
+                        test_tenants(db)
 
                     except fdb.FDBError as e:
                         print("Unit tests failed: %s" % e.description)
