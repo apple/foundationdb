@@ -226,9 +226,11 @@ static void startLoad(const ReadBlobGranuleContext granuleContext,
 	// Start load process for all files in chunk
 	if (chunk.snapshotFile.present()) {
 		std::string snapshotFname = chunk.snapshotFile.get().filename.toString();
+		// FIXME: full file length won't always be length of read
 		loadIds.snapshotId = granuleContext.start_load_f(snapshotFname.c_str(),
 		                                                 snapshotFname.size(),
 		                                                 chunk.snapshotFile.get().offset,
+		                                                 chunk.snapshotFile.get().length,
 		                                                 chunk.snapshotFile.get().length,
 		                                                 granuleContext.userContext);
 	}
@@ -238,6 +240,7 @@ static void startLoad(const ReadBlobGranuleContext granuleContext,
 		int64_t deltaLoadId = granuleContext.start_load_f(deltaFName.c_str(),
 		                                                  deltaFName.size(),
 		                                                  chunk.deltaFiles[deltaFileIdx].offset,
+		                                                  chunk.deltaFiles[deltaFileIdx].length,
 		                                                  chunk.deltaFiles[deltaFileIdx].length,
 		                                                  granuleContext.userContext);
 		loadIds.deltaIds.push_back(deltaLoadId);

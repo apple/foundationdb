@@ -585,6 +585,7 @@ int64_t granule_start_load(const char* filename,
                            int filenameLength,
                            int64_t offset,
                            int64_t length,
+                           int64_t fullFileLength,
                            void* userContext) {
 	FILE* fp;
 	char full_fname[PATH_MAX];
