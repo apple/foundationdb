@@ -86,9 +86,10 @@ struct RelocateData {
 
 	bool operator==(const RelocateData& rhs) const {
 		return priority == rhs.priority && boundaryPriority == rhs.boundaryPriority &&
-		       healthPriority == rhs.healthPriority && keys == rhs.keys && startTime == rhs.startTime &&
-		       workFactor == rhs.workFactor && src == rhs.src && completeSources == rhs.completeSources &&
-		       wantsNewServers == rhs.wantsNewServers && randomId == rhs.randomId;
+		       healthPriority == rhs.healthPriority && reason == rhs.reason && keys == rhs.keys &&
+		       startTime == rhs.startTime && workFactor == rhs.workFactor && src == rhs.src &&
+		       completeSources == rhs.completeSources && wantsNewServers == rhs.wantsNewServers &&
+		       randomId == rhs.randomId;
 	}
 	bool operator!=(const RelocateData& rhs) const { return !(*this == rhs); }
 };
@@ -1040,9 +1041,9 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 					req.src = rd.src;
 					req.completeSources = rd.completeSources;
 
-					// if (rd.reason == RelocateReason::REBALANCE_READ) {
-					// 	req.teamSorter = greaterReadLoad;
-					// }
+					if (rd.reason == RelocateReason::REBALANCE_READ) {
+						req.teamSorter = greaterReadLoad;
+					}
 					// bestTeam.second = false if the bestTeam in the teamCollection (in the DC) does not have any
 					// server that hosts the relocateData. This is possible, for example, in a fearless configuration
 					// when the remote DC is just brought up.
@@ -1343,13 +1344,13 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 		return false;
 	}
 	if (metrics.keys.present() && metrics.bytes > 0) {
-//		auto srcLoad = sourceTeam->getLoadReadBandwidth(), destLoad = destTeam->getLoadReadBandwidth();
-//		if (abs(srcLoad - destLoad) <=
-//		    3 * std::max(metrics.bytesReadPerKSecond, SERVER_KNOBS->SHARD_READ_HOT_BANDWITH_MIN_PER_KSECONDS)) {
-//			traceEvent->detail("SkipReason", "TeamTooSimilar");
-//			return false;
-//		}
-		// Verify the shard is still in ShardsAffectedByTeamFailure
+		// auto srcLoad = sourceTeam->getLoadReadBandwidth(), destLoad = destTeam->getLoadReadBandwidth();
+		// if (abs(srcLoad - destLoad) <=
+		//     3 * std::max(metrics.bytesReadPerKSecond, SERVER_KNOBS->SHARD_READ_HOT_BANDWITH_MIN_PER_KSECONDS)) {
+		//	traceEvent->detail("SkipReason", "TeamTooSimilar");
+		//	return false;
+		// }
+		//  Verify the shard is still in ShardsAffectedByTeamFailure
 		shards = self->shardsAffectedByTeamFailure->getShardsFor(
 		    ShardsAffectedByTeamFailure::Team(sourceTeam->getServerIDs(), primary));
 		for (int i = 0; i < shards.size(); i++) {

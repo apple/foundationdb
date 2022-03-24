@@ -106,16 +106,17 @@ struct GetTeamRequest {
 	    teamMustHaveShards(teamMustHaveShards), inflightPenalty(inflightPenalty) {}
 
 	// return true if a.score < b.score
-	[[nodiscard]] bool lessCompare(TeamRef a, TeamRef b) const {
+	[[nodiscard]] bool lessCompare(TeamRef a, TeamRef b, int64_t aLoadBytes, int64_t bLoadBytes) const {
 		if (teamSorter) {
 			return teamSorter(a, b);
 		}
-		return false;
+		return lessCompareByLoad(aLoadBytes, bLoadBytes);
 	}
 
-	// return true if scoreWithLoadBytes < bestScoreWithBestLoadBytes
-	bool lessCompareByLoad(int64_t loadBytes, int64_t bestLoadBytes) const {
-		bool lessLoad = loadBytes < bestLoadBytes;
+	// return true if preferHigherUtil && aLoadBytes <= bLoadBytes (higher load bytes has larger score)
+	// or preferLowerUtil && aLoadBytes > bLoadBytes
+	bool lessCompareByLoad(int64_t aLoadBytes, int64_t bLoadBytes) const {
+		bool lessLoad = aLoadBytes <= bLoadBytes;
 		return preferLowerUtilization ? !lessLoad : lessLoad;
 	}
 

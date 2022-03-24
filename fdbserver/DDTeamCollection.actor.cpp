@@ -250,8 +250,8 @@ public:
 						     self->shardsAffectedByTeamFailure->hasShards(ShardsAffectedByTeamFailure::Team(
 						         self->teams[currentIndex]->getServerIDs(), self->primary))) &&
 						    // sort conditions
-						    (!bestOption.present() || req.lessCompare(bestOption.get(), self->teams[currentIndex]) ||
-						     !req.lessCompareByLoad(loadBytes, bestLoadBytes))) {
+						    (!bestOption.present() ||
+						     req.lessCompare(bestOption.get(), self->teams[currentIndex], bestLoadBytes, loadBytes))) {
 							bestLoadBytes = loadBytes;
 							bestOption = self->teams[currentIndex];
 							bestIndex = currentIndex;
@@ -299,8 +299,8 @@ public:
 
 				for (int i = 0; i < randomTeams.size(); i++) {
 					int64_t loadBytes = randomTeams[i]->getLoadBytes(true, req.inflightPenalty);
-					if (!bestOption.present() || req.lessCompare(bestOption.get(), randomTeams[i]) ||
-					    !req.lessCompareByLoad(loadBytes, bestLoadBytes)) {
+					if (!bestOption.present() ||
+					    req.lessCompare(bestOption.get(), randomTeams[i], bestLoadBytes, loadBytes)) {
 						bestLoadBytes = loadBytes;
 						bestOption = randomTeams[i];
 					}

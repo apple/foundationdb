@@ -821,9 +821,9 @@ struct ChangeFeedVersionUpdateRequest {
 
 struct GetStorageMetricsReply {
 	constexpr static FileIdentifier file_identifier = 15491478;
-	StorageMetrics load;
-	StorageMetrics available;
-	StorageMetrics capacity;
+	StorageMetrics load; // sum of key-value metrics (logical bytes)
+	StorageMetrics available; // physical bytes
+	StorageMetrics capacity; // physical bytes
 	double bytesInputRate;
 	int64_t versionLag;
 	double lastUpdate;
