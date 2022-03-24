@@ -2192,8 +2192,7 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 
 					TraceEvent("CleanUpDataMoveCommitted", dataMoveID)
 					    .detail("DataMoveID", dataMoveID)
-					    .detail("Range", currentRange)
-					    .detail("DestServer", *oldDest);
+					    .detail("Range", currentRange);
 					begin = currentRange.end;
 					break;
 				} catch (Error& e) {

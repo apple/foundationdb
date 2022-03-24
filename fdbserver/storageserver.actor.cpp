@@ -464,7 +464,7 @@ public:
 		return new ShardInfo(keys, std::make_unique<AddingShard>(data, keys), nullptr, nullptr);
 	}
 	static ShardInfo* newMoveInShard(StorageServer* data, const UID& dataMoveId, KeyRange keys, Version version) {
-		return new ShardInfo(keys, nullptr, std::make_unique<MoveInShard>(data, keys, version), nullptr);
+		return new ShardInfo(keys, nullptr, std::make_unique<MoveInShard>(data, dataMoveId, keys, version), nullptr);
 	}
 	static ShardInfo* newMoveInShard(StorageServer* data, MoveInShardMetaData moveInShardMetaData) {
 		return new ShardInfo(
@@ -5993,11 +5993,11 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 			const MoveInShard* oldMoveInShard = ranges[i].value->moveInShard.get();
 			TraceEvent(SevWarn, "NonAllignedMoveInShards", data->thisServerID)
 			    .detail("NewRange", keys)
-			    .detail("Range", ranges[i])
+			    // .detail("Range", ranges[i])
 			    .detail("ExistingMoveInShard", oldMoveInShard->toString())
 			    .detail("NowAssigned", nowAssigned);
 			data->addShard(
-			    ShardInfo::newPendingMoveInShard(data, oldMoveInShard->meta.dataMoveId, ranges[i], version + 1));
+			    ShardInfo::newPendingMoveInShard(data, oldMoveInShard->meta->dataMoveId, ranges[i], version + 1));
 		} else {
 			ASSERT(false);
 		}
@@ -6061,11 +6061,10 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 				auto& shard = data->shards[range.begin];
 				if (!shard->assigned()) {
 					newMoveInShards.emplace_back(dataMoveId, range, version + 1);
-					moveInRanges.emplace_back(range, false);
 				} else {
 					ASSERT(shard->moveInShard != nullptr);
 					const MoveInShard* oldMoveInShard = shard->moveInShard.get();
-					if (oldMoveInShard->meta.dataMoveId != dataMoveId) {
+					if (oldMoveInShard->meta->dataMoveId != dataMoveId) {
 						TraceEvent(SevDebug, "ChangeServerKeysCancelMoveInShard", data->thisServerID)
 						    .detail("DataMoveID", dataMoveId)
 						    .detail("Range", range)
@@ -6100,7 +6099,7 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 	for (const auto& meta : newMoveInShards) {
 		data->addShard(ShardInfo::newMoveInShard(data, meta));
 		TraceEvent(SevDebug, "ChangeServerKeysAddNewMoveInShard", data->thisServerID)
-		    .detail("MoveInShard", data->shards[range.begin]->moveInShard->toString());
+		    .detail("MoveInShard", data->shards[meta.range.begin]->moveInShard->toString());
 	}
 
 	// Update newestAvailableVersion when a shard becomes (un)available (in a separate loop to avoid invalidating vr
@@ -6520,7 +6519,7 @@ private:
 				const ChangeServerKeysContext context = emptyRange ? CSK_ASSIGN_EMPTY : CSK_UPDATE;
 				if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
 					changeServerKeysWithPhysicalShards(
-					    data, keys, dataMoveId, nowAssigned, currentVersion - 1, context);
+					    data, keys, dataMoveId, nowAssigned, currentVersion - 1, CSK_UPDATE);
 				} else {
 					changeServerKeys(data, keys, nowAssigned, currentVersion - 1, context);
 				}
@@ -6536,7 +6535,7 @@ private:
 			if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
 				decodeServerKeysValue(m.param2, dataMoveId);
 				nowAssigned = dataMoveId.isValid();
-				// emptyRange = m.param2 == serverKeysTrueEmptyRange;
+				emptyRange = m.param2 == serverKeysTrueEmptyRange;
 			} else {
 				nowAssigned = m.param2 != serverKeysFalse;
 				emptyRange = m.param2 == serverKeysTrueEmptyRange;
