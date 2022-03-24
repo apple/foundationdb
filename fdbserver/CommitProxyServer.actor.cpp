@@ -770,7 +770,7 @@ ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 	pProxyCommitData->stats.lastCommitVersionAssigned = versionReply.version;
 	pProxyCommitData->stats.getCommitVersionDist->sampleSeconds(now() - beforeGettingCommitVersion);
 
-	self->commitVersion = versionReply.version;
+	self->commitVersion = versionReply.version; // hfu : get commit version here
 	self->prevVersion = versionReply.prevVersion;
 
 	if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
@@ -1048,6 +1048,16 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 	state ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
 	state std::vector<CommitTransactionRequest>& trs = self->trs;
+	state std::set<ptxn::StorageTeamID> privateTeamsForServersInSeedTeam;
+	if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS && self->commitVersion == 1) {
+		ASSERT(!pProxyCommitData->ssToStorageTeam.empty());
+		for (const auto& [_, teams] : pProxyCommitData->ssToStorageTeam) {
+			// applyMetadataToCommittedTransactions.applyMetadataMutations is called before,
+			// thus pProxyCommitData->ssToStorageTeam should be ready. i.e. it has all the
+			// seedTeam SS as keys, and their corresponding teams as values
+			privateTeamsForServersInSeedTeam.insert(teams.getPrivateMutationsStorageTeamID());
+		}
+	}
 
 	for (self->transactionNum = 0; self->transactionNum < trs.size(); self->transactionNum++) {
 		if (!(self->committed[self->transactionNum] == ConflictBatch::TransactionCommitted &&
@@ -1123,6 +1133,17 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				self->toCommit.writeTypedMessage(m);
 				if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 					self->writeToStorageTeams(pProxyCommitData->keyInfo[m.param1].storageTeams, m);
+					if (self->commitVersion == 1) {
+						// For a brand new cluster, sending all mutations in txn(version == 1) to seedTeam SS.
+
+						// seedTeam SS need to get the all mutations in txn(version == 1).
+						// because otherwise they would not know they are seedTeam SS until after this transaction,
+						// thus mutations in this txn will be lost.
+
+						// So we write all mutations as normal mutations to private teams of seedTeam servers,
+						// thus all data will be persisted there and mutation lost will be avoided.
+						self->writeToStorageTeams(privateTeamsForServersInSeedTeam, m);
+					}
 				}
 			} else if (m.type == MutationRef::ClearRange) {
 				KeyRangeRef clearRange(KeyRangeRef(m.param1, m.param2));
@@ -2275,6 +2296,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
                                          Version recoveryTransactionVersion,
                                          bool firstProxy,
                                          std::string whitelistBinPaths) {
+	// hfu : recovery version is stored in commit proxy
 	state ProxyCommitData commitData(
 	    proxy.id(), master, proxy.getConsistentReadVersion, recoveryTransactionVersion, proxy.commit, db, firstProxy);
 

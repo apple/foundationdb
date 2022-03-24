@@ -909,7 +909,7 @@ ACTOR Future<Void> readTransactionSystemState(Reference<MasterData> self,
 	// Recover version info
 	self->lastEpochEnd = oldLogSystem->getEnd() - 1;
 	if (self->lastEpochEnd == 0) {
-		self->recoveryTransactionVersion = 1;
+		self->recoveryTransactionVersion = 1; // recoveryTransactionVersion is set here
 	} else {
 		if (self->forceRecovery) {
 			self->recoveryTransactionVersion = self->lastEpochEnd + SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT_FORCED;
@@ -1297,6 +1297,9 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 		GetCommitVersionReply rep;
 
 		if (self->version == invalidVersion) {
+			// version(invalidVersion), in MasterData constructor, version is init as a invalid version
+			// thus the reply version is recoveryTransactionVersion, which is 1 in the case of a brand new
+			// cluster(rather than a recovery)
 			self->lastVersionTime = now();
 			self->version = self->recoveryTransactionVersion;
 			rep.prevVersion = self->lastEpochEnd;
@@ -1327,7 +1330,7 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 			}
 		}
 
-		rep.version = self->version;
+		rep.version = self->version; // hfu : reply.version is master's self->version
 		rep.requestNum = req.requestNum;
 
 		proxyItr->second.replies.erase(proxyItr->second.replies.begin(),
