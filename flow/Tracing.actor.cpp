@@ -19,6 +19,8 @@
  */
 
 #include "flow/Tracing.h"
+#include "fdbclient/FDBTypes.h"
+#include "flow/Arena.h"
 #include "flow/ITrace.h"
 #include "flow/UnitTest.h"
 
@@ -722,6 +724,15 @@ uint64_t swapUint64BE(uint8_t* index) {
 	return fromBigEndian64(value);
 }
 
+double swapDoubleBE(uint8_t* index) {
+  double value;
+  memcpy(&value, index, sizeof(value));
+  char* const p = reinterpret_cast<char*>(&value);
+  for (size_t i = 0; i < sizeof(double) / 2; ++i)
+    std::swap(p[i], p[sizeof(double) - i - 1]);
+  return value;
+}
+
 std::string readMPString(uint8_t* index, int len) {
 	uint8_t data[len + 1];
 	std::copy(index, index + len, data);
@@ -790,6 +801,76 @@ TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
 	// Attributes
 	ASSERT(data[119] == 0b10000001); // single k/v pair
 	ASSERT(data[120] == 0b10100111); // length of key string "address" == 7
+
+  request.reset();
+
+  // Exercise all fluent interfaces, include links, events, and attributes.
+  OTELSpan span3("encoded_span_3"_loc);
+  auto s3Arena = span3.arena;
+  span3.addAttribute(StringRef(s3Arena, LiteralStringRef("operation")), StringRef(s3Arena, LiteralStringRef("grv"))).addLink(SpanContext(UID(300, 301), 400, TraceFlags::sampled)).addEvent(StringRef(s3Arena, LiteralStringRef("event1")), 100.101, { KeyValueRef(s3Arena, KeyValueRef(LiteralStringRef("foo"), LiteralStringRef("bar")))});
+	tracer.serialize_span(span3, request);
+	data = request.buffer.get();
+  ASSERT(data[0] == 0b10011110); // 14 element array.
+  // We don't care about the next 54 bytes as there is no parent and a randomly assigned Trace and SpanID
+	// Read and verify span name
+	ASSERT(data[55] == (0b10100000 | strlen("encoded_span_3")));
+	ASSERT(strncmp(readMPString(&data[56], strlen("encoded_span_3")).c_str(), "encoded_span_3", strlen("encoded_span_3")) == 0);
+	// Verify begin/end is encoded, we don't care about the values
+	ASSERT(data[70] == 0xcb);
+	ASSERT(data[79] == 0xcb);
+	// SpanKind
+	ASSERT(data[88] == 0xcc);
+	ASSERT(data[89] == static_cast<uint8_t>(SpanKind::SERVER));
+	// Status
+	ASSERT(data[90] == 0xcc);
+	ASSERT(data[91] == static_cast<uint8_t>(SpanStatus::OK));
+	// Linked SpanContext
+	ASSERT(data[92] == 0b10010001);
+	ASSERT(data[93] == 0xcf);
+	ASSERT(swapUint64BE(&data[94]) == 300);
+	ASSERT(data[102] == 0xcf);
+	ASSERT(swapUint64BE(&data[103]) == 301);
+	ASSERT(data[111] == 0xcf);
+	ASSERT(swapUint64BE(&data[112]) == 400);
+	// Events
+	ASSERT(data[120] == 0b10010001); // empty
+	ASSERT(data[121] == (0b10100000 | strlen("event1")));
+	ASSERT(strncmp(readMPString(&data[122], strlen("event1")).c_str(), "event1", strlen("event1")) == 0);
+	ASSERT(data[128] == 0xcb);
+	ASSERT(swapDoubleBE(&data[129]) == 100.101);
+	// Events Attributes
+	ASSERT(data[137] == 0b10000001); // single k/v pair
+	ASSERT(data[138] == 0b10100011); // length of key string "foo" == 3
+	ASSERT(strncmp(readMPString(&data[139], strlen("foo")).c_str(), "foo", strlen("foo")) == 0);
+	ASSERT(data[142] == 0b10100011); // length of key string "bar" == 3
+	ASSERT(strncmp(readMPString(&data[143], strlen("bar")).c_str(), "bar", strlen("bar")) == 0);
+  // Attributes
+	ASSERT(data[146] == 0b10000010); // two k/v pair
+  // Reconstruct map from MessagePack wire format data and verify.
+  std::unordered_map<std::string, std::string> attributes;
+  auto index = 147;
+  // We & out the bits here that contain the length the initial 4 higher order bits are 
+  // to signify this is a string of len <= 31 chars. 
+  auto firstKeyLength = static_cast<uint8_t>(data[index] & 0b00001111);
+  index++;
+  auto firstKey = readMPString(&data[index], firstKeyLength);
+  index += firstKeyLength;
+  auto firstValueLength = static_cast<uint8_t>(data[index] & 0b00001111);
+  index++;
+  auto firstValue = readMPString(&data[index], firstValueLength);
+  index += firstValueLength;
+  attributes[firstKey] = firstValue;
+  auto secondKeyLength = static_cast<uint8_t>(data[index] & 0b00001111);
+  index++;
+  auto secondKey = readMPString(&data[index], secondKeyLength);
+  index += secondKeyLength;
+  auto secondValueLength = static_cast<uint8_t>(data[index] & 0b00001111);
+  index++;
+  auto secondValue = readMPString(&data[index], secondValueLength);
+  attributes[secondKey] = secondValue;
+  // We don't know what the value for address will be, so just verify it is in the map.
+  ASSERT(attributes.find("address") != attributes.end());
+  ASSERT(strncmp(attributes["operation"].c_str(), "grv", strlen("grv")) == 0);
 	return Void();
 };
 #endif
