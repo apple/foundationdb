@@ -276,15 +276,16 @@ struct vector_like_traits<std::unordered_set<Key, Hash, KeyEqual, Allocator>> : 
 	static size_t num_entries(const Vec& v, Context&) {
 		return v.size();
 	}
-	template <class Context>
-	static void reserve(Vec& v, size_t size, Context&) {
-		v.reserve(size);
-	}
 
+	// Return an insert_iterator starting with an empty vector. |size| is the
+	// number of elements to be inserted. Implementations may want to allocate
+	// enough memory up front to hold |size| elements.
 	template <class Context>
-	static insert_iterator insert(Vec& v, Context&) {
+	static insert_iterator insert(Vec& v, size_t size, Context&) {
+		v.reserve(size);
 		return std::inserter(v, v.end());
 	}
+
 	template <class Context>
 	static iterator begin(const Vec& v, Context&) {
 		return v.begin();
