@@ -1035,14 +1035,16 @@ struct DDQueueData {
 	}
 };
 
-// return true if a.readload > b.readload
-bool greaterReadLoad(Reference<IDataDistributionTeam> a, Reference<IDataDistributionTeam> b) {
-	return a->getLoadReadBandwidth() > b->getLoadReadBandwidth();
+// return -1 if a.readload > b.readload
+int greaterReadLoad(Reference<IDataDistributionTeam> a, Reference<IDataDistributionTeam> b) {
+	auto r1 = a->getLoadReadBandwidth(), r2 = b->getLoadReadBandwidth();
+	return r1 == r2 ? 0 : (r1 > r2 ? -1 : 1);
 }
 
-// return true if a.readload < b.readload
-bool lessReadLoad(Reference<IDataDistributionTeam> a, Reference<IDataDistributionTeam> b) {
-	return a->getLoadReadBandwidth() < b->getLoadReadBandwidth();
+// return -1 if a.readload < b.readload
+int lessReadLoad(Reference<IDataDistributionTeam> a, Reference<IDataDistributionTeam> b) {
+	auto r1 = a->getLoadReadBandwidth(), r2 = b->getLoadReadBandwidth();
+	return r1 == r2 ? 0 : (r1 < r2 ? -1 : 1);
 }
 
 static std::string destServersString(std::vector<std::pair<Reference<IDataDistributionTeam>, bool>> const& bestTeams) {

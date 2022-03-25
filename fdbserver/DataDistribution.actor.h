@@ -93,8 +93,8 @@ struct GetTeamRequest {
 	// optional
 	typedef Reference<IDataDistributionTeam> TeamRef;
 	std::function<bool(TeamRef)> hardConstraint;
-	std::function<bool(TeamRef, TeamRef)>
-	    teamSorter; // => true if a.score < b.score, the reply will choose the largest one
+	std::function<int(TeamRef, TeamRef)>
+	    teamSorter; // => -1 if a.score < b.score, 0 if equal, 1 if larger, the reply will choose the largest one
 
 	GetTeamRequest() {}
 	GetTeamRequest(bool wantsNewServers,
@@ -107,10 +107,11 @@ struct GetTeamRequest {
 
 	// return true if a.score < b.score
 	[[nodiscard]] bool lessCompare(TeamRef a, TeamRef b, int64_t aLoadBytes, int64_t bLoadBytes) const {
+		int res = 0;
 		if (teamSorter) {
-			return teamSorter(a, b);
+			res = teamSorter(a, b);
 		}
-		return lessCompareByLoad(aLoadBytes, bLoadBytes);
+		return res == 0 ? lessCompareByLoad(aLoadBytes, bLoadBytes) : res < 0;
 	}
 
 	// return true if preferHigherUtil && aLoadBytes <= bLoadBytes (higher load bytes has larger score)

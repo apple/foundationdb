@@ -5667,21 +5667,20 @@ public:
 		state int teamSize = 1;
 		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
 
-
-		int64_t capacity = 1000 * 1024 * 1024, available = 800*1024*1024;
+		int64_t capacity = 1000 * 1024 * 1024, available = 800 * 1024 * 1024;
 		std::vector<int64_t> read_bandwidths{
-			100 * 1024 * 1024, 300 * 1024 * 1024, 500 * 1024 * 1024, 700 * 1024 * 1024, 900 * 1024 * 1024
+			300 * 1024 * 1024, 100 * 1024 * 1024, 500 * 1024 * 1024, 100 * 1024 * 1024, 900 * 1024 * 1024
 		};
 		std::vector<int64_t> load_bytes{
-			50 * 1024 * 1024, 200 * 1024 * 1024, 400 * 1024 * 1024, 600 * 1024 * 1024, 800 * 1024 * 1024
+			50 * 1024 * 1024, 600 * 1024 * 1024, 800 * 1024 * 1024, 200 * 1024 * 1024, 100 * 1024 * 1024
 		};
 		GetStorageMetricsReply metrics[5];
 		for (int i = 0; i < 5; ++i) {
 			metrics[i].capacity.bytes = capacity;
 			metrics[i].available.bytes = available;
 			metrics[i].load.bytesReadPerKSecond = read_bandwidths[i];
-			metrics[i].load.bytes = deterministicRandom()->randomChoice(load_bytes);
-			collection->addTeam(std::set<UID>({ UID(i + 1, 0) }), true);
+			metrics[i].load.bytes = load_bytes[i];
+			collection->addTeam(std::set<UID>({ UID(i + 1, 0) }), IsInitialTeam::True);
 			collection->server_info[UID(i + 1, 0)]->setMetrics(metrics[i]);
 		}
 
@@ -5697,16 +5696,19 @@ public:
 		state GetTeamRequest req(wantsNewServers, wantsTrueBest, preferLowerUtilization, teamMustHaveShards);
 		req.completeSources = completeSources;
 		req.teamSorter = [](Reference<IDataDistributionTeam> a, Reference<IDataDistributionTeam> b) {
-			return a->getLoadReadBandwidth() > b->getLoadReadBandwidth();
+			auto r1 = a->getLoadReadBandwidth(), r2 = b->getLoadReadBandwidth();
+			return r1 == r2 ? 0 : (r1 > r2 ? -1 : 1);
 		};
 
 		wait(collection->getTeam(req));
 		std::pair<Optional<Reference<IDataDistributionTeam>>, bool> resTeam = req.reply.getFuture().get();
-		std::set<UID> expectedServers{ UID(1, 0) };
+		std::set<UID> expectedServers{ UID(4, 0) };
 
 		ASSERT(resTeam.first.present());
 		auto servers = resTeam.first.get()->getServerIDs();
 		const std::set<UID> selectedServers(servers.begin(), servers.end());
+		// for (auto id : selectedServers)
+		// 	std::cout << id.toString() << std::endl;
 		ASSERT(expectedServers == selectedServers);
 
 		return Void();
@@ -5824,7 +5826,7 @@ TEST_CASE("/DataDistribution/GetTeam/ServerUtilizationNearCutoff") {
 	return Void();
 }
 TEST_CASE("/DataDistribution/GetTeam/TrueBestLeastReadBandwidth") {
-	Optional<Void> res = wait(timeout(recurringFuture(DDTeamCollectionUnitTest::GetTeam_TrueBestLeastReadBandwidth(), 0.1), 10));
+	wait(DDTeamCollectionUnitTest::GetTeam_TrueBestLeastReadBandwidth());
 	return Void();
 }
 
