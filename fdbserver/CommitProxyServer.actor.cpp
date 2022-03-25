@@ -561,6 +561,9 @@ struct CommitBatchContext {
 
 	void writeToStorageTeams(const ptxn::StorageTeamID& team, StringRef m);
 
+	// true this commit is setting up a new cluster, otherwise false.
+	bool isSettingUpNewCluster();
+
 private:
 	void evaluateBatchSize();
 };
@@ -678,6 +681,10 @@ void CommitBatchContext::writeToStorageTeams(const ptxn::StorageTeamID& team, St
 	auto groupID = pProxyCommitData->tLogGroupCollection->assignStorageTeam(team)->id();
 	ASSERT(pGroupMessageBuilders.count(groupID));
 	pGroupMessageBuilders[groupID]->write(m, team);
+}
+
+bool CommitBatchContext::isSettingUpNewCluster() {
+	return commitVersion == 1;
 }
 
 // Try to identify recovery transaction and backup's apply mutations (blind writes).
@@ -1049,7 +1056,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 	state ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
 	state std::vector<CommitTransactionRequest>& trs = self->trs;
 	state std::set<ptxn::StorageTeamID> privateTeamsForServersInSeedTeam;
-	if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS && self->commitVersion == 1) {
+	if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS && self->isSettingUpNewCluster()) {
 		ASSERT(!pProxyCommitData->ssToStorageTeam.empty());
 		for (const auto& [_, teams] : pProxyCommitData->ssToStorageTeam) {
 			// applyMetadataToCommittedTransactions.applyMetadataMutations is called before,
@@ -1057,6 +1064,8 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 			// seedTeam SS as keys, and their corresponding teams as values
 			privateTeamsForServersInSeedTeam.insert(teams.getPrivateMutationsStorageTeamID());
 		}
+		TraceEvent("AssignAllMutationsToSeedTeamServersDuringSetup")
+		    .detail("PrivateTeam", describe(privateTeamsForServersInSeedTeam));
 	}
 
 	for (self->transactionNum = 0; self->transactionNum < trs.size(); self->transactionNum++) {
@@ -1133,7 +1142,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				self->toCommit.writeTypedMessage(m);
 				if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 					self->writeToStorageTeams(pProxyCommitData->keyInfo[m.param1].storageTeams, m);
-					if (self->commitVersion == 1) {
+					if (self->isSettingUpNewCluster()) {
 						// For a brand new cluster, sending all mutations in txn(version == 1) to seedTeam SS.
 
 						// seedTeam SS need to get the all mutations in txn(version == 1).
