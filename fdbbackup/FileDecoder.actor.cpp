@@ -362,16 +362,17 @@ struct VersionedMutations {
  *
  *    DecodeProgress progress(logfile);
  *    wait(progress->openFile(container));
- *    while (!progress->finished()) {
- *        VersionedMutations m = wait(progress->getNextBatch());
- *        ...
+ *    while (1) {
+ *        Optional<VersionedMutations> batch = wait(progress->getNextBatch());
+ *        if (!batch.present()) break;
+ *        ... // process the batch mutations
  *    }
  *
  * Internally, the decoding process is done block by block -- each block is
  * decoded into a list of key/value pairs, which are then decoded into batches
  * of mutations. Because a version's mutations can be split into many key/value
- * pairs, the decoding of mutation batch needs to look ahead one more pair. So
- * at any time this object might have two blocks of data in memory.
+ * pairs, the decoding of mutation needs to look ahead to find all batches that
+ * belong to the same version.
  */
 class DecodeProgress {
 	std::vector<Standalone<VectorRef<KeyValueRef>>> blocks;
@@ -387,21 +388,15 @@ public:
 		}
 	}
 
-	// If there are no more mutations to pull from the file.
-	bool finished() const { return done; }
-
 	// Open and loads file into memory
 	Future<Void> openFile(Reference<IBackupContainer> container) { return openFileImpl(this, container); }
 
 	// The following are private APIs:
 
-	// PRECONDITION: finished() must return false before calling this function.
 	// Returns the next batch of mutations along with the arena backing it.
 	// Note the returned batch can be empty when the file has unfinished
 	// version batch data that are in the next file.
-	VersionedMutations getNextBatch() {
-		ASSERT(!finished());
-
+	Optional<VersionedMutations> getNextBatch() {
 		for (auto& [version, m] : mutationBlocksByVersion) {
 			if (m.isComplete()) {
 				VersionedMutations vms;
@@ -418,8 +413,7 @@ public:
 		if (!mutationBlocksByVersion.empty()) {
 			TraceEvent(SevWarn, "UnfishedBlocks").detail("NumberOfVersions", mutationBlocksByVersion.size());
 		}
-		done = true;
-		return VersionedMutations();
+		return Optional<VersionedMutations>();
 	}
 
 	ACTOR static Future<Void> openFileImpl(DecodeProgress* self, Reference<IBackupContainer> container) {
@@ -514,7 +508,6 @@ public:
 	Reference<IAsyncFile> fd;
 	int64_t offset = 0;
 	bool eof = false;
-	bool done = false;
 	bool save = false;
 	int lfd = -1; // local file descriptor
 };
@@ -527,8 +520,12 @@ ACTOR Future<Void> process_file(Reference<IBackupContainer> container, LogFile f
 
 	state DecodeProgress progress(file, params.save_file_locally);
 	wait(progress.openFile(container));
-	while (!progress.finished()) {
-		VersionedMutations vms = progress.getNextBatch();
+	while (true) {
+		auto batch = progress.getNextBatch();
+		if (!batch.present())
+			break;
+
+		const VersionedMutations& vms = batch.get();
 		if (vms.version < params.beginVersionFilter || vms.version >= params.endVersionFilter) {
 			TraceEvent("SkipVersion").detail("Version", vms.version);
 			continue;
