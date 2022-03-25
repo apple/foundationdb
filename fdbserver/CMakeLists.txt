@@ -232,6 +232,7 @@ set(FDBSERVER_SRCS
   workloads/FuzzApiCorrectness.actor.cpp
   workloads/GetMappedRange.actor.cpp
   workloads/GetRangeStream.actor.cpp
+  workloads/GlobalTagThrottling.actor.cpp
   workloads/HealthMetricsApi.actor.cpp
   workloads/HighContentionPrefixAllocatorWorkload.actor.cpp
   workloads/Increment.actor.cpp

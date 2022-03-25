@@ -18,9 +18,11 @@
  * limitations under the License.
  */
 
-#include "fdbclient/TagThrottle.actor.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/DatabaseContext.h"
+#include "fdbclient/SystemData.h"
+#include "fdbclient/TagThrottle.actor.h"
+#include "fdbclient/Tuple.h"
 
 #include "flow/actorcompiler.h" // has to be last include
 
@@ -122,6 +124,33 @@ TagThrottleValue TagThrottleValue::fromValue(const ValueRef& value) {
 	BinaryReader reader(value, IncludeVersion(ProtocolVersion::withTagThrottleValueReason()));
 	reader >> throttleValue;
 	return throttleValue;
+}
+
+KeyRangeRef const tagQuotaKeys = KeyRangeRef("\xff/tagQuota/"_sr, "\xff/tagQuota0"_sr);
+KeyRef const tagQuotaPrefix = tagQuotaKeys.begin;
+
+Key ThrottleApi::getTagQuotaKey(TransactionTagRef tag) {
+	return tag.withPrefix(tagQuotaPrefix);
+}
+
+Value ThrottleApi::TagQuotaValue::toValue() const {
+	Tuple tuple;
+	tuple.appendDouble(reservedReadQuota);
+	tuple.appendDouble(totalReadQuota);
+	tuple.appendDouble(reservedWriteQuota);
+	tuple.appendDouble(totalWriteQuota);
+	return tuple.pack();
+}
+
+ThrottleApi::TagQuotaValue ThrottleApi::TagQuotaValue::fromValue(ValueRef value) {
+	auto tuple = Tuple::unpack(value);
+	ASSERT_EQ(tuple.size(), 4);
+	TagQuotaValue result;
+	result.reservedReadQuota = tuple.getDouble(0);
+	result.totalReadQuota = tuple.getDouble(1);
+	result.reservedWriteQuota = tuple.getDouble(2);
+	result.totalWriteQuota = tuple.getDouble(3);
+	return result;
 }
 
 FDB_DEFINE_BOOLEAN_PARAM(ContainsRecommended);

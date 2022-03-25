@@ -19,14 +19,15 @@
  */
 
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/TagQuota.h"
+#include "fdbclient/TagThrottle.actor.h"
 #include "fdbrpc/Smoother.h"
 #include "fdbserver/TagThrottler.h"
+
 #include "flow/actorcompiler.h" // must be last include
 
 class GlobalTagThrottlerImpl {
 	struct QuotaAndCounter {
-		TagQuotaValue quota;
+		ThrottleApi::TagQuotaValue quota;
 		Smoother readCostCounter;
 		QuotaAndCounter() : readCostCounter(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT) {}
 	};
@@ -48,7 +49,7 @@ class GlobalTagThrottlerImpl {
 					state RangeResult currentQuotas = wait(tr.getRange(tagQuotaKeys, CLIENT_KNOBS->TOO_MANY));
 					for (auto const kv : currentQuotas) {
 						auto tag = kv.key.removePrefix(tagQuotaPrefix);
-						auto quota = TagQuotaValue::fromValue(kv.value);
+						auto quota = ThrottleApi::TagQuotaValue::fromValue(kv.value);
 						self->throttledTags[tag].quota = quota;
 					}
 
