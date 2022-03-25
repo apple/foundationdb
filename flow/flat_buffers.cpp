@@ -27,6 +27,7 @@
 
 #include <algorithm>
 #include <iomanip>
+#include <unordered_set>
 #include <variant>
 
 namespace detail {
@@ -588,37 +589,26 @@ TEST_CASE("/flow/FlatBuffers/EmptyUnorderedSet") {
 }
 
 TEST_CASE("/flow/FlatBuffers/NonEmptyUnorderedSet") {
-	// first we construct the data to serialize/deserialize
-	// so we can compare it afterwards
-	std::unordered_set<std::string> src;
-	src.insert("FDB");
-	src.insert("is");
-	src.insert("awesome");
-	::Arena vecArena;
-	std::unordered_set<StringRef> outVec;
-	{
-		::Arena readerArena;
-		StringRef serializedVector;
-		{
-			::Arena arena;
-			std::unordered_set<StringRef> s;
-			for (const auto& str : src) {
-				s.insert(StringRef(arena, str));
-			}
-			ObjectWriter writer(Unversioned());
-			writer.serialize(FileIdentifierFor<decltype(s)>::value, arena, s);
-			serializedVector = StringRef(readerArena, writer.toStringRef());
-		}
-		ArenaObjectReader reader(readerArena, serializedVector, Unversioned());
-		// The VectorRef and Arena arguments are intentionally in a different order from the serialize call above.
-		// Arenas need to get serialized after any Ref types whose memory they own. In order for schema evolution to be
-		// possible, it needs to be okay to reorder an Arena so that it appears after a newly added Ref type. For this
-		// reason, Arenas are ignored by the wire protocol entirely. We test that behavior here.
-		reader.deserialize(FileIdentifierFor<decltype(outVec)>::value, outVec, vecArena);
+	int kSize = deterministicRandom()->randomInt(0, 100);
+	std::vector<std::unordered_set<Y1, Y1Hasher, Y1Equal>> src;
+	std::unordered_set<Y1, Y1Hasher, Y1Equal> s;
+	for (int i = 0; i < kSize; i++) {
+		Y1 y;
+		y.a = i;
+		s.insert(y);
 	}
-	ASSERT(src.size() == outVec.size());
-	for (StringRef s : outVec) {
-		ASSERT(src.find(s.toString()) != src.end());
+	src.push_back(s);
+
+	Standalone<StringRef> msg = ObjectWriter::toValue(src, Unversioned());
+	ObjectReader rd(msg.begin(), Unversioned());
+	std::vector<std::unordered_set<Y1, Y1Hasher, Y1Equal>> xs;
+	rd.deserialize(xs);
+	ASSERT(xs.size() == 1);
+	ASSERT(xs[0].size() == kSize);
+	for (int i = 0; i < kSize; i++) {
+		Y1 y;
+		y.a = i;
+		ASSERT(xs[0].find(y) != xs[0].end());
 	}
 	return Void();
 }
