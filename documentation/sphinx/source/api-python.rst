@@ -325,12 +325,6 @@ A |database-blurb1| |database-blurb2|
 .. |sync-read| replace:: This read is fully synchronous.
 .. |sync-write| replace:: This change will be committed immediately, and is fully synchronous.
 
-.. method:: Database.allocate_tenant(tenant_name):
-
-    Creates a new tenant in the cluster. |sync-write|
-
-    The tenant name can be either a byte string or a tuple and cannot start with the ``\xff`` byte. If a tuple is provided, the tuple will be packed using the tuple layer to generate the byte string tenant name.
-
 .. method:: Database.delete_tenant(tenant_name):
 
     Delete a tenant from the cluster. |sync-write|
@@ -1590,3 +1584,32 @@ Locality information
 .. method:: fdb.locality.get_addresses_for_key(tr, key)
 
     Returns a :class:`fdb.FutureStringArray`. You must call the :meth:`fdb.Future.wait()` method on this object to retrieve a list of public network addresses as strings, one for each of the storage servers responsible for storing ``key`` and its associated value.
+
+Tenant management
+=================
+
+.. module:: fdb.tenant_management
+
+The FoundationDB API includes function to manage the set of tenants in a cluster.
+
+.. method:: fdb.tenant_management.create_tenant(db_or_tr, tenant_name)
+
+    Creates a new tenant in the cluster.
+
+    The tenant name can be either a byte string or a tuple and cannot start with the ``\xff`` byte. If a tuple is provided, the tuple will be packed using the tuple layer to generate the byte string tenant name.
+
+    If a database is provided to this function for the ``db_or_tr`` parameter, then this function will first check if the tenant already exists. If it does, it will fail with a ``tenant_already_exists`` error. Otherwise, it will create a transaction and attempt to create the tenant in a retry loop. If the tenant is created concurrently by another transaction, this function may still return successfully.
+
+    If a transaction is provided to this function for the ``db_or_tr`` parameter, then this function will not check if the tenant already exists. It is up to the user to perform that check if required. The user must also successfully commit the transaction in order for the creation to take effect.
+
+.. method:: fdb.tenant_management.delete_tenant(db_or_tr, tenant_name)
+
+    Delete a tenant from the cluster.
+
+    The tenant name can be either a byte string or a tuple. If a tuple is provided, the tuple will be packed using the tuple layer to generate the byte string tenant name.
+
+    It is an error to delete a tenant that still has data. To delete a non-empty tenant, first clear all of the keys in the tenant.
+
+    If a database is provided to this function for the ``db_or_tr`` parameter, then this function will first check if the tenant already exists. If it does not, it will fail with a ``tenant_not_found`` error. Otherwise, it will create a transaction and attempt to delete the tenant in a retry loop. If the tenant is deleted concurrently by another transaction, this function may still return successfully.
+
+    If a transaction is provided to this function for the ``db_or_tr`` parameter, then this function will not check if the tenant already exists. It is up to the user to perform that check if required. The user must also successfully commit the transaction in order for the deletion to take effect.
