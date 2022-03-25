@@ -23,18 +23,36 @@
 #include "fdbrpc/Smoother.h"
 #include "fdbserver/TagThrottler.h"
 
+#include <limits>
+
 #include "flow/actorcompiler.h" // must be last include
 
 class GlobalTagThrottlerImpl {
-	struct QuotaAndCounter {
+	struct QuotaAndCounters {
 		ThrottleApi::TagQuotaValue quota;
 		Smoother readCostCounter;
-		QuotaAndCounter() : readCostCounter(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT) {}
+		Smoother writeCostCounter;
+		Smoother transactionCounter;
+
+		QuotaAndCounters()
+		  : readCostCounter(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT), writeCostCounter(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
+		    transactionCounter(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT) {}
+
+		ClientTagThrottleLimits getTotalLimit() const {
+			// TODO: Enforce minimum and maximum
+			auto readCostPerTxn = readCostCounter.smoothRate() / transactionCounter.smoothRate();
+			auto readLimit = quota.totalReadQuota / readCostPerTxn;
+			auto writeCostPerTxn = writeCostCounter.smoothRate() / transactionCounter.smoothRate();
+			auto writeLimit = quota.totalWriteQuota / writeCostPerTxn;
+
+			// TODO: Implement expiration logic
+			return { std::min(readLimit, writeLimit), std::numeric_limits<double>::max() };
+		}
 	};
 
 	Database db;
 	UID id;
-	std::map<TransactionTag, QuotaAndCounter> throttledTags;
+	std::map<TransactionTag, QuotaAndCounters> trackedTags;
 	uint64_t throttledTagChangeId{ 0 };
 
 	ACTOR static Future<Void> monitorThrottlingChanges(GlobalTagThrottlerImpl* self) {
@@ -50,7 +68,7 @@ class GlobalTagThrottlerImpl {
 					for (auto const kv : currentQuotas) {
 						auto tag = kv.key.removePrefix(tagQuotaPrefix);
 						auto quota = ThrottleApi::TagQuotaValue::fromValue(kv.value);
-						self->throttledTags[tag].quota = quota;
+						self->trackedTags[tag].quota = quota;
 					}
 
 					++self->throttledTagChangeId;
@@ -69,15 +87,39 @@ class GlobalTagThrottlerImpl {
 public:
 	GlobalTagThrottlerImpl(Database db, UID id) : db(db), id(id) {}
 	Future<Void> monitorThrottlingChanges() { return monitorThrottlingChanges(this); }
-	void addRequests(TransactionTag tag, int count) { throttledTags[tag].readCostCounter.addDelta(count); }
+	void addRequests(TransactionTag tag, int count) { trackedTags[tag].transactionCounter.addDelta(count); }
 	uint64_t getThrottledTagChangeId() const { return throttledTagChangeId; }
-	PrioritizedTransactionTagMap<ClientTagThrottleLimits> getClientRates() { return {}; }
-	int64_t autoThrottleCount() const { return 0; }
-	uint32_t busyReadTagCount() const { return 0; }
-	uint32_t busyWriteTagCount() const { return 0; }
-	int64_t manualThrottleCount() const { return 0; }
-	bool isAutoThrottlingEnabled() const { return 0; }
-	Future<Void> tryUpdateAutoThrottling(StorageQueueInfo const& ss) { return Void(); }
+	PrioritizedTransactionTagMap<ClientTagThrottleLimits> getClientRates() {
+		// TODO: For now, only enforce total throttling rates.
+		// We should use reserved quotas as well.
+		PrioritizedTransactionTagMap<ClientTagThrottleLimits> result;
+		for (const auto& [tag, quotaAndCounters] : trackedTags) {
+			// Currently there is no differentiation between batch priority and default priority transactions
+			result[TransactionPriority::BATCH][tag] = result[TransactionPriority::DEFAULT][tag] =
+			    quotaAndCounters.getTotalLimit();
+		}
+		return result;
+	}
+	int64_t autoThrottleCount() const { return trackedTags.size(); }
+	uint32_t busyReadTagCount() const {
+		// TODO: Implement
+		return 0;
+	}
+	uint32_t busyWriteTagCount() const {
+		// TODO: Implement
+		return 0;
+	}
+	int64_t manualThrottleCount() const { return trackedTags.size(); }
+	Future<Void> tryUpdateAutoThrottling(StorageQueueInfo const& ss) {
+		for (const auto& busyReadTag : ss.busiestReadTags) {
+			trackedTags[busyReadTag.tag].readCostCounter.addDelta(busyReadTag.rate);
+		}
+		for (const auto& busyWriteTag : ss.busiestWriteTags) {
+			trackedTags[busyWriteTag.tag].writeCostCounter.addDelta(busyWriteTag.rate);
+		}
+		// TODO: Call ThrottleApi::throttleTags
+		return Void();
+	}
 };
 
 GlobalTagThrottler::GlobalTagThrottler(Database db, UID id) : impl(PImpl<GlobalTagThrottlerImpl>::create(db, id)) {}
@@ -109,7 +151,7 @@ int64_t GlobalTagThrottler::manualThrottleCount() const {
 	return impl->manualThrottleCount();
 }
 bool GlobalTagThrottler::isAutoThrottlingEnabled() const {
-	return impl->isAutoThrottlingEnabled();
+	return true;
 }
 Future<Void> GlobalTagThrottler::tryUpdateAutoThrottling(StorageQueueInfo const& ss) {
 	return impl->tryUpdateAutoThrottling(ss);
