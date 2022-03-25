@@ -92,9 +92,9 @@ else()
     set(FDB_VERSION ${PROJECT_VERSION})
 endif()
 
-if (FDB_PRERELEASE_NAME)
+if (NOT FDB_RELEASE)
   string(TIMESTAMP fdb_buildtime %Y%m%d%H%M%S)
-  string(APPEND FDB_VERSION ".pre${fdb_buildtime}")
+  string(APPEND FDB_VERSION ".${fdb_buildtime}")
 endif()
 
 set(FDB_VERSION_PLAIN ${FDB_VERSION})
