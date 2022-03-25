@@ -133,7 +133,7 @@ std::pair<Version, Version> getReceivedVersionRange(const StorageTeamID& storage
 		}
 	}
 
-	return { minVersion, maxVersion };
+	return { minVersion, maxVersion + 1 };
 }
 
 } // anonymous namespace
@@ -160,7 +160,7 @@ ACTOR Future<Void> fakeTLogPeek(TLogPeekRequest request, std::shared_ptr<FakeTLo
 	printTiming << "Commit record version range [" << versionRange.first << ", " << versionRange.second << ")"
 	            << std::endl;
 	printTiming << "Received version range [" << receivedVersionRange.first << ", " << receivedVersionRange.second
-	            << "]" << std::endl;
+	            << ")" << std::endl;
 	printTiming << "Request begin commit version = " << request.beginVersion << std::endl;
 
 	Version firstVersion = std::max(versionRange.first, request.beginVersion);
@@ -171,8 +171,9 @@ ACTOR Future<Void> fakeTLogPeek(TLogPeekRequest request, std::shared_ptr<FakeTLo
 		endVersion = std::min(endVersion, request.endVersion.get());
 	}
 
-	// NOTE: Since the broadcast will cause new
-	if (request.beginVersion >= std::max(versionRange.second, receivedVersionRange.second + 1)) {
+	// NOTE: Since the broadcast will cause EmptyVersionMessage, we cannot simply use just one of versionRange or
+	// receivedVersionRange
+	if (request.beginVersion >= std::max(versionRange.second, receivedVersionRange.second)) {
 		printTiming << "End of stream" << std::endl;
 		request.reply.sendError(end_of_stream());
 		return Void();

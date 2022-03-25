@@ -264,9 +264,8 @@ private:
 	// version will be ignored
 	bool reportEmptyVersion;
 
-	// The last version that the cursor have received, the next remote RPC will return versions larger than lastVersion,
-	// if available.
-	Version lastVersion;
+	// The version that the cursor should use for RPC
+	Version rpcVersion;
 
 public:
 	// version_ is the version the cursor begins with
@@ -479,6 +478,7 @@ protected:
 	                                     const Version& version_ = 0)
 	  : pCursorContainer(std::move(pCursorContainer_)),
 	    remoteMoreAvailableSnapshot{ false, version_, std::move(pCursorContainerSnapshot_) }, currentVersion(version_) {
+
 	}
 
 	// Tries to fill the cursor heap, returns true if the cursorContainer is filled with cursors.
@@ -513,9 +513,10 @@ protected:
 	virtual void nextImpl() override;
 
 public:
-	BroadcastedStorageTeamPeekCursor_Ordered()
+	BroadcastedStorageTeamPeekCursor_Ordered(const Version& version_ = 0)
 	  : BroadcastedStorageTeamPeekCursorBase(std::make_unique<details::OrderedCursorContainer>(),
-	                                         std::make_unique<details::OrderedCursorContainer>()) {}
+	                                         std::make_unique<details::OrderedCursorContainer>(),
+											 version_) {}
 };
 
 // Merge multiple storage team peek cursor into one. The version is the barrier, i.e., a version is complete iff all
@@ -527,9 +528,10 @@ protected:
 	virtual void nextImpl() override;
 
 public:
-	BroadcastedStorageTeamPeekCursor_Unordered()
+	BroadcastedStorageTeamPeekCursor_Unordered(const Version& version_ = 0)
 	  : BroadcastedStorageTeamPeekCursorBase(std::make_unique<details::UnorderedCursorContainer>(),
-	                                         std::make_unique<details::UnorderedCursorContainer>()) {}
+	                                         std::make_unique<details::UnorderedCursorContainer>(),
+											 version_) {}
 };
 
 } // namespace merged

@@ -12,30 +12,30 @@ startDelay = 0
    numMutationsPerVersion = 100
 
 [[test]]
-    testTitle = "BroadcastedStorageTeamPeekCursor_Unordered test"
-    useDB = false
-    startDelay = 0
+   testTitle = "BroadcastedStorageTeamPeekCursor_Unordered test"
+   useDB = false
+   startDelay = 0
 
-    [[test.workload]]
-    testName = "UnitTests"
-    maxTestCases = 1
-    testsMatching = '/fdbserver/ptxn/test/tLogPeek/cursor/merged/BroadcastedStorageTeamPeekCursor_Unordered'
+   [[test.workload]]
+   testName = "UnitTests"
+   maxTestCases = 1
+   testsMatching = '/fdbserver/ptxn/test/tLogPeek/cursor/merged/BroadcastedStorageTeamPeekCursor_Unordered'
 
-    numVersions = 10
-    numMutationsPerVersion = 10
+   numVersions = 50
+   numMutationsPerVersion = 100
 
 [[test]]
 testTitle = "BroadcastedStorageTeamPeekCursor_Ordered test"
 useDB = false
 startDelay = 0
 
-    [[test.workload]]
-    testName = "UnitTests"
-    maxTestCases = 1
-    testsMatching = '/fdbserver/ptxn/test/tLogPeek/cursor/merged/BroadcastedStorageTeamPeekCursor_Ordered'
+   [[test.workload]]
+   testName = "UnitTests"
+   maxTestCases = 1
+   testsMatching = '/fdbserver/ptxn/test/tLogPeek/cursor/merged/BroadcastedStorageTeamPeekCursor_Ordered'
 
-    numVersions = 10
-    numMutationsPerVersion = 100
+   numVersions = 50
+   numMutationsPerVersion = 100
 
 [[test]]
 testTitle = "OrderedMutableTeamPeekCursor test"
@@ -47,8 +47,8 @@ startDelay = 0
    maxTestCases = 1
    testsMatching = '/fdbserver/ptxn/test/tLogPeek/cursor/merged/OrderedMutableTeamPeekCursor'
 
-   numVersions = 10
-   numMutationsPerVersion = 10
+   numVersions = 50
+   numMutationsPerVersion = 100
 
 [[test]]
 testTitle = "Advance To"
