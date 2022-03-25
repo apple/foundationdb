@@ -463,6 +463,7 @@ public:
 
 	Reference<TransactionState> trState;
 	std::vector<Reference<Watch>> watches;
+	TagSet const &getTags() const;
 	Span span;
 
 	// used in template functions as returned Future type

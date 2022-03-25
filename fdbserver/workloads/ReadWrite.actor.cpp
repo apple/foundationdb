@@ -332,12 +332,12 @@ struct ReadWriteWorkload : KVWorkload {
 	Standalone<KeyValueRef> operator()(uint64_t n) { return KeyValueRef(keyForIndex(n, false), randomValue()); }
 
 	template <class Trans>
-	void setupTransaction(Trans* tr) {
+	void setupTransaction(Trans &tr) {
 		if (batchPriority) {
-			tr->setOption(FDBTransactionOptions::PRIORITY_BATCH);
+			tr.setOption(FDBTransactionOptions::PRIORITY_BATCH);
 		}
-		if (transactionTag.present()) {
-			tr->setOption(FDBTransactionOptions::AUTO_THROTTLE_TAG, transactionTag.get());
+		if (transactionTag.present() && tr.getTags().size() == 0) {
+			tr.setOption(FDBTransactionOptions::AUTO_THROTTLE_TAG, transactionTag.get());
 		}
 	}
 
@@ -597,7 +597,7 @@ struct ReadWriteWorkload : KVWorkload {
 			state Transaction tr(cx);
 
 			try {
-				self->setupTransaction(&tr);
+				self->setupTransaction(tr);
 				wait(self->readOp(&tr, keys, self, false));
 				wait(tr.warmRange(allKeys));
 				break;
@@ -735,7 +735,7 @@ struct ReadWriteWorkload : KVWorkload {
 
 				loop {
 					try {
-						self->setupTransaction(&tr);
+						self->setupTransaction(tr);
 
 						GRVStartTime = now();
 						self->transactionFailureMetric->startLatency = -1;

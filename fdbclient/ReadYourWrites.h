@@ -195,6 +195,7 @@ public:
 	Transaction& getTransaction() { return tr; }
 
 	Optional<TenantName> getTenant() { return tr.getTenant(); }
+	TagSet const &getTags() const { return tr.getTags(); }
 
 	// used in template functions as returned Future type
 	template <typename Type>
