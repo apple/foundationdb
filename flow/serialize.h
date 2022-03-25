@@ -20,6 +20,7 @@
 
 #ifndef FLOW_SERIALIZE_H
 #define FLOW_SERIALIZE_H
+#include <unordered_set>
 #pragma once
 
 #include <stdint.h>
@@ -171,6 +172,13 @@ struct FileIdentifierFor<std::vector<T, Allocator>> : ComposedIdentifierExternal
 template <class T, class Allocator>
 struct CompositionDepthFor<std::vector<T, Allocator>> : std::integral_constant<int, CompositionDepthFor<T>::value + 1> {
 };
+
+template <class Key, class Hash, class KeyEqual, class Allocator>
+struct FileIdentifierFor<std::unordered_set<Key, Hash, KeyEqual, Allocator>> : ComposedIdentifierExternal<Key, 6> {};
+
+template <class Key, class Hash, class KeyEqual, class Allocator>
+struct CompositionDepthFor<std::unordered_set<Key, Hash, KeyEqual, Allocator>>
+  : std::integral_constant<int, CompositionDepthFor<Key>::value + 1> {};
 
 template <class Archive, class T>
 inline void save(Archive& ar, const std::vector<T>& value) {
