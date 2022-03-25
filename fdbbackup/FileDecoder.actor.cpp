@@ -37,6 +37,7 @@
 #include "fdbclient/MutationList.h"
 #include "flow/ArgParseUtil.h"
 #include "flow/IRandom.h"
+#include "flow/Platform.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
 #include "flow/serialize.h"
@@ -83,7 +84,8 @@ void printDecodeUsage() {
 	             "  --end-version-filter END_VERSION\n"
 	             "                 The version range's end version (exclusive) for filtering.\n"
 	             "  --knob-KNOBNAME KNOBVALUE\n"
-	             "                 Changes a knob value. KNOBNAME should be lowercase."
+	             "                 Changes a knob value. KNOBNAME should be lowercase.\n"
+	             "  -s, --save     Save a copy of downloaded files (default: not saving).\n"
 	             "\n";
 	return;
 }
@@ -100,6 +102,7 @@ struct DecodeParams {
 	std::string log_dir, trace_format, trace_log_group;
 	BackupTLSConfig tlsConfig;
 	bool list_only = false;
+	bool save_file_locally = false;
 	std::string prefix; // Key prefix for filtering
 	Version beginVersionFilter = 0;
 	Version endVersionFilter = std::numeric_limits<Version>::max();
@@ -146,6 +149,7 @@ struct DecodeParams {
 		for (const auto& [knob, value] : knobs) {
 			s.append(", KNOB-").append(knob).append(" = ").append(value);
 		}
+		s.append(", SaveFile: ").append(save_file_locally ? "true" : "false");
 		return s;
 	}
 
@@ -289,6 +293,10 @@ int parseDecodeCommandLine(DecodeParams* param, CSimpleOpt* args) {
 			break;
 		}
 
+		case OPT_SAVE_FILE:
+			param->save_file_locally = true;
+			break;
+
 #ifndef TLS_DISABLED
 		case TLSConfig::OPT_TLS_PLUGIN:
 			args->OptionArg();
@@ -371,7 +379,13 @@ class DecodeProgress {
 
 public:
 	DecodeProgress() = default;
-	DecodeProgress(const LogFile& file) : file(file) {}
+	DecodeProgress(const LogFile& file, bool save) : file(file), save(save) {}
+
+	~DecodeProgress() {
+		if (lfd != -1) {
+			close(lfd);
+		}
+	}
 
 	// If there are no more mutations to pull from the file.
 	bool finished() const { return done; }
@@ -412,6 +426,21 @@ public:
 	ACTOR static Future<Void> openFileImpl(DecodeProgress* self, Reference<IBackupContainer> container) {
 		Reference<IAsyncFile> fd = wait(container->readFile(self->file.fileName));
 		self->fd = fd;
+		if (self->save) {
+			std::string dir = self->file.fileName;
+			std::size_t found = self->file.fileName.find_last_of('/');
+			if (found != std::string::npos) {
+				std::string path = self->file.fileName.substr(0, found);
+				if (!directoryExists(path)) {
+					platform::createDirectory(path);
+				}
+			}
+			self->lfd = open(self->file.fileName.c_str(), O_WRONLY | O_CREAT | O_TRUNC);
+			if (self->lfd == -1) {
+				TraceEvent(SevError, "OpenLocalFileFailed").detail("File", self->file.fileName);
+				throw platform_error();
+			}
+		}
 		while (!self->eof) {
 			wait(readAndDecodeFile(self));
 		}
@@ -436,9 +465,33 @@ public:
 			}
 
 			// Decode a file block into log_key and log_value chunks
-			Standalone<VectorRef<KeyValueRef>> chunks =
+			state Standalone<VectorRef<KeyValueRef>> chunks =
 			    wait(fileBackup::decodeMutationLogFileBlock(self->fd, self->offset, len));
 			self->blocks.push_back(chunks);
+
+			if (self->save) {
+				ASSERT(self->lfd != -1);
+
+				// Read the chunck one more time
+				state Standalone<StringRef> buf = makeString(len);
+				int rLen = wait(self->fd->read(mutateString(buf), len, self->offset));
+				if (rLen != len)
+					throw restore_bad_read();
+
+				int wlen = write(self->lfd, buf.begin(), len);
+				if (wlen != len) {
+					TraceEvent(SevError, "WriteLocalFileFailed")
+					    .detail("File", self->file.fileName)
+					    .detail("Offset", self->offset)
+					    .detail("Len", len)
+					    .detail("Wrote", wlen);
+					throw platform_error();
+				}
+				TraceEvent("WriteLocalFile")
+				    .detail("Name", self->file.fileName)
+				    .detail("Len", len)
+				    .detail("Offset", self->offset);
+			}
 
 			TraceEvent("ReadFile")
 			    .detail("Name", self->file.fileName)
@@ -463,6 +516,8 @@ public:
 	int64_t offset = 0;
 	bool eof = false;
 	bool done = false;
+	bool save = false;
+	int lfd = -1; // local file descriptor
 };
 
 ACTOR Future<Void> process_file(Reference<IBackupContainer> container, LogFile file, UID uid, DecodeParams params) {
@@ -471,7 +526,7 @@ ACTOR Future<Void> process_file(Reference<IBackupContainer> container, LogFile f
 		return Void();
 	}
 
-	state DecodeProgress progress(file);
+	state DecodeProgress progress(file, params.save_file_locally);
 	wait(progress.openFile(container));
 	while (!progress.finished()) {
 		VersionedMutations vms = progress.getNextBatch();
