@@ -178,6 +178,12 @@ public:
 	//
 	// Methods to copy an encoded version vector into the serialization buffer.
 	//
+	// Encoding methods used:
+	//
+	// - Tag localities: Run-length encoding
+	// - Tag ids: Compact representation (depending on the max tag id value)
+	// - Commit versions: Delta encoding
+	//
 
 	// Extracts information about tag ids, tag localities, and commit versions that are
 	// captured in the version vector. This will avoid the need to make multiple iterations
@@ -289,7 +295,7 @@ public:
 		}
 	}
 
-	// Copy encoded tag id and commit version delta values into the serialization buffer.
+	// Copy encoded tag id and commit version values into the serialization buffer.
 	// T: Type to be used to serialize tag ids (uint8_t/uint16_t)
 	// V: Type to be used to serialize commit version deltas (uint8_t/uint16_t/uint32_t/uint64_t)
 	template <typename T, typename V>
@@ -312,8 +318,8 @@ public:
 		}
 	}
 
-	// Figure out the type to be used to serialize commit version deltas and call the above method
-	// to do the serialization.
+	// Figure out the type to be used to serialize delta encoded commit version values,
+	// and call the above method to do the serialization.
 	// T: Type to be used to serialize tag ids (uint8_t/uint16_t)
 	template <typename T>
 	void serializeSizedTagIdsAndCommitVersions(Version minVersion, Version maxVersion, uint8_t*& out) const {
@@ -328,8 +334,8 @@ public:
 		}
 	}
 
-	// Figure out the types to be used to serialize tag ids and commit version deltas, and call the
-	// above methods to do the serialization.
+	// Figure out the types to be used to serialize (potentially compacted) tag ids and delta
+	// encoded commit version values, and call the above methods to do the serialization.
 	void serializeTagIdsAndCommitVersions(uint16_t maxTagId,
 	                                      Version minVersion,
 	                                      Version maxVersion,
