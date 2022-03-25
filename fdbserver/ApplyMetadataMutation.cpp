@@ -40,12 +40,6 @@ Reference<StorageInfo> getStorageInfo(UID id,
 		(*storageCache)[id] = storageInfo;
 	} else {
 		storageInfo = cacheItr->second;
-		if (!storageInfo->interf.isAcceptingRequests()) {
-			storageInfo->interf = decodeServerListValue(txnStateStore->readValue(serverListKeyFor(id)).get().get());
-			if (storageInfo->interf.isAcceptingRequests()) {
-				TraceEvent(SevInfo, "StorageInfoUpdatedAcceptingRequests", storageInfo->interf.id()).log();
-			}
-		}
 	}
 	return storageInfo;
 }
@@ -238,7 +232,7 @@ private:
 			txnStateStore->set(KeyValueRef(m.param1, m.param2));
 			if (storageCache) {
 				auto cacheItr = storageCache->find(id);
-				if (cacheItr == storageCache->end() || !cacheItr->second->interf.isAcceptingRequests()) {
+				if (cacheItr == storageCache->end()) {
 					Reference<StorageInfo> storageInfo = makeReference<StorageInfo>();
 					storageInfo->tag = tag;
 					Optional<Key> interfKey = txnStateStore->readValue(serverListKeyFor(id)).get();
