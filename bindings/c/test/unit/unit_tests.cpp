@@ -20,6 +20,7 @@
 
 // Unit tests for the FoundationDB C API.
 
+#include "fdb_c_options.g.h"
 #define FDB_API_VERSION 710
 #include <foundationdb/fdb_c.h>
 #include <assert.h>
@@ -2426,6 +2427,38 @@ TEST_CASE("Tenant create, access, and delete") {
 			fdb_check(wait_future(f));
 			continue;
 		}
+		tr.reset();
+		break;
+	}
+
+	while (1) {
+		StringRef begin = "\xff\xff/management/tenant_map/"_sr;
+		StringRef end = "\xff\xff/management/tenant_map0"_sr;
+
+		fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, nullptr, 0));
+		fdb::KeyValueArrayFuture f = tr.get_range(FDB_KEYSEL_FIRST_GREATER_OR_EQUAL(begin.data(), begin.size()),
+		                                          FDB_KEYSEL_FIRST_GREATER_OR_EQUAL(end.data(), end.size()),
+		                                          /* limit */ 0,
+		                                          /* target_bytes */ 0,
+		                                          /* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL,
+		                                          /* iteration */ 0,
+		                                          /* snapshot */ false,
+		                                          /* reverse */ 0);
+
+		fdb_error_t err = wait_future(f);
+		if (err) {
+			fdb::EmptyFuture f2 = tr.on_error(err);
+			fdb_check(wait_future(f2));
+			continue;
+		}
+
+		FDBKeyValue const* outKv;
+		int outCount;
+		int outMore;
+		fdb_check(f1.get(&outKv, &outCount, &outMore));
+		CHECK(outCount == 1);
+		CHECK(StringRef(outKv->key, outKv->key_length) == StringRef(tenantName).withPrefix(tenantMapKeys.begin));
+
 		tr.reset();
 		break;
 	}
