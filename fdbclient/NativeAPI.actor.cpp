@@ -8642,6 +8642,7 @@ ACTOR Future<Void> singleChangeFeedStreamInternal(KeyRange range,
 
 	state Promise<Void> refresh = results->refresh;
 	ASSERT(results->streams.size() == 1);
+	state FutureStream<ChangeFeedStreamReply> feedReplyStream = results->streams[0].getFuture();
 	ASSERT(results->storageData.size() == 1);
 	state bool atLatest = false;
 
@@ -8656,7 +8657,7 @@ ACTOR Future<Void> singleChangeFeedStreamInternal(KeyRange range,
 
 	loop {
 
-		state ChangeFeedStreamReply feedReply = waitNext(results->streams[0].getFuture());
+		state ChangeFeedStreamReply feedReply = waitNext(feedReplyStream);
 		*begin = feedReply.mutations.back().version + 1;
 
 		if (feedReply.popVersion > results->popVersion) {
