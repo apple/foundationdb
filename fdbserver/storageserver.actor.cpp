@@ -5652,7 +5652,7 @@ ACTOR Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 // }
 
 Key MoveInUpdates::getPersistKey(const Version version, const int idx) {
-	
+
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(range.begin);
 	wr << version;
@@ -5713,7 +5713,7 @@ void MoveInUpdates::addMutation(Version version, bool fromFetch, MutationRef con
 
 	auto& mLV = data->addVersionToMutationLog(version);
 	Key pk = getPersistKey(version, updates.back().mutations.size());
-	TraceEvent(SevDebug, "MoveInUpdatesPersistKey").detail("Key", pk).detail("Version", version);
+	// TraceEvent(SevDebug, "MoveInUpdatesPersistKey").detail("Key", pk).detail("Version", version);
 	ASSERT(pk > getPersistKey(version, updates.back().mutations.size() - 1));
 	data->addMutationToMutationLog(
 	    mLV, MutationRef(MutationRef::SetValue, pk, BinaryWriter::toValue(mutation, IncludeVersion())));

@@ -601,9 +601,10 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 							    .detail("DataMoveID", dataMoveID)
 							    .detail("ExistingDataMoveID", destId)
 							    .detail("ExistingDataMove", _dataMove.toString());
+							return Void();
 							// Note, When actually deleting a data move, clear only the ranges with the same dataMoveId.
-							_dataMove.setPhase(DataMoveMetaData::Deleting);
-							tr->set(dataMoveKeyFor(destId), dataMoveValue(_dataMove));
+							// _dataMove.setPhase(DataMoveMetaData::Deleting);
+							// tr->set(dataMoveKeyFor(destId), dataMoveValue(_dataMove));
 						}
 
 						TraceEvent("StartMoveKeysOldRange", relocationIntervalId)
