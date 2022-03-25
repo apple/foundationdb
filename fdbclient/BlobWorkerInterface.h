@@ -86,13 +86,14 @@ struct BlobGranuleFileRequest {
 	KeyRangeRef keyRange;
 	Version beginVersion = 0;
 	Version readVersion;
+	bool canCollapseBegin = true;
 	ReplyPromise<BlobGranuleFileReply> reply;
 
 	BlobGranuleFileRequest() {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keyRange, beginVersion, readVersion, reply, arena);
+		serializer(ar, keyRange, beginVersion, readVersion, canCollapseBegin, reply, arena);
 	}
 };
 
