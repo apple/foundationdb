@@ -24,13 +24,14 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 class GlobalTagThrottlingWorkload : public TestWorkload {
+	TransactionTag transactionTag;
 
 	ACTOR static Future<Void> setup(GlobalTagThrottlingWorkload* self, Database cx) {
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				ThrottleApi::setTagQuota(tr, "a"_sr, 100, 100, 0, 0);
+				ThrottleApi::setTagQuota(tr, self->transactionTag, 100, 100, 0, 0);
 				wait(tr->commit());
 				return Void();
 			} catch (Error& e) {
@@ -40,7 +41,9 @@ class GlobalTagThrottlingWorkload : public TestWorkload {
 	}
 
 public:
-	explicit GlobalTagThrottlingWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
+	explicit GlobalTagThrottlingWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+		transactionTag = getOption(options, "transactionTag"_sr, "sampleTag"_sr);
+	}
 
 	std::string description() const override { return "GlobalTagThrottling"; }
 	Future<Void> setup(Database const& cx) override { return clientId ? Void() : setup(this, cx); }

@@ -1,8 +1,12 @@
 [[test]]
 testTitle='GlobalTagThrottling'
 
+  [[test.knobs]]
+  global_tag_throttling=true
+
   [[test.workload]]
   testName='GlobalTagThrottling'
+  transactionTag='sampleTag'
 
   [[test.workload]]
   testName='ReadWrite'
@@ -17,3 +21,4 @@ testTitle='GlobalTagThrottling'
   valueBytes=1000
   minValueBytes=1000
   warmingDelay=10.0
+  transactionTag='sampleTag'

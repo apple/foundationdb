@@ -98,6 +98,7 @@ struct ReadWriteWorkload : KVWorkload {
 	bool rampTransactionType;
 	bool rampUpConcurrency;
 	bool batchPriority;
+	Optional<TransactionTag> transactionTag;
 
 	Standalone<StringRef> descriptionString;
 
@@ -147,6 +148,9 @@ struct ReadWriteWorkload : KVWorkload {
 		    getOption(options, LiteralStringRef("extraReadConflictRangesPerTransaction"), 0);
 		extraWriteConflictRangesPerTransaction =
 		    getOption(options, LiteralStringRef("extraWriteConflictRangesPerTransaction"), 0);
+		if (hasOption(options, "transactionTag"_sr)) {
+			transactionTag = getOption(options, "transactionTag"_sr, ""_sr);
+		}
 
 		valueString = std::string(maxValueBytes, '.');
 		if (nodePrefix > 0) {
@@ -331,6 +335,9 @@ struct ReadWriteWorkload : KVWorkload {
 	void setupTransaction(Trans* tr) {
 		if (batchPriority) {
 			tr->setOption(FDBTransactionOptions::PRIORITY_BATCH);
+		}
+		if (transactionTag.present()) {
+			tr->setOption(FDBTransactionOptions::AUTO_THROTTLE_TAG, transactionTag.get());
 		}
 	}
 
