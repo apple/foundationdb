@@ -1930,7 +1930,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 	} catch (Error& e) {
 		if (e.code() != error_code_broken_promise && // FIXME: Get rid of these broken_promise errors every time we are
 		                                             // killed by the master dying
-		    e.code() != error_code_movekeys_conflict)
+		    e.code() != error_code_movekeys_conflict && e.code() != error_code_data_move_cancelled)
 			TraceEvent(SevError, "DataDistributionQueueError", distributorId).error(e);
 		throw e;
 	}

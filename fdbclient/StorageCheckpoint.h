@@ -75,8 +75,8 @@ struct CheckpointMetaData {
 
 	std::string toString() const {
 		std::string res = "Checkpoint MetaData:\nRange: " + range.toString() + "\nVersion: " + std::to_string(version) +
-		                  "\nFormat: " + std::to_string(format) + "\nID: " + checkpointID.toString() +
-		                  "\nDataMoveID: " + dataMoveID.toString() + "\nServer: " + ssID.toString() +
+		                  "\nFormat: " + std::to_string(format) + "\nID: " + checkpointID.shortString() +
+		                  "\nDataMoveID: " + dataMoveID.shortString() + "\nServer: " + ssID.shortString() +
 		                  "\nState: " + std::to_string(static_cast<int>(state)) + "\n";
 		return res;
 	}
@@ -115,7 +115,7 @@ struct DataMoveMetaData {
 	void setPhase(Phase phase) { this->phase = static_cast<int16_t>(phase); }
 
 	std::string toString() const {
-		std::string res = "DataMoveMetaData:\nID: " + id.toString() + "\nRange: " + range.toString() +
+		std::string res = "DataMoveMetaData:\nID: " + id.shortString() + "\nRange: " + range.toString() +
 		                  //   "\nVersion: " + std::to_string(version) + "\nPriority: " + std::to_string(priority) +
 		                  "\nPhase: " + std::to_string(static_cast<int>(phase)) + "\nSource Servers: " + describe(src) +
 		                  "\nDestination Servers: " + describe(dest) + "\n";
