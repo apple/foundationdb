@@ -519,17 +519,21 @@ Future<Version> TagPartitionedLogSystem::push(Version prevVersion,
 	std::unordered_map<int, int> tLogCount;
 	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
 		int location = 0;
-		int logGroup = 0;
+		int logGroupLocal = 0;
 		for (auto& it : tLogs) {
+			if (!it->isLocal) {
+				continue;
+			}
 			for (int loc = 0; loc < it->logServers.size(); loc++) {
 				if (tpcvMap.get().find(location) != tpcvMap.get().end()) {
-					tLogCount[logGroup]++;
+					tLogCount[logGroupLocal]++;
 				}
 				location++;
 			}
-			logGroup++;
+			logGroupLocal++;
 		}
 	}
+	int logGroupLocal = 0;
 	for (auto& it : tLogs) {
 		if (it->isLocal && it->logServers.size()) {
 			if (it->connectionResetTrackers.size() == 0) {
@@ -568,7 +572,7 @@ Future<Version> TagPartitionedLogSystem::push(Version prevVersion,
 				                                                                          knownCommittedVersion,
 				                                                                          minKnownCommittedVersion,
 				                                                                          msg,
-				                                                                          tLogCount[location],
+				                                                                          tLogCount[logGroupLocal],
 				                                                                          debugID),
 				                                                        TaskPriority::ProxyTLogCommitReply)));
 				Future<Void> commitSuccess = success(allReplies.back());
@@ -577,6 +581,7 @@ Future<Version> TagPartitionedLogSystem::push(Version prevVersion,
 				location++;
 			}
 			quorumResults.push_back(quorum(tLogCommitResults, tLogCommitResults.size() - it->tLogWriteAntiQuorum));
+			logGroupLocal++;
 		}
 	}
 
