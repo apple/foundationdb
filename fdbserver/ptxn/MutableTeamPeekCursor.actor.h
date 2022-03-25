@@ -97,8 +97,12 @@ protected:
 public:
 	MutableTeamPeekCursor(const UID serverID_,
 	                      const StorageTeamID& privateMutationStorageTeamID_,
-	                      const TLogInterfaceByStorageTeamIDFunc& getTLogInterfaceByStorageTeamID_)
-	  : BaseClass(), serverID(serverID_), storageServerToTeamIDKey(::storageServerToTeamIdKey(serverID_)),
+	                      const TLogInterfaceByStorageTeamIDFunc& getTLogInterfaceByStorageTeamID_,
+	                      const Version& initialVersion_ = 0)
+
+	  : // This minus one in BaseClass is necessary since all new cursor will start with BaseClass::currentVersion + 1
+	    BaseClass(initialVersion_ - 1), serverID(serverID_),
+	    storageServerToTeamIDKey(::storageServerToTeamIdKey(serverID_)),
 	    storageTeamIDsSnapshot(privateMutationStorageTeamID_), storageTeamIDs(privateMutationStorageTeamID_),
 	    newStorageTeamIDs(privateMutationStorageTeamID_),
 	    getTLogInterfaceByStorageTeamID(getTLogInterfaceByStorageTeamID_), shouldUpdateStorageTeamCursor(false) {
@@ -110,6 +114,20 @@ public:
 		TraceEvent("MutableTeamPeekCursorCreated")
 		    .detail("ServerID", serverID)
 		    .detail("PrivateMutationStorageTeamID", privateMutationStorageTeamID);
+	}
+
+	MutableTeamPeekCursor(const UID serverID_,
+	                      const StorageServerStorageTeams& storageTeams_,
+	                      const TLogInterfaceByStorageTeamIDFunc& getTLogInterfaceByStorageTeamID_,
+	                      const Version& initialVersion_ = 0)
+	  : MutableTeamPeekCursor(serverID_,
+	                          storageTeams_.getPrivateMutationsStorageTeamID(),
+	                          getTLogInterfaceByStorageTeamID_,
+	                          initialVersion_) {
+
+		for (const auto& storageTeamID : storageTeams_.getStorageTeams()) {
+			BaseClass::addCursor(createCursor(storageTeamID));
+		}
 	}
 
 	const StorageServerStorageTeams getStorageTeamIDs() const { return storageTeamIDs; }

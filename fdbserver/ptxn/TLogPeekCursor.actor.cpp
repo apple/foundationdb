@@ -59,8 +59,8 @@ struct PeekRemoteContext {
 	const Optional<UID> debugID;
 	const StorageTeamID storageTeamID;
 
-	// The last version being processed, the peek will request lastVersion + 1
-	Version* pLastVersion;
+	// The version used for RPC
+	Version* pRpcVersion;
 
 	// The interface to the remote TLog server
 	const std::vector<TLogInterfaceBase*>& pTLogInterfaces;
@@ -86,7 +86,7 @@ struct PeekRemoteContext {
 
 	PeekRemoteContext(const Optional<UID>& debugID_,
 	                  const StorageTeamID& storageTeamID_,
-	                  Version* pLastVersion_,
+	                  Version* pRpcVersion_,
 	                  const std::vector<TLogInterfaceBase*>& pInterfaces_,
 	                  SubsequencedMessageDeserializer& deserializer_,
 	                  details::ArenaWrapper<SubsequencedMessageDeserializer::iterator>& wrappedDeserializerIterator_,
@@ -94,7 +94,7 @@ struct PeekRemoteContext {
 	                  Version* pMinKnownCommittedVersion_,
 	                  Arena* pWorkArena_,
 	                  Arena* pAttachArena_ = nullptr)
-	  : debugID(debugID_), storageTeamID(storageTeamID_), pLastVersion(pLastVersion_), pTLogInterfaces(pInterfaces_),
+	  : debugID(debugID_), storageTeamID(storageTeamID_), pRpcVersion(pRpcVersion_), pTLogInterfaces(pInterfaces_),
 	    deserializer(deserializer_), wrappedDeserializerIter(wrappedDeserializerIterator_),
 	    pMaxKnownVersion(pMaxKnownVersion_), pMinKnownCommittedVersion(pMinKnownCommittedVersion_),
 	    pWorkArena(pWorkArena_), pAttachArena(pAttachArena_) {
@@ -114,7 +114,7 @@ ACTOR Future<bool> peekRemote(PeekRemoteContext peekRemoteContext) {
 	        .pTLogInterfaces[deterministicRandom()->randomInt(0, peekRemoteContext.pTLogInterfaces.size())];
 
 	request.debugID = peekRemoteContext.debugID;
-	request.beginVersion = *peekRemoteContext.pLastVersion;
+	request.beginVersion = *peekRemoteContext.pRpcVersion;
 	request.endVersion = invalidVersion; // we *ALWAYS* try to extract *ALL* data
 	request.storageTeamID = peekRemoteContext.storageTeamID;
 
@@ -133,7 +133,7 @@ ACTOR Future<bool> peekRemote(PeekRemoteContext peekRemoteContext) {
 	*peekRemoteContext.pMaxKnownVersion = reply.maxKnownVersion;
 	*peekRemoteContext.pMinKnownCommittedVersion = reply.minKnownCommittedVersion;
 
-	*peekRemoteContext.pLastVersion = reply.endVersion;
+	*peekRemoteContext.pRpcVersion = reply.endVersion;
 	*peekRemoteContext.pWorkArena = reply.arena;
 
 	return true;
@@ -251,7 +251,7 @@ StorageTeamPeekCursor::StorageTeamPeekCursor(const Version& beginVersion_,
   : VersionSubsequencePeekCursorBase(), storageTeamID(storageTeamID_), pTLogInterfaces(pTLogInterfaces_),
     pAttachArena(pArena_), deserializer(emptyCursorHeader(), /* reportEmptyVersion_ */ true),
     wrappedDeserializerIter(deserializer.begin(), pArena_), beginVersion(beginVersion_),
-    reportEmptyVersion(reportEmptyVersion_), lastVersion(beginVersion_ - 1) {
+    reportEmptyVersion(reportEmptyVersion_), rpcVersion(beginVersion_) {
 
 	for (const auto pTLogInterface : pTLogInterfaces) {
 		ASSERT(pTLogInterface != nullptr);
@@ -270,7 +270,7 @@ Future<bool> StorageTeamPeekCursor::remoteMoreAvailableImpl() {
 	// FIXME Put debugID if necessary
 	details::StorageTeamPeekCursor::PeekRemoteContext context(Optional<UID>(),
 	                                                          getStorageTeamID(),
-	                                                          &lastVersion,
+	                                                          &rpcVersion,
 	                                                          pTLogInterfaces,
 	                                                          deserializer,
 	                                                          wrappedDeserializerIter,
