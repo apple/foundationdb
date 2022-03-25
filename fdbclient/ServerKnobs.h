@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -112,10 +112,12 @@ public:
 	// Data distribution queue
 	double HEALTH_POLL_TIME;
 	double BEST_TEAM_STUCK_DELAY;
+	double DEST_OVERLOADED_DELAY;
 	double BG_REBALANCE_POLLING_INTERVAL;
 	double BG_REBALANCE_SWITCH_CHECK_INTERVAL;
 	double DD_QUEUE_LOGGING_INTERVAL;
 	double RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
+	double RELOCATION_PARALLELISM_PER_DEST_SERVER;
 	int DD_QUEUE_MAX_KEY_SERVERS;
 	int DD_REBALANCE_PARALLELISM;
 	int DD_REBALANCE_RESET_AMOUNT;
@@ -296,6 +298,7 @@ public:
 	bool ROCKSDB_READ_RANGE_REUSE_ITERATORS;
 	int64_t ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC;
 	bool ROCKSDB_WRITE_RATE_LIMITER_AUTO_TUNE;
+	std::string DEFAULT_FDB_ROCKSDB_COLUMN_FAMILY;
 	bool ROCKSDB_PERFCONTEXT_ENABLE; // Enable rocks perf context metrics. May cause performance overhead
 	double ROCKSDB_PERFCONTEXT_SAMPLE_RATE;
 	int ROCKSDB_MAX_SUBCOMPACTIONS;
@@ -304,6 +307,7 @@ public:
 	int64_t ROCKSDB_CAN_COMMIT_COMPACT_BYTES_LIMIT;
 	int ROCKSDB_CAN_COMMIT_DELAY_ON_OVERLOAD;
 	int ROCKSDB_CAN_COMMIT_DELAY_TIMES_ON_OVERLOAD;
+	int64_t ROCKSDB_COMPACTION_READAHEAD_SIZE;
 
 	// Leader election
 	int MAX_NOTIFICATIONS;
@@ -466,6 +470,7 @@ public:
 	double RECRUITMENT_TIMEOUT;
 	int DBINFO_SEND_AMOUNT;
 	double DBINFO_BATCH_DELAY;
+	double SINGLETON_RECRUIT_BME_DELAY;
 
 	// Move Keys
 	double SHARD_READY_DELAY;
@@ -582,6 +587,7 @@ public:
 	int FETCH_KEYS_PARALLELISM_BYTES;
 	int FETCH_KEYS_PARALLELISM;
 	int FETCH_KEYS_LOWER_PRIORITY;
+	int FETCH_CHANGEFEED_PARALLELISM;
 	int BUGGIFY_BLOCK_BYTES;
 	double STORAGE_DURABILITY_LAG_REJECT_THRESHOLD;
 	double STORAGE_DURABILITY_LAG_MIN_RATE;
@@ -612,9 +618,12 @@ public:
 	double FETCH_KEYS_TOO_LONG_TIME_CRITERIA;
 	double MAX_STORAGE_COMMIT_TIME;
 	int64_t RANGESTREAM_LIMIT_BYTES;
+	int64_t CHANGEFEEDSTREAM_LIMIT_BYTES;
+	int64_t BLOBWORKERSTATUSSTREAM_LIMIT_BYTES;
 	bool ENABLE_CLEAR_RANGE_EAGER_READS;
 	bool QUICK_GET_VALUE_FALLBACK;
 	bool QUICK_GET_KEY_VALUES_FALLBACK;
+	int CHECKPOINT_TRANSFER_BLOCK_BYTES;
 	int QUICK_GET_KEY_VALUES_LIMIT;
 	int QUICK_GET_KEY_VALUES_LIMIT_BYTES;
 
@@ -653,6 +662,7 @@ public:
 	double COORDINATOR_LEADER_CONNECTION_TIMEOUT;
 
 	// Dynamic Knobs (implementation)
+	double COMPACTION_INTERVAL;
 	double UPDATE_NODE_TIMEOUT;
 	double GET_COMMITTED_VERSION_TIMEOUT;
 	double GET_SNAPSHOT_AND_CHANGES_TIMEOUT;
@@ -749,9 +759,10 @@ public:
 	                                  // queue is empty
 	int REDWOOD_LAZY_CLEAR_MAX_PAGES; // Maximum number of pages to free before ending a lazy clear cycle, unless the
 	                                  // queue is empty
-	int64_t REDWOOD_REMAP_CLEANUP_WINDOW; // Remap remover lag interval in which to coalesce page writes
-	double REDWOOD_REMAP_CLEANUP_LAG; // Maximum allowed remap remover lag behind the cleanup window as a multiple of
-	                                  // the window size
+	int64_t REDWOOD_REMAP_CLEANUP_WINDOW_BYTES; // Total size of remapped pages to keep before being removed by
+	                                            // remap cleanup
+	double REDWOOD_REMAP_CLEANUP_TOLERANCE_RATIO; // Maximum ratio of the remap cleanup window that remap cleanup is
+	                                              // allowed to be ahead or behind
 	int REDWOOD_PAGEFILE_GROWTH_SIZE_PAGES; // Number of pages to grow page file by
 	double REDWOOD_METRICS_INTERVAL;
 	double REDWOOD_HISTOGRAM_INTERVAL;
@@ -764,8 +775,9 @@ public:
 	// Cluster recovery
 	std::string CLUSTER_RECOVERY_EVENT_NAME_PREFIX;
 
-	// encrypt key proxy
+	// Encryption
 	bool ENABLE_ENCRYPTION;
+	std::string ENCRYPTION_MODE;
 
 	// blob granule stuff
 	// FIXME: configure url with database configuration instead of knob eventually
@@ -774,8 +786,18 @@ public:
 	int BG_SNAPSHOT_FILE_TARGET_BYTES;
 	int BG_DELTA_FILE_TARGET_BYTES;
 	int BG_DELTA_BYTES_BEFORE_COMPACT;
+	int BG_MAX_SPLIT_FANOUT;
+	int BG_HOT_SNAPSHOT_VERSIONS;
 
+	int BLOB_WORKER_INITIAL_SNAPSHOT_PARALLELISM;
 	double BLOB_WORKER_TIMEOUT; // Blob Manager's reaction time to a blob worker failure
+	double BLOB_WORKER_REQUEST_TIMEOUT; // Blob Worker's server-side request timeout
+	double BLOB_WORKERLIST_FETCH_INTERVAL;
+	double BLOB_WORKER_BATCH_GRV_INTERVAL;
+
+	double BLOB_MANAGER_STATUS_EXP_BACKOFF_MIN;
+	double BLOB_MANAGER_STATUS_EXP_BACKOFF_MAX;
+	double BLOB_MANAGER_STATUS_EXP_BACKOFF_EXPONENT;
 
 	ServerKnobs(Randomize, ClientKnobs*, IsSimulated);
 	void initialize(Randomize, ClientKnobs*, IsSimulated);

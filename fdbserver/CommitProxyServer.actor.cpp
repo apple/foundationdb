@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1887,11 +1887,21 @@ ACTOR Future<Void> proxyCheckSafeExclusion(Reference<AsyncVar<ServerDBInfo> cons
 		return Void();
 	}
 	try {
-		state Future<ErrorOr<DistributorExclusionSafetyCheckReply>> safeFuture =
+		state Future<ErrorOr<DistributorExclusionSafetyCheckReply>> ddSafeFuture =
 		    db->get().distributor.get().distributorExclCheckReq.tryGetReply(
 		        DistributorExclusionSafetyCheckRequest(req.exclusions));
-		DistributorExclusionSafetyCheckReply _reply = wait(throwErrorOr(safeFuture));
+		DistributorExclusionSafetyCheckReply _reply = wait(throwErrorOr(ddSafeFuture));
 		reply.safe = _reply.safe;
+		if (db->get().blobManager.present()) {
+			TraceEvent("SafetyCheckCommitProxyBM").detail("BMID", db->get().blobManager.get().id());
+			state Future<ErrorOr<BlobManagerExclusionSafetyCheckReply>> bmSafeFuture =
+			    db->get().blobManager.get().blobManagerExclCheckReq.tryGetReply(
+			        BlobManagerExclusionSafetyCheckRequest(req.exclusions));
+			BlobManagerExclusionSafetyCheckReply _reply = wait(throwErrorOr(bmSafeFuture));
+			reply.safe &= _reply.safe;
+		} else {
+			TraceEvent("SafetyCheckCommitProxyNoBM");
+		}
 	} catch (Error& e) {
 		TraceEvent("SafetyCheckCommitProxyResponseError").error(e);
 		if (e.code() != error_code_operation_cancelled) {
@@ -1954,6 +1964,8 @@ struct TransactionStateResolveContext {
 
 	// Pointer to transaction state store, shortcut for commitData.txnStateStore
 	IKeyValueStore* pTxnStateStore = nullptr;
+
+	Future<Void> txnRecovery;
 
 	// Actor streams
 	PromiseStream<Future<Void>>* pActors = nullptr;
@@ -2070,6 +2082,9 @@ ACTOR Future<Void> processTransactionStateRequestPart(TransactionStateResolveCon
 	ASSERT(pContext->pActors != nullptr);
 
 	if (pContext->receivedSequences.count(request.sequence)) {
+		if (pContext->receivedSequences.size() == pContext->maxSequence) {
+			wait(pContext->txnRecovery);
+		}
 		// This part is already received. Still we will re-broadcast it to other CommitProxies
 		pContext->pActors->send(broadcastTxnRequest(request, SERVER_KNOBS->TXN_STATE_SEND_AMOUNT, true));
 		wait(yield());
@@ -2095,7 +2110,8 @@ ACTOR Future<Void> processTransactionStateRequestPart(TransactionStateResolveCon
 	if (pContext->receivedSequences.size() == pContext->maxSequence) {
 		// Received all components of the txnStateRequest
 		ASSERT(!pContext->processed);
-		wait(processCompleteTransactionStateRequest(pContext));
+		pContext->txnRecovery = processCompleteTransactionStateRequest(pContext);
+		wait(pContext->txnRecovery);
 		pContext->processed = true;
 	}
 

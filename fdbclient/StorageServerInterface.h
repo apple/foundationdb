@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@
 
 #include <ostream>
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/StorageCheckpoint.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/fdbrpc.h"
@@ -85,6 +86,8 @@ struct StorageServerInterface {
 	RequestStream<struct OverlappingChangeFeedsRequest> overlappingChangeFeeds;
 	RequestStream<struct ChangeFeedPopRequest> changeFeedPop;
 	RequestStream<struct ChangeFeedVersionUpdateRequest> changeFeedVersionUpdate;
+	RequestStream<struct GetCheckpointRequest> checkpoint;
+	RequestStream<struct FetchCheckpointRequest> fetchCheckpoint;
 
 	explicit StorageServerInterface(UID uid) : uniqueID(uid) {}
 	StorageServerInterface() : uniqueID(deterministicRandom()->randomUniqueID()) {}
@@ -137,6 +140,9 @@ struct StorageServerInterface {
 				    RequestStream<struct ChangeFeedPopRequest>(getValue.getEndpoint().getAdjustedEndpoint(17));
 				changeFeedVersionUpdate = RequestStream<struct ChangeFeedVersionUpdateRequest>(
 				    getValue.getEndpoint().getAdjustedEndpoint(18));
+				checkpoint = RequestStream<struct GetCheckpointRequest>(getValue.getEndpoint().getAdjustedEndpoint(19));
+				fetchCheckpoint =
+				    RequestStream<struct FetchCheckpointRequest>(getValue.getEndpoint().getAdjustedEndpoint(20));
 			}
 		} else {
 			ASSERT(Ar::isDeserializing);
@@ -184,6 +190,8 @@ struct StorageServerInterface {
 		streams.push_back(overlappingChangeFeeds.getReceiver());
 		streams.push_back(changeFeedPop.getReceiver());
 		streams.push_back(changeFeedVersionUpdate.getReceiver());
+		streams.push_back(checkpoint.getReceiver());
+		streams.push_back(fetchCheckpoint.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -765,6 +773,7 @@ struct ChangeFeedStreamReply : public ReplyPromiseStreamReply {
 	VectorRef<MutationsAndVersionRef> mutations;
 	bool atLatestVersion = false;
 	Version minStreamVersion = invalidVersion;
+	Version popVersion = invalidVersion;
 
 	ChangeFeedStreamReply() {}
 
@@ -778,6 +787,7 @@ struct ChangeFeedStreamReply : public ReplyPromiseStreamReply {
 		           mutations,
 		           atLatestVersion,
 		           minStreamVersion,
+		           popVersion,
 		           arena);
 	}
 };
@@ -790,12 +800,18 @@ struct ChangeFeedStreamRequest {
 	Version begin = 0;
 	Version end = 0;
 	KeyRange range;
+	int replyBufferSize = -1;
+	bool canReadPopped = true;
+	UID debugUID; // This is only used for debugging and tracing, but being able to link a client + server side stream
+	              // is so useful for testing, and this is such small overhead compared to streaming large amounts of
+	              // change feed data, it is left in the interface
+
 	ReplyPromiseStream<ChangeFeedStreamReply> reply;
 
 	ChangeFeedStreamRequest() {}
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, rangeID, begin, end, range, reply, spanContext, arena);
+		serializer(ar, rangeID, begin, end, range, reply, spanContext, replyBufferSize, canReadPopped, debugUID, arena);
 	}
 };
 
@@ -816,22 +832,78 @@ struct ChangeFeedPopRequest {
 	}
 };
 
-struct OverlappingChangeFeedEntry {
-	Key rangeId;
+// Request to search for a checkpoint for a minimum keyrange: `range`, at the specific version,
+// in the specific format.
+// A CheckpointMetaData will be returned if the specific checkpoint is found.
+struct GetCheckpointRequest {
+	constexpr static FileIdentifier file_identifier = 13804343;
+	Version version; // The FDB version at which the checkpoint is created.
 	KeyRange range;
-	bool stopped = false;
+	int16_t format; // CheckpointFormat.
+	Optional<UID> checkpointID; // When present, look for the checkpoint with the exact UID.
+	ReplyPromise<CheckpointMetaData> reply;
 
-	bool operator==(const OverlappingChangeFeedEntry& r) const {
-		return rangeId == r.rangeId && range == r.range && stopped == r.stopped;
-	}
-
-	OverlappingChangeFeedEntry() {}
-	OverlappingChangeFeedEntry(Key const& rangeId, KeyRange const& range, bool stopped)
-	  : rangeId(rangeId), range(range), stopped(stopped) {}
+	GetCheckpointRequest() {}
+	GetCheckpointRequest(Version version, KeyRange const& range, CheckpointFormat format)
+	  : version(version), range(range), format(format) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, rangeId, range, stopped);
+		serializer(ar, version, range, format, checkpointID, reply);
+	}
+};
+
+// Reply to FetchCheckpointRequest, transfers checkpoint back to client.
+struct FetchCheckpointReply : public ReplyPromiseStreamReply {
+	constexpr static FileIdentifier file_identifier = 13804345;
+	Standalone<StringRef> token; // Serialized data specific to a particular checkpoint format.
+	Standalone<StringRef> data;
+
+	FetchCheckpointReply() {}
+	FetchCheckpointReply(StringRef token) : token(token) {}
+
+	int expectedSize() const { return data.expectedSize(); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, ReplyPromiseStreamReply::acknowledgeToken, ReplyPromiseStreamReply::sequence, token, data);
+	}
+};
+
+// Request to fetch checkpoint from a storage server.
+struct FetchCheckpointRequest {
+	constexpr static FileIdentifier file_identifier = 13804344;
+	UID checkpointID;
+	Standalone<StringRef> token; // Serialized data specific to a particular checkpoint format.
+	ReplyPromiseStream<FetchCheckpointReply> reply;
+
+	FetchCheckpointRequest() = default;
+	FetchCheckpointRequest(UID checkpointID, StringRef token) : checkpointID(checkpointID), token(token) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, checkpointID, token, reply);
+	}
+};
+
+struct OverlappingChangeFeedEntry {
+	Key rangeId;
+	KeyRange range;
+	Version emptyVersion;
+	Version stopVersion;
+
+	bool operator==(const OverlappingChangeFeedEntry& r) const {
+		return rangeId == r.rangeId && range == r.range && emptyVersion == r.emptyVersion &&
+		       stopVersion == r.stopVersion;
+	}
+
+	OverlappingChangeFeedEntry() {}
+	OverlappingChangeFeedEntry(Key const& rangeId, KeyRange const& range, Version emptyVersion, Version stopVersion)
+	  : rangeId(rangeId), range(range), emptyVersion(emptyVersion), stopVersion(stopVersion) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, rangeId, range, emptyVersion, stopVersion);
 	}
 };
 
@@ -921,6 +993,22 @@ struct GetStorageMetricsRequest {
 };
 
 struct StorageQueuingMetricsReply {
+	struct TagInfo {
+		constexpr static FileIdentifier file_identifier = 4528694;
+		TransactionTag tag;
+		double rate{ 0.0 };
+		double fractionalBusyness{ 0.0 };
+
+		TagInfo() = default;
+		TagInfo(TransactionTag const& tag, double rate, double fractionalBusyness)
+		  : tag(tag), rate(rate), fractionalBusyness(fractionalBusyness) {}
+
+		template <class Ar>
+		void serialize(Ar& ar) {
+			serializer(ar, tag, rate, fractionalBusyness);
+		}
+	};
+
 	constexpr static FileIdentifier file_identifier = 7633366;
 	double localTime;
 	int64_t instanceID; // changes if bytesDurable and bytesInput reset
@@ -931,9 +1019,7 @@ struct StorageQueuingMetricsReply {
 	double cpuUsage;
 	double diskUsage;
 	double localRateLimit;
-	Optional<TransactionTag> busiestTag;
-	double busiestTagFractionalBusyness;
-	double busiestTagRate;
+	std::vector<TagInfo> busiestTags;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -948,9 +1034,7 @@ struct StorageQueuingMetricsReply {
 		           cpuUsage,
 		           diskUsage,
 		           localRateLimit,
-		           busiestTag,
-		           busiestTagFractionalBusyness,
-		           busiestTagRate);
+		           busiestTags);
 	}
 };
 

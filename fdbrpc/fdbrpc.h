@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -274,7 +274,7 @@ struct AcknowledgementReply {
 	}
 };
 
-// Registered on the server to recieve acknowledgements that the client has received stream data. This prevents the
+// Registered on the server to receive acknowledgements that the client has received stream data. This prevents the
 // server from sending too much data to the client if the client is not consuming it.
 struct AcknowledgementReceiver final : FlowReceiver, FastAllocated<AcknowledgementReceiver> {
 	using FastAllocated<AcknowledgementReceiver>::operator new;
@@ -326,14 +326,14 @@ struct NetNotifiedQueueWithAcknowledgements final : NotifiedQueue<T>,
 	AcknowledgementReceiver acknowledgements;
 	Endpoint requestStreamEndpoint;
 	bool sentError = false;
+	Promise<Void> onConnect;
 
-	NetNotifiedQueueWithAcknowledgements(int futures, int promises) : NotifiedQueue<T>(futures, promises) {}
+	NetNotifiedQueueWithAcknowledgements(int futures, int promises)
+	  : NotifiedQueue<T>(futures, promises), onConnect(nullptr) {}
 	NetNotifiedQueueWithAcknowledgements(int futures, int promises, const Endpoint& remoteEndpoint)
-	  : NotifiedQueue<T>(futures, promises), FlowReceiver(remoteEndpoint, true) {
+	  : NotifiedQueue<T>(futures, promises), FlowReceiver(remoteEndpoint, true), onConnect(nullptr) {
 		// A ReplyPromiseStream will be terminated on the server side if the network connection with the client breaks
-		acknowledgements.failures = tagError<Void>(
-		    makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnect(remoteEndpoint.getPrimaryAddress()),
-		    operation_obsolete());
+		acknowledgements.failures = tagError<Void>(FlowTransport::transport().loadedDisconnect(), operation_obsolete());
 	}
 
 	void destroy() override { delete this; }
@@ -350,11 +350,17 @@ struct NetNotifiedQueueWithAcknowledgements final : NotifiedQueue<T>,
 				// GetKeyValuesStream requests on the same endpoint will fail
 				IFailureMonitor::failureMonitor().endpointNotFound(requestStreamEndpoint);
 			}
+			if (onConnect.isValid() && onConnect.canBeSet()) {
+				onConnect.send(Void());
+			}
 			this->sendError(message.getError());
 		} else {
 			if (message.get().asUnderlyingType().acknowledgeToken.present()) {
 				acknowledgements = AcknowledgementReceiver(
 				    FlowTransport::transport().loadedEndpoint(message.get().asUnderlyingType().acknowledgeToken.get()));
+				if (onConnect.isValid() && onConnect.canBeSet()) {
+					onConnect.send(Void());
+				}
 			}
 			if (acknowledgements.sequence != message.get().asUnderlyingType().sequence) {
 				TraceEvent(SevError, "StreamSequenceMismatch")
@@ -487,6 +493,18 @@ public:
 
 	void setRequestStreamEndpoint(const Endpoint& endpoint) { queue->requestStreamEndpoint = endpoint; }
 
+	bool connected() { return queue->acknowledgements.getRawEndpoint().isValid() || queue->error.isValid(); }
+
+	Future<Void> onConnected() {
+		if (connected()) {
+			return Void();
+		}
+		if (!queue->onConnect.isValid()) {
+			queue->onConnect = Promise<Void>();
+		}
+		return queue->onConnect.getFuture();
+	}
+
 	~ReplyPromiseStream() {
 		if (queue)
 			queue->delPromiseRef();
@@ -511,6 +529,19 @@ public:
 			queue->onEmpty = Promise<Void>();
 		}
 		return queue->onEmpty.getFuture();
+	}
+
+	bool isError() const { return !queue->isError(); }
+
+	// throws, used to short circuit waiting on the queue if there has been an unexpected error
+	Future<Void> onError() {
+		if (queue->hasError() && queue->error.code() != error_code_end_of_stream) {
+			throw queue->error;
+		}
+		if (!queue->onError.isValid()) {
+			queue->onError = Promise<Void>();
+		}
+		return queue->onError.getFuture();
 	}
 
 	uint32_t size() const { return queue->size(); }
@@ -729,10 +760,13 @@ public:
 			Future<Void> disc =
 			    makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnectOrFailure(getEndpoint());
 			auto& p = getReplyPromiseStream(value);
-			Reference<Peer> peer =
-			    FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(), true);
-			// FIXME: defer sending the message until we know the connection is established
-			endStreamOnDisconnect(disc, p, getEndpoint(), peer);
+			if (disc.isReady()) {
+				p.sendError(request_maybe_delivered());
+			} else {
+				Reference<Peer> peer =
+				    FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(), true);
+				endStreamOnDisconnect(disc, p, getEndpoint(), peer);
+			}
 			return p;
 		} else {
 			send(value);
