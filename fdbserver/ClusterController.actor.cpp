@@ -2475,11 +2475,12 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 	}
 }
 
-ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
+ACTOR Future<Void> clusterControllerCore(Reference<IClusterConnectionRecord> connRecord,
+                                         ClusterControllerFullInterface interf,
                                          Future<Void> leaderFail,
-                                         ServerCoordinators coordinators,
                                          LocalityData locality,
                                          ConfigDBType configDBType) {
+	state ServerCoordinators coordinators(connRecord);
 	state ClusterControllerData self(interf, locality, coordinators);
 	state ConfigBroadcaster configBroadcaster(coordinators, configDBType);
 	state Future<Void> coordinationPingDelay = delay(SERVER_KNOBS->WORKER_COORDINATION_PING_DELAY);
@@ -2612,7 +2613,7 @@ ACTOR Future<Void> replaceInterface(ClusterControllerFullInterface interf) {
 	}
 }
 
-ACTOR Future<Void> clusterController(ServerCoordinators coordinators,
+ACTOR Future<Void> clusterController(Reference<IClusterConnectionRecord> connRecord,
                                      Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC,
                                      bool hasConnected,
                                      Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo,
@@ -2623,9 +2624,10 @@ ACTOR Future<Void> clusterController(ServerCoordinators coordinators,
 		state bool inRole = false;
 		cci.initEndpoints();
 		try {
+			wait(connRecord->resolveHostnames());
 			// Register as a possible leader; wait to be elected
 			state Future<Void> leaderFail =
-			    tryBecomeLeader(coordinators, cci, currentCC, hasConnected, asyncPriorityInfo);
+			    tryBecomeLeader(connRecord, cci, currentCC, hasConnected, asyncPriorityInfo);
 			state Future<Void> shouldReplace = replaceInterface(cci);
 
 			while (!currentCC->get().present() || currentCC->get().get() != cci) {
@@ -2644,7 +2646,7 @@ ACTOR Future<Void> clusterController(ServerCoordinators coordinators,
 				startRole(Role::CLUSTER_CONTROLLER, cci.id(), UID());
 				inRole = true;
 
-				wait(clusterControllerCore(cci, leaderFail, coordinators, locality, configDBType));
+				wait(clusterControllerCore(connRecord, cci, leaderFail, locality, configDBType));
 			}
 		} catch (Error& e) {
 			if (inRole)
@@ -2673,15 +2675,12 @@ ACTOR Future<Void> clusterController(Reference<IClusterConnectionRecord> connRec
 	state bool hasConnected = false;
 	loop {
 		try {
-			wait(connRecord->resolveHostnames());
-			ServerCoordinators coordinators(connRecord);
-			wait(clusterController(coordinators, currentCC, hasConnected, asyncPriorityInfo, locality, configDBType));
+			wait(clusterController(connRecord, currentCC, hasConnected, asyncPriorityInfo, locality, configDBType));
+			hasConnected = true;
 		} catch (Error& e) {
 			if (e.code() != error_code_coordinators_changed)
 				throw; // Expected to terminate fdbserver
 		}
-
-		hasConnected = true;
 	}
 }
 
