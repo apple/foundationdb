@@ -7781,7 +7781,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 
 		if (seedTag == invalidTag) {
 			ssi.startAcceptingRequests();
-			self.registerInterfaceAcceptingRequests.send(false);
+			self.registerInterfaceAcceptingRequests.send(true);
 
 			// Might throw recruitment_failed in case of simultaneous master failure
 			std::pair<Version, Tag> verAndTag = wait(addStorageServer(self.cx, ssi));
@@ -7798,13 +7798,13 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 			self.tag = seedTag;
 		}
 
-		self.interfaceRegistered =
-		    storageInterfaceRegistration(&self, ssi, self.registerInterfaceAcceptingRequests.getFuture());
-		wait(delay(0));
-
 		self.storage.makeNewStorageServerDurable();
 		wait(self.storage.commit());
 		++self.counters.kvCommits;
+
+		self.interfaceRegistered =
+		    storageInterfaceRegistration(&self, ssi, self.registerInterfaceAcceptingRequests.getFuture());
+		wait(delay(0));
 
 		TraceEvent("StorageServerInit", ssi.id())
 		    .detail("Version", self.version.get())
