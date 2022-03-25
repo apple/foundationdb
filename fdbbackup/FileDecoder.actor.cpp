@@ -402,14 +402,13 @@ public:
 	VersionedMutations getNextBatch() {
 		ASSERT(!finished());
 
-		VersionedMutations vms;
 		for (auto& [version, m] : mutationBlocksByVersion) {
 			if (m.isComplete()) {
+				VersionedMutations vms;
 				vms.version = version;
-				std::vector<MutationRef> mutations = fileBackup::decodeMutationLogValue(m.serializedMutations);
-				TraceEvent("Decode").detail("Version", vms.version).detail("N", mutations.size());
-				vms.mutations.insert(vms.mutations.end(), mutations.begin(), mutations.end());
 				vms.serializedMutations = m.serializedMutations;
+				vms.mutations = fileBackup::decodeMutationLogValue(vms.serializedMutations);
+				TraceEvent("Decode").detail("Version", vms.version).detail("N", vms.mutations.size());
 				mutationBlocksByVersion.erase(version);
 				return vms;
 			}
@@ -420,7 +419,7 @@ public:
 			TraceEvent(SevWarn, "UnfishedBlocks").detail("NumberOfVersions", mutationBlocksByVersion.size());
 		}
 		done = true;
-		return vms;
+		return VersionedMutations();
 	}
 
 	ACTOR static Future<Void> openFileImpl(DecodeProgress* self, Reference<IBackupContainer> container) {
