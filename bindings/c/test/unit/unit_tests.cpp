@@ -2436,8 +2436,8 @@ TEST_CASE("Tenant create, access, and delete") {
 		StringRef end = "\xff\xff/management/tenant_map0"_sr;
 
 		fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, nullptr, 0));
-		fdb::KeyValueArrayFuture f = tr.get_range(FDB_KEYSEL_FIRST_GREATER_OR_EQUAL(begin.data(), begin.size()),
-		                                          FDB_KEYSEL_FIRST_GREATER_OR_EQUAL(end.data(), end.size()),
+		fdb::KeyValueArrayFuture f = tr.get_range(FDB_KEYSEL_FIRST_GREATER_OR_EQUAL(begin.begin(), begin.size()),
+		                                          FDB_KEYSEL_FIRST_GREATER_OR_EQUAL(end.begin(), end.size()),
 		                                          /* limit */ 0,
 		                                          /* target_bytes */ 0,
 		                                          /* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL,
@@ -2455,9 +2455,9 @@ TEST_CASE("Tenant create, access, and delete") {
 		FDBKeyValue const* outKv;
 		int outCount;
 		int outMore;
-		fdb_check(f1.get(&outKv, &outCount, &outMore));
+		fdb_check(f.get(&outKv, &outCount, &outMore));
 		CHECK(outCount == 1);
-		CHECK(StringRef(outKv->key, outKv->key_length) == StringRef(tenantName).withPrefix(tenantMapKeys.begin));
+		CHECK(StringRef(outKv->key, outKv->key_length) == StringRef(tenantName).withPrefix(begin));
 
 		tr.reset();
 		break;
