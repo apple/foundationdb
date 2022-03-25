@@ -22,6 +22,13 @@
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+ACTOR Future<Void> recurringFuture(Future<Void> what, double interval, TaskPriority taskID) {
+	loop {
+		wait(what);
+		wait(delay(interval));
+	}
+}
+
 ACTOR Future<bool> allTrue(std::vector<Future<bool>> all) {
 	state int i = 0;
 	while (i != all.size()) {

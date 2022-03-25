@@ -48,8 +48,6 @@ class TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	std::vector<Reference<TCTeamInfo>> teams;
 	ErrorOr<GetStorageMetricsReply> metrics;
 
-	GetStorageMetricsReply const& getMetrics() const { return metrics.get(); }
-
 	void setMetrics(GetStorageMetricsReply serverMetrics) { this->metrics = serverMetrics; }
 	void markTeamUnhealthy(int teamIndex);
 
@@ -73,6 +71,8 @@ public:
 	             bool inDesiredDC,
 	             Reference<LocalitySet> storageServerSet,
 	             Version addedVersion = 0);
+
+	GetStorageMetricsReply const& getMetrics() const { return metrics.get(); }
 
 	UID const& getId() const { return id; }
 	bool isInDesiredDC() const { return inDesiredDC; }

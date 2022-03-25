@@ -378,8 +378,8 @@ double TCTeamInfo::getLoadReadBandwidth() const {
 	double sum = 0;
 	int size = 0;
 	for (const auto& server : servers) {
-		if (server->serverMetricsPresent()) {
-			auto& replyValue = server->getServerMetrics();
+		if (server->metricsPresent()) {
+			auto& replyValue = server->getMetrics();
 			ASSERT(replyValue.load.bytesReadPerKSecond >= 0);
 			sum += replyValue.load.bytesReadPerKSecond;
 			size += 1;

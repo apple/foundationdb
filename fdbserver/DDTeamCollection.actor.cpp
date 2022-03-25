@@ -5656,14 +5656,13 @@ public:
 
 	ACTOR static Future<Void> GetTeam_TrueBestLeastReadBandwidth() {
 		Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
-		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		    new PolicyAcross(1, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
 		state int processSize = 5;
 		state int teamSize = 1;
 		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
-		collection->disableBuildingTeams();
-		collection->setCheckTeamDelay();
 
-		int64_t capacity = 1000 * 1024 * 1024;
+
+		int64_t capacity = 1000 * 1024 * 1024, available = 800*1024*1024;
 		std::vector<int64_t> read_bandwidths{
 			100 * 1024 * 1024, 300 * 1024 * 1024, 500 * 1024 * 1024, 700 * 1024 * 1024, 900 * 1024 * 1024
 		};
@@ -5673,12 +5672,16 @@ public:
 		GetStorageMetricsReply metrics[5];
 		for (int i = 0; i < 5; ++i) {
 			metrics[i].capacity.bytes = capacity;
-			metrics[i].available.bytes = deterministicRandom()->randomChoice(load_bytes);
+			metrics[i].available.bytes = available;
 			metrics[i].load.bytesReadPerKSecond = read_bandwidths[i];
 			metrics[i].load.bytes = deterministicRandom()->randomChoice(load_bytes);
 			collection->addTeam(std::set<UID>({ UID(i + 1, 0) }), true);
 			collection->server_info[UID(i + 1, 0)]->setMetrics(metrics[i]);
 		}
+
+		collection->disableBuildingTeams();
+		collection->setCheckTeamDelay();
+
 		bool wantsNewServers = true;
 		bool wantsTrueBest = true;
 		bool preferLowerUtilization = true;
@@ -5815,7 +5818,7 @@ TEST_CASE("/DataDistribution/GetTeam/ServerUtilizationNearCutoff") {
 	return Void();
 }
 TEST_CASE("/DataDistribution/GetTeam/TrueBestLeastReadBandwidth") {
-	wait(timeout(recurring(DDTeamCollectionUnitTest::GetTeam_TrueBestLeastReadBandwidth(), 0.1), 10));
+	Optional<Void> res = wait(timeout(recurringFuture(DDTeamCollectionUnitTest::GetTeam_TrueBestLeastReadBandwidth(), 0.1), 10));
 	return Void();
 }
 
