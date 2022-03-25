@@ -5652,10 +5652,15 @@ ACTOR Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 // }
 
 Key MoveInUpdates::getPersistKey(const Version version, const int idx) {
+	
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(range.begin);
 	wr << version;
-	wr << idx;
+	// wr.serializeBytes((const void*)(&idx), 4);
+	std::stringstream stream;
+	stream << "0x" << std::setfill('0') << std::setw(sizeof(int) * 2) << std::hex << idx;
+	std::string suffix = stream.str();
+	wr.serializeBytes((const void*)(suffix.data()), suffix.size());
 	// wr.serializeBytes(range.begin);
 	return wr.toValue();
 }
@@ -5707,10 +5712,11 @@ void MoveInUpdates::addMutation(Version version, bool fromFetch, MutationRef con
 	updates.back().mutations.push_back_deep(updates.back().arena(), mutation);
 
 	auto& mLV = data->addVersionToMutationLog(version);
-	data->addMutationToMutationLog(mLV,
-	                               MutationRef(MutationRef::SetValue,
-	                                           getPersistKey(version, updates.back().mutations.size()),
-	                                           BinaryWriter::toValue(mutation, IncludeVersion())));
+	Key pk = getPersistKey(version, updates.back().mutations.size());
+	TraceEvent(SevDebug, "MoveInUpdatesPersistKey").detail("Key", pk).detail("Version", version);
+	ASSERT(pk > getPersistKey(version, updates.back().mutations.size() - 1));
+	data->addMutationToMutationLog(
+	    mLV, MutationRef(MutationRef::SetValue, pk, BinaryWriter::toValue(mutation, IncludeVersion())));
 }
 
 MoveInShard::MoveInShard(StorageServer* server,

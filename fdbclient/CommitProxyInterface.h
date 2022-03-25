@@ -177,7 +177,7 @@ struct CommitTransactionRequest : TimedRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(
-		    ar, transaction, reply, flags, debugID, commitCostEstimation, tagSet, spanContext, tenantInfo, arena);
+		    ar, transaction, reply, arena, flags, debugID, commitCostEstimation, tagSet, spanContext, tenantInfo);
 	}
 };
 
