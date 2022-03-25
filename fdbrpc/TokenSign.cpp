@@ -59,12 +59,11 @@ public:
 }
 
 struct KeyPair {
-	Arena arena;
 	StringRef privateKey;
 	StringRef publicKey;
 };
 
-KeyPair generateEcdsaKeyPair() {
+Standalone<KeyPair> generateEcdsaKeyPair() {
 	auto params = std::add_pointer_t<EVP_PKEY>();
 	{
 		auto pctx = ::EVP_PKEY_CTX_new_id(EVP_PKEY_EC, nullptr);
@@ -88,8 +87,8 @@ KeyPair generateEcdsaKeyPair() {
 	ASSERT(key);
 	auto cg_key = ExitGuard([key]() { ::EVP_PKEY_free(key); });
 
-	auto ret = KeyPair{};
-	auto& arena = ret.arena;
+	auto ret = Standalone<KeyPair>{};
+	auto& arena = ret.arena();
 	{
 		auto len = 0;
 		len = ::i2d_PrivateKey(key, nullptr);
@@ -113,12 +112,12 @@ KeyPair generateEcdsaKeyPair() {
 
 } // namespace
 
-SignedToken signToken(Token token, StringRef keyName, StringRef privateKeyDer) {
-	auto ret = SignedToken{};
-	auto& arena = ret.arena;
+Standalone<SignedToken> signToken(Token token, StringRef keyName, StringRef privateKeyDer) {
+	auto ret = Standalone<SignedToken>{};
+	auto arena = ret.arena();
 	auto writer = ObjectWriter([&arena](size_t len) { return new (arena) uint8_t[len]; }, IncludeVersion());
 	writer.serialize(token);
-	ret.token = writer.toStringRef();
+	auto tokenstr = writer.toStringRef();
 
 	auto p_key_der = privateKeyDer.begin();
 	auto key = ::d2i_AutoPrivateKey(nullptr, &p_key_der, privateKeyDer.size());
@@ -132,7 +131,7 @@ SignedToken signToken(Token token, StringRef keyName, StringRef privateKeyDer) {
 	auto guard_mdctx = ExitGuard([mdctx]() { ::EVP_MD_CTX_free(mdctx); });
 	if (1 != ::EVP_DigestSignInit(mdctx, nullptr, ::EVP_sha256() /*Parameterize?*/, nullptr, key))
 		traceAndThrow("SignTokenInitFail");
-	if (1 != ::EVP_DigestSignUpdate(mdctx, ret.token.begin(), ret.token.size()))
+	if (1 != ::EVP_DigestSignUpdate(mdctx, tokenstr.begin(), tokenstr.size()))
 		traceAndThrow("SignTokenUpdateFail");
 	auto siglen = size_t{};
 	if (1 != ::EVP_DigestSignFinal(mdctx, nullptr, &siglen)) // assess the length first
@@ -140,6 +139,7 @@ SignedToken signToken(Token token, StringRef keyName, StringRef privateKeyDer) {
 	auto sigbuf = new (arena) uint8_t[siglen];
 	if (1 != ::EVP_DigestSignFinal(mdctx, sigbuf, &siglen))
 		traceAndThrow("SignTokenFinalizeFail");
+	ret.token = tokenstr;
 	ret.signature = StringRef(sigbuf, siglen);
 	ret.keyName = StringRef(arena, keyName);
 	return ret;
@@ -176,34 +176,47 @@ bool verifyToken(SignedToken signedToken, StringRef publicKeyDer) {
 
 void forceLinkTokenSignTests() {}
 
-TEST_CASE("/fdbrpc/token_sign") {
-	auto key_pair = generateEcdsaKeyPair();
-	auto token = Token{};
-	auto& rng = *deterministicRandom();
-	token.expiresAt = timer_monotonic() * (0.5 + rng.random01());
-	if (rng.randomInt(0, 2)) {
-		if (rng.randomInt(0, 2)) {
-			token.ipAddress = IPAddress(rng.randomUInt32());
-		} else {
-			auto v6 = std::array<uint8_t, 16>{};
-			for (auto& byte : v6)
-				byte = rng.randomUInt32() & 255;
-			token.ipAddress = IPAddress(v6);
+TEST_CASE("/fdbrpc/TokenSign") {
+	const auto num_iters = 100;
+	for (auto i = 0; i < num_iters; i++) {
+		auto key_pair = generateEcdsaKeyPair();
+		auto token = Standalone<Token>{};
+		auto arena = token.arena();
+		auto& rng = *deterministicRandom();
+		token.expiresAt = timer_monotonic() * (0.5 + rng.random01());
+		if (auto set_ip = rng.randomInt(0, 3)) {
+			if (set_ip == 1) {
+				token.ipAddress = IPAddress(rng.randomUInt32());
+			} else {
+				auto v6 = std::array<uint8_t, 16>{};
+				for (auto& byte : v6)
+					byte = rng.randomUInt32() & 255;
+				token.ipAddress = IPAddress(v6);
+			}
 		}
+		auto random_stringref = [&arena, &rng]() {
+			const auto len = rng.randomInt(1, 21);
+			auto s_raw = new (arena) uint8_t[len];
+			for (auto i = 0; i < len; i++)
+				s_raw[i] = (uint8_t)rng.randomAlphaNumeric();
+			return StringRef(s_raw, len);
+		};
+		const auto num_tenants = rng.randomInt(0, 31);
+		for (auto i = 0; i < num_tenants; i++) {
+			token.tenants.push_back(arena, random_stringref());
+		}
+		auto key_name = random_stringref();
+		auto signed_token = signToken(token, key_name, key_pair.privateKey);
+		const auto verify_expect_ok = verifyToken(signed_token, key_pair.publicKey);
+		ASSERT(verify_expect_ok);
+		// try tampering with signed token by adding one more tenant
+		token.tenants.push_back(arena, random_stringref());
+		auto writer = ObjectWriter([&arena](size_t len) { return new (arena) uint8_t[len]; }, IncludeVersion());
+		writer.serialize(token);
+		signed_token.token = writer.toStringRef();
+		const auto verify_expect_fail = verifyToken(signed_token, key_pair.publicKey);
+		ASSERT(!verify_expect_fail);
 	}
-	auto getRandomStringRef = [&arena = token.arena, &rng]() {
-		const auto len = rng.randomInt(1, 21);
-		auto s_raw = new (arena) uint8_t[len];
-		for (auto i = 0; i < len; i++)
-			s_raw[i] = (uint8_t)rng.randomAlphaNumeric();
-		return StringRef(s_raw, len);
-	};
-	const auto num_tenants = rng.randomInt(0, 31);
-	for (auto i = 0; i < num_tenants; i++) {
-		token.tenants.push_back(token.arena, getRandomStringRef());
-	}
-	auto signedToken = signToken(token, getRandomStringRef() /*keyName*/, key_pair.privateKey);
-	const auto verify_ok = verifyToken(signedToken, key_pair.publicKey);
-	ASSERT(verify_ok);
+	printf("%d runs OK\n", num_iters);
 	return Void();
 }

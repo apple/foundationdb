@@ -29,31 +29,29 @@
 
 struct Token {
 	static constexpr FileIdentifier file_identifier = 1523118;
-	Arena arena;
 	double expiresAt;
 	IPAddress ipAddress;
 	VectorRef<StringRef> tenants;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, expiresAt, ipAddress, tenants, arena);
+		serializer(ar, expiresAt, ipAddress, tenants);
 	}
 };
 
 struct SignedToken {
 	static constexpr FileIdentifier file_identifier = 5916732;
-	Arena arena;
 	StringRef token;
 	StringRef keyName;
 	StringRef signature;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, token, keyName, signature, arena);
+		serializer(ar, token, keyName, signature);
 	}
 };
 
-SignedToken signToken(Token token, StringRef keyName, StringRef privateKeyDer);
+Standalone<SignedToken> signToken(Token token, StringRef keyName, StringRef privateKeyDer);
 
 bool verifyToken(SignedToken signedToken, StringRef publicKeyDer);
 
