@@ -185,7 +185,6 @@ struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> 
 	ServerCoordinators coordinators;
 
 	Reference<ILogSystem> logSystem;
-	Version version; // The last version assigned to a proxy by getVersion()
 	double lastVersionTime;
 	LogSystemDiskQueueAdapter* txnStateLogAdapter;
 	IKeyValueStore* txnStateStore;
@@ -225,10 +224,6 @@ struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> 
 
 	RecoveryState recoveryState;
 
-	AsyncVar<Standalone<VectorRef<ResolverMoveRef>>> resolverChanges;
-	Version resolverChangesVersion;
-	std::set<UID> resolverNeedingChanges;
-
 	PromiseStream<Future<Void>> addActor;
 	Reference<AsyncVar<bool>> recruitmentStalled;
 	bool forceRecovery;
@@ -266,12 +261,11 @@ struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> 
 	  : controllerData(controllerData), dbgid(masterInterface.id()), lastEpochEnd(invalidVersion),
 	    recoveryTransactionVersion(invalidVersion), lastCommitTime(0), liveCommittedVersion(invalidVersion),
 	    databaseLocked(false), minKnownCommittedVersion(invalidVersion), hasConfiguration(false),
-	    coordinators(coordinators), version(invalidVersion), lastVersionTime(0), txnStateStore(nullptr),
-	    memoryLimit(2e9), dbId(dbId), masterInterface(masterInterface), masterLifetime(masterLifetimeToken),
-	    clusterController(clusterController), cstate(coordinators, addActor, dbgid), dbInfo(dbInfo),
-	    registrationCount(0), addActor(addActor), recruitmentStalled(makeReference<AsyncVar<bool>>(false)),
-	    forceRecovery(forceRecovery), neverCreated(false), safeLocality(tagLocalityInvalid),
-	    primaryLocality(tagLocalityInvalid), cc("Master", dbgid.toString()),
+	    coordinators(coordinators), lastVersionTime(0), txnStateStore(nullptr), memoryLimit(2e9), dbId(dbId),
+	    masterInterface(masterInterface), masterLifetime(masterLifetimeToken), clusterController(clusterController),
+	    cstate(coordinators, addActor, dbgid), dbInfo(dbInfo), registrationCount(0), addActor(addActor),
+	    recruitmentStalled(makeReference<AsyncVar<bool>>(false)), forceRecovery(forceRecovery), neverCreated(false),
+	    safeLocality(tagLocalityInvalid), primaryLocality(tagLocalityInvalid), cc("Master", dbgid.toString()),
 	    changeCoordinatorsRequests("ChangeCoordinatorsRequests", cc),
 	    getCommitVersionRequests("GetCommitVersionRequests", cc),
 	    backupWorkerDoneRequests("BackupWorkerDoneRequests", cc),

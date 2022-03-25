@@ -22,6 +22,7 @@
 
 #include "fdbclient/json_spirit/json_spirit_writer_template.h"
 #include "fdbclient/json_spirit/json_spirit_reader_template.h"
+#include "flow/Error.h"
 
 // JSONDoc is a convenient reader/writer class for manipulating JSON documents using "paths".
 // Access is done using a "path", which is a string of dot-separated

@@ -23,14 +23,15 @@
 #pragma once
 
 #include "fdbclient/CommitProxyInterface.h"
-#include "fdbclient/FDBTypes.h"
-#include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/DatabaseConfiguration.h"
-#include "fdbserver/TLogInterface.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/Notified.h"
+#include "fdbclient/StorageServerInterface.h"
+#include "fdbserver/ResolverInterface.h"
+#include "fdbserver/TLogInterface.h"
 
-typedef uint64_t DBRecoveryCount;
+using DBRecoveryCount = uint64_t;
 
 struct MasterInterface {
 	constexpr static FileIdentifier file_identifier = 5979145;
@@ -155,18 +156,20 @@ struct UpdateRecoveryDataRequest {
 	Version recoveryTransactionVersion;
 	Version lastEpochEnd;
 	std::vector<CommitProxyInterface> commitProxies;
+	std::vector<ResolverInterface> resolvers;
 	ReplyPromise<Void> reply;
 
-	UpdateRecoveryDataRequest() {}
+	UpdateRecoveryDataRequest() = default;
 	UpdateRecoveryDataRequest(Version recoveryTransactionVersion,
 	                          Version lastEpochEnd,
-	                          std::vector<CommitProxyInterface> commitProxies)
+	                          const std::vector<CommitProxyInterface>& commitProxies,
+	                          const std::vector<ResolverInterface>& resolvers)
 	  : recoveryTransactionVersion(recoveryTransactionVersion), lastEpochEnd(lastEpochEnd),
-	    commitProxies(commitProxies) {}
+	    commitProxies(commitProxies), resolvers(resolvers) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, recoveryTransactionVersion, lastEpochEnd, commitProxies, reply);
+		serializer(ar, recoveryTransactionVersion, lastEpochEnd, commitProxies, resolvers, reply);
 	}
 };
 

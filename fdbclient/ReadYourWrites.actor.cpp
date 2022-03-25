@@ -1791,8 +1791,6 @@ Future<Standalone<VectorRef<BlobGranuleChunkRef>>> ReadYourWritesTransaction::re
     Version begin,
     Optional<Version> readVersion,
     Version* readVersionOut) {
-	// Remove in V2 of API
-	ASSERT(begin == 0);
 
 	if (!options.readYourWritesDisabled) {
 		return blob_granule_no_ryw();

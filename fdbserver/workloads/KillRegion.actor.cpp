@@ -107,7 +107,10 @@ struct KillRegionWorkload : TestWorkload {
 
 		DatabaseConfiguration conf = wait(getDatabaseConfiguration(cx));
 
-		TraceEvent("ForceRecovery_GotConfig").detail("Conf", conf.toString());
+		TraceEvent("ForceRecovery_GotConfig")
+		    .setMaxEventLength(11000)
+		    .setMaxFieldLength(10000)
+		    .detail("Conf", conf.toString());
 
 		if (conf.usableRegions > 1) {
 			loop {

@@ -250,6 +250,8 @@ struct DatabaseConfiguration {
 	// Storage Migration Type
 	StorageMigrationType storageMigrationType;
 
+	// Blob Granules
+	bool blobGranulesEnabled;
 	TenantMode tenantMode;
 
 	// Excluded servers (no state should be here)
