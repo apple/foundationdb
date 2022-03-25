@@ -93,8 +93,9 @@ else()
 endif()
 
 if (NOT FDB_RELEASE)
-  string(TIMESTAMP fdb_buildtime %Y%m%d%H%M%S)
-  string(APPEND FDB_VERSION ".${fdb_buildtime}")
+  string(TIMESTAMP FDB_BUILDTIME %Y%m%d%H%M%S)
+  set(PRERELEASE_STRING ".${fdb_buildtime}")
+  set(PRERELEASE_TAG "-prerelease")
 endif()
 
 set(FDB_VERSION_PLAIN ${FDB_VERSION})
