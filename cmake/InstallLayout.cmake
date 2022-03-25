@@ -239,14 +239,6 @@ else()
   set(not_fdb_release_string "-1")
 endif()
 
-#if(FDB_PRERELEASE_NAME)
-#  if(FDB_RELEASE)
-#    set(not_fdb_release_string "")
-#  else()
-#    set(not_fdb_release_string ".${git_string}.SNAPSHOT")
-#  endif()
-#endif()
-
 #############
 # Filenames #
 #############
