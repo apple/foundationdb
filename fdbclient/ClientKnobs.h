@@ -273,6 +273,9 @@ public:
 	int MVC_CLIENTLIB_CHUNK_SIZE;
 	int MVC_CLIENTLIB_CHUNKS_PER_TRANSACTION;
 
+	// Blob Granules
+	int BG_MAX_GRANULE_PARALLELISM;
+
 	ClientKnobs(Randomize randomize);
 	void initialize(Randomize randomize);
 };
