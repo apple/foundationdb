@@ -587,27 +587,28 @@ const Key serverListKeyFor(UID serverID) {
 	return wr.toValue();
 }
 
-// TODO use flatbuffers depending on version
-const Value serverListValue(StorageServerInterface const& server) {
-	BinaryWriter wr(IncludeVersion(ProtocolVersion::withServerListValue()));
+const Value serverListValueOld(StorageServerInterfaceOld const& server) {
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withTSS()));
 	wr << server;
 	return wr.toValue();
 }
+
+const Value serverListValue(StorageServerInterface const& server) {
+	return serverListValueFB(server);
+}
+
 UID decodeServerListKey(KeyRef const& key) {
 	UID serverID;
 	BinaryReader rd(key.removePrefix(serverListKeys.begin), Unversioned());
 	rd >> serverID;
 	return serverID;
 }
-StorageServerInterface decodeServerListValue(ValueRef const& value) {
-	StorageServerInterface s;
-	BinaryReader reader(value, IncludeVersion());
+
+StorageServerInterfaceOld decodeServerListValueOld(ValueRef const& value) {
+	StorageServerInterfaceOld s;
+	BinaryReader reader(value, IncludeVersion(ProtocolVersion::withTSS()));
 	reader >> s;
 	return s;
-}
-
-const Value serverListValueFB(StorageServerInterface const& server) {
-	return ObjectWriter::toValue(server, IncludeVersion());
 }
 
 StorageServerInterface decodeServerListValueFB(ValueRef const& value) {
@@ -615,6 +616,24 @@ StorageServerInterface decodeServerListValueFB(ValueRef const& value) {
 	ObjectReader reader(value.begin(), IncludeVersion());
 	reader.deserialize(s);
 	return s;
+}
+
+StorageServerInterface decodeServerListValue(ValueRef const& value) {
+	StorageServerInterface s;
+	BinaryReader reader(value, IncludeVersion());
+
+	if (!reader.protocolVersion().hasStorageInterfaceReadiness()) {
+		reader >> s;
+		return s;
+	}
+
+	return decodeServerListValueFB(value);
+}
+
+const Value serverListValueFB(StorageServerInterface const& server) {
+	auto protocolVersion = currentProtocolVersion;
+	protocolVersion.addObjectSerializerFlag();
+	return ObjectWriter::toValue(server, IncludeVersion(protocolVersion));
 }
 
 // processClassKeys.contains(k) iff k.startsWith( processClassKeys.begin ) because '/'+1 == '0'
@@ -1401,7 +1420,7 @@ void testSSISerdes(StorageServerInterface const& ssi, bool useFB) {
 }
 
 // unit test for serialization since tss stuff had bugs
-TEST_CASE("/SystemData/SerDes/SSI") {
+TEST_CASE("/SystemData/SSI/SerDes") {
 	printf("testing ssi serdes\n");
 	LocalityData localityData(Optional<Standalone<StringRef>>(),
 	                          Standalone<StringRef>(deterministicRandom()->randomUniqueID().toString()),
@@ -1422,6 +1441,83 @@ TEST_CASE("/SystemData/SerDes/SSI") {
 	testSSISerdes(ssi, false);
 	testSSISerdes(ssi, true);
 	printf("ssi serdes test complete\n");
+
+	return Void();
+}
+
+TEST_CASE("/SystemData/SSI/Downgrade") {
+	std::vector<StorageServerInterface> newssis;
+	constexpr int num_ssis = 10;
+
+	LocalityData localityData(Optional<Standalone<StringRef>>(),
+	                          Standalone<StringRef>(deterministicRandom()->randomUniqueID().toString()),
+	                          Standalone<StringRef>(deterministicRandom()->randomUniqueID().toString()),
+	                          Optional<Standalone<StringRef>>());
+
+	for (int i = 0; i < num_ssis; i++) {
+		StorageServerInterface ssi;
+		ssi.locality = localityData;
+		ssi.uniqueID = UID(0x1234123412341234 + i, 0x5678567856785678 + i);
+		ssi.acceptingRequests = i % 2;
+		ssi.initEndpoints();
+		newssis.push_back(ssi);
+	}
+
+	for (int i = 0; i < num_ssis; i++) {
+		StorageServerInterfaceOld oldssi;
+		StorageServerInterface newssi;
+
+		auto value = serverListValueFB(newssis[i]);
+		oldssi = decodeServerListValueOld(value);
+		newssi = decodeServerListValue(value);
+
+		ASSERT(oldssi.locality == newssis[i].locality);
+		ASSERT(oldssi.id() == newssis[i].id());
+		ASSERT(oldssi.getValue.getEndpoint().token == newssis[i].getValue.getEndpoint().token);
+
+		ASSERT(newssi.locality == newssis[i].locality);
+		ASSERT(newssi.id() == newssis[i].id());
+		ASSERT(newssi.isAcceptingRequests() == newssis[i].isAcceptingRequests());
+		ASSERT(newssi.getValue.getEndpoint().token == newssis[i].getValue.getEndpoint().token);
+	}
+
+	return Void();
+}
+
+TEST_CASE("/SystemData/SSI/Upgrade") {
+	std::vector<StorageServerInterfaceOld> oldssis;
+	constexpr int num_ssis = 10;
+
+	LocalityData localityData(Optional<Standalone<StringRef>>(),
+	                          Standalone<StringRef>(deterministicRandom()->randomUniqueID().toString()),
+	                          Standalone<StringRef>(deterministicRandom()->randomUniqueID().toString()),
+	                          Optional<Standalone<StringRef>>());
+
+	for (int i = 0; i < num_ssis; i++) {
+		StorageServerInterfaceOld ssi;
+		ssi.locality = localityData;
+		ssi.uniqueID = UID(0x1234123412341234 + i, 0x5678567856785678 + i);
+		ssi.initEndpoints();
+		oldssis.push_back(ssi);
+	}
+
+	for (int i = 0; i < num_ssis; i++) {
+		StorageServerInterfaceOld oldssi;
+		StorageServerInterface newssi;
+
+		auto value = serverListValueOld(oldssis[i]);
+		oldssi = decodeServerListValueOld(value);
+		newssi = decodeServerListValue(value);
+
+		ASSERT(oldssi.locality == oldssis[i].locality);
+		ASSERT(oldssi.id() == oldssis[i].id());
+		ASSERT(oldssi.getValue.getEndpoint().token == oldssis[i].getValue.getEndpoint().token);
+
+		ASSERT(newssi.locality == oldssis[i].locality);
+		ASSERT(newssi.id() == oldssis[i].id());
+		ASSERT(newssi.isAcceptingRequests() == 0);
+		ASSERT(newssi.getValue.getEndpoint().token == oldssis[i].getValue.getEndpoint().token);
+	}
 
 	return Void();
 }

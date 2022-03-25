@@ -52,6 +52,7 @@ struct StorageQueueInfo {
 	LocalityData locality;
 	StorageQueuingMetricsReply lastReply;
 	StorageQueuingMetricsReply prevReply;
+	bool acceptingRequests;
 	Smoother smoothDurableBytes, smoothInputBytes, verySmoothDurableBytes;
 	Smoother smoothDurableVersion, smoothLatestVersion;
 	Smoother smoothFreeSpace;
@@ -70,8 +71,9 @@ struct StorageQueueInfo {
 	int totalWriteOps = 0;
 
 	StorageQueueInfo(UID id, LocalityData locality)
-	  : valid(false), id(id), locality(locality), smoothDurableBytes(SERVER_KNOBS->SMOOTHING_AMOUNT),
-	    smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
+	  : valid(false), id(id), locality(locality), acceptingRequests(false),
+	    smoothDurableBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT),
+	    verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
 	    smoothDurableVersion(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothLatestVersion(SERVER_KNOBS->SMOOTHING_AMOUNT),
 	    smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT),
 	    limitReason(limitReason_t::unlimited),

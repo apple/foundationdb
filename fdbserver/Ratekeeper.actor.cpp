@@ -121,7 +121,8 @@ public:
 					newServers[serverId] = ssi;
 
 					if (oldServers.count(serverId)) {
-						if (ssi.getValue.getEndpoint() != oldServers[serverId].getValue.getEndpoint()) {
+						if (ssi.getValue.getEndpoint() != oldServers[serverId].getValue.getEndpoint() ||
+						    ssi.isAcceptingRequests() != oldServers[serverId].isAcceptingRequests()) {
 							serverChanges.send(std::make_pair(serverId, Optional<StorageServerInterface>(ssi)));
 						}
 						oldServers.erase(serverId);
@@ -183,6 +184,7 @@ public:
 					myQueueInfo->value.busiestReadTag = reply.get().busiestTag;
 					myQueueInfo->value.busiestReadTagFractionalBusyness = reply.get().busiestTagFractionalBusyness;
 					myQueueInfo->value.busiestReadTagRate = reply.get().busiestTagRate;
+					myQueueInfo->value.acceptingRequests = ssi.isAcceptingRequests();
 				} else {
 					if (myQueueInfo->value.valid) {
 						TraceEvent("RkStorageServerDidNotRespond", self->id).detail("StorageServer", ssi.id());
@@ -255,7 +257,7 @@ public:
 			when(state std::pair<UID, Optional<StorageServerInterface>> change = waitNext(serverChanges)) {
 				wait(delay(0)); // prevent storageServerTracker from getting cancelled while on the call stack
 				if (change.second.present()) {
-					if (!change.second.get().isTss() && change.second.get().isAcceptingRequests()) {
+					if (!change.second.get().isTss()) {
 						auto& a = actors[change.first];
 						a = Future<Void>();
 						a = splitError(trackStorageServerQueueInfo(self, change.second.get()), err);
@@ -523,7 +525,7 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 	// Look at each storage server's write queue and local rate, compute and store the desired rate ratio
 	for (auto i = storageQueueInfo.begin(); i != storageQueueInfo.end(); ++i) {
 		auto const& ss = i->value;
-		if (!ss.valid || (remoteDC.present() && ss.locality.dcId() == remoteDC))
+		if (!ss.valid || !ss.acceptingRequests || (remoteDC.present() && ss.locality.dcId() == remoteDC))
 			continue;
 		++sscount;
 
