@@ -777,7 +777,7 @@ ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 	pProxyCommitData->stats.lastCommitVersionAssigned = versionReply.version;
 	pProxyCommitData->stats.getCommitVersionDist->sampleSeconds(now() - beforeGettingCommitVersion);
 
-	self->commitVersion = versionReply.version; // hfu : get commit version here
+	self->commitVersion = versionReply.version;
 	self->prevVersion = versionReply.prevVersion;
 
 	if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
@@ -2305,7 +2305,6 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
                                          Version recoveryTransactionVersion,
                                          bool firstProxy,
                                          std::string whitelistBinPaths) {
-	// hfu : recovery version is stored in commit proxy
 	state ProxyCommitData commitData(
 	    proxy.id(), master, proxy.getConsistentReadVersion, recoveryTransactionVersion, proxy.commit, db, firstProxy);
 

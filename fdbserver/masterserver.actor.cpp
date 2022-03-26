@@ -1330,7 +1330,7 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 			}
 		}
 
-		rep.version = self->version; // hfu : reply.version is master's self->version
+		rep.version = self->version;
 		rep.requestNum = req.requestNum;
 
 		proxyItr->second.replies.erase(proxyItr->second.replies.begin(),
