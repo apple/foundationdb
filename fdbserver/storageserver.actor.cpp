@@ -27,6 +27,7 @@
 #include "fdbrpc/LoadBalance.h"
 #include "flow/ActorCollection.h"
 #include "flow/Arena.h"
+#include "flow/Error.h"
 #include "flow/Hash3.h"
 #include "flow/Histogram.h"
 #include "flow/IRandom.h"
@@ -5568,7 +5569,6 @@ ACTOR Future<Void> tssDelayForever() {
 ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 	state double start;
 	try {
-
 		// if (data->registerInterfaceAcceptingRequests.canBeSet()) {
 		// 	data->registerInterfaceAcceptingRequests.send(true);
 		// 	wait(data->interfaceRegistered);
@@ -7384,7 +7384,12 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 
 	if (self->registerInterfaceAcceptingRequests.canBeSet()) {
 		self->registerInterfaceAcceptingRequests.send(true);
-		wait(self->interfaceRegistered);
+		ErrorOr<Void> e = wait(errorOr(self->interfaceRegistered));
+		if (e.isError()) {
+			TraceEvent(SevWarn, "StorageInterfaceRegistrationFailed")
+			    .detail("ServerID", ssi.id())
+			    .detail("Error", e.getError().code());
+		}
 	}
 
 	loop {
@@ -7729,25 +7734,7 @@ ACTOR Future<Void> storageInterfaceRegistration(StorageServer* self,
 			wait(replaceInterface(self, ssi));
 		}
 	} catch (Error& e) {
-		if (e.code() != error_code_worker_removed) {
-			throw;
-		}
-		state UID clusterId = wait(getClusterId(self));
-		ASSERT(self->clusterId.isValid());
-		UID durableClusterId = wait(self->clusterId.getFuture());
-		ASSERT(durableClusterId.isValid());
-		if (clusterId == durableClusterId) {
-			throw worker_removed();
-		}
-		// When a storage server connects to a new cluster, it deletes its
-		// old data and creates a new, empty data file for the new cluster.
-		// We want to avoid this and force a manual removal of the storage
-		// servers' old data when being assigned to a new cluster to avoid
-		// accidental data loss.
-		TraceEvent(SevError, "StorageServerBelongsToExistingCluster")
-		    .detail("ClusterID", durableClusterId)
-		    .detail("NewClusterID", clusterId);
-		wait(Future<Void>(Never()));
+		throw;
 	}
 
 	return Void();
@@ -7901,18 +7888,35 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		state Future<Void> f = storageInterfaceRegistration(&self, ssi, registerInterface.getFuture());
 		wait(delay(0));
 		registerInterface.send(false);
-		wait(f);
+		ErrorOr<Void> e = wait(errorOr(f));
+		if (e.isError()) {
+			Error e = f.getError();
+
+			if (e.code() != error_code_worker_removed) {
+				throw e;
+			}
+			state UID clusterId = wait(getClusterId(&self));
+			ASSERT(self.clusterId.isValid());
+			UID durableClusterId = wait(self.clusterId.getFuture());
+			ASSERT(durableClusterId.isValid());
+			if (clusterId == durableClusterId) {
+				throw worker_removed();
+			}
+			// When a storage server connects to a new cluster, it deletes its
+			// old data and creates a new, empty data file for the new cluster.
+			// We want to avoid this and force a manual removal of the storage
+			// servers' old data when being assigned to a new cluster to avoid
+			// accidental data loss.
+			TraceEvent(SevWarn, "StorageServerBelongsToExistingCluster")
+			    .detail("ServerID", ssi.id())
+			    .detail("ClusterID", durableClusterId)
+			    .detail("NewClusterID", clusterId);
+			wait(Future<Void>(Never()));
+		}
 
 		self.interfaceRegistered =
 		    storageInterfaceRegistration(&self, ssi, self.registerInterfaceAcceptingRequests.getFuture());
 		wait(delay(0));
-
-		ASSERT(self.registerInterfaceAcceptingRequests.canBeSet());
-
-		if (self.registerInterfaceAcceptingRequests.canBeSet()) {
-			self.registerInterfaceAcceptingRequests.send(true);
-			wait(self.interfaceRegistered);
-		}
 
 		TraceEvent("StorageServerStartingCore", self.thisServerID).detail("TimeTaken", now() - start);
 
