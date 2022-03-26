@@ -909,7 +909,7 @@ ACTOR Future<Void> readTransactionSystemState(Reference<MasterData> self,
 	// Recover version info
 	self->lastEpochEnd = oldLogSystem->getEnd() - 1;
 	if (self->lastEpochEnd == 0) {
-		self->recoveryTransactionVersion = 1; // recoveryTransactionVersion is set here
+		self->recoveryTransactionVersion = 1;
 	} else {
 		if (self->forceRecovery) {
 			self->recoveryTransactionVersion = self->lastEpochEnd + SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT_FORCED;

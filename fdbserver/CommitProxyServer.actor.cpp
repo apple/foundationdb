@@ -1050,6 +1050,22 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 	return Void();
 }
 
+void writeToSeedTeamServersDuringClusterSetupTxn(CommitBatchContext* self,
+                                                 const std::set<ptxn::StorageTeamID>& privateTeamsForServersInSeedTeam,
+                                                 const MutationRef& m) {
+	if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS && self->isSettingUpNewCluster()) {
+		// For a brand new cluster, sending all mutations in txn(version == 1) to seedTeam SS.
+
+		// seedTeam SS need to get the all mutations in txn(version == 1).
+		// because otherwise they would not know they are seedTeam SS until after this transaction,
+		// thus mutations in this txn will be lost.
+
+		// So we write all mutations as normal mutations to private teams of seedTeam servers,
+		// thus all data will be persisted there and mutation lost will be avoided.
+		self->writeToStorageTeams(privateTeamsForServersInSeedTeam, m);
+	}
+}
+
 /// This second pass through committed transactions assigns the actual mutations to the appropriate storage servers'
 /// tags
 ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
@@ -1142,17 +1158,6 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				self->toCommit.writeTypedMessage(m);
 				if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 					self->writeToStorageTeams(pProxyCommitData->keyInfo[m.param1].storageTeams, m);
-					if (self->isSettingUpNewCluster()) {
-						// For a brand new cluster, sending all mutations in txn(version == 1) to seedTeam SS.
-
-						// seedTeam SS need to get the all mutations in txn(version == 1).
-						// because otherwise they would not know they are seedTeam SS until after this transaction,
-						// thus mutations in this txn will be lost.
-
-						// So we write all mutations as normal mutations to private teams of seedTeam servers,
-						// thus all data will be persisted there and mutation lost will be avoided.
-						self->writeToStorageTeams(privateTeamsForServersInSeedTeam, m);
-					}
 				}
 			} else if (m.type == MutationRef::ClearRange) {
 				KeyRangeRef clearRange(KeyRangeRef(m.param1, m.param2));
@@ -1218,6 +1223,8 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 			} else {
 				UNREACHABLE();
 			}
+
+			writeToSeedTeamServersDuringClusterSetupTxn(self, privateTeamsForServersInSeedTeam, m);
 
 			// Check on backing up key, if backup ranges are defined and a normal key
 			if (!(pProxyCommitData->vecBackupKeys.size() > 1 &&
