@@ -449,7 +449,7 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 	// 	dataMove.id = dataMoveID;
 	// }
 
-	TraceEvent(SevDebug, interval.begin(), relocationIntervalId);
+	TraceEvent(SevDebug, interval.begin(), relocationIntervalId).detail("DataMoveID", dataMoveID);
 
 	try {
 		state Key begin = keys.begin;
@@ -494,16 +494,17 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 							    .detail("DataMoveID", dataMoveID)
 							    .detail("DataMove", dataMove.toString());
 							if (dataMove.getPhase() == DataMoveMetaData::Deleting) {
-								TraceEvent(SevWarn, interval.end(), relocationIntervalId)
+								TraceEvent(SevWarn, "StartMoveKeysDataMove", relocationIntervalId)
 								    .detail("DataMoveBeingDeleted", dataMoveID);
 								throw data_move_cancelled();
 							}
 							if (dataMove.getPhase() == DataMoveMetaData::Running) {
-								TraceEvent(SevWarn, interval.end(), relocationIntervalId)
+								TraceEvent(SevWarn, "StartMoveKeysDataMove", relocationIntervalId)
 								    .detail("DataMoveAlreadyCommitted", dataMoveID);
 								return Void();
 							}
-							ASSERT(dataMove.range.end == begin);
+							// if (dataMove.getPhase() == DataMoveMetaData::Prepare) {
+							// }
 						} else {
 							dataMove.id = dataMoveID;
 							TraceEvent(SevDebug, "StartMoveKeysNewDataMove", relocationIntervalId)
@@ -1220,7 +1221,7 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 							    .detail("DataMoveID", dataMoveID)
 							    .detail("DataMove", dataMove.toString());
 							if (dataMove.getPhase() == DataMoveMetaData::Deleting) {
-								TraceEvent(SevWarn, interval.end(), relocationIntervalId)
+								TraceEvent(SevWarn, "FinishMoveKeysDataMove", relocationIntervalId)
 								    .detail("DataMoveBeingDeleted", dataMoveID);
 								throw operation_cancelled();
 							}
@@ -1231,7 +1232,7 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 								currentKeys = KeyRangeRef(begin, keys.end);
 							}
 						} else {
-							TraceEvent(SevWarn, interval.end(), relocationIntervalId)
+							TraceEvent(SevWarn, "FinishMoveKeysDataMove", relocationIntervalId)
 							    .detail("DataMoveNotFound", dataMoveID);
 							throw operation_cancelled();
 						}
@@ -1275,7 +1276,7 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 							    .detail("SrcID", srcId)
 							    .detail("Dest", describe(dest))
 							    .detail("DestID", destId);
-							ASSERT(destId == dataMoveID);
+							ASSERT(destId == dataMoveID); // TODO(bug)
 						} else {
 							decodeKeyServersValue(UIDtoTagMap, keyServers[currentIndex].value, src, dest);
 						}

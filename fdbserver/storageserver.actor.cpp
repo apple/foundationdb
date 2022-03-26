@@ -5304,10 +5304,21 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 }
 
 ACTOR Future<Void> persistMoveInShardMetaData(StorageServer* data, MoveInShardMetaData* shard) {
+	Optional<Value> pm = wait(data->storage.readValue(shard->moveInShardKey()));
+	if (!pm.present()) {
+		TraceEvent("UpdatedMoveInShardMetaDataNotFound", data->thisServerID)
+		    .detail("Shard", shard->toString())
+		    .detail("ShardKey", shard->moveInShardKey())
+		    .detail("DurableVersion", data->durableVersion.get());
+		throw operation_cancelled();
+	}
 	data->storage.writeKeyValue(KeyValueRef(shard->moveInShardKey(), shard->moveInShardValue()));
 	// mLV, MutationRef(MutationRef::SetValue, shard->moveInShardKey(), shard->moveInShardValue()));
 	wait(data->durableVersion.whenAtLeast(data->storageVersion() + 1));
-	TraceEvent("UpdatedMoveInShardMetaData", data->thisServerID).detail("Shard", shard->toString());
+	TraceEvent("UpdatedMoveInShardMetaData", data->thisServerID)
+	    .detail("Shard", shard->toString())
+	    .detail("ShardKey", shard->moveInShardKey())
+	    .detail("DurableVersion", data->durableVersion.get());
 
 	return Void();
 }
@@ -5616,12 +5627,12 @@ ACTOR Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 			    .errorUnsuppressed(e)
 			    .detail("MoveInShardID", shard->id)
 			    .detail("MoveInShard", shard->toString());
-			if (attempt >= 3) {
-				throw e;
-			} else {
-				shard->setPhase(MoveInShardMetaData::Fetching);
-				wait(persistMoveInShardMetaData(data, shard.get()));
-			}
+			// if (attempt >= 3) {
+			throw e;
+			// } else {
+			// 	shard->setPhase(MoveInShardMetaData::Fetching);
+			// 	wait(persistMoveInShardMetaData(data, shard.get()));
+			// }
 		}
 		wait(delay(1, TaskPriority::FetchKeys));
 	}
@@ -5911,8 +5922,9 @@ void restoreShards(StorageServer* data,
 			for (auto it = existingShards.begin(); it != existingShards.end(); ++it) {
 				TraceEvent(SevDebug, "RestoreShardCompareAssigned", data->thisServerID)
 				    .detail("AssginedRange", keys)
-				    .detail("Shard", it->value()->debugDescribeState());
-				ASSERT(keys.contains(it->value()->keys));
+				    .detail("Shard", it->value()->debugDescribeState())
+				    .detail("ShardRange", it->value()->keys);
+				// ASSERT(keys.contains(it->value()->keys)); // TODO(bug)
 				ASSERT(it->value()->assigned());
 			}
 		} else {
@@ -5921,7 +5933,11 @@ void restoreShards(StorageServer* data,
 				TraceEvent(SevDebug, "RestoreShardCompareNotAssigned", data->thisServerID)
 				    .detail("NotAssginedRange", keys)
 				    .detail("Shard", it->value()->debugDescribeState());
-				// ASSERT(keys.contains(it->value()->keys));
+				if (it->value()->moveInShard != nullptr) {
+					TraceEvent(SevDebug, "RestoreShardNotAssignedConflict", data->thisServerID)
+					    .detail("NotAssginedRange", keys)
+					    .detail("MoveInShard", it->value()->moveInShard->toString());
+				}
 				ASSERT(it->value()->notAssigned());
 				data->addShard(ShardInfo::newNotAssigned(keys));
 			}

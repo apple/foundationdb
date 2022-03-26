@@ -535,6 +535,7 @@ static std::set<int> const& normalDDQueueErrors() {
 	if (s.empty()) {
 		s.insert(error_code_movekeys_conflict);
 		s.insert(error_code_broken_promise);
+		s.insert(error_code_data_move_cancelled);
 	}
 	return s;
 }
@@ -1010,6 +1011,7 @@ static std::set<int> const& normalDataDistributorErrors() {
 		s.insert(error_code_actor_cancelled);
 		s.insert(error_code_please_reboot);
 		s.insert(error_code_movekeys_conflict);
+		s.insert(error_code_data_move_cancelled);
 	}
 	return s;
 }
