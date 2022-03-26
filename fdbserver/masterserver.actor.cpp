@@ -1297,6 +1297,9 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 		GetCommitVersionReply rep;
 
 		if (self->version == invalidVersion) {
+			// version(invalidVersion), in MasterData constructor, version is init as a invalid version
+			// thus the reply version is recoveryTransactionVersion, which is 1 in the case of a brand new
+			// cluster(rather than a recovery)
 			self->lastVersionTime = now();
 			self->version = self->recoveryTransactionVersion;
 			rep.prevVersion = self->lastEpochEnd;

@@ -561,6 +561,9 @@ struct CommitBatchContext {
 
 	void writeToStorageTeams(const ptxn::StorageTeamID& team, StringRef m);
 
+	// true this commit is setting up a new cluster, otherwise false.
+	bool isSettingUpNewCluster();
+
 private:
 	void evaluateBatchSize();
 };
@@ -678,6 +681,10 @@ void CommitBatchContext::writeToStorageTeams(const ptxn::StorageTeamID& team, St
 	auto groupID = pProxyCommitData->tLogGroupCollection->assignStorageTeam(team)->id();
 	ASSERT(pGroupMessageBuilders.count(groupID));
 	pGroupMessageBuilders[groupID]->write(m, team);
+}
+
+bool CommitBatchContext::isSettingUpNewCluster() {
+	return commitVersion == 1;
 }
 
 // Try to identify recovery transaction and backup's apply mutations (blind writes).
@@ -1043,11 +1050,39 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 	return Void();
 }
 
+void writeToSeedTeamServersDuringClusterSetupTxn(CommitBatchContext* self,
+                                                 const std::set<ptxn::StorageTeamID>& privateTeamsForServersInSeedTeam,
+                                                 const MutationRef& m) {
+	if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS && self->isSettingUpNewCluster()) {
+		// For a brand new cluster, sending all mutations in txn(version == 1) to seedTeam SS.
+
+		// seedTeam SS need to get the all mutations in txn(version == 1).
+		// because otherwise they would not know they are seedTeam SS until after this transaction,
+		// thus mutations in this txn will be lost.
+
+		// So we write all mutations as normal mutations to private teams of seedTeam servers,
+		// thus all data will be persisted there and mutation lost will be avoided.
+		self->writeToStorageTeams(privateTeamsForServersInSeedTeam, m);
+	}
+}
+
 /// This second pass through committed transactions assigns the actual mutations to the appropriate storage servers'
 /// tags
 ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 	state ProxyCommitData* const pProxyCommitData = self->pProxyCommitData;
 	state std::vector<CommitTransactionRequest>& trs = self->trs;
+	state std::set<ptxn::StorageTeamID> privateTeamsForServersInSeedTeam;
+	if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS && self->isSettingUpNewCluster()) {
+		ASSERT(!pProxyCommitData->ssToStorageTeam.empty());
+		for (const auto& [_, teams] : pProxyCommitData->ssToStorageTeam) {
+			// applyMetadataToCommittedTransactions.applyMetadataMutations is called before,
+			// thus pProxyCommitData->ssToStorageTeam should be ready. i.e. it has all the
+			// seedTeam SS as keys, and their corresponding teams as values
+			privateTeamsForServersInSeedTeam.insert(teams.getPrivateMutationsStorageTeamID());
+		}
+		TraceEvent("AssignAllMutationsToSeedTeamServersDuringSetup")
+		    .detail("PrivateTeam", describe(privateTeamsForServersInSeedTeam));
+	}
 
 	for (self->transactionNum = 0; self->transactionNum < trs.size(); self->transactionNum++) {
 		if (!(self->committed[self->transactionNum] == ConflictBatch::TransactionCommitted &&
@@ -1188,6 +1223,8 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 			} else {
 				UNREACHABLE();
 			}
+
+			writeToSeedTeamServersDuringClusterSetupTxn(self, privateTeamsForServersInSeedTeam, m);
 
 			// Check on backing up key, if backup ranges are defined and a normal key
 			if (!(pProxyCommitData->vecBackupKeys.size() > 1 &&
