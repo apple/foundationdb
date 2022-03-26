@@ -342,23 +342,23 @@ ArenaBlock* ArenaBlock::create(int dataSize, Reference<ArenaBlock>& next) {
 				b->bigSize = 256;
 				INSTRUMENT_ALLOCATE("Arena256");
 			} else if (reqSize <= 512) {
-				b = (ArenaBlock*)FastAllocator<512>::allocate();
+				b = (ArenaBlock*)new uint8_t[512];
 				b->bigSize = 512;
 				INSTRUMENT_ALLOCATE("Arena512");
 			} else if (reqSize <= 1024) {
-				b = (ArenaBlock*)FastAllocator<1024>::allocate();
+				b = (ArenaBlock*)new uint8_t[1024];
 				b->bigSize = 1024;
 				INSTRUMENT_ALLOCATE("Arena1024");
 			} else if (reqSize <= 2048) {
-				b = (ArenaBlock*)FastAllocator<2048>::allocate();
+				b = (ArenaBlock*)new uint8_t[2048];
 				b->bigSize = 2048;
 				INSTRUMENT_ALLOCATE("Arena2048");
 			} else if (reqSize <= 4096) {
-				b = (ArenaBlock*)FastAllocator<4096>::allocate();
+				b = (ArenaBlock*)new uint8_t[4096];
 				b->bigSize = 4096;
 				INSTRUMENT_ALLOCATE("Arena4096");
 			} else {
-				b = (ArenaBlock*)FastAllocator<8192>::allocate();
+				b = (ArenaBlock*)new uint8_t[8192];
 				b->bigSize = 8192;
 				INSTRUMENT_ALLOCATE("Arena8192");
 			}
@@ -460,26 +460,26 @@ void ArenaBlock::destroyLeaf() {
 			FastAllocator<256>::release(this);
 			INSTRUMENT_RELEASE("Arena256");
 		} else if (bigSize <= 512) {
-			FastAllocator<512>::release(this);
+			delete[] reinterpret_cast<uint8_t*>(this);
 			INSTRUMENT_RELEASE("Arena512");
 		} else if (bigSize <= 1024) {
-			FastAllocator<1024>::release(this);
+			delete[] reinterpret_cast<uint8_t*>(this);
 			INSTRUMENT_RELEASE("Arena1024");
 		} else if (bigSize <= 2048) {
-			FastAllocator<2048>::release(this);
+			delete[] reinterpret_cast<uint8_t*>(this);
 			INSTRUMENT_RELEASE("Arena2048");
 		} else if (bigSize <= 4096) {
-			FastAllocator<4096>::release(this);
+			delete[] reinterpret_cast<uint8_t*>(this);
 			INSTRUMENT_RELEASE("Arena4096");
 		} else if (bigSize <= 8192) {
-			FastAllocator<8192>::release(this);
+			delete[] reinterpret_cast<uint8_t*>(this);
 			INSTRUMENT_RELEASE("Arena8192");
 		} else {
 #ifdef ALLOC_INSTRUMENTATION
 			allocInstr["ArenaHugeKB"].dealloc((bigSize + 1023) >> 10);
 #endif
 			g_hugeArenaMemory.fetch_sub(bigSize);
-			delete[](uint8_t*) this;
+			delete[] reinterpret_cast<uint8_t*>(this);
 		}
 	}
 }
