@@ -22,6 +22,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -600,10 +601,10 @@ ACTOR Future<Void> decode_logs(DecodeParams params) {
 
 int main(int argc, char** argv) {
 	try {
-		CSimpleOpt* args =
-		    new CSimpleOpt(argc, argv, file_converter::gConverterOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
+		std::unique_ptr<CSimpleOpt> args(
+		    new CSimpleOpt(argc, argv, file_converter::gConverterOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE));
 		file_converter::DecodeParams param;
-		int status = file_converter::parseDecodeCommandLine(&param, args);
+		int status = file_converter::parseDecodeCommandLine(&param, args.get());
 		std::cout << "Params: " << param.toString() << "\n";
 		if (status != FDB_EXIT_SUCCESS) {
 			file_converter::printDecodeUsage();
