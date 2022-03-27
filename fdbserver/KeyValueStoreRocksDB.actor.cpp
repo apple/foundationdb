@@ -294,6 +294,9 @@ rocksdb::ColumnFamilyOptions getCFOptions() {
 		}
 		bbOpts.block_cache = rocksdb_block_cache;
 	}
+	if (SERVER_KNOBS->ROCKSDB_BLOCK_SIZE > 0) {
+		bbOpts.block_size = SERVER_KNOBS->ROCKSDB_BLOCK_SIZE;
+	}
 
 	options.table_factory.reset(rocksdb::NewBlockBasedTableFactory(bbOpts));
 
