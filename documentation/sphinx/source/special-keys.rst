@@ -121,8 +121,8 @@ Aggregate stats about cluster health. Reading this key alone is slightly cheaper
 **Field**                           **Type** **Description**
 ----------------------------------- -------- ---------------
 batch_limited                       boolean  Whether or not the cluster is limiting batch priority transactions
-limiting_storage_durability_lag     number   storage_durability_lag that ratekeeper is using to determing throttling (see the description for storage_durability_lag)
-limiting_storage_queue              number   storage_queue that ratekeeper is using to determing throttling (see the description for storage_queue)
+limiting_storage_durability_lag     number   storage_durability_lag that ratekeeper is using to determine throttling (see the description for storage_durability_lag)
+limiting_storage_queue              number   storage_queue that ratekeeper is using to determine throttling (see the description for storage_queue)
 tps_limit                           number   The rate at which normal priority transactions are allowed to start
 worst_storage_durability_lag        number   See the description for storage_durability_lag
 worst_storage_queue                 number   See the description for storage_queue
@@ -205,6 +205,7 @@ that process, and wait for necessary data to be moved away.
 #. ``\xff\xff/management/failed_locality/<locality>`` Read/write. Indicates that the cluster should consider matching processes as permanently failed. This allows the cluster to avoid maintaining extra state and doing extra work in the hope that these processes come back. See :ref:`removing machines from a cluster <removing-machines-from-a-cluster>` for documentation for the corresponding fdbcli command.
 #. ``\xff\xff/management/options/excluded_locality/force`` Read/write. Setting this key disables safety checks for writes to ``\xff\xff/management/excluded_locality/<locality>``. Setting this key only has an effect in the current transaction and is not persisted on commit.
 #. ``\xff\xff/management/options/failed_locality/force`` Read/write. Setting this key disables safety checks for writes to ``\xff\xff/management/failed_locality/<locality>``. Setting this key only has an effect in the current transaction and is not persisted on commit.
+#. ``\xff\xff/management/tenant_map/<tenant>`` Read/write. Setting a key in this range to any value will result in a tenant being created with name ``<tenant>``. Clearing a key in this range will delete the tenant with name ``<tenant>``. Reading all or a portion of this range will return the list of tenants currently present in the cluster, excluding any changes in this transaction. Values read in this range will be JSON objects containing the metadata for the associated tenants.
 
 An exclusion is syntactically either an ip address (e.g. ``127.0.0.1``), or
 an ip address and port (e.g. ``127.0.0.1:4500``) or any locality (e.g ``locality_dcid:primary-satellite`` or

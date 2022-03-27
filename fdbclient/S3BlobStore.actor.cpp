@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,6 +34,8 @@
 #include "fdbrpc/IAsyncFile.h"
 #include "flow/UnitTest.h"
 #include "fdbclient/rapidxml/rapidxml.hpp"
+#include "fdbclient/FDBAWSCredentialsProvider.h"
+
 #include "flow/actorcompiler.h" // has to be last include
 
 using namespace rapidxml;
@@ -82,6 +84,7 @@ S3BlobStoreEndpoint::BlobKnobs::BlobKnobs() {
 	read_cache_blocks_per_file = CLIENT_KNOBS->BLOBSTORE_READ_CACHE_BLOCKS_PER_FILE;
 	max_send_bytes_per_second = CLIENT_KNOBS->BLOBSTORE_MAX_SEND_BYTES_PER_SECOND;
 	max_recv_bytes_per_second = CLIENT_KNOBS->BLOBSTORE_MAX_RECV_BYTES_PER_SECOND;
+	sdk_auth = false;
 }
 
 bool S3BlobStoreEndpoint::BlobKnobs::set(StringRef name, int value) {
@@ -118,6 +121,7 @@ bool S3BlobStoreEndpoint::BlobKnobs::set(StringRef name, int value) {
 	TRY_PARAM(read_cache_blocks_per_file, rcb);
 	TRY_PARAM(max_send_bytes_per_second, sbps);
 	TRY_PARAM(max_recv_bytes_per_second, rbps);
+	TRY_PARAM(sdk_auth, sa);
 #undef TRY_PARAM
 	return false;
 }
@@ -506,7 +510,38 @@ ACTOR Future<Optional<json_spirit::mObject>> tryReadJSONFile(std::string path) {
 	return Optional<json_spirit::mObject>();
 }
 
+// If the credentials expire, the connection will eventually fail and be discarded from the pool, and then a new
+// connection will be constructed, which will call this again to get updated credentials
+static S3BlobStoreEndpoint::Credentials getSecretSdk() {
+#ifdef BUILD_AWS_BACKUP
+	double elapsed = -timer_monotonic();
+	Aws::Auth::AWSCredentials awsCreds = FDBAWSCredentialsProvider::getAwsCredentials();
+	elapsed += timer_monotonic();
+
+	if (awsCreds.IsEmpty()) {
+		TraceEvent(SevWarn, "S3BlobStoreAWSCredsEmpty");
+		throw backup_auth_missing();
+	}
+
+	S3BlobStoreEndpoint::Credentials fdbCreds;
+	fdbCreds.key = awsCreds.GetAWSAccessKeyId();
+	fdbCreds.secret = awsCreds.GetAWSSecretKey();
+	fdbCreds.securityToken = awsCreds.GetSessionToken();
+
+	TraceEvent("S3BlobStoreGotSdkCredentials").suppressFor(60).detail("Duration", elapsed);
+
+	return fdbCreds;
+#else
+	TraceEvent(SevError, "S3BlobStoreNoSDK");
+	throw backup_auth_missing();
+#endif
+}
+
 ACTOR Future<Void> updateSecret_impl(Reference<S3BlobStoreEndpoint> b) {
+	if (b->knobs.sdk_auth) {
+		b->credentials = getSecretSdk();
+		return Void();
+	}
 	std::vector<std::string>* pFiles = (std::vector<std::string>*)g_network->global(INetwork::enBlobCredentialFiles);
 	if (pFiles == nullptr)
 		return Void();
@@ -538,7 +573,7 @@ ACTOR Future<Void> updateSecret_impl(Reference<S3BlobStoreEndpoint> b) {
 			JSONDoc accounts(doc.last().get_obj());
 			if (accounts.has(credentialsFileKey, false) && accounts.last().type() == json_spirit::obj_type) {
 				JSONDoc account(accounts.last());
-				S3BlobStoreEndpoint::Credentials creds;
+				S3BlobStoreEndpoint::Credentials creds = b->credentials.get();
 				if (b->lookupKey) {
 					std::string apiKey;
 					if (account.tryGet("api_key", apiKey))
@@ -601,7 +636,7 @@ ACTOR Future<S3BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<S3B
 	    .detail("RemoteEndpoint", conn->getPeerAddress())
 	    .detail("ExpiresIn", b->knobs.max_connection_life);
 
-	if (b->lookupKey || b->lookupSecret)
+	if (b->lookupKey || b->lookupSecret || b->knobs.sdk_auth)
 		wait(b->updateSecret());
 
 	return S3BlobStoreEndpoint::ReusableConnection({ conn, now() + b->knobs.max_connection_life });

@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -555,7 +555,7 @@ struct StorageServerMetrics {
 		req.reply.send(reply);
 	}
 
-	std::vector<KeyRef> getSplitPoints(KeyRangeRef range, int64_t chunkSize) {
+	std::vector<KeyRef> getSplitPoints(KeyRangeRef range, int64_t chunkSize, Optional<Key> prefixToRemove) {
 		std::vector<KeyRef> toReturn;
 		KeyRef beginKey = range.begin;
 		IndexedSet<Key, int64_t>::iterator endKey =
@@ -568,7 +568,11 @@ struct StorageServerMetrics {
 				++endKey;
 				continue;
 			}
-			toReturn.push_back(*endKey);
+			KeyRef splitPoint = *endKey;
+			if (prefixToRemove.present()) {
+				splitPoint = splitPoint.removePrefix(prefixToRemove.get());
+			}
+			toReturn.push_back(splitPoint);
 			beginKey = *endKey;
 			endKey =
 			    byteSample.sample.index(byteSample.sample.sumTo(byteSample.sample.lower_bound(beginKey)) + chunkSize);
@@ -576,9 +580,13 @@ struct StorageServerMetrics {
 		return toReturn;
 	}
 
-	void getSplitPoints(SplitRangeRequest req) {
+	void getSplitPoints(SplitRangeRequest req, Optional<Key> prefix) {
 		SplitRangeReply reply;
-		std::vector<KeyRef> points = getSplitPoints(req.keys, req.chunkSize);
+		KeyRangeRef range = req.keys;
+		if (prefix.present()) {
+			range = range.withPrefix(prefix.get(), req.arena);
+		}
+		std::vector<KeyRef> points = getSplitPoints(range, req.chunkSize, prefix);
 
 		reply.splitPoints.append_deep(reply.splitPoints.arena(), points.data(), points.size());
 		req.reply.send(reply);
@@ -621,8 +629,8 @@ TEST_CASE("/fdbserver/StorageMetricSample/rangeSplitPoints/simple") {
 	ssm.byteSample.sample.insert(LiteralStringRef("But"), 100 * sampleUnit);
 	ssm.byteSample.sample.insert(LiteralStringRef("Cat"), 300 * sampleUnit);
 
-	std::vector<KeyRef> t =
-	    ssm.getSplitPoints(KeyRangeRef(LiteralStringRef("A"), LiteralStringRef("C")), 2000 * sampleUnit);
+	std::vector<KeyRef> t = ssm.getSplitPoints(
+	    KeyRangeRef(LiteralStringRef("A"), LiteralStringRef("C")), 2000 * sampleUnit, Optional<Key>());
 
 	ASSERT(t.size() == 1 && t[0] == LiteralStringRef("Bah"));
 
@@ -643,8 +651,8 @@ TEST_CASE("/fdbserver/StorageMetricSample/rangeSplitPoints/multipleReturnedPoint
 	ssm.byteSample.sample.insert(LiteralStringRef("But"), 100 * sampleUnit);
 	ssm.byteSample.sample.insert(LiteralStringRef("Cat"), 300 * sampleUnit);
 
-	std::vector<KeyRef> t =
-	    ssm.getSplitPoints(KeyRangeRef(LiteralStringRef("A"), LiteralStringRef("C")), 600 * sampleUnit);
+	std::vector<KeyRef> t = ssm.getSplitPoints(
+	    KeyRangeRef(LiteralStringRef("A"), LiteralStringRef("C")), 600 * sampleUnit, Optional<Key>());
 
 	ASSERT(t.size() == 3 && t[0] == LiteralStringRef("Absolute") && t[1] == LiteralStringRef("Apple") &&
 	       t[2] == LiteralStringRef("Bah"));
@@ -666,8 +674,8 @@ TEST_CASE("/fdbserver/StorageMetricSample/rangeSplitPoints/noneSplitable") {
 	ssm.byteSample.sample.insert(LiteralStringRef("But"), 100 * sampleUnit);
 	ssm.byteSample.sample.insert(LiteralStringRef("Cat"), 300 * sampleUnit);
 
-	std::vector<KeyRef> t =
-	    ssm.getSplitPoints(KeyRangeRef(LiteralStringRef("A"), LiteralStringRef("C")), 10000 * sampleUnit);
+	std::vector<KeyRef> t = ssm.getSplitPoints(
+	    KeyRangeRef(LiteralStringRef("A"), LiteralStringRef("C")), 10000 * sampleUnit, Optional<Key>());
 
 	ASSERT(t.size() == 0);
 
@@ -688,8 +696,8 @@ TEST_CASE("/fdbserver/StorageMetricSample/rangeSplitPoints/chunkTooLarge") {
 	ssm.byteSample.sample.insert(LiteralStringRef("But"), 10 * sampleUnit);
 	ssm.byteSample.sample.insert(LiteralStringRef("Cat"), 30 * sampleUnit);
 
-	std::vector<KeyRef> t =
-	    ssm.getSplitPoints(KeyRangeRef(LiteralStringRef("A"), LiteralStringRef("C")), 1000 * sampleUnit);
+	std::vector<KeyRef> t = ssm.getSplitPoints(
+	    KeyRangeRef(LiteralStringRef("A"), LiteralStringRef("C")), 1000 * sampleUnit, Optional<Key>());
 
 	ASSERT(t.size() == 0);
 

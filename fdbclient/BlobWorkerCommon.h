@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2021 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -37,6 +37,9 @@ struct BlobWorkerStats {
 	Counter readReqDeltaBytesReturned;
 	Counter commitVersionChecks;
 	Counter granuleUpdateErrors;
+	Counter granuleRequestTimeouts;
+	Counter readRequestsWithBegin;
+	Counter readRequestsCollapsed;
 
 	int numRangesAssigned;
 	int mutationBytesBuffered;
@@ -57,7 +60,9 @@ struct BlobWorkerStats {
 	    wrongShardServer("WrongShardServer", cc), changeFeedInputBytes("RangeFeedInputBytes", cc),
 	    readReqTotalFilesReturned("ReadReqTotalFilesReturned", cc),
 	    readReqDeltaBytesReturned("ReadReqDeltaBytesReturned", cc), commitVersionChecks("CommitVersionChecks", cc),
-	    granuleUpdateErrors("GranuleUpdateErrors", cc), numRangesAssigned(0), mutationBytesBuffered(0) {
+	    granuleUpdateErrors("GranuleUpdateErrors", cc), granuleRequestTimeouts("GranuleRequestTimeouts", cc),
+	    readRequestsWithBegin("ReadRequestsWithBegin", cc), readRequestsCollapsed("ReadRequestsCollapsed", cc),
+	    numRangesAssigned(0), mutationBytesBuffered(0), activeReadRequests(0) {
 		specialCounter(cc, "NumRangesAssigned", [this]() { return this->numRangesAssigned; });
 		specialCounter(cc, "MutationBytesBuffered", [this]() { return this->mutationBytesBuffered; });
 		specialCounter(cc, "ActiveReadRequests", [this]() { return this->activeReadRequests; });

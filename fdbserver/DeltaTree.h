@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1095,20 +1095,48 @@ public:
 	// DecodedNodes are stored in a contiguous vector, which sometimes must be expanded, so care
 	// must be taken to resolve DecodedNode pointers again after the DecodeCache has new entries added.
 	struct DecodeCache : FastAllocated<DecodeCache>, ReferenceCounted<DecodeCache> {
-		DecodeCache(const T& lowerBound = T(), const T& upperBound = T())
-		  : lowerBound(arena, lowerBound), upperBound(arena, upperBound) {
+		DecodeCache(const T& lowerBound = T(), const T& upperBound = T(), int64_t* pMemoryTracker = nullptr)
+		  : lowerBound(arena, lowerBound), upperBound(arena, upperBound), lastKnownUsedMemory(0),
+		    pMemoryTracker(pMemoryTracker) {
 			decodedNodes.reserve(10);
 			deltatree_printf("DecodedNode size: %d\n", sizeof(DecodedNode));
+		}
+
+		~DecodeCache() {
+			if (pMemoryTracker != nullptr) {
+				// Do not update, only subtract the last known amount which would have been
+				// published to the counter
+				*pMemoryTracker -= lastKnownUsedMemory;
+			}
 		}
 
 		Arena arena;
 		T lowerBound;
 		T upperBound;
 
+		// Track the amount of memory used by the vector and arena and publish updates to some counter.
+		// Note that no update is pushed on construction because a Cursor will surely soon follow.
+		// Updates are pushed to the counter on
+		//    DecodeCache clear
+		//    DecodeCache destruction
+		//    Cursor destruction
+		// as those are the most efficient times to publish an update.
+		int lastKnownUsedMemory;
+		int64_t* pMemoryTracker;
+
 		// Index 0 is always the root
 		std::vector<DecodedNode> decodedNodes;
 
 		DecodedNode& get(int index) { return decodedNodes[index]; }
+
+		void updateUsedMemory() {
+			int usedNow = sizeof(DeltaTree2) + arena.getSize(FastInaccurateEstimate::True) +
+			              (decodedNodes.capacity() * sizeof(DecodedNode));
+			if (pMemoryTracker != nullptr) {
+				*pMemoryTracker += (usedNow - lastKnownUsedMemory);
+			}
+			lastKnownUsedMemory = usedNow;
+		}
 
 		template <class... Args>
 		int emplace_new(Args&&... args) {
@@ -1125,6 +1153,7 @@ public:
 			lowerBound = T(a, lowerBound);
 			upperBound = T(a, upperBound);
 			arena = a;
+			updateUsedMemory();
 		}
 	};
 
@@ -1141,6 +1170,12 @@ public:
 
 		// Copy constructor does not copy item because normally a copied cursor will be immediately moved.
 		Cursor(const Cursor& c) : tree(c.tree), cache(c.cache), nodeIndex(c.nodeIndex) {}
+
+		~Cursor() {
+			if (cache != nullptr) {
+				cache->updateUsedMemory();
+			}
+		}
 
 		Cursor next() const {
 			Cursor c = *this;
@@ -1545,7 +1580,17 @@ public:
 			T leftBase = leftBaseIndex == -1 ? cache->lowerBound : get(cache->get(leftBaseIndex));
 			T rightBase = rightBaseIndex == -1 ? cache->upperBound : get(cache->get(rightBaseIndex));
 
-			int common = leftBase.getCommonPrefixLen(rightBase, skipLen);
+			// If seek has reached a non-edge node then whatever bytes the left and right bases
+			// have in common are definitely in common with k.  However, for an edge node there
+			// is no guarantee, as one of the bases will be the lower or upper decode boundary
+			// and it is possible to add elements to the DeltaTree beyond those boundaries.
+			int common;
+			if (leftBaseIndex == -1 || rightBaseIndex == -1) {
+				common = 0;
+			} else {
+				common = leftBase.getCommonPrefixLen(rightBase, skipLen);
+			}
+
 			int commonWithLeftParent = k.getCommonPrefixLen(leftBase, common);
 			int commonWithRightParent = k.getCommonPrefixLen(rightBase, common);
 			bool borrowFromLeft = commonWithLeftParent >= commonWithRightParent;

@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,6 +27,7 @@
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/DatabaseContext.h" // for clone()
+#include "fdbserver/KnobProtectiveGroups.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbrpc/simulator.h"
 #include "flow/actorcompiler.h"
@@ -205,9 +206,14 @@ public:
 	ISimulator::BackupAgentType simBackupAgents; // If set to true, then the simulation runs backup agents on the
 	                                             // workers. Can only be used in simulation.
 	ISimulator::BackupAgentType simDrAgents;
+
+	KnobKeyValuePairs overrideKnobs;
 };
 
-ACTOR Future<DistributedTestResults> runWorkload(Database cx, std::vector<TesterInterface> testers, TestSpec spec);
+ACTOR Future<DistributedTestResults> runWorkload(Database cx,
+                                                 std::vector<TesterInterface> testers,
+                                                 TestSpec spec,
+                                                 Optional<TenantName> defaultTenant);
 
 void logMetrics(std::vector<PerfMetric> metrics);
 

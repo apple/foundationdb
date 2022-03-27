@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,13 +26,14 @@
 #endif
 
 #include <errno.h>
-#include "contrib/fmt-8.0.1/include/fmt/format.h"
+#include "contrib/fmt-8.1.1/include/fmt/format.h"
 #include "flow/Platform.h"
 #include "flow/Platform.actor.h"
 #include "flow/Arena.h"
 
 #if (!defined(TLS_DISABLED) && !defined(_WIN32))
 #include "flow/StreamCipher.h"
+#include "flow/BlobCipher.h"
 #endif
 #include "flow/Trace.h"
 #include "flow/Error.h"
@@ -3231,6 +3232,10 @@ extern "C" void flushAndExit(int exitCode) {
 	flushTraceFileVoid();
 	fflush(stdout);
 	closeTraceFile();
+
+	// Flush all output streams. The original intent is to flush the outfile for contrib/debug_determinism.
+	fflush(nullptr);
+
 #ifdef USE_GCOV
 	__gcov_flush();
 #endif
@@ -3497,6 +3502,7 @@ void crashHandler(int sig) {
 #if (!defined(TLS_DISABLED) && !defined(_WIN32))
 	StreamCipherKey::cleanup();
 	StreamCipher::cleanup();
+	BlobCipherKeyCache::cleanup();
 #endif
 
 	fflush(stdout);

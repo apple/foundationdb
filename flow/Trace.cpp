@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -399,6 +399,8 @@ public:
 		// Without this we would never see any trace events from that loop, and it would be more difficult to identify
 		// where the process is actually stuck.
 		if (g_network && g_network->isSimulated() && bufferLength > 1e8) {
+			fprintf(stderr, "Trace log buffer overflow\n");
+			fprintf(stderr, "Last event: %s\n", fields.toString().c_str());
 			// Setting this to 0 avoids a recurse from the assertion trace event and also prevents a situation where
 			// we roll the trace log only to log the single assertion event when using --crash.
 			bufferLength = 0;
@@ -1020,7 +1022,7 @@ BaseTraceEvent& BaseTraceEvent::detailImpl(std::string&& key, std::string&& valu
 		if (maxEventLength >= 0 && fields.sizeBytes() > maxEventLength) {
 			TraceEvent(g_network && g_network->isSimulated() ? SevError : SevWarnAlways, "TraceEventOverflow")
 			    .setMaxEventLength(1000)
-			    .detail("TraceFirstBytes", fields.toString().substr(300));
+			    .detail("TraceFirstBytes", fields.toString().substr(0, 300));
 			enabled = false;
 		}
 		--g_allocation_tracing_disabled;

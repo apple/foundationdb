@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -475,6 +475,7 @@ using KeyRange = Standalone<KeyRangeRef>;
 using KeyValue = Standalone<KeyValueRef>;
 using KeySelector = Standalone<struct KeySelectorRef>;
 using RangeResult = Standalone<struct RangeResultRef>;
+using MappedRangeResult = Standalone<struct MappedRangeResultRef>;
 
 enum { invalidVersion = -1, latestVersion = -2, MAX_VERSION = std::numeric_limits<int64_t>::max() };
 
@@ -546,6 +547,7 @@ public:
 	KeyRef getKey() const { return key; }
 
 	void setKey(KeyRef const& key);
+	void setKeyUnlimited(KeyRef const& key);
 
 	std::string toString() const;
 
@@ -593,6 +595,11 @@ inline bool selectorInRange(KeySelectorRef const& sel, KeyRangeRef const& range)
 	return sel.getKey() >= range.begin && (sel.isBackward() ? sel.getKey() <= range.end : sel.getKey() < range.end);
 }
 
+template <>
+struct Traceable<KeySelectorRef> : std::true_type {
+	static std::string toString(const KeySelectorRef& value) { return value.toString(); }
+};
+
 template <class Val>
 struct KeyRangeWith : KeyRange {
 	Val value;
@@ -610,6 +617,8 @@ KeyRangeWith<Val> keyRangeWith(const KeyRangeRef& range, const Val& value) {
 	return KeyRangeWith<Val>(range, value);
 }
 
+struct MappedKeyValueRef;
+
 struct GetRangeLimits {
 	enum { ROW_LIMIT_UNLIMITED = -1, BYTE_LIMIT_UNLIMITED = -1 };
 
@@ -623,6 +632,8 @@ struct GetRangeLimits {
 
 	void decrement(VectorRef<KeyValueRef> const& data);
 	void decrement(KeyValueRef const& data);
+	void decrement(VectorRef<MappedKeyValueRef> const& data);
+	void decrement(MappedKeyValueRef const& data);
 
 	// True if either the row or byte limit has been reached
 	bool isReached();
@@ -645,7 +656,7 @@ struct RangeResultRef : VectorRef<KeyValueRef> {
 	           // limits requested) False implies that no such values remain
 	Optional<KeyRef> readThrough; // Only present when 'more' is true. When present, this value represent the end (or
 	                              // beginning if reverse) of the range which was read to produce these results. This is
-	                              // guarenteed to be less than the requested range.
+	                              // guaranteed to be less than the requested range.
 	bool readToBegin;
 	bool readThroughEnd;
 
@@ -680,6 +691,114 @@ template <>
 struct Traceable<RangeResultRef> : std::true_type {
 	static std::string toString(const RangeResultRef& value) {
 		return Traceable<VectorRef<KeyValueRef>>::toString(value);
+	}
+};
+
+// Similar to KeyValueRef, but result can be empty.
+struct GetValueReqAndResultRef {
+	KeyRef key;
+	Optional<ValueRef> result;
+
+	GetValueReqAndResultRef() {}
+	GetValueReqAndResultRef(Arena& a, const GetValueReqAndResultRef& copyFrom)
+	  : key(a, copyFrom.key), result(a, copyFrom.result) {}
+
+	bool operator==(const GetValueReqAndResultRef& rhs) const { return key == rhs.key && result == rhs.result; }
+	bool operator!=(const GetValueReqAndResultRef& rhs) const { return !(rhs == *this); }
+	int expectedSize() const { return key.expectedSize() + result.expectedSize(); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, key, result);
+	}
+};
+
+struct GetRangeReqAndResultRef {
+	KeySelectorRef begin, end;
+	RangeResultRef result;
+
+	GetRangeReqAndResultRef() {}
+	//	KeyValueRef(const KeyRef& key, const ValueRef& value) : key(key), value(value) {}
+	GetRangeReqAndResultRef(Arena& a, const GetRangeReqAndResultRef& copyFrom)
+	  : begin(a, copyFrom.begin), end(a, copyFrom.end), result(a, copyFrom.result) {}
+
+	bool operator==(const GetRangeReqAndResultRef& rhs) const {
+		return begin == rhs.begin && end == rhs.end && result == rhs.result;
+	}
+	bool operator!=(const GetRangeReqAndResultRef& rhs) const { return !(rhs == *this); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, begin, end, result);
+	}
+};
+
+using MappedReqAndResultRef = std::variant<GetValueReqAndResultRef, GetRangeReqAndResultRef>;
+
+struct MappedKeyValueRef : KeyValueRef {
+	// Save the original key value at the base (KeyValueRef).
+
+	MappedReqAndResultRef reqAndResult;
+
+	MappedKeyValueRef() = default;
+	MappedKeyValueRef(Arena& a, const MappedKeyValueRef& copyFrom) : KeyValueRef(a, copyFrom) {
+		const auto& reqAndResultCopyFrom = copyFrom.reqAndResult;
+		if (std::holds_alternative<GetValueReqAndResultRef>(reqAndResultCopyFrom)) {
+			auto getValue = std::get<GetValueReqAndResultRef>(reqAndResultCopyFrom);
+			reqAndResult = GetValueReqAndResultRef(a, getValue);
+		} else if (std::holds_alternative<GetRangeReqAndResultRef>(reqAndResultCopyFrom)) {
+			auto getRange = std::get<GetRangeReqAndResultRef>(reqAndResultCopyFrom);
+			reqAndResult = GetRangeReqAndResultRef(a, getRange);
+		} else {
+			throw internal_error();
+		}
+	}
+
+	bool operator==(const MappedKeyValueRef& rhs) const {
+		return static_cast<const KeyValueRef&>(*this) == static_cast<const KeyValueRef&>(rhs) &&
+		       reqAndResult == rhs.reqAndResult;
+	}
+	bool operator!=(const MappedKeyValueRef& rhs) const { return !(rhs == *this); }
+
+	// It relies on the base to provide the expectedSize. TODO: Consider add the underlying request and key values into
+	// expected size?
+	//	int expectedSize() const { return ((KeyValueRef*)this)->expectedSisze() + reqA }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, ((KeyValueRef&)*this), reqAndResult);
+	}
+};
+
+struct MappedRangeResultRef : VectorRef<MappedKeyValueRef> {
+	// Additional information on range result. See comments on RangeResultRef.
+	bool more;
+	Optional<KeyRef> readThrough;
+	bool readToBegin;
+	bool readThroughEnd;
+
+	MappedRangeResultRef() : more(false), readToBegin(false), readThroughEnd(false) {}
+	MappedRangeResultRef(Arena& p, const MappedRangeResultRef& toCopy)
+	  : VectorRef<MappedKeyValueRef>(p, toCopy), more(toCopy.more),
+	    readThrough(toCopy.readThrough.present() ? KeyRef(p, toCopy.readThrough.get()) : Optional<KeyRef>()),
+	    readToBegin(toCopy.readToBegin), readThroughEnd(toCopy.readThroughEnd) {}
+	MappedRangeResultRef(const VectorRef<MappedKeyValueRef>& value,
+	                     bool more,
+	                     Optional<KeyRef> readThrough = Optional<KeyRef>())
+	  : VectorRef<MappedKeyValueRef>(value), more(more), readThrough(readThrough), readToBegin(false),
+	    readThroughEnd(false) {}
+	MappedRangeResultRef(bool readToBegin, bool readThroughEnd)
+	  : more(false), readToBegin(readToBegin), readThroughEnd(readThroughEnd) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, ((VectorRef<MappedKeyValueRef>&)*this), more, readThrough, readToBegin, readThroughEnd);
+	}
+
+	std::string toString() const {
+		return "more:" + std::to_string(more) +
+		       " readThrough:" + (readThrough.present() ? readThrough.get().toString() : "[unset]") +
+		       " readToBegin:" + std::to_string(readToBegin) + " readThroughEnd:" + std::to_string(readThroughEnd);
 	}
 };
 
@@ -1175,6 +1294,42 @@ struct StorageMigrationType {
 	uint32_t type;
 };
 
+struct TenantMode {
+	// These enumerated values are stored in the database configuration, so can NEVER be changed.  Only add new ones
+	// just before END.
+	// Note: OPTIONAL_TENANT is not named OPTIONAL because of a collision with a Windows macro.
+	enum Mode { DISABLED = 0, OPTIONAL_TENANT = 1, REQUIRED = 2, END = 3 };
+
+	TenantMode() : mode(DISABLED) {}
+	TenantMode(Mode mode) : mode(mode) {
+		if ((uint32_t)mode >= END) {
+			this->mode = DISABLED;
+		}
+	}
+	operator Mode() const { return Mode(mode); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, mode);
+	}
+
+	std::string toString() const {
+		switch (mode) {
+		case DISABLED:
+			return "disabled";
+		case OPTIONAL_TENANT:
+			return "optional_experimental";
+		case REQUIRED:
+			return "required_experimental";
+		default:
+			ASSERT(false);
+		}
+		return "";
+	}
+
+	uint32_t mode;
+};
+
 inline bool isValidPerpetualStorageWiggleLocality(std::string locality) {
 	int pos = locality.find(':');
 	// locality should be either 0 or in the format '<non_empty_string>:<non_empty_string>'
@@ -1187,7 +1342,12 @@ struct ReadBlobGranuleContext {
 	void* userContext;
 
 	// Returns a unique id for the load. Asynchronous to support queueing multiple in parallel.
-	int64_t (*start_load_f)(const char* filename, int filenameLength, int64_t offset, int64_t length, void* context);
+	int64_t (*start_load_f)(const char* filename,
+	                        int filenameLength,
+	                        int64_t offset,
+	                        int64_t length,
+	                        int64_t fullFileLength,
+	                        void* context);
 
 	// Returns data for the load. Pass the loadId returned by start_load_f
 	uint8_t* (*get_load_f)(int64_t loadId, void* context);
@@ -1198,6 +1358,9 @@ struct ReadBlobGranuleContext {
 	// Set this to true for testing if you don't want to read the granule files,
 	// just do the request to the blob workers
 	bool debugNoMaterialize;
+
+	// number of granules to load in parallel (default 1)
+	int granuleParallelism = 1;
 };
 
 // Store metadata associated with each storage server. Now it only contains data be used in perpetual storage wiggle.
