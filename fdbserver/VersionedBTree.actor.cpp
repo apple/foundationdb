@@ -1496,8 +1496,8 @@ public:
 	int64_t numEntries;
 	int dataBytesPerPage;
 	int pagesPerExtent;
-	bool usesExtents;
-	bool tailPageNewExtent;
+	bool usesExtents = false;
+	bool tailPageNewExtent = false;
 	LogicalPageID prevExtentEndPageID;
 
 	Cursor headReader;
