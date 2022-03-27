@@ -1699,7 +1699,7 @@ public:
 		int count = end - begin;
 		numItems = count;
 		nodeBytesDeleted = 0;
-		initialHeight = (uint8_t)log2(count) + 1;
+		initialHeight = count == 0 ? 0 : (uint8_t)log2(count) + 1;
 		maxHeight = 0;
 
 		// The boundary leading to the new page acts as the last time we branched right
