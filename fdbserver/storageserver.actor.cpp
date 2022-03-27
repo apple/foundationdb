@@ -5569,10 +5569,6 @@ ACTOR Future<Void> tssDelayForever() {
 ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 	state double start;
 	try {
-		// if (data->registerInterfaceAcceptingRequests.canBeSet()) {
-		// 	data->registerInterfaceAcceptingRequests.send(true);
-		// 	wait(data->interfaceRegistered);
-		// }
 
 		// If we are disk bound and durableVersion is very old, we need to block updates or we could run out of
 		// memory. This is often referred to as the storage server e-brake (emergency brake)
@@ -5969,6 +5965,18 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		}
 
 		validate(data);
+
+		if ((data->lastTLogVersion - data->version.get()) < SERVER_KNOBS->STORAGE_RECOVERY_VERSION_LAG_LIMIT) {
+			if (data->registerInterfaceAcceptingRequests.canBeSet()) {
+				data->registerInterfaceAcceptingRequests.send(true);
+				ErrorOr<Void> e = wait(errorOr(data->interfaceRegistered));
+				if (e.isError()) {
+					TraceEvent(SevWarn, "StorageInterfaceRegistrationFailed")
+					    .detail("ServerID", data->thisServerID)
+					    .detail("Error", e.getError().code());
+				}
+			}
+		}
 
 		data->logCursor->advanceTo(cloneCursor2->version());
 		if (cursor->version().version >= data->lastTLogVersion) {
@@ -7381,16 +7389,6 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 	    recurring([&]() { self->transactionTagCounter.startNewInterval(); }, SERVER_KNOBS->TAG_MEASUREMENT_INTERVAL));
 
 	self->coreStarted.send(Void());
-
-	if (self->registerInterfaceAcceptingRequests.canBeSet()) {
-		self->registerInterfaceAcceptingRequests.send(true);
-		ErrorOr<Void> e = wait(errorOr(self->interfaceRegistered));
-		if (e.isError()) {
-			TraceEvent(SevWarn, "StorageInterfaceRegistrationFailed")
-			    .detail("ServerID", ssi.id())
-			    .detail("Error", e.getError().code());
-		}
-	}
 
 	loop {
 		++self->counters.loops;
