@@ -568,6 +568,8 @@ public:
 	// Use global tag throttling strategy. i.e. throttle based on the cluster-wide
 	// throughput for tags and their associated quotas.
 	bool GLOBAL_TAG_THROTTLING;
+	// Minimum number of transactions per second that the global tag throttler must allow for each tag
+	double GLOBAL_TAG_THROTTLING_MIN_RATE;
 
 	double MAX_TRANSACTIONS_PER_BYTE;
 

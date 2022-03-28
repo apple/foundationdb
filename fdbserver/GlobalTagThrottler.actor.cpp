@@ -39,14 +39,18 @@ class GlobalTagThrottlerImpl {
 		    transactionCounter(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT) {}
 
 		ClientTagThrottleLimits getTotalLimit() const {
-			// TODO: Enforce minimum and maximum
-			auto readCostPerTxn = readCostCounter.smoothRate() / transactionCounter.smoothRate();
-			auto readLimit = quota.totalReadQuota / readCostPerTxn;
-			auto writeCostPerTxn = writeCostCounter.smoothRate() / transactionCounter.smoothRate();
-			auto writeLimit = quota.totalWriteQuota / writeCostPerTxn;
+			auto readLimit =
+			    (readCostCounter.smoothRate() == 0)
+			        ? std::numeric_limits<double>::max()
+			        : quota.totalReadQuota * transactionCounter.smoothRate() / readCostCounter.smoothRate();
+			auto writeLimit =
+			    (writeCostCounter.smoothRate() == 0)
+			        ? std::numeric_limits<double>::max()
+			        : quota.totalWriteQuota * transactionCounter.smoothRate() / writeCostCounter.smoothRate();
 
 			// TODO: Implement expiration logic
-			return { std::min(readLimit, writeLimit), std::numeric_limits<double>::max() };
+			return { std::max(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_MIN_RATE, std::min(readLimit, writeLimit)),
+				     std::numeric_limits<double>::max() };
 		}
 	};
 
