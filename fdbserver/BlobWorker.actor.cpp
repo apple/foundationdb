@@ -722,6 +722,8 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData>
 
 	loop {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		// FIXME: proper tenant support in Blob Worker
+		tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 		try {
 			Version rv = wait(tr->getReadVersion());
 			readVersion = rv;
