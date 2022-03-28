@@ -35,8 +35,9 @@ class GlobalTagThrottlerImpl {
 		Smoother transactionCounter;
 
 		QuotaAndCounters()
-		  : readCostCounter(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT), writeCostCounter(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
-		    transactionCounter(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT) {}
+		  : readCostCounter(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FOLDING_TIME),
+		    writeCostCounter(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FOLDING_TIME),
+		    transactionCounter(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FOLDING_TIME) {}
 
 		ClientTagThrottleLimits getTotalLimit() const {
 			auto readLimit =

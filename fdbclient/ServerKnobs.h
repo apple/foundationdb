@@ -570,6 +570,8 @@ public:
 	bool GLOBAL_TAG_THROTTLING;
 	// Minimum number of transactions per second that the global tag throttler must allow for each tag
 	double GLOBAL_TAG_THROTTLING_MIN_RATE;
+	// Used by global tag throttling counters
+	double GLOBAL_TAG_THROTTLING_FOLDING_TIME;
 
 	double MAX_TRANSACTIONS_PER_BYTE;
 
