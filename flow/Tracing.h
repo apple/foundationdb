@@ -287,8 +287,8 @@ public:
 	// 	return addEvent(StringRef(arena, name), time, attrs);
 	// }
 
-	// TODO - Should we remove this in favor of above addEvent which is comment out? Potentially dangerous if the
-	// StrinRef uses a different Arena than the OTELSpan?
+	// TODO - Should we remove this in favor of above addEvent which is commented out? Potentially dangerous if the
+	// StringRef uses a different Arena than the OTELSpan?
 	OTELSpan& addEvent(const StringRef& name,
 	                   const double& time,
 	                   const std::initializer_list<KeyValueRef>& attrs = {}) {
