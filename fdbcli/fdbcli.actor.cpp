@@ -790,6 +790,7 @@ void configureGenerator(const char* text, const char* line, std::vector<std::str
 		                   "perpetual_storage_wiggle_locality=",
 		                   "storage_migration_type="
 		                   "tenant_mode=",
+		                   "blob_granules_enabled=",
 		                   nullptr };
 	arrayGenerator(text, line, opts, lc);
 }

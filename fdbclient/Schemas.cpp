@@ -810,6 +810,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
              "aggressive",
              "gradual"
          ]},
+         "blob_granules_enabled":0,
          "tenant_mode": {
              "$enum":[
              "disabled",

@@ -1,12 +1,17 @@
+[configuration]
+blobGranulesEnabled = true 
+# FIXME: re-enable rocks at some point
+storageEngineExcludeTypes = [4]
+
 [[test]]
-testTitle = 'BlobGranuleCorrectnessLargeCleanTest'
+testTitle = 'BlobGranuleVerifyLargeClean'
 
     [[test.workload]]
     testName = 'ReadWrite'
-    testDuration = 200.0
+    testDuration = 120.0
     transactionsPerSecond = 200
-    writesPerTransactionA = 0
-    readsPerTransactionA = 10
+    writesPerTransactionA = 5
+    readsPerTransactionA = 1
     writesPerTransactionB = 10
     readsPerTransactionB = 1
     alpha = 0.5
@@ -18,4 +23,4 @@ testTitle = 'BlobGranuleCorrectnessLargeCleanTest'
 
     [[test.workload]]
     testName = 'BlobGranuleVerifier'
-    testDuration = 200.0
+    testDuration = 120.0
