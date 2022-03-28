@@ -572,8 +572,8 @@ const Key blobGranuleFileKeyFor(UID granuleID, Version fileVersion, uint8_t file
 std::tuple<UID, Version, uint8_t> decodeBlobGranuleFileKey(KeyRef const& key);
 const KeyRange blobGranuleFileKeyRangeFor(UID granuleID);
 
-const Value blobGranuleFileValueFor(StringRef const& filename, int64_t offset, int64_t length);
-std::tuple<Standalone<StringRef>, int64_t, int64_t> decodeBlobGranuleFileValue(ValueRef const& value);
+const Value blobGranuleFileValueFor(StringRef const& filename, int64_t offset, int64_t length, int64_t fullFileLength);
+std::tuple<Standalone<StringRef>, int64_t, int64_t, int64_t> decodeBlobGranuleFileValue(ValueRef const& value);
 
 const Value blobGranulePruneValueFor(Version version, KeyRange range, bool force);
 std::tuple<Version, KeyRange, bool> decodeBlobGranulePruneValue(ValueRef const& value);
