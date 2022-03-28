@@ -28,6 +28,7 @@ ACTOR Future<std::pair<RangeResult, Version>> readFromFDB(Database cx, KeyRange 
 	state Transaction tr(cx);
 	state KeyRange currentRange = range;
 	loop {
+		tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 		try {
 			state RangeResult r = wait(tr.getRange(currentRange, CLIENT_KNOBS->TOO_MANY));
 			Version grv = wait(tr.getReadVersion());
