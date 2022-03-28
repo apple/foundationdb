@@ -511,7 +511,8 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 				numIterations++;
 
 				Key dfKey = blobGranuleFileKeyFor(granuleID, currentDeltaVersion, 'D');
-				Value dfValue = blobGranuleFileValueFor(fname, 0, serializedSize);
+				// TODO change once we support file multiplexing
+				Value dfValue = blobGranuleFileValueFor(fname, 0, serializedSize, serializedSize);
 				tr->set(dfKey, dfValue);
 
 				if (oldGranuleComplete.present()) {
@@ -538,7 +539,8 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 				if (BUGGIFY_WITH_PROB(0.01)) {
 					wait(delay(deterministicRandom()->random01()));
 				}
-				return BlobFileIndex(currentDeltaVersion, fname, 0, serializedSize);
+				// FIXME: change when we implement multiplexing
+				return BlobFileIndex(currentDeltaVersion, fname, 0, serializedSize, serializedSize);
 			} catch (Error& e) {
 				wait(tr->onError(e));
 			}
@@ -648,7 +650,8 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 				wait(readAndCheckGranuleLock(tr, keyRange, epoch, seqno));
 				numIterations++;
 				Key snapshotFileKey = blobGranuleFileKeyFor(granuleID, version, 'S');
-				Key snapshotFileValue = blobGranuleFileValueFor(fname, 0, serializedSize);
+				// TODO change once we support file multiplexing
+				Key snapshotFileValue = blobGranuleFileValueFor(fname, 0, serializedSize, serializedSize);
 				tr->set(snapshotFileKey, snapshotFileValue);
 				// create granule history at version if this is a new granule with the initial dump from FDB
 				if (createGranuleHistory) {
@@ -692,7 +695,8 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 		wait(delay(deterministicRandom()->random01()));
 	}
 
-	return BlobFileIndex(version, fname, 0, serializedSize);
+	// FIXME: change when we implement multiplexing
+	return BlobFileIndex(version, fname, 0, serializedSize, serializedSize);
 }
 
 ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData> bwData,
@@ -797,7 +801,8 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 
 	ASSERT(snapshotVersion < version);
 
-	chunk.snapshotFile = BlobFilePointerRef(filenameArena, snapshotF.filename, snapshotF.offset, snapshotF.length);
+	chunk.snapshotFile = BlobFilePointerRef(
+	    filenameArena, snapshotF.filename, snapshotF.offset, snapshotF.length, snapshotF.fullFileLength);
 	compactBytesRead += snapshotF.length;
 	int deltaIdx = files.deltaFiles.size() - 1;
 	while (deltaIdx >= 0 && files.deltaFiles[deltaIdx].version > snapshotVersion) {
@@ -807,7 +812,8 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 	Version lastDeltaVersion = invalidVersion;
 	while (deltaIdx < files.deltaFiles.size() && files.deltaFiles[deltaIdx].version <= version) {
 		BlobFileIndex deltaF = files.deltaFiles[deltaIdx];
-		chunk.deltaFiles.emplace_back_deep(filenameArena, deltaF.filename, deltaF.offset, deltaF.length);
+		chunk.deltaFiles.emplace_back_deep(
+		    filenameArena, deltaF.filename, deltaF.offset, deltaF.length, deltaF.fullFileLength);
 		compactBytesRead += deltaF.length;
 		lastDeltaVersion = files.deltaFiles[deltaIdx].version;
 		deltaIdx++;
