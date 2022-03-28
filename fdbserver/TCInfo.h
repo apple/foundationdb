@@ -44,7 +44,7 @@ class TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	// To change storeType for an ip:port, we destroy the old one and create a new one.
 	KeyValueStoreType storeType; // Storage engine type
 
-	int64_t dataInFlightToServer;
+	int64_t dataInFlightToServer, readInFlightToServer = 0;
 	std::vector<Reference<TCTeamInfo>> teams;
 	ErrorOr<GetStorageMetricsReply> metrics;
 
@@ -84,7 +84,12 @@ public:
 	Future<Void> updateStoreType();
 	KeyValueStoreType getStoreType() const { return storeType; }
 	int64_t getDataInFlightToServer() const { return dataInFlightToServer; }
-	void incrementDataInFlightToServer(int64_t bytes) { dataInFlightToServer += bytes; }
+	// expect read traffic to server after data movement
+	int64_t getReadInFlightToServer() const { return readInFlightToServer; }
+	void incrementDataInFlightToServer(int64_t bytes, int64_t readBytes = 0) {
+		dataInFlightToServer += bytes;
+		readInFlightToServer += readBytes;
+	}
 	void cancel();
 	std::vector<Reference<TCTeamInfo>> const& getTeams() const { return teams; }
 	void addTeam(Reference<TCTeamInfo> team) { teams.push_back(team); }
@@ -189,13 +194,15 @@ public:
 
 	std::string getServerIDsStr() const;
 
-	void addDataInFlightToTeam(int64_t delta) override;
+	void addDataInFlightToTeam(int64_t delta, int64_t readDelta = 0) override;
 
 	int64_t getDataInFlightToTeam() const override;
 
 	int64_t getLoadBytes(bool includeInFlight = true, double inflightPenalty = 1.0) const override;
 
-	double getLoadReadBandwidth() const override;
+	double getLoadReadBandwidth(bool includeInFlight = true) const override;
+
+	int64_t getReadInFlightToTeam() const override;
 
 	int64_t getMinAvailableSpace(bool includeInFlight = true) const override;
 

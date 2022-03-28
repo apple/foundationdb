@@ -164,7 +164,7 @@ public:
 				}
 
 				size_t pivot = teamAvailableSpace.size() / 2;
-				if (teamAvailableSpace.size() >= 1) {
+				if (teamAvailableSpace.size() > 1) {
 					std::nth_element(
 					    teamAvailableSpace.begin(), teamAvailableSpace.begin() + pivot, teamAvailableSpace.end());
 					self->medianAvailableSpace =

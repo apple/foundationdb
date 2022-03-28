@@ -162,9 +162,9 @@ public:
 		return tempServerIDs;
 	}
 
-	void addDataInFlightToTeam(int64_t delta) override {
+	void addDataInFlightToTeam(int64_t delta, int64_t readDelta = 0) override {
 		for (auto& team : teams) {
-			team->addDataInFlightToTeam(delta);
+			team->addDataInFlightToTeam(delta, readDelta);
 		}
 	}
 
@@ -178,8 +178,14 @@ public:
 		});
 	}
 
-	double getLoadReadBandwidth() const override {
-		return sum([](IDataDistributionTeam const& team) { return team.getLoadReadBandwidth(); });
+	int64_t getReadInFlightToTeam() const override {
+		return sum([](IDataDistributionTeam const& team) { return team.getReadInFlightToTeam(); });
+	}
+
+	double getLoadReadBandwidth(bool includeInFlight = true) const override {
+		return sum([includeInFlight](IDataDistributionTeam const& team) {
+			return team.getLoadReadBandwidth(includeInFlight);
+		});
 	}
 
 	int64_t getMinAvailableSpace(bool includeInFlight = true) const override {
@@ -1262,7 +1268,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 			self->shardsAffectedByTeamFailure->moveShard(rd.keys, destinationTeams);
 
 			// FIXME: do not add data in flight to servers that were already in the src.
-			healthyDestinations.addDataInFlightToTeam(+metrics.bytes);
+			healthyDestinations.addDataInFlightToTeam(+metrics.bytes, +metrics.bytesReadPerKSecond);
 
 			launchDest(rd, bestTeams, self->destBusymap);
 
@@ -1280,6 +1286,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 			} else {
 				TraceEvent(relocateShardInterval.severity, "RelocateShardHasDestination", distributorId)
 				    .detail("PairId", relocateShardInterval.pairID)
+				    .detail("Priority", rd.priority)
 				    .detail("KeyBegin", rd.keys.begin)
 				    .detail("KeyEnd", rd.keys.end)
 				    .detail("SourceServers", describe(rd.src))
@@ -1366,7 +1373,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 					}
 				}
 
-				healthyDestinations.addDataInFlightToTeam(-metrics.bytes);
+				healthyDestinations.addDataInFlightToTeam(-metrics.bytes, -metrics.bytesReadPerKSecond);
 
 				// onFinished.send( rs );
 				if (!error.code()) {
@@ -1399,7 +1406,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 				}
 			} else {
 				TEST(true); // move to removed server
-				healthyDestinations.addDataInFlightToTeam(-metrics.bytes);
+				healthyDestinations.addDataInFlightToTeam(-metrics.bytes, -metrics.bytesReadPerKSecond);
 				wait(delay(SERVER_KNOBS->RETRY_RELOCATESHARD_DELAY, TaskPriority::DataDistributionLaunch));
 			}
 		}
