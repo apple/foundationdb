@@ -21,9 +21,7 @@
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
-#include "flow/Arena.h"
 #include "flow/IRandom.h"
-#include <unordered_map>
 #include <unordered_set>
 #include <atomic>
 

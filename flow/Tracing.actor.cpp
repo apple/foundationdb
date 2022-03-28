@@ -19,21 +19,12 @@
  */
 
 #include "flow/Tracing.h"
-#include "fdbclient/FDBTypes.h"
-#include "flow/Arena.h"
-#include "flow/ITrace.h"
 #include "flow/UnitTest.h"
-
 #include "flow/Knobs.h"
 #include "flow/network.h"
-
-#include <cstring>
 #include <functional>
 #include <iomanip>
 #include <memory>
-
-#define __STDC_FORMAT_MACROS
-#include <inttypes.h>
 
 #include "flow/actorcompiler.h" // has to be last include
 
@@ -269,10 +260,6 @@ private:
 		serialize_string(reinterpret_cast<const uint8_t*>(str.data()), str.size(), request);
 	}
 
-	inline void serialize_string_ref(const StringRef& str, TraceRequest& request) {
-		serialize_string(reinterpret_cast<const uint8_t*>(str.toString().data()), str.size(), request);
-	}
-
 	// Writes the given vector of SpanIDs to the request. If the vector is
 	// empty, the request is not modified.
 	inline void serialize_vector(const SmallVectorRef<SpanID>& vec, TraceRequest& request) {
@@ -352,8 +339,8 @@ private:
 		}
 
 		for (const auto& kv : vals) {
-			serialize_string_ref(kv.key, request);
-			serialize_string_ref(kv.value, request);
+			serialize_string(kv.key.toString(), request);
+			serialize_string(kv.value.toString(), request);
 		}
 	}
 
