@@ -992,7 +992,7 @@ static void scanPackets(TransportData* transport,
                         NetworkAddress const& peerAddress,
                         ProtocolVersion peerProtocolVersion,
                         Future<Void> disconnect,
-						bool isStableConnection) {
+                        bool isStableConnection) {
 	// Find each complete packet in the given byte range and queue a ready task to deliver it.
 	// Remove the complete packets from the range by increasing unprocessed_begin.
 	// There won't be more than 64K of data plus one packet, so this shouldn't take a long time.
@@ -1308,7 +1308,7 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 						            peerAddress,
 						            peerProtocolVersion,
 						            peer->disconnect.getFuture(),
-									g_network->isSimulated() && conn->isStableConnection());
+						            g_network->isSimulated() && conn->isStableConnection());
 					} else {
 						unprocessed_begin = unprocessed_end;
 						peer->resetPing.trigger();
