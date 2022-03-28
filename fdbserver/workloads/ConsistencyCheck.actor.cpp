@@ -2378,9 +2378,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		    (!nonExcludedWorkerProcessMap.count(db.encryptKeyProxy.get().address()) ||
 		     nonExcludedWorkerProcessMap[db.encryptKeyProxy.get().address()].processClass.machineClassFitness(
 		         ProcessClass::EncryptKeyProxy) > fitnessLowerBound)) {
-			TraceEvent("ConsistencyCheck_EncyrptKeyProxyNotBest")
+			TraceEvent("ConsistencyCheck_EncryptKeyProxyNotBest")
 			    .detail("BestEncryptKeyProxyFitness", fitnessLowerBound)
-			    .detail("ExistingEncyrptKeyProxyFitness",
+			    .detail("ExistingEncryptKeyProxyFitness",
 			            nonExcludedWorkerProcessMap.count(db.encryptKeyProxy.get().address())
 			                ? nonExcludedWorkerProcessMap[db.encryptKeyProxy.get().address()]
 			                      .processClass.machineClassFitness(ProcessClass::EncryptKeyProxy)

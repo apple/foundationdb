@@ -775,8 +775,9 @@ public:
 	// Cluster recovery
 	std::string CLUSTER_RECOVERY_EVENT_NAME_PREFIX;
 
-	// encrypt key proxy
+	// Encryption
 	bool ENABLE_ENCRYPTION;
+	std::string ENCRYPTION_MODE;
 
 	// blob granule stuff
 	// FIXME: configure url with database configuration instead of knob eventually
