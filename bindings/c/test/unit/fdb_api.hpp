@@ -206,6 +206,11 @@ public:
 class Tenant final {
 public:
 	Tenant(FDBDatabase* db, const uint8_t* name, int name_length);
+	~Tenant();
+	Tenant(const Tenant&) = delete;
+	Tenant& operator=(const Tenant&) = delete;
+	Tenant(Tenant&&) = delete;
+	Tenant& operator=(Tenant&&) = delete;
 
 private:
 	friend class Transaction;
@@ -219,7 +224,7 @@ class Transaction final {
 public:
 	// Given an FDBDatabase, initializes a new transaction.
 	Transaction(FDBDatabase* db);
-	Transaction(Tenant tenant);
+	Transaction(Tenant& tenant);
 	~Transaction();
 
 	// Wrapper around fdb_transaction_reset.
