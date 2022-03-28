@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1443,17 +1443,21 @@ public:
 	}
 };
 
-ReadYourWritesTransaction::ReadYourWritesTransaction(Database const& cx)
-  : ISingleThreadTransaction(cx->deferredError), tr(cx), cache(&arena), writes(&arena), retries(0), approximateSize(0),
-    creationTime(now()), commitStarted(false), versionStampFuture(tr.getVersionstamp()),
+ReadYourWritesTransaction::ReadYourWritesTransaction(Database const& cx, Optional<TenantName> tenantName)
+  : ISingleThreadTransaction(cx->deferredError), tr(cx, tenantName), cache(&arena), writes(&arena), retries(0),
+    approximateSize(0), creationTime(now()), commitStarted(false), versionStampFuture(tr.getVersionstamp()),
     specialKeySpaceWriteMap(std::make_pair(false, Optional<Value>()), specialKeys.end), options(tr) {
 	std::copy(
 	    cx.getTransactionDefaults().begin(), cx.getTransactionDefaults().end(), std::back_inserter(persistentOptions));
 	applyPersistentOptions();
 }
 
-void ReadYourWritesTransaction::setDatabase(Database const& cx) {
-	*this = ReadYourWritesTransaction(cx);
+void ReadYourWritesTransaction::construct(Database const& cx) {
+	*this = ReadYourWritesTransaction(cx, Optional<TenantName>());
+}
+
+void ReadYourWritesTransaction::construct(Database const& cx, TenantName const& tenantName) {
+	*this = ReadYourWritesTransaction(cx, tenantName);
 }
 
 ACTOR Future<Void> timebomb(double endTime, Promise<Void> resetPromise) {
@@ -1787,8 +1791,6 @@ Future<Standalone<VectorRef<BlobGranuleChunkRef>>> ReadYourWritesTransaction::re
     Version begin,
     Optional<Version> readVersion,
     Version* readVersionOut) {
-	// Remove in V2 of API
-	ASSERT(begin == 0);
 
 	if (!options.readYourWritesDisabled) {
 		return blob_granule_no_ryw();

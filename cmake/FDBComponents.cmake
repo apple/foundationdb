@@ -213,6 +213,17 @@ endif()
 set(COROUTINE_IMPL ${DEFAULT_COROUTINE_IMPL} CACHE STRING "Which coroutine implementation to use. Options are boost and libcoro")
 
 ################################################################################
+# AWS SDK
+################################################################################
+
+set(BUILD_AWS_BACKUP OFF CACHE BOOL "Build AWS S3 SDK backup client")
+if (BUILD_AWS_BACKUP)
+  set(WITH_AWS_BACKUP ON)
+else()
+  set(WITH_AWS_BACKUP OFF)
+endif()
+
+################################################################################
 
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/packages)
 add_custom_target(packages)
@@ -232,6 +243,7 @@ function(print_components)
   message(STATUS "Build Python sdist (make package):    ${WITH_PYTHON_BINDING}")
   message(STATUS "Configure CTest (depends on Python):  ${WITH_PYTHON}")
   message(STATUS "Build with RocksDB:                   ${WITH_ROCKSDB_EXPERIMENTAL}")
+  message(STATUS "Build with AWS SDK:                   ${WITH_AWS_BACKUP}")
   message(STATUS "=========================================")
 endfunction()
 

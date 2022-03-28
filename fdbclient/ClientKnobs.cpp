@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -50,6 +50,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( MAX_GENERATIONS_OVERRIDE,                  0 );
 	init( MAX_GENERATIONS_SIM,                      50 ); //Disable network connections after this many generations in simulation, should be less than RECOVERY_DELAY_START_GENERATION
 
+	init( COORDINATOR_HOSTNAME_RESOLVE_DELAY,     0.05 );
 	init( COORDINATOR_RECONNECTION_DELAY,          1.0 );
 	init( CLIENT_EXAMPLE_AMOUNT,                    20 );
 	init( MAX_CLIENT_STATUS_AGE,                   1.0 );
@@ -61,6 +62,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 
 	init( WRONG_SHARD_SERVER_DELAY,                .01 ); if( randomize && BUGGIFY ) WRONG_SHARD_SERVER_DELAY = deterministicRandom()->random01(); // FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY; // SOMEDAY: This delay can limit performance of retrieving data when the cache is mostly wrong (e.g. dumping the database after a test)
 	init( FUTURE_VERSION_RETRY_DELAY,              .01 ); if( randomize && BUGGIFY ) FUTURE_VERSION_RETRY_DELAY = deterministicRandom()->random01();// FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY;
+	init( UNKNOWN_TENANT_RETRY_DELAY,              0.0 ); if( randomize && BUGGIFY ) UNKNOWN_TENANT_RETRY_DELAY = deterministicRandom()->random01();
 	init( REPLY_BYTE_LIMIT,                      80000 );
 	init( DEFAULT_BACKOFF,                         .01 ); if( randomize && BUGGIFY ) DEFAULT_BACKOFF = deterministicRandom()->random01();
 	init( DEFAULT_MAX_BACKOFF,                     1.0 );
@@ -79,6 +81,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( CHANGE_FEED_LOCATION_LIMIT,            10000 );
 	init( CHANGE_FEED_CACHE_SIZE,               100000 ); if( randomize && BUGGIFY ) CHANGE_FEED_CACHE_SIZE = 1;
 	init( CHANGE_FEED_POP_TIMEOUT,                 5.0 );
+	init( CHANGE_FEED_STREAM_MIN_BYTES,            1e4 ); if( randomize && BUGGIFY ) CHANGE_FEED_STREAM_MIN_BYTES = 1;
 
 	init( MAX_BATCH_SIZE,                         1000 ); if( randomize && BUGGIFY ) MAX_BATCH_SIZE = 1;
 	init( GRV_BATCH_TIMEOUT,                     0.005 ); if( randomize && BUGGIFY ) GRV_BATCH_TIMEOUT = 0.1;
@@ -89,6 +92,8 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( LOCATION_CACHE_EVICTION_SIZE_SIM,         10 ); if( randomize && BUGGIFY ) LOCATION_CACHE_EVICTION_SIZE_SIM = 3;
 	init( LOCATION_CACHE_ENDPOINT_FAILURE_GRACE_PERIOD,     60 );
 	init( LOCATION_CACHE_FAILED_ENDPOINT_RETRY_INTERVAL,    60 );
+	init( TENANT_CACHE_EVICTION_SIZE,           100000 );
+	init( TENANT_CACHE_EVICTION_SIZE_SIM,           10 ); if( randomize && BUGGIFY ) TENANT_CACHE_EVICTION_SIZE_SIM = 3;
 
 	init( GET_RANGE_SHARD_LIMIT,                     2 );
 	init( WARM_RANGE_SHARD_LIMIT,                  100 );
@@ -272,8 +277,12 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( BUSYNESS_SPIKE_START_THRESHOLD,         0.100 );
 	init( BUSYNESS_SPIKE_SATURATED_THRESHOLD,     0.500 );
 
-	// blob granules
-	init( ENABLE_BLOB_GRANULES,                   false );
+	// multi-version client control
+	init( MVC_CLIENTLIB_CHUNK_SIZE,              8*1024 );
+	init( MVC_CLIENTLIB_CHUNKS_PER_TRANSACTION,      32 );
+
+	// Blob granules
+	init( BG_MAX_GRANULE_PARALLELISM,                10 );
 
 	// clang-format on
 }

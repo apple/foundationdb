@@ -448,14 +448,19 @@ func (o TransactionOptions) SetInitializeNewDatabase() error {
 	return o.setOpt(300, nil)
 }
 
-// Allows this transaction to read and modify system keys (those that start with the byte 0xFF)
+// Allows this transaction to read and modify system keys (those that start with the byte 0xFF). Implies raw_access.
 func (o TransactionOptions) SetAccessSystemKeys() error {
 	return o.setOpt(301, nil)
 }
 
-// Allows this transaction to read system keys (those that start with the byte 0xFF)
+// Allows this transaction to read system keys (those that start with the byte 0xFF). Implies raw_access.
 func (o TransactionOptions) SetReadSystemKeys() error {
 	return o.setOpt(302, nil)
+}
+
+// Allows this transaction to access the raw key-space when tenant mode is on.
+func (o TransactionOptions) SetRawAccess() error {
+	return o.setOpt(303, nil)
 }
 
 // Not yet implemented.

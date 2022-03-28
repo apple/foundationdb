@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -67,6 +67,7 @@ extern "C" {
 typedef struct FDB_future FDBFuture;
 typedef struct FDB_result FDBResult;
 typedef struct FDB_database FDBDatabase;
+typedef struct FDB_tenant FDBTenant;
 typedef struct FDB_transaction FDBTransaction;
 
 typedef int fdb_error_t;
@@ -184,7 +185,12 @@ typedef struct readgranulecontext {
 	void* userContext;
 
 	/* Returns a unique id for the load. Asynchronous to support queueing multiple in parallel. */
-	int64_t (*start_load_f)(const char* filename, int filenameLength, int64_t offset, int64_t length, void* context);
+	int64_t (*start_load_f)(const char* filename,
+	                        int filenameLength,
+	                        int64_t offset,
+	                        int64_t length,
+	                        int64_t fullFileLength,
+	                        void* context);
 
 	/* Returns data for the load. Pass the loadId returned by start_load_f */
 	uint8_t* (*get_load_f)(int64_t loadId, void* context);
@@ -195,6 +201,9 @@ typedef struct readgranulecontext {
 	/* Set this to true for testing if you don't want to read the granule files,
 	   just do the request to the blob workers */
 	fdb_bool_t debugNoMaterialize;
+
+	/* Number of granules to load in parallel */
+	int granuleParallelism;
 } FDBReadBlobGranuleContext;
 
 DLLEXPORT void fdb_future_cancel(FDBFuture* f);
@@ -271,6 +280,11 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_database_set_option(FDBDatabase* d,
                                                                  uint8_t const* value,
                                                                  int value_length);
 
+DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_database_open_tenant(FDBDatabase* d,
+                                                                  uint8_t const* tenant_name,
+                                                                  int tenant_name_length,
+                                                                  FDBTenant** out_tenant);
+
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_database_create_transaction(FDBDatabase* d,
                                                                          FDBTransaction** out_transaction);
 
@@ -293,6 +307,11 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_create_snapshot(FDBDatabase
 DLLEXPORT WARN_UNUSED_RESULT double fdb_database_get_main_thread_busyness(FDBDatabase* db);
 
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_get_server_protocol(FDBDatabase* db, uint64_t expected_version);
+
+DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_tenant_create_transaction(FDBTenant* tenant,
+                                                                       FDBTransaction** out_transaction);
+
+DLLEXPORT void fdb_tenant_destroy(FDBTenant* tenant);
 
 DLLEXPORT void fdb_transaction_destroy(FDBTransaction* tr);
 
@@ -436,7 +455,7 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_blob_granule_ranges(
                                                                                 uint8_t const* end_key_name,
                                                                                 int end_key_name_length);
 
-/* InvalidVersion (-1) for readVersion means get read version from transaction
+/* LatestVersion (-2) for readVersion means get read version from transaction
    Separated out as optional because BG reads can support longer-lived reads than normal FDB transactions */
 DLLEXPORT WARN_UNUSED_RESULT FDBResult* fdb_transaction_read_blob_granules(FDBTransaction* db,
                                                                            uint8_t const* begin_key_name,
