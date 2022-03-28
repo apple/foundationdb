@@ -43,6 +43,7 @@ import com.apple.foundationdb.KeyArrayResult;
 import com.apple.foundationdb.MutationType;
 import com.apple.foundationdb.Range;
 import com.apple.foundationdb.StreamingMode;
+import com.apple.foundationdb.TenantManagement;
 import com.apple.foundationdb.Transaction;
 import com.apple.foundationdb.async.AsyncUtil;
 import com.apple.foundationdb.tuple.ByteArrayUtil;
@@ -473,13 +474,13 @@ public class AsyncStackTester {
 		else if (op == StackOperation.TENANT_CREATE) {
 			return inst.popParam().thenAcceptAsync(param -> {
 				byte[] tenantName = (byte[])param;
-				inst.push(inst.context.db.allocateTenant(tenantName));
+				inst.push(TenantManagement.createTenant(inst.context.db, tenantName));
 			}, FDB.DEFAULT_EXECUTOR);
 		}
 		else if (op == StackOperation.TENANT_DELETE) {
 			return inst.popParam().thenAcceptAsync(param -> {
 				byte[] tenantName = (byte[])param;
-				inst.push(inst.context.db.deleteTenant(tenantName));
+				inst.push(TenantManagement.deleteTenant(inst.context.db, tenantName));
 			}, FDB.DEFAULT_EXECUTOR);
 		}
 		else if (op == StackOperation.TENANT_SET_ACTIVE) {

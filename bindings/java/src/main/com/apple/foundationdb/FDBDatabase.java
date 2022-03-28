@@ -23,7 +23,6 @@ package com.apple.foundationdb;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.Executor;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 
@@ -120,60 +119,6 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 	}
 
 	@Override
-	public CompletableFuture<Void> allocateTenant(byte[] tenantName) {
-		final AtomicBoolean checkedExistence = new AtomicBoolean(false);
-		final byte[] key = ByteArrayUtil.join(FDBTenant.TENANT_MAP_PREFIX, tenantName);
-		return runAsync(tr -> {
-			tr.options().setSpecialKeySpaceEnableWrites();
-			if(checkedExistence.get()) {
-				tr.set(key, new byte[0]);
-				return CompletableFuture.completedFuture(null);
-			}
-			else {
-				return tr.get(key).thenAcceptAsync(result -> {
-					checkedExistence.set(true);
-					if(result != null) {
-						throw new FDBException("A tenant with the given name already exists", 2132);
-					}
-					tr.set(key, new byte[0]);
-				});
-			}
-		});
-	}
-
-	@Override
-	public CompletableFuture<Void> allocateTenant(Tuple tenantName) {
-		return allocateTenant(tenantName.pack());
-	}
-
-	@Override
-	public CompletableFuture<Void> deleteTenant(byte[] tenantName) {
-		final AtomicBoolean checkedExistence = new AtomicBoolean(false);
-		final byte[] key = ByteArrayUtil.join(FDBTenant.TENANT_MAP_PREFIX, tenantName);
-		return runAsync(tr -> {
-			tr.options().setSpecialKeySpaceEnableWrites();
-			if(checkedExistence.get()) {
-				tr.clear(key);
-				return CompletableFuture.completedFuture(null);
-			}
-			else {
-				return tr.get(key).thenAcceptAsync(result -> {
-					checkedExistence.set(true);
-					if (result == null) {
-						throw new FDBException("Tenant does not exist", 2131);
-					}
-					tr.clear(key);
-				});
-			}
-		});
-	}
-
-	@Override
-	public CompletableFuture<Void> deleteTenant(Tuple tenantName) {
-		return deleteTenant(tenantName.pack());
-	}
-
-	@Override
 	public Tenant openTenant(byte[] tenantName, Executor e) {
 		return openTenant(tenantName, e, eventKeeper);
 	}
@@ -265,8 +210,6 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 		Database_dispose(cPtr);
 	}
 
-	private native long Database_allocateTenant(long cPtr, byte[] tenantName);
-	private native long Database_deleteTenant(long cPtr, byte[] tenantName);
 	private native long Database_openTenant(long cPtr, byte[] tenantName);
 	private native long Database_createTransaction(long cPtr);
 	private native void Database_dispose(long cPtr);

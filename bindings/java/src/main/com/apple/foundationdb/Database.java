@@ -42,50 +42,6 @@ import com.apple.foundationdb.tuple.Tuple;
  */
 public interface Database extends AutoCloseable, TransactionContext {
 	/**
-	 * Creates a new tenant in the cluster.
-	 *
-	 * @param tenantName The name of the tenant. Can be any byte string that does not begin a 0xFF byte.
-	 * @return a {@code CompletableFuture} that when set without error will indicate that the tenant has
-	 * been created.
-	 */
-	CompletableFuture<Void> allocateTenant(byte[] tenantName);
-
-	/**
-	 * Creates a new tenant in the cluster. This is a convenience method that generates the tenant name by packing a
-	 * {@code Tuple}.
-	 *
-	 * @param tenantName The name of the tenant, as a Tuple.
-	 * @return a {@code CompletableFuture} that when set without error will indicate that the tenant has
-	 * been created.
-	 */
-	CompletableFuture<Void> allocateTenant(Tuple tenantName);
-
-	/**
-	 * Deletes a tenant from the cluster.<br>
-	 * <br>
-	 * <b>Note:</b> A tenant cannot be deleted if it has any data in it. To delete a non-empty tenant, you must
-	 *  first use a clear operation to delete all of its keys.
-	 *
-	 * @param tenantName The name of the tenant being deleted.
-	 * @return a {@code CompletableFuture} that when set without error will indicate that the tenant has
-	 * been deleted.
-	 */
-	CompletableFuture<Void> deleteTenant(byte[] tenantName);
-
-	/**
-	 * Deletes a tenant from the cluster. This is a convenience method that generates the tenant name by packing a
-	 * {@code Tuple}.<br>
-	 * <br>
-	 * <b>Note:</b> A tenant cannot be deleted if it has any data in it. To delete a non-empty
-	 * tenant, you must first use a clear operation to delete all of its keys.
-	 *
-	 * @param tenantName The name of the tenant being deleted, as a Tuple.
-	 * @return a {@code CompletableFuture} that when set without error will indicate that the tenant has
-	 * been deleted.
-	 */
-	CompletableFuture<Void> deleteTenant(Tuple tenantName);
-
-	/**
 	 * Opens an existing tenant to be used for running transactions.
 	 *
 	 * @param tenantName The name of the tenant to open.

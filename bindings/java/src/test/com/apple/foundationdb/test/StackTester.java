@@ -45,6 +45,7 @@ import com.apple.foundationdb.LocalityUtil;
 import com.apple.foundationdb.MutationType;
 import com.apple.foundationdb.Range;
 import com.apple.foundationdb.StreamingMode;
+import com.apple.foundationdb.TenantManagement;
 import com.apple.foundationdb.Transaction;
 import com.apple.foundationdb.async.AsyncIterable;
 import com.apple.foundationdb.async.AsyncUtil;
@@ -422,11 +423,11 @@ public class StackTester {
 			}
 			else if (op == StackOperation.TENANT_CREATE) {
 				byte[] tenantName = (byte[])inst.popParam().join();
-				inst.push(inst.context.db.allocateTenant(tenantName));
+				inst.push(TenantManagement.createTenant(inst.context.db, tenantName));
 			}
 			else if (op == StackOperation.TENANT_DELETE) {
 				byte[] tenantName = (byte[])inst.popParam().join();
-				inst.push(inst.context.db.deleteTenant(tenantName));
+				inst.push(TenantManagement.deleteTenant(inst.context.db, tenantName));
 			}
 			else if (op == StackOperation.TENANT_SET_ACTIVE) {
 				byte[] tenantName = (byte[])inst.popParam().join();
@@ -761,7 +762,7 @@ public class StackTester {
 
 	private static void testTenantTupleNames(Database db) {
 		try {
-			db.allocateTenant(Tuple.from("tenant")).join();
+			TenantManagement.createTenant(db, Tuple.from("tenant")).join();
 			Tenant tenant = db.openTenant(Tuple.from("tenant"));
 
 			tenant.run(tr -> {
@@ -781,7 +782,7 @@ public class StackTester {
 					return null;
 			});
 
-			db.deleteTenant(Tuple.from("tenant")).join();
+			TenantManagement.deleteTenant(db, Tuple.from("tenant")).join();
         }
 		catch(Exception e) {
 			e.printStackTrace();
