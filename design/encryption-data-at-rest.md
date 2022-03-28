@@ -17,18 +17,18 @@ The proposed solution `will not be able` to handle the following attacks:
 
 FoundationDB being a multi-model, easily scalable and fault-tolerant, with an ability to provide great performance even with commodity hardware, plays a critical role enabling enterprises to deploy, manage and run mission critical applications.
 
-Data encryption support is a tablestake feature for modern day enterprise service offerings in the cloud. Customers expect, and at times warrant, that their data and metadata be fully encrypted using the latest security standards. The goals of this document includes:
+Data encryption support is a table-stake feature for modern day enterprise service offerings in the cloud. Customers expect, and at times warrant, that their data and metadata be fully encrypted using the latest security standards. The goal of this document includes:
 
 * Discuss detailed design to support data at-rest encryption support for data stored in FDB clusters. Encrypting data in-transit and/or in-memory caches at various layers in the query execution pipeline (inside and external to FDB) is out of the scope of this feature.
 
-* Isolation guarantees: the encryption domain matches with `tenant` partition semantics supported by FDB clusters. Tenants are discrete namespaces in FDB that serve as transaction domains. A tenant is a `identifier` that maps to a `prefix` within the data-FDB cluster, and all operations within a tenant are implicitly bound within a `tenant-prefix`. Refer to `Multi-Tenant FoundationDB API` documentaion more details. However, it is possible to use a single encryption key for the whole cluster, in case `tenant  partitioning` isn’t available.
+* Isolation guarantees: the encryption domain matches with `tenant` partition semantics supported by FDB clusters. Tenants are discrete namespaces in FDB that serve as transaction domains. A tenant is a `identifier` that maps to a `prefix` within the data-FDB cluster, and all operations within a tenant are implicitly bound within a `tenant-prefix`. Refer to `Multi-Tenant FoundationDB API` documentation more details. However, it is possible to use a single encryption key for the whole cluster, in case `tenant partitioning` isn’t available.
 
 * Ease of integration with external Key Management Services enabling persisting, caching, and lookup of encryption keys. 
 
 ## Config Knobs
 
 * `ServerKnob::ENABLE_ENCRYPION` allows enable/disable encryption feature.
-* `ServerKnob::ENCRYPTION_MODE` controls the encryption mode supported. At the moment scheme supports `AES-256-CTR` encryption mode.
+* `ServerKnob::ENCRYPTION_MODE` controls the encryption mode supported. The current scheme supports `AES-256-CTR` encryption mode.
 
 ## Encryption Mode
 
@@ -47,29 +47,29 @@ UID  = Host local random generated number
 
 UID is an 8 byte host-local random number. Another option would have been a simple host-local incrementing counter, however, the scheme runs the risk of repeated encryption-key generation on cluster/process restarts.
 
-* An encryption key derived using the above formula will be cached (in-memory) for a short time interval (10 mins, for instance). The encryption-key is immutable, but, the TTL approach allows refetching encryption key by reaching out to External Encryption KeyManagement solutions, hence, supporting “restricting lifetime of an encryption” feature if implemented by Encryption Key Management solution.
+* An encryption key derived using the above formula will be cached (in-memory) for a short time interval (10 mins, for instance). The encryption-key is immutable, but, the TTL approach allows refreshing encryption key by reaching out to External Encryption KeyManagement solutions, hence, supporting “restricting lifetime of an encryption” feature if implemented by Encryption Key Management solution.
 
-* Initialization Vector (IV) selection would be rando.
+* Initialization Vector (IV) selection would be random.
 
 ## Architecture
 
-The encryption responsibilities are split across multiple modules to ensure data and metadata stored in the cluster is never persisted in plain text on any durable storages (temporary and/or long term durable storage).  
+The encryption responsibilities are split across multiple modules to ensure data and metadata stored in the cluster is never persisted in plain text on any durable storages (temporary and/or long-term durable storage).
 
 ## Encryption Request Workflow
 
 ### **Write Request**
 
-* A FDB client initiates a write transaction providing {key, value} in plaintext format.
-* A FDB cluster host as part of processing a write transaction would do the following:
+* An FDB client initiates a write transaction providing {key, value} in plaintext format.
+* An FDB cluster host as part of processing a write transaction would do the following:
     1. Obtain required encryption key based on the transaction request tenant information.
-    2. Encrypt mutation before persisting them on Transaction Logs (TLogs). As a background process, the mutations are moved to a long term durable storage by the Storage Server processes. 
+    2. Encrypt mutations before persisting them on Transaction Logs (TLogs). As a background process, the mutations are moved to a long-term durable storage by the Storage Server processes.
 
 Refer to the sections below for more details.
 
 ### **Read Request**
 
 * An FDB client initiates a read transaction request. 
-* A FDB cluster host as part of processing request would do the following:
+* An FDB cluster host as part of processing request would do the following:
     1. StorageServer would read desired data blocks from the persistent storage.
     2. Regenerate the encryption key required to decrypt the data.
     3. Decrypt data and pass results as plaintext to the caller.
@@ -104,7 +104,7 @@ Below diagram depicts the end-to-end encryption workflow detailing various modul
                                          |_______________________________________________________|
 ```
 
-## FDB Encrypion
+## FDB Encryption
 
 An FDB client would insert data i.e. plaintext {key, value} in a FDB cluster for persistence. 
 
@@ -180,12 +180,16 @@ CPs would cache (in-memory) recently used encryption-keys to optimize network tr
 
 ### **Caveats**
 
-The encryption is done inline in the  transaction path, which will increase the total commit latencies. Few possible ways to minimize this impact are:
+The encryption is done inline in the transaction path, which will increase the total commit latencies. Few possible ways to minimize this impact are:
 
 * Overlap encryption operations with the CP::resolution phase, which would minimize the latency penalty per transaction at the cost of spending more CPU cycles. If needed, for production deployments, we may need to increase the number of CPs per FDB cluster.
 * Implement an external process to offload encryption. If done, encryption would appear no different than the CP::resolution phase, where the process would invoke RPC calls to encrypt the buffer and wait for operation completion.
 
-### Redwood Storage nodes
+### Storage Servers
+
+The encryption design only supports Redwood Storage Server integration, support for other storage engines is yet to be planned.
+
+### Redwood Storage Nodes
 
 Redwood at heart is a B+ tree and stores data in two types of nodes:
 
