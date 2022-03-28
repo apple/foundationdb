@@ -8707,11 +8707,24 @@ ACTOR Future<Void> singleChangeFeedStreamInternal(KeyRange range,
 			results->lastReturnedVersion.set(feedReply.mutations.back().version);
 		}
 
-		if (refresh.canBeSet() && !atLatest && feedReply.atLatestVersion) {
+		if (!refresh.canBeSet()) {
+			try {
+				// refresh is set if and only if this actor is cancelled
+				wait(Future<Void>(Void()));
+				// Catch any unexpected behavior if the above contract is broken
+				ASSERT(false);
+			} catch (Error& e) {
+				ASSERT(e.code() == error_code_actor_cancelled);
+				throw;
+			}
+		}
+
+		if (!atLatest && feedReply.atLatestVersion) {
 			atLatest = true;
 			results->notAtLatest.set(0);
 		}
-		if (refresh.canBeSet() && feedReply.minStreamVersion > results->storageData[0]->version.get()) {
+
+		if (feedReply.minStreamVersion > results->storageData[0]->version.get()) {
 			results->storageData[0]->version.set(feedReply.minStreamVersion);
 		}
 	}
