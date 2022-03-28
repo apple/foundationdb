@@ -88,6 +88,7 @@ def api_version(ver):
         'predicates',
         'Future',
         'Database',
+        'Tenant',
         'Transaction',
         'KeyValue',
         'KeySelector',
