@@ -1590,7 +1590,7 @@ Tenant management
 
 .. module:: fdb.tenant_management
 
-The FoundationDB API includes function to manage the set of tenants in a cluster.
+The FoundationDB API includes functions to manage the set of tenants in a cluster.
 
 .. method:: fdb.tenant_management.create_tenant(db_or_tr, tenant_name)
 
