@@ -206,7 +206,7 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 					// In simulation, we simply disable killing parent or child processes as we cannot use the same
 					// mechanism here
 				}
-				when(wait(parentShutdown)) { 
+				when(wait(parentShutdown)) {
 					ASSERT(false);
 					// Parent process is not killed, see above
 				}

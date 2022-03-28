@@ -447,7 +447,8 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 		choose {
 			when(wait(self->initialized)) {}
 			when(wait(delay(SERVER_KNOBS->REMOTE_KV_STORE_MAX_INIT_DURATION))) {
-				TraceEvent(SevError, "RemoteIKVSInitTooLong").detail("TimeLimit", SERVER_KNOBS->REMOTE_KV_STORE_MAX_INIT_DURATION);
+				TraceEvent(SevError, "RemoteIKVSInitTooLong")
+				    .detail("TimeLimit", SERVER_KNOBS->REMOTE_KV_STORE_MAX_INIT_DURATION);
 				throw please_reboot_remote_kv_store();
 			}
 		}
