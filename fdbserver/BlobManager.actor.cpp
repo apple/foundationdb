@@ -1581,6 +1581,7 @@ static void addAssignment(KeyRangeMap<std::tuple<UID, int64_t, int64_t>>& map,
 }
 
 ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
+	state double recoveryStartTime = now();
 	state Promise<Void> workerListReady;
 	bmData->addActor.send(checkBlobWorkerList(bmData, workerListReady));
 	wait(workerListReady.getFuture());
@@ -1836,6 +1837,7 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 
 	TraceEvent("BlobManagerRecovered", bmData->id)
 	    .detail("Epoch", bmData->epoch)
+	    .detail("Duration", now() - recoveryStartTime)
 	    .detail("Granules", bmData->workerAssignments.size())
 	    .detail("Assigned", explicitAssignments)
 	    .detail("Revoked", outOfDateAssignments.size());
