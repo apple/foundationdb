@@ -102,7 +102,6 @@ void ExecCmdValueString::dbgPrint() const {
 }
 
 ACTOR void destoryChildProcess(Future<Void> parentSSClosed, ISimulator::ProcessInfo* childInfo, std::string message) {
-	// TODO : need to wait the onClosed message is sent back to the storage server
 	// This code path should be bug free
 	wait(parentSSClosed);
 	TraceEvent(SevDebug, message.c_str()).log();
@@ -151,10 +150,6 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 					NetworkAddressList l;
 					l.address = addr;
 					parentProcessEndpoint = Endpoint(l, token);
-					// TODO : remove debugging code
-					// std::cout << "flowChildProcessEndpoint: " <<
-					// parentProcessEndpoint.getPrimaryAddress().ip.toString()
-					//           << ", token: " << parentProcessEndpoint.token.toString() << "\n";
 				} catch (Error& e) {
 					std::cerr << "Could not parse network address " << addressArray[0] << std::endl;
 					flushAndExit(FDB_EXIT_ERROR);
@@ -191,9 +186,6 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 		}
 		if (role == "flowprocess" && !parentShutdown.isReady()) {
 			self->childs.push_back(child);
-			// TODO: remove this
-			state std::string childDataFolder(std::string(child->dataFolder).append("_child"));
-			child->dataFolder = childDataFolder.c_str();
 			state Future<Void> parentSSClosed = parent->onClosed();
 			FlowTransport::createInstance(false, 1, WLTOKEN_RESERVED_COUNT);
 			FlowTransport::transport().bind(child->address, child->address);
@@ -208,25 +200,15 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 					TraceEvent(SevDebug, "BackOnParentProcess").detail("Result", std::to_string(result));
 					destoryChildProcess(parentSSClosed, child, "StorageServerReceivedClosedMessage");
 				}
-				when(ISimulator::KillType killType = wait(onShutdown)) {
+				when(wait(onShutdown)) {
 					ASSERT(false);
-					TraceEvent(SevError, "ChildProcessReboot").detail("KillType", killType).log();
-					// TODO : need to make sure the close is finished before destroying the child process
-					// wait(flowProcessF);
-					// pair it up, child dies and also the parent dies
-					g_pSimulator->killProcess(child, ISimulator::KillInstantly);
+					// In prod, we use prctl to bind parent and child processes to die together
+					// In simulation, we simply disable killing parent or child processes as we cannot use the same
+					// mechanism here
 				}
-				when(ISimulator::KillType killType = wait(parentShutdown)) {
+				when(wait(parentShutdown)) { 
 					ASSERT(false);
-					TraceEvent(SevDebug, "ParentProcessReboot").detail("KillType", killType).log();
-					// Note: failed machines are not cancelled and actors behind is just running
-					// g_pSimulator->killProcess(child, killType);
-					if (killType < ISimulator::RebootAndDelete) {
-						ASSERT(false);
-					} else {
-						flowProcessF.cancel();
-						destoryChildProcess(flowProcessF, child, "ChildClosedAfterParentShutdown");
-					}
+					// Parent process is not killed, see above
 				}
 			}
 		} else {
