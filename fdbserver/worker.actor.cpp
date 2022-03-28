@@ -21,12 +21,17 @@
 #include <tuple>
 #include <boost/lexical_cast.hpp>
 
+#include "fdbrpc/IAsyncFile.h"
 #include "fdbrpc/Locality.h"
 #include "fdbclient/GlobalConfig.actor.h"
 #include "fdbclient/ProcessInterface.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbserver/Knobs.h"
 #include "flow/ActorCollection.h"
+#include "flow/Error.h"
+#include "flow/FileIdentifier.h"
+#include "flow/ObjectSerializer.h"
+#include "flow/Platform.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/SystemMonitor.h"
 #include "flow/TDMetric.actor.h"
@@ -56,6 +61,7 @@
 #include "flow/Trace.h"
 #include "flow/flow.h"
 #include "flow/network.h"
+#include "flow/serialize.h"
 
 #ifdef __linux__
 #include <fcntl.h>
@@ -2400,6 +2406,106 @@ ACTOR Future<Void> monitorAndWriteCCPriorityInfo(std::string filePath,
 	}
 }
 
+struct SWVersion {
+	constexpr static FileIdentifier file_identifier = 13943984;
+
+	uint64_t latestProtocolVersion;
+	uint64_t compatibleProtocolVersion;
+
+	explicit SWVersion(ProtocolVersion latestVersion, ProtocolVersion compatibleVersion)
+	  : latestProtocolVersion(latestVersion.version()), compatibleProtocolVersion(compatibleVersion.version()) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, latestProtocolVersion, compatibleProtocolVersion);
+	}
+};
+
+static const std::string versionFileName = "sw-version";
+
+ACTOR Future<bool> isCompatibleSoftwareVersion(std::string folder) {
+	try {
+		state std::string versionFilePath = joinPath(folder, versionFileName);
+		state ErrorOr<Reference<IAsyncFile>> versionFile = wait(
+		    errorOr(IAsyncFileSystem::filesystem(g_network)->open(versionFilePath, IAsyncFile::OPEN_READONLY, 0600)));
+
+		if (versionFile.isError()) {
+			if (versionFile.getError().code() == error_code_file_not_found && !fileExists(versionFilePath)) {
+				// If a version file does not exist, we assume this is either a fresh
+				// installation or an upgrade from a version that does not support version files.
+				// Either way, we can safely continue running this version of software.
+				TraceEvent(SevInfo, "NoPreviousSWVersion").log();
+				return true;
+			} else {
+				// Dangerous to continue if we cannot do a software compatibility test
+				throw versionFile.getError();
+			}
+		} else {
+			// Test whether the most newest software version that has been run on this cluster is
+			// compatible with the current software version
+			int64_t filesize = wait(versionFile.get()->size());
+			state Standalone<StringRef> fileData = makeString(filesize);
+			wait(success(versionFile.get()->read(mutateString(fileData), filesize, 0)));
+
+			try {
+				auto latestSoftwareVersion = BinaryReader::fromStringRef<ProtocolVersion>(fileData, Unversioned());
+				if (latestSoftwareVersion <= currentProtocolVersion) {
+					TraceEvent(SevInfo, "SWVersionCompatible").log();
+					return true;
+				} else {
+					TraceEvent(SevInfo, "SWVersionIncompatible").log();
+					return false;
+				}
+			} catch (Error& e) {
+				TraceEvent(SevError, "ReadSWVersionFileError").error(e);
+				throw e;
+			}
+		}
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
+		// TODO(bvr): Inject faults
+		TraceEvent(SevError, "OpenReadSWVersionFileError").error(e);
+		throw;
+	}
+}
+
+ACTOR Future<Void> checkAndUpdateNewestSoftwareVersion(std::string folder) {
+	try {
+		state std::string versionFilePath = joinPath(folder, versionFileName);
+		state ErrorOr<Reference<IAsyncFile>> versionFile = wait(
+		    errorOr(IAsyncFileSystem::filesystem(g_network)->open(versionFilePath, IAsyncFile::OPEN_READWRITE, 0600)));
+
+		if (versionFile.isError()) {
+			if (versionFile.getError().code() == error_code_file_not_found && !fileExists(versionFilePath)) {
+				Reference<IAsyncFile> newVersionFile = wait(IAsyncFileSystem::filesystem()->open(
+				    versionFilePath,
+				    IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE,
+				    0600));
+				versionFile = newVersionFile;
+			} else {
+				TraceEvent(SevError, "OpenSWVersionFileError").error(versionFile.getError());
+				throw versionFile.getError();
+			}
+		}
+
+		SWVersion swVersion(currentProtocolVersion, currentProtocolVersion);
+		ObjectWriter wr(Unversioned());
+		auto s = wr.toValue(swVersion, IncludeVersion());
+		wait(versionFile.get()->write(s.toString().c_str(), s.size(), 0));
+		wait(versionFile.get()->sync());
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
+		TraceEvent(SevError, "OpenWriteSWVersionFileError").error(e);
+		throw;
+	}
+
+	return Void();
+}
+
 ACTOR Future<UID> createAndLockProcessIdFile(std::string folder) {
 	state UID processIDUid;
 	platform::createDirectory(folder);
@@ -2700,6 +2806,21 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		state UID processIDUid = wait(createAndLockProcessIdFile(dataFolder));
 		localities.set(LocalityData::keyProcessId, processIDUid.toString());
 		// Only one process can execute on a dataFolder from this point onwards
+
+		Future<bool> pf = isCompatibleSoftwareVersion(dataFolder);
+		ErrorOr<bool> px = wait(errorOr(pf));
+		if (px.isError()) {
+			throw internal_error();
+		}
+		ErrorOr<Void> v = wait(errorOr(checkAndUpdateNewestSoftwareVersion(dataFolder)));
+		if (v.isError()) {
+			TraceEvent(SevError, "SWVersionNotWritten").error(v.getError());
+		}
+		Future<bool> f = isCompatibleSoftwareVersion(dataFolder);
+		ErrorOr<bool> vx = wait(errorOr(f));
+		if (vx.isError()) {
+			TraceEvent(SevError, "SWVersionCompatibilityUnknown").error(vx.getError());
+		}
 
 		std::string fitnessFilePath = joinPath(dataFolder, "fitness");
 		auto cc = makeReference<AsyncVar<Optional<ClusterControllerFullInterface>>>();
