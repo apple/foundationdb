@@ -200,13 +200,13 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 					TraceEvent(SevDebug, "BackOnParentProcess").detail("Result", std::to_string(result));
 					destoryChildProcess(parentSSClosed, child, "StorageServerReceivedClosedMessage");
 				}
-				when(wait(onShutdown)) {
+				when(wait(success(onShutdown))) {
 					ASSERT(false);
 					// In prod, we use prctl to bind parent and child processes to die together
 					// In simulation, we simply disable killing parent or child processes as we cannot use the same
 					// mechanism here
 				}
-				when(wait(parentShutdown)) {
+				when(wait(success(parentShutdown))) {
 					ASSERT(false);
 					// Parent process is not killed, see above
 				}
