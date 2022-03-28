@@ -255,7 +255,8 @@ private:
 			request.write_byte(static_cast<uint8_t>(length));
 		} else if (length <= 65535) {
 			request.write_byte(0xda);
-			request.write_byte(static_cast<uint16_t>(length));
+			request.write_byte(reinterpret_cast<const uint8_t*>(&length)[1]);
+			request.write_byte(reinterpret_cast<const uint8_t*>(&length)[0]);
 		} else {
 			// TODO: Add support for longer strings if necessary.
 			ASSERT(false);
@@ -405,8 +406,7 @@ struct FastUDPTracer : public UDPTracer {
 
 	TracerType type() const override { return TracerType::NETWORK_LOSSY; }
 
-	// TODO - DRY this up
-	void trace(OTELSpan const& span) override {
+	void prepare(int size) {
 		static std::once_flag once;
 		std::call_once(once, [&]() {
 			log_actor_ = fastTraceLogger(&unready_socket_messages_, &failed_messages_, &total_messages_, &send_error_);
@@ -422,7 +422,7 @@ struct FastUDPTracer : public UDPTracer {
 			socket_ = INetworkConnections::net()->createUDPSocket(destAddress);
 		});
 
-		if (span.location.name.size() == 0) {
+		if (size == 0) {
 			return;
 		}
 
@@ -437,9 +437,9 @@ struct FastUDPTracer : public UDPTracer {
 		if (send_error_) {
 			return;
 		}
+	}
 
-		serialize_span(span, request_);
-
+	void write() {
 		int bytesSent = send(socket_fd_, request_.buffer.get(), request_.data_size, MSG_DONTWAIT);
 		if (bytesSent == -1) {
 			// Will forgo checking errno here, and assume all error messages
@@ -450,49 +450,19 @@ struct FastUDPTracer : public UDPTracer {
 		request_.reset();
 	}
 
-	// TODO - DRY this up
-	void trace(Span const& span) override {
-		static std::once_flag once;
-		std::call_once(once, [&]() {
-			log_actor_ = fastTraceLogger(&unready_socket_messages_, &failed_messages_, &total_messages_, &send_error_);
-			std::string destAddr = FLOW_KNOBS->TRACING_UDP_LISTENER_ADDR;
-			if (g_network->isSimulated()) {
-				udp_server_actor_ = simulationStartServer();
-				// Force loopback when in simulation mode
-				destAddr = "127.0.0.1";
-			}
-			NetworkAddress destAddress =
-			    NetworkAddress::parse(destAddr + ":" + std::to_string(FLOW_KNOBS->TRACING_UDP_LISTENER_PORT));
-
-			socket_ = INetworkConnections::net()->createUDPSocket(destAddress);
-		});
-
-		if (span.location.name.size() == 0) {
-			return;
-		}
-
-		++total_messages_;
-		if (!socket_.isReady()) {
-			++unready_socket_messages_;
-			return;
-		} else if (socket_fd_ == -1) {
-			socket_fd_ = socket_.get()->native_handle();
-		}
-
-		if (send_error_) {
-			return;
-		}
-
+	// TODO - We could DRY this and trace(Span const& span) up. They both could inherit from some virtual interface with
+	// a serialize method something like SerializableSpan, and then we wouldn't need both functions. However if we're
+	// only keeping the new implementation, then there is no need as we'll remove the method below.
+	void trace(OTELSpan const& span) override {
+		prepare(span.location.name.size());
 		serialize_span(span, request_);
+		write();
+	}
 
-		int bytesSent = send(socket_fd_, request_.buffer.get(), request_.data_size, MSG_DONTWAIT);
-		if (bytesSent == -1) {
-			// Will forgo checking errno here, and assume all error messages
-			// should be treated the same.
-			++failed_messages_;
-			send_error_ = true;
-		}
-		request_.reset();
+	void trace(Span const& span) override {
+		prepare(span.location.name.size());
+		serialize_span(span, request_);
+		write();
 	}
 
 private:
@@ -554,7 +524,6 @@ Span& Span::operator=(Span&& o) {
 	location = o.location;
 	parents = std::move(o.parents);
 	o.begin = 0;
-	// TODO: Why no tags in assignment copy overload?
 	return *this;
 }
 
@@ -570,6 +539,7 @@ OTELSpan& OTELSpan::operator=(OTELSpan&& o) {
 		end = g_network->now();
 		g_tracer->trace(*this);
 	}
+	arena = std::move(o.arena);
 	context = o.context;
 	parentContext = o.parentContext;
 	begin = o.begin;
@@ -577,8 +547,14 @@ OTELSpan& OTELSpan::operator=(OTELSpan&& o) {
 	location = o.location;
 	links = std::move(o.links);
 	events = std::move(o.events);
-	// TODO do we need tags?
-	o.begin = 0;
+	status = o.status;
+	kind = o.kind;
+	o.context = SpanContext();
+	o.parentContext = SpanContext();
+	o.kind = SpanKind::INTERNAL;
+	o.begin = 0.0;
+	o.end = 0.0;
+	o.status = SpanStatus::UNSET;
 	return *this;
 }
 
@@ -718,6 +694,12 @@ TEST_CASE("/flow/Tracing/AddLinks") {
 	return Void();
 };
 
+uint64_t swapUint16BE(uint8_t* index) {
+	uint16_t value;
+	memcpy(&value, index, sizeof(value));
+	return fromBigEndian16(value);
+}
+
 uint64_t swapUint64BE(uint8_t* index) {
 	uint64_t value;
 	memcpy(&value, index, sizeof(value));
@@ -725,12 +707,12 @@ uint64_t swapUint64BE(uint8_t* index) {
 }
 
 double swapDoubleBE(uint8_t* index) {
-  double value;
-  memcpy(&value, index, sizeof(value));
-  char* const p = reinterpret_cast<char*>(&value);
-  for (size_t i = 0; i < sizeof(double) / 2; ++i)
-    std::swap(p[i], p[sizeof(double) - i - 1]);
-  return value;
+	double value;
+	memcpy(&value, index, sizeof(value));
+	char* const p = reinterpret_cast<char*>(&value);
+	for (size_t i = 0; i < sizeof(double) / 2; ++i)
+		std::swap(p[i], p[sizeof(double) - i - 1]);
+	return value;
 }
 
 std::string readMPString(uint8_t* index, int len) {
@@ -802,19 +784,25 @@ TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
 	ASSERT(data[119] == 0b10000001); // single k/v pair
 	ASSERT(data[120] == 0b10100111); // length of key string "address" == 7
 
-  request.reset();
+	request.reset();
 
-  // Exercise all fluent interfaces, include links, events, and attributes.
-  OTELSpan span3("encoded_span_3"_loc);
-  auto s3Arena = span3.arena;
-  span3.addAttribute(StringRef(s3Arena, LiteralStringRef("operation")), StringRef(s3Arena, LiteralStringRef("grv"))).addLink(SpanContext(UID(300, 301), 400, TraceFlags::sampled)).addEvent(StringRef(s3Arena, LiteralStringRef("event1")), 100.101, { KeyValueRef(s3Arena, KeyValueRef(LiteralStringRef("foo"), LiteralStringRef("bar")))});
+	// Exercise all fluent interfaces, include links, events, and attributes.
+	OTELSpan span3("encoded_span_3"_loc);
+	auto s3Arena = span3.arena;
+	span3.addAttribute(StringRef(s3Arena, LiteralStringRef("operation")), StringRef(s3Arena, LiteralStringRef("grv")))
+	    .addLink(SpanContext(UID(300, 301), 400, TraceFlags::sampled))
+	    .addEvent(StringRef(s3Arena, LiteralStringRef("event1")),
+	              100.101,
+	              { KeyValueRef(s3Arena, KeyValueRef(LiteralStringRef("foo"), LiteralStringRef("bar"))) });
 	tracer.serialize_span(span3, request);
 	data = request.buffer.get();
-  ASSERT(data[0] == 0b10011110); // 14 element array.
-  // We don't care about the next 54 bytes as there is no parent and a randomly assigned Trace and SpanID
+	ASSERT(data[0] == 0b10011110); // 14 element array.
+	// We don't care about the next 54 bytes as there is no parent and a randomly assigned Trace and SpanID
 	// Read and verify span name
 	ASSERT(data[55] == (0b10100000 | strlen("encoded_span_3")));
-	ASSERT(strncmp(readMPString(&data[56], strlen("encoded_span_3")).c_str(), "encoded_span_3", strlen("encoded_span_3")) == 0);
+	ASSERT(strncmp(readMPString(&data[56], strlen("encoded_span_3")).c_str(),
+	               "encoded_span_3",
+	               strlen("encoded_span_3")) == 0);
 	// Verify begin/end is encoded, we don't care about the values
 	ASSERT(data[70] == 0xcb);
 	ASSERT(data[79] == 0xcb);
@@ -844,33 +832,57 @@ TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
 	ASSERT(strncmp(readMPString(&data[139], strlen("foo")).c_str(), "foo", strlen("foo")) == 0);
 	ASSERT(data[142] == 0b10100011); // length of key string "bar" == 3
 	ASSERT(strncmp(readMPString(&data[143], strlen("bar")).c_str(), "bar", strlen("bar")) == 0);
-  // Attributes
+	// Attributes
 	ASSERT(data[146] == 0b10000010); // two k/v pair
-  // Reconstruct map from MessagePack wire format data and verify.
-  std::unordered_map<std::string, std::string> attributes;
-  auto index = 147;
-  // We & out the bits here that contain the length the initial 4 higher order bits are 
-  // to signify this is a string of len <= 31 chars. 
-  auto firstKeyLength = static_cast<uint8_t>(data[index] & 0b00001111);
-  index++;
-  auto firstKey = readMPString(&data[index], firstKeyLength);
-  index += firstKeyLength;
-  auto firstValueLength = static_cast<uint8_t>(data[index] & 0b00001111);
-  index++;
-  auto firstValue = readMPString(&data[index], firstValueLength);
-  index += firstValueLength;
-  attributes[firstKey] = firstValue;
-  auto secondKeyLength = static_cast<uint8_t>(data[index] & 0b00001111);
-  index++;
-  auto secondKey = readMPString(&data[index], secondKeyLength);
-  index += secondKeyLength;
-  auto secondValueLength = static_cast<uint8_t>(data[index] & 0b00001111);
-  index++;
-  auto secondValue = readMPString(&data[index], secondValueLength);
-  attributes[secondKey] = secondValue;
-  // We don't know what the value for address will be, so just verify it is in the map.
-  ASSERT(attributes.find("address") != attributes.end());
-  ASSERT(strncmp(attributes["operation"].c_str(), "grv", strlen("grv")) == 0);
+	// Reconstruct map from MessagePack wire format data and verify.
+	std::unordered_map<std::string, std::string> attributes;
+	auto index = 147;
+	// We & out the bits here that contain the length the initial 4 higher order bits are
+	// to signify this is a string of len <= 31 chars.
+	auto firstKeyLength = static_cast<uint8_t>(data[index] & 0b00001111);
+	index++;
+	auto firstKey = readMPString(&data[index], firstKeyLength);
+	index += firstKeyLength;
+	auto firstValueLength = static_cast<uint8_t>(data[index] & 0b00001111);
+	index++;
+	auto firstValue = readMPString(&data[index], firstValueLength);
+	index += firstValueLength;
+	attributes[firstKey] = firstValue;
+	auto secondKeyLength = static_cast<uint8_t>(data[index] & 0b00001111);
+	index++;
+	auto secondKey = readMPString(&data[index], secondKeyLength);
+	index += secondKeyLength;
+	auto secondValueLength = static_cast<uint8_t>(data[index] & 0b00001111);
+	index++;
+	auto secondValue = readMPString(&data[index], secondValueLength);
+	attributes[secondKey] = secondValue;
+	// We don't know what the value for address will be, so just verify it is in the map.
+	ASSERT(attributes.find("address") != attributes.end());
+	ASSERT(strncmp(attributes["operation"].c_str(), "grv", strlen("grv")) == 0);
+
+	request.reset();
+
+	// Test message pack encoding for string >= 256 && <= 65535 chars
+	const char* longString = "yGUtj42gSKfdqib3f0Ri4OVhD7eWyTbKsH/g9+x4UWyXry7NIBFIapPV9f1qdTRl"
+	                         "2jXcZI8Ua/Gp8k9EBn7peaEN1uj4w9kf4FQ2Lalu0VrA4oquQoaKYr+wPsLBak9i"
+	                         "uyZDF9sX/HW4pVvQhPQdXQWME5E7m58XFMpZ3H8HNXuytWInEuh97SRLlI0RhrvG"
+	                         "ixNpYtYlvghsLCrEdZMMGnS2gXgGufIdg1xKJd30fUbZLHcYIC4DTnL5RBpkbQCR"
+	                         "SGKKUrpIb/7zePhBDi+gzUzyAcbQ2zUbFWI1KNi3zQk58uUG6wWJZkw+GCs7Cc3V"
+	                         "OUxOljwCJkC4QTgdsbbFhxUC+rtoHV5xAqoTQwR0FXnWigUjP7NtdL6huJUr3qRv"
+	                         "40c4yUI1a4+P5vJa";
+	auto span4 = OTELSpan();
+	auto location = Location();
+	location.name = StringRef(span4.arena, longString);
+	span4.location = location;
+	tracer.serialize_span(span4, request);
+	data = request.buffer.get();
+	ASSERT(data[0] == 0b10011110); // 14 element array.
+	// We don't care about the next 54 bytes as there is no parent and a randomly assigned Trace and SpanID
+	// Read and verify span name
+	ASSERT(data[55] == 0xda);
+	auto locationLength = swapUint16BE(&data[56]);
+	ASSERT(locationLength == strlen(longString));
+	ASSERT(strncmp(readMPString(&data[58], locationLength).c_str(), longString, strlen(longString)) == 0);
 	return Void();
 };
 #endif

@@ -253,10 +253,7 @@ public:
 		std::swap(status, other.status);
 		std::swap(begin, other.begin);
 		std::swap(end, other.end);
-		// We're going to keep the swap here for links because it is somewhat equivalent to {} parents
-		// in the Span implementation.
 		std::swap(links, other.links);
-		// Also swapping events as it shares the same arena
 		std::swap(events, other.events);
 		// TODO - Should we leave out attributes? We did in the Span impl.
 		// std::swap(attributes, other.attributes);
@@ -275,16 +272,6 @@ public:
 		return *this;
 	}
 
-	// TODO: causes ambiguity as StringRef has a std::string based constructor.
-	// Need to discuss with the team whether we want const std::string& or allow
-	// allow users to pass StringRef as first arg and let them deal with any lifecycle/memory issue.
-
-	// OTELSpan& addEvent(const std::string& name,
-	//                    const double& time,
-	//                    const std::initializer_list<KeyValueRef>& attrs = {}) {
-	// 	return addEvent(StringRef(arena, name), time, attrs);
-	// }
-
 	// TODO - Should we remove this. Potentially dangerous if the OTELEvent SmallVectorRef of attributes
 	// uses a different Arena than the OTELSpan?
 	OTELSpan& addEvent(const OTELEvent& event) {
@@ -292,7 +279,18 @@ public:
 		return *this;
 	}
 
-	// TODO - Should we remove this. Potentially dangerous if the StrinRef uses a different Arena than the OTELSpan?
+	// TODO: causes ambiguity as StringRef has a std::string based constructor.
+	// Need to discuss with the team whether we want const std::string& or allow
+	// allow users to pass StringRef as first arg and let them deal with any separate Arena scope/memory issues.
+
+	// OTELSpan& addEvent(const std::string& name,
+	//                    const double& time,
+	//                    const std::initializer_list<KeyValueRef>& attrs = {}) {
+	// 	return addEvent(StringRef(arena, name), time, attrs);
+	// }
+
+	// TODO - Should we remove this in favor of above addEvent which is comment out? Potentially dangerous if the
+	// StrinRef uses a different Arena than the OTELSpan?
 	OTELSpan& addEvent(const StringRef& name,
 	                   const double& time,
 	                   const std::initializer_list<KeyValueRef>& attrs = {}) {
@@ -307,8 +305,8 @@ public:
 	// 	return *this;
 	// }
 
-	// TODO - Should we remove this. Potentially dangerous if the StringRef Arena goes out of scope
-	// as it's not tied to this Arena?
+	// TODO - Should we remove this in favor of above AddAttribute which is commented out. Potentially dangerous if the
+	// StringRef Arena goes out of scope as it's not tied to this Arena?
 	OTELSpan& addAttribute(const StringRef& key, const StringRef& value) {
 		attributes[key] = value;
 		return *this;
