@@ -65,11 +65,13 @@ class GlobalTagThrottlerImpl {
 			state ReadYourWritesTransaction tr(self->db);
 
 			loop {
+				// TODO: Clean up quotas that have been removed
 				try {
 					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 					state RangeResult currentQuotas = wait(tr.getRange(tagQuotaKeys, CLIENT_KNOBS->TOO_MANY));
+					TraceEvent("GlobalTagThrottler_ReadCurrentQuotas").detail("Size", currentQuotas.size());
 					for (auto const kv : currentQuotas) {
 						auto tag = kv.key.removePrefix(tagQuotaPrefix);
 						auto quota = ThrottleApi::TagQuotaValue::fromValue(kv.value);
@@ -78,7 +80,7 @@ class GlobalTagThrottlerImpl {
 
 					++self->throttledTagChangeId;
 					wait(tr.watch(tagThrottleSignalKey));
-					TraceEvent("GlobalTagThrottlerChangeSignaled");
+					TraceEvent("GlobalTagThrottler_ChangeSignaled");
 					TEST(true); // Global tag throttler detected quota changes
 					break;
 				} catch (Error& e) {

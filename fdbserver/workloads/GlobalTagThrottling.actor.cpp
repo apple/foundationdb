@@ -25,13 +25,14 @@
 
 class GlobalTagThrottlingWorkload : public TestWorkload {
 	TransactionTag transactionTag;
+	double quota;
 
 	ACTOR static Future<Void> setup(GlobalTagThrottlingWorkload* self, Database cx) {
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				ThrottleApi::setTagQuota(tr, self->transactionTag, 100, 100, 0, 0);
+				ThrottleApi::setTagQuota(tr, self->transactionTag, self->quota, self->quota, 0, 0);
 				wait(tr->commit());
 				return Void();
 			} catch (Error& e) {
@@ -43,6 +44,7 @@ class GlobalTagThrottlingWorkload : public TestWorkload {
 public:
 	explicit GlobalTagThrottlingWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		transactionTag = getOption(options, "transactionTag"_sr, "sampleTag"_sr);
+		quota = getOption(options, "quota"_sr, 100.0);
 	}
 
 	std::string description() const override { return "GlobalTagThrottling"; }
