@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2021 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -75,7 +75,10 @@ ACTOR Future<Void> requestVersionUpdate(Database localDb, Reference<ChangeFeedDa
 	}
 }
 
-ACTOR Future<bool> changeFeedCommandActor(Database localDb, std::vector<StringRef> tokens, Future<Void> warn) {
+ACTOR Future<bool> changeFeedCommandActor(Database localDb,
+                                          Optional<TenantMapEntry> tenantEntry,
+                                          std::vector<StringRef> tokens,
+                                          Future<Void> warn) {
 	if (tokens.size() == 1) {
 		printUsage(tokens[0]);
 		return false;
@@ -92,8 +95,15 @@ ACTOR Future<bool> changeFeedCommandActor(Database localDb, std::vector<StringRe
 			printUsage(tokens[0]);
 			return false;
 		}
-		wait(updateChangeFeed(
-		    localDb, tokens[2], ChangeFeedStatus::CHANGE_FEED_CREATE, KeyRangeRef(tokens[3], tokens[4])));
+
+		KeyRange range;
+		if (tenantEntry.present()) {
+			range = KeyRangeRef(tokens[3], tokens[4]).withPrefix(tenantEntry.get().prefix);
+		} else {
+			range = KeyRangeRef(tokens[3], tokens[4]);
+		}
+
+		wait(updateChangeFeed(localDb, tokens[2], ChangeFeedStatus::CHANGE_FEED_CREATE, range));
 	} else if (tokencmp(tokens[1], "stop")) {
 		if (tokens.size() != 3) {
 			printUsage(tokens[0]);

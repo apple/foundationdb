@@ -203,6 +203,15 @@ public:
 	                                   int snap_command_length);
 };
 
+class Tenant final {
+public:
+	Tenant(FDBDatabase* db, const uint8_t* name, int name_length);
+
+private:
+	friend class Transaction;
+	FDBTenant* tenant;
+};
+
 // Wrapper around FDBTransaction, providing the same set of calls as the C API.
 // Handles cleanup of memory, removing the need to call
 // fdb_transaction_destroy.
@@ -210,6 +219,7 @@ class Transaction final {
 public:
 	// Given an FDBDatabase, initializes a new transaction.
 	Transaction(FDBDatabase* db);
+	Transaction(Tenant tenant);
 	~Transaction();
 
 	// Wrapper around fdb_transaction_reset.

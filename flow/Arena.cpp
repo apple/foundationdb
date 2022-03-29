@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2020 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -106,7 +106,9 @@ void* Arena::allocate4kAlignedBuffer(uint32_t size) {
 	return ArenaBlock::dependOn4kAlignedBuffer(impl, size);
 }
 
-size_t Arena::getSize(bool fastInaccurateEstimate) const {
+FDB_DEFINE_BOOLEAN_PARAM(FastInaccurateEstimate);
+
+size_t Arena::getSize(FastInaccurateEstimate fastInaccurateEstimate) const {
 	if (impl) {
 		allowAccess(impl.getPtr());
 		size_t result;
@@ -340,23 +342,23 @@ ArenaBlock* ArenaBlock::create(int dataSize, Reference<ArenaBlock>& next) {
 				b->bigSize = 256;
 				INSTRUMENT_ALLOCATE("Arena256");
 			} else if (reqSize <= 512) {
-				b = (ArenaBlock*)FastAllocator<512>::allocate();
+				b = (ArenaBlock*)new uint8_t[512];
 				b->bigSize = 512;
 				INSTRUMENT_ALLOCATE("Arena512");
 			} else if (reqSize <= 1024) {
-				b = (ArenaBlock*)FastAllocator<1024>::allocate();
+				b = (ArenaBlock*)new uint8_t[1024];
 				b->bigSize = 1024;
 				INSTRUMENT_ALLOCATE("Arena1024");
 			} else if (reqSize <= 2048) {
-				b = (ArenaBlock*)FastAllocator<2048>::allocate();
+				b = (ArenaBlock*)new uint8_t[2048];
 				b->bigSize = 2048;
 				INSTRUMENT_ALLOCATE("Arena2048");
 			} else if (reqSize <= 4096) {
-				b = (ArenaBlock*)FastAllocator<4096>::allocate();
+				b = (ArenaBlock*)new uint8_t[4096];
 				b->bigSize = 4096;
 				INSTRUMENT_ALLOCATE("Arena4096");
 			} else {
-				b = (ArenaBlock*)FastAllocator<8192>::allocate();
+				b = (ArenaBlock*)new uint8_t[8192];
 				b->bigSize = 8192;
 				INSTRUMENT_ALLOCATE("Arena8192");
 			}
@@ -458,26 +460,26 @@ void ArenaBlock::destroyLeaf() {
 			FastAllocator<256>::release(this);
 			INSTRUMENT_RELEASE("Arena256");
 		} else if (bigSize <= 512) {
-			FastAllocator<512>::release(this);
+			delete[] reinterpret_cast<uint8_t*>(this);
 			INSTRUMENT_RELEASE("Arena512");
 		} else if (bigSize <= 1024) {
-			FastAllocator<1024>::release(this);
+			delete[] reinterpret_cast<uint8_t*>(this);
 			INSTRUMENT_RELEASE("Arena1024");
 		} else if (bigSize <= 2048) {
-			FastAllocator<2048>::release(this);
+			delete[] reinterpret_cast<uint8_t*>(this);
 			INSTRUMENT_RELEASE("Arena2048");
 		} else if (bigSize <= 4096) {
-			FastAllocator<4096>::release(this);
+			delete[] reinterpret_cast<uint8_t*>(this);
 			INSTRUMENT_RELEASE("Arena4096");
 		} else if (bigSize <= 8192) {
-			FastAllocator<8192>::release(this);
+			delete[] reinterpret_cast<uint8_t*>(this);
 			INSTRUMENT_RELEASE("Arena8192");
 		} else {
 #ifdef ALLOC_INSTRUMENTATION
 			allocInstr["ArenaHugeKB"].dealloc((bigSize + 1023) >> 10);
 #endif
 			g_hugeArenaMemory.fetch_sub(bigSize);
-			delete[](uint8_t*) this;
+			delete[] reinterpret_cast<uint8_t*>(this);
 		}
 	}
 }
@@ -676,6 +678,7 @@ TEST_CASE("/flow/Arena/DefaultBoostHash") {
 
 TEST_CASE("/flow/Arena/Size") {
 	Arena a;
+	int fastSize, slowSize;
 
 	// Size estimates are accurate unless dependencies are added to an Arena via another Arena
 	// handle which points to a non-root node.
@@ -683,10 +686,14 @@ TEST_CASE("/flow/Arena/Size") {
 	// Note that the ASSERT argument order matters, the estimate must be calculated first as
 	// the full accurate calculation will update the estimate
 	makeString(40, a);
-	ASSERT_EQ(a.getSize(true), a.getSize());
+	fastSize = a.getSize(FastInaccurateEstimate::True);
+	slowSize = a.getSize();
+	ASSERT_EQ(fastSize, slowSize);
 
 	makeString(700, a);
-	ASSERT_EQ(a.getSize(true), a.getSize());
+	fastSize = a.getSize(FastInaccurateEstimate::True);
+	slowSize = a.getSize();
+	ASSERT_EQ(fastSize, slowSize);
 
 	// Copy a at a point where it points to a large block with room for block references
 	Arena b = a;
@@ -697,35 +704,51 @@ TEST_CASE("/flow/Arena/Size") {
 
 	makeString(1000, a);
 	makeString(1000, a);
-	ASSERT_EQ(a.getSize(true), a.getSize());
+	fastSize = a.getSize(FastInaccurateEstimate::True);
+	slowSize = a.getSize();
+	ASSERT_EQ(fastSize, slowSize);
 
 	Standalone<StringRef> s = makeString(500);
 	a.dependsOn(s.arena());
-	ASSERT_EQ(a.getSize(true), a.getSize());
+	fastSize = a.getSize(FastInaccurateEstimate::True);
+	slowSize = a.getSize();
+	ASSERT_EQ(fastSize, slowSize);
 
 	Standalone<StringRef> s2 = makeString(500);
 	a.dependsOn(s2.arena());
-	ASSERT_EQ(a.getSize(true), a.getSize());
+	fastSize = a.getSize(FastInaccurateEstimate::True);
+	slowSize = a.getSize();
+	ASSERT_EQ(fastSize, slowSize);
 
 	// Add a dependency to b, which will fit in b's root and update b's size estimate
 	Standalone<StringRef> s3 = makeString(100);
 	b.dependsOn(s3.arena());
-	ASSERT_EQ(b.getSize(true), b.getSize());
+	fastSize = b.getSize(FastInaccurateEstimate::True);
+	slowSize = b.getSize();
+	ASSERT_EQ(fastSize, slowSize);
 
 	// But now a's size estimate is out of date because the new reference in b's root is still
 	// in a's tree
-	ASSERT_LT(a.getSize(true), a.getSize());
+	fastSize = a.getSize(FastInaccurateEstimate::True);
+	slowSize = a.getSize();
+	ASSERT_LT(fastSize, slowSize);
 
 	// Now that a full size calc has been done on a, the estimate is up to date.
-	ASSERT_EQ(a.getSize(true), a.getSize());
+	fastSize = a.getSize(FastInaccurateEstimate::True);
+	slowSize = a.getSize();
+	ASSERT_EQ(fastSize, slowSize);
 
 	// Add a dependency to c, which will NOT fit in c's root, so it will be added to a new
 	// root for c and that root will not be in a's tree so a's size and estimate remain
 	// unchanged and the same.  The size and estimate of c will also match.
 	Standalone<StringRef> s4 = makeString(100);
 	c.dependsOn(s4.arena());
-	ASSERT_EQ(c.getSize(true), c.getSize());
-	ASSERT_EQ(a.getSize(true), a.getSize());
+	fastSize = c.getSize(FastInaccurateEstimate::True);
+	slowSize = c.getSize();
+	ASSERT_EQ(fastSize, slowSize);
+	fastSize = a.getSize(FastInaccurateEstimate::True);
+	slowSize = a.getSize();
+	ASSERT_EQ(fastSize, slowSize);
 
 	return Void();
 }

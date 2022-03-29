@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,14 +29,7 @@ static std::map<NetworkAddress, std::pair<Reference<EvictablePageCache>, Referen
 
 EvictablePage::~EvictablePage() {
 	if (data) {
-#if defined(USE_JEMALLOC)
-		aligned_free(data);
-#else
-		if (pageCache->pageSize == 4096)
-			FastAllocator<4096>::release(data);
-		else
-			aligned_free(data);
-#endif
+		freeFast4kAligned(pageCache->pageSize, data);
 	}
 	if (EvictablePageCache::RANDOM == pageCache->cacheEvictionType) {
 		if (index > -1) {
@@ -173,14 +166,7 @@ void AsyncFileCached::releaseZeroCopy(void* data, int length, int64_t offset) {
 		if (o != orphanedPages.end()) {
 			if (o->second == 1) {
 				if (data) {
-#if defined(USE_JEMALLOC)
-					aligned_free(data);
-#else
-					if (length == 4096)
-						FastAllocator<4096>::release(data);
-					else
-						aligned_free(data);
-#endif
+					freeFast4kAligned(length, data);
 				}
 			} else {
 				--o->second;

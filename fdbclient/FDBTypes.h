@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1342,7 +1342,12 @@ struct ReadBlobGranuleContext {
 	void* userContext;
 
 	// Returns a unique id for the load. Asynchronous to support queueing multiple in parallel.
-	int64_t (*start_load_f)(const char* filename, int filenameLength, int64_t offset, int64_t length, void* context);
+	int64_t (*start_load_f)(const char* filename,
+	                        int filenameLength,
+	                        int64_t offset,
+	                        int64_t length,
+	                        int64_t fullFileLength,
+	                        void* context);
 
 	// Returns data for the load. Pass the loadId returned by start_load_f
 	uint8_t* (*get_load_f)(int64_t loadId, void* context);
@@ -1353,6 +1358,9 @@ struct ReadBlobGranuleContext {
 	// Set this to true for testing if you don't want to read the granule files,
 	// just do the request to the blob workers
 	bool debugNoMaterialize;
+
+	// number of granules to load in parallel (default 1)
+	int granuleParallelism = 1;
 };
 
 // Store metadata associated with each storage server. Now it only contains data be used in perpetual storage wiggle.

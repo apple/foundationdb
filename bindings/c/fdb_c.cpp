@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -835,9 +835,10 @@ extern "C" DLLEXPORT FDBResult* fdb_transaction_read_blob_granules(FDBTransactio
 	    context.get_load_f = granule_context.get_load_f;
 	    context.free_load_f = granule_context.free_load_f;
 	    context.debugNoMaterialize = granule_context.debugNoMaterialize;
+	    context.granuleParallelism = granule_context.granuleParallelism;
 
 	    Optional<Version> rv;
-	    if (readVersion != invalidVersion) { rv = readVersion; }
+	    if (readVersion != latestVersion) { rv = readVersion; }
 
 	    return (FDBResult*)(TXN(tr)->readBlobGranules(range, beginVersion, rv, context).extractPtr()););
 }
