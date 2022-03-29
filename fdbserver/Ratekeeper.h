@@ -59,11 +59,6 @@ public:
 	UID id;
 	LocalityData locality;
 	StorageQueuingMetricsReply lastReply;
-<<<<<<< HEAD
-	StorageQueuingMetricsReply prevReply;
-	
-=======
->>>>>>> ad98d6479992d2fcf1f89ff59d20945479a54cf1
 	bool acceptingRequests;
 	Smoother smoothDurableBytes, smoothInputBytes, verySmoothDurableBytes;
 	Smoother smoothDurableVersion, smoothLatestVersion;
@@ -72,37 +67,12 @@ public:
 	limitReason_t limitReason;
 	std::vector<StorageQueuingMetricsReply::TagInfo> busiestReadTags, busiestWriteTags;
 
-<<<<<<< HEAD
-	Optional<TransactionTag> busiestReadTag, busiestWriteTag;
-	double busiestReadTagFractionalBusyness = 0, busiestWriteTagFractionalBusyness = 0;
-	double busiestReadTagRate = 0, busiestWriteTagRate = 0;
-
-	Reference<EventCacheHolder> busiestWriteTagEventHolder;
-
-	// refresh periodically
-	TransactionTagMap<TransactionCommitCostEstimation> tagCostEst;
-	uint64_t totalWriteCosts = 0;
-	int totalWriteOps = 0;
-
-	StorageQueueInfo(UID id, LocalityData locality)
-	  : valid(false), id(id), locality(locality), acceptingRequests(false),
-	    smoothDurableBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT),
-	    verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
-	    smoothDurableVersion(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothLatestVersion(SERVER_KNOBS->SMOOTHING_AMOUNT),
-	    smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT),
-	    limitReason(limitReason_t::unlimited),
-	    busiestWriteTagEventHolder(makeReference<EventCacheHolder>(id.toString() + "/BusiestWriteTag")) {
-		// FIXME: this is a tacky workaround for a potential uninitialized use in trackStorageServerQueueInfo
-		lastReply.instanceID = -1;
-	}
-=======
 	StorageQueueInfo(UID id, LocalityData locality);
 	void refreshCommitCost(double elapsed);
 	int64_t getStorageQueueBytes() const { return lastReply.bytesInput - smoothDurableBytes.smoothTotal(); }
 	int64_t getDurabilityLag() const { return smoothLatestVersion.smoothTotal() - smoothDurableVersion.smoothTotal(); }
 	void update(StorageQueuingMetricsReply const&, Smoother& smoothTotalDurableBytes);
 	void addCommitCost(TransactionTagRef tagName, TransactionCommitCostEstimation const& cost);
->>>>>>> ad98d6479992d2fcf1f89ff59d20945479a54cf1
 };
 
 struct TLogQueueInfo {
