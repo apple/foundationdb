@@ -226,12 +226,12 @@ struct RestoreLoaderData : RestoreRoleData, public ReferenceCounted<RestoreLoade
 		finishedBatch = NotifiedVersion(0);
 	}
 
-	void initBackupContainer(Key url) {
+	void initBackupContainer(Key url, Optional<std::string> proxy) {
 		if (bcUrl == url && bc.isValid()) {
 			return;
 		}
 		bcUrl = url;
-		bc = IBackupContainer::openContainer(url.toString());
+		bc = IBackupContainer::openContainer(url.toString(), proxy, {});
 	}
 };
 

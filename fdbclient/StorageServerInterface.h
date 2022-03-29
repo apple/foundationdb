@@ -935,7 +935,7 @@ struct OverlappingChangeFeedsReply {
 };
 
 struct OverlappingChangeFeedsRequest {
-	constexpr static FileIdentifier file_identifier = 10726174;
+	constexpr static FileIdentifier file_identifier = 7228462;
 	KeyRange range;
 	Version minVersion;
 	ReplyPromise<OverlappingChangeFeedsReply> reply;
@@ -950,7 +950,7 @@ struct OverlappingChangeFeedsRequest {
 };
 
 struct ChangeFeedVersionUpdateReply {
-	constexpr static FileIdentifier file_identifier = 11815134;
+	constexpr static FileIdentifier file_identifier = 4246160;
 	Version version = 0;
 
 	ChangeFeedVersionUpdateReply() {}
