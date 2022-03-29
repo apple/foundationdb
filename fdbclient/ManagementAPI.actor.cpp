@@ -214,7 +214,7 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 	} else if (mode == "ssd-redwood-1-experimental") {
 		logType = KeyValueStoreType::SSD_BTREE_V2;
 		storeType = KeyValueStoreType::SSD_REDWOOD_V1;
-	} else if (mode == "ssd-rocksdb-experimental") {
+	} else if (mode == "ssd-rocksdb-v1") {
 		logType = KeyValueStoreType::SSD_BTREE_V2;
 		storeType = KeyValueStoreType::SSD_ROCKSDB_V1;
 	} else if (mode == "memory" || mode == "memory-2") {
