@@ -980,7 +980,7 @@ ThreadFuture<MappedRangeResult> MultiVersionTransaction::getMappedRange(const Ke
 	auto tr = getTransaction();
 	auto f = tr.transaction ? tr.transaction->getMappedRange(begin, end, mapper, limits, snapshot, reverse)
 	                        : makeTimeout<MappedRangeResult>();
-	return abortableFuture(f, tr.onChange);
+	return abortableFuture(f, tr.onChange, cluster_version_changed());
 }
 
 ThreadFuture<Standalone<StringRef>> MultiVersionTransaction::getVersionstamp() {

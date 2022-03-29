@@ -22,6 +22,7 @@ package com.apple.foundationdb;
 
 import java.nio.charset.Charset;
 import java.util.Arrays;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.Executor;
@@ -208,6 +209,101 @@ public class TenantManagement {
 	 */
 	public static CompletableFuture<Void> deleteTenant(Database db, Tuple tenantName) {
 		return deleteTenant(db, tenantName.pack());
+	}
+
+
+	/**
+	 * Lists all tenants in between the range specified. The number of tenants listed can be restricted.
+	 *
+	 * @param db The database used to create a transaction for listing the tenants.
+	 * @param begin The beginning of the range of tenants to list.
+	 * @param end The end of the range of the tenants to list.
+	 * @param limit The maximum number of tenants to return from this request.
+	 * @return an iterator where each item is a byte array with the tenant name and value.
+	 */
+	public static CloseableAsyncIterator<byte[]> listTenants(Database db, byte[] begin, byte[] end, int limit) {
+		return listTenants_internal(db.createTransaction(), begin, end, limit);
+	}
+
+	public static CloseableAsyncIterator<byte[]> listTenants(Database db, Tuple begin, Tuple end, int limit) {
+		return listTenants_internal(db.createTransaction(), begin.pack(), end.pack(), limit);
+	}
+
+	private static CloseableAsyncIterator<byte[]> listTenants_internal(Transaction tr, byte[] begin, byte[] end,
+	                                                                   int limit) {
+		return new TenantAsyncIterator(tr, begin, end, limit);
+	}
+
+	// Templates taken from BoundaryIterator LocalityUtil.java
+	static class TenantAsyncIterator implements CloseableAsyncIterator<byte[]> {
+		Transaction tr;
+		final byte[] begin;
+		final byte[] end;
+
+		final AsyncIterable<KeyValue> firstGet;
+		AsyncIterator<KeyValue> iter;
+		private boolean closed;
+
+		TenantAsyncIterator(Transaction tr, byte[] begin, byte[] end, int limit) {
+			this.tr = tr;
+
+			this.begin = ByteArrayUtil.join(TENANT_MAP_PREFIX, begin);
+			this.end = ByteArrayUtil.join(TENANT_MAP_PREFIX, end);
+
+			tr.options().setReadSystemKeys();
+			tr.options().setLockAware();
+
+			firstGet = tr.getRange(this.begin, this.end, limit);
+			iter = firstGet.iterator();
+			closed = false;
+		}
+
+		@Override
+		public CompletableFuture<Boolean> onHasNext() {
+			return iter.onHasNext();
+		}
+
+		@Override
+		public boolean hasNext() {
+			return iter.hasNext();
+		}
+		@Override
+		public byte[] next() {
+			KeyValue kv = iter.next();
+			byte[] tenant = ByteArrayUtil.replace(kv.getKey(), 0, kv.getKey().length, TENANT_MAP_PREFIX, null);
+			byte[] value = kv.getValue();
+
+			List<byte[]> parts = Arrays.asList(tenant, value);
+			byte[] separator = ": ".getBytes();
+
+			byte[] result = ByteArrayUtil.join(separator, parts);
+			return result;
+		}
+
+		@Override
+		public void remove() {
+			throw new UnsupportedOperationException("Tenant lists are read-only");
+		}
+
+		@Override
+		public void close() {
+			TenantAsyncIterator.this.tr.close();
+			closed = true;
+		}
+
+		@Override
+		protected void finalize() throws Throwable {
+			try {
+				if (FDB.instance().warnOnUnclosed && !closed) {
+					System.err.println("CloseableAsyncIterator not closed (listTenants)");
+				}
+				if (!closed) {
+					close();
+				}
+			} finally {
+				super.finalize();
+			}
+		}
 	}
 
 	private TenantManagement() {}
