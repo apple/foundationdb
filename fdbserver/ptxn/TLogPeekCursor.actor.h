@@ -516,7 +516,7 @@ public:
 	BroadcastedStorageTeamPeekCursor_Ordered(const Version& version_ = 0)
 	  : BroadcastedStorageTeamPeekCursorBase(std::make_unique<details::OrderedCursorContainer>(),
 	                                         std::make_unique<details::OrderedCursorContainer>(),
-											 version_) {}
+	                                         version_) {}
 };
 
 // Merge multiple storage team peek cursor into one. The version is the barrier, i.e., a version is complete iff all
@@ -531,7 +531,7 @@ public:
 	BroadcastedStorageTeamPeekCursor_Unordered(const Version& version_ = 0)
 	  : BroadcastedStorageTeamPeekCursorBase(std::make_unique<details::UnorderedCursorContainer>(),
 	                                         std::make_unique<details::UnorderedCursorContainer>(),
-											 version_) {}
+	                                         version_) {}
 };
 
 } // namespace merged
