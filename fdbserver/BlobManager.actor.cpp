@@ -211,12 +211,32 @@ struct SplitEvaluation {
 	  : epoch(epoch), seqno(seqno), inProgress(inProgress) {}
 };
 
+struct BlobManagerStats {
+	CounterCollection cc;
+
+	// FIXME: pruning stats
+
+	Counter granuleSplits;
+	Counter granuleWriteHotSplits;
+	Future<Void> logger;
+
+	// Current stats maintained for a given blob worker process
+	explicit BlobManagerStats(UID id, double interval, std::unordered_map<UID, BlobWorkerInterface>* workers)
+	  : cc("BlobManagerStats", id.toString()), granuleSplits("GranuleSplits", cc),
+	    granuleWriteHotSplits("GranuleWriteHotSplits", cc) {
+		specialCounter(cc, "WorkerCount", [workers]() { return workers->size(); });
+		logger = traceCounters("BlobManagerMetrics", id, interval, &cc, "BlobManagerMetrics");
+	}
+};
+
 struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 	UID id;
 	Database db;
 	Optional<Key> dcId;
 	PromiseStream<Future<Void>> addActor;
 	Promise<Void> doLockCheck;
+
+	BlobManagerStats stats;
 
 	Reference<BackupContainerFileSystem> bstore;
 
@@ -246,8 +266,9 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 	PromiseStream<RangeAssignment> rangesToAssign;
 
 	BlobManagerData(UID id, Database db, Optional<Key> dcId)
-	  : id(id), db(db), dcId(dcId), knownBlobRanges(false, normalKeys.end),
-	    restartRecruiting(SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY), recruitingStream(0) {}
+	  : id(id), db(db), dcId(dcId), stats(id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &workersById),
+	    knownBlobRanges(false, normalKeys.end), restartRecruiting(SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY),
+	    recruitingStream(0) {}
 };
 
 ACTOR Future<Standalone<VectorRef<KeyRef>>> splitRange(Reference<BlobManagerData> bmData,
@@ -753,6 +774,7 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 				}
 
 				for (KeyRangeRef range : rangesToRemove) {
+					TraceEvent("ClientBlobRangeRemoved", bmData->id).detail("Range", range);
 					if (BM_DEBUG) {
 						fmt::print(
 						    "BM Got range to revoke [{0} - {1})\n", range.begin.printable(), range.end.printable());
@@ -768,6 +790,7 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 				state std::vector<Future<Standalone<VectorRef<KeyRef>>>> splitFutures;
 				// Divide new ranges up into equal chunks by using SS byte sample
 				for (KeyRangeRef range : rangesToAdd) {
+					TraceEvent("ClientBlobRangeAdded", bmData->id).detail("Range", range);
 					splitFutures.push_back(splitRange(bmData, range, false));
 				}
 
@@ -1096,6 +1119,11 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 		           splitVersion);
 	}
 
+	++bmData->stats.granuleSplits;
+	if (writeHot) {
+		++bmData->stats.granuleWriteHotSplits;
+	}
+
 	// transaction committed, send range assignments
 	// range could have been moved since split eval started, so just revoke from whoever has it
 	RangeAssignment raRevoke;
@@ -1181,6 +1209,8 @@ ACTOR Future<Void> killBlobWorker(Reference<BlobManagerData> bmData, BlobWorkerI
 	// the one we just killed isn't considered.
 	// Remove it from workersById also since otherwise that worker addr will remain excluded
 	// when we try to recruit new blob workers.
+
+	TraceEvent("KillBlobWorker", bmData->id).detail("WorkerId", bwId);
 
 	if (registered) {
 		bmData->deadWorkers.insert(bwId);
@@ -1838,7 +1868,7 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 	TraceEvent("BlobManagerRecovered", bmData->id)
 	    .detail("Epoch", bmData->epoch)
 	    .detail("Duration", now() - recoveryStartTime)
-	    .detail("Granules", bmData->workerAssignments.size())
+	    .detail("Granules", bmData->workerAssignments.size()) // TODO this includes un-set ranges, so it is inaccurate
 	    .detail("Assigned", explicitAssignments)
 	    .detail("Revoked", outOfDateAssignments.size());
 
@@ -2088,6 +2118,8 @@ ACTOR Future<GranuleFiles> loadHistoryFiles(Reference<BlobManagerData> bmData, U
 		}
 	}
 }
+
+// FIXME: trace events for pruning
 
 /*
  * Deletes all files pertaining to the granule with id granuleId and
