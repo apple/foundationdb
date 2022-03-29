@@ -831,6 +831,7 @@ struct LogPushData : NonCopyable {
 	// Sets mutations for internal group writers. "groupMutations" is the output from
 	// getGroupMutations() and is used before writing any other mutations.
 	void setGroupMutations(
+	    const Arena& arena,
 	    const std::map<ptxn::TLogGroupID, std::unordered_map<ptxn::StorageTeamID, StringRef>>& groupMutations,
 	    Version commitVersion);
 

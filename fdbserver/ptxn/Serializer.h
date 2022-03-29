@@ -326,15 +326,15 @@ bool headeredItemDeserializerBase(const Arena& arena, StringRef serialized, Head
 // Deserializes the TwoLevelHeaderedItemsSerializer
 template <typename MainHeader, typename SectionHeader>
 class TwoLevelHeaderedItemsDeserializer {
-	BinaryReader reader;
+	ArenaReader reader;
 
 public:
 	using main_header_t = MainHeader;
 	using section_header_t = SectionHeader;
 
 	// serialized is the StringRef points to the serialied data
-	TwoLevelHeaderedItemsDeserializer(StringRef serialized)
-	  : reader(serialized, IncludeVersion(ProtocolVersion::withPartitionTransaction())) {
+	TwoLevelHeaderedItemsDeserializer(Arena arena, StringRef serialized)
+	  : reader(arena, serialized, IncludeVersion(ProtocolVersion::withPartitionTransaction())) {
 		// The serialized data *MUST* have a header
 		ASSERT(!allConsumed());
 	}

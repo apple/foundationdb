@@ -123,7 +123,7 @@ ACTOR Future<bool> peekRemote(PeekRemoteContext peekRemoteContext) {
 	// In case the remote epoch ended, an end_of_stream exception will be thrown and it is the caller's responsible
 	// to catch.
 
-	peekRemoteContext.deserializer.reset(reply.data);
+	peekRemoteContext.deserializer.reset(reply.arena, reply.data);
 	peekRemoteContext.wrappedDeserializerIter = peekRemoteContext.deserializer.begin();
 	if (peekRemoteContext.wrappedDeserializerIter.get() == peekRemoteContext.deserializer.end()) {
 		// No new mutations incoming, and there is no new mutations responded from TLog in this request
@@ -249,7 +249,8 @@ StorageTeamPeekCursor::StorageTeamPeekCursor(const Version& beginVersion_,
                                              Arena* pArena_,
                                              const bool reportEmptyVersion_)
   : VersionSubsequencePeekCursorBase(), storageTeamID(storageTeamID_), pTLogInterfaces(pTLogInterfaces_),
-    pAttachArena(pArena_), deserializer(emptyCursorHeader(), /* reportEmptyVersion_ */ true),
+    pAttachArena(pArena_),
+    deserializer(emptyCursorHeader().arena(), emptyCursorHeader(), /* reportEmptyVersion_ */ true),
     wrappedDeserializerIter(deserializer.begin(), pArena_), beginVersion(beginVersion_),
     reportEmptyVersion(reportEmptyVersion_), lastVersion(beginVersion_ - 1) {
 

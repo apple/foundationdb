@@ -37,10 +37,11 @@ namespace ptxn::test {
 void processTLogCommitRequestByStorageTeam(std::shared_ptr<FakeTLogContext> pFakeTLogContext,
                                            const Version& commitVersion,
                                            const StorageTeamID& storageTeamID,
+                                           const Arena arenaFromReq,
                                            const StringRef& messages) {
 	print::PrintTiming printTiming("processTLogCommitRequest");
 	printTiming << "Processing commit " << commitVersion << " for storage team " << storageTeamID << std::endl;
-	SubsequencedMessageDeserializer deserializer(messages, true);
+	SubsequencedMessageDeserializer deserializer(arenaFromReq, messages, true);
 	auto& commitRecord = pFakeTLogContext->pTestDriverContext->commitRecord;
 
 	// Check the committed data matches the record
@@ -101,7 +102,8 @@ ACTOR Future<Void> processTLogCommitRequest(std::shared_ptr<FakeTLogContext> pFa
                                             TLogCommitRequest commitRequest) {
 	wait(pFakeTLogContext->latency());
 	for (const auto& [storageTeamID, message] : commitRequest.messages) {
-		processTLogCommitRequestByStorageTeam(pFakeTLogContext, commitRequest.version, storageTeamID, message);
+		processTLogCommitRequestByStorageTeam(
+		    pFakeTLogContext, commitRequest.version, storageTeamID, commitRequest.arena, message);
 	}
 	commitRequest.reply.send(TLogCommitReply{ commitRequest.version });
 	return Void();

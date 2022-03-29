@@ -397,6 +397,7 @@ std::unordered_map<ptxn::TLogGroupID, ptxn::SerializedTeamData> LogPushData::get
 // It would be nice that ProxySubsequencedMessageSerializer can be set with
 // serialized data.
 void LogPushData::setGroupMutations(
+    const Arena& arena,
     const std::map<ptxn::TLogGroupID, std::unordered_map<ptxn::StorageTeamID, StringRef>>& groupMutations,
     Version commitVersion) {
 	for (const auto& [group, teamData] : groupMutations) {
@@ -408,7 +409,7 @@ void LogPushData::setGroupMutations(
 		}
 		auto& writer = it->second;
 		for (const auto& [team, mutations] : teamData) {
-			ptxn::SubsequencedMessageDeserializer deserializer(mutations);
+			ptxn::SubsequencedMessageDeserializer deserializer(arena, mutations);
 			for (const auto& item : deserializer) {
 				if (item.message.getType() == ptxn::Message::Type::SPAN_CONTEXT_MESSAGE) {
 					writer->writeTeamSpanContext(std::get<SpanContextMessage>(item.message), team);

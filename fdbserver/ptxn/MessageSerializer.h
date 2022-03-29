@@ -320,10 +320,11 @@ namespace details {
 class SubsequencedMessageDeserializerBase {
 protected:
 	StringRef serialized;
+	Arena arena;
 	MessageHeader header;
 
 	// Reset the deserializer, start with new serialized data
-	void resetImpl(const StringRef);
+	void resetImpl(const Arena, const StringRef);
 
 public:
 	// Gets the team ID
@@ -379,7 +380,10 @@ public:
 		// serialized_ refers to the serialized data
 		// If isEndIterator, then the iterator indicates the end of the serialized data. The behavior of dereferencing
 		// the iterator is undefined.
-		iterator(StringRef serialized_, const bool isEndIterator = false, const bool iterateOverEmptyVersions_ = false);
+		iterator(Arena arena_,
+		         StringRef serialized_,
+		         const bool isEndIterator = false,
+		         const bool iterateOverEmptyVersions_ = false);
 
 	public:
 		bool operator==(const iterator& another) const;
@@ -416,13 +420,15 @@ public:
 	// serialized_ refers to the serialized data
 	// If iterateOverEmptyVersions_ is set to true, the iterator will yield a VersionSubsequencedMessage with message
 	// type EmptyMessage when meet a version that has no messages, instead of skipping it.
-	SubsequencedMessageDeserializer(const StringRef serialized_, const bool iterateOverEmptyVersions_ = false);
+	SubsequencedMessageDeserializer(const Arena arena_,
+	                                const StringRef serialized_,
+	                                const bool iterateOverEmptyVersions_ = false);
 
 	// Returns true if a version without messages will be skipped.
 	bool isEmptyVersionsIgnored() const;
 
 	// Resets the deserializer, this will invalidate all iterators
-	void reset(const StringRef serialized_);
+	void reset(const Arena, const StringRef);
 
 	// Returns an iterator.
 	iterator begin() const;

@@ -227,7 +227,7 @@ ACTOR Future<Void> commitPeekAndCheck(std::shared_ptr<ptxn::test::TestDriverCont
 	ptxn::test::print::print(peekReply);
 
 	// Verify
-	ptxn::SubsequencedMessageDeserializer deserializer(peekReply.data);
+	ptxn::SubsequencedMessageDeserializer deserializer(peekReply.arena, peekReply.data);
 	ASSERT(storageTeamID == deserializer.getStorageTeamID());
 	ASSERT_EQ(beginVersion, deserializer.getFirstVersion());
 	ASSERT_EQ(beginVersion, deserializer.getLastVersion());
@@ -554,7 +554,7 @@ ACTOR Future<Void> verifyPeek(std::shared_ptr<ptxn::test::TestDriverContext> pCo
 		request.endVersion.reset();
 		ptxn::TLogPeekReply reply = wait(pInterface->peek.getReply(request));
 
-		ptxn::SubsequencedMessageDeserializer deserializer(reply.data);
+		ptxn::SubsequencedMessageDeserializer deserializer(reply.arena, reply.data);
 		Version v = deserializer.getFirstVersion();
 
 		if (v == invalidVersion) {

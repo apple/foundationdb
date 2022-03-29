@@ -277,10 +277,11 @@ namespace details {
 
 #pragma region SubsequencedMessageDeserializerBase
 
-void SubsequencedMessageDeserializerBase::resetImpl(const StringRef serialized_) {
+void SubsequencedMessageDeserializerBase::resetImpl(const Arena arena_, const StringRef serialized_) {
 	ASSERT(serialized_.size() > 0);
 
 	serialized = serialized_;
+	arena = arena_;
 	header = ptxn::details::readSerializedHeader<MessageHeader>(serialized);
 }
 
@@ -306,10 +307,12 @@ const Version& SubsequencedMessageDeserializerBase::getLastVersion() const {
 
 #pragma region SubsequencedMessageDeserializer
 
-SubsequencedMessageDeserializer::iterator::iterator(const StringRef serialized_,
+SubsequencedMessageDeserializer::iterator::iterator(const Arena arena_,
+                                                    const StringRef serialized_,
                                                     const bool isEndIterator,
                                                     const bool iterateOverEmptyVersions_)
-  : deserializer(serialized_), rawSerializedData(serialized_), iterateOverEmptyVersions(iterateOverEmptyVersions_) {
+  : deserializer(arena_, serialized_), rawSerializedData(serialized_),
+    iterateOverEmptyVersions(iterateOverEmptyVersions_) {
 
 	header = deserializer.deserializeAsMainHeader();
 
@@ -408,28 +411,28 @@ Arena& SubsequencedMessageDeserializer::iterator::arena() {
 	return deserializer.arena();
 }
 
-SubsequencedMessageDeserializer::SubsequencedMessageDeserializer(const StringRef serialized_,
+SubsequencedMessageDeserializer::SubsequencedMessageDeserializer(const Arena arena_,
+                                                                 const StringRef serialized_,
                                                                  const bool iterateOverEmptyVersions_)
-  : endIterator(serialized_, true), iterateOverEmptyVersions(iterateOverEmptyVersions_) {
-
-	reset(serialized_);
+  : endIterator(arena_, serialized_, true), iterateOverEmptyVersions(iterateOverEmptyVersions_) {
+	reset(arena_, serialized_);
 }
 
 bool SubsequencedMessageDeserializer::isEmptyVersionsIgnored() const {
 	return !iterateOverEmptyVersions;
 }
 
-void SubsequencedMessageDeserializer::reset(const StringRef serialized_) {
-	details::SubsequencedMessageDeserializerBase::resetImpl(serialized_);
+void SubsequencedMessageDeserializer::reset(const Arena arena_, const StringRef serialized_) {
+	details::SubsequencedMessageDeserializerBase::resetImpl(arena_, serialized_);
 
-	endIterator = iterator(serialized, true);
+	endIterator = iterator(arena, serialized, true);
 }
 
 SubsequencedMessageDeserializer::iterator SubsequencedMessageDeserializer::begin() const {
 	// Since the iterator is setting to a state that it is located at the end of a version section,
 	// doing a prefix ++ will trigger it read a new version section, and place itself to the beginning
 	// of the items in the section.
-	return ++iterator(serialized, false, iterateOverEmptyVersions);
+	return ++iterator(arena, serialized, false, iterateOverEmptyVersions);
 }
 
 const SubsequencedMessageDeserializer::iterator& SubsequencedMessageDeserializer::end() const {
