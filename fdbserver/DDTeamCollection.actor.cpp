@@ -5700,16 +5700,35 @@ public:
 			return r1 == r2 ? 0 : (r1 > r2 ? -1 : 1);
 		};
 
-		wait(collection->getTeam(req));
-		std::pair<Optional<Reference<IDataDistributionTeam>>, bool> resTeam = req.reply.getFuture().get();
-		std::set<UID> expectedServers{ UID(4, 0) };
+		state GetTeamRequest reqHigh(wantsNewServers, wantsTrueBest, false, teamMustHaveShards);
+		reqHigh.teamSorter = [](Reference<IDataDistributionTeam> a, Reference<IDataDistributionTeam> b) {
+			auto r1 = a->getLoadReadBandwidth(), r2 = b->getLoadReadBandwidth();
+			return r1 == r2 ? 0 : (r1 < r2 ? -1 : 1);
+		};
 
-		ASSERT(resTeam.first.present());
-		auto servers = resTeam.first.get()->getServerIDs();
-		const std::set<UID> selectedServers(servers.begin(), servers.end());
+		wait(collection->getTeam(req) && collection->getTeam(reqHigh));
+		std::pair<Optional<Reference<IDataDistributionTeam>>, bool> resTeam = req.reply.getFuture().get(),
+		                                                            resTeamHigh = reqHigh.reply.getFuture().get();
+
+		std::set<UID> expectedServers{ UID(4, 0) };
+		std::set<UID> expectedServersHigh{ UID(5, 0) };
+
+		ASSERT(resTeam.first.present() && resTeamHigh.first.present());
+		auto servers = resTeam.first.get()->getServerIDs(), serversHigh = resTeamHigh.first.get()->getServerIDs();
+		const std::set<UID> selectedServers(servers.begin(), servers.end()),
+		    selectedServersHigh(serversHigh.begin(), serversHigh.end());
 		// for (auto id : selectedServers)
 		// 	std::cout << id.toString() << std::endl;
-		ASSERT(expectedServers == selectedServers);
+		ASSERT(expectedServers == selectedServers && expectedServersHigh == selectedServersHigh);
+
+		resTeam.first.get()->addDataInFlightToTeam(50, 50);
+		req.reply.reset();
+		wait(collection->getTeam(req));
+		std::pair<Optional<Reference<IDataDistributionTeam>>, bool> resTeam1 = req.reply.getFuture().get();
+		std::set<UID> expectedServers1{ UID(2, 0) };
+		auto servers1 = resTeam1.first.get()->getServerIDs();
+		const std::set<UID> selectedServers1(servers1.begin(), servers1.end());
+		ASSERT(expectedServers1 == selectedServers1);
 
 		return Void();
 	}
