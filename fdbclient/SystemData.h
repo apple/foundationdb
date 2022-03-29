@@ -202,7 +202,6 @@ extern const KeyRangeRef serverListKeys;
 extern const KeyRef serverListPrefix;
 const Key serverListKeyFor(UID serverID);
 const Value serverListValue(StorageServerInterface const&);
-const Value serverListValueFB(StorageServerInterface const&);
 UID decodeServerListKey(KeyRef const&);
 StorageServerInterface decodeServerListValue(ValueRef const&);
 

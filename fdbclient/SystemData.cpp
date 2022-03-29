@@ -588,7 +588,9 @@ const Key serverListKeyFor(UID serverID) {
 }
 
 const Value serverListValue(StorageServerInterface const& server) {
-	return serverListValueFB(server);
+	auto protocolVersion = currentProtocolVersion;
+	protocolVersion.addObjectSerializerFlag();
+	return ObjectWriter::toValue(server, IncludeVersion(protocolVersion));
 }
 
 UID decodeServerListKey(KeyRef const& key) {
@@ -615,12 +617,6 @@ StorageServerInterface decodeServerListValue(ValueRef const& value) {
 	}
 
 	return decodeServerListValueFB(value);
-}
-
-const Value serverListValueFB(StorageServerInterface const& server) {
-	auto protocolVersion = currentProtocolVersion;
-	protocolVersion.addObjectSerializerFlag();
-	return ObjectWriter::toValue(server, IncludeVersion(protocolVersion));
 }
 
 // processClassKeys.contains(k) iff k.startsWith( processClassKeys.begin ) because '/'+1 == '0'
@@ -1396,32 +1392,31 @@ const KeyRef tenantLastIdKey = "\xff/tenantLastId/"_sr;
 const KeyRef tenantDataPrefixKey = "\xff/tenantDataPrefix"_sr;
 
 // for tests
-void testSSISerdes(StorageServerInterface const& ssi, bool useFB) {
+void testSSISerdes(StorageServerInterface const& ssi) {
 	printf("ssi=\nid=%s\nlocality=%s\nisTss=%s\ntssId=%s\nacceptingRequests=%s\naddress=%s\ngetValue=%s\n\n\n",
 	       ssi.id().toString().c_str(),
 	       ssi.locality.toString().c_str(),
 	       ssi.isTss() ? "true" : "false",
 	       ssi.isTss() ? ssi.tssPairID.get().toString().c_str() : "",
-	       ssi.acceptingRequests ? "true" : "false",
+	       ssi.isAcceptingRequests() ? "true" : "false",
 	       ssi.address().toString().c_str(),
 	       ssi.getValue.getEndpoint().token.toString().c_str());
 
-	StorageServerInterface ssi2 =
-	    (useFB) ? decodeServerListValueFB(serverListValueFB(ssi)) : decodeServerListValue(serverListValue(ssi));
+	StorageServerInterface ssi2 = decodeServerListValue(serverListValue(ssi));
 
 	printf("ssi2=\nid=%s\nlocality=%s\nisTss=%s\ntssId=%s\nacceptingRequests=%s\naddress=%s\ngetValue=%s\n\n\n",
 	       ssi2.id().toString().c_str(),
 	       ssi2.locality.toString().c_str(),
 	       ssi2.isTss() ? "true" : "false",
 	       ssi2.isTss() ? ssi2.tssPairID.get().toString().c_str() : "",
-	       ssi2.acceptingRequests ? "true" : "false",
+	       ssi2.isAcceptingRequests() ? "true" : "false",
 	       ssi2.address().toString().c_str(),
 	       ssi2.getValue.getEndpoint().token.toString().c_str());
 
 	ASSERT(ssi.id() == ssi2.id());
 	ASSERT(ssi.locality == ssi2.locality);
 	ASSERT(ssi.isTss() == ssi2.isTss());
-	ASSERT(ssi.acceptingRequests == ssi2.acceptingRequests);
+	ASSERT(ssi.isAcceptingRequests() == ssi2.isAcceptingRequests());
 	if (ssi.isTss()) {
 		ASSERT(ssi2.tssPairID.get() == ssi2.tssPairID.get());
 	}
@@ -1430,7 +1425,7 @@ void testSSISerdes(StorageServerInterface const& ssi, bool useFB) {
 }
 
 // unit test for serialization since tss stuff had bugs
-TEST_CASE("/SystemData/SSI/SerDes") {
+TEST_CASE("/SystemData/SerDes/SSI") {
 	printf("testing ssi serdes\n");
 	LocalityData localityData(Optional<Standalone<StringRef>>(),
 	                          Standalone<StringRef>(deterministicRandom()->randomUniqueID().toString()),
@@ -1443,13 +1438,11 @@ TEST_CASE("/SystemData/SSI/SerDes") {
 	ssi.locality = localityData;
 	ssi.initEndpoints();
 
-	testSSISerdes(ssi, false);
-	testSSISerdes(ssi, true);
+	testSSISerdes(ssi);
 
 	ssi.tssPairID = UID(0x2345234523452345, 0x1238123812381238);
 
-	testSSISerdes(ssi, false);
-	testSSISerdes(ssi, true);
+	testSSISerdes(ssi);
 	printf("ssi serdes test complete\n");
 
 	return Void();

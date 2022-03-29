@@ -89,8 +89,10 @@ struct StorageServerInterface {
 	RequestStream<struct GetCheckpointRequest> checkpoint;
 	RequestStream<struct FetchCheckpointRequest> fetchCheckpoint;
 
+private:
 	bool acceptingRequests;
 
+public:
 	explicit StorageServerInterface(UID uid) : uniqueID(uid) { acceptingRequests = false; }
 	StorageServerInterface() : uniqueID(deterministicRandom()->randomUniqueID()) { acceptingRequests = false; }
 	NetworkAddress address() const { return getValue.getEndpoint().getPrimaryAddress(); }
