@@ -80,6 +80,8 @@
 #include "fdbclient/SimpleIni.h"
 #include "fdbclient/versions.h"
 
+constexpr double RSS_CHECK_INTERVAL = 1.0; // seconds
+
 #ifdef __linux__
 typedef fd_set* fdb_fd_set;
 #elif defined(__APPLE__) || defined(__FreeBSD__)
@@ -397,6 +399,47 @@ int mkdir(std::string const& directory) {
 	return 0;
 }
 
+// Parse size value with same format as parse_with_suffix in flow.h
+uint64_t parseWithSuffix(const char* to_parse, const char* default_unit = nullptr) {
+	char* end_ptr = nullptr;
+	uint64_t ret = strtoull(to_parse, &end_ptr, 10);
+	if (end_ptr == to_parse) {
+		// failed to parse
+		return 0;
+	}
+	const char* unit = default_unit;
+	if (*end_ptr != 0) {
+		unit = end_ptr;
+	}
+	if (unit == nullptr) {
+		// no unit found
+		return 0;
+	}
+	if (strcmp(end_ptr, "B") == 0) {
+		// do nothing
+	} else if (strcmp(unit, "KB") == 0) {
+		ret *= static_cast<uint64_t>(1e3);
+	} else if (strcmp(unit, "KiB") == 0) {
+		ret *= 1ull << 10;
+	} else if (strcmp(unit, "MB") == 0) {
+		ret *= static_cast<uint64_t>(1e6);
+	} else if (strcmp(unit, "MiB") == 0) {
+		ret *= 1ull << 20;
+	} else if (strcmp(unit, "GB") == 0) {
+		ret *= static_cast<uint64_t>(1e9);
+	} else if (strcmp(unit, "GiB") == 0) {
+		ret *= 1ull << 30;
+	} else if (strcmp(unit, "TB") == 0) {
+		ret *= static_cast<uint64_t>(1e12);
+	} else if (strcmp(unit, "TiB") == 0) {
+		ret *= 1ull << 40;
+	} else {
+		// unrecognized unit
+		ret = 0;
+	}
+	return ret;
+}
+
 struct Command {
 private:
 	std::vector<std::string> commands;
@@ -416,6 +459,7 @@ public:
 	const char* delete_envvars;
 	bool deconfigured;
 	bool kill_on_configuration_change;
+	uint64_t memory_rss;
 
 	// one pair for each of stdout and stderr
 	int pipes[2][2];
@@ -423,7 +467,7 @@ public:
 	Command() : argv(nullptr) {}
 	Command(const CSimpleIni& ini, std::string _section, ProcessID id, fdb_fd_set fds, int* maxfd)
 	  : fds(fds), argv(nullptr), section(_section), fork_retry_time(-1), quiet(false), delete_envvars(nullptr),
-	    deconfigured(false), kill_on_configuration_change(true) {
+	    deconfigured(false), kill_on_configuration_change(true), memory_rss(0) {
 		char _ssection[strlen(section.c_str()) + 22];
 		snprintf(_ssection, strlen(section.c_str()) + 22, "%s", id.c_str());
 		ssection = _ssection;
@@ -529,6 +573,12 @@ public:
 			log_msg(SevError, "Unable to resolve command for %s\n", ssection.c_str());
 			return;
 		}
+
+		const char* mem_rss = get_value_multi(ini, "memory-rss", ssection.c_str(), section.c_str(), "general", nullptr);
+		if (mem_rss) {
+			memory_rss = parseWithSuffix(mem_rss, "MiB");
+		}
+
 		std::stringstream ss(binary);
 		std::copy(std::istream_iterator<std::string>(ss),
 		          std::istream_iterator<std::string>(),
@@ -543,7 +593,8 @@ public:
 			    isParameterNameEqual(i.pItem, "restart-delay-reset-interval") ||
 			    isParameterNameEqual(i.pItem, "disable-lifecycle-logging") ||
 			    isParameterNameEqual(i.pItem, "delete-envvars") ||
-			    isParameterNameEqual(i.pItem, "kill-on-configuration-change")) {
+			    isParameterNameEqual(i.pItem, "kill-on-configuration-change") ||
+			    isParameterNameEqual(i.pItem, "memory-rss")) {
 				continue;
 			}
 
@@ -641,6 +692,31 @@ CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONFFILE, "--conffile", SO_REQ_SEP }
 	                                  { OPT_HELP, "-h", SO_NONE },
 	                                  { OPT_HELP, "--help", SO_NONE },
 	                                  SO_END_OF_OPTIONS };
+
+// Return resident memory in bytes for the given process, or 0 if error.
+uint64_t getRss(ProcessID id) {
+#ifndef __linux__
+	// TODO: implement for non-linux
+	return 0;
+#else
+	pid_t pid = id_pid[id];
+	char stat_path[100];
+	snprintf(stat_path, sizeof(stat_path), "/proc/%d/statm", pid);
+	FILE* stat_file = fopen(stat_path, "r");
+	if (stat_file == nullptr) {
+		log_msg(SevWarn, "Unable to open stat file for %s\n", id.c_str());
+		return 0;
+	}
+	long rss = 0;
+	int ret = fscanf(stat_file, "%*lu%ld", &rss);
+	if (ret == 0) {
+		log_msg(SevWarn, "Unable to parse rss size for %s\n", id.c_str());
+		return 0;
+	}
+	fclose(stat_file);
+	return static_cast<uint64_t>(rss) * sysconf(_SC_PAGESIZE);
+#endif
+}
 
 void start_process(Command* cmd, ProcessID id, uid_t uid, gid_t gid, int delay, sigset_t* mask) {
 	if (!cmd->argv)
@@ -797,7 +873,7 @@ bool argv_equal(const char** a1, const char** a2) {
 	return true;
 }
 
-void kill_process(ProcessID id, bool wait = true) {
+void kill_process(ProcessID id, bool wait = true, bool cleanup = true) {
 	pid_t pid = id_pid[id];
 
 	log_msg(SevInfo, "Killing process %d\n", pid);
@@ -807,8 +883,10 @@ void kill_process(ProcessID id, bool wait = true) {
 		waitpid(pid, nullptr, 0);
 	}
 
-	pid_id.erase(pid);
-	id_pid.erase(id);
+	if (cleanup) {
+		pid_id.erase(pid);
+		id_pid.erase(id);
+	}
 }
 
 void load_conf(const char* confpath, uid_t& uid, gid_t& gid, sigset_t* mask, fdb_fd_set rfds, int* maxfd) {
@@ -1534,20 +1612,32 @@ int main(int argc, char** argv) {
 		}
 
 		double end_time = std::numeric_limits<double>::max();
+		double now = timer();
+		bool need_rss_check = false;
 		for (auto& i : id_command) {
 			if (i.second->fork_retry_time >= 0) {
 				end_time = std::min(i.second->fork_retry_time, end_time);
 			}
+			if (i.second->memory_rss > 0 && id_pid.count(i.first) > 0) {
+				need_rss_check = true;
+			}
+		}
+		bool timeout_for_rss_check = false;
+		if (need_rss_check && end_time > now + RSS_CHECK_INTERVAL) {
+			end_time = now + RSS_CHECK_INTERVAL;
+			timeout_for_rss_check = true;
 		}
 		struct timespec tv;
 		double timeout = -1;
 		if (end_time < std::numeric_limits<double>::max()) {
-			timeout = std::max(0.0, end_time - timer());
+			timeout = std::max(0.0, end_time - now);
 			if (timeout > 0) {
 				tv.tv_sec = timeout;
 				tv.tv_nsec = 1e9 * (timeout - tv.tv_sec);
 			}
 		}
+
+		bool is_timeout = false;
 
 #ifdef __linux__
 		/* Block until something interesting happens (while atomically
@@ -1561,7 +1651,10 @@ int main(int argc, char** argv) {
 		}
 
 		if (nfds == 0) {
-			reload = true;
+			is_timeout = true;
+			if (!timeout_for_rss_check) {
+				reload = true;
+			}
 		}
 #elif defined(__APPLE__) || defined(__FreeBSD__)
 		int nev = 0;
@@ -1572,7 +1665,10 @@ int main(int argc, char** argv) {
 		}
 
 		if (nev == 0) {
-			reload = true;
+			is_timeout = true;
+			if (!timeout_for_rss_check) {
+				reload = true;
+			}
 		}
 
 		if (nev > 0) {
@@ -1620,6 +1716,36 @@ int main(int argc, char** argv) {
 			reload = true;
 		}
 #endif
+
+		if (is_timeout && timeout_for_rss_check) {
+			std::vector<ProcessID> oom_ids;
+			for (auto& i : id_command) {
+				if (id_pid.count(i.first) == 0) {
+					// process is not running
+					continue;
+				}
+				uint64_t rss_limit = i.second->memory_rss;
+				if (rss_limit == 0) {
+					continue;
+				}
+				uint64_t current_rss = getRss(i.first);
+				if (current_rss > rss_limit) {
+					log_process_msg(SevWarn,
+					                i.second->ssection.c_str(),
+					                "Process %d being killed for exceeding resident memory limit, current %" PRIu64
+					                " , limit %" PRIu64 "\n",
+					                id_pid[i.first],
+					                current_rss,
+					                i.second->memory_rss);
+					oom_ids.push_back(i.first);
+				}
+			}
+			// kill process without waiting, and rely on the SIGCHLD handling logic below to restart the process.
+			for (auto& id : oom_ids) {
+				kill_process(id, false /*wait*/, false /*cleanup*/);
+				child_exited = true;
+			}
+		}
 
 		/* select() could have returned because received an exit signal */
 		if (exit_signal > 0) {
