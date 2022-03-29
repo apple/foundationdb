@@ -836,7 +836,7 @@ public:
 	Promise<Void> coreStarted;
 	bool shuttingDown;
 
-	Promise<bool> registerInterfaceAcceptingRequests;
+	Promise<Void> registerInterfaceAcceptingRequests;
 	Future<Void> interfaceRegistered;
 
 	bool behind;
@@ -6803,12 +6803,10 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 
 		if ((data->lastTLogVersion - data->version.get()) < SERVER_KNOBS->STORAGE_RECOVERY_VERSION_LAG_LIMIT) {
 			if (data->registerInterfaceAcceptingRequests.canBeSet()) {
-				data->registerInterfaceAcceptingRequests.send(true);
+				data->registerInterfaceAcceptingRequests.send(Void());
 				ErrorOr<Void> e = wait(errorOr(data->interfaceRegistered));
 				if (e.isError()) {
-					TraceEvent(SevWarn, "StorageInterfaceRegistrationFailed")
-					    .detail("ServerID", data->thisServerID)
-					    .detail("Error", e.getError().code());
+					TraceEvent(SevWarn, "StorageInterfaceRegistrationFailed", data->thisServerID).error(e.getError());
 				}
 			}
 		}
@@ -8623,10 +8621,10 @@ ACTOR Future<Void> replaceTSSInterface(StorageServer* self, StorageServerInterfa
 
 ACTOR Future<Void> storageInterfaceRegistration(StorageServer* self,
                                                 StorageServerInterface ssi,
-                                                Future<bool> interfaceAcceptingRequests) {
+                                                Optional<Future<Void>> readyToAcceptRequests) {
 
-	bool acceptingRequests = wait(interfaceAcceptingRequests);
-	if (acceptingRequests) {
+	if (readyToAcceptRequests.present()) {
+		wait(readyToAcceptRequests.get());
 		ssi.startAcceptingRequests();
 	} else {
 		ssi.stopAcceptingRequests();
@@ -8673,7 +8671,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 
 		if (seedTag == invalidTag) {
 			ssi.startAcceptingRequests();
-			self.registerInterfaceAcceptingRequests.send(true);
+			self.registerInterfaceAcceptingRequests.send(Void());
 
 			// Might throw recruitment_failed in case of simultaneous master failure
 			std::pair<Version, Tag> verAndTag = wait(addStorageServer(self.cx, ssi));
@@ -8789,10 +8787,8 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		if (recovered.canBeSet())
 			recovered.send(Void());
 
-		state Promise<bool> registerInterface;
-		state Future<Void> f = storageInterfaceRegistration(&self, ssi, registerInterface.getFuture());
+		state Future<Void> f = storageInterfaceRegistration(&self, ssi, {});
 		wait(delay(0));
-		registerInterface.send(false);
 		ErrorOr<Void> e = wait(errorOr(f));
 		if (e.isError()) {
 			Error e = f.getError();
