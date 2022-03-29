@@ -909,27 +909,27 @@ ACTOR static Future<Void> finishMoveShard(Database occ,
 		    .detail("DataMoveID", dataMoveID)
 		    .detail("TargetRange", keys);
 
-		// This process can be split up into multiple transactions if there are too many existing overlapping shards
-		// In that case, each iteration of this loop will have begin set to the end of the last processed shard
+		// This process can be split up into multiple transactions if getRange() doesn't return the entire
+		// target range.
 		loop {
 			state std::vector<UID> completeSrc;
 			state std::vector<UID> destServers;
-			state std::unordered_set<UID> srcServers;
-			// state Transaction tr(occ);
-			state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+			state std::unordered_set<UID> allServers;
 			state KeyRange range;
+			// state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(occ);
+			state Transaction tr(occ);
 			try {
-				tr->trState->taskID = TaskPriority::MoveKeys;
-				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.trState->taskID = TaskPriority::MoveKeys;
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
 				releaser.release();
 				wait(finishMoveKeysParallelismLock->take(TaskPriority::DataDistributionLaunch));
 				releaser = FlowLock::Releaser(*finishMoveKeysParallelismLock);
 
-				wait(checkMoveKeysLock(&(tr->getTransaction()), lock, ddEnabledState));
+				wait(checkMoveKeysLock(&tr, lock, ddEnabledState));
 
-				Optional<Value> val = wait(tr->get(dataMoveKeyFor(dataMoveID)));
+				Optional<Value> val = wait(tr.get(dataMoveKeyFor(dataMoveID)));
 				if (val.present()) {
 					dataMove = decodeDataMoveValue(val.get());
 					TraceEvent(SevDebug, "FinishMoveShardFoundDataMove", relocationIntervalId)
@@ -950,26 +950,26 @@ ACTOR static Future<Void> finishMoveShard(Database occ,
 					throw data_move_cancelled();
 				}
 
-				state RangeResult UIDtoTagMap = wait(tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+				state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
 
-				state RangeResult keyServers = wait(krmGetRanges(tr,
+				state RangeResult keyServers = wait(krmGetRanges(&tr,
 				                                                 keyServersPrefix,
 				                                                 range,
 				                                                 SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT,
 				                                                 SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT));
 				ASSERT(!keyServers.empty());
 				range = KeyRangeRef(range.begin, keyServers.back().key);
+				ASSERT(!range.empty());
 
-				// Iterate through the beginning of keyServers until we find one that hasn't already been processed
-				state int currentIndex = 0;
-				for (; currentIndex < keyServers.size() - 1 && alreadyMoved; ++currentIndex) {
+				// state int currentIndex = 0;
+				for (int currentIndex = 0; currentIndex < keyServers.size() - 1; ++currentIndex) {
 					std::vector<UID> src;
 					std::vector<UID> dest;
 					UID srcId;
 					UID destId;
 					decodeKeyServersValue(UIDtoTagMap, keyServers[currentIndex].value, src, dest, srcId, destId);
-					state KeyRange currentRange =
+					const KeyRange currentRange =
 					    KeyRangeRef(keyServers[currentIndex].key, keyServers[currentIndex + 1].key);
 					TraceEvent(SevDebug, "FinishMoveShardProcessingShard", relocationIntervalId)
 					    .detail("Range", currentRange)
@@ -977,26 +977,27 @@ ACTOR static Future<Void> finishMoveShard(Database occ,
 					    .detail("Src", describe(src))
 					    .detail("DestID", destId)
 					    .detail("Dest", describe(dest));
-					srcServers.insert(src.begin(), src.end());
-					srcServers.insert(dest.begin(), dest.end());
+					allServers.insert(src.begin(), src.end());
+					allServers.insert(dest.begin(), dest.end());
 					if (!destId.isValid()) {
 						TraceEvent(SevWarnAlways, "FinishMoveShardInvalidDestID", relocationIntervalId)
 						    .detail("DataMoveID", dataMoveID);
-						ASSERT(srcId == dataMoveID);
-						begin = keyServers[currentIndex + 1].key;
+						// ASSERT(srcId == dataMoveID);
+						ASSERT(false);
 						continue;
 					} else {
 						ASSERT(destId == dataMoveID);
 						std::sort(dest.begin(), dest.end());
-						if (!std::equal(destServers.begin(), destServers.end(), dest.begin())) {
-							TraceEvent(SevDebug, "FinishMoveShardDestChanged", relocationIntervalId)
-							    .detail("Range", currentRange)
-							    .detail("DestID", destId)
-							    .detail("Dest", describe(dest))
-							    .detail("IntendedDest", describe(destServers));
-							ASSERT(std::includes(destServers.begin(), destServers.end(), dest.begin(), dest.end()));
-							destServers = dest;
-						}
+						ASSERT(std::equal(destServers.begin(), destServers.end(), dest.begin()));
+						// if (!std::equal(destServers.begin(), destServers.end(), dest.begin())) {
+						// 	TraceEvent(SevDebug, "FinishMoveShardDestChanged", relocationIntervalId)
+						// 	    .detail("Range", currentRange)
+						// 	    .detail("DestID", destId)
+						// 	    .detail("Dest", describe(dest))
+						// 	    .detail("IntendedDest", describe(destServers));
+						// 	ASSERT(std::includes(destServers.begin(), destServers.end(), dest.begin(), dest.end()));
+						// 	destServers = dest;
+						// }
 					}
 
 					std::set<UID> srcSet;
@@ -1022,17 +1023,16 @@ ACTOR static Future<Void> finishMoveShard(Database occ,
 				state std::vector<UID> newDestinations;
 				std::set<UID> completeSrcSet(completeSrc.begin(), completeSrc.end());
 				for (const UID& id : destServers) {
-					if (!hasRemote || !completeSrcSet.count(id)) {
+					if (!completeSrcSet.count(id)) {
 						newDestinations.push_back(id);
 					}
 				}
 
-				// for smartQuorum
 				state std::vector<StorageServerInterface> storageServerInterfaces;
 				std::vector<Future<Optional<Value>>> serverListEntries;
 				serverListEntries.reserve(newDestinations.size());
 				for (const UID& id : newDestinations) {
-					serverListEntries.push_back(tr->get(serverListKeyFor(id)));
+					serverListEntries.push_back(tr.get(serverListKeyFor(id)));
 				}
 				state std::vector<Optional<Value>> serverListValues = wait(getAll(serverListEntries));
 
@@ -1050,7 +1050,7 @@ ACTOR static Future<Void> finishMoveShard(Database occ,
 				serverReady.reserve(storageServerInterfaces.size());
 				for (int s = 0; s < storageServerInterfaces.size(); s++) {
 					serverReady.push_back(waitForShardReady(
-					    storageServerInterfaces[s], range, tr->getReadVersion().get(), GetShardStateRequest::READABLE));
+					    storageServerInterfaces[s], range, tr.getReadVersion().get(), GetShardStateRequest::READABLE));
 				}
 
 				// Wait for all storage server moves, and explicitly swallow errors for tss ones with
@@ -1061,7 +1061,7 @@ ACTOR static Future<Void> finishMoveShard(Database occ,
 				             TaskPriority::MoveKeys));
 
 				int count = 0;
-				for (int s = 0; s < serverReady.size(); s++) {
+				for (int s = 0; s < serverReady.size(); ++s) {
 					count += serverReady[s].isReady() && !serverReady[s].isError();
 				}
 
@@ -1072,15 +1072,15 @@ ACTOR static Future<Void> finishMoveShard(Database occ,
 					// update keyServers, serverKeys
 					// SOMEDAY: Doing these in parallel is safe because none of them overlap or touch (one per
 					// server)
-					wait(krmSetRangeCoalescing(tr,
+					wait(krmSetRangeCoalescing(&tr,
 					                           keyServersPrefix,
 					                           range,
 					                           allKeys,
 					                           keyServersValue(UIDtoTagMap, destServers, {}, dataMoveID, UID())));
 
-					std::unordered_set<UID>::iterator asi = srcServers.begin();
+					std::unordered_set<UID>::iterator asi = allServers.begin();
 					std::vector<Future<Void>> actors;
-					while (asi != srcServers.end()) {
+					while (asi != allServers.end()) {
 						const bool destHasServer =
 						    std::find(destServers.begin(), destServers.end(), *asi) != destServers.end();
 						actors.push_back(krmSetRangeCoalescing(&tr,
@@ -1098,7 +1098,7 @@ ACTOR static Future<Void> finishMoveShard(Database occ,
 						for (const UID& ssID : dataMove.src) {
 							tr.clear(prefixRange(checkpointKeyPrefixFor(ssID, dataMoveID)));
 						}
-						tr->clear(dataMoveKeyFor(dataMoveID));
+						tr.clear(dataMoveKeyFor(dataMoveID));
 						complete = true;
 						TraceEvent("CleanUpDataMoveCheckpoint", dataMoveID)
 						    .detail("DataMoveID", dataMoveID)
@@ -1109,16 +1109,17 @@ ACTOR static Future<Void> finishMoveShard(Database occ,
 						    .detail("CurrentRange", range)
 						    .detail("NewDataMoveMetaData", dataMove.toString());
 						dataMove.range = KeyRangeRef(range.end, dataMove.range.end);
-						tr->set(dataMoveKeyFor(dataMoveID), dataMoveValue(dataMove));
+						tr.set(dataMoveKeyFor(dataMoveID), dataMoveValue(dataMove));
 					}
 
-					wait(tr->commit());
+					wait(tr.commit());
 
 					if (complete) {
 						break;
 					}
+				} else {
+					tr.reset();
 				}
-				tr.reset();
 			} catch (Error& error) {
 				TraceEvent(SevWarnAlways, "TryFinishMoveKeysError", relocationIntervalId).errorUnsuppressed(error);
 				if (error.code() == error_code_actor_cancelled)
@@ -2242,16 +2243,29 @@ ACTOR Future<Void> moveKeys(Database cx,
 	state Future<Void> completionSignaller =
 	    checkFetchingState(cx, healthyDestinations, keys, dataMovementComplete, relocationIntervalId, tssMapping);
 
-	wait(finishMoveKeys(cx,
-	                    keys,
-	                    dataMoveID,
-	                    destinationTeam,
-	                    lock,
-	                    finishMoveKeysParallelismLock,
-	                    hasRemote,
-	                    relocationIntervalId,
-	                    tssMapping,
-	                    ddEnabledState));
+	if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+		wait(finishMoveShard(cx,
+		                     keys,
+		                     dataMoveID,
+		                     destinationTeam,
+		                     lock,
+		                     finishMoveKeysParallelismLock,
+		                     hasRemote,
+		                     relocationIntervalId,
+		                     tssMapping,
+		                     ddEnabledState));
+	} else {
+		wait(finishMoveKeys(cx,
+		                    keys,
+		                    dataMoveID,
+		                    destinationTeam,
+		                    lock,
+		                    finishMoveKeysParallelismLock,
+		                    hasRemote,
+		                    relocationIntervalId,
+		                    tssMapping,
+		                    ddEnabledState));
+	}
 
 	// This is defensive, but make sure that we always say that the movement is complete before moveKeys completes
 	completionSignaller.cancel();
