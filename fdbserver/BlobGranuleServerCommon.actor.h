@@ -49,11 +49,12 @@ struct BlobFileIndex {
 	std::string filename;
 	int64_t offset;
 	int64_t length;
+	int64_t fullFileLength;
 
 	BlobFileIndex() {}
 
-	BlobFileIndex(Version version, std::string filename, int64_t offset, int64_t length)
-	  : version(version), filename(filename), offset(offset), length(length) {}
+	BlobFileIndex(Version version, std::string filename, int64_t offset, int64_t length, int64_t fullFileLength)
+	  : version(version), filename(filename), offset(offset), length(length), fullFileLength(fullFileLength) {}
 
 	// compare on version
 	bool operator<(const BlobFileIndex& r) const { return version < r.version; }

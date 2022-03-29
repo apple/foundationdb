@@ -858,7 +858,7 @@ public:
 		CounterCollection cc;
 		Counter allQueries, getKeyQueries, getValueQueries, getRangeQueries, getMappedRangeQueries,
 		    getRangeStreamQueries, finishedQueries, lowPriorityQueries, rowsQueried, bytesQueried, watchQueries,
-		    emptyQueries, feedRowsQueried, feedBytesQueried;
+		    emptyQueries, feedRowsQueried, feedBytesQueried, feedStreamQueries, feedVersionQueries;
 
 		// Bytes of the mutations that have been added to the memory of the storage server. When the data is durable
 		// and cleared from the memory, we do not subtract it but add it to bytesDurable.
@@ -930,6 +930,7 @@ public:
 		    lowPriorityQueries("LowPriorityQueries", cc), rowsQueried("RowsQueried", cc),
 		    bytesQueried("BytesQueried", cc), watchQueries("WatchQueries", cc), emptyQueries("EmptyQueries", cc),
 		    feedRowsQueried("FeedRowsQueried", cc), feedBytesQueried("FeedBytesQueried", cc),
+		    feedStreamQueries("FeedStreamQueries", cc), feedVersionQueries("FeedVersionQueries", cc),
 		    bytesInput("BytesInput", cc), logicalBytesInput("LogicalBytesInput", cc),
 		    logicalBytesMoveInOverhead("LogicalBytesMoveInOverhead", cc),
 		    kvCommitLogicalBytes("KVCommitLogicalBytes", cc), kvClearRanges("KVClearRanges", cc),
@@ -2436,6 +2437,8 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 		req.reply.setByteLimit(std::min((int64_t)req.replyBufferSize, SERVER_KNOBS->CHANGEFEEDSTREAM_LIMIT_BYTES));
 	}
 
+	++data->counters.feedStreamQueries;
+
 	wait(delay(0, TaskPriority::DefaultEndpoint));
 
 	try {
@@ -2587,6 +2590,7 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 }
 
 ACTOR Future<Void> changeFeedVersionUpdateQ(StorageServer* data, ChangeFeedVersionUpdateRequest req) {
+	++data->counters.feedVersionQueries;
 	wait(data->version.whenAtLeast(req.minVersion));
 	wait(delay(0));
 	Version minVersion = data->minFeedVersionForAddress(req.reply.getEndpoint().getPrimaryAddress());

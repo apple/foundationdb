@@ -1190,23 +1190,26 @@ const KeyRange blobGranuleFileKeyRangeFor(UID granuleID) {
 	return KeyRangeRef(startKey, strinc(startKey));
 }
 
-const Value blobGranuleFileValueFor(StringRef const& filename, int64_t offset, int64_t length) {
+const Value blobGranuleFileValueFor(StringRef const& filename, int64_t offset, int64_t length, int64_t fullFileLength) {
 	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBlobGranule()));
 	wr << filename;
 	wr << offset;
 	wr << length;
+	wr << fullFileLength;
 	return wr.toValue();
 }
 
-std::tuple<Standalone<StringRef>, int64_t, int64_t> decodeBlobGranuleFileValue(ValueRef const& value) {
+std::tuple<Standalone<StringRef>, int64_t, int64_t, int64_t> decodeBlobGranuleFileValue(ValueRef const& value) {
 	StringRef filename;
 	int64_t offset;
 	int64_t length;
+	int64_t fullFileLength;
 	BinaryReader reader(value, IncludeVersion());
 	reader >> filename;
 	reader >> offset;
 	reader >> length;
-	return std::tuple(filename, offset, length);
+	reader >> fullFileLength;
+	return std::tuple(filename, offset, length, fullFileLength);
 }
 
 const Value blobGranulePruneValueFor(Version version, KeyRange range, bool force) {
