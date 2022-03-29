@@ -211,7 +211,7 @@ public:
 		// Kind
 		serialize_value(span.kind, request, 0xcc);
 		// Status
-		serialize_value(span.status, request, 0xcc); // end
+		serialize_value(span.status, request, 0xcc);
 		// Links
 		serialize_vector(span.links, request);
 		// Events
