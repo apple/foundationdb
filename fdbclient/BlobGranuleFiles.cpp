@@ -240,22 +240,27 @@ static void startLoad(const ReadBlobGranuleContext granuleContext,
 	// Start load process for all files in chunk
 	if (chunk.snapshotFile.present()) {
 		std::string snapshotFname = chunk.snapshotFile.get().filename.toString();
-		// FIXME: full file length won't always be length of read
+		// FIXME: remove when we implement file multiplexing
+		ASSERT(chunk.snapshotFile.get().offset == 0);
+		ASSERT(chunk.snapshotFile.get().length == chunk.snapshotFile.get().fullFileLength);
 		loadIds.snapshotId = granuleContext.start_load_f(snapshotFname.c_str(),
 		                                                 snapshotFname.size(),
 		                                                 chunk.snapshotFile.get().offset,
 		                                                 chunk.snapshotFile.get().length,
-		                                                 chunk.snapshotFile.get().length,
+		                                                 chunk.snapshotFile.get().fullFileLength,
 		                                                 granuleContext.userContext);
 	}
 	loadIds.deltaIds.reserve(chunk.deltaFiles.size());
 	for (int deltaFileIdx = 0; deltaFileIdx < chunk.deltaFiles.size(); deltaFileIdx++) {
 		std::string deltaFName = chunk.deltaFiles[deltaFileIdx].filename.toString();
+		// FIXME: remove when we implement file multiplexing
+		ASSERT(chunk.deltaFiles[deltaFileIdx].offset == 0);
+		ASSERT(chunk.deltaFiles[deltaFileIdx].length == chunk.deltaFiles[deltaFileIdx].fullFileLength);
 		int64_t deltaLoadId = granuleContext.start_load_f(deltaFName.c_str(),
 		                                                  deltaFName.size(),
 		                                                  chunk.deltaFiles[deltaFileIdx].offset,
 		                                                  chunk.deltaFiles[deltaFileIdx].length,
-		                                                  chunk.deltaFiles[deltaFileIdx].length,
+		                                                  chunk.deltaFiles[deltaFileIdx].fullFileLength,
 		                                                  granuleContext.userContext);
 		loadIds.deltaIds.push_back(deltaLoadId);
 	}

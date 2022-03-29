@@ -99,11 +99,15 @@ public:
 	};
 
 	S3BlobStoreEndpoint(std::string const& host,
-	                    std::string service,
+	                    std::string const& service,
+	                    Optional<std::string> const& proxyHost,
+	                    Optional<std::string> const& proxyPort,
 	                    Optional<Credentials> const& creds,
 	                    BlobKnobs const& knobs = BlobKnobs(),
 	                    HTTP::Headers extraHeaders = HTTP::Headers())
-	  : host(host), service(service), credentials(creds), lookupKey(creds.present() && creds.get().key.empty()),
+	  : host(host), service(service), proxyHost(proxyHost), proxyPort(proxyPort),
+	    useProxy(proxyHost.present() && proxyPort.present()), credentials(creds),
+	    lookupKey(creds.present() && creds.get().key.empty()),
 	    lookupSecret(creds.present() && creds.get().secret.empty()), knobs(knobs), extraHeaders(extraHeaders),
 	    requestRate(new SpeedLimit(knobs.requests_per_second, 1)),
 	    requestRateList(new SpeedLimit(knobs.list_requests_per_second, 1)),
@@ -114,7 +118,7 @@ public:
 	    recvRate(new SpeedLimit(knobs.max_recv_bytes_per_second, 1)), concurrentRequests(knobs.concurrent_requests),
 	    concurrentUploads(knobs.concurrent_uploads), concurrentLists(knobs.concurrent_lists) {
 
-		if (host.empty())
+		if (host.empty() || (proxyHost.present() != proxyPort.present()))
 			throw connection_string_invalid();
 	}
 
@@ -132,10 +136,11 @@ public:
 	// Parse url and return a S3BlobStoreEndpoint
 	// If the url has parameters that S3BlobStoreEndpoint can't consume then an error will be thrown unless
 	// ignored_parameters is given in which case the unconsumed parameters will be added to it.
-	static Reference<S3BlobStoreEndpoint> fromString(std::string const& url,
-	                                                 std::string* resourceFromURL = nullptr,
-	                                                 std::string* error = nullptr,
-	                                                 ParametersT* ignored_parameters = nullptr);
+	static Reference<S3BlobStoreEndpoint> fromString(const std::string& url,
+	                                                 const Optional<std::string>& proxy,
+	                                                 std::string* resourceFromURL,
+	                                                 std::string* error,
+	                                                 ParametersT* ignored_parameters);
 
 	// Get a normalized version of this URL with the given resource and any non-default BlobKnob values as URL
 	// parameters in addition to the passed params string
@@ -151,6 +156,10 @@ public:
 
 	std::string host;
 	std::string service;
+	Optional<std::string> proxyHost;
+	Optional<std::string> proxyPort;
+	bool useProxy;
+
 	Optional<Credentials> credentials;
 	bool lookupKey;
 	bool lookupSecret;

@@ -90,13 +90,13 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 				if (BGV_DEBUG) {
 					printf("Blob Granule Verifier constructing simulated backup container\n");
 				}
-				bstore = BackupContainerFileSystem::openContainerFS("file://fdbblob/");
+				bstore = BackupContainerFileSystem::openContainerFS("file://fdbblob/", {}, {});
 			} else {
 				if (BGV_DEBUG) {
 					printf("Blob Granule Verifier constructing backup container from %s\n",
 					       SERVER_KNOBS->BG_URL.c_str());
 				}
-				bstore = BackupContainerFileSystem::openContainerFS(SERVER_KNOBS->BG_URL);
+				bstore = BackupContainerFileSystem::openContainerFS(SERVER_KNOBS->BG_URL, {}, {});
 				if (BGV_DEBUG) {
 					printf("Blob Granule Verifier constructed backup container\n");
 				}

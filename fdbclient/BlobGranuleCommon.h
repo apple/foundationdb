@@ -52,19 +52,20 @@ struct BlobFilePointerRef {
 	StringRef filename;
 	int64_t offset;
 	int64_t length;
+	int64_t fullFileLength;
 
 	BlobFilePointerRef() {}
-	BlobFilePointerRef(Arena& to, const std::string& filename, int64_t offset, int64_t length)
-	  : filename(to, filename), offset(offset), length(length) {}
+	BlobFilePointerRef(Arena& to, const std::string& filename, int64_t offset, int64_t length, int64_t fullFileLength)
+	  : filename(to, filename), offset(offset), length(length), fullFileLength(fullFileLength) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, filename, offset, length);
+		serializer(ar, filename, offset, length, fullFileLength);
 	}
 
 	std::string toString() const {
 		std::stringstream ss;
-		ss << filename.toString() << ":" << offset << ":" << length;
+		ss << filename.toString() << ":" << offset << ":" << length << ":" << fullFileLength;
 		return std::move(ss).str();
 	}
 };
