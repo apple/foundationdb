@@ -1942,6 +1942,9 @@ std::string epochsToGMTString(double epochs) {
 }
 
 void setMemoryQuota(size_t limit) {
+	if (limit == 0) {
+		return;
+	}
 #if defined(USE_SANITIZER)
 	// ASAN doesn't work with memory quotas: https://github.com/google/sanitizers/wiki/AddressSanitizer#ulimit--v
 	return;
