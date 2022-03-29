@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -344,6 +344,26 @@ bool Knobs::setKnob(std::string const& knob, std::string const& value) {
 	*string_knobs[knob].value = value;
 	explicitlySetKnobs.insert(toLower(knob));
 	return true;
+}
+
+ParsedKnobValue Knobs::getKnob(const std::string& name) const {
+	if (double_knobs.count(name) > 0) {
+		return ParsedKnobValue{ *double_knobs.at(name).value };
+	}
+	if (int64_knobs.count(name) > 0) {
+		return ParsedKnobValue{ *int64_knobs.at(name).value };
+	}
+	if (int_knobs.count(name) > 0) {
+		return ParsedKnobValue{ *int_knobs.at(name).value };
+	}
+	if (string_knobs.count(name) > 0) {
+		return ParsedKnobValue{ *string_knobs.at(name).value };
+	}
+	if (bool_knobs.count(name) > 0) {
+		return ParsedKnobValue{ *bool_knobs.at(name).value };
+	}
+
+	return ParsedKnobValue{ NoKnobFound() };
 }
 
 bool Knobs::isAtomic(std::string const& knob) const {

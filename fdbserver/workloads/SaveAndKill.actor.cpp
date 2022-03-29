@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -37,11 +37,9 @@ struct SaveAndKillWorkload : TestWorkload {
 	int isRestoring;
 
 	SaveAndKillWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		restartInfo =
-		    getOption(options, LiteralStringRef("restartInfoLocation"), LiteralStringRef("simfdb/restartInfo.ini"))
-		        .toString();
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-		isRestoring = getOption(options, LiteralStringRef("isRestoring"), 0);
+		restartInfo = getOption(options, "restartInfoLocation"_sr, "simfdb/restartInfo.ini"_sr).toString();
+		testDuration = getOption(options, "testDuration"_sr, 10.0);
+		isRestoring = getOption(options, "isRestoring"_sr, 0);
 	}
 
 	std::string description() const override { return "SaveAndKillWorkload"; }
@@ -70,23 +68,22 @@ struct SaveAndKillWorkload : TestWorkload {
 
 		std::vector<ISimulator::ProcessInfo*> processes = g_simulator.getAllProcesses();
 		std::map<NetworkAddress, ISimulator::ProcessInfo*> rebootingProcesses = g_simulator.currentlyRebootingProcesses;
-		std::map<std::string, ISimulator::ProcessInfo*> allProcessesMap =
-		    std::map<std::string, ISimulator::ProcessInfo*>();
-		for (auto it = rebootingProcesses.begin(); it != rebootingProcesses.end(); it++) {
-			if (allProcessesMap.find(it->second->dataFolder) == allProcessesMap.end())
-				allProcessesMap[it->second->dataFolder] = it->second;
+		std::map<std::string, ISimulator::ProcessInfo*> allProcessesMap;
+		for (const auto& [_, process] : rebootingProcesses) {
+			if (allProcessesMap.find(process->dataFolder) == allProcessesMap.end()) {
+				allProcessesMap[process->dataFolder] = process;
+			}
 		}
-		for (auto it = processes.begin(); it != processes.end(); it++) {
-			if (allProcessesMap.find((*it)->dataFolder) == allProcessesMap.end())
-				allProcessesMap[(*it)->dataFolder] = *it;
+		for (const auto& process : processes) {
+			if (allProcessesMap.find(process->dataFolder) == allProcessesMap.end()) {
+				allProcessesMap[process->dataFolder] = process;
+			}
 		}
 		ini.SetValue("META", "processCount", format("%d", allProcessesMap.size() - 1).c_str());
 		std::map<std::string, int> machines;
 
 		int j = 0;
-		for (auto processIterator = allProcessesMap.begin(); processIterator != allProcessesMap.end();
-		     processIterator++) {
-			ISimulator::ProcessInfo* process = processIterator->second;
+		for (const auto& [_, process] : allProcessesMap) {
 			std::string machineId = printable(process->locality.machineId());
 			const char* machineIdString = machineId.c_str();
 			if (strcmp(process->name, "TestSystem") != 0) {

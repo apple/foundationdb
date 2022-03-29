@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -49,6 +49,7 @@ public:
 	double MAX_GENERATIONS_OVERRIDE;
 	double MAX_GENERATIONS_SIM;
 
+	double COORDINATOR_HOSTNAME_RESOLVE_DELAY;
 	double COORDINATOR_RECONNECTION_DELAY;
 	int CLIENT_EXAMPLE_AMOUNT;
 	double MAX_CLIENT_STATUS_AGE;
@@ -79,6 +80,7 @@ public:
 	int64_t CHANGE_FEED_LOCATION_LIMIT;
 	int64_t CHANGE_FEED_CACHE_SIZE;
 	double CHANGE_FEED_POP_TIMEOUT;
+	int64_t CHANGE_FEED_STREAM_MIN_BYTES;
 
 	int MAX_BATCH_SIZE;
 	double GRV_BATCH_TIMEOUT;
@@ -267,8 +269,12 @@ public:
 	double BUSYNESS_SPIKE_START_THRESHOLD;
 	double BUSYNESS_SPIKE_SATURATED_THRESHOLD;
 
-	// blob granules
-	bool ENABLE_BLOB_GRANULES;
+	// multi-version client control
+	int MVC_CLIENTLIB_CHUNK_SIZE;
+	int MVC_CLIENTLIB_CHUNKS_PER_TRANSACTION;
+
+	// Blob Granules
+	int BG_MAX_GRANULE_PARALLELISM;
 
 	ClientKnobs(Randomize randomize);
 	void initialize(Randomize randomize);

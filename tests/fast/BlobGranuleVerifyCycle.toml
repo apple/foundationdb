@@ -1,34 +1,40 @@
+[configuration]
+blobGranulesEnabled = true 
+# FIXME: re-enable rocks at some point
+storageEngineExcludeTypes = [4]
+
 [[test]]
-testTitle = 'BlobGranuleCorrectnessTest'
+testTitle = 'BlobGranuleVerifyCycle'
 
     [[test.workload]]
-    testName = 'WriteDuringRead'
-    testDuration = 120.0
+    testName = 'Cycle'
+    transactionsPerSecond = 250.0
+    testDuration = 60.0
+    expectedRate = 0
 
     [[test.workload]]
     testName = 'BlobGranuleVerifier'
-    testDuration = 120.0
+    testDuration = 60.0
 
     [[test.workload]]
     testName = 'RandomClogging'
-    testDuration = 120.0 
+    testDuration = 60.0
 
     [[test.workload]]
     testName = 'Rollback'
-    meanDelay = 30.0
-    testDuration = 120.0 
+    meanDelay = 60.0
+    testDuration = 60.0
 
     [[test.workload]]
     testName = 'Attrition'
     machinesToKill = 10
     machinesToLeave = 3
     reboot = true
-    testDuration = 120.0 
+    testDuration = 60.0
 
     [[test.workload]]
     testName = 'Attrition'
     machinesToKill = 10
     machinesToLeave = 3
     reboot = true
-    testDuration = 120.0 
-
+    testDuration = 60.0
