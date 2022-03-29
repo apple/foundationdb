@@ -784,6 +784,8 @@ ACTOR Future<Void> rocksDBMetricLogger(std::shared_ptr<rocksdb::Statistics> stat
 		{ "EstimateLiveDataSize", rocksdb::DB::Properties::kEstimateLiveDataSize },
 		{ "BaseLevel", rocksdb::DB::Properties::kBaseLevel },
 		{ "EstPendCompactBytes", rocksdb::DB::Properties::kEstimatePendingCompactionBytes },
+		{ "BlockCacheUsage", rocksdb::DB::Properties::kBlockCacheUsage },
+		{ "BlockCachePinnedUsage", rocksdb::DB::Properties::kBlockCachePinnedUsage },
 	};
 
 	state std::unordered_map<std::string, uint64_t> readIteratorPoolStats = {

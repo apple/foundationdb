@@ -57,6 +57,7 @@ struct SubmitBackupWorkload final : TestWorkload {
 		try {
 			wait(self->backupAgent.submitBackup(cx,
 			                                    self->backupDir,
+			                                    {},
 			                                    self->initSnapshotInterval,
 			                                    self->snapshotInterval,
 			                                    self->tag.toString(),

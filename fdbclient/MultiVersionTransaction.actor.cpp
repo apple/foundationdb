@@ -282,8 +282,9 @@ ThreadResult<RangeResult> DLTransaction::readBlobGranules(const KeyRangeRef& key
 	context.get_load_f = granuleContext.get_load_f;
 	context.free_load_f = granuleContext.free_load_f;
 	context.debugNoMaterialize = granuleContext.debugNoMaterialize;
+	context.granuleParallelism = granuleContext.granuleParallelism;
 
-	int64_t rv = readVersion.present() ? readVersion.get() : invalidVersion;
+	int64_t rv = readVersion.present() ? readVersion.get() : latestVersion;
 
 	FdbCApi::FDBResult* r = api->transactionReadBlobGranules(tr,
 	                                                         keyRange.begin.begin(),

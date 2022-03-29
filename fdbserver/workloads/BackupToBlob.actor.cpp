@@ -62,6 +62,7 @@ struct BackupToBlobWorkload : TestWorkload {
 		wait(delay(self->backupAfter));
 		wait(backupAgent.submitBackup(cx,
 		                              self->backupURL,
+		                              {},
 		                              self->initSnapshotInterval,
 		                              self->snapshotInterval,
 		                              self->backupTag.toString(),

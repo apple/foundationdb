@@ -34,6 +34,7 @@ import traceback
 
 import fdb
 from fdb import six
+from fdb.tuple import pack, unpack
 
 _network_thread = None
 _network_thread_reentrant_lock = threading.RLock()
@@ -198,9 +199,10 @@ def transactional(*tr_args, **tr_kwargs):
     one of two actions, depending on the type of the parameter passed
     to the function at call time.
 
-    If given a Database, a Transaction will be created and passed into
-    the wrapped code in place of the Database. After the function is
-    complete, the newly created transaction will be committed.
+    If given a Database or Tenant, a Transaction will be created and 
+    passed into the wrapped code in place of the Database or Tenant. 
+    After the function is complete, the newly created transaction 
+    will be committed.
 
     It is important to note that the wrapped method may be called
     multiple times in the event of a commit failure, until the commit
@@ -943,128 +945,114 @@ class FormerFuture(_FDBBase):
             except:
                 pass
 
-
-class Database(_FDBBase):
-    def __init__(self, dpointer):
-        self.dpointer = dpointer
-        self.options = _DatabaseOptions(self)
-
-    def __del__(self):
-        # print('Destroying database 0x%x' % self.dpointer)
-        self.capi.fdb_database_destroy(self.dpointer)
-
+class _TransactionCreator(_FDBBase):
     def get(self, key):
-        return Database.__database_getitem(self, key)
+        return _TransactionCreator.__creator_getitem(self, key)
 
     def __getitem__(self, key):
         if isinstance(key, slice):
             return self.get_range(key.start, key.stop, reverse=(key.step == -1))
-        return Database.__database_getitem(self, key)
+        return _TransactionCreator.__creator_getitem(self, key)
 
     def get_key(self, key_selector):
-        return Database.__database_get_key(self, key_selector)
+        return _TransactionCreator.__creator_get_key(self, key_selector)
 
     def get_range(self, begin, end, limit=0, reverse=False, streaming_mode=StreamingMode.want_all):
-        return Database.__database_get_range(self, begin, end, limit, reverse, streaming_mode)
+        return _TransactionCreator.__creator_get_range(self, begin, end, limit, reverse, streaming_mode)
 
     def get_range_startswith(self, prefix, *args, **kwargs):
-        return Database.__database_get_range_startswith(self, prefix, *args, **kwargs)
+        return _TransactionCreator.__creator_get_range_startswith(self, prefix, *args, **kwargs)
 
     def set(self, key, value):
-        Database.__database_setitem(self, key, value)
+        _TransactionCreator.__creator_setitem(self, key, value)
 
     def __setitem__(self, key, value):
-        Database.__database_setitem(self, key, value)
+        _TransactionCreator.__creator_setitem(self, key, value)
 
     def clear(self, key):
-        Database.__database_delitem(self, key)
+        _TransactionCreator.__creator_delitem(self, key)
 
     def clear_range(self, begin, end):
-        Database.__database_delitem(self, slice(begin, end))
+        _TransactionCreator.__creator_delitem(self, slice(begin, end))
 
     def __delitem__(self, key_or_slice):
-        Database.__database_delitem(self, key_or_slice)
+        _TransactionCreator.__creator_delitem(self, key_or_slice)
 
     def clear_range_startswith(self, prefix):
-        Database.__database_clear_range_startswith(self, prefix)
+        _TransactionCreator.__creator_clear_range_startswith(self, prefix)
 
     def get_and_watch(self, key):
-        return Database.__database_get_and_watch(self, key)
+        return _TransactionCreator.__creator_get_and_watch(self, key)
 
     def set_and_watch(self, key, value):
-        return Database.__database_set_and_watch(self, key, value)
+        return _TransactionCreator.__creator_set_and_watch(self, key, value)
 
     def clear_and_watch(self, key):
-        return Database.__database_clear_and_watch(self, key)
+        return _TransactionCreator.__creator_clear_and_watch(self, key)
 
     def create_transaction(self):
-        pointer = ctypes.c_void_p()
-        self.capi.fdb_database_create_transaction(self.dpointer, ctypes.byref(pointer))
-        return Transaction(pointer.value, self)
-
-    def _set_option(self, option, param, length):
-        self.capi.fdb_database_set_option(self.dpointer, option, param, length)
+        pass
 
     def _atomic_operation(self, opcode, key, param):
-        Database.__database_atomic_operation(self, opcode, key, param)
+        _TransactionCreator.__creator_atomic_operation(self, opcode, key, param)
 
     #### Transaction implementations ####
     @staticmethod
     @transactional
-    def __database_getitem(tr, key):
+    def __creator_getitem(tr, key):
         return tr[key].value
 
     @staticmethod
     @transactional
-    def __database_get_key(tr, key_selector):
+    def __creator_get_key(tr, key_selector):
         return tr.get_key(key_selector).value
 
     @staticmethod
     @transactional
-    def __database_get_range(tr, begin, end, limit, reverse, streaming_mode):
+    def __creator_get_range(tr, begin, end, limit, reverse, streaming_mode):
         return tr.get_range(begin, end, limit, reverse, streaming_mode).to_list()
 
     @staticmethod
     @transactional
-    def __database_get_range_startswith(tr, prefix, *args, **kwargs):
+    def __creator_get_range_startswith(tr, prefix, *args, **kwargs):
         return tr.get_range_startswith(prefix, *args, **kwargs).to_list()
 
     @staticmethod
     @transactional
-    def __database_setitem(tr, key, value):
+    def __creator_setitem(tr, key, value):
         tr[key] = value
 
     @staticmethod
     @transactional
-    def __database_clear_range_startswith(tr, prefix):
+    def __creator_clear_range_startswith(tr, prefix):
         tr.clear_range_startswith(prefix)
 
     @staticmethod
     @transactional
-    def __database_get_and_watch(tr, key):
+    def __creator_get_and_watch(tr, key):
         v = tr.get(key)
         return v, tr.watch(key)
 
     @staticmethod
     @transactional
-    def __database_set_and_watch(tr, key, value):
+    def __creator_set_and_watch(tr, key, value):
         tr.set(key, value)
         return tr.watch(key)
 
     @staticmethod
     @transactional
-    def __database_clear_and_watch(tr, key):
+    def __creator_clear_and_watch(tr, key):
         del tr[key]
         return tr.watch(key)
 
     @staticmethod
     @transactional
-    def __database_delitem(tr, key_or_slice):
+    def __creator_delitem(tr, key_or_slice):
         del tr[key_or_slice]
 
     @staticmethod
     @transactional
-    def __database_atomic_operation(tr, opcode, key, param):
+    def __creator_atomic_operation(tr, opcode, key, param):
         tr._atomic_operation(opcode, key, param)
 
     # Asynchronous transactions
@@ -1074,11 +1062,11 @@ class Database(_FDBBase):
         From = asyncio.From
         coroutine = asyncio.coroutine
 
-        class Database:
+        class TransactionCreator:
             @staticmethod
             @transactional
             @coroutine
-            def __database_getitem(tr, key):
+            def __creator_getitem(tr, key):
                 # raise Return(( yield From( tr[key] ) ))
                 raise Return(tr[key])
                 yield None
@@ -1086,26 +1074,26 @@ class Database(_FDBBase):
             @staticmethod
             @transactional
             @coroutine
-            def __database_get_key(tr, key_selector):
+            def __creator_get_key(tr, key_selector):
                 raise Return(tr.get_key(key_selector))
                 yield None
 
             @staticmethod
             @transactional
             @coroutine
-            def __database_get_range(tr, begin, end, limit, reverse, streaming_mode):
+            def __creator_get_range(tr, begin, end, limit, reverse, streaming_mode):
                 raise Return((yield From(tr.get_range(begin, end, limit, reverse, streaming_mode).to_list())))
 
             @staticmethod
             @transactional
             @coroutine
-            def __database_get_range_startswith(tr, prefix, *args, **kwargs):
+            def __creator_get_range_startswith(tr, prefix, *args, **kwargs):
                 raise Return((yield From(tr.get_range_startswith(prefix, *args, **kwargs).to_list())))
 
             @staticmethod
             @transactional
             @coroutine
-            def __database_setitem(tr, key, value):
+            def __creator_setitem(tr, key, value):
                 tr[key] = value
                 raise Return()
                 yield None
@@ -1113,7 +1101,7 @@ class Database(_FDBBase):
             @staticmethod
             @transactional
             @coroutine
-            def __database_clear_range_startswith(tr, prefix):
+            def __creator_clear_range_startswith(tr, prefix):
                 tr.clear_range_startswith(prefix)
                 raise Return()
                 yield None
@@ -1121,7 +1109,7 @@ class Database(_FDBBase):
             @staticmethod
             @transactional
             @coroutine
-            def __database_get_and_watch(tr, key):
+            def __creator_get_and_watch(tr, key):
                 v = tr.get(key)
                 raise Return(v, tr.watch(key))
                 yield None
@@ -1129,7 +1117,7 @@ class Database(_FDBBase):
             @staticmethod
             @transactional
             @coroutine
-            def __database_set_and_watch(tr, key, value):
+            def __creator_set_and_watch(tr, key, value):
                 tr.set(key, value)
                 raise Return(tr.watch(key))
                 yield None
@@ -1137,7 +1125,7 @@ class Database(_FDBBase):
             @staticmethod
             @transactional
             @coroutine
-            def __database_clear_and_watch(tr, key):
+            def __creator_clear_and_watch(tr, key):
                 del tr[key]
                 raise Return(tr.watch(key))
                 yield None
@@ -1145,7 +1133,7 @@ class Database(_FDBBase):
             @staticmethod
             @transactional
             @coroutine
-            def __database_delitem(tr, key_or_slice):
+            def __creator_delitem(tr, key_or_slice):
                 del tr[key_or_slice]
                 raise Return()
                 yield None
@@ -1153,11 +1141,101 @@ class Database(_FDBBase):
             @staticmethod
             @transactional
             @coroutine
-            def __database_atomic_operation(tr, opcode, key, param):
+            def __creator_atomic_operation(tr, opcode, key, param):
                 tr._atomic_operation(opcode, key, param)
                 raise Return()
                 yield None
-        return Database
+        return TransactionCreator
+
+def process_tenant_name(name):
+    if isinstance(name, tuple):
+        return pack(name)
+    elif isinstance(name, bytes):
+        return name
+    else:
+        raise TypeError('Tenant name must be of type ' + bytes.__name__ + ' or of type ' + tuple.__name__)
+
+class Database(_TransactionCreator):
+    def __init__(self, dpointer):
+        self.dpointer = dpointer
+        self.options = _DatabaseOptions(self)
+
+    def __del__(self):
+        # print('Destroying database 0x%x' % self.dpointer)
+        self.capi.fdb_database_destroy(self.dpointer)
+
+    def _set_option(self, option, param, length):
+        self.capi.fdb_database_set_option(self.dpointer, option, param, length)
+
+    def open_tenant(self, name):
+        tname = process_tenant_name(name)
+        pointer = ctypes.c_void_p()
+        self.capi.fdb_database_open_tenant(self.dpointer, tname, len(tname), ctypes.byref(pointer))
+        return Tenant(pointer.value)
+
+    def create_transaction(self):
+        pointer = ctypes.c_void_p()
+        self.capi.fdb_database_create_transaction(self.dpointer, ctypes.byref(pointer))
+        return Transaction(pointer.value, self)
+
+    def allocate_tenant(self, name):
+        Database.__database_allocate_tenant(self, process_tenant_name(name), [])
+
+    def delete_tenant(self, name):
+        Database.__database_delete_tenant(self, process_tenant_name(name), [])
+
+    # Attempt to allocate a tenant in the cluster. If the tenant already exists,
+    # this function will return a tenant_already_exists error. If the tenant is created
+    # concurrently, then this function may return success even if another caller creates 
+    # it.
+    #
+    # The existence_check_marker is expected to be an empty list. This function will
+    # modify the list after completing the existence check to avoid checking for existence
+    # on retries. This allows the operation to be idempotent.
+    @staticmethod
+    @transactional
+    def __database_allocate_tenant(tr, name, existence_check_marker):
+        tr.options.set_special_key_space_enable_writes()
+        key = b'\xff\xff/management/tenant_map/%s' % name
+        if not existence_check_marker:
+            existing_tenant = tr[key].wait()
+            existence_check_marker.append(None)
+            if existing_tenant != None:
+                raise fdb.FDBError(2132) # tenant_already_exists
+        tr[key] = b''
+
+    # Attempt to remove a tenant in the cluster. If the tenant doesn't exist, this 
+    # function will return a tenant_not_found error. If the tenant is deleted
+    # concurrently, then this function may return success even if another caller deletes 
+    # it.
+    #
+    # The existence_check_marker is expected to be an empty list. This function will
+    # modify the list after completing the existence check to avoid checking for existence
+    # on retries. This allows the operation to be idempotent.
+    @staticmethod
+    @transactional
+    def __database_delete_tenant(tr, name, existence_check_marker):
+        tr.options.set_special_key_space_enable_writes()
+        key = b'\xff\xff/management/tenant_map/%s' % name
+        if not existence_check_marker:
+            existing_tenant = tr[key].wait()
+            existence_check_marker.append(None)
+            if existing_tenant == None:
+                raise fdb.FDBError(2131) # tenant_not_found
+        del tr[key]
+
+
+class Tenant(_TransactionCreator):
+    def __init__(self, tpointer):
+        self.tpointer = tpointer
+
+    def __del__(self):
+        self.capi.fdb_tenant_destroy(self.tpointer)
+
+    def create_transaction(self):
+        pointer = ctypes.c_void_p()
+        self.capi.fdb_tenant_create_transaction(self.tpointer, ctypes.byref(pointer))
+        return Transaction(pointer.value, self)
 
 
 fill_operations()
@@ -1458,6 +1536,10 @@ def init_c_api():
     _capi.fdb_database_destroy.argtypes = [ctypes.c_void_p]
     _capi.fdb_database_destroy.restype = None
 
+    _capi.fdb_database_open_tenant.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p)]
+    _capi.fdb_database_open_tenant.restype = ctypes.c_int
+    _capi.fdb_database_open_tenant.errcheck = check_error_code
+
     _capi.fdb_database_create_transaction.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)]
     _capi.fdb_database_create_transaction.restype = ctypes.c_int
     _capi.fdb_database_create_transaction.errcheck = check_error_code
@@ -1465,6 +1547,13 @@ def init_c_api():
     _capi.fdb_database_set_option.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_int]
     _capi.fdb_database_set_option.restype = ctypes.c_int
     _capi.fdb_database_set_option.errcheck = check_error_code
+
+    _capi.fdb_tenant_destroy.argtypes = [ctypes.c_void_p]
+    _capi.fdb_tenant_destroy.restype = None
+
+    _capi.fdb_tenant_create_transaction.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)]
+    _capi.fdb_tenant_create_transaction.restype = ctypes.c_int
+    _capi.fdb_tenant_create_transaction.errcheck = check_error_code
 
     _capi.fdb_transaction_destroy.argtypes = [ctypes.c_void_p]
     _capi.fdb_transaction_destroy.restype = None
@@ -1686,10 +1775,10 @@ def init(event_model=None):
                             raise asyncio.Return(self)
                         return it()
                     FDBRange.iterate = iterate
-                    AT = Database.declare_asynchronous_transactions()
+                    AT = _TransactionCreator.declare_asynchronous_transactions()
                     for name in dir(AT):
-                        if name.startswith("_Database__database_"):
-                            setattr(Database, name, getattr(AT, name))
+                        if name.startswith("__TransactionCreator__creator_"):
+                            setattr(_TransactionCreator, name, getattr(AT, name))
 
                     def to_list(self):
                         if self._mode == StreamingMode.iterator:

@@ -851,9 +851,10 @@ extern "C" DLLEXPORT FDBResult* fdb_transaction_read_blob_granules(FDBTransactio
 	    context.get_load_f = granule_context.get_load_f;
 	    context.free_load_f = granule_context.free_load_f;
 	    context.debugNoMaterialize = granule_context.debugNoMaterialize;
+	    context.granuleParallelism = granule_context.granuleParallelism;
 
 	    Optional<Version> rv;
-	    if (readVersion != invalidVersion) { rv = readVersion; }
+	    if (readVersion != latestVersion) { rv = readVersion; }
 
 	    return (FDBResult*)(TXN(tr)->readBlobGranules(range, beginVersion, rv, context).extractPtr()););
 }

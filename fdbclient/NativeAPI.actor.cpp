@@ -559,6 +559,14 @@ ACTOR Future<Void> databaseLogger(DatabaseContext* cx) {
 			    .detail("MedianBytesPerCommit", cx->bytesPerCommit.median())
 			    .detail("MaxBytesPerCommit", cx->bytesPerCommit.max())
 			    .detail("NumLocalityCacheEntries", cx->locationCache.size());
+			if (cx->anyBlobGranuleRequests) {
+				ev.detail("MeanBGLatency", cx->bgLatencies.mean())
+				    .detail("MedianBGLatency", cx->bgLatencies.median())
+				    .detail("MaxBGLatency", cx->bgLatencies.max())
+				    .detail("MeanBGGranulesPerRequest", cx->bgGranulesPerRequest.mean())
+				    .detail("MedianBGGranulesPerRequest", cx->bgGranulesPerRequest.median())
+				    .detail("MaxBGGranulesPerRequest", cx->bgGranulesPerRequest.max());
+			}
 		}
 
 		cx->latencies.clear();
@@ -567,6 +575,8 @@ ACTOR Future<Void> databaseLogger(DatabaseContext* cx) {
 		cx->commitLatencies.clear();
 		cx->mutationsPerCommit.clear();
 		cx->bytesPerCommit.clear();
+		cx->bgLatencies.clear();
+		cx->bgGranulesPerRequest.clear();
 
 		lastLogged = now();
 	}
@@ -1379,11 +1389,12 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
     transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
     transactionGrvFullBatches("NumGrvFullBatches", cc), transactionGrvTimedOutBatches("NumGrvTimedOutBatches", cc),
     latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000),
-    bytesPerCommit(1000), outstandingWatches(0), sharedStatePtr(nullptr), lastGrvTime(0.0), cachedReadVersion(0),
-    lastRkBatchThrottleTime(0.0), lastRkDefaultThrottleTime(0.0), lastProxyRequestTime(0.0),
-    transactionTracingSample(false), taskID(taskID), clientInfo(clientInfo), clientInfoMonitor(clientInfoMonitor),
-    coordinator(coordinator), apiVersion(apiVersion), mvCacheInsertLocation(0), healthMetricsLastUpdated(0),
-    detailedHealthMetricsLastUpdated(0), smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
+    bytesPerCommit(1000), bgLatencies(1000), bgGranulesPerRequest(1000), outstandingWatches(0), sharedStatePtr(nullptr),
+    lastGrvTime(0.0), cachedReadVersion(0), lastRkBatchThrottleTime(0.0), lastRkDefaultThrottleTime(0.0),
+    lastProxyRequestTime(0.0), transactionTracingSample(false), taskID(taskID), clientInfo(clientInfo),
+    clientInfoMonitor(clientInfoMonitor), coordinator(coordinator), apiVersion(apiVersion), mvCacheInsertLocation(0),
+    healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0),
+    smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
     specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)),
     connectToDatabaseEventCacheHolder(format("ConnectToDatabase/%s", dbId.toString().c_str())) {
 	dbId = deterministicRandom()->randomUniqueID();
@@ -1645,7 +1656,8 @@ DatabaseContext::DatabaseContext(const Error& err)
     transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
     transactionGrvFullBatches("NumGrvFullBatches", cc), transactionGrvTimedOutBatches("NumGrvTimedOutBatches", cc),
     latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000),
-    bytesPerCommit(1000), transactionTracingSample(false), smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
+    bytesPerCommit(1000), bgLatencies(1000), bgGranulesPerRequest(1000), transactionTracingSample(false),
+    smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
     connectToDatabaseEventCacheHolder(format("ConnectToDatabase/%s", dbId.toString().c_str())) {}
 
 // Static constructor used by server processes to create a DatabaseContext
@@ -7373,6 +7385,7 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 	state Version rv;
 
 	state Standalone<VectorRef<BlobGranuleChunkRef>> results;
+	state double startTime = now();
 
 	if (read.present()) {
 		rv = read.get();
@@ -7393,6 +7406,7 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 			fmt::print(
 			    "BG Mapping for [{0} - %{1}) too large!\n", keyRange.begin.printable(), keyRange.end.printable());
 		}
+		TraceEvent(SevWarn, "BGMappingTooLarge").detail("Range", range).detail("Max", 1000);
 		throw unsupported_operation();
 	}
 	ASSERT(!blobGranuleMapping.more && blobGranuleMapping.size() < CLIENT_KNOBS->TOO_MANY);
@@ -7475,6 +7489,7 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 		req.keyRange = KeyRangeRef(StringRef(req.arena, granuleStartKey), StringRef(req.arena, granuleEndKey));
 		req.beginVersion = begin;
 		req.readVersion = rv;
+		req.canCollapseBegin = true; // TODO make this a parameter once we support it
 
 		std::vector<Reference<ReferencedInterface<BlobWorkerInterface>>> v;
 		v.push_back(
@@ -7547,6 +7562,11 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 			throw e;
 		}
 	}
+
+	self->trState->cx->anyBlobGranuleRequests = true;
+	self->trState->cx->bgGranulesPerRequest.addSample(results.size());
+	self->trState->cx->bgLatencies.addSample(now() - startTime);
+
 	if (readVersionOut != nullptr) {
 		*readVersionOut = rv;
 	}
@@ -8735,11 +8755,24 @@ ACTOR Future<Void> singleChangeFeedStreamInternal(KeyRange range,
 			results->lastReturnedVersion.set(feedReply.mutations.back().version);
 		}
 
-		if (refresh.canBeSet() && !atLatest && feedReply.atLatestVersion) {
+		if (!refresh.canBeSet()) {
+			try {
+				// refresh is set if and only if this actor is cancelled
+				wait(Future<Void>(Void()));
+				// Catch any unexpected behavior if the above contract is broken
+				ASSERT(false);
+			} catch (Error& e) {
+				ASSERT(e.code() == error_code_actor_cancelled);
+				throw;
+			}
+		}
+
+		if (!atLatest && feedReply.atLatestVersion) {
 			atLatest = true;
 			results->notAtLatest.set(0);
 		}
-		if (refresh.canBeSet() && feedReply.minStreamVersion > results->storageData[0]->version.get()) {
+
+		if (feedReply.minStreamVersion > results->storageData[0]->version.get()) {
 			results->storageData[0]->version.set(feedReply.minStreamVersion);
 		}
 	}

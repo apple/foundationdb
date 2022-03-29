@@ -49,17 +49,29 @@ struct BlobFileIndex {
 	std::string filename;
 	int64_t offset;
 	int64_t length;
+	int64_t fullFileLength;
 
 	BlobFileIndex() {}
 
-	BlobFileIndex(Version version, std::string filename, int64_t offset, int64_t length)
-	  : version(version), filename(filename), offset(offset), length(length) {}
+	BlobFileIndex(Version version, std::string filename, int64_t offset, int64_t length, int64_t fullFileLength)
+	  : version(version), filename(filename), offset(offset), length(length), fullFileLength(fullFileLength) {}
+
+	// compare on version
+	bool operator<(const BlobFileIndex& r) const { return version < r.version; }
 };
 
+// FIXME: initialize these to smaller default sizes to save a bit of memory, particularly snapshotFiles
 // Stores the files that comprise a blob granule
 struct GranuleFiles {
-	std::deque<BlobFileIndex> snapshotFiles;
-	std::deque<BlobFileIndex> deltaFiles;
+	std::vector<BlobFileIndex> snapshotFiles;
+	std::vector<BlobFileIndex> deltaFiles;
+
+	void getFiles(Version beginVersion,
+	              Version readVersion,
+	              bool canCollapse,
+	              BlobGranuleChunkRef& chunk,
+	              Arena& replyArena,
+	              int64_t& deltaBytesCounter) const;
 };
 
 class Transaction;

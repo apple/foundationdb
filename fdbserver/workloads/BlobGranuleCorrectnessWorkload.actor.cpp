@@ -250,13 +250,13 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 				if (BGW_DEBUG) {
 					printf("Blob Granule Correctness constructing simulated backup container\n");
 				}
-				self->bstore = BackupContainerFileSystem::openContainerFS("file://fdbblob/");
+				self->bstore = BackupContainerFileSystem::openContainerFS("file://fdbblob/", {}, {});
 			} else {
 				if (BGW_DEBUG) {
 					printf("Blob Granule Correctness constructing backup container from %s\n",
 					       SERVER_KNOBS->BG_URL.c_str());
 				}
-				self->bstore = BackupContainerFileSystem::openContainerFS(SERVER_KNOBS->BG_URL);
+				self->bstore = BackupContainerFileSystem::openContainerFS(SERVER_KNOBS->BG_URL, {}, {});
 				if (BGW_DEBUG) {
 					printf("Blob Granule Correctness constructed backup container\n");
 				}
@@ -272,15 +272,20 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 	}
 
 	// FIXME: typedef this pair type and/or chunk list
-	ACTOR Future<std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>>>
-	readFromBlob(Database cx, BlobGranuleCorrectnessWorkload* self, KeyRange range, Version version) {
+	ACTOR Future<std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>>> readFromBlob(
+	    Database cx,
+	    BlobGranuleCorrectnessWorkload* self,
+	    KeyRange range,
+	    Version beginVersion,
+	    Version readVersion) {
 		state RangeResult out;
 		state Standalone<VectorRef<BlobGranuleChunkRef>> chunks;
 		state Transaction tr(cx);
 
 		loop {
 			try {
-				Standalone<VectorRef<BlobGranuleChunkRef>> chunks_ = wait(tr.readBlobGranules(range, 0, version));
+				Standalone<VectorRef<BlobGranuleChunkRef>> chunks_ =
+				    wait(tr.readBlobGranules(range, beginVersion, readVersion));
 				chunks = chunks_;
 				break;
 			} catch (Error& e) {
@@ -289,7 +294,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		}
 
 		for (const BlobGranuleChunkRef& chunk : chunks) {
-			RangeResult chunkRows = wait(readBlobGranule(chunk, range, version, self->bstore));
+			RangeResult chunkRows = wait(readBlobGranule(chunk, range, beginVersion, readVersion, self->bstore));
 			out.arena().dependsOn(chunkRows.arena());
 			out.append(out.arena(), chunkRows.begin(), chunkRows.size());
 		}
@@ -321,7 +326,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 				Version rv = wait(self->doGrv(&tr));
 				state Version readVersion = rv;
 				std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> blob =
-				    wait(self->readFromBlob(cx, self, threadData->directoryRange, readVersion));
+				    wait(self->readFromBlob(cx, self, threadData->directoryRange, 0, readVersion));
 				fmt::print("Directory {0} got {1} RV {2}\n",
 				           threadData->directoryID,
 				           doSetup ? "initial" : "final",
@@ -349,6 +354,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 	                 const Optional<Value>& blobValue,
 	                 uint32_t startKey,
 	                 uint32_t endKey,
+	                 Version beginVersion,
 	                 Version readVersion,
 	                 const std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>>& blob) {
 		threadData->mismatches++;
@@ -360,11 +366,13 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		ev.detail("DirectoryID", format("%08x", threadData->directoryID))
 		    .detail("RangeStart", format("%08x", startKey))
 		    .detail("RangeEnd", format("%08x", endKey))
+		    .detail("BeginVersion", beginVersion)
 		    .detail("Version", readVersion);
-		fmt::print("Found mismatch! Request for dir {0} [{1} - {2}) @ {3}\n",
+		fmt::print("Found mismatch! Request for dir {0} [{1} - {2}) @ {3} - {4}\n",
 		           format("%08x", threadData->directoryID),
 		           format("%08x", startKey),
 		           format("%08x", endKey),
+		           beginVersion,
 		           readVersion);
 		if (lastMatching.present()) {
 			fmt::print("    last correct: {}\n", lastMatching.get().printable());
@@ -456,6 +464,29 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 			           readVersion);
 		}
 
+		// because each chunk could be separately collapsed or not if we set beginVersion, we have to track it by chunk
+		KeyRangeMap<Version> beginVersionByChunk;
+		beginVersionByChunk.insert(normalKeys, 0);
+		int beginCollapsed = 0;
+		int beginNotCollapsed = 0;
+		for (auto& chunk : blob.second) {
+			if (!chunk.snapshotFile.present()) {
+				ASSERT(beginVersion > 0);
+				ASSERT(chunk.snapshotVersion == invalidVersion);
+				beginCollapsed++;
+				beginVersionByChunk.insert(chunk.keyRange, beginVersion);
+			} else {
+				ASSERT(chunk.snapshotVersion != invalidVersion);
+				if (beginVersion > 0) {
+					beginNotCollapsed++;
+				}
+			}
+		}
+		TEST(beginCollapsed > 0); // BGCorrectness got collapsed request with beginVersion > 0
+		TEST(beginNotCollapsed > 0); // BGCorrectness got un-collapsed request with beginVersion > 0
+		TEST(beginCollapsed > 0 &&
+		     beginNotCollapsed > 0); // BGCorrectness got both collapsed and uncollapsed in the same request!
+
 		while (checkIt != threadData->keyData.end() && checkIt->first < endKeyExclusive) {
 			uint32_t key = checkIt->first;
 			if (DEBUG_READ_OP(threadData->directoryID, readVersion)) {
@@ -475,6 +506,16 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 			for (; idIdx < checkIt->second.writes.size() && checkIt->second.writes[idIdx].writeVersion <= readVersion;
 			     idIdx++) {
 				Key nextKeyShouldBe = threadData->getKey(key, idIdx);
+				Version keyBeginVersion = beginVersionByChunk.rangeContaining(nextKeyShouldBe).cvalue();
+				if (keyBeginVersion > checkIt->second.writes[idIdx].writeVersion) {
+					if (DEBUG_READ_OP(threadData->directoryID, readVersion)) {
+						fmt::print("DBG READ:     Skip ID {0} written @ {1} < beginVersion {2}\n",
+						           idIdx,
+						           checkIt->second.writes[idIdx].clearVersion,
+						           keyBeginVersion);
+					}
+					continue;
+				}
 				if (DEBUG_READ_OP(threadData->directoryID, readVersion)) {
 					fmt::print("DBG READ:     Checking ID {0} ({1}) written @ {2}\n",
 					           format("%08x", idIdx),
@@ -491,6 +532,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 					            Optional<Value>(),
 					            startKeyInclusive,
 					            endKeyExclusive,
+					            beginVersion,
 					            readVersion,
 					            blob);
 					return false;
@@ -509,6 +551,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 					            Optional<Value>(),
 					            startKeyInclusive,
 					            endKeyExclusive,
+					            beginVersion,
 					            readVersion,
 					            blob);
 					return false;
@@ -523,6 +566,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 					            blob.first[resultIdx].value,
 					            startKeyInclusive,
 					            endKeyExclusive,
+					            beginVersion,
 					            readVersion,
 					            blob);
 					return false;
@@ -545,6 +589,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 			            Optional<Value>(),
 			            startKeyInclusive,
 			            endKeyExclusive,
+			            beginVersion,
 			            readVersion,
 			            blob);
 			return false;
@@ -565,6 +610,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		state double targetReadBytesPerSec = threadData->targetByteRate * 4;
 		ASSERT(targetReadBytesPerSec > 0);
 
+		state Version beginVersion;
 		state Version readVersion;
 
 		TraceEvent("BlobGranuleCorrectnessReaderStart").log();
@@ -610,26 +656,42 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 				state KeyRange range = KeyRangeRef(threadData->getKey(startKey, 0), threadData->getKey(endKey, 0));
 
 				// pick read version
-				// TODO could also pick begin version here
 				ASSERT(threadData->writeVersions.back() >= threadData->minSuccessfulReadVersion);
+				size_t readVersionIdx;
 				// randomly choose up to date vs time travel read
 				if (deterministicRandom()->random01() < 0.5) {
 					threadData->reads++;
+					readVersionIdx = threadData->writeVersions.size() - 1;
 					readVersion = threadData->writeVersions.back();
 				} else {
 					threadData->timeTravelReads++;
+					size_t startIdx = 0;
 					loop {
-						int readVersionIdx = deterministicRandom()->randomInt(0, threadData->writeVersions.size());
+						readVersionIdx = deterministicRandom()->randomInt(startIdx, threadData->writeVersions.size());
 						readVersion = threadData->writeVersions[readVersionIdx];
 						if (readVersion >= threadData->minSuccessfulReadVersion) {
 							break;
+						} else {
+							startIdx = readVersionIdx + 1;
 						}
 					}
 				}
 
+				// randomly choose begin version or not
+				beginVersion = 0;
+				if (deterministicRandom()->random01() < 0.5) {
+					int startIdx = 0;
+					int endIdxExclusive = readVersionIdx + 1;
+					// Choose skewed towards later versions. It's ok if beginVersion isn't readable though because it
+					// will collapse
+					size_t beginVersionIdx = (size_t)std::sqrt(
+					    deterministicRandom()->randomInt(startIdx * startIdx, endIdxExclusive * endIdxExclusive));
+					beginVersion = threadData->writeVersions[beginVersionIdx];
+				}
+
 				std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> blob =
-				    wait(self->readFromBlob(cx, self, range, readVersion));
-				self->validateResult(threadData, blob, startKey, endKey, 0, readVersion);
+				    wait(self->readFromBlob(cx, self, range, beginVersion, readVersion));
+				self->validateResult(threadData, blob, startKey, endKey, beginVersion, readVersion);
 
 				int resultBytes = blob.first.expectedSize();
 				threadData->rowsRead += blob.first.size();
@@ -822,7 +884,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 				fmt::print("Directory {0} doing final data check @ {1}\n", threadData->directoryID, readVersion);
 			}
 			std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> blob =
-			    wait(self->readFromBlob(cx, self, threadData->directoryRange, readVersion));
+			    wait(self->readFromBlob(cx, self, threadData->directoryRange, 0, readVersion));
 			result = self->validateResult(threadData, blob, 0, std::numeric_limits<uint32_t>::max(), 0, readVersion);
 			finalRowsValidated = blob.first.size();
 
