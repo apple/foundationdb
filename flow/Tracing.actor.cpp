@@ -209,7 +209,7 @@ public:
 		serialize_value(span.begin, request, 0xcb); // start time
 		serialize_value(span.end, request, 0xcb); // end
 		// Kind
-		serialize_value(span.kind, request, 0xcc); // end
+		serialize_value(span.kind, request, 0xcc);
 		// Status
 		serialize_value(span.status, request, 0xcc); // end
 		// Links
