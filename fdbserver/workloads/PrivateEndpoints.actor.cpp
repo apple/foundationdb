@@ -81,7 +81,8 @@ struct PrivateEndpoints : TestWorkload {
 			}
 			RequestStream<RT> s = optintf.get().*channel;
 			RT req;
-			return assumeFailure(s.getReply(req));
+			return assumeFailure(deterministicRandom()->coinflip() ? throwErrorOr(s.tryGetReply(req))
+			                                                       : s.getReply(req));
 		});
 	}
 
@@ -116,9 +117,8 @@ struct PrivateEndpoints : TestWorkload {
 				when(wait(testFuture)) { ++self->numSuccesses; }
 				when(wait(end)) { return Void(); }
 			}
-			break;
+			wait(delay(0.2));
 		}
-		return Void();
 	}
 };
 

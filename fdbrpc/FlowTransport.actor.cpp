@@ -259,6 +259,21 @@ struct TenantAuthorizer final : NetworkMessageReceiver {
 	bool isPublic() const override { return true; }
 };
 
+struct UnauthorizedEndpointReceiver final : NetworkMessageReceiver {
+	UnauthorizedEndpointReceiver(EndpointMap& endpoints) {
+		endpoints.insertWellKnown(
+		    this, Endpoint::wellKnownToken(WLTOKEN_UNAUTHORIZED_ENDPOINT), TaskPriority::ReadSocket);
+	}
+
+	void receive(ArenaObjectReader& reader) override {
+		UID token;
+		reader.deserialize(token);
+		Endpoint e = FlowTransport::transport().loadedEndpoint(token);
+		IFailureMonitor::failureMonitor().unauthorizedEndpoint(e);
+	}
+	bool isPublic() const override { return true; }
+};
+
 class TransportData {
 public:
 	TransportData(uint64_t transportId, int maxWellKnownEndpoints, IPAllowList const* allowList);
@@ -293,6 +308,7 @@ public:
 	EndpointNotFoundReceiver endpointNotFoundReceiver{ endpoints };
 	PingReceiver pingReceiver{ endpoints };
 	TenantAuthorizer tenantReceiver{ endpoints };
+	UnauthorizedEndpointReceiver unauthorizedEndpointReceiver{ endpoints };
 
 	Int64MetricHandle bytesSent;
 	Int64MetricHandle countPacketsReceived;
@@ -994,19 +1010,27 @@ ACTOR static void deliver(TransportData* self,
 		// We don't have the (stream) endpoint 'token', notify the remote machine
 		if (receiver) {
 			TraceEvent(SevWarnAlways, "AttemptedRPCToPrivatePrevented").detail("From", peerAddress);
-		}
-		if (destination.token.first() != -1) {
-			if (self->isLocalAddress(destination.getPrimaryAddress())) {
-				sendLocal(self,
-				          SerializeSource<UID>(destination.token),
-				          Endpoint::wellKnown(destination.addresses, WLTOKEN_ENDPOINT_NOT_FOUND));
-			} else {
-				Reference<Peer> peer = self->getOrOpenPeer(destination.getPrimaryAddress());
-				sendPacket(self,
-				           peer,
-				           SerializeSource<UID>(destination.token),
-				           Endpoint::wellKnown(destination.addresses, WLTOKEN_ENDPOINT_NOT_FOUND),
-				           false);
+			ASSERT(!self->isLocalAddress(destination.getPrimaryAddress()));
+			Reference<Peer> peer = self->getOrOpenPeer(destination.getPrimaryAddress());
+			sendPacket(self,
+			           peer,
+			           SerializeSource<UID>(destination.token),
+			           Endpoint::wellKnown(destination.addresses, WLTOKEN_UNAUTHORIZED_ENDPOINT),
+			           false);
+		} else {
+			if (destination.token.first() != -1) {
+				if (self->isLocalAddress(destination.getPrimaryAddress())) {
+					sendLocal(self,
+					          SerializeSource<UID>(destination.token),
+					          Endpoint::wellKnown(destination.addresses, WLTOKEN_ENDPOINT_NOT_FOUND));
+				} else {
+					Reference<Peer> peer = self->getOrOpenPeer(destination.getPrimaryAddress());
+					sendPacket(self,
+					           peer,
+					           SerializeSource<UID>(destination.token),
+					           Endpoint::wellKnown(destination.addresses, WLTOKEN_ENDPOINT_NOT_FOUND),
+					           false);
+				}
 			}
 		}
 	}

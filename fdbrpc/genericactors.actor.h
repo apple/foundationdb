@@ -228,7 +228,11 @@ Future<ErrorOr<X>> waitValueOrSignal(Future<X> value,
 		try {
 			choose {
 				when(X x = wait(value)) { return x; }
-				when(wait(signal)) { return ErrorOr<X>(request_maybe_delivered()); }
+				when(wait(signal)) {
+					return ErrorOr<X>(IFailureMonitor::failureMonitor().knownUnauthorized(endpoint)
+					                      ? unauthorized_attempt()
+					                      : request_maybe_delivered());
+				}
 			}
 		} catch (Error& e) {
 			if (signal.isError()) {
@@ -251,12 +255,32 @@ Future<ErrorOr<X>> waitValueOrSignal(Future<X> value,
 
 ACTOR template <class T>
 Future<T> sendCanceler(ReplyPromise<T> reply, ReliablePacket* send, Endpoint endpoint) {
+	state bool didCancelReliable = false;
 	try {
-		T t = wait(reply.getFuture());
-		FlowTransport::transport().cancelReliable(send);
-		return t;
+		loop {
+			choose {
+				when(T t = wait(reply.getFuture())) {
+					FlowTransport::transport().cancelReliable(send);
+					didCancelReliable = true;
+					return t;
+				}
+				when(wait(IFailureMonitor::failureMonitor().onDisconnectOrFailure(endpoint))) {
+					if (IFailureMonitor::failureMonitor().permanentlyFailed(endpoint)) {
+						FlowTransport::transport().cancelReliable(send);
+						didCancelReliable = true;
+						if (IFailureMonitor::failureMonitor().knownUnauthorized(endpoint)) {
+							throw unauthorized_attempt();
+						} else {
+							wait(Never());
+						}
+					}
+				}
+			}
+		}
 	} catch (Error& e) {
-		FlowTransport::transport().cancelReliable(send);
+		if (!didCancelReliable) {
+			FlowTransport::transport().cancelReliable(send);
+		}
 		if (e.code() == error_code_broken_promise) {
 			IFailureMonitor::failureMonitor().endpointNotFound(endpoint);
 		}

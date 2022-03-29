@@ -693,6 +693,9 @@ public:
 			Future<Void> disc =
 			    makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnectOrFailure(getEndpoint(taskID));
 			if (disc.isReady()) {
+				if (IFailureMonitor::failureMonitor().knownUnauthorized(getEndpoint(taskID))) {
+					return ErrorOr<REPLY_TYPE(X)>(unauthorized_attempt());
+				}
 				return ErrorOr<REPLY_TYPE(X)>(request_maybe_delivered());
 			}
 			Reference<Peer> peer =
@@ -711,6 +714,9 @@ public:
 			Future<Void> disc =
 			    makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnectOrFailure(getEndpoint());
 			if (disc.isReady()) {
+				if (IFailureMonitor::failureMonitor().knownUnauthorized(getEndpoint())) {
+					return ErrorOr<REPLY_TYPE(X)>(unauthorized_attempt());
+				}
 				return ErrorOr<REPLY_TYPE(X)>(request_maybe_delivered());
 			}
 			Reference<Peer> peer =

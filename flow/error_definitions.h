@@ -286,9 +286,9 @@ ERROR( unknown_error, 4000, "An unknown error occurred" )  // C++ exception not 
 ERROR( internal_error, 4100, "An internal error occurred" )
 ERROR( not_implemented, 4200, "Not implemented yet" )
 
-// 5xxx Authorization and authentication error codes
-ERROR( permission_denied, 5000, "Client is not allowed to access endpoint" )
-ERROR( unauthorized_attempt, 5001, "A untrusted client tried to send a message to a private endpoint" )
+// 6xxx Authorization and authentication error codes
+ERROR( permission_denied, 6000, "Client tried to access unauthorized data" )
+ERROR( unauthorized_attempt, 6001, "A untrusted client tried to send a message to a private endpoint" )
 // clang-format on
 
 #undef ERROR
