@@ -178,6 +178,10 @@ Reference<S3BlobStoreEndpoint> S3BlobStoreEndpoint::fromString(const std::string
 
 		Optional<std::string> proxyHost, proxyPort;
 		if (proxy.present()) {
+			if (!Hostname::isHostname(proxy.get()) && !NetworkAddress::parseOptional(proxy.get()).present()) {
+				throw format("'%s' is not a valid value for proxy. Format should be either IP:port or host:port.",
+				             proxy.get().c_str());
+			}
 			StringRef p(proxy.get());
 			proxyHost = p.eat(":").toString();
 			proxyPort = p.eat().toString();

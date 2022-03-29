@@ -3621,6 +3621,10 @@ int main(int argc, char* argv[]) {
 				break;
 			case OPT_PROXY:
 				proxy = args->OptionArg();
+				if (!Hostname::isHostname(proxy.get()) && !NetworkAddress::parseOptional(proxy.get()).present()) {
+					fprintf(stderr, "ERROR: Proxy format should be either IP:port or host:port\n");
+					return FDB_EXIT_ERROR;
+				}
 				modifyOptions.proxy = proxy;
 				break;
 			case OPT_DESTCONTAINER:
