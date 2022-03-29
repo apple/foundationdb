@@ -435,8 +435,11 @@ extern "C" DLLEXPORT FDBFuture* fdb_database_create_shared_state(FDBDatabase* db
 	return (FDBFuture*)(DB(db)->createSharedState().extractPtr());
 }
 
-extern "C" DLLEXPORT FDBFuture* fdb_database_set_shared_state(FDBDatabase* db, DatabaseSharedState* p) {
-	return (FDBFuture*)(DB(db)->setSharedState(p).extractPtr());
+extern "C" DLLEXPORT void fdb_database_set_shared_state(FDBDatabase* db, DatabaseSharedState* p) {
+	try {
+		DB(db)->setSharedState(p);
+	} catch (...) {
+	}
 }
 
 // Get network thread busyness (updated every 1s)

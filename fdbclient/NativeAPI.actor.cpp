@@ -8160,15 +8160,14 @@ Future<Void> DatabaseContext::createSnapshot(StringRef uid, StringRef snapshot_c
 Future<DatabaseSharedState*> DatabaseContext::initSharedState() {
 	ASSERT(!sharedStatePtr); // Don't re-initialize shared state if a pointer already exists
 	DatabaseSharedState* newState = new DatabaseSharedState();
+	newState->protocolVersion = getClusterProtocol();
 	setSharedState(newState);
 	return newState;
 }
 
-Future<Void> DatabaseContext::setSharedState(DatabaseSharedState* p) {
-	MutexHolder holder(p->mutexLock);
+void DatabaseContext::setSharedState(DatabaseSharedState* p) {
 	sharedStatePtr = p;
 	sharedStatePtr->refCount++;
-	return Void();
 }
 
 ACTOR Future<Void> storageFeedVersionUpdater(StorageServerInterface interf, ChangeFeedStorageData* self) {

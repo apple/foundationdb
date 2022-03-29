@@ -143,7 +143,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                     uint8_t const* snapshotCommmand,
 	                                     int snapshotCommandLength);
 	FDBFuture* (*databaseCreateSharedState)(FDBDatabase* database);
-	FDBFuture* (*databaseSetSharedState)(FDBDatabase* database, DatabaseSharedState* p);
+	void (*databaseSetSharedState)(FDBDatabase* database, DatabaseSharedState* p);
 
 	double (*databaseGetMainThreadBusyness)(FDBDatabase* database);
 	FDBFuture* (*databaseGetServerProtocol)(FDBDatabase* database, uint64_t expectedVersion);
@@ -431,7 +431,7 @@ public:
 	ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) override;
 
 	ThreadFuture<DatabaseSharedState*> createSharedState() override;
-	ThreadFuture<Void> setSharedState(DatabaseSharedState* p) override;
+	void setSharedState(DatabaseSharedState* p) override;
 
 private:
 	const Reference<FdbCApi> api;
@@ -697,7 +697,7 @@ public:
 	ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) override;
 
 	ThreadFuture<DatabaseSharedState*> createSharedState() override;
-	ThreadFuture<Void> setSharedState(DatabaseSharedState* p) override;
+	void setSharedState(DatabaseSharedState* p) override;
 
 	// private:
 

@@ -29,6 +29,7 @@
 
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
+#include "flow/ProtocolVersion.h"
 #include "flow/flow.h"
 
 typedef int64_t Version;
@@ -1340,8 +1341,9 @@ struct GRVCacheSpace {
 // This structure can be extended in the future to include additional features that required a shared state
 struct DatabaseSharedState {
 	Mutex mutexLock;
+	Future<ProtocolVersion> protocolVersion;
 	GRVCacheSpace grvCacheSpace;
-	int refCount;
+	std::atomic<int> refCount;
 
 	DatabaseSharedState() : mutexLock(Mutex()), grvCacheSpace(GRVCacheSpace()), refCount(0) {}
 };

@@ -59,7 +59,7 @@ public:
 	ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) override;
 
 	ThreadFuture<DatabaseSharedState*> createSharedState() override;
-	ThreadFuture<Void> setSharedState(DatabaseSharedState* p) override;
+	void setSharedState(DatabaseSharedState* p) override;
 
 private:
 	friend class ThreadSafeTenant;

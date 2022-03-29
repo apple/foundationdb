@@ -106,9 +106,9 @@ ThreadFuture<DatabaseSharedState*> ThreadSafeDatabase::createSharedState() {
 	return onMainThread([db]() -> Future<DatabaseSharedState*> { return db->initSharedState(); });
 }
 
-ThreadFuture<Void> ThreadSafeDatabase::setSharedState(DatabaseSharedState* p) {
+void ThreadSafeDatabase::setSharedState(DatabaseSharedState* p) {
 	DatabaseContext* db = this->db;
-	return onMainThread([db, p]() -> Future<Void> { return db->setSharedState(p); });
+	onMainThreadVoid([db, p]() { db->setSharedState(p); }, nullptr);
 }
 
 // Return the main network thread busyness

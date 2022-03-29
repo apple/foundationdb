@@ -481,12 +481,11 @@ ThreadFuture<DatabaseSharedState*> DLDatabase::createSharedState() {
 	});
 }
 
-ThreadFuture<Void> DLDatabase::setSharedState(DatabaseSharedState* p) {
+void DLDatabase::setSharedState(DatabaseSharedState* p) {
 	if (!api->databaseSetSharedState) {
-		return unsupported_operation();
+		throw unsupported_operation();
 	}
-	FdbCApi::FDBFuture* f = api->databaseSetSharedState(db, p);
-	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) { return Void(); });
+	api->databaseSetSharedState(db, p);
 }
 
 // Get network thread busyness
@@ -775,7 +774,6 @@ Reference<IDatabase> DLApi::createDatabase609(const char* clusterFilePath) {
 Reference<IDatabase> DLApi::createDatabase(const char* clusterFilePath) {
 	if (headerVersion >= 610) {
 		FdbCApi::FDBDatabase* db;
-		// can the FdbCApi wrapper signature be changed to add this ptr?
 		throwIfError(api->createDatabase(clusterFilePath, &db));
 		return Reference<IDatabase>(new DLDatabase(api, db));
 	} else {
@@ -1396,13 +1394,15 @@ ThreadFuture<Void> MultiVersionDatabase::createSnapshot(const StringRef& uid, co
 }
 
 ThreadFuture<DatabaseSharedState*> MultiVersionDatabase::createSharedState() {
-	auto f = dbState->db ? dbState->db->createSharedState() : ThreadFuture<DatabaseSharedState*>(Never());
-	return abortableFuture(f, dbState->dbVar->get().onChange);
+	auto dbVar = dbState->dbVar->get();
+	auto f = dbVar.value ? dbVar.value->createSharedState() : ThreadFuture<DatabaseSharedState*>(Never());
+	return abortableFuture(f, dbVar.onChange);
 }
 
-ThreadFuture<Void> MultiVersionDatabase::setSharedState(DatabaseSharedState* p) {
-	auto f = dbState->db ? dbState->db->setSharedState(p) : ThreadFuture<Void>(Never());
-	return abortableFuture(f, dbState->dbVar->get().onChange);
+void MultiVersionDatabase::setSharedState(DatabaseSharedState* p) {
+	if (dbState->db) {
+		dbState->db->setSharedState(p);
+	}
 }
 
 // Get network thread busyness
