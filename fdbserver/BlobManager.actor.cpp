@@ -2508,7 +2508,7 @@ ACTOR Future<Void> monitorPruneKeys(Reference<BlobManagerData> self) {
 	if (BM_DEBUG) {
 		fmt::print("BM constructing backup container from {}\n", SERVER_KNOBS->BG_URL.c_str());
 	}
-	self->bstore = BackupContainerFileSystem::openContainerFS(SERVER_KNOBS->BG_URL);
+	self->bstore = BackupContainerFileSystem::openContainerFS(SERVER_KNOBS->BG_URL, {}, {});
 	if (BM_DEBUG) {
 		printf("BM constructed backup container\n");
 	}

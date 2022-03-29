@@ -3027,7 +3027,7 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 		if (BW_DEBUG) {
 			fmt::print("BW constructing backup container from {0}\n", SERVER_KNOBS->BG_URL);
 		}
-		self->bstore = BackupContainerFileSystem::openContainerFS(SERVER_KNOBS->BG_URL);
+		self->bstore = BackupContainerFileSystem::openContainerFS(SERVER_KNOBS->BG_URL, {}, {});
 		if (BW_DEBUG) {
 			printf("BW constructed backup container\n");
 		}
