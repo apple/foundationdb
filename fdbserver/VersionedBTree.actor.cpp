@@ -3691,6 +3691,7 @@ public:
 		self->operations.clear();
 
 		debug_printf("DWALPager(%s) shutdown destroy page cache\n", self->filename.c_str());
+		wait(self->extentCache.clear());
 		wait(self->pageCache.clear());
 		wait(delay(0));
 
