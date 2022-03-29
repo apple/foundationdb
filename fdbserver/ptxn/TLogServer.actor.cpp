@@ -2570,9 +2570,7 @@ ACTOR Future<Void> updatePersistentData(Reference<TLogGroupData> self,
 					uint32_t size = 0;
 					for (; msg != teamData->versionMessages.end() && msg->first == currentVersion; ++msg) {
 						// Fast forward until we find a new version.
-						// TOFIX: how to calculate the size of stringref?
-						// size += msg->second->first.expectedSize();
-						size += 0;
+						size += msg->second.size();
 					}
 
 					SpilledData spilledData(currentVersion, begin, length, size);
