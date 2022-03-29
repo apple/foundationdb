@@ -7372,6 +7372,7 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 			fmt::print(
 			    "BG Mapping for [{0} - %{1}) too large!\n", keyRange.begin.printable(), keyRange.end.printable());
 		}
+		TraceEvent(SevWarn, "BGMappingTooLarge").detail("Range", range).detail("Max", 1000);
 		throw unsupported_operation();
 	}
 	ASSERT(!blobGranuleMapping.more && blobGranuleMapping.size() < CLIENT_KNOBS->TOO_MANY);
@@ -8707,11 +8708,24 @@ ACTOR Future<Void> singleChangeFeedStreamInternal(KeyRange range,
 			results->lastReturnedVersion.set(feedReply.mutations.back().version);
 		}
 
-		if (refresh.canBeSet() && !atLatest && feedReply.atLatestVersion) {
+		if (!refresh.canBeSet()) {
+			try {
+				// refresh is set if and only if this actor is cancelled
+				wait(Future<Void>(Void()));
+				// Catch any unexpected behavior if the above contract is broken
+				ASSERT(false);
+			} catch (Error& e) {
+				ASSERT(e.code() == error_code_actor_cancelled);
+				throw;
+			}
+		}
+
+		if (!atLatest && feedReply.atLatestVersion) {
 			atLatest = true;
 			results->notAtLatest.set(0);
 		}
-		if (refresh.canBeSet() && feedReply.minStreamVersion > results->storageData[0]->version.get()) {
+
+		if (feedReply.minStreamVersion > results->storageData[0]->version.get()) {
 			results->storageData[0]->version.set(feedReply.minStreamVersion);
 		}
 	}

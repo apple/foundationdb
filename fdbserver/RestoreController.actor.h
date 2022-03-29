@@ -446,13 +446,15 @@ struct RestoreControllerData : RestoreRoleData, public ReferenceCounted<RestoreC
 		}
 	}
 
-	void initBackupContainer(Key url) {
+	void initBackupContainer(Key url, Optional<std::string> proxy) {
 		if (bcUrl == url && bc.isValid()) {
 			return;
 		}
-		TraceEvent("FastRestoreControllerInitBackupContainer").detail("URL", url);
+		TraceEvent("FastRestoreControllerInitBackupContainer")
+		    .detail("URL", url)
+		    .detail("Proxy", proxy.present() ? proxy.get() : "");
 		bcUrl = url;
-		bc = IBackupContainer::openContainer(url.toString());
+		bc = IBackupContainer::openContainer(url.toString(), proxy, {});
 	}
 };
 
