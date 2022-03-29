@@ -73,10 +73,24 @@ struct LogfileTracer : ITracer {
 		    .detail("Status", span.status)
 		    .detail("ParentSpanID", span.parentContext.spanID);
 
+		for (const auto& link : span.links) {
+			TraceEvent(SevInfo, "TracingSpanLink", span.context.traceID)
+			    .detail("TraceID", link.traceID)
+			    .detail("SpanID", link.spanID);
+		}
 		for (const auto& [key, value] : span.attributes) {
 			TraceEvent(SevInfo, "TracingSpanTag", span.context.traceID).detail("Key", key).detail("Value", value);
 		}
-		// TODO do we want links and events or is that too much noise?
+		for (const auto& event : span.events) {
+			TraceEvent(SevInfo, "TracingSpanEvent", span.context.traceID)
+			    .detail("Name", event.name)
+			    .detail("Time", event.time);
+			for (const auto& [key, value] : event.attributes) {
+				TraceEvent(SevInfo, "TracingSpanEventAttribute", span.context.traceID)
+				    .detail("Key", key)
+				    .detail("Value", value);
+			}
+		}
 	}
 };
 
@@ -249,8 +263,9 @@ private:
 			request.write_byte(reinterpret_cast<const uint8_t*>(&length)[1]);
 			request.write_byte(reinterpret_cast<const uint8_t*>(&length)[0]);
 		} else {
-			// TODO: Add support for longer strings if necessary.
-			ASSERT(false);
+			TraceEvent(SevWarn, "TracingSpanSerializeString")
+			    .detail("Failed to MessagePack encode very large string", length);
+			ASSERT_WE_THINK(false);
 		}
 
 		request.write_bytes(c, length);
@@ -274,8 +289,9 @@ private:
 			request.write_byte(reinterpret_cast<const uint8_t*>(&size)[1]);
 			request.write_byte(reinterpret_cast<const uint8_t*>(&size)[0]);
 		} else {
-			// TODO: Add support for longer vectors if necessary.
-			ASSERT(false);
+			TraceEvent(SevWarn, "TracingSpanSerializeVector")
+			    .detail("Failed to MessagePack encode very large vector", size);
+			ASSERT_WE_THINK(false);
 		}
 
 		for (const auto& parentContext : vec) {
@@ -294,8 +310,8 @@ private:
 			request.write_byte(reinterpret_cast<const uint8_t*>(&size)[1]);
 			request.write_byte(reinterpret_cast<const uint8_t*>(&size)[0]);
 		} else {
-			// TODO: Add support for longer vectors if necessary.
-			ASSERT(false);
+			TraceEvent(SevWarn, "TracingSpanSerializeVector").detail("Failed to MessagePack encode large vector", size);
+			ASSERT_WE_THINK(false);
 		}
 
 		for (const auto& link : vec) {
@@ -316,8 +332,8 @@ private:
 			request.write_byte(reinterpret_cast<const uint8_t*>(&size)[1]);
 			request.write_byte(reinterpret_cast<const uint8_t*>(&size)[0]);
 		} else {
-			// TODO: Add support for longer vectors if necessary.
-			ASSERT(false);
+			TraceEvent(SevWarn, "TracingSpanSerializeVector").detail("Failed to MessagePack encode large vector", size);
+			ASSERT_WE_THINK(false);
 		}
 
 		for (const auto& event : vec) {
@@ -334,8 +350,8 @@ private:
 			// fixmap	1000xxxx	0x80 - 0x8f
 			request.write_byte(static_cast<uint8_t>(size) | 0b10000000);
 		} else {
-			// TODO: Add support for longer maps if necessary.
-			ASSERT(false);
+			TraceEvent(SevWarn, "TracingSpanSerializeVector").detail("Failed to MessagePack encode large vector", size);
+			ASSERT_WE_THINK(false);
 		}
 
 		for (const auto& kv : vals) {
@@ -350,8 +366,8 @@ private:
 		if (size <= 15) {
 			request.write_byte(static_cast<uint8_t>(size) | 0b10000000);
 		} else {
-			// TODO: Add support for longer maps if necessary.
-			ASSERT(false);
+			TraceEvent(SevWarn, "TracingSpanSerializeMap").detail("Failed to MessagePack encode large map", size);
+			ASSERT_WE_THINK(false);
 		}
 
 		for (const auto& [key, value] : map) {
