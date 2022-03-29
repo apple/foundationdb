@@ -94,6 +94,7 @@ void printBuildInformation() {
 
 struct DecodeParams {
 	std::string container_url;
+	Optional<std::string> proxy;
 	std::string fileFilter; // only files match the filter will be decoded
 	bool log_enabled = true;
 	std::string log_dir, trace_format, trace_log_group;
@@ -115,6 +116,10 @@ struct DecodeParams {
 		std::string s;
 		s.append("ContainerURL: ");
 		s.append(container_url);
+		if (proxy.present()) {
+			s.append(", Proxy: ");
+			s.append(proxy.get());
+		}
 		s.append(", FileFilter: ");
 		s.append(fileFilter);
 		if (log_enabled) {
@@ -526,7 +531,8 @@ ACTOR Future<Void> process_file(Reference<IBackupContainer> container, LogFile f
 }
 
 ACTOR Future<Void> decode_logs(DecodeParams params) {
-	state Reference<IBackupContainer> container = IBackupContainer::openContainer(params.container_url);
+	state Reference<IBackupContainer> container =
+	    IBackupContainer::openContainer(params.container_url, params.proxy, {});
 	state UID uid = deterministicRandom()->randomUniqueID();
 	state BackupFileList listing = wait(container->dumpFileList());
 	// remove partitioned logs

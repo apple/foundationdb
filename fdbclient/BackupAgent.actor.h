@@ -165,6 +165,7 @@ public:
 	                                   Key backupTag,
 	                                   Standalone<VectorRef<KeyRangeRef>> backupRanges,
 	                                   Key bcUrl,
+	                                   Optional<std::string> proxy,
 	                                   Version targetVersion,
 	                                   LockDB lockDB,
 	                                   UID randomUID,
@@ -187,6 +188,7 @@ public:
 	                        Optional<Database> cxOrig,
 	                        Key tagName,
 	                        Key url,
+	                        Optional<std::string> proxy,
 	                        Standalone<VectorRef<KeyRangeRef>> ranges,
 	                        WaitForComplete = WaitForComplete::True,
 	                        Version targetVersion = ::invalidVersion,
@@ -202,6 +204,7 @@ public:
 	                        Optional<Database> cxOrig,
 	                        Key tagName,
 	                        Key url,
+	                        Optional<std::string> proxy,
 	                        WaitForComplete waitForComplete = WaitForComplete::True,
 	                        Version targetVersion = ::invalidVersion,
 	                        Verbose verbose = Verbose::True,
@@ -219,6 +222,7 @@ public:
 		               cxOrig,
 		               tagName,
 		               url,
+		               proxy,
 		               rangeRef,
 		               waitForComplete,
 		               targetVersion,
@@ -263,6 +267,7 @@ public:
 
 	Future<Void> submitBackup(Reference<ReadYourWritesTransaction> tr,
 	                          Key outContainer,
+	                          Optional<std::string> proxy,
 	                          int initialSnapshotIntervalSeconds,
 	                          int snapshotIntervalSeconds,
 	                          std::string const& tagName,
@@ -273,6 +278,7 @@ public:
 	                          Optional<std::string> const& encryptionKeyFileName = {});
 	Future<Void> submitBackup(Database cx,
 	                          Key outContainer,
+	                          Optional<std::string> proxy,
 	                          int initialSnapshotIntervalSeconds,
 	                          int snapshotIntervalSeconds,
 	                          std::string const& tagName,
@@ -284,6 +290,7 @@ public:
 		return runRYWTransactionFailIfLocked(cx, [=](Reference<ReadYourWritesTransaction> tr) {
 			return submitBackup(tr,
 			                    outContainer,
+			                    proxy,
 			                    initialSnapshotIntervalSeconds,
 			                    snapshotIntervalSeconds,
 			                    tagName,
@@ -720,20 +727,31 @@ template <>
 inline Tuple Codec<Reference<IBackupContainer>>::pack(Reference<IBackupContainer> const& bc) {
 	Tuple tuple;
 	tuple.append(StringRef(bc->getURL()));
+	if (bc->getProxy().present()) {
+		tuple.append(StringRef(bc->getProxy().get()));
+	} else {
+		tuple.append(StringRef());
+	}
 	if (bc->getEncryptionKeyFileName().present()) {
 		tuple.append(bc->getEncryptionKeyFileName().get());
+	} else {
+		tuple.append(StringRef());
 	}
 	return tuple;
 }
 template <>
 inline Reference<IBackupContainer> Codec<Reference<IBackupContainer>>::unpack(Tuple const& val) {
-	ASSERT(val.size() == 1 || val.size() == 2);
+	ASSERT(val.size() == 3);
 	auto url = val.getString(0).toString();
-	Optional<std::string> encryptionKeyFileName;
-	if (val.size() == 2) {
-		encryptionKeyFileName = val.getString(1).toString();
+	Optional<std::string> proxy;
+	if (!val.getString(1).empty()) {
+		proxy = val.getString(1).toString();
 	}
-	return IBackupContainer::openContainer(url, encryptionKeyFileName);
+	Optional<std::string> encryptionKeyFileName;
+	if (!val.getString(2).empty()) {
+		encryptionKeyFileName = val.getString(2).toString();
+	}
+	return IBackupContainer::openContainer(url, proxy, encryptionKeyFileName);
 }
 
 class BackupConfig : public KeyBackedConfig {
