@@ -287,8 +287,8 @@ rocksdb::Options getOptions() {
 	if (SERVER_KNOBS->ROCKSDB_BACKGROUND_PARALLELISM > 0) {
 		options.IncreaseParallelism(SERVER_KNOBS->ROCKSDB_BACKGROUND_PARALLELISM);
 	}
-
-	options.statistics = rocksdb::CreateDBStatistics(); // can be passed to multiple db instances and do aggregation
+	// Zhe: TODO: we could remove options.statistics from getOption since we are creating the stat obj in RocksDBMetrics
+	options.statistics = rocksdb::CreateDBStatistics();
 	options.statistics->set_stats_level(rocksdb::kExceptHistogramOrTimers);
 
 	options.db_log_dir = SERVER_KNOBS->LOG_DIRECTORY;
@@ -872,14 +872,12 @@ std::shared_ptr<rocksdb::Statistics> RocksDBMetrics::getStatsObjForRocksDB(std::
 void RocksDBMetrics::logStats(rocksdb::DB* db, std::shared_ptr<ReadIteratorPool> readIterPool) {
 	TraceEvent e("RocksDBMetrics");
 	uint64_t stat;
-	for (auto& t : tickerStats) {
-		auto& [name, ticker, cum] = t;
+	for (auto& [name, ticker, cum] : tickerStats) {
 		stat = stats->getTickerCount(ticker);
 		e.detail(name, stat - cum);
 		cum = stat;
 	}
-	for (auto& p : propertyStats) { // Zhe: TODO aggregation
-		auto& [name, property] = p;
+	for (auto& [name, property] : propertyStats) { // Zhe: TODO aggregation
 		stat = 0;
 		ASSERT(db->GetIntProperty(property, &stat));
 		e.detail(name, stat);
@@ -1090,10 +1088,10 @@ ACTOR Future<Void> rocksDBMetricLogger(rocksdb::DB* db,
                                        std::shared_ptr<DataShard> shard) {
 	loop {
 		wait(delay(SERVER_KNOBS->ROCKSDB_METRICS_DELAY));
-		if (SERVER_KNOBS->ROCKSDB_STATISTIC_ENABLE) {
+		if (SERVER_KNOBS->ROCKSDB_ENABLE_STATISTIC) {
 			rocksDBMetrics->logStats(db, readIterPool);
 		}
-		if (SERVER_KNOBS->ROCKSDB_PERFCONTEXT_ENABLE) {
+		if (SERVER_KNOBS->ROCKSDB_PERFCONTEXT_SAMPLE_RATE != 0) {
 			rocksDBMetrics->logPerfContext(true);
 		}
 	}
@@ -1365,13 +1363,13 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				} else {
 					getHistograms = false;
 				}
-				if (SERVER_KNOBS->ROCKSDB_PERFCONTEXT_ENABLE &&
+				if ((SERVER_KNOBS->ROCKSDB_PERFCONTEXT_SAMPLE_RATE != 0) &&
 				    (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_PERFCONTEXT_SAMPLE_RATE)) {
 					getPerfContext = true;
 				} else {
 					getPerfContext = false;
 				}
-				if (SERVER_KNOBS->ROCKSDB_MEM_USAGE_METRIC_ENABLE &&
+				if ((SERVER_KNOBS->ROCKSDB_MEM_USAGE_METRIC_SAMPLE_RATE != 0) &&
 				    (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_MEM_USAGE_METRIC_SAMPLE_RATE)) {
 					logShardMemUsage = true;
 				} else {
@@ -1486,9 +1484,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				for (auto& [shard, batch] : *(a.shardsToCommit)) {
 					rocksDBMetrics->logMemUsagePerShard(shard->name, shard->db);
 				}
-				if (specialKeysShard) {
-					rocksDBMetrics->logMemUsagePerShard(specialKeysShard->name, specialKeysShard->db);
-				}
 			}
 			// Destroy all the delete pending shards.
 			a.shardsToCommit->clear();
@@ -1592,12 +1587,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			    getHistograms(
 			        (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE) ? true : false),
 			    getPerfContext(
-			        SERVER_KNOBS->ROCKSDB_PERFCONTEXT_ENABLE &&
+			        (SERVER_KNOBS->ROCKSDB_PERFCONTEXT_SAMPLE_RATE != 0) &&
 			                (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_PERFCONTEXT_SAMPLE_RATE)
 			            ? true
 			            : false),
 			    logShardMemUsage(
-			        SERVER_KNOBS->ROCKSDB_MEM_USAGE_METRIC_ENABLE &&
+			        (SERVER_KNOBS->ROCKSDB_MEM_USAGE_METRIC_SAMPLE_RATE != 0) &&
 			                (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_MEM_USAGE_METRIC_SAMPLE_RATE)
 			            ? true
 			            : false) {}
@@ -1689,12 +1684,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			    getHistograms(
 			        (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE) ? true : false),
 			    getPerfContext(
-			        SERVER_KNOBS->ROCKSDB_PERFCONTEXT_ENABLE &&
+			        (SERVER_KNOBS->ROCKSDB_PERFCONTEXT_SAMPLE_RATE != 0) &&
 			                (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_PERFCONTEXT_SAMPLE_RATE)
 			            ? true
 			            : false),
 			    logShardMemUsage(
-			        SERVER_KNOBS->ROCKSDB_MEM_USAGE_METRIC_ENABLE &&
+			        (SERVER_KNOBS->ROCKSDB_MEM_USAGE_METRIC_SAMPLE_RATE != 0) &&
 			                (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_MEM_USAGE_METRIC_SAMPLE_RATE)
 			            ? true
 			            : false) {}
@@ -1789,12 +1784,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			    getHistograms(
 			        (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE) ? true : false),
 			    getPerfContext(
-			        SERVER_KNOBS->ROCKSDB_PERFCONTEXT_ENABLE &&
+			        (SERVER_KNOBS->ROCKSDB_PERFCONTEXT_SAMPLE_RATE != 0) &&
 			                (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_PERFCONTEXT_SAMPLE_RATE)
 			            ? true
 			            : false),
 			    logShardMemUsage(
-			        SERVER_KNOBS->ROCKSDB_MEM_USAGE_METRIC_ENABLE &&
+			        (SERVER_KNOBS->ROCKSDB_MEM_USAGE_METRIC_SAMPLE_RATE != 0) &&
 			                (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_MEM_USAGE_METRIC_SAMPLE_RATE)
 			            ? true
 			            : false) {}

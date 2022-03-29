@@ -296,10 +296,8 @@ public:
 	bool ROCKSDB_READ_RANGE_REUSE_ITERATORS;
 	int64_t ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC;
 	bool ROCKSDB_WRITE_RATE_LIMITER_AUTO_TUNE;
-	bool ROCKSDB_STATISTIC_ENABLE; // Enable rocks statistic
-	bool ROCKSDB_PERFCONTEXT_ENABLE; // Enable rocks perf context metrics. May cause performance overhead
-	double ROCKSDB_PERFCONTEXT_SAMPLE_RATE;
-	bool ROCKSDB_MEM_USAGE_METRIC_ENABLE;
+	bool ROCKSDB_ENABLE_STATISTIC; // Enable rocks statistic
+	double ROCKSDB_PERFCONTEXT_SAMPLE_RATE; // Enable rocks perf context metrics. May cause performance overhead
 	double ROCKSDB_MEM_USAGE_METRIC_SAMPLE_RATE;
 
 	// Leader election
