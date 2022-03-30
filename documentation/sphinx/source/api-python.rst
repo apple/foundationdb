@@ -325,14 +325,6 @@ A |database-blurb1| |database-blurb2|
 .. |sync-read| replace:: This read is fully synchronous.
 .. |sync-write| replace:: This change will be committed immediately, and is fully synchronous.
 
-.. method:: Database.delete_tenant(tenant_name):
-
-    Delete a tenant from the cluster. |sync-write|
-
-    The tenant name can be either a byte string or a tuple. If a tuple is provided, the tuple will be packed using the tuple layer to generate the byte string tenant name.
-
-    It is an error to delete a tenant that still has data. To delete a non-empty tenant, first clear all of the keys in the tenant.
-
 .. method:: Database.get(key)
 
     Returns the value associated with the specified key in the database (or ``None`` if the key does not exist). |sync-read|
