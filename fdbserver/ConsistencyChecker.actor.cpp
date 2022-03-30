@@ -50,7 +50,7 @@ ACTOR Future<Void> consistencyChecker(ConsistencyCheckerInterface ckInterf,
                                       int64_t restart,
                                       double maxRate,
                                       double targetInterval,
-									  Reference<IClusterConnectionRecord> connRecord) {
+                                      Reference<IClusterConnectionRecord> connRecord) {
 	state ConsistencyCheckerData self(ckInterf.id(),
 	                                  openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True));
 	state Promise<Void> err;

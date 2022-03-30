@@ -458,8 +458,8 @@ struct RegisterWorkerRequest {
 	                      ConfigClassSet knobConfigClassSet)
 	  : wi(wi), initialClass(initialClass), processClass(processClass), priorityInfo(priorityInfo),
 	    generation(generation), distributorInterf(ddInterf), ratekeeperInterf(rkInterf), blobManagerInterf(bmInterf),
-	    encryptKeyProxyInterf(ekpInterf), consistencyCheckerInterf(ckInterf), degraded(degraded), lastSeenKnobVersion(lastSeenKnobVersion),
-	    knobConfigClassSet(knobConfigClassSet), requestDbInfo(false) {}
+	    encryptKeyProxyInterf(ekpInterf), consistencyCheckerInterf(ckInterf), degraded(degraded),
+	    lastSeenKnobVersion(lastSeenKnobVersion), knobConfigClassSet(knobConfigClassSet), requestDbInfo(false) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -1163,7 +1163,7 @@ ACTOR Future<Void> consistencyChecker(ConsistencyCheckerInterface ckInterf,
                                       int64_t restart,
                                       double maxRate,
                                       double targetInterval,
-									  Reference<IClusterConnectionRecord> connRecord);
+                                      Reference<IClusterConnectionRecord> connRecord);
 ACTOR Future<Void> blobManager(BlobManagerInterface bmi, Reference<AsyncVar<ServerDBInfo> const> db, int64_t epoch);
 ACTOR Future<Void> storageCacheServer(StorageServerInterface interf,
                                       uint16_t id,

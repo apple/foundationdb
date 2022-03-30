@@ -32,7 +32,7 @@ struct ConsistencyCheckerInterface {
 	RequestStream<struct HaltConsistencyCheckerRequest> haltConsistencyChecker;
 	struct LocalityData locality;
 	UID myId;
-	//RequestStream<struct ConsistencyCheckRequest> consistencyCheckerCheckReq;
+	// RequestStream<struct ConsistencyCheckRequest> consistencyCheckerCheckReq;
 
 	ConsistencyCheckerInterface() {}
 	explicit ConsistencyCheckerInterface(const struct LocalityData& l, UID id) : locality(l), myId(id) {}
@@ -63,8 +63,8 @@ struct HaltConsistencyCheckerRequest {
 	}
 };
 
-//TODO: NEELAM: mpst likely will be removed
-//struct ConsistencyCheckRequest {
+// TODO: NEELAM: mpst likely will be removed
+// struct ConsistencyCheckRequest {
 //	constexpr static FileIdentifier file_identifier = 3485239;
 //	bool state;
 //	double maxRate;
@@ -73,13 +73,14 @@ struct HaltConsistencyCheckerRequest {
 //	ReplyPromise<Void> reply;
 //
 //	explicit ConsistencyCheckRequest(Optional<UID> const& requesterID = Optional<UID>()) : requesterID(requesterID) {}
-//	explicit ConsistencyCheckRequest(bool state, double maxRate, double targetInterval, UID reqUID, Optional<UID> requesterID = Optional<UID>())
-//		: state(state), maxRate(maxRate), targetInterval(targetInterval), requesterID(reqUID), requesterID(requesterID) {}
+//	explicit ConsistencyCheckRequest(bool state, double maxRate, double targetInterval, UID reqUID, Optional<UID>
+//requesterID = Optional<UID>()) 		: state(state), maxRate(maxRate), targetInterval(targetInterval), requesterID(reqUID),
+//requesterID(requesterID) {}
 //
 //	template <class Ar>
 //	void serialize(Ar& ar) {
 //		serializer(ar, state, maxRate, targetInterval, requesterID, reply);
 //	}
-//};
+// };
 
 #endif // FDBSERVER_CONSISTENCYCHECKERINTERFACE_H

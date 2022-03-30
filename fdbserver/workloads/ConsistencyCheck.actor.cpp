@@ -1180,15 +1180,16 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		state int i = self->clientId * (self->shardSampleFactor + 1);
 		state int increment =
 		    (self->distributed && !self->firstClient) ? effectiveClientCount * self->shardSampleFactor : 1;
-		// TODO: NEELAM: take self->maxRate and self->targetInterval into account if specified
+		// Honor self->maxRate and self->targetInterval if specified
+		state int maxRate = self->maxRate ? self->maxRate : self->rateLimitMax;
+		state int targetInterval = self->targetInterval
+		                               ? self->targetInterval
+		                               : CLIENT_KNOBS->CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME;
 		state int rateLimitForThisRound =
 		    self->bytesReadInPreviousRound == 0
-		        ? self->rateLimitMax
-		        : std::min(
-		              self->rateLimitMax,
-		              static_cast<int>(ceil(self->bytesReadInPreviousRound /
-		                                    (float)CLIENT_KNOBS->CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME)));
-		ASSERT(rateLimitForThisRound >= 0 && rateLimitForThisRound <= self->rateLimitMax);
+		        ? maxRate
+		        : std::min(maxRate, static_cast<int>(ceil(self->bytesReadInPreviousRound / (float)targetInterval)));
+		ASSERT(rateLimitForThisRound >= 0 && rateLimitForThisRound <= maxRate);
 		TraceEvent("ConsistencyCheck_RateLimitForThisRound").detail("RateLimit", rateLimitForThisRound);
 		state Reference<IRateControl> rateLimiter = Reference<IRateControl>(new SpeedLimit(rateLimitForThisRound, 1));
 		state double rateLimiterStartTime = now();
@@ -1401,13 +1402,14 @@ struct ConsistencyCheckWorkload : TestWorkload {
 								    .detail(format("StorageServer%d", j).c_str(), storageServers[j].toString());
 								current = _current;
 							} catch (Error& e) {
-								if (e.code() != error_code_end_of_stream || e.code() == error_code_operation_cancelled) {
+								if (e.code() != error_code_end_of_stream ||
+								    e.code() == error_code_operation_cancelled) {
 									// If the data is not available and we aren't relocating this shard
 									if (!isRelocating) {
 										printf("Error %d - %s\n", e.code(), e.name());
 										TraceEvent("ConsistencyCheck_StorageServerUnavailable")
-											.errorUnsuppressed(e)
-											.suppressFor(1.0)
+										    .errorUnsuppressed(e)
+										    .suppressFor(1.0)
 										    .detail("StorageServer", storageServers[j])
 										    .detail("ShardBegin", printable(range.begin))
 										    .detail("ShardEnd", printable(range.end))
@@ -1633,10 +1635,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 						if (rateLimitForThisRound > 0) {
 							wait(rateLimiter->getAllowance(totalReadAmount));
 							// Set ratelimit to max allowed if current round has been going on for a while
-							if (now() - rateLimiterStartTime >
-							        1.1 * CLIENT_KNOBS->CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME &&
-							    rateLimitForThisRound != self->rateLimitMax) {
-								rateLimitForThisRound = self->rateLimitMax;
+							if (now() - rateLimiterStartTime > 1.1 * targetInterval &&
+							    rateLimitForThisRound != maxRate) {
+								rateLimitForThisRound = self->maxRate;
 								rateLimiter = Reference<IRateControl>(new SpeedLimit(rateLimitForThisRound, 1));
 								rateLimiterStartTime = now();
 								TraceEvent(SevInfo, "ConsistencyCheck_RateLimitSetMaxForThisRound")

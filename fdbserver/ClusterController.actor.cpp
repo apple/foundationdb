@@ -775,7 +775,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	if (newColocMap[newRKProcessId] <= currColocMap[currRKProcessId] &&
 	    newColocMap[newDDProcessId] <= currColocMap[currDDProcessId] &&
 	    newColocMap[newBMProcessId] <= currColocMap[currBMProcessId] &&
-		newColocMap[newEKPProcessId] <= currColocMap[currEKPProcessId] &&
+	    newColocMap[newEKPProcessId] <= currColocMap[currEKPProcessId] &&
 	    newColocMap[newCKProcessId] <= currColocMap[currCKProcessId]) {
 		// rerecruit the singleton for which we have found a better process, if any
 		if (newColocMap[newRKProcessId] < currColocMap[currRKProcessId]) {
@@ -2255,8 +2255,7 @@ ACTOR Future<Void> monitorConsistencyChecker(ClusterControllerData* self) {
 
 	TraceEvent("CCMonitorConsistencyChecker", self->id).log();
 	loop {
-		if (self->db.serverInfo->get().consistencyChecker.present()
-		    && !self->recruitConsistencyChecker.get()) {
+		if (self->db.serverInfo->get().consistencyChecker.present() && !self->recruitConsistencyChecker.get()) {
 			// TODO: NEELAM: check
 			if (!self->db.config.consistencyScanEnabled) {
 				TraceEvent("CCConsistencyCheckerHalting", self->id)
