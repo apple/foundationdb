@@ -102,6 +102,13 @@ func (o NetworkOptions) SetTraceFileIdentifier(param string) error {
 	return o.setOpt(36, []byte(param))
 }
 
+// Set file suffix for partially written log files.
+//
+// Parameter: Append this suffix to partially written log files. When a log file is complete, it is renamed to remove the suffix. No separator is added between the file and the suffix. If you want to add a file extension, you should include the separator - e.g. '.tmp' instead of 'tmp' to add the 'tmp' extension.
+func (o NetworkOptions) SetTracePartialFileSuffix(param string) error {
+	return o.setOpt(39, []byte(param))
+}
+
 // Set internal tuning or debugging knobs
 //
 // Parameter: knob_name=knob_value
@@ -271,6 +278,13 @@ func (o NetworkOptions) SetClientBuggifySectionFiredProbability(param int64) err
 	return o.setOpt(83, int64ToBytes(param))
 }
 
+// Set a tracer to run on the client. Should be set to the same value as the tracer set on the server.
+//
+// Parameter: Distributed tracer type. Choose from none, log_file, or network_lossy
+func (o NetworkOptions) SetDistributedClientTracer(param string) error {
+	return o.setOpt(90, []byte(param))
+}
+
 // Set the size of the client location cache. Raising this value can boost performance in very large databases where clients access data in a near-random pattern. Defaults to 100000.
 //
 // Parameter: Max location cache entries
@@ -349,9 +363,24 @@ func (o DatabaseOptions) SetTransactionCausalReadRisky() error {
 	return o.setOpt(504, nil)
 }
 
-// Addresses returned by get_addresses_for_key include the port when enabled. As of api version 630, this option is enabled by default and setting this has no effect.
+// Deprecated. Addresses returned by get_addresses_for_key include the port when enabled. As of api version 630, this option is enabled by default and setting this has no effect.
 func (o DatabaseOptions) SetTransactionIncludePortInAddress() error {
 	return o.setOpt(505, nil)
+}
+
+// Allows ``get`` operations to read from sections of keyspace that have become unreadable because of versionstamp operations. This sets the ``bypass_unreadable`` option of each transaction created by this database. See the transaction option description for more information.
+func (o DatabaseOptions) SetTransactionBypassUnreadable() error {
+	return o.setOpt(700, nil)
+}
+
+// Use configuration database.
+func (o DatabaseOptions) SetUseConfigDatabase() error {
+	return o.setOpt(800, nil)
+}
+
+// An integer between 0 and 100 (default is 0) expressing the probability that a client will verify it can't read stale data whenever it detects a recovery.
+func (o DatabaseOptions) SetTestCausalReadRisky() error {
+	return o.setOpt(900, nil)
 }
 
 // The transaction, if not self-conflicting, may be committed a second time after commit succeeds, in the event of a fault
@@ -379,7 +408,7 @@ func (o TransactionOptions) SetNextWriteNoWriteConflictRange() error {
 	return o.setOpt(30, nil)
 }
 
-// Reads performed by a transaction will not see any prior mutations that occured in that transaction, instead seeing the value which was in the database at the transaction's read version. This option may provide a small performance benefit for the client, but also disables a number of client-side optimizations which are beneficial for transactions which tend to read and write the same keys within a single transaction.
+// Reads performed by a transaction will not see any prior mutations that occured in that transaction, instead seeing the value which was in the database at the transaction's read version. This option may provide a small performance benefit for the client, but also disables a number of client-side optimizations which are beneficial for transactions which tend to read and write the same keys within a single transaction. It is an error to set this option after performing any reads or writes on the transaction.
 func (o TransactionOptions) SetReadYourWritesDisable() error {
 	return o.setOpt(51, nil)
 }
@@ -419,14 +448,19 @@ func (o TransactionOptions) SetInitializeNewDatabase() error {
 	return o.setOpt(300, nil)
 }
 
-// Allows this transaction to read and modify system keys (those that start with the byte 0xFF)
+// Allows this transaction to read and modify system keys (those that start with the byte 0xFF). Implies raw_access.
 func (o TransactionOptions) SetAccessSystemKeys() error {
 	return o.setOpt(301, nil)
 }
 
-// Allows this transaction to read system keys (those that start with the byte 0xFF)
+// Allows this transaction to read system keys (those that start with the byte 0xFF). Implies raw_access.
 func (o TransactionOptions) SetReadSystemKeys() error {
 	return o.setOpt(302, nil)
+}
+
+// Allows this transaction to access the raw key-space when tenant mode is on.
+func (o TransactionOptions) SetRawAccess() error {
+	return o.setOpt(303, nil)
 }
 
 // Not yet implemented.
@@ -533,6 +567,11 @@ func (o TransactionOptions) SetSpecialKeySpaceRelaxed() error {
 	return o.setOpt(713, nil)
 }
 
+// By default, users are not allowed to write to special keys. Enable this option will implicitly enable all options required to achieve the configuration change.
+func (o TransactionOptions) SetSpecialKeySpaceEnableWrites() error {
+	return o.setOpt(714, nil)
+}
+
 // Adds a tag to the transaction that can be used to apply manual targeted throttling. At most 5 tags can be set on a transaction.
 //
 // Parameter: String identifier used to associated this transaction with a throttling group. Must not exceed 16 characters.
@@ -545,6 +584,28 @@ func (o TransactionOptions) SetTag(param string) error {
 // Parameter: String identifier used to associated this transaction with a throttling group. Must not exceed 16 characters.
 func (o TransactionOptions) SetAutoThrottleTag(param string) error {
 	return o.setOpt(801, []byte(param))
+}
+
+// Adds a parent to the Span of this transaction. Used for transaction tracing. A span can be identified with any 16 bytes
+//
+// Parameter: A byte string of length 16 used to associate the span of this transaction with a parent
+func (o TransactionOptions) SetSpanParent(param []byte) error {
+	return o.setOpt(900, param)
+}
+
+// Asks storage servers for how many bytes a clear key range contains. Otherwise uses the location cache to roughly estimate this.
+func (o TransactionOptions) SetExpensiveClearCostEstimationEnable() error {
+	return o.setOpt(1000, nil)
+}
+
+// Allows ``get`` operations to read from sections of keyspace that have become unreadable because of versionstamp operations. These reads will view versionstamp operations as if they were set operations that did not fill in the versionstamp.
+func (o TransactionOptions) SetBypassUnreadable() error {
+	return o.setOpt(1100, nil)
+}
+
+// Allows this transaction to use cached GRV from the database context. Defaults to off. Upon first usage, starts a background updater to periodically update the cache to avoid stale read versions.
+func (o TransactionOptions) SetUseGrvCache() error {
+	return o.setOpt(1101, nil)
 }
 
 type StreamingMode int
@@ -561,13 +622,13 @@ const (
 	// minimize costs if the client doesn't read the entire range), and as the
 	// caller iterates over more items in the range larger batches will be
 	// transferred in order to minimize latency. After enough iterations, the
-	// iterator mode will eventually reach the same byte limit as ``WANT_ALL``
+	// iterator mode will eventually reach the same byte limit as “WANT_ALL“
 	StreamingModeIterator StreamingMode = 0
 
 	// Infrequently used. The client has passed a specific row limit and wants
 	// that many rows delivered in a single batch. Because of iterator operation
 	// in client drivers make request batches transparent to the user, consider
-	// ``WANT_ALL`` StreamingMode instead. A row limit must be specified if this
+	// “WANT_ALL“ StreamingMode instead. A row limit must be specified if this
 	// mode is used.
 	StreamingModeExact StreamingMode = 1
 
@@ -684,15 +745,15 @@ type ErrorPredicate int
 
 const (
 
-	// Returns ``true`` if the error indicates the operations in the transactions
+	// Returns “true“ if the error indicates the operations in the transactions
 	// should be retried because of transient error.
 	ErrorPredicateRetryable ErrorPredicate = 50000
 
-	// Returns ``true`` if the error indicates the transaction may have succeeded,
+	// Returns “true“ if the error indicates the transaction may have succeeded,
 	// though not in a way the system can verify.
 	ErrorPredicateMaybeCommitted ErrorPredicate = 50001
 
-	// Returns ``true`` if the error indicates the transaction has not committed,
+	// Returns “true“ if the error indicates the transaction has not committed,
 	// though in a way that can be retried.
 	ErrorPredicateRetryableNotCommitted ErrorPredicate = 50002
 )

@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2021 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -183,6 +183,7 @@ ACTOR Future<Void> GlobalConfig::refresh(GlobalConfig* self) {
 	self->erase(KeyRangeRef(""_sr, "\xff"_sr));
 
 	Transaction tr(self->cx);
+	tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 	RangeResult result = wait(tr.getRange(globalConfigDataKeys, CLIENT_KNOBS->TOO_MANY));
 	for (const auto& kv : result) {
 		KeyRef systemKey = kv.key.removePrefix(globalConfigKeysPrefix);

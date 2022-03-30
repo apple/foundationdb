@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2020 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -90,6 +90,14 @@ void Future::cancel() {
 	return fdb_future_get_keyvalue_array(future_, out_kv, out_count, out_more);
 }
 
+// MappedKeyValueArrayFuture
+
+[[nodiscard]] fdb_error_t MappedKeyValueArrayFuture::get(const FDBMappedKeyValue** out_kv,
+                                                         int* out_count,
+                                                         fdb_bool_t* out_more) {
+	return fdb_future_get_mappedkeyvalue_array(future_, out_kv, out_count, out_more);
+}
+
 // Result
 
 Result::~Result() {
@@ -122,10 +130,30 @@ EmptyFuture Database::create_snapshot(FDBDatabase* db,
 	return EmptyFuture(fdb_database_create_snapshot(db, uid, uid_length, snap_command, snap_command_length));
 }
 
-// Transaction
+// Tenant
+Tenant::Tenant(FDBDatabase* db, const uint8_t* name, int name_length) {
+	if (fdb_error_t err = fdb_database_open_tenant(db, name, name_length, &tenant)) {
+		std::cerr << fdb_get_error(err) << std::endl;
+		std::abort();
+	}
+}
 
+Tenant::~Tenant() {
+	if (tenant != nullptr) {
+		fdb_tenant_destroy(tenant);
+	}
+}
+
+// Transaction
 Transaction::Transaction(FDBDatabase* db) {
 	if (fdb_error_t err = fdb_database_create_transaction(db, &tr_)) {
+		std::cerr << fdb_get_error(err) << std::endl;
+		std::abort();
+	}
+}
+
+Transaction::Transaction(Tenant& tenant) {
+	if (fdb_error_t err = fdb_tenant_create_transaction(tenant.tenant, &tr_)) {
 		std::cerr << fdb_get_error(err) << std::endl;
 		std::abort();
 	}
@@ -210,7 +238,7 @@ KeyValueArrayFuture Transaction::get_range(const uint8_t* begin_key_name,
 	                                                     reverse));
 }
 
-KeyValueArrayFuture Transaction::get_range_and_flat_map(const uint8_t* begin_key_name,
+MappedKeyValueArrayFuture Transaction::get_mapped_range(const uint8_t* begin_key_name,
                                                         int begin_key_name_length,
                                                         fdb_bool_t begin_or_equal,
                                                         int begin_offset,
@@ -226,7 +254,7 @@ KeyValueArrayFuture Transaction::get_range_and_flat_map(const uint8_t* begin_key
                                                         int iteration,
                                                         fdb_bool_t snapshot,
                                                         fdb_bool_t reverse) {
-	return KeyValueArrayFuture(fdb_transaction_get_range_and_flat_map(tr_,
+	return MappedKeyValueArrayFuture(fdb_transaction_get_mapped_range(tr_,
 	                                                                  begin_key_name,
 	                                                                  begin_key_name_length,
 	                                                                  begin_or_equal,

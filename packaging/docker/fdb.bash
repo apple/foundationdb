@@ -5,7 +5,7 @@
 #
 # This source file is part of the FoundationDB open source project
 #
-# Copyright 2013-2021 Apple Inc. and the FoundationDB project authors
+# Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -63,6 +63,6 @@ function create_server_environment() {
 create_server_environment
 source /var/fdb/.fdbenv
 echo "Starting FDB server on $PUBLIC_IP:$FDB_PORT"
-fdbserver --listen_address 0.0.0.0:"$FDB_PORT" --public_address "$PUBLIC_IP:$FDB_PORT" \
+fdbserver --listen-address 0.0.0.0:"$FDB_PORT" --public-address "$PUBLIC_IP:$FDB_PORT" \
     --datadir /var/fdb/data --logdir /var/fdb/logs \
-    --locality_zoneid="$(hostname)" --locality_machineid="$(hostname)" --class "$FDB_PROCESS_CLASS"
+    --locality-zoneid="$(hostname)" --locality-machineid="$(hostname)" --class "$FDB_PROCESS_CLASS"

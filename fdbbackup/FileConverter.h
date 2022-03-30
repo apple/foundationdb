@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2019 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -46,6 +46,7 @@ enum {
 	OPT_HEX_KEY_PREFIX,
 	OPT_BEGIN_VERSION_FILTER,
 	OPT_END_VERSION_FILTER,
+	OPT_KNOB,
 	OPT_HELP
 };
 
@@ -58,20 +59,21 @@ CSimpleOpt::SOption gConverterOptions[] = { { OPT_CONTAINER, "-r", SO_REQ_SEP },
 	                                        { OPT_END_VERSION, "--end", SO_REQ_SEP },
 	                                        { OPT_TRACE, "--log", SO_NONE },
 	                                        { OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
-	                                        { OPT_TRACE_FORMAT, "--trace_format", SO_REQ_SEP },
+	                                        { OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
 	                                        { OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
 	                                        { OPT_INPUT_FILE, "-i", SO_REQ_SEP },
 	                                        { OPT_INPUT_FILE, "--input", SO_REQ_SEP },
-	                                        { OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
+	                                        { OPT_BLOB_CREDENTIALS, "--blob-credentials", SO_REQ_SEP },
 #ifndef TLS_DISABLED
 	                                        TLS_OPTION_FLAGS
 #endif
-	                                        { OPT_BUILD_FLAGS, "--build_flags", SO_NONE },
-	                                        { OPT_LIST_ONLY, "--list_only", SO_NONE },
+	                                        { OPT_BUILD_FLAGS, "--build-flags", SO_NONE },
+	                                        { OPT_LIST_ONLY, "--list-only", SO_NONE },
 	                                        { OPT_KEY_PREFIX, "-k", SO_REQ_SEP },
-	                                        { OPT_HEX_KEY_PREFIX, "--hex_prefix", SO_REQ_SEP },
-	                                        { OPT_BEGIN_VERSION_FILTER, "--begin_version_filter", SO_REQ_SEP },
-	                                        { OPT_END_VERSION_FILTER, "--end_version_filter", SO_REQ_SEP },
+	                                        { OPT_HEX_KEY_PREFIX, "--hex-prefix", SO_REQ_SEP },
+	                                        { OPT_BEGIN_VERSION_FILTER, "--begin-version-filter", SO_REQ_SEP },
+	                                        { OPT_END_VERSION_FILTER, "--end-version-filter", SO_REQ_SEP },
+	                                        { OPT_KNOB, "--knob-", SO_REQ_SEP },
 	                                        { OPT_HELP, "-?", SO_NONE },
 	                                        { OPT_HELP, "-h", SO_NONE },
 	                                        { OPT_HELP, "--help", SO_NONE },

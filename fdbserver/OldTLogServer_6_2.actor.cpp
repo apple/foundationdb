@@ -4,7 +4,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1908,8 +1908,8 @@ ACTOR Future<Void> tLogPeekStream(TLogData* self, TLogPeekStreamRequest req, Ref
 		} catch (Error& e) {
 			self->activePeekStreams--;
 			TraceEvent(SevDebug, "TLogPeekStreamEnd", logData->logId)
-			    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress())
-			    .error(e, true);
+			    .errorUnsuppressed(e)
+			    .detail("PeerAddr", req.reply.getEndpoint().getPrimaryAddress());
 
 			if (e.code() == error_code_end_of_stream || e.code() == error_code_operation_obsolete) {
 				req.reply.sendError(e);
@@ -2174,12 +2174,12 @@ ACTOR Future<Void> initPersistentState(TLogData* self, Reference<LogData> logDat
 	return Void();
 }
 
-ACTOR Future<Void> rejoinMasters(TLogData* self,
-                                 TLogInterface tli,
-                                 DBRecoveryCount recoveryCount,
-                                 Future<Void> registerWithMaster,
-                                 bool isPrimary) {
-	state UID lastMasterID(0, 0);
+ACTOR Future<Void> rejoinClusterController(TLogData* self,
+                                           TLogInterface tli,
+                                           DBRecoveryCount recoveryCount,
+                                           Future<Void> registerWithCC,
+                                           bool isPrimary) {
+	state LifetimeToken lastMasterLifetime;
 	loop {
 		auto const& inf = self->dbInfo->get();
 		bool isDisplaced =
@@ -2207,17 +2207,20 @@ ACTOR Future<Void> rejoinMasters(TLogData* self,
 			throw worker_removed();
 		}
 
-		if (registerWithMaster.isReady()) {
-			if (self->dbInfo->get().master.id() != lastMasterID) {
+		if (registerWithCC.isReady()) {
+			if (!lastMasterLifetime.isEqual(self->dbInfo->get().masterLifetime)) {
 				// The TLogRejoinRequest is needed to establish communications with a new master, which doesn't have our
 				// TLogInterface
 				TLogRejoinRequest req(tli);
-				TraceEvent("TLogRejoining", tli.id()).detail("Master", self->dbInfo->get().master.id());
+				TraceEvent("TLogRejoining", tli.id())
+				    .detail("ClusterController", self->dbInfo->get().clusterInterface.id())
+				    .detail("DbInfoMasterLifeTime", self->dbInfo->get().masterLifetime.toString())
+				    .detail("LastMasterLifeTime", lastMasterLifetime.toString());
 				choose {
-					when(TLogRejoinReply rep =
-					         wait(brokenPromiseToNever(self->dbInfo->get().master.tlogRejoin.getReply(req)))) {
+					when(TLogRejoinReply rep = wait(
+					         brokenPromiseToNever(self->dbInfo->get().clusterInterface.tlogRejoin.getReply(req)))) {
 						if (rep.masterIsRecovered)
-							lastMasterID = self->dbInfo->get().master.id();
+							lastMasterLifetime = self->dbInfo->get().masterLifetime;
 					}
 					when(wait(self->dbInfo->onChange())) {}
 				}
@@ -2225,7 +2228,7 @@ ACTOR Future<Void> rejoinMasters(TLogData* self,
 				wait(self->dbInfo->onChange());
 			}
 		} else {
-			wait(registerWithMaster || self->dbInfo->onChange());
+			wait(registerWithCC || self->dbInfo->onChange());
 		}
 	}
 }
@@ -2354,7 +2357,7 @@ ACTOR Future<Void> tLogSnapCreate(TLogSnapRequest snapReq, TLogData* self, Refer
 		}
 		snapReq.reply.send(Void());
 	} catch (Error& e) {
-		TraceEvent("TLogExecHelperError").error(e, true /*includeCancelled */);
+		TraceEvent("TLogExecHelperError").errorUnsuppressed(e);
 		if (e.code() != error_code_operation_cancelled) {
 			snapReq.reply.sendError(e);
 		} else {
@@ -2528,7 +2531,7 @@ void removeLog(TLogData* self, Reference<LogData> logData) {
 	}
 }
 
-// copy data from old gene to new gene without desiarlzing
+// copy data from old gene to new gene without deserializing
 ACTOR Future<Void> pullAsyncData(TLogData* self,
                                  Reference<LogData> logData,
                                  std::vector<Tag> tags,
@@ -2846,7 +2849,7 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 	}
 
 	state int idx = 0;
-	state Promise<Void> registerWithMaster;
+	state Promise<Void> registerWithCC;
 	state std::map<UID, TLogInterface> id_interf;
 	state std::vector<std::pair<Version, UID>> logsByVersion;
 	for (idx = 0; idx < fVers.get().size(); idx++) {
@@ -2894,7 +2897,7 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 		logData->recoveryCount =
 		    BinaryReader::fromStringRef<DBRecoveryCount>(fRecoverCounts.get()[idx].value, Unversioned());
 		logData->removed =
-		    rejoinMasters(self, recruited, logData->recoveryCount, registerWithMaster.getFuture(), false);
+		    rejoinClusterController(self, recruited, logData->recoveryCount, registerWithCC.getFuture(), false);
 		removed.push_back(errorOr(logData->removed));
 		logsByVersion.emplace_back(ver, id1);
 
@@ -3017,8 +3020,8 @@ ACTOR Future<Void> restorePersistentState(TLogData* self,
 		self->sharedActors.send(tLogCore(self, it.second, id_interf[it.first], false));
 	}
 
-	if (registerWithMaster.canBeSet())
-		registerWithMaster.send(Void());
+	if (registerWithCC.canBeSet())
+		registerWithCC.send(Void());
 	return Void();
 }
 
@@ -3035,7 +3038,7 @@ bool tlogTerminated(TLogData* self, IKeyValueStore* persistentData, TLogQueue* p
 
 	if (e.code() == error_code_worker_removed || e.code() == error_code_recruitment_failed ||
 	    e.code() == error_code_file_not_found) {
-		TraceEvent("TLogTerminated", self->dbgid).error(e, true);
+		TraceEvent("TLogTerminated", self->dbgid).errorUnsuppressed(e);
 		return true;
 	} else
 		return false;
@@ -3135,7 +3138,7 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 	self->id_data[recruited.id()] = logData;
 	logData->locality = req.locality;
 	logData->recoveryCount = req.epoch;
-	logData->removed = rejoinMasters(self, recruited, req.epoch, Future<Void>(Void()), req.isPrimary);
+	logData->removed = rejoinClusterController(self, recruited, req.epoch, Future<Void>(Void()), req.isPrimary);
 	self->popOrder.push_back(recruited.id());
 	self->spillOrder.push_back(recruited.id());
 
@@ -3333,7 +3336,7 @@ ACTOR Future<Void> tLog(IKeyValueStore* persistentData,
 		}
 	} catch (Error& e) {
 		self.terminated.send(Void());
-		TraceEvent("TLogError", tlogId).error(e, true);
+		TraceEvent("TLogError", tlogId).errorUnsuppressed(e);
 		if (recovered.canBeSet())
 			recovered.send(Void());
 

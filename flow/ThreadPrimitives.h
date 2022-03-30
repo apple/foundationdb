@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -64,8 +64,10 @@ public:
 	}
 	void enter() {
 		while (isLocked.test_and_set(std::memory_order_acquire))
-#ifdef __aarch64__
+#if defined(__aarch64__)
 			__asm__ volatile("isb");
+#elif defined(__powerpc64__)
+			__asm__ volatile("or 27,27,27" ::: "memory");
 #else
 			_mm_pause();
 #endif

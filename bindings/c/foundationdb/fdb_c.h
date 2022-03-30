@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -67,6 +67,7 @@ extern "C" {
 typedef struct FDB_future FDBFuture;
 typedef struct FDB_result FDBResult;
 typedef struct FDB_database FDBDatabase;
+typedef struct FDB_tenant FDBTenant;
 typedef struct FDB_transaction FDBTransaction;
 
 typedef int fdb_error_t;
@@ -113,6 +114,64 @@ typedef struct keyvalue {
 	int value_length;
 } FDBKeyValue;
 #endif
+
+#pragma pack(pop)
+
+/* Memory layout of KeySelectorRef. */
+typedef struct keyselector {
+	FDBKey key;
+	/* orEqual and offset have not be tested in C binding. Just a placeholder. */
+	fdb_bool_t orEqual;
+	int offset;
+} FDBKeySelector;
+
+/* Memory layout of GetRangeReqAndResultRef. */
+typedef struct getrangereqandresult {
+	FDBKeySelector begin;
+	FDBKeySelector end;
+	FDBKeyValue* data;
+	int m_size, m_capacity;
+} FDBGetRangeReqAndResult;
+
+/* Memory layout of MappedKeyValueRef.
+
+Total 112 bytes
+- key (12 bytes)
+:74:8F:8E:5F:AE:7F:00:00
+:4A:00:00:00
+- value (12 bytes)
+:70:8F:8E:5F:AE:7F:00:00
+:00:00:00:00
+- begin selector (20 bytes)
+:30:8F:8E:5F:AE:7F:00:00
+:2D:00:00:00
+:00:7F:00:00
+:01:00:00:00
+- end selector (20 bytes)
+:EC:8E:8E:5F:AE:7F:00:00
+:2D:00:00:00
+:00:2B:3C:60
+:01:00:00:00
+- vector (16 bytes)
+:74:94:8E:5F:AE:7F:00:00
+:01:00:00:00
+:01:00:00:00
+- buffer (32 bytes)
+:00:20:D1:61:00:00:00:00
+:00:00:00:00:00:00:00:00
+:00:00:00:00:00:00:00:00
+:01:00:00:00:AE:7F:00:00
+*/
+typedef struct mappedkeyvalue {
+	FDBKey key;
+	FDBKey value;
+	/* It's complicated to map a std::variant to C. For now we assume the underlying requests are always getRange and
+	 * take the shortcut. */
+	FDBGetRangeReqAndResult getRange;
+	unsigned char buffer[32];
+} FDBMappedKeyValue;
+
+#pragma pack(push, 4)
 typedef struct keyrange {
 	const uint8_t* begin_key;
 	int begin_key_length;
@@ -126,7 +185,12 @@ typedef struct readgranulecontext {
 	void* userContext;
 
 	/* Returns a unique id for the load. Asynchronous to support queueing multiple in parallel. */
-	int64_t (*start_load_f)(const char* filename, int filenameLength, int64_t offset, int64_t length, void* context);
+	int64_t (*start_load_f)(const char* filename,
+	                        int filenameLength,
+	                        int64_t offset,
+	                        int64_t length,
+	                        int64_t fullFileLength,
+	                        void* context);
 
 	/* Returns data for the load. Pass the loadId returned by start_load_f */
 	uint8_t* (*get_load_f)(int64_t loadId, void* context);
@@ -137,6 +201,9 @@ typedef struct readgranulecontext {
 	/* Set this to true for testing if you don't want to read the granule files,
 	   just do the request to the blob workers */
 	fdb_bool_t debugNoMaterialize;
+
+	/* Number of granules to load in parallel */
+	int granuleParallelism;
 } FDBReadBlobGranuleContext;
 
 DLLEXPORT void fdb_future_cancel(FDBFuture* f);
@@ -176,6 +243,12 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_keyvalue_array(FDBFuture
                                                                        int* out_count,
                                                                        fdb_bool_t* out_more);
 #endif
+
+DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_mappedkeyvalue_array(FDBFuture* f,
+                                                                             FDBMappedKeyValue const** out_kv,
+                                                                             int* out_count,
+                                                                             fdb_bool_t* out_more);
+
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_key_array(FDBFuture* f,
                                                                   FDBKey const** out_key_array,
                                                                   int* out_count);
@@ -207,6 +280,11 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_database_set_option(FDBDatabase* d,
                                                                  uint8_t const* value,
                                                                  int value_length);
 
+DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_database_open_tenant(FDBDatabase* d,
+                                                                  uint8_t const* tenant_name,
+                                                                  int tenant_name_length,
+                                                                  FDBTenant** out_tenant);
+
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_database_create_transaction(FDBDatabase* d,
                                                                          FDBTransaction** out_transaction);
 
@@ -229,6 +307,11 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_create_snapshot(FDBDatabase
 DLLEXPORT WARN_UNUSED_RESULT double fdb_database_get_main_thread_busyness(FDBDatabase* db);
 
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_get_server_protocol(FDBDatabase* db, uint64_t expected_version);
+
+DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_tenant_create_transaction(FDBTenant* tenant,
+                                                                       FDBTransaction** out_transaction);
+
+DLLEXPORT void fdb_tenant_destroy(FDBTenant* tenant);
 
 DLLEXPORT void fdb_transaction_destroy(FDBTransaction* tr);
 
@@ -283,23 +366,23 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_range(FDBTransaction
                                                                   fdb_bool_t reverse);
 #endif
 
-DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_range_and_flat_map(FDBTransaction* tr,
-                                                                               uint8_t const* begin_key_name,
-                                                                               int begin_key_name_length,
-                                                                               fdb_bool_t begin_or_equal,
-                                                                               int begin_offset,
-                                                                               uint8_t const* end_key_name,
-                                                                               int end_key_name_length,
-                                                                               fdb_bool_t end_or_equal,
-                                                                               int end_offset,
-                                                                               uint8_t const* mapper_name,
-                                                                               int mapper_name_length,
-                                                                               int limit,
-                                                                               int target_bytes,
-                                                                               FDBStreamingMode mode,
-                                                                               int iteration,
-                                                                               fdb_bool_t snapshot,
-                                                                               fdb_bool_t reverse);
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_mapped_range(FDBTransaction* tr,
+                                                                         uint8_t const* begin_key_name,
+                                                                         int begin_key_name_length,
+                                                                         fdb_bool_t begin_or_equal,
+                                                                         int begin_offset,
+                                                                         uint8_t const* end_key_name,
+                                                                         int end_key_name_length,
+                                                                         fdb_bool_t end_or_equal,
+                                                                         int end_offset,
+                                                                         uint8_t const* mapper_name,
+                                                                         int mapper_name_length,
+                                                                         int limit,
+                                                                         int target_bytes,
+                                                                         FDBStreamingMode mode,
+                                                                         int iteration,
+                                                                         fdb_bool_t snapshot,
+                                                                         fdb_bool_t reverse);
 
 DLLEXPORT void fdb_transaction_set(FDBTransaction* tr,
                                    uint8_t const* key_name,
@@ -366,15 +449,15 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_range_split_points(F
                                                                                int end_key_name_length,
                                                                                int64_t chunk_size);
 
-DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_blob_granule_ranges(FDBTransaction* db,
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_blob_granule_ranges(FDBTransaction* tr,
                                                                                 uint8_t const* begin_key_name,
                                                                                 int begin_key_name_length,
                                                                                 uint8_t const* end_key_name,
                                                                                 int end_key_name_length);
 
-/* InvalidVersion (-1) for readVersion means get read version from transaction
+/* LatestVersion (-2) for readVersion means get read version from transaction
    Separated out as optional because BG reads can support longer-lived reads than normal FDB transactions */
-DLLEXPORT WARN_UNUSED_RESULT FDBResult* fdb_transaction_read_blob_granules(FDBTransaction* db,
+DLLEXPORT WARN_UNUSED_RESULT FDBResult* fdb_transaction_read_blob_granules(FDBTransaction* tr,
                                                                            uint8_t const* begin_key_name,
                                                                            int begin_key_name_length,
                                                                            uint8_t const* end_key_name,

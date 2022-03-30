@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@
 #include "flow/Trace.h"
 #include "flow/Error.h"
 #include "flow/Knobs.h"
+#include "flow/UnitTest.h"
 #include "flow/crc32c.h"
 #include "flow/flow.h"
 
@@ -72,10 +73,13 @@
 #endif
 
 template <int Size>
-INIT_SEG thread_local typename FastAllocator<Size>::ThreadData FastAllocator<Size>::threadData;
+INIT_SEG thread_local typename FastAllocator<Size>::ThreadDataInit FastAllocator<Size>::threadDataInit;
 
 template <int Size>
-thread_local bool FastAllocator<Size>::threadInitialized = false;
+typename FastAllocator<Size>::ThreadData& FastAllocator<Size>::threadData() noexcept {
+	static thread_local ThreadData threadData;
+	return threadData;
+}
 
 #ifdef VALGRIND
 template <int Size>
@@ -107,14 +111,6 @@ bool valgrindPrecise() {
 
 template <int Size>
 void* FastAllocator<Size>::freelist = nullptr;
-
-typedef void (*ThreadInitFunction)();
-
-ThreadInitFunction threadInitFunction = 0; // See ThreadCleanup.cpp in the C binding
-void setFastAllocatorThreadInitFunction(ThreadInitFunction f) {
-	ASSERT(!threadInitFunction);
-	threadInitFunction = f;
-}
 
 std::atomic<int64_t> g_hugeArenaMemory(0);
 
@@ -310,9 +306,6 @@ static int64_t getSizeCode(int i) {
 
 template <int Size>
 void* FastAllocator<Size>::allocate() {
-	if (!threadInitialized) {
-		initThread();
-	}
 
 #if defined(USE_GPERFTOOLS) || defined(ADDRESS_SANITIZER)
 	// Some usages of FastAllocator require 4096 byte alignment.
@@ -327,7 +320,7 @@ void* FastAllocator<Size>::allocate() {
 #endif
 
 #if FASTALLOC_THREAD_SAFE
-	ThreadData& thr = threadData;
+	ThreadData& thr = threadData();
 	if (!thr.freelist) {
 		ASSERT(thr.count == 0);
 		if (thr.alternate) {
@@ -366,9 +359,6 @@ void* FastAllocator<Size>::allocate() {
 
 template <int Size>
 void FastAllocator<Size>::release(void* ptr) {
-	if (!threadInitialized) {
-		initThread();
-	}
 
 #if defined(USE_GPERFTOOLS) || defined(ADDRESS_SANITIZER)
 	return aligned_free(ptr);
@@ -381,7 +371,7 @@ void FastAllocator<Size>::release(void* ptr) {
 #endif
 
 #if FASTALLOC_THREAD_SAFE
-	ThreadData& thr = threadData;
+	ThreadData& thr = threadData();
 	if (thr.count == magazine_size) {
 		if (thr.alternate) // Two full magazines, return one
 			releaseMagazine(thr.alternate);
@@ -462,39 +452,33 @@ void FastAllocator<Size>::check(void* ptr, bool alloc) {
 }
 
 template <int Size>
-void FastAllocator<Size>::initThread() {
-	threadInitialized = true;
-	if (threadInitFunction) {
-		threadInitFunction();
-	}
-
+FastAllocator<Size>::ThreadData::ThreadData() {
 	globalData()->activeThreads.fetch_add(1);
-
-	threadData.freelist = nullptr;
-	threadData.alternate = nullptr;
-	threadData.count = 0;
+	freelist = nullptr;
+	alternate = nullptr;
+	count = 0;
 }
 
 template <int Size>
 void FastAllocator<Size>::getMagazine() {
-	ASSERT(threadInitialized);
-	ASSERT(!threadData.freelist && !threadData.alternate && threadData.count == 0);
+	ThreadData& thr = threadData();
+	ASSERT(!thr.freelist && !thr.alternate && thr.count == 0);
 
 	EnterCriticalSection(&globalData()->mutex);
 	if (globalData()->magazines.size()) {
 		void* m = globalData()->magazines.back();
 		globalData()->magazines.pop_back();
 		LeaveCriticalSection(&globalData()->mutex);
-		threadData.freelist = m;
-		threadData.count = magazine_size;
+		thr.freelist = m;
+		thr.count = magazine_size;
 		return;
 	} else if (globalData()->partial_magazines.size()) {
 		std::pair<int, void*> p = globalData()->partial_magazines.back();
 		globalData()->partial_magazines.pop_back();
 		globalData()->partialMagazineUnallocatedMemory -= p.first * Size;
 		LeaveCriticalSection(&globalData()->mutex);
-		threadData.freelist = p.second;
-		threadData.count = p.first;
+		thr.freelist = p.second;
+		thr.count = p.first;
 		return;
 	}
 	globalData()->totalMemory.fetch_add(magazine_size * Size);
@@ -527,12 +511,14 @@ void FastAllocator<Size>::getMagazine() {
 	// FIXME: We should be able to allocate larger magazine sizes here if we
 	// detect that the underlying system supports hugepages.  Using hugepages
 	// with smaller-than-2MiB magazine sizes strands memory.  See issue #909.
+#if !DEBUG_DETERMINISM
 	if (FLOW_KNOBS && g_allocation_tracing_disabled == 0 &&
 	    nondeterministicRandom()->random01() < (magazine_size * Size) / FLOW_KNOBS->FAST_ALLOC_LOGGING_BYTES) {
 		++g_allocation_tracing_disabled;
 		TraceEvent("GetMagazineSample").detail("Size", Size).backtrace();
 		--g_allocation_tracing_disabled;
 	}
+#endif
 	block = (void**)::allocate(magazine_size * Size, false);
 #endif
 
@@ -544,55 +530,32 @@ void FastAllocator<Size>::getMagazine() {
 
 	block[(magazine_size - 1) * PSize + 1] = block[(magazine_size - 1) * PSize] = nullptr;
 	check(&block[(magazine_size - 1) * PSize], false);
-	threadData.freelist = block;
-	threadData.count = magazine_size;
+	thr.freelist = block;
+	thr.count = magazine_size;
 }
 template <int Size>
 void FastAllocator<Size>::releaseMagazine(void* mag) {
-	ASSERT(threadInitialized);
 	EnterCriticalSection(&globalData()->mutex);
 	globalData()->magazines.push_back(mag);
 	LeaveCriticalSection(&globalData()->mutex);
 }
 template <int Size>
-void FastAllocator<Size>::releaseThreadMagazines() {
-	if (threadInitialized) {
-		threadInitialized = false;
-		ThreadData& thr = threadData;
-
-		EnterCriticalSection(&globalData()->mutex);
-		if (thr.freelist || thr.alternate) {
-			if (thr.freelist) {
-				ASSERT(thr.count > 0 && thr.count <= magazine_size);
-				globalData()->partial_magazines.emplace_back(thr.count, thr.freelist);
-				globalData()->partialMagazineUnallocatedMemory += thr.count * Size;
-			}
-			if (thr.alternate) {
-				globalData()->magazines.push_back(thr.alternate);
-			}
-		}
-		globalData()->activeThreads.fetch_add(-1);
-		LeaveCriticalSection(&globalData()->mutex);
-
-		thr.count = 0;
-		thr.alternate = nullptr;
-		thr.freelist = nullptr;
+FastAllocator<Size>::ThreadData::~ThreadData() {
+	EnterCriticalSection(&globalData()->mutex);
+	if (freelist) {
+		ASSERT_ABORT(count > 0 && count <= magazine_size);
+		globalData()->partial_magazines.emplace_back(count, freelist);
+		globalData()->partialMagazineUnallocatedMemory += count * Size;
 	}
-}
+	if (alternate) {
+		globalData()->magazines.push_back(alternate);
+	}
+	globalData()->activeThreads.fetch_add(-1);
+	LeaveCriticalSection(&globalData()->mutex);
 
-void releaseAllThreadMagazines() {
-	FastAllocator<16>::releaseThreadMagazines();
-	FastAllocator<32>::releaseThreadMagazines();
-	FastAllocator<64>::releaseThreadMagazines();
-	FastAllocator<96>::releaseThreadMagazines();
-	FastAllocator<128>::releaseThreadMagazines();
-	FastAllocator<256>::releaseThreadMagazines();
-	FastAllocator<512>::releaseThreadMagazines();
-	FastAllocator<1024>::releaseThreadMagazines();
-	FastAllocator<2048>::releaseThreadMagazines();
-	FastAllocator<4096>::releaseThreadMagazines();
-	FastAllocator<8192>::releaseThreadMagazines();
-	FastAllocator<16384>::releaseThreadMagazines();
+	count = 0;
+	alternate = nullptr;
+	freelist = nullptr;
 }
 
 int64_t getTotalUnusedAllocatedMemory() {
@@ -626,3 +589,30 @@ template class FastAllocator<2048>;
 template class FastAllocator<4096>;
 template class FastAllocator<8192>;
 template class FastAllocator<16384>;
+
+#ifdef USE_JEMALLOC
+#include <jemalloc/jemalloc.h>
+TEST_CASE("/jemalloc/4k_aligned_usable_size") {
+	void* ptr;
+	try {
+		// Check that we can allocate 4k aligned up to 16k with no internal
+		// fragmentation
+		for (int i = 1; i < 4; ++i) {
+			ptr = aligned_alloc(4096, i * 4096);
+			ASSERT_EQ(malloc_usable_size(ptr), i * 4096);
+			aligned_free(ptr);
+			ptr = nullptr;
+		}
+		// Also check that we can allocate magazines with no internal
+		// fragmentation, should we decide to do that.
+		ptr = aligned_alloc(4096, kFastAllocMagazineBytes);
+		ASSERT_EQ(malloc_usable_size(ptr), kFastAllocMagazineBytes);
+		aligned_free(ptr);
+		ptr = nullptr;
+	} catch (...) {
+		aligned_free(ptr);
+		throw;
+	}
+	return Void();
+}
+#endif

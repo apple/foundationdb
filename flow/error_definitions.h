@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -84,30 +84,35 @@ ERROR( change_feed_not_registered, 1060, "Change feed not registered" )
 ERROR( granule_assignment_conflict, 1061, "Conflicting attempts to assign blob granules" )
 ERROR( change_feed_cancelled, 1062, "Change feed was cancelled" )
 ERROR( blob_granule_file_load_error, 1063, "Error loading a blob file during granule materialization" )
+ERROR( blob_granule_transaction_too_old, 1064, "Read version is older than blob granule history supports" )
+ERROR( blob_manager_replaced, 1065, "This blob manager has been replaced." )
+ERROR( change_feed_popped, 1066, "Tried to read a version older than what has been popped from the change feed" )
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )
 ERROR( future_released, 1102, "Future has been released" )
 ERROR( connection_leaked, 1103, "Connection object leaked" )
+ERROR( never_reply, 1104, "Never reply to the request" )
 
 ERROR( recruitment_failed, 1200, "Recruitment of a server failed" )   // Be careful, catching this will delete the data of a storage server or tlog permanently
 ERROR( move_to_removed_server, 1201, "Attempt to move keys to a storage server that was removed" )
 ERROR( worker_removed, 1202, "Normal worker shut down" )   // Be careful, catching this will delete the data of a storage server or tlog permanently
-ERROR( master_recovery_failed, 1203, "Master recovery failed")
+ERROR( cluster_recovery_failed, 1203, "Cluster recovery failed")
 ERROR( master_max_versions_in_flight, 1204, "Master hit maximum number of versions in flight" )
-ERROR( master_tlog_failed, 1205, "Master terminating because a TLog failed" )   // similar to tlog_stopped, but the tlog has actually died
+ERROR( tlog_failed, 1205, "Cluster recovery terminating because a TLog failed" )   // similar to tlog_stopped, but the tlog has actually died
 ERROR( worker_recovery_failed, 1206, "Recovery of a worker process failed" )
 ERROR( please_reboot, 1207, "Reboot of server process requested" )
 ERROR( please_reboot_delete, 1208, "Reboot of server process requested, with deletion of state" )
 ERROR( commit_proxy_failed, 1209, "Master terminating because a CommitProxy failed" )
-ERROR( master_resolver_failed, 1210, "Master terminating because a Resolver failed" )
+ERROR( resolver_failed, 1210, "Cluster recovery terminating because a Resolver failed" )
 ERROR( server_overloaded, 1211, "Server is under too much load and cannot respond" )
-ERROR( master_backup_worker_failed, 1212, "Master terminating because a backup worker failed")
+ERROR( backup_worker_failed, 1212, "Cluster recovery terminating because a backup worker failed")
 ERROR( tag_throttled, 1213, "Transaction tag is being throttled" )
-ERROR( grv_proxy_failed, 1214, "Master terminating because a GRVProxy failed" )
+ERROR( grv_proxy_failed, 1214, "Cluster recovery terminating because a GRVProxy failed" )
 ERROR( dd_tracker_cancelled, 1215, "The data distribution tracker has been cancelled" )
 ERROR( failed_to_progress, 1216, "Process has failed to make sufficient progress" )
 ERROR( invalid_cluster_id, 1217, "Attempted to join cluster with a different cluster ID" )
+ERROR( restart_cluster_controller, 1218, "Restart cluster controller process" )
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )
@@ -169,8 +174,10 @@ ERROR( quick_get_key_values_has_more, 2033, "One of the mapped range queries is 
 ERROR( quick_get_value_miss, 2034, "Found a mapped key that is not served in the same SS" )
 ERROR( quick_get_key_values_miss, 2035, "Found a mapped range that is not served in the same SS" )
 ERROR( blob_granule_no_ryw, 2036, "Blob Granule Read Transactions must be specified as ryw-disabled" )
-ERROR( blob_granule_not_materialized, 2037, "Blob Granule Read Transactions must be specified as ryw-disabled" )
-ERROR( get_key_values_and_map_has_more, 2038, "getRangeAndFlatMap does not support continuation for now" )
+ERROR( blob_granule_not_materialized, 2037, "Blob Granule Read was not materialized" )
+ERROR( get_mapped_key_values_has_more, 2038, "getMappedRange does not support continuation for now" )
+ERROR( get_mapped_range_reads_your_writes, 2039, "getMappedRange tries to read data that were previously written in the transaction" )
+ERROR( checkpoint_not_found, 2040, "Checkpoint not found" )
 
 ERROR( incompatible_protocol_version, 2100, "Incompatible protocol version" )
 ERROR( transaction_too_large, 2101, "Transaction exceeds byte limit" )
@@ -195,6 +202,15 @@ ERROR( client_lib_already_exists, 2119, "Client library with same identifier alr
 ERROR( client_lib_not_found, 2120, "Client library for the given identifier not found." )
 ERROR( client_lib_not_available, 2121, "Client library exists, but is not available for download." )
 ERROR( client_lib_invalid_binary, 2122, "Invalid client library binary." )
+
+ERROR( tenant_name_required, 2130, "Tenant name must be specified to access data in the cluster" )
+ERROR( tenant_not_found, 2131, "Tenant does not exist" )
+ERROR( tenant_already_exists, 2132, "A tenant with the given name already exists" )
+ERROR( tenant_not_empty, 2133, "Cannot delete a non-empty tenant" )
+ERROR( invalid_tenant_name, 2134, "Tenant name cannot begin with \\xff");
+ERROR( tenant_prefix_allocator_conflict, 2135, "The database already has keys stored at the prefix allocated for the tenant");
+ERROR( tenants_disabled, 2136, "Tenants have been disabled in the cluster");
+ERROR( unknown_tenant, 2137, "Tenant is not available from this server")
 
 // 2200 - errors from bindings and official APIs
 ERROR( api_version_unset, 2200, "API version is not set" )
@@ -268,9 +284,19 @@ ERROR( snap_log_anti_quorum_unsupported, 2507, "Unsupported when log anti quorum
 ERROR( snap_with_recovery_unsupported, 2508, "Cluster recovery during snapshot operation not supported")
 ERROR( snap_invalid_uid_string, 2509, "The given uid string is not a 32-length hex string")
 
+// 3XXX - Encryption operations errors
+ERROR( encrypt_ops_error, 3000, "Encryption operation error")
+ERROR( encrypt_header_metadata_mismatch, 3001, "Encryption header metadata mismatch")
+ERROR( encrypt_key_not_found, 3002, "Expected encryption key is missing")
+ERROR( encrypt_key_ttl_expired, 3003, "Expected encryption key TTL has expired")
+ERROR( encrypt_header_checksum_mismatch, 3004, "Encryption header checksum mismatch")
+ERROR( encrypt_update_cipher, 3005, "Attempt to update encryption cipher key")
+ERROR( encrypt_invalid_id, 3006, "Invalid encryption domainId or encryption cipher key id")
+
 // 4xxx Internal errors (those that should be generated only by bugs) are decimal 4xxx
 ERROR( unknown_error, 4000, "An unknown error occurred" )  // C++ exception not of type Error
 ERROR( internal_error, 4100, "An internal error occurred" )
+ERROR( not_implemented, 4200, "Not implemented yet" )
 // clang-format on
 
 #undef ERROR

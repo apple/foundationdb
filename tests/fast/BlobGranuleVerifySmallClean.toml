@@ -1,0 +1,18 @@
+[configuration]
+blobGranulesEnabled = true
+# FIXME: exclude redwood because WriteDuringRead can write massive KV pairs and we don't chunk change feed data on disk yet
+# FIXME: re-enable rocks at some point
+storageEngineExcludeTypes = [3, 4]
+
+[[test]]
+testTitle = 'BlobGranuleVerifySmallClean'
+
+    [[test.workload]]
+    testName = 'WriteDuringRead'
+    testDuration = 60.0
+    useSystemKeys = false
+    maximumDataWritten=50000000
+
+    [[test.workload]]
+    testName = 'BlobGranuleVerifier'
+    testDuration = 60.0

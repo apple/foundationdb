@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/FDBOptions.g.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/ManagementAPI.actor.h"
@@ -50,6 +51,7 @@ struct MoveKeysWorkload : TestWorkload {
 			// Get the database configuration so as to use proper team size
 			state Transaction tr(cx);
 			loop {
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				try {
 					RangeResult res = wait(tr.getRange(configKeys, 1000));
 					ASSERT(res.size() < 1000);
@@ -154,7 +156,7 @@ struct MoveKeysWorkload : TestWorkload {
 			TraceEvent(relocateShardInterval.end()).detail("Result", "Success");
 			return Void();
 		} catch (Error& e) {
-			TraceEvent(relocateShardInterval.end(), self->dbInfo->get().master.id()).error(e, true);
+			TraceEvent(relocateShardInterval.end(), self->dbInfo->get().master.id()).errorUnsuppressed(e);
 			throw;
 		}
 	}

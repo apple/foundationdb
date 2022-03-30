@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2020 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/Knobs.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/TransactionLineage.h"
 #include "fdbserver/LogSystem.h"
@@ -26,6 +27,7 @@
 #include "fdbclient/GrvProxyInterface.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
+#include "fdbrpc/sim_validation.h"
 #include "flow/flow.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -44,6 +46,11 @@ struct GrvProxyStats {
 	// how much of the GRV requests queue was processed in one attempt to hand out read version.
 	double percentageOfDefaultGRVQueueProcessed;
 	double percentageOfBatchGRVQueueProcessed;
+
+	bool lastBatchQueueThrottled;
+	bool lastDefaultQueueThrottled;
+	double batchThrottleStartTime;
+	double defaultThrottleStartTime;
 
 	LatencySample defaultTxnGRVTimeInQueue;
 	LatencySample batchTxnGRVTimeInQueue;
@@ -97,10 +104,12 @@ struct GrvProxyStats {
 	    updatesFromRatekeeper("UpdatesFromRatekeeper", cc), leaseTimeouts("LeaseTimeouts", cc), systemGRVQueueSize(0),
 	    defaultGRVQueueSize(0), batchGRVQueueSize(0), transactionRateAllowed(0), batchTransactionRateAllowed(0),
 	    transactionLimit(0), batchTransactionLimit(0), percentageOfDefaultGRVQueueProcessed(0),
-	    percentageOfBatchGRVQueueProcessed(0), defaultTxnGRVTimeInQueue("DefaultTxnGRVTimeInQueue",
-	                                                                    id,
-	                                                                    SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                                                                    SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	    percentageOfBatchGRVQueueProcessed(0), lastBatchQueueThrottled(false), lastDefaultQueueThrottled(false),
+	    batchThrottleStartTime(0.0), defaultThrottleStartTime(0.0),
+	    defaultTxnGRVTimeInQueue("DefaultTxnGRVTimeInQueue",
+	                             id,
+	                             SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                             SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 	    batchTxnGRVTimeInQueue("BatchTxnGRVTimeInQueue",
 	                           id,
 	                           SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
@@ -589,7 +598,7 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(SpanID parentSpan,
 	return rep;
 }
 
-// Returns the current read version (or minimum known committed verison if requested),
+// Returns the current read version (or minimum known committed version if requested),
 // to each request in the provided list. Also check if the request should be throttled.
 // Update GRV statistics according to the request's priority.
 ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
@@ -647,6 +656,22 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
 			}
 		}
 
+		if (stats->lastBatchQueueThrottled) {
+			// Check if this throttling has been sustained for a certain amount of time to avoid false positives
+			if (now() - stats->batchThrottleStartTime > CLIENT_KNOBS->GRV_SUSTAINED_THROTTLING_THRESHOLD) {
+				reply.rkBatchThrottled = true;
+			}
+		}
+		if (stats->lastDefaultQueueThrottled) {
+			// Check if this throttling has been sustained for a certain amount of time to avoid false positives
+			if (now() - stats->defaultThrottleStartTime > CLIENT_KNOBS->GRV_SUSTAINED_THROTTLING_THRESHOLD) {
+				// Consider the batch queue throttled if the default is throttled
+				// to deal with a potential lull in activity for that priority.
+				// Avoids mistakenly thinking batch is unthrottled while default is still throttled.
+				reply.rkBatchThrottled = true;
+				reply.rkDefaultThrottled = true;
+			}
+		}
 		request.reply.send(reply);
 		++stats->txnRequestOut;
 	}
@@ -838,11 +863,26 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 				grvProxyData->stats.batchTxnGRVTimeInQueue.addMeasurement(currentTime - req.requestTime());
 				--grvProxyData->stats.batchGRVQueueSize;
 			}
-
 			start[req.flags & 1].push_back(std::move(req));
 			static_assert(GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY == 1, "Implementation dependent on flag value");
 			transactionQueue->pop_front();
 			requestsToStart++;
+		}
+		if (!batchQueue.empty()) {
+			if (!grvProxyData->stats.lastBatchQueueThrottled) {
+				grvProxyData->stats.lastBatchQueueThrottled = true;
+				grvProxyData->stats.batchThrottleStartTime = now();
+			}
+		} else {
+			grvProxyData->stats.lastBatchQueueThrottled = false;
+		}
+		if (!defaultQueue.empty()) {
+			if (!grvProxyData->stats.lastDefaultQueueThrottled) {
+				grvProxyData->stats.lastDefaultQueueThrottled = true;
+				grvProxyData->stats.defaultThrottleStartTime = now();
+			}
+		} else {
+			grvProxyData->stats.lastDefaultQueueThrottled = false;
 		}
 
 		if (!systemQueue.empty() || !defaultQueue.empty() || !batchQueue.empty()) {
@@ -920,12 +960,12 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 
 ACTOR Future<Void> grvProxyServerCore(GrvProxyInterface proxy,
                                       MasterInterface master,
+                                      LifetimeToken masterLifetime,
                                       Reference<AsyncVar<ServerDBInfo> const> db) {
 	state GrvProxyData grvProxyData(proxy.id(), master, proxy.getConsistentReadVersion, db);
 
 	state PromiseStream<Future<Void>> addActor;
-	state Future<Void> onError =
-	    transformError(actorCollection(addActor.getFuture()), broken_promise(), master_tlog_failed());
+	state Future<Void> onError = transformError(actorCollection(addActor.getFuture()), broken_promise(), tlog_failed());
 
 	state GetHealthMetricsReply healthMetricsReply;
 	state GetHealthMetricsReply detailedHealthMetricsReply;
@@ -933,9 +973,14 @@ ACTOR Future<Void> grvProxyServerCore(GrvProxyInterface proxy,
 	addActor.send(waitFailureServer(proxy.waitFailure.getFuture()));
 	addActor.send(traceRole(Role::GRV_PROXY, proxy.id()));
 
+	TraceEvent("GrvProxyServerCore", proxy.id())
+	    .detail("MasterId", master.id())
+	    .detail("MasterLifetime", masterLifetime.toString())
+	    .detail("RecoveryCount", db->get().recoveryCount);
+
 	// Wait until we can load the "real" logsystem, since we don't support switching them currently
-	while (!(grvProxyData.db->get().master.id() == master.id() &&
-	         grvProxyData.db->get().recoveryState >= RecoveryState::RECOVERY_TRANSACTION)) {
+	while (!(masterLifetime.isEqual(grvProxyData.db->get().masterLifetime) &&
+	         grvProxyData.db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS)) {
 		wait(grvProxyData.db->onChange());
 	}
 	// Do we need to wait for any db info change? Yes. To update latency band.
@@ -956,7 +1001,7 @@ ACTOR Future<Void> grvProxyServerCore(GrvProxyInterface proxy,
 		when(wait(dbInfoChange)) {
 			dbInfoChange = grvProxyData.db->onChange();
 
-			if (grvProxyData.db->get().master.id() == master.id() &&
+			if (masterLifetime.isEqual(grvProxyData.db->get().masterLifetime) &&
 			    grvProxyData.db->get().recoveryState >= RecoveryState::RECOVERY_TRANSACTION) {
 				grvProxyData.logSystem =
 				    ILogSystem::fromServerDBInfo(proxy.id(), grvProxyData.db->get(), false, addActor);
@@ -983,13 +1028,13 @@ ACTOR Future<Void> grvProxyServer(GrvProxyInterface proxy,
                                   InitializeGrvProxyRequest req,
                                   Reference<AsyncVar<ServerDBInfo> const> db) {
 	try {
-		state Future<Void> core = grvProxyServerCore(proxy, req.master, db);
+		state Future<Void> core = grvProxyServerCore(proxy, req.master, req.masterLifetime, db);
 		wait(core || checkRemoved(db, req.recoveryCount, proxy));
 	} catch (Error& e) {
-		TraceEvent("GrvProxyTerminated", proxy.id()).error(e, true);
+		TraceEvent("GrvProxyTerminated", proxy.id()).errorUnsuppressed(e);
 
 		if (e.code() != error_code_worker_removed && e.code() != error_code_tlog_stopped &&
-		    e.code() != error_code_master_tlog_failed && e.code() != error_code_coordinators_changed &&
+		    e.code() != error_code_tlog_failed && e.code() != error_code_coordinators_changed &&
 		    e.code() != error_code_coordinated_state_conflict && e.code() != error_code_new_coordinators_timed_out) {
 			throw;
 		}

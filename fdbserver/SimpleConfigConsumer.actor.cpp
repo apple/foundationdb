@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -79,7 +79,7 @@ class SimpleConfigConsumerImpl {
 						}
 					}
 					self->lastSeenVersion = committedVersion;
-					broadcaster->applyChanges(reply.changes, committedVersion, reply.annotations);
+					broadcaster->applyChanges(reply.changes, committedVersion, reply.annotations, { self->cfi });
 				}
 				wait(delayJittered(self->pollingInterval));
 			} catch (Error& e) {
@@ -107,8 +107,12 @@ class SimpleConfigConsumerImpl {
 		    .detail("AnnotationsSize", reply.annotations.size());
 		ASSERT_GE(committedVersion, self->lastSeenVersion);
 		self->lastSeenVersion = committedVersion;
-		broadcaster->applySnapshotAndChanges(
-		    std::move(reply.snapshot), reply.snapshotVersion, reply.changes, committedVersion, reply.annotations);
+		broadcaster->applySnapshotAndChanges(std::move(reply.snapshot),
+		                                     reply.snapshotVersion,
+		                                     reply.changes,
+		                                     committedVersion,
+		                                     reply.annotations,
+		                                     { self->cfi });
 		return Void();
 	}
 

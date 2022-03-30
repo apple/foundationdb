@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,6 +34,7 @@ namespace {
 
 const KeyRef lastCompactedVersionKey = "lastCompactedVersion"_sr;
 const KeyRef currentGenerationKey = "currentGeneration"_sr;
+const KeyRef registeredKey = "registered"_sr;
 const KeyRangeRef kvKeys = KeyRangeRef("kv/"_sr, "kv0"_sr);
 const KeyRangeRef mutationKeys = KeyRangeRef("mutation/"_sr, "mutation0"_sr);
 const KeyRangeRef annotationKeys = KeyRangeRef("annotation/"_sr, "annotation0"_sr);
@@ -201,15 +202,14 @@ class ConfigNodeImpl {
 		}
 		state Version committedVersion =
 		    wait(map(getGeneration(self), [](auto const& gen) { return gen.committedVersion; }));
-		// TODO: Reenable this when running the ConfigIncrement workload with reboot=false
-		// if (committedVersion < req.mostRecentVersion) {
-		// 	// Handle a very rare case where a ConfigNode loses data between
-		// 	// responding with a committed version and responding to the
-		// 	// subsequent get changes request.
-		// 	TEST(true); // ConfigNode data loss occurred on a minority of coordinators
-		// 	req.reply.sendError(process_behind()); // Reuse the process_behind error
-		// 	return Void();
-		// }
+		if (committedVersion < req.mostRecentVersion) {
+			// Handle a very rare case where a ConfigNode loses data between
+			// responding with a committed version and responding to the
+			// subsequent get changes request.
+			TEST(true); // ConfigNode data loss occurred on a minority of coordinators
+			req.reply.sendError(process_behind()); // Reuse the process_behind error
+			return Void();
+		}
 		state Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations =
 		    wait(getMutations(self, req.lastSeenVersion + 1, committedVersion));
 		state Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> versionedAnnotations =
@@ -443,8 +443,7 @@ class ConfigNodeImpl {
 		TraceEvent(SevDebug, "ConfigNodeGettingSnapshot", self->id)
 		    .detail("SnapshotVersion", reply.snapshotVersion)
 		    .detail("SnapshotSize", reply.snapshot.size())
-		    .detail("ChangesSize", reply.changes.size())
-		    .detail("AnnotationsSize", reply.annotations.size());
+		    .detail("ChangesSize", reply.changes.size());
 		req.reply.send(reply);
 		return Void();
 	}
@@ -496,7 +495,7 @@ class ConfigNodeImpl {
 	}
 
 	ACTOR static Future<Void> rollforward(ConfigNodeImpl* self, ConfigFollowerRollforwardRequest req) {
-		Version lastCompactedVersion = wait(getLastCompactedVersion(self));
+		state Version lastCompactedVersion = wait(getLastCompactedVersion(self));
 		if (req.lastKnownCommitted < lastCompactedVersion) {
 			req.reply.sendError(version_already_compacted());
 			return Void();
@@ -506,6 +505,11 @@ class ConfigNodeImpl {
 			req.reply.sendError(transaction_too_old());
 			return Void();
 		}
+		TraceEvent("ConfigNodeRollforward")
+		    .detail("RollbackTo", req.rollback)
+		    .detail("Target", req.target)
+		    .detail("LastKnownCommitted", req.lastKnownCommitted)
+		    .detail("Committed", currentGeneration.committedVersion);
 		// Rollback to prior known committed version to erase any commits not
 		// made on a quorum.
 		if (req.rollback.present() && req.rollback.get() < currentGeneration.committedVersion) {
@@ -525,6 +529,10 @@ class ConfigNodeImpl {
 			                                 versionedAnnotationKey(currentGeneration.committedVersion + 1)));
 
 			currentGeneration.committedVersion = req.rollback.get();
+			if (req.rollback.get() < lastCompactedVersion) {
+				self->kvStore->set(
+				    KeyValueRef(lastCompactedVersionKey, BinaryWriter::toValue(req.rollback.get(), IncludeVersion())));
+			}
 			// The mutation commit loop below should persist the new generation
 			// to disk, so we don't need to do it here.
 		}
@@ -532,13 +540,15 @@ class ConfigNodeImpl {
 		// committed version and rollforward version.
 		ASSERT_GT(req.mutations[0].version, currentGeneration.committedVersion);
 		wait(commitMutations(self, req.mutations, req.annotations, req.target));
+
 		req.reply.send(Void());
 		return Void();
 	}
 
 	ACTOR static Future<Void> getCommittedVersion(ConfigNodeImpl* self, ConfigFollowerGetCommittedVersionRequest req) {
+		state Version lastCompacted = wait(getLastCompactedVersion(self));
 		ConfigGeneration generation = wait(getGeneration(self));
-		req.reply.send(ConfigFollowerGetCommittedVersionReply{ generation.committedVersion });
+		req.reply.send(ConfigFollowerGetCommittedVersionReply{ lastCompacted, generation.committedVersion });
 		return Void();
 	}
 
@@ -570,6 +580,50 @@ class ConfigNodeImpl {
 		}
 	}
 
+	ACTOR static Future<Void> serve(ConfigNodeImpl* self, ConfigBroadcastInterface const* cbi, bool infinite) {
+		loop {
+			// Normally, the ConfigBroadcaster will first send a
+			// ConfigBroadcastRegisteredRequest, followed by a
+			// ConfigBroadcastReadyRequest. However, if the cluster controller
+			// the broadcaster is running on fails in between sending these two
+			// messages, the new broadcaster may need to resend its registered
+			// request. So we need to listen for either message in a loop to
+			// guarantee no pattern of failure will result in a stuck
+			// ConfigNode.
+			choose {
+				when(state ConfigBroadcastRegisteredRequest req = waitNext(cbi->registered.getFuture())) {
+					bool isRegistered = wait(registered(self));
+					req.reply.send(ConfigBroadcastRegisteredReply{ isRegistered });
+				}
+				when(ConfigBroadcastReadyRequest readyReq = waitNext(cbi->ready.getFuture())) {
+					readyReq.reply.send(ConfigBroadcastReadyReply{});
+					if (!infinite) {
+						return Void();
+					}
+				}
+			}
+		}
+	}
+
+	ACTOR static Future<Void> serve(ConfigNodeImpl* self,
+	                                ConfigBroadcastInterface const* cbi,
+	                                ConfigTransactionInterface const* cti,
+	                                ConfigFollowerInterface const* cfi) {
+		wait(serve(self, cbi, false));
+
+		self->kvStore->set(KeyValueRef(registeredKey, BinaryWriter::toValue(true, IncludeVersion())));
+		wait(self->kvStore->commit());
+
+		// Shouldn't return (coordinationServer will throw an error if it does).
+		wait(serve(self, cbi, true) || serve(self, cti) || serve(self, cfi));
+		return Void();
+	}
+
+	ACTOR static Future<bool> registered(ConfigNodeImpl* self) {
+		Optional<Value> value = wait(self->kvStore->readValue(registeredKey));
+		return value.present();
+	}
+
 public:
 	ConfigNodeImpl(std::string const& folder)
 	  : id(deterministicRandom()->randomUniqueID()), kvStore(folder, id, "globalconf-"), cc("ConfigNode"),
@@ -581,6 +635,12 @@ public:
 	    getValueRequests("GetValueRequests", cc), getGenerationRequests("GetGenerationRequests", cc) {
 		logger = traceCounters("ConfigNodeMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ConfigNode");
 		TraceEvent(SevDebug, "StartingConfigNode", id).detail("KVStoreAlreadyExists", kvStore.exists());
+	}
+
+	Future<Void> serve(ConfigBroadcastInterface const& cbi,
+	                   ConfigTransactionInterface const& cti,
+	                   ConfigFollowerInterface const& cfi) {
+		return serve(this, &cbi, &cti, &cfi);
 	}
 
 	Future<Void> serve(ConfigTransactionInterface const& cti) { return serve(this, &cti); }
@@ -595,6 +655,12 @@ public:
 ConfigNode::ConfigNode(std::string const& folder) : impl(PImpl<ConfigNodeImpl>::create(folder)) {}
 
 ConfigNode::~ConfigNode() = default;
+
+Future<Void> ConfigNode::serve(ConfigBroadcastInterface const& cbi,
+                               ConfigTransactionInterface const& cti,
+                               ConfigFollowerInterface const& cfi) {
+	return impl->serve(cbi, cti, cfi);
+}
 
 Future<Void> ConfigNode::serve(ConfigTransactionInterface const& cti) {
 	return impl->serve(cti);

@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <cstdint>
+
 #include "fdbclient/ConfigTransactionInterface.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/ConfigNode.h"
@@ -31,9 +33,9 @@
 #include "flow/UnitTest.h"
 #include "flow/IndexedSet.h"
 #include "fdbclient/MonitorLeader.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 #include "flow/network.h"
-#include <cstdint>
+
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 // This module implements coordinationServer() and the interfaces in CoordinationInterface.h
 
@@ -96,6 +98,7 @@ LeaderElectionRegInterface::LeaderElectionRegInterface(INetwork* local) : Client
 }
 
 ServerCoordinators::ServerCoordinators(Reference<IClusterConnectionRecord> ccr) : ClientCoordinators(ccr) {
+	ASSERT(ccr->connectionStringStatus() == ClusterConnectionString::RESOLVED);
 	ClusterConnectionString cs = ccr->getConnectionString();
 	for (auto s = cs.coordinators().begin(); s != cs.coordinators().end(); ++s) {
 		leaderElectionServers.emplace_back(*s);
@@ -205,8 +208,11 @@ ACTOR Future<Void> openDatabase(ClientData* db,
                                 int* clientCount,
                                 Reference<AsyncVar<bool>> hasConnectedClients,
                                 OpenDatabaseCoordRequest req,
-                                Future<Void> checkStuck) {
+                                Future<Void> checkStuck,
+                                Reference<AsyncVar<Void>> coordinatorsChanged) {
 	state ErrorOr<CachedSerialization<ClientDBInfo>> replyContents;
+	state Future<Void> coordinatorsChangedOnChange = coordinatorsChanged->onChange();
+	state Future<Void> clientInfoOnChange = db->clientInfo->onChange();
 
 	++(*clientCount);
 	hasConnectedClients->set(true);
@@ -223,7 +229,15 @@ ACTOR Future<Void> openDatabase(ClientData* db,
 				replyContents = failed_to_progress();
 				break;
 			}
-			when(wait(yieldedFuture(db->clientInfo->onChange()))) { replyContents = db->clientInfo->get(); }
+			when(wait(yieldedFuture(clientInfoOnChange))) {
+				clientInfoOnChange = db->clientInfo->onChange();
+				replyContents = db->clientInfo->get();
+			}
+			when(wait(coordinatorsChangedOnChange)) {
+				coordinatorsChangedOnChange = coordinatorsChanged->onChange();
+				replyContents = coordinators_changed();
+				break;
+			}
 			when(wait(delayJittered(SERVER_KNOBS->CLIENT_REGISTER_INTERVAL))) {
 				if (db->clientInfo->get().read().id.isValid()) {
 					replyContents = db->clientInfo->get();
@@ -254,18 +268,33 @@ ACTOR Future<Void> openDatabase(ClientData* db,
 ACTOR Future<Void> remoteMonitorLeader(int* clientCount,
                                        Reference<AsyncVar<bool>> hasConnectedClients,
                                        Reference<AsyncVar<Optional<LeaderInfo>>> currentElectedLeader,
-                                       ElectionResultRequest req) {
+                                       ElectionResultRequest req,
+                                       Reference<AsyncVar<Void>> coordinatorsChanged) {
+	state bool coordinatorsChangeDetected = false;
+	state Future<Void> coordinatorsChangedOnChange = coordinatorsChanged->onChange();
+	state Future<Void> currentElectedLeaderOnChange = currentElectedLeader->onChange();
 	++(*clientCount);
 	hasConnectedClients->set(true);
 
 	while (!currentElectedLeader->get().present() || req.knownLeader == currentElectedLeader->get().get().changeID) {
 		choose {
-			when(wait(yieldedFuture(currentElectedLeader->onChange()))) {}
+			when(wait(yieldedFuture(currentElectedLeaderOnChange))) {
+				currentElectedLeaderOnChange = currentElectedLeader->onChange();
+			}
+			when(wait(coordinatorsChangedOnChange)) {
+				coordinatorsChangedOnChange = coordinatorsChanged->onChange();
+				coordinatorsChangeDetected = true;
+				break;
+			}
 			when(wait(delayJittered(SERVER_KNOBS->CLIENT_REGISTER_INTERVAL))) { break; }
 		}
 	}
 
-	req.reply.send(currentElectedLeader->get());
+	if (coordinatorsChangeDetected) {
+		req.reply.sendError(coordinators_changed());
+	} else {
+		req.reply.send(currentElectedLeader->get());
+	}
 
 	if (--(*clientCount) == 0) {
 		hasConnectedClients->set(false);
@@ -296,6 +325,9 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 	state Reference<AsyncVar<Optional<LeaderInfo>>> currentElectedLeader =
 	    makeReference<AsyncVar<Optional<LeaderInfo>>>();
 	state LivenessChecker canConnectToLeader(SERVER_KNOBS->COORDINATOR_LEADER_CONNECTION_TIMEOUT);
+	state Reference<AsyncVar<Void>> coordinatorsChanged = makeReference<AsyncVar<Void>>();
+	state Future<Void> coordinatorsChangedOnChange = coordinatorsChanged->onChange();
+	state Future<Void> hasConnectedClientsOnChange = hasConnectedClients->onChange();
 
 	loop choose {
 		when(OpenDatabaseCoordRequest req = waitNext(interf.openDatabase.getFuture())) {
@@ -306,10 +338,14 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 			} else {
 				if (!leaderMon.isValid()) {
 					leaderMon = monitorLeaderAndGetClientInfo(
-					    req.clusterKey, req.coordinators, &clientData, currentElectedLeader);
+					    req.clusterKey, req.coordinators, &clientData, currentElectedLeader, coordinatorsChanged);
 				}
-				actors.add(
-				    openDatabase(&clientData, &clientCount, hasConnectedClients, req, canConnectToLeader.checkStuck()));
+				actors.add(openDatabase(&clientData,
+				                        &clientCount,
+				                        hasConnectedClients,
+				                        req,
+				                        canConnectToLeader.checkStuck(),
+				                        coordinatorsChanged));
 			}
 		}
 		when(ElectionResultRequest req = waitNext(interf.electionResult.getFuture())) {
@@ -318,10 +354,11 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 				req.reply.send(currentElectedLeader->get());
 			} else {
 				if (!leaderMon.isValid()) {
-					leaderMon =
-					    monitorLeaderAndGetClientInfo(req.key, req.coordinators, &clientData, currentElectedLeader);
+					leaderMon = monitorLeaderAndGetClientInfo(
+					    req.key, req.coordinators, &clientData, currentElectedLeader, coordinatorsChanged);
 				}
-				actors.add(remoteMonitorLeader(&clientCount, hasConnectedClients, currentElectedLeader, req));
+				actors.add(remoteMonitorLeader(
+				    &clientCount, hasConnectedClients, currentElectedLeader, req, coordinatorsChanged));
 			}
 		}
 		when(GetLeaderRequest req = waitNext(interf.getLeader.getFuture())) {
@@ -454,13 +491,18 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 				notify.pop_front();
 			}
 		}
-		when(wait(hasConnectedClients->onChange())) {
+		when(wait(hasConnectedClientsOnChange)) {
+			hasConnectedClientsOnChange = hasConnectedClients->onChange();
 			if (!hasConnectedClients->get() && !nextInterval.isValid()) {
 				TraceEvent("LeaderRegisterUnneeded").detail("Key", key);
 				return Void();
 			}
 		}
 		when(wait(actors.getResult())) {}
+		when(wait(coordinatorsChangedOnChange)) {
+			leaderMon = Future<Void>();
+			coordinatorsChangedOnChange = coordinatorsChanged->onChange();
+		}
 	}
 }
 
@@ -732,25 +774,23 @@ ACTOR Future<Void> leaderServer(LeaderElectionRegInterface interf,
 
 ACTOR Future<Void> coordinationServer(std::string dataFolder,
                                       Reference<IClusterConnectionRecord> ccr,
-                                      ConfigDBType configDBType) {
+                                      Reference<ConfigNode> configNode,
+                                      ConfigBroadcastInterface cbi) {
 	state UID myID = deterministicRandom()->randomUniqueID();
 	state LeaderElectionRegInterface myLeaderInterface(g_network);
 	state GenerationRegInterface myInterface(g_network);
 	state OnDemandStore store(dataFolder, myID, "coordination-");
 	state ConfigTransactionInterface configTransactionInterface;
 	state ConfigFollowerInterface configFollowerInterface;
-	state Reference<ConfigNode> configNode;
 	state Future<Void> configDatabaseServer = Never();
 	TraceEvent("CoordinationServer", myID)
 	    .detail("MyInterfaceAddr", myInterface.read.getEndpoint().getPrimaryAddress())
 	    .detail("Folder", dataFolder);
 
-	if (configDBType != ConfigDBType::DISABLED) {
+	if (configNode.isValid()) {
 		configTransactionInterface.setupWellKnownEndpoints();
 		configFollowerInterface.setupWellKnownEndpoints();
-		configNode = makeReference<ConfigNode>(dataFolder);
-		configDatabaseServer =
-		    configNode->serve(configTransactionInterface) || configNode->serve(configFollowerInterface);
+		configDatabaseServer = configNode->serve(cbi, configTransactionInterface, configFollowerInterface);
 	}
 
 	try {
@@ -758,7 +798,7 @@ ACTOR Future<Void> coordinationServer(std::string dataFolder,
 		     store.getError() || configDatabaseServer);
 		throw internal_error();
 	} catch (Error& e) {
-		TraceEvent("CoordinationServerError", myID).error(e, true);
+		TraceEvent("CoordinationServerError", myID).errorUnsuppressed(e);
 		throw;
 	}
 }

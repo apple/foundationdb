@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2021 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@
  */
 
 #include "boost/lexical_cast.hpp"
-
+#include "contrib/fmt-8.1.1/include/fmt/format.h"
 #include "fdbcli/fdbcli.actor.h"
 
 #include "fdbclient/IClientApi.h"
@@ -40,7 +40,7 @@ ACTOR Future<bool> advanceVersionCommandActor(Reference<IDatabase> db, std::vect
 	} else {
 		state Version v;
 		int n = 0;
-		if (sscanf(tokens[1].toString().c_str(), "%ld%n", &v, &n) != 1 || n != tokens[1].size()) {
+		if (sscanf(tokens[1].toString().c_str(), "%" PRId64 "%n", &v, &n) != 1 || n != tokens[1].size()) {
 			printUsage(tokens[0]);
 			return false;
 		} else {
@@ -53,7 +53,7 @@ ACTOR Future<bool> advanceVersionCommandActor(Reference<IDatabase> db, std::vect
 						tr->set(advanceVersionSpecialKey, boost::lexical_cast<std::string>(v));
 						wait(safeThreadFutureToFuture(tr->commit()));
 					} else {
-						printf("Current read version is %ld\n", rv);
+						fmt::print("Current read version is {}\n", rv);
 						return true;
 					}
 				} catch (Error& e) {

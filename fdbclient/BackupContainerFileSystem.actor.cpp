@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -409,6 +409,7 @@ public:
 	                                                      Version logStartVersionOverride) {
 		state BackupDescription desc;
 		desc.url = bc->getURL();
+		desc.proxy = bc->getProxy();
 
 		TraceEvent("BackupContainerDescribe1")
 		    .detail("URL", bc->getURL())
@@ -1133,8 +1134,8 @@ public:
 		    filename,
 		    IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE,
 		    0600));
-		StreamCipher::Key::RawKeyType testKey;
-		generateRandomData(testKey.data(), testKey.size());
+		StreamCipherKey testKey(AES_256_KEY_LENGTH);
+		testKey.initializeRandomTestKey();
 		keyFile->write(testKey.data(), testKey.size(), 0);
 		wait(keyFile->sync());
 		return Void();
@@ -1142,26 +1143,25 @@ public:
 
 	ACTOR static Future<Void> readEncryptionKey(std::string encryptionKeyFileName) {
 		state Reference<IAsyncFile> keyFile;
-		state StreamCipher::Key::RawKeyType key;
+		state StreamCipherKey const* cipherKey = StreamCipherKey::getGlobalCipherKey();
 		try {
 			Reference<IAsyncFile> _keyFile =
 			    wait(IAsyncFileSystem::filesystem()->open(encryptionKeyFileName, 0x0, 0400));
 			keyFile = _keyFile;
 		} catch (Error& e) {
 			TraceEvent(SevWarnAlways, "FailedToOpenEncryptionKeyFile")
-			    .detail("FileName", encryptionKeyFileName)
-			    .error(e);
+			    .error(e)
+			    .detail("FileName", encryptionKeyFileName);
 			throw e;
 		}
-		int bytesRead = wait(keyFile->read(key.data(), key.size(), 0));
-		if (bytesRead != key.size()) {
+		int bytesRead = wait(keyFile->read(cipherKey->data(), cipherKey->size(), 0));
+		if (bytesRead != cipherKey->size()) {
 			TraceEvent(SevWarnAlways, "InvalidEncryptionKeyFileSize")
-			    .detail("ExpectedSize", key.size())
+			    .detail("ExpectedSize", cipherKey->size())
 			    .detail("ActualSize", bytesRead);
 			throw invalid_encryption_key_file();
 		}
-		ASSERT_EQ(bytesRead, key.size());
-		StreamCipher::Key::initializeKey(std::move(key));
+		ASSERT_EQ(bytesRead, cipherKey->size());
 		return Void();
 	}
 #endif // ENCRYPTION_ENABLED
@@ -1378,8 +1378,8 @@ ACTOR static Future<KeyRange> getSnapshotFileKeyRange_impl(Reference<BackupConta
 			           e.code() == error_code_timed_out || e.code() == error_code_lookup_failed) {
 				// blob http request failure, retry
 				TraceEvent(SevWarnAlways, "BackupContainerGetSnapshotFileKeyRangeConnectionFailure")
-				    .detail("Retries", ++readFileRetries)
-				    .error(e);
+				    .error(e)
+				    .detail("Retries", ++readFileRetries);
 				wait(delayJittered(0.1));
 			} else {
 				TraceEvent(SevError, "BackupContainerGetSnapshotFileKeyRangeUnexpectedError").error(e);
@@ -1501,7 +1501,8 @@ Future<Void> BackupContainerFileSystem::createTestEncryptionKeyFile(std::string 
 // code but returning a different template type because you can't cast between them
 Reference<BackupContainerFileSystem> BackupContainerFileSystem::openContainerFS(
     const std::string& url,
-    Optional<std::string> const& encryptionKeyFileName) {
+    const Optional<std::string>& proxy,
+    const Optional<std::string>& encryptionKeyFileName) {
 	static std::map<std::string, Reference<BackupContainerFileSystem>> m_cache;
 
 	Reference<BackupContainerFileSystem>& r = m_cache[url];
@@ -1518,7 +1519,7 @@ Reference<BackupContainerFileSystem> BackupContainerFileSystem::openContainerFS(
 			// The URL parameters contain blobstore endpoint tunables as well as possible backup-specific options.
 			S3BlobStoreEndpoint::ParametersT backupParams;
 			Reference<S3BlobStoreEndpoint> bstore =
-			    S3BlobStoreEndpoint::fromString(url, &resource, &lastOpenError, &backupParams);
+			    S3BlobStoreEndpoint::fromString(url, proxy, &resource, &lastOpenError, &backupParams);
 
 			if (resource.empty())
 				throw backup_invalid_url();
@@ -1550,9 +1551,9 @@ Reference<BackupContainerFileSystem> BackupContainerFileSystem::openContainerFS(
 			throw;
 
 		TraceEvent m(SevWarn, "BackupContainer");
+		m.error(e);
 		m.detail("Description", "Invalid container specification.  See help.");
 		m.detail("URL", url);
-		m.error(e);
 		if (e.code() == error_code_backup_invalid_url)
 			m.detail("LastOpenError", lastOpenError);
 
@@ -1636,7 +1637,9 @@ ACTOR static Future<Void> testWriteSnapshotFile(Reference<IBackupFile> file, Key
 	return Void();
 }
 
-ACTOR Future<Void> testBackupContainer(std::string url, Optional<std::string> encryptionKeyFileName) {
+ACTOR Future<Void> testBackupContainer(std::string url,
+                                       Optional<std::string> proxy,
+                                       Optional<std::string> encryptionKeyFileName) {
 	state FlowLock lock(100e6);
 
 	if (encryptionKeyFileName.present()) {
@@ -1645,7 +1648,7 @@ ACTOR Future<Void> testBackupContainer(std::string url, Optional<std::string> en
 
 	printf("BackupContainerTest URL %s\n", url.c_str());
 
-	state Reference<IBackupContainer> c = IBackupContainer::openContainer(url, encryptionKeyFileName);
+	state Reference<IBackupContainer> c = IBackupContainer::openContainer(url, proxy, encryptionKeyFileName);
 
 	// Make sure container doesn't exist, then create it.
 	try {
@@ -1790,12 +1793,13 @@ ACTOR Future<Void> testBackupContainer(std::string url, Optional<std::string> en
 }
 
 TEST_CASE("/backup/containers/localdir/unencrypted") {
-	wait(testBackupContainer(format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()), {}));
+	wait(testBackupContainer(format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()), {}, {}));
 	return Void();
 }
 
 TEST_CASE("/backup/containers/localdir/encrypted") {
 	wait(testBackupContainer(format("file://%s/fdb_backups/%llx", params.getDataDir().c_str(), timer_int()),
+	                         {},
 	                         format("%s/test_encryption_key", params.getDataDir().c_str())));
 	return Void();
 }
@@ -1804,7 +1808,7 @@ TEST_CASE("/backup/containers/url") {
 	if (!g_network->isSimulated()) {
 		const char* url = getenv("FDB_TEST_BACKUP_URL");
 		ASSERT(url != nullptr);
-		wait(testBackupContainer(url, {}));
+		wait(testBackupContainer(url, {}, {}));
 	}
 	return Void();
 }
@@ -1814,7 +1818,7 @@ TEST_CASE("/backup/containers_list") {
 		state const char* url = getenv("FDB_TEST_BACKUP_URL");
 		ASSERT(url != nullptr);
 		printf("Listing %s\n", url);
-		std::vector<std::string> urls = wait(IBackupContainer::listContainers(url));
+		std::vector<std::string> urls = wait(IBackupContainer::listContainers(url, {}));
 		for (auto& u : urls) {
 			printf("%s\n", u.c_str());
 		}

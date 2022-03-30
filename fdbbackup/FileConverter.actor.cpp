@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2019 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -49,10 +49,10 @@ void printConvertUsage() {
 	          << "  --loggroup LOG_GROUP\n"
 	          << "                  Sets the LogGroup field with the specified value for all\n"
 	          << "                  events in the trace output (defaults to `default').\n"
-	          << "  --trace_format FORMAT\n"
+	          << "  --trace-format FORMAT\n"
 	          << "                  Select the format of the trace files. xml (the default) and json are supported.\n"
 	          << "                  Has no effect unless --log is specified.\n"
-	          << "  --build_flags   Print build information and exit.\n"
+	          << "  --build-flags   Print build information and exit.\n"
 	          << "  -h, --help      Display this help and exit.\n"
 	          << "\n";
 
@@ -101,6 +101,7 @@ std::vector<LogFile> getRelevantLogFiles(const std::vector<LogFile>& files, Vers
 
 struct ConvertParams {
 	std::string container_url;
+	Optional<std::string> proxy;
 	Version begin = invalidVersion;
 	Version end = invalidVersion;
 	bool log_enabled = false;
@@ -112,6 +113,10 @@ struct ConvertParams {
 		std::string s;
 		s.append("ContainerURL:");
 		s.append(container_url);
+		if (proxy.present()) {
+			s.append(" Proxy:");
+			s.append(proxy.get());
+		}
 		s.append(" Begin:");
 		s.append(format("%" PRId64, begin));
 		s.append(" End:");
@@ -448,7 +453,8 @@ private:
 };
 
 ACTOR Future<Void> convert(ConvertParams params) {
-	state Reference<IBackupContainer> container = IBackupContainer::openContainer(params.container_url);
+	state Reference<IBackupContainer> container =
+	    IBackupContainer::openContainer(params.container_url, params.proxy, {});
 	state BackupFileList listing = wait(container->dumpFileList());
 	std::sort(listing.logs.begin(), listing.logs.end());
 	TraceEvent("Container").detail("URL", params.container_url).detail("Logs", listing.logs.size());
@@ -571,7 +577,8 @@ int parseCommandLine(ConvertParams* param, CSimpleOpt* args) {
 
 int main(int argc, char** argv) {
 	try {
-		CSimpleOpt* args = new CSimpleOpt(argc, argv, file_converter::gConverterOptions, SO_O_EXACT);
+		CSimpleOpt* args =
+		    new CSimpleOpt(argc, argv, file_converter::gConverterOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
 		file_converter::ConvertParams param;
 		int status = file_converter::parseCommandLine(&param, args);
 		std::cout << "Params: " << param.toString() << "\n";

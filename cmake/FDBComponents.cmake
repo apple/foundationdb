@@ -25,24 +25,17 @@ if(DISABLE_TLS)
   set(WITH_TLS OFF)
 else()
   set(OPENSSL_USE_STATIC_LIBS TRUE)
+  if(WIN32)
+    set(OPENSSL_MSVC_STATIC_RT ON)
+  endif()
   find_package(OpenSSL)
   if(OPENSSL_FOUND)
     set(CMAKE_REQUIRED_INCLUDES ${OPENSSL_INCLUDE_DIR})
     set(WITH_TLS ON)
     add_compile_options(-DHAVE_OPENSSL)
-    check_symbol_exists("OPENSSL_INIT_NO_ATEXIT" "openssl/crypto.h" OPENSSL_HAS_NO_ATEXIT)
-    if(OPENSSL_HAS_NO_ATEXIT)
-      add_compile_options(-DHAVE_OPENSSL_INIT_NO_AT_EXIT)
-    else()
-      message(STATUS "Found OpenSSL without OPENSSL_INIT_NO_ATEXIT: assuming BoringSSL")
-    endif()
   else()
     message(STATUS "OpenSSL was not found - Will compile without TLS Support")
     message(STATUS "You can set OPENSSL_ROOT_DIR to help cmake find it")
-    set(WITH_TLS OFF)
-  endif()
-  if(WIN32)
-    message(STATUS "TLS is temporarilty disabled on Windows while libressl -> openssl transition happens")
     set(WITH_TLS OFF)
   endif()
 endif()
@@ -169,6 +162,8 @@ endif()
 ################################################################################
 
 set(SSD_ROCKSDB_EXPERIMENTAL ON CACHE BOOL "Build with experimental RocksDB support")
+set(PORTABLE_ROCKSDB ON CACHE BOOL "Compile RocksDB in portable mode") # Set this to OFF to compile RocksDB with `-march=native`
+set(WITH_LIBURING OFF CACHE BOOL "Build with liburing enabled") # Set this to ON to include liburing
 # RocksDB is currently enabled by default for GCC but does not build with the latest
 # Clang.
 if (SSD_ROCKSDB_EXPERIMENTAL AND GCC)
@@ -218,6 +213,17 @@ endif()
 set(COROUTINE_IMPL ${DEFAULT_COROUTINE_IMPL} CACHE STRING "Which coroutine implementation to use. Options are boost and libcoro")
 
 ################################################################################
+# AWS SDK
+################################################################################
+
+set(BUILD_AWS_BACKUP OFF CACHE BOOL "Build AWS S3 SDK backup client")
+if (BUILD_AWS_BACKUP)
+  set(WITH_AWS_BACKUP ON)
+else()
+  set(WITH_AWS_BACKUP OFF)
+endif()
+
+################################################################################
 
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/packages)
 add_custom_target(packages)
@@ -237,6 +243,7 @@ function(print_components)
   message(STATUS "Build Python sdist (make package):    ${WITH_PYTHON_BINDING}")
   message(STATUS "Configure CTest (depends on Python):  ${WITH_PYTHON}")
   message(STATUS "Build with RocksDB:                   ${WITH_ROCKSDB_EXPERIMENTAL}")
+  message(STATUS "Build with AWS SDK:                   ${WITH_AWS_BACKUP}")
   message(STATUS "=========================================")
 endfunction()
 

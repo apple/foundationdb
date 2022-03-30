@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -44,7 +44,7 @@ public:
 	ExtStringRef beginKey();
 	ExtStringRef endKey();
 
-	const KeyValueRef* kv(Arena& arena);
+	virtual const KeyValueRef* kv(Arena& arena);
 
 	RYWIterator& operator++();
 
@@ -61,14 +61,14 @@ public:
 
 	void bypassUnreadableProtection() { bypassUnreadable = true; }
 
-	WriteMap::iterator& extractWriteMapIterator();
+	virtual WriteMap::iterator& extractWriteMapIterator();
 	// Really this should return an iterator by value, but for performance it's convenient to actually grab the internal
 	// one.  Consider copying the return value if performance isn't critical. If you modify the returned iterator, it
 	// invalidates this iterator until the next call to skip()
 
 	void dbg();
 
-private:
+protected:
 	int begin_key_cmp; // -1 if cache.beginKey() < writes.beginKey(), 0 if ==, +1 if >
 	int end_key_cmp; //
 	SnapshotCache::iterator cache;

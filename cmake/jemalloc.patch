@@ -1,0 +1,38 @@
+diff --git a/include/jemalloc/internal/sz.h b/include/jemalloc/internal/sz.h
+index 68e558ab..87bb2280 100644
+--- a/include/jemalloc/internal/sz.h
++++ b/include/jemalloc/internal/sz.h
+@@ -266,7 +266,7 @@ sz_sa2u(size_t size, size_t alignment) {
+ 	assert(alignment != 0 && ((alignment - 1) & alignment) == 0);
+ 
+ 	/* Try for a small size class. */
+-	if (size <= SC_SMALL_MAXCLASS && alignment < PAGE) {
++	if (size <= SC_SMALL_MAXCLASS && alignment <= PAGE) {
+ 		/*
+ 		 * Round size up to the nearest multiple of alignment.
+ 		 *
+diff --git a/src/arena.c b/src/arena.c
+index ba50e410..dc7646e6 100644
+--- a/src/arena.c
++++ b/src/arena.c
+@@ -1533,10 +1533,17 @@ arena_palloc(tsdn_t *tsdn, arena_t *arena, size_t usize, size_t alignment,
+     bool zero, tcache_t *tcache) {
+ 	void *ret;
+ 
+-	if (usize <= SC_SMALL_MAXCLASS
+-	    && (alignment < PAGE
+-	    || (alignment == PAGE && (usize & PAGE_MASK) == 0))) {
++	if (usize <= SC_SMALL_MAXCLASS) {
+ 		/* Small; alignment doesn't require special slab placement. */
++
++		/* usize should be a result of sz_sa2u() */
++		assert((usize & (alignment - 1)) == 0);
++
++		/*
++		 * Small usize can't come from an alignment larger than a page.
++		 */
++		assert(alignment <= PAGE);
++
+ 		ret = arena_malloc(tsdn, arena, usize, sz_size2index(usize),
+ 		    zero, tcache, true);
+ 	} else {

@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,8 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/PaxosConfigTransaction.h"
 #include "flow/actorcompiler.h" // must be last include
+
+using ConfigTransactionInfo = ModelInterface<ConfigTransactionInterface>;
 
 class CommitQuorum {
 	ActorCollection actors{ false };
@@ -57,15 +59,16 @@ class CommitQuorum {
 	                                          ConfigGeneration generation,
 	                                          ConfigTransactionInterface cti) {
 		try {
-			wait(retryBrokenPromise(cti.commit, self->getCommitRequest(generation)));
+			wait(timeoutError(cti.commit.getReply(self->getCommitRequest(generation)),
+			                  CLIENT_KNOBS->COMMIT_QUORUM_TIMEOUT));
 			++self->successful;
 		} catch (Error& e) {
-			// self might be destroyed if this actor is canceled
+			// self might be destroyed if this actor is cancelled
 			if (e.code() == error_code_actor_cancelled) {
 				throw;
 			}
 
-			if (e.code() == error_code_not_committed) {
+			if (e.code() == error_code_not_committed || e.code() == error_code_timed_out) {
 				++self->failed;
 			} else {
 				++self->maybeCommitted;
@@ -117,21 +120,41 @@ class GetGenerationQuorum {
 	Future<ConfigGeneration> getGenerationFuture;
 
 	ACTOR static Future<Void> addRequestActor(GetGenerationQuorum* self, ConfigTransactionInterface cti) {
-		ConfigTransactionGetGenerationReply reply = wait(
-		    retryBrokenPromise(cti.getGeneration, ConfigTransactionGetGenerationRequest{ self->lastSeenLiveVersion }));
+		loop {
+			try {
+				ConfigTransactionGetGenerationReply reply = wait(timeoutError(
+				    cti.getGeneration.getReply(ConfigTransactionGetGenerationRequest{ self->lastSeenLiveVersion }),
+				    CLIENT_KNOBS->GET_GENERATION_QUORUM_TIMEOUT));
 
-		++self->totalRepliesReceived;
-		auto gen = reply.generation;
-		self->lastSeenLiveVersion = std::max(gen.liveVersion, self->lastSeenLiveVersion.orDefault(::invalidVersion));
-		auto& replicas = self->seenGenerations[gen];
-		replicas.push_back(cti);
-		self->maxAgreement = std::max(replicas.size(), self->maxAgreement);
-		if (replicas.size() >= self->ctis.size() / 2 + 1 && !self->result.isSet()) {
-			self->result.send(gen);
-		} else if (self->maxAgreement + (self->ctis.size() - self->totalRepliesReceived) <
-		           (self->ctis.size() / 2 + 1)) {
-			if (!self->result.isError()) {
-				self->result.sendError(failed_to_reach_quorum());
+				++self->totalRepliesReceived;
+				auto gen = reply.generation;
+				self->lastSeenLiveVersion =
+				    std::max(gen.liveVersion, self->lastSeenLiveVersion.orDefault(::invalidVersion));
+				auto& replicas = self->seenGenerations[gen];
+				replicas.push_back(cti);
+				self->maxAgreement = std::max(replicas.size(), self->maxAgreement);
+				if (replicas.size() >= self->ctis.size() / 2 + 1 && !self->result.isSet()) {
+					self->result.send(gen);
+				} else if (self->maxAgreement + (self->ctis.size() - self->totalRepliesReceived) <
+				           (self->ctis.size() / 2 + 1)) {
+					if (!self->result.isError()) {
+						self->result.sendError(failed_to_reach_quorum());
+					}
+				}
+				break;
+			} catch (Error& e) {
+				if (e.code() == error_code_broken_promise) {
+					continue;
+				} else if (e.code() == error_code_timed_out) {
+					++self->totalRepliesReceived;
+					if (self->totalRepliesReceived == self->ctis.size() && self->result.canBeSet() &&
+					    !self->result.isError()) {
+						self->result.sendError(failed_to_reach_quorum());
+					}
+					break;
+				} else {
+					throw;
+				}
 			}
 		}
 		return Void();
@@ -151,9 +174,11 @@ class GetGenerationQuorum {
 			} catch (Error& e) {
 				if (e.code() == error_code_failed_to_reach_quorum) {
 					TEST(true); // Failed to reach quorum getting generation
-					wait(delayJittered(0.01 * (1 << retries)));
+					wait(delayJittered(
+					    std::clamp(0.005 * (1 << retries), 0.0, CLIENT_KNOBS->TIMEOUT_RETRY_UPPER_BOUND)));
 					++retries;
 					self->actors.clear(false);
+					self->seenGenerations.clear();
 					self->result.reset();
 					self->totalRepliesReceived = 0;
 					self->maxAgreement = 0;
@@ -198,23 +223,38 @@ class PaxosConfigTransactionImpl {
 
 	ACTOR static Future<Optional<Value>> get(PaxosConfigTransactionImpl* self, Key key) {
 		state ConfigKey configKey = ConfigKey::decodeKey(key);
-		ConfigGeneration generation = wait(self->getGenerationQuorum.getGeneration());
-		// TODO: Load balance
-		ConfigTransactionGetReply reply = wait(retryBrokenPromise(
-		    self->getGenerationQuorum.getReadReplicas()[0].get, ConfigTransactionGetRequest{ generation, configKey }));
-		if (reply.value.present()) {
-			return reply.value.get().toValue();
-		} else {
-			return Optional<Value>{};
+		loop {
+			try {
+				ConfigGeneration generation = wait(self->getGenerationQuorum.getGeneration());
+				state Reference<ConfigTransactionInfo> configNodes(
+				    new ConfigTransactionInfo(self->getGenerationQuorum.getReadReplicas()));
+				ConfigTransactionGetReply reply =
+				    wait(timeoutError(basicLoadBalance(configNodes,
+				                                       &ConfigTransactionInterface::get,
+				                                       ConfigTransactionGetRequest{ generation, configKey }),
+				                      CLIENT_KNOBS->GET_KNOB_TIMEOUT));
+				if (reply.value.present()) {
+					return reply.value.get().toValue();
+				} else {
+					return Optional<Value>{};
+				}
+			} catch (Error& e) {
+				if (e.code() != error_code_timed_out && e.code() != error_code_broken_promise) {
+					throw;
+				}
+				self->reset();
+			}
 		}
 	}
 
 	ACTOR static Future<RangeResult> getConfigClasses(PaxosConfigTransactionImpl* self) {
 		ConfigGeneration generation = wait(self->getGenerationQuorum.getGeneration());
-		// TODO: Load balance
+		state Reference<ConfigTransactionInfo> configNodes(
+		    new ConfigTransactionInfo(self->getGenerationQuorum.getReadReplicas()));
 		ConfigTransactionGetConfigClassesReply reply =
-		    wait(retryBrokenPromise(self->getGenerationQuorum.getReadReplicas()[0].getClasses,
-		                            ConfigTransactionGetConfigClassesRequest{ generation }));
+		    wait(basicLoadBalance(configNodes,
+		                          &ConfigTransactionInterface::getClasses,
+		                          ConfigTransactionGetConfigClassesRequest{ generation }));
 		RangeResult result;
 		result.reserve(result.arena(), reply.configClasses.size());
 		for (const auto& configClass : reply.configClasses) {
@@ -225,10 +265,12 @@ class PaxosConfigTransactionImpl {
 
 	ACTOR static Future<RangeResult> getKnobs(PaxosConfigTransactionImpl* self, Optional<Key> configClass) {
 		ConfigGeneration generation = wait(self->getGenerationQuorum.getGeneration());
-		// TODO: Load balance
+		state Reference<ConfigTransactionInfo> configNodes(
+		    new ConfigTransactionInfo(self->getGenerationQuorum.getReadReplicas()));
 		ConfigTransactionGetKnobsReply reply =
-		    wait(retryBrokenPromise(self->getGenerationQuorum.getReadReplicas()[0].getKnobs,
-		                            ConfigTransactionGetKnobsRequest{ generation, configClass }));
+		    wait(basicLoadBalance(configNodes,
+		                          &ConfigTransactionInterface::getKnobs,
+		                          ConfigTransactionGetKnobsRequest{ generation, configClass }));
 		RangeResult result;
 		result.reserve(result.arena(), reply.knobNames.size());
 		for (const auto& knobName : reply.knobNames) {
@@ -248,7 +290,9 @@ class PaxosConfigTransactionImpl {
 		// TODO: Improve this:
 		TraceEvent("ConfigIncrementOnError").error(e).detail("NumRetries", self->numRetries);
 		if (e.code() == error_code_transaction_too_old || e.code() == error_code_not_committed) {
-			wait(delay((1 << self->numRetries++) * 0.01 * deterministicRandom()->random01()));
+			wait(delay(std::clamp((1 << self->numRetries++) * 0.01 * deterministicRandom()->random01(),
+			                      0.0,
+			                      CLIENT_KNOBS->TIMEOUT_RETRY_UPPER_BOUND)));
 			self->reset();
 			return Void();
 		}
@@ -425,6 +469,6 @@ PaxosConfigTransaction::PaxosConfigTransaction() = default;
 
 PaxosConfigTransaction::~PaxosConfigTransaction() = default;
 
-void PaxosConfigTransaction::setDatabase(Database const& cx) {
+void PaxosConfigTransaction::construct(Database const& cx) {
 	impl = PImpl<PaxosConfigTransactionImpl>::create(cx);
 }

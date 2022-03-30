@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,6 +30,7 @@
 #include "flow/flow.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+// This actor is used by FlowTransport to serialize the response to a ReplyPromise across the network
 ACTOR template <class T>
 void networkSender(Future<T> input, Endpoint endpoint) {
 	try {
@@ -37,6 +38,9 @@ void networkSender(Future<T> input, Endpoint endpoint) {
 		FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<EnsureTable<T>>>(value), endpoint, false);
 	} catch (Error& err) {
 		// if (err.code() == error_code_broken_promise) return;
+		if (err.code() == error_code_never_reply) {
+			return;
+		}
 		ASSERT(err.code() != error_code_actor_cancelled);
 		FlowTransport::transport().sendUnreliable(SerializeSource<ErrorOr<EnsureTable<T>>>(err), endpoint, false);
 	}

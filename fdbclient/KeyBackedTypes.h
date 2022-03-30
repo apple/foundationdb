@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -465,6 +465,10 @@ public:
 		tr->set(k, v);
 		return k.expectedSize() + v.expectedSize();
 	}
+
+	Key serializeKey(KeyType const& key) { return space.pack(Codec<KeyType>::pack(key)); }
+
+	Value serializeValue(ValueType const& val) { return ObjectWriter::toValue(val, versionOptions); }
 
 	void erase(Reference<ReadYourWritesTransaction> tr, KeyType const& key) {
 		return tr->clear(space.pack(Codec<KeyType>::pack(key)));

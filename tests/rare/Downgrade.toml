@@ -1,7 +1,0 @@
-[[test]]
-testTitle = 'Downgrade'
-
-    [[test.workload]]
-    testName = 'Downgrade'
-    oldKey = 'oldKey'
-    newKey = 'newKey'

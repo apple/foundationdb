@@ -50,7 +50,7 @@ ACTOR Future<Void> consistencyChecker(ConsistencyCheckerInterface ckInterf,
                                       int64_t restart,
                                       double maxRate,
                                       double targetInterval,
-                                      Reference<ClusterConnectionFile> connFile) {
+									  Reference<IClusterConnectionRecord> connRecord) {
 	state ConsistencyCheckerData self(ckInterf.id(),
 	                                  openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True));
 	state Promise<Void> err;
@@ -69,7 +69,7 @@ ACTOR Future<Void> consistencyChecker(ConsistencyCheckerInterface ckInterf,
 	try {
 		loop choose {
 			// Run consistency check workload. Pass in the DBConfig params as testParams
-			when(wait(runTests(connFile, // Reference<ClusterConnectionFile>(new ClusterConnectionFile()),
+			when(wait(runTests(connRecord,
 			                   TEST_TYPE_CONSISTENCY_CHECK,
 			                   TEST_HERE,
 			                   1,
@@ -92,10 +92,10 @@ ACTOR Future<Void> consistencyChecker(ConsistencyCheckerInterface ckInterf,
 		}
 	} catch (Error& err) {
 		if (err.code() == error_code_actor_cancelled) {
-			TraceEvent("ConsistencyCheckerActorCanceled", ckInterf.id()).error(err, true);
+			TraceEvent("ConsistencyCheckerActorCanceled", ckInterf.id()).errorUnsuppressed(err);
 			return Void();
 		}
-		TraceEvent("ConsistencyCheckerDied", ckInterf.id()).error(err, true);
+		TraceEvent("ConsistencyCheckerDied", ckInterf.id()).errorUnsuppressed(err);
 	}
 	return Void();
 }

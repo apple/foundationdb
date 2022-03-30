@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@
 
 #ifndef FLOW_SERIALIZE_H
 #define FLOW_SERIALIZE_H
+#include <unordered_set>
 #pragma once
 
 #include <stdint.h>
@@ -172,6 +173,13 @@ template <class T, class Allocator>
 struct CompositionDepthFor<std::vector<T, Allocator>> : std::integral_constant<int, CompositionDepthFor<T>::value + 1> {
 };
 
+template <class Key, class Hash, class KeyEqual, class Allocator>
+struct FileIdentifierFor<std::unordered_set<Key, Hash, KeyEqual, Allocator>> : ComposedIdentifierExternal<Key, 6> {};
+
+template <class Key, class Hash, class KeyEqual, class Allocator>
+struct CompositionDepthFor<std::unordered_set<Key, Hash, KeyEqual, Allocator>>
+  : std::integral_constant<int, CompositionDepthFor<Key>::value + 1> {};
+
 template <class Archive, class T>
 inline void save(Archive& ar, const std::vector<T>& value) {
 	ar << (int)value.size();
@@ -314,7 +322,7 @@ struct _IncludeVersion {
 			throw err;
 		}
 		if (v >= minInvalidProtocolVersion) {
-			// Downgrades are only supported for one minor version
+			// The version v is too large to be downgraded from.
 			auto err = incompatible_protocol_version();
 			TraceEvent(SevError, "FutureProtocolVersion").error(err).detailf("Version", "%llx", v.versionWithFlags());
 			throw err;
@@ -762,9 +770,6 @@ private:
 public:
 	static PacketBuffer* create(size_t size = 0) {
 		size = std::max(size, PACKET_BUFFER_MIN_SIZE - PACKET_BUFFER_OVERHEAD);
-		if (size == PACKET_BUFFER_MIN_SIZE - PACKET_BUFFER_OVERHEAD) {
-			return new (FastAllocator<PACKET_BUFFER_MIN_SIZE>::allocate()) PacketBuffer{ size };
-		}
 		uint8_t* mem = new uint8_t[size + PACKET_BUFFER_OVERHEAD];
 		return new (mem) PacketBuffer{ size };
 	}
@@ -772,11 +777,7 @@ public:
 	void addref() { ++reference_count; }
 	void delref() {
 		if (!--reference_count) {
-			if (size_ == PACKET_BUFFER_MIN_SIZE - PACKET_BUFFER_OVERHEAD) {
-				FastAllocator<PACKET_BUFFER_MIN_SIZE>::release(this);
-			} else {
-				delete[] this;
-			}
+			delete[] reinterpret_cast<uint8_t*>(this);
 		}
 	}
 	int bytes_unwritten() const { return size_ - bytes_written; }

@@ -1,4 +1,4 @@
-set(FDBMONITOR_SRCS ConvertUTF.h SimpleIni.h fdbmonitor.cpp)
+set(FDBMONITOR_SRCS fdbmonitor.cpp)
 
 add_executable(fdbmonitor ${FDBMONITOR_SRCS})
 strip_debug_symbols(fdbmonitor)
@@ -9,6 +9,16 @@ endif()
 # FIXME: This include directory is an ugly hack. We probably want to fix this
 # as soon as we get rid of the old build system
 target_link_libraries(fdbmonitor PUBLIC Threads::Threads)
+
+# We don't compile fdbmonitor with thread sanitizer instrumentation, since this
+# appears to change its behavior (it no longer seems to restart killed
+# processes). fdbmonitor is single-threaded anyway.
+get_target_property(fdbmonitor_options fdbmonitor COMPILE_OPTIONS)
+list(REMOVE_ITEM fdbmonitor_options "-fsanitize=thread")
+set_property(TARGET fdbmonitor PROPERTY COMPILE_OPTIONS ${target_options})
+get_target_property(fdbmonitor_options fdbmonitor LINK_OPTIONS)
+list(REMOVE_ITEM fdbmonitor_options "-fsanitize=thread")
+set_property(TARGET fdbmonitor PROPERTY LINK_OPTIONS ${target_options})
 
 if(GENERATE_DEBUG_PACKAGES)
   fdb_install(TARGETS fdbmonitor DESTINATION fdbmonitor COMPONENT server)
@@ -35,3 +45,13 @@ add_custom_target(start_sandbox
                                              --lockfile ${CMAKE_BINARY_DIR}/sandbox/fdbmonitor.lock)
 
 add_dependencies(start_sandbox fdbmonitor fdbserver)
+
+if(NOT EXISTS ${CMAKE_BINARY_DIR}/contrib/generate_profile.sh)
+  configure_file(${CMAKE_SOURCE_DIR}/contrib/generate_profile.sh
+    ${CMAKE_BINARY_DIR}/contrib/generate_profile.sh)
+endif()
+
+add_custom_target(generate_profile
+  COMMAND  ${CMAKE_BINARY_DIR}/contrib/generate_profile.sh ${CMAKE_BINARY_DIR})
+
+add_dependencies(generate_profile fdbmonitor fdbserver mako fdbcli)

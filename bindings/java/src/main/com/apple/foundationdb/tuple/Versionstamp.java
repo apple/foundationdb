@@ -24,7 +24,6 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Arrays;
 
-
 /**
  * Used to represent values written by versionstamp operations with a {@link Tuple}.
  *  This wraps a single array which should contain twelve bytes. The first ten bytes
@@ -37,7 +36,7 @@ import java.util.Arrays;
  *  over time. The final two bytes are the "user" version and should be set by the client.
  *  This allows the user to use this class to impose a total order of items across multiple
  *  transactions in the database in a consistent and conflict-free way. The user can elect to
- *  ignore this parameter by instantiating the class with the paramaterless {@link #incomplete() incomplete()}
+ *  ignore this parameter by instantiating the class with the parameterless {@link #incomplete() incomplete()}
  *  and one-parameter {@link #complete(byte[]) complete} static initializers. If they do so,
  *  then versions are written with a default (constant) user version.
  *

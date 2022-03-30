@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -137,7 +137,7 @@ struct PerformanceWorkload : TestWorkload {
 		TestSpec spec(LiteralStringRef("PerformanceSetup"), false, false);
 		spec.options = options;
 		spec.phases = TestWorkload::SETUP;
-		DistributedTestResults results = wait(runWorkload(cx, testers, spec));
+		DistributedTestResults results = wait(runWorkload(cx, testers, spec, Optional<TenantName>()));
 
 		return Void();
 	}
@@ -172,10 +172,12 @@ struct PerformanceWorkload : TestWorkload {
 				TestSpec spec(LiteralStringRef("PerformanceRun"), false, false);
 				spec.phases = TestWorkload::EXECUTION | TestWorkload::METRICS;
 				spec.options = options;
-				DistributedTestResults r = wait(runWorkload(cx, self->testers, spec));
+				DistributedTestResults r = wait(runWorkload(cx, self->testers, spec, Optional<TenantName>()));
 				results = r;
 			} catch (Error& e) {
-				TraceEvent("PerformanceRunError").error(e, true).detail("Workload", printable(self->probeWorkload));
+				TraceEvent("PerformanceRunError")
+				    .errorUnsuppressed(e)
+				    .detail("Workload", printable(self->probeWorkload));
 				break;
 			}
 			PerfMetric tpsMetric = self->getNamedMetric("Transactions/sec", results.metrics);

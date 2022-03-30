@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,10 +30,12 @@ void forceLinkMemcpyTests();
 void forceLinkMemcpyPerfTests();
 #if (!defined(TLS_DISABLED) && !defined(_WIN32))
 void forceLinkStreamCipherTests();
+void forceLinkBLockCiherTests();
 #endif
 void forceLinkParallelStreamTests();
 void forceLinkSimExternalConnectionTests();
 void forceLinkMutationLogReaderTests();
+void forceLinkSimEncryptVaultProxyTests();
 void forceLinkIThreadPoolTests();
 
 struct UnitTestWorkload : TestWorkload {
@@ -75,10 +77,12 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkMemcpyPerfTests();
 #if (!defined(TLS_DISABLED) && !defined(_WIN32))
 		forceLinkStreamCipherTests();
+		void forceLinkBlobCipherTests();
 #endif
 		forceLinkParallelStreamTests();
 		forceLinkSimExternalConnectionTests();
 		forceLinkMutationLogReaderTests();
+		forceLinkSimEncryptVaultProxyTests();
 		forceLinkIThreadPoolTests();
 	}
 
@@ -149,7 +153,7 @@ struct UnitTestWorkload : TestWorkload {
 			self->totalWallTime += wallTime;
 			self->totalSimTime += simTime;
 			TraceEvent(result.code() != error_code_success ? SevError : SevInfo, "UnitTest")
-			    .error(result, true)
+			    .errorUnsuppressed(result)
 			    .detail("Name", test->name)
 			    .detail("File", test->file)
 			    .detail("Line", test->line)

@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,6 +31,10 @@
 // MockDNS is a class maintaining a <hostname, vector<NetworkAddress>> mapping, mocking a DNS in simulation.
 class MockDNS {
 public:
+	MockDNS() {}
+	explicit MockDNS(const std::map<std::string, std::vector<NetworkAddress>>& mockDNS)
+	  : hostnameToAddresses(mockDNS) {}
+
 	bool findMockTCPEndpoint(const std::string& host, const std::string& service);
 	void addMockTCPEndpoint(const std::string& host,
 	                        const std::string& service,
@@ -41,6 +45,12 @@ public:
 	void removeMockTCPEndpoint(const std::string& host, const std::string& service);
 	void clearMockTCPEndpoints();
 	std::vector<NetworkAddress> getTCPEndpoint(const std::string& host, const std::string& service);
+
+	void operator=(MockDNS const& rhs) { hostnameToAddresses = rhs.hostnameToAddresses; }
+	// Convert hostnameToAddresses to string. The format is:
+	// hostname1,host1Address1,host1Address2;hostname2,host2Address1,host2Address2...
+	std::string toString();
+	static MockDNS parseFromString(const std::string& s);
 
 private:
 	std::map<std::string, std::vector<NetworkAddress>> hostnameToAddresses;
@@ -67,6 +77,7 @@ public:
 	NetworkAddress getPeerAddress() const override;
 	UID getDebugID() const override;
 	static Future<std::vector<NetworkAddress>> resolveTCPEndpoint(const std::string& host, const std::string& service);
+	static std::vector<NetworkAddress> resolveTCPEndpointBlocking(const std::string& host, const std::string& service);
 	static Future<Reference<IConnection>> connect(NetworkAddress toAddr);
 };
 

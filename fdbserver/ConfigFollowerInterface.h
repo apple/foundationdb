@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -176,20 +176,24 @@ struct ConfigFollowerRollforwardRequest {
 
 struct ConfigFollowerGetCommittedVersionReply {
 	static constexpr FileIdentifier file_identifier = 9214735;
+	Version lastCompacted;
 	Version lastCommitted;
 
 	ConfigFollowerGetCommittedVersionReply() = default;
-	explicit ConfigFollowerGetCommittedVersionReply(Version lastCommitted) : lastCommitted(lastCommitted) {}
+	explicit ConfigFollowerGetCommittedVersionReply(Version lastCompacted, Version lastCommitted)
+	  : lastCompacted(lastCompacted), lastCommitted(lastCommitted) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, lastCommitted);
+		serializer(ar, lastCompacted, lastCommitted);
 	}
 };
 
 struct ConfigFollowerGetCommittedVersionRequest {
 	static constexpr FileIdentifier file_identifier = 1093472;
 	ReplyPromise<ConfigFollowerGetCommittedVersionReply> reply;
+
+	ConfigFollowerGetCommittedVersionRequest() = default;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -218,6 +222,7 @@ public:
 	bool operator==(ConfigFollowerInterface const& rhs) const;
 	bool operator!=(ConfigFollowerInterface const& rhs) const;
 	UID id() const { return _id; }
+	NetworkAddress address() const { return getSnapshotAndChanges.getEndpoint().getPrimaryAddress(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {

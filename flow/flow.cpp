@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -69,7 +69,7 @@ using namespace std::literals;
 
 const std::string_view StackLineage::name = "StackLineage"sv;
 
-#if (defined(__linux__) || defined(__FreeBSD__)) && defined(__AVX__) && !defined(MEMORY_SANITIZER)
+#if (defined(__linux__) || defined(__FreeBSD__)) && defined(__AVX__) && !defined(MEMORY_SANITIZER) && !DEBUG_DETERMINISM
 // For benchmarking; need a version of rte_memcpy that doesn't live in the same compilation unit as the test.
 void* rte_memcpy_noinline(void* __restrict __dest, const void* __restrict __src, size_t __n) {
 	return rte_memcpy(__dest, __src, __n);
@@ -445,5 +445,11 @@ TEST_CASE("/flow/FlatBuffers/Standalone") {
 		reader.deserialize(out);
 		ASSERT(in == out);
 	}
+	return Void();
+}
+
+// we need to make sure at least one test of each prefix exists, otherwise
+// the noSim test fails if we compile without RocksDB
+TEST_CASE("noSim/noopTest") {
 	return Void();
 }

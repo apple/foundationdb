@@ -41,6 +41,7 @@ type ReadTransaction interface {
 	Snapshot() Snapshot
 	GetEstimatedRangeSizeBytes(r ExactRange) FutureInt64
 	GetRangeSplitPoints(r ExactRange, chunkSize int64) FutureKeyArray
+	Options() TransactionOptions
 
 	ReadTransactor
 }

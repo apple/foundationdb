@@ -1,14 +1,20 @@
 set(FDBSERVER_SRCS
-  ApplyMetadataMutation.h
   ApplyMetadataMutation.cpp
+  ApplyMetadataMutation.h
   BackupInterface.h
   BackupProgress.actor.cpp
   BackupProgress.actor.h
   BackupWorker.actor.cpp
+  BlobGranuleServerCommon.actor.cpp
+  BlobGranuleServerCommon.actor.h
   BlobManager.actor.cpp
   BlobManagerInterface.h
   BlobWorker.actor.cpp
   ClusterController.actor.cpp
+  ClusterController.actor.h
+  ClusterRecovery.actor.cpp
+  ClusterRecovery.actor.h
+  CommitProxyServer.actor.cpp
   ConfigBroadcaster.actor.cpp
   ConfigBroadcaster.h
   ConfigDatabaseUnitTests.actor.cpp
@@ -30,10 +36,14 @@ set(FDBSERVER_SRCS
   DataDistributionTracker.actor.cpp
   DataDistributorInterface.h
   DBCoreState.h
+  DDTeamCollection.actor.cpp
+  DDTeamCollection.h
   DiskQueue.actor.cpp
-  fdbserver.actor.cpp
+  EncryptKeyProxy.actor.cpp
+  EncryptKeyProxyInterface.h
   FDBExecHelper.actor.cpp
   FDBExecHelper.actor.h
+  fdbserver.actor.cpp
   GrvProxyServer.actor.cpp
   IConfigConsumer.cpp
   IConfigConsumer.h
@@ -45,6 +55,8 @@ set(FDBSERVER_SRCS
   KeyValueStoreMemory.actor.cpp
   KeyValueStoreRocksDB.actor.cpp
   KeyValueStoreSQLite.actor.cpp
+  KnobProtectiveGroups.cpp
+  KnobProtectiveGroups.h
   Knobs.h
   LatencyBandConfig.cpp
   LatencyBandConfig.h
@@ -62,14 +74,13 @@ set(FDBSERVER_SRCS
   LogSystemDiskQueueAdapter.h
   LogSystemPeekCursor.actor.cpp
   MasterInterface.h
+  masterserver.actor.cpp
   MetricLogger.actor.cpp
   MetricLogger.actor.h
-  CommitProxyServer.actor.cpp
-  masterserver.actor.cpp
-  MutationTracking.h
-  MutationTracking.cpp
-  MoveKeys.actor.h
   MoveKeys.actor.cpp
+  MoveKeys.actor.h
+  MutationTracking.cpp
+  MutationTracking.h
   networktest.actor.cpp
   NetworkTest.h
   OldTLogServer_4_6.actor.cpp
@@ -86,31 +97,42 @@ set(FDBSERVER_SRCS
   QuietDatabase.h
   RadixTree.h
   Ratekeeper.actor.cpp
+  Ratekeeper.h
   RatekeeperInterface.h
   RecoveryState.h
-  RestoreCommon.actor.h
-  RestoreCommon.actor.cpp
-  RestoreUtil.h
-  RestoreUtil.actor.cpp
-  RestoreRoleCommon.actor.h
-  RestoreRoleCommon.actor.cpp
-  RestoreController.actor.h
-  RestoreController.actor.cpp
-  RestoreApplier.actor.h
-  RestoreApplier.actor.cpp
-  RestoreLoader.actor.h
-  RestoreLoader.actor.cpp
-  RestoreWorker.actor.h
-  RestoreWorker.actor.cpp
-  RestoreWorkerInterface.actor.cpp
-  RestoreWorkerInterface.actor.h
+  ResolutionBalancer.actor.cpp
+  ResolutionBalancer.actor.h
   Resolver.actor.cpp
   ResolverInterface.h
-  RoleLineage.actor.h
+  RestoreApplier.actor.cpp
+  RestoreApplier.actor.h
+  RestoreCommon.actor.cpp
+  RestoreCommon.actor.h
+  RestoreController.actor.cpp
+  RestoreController.actor.h
+  RestoreLoader.actor.cpp
+  RestoreLoader.actor.h
+  RestoreRoleCommon.actor.cpp
+  RestoreRoleCommon.actor.h
+  RestoreUtil.actor.cpp
+  RestoreUtil.h
+  RestoreWorker.actor.cpp
+  RestoreWorker.actor.h
+  RestoreWorkerInterface.actor.cpp
+  RestoreWorkerInterface.actor.h
+  RkTagThrottleCollection.cpp
+  RkTagThrottleCollection.h
+  RocksDBCheckpointUtils.actor.cpp
+  RocksDBCheckpointUtils.actor.h
   RoleLineage.actor.cpp
+  RoleLineage.actor.h
+  ServerCheckpoint.actor.cpp
+  ServerCheckpoint.actor.h
   ServerDBInfo.actor.h
   ServerDBInfo.h
   SigStack.cpp
+  SimEncryptVaultProxy.actor.cpp
+  SimEncryptVaultProxy.actor.h
   SimpleConfigConsumer.actor.cpp
   SimpleConfigConsumer.h
   SimulatedCluster.actor.cpp
@@ -125,16 +147,22 @@ set(FDBSERVER_SRCS
   storageserver.actor.cpp
   TagPartitionedLogSystem.actor.cpp
   TagPartitionedLogSystem.actor.h
+  TagThrottler.actor.cpp
+  TagThrottler.h
+  TCInfo.actor.cpp
+  TCInfo.h
   template_fdb.h
   tester.actor.cpp
   TesterInterface.actor.h
   TLogInterface.h
   TLogServer.actor.cpp
-  TSSMappingUtil.actor.h
+  TransactionTagCounter.cpp
+  TransactionTagCounter.h
   TSSMappingUtil.actor.cpp
+  TSSMappingUtil.actor.h
   VersionedBTree.actor.cpp
-  VFSAsync.h
   VFSAsync.cpp
+  VFSAsync.h
   WaitFailure.actor.cpp
   WaitFailure.h
   worker.actor.cpp
@@ -152,57 +180,59 @@ set(FDBSERVER_SRCS
   workloads/AtomicRestore.actor.cpp
   workloads/AtomicSwitchover.actor.cpp
   workloads/BackgroundSelectors.actor.cpp
-  workloads/BackupCorrectness.actor.cpp
   workloads/BackupAndParallelRestoreCorrectness.actor.cpp
-  workloads/ClogSingleConnection.actor.cpp
-  workloads/ConfigIncrement.actor.cpp
+  workloads/BackupCorrectness.actor.cpp
   workloads/BackupToBlob.actor.cpp
   workloads/BackupToDBAbort.actor.cpp
   workloads/BackupToDBCorrectness.actor.cpp
   workloads/BackupToDBUpgrade.actor.cpp
-  workloads/BlobStoreWorkload.h
+  workloads/BlobGranuleCorrectnessWorkload.actor.cpp
   workloads/BlobGranuleVerifier.actor.cpp
+  workloads/BlobStoreWorkload.h
   workloads/BulkLoad.actor.cpp
   workloads/BulkSetup.actor.h
   workloads/Cache.actor.cpp
   workloads/ChangeConfig.actor.cpp
+  workloads/ChangeFeeds.actor.cpp
   workloads/ClearSingleRange.actor.cpp
-  workloads/ClientLibManagementWorkload.actor.cpp
   workloads/ClientTransactionProfileCorrectness.actor.cpp
-  workloads/TriggerRecovery.actor.cpp
-  workloads/SuspendProcesses.actor.cpp
+  workloads/ClogSingleConnection.actor.cpp
   workloads/CommitBugCheck.actor.cpp
+  workloads/ConfigIncrement.actor.cpp
   workloads/ConfigureDatabase.actor.cpp
   workloads/ConflictRange.actor.cpp
   workloads/ConsistencyCheck.actor.cpp
   workloads/CpuProfiler.actor.cpp
   workloads/Cycle.actor.cpp
-  workloads/ChangeFeeds.actor.cpp
   workloads/DataDistributionMetrics.actor.cpp
   workloads/DataLossRecovery.actor.cpp
   workloads/DDBalance.actor.cpp
   workloads/DDMetrics.actor.cpp
   workloads/DDMetricsExclude.actor.cpp
+  workloads/DifferentClustersSameRV.actor.cpp
   workloads/DiskDurability.actor.cpp
   workloads/DiskDurabilityTest.actor.cpp
   workloads/DiskFailureInjection.actor.cpp
   workloads/DummyWorkload.actor.cpp
+  workloads/EncryptionOps.actor.cpp
   workloads/ExternalWorkload.actor.cpp
   workloads/FastTriggeredWatches.actor.cpp
   workloads/FileSystem.actor.cpp
   workloads/Fuzz.cpp
   workloads/FuzzApiCorrectness.actor.cpp
+  workloads/GetMappedRange.actor.cpp
   workloads/GetRangeStream.actor.cpp
   workloads/HealthMetricsApi.actor.cpp
-  workloads/IncrementalBackup.actor.cpp
+  workloads/HighContentionPrefixAllocatorWorkload.actor.cpp
   workloads/Increment.actor.cpp
+  workloads/IncrementalBackup.actor.cpp
   workloads/IndexScan.actor.cpp
   workloads/Inventory.actor.cpp
-  workloads/KVStoreTest.actor.cpp
   workloads/KillRegion.actor.cpp
+  workloads/KVStoreTest.actor.cpp
+  workloads/LocalRatekeeper.actor.cpp
   workloads/LockDatabase.actor.cpp
   workloads/LockDatabaseFrequently.actor.cpp
-  workloads/LocalRatekeeper.actor.cpp
   workloads/LogMetrics.actor.cpp
   workloads/LowLatency.actor.cpp
   workloads/MachineAttrition.actor.cpp
@@ -213,9 +243,9 @@ set(FDBSERVER_SRCS
   workloads/MetricLogging.actor.cpp
   workloads/MiniCycle.actor.cpp
   workloads/MutationLogReaderCorrectness.actor.cpp
-  workloads/GetRangeAndMap.actor.cpp
   workloads/ParallelRestore.actor.cpp
   workloads/Performance.actor.cpp
+  workloads/PhysicalShardMove.actor.cpp
   workloads/Ping.actor.cpp
   workloads/PopulateTPCC.actor.cpp
   workloads/ProtocolVersion.actor.cpp
@@ -239,29 +269,32 @@ set(FDBSERVER_SRCS
   workloads/SelectorCorrectness.actor.cpp
   workloads/Serializability.actor.cpp
   workloads/Sideband.actor.cpp
+  workloads/SidebandSingle.actor.cpp
   workloads/SimpleAtomicAdd.actor.cpp
   workloads/SlowTaskWorkload.actor.cpp
   workloads/SnapTest.actor.cpp
   workloads/SpecialKeySpaceCorrectness.actor.cpp
-  workloads/StreamingRangeRead.actor.cpp
   workloads/StatusWorkload.actor.cpp
   workloads/Storefront.actor.cpp
+  workloads/StreamingRangeRead.actor.cpp
   workloads/StreamingRead.actor.cpp
   workloads/SubmitBackup.actor.cpp
+  workloads/SuspendProcesses.actor.cpp
   workloads/TagThrottleApi.actor.cpp
   workloads/TargetedKill.actor.cpp
   workloads/TaskBucketCorrectness.actor.cpp
+  workloads/TenantManagement.actor.cpp
   workloads/ThreadSafety.actor.cpp
   workloads/Throttling.actor.cpp
   workloads/Throughput.actor.cpp
   workloads/TimeKeeperCorrectness.actor.cpp
   workloads/TPCC.actor.cpp
   workloads/TPCCWorkload.h
-  workloads/DifferentClustersSameRV.actor.cpp
+  workloads/TriggerRecovery.actor.cpp
+  workloads/UDPWorkload.actor.cpp
   workloads/UnitPerf.actor.cpp
   workloads/UnitTests.actor.cpp
   workloads/Unreadable.actor.cpp
-  workloads/UDPWorkload.actor.cpp
   workloads/VersionStamp.actor.cpp
   workloads/WatchAndWait.actor.cpp
   workloads/Watches.actor.cpp
@@ -290,14 +323,15 @@ add_library(fdb_sqlite STATIC
 
 if (WITH_ROCKSDB_EXPERIMENTAL)
   add_definitions(-DSSD_ROCKSDB_EXPERIMENTAL)
-  # Set this to 0 if you want to compile RocksDB with `-march=native`.
-  set(PORTABLE_ROCKSDB 1)
 
   include(CompileRocksDB)
   # CompileRocksDB sets `lz4_LIBRARIES` to be the shared lib, we want to link
   # statically, so find the static library here.
   find_library(lz4_STATIC_LIBRARIES
     NAMES liblz4.a REQUIRED)
+  if (WITH_LIBURING)
+    find_package(uring)
+  endif()
 endif()
 
 # Suppress warnings in sqlite since it's third party
@@ -317,8 +351,15 @@ target_include_directories(fdbserver PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/workloads)
 if (WITH_ROCKSDB_EXPERIMENTAL)
   add_dependencies(fdbserver rocksdb)
-  target_include_directories(fdbserver PRIVATE ${ROCKSDB_INCLUDE_DIR})
-  target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite ${ROCKSDB_LIBRARIES} ${lz4_STATIC_LIBRARIES})
+  if(WITH_LIBURING)
+    target_include_directories(fdbserver PRIVATE ${ROCKSDB_INCLUDE_DIR} ${uring_INCLUDE_DIR})
+    target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite ${ROCKSDB_LIBRARIES} ${uring_LIBRARIES} ${lz4_STATIC_LIBRARIES})
+    target_compile_definitions(fdbserver PRIVATE BOOST_ASIO_HAS_IO_URING=1 BOOST_ASIO_DISABLE_EPOLL=1)
+  else()
+    target_include_directories(fdbserver PRIVATE ${ROCKSDB_INCLUDE_DIR})
+    target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite ${ROCKSDB_LIBRARIES} ${lz4_STATIC_LIBRARIES})
+    target_compile_definitions(fdbserver PRIVATE)
+  endif()
 else()
   target_link_libraries(fdbserver PRIVATE fdbclient fdb_sqlite)
 endif()

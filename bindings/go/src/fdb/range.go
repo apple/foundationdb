@@ -22,10 +22,6 @@
 
 package fdb
 
-// #define FDB_API_VERSION 710
-// #include <foundationdb/fdb_c.h>
-import "C"
-
 import (
 	"fmt"
 )

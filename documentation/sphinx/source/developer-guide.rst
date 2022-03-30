@@ -8,6 +8,7 @@
 .. |database-type| replace:: ``Database``
 .. |database-class| replace:: ``Database``
 .. |database-auto| replace:: FIXME
+.. |tenant-type| replace:: FIXME
 .. |transaction-class| replace:: ``Transaction``
 .. |get-key-func| replace:: get_key()
 .. |get-range-func| replace:: get_range()
@@ -915,7 +916,7 @@ When using FoundationDB we strongly recommend users to use the retry-loop. In Py
        except FDBError as e:
            tr.on_error(e.code).wait()
 
-This is also what the transaction decoration in python does, if you pass a ``Database`` object to a decorated function. There are some interesting properies of this retry loop:
+This is also what the transaction decoration in python does, if you pass a ``Database`` object to a decorated function. There are some interesting properties of this retry loop:
 
 * We never create a new transaction within that loop. Instead ``tr.on_error`` will create a soft reset on the transaction.
 * ``tr.on_error`` returns a future. This is because ``on_error`` will do back off to make sure we don't overwhelm the cluster.

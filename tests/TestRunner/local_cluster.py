@@ -7,10 +7,22 @@ import sys
 import socket
 
 
-def get_free_port():
+def _get_free_port_internal():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(('0.0.0.0', 0))
         return s.getsockname()[1]
+
+
+_used_ports = set()
+
+
+def get_free_port():
+    global _used_ports
+    port = _get_free_port_internal()
+    while port in _used_ports:
+        port = _get_free_port_internal()
+    _used_ports.add(port)
+    return port
 
 
 class LocalCluster:
@@ -24,32 +36,32 @@ class LocalCluster:
 [fdbmonitor]
 
 [general]
-restart_delay = 10
-## by default, restart_backoff = restart_delay_reset_interval = restart_delay
-# initial_restart_delay = 0
-# restart_backoff = 60
-# restart_delay_reset_interval = 60
-cluster_file = {etcdir}/fdb.cluster
-# delete_envvars =
-# kill_on_configuration_change = true
+restart-delay = 10
+## by default, restart-backoff = restart-delay-reset-interval = restart-delay
+# initial-restart-delay = 0
+# restart-backoff = 60
+# restart-delay-reset-interval = 60
+cluster-file = {etcdir}/fdb.cluster
+# delete-envvars =
+# kill-on-configuration-change = true
 
 ## Default parameters for individual fdbserver processes
 [fdbserver]
 command = {fdbserver_bin}
-public_address = auto:$ID
-listen_address = public
+public-address = auto:$ID
+listen-address = public
 datadir = {datadir}/$ID
 logdir = {logdir}
 # logsize = 10MiB
 # maxlogssize = 100MiB
-# machine_id =
-# datacenter_id =
+# machine-id =
+# datacenter-id =
 # class =
 # memory = 8GiB
-# storage_memory = 1GiB
-# cache_memory = 2GiB
-# metrics_cluster =
-# metrics_prefix =
+# storage-memory = 1GiB
+# cache-memory = 2GiB
+# metrics-cluster =
+# metrics-prefix =
 
 ## An individual fdbserver process with id 4000
 ## Parameters set here override defaults from the [fdbserver] section
@@ -124,5 +136,5 @@ logdir = {logdir}
 
     def create_database(self, storage='ssd'):
         args = [self.fdbcli_binary, '-C', self.etc.joinpath('fdb.cluster'), '--exec',
-                'configure new single {}'.format(storage)]
+                'configure new single {} tenant_mode=optional_experimental'.format(storage)]
         subprocess.run(args)

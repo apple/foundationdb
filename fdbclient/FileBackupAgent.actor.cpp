@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "contrib/fmt-8.0.1/include/fmt/format.h"
+#include "contrib/fmt-8.1.1/include/fmt/format.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/DatabaseContext.h"
@@ -87,7 +87,7 @@ std::string secondsToTimeFormat(int64_t seconds) {
 	else if (seconds >= 60)
 		return format("%.2f minute(s)", seconds / 60.0);
 	else
-		return format("%ld second(s)", seconds);
+		return format("%lld second(s)", seconds);
 }
 
 const Key FileBackupAgent::keyLastRestorable = LiteralStringRef("last_restorable");
@@ -4363,13 +4363,14 @@ public:
 	                                                Key backupTag,
 	                                                Standalone<VectorRef<KeyRangeRef>> backupRanges,
 	                                                Key bcUrl,
+	                                                Optional<std::string> proxy,
 	                                                Version targetVersion,
 	                                                LockDB lockDB,
 	                                                UID randomUID,
 	                                                Key addPrefix,
 	                                                Key removePrefix) {
 		// Sanity check backup is valid
-		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(bcUrl.toString());
+		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(bcUrl.toString(), proxy, {});
 		state BackupDescription desc = wait(bc->describeBackup());
 		wait(desc.resolveVersionTimes(cx));
 
@@ -4407,9 +4408,9 @@ public:
 				break;
 			} catch (Error& e) {
 				TraceEvent(numTries > 50 ? SevError : SevInfo, "FastRestoreToolSubmitRestoreRequestsMayFail")
+				    .error(e)
 				    .detail("Reason", "DB is not properly locked")
-				    .detail("ExpectedLockID", randomUID)
-				    .error(e);
+				    .detail("ExpectedLockID", randomUID);
 				numTries++;
 				wait(tr->onError(e));
 			}
@@ -4430,6 +4431,7 @@ public:
 					struct RestoreRequest restoreRequest(restoreIndex,
 					                                     restoreTag,
 					                                     bcUrl,
+					                                     proxy,
 					                                     targetVersion,
 					                                     range,
 					                                     deterministicRandom()->randomUniqueID(),
@@ -4443,8 +4445,8 @@ public:
 				break;
 			} catch (Error& e) {
 				TraceEvent(numTries > 50 ? SevError : SevInfo, "FastRestoreToolSubmitRestoreRequestsRetry")
-				    .detail("RestoreIndex", restoreIndex)
-				    .error(e);
+				    .error(e)
+				    .detail("RestoreIndex", restoreIndex);
 				numTries++;
 				wait(tr->onError(e));
 			}
@@ -4510,6 +4512,7 @@ public:
 	ACTOR static Future<Void> submitBackup(FileBackupAgent* backupAgent,
 	                                       Reference<ReadYourWritesTransaction> tr,
 	                                       Key outContainer,
+	                                       Optional<std::string> proxy,
 	                                       int initialSnapshotIntervalSeconds,
 	                                       int snapshotIntervalSeconds,
 	                                       std::string tagName,
@@ -4555,7 +4558,8 @@ public:
 			backupContainer = joinPath(backupContainer, std::string("backup-") + nowStr.toString());
 		}
 
-		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(backupContainer, encryptionKeyFileName);
+		state Reference<IBackupContainer> bc =
+		    IBackupContainer::openContainer(backupContainer, proxy, encryptionKeyFileName);
 		try {
 			wait(timeoutError(bc->create(), 30));
 		} catch (Error& e) {
@@ -4642,6 +4646,7 @@ public:
 	                                        Reference<ReadYourWritesTransaction> tr,
 	                                        Key tagName,
 	                                        Key backupURL,
+	                                        Optional<std::string> proxy,
 	                                        Standalone<VectorRef<KeyRangeRef>> ranges,
 	                                        Version restoreVersion,
 	                                        Key addPrefix,
@@ -4710,7 +4715,7 @@ public:
 		// Point the tag to the new uid
 		tag.set(tr, { uid, false });
 
-		Reference<IBackupContainer> bc = IBackupContainer::openContainer(backupURL.toString());
+		Reference<IBackupContainer> bc = IBackupContainer::openContainer(backupURL.toString(), proxy, {});
 
 		// Configure the new restore
 		restore.tag().set(tr, tagName.toString());
@@ -5183,7 +5188,7 @@ public:
 						else
 							statusText += "The initial snapshot is still running.\n";
 
-						statusText += format("\nDetails:\n LogBytes written - %ld\n RangeBytes written - %ld\n "
+						statusText += format("\nDetails:\n LogBytes written - %lld\n RangeBytes written - %lld\n "
 						                     "Last complete log version and timestamp        - %s, %s\n "
 						                     "Last complete snapshot version and timestamp   - %s, %s\n "
 						                     "Current Snapshot start version and timestamp   - %s, %s\n "
@@ -5303,6 +5308,7 @@ public:
 	                                     Optional<Database> cxOrig,
 	                                     Key tagName,
 	                                     Key url,
+	                                     Optional<std::string> proxy,
 	                                     Standalone<VectorRef<KeyRangeRef>> ranges,
 	                                     WaitForComplete waitForComplete,
 	                                     Version targetVersion,
@@ -5320,7 +5326,7 @@ public:
 			throw restore_error();
 		}
 
-		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(url.toString());
+		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(url.toString(), proxy, {});
 
 		state BackupDescription desc = wait(bc->describeBackup(true));
 		if (cxOrig.present()) {
@@ -5360,6 +5366,7 @@ public:
 				                   tr,
 				                   tagName,
 				                   url,
+				                   proxy,
 				                   ranges,
 				                   targetVersion,
 				                   addPrefix,
@@ -5499,6 +5506,7 @@ public:
 			                           tagName,
 			                           ranges,
 			                           KeyRef(bc->getURL()),
+			                           bc->getProxy(),
 			                           targetVersion,
 			                           LockDB::True,
 			                           randomUid,
@@ -5520,6 +5528,7 @@ public:
 			                           cx,
 			                           tagName,
 			                           KeyRef(bc->getURL()),
+			                           bc->getProxy(),
 			                           ranges,
 			                           WaitForComplete::True,
 			                           ::invalidVersion,
@@ -5561,13 +5570,14 @@ Future<Void> FileBackupAgent::submitParallelRestore(Database cx,
                                                     Key backupTag,
                                                     Standalone<VectorRef<KeyRangeRef>> backupRanges,
                                                     Key bcUrl,
+                                                    Optional<std::string> proxy,
                                                     Version targetVersion,
                                                     LockDB lockDB,
                                                     UID randomUID,
                                                     Key addPrefix,
                                                     Key removePrefix) {
 	return FileBackupAgentImpl::submitParallelRestore(
-	    cx, backupTag, backupRanges, bcUrl, targetVersion, lockDB, randomUID, addPrefix, removePrefix);
+	    cx, backupTag, backupRanges, bcUrl, proxy, targetVersion, lockDB, randomUID, addPrefix, removePrefix);
 }
 
 Future<Void> FileBackupAgent::atomicParallelRestore(Database cx,
@@ -5582,6 +5592,7 @@ Future<Version> FileBackupAgent::restore(Database cx,
                                          Optional<Database> cxOrig,
                                          Key tagName,
                                          Key url,
+                                         Optional<std::string> proxy,
                                          Standalone<VectorRef<KeyRangeRef>> ranges,
                                          WaitForComplete waitForComplete,
                                          Version targetVersion,
@@ -5598,6 +5609,7 @@ Future<Version> FileBackupAgent::restore(Database cx,
 	                                    cxOrig,
 	                                    tagName,
 	                                    url,
+	                                    proxy,
 	                                    ranges,
 	                                    waitForComplete,
 	                                    targetVersion,
@@ -5639,6 +5651,7 @@ Future<ERestoreState> FileBackupAgent::waitRestore(Database cx, Key tagName, Ver
 
 Future<Void> FileBackupAgent::submitBackup(Reference<ReadYourWritesTransaction> tr,
                                            Key outContainer,
+                                           Optional<std::string> proxy,
                                            int initialSnapshotIntervalSeconds,
                                            int snapshotIntervalSeconds,
                                            std::string const& tagName,
@@ -5650,6 +5663,7 @@ Future<Void> FileBackupAgent::submitBackup(Reference<ReadYourWritesTransaction> 
 	return FileBackupAgentImpl::submitBackup(this,
 	                                         tr,
 	                                         outContainer,
+	                                         proxy,
 	                                         initialSnapshotIntervalSeconds,
 	                                         snapshotIntervalSeconds,
 	                                         tagName,
@@ -5800,9 +5814,9 @@ ACTOR static Future<Void> transformDatabaseContents(Database cx,
 			break;
 		} catch (Error& e) {
 			TraceEvent("FastRestoreWorkloadTransformDatabaseContentsGetAllKeys")
+			    .error(e)
 			    .detail("Index", i)
-			    .detail("RestoreRange", restoreRanges[i])
-			    .error(e);
+			    .detail("RestoreRange", restoreRanges[i]);
 			oldData = Standalone<VectorRef<KeyValueRef>>(); // clear the vector
 			wait(tr.onError(e));
 		}

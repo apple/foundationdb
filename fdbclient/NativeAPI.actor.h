@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -45,6 +45,8 @@
 #define CLIENT_BUGGIFY_WITH_PROB(x)                                                                                    \
 	(getSBVar(__FILE__, __LINE__, BuggifyType::Client) && deterministicRandom()->random01() < (x))
 #define CLIENT_BUGGIFY CLIENT_BUGGIFY_WITH_PROB(P_BUGGIFIED_SECTION_FIRES[int(BuggifyType::Client)])
+
+FDB_DECLARE_BOOLEAN_PARAM(UseProvisionalProxies);
 
 // Incomplete types that are reference counted
 class DatabaseContext;
@@ -130,12 +132,12 @@ void setupNetwork(uint64_t transportId = 0, UseMetrics = UseMetrics::False);
 //  call stopNetwork (from a non-networking thread) can cause the runNetwork() call to
 //  return.
 //
-// Throws network_already_setup if g_network has already been initalized
+// Throws network_already_setup if g_network has already been initialized
 void runNetwork();
 
 // See above.  Can be called from a thread that is not the "networking thread"
 //
-// Throws network_not_setup if g_network has not been initalized
+// Throws network_not_setup if g_network has not been initialized
 void stopNetwork();
 
 struct StorageMetrics;
@@ -155,6 +157,9 @@ struct TransactionOptions {
 	bool includePort : 1;
 	bool reportConflictingKeys : 1;
 	bool expensiveClearCostEstimation : 1;
+	bool useGrvCache : 1;
+	bool skipGrvCache : 1;
+	bool rawAccess : 1;
 
 	TransactionPriority priority;
 
@@ -173,22 +178,6 @@ private:
 };
 
 class ReadYourWritesTransaction; // workaround cyclic dependency
-struct TransactionInfo {
-	Optional<UID> debugID;
-	TaskPriority taskID;
-	SpanID spanID;
-	bool useProvisionalProxies;
-	// Used to save conflicting keys if FDBTransactionOptions::REPORT_CONFLICTING_KEYS is enabled
-	// prefix/<key1> : '1' - any keys equal or larger than this key are (probably) conflicting keys
-	// prefix/<key2> : '0' - any keys equal or larger than this key are (definitely) not conflicting keys
-	std::shared_ptr<CoalescedKeyRangeMap<Value>> conflictingKeys;
-
-	// Only available so that Transaction can have a default constructor, for use in state variables
-	TransactionInfo() : taskID(), spanID(), useProvisionalProxies() {}
-
-	explicit TransactionInfo(TaskPriority taskID, SpanID spanID)
-	  : taskID(taskID), spanID(spanID), useProvisionalProxies(false) {}
-};
 
 struct TransactionLogInfo : public ReferenceCounted<TransactionLogInfo>, NonCopyable {
 	enum LoggingLocation { DONT_LOG = 0, TRACE_LOG = 1, DATABASE = 2 };
@@ -246,9 +235,51 @@ struct Watch : public ReferenceCounted<Watch>, NonCopyable {
 	void setWatch(Future<Void> watchFuture);
 };
 
+struct TransactionState : ReferenceCounted<TransactionState> {
+	Database cx;
+	int64_t tenantId = TenantInfo::INVALID_TENANT;
+	Reference<TransactionLogInfo> trLogInfo;
+	TransactionOptions options;
+
+	Optional<UID> debugID;
+	TaskPriority taskID;
+	SpanID spanID;
+	UseProvisionalProxies useProvisionalProxies = UseProvisionalProxies::False;
+
+	int numErrors = 0;
+	double startTime = 0;
+	Promise<Standalone<StringRef>> versionstampPromise;
+
+	Version committedVersion{ invalidVersion };
+
+	// Used to save conflicting keys if FDBTransactionOptions::REPORT_CONFLICTING_KEYS is enabled
+	// prefix/<key1> : '1' - any keys equal or larger than this key are (probably) conflicting keys
+	// prefix/<key2> : '0' - any keys equal or larger than this key are (definitely) not conflicting keys
+	std::shared_ptr<CoalescedKeyRangeMap<Value>> conflictingKeys;
+
+	// Only available so that Transaction can have a default constructor, for use in state variables
+	TransactionState(TaskPriority taskID, SpanID spanID) : taskID(taskID), spanID(spanID), tenantSet(false) {}
+
+	TransactionState(Database cx,
+	                 Optional<TenantName> tenant,
+	                 TaskPriority taskID,
+	                 SpanID spanID,
+	                 Reference<TransactionLogInfo> trLogInfo);
+
+	Reference<TransactionState> cloneAndReset(Reference<TransactionLogInfo> newTrLogInfo, bool generateNewSpan) const;
+	TenantInfo getTenantInfo();
+
+	Optional<TenantName> const& tenant();
+	bool hasTenant() const;
+
+private:
+	Optional<TenantName> tenant_;
+	bool tenantSet;
+};
+
 class Transaction : NonCopyable {
 public:
-	explicit Transaction(Database const& cx);
+	explicit Transaction(Database const& cx, Optional<TenantName> const& tenant = Optional<TenantName>());
 	~Transaction();
 
 	void setVersion(Version v);
@@ -291,21 +322,21 @@ public:
 		                reverse);
 	}
 
-	[[nodiscard]] Future<RangeResult> getRangeAndFlatMap(const KeySelector& begin,
-	                                                     const KeySelector& end,
-	                                                     const Key& mapper,
-	                                                     GetRangeLimits limits,
-	                                                     Snapshot = Snapshot::False,
-	                                                     Reverse = Reverse::False);
+	[[nodiscard]] Future<MappedRangeResult> getMappedRange(const KeySelector& begin,
+	                                                       const KeySelector& end,
+	                                                       const Key& mapper,
+	                                                       GetRangeLimits limits,
+	                                                       Snapshot = Snapshot::False,
+	                                                       Reverse = Reverse::False);
 
 private:
-	template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply>
-	Future<RangeResult> getRangeInternal(const KeySelector& begin,
-	                                     const KeySelector& end,
-	                                     const Key& mapper,
-	                                     GetRangeLimits limits,
-	                                     Snapshot snapshot,
-	                                     Reverse reverse);
+	template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply, class RangeResultFamily>
+	Future<RangeResultFamily> getRangeInternal(const KeySelector& begin,
+	                                           const KeySelector& end,
+	                                           const Key& mapper,
+	                                           GetRangeLimits limits,
+	                                           Snapshot snapshot,
+	                                           Reverse reverse);
 
 public:
 	// A method for streaming data from the storage server that is more efficient than getRange when reading large
@@ -354,20 +385,7 @@ public:
 	void addWriteConflictRange(KeyRangeRef const& keys);
 	void makeSelfConflicting();
 
-	Future<Void> warmRange(Database cx, KeyRange keys);
-
-	Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(KeyRange const& keys,
-	                                                                    StorageMetrics const& min,
-	                                                                    StorageMetrics const& max,
-	                                                                    StorageMetrics const& permittedError,
-	                                                                    int shardLimit,
-	                                                                    int expectedShardCount);
-	// Pass a negative value for `shardLimit` to indicate no limit on the shard number.
-	Future<StorageMetrics> getStorageMetrics(KeyRange const& keys, int shardLimit);
-	Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(KeyRange const& keys,
-	                                                          StorageMetrics const& limit,
-	                                                          StorageMetrics const& estimated);
-	Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>> getReadHotRanges(KeyRange const& keys);
+	Future<Void> warmRange(KeyRange keys);
 
 	// Try to split the given range into equally sized chunks based on estimated size.
 	// The returned list would still be in form of [keys.begin, splitPoint1, splitPoint2, ... , keys.end]
@@ -387,19 +405,19 @@ public:
 	              AddConflictRange = AddConflictRange::True);
 	void clear(const KeyRangeRef& range, AddConflictRange = AddConflictRange::True);
 	void clear(const KeyRef& key, AddConflictRange = AddConflictRange::True);
-	[[nodiscard]] Future<Void> commit(); // Throws not_committed or commit_unknown_result errors in normal operation
+
+	// Throws not_committed or commit_unknown_result errors in normal operation
+	[[nodiscard]] Future<Void> commit();
 
 	void setOption(FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>());
 
-	Version getCommittedVersion() const {
-		return committedVersion;
-	} // May be called only after commit() returns success
-	[[nodiscard]] Future<Standalone<StringRef>>
-	getVersionstamp(); // Will be fulfilled only after commit() returns success
+	// May be called only after commit() returns success
+	Version getCommittedVersion() const { return trState->committedVersion; }
+
+	// Will be fulfilled only after commit() returns success
+	[[nodiscard]] Future<Standalone<StringRef>> getVersionstamp();
 
 	Future<uint64_t> getProtocolVersion();
-
-	Promise<Standalone<StringRef>> versionstampPromise;
 
 	uint32_t getSize();
 	[[nodiscard]] Future<Void> onError(Error const& e);
@@ -412,27 +430,17 @@ public:
 	void reset();
 	void fullReset();
 	double getBackoff(int errCode);
-	void debugTransaction(UID dID) { info.debugID = dID; }
+	void debugTransaction(UID dID) { trState->debugID = dID; }
 
 	Future<Void> commitMutations();
 	void setupWatches();
 	void cancelWatches(Error const& e = transaction_cancelled());
 
-	TransactionInfo info;
-	int numErrors;
-
-	std::vector<Reference<Watch>> watches;
-
 	int apiVersionAtLeast(int minVersion) const;
-
 	void checkDeferredError() const;
 
-	Database getDatabase() const { return cx; }
+	Database getDatabase() const { return trState->cx; }
 	static Reference<TransactionLogInfo> createTrLogInfoProbabilistically(const Database& cx);
-	TransactionOptions options;
-	Span span;
-	double startTime;
-	Reference<TransactionLogInfo> trLogInfo;
 
 	void setTransactionID(uint64_t id);
 	void setToken(uint64_t token);
@@ -445,12 +453,26 @@ public:
 		return Standalone<VectorRef<KeyRangeRef>>(tr.transaction.write_conflict_ranges, tr.arena);
 	}
 
+	Optional<TenantName> getTenant() { return trState->tenant(); }
+
+	Reference<TransactionState> trState;
+	std::vector<Reference<Watch>> watches;
+	Span span;
+
 private:
 	Future<Version> getReadVersion(uint32_t flags);
-	Database cx;
+
+	template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply>
+	Future<RangeResult> getRangeInternal(const KeySelector& begin,
+	                                     const KeySelector& end,
+	                                     const Key& mapper,
+	                                     GetRangeLimits limits,
+	                                     Snapshot snapshot,
+	                                     Reverse reverse);
+
+	void resetImpl(bool generateNewSpan);
 
 	double backoff;
-	Version committedVersion{ invalidVersion };
 	CommitTransactionRequest tr;
 	Future<Version> readVersion;
 	Promise<Optional<Value>> metadataVersion;
@@ -474,6 +496,25 @@ int64_t extractIntOption(Optional<StringRef> value,
 // states: coordinator, TLog and storage state
 ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID);
 
+// Adds necessary mutation(s) to the transaction, so that *one* checkpoint will be created for
+// each and every shards overlapping with `range`. Each checkpoint will be created at a random
+// storage server for each shard.
+// All checkpoint(s) will be created at the transaction's commit version.
+Future<Void> createCheckpoint(Transaction* tr, KeyRangeRef range, CheckpointFormat format);
+
+// Same as above.
+Future<Void> createCheckpoint(Reference<ReadYourWritesTransaction> tr, KeyRangeRef range, CheckpointFormat format);
+
+// Gets checkpoint metadata for `keys` at the specific version, with the particular format.
+// One CheckpointMetaData will be returned for each distinctive shard.
+// The collective keyrange of the returned checkpoint(s) is a super-set of `keys`.
+// checkpoint_not_found() error will be returned if the specific checkpoint(s) cannot be found.
+ACTOR Future<std::vector<CheckpointMetaData>> getCheckpointMetaData(Database cx,
+                                                                    KeyRange keys,
+                                                                    Version version,
+                                                                    CheckpointFormat format,
+                                                                    double timeout = 5.0);
+
 // Checks with Data Distributor that it is safe to mark all servers in exclusions as failed
 ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion> exclusions);
 
@@ -484,6 +525,10 @@ inline uint64_t getWriteOperationCost(uint64_t bytes) {
 // Create a transaction to set the value of system key \xff/conf/perpetual_storage_wiggle. If enable == true, the value
 // will be 1. Otherwise, the value will be 0.
 ACTOR Future<Void> setPerpetualStorageWiggle(Database cx, bool enable, LockAware lockAware = LockAware::False);
+
+ACTOR Future<std::vector<std::pair<UID, StorageWiggleValue>>> readStorageWiggleValues(Database cx,
+                                                                                      bool primary,
+                                                                                      bool use_system_priority);
 
 #include "flow/unactorcompiler.h"
 #endif

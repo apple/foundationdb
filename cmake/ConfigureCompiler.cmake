@@ -22,11 +22,22 @@ use_libcxx(_use_libcxx)
 env_set(USE_LIBCXX "${_use_libcxx}" BOOL "Use libc++")
 static_link_libcxx(_static_link_libcxx)
 env_set(STATIC_LINK_LIBCXX "${_static_link_libcxx}" BOOL "Statically link libstdcpp/libc++")
+env_set(TRACE_PC_GUARD_INSTRUMENTATION_LIB "" STRING "Path to a library containing an implementation for __sanitizer_cov_trace_pc_guard. See https://clang.llvm.org/docs/SanitizerCoverage.html for more info.")
+env_set(PROFILE_INSTR_GENERATE OFF BOOL "If set, build FDB as an instrumentation build to generate profiles")
+env_set(PROFILE_INSTR_USE "" STRING "If set, build FDB with profile")
 
 set(USE_SANITIZER OFF)
 if(USE_ASAN OR USE_VALGRIND OR USE_MSAN OR USE_TSAN OR USE_UBSAN)
   set(USE_SANITIZER ON)
 endif()
+
+set(jemalloc_default ON)
+# We don't want to use jemalloc on Windows
+# Nor on FreeBSD, where jemalloc is the default system allocator
+if(USE_SANITIZER OR WIN32 OR (CMAKE_SYSTEM_NAME STREQUAL "FreeBSD") OR APPLE)
+  set(jemalloc_default OFF)
+endif()
+env_set(USE_JEMALLOC ${jemalloc_default} BOOL "Link with jemalloc")
 
 if(USE_LIBCXX AND STATIC_LINK_LIBCXX AND NOT USE_LD STREQUAL "LLD")
   message(FATAL_ERROR "Unsupported configuration: STATIC_LINK_LIBCXX with libc++ only works if USE_LD=LLD")
@@ -155,6 +166,10 @@ else()
   # we always compile with debug symbols. CPack will strip them out
   # and create a debuginfo rpm
   add_compile_options(-ggdb -fno-omit-frame-pointer)
+  if(TRACE_PC_GUARD_INSTRUMENTATION_LIB)
+      add_compile_options(-fsanitize-coverage=trace-pc-guard)
+      link_libraries(${TRACE_PC_GUARD_INSTRUMENTATION_LIB})
+  endif()
   if(USE_ASAN)
     list(APPEND SANITIZER_COMPILE_OPTIONS
       -fsanitize=address
@@ -212,7 +227,7 @@ else()
   endif()
   if(STATIC_LINK_LIBCXX)
     if (NOT USE_LIBCXX AND NOT APPLE)
-      add_link_options(-static-libstdc++ -static-libgcc)
+	add_link_options(-static-libstdc++ -static-libgcc)
     endif()
   endif()
   # # Instruction sets we require to be supported by the CPU
@@ -283,7 +298,6 @@ else()
       -Woverloaded-virtual
       -Wshift-sign-overflow
       # Here's the current set of warnings we need to explicitly disable to compile warning-free with clang 11
-      -Wno-delete-non-virtual-dtor
       -Wno-sign-compare
       -Wno-undefined-var-template
       -Wno-unknown-warning-option
@@ -294,6 +308,18 @@ else()
       add_compile_options(
         -Wno-register
         -Wno-unused-command-line-argument)
+    endif()
+    if (PROFILE_INSTR_GENERATE)
+      add_compile_options(-fprofile-instr-generate)
+      add_link_options(-fprofile-instr-generate)
+    endif()
+    if (NOT (PROFILE_INSTR_USE STREQUAL ""))
+      if (PROFILE_INSTR_GENERATE)
+          message(FATAL_ERROR "Can't set both PROFILE_INSTR_GENERATE and PROFILE_INSTR_USE")
+      endif()
+      add_compile_options(-Wno-error=profile-instr-out-of-date -Wno-error=profile-instr-unprofiled)
+      add_compile_options(-fprofile-instr-use=${PROFILE_INSTR_USE})
+      add_link_options(-fprofile-instr-use=${PROFILE_INSTR_USE})
     endif()
   endif()
   if (USE_WERROR)
@@ -331,6 +357,9 @@ else()
     add_compile_options(-march=armv8.2-a+crc+simd)
   endif()
 
+  if (CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64le")
+    add_compile_options(-m64 -mcpu=power9 -mtune=power9 -DNO_WARN_X86_INTRINSICS)
+  endif()
   # Check whether we can use dtrace probes
   include(CheckSymbolExists)
   check_symbol_exists(DTRACE_PROBE sys/sdt.h SUPPORT_DTRACE)
@@ -340,9 +369,19 @@ else()
     set(DTRACE_PROBES 1)
   endif()
 
-  if(CMAKE_COMPILER_IS_GNUCXX)
-    set(USE_LTO OFF CACHE BOOL "Do link time optimization")
-    if (USE_LTO)
+  set(USE_LTO OFF CACHE BOOL "Do link time optimization")
+  if (USE_LTO)
+    if (CLANG)
+      set(CLANG_LTO_STRATEGY "Thin" CACHE STRING "LLVM LTO strategy (Thin, or Full)")
+      if (CLANG_LTO_STRATEGY STREQUAL "Full")
+        add_compile_options($<$<CONFIG:Release>:-flto=full>)
+      else()
+        add_compile_options($<$<CONFIG:Release>:-flto=thin>)
+      endif()
+      set(CMAKE_RANLIB "llvm-ranlib")
+      set(CMAKE_AR "llvm-ar")
+    endif()
+    if(CMAKE_COMPILER_IS_GNUCXX)
       add_compile_options($<$<CONFIG:Release>:-flto>)
       set(CMAKE_AR  "gcc-ar")
       set(CMAKE_C_ARCHIVE_CREATE "<CMAKE_AR> qcs <TARGET> <LINK_FLAGS> <OBJECTS>")

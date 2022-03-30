@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2021 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -176,7 +176,7 @@ ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
 	case ConfigurationResult::STORAGE_MIGRATION_DISABLED:
 		fprintf(stderr,
 		        "ERROR: Storage engine type cannot be changed because "
-		        "storage_migration_mode=disabled.\n");
+		        "storage_migration_type=disabled.\n");
 		fprintf(stderr,
 		        "Type `configure perpetual_storage_wiggle=1 storage_migration_type=gradual' to enable gradual "
 		        "migration with the perpetual wiggle, or `configure "
@@ -264,9 +264,10 @@ CommandFactory configureFactory(
         "<single|double|triple|three_data_hall|three_datacenter|ssd|memory|memory-radixtree-beta|proxies=<PROXIES>|"
         "commit_proxies=<COMMIT_PROXIES>|grv_proxies=<GRV_PROXIES>|logs=<LOGS>|resolvers=<RESOLVERS>>*|"
         "count=<TSS_COUNT>|perpetual_storage_wiggle=<WIGGLE_SPEED>|perpetual_storage_wiggle_locality="
-        "<<LOCALITY_KEY>:<LOCALITY_VALUE>|0>|storage_migration_type={disabled|gradual|aggressive}|consistency_scan_enabled={0|1}|consistency_scan_restart={0|1}|consistency_scan_rate=<SCAN_MAX_"
-        "RATE>|consistency_scan_interval=<"
-        "SCAN_INTERVAL>",
+		"<<LOCALITY_KEY>:<LOCALITY_VALUE>|0>|storage_migration_type={disabled|gradual|aggressive}"
+		"|tenant_mode={disabled|optional_experimental|required_experimental}|blob_granules_enabled={0|1}|"
+		"consistency_scan_enabled={0|1}|consistency_scan_restart={0|1}|consistency_scan_rate=<SCAN_MAX_RATE>|"
+		"consistency_scan_interval=<SCAN_INTERVAL>",
         "change the database configuration",
         "The `new' option, if present, initializes a new database with the given configuration rather than changing "
         "the configuration of an existing one. When used, both a redundancy mode and a storage engine must be "
@@ -297,6 +298,9 @@ CommandFactory configureFactory(
         "perpetual_storage_wiggle_locality=<<LOCALITY_KEY>:<LOCALITY_VALUE>|0>: Set the process filter for wiggling. "
         "The processes that match the given locality key and locality value are only wiggled. The value 0 will disable "
         "the locality filter and matches all the processes for wiggling.\n\n"
+        "tenant_mode=<disabled|optional_experimental|required_experimental>: Sets the tenant mode for the cluster. If "
+        "optional, then transactions can be run with or without specifying tenants. If required, all data must be "
+        "accessed using tenants.\n\n"
         "consistency_scan_enabled if set to 1, means a new process role will be recruited to scan all shards of "
         "the database to validate data consistency.\n\n"
         "consistency_scan_restart if set to 1, means restart the scan from the beginning.\n\n"

@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -63,7 +63,7 @@ bool IPAddress::isValid() const {
 	return std::get<uint32_t>(addr) != 0;
 }
 
-Hostname Hostname::parse(std::string const& s) {
+Hostname Hostname::parse(const std::string& s) {
 	if (s.empty()) {
 		throw connection_string_invalid();
 	}
@@ -134,12 +134,12 @@ Optional<NetworkAddress> NetworkAddress::parseOptional(std::string const& s) {
 std::vector<NetworkAddress> NetworkAddress::parseList(std::string const& addrs) {
 	// Split addrs on ',' and parse them individually
 	std::vector<NetworkAddress> coord;
-	for (int p = 0; p <= addrs.size();) {
+	for (int p = 0; p < addrs.length();) {
 		int pComma = addrs.find_first_of(',', p);
-		if (pComma == addrs.npos)
-			pComma = addrs.size();
-		NetworkAddress parsedAddress = NetworkAddress::parse(addrs.substr(p, pComma - p));
-		coord.push_back(parsedAddress);
+		if (pComma == addrs.npos) {
+			pComma = addrs.length();
+		}
+		coord.push_back(NetworkAddress::parse(addrs.substr(p, pComma - p)));
 		p = pComma + 1;
 	}
 	return coord;
@@ -180,13 +180,13 @@ std::string formatIpPort(const IPAddress& ip, uint16_t port) {
 
 Future<Reference<IConnection>> INetworkConnections::connect(const std::string& host,
                                                             const std::string& service,
-                                                            bool useTLS) {
+                                                            bool isTLS) {
 	// Use map to create an actor that returns an endpoint or throws
 	Future<NetworkAddress> pickEndpoint =
 	    map(resolveTCPEndpoint(host, service), [=](std::vector<NetworkAddress> const& addresses) -> NetworkAddress {
 		    NetworkAddress addr = addresses[deterministicRandom()->randomInt(0, addresses.size())];
 		    addr.fromHostname = true;
-		    if (useTLS) {
+		    if (isTLS) {
 			    addr.flags = NetworkAddress::FLAG_TLS;
 		    }
 		    return addr;
@@ -272,25 +272,25 @@ TEST_CASE("/flow/network/hostname") {
 	ASSERT(hn1.toString() == hn1s);
 	ASSERT(hn1.host == "localhost");
 	ASSERT(hn1.service == "1234");
-	ASSERT(!hn1.useTLS);
+	ASSERT(!hn1.isTLS);
 
 	auto hn2 = Hostname::parse(hn2s);
 	ASSERT(hn2.toString() == hn2s);
 	ASSERT(hn2.host == "host-name");
 	ASSERT(hn2.service == "1234");
-	ASSERT(!hn2.useTLS);
+	ASSERT(!hn2.isTLS);
 
 	auto hn3 = Hostname::parse(hn3s);
 	ASSERT(hn3.toString() == hn3s);
 	ASSERT(hn3.host == "host.name");
 	ASSERT(hn3.service == "1234");
-	ASSERT(!hn3.useTLS);
+	ASSERT(!hn3.isTLS);
 
 	auto hn4 = Hostname::parse(hn4s);
 	ASSERT(hn4.toString() == hn4s);
 	ASSERT(hn4.host == "host-name_part1.host-name_part2");
 	ASSERT(hn4.service == "1234");
-	ASSERT(hn4.useTLS);
+	ASSERT(hn4.isTLS);
 
 	ASSERT(Hostname::isHostname(hn1s));
 	ASSERT(Hostname::isHostname(hn2s));

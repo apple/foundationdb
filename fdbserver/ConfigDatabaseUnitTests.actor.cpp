@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -61,7 +61,7 @@ class WriteToTransactionEnvironment {
 	Version lastWrittenVersion{ 0 };
 
 	static Value longToValue(int64_t v) {
-		auto s = format("%ld", v);
+		auto s = format("%lld", v);
 		return StringRef(reinterpret_cast<uint8_t const*>(s.c_str()), s.size());
 	}
 
@@ -269,15 +269,15 @@ class BroadcasterToLocalConfigEnvironment {
 		wait(self->readFrom.setup());
 		self->cbi = makeReference<AsyncVar<ConfigBroadcastInterface>>();
 		self->readFrom.connectToBroadcaster(self->cbi);
-		self->broadcastServer =
-		    self->broadcaster.registerWorker(0, configClassSet, self->workerFailure.getFuture(), self->cbi->get());
+		self->broadcastServer = self->broadcaster.registerNode(
+		    WorkerInterface(), 0, configClassSet, self->workerFailure.getFuture(), self->cbi->get());
 		return Void();
 	}
 
 	void addMutation(Optional<KeyRef> configClass, KeyRef knobName, KnobValueRef value) {
 		Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations;
 		appendVersionedMutation(versionedMutations, ++lastWrittenVersion, configClass, knobName, value);
-		broadcaster.applyChanges(versionedMutations, lastWrittenVersion, {});
+		broadcaster.applyChanges(versionedMutations, lastWrittenVersion, {}, {});
 	}
 
 public:
@@ -303,8 +303,11 @@ public:
 		broadcastServer.cancel();
 		cbi->set(ConfigBroadcastInterface{});
 		readFrom.connectToBroadcaster(cbi);
-		broadcastServer = broadcaster.registerWorker(
-		    readFrom.lastSeenVersion(), readFrom.configClassSet(), workerFailure.getFuture(), cbi->get());
+		broadcastServer = broadcaster.registerNode(WorkerInterface(),
+		                                           readFrom.lastSeenVersion(),
+		                                           readFrom.configClassSet(),
+		                                           workerFailure.getFuture(),
+		                                           cbi->get());
 	}
 
 	Future<Void> restartLocalConfig(std::string const& newConfigPath) {
@@ -436,8 +439,8 @@ class TransactionToLocalConfigEnvironment {
 		wait(self->readFrom.setup());
 		self->cbi = makeReference<AsyncVar<ConfigBroadcastInterface>>();
 		self->readFrom.connectToBroadcaster(self->cbi);
-		self->broadcastServer =
-		    self->broadcaster.registerWorker(0, configClassSet, self->workerFailure.getFuture(), self->cbi->get());
+		self->broadcastServer = self->broadcaster.registerNode(
+		    WorkerInterface(), 0, configClassSet, self->workerFailure.getFuture(), self->cbi->get());
 		return Void();
 	}
 
@@ -454,8 +457,11 @@ public:
 		broadcastServer.cancel();
 		cbi->set(ConfigBroadcastInterface{});
 		readFrom.connectToBroadcaster(cbi);
-		broadcastServer = broadcaster.registerWorker(
-		    readFrom.lastSeenVersion(), readFrom.configClassSet(), workerFailure.getFuture(), cbi->get());
+		broadcastServer = broadcaster.registerNode(WorkerInterface(),
+		                                           readFrom.lastSeenVersion(),
+		                                           readFrom.configClassSet(),
+		                                           workerFailure.getFuture(),
+		                                           cbi->get());
 	}
 
 	Future<Void> restartLocalConfig(std::string const& newConfigPath) {
