@@ -432,13 +432,13 @@ extern "C" DLLEXPORT FDBFuture* fdb_database_create_snapshot(FDBDatabase* db,
 	                        .extractPtr());
 }
 
-extern "C" DLLEXPORT FDBFuture* fdb_database_create_shared_state(FDBDatabase* db, ProtocolVersion v) {
-	return (FDBFuture*)(DB(db)->createSharedState(v).extractPtr());
+extern "C" DLLEXPORT FDBFuture* fdb_database_create_shared_state(FDBDatabase* db) {
+	return (FDBFuture*)(DB(db)->createSharedState().extractPtr());
 }
 
-extern "C" DLLEXPORT void fdb_database_set_shared_state(FDBDatabase* db, DatabaseSharedState* p, ProtocolVersion v) {
+extern "C" DLLEXPORT void fdb_database_set_shared_state(FDBDatabase* db, DatabaseSharedState* p) {
 	try {
-		DB(db)->setSharedState(p, v);
+		DB(db)->setSharedState(p);
 	} catch (...) {
 	}
 }

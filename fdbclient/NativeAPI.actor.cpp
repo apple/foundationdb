@@ -8178,15 +8178,15 @@ Future<Void> DatabaseContext::createSnapshot(StringRef uid, StringRef snapshot_c
 	return createSnapshotActor(this, UID::fromString(uid_str), snapshot_command);
 }
 
-Future<DatabaseSharedState*> DatabaseContext::initSharedState(ProtocolVersion v) {
+Future<DatabaseSharedState*> DatabaseContext::initSharedState() {
 	ASSERT(!sharedStatePtr); // Don't re-initialize shared state if a pointer already exists
-	DatabaseSharedState* newState = new DatabaseSharedState(v);
-	setSharedState(newState, v);
+	DatabaseSharedState* newState = new DatabaseSharedState();
+	setSharedState(newState);
 	return newState;
 }
 
-void DatabaseContext::setSharedState(DatabaseSharedState* p, ProtocolVersion v) {
-	ASSERT(p->protocolVersion == v);
+void DatabaseContext::setSharedState(DatabaseSharedState* p) {
+	ASSERT(p->protocolVersion == currentProtocolVersion);
 	sharedStatePtr = p;
 	sharedStatePtr->refCount++;
 }

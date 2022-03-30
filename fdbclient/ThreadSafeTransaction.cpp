@@ -102,14 +102,14 @@ ThreadFuture<Void> ThreadSafeDatabase::createSnapshot(const StringRef& uid, cons
 	return onMainThread([db, snapUID, cmd]() -> Future<Void> { return db->createSnapshot(snapUID, cmd); });
 }
 
-ThreadFuture<DatabaseSharedState*> ThreadSafeDatabase::createSharedState(ProtocolVersion v) {
+ThreadFuture<DatabaseSharedState*> ThreadSafeDatabase::createSharedState() {
 	DatabaseContext* db = this->db;
-	return onMainThread([db, v]() -> Future<DatabaseSharedState*> { return db->initSharedState(v); });
+	return onMainThread([db]() -> Future<DatabaseSharedState*> { return db->initSharedState(); });
 }
 
-void ThreadSafeDatabase::setSharedState(DatabaseSharedState* p, ProtocolVersion v) {
+void ThreadSafeDatabase::setSharedState(DatabaseSharedState* p) {
 	DatabaseContext* db = this->db;
-	onMainThreadVoid([db, p, v]() { db->setSharedState(p, v); }, nullptr);
+	onMainThreadVoid([db, p]() { db->setSharedState(p); }, nullptr);
 }
 
 // Return the main network thread busyness

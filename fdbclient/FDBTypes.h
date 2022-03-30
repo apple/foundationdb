@@ -1345,8 +1345,8 @@ struct DatabaseSharedState {
 	GRVCacheSpace grvCacheSpace;
 	std::atomic<int> refCount;
 
-	DatabaseSharedState(ProtocolVersion v)
-	  : protocolVersion(v), mutexLock(Mutex()), grvCacheSpace(GRVCacheSpace()), refCount(0) {}
+	DatabaseSharedState()
+	  : protocolVersion(currentProtocolVersion), mutexLock(Mutex()), grvCacheSpace(GRVCacheSpace()), refCount(0) {}
 };
 
 inline bool isValidPerpetualStorageWiggleLocality(std::string locality) {
