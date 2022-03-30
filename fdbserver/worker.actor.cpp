@@ -1544,17 +1544,15 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			if (s.storedComponent == DiskStore::Storage) {
 				LocalLineage _;
 				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::Storage;
-				// add a knob in fdbserver/Knobs.h for the last argument
-				TraceEvent(SevDebug, "OpenRemoteKVStoreReboot")
-				    .detail("StoreType", s.storeType)
-				    .detail("RemoteKVStore", SERVER_KNOBS->REMOTE_KV_STORE);
-				IKeyValueStore* kv = openKVStore(s.storeType,
-				                                 s.filename,
-				                                 s.storeID,
-				                                 memoryLimit,
-				                                 false,
-				                                 validateDataFiles,
-				                                 SERVER_KNOBS->REMOTE_KV_STORE);
+				IKeyValueStore* kv = openKVStore(
+				    s.storeType,
+				    s.filename,
+				    s.storeID,
+				    memoryLimit,
+				    false,
+				    validateDataFiles,
+				    SERVER_KNOBS->REMOTE_KV_STORE && /* testing mixed mode in simulation if remote kvs enabled*/
+				        (g_network->isSimulated() ? deterministicRandom()->coinflip() : true));
 				Future<Void> kvClosed = kv->onClosed();
 				filesClosed.add(kvClosed);
 
@@ -2119,16 +2117,15 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                   isTss ? testingStoragePrefix.toString() : fileStoragePrefix.toString(),
 					                   recruited.id());
 
-					TraceEvent(SevDebug, "OpenRemoteKVStoreInitilization")
-					    .detail("StoreType", req.storeType)
-					    .detail("RemoteKVStore", SERVER_KNOBS->REMOTE_KV_STORE);
-					IKeyValueStore* data = openKVStore(req.storeType,
-					                                   filename,
-					                                   recruited.id(),
-					                                   memoryLimit,
-					                                   false,
-					                                   false,
-					                                   SERVER_KNOBS->REMOTE_KV_STORE);
+					IKeyValueStore* data = openKVStore(
+					    req.storeType,
+					    filename,
+					    recruited.id(),
+					    memoryLimit,
+					    false,
+					    false,
+					    SERVER_KNOBS->REMOTE_KV_STORE && /* testing mixed mode in simulation if remote kvs enabled*/
+					        (g_network->isSimulated() ? deterministicRandom()->coinflip() : true));
 
 					Future<Void> kvClosed = data->onClosed();
 					filesClosed.add(kvClosed);
