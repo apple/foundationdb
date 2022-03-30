@@ -303,7 +303,7 @@ public:
 	//	1 = "memory"
 	//	2 = "memory-radixtree-beta"
 	//	3 = "ssd-redwood-1-experimental"
-	//	4 = "ssd-rocksdb-experimental"
+	//	4 = "ssd-rocksdb-v1"
 	// Requires a comma-separated list of numbers WITHOUT whitespaces
 	std::vector<int> storageEngineExcludeTypes;
 	// Set the maximum TLog version that can be selected for a test
@@ -1395,7 +1395,7 @@ void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
 	}
 	case 4: {
 		TEST(true); // Simulated cluster using RocksDB storage engine
-		set_config("ssd-rocksdb-experimental");
+		set_config("ssd-rocksdb-v1");
 		// Tests using the RocksDB engine are necessarily non-deterministic because of RocksDB
 		// background threads.
 		TraceEvent(SevWarnAlways, "RocksDBNonDeterminism")
