@@ -15,10 +15,10 @@ target_link_libraries(fdbmonitor PUBLIC Threads::Threads)
 # processes). fdbmonitor is single-threaded anyway.
 get_target_property(fdbmonitor_options fdbmonitor COMPILE_OPTIONS)
 list(REMOVE_ITEM fdbmonitor_options "-fsanitize=thread")
-set_property(TARGET fdbmonitor PROPERTY COMPILE_OPTIONS ${target_options})
+set_property(TARGET fdbmonitor PROPERTY COMPILE_OPTIONS ${fdbmonitor_options})
 get_target_property(fdbmonitor_options fdbmonitor LINK_OPTIONS)
 list(REMOVE_ITEM fdbmonitor_options "-fsanitize=thread")
-set_property(TARGET fdbmonitor PROPERTY LINK_OPTIONS ${target_options})
+set_property(TARGET fdbmonitor PROPERTY LINK_OPTIONS ${fdbmonitor_options})
 
 if(GENERATE_DEBUG_PACKAGES)
   fdb_install(TARGETS fdbmonitor DESTINATION fdbmonitor COMPONENT server)
