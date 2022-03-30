@@ -821,6 +821,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 					if (dataMoveMap[meta.range.begin]->valid) {
 						RelocateShard rs(meta.range, SERVER_KNOBS->PRIORITY_RECOVER_MOVE, true);
 						rs.dataMove = dataMoveMap[meta.range.begin];
+						rs.dataMoveId = meta.id;
 						// TODO: Persist priority in DataMoveMetaData.
 						// rs.priority = SERVER_KNOBS->PRIORITY_RECOVER_MOVE;
 						TraceEvent("DDInitRestoredDataMove", self->ddId)

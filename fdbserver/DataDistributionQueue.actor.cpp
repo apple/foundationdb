@@ -61,7 +61,7 @@ struct RelocateData {
 	explicit RelocateData(RelocateShard const& rs)
 	  : keys(rs.keys), priority(rs.priority), boundaryPriority(isBoundaryPriority(rs.priority) ? rs.priority : -1),
 	    healthPriority(isHealthPriority(rs.priority) ? rs.priority : -1), startTime(now()), restore(rs.restore),
-	    randomId(deterministicRandom()->randomUniqueID()), workFactor(0),
+	    randomId(deterministicRandom()->randomUniqueID()), dataMoveID(rs.dataMoveId), workFactor(0),
 	    // src(rs.dataMove.present() ? rs.dataMove.get().src : std::vector<UID>()),
 	    wantsNewServers(rs.priority == SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM ||
 	                    rs.priority == SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM ||
@@ -405,10 +405,7 @@ void complete(RelocateData const& relocation, std::map<UID, Busyness>& busymap, 
 	}
 }
 
-ACTOR Future<Void> cancelDataMove(struct DDQueueData* self,
-                                  UID dataMoveID,
-                                  KeyRange range,
-                                  const DDEnabledState* ddEnabledState);
+ACTOR Future<Void> cancelDataMove(struct DDQueueData* self, KeyRange range, const DDEnabledState* ddEnabledState);
 
 ACTOR Future<Void> dataDistributionRelocator(struct DDQueueData* self,
                                              RelocateData rd,
@@ -964,6 +961,7 @@ struct DDQueueData {
 
 			if (overlappingInFlight) {
 				// logRelocation( rd, "SkippingOverlappingInFlight" );
+				ASSERT(!rd.restore);
 				continue;
 			}
 
@@ -981,7 +979,7 @@ struct DDQueueData {
 			// SOMEDAY: the list of source servers may be outdated since they were fetched when the work was put in the
 			// queue
 			// FIXME: we need spare capacity even when we're just going to be cancelling work via TEAM_HEALTHY
-			if (!canLaunchSrc(rd, teamSize, singleRegionTeamSize, busymap, cancellableRelocations)) {
+			if (!rd.restore && !canLaunchSrc(rd, teamSize, singleRegionTeamSize, busymap, cancellableRelocations)) {
 				// logRelocation( rd, "SkippingQueuedRelocation" );
 				continue;
 			}
@@ -1002,18 +1000,15 @@ struct DDQueueData {
 				}
 			}
 
-			std::vector<Future<Void>> cleanup;
+			Future<Void> fCleanup =
+			    SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE ? cancelDataMove(this, rd.keys, ddEnabledState) : Void();
+
 			// If there is a job in flight that wants data relocation which we are about to cancel/modify,
 			//     make sure that we keep the relocation intent for the job that we launch
 			auto f = inFlight.intersectingRanges(rd.keys);
 			for (auto it = f.begin(); it != f.end(); ++it) {
 				if (inFlightActors.liveActorAt(it->range().begin)) {
 					rd.wantsNewServers |= it->value().wantsNewServers;
-					if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
-						// dataMoves[i->value().keys.begin] is the corresponding dataMove.
-						cleanup.push_back(cleanUpDataMove(
-						    this->cx, it->value().dataMoveID, this->lock, it->value().keys, true, ddEnabledState));
-					}
 				}
 			}
 			startedHere++;
@@ -1023,9 +1018,6 @@ struct DDQueueData {
 			inFlightActors.getRangesAffectedByInsertion(rd.keys, ranges);
 			inFlightActors.cancel(KeyRangeRef(ranges.front().begin, ranges.back().end));
 			inFlight.insert(rd.keys, rd);
-
-			// TODO: Cancel the overlapping actors, and wait for them to finish.
-			Future<Void> fCleanup = SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE ? waitForAll(cleanup) : Void();
 
 			for (int r = 0; r < ranges.size(); r++) {
 				RelocateData& rrs = inFlight.rangeContaining(ranges[r].begin)->value();
@@ -1060,22 +1052,23 @@ struct DDQueueData {
 	}
 };
 
-ACTOR Future<Void> cancelDataMove(struct DDQueueData* self,
-                                  UID dataMoveID,
-                                  KeyRange range,
-                                  const DDEnabledState* ddEnabledState) {
+ACTOR Future<Void> cancelDataMove(struct DDQueueData* self, KeyRange range, const DDEnabledState* ddEnabledState) {
 	ASSERT(SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE);
+
 	std::vector<Future<Void>> cleanup;
 	auto f = self->dataMoves.intersectingRanges(range);
+	std::unordered_set<UID> dms;
 	for (auto it = f.begin(); it != f.end(); ++it) {
-		if (it->value().isValid()) {
-			cleanup.push_back(cleanUpDataMove(self->cx,
-			                                  it->value(),
-			                                  self->lock,
-			                                  KeyRangeRef(it->range().begin, it->range().end),
-			                                  true,
-			                                  ddEnabledState));
+		if (!it->value().isValid()) {
+			continue;
 		}
+		KeyRange keys = KeyRangeRef(it->range().begin, it->range().end);
+		TraceEvent(SevDebug, "DDQueueCancelDataMove", self->distributorId)
+		    .detail("DataMoveID", it->value())
+		    .detail("Range", keys);
+		auto [iter, inserted] = dms.insert(it->value());
+		ASSERT(inserted);
+		cleanup.push_back(cleanUpDataMove(self->cx, it->value(), self->lock, keys, true, ddEnabledState));
 	}
 	wait(waitForAll(cleanup));
 	auto ranges = self->dataMoves.getAffectedRangesAfterInsertion(range);
@@ -1140,6 +1133,9 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 		}
 
 		wait(prevCleanup);
+		if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+			self->dataMoves.insert(rd.keys, rd.dataMoveID);
+		}
 
 		state StorageMetrics metrics =
 		    wait(brokenPromiseToNever(self->getShardMetrics.getReply(GetMetricsRequest(rd.keys))));
@@ -1837,6 +1833,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 				when(RelocateShard rs = waitNext(self.input)) {
 					if (rs.restore) {
 						ASSERT(rs.dataMove != nullptr);
+						ASSERT(rs.dataMoveId.isValid());
 						// self.startRelocation(rd.priority, rd.healthPriority);
 						self.launchQueuedWork(RelocateData(rs), ddEnabledState);
 					} else {

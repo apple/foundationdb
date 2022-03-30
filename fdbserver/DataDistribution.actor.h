@@ -64,6 +64,7 @@ struct RelocateShard {
 	int priority;
 	const bool restore;
 	std::shared_ptr<DataMove> dataMove;
+	UID dataMoveId;
 
 	RelocateShard() : priority(0), restore(false) {}
 	RelocateShard(KeyRange const& keys, int priority) : keys(keys), priority(priority), restore(false) {}
