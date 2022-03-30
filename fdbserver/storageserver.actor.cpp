@@ -100,6 +100,9 @@ bool canReplyWith(Error e) {
 	case error_code_quick_get_value_miss:
 	case error_code_quick_get_key_values_miss:
 	case error_code_get_mapped_key_values_has_more:
+	case error_code_key_not_tuple:
+	case error_code_value_not_tuple:
+	case error_code_mapper_not_tuple:
 		// case error_code_all_alternatives_failed:
 		return true;
 	default:
@@ -3440,7 +3443,7 @@ Key constructMappedKey(KeyValueRef* keyValue, Tuple& mappedKeyFormatTuple, bool&
 						try {
 							keyTuple = Tuple::unpack(keyValue->key);
 						} catch (Error& e) {
-							TraceEvent(SevError, "KeyNotTuple").detail("Key", keyValue->key.printable());
+							TraceEvent("KeyNotTuple").error(e).detail("Key", keyValue->key.printable());
 							throw key_not_tuple();
 						}
 					}
@@ -3452,7 +3455,7 @@ Key constructMappedKey(KeyValueRef* keyValue, Tuple& mappedKeyFormatTuple, bool&
 						try {
 							valueTuple = Tuple::unpack(keyValue->value);
 						} catch (Error& e) {
-							TraceEvent(SevError, "ValueNotTuple").detail("Value", keyValue->value.printable());
+							TraceEvent("ValueNotTuple").error(e).detail("Value", keyValue->value.printable());
 							throw value_not_tuple();
 						}
 					}
@@ -3592,7 +3595,7 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 	try {
 		mappedKeyFormatTuple = Tuple::unpack(mapper);
 	} catch (Error& e) {
-		TraceEvent(SevError, "MapperNotTuple").detail("Mapper", mapper.printable());
+		TraceEvent("MapperNotTuple").error(e).detail("Mapper", mapper.printable());
 		throw mapper_not_tuple();
 	}
 	state KeyValueRef* it = input.data.begin();

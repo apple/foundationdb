@@ -179,7 +179,7 @@ ERROR( get_mapped_key_values_has_more, 2038, "getMappedRange does not support co
 ERROR( get_mapped_range_reads_your_writes, 2039, "getMappedRange tries to read data that were previously written in the transaction" )
 ERROR( checkpoint_not_found, 2040, "Checkpoint not found" )
 ERROR( key_not_tuple, 2041, "The key cannot be parsed as a tuple" );
-ERROR( value_not_tuple, 2042, "The key cannot be parsed as a tuple" );
+ERROR( value_not_tuple, 2042, "The value cannot be parsed as a tuple" );
 ERROR( mapper_not_tuple, 2043, "The mapper cannot be parsed as a tuple" );
 
 
