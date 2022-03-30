@@ -83,6 +83,12 @@ struct ThreadCallback {
 		// If this is the only registered callback this will be called with (possibly) arbitrary pointers
 	}
 
+	// Note that when a ThreadCallback is destroyed it must have no MultiCallbackHolders, but this can't be
+	// asserted on destruction because throwing is not allowed in ~ThreadCallback() and the default destroy()
+	// implementation here is never called.
+	// However, ThreadMultiCallback::destroy() ensures that no ThreadMultiCallback will be destroyed while
+	// still holding a ThreadCallback so the invariant is effectively enforced there.  See
+	// ThreadMultiCallback::destroy() for more details.
 	virtual void destroy() { UNSTOPPABLE_ASSERT(false); }
 	virtual bool isMultiCallback() const { return false; }
 
@@ -218,6 +224,10 @@ public:
 	}
 
 	void destroy() override {
+		// This assert assures that all ThreadMultiCallbacks remove themselves as a holder from
+		// every ThreadCallback they hold prior to destruction, because if they do not then this
+		// assert will fire, so ThreadCallback does not attempt to destroy its MultiCallbackHolder
+		// linked list or verify that it is empty.
 		UNSTOPPABLE_ASSERT(callbacks.empty());
 		delete this;
 	}
