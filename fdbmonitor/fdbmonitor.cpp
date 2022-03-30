@@ -708,7 +708,7 @@ uint64_t getRss(ProcessID id) {
 		return 0;
 	}
 	long rss = 0;
-	int ret = fscanf(stat_file, "%*lu%ld", &rss);
+	int ret = fscanf(stat_file, "%*s%ld", &rss);
 	if (ret == 0) {
 		log_msg(SevWarn, "Unable to parse rss size for %s\n", id.c_str());
 		return 0;
@@ -1555,6 +1555,7 @@ int main(int argc, char** argv) {
 #endif
 
 	bool reload = true;
+	double last_rss_check = timer();
 	while (1) {
 		if (reload) {
 			reload = false;
@@ -1613,18 +1614,22 @@ int main(int argc, char** argv) {
 
 		double end_time = std::numeric_limits<double>::max();
 		double now = timer();
+
+		// True if any process has a resident memory limit
 		bool need_rss_check = false;
+
 		for (auto& i : id_command) {
 			if (i.second->fork_retry_time >= 0) {
 				end_time = std::min(i.second->fork_retry_time, end_time);
 			}
+			// If process has a resident memory limit and is currently running
 			if (i.second->memory_rss > 0 && id_pid.count(i.first) > 0) {
 				need_rss_check = true;
 			}
 		}
 		bool timeout_for_rss_check = false;
-		if (need_rss_check && end_time > now + RSS_CHECK_INTERVAL) {
-			end_time = now + RSS_CHECK_INTERVAL;
+		if (need_rss_check && end_time > last_rss_check + RSS_CHECK_INTERVAL) {
+			end_time = last_rss_check + RSS_CHECK_INTERVAL;
 			timeout_for_rss_check = true;
 		}
 		struct timespec tv;
@@ -1718,6 +1723,7 @@ int main(int argc, char** argv) {
 #endif
 
 		if (is_timeout && timeout_for_rss_check) {
+			last_rss_check = timer();
 			std::vector<ProcessID> oom_ids;
 			for (auto& i : id_command) {
 				if (id_pid.count(i.first) == 0) {
@@ -1743,6 +1749,8 @@ int main(int argc, char** argv) {
 			// kill process without waiting, and rely on the SIGCHLD handling logic below to restart the process.
 			for (auto& id : oom_ids) {
 				kill_process(id, false /*wait*/, false /*cleanup*/);
+			}
+			if (oom_ids.size() > 0) {
 				child_exited = true;
 			}
 		}
