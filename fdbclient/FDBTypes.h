@@ -1363,7 +1363,7 @@ struct StorageMetadataType {
 	StorageMetadataType() : createdTime(0) {}
 	StorageMetadataType(uint64_t t) : createdTime(t) {}
 
-	static uint64_t currentTime() { return g_network->timer() * 1e9; }
+	static uint64_t currentTime() { return g_network->timer_int(); }
 
 	// To change this serialization, ProtocolVersion::StorageMetadata must be updated, and downgrades need
 	// to be considered
