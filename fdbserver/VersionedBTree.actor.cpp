@@ -10370,7 +10370,7 @@ TEST_CASE(":/redwood/performance/set") {
 
 	state Future<Void> stats =
 	    traceMetrics ? Void()
-	                 : repeatEvery(1.0, [&]() { printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str()); });
+	                 : recurring([&]() { printf("Stats:\n%s\n", g_redwoodMetrics.toString(true).c_str()); }, 1.0);
 
 	if (scans > 0) {
 		printf("Parallel scans, concurrency=%d, scans=%d, scanWidth=%d, scanPreftchBytes=%d ...\n",
