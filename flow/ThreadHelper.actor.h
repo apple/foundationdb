@@ -98,14 +98,14 @@ struct ThreadCallback {
 	// MultiCallbackHolder objects can form a doubly linked list.
 	struct MultiCallbackHolder : public FastAllocated<MultiCallbackHolder> {
 		// Construction requires no arguments or all the arguments
-		MultiCallbackHolder() : holder(nullptr), index(0), previous(nullptr), next(nullptr) {}
+		MultiCallbackHolder() : multiCallback(nullptr), index(0), previous(nullptr), next(nullptr) {}
 		MultiCallbackHolder(ThreadMultiCallback* multiCallback,
 		                    int index,
 		                    MultiCallbackHolder* prev,
 		                    MultiCallbackHolder* next)
-		  : holder(multiCallback), index(0), previous(prev), next(next) {}
+		  : multiCallback(multiCallback), index(0), previous(prev), next(next) {}
 
-		ThreadMultiCallback* holder;
+		ThreadMultiCallback* multiCallback;
 		int index;
 		MultiCallbackHolder* previous;
 		MultiCallbackHolder* next;
@@ -118,8 +118,8 @@ struct ThreadCallback {
 	// Return a MultiCallbackHolder for the given holder, using the firstHolder if free or allocating
 	// a new one.  No check for an existing record for holder is done.
 	MultiCallbackHolder* addHolder(ThreadMultiCallback* multiCallback, int index) {
-		if (firstHolder.holder == nullptr) {
-			firstHolder.holder = multiCallback;
+		if (firstHolder.multiCallback == nullptr) {
+			firstHolder.multiCallback = multiCallback;
 			firstHolder.index = index;
 			return &firstHolder;
 		}
@@ -130,7 +130,7 @@ struct ThreadCallback {
 	// Get the MultiCallbackHolder for holder if it exists, or nullptr.
 	MultiCallbackHolder* getHolder(ThreadMultiCallback* multiCallback) {
 		MultiCallbackHolder* h = &firstHolder;
-		while (h != nullptr && h->holder != multiCallback) {
+		while (h != nullptr && h->multiCallback != multiCallback) {
 			h = h->next;
 		}
 		return h;
@@ -142,7 +142,7 @@ struct ThreadCallback {
 
 		// If h is the firstHolder just clear its holder pointer to indicate unusedness
 		if (h == &firstHolder) {
-			h->holder = nullptr;
+			h->multiCallback = nullptr;
 		} else {
 			// Otherwise unlink h from the doubly linked list and free it
 			// h->previous is definitely valid
