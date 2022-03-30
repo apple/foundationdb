@@ -755,10 +755,8 @@ inline Reference<IBackupContainer> Codec<Reference<IBackupContainer>>::unpack(Tu
 	}
 
 	Optional<std::string> proxy;
-	if (val.size() > 2) {
-		if (!val.getString(2).empty()) {
-			proxy = val.getString(2).toString();
-		};
+	if (val.size() > 2 && !val.getString(2).empty()) {
+		proxy = val.getString(2).toString();
 	}
 
 	return IBackupContainer::openContainer(url, proxy, encryptionKeyFileName);
