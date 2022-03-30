@@ -727,30 +727,40 @@ template <>
 inline Tuple Codec<Reference<IBackupContainer>>::pack(Reference<IBackupContainer> const& bc) {
 	Tuple tuple;
 	tuple.append(StringRef(bc->getURL()));
-	if (bc->getProxy().present()) {
-		tuple.append(StringRef(bc->getProxy().get()));
-	} else {
-		tuple.append(StringRef());
-	}
+
 	if (bc->getEncryptionKeyFileName().present()) {
 		tuple.append(bc->getEncryptionKeyFileName().get());
 	} else {
 		tuple.append(StringRef());
 	}
+
+	if (bc->getProxy().present()) {
+		tuple.append(StringRef(bc->getProxy().get()));
+	} else {
+		tuple.append(StringRef());
+	}
+
 	return tuple;
 }
 template <>
 inline Reference<IBackupContainer> Codec<Reference<IBackupContainer>>::unpack(Tuple const& val) {
-	ASSERT(val.size() == 3);
+	ASSERT(val.size() >= 1 || val.size() <= 3);
 	auto url = val.getString(0).toString();
-	Optional<std::string> proxy;
-	if (!val.getString(1).empty()) {
-		proxy = val.getString(1).toString();
-	}
+
 	Optional<std::string> encryptionKeyFileName;
-	if (!val.getString(2).empty()) {
-		encryptionKeyFileName = val.getString(2).toString();
+	if (val.size() > 1) {
+		if (!val.getString(1).empty()) {
+			encryptionKeyFileName = val.getString(1).toString();
+		}
 	}
+
+	Optional<std::string> proxy;
+	if (val.size() > 2) {
+		if (!val.getString(2).empty()) {
+			proxy = val.getString(2).toString();
+		};
+	}
+
 	return IBackupContainer::openContainer(url, proxy, encryptionKeyFileName);
 }
 
