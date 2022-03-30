@@ -1821,6 +1821,12 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			}
 		}
 	} catch (Error& e) {
+		if (BW_DEBUG) {
+			fmt::print("Granule file updater for [{0} - {1}) got error {2}, exiting\n",
+			           metadata->keyRange.begin.printable(),
+			           metadata->keyRange.end.printable(),
+			           e.name());
+		}
 		// Free last change feed data
 		metadata->activeCFData.set(Reference<ChangeFeedData>());
 
@@ -1845,12 +1851,6 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			return Void();
 		}
 		++bwData->stats.granuleUpdateErrors;
-		if (BW_DEBUG) {
-			fmt::print("Granule file updater for [{0} - {1}) got error {2}, exiting\n",
-			           metadata->keyRange.begin.printable(),
-			           metadata->keyRange.end.printable(),
-			           e.name());
-		}
 
 		if (granuleCanRetry(e)) {
 			TEST(true); // Granule close and re-open on error
