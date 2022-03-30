@@ -666,7 +666,7 @@ public:
 		Mutex tenantLock;
 		ThreadFuture<Void> tenantUpdater;
 
-		std::atomic_bool closed;
+		bool closed;
 	};
 
 	Reference<TenantState> tenantState;

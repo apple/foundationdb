@@ -1235,10 +1235,6 @@ MultiVersionTenant::TenantState::TenantState(Reference<MultiVersionDatabase> db,
 // Creates a new underlying tenant object whenever the database connection changes. This change is signaled
 // to open transactions via an AsyncVar.
 void MultiVersionTenant::TenantState::updateTenant() {
-	if (closed) {
-		return;
-	}
-
 	Reference<ITenant> tenant;
 	auto currentDb = db->dbState->dbVar->get();
 	if (currentDb.value) {
@@ -1252,6 +1248,10 @@ void MultiVersionTenant::TenantState::updateTenant() {
 	Reference<TenantState> self = Reference<TenantState>::addRef(this);
 
 	MutexHolder holder(tenantLock);
+	if (closed) {
+		return;
+	}
+
 	tenantUpdater = mapThreadFuture<Void, Void>(currentDb.onChange, [self](ErrorOr<Void> result) {
 		self->updateTenant();
 		return Void();
@@ -1259,9 +1259,8 @@ void MultiVersionTenant::TenantState::updateTenant() {
 }
 
 void MultiVersionTenant::TenantState::close() {
-	closed = true;
-
 	MutexHolder holder(tenantLock);
+	closed = true;
 	if (tenantUpdater.isValid()) {
 		tenantUpdater.cancel();
 	}
