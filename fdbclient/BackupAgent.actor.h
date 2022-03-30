@@ -744,21 +744,17 @@ inline Tuple Codec<Reference<IBackupContainer>>::pack(Reference<IBackupContainer
 }
 template <>
 inline Reference<IBackupContainer> Codec<Reference<IBackupContainer>>::unpack(Tuple const& val) {
-	ASSERT(val.size() >= 1 || val.size() <= 3);
+	ASSERT(val.size() >= 1);
 	auto url = val.getString(0).toString();
 
 	Optional<std::string> encryptionKeyFileName;
-	if (val.size() > 1) {
-		if (!val.getString(1).empty()) {
-			encryptionKeyFileName = val.getString(1).toString();
-		}
+	if (val.size() > 1 && !val.getString(1).empty()) {
+		encryptionKeyFileName = val.getString(1).toString();
 	}
 
 	Optional<std::string> proxy;
-	if (val.size() > 2) {
-		if (!val.getString(2).empty()) {
-			proxy = val.getString(2).toString();
-		};
+	if (val.size() > 2 && !val.getString(2).empty()) {
+		proxy = val.getString(2).toString();
 	}
 
 	return IBackupContainer::openContainer(url, proxy, encryptionKeyFileName);
