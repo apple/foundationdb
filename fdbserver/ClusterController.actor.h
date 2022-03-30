@@ -1896,8 +1896,8 @@ public:
 					throw;
 				}
 				TraceEvent(SevWarn, "AttemptingRecruitmentInRemoteDc", id)
-				    .detail("SetPrimaryDesired", setPrimaryDesired)
-				    .error(e);
+				    .error(e)
+				    .detail("SetPrimaryDesired", setPrimaryDesired);
 				auto reply = findWorkersForConfigurationFromDC(req, regions[1].dcId, checkGoodRecruitment);
 				if (!setPrimaryDesired) {
 					std::vector<Optional<Key>> dcPriority;

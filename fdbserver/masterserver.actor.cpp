@@ -239,6 +239,11 @@ void updateLiveCommittedVersion(Reference<MasterData> self, ReportRawCommittedVe
 			self->ssVersionVector.setVersion(req.writtenTags.get(), req.version);
 			self->versionVectorTagUpdates += req.writtenTags.get().size();
 		}
+		auto curTime = now();
+		// add debug here to change liveCommittedVersion to time bound of now()
+		debug_advanceVersionTimestamp(self->liveCommittedVersion.get(), curTime + CLIENT_KNOBS->MAX_VERSION_CACHE_LAG);
+		// also add req.version but with no time bound
+		debug_advanceVersionTimestamp(req.version, std::numeric_limits<double>::max());
 		self->databaseLocked = req.locked;
 		self->proxyMetadataVersion = req.metadataVersion;
 		// Note the set call switches context to any waiters on liveCommittedVersion before continuing.

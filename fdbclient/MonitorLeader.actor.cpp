@@ -178,6 +178,10 @@ void ClusterConnectionString::resetToUnresolved() {
 	}
 }
 
+void ClusterConnectionString::resetConnectionString() {
+	connectionString = toString();
+}
+
 void ClusterConnectionString::parseConnString() {
 	// Split on '@' into key@addrs
 	int pAt = connectionString.find_first_of('@');
@@ -444,26 +448,14 @@ ClusterConnectionString::ClusterConnectionString(const std::vector<NetworkAddres
   : status(RESOLVED), coords(servers) {
 	std::string keyString = key.toString();
 	parseKey(keyString);
-	connectionString = keyString + "@";
-	for (int i = 0; i < coords.size(); i++) {
-		if (i) {
-			connectionString += ',';
-		}
-		connectionString += coords[i].toString();
-	}
+	resetConnectionString();
 }
 
 ClusterConnectionString::ClusterConnectionString(const std::vector<Hostname>& hosts, Key key)
   : status(UNRESOLVED), hostnames(hosts) {
 	std::string keyString = key.toString();
 	parseKey(keyString);
-	connectionString = keyString + "@";
-	for (int i = 0; i < hostnames.size(); i++) {
-		if (i) {
-			connectionString += ',';
-		}
-		connectionString += hostnames[i].toString();
-	}
+	resetConnectionString();
 }
 
 void ClusterConnectionString::parseKey(const std::string& key) {
@@ -562,9 +554,9 @@ ACTOR Future<Void> monitorNominee(Key key,
 			if (rep.isError()) {
 				// Connecting to nominee failed, most likely due to connection failed.
 				TraceEvent("MonitorNomineeError")
+				    .error(rep.getError())
 				    .detail("Hostname", hostname.present() ? hostname.get().toString() : "UnknownHostname")
-				    .detail("OldAddr", coord.getLeader.getEndpoint().getPrimaryAddress().toString())
-				    .error(rep.getError());
+				    .detail("OldAddr", coord.getLeader.getEndpoint().getPrimaryAddress().toString());
 				if (rep.getError().code() == error_code_request_maybe_delivered) {
 					// 50 milliseconds delay to prevent tight resolving loop due to outdated DNS cache
 					wait(delay(0.05));

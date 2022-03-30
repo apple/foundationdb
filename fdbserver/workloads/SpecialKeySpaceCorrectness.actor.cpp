@@ -668,7 +668,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
 				ASSERT(valueObj["command"].get_str() == "exclude" && !valueObj["retriable"].get_bool());
 			} else {
-				TraceEvent(SevDebug, "UnexpectedError").detail("Command", "Exclude").error(e);
+				TraceEvent(SevDebug, "UnexpectedError").error(e).detail("Command", "Exclude");
 				wait(tx->onError(e));
 			}
 			tx->reset();
@@ -737,7 +737,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					ASSERT(schemaMatch(schema, valueObj, errorStr, SevError, true));
 					ASSERT(valueObj["command"].get_str() == "setclass" && !valueObj["retriable"].get_bool());
 				} else {
-					TraceEvent(SevDebug, "UnexpectedError").detail("Command", "Setclass").error(e);
+					TraceEvent(SevDebug, "UnexpectedError").error(e).detail("Command", "Setclass");
 					wait(tx->onError(e));
 				}
 				tx->reset();

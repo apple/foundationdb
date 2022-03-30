@@ -87,6 +87,8 @@ void ClientKnobs::initialize(Randomize randomize) {
 
 	init( LOCATION_CACHE_EVICTION_SIZE,         600000 );
 	init( LOCATION_CACHE_EVICTION_SIZE_SIM,         10 ); if( randomize && BUGGIFY ) LOCATION_CACHE_EVICTION_SIZE_SIM = 3;
+	init( LOCATION_CACHE_ENDPOINT_FAILURE_GRACE_PERIOD,     60 );
+	init( LOCATION_CACHE_FAILED_ENDPOINT_RETRY_INTERVAL,    60 );
 
 	init( GET_RANGE_SHARD_LIMIT,                     2 );
 	init( WARM_RANGE_SHARD_LIMIT,                  100 );
@@ -118,6 +120,12 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( CORE_VERSIONSPERSECOND,		           1e6 );
 	init( LOG_RANGE_BLOCK_SIZE, CORE_VERSIONSPERSECOND );
 	init( MUTATION_BLOCK_SIZE,	            	  10000);
+	init( MAX_VERSION_CACHE_LAG,                    0.1 );
+	init( MAX_PROXY_CONTACT_LAG,                    0.2 );
+	init( DEBUG_USE_GRV_CACHE_CHANCE,              -1.0 ); // For 100% chance at 1.0, this means 0.0 is not 0%. We don't want the default to be 0. 
+	init( FORCE_GRV_CACHE_OFF,                    false );
+	init( GRV_CACHE_RK_COOLDOWN,                   60.0 );
+	init( GRV_SUSTAINED_THROTTLING_THRESHOLD,       0.1 );
 
 	// TaskBucket
 	init( TASKBUCKET_LOGGING_DELAY,                5.0 );

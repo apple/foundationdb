@@ -154,7 +154,7 @@ struct MoveKeysWorkload : TestWorkload {
 			TraceEvent(relocateShardInterval.end()).detail("Result", "Success");
 			return Void();
 		} catch (Error& e) {
-			TraceEvent(relocateShardInterval.end(), self->dbInfo->get().master.id()).error(e, true);
+			TraceEvent(relocateShardInterval.end(), self->dbInfo->get().master.id()).errorUnsuppressed(e);
 			throw;
 		}
 	}
