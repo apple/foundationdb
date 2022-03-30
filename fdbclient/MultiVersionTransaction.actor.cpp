@@ -469,11 +469,11 @@ ThreadFuture<Void> DLDatabase::createSnapshot(const StringRef& uid, const String
 	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) { return Void(); });
 }
 
-ThreadFuture<DatabaseSharedState*> DLDatabase::createSharedState() {
+ThreadFuture<DatabaseSharedState*> DLDatabase::createSharedState(ProtocolVersion v) {
 	if (!api->databaseCreateSharedState) {
 		return unsupported_operation();
 	}
-	FdbCApi::FDBFuture* f = api->databaseCreateSharedState(db);
+	FdbCApi::FDBFuture* f = api->databaseCreateSharedState(db, v);
 	return toThreadFuture<DatabaseSharedState*>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
 		DatabaseSharedState* res;
 		FdbCApi::fdb_error_t error = api->futureGetSharedState(f, &res);
@@ -482,11 +482,11 @@ ThreadFuture<DatabaseSharedState*> DLDatabase::createSharedState() {
 	});
 }
 
-void DLDatabase::setSharedState(DatabaseSharedState* p) {
+void DLDatabase::setSharedState(DatabaseSharedState* p, ProtocolVersion v) {
 	if (!api->databaseSetSharedState) {
 		throw unsupported_operation();
 	}
-	api->databaseSetSharedState(db, p);
+	api->databaseSetSharedState(db, p, v);
 }
 
 // Get network thread busyness
@@ -1394,15 +1394,15 @@ ThreadFuture<Void> MultiVersionDatabase::createSnapshot(const StringRef& uid, co
 	return abortableFuture(f, dbState->dbVar->get().onChange);
 }
 
-ThreadFuture<DatabaseSharedState*> MultiVersionDatabase::createSharedState() {
+ThreadFuture<DatabaseSharedState*> MultiVersionDatabase::createSharedState(ProtocolVersion v) {
 	auto dbVar = dbState->dbVar->get();
-	auto f = dbVar.value ? dbVar.value->createSharedState() : ThreadFuture<DatabaseSharedState*>(Never());
+	auto f = dbVar.value ? dbVar.value->createSharedState(v) : ThreadFuture<DatabaseSharedState*>(Never());
 	return abortableFuture(f, dbVar.onChange);
 }
 
-void MultiVersionDatabase::setSharedState(DatabaseSharedState* p) {
+void MultiVersionDatabase::setSharedState(DatabaseSharedState* p, ProtocolVersion v) {
 	if (dbState->db) {
-		dbState->db->setSharedState(p);
+		dbState->db->setSharedState(p, v);
 	}
 }
 
@@ -1622,8 +1622,9 @@ void MultiVersionDatabase::DatabaseState::updateDatabase(Reference<IDatabase> ne
 			    .detail("ClusterFilePath", clusterFilePath);
 		}
 	}
-	if (db.isValid()) {
-		auto updateResult = MultiVersionApi::api->updateClusterSharedStateMap(clusterFilePath, db);
+	if (db.isValid() && dbProtocolVersion.present()) {
+		auto updateResult =
+		    MultiVersionApi::api->updateClusterSharedStateMap(clusterFilePath, db, dbProtocolVersion.get());
 		auto handler = mapThreadFuture<Void, Void>(updateResult, [this](ErrorOr<Void> result) {
 			dbVar->set(db);
 			return ErrorOr<Void>(Void());
@@ -2286,18 +2287,21 @@ void MultiVersionApi::updateSupportedVersions() {
 	}
 }
 
-ThreadFuture<Void> MultiVersionApi::updateClusterSharedStateMap(std::string clusterFilePath, Reference<IDatabase> db) {
+ThreadFuture<Void> MultiVersionApi::updateClusterSharedStateMap(std::string clusterFilePath,
+                                                                Reference<IDatabase> db,
+                                                                ProtocolVersion v) {
 	MutexHolder holder(lock);
-	if (clusterSharedStateMap.find(clusterFilePath) == clusterSharedStateMap.end()) {
-		clusterSharedStateMap[clusterFilePath] = db->createSharedState();
+	std::pair<std::string, ProtocolVersion> mapKey = std::make_pair(clusterFilePath, v);
+	if (clusterSharedStateMap.find(mapKey) == clusterSharedStateMap.end()) {
+		clusterSharedStateMap[mapKey] = db->createSharedState(v);
 	} else {
-		ThreadFuture<DatabaseSharedState*> entry = clusterSharedStateMap[clusterFilePath];
-		return mapThreadFuture<DatabaseSharedState*, Void>(entry, [db](ErrorOr<DatabaseSharedState*> result) {
+		ThreadFuture<DatabaseSharedState*> entry = clusterSharedStateMap[mapKey];
+		return mapThreadFuture<DatabaseSharedState*, Void>(entry, [db, v](ErrorOr<DatabaseSharedState*> result) {
 			if (result.isError()) {
 				return ErrorOr<Void>(result.getError());
 			}
 			auto ssPtr = result.get();
-			db->setSharedState(ssPtr);
+			db->setSharedState(ssPtr, v);
 			return ErrorOr<Void>(Void());
 		});
 	}

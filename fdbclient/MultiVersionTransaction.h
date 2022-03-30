@@ -20,6 +20,7 @@
 
 #ifndef FDBCLIENT_MULTIVERSIONTRANSACTION_H
 #define FDBCLIENT_MULTIVERSIONTRANSACTION_H
+#include "flow/ProtocolVersion.h"
 #pragma once
 
 #include "bindings/c/foundationdb/fdb_c_options.g.h"
@@ -149,8 +150,8 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                     int uidLength,
 	                                     uint8_t const* snapshotCommmand,
 	                                     int snapshotCommandLength);
-	FDBFuture* (*databaseCreateSharedState)(FDBDatabase* database);
-	void (*databaseSetSharedState)(FDBDatabase* database, DatabaseSharedState* p);
+	FDBFuture* (*databaseCreateSharedState)(FDBDatabase* database, ProtocolVersion v);
+	void (*databaseSetSharedState)(FDBDatabase* database, DatabaseSharedState* p, ProtocolVersion v);
 
 	double (*databaseGetMainThreadBusyness)(FDBDatabase* database);
 	FDBFuture* (*databaseGetServerProtocol)(FDBDatabase* database, uint64_t expectedVersion);
@@ -437,8 +438,8 @@ public:
 	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
 	ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) override;
 
-	ThreadFuture<DatabaseSharedState*> createSharedState() override;
-	void setSharedState(DatabaseSharedState* p) override;
+	ThreadFuture<DatabaseSharedState*> createSharedState(ProtocolVersion v) override;
+	void setSharedState(DatabaseSharedState* p, ProtocolVersion v) override;
 
 private:
 	const Reference<FdbCApi> api;
@@ -703,8 +704,8 @@ public:
 	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
 	ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) override;
 
-	ThreadFuture<DatabaseSharedState*> createSharedState() override;
-	void setSharedState(DatabaseSharedState* p) override;
+	ThreadFuture<DatabaseSharedState*> createSharedState(ProtocolVersion v) override;
+	void setSharedState(DatabaseSharedState* p, ProtocolVersion v) override;
 
 	// private:
 
@@ -828,7 +829,9 @@ public:
 
 	bool callbackOnMainThread;
 	bool localClientDisabled;
-	ThreadFuture<Void> updateClusterSharedStateMap(std::string clusterFilePath, Reference<IDatabase> db);
+	ThreadFuture<Void> updateClusterSharedStateMap(std::string clusterFilePath,
+	                                               Reference<IDatabase> db,
+	                                               ProtocolVersion v);
 
 	static bool apiVersionAtLeast(int minVersion);
 
@@ -852,8 +855,8 @@ private:
 	Reference<ClientInfo> localClient;
 	std::map<std::string, ClientDesc> externalClientDescriptions;
 	std::map<std::string, std::vector<Reference<ClientInfo>>> externalClients;
-	// Map of clusterFilePath -> DatabaseSharedState pointer
-	std::map<std::string, ThreadFuture<DatabaseSharedState*>> clusterSharedStateMap;
+	// Map of [clusterFilePath, ProtocolVersion] -> DatabaseSharedState pointer Future
+	std::map<std::pair<std::string, ProtocolVersion>, ThreadFuture<DatabaseSharedState*>> clusterSharedStateMap;
 
 	bool networkStartSetup;
 	volatile bool networkSetup;

@@ -20,6 +20,7 @@
 
 #ifndef FDBCLIENT_THREADSAFETRANSACTION_H
 #define FDBCLIENT_THREADSAFETRANSACTION_H
+#include "flow/ProtocolVersion.h"
 #pragma once
 
 #include "fdbclient/ReadYourWrites.h"
@@ -58,8 +59,8 @@ public:
 	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
 	ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) override;
 
-	ThreadFuture<DatabaseSharedState*> createSharedState() override;
-	void setSharedState(DatabaseSharedState* p) override;
+	ThreadFuture<DatabaseSharedState*> createSharedState(ProtocolVersion v) override;
+	void setSharedState(DatabaseSharedState* p, ProtocolVersion v) override;
 
 private:
 	friend class ThreadSafeTenant;

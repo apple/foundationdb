@@ -71,6 +71,7 @@
 #include "flow/Error.h"
 #include "flow/FastRef.h"
 #include "flow/IRandom.h"
+#include "flow/ProtocolVersion.h"
 #include "flow/flow.h"
 #include "flow/genericactors.actor.h"
 #include "flow/Knobs.h"
@@ -8177,15 +8178,15 @@ Future<Void> DatabaseContext::createSnapshot(StringRef uid, StringRef snapshot_c
 	return createSnapshotActor(this, UID::fromString(uid_str), snapshot_command);
 }
 
-Future<DatabaseSharedState*> DatabaseContext::initSharedState() {
+Future<DatabaseSharedState*> DatabaseContext::initSharedState(ProtocolVersion v) {
 	ASSERT(!sharedStatePtr); // Don't re-initialize shared state if a pointer already exists
-	DatabaseSharedState* newState = new DatabaseSharedState();
-	newState->protocolVersion = getClusterProtocol();
-	setSharedState(newState);
+	DatabaseSharedState* newState = new DatabaseSharedState(v);
+	setSharedState(newState, v);
 	return newState;
 }
 
-void DatabaseContext::setSharedState(DatabaseSharedState* p) {
+void DatabaseContext::setSharedState(DatabaseSharedState* p, ProtocolVersion v) {
+	ASSERT(p->protocolVersion == v);
 	sharedStatePtr = p;
 	sharedStatePtr->refCount++;
 }

@@ -25,6 +25,7 @@
 #include "fdbclient/versions.h"
 #include "fdbclient/GenericManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "flow/ProtocolVersion.h"
 
 // Users of ThreadSafeTransaction might share Reference<ThreadSafe...> between different threads as long as they don't
 // call addRef (e.g. C API follows this). Therefore, it is unsafe to call (explicitly or implicitly) this->addRef in any
@@ -101,14 +102,14 @@ ThreadFuture<Void> ThreadSafeDatabase::createSnapshot(const StringRef& uid, cons
 	return onMainThread([db, snapUID, cmd]() -> Future<Void> { return db->createSnapshot(snapUID, cmd); });
 }
 
-ThreadFuture<DatabaseSharedState*> ThreadSafeDatabase::createSharedState() {
+ThreadFuture<DatabaseSharedState*> ThreadSafeDatabase::createSharedState(ProtocolVersion v) {
 	DatabaseContext* db = this->db;
-	return onMainThread([db]() -> Future<DatabaseSharedState*> { return db->initSharedState(); });
+	return onMainThread([db, v]() -> Future<DatabaseSharedState*> { return db->initSharedState(v); });
 }
 
-void ThreadSafeDatabase::setSharedState(DatabaseSharedState* p) {
+void ThreadSafeDatabase::setSharedState(DatabaseSharedState* p, ProtocolVersion v) {
 	DatabaseContext* db = this->db;
-	onMainThreadVoid([db, p]() { db->setSharedState(p); }, nullptr);
+	onMainThreadVoid([db, p, v]() { db->setSharedState(p, v); }, nullptr);
 }
 
 // Return the main network thread busyness

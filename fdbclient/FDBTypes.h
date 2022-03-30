@@ -1340,12 +1340,13 @@ struct GRVCacheSpace {
 
 // This structure can be extended in the future to include additional features that required a shared state
 struct DatabaseSharedState {
+	const ProtocolVersion protocolVersion;
 	Mutex mutexLock;
-	Future<ProtocolVersion> protocolVersion;
 	GRVCacheSpace grvCacheSpace;
 	std::atomic<int> refCount;
 
-	DatabaseSharedState() : mutexLock(Mutex()), grvCacheSpace(GRVCacheSpace()), refCount(0) {}
+	DatabaseSharedState(ProtocolVersion v)
+	  : protocolVersion(v), mutexLock(Mutex()), grvCacheSpace(GRVCacheSpace()), refCount(0) {}
 };
 
 inline bool isValidPerpetualStorageWiggleLocality(std::string locality) {
