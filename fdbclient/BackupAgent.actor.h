@@ -748,10 +748,8 @@ inline Reference<IBackupContainer> Codec<Reference<IBackupContainer>>::unpack(Tu
 	auto url = val.getString(0).toString();
 
 	Optional<std::string> encryptionKeyFileName;
-	if (val.size() > 1) {
-		if (!val.getString(1).empty()) {
-			encryptionKeyFileName = val.getString(1).toString();
-		}
+	if (val.size() > 1 && !val.getString(1).empty()) {
+		encryptionKeyFileName = val.getString(1).toString();
 	}
 
 	Optional<std::string> proxy;
