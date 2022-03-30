@@ -91,10 +91,13 @@ struct ThreadCallback {
 	// some other scheme to store the indices by callback.
 	// MultiCallbackHolder objects can form a doubly linked list.
 	struct MultiCallbackHolder : public FastAllocated<MultiCallbackHolder> {
-		MultiCallbackHolder(ThreadMultiCallback* holder = nullptr,
-		                    MultiCallbackHolder* prev = nullptr,
-		                    MultiCallbackHolder* next = nullptr)
-		  : holder(holder), previous(prev), next(next) {}
+		// Construction requires no arguments or all the arguments
+		MultiCallbackHolder() : holder(nullptr), index(0), previous(nullptr), next(nullptr) {}
+		MultiCallbackHolder(ThreadMultiCallback* multiCallback,
+		                    int index,
+		                    MultiCallbackHolder* prev,
+		                    MultiCallbackHolder* next)
+		  : holder(multiCallback), index(0), previous(prev), next(next) {}
 
 		ThreadMultiCallback* holder;
 		int index;
@@ -108,19 +111,20 @@ struct ThreadCallback {
 
 	// Return a MultiCallbackHolder for the given holder, using the firstHolder if free or allocating
 	// a new one.  No check for an existing record for holder is done.
-	MultiCallbackHolder* addHolder(ThreadMultiCallback* holder) {
+	MultiCallbackHolder* addHolder(ThreadMultiCallback* multiCallback, int index) {
 		if (firstHolder.holder == nullptr) {
-			firstHolder.holder = holder;
+			firstHolder.holder = multiCallback;
+			firstHolder.index = index;
 			return &firstHolder;
 		}
-		firstHolder.next = new MultiCallbackHolder(holder, &firstHolder, firstHolder.next);
+		firstHolder.next = new MultiCallbackHolder(multiCallback, index, &firstHolder, firstHolder.next);
 		return firstHolder.next;
 	}
 
 	// Get the MultiCallbackHolder for holder if it exists, or nullptr.
-	MultiCallbackHolder* getHolder(ThreadMultiCallback* holder) {
+	MultiCallbackHolder* getHolder(ThreadMultiCallback* multiCallback) {
 		MultiCallbackHolder* h = &firstHolder;
-		while (h != nullptr && h->holder != holder) {
+		while (h != nullptr && h->holder != multiCallback) {
 			h = h->next;
 		}
 		return h;
@@ -150,10 +154,10 @@ public:
 	ThreadMultiCallback() {}
 
 	ThreadCallback* addCallback(ThreadCallback* callback) override {
-		UNSTOPPABLE_ASSERT(
-		    callback->getHolder(this) ==
-		    nullptr); // May be triggered by a waitForAll on a vector with the same future in it more than once
-		callback->addHolder(this)->index = callbacks.size();
+		// May be triggered by a waitForAll on a vector with the same future in it more than once
+		UNSTOPPABLE_ASSERT(callback->getHolder(this) == nullptr);
+
+		callback->addHolder(this, callbacks.size());
 		callbacks.push_back(callback);
 		return (ThreadCallback*)this;
 	}
