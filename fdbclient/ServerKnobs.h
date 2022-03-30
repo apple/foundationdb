@@ -297,7 +297,6 @@ public:
 	int64_t ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC;
 	bool ROCKSDB_WRITE_RATE_LIMITER_AUTO_TUNE;
 	bool ROCKSDB_ENABLE_STATISTIC; // Enable rocks statistic
-	bool ROCKSDB_PERFCONTEXT_ENABLE;
 	double ROCKSDB_PERFCONTEXT_SAMPLE_RATE; // Enable rocks perf context metrics. May cause performance overhead
 	double ROCKSDB_MEM_USAGE_METRIC_SAMPLE_RATE;
 
