@@ -1178,52 +1178,6 @@ class Database(_TransactionCreator):
         self.capi.fdb_database_create_transaction(self.dpointer, ctypes.byref(pointer))
         return Transaction(pointer.value, self)
 
-    def allocate_tenant(self, name):
-        Database.__database_allocate_tenant(self, process_tenant_name(name), [])
-
-    def delete_tenant(self, name):
-        Database.__database_delete_tenant(self, process_tenant_name(name), [])
-
-    # Attempt to allocate a tenant in the cluster. If the tenant already exists,
-    # this function will return a tenant_already_exists error. If the tenant is created
-    # concurrently, then this function may return success even if another caller creates 
-    # it.
-    #
-    # The existence_check_marker is expected to be an empty list. This function will
-    # modify the list after completing the existence check to avoid checking for existence
-    # on retries. This allows the operation to be idempotent.
-    @staticmethod
-    @transactional
-    def __database_allocate_tenant(tr, name, existence_check_marker):
-        tr.options.set_special_key_space_enable_writes()
-        key = b'\xff\xff/management/tenant_map/%s' % name
-        if not existence_check_marker:
-            existing_tenant = tr[key].wait()
-            existence_check_marker.append(None)
-            if existing_tenant != None:
-                raise fdb.FDBError(2132) # tenant_already_exists
-        tr[key] = b''
-
-    # Attempt to remove a tenant in the cluster. If the tenant doesn't exist, this 
-    # function will return a tenant_not_found error. If the tenant is deleted
-    # concurrently, then this function may return success even if another caller deletes 
-    # it.
-    #
-    # The existence_check_marker is expected to be an empty list. This function will
-    # modify the list after completing the existence check to avoid checking for existence
-    # on retries. This allows the operation to be idempotent.
-    @staticmethod
-    @transactional
-    def __database_delete_tenant(tr, name, existence_check_marker):
-        tr.options.set_special_key_space_enable_writes()
-        key = b'\xff\xff/management/tenant_map/%s' % name
-        if not existence_check_marker:
-            existing_tenant = tr[key].wait()
-            existence_check_marker.append(None)
-            if existing_tenant == None:
-                raise fdb.FDBError(2131) # tenant_not_found
-        del tr[key]
-
 
 class Tenant(_TransactionCreator):
     def __init__(self, tpointer):
