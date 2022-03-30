@@ -744,7 +744,7 @@ inline Tuple Codec<Reference<IBackupContainer>>::pack(Reference<IBackupContainer
 }
 template <>
 inline Reference<IBackupContainer> Codec<Reference<IBackupContainer>>::unpack(Tuple const& val) {
-	ASSERT(val.size() >= 1 || val.size() <= 3);
+	ASSERT(val.size() >= 1 && val.size() <= 3);
 	auto url = val.getString(0).toString();
 
 	Optional<std::string> encryptionKeyFileName;
