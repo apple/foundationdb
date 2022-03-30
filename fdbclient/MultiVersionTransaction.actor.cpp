@@ -780,7 +780,7 @@ void MultiVersionTransaction::updateTransaction() {
 	TransactionInfo newTr;
 	if (tenant.present()) {
 		ASSERT(tenant.get());
-		auto currentTenant = tenant.get()->tenantVar->get();
+		auto currentTenant = tenant.get()->tenantState->tenantVar->get();
 		if (currentTenant.value) {
 			newTr.transaction = currentTenant.value->createTransaction();
 		}
@@ -1080,7 +1080,7 @@ ThreadFuture<Void> MultiVersionTransaction::onError(Error const& e) {
 
 Optional<TenantName> MultiVersionTransaction::getTenant() {
 	if (tenant.present()) {
-		return tenant.get()->tenantName;
+		return tenant.get()->tenantState->tenantName;
 	} else {
 		return Optional<TenantName>();
 	}
@@ -1214,20 +1214,31 @@ bool MultiVersionTransaction::isValid() {
 
 // MultiVersionTenant
 MultiVersionTenant::MultiVersionTenant(Reference<MultiVersionDatabase> db, StringRef tenantName)
-  : tenantVar(new ThreadSafeAsyncVar<Reference<ITenant>>(Reference<ITenant>(nullptr))), tenantName(tenantName), db(db) {
-	updateTenant();
+  : tenantState(makeReference<TenantState>(db, tenantName)) {}
+
+MultiVersionTenant::~MultiVersionTenant() {
+	tenantState->close();
 }
 
-MultiVersionTenant::~MultiVersionTenant() {}
-
 Reference<ITransaction> MultiVersionTenant::createTransaction() {
-	return Reference<ITransaction>(new MultiVersionTransaction(
-	    db, Reference<MultiVersionTenant>::addRef(this), db->dbState->transactionDefaultOptions));
+	return Reference<ITransaction>(new MultiVersionTransaction(tenantState->db,
+	                                                           Reference<MultiVersionTenant>::addRef(this),
+	                                                           tenantState->db->dbState->transactionDefaultOptions));
+}
+
+MultiVersionTenant::TenantState::TenantState(Reference<MultiVersionDatabase> db, StringRef tenantName)
+  : tenantVar(new ThreadSafeAsyncVar<Reference<ITenant>>(Reference<ITenant>(nullptr))), tenantName(tenantName), db(db),
+    closed(false) {
+	updateTenant();
 }
 
 // Creates a new underlying tenant object whenever the database connection changes. This change is signaled
 // to open transactions via an AsyncVar.
-void MultiVersionTenant::updateTenant() {
+void MultiVersionTenant::TenantState::updateTenant() {
+	if (closed) {
+		return;
+	}
+
 	Reference<ITenant> tenant;
 	auto currentDb = db->dbState->dbVar->get();
 	if (currentDb.value) {
@@ -1238,11 +1249,22 @@ void MultiVersionTenant::updateTenant() {
 
 	tenantVar->set(tenant);
 
+	Reference<TenantState> self = Reference<TenantState>::addRef(this);
+
 	MutexHolder holder(tenantLock);
-	tenantUpdater = mapThreadFuture<Void, Void>(currentDb.onChange, [this](ErrorOr<Void> result) {
-		updateTenant();
+	tenantUpdater = mapThreadFuture<Void, Void>(currentDb.onChange, [self](ErrorOr<Void> result) {
+		self->updateTenant();
 		return Void();
 	});
+}
+
+void MultiVersionTenant::TenantState::close() {
+	closed = true;
+
+	MutexHolder holder(tenantLock);
+	if (tenantUpdater.isValid()) {
+		tenantUpdater.cancel();
+	}
 }
 
 // MultiVersionDatabase
