@@ -322,6 +322,8 @@ A |database-blurb1| |database-blurb2|
 
     The tenant name can be either a byte string or a tuple. If a tuple is provided, the tuple will be packed using the tuple layer to generate the byte string tenant name.
 
+    .. note :: Opening a tenant does not check its existence in the cluster. If the tenant does not exist, attempts to read or write data with it will fail.
+
 .. |sync-read| replace:: This read is fully synchronous.
 .. |sync-write| replace:: This change will be committed immediately, and is fully synchronous.
 
