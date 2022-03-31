@@ -108,13 +108,13 @@ public:
 
 	void addReleased(int released) { smoothReleased.addDelta(released); }
 
-	bool expired() { return expiration <= now(); }
+	bool expired() const { return expiration <= now(); }
 
 	void updateChecked() { lastCheck = now(); }
 
-	bool canRecheck() { return lastCheck < now() - CLIENT_KNOBS->TAG_THROTTLE_RECHECK_INTERVAL; }
+	bool canRecheck() const { return lastCheck < now() - CLIENT_KNOBS->TAG_THROTTLE_RECHECK_INTERVAL; }
 
-	double throttleDuration() {
+	double throttleDuration() const {
 		if (expiration <= now()) {
 			return 0.0;
 		}
@@ -134,6 +134,7 @@ public:
 };
 
 struct WatchParameters : public ReferenceCounted<WatchParameters> {
+	const TenantInfo tenant;
 	const Key key;
 	const Optional<Value> value;
 
@@ -144,7 +145,8 @@ struct WatchParameters : public ReferenceCounted<WatchParameters> {
 	const Optional<UID> debugID;
 	const UseProvisionalProxies useProvisionalProxies;
 
-	WatchParameters(Key key,
+	WatchParameters(TenantInfo tenant,
+	                Key key,
 	                Optional<Value> value,
 	                Version version,
 	                TagSet tags,
@@ -152,8 +154,8 @@ struct WatchParameters : public ReferenceCounted<WatchParameters> {
 	                TaskPriority taskID,
 	                Optional<UID> debugID,
 	                UseProvisionalProxies useProvisionalProxies)
-	  : key(key), value(value), version(version), tags(tags), spanID(spanID), taskID(taskID), debugID(debugID),
-	    useProvisionalProxies(useProvisionalProxies) {}
+	  : tenant(tenant), key(key), value(value), version(version), tags(tags), spanID(spanID), taskID(taskID),
+	    debugID(debugID), useProvisionalProxies(useProvisionalProxies) {}
 };
 
 class WatchMetadata : public ReferenceCounted<WatchMetadata> {
@@ -204,6 +206,16 @@ struct EndpointFailureInfo {
 	double lastRefreshTime = 0;
 };
 
+struct KeyRangeLocationInfo {
+	TenantMapEntry tenantEntry;
+	KeyRange range;
+	Reference<LocationInfo> locations;
+
+	KeyRangeLocationInfo() {}
+	KeyRangeLocationInfo(TenantMapEntry tenantEntry, KeyRange range, Reference<LocationInfo> locations)
+	  : tenantEntry(tenantEntry), range(range), locations(locations) {}
+};
+
 class DatabaseContext : public ReferenceCounted<DatabaseContext>, public FastAllocated<DatabaseContext>, NonCopyable {
 public:
 	static DatabaseContext* allocateOnForeignThread() {
@@ -238,14 +250,22 @@ public:
 		                                    switchable));
 	}
 
-	std::pair<KeyRange, Reference<LocationInfo>> getCachedLocation(const KeyRef&, Reverse isBackward = Reverse::False);
-	bool getCachedLocations(const KeyRangeRef&,
-	                        std::vector<std::pair<KeyRange, Reference<LocationInfo>>>&,
+	Optional<KeyRangeLocationInfo> getCachedLocation(const Optional<TenantName>& tenant,
+	                                                 const KeyRef&,
+	                                                 Reverse isBackward = Reverse::False);
+	bool getCachedLocations(const Optional<TenantName>& tenant,
+	                        const KeyRangeRef&,
+	                        std::vector<KeyRangeLocationInfo>&,
 	                        int limit,
 	                        Reverse reverse);
-	Reference<LocationInfo> setCachedLocation(const KeyRangeRef&, const std::vector<struct StorageServerInterface>&);
-	void invalidateCache(const KeyRef&, Reverse isBackward = Reverse::False);
-	void invalidateCache(const KeyRangeRef&);
+	void cacheTenant(const TenantName& tenant, const TenantMapEntry& tenantEntry);
+	Reference<LocationInfo> setCachedLocation(const Optional<TenantName>& tenant,
+	                                          const TenantMapEntry& tenantEntry,
+	                                          const KeyRangeRef&,
+	                                          const std::vector<struct StorageServerInterface>&);
+	void invalidateCachedTenant(const TenantNameRef& tenant);
+	void invalidateCache(const KeyRef& tenantPrefix, const KeyRef& key, Reverse isBackward = Reverse::False);
+	void invalidateCache(const KeyRef& tenantPrefix, const KeyRangeRef& keys);
 
 	// Records that `endpoint` is failed on a healthy server.
 	void setFailedEndpointOnHealthyServer(const Endpoint& endpoint);
@@ -289,9 +309,9 @@ public:
 	void removeWatch();
 
 	// watch map operations
-	Reference<WatchMetadata> getWatchMetadata(KeyRef key) const;
-	Key setWatchMetadata(Reference<WatchMetadata> metadata);
-	void deleteWatchMetadata(KeyRef key);
+	Reference<WatchMetadata> getWatchMetadata(int64_t tenantId, KeyRef key) const;
+	void setWatchMetadata(Reference<WatchMetadata> metadata);
+	void deleteWatchMetadata(int64_t tenant, KeyRef key);
 	void clearWatchMetadata();
 
 	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value);
@@ -409,8 +429,10 @@ public:
 
 	// Cache of location information
 	int locationCacheSize;
+	int tenantCacheSize;
 	CoalescedKeyRangeMap<Reference<LocationInfo>> locationCache;
 	std::unordered_map<Endpoint, EndpointFailureInfo> failedEndpointsOnHealthyServersInfo;
+	std::unordered_map<TenantName, TenantMapEntry> tenantCache;
 
 	std::map<UID, StorageServerInfo*> server_interf;
 	std::map<UID, BlobWorkerInterface> blobWorker_interf; // blob workers don't change endpoints for the same ID
@@ -581,7 +603,8 @@ public:
 	EventCacheHolder connectToDatabaseEventCacheHolder;
 
 private:
-	std::unordered_map<Key, Reference<WatchMetadata>> watchMap;
+	std::unordered_map<std::pair<int64_t, Key>, Reference<WatchMetadata>, boost::hash<std::pair<int64_t, Key>>>
+	    watchMap;
 };
 
 #endif

@@ -38,7 +38,7 @@ class RkTagThrottleCollection : NonCopyable {
 
 		RkTagThrottleData() : clientRate(CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW) {}
 
-		double getTargetRate(Optional<double> requestRate) {
+		double getTargetRate(Optional<double> requestRate) const {
 			if (limits.tpsRate == 0.0 || !requestRate.present() || requestRate.get() == 0.0 || !rateSet) {
 				return limits.tpsRate;
 			} else {
@@ -538,7 +538,7 @@ public:
 	int64_t manualThrottleCount() const { return throttledTags.manualThrottleCount(); }
 	bool isAutoThrottlingEnabled() const { return autoThrottlingEnabled; }
 
-	Future<Void> tryAutoThrottleTag(StorageQueueInfo& ss, int64_t storageQueue, int64_t storageDurabilityLag) {
+	Future<Void> tryAutoThrottleTag(StorageQueueInfo const& ss, int64_t storageQueue, int64_t storageDurabilityLag) {
 		// NOTE: we just keep it simple and don't differentiate write-saturation and read-saturation at the moment. In
 		// most of situation, this works. More indicators besides queue size and durability lag could be investigated in
 		// the future
@@ -591,7 +591,7 @@ int64_t TagThrottler::manualThrottleCount() const {
 bool TagThrottler::isAutoThrottlingEnabled() const {
 	return impl->isAutoThrottlingEnabled();
 }
-Future<Void> TagThrottler::tryAutoThrottleTag(StorageQueueInfo& ss,
+Future<Void> TagThrottler::tryAutoThrottleTag(StorageQueueInfo const& ss,
                                               int64_t storageQueue,
                                               int64_t storageDurabilityLag) {
 	return impl->tryAutoThrottleTag(ss, storageQueue, storageDurabilityLag);
