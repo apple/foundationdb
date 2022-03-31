@@ -22,7 +22,7 @@
 #include <ostream>
 
 // FIXME: Trim this down
-#include "contrib/fmt-8.0.1/include/fmt/format.h"
+#include "contrib/fmt-8.1.1/include/fmt/format.h"
 #include "flow/Platform.actor.h"
 #include "fdbclient/AsyncTaskThread.h"
 #include "fdbclient/BackupContainer.h"

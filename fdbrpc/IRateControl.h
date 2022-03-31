@@ -36,7 +36,7 @@ public:
 	virtual void delref() = 0;
 };
 
-// An IRateControl implemenation that allows at most hands out at most windowLimit units of 'credit' in windowSeconds
+// An IRateControl implementation that allows at most hands out at most windowLimit units of 'credit' in windowSeconds
 // seconds
 class SpeedLimit final : public IRateControl, ReferenceCounted<SpeedLimit> {
 public:
@@ -89,7 +89,7 @@ private:
 	Promise<Void> m_stop;
 };
 
-// An IRateControl implemenation that enforces no limit
+// An IRateControl implementation that enforces no limit
 class Unlimited final : public IRateControl, ReferenceCounted<Unlimited> {
 public:
 	Unlimited() {}

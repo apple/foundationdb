@@ -173,7 +173,8 @@ ERROR( quick_get_value_miss, 2034, "Found a mapped key that is not served in the
 ERROR( quick_get_key_values_miss, 2035, "Found a mapped range that is not served in the same SS" )
 ERROR( blob_granule_no_ryw, 2036, "Blob Granule Read Transactions must be specified as ryw-disabled" )
 ERROR( blob_granule_not_materialized, 2037, "Blob Granule Read Transactions must be specified as ryw-disabled" )
-ERROR( get_key_values_and_map_has_more, 2038, "getRangeAndFlatMap does not support continuation for now" )
+ERROR( get_mapped_key_values_has_more, 2038, "getMappedRange does not support continuation for now" )
+ERROR( get_mapped_range_reads_your_writes, 2039, "getMappedRange tries to read data that were previously written in the transaction" )
 
 ERROR( incompatible_protocol_version, 2100, "Incompatible protocol version" )
 ERROR( transaction_too_large, 2101, "Transaction exceeds byte limit" )
@@ -198,6 +199,15 @@ ERROR( client_lib_already_exists, 2119, "Client library with same identifier alr
 ERROR( client_lib_not_found, 2120, "Client library for the given identifier not found." )
 ERROR( client_lib_not_available, 2121, "Client library exists, but is not available for download." )
 ERROR( client_lib_invalid_binary, 2122, "Invalid client library binary." )
+
+ERROR( tenant_name_required, 2130, "Tenant name must be specified to access data in the cluster" )
+ERROR( tenant_not_found, 2131, "Tenant does not exist" )
+ERROR( tenant_already_exists, 2132, "A tenant with the given name already exists" )
+ERROR( tenant_not_empty, 2133, "Cannot delete a non-empty tenant" )
+ERROR( invalid_tenant_name, 2134, "Tenant name cannot begin with \\xff");
+ERROR( tenant_prefix_allocator_conflict, 2135, "The database already has keys stored at the prefix allocated for the tenant");
+ERROR( tenants_disabled, 2136, "Tenants have been disabled in the cluster");
+ERROR( unknown_tenant, 2137, "Tenant is not available from this server")
 
 // 2200 - errors from bindings and official APIs
 ERROR( api_version_unset, 2200, "API version is not set" )

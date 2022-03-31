@@ -278,6 +278,7 @@ inline void freeFast(int size, void* ptr) {
 }
 
 [[nodiscard]] inline void* allocateFast4kAligned(int size) {
+#if !defined(USE_JEMALLOC)
 	// Use FastAllocator for sizes it supports to avoid internal fragmentation in some implementations of aligned_alloc
 	if (size <= 4096)
 		return FastAllocator<4096>::allocate();
@@ -285,10 +286,12 @@ inline void freeFast(int size, void* ptr) {
 		return FastAllocator<8192>::allocate();
 	if (size <= 16384)
 		return FastAllocator<16384>::allocate();
+#endif
 	return aligned_alloc(4096, size);
 }
 
 inline void freeFast4kAligned(int size, void* ptr) {
+#if !defined(USE_JEMALLOC)
 	// Sizes supported by FastAllocator must be release via FastAllocator
 	if (size <= 4096)
 		return FastAllocator<4096>::release(ptr);
@@ -296,6 +299,7 @@ inline void freeFast4kAligned(int size, void* ptr) {
 		return FastAllocator<8192>::release(ptr);
 	if (size <= 16384)
 		return FastAllocator<16384>::release(ptr);
+#endif
 	aligned_free(ptr);
 }
 

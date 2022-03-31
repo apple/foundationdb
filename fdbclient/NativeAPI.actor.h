@@ -132,12 +132,12 @@ void setupNetwork(uint64_t transportId = 0, UseMetrics = UseMetrics::False);
 //  call stopNetwork (from a non-networking thread) can cause the runNetwork() call to
 //  return.
 //
-// Throws network_already_setup if g_network has already been initalized
+// Throws network_already_setup if g_network has already been initialized
 void runNetwork();
 
 // See above.  Can be called from a thread that is not the "networking thread"
 //
-// Throws network_not_setup if g_network has not been initalized
+// Throws network_not_setup if g_network has not been initialized
 void stopNetwork();
 
 struct StorageMetrics;
@@ -312,13 +312,23 @@ public:
 		                reverse);
 	}
 
-	[[nodiscard]] Future<RangeResult> getRangeAndFlatMap(const KeySelector& begin,
-	                                                     const KeySelector& end,
-	                                                     const Key& mapper,
-	                                                     GetRangeLimits limits,
-	                                                     Snapshot = Snapshot::False,
-	                                                     Reverse = Reverse::False);
+	[[nodiscard]] Future<MappedRangeResult> getMappedRange(const KeySelector& begin,
+	                                                       const KeySelector& end,
+	                                                       const Key& mapper,
+	                                                       GetRangeLimits limits,
+	                                                       Snapshot = Snapshot::False,
+	                                                       Reverse = Reverse::False);
 
+private:
+	template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply, class RangeResultFamily>
+	Future<RangeResultFamily> getRangeInternal(const KeySelector& begin,
+	                                           const KeySelector& end,
+	                                           const Key& mapper,
+	                                           GetRangeLimits limits,
+	                                           Snapshot snapshot,
+	                                           Reverse reverse);
+
+public:
 	// A method for streaming data from the storage server that is more efficient than getRange when reading large
 	// amounts of data
 	[[nodiscard]] Future<Void> getRangeStream(const PromiseStream<Standalone<RangeResultRef>>& results,

@@ -22,7 +22,7 @@
 #include <utility>
 #include <vector>
 
-#include "contrib/fmt-8.0.1/include/fmt/format.h"
+#include "contrib/fmt-8.1.1/include/fmt/format.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/BackupContainerFileSystem.h"
@@ -473,7 +473,7 @@ ACTOR Future<std::pair<BlobGranuleSplitState, Version>> getGranuleSplitState(Tra
 }
 
 // writeDelta file writes speculatively in the common case to optimize throughput. It creates the s3 object even though
-// the data in it may not yet be committed, and even though previous delta fiels with lower versioned data may still be
+// the data in it may not yet be committed, and even though previous delta files with lower versioned data may still be
 // in flight. The synchronization happens after the s3 file is written, but before we update the FDB index of what files
 // exist. Before updating FDB, we ensure the version is committed and all previous delta files have updated FDB.
 ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,

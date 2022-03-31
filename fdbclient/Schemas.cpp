@@ -809,6 +809,12 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
              "disabled",
              "aggressive",
              "gradual"
+         ]},
+         "tenant_mode": {
+             "$enum":[
+             "disabled",
+             "optional_experimental",
+             "required_experimental"
          ]}
       },
       "data":{

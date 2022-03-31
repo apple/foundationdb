@@ -2531,7 +2531,7 @@ void removeLog(TLogData* self, Reference<LogData> logData) {
 	}
 }
 
-// copy data from old gene to new gene without desiarlzing
+// copy data from old gene to new gene without deserializing
 ACTOR Future<Void> pullAsyncData(TLogData* self,
                                  Reference<LogData> logData,
                                  std::vector<Tag> tags,

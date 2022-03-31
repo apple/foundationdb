@@ -454,7 +454,7 @@ An |database-blurb1| Modifications to a database are performed via transactions.
    
    The function will change the region configuration to have a positive priority for the chosen dcId, and a negative priority for all other dcIds.
 
-   In particular, no error will be thrown if the given dcId does not exist. It will just not attemp to force a recovery.
+   In particular, no error will be thrown if the given dcId does not exist. It will just not attempt to force a recovery.
    
    If the database has already recovered, the function does nothing. Thus it's safe to call it multiple times.
 

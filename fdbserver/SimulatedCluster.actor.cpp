@@ -1811,7 +1811,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		if (kv.second.type() == json_spirit::int_type) {
 			startingConfigString += kv.first + ":=" + format("%d", kv.second.get_int());
 		} else if (kv.second.type() == json_spirit::str_type) {
-			if ("storage_migration_type" == kv.first) {
+			if ("storage_migration_type" == kv.first || "tenant_mode" == kv.first) {
 				startingConfigString += kv.first + "=" + kv.second.get_str();
 			} else {
 				startingConfigString += kv.second.get_str();
@@ -2244,7 +2244,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 
 using namespace std::literals;
 
-#if defined(SSD_ROCKSDB_EXPERIMENTAL) && !VALGRIND
+#if defined(SSD_ROCKSDB_EXPERIMENTAL)
 bool rocksDBEnabled = true;
 #else
 bool rocksDBEnabled = false;

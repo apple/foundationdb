@@ -19,7 +19,7 @@
  */
 
 #include <cinttypes>
-#include "contrib/fmt-8.0.1/include/fmt/format.h"
+#include "contrib/fmt-8.1.1/include/fmt/format.h"
 #include "fdbclient/BlobWorkerInterface.h"
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbserver/Status.h"
@@ -813,7 +813,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		roles.addRole("blob_manager", db->get().blobManager.get());
 	}
 
-	if (SERVER_KNOBS->ENABLE_ENCRYPT_KEY_PROXY && db->get().encryptKeyProxy.present()) {
+	if (SERVER_KNOBS->ENABLE_ENCRYPTION && db->get().encryptKeyProxy.present()) {
 		roles.addRole("encrypt_key_proxy", db->get().encryptKeyProxy.get());
 	}
 
@@ -1986,8 +1986,8 @@ ACTOR static Future<std::vector<std::pair<GrvProxyInterface, EventMap>>> getGrvP
 	return results;
 }
 
-// Returns the number of zones eligble for recruiting new tLogs after zone failures, to maintain the current replication
-// factor.
+// Returns the number of zones eligible for recruiting new tLogs after zone failures, to maintain the current
+// replication factor.
 static int getExtraTLogEligibleZones(const std::vector<WorkerDetails>& workers,
                                      const DatabaseConfiguration& configuration) {
 	std::set<StringRef> allZones;

@@ -96,30 +96,30 @@ struct DataDistributionMetricsWorkload : KVWorkload {
 						TraceEvent(SevError, "TestFailure")
 						    .detail("Reason", "Result mismatches the given begin selector")
 						    .detail("Size", result.size())
-						    .detail("FirstKey", result[0].key.toString())
-						    .detail("SecondKey", result[1].key.toString())
-						    .detail("BeginKeySelector", begin.toString());
+						    .detail("FirstKey", result[0].key)
+						    .detail("SecondKey", result[1].key)
+						    .detail("BeginKeySelector", begin);
 					}
 					if (result[result.size() - 1].key < end.getKey() || result[result.size() - 2].key >= end.getKey()) {
 						++self->errors;
 						TraceEvent(SevError, "TestFailure")
 						    .detail("Reason", "Result mismatches the given end selector")
 						    .detail("Size", result.size())
-						    .detail("FirstKey", result[result.size() - 1].key.toString())
-						    .detail("SecondKey", result[result.size() - 2].key.toString())
-						    .detail("EndKeySelector", end.toString());
+						    .detail("FirstKey", result[result.size() - 1].key)
+						    .detail("SecondKey", result[result.size() - 2].key)
+						    .detail("EndKeySelector", end);
 					}
 					// Debugging traces
 					// TraceEvent(SevDebug, "DDMetricsConsistencyTest")
 					// 	    .detail("Size", result.size())
-					// 	    .detail("FirstKey", result[0].key.toString())
-					// 	    .detail("SecondKey", result[1].key.toString())
-					// 	    .detail("BeginKeySelector", begin.toString());
+					// 	    .detail("FirstKey", result[0].key)
+					// 	    .detail("SecondKey", result[1].key)
+					// 	    .detail("BeginKeySelector", begin);
 					// TraceEvent(SevDebug, "DDMetricsConsistencyTest")
 					// 	    .detail("Size", result.size())
-					// 	    .detail("LastKey", result[result.size() - 1].key.toString())
-					// 	    .detail("SecondLastKey", result[result.size() - 2].key.toString())
-					// 	    .detail("EndKeySelector", end.toString());
+					// 	    .detail("LastKey", result[result.size() - 1].key)
+					// 	    .detail("SecondLastKey", result[result.size() - 2].key)
+					// 	    .detail("EndKeySelector", end);
 				}
 			} catch (Error& e) {
 				// Ignore timed_out error and cross_module_read, the end key selector may read through the end

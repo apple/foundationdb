@@ -93,6 +93,7 @@ void applyMetadataMutations(SpanID const& spanContext,
                             const VectorRef<MutationRef>& mutations,
                             LogPushData* pToCommit,
                             bool& confChange,
+                            Version version,
                             Version popVersion,
                             bool initialCommit);
 void applyMetadataMutations(SpanID const& spanContext,

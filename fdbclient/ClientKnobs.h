@@ -35,6 +35,7 @@ public:
 
 	double SYSTEM_MONITOR_INTERVAL;
 	double NETWORK_BUSYNESS_MONITOR_INTERVAL; // The interval in which we should update the network busyness metric
+	double TSS_METRICS_LOGGING_INTERVAL;
 
 	double FAILURE_MAX_DELAY;
 	double FAILURE_MIN_DELAY;
