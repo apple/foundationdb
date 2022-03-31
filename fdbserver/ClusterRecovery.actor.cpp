@@ -26,7 +26,6 @@
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/WaitFailure.h"
 
-#include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 static std::set<int> const& normalClusterRecoveryErrors() {
@@ -1269,8 +1268,7 @@ ACTOR Future<Void> recoverFrom(Reference<ClusterRecoveryData> self,
                                std::vector<StorageServerInterface>* seedServers,
                                std::vector<Standalone<CommitTransactionRef>>* initialConfChanges,
                                Future<Version> poppedTxsVersion,
-                               bool* clusterIdExists,
-                               ProtocolVersion* persistedServerVersion) {
+                               bool* clusterIdExists) {
 	TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_STATE_EVENT_NAME).c_str(), self->dbgid)
 	    .detail("StatusCode", RecoveryStatus::reading_transaction_system_state)
 	    .detail("Status", RecoveryStatus::names[RecoveryStatus::reading_transaction_system_state])
@@ -1302,12 +1300,6 @@ ACTOR Future<Void> recoverFrom(Reference<ClusterRecoveryData> self,
 		self->clusterId = deterministicRandom()->randomUniqueID();
 	} else {
 		self->clusterId = BinaryReader::fromStringRef<UID>(clusterId.get(), Unversioned());
-	}
-
-	Optional<Value> persistedServerVersionValue = self->txnStateStore->readValue(latestServerVersionKey).get();
-	if (persistedServerVersionValue.present()) {
-		*persistedServerVersion =
-		    BinaryReader::fromStringRef<ProtocolVersion>(persistedServerVersionValue.get(), Unversioned());
 	}
 
 	// Ordinarily we pass through this loop once and recover.  We go around the loop if recovery stalls for more than a
@@ -1449,7 +1441,6 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	state Future<Void> minRecoveryDuration;
 	state Future<Version> poppedTxsVersion;
 	state bool clusterIdExists = false;
-	state ProtocolVersion persistedServerVersion;
 
 	loop {
 		Reference<ILogSystem> oldLogSystem = oldLogSystems->get();
@@ -1470,8 +1461,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 			                                     &seedServers,
 			                                     &initialConfChanges,
 			                                     poppedTxsVersion,
-			                                     std::addressof(clusterIdExists),
-			                                     std::addressof(persistedServerVersion))
+			                                     std::addressof(clusterIdExists))
 			                       : Never())) {
 				reg.cancel();
 				break;
@@ -1590,24 +1580,9 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 		tr.set(recoveryCommitRequest.arena, clusterIdKey, BinaryWriter::toValue(self->clusterId, Unversioned()));
 	}
 
-	if (persistedServerVersion.version() != 0) {
-		TraceEvent(SevInfo, "RecoveryLatestServerVersion", self->dbgid).detail("Version", persistedServerVersion);
-	}
-
-	// ProtocolVersion testPersistedServerVersion(0x0FDB00B070010000LL);
-	// persistedServerVersion = testPersistedServerVersion
-	if (currentProtocolVersion > persistedServerVersion) {
-		tr.set(recoveryCommitRequest.arena,
-		       latestServerVersionKey,
-		       BinaryWriter::toValue(currentProtocolVersion.version(), Unversioned()));
-		TraceEvent(SevInfo, "SetNewLatestServerVersion", self->dbgid)
-		    .detail("OldVersion", persistedServerVersion)
-		    .detail("NewVersion", currentProtocolVersion);
-	} else {
-		TraceEvent(SevInfo, "RetainedLatestServerVersion", self->dbgid)
-		    .detail("OldVersion", persistedServerVersion)
-		    .detail("NewVersion", currentProtocolVersion);
-	}
+	tr.set(recoveryCommitRequest.arena,
+	       latestServerVersionKey,
+	       BinaryWriter::toValue(currentProtocolVersion.version(), Unversioned()));
 
 	applyMetadataMutations(SpanID(),
 	                       self->dbgid,
@@ -1616,8 +1591,8 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	                       self->txnStateStore);
 	mmApplied = tr.mutations.size();
 
-	tr.read_snapshot = self->recoveryTransactionVersion; // lastEpochEnd would make more sense, but isn't in the
-	                                                     // initial window of the resolver(s)
+	tr.read_snapshot = self->recoveryTransactionVersion; // lastEpochEnd would make more sense, but isn't in the initial
+	                                                     // window of the resolver(s)
 
 	TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_COMMIT_EVENT_NAME).c_str(), self->dbgid)
 	    .log();
@@ -1657,8 +1632,8 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	//  3. No other master will attempt to commit anything to our "new" Tlogs
 	//     because it didn't recruit them
 	//  4. Therefore, no full commit can come between self->lastEpochEnd and the first commit
-	//     we made to the new Tlogs (self->recoveryTransactionVersion), and only our own semi-commits can come
-	//     between our first commit and the next new TLogs
+	//     we made to the new Tlogs (self->recoveryTransactionVersion), and only our own semi-commits can come between
+	//     our first commit and the next new TLogs
 
 	self->addActor.send(trackTlogRecovery(self, oldLogSystems, minRecoveryDuration));
 	debug_advanceMaxCommittedVersion(UID(), self->recoveryTransactionVersion);
