@@ -1,9 +1,9 @@
 /*
- * Database.java
+ * Tenant.java
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,148 +23,71 @@ package com.apple.foundationdb;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.function.Function;
-import com.apple.foundationdb.tuple.Tuple;
 
 /**
- * A mutable, lexicographically ordered mapping from binary keys to binary values.
- *  {@link Transaction}s are used to manipulate data within a single
- *  {@code Database} -- multiple, concurrent
- *  {@code Transaction}s on a {@code Database} enforce <b>ACID</b> properties.<br>
+ * A tenant represents a named key-space within a database that can be interacted with
+ * transactionally.<br>
  * <br>
- * The simplest correct programs using FoundationDB will make use of the methods defined
- *  in the {@link TransactionContext} interface. When used on a {@code Database} these
+ * The simplest correct programs using tenants will make use of the methods defined
+ *  in the {@link TransactionContext} interface. When used on a {@code Tenant} these
  *  methods will call {@code Transaction#commit()} after user code has been
  *  executed. These methods will not return successfully until {@code commit()} has
  *  returned successfully.<br>
  * <br>
- * <b>Note:</b> {@code Database} objects must be {@link #close closed} when no longer
+ * <b>Note:</b> {@code Tenant} objects must be {@link #close closed} when no longer
  *  in use in order to free any associated resources.
  */
-public interface Database extends AutoCloseable, TransactionContext {
+public interface Tenant extends AutoCloseable, TransactionContext {
 	/**
-	 * Opens an existing tenant to be used for running transactions.
-	 *
-	 * @param tenantName The name of the tenant to open.
-	 * @return a {@link Tenant} that can be used to create transactions that will operate in the tenant's key-space.
-	 */
-	default Tenant openTenant(byte[] tenantName) {
-		return openTenant(tenantName, getExecutor());
-	}
-
-	/**
-	 * Opens an existing tenant to be used for running transactions. This is a convenience method that generates the
-	 * tenant name by packing a {@code Tuple}.
-	 *
-	 * @param tenantName The name of the tenant to open, as a Tuple.
-	 * @return a {@link Tenant} that can be used to create transactions that will operate in the tenant's key-space.
-	 */
-	Tenant openTenant(Tuple tenantName);
-
-	/**
-	 * Opens an existing tenant to be used for running transactions.
-	 *
-	 * @param tenantName The name of the tenant to open.
-	 * @param e the {@link Executor} to use when executing asynchronous callbacks.
-	 * @return a {@link Tenant} that can be used to create transactions that will operate in the tenant's key-space.
-	 */
-	Tenant openTenant(byte[] tenantName, Executor e);
-
-	/**
-	 * Opens an existing tenant to be used for running transactions. This is a convenience method that generates the
-	 * tenant name by packing a {@code Tuple}.
-	 *
-	 * @param tenantName The name of the tenant to open, as a Tuple.
-	 * @param e the {@link Executor} to use when executing asynchronous callbacks.
-	 * @return a {@link Tenant} that can be used to create transactions that will operate in the tenant's key-space.
-	 */
-	Tenant openTenant(Tuple tenantName, Executor e);
-
-	/**
-	 * Opens an existing tenant to be used for running transactions.
-	 *
-	 * @param tenantName The name of the tenant to open.
-	 * @param e the {@link Executor} to use when executing asynchronous callbacks.
-	 * @param eventKeeper the {@link EventKeeper} to use when tracking instrumented calls for the tenant's transactions.
-	 * @return a {@link Tenant} that can be used to create transactions that will operate in the tenant's key-space.
-	 */
-	Tenant openTenant(byte[] tenantName, Executor e, EventKeeper eventKeeper);
-
-	/**
-	 * Opens an existing tenant to be used for running transactions. This is a convenience method that generates the
-	 * tenant name by packing a {@code Tuple}.
-	 *
-	 * @param tenantName The name of the tenant to open, as a Tuple.
-	 * @param e the {@link Executor} to use when executing asynchronous callbacks.
-	 * @param eventKeeper the {@link EventKeeper} to use when tracking instrumented calls for the tenant's transactions.
-	 * @return a {@link Tenant} that can be used to create transactions that will operate in the tenant's key-space.
-	 */
-	Tenant openTenant(Tuple tenantName, Executor e, EventKeeper eventKeeper);
-
-	/**
-	 * Creates a {@link Transaction} that operates on this {@code Database}. Creating a transaction
-	 *  in this way does not associate it with a {@code Tenant}, and as a result the transaction will
-	 *  operate on the entire key-space for the database.<br>
+	 * Creates a {@link Transaction} that operates on this {@code Tenant}.<br>
 	 * <br>
 	 * <b>Note:</b> Java transactions automatically set the {@link TransactionOptions#setUsedDuringCommitProtectionDisable}
 	 *  option. This is because the Java bindings disallow use of {@code Transaction} objects after
-	 *  {@link Transaction#onError} is called.<br>
-	 * <br>
-	 * <b>Note:</b> Transactions created directly on a {@code Database} object cannot be used in a cluster
-	 *  that requires tenant-based access. To run transactions in those clusters, you must first open a tenant
-	 *  with {@link #openTenant(byte[])}.
+	 *  {@link Transaction#onError} is called.
 	 *
-	 * @return a newly created {@code Transaction} that reads from and writes to this {@code Database}.
+	 * @return a newly created {@code Transaction} that reads from and writes to this {@code Tenant}.
 	 */
 	default Transaction createTransaction() {
 		return createTransaction(getExecutor());
 	}
 
 	/**
-	 * Creates a {@link Transaction} that operates on this {@code Database} with the given {@link Executor}
+	 * Creates a {@link Transaction} that operates on this {@code Tenant} with the given {@link Executor}
 	 * for asynchronous callbacks.
 	 *
-	 * @param e the {@link Executor} to use when executing asynchronous callbacks for the database
-	 * @return a newly created {@code Transaction} that reads from and writes to this {@code Database}.
+	 * @param e the {@link Executor} to use when executing asynchronous callbacks.
+	 * @return a newly created {@code Transaction} that reads from and writes to this {@code Tenant}.
 	 */
 	Transaction createTransaction(Executor e);
 
 	/**
-	 * Creates a {@link Transaction} that operates on this {@code Database} with the given {@link Executor}
+	 * Creates a {@link Transaction} that operates on this {@code Tenant} with the given {@link Executor}
 	 * for asynchronous callbacks.
 	 *
-	 * @param e the {@link Executor} to use when executing asynchronous callbacks for the database
+	 * @param e the {@link Executor} to use when executing asynchronous callbacks.
 	 * @param eventKeeper the {@link EventKeeper} to use when tracking instrumented calls for the transaction.
 	 *
-	 * @return a newly created {@code Transaction} that reads from and writes to this {@code Database}.
+	 * @return a newly created {@code Transaction} that reads from and writes to this {@code Tenant}.
 	 */
 	Transaction createTransaction(Executor e, EventKeeper eventKeeper);
 
 	/**
-	 * Returns a set of options that can be set on a {@code Database}
+	 * Returns the name of this {@code Tenant}.
 	 *
-	 * @return a set of database-specific options affecting this {@code Database}
+	 * @return the name of this {@code Tenant} as a byte string.
 	 */
-	DatabaseOptions options();
+	byte[] getName();
 
 	/**
-	 * Returns a value which indicates the saturation of the client
-	 * <br>
-	 * <b>Note:</b> By default, this value is updated every second
-	 *
-	 * @return a value where 0 indicates that the client is idle and 1 (or larger) indicates that the client is saturated.
-	 */
-	double getMainThreadBusyness();
-
-	/**
-	 * Runs a read-only transactional function against this {@code Database} with retry logic.
+	 * Runs a read-only transactional function against this {@code Tenant} with retry logic.
 	 *  {@link Function#apply(Object) apply(ReadTransaction)} will be called on the
 	 *  supplied {@link Function} until a non-retryable
-	 *  {@link FDBException} (or any {@code Throwable} other than an {@code FDBException})
+	 *  FDBException (or any {@code Throwable} other than an {@code FDBException})
 	 *  is thrown. This call is blocking -- this
 	 *  method will not return until the {@code Function} has been called and completed without error.<br>
 	 *
 	 * @param retryable the block of logic to execute in a {@link Transaction} against
-	 *  this database
+	 *  this tenant
 	 * @param <T> the return type of {@code retryable}
 	 *
 	 * @return the result of the last run of {@code retryable}
@@ -175,12 +98,12 @@ public interface Database extends AutoCloseable, TransactionContext {
 	}
 
 	/**
-	 * Runs a read-only transactional function against this {@code Database} with retry logic. Use
+	 * Runs a read-only transactional function against this {@code Tenant} with retry logic. Use
 	 *  this formulation of {@link #read(Function)} if one wants to set a custom {@link Executor}
 	 *  for the transaction when run.
 	 *
 	 * @param retryable the block of logic to execute in a {@link Transaction} against
-	 *  this database
+	 *  this tenant
 	 * @param e the {@link Executor} to use for asynchronous callbacks
 	 * @param <T> the return type of {@code retryable}
 	 * @return the result of the last run of {@code retryable}
@@ -190,10 +113,10 @@ public interface Database extends AutoCloseable, TransactionContext {
 	<T> T read(Function<? super ReadTransaction, T> retryable, Executor e);
 
 	/**
-	 * Runs a read-only transactional function against this {@code Database} with retry logic.
+	 * Runs a read-only transactional function against this {@code Tenant} with retry logic.
 	 *  {@link Function#apply(Object) apply(ReadTransaction)} will be called on the
 	 *  supplied {@link Function} until a non-retryable
-	 *  {@link FDBException} (or any {@code Throwable} other than an {@code FDBException})
+	 *  FDBException (or any {@code Throwable} other than an {@code FDBException})
 	 *  is thrown. This call is non-blocking -- this
 	 *  method will return immediately and with a {@link CompletableFuture} that will be
 	 *  set when the {@code Function} has been called and completed without error.<br>
@@ -202,7 +125,7 @@ public interface Database extends AutoCloseable, TransactionContext {
 	 *  database, will be set on the returned {@code CompletableFuture}.
 	 *
 	 * @param retryable the block of logic to execute in a {@link ReadTransaction} against
-	 *  this database
+	 *  this tenant
 	 * @param <T> the return type of {@code retryable}
 	 *
 	 * @return a {@code CompletableFuture} that will be set to the value returned by the last call
@@ -215,12 +138,12 @@ public interface Database extends AutoCloseable, TransactionContext {
 	}
 
 	/**
-	 * Runs a read-only transactional function against this {@code Database} with retry logic.
+	 * Runs a read-only transactional function against this {@code Tenant} with retry logic.
 	 *  Use this version of {@link #readAsync(Function)} if one wants to set a custom
 	 *  {@link Executor} for the transaction when run.
 	 *
 	 * @param retryable the block of logic to execute in a {@link ReadTransaction} against
-	 *  this database
+	 *  this tenant
 	 * @param e the {@link Executor} to use for asynchronous callbacks
 	 * @param <T> the return type of {@code retryable}
 	 *
@@ -233,10 +156,10 @@ public interface Database extends AutoCloseable, TransactionContext {
 			Function<? super ReadTransaction, ? extends CompletableFuture<T>> retryable, Executor e);
 
 	/**
-	 * Runs a transactional function against this {@code Database} with retry logic.
+	 * Runs a transactional function against this {@code Tenant} with retry logic.
 	 *  {@link Function#apply(Object) apply(Transaction)} will be called on the
 	 *  supplied {@link Function} until a non-retryable
-	 *  {@link FDBException} (or any {@code Throwable} other than an {@code FDBException})
+	 *  FDBException (or any {@code Throwable} other than an {@code FDBException})
 	 *  is thrown or {@link Transaction#commit() commit()},
 	 *  when called after {@code apply()}, returns success. This call is blocking -- this
 	 *  method will not return until {@code commit()} has been called and returned success.<br>
@@ -249,7 +172,7 @@ public interface Database extends AutoCloseable, TransactionContext {
 	 *   target="_blank">the FounationDB Developer Guide</a>
 	 *
 	 * @param retryable the block of logic to execute in a {@link Transaction} against
-	 *  this database
+	 *  this tenant
 	 * @param <T> the return type of {@code retryable}
 	 *
 	 * @return the result of the last run of {@code retryable}
@@ -260,12 +183,12 @@ public interface Database extends AutoCloseable, TransactionContext {
 	}
 
 	/**
-	 * Runs a transactional function against this {@code Database} with retry logic.
+	 * Runs a transactional function against this {@code Tenant} with retry logic.
 	 *  Use this formulation of {@link #run(Function)} if one would like to set a
 	 *  custom {@link Executor} for the transaction when run.
 	 *
 	 * @param retryable the block of logic to execute in a {@link Transaction} against
-	 *  this database
+	 *  this tenant
 	 * @param e the {@link Executor} to use for asynchronous callbacks
 	 * @param <T> the return type of {@code retryable}
 	 *
@@ -274,10 +197,10 @@ public interface Database extends AutoCloseable, TransactionContext {
 	<T> T run(Function<? super Transaction, T> retryable, Executor e);
 
 	/**
-	 * Runs a transactional function against this {@code Database} with retry logic.
+	 * Runs a transactional function against this {@code Tenant} with retry logic.
 	 *  {@link Function#apply(Object) apply(Transaction)} will be called on the
 	 *  supplied {@link Function} until a non-retryable
-	 *  {@link FDBException} (or any {@code Throwable} other than an {@code FDBException})
+	 *  FDBException (or any {@code Throwable} other than an {@code FDBException})
 	 *  is thrown or {@link Transaction#commit() commit()},
 	 *  when called after {@code apply()}, returns success. This call is non-blocking -- this
 	 *  method will return immediately and with a {@link CompletableFuture} that will be
@@ -294,7 +217,7 @@ public interface Database extends AutoCloseable, TransactionContext {
 	 *  database, will be set on the returned {@code CompletableFuture}.
 	 *
 	 * @param retryable the block of logic to execute in a {@link Transaction} against
-	 *  this database
+	 *  this tenant
 	 * @param <T> the return type of {@code retryable}
 	 *
 	 * @return a {@code CompletableFuture} that will be set to the value returned by the last call
@@ -307,12 +230,12 @@ public interface Database extends AutoCloseable, TransactionContext {
 	}
 
 	/**
-	 * Runs a transactional function against this {@code Database} with retry logic. Use
+	 * Runs a transactional function against this {@code Tenant} with retry logic. Use
 	 *  this formulation of the non-blocking {@link #runAsync(Function)} if one wants
 	 *  to set a custom {@link Executor} for the transaction when run.
 	 *
 	 * @param retryable the block of logic to execute in a {@link Transaction} against
-	 *  this database
+	 *  this tenant
 	 * @param e the {@link Executor} to use for asynchronous callbacks
 	 * @param <T> the return type of {@code retryable}
 	 *
@@ -325,8 +248,8 @@ public interface Database extends AutoCloseable, TransactionContext {
 			Function<? super Transaction, ? extends CompletableFuture<T>> retryable, Executor e);
 
 	/**
-	 * Close the {@code Database} object and release any associated resources. This must be called at
-	 *  least once after the {@code Database} object is no longer in use. This can be called multiple
+	 * Close the {@code Tenant} object and release any associated resources. This must be called at
+	 *  least once after the {@code Tenant} object is no longer in use. This can be called multiple
 	 *  times, but care should be taken that it is not in use in another thread at the time of the call.
 	 */
 	@Override
