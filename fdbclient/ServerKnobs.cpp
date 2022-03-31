@@ -846,6 +846,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
     // encrypt key proxy
     init( ENABLE_ENCRYPTION,                                   false );
     init( ENCRYPTION_MODE,                              "AES-256-CTR");
+    init( SIM_KMS_MAX_KEYS,                                      4096);
 
 	// Blob granlues
 	init( BG_URL,               isSimulated ? "file://fdbblob/" : "" ); // TODO: store in system key space or something, eventually

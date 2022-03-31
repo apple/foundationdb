@@ -304,7 +304,6 @@ public:
 
 private:
 	BlobCipherDomainCacheMap domainCacheMap;
-	static constexpr uint64_t CIPHER_KEY_CACHE_TTL_SEC = 10 * 60L;
 
 	BlobCipherKeyCache() {}
 };

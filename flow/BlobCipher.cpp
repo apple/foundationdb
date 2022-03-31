@@ -20,6 +20,7 @@
 
 #include "flow/BlobCipher.h"
 #include "flow/EncryptUtils.h"
+#include "flow/Knobs.h"
 #include "flow/Error.h"
 #include "flow/FastRef.h"
 #include "flow/IRandom.h"
@@ -205,7 +206,7 @@ Reference<BlobCipherKey> BlobCipherKeyCache::getLatestCipherKey(const EncryptCip
 
 	Reference<BlobCipherKeyIdCache> keyIdCache = domainItr->second;
 	Reference<BlobCipherKey> cipherKey = keyIdCache->getLatestCipherKey();
-	if ((now() - cipherKey->getCreationTime()) > BlobCipherKeyCache::CIPHER_KEY_CACHE_TTL_SEC) {
+	if ((now() - cipherKey->getCreationTime()) > FLOW_KNOBS->ENCRYPT_CIPHER_KEY_CACHE_TTL) {
 		TraceEvent("GetLatestCipherKey_ExpiredTTL")
 		    .detail("DomainId", domainId)
 		    .detail("BaseCipherId", cipherKey->getBaseCipherId());
@@ -723,7 +724,7 @@ TEST_CASE("flow/BlobCipher") {
 	}
 	TraceEvent("BlobCipherTest_ReinsertNonIdempotentKeyDone").log();
 
-	// Validate Encyrption ops
+	// Validate Encryption ops
 	Reference<BlobCipherKey> cipherKey = cipherKeyCache.getLatestCipherKey(minDomainId);
 	Reference<BlobCipherKey> headerCipherKey = cipherKeyCache.getLatestCipherKey(ENCRYPT_HEADER_DOMAIN_ID);
 	const int bufLen = deterministicRandom()->randomInt(786, 2127) + 512;
