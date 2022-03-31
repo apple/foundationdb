@@ -296,7 +296,7 @@ Future<Void> StorageWiggler::restoreStats() {
 	return map(readFuture, assignFunc);
 }
 Future<Void> StorageWiggler::startWiggle() {
-	metrics.last_wiggle_start = g_network->timer_int();
+	metrics.last_wiggle_start = StorageMetadataType::currentTime();
 	if (shouldStartNewRound()) {
 		metrics.last_round_start = metrics.last_wiggle_start;
 	}
@@ -304,7 +304,7 @@ Future<Void> StorageWiggler::startWiggle() {
 }
 
 Future<Void> StorageWiggler::finishWiggle() {
-	metrics.last_wiggle_finish = g_network->timer_int();
+	metrics.last_wiggle_finish = StorageMetadataType::currentTime();
 	metrics.finished_wiggle += 1;
 	auto duration = metrics.last_wiggle_finish - metrics.last_wiggle_start;
 	metrics.smoothed_wiggle_duration.setTotal((double)duration);
