@@ -2256,21 +2256,6 @@ public:
 		}
 	}
 
-	ACTOR static Future<ProtocolVersion> getLatestSoftwareVersion(DDTeamCollection* self) {
-		state ReadYourWritesTransaction tr(self->cx);
-		loop {
-			try {
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				Optional<Value> latestServerVersion = wait(tr.get(latestServerVersionKey));
-				ASSERT(latestServerVersion.present());
-				return BinaryReader::fromStringRef<ProtocolVersion>(latestServerVersion.get(), Unversioned());
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
-	}
-
 	ACTOR static Future<Void> initializeStorage(DDTeamCollection* self,
 	                                            RecruitStorageReply candidateWorker,
 	                                            const DDEnabledState* ddEnabledState,
@@ -2293,10 +2278,6 @@ public:
 			// same storage
 			self->recruitingIds.insert(interfaceId);
 			self->recruitingLocalities.insert(candidateWorker.worker.stableAddress());
-
-			ProtocolVersion latestServerVersion = wait(DDTeamCollectionImpl::getLatestSoftwareVersion(self));
-			TraceEvent(SevInfo, "DDSoftwareVersion", self->distributorId)
-			    .detail("LatestServerVersion", latestServerVersion);
 
 			UID clusterId = wait(self->getClusterId());
 

@@ -335,14 +335,6 @@ std::vector<std::pair<UID, Version>> decodeBackupStartedValue(const ValueRef& va
 // 1 = Send a signal to pause/already paused.
 extern const KeyRef backupPausedKey;
 
-// Key whose value stores the newest software version that has been run on the server
-// This is used to make sure that once a version of software is run on the
-// server, only compatible versions are permitted to run thereafter.
-// A different version of software is considered permitted if it is newer or if
-// is only one minor version older.
-// "\xff/latestServerVersion"
-extern const KeyRef latestServerVersionKey;
-
 //	"\xff/coordinators" = "[[ClusterConnectionString]]"
 //	Set to the encoded structure of the cluster's current set of coordinators.
 //	Changed when performing quorumChange.

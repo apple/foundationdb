@@ -825,8 +825,6 @@ std::vector<std::pair<UID, Version>> decodeBackupStartedValue(const ValueRef& va
 	return ids;
 }
 
-const KeyRef latestServerVersionKey = LiteralStringRef("\xff/latestServerVersion");
-
 const KeyRef coordinatorsKey = LiteralStringRef("\xff/coordinators");
 const KeyRef logsKey = LiteralStringRef("\xff/logs");
 const KeyRef minRequiredCommitVersionKey = LiteralStringRef("\xff/minRequiredCommitVersion");
