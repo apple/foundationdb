@@ -197,6 +197,8 @@ const Value serverListValue(StorageServerInterface const&);
 UID decodeServerListKey(KeyRef const&);
 StorageServerInterface decodeServerListValue(ValueRef const&);
 
+SWVersion decodeSWVersionValue(ValueRef const&);
+
 //    "\xff/processClass/[[processID]]" := "[[ProcessClass]]"
 // Contains a mapping from processID to processClass
 extern const KeyRangeRef processClassKeys;

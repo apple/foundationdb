@@ -590,6 +590,13 @@ StorageServerInterface decodeServerListValueFB(ValueRef const& value) {
 	return s;
 }
 
+SWVersion decodeSWVersionValue(ValueRef const& value) {
+	SWVersion s;
+	ObjectReader reader(value.begin(), IncludeVersion());
+	reader.deserialize(s);
+	return s;
+}
+
 // processClassKeys.contains(k) iff k.startsWith( processClassKeys.begin ) because '/'+1 == '0'
 const KeyRangeRef processClassKeys(LiteralStringRef("\xff/processClass/"), LiteralStringRef("\xff/processClass0"));
 const KeyRef processClassPrefix = processClassKeys.begin;

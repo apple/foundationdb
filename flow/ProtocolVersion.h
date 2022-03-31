@@ -37,6 +37,9 @@ constexpr uint64_t currentProtocolVersionValue = 0x0FDB00B071010000LL;
 // than the current version, meaning that we only support downgrades between consecutive release versions.
 constexpr uint64_t minInvalidProtocolVersionValue = 0x0FDB00B073000000LL;
 
+// The lowest protocol version that can be downgraded to.
+constexpr uint64_t minCompatibleProtocolVersionValue = 0x0FDB00B070000000LL;
+
 #define PROTOCOL_VERSION_FEATURE(v, x)                                                                                 \
 	static_assert((v & 0xF0FFFFLL) == 0 || v < 0x0FDB00B071000000LL, "Unexpected feature protocol version");           \
 	static_assert(v <= currentProtocolVersionValue, "Feature protocol version too large");                             \
@@ -172,6 +175,7 @@ struct Traceable<ProtocolVersion> : std::true_type {
 
 constexpr ProtocolVersion currentProtocolVersion(currentProtocolVersionValue);
 constexpr ProtocolVersion minInvalidProtocolVersion(minInvalidProtocolVersionValue);
+constexpr ProtocolVersion minCompatibleProtocolVersion(minCompatibleProtocolVersionValue);
 
 // This assert is intended to help prevent incrementing the leftmost digits accidentally. It will probably need to
 // change when we reach version 10.
@@ -191,3 +195,26 @@ static_assert(minInvalidProtocolVersion.version() >=
 // The min invalid protocol version should be the smallest possible protocol version associated with a minor release
 // version.
 static_assert((minInvalidProtocolVersion.version() & 0xFFFFFFLL) == 0, "Unexpected min invalid protocol version");
+
+struct SWVersion {
+	constexpr static FileIdentifier file_identifier = 13943984;
+
+	uint64_t latestProtocolVersion;
+	uint64_t lastProtocolVersion;
+	uint64_t lowestCompatibleProtocolVersion;
+
+	SWVersion() {
+		latestProtocolVersion = currentProtocolVersion.version();
+		lastProtocolVersion = currentProtocolVersion.version();
+		lowestCompatibleProtocolVersion = currentProtocolVersion.version();
+	}
+
+	SWVersion(ProtocolVersion latestVersion, ProtocolVersion lastVersion, ProtocolVersion minCompatibleVersion)
+	  : latestProtocolVersion(latestVersion.version()), lastProtocolVersion(lastVersion.version()),
+	    lowestCompatibleProtocolVersion(minCompatibleVersion.version()) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, latestProtocolVersion, lastProtocolVersion, lowestCompatibleProtocolVersion);
+	}
+};

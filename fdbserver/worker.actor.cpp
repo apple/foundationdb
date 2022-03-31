@@ -2406,21 +2406,6 @@ ACTOR Future<Void> monitorAndWriteCCPriorityInfo(std::string filePath,
 	}
 }
 
-struct SWVersion {
-	constexpr static FileIdentifier file_identifier = 13943984;
-
-	uint64_t latestProtocolVersion;
-	uint64_t compatibleProtocolVersion;
-
-	explicit SWVersion(ProtocolVersion latestVersion, ProtocolVersion compatibleVersion)
-	  : latestProtocolVersion(latestVersion.version()), compatibleProtocolVersion(compatibleVersion.version()) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, latestProtocolVersion, compatibleProtocolVersion);
-	}
-};
-
 static const std::string versionFileName = "sw-version";
 
 ACTOR Future<bool> isCompatibleSoftwareVersion(std::string folder) {
@@ -2448,7 +2433,9 @@ ACTOR Future<bool> isCompatibleSoftwareVersion(std::string folder) {
 			wait(success(versionFile.get()->read(mutateString(fileData), filesize, 0)));
 
 			try {
-				auto latestSoftwareVersion = BinaryReader::fromStringRef<ProtocolVersion>(fileData, Unversioned());
+				Value value = ObjectReader::fromStringRef<Value>(fileData, Unversioned());
+				SWVersion swversion = decodeSWVersionValue(value);
+				ProtocolVersion latestSoftwareVersion(swversion.latestProtocolVersion);
 				if (latestSoftwareVersion <= currentProtocolVersion) {
 					TraceEvent(SevInfo, "SWVersionCompatible").log();
 					return true;
@@ -2490,7 +2477,7 @@ ACTOR Future<Void> checkAndUpdateNewestSoftwareVersion(std::string folder) {
 			}
 		}
 
-		SWVersion swVersion(currentProtocolVersion, currentProtocolVersion);
+		SWVersion swVersion(currentProtocolVersion, currentProtocolVersion, minCompatibleProtocolVersion);
 		ObjectWriter wr(Unversioned());
 		auto s = wr.toValue(swVersion, IncludeVersion());
 		wait(versionFile.get()->write(s.toString().c_str(), s.size(), 0));
