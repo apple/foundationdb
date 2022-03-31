@@ -1537,18 +1537,7 @@ struct LoadConfigurationResult {
 };
 
 ACTOR Future<ProtocolVersion> getLatestSoftwareVersion(Database cx) {
-	state ReadYourWritesTransaction tr(cx);
-	loop {
-		try {
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			Optional<Value> latestServerVersion = wait(tr.get(latestServerVersionKey));
-			ASSERT(latestServerVersion.present());
-			return BinaryReader::fromStringRef<ProtocolVersion>(latestServerVersion.get(), Unversioned());
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
+	return currentProtocolVersion;
 }
 
 ACTOR static Future<std::pair<Optional<DatabaseConfiguration>, Optional<LoadConfigurationResult>>>
