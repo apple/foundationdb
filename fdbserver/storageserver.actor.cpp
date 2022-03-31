@@ -100,6 +100,9 @@ bool canReplyWith(Error e) {
 	case error_code_quick_get_value_miss:
 	case error_code_quick_get_key_values_miss:
 	case error_code_get_mapped_key_values_has_more:
+	case error_code_key_not_tuple:
+	case error_code_value_not_tuple:
+	case error_code_mapper_not_tuple:
 		// case error_code_all_alternatives_failed:
 		return true;
 	default:
@@ -3437,14 +3440,24 @@ Key constructMappedKey(KeyValueRef* keyValue, Tuple& mappedKeyFormatTuple, bool&
 					// Use keyTuple as reference.
 					if (!keyTuple.present()) {
 						// May throw exception if the key is not parsable as a tuple.
-						keyTuple = Tuple::unpack(keyValue->key);
+						try {
+							keyTuple = Tuple::unpack(keyValue->key);
+						} catch (Error& e) {
+							TraceEvent("KeyNotTuple").error(e).detail("Key", keyValue->key.printable());
+							throw key_not_tuple();
+						}
 					}
 					referenceTuple = &keyTuple.get();
 				} else if (s[1] == 'V') {
 					// Use valueTuple as reference.
 					if (!valueTuple.present()) {
 						// May throw exception if the value is not parsable as a tuple.
-						valueTuple = Tuple::unpack(keyValue->value);
+						try {
+							valueTuple = Tuple::unpack(keyValue->value);
+						} catch (Error& e) {
+							TraceEvent("ValueNotTuple").error(e).detail("Value", keyValue->value.printable());
+							throw value_not_tuple();
+						}
 					}
 					referenceTuple = &valueTuple.get();
 				} else {
@@ -3578,7 +3591,13 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 
 	result.data.reserve(result.arena, input.data.size());
 
-	state Tuple mappedKeyFormatTuple = Tuple::unpack(mapper);
+	state Tuple mappedKeyFormatTuple;
+	try {
+		mappedKeyFormatTuple = Tuple::unpack(mapper);
+	} catch (Error& e) {
+		TraceEvent("MapperNotTuple").error(e).detail("Mapper", mapper.printable());
+		throw mapper_not_tuple();
+	}
 	state KeyValueRef* it = input.data.begin();
 	for (; it != input.data.end(); it++) {
 		state MappedKeyValueRef kvm;
