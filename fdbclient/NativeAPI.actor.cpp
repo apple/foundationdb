@@ -2960,7 +2960,7 @@ ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version, Span
 					if (cx->isCurrentGrvProxy(v.proxyId)) {
 						cx->ssVersionVectorCache.applyDelta(v.ssVersionVectorDelta);
 					} else {
-						throw stale_version_vector();
+						cx->ssVersionVectorCache.clear();
 					}
 					if (v.version >= version)
 						return v.version;
@@ -2992,7 +2992,7 @@ ACTOR Future<Version> getRawVersion(Reference<TransactionState> trState) {
 				if (trState->cx->isCurrentGrvProxy(v.proxyId)) {
 					trState->cx->ssVersionVectorCache.applyDelta(v.ssVersionVectorDelta);
 				} else {
-					throw stale_version_vector();
+					trState->cx->ssVersionVectorCache.clear();
 				}
 				return v.version;
 			}
@@ -6036,7 +6036,7 @@ ACTOR Future<Version> extractReadVersion(Reference<TransactionState> trState,
 	if (trState->cx->isCurrentGrvProxy(rep.proxyId)) {
 		trState->cx->ssVersionVectorCache.applyDelta(rep.ssVersionVectorDelta);
 	} else {
-		throw stale_version_vector();
+		trState->cx->ssVersionVectorCache.clear();
 	}
 	return rep.version;
 }
