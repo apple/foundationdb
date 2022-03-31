@@ -341,9 +341,14 @@ std::string TCTeamInfo::getServerIDsStr() const {
 	return std::move(ss).str();
 }
 
-void TCTeamInfo::addDataInFlightToTeam(int64_t delta, int64_t readDelta) {
+void TCTeamInfo::addDataInFlightToTeam(int64_t delta) {
 	for (int i = 0; i < servers.size(); i++)
-		servers[i]->incrementDataInFlightToServer(delta, readDelta);
+		servers[i]->incrementDataInFlightToServer(delta);
+}
+
+void TCTeamInfo::addReadInFlightToTeam(int64_t delta) {
+	for (int i = 0; i < servers.size(); i++)
+		servers[i]->incrementReadInFlightToServer(delta);
 }
 
 int64_t TCTeamInfo::getDataInFlightToTeam() const {
@@ -382,7 +387,8 @@ int64_t TCTeamInfo::getLoadBytes(bool includeInFlight, double inflightPenalty) c
 	return (physicalBytes + (inflightPenalty * inFlightBytes)) * availableSpaceMultiplier;
 }
 
-double TCTeamInfo::getLoadReadBandwidth(bool includeInFlight) const {
+double TCTeamInfo::getLoadReadBandwidth(bool includeInFlight, double inflightPenalty) const {
+	// FIXME: consider team load variance
 	double sum = 0;
 	int size = 0;
 	for (const auto& server : servers) {
@@ -394,7 +400,7 @@ double TCTeamInfo::getLoadReadBandwidth(bool includeInFlight) const {
 		}
 	}
 	return (size == 0 ? 0 : sum / size) +
-	       (includeInFlight && !servers.empty() ? getReadInFlightToTeam() / servers.size() : 0);
+	       (includeInFlight && !servers.empty() ? inflightPenalty * getReadInFlightToTeam() / servers.size() : 0);
 }
 
 int64_t TCTeamInfo::getMinAvailableSpace(bool includeInFlight) const {

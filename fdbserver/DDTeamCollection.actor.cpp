@@ -5721,7 +5721,7 @@ public:
 		// 	std::cout << id.toString() << std::endl;
 		ASSERT(expectedServers == selectedServers && expectedServersHigh == selectedServersHigh);
 
-		resTeam.first.get()->addDataInFlightToTeam(50, 50);
+		resTeam.first.get()->addReadInFlightToTeam(50);
 		req.reply.reset();
 		wait(collection->getTeam(req));
 		std::pair<Optional<Reference<IDataDistributionTeam>>, bool> resTeam1 = req.reply.getFuture().get();

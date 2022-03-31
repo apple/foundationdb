@@ -47,11 +47,12 @@ struct IDataDistributionTeam {
 	virtual std::vector<StorageServerInterface> getLastKnownServerInterfaces() const = 0;
 	virtual int size() const = 0;
 	virtual std::vector<UID> const& getServerIDs() const = 0;
-	virtual void addDataInFlightToTeam(int64_t delta, int64_t readDelta = 0) = 0;
+	virtual void addDataInFlightToTeam(int64_t delta) = 0;
+	virtual void addReadInFlightToTeam(int64_t delta) = 0;
 	virtual int64_t getDataInFlightToTeam() const = 0;
 	virtual int64_t getLoadBytes(bool includeInFlight = true, double inflightPenalty = 1.0) const = 0;
 	virtual int64_t getReadInFlightToTeam() const = 0;
-	virtual double getLoadReadBandwidth(bool includeInFlight = true) const = 0;
+	virtual double getLoadReadBandwidth(bool includeInFlight = true, double inflightPenalty = 1.0) const = 0;
 	virtual int64_t getMinAvailableSpace(bool includeInFlight = true) const = 0;
 	virtual double getMinAvailableSpaceRatio(bool includeInFlight = true) const = 0;
 	virtual bool hasHealthyAvailableSpace(double minRatio) const = 0;

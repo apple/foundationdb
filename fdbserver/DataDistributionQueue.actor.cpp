@@ -130,6 +130,7 @@ class ParallelTCInfo final : public ReferenceCounted<ParallelTCInfo>, public IDa
 
 public:
 	ParallelTCInfo() = default;
+	explicit ParallelTCInfo(ParallelTCInfo const& info) : teams(info.teams), tempServerIDs(info.tempServerIDs){};
 
 	void addTeam(Reference<IDataDistributionTeam> team) { teams.push_back(team); }
 
@@ -162,9 +163,15 @@ public:
 		return tempServerIDs;
 	}
 
-	void addDataInFlightToTeam(int64_t delta, int64_t readDelta = 0) override {
+	void addDataInFlightToTeam(int64_t delta) override {
 		for (auto& team : teams) {
-			team->addDataInFlightToTeam(delta, readDelta);
+			team->addDataInFlightToTeam(delta);
+		}
+	}
+
+	void addReadInFlightToTeam(int64_t delta) override {
+		for (auto& team : teams) {
+			team->addReadInFlightToTeam(delta);
 		}
 	}
 
@@ -182,9 +189,9 @@ public:
 		return sum([](IDataDistributionTeam const& team) { return team.getReadInFlightToTeam(); });
 	}
 
-	double getLoadReadBandwidth(bool includeInFlight = true) const override {
-		return sum([includeInFlight](IDataDistributionTeam const& team) {
-			return team.getLoadReadBandwidth(includeInFlight);
+	double getLoadReadBandwidth(bool includeInFlight = true, double inflightPenalty = 1.0) const override {
+		return sum([includeInFlight, inflightPenalty](IDataDistributionTeam const& team) {
+			return team.getLoadReadBandwidth(includeInFlight, inflightPenalty);
 		});
 	}
 
@@ -450,6 +457,7 @@ struct DDQueueData {
 	PromiseStream<RelocateData> dataTransferComplete;
 	PromiseStream<RelocateData> relocationComplete;
 	PromiseStream<RelocateData> fetchSourceServersComplete; // find source SSs for a relocate range
+	ActorCollectionNoErrors noErrorActors;
 
 	PromiseStream<RelocateShard> output;
 	FutureStream<RelocateShard> input;
@@ -1043,7 +1051,7 @@ struct DDQueueData {
 
 // return -1 if a.readload > b.readload
 int greaterReadLoad(Reference<IDataDistributionTeam> a, Reference<IDataDistributionTeam> b) {
-	auto r1 = a->getLoadReadBandwidth(), r2 = b->getLoadReadBandwidth();
+	auto r1 = a->getLoadReadBandwidth(true, 2), r2 = b->getLoadReadBandwidth(true, 2);
 	return r1 == r2 ? 0 : (r1 > r2 ? -1 : 1);
 }
 
@@ -1268,7 +1276,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 			self->shardsAffectedByTeamFailure->moveShard(rd.keys, destinationTeams);
 
 			// FIXME: do not add data in flight to servers that were already in the src.
-			healthyDestinations.addDataInFlightToTeam(+metrics.bytes, +metrics.bytesReadPerKSecond);
+			healthyDestinations.addDataInFlightToTeam(+metrics.bytes);
+			healthyDestinations.addReadInFlightToTeam(+metrics.bytesReadPerKSecond);
 
 			launchDest(rd, bestTeams, self->destBusymap);
 
@@ -1373,7 +1382,12 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 					}
 				}
 
-				healthyDestinations.addDataInFlightToTeam(-metrics.bytes, -metrics.bytesReadPerKSecond);
+				healthyDestinations.addDataInFlightToTeam(-metrics.bytes);
+				auto readLoad = metrics.bytesReadPerKSecond;
+				auto& destinationRef = healthyDestinations;
+				self->noErrorActors.add(
+				    trigger([destinationRef, readLoad]() mutable { destinationRef.addDataInFlightToTeam(-readLoad); },
+				            delay(SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL)));
 
 				// onFinished.send( rs );
 				if (!error.code()) {
@@ -1406,7 +1420,12 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 				}
 			} else {
 				TEST(true); // move to removed server
-				healthyDestinations.addDataInFlightToTeam(-metrics.bytes, -metrics.bytesReadPerKSecond);
+				healthyDestinations.addDataInFlightToTeam(-metrics.bytes);
+				auto readLoad = metrics.bytesReadPerKSecond;
+				auto& destinationRef = healthyDestinations;
+				self->noErrorActors.add(
+				    trigger([destinationRef, readLoad]() mutable { destinationRef.addDataInFlightToTeam(-readLoad); },
+				            delay(SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL)));
 				wait(delay(SERVER_KNOBS->RETRY_RELOCATESHARD_DELAY, TaskPriority::DataDistributionLaunch));
 			}
 		}
@@ -1474,12 +1493,14 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 		return false;
 	}
 	if (metrics.keys.present() && metrics.bytes > 0) {
-		// auto srcLoad = sourceTeam->getLoadReadBandwidth(), destLoad = destTeam->getLoadReadBandwidth();
-		// if (abs(srcLoad - destLoad) <=
-		//     3 * std::max(metrics.bytesReadPerKSecond, SERVER_KNOBS->SHARD_READ_HOT_BANDWITH_MIN_PER_KSECONDS)) {
-		//	traceEvent->detail("SkipReason", "TeamTooSimilar");
-		//	return false;
-		// }
+		auto srcLoad = sourceTeam->getLoadReadBandwidth(), destLoad = destTeam->getLoadReadBandwidth();
+		if (abs(srcLoad - destLoad) <=
+		    3 * std::max(metrics.bytesReadPerKSecond, SERVER_KNOBS->SHARD_READ_HOT_BANDWITH_MIN_PER_KSECONDS)) {
+			traceEvent->detail("SkipReason", "TeamTooSimilar")
+			    .detail("ShardReadBandwidth", metrics.bytesReadPerKSecond)
+			    .detail("SrcReadBandwidth", srcLoad);
+			return false;
+		}
 		//  Verify the shard is still in ShardsAffectedByTeamFailure
 		shards = self->shardsAffectedByTeamFailure->getShardsFor(
 		    ShardsAffectedByTeamFailure::Team(sourceTeam->getServerIDs(), primary));
@@ -1865,7 +1886,6 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 
 	state std::vector<Future<Void>> balancingFutures;
 
-	state ActorCollectionNoErrors actors;
 	state PromiseStream<KeyRange> rangesComplete;
 	state Future<Void> launchQueuedWorkTimeout = Never();
 
@@ -1921,7 +1941,8 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 					self.finishRelocation(done.priority, done.healthPriority);
 					self.fetchKeysComplete.erase(done);
 					// self.logRelocation( done, "ShardRelocatorDone" );
-					actors.add(tag(delay(0, TaskPriority::DataDistributionLaunch), done.keys, rangesComplete));
+					self.noErrorActors.add(
+					    tag(delay(0, TaskPriority::DataDistributionLaunch), done.keys, rangesComplete));
 					if (g_network->isSimulated() && debug_isCheckRelocationDuration() && now() - done.startTime > 60) {
 						TraceEvent(SevWarnAlways, "RelocationDurationTooLong")
 						    .detail("Duration", now() - done.startTime);

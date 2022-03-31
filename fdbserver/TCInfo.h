@@ -86,10 +86,8 @@ public:
 	int64_t getDataInFlightToServer() const { return dataInFlightToServer; }
 	// expect read traffic to server after data movement
 	int64_t getReadInFlightToServer() const { return readInFlightToServer; }
-	void incrementDataInFlightToServer(int64_t bytes, int64_t readBytes = 0) {
-		dataInFlightToServer += bytes;
-		readInFlightToServer += readBytes;
-	}
+	void incrementDataInFlightToServer(int64_t bytes) { dataInFlightToServer += bytes; }
+	void incrementReadInFlightToServer(int64_t readBytes) { readInFlightToServer += readBytes; }
 	void cancel();
 	std::vector<Reference<TCTeamInfo>> const& getTeams() const { return teams; }
 	void addTeam(Reference<TCTeamInfo> team) { teams.push_back(team); }
@@ -194,13 +192,15 @@ public:
 
 	std::string getServerIDsStr() const;
 
-	void addDataInFlightToTeam(int64_t delta, int64_t readDelta = 0) override;
+	void addDataInFlightToTeam(int64_t delta) override;
+
+	void addReadInFlightToTeam(int64_t delta) override;
 
 	int64_t getDataInFlightToTeam() const override;
 
 	int64_t getLoadBytes(bool includeInFlight = true, double inflightPenalty = 1.0) const override;
 
-	double getLoadReadBandwidth(bool includeInFlight = true) const override;
+	double getLoadReadBandwidth(bool includeInFlight = true, double inflightPenalty = 1.0) const override;
 
 	int64_t getReadInFlightToTeam() const override;
 
