@@ -79,6 +79,7 @@
 #include "flow/TLSConfig.actor.h"
 #include "flow/Tracing.h"
 #include "flow/UnitTest.h"
+#include "flow/network.h"
 #include "flow/serialize.h"
 
 #ifdef ADDRESS_SANITIZER
@@ -303,7 +304,6 @@ std::string printable(const VectorRef<StringRef>& val) {
 std::string printable(const StringRef& val) {
 	return val.printable();
 }
-
 std::string printable(const std::string& str) {
 	return StringRef(str).printable();
 }
@@ -457,7 +457,7 @@ ACTOR Future<Void> tssLogger(DatabaseContext* cx) {
 
 		// Log each TSS pair separately
 		for (const auto& it : cx->tssMetrics) {
-			if (it.second->mismatches.getIntervalDelta()) {
+			if (it.second->detailedMismatches.size()) {
 				cx->tssMismatchStream.send(
 				    std::pair<UID, std::vector<DetailedTSSMismatch>>(it.first, it.second->detailedMismatches));
 			}
@@ -499,39 +499,49 @@ ACTOR Future<Void> databaseLogger(DatabaseContext* cx) {
 	loop {
 		wait(delay(CLIENT_KNOBS->SYSTEM_MONITOR_INTERVAL, TaskPriority::FlushTrace));
 
-		TraceEvent ev("TransactionMetrics", cx->dbId);
+		if (!g_network->isSimulated()) {
+			TraceEvent ev("TransactionMetrics", cx->dbId);
 
-		ev.detail("Elapsed", (lastLogged == 0) ? 0 : now() - lastLogged)
-		    .detail("Cluster",
-		            cx->getConnectionRecord()
-		                ? cx->getConnectionRecord()->getConnectionString().clusterKeyName().toString()
-		                : "")
-		    .detail("Internal", cx->internal);
+			ev.detail("Elapsed", (lastLogged == 0) ? 0 : now() - lastLogged)
+			    .detail("Cluster",
+			            cx->getConnectionRecord()
+			                ? cx->getConnectionRecord()->getConnectionString().clusterKeyName().toString()
+			                : "")
+			    .detail("Internal", cx->internal);
 
-		cx->cc.logToTraceEvent(ev);
+			cx->cc.logToTraceEvent(ev);
 
-		ev.detail("LocationCacheEntryCount", cx->locationCache.size());
-		ev.detail("MeanLatency", cx->latencies.mean())
-		    .detail("MedianLatency", cx->latencies.median())
-		    .detail("Latency90", cx->latencies.percentile(0.90))
-		    .detail("Latency98", cx->latencies.percentile(0.98))
-		    .detail("MaxLatency", cx->latencies.max())
-		    .detail("MeanRowReadLatency", cx->readLatencies.mean())
-		    .detail("MedianRowReadLatency", cx->readLatencies.median())
-		    .detail("MaxRowReadLatency", cx->readLatencies.max())
-		    .detail("MeanGRVLatency", cx->GRVLatencies.mean())
-		    .detail("MedianGRVLatency", cx->GRVLatencies.median())
-		    .detail("MaxGRVLatency", cx->GRVLatencies.max())
-		    .detail("MeanCommitLatency", cx->commitLatencies.mean())
-		    .detail("MedianCommitLatency", cx->commitLatencies.median())
-		    .detail("MaxCommitLatency", cx->commitLatencies.max())
-		    .detail("MeanMutationsPerCommit", cx->mutationsPerCommit.mean())
-		    .detail("MedianMutationsPerCommit", cx->mutationsPerCommit.median())
-		    .detail("MaxMutationsPerCommit", cx->mutationsPerCommit.max())
-		    .detail("MeanBytesPerCommit", cx->bytesPerCommit.mean())
-		    .detail("MedianBytesPerCommit", cx->bytesPerCommit.median())
-		    .detail("MaxBytesPerCommit", cx->bytesPerCommit.max())
-		    .detail("NumLocalityCacheEntries", cx->locationCache.size());
+			ev.detail("LocationCacheEntryCount", cx->locationCache.size());
+			ev.detail("MeanLatency", cx->latencies.mean())
+			    .detail("MedianLatency", cx->latencies.median())
+			    .detail("Latency90", cx->latencies.percentile(0.90))
+			    .detail("Latency98", cx->latencies.percentile(0.98))
+			    .detail("MaxLatency", cx->latencies.max())
+			    .detail("MeanRowReadLatency", cx->readLatencies.mean())
+			    .detail("MedianRowReadLatency", cx->readLatencies.median())
+			    .detail("MaxRowReadLatency", cx->readLatencies.max())
+			    .detail("MeanGRVLatency", cx->GRVLatencies.mean())
+			    .detail("MedianGRVLatency", cx->GRVLatencies.median())
+			    .detail("MaxGRVLatency", cx->GRVLatencies.max())
+			    .detail("MeanCommitLatency", cx->commitLatencies.mean())
+			    .detail("MedianCommitLatency", cx->commitLatencies.median())
+			    .detail("MaxCommitLatency", cx->commitLatencies.max())
+			    .detail("MeanMutationsPerCommit", cx->mutationsPerCommit.mean())
+			    .detail("MedianMutationsPerCommit", cx->mutationsPerCommit.median())
+			    .detail("MaxMutationsPerCommit", cx->mutationsPerCommit.max())
+			    .detail("MeanBytesPerCommit", cx->bytesPerCommit.mean())
+			    .detail("MedianBytesPerCommit", cx->bytesPerCommit.median())
+			    .detail("MaxBytesPerCommit", cx->bytesPerCommit.max())
+			    .detail("NumLocalityCacheEntries", cx->locationCache.size());
+			if (cx->anyBlobGranuleRequests) {
+				ev.detail("MeanBGLatency", cx->bgLatencies.mean())
+				    .detail("MedianBGLatency", cx->bgLatencies.median())
+				    .detail("MaxBGLatency", cx->bgLatencies.max())
+				    .detail("MeanBGGranulesPerRequest", cx->bgGranulesPerRequest.mean())
+				    .detail("MedianBGGranulesPerRequest", cx->bgGranulesPerRequest.median())
+				    .detail("MaxBGGranulesPerRequest", cx->bgGranulesPerRequest.max());
+			}
+		}
 
 		cx->latencies.clear();
 		cx->readLatencies.clear();
@@ -539,6 +549,8 @@ ACTOR Future<Void> databaseLogger(DatabaseContext* cx) {
 		cx->commitLatencies.clear();
 		cx->mutationsPerCommit.clear();
 		cx->bytesPerCommit.clear();
+		cx->bgLatencies.clear();
+		cx->bgGranulesPerRequest.clear();
 
 		lastLogged = now();
 	}
@@ -996,6 +1008,8 @@ ACTOR static Future<Void> handleTssMismatches(DatabaseContext* cx) {
 	loop {
 		// <tssid, list of detailed mismatch data>
 		state std::pair<UID, std::vector<DetailedTSSMismatch>> data = waitNext(cx->tssMismatchStream.getFuture());
+		// return to calling actor, don't do this as part of metrics loop
+		wait(delay(0));
 		// find ss pair id so we can remove it from the mapping
 		state UID tssPairID;
 		bool found = false;
@@ -1349,11 +1363,11 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
     transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
     transactionGrvFullBatches("NumGrvFullBatches", cc), transactionGrvTimedOutBatches("NumGrvTimedOutBatches", cc),
     latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000),
-    bytesPerCommit(1000), outstandingWatches(0), lastGrvTime(0.0), cachedReadVersion(0), lastRkBatchThrottleTime(0.0),
-    lastRkDefaultThrottleTime(0.0), lastProxyRequestTime(0.0), transactionTracingSample(false), taskID(taskID),
-    clientInfo(clientInfo), clientInfoMonitor(clientInfoMonitor), coordinator(coordinator), apiVersion(apiVersion),
-    mvCacheInsertLocation(0), healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0),
-    smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
+    bytesPerCommit(1000), bgLatencies(1000), bgGranulesPerRequest(1000), outstandingWatches(0), lastGrvTime(0.0),
+    cachedReadVersion(0), lastRkBatchThrottleTime(0.0), lastRkDefaultThrottleTime(0.0), lastProxyRequestTime(0.0),
+    transactionTracingSample(false), taskID(taskID), clientInfo(clientInfo), clientInfoMonitor(clientInfoMonitor),
+    coordinator(coordinator), apiVersion(apiVersion), mvCacheInsertLocation(0), healthMetricsLastUpdated(0),
+    detailedHealthMetricsLastUpdated(0), smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
     specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)),
     connectToDatabaseEventCacheHolder(format("ConnectToDatabase/%s", dbId.toString().c_str())) {
 	dbId = deterministicRandom()->randomUniqueID();
@@ -1615,7 +1629,8 @@ DatabaseContext::DatabaseContext(const Error& err)
     transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
     transactionGrvFullBatches("NumGrvFullBatches", cc), transactionGrvTimedOutBatches("NumGrvTimedOutBatches", cc),
     latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000),
-    bytesPerCommit(1000), transactionTracingSample(false), smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
+    bytesPerCommit(1000), bgLatencies(1000), bgGranulesPerRequest(1000), transactionTracingSample(false),
+    smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
     connectToDatabaseEventCacheHolder(format("ConnectToDatabase/%s", dbId.toString().c_str())) {}
 
 // Static constructor used by server processes to create a DatabaseContext
@@ -7288,9 +7303,7 @@ ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRangesActor(Trans
 	state KeyRange currentRange = keyRange;
 	state Standalone<VectorRef<KeyRangeRef>> results;
 	if (BG_REQUEST_DEBUG) {
-		printf("Getting Blob Granules for [%s - %s)\n",
-		       keyRange.begin.printable().c_str(),
-		       keyRange.end.printable().c_str());
+		fmt::print("Getting Blob Granules for [{0} - {1})\n", keyRange.begin.printable(), keyRange.end.printable());
 	}
 	self->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	loop {
@@ -7303,6 +7316,7 @@ ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRangesActor(Trans
 				                  KeyRangeRef(blobGranuleMapping[i].key, blobGranuleMapping[i + 1].key));
 			}
 		}
+		results.arena().dependsOn(blobGranuleMapping.arena());
 		if (blobGranuleMapping.more) {
 			currentRange = KeyRangeRef(blobGranuleMapping.back().key, currentRange.end);
 		} else {
@@ -7334,17 +7348,18 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 	state KeyRange keyRange = range;
 	state UID workerId;
 	state int i;
+	state Version rv;
 
 	state Standalone<VectorRef<BlobGranuleChunkRef>> results;
+	state double startTime = now();
 
 	if (read.present()) {
-		*readVersionOut = read.get();
+		rv = read.get();
 	} else {
 		Version _end = wait(self->getReadVersion());
-		*readVersionOut = _end;
+		rv = _end;
 	}
 	self->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-
 	// Right now just read whole blob range assignments from DB
 	// FIXME: eventually we probably want to cache this and invalidate similarly to storage servers.
 	// Cache misses could still read from the DB, or we could add it to the Transaction State Store and
@@ -7357,6 +7372,7 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 			fmt::print(
 			    "BG Mapping for [{0} - %{1}) too large!\n", keyRange.begin.printable(), keyRange.end.printable());
 		}
+		TraceEvent(SevWarn, "BGMappingTooLarge").detail("Range", range).detail("Max", 1000);
 		throw unsupported_operation();
 	}
 	ASSERT(!blobGranuleMapping.more && blobGranuleMapping.size() < CLIENT_KNOBS->TOO_MANY);
@@ -7365,11 +7381,11 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 		if (BG_REQUEST_DEBUG) {
 			printf("no blob worker assignments yet\n");
 		}
-		throw transaction_too_old();
+		throw blob_granule_transaction_too_old();
 	}
 
 	if (BG_REQUEST_DEBUG) {
-		fmt::print("Doing blob granule request @ {}\n", *readVersionOut);
+		fmt::print("Doing blob granule request @ {}\n", rv);
 		fmt::print("blob worker assignments:\n");
 	}
 
@@ -7378,31 +7394,42 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 		granuleEndKey = blobGranuleMapping[i + 1].key;
 		if (!blobGranuleMapping[i].value.size()) {
 			if (BG_REQUEST_DEBUG) {
-				printf("Key range [%s - %s) missing worker assignment!\n",
-				       granuleStartKey.printable().c_str(),
-				       granuleEndKey.printable().c_str());
+				fmt::print("Key range [{0} - {1}) missing worker assignment!\n",
+				           granuleStartKey.printable(),
+				           granuleEndKey.printable());
 				// TODO probably new exception type instead
 			}
-			throw transaction_too_old();
+			throw blob_granule_transaction_too_old();
 		}
 
 		workerId = decodeBlobGranuleMappingValue(blobGranuleMapping[i].value);
+		if (workerId == UID()) {
+			if (BG_REQUEST_DEBUG) {
+				fmt::print("Key range [{0} - {1}) has no assigned worker yet!\n",
+				           granuleStartKey.printable(),
+				           granuleEndKey.printable());
+			}
+			throw blob_granule_transaction_too_old();
+		}
 		if (BG_REQUEST_DEBUG) {
-			printf("  [%s - %s): %s\n",
-			       granuleStartKey.printable().c_str(),
-			       granuleEndKey.printable().c_str(),
-			       workerId.toString().c_str());
+			fmt::print(
+			    "  [{0} - {1}): {2}\n", granuleStartKey.printable(), granuleEndKey.printable(), workerId.toString());
 		}
 
 		if (!self->trState->cx->blobWorker_interf.count(workerId)) {
 			Optional<Value> workerInterface = wait(self->get(blobWorkerListKeyFor(workerId)));
+			// from the time the mapping was read from the db, the associated blob worker
+			// could have died and so its interface wouldn't be present as part of the blobWorkerList
+			// we persist in the db. So throw wrong_shard_server to get the new mapping
 			if (!workerInterface.present()) {
-				throw wrong_shard_server();
+				// need to re-read mapping, throw transaction_too_old so client retries. TODO better error?
+				// throw wrong_shard_server();
+				throw transaction_too_old();
 			}
 			// FIXME: maybe just want to insert here if there are racing queries for the same worker or something?
 			self->trState->cx->blobWorker_interf[workerId] = decodeBlobWorkerListValue(workerInterface.get());
 			if (BG_REQUEST_DEBUG) {
-				printf("    decoded worker interface for %s\n", workerId.toString().c_str());
+				fmt::print("    decoded worker interface for {0}\n", workerId.toString());
 			}
 		}
 	}
@@ -7427,7 +7454,8 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 		state BlobGranuleFileRequest req;
 		req.keyRange = KeyRangeRef(StringRef(req.arena, granuleStartKey), StringRef(req.arena, granuleEndKey));
 		req.beginVersion = begin;
-		req.readVersion = *readVersionOut;
+		req.readVersion = rv;
+		req.canCollapseBegin = true; // TODO make this a parameter once we support it
 
 		std::vector<Reference<ReferencedInterface<BlobWorkerInterface>>> v;
 		v.push_back(
@@ -7435,43 +7463,78 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 		state Reference<MultiInterface<ReferencedInterface<BlobWorkerInterface>>> location =
 		    makeReference<BWLocationInfo>(v);
 		// use load balance with one option for now for retry and error handling
-		BlobGranuleFileReply rep = wait(loadBalance(location,
-		                                            &BlobWorkerInterface::blobGranuleFileRequest,
-		                                            req,
-		                                            TaskPriority::DefaultPromiseEndpoint,
-		                                            AtMostOnce::False,
-		                                            nullptr));
+		try {
+			choose {
+				when(BlobGranuleFileReply rep = wait(loadBalance(location,
+				                                                 &BlobWorkerInterface::blobGranuleFileRequest,
+				                                                 req,
+				                                                 TaskPriority::DefaultPromiseEndpoint,
+				                                                 AtMostOnce::False,
+				                                                 nullptr))) {
+					if (BG_REQUEST_DEBUG) {
+						fmt::print("Blob granule request for [{0} - {1}) @ {2} - {3} got reply from {4}:\n",
+						           granuleStartKey.printable(),
+						           granuleEndKey.printable(),
+						           begin,
+						           rv,
+						           workerId.toString());
+					}
+					results.arena().dependsOn(rep.arena);
+					for (auto& chunk : rep.chunks) {
+						if (BG_REQUEST_DEBUG) {
+							fmt::print(
+							    "[{0} - {1})\n", chunk.keyRange.begin.printable(), chunk.keyRange.end.printable());
 
-		if (BG_REQUEST_DEBUG) {
-			fmt::print("Blob granule request for [{0} - {1}) @ {2} - {3} got reply from {4}:\n",
-			           granuleStartKey.printable(),
-			           granuleEndKey.printable(),
-			           begin,
-			           *readVersionOut,
-			           workerId.toString());
-		}
-		results.arena().dependsOn(rep.arena);
-		for (auto& chunk : rep.chunks) {
-			if (BG_REQUEST_DEBUG) {
-				fmt::print("[{0} - {1})\n", chunk.keyRange.begin.printable(), chunk.keyRange.end.printable());
+							fmt::print("  SnapshotFile: {0}\n    \n  DeltaFiles:\n",
+							           chunk.snapshotFile.present() ? chunk.snapshotFile.get().toString().c_str()
+							                                        : "<none>");
+							for (auto& df : chunk.deltaFiles) {
+								fmt::print("    {0}\n", df.toString());
+							}
+							fmt::print("  Deltas: ({0})", chunk.newDeltas.size());
+							if (chunk.newDeltas.size() > 0) {
+								fmt::print(" with version [{0} - {1}]",
+								           chunk.newDeltas[0].version,
+								           chunk.newDeltas[chunk.newDeltas.size() - 1].version);
+							}
+							fmt::print("  IncludedVersion: {0}\n\n\n", chunk.includedVersion);
+						}
 
-				fmt::print("  SnapshotFile: {0}\n    \n  DeltaFiles:\n",
-				           chunk.snapshotFile.present() ? chunk.snapshotFile.get().toString().c_str() : "<none>");
-				for (auto& df : chunk.deltaFiles) {
-					fmt::print("    {0}\n", df.toString());
+						results.push_back(results.arena(), chunk);
+						keyRange = KeyRangeRef(std::min(chunk.keyRange.end, keyRange.end), keyRange.end);
+					}
 				}
-				fmt::print("  Deltas: ({0})", chunk.newDeltas.size());
-				if (chunk.newDeltas.size() > 0) {
-					fmt::print(" with version [{0} - {1}]",
-					           chunk.newDeltas[0].version,
-					           chunk.newDeltas[chunk.newDeltas.size() - 1].version);
+				// if we detect that this blob worker fails, cancel the request, as otherwise load balance will
+				// retry indefinitely with one option
+				when(wait(IFailureMonitor::failureMonitor().onStateEqual(
+				    location->get(0, &BlobWorkerInterface::blobGranuleFileRequest).getEndpoint(),
+				    FailureStatus(true)))) {
+					if (BG_REQUEST_DEBUG) {
+						fmt::print("readBlobGranules got BW {0} failed\n", workerId.toString());
+					}
+
+					throw connection_failed();
 				}
-				fmt::print("  IncludedVersion: {0}\n\n\n", chunk.includedVersion);
 			}
-
-			results.push_back(results.arena(), chunk);
-			keyRange = KeyRangeRef(std::min(chunk.keyRange.end, keyRange.end), keyRange.end);
+		} catch (Error& e) {
+			if (BG_REQUEST_DEBUG) {
+				fmt::print("BGReq got error {}\n", e.name());
+			}
+			// worker is up but didn't actually have granule, or connection failed
+			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_connection_failed) {
+				// need to re-read mapping, throw transaction_too_old so client retries. TODO better error?
+				throw transaction_too_old();
+			}
+			throw e;
 		}
+	}
+
+	self->trState->cx->anyBlobGranuleRequests = true;
+	self->trState->cx->bgGranulesPerRequest.addSample(results.size());
+	self->trState->cx->bgLatencies.addSample(now() - startTime);
+
+	if (readVersionOut != nullptr) {
+		*readVersionOut = rv;
 	}
 	return results;
 }
@@ -7528,6 +7591,109 @@ ACTOR Future<std::vector<std::pair<UID, StorageWiggleValue>>> readStorageWiggleV
 	return res;
 }
 
+ACTOR Future<Void> splitStorageMetricsStream(PromiseStream<Key> resultStream,
+                                             Database cx,
+                                             KeyRange keys,
+                                             StorageMetrics limit,
+                                             StorageMetrics estimated) {
+	state Span span("NAPI:SplitStorageMetricsStream"_loc);
+	state Key beginKey = keys.begin;
+	state Key globalLastKey = beginKey;
+	resultStream.send(beginKey);
+	// track used across loops
+	state StorageMetrics globalUsed;
+	loop {
+		state std::vector<KeyRangeLocationInfo> locations =
+		    wait(getKeyRangeLocations(cx,
+		                              Optional<TenantName>(),
+		                              KeyRangeRef(beginKey, keys.end),
+		                              CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT,
+		                              Reverse::False,
+		                              &StorageServerInterface::splitMetrics,
+		                              span.context,
+		                              Optional<UID>(),
+		                              UseProvisionalProxies::False,
+		                              latestVersion));
+		try {
+			//TraceEvent("SplitStorageMetrics").detail("Locations", locations.size());
+
+			state StorageMetrics localUsed = globalUsed;
+			state Key localLastKey = globalLastKey;
+			state Standalone<VectorRef<KeyRef>> results;
+			state int i = 0;
+			for (; i < locations.size(); i++) {
+				SplitMetricsRequest req(locations[i].range,
+				                        limit,
+				                        localUsed,
+				                        estimated,
+				                        i == locations.size() - 1 && keys.end <= locations.back().range.end);
+				SplitMetricsReply res = wait(loadBalance(locations[i].locations->locations(),
+				                                         &StorageServerInterface::splitMetrics,
+				                                         req,
+				                                         TaskPriority::DataDistribution));
+				if (res.splits.size() &&
+				    res.splits[0] <= localLastKey) { // split points are out of order, possibly because
+					// of moving data, throw error to retry
+					ASSERT_WE_THINK(false); // FIXME: This seems impossible and doesn't seem to be covered by testing
+					throw all_alternatives_failed();
+				}
+
+				if (res.splits.size()) {
+					results.append(results.arena(), res.splits.begin(), res.splits.size());
+					results.arena().dependsOn(res.splits.arena());
+					localLastKey = res.splits.back();
+				}
+				localUsed = res.used;
+
+				//TraceEvent("SplitStorageMetricsResult").detail("Used", used.bytes).detail("Location", i).detail("Size", res.splits.size());
+			}
+
+			globalUsed = localUsed;
+
+			// only truncate split at end
+			if (keys.end <= locations.back().range.end &&
+			    globalUsed.allLessOrEqual(limit * CLIENT_KNOBS->STORAGE_METRICS_UNFAIR_SPLIT_LIMIT) &&
+			    results.size() > 1) {
+				results.resize(results.arena(), results.size() - 1);
+				localLastKey = results.back();
+			}
+			globalLastKey = localLastKey;
+
+			for (auto& splitKey : results) {
+				resultStream.send(splitKey);
+			}
+
+			if (keys.end <= locations.back().range.end) {
+				resultStream.send(keys.end);
+				resultStream.sendError(end_of_stream());
+				break;
+			} else {
+				beginKey = locations.back().range.end;
+			}
+		} catch (Error& e) {
+			if (e.code() == error_code_operation_cancelled) {
+				throw e;
+			}
+			if (e.code() != error_code_wrong_shard_server && e.code() != error_code_all_alternatives_failed) {
+				TraceEvent(SevError, "SplitStorageMetricsStreamError").error(e);
+				resultStream.sendError(e);
+				throw;
+			}
+			cx->invalidateCache(Key(), keys);
+			wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
+		}
+	}
+	return Void();
+}
+
+Future<Void> DatabaseContext::splitStorageMetricsStream(const PromiseStream<Key>& resultStream,
+                                                        KeyRange const& keys,
+                                                        StorageMetrics const& limit,
+                                                        StorageMetrics const& estimated) {
+	return ::splitStorageMetricsStream(
+	    resultStream, Database(Reference<DatabaseContext>::addRef(this)), keys, limit, estimated);
+}
+
 ACTOR Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(Database cx,
                                                                 KeyRange keys,
                                                                 StorageMetrics limit,
@@ -7566,8 +7732,8 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(Database cx,
 					                                         req,
 					                                         TaskPriority::DataDistribution));
 					if (res.splits.size() &&
-					    res.splits[0] <= results.back()) { // split points are out of order, possibly because of moving
-						                                   // data, throw error to retry
+					    res.splits[0] <= results.back()) { // split points are out of order, possibly because of
+						                                   // moving data, throw error to retry
 						ASSERT_WE_THINK(
 						    false); // FIXME: This seems impossible and doesn't seem to be covered by testing
 						throw all_alternatives_failed();
@@ -7581,11 +7747,14 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(Database cx,
 					//TraceEvent("SplitStorageMetricsResult").detail("Used", used.bytes).detail("Location", i).detail("Size", res.splits.size());
 				}
 
-				if (used.allLessOrEqual(limit * CLIENT_KNOBS->STORAGE_METRICS_UNFAIR_SPLIT_LIMIT)) {
+				if (used.allLessOrEqual(limit * CLIENT_KNOBS->STORAGE_METRICS_UNFAIR_SPLIT_LIMIT) &&
+				    results.size() > 1) {
 					results.resize(results.arena(), results.size() - 1);
 				}
 
-				results.push_back_deep(results.arena(), keys.end);
+				if (keys.end <= locations.back().range.end) {
+					results.push_back_deep(results.arena(), keys.end);
+				}
 				return results;
 			} catch (Error& e) {
 				if (e.code() != error_code_wrong_shard_server && e.code() != error_code_all_alternatives_failed) {
@@ -7986,10 +8155,22 @@ ACTOR Future<Void> storageFeedVersionUpdater(StorageServerInterface interf, Chan
 				return Void();
 			}
 			if (self->version.get() < self->desired.get()) {
-				ChangeFeedVersionUpdateReply rep = wait(brokenPromiseToNever(
-				    interf.changeFeedVersionUpdate.getReply(ChangeFeedVersionUpdateRequest(self->desired.get()))));
-				if (rep.version > self->version.get()) {
-					self->version.set(rep.version);
+				try {
+					ChangeFeedVersionUpdateReply rep = wait(brokenPromiseToNever(
+					    interf.changeFeedVersionUpdate.getReply(ChangeFeedVersionUpdateRequest(self->desired.get()))));
+
+					if (rep.version > self->version.get()) {
+						self->version.set(rep.version);
+					}
+				} catch (Error& e) {
+					if (e.code() == error_code_server_overloaded) {
+						if (FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY > CLIENT_KNOBS->CHANGE_FEED_EMPTY_BATCH_TIME) {
+							wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY -
+							           CLIENT_KNOBS->CHANGE_FEED_EMPTY_BATCH_TIME));
+						}
+					} else {
+						throw e;
+					}
 				}
 			}
 		} else {
@@ -7999,93 +8180,135 @@ ACTOR Future<Void> storageFeedVersionUpdater(StorageServerInterface interf, Chan
 }
 
 Reference<ChangeFeedStorageData> DatabaseContext::getStorageData(StorageServerInterface interf) {
-	auto it = changeFeedUpdaters.find(interf.id());
+	// use token from interface since that changes on SS restart
+	UID token = interf.waitFailure.getEndpoint().token;
+	auto it = changeFeedUpdaters.find(token);
 	if (it == changeFeedUpdaters.end()) {
 		Reference<ChangeFeedStorageData> newStorageUpdater = makeReference<ChangeFeedStorageData>();
 		newStorageUpdater->id = interf.id();
+		newStorageUpdater->interfToken = token;
 		newStorageUpdater->updater = storageFeedVersionUpdater(interf, newStorageUpdater.getPtr());
-		changeFeedUpdaters[interf.id()] = newStorageUpdater;
+		changeFeedUpdaters[token] = newStorageUpdater;
 		return newStorageUpdater;
 	}
 	return it->second;
 }
 
 Version ChangeFeedData::getVersion() {
-	if (notAtLatest.get() == 0 && mutations.isEmpty()) {
-		Version v = storageData[0]->version.get();
-		for (int i = 1; i < storageData.size(); i++) {
-			if (storageData[i]->version.get() < v) {
-				v = storageData[i]->version.get();
-			}
-		}
-		return std::max(v, lastReturnedVersion.get());
-	}
 	return lastReturnedVersion.get();
 }
 
-ACTOR Future<Void> changeFeedWhenAtLatest(ChangeFeedData* self, Version version) {
-	state Future<Void> lastReturned = self->lastReturnedVersion.whenAtLeast(version);
-	loop {
-		if (self->notAtLatest.get() == 0) {
-			std::vector<Future<Void>> allAtLeast;
-			for (auto& it : self->storageData) {
-				if (it->version.get() < version) {
-					if (version > it->desired.get()) {
-						it->desired.set(version);
-					}
-					allAtLeast.push_back(it->version.whenAtLeast(version));
-				}
+// This function is essentially bubbling the information about what has been processed from the server through the
+// change feed client. First it makes sure the server has returned all mutations up through the target version, the
+// native api has consumed and processed, them, and then the fdb client has consumed all of the mutations.
+ACTOR Future<Void> changeFeedWaitLatest(Reference<ChangeFeedData> self, Version version) {
+	// wait on SS to have sent up through version
+	int desired = 0;
+	int waiting = 0;
+	std::vector<Future<Void>> allAtLeast;
+	for (auto& it : self->storageData) {
+		if (it->version.get() < version) {
+			waiting++;
+			if (version > it->desired.get()) {
+				it->desired.set(version);
+				desired++;
 			}
-			choose {
-				when(wait(lastReturned)) { return Void(); }
-				when(wait(waitForAll(allAtLeast))) {
-					std::vector<Future<Void>> onEmpty;
-					if (!self->mutations.isEmpty()) {
-						onEmpty.push_back(self->mutations.onEmpty());
-					}
-					for (auto& it : self->streams) {
-						if (!it.isEmpty()) {
-							onEmpty.push_back(it.onEmpty());
-						}
-					}
-					if (!onEmpty.size()) {
-						return Void();
-					}
-					choose {
-						when(wait(waitForAll(onEmpty))) {
-							wait(delay(0));
-							return Void();
-						}
-						when(wait(lastReturned)) { return Void(); }
-						when(wait(self->refresh.getFuture())) {}
-						when(wait(self->notAtLatest.onChange())) {}
-					}
-				}
-				when(wait(self->refresh.getFuture())) {}
-				when(wait(self->notAtLatest.onChange())) {}
-			}
-		} else {
-			choose {
-				when(wait(lastReturned)) { return Void(); }
-				when(wait(self->notAtLatest.onChange())) {}
-				when(wait(self->refresh.getFuture())) {}
-			}
+			allAtLeast.push_back(it->version.whenAtLeast(version));
 		}
 	}
+
+	wait(waitForAll(allAtLeast));
+
+	// then, wait on ss streams to have processed up through version
+	std::vector<Future<Void>> onEmpty;
+	for (auto& it : self->streams) {
+		if (!it.isEmpty()) {
+			onEmpty.push_back(it.onEmpty());
+		}
+	}
+
+	if (onEmpty.size()) {
+		wait(waitForAll(onEmpty));
+	}
+
+	if (self->mutations.isEmpty()) {
+		wait(delay(0));
+	}
+
+	// wait for merge cursor to fully process everything it read from its individual promise streams, either until it is
+	// done processing or we have up through the desired version
+	while (self->lastReturnedVersion.get() < self->maxSeenVersion && self->lastReturnedVersion.get() < version) {
+		Version target = std::min(self->maxSeenVersion, version);
+		wait(self->lastReturnedVersion.whenAtLeast(target));
+	}
+
+	// then, wait for client to have consumed up through version
+	if (self->maxSeenVersion >= version) {
+		// merge cursor may have something buffered but has not yet sent it to self->mutations, just wait for
+		// lastReturnedVersion
+		wait(self->lastReturnedVersion.whenAtLeast(version));
+	} else {
+		// all mutations <= version are in self->mutations, wait for empty
+		while (!self->mutations.isEmpty()) {
+			wait(self->mutations.onEmpty());
+			wait(delay(0));
+		}
+	}
+
+	return Void();
+}
+
+ACTOR Future<Void> changeFeedWhenAtLatest(Reference<ChangeFeedData> self, Version version) {
+	if (version >= self->endVersion) {
+		return Never();
+	}
+	if (version <= self->getVersion()) {
+		return Void();
+	}
+	state Future<Void> lastReturned = self->lastReturnedVersion.whenAtLeast(version);
+	loop {
+		// only allowed to use empty versions if you're caught up
+		Future<Void> waitEmptyVersion = (self->notAtLatest.get() == 0) ? changeFeedWaitLatest(self, version) : Never();
+		choose {
+			when(wait(waitEmptyVersion)) { break; }
+			when(wait(lastReturned)) { break; }
+			when(wait(self->refresh.getFuture())) {}
+			when(wait(self->notAtLatest.onChange())) {}
+		}
+	}
+
+	if (self->lastReturnedVersion.get() < version) {
+		self->lastReturnedVersion.set(version);
+	}
+	ASSERT(self->getVersion() >= version);
+	return Void();
 }
 
 Future<Void> ChangeFeedData::whenAtLeast(Version version) {
-	return changeFeedWhenAtLatest(this, version);
+	return changeFeedWhenAtLatest(Reference<ChangeFeedData>::addRef(this), version);
 }
 
-ACTOR Future<Void> singleChangeFeedStream(StorageServerInterface interf,
-                                          PromiseStream<Standalone<MutationsAndVersionRef>> results,
-                                          ReplyPromiseStream<ChangeFeedStreamReply> replyStream,
-                                          Version end,
-                                          Reference<ChangeFeedData> feedData,
-                                          Reference<ChangeFeedStorageData> storageData) {
+#define DEBUG_CF_CLIENT_TRACE false
+
+ACTOR Future<Void> partialChangeFeedStream(StorageServerInterface interf,
+                                           PromiseStream<Standalone<MutationsAndVersionRef>> results,
+                                           ReplyPromiseStream<ChangeFeedStreamReply> replyStream,
+                                           Version begin,
+                                           Version end,
+                                           Reference<ChangeFeedData> feedData,
+                                           Reference<ChangeFeedStorageData> storageData,
+                                           UID debugUID) {
+
+	// calling lastReturnedVersion's callbacks could cause us to be cancelled
+	state Promise<Void> refresh = feedData->refresh;
 	state bool atLatestVersion = false;
-	state Version nextVersion = 0;
+	state Version nextVersion = begin;
+	// We don't need to force every other partial stream to do an empty if we get an empty, but if we get actual
+	// mutations back after sending an empty, we may need the other partial streams to get an empty, to advance the
+	// merge cursor, so we can send the mutations we just got.
+	// if lastEmpty != invalidVersion, we need to update the desired versions of the other streams BEFORE waiting
+	// onReady once getting a reply
+	state Version lastEmpty = invalidVersion;
 	try {
 		loop {
 			if (nextVersion >= end) {
@@ -8094,30 +8317,81 @@ ACTOR Future<Void> singleChangeFeedStream(StorageServerInterface interf,
 			}
 			choose {
 				when(state ChangeFeedStreamReply rep = waitNext(replyStream.getFuture())) {
+					// handle first empty mutation on stream establishment explicitly
+					if (nextVersion == begin && rep.mutations.size() == 1 && rep.mutations[0].mutations.size() == 0 &&
+					    rep.mutations[0].version == begin - 1) {
+						continue;
+					}
+
+					if (DEBUG_CF_CLIENT_TRACE) {
+						TraceEvent(SevDebug, "TraceChangeFeedClientMergeCursorReply", debugUID)
+						    .detail("SSID", storageData->id)
+						    .detail("AtLatest", atLatestVersion)
+						    .detail("FirstVersion", rep.mutations.front().version)
+						    .detail("LastVersion", rep.mutations.back().version)
+						    .detail("Count", rep.mutations.size())
+						    .detail("MinStreamVersion", rep.minStreamVersion)
+						    .detail("PopVersion", rep.popVersion)
+						    .detail("RepAtLatest", rep.atLatestVersion);
+					}
+
+					if (rep.mutations.back().version > feedData->maxSeenVersion) {
+						feedData->maxSeenVersion = rep.mutations.back().version;
+					}
+					if (rep.popVersion > feedData->popVersion) {
+						feedData->popVersion = rep.popVersion;
+					}
+
+					if (lastEmpty != invalidVersion && !results.isEmpty()) {
+						for (auto& it : feedData->storageData) {
+							if (refresh.canBeSet() && lastEmpty > it->desired.get()) {
+								it->desired.set(lastEmpty);
+							}
+						}
+						lastEmpty = invalidVersion;
+					}
+
 					state int resultLoc = 0;
 					while (resultLoc < rep.mutations.size()) {
 						wait(results.onEmpty());
 						if (rep.mutations[resultLoc].version >= nextVersion) {
 							results.send(rep.mutations[resultLoc]);
+
+							if (DEBUG_CF_CLIENT_TRACE) {
+								TraceEvent(SevDebug, "TraceChangeFeedClientMergeCursorSend", debugUID)
+								    .detail("Version", rep.mutations[resultLoc].version)
+								    .detail("Size", rep.mutations[resultLoc].mutations.size());
+							}
+
+							// check refresh.canBeSet so that, if we are killed after calling one of these callbacks, we
+							// just skip to the next wait and get actor_cancelled
+							// FIXME: this is somewhat expensive to do every mutation.
+							for (auto& it : feedData->storageData) {
+								if (refresh.canBeSet() && rep.mutations[resultLoc].version > it->desired.get()) {
+									it->desired.set(rep.mutations[resultLoc].version);
+								}
+							}
 						} else {
 							ASSERT(rep.mutations[resultLoc].mutations.empty());
 						}
 						resultLoc++;
 					}
-					nextVersion = rep.mutations.back().version + 1;
 
-					if (!atLatestVersion && rep.atLatestVersion) {
+					// if we got the empty version that went backwards, don't decrease nextVersion
+					if (rep.mutations.back().version + 1 > nextVersion) {
+						nextVersion = rep.mutations.back().version + 1;
+					}
+
+					if (refresh.canBeSet() && !atLatestVersion && rep.atLatestVersion) {
 						atLatestVersion = true;
 						feedData->notAtLatest.set(feedData->notAtLatest.get() - 1);
 					}
-					if (rep.minStreamVersion > storageData->version.get()) {
+					if (refresh.canBeSet() && rep.minStreamVersion > storageData->version.get()) {
 						storageData->version.set(rep.minStreamVersion);
 					}
-
-					for (auto& it : feedData->storageData) {
-						if (rep.mutations.back().version > it->desired.get()) {
-							it->desired.set(rep.mutations.back().version);
-						}
+					if (DEBUG_CF_CLIENT_TRACE) {
+						TraceEvent(SevDebug, "TraceChangeFeedClientMergeCursorReplyDone", debugUID)
+						    .detail("AtLatestNow", atLatestVersion);
 					}
 				}
 				when(wait(atLatestVersion && replyStream.isEmpty() && results.isEmpty()
@@ -8127,12 +8401,20 @@ ACTOR Future<Void> singleChangeFeedStream(StorageServerInterface interf,
 					empty.version = storageData->version.get();
 					results.send(empty);
 					nextVersion = storageData->version.get() + 1;
+					if (DEBUG_CF_CLIENT_TRACE) {
+						TraceEvent(SevDebug, "TraceChangeFeedClientMergeCursorSendEmpty", debugUID)
+						    .detail("Version", empty.version);
+					}
+					lastEmpty = empty.version;
 				}
 				when(wait(atLatestVersion && replyStream.isEmpty() && !results.isEmpty() ? results.onEmpty()
 				                                                                         : Future<Void>(Never()))) {}
 			}
 		}
 	} catch (Error& e) {
+		if (DEBUG_CF_CLIENT_TRACE) {
+			TraceEvent(SevDebug, "TraceChangeFeedClientMergeCursorError", debugUID).errorUnsuppressed(e);
+		}
 		if (e.code() == error_code_actor_cancelled) {
 			throw;
 		}
@@ -8141,16 +8423,137 @@ ACTOR Future<Void> singleChangeFeedStream(StorageServerInterface interf,
 	}
 }
 
+ACTOR Future<Void> mergeChangeFeedStreamInternal(Reference<ChangeFeedData> results,
+                                                 std::vector<std::pair<StorageServerInterface, KeyRange>> interfs,
+                                                 std::vector<MutationAndVersionStream> streams,
+                                                 Version* begin,
+                                                 Version end,
+                                                 UID mergeCursorUID) {
+	state Promise<Void> refresh = results->refresh;
+	// with empty version handling in the partial cursor, all streams will always have a next element with version >=
+	// the minimum version of any stream's next element
+	state std::priority_queue<MutationAndVersionStream, std::vector<MutationAndVersionStream>> mutations;
+
+	if (DEBUG_CF_CLIENT_TRACE) {
+		TraceEvent(SevDebug, "TraceChangeFeedClientMergeCursorStart", mergeCursorUID)
+		    .detail("StreamCount", interfs.size())
+		    .detail("Begin", *begin)
+		    .detail("End", end);
+	}
+
+	// previous version of change feed may have put a mutation in the promise stream and then immediately died. Wait for
+	// that mutation first, so the promise stream always starts empty
+	wait(results->mutations.onEmpty());
+	wait(delay(0));
+	ASSERT(results->mutations.isEmpty());
+
+	if (DEBUG_CF_CLIENT_TRACE) {
+		TraceEvent(SevDebug, "TraceChangeFeedClientMergeCursorGotEmpty", mergeCursorUID);
+	}
+
+	// update lastReturned once the previous mutation has been consumed
+	if (*begin - 1 > results->lastReturnedVersion.get()) {
+		results->lastReturnedVersion.set(*begin - 1);
+	}
+
+	state int interfNum = 0;
+
+	state std::vector<MutationAndVersionStream> streamsUsed;
+	// initially, pull from all streams
+	for (auto& stream : streams) {
+		streamsUsed.push_back(stream);
+	}
+
+	state Version nextVersion;
+	loop {
+		// bring all of the streams up to date to ensure we have the latest element from each stream in mutations
+		interfNum = 0;
+		while (interfNum < streamsUsed.size()) {
+			try {
+				Standalone<MutationsAndVersionRef> res = waitNext(streamsUsed[interfNum].results.getFuture());
+				streamsUsed[interfNum].next = res;
+				mutations.push(streamsUsed[interfNum]);
+			} catch (Error& e) {
+				if (e.code() != error_code_end_of_stream) {
+					throw e;
+				}
+			}
+			interfNum++;
+		}
+
+		if (mutations.empty()) {
+			throw end_of_stream();
+		}
+
+		streamsUsed.clear();
+
+		// Without this delay, weird issues with the last stream getting on another stream's callstack can happen
+		wait(delay(0));
+
+		// pop first item off queue - this will be mutation with the lowest version
+		Standalone<VectorRef<MutationsAndVersionRef>> nextOut;
+		nextVersion = mutations.top().next.version;
+
+		streamsUsed.push_back(mutations.top());
+		nextOut.push_back_deep(nextOut.arena(), mutations.top().next);
+		mutations.pop();
+
+		// for each other stream that has mutations with the same version, add it to nextOut
+		while (!mutations.empty() && mutations.top().next.version == nextVersion) {
+			if (mutations.top().next.mutations.size() &&
+			    mutations.top().next.mutations.front().param1 != lastEpochEndPrivateKey) {
+				nextOut.back().mutations.append_deep(
+				    nextOut.arena(), mutations.top().next.mutations.begin(), mutations.top().next.mutations.size());
+			}
+			streamsUsed.push_back(mutations.top());
+			mutations.pop();
+		}
+
+		ASSERT(nextOut.size() == 1);
+		ASSERT(nextVersion >= *begin);
+
+		*begin = nextVersion + 1;
+
+		if (DEBUG_CF_CLIENT_TRACE) {
+			TraceEvent(SevDebug, "TraceChangeFeedClientMergeCursorSending", mergeCursorUID)
+			    .detail("Count", streamsUsed.size())
+			    .detail("Version", nextVersion);
+		}
+
+		// send mutations at nextVersion to the client
+		if (nextOut.back().mutations.empty()) {
+			ASSERT(results->mutations.isEmpty());
+		} else {
+			ASSERT(nextOut.back().version > results->lastReturnedVersion.get());
+
+			results->mutations.send(nextOut);
+			wait(results->mutations.onEmpty());
+			wait(delay(0));
+		}
+
+		if (nextVersion > results->lastReturnedVersion.get()) {
+			results->lastReturnedVersion.set(nextVersion);
+		}
+	}
+}
+
 ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
                                          std::vector<std::pair<StorageServerInterface, KeyRange>> interfs,
                                          Reference<ChangeFeedData> results,
                                          Key rangeID,
                                          Version* begin,
-                                         Version end) {
-	state std::priority_queue<MutationAndVersionStream, std::vector<MutationAndVersionStream>> mutations;
+                                         Version end,
+                                         int replyBufferSize,
+                                         bool canReadPopped) {
 	state std::vector<Future<Void>> fetchers(interfs.size());
+	state std::vector<Future<Void>> onErrors(interfs.size());
 	state std::vector<MutationAndVersionStream> streams(interfs.size());
 
+	TEST(interfs.size() > 10); // Large change feed merge cursor
+	TEST(interfs.size() > 100); // Very large change feed merge cursor
+
+	state UID mergeCursorUID = UID();
+	state std::vector<UID> debugUIDs;
 	results->streams.clear();
 	for (auto& it : interfs) {
 		ChangeFeedStreamRequest req;
@@ -8158,14 +8561,26 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 		req.begin = *begin;
 		req.end = end;
 		req.range = it.second;
+		req.canReadPopped = canReadPopped;
+		// divide total buffer size among sub-streams, but keep individual streams large enough to be efficient
+		req.replyBufferSize = replyBufferSize / interfs.size();
+		if (replyBufferSize != -1 && req.replyBufferSize < CLIENT_KNOBS->CHANGE_FEED_STREAM_MIN_BYTES) {
+			req.replyBufferSize = CLIENT_KNOBS->CHANGE_FEED_STREAM_MIN_BYTES;
+		}
+		req.debugUID = deterministicRandom()->randomUniqueID();
+		debugUIDs.push_back(req.debugUID);
+		mergeCursorUID =
+		    UID(mergeCursorUID.first() ^ req.debugUID.first(), mergeCursorUID.second() ^ req.debugUID.second());
+
 		results->streams.push_back(it.first.changeFeedStream.getReplyStream(req));
 	}
 
 	for (auto& it : results->storageData) {
 		if (it->debugGetReferenceCount() == 2) {
-			db->changeFeedUpdaters.erase(it->id);
+			db->changeFeedUpdaters.erase(it->interfToken);
 		}
 	}
+	results->maxSeenVersion = invalidVersion;
 	results->storageData.clear();
 	Promise<Void> refresh = results->refresh;
 	results->refresh = Promise<Void>();
@@ -8176,61 +8591,31 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 	refresh.send(Void());
 
 	for (int i = 0; i < interfs.size(); i++) {
-		fetchers[i] = singleChangeFeedStream(
-		    interfs[i].first, streams[i].results, results->streams[i], end, results, results->storageData[i]);
-	}
-	state int interfNum = 0;
-	while (interfNum < interfs.size()) {
-		try {
-			Standalone<MutationsAndVersionRef> res = waitNext(streams[interfNum].results.getFuture());
-			streams[interfNum].next = res;
-			mutations.push(streams[interfNum]);
-		} catch (Error& e) {
-			if (e.code() != error_code_end_of_stream) {
-				throw e;
-			}
+		if (DEBUG_CF_CLIENT_TRACE) {
+			TraceEvent(SevDebug, "TraceChangeFeedClientMergeCursorInit", debugUIDs[i])
+			    .detail("CursorDebugUID", mergeCursorUID)
+			    .detail("Idx", i)
+			    .detail("FeedID", rangeID)
+			    .detail("MergeRange", KeyRangeRef(interfs.front().second.begin, interfs.back().second.end))
+			    .detail("PartialRange", interfs[i].second)
+			    .detail("Begin", *begin)
+			    .detail("End", end)
+			    .detail("CanReadPopped", canReadPopped);
 		}
-		interfNum++;
+		onErrors[i] = results->streams[i].onError();
+		fetchers[i] = partialChangeFeedStream(interfs[i].first,
+		                                      streams[i].results,
+		                                      results->streams[i],
+		                                      *begin,
+		                                      end,
+		                                      results,
+		                                      results->storageData[i],
+		                                      debugUIDs[i]);
 	}
-	state Version checkVersion = invalidVersion;
-	state Standalone<VectorRef<MutationsAndVersionRef>> nextOut;
-	while (mutations.size()) {
-		state MutationAndVersionStream nextStream = mutations.top();
-		mutations.pop();
-		ASSERT(nextStream.next.version >= checkVersion);
-		if (nextStream.next.version != checkVersion) {
-			if (nextOut.size()) {
-				*begin = checkVersion + 1;
-				results->mutations.send(nextOut);
-				results->lastReturnedVersion.set(nextOut.back().version);
-				nextOut = Standalone<VectorRef<MutationsAndVersionRef>>();
-			}
-			checkVersion = nextStream.next.version;
-		}
-		if (nextOut.size() && nextStream.next.version == nextOut.back().version) {
-			if (nextStream.next.mutations.size() &&
-			    nextStream.next.mutations.front().param1 != lastEpochEndPrivateKey) {
-				nextOut.back().mutations.append_deep(
-				    nextOut.arena(), nextStream.next.mutations.begin(), nextStream.next.mutations.size());
-			}
-		} else {
-			nextOut.push_back_deep(nextOut.arena(), nextStream.next);
-		}
-		try {
-			Standalone<MutationsAndVersionRef> res = waitNext(nextStream.results.getFuture());
-			nextStream.next = res;
-			mutations.push(nextStream);
-		} catch (Error& e) {
-			if (e.code() != error_code_end_of_stream) {
-				throw e;
-			}
-		}
-	}
-	if (nextOut.size()) {
-		results->mutations.send(nextOut);
-		results->lastReturnedVersion.set(nextOut.back().version);
-	}
-	throw end_of_stream();
+
+	wait(waitForAny(onErrors) || mergeChangeFeedStreamInternal(results, interfs, streams, begin, end, mergeCursorUID));
+
+	return Void();
 }
 
 ACTOR Future<KeyRange> getChangeFeedRange(Reference<DatabaseContext> db, Database cx, Key rangeID, Version begin = 0) {
@@ -8267,18 +8652,155 @@ ACTOR Future<KeyRange> getChangeFeedRange(Reference<DatabaseContext> db, Databas
 	}
 }
 
+ACTOR Future<Void> singleChangeFeedStreamInternal(KeyRange range,
+                                                  Reference<ChangeFeedData> results,
+                                                  Key rangeID,
+                                                  Version* begin,
+                                                  Version end) {
+
+	state Promise<Void> refresh = results->refresh;
+	ASSERT(results->streams.size() == 1);
+	ASSERT(results->storageData.size() == 1);
+	state bool atLatest = false;
+
+	// wait for any previous mutations in stream to be consumed
+	wait(results->mutations.onEmpty());
+	wait(delay(0));
+	ASSERT(results->mutations.isEmpty());
+	// update lastReturned once the previous mutation has been consumed
+	if (*begin - 1 > results->lastReturnedVersion.get()) {
+		results->lastReturnedVersion.set(*begin - 1);
+	}
+
+	loop {
+
+		state ChangeFeedStreamReply feedReply = waitNext(results->streams[0].getFuture());
+		*begin = feedReply.mutations.back().version + 1;
+
+		if (feedReply.popVersion > results->popVersion) {
+			results->popVersion = feedReply.popVersion;
+		}
+
+		// don't send completely empty set of mutations to promise stream
+		bool anyMutations = false;
+		for (auto& it : feedReply.mutations) {
+			if (!it.mutations.empty()) {
+				anyMutations = true;
+				break;
+			}
+		}
+		if (anyMutations) {
+			// empty versions can come out of order, as we sometimes send explicit empty versions when restarting a
+			// stream. Anything with mutations should be strictly greater than lastReturnedVersion
+			ASSERT(feedReply.mutations.front().version > results->lastReturnedVersion.get());
+
+			results->mutations.send(
+			    Standalone<VectorRef<MutationsAndVersionRef>>(feedReply.mutations, feedReply.arena));
+
+			// Because onEmpty returns here before the consuming process, we must do a delay(0)
+			wait(results->mutations.onEmpty());
+			wait(delay(0));
+		}
+
+		// check refresh.canBeSet so that, if we are killed after calling one of these callbacks, we just
+		// skip to the next wait and get actor_cancelled
+		if (feedReply.mutations.back().version > results->lastReturnedVersion.get()) {
+			results->lastReturnedVersion.set(feedReply.mutations.back().version);
+		}
+
+		if (!refresh.canBeSet()) {
+			try {
+				// refresh is set if and only if this actor is cancelled
+				wait(Future<Void>(Void()));
+				// Catch any unexpected behavior if the above contract is broken
+				ASSERT(false);
+			} catch (Error& e) {
+				ASSERT(e.code() == error_code_actor_cancelled);
+				throw;
+			}
+		}
+
+		if (!atLatest && feedReply.atLatestVersion) {
+			atLatest = true;
+			results->notAtLatest.set(0);
+		}
+
+		if (feedReply.minStreamVersion > results->storageData[0]->version.get()) {
+			results->storageData[0]->version.set(feedReply.minStreamVersion);
+		}
+	}
+}
+
+ACTOR Future<Void> singleChangeFeedStream(Reference<DatabaseContext> db,
+                                          StorageServerInterface interf,
+                                          KeyRange range,
+                                          Reference<ChangeFeedData> results,
+                                          Key rangeID,
+                                          Version* begin,
+                                          Version end,
+                                          int replyBufferSize,
+                                          bool canReadPopped) {
+	state Database cx(db);
+	state ChangeFeedStreamRequest req;
+	req.rangeID = rangeID;
+	req.begin = *begin;
+	req.end = end;
+	req.range = range;
+	req.canReadPopped = canReadPopped;
+	req.replyBufferSize = replyBufferSize;
+	req.debugUID = deterministicRandom()->randomUniqueID();
+
+	if (DEBUG_CF_CLIENT_TRACE) {
+		TraceEvent(SevDebug, "TraceChangeFeedClientSingleCursor", req.debugUID)
+		    .detail("FeedID", rangeID)
+		    .detail("Range", range)
+		    .detail("Begin", *begin)
+		    .detail("End", end)
+		    .detail("CanReadPopped", canReadPopped);
+	}
+
+	results->streams.clear();
+
+	for (auto& it : results->storageData) {
+		if (it->debugGetReferenceCount() == 2) {
+			db->changeFeedUpdaters.erase(it->interfToken);
+		}
+	}
+	results->streams.push_back(interf.changeFeedStream.getReplyStream(req));
+
+	results->maxSeenVersion = invalidVersion;
+	results->storageData.clear();
+	results->storageData.push_back(db->getStorageData(interf));
+	Promise<Void> refresh = results->refresh;
+	results->refresh = Promise<Void>();
+	results->notAtLatest.set(1);
+	refresh.send(Void());
+
+	wait(results->streams[0].onError() || singleChangeFeedStreamInternal(range, results, rangeID, begin, end));
+
+	return Void();
+}
+
 ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
                                             Reference<ChangeFeedData> results,
                                             Key rangeID,
                                             Version begin,
                                             Version end,
-                                            KeyRange range) {
+                                            KeyRange range,
+                                            int replyBufferSize,
+                                            bool canReadPopped) {
 	state Database cx(db);
 	state Span span("NAPI:GetChangeFeedStream"_loc);
+
+	results->endVersion = end;
+
+	state double sleepWithBackoff = CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY;
+	state Version lastBeginVersion = invalidVersion;
 
 	loop {
 		state KeyRange keys;
 		try {
+			lastBeginVersion = begin;
 			KeyRange fullRange = wait(getChangeFeedRange(db, cx, rangeID, begin));
 			keys = fullRange & range;
 			state std::vector<KeyRangeLocationInfo> locations =
@@ -8346,59 +8868,34 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 					interfs.emplace_back(locations[i].locations->getInterface(chosenLocations[i]),
 					                     locations[i].range & range);
 				}
-				wait(mergeChangeFeedStream(db, interfs, results, rangeID, &begin, end) || cx->connectionFileChanged());
+				TEST(true); // Change feed merge cursor
+				// TODO (jslocum): validate connectionFileChanged behavior
+				wait(
+				    mergeChangeFeedStream(db, interfs, results, rangeID, &begin, end, replyBufferSize, canReadPopped) ||
+				    cx->connectionFileChanged());
 			} else {
-				state ChangeFeedStreamRequest req;
-				req.rangeID = rangeID;
-				req.begin = begin;
-				req.end = end;
-				req.range = range;
+				TEST(true); // Change feed single cursor
 				StorageServerInterface interf = locations[0].locations->getInterface(chosenLocations[0]);
-				state ReplyPromiseStream<ChangeFeedStreamReply> replyStream =
-				    interf.changeFeedStream.getReplyStream(req);
-				for (auto& it : results->storageData) {
-					if (it->debugGetReferenceCount() == 2) {
-						db->changeFeedUpdaters.erase(it->id);
-					}
-				}
-				results->streams.clear();
-				results->storageData.clear();
-				results->storageData.push_back(db->getStorageData(interf));
-				Promise<Void> refresh = results->refresh;
-				results->refresh = Promise<Void>();
-				results->notAtLatest.set(1);
-				refresh.send(Void());
-				state bool atLatest = false;
-				loop {
-					wait(results->mutations.onEmpty());
-					choose {
-						when(wait(cx->connectionFileChanged())) { break; }
-						when(ChangeFeedStreamReply rep = waitNext(replyStream.getFuture())) {
-							begin = rep.mutations.back().version + 1;
-							results->mutations.send(
-							    Standalone<VectorRef<MutationsAndVersionRef>>(rep.mutations, rep.arena));
-							results->lastReturnedVersion.set(rep.mutations.back().version);
-							if (!atLatest && rep.atLatestVersion) {
-								atLatest = true;
-								results->notAtLatest.set(0);
-							}
-							if (rep.minStreamVersion > results->storageData[0]->version.get()) {
-								results->storageData[0]->version.set(rep.minStreamVersion);
-							}
-						}
-					}
-				}
+				wait(singleChangeFeedStream(
+				         db, interf, range, results, rangeID, &begin, end, replyBufferSize, canReadPopped) ||
+				     cx->connectionFileChanged());
 			}
 		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) {
+			if (e.code() == error_code_actor_cancelled || e.code() == error_code_change_feed_popped) {
 				for (auto& it : results->storageData) {
 					if (it->debugGetReferenceCount() == 2) {
-						db->changeFeedUpdaters.erase(it->id);
+						db->changeFeedUpdaters.erase(it->interfToken);
 					}
 				}
 				results->streams.clear();
 				results->storageData.clear();
-				results->refresh.sendError(change_feed_cancelled());
+				if (e.code() == error_code_change_feed_popped) {
+					TEST(true); // getChangeFeedStreamActor got popped
+					results->mutations.sendError(e);
+					results->refresh.sendError(e);
+				} else {
+					results->refresh.sendError(change_feed_cancelled());
+				}
 				throw;
 			}
 			if (results->notAtLatest.get() == 0) {
@@ -8410,13 +8907,20 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 			    e.code() == error_code_broken_promise) {
 				db->changeFeedCache.erase(rangeID);
 				cx->invalidateCache(Key(), keys);
-				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY));
+				if (begin == lastBeginVersion) {
+					// We didn't read anything since the last failure before failing again.
+					// Do exponential backoff, up to 1 second
+					sleepWithBackoff = std::min(1.0, sleepWithBackoff * 1.5);
+				} else {
+					sleepWithBackoff = CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY;
+				}
+				wait(delay(sleepWithBackoff));
 			} else {
 				results->mutations.sendError(e);
 				results->refresh.sendError(change_feed_cancelled());
 				for (auto& it : results->storageData) {
 					if (it->debugGetReferenceCount() == 2) {
-						db->changeFeedUpdaters.erase(it->id);
+						db->changeFeedUpdaters.erase(it->interfToken);
 					}
 				}
 				results->streams.clear();
@@ -8431,8 +8935,11 @@ Future<Void> DatabaseContext::getChangeFeedStream(Reference<ChangeFeedData> resu
                                                   Key rangeID,
                                                   Version begin,
                                                   Version end,
-                                                  KeyRange range) {
-	return getChangeFeedStreamActor(Reference<DatabaseContext>::addRef(this), results, rangeID, begin, end, range);
+                                                  KeyRange range,
+                                                  int replyBufferSize,
+                                                  bool canReadPopped) {
+	return getChangeFeedStreamActor(
+	    Reference<DatabaseContext>::addRef(this), results, rangeID, begin, end, range, replyBufferSize, canReadPopped);
 }
 
 ACTOR Future<std::vector<OverlappingChangeFeedEntry>> singleLocationOverlappingChangeFeeds(
@@ -8599,7 +9106,8 @@ ACTOR Future<Void> popChangeFeedMutationsActor(Reference<DatabaseContext> db, Ke
 		}
 	} catch (Error& e) {
 		if (e.code() != error_code_unknown_change_feed && e.code() != error_code_wrong_shard_server &&
-		    e.code() != error_code_all_alternatives_failed) {
+		    e.code() != error_code_all_alternatives_failed && e.code() != error_code_broken_promise &&
+		    e.code() != error_code_server_overloaded) {
 			throw;
 		}
 		db->changeFeedCache.erase(rangeID);

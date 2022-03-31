@@ -804,7 +804,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		roles.addRole("ratekeeper", db->get().ratekeeper.get());
 	}
 
-	if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES && db->get().blobManager.present()) {
+	if (configuration.present() && configuration.get().blobGranulesEnabled && db->get().blobManager.present()) {
 		roles.addRole("blob_manager", db->get().blobManager.get());
 	}
 
@@ -875,7 +875,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		wait(yield());
 	}
 
-	if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
+	if (configuration.present() && configuration.get().blobGranulesEnabled) {
 		for (auto blobWorker : blobWorkers) {
 			roles.addRole("blob_worker", blobWorker);
 			wait(yield());
@@ -2983,7 +2983,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			    errorOr(getGrvProxiesAndMetrics(db, address_workers));
 			state Future<ErrorOr<std::vector<BlobWorkerInterface>>> blobWorkersFuture;
 
-			if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
+			if (configuration.present() && configuration.get().blobGranulesEnabled) {
 				blobWorkersFuture = errorOr(timeoutError(getBlobWorkers(cx, true), 5.0));
 			}
 
@@ -3121,7 +3121,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			}
 
 			// ...also blob workers
-			if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
+			if (configuration.present() && configuration.get().blobGranulesEnabled) {
 				ErrorOr<std::vector<BlobWorkerInterface>> _blobWorkers = wait(blobWorkersFuture);
 				if (_blobWorkers.present()) {
 					blobWorkers = _blobWorkers.get();

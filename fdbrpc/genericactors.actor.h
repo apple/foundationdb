@@ -210,9 +210,21 @@ void endStreamOnDisconnect(Future<Void> signal,
                            Reference<Peer> peer = Reference<Peer>()) {
 	state PeerHolder holder = PeerHolder(peer);
 	stream.setRequestStreamEndpoint(endpoint);
-	choose {
-		when(wait(signal)) { stream.sendError(connection_failed()); }
-		when(wait(stream.getErrorFutureAndDelPromiseRef())) {}
+	try {
+		choose {
+			when(wait(signal)) { stream.sendError(connection_failed()); }
+			when(wait(peer.isValid() ? peer->disconnect.getFuture() : Never())) {
+				stream.sendError(connection_failed());
+			}
+			when(wait(stream.getErrorFutureAndDelPromiseRef())) {}
+		}
+	} catch (Error& e) {
+		if (e.code() == error_code_broken_promise) {
+			// getErrorFutureAndDelPromiseRef returned, wait on stream connect or error
+			if (!stream.connected()) {
+				wait(signal || stream.onConnected());
+			}
+		}
 	}
 }
 

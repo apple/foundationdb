@@ -1,0 +1,39 @@
+[configuration]
+blobGranulesEnabled = true 
+# FIXME: re-enable rocks at some point
+storageEngineExcludeTypes = [4]
+
+[[test]]
+testTitle = 'BlobGranuleVerifyAtomicOps'
+
+    [[test.workload]]
+    testName = 'AtomicOps'
+    transactionsPerSecond = 2500.0
+    testDuration = 30.0
+
+    [[test.workload]]
+    testName = 'BlobGranuleVerifier'
+    testDuration = 30.0
+
+    [[test.workload]]
+    testName = 'RandomClogging'
+    testDuration = 30.0
+
+    [[test.workload]]
+    testName = 'Rollback'
+    meanDelay = 30.0
+    testDuration = 30.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 30.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 30.0

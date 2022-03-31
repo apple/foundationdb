@@ -83,6 +83,12 @@ struct ThreadCallback {
 		// If this is the only registered callback this will be called with (possibly) arbitrary pointers
 	}
 
+	// Note that when a ThreadCallback is destroyed it must have no MultiCallbackHolders, but this can't be
+	// asserted on destruction because throwing is not allowed in ~ThreadCallback() and the default destroy()
+	// implementation here is never called.
+	// However, ThreadMultiCallback::destroy() ensures that no ThreadMultiCallback will be destroyed while
+	// still holding a ThreadCallback so the invariant is effectively enforced there.  See
+	// ThreadMultiCallback::destroy() for more details.
 	virtual void destroy() { UNSTOPPABLE_ASSERT(false); }
 	virtual bool isMultiCallback() const { return false; }
 
@@ -91,12 +97,15 @@ struct ThreadCallback {
 	// some other scheme to store the indices by callback.
 	// MultiCallbackHolder objects can form a doubly linked list.
 	struct MultiCallbackHolder : public FastAllocated<MultiCallbackHolder> {
-		MultiCallbackHolder(ThreadMultiCallback* holder = nullptr,
-		                    MultiCallbackHolder* prev = nullptr,
-		                    MultiCallbackHolder* next = nullptr)
-		  : holder(holder), previous(prev), next(next) {}
+		// Construction requires no arguments or all the arguments
+		MultiCallbackHolder() : multiCallback(nullptr), index(0), previous(nullptr), next(nullptr) {}
+		MultiCallbackHolder(ThreadMultiCallback* multiCallback,
+		                    int index,
+		                    MultiCallbackHolder* prev,
+		                    MultiCallbackHolder* next)
+		  : multiCallback(multiCallback), index(0), previous(prev), next(next) {}
 
-		ThreadMultiCallback* holder;
+		ThreadMultiCallback* multiCallback;
 		int index;
 		MultiCallbackHolder* previous;
 		MultiCallbackHolder* next;
@@ -108,19 +117,20 @@ struct ThreadCallback {
 
 	// Return a MultiCallbackHolder for the given holder, using the firstHolder if free or allocating
 	// a new one.  No check for an existing record for holder is done.
-	MultiCallbackHolder* addHolder(ThreadMultiCallback* holder) {
-		if (firstHolder.holder == nullptr) {
-			firstHolder.holder = holder;
+	MultiCallbackHolder* addHolder(ThreadMultiCallback* multiCallback, int index) {
+		if (firstHolder.multiCallback == nullptr) {
+			firstHolder.multiCallback = multiCallback;
+			firstHolder.index = index;
 			return &firstHolder;
 		}
-		firstHolder.next = new MultiCallbackHolder(holder, &firstHolder, firstHolder.next);
+		firstHolder.next = new MultiCallbackHolder(multiCallback, index, &firstHolder, firstHolder.next);
 		return firstHolder.next;
 	}
 
 	// Get the MultiCallbackHolder for holder if it exists, or nullptr.
-	MultiCallbackHolder* getHolder(ThreadMultiCallback* holder) {
+	MultiCallbackHolder* getHolder(ThreadMultiCallback* multiCallback) {
 		MultiCallbackHolder* h = &firstHolder;
-		while (h != nullptr && h->holder != holder) {
+		while (h != nullptr && h->multiCallback != multiCallback) {
 			h = h->next;
 		}
 		return h;
@@ -132,7 +142,7 @@ struct ThreadCallback {
 
 		// If h is the firstHolder just clear its holder pointer to indicate unusedness
 		if (h == &firstHolder) {
-			h->holder = nullptr;
+			h->multiCallback = nullptr;
 		} else {
 			// Otherwise unlink h from the doubly linked list and free it
 			// h->previous is definitely valid
@@ -150,10 +160,10 @@ public:
 	ThreadMultiCallback() {}
 
 	ThreadCallback* addCallback(ThreadCallback* callback) override {
-		UNSTOPPABLE_ASSERT(
-		    callback->getHolder(this) ==
-		    nullptr); // May be triggered by a waitForAll on a vector with the same future in it more than once
-		callback->addHolder(this)->index = callbacks.size();
+		// May be triggered by a waitForAll on a vector with the same future in it more than once
+		UNSTOPPABLE_ASSERT(callback->getHolder(this) == nullptr);
+
+		callback->addHolder(this, callbacks.size());
 		callbacks.push_back(callback);
 		return (ThreadCallback*)this;
 	}
@@ -214,6 +224,10 @@ public:
 	}
 
 	void destroy() override {
+		// This assert assures that all ThreadMultiCallbacks remove themselves as a holder from
+		// every ThreadCallback they hold prior to destruction, because if they do not then this
+		// assert will fire, so ThreadCallback does not attempt to destroy its MultiCallbackHolder
+		// linked list or verify that it is empty.
 		UNSTOPPABLE_ASSERT(callbacks.empty());
 		delete this;
 	}

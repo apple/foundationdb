@@ -114,6 +114,7 @@ struct RestoreBackupWorkload final : TestWorkload {
 		                                       cx,
 		                                       self->tag,
 		                                       Key(self->backupContainer->getURL()),
+		                                       self->backupContainer->getProxy(),
 		                                       WaitForComplete::True,
 		                                       ::invalidVersion,
 		                                       Verbose::True)));

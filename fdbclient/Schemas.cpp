@@ -768,7 +768,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
              "ssd-1",
              "ssd-2",
              "ssd-redwood-1-experimental",
-             "ssd-rocksdb-experimental",
+             "ssd-rocksdb-v1",
              "memory",
              "memory-1",
              "memory-2",
@@ -781,7 +781,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
              "ssd-1",
              "ssd-2",
              "ssd-redwood-1-experimental",
-             "ssd-rocksdb-experimental",
+             "ssd-rocksdb-v1",
              "memory",
              "memory-1",
              "memory-2",
@@ -810,6 +810,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
              "aggressive",
              "gradual"
          ]},
+         "blob_granules_enabled":0,
          "tenant_mode": {
              "$enum":[
              "disabled",
