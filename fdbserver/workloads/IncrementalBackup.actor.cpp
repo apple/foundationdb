@@ -98,12 +98,12 @@ struct IncrementalBackupWorkload : TestWorkload {
 				if (!backupContainer.isValid()) {
 					TraceEvent("IBackupCheckListContainersAttempt").log();
 					state std::vector<std::string> containers =
-					    wait(IBackupContainer::listContainers(self->backupDir.toString()));
+					    wait(IBackupContainer::listContainers(self->backupDir.toString(), {}));
 					TraceEvent("IBackupCheckListContainersSuccess")
 					    .detail("Size", containers.size())
 					    .detail("First", containers.front());
 					if (containers.size()) {
-						backupContainer = IBackupContainer::openContainer(containers.front());
+						backupContainer = IBackupContainer::openContainer(containers.front(), {}, {});
 					}
 				}
 				state bool e = wait(backupContainer->exists());
@@ -152,6 +152,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 			try {
 				wait(self->backupAgent.submitBackup(cx,
 				                                    self->backupDir,
+				                                    {},
 				                                    0,
 				                                    1e8,
 				                                    self->tag.toString(),
@@ -219,7 +220,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 			}
 			TraceEvent("IBackupStartListContainersAttempt").log();
 			state std::vector<std::string> containers =
-			    wait(IBackupContainer::listContainers(self->backupDir.toString()));
+			    wait(IBackupContainer::listContainers(self->backupDir.toString(), {}));
 			TraceEvent("IBackupStartListContainersSuccess")
 			    .detail("Size", containers.size())
 			    .detail("First", containers.front());
@@ -229,6 +230,7 @@ struct IncrementalBackupWorkload : TestWorkload {
 			                                       cx,
 			                                       Key(self->tag.toString()),
 			                                       backupURL,
+			                                       {},
 			                                       WaitForComplete::True,
 			                                       invalidVersion,
 			                                       Verbose::True,

@@ -61,8 +61,8 @@ struct RestoreFromBlobWorkload : TestWorkload {
 		restoreRanges.push_back_deep(restoreRanges.arena(), normalKeys);
 
 		wait(delay(self->restoreAfter));
-		Version v =
-		    wait(backupAgent.restore(cx, {}, self->backupTag, self->backupURL, restoreRanges, self->waitForComplete));
+		Version v = wait(
+		    backupAgent.restore(cx, {}, self->backupTag, self->backupURL, {}, restoreRanges, self->waitForComplete));
 		return Void();
 	}
 

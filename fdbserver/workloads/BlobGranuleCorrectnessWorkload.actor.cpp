@@ -250,13 +250,13 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 				if (BGW_DEBUG) {
 					printf("Blob Granule Correctness constructing simulated backup container\n");
 				}
-				self->bstore = BackupContainerFileSystem::openContainerFS("file://fdbblob/");
+				self->bstore = BackupContainerFileSystem::openContainerFS("file://fdbblob/", {}, {});
 			} else {
 				if (BGW_DEBUG) {
 					printf("Blob Granule Correctness constructing backup container from %s\n",
 					       SERVER_KNOBS->BG_URL.c_str());
 				}
-				self->bstore = BackupContainerFileSystem::openContainerFS(SERVER_KNOBS->BG_URL);
+				self->bstore = BackupContainerFileSystem::openContainerFS(SERVER_KNOBS->BG_URL, {}, {});
 				if (BGW_DEBUG) {
 					printf("Blob Granule Correctness constructed backup container\n");
 				}
