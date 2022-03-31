@@ -561,6 +561,7 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 						if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
 							decodeKeyServersValue(UIDtoTagMap, old[oldIndex].value, src, dest, srcId, destId);
 							TraceEvent(SevDebug, "StartMoveKeysProcessingShard", relocationIntervalId)
+							    .detail("DataMoveID", dataMoveID)
 							    .detail("Range", rangeIntersectKeys)
 							    .detail("OldSrc", describe(src))
 							    .detail("OldDest", describe(dest))
@@ -1196,7 +1197,7 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 							if (dataMove.getPhase() == DataMoveMetaData::Deleting) {
 								TraceEvent(SevWarn, "FinishMoveKeysDataMove", relocationIntervalId)
 								    .detail("DataMoveBeingDeleted", dataMoveID);
-								throw operation_cancelled();
+								throw data_move_cancelled();
 							}
 							// ASSERT(dataMove.range == currentKeys);
 							ASSERT(currentKeys.contains(dataMove.range));
@@ -1207,7 +1208,7 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 						} else {
 							TraceEvent(SevWarn, "FinishMoveKeysDataMove", relocationIntervalId)
 							    .detail("DataMoveNotFound", dataMoveID);
-							throw operation_cancelled();
+							throw data_move_cancelled();
 						}
 					}
 

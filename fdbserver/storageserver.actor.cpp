@@ -7616,12 +7616,12 @@ void setAvailableStatus(StorageServer* self, KeyRangeRef keys, bool available) {
 				checkpoint.setState(CheckpointMetaData::Deleting);
 				self->addMutationToMutationLog(
 				    mLV, MutationRef(MutationRef::SetValue, persistCheckpointKey, checkpointValue(checkpoint)));
+				self->actors.add(deleteCheckpointQ(self, mLV.version + 1, checkpoint));
+				TraceEvent("SSDeleteCheckpointScheduled", self->thisServerID)
+				    .detail("MovedOutRange", keys.toString())
+				    .detail("Checkpoint", checkpoint.toString())
+				    .detail("DeleteVersion", mLV.version + 1);
 			}
-			self->actors.add(deleteCheckpointQ(self, mLV.version + 1, checkpoint));
-			TraceEvent("SSDeleteCheckpointScheduled", self->thisServerID)
-			    .detail("MovedOutRange", keys.toString())
-			    .detail("Checkpoint", checkpoint.toString())
-			    .detail("DeleteVersion", mLV.version + 1);
 		}
 	}
 }
