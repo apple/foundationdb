@@ -18,17 +18,17 @@
  * limitations under the License.
  */
 
-#include "fdbserver/RemoteIKeyValueStore.actor.h"
-#include "fdbserver/FDBExecHelper.actor.h"
-#include "fdbclient/FDBTypes.h"
-#include "fdbrpc/fdbrpc.h"
-#include "fdbrpc/FlowProcess.actor.h"
-
-#include "fdbserver/Knobs.h"
 #include "flow/ActorCollection.h"
 #include "flow/Error.h"
 #include "flow/Platform.h"
 #include "flow/Trace.h"
+#include "fdbrpc/FlowProcess.actor.h"
+#include "fdbrpc/fdbrpc.h"
+#include "fdbclient/FDBTypes.h"
+#include "fdbserver/FDBExecHelper.actor.h"
+#include "fdbserver/Knobs.h"
+#include "fdbserver/RemoteIKeyValueStore.actor.h"
+
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 StringRef KeyValueStoreProcess::_name = "KeyValueStoreProcess"_sr;
@@ -86,16 +86,14 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 	                                            openReq.memoryLimit,
 	                                            openReq.checkChecksums,
 	                                            openReq.checkIntegrity);
-	state UID uid_kvs(deterministicRandom()->randomUniqueID());
+	state UID kvsId(ikvsInterface.id());
 	state ActorCollection actors(false);
-	state AfterReturn guard(kvStore, uid_kvs);
+	state AfterReturn guard(kvStore, kvsId);
 	state Promise<Void> onClosed;
-	TraceEvent(SevDebug, "RemoteKVStoreInitializing")
-	    .detail("Action", "initializing local store")
-	    .detail("UID", uid_kvs);
+	TraceEvent(SevDebug, "RemoteKVStoreInitializing").detail("UID", kvsId);
 	wait(kvStore->init());
 	openReq.reply.send(ikvsInterface);
-	TraceEvent("RemoteKVStoreInitializaed").detail("IKVSInterfaceUID", ikvsInterface.id());
+	TraceEvent(SevInfo, "RemoteKVStoreInitialized").detail("IKVSInterfaceUID", kvsId);
 
 	loop {
 		try {
@@ -135,16 +133,14 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 					forwardPromise(onClosedReq.reply, kvStore->onClosed());
 				}
 				when(IKVSDisposeRequest disposeReq = waitNext(ikvsInterface.dispose.getFuture())) {
-					TraceEvent(SevDebug, "RemoteIKVSDisposeReceivedRequest").detail("UID", uid_kvs);
-					Future<Void> f = kvStore->onClosed();
+					TraceEvent(SevDebug, "RemoteIKVSDisposeReceivedRequest").detail("UID", kvsId);
 					kvStore->dispose();
 					guard.invalidate();
 					onClosed.send(Void());
 					return Void();
 				}
 				when(IKVSCloseRequest closeReq = waitNext(ikvsInterface.close.getFuture())) {
-					TraceEvent(SevDebug, "RemoteIKVSCloseReceivedRequest").detail("UID", uid_kvs);
-					Future<Void> f = kvStore->onClosed();
+					TraceEvent(SevDebug, "RemoteIKVSCloseReceivedRequest").detail("UID", kvsId);
 					kvStore->close();
 					guard.invalidate();
 					onClosed.send(Void());
@@ -153,11 +149,11 @@ ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterfa
 			}
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
-				TraceEvent("RemoteKVStoreCancelled").detail("UID", uid_kvs).backtrace();
+				TraceEvent(SevInfo, "RemoteKVStoreCancelled").detail("UID", kvsId).backtrace();
 				onClosed.send(Void());
 				return Void();
 			} else {
-				TraceEvent(SevError, "RemoteKVStoreError").error(e).detail("UID", uid_kvs).backtrace();
+				TraceEvent(SevError, "RemoteKVStoreError").error(e).detail("UID", kvsId).backtrace();
 				throw;
 			}
 		}
@@ -208,13 +204,12 @@ ACTOR static Future<int> flowProcessRunner(RemoteIKeyValueStore* self, Promise<V
 }
 
 ACTOR static Future<Void> initializeRemoteKVStore(RemoteIKeyValueStore* self, OpenKVStoreRequest openKVSReq) {
-	TraceEvent("WaitingOnFlowProcess").detail("StoreType", openKVSReq.storeType).log();
+	TraceEvent(SevInfo, "WaitingOnFlowProcess").detail("StoreType", openKVSReq.storeType).log();
 	Promise<Void> ready;
 	self->returnCode = flowProcessRunner(self, ready);
 	wait(ready.getFuture());
-	TraceEvent("FlowProcessReady").log();
 	IKVSInterface ikvsInterface = wait(self->kvsProcess.openKVStore.getReply(openKVSReq));
-	TraceEvent("IKVSInterfaceReceived").detail("UID", ikvsInterface.id());
+	TraceEvent(SevInfo, "IKVSInterfaceReceived").detail("UID", ikvsInterface.id());
 	self->interf = ikvsInterface;
 	self->interf.storeType = openKVSReq.storeType;
 	return Void();
@@ -239,7 +234,7 @@ ACTOR static Future<Void> delayFlowProcessRunAction(FlowProcess* self, double ti
 }
 
 Future<Void> runFlowProcess(std::string const& name, Endpoint endpoint) {
-	TraceEvent(SevDebug, "RunFlowProcessStart").log();
+	TraceEvent(SevInfo, "RunFlowProcessStart").log();
 	FlowProcess* self = IProcessFactory::create(name.c_str());
 	self->registerEndpoint(endpoint);
 	RequestStream<FlowProcessRegistrationRequest> registerProcess(endpoint);

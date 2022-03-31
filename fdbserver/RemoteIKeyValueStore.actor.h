@@ -26,20 +26,20 @@
 #elif !defined(FDBSERVER_REMOTE_IKEYVALUESTORE_ACTOR_H)
 #define FDBSERVER_REMOTE_IKEYVALUESTORE_ACTOR_H
 
-#include "fdbclient/FDBTypes.h"
-#include "fdbrpc/fdbrpc.h"
-#include "fdbrpc/FlowProcess.actor.h"
-#include "fdbrpc/FlowTransport.h"
-#include "fdbserver/IKeyValueStore.h"
-#include "fdbserver/FDBExecHelper.actor.h"
-#include "fdbserver/Knobs.h"
 #include "flow/ActorCollection.h"
+#include "flow/IRandom.h"
+#include "flow/Knobs.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
 #include "flow/network.h"
-#include "flow/Knobs.h"
+#include "fdbrpc/FlowProcess.actor.h"
+#include "fdbrpc/FlowTransport.h"
+#include "fdbrpc/fdbrpc.h"
+#include "fdbclient/FDBTypes.h"
+#include "fdbserver/FDBExecHelper.actor.h"
+#include "fdbserver/IKeyValueStore.h"
+#include "fdbserver/Knobs.h"
 
-#include "flow/IRandom.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct IKVSCommitReply {
@@ -85,7 +85,7 @@ struct IKVSInterface {
 	RequestStream<struct IKVSDisposeRequest> dispose;
 	RequestStream<struct IKVSCloseRequest> close;
 
-	UID uniqueID = deterministicRandom()->randomUniqueID();
+	UID uniqueID;
 
 	UID id() const { return uniqueID; }
 
@@ -95,7 +95,7 @@ struct IKVSInterface {
 
 	IKVSInterface() {}
 
-	IKVSInterface(KeyValueStoreType type) : storeType(type) {}
+	IKVSInterface(KeyValueStoreType type) : uniqueID(deterministicRandom()->randomUniqueID()), storeType(type) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
