@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -182,6 +182,7 @@ struct ChangeFeedStorageData : ReferenceCounted<ChangeFeedStorageData> {
 	NotifiedVersion version;
 	NotifiedVersion desired;
 	Promise<Void> destroyed;
+	UID interfToken;
 
 	~ChangeFeedStorageData() { destroyed.send(Void()); }
 };
@@ -197,6 +198,10 @@ struct ChangeFeedData : ReferenceCounted<ChangeFeedData> {
 	std::vector<Reference<ChangeFeedStorageData>> storageData;
 	AsyncVar<int> notAtLatest;
 	Promise<Void> refresh;
+	Version maxSeenVersion;
+	Version endVersion = invalidVersion;
+	Version popVersion =
+	    invalidVersion; // like TLog pop version, set by SS and client can check it to see if they missed data
 
 	ChangeFeedData() : notAtLatest(1) {}
 };
@@ -247,7 +252,8 @@ public:
 		                                    lockAware,
 		                                    internal,
 		                                    apiVersion,
-		                                    switchable));
+		                                    switchable,
+		                                    defaultTenant));
 	}
 
 	Optional<KeyRangeLocationInfo> getCachedLocation(const Optional<TenantName>& tenant,
@@ -293,6 +299,10 @@ public:
 	                                                                    StorageMetrics const& permittedError,
 	                                                                    int shardLimit,
 	                                                                    int expectedShardCount);
+	Future<Void> splitStorageMetricsStream(PromiseStream<Key> const& resultsStream,
+	                                       KeyRange const& keys,
+	                                       StorageMetrics const& limit,
+	                                       StorageMetrics const& estimated);
 	Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(KeyRange const& keys,
 	                                                          StorageMetrics const& limit,
 	                                                          StorageMetrics const& estimated);
@@ -356,7 +366,9 @@ public:
 	                                 Key rangeID,
 	                                 Version begin = 0,
 	                                 Version end = std::numeric_limits<Version>::max(),
-	                                 KeyRange range = allKeys);
+	                                 KeyRange range = allKeys,
+	                                 int replyBufferSize = -1,
+	                                 bool canReadPopped = true);
 
 	Future<std::vector<OverlappingChangeFeedEntry>> getOverlappingChangeFeeds(KeyRangeRef ranges, Version minVersion);
 	Future<Void> popChangeFeedMutations(Key rangeID, Version version);
@@ -372,7 +384,8 @@ public:
 	                         LockAware,
 	                         IsInternal = IsInternal::True,
 	                         int apiVersion = Database::API_VERSION_LATEST,
-	                         IsSwitchable = IsSwitchable::False);
+	                         IsSwitchable = IsSwitchable::False,
+	                         Optional<TenantName> defaultTenant = Optional<TenantName>());
 
 	explicit DatabaseContext(const Error& err);
 
@@ -393,6 +406,10 @@ public:
 	LocalityData clientLocality;
 	QueueModel queueModel;
 	EnableLocalityLoadBalance enableLocalityLoadBalance{ EnableLocalityLoadBalance::False };
+
+	// The tenant used when none is specified for a transaction. Ordinarily this is unspecified, in which case the raw
+	// key-space is used.
+	Optional<TenantName> defaultTenant;
 
 	struct VersionRequest {
 		SpanID spanContext;

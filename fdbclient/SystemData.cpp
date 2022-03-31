@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1153,30 +1153,33 @@ const KeyRangeRef blobGranuleMappingKeys(LiteralStringRef("\xff\x02/bgm/"), Lite
 const KeyRangeRef blobGranuleLockKeys(LiteralStringRef("\xff\x02/bgl/"), LiteralStringRef("\xff\x02/bgl0"));
 const KeyRangeRef blobGranuleSplitKeys(LiteralStringRef("\xff\x02/bgs/"), LiteralStringRef("\xff\x02/bgs0"));
 const KeyRangeRef blobGranuleHistoryKeys(LiteralStringRef("\xff\x02/bgh/"), LiteralStringRef("\xff\x02/bgh0"));
+const KeyRangeRef blobGranulePruneKeys(LiteralStringRef("\xff\x02/bgp/"), LiteralStringRef("\xff\x02/bgp0"));
+const KeyRangeRef blobGranuleVersionKeys(LiteralStringRef("\xff\x02/bgv/"), LiteralStringRef("\xff\x02/bgv0"));
+const KeyRef blobGranulePruneChangeKey = LiteralStringRef("\xff\x02/bgpChange");
 
 const uint8_t BG_FILE_TYPE_DELTA = 'D';
 const uint8_t BG_FILE_TYPE_SNAPSHOT = 'S';
 
-const Key blobGranuleFileKeyFor(UID granuleID, uint8_t fileType, Version fileVersion) {
+const Key blobGranuleFileKeyFor(UID granuleID, Version fileVersion, uint8_t fileType) {
 	ASSERT(fileType == 'D' || fileType == 'S');
 	BinaryWriter wr(AssumeVersion(ProtocolVersion::withBlobGranule()));
 	wr.serializeBytes(blobGranuleFileKeys.begin);
 	wr << granuleID;
-	wr << fileType;
 	wr << bigEndian64(fileVersion);
+	wr << fileType;
 	return wr.toValue();
 }
 
-std::tuple<UID, uint8_t, Version> decodeBlobGranuleFileKey(KeyRef const& key) {
+std::tuple<UID, Version, uint8_t> decodeBlobGranuleFileKey(KeyRef const& key) {
 	UID granuleID;
-	uint8_t fileType;
 	Version fileVersion;
+	uint8_t fileType;
 	BinaryReader reader(key.removePrefix(blobGranuleFileKeys.begin), AssumeVersion(ProtocolVersion::withBlobGranule()));
 	reader >> granuleID;
-	reader >> fileType;
 	reader >> fileVersion;
+	reader >> fileType;
 	ASSERT(fileType == 'D' || fileType == 'S');
-	return std::tuple(granuleID, fileType, bigEndian64(fileVersion));
+	return std::tuple(granuleID, bigEndian64(fileVersion), fileType);
 }
 
 const KeyRange blobGranuleFileKeyRangeFor(UID granuleID) {
@@ -1204,6 +1207,25 @@ std::tuple<Standalone<StringRef>, int64_t, int64_t> decodeBlobGranuleFileValue(V
 	reader >> offset;
 	reader >> length;
 	return std::tuple(filename, offset, length);
+}
+
+const Value blobGranulePruneValueFor(Version version, KeyRange range, bool force) {
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBlobGranule()));
+	wr << version;
+	wr << range;
+	wr << force;
+	return wr.toValue();
+}
+
+std::tuple<Version, KeyRange, bool> decodeBlobGranulePruneValue(ValueRef const& value) {
+	Version version;
+	KeyRange range;
+	bool force;
+	BinaryReader reader(value, IncludeVersion());
+	reader >> version;
+	reader >> range;
+	reader >> force;
+	return std::tuple(version, range, force);
 }
 
 const Value blobGranuleMappingValueFor(UID const& workerID) {
@@ -1284,7 +1306,8 @@ std::pair<BlobGranuleSplitState, Version> decodeBlobGranuleSplitValue(const Valu
 	BinaryReader reader(value, IncludeVersion());
 	reader >> st;
 	reader >> v;
-	return std::pair(st, v);
+
+	return std::pair(st, bigEndian64(v));
 }
 
 const Key blobGranuleHistoryKeyFor(KeyRangeRef const& range, Version version) {

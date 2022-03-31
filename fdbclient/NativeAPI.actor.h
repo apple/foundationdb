@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -237,7 +237,6 @@ struct Watch : public ReferenceCounted<Watch>, NonCopyable {
 
 struct TransactionState : ReferenceCounted<TransactionState> {
 	Database cx;
-	Optional<TenantName> tenant;
 	int64_t tenantId = TenantInfo::INVALID_TENANT;
 	Reference<TransactionLogInfo> trLogInfo;
 	TransactionOptions options;
@@ -260,7 +259,7 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	std::shared_ptr<CoalescedKeyRangeMap<Value>> conflictingKeys;
 
 	// Only available so that Transaction can have a default constructor, for use in state variables
-	TransactionState(TaskPriority taskID, SpanID spanID) : taskID(taskID), spanID(spanID) {}
+	TransactionState(TaskPriority taskID, SpanID spanID) : taskID(taskID), spanID(spanID), tenantSet(false) {}
 
 	// VERSION_VECTOR changed default values of readVersionObtainedFromGrvProxy
 	TransactionState(Database cx,
@@ -270,7 +269,14 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	                 Reference<TransactionLogInfo> trLogInfo);
 
 	Reference<TransactionState> cloneAndReset(Reference<TransactionLogInfo> newTrLogInfo, bool generateNewSpan) const;
-	TenantInfo getTenantInfo() const;
+	TenantInfo getTenantInfo();
+
+	Optional<TenantName> const& tenant();
+	bool hasTenant() const;
+
+private:
+	Optional<TenantName> tenant_;
+	bool tenantSet;
 };
 
 class Transaction : NonCopyable {
@@ -452,7 +458,7 @@ public:
 		return Standalone<VectorRef<KeyRangeRef>>(tr.transaction.write_conflict_ranges, tr.arena);
 	}
 
-	Optional<TenantName> getTenant() { return trState->tenant; }
+	Optional<TenantName> getTenant() { return trState->tenant(); }
 
 	Reference<TransactionState> trState;
 	std::vector<Reference<Watch>> watches;
