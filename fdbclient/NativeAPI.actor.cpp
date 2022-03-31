@@ -226,10 +226,10 @@ void DatabaseContext::getLatestCommitVersions(const Reference<LocationInfo>& loc
 	}
 
 	if (ssVersionVectorCache.getMaxVersion() != invalidVersion && readVersion > ssVersionVectorCache.getMaxVersion()) {
-		TraceEvent(SevError, "GetLatestCommitVersions")
+		TraceEvent(SevDebug, "GetLatestCommitVersions")
 		    .detail("ReadVersion", readVersion)
 		    .detail("VersionVector", ssVersionVectorCache.toString());
-		ASSERT(false);
+		throw stale_version_vector(); // TODO: investigate why
 	}
 
 	std::map<Version, std::set<Tag>> versionMap; // order the versions to be returned
