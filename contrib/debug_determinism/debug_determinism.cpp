@@ -40,11 +40,11 @@ extern "C" void __sanitizer_cov_trace_pc_guard(uint32_t* guard) {
 	if (!guard) {
 		return;
 	}
-	fwrite(guard, 1, sizeof(*guard), out);
+	fwrite(guard, sizeof(*guard), 1, out);
 	if (in) {
 		uint32_t theirs;
-		fread(&theirs, 1, sizeof(theirs), in);
-		if (*guard != theirs) {
+		auto read = fread(&theirs, sizeof(theirs), 1, in);
+		if (read != 1 || *guard != theirs) {
 			printf("Non-determinism detected\n");
 			loop_forever();
 		}

@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,7 +36,11 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	typedef struct FDB_result FDBResult;
 	typedef struct FDB_cluster FDBCluster;
 	typedef struct FDB_database FDBDatabase;
+	typedef struct FDB_tenant FDBTenant;
 	typedef struct FDB_transaction FDBTransaction;
+
+	typedef int fdb_error_t;
+	typedef int fdb_bool_t;
 
 #pragma pack(push, 4)
 	typedef struct key {
@@ -49,6 +53,35 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 		const void* value;
 		int valueLength;
 	} FDBKeyValue;
+
+#pragma pack(pop)
+
+	/* Memory layout of KeySelectorRef. */
+	typedef struct keyselector {
+		FDBKey key;
+		/* orEqual and offset have not be tested in C binding. Just a placeholder. */
+		fdb_bool_t orEqual;
+		int offset;
+	} FDBKeySelector;
+
+	/* Memory layout of GetRangeReqAndResultRef. */
+	typedef struct getrangereqandresult {
+		FDBKeySelector begin;
+		FDBKeySelector end;
+		FDBKeyValue* data;
+		int m_size, m_capacity;
+	} FDBGetRangeReqAndResult;
+
+	typedef struct mappedkeyvalue {
+		FDBKey key;
+		FDBKey value;
+		/* It's complicated to map a std::variant to C. For now we assume the underlying requests are always getRange
+		 * and take the shortcut. */
+		FDBGetRangeReqAndResult getRange;
+		unsigned char buffer[32];
+	} FDBMappedKeyValue;
+
+#pragma pack(push, 4)
 	typedef struct keyrange {
 		const void* beginKey;
 		int beginKeyLength;
@@ -57,16 +90,17 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	} FDBKeyRange;
 #pragma pack(pop)
 
-	typedef int fdb_error_t;
-	typedef int fdb_bool_t;
-
 	typedef struct readgranulecontext {
 		// User context to pass along to functions
 		void* userContext;
 
 		// Returns a unique id for the load. Asynchronous to support queueing multiple in parallel.
-		int64_t (
-		    *start_load_f)(const char* filename, int filenameLength, int64_t offset, int64_t length, void* context);
+		int64_t (*start_load_f)(const char* filename,
+		                        int filenameLength,
+		                        int64_t offset,
+		                        int64_t length,
+		                        int64_t fullFileLength,
+		                        void* context);
 
 		// Returns data for the load. Pass the loadId returned by start_load_f
 		uint8_t* (*get_load_f)(int64_t loadId, void* context);
@@ -77,6 +111,9 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 		// set this to true for testing if you don't want to read the granule files, just
 		// do the request to the blob workers
 		fdb_bool_t debugNoMaterialize;
+
+		// number of granules to load in parallel (default 1)
+		int granuleParallelism;
 	} FDBReadBlobGranuleContext;
 
 	typedef void (*FDBCallback)(FDBFuture* future, void* callback_parameter);
@@ -91,6 +128,10 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	fdb_error_t (*createDatabase)(const char* clusterFilePath, FDBDatabase** db);
 
 	// Database
+	fdb_error_t (*databaseOpenTenant)(FDBDatabase* database,
+	                                  uint8_t const* tenantName,
+	                                  int tenantNameLength,
+	                                  FDBTenant** outTenant);
 	fdb_error_t (*databaseCreateTransaction)(FDBDatabase* database, FDBTransaction** tr);
 	fdb_error_t (*databaseSetOption)(FDBDatabase* database,
 	                                 FDBDatabaseOption option,
@@ -110,6 +151,10 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                     int snapshotCommandLength);
 	double (*databaseGetMainThreadBusyness)(FDBDatabase* database);
 	FDBFuture* (*databaseGetServerProtocol)(FDBDatabase* database, uint64_t expectedVersion);
+
+	// Tenant
+	fdb_error_t (*tenantCreateTransaction)(FDBTenant* tenant, FDBTransaction** outTransaction);
+	void (*tenantDestroy)(FDBTenant* tenant);
 
 	// Transaction
 	fdb_error_t (*transactionSetOption)(FDBTransaction* tr,
@@ -144,23 +189,23 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                  int iteration,
 	                                  fdb_bool_t snapshot,
 	                                  fdb_bool_t reverse);
-	FDBFuture* (*transactionGetRangeAndFlatMap)(FDBTransaction* tr,
-	                                            uint8_t const* beginKeyName,
-	                                            int beginKeyNameLength,
-	                                            fdb_bool_t beginOrEqual,
-	                                            int beginOffset,
-	                                            uint8_t const* endKeyName,
-	                                            int endKeyNameLength,
-	                                            fdb_bool_t endOrEqual,
-	                                            int endOffset,
-	                                            uint8_t const* mapper_name,
-	                                            int mapper_name_length,
-	                                            int limit,
-	                                            int targetBytes,
-	                                            FDBStreamingMode mode,
-	                                            int iteration,
-	                                            fdb_bool_t snapshot,
-	                                            fdb_bool_t reverse);
+	FDBFuture* (*transactionGetMappedRange)(FDBTransaction* tr,
+	                                        uint8_t const* beginKeyName,
+	                                        int beginKeyNameLength,
+	                                        fdb_bool_t beginOrEqual,
+	                                        int beginOffset,
+	                                        uint8_t const* endKeyName,
+	                                        int endKeyNameLength,
+	                                        fdb_bool_t endOrEqual,
+	                                        int endOffset,
+	                                        uint8_t const* mapper_name,
+	                                        int mapper_name_length,
+	                                        int limit,
+	                                        int targetBytes,
+	                                        FDBStreamingMode mode,
+	                                        int iteration,
+	                                        fdb_bool_t snapshot,
+	                                        fdb_bool_t reverse);
 	FDBFuture* (*transactionGetVersionstamp)(FDBTransaction* tr);
 
 	void (*transactionSet)(FDBTransaction* tr,
@@ -236,6 +281,10 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	fdb_error_t (*futureGetKeyRangeArray)(FDBFuture* f, const FDBKeyRange** out_keyranges, int* outCount);
 	fdb_error_t (*futureGetKeyArray)(FDBFuture* f, FDBKey const** outKeys, int* outCount);
 	fdb_error_t (*futureGetKeyValueArray)(FDBFuture* f, FDBKeyValue const** outKV, int* outCount, fdb_bool_t* outMore);
+	fdb_error_t (*futureGetMappedKeyValueArray)(FDBFuture* f,
+	                                            FDBMappedKeyValue const** outKVM,
+	                                            int* outCount,
+	                                            fdb_bool_t* outMore);
 	fdb_error_t (*futureSetCallback)(FDBFuture* f, FDBCallback callback, void* callback_parameter);
 	void (*futureCancel)(FDBFuture* f);
 	void (*futureDestroy)(FDBFuture* f);
@@ -281,12 +330,12 @@ public:
 	                                   GetRangeLimits limits,
 	                                   bool snapshot = false,
 	                                   bool reverse = false) override;
-	ThreadFuture<RangeResult> getRangeAndFlatMap(const KeySelectorRef& begin,
-	                                             const KeySelectorRef& end,
-	                                             const StringRef& mapper,
-	                                             GetRangeLimits limits,
-	                                             bool snapshot,
-	                                             bool reverse) override;
+	ThreadFuture<MappedRangeResult> getMappedRange(const KeySelectorRef& begin,
+	                                               const KeySelectorRef& end,
+	                                               const StringRef& mapper,
+	                                               GetRangeLimits limits,
+	                                               bool snapshot,
+	                                               bool reverse) override;
 	ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key) override;
 	ThreadFuture<Standalone<StringRef>> getVersionstamp() override;
 	ThreadFuture<int64_t> getEstimatedRangeSizeBytes(const KeyRangeRef& keys) override;
@@ -320,12 +369,36 @@ public:
 	ThreadFuture<Void> onError(Error const& e) override;
 	void reset() override;
 
+	Optional<TenantName> getTenant() override {
+		ASSERT(false);
+		throw internal_error();
+	}
+
 	void addref() override { ThreadSafeReferenceCounted<DLTransaction>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<DLTransaction>::delref(); }
 
 private:
 	const Reference<FdbCApi> api;
 	FdbCApi::FDBTransaction* const tr;
+};
+
+class DLTenant : public ITenant, ThreadSafeReferenceCounted<DLTenant> {
+public:
+	DLTenant(Reference<FdbCApi> api, FdbCApi::FDBTenant* tenant) : api(api), tenant(tenant) {}
+	~DLTenant() override {
+		if (tenant) {
+			api->tenantDestroy(tenant);
+		}
+	}
+
+	Reference<ITransaction> createTransaction() override;
+
+	void addref() override { ThreadSafeReferenceCounted<DLTenant>::addref(); }
+	void delref() override { ThreadSafeReferenceCounted<DLTenant>::delref(); }
+
+private:
+	const Reference<FdbCApi> api;
+	FdbCApi::FDBTenant* tenant;
 };
 
 // An implementation of IDatabase that wraps a database object created on an externally loaded client library.
@@ -342,6 +415,7 @@ public:
 
 	ThreadFuture<Void> onReady();
 
+	Reference<ITenant> openTenant(TenantNameRef tenantName) override;
 	Reference<ITransaction> createTransaction() override;
 	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
 	double getMainThreadBusyness() override;
@@ -399,6 +473,7 @@ private:
 };
 
 class MultiVersionDatabase;
+class MultiVersionTenant;
 
 // An implementation of ITransaction that wraps a transaction created either locally or through a dynamically loaded
 // external client. When needed (e.g on cluster version change), the MultiVersionTransaction can automatically replace
@@ -406,6 +481,7 @@ class MultiVersionDatabase;
 class MultiVersionTransaction : public ITransaction, ThreadSafeReferenceCounted<MultiVersionTransaction> {
 public:
 	MultiVersionTransaction(Reference<MultiVersionDatabase> db,
+	                        Optional<Reference<MultiVersionTenant>> tenant,
 	                        UniqueOrderedOptionList<FDBTransactionOptions> defaultOptions);
 
 	~MultiVersionTransaction() override;
@@ -434,12 +510,12 @@ public:
 	                                   GetRangeLimits limits,
 	                                   bool snapshot = false,
 	                                   bool reverse = false) override;
-	ThreadFuture<RangeResult> getRangeAndFlatMap(const KeySelectorRef& begin,
-	                                             const KeySelectorRef& end,
-	                                             const StringRef& mapper,
-	                                             GetRangeLimits limits,
-	                                             bool snapshot,
-	                                             bool reverse) override;
+	ThreadFuture<MappedRangeResult> getMappedRange(const KeySelectorRef& begin,
+	                                               const KeySelectorRef& end,
+	                                               const StringRef& mapper,
+	                                               GetRangeLimits limits,
+	                                               bool snapshot,
+	                                               bool reverse) override;
 	ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key) override;
 	ThreadFuture<Standalone<StringRef>> getVersionstamp() override;
 
@@ -474,6 +550,8 @@ public:
 	ThreadFuture<Void> onError(Error const& e) override;
 	void reset() override;
 
+	Optional<TenantName> getTenant() override;
+
 	void addref() override { ThreadSafeReferenceCounted<MultiVersionTransaction>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<MultiVersionTransaction>::delref(); }
 
@@ -482,6 +560,7 @@ public:
 
 private:
 	const Reference<MultiVersionDatabase> db;
+	const Optional<Reference<MultiVersionTenant>> tenant;
 	ThreadSpinLock lock;
 
 	struct TransactionInfo {
@@ -522,6 +601,8 @@ private:
 	void setDefaultOptions(UniqueOrderedOptionList<FDBTransactionOptions> options);
 
 	std::vector<std::pair<FDBTransactionOptions::Option, Optional<Standalone<StringRef>>>> persistentOptions;
+
+	const Optional<TenantName> tenantName;
 };
 
 struct ClientDesc {
@@ -552,6 +633,33 @@ struct ClientInfo : ClientDesc, ThreadSafeReferenceCounted<ClientInfo> {
 
 class MultiVersionApi;
 
+// An implementation of ITenant that wraps a tenant created either locally or through a dynamically loaded
+// external client. The wrapped ITenant is automatically changed when the MultiVersionDatabase used to create
+// it connects with a different version.
+class MultiVersionTenant final : public ITenant, ThreadSafeReferenceCounted<MultiVersionTenant> {
+public:
+	MultiVersionTenant(Reference<MultiVersionDatabase> db, StringRef tenantName);
+	~MultiVersionTenant() override;
+
+	Reference<ITransaction> createTransaction() override;
+
+	void addref() override { ThreadSafeReferenceCounted<MultiVersionTenant>::addref(); }
+	void delref() override { ThreadSafeReferenceCounted<MultiVersionTenant>::delref(); }
+
+	Reference<ThreadSafeAsyncVar<Reference<ITenant>>> tenantVar;
+	const Standalone<StringRef> tenantName;
+
+private:
+	Reference<MultiVersionDatabase> db;
+
+	Mutex tenantLock;
+	ThreadFuture<Void> tenantUpdater;
+
+	// Creates a new underlying tenant object whenever the database connection changes. This change is signaled
+	// to open transactions via an AsyncVar.
+	void updateTenant();
+};
+
 // An implementation of IDatabase that wraps a database created either locally or through a dynamically loaded
 // external client. The MultiVersionDatabase monitors the protocol version of the cluster and automatically
 // replaces the wrapped database when the protocol version changes.
@@ -566,6 +674,7 @@ public:
 
 	~MultiVersionDatabase() override;
 
+	Reference<ITenant> openTenant(TenantNameRef tenantName) override;
 	Reference<ITransaction> createTransaction() override;
 	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
 	double getMainThreadBusyness() override;

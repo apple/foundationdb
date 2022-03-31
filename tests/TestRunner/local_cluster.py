@@ -136,5 +136,5 @@ logdir = {logdir}
 
     def create_database(self, storage='ssd'):
         args = [self.fdbcli_binary, '-C', self.etc.joinpath('fdb.cluster'), '--exec',
-                'configure new single {}'.format(storage)]
+                'configure new single {} tenant_mode=optional_experimental'.format(storage)]
         subprocess.run(args)

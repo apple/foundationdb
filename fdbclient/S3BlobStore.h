@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -59,7 +59,7 @@ public:
 		    delete_requests_per_second, multipart_max_part_size, multipart_min_part_size, concurrent_requests,
 		    concurrent_uploads, concurrent_lists, concurrent_reads_per_file, concurrent_writes_per_file,
 		    read_block_size, read_ahead_blocks, read_cache_blocks_per_file, max_send_bytes_per_second,
-		    max_recv_bytes_per_second;
+		    max_recv_bytes_per_second, sdk_auth;
 		bool set(StringRef name, int value);
 		std::string getURLParameters() const;
 		static std::vector<std::string> getKnobDescriptions() {
@@ -68,7 +68,7 @@ public:
 				"connect_tries (or ct)                 Number of times to try to connect for each request.",
 				"connect_timeout (or cto)              Number of seconds to wait for a connect request to succeed.",
 				"max_connection_life (or mcl)          Maximum number of seconds to use a single TCP connection.",
-				"request_tries (or rt)                 Number of times to try each request until a parseable HTTP "
+				"request_tries (or rt)                 Number of times to try each request until a parsable HTTP "
 				"response other than 429 is received.",
 				"request_timeout_min (or rtom)         Number of seconds to wait for a request to succeed after a "
 				"connection is established.",
@@ -91,17 +91,23 @@ public:
 				"read_cache_blocks_per_file (or rcb)   Size of the read cache for a file in blocks.",
 				"max_send_bytes_per_second (or sbps)   Max send bytes per second for all requests combined.",
 				"max_recv_bytes_per_second (or rbps)   Max receive bytes per second for all requests combined (NOT YET "
-				"USED)."
+				"USED).",
+				"sdk_auth (or sa)                      Use AWS SDK to resolve credentials. Only valid if "
+				"BUILD_AWS_BACKUP is enabled."
 			};
 		}
 	};
 
 	S3BlobStoreEndpoint(std::string const& host,
-	                    std::string service,
+	                    std::string const& service,
+	                    Optional<std::string> const& proxyHost,
+	                    Optional<std::string> const& proxyPort,
 	                    Optional<Credentials> const& creds,
 	                    BlobKnobs const& knobs = BlobKnobs(),
 	                    HTTP::Headers extraHeaders = HTTP::Headers())
-	  : host(host), service(service), credentials(creds), lookupKey(creds.present() && creds.get().key.empty()),
+	  : host(host), service(service), proxyHost(proxyHost), proxyPort(proxyPort),
+	    useProxy(proxyHost.present() && proxyPort.present()), credentials(creds),
+	    lookupKey(creds.present() && creds.get().key.empty()),
 	    lookupSecret(creds.present() && creds.get().secret.empty()), knobs(knobs), extraHeaders(extraHeaders),
 	    requestRate(new SpeedLimit(knobs.requests_per_second, 1)),
 	    requestRateList(new SpeedLimit(knobs.list_requests_per_second, 1)),
@@ -112,7 +118,7 @@ public:
 	    recvRate(new SpeedLimit(knobs.max_recv_bytes_per_second, 1)), concurrentRequests(knobs.concurrent_requests),
 	    concurrentUploads(knobs.concurrent_uploads), concurrentLists(knobs.concurrent_lists) {
 
-		if (host.empty())
+		if (host.empty() || (proxyHost.present() != proxyPort.present()))
 			throw connection_string_invalid();
 	}
 
@@ -130,10 +136,11 @@ public:
 	// Parse url and return a S3BlobStoreEndpoint
 	// If the url has parameters that S3BlobStoreEndpoint can't consume then an error will be thrown unless
 	// ignored_parameters is given in which case the unconsumed parameters will be added to it.
-	static Reference<S3BlobStoreEndpoint> fromString(std::string const& url,
-	                                                 std::string* resourceFromURL = nullptr,
-	                                                 std::string* error = nullptr,
-	                                                 ParametersT* ignored_parameters = nullptr);
+	static Reference<S3BlobStoreEndpoint> fromString(const std::string& url,
+	                                                 const Optional<std::string>& proxy,
+	                                                 std::string* resourceFromURL,
+	                                                 std::string* error,
+	                                                 ParametersT* ignored_parameters);
 
 	// Get a normalized version of this URL with the given resource and any non-default BlobKnob values as URL
 	// parameters in addition to the passed params string
@@ -149,6 +156,10 @@ public:
 
 	std::string host;
 	std::string service;
+	Optional<std::string> proxyHost;
+	Optional<std::string> proxyPort;
+	bool useProxy;
+
 	Optional<Credentials> credentials;
 	bool lookupKey;
 	bool lookupSecret;

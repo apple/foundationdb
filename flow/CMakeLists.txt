@@ -8,6 +8,8 @@ set(FLOW_SRCS
   ArgParseUtil.h
   AsioReactor.h
   BooleanParam.h
+  BlobCipher.h
+  BlobCipher.cpp
   CompressedInt.actor.cpp
   CompressedInt.h
   Deque.cpp
@@ -100,7 +102,7 @@ set(FLOW_SRCS
   xxhash.c
   xxhash.h)
 
-if(WITH_TLS AND NOT WIN32)
+if(WITH_TLS)
   set(FLOW_SRCS
     ${FLOW_SRCS}
     StreamCipher.cpp)

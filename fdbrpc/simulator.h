@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -37,12 +37,6 @@ enum ClogMode { ClogDefault, ClogAll, ClogSend, ClogReceive };
 
 class ISimulator : public INetwork {
 public:
-	ISimulator()
-	  : desiredCoordinators(1), physicalDatacenters(1), processesPerMachine(0), listenersPerProcess(1),
-	    extraDB(nullptr), usableRegions(1), allowLogSetKills(true), tssMode(TSSMode::Disabled), isStopped(false),
-	    lastConnectionFailure(0), connectionFailuresDisableDuration(0), speedUpSimulation(false),
-	    backupAgents(BackupAgentType::WaitForType), drAgents(BackupAgentType::WaitForType), allSwapsDisabled(false) {}
-
 	// Order matters!
 	enum KillType {
 		KillInstantly,
@@ -393,7 +387,7 @@ public:
 	int listenersPerProcess;
 	std::set<NetworkAddress> protectedAddresses;
 	std::map<NetworkAddress, ProcessInfo*> currentlyRebootingProcesses;
-	class ClusterConnectionString* extraDB;
+	std::unique_ptr<class ClusterConnectionString> extraDB;
 	Reference<IReplicationPolicy> storagePolicy;
 	Reference<IReplicationPolicy> tLogPolicy;
 	int32_t tLogWriteAntiQuorum;
@@ -427,6 +421,7 @@ public:
 	bool speedUpSimulation;
 	BackupAgentType backupAgents;
 	BackupAgentType drAgents;
+	bool restarted = false;
 
 	bool hasDiffProtocolProcess; // true if simulator is testing a process with a different version
 	bool setDiffProtocol; // true if a process with a different protocol version has been started
@@ -454,6 +449,9 @@ public:
 			return iter->second;
 		return false;
 	}
+
+	ISimulator();
+	virtual ~ISimulator();
 
 protected:
 	Mutex mutex;

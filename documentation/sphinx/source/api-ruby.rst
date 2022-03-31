@@ -5,6 +5,7 @@
 .. |database-type| replace:: ``Database``
 .. |database-class| replace:: :class:`Database`
 .. |database-auto| replace:: :meth:`Database.transact`
+.. |tenant-type| replace:: FIXME
 .. |transaction-class| replace:: :class:`Transaction`
 .. |get-key-func| replace:: :meth:`Transaction.get_key`
 .. |get-range-func| replace:: :meth:`Transaction.get_range`

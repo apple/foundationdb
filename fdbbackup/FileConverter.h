@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2019 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -46,6 +46,7 @@ enum {
 	OPT_HEX_KEY_PREFIX,
 	OPT_BEGIN_VERSION_FILTER,
 	OPT_END_VERSION_FILTER,
+	OPT_KNOB,
 	OPT_HELP
 };
 
@@ -72,6 +73,7 @@ CSimpleOpt::SOption gConverterOptions[] = { { OPT_CONTAINER, "-r", SO_REQ_SEP },
 	                                        { OPT_HEX_KEY_PREFIX, "--hex-prefix", SO_REQ_SEP },
 	                                        { OPT_BEGIN_VERSION_FILTER, "--begin-version-filter", SO_REQ_SEP },
 	                                        { OPT_END_VERSION_FILTER, "--end-version-filter", SO_REQ_SEP },
+	                                        { OPT_KNOB, "--knob-", SO_REQ_SEP },
 	                                        { OPT_HELP, "-?", SO_NONE },
 	                                        { OPT_HELP, "-h", SO_NONE },
 	                                        { OPT_HELP, "--help", SO_NONE },

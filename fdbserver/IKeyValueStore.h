@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,6 +24,22 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/Knobs.h"
+#include "fdbclient/StorageCheckpoint.h"
+
+struct CheckpointRequest {
+	const Version version; // The FDB version at which the checkpoint is created.
+	const KeyRange range; // Keyrange this checkpoint must contain.
+	const CheckpointFormat format;
+	const UID checkpointID;
+	const std::string checkpointDir; // The local directory where the checkpoint file will be created.
+
+	CheckpointRequest(const Version version,
+	                  const KeyRange& range,
+	                  const CheckpointFormat format,
+	                  const UID& id,
+	                  const std::string& checkpointDir)
+	  : version(version), range(range), format(format), checkpointID(id), checkpointDir(checkpointDir) {}
+};
 
 class IClosable {
 public:
@@ -46,6 +62,7 @@ public:
 	virtual KeyValueStoreType getType() const = 0;
 	virtual void set(KeyValueRef keyValue, const Arena* arena = nullptr) = 0;
 	virtual void clear(KeyRangeRef range, const Arena* arena = nullptr) = 0;
+	virtual Future<Void> canCommit() { return Void(); }
 	virtual Future<Void> commit(
 	    bool sequential = false) = 0; // returns when prior sets and clears are (atomically) durable
 
@@ -85,6 +102,15 @@ public:
 	virtual void resyncLog() {}
 
 	virtual void enableSnapshot() {}
+
+	// Create a checkpoint.
+	virtual Future<CheckpointMetaData> checkpoint(const CheckpointRequest& request) { throw not_implemented(); }
+
+	// Restore from a checkpoint.
+	virtual Future<Void> restore(const std::vector<CheckpointMetaData>& checkpoints) { throw not_implemented(); }
+
+	// Delete a checkpoint.
+	virtual Future<Void> deleteCheckpoint(const CheckpointMetaData& checkpoint) { throw not_implemented(); }
 
 	/*
 	Concurrency contract

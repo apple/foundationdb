@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -249,6 +249,10 @@ struct DatabaseConfiguration {
 
 	// Storage Migration Type
 	StorageMigrationType storageMigrationType;
+
+	// Blob Granules
+	bool blobGranulesEnabled;
+	TenantMode tenantMode;
 
 	// Excluded servers (no state should be here)
 	bool isExcludedServer(NetworkAddressList) const;

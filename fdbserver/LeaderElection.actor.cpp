@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,28 +25,56 @@
 #include "fdbclient/MonitorLeader.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+// Keep trying to become a leader by submitting itself to all coordinators.
+// Monitor the health of all coordinators at the same time.
+// Note: for coordinators whose NetworkAddress is parsed out of a hostname, a connection failure will cause this actor
+// to throw `coordinators_changed()` error
 ACTOR Future<Void> submitCandidacy(Key key,
                                    LeaderElectionRegInterface coord,
                                    LeaderInfo myInfo,
                                    UID prevChangeID,
-                                   Reference<AsyncVar<std::vector<Optional<LeaderInfo>>>> nominees,
-                                   int index) {
+                                   AsyncTrigger* nomineeChange,
+                                   Optional<LeaderInfo>* nominee,
+                                   Optional<Hostname> hostname = Optional<Hostname>()) {
 	loop {
-		auto const& nom = nominees->get()[index];
-		Optional<LeaderInfo> li = wait(
-		    retryBrokenPromise(coord.candidacy,
-		                       CandidacyRequest(key, myInfo, nom.present() ? nom.get().changeID : UID(), prevChangeID),
-		                       TaskPriority::CoordinationReply));
+		state Optional<LeaderInfo> li;
 
-		if (li != nominees->get()[index]) {
-			std::vector<Optional<LeaderInfo>> v = nominees->get();
-			v[index] = li;
-			nominees->set(v);
+		if (coord.candidacy.getEndpoint().getPrimaryAddress().fromHostname) {
+			state ErrorOr<Optional<LeaderInfo>> rep = wait(coord.candidacy.tryGetReply(
+			    CandidacyRequest(key, myInfo, nominee->present() ? nominee->get().changeID : UID(), prevChangeID),
+			    TaskPriority::CoordinationReply));
+			if (rep.isError()) {
+				// Connecting to nominee failed, most likely due to connection failed.
+				TraceEvent("SubmitCandadicyError")
+				    .error(rep.getError())
+				    .detail("Hostname", hostname.present() ? hostname.get().toString() : "UnknownHostname")
+				    .detail("OldAddr", coord.candidacy.getEndpoint().getPrimaryAddress().toString());
+				if (rep.getError().code() == error_code_request_maybe_delivered) {
+					// Delay to prevent tight resolving loop due to outdated DNS cache
+					wait(delay(CLIENT_KNOBS->COORDINATOR_HOSTNAME_RESOLVE_DELAY));
+					throw coordinators_changed();
+				} else {
+					throw rep.getError();
+				}
+			} else if (rep.present()) {
+				li = rep.get();
+			}
+		} else {
+			Optional<LeaderInfo> tmp = wait(retryBrokenPromise(
+			    coord.candidacy,
+			    CandidacyRequest(key, myInfo, nominee->present() ? nominee->get().changeID : UID(), prevChangeID),
+			    TaskPriority::CoordinationReply));
+			li = tmp;
+		}
+
+		wait(Future<Void>(Void())); // Make sure we weren't cancelled
+
+		if (li != *nominee) {
+			*nominee = li;
+			nomineeChange->trigger();
 
 			if (li.present() && li.get().forward)
 				wait(Future<Void>(Never()));
-
-			wait(Future<Void>(Void())); // Make sure we weren't cancelled
 		}
 	}
 }
@@ -84,13 +112,14 @@ ACTOR Future<Void> changeLeaderCoordinators(ServerCoordinators coordinators, Val
 	return Void();
 }
 
-ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
+ACTOR Future<Void> tryBecomeLeaderInternal(Reference<IClusterConnectionRecord> connRecord,
                                            Value proposedSerializedInterface,
                                            Reference<AsyncVar<Value>> outSerializedLeader,
                                            bool hasConnected,
                                            Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo) {
-	state Reference<AsyncVar<std::vector<Optional<LeaderInfo>>>> nominees(
-	    new AsyncVar<std::vector<Optional<LeaderInfo>>>());
+	state ServerCoordinators coordinators(connRecord);
+	state AsyncTrigger nomineeChange;
+	state std::vector<Optional<LeaderInfo>> nominees;
 	state LeaderInfo myInfo;
 	state Future<Void> candidacies;
 	state bool iAmLeader = false;
@@ -105,8 +134,6 @@ ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
 		wait(delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY));
 	}
 
-	nominees->set(std::vector<Optional<LeaderInfo>>(coordinators.clientLeaderServers.size()));
-
 	myInfo.serializedInfo = proposedSerializedInterface;
 	outSerializedLeader->set(Value());
 
@@ -114,6 +141,9 @@ ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
 	    (SERVER_KNOBS->BUGGIFY_ALL_COORDINATION || BUGGIFY) ? buggifyDelayedAsyncVar(outSerializedLeader) : Void();
 
 	while (!iAmLeader) {
+		wait(connRecord->resolveHostnames());
+		coordinators = ServerCoordinators(connRecord);
+		nominees.resize(coordinators.leaderElectionServers.size());
 		state Future<Void> badCandidateTimeout;
 
 		myInfo.changeID = deterministicRandom()->randomUniqueID();
@@ -122,13 +152,25 @@ ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
 
 		std::vector<Future<Void>> cand;
 		cand.reserve(coordinators.leaderElectionServers.size());
-		for (int i = 0; i < coordinators.leaderElectionServers.size(); i++)
-			cand.push_back(submitCandidacy(
-			    coordinators.clusterKey, coordinators.leaderElectionServers[i], myInfo, prevChangeID, nominees, i));
+		for (int i = 0; i < coordinators.leaderElectionServers.size(); i++) {
+			Optional<Hostname> hostname;
+			auto r = connRecord->getConnectionString().networkAddressToHostname.find(
+			    coordinators.leaderElectionServers[i].candidacy.getEndpoint().getPrimaryAddress());
+			if (r != connRecord->getConnectionString().networkAddressToHostname.end()) {
+				hostname = r->second;
+			}
+			cand.push_back(submitCandidacy(coordinators.clusterKey,
+			                               coordinators.leaderElectionServers[i],
+			                               myInfo,
+			                               prevChangeID,
+			                               &nomineeChange,
+			                               &nominees[i],
+			                               hostname));
+		}
 		candidacies = waitForAll(cand);
 
 		loop {
-			state Optional<std::pair<LeaderInfo, bool>> leader = getLeader(nominees->get());
+			state Optional<std::pair<LeaderInfo, bool>> leader = getLeader(nominees);
 			if (leader.present() && leader.get().first.forward) {
 				// These coordinators are forwarded to another set.  But before we change our own cluster file, we need
 				// to make sure that a majority of coordinators know that. SOMEDAY: Wait briefly to see if other
@@ -172,22 +214,30 @@ ACTOR Future<Void> tryBecomeLeaderInternal(ServerCoordinators coordinators,
 			// If more than 2*SERVER_KNOBS->POLLING_FREQUENCY elapses while we are nominated by some coordinator but
 			// there is no leader, we might be breaking the leader election process for someone with better
 			// communications but lower ID, so change IDs.
-			if ((!leader.present() || !leader.get().second) &&
-			    std::count(nominees->get().begin(), nominees->get().end(), myInfo)) {
+			if ((!leader.present() || !leader.get().second) && std::count(nominees.begin(), nominees.end(), myInfo)) {
 				if (!badCandidateTimeout.isValid())
 					badCandidateTimeout = delay(SERVER_KNOBS->POLLING_FREQUENCY * 2, TaskPriority::CoordinationReply);
 			} else
 				badCandidateTimeout = Future<Void>();
 
-			choose {
-				when(wait(nominees->onChange())) {}
-				when(wait(badCandidateTimeout.isValid() ? badCandidateTimeout : Never())) {
-					TEST(true); // Bad candidate timeout
-					TraceEvent("LeaderBadCandidateTimeout", myInfo.changeID).log();
-					break;
+			try {
+				choose {
+					when(wait(nomineeChange.onTrigger())) {}
+					when(wait(badCandidateTimeout.isValid() ? badCandidateTimeout : Never())) {
+						TEST(true); // Bad candidate timeout
+						TraceEvent("LeaderBadCandidateTimeout", myInfo.changeID).log();
+						break;
+					}
+					when(wait(candidacies)) { ASSERT(false); }
+					when(wait(asyncPriorityInfo->onChange())) { break; }
 				}
-				when(wait(candidacies)) { ASSERT(false); }
-				when(wait(asyncPriorityInfo->onChange())) { break; }
+			} catch (Error& e) {
+				if (e.code() == error_code_coordinators_changed) {
+					connRecord->getConnectionString().resetToUnresolved();
+					break;
+				} else {
+					throw e;
+				}
 			}
 		}
 
