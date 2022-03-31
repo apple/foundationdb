@@ -354,10 +354,13 @@ static std::vector<std::vector<StringRef>> parseLine(std::string& line, bool& er
 			forcetoken = true;
 			break;
 		case ' ':
+		case '\n':
+		case '\t':
+		case '\r':
 			if (!quoted) {
 				if (i > offset || (forcetoken && i == offset))
 					buf.push_back(StringRef((uint8_t*)(line.data() + offset), i - offset));
-				offset = i = line.find_first_not_of(' ', i);
+				offset = i = line.find_first_not_of(" \n\t\r", i);
 				forcetoken = false;
 			} else
 				i++;
@@ -788,7 +791,7 @@ void configureGenerator(const char* text, const char* line, std::vector<std::str
 		                   "resolvers=",
 		                   "perpetual_storage_wiggle=",
 		                   "perpetual_storage_wiggle_locality=",
-		                   "storage_migration_type="
+		                   "storage_migration_type=",
 		                   "tenant_mode=",
 		                   "blob_granules_enabled=",
 		                   nullptr };
