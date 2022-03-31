@@ -2351,9 +2351,9 @@ ACTOR void setupAndRun(std::string dataFolder,
 	state Optional<TenantName> defaultTenant;
 	state TenantMode tenantMode = TenantMode::DISABLED;
 
-	if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
-		allowDefaultTenant = false;
-	}
+	// if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+	// 	allowDefaultTenant = false;
+	// }
 	if (allowDefaultTenant && deterministicRandom()->random01() < 0.5) {
 		defaultTenant = "SimulatedDefaultTenant"_sr;
 		if (deterministicRandom()->random01() < 0.9) {
@@ -2364,9 +2364,9 @@ ACTOR void setupAndRun(std::string dataFolder,
 	} else if (!allowDisablingTenants || deterministicRandom()->random01() < 0.5) {
 		tenantMode = TenantMode::OPTIONAL_TENANT;
 	}
-	if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
-		tenantMode = TenantMode::DISABLED;
-	}
+	// if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+	// 	tenantMode = TenantMode::DISABLED;
+	// }
 
 	TraceEvent("SimulatedClusterTenantMode")
 	    .detail("UsingTenant", defaultTenant)

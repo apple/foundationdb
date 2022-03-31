@@ -1384,6 +1384,13 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 								                      ddEnabledState);
 							} else {
 								self->fetchKeysComplete.insert(rd);
+								if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+									auto f = self->dataMoves.intersectingRanges(rd.keys);
+									for (auto it = f.begin(); it != f.end(); ++it) {
+										ASSERT(it->value() == rd.dataMoveID);
+									}
+									self->dataMoves.insert(rd.keys, UID());
+								}
 								break;
 							}
 						}
@@ -1409,6 +1416,26 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 				}
 			} catch (Error& e) {
 				error = e;
+			}
+
+			if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE && error.code() &&
+			    error.code() != error_code_actor_cancelled) {
+				TraceEvent("DequeueDataMove", self->distributorId)
+				    .error(error)
+				    .detail("Range", rd.keys)
+				    .detail("DataMoveID", rd.dataMoveID);
+				auto f = self->dataMoves.intersectingRanges(rd.keys);
+				std::vector<Future<Void>> actors;
+				for (auto it = f.begin(); it != f.end(); ++it) {
+					if (it->value() == rd.dataMoveID) {
+						KeyRange kr = KeyRangeRef(it->range().begin, it->range().end);
+						actors.push_back(cancelDataMove(self, kr, ddEnabledState));
+						TraceEvent("CancelDataMoveOnError", self->distributorId)
+						    .detail("Range", kr)
+						    .detail("DataMoveID", rd.dataMoveID);
+					}
+				}
+				wait(waitForAll(actors));
 			}
 
 			//TraceEvent("RelocateShardFinished", distributorId).detail("RelocateId", relocateShardInterval.pairID);
@@ -1477,7 +1504,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 
 		relocationComplete.send(rd);
 
-		if (e.code() != error_code_actor_cancelled) {
+		// if (e.code() != error_code_actor_cancelled) {
+		if (e.code() != error_code_actor_cancelled && e.code() != error_code_data_move_cancelled) {
 			if (errorOut.canBeSet()) {
 				errorOut.sendError(e);
 			}

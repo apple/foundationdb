@@ -430,24 +430,11 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 	state TraceInterval interval("RelocateShard_StartMoveKeys");
 
 	state Future<Void> warningLogger = logWarningAfter("StartMoveKeysTooLong", 600, servers);
-	// state TraceInterval waitInterval("");
 
 	wait(startMoveKeysLock->take(TaskPriority::DataDistributionLaunch));
 	state FlowLock::Releaser releaser(*startMoveKeysLock);
 	state bool loadedTssMapping = false;
 	state DataMoveMetaData dataMove;
-
-	// if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
-	// 	Optional<DataMoveMetaData> md = wait(getDataMoveMetaData(occ, dataMoveID));
-	// 	if (md.present()) {
-	// 		ASSERT(md.get().range == keys);
-	// 		TraceEvent("StartMoveKeysDataMoveExists")
-	// 		    .detail("DataMoveID", dataMoveID)
-	// 		    .detail("DataMoveMetaData", md.get().toString());
-	// 		return Void();
-	// 	}
-	// 	dataMove.id = dataMoveID;
-	// }
 
 	TraceEvent(SevDebug, interval.begin(), relocationIntervalId).detail("DataMoveID", dataMoveID);
 
@@ -503,8 +490,6 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 								    .detail("DataMoveAlreadyCommitted", dataMoveID);
 								return Void();
 							}
-							// if (dataMove.getPhase() == DataMoveMetaData::Prepare) {
-							// }
 						} else {
 							dataMove.id = dataMoveID;
 							TraceEvent(SevDebug, "StartMoveKeysNewDataMove", relocationIntervalId)
@@ -575,19 +560,19 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 						state UID destId;
 						if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
 							decodeKeyServersValue(UIDtoTagMap, old[oldIndex].value, src, dest, srcId, destId);
-							TraceEvent("StartMoveKeysProcessingShard", relocationIntervalId)
+							TraceEvent(SevDebug, "StartMoveKeysProcessingShard", relocationIntervalId)
 							    .detail("Range", rangeIntersectKeys)
 							    .detail("OldSrc", describe(src))
 							    .detail("OldDest", describe(dest))
 							    .detail("SrcID", srcId)
 							    .detail("DestID", destId)
 							    .detail("ReadVersion", tr->getReadVersion().get());
-							if (!srcId.isValid()) {
-								srcId = deterministicRandom()->randomUniqueID();
-								TraceEvent(SevWarn, "StartMoveKeysBackfillTeamId", relocationIntervalId)
-								    .detail("Range", rangeIntersectKeys)
-								    .detail("NewTeamID", srcId);
-							}
+							// if (!srcId.isValid()) {
+							// 	srcId = deterministicRandom()->randomUniqueID();
+							// 	TraceEvent(SevWarn, "StartMoveKeysBackfillTeamId", relocationIntervalId)
+							// 	    .detail("Range", rangeIntersectKeys)
+							// 	    .detail("NewTeamID", srcId);
+							// }
 						} else {
 							decodeKeyServersValue(UIDtoTagMap, old[oldIndex].value, src, dest);
 						}
@@ -610,11 +595,7 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 							    .detail("DataMoveID", dataMoveID)
 							    .detail("ExistingDataMoveID", destId)
 							    .detail("ExistingDataMove", _dataMove.toString());
-							throw data_move_cancelled();
-							// return Void();
-							// Note, When actually deleting a data move, clear only the ranges with the same dataMoveId.
-							// _dataMove.setPhase(DataMoveMetaData::Deleting);
-							// tr->set(dataMoveKeyFor(destId), dataMoveValue(_dataMove));
+							throw movekeys_conflict();
 						}
 
 						TraceEvent("StartMoveKeysOldRange", relocationIntervalId)
@@ -2231,40 +2212,36 @@ ACTOR Future<Void> moveKeys(Database cx,
 		                   dataMoveID,
 		                   &tssMapping,
 		                   ddEnabledState));
-	} catch (Error& e) {
-		state Error err = e;
-		TraceEvent("StartMoveKeysError", relocationIntervalId).errorUnsuppressed(err);
-		if (err.code() == error_code_data_move_cancelled && SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
-			wait(cleanUpDataMove(cx, dataMoveID, lock, keys, true, ddEnabledState));
+
+		state Future<Void> completionSignaller =
+		    checkFetchingState(cx, healthyDestinations, keys, dataMovementComplete, relocationIntervalId, tssMapping);
+
+		if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+			wait(finishMoveShard(cx,
+			                     keys,
+			                     dataMoveID,
+			                     destinationTeam,
+			                     lock,
+			                     finishMoveKeysParallelismLock,
+			                     hasRemote,
+			                     relocationIntervalId,
+			                     tssMapping,
+			                     ddEnabledState));
+		} else {
+			wait(finishMoveKeys(cx,
+			                    keys,
+			                    dataMoveID,
+			                    destinationTeam,
+			                    lock,
+			                    finishMoveKeysParallelismLock,
+			                    hasRemote,
+			                    relocationIntervalId,
+			                    tssMapping,
+			                    ddEnabledState));
 		}
-		throw err;
-	}
-
-	state Future<Void> completionSignaller =
-	    checkFetchingState(cx, healthyDestinations, keys, dataMovementComplete, relocationIntervalId, tssMapping);
-
-	if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
-		wait(finishMoveShard(cx,
-		                     keys,
-		                     dataMoveID,
-		                     destinationTeam,
-		                     lock,
-		                     finishMoveKeysParallelismLock,
-		                     hasRemote,
-		                     relocationIntervalId,
-		                     tssMapping,
-		                     ddEnabledState));
-	} else {
-		wait(finishMoveKeys(cx,
-		                    keys,
-		                    dataMoveID,
-		                    destinationTeam,
-		                    lock,
-		                    finishMoveKeysParallelismLock,
-		                    hasRemote,
-		                    relocationIntervalId,
-		                    tssMapping,
-		                    ddEnabledState));
+	} catch (Error& e) {
+		TraceEvent("StartMoveKeysError", relocationIntervalId).errorUnsuppressed(e);
+		throw;
 	}
 
 	// This is defensive, but make sure that we always say that the movement is complete before moveKeys completes
