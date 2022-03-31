@@ -46,57 +46,45 @@ enum limitReason_t {
 	limitReason_t_end
 };
 
-struct StorageQueueInfo {
+class StorageQueueInfo {
+	uint64_t totalWriteCosts{ 0 };
+	int totalWriteOps{ 0 };
+	Reference<EventCacheHolder> busiestWriteTagEventHolder;
+
+	// refresh periodically
+	TransactionTagMap<TransactionCommitCostEstimation> tagCostEst;
+
+public:
 	bool valid;
 	UID id;
 	LocalityData locality;
 	StorageQueuingMetricsReply lastReply;
-	StorageQueuingMetricsReply prevReply;
 	Smoother smoothDurableBytes, smoothInputBytes, verySmoothDurableBytes;
 	Smoother smoothDurableVersion, smoothLatestVersion;
 	Smoother smoothFreeSpace;
 	Smoother smoothTotalSpace;
 	limitReason_t limitReason;
+	std::vector<StorageQueuingMetricsReply::TagInfo> busiestReadTags, busiestWriteTags;
 
-	Optional<TransactionTag> busiestReadTag, busiestWriteTag;
-	double busiestReadTagFractionalBusyness = 0, busiestWriteTagFractionalBusyness = 0;
-	double busiestReadTagRate = 0, busiestWriteTagRate = 0;
-
-	Reference<EventCacheHolder> busiestWriteTagEventHolder;
-
-	// refresh periodically
-	TransactionTagMap<TransactionCommitCostEstimation> tagCostEst;
-	uint64_t totalWriteCosts = 0;
-	int totalWriteOps = 0;
-
-	StorageQueueInfo(UID id, LocalityData locality)
-	  : valid(false), id(id), locality(locality), smoothDurableBytes(SERVER_KNOBS->SMOOTHING_AMOUNT),
-	    smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
-	    smoothDurableVersion(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothLatestVersion(SERVER_KNOBS->SMOOTHING_AMOUNT),
-	    smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT),
-	    limitReason(limitReason_t::unlimited),
-	    busiestWriteTagEventHolder(makeReference<EventCacheHolder>(id.toString() + "/BusiestWriteTag")) {
-		// FIXME: this is a tacky workaround for a potential uninitialized use in trackStorageServerQueueInfo
-		lastReply.instanceID = -1;
-	}
+	StorageQueueInfo(UID id, LocalityData locality);
+	void refreshCommitCost(double elapsed);
+	int64_t getStorageQueueBytes() const { return lastReply.bytesInput - smoothDurableBytes.smoothTotal(); }
+	int64_t getDurabilityLag() const { return smoothLatestVersion.smoothTotal() - smoothDurableVersion.smoothTotal(); }
+	void update(StorageQueuingMetricsReply const&, Smoother& smoothTotalDurableBytes);
+	void addCommitCost(TransactionTagRef tagName, TransactionCommitCostEstimation const& cost);
 };
 
 struct TLogQueueInfo {
+	TLogQueuingMetricsReply lastReply;
 	bool valid;
 	UID id;
-	TLogQueuingMetricsReply lastReply;
-	TLogQueuingMetricsReply prevReply;
 	Smoother smoothDurableBytes, smoothInputBytes, verySmoothDurableBytes;
 	Smoother smoothFreeSpace;
 	Smoother smoothTotalSpace;
-	TLogQueueInfo(UID id)
-	  : valid(false), id(id), smoothDurableBytes(SERVER_KNOBS->SMOOTHING_AMOUNT),
-	    smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
-	    smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT) {
-		// FIXME: this is a tacky workaround for a potential uninitialized use in trackTLogQueueInfo (copied from
-		// storageQueueInfO)
-		lastReply.instanceID = -1;
-	}
+
+	TLogQueueInfo(UID id);
+	Version getLastCommittedVersion() const { return lastReply.v; }
+	void update(TLogQueuingMetricsReply const& reply, Smoother& smoothTotalDurableBytes);
 };
 
 struct RatekeeperLimits {
@@ -126,17 +114,7 @@ struct RatekeeperLimits {
 	                 int64_t logTargetBytes,
 	                 int64_t logSpringBytes,
 	                 double maxVersionDifference,
-	                 int64_t durabilityLagTargetVersions)
-	  : tpsLimit(std::numeric_limits<double>::infinity()), tpsLimitMetric(StringRef("Ratekeeper.TPSLimit" + context)),
-	    reasonMetric(StringRef("Ratekeeper.Reason" + context)), storageTargetBytes(storageTargetBytes),
-	    storageSpringBytes(storageSpringBytes), logTargetBytes(logTargetBytes), logSpringBytes(logSpringBytes),
-	    maxVersionDifference(maxVersionDifference),
-	    durabilityLagTargetVersions(
-	        durabilityLagTargetVersions +
-	        SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS), // The read transaction life versions are expected to not
-	                                                           // be durable on the storage servers
-	    lastDurabilityLag(0), durabilityLagLimit(std::numeric_limits<double>::infinity()), priority(priority),
-	    context(context), rkUpdateEventCacheHolder(makeReference<EventCacheHolder>("RkUpdate" + context)) {}
+	                 int64_t durabilityLagTargetVersions);
 };
 
 class Ratekeeper {
@@ -144,16 +122,12 @@ class Ratekeeper {
 
 	// Differentiate from GrvProxyInfo in DatabaseContext.h
 	struct GrvProxyInfo {
-		int64_t totalTransactions;
-		int64_t batchTransactions;
-		uint64_t lastThrottledTagChangeId;
+		int64_t totalTransactions{ 0 };
+		int64_t batchTransactions{ 0 };
+		uint64_t lastThrottledTagChangeId{ 0 };
 
-		double lastUpdateTime;
-		double lastTagPushTime;
-
-		GrvProxyInfo()
-		  : totalTransactions(0), batchTransactions(0), lastThrottledTagChangeId(0), lastUpdateTime(0),
-		    lastTagPushTime(0) {}
+		double lastUpdateTime{ 0.0 };
+		double lastTagPushTime{ 0.0 };
 	};
 
 	UID id;
@@ -181,16 +155,12 @@ class Ratekeeper {
 	Deque<double> actualTpsHistory;
 	Optional<Key> remoteDC;
 
-	Future<Void> expiredTagThrottleCleanup;
-
-	double lastBusiestCommitTagPick;
-
 	Ratekeeper(UID id, Database db);
 
 	Future<Void> configurationMonitor();
 	void updateCommitCostEstimation(UIDTransactionTagMap<TransactionCommitCostEstimation> const& costEstimation);
 	void updateRate(RatekeeperLimits* limits);
-	Future<Void> refreshStorageServerCommitCost();
+	Future<Void> refreshStorageServerCommitCosts();
 	Future<Void> monitorServerListChange(PromiseStream<std::pair<UID, Optional<StorageServerInterface>>> serverChanges);
 	Future<Void> trackEachStorageServer(FutureStream<std::pair<UID, Optional<StorageServerInterface>>> serverChanges);
 

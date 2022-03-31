@@ -49,6 +49,7 @@ public:
 	double MAX_GENERATIONS_OVERRIDE;
 	double MAX_GENERATIONS_SIM;
 
+	double COORDINATOR_HOSTNAME_RESOLVE_DELAY;
 	double COORDINATOR_RECONNECTION_DELAY;
 	int CLIENT_EXAMPLE_AMOUNT;
 	double MAX_CLIENT_STATUS_AGE;
@@ -272,6 +273,9 @@ public:
 	// multi-version client control
 	int MVC_CLIENTLIB_CHUNK_SIZE;
 	int MVC_CLIENTLIB_CHUNKS_PER_TRANSACTION;
+
+	// Blob Granules
+	int BG_MAX_GRANULE_PARALLELISM;
 
 	ClientKnobs(Randomize randomize);
 	void initialize(Randomize randomize);

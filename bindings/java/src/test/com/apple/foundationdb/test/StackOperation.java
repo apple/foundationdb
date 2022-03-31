@@ -73,5 +73,11 @@ enum StackOperation {
 	DECODE_DOUBLE,
 	UNIT_TESTS, /* Possibly unimplemented */
 
+	// Tenants
+	TENANT_CREATE,
+	TENANT_DELETE,
+	TENANT_SET_ACTIVE,
+	TENANT_CLEAR_ACTIVE,
+
 	LOG_STACK
 }

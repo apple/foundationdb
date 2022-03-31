@@ -62,6 +62,7 @@
 #include "fdbserver/ServerCheckpoint.actor.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/TLogInterface.h"
+#include "fdbserver/TransactionTagCounter.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbrpc/sim_validation.h"
@@ -849,78 +850,6 @@ public:
 		return val;
 	}
 
-	struct TransactionTagCounter {
-		struct TagInfo {
-			TransactionTag tag;
-			double rate;
-			double fractionalBusyness;
-
-			TagInfo(TransactionTag const& tag, double rate, double fractionalBusyness)
-			  : tag(tag), rate(rate), fractionalBusyness(fractionalBusyness) {}
-		};
-
-		TransactionTagMap<int64_t> intervalCounts;
-		int64_t intervalTotalSampledCount = 0;
-		TransactionTag busiestTag;
-		int64_t busiestTagCount = 0;
-		double intervalStart = 0;
-
-		Optional<TagInfo> previousBusiestTag;
-
-		UID thisServerID;
-
-		Reference<EventCacheHolder> busiestReadTagEventHolder;
-
-		TransactionTagCounter(UID thisServerID)
-		  : thisServerID(thisServerID),
-		    busiestReadTagEventHolder(makeReference<EventCacheHolder>(thisServerID.toString() + "/BusiestReadTag")) {}
-
-		int64_t costFunction(int64_t bytes) { return bytes / SERVER_KNOBS->READ_COST_BYTE_FACTOR + 1; }
-
-		void addRequest(Optional<TagSet> const& tags, int64_t bytes) {
-			if (tags.present()) {
-				TEST(true); // Tracking tag on storage server
-				double cost = costFunction(bytes);
-				for (auto& tag : tags.get()) {
-					int64_t& count = intervalCounts[TransactionTag(tag, tags.get().getArena())];
-					count += cost;
-					if (count > busiestTagCount) {
-						busiestTagCount = count;
-						busiestTag = tag;
-					}
-				}
-
-				intervalTotalSampledCount += cost;
-			}
-		}
-
-		void startNewInterval() {
-			double elapsed = now() - intervalStart;
-			previousBusiestTag.reset();
-			if (intervalStart > 0 && CLIENT_KNOBS->READ_TAG_SAMPLE_RATE > 0 && elapsed > 0) {
-				double rate = busiestTagCount / CLIENT_KNOBS->READ_TAG_SAMPLE_RATE / elapsed;
-				if (rate > SERVER_KNOBS->MIN_TAG_READ_PAGES_RATE) {
-					previousBusiestTag = TagInfo(busiestTag, rate, (double)busiestTagCount / intervalTotalSampledCount);
-				}
-
-				TraceEvent("BusiestReadTag", thisServerID)
-				    .detail("Elapsed", elapsed)
-				    .detail("Tag", printable(busiestTag))
-				    .detail("TagCost", busiestTagCount)
-				    .detail("TotalSampledCost", intervalTotalSampledCount)
-				    .detail("Reported", previousBusiestTag.present())
-				    .trackLatest(busiestReadTagEventHolder->trackingKey);
-			}
-
-			intervalCounts.clear();
-			intervalTotalSampledCount = 0;
-			busiestTagCount = 0;
-			intervalStart = now();
-		}
-
-		Optional<TagInfo> getBusiestTag() const { return previousBusiestTag; }
-	};
-
 	TransactionTagCounter transactionTagCounter;
 
 	Optional<LatencyBandConfig> latencyBandConfig;
@@ -929,7 +858,7 @@ public:
 		CounterCollection cc;
 		Counter allQueries, getKeyQueries, getValueQueries, getRangeQueries, getMappedRangeQueries,
 		    getRangeStreamQueries, finishedQueries, lowPriorityQueries, rowsQueried, bytesQueried, watchQueries,
-		    emptyQueries, feedRowsQueried, feedBytesQueried;
+		    emptyQueries, feedRowsQueried, feedBytesQueried, feedStreamQueries, feedVersionQueries;
 
 		// Bytes of the mutations that have been added to the memory of the storage server. When the data is durable
 		// and cleared from the memory, we do not subtract it but add it to bytesDurable.
@@ -1001,6 +930,7 @@ public:
 		    lowPriorityQueries("LowPriorityQueries", cc), rowsQueried("RowsQueried", cc),
 		    bytesQueried("BytesQueried", cc), watchQueries("WatchQueries", cc), emptyQueries("EmptyQueries", cc),
 		    feedRowsQueried("FeedRowsQueried", cc), feedBytesQueried("FeedBytesQueried", cc),
+		    feedStreamQueries("FeedStreamQueries", cc), feedVersionQueries("FeedVersionQueries", cc),
 		    bytesInput("BytesInput", cc), logicalBytesInput("LogicalBytesInput", cc),
 		    logicalBytesMoveInOverhead("LogicalBytesMoveInOverhead", cc),
 		    kvCommitLogicalBytes("KVCommitLogicalBytes", cc), kvClearRanges("KVClearRanges", cc),
@@ -2556,6 +2486,8 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 		req.reply.setByteLimit(std::min((int64_t)req.replyBufferSize, SERVER_KNOBS->CHANGEFEEDSTREAM_LIMIT_BYTES));
 	}
 
+	++data->counters.feedStreamQueries;
+
 	wait(delay(0, TaskPriority::DefaultEndpoint));
 
 	try {
@@ -2707,6 +2639,7 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 }
 
 ACTOR Future<Void> changeFeedVersionUpdateQ(StorageServer* data, ChangeFeedVersionUpdateRequest req) {
+	++data->counters.feedVersionQueries;
 	wait(data->version.whenAtLeast(req.minVersion));
 	wait(delay(0));
 	Version minVersion = data->minFeedVersionForAddress(req.reply.getEndpoint().getPrimaryAddress());
@@ -4264,11 +4197,7 @@ void getQueuingMetrics(StorageServer* self, StorageQueuingMetricsRequest const& 
 	reply.diskUsage = self->diskUsage;
 	reply.durableVersion = self->durableVersion.get();
 
-	Optional<StorageServer::TransactionTagCounter::TagInfo> busiestTag = self->transactionTagCounter.getBusiestTag();
-	reply.busiestTag = busiestTag.map<TransactionTag>(
-	    [](StorageServer::TransactionTagCounter::TagInfo tagInfo) { return tagInfo.tag; });
-	reply.busiestTagFractionalBusyness = busiestTag.present() ? busiestTag.get().fractionalBusyness : 0.0;
-	reply.busiestTagRate = busiestTag.present() ? busiestTag.get().rate : 0.0;
+	reply.busiestTags = self->transactionTagCounter.getBusiestTags();
 
 	req.reply.send(reply);
 }

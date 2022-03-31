@@ -2726,8 +2726,6 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 	actors.push_back(serveProcess());
 
 	try {
-		wait(connRecord->resolveHostnames());
-		ServerCoordinators coordinators(connRecord);
 		if (g_network->isSimulated()) {
 			whitelistBinPaths = ",, random_path,  /bin/snap_create.sh,,";
 		}
@@ -2745,8 +2743,8 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		if (coordFolder.size()) {
 			// SOMEDAY: remove the fileNotFound wrapper and make DiskQueue construction safe from errors setting up
 			// their files
-			actors.push_back(fileNotFoundToNever(
-			    coordinationServer(coordFolder, coordinators.ccr, configNode, configBroadcastInterface)));
+			actors.push_back(
+			    fileNotFoundToNever(coordinationServer(coordFolder, connRecord, configNode, configBroadcastInterface)));
 		}
 
 		state UID processIDUid = wait(createAndLockProcessIdFile(dataFolder));

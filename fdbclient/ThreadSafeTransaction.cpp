@@ -319,9 +319,6 @@ ThreadResult<RangeResult> ThreadSafeTransaction::readBlobGranules(const KeyRange
                                                                   Version beginVersion,
                                                                   Optional<Version> readVersion,
                                                                   ReadBlobGranuleContext granule_context) {
-	// In V1 of api this is required, field is just for forward compatibility
-	ASSERT(beginVersion == 0);
-
 	// FIXME: prevent from calling this from another main thread!
 
 	ISingleThreadTransaction* tr = this->tr;

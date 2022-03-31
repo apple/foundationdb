@@ -523,7 +523,7 @@ public:
 	Counter transactionsStaleVersionVectors;
 
 	ContinuousSample<double> latencies, readLatencies, commitLatencies, GRVLatencies, mutationsPerCommit,
-	    bytesPerCommit;
+	    bytesPerCommit, bgLatencies, bgGranulesPerRequest;
 
 	int outstandingWatches;
 	int maxOutstandingWatches;
@@ -547,6 +547,7 @@ public:
 	bool transactionTracingSample;
 	double verifyCausalReadsProp = 0.0;
 	bool blobGranuleNoMaterialize = false;
+	bool anyBlobGranuleRequests = false;
 
 	Future<Void> logger;
 	Future<Void> throttleExpirer;
