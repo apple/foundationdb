@@ -1470,15 +1470,19 @@ struct vector_like_traits<VectorRef<T, VecSerStrategy::FlatBuffers>> : std::true
 	static size_t num_entries(const VectorRef<T>& v, Context&) {
 		return v.size();
 	}
-	template <class Context>
-	static void reserve(VectorRef<T>& v, size_t s, Context& context) {
-		v.resize(context.arena(), s);
-	}
 
+	// Return an insert_iterator starting with an empty vector. |size| is the
+	// number of elements to be inserted. Implementations may want to allocate
+	// enough memory up front to hold |size| elements.
 	template <class Context>
-	static insert_iterator insert(Vec& v, Context&) {
+	static insert_iterator insert(Vec& v, size_t s, Context& context) {
+		// Logically v should be empty after this function returns, but since we're going to
+		// insert s times into the raw pointer insert_iterator it will end up
+		// with the correct size after deserialization finishes.
+		v.resize(context.arena(), s);
 		return v.begin();
 	}
+
 	template <class Context>
 	static iterator begin(const Vec& v, Context&) {
 		return v.begin();
