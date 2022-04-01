@@ -757,7 +757,11 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData>
 				           bytesRead);
 			}
 			state Error err = e;
-			wait(tr->onError(e));
+			if (e.code() == error_code_server_overloaded) {
+				wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
+			} else {
+				wait(tr->onError(e));
+			}
 			retries++;
 			TEST(true); // Granule initial snapshot failed
 			// FIXME: why can't we supress error event?
