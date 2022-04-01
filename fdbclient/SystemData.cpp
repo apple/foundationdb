@@ -607,13 +607,6 @@ StorageServerInterface decodeServerListValueFB(ValueRef const& value) {
 	return s;
 }
 
-<<<<<<< HEAD
-SWVersion decodeSWVersionValue(ValueRef const& value) {
-	SWVersion s;
-	ObjectReader reader(value.begin(), IncludeVersion());
-	reader.deserialize(s);
-	return s;
-=======
 StorageServerInterface decodeServerListValue(ValueRef const& value) {
 	StorageServerInterface s;
 	BinaryReader reader(value, IncludeVersion());
@@ -624,7 +617,13 @@ StorageServerInterface decodeServerListValue(ValueRef const& value) {
 	}
 
 	return decodeServerListValueFB(value);
->>>>>>> d248b73df5fb08b88d0e003e6d2950fe03bab5f2
+}
+
+SWVersion decodeSWVersionValue(ValueRef const& value) {
+	SWVersion s;
+	ObjectReader reader(value.begin(), IncludeVersion());
+	reader.deserialize(s);
+	return s;
 }
 
 // processClassKeys.contains(k) iff k.startsWith( processClassKeys.begin ) because '/'+1 == '0'
