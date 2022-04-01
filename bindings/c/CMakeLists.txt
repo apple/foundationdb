@@ -81,8 +81,20 @@ endif()
 # check later whether this works
 if(NOT WIN32 AND NOT IS_ARM_MAC)
   set(MAKO_SRCS
+    test/mako/async.hpp
+    test/mako/async.cpp
+    test/mako/blob_granules.hpp
+    test/mako/blob_granules.cpp
+    test/mako/future.hpp
+    test/mako/logger.hpp
     test/mako/mako.cpp
     test/mako/mako.hpp
+    test/mako/operations.hpp
+    test/mako/operations.cpp
+    test/mako/process.hpp
+    test/mako/shm.hpp
+    test/mako/stats.hpp
+    test/mako/time.hpp
     test/mako/utils.cpp
     test/mako/utils.hpp)
   add_subdirectory(test/unit/third_party)

@@ -81,7 +81,6 @@ constexpr const int KNOB_MAX = 256;
 constexpr const int TAGPREFIXLENGTH_MAX = 8;
 constexpr const int NUM_CLUSTERS_MAX = 3;
 constexpr const int NUM_DATABASES_MAX = 10;
-constexpr const int MAX_BG_IDS = 1000;
 constexpr const std::string_view KEY_PREFIX{ "mako" };
 constexpr const std::string_view TEMP_DATA_STORE{ "/tmp/makoTemp" };
 
@@ -143,37 +142,6 @@ struct alignas(64) ThreadArgs {
 	Arguments const* args;
 	shared_memory::Access shm;
 	fdb::Database database; // database to work with
-};
-
-using StepFunction = fdb::Future (*)(fdb::Transaction tx,
-                                     Arguments const&,
-                                     fdb::ByteString& /*key1*/,
-                                     fdb::ByteString& /*key2*/,
-                                     fdb::ByteString& /*value*/);
-
-class Operation {
-	using Step = std::pair<StepKind, StepFunction>;
-	std::string_view name_;
-	std::vector<Step> steps_;
-	bool needs_commit_;
-
-public:
-	Operation(std::string_view name, std::vector<Step>&& steps, bool needs_commit)
-	  : name_(name), steps_(std::move(steps)), needs_commit_(needs_commit) {}
-
-	std::string_view name() const noexcept { return name_; }
-
-	StepKind stepKind(int step) const noexcept {
-		assert(step < steps());
-		return steps_[step].first;
-	}
-
-	StepFunction stepFunction(int step) const noexcept { return steps_[step].second; }
-
-	// how many steps in this op?
-	int steps() const noexcept { return static_cast<int>(steps_.size()); }
-	// does the op needs to commit some time after its final step?
-	bool needsCommit() const noexcept { return needs_commit_; }
 };
 
 } // namespace mako

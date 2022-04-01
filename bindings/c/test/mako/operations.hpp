@@ -1,10 +1,17 @@
 #ifndef MAKO_OPERATIONS_HPP
 #define MAKO_OPERATIONS_HPP
 
-#include <vector>
+#include <fdb.hpp>
+#include <array>
+#include <cassert>
 #include <string_view>
+#include <tuple>
+#include <utility>
+#include <vector>
 
 namespace mako {
+
+struct Arguments;
 
 /* transaction specification */
 enum OpKind {
@@ -45,6 +52,49 @@ enum class StepKind {
 inline bool isAbstractOp(int op) noexcept {
 	return op == OP_COMMIT || op == OP_TRANSACTION; // || op == OP_TASK;
 }
+
+using StepFunction = fdb::Future (*)(fdb::Transaction tx,
+                                     Arguments const&,
+                                     fdb::ByteString& /*key1*/,
+                                     fdb::ByteString& /*key2*/,
+                                     fdb::ByteString& /*value*/);
+
+class Operation {
+	using Step = std::pair<StepKind, StepFunction>;
+	std::string_view name_;
+	std::vector<Step> steps_;
+	bool needs_commit_;
+
+public:
+	Operation(std::string_view name, std::vector<Step>&& steps, bool needs_commit)
+	  : name_(name), steps_(std::move(steps)), needs_commit_(needs_commit) {}
+
+	std::string_view name() const noexcept { return name_; }
+
+	StepKind stepKind(int step) const noexcept {
+		assert(step < steps());
+		return steps_[step].first;
+	}
+
+	StepFunction stepFunction(int step) const noexcept { return steps_[step].second; }
+
+	// how many steps in this op?
+	int steps() const noexcept { return static_cast<int>(steps_.size()); }
+	// does the op needs to commit some time after its final step?
+	bool needsCommit() const noexcept { return needs_commit_; }
+};
+
+char const* getOpName(int ops_code);
+
+extern const std::array<Operation, MAX_OP> opTable;
+
+using OpIterator = std::tuple<int /*op*/, int /*count*/, int /*step*/>;
+
+constexpr const OpIterator OpEnd = OpIterator(MAX_OP, -1, -1);
+
+OpIterator getOpBegin(Arguments const& args) noexcept;
+
+OpIterator getOpNext(Arguments const& args, OpIterator current) noexcept;
 
 } // namespace mako
 
