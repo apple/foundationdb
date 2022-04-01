@@ -42,7 +42,10 @@ import com.apple.foundationdb.tuple.Tuple;
  */
 public interface Database extends AutoCloseable, TransactionContext {
 	/**
-	 * Opens an existing tenant to be used for running transactions.
+	 * Opens an existing tenant to be used for running transactions.<br>
+	 * <br>
+	 * <b>Note:</b> opening a tenant does not check its existence in the cluster. If the tenant does not exist,
+	 * attempts to read or write data with it will fail.
 	 *
 	 * @param tenantName The name of the tenant to open.
 	 * @return a {@link Tenant} that can be used to create transactions that will operate in the tenant's key-space.
@@ -53,7 +56,10 @@ public interface Database extends AutoCloseable, TransactionContext {
 
 	/**
 	 * Opens an existing tenant to be used for running transactions. This is a convenience method that generates the
-	 * tenant name by packing a {@code Tuple}.
+	 * tenant name by packing a {@code Tuple}.<br>
+	 * <br>
+	 * <b>Note:</b> opening a tenant does not check its existence in the cluster. If the tenant does not exist,
+	 * attempts to read or write data with it will fail.
 	 *
 	 * @param tenantName The name of the tenant to open, as a Tuple.
 	 * @return a {@link Tenant} that can be used to create transactions that will operate in the tenant's key-space.
