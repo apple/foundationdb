@@ -1137,7 +1137,18 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 			auto f = self->dataMoves.intersectingRanges(rd.keys);
 			for (auto it = f.begin(); it != f.end(); ++it) {
 				KeyRangeRef kr(it->range().begin, it->range().end);
-				ASSERT(!it->value().isValid()); 
+				const UID mId = it->value();
+				if (mId.isValid() && mId != rd.dataMoveID) {
+					TraceEvent("DDRelocatorConflictingDataMove", distributorId)
+					    .detail("CurrentDataMoveID", rd.dataMoveID)
+					    .detail("DataMoveID", mId)
+					    .detail("Range", kr);
+					if (!signalledTransferComplete) {
+						dataTransferComplete.send(rd);
+					}
+					relocationComplete.send(rd);
+					return Void();
+				}
 			}
 			self->dataMoves.insert(rd.keys, rd.dataMoveID);
 		}

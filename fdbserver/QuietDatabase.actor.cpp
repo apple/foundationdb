@@ -668,7 +668,12 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 		wait(delay(5.0));
 
 	TraceEvent("QuietDatabaseWaitingOnFullRecovery").log();
+	state int count = 0;
 	while (dbInfo->get().recoveryState != RecoveryState::FULLY_RECOVERED) {
+		if (count % 10 == 0) {
+			TraceEvent("QuietDatabaseWaitingOnDBInfoChange").detail("Retry", count).log();
+			++count;
+		}
 		wait(dbInfo->onChange());
 	}
 

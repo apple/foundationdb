@@ -1103,7 +1103,9 @@ ACTOR static Future<Void> finishMoveShard(Database occ,
 					tr.reset();
 				}
 			} catch (Error& error) {
-				TraceEvent(SevWarnAlways, "TryFinishMoveKeysError", relocationIntervalId).errorUnsuppressed(error);
+				TraceEvent(SevWarnAlways, "TryFinishMoveShardError", relocationIntervalId)
+				    .errorUnsuppressed(error)
+				    .detail("DataMoveID", dataMoveID);
 				if (error.code() == error_code_actor_cancelled)
 					throw;
 				state Error err = error;

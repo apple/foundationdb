@@ -764,7 +764,9 @@ private:
 
 public:
 	std::map<Version, std::vector<CheckpointMetaData>> pendingCheckpoints; // Pending checkpoint requests
+	// TODO: Combine checkpoints of the same dataMove.
 	std::unordered_map<UID, CheckpointMetaData> checkpoints; // Existing and deleting checkpoints
+	std::unordered_map<UID, std::unordered_set<UID>> dataMoveCheckpointsMap;
 	std::unordered_map<UID, MoveInShard> moveInShards; // Shards that are being moved in.
 	TenantMap tenantMap;
 	TenantPrefixIndex tenantPrefixIndex;
@@ -2121,6 +2123,13 @@ ACTOR Future<Void> deleteCheckpointQ(StorageServer* self, Version version, Check
 
 	TraceEvent("DeleteCheckpointBegin", self->thisServerID).detail("Checkpoint", checkpoint.toString());
 
+	auto it = self->dataMoveCheckpointsMap.find(checkpoint.dataMoveID);
+	if (it != self->dataMoveCheckpointsMap.end()) {
+		it->second.erase(checkpoint.dataMoveID);
+		if (it->second.empty()) {
+			self->dataMoveCheckpointsMap.erase(it);
+		}
+	}
 	self->checkpoints.erase(checkpoint.checkpointID);
 
 	try {
@@ -7329,6 +7338,7 @@ ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData meta
 		checkpointResult.dataMoveID = metaData.dataMoveID;
 		ASSERT(checkpointResult.getState() == CheckpointMetaData::Complete);
 		data->checkpoints[checkpointResult.checkpointID] = checkpointResult;
+		data->dataMoveCheckpointsMap[checkpointResult.dataMoveID].insert(checkpointResult.checkpointID);
 		TraceEvent("StorageCreatedCheckpoint", data->thisServerID).detail("Checkpoint", checkpointResult.toString());
 	} catch (Error& e) {
 		// If checkpoint creation fails, the failure is persisted.
@@ -7353,7 +7363,8 @@ ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData meta
 		TraceEvent("StorageCreateCheckpointPersistFailure", data->thisServerID)
 		    .errorUnsuppressed(e)
 		    .detail("Checkpoint", checkpointResult.toString());
-		data->checkpoints.erase(checkpointResult.checkpointID);
+		data->checkpoints[checkpointResult.checkpointID].setState(CheckpointMetaData::Deleting);
+		// data->checkpoints.erase(checkpointResult.checkpointID);
 		data->actors.add(deleteCheckpointQ(data, metaData.version, checkpointResult));
 	}
 
