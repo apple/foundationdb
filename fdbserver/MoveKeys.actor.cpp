@@ -1677,6 +1677,7 @@ void seedShardServers(Arena& arena,
 		}
 		return;
 	} else {
+		// TODO(PTXN): Make TAG_ENCODE_KEY_SERVERS compatible with PTXN. Currently, it doesn't include team IDs.
 		auto ksValue = CLIENT_KNOBS->TAG_ENCODE_KEY_SERVERS
 		                   ? keyServersValue(serverTags)
 		                   : keyServersValue(

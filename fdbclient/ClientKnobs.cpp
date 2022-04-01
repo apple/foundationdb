@@ -56,6 +56,9 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( MAX_GRV_PROXY_CONNECTIONS,                 3 ); if( randomize && BUGGIFY ) MAX_GRV_PROXY_CONNECTIONS = 1;
 	init( STATUS_IDLE_TIMEOUT,                   120.0 );
 
+	// Partitioned transactions
+	init( ENABLE_PARTITIONED_TRANSACTIONS,       false );
+
 	// wrong_shard_server sometimes comes from the only nonfailed server, so we need to avoid a fast spin
 
 	init( WRONG_SHARD_SERVER_DELAY,                .01 ); if( randomize && BUGGIFY ) WRONG_SHARD_SERVER_DELAY = deterministicRandom()->random01(); // FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY; // SOMEDAY: This delay can limit performance of retrieving data when the cache is mostly wrong (e.g. dumping the database after a test)
@@ -96,7 +99,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( AGGREGATE_HEALTH_METRICS_MAX_STALENESS,  0.5 );
 	init( DETAILED_HEALTH_METRICS_MAX_STALENESS,   5.0 );
 	init( MID_SHARD_SIZE_MAX_STALENESS,           10.0 );
-	init( TAG_ENCODE_KEY_SERVERS,                false ); if( randomize && BUGGIFY ) TAG_ENCODE_KEY_SERVERS = true;
+	init( TAG_ENCODE_KEY_SERVERS,                false ); if( !ENABLE_PARTITIONED_TRANSACTIONS && randomize && BUGGIFY ) TAG_ENCODE_KEY_SERVERS = true;
 	init( RANGESTREAM_FRAGMENT_SIZE,               1e6 );
 	init( RANGESTREAM_BUFFERED_FRAGMENTS_LIMIT,     20 );
 	init( QUARANTINE_TSS_ON_MISMATCH,             true ); if( randomize && BUGGIFY ) QUARANTINE_TSS_ON_MISMATCH = false; // if true, a tss mismatch will put the offending tss in quarantine. If false, it will just be killed
