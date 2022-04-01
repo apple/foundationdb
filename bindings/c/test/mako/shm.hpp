@@ -50,7 +50,12 @@ public:
 
 	size_t size() const noexcept { return storageSize(num_processes, num_threads); }
 
-	void reset() noexcept { memset(base, 0, size()); }
+	void initMemory() noexcept {
+		memset(&header(), 0, sizeof(Header));
+		for (auto i = 0; i < num_processes; i++)
+			for (auto j = 0; j < num_threads; j++)
+				new (&statsSlot(i, j)) ThreadStatistics();
+	}
 
 	Header const& headerConst() const noexcept { return *static_cast<Header const*>(base); }
 

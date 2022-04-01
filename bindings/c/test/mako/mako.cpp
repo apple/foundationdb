@@ -534,9 +534,6 @@ void workerThread(ThreadArgs& thread_args) {
 	auto& stats = thread_args.shm.statsSlot(worker_id, thread_id);
 	logr = Logger(WorkerProcess{}, args.verbose, worker_id, thread_id);
 
-	/* init per-thread latency statistics */
-	new (&stats) ThreadStatistics();
-
 	logr.debug("started, tid: {}", reinterpret_cast<uint64_t>(pthread_self()));
 
 	const auto thread_tps =
@@ -1286,7 +1283,7 @@ void printStats(Arguments const& args, ThreadStatistics const* stats, double con
 	const auto num_effective_threads = args.async_xacts > 0 ? args.async_xacts : args.num_threads;
 	auto current = ThreadStatistics{};
 	for (auto i = 0; i < args.num_processes; i++) {
-		for (auto j = 0; j < args.num_threads; j++) {
+		for (auto j = 0; j < num_effective_threads; j++) {
 			current.combine(stats[(i * num_effective_threads) + j]);
 		}
 	}
@@ -1961,7 +1958,7 @@ int main(int argc, char* argv[]) {
 	auto shm_access = shared_memory::Access(shm, args.num_processes, nthreads_for_shm);
 
 	/* initialize the shared memory */
-	shm_access.reset();
+	shm_access.initMemory();
 
 	/* get ready */
 	auto& shm_hdr = shm_access.header();

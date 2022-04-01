@@ -192,8 +192,7 @@ void ResumableStateForRunWorkload::onStepSuccess() {
 		if (needs_commit || args.commit_get) {
 			// task completed, need to commit before finish
 			watch_commit.start();
-			auto f = tx.commit().eraseType();
-			f.then([this, state=shared_from_this()](Future f) {
+			tx.commit().then([this, state=shared_from_this()](Future f) {
 				UNPACK_OP_INFO();
 				if (auto err = f.error()) {
 					// commit had errors
