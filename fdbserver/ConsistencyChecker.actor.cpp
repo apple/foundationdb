@@ -62,6 +62,8 @@ ACTOR Future<Void> consistencyChecker(ConsistencyCheckerInterface ckInterf,
 
 	self.addActor.send(traceRole(Role::CONSISTENCYCHECKER, ckInterf.id()));
 
+	testParams.set("distributed", "false");
+	testParams.set("failureIsError", "true");
 	testParams.set("restart", restart);
 	testParams.set("maxRate", maxRate);
 	testParams.set("targetInterval", targetInterval);

@@ -759,7 +759,6 @@ void arrayGenerator(const char* text, const char* line, const char** options, st
 		iter++;
 		if (!strncmp(name, text, len)) {
 			lc.push_back(newCompletion(line, name));
-			printf("%s%s\n", line, name);
 		}
 	}
 }

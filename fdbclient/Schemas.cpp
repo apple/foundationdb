@@ -127,10 +127,10 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                         "cluster_controller",
                         "data_distributor",
                         "ratekeeper",
-                        "consistency_checker",
                         "blob_manager",
                         "blob_worker",
                         "encrypt_key_proxy",
+                        "consistency_checker",
                         "storage_cache",
                         "router",
                         "coordinator"
@@ -534,9 +534,9 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "unreachable_cluster_controller_worker",
                   "unreachable_dataDistributor_worker",
                   "unreachable_ratekeeper_worker",
-                  "unreachable_consistencyChecker_worker",
                   "unreachable_blobManager_worker",
                   "unreachable_encryptKeyProxy_worker",
+                  "unreachable_consistencyChecker_worker",
                   "unreadable_configuration",
                   "full_replication_timeout",
                   "client_issues",
@@ -818,7 +818,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
              "disabled",
              "optional_experimental",
              "required_experimental"
-         ]}
+         ]},
          "consistency_scan_enabled":0,
          "consistency_scan_restart":0,
          "consistency_scan_rate":0,

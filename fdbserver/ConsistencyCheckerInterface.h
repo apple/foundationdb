@@ -74,8 +74,8 @@ struct HaltConsistencyCheckerRequest {
 //
 //	explicit ConsistencyCheckRequest(Optional<UID> const& requesterID = Optional<UID>()) : requesterID(requesterID) {}
 //	explicit ConsistencyCheckRequest(bool state, double maxRate, double targetInterval, UID reqUID, Optional<UID>
-//requesterID = Optional<UID>()) 		: state(state), maxRate(maxRate), targetInterval(targetInterval), requesterID(reqUID),
-//requesterID(requesterID) {}
+// requesterID = Optional<UID>()) 		: state(state), maxRate(maxRate), targetInterval(targetInterval),
+// requesterID(reqUID), requesterID(requesterID) {}
 //
 //	template <class Ar>
 //	void serialize(Ar& ar) {

@@ -1381,8 +1381,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 						// Try getting the entries in the specified range
 						state std::vector<FutureStream<GetKeyValuesStreamReply>> keyValueFutures;
 						state int j = 0;
-						//TraceEvent("ConsistencyCheck_StoringGetFutures")
-						//  .detail("SSISize", storageServerInterfaces.size());
+						TraceEvent("ConsistencyCheck_StoringGetFutures")
+						    .detail("SSISize", storageServerInterfaces.size());
 
 						// Read the resulting entries
 						state int firstValidServer = -1;
@@ -1391,7 +1391,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 						for (j = 0; j < storageServerInterfaces.size(); j++) {
 							state GetKeyValuesStreamReply current;
 							try {
-								//TraceEvent("ConsistencyCheck_GetKeyValuesStream").detail("Iter", j);
+								TraceEvent("ConsistencyCheck_GetKeyValuesStream").detail("Iter", j);
 								resetReply(req);
 								GetKeyValuesStreamReply _current = waitNext(
 								    storageServerInterfaces[j].getKeyValuesStream.getReplyStream(req).getFuture());
@@ -1424,6 +1424,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 											self->testFailure("Storage server unavailable");
 											return false;
 										}
+									} else {
+										TraceEvent("ConsistencyCheck_Here").detail("Iter", j);
 									} // TODO: else continue?
 								} else {
 									current = GetKeyValuesStreamReply();

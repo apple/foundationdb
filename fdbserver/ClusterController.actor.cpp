@@ -624,8 +624,8 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	// note: this map doesn't consider pids used by existing singletons
 	std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
 
-	int recruitCK = 0;
-	recruitCK = self->db.config.consistencyScanEnabled;
+	int recruitCK = 1;
+	// recruitCK = self->db.config.consistencyScanEnabled;
 
 	// We prefer spreading out other roles more than separating singletons on their own process
 	// so we artificially amplify the pid count for the processes used by non-singleton roles.

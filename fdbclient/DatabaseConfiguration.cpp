@@ -227,10 +227,10 @@ bool DatabaseConfiguration::isValid() const {
 	      (perpetualStorageWiggleSpeed == 0 || perpetualStorageWiggleSpeed == 1) &&
 	      isValidPerpetualStorageWiggleLocality(perpetualStorageWiggleLocality) &&
 	      storageMigrationType != StorageMigrationType::UNSET && tenantMode >= TenantMode::DISABLED &&
-	      tenantMode < TenantMode::END)) {
-		//} &&
-		// TODO: NEELAM: check
-		//  (consistencyScanEnabled && consistencyScanMaxRate > 0))) {
+	      tenantMode < TenantMode::END &&
+	      // TODO: NEELAM: check
+	      (consistencyScanEnabled == 0 || consistencyScanEnabled == 1) && consistencyScanMaxRate >= 0 &&
+	      consistencyScanInterval >= 0)) {
 		return false;
 	}
 	std::set<Key> dcIds;
@@ -660,9 +660,15 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	} else if (ck == LiteralStringRef("consistency_scan_restart")) {
 		parse(&consistencyScanRestart, value);
 	} else if (ck == LiteralStringRef("consistency_scan_rate")) {
-		parse(&consistencyScanMaxRate, value);
+		int consistencyScanMaxRateMBPS;
+		parse(&consistencyScanMaxRateMBPS, value);
+		// parse(&consistencyScanMaxRate, value);
+		consistencyScanMaxRate = consistencyScanMaxRateMBPS * 1024 * 1024;
 	} else if (ck == LiteralStringRef("consistency_scan_interval")) {
-		parse(&consistencyScanInterval, value);
+		int consistencyScanIntervalDays;
+		parse(&consistencyScanIntervalDays, value);
+		// parse(&consistencyScanInterval, value);
+		consistencyScanInterval = consistencyScanIntervalDays * 24 * 60 * 60;
 	} else if (ck == LiteralStringRef("proxies")) {
 		overwriteProxiesCount();
 	} else if (ck == LiteralStringRef("blob_granules_enabled")) {

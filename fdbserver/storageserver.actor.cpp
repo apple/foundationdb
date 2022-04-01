@@ -3942,6 +3942,12 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 				                       !data->isTss() && !data->isSSWithTSSPair())
 				                          ? 1
 				                          : CLIENT_KNOBS->REPLY_BYTE_LIMIT;
+				byteLimit = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
+				TraceEvent(SevDebug, "SSGetKeyValueStreamLimits")
+				    .detail("ByteLimit", byteLimit)
+				    .detail("ReqLimit", req.limit)
+				    .detail("Begin", begin.printable())
+				    .detail("End", end.printable());
 				GetKeyValuesReply _r = wait(readRange(
 				    data, version, KeyRangeRef(begin, end), req.limit, &byteLimit, span.context, type, tenantPrefix));
 				GetKeyValuesStreamReply r(_r);

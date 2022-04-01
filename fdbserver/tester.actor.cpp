@@ -563,7 +563,8 @@ ACTOR Future<Void> runWorkloadAsync(Database cx,
 					TraceEvent(SevError, "TestSetupError", workIface.id())
 					    .error(e)
 					    .detail("Workload", workload->description());
-					if (e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_delete)
+					if (e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_delete ||
+					    e.code() == error_code_actor_cancelled)
 						throw;
 				}
 			}
@@ -578,7 +579,8 @@ ACTOR Future<Void> runWorkloadAsync(Database cx,
 					startResult = Void();
 				} catch (Error& e) {
 					startResult = operation_failed();
-					if (e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_delete)
+					if (e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_delete ||
+					    e.code() == error_code_actor_cancelled)
 						throw;
 					TraceEvent(SevError, "TestFailure", workIface.id())
 					    .errorUnsuppressed(e)
@@ -602,7 +604,8 @@ ACTOR Future<Void> runWorkloadAsync(Database cx,
 					checkResult = CheckReply{ (!startResult.present() || !startResult.get().isError()) && check };
 				} catch (Error& e) {
 					checkResult = operation_failed(); // was: checkResult = false;
-					if (e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_delete)
+					if (e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_delete ||
+					    e.code() == error_code_actor_cancelled)
 						throw;
 					TraceEvent(SevError, "TestFailure", workIface.id())
 					    .error(e)
@@ -623,7 +626,8 @@ ACTOR Future<Void> runWorkloadAsync(Database cx,
 				TraceEvent("WorkloadSendMetrics", workIface.id()).detail("Count", m.size());
 				req.send(m);
 			} catch (Error& e) {
-				if (e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_delete)
+				if (e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_delete ||
+				    e.code() == error_code_actor_cancelled)
 					throw;
 				TraceEvent(SevError, "WorkloadSendMetrics", workIface.id()).error(e);
 				s_req.sendError(operation_failed());
@@ -1705,11 +1709,6 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 		Standalone<VectorRef<KeyValueRef>> options;
 		TraceEvent(SevDebug, "TestHarnessConsistencyCheck").detail("File", fileName.c_str());
 		spec.title = LiteralStringRef("ConsistencyCheck");
-
-		// TODO: Revisit these defaults as they may not make sense for running consistency checker as a separate role?
-		// shuffleShards?
-		// indefinite?
-		// rateLimitMax?
 		spec.databasePingDelay = 0;
 		spec.timeout = 0;
 		spec.waitForQuiescenceBegin = false;
@@ -1717,20 +1716,25 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 		std::string rateLimitMax = format("%d", CLIENT_KNOBS->CONSISTENCY_CHECK_RATE_LIMIT_MAX);
 		options.push_back_deep(options.arena(),
 		                       KeyValueRef(LiteralStringRef("testName"), LiteralStringRef("ConsistencyCheck")));
-		options.push_back_deep(options.arena(),
-		                       KeyValueRef(LiteralStringRef("performQuiescentChecks"), LiteralStringRef("false")));
-		options.push_back_deep(options.arena(),
-		                       KeyValueRef(LiteralStringRef("distributed"), LiteralStringRef("false")));
-		options.push_back_deep(options.arena(),
-		                       KeyValueRef(LiteralStringRef("failureIsError"), LiteralStringRef("true")));
-		options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("indefinite"), LiteralStringRef("true")));
 		options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("rateLimitMax"), StringRef(rateLimitMax)));
-		options.push_back_deep(options.arena(),
-		                       KeyValueRef(LiteralStringRef("shuffleShards"), LiteralStringRef("true")));
-		// Add unit test options as test spec options
-		for (auto& kv : testOptions.params) {
-			options.push_back_deep(options.arena(), KeyValueRef(kv.first, kv.second));
+		// Use unit test options as test spec options when privided
+		if (testOptions.params.size()) {
+			for (auto& kv : testOptions.params) {
+				options.push_back_deep(options.arena(), KeyValueRef(kv.first, kv.second));
+			}
+		} else {
+			options.push_back_deep(options.arena(),
+			                       KeyValueRef(LiteralStringRef("performQuiescentChecks"), LiteralStringRef("false")));
+			options.push_back_deep(options.arena(),
+			                       KeyValueRef(LiteralStringRef("distributed"), LiteralStringRef("false")));
+			options.push_back_deep(options.arena(),
+			                       KeyValueRef(LiteralStringRef("failureIsError"), LiteralStringRef("true")));
+			options.push_back_deep(options.arena(),
+			                       KeyValueRef(LiteralStringRef("indefinite"), LiteralStringRef("true")));
+			options.push_back_deep(options.arena(),
+			                       KeyValueRef(LiteralStringRef("shuffleShards"), LiteralStringRef("true")));
 		}
+		// TODO: remove
 		printf("runTests: Options:\n");
 		for (int q = 0; q < options.size(); q++)
 			fprintf(stdout, " '%s' = '%s'\n", options[q].key.toString().c_str(), options[q].value.toString().c_str());

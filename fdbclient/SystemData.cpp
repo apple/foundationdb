@@ -670,7 +670,7 @@ const KeyRef perpetualStorageWiggleStatsPrefix(
 
 const KeyRef triggerDDTeamInfoPrintKey(LiteralStringRef("\xff/triggerDDTeamInfoPrint"));
 
-const KeyRef consistencyCheckProgressKey(LiteralStringRef("\xff/consistencyCheckProgressKey"));
+const KeyRef consistencyCheckProgressKey = "\xff/consistencyCheckProgress"_sr;
 
 const KeyRangeRef excludedServersKeys(LiteralStringRef("\xff/conf/excluded/"), LiteralStringRef("\xff/conf/excluded0"));
 const KeyRef excludedServersPrefix = excludedServersKeys.begin;
