@@ -357,6 +357,7 @@ private:
 				}
 				toCommit->addTags(allSources);
 			}
+			TraceEvent(SevDebug, "SendingPrivatized_ChangeFeed", dbgid).detail("M", privatized);
 			toCommit->writeTypedMessage(privatized);
 		}
 	}
