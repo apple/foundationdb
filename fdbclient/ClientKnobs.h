@@ -55,6 +55,9 @@ public:
 	int MAX_GRV_PROXY_CONNECTIONS;
 	double STATUS_IDLE_TIMEOUT;
 
+	// Partitioned transactions
+	bool ENABLE_PARTITIONED_TRANSACTIONS;
+
 	// wrong_shard_server sometimes comes from the only nonfailed server, so we need to avoid a fast spin
 	double WRONG_SHARD_SERVER_DELAY; // SOMEDAY: This delay can limit performance of retrieving data when the cache is
 	                                 // mostly wrong (e.g. dumping the database after a test)
