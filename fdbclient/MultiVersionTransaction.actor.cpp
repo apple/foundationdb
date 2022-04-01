@@ -1514,8 +1514,10 @@ void MultiVersionDatabase::DatabaseState::protocolVersionChanged(ProtocolVersion
 		    .detail("NewProtocolVersion", protocolVersion)
 		    .detail("OldProtocolVersion", dbProtocolVersion);
 		// When the protocol version changes, clear the corresponding entry in the shared state map
-		// so it can be re-initialized.
-		MultiVersionApi::api->clearClusterSharedStateMapEntry(clusterFilePath);
+		// so it can be re-initialized. Only do so if there was a valid previous protocol version.
+		if (dbProtocolVersion.present()) {
+			MultiVersionApi::api->clearClusterSharedStateMapEntry(clusterFilePath);
+		}
 
 		dbProtocolVersion = protocolVersion;
 
