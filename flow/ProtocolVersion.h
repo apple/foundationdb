@@ -204,11 +204,7 @@ struct SWVersion {
 	uint64_t lastProtocolVersion;
 	uint64_t lowestCompatibleProtocolVersion;
 
-	SWVersion() {
-		latestProtocolVersion = currentProtocolVersion.version();
-		lastProtocolVersion = currentProtocolVersion.version();
-		lowestCompatibleProtocolVersion = currentProtocolVersion.version();
-	}
+	SWVersion() { SWVersion(ProtocolVersion(), ProtocolVersion(), ProtocolVersion()); }
 
 	SWVersion(ProtocolVersion latestVersion, ProtocolVersion lastVersion, ProtocolVersion minCompatibleVersion)
 	  : latestProtocolVersion(latestVersion.version()), lastProtocolVersion(lastVersion.version()),

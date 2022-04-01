@@ -60,6 +60,7 @@
 #include "flow/ThreadHelper.actor.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
+#include "flow/genericactors.actor.h"
 #include "flow/network.h"
 #include "flow/serialize.h"
 
@@ -2460,7 +2461,7 @@ ACTOR Future<Void> monitorAndWriteCCPriorityInfo(std::string filePath,
 
 static const std::string versionFileName = "sw-version";
 
-ACTOR Future<bool> isCompatibleSoftwareVersion(std::string folder) {
+ACTOR Future<SWVersion> testSoftwareVersionCompatibility(std::string folder) {
 	try {
 		state std::string versionFilePath = joinPath(folder, versionFileName);
 		state ErrorOr<Reference<IAsyncFile>> versionFile = wait(
@@ -2472,7 +2473,7 @@ ACTOR Future<bool> isCompatibleSoftwareVersion(std::string folder) {
 				// installation or an upgrade from a version that does not support version files.
 				// Either way, we can safely continue running this version of software.
 				TraceEvent(SevInfo, "NoPreviousSWVersion").log();
-				return true;
+				return SWVersion();
 			} else {
 				// Dangerous to continue if we cannot do a software compatibility test
 				throw versionFile.getError();
@@ -2487,13 +2488,13 @@ ACTOR Future<bool> isCompatibleSoftwareVersion(std::string folder) {
 			try {
 				Value value = ObjectReader::fromStringRef<Value>(fileData, Unversioned());
 				SWVersion swversion = decodeSWVersionValue(value);
-				ProtocolVersion latestSoftwareVersion(swversion.latestProtocolVersion);
-				if (latestSoftwareVersion <= currentProtocolVersion) {
+				ProtocolVersion lowestCompatibleVersion(swversion.lowestCompatibleProtocolVersion);
+				if (currentProtocolVersion >= lowestCompatibleVersion) {
 					TraceEvent(SevInfo, "SWVersionCompatible").log();
-					return true;
+					return swversion;
 				} else {
 					TraceEvent(SevInfo, "SWVersionIncompatible").log();
-					return false;
+					throw incomptible_software_version();
 				}
 			} catch (Error& e) {
 				TraceEvent(SevError, "ReadSWVersionFileError").error(e);
@@ -2510,7 +2511,13 @@ ACTOR Future<bool> isCompatibleSoftwareVersion(std::string folder) {
 	}
 }
 
-ACTOR Future<Void> checkAndUpdateNewestSoftwareVersion(std::string folder) {
+ACTOR Future<Void> checkAndUpdateNewestSoftwareVersion(std::string folder,
+                                                       ProtocolVersion currentVersion,
+                                                       ProtocolVersion latestVersion,
+                                                       ProtocolVersion minCompatibleVersion) {
+
+	ASSERT(currentVersion >= minCompatibleVersion);
+
 	try {
 		state std::string versionFilePath = joinPath(folder, versionFileName);
 		state ErrorOr<Reference<IAsyncFile>> versionFile = wait(
@@ -2541,6 +2548,21 @@ ACTOR Future<Void> checkAndUpdateNewestSoftwareVersion(std::string folder) {
 		TraceEvent(SevError, "OpenWriteSWVersionFileError").error(e);
 		throw;
 	}
+
+	return Void();
+}
+
+static const std::string swversionTestDirName = "sw-version-test";
+
+TEST_CASE("/fdbserver/worker/swversion/noversionhistory") {
+	wait(Future<Void>(Void()));
+
+	if (!platform::createDirectory("sw-version-test")) {
+		TraceEvent(SevInfo, "CreatedDirectory").detail("Directory", "sw-version-test");
+		return Void();
+	}
+
+	SWVersion swversion = wait(errorOr(testSoftwareVersionCompatibility(swversionTestDirName)));
 
 	return Void();
 }
@@ -2844,19 +2866,15 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		localities.set(LocalityData::keyProcessId, processIDUid.toString());
 		// Only one process can execute on a dataFolder from this point onwards
 
-		Future<bool> pf = isCompatibleSoftwareVersion(dataFolder);
-		ErrorOr<bool> px = wait(errorOr(pf));
-		if (px.isError()) {
-			throw internal_error();
+		Future<SWVersion> f = testSoftwareVersionCompatibility(dataFolder);
+		ErrorOr<SWVersion> swversion = wait(errorOr(f));
+		if (swversion.isError()) {
+			throw swversion.getError();
 		}
-		ErrorOr<Void> v = wait(errorOr(checkAndUpdateNewestSoftwareVersion(dataFolder)));
+		ErrorOr<Void> v = wait(errorOr(checkAndUpdateNewestSoftwareVersion(
+		    dataFolder, currentProtocolVersion, currentProtocolVersion, currentProtocolVersion)));
 		if (v.isError()) {
 			TraceEvent(SevError, "SWVersionNotWritten").error(v.getError());
-		}
-		Future<bool> f = isCompatibleSoftwareVersion(dataFolder);
-		ErrorOr<bool> vx = wait(errorOr(f));
-		if (vx.isError()) {
-			TraceEvent(SevError, "SWVersionCompatibilityUnknown").error(vx.getError());
 		}
 
 		std::string fitnessFilePath = joinPath(dataFolder, "fitness");
