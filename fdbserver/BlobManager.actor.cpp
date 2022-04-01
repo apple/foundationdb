@@ -1346,9 +1346,14 @@ ACTOR Future<Void> monitorBlobWorkerStatus(Reference<BlobManagerData> bmData, Bl
 						           rep.granuleRange.end.printable());
 					}
 				} else {
-					ASSERT(lastSplitEval.cvalue().epoch < rep.epoch ||
-					       (lastSplitEval.cvalue().epoch == rep.epoch && lastSplitEval.cvalue().seqno < rep.seqno));
-					if (lastSplitEval.cvalue().inProgress.isValid() && !lastSplitEval.cvalue().inProgress.isReady()) {
+					if (!(lastSplitEval.cvalue().epoch < rep.epoch ||
+					      (lastSplitEval.cvalue().epoch == rep.epoch && lastSplitEval.cvalue().seqno < rep.seqno))) {
+						// This can be a race where granule is moved away from a worker, but the worker still has the
+						// range. Then the range is moved back to that worker, and that worker's request to split races
+						// with the assignment request. It is safe to ignore it since this is from an old version of the
+						// granule on that worker
+					} else if (lastSplitEval.cvalue().inProgress.isValid() &&
+					           !lastSplitEval.cvalue().inProgress.isReady()) {
 						TEST(true); // racing BM splits
 						// For example, one worker asked BM to split, then died, granule was moved, new worker asks to
 						// split on recovery. We need to ensure that they are semantically the same split.
