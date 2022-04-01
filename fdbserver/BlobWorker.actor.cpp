@@ -1021,10 +1021,14 @@ static void handleCompletedDeltaFile(Reference<BlobWorkerData> bwData,
 // if we get an i/o error updating files, or a rollback, reassign the granule to ourselves and start fresh
 static bool granuleCanRetry(const Error& e) {
 	switch (e.code()) {
-	case error_code_please_reboot:
 	case error_code_io_error:
 	case error_code_io_timeout:
+	// FIXME: handle connection errors in tighter retry loop around individual files.
+	// FIXME: if these requests fail at a high enough rate, the whole worker should be marked as unhealthy and its
+	// granules should be moved away, as there may be some problem with this host contacting blob storage
 	case error_code_http_request_failed:
+	case error_code_connection_failed:
+	case error_code_lookup_failed: // dns
 		return true;
 	default:
 		return false;
