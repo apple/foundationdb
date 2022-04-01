@@ -471,11 +471,14 @@ ACTOR Future<Void> refreshReadIteratorPool(ShardMap* shardMap) {
 	if (SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS) {
 		loop {
 			wait(delay(SERVER_KNOBS->ROCKSDB_READ_RANGE_ITERATOR_REFRESH_TIME));
+			int64_t numShards = 0;
 			for (auto it : shardMap->ranges()) {
 				if (it.value() && it.value()->readIterPool) {
 					it.value()->readIterPool->refreshIterators();
+					numShards = numShards + 1;
 				}
 			}
+			TraceEvent("RefreshReadIteratorPool").detail("NumShards", numShards);
 		}
 	}
 	return Void();
@@ -563,7 +566,7 @@ int readRangeInDb(std::shared_ptr<DataShard> shard,
 
 	if (!s.ok()) {
 		logRocksDBError(s, "ReadRange");
-		// The data wrriten to the arena is not erased, which will leave RangeResult in a dirty state. The RangeResult
+		// The data writen to the arena is not erased, which will leave RangeResult in a dirty state. The RangeResult
 		// should never be returned to user.
 		return -1;
 	}
@@ -635,6 +638,8 @@ private:
 	uint64_t getRocksdbPerfcontextMetric(int metric);
 };
 
+// We have 4 readers and 1 writer. Following input index denotes the 
+// id assigned to the reader thread when creating it
 Reference<Histogram> RocksDBMetrics::getReadRangeLatencyHistogram(int index) {
 	return readRangeLatencyHistograms[index];
 }
@@ -883,10 +888,10 @@ std::shared_ptr<rocksdb::Statistics> RocksDBMetrics::getStatsObjForRocksDB() {
 void RocksDBMetrics::logStats(rocksdb::DB* db) {
 	TraceEvent e("RocksDBMetrics");
 	uint64_t stat;
-	for (auto& [name, ticker, cum] : tickerStats) {
+	for (auto& [name, ticker, cumulation] : tickerStats) {
 		stat = stats->getTickerCount(ticker);
-		e.detail(name, stat - cum);
-		cum = stat;
+		e.detail(name, stat - cumulation);
+		cumulation = stat;
 	}
 	for (auto& [name, property] : propertyStats) { // Zhe: TODO aggregation
 		stat = 0;
@@ -1285,9 +1290,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 			auto shards = decodeShardMapping(rangeResult, persistShardMappingPrefix);
 			std::unordered_map<std::string, std::shared_ptr<DataShard>> openShards;
+			int64_t numShards = 0;
 			for (const auto& [range, name] : shards) {
 				openShards[name] = nullptr;
+				numShards = numShards + 1;
 			}
+			TraceEvent("RestoreDurableStateAction").detail("NumShards", numShards);
 
 			std::shared_ptr<DataShard> specialKeysShard;
 			for (auto it : a.shardMap->ranges()) {
