@@ -571,6 +571,10 @@ public:
 	// A wrapper for directly getting the system time. The time returned by now() only updates in the run loop,
 	// so it cannot be used to measure times of functions that do not have wait statements.
 
+	// Simulation version of timer_int for convenience, based on timer()
+	// Returns epoch nanoseconds
+	uint64_t timer_int() { return (uint64_t)(g_network->timer() * 1e9); }
+
 	virtual double timer_monotonic() = 0;
 	// Similar to timer, but monotonic
 
