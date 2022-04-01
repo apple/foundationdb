@@ -147,6 +147,7 @@ private:
 };
 using DB = rocksdb::DB*;
 using CF = rocksdb::ColumnFamilyHandle*;
+std::shared_ptr<rocksdb::Cache> rocksdb_block_cache = nullptr;
 
 #define PERSIST_PREFIX "\xff\xff"
 const KeyRef persistVersion = LiteralStringRef(PERSIST_PREFIX "Version");
@@ -288,7 +289,10 @@ rocksdb::ColumnFamilyOptions getCFOptions() {
 	}
 
 	if (SERVER_KNOBS->ROCKSDB_BLOCK_CACHE_SIZE > 0) {
-		bbOpts.block_cache = rocksdb::NewLRUCache(SERVER_KNOBS->ROCKSDB_BLOCK_CACHE_SIZE);
+		if (rocksdb_block_cache == nullptr) {
+			rocksdb_block_cache = rocksdb::NewLRUCache(SERVER_KNOBS->ROCKSDB_BLOCK_CACHE_SIZE);
+		}
+		bbOpts.block_cache = rocksdb_block_cache;
 	}
 
 	options.table_factory.reset(rocksdb::NewBlockBasedTableFactory(bbOpts));
