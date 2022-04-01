@@ -551,6 +551,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( MAX_ADDED_SOURCES_MULTIPLIER,                          2.0 );
 	init( ENABLE_PHYSICAL_SHARD_MOVE,                           true );
 	init( FETCH_SHARD_BUFFER_BYTE_LIMIT,                        20e6 );
+	init(DELETE_CHECKPOINTS_WHEN_SHARD_MOVED_OUT,              false );
 
 	//FdbServer
 	bool longReboots = randomize && BUGGIFY;

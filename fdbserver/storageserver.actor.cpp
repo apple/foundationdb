@@ -6497,6 +6497,8 @@ public:
 				applyPrivateCacheData(data, m);
 			} else if ((m.type == MutationRef::SetValue) && m.param1.substr(1).startsWith(checkpointPrefix)) {
 				registerPendingCheckpoint(data, m, ver);
+			} else if ((m.type == MutationRef::ClearRange) && m.param1.substr(1).startsWith(checkpointPrefix)) {
+				clearCheckpoints(data, m, ver);
 			} else {
 				applyPrivateData(data, m);
 			}
@@ -6815,6 +6817,25 @@ private:
 		TraceEvent("RegisterPendingCheckpoint", data->thisServerID)
 		    .detail("Key", pendingCheckpointKey)
 		    .detail("Checkpoint", checkpoint.toString());
+	}
+
+	void clearCheckpoints(StorageServer* data, const MutationRef& m, Version ver) {
+		KeyRangeRef range(m.param1.removePrefix(systemKeys.begin), m.param2.removePrefix(systemKeys.begin));
+		UID ssId, dataMoveId;
+		decodeCheckpointKeyRange(range, ssId, dataMoveId);
+		for (auto [id, checkpoint] : data->checkpoints) {
+			if (checkpoint.dataMoveID == dataMoveId) {
+				Key persistCheckpointKey(persistCheckpointKeys.begin.toString() + checkpoint.checkpointID.toString());
+				checkpoint.setState(CheckpointMetaData::Deleting);
+				auto& mLV = data->addVersionToMutationLog(ver);
+				data->addMutationToMutationLog(
+				    mLV, MutationRef(MutationRef::SetValue, persistCheckpointKey, checkpointValue(checkpoint)));
+				data->actors.add(deleteCheckpointQ(data, ver + 1, checkpoint));
+				TraceEvent("SSDeleteCheckpointScheduled", data->thisServerID)
+				    .detail("Checkpoint", checkpoint.toString())
+				    .detail("DeleteVersion", ver + 1);
+			}
+		}
 	}
 };
 
@@ -7619,7 +7640,7 @@ void setAvailableStatus(StorageServer* self, KeyRangeRef keys, bool available) {
 	}
 
 	// When a shard is moved out, delete all related checkpoints created for data move.
-	if (!available) {
+	if (!available && SERVER_KNOBS->DELETE_CHECKPOINTS_WHEN_SHARD_MOVED_OUT) {
 		for (auto& [id, checkpoint] : self->checkpoints) {
 			// if (checkpoint.range.intersects(keys)) {
 			if (keys.contains(checkpoint.range)) {
@@ -7628,7 +7649,7 @@ void setAvailableStatus(StorageServer* self, KeyRangeRef keys, bool available) {
 				self->addMutationToMutationLog(
 				    mLV, MutationRef(MutationRef::SetValue, persistCheckpointKey, checkpointValue(checkpoint)));
 				self->actors.add(deleteCheckpointQ(self, mLV.version + 1, checkpoint));
-				TraceEvent("SSDeleteCheckpointScheduled", self->thisServerID)
+				TraceEvent("MoveShardDeleteCheckpointScheduled", self->thisServerID)
 				    .detail("MovedOutRange", keys.toString())
 				    .detail("Checkpoint", checkpoint.toString())
 				    .detail("DeleteVersion", mLV.version + 1);
@@ -7990,7 +8011,6 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 		if (metaData.version < version) {
 			data->actors.add(deleteCheckpointQ(data, version, metaData));
 			TraceEvent(SevWarnAlways, "StorageRestoreStaleCheckpointRequest", data->thisServerID)
-
 			    .detail("PendingCheckpoint", metaData.toString())
 			    .detail("DurableVersion", version);
 		} else {

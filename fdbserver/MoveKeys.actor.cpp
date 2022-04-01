@@ -1078,7 +1078,7 @@ ACTOR static Future<Void> finishMoveShard(Database occ,
 
 					if (range.end == dataMove.range.end) {
 						for (const UID& ssID : dataMove.src) {
-							tr.clear(prefixRange(checkpointKeyPrefixFor(ssID, dataMoveID)));
+							tr.clear(checkpointKeyRangeFor(ssID, dataMoveID));
 						}
 						tr.clear(dataMoveKeyFor(dataMoveID));
 						complete = true;
@@ -1514,7 +1514,7 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 						if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
 							if (currentKeys.end == keys.end) {
 								for (const UID& ssID : dataMove.src) {
-									tr.clear(prefixRange(checkpointKeyPrefixFor(ssID, dataMoveID)));
+									tr.clear(checkpointKeyRangeFor(ssID, dataMoveID));
 								}
 								tr.clear(dataMoveKeyFor(dataMoveID));
 								TraceEvent("CleanUpDataMoveCheckpoint", dataMoveID)
@@ -2141,7 +2141,7 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 
 				if (range.end == dataMove.range.end) {
 					for (const UID& ssID : dataMove.src) {
-						tr->clear(prefixRange(checkpointKeyPrefixFor(ssID, dataMoveID)));
+						tr->clear(checkpointKeyRangeFor(ssID, dataMoveID));
 					}
 					tr->clear(dataMoveKeyFor(dataMoveID));
 					complete = true;

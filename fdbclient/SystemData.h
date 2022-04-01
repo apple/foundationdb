@@ -90,10 +90,13 @@ void decodeKeyServersValue(std::map<Tag, UID> const& tag_uid,
 extern const KeyRef clusterIdKey;
 
 // "\xff/checkpoint/[[UID]] := [[CheckpointMetaData]]"
+extern const KeyRangeRef checkpointKeys;
 extern const KeyRef checkpointPrefix;
 const Key checkpointKeyFor(UID checkpointID);
 const Key checkpointKeyFor(UID ssID, UID moveDataID, UID checkpointID);
 const Key checkpointKeyPrefixFor(UID ssID, UID moveDataID);
+const KeyRange checkpointKeyRangeFor(UID ssID, UID moveDataID);
+void decodeCheckpointKeyRange(const KeyRangeRef& key, UID& ssID, UID& dataMoveID);
 const Value checkpointValue(const CheckpointMetaData& checkpoint);
 UID decodeCheckpointKey(const KeyRef& key);
 void decodeCheckpointKey(const KeyRef& key, UID& ssID, UID& dataMoveID, UID& checkpointID);

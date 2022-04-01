@@ -391,7 +391,8 @@ const KeyRangeRef writeConflictRangeKeysRange =
 
 const KeyRef clusterIdKey = LiteralStringRef("\xff/clusterId");
 
-const KeyRef checkpointPrefix = "\xff/checkpoint/"_sr;
+const KeyRangeRef checkpointKeys = KeyRangeRef("\xff/checkpoints/"_sr, "\xff/checkpoints0"_sr);
+const KeyRef checkpointPrefix = checkpointKeys.begin;
 
 const Key checkpointKeyFor(UID checkpointID) {
 	BinaryWriter wr(Unversioned());
@@ -419,6 +420,23 @@ const Key checkpointKeyPrefixFor(UID ssID, UID moveDataID) {
 	wr << moveDataID;
 	wr.serializeBytes("/"_sr);
 	return wr.toValue();
+}
+
+const KeyRange checkpointKeyRangeFor(UID ssID, UID moveDataID) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(checkpointPrefix);
+	wr << ssID;
+	wr.serializeBytes("/"_sr);
+	wr << moveDataID;
+	wr.serializeBytes("/"_sr);
+	return prefixRange(wr.toValue());
+}
+
+void decodeCheckpointKeyRange(const KeyRangeRef& range, UID& ssID, UID& dataMoveID) {
+	BinaryReader rd(range.begin.removePrefix(checkpointPrefix), Unversioned());
+	rd >> ssID;
+	rd.readBytes(1); // Skip "/".
+	rd >> dataMoveID;
 }
 
 const Value checkpointValue(const CheckpointMetaData& checkpoint) {
