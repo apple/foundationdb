@@ -28,11 +28,13 @@
 #include "fdbrpc/LoadBalance.h"
 #include "flow/ActorCollection.h"
 #include "flow/Arena.h"
+#include "flow/Error.h"
 #include "flow/Hash3.h"
 #include "flow/Histogram.h"
 #include "flow/IRandom.h"
 #include "flow/IndexedSet.h"
 #include "flow/SystemMonitor.h"
+#include "flow/Trace.h"
 #include "flow/Tracing.h"
 #include "flow/Util.h"
 #include "fdbclient/Atomic.h"
@@ -836,6 +838,9 @@ public:
 	Promise<Void> otherError;
 	Promise<Void> coreStarted;
 	bool shuttingDown;
+
+	Promise<Void> registerInterfaceAcceptingRequests;
+	Future<Void> interfaceRegistered;
 
 	bool behind;
 	bool versionBehind;
@@ -6420,6 +6425,7 @@ ACTOR Future<Void> tssDelayForever() {
 ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 	state double start;
 	try {
+
 		// If we are disk bound and durableVersion is very old, we need to block updates or we could run out of
 		// memory. This is often referred to as the storage server e-brake (emergency brake)
 
@@ -6817,6 +6823,16 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		}
 
 		validate(data);
+
+		if ((data->lastTLogVersion - data->version.get()) < SERVER_KNOBS->STORAGE_RECOVERY_VERSION_LAG_LIMIT) {
+			if (data->registerInterfaceAcceptingRequests.canBeSet()) {
+				data->registerInterfaceAcceptingRequests.send(Void());
+				ErrorOr<Void> e = wait(errorOr(data->interfaceRegistered));
+				if (e.isError()) {
+					TraceEvent(SevWarn, "StorageInterfaceRegistrationFailed", data->thisServerID).error(e.getError());
+				}
+			}
+		}
 
 		data->logCursor->advanceTo(cloneCursor2->version());
 		if (cursor->version().version >= data->lastTLogVersion) {
@@ -8492,88 +8508,6 @@ ACTOR Future<Void> initTenantMap(StorageServer* self) {
 	return Void();
 }
 
-// for creating a new storage server
-ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
-                                 StorageServerInterface ssi,
-                                 Tag seedTag,
-                                 UID clusterId,
-                                 Version tssSeedVersion,
-                                 ReplyPromise<InitializeStorageReply> recruitReply,
-                                 Reference<AsyncVar<ServerDBInfo> const> db,
-                                 std::string folder) {
-	state StorageServer self(persistentData, db, ssi);
-	state Future<Void> ssCore;
-	self.clusterId.send(clusterId);
-	if (ssi.isTss()) {
-		self.setTssPair(ssi.tssPairID.get());
-		ASSERT(self.isTss());
-	}
-
-	self.sk = serverKeysPrefixFor(self.tssPairID.present() ? self.tssPairID.get() : self.thisServerID)
-	              .withPrefix(systemKeys.begin); // FFFF/serverKeys/[this server]/
-	self.folder = folder;
-
-	try {
-		wait(self.storage.init());
-		wait(self.storage.commit());
-		++self.counters.kvCommits;
-
-		if (seedTag == invalidTag) {
-			// Might throw recruitment_failed in case of simultaneous master failure
-			std::pair<Version, Tag> verAndTag = wait(addStorageServer(self.cx, ssi));
-
-			self.tag = verAndTag.second;
-			if (ssi.isTss()) {
-				self.setInitialVersion(tssSeedVersion);
-			} else {
-				self.setInitialVersion(verAndTag.first - 1);
-			}
-
-			wait(initTenantMap(&self));
-		} else {
-			self.tag = seedTag;
-		}
-
-		self.storage.makeNewStorageServerDurable();
-		wait(self.storage.commit());
-		++self.counters.kvCommits;
-
-		TraceEvent("StorageServerInit", ssi.id())
-		    .detail("Version", self.version.get())
-		    .detail("SeedTag", seedTag.toString())
-		    .detail("TssPair", ssi.isTss() ? ssi.tssPairID.get().toString() : "");
-		InitializeStorageReply rep;
-		rep.interf = ssi;
-		rep.addedVersion = self.version.get();
-		recruitReply.send(rep);
-		self.byteSampleRecovery = Void();
-
-		ssCore = storageServerCore(&self, ssi);
-		wait(ssCore);
-
-		throw internal_error();
-	} catch (Error& e) {
-		// If we die with an error before replying to the recruitment request, send the error to the recruiter
-		// (ClusterController, and from there to the DataDistributionTeamCollection)
-		if (!recruitReply.isSet())
-			recruitReply.sendError(recruitment_failed());
-
-		// If the storage server dies while something that uses self is still on the stack,
-		// we want that actor to complete before we terminate and that memory goes out of scope
-		state Error err = e;
-		if (storageServerTerminated(self, persistentData, err)) {
-			ssCore.cancel();
-			self.actors.clear(true);
-			wait(delay(0));
-			return Void();
-		}
-		ssCore.cancel();
-		self.actors.clear(true);
-		wait(delay(0));
-		throw err;
-	}
-}
-
 ACTOR Future<Void> replaceInterface(StorageServer* self, StorageServerInterface ssi) {
 	ASSERT(!ssi.isTss());
 	state Transaction tr(self->cx);
@@ -8709,6 +8643,119 @@ ACTOR Future<Void> replaceTSSInterface(StorageServer* self, StorageServerInterfa
 	return Void();
 }
 
+ACTOR Future<Void> storageInterfaceRegistration(StorageServer* self,
+                                                StorageServerInterface ssi,
+                                                Optional<Future<Void>> readyToAcceptRequests) {
+
+	if (readyToAcceptRequests.present()) {
+		wait(readyToAcceptRequests.get());
+		ssi.startAcceptingRequests();
+	} else {
+		ssi.stopAcceptingRequests();
+	}
+
+	try {
+		if (self->isTss()) {
+			wait(replaceTSSInterface(self, ssi));
+		} else {
+			wait(replaceInterface(self, ssi));
+		}
+	} catch (Error& e) {
+		throw;
+	}
+
+	return Void();
+}
+
+// for creating a new storage server
+ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
+                                 StorageServerInterface ssi,
+                                 Tag seedTag,
+                                 UID clusterId,
+                                 Version tssSeedVersion,
+                                 ReplyPromise<InitializeStorageReply> recruitReply,
+                                 Reference<AsyncVar<ServerDBInfo> const> db,
+                                 std::string folder) {
+	state StorageServer self(persistentData, db, ssi);
+	state Future<Void> ssCore;
+	self.clusterId.send(clusterId);
+	if (ssi.isTss()) {
+		self.setTssPair(ssi.tssPairID.get());
+		ASSERT(self.isTss());
+	}
+
+	self.sk = serverKeysPrefixFor(self.tssPairID.present() ? self.tssPairID.get() : self.thisServerID)
+	              .withPrefix(systemKeys.begin); // FFFF/serverKeys/[this server]/
+	self.folder = folder;
+
+	try {
+		wait(self.storage.init());
+		wait(self.storage.commit());
+		++self.counters.kvCommits;
+
+		if (seedTag == invalidTag) {
+			ssi.startAcceptingRequests();
+			self.registerInterfaceAcceptingRequests.send(Void());
+
+			// Might throw recruitment_failed in case of simultaneous master failure
+			std::pair<Version, Tag> verAndTag = wait(addStorageServer(self.cx, ssi));
+
+			self.tag = verAndTag.second;
+			if (ssi.isTss()) {
+				self.setInitialVersion(tssSeedVersion);
+			} else {
+				self.setInitialVersion(verAndTag.first - 1);
+			}
+
+			wait(initTenantMap(&self));
+		} else {
+			self.tag = seedTag;
+		}
+
+		self.storage.makeNewStorageServerDurable();
+		wait(self.storage.commit());
+		++self.counters.kvCommits;
+
+		self.interfaceRegistered =
+		    storageInterfaceRegistration(&self, ssi, self.registerInterfaceAcceptingRequests.getFuture());
+		wait(delay(0));
+
+		TraceEvent("StorageServerInit", ssi.id())
+		    .detail("Version", self.version.get())
+		    .detail("SeedTag", seedTag.toString())
+		    .detail("TssPair", ssi.isTss() ? ssi.tssPairID.get().toString() : "");
+		InitializeStorageReply rep;
+		rep.interf = ssi;
+		rep.addedVersion = self.version.get();
+		recruitReply.send(rep);
+		self.byteSampleRecovery = Void();
+
+		ssCore = storageServerCore(&self, ssi);
+		wait(ssCore);
+
+		throw internal_error();
+	} catch (Error& e) {
+		// If we die with an error before replying to the recruitment request, send the error to the recruiter
+		// (ClusterController, and from there to the DataDistributionTeamCollection)
+		if (!recruitReply.isSet())
+			recruitReply.sendError(recruitment_failed());
+
+		// If the storage server dies while something that uses self is still on the stack,
+		// we want that actor to complete before we terminate and that memory goes out of scope
+		state Error err = e;
+		if (storageServerTerminated(self, persistentData, err)) {
+			ssCore.cancel();
+			self.actors.clear(true);
+			wait(delay(0));
+			return Void();
+		}
+		ssCore.cancel();
+		self.actors.clear(true);
+		wait(delay(0));
+		throw err;
+	}
+}
+
 // for recovering an existing storage server
 ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  StorageServerInterface ssi,
@@ -8764,15 +8811,14 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		if (recovered.canBeSet())
 			recovered.send(Void());
 
-		try {
-			if (self.isTss()) {
-				wait(replaceTSSInterface(&self, ssi));
-			} else {
-				wait(replaceInterface(&self, ssi));
-			}
-		} catch (Error& e) {
+		state Future<Void> f = storageInterfaceRegistration(&self, ssi, {});
+		wait(delay(0));
+		ErrorOr<Void> e = wait(errorOr(f));
+		if (e.isError()) {
+			Error e = f.getError();
+
 			if (e.code() != error_code_worker_removed) {
-				throw;
+				throw e;
 			}
 			state UID clusterId = wait(getClusterId(&self));
 			ASSERT(self.clusterId.isValid());
@@ -8786,15 +8832,19 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 			// We want to avoid this and force a manual removal of the storage
 			// servers' old data when being assigned to a new cluster to avoid
 			// accidental data loss.
-			TraceEvent(SevError, "StorageServerBelongsToExistingCluster")
+			TraceEvent(SevWarn, "StorageServerBelongsToExistingCluster")
+			    .detail("ServerID", ssi.id())
 			    .detail("ClusterID", durableClusterId)
 			    .detail("NewClusterID", clusterId);
 			wait(Future<Void>(Never()));
 		}
 
+		self.interfaceRegistered =
+		    storageInterfaceRegistration(&self, ssi, self.registerInterfaceAcceptingRequests.getFuture());
+		wait(delay(0));
+
 		TraceEvent("StorageServerStartingCore", self.thisServerID).detail("TimeTaken", now() - start);
 
-		// wait( delay(0) );  // To make sure self->zkMasterInfo.onChanged is available to wait on
 		ssCore = storageServerCore(&self, ssi);
 		wait(ssCore);
 
