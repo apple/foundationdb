@@ -31,17 +31,17 @@ struct ResumableStateForPopulate : std::enable_shared_from_this<ResumableStateFo
 	Stopwatch watch_commit;
 	Stopwatch watch_total;
 
-	ResumableStateForPopulate(
-			Logger logr,
-			fdb::Database db, fdb::Transaction tx,
-			boost::asio::io_context& io_context,
-			Arguments const& args,
-			ThreadStatistics& stats,
-			std::atomic<int>& stopcount, int key_begin, int key_end) :
-		logr(logr), db(db), tx(tx),
-		io_context(io_context), args(args), stats(stats), stopcount(stopcount),
-		key_begin(key_begin), key_end(key_end), key_checkpoint(key_begin)
-	{
+	ResumableStateForPopulate(Logger logr,
+	                          fdb::Database db,
+	                          fdb::Transaction tx,
+	                          boost::asio::io_context& io_context,
+	                          Arguments const& args,
+	                          ThreadStatistics& stats,
+	                          std::atomic<int>& stopcount,
+	                          int key_begin,
+	                          int key_end)
+	  : logr(logr), db(db), tx(tx), io_context(io_context), args(args), stats(stats), stopcount(stopcount),
+	    key_begin(key_begin), key_end(key_end), key_checkpoint(key_begin) {
 		keystr.reserve(args.key_length);
 		valstr.reserve(args.value_length);
 	}
@@ -74,17 +74,18 @@ struct ResumableStateForRunWorkload : std::enable_shared_from_this<ResumableStat
 	Stopwatch watch_task;
 	bool needs_commit;
 
-	ResumableStateForRunWorkload(
-			Logger logr,
-			fdb::Database db, fdb::Transaction tx,
-			boost::asio::io_context& io_context,
-			Arguments const& args,
-			ThreadStatistics& stats,
-			std::atomic<int>& stopcount, std::atomic<int> const& signal,
-			int max_iters, OpIterator op_iter) :
-		logr(logr), db(db), tx(tx), io_context(io_context), args(args), stats(stats),
-		stopcount(stopcount), signal(signal), max_iters(max_iters), op_iter(op_iter), needs_commit(false)
-	{
+	ResumableStateForRunWorkload(Logger logr,
+	                             fdb::Database db,
+	                             fdb::Transaction tx,
+	                             boost::asio::io_context& io_context,
+	                             Arguments const& args,
+	                             ThreadStatistics& stats,
+	                             std::atomic<int>& stopcount,
+	                             std::atomic<int> const& signal,
+	                             int max_iters,
+	                             OpIterator op_iter)
+	  : logr(logr), db(db), tx(tx), io_context(io_context), args(args), stats(stats), stopcount(stopcount),
+	    signal(signal), max_iters(max_iters), op_iter(op_iter), needs_commit(false) {
 		key1.reserve(args.key_length);
 		key2.reserve(args.key_length);
 		val.reserve(args.value_length);

@@ -7,11 +7,7 @@ extern thread_local mako::Logger logr;
 
 namespace mako::blob_granules::local_file {
 
-int64_t startLoad(const char* filename,
-                  int filenameLength,
-                  int64_t offset,
-                  int64_t length,
-                  void* userContext) {
+int64_t startLoad(const char* filename, int filenameLength, int64_t offset, int64_t length, void* userContext) {
 	FILE* fp;
 	char full_fname[PATH_MAX]{
 		0,

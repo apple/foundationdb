@@ -17,7 +17,8 @@ struct UserContext {
 	std::unique_ptr<uint8_t*[]> dataByIdMem;
 	uint8_t** dataById;
 
-	UserContext(char const* filePath) : bgFilePath(filePath), nextId(0), dataByIdMem(new uint8_t*[MAX_BG_IDS]()), dataById(dataByIdMem.get()) {}
+	UserContext(char const* filePath)
+	  : bgFilePath(filePath), nextId(0), dataByIdMem(new uint8_t*[MAX_BG_IDS]()), dataById(dataByIdMem.get()) {}
 
 	void clear() { dataByIdMem.reset(); }
 };

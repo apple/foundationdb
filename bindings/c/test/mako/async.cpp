@@ -14,7 +14,7 @@ using namespace fdb;
 namespace mako {
 
 void ResumableStateForPopulate::postNextTick() {
-	boost::asio::post(io_context, [this, state=shared_from_this()]() { runOneTick(); });
+	boost::asio::post(io_context, [this, state = shared_from_this()]() { runOneTick(); });
 }
 
 void ResumableStateForPopulate::runOneTick() {
@@ -27,14 +27,14 @@ void ResumableStateForPopulate::runOneTick() {
 		if (i == key_end || (i - key_begin + 1) % num_commit_every == 0) {
 			watch_commit.start();
 			auto f = tx.commit();
-			f.then([this, state=shared_from_this(), i](Future f) {
+			f.then([this, state = shared_from_this(), i](Future f) {
 				if (auto err = f.error()) {
 					logr.printWithLogLevel(err.retryable() ? VERBOSE_WARN : VERBOSE_NONE,
 					                       "ERROR",
 					                       "commit for populate returned '{}'",
 					                       err.what());
 					auto err_f = tx.onError(err);
-					err_f.then([this, state=shared_from_this()](Future f) {
+					err_f.then([this, state = shared_from_this()](Future f) {
 						const auto f_rc = handleForOnError(tx, f, "ON_ERROR_FOR_POPULATE");
 						if (f_rc == FutureRC::ABORT) {
 							signalEnd();
@@ -82,11 +82,11 @@ void ResumableStateForPopulate::runOneTick() {
 }
 
 void ResumableStateForRunWorkload::postNextTick() {
-	boost::asio::post(io_context, [this, state=shared_from_this()]() { runOneTick(); });
+	boost::asio::post(io_context, [this, state = shared_from_this()]() { runOneTick(); });
 }
 
-#define UNPACK_OP_INFO() \
-	[[maybe_unused]] auto& [op, count, step] = op_iter; \
+#define UNPACK_OP_INFO()                                                                                               \
+	[[maybe_unused]] auto& [op, count, step] = op_iter;                                                                \
 	[[maybe_unused]] const auto step_kind = opTable[op].stepKind(step)
 
 void ResumableStateForRunWorkload::runOneTick() {
@@ -101,7 +101,7 @@ void ResumableStateForRunWorkload::runOneTick() {
 		// immediately completed client-side ops: e.g. set, setrange, clear, clearrange, ...
 		onStepSuccess();
 	} else {
-		f.then([this, state=shared_from_this()](Future f) {
+		f.then([this, state = shared_from_this()](Future f) {
 			UNPACK_OP_INFO();
 			if (step_kind != StepKind::ON_ERROR) {
 				if (auto err = f.error()) {
@@ -111,7 +111,7 @@ void ResumableStateForRunWorkload::runOneTick() {
 					                       step,
 					                       opTable[op].name(),
 					                       err.what());
-					tx.onError(err).then([this, state=shared_from_this()](Future f) {
+					tx.onError(err).then([this, state = shared_from_this()](Future f) {
 						UNPACK_OP_INFO();
 						const auto rc = handleForOnError(tx, f, fmt::format("{}_STEP_{}", opTable[op].name(), step));
 						if (rc == FutureRC::RETRY) {
@@ -192,7 +192,7 @@ void ResumableStateForRunWorkload::onStepSuccess() {
 		if (needs_commit || args.commit_get) {
 			// task completed, need to commit before finish
 			watch_commit.start();
-			tx.commit().then([this, state=shared_from_this()](Future f) {
+			tx.commit().then([this, state = shared_from_this()](Future f) {
 				UNPACK_OP_INFO();
 				if (auto err = f.error()) {
 					// commit had errors
@@ -200,7 +200,7 @@ void ResumableStateForRunWorkload::onStepSuccess() {
 					                       "ERROR",
 					                       "Post-iteration commit returned error: {}",
 					                       err.what());
-					tx.onError(err).then([this, state=shared_from_this()](Future f) {
+					tx.onError(err).then([this, state = shared_from_this()](Future f) {
 						const auto rc = handleForOnError(tx, f, "ON_ERROR");
 						if (rc == FutureRC::CONFLICT)
 							stats.incrConflictCount();

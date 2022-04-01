@@ -463,16 +463,16 @@ void runAsyncWorkload(Arguments const& args,
 			const auto key_begin = insertBegin(args.rows, worker_id, i, args.num_processes, args.async_xacts);
 			const auto key_end = insertEnd(args.rows, worker_id, i, args.num_processes, args.async_xacts);
 			auto db = databases[i % args.num_databases];
-			auto state = std::make_shared<ResumableStateForPopulate>(
-											   Logger(WorkerProcess{}, args.verbose, worker_id, i),
-											   db,
-											   db.createTransaction(),
-											   io_context,
-											   args,
-											   shm.statsSlot(worker_id, i),
-											   stopcount,
-											   key_begin,
-											   key_end);
+			auto state =
+			    std::make_shared<ResumableStateForPopulate>(Logger(WorkerProcess{}, args.verbose, worker_id, i),
+			                                                db,
+			                                                db.createTransaction(),
+			                                                io_context,
+			                                                args,
+			                                                shm.statsSlot(worker_id, i),
+			                                                stopcount,
+			                                                key_begin,
+			                                                key_end);
 			state->watch_tx.start();
 			state->watch_total.start();
 			states[i] = state;
@@ -480,7 +480,8 @@ void runAsyncWorkload(Arguments const& args,
 		while (shm.headerConst().signal.load() != SIGNAL_GREEN)
 			usleep(1000);
 		// launch [async_xacts] concurrent transactions
-		for (auto state : states) state->postNextTick();
+		for (auto state : states)
+			state->postNextTick();
 		while (stopcount.load() != args.async_xacts)
 			usleep(1000);
 		dump_samples(states);
@@ -492,24 +493,25 @@ void runAsyncWorkload(Arguments const& args,
 			    args.iteration == 0
 			        ? -1
 			        : computeThreadIters(args.iteration, worker_id, i, args.num_processes, args.async_xacts);
-			auto state = std::make_shared<ResumableStateForRunWorkload>(
-												  Logger(WorkerProcess{}, args.verbose, worker_id, i),
-			                                      db,
-			                                      db.createTransaction(),
-			                                      io_context,
-			                                      args,
-			                                      shm.statsSlot(worker_id, i),
-			                                      stopcount,
-			                                      shm.headerConst().signal,
-			                                      max_iters,
-			                                      getOpBegin(args));
+			auto state =
+			    std::make_shared<ResumableStateForRunWorkload>(Logger(WorkerProcess{}, args.verbose, worker_id, i),
+			                                                   db,
+			                                                   db.createTransaction(),
+			                                                   io_context,
+			                                                   args,
+			                                                   shm.statsSlot(worker_id, i),
+			                                                   stopcount,
+			                                                   shm.headerConst().signal,
+			                                                   max_iters,
+			                                                   getOpBegin(args));
 			states[i] = state;
 			state->watch_task.start();
 			state->watch_tx.start();
 		}
 		while (shm.headerConst().signal.load() != SIGNAL_GREEN)
 			usleep(1000);
-		for (auto state : states) state->postNextTick();
+		for (auto state : states)
+			state->postNextTick();
 		logr.debug("Launched {} concurrent transactions", states.size());
 		while (stopcount.load() != args.async_xacts)
 			usleep(1000);

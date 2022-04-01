@@ -266,7 +266,7 @@ const std::array<Operation, MAX_OP> opTable{
 	            }
 
 	            // Allocate a separate context per call to avoid multiple threads accessing
-				auto user_context = blob_granules::local_file::UserContext(args.bg_file_path);
+	            auto user_context = blob_granules::local_file::UserContext(args.bg_file_path);
 
 	            auto api_context = blob_granules::local_file::createApiContext(user_context, args.bg_materialize_files);
 
