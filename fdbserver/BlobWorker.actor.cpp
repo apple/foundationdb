@@ -1107,10 +1107,15 @@ static Version doGranuleRollback(Reference<GranuleMetadata> metadata,
 		}
 		metadata->pendingDeltaVersion = cfRollbackVersion;
 		if (BW_DEBUG) {
-			fmt::print("[{0} - {1}) rollback discarding all {2} in-memory mutations\n",
+			fmt::print("[{0} - {1}) rollback discarding all {2} in-memory mutations",
 			           metadata->keyRange.begin.printable(),
 			           metadata->keyRange.end.printable(),
 			           metadata->currentDeltas.size());
+			if (metadata->currentDeltas.size()) {
+				fmt::print(
+				    " {0} - {1}", metadata->currentDeltas.front().version, metadata->currentDeltas.back().version);
+			}
+			fmt::print("\n");
 		}
 
 		// discard all in-memory mutations
@@ -1138,6 +1143,8 @@ static Version doGranuleRollback(Reference<GranuleMetadata> metadata,
 
 		// FIXME: could binary search?
 		int mIdx = metadata->currentDeltas.size() - 1;
+		Version firstDiscarded = invalidVersion;
+		Version lastDiscarded = invalidVersion;
 		while (mIdx >= 0) {
 			if (metadata->currentDeltas[mIdx].version <= rollbackVersion) {
 				break;
@@ -1145,19 +1152,37 @@ static Version doGranuleRollback(Reference<GranuleMetadata> metadata,
 			for (auto& m : metadata->currentDeltas[mIdx].mutations) {
 				metadata->bufferedDeltaBytes -= m.totalSize();
 			}
+			if (firstDiscarded == invalidVersion) {
+				firstDiscarded = metadata->currentDeltas[mIdx].version;
+			}
+			lastDiscarded = metadata->currentDeltas[mIdx].version;
 			mIdx--;
 		}
-		mIdx++;
+
 		if (BW_DEBUG) {
-			fmt::print("[{0} - {1}) rollback discarding {2} in-memory mutations, {3} mutations and {4} bytes left\n",
+			fmt::print("[{0} - {1}) rollback discarding {2} in-memory mutations",
 			           metadata->keyRange.begin.printable(),
 			           metadata->keyRange.end.printable(),
-			           metadata->currentDeltas.size() - mIdx,
-			           mIdx,
-			           metadata->bufferedDeltaBytes);
+			           metadata->currentDeltas.size() - mIdx - 1);
+
+			if (firstDiscarded != invalidVersion) {
+				fmt::print(" {0} - {1}", lastDiscarded, firstDiscarded);
+			}
+
+			fmt::print(", {0} mutations", mIdx);
+			if (mIdx >= 0) {
+				fmt::print(
+				    " ({0} - {1})", metadata->currentDeltas.front().version, metadata->currentDeltas[mIdx].version);
+			}
+			fmt::print(" and {0} bytes left\n", metadata->bufferedDeltaBytes);
 		}
 
-		metadata->currentDeltas.resize(metadata->currentDeltas.arena(), mIdx);
+		if (mIdx < 0) {
+			metadata->currentDeltas = Standalone<GranuleDeltas>();
+			metadata->bufferedDeltaBytes = 0;
+		} else {
+			metadata->currentDeltas.resize(metadata->currentDeltas.arena(), mIdx + 1);
+		}
 
 		// delete all deltas in rollback range, but we can optimize here to just skip the uncommitted mutations
 		// directly and immediately pop the rollback out of inProgress to completed
@@ -1611,6 +1636,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 									metadata->activeCFData.set(cfData);
 
 									justDidRollback = true;
+									lastDeltaVersion = cfRollbackVersion;
 									break;
 								}
 							}
