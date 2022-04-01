@@ -991,7 +991,8 @@ static void scanPackets(TransportData* transport,
                         Arena& arena,
                         NetworkAddress const& peerAddress,
                         ProtocolVersion peerProtocolVersion,
-                        Future<Void> disconnect) {
+                        Future<Void> disconnect,
+                        bool isStableConnection) {
 	// Find each complete packet in the given byte range and queue a ready task to deliver it.
 	// Remove the complete packets from the range by increasing unprocessed_begin.
 	// There won't be more than 64K of data plus one packet, so this shouldn't take a long time.
@@ -1030,7 +1031,7 @@ static void scanPackets(TransportData* transport,
 
 		if (checksumEnabled) {
 			bool isBuggifyEnabled = false;
-			if (g_network->isSimulated() &&
+			if (g_network->isSimulated() && !isStableConnection &&
 			    g_network->now() - g_simulator.lastConnectionFailure > g_simulator.connectionFailuresDisableDuration &&
 			    BUGGIFY_WITH_PROB(0.0001)) {
 				g_simulator.lastConnectionFailure = g_network->now();
@@ -1057,7 +1058,8 @@ static void scanPackets(TransportData* transport,
 				if (isBuggifyEnabled) {
 					TraceEvent(SevInfo, "ChecksumMismatchExp")
 					    .detail("PacketChecksum", packetChecksum)
-					    .detail("CalculatedChecksum", calculatedChecksum);
+					    .detail("CalculatedChecksum", calculatedChecksum)
+					    .detail("PeerAddress", peerAddress.toString());
 				} else {
 					TraceEvent(SevWarnAlways, "ChecksumMismatchUnexp")
 					    .detail("PacketChecksum", packetChecksum)
@@ -1305,7 +1307,8 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 						            arena,
 						            peerAddress,
 						            peerProtocolVersion,
-						            peer->disconnect.getFuture());
+						            peer->disconnect.getFuture(),
+						            g_network->isSimulated() && conn->isStableConnection());
 					} else {
 						unprocessed_begin = unprocessed_end;
 						peer->resetPing.trigger();
@@ -1364,6 +1367,11 @@ ACTOR static Future<Void> listen(TransportData* self, NetworkAddress listenAddr)
 	state ActorCollectionNoErrors
 	    incoming; // Actors monitoring incoming connections that haven't yet been associated with a peer
 	state Reference<IListener> listener = INetworkConnections::net()->listen(listenAddr);
+	if (!g_network->isSimulated() && self->localAddresses.address.port == 0) {
+		TraceEvent(SevInfo, "UpdatingListenAddress")
+		    .detail("AssignedListenAddress", listener->getListenAddress().toString());
+		self->localAddresses.address = listener->getListenAddress();
+	}
 	state uint64_t connectionCount = 0;
 	try {
 		loop {
