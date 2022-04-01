@@ -703,6 +703,9 @@ void* loadFunction(void* lib, const char* func_name);
 
 std::string exePath();
 
+// get the absolute path
+std::string getExecPath();
+
 #ifdef _WIN32
 inline static int ctzll(uint64_t value) {
 	unsigned long count = 0;

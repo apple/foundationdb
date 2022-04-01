@@ -87,6 +87,7 @@ ERROR( blob_granule_file_load_error, 1063, "Error loading a blob file during gra
 ERROR( blob_granule_transaction_too_old, 1064, "Read version is older than blob granule history supports" )
 ERROR( blob_manager_replaced, 1065, "This blob manager has been replaced." )
 ERROR( change_feed_popped, 1066, "Tried to read a version older than what has been popped from the change feed" )
+ERROR( remote_kvs_cancelled, 1067, "The remote key-value store is cancelled" )
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )
@@ -113,6 +114,7 @@ ERROR( dd_tracker_cancelled, 1215, "The data distribution tracker has been cance
 ERROR( failed_to_progress, 1216, "Process has failed to make sufficient progress" )
 ERROR( invalid_cluster_id, 1217, "Attempted to join cluster with a different cluster ID" )
 ERROR( restart_cluster_controller, 1218, "Restart cluster controller process" )
+ERROR( please_reboot_remote_kv_store, 1219, "Need to reboot the storage engine process as it died abnormally")
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )
