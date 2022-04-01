@@ -3842,7 +3842,7 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 
 		// If more blocks need to be dispatched in this batch then add a follow-on task that is part of the allPartsDone
 		// group which will won't wait to run and will add more block tasks.
-		if (remainingInBatch > 0)
+		if (remainingInBatch > 0) {
 			addTaskFutures.push_back(RestoreDispatchTaskFunc::addTask(tr,
 			                                                          taskBucket,
 			                                                          task,
@@ -3852,7 +3852,7 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 			                                                          batchSize,
 			                                                          remainingInBatch,
 			                                                          TaskCompletionKey::joinWith(allPartsDone)));
-		else // Otherwise, add a follow-on task to continue after all previously dispatched blocks are done
+		} else { // Otherwise, add a follow-on task to continue after all previously dispatched blocks are done
 			addTaskFutures.push_back(RestoreDispatchTaskFunc::addTask(tr,
 			                                                          taskBucket,
 			                                                          task,
@@ -3863,6 +3863,7 @@ struct RestoreDispatchTaskFunc : RestoreTaskFuncBase {
 			                                                          0,
 			                                                          TaskCompletionKey::noSignal(),
 			                                                          allPartsDone));
+		}
 
 		wait(waitForAll(addTaskFutures));
 

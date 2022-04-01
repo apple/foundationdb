@@ -193,37 +193,15 @@ Standalone<VectorRef<KeyRangeRef>> getLogRanges(Version beginVersion,
 	return ret;
 }
 
-Standalone<VectorRef<KeyRangeRef>> getApplyRanges(Version beginVersion, Version endVersion, Key backupUid) {
-	Standalone<VectorRef<KeyRangeRef>> ret;
-
-	Key baLogRangePrefix = backupUid.withPrefix(applyLogKeys.begin);
-
-	//TraceEvent("GetLogRanges").detail("BackupUid", backupUid).detail("Prefix", baLogRangePrefix);
-
-	for (int64_t vblock = beginVersion / CLIENT_KNOBS->APPLY_BLOCK_SIZE;
-	     vblock < (endVersion + CLIENT_KNOBS->APPLY_BLOCK_SIZE - 1) / CLIENT_KNOBS->APPLY_BLOCK_SIZE;
-	     ++vblock) {
-		int64_t tb = vblock * CLIENT_KNOBS->APPLY_BLOCK_SIZE / CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE;
-		uint64_t bv = bigEndian64(std::max(beginVersion, vblock * CLIENT_KNOBS->APPLY_BLOCK_SIZE));
-		uint64_t ev = bigEndian64(std::min(endVersion, (vblock + 1) * CLIENT_KNOBS->APPLY_BLOCK_SIZE));
-		uint32_t data = tb & 0xffffffff;
-		uint8_t hash = (uint8_t)hashlittle(&data, sizeof(uint32_t), 0);
-
-		Key vblockPrefix = StringRef(&hash, sizeof(uint8_t)).withPrefix(baLogRangePrefix);
-
-		ret.push_back_deep(ret.arena(),
-		                   KeyRangeRef(StringRef((uint8_t*)&bv, sizeof(uint64_t)).withPrefix(vblockPrefix),
-		                               StringRef((uint8_t*)&ev, sizeof(uint64_t)).withPrefix(vblockPrefix)));
-	}
-
-	return ret;
+uint8_t getHash(Version version) {
+	int64_t vblock = (version - 1) / CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE;
+	uint32_t data = vblock & 0xffffffff;
+	return (uint8_t)hashlittle(&data, sizeof(uint32_t), 0);
 }
 
 Key getApplyKey(Version version, Key backupUid) {
-	int64_t vblock = (version - 1) / CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE;
 	uint64_t v = bigEndian64(version);
-	uint32_t data = vblock & 0xffffffff;
-	uint8_t hash = (uint8_t)hashlittle(&data, sizeof(uint32_t), 0);
+	uint8_t hash = getHash(version);
 	Key k1 = StringRef((uint8_t*)&v, sizeof(uint64_t)).withPrefix(StringRef(&hash, sizeof(uint8_t)));
 	Key k2 = k1.withPrefix(backupUid);
 	return k2.withPrefix(applyLogKeys.begin);
@@ -279,8 +257,9 @@ void decodeBackupLogValue(Arena& arena,
 		offset += sizeof(uint32_t);
 		uint32_t consumed = 0;
 
-		if (totalBytes + offset > value.size())
+		if (totalBytes + offset > value.size()) {
 			throw restore_missing_data();
+		}
 
 		int originalOffset = offset;
 
@@ -583,93 +562,51 @@ ACTOR Future<Void> readCommitted(Database cx,
 	}
 }
 
-Future<Void> readCommitted(Database cx,
-                           PromiseStream<RCGroup> results,
-                           Reference<FlowLock> lock,
-                           KeyRangeRef range,
-                           std::function<std::pair<uint64_t, uint32_t>(Key key)> groupBy) {
-	return readCommitted(
-	    cx, results, Void(), lock, range, groupBy, Terminator::True, AccessSystemKeys::True, LockAware::True);
-}
+ACTOR Future<Void> restoreData(Database cx,
+                               RestoreGroup restoreGroup,
+                               Key uid,
+                               Key addPrefix,
+                               Key removePrefix,
+                               RequestStream<CommitTransactionRequest> commit,
+                               NotifiedVersion* committedVersion,
+                               Optional<Version> endVersion,
+                               PromiseStream<Future<Void>> addActor,
+                               FlowLock* commitLock,
+                               Reference<KeyRangeMap<Version>> keyVersion) {
+	state CommitTransactionRequest req;
+	state int mutationSize = 0;
+	state Version largestVersion = ::invalidVersion;
 
-ACTOR Future<int> dumpData(Database cx,
-                           PromiseStream<RCGroup> results,
-                           Reference<FlowLock> lock,
-                           Key uid,
-                           Key addPrefix,
-                           Key removePrefix,
-                           RequestStream<CommitTransactionRequest> commit,
-                           NotifiedVersion* committedVersion,
-                           Optional<Version> endVersion,
-                           Key rangeBegin,
-                           PromiseStream<Future<Void>> addActor,
-                           FlowLock* commitLock,
-                           Reference<KeyRangeMap<Version>> keyVersion) {
-	state Version lastVersion = invalidVersion;
-	state bool endOfStream = false;
-	state int totalBytes = 0;
-	loop {
-		state CommitTransactionRequest req;
-		state Version newBeginVersion = invalidVersion;
-		state int mutationSize = 0;
-		loop {
-			try {
-				RCGroup group = waitNext(results.getFuture());
-				lock->release(group.items.expectedSize());
-
-				BinaryWriter bw(Unversioned());
-				for (int i = 0; i < group.items.size(); ++i) {
-					bw.serializeBytes(group.items[i].value);
-				}
-				decodeBackupLogValue(req.arena,
-				                     req.transaction.mutations,
-				                     mutationSize,
-				                     bw.toValue(),
-				                     addPrefix,
-				                     removePrefix,
-				                     group.groupKey,
-				                     keyVersion);
-				newBeginVersion = group.groupKey + 1;
-				if (mutationSize >= CLIENT_KNOBS->BACKUP_LOG_WRITE_BATCH_MAX_SIZE) {
-					break;
-				}
-			} catch (Error& e) {
-				if (e.code() == error_code_end_of_stream) {
-					if (endVersion.present() && endVersion.get() > lastVersion && endVersion.get() > newBeginVersion) {
-						newBeginVersion = endVersion.get();
-					}
-					if (newBeginVersion == invalidVersion)
-						return totalBytes;
-					endOfStream = true;
-					break;
-				}
-				throw;
-			}
-		}
-
-		Key applyBegin = uid.withPrefix(applyMutationsBeginRange.begin);
-		Key versionKey = BinaryWriter::toValue(newBeginVersion, Unversioned());
-		Key rangeEnd = getApplyKey(newBeginVersion, uid);
-
-		req.transaction.mutations.push_back_deep(req.arena, MutationRef(MutationRef::SetValue, applyBegin, versionKey));
-		req.transaction.write_conflict_ranges.push_back_deep(req.arena, singleKeyRange(applyBegin));
-		req.transaction.mutations.push_back_deep(req.arena, MutationRef(MutationRef::ClearRange, rangeBegin, rangeEnd));
-		req.transaction.write_conflict_ranges.push_back_deep(req.arena, singleKeyRange(rangeBegin));
-
-		// The commit request contains no read conflict ranges, so regardless of what read version we
-		// choose, it's impossible for us to get a transaction_too_old error back, and it's impossible
-		// for our transaction to be aborted due to conflicts.
-		req.transaction.read_snapshot = committedVersion->get();
-		req.flags = req.flags | CommitTransactionRequest::FLAG_IS_LOCK_AWARE;
-
-		totalBytes += mutationSize;
-		wait(commitLock->take(TaskPriority::DefaultYield, mutationSize));
-		addActor.send(commitLock->releaseWhen(success(commit.getReply(req)), mutationSize));
-
-		if (endOfStream) {
-			return totalBytes;
-		}
+	for (const auto& [groupKey, value] : restoreGroup.data()) {
+		decodeBackupLogValue(
+		    req.arena, req.transaction.mutations, mutationSize, value, addPrefix, removePrefix, groupKey, keyVersion);
+		largestVersion = groupKey;
 	}
+
+	if (endVersion.present() && endVersion.get() > largestVersion) {
+		largestVersion = endVersion.get();
+	}
+
+	Key applyBegin = uid.withPrefix(applyMutationsBeginRange.begin);
+	Key versionKey = BinaryWriter::toValue(largestVersion + 1, Unversioned());
+	Key rangeBegin = getApplyKey(restoreGroup.begin, uid);
+	Key rangeEnd = getApplyKey(largestVersion, uid);
+	ASSERT(rangeBegin <= rangeEnd);
+
+	req.transaction.mutations.push_back_deep(req.arena, MutationRef(MutationRef::SetValue, applyBegin, versionKey));
+	req.transaction.write_conflict_ranges.push_back_deep(req.arena, singleKeyRange(applyBegin));
+	req.transaction.mutations.push_back_deep(req.arena, MutationRef(MutationRef::ClearRange, rangeBegin, rangeEnd));
+	req.transaction.write_conflict_ranges.push_back_deep(req.arena, singleKeyRange(rangeBegin));
+
+	// The commit request contains no read conflict ranges, so regardless of what read version we
+	// choose, it's impossible for us to get a transaction_too_old error back, and it's impossible
+	// for our transaction to be aborted due to conflicts.
+	req.transaction.read_snapshot = committedVersion->get();
+	req.flags = req.flags | CommitTransactionRequest::FLAG_IS_LOCK_AWARE;
+
+	wait(commitLock->take(TaskPriority::DefaultYield, mutationSize));
+	addActor.send(commitLock->releaseWhen(success(commit.getReply(req)), mutationSize));
+	return Void();
 }
 
 ACTOR Future<Void> coalesceKeyVersionCache(Key uid,
@@ -730,70 +667,100 @@ ACTOR Future<Void> applyMutations(Database cx,
                                   Reference<KeyRangeMap<Version>> keyVersion) {
 	state FlowLock commitLock(CLIENT_KNOBS->BACKUP_LOCK_BYTES);
 	state PromiseStream<Future<Void>> addActor;
-	state Future<Void> error = actorCollection(addActor.getFuture());
-	state int maxBytes = CLIENT_KNOBS->APPLY_MIN_LOCK_BYTES;
+	state BinaryWriter bw(Unversioned());
 
 	keyVersion->insert(metadataVersionKey, 0);
 
+	if (beginVersion >= *endVersion) {
+		return Void();
+	}
+
+	state Reference<MutationLogReader> reader =
+	    wait(MutationLogReader::Create(cx, beginVersion, *endVersion, uid, applyLogKeys.begin, /*pipelineDepth=*/1));
+	state RestoreGroup restoreGroup = RestoreGroup();
+	state uint64_t latestGroupKey = ULLONG_MAX;
+	state Optional<uint8_t> latestHash;
 	try {
 		loop {
-			if (beginVersion >= *endVersion) {
-				wait(commitLock.take(TaskPriority::DefaultYield, CLIENT_KNOBS->BACKUP_LOCK_BYTES));
-				commitLock.release(CLIENT_KNOBS->BACKUP_LOCK_BYTES);
-				if (beginVersion >= *endVersion) {
-					return Void();
+			state RangeResult results = wait(reader->getNext());
+
+			state int i;
+			for (i = 0; i < results.size(); ++i) {
+				state KeyValueRef result = results[i];
+				state uint64_t groupKey = decodeBKMutationLogKey(result.key).first;
+				state uint8_t hash = getHash(groupKey);
+
+				if (!restoreGroup.populated) {
+					restoreGroup.populated = true;
+					restoreGroup.begin = groupKey;
+					latestGroupKey = groupKey;
+					latestHash = hash;
+				} else if (latestGroupKey != groupKey) {
+					restoreGroup.addData(latestGroupKey, bw.toValue());
+
+					if (restoreGroup.totalSize >= CLIENT_KNOBS->BACKUP_LOG_WRITE_BATCH_MAX_SIZE ||
+					    (latestHash.present() && latestHash.get() != hash)) {
+						wait(restoreData(cx,
+						                 restoreGroup,
+						                 uid,
+						                 addPrefix,
+						                 removePrefix,
+						                 commit,
+						                 committedVersion,
+						                 Optional<Version>(),
+						                 addActor,
+						                 &commitLock,
+						                 keyVersion));
+						wait(coalesceKeyVersionCache(
+						    uid, latestGroupKey, keyVersion, commit, committedVersion, addActor, &commitLock));
+
+						restoreGroup = RestoreGroup();
+						restoreGroup.populated = true;
+						restoreGroup.begin = groupKey;
+					}
+
+					latestGroupKey = groupKey;
+					latestHash = hash;
+					bw = BinaryWriter(Unversioned());
 				}
-			}
-
-			int rangeCount = std::max(1, CLIENT_KNOBS->APPLY_MAX_LOCK_BYTES / maxBytes);
-			state Version newEndVersion = std::min(*endVersion,
-			                                       ((beginVersion / CLIENT_KNOBS->APPLY_BLOCK_SIZE) + rangeCount) *
-			                                           CLIENT_KNOBS->APPLY_BLOCK_SIZE);
-			state Standalone<VectorRef<KeyRangeRef>> ranges = getApplyRanges(beginVersion, newEndVersion, uid);
-			state size_t idx;
-			state std::vector<PromiseStream<RCGroup>> results;
-			state std::vector<Future<Void>> rc;
-			state std::vector<Reference<FlowLock>> locks;
-
-			for (int i = 0; i < ranges.size(); ++i) {
-				results.push_back(PromiseStream<RCGroup>());
-				locks.push_back(makeReference<FlowLock>(
-				    std::max(CLIENT_KNOBS->APPLY_MAX_LOCK_BYTES / ranges.size(), CLIENT_KNOBS->APPLY_MIN_LOCK_BYTES)));
-				rc.push_back(readCommitted(cx, results[i], locks[i], ranges[i], decodeBKMutationLogKey));
-			}
-
-			maxBytes = std::max<int>(maxBytes * CLIENT_KNOBS->APPLY_MAX_DECAY_RATE, CLIENT_KNOBS->APPLY_MIN_LOCK_BYTES);
-			for (idx = 0; idx < ranges.size(); ++idx) {
-				int bytes = wait(dumpData(cx,
-				                          results[idx],
-				                          locks[idx],
-				                          uid,
-				                          addPrefix,
-				                          removePrefix,
-				                          commit,
-				                          committedVersion,
-				                          idx == ranges.size() - 1 ? newEndVersion : Optional<Version>(),
-				                          ranges[idx].begin,
-				                          addActor,
-				                          &commitLock,
-				                          keyVersion));
-				maxBytes = std::max<int>(CLIENT_KNOBS->APPLY_MAX_INCREASE_FACTOR * bytes, maxBytes);
-				if (error.isError())
-					throw error.getError();
-			}
-
-			wait(coalesceKeyVersionCache(
-			    uid, newEndVersion, keyVersion, commit, committedVersion, addActor, &commitLock));
-			beginVersion = newEndVersion;
-			if (BUGGIFY) {
-				wait(delay(2.0));
+				bw.serializeBytes(result.value);
 			}
 		}
 	} catch (Error& e) {
-		TraceEvent(e.code() == error_code_restore_missing_data ? SevWarnAlways : SevError, "ApplyMutationsError")
-		    .error(e);
-		throw;
+		if (e.code() != error_code_end_of_stream) {
+			throw e;
+		}
 	}
+
+	if (restoreGroup.populated) {
+		restoreGroup.addData(latestGroupKey, bw.toValue());
+		wait(restoreData(cx,
+		                 restoreGroup,
+		                 uid,
+		                 addPrefix,
+		                 removePrefix,
+		                 commit,
+		                 committedVersion,
+		                 Optional<Version>(),
+		                 addActor,
+		                 &commitLock,
+		                 keyVersion));
+	}
+	wait(coalesceKeyVersionCache(uid, *endVersion, keyVersion, commit, committedVersion, addActor, &commitLock));
+
+	state CommitTransactionRequest req;
+	Key applyBegin = uid.withPrefix(applyMutationsBeginRange.begin);
+	Key versionKey = BinaryWriter::toValue(*endVersion, Unversioned());
+	req.transaction.mutations.push_back_deep(req.arena, MutationRef(MutationRef::SetValue, applyBegin, versionKey));
+	req.transaction.write_conflict_ranges.push_back_deep(req.arena, singleKeyRange(applyBegin));
+	req.transaction.read_snapshot = committedVersion->get();
+	req.flags = req.flags | CommitTransactionRequest::FLAG_IS_LOCK_AWARE;
+	wait(commitLock.take(TaskPriority::DefaultYield, 0));
+	addActor.send(commitLock.releaseWhen(success(commit.getReply(req)), 0));
+
+	wait(commitLock.take(TaskPriority::DefaultYield, CLIENT_KNOBS->BACKUP_LOCK_BYTES));
+	commitLock.release(CLIENT_KNOBS->BACKUP_LOCK_BYTES);
+	return Void();
 }
 
 ACTOR static Future<Void> _eraseLogData(Reference<ReadYourWritesTransaction> tr,

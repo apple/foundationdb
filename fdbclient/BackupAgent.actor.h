@@ -26,6 +26,7 @@
 #define FDBCLIENT_BACKUP_AGENT_ACTOR_H
 
 #include "flow/flow.h"
+#include "fdbclient/MutationLogReader.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/TaskBucket.h"
 #include "fdbclient/Notified.h"
@@ -513,6 +514,25 @@ public:
 
 using RangeResultWithVersion = std::pair<RangeResult, Version>;
 
+struct RestoreGroup {
+	bool populated;
+	uint64_t begin;
+	uint64_t totalSize;
+	Arena arena;
+
+	RestoreGroup() : populated(false), begin(ULLONG_MAX), totalSize(0), data_() {}
+
+	const std::map<uint64_t, ValueRef>& data() const { return data_; }
+
+	void addData(uint64_t key, const ValueRef& value) {
+		totalSize += value.size();
+		data_[key] = StringRef(arena, value);
+	}
+
+private:
+	std::map<uint64_t, ValueRef> data_;
+};
+
 struct RCGroup {
 	RangeResult items;
 	Version version;
@@ -554,6 +574,16 @@ ACTOR Future<Void> readCommitted(Database cx,
                                  AccessSystemKeys systemAccess = AccessSystemKeys::False,
                                  LockAware lockAware = LockAware::False);
 ACTOR Future<Void> readCommitted(Database cx,
+                                 PromiseStream<RCGroup> results,
+                                 Future<Void> active,
+                                 Reference<FlowLock> lock,
+                                 KeyRangeRef range,
+                                 std::function<std::pair<uint64_t, uint32_t>(Key key)> groupBy,
+                                 Terminator terminator = Terminator::True,
+                                 AccessSystemKeys systemAccess = AccessSystemKeys::False,
+                                 LockAware lockAware = LockAware::False);
+ACTOR Future<Void> readCommitted(Database cx,
+                                 Reference<MutationLogReader> reader,
                                  PromiseStream<RCGroup> results,
                                  Future<Void> active,
                                  Reference<FlowLock> lock,
