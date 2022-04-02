@@ -949,11 +949,9 @@ std::map<std::string, std::string> fillInRecords(int n) {
 	return data;
 }
 
-GetMappedRangeResult getMappedIndexEntries(int beginId, int endId, fdb::Transaction& tr) {
+GetMappedRangeResult getMappedIndexEntries(int beginId, int endId, fdb::Transaction& tr, std::string mapper) {
 	std::string indexEntryKeyBegin = indexEntryKey(beginId);
 	std::string indexEntryKeyEnd = indexEntryKey(endId);
-
-	std::string mapper = Tuple().append(prefix).append(RECORD).append("{K[3]}"_sr).append("{...}"_sr).pack().toString();
 
 	return get_mapped_range(
 	    tr,
@@ -967,6 +965,11 @@ GetMappedRangeResult getMappedIndexEntries(int beginId, int endId, fdb::Transact
 	    /* iteration */ 0,
 	    /* snapshot */ false,
 	    /* reverse */ 0);
+}
+
+GetMappedRangeResult getMappedIndexEntries(int beginId, int endId, fdb::Transaction& tr) {
+	std::string mapper = Tuple().append(prefix).append(RECORD).append("{K[3]}"_sr).append("{...}"_sr).pack().toString();
+	return getMappedIndexEntries(beginId, endId, tr, mapper);
 }
 
 TEST_CASE("fdb_transaction_get_mapped_range") {
@@ -1009,7 +1012,6 @@ TEST_CASE("fdb_transaction_get_mapped_range") {
 TEST_CASE("fdb_transaction_get_mapped_range_restricted_to_serializable") {
 	std::string mapper = Tuple().append(prefix).append(RECORD).append("{K[3]}"_sr).pack().toString();
 	fdb::Transaction tr(db);
-	fdb_check(tr.set_option(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE, nullptr, 0));
 	auto result = get_mapped_range(
 	    tr,
 	    FDB_KEYSEL_FIRST_GREATER_OR_EQUAL((const uint8_t*)indexEntryKey(0).c_str(), indexEntryKey(0).size()),
@@ -1039,9 +1041,34 @@ TEST_CASE("fdb_transaction_get_mapped_range_restricted_to_ryw_enable") {
 	    /* target_bytes */ 0,
 	    /* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL,
 	    /* iteration */ 0,
-	    /* snapshot */ true,
+	    /* snapshot */ false,
 	    /* reverse */ 0);
 	ASSERT(result.err == error_code_unsupported_operation);
+}
+
+void assertNotTuple(std::string str) {
+	try {
+		Tuple::unpack(str);
+	} catch (Error& e) {
+		return;
+	}
+	UNREACHABLE();
+}
+
+TEST_CASE("fdb_transaction_get_mapped_range_fail_on_mapper_not_tuple") {
+	// A string that cannot be parsed as tuple.
+	// "\x15:\x152\x15E\x15\x09\x15\x02\x02MySimpleRecord$repeater-version\x00\x15\x013\x00\x00\x00\x00\x1aU\x90\xba\x00\x00\x00\x02\x15\x04"
+	std::string mapper = {
+		'\x15', ':',    '\x15', '2', '\x15', 'E',    '\x15', '\t',   '\x15', '\x02', '\x02', 'M',
+		'y',    'S',    'i',    'm', 'p',    'l',    'e',    'R',    'e',    'c',    'o',    'r',
+		'd',    '$',    'r',    'e', 'p',    'e',    'a',    't',    'e',    'r',    '-',    'v',
+		'e',    'r',    's',    'i', 'o',    'n',    '\x00', '\x15', '\x01', '3',    '\x00', '\x00',
+		'\x00', '\x00', '\x1a', 'U', '\x90', '\xba', '\x00', '\x00', '\x00', '\x02', '\x15', '\x04'
+	};
+	assertNotTuple(mapper);
+	fdb::Transaction tr(db);
+	auto result = getMappedIndexEntries(1, 3, tr, mapper);
+	ASSERT(result.err == error_code_mapper_not_tuple);
 }
 
 TEST_CASE("fdb_transaction_get_range reverse") {

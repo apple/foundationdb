@@ -273,7 +273,8 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 
 ACTOR Future<Standalone<VectorRef<KeyRef>>> splitRange(Reference<BlobManagerData> bmData,
                                                        KeyRange range,
-                                                       bool writeHot) {
+                                                       bool writeHot,
+                                                       bool initialSplit) {
 	try {
 		if (BM_DEBUG) {
 			fmt::print("Splitting new range [{0} - {1}): {2}\n",
@@ -290,8 +291,24 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitRange(Reference<BlobManagerData
 			           estimated.bytes);
 		}
 
+		int64_t splitThreshold = SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES;
+		if (!initialSplit) {
+			// If we have X MB target granule size, we want to do the initial split to split up into X MB chunks.
+			// However, if we already have a granule that we are evaluating for split, if we split it as soon as it is
+			// larger than X MB, we will end up with 2 X/2 MB granules.
+			// To ensure an average size of X MB, we split granules at 4/3*X, so that they range between 2/3*X and
+			// 4/3*X, averaging X
+			splitThreshold = (splitThreshold * 4) / 3;
+		}
+		// if write-hot, we want to be able to split smaller, but not infinitely. Allow write-hot granules to be 3x
+		// smaller
+		// TODO knob?
+		// TODO: re-evaluate after we have granule merging?
+		if (writeHot) {
+			splitThreshold /= 3;
+		}
 		TEST(writeHot); // Change feed write hot split
-		if (estimated.bytes > SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES || writeHot) {
+		if (estimated.bytes > splitThreshold) {
 			// only split on bytes and write rate
 			state StorageMetrics splitMetrics;
 			splitMetrics.bytes = SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES;
@@ -325,6 +342,7 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitRange(Reference<BlobManagerData
 			ASSERT(keys.back() == range.end);
 			return keys;
 		} else {
+			TEST(writeHot); // Not splitting write-hot because granules would be too small
 			if (BM_DEBUG) {
 				printf("Not splitting range\n");
 			}
@@ -791,7 +809,7 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 				// Divide new ranges up into equal chunks by using SS byte sample
 				for (KeyRangeRef range : rangesToAdd) {
 					TraceEvent("ClientBlobRangeAdded", bmData->id).detail("Range", range);
-					splitFutures.push_back(splitRange(bmData, range, false));
+					splitFutures.push_back(splitRange(bmData, range, false, true));
 				}
 
 				for (auto f : splitFutures) {
@@ -892,7 +910,7 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 	state Standalone<VectorRef<KeyRef>> newRanges;
 
 	// first get ranges to split
-	Standalone<VectorRef<KeyRef>> _newRanges = wait(splitRange(bmData, granuleRange, writeHot));
+	Standalone<VectorRef<KeyRef>> _newRanges = wait(splitRange(bmData, granuleRange, writeHot, false));
 	newRanges = _newRanges;
 
 	ASSERT(newRanges.size() >= 2);

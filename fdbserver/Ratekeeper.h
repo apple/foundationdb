@@ -59,6 +59,7 @@ public:
 	UID id;
 	LocalityData locality;
 	StorageQueuingMetricsReply lastReply;
+	bool acceptingRequests;
 	Smoother smoothDurableBytes, smoothInputBytes, verySmoothDurableBytes;
 	Smoother smoothDurableVersion, smoothLatestVersion;
 	Smoother smoothFreeSpace;

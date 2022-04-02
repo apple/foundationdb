@@ -650,18 +650,30 @@ public:
 	void addref() override { ThreadSafeReferenceCounted<MultiVersionTenant>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<MultiVersionTenant>::delref(); }
 
-	Reference<ThreadSafeAsyncVar<Reference<ITenant>>> tenantVar;
-	const Standalone<StringRef> tenantName;
+	// A struct that manages the current connection state of the MultiVersionDatabase. This wraps the underlying
+	// IDatabase object that is currently interacting with the cluster.
+	struct TenantState : ThreadSafeReferenceCounted<TenantState> {
+		TenantState(Reference<MultiVersionDatabase> db, StringRef tenantName);
 
-private:
-	Reference<MultiVersionDatabase> db;
+		// Creates a new underlying tenant object whenever the database connection changes. This change is signaled
+		// to open transactions via an AsyncVar.
+		void updateTenant();
 
-	Mutex tenantLock;
-	ThreadFuture<Void> tenantUpdater;
+		// Cleans up local state to break reference cycles
+		void close();
 
-	// Creates a new underlying tenant object whenever the database connection changes. This change is signaled
-	// to open transactions via an AsyncVar.
-	void updateTenant();
+		Reference<ThreadSafeAsyncVar<Reference<ITenant>>> tenantVar;
+		const Standalone<StringRef> tenantName;
+
+		Reference<MultiVersionDatabase> db;
+
+		Mutex tenantLock;
+		ThreadFuture<Void> tenantUpdater;
+
+		bool closed;
+	};
+
+	Reference<TenantState> tenantState;
 };
 
 // An implementation of IDatabase that wraps a database created either locally or through a dynamically loaded

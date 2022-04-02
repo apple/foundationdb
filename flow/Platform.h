@@ -275,7 +275,7 @@ double
 timer(); // Returns the system real time clock with high precision.  May jump around when system time is adjusted!
 double timer_monotonic(); // Returns a high precision monotonic clock which is adjusted to be kind of similar to timer()
                           // at startup, but might not be a globally accurate time.
-uint64_t timer_int(); // Return timer as uint64_t
+uint64_t timer_int(); // Return timer as uint64_t representing epoch nanoseconds
 
 void getLocalTime(const time_t* timep, struct tm* result);
 
@@ -702,6 +702,9 @@ void closeLibrary(void* handle);
 void* loadFunction(void* lib, const char* func_name);
 
 std::string exePath();
+
+// get the absolute path
+std::string getExecPath();
 
 #ifdef _WIN32
 inline static int ctzll(uint64_t value) {

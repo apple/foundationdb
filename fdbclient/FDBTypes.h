@@ -667,6 +667,7 @@ struct GetRangeLimits {
 };
 
 struct RangeResultRef : VectorRef<KeyValueRef> {
+	constexpr static FileIdentifier file_identifier = 3985192;
 	bool more; // True if (but not necessarily only if) values remain in the *key* range requested (possibly beyond the
 	           // limits requested) False implies that no such values remain
 	Optional<KeyRef> readThrough; // Only present when 'more' is true. When present, this value represent the end (or
@@ -973,6 +974,7 @@ struct TLogSpillType {
 
 // Contains the amount of free and total space for a storage server, in bytes
 struct StorageBytes {
+	constexpr static FileIdentifier file_identifier = 3928581;
 	// Free space on the filesystem
 	int64_t free;
 	// Total space on the filesystem
@@ -1386,7 +1388,7 @@ struct StorageMetadataType {
 	StorageMetadataType() : createdTime(0) {}
 	StorageMetadataType(uint64_t t) : createdTime(t) {}
 
-	static uint64_t currentTime() { return g_network->timer() * 1e9; }
+	static uint64_t currentTime() { return g_network->timer_int(); }
 
 	// To change this serialization, ProtocolVersion::StorageMetadata must be updated, and downgrades need
 	// to be considered

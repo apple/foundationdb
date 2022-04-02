@@ -236,6 +236,14 @@ public:
 	double DD_FAILURE_TIME;
 	double DD_ZERO_HEALTHY_TEAM_DELAY;
 
+	// Run storage enginee on a child process on the same machine with storage process
+	bool REMOTE_KV_STORE;
+	// A delay to avoid race on file resources if the new kv store process started immediately after the previous kv
+	// store process died
+	double REMOTE_KV_STORE_INIT_DELAY;
+	// max waiting time for the remote kv store to initialize
+	double REMOTE_KV_STORE_MAX_INIT_DURATION;
+
 	// KeyValueStore SQLITE
 	int CLEAR_BUFFER_SIZE;
 	double READ_VALUE_TIME_ESTIMATE;
@@ -492,6 +500,7 @@ public:
 	double MIN_REBOOT_TIME;
 	double MAX_REBOOT_TIME;
 	std::string LOG_DIRECTORY;
+	std::string CONN_FILE;
 	int64_t SERVER_MEM_LIMIT;
 	double SYSTEM_MONITOR_FREQUENCY;
 
@@ -593,6 +602,7 @@ public:
 	int FETCH_KEYS_LOWER_PRIORITY;
 	int FETCH_CHANGEFEED_PARALLELISM;
 	int BUGGIFY_BLOCK_BYTES;
+	int64_t STORAGE_RECOVERY_VERSION_LAG_LIMIT;
 	double STORAGE_DURABILITY_LAG_REJECT_THRESHOLD;
 	double STORAGE_DURABILITY_LAG_MIN_RATE;
 	int STORAGE_COMMIT_BYTES;
