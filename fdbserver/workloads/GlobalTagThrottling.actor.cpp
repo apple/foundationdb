@@ -32,6 +32,9 @@ class GlobalTagThrottlingWorkload : public TestWorkload {
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				TraceEvent("GlobalTagThrottlingWorkload_SettingTagQuota")
+				    .detail("Tag", self->transactionTag)
+				    .detail("Quota", self->quota);
 				ThrottleApi::setTagQuota(tr, self->transactionTag, self->quota, self->quota, 0, 0);
 				wait(tr->commit());
 				return Void();

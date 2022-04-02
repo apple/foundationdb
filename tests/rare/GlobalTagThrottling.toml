@@ -11,7 +11,7 @@ testTitle='GlobalTagThrottling'
 
   [[test.workload]]
   testName='ReadWrite'
-  testDuration=300.0
+  testDuration=600.0
   transactionsPerSecond=100
   writesPerTransactionA=0
   readsPerTransactionA=10
@@ -21,12 +21,12 @@ testTitle='GlobalTagThrottling'
   nodeCount=10000
   valueBytes=1000
   minValueBytes=1000
-  warmingDelay=10.0
+  warmingDelay=60.0
   transactionTag='sampleTag1'
 
   [[test.workload]]
   testName='ReadWrite'
-  testDuration=300.0
+  testDuration=600.0
   transactionsPerSecond=100
   writesPerTransactionA=0
   readsPerTransactionA=10
@@ -36,5 +36,5 @@ testTitle='GlobalTagThrottling'
   nodeCount=10000
   valueBytes=1000
   minValueBytes=1000
-  warmingDelay=10.0
+  warmingDelay=60.0
   transactionTag='sampleTag2'

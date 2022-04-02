@@ -28,30 +28,52 @@
 #include "flow/actorcompiler.h" // must be last include
 
 class GlobalTagThrottlerImpl {
-	struct QuotaAndCounters {
-		ThrottleApi::TagQuotaValue quota;
+	class QuotaAndCounters {
+		Optional<ThrottleApi::TagQuotaValue> quota;
 		Smoother readCostCounter;
 		Smoother writeCostCounter;
 		Smoother transactionCounter;
 
+	public:
 		QuotaAndCounters()
 		  : readCostCounter(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FOLDING_TIME),
 		    writeCostCounter(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FOLDING_TIME),
 		    transactionCounter(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FOLDING_TIME) {}
 
-		ClientTagThrottleLimits getTotalLimit() const {
-			auto readLimit =
-			    (readCostCounter.smoothRate() == 0)
-			        ? std::numeric_limits<double>::max()
-			        : quota.totalReadQuota * transactionCounter.smoothRate() / readCostCounter.smoothRate();
-			auto writeLimit =
-			    (writeCostCounter.smoothRate() == 0)
-			        ? std::numeric_limits<double>::max()
-			        : quota.totalWriteQuota * transactionCounter.smoothRate() / writeCostCounter.smoothRate();
+		void setQuota(ThrottleApi::TagQuotaValue const& quota) { this->quota = quota; }
+
+		void addReadCost(double readCost) { readCostCounter.addDelta(readCost); }
+
+		void addWriteCost(double writeCost) { writeCostCounter.addDelta(writeCost); }
+
+		void addTransactions(int count) { transactionCounter.addDelta(count); }
+
+		Optional<ClientTagThrottleLimits> getTotalLimit() const {
+			if (!quota.present())
+				return {};
+			Optional<double> readLimit, writeLimit;
+			if (readCostCounter.smoothRate() > 0) {
+				readLimit = quota.get().totalReadQuota * transactionCounter.smoothRate() / readCostCounter.smoothRate();
+			}
+			if (writeCostCounter.smoothRate() > 0) {
+				writeLimit =
+				    quota.get().totalWriteQuota * transactionCounter.smoothRate() / writeCostCounter.smoothRate();
+			}
 
 			// TODO: Implement expiration logic
-			return { std::max(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_MIN_RATE, std::min(readLimit, writeLimit)),
-				     std::numeric_limits<double>::max() };
+			if (!readLimit.present() && !writeLimit.present()) {
+				return {};
+			} else {
+				auto totalLimit = SERVER_KNOBS->GLOBAL_TAG_THROTTLING_MIN_RATE;
+				if (!readLimit.present()) {
+					totalLimit = std::max(totalLimit, writeLimit.get());
+				} else if (!writeLimit.present()) {
+					totalLimit = std::max(totalLimit, readLimit.get());
+				} else {
+					totalLimit = std::max(totalLimit, std::min(readLimit.get(), writeLimit.get()));
+				}
+				return ClientTagThrottleLimits(totalLimit, std::numeric_limits<double>::max());
+			}
 		}
 	};
 
@@ -75,11 +97,13 @@ class GlobalTagThrottlerImpl {
 					for (auto const kv : currentQuotas) {
 						auto tag = kv.key.removePrefix(tagQuotaPrefix);
 						auto quota = ThrottleApi::TagQuotaValue::fromValue(kv.value);
-						self->trackedTags[tag].quota = quota;
+						self->trackedTags[tag].setQuota(quota);
 					}
 
 					++self->throttledTagChangeId;
-					wait(tr.watch(tagThrottleSignalKey));
+					// FIXME: Should wait on watch instead
+					// wait(tr.watch(tagThrottleSignalKey));
+					wait(delay(5.0));
 					TraceEvent("GlobalTagThrottler_ChangeSignaled");
 					TEST(true); // Global tag throttler detected quota changes
 					break;
@@ -94,7 +118,7 @@ class GlobalTagThrottlerImpl {
 public:
 	GlobalTagThrottlerImpl(Database db, UID id) : db(db), id(id) {}
 	Future<Void> monitorThrottlingChanges() { return monitorThrottlingChanges(this); }
-	void addRequests(TransactionTag tag, int count) { trackedTags[tag].transactionCounter.addDelta(count); }
+	void addRequests(TransactionTag tag, int count) { trackedTags[tag].addTransactions(count); }
 	uint64_t getThrottledTagChangeId() const { return throttledTagChangeId; }
 	PrioritizedTransactionTagMap<ClientTagThrottleLimits> getClientRates() {
 		// TODO: For now, only enforce total throttling rates.
@@ -102,8 +126,10 @@ public:
 		PrioritizedTransactionTagMap<ClientTagThrottleLimits> result;
 		for (const auto& [tag, quotaAndCounters] : trackedTags) {
 			// Currently there is no differentiation between batch priority and default priority transactions
-			result[TransactionPriority::BATCH][tag] = result[TransactionPriority::DEFAULT][tag] =
-			    quotaAndCounters.getTotalLimit();
+			auto const limit = quotaAndCounters.getTotalLimit();
+			if (limit.present()) {
+				result[TransactionPriority::BATCH][tag] = result[TransactionPriority::DEFAULT][tag] = limit.get();
+			}
 		}
 		return result;
 	}
@@ -119,10 +145,10 @@ public:
 	int64_t manualThrottleCount() const { return trackedTags.size(); }
 	Future<Void> tryUpdateAutoThrottling(StorageQueueInfo const& ss) {
 		for (const auto& busyReadTag : ss.busiestReadTags) {
-			trackedTags[busyReadTag.tag].readCostCounter.addDelta(busyReadTag.rate);
+			trackedTags[busyReadTag.tag].addReadCost(busyReadTag.rate);
 		}
 		for (const auto& busyWriteTag : ss.busiestWriteTags) {
-			trackedTags[busyWriteTag.tag].writeCostCounter.addDelta(busyWriteTag.rate);
+			trackedTags[busyWriteTag.tag].addWriteCost(busyWriteTag.rate);
 		}
 		// TODO: Call ThrottleApi::throttleTags
 		return Void();
