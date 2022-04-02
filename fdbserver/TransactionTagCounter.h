@@ -24,15 +24,39 @@
 #include "fdbclient/TagThrottle.actor.h"
 #include "fdbserver/Knobs.h"
 
+class TopKTags {
+public:
+	struct TagAndCount {
+		TransactionTag tag;
+		int64_t count;
+		bool operator<(TagAndCount const& other) const { return count < other.count; }
+		explicit TagAndCount(TransactionTag tag, int64_t count) : tag(tag), count(count) {}
+	};
+
+private:
+	// Because the number of tracked is expected to be small, they can be tracked
+	// in a simple vector. If the number of tracked tags increases, a more sophisticated
+	// data structure will be required.
+	std::vector<TagAndCount> topTags;
+	int limit;
+
+public:
+	explicit TopKTags(int limit) : limit(limit) { ASSERT_GT(limit, 0); }
+	void incrementTagCount(TransactionTag tag, int previousCount, int increase);
+
+	std::vector<StorageQueuingMetricsReply::TagInfo> getBusiestTags(double elapsed, double totalSampleCount) const;
+
+	void clear() { topTags.clear(); }
+};
+
 class TransactionTagCounter {
+	UID thisServerID;
 	TransactionTagMap<int64_t> intervalCounts;
 	int64_t intervalTotalSampledCount = 0;
-	TransactionTag busiestTag;
-	int64_t busiestTagCount = 0;
+	TopKTags topTags;
 	double intervalStart = 0;
 
 	std::vector<StorageQueuingMetricsReply::TagInfo> previousBusiestTags;
-	UID thisServerID;
 	Reference<EventCacheHolder> busiestReadTagEventHolder;
 
 public:
