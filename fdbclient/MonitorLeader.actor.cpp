@@ -103,18 +103,18 @@ ACTOR Future<Void> resolveHostnamesImpl(ClusterConnectionString* self) {
 			self->status = ClusterConnectionString::RESOLVING;
 			std::vector<Future<Void>> fs;
 			for (auto const& hostname : self->hostnames) {
-				fs.push_back(map(INetworkConnections::net()->resolveTCPEndpoint(hostname.host, hostname.service),
-				                 [=](std::vector<NetworkAddress> const& addresses) -> Void {
-					                 NetworkAddress address =
-					                     addresses[deterministicRandom()->randomInt(0, addresses.size())];
-					                 address.flags = 0; // Reset the parsed address to public
-					                 address.fromHostname = NetworkAddressFromHostname::True;
-					                 if (hostname.isTLS) {
-						                 address.flags |= NetworkAddress::FLAG_TLS;
-					                 }
-					                 self->addResolved(hostname, address);
-					                 return Void();
-				                 }));
+				fs.push_back(
+				    map(INetworkConnections::net()->resolveTCPEndpointWithDNSCache(hostname.host, hostname.service),
+				        [=](std::vector<NetworkAddress> const& addresses) -> Void {
+					        NetworkAddress address = addresses[deterministicRandom()->randomInt(0, addresses.size())];
+					        address.flags = 0; // Reset the parsed address to public
+					        address.fromHostname = NetworkAddressFromHostname::True;
+					        if (hostname.isTLS) {
+						        address.flags |= NetworkAddress::FLAG_TLS;
+					        }
+					        self->addResolved(hostname, address);
+					        return Void();
+				        }));
 			}
 			wait(waitForAll(fs));
 			std::sort(self->coords.begin(), self->coords.end());
@@ -558,6 +558,9 @@ ACTOR Future<Void> monitorNominee(Key key,
 				    .detail("Hostname", hostname.present() ? hostname.get().toString() : "UnknownHostname")
 				    .detail("OldAddr", coord.getLeader.getEndpoint().getPrimaryAddress().toString());
 				if (rep.getError().code() == error_code_request_maybe_delivered) {
+					if (hostname.present()) {
+						INetworkConnections::net()->removeCachedDNS(hostname.get().host, hostname.get().service);
+					}
 					// Delay to prevent tight resolving loop due to outdated DNS cache
 					wait(delay(CLIENT_KNOBS->COORDINATOR_HOSTNAME_RESOLVE_DELAY));
 					throw coordinators_changed();
@@ -1034,6 +1037,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 		} else {
 			TEST(rep.getError().code() == error_code_failed_to_progress); // Coordinator cant talk to cluster controller
 			if (rep.getError().code() == error_code_coordinators_changed) {
+
 				throw coordinators_changed();
 			}
 			index = (index + 1) % addrs.size();

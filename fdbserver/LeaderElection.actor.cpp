@@ -50,6 +50,9 @@ ACTOR Future<Void> submitCandidacy(Key key,
 				    .detail("Hostname", hostname.present() ? hostname.get().toString() : "UnknownHostname")
 				    .detail("OldAddr", coord.candidacy.getEndpoint().getPrimaryAddress().toString());
 				if (rep.getError().code() == error_code_request_maybe_delivered) {
+					if (hostname.present()) {
+						INetworkConnections::net()->removeCachedDNS(hostname.get().host, hostname.get().service);
+					}
 					// Delay to prevent tight resolving loop due to outdated DNS cache
 					wait(delay(CLIENT_KNOBS->COORDINATOR_HOSTNAME_RESOLVE_DELAY));
 					throw coordinators_changed();
