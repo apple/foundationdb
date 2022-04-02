@@ -158,8 +158,8 @@ public:
 	}
 
 	void clear() {
-		for (uint32_t& i : buckets) {
-			i = 0;
+		for (std::atomic<uint32_t>& i : buckets) {
+			i.store(0);
 		}
 	}
 	void writeToLog(double elapsed = -1.0);
@@ -172,7 +172,7 @@ public:
 	std::string const op;
 	Unit const unit;
 	Reference<HistogramRegistry> registry;
-	uint32_t buckets[32];
+	std::atomic<uint32_t> buckets[32];
 	uint32_t lowerBound;
 	uint32_t upperBound;
 };

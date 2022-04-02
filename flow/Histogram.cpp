@@ -108,7 +108,7 @@ const char* const Histogram::UnitToStringMapper[] = { "microseconds", "bytes", "
 void Histogram::writeToLog(double elapsed) {
 	bool active = false;
 	for (uint32_t i = 0; i < 32; i++) {
-		if (buckets[i]) {
+		if (buckets[i].load()) {
 			active = true;
 			break;
 		}
@@ -125,25 +125,25 @@ void Histogram::writeToLog(double elapsed) {
 	for (uint32_t i = 0; i < 32; i++) {
 		uint64_t value = uint64_t(1) << (i + 1);
 
-		if (buckets[i]) {
-			totalCount += buckets[i];
+		if (buckets[i].load()) {
+			totalCount += buckets[i].load();
 			switch (unit) {
 			case Unit::microseconds:
-				e.detail(format("LessThan%u.%03u", int(value / 1000), int(value % 1000)), buckets[i]);
+				e.detail(format("LessThan%u.%03u", int(value / 1000), int(value % 1000)), buckets[i].load());
 				break;
 			case Unit::bytes:
 			case Unit::bytes_per_second:
-				e.detail(format("LessThan%" PRIu64, value), buckets[i]);
+				e.detail(format("LessThan%" PRIu64, value), buckets[i].load());
 				break;
 			case Unit::percentageLinear:
-				e.detail(format("LessThan%f", (i + 1) * 0.04), buckets[i]);
+				e.detail(format("LessThan%f", (i + 1) * 0.04), buckets[i].load());
 				break;
 			case Unit::countLinear:
 				value = uint64_t((i + 1) * ((upperBound - lowerBound) / 31.0));
-				e.detail(format("LessThan%" PRIu64, value), buckets[i]);
+				e.detail(format("LessThan%" PRIu64, value), buckets[i].load());
 				break;
 			case Unit::MAXHISTOGRAMUNIT:
-				e.detail(format("Default%u", i), buckets[i]);
+				e.detail(format("Default%u", i), buckets[i].load());
 				break;
 			default:
 				ASSERT(false);
@@ -173,10 +173,10 @@ std::string Histogram::drawHistogram() {
 	double maxPct = 0;
 
 	for (int i = 0; i < 32; i++) {
-		total += buckets[i];
+		total += buckets[i].load();
 	}
 	for (int i = 0; i < 32; i++) {
-		maxPct = std::max(maxPct, (100.0 * buckets[i]) / total);
+		maxPct = std::max(maxPct, (100.0 * buckets[i].load()) / total);
 	}
 
 	double intervalSize = (maxPct < (max_lines - 3)) ? 1 : maxPct / (max_lines - 3);
@@ -190,7 +190,7 @@ std::string Histogram::drawHistogram() {
 		double halfFullHeight = currHeight - intervalSize / 4;
 		result << std::setw(6) << std::setprecision(2) << currHeight << " " << verticalLine;
 		for (int i = 0; i < 32; i++) {
-			double pct = (100.0 * buckets[i]) / total;
+			double pct = (100.0 * buckets[i].load()) / total;
 			if (pct > currHeight)
 				result << fullCell;
 			else if (pct > halfFullHeight)
@@ -203,7 +203,7 @@ std::string Histogram::drawHistogram() {
 
 	result << "  0.00 " << origin;
 	for (int i = 0; i < 32; i++) {
-		double pct = (100.0 * buckets[i]) / total;
+		double pct = (100.0 * buckets[i].load()) / total;
 		if (pct > intervalSize / 4)
 			result << xFull;
 		else
@@ -227,38 +227,38 @@ TEST_CASE("/flow/histogram/smoke_test") {
 		    Histogram::getHistogram(LiteralStringRef("smoke_test"), LiteralStringRef("counts"), Histogram::Unit::bytes);
 
 		h->sample(0);
-		ASSERT(h->buckets[0] == 1);
+		ASSERT(h->buckets[0].load() == 1);
 		h->sample(1);
-		ASSERT(h->buckets[0] == 2);
+		ASSERT(h->buckets[0].load() == 2);
 
 		h->sample(2);
-		ASSERT(h->buckets[1] == 1);
+		ASSERT(h->buckets[1].load() == 1);
 
 		GetHistogramRegistry().logReport();
 
-		ASSERT(h->buckets[0] == 0);
+		ASSERT(h->buckets[0].load() == 0);
 		h->sample(0);
-		ASSERT(h->buckets[0] == 1);
+		ASSERT(h->buckets[0].load() == 1);
 		h = Histogram::getHistogram(
 		    LiteralStringRef("smoke_test"), LiteralStringRef("counts2"), Histogram::Unit::bytes);
 
 		// confirm that old h was deallocated.
 		h = Histogram::getHistogram(LiteralStringRef("smoke_test"), LiteralStringRef("counts"), Histogram::Unit::bytes);
-		ASSERT(h->buckets[0] == 0);
+		ASSERT(h->buckets[0].load() == 0);
 
 		h = Histogram::getHistogram(
 		    LiteralStringRef("smoke_test"), LiteralStringRef("times"), Histogram::Unit::microseconds);
 
 		h->sampleSeconds(0.000000);
 		h->sampleSeconds(0.0000019);
-		ASSERT(h->buckets[0] == 2);
+		ASSERT(h->buckets[0].load() == 2);
 		h->sampleSeconds(0.0000021);
-		ASSERT(h->buckets[1] == 1);
+		ASSERT(h->buckets[1].load() == 1);
 		h->sampleSeconds(0.000015);
-		ASSERT(h->buckets[3] == 1);
+		ASSERT(h->buckets[3].load() == 1);
 
 		h->sampleSeconds(4400.0);
-		ASSERT(h->buckets[31] == 1);
+		ASSERT(h->buckets[31].load() == 1);
 
 		GetHistogramRegistry().logReport();
 	}
