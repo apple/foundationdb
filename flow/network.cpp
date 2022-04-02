@@ -178,6 +178,117 @@ std::string formatIpPort(const IPAddress& ip, uint16_t port) {
 	return format(patt, ip.toString().c_str(), port);
 }
 
+Optional<std::vector<NetworkAddress>> DNSCache::find(const std::string& host, const std::string& service) {
+	std::string hostname = host + ":" + service;
+	if (hostnameToAddresses.find(hostname) != hostnameToAddresses.end()) {
+		return hostnameToAddresses[host + ":" + service];
+	}
+	return {};
+}
+
+void DNSCache::add(const std::string& host, const std::string& service, const std::vector<NetworkAddress>& addresses) {
+	hostnameToAddresses[host + ":" + service] = addresses;
+}
+
+void DNSCache::remove(const std::string& host, const std::string& service) {
+	if (find(host, service).present()) {
+		hostnameToAddresses.erase(host + ":" + service);
+	}
+}
+
+void DNSCache::clear() {
+	hostnameToAddresses.clear();
+}
+
+std::string DNSCache::toString() {
+	std::string ret;
+	for (auto it = hostnameToAddresses.begin(); it != hostnameToAddresses.end(); ++it) {
+		if (it != hostnameToAddresses.begin()) {
+			ret += ';';
+		}
+		ret += it->first + ',';
+		const std::vector<NetworkAddress>& addresses = it->second;
+		for (int i = 0; i < addresses.size(); ++i) {
+			ret += addresses[i].toString();
+			if (i != addresses.size() - 1) {
+				ret += ',';
+			}
+		}
+	}
+	return ret;
+}
+
+DNSCache DNSCache::parseFromString(const std::string& s) {
+	std::map<std::string, std::vector<NetworkAddress>> dnsCache;
+
+	for (int p = 0; p < s.length();) {
+		int pSemiColumn = s.find_first_of(';', p);
+		if (pSemiColumn == s.npos) {
+			pSemiColumn = s.length();
+		}
+		std::string oneMapping = s.substr(p, pSemiColumn - p);
+
+		std::string hostname;
+		std::vector<NetworkAddress> addresses;
+		for (int i = 0; i < oneMapping.length();) {
+			int pComma = oneMapping.find_first_of(',', i);
+			if (pComma == oneMapping.npos) {
+				pComma = oneMapping.length();
+			}
+			if (!i) {
+				// The first part is hostname
+				hostname = oneMapping.substr(i, pComma - i);
+			} else {
+				addresses.push_back(NetworkAddress::parse(oneMapping.substr(i, pComma - i)));
+			}
+			i = pComma + 1;
+		}
+		dnsCache[hostname] = addresses;
+		p = pSemiColumn + 1;
+	}
+
+	return DNSCache(dnsCache);
+}
+
+TEST_CASE("/flow/DNSCache") {
+	DNSCache dnsCache;
+	std::vector<NetworkAddress> networkAddresses;
+	NetworkAddress address1(IPAddress(0x13131313), 1), address2(IPAddress(0x14141414), 2);
+	networkAddresses.push_back(address1);
+	networkAddresses.push_back(address2);
+	dnsCache.add("testhost1", "port1", networkAddresses);
+	ASSERT(dnsCache.find("testhost1", "port1").present());
+	ASSERT(!dnsCache.find("testhost1", "port2").present());
+	std::vector<NetworkAddress> resolvedNetworkAddresses = dnsCache.find("testhost1", "port1").get();
+	ASSERT(resolvedNetworkAddresses.size() == 2);
+	ASSERT(std::find(resolvedNetworkAddresses.begin(), resolvedNetworkAddresses.end(), address1) !=
+	       resolvedNetworkAddresses.end());
+	ASSERT(std::find(resolvedNetworkAddresses.begin(), resolvedNetworkAddresses.end(), address2) !=
+	       resolvedNetworkAddresses.end());
+	dnsCache.remove("testhost1", "port1");
+	ASSERT(!dnsCache.find("testhost1", "port1").present());
+	dnsCache.add("testhost1", "port2", networkAddresses);
+	ASSERT(dnsCache.find("testhost1", "port2").present());
+	dnsCache.clear();
+	ASSERT(!dnsCache.find("testhost1", "port2").present());
+
+	return Void();
+}
+
+TEST_CASE("/flow/DNSCacheParsing") {
+	std::string dnsCacheString;
+	ASSERT(DNSCache::parseFromString(dnsCacheString).toString() == dnsCacheString);
+
+	dnsCacheString = "testhost1:port1,[::1]:4800:tls(fromHostname)";
+	ASSERT(DNSCache::parseFromString(dnsCacheString).toString() == dnsCacheString);
+
+	dnsCacheString = "testhost1:port1,[::1]:4800,[2001:db8:85a3::8a2e:370:7334]:4800;testhost2:port2,[2001:db8:85a3::"
+	                 "8a2e:370:7334]:4800:tls(fromHostname),8.8.8.8:12";
+	ASSERT(DNSCache::parseFromString(dnsCacheString).toString() == dnsCacheString);
+
+	return Void();
+}
+
 Future<Reference<IConnection>> INetworkConnections::connect(const std::string& host,
                                                             const std::string& service,
                                                             bool isTLS) {
