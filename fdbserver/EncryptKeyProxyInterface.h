@@ -95,12 +95,13 @@ struct EKPGetBaseCipherKeysByIdsReply {
 	Arena arena;
 	std::unordered_map<uint64_t, StringRef> baseCipherMap;
 	int numHits;
+	Optional<Error> error;
 
 	EKPGetBaseCipherKeysByIdsReply() : numHits(0) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, arena, baseCipherMap, numHits);
+		serializer(ar, arena, baseCipherMap, numHits, error);
 	}
 };
 
@@ -140,6 +141,7 @@ struct EKPGetLatestBaseCipherKeysReply {
 	Arena arena;
 	std::unordered_map<uint64_t, EKPBaseCipherDetails> baseCipherDetailMap;
 	int numHits;
+	Optional<Error> error;
 
 	EKPGetLatestBaseCipherKeysReply() : numHits(0) {}
 	explicit EKPGetLatestBaseCipherKeysReply(const std::unordered_map<uint64_t, EKPBaseCipherDetails>& cipherMap)
@@ -147,7 +149,7 @@ struct EKPGetLatestBaseCipherKeysReply {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, arena, baseCipherDetailMap, numHits);
+		serializer(ar, arena, baseCipherDetailMap, numHits, error);
 	}
 };
 

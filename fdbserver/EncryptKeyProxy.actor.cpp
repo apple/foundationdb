@@ -36,11 +36,24 @@
 #include "flow/genericactors.actor.h"
 #include "flow/network.h"
 
-#include "flow/actorcompiler.h" // This must be the last #include.
 #include <boost/mpl/not.hpp>
+
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 using EncryptDomainId = uint64_t;
 using EncryptBaseCipherId = uint64_t;
+
+namespace {
+bool canReplyWith(Error e) {
+	switch (e.code()) {
+	case error_code_encrypt_key_not_found:
+		return true;
+	default:
+		return false;
+	}
+}
+
+} // namespace
 
 struct EncryptBaseCipherKey {
 	EncryptDomainId domainId;
@@ -80,6 +93,8 @@ public:
 	Counter baseCipherDomainIdCacheMisses;
 	Counter baseCipherDomainIdCacheHits;
 	Counter baseCipherKeysRefreshed;
+	Counter numResponseWithErrors;
+	Counter numEncryptionKeyRefreshErrors;
 
 	explicit EncryptKeyProxyData(UID id)
 	  : myId(id), ekpCacheMetrics("EKPMetrics", myId.toString()),
@@ -87,7 +102,9 @@ public:
 	    baseCipherKeyIdCacheHits("EKPCipherIdCacheHits", ekpCacheMetrics),
 	    baseCipherDomainIdCacheMisses("EKPCipherDomainIdCacheMisses", ekpCacheMetrics),
 	    baseCipherDomainIdCacheHits("EKPCipherDomainIdCacheHits", ekpCacheMetrics),
-	    baseCipherKeysRefreshed("EKPCipherKeysRefreshed", ekpCacheMetrics) {}
+	    baseCipherKeysRefreshed("EKPCipherKeysRefreshed", ekpCacheMetrics),
+	    numResponseWithErrors("EKPNumResponseWithErrors", ekpCacheMetrics),
+	    numEncryptionKeyRefreshErrors("EKPNumEncryptionKeyRefreshErrors", ekpCacheMetrics) {}
 
 	void insertIntoBaseDomainIdCache(const EncryptDomainId domainId,
 	                                 const EncryptBaseCipherId baseCipherId,
@@ -108,6 +125,22 @@ public:
 		// TODO: Update cache to support LRU eviction policy to limit the total cache size.
 
 		baseCipherKeyIdCache[baseCipherId] = EncryptBaseCipherKey(domainId, baseCipherId, baseCipherKey, true);
+	}
+
+	template <class Reply>
+	using isEKPGetLatestBaseCipherKeysReply = std::is_base_of<EKPGetLatestBaseCipherKeysReply, Reply>;
+	template <class Reply>
+	using isEKPGetBaseCipherKeysByIdsReply = std::is_base_of<EKPGetBaseCipherKeysByIdsReply, Reply>;
+
+	template <class Reply>
+	typename std::enable_if<isEKPGetBaseCipherKeysByIdsReply<Reply>::value ||
+	                            isEKPGetLatestBaseCipherKeysReply<Reply>::value,
+	                        void>::type
+	sendErrorResponse(const ReplyPromise<Reply>& promise, const Error& e) {
+		Reply reply;
+		++numResponseWithErrors;
+		reply.error = e;
+		promise.send(reply);
 	}
 };
 
@@ -154,12 +187,15 @@ ACTOR Future<Void> getCipherKeysByBaseCipherKeyIds(Reference<EncryptKeyProxyData
 					ekpProxyData->insertIntoBaseCipherIdCache(0, item.first, item.second);
 				}
 			} catch (Error& e) {
-				TraceEvent("GetCipherKeysByIds", ekpProxyData->myId).detail("Error", e.code());
-				keysByIds.reply.sendError(e);
+				if (!canReplyWith(e)) {
+					TraceEvent("GetCipherKeysByIds", ekpProxyData->myId).error(e);
+					throw;
+				}
+				TraceEvent("GetCipherKeysByIds", ekpProxyData->myId).detail("ErrorCode", e.code());
+				ekpProxyData->sendErrorResponse(keysByIds.reply, e);
 				return Void();
 			}
 		}
-
 	} else {
 		// TODO: Call to non-FDB KMS connector process.
 		throw not_implemented();
@@ -218,8 +254,12 @@ ACTOR Future<Void> getLatestCipherKeys(Reference<EncryptKeyProxyData> ekpProxyDa
 					    item.first, item.second.encryptKeyId, item.second.encryptKey);
 				}
 			} catch (Error& e) {
-				TraceEvent("GetLatestCipherKeys", ekpProxyData->myId).detail("Error", e.code());
-				latestKeysReq.reply.sendError(e);
+				if (!canReplyWith(e)) {
+					TraceEvent("GetLatestCipherKeys", ekpProxyData->myId).error(e);
+					throw;
+				}
+				TraceEvent("GetLatestCipherKeys", ekpProxyData->myId).detail("ErrorCode", e.code());
+				ekpProxyData->sendErrorResponse(latestKeysReq.reply, e);
 				return Void();
 			}
 		}
@@ -246,19 +286,28 @@ ACTOR Future<Void> refreshEncryptionKeysUsingSimKms(Reference<EncryptKeyProxyDat
 
 	TraceEvent("RefreshEKs_Start", ekpProxyData->myId).detail("Inf", simKmsInterface.id());
 
-	SimGetEncryptKeysByDomainIdsRequest req;
-	req.encryptDomainIds.reserve(ekpProxyData->baseCipherDomainIdCache.size());
+	try {
+		SimGetEncryptKeysByDomainIdsRequest req;
+		req.encryptDomainIds.reserve(ekpProxyData->baseCipherDomainIdCache.size());
 
-	for (auto& item : ekpProxyData->baseCipherDomainIdCache) {
-		req.encryptDomainIds.emplace_back(item.first);
-	}
-	SimGetEncryptKeyByDomainIdReply rep = wait(simKmsInterface.encryptKeyLookupByDomainId.getReply(req));
-	for (auto& item : rep.encryptKeyMap) {
-		ekpProxyData->insertIntoBaseDomainIdCache(item.first, item.second.encryptKeyId, item.second.encryptKey);
-	}
+		for (auto& item : ekpProxyData->baseCipherDomainIdCache) {
+			req.encryptDomainIds.emplace_back(item.first);
+		}
+		SimGetEncryptKeyByDomainIdReply rep = wait(simKmsInterface.encryptKeyLookupByDomainId.getReply(req));
+		for (auto& item : rep.encryptKeyMap) {
+			ekpProxyData->insertIntoBaseDomainIdCache(item.first, item.second.encryptKeyId, item.second.encryptKey);
+		}
 
-	ekpProxyData->baseCipherKeysRefreshed += rep.encryptKeyMap.size();
-	TraceEvent("RefreshEKs_Done", ekpProxyData->myId).detail("KeyCount", rep.encryptKeyMap.size());
+		ekpProxyData->baseCipherKeysRefreshed += rep.encryptKeyMap.size();
+		TraceEvent("RefreshEKs_Done", ekpProxyData->myId).detail("KeyCount", rep.encryptKeyMap.size());
+	} catch (Error& e) {
+		if (!canReplyWith(e)) {
+			TraceEvent("RefreshEncryptionKeys_Error").error(e);
+			throw e;
+		}
+		TraceEvent("RefreshEncryptionKeys").detail("ErrorCode", e.code());
+		++ekpProxyData->numEncryptionKeyRefreshErrors;
+	}
 
 	return Void();
 }

@@ -67,6 +67,7 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 		EKPGetLatestBaseCipherKeysRequest req(deterministicRandom()->randomUniqueID(), self->domainIds);
 		EKPGetLatestBaseCipherKeysReply rep = wait(self->ekpInf.getLatestBaseCipherKeys.getReply(req));
 
+		ASSERT(!rep.error.present());
 		ASSERT_EQ(rep.baseCipherDetailMap.size(), self->domainIds.size());
 
 		for (const uint64_t id : self->domainIds) {
@@ -97,6 +98,7 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 		EKPGetLatestBaseCipherKeysRequest req(deterministicRandom()->randomUniqueID(), self->domainIds);
 		EKPGetLatestBaseCipherKeysReply rep = wait(self->ekpInf.getLatestBaseCipherKeys.getReply(req));
 
+		ASSERT(!rep.error.present());
 		ASSERT_EQ(rep.baseCipherDetailMap.size(), self->domainIds.size());
 
 		for (const uint64_t id : self->domainIds) {
@@ -121,6 +123,7 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 		EKPGetLatestBaseCipherKeysRequest req(deterministicRandom()->randomUniqueID(), self->domainIds);
 		EKPGetLatestBaseCipherKeysReply rep = wait(self->ekpInf.getLatestBaseCipherKeys.getReply(req));
 
+		ASSERT(!rep.error.present());
 		ASSERT_EQ(rep.baseCipherDetailMap.size(), self->domainIds.size());
 		for (const uint64_t id : self->domainIds) {
 			ASSERT(rep.baseCipherDetailMap.find(id) != rep.baseCipherDetailMap.end());
@@ -145,6 +148,7 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 			expectedHits = req.baseCipherIds.size();
 			EKPGetBaseCipherKeysByIdsReply rep = wait(self->ekpInf.getBaseCipherKeysByIds.getReply(req));
 
+			ASSERT(!rep.error.present());
 			ASSERT_EQ(rep.baseCipherMap.size(), expectedHits);
 			ASSERT_EQ(rep.numHits, expectedHits);
 			// Valdiate the 'cipherKey' content against the one read while querying by domainIds
@@ -171,14 +175,14 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 
 	ACTOR Future<Void> simLookupInvalidKeyId(EncryptKeyProxyTestWorkload* self) {
 		// Prepare a lookup with valid and invalid keyIds - SimEncryptKmsProxy should throw encrypt_key_not_found()
-		try {
-			std::vector<uint64_t> baseCipherIds(self->cipherIds);
-			baseCipherIds.emplace_back(SERVER_KNOBS->SIM_KMS_MAX_KEYS + 10);
-			EKPGetBaseCipherKeysByIdsRequest req(deterministicRandom()->randomUniqueID(), baseCipherIds);
-			EKPGetBaseCipherKeysByIdsReply rep = wait(self->ekpInf.getBaseCipherKeysByIds.getReply(req));
-		} catch (Error& e) {
-			ASSERT_EQ(e.code(), error_code_encrypt_key_not_found);
-		}
+		std::vector<uint64_t> baseCipherIds(self->cipherIds);
+		baseCipherIds.emplace_back(SERVER_KNOBS->SIM_KMS_MAX_KEYS + 10);
+		EKPGetBaseCipherKeysByIdsRequest req(deterministicRandom()->randomUniqueID(), baseCipherIds);
+		EKPGetBaseCipherKeysByIdsReply rep = wait(self->ekpInf.getBaseCipherKeysByIds.getReply(req));
+
+		ASSERT_EQ(rep.baseCipherMap.size(), 0);
+		ASSERT(rep.error.present());
+		ASSERT_EQ(rep.error.get().code(), error_code_encrypt_key_not_found);
 
 		return Void();
 	}
