@@ -965,28 +965,30 @@ public:
 	void addMockTCPEndpoint(const std::string& host,
 	                        const std::string& service,
 	                        const std::vector<NetworkAddress>& addresses) override {
-		mockDNS.addMockTCPEndpoint(host, service, addresses);
+		mockDNS.add(host, service, addresses);
 	}
 	void removeMockTCPEndpoint(const std::string& host, const std::string& service) override {
-		mockDNS.removeMockTCPEndpoint(host, service);
+		mockDNS.remove(host, service);
 	}
 	// Convert hostnameToAddresses from/to string. The format is:
 	// hostname1,host1Address1,host1Address2;hostname2,host2Address1,host2Address2...
-	void parseMockDNSFromString(const std::string& s) override { mockDNS = MockDNS::parseFromString(s); }
+	void parseMockDNSFromString(const std::string& s) override { mockDNS = DNSCache::parseFromString(s); }
 	std::string convertMockDNSToString() override { return mockDNS.toString(); }
 	Future<std::vector<NetworkAddress>> resolveTCPEndpoint(const std::string& host,
 	                                                       const std::string& service) override {
 		// If a <hostname, vector<NetworkAddress>> pair was injected to mock DNS, use it.
-		if (mockDNS.findMockTCPEndpoint(host, service)) {
-			return mockDNS.getTCPEndpoint(host, service);
+		Optional<std::vector<NetworkAddress>> mock = mockDNS.find(host, service);
+		if (mock.present()) {
+			return mock.get();
 		}
 		return SimExternalConnection::resolveTCPEndpoint(host, service);
 	}
 	std::vector<NetworkAddress> resolveTCPEndpointBlocking(const std::string& host,
 	                                                       const std::string& service) override {
 		// If a <hostname, vector<NetworkAddress>> pair was injected to mock DNS, use it.
-		if (mockDNS.findMockTCPEndpoint(host, service)) {
-			return mockDNS.getTCPEndpoint(host, service);
+		Optional<std::vector<NetworkAddress>> mock = mockDNS.find(host, service);
+		if (mock.present()) {
+			return mock.get();
 		}
 		return SimExternalConnection::resolveTCPEndpointBlocking(host, service);
 	}
@@ -2193,7 +2195,7 @@ public:
 	bool printSimTime;
 
 private:
-	MockDNS mockDNS;
+	DNSCache mockDNS;
 
 #ifdef ENABLE_SAMPLING
 	ActorLineageSet actorLineageSet;
