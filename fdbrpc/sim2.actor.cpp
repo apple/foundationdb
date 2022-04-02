@@ -981,7 +981,20 @@ public:
 		if (mock.present()) {
 			return mock.get();
 		}
-		return SimExternalConnection::resolveTCPEndpoint(host, service);
+		return SimExternalConnection::resolveTCPEndpoint(host, service, &dnsCache);
+	}
+	Future<std::vector<NetworkAddress>> resolveTCPEndpointWithDNSCache(const std::string& host,
+	                                                                   const std::string& service) override {
+		// If a <hostname, vector<NetworkAddress>> pair was injected to mock DNS, use it.
+		Optional<std::vector<NetworkAddress>> mock = mockDNS.find(host, service);
+		if (mock.present()) {
+			return mock.get();
+		}
+		Optional<std::vector<NetworkAddress>> cache = dnsCache.find(host, service);
+		if (cache.present()) {
+			return cache.get();
+		}
+		return SimExternalConnection::resolveTCPEndpoint(host, service, &dnsCache);
 	}
 	std::vector<NetworkAddress> resolveTCPEndpointBlocking(const std::string& host,
 	                                                       const std::string& service) override {
@@ -990,7 +1003,7 @@ public:
 		if (mock.present()) {
 			return mock.get();
 		}
-		return SimExternalConnection::resolveTCPEndpointBlocking(host, service);
+		return SimExternalConnection::resolveTCPEndpointBlocking(host, service, &dnsCache);
 	}
 	ACTOR static Future<Reference<IConnection>> onConnect(Future<Void> ready, Reference<Sim2Conn> conn) {
 		wait(ready);

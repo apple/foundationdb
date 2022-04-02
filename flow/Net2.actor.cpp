@@ -166,6 +166,8 @@ public:
 
 	Future<std::vector<NetworkAddress>> resolveTCPEndpoint(const std::string& host,
 	                                                       const std::string& service) override;
+	Future<std::vector<NetworkAddress>> resolveTCPEndpointWithDNSCache(const std::string& host,
+	                                                                   const std::string& service) override;
 	std::vector<NetworkAddress> resolveTCPEndpointBlocking(const std::string& host,
 	                                                       const std::string& service) override;
 	Reference<IListener> listen(NetworkAddress localAddr) override;
@@ -1837,6 +1839,14 @@ Future<Reference<IConnection>> Net2::connectExternal(NetworkAddress toAddr, cons
 	return connect(toAddr, host);
 }
 
+Future<Reference<IUDPSocket>> Net2::createUDPSocket(NetworkAddress toAddr) {
+	return UDPSocket::connect(&reactor.ios, toAddr, toAddr.ip.isV6());
+}
+
+Future<Reference<IUDPSocket>> Net2::createUDPSocket(bool isV6) {
+	return UDPSocket::connect(&reactor.ios, Optional<NetworkAddress>(), isV6);
+}
+
 ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl(Net2* self,
                                                                          std::string host,
                                                                          std::string service) {
@@ -1848,6 +1858,7 @@ ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl(Net2* s
 	                          [=](const boost::system::error_code& ec, tcp::resolver::iterator iter) {
 		                          if (ec) {
 			                          promise.sendError(lookup_failed());
+			                          self->dnsCache.remove(host, service);
 			                          return;
 		                          }
 
@@ -1874,19 +1885,22 @@ ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl(Net2* s
 
 	wait(ready(result));
 	tcpResolver.cancel();
+	std::vector<NetworkAddress> ret = result.get();
+	self->dnsCache.add(host, service, ret);
 
-	return result.get();
-}
-
-Future<Reference<IUDPSocket>> Net2::createUDPSocket(NetworkAddress toAddr) {
-	return UDPSocket::connect(&reactor.ios, toAddr, toAddr.ip.isV6());
-}
-
-Future<Reference<IUDPSocket>> Net2::createUDPSocket(bool isV6) {
-	return UDPSocket::connect(&reactor.ios, Optional<NetworkAddress>(), isV6);
+	return ret;
 }
 
 Future<std::vector<NetworkAddress>> Net2::resolveTCPEndpoint(const std::string& host, const std::string& service) {
+	return resolveTCPEndpoint_impl(this, host, service);
+}
+
+Future<std::vector<NetworkAddress>> Net2::resolveTCPEndpointWithDNSCache(const std::string& host,
+                                                                         const std::string& service) {
+	Optional<std::vector<NetworkAddress>> cache = dnsCache.find(host, service);
+	if (cache.present()) {
+		return cache.get();
+	}
 	return resolveTCPEndpoint_impl(this, host, service);
 }
 
