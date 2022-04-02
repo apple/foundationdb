@@ -224,21 +224,24 @@ UID SimExternalConnection::getDebugID() const {
 std::vector<NetworkAddress> SimExternalConnection::resolveTCPEndpointBlocking(const std::string& host,
                                                                               const std::string& service) {
 	ip::tcp::resolver resolver(ios);
-	ip::tcp::resolver::query query(host, service);
-	auto iter = resolver.resolve(query);
-	decltype(iter) end;
-	std::vector<NetworkAddress> addrs;
-	while (iter != end) {
-		auto endpoint = iter->endpoint();
-		auto addr = endpoint.address();
-		if (addr.is_v6()) {
-			addrs.emplace_back(IPAddress(addr.to_v6().to_bytes()), endpoint.port());
-		} else {
-			addrs.emplace_back(addr.to_v4().to_ulong(), endpoint.port());
+	try {
+		auto iter = resolver.resolve(host, service);
+		decltype(iter) end;
+		std::vector<NetworkAddress> addrs;
+		while (iter != end) {
+			auto endpoint = iter->endpoint();
+			auto addr = endpoint.address();
+			if (addr.is_v6()) {
+				addrs.emplace_back(IPAddress(addr.to_v6().to_bytes()), endpoint.port());
+			} else {
+				addrs.emplace_back(addr.to_v4().to_ulong(), endpoint.port());
+			}
+			++iter;
 		}
-		++iter;
+		return addrs;
+	} catch (...) {
+		throw lookup_failed();
 	}
-	return addrs;
 }
 
 ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpointImpl(std::string host, std::string service) {
