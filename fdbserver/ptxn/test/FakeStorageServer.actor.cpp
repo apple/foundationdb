@@ -42,7 +42,7 @@ ACTOR Future<Void> fakeStorageServer_PassivelyReceive(
 		when(StorageServerPushRequest request = waitNext(pStorageServerInterface->pushRequests.getFuture())) {
 			const Version version = request.version;
 			const StorageTeamID storageTeamID = request.storageTeamID;
-			SubsequencedMessageDeserializer deserializer(request.messages);
+			SubsequencedMessageDeserializer deserializer(request.arena, request.messages);
 			int index = 0;
 			for (auto vsm : deserializer) {
 				const auto& message = vsm.message;

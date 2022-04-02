@@ -1022,7 +1022,7 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 		// in the same set of transactions as this proxy.
 		ResolveTransactionBatchReply& reply = self->resolution[0];
 		if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
-			self->toCommit.setGroupMutations(reply.groupPrivateMutations, self->commitVersion);
+			self->toCommit.setGroupMutations(reply.arena, reply.groupPrivateMutations, self->commitVersion);
 		} else {
 			self->toCommit.setMutations(reply.privateMutationCount, reply.privateMutations);
 		}

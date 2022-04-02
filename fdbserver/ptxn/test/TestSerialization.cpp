@@ -181,7 +181,7 @@ TEST_CASE("/fdbserver/ptxn/test/twoLevelHeaderedSerializer/base") {
 	serializer.writeHeader(TestSerializerHeader{ 10, 11, 12 });
 
 	Standalone<StringRef> serialized = serializer.getSerialized();
-	TestDeserializer deserializer(serialized);
+	TestDeserializer deserializer(serialized.arena(), serialized);
 
 	TestSerializerHeader mainHeader = deserializer.deserializeAsMainHeader();
 	ASSERT_EQ(mainHeader.item1, 10);
@@ -253,7 +253,7 @@ TEST_CASE("/fdbserver/ptxn/test/twoLevelHeaderedSerializer/preserialized") {
 	Standalone<StringRef> serialized = serializer.getSerialized();
 
 	// Deserialize and verify
-	TestDeserializer deserializer(serialized);
+	TestDeserializer deserializer(serialized.arena(), serialized);
 
 	auto mainHeader = deserializer.deserializeAsMainHeader();
 	ASSERT_EQ(mainHeader.item1, 1);
@@ -530,7 +530,7 @@ bool testSerialization() {
 	for (const auto iterateEmptyVersionFlag : std::vector<bool>{ true, false }) {
 		printTiming << "Testing with iterateEmptyVersionFlag = " << std::boolalpha << iterateEmptyVersionFlag
 		            << std::endl;
-		SubsequencedMessageDeserializer deserializer(serialized, iterateEmptyVersionFlag);
+		SubsequencedMessageDeserializer deserializer(serialized.arena(), serialized, iterateEmptyVersionFlag);
 		SubsequencedMessageDeserializer::iterator iterator = deserializer.cbegin();
 		printTiming << deserializer.getStorageTeamID() << std::endl;
 
@@ -564,7 +564,7 @@ bool testSerializationEmpty() {
 	serializer.completeMessageWriting();
 
 	Standalone<StringRef> serialized = serializer.getSerialized();
-	SubsequencedMessageDeserializer deserializer(serialized);
+	SubsequencedMessageDeserializer deserializer(serialized.arena(), serialized);
 	SubsequencedMessageDeserializer::iterator iterator = deserializer.cbegin();
 
 	ASSERT(iterator == deserializer.cend());
@@ -616,7 +616,7 @@ bool testDeserializerIterators() {
 
 	auto serialized = serializer.getSerialized();
 
-	SubsequencedMessageDeserializer deserializer(serialized);
+	SubsequencedMessageDeserializer deserializer(serialized.arena(), serialized);
 
 	ASSERT(deserializer.getStorageTeamID() == storageTeamID);
 	ASSERT_EQ(deserializer.getNumVersions(), 2);
@@ -678,7 +678,7 @@ bool testDeserializerIteratorPostfixOperator() {
 	serializer.completeMessageWriting();
 
 	Standalone<StringRef> serialized = serializer.getSerialized();
-	SubsequencedMessageDeserializer deserializer(serialized);
+	SubsequencedMessageDeserializer deserializer(serialized.arena(), serialized);
 
 	auto iter = deserializer.begin();
 	ASSERT(*iter == PART1[0]);
@@ -715,14 +715,14 @@ bool testDeserializerReset() {
 	serializer2.completeMessageWriting();
 	Standalone<StringRef> serialized2 = serializer2.getSerialized();
 
-	SubsequencedMessageDeserializer deserializer(serialized1);
+	SubsequencedMessageDeserializer deserializer(serialized1.arena(), serialized1);
 	auto iter1 = deserializer.begin();
 	for (int i = 0; i < NUM_MUTATIONS; ++i, ++iter1) {
 		ASSERT(*iter1 == data1[i]);
 	}
 	ASSERT(iter1 == deserializer.end());
 
-	deserializer.reset(serialized2);
+	deserializer.reset(serialized2.arena(), serialized2);
 	auto iter2 = deserializer.begin();
 	for (int i = 0; i < NUM_MUTATIONS; ++i, ++iter2) {
 		ASSERT(*iter2 == data2[i]);
@@ -775,7 +775,7 @@ TEST_CASE("/fdbserver/ptxn/test/SubsequencedMessageSerializer/timing") {
 	            << serializer.getTotalBytes() << " bytes." << std::endl;
 
 	Standalone<StringRef> serialized = serializer.getSerialized();
-	SubsequencedMessageDeserializer deserializer(serialized);
+	SubsequencedMessageDeserializer deserializer(serialized.arena(), serialized);
 	for (SubsequencedMessageDeserializer::iterator iter = deserializer.begin(); iter != deserializer.end(); ++iter)
 		;
 	printTiming << "Deserialized " << numMutations << " mutations" << std::endl;
@@ -809,7 +809,7 @@ bool testWriteSerialized() {
 	TLogSubsequencedMessageSerializer serializer(ptxn::test::randomUID());
 	serializer.writeSerializedVersionSection(serializedWithoutVersionOptions);
 	Standalone<StringRef> serialized = serializer.getSerialized();
-	SubsequencedMessageDeserializer deserializer(serialized);
+	SubsequencedMessageDeserializer deserializer(serialized.arena(), serialized);
 
 	auto iter = deserializer.begin();
 	ASSERT_EQ(iter->version, 0xab);
@@ -884,7 +884,7 @@ bool testWriteMessage(const UnitTestParameters& params) {
 
 	std::map<Subsequence, VersionSubsequenceMessage> allMessages;
 	for (const auto& [_, serializedData] : serialized.second) {
-		SubsequencedMessageDeserializer deserializer(serializedData);
+		SubsequencedMessageDeserializer deserializer(serialized.first, serializedData);
 		checkSubequenceIncremental(deserializer);
 
 		for (const auto& item : deserializer) {
