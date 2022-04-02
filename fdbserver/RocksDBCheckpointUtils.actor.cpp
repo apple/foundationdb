@@ -476,10 +476,11 @@ private:
 ACTOR Future<Void> fetchCheckpointRange(Database cx,
                                         std::shared_ptr<CheckpointMetaData> metaData,
                                         KeyRange range,
-                                        std::string localFile,
+                                        std::string dir,
                                         std::shared_ptr<rocksdb::SstFileWriter> writer,
                                         std::function<Future<Void>(const CheckpointMetaData&)> cFun,
                                         int maxRetries = 3) {
+	state std::string localFile = dir + "/" + metaData->checkpointID.toString() + ".sst";
 	RocksDBCheckpoint rcp = getRocksCheckpoint(*metaData);
 	TraceEvent("FetchCheckpointRange")
 	    .detail("InitialState", metaData->toString())
@@ -603,6 +604,7 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 				if (totalBytes > 0) {
 					RocksDBCheckpoint rcp = getRocksCheckpoint(*metaData);
 					rcp.fetchedFiles.emplace_back(range, localFile);
+					rcp.checkpointDir = dir;
 					metaData->serializedCheckpoint = ObjectWriter::toValue(rcp, IncludeVersion());
 				}
 				// TODO: This won't work since it is not transactional.
@@ -796,10 +798,9 @@ ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
 		wait(waitForAll(fs));
 	} else if (metaData->format == RocksDB) {
 		// RocksDBCheckpoint rcp = getRocksCheckpoint(*metaData);
-		std::string localFile = dir + "/" + metaData->checkpointID.toString() + ".sst";
 		std::shared_ptr<rocksdb::SstFileWriter> writer =
 		    std::make_shared<rocksdb::SstFileWriter>(rocksdb::EnvOptions(), rocksdb::Options());
-		wait(fetchCheckpointRange(cx, metaData, metaData->range, localFile, writer, cFun));
+		wait(fetchCheckpointRange(cx, metaData, metaData->range, dir, writer, cFun));
 	}
 
 	return *metaData;

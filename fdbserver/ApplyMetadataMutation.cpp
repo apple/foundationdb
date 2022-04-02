@@ -576,7 +576,12 @@ private:
 		if (toCommit) {
 			UID ssID, dataMoveID, checkpointID;
 			decodeCheckpointKeyRange(range, ssID, dataMoveID);
-			Tag tag = decodeServerTagValue(txnStateStore->readValue(serverTagKeyFor(ssID)).get().get());
+			// TODO: How to delete checkpoint for failed ss?
+			Optional<Value> tagV = txnStateStore->readValue(serverTagKeyFor(ssID)).get();
+			if(!tagV.present()) {
+				return;
+			}
+			Tag tag = decodeServerTagValue(tagV.get());
 			MutationRef privatized = m;
 			privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 			privatized.param2 = m.param2.withPrefix(systemKeys.begin, arena);
