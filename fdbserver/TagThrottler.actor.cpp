@@ -187,23 +187,21 @@ public:
 		// the future
 		auto storageQueue = ss.getStorageQueueBytes();
 		auto storageDurabilityLag = ss.getDurabilityLag();
+		std::vector<Future<Void>> futures;
 		if (storageQueue > SERVER_KNOBS->AUTO_TAG_THROTTLE_STORAGE_QUEUE_BYTES ||
 		    storageDurabilityLag > SERVER_KNOBS->AUTO_TAG_THROTTLE_DURABILITY_LAG_VERSIONS) {
-			// TODO: Update once size is potentially > 1
-			ASSERT_WE_THINK(ss.busiestWriteTags.size() <= 1);
-			ASSERT_WE_THINK(ss.busiestReadTags.size() <= 1);
 			for (const auto& busyWriteTag : ss.busiestWriteTags) {
-				return tryUpdateAutoThrottling(busyWriteTag.tag,
-				                               busyWriteTag.rate,
-				                               busyWriteTag.fractionalBusyness,
-				                               TagThrottledReason::BUSY_WRITE);
+				futures.push_back(tryUpdateAutoThrottling(busyWriteTag.tag,
+				                                          busyWriteTag.rate,
+				                                          busyWriteTag.fractionalBusyness,
+				                                          TagThrottledReason::BUSY_WRITE));
 			}
 			for (const auto& busyReadTag : ss.busiestReadTags) {
-				return tryUpdateAutoThrottling(
-				    busyReadTag.tag, busyReadTag.rate, busyReadTag.fractionalBusyness, TagThrottledReason::BUSY_READ);
+				futures.push_back(tryUpdateAutoThrottling(
+				    busyReadTag.tag, busyReadTag.rate, busyReadTag.fractionalBusyness, TagThrottledReason::BUSY_READ));
 			}
 		}
-		return Void();
+		return waitForAll(futures);
 	}
 
 }; // class TagThrottlerImpl
