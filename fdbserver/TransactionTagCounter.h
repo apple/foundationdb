@@ -20,49 +20,23 @@
 
 #pragma once
 
+#include "fdbclient/PImpl.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/TagThrottle.actor.h"
-#include "fdbserver/Knobs.h"
-
-class TopKTags {
-public:
-	struct TagAndCount {
-		TransactionTag tag;
-		int64_t count;
-		bool operator<(TagAndCount const& other) const { return count < other.count; }
-		explicit TagAndCount(TransactionTag tag, int64_t count) : tag(tag), count(count) {}
-	};
-
-private:
-	// Because the number of tracked is expected to be small, they can be tracked
-	// in a simple vector. If the number of tracked tags increases, a more sophisticated
-	// data structure will be required.
-	std::vector<TagAndCount> topTags;
-	int limit;
-
-public:
-	explicit TopKTags(int limit) : limit(limit) { ASSERT_GT(limit, 0); }
-	void incrementCount(TransactionTag tag, int previousCount, int increase);
-
-	std::vector<StorageQueuingMetricsReply::TagInfo> getBusiestTags(double elapsed, double totalSampleCount) const;
-
-	void clear() { topTags.clear(); }
-};
 
 class TransactionTagCounter {
-	UID thisServerID;
-	TransactionTagMap<int64_t> intervalCounts;
-	int64_t intervalTotalSampledCount = 0;
-	TopKTags topTags;
-	double intervalStart = 0;
-
-	std::vector<StorageQueuingMetricsReply::TagInfo> previousBusiestTags;
-	Reference<EventCacheHolder> busiestReadTagEventHolder;
+	PImpl<class TransactionTagCounterImpl> impl;
 
 public:
 	TransactionTagCounter(UID thisServerID);
-	static int64_t costFunction(int64_t bytes) { return bytes / SERVER_KNOBS->READ_COST_BYTE_FACTOR + 1; }
+	~TransactionTagCounter();
+
+	// Update counters tracking the busyness of each tag in the current interval
 	void addRequest(Optional<TagSet> const& tags, int64_t bytes);
+
+	// Save current set of busy tags and reset counters for next interval
 	void startNewInterval();
-	std::vector<StorageQueuingMetricsReply::TagInfo> const& getBusiestTags() const { return previousBusiestTags; }
+
+	// Returns the set of busiest tags as of the end of the last interval
+	std::vector<StorageQueuingMetricsReply::TagInfo> const& getBusiestTags() const;
 };

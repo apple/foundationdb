@@ -18,76 +18,135 @@
  * limitations under the License.
  */
 
+#include "fdbserver/Knobs.h"
 #include "fdbserver/TransactionTagCounter.h"
 #include "flow/Trace.h"
 
-void TopKTags::incrementCount(TransactionTag tag, int previousCount, int increase) {
-	auto iter = std::find_if(topTags.begin(), topTags.end(), [tag](const auto& tc) { return tc.tag == tag; });
-	if (iter != topTags.end()) {
-		ASSERT_EQ(previousCount, iter->count);
-		iter->count += increase;
-	} else if (topTags.size() < limit) {
-		ASSERT_EQ(previousCount, 0);
-		topTags.emplace_back(tag, increase);
-	} else {
-		auto toReplace = std::min_element(topTags.begin(), topTags.end());
-		ASSERT_GE(toReplace->count, previousCount);
-		if (toReplace->count < previousCount + increase) {
-			toReplace->tag = tag;
-			toReplace->count = previousCount + increase;
-		}
-	}
-}
+namespace {
 
-std::vector<StorageQueuingMetricsReply::TagInfo> TopKTags::getBusiestTags(double elapsed,
-                                                                          double totalSampleCount) const {
-	std::vector<StorageQueuingMetricsReply::TagInfo> result;
-	for (auto const& tagAndCounter : topTags) {
-		auto rate = (tagAndCounter.count / CLIENT_KNOBS->READ_TAG_SAMPLE_RATE) / elapsed;
-		if (rate > SERVER_KNOBS->MIN_TAG_READ_PAGES_RATE) {
-			result.emplace_back(tagAndCounter.tag, rate, tagAndCounter.count / totalSampleCount);
+class TopKTags {
+public:
+	struct TagAndCount {
+		TransactionTag tag;
+		int64_t count;
+		bool operator<(TagAndCount const& other) const { return count < other.count; }
+		explicit TagAndCount(TransactionTag tag, int64_t count) : tag(tag), count(count) {}
+	};
+
+private:
+	// Because the number of tracked is expected to be small, they can be tracked
+	// in a simple vector. If the number of tracked tags increases, a more sophisticated
+	// data structure will be required.
+	std::vector<TagAndCount> topTags;
+	int limit;
+
+public:
+	explicit TopKTags(int limit) : limit(limit) { ASSERT_GT(limit, 0); }
+
+	void incrementCount(TransactionTag tag, int previousCount, int increase) {
+		auto iter = std::find_if(topTags.begin(), topTags.end(), [tag](const auto& tc) { return tc.tag == tag; });
+		if (iter != topTags.end()) {
+			ASSERT_EQ(previousCount, iter->count);
+			iter->count += increase;
+		} else if (topTags.size() < limit) {
+			ASSERT_EQ(previousCount, 0);
+			topTags.emplace_back(tag, increase);
+		} else {
+			auto toReplace = std::min_element(topTags.begin(), topTags.end());
+			ASSERT_GE(toReplace->count, previousCount);
+			if (toReplace->count < previousCount + increase) {
+				toReplace->tag = tag;
+				toReplace->count = previousCount + increase;
+			}
 		}
 	}
-	return result;
-}
+
+	std::vector<StorageQueuingMetricsReply::TagInfo> getBusiestTags(double elapsed, double totalSampleCount) const {
+		std::vector<StorageQueuingMetricsReply::TagInfo> result;
+		for (auto const& tagAndCounter : topTags) {
+			auto rate = (tagAndCounter.count / CLIENT_KNOBS->READ_TAG_SAMPLE_RATE) / elapsed;
+			if (rate > SERVER_KNOBS->MIN_TAG_READ_PAGES_RATE) {
+				result.emplace_back(tagAndCounter.tag, rate, tagAndCounter.count / totalSampleCount);
+			}
+		}
+		return result;
+	}
+
+	void clear() { topTags.clear(); }
+};
+
+} // namespace
+
+class TransactionTagCounterImpl {
+	UID thisServerID;
+	TransactionTagMap<int64_t> intervalCounts;
+	int64_t intervalTotalSampledCount = 0;
+	TopKTags topTags;
+	double intervalStart = 0;
+
+	std::vector<StorageQueuingMetricsReply::TagInfo> previousBusiestTags;
+	Reference<EventCacheHolder> busiestReadTagEventHolder;
+
+	static int64_t costFunction(int64_t bytes) { return bytes / SERVER_KNOBS->READ_COST_BYTE_FACTOR + 1; }
+
+public:
+	TransactionTagCounterImpl(UID thisServerID)
+	  : thisServerID(thisServerID), topTags(1), // TODO: Make this a knob
+	    busiestReadTagEventHolder(makeReference<EventCacheHolder>(thisServerID.toString() + "/BusiestReadTag")) {}
+
+	void addRequest(Optional<TagSet> const& tags, int64_t bytes) {
+		if (tags.present()) {
+			TEST(true); // Tracking transaction tag in counter
+			double cost = costFunction(bytes);
+			for (auto& tag : tags.get()) {
+				int64_t& count = intervalCounts[TransactionTag(tag, tags.get().getArena())];
+				topTags.incrementCount(tag, count, cost);
+				count += cost;
+			}
+
+			intervalTotalSampledCount += cost;
+		}
+	}
+
+	void startNewInterval() {
+		double elapsed = now() - intervalStart;
+		previousBusiestTags.clear();
+		if (intervalStart > 0 && CLIENT_KNOBS->READ_TAG_SAMPLE_RATE > 0 && elapsed > 0) {
+			previousBusiestTags = topTags.getBusiestTags(elapsed, intervalTotalSampledCount);
+
+			TraceEvent("BusiestReadTag", thisServerID)
+			    .detail("Elapsed", elapsed)
+			    //.detail("Tag", printable(busiestTag))
+			    //.detail("TagCost", busiestTagCount)
+			    .detail("TotalSampledCost", intervalTotalSampledCount)
+			    .detail("Reported", previousBusiestTags.size())
+			    .trackLatest(busiestReadTagEventHolder->trackingKey);
+		}
+
+		intervalCounts.clear();
+		intervalTotalSampledCount = 0;
+		topTags.clear();
+		intervalStart = now();
+	}
+
+	std::vector<StorageQueuingMetricsReply::TagInfo> const& getBusiestTags() const { return previousBusiestTags; }
+};
 
 TransactionTagCounter::TransactionTagCounter(UID thisServerID)
-  : thisServerID(thisServerID), topTags(1), // TODO: Make this a knob
-    busiestReadTagEventHolder(makeReference<EventCacheHolder>(thisServerID.toString() + "/BusiestReadTag")) {}
+  : impl(PImpl<TransactionTagCounterImpl>::create(thisServerID)) {}
+
+TransactionTagCounter::~TransactionTagCounter() = default;
 
 void TransactionTagCounter::addRequest(Optional<TagSet> const& tags, int64_t bytes) {
-	if (tags.present()) {
-		TEST(true); // Tracking transaction tag in counter
-		double cost = costFunction(bytes);
-		for (auto& tag : tags.get()) {
-			int64_t& count = intervalCounts[TransactionTag(tag, tags.get().getArena())];
-			topTags.incrementCount(tag, count, cost);
-			count += cost;
-		}
-
-		intervalTotalSampledCount += cost;
-	}
+	return impl->addRequest(tags, bytes);
 }
 
 void TransactionTagCounter::startNewInterval() {
-	double elapsed = now() - intervalStart;
-	previousBusiestTags.clear();
-	if (intervalStart > 0 && CLIENT_KNOBS->READ_TAG_SAMPLE_RATE > 0 && elapsed > 0) {
-		previousBusiestTags = topTags.getBusiestTags(elapsed, intervalTotalSampledCount);
+	return impl->startNewInterval();
+}
 
-		TraceEvent("BusiestReadTag", thisServerID)
-		    .detail("Elapsed", elapsed)
-		    //.detail("Tag", printable(busiestTag))
-		    //.detail("TagCost", busiestTagCount)
-		    .detail("TotalSampledCost", intervalTotalSampledCount)
-		    .detail("Reported", previousBusiestTags.size())
-		    .trackLatest(busiestReadTagEventHolder->trackingKey);
-	}
-
-	intervalCounts.clear();
-	intervalTotalSampledCount = 0;
-	topTags.clear();
-	intervalStart = now();
+std::vector<StorageQueuingMetricsReply::TagInfo> const& TransactionTagCounter::getBusiestTags() const {
+	return impl->getBusiestTags();
 }
 
 TEST_CASE("/TransactionTagCounter/TopKTags") {
