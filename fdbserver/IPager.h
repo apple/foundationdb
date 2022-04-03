@@ -221,9 +221,11 @@ public:
 	struct RedwoodHeaderV1 {
 		PageType pageType;
 		// The meaning of pageSubType is based on pageType
-		//   For Queue pages, pageSubType is QueueID
+		//   For Queue pages, pageSubType is the QueueID
 		//   For BTree nodes, pageSubType is Height (also stored in BTreeNode)
 		uint8_t pageSubType;
+		// Format identifier, normally specific to the page Type and SubType
+		uint8_t pageFormat;
 		XXH64_hash_t checksum;
 
 		// Physical page ID of first block on disk of the ArenaPage
@@ -319,7 +321,7 @@ public:
 	// Post: Page header is initialized and space is reserved for subheaders for
 	//       HEADER_WRITE_VERSION main header and the given encoding type.
 	//       Payload can be written to with mutateData() and dataSize()
-	void init(EncodingType t, PageType pageType, uint8_t pageSubType) {
+	void init(EncodingType t, PageType pageType, uint8_t pageSubType, uint8_t pageFormat = 0) {
 		// Carefully cast away constness to modify page header
 		Page* p = const_cast<Page*>(page);
 		p->headerVersion = HEADER_WRITE_VERSION;
@@ -333,6 +335,7 @@ public:
 		RedwoodHeaderV1* h = page->getMainHeader<RedwoodHeaderV1>();
 		h->pageType = pageType;
 		h->pageSubType = pageSubType;
+		h->pageFormat = pageFormat;
 
 		// Write dummy values for these in new pages. They should be updated when possible before calling preWrite()
 		// when modifying existing pages
