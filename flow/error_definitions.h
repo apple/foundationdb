@@ -295,7 +295,7 @@ ERROR( encrypt_ops_error, 3000, "Encryption operation error")
 ERROR( encrypt_header_metadata_mismatch, 3001, "Encryption header metadata mismatch")
 ERROR( encrypt_key_not_found, 3002, "Expected encryption key is missing")
 ERROR( encrypt_key_ttl_expired, 3003, "Expected encryption key TTL has expired")
-ERROR( encrypt_header_checksum_mismatch, 3004, "Encryption header checksum mismatch")
+ERROR( encrypt_header_authtoken_mismatch, 3004, "Encryption header authentication token mismatch")
 ERROR( encrypt_update_cipher, 3005, "Attempt to update encryption cipher key")
 ERROR( encrypt_invalid_id, 3006, "Invalid encryption domainId or encryption cipher key id")
 
