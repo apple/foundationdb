@@ -1394,7 +1394,10 @@ public:
 			bool foundSSToRemove = false;
 
 			for (auto& server : self->server_info) {
-				if (!server.second->isCorrectStoreType(self->configuration.storageServerStoreType)) {
+				// If this server isn't the right storage type and its wrong-type trigger has not yet been set
+				// then set it if we're in aggressive mode and log its presence either way.
+				if (!server.second->isCorrectStoreType(self->configuration.storageServerStoreType) &&
+				    !server.second->wrongStoreTypeToRemove.get()) {
 					// Server may be removed due to failure while the wrongStoreTypeToRemove is sent to the
 					// storageServerTracker. This race may cause the server to be removed before react to
 					// wrongStoreTypeToRemove
@@ -1407,12 +1410,16 @@ public:
 					TraceEvent("WrongStoreTypeRemover", self->distributorId)
 					    .detail("Server", server.first)
 					    .detail("StoreType", server.second->getStoreType())
-					    .detail("ConfiguredStoreType", self->configuration.storageServerStoreType);
-					break;
+					    .detail("ConfiguredStoreType", self->configuration.storageServerStoreType)
+					    .detail("RemovingNow",
+					            self->configuration.storageMigrationType == StorageMigrationType::AGGRESSIVE);
 				}
 			}
 
-			if (!foundSSToRemove) {
+			// Stop if no incorrect storage types were found, or if we're not in aggressive mode and can't act on any
+			// found. Aggressive mode is checked at this location so that in non-aggressive mode the loop will execute
+			// once and log any incorrect storage types found.
+			if (!foundSSToRemove || self->configuration.storageMigrationType != StorageMigrationType::AGGRESSIVE) {
 				break;
 			}
 		}

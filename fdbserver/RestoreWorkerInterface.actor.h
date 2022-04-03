@@ -368,6 +368,7 @@ struct LoadingParam {
 
 	bool isRangeFile;
 	Key url;
+	Optional<std::string> proxy;
 	Optional<Version> rangeVersion; // range file's version
 
 	int64_t blockSize;
@@ -386,12 +387,13 @@ struct LoadingParam {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, isRangeFile, url, rangeVersion, blockSize, asset);
+		serializer(ar, isRangeFile, url, proxy, rangeVersion, blockSize, asset);
 	}
 
 	std::string toString() const {
 		std::stringstream str;
 		str << "isRangeFile:" << isRangeFile << " url:" << url.toString()
+		    << " proxy:" << (proxy.present() ? proxy.get() : "")
 		    << " rangeVersion:" << (rangeVersion.present() ? rangeVersion.get() : -1) << " blockSize:" << blockSize
 		    << " RestoreAsset:" << asset.toString();
 		return str.str();

@@ -8,6 +8,8 @@ set(FLOW_SRCS
   ArgParseUtil.h
   AsioReactor.h
   BooleanParam.h
+  BlobCipher.h
+  BlobCipher.cpp
   CompressedInt.actor.cpp
   CompressedInt.h
   Deque.cpp

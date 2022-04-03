@@ -52,12 +52,13 @@ struct RelocateData {
 	std::vector<UID> completeSources;
 	std::vector<UID> completeDests;
 	bool wantsNewServers;
+	bool cancellable;
 	TraceInterval interval;
 	std::shared_ptr<DataMove> dataMove;
 
 	RelocateData()
 	  : priority(-1), boundaryPriority(-1), healthPriority(-1), restore(false), startTime(-1), workFactor(0),
-	    wantsNewServers(false), interval("QueuedRelocation") {}
+	    wantsNewServers(false), cancellable(false), interval("QueuedRelocation") {}
 	explicit RelocateData(RelocateShard const& rs)
 	  : keys(rs.keys), priority(rs.priority), boundaryPriority(isBoundaryPriority(rs.priority) ? rs.priority : -1),
 	    healthPriority(isHealthPriority(rs.priority) ? rs.priority : -1), startTime(now()), restore(rs.restore),
@@ -67,7 +68,7 @@ struct RelocateData {
 	                    rs.priority == SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM ||
 	                    rs.priority == SERVER_KNOBS->PRIORITY_SPLIT_SHARD ||
 	                    rs.priority == SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT),
-	    interval("QueuedRelocation"), dataMove(rs.dataMove) {
+	    cancellable(true), interval("QueuedRelocation"), dataMove(rs.dataMove) {
 		if (dataMove != nullptr && restore) {
 			this->src.insert(this->src.end(), dataMove->meta.src.begin(), dataMove->meta.src.end());
 		}
@@ -623,19 +624,23 @@ struct DDQueueData {
 						    .detail(
 						        "Problem",
 						        "the key range in the inFlight map matches the key range in the RelocateData message");
+				} else if (it->value().cancellable) {
+					TraceEvent(SevError, "DDQueueValidateError13")
+					    .detail("Problem", "key range is cancellable but not in flight!")
+					    .detail("Range", it->range());
 				}
 			}
 
 			for (auto it = busymap.begin(); it != busymap.end(); ++it) {
 				for (int i = 0; i < it->second.ledger.size() - 1; i++) {
 					if (it->second.ledger[i] < it->second.ledger[i + 1])
-						TraceEvent(SevError, "DDQueueValidateError13")
+						TraceEvent(SevError, "DDQueueValidateError14")
 						    .detail("Problem", "ascending ledger problem")
 						    .detail("LedgerLevel", i)
 						    .detail("LedgerValueA", it->second.ledger[i])
 						    .detail("LedgerValueB", it->second.ledger[i + 1]);
 					if (it->second.ledger[i] < 0.0)
-						TraceEvent(SevError, "DDQueueValidateError14")
+						TraceEvent(SevError, "DDQueueValidateError15")
 						    .detail("Problem", "negative ascending problem")
 						    .detail("LedgerLevel", i)
 						    .detail("LedgerValue", it->second.ledger[i]);
@@ -645,13 +650,13 @@ struct DDQueueData {
 			for (auto it = destBusymap.begin(); it != destBusymap.end(); ++it) {
 				for (int i = 0; i < it->second.ledger.size() - 1; i++) {
 					if (it->second.ledger[i] < it->second.ledger[i + 1])
-						TraceEvent(SevError, "DDQueueValidateError15")
+						TraceEvent(SevError, "DDQueueValidateError16")
 						    .detail("Problem", "ascending ledger problem")
 						    .detail("LedgerLevel", i)
 						    .detail("LedgerValueA", it->second.ledger[i])
 						    .detail("LedgerValueB", it->second.ledger[i + 1]);
 					if (it->second.ledger[i] < 0.0)
-						TraceEvent(SevError, "DDQueueValidateError16")
+						TraceEvent(SevError, "DDQueueValidateError17")
 						    .detail("Problem", "negative ascending problem")
 						    .detail("LedgerLevel", i)
 						    .detail("LedgerValue", it->second.ledger[i]);
@@ -970,7 +975,7 @@ struct DDQueueData {
 			auto containedRanges = inFlight.containedRanges(rd.keys);
 			std::vector<RelocateData> cancellableRelocations;
 			for (auto it = containedRanges.begin(); it != containedRanges.end(); ++it) {
-				if (inFlightActors.liveActorAt(it->range().begin)) {
+				if (it.value().cancellable) {
 					cancellableRelocations.push_back(it->value());
 				}
 			}
@@ -1285,6 +1290,12 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 				// TODO different trace event + knob for overloaded? Could wait on an async var for done moves
 			}
 
+			// set cancellable to false on inFlight's entry for this key range
+			auto inFlightRange = self->inFlight.rangeContaining(rd.keys.begin);
+			ASSERT(inFlightRange.range() == rd.keys);
+			ASSERT(inFlightRange.value().randomId == rd.randomId);
+			inFlightRange.value().cancellable = false;
+
 			destIds.clear();
 			state std::vector<UID> healthyIds;
 			state std::vector<UID> extraIds;
@@ -1511,6 +1522,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 			} else {
 				TEST(true); // move to removed server
 				healthyDestinations.addDataInFlightToTeam(-metrics.bytes);
+				rd.completeDests.clear();
 				wait(delay(SERVER_KNOBS->RETRY_RELOCATESHARD_DELAY, TaskPriority::DataDistributionLaunch));
 			}
 		}

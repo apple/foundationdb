@@ -19,6 +19,8 @@
  */
 
 #include <cinttypes>
+#include <vector>
+
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/SystemData.h"
 #include "flow/ActorCollection.h"

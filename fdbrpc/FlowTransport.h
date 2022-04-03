@@ -169,6 +169,7 @@ struct Peer : public ReferenceCounted<Peer> {
 	int connectIncomingCount;
 	int connectFailedCount;
 	ContinuousSample<double> connectLatencies;
+	Promise<Void> disconnect;
 
 	explicit Peer(TransportData* transport, NetworkAddress const& destination);
 
@@ -269,6 +270,7 @@ public:
 	static NetworkAddressList getGlobalLocalAddresses() { return transport().getLocalAddresses(); }
 
 	Endpoint loadedEndpoint(const UID& token);
+	Future<Void> loadedDisconnect();
 
 	HealthMonitor* healthMonitor();
 

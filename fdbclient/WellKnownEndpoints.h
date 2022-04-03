@@ -52,4 +52,7 @@ enum WellKnownEndpoints {
 	WLTOKEN_RESERVED_COUNT // 23
 };
 
+static_assert(WLTOKEN_PROTOCOL_INFO ==
+              10); // Enforce that the value of this endpoint does not change per comment above.
+
 #endif
