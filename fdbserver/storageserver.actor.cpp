@@ -2124,6 +2124,7 @@ ACTOR Future<Void> getCheckpointQ(StorageServer* self, GetCheckpointRequest req)
 
 // Delete the checkpoint from disk, as well as all related presisted meta data.
 ACTOR Future<Void> deleteCheckpointQ(StorageServer* self, Version version, CheckpointMetaData checkpoint) {
+	wait(delay(0, TaskPriority::Low));
 	wait(self->durableVersion.whenAtLeast(version));
 
 	TraceEvent("DeleteCheckpointBegin", self->thisServerID).detail("Checkpoint", checkpoint.toString());
@@ -2162,7 +2163,13 @@ ACTOR Future<Void> deleteMoveInShardQ(StorageServer* self, Version version, Move
 	TraceEvent("DeleteMoveInShardBegin", self->thisServerID)
 	    .detail("MoveInShard", shard.toString())
 	    .detail("Version", version);
-
+	state int idx = 0;
+	for (; idx < shard.checkpoints.size(); ++idx) {
+		wait(deleteCheckpointQ(self, version, shard.checkpoints[idx]));
+	}
+	self->storage.clearRange(shard.persistUpdatesKeyRange());
+	self->storage.clearRange(singleKeyRange(shard.moveInShardKey()));
+	wait(self->durableVersion.whenAtLeast(self->storageVersion() + 1));
 	return Void();
 }
 
@@ -5663,6 +5670,7 @@ ACTOR Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 	data->newestAvailableVersion.insert(shard->range, latestVersion);
 	moveInShard->readWrite.send(Void());
 	// TODO: Delete MoveInShard.
+	data->actors.add(deleteMoveInShardQ(data, data->data().getLatestVersion(), *shard));
 	data->addShard(ShardInfo::newReadWrite(shard->range, data)); // invalidates shard!
 	coalesceShards(data, shard->range);
 
@@ -5918,6 +5926,7 @@ void restoreShards(StorageServer* data,
 		MoveInShardMetaData metaData = MoveInShard::decodeMoveInShardValue(moveInShards[mLoc].value);
 		TraceEvent("RestoreShardMoveInShard", data->thisServerID).detail("MoveInShard", metaData.toString());
 		if (metaData.getPhase() == MoveInShardMetaData::Complete) {
+			data->actors.add(deleteMoveInShardQ(data, version, metaData));
 			continue;
 		}
 		data->addShard(ShardInfo::newMoveInShard(data, metaData));

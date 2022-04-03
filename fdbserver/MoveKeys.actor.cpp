@@ -581,6 +581,10 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 						state Shard physicalShard(rangeIntersectKeys, srcId);
 
 						if (destId.isValid()) {
+							TraceEvent(SevDebug, "StartMoveKeysDestIDExist", relocationIntervalId)
+							    .detail("Range", rangeIntersectKeys)
+							    .detail("DataMoveID", dataMoveID)
+							    .detail("DestID", destId).log();
 							ASSERT(!dest.empty());
 							if (destId == dataMoveID) {
 								TraceEvent(SevDebug, "StartMoveKeysRangeAlreadyCommitted", relocationIntervalId)
