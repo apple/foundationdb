@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -274,12 +274,12 @@ ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
 				Transaction tr(self()->cx);
 				// metrics.second is the number of key-ranges (i.e., shards) in the 'keys' key-range
 				std::pair<Optional<StorageMetrics>, int> metrics =
-				    wait(tr.waitStorageMetrics(keys,
-				                               bounds.min,
-				                               bounds.max,
-				                               bounds.permittedError,
-				                               CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT,
-				                               shardCount));
+				    wait(self()->cx->waitStorageMetrics(keys,
+				                                        bounds.min,
+				                                        bounds.max,
+				                                        bounds.permittedError,
+				                                        CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT,
+				                                        shardCount));
 				if (metrics.first.present()) {
 					BandwidthStatus newBandwidthStatus = getBandwidthStatus(metrics.first.get());
 					if (newBandwidthStatus == BandwidthStatusLow && bandwidthStatus != BandwidthStatusLow) {
@@ -336,7 +336,8 @@ ACTOR Future<Void> readHotDetector(DataDistributionTracker* self) {
 			state Transaction tr(self->cx);
 			loop {
 				try {
-					Standalone<VectorRef<ReadHotRangeWithMetrics>> readHotRanges = wait(tr.getReadHotRanges(keys));
+					Standalone<VectorRef<ReadHotRangeWithMetrics>> readHotRanges =
+					    wait(self->cx->getReadHotRanges(keys));
 					for (const auto& keyRange : readHotRanges) {
 						TraceEvent("ReadHotRangeLog")
 						    .detail("ReadDensity", keyRange.density)
@@ -378,7 +379,8 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> getSplitKeys(DataDistributionTracker
 	loop {
 		state Transaction tr(self->cx);
 		try {
-			Standalone<VectorRef<KeyRef>> keys = wait(tr.splitStorageMetrics(splitRange, splitMetrics, estimated));
+			Standalone<VectorRef<KeyRef>> keys =
+			    wait(self->cx->splitStorageMetrics(splitRange, splitMetrics, estimated));
 			return keys;
 		} catch (Error& e) {
 			wait(tr.onError(e));
@@ -971,7 +973,7 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
 	}
 }
 
-std::vector<KeyRange> ShardsAffectedByTeamFailure::getShardsFor(Team team) {
+std::vector<KeyRange> ShardsAffectedByTeamFailure::getShardsFor(Team team) const {
 	std::vector<KeyRange> r;
 	for (auto it = team_shards.lower_bound(std::pair<Team, KeyRange>(team, KeyRangeRef()));
 	     it != team_shards.end() && it->first == team;
@@ -1104,7 +1106,7 @@ void ShardsAffectedByTeamFailure::finishMove(KeyRangeRef keys) {
 	}
 }
 
-void ShardsAffectedByTeamFailure::check() {
+void ShardsAffectedByTeamFailure::check() const {
 	if (EXPENSIVE_VALIDATION) {
 		for (auto t = team_shards.begin(); t != team_shards.end(); ++t) {
 			auto i = shard_teams.rangeContaining(t->second.begin);
@@ -1113,8 +1115,8 @@ void ShardsAffectedByTeamFailure::check() {
 			}
 		}
 		auto rs = shard_teams.ranges();
-		for (auto i = rs.begin(); i != rs.end(); ++i)
-			for (std::vector<Team>::iterator t = i->value().first.begin(); t != i->value().first.end(); ++t)
+		for (auto i = rs.begin(); i != rs.end(); ++i) {
+			for (auto t = i->value().first.begin(); t != i->value().first.end(); ++t) {
 				if (!team_shards.count(std::make_pair(*t, i->range()))) {
 					std::string teamDesc, shards;
 					for (int k = 0; k < t->servers.size(); k++)
@@ -1130,5 +1132,7 @@ void ShardsAffectedByTeamFailure::check() {
 					    .detail("Shards", shards);
 					ASSERT(false);
 				}
+			}
+		}
 	}
 }

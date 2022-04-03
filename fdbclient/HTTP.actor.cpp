@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,6 +25,24 @@
 #include "flow/actorcompiler.h" // has to be last include
 
 namespace HTTP {
+
+// AWS V4 headers require this encoding for its signature calculation
+std::string awsV4URIEncode(const std::string& s, bool encodeSlash) {
+	std::string o;
+	o.reserve(s.size() * 3);
+	char buf[4];
+	for (auto c : s) {
+		if (std::isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~')
+			o.append(&c, 1);
+		else if (c == '/')
+			o.append(encodeSlash ? "%2F" : "/");
+		else {
+			sprintf(buf, "%%%.02X", c);
+			o.append(buf);
+		}
+	}
+	return o;
+}
 
 std::string urlEncode(const std::string& s) {
 	std::string o;
@@ -189,7 +207,7 @@ ACTOR Future<Void> read_http_response_headers(Reference<IConnection> conn,
 
 // Reads an HTTP response from a network connection
 // If the connection fails while being read the exception will emitted
-// If the response is not parseable or complete in some way, http_bad_response will be thrown
+// If the response is not parsable or complete in some way, http_bad_response will be thrown
 ACTOR Future<Void> read_http_response(Reference<HTTP::Response> r, Reference<IConnection> conn, bool header_only) {
 	state std::string buf;
 	state size_t pos = 0;
@@ -430,6 +448,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest(Reference<IConnection> conn,
 				err = http_bad_request_id();
 
 				TraceEvent(SevError, "HTTPRequestFailedIDMismatch")
+				    .error(err.get())
 				    .detail("DebugID", conn->getDebugID())
 				    .detail("RemoteAddress", conn->getPeerAddress())
 				    .detail("Verb", verb)
@@ -438,8 +457,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest(Reference<IConnection> conn,
 				    .detail("ResponseCode", r->code)
 				    .detail("ResponseContentLen", r->contentLen)
 				    .detail("RequestIDSent", requestID)
-				    .detail("RequestIDReceived", responseID)
-				    .error(err.get());
+				    .detail("RequestIDReceived", responseID);
 			}
 		}
 
@@ -483,7 +501,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest(Reference<IConnection> conn,
 			       contentLen,
 			       total_sent);
 		}
-		event.error(e);
+		event.errorUnsuppressed(e);
 		throw;
 	}
 }

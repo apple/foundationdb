@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2019 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -673,7 +673,9 @@ ACTOR Future<Void> changeCoordinators(Reference<ClusterRecoveryData> self) {
 		}
 
 		try {
-			wait(self->cstate.move(ClusterConnectionString(changeCoordinatorsRequest.newConnectionString.toString())));
+			state ClusterConnectionString conn(changeCoordinatorsRequest.newConnectionString.toString());
+			wait(conn.resolveHostnames());
+			wait(self->cstate.move(conn));
 		} catch (Error& e) {
 			if (e.code() != error_code_actor_cancelled)
 				changeCoordinatorsRequest.reply.sendError(e);

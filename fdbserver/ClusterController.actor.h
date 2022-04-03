@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2020 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -50,6 +50,7 @@ struct WorkerInfo : NonCopyable {
 	Future<Void> haltRatekeeper;
 	Future<Void> haltDistributor;
 	Future<Void> haltBlobManager;
+	Future<Void> haltEncryptKeyProxy;
 	Standalone<VectorRef<StringRef>> issues;
 
 	WorkerInfo()
@@ -71,7 +72,7 @@ struct WorkerInfo : NonCopyable {
 	  : watcher(std::move(r.watcher)), reply(std::move(r.reply)), gen(r.gen), reboots(r.reboots),
 	    initialClass(r.initialClass), priorityInfo(r.priorityInfo), details(std::move(r.details)),
 	    haltRatekeeper(r.haltRatekeeper), haltDistributor(r.haltDistributor), haltBlobManager(r.haltBlobManager),
-	    issues(r.issues) {}
+	    haltEncryptKeyProxy(r.haltEncryptKeyProxy), issues(r.issues) {}
 	void operator=(WorkerInfo&& r) noexcept {
 		watcher = std::move(r.watcher);
 		reply = std::move(r.reply);
@@ -83,6 +84,7 @@ struct WorkerInfo : NonCopyable {
 		haltRatekeeper = r.haltRatekeeper;
 		haltDistributor = r.haltDistributor;
 		haltBlobManager = r.haltBlobManager;
+		haltEncryptKeyProxy = r.haltEncryptKeyProxy;
 		issues = r.issues;
 	}
 };
@@ -173,6 +175,14 @@ public:
 			serverInfo->set(newInfo);
 		}
 
+		void setEncryptKeyProxy(const EncryptKeyProxyInterface& interf) {
+			auto newInfo = serverInfo->get();
+			newInfo.id = deterministicRandom()->randomUniqueID();
+			newInfo.infoGeneration = ++dbInfoCount;
+			newInfo.encryptKeyProxy = interf;
+			serverInfo->set(newInfo);
+		}
+
 		void clearInterf(ProcessClass::ClassType t) {
 			auto newInfo = serverInfo->get();
 			newInfo.id = deterministicRandom()->randomUniqueID();
@@ -183,6 +193,8 @@ public:
 				newInfo.ratekeeper = Optional<RatekeeperInterface>();
 			} else if (t == ProcessClass::BlobManagerClass) {
 				newInfo.blobManager = Optional<BlobManagerInterface>();
+			} else if (t == ProcessClass::EncryptKeyProxyClass) {
+				newInfo.encryptKeyProxy = Optional<EncryptKeyProxyInterface>();
 			}
 			serverInfo->set(newInfo);
 		}
@@ -275,7 +287,9 @@ public:
 		       (db.serverInfo->get().ratekeeper.present() &&
 		        db.serverInfo->get().ratekeeper.get().locality.processId() == processId) ||
 		       (db.serverInfo->get().blobManager.present() &&
-		        db.serverInfo->get().blobManager.get().locality.processId() == processId);
+		        db.serverInfo->get().blobManager.get().locality.processId() == processId) ||
+		       (db.serverInfo->get().encryptKeyProxy.present() &&
+		        db.serverInfo->get().encryptKeyProxy.get().locality.processId() == processId);
 	}
 
 	WorkerDetails getStorageWorker(RecruitStorageRequest const& req) {
@@ -1882,8 +1896,8 @@ public:
 					throw;
 				}
 				TraceEvent(SevWarn, "AttemptingRecruitmentInRemoteDc", id)
-				    .detail("SetPrimaryDesired", setPrimaryDesired)
-				    .error(e);
+				    .error(e)
+				    .detail("SetPrimaryDesired", setPrimaryDesired);
 				auto reply = findWorkersForConfigurationFromDC(req, regions[1].dcId, checkGoodRecruitment);
 				if (!setPrimaryDesired) {
 					std::vector<Optional<Key>> dcPriority;
@@ -2304,7 +2318,7 @@ public:
 	// FIXME: determine when to fail the cluster controller when a primaryDC has not been set
 
 	// This function returns true when the cluster controller determines it is worth forcing
-	// a master recovery in order to change the recruited processes in the transaction subsystem.
+	// a cluster recovery in order to change the recruited processes in the transaction subsystem.
 	bool betterMasterExists() {
 		const ServerDBInfo dbi = db.serverInfo->get();
 
@@ -2845,7 +2859,7 @@ public:
 		ASSERT(masterProcessId.present());
 		const auto& pid = worker.interf.locality.processId();
 		if ((role != ProcessClass::DataDistributor && role != ProcessClass::Ratekeeper &&
-		     role != ProcessClass::BlobManager) ||
+		     role != ProcessClass::BlobManager && role != ProcessClass::EncryptKeyProxy) ||
 		    pid == masterProcessId.get()) {
 			return false;
 		}
@@ -2865,6 +2879,7 @@ public:
 				}
 			}
 		}
+
 		for (const CommitProxyInterface& interf : dbInfo.client.commitProxies) {
 			ASSERT(interf.processId.present());
 			idUsed[interf.processId]++;
@@ -3216,6 +3231,8 @@ public:
 	Optional<UID> recruitingRatekeeperID;
 	AsyncVar<bool> recruitBlobManager;
 	Optional<UID> recruitingBlobManagerID;
+	AsyncVar<bool> recruitEncryptKeyProxy;
+	Optional<UID> recruitingEncryptKeyProxyID;
 
 	// Stores the health information from a particular worker's perspective.
 	struct WorkerHealth {
@@ -3254,7 +3271,7 @@ public:
 	    ac(false), outstandingRequestChecker(Void()), outstandingRemoteRequestChecker(Void()), startTime(now()),
 	    goodRecruitmentTime(Never()), goodRemoteRecruitmentTime(Never()), datacenterVersionDifference(0),
 	    versionDifferenceUpdated(false), remoteDCMonitorStarted(false), remoteTransactionSystemDegraded(false),
-	    recruitDistributor(false), recruitRatekeeper(false), recruitBlobManager(false),
+	    recruitDistributor(false), recruitRatekeeper(false), recruitBlobManager(false), recruitEncryptKeyProxy(false),
 	    clusterControllerMetrics("ClusterController", id.toString()),
 	    openDatabaseRequests("OpenDatabaseRequests", clusterControllerMetrics),
 	    registerWorkerRequests("RegisterWorkerRequests", clusterControllerMetrics),

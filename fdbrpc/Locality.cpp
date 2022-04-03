@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -271,6 +271,24 @@ ProcessClass::Fitness ProcessClass::machineClassFitness(ClusterRole role) const 
 			return ProcessClass::BestFit;
 		default:
 			return ProcessClass::NeverAssign;
+		}
+	case ProcessClass::EncryptKeyProxy:
+		switch (_class) {
+		case ProcessClass::EncryptKeyProxyClass:
+			return ProcessClass::BestFit;
+		case ProcessClass::StatelessClass:
+			return ProcessClass::GoodFit;
+		case ProcessClass::UnsetClass:
+			return ProcessClass::UnsetFit;
+		case ProcessClass::MasterClass:
+			return ProcessClass::OkayFit;
+		case ProcessClass::CoordinatorClass:
+		case ProcessClass::TesterClass:
+		case ProcessClass::StorageCacheClass:
+		case ProcessClass::BlobWorkerClass:
+			return ProcessClass::NeverAssign;
+		default:
+			return ProcessClass::WorstFit;
 		}
 	default:
 		return ProcessClass::NeverAssign;

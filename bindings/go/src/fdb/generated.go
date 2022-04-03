@@ -363,7 +363,7 @@ func (o DatabaseOptions) SetTransactionCausalReadRisky() error {
 	return o.setOpt(504, nil)
 }
 
-// Addresses returned by get_addresses_for_key include the port when enabled. As of api version 630, this option is enabled by default and setting this has no effect.
+// Deprecated. Addresses returned by get_addresses_for_key include the port when enabled. As of api version 630, this option is enabled by default and setting this has no effect.
 func (o DatabaseOptions) SetTransactionIncludePortInAddress() error {
 	return o.setOpt(505, nil)
 }
@@ -448,14 +448,19 @@ func (o TransactionOptions) SetInitializeNewDatabase() error {
 	return o.setOpt(300, nil)
 }
 
-// Allows this transaction to read and modify system keys (those that start with the byte 0xFF)
+// Allows this transaction to read and modify system keys (those that start with the byte 0xFF). Implies raw_access.
 func (o TransactionOptions) SetAccessSystemKeys() error {
 	return o.setOpt(301, nil)
 }
 
-// Allows this transaction to read system keys (those that start with the byte 0xFF)
+// Allows this transaction to read system keys (those that start with the byte 0xFF). Implies raw_access.
 func (o TransactionOptions) SetReadSystemKeys() error {
 	return o.setOpt(302, nil)
+}
+
+// Allows this transaction to access the raw key-space when tenant mode is on.
+func (o TransactionOptions) SetRawAccess() error {
+	return o.setOpt(303, nil)
 }
 
 // Not yet implemented.
@@ -596,6 +601,11 @@ func (o TransactionOptions) SetExpensiveClearCostEstimationEnable() error {
 // Allows ``get`` operations to read from sections of keyspace that have become unreadable because of versionstamp operations. These reads will view versionstamp operations as if they were set operations that did not fill in the versionstamp.
 func (o TransactionOptions) SetBypassUnreadable() error {
 	return o.setOpt(1100, nil)
+}
+
+// Allows this transaction to use cached GRV from the database context. Defaults to off. Upon first usage, starts a background updater to periodically update the cache to avoid stale read versions.
+func (o TransactionOptions) SetUseGrvCache() error {
+	return o.setOpt(1101, nil)
 }
 
 type StreamingMode int

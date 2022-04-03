@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -314,7 +314,7 @@ struct _IncludeVersion {
 			throw err;
 		}
 		if (v >= minInvalidProtocolVersion) {
-			// Downgrades are only supported for one minor version
+			// The version v is too large to be downgraded from.
 			auto err = incompatible_protocol_version();
 			TraceEvent(SevError, "FutureProtocolVersion").error(err).detailf("Version", "%llx", v.versionWithFlags());
 			throw err;

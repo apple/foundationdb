@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -50,7 +50,7 @@ Future<T> traceAfter(Future<T> what, const char* type, const char* key, X value,
 		return val;
 	} catch (Error& e) {
 		if (traceErrors)
-			TraceEvent(type).error(e, true).detail(key, value);
+			TraceEvent(type).errorUnsuppressed(e).detail(key, value);
 		throw;
 	}
 }
@@ -67,7 +67,7 @@ Future<T> traceAfterCall(Future<T> what, const char* type, const char* key, X fu
 		return val;
 	} catch (Error& e) {
 		if (traceErrors)
-			TraceEvent(type).error(e, true);
+			TraceEvent(type).errorUnsuppressed(e);
 		throw;
 	}
 }
@@ -1119,6 +1119,12 @@ Future<T> tagError(Future<Void> future, Error e) {
 	throw e;
 }
 
+ACTOR template <class T>
+Future<T> detach(Future<T> f) {
+	T x = wait(f);
+	return x;
+}
+
 // If the future is ready, yields and returns. Otherwise, returns when future is set.
 template <class T>
 Future<T> orYield(Future<T> f) {
@@ -1202,17 +1208,17 @@ Future<T> brokenPromiseToMaybeDelivered(Future<T> in) {
 	}
 }
 
-ACTOR template <class T>
-void tagAndForward(Promise<T>* pOutputPromise, T value, Future<Void> signal) {
+ACTOR template <class T, class U>
+void tagAndForward(Promise<T>* pOutputPromise, U value, Future<Void> signal) {
 	state Promise<T> out(std::move(*pOutputPromise));
 	wait(signal);
-	out.send(value);
+	out.send(std::move(value));
 }
 
 ACTOR template <class T>
 void tagAndForward(PromiseStream<T>* pOutput, T value, Future<Void> signal) {
 	wait(signal);
-	pOutput->send(value);
+	pOutput->send(std::move(value));
 }
 
 ACTOR template <class T>
@@ -2041,6 +2047,15 @@ private:
 
 	Reference<UnsafeWeakFutureReferenceData> data;
 };
+
+// Call a lambda every <interval> seconds
+ACTOR template <typename Fn>
+Future<Void> repeatEvery(double interval, Fn fn) {
+	loop {
+		wait(delay(interval));
+		fn();
+	}
+}
 
 #include "flow/unactorcompiler.h"
 

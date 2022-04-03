@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2020 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,12 +29,12 @@ void HealthMonitor::reportPeerClosed(const NetworkAddress& peerAddress) {
 }
 
 void HealthMonitor::purgeOutdatedHistory() {
-	for (auto it = peerClosedHistory.begin(); it != peerClosedHistory.end();) {
-		if (it->first < now() - FLOW_KNOBS->HEALTH_MONITOR_CLIENT_REQUEST_INTERVAL_SECS) {
-			auto& count = peerClosedNum[it->second];
+	while (!peerClosedHistory.empty()) {
+		auto const& p = peerClosedHistory.front();
+		if (p.first < now() - FLOW_KNOBS->HEALTH_MONITOR_CLIENT_REQUEST_INTERVAL_SECS) {
+			auto& count = peerClosedNum[p.second];
 			--count;
 			ASSERT(count >= 0);
-			++it; // Increment before pop_front to avoid iterator invalidation
 			peerClosedHistory.pop_front();
 		} else {
 			break;

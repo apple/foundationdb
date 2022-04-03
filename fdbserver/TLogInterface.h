@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -193,7 +193,6 @@ struct TLogPeekReply {
 
 struct TLogPeekRequest {
 	constexpr static FileIdentifier file_identifier = 11001131;
-	Arena arena;
 	Version begin;
 	Tag tag;
 	bool returnIfBlocked;
@@ -211,7 +210,7 @@ struct TLogPeekRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, arena, begin, tag, returnIfBlocked, onlySpilled, sequence, reply);
+		serializer(ar, begin, tag, returnIfBlocked, onlySpilled, sequence, reply);
 	}
 };
 
@@ -232,7 +231,6 @@ struct TLogPeekStreamReply : public ReplyPromiseStreamReply {
 
 struct TLogPeekStreamRequest {
 	constexpr static FileIdentifier file_identifier = 10072821;
-	Arena arena;
 	Version begin;
 	Tag tag;
 	bool returnIfBlocked;
@@ -245,13 +243,12 @@ struct TLogPeekStreamRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, arena, begin, tag, returnIfBlocked, limitBytes, reply);
+		serializer(ar, begin, tag, returnIfBlocked, limitBytes, reply);
 	}
 };
 
 struct TLogPopRequest {
 	constexpr static FileIdentifier file_identifier = 5556423;
-	Arena arena;
 	Version to;
 	Version durableKnownCommittedVersion;
 	Tag tag;
@@ -263,7 +260,7 @@ struct TLogPopRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, arena, to, durableKnownCommittedVersion, tag, reply);
+		serializer(ar, to, durableKnownCommittedVersion, tag, reply);
 	}
 };
 
@@ -359,7 +356,6 @@ struct TLogQueuingMetricsRequest {
 
 struct TLogDisablePopRequest {
 	constexpr static FileIdentifier file_identifier = 4022806;
-	Arena arena;
 	UID snapUID;
 	ReplyPromise<Void> reply;
 	Optional<UID> debugID;
@@ -369,13 +365,12 @@ struct TLogDisablePopRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, snapUID, reply, arena, debugID);
+		serializer(ar, snapUID, reply, debugID);
 	}
 };
 
 struct TLogEnablePopRequest {
 	constexpr static FileIdentifier file_identifier = 4022809;
-	Arena arena;
 	UID snapUID;
 	ReplyPromise<Void> reply;
 	Optional<UID> debugID;
@@ -385,7 +380,7 @@ struct TLogEnablePopRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, snapUID, reply, arena, debugID);
+		serializer(ar, snapUID, reply, debugID);
 	}
 };
 

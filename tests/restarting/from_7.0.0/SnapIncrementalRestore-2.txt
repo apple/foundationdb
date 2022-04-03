@@ -1,0 +1,20 @@
+testTitle=RestoreBackup
+simBackupAgents=BackupToFile
+clearAfterTest=false
+
+    testName=IncrementalBackup
+    tag=default
+    restoreOnly=true
+    checkBeginVersion=true
+    clearBackupAgentKeys=true
+
+testTitle=VerifyCycleAndAtomics
+checkOnly=true
+
+    testName=Cycle
+    nodeCount=3000
+    transactionsPerSecond=3000.0
+    testDuration=10.0
+    expectedRate=0
+
+    testName=SimpleAtomicAdd

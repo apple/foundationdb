@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@
 #include <map>
 #include <vector>
 
-#include "contrib/fmt-8.0.1/include/fmt/format.h"
+#include "contrib/fmt-8.1.1/include/fmt/format.h"
 #include "fdbclient/AsyncFileS3BlobStore.actor.h"
 #include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/BlobGranuleFiles.h"
@@ -30,7 +30,7 @@
 #include "fdbclient/BlobWorkerInterface.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-// TODO more efficient data structure besides std::map? PTree is unecessary since this isn't versioned, but some other
+// TODO more efficient data structure besides std::map? PTree is unnecessary since this isn't versioned, but some other
 // sorted thing could work. And if it used arenas it'd probably be more efficient with allocations, since everything
 // else is in 1 arena and discarded at the end.
 

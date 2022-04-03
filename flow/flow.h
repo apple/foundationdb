@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -61,10 +61,11 @@
 #define TEST(condition)                                                                                                \
 	if (!(condition)) {                                                                                                \
 	} else {                                                                                                           \
-		static TraceEvent* __test = &(TraceEvent("CodeCoverage")                                                       \
-		                                  .detail("File", __FILE__)                                                    \
-		                                  .detail("Line", __LINE__)                                                    \
-		                                  .detail("Condition", #condition));                                           \
+		static BaseTraceEvent* __test =                                                                                \
+		    &(TraceEvent(intToSeverity(FLOW_KNOBS->CODE_COV_TRACE_EVENT_SEVERITY), "CodeCoverage")                     \
+		          .detail("File", __FILE__)                                                                            \
+		          .detail("Line", __LINE__)                                                                            \
+		          .detail("Condition", #condition));                                                                   \
 		(void)__test;                                                                                                  \
 	}
 

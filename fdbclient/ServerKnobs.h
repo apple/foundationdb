@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -106,14 +106,18 @@ public:
 	double PUSH_STATS_SLOW_AMOUNT;
 	double PUSH_STATS_SLOW_RATIO;
 	int TLOG_POP_BATCH_SIZE;
+	bool PEEK_BATCHING_EMPTY_MSG;
+	double PEEK_BATCHING_EMPTY_MSG_INTERVAL;
 
 	// Data distribution queue
 	double HEALTH_POLL_TIME;
 	double BEST_TEAM_STUCK_DELAY;
+	double DEST_OVERLOADED_DELAY;
 	double BG_REBALANCE_POLLING_INTERVAL;
 	double BG_REBALANCE_SWITCH_CHECK_INTERVAL;
 	double DD_QUEUE_LOGGING_INTERVAL;
 	double RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
+	double RELOCATION_PARALLELISM_PER_DEST_SERVER;
 	int DD_QUEUE_MAX_KEY_SERVERS;
 	int DD_REBALANCE_PARALLELISM;
 	int DD_REBALANCE_RESET_AMOUNT;
@@ -252,6 +256,7 @@ public:
 	int SQLITE_READER_THREADS;
 	int SQLITE_WRITE_WINDOW_LIMIT;
 	double SQLITE_WRITE_WINDOW_SECONDS;
+	int64_t SQLITE_CURSOR_MAX_LIFETIME_BYTES;
 
 	// KeyValueStoreSqlite spring cleaning
 	double SPRING_CLEANING_NO_ACTION_INTERVAL;
@@ -289,6 +294,19 @@ public:
 	// These histograms are in read and write path which can cause performance overhead.
 	// Set to 0 to disable histograms.
 	double ROCKSDB_HISTOGRAMS_SAMPLE_RATE;
+	double ROCKSDB_READ_RANGE_ITERATOR_REFRESH_TIME;
+	bool ROCKSDB_READ_RANGE_REUSE_ITERATORS;
+	int64_t ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC;
+	bool ROCKSDB_WRITE_RATE_LIMITER_AUTO_TUNE;
+	std::string DEFAULT_FDB_ROCKSDB_COLUMN_FAMILY;
+	bool ROCKSDB_PERFCONTEXT_ENABLE; // Enable rocks perf context metrics. May cause performance overhead
+	double ROCKSDB_PERFCONTEXT_SAMPLE_RATE;
+	int ROCKSDB_MAX_SUBCOMPACTIONS;
+	int64_t ROCKSDB_SOFT_PENDING_COMPACT_BYTES_LIMIT;
+	int64_t ROCKSDB_HARD_PENDING_COMPACT_BYTES_LIMIT;
+	int64_t ROCKSDB_CAN_COMMIT_COMPACT_BYTES_LIMIT;
+	int ROCKSDB_CAN_COMMIT_DELAY_ON_OVERLOAD;
+	int ROCKSDB_CAN_COMMIT_DELAY_TIMES_ON_OVERLOAD;
 
 	// Leader election
 	int MAX_NOTIFICATIONS;
@@ -396,6 +414,7 @@ public:
 	double WAIT_FOR_DISTRIBUTOR_JOIN_DELAY;
 	double WAIT_FOR_RATEKEEPER_JOIN_DELAY;
 	double WAIT_FOR_BLOB_MANAGER_JOIN_DELAY;
+	double WAIT_FOR_ENCRYPT_KEY_PROXY_JOIN_DELAY;
 	double WORKER_FAILURE_TIME;
 	double CHECK_OUTSTANDING_INTERVAL;
 	double INCOMPATIBLE_PEERS_LOGGING_INTERVAL;
@@ -418,6 +437,7 @@ public:
 	                                             // degraded server is considered healthy.
 	double CC_MIN_DEGRADATION_INTERVAL; // The minimum interval that a server is reported as degraded to be considered
 	                                    // as degraded by Cluster Controller.
+	double ENCRYPT_KEY_PROXY_FAILURE_TIME;
 	int CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE; // The maximum number of degraded peers when excluding a server. When the
 	                                        // number of degraded peers is more than this value, we will not exclude
 	                                        // this server since it may because of server overload.
@@ -476,6 +496,8 @@ public:
 	double DETAILED_METRIC_UPDATE_RATE;
 	double LAST_LIMITED_RATIO;
 	double RATEKEEPER_DEFAULT_LIMIT;
+	double RATEKEEPER_LIMIT_REASON_SAMPLE_RATE;
+	bool RATEKEEPER_PRINT_LIMIT_REASON;
 
 	int64_t TARGET_BYTES_PER_STORAGE_SERVER;
 	int64_t SPRING_BYTES_STORAGE_SERVER;
@@ -517,6 +539,7 @@ public:
 
 	int64_t MIN_AVAILABLE_SPACE;
 	double MIN_AVAILABLE_SPACE_RATIO;
+	double MIN_AVAILABLE_SPACE_RATIO_SAFETY_BUFFER;
 	double TARGET_AVAILABLE_SPACE_RATIO;
 	double AVAILABLE_SPACE_UPDATE_DELAY;
 
@@ -595,6 +618,9 @@ public:
 	bool ENABLE_CLEAR_RANGE_EAGER_READS;
 	bool QUICK_GET_VALUE_FALLBACK;
 	bool QUICK_GET_KEY_VALUES_FALLBACK;
+	int CHECKPOINT_TRANSFER_BLOCK_BYTES;
+	int QUICK_GET_KEY_VALUES_LIMIT;
+	int QUICK_GET_KEY_VALUES_LIMIT_BYTES;
 
 	// Wait Failure
 	int MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS;
@@ -631,7 +657,11 @@ public:
 	double COORDINATOR_LEADER_CONNECTION_TIMEOUT;
 
 	// Dynamic Knobs (implementation)
+	double COMPACTION_INTERVAL;
+	double UPDATE_NODE_TIMEOUT;
 	double GET_COMMITTED_VERSION_TIMEOUT;
+	double GET_SNAPSHOT_AND_CHANGES_TIMEOUT;
+	double FETCH_CHANGES_TIMEOUT;
 
 	// Buggification
 	double BUGGIFIED_EVENTUAL_CONSISTENCY;
@@ -724,9 +754,10 @@ public:
 	                                  // queue is empty
 	int REDWOOD_LAZY_CLEAR_MAX_PAGES; // Maximum number of pages to free before ending a lazy clear cycle, unless the
 	                                  // queue is empty
-	int64_t REDWOOD_REMAP_CLEANUP_WINDOW; // Remap remover lag interval in which to coalesce page writes
-	double REDWOOD_REMAP_CLEANUP_LAG; // Maximum allowed remap remover lag behind the cleanup window as a multiple of
-	                                  // the window size
+	int64_t REDWOOD_REMAP_CLEANUP_WINDOW_BYTES; // Total size of remapped pages to keep before being removed by
+	                                            // remap cleanup
+	double REDWOOD_REMAP_CLEANUP_TOLERANCE_RATIO; // Maximum ratio of the remap cleanup window that remap cleanup is
+	                                              // allowed to be ahead or behind
 	int REDWOOD_PAGEFILE_GROWTH_SIZE_PAGES; // Number of pages to grow page file by
 	double REDWOOD_METRICS_INTERVAL;
 	double REDWOOD_HISTOGRAM_INTERVAL;
@@ -738,6 +769,9 @@ public:
 
 	// Cluster recovery
 	std::string CLUSTER_RECOVERY_EVENT_NAME_PREFIX;
+
+	// encrypt key proxy
+	bool ENABLE_ENCRYPTION;
 
 	// blob granule stuff
 	// FIXME: configure url with database configuration instead of knob eventually

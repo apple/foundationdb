@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@
 #include <ostream>
 
 // FIXME: Trim this down
-#include "contrib/fmt-8.0.1/include/fmt/format.h"
+#include "contrib/fmt-8.1.1/include/fmt/format.h"
 #include "flow/Platform.actor.h"
 #include "fdbclient/AsyncTaskThread.h"
 #include "fdbclient/BackupContainer.h"
@@ -305,9 +305,9 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 			throw;
 
 		TraceEvent m(SevWarn, "BackupContainer");
+		m.error(e);
 		m.detail("Description", "Invalid container specification.  See help.");
 		m.detail("URL", url);
-		m.error(e);
 		if (e.code() == error_code_backup_invalid_url)
 			m.detail("LastOpenError", lastOpenError);
 
@@ -360,10 +360,9 @@ ACTOR Future<std::vector<std::string>> listContainers_impl(std::string baseURL) 
 			throw;
 
 		TraceEvent m(SevWarn, "BackupContainer");
-
+		m.error(e);
 		m.detail("Description", "Invalid backup container URL prefix.  See help.");
 		m.detail("URL", baseURL);
-		m.error(e);
 		if (e.code() == error_code_backup_invalid_url)
 			m.detail("LastOpenError", IBackupContainer::lastOpenError);
 

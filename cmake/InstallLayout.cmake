@@ -303,7 +303,9 @@ set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
   "/etc/rc.d/init.d"
   "/usr/lib/pkgconfig"
   "/usr/lib/foundationdb"
-  "/usr/lib/cmake")
+  "/usr/lib/cmake"
+  "/usr/lib/foundationdb-${FDB_VERSION}/etc/foundationdb"
+  )
 set(CPACK_RPM_DEBUGINFO_PACKAGE ${GENERATE_DEBUG_PACKAGES})
 #set(CPACK_RPM_BUILD_SOURCE_FDB_INSTALL_DIRS_PREFIX /usr/src)
 set(CPACK_RPM_COMPONENT_INSTALL ON)

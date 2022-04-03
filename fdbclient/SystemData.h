@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,6 +27,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/BlobWorkerInterface.h" // TODO move the functions that depend on this out of here and into BlobWorkerInterface.h to remove this depdendency
 #include "fdbclient/StorageServerInterface.h"
+#include "Tenant.h"
 
 // Don't warn on constants being defined in this file.
 #pragma clang diagnostic push
@@ -68,6 +69,13 @@ void decodeKeyServersValue(std::map<Tag, UID> const& tag_uid,
                            std::vector<UID>& dest);
 
 extern const KeyRef clusterIdKey;
+
+// "\xff/checkpoint/[[UID]] := [[CheckpointMetaData]]"
+extern const KeyRef checkpointPrefix;
+const Key checkpointKeyFor(UID checkpointID);
+const Value checkpointValue(const CheckpointMetaData& checkpoint);
+UID decodeCheckpointKey(const KeyRef& key);
+CheckpointMetaData decodeCheckpointValue(const ValueRef& value);
 
 // "\xff/storageCacheServer/[[UID]] := StorageServerInterface"
 // This will be added by the cache server on initialization and removed by DD
@@ -130,6 +138,10 @@ UID decodeTssQuarantineKey(KeyRef const&);
 // \xff/tssMismatch/[[Tuple<TSSStorageUID, timestamp, mismatchUID>]] := [[TraceEventString]]
 // For recording tss mismatch details in the system keyspace
 extern const KeyRangeRef tssMismatchKeys;
+
+// \xff/serverMetadata/[[storageInterfaceUID]] = [[StorageMetadataType]]
+// Note: storageInterfaceUID is the one stated in the file name
+extern const KeyRangeRef serverMetadataKeys;
 
 // "\xff/serverTag/[[serverID]]" = "[[Tag]]"
 //	Provides the Tag for the given serverID. Used to access a
@@ -214,7 +226,9 @@ extern const KeyRef configKeysPrefix;
 
 extern const KeyRef perpetualStorageWiggleKey;
 extern const KeyRef perpetualStorageWiggleLocalityKey;
-extern const KeyRef wigglingStorageServerKey;
+extern const KeyRef perpetualStorageWiggleIDPrefix;
+extern const KeyRef perpetualStorageWiggleStatsPrefix;
+
 // Change the value of this key to anything and that will trigger detailed data distribution team info log.
 extern const KeyRef triggerDDTeamInfoPrintKey;
 
@@ -326,7 +340,7 @@ extern const KeyRef backupPausedKey;
 extern const KeyRef coordinatorsKey;
 
 //	"\xff/logs" = "[[LogsValue]]"
-//	Used during master recovery in order to communicate
+//	Used during cluster recovery in order to communicate
 //	and store info about the logs system.
 extern const KeyRef logsKey;
 
@@ -482,18 +496,8 @@ extern const KeyRef rebalanceDDIgnoreKey;
 const Value healthyZoneValue(StringRef const& zoneId, Version version);
 std::pair<Key, Version> decodeHealthyZoneValue(ValueRef const&);
 
-// Key ranges reserved for storing client library binaries and respective
-// json documents with the metadata describing the libaries
-extern const KeyRangeRef clientLibMetadataKeys;
-extern const KeyRef clientLibMetadataPrefix;
-
-extern const KeyRangeRef clientLibBinaryKeys;
-extern const KeyRef clientLibBinaryPrefix;
-
-extern const KeyRef clientLibChangeCounterKey;
-
 // All mutations done to this range are blindly copied into txnStateStore.
-// Used to create artifically large txnStateStore instances in testing.
+// Used to create artificially large txnStateStore instances in testing.
 extern const KeyRangeRef testOnlyTxnStateStorePrefixRange;
 
 // Snapshot + Incremental Restore
@@ -596,6 +600,16 @@ const Key blobWorkerListKeyFor(UID workerID);
 UID decodeBlobWorkerListKey(KeyRef const& key);
 const Value blobWorkerListValue(BlobWorkerInterface const& interface);
 BlobWorkerInterface decodeBlobWorkerListValue(ValueRef const& value);
+
+// State for the tenant map
+extern const KeyRangeRef tenantMapKeys;
+extern const KeyRef tenantMapPrefix;
+extern const KeyRef tenantMapPrivatePrefix;
+extern const KeyRef tenantLastIdKey;
+extern const KeyRef tenantDataPrefixKey;
+
+Value encodeTenantEntry(TenantMapEntry const& tenantEntry);
+TenantMapEntry decodeTenantEntry(ValueRef const& value);
 
 #pragma clang diagnostic pop
 

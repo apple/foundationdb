@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -52,7 +52,7 @@ FDB_DECLARE_BOOLEAN_PARAM(UpdateParams);
 //   4.  If the executor loses contact with FDB, another executor may begin at step 2.  The first
 //       Task execution can detect this by checking the result of keepRunning() periodically.
 //   5.  Once a Task execution's _execute() call returns, the _finish() step is called.
-//       _finish() is transactional and is guaraunteed to never be called more than once for the
+//       _finish() is transactional and is guaranteed to never be called more than once for the
 //       same Task
 class Task : public ReferenceCounted<Task> {
 public:

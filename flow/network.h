@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -138,24 +138,38 @@ class Void;
 struct Hostname {
 	std::string host;
 	std::string service; // decimal port number
-	bool useTLS;
+	bool isTLS;
 
-	Hostname(std::string host, std::string service, bool useTLS) : host(host), service(service), useTLS(useTLS) {}
+	Hostname(std::string host, std::string service, bool isTLS) : host(host), service(service), isTLS(isTLS) {}
+	Hostname() : host(""), service(""), isTLS(false) {}
+
+	bool operator==(const Hostname& r) const { return host == r.host && service == r.service && isTLS == r.isTLS; }
+	bool operator!=(const Hostname& r) const { return !(*this == r); }
+	bool operator<(const Hostname& r) const {
+		if (isTLS != r.isTLS)
+			return isTLS < r.isTLS;
+		else if (host != r.host)
+			return host < r.host;
+		return service < r.service;
+	}
+	bool operator>(const Hostname& r) const { return r < *this; }
+	bool operator<=(const Hostname& r) const { return !(*this > r); }
+	bool operator>=(const Hostname& r) const { return !(*this < r); }
 
 	// Allow hostnames in forms like following:
 	//    hostname:1234
 	//    host.name:1234
 	//    host-name:1234
 	//    host-name_part1.host-name_part2:1234:tls
-	static bool isHostname(std::string& s) {
+	static bool isHostname(const std::string& s) {
 		std::regex validation("^([\\w\\-]+\\.?)+:([\\d]+){1,}(:tls)?$");
 		std::regex ipv4Validation("^([\\d]{1,3}\\.?){4,}:([\\d]+){1,}(:tls)?$");
 		return !std::regex_match(s, ipv4Validation) && std::regex_match(s, validation);
 	}
 
-	static Hostname parse(std::string const& str);
+	static Hostname parse(const std::string& s);
 
-	std::string toString() const { return host + ":" + service + (useTLS ? ":tls" : ""); }
+	std::string toString() const { return host + ":" + service + (isTLS ? ":tls" : ""); }
 };
 
 struct IPAddress {
@@ -261,7 +275,7 @@ struct NetworkAddress {
 	  : NetworkAddress(ip, port, false, false, NetworkAddressFromHostname::False) {}
 
 	bool operator==(NetworkAddress const& r) const { return ip == r.ip && port == r.port && flags == r.flags; }
-	bool operator!=(NetworkAddress const& r) const { return ip != r.ip || port != r.port || flags != r.flags; }
+	bool operator!=(NetworkAddress const& r) const { return !(*this == r); }
 	bool operator<(NetworkAddress const& r) const {
 		if (flags != r.flags)
 			return flags < r.flags;
@@ -695,16 +709,23 @@ public:
 	virtual void addMockTCPEndpoint(const std::string& host,
 	                                const std::string& service,
 	                                const std::vector<NetworkAddress>& addresses) = 0;
+	virtual void removeMockTCPEndpoint(const std::string& host, const std::string& service) = 0;
+	virtual void parseMockDNSFromString(const std::string& s) = 0;
+	virtual std::string convertMockDNSToString() = 0;
 	// Resolve host name and service name (such as "http" or can be a plain number like "80") to a list of 1 or more
 	// NetworkAddresses
 	virtual Future<std::vector<NetworkAddress>> resolveTCPEndpoint(const std::string& host,
 	                                                               const std::string& service) = 0;
+	// Resolve host name and service name. This one should only be used when resolving asynchronously is impossible. For
+	// all other cases, resolveTCPEndpoint() should be preferred.
+	virtual std::vector<NetworkAddress> resolveTCPEndpointBlocking(const std::string& host,
+	                                                               const std::string& service) = 0;
 
 	// Convenience function to resolve host/service and connect to one of its NetworkAddresses randomly
-	// useTLS has to be a parameter here because it is passed to connect() as part of the toAddr object.
+	// isTLS has to be a parameter here because it is passed to connect() as part of the toAddr object.
 	virtual Future<Reference<IConnection>> connect(const std::string& host,
 	                                               const std::string& service,
-	                                               bool useTLS = false);
+	                                               bool isTLS = false);
 
 	// Listen for connections on the given local address
 	virtual Reference<IListener> listen(NetworkAddress localAddr) = 0;

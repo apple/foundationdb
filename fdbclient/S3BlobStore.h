@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -49,6 +49,7 @@ public:
 	struct Credentials {
 		std::string key;
 		std::string secret;
+		std::string securityToken;
 	};
 
 	struct BlobKnobs {
@@ -67,7 +68,7 @@ public:
 				"connect_tries (or ct)                 Number of times to try to connect for each request.",
 				"connect_timeout (or cto)              Number of seconds to wait for a connect request to succeed.",
 				"max_connection_life (or mcl)          Maximum number of seconds to use a single TCP connection.",
-				"request_tries (or rt)                 Number of times to try each request until a parseable HTTP "
+				"request_tries (or rt)                 Number of times to try each request until a parsable HTTP "
 				"response other than 429 is received.",
 				"request_timeout_min (or rtom)         Number of seconds to wait for a request to succeed after a "
 				"connection is established.",
@@ -100,8 +101,9 @@ public:
 	                    Optional<Credentials> const& creds,
 	                    BlobKnobs const& knobs = BlobKnobs(),
 	                    HTTP::Headers extraHeaders = HTTP::Headers())
-	  : host(host), service(service), credentials(creds), lookupSecret(creds.present() && creds.get().secret.empty()),
-	    knobs(knobs), extraHeaders(extraHeaders), requestRate(new SpeedLimit(knobs.requests_per_second, 1)),
+	  : host(host), service(service), credentials(creds), lookupKey(creds.present() && creds.get().key.empty()),
+	    lookupSecret(creds.present() && creds.get().secret.empty()), knobs(knobs), extraHeaders(extraHeaders),
+	    requestRate(new SpeedLimit(knobs.requests_per_second, 1)),
 	    requestRateList(new SpeedLimit(knobs.list_requests_per_second, 1)),
 	    requestRateWrite(new SpeedLimit(knobs.write_requests_per_second, 1)),
 	    requestRateRead(new SpeedLimit(knobs.read_requests_per_second, 1)),
@@ -118,8 +120,9 @@ public:
 		const char* resource = "";
 		if (withResource)
 			resource = "<name>";
-		return format("blobstore://[<api_key>:<secret>@]<host>[:<port>]/%s[?<param>=<value>[&<param>=<value>]...]",
-		              resource);
+		return format(
+		    "blobstore://<api_key>:<secret>:<security_token>@<host>[:<port>]/%s[?<param>=<value>[&<param>=<value>]...]",
+		    resource);
 	}
 
 	typedef std::map<std::string, std::string> ParametersT;
@@ -147,6 +150,7 @@ public:
 	std::string host;
 	std::string service;
 	Optional<Credentials> credentials;
+	bool lookupKey;
 	bool lookupSecret;
 	BlobKnobs knobs;
 	HTTP::Headers extraHeaders;
@@ -170,6 +174,13 @@ public:
 
 	// Sets headers needed for Authorization (including Date which will be overwritten if present)
 	void setAuthHeaders(std::string const& verb, std::string const& resource, HTTP::Headers& headers);
+
+	// Set headers in the AWS V4 authorization format. $date and $datestamp are used for unit testing
+	void setV4AuthHeaders(const std::string& verb,
+	                      const std::string& resource,
+	                      HTTP::Headers& headers,
+	                      std::string date = "",
+	                      std::string datestamp = "");
 
 	// Prepend the HTTP request header to the given PacketBuffer, returning the new head of the buffer chain
 	static PacketBuffer* writeRequestHeader(std::string const& request,

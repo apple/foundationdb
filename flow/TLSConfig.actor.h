@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2020 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,22 +36,6 @@
 #include "flow/FastRef.h"
 #include "flow/Knobs.h"
 #include "flow/flow.h"
-
-namespace TLS {
-
-// Force OpenSSL to not register an atexit handler to clean up global state before process exit.
-// If you call this, you must also call DestroyOpenSSLGlobalState() before the program exits.
-// Calls OPENSSL_init_crypto with OPENSSL_INIT_NO_ATEXIT.
-// Must be called before any other OpenSSL function.
-void DisableOpenSSLAtExitHandler();
-
-// Frees all global state maintained by OpenSSL.
-// Calls OPENSSL_cleanup.
-// Must be called before program exit if using DisableOpenSSLAtExitHandler.
-// No OpenSSL code may be run after calling this function.
-void DestroyOpenSSLGlobalState();
-
-} // namespace TLS
 
 #ifndef TLS_DISABLED
 

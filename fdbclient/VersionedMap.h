@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -877,7 +877,13 @@ public:
 		Version at;
 	};
 
-	ViewAtVersion at(Version v) const { return ViewAtVersion(getRoot(v), v); }
+	ViewAtVersion at(Version v) const {
+		if (v == ::latestVersion) {
+			return atLatest();
+		}
+
+		return ViewAtVersion(getRoot(v), v);
+	}
 	ViewAtVersion atLatest() const { return ViewAtVersion(roots.back().second, latestVersion); }
 
 	bool isClearContaining(ViewAtVersion const& view, KeyRef key) {

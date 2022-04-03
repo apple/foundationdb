@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1133,8 +1133,8 @@ public:
 		    filename,
 		    IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE,
 		    0600));
-		StreamCipher::Key::RawKeyType testKey;
-		generateRandomData(testKey.data(), testKey.size());
+		StreamCipherKey testKey(AES_256_KEY_LENGTH);
+		testKey.initializeRandomTestKey();
 		keyFile->write(testKey.data(), testKey.size(), 0);
 		wait(keyFile->sync());
 		return Void();
@@ -1142,26 +1142,25 @@ public:
 
 	ACTOR static Future<Void> readEncryptionKey(std::string encryptionKeyFileName) {
 		state Reference<IAsyncFile> keyFile;
-		state StreamCipher::Key::RawKeyType key;
+		state StreamCipherKey const* cipherKey = StreamCipherKey::getGlobalCipherKey();
 		try {
 			Reference<IAsyncFile> _keyFile =
 			    wait(IAsyncFileSystem::filesystem()->open(encryptionKeyFileName, 0x0, 0400));
 			keyFile = _keyFile;
 		} catch (Error& e) {
 			TraceEvent(SevWarnAlways, "FailedToOpenEncryptionKeyFile")
-			    .detail("FileName", encryptionKeyFileName)
-			    .error(e);
+			    .error(e)
+			    .detail("FileName", encryptionKeyFileName);
 			throw e;
 		}
-		int bytesRead = wait(keyFile->read(key.data(), key.size(), 0));
-		if (bytesRead != key.size()) {
+		int bytesRead = wait(keyFile->read(cipherKey->data(), cipherKey->size(), 0));
+		if (bytesRead != cipherKey->size()) {
 			TraceEvent(SevWarnAlways, "InvalidEncryptionKeyFileSize")
-			    .detail("ExpectedSize", key.size())
+			    .detail("ExpectedSize", cipherKey->size())
 			    .detail("ActualSize", bytesRead);
 			throw invalid_encryption_key_file();
 		}
-		ASSERT_EQ(bytesRead, key.size());
-		StreamCipher::Key::initializeKey(std::move(key));
+		ASSERT_EQ(bytesRead, cipherKey->size());
 		return Void();
 	}
 #endif // ENCRYPTION_ENABLED
@@ -1378,8 +1377,8 @@ ACTOR static Future<KeyRange> getSnapshotFileKeyRange_impl(Reference<BackupConta
 			           e.code() == error_code_timed_out || e.code() == error_code_lookup_failed) {
 				// blob http request failure, retry
 				TraceEvent(SevWarnAlways, "BackupContainerGetSnapshotFileKeyRangeConnectionFailure")
-				    .detail("Retries", ++readFileRetries)
-				    .error(e);
+				    .error(e)
+				    .detail("Retries", ++readFileRetries);
 				wait(delayJittered(0.1));
 			} else {
 				TraceEvent(SevError, "BackupContainerGetSnapshotFileKeyRangeUnexpectedError").error(e);
@@ -1550,9 +1549,9 @@ Reference<BackupContainerFileSystem> BackupContainerFileSystem::openContainerFS(
 			throw;
 
 		TraceEvent m(SevWarn, "BackupContainer");
+		m.error(e);
 		m.detail("Description", "Invalid container specification.  See help.");
 		m.detail("URL", url);
-		m.error(e);
 		if (e.code() == error_code_backup_invalid_url)
 			m.detail("LastOpenError", lastOpenError);
 

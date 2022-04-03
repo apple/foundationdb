@@ -66,7 +66,7 @@ class FutureResults extends NativeFuture<RangeResultInfo> {
 		try {
 			pointerReadLock.lock();
 			if (buffer != null) {
-				try (DirectBufferIterator directIterator = new DirectBufferIterator(buffer)) {
+				try (RangeResultDirectBufferIterator directIterator = new RangeResultDirectBufferIterator(buffer)) {
 					FutureResults_getDirect(getPtr(), directIterator.getBuffer(), directIterator.getBuffer().capacity());
 					return new RangeResult(directIterator);
 				}
@@ -81,6 +81,6 @@ class FutureResults extends NativeFuture<RangeResultInfo> {
 	private boolean enableDirectBufferQueries = false;
 
 	private native RangeResult FutureResults_get(long cPtr) throws FDBException;
-	private native boolean FutureResults_getDirect(long cPtr, ByteBuffer buffer, int capacity)
+	private native void FutureResults_getDirect(long cPtr, ByteBuffer buffer, int capacity)
 		throws FDBException;
 }

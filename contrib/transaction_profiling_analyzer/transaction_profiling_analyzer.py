@@ -48,8 +48,11 @@ PROTOCOL_VERSION_6_0 = 0x0FDB00A570010001
 PROTOCOL_VERSION_6_1 = 0x0FDB00B061060001
 PROTOCOL_VERSION_6_2 = 0x0FDB00B062010001
 PROTOCOL_VERSION_6_3 = 0x0FDB00B063010001
+PROTOCOL_VERSION_7_0 = 0x0FDB00B070010001
+PROTOCOL_VERSION_7_1 = 0x0FDB00B071010001
 supported_protocol_versions = frozenset([PROTOCOL_VERSION_5_2, PROTOCOL_VERSION_6_0, PROTOCOL_VERSION_6_1,
-                                         PROTOCOL_VERSION_6_2, PROTOCOL_VERSION_6_3])
+                                         PROTOCOL_VERSION_6_2, PROTOCOL_VERSION_6_3, PROTOCOL_VERSION_7_0,
+                                         PROTOCOL_VERSION_7_1])
 
 
 fdb.api_version(520)
@@ -166,6 +169,11 @@ class MutationType(Enum):
     MIN = 13
     SET_VERSION_STAMPED_KEY = 14
     SET_VERSION_STAMPED_VALUE = 15
+    BYTE_MIN = 16
+    BYTE_MAX = 17
+    MIN_V2 = 18
+    AND_V2 = 19
+    COMPARE_AND_CLEAR = 20
 
 
 class Mutation(object):
@@ -176,10 +184,16 @@ class Mutation(object):
 
 
 class BaseInfo(object):
+    """
+    Corresponds to FdbClientLogEvents::Event
+    """
     def __init__(self, bb, protocol_version):
+        # we already read the EventType, so go straight to start_timestamp
         self.start_timestamp = bb.get_double()
         if protocol_version >= PROTOCOL_VERSION_6_3:
             self.dc_id = bb.get_bytes_with_length()
+        if protocol_version >= PROTOCOL_VERSION_7_1:
+            self.tenant = bb.get_bytes_with_length()
 
 class GetVersionInfo(BaseInfo):
     def __init__(self, bb, protocol_version):
@@ -281,6 +295,7 @@ class ClientTransactionInfo:
         protocol_version = bb.get_long()
         if protocol_version not in supported_protocol_versions:
             raise UnsupportedProtocolVersionError(protocol_version)
+        # keep in sync with subclasses of FdbClientLogEvents::Event in fdbclient/ClientLogEvents.h
         while bb.get_remaining_bytes():
             event = bb.get_int()
             if event == 0:

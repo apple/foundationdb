@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -74,6 +74,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 
 	init( WRITE_TRACING_ENABLED,                              true ); if( randomize && BUGGIFY ) WRITE_TRACING_ENABLED = false;
 	init( TRACING_SAMPLE_RATE,                                 0.0 ); // Fraction of distributed traces (not spans) to sample (0 means ignore all traces)
+	init( TRACING_UDP_LISTENER_ADDR,                   "127.0.0.1" ); // Only applicable if TracerType is set to a network option
 	init( TRACING_UDP_LISTENER_PORT,                          8889 ); // Only applicable if TracerType is set to a network option
 
 	//connectionMonitor
@@ -171,6 +172,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( MIN_LOGGED_PRIORITY_BUSY_FRACTION,                  0.05 );
 	init( CERT_FILE_MAX_SIZE,                      5 * 1024 * 1024 );
 	init( READY_QUEUE_RESERVED_SIZE,                          8192 );
+	init( ITERATIONS_PER_REACTOR_CHECK,                        100 );
 
 	//Network
 	init( PACKET_LIMIT,                                  100LL<<20 );
@@ -209,6 +211,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( MAX_TRACE_EVENT_LENGTH,                             4000 ); // If the value of this is changed, the corresponding default in Trace.cpp should be changed as well
 	init( ALLOCATION_TRACING_ENABLED,                         true );
 	init( SIM_SPEEDUP_AFTER_SECONDS,                           450 );
+	init( CODE_COV_TRACE_EVENT_SEVERITY,                        10 ); // Code coverage TraceEvent severity level
 
 	//TDMetrics
 	init( MAX_METRICS,                                         600 );
@@ -341,6 +344,26 @@ bool Knobs::setKnob(std::string const& knob, std::string const& value) {
 	*string_knobs[knob].value = value;
 	explicitlySetKnobs.insert(toLower(knob));
 	return true;
+}
+
+ParsedKnobValue Knobs::getKnob(const std::string& name) const {
+	if (double_knobs.count(name) > 0) {
+		return ParsedKnobValue{ *double_knobs.at(name).value };
+	}
+	if (int64_knobs.count(name) > 0) {
+		return ParsedKnobValue{ *int64_knobs.at(name).value };
+	}
+	if (int_knobs.count(name) > 0) {
+		return ParsedKnobValue{ *int_knobs.at(name).value };
+	}
+	if (string_knobs.count(name) > 0) {
+		return ParsedKnobValue{ *string_knobs.at(name).value };
+	}
+	if (bool_knobs.count(name) > 0) {
+		return ParsedKnobValue{ *bool_knobs.at(name).value };
+	}
+
+	return ParsedKnobValue{ NoKnobFound() };
 }
 
 bool Knobs::isAtomic(std::string const& knob) const {

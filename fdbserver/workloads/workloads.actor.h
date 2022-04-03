@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,6 +27,7 @@
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/DatabaseContext.h" // for clone()
+#include "fdbserver/KnobProtectiveGroups.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbrpc/simulator.h"
 #include "flow/actorcompiler.h"
@@ -57,7 +58,7 @@ struct WorkloadContext {
 	WorkloadContext& operator=(const WorkloadContext&) = delete;
 };
 
-struct TestWorkload : NonCopyable, WorkloadContext {
+struct TestWorkload : NonCopyable, WorkloadContext, ReferenceCounted<TestWorkload> {
 	int phases;
 
 	// Subclasses are expected to also have a constructor with this signature (to work with WorkloadFactory<>):
@@ -103,25 +104,26 @@ struct KVWorkload : TestWorkload {
 	Key keyForIndex(uint64_t index, bool absent) const;
 };
 
-struct IWorkloadFactory {
-	static TestWorkload* create(std::string const& name, WorkloadContext const& wcx) {
+struct IWorkloadFactory : ReferenceCounted<IWorkloadFactory> {
+	static Reference<TestWorkload> create(std::string const& name, WorkloadContext const& wcx) {
 		auto it = factories().find(name);
 		if (it == factories().end())
-			return nullptr; // or throw?
+			return {}; // or throw?
 		return it->second->create(wcx);
 	}
-	static std::map<std::string, IWorkloadFactory*>& factories() {
-		static std::map<std::string, IWorkloadFactory*> theFactories;
+	static std::map<std::string, Reference<IWorkloadFactory>>& factories() {
+		static std::map<std::string, Reference<IWorkloadFactory>> theFactories;
 		return theFactories;
 	}
 
-	virtual TestWorkload* create(WorkloadContext const& wcx) = 0;
+	virtual ~IWorkloadFactory() = default;
+	virtual Reference<TestWorkload> create(WorkloadContext const& wcx) = 0;
 };
 
 template <class WorkloadType>
 struct WorkloadFactory : IWorkloadFactory {
-	WorkloadFactory(const char* name) { factories()[name] = this; }
-	TestWorkload* create(WorkloadContext const& wcx) override { return new WorkloadType(wcx); }
+	WorkloadFactory(const char* name) { factories()[name] = Reference<IWorkloadFactory>::addRef(this); }
+	Reference<TestWorkload> create(WorkloadContext const& wcx) override { return makeReference<WorkloadType>(wcx); }
 };
 
 #define REGISTER_WORKLOAD(classname) WorkloadFactory<classname> classname##WorkloadFactory(#classname)
@@ -204,9 +206,14 @@ public:
 	ISimulator::BackupAgentType simBackupAgents; // If set to true, then the simulation runs backup agents on the
 	                                             // workers. Can only be used in simulation.
 	ISimulator::BackupAgentType simDrAgents;
+
+	KnobKeyValuePairs overrideKnobs;
 };
 
-ACTOR Future<DistributedTestResults> runWorkload(Database cx, std::vector<TesterInterface> testers, TestSpec spec);
+ACTOR Future<DistributedTestResults> runWorkload(Database cx,
+                                                 std::vector<TesterInterface> testers,
+                                                 TestSpec spec,
+                                                 Optional<TenantName> defaultTenant);
 
 void logMetrics(std::vector<PerfMetric> metrics);
 

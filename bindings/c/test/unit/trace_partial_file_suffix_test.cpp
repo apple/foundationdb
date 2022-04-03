@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2021 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -72,7 +72,7 @@ int main(int argc, char** argv) {
 
 	// Apparently you need to open a database to initialize logging
 	FDBDatabase* out;
-	fdb_check(fdb_create_database(nullptr, &out));
+	fdb_check(fdb_create_database(argv[1], &out));
 	fdb_database_destroy(out);
 
 	// Eventually there's a new trace file for this test ending in .tmp

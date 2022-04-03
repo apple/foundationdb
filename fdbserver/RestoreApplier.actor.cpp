@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,8 +33,9 @@
 #include "fdbserver/RestoreRoleCommon.actor.h"
 #include "fdbserver/RestoreApplier.actor.h"
 
-#include "flow/actorcompiler.h" // This must be the last #include.
 #include "flow/network.h"
+
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 ACTOR static Future<Void> handleSendMutationVectorRequest(RestoreSendVersionedMutationsRequest req,
                                                           Reference<RestoreApplierData> self);
@@ -98,8 +99,8 @@ ACTOR Future<Void> restoreApplierCore(RestoreApplierInterface applierInterf, int
 		} catch (Error& e) {
 			bool isError = e.code() != error_code_operation_cancelled;
 			TraceEvent(isError ? SevError : SevWarnAlways, "FastRestoreApplierError", self->id())
-			    .detail("RequestType", requestTypeStr)
-			    .error(e, true);
+			    .errorUnsuppressed(e)
+			    .detail("RequestType", requestTypeStr);
 			actors.clear(false);
 			break;
 		}
@@ -251,9 +252,9 @@ ACTOR static Future<Void> applyClearRangeMutations(Standalone<VectorRef<KeyRange
 			retries++;
 			if (retries > SERVER_KNOBS->FASTRESTORE_TXN_RETRY_MAX) {
 				TraceEvent(SevWarnAlways, "RestoreApplierApplyClearRangeMutationsStuck", applierID)
+				    .error(e)
 				    .detail("BatchIndex", batchIndex)
-				    .detail("ClearRanges", ranges.size())
-				    .error(e);
+				    .detail("ClearRanges", ranges.size());
 			}
 			wait(tr->onError(e));
 		}
@@ -314,11 +315,13 @@ ACTOR static Future<Void> getAndComputeStagingKeys(
 		} catch (Error& e) {
 			cc->fetchTxnRetries += 1;
 			if (retries++ > incompleteStagingKeys.size()) {
-				TraceEvent(SevWarnAlways, "GetAndComputeStagingKeys", applierID)
-				    .suppressFor(1.0)
-				    .detail("RandomUID", randomID)
-				    .detail("BatchIndex", batchIndex)
-				    .error(e);
+				if (e.code() != error_code_actor_cancelled) {
+					TraceEvent(SevWarnAlways, "GetAndComputeStagingKeys", applierID)
+					    .errorUnsuppressed(e)
+					    .suppressFor(1.0)
+					    .detail("RandomUID", randomID)
+					    .detail("BatchIndex", batchIndex);
+				}
 			}
 			wait(tr->onError(e));
 		}
