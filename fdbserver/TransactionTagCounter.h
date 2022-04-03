@@ -42,7 +42,7 @@ private:
 
 public:
 	explicit TopKTags(int limit) : limit(limit) { ASSERT_GT(limit, 0); }
-	void incrementTagCount(TransactionTag tag, int previousCount, int increase);
+	void incrementCount(TransactionTag tag, int previousCount, int increase);
 
 	std::vector<StorageQueuingMetricsReply::TagInfo> getBusiestTags(double elapsed, double totalSampleCount) const;
 

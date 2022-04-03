@@ -21,7 +21,7 @@
 #include "fdbserver/TransactionTagCounter.h"
 #include "flow/Trace.h"
 
-void TopKTags::incrementTagCount(TransactionTag tag, int previousCount, int increase) {
+void TopKTags::incrementCount(TransactionTag tag, int previousCount, int increase) {
 	auto iter = std::find_if(topTags.begin(), topTags.end(), [tag](const auto& tc) { return tc.tag == tag; });
 	if (iter != topTags.end()) {
 		ASSERT_EQ(previousCount, iter->count);
@@ -43,8 +43,7 @@ std::vector<StorageQueuingMetricsReply::TagInfo> TopKTags::getBusiestTags(double
                                                                           double totalSampleCount) const {
 	std::vector<StorageQueuingMetricsReply::TagInfo> result;
 	for (auto const& tagAndCounter : topTags) {
-		// FIXME: Confusing operator precedence
-		auto rate = tagAndCounter.count / CLIENT_KNOBS->READ_TAG_SAMPLE_RATE / elapsed;
+		auto rate = (tagAndCounter.count / CLIENT_KNOBS->READ_TAG_SAMPLE_RATE) / elapsed;
 		if (rate > SERVER_KNOBS->MIN_TAG_READ_PAGES_RATE) {
 			result.emplace_back(tagAndCounter.tag, rate, tagAndCounter.count / totalSampleCount);
 		}
@@ -62,7 +61,7 @@ void TransactionTagCounter::addRequest(Optional<TagSet> const& tags, int64_t byt
 		double cost = costFunction(bytes);
 		for (auto& tag : tags.get()) {
 			int64_t& count = intervalCounts[TransactionTag(tag, tags.get().getArena())];
-			topTags.incrementTagCount(tag, count, cost);
+			topTags.incrementCount(tag, count, cost);
 			count += cost;
 		}
 
@@ -89,4 +88,61 @@ void TransactionTagCounter::startNewInterval() {
 	intervalTotalSampledCount = 0;
 	topTags.clear();
 	intervalStart = now();
+}
+
+TEST_CASE("/TransactionTagCounter/TopKTags") {
+	TopKTags topTags(2);
+
+	// Ensure that costs are larger enough to show up
+	auto const costMultiplier =
+	    std::max<double>(1.0, 2 * SERVER_KNOBS->MIN_TAG_READ_PAGES_RATE * CLIENT_KNOBS->READ_TAG_SAMPLE_RATE);
+
+	ASSERT_EQ(topTags.getBusiestTags(1.0, 0).size(), 0);
+	topTags.incrementCount("a"_sr, 0, 1 * costMultiplier);
+	{
+		auto const busiestTags = topTags.getBusiestTags(1.0, 1 * costMultiplier);
+		ASSERT_EQ(busiestTags.size(), 1);
+		ASSERT_EQ(std::count_if(busiestTags.begin(),
+		                        busiestTags.end(),
+		                        [](auto const& tagInfo) { return tagInfo.tag == "a"_sr; }),
+		          1);
+	}
+	topTags.incrementCount("b"_sr, 0, 2 * costMultiplier);
+	topTags.incrementCount("c"_sr, 0, 3 * costMultiplier);
+	{
+		auto busiestTags = topTags.getBusiestTags(1.0, 6 * costMultiplier);
+		ASSERT_EQ(busiestTags.size(), 2);
+		ASSERT_EQ(std::count_if(busiestTags.begin(),
+		                        busiestTags.end(),
+		                        [](auto const& tagInfo) { return tagInfo.tag == "a"_sr; }),
+		          0);
+		ASSERT_EQ(std::count_if(busiestTags.begin(),
+		                        busiestTags.end(),
+		                        [](auto const& tagInfo) { return tagInfo.tag == "b"_sr; }),
+		          1);
+		ASSERT_EQ(std::count_if(busiestTags.begin(),
+		                        busiestTags.end(),
+		                        [](auto const& tagInfo) { return tagInfo.tag == "c"_sr; }),
+		          1);
+	}
+	topTags.incrementCount("a"_sr, 1 * costMultiplier, 3 * costMultiplier);
+	{
+		auto busiestTags = topTags.getBusiestTags(1.0, 9 * costMultiplier);
+		ASSERT_EQ(busiestTags.size(), 2);
+		ASSERT_EQ(std::count_if(busiestTags.begin(),
+		                        busiestTags.end(),
+		                        [](auto const& tagInfo) { return tagInfo.tag == "a"_sr; }),
+		          1);
+		ASSERT_EQ(std::count_if(busiestTags.begin(),
+		                        busiestTags.end(),
+		                        [](auto const& tagInfo) { return tagInfo.tag == "b"_sr; }),
+		          0);
+		ASSERT_EQ(std::count_if(busiestTags.begin(),
+		                        busiestTags.end(),
+		                        [](auto const& tagInfo) { return tagInfo.tag == "c"_sr; }),
+		          1);
+	}
+	topTags.clear();
+	ASSERT_EQ(topTags.getBusiestTags(1.0, 0).size(), 0);
+	return Void();
 }
