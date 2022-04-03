@@ -1537,8 +1537,8 @@ public:
 	int64_t numPages;
 	int64_t numEntries;
 	int pagesPerExtent;
-	bool usesExtents;// = false;
-	bool tailPageNewExtent;// = false;
+	bool usesExtents;
+	bool tailPageNewExtent;
 	PhysicalPageID prevExtentEndPageID;
 
 	Cursor headReader;
@@ -2208,8 +2208,8 @@ public:
 	          Promise<Void> errorPromise = {})
 	  : keyProvider(keyProvider), ioLock(FLOW_KNOBS->MAX_OUTSTANDING, ioMaxPriority, FLOW_KNOBS->MAX_OUTSTANDING / 2),
 	    pageCacheBytes(pageCacheSizeBytes), desiredPageSize(desiredPageSize), desiredExtentSize(desiredExtentSize),
-	    filename(filename), memoryOnly(memoryOnly), errorPromise(errorPromise), remapCleanupWindowBytes(remapCleanupWindowBytes),
-	    concurrentExtentReads(new FlowLock(concurrentExtentReads)) {
+	    filename(filename), memoryOnly(memoryOnly), errorPromise(errorPromise),
+	    remapCleanupWindowBytes(remapCleanupWindowBytes), concurrentExtentReads(new FlowLock(concurrentExtentReads)) {
 
 		if (keyProvider == nullptr) {
 			keyProvider = std::make_shared<NullKeyProvider>();
@@ -3068,10 +3068,10 @@ public:
 			}
 			page->postReadPayload(pageIDs.front());
 			debug_printf("DWALPager(%s) op=readPhysicalVerified %s ptr=%p bytes=%d\n",
-						self->filename.c_str(),
-						toString(pageIDs).c_str(),
-						page->rawData(),
-						pageIDs.size() * blockSize);
+			             self->filename.c_str(),
+			             toString(pageIDs).c_str(),
+			             page->rawData(),
+			             pageIDs.size() * blockSize);
 		} catch (Error& e) {
 			// For header pages, error is a warning because recovery may still be possible
 			TraceEvent(SevError, "RedwoodPageError")
@@ -3106,7 +3106,11 @@ public:
 	                                      bool noHit) override {
 		// Use cached page if present, without triggering a cache hit.
 		// Otherwise, read the page and return it but don't add it to the cache
-		debug_printf("DWALPager(%s) op=read %s reason=%s  noHit=%d\n", filename.c_str(), toString(pageID).c_str(), PagerEventReasonsStrings[(int)reason], noHit);
+		debug_printf("DWALPager(%s) op=read %s reason=%s  noHit=%d\n",
+		             filename.c_str(),
+		             toString(pageID).c_str(),
+		             PagerEventReasonsStrings[(int)reason],
+		             noHit);
 		auto& eventReasons = g_redwoodMetrics.level(level).metrics.events;
 		eventReasons.addEventReason(PagerEvents::CacheLookup, reason);
 		if (!cacheable) {
@@ -3151,7 +3155,11 @@ public:
 	                                           bool noHit) override {
 		// Use cached page if present, without triggering a cache hit.
 		// Otherwise, read the page and return it but don't add it to the cache
-		debug_printf("DWALPager(%s) op=read %s reason=%s noHit=%d\n", filename.c_str(), toString(pageIDs).c_str(), PagerEventReasonsStrings[(int)reason], noHit);
+		debug_printf("DWALPager(%s) op=read %s reason=%s noHit=%d\n",
+		             filename.c_str(),
+		             toString(pageIDs).c_str(),
+		             PagerEventReasonsStrings[(int)reason],
+		             noHit);
 		auto& eventReasons = g_redwoodMetrics.level(level).metrics.events;
 		eventReasons.addEventReason(PagerEvents::CacheLookup, reason);
 		if (!cacheable) {
@@ -6085,7 +6093,8 @@ private:
 			                            upperBound)
 			                 .c_str());
 
-			BTreePage::BinaryTree::DecodeCache* cache = new BTreePage::BinaryTree::DecodeCache(lowerBound, upperBound, m_pDecodeCacheMemory);
+			BTreePage::BinaryTree::DecodeCache* cache =
+			    new BTreePage::BinaryTree::DecodeCache(lowerBound, upperBound, m_pDecodeCacheMemory);
 
 			page->userData = cache;
 			page->userDataDestructor = [](void* cache) { ((BTreePage::BinaryTree::DecodeCache*)cache)->delref(); };
@@ -6545,8 +6554,8 @@ private:
 			}
 		}
 
-		state Reference<const ArenaPage> page =
-		    wait(readPage(self, PagerEventReasons::Commit, height, batch->snapshot.getPtr(), rootID, height, false, true));
+		state Reference<const ArenaPage> page = wait(
+		    readPage(self, PagerEventReasons::Commit, height, batch->snapshot.getPtr(), rootID, height, false, true));
 
 		// If the page exists in the cache, it must be copied before modification.
 		// That copy will be referenced by pageCopy, as page must stay in scope in case anything references its
@@ -10072,7 +10081,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 				                               extentSize,
 				                               file,
 				                               pageCacheBytes,
-											   remapCleanupWindowBytes,
+				                               remapCleanupWindowBytes,
 				                               concurrentExtentReads,
 				                               false,
 				                               keyProvider);
@@ -10116,12 +10125,17 @@ TEST_CASE("Lredwood/correctness/btree") {
 	state Future<Void> closedFuture = btree->onClosed();
 	btree->close();
 	wait(closedFuture);
-	btree = new VersionedBTree(
-	    new DWALPager(
-	        pageSize, extentSize, file, pageCacheBytes, (BUGGIFY ? 0 : remapCleanupWindowBytes), concurrentExtentReads, pagerMemoryOnly, keyProvider),
-	    file,
-	    encodingType,
-	    keyProvider);
+	btree = new VersionedBTree(new DWALPager(pageSize,
+	                                         extentSize,
+	                                         file,
+	                                         pageCacheBytes,
+	                                         (BUGGIFY ? 0 : remapCleanupWindowBytes),
+	                                         concurrentExtentReads,
+	                                         pagerMemoryOnly,
+	                                         keyProvider),
+	                           file,
+	                           encodingType,
+	                           keyProvider);
 	wait(btree->init());
 
 	wait(btree->clearAllAndCheckSanity());
@@ -10257,8 +10271,14 @@ TEST_CASE(":/redwood/performance/extentQueue") {
 
 	// Do random pushes into the queue and commit periodically
 	if (reload) {
-		pager = new DWALPager(
-		    pageSize, extentSize, fileName, cacheSizeBytes, remapCleanupWindowBytes, concurrentExtentReads, false, nullptr);
+		pager = new DWALPager(pageSize,
+		                      extentSize,
+		                      fileName,
+		                      cacheSizeBytes,
+		                      remapCleanupWindowBytes,
+		                      concurrentExtentReads,
+		                      false,
+		                      nullptr);
 
 		wait(success(pager->init()));
 
