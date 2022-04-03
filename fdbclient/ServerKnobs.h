@@ -565,6 +565,9 @@ public:
 	double AUTO_TAG_THROTTLE_UPDATE_FREQUENCY;
 	double TAG_THROTTLE_EXPIRED_CLEANUP_INTERVAL;
 	bool AUTO_TAG_THROTTLING_ENABLED;
+	// Limit to the number of throttling tags each storage server
+	// will track and send to the ratekeeper
+	int64_t SS_THROTTLE_TAGS_TRACKED;
 	// Use global tag throttling strategy. i.e. throttle based on the cluster-wide
 	// throughput for tags and their associated quotas.
 	bool GLOBAL_TAG_THROTTLING;

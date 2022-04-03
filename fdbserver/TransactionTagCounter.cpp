@@ -41,7 +41,10 @@ private:
 	int limit;
 
 public:
-	explicit TopKTags(int limit) : limit(limit) { ASSERT_GT(limit, 0); }
+	explicit TopKTags(int limit) : limit(limit) {
+		ASSERT_GT(limit, 0);
+		topTags.reserve(limit);
+	}
 
 	void incrementCount(TransactionTag tag, int previousCount, int increase) {
 		auto iter = std::find_if(topTags.begin(), topTags.end(), [tag](const auto& tc) { return tc.tag == tag; });
@@ -91,7 +94,7 @@ class TransactionTagCounterImpl {
 
 public:
 	TransactionTagCounterImpl(UID thisServerID)
-	  : thisServerID(thisServerID), topTags(1), // TODO: Make this a knob
+	  : thisServerID(thisServerID), topTags(SERVER_KNOBS->SS_THROTTLE_TAGS_TRACKED),
 	    busiestReadTagEventHolder(makeReference<EventCacheHolder>(thisServerID.toString() + "/BusiestReadTag")) {}
 
 	void addRequest(Optional<TagSet> const& tags, int64_t bytes) {
