@@ -5,6 +5,8 @@ set(FDBSERVER_SRCS
   BackupProgress.actor.cpp
   BackupProgress.actor.h
   BackupWorker.actor.cpp
+  BlobGranuleServerCommon.actor.cpp
+  BlobGranuleServerCommon.actor.h
   BlobManager.actor.cpp
   BlobManagerInterface.h
   BlobWorker.actor.cpp
@@ -96,6 +98,10 @@ set(FDBSERVER_SRCS
   Ratekeeper.h
   RatekeeperInterface.h
   RecoveryState.h
+  RemoteIKeyValueStore.actor.h
+  RemoteIKeyValueStore.actor.cpp
+  ResolutionBalancer.actor.cpp
+  ResolutionBalancer.actor.h
   Resolver.actor.cpp
   ResolverInterface.h
   RestoreApplier.actor.cpp
@@ -114,6 +120,8 @@ set(FDBSERVER_SRCS
   RestoreWorker.actor.h
   RestoreWorkerInterface.actor.cpp
   RestoreWorkerInterface.actor.h
+  RkTagThrottleCollection.cpp
+  RkTagThrottleCollection.h
   RocksDBCheckpointUtils.actor.cpp
   RocksDBCheckpointUtils.actor.h
   RoleLineage.actor.cpp
@@ -148,6 +156,8 @@ set(FDBSERVER_SRCS
   TesterInterface.actor.h
   TLogInterface.h
   TLogServer.actor.cpp
+  TransactionTagCounter.cpp
+  TransactionTagCounter.h
   TSSMappingUtil.actor.cpp
   TSSMappingUtil.actor.h
   VersionedBTree.actor.cpp
@@ -176,6 +186,7 @@ set(FDBSERVER_SRCS
   workloads/BackupToDBAbort.actor.cpp
   workloads/BackupToDBCorrectness.actor.cpp
   workloads/BackupToDBUpgrade.actor.cpp
+  workloads/BlobGranuleCorrectnessWorkload.actor.cpp
   workloads/BlobGranuleVerifier.actor.cpp
   workloads/BlobStoreWorkload.h
   workloads/BulkLoad.actor.cpp

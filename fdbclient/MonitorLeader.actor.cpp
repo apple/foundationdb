@@ -169,7 +169,7 @@ void ClusterConnectionString::resolveHostnamesBlocking() {
 }
 
 void ClusterConnectionString::resetToUnresolved() {
-	if (hostnames.size() > 0) {
+	if (status == RESOLVED && hostnames.size() > 0) {
 		coords.clear();
 		hostnames.clear();
 		networkAddressToHostname.clear();
@@ -558,8 +558,8 @@ ACTOR Future<Void> monitorNominee(Key key,
 				    .detail("Hostname", hostname.present() ? hostname.get().toString() : "UnknownHostname")
 				    .detail("OldAddr", coord.getLeader.getEndpoint().getPrimaryAddress().toString());
 				if (rep.getError().code() == error_code_request_maybe_delivered) {
-					// 50 milliseconds delay to prevent tight resolving loop due to outdated DNS cache
-					wait(delay(0.05));
+					// Delay to prevent tight resolving loop due to outdated DNS cache
+					wait(delay(CLIENT_KNOBS->COORDINATOR_HOSTNAME_RESOLVE_DELAY));
 					throw coordinators_changed();
 				} else {
 					throw rep.getError();
@@ -589,7 +589,6 @@ ACTOR Future<Void> monitorNominee(Key key,
 
 			if (li.present() && li.get().forward)
 				wait(Future<Void>(Never()));
-			wait(Future<Void>(Void()));
 		}
 	}
 }

@@ -273,6 +273,16 @@ Directory partitions have the following drawbacks, and in general they should no
 * Directories in a partition have longer prefixes than their counterparts outside of partitions, which reduces performance. Nesting partitions inside of other partitions results in even longer prefixes.
 * The root directory of a partition cannot be used to pack/unpack keys and therefore cannot be used to create subspaces. You must create at least one subdirectory of a partition in order to store content in it.
 
+Tenants
+-------
+
+:doc:`tenants` in FoundationDB provide a way to divide the cluster key-space into named transaction domains. Each tenant has a byte-string name that can be used to open transactions on the tenant's data, and tenant transactions are not permitted to access data outside of the tenant. Tenants can be useful for enforcing separation between unrelated use-cases.
+
+Tenants and directories
+~~~~~~~~~~~~~~~~~~~~~~~
+
+Because tenants enforce that transactions operate within the tenant boundaries, it is not recommended to use a global directory layer shared between tenants. It is possible, however, to use the directory layer within each tenant. To do so, simply use the directory layer as normal with tenant transactions.
+
 Working with the APIs
 =====================
 

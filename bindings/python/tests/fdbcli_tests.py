@@ -233,7 +233,8 @@ def suspend(logger):
     port = address.split(':')[1]
     logger.debug("Port: {}".format(port))
     # use the port number to find the exact fdb process we are connecting to
-    pinfo = list(filter(lambda x: port in x, pinfos))
+    # child process like fdbserver -r flowprocess does not provide `datadir` in the command line
+    pinfo = list(filter(lambda x: port in x and 'datadir' in x, pinfos))
     assert len(pinfo) == 1
     pid = pinfo[0].split(' ')[0]
     logger.debug("Pid: {}".format(pid))
