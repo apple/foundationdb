@@ -68,12 +68,29 @@ void HistogramRegistry::registerHistogram(Histogram* h) {
 	histograms.insert(std::pair<std::string, Histogram*>(h->name(), h));
 }
 
+void HistogramRegistry::registerRocksDBHistogram(RocksDBHistogram* h) {
+	if (rocksDBHistograms.find(h->name()) != rocksDBHistograms.end()) {
+		TraceEvent(SevError, "HistogramDoubleRegistered").detail("group", h->group).detail("op", h->op);
+		ASSERT(false);
+	}
+	rocksDBHistograms.insert(std::pair<std::string, RocksDBHistogram*>(h->name(), h));
+}
+
 void HistogramRegistry::unregisterHistogram(Histogram* h) {
 	std::string name = h->name();
 	if (histograms.find(name) == histograms.end()) {
 		TraceEvent(SevError, "HistogramNotRegistered").detail("group", h->group).detail("op", h->op);
 	}
 	int count = histograms.erase(name);
+	ASSERT(count == 1);
+}
+
+void HistogramRegistry::unregisterRocksDBHistogram(RocksDBHistogram* h) {
+	std::string name = h->name();
+	if (rocksDBHistograms.find(name) == rocksDBHistograms.end()) {
+		TraceEvent(SevError, "HistogramNotRegistered").detail("group", h->group).detail("op", h->op);
+	}
+	int count = rocksDBHistograms.erase(name);
 	ASSERT(count == 1);
 }
 
@@ -85,8 +102,20 @@ Histogram* HistogramRegistry::lookupHistogram(std::string const& name) {
 	return h->second;
 }
 
+RocksDBHistogram* HistogramRegistry::lookupRocksDBHistogram(std::string const& name) {
+	auto h = rocksDBHistograms.find(name);
+	if (h == rocksDBHistograms.end()) {
+		return nullptr;
+	}
+	return h->second;
+}
+
 void HistogramRegistry::logReport(double elapsed) {
 	for (auto& i : histograms) {
+		// Reset all buckets in writeToLog function
+		i.second->writeToLog(elapsed);
+	}
+	for (auto& i : rocksDBHistograms) {
 		// Reset all buckets in writeToLog function
 		i.second->writeToLog(elapsed);
 	}
@@ -95,6 +124,11 @@ void HistogramRegistry::logReport(double elapsed) {
 void HistogramRegistry::clear() {
 	for (auto& i : histograms) {
 		i.second->clear();
+	}
+	for (auto& i : rocksDBHistograms) {
+		i.second->selfMutex.lock();
+		i.second->clear();
+		i.second->selfMutex.unlock();
 	}
 }
 
@@ -219,6 +253,12 @@ std::string Histogram::drawHistogram() {
 	return result.str();
 }
 
+void RocksDBHistogram::writeToLog(double elapsed) {
+	selfMutex.lock();
+	Histogram::writeToLog(elapsed);
+	selfMutex.unlock();
+}
+
 #pragma endregion // Histogram
 
 TEST_CASE("/flow/histogram/smoke_test") {
@@ -248,6 +288,55 @@ TEST_CASE("/flow/histogram/smoke_test") {
 
 		h = Histogram::getHistogram(
 		    LiteralStringRef("smoke_test"), LiteralStringRef("times"), Histogram::Unit::microseconds);
+
+		h->sampleSeconds(0.000000);
+		h->sampleSeconds(0.0000019);
+		ASSERT(h->buckets[0] == 2);
+		h->sampleSeconds(0.0000021);
+		ASSERT(h->buckets[1] == 1);
+		h->sampleSeconds(0.000015);
+		ASSERT(h->buckets[3] == 1);
+
+		h->sampleSeconds(4400.0);
+		ASSERT(h->buckets[31] == 1);
+
+		GetHistogramRegistry().logReport();
+	}
+
+	// h has been deallocated.  Does this crash?
+	GetHistogramRegistry().logReport();
+
+	return Void();
+}
+
+TEST_CASE("/flow/histogram/smoke_test_2") {
+	{
+		Reference<RocksDBHistogram> h = RocksDBHistogram::getHistogram(
+		    LiteralStringRef("smoke_test_2"), LiteralStringRef("counts"), RocksDBHistogram::Unit::bytes);
+
+		h->sample(0);
+		ASSERT(h->buckets[0] == 1);
+		h->sample(1);
+		ASSERT(h->buckets[0] == 2);
+
+		h->sample(2);
+		ASSERT(h->buckets[1] == 1);
+
+		GetHistogramRegistry().logReport();
+
+		ASSERT(h->buckets[0] == 0);
+		h->sample(0);
+		ASSERT(h->buckets[0] == 1);
+		h = RocksDBHistogram::getHistogram(
+		    LiteralStringRef("smoke_test_2"), LiteralStringRef("counts2"), RocksDBHistogram::Unit::bytes);
+
+		// confirm that old h was deallocated.
+		h = RocksDBHistogram::getHistogram(
+		    LiteralStringRef("smoke_test"), LiteralStringRef("counts"), RocksDBHistogram::Unit::bytes);
+		ASSERT(h->buckets[0] == 0);
+
+		h = RocksDBHistogram::getHistogram(
+		    LiteralStringRef("smoke_test_2"), LiteralStringRef("times"), RocksDBHistogram::Unit::microseconds);
 
 		h->sampleSeconds(0.000000);
 		h->sampleSeconds(0.0000019);

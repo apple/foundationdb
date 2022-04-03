@@ -24,6 +24,7 @@
 
 #include <flow/Arena.h>
 #include <string>
+#include <mutex>
 #include <map>
 #include <unordered_map>
 #include <iomanip>
@@ -33,12 +34,16 @@
 #endif
 
 class Histogram;
+class RocksDBHistogram;
 
 class HistogramRegistry : public ReferenceCounted<HistogramRegistry> {
 public:
 	void registerHistogram(Histogram* h);
 	void unregisterHistogram(Histogram* h);
 	Histogram* lookupHistogram(std::string const& name);
+	void registerRocksDBHistogram(RocksDBHistogram* h);
+	void unregisterRocksDBHistogram(RocksDBHistogram* h);
+	RocksDBHistogram* lookupRocksDBHistogram(std::string const& name);
 	void logReport(double elapsed = -1.0);
 	void clear();
 
@@ -46,6 +51,7 @@ private:
 	// This map is ordered by key so that ops within the same group end up
 	// next to each other in the trace log.
 	std::map<std::string, Histogram*> histograms;
+	std::map<std::string, RocksDBHistogram*> rocksDBHistograms;
 };
 
 HistogramRegistry& GetHistogramRegistry();
@@ -56,7 +62,7 @@ HistogramRegistry& GetHistogramRegistry();
  * For more information about this technique, see:
  * https://www.fsl.cs.stonybrook.edu/project-osprof.html
  */
-class Histogram final : public ReferenceCounted<Histogram> {
+class Histogram : public ReferenceCounted<Histogram> {
 public:
 	enum class Unit { microseconds = 0, bytes, bytes_per_second, percentageLinear, countLinear, MAXHISTOGRAMUNIT };
 	static const char* const UnitToStringMapper[];
@@ -175,6 +181,47 @@ public:
 	uint32_t buckets[32];
 	uint32_t lowerBound;
 	uint32_t upperBound;
+};
+
+class RocksDBHistogram : public Histogram {
+public:
+	using Histogram::Histogram;
+	void writeToLog(double elapsed = -1.0);
+	inline void sampleSeconds(double delta) {
+		if (selfMutex.try_lock()) {
+			Histogram::sampleSeconds(delta);
+			selfMutex.unlock();
+		}
+	}
+	static Reference<RocksDBHistogram> getHistogram(StringRef group,
+	                                                StringRef op,
+	                                                Unit unit,
+	                                                uint32_t lower = 0,
+	                                                uint32_t upper = UINT32_MAX) {
+		std::string group_str = group.toString();
+		std::string op_str = op.toString();
+		std::string name = generateName(group_str, op_str);
+		HistogramRegistry& registry = GetHistogramRegistry();
+		RocksDBHistogram* h = registry.lookupRocksDBHistogram(name);
+		if (!h) {
+			h = new RocksDBHistogram(
+			    Reference<HistogramRegistry>::addRef(&registry), group_str, op_str, unit, lower, upper);
+			registry.registerRocksDBHistogram(h);
+			return Reference<RocksDBHistogram>(h);
+		} else {
+			return Reference<RocksDBHistogram>::addRef(h);
+		}
+	}
+	~RocksDBHistogram() {
+		if (registry.isValid() && unit != Unit::MAXHISTOGRAMUNIT) {
+			registry->unregisterRocksDBHistogram(this);
+		}
+		registry.clear();
+	}
+	std::mutex selfMutex;
+
+private:
+	static std::string generateName(std::string const& group, std::string const& op) { return group + ":" + op; }
 };
 
 #endif // FLOW_HISTOGRAM_H

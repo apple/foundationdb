@@ -855,11 +855,11 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 		UID id;
 		std::shared_ptr<rocksdb::RateLimiter> rateLimiter;
-		Reference<Histogram> commitLatencyHistogram;
-		Reference<Histogram> commitActionHistogram;
-		Reference<Histogram> commitQueueWaitHistogram;
-		Reference<Histogram> writeHistogram;
-		Reference<Histogram> deleteCompactRangeHistogram;
+		Reference<RocksDBHistogram> commitLatencyHistogram;
+		Reference<RocksDBHistogram> commitActionHistogram;
+		Reference<RocksDBHistogram> commitQueueWaitHistogram;
+		Reference<RocksDBHistogram> writeHistogram;
+		Reference<RocksDBHistogram> deleteCompactRangeHistogram;
 		std::shared_ptr<ReadIteratorPool> readIterPool;
 		std::shared_ptr<PerfContextMetrics> perfContextMetrics;
 		int threadIndex;
@@ -880,21 +880,21 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		                          rocksdb::RateLimiter::Mode::kWritesOnly,
 		                          SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_AUTO_TUNE)
 		                    : nullptr),
-		    commitLatencyHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
-		                                                   ROCKSDB_COMMIT_LATENCY_HISTOGRAM,
-		                                                   Histogram::Unit::microseconds)),
-		    commitActionHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
-		                                                  ROCKSDB_COMMIT_ACTION_HISTOGRAM,
-		                                                  Histogram::Unit::microseconds)),
-		    commitQueueWaitHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
-		                                                     ROCKSDB_COMMIT_QUEUEWAIT_HISTOGRAM,
-		                                                     Histogram::Unit::microseconds)),
-		    writeHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
-		                                           ROCKSDB_WRITE_HISTOGRAM,
-		                                           Histogram::Unit::microseconds)),
-		    deleteCompactRangeHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
-		                                                        ROCKSDB_DELETE_COMPACTRANGE_HISTOGRAM,
-		                                                        Histogram::Unit::microseconds)) {
+		    commitLatencyHistogram(RocksDBHistogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
+		                                                          ROCKSDB_COMMIT_LATENCY_HISTOGRAM,
+		                                                          RocksDBHistogram::Unit::microseconds)),
+		    commitActionHistogram(RocksDBHistogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
+		                                                         ROCKSDB_COMMIT_ACTION_HISTOGRAM,
+		                                                         RocksDBHistogram::Unit::microseconds)),
+		    commitQueueWaitHistogram(RocksDBHistogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
+		                                                            ROCKSDB_COMMIT_QUEUEWAIT_HISTOGRAM,
+		                                                            RocksDBHistogram::Unit::microseconds)),
+		    writeHistogram(RocksDBHistogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
+		                                                  ROCKSDB_WRITE_HISTOGRAM,
+		                                                  RocksDBHistogram::Unit::microseconds)),
+		    deleteCompactRangeHistogram(RocksDBHistogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
+		                                                               ROCKSDB_DELETE_COMPACTRANGE_HISTOGRAM,
+		                                                               RocksDBHistogram::Unit::microseconds)) {
 			if (SERVER_KNOBS->ROCKSDB_PERFCONTEXT_ENABLE) {
 				// Enable perf context on the same thread with the db thread
 				rocksdb::SetPerfLevel(rocksdb::PerfLevel::kEnableTimeExceptForMutex);
@@ -1272,18 +1272,18 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		double readValueTimeout;
 		double readValuePrefixTimeout;
 		double readRangeTimeout;
-		Reference<Histogram> readRangeLatencyHistogram;
-		Reference<Histogram> readValueLatencyHistogram;
-		Reference<Histogram> readPrefixLatencyHistogram;
-		Reference<Histogram> readRangeActionHistogram;
-		Reference<Histogram> readValueActionHistogram;
-		Reference<Histogram> readPrefixActionHistogram;
-		Reference<Histogram> readRangeQueueWaitHistogram;
-		Reference<Histogram> readValueQueueWaitHistogram;
-		Reference<Histogram> readPrefixQueueWaitHistogram;
-		Reference<Histogram> readRangeNewIteratorHistogram;
-		Reference<Histogram> readValueGetHistogram;
-		Reference<Histogram> readPrefixGetHistogram;
+		Reference<RocksDBHistogram> readRangeLatencyHistogram;
+		Reference<RocksDBHistogram> readValueLatencyHistogram;
+		Reference<RocksDBHistogram> readPrefixLatencyHistogram;
+		Reference<RocksDBHistogram> readRangeActionHistogram;
+		Reference<RocksDBHistogram> readValueActionHistogram;
+		Reference<RocksDBHistogram> readPrefixActionHistogram;
+		Reference<RocksDBHistogram> readRangeQueueWaitHistogram;
+		Reference<RocksDBHistogram> readValueQueueWaitHistogram;
+		Reference<RocksDBHistogram> readPrefixQueueWaitHistogram;
+		Reference<RocksDBHistogram> readRangeNewIteratorHistogram;
+		Reference<RocksDBHistogram> readValueGetHistogram;
+		Reference<RocksDBHistogram> readPrefixGetHistogram;
 		std::shared_ptr<ReadIteratorPool> readIterPool;
 		std::shared_ptr<PerfContextMetrics> perfContextMetrics;
 		int threadIndex;
@@ -1295,42 +1295,42 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		                int threadIndex)
 		  : db(db), cf(cf), readIterPool(readIterPool), perfContextMetrics(perfContextMetrics),
 		    threadIndex(threadIndex),
-		    readRangeLatencyHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
-		                                                      ROCKSDB_READRANGE_LATENCY_HISTOGRAM,
-		                                                      Histogram::Unit::microseconds)),
-		    readValueLatencyHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
-		                                                      ROCKSDB_READVALUE_LATENCY_HISTOGRAM,
-		                                                      Histogram::Unit::microseconds)),
-		    readPrefixLatencyHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
-		                                                       ROCKSDB_READPREFIX_LATENCY_HISTOGRAM,
-		                                                       Histogram::Unit::microseconds)),
-		    readRangeActionHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
-		                                                     ROCKSDB_READRANGE_ACTION_HISTOGRAM,
-		                                                     Histogram::Unit::microseconds)),
-		    readValueActionHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
-		                                                     ROCKSDB_READVALUE_ACTION_HISTOGRAM,
-		                                                     Histogram::Unit::microseconds)),
-		    readPrefixActionHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
-		                                                      ROCKSDB_READPREFIX_ACTION_HISTOGRAM,
-		                                                      Histogram::Unit::microseconds)),
-		    readRangeQueueWaitHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
-		                                                        ROCKSDB_READRANGE_QUEUEWAIT_HISTOGRAM,
-		                                                        Histogram::Unit::microseconds)),
-		    readValueQueueWaitHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
-		                                                        ROCKSDB_READVALUE_QUEUEWAIT_HISTOGRAM,
-		                                                        Histogram::Unit::microseconds)),
-		    readPrefixQueueWaitHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
-		                                                         ROCKSDB_READPREFIX_QUEUEWAIT_HISTOGRAM,
-		                                                         Histogram::Unit::microseconds)),
-		    readRangeNewIteratorHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
-		                                                          ROCKSDB_READRANGE_NEWITERATOR_HISTOGRAM,
-		                                                          Histogram::Unit::microseconds)),
-		    readValueGetHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
-		                                                  ROCKSDB_READVALUE_GET_HISTOGRAM,
-		                                                  Histogram::Unit::microseconds)),
-		    readPrefixGetHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
-		                                                   ROCKSDB_READPREFIX_GET_HISTOGRAM,
-		                                                   Histogram::Unit::microseconds)) {
+		    readRangeLatencyHistogram(RocksDBHistogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
+		                                                             ROCKSDB_READRANGE_LATENCY_HISTOGRAM,
+		                                                             RocksDBHistogram::Unit::microseconds)),
+		    readValueLatencyHistogram(RocksDBHistogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
+		                                                             ROCKSDB_READVALUE_LATENCY_HISTOGRAM,
+		                                                             RocksDBHistogram::Unit::microseconds)),
+		    readPrefixLatencyHistogram(RocksDBHistogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
+		                                                              ROCKSDB_READPREFIX_LATENCY_HISTOGRAM,
+		                                                              RocksDBHistogram::Unit::microseconds)),
+		    readRangeActionHistogram(RocksDBHistogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
+		                                                            ROCKSDB_READRANGE_ACTION_HISTOGRAM,
+		                                                            RocksDBHistogram::Unit::microseconds)),
+		    readValueActionHistogram(RocksDBHistogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
+		                                                            ROCKSDB_READVALUE_ACTION_HISTOGRAM,
+		                                                            RocksDBHistogram::Unit::microseconds)),
+		    readPrefixActionHistogram(RocksDBHistogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
+		                                                             ROCKSDB_READPREFIX_ACTION_HISTOGRAM,
+		                                                             RocksDBHistogram::Unit::microseconds)),
+		    readRangeQueueWaitHistogram(RocksDBHistogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
+		                                                               ROCKSDB_READRANGE_QUEUEWAIT_HISTOGRAM,
+		                                                               RocksDBHistogram::Unit::microseconds)),
+		    readValueQueueWaitHistogram(RocksDBHistogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
+		                                                               ROCKSDB_READVALUE_QUEUEWAIT_HISTOGRAM,
+		                                                               RocksDBHistogram::Unit::microseconds)),
+		    readPrefixQueueWaitHistogram(RocksDBHistogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
+		                                                                ROCKSDB_READPREFIX_QUEUEWAIT_HISTOGRAM,
+		                                                                RocksDBHistogram::Unit::microseconds)),
+		    readRangeNewIteratorHistogram(RocksDBHistogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
+		                                                                 ROCKSDB_READRANGE_NEWITERATOR_HISTOGRAM,
+		                                                                 RocksDBHistogram::Unit::microseconds)),
+		    readValueGetHistogram(RocksDBHistogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
+		                                                         ROCKSDB_READVALUE_GET_HISTOGRAM,
+		                                                         RocksDBHistogram::Unit::microseconds)),
+		    readPrefixGetHistogram(RocksDBHistogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
+		                                                          ROCKSDB_READPREFIX_GET_HISTOGRAM,
+		                                                          RocksDBHistogram::Unit::microseconds)) {
 			if (g_network->isSimulated()) {
 				// In simulation, increasing the read operation timeouts to 5 minutes, as some of the tests have
 				// very high load and single read thread cannot process all the load within the timeouts.
