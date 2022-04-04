@@ -1304,17 +1304,58 @@ std::string toml_to_string(const T& value) {
 	}
 }
 
-std::vector<TestSpec> readTOMLTests_(std::string fileName) {
-	TestSpec spec;
+struct TestSet {
+	KnobKeyValuePairs overrideKnobs;
+	std::vector<TestSpec> testSpecs;
+};
+
+namespace {
+
+// In the current TOML scope, look for "knobs" field. If exists, translate all
+// key value pairs into KnobKeyValuePairs
+KnobKeyValuePairs getOverriddenKnobKeyValues(const toml::value& context) {
+	KnobKeyValuePairs result;
+
+	try {
+		const toml::array& overrideKnobs = toml::find(context, "knobs").as_array();
+		for (const toml::value& knob : overrideKnobs) {
+			for (const auto& [key, value_] : knob.as_table()) {
+				const std::string& value = toml_to_string(value_);
+				ParsedKnobValue parsedValue = CLIENT_KNOBS->parseKnobValue(key, value);
+				if (std::get_if<NoKnobFound>(&parsedValue)) {
+					parsedValue = SERVER_KNOBS->parseKnobValue(key, value);
+				}
+				if (std::get_if<NoKnobFound>(&parsedValue)) {
+					TraceEvent(SevError, "TestSpecUnrecognizedKnob")
+					    .detail("KnobName", key)
+					    .detail("OverrideValue", value);
+					continue;
+				}
+				result.set(key, parsedValue);
+			}
+		}
+	} catch (const std::out_of_range&) {
+		// No knobs field in this scope, this is not an error
+	}
+
+	return result;
+}
+
+} // namespace
+
+TestSet readTOMLTests_(std::string fileName) {
 	Standalone<VectorRef<KeyValueRef>> workloadOptions;
-	std::vector<TestSpec> result;
+	TestSet result;
 
 	const toml::value& conf = toml::parse(fileName);
+
+	// Parse the global knob changes
+	result.overrideKnobs = getOverriddenKnobKeyValues(conf);
 
 	// Then parse each test
 	const toml::array& tests = toml::find(conf, "test").as_array();
 	for (const toml::value& test : tests) {
-		spec = TestSpec();
+		TestSpec spec;
 
 		// First handle all test-level settings
 		for (const auto& [k, v] : test.as_table()) {
@@ -1345,29 +1386,9 @@ std::vector<TestSpec> readTOMLTests_(std::string fileName) {
 		}
 
 		// And then copy the knob attributes to spec.overrideKnobs
-		try {
-			const toml::array& overrideKnobs = toml::find(test, "knobs").as_array();
-			for (const toml::value& knob : overrideKnobs) {
-				for (const auto& [key, value_] : knob.as_table()) {
-					const std::string& value = toml_to_string(value_);
-					ParsedKnobValue parsedValue = CLIENT_KNOBS->parseKnobValue(key, value);
-					if (std::get_if<NoKnobFound>(&parsedValue)) {
-						parsedValue = SERVER_KNOBS->parseKnobValue(key, value);
-					}
-					if (std::get_if<NoKnobFound>(&parsedValue)) {
-						TraceEvent(SevError, "TestSpecUnrecognizedKnob")
-						    .detail("KnobName", key)
-						    .detail("OverrideValue", value);
-						continue;
-					}
-					spec.overrideKnobs.set(key, parsedValue);
-				}
-			}
-		} catch (const std::out_of_range&) {
-			// no knob overridden
-		}
+		spec.overrideKnobs = getOverriddenKnobKeyValues(test);
 
-		result.push_back(spec);
+		result.testSpecs.push_back(spec);
 	}
 
 	return result;
@@ -1375,7 +1396,7 @@ std::vector<TestSpec> readTOMLTests_(std::string fileName) {
 
 // A hack to catch and log std::exception, because TOML11 has very useful
 // error messages, but the actor framework can't handle std::exception.
-std::vector<TestSpec> readTOMLTests(std::string fileName) {
+TestSet readTOMLTests(std::string fileName) {
 	try {
 		return readTOMLTests_(fileName);
 	} catch (std::exception& e) {
@@ -1669,7 +1690,8 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
                             StringRef startingConfiguration,
                             LocalityData locality,
                             UnitTestParameters testOptions) {
-	state std::vector<TestSpec> testSpecs;
+	state TestSet testSet;
+	state std::unique_ptr<KnobProtectiveGroup> knobProtectiveGroup(nullptr);
 	auto cc = makeReference<AsyncVar<Optional<ClusterControllerFullInterface>>>();
 	auto ci = makeReference<AsyncVar<Optional<ClusterInterface>>>();
 	std::vector<Future<Void>> actors;
@@ -1700,7 +1722,7 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 		options.push_back_deep(options.arena(),
 		                       KeyValueRef(LiteralStringRef("shuffleShards"), LiteralStringRef("true")));
 		spec.options.push_back_deep(spec.options.arena(), options);
-		testSpecs.push_back(spec);
+		testSet.testSpecs.push_back(spec);
 	} else if (whatToRun == TEST_TYPE_UNIT_TESTS) {
 		TestSpec spec;
 		Standalone<VectorRef<KeyValueRef>> options;
@@ -1716,7 +1738,7 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 			options.push_back_deep(options.arena(), KeyValueRef(kv.first, kv.second));
 		}
 		spec.options.push_back_deep(spec.options.arena(), options);
-		testSpecs.push_back(spec);
+		testSet.testSpecs.push_back(spec);
 	} else {
 		std::ifstream ifs;
 		ifs.open(fileName.c_str(), std::ifstream::in);
@@ -1729,11 +1751,11 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 		}
 		enableClientInfoLogging(); // Enable Client Info logging by default for tester
 		if (boost::algorithm::ends_with(fileName, ".txt")) {
-			testSpecs = readTests(ifs);
+			testSet.testSpecs = readTests(ifs);
 		} else if (boost::algorithm::ends_with(fileName, ".toml")) {
 			// TOML is weird about opening the file as binary on windows, so we
 			// just let TOML re-open the file instead of using ifs.
-			testSpecs = readTOMLTests(fileName);
+			testSet = readTOMLTests(fileName);
 		} else {
 			TraceEvent(SevError, "TestHarnessFail")
 			    .detail("Reason", "unknown tests specification extension")
@@ -1743,6 +1765,7 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 		ifs.close();
 	}
 
+	knobProtectiveGroup = std::make_unique<KnobProtectiveGroup>(testSet.overrideKnobs);
 	Future<Void> tests;
 	if (at == TEST_HERE) {
 		auto db = makeReference<AsyncVar<ServerDBInfo>>();
