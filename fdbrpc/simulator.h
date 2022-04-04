@@ -21,6 +21,7 @@
 #ifndef FLOW_SIMULATOR_H
 #define FLOW_SIMULATOR_H
 #include "flow/ProtocolVersion.h"
+#include <algorithm>
 #include <string>
 #pragma once
 
@@ -87,6 +88,8 @@ public:
 
 		ProtocolVersion protocolVersion;
 
+		std::vector<ProcessInfo*> childs;
+
 		ProcessInfo(const char* name,
 		            LocalityData locality,
 		            ProcessClass startingClass,
@@ -117,6 +120,7 @@ public:
 			   << " fault_injection_p2:" << fault_injection_p2;
 			return ss.str();
 		}
+		std::vector<ProcessInfo*> const& getChilds() const { return childs; }
 
 		// Return true if the class type is suitable for stateful roles, such as tLog and StorageServer.
 		bool isAvailableClass() const {
@@ -202,7 +206,30 @@ public:
 		std::set<std::string> closingFiles;
 		Optional<Standalone<StringRef>> machineId;
 
-		MachineInfo() : machineProcess(nullptr) {}
+		const uint16_t remotePortStart;
+		std::vector<uint16_t> usedRemotePorts;
+
+		MachineInfo() : machineProcess(nullptr), remotePortStart(1000) {}
+
+		short getRandomPort() {
+			for (uint16_t i = remotePortStart; i < 60000; i++) {
+				if (std::find(usedRemotePorts.begin(), usedRemotePorts.end(), i) == usedRemotePorts.end()) {
+					TraceEvent(SevDebug, "RandomPortOpened").detail("PortNum", i);
+					usedRemotePorts.push_back(i);
+					return i;
+				}
+			}
+			UNREACHABLE();
+		}
+
+		void removeRemotePort(uint16_t port) {
+			if (port < remotePortStart)
+				return;
+			auto pos = std::find(usedRemotePorts.begin(), usedRemotePorts.end(), port);
+			if (pos != usedRemotePorts.end()) {
+				usedRemotePorts.erase(pos);
+			}
+		}
 	};
 
 	ProcessInfo* getProcess(Endpoint const& endpoint) { return getProcessByAddress(endpoint.getPrimaryAddress()); }

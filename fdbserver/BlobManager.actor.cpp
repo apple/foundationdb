@@ -34,6 +34,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbserver/BlobManagerInterface.h"
 #include "fdbserver/Knobs.h"
+#include "fdbserver/BlobGranuleValidation.actor.h"
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/WaitFailure.h"
@@ -195,10 +196,11 @@ struct RangeAssignment {
 };
 
 // SOMEDAY: track worker's reads/writes eventually
-struct BlobWorkerStats {
+// FIXME: namespace?
+struct BlobWorkerInfo {
 	int numGranulesAssigned;
 
-	BlobWorkerStats(int numGranulesAssigned = 0) : numGranulesAssigned(numGranulesAssigned) {}
+	BlobWorkerInfo(int numGranulesAssigned = 0) : numGranulesAssigned(numGranulesAssigned) {}
 };
 
 struct SplitEvaluation {
@@ -218,12 +220,17 @@ struct BlobManagerStats {
 
 	Counter granuleSplits;
 	Counter granuleWriteHotSplits;
+	Counter ccGranulesChecked;
+	Counter ccRowsChecked;
+	Counter ccBytesChecked;
+	Counter ccMismatches;
 	Future<Void> logger;
 
 	// Current stats maintained for a given blob worker process
 	explicit BlobManagerStats(UID id, double interval, std::unordered_map<UID, BlobWorkerInterface>* workers)
 	  : cc("BlobManagerStats", id.toString()), granuleSplits("GranuleSplits", cc),
-	    granuleWriteHotSplits("GranuleWriteHotSplits", cc) {
+	    granuleWriteHotSplits("GranuleWriteHotSplits", cc), ccGranulesChecked("CCGranulesChecked", cc),
+	    ccRowsChecked("CCRowsChecked", cc), ccBytesChecked("CCBytesChecked", cc), ccMismatches("CCMismatches", cc) {
 		specialCounter(cc, "WorkerCount", [workers]() { return workers->size(); });
 		logger = traceCounters("BlobManagerMetrics", id, interval, &cc, "BlobManagerMetrics");
 	}
@@ -241,7 +248,7 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 	Reference<BackupContainerFileSystem> bstore;
 
 	std::unordered_map<UID, BlobWorkerInterface> workersById;
-	std::unordered_map<UID, BlobWorkerStats> workerStats; // mapping between workerID -> workerStats
+	std::unordered_map<UID, BlobWorkerInfo> workerStats; // mapping between workerID -> workerStats
 	std::unordered_set<NetworkAddress> workerAddresses;
 	std::unordered_set<UID> deadWorkers;
 	KeyRangeMap<UID> workerAssignments;
@@ -269,11 +276,25 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 	  : id(id), db(db), dcId(dcId), stats(id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &workersById),
 	    knownBlobRanges(false, normalKeys.end), restartRecruiting(SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY),
 	    recruitingStream(0) {}
+
+	// only initialize blob store if actually needed
+	void initBStore() {
+		if (!bstore.isValid()) {
+			if (BM_DEBUG) {
+				fmt::print("BM {} constructing backup container from {}\n", epoch, SERVER_KNOBS->BG_URL.c_str());
+			}
+			bstore = BackupContainerFileSystem::openContainerFS(SERVER_KNOBS->BG_URL, {}, {});
+			if (BM_DEBUG) {
+				fmt::print("BM {} constructed backup container\n", epoch);
+			}
+		}
+	}
 };
 
 ACTOR Future<Standalone<VectorRef<KeyRef>>> splitRange(Reference<BlobManagerData> bmData,
                                                        KeyRange range,
-                                                       bool writeHot) {
+                                                       bool writeHot,
+                                                       bool initialSplit) {
 	try {
 		if (BM_DEBUG) {
 			fmt::print("Splitting new range [{0} - {1}): {2}\n",
@@ -290,8 +311,24 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitRange(Reference<BlobManagerData
 			           estimated.bytes);
 		}
 
+		int64_t splitThreshold = SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES;
+		if (!initialSplit) {
+			// If we have X MB target granule size, we want to do the initial split to split up into X MB chunks.
+			// However, if we already have a granule that we are evaluating for split, if we split it as soon as it is
+			// larger than X MB, we will end up with 2 X/2 MB granules.
+			// To ensure an average size of X MB, we split granules at 4/3*X, so that they range between 2/3*X and
+			// 4/3*X, averaging X
+			splitThreshold = (splitThreshold * 4) / 3;
+		}
+		// if write-hot, we want to be able to split smaller, but not infinitely. Allow write-hot granules to be 3x
+		// smaller
+		// TODO knob?
+		// TODO: re-evaluate after we have granule merging?
+		if (writeHot) {
+			splitThreshold /= 3;
+		}
 		TEST(writeHot); // Change feed write hot split
-		if (estimated.bytes > SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES || writeHot) {
+		if (estimated.bytes > splitThreshold) {
 			// only split on bytes and write rate
 			state StorageMetrics splitMetrics;
 			splitMetrics.bytes = SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES;
@@ -325,6 +362,7 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitRange(Reference<BlobManagerData
 			ASSERT(keys.back() == range.end);
 			return keys;
 		} else {
+			TEST(writeHot); // Not splitting write-hot because granules would be too small
 			if (BM_DEBUG) {
 				printf("Not splitting range\n");
 			}
@@ -791,7 +829,7 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 				// Divide new ranges up into equal chunks by using SS byte sample
 				for (KeyRangeRef range : rangesToAdd) {
 					TraceEvent("ClientBlobRangeAdded", bmData->id).detail("Range", range);
-					splitFutures.push_back(splitRange(bmData, range, false));
+					splitFutures.push_back(splitRange(bmData, range, false, true));
 				}
 
 				for (auto f : splitFutures) {
@@ -892,7 +930,7 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 	state Standalone<VectorRef<KeyRef>> newRanges;
 
 	// first get ranges to split
-	Standalone<VectorRef<KeyRef>> _newRanges = wait(splitRange(bmData, granuleRange, writeHot));
+	Standalone<VectorRef<KeyRef>> _newRanges = wait(splitRange(bmData, granuleRange, writeHot, false));
 	newRanges = _newRanges;
 
 	ASSERT(newRanges.size() >= 2);
@@ -1501,7 +1539,7 @@ ACTOR Future<Void> checkBlobWorkerList(Reference<BlobManagerData> bmData, Promis
 					    worker.locality.dcId() == bmData->dcId) {
 						bmData->workerAddresses.insert(worker.stableAddress());
 						bmData->workersById[worker.id()] = worker;
-						bmData->workerStats[worker.id()] = BlobWorkerStats();
+						bmData->workerStats[worker.id()] = BlobWorkerInfo();
 						bmData->addActor.send(monitorBlobWorker(bmData, worker));
 						foundAnyNew = true;
 					} else if (!bmData->workersById.count(worker.id())) {
@@ -2004,7 +2042,7 @@ ACTOR Future<Void> initializeBlobWorker(Reference<BlobManagerData> self, Recruit
 				if (!self->workerAddresses.count(bwi.stableAddress()) && bwi.locality.dcId() == self->dcId) {
 					self->workerAddresses.insert(bwi.stableAddress());
 					self->workersById[bwi.id()] = bwi;
-					self->workerStats[bwi.id()] = BlobWorkerStats();
+					self->workerStats[bwi.id()] = BlobWorkerInfo();
 					self->addActor.send(monitorBlobWorker(self, bwi));
 				} else if (!self->workersById.count(bwi.id())) {
 					self->addActor.send(killBlobWorker(self, bwi, false));
@@ -2536,14 +2574,7 @@ ACTOR Future<Void> pruneRange(Reference<BlobManagerData> self, KeyRangeRef range
  * case that the timer is up before any new prune intents arrive).
  */
 ACTOR Future<Void> monitorPruneKeys(Reference<BlobManagerData> self) {
-	// setup bstore
-	if (BM_DEBUG) {
-		fmt::print("BM constructing backup container from {}\n", SERVER_KNOBS->BG_URL.c_str());
-	}
-	self->bstore = BackupContainerFileSystem::openContainerFS(SERVER_KNOBS->BG_URL, {}, {});
-	if (BM_DEBUG) {
-		printf("BM constructed backup container\n");
-	}
+	self->initBStore();
 
 	loop {
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->db);
@@ -2712,6 +2743,73 @@ static void blobManagerExclusionSafetyCheck(Reference<BlobManagerData> self,
 	req.reply.send(reply);
 }
 
+// FIXME: could eventually make this more thorough by storing some state in the DB or something
+// FIXME: simpler solution could be to shuffle ranges
+ACTOR Future<Void> bgConsistencyCheck(Reference<BlobManagerData> bmData) {
+
+	state Reference<IRateControl> rateLimiter =
+	    Reference<IRateControl>(new SpeedLimit(SERVER_KNOBS->BG_CONSISTENCY_CHECK_TARGET_SPEED_KB * 1024, 1));
+	bmData->initBStore();
+
+	if (BM_DEBUG) {
+		fmt::print("BGCC starting\n");
+	}
+
+	loop {
+		if (g_network->isSimulated() && g_simulator.speedUpSimulation) {
+			if (BM_DEBUG) {
+				printf("BGCC stopping\n");
+			}
+			return Void();
+		}
+
+		if (bmData->workersById.size() >= 1) {
+			int tries = 10;
+			state KeyRange range;
+			while (tries > 0) {
+				auto randomRange = bmData->workerAssignments.randomRange();
+				if (randomRange.value() != UID()) {
+					range = randomRange.range();
+					break;
+				}
+				tries--;
+			}
+
+			if (tries == 0) {
+				if (BM_DEBUG) {
+					printf("BGCC couldn't find random range to check, skipping\n");
+				}
+				wait(rateLimiter->getAllowance(SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES));
+			} else {
+				state std::pair<RangeResult, Version> fdbResult = wait(readFromFDB(bmData->db, range));
+
+				std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> blobResult =
+				    wait(readFromBlob(bmData->db, bmData->bstore, range, 0, fdbResult.second));
+
+				if (!compareFDBAndBlob(fdbResult.first, blobResult, range, fdbResult.second, BM_DEBUG)) {
+					++bmData->stats.ccMismatches;
+				}
+
+				int64_t bytesRead = fdbResult.first.expectedSize();
+
+				++bmData->stats.ccGranulesChecked;
+				bmData->stats.ccRowsChecked += fdbResult.first.size();
+				bmData->stats.ccBytesChecked += bytesRead;
+
+				// clear fdb result to release memory since it is a state variable
+				fdbResult = std::pair(RangeResult(), 0);
+
+				wait(rateLimiter->getAllowance(bytesRead));
+			}
+		} else {
+			if (BM_DEBUG) {
+				fmt::print("BGCC found no workers, skipping\n", bmData->workerAssignments.size());
+			}
+			wait(delay(60.0));
+		}
+	}
+}
+
 // Simulation validation that multiple blob managers aren't started with the same epoch
 static std::map<int64_t, UID> managerEpochsSeen;
 
@@ -2758,6 +2856,9 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 	self->addActor.send(doLockChecks(self));
 	self->addActor.send(monitorClientRanges(self));
 	self->addActor.send(monitorPruneKeys(self));
+	if (SERVER_KNOBS->BG_CONSISTENCY_CHECK_ENABLED) {
+		self->addActor.send(bgConsistencyCheck(self));
+	}
 
 	if (BUGGIFY) {
 		self->addActor.send(chaosRangeMover(self));

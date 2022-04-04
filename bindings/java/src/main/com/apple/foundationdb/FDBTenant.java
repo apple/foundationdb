@@ -1,9 +1,9 @@
 /*
- * FDBDatabase.java
+ * FDBTenant.java
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,27 +28,23 @@ import java.util.function.Function;
 
 import com.apple.foundationdb.async.AsyncUtil;
 import com.apple.foundationdb.tuple.ByteArrayUtil;
-import com.apple.foundationdb.tuple.Tuple;
 
-class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsumer {
-	private DatabaseOptions options;
+class FDBTenant extends NativeObjectWrapper implements Tenant {
+	private final Database database;
+	private final byte[] name;
 	private final Executor executor;
 	private final EventKeeper eventKeeper;
 
-	protected FDBDatabase(long cPtr, Executor executor) {
-		this(cPtr, executor, null);
+	protected FDBTenant(long cPtr, Database database, byte[] name, Executor executor) {
+		this(cPtr, database, name, executor, null);
 	}
 
-	protected FDBDatabase(long cPtr, Executor executor, EventKeeper eventKeeper) {
+	protected FDBTenant(long cPtr, Database database, byte[] name, Executor executor, EventKeeper eventKeeper) {
 		super(cPtr);
+		this.database = database;
+		this.name = name;
 		this.executor = executor;
-		this.options = new DatabaseOptions(this);
 		this.eventKeeper = eventKeeper;
-	}
-
-	@Override
-	public DatabaseOptions options() {
-		return options;
 	}
 
 	@Override
@@ -110,50 +106,12 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 	@Override
 	protected void finalize() throws Throwable {
 		try {
-			checkUnclosed("Database");
+			checkUnclosed("Tenant");
 			close();
 		}
 		finally {
 			super.finalize();
 		}
-	}
-
-	@Override
-	public Tenant openTenant(byte[] tenantName, Executor e) {
-		return openTenant(tenantName, e, eventKeeper);
-	}
-
-	@Override
-	public Tenant openTenant(Tuple tenantName) {
-		return openTenant(tenantName.pack());
-	}
-
-	@Override
-	public Tenant openTenant(Tuple tenantName, Executor e) {
-		return openTenant(tenantName.pack(), e);
-	}
-
-	@Override
-	public Tenant openTenant(byte[] tenantName, Executor e, EventKeeper eventKeeper) {
-		pointerReadLock.lock();
-		Tenant tenant = null;
-		try {
-			tenant = new FDBTenant(Database_openTenant(getPtr(), tenantName), this, tenantName, e, eventKeeper);
-			return tenant;
-		} catch (RuntimeException err) {
-			if (tenant != null) {
-				tenant.close();
-			}
-
-			throw err;
-		} finally {
-			pointerReadLock.unlock();
-		}
-	}
-
-	@Override
-	public Tenant openTenant(Tuple tenantName, Executor e, EventKeeper eventKeeper) {
-		return openTenant(tenantName.pack(), e, eventKeeper);
 	}
 
 	@Override
@@ -166,7 +124,7 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 		pointerReadLock.lock();
 		Transaction tr = null;
 		try {
-			tr = new FDBTransaction(Database_createTransaction(getPtr()), this, e, eventKeeper);
+			tr = new FDBTransaction(Tenant_createTransaction(getPtr()), database, e, eventKeeper);
 			tr.options().setUsedDuringCommitProtectionDisable();
 			return tr;
 		} catch (RuntimeException err) {
@@ -181,23 +139,8 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 	}
 
 	@Override
-	public void setOption(int code, byte[] value) {
-		pointerReadLock.lock();
-		try {
-			Database_setOption(getPtr(), code, value);
-		} finally {
-			pointerReadLock.unlock();
-		}
-	}
-
-	@Override
-	public double getMainThreadBusyness() {
-		pointerReadLock.lock();
-		try {
-			return Database_getMainThreadBusyness(getPtr());
-		} finally {
-			pointerReadLock.unlock();
-		}
+	public byte[] getName() {
+		return name;
 	}
 
 	@Override
@@ -207,12 +150,9 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 
 	@Override
 	protected void closeInternal(long cPtr) {
-		Database_dispose(cPtr);
+		Tenant_dispose(cPtr);
 	}
 
-	private native long Database_openTenant(long cPtr, byte[] tenantName);
-	private native long Database_createTransaction(long cPtr);
-	private native void Database_dispose(long cPtr);
-	private native void Database_setOption(long cPtr, int code, byte[] value) throws FDBException;
-	private native double Database_getMainThreadBusyness(long cPtr);
+	private native long Tenant_createTransaction(long cPtr);
+	private native void Tenant_dispose(long cPtr);
 }

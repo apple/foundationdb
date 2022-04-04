@@ -24,37 +24,37 @@
 const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
 {
    "cluster":{
-       "storage_wiggler": {
-		 "wiggle_server_ids":["0ccb4e0feddb55"],
-		 "wiggle_server_addresses": ["127.0.0.1"],
+      "storage_wiggler": {
+         "wiggle_server_ids":["0ccb4e0feddb55"],
+         "wiggle_server_addresses": ["127.0.0.1"],
          "primary": {
-          	"last_round_start_datetime": "Wed Feb  4 09:36:37 2022 +0000",
-			"last_round_start_timestamp": 63811229797,
-			"last_round_finish_datetime": "Thu Jan  1 00:00:00 1970 +0000",
-			"last_round_finish_timestamp": 0,
-			"smoothed_round_seconds": 1,
-			"finished_round": 1,
-			"last_wiggle_start_datetime": "Wed Feb  4 09:36:37 2022 +0000",
-			"last_wiggle_start_timestamp": 63811229797,
-			"last_wiggle_finish_datetime": "Thu Jan  1 00:00:00 1970 +0000",
-			"last_wiggle_finish_timestamp": 0,
-			"smoothed_wiggle_seconds": 1,
-			"finished_wiggle": 1
-          },
-          "remote": {
-          	"last_round_start_datetime": "Wed Feb  4 09:36:37 2022 +0000",
-			"last_round_start_timestamp": 63811229797,
-			"last_round_finish_datetime": "Thu Jan  1 00:00:00 1970 +0000",
-			"last_round_finish_timestamp": 0,
-			"smoothed_round_seconds": 1,
-			"finished_round": 1,
-			"last_wiggle_start_datetime": "Wed Feb  4 09:36:37 2022 +0000",
-			"last_wiggle_start_timestamp": 63811229797,
-			"last_wiggle_finish_datetime": "Thu Jan  1 00:00:00 1970 +0000",
-			"last_wiggle_finish_timestamp": 0,
-			"smoothed_wiggle_seconds": 1,
-			"finished_wiggle": 1
-          }
+            "last_round_start_datetime": "2022-04-02 00:05:05.123 +0000",
+            "last_round_start_timestamp": 1648857905.123,
+            "last_round_finish_datetime": "1970-01-01 00:00:00.000 +0000",
+            "last_round_finish_timestamp": 0,
+            "smoothed_round_seconds": 1,
+            "finished_round": 1,
+            "last_wiggle_start_datetime": "2022-04-02 00:05:05.123 +0000",
+            "last_wiggle_start_timestamp": 1648857905.123,
+            "last_wiggle_finish_datetime": "1970-01-01 00:00:00.000 +0000",
+            "last_wiggle_finish_timestamp": 0,
+            "smoothed_wiggle_seconds": 1,
+            "finished_wiggle": 1
+         },
+         "remote": {
+            "last_round_start_datetime": "2022-04-02 00:05:05.123 +0000",
+            "last_round_start_timestamp": 1648857905.123,
+            "last_round_finish_datetime": "1970-01-01 00:00:00.000 +0000",
+            "last_round_finish_timestamp": 0,
+            "smoothed_round_seconds": 1,
+            "finished_round": 1,
+            "last_wiggle_start_datetime": "2022-04-02 00:05:05.123 +0000",
+            "last_wiggle_start_timestamp": 1648857905.123,
+            "last_wiggle_finish_datetime": "1970-01-01 00:00:00.000 +0000",
+            "last_wiggle_finish_timestamp": 0,
+            "smoothed_wiggle_seconds": 1,
+            "finished_wiggle": 1
+         }
       },
       "layers":{
          "_valid":true,
@@ -136,7 +136,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                      ]
                   },
                   "storage_metadata":{
-                     "created_time_datetime":"Thu Jan  1 00:00:00 1970 +0000",
+                     "created_time_datetime":"1970-01-01 00:00:00.000 +0000",
                      "created_time_timestamp": 0
                   },
                   "data_version":12341234,
