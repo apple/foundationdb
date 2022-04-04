@@ -28,6 +28,7 @@ Bindings
 
 Other Changes
 -------------
+* Changed ``memory`` option to limit resident memory instead of virtual memory. Added a new ``memory_vsize`` option if limiting virtual memory is desired. `(PR #6719) <https://github.com/apple/foundationdb/pull/6719>`_
 
 Earlier release notes
 ---------------------
