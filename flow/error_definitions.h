@@ -88,6 +88,7 @@ ERROR( blob_granule_transaction_too_old, 1064, "Read version is older than blob 
 ERROR( blob_manager_replaced, 1065, "This blob manager has been replaced." )
 ERROR( change_feed_popped, 1066, "Tried to read a version older than what has been popped from the change feed" )
 ERROR( remote_kvs_cancelled, 1067, "The remote key-value store is cancelled" )
+ERROR( stale_version_vector, 1068, "Client version vector is stale" )
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )

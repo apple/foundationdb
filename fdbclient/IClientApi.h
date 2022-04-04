@@ -28,6 +28,8 @@
 
 #include "flow/ThreadHelper.actor.h"
 
+struct VersionVector;
+
 // An interface that represents a transaction created by a client
 class ITransaction {
 public:
@@ -93,6 +95,11 @@ public:
 
 	virtual ThreadFuture<Void> commit() = 0;
 	virtual Version getCommittedVersion() = 0;
+	// @todo This API and the "getSpanID()" API may help with debugging simulation
+	// test failures. (These APIs are not currently invoked anywhere.) Remove them
+	// later if they are not really needed.
+	virtual VersionVector getVersionVector() = 0;
+	virtual UID getSpanID() = 0;
 	virtual ThreadFuture<int64_t> getApproximateSize() = 0;
 
 	virtual void setOption(FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) = 0;
