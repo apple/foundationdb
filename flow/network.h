@@ -701,7 +701,7 @@ public:
 class DNSCache {
 public:
 	DNSCache() = default;
-	explicit DNSCache(const std::unordered_map<std::string, std::vector<NetworkAddress>>& dnsCache)
+	explicit DNSCache(const std::map<std::string, std::vector<NetworkAddress>>& dnsCache)
 	  : hostnameToAddresses(dnsCache) {}
 
 	Optional<std::vector<NetworkAddress>> find(const std::string& host, const std::string& service);
@@ -715,7 +715,7 @@ public:
 	static DNSCache parseFromString(const std::string& s);
 
 private:
-	std::unordered_map<std::string, std::vector<NetworkAddress>> hostnameToAddresses;
+	std::map<std::string, std::vector<NetworkAddress>> hostnameToAddresses;
 };
 
 class INetworkConnections {
