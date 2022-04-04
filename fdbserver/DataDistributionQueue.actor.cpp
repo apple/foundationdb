@@ -1722,7 +1722,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
                                          Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
                                          MoveKeysLock lock,
                                          PromiseStream<Promise<int64_t>> getAverageShardBytes,
-                                         PromiseStream<Promise<int>> getUnhealthyRelocationCount,
+                                         FutureStream<Promise<int>> getUnhealthyRelocationCount,
                                          FutureStream<Promise<Optional<int>>> getMinReplicasRemaining,
                                          UID distributorId,
                                          int teamSize,
@@ -1854,9 +1854,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 				when(Promise<Optional<int>> r = waitNext(getMinReplicasRemaining)) {
 					r.send(self.getMinReplicasRemaining());
 				}
-				when(Promise<int> r = waitNext(getUnhealthyRelocationCount.getFuture())) {
-					r.send(self.unhealthyRelocations);
-				}
+				when(Promise<int> r = waitNext(getUnhealthyRelocationCount)) { r.send(self.unhealthyRelocations); }
 				when(wait(self.error.getFuture())) {} // Propagate errors from dataDistributionRelocator
 				when(wait(waitForAll(balancingFutures))) {}
 			}
