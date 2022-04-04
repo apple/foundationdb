@@ -220,7 +220,7 @@ std::string DNSCache::toString() {
 }
 
 DNSCache DNSCache::parseFromString(const std::string& s) {
-	std::map<std::string, std::vector<NetworkAddress>> dnsCache;
+	std::unordered_map<std::string, std::vector<NetworkAddress>> dnsCache;
 
 	for (int p = 0; p < s.length();) {
 		int pSemiColumn = s.find_first_of(';', p);
