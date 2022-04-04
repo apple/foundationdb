@@ -454,6 +454,7 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 		}
 		state Future<Void> connectionCheckingDelay = delay(FLOW_KNOBS->FAILURE_DETECTION_DELAY);
 		state Future<ErrorOr<Void>> storeError = errorOr(self->interf.getError.getReply(IKVSGetErrorRequest{}));
+		state NetworkAddress childAddr = self->interf.getError.getEndpoint().getPrimaryAddress();
 		loop choose {
 			when(ErrorOr<Void> e = wait(storeError)) {
 				TraceEvent(SevDebug, "RemoteIKVSGetError")
@@ -474,9 +475,7 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 			when(wait(connectionCheckingDelay)) {
 				// for the corner case where the child process stuck and waitpid also does not give update on it
 				// In this scenario, we need to manually reboot the storage engine process
-				if (IFailureMonitor::failureMonitor()
-				        .getState(self->interf.getError.getEndpoint().getPrimaryAddress())
-				        .isFailed()) {
+				if (IFailureMonitor::failureMonitor().getState(childAddr).isFailed()) {
 					TraceEvent(SevError, "RemoteKVStoreConnectionStuck").log();
 					throw please_reboot_remote_kv_store(); // this will reboot the worker
 				}
