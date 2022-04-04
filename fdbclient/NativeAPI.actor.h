@@ -459,6 +459,10 @@ public:
 	std::vector<Reference<Watch>> watches;
 	Span span;
 
+	// used in template functions as returned Future type
+	template <typename Type>
+	using FutureT = Future<Type>;
+
 private:
 	Future<Version> getReadVersion(uint32_t flags);
 
