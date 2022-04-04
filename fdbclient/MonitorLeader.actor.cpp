@@ -508,11 +508,14 @@ std::string ClusterConnectionString::toString() const {
 }
 
 ClientCoordinators::ClientCoordinators(Reference<IClusterConnectionRecord> ccr) : ccr(ccr) {
-	ASSERT(ccr->connectionStringStatus() == ClusterConnectionString::RESOLVED);
 	ClusterConnectionString cs = ccr->getConnectionString();
-	for (auto s = cs.coordinators().begin(); s != cs.coordinators().end(); ++s)
-		clientLeaderServers.push_back(ClientLeaderRegInterface(*s));
 	clusterKey = cs.clusterKey();
+	for (auto h : cs.hostnames) {
+		clientLeaderServers.push_back(ClientLeaderRegInterface(h));
+	}
+	for (auto s : cs.coordinators()) {
+		clientLeaderServers.push_back(ClientLeaderRegInterface(s));
+	}
 }
 
 ClientCoordinators::ClientCoordinators(Key clusterKey, std::vector<NetworkAddress> coordinators)
