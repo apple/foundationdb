@@ -23,6 +23,7 @@
 #include "flow/Error.h"
 #include "flow/FastAlloc.h"
 #include "flow/ProtocolVersion.h"
+#include <cstddef>
 #include <stdint.h>
 #pragma once
 
@@ -127,6 +128,76 @@ public:
 	virtual Future<EncryptionKey> getByRange(const KeyRef& begin, const KeyRef& end) = 0;
 };
 
+// This is a hacky way to attach an additional object of an arbitrary type at runtime to another object.
+// It stores an arbitrary void pointer and a void pointer function to call when the ArbitraryObject
+// is destroyed.
+// It has helper operator= methods for storing heap-allocated T's or Reference<T>'s in into it via
+//   x = thing;
+// Examples:
+//   ArbitraryObject x;
+//   x.set(new Widget());  // x owns the new object
+//   x.set(Reference<SomeClass>(new SomeClass());    // x holds a reference now too
+//   x.setReference(new SomeReferenceCountedType()); //
+struct ArbitraryObject {
+	ArbitraryObject() : ptr(nullptr), onDestruct(nullptr) {}
+	ArbitraryObject(const ArbitraryObject&) = delete;
+
+	~ArbitraryObject() { destructOnly(); }
+
+	bool valid() const { return ptr != nullptr; }
+
+	template <typename T>
+	void operator=(T* p) {
+		destructOnly();
+		ptr = p;
+		onDestruct = [](void* ptr) { delete (T*)ptr; };
+	}
+
+	template <typename T>
+	void operator=(Reference<T>& r) {
+		destructOnly();
+		ptr = r.getPtr();
+		r.getPtr()->addref();
+		onDestruct = [](void* ptr) { ((T*)ptr)->delref(); };
+	}
+
+	template <typename T>
+	void operator=(Reference<T>&& r) {
+		destructOnly();
+		ptr = r.extractPtr();
+		onDestruct = [](void* ptr) { ((T*)ptr)->delref(); };
+	}
+
+	template <typename T>
+	T* getPtr() {
+		return (T*)ptr;
+	}
+
+	template <typename T>
+	Reference<T> getReference() {
+		return Reference<T>::addRef((T*)ptr);
+	}
+
+	void reset() {
+		destructOnly();
+		ptr = nullptr;
+		onDestruct = nullptr;
+	}
+
+	// ptr can be set to any arbitrary thing.  If it is not null at destruct time then
+	// onDestruct(ptr) will be called if onDestruct is not null.
+	void* ptr = nullptr;
+	void (*onDestruct)(void*) = nullptr;
+
+private:
+	// Call onDestruct(ptr) if needed but don't reset any state
+	void destructOnly() {
+		if (ptr != nullptr && onDestruct != nullptr) {
+			onDestruct(ptr);
+		}
+	}
+};
+
 // ArenaPage represents a data page meant to be stored on disk, located in a block of
 // 4k-aligned memory held by an Arena
 //
@@ -151,8 +222,7 @@ public:
 	// for new pages as part of downgrade support.
 	static constexpr uint8_t HEADER_WRITE_VERSION = 1;
 
-	ArenaPage(int logicalSize, int bufferSize)
-	  : logicalSize(logicalSize), bufferSize(bufferSize), pPayload(nullptr), userData(nullptr) {
+	ArenaPage(int logicalSize, int bufferSize) : logicalSize(logicalSize), bufferSize(bufferSize), pPayload(nullptr) {
 		if (bufferSize > 0) {
 			buffer = (uint8_t*)arena.allocate4kAlignedBuffer(bufferSize);
 
@@ -163,11 +233,7 @@ public:
 		}
 	};
 
-	~ArenaPage() {
-		if (userData != nullptr && userDataDestructor != nullptr) {
-			userDataDestructor(userData);
-		}
-	}
+	~ArenaPage() {}
 
 	// Before using these, either init() or postReadHeader and postReadPayload() must be called
 	const uint8_t* data() const { return pPayload; }
@@ -347,7 +413,8 @@ public:
 	// Get the logical page buffer as a StringRef
 	Standalone<StringRef> asStringRef() const { return Standalone<StringRef>(StringRef(buffer, logicalSize)); }
 
-	// Get an ArenaPage which is a copy of this page, in its own Arena
+	// Get a new ArenaPage that contains a copy of this page's data.
+	// extra is not copied to the returned page
 	Reference<ArenaPage> clone() const {
 		ArenaPage* p = new ArenaPage(logicalSize, bufferSize);
 		memcpy(p->buffer, buffer, logicalSize);
@@ -509,9 +576,7 @@ public:
 	// Used by encodings that do encryption
 	EncryptionKey encryptionKey;
 
-	// A metadata object that can be attached to the page and will be deleted with the page
-	mutable void* userData;
-	mutable void (*userDataDestructor)(void*);
+	mutable ArbitraryObject extra;
 };
 
 class IPagerSnapshot {
@@ -536,6 +601,8 @@ public:
 
 	virtual void addref() = 0;
 	virtual void delref() = 0;
+
+	ArbitraryObject extra;
 };
 
 // This API is probably too customized to the behavior of DWALPager and probably needs some changes to be more generic.

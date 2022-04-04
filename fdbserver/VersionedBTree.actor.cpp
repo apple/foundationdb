@@ -6050,7 +6050,7 @@ private:
 	inline BTreePage::BinaryTree::Cursor getCursor(const ArenaPage* page,
 	                                               const RedwoodRecordRef& lowerBound,
 	                                               const RedwoodRecordRef& upperBound) {
-		if (page->userData == nullptr) {
+		if (!page->extra.valid()) {
 			debug_printf("Creating DecodeCache for ptr=%p lower=%s upper=%s %s\n",
 			             page->data(),
 			             lowerBound.toString(false).c_str(),
@@ -6063,24 +6063,21 @@ private:
 			                            upperBound)
 			                 .c_str());
 
-			BTreePage::BinaryTree::DecodeCache* cache =
-			    new BTreePage::BinaryTree::DecodeCache(lowerBound, upperBound, m_pDecodeCacheMemory);
-
-			page->userData = cache;
-			page->userDataDestructor = [](void* cache) { ((BTreePage::BinaryTree::DecodeCache*)cache)->delref(); };
+			page->extra =
+			    makeReference<BTreePage::BinaryTree::DecodeCache>(lowerBound, upperBound, m_pDecodeCacheMemory);
 		}
 
-		return BTreePage::BinaryTree::Cursor((BTreePage::BinaryTree::DecodeCache*)page->userData,
+		return BTreePage::BinaryTree::Cursor(page->extra.getPtr<BTreePage::BinaryTree::DecodeCache>(),
 		                                     ((BTreePage*)page->mutateData())->tree());
 	}
 
 	// Get cursor into a BTree node from a child link
 	inline BTreePage::BinaryTree::Cursor getCursor(const ArenaPage* page, const BTreePage::BinaryTree::Cursor& link) {
-		if (page->userData == nullptr) {
+		if (!page->extra.valid()) {
 			return getCursor(page, link.get(), link.next().getOrUpperBound());
 		}
 
-		return BTreePage::BinaryTree::Cursor((BTreePage::BinaryTree::DecodeCache*)page->userData,
+		return BTreePage::BinaryTree::Cursor(page->extra.getPtr<BTreePage::BinaryTree::DecodeCache>(),
 		                                     ((BTreePage*)page->mutateData())->tree());
 	}
 
@@ -6122,7 +6119,7 @@ private:
 
 		if (REDWOOD_DEBUG) {
 			const BTreePage* btPage = (const BTreePage*)page->mutateData();
-			BTreePage::BinaryTree::DecodeCache* cache = (BTreePage::BinaryTree::DecodeCache*)page->userData;
+			BTreePage::BinaryTree::DecodeCache* cache = page->extra.getPtr<BTreePage::BinaryTree::DecodeCache>();
 
 			debug_printf_always(
 			    "updateBTreePage(%s, %s) start, page:\n%s\n",
@@ -6172,11 +6169,8 @@ private:
 	static Reference<ArenaPage> clonePageForUpdate(Reference<const ArenaPage> page) {
 		Reference<ArenaPage> newPage = page->clone();
 
-		if (newPage->userData != nullptr) {
-			BTreePage::BinaryTree::DecodeCache* cache = (BTreePage::BinaryTree::DecodeCache*)page->userData;
-			cache->addref();
-			newPage->userData = cache;
-			newPage->userDataDestructor = page->userDataDestructor;
+		if (page->extra.valid()) {
+			newPage->extra = page->extra.getReference<BTreePage::BinaryTree::DecodeCache>();
 		}
 
 		debug_printf("cloneForUpdate(%p -> %p  size=%d\n", page->data(), newPage->data(), page->dataSize());
@@ -7653,15 +7647,21 @@ public:
 	Future<Void> initBTreeCursor(BTreeCursor* cursor, Version snapshotVersion, PagerEventReasons reason) {
 		Reference<IPagerSnapshot> snapshot = m_pager->getReadSnapshot(snapshotVersion);
 
-		// This is a ref because snapshot will continue to hold the metakey value memory
-		KeyRef m = snapshot->getMetaKey();
+		BTreeNodeLinkRef root;
+		// Parse the metakey just once to get the root pointer and store it as the extra object
+		if (!snapshot->extra.valid()) {
+			KeyRef m = snapshot->getMetaKey();
+			if (!m.empty()) {
+				BTreeCommitHeader h = ObjectReader::fromStringRef<VersionedBTree::BTreeCommitHeader>(m, Unversioned());
+				root = h.root;
+				// Copy the BTreeNodeLink but keep the same arena and BTreeNodeLinkRef
+				snapshot->extra = new BTreeNodeLink(h.root, h.root.arena());
+			}
+		} else {
+			root = *snapshot->extra.getPtr<BTreeNodeLink>();
+		}
 
-		return cursor->init(
-		    this,
-		    reason,
-		    snapshot,
-		    m.size() == 0 ? BTreeNodeLinkRef()
-		                  : ObjectReader::fromStringRef<VersionedBTree::BTreeCommitHeader>(m, Unversioned()).root);
+		return cursor->init(this, reason, snapshot, root);
 	}
 };
 
