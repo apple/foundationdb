@@ -80,7 +80,7 @@
 #include "fdbclient/SimpleIni.h"
 #include "fdbclient/versions.h"
 
-constexpr double RSS_CHECK_INTERVAL = 1.0; // seconds
+constexpr double RSS_CHECK_INTERVAL = 2.0; // seconds
 
 #ifdef __linux__
 typedef fd_set* fdb_fd_set;
@@ -574,9 +574,15 @@ public:
 			return;
 		}
 
-		const char* mem_rss = get_value_multi(ini, "memory-rss", ssection.c_str(), section.c_str(), "general", nullptr);
+		const char* mem_rss = get_value_multi(ini, "memory", ssection.c_str(), section.c_str(), "general", nullptr);
 		if (mem_rss) {
+#ifdef __linux__
 			memory_rss = parseWithSuffix(mem_rss, "MiB");
+#else
+			// While the memory check is not currently implemented on non-Linux by fdbmonitor, the "memory" option is
+			// still pass to fdbserver, which will crash itself if the limit is exceeded.
+			log_msg(SevWarn, "Memory monitoring by fdbmonitor is not supported by current system\n");
+#endif
 		}
 
 		std::stringstream ss(binary);
@@ -587,14 +593,14 @@ public:
 		const char* id_s = ssection.c_str() + strlen(section.c_str()) + 1;
 
 		for (auto i : keys) {
+			// For "memory" option, despite they are handled by fdbmonitor, we still pass it to fdbserver.
 			if (isParameterNameEqual(i.pItem, "command") || isParameterNameEqual(i.pItem, "restart-delay") ||
 			    isParameterNameEqual(i.pItem, "initial-restart-delay") ||
 			    isParameterNameEqual(i.pItem, "restart-backoff") ||
 			    isParameterNameEqual(i.pItem, "restart-delay-reset-interval") ||
 			    isParameterNameEqual(i.pItem, "disable-lifecycle-logging") ||
 			    isParameterNameEqual(i.pItem, "delete-envvars") ||
-			    isParameterNameEqual(i.pItem, "kill-on-configuration-change") ||
-			    isParameterNameEqual(i.pItem, "memory-rss")) {
+			    isParameterNameEqual(i.pItem, "kill-on-configuration-change")) {
 				continue;
 			}
 

@@ -560,6 +560,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( LOG_DIRECTORY,                                          ".");  // Will be set to the command line flag.
 	init( CONN_FILE,                                               "");  // Will be set to the command line flag.
 	init( SERVER_MEM_LIMIT,                                8LL << 30 );
+	init( MEMORY_USAGE_CHECK_INTERVAL,                           1.0 );
 	init( SYSTEM_MONITOR_FREQUENCY,                              5.0 );
 
 	//Ratekeeper
