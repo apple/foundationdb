@@ -1925,20 +1925,16 @@ void getLocalTime(const time_t* timep, struct tm* result) {
 #endif
 }
 
-// Outputs a GMT time string for the given epoch seconds, which looks like
-// 2013-04-28 20:57:01.000 +0000
-std::string epochsToGMTString(double epochs) {
-	auto time = (time_t)epochs;
+std::string timerIntToGmt(uint64_t timestamp) {
+	auto time = (time_t)(timestamp / 1e9); // convert to second, see timer_int() implementation
+	return getGmtTimeStr(&time);
+}
 
+std::string getGmtTimeStr(const time_t* time) {
 	char buff[50];
-	auto size = strftime(buff, 50, "%Y-%m-%d %H:%M:%S", gmtime(&time));
-	std::string timeString = std::string(std::begin(buff), std::begin(buff) + size);
-
-	// Add fractional seconds and GMT timezone.
-	double integerPart;
-	timeString += format(".%03.3d +0000", (int)(1000 * modf(epochs, &integerPart)));
-
-	return timeString;
+	auto size = strftime(buff, 50, "%c %z", gmtime(time));
+	// printf(buff);
+	return std::string(std::begin(buff), std::begin(buff) + size);
 }
 
 void setMemoryQuota(size_t limit) {

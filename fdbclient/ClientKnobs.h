@@ -56,6 +56,7 @@ public:
 	int MAX_COMMIT_PROXY_CONNECTIONS;
 	int MAX_GRV_PROXY_CONNECTIONS;
 	double STATUS_IDLE_TIMEOUT;
+	bool SEND_ENTIRE_VERSION_VECTOR;
 
 	// wrong_shard_server sometimes comes from the only nonfailed server, so we need to avoid a fast spin
 	double WRONG_SHARD_SERVER_DELAY; // SOMEDAY: This delay can limit performance of retrieving data when the cache is

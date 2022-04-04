@@ -26,6 +26,7 @@
 #include <string>
 #include <vector>
 #include <unordered_set>
+#include <boost/functional/hash.hpp>
 
 #include "flow/Arena.h"
 #include "flow/flow.h"
@@ -72,6 +73,8 @@ struct Tag {
 	bool operator<(const Tag& r) const { return locality < r.locality || (locality == r.locality && id < r.id); }
 
 	int toTagDataIndex() const { return locality >= 0 ? 2 * locality : 1 - (2 * locality); }
+
+	bool isNonPrimaryTLogType() const { return locality < 0; }
 
 	std::string toString() const { return format("%d:%d", locality, id); }
 
@@ -125,6 +128,18 @@ template <>
 struct Traceable<Tag> : std::true_type {
 	static std::string toString(const Tag& value) { return value.toString(); }
 };
+
+namespace std {
+template <>
+struct hash<Tag> {
+	std::size_t operator()(const Tag& tag) const {
+		std::size_t seed = 0;
+		boost::hash_combine(seed, std::hash<int8_t>{}(tag.locality));
+		boost::hash_combine(seed, std::hash<uint16_t>{}(tag.id));
+		return seed;
+	}
+};
+} // namespace std
 
 static const Tag invalidTag{ tagLocalitySpecial, 0 };
 static const Tag txsTag{ tagLocalitySpecial, 1 };
@@ -1368,12 +1383,12 @@ struct ReadBlobGranuleContext {
 // Store metadata associated with each storage server. Now it only contains data be used in perpetual storage wiggle.
 struct StorageMetadataType {
 	constexpr static FileIdentifier file_identifier = 732123;
-	// when the SS is initialized, in epoch seconds, comes from currentTime()
-	double createdTime;
+	// when the SS is initialized
+	uint64_t createdTime; // comes from currentTime()
 	StorageMetadataType() : createdTime(0) {}
 	StorageMetadataType(uint64_t t) : createdTime(t) {}
 
-	static double currentTime() { return g_network->timer(); }
+	static uint64_t currentTime() { return g_network->timer_int(); }
 
 	// To change this serialization, ProtocolVersion::StorageMetadata must be updated, and downgrades need
 	// to be considered

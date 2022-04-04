@@ -279,8 +279,10 @@ uint64_t timer_int(); // Return timer as uint64_t representing epoch nanoseconds
 
 void getLocalTime(const time_t* timep, struct tm* result);
 
-// get GMT time string from an epoch seconds double
-std::string epochsToGMTString(double epochs);
+// convert timestamp returned by timer_int() to Gmt format string
+std::string timerIntToGmt(uint64_t timestamp);
+
+std::string getGmtTimeStr(const time_t* time);
 
 void setMemoryQuota(size_t limit);
 
