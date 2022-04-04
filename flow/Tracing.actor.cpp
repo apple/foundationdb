@@ -632,7 +632,7 @@ TEST_CASE("/flow/Tracing/AddEvents") {
 	ASSERT(span3.events[1].attributes.size() == 1);
 	ASSERT(span3.events[1].attributes.begin()->key.toString() == "xyz");
 	ASSERT(span3.events[1].attributes.begin()->value.toString() == "123");
-		return Void();
+	return Void();
 };
 
 TEST_CASE("/flow/Tracing/AddAttributes") {
