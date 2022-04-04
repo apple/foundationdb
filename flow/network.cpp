@@ -179,9 +179,9 @@ std::string formatIpPort(const IPAddress& ip, uint16_t port) {
 }
 
 Optional<std::vector<NetworkAddress>> DNSCache::find(const std::string& host, const std::string& service) {
-	std::string hostname = host + ":" + service;
-	if (hostnameToAddresses.find(hostname) != hostnameToAddresses.end()) {
-		return hostnameToAddresses[host + ":" + service];
+	auto it = hostnameToAddresses.find(host + ":" + service);
+	if (it != hostnameToAddresses.end()) {
+		return it->second;
 	}
 	return {};
 }
@@ -191,8 +191,9 @@ void DNSCache::add(const std::string& host, const std::string& service, const st
 }
 
 void DNSCache::remove(const std::string& host, const std::string& service) {
-	if (find(host, service).present()) {
-		hostnameToAddresses.erase(host + ":" + service);
+	auto it = hostnameToAddresses.find(host + ":" + service);
+	if (it != hostnameToAddresses.end()) {
+		hostnameToAddresses.erase(it);
 	}
 }
 

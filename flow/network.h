@@ -700,7 +700,7 @@ public:
 // DNSCache is a class maintaining a <hostname, vector<NetworkAddress>> mapping.
 class DNSCache {
 public:
-	DNSCache() {}
+	DNSCache() = default;
 	explicit DNSCache(const std::map<std::string, std::vector<NetworkAddress>>& dnsCache)
 	  : hostnameToAddresses(dnsCache) {}
 
