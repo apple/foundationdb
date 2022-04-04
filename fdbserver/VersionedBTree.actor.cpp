@@ -4732,8 +4732,7 @@ struct BTreePage {
 			if (tree()->numItems > 0) {
 				// This doesn't use the cached reader for the page because it is only for debugging purposes,
 				// a cached reader may not exist
-				BinaryTree::DecodeCache cache(lowerBound, upperBound);
-				BinaryTree::Cursor c(&cache, tree());
+				BinaryTree::Cursor c(makeReference<BinaryTree::DecodeCache>(lowerBound, upperBound), tree());
 
 				c.moveFirst();
 				ASSERT(c.valid());
@@ -5146,8 +5145,8 @@ public:
 
 				// Iterate over page entries, skipping key decoding using BTreePage::ValueTree which uses
 				// RedwoodRecordRef::DeltaValueOnly as the delta type type to skip key decoding
-				BTreePage::ValueTree::DecodeCache cache(dbBegin, dbEnd);
-				BTreePage::ValueTree::Cursor c(&cache, btPage.valueTree());
+				BTreePage::ValueTree::Cursor c(makeReference<BTreePage::ValueTree::DecodeCache>(dbBegin, dbEnd),
+				                               btPage.valueTree());
 				ASSERT(c.moveFirst());
 				Version v = entry.version;
 				while (1) {
@@ -6067,7 +6066,7 @@ private:
 			    makeReference<BTreePage::BinaryTree::DecodeCache>(lowerBound, upperBound, m_pDecodeCacheMemory);
 		}
 
-		return BTreePage::BinaryTree::Cursor(page->extra.getPtr<BTreePage::BinaryTree::DecodeCache>(),
+		return BTreePage::BinaryTree::Cursor(page->extra.getReference<BTreePage::BinaryTree::DecodeCache>(),
 		                                     ((BTreePage*)page->mutateData())->tree());
 	}
 
@@ -6077,7 +6076,7 @@ private:
 			return getCursor(page, link.get(), link.next().getOrUpperBound());
 		}
 
-		return BTreePage::BinaryTree::Cursor(page->extra.getPtr<BTreePage::BinaryTree::DecodeCache>(),
+		return BTreePage::BinaryTree::Cursor(page->extra.getReference<BTreePage::BinaryTree::DecodeCache>(),
 		                                     ((BTreePage*)page->mutateData())->tree());
 	}
 
@@ -8971,8 +8970,7 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/RedwoodRecordRef2") {
 	       largeTree);
 	debug_printf("Data(%p): %s\n", tree, StringRef((uint8_t*)tree, tree->size()).toHexString().c_str());
 
-	DeltaTree2<RedwoodRecordRef>::DecodeCache cache(prev, next);
-	DeltaTree2<RedwoodRecordRef>::Cursor c(&cache, tree);
+	DeltaTree2<RedwoodRecordRef>::Cursor c(makeReference<DeltaTree2<RedwoodRecordRef>::DecodeCache>(prev, next), tree);
 
 	// Test delete/insert behavior for each item, making no net changes
 	printf("Testing seek/delete/insert for existing keys with random values\n");
@@ -9002,9 +9000,9 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/RedwoodRecordRef2") {
 	DeltaTree2<RedwoodRecordRef>::Cursor fwd = c;
 	DeltaTree2<RedwoodRecordRef>::Cursor rev = c;
 
-	DeltaTree2<RedwoodRecordRef, RedwoodRecordRef::DeltaValueOnly>::DecodeCache cacheValuesOnly(prev, next);
 	DeltaTree2<RedwoodRecordRef, RedwoodRecordRef::DeltaValueOnly>::Cursor fwdValueOnly(
-	    &cacheValuesOnly, (DeltaTree2<RedwoodRecordRef, RedwoodRecordRef::DeltaValueOnly>*)tree);
+	    makeReference<DeltaTree2<RedwoodRecordRef, RedwoodRecordRef::DeltaValueOnly>::DecodeCache>(prev, next),
+	    (DeltaTree2<RedwoodRecordRef, RedwoodRecordRef::DeltaValueOnly>*)tree);
 
 	printf("Verifying tree contents using forward, reverse, and value-only iterators\n");
 	ASSERT(fwd.moveFirst());
@@ -9054,8 +9052,8 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/RedwoodRecordRef2") {
 	ASSERT(i == items.size());
 
 	{
-		DeltaTree2<RedwoodRecordRef>::DecodeCache cache(prev, next);
-		DeltaTree2<RedwoodRecordRef>::Cursor c(&cache, tree);
+		DeltaTree2<RedwoodRecordRef>::Cursor c(makeReference<DeltaTree2<RedwoodRecordRef>::DecodeCache>(prev, next),
+		                                       tree);
 
 		printf("Doing 20M random seeks using the same cursor from the same mirror.\n");
 		double start = timer();
@@ -9151,8 +9149,8 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/IntIntPair") {
 	DeltaTree2<IntIntPair>* tree2 = (DeltaTree2<IntIntPair>*)new uint8_t[bufferSize];
 	int builtSize2 = tree2->build(bufferSize, &items[0], &items[0] + items.size(), &lowerBound, &upperBound);
 	ASSERT(builtSize2 <= bufferSize);
-	DeltaTree2<IntIntPair>::DecodeCache cache(lowerBound, upperBound);
-	DeltaTree2<IntIntPair>::Cursor cur2(&cache, tree2);
+	auto cache = makeReference<DeltaTree2<IntIntPair>::DecodeCache>(lowerBound, upperBound);
+	DeltaTree2<IntIntPair>::Cursor cur2(cache, tree2);
 
 	auto printItems = [&] {
 		for (int k = 0; k < items.size(); ++k) {
@@ -9222,8 +9220,8 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/IntIntPair") {
 	auto scanAndVerify2 = [&]() {
 		printf("Verify DeltaTree2 contents.\n");
 
-		DeltaTree2<IntIntPair>::Cursor fwd(&cache, tree2);
-		DeltaTree2<IntIntPair>::Cursor rev(&cache, tree2);
+		DeltaTree2<IntIntPair>::Cursor fwd(cache, tree2);
+		DeltaTree2<IntIntPair>::Cursor rev(cache, tree2);
 
 		ASSERT(fwd.moveFirst());
 		ASSERT(rev.moveLast());
@@ -9308,7 +9306,7 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/IntIntPair") {
 
 	// Create a new mirror, decoding the tree from scratch since insert() modified both the tree and the mirror
 	r = DeltaTree<IntIntPair>::Mirror(tree, &lowerBound, &upperBound);
-	cache.clear();
+	cache->clear();
 	scanAndVerify();
 	scanAndVerify2();
 
@@ -9367,7 +9365,7 @@ TEST_CASE("Lredwood/correctness/unit/deltaTree/IntIntPair") {
 
 	printf("Verifying seek behaviors\n");
 	DeltaTree<IntIntPair>::Cursor s = r.getCursor();
-	DeltaTree2<IntIntPair>::Cursor s2(&cache, tree2);
+	DeltaTree2<IntIntPair>::Cursor s2(cache, tree2);
 
 	// SeekLTE to each element
 	for (int i = 0; i < items.size(); ++i) {

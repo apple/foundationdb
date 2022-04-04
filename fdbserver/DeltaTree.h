@@ -1177,15 +1177,16 @@ public:
 	struct Cursor {
 		Cursor() : cache(nullptr), nodeIndex(-1) {}
 
-		Cursor(DecodeCache* cache, DeltaTree2* tree) : tree(tree), cache(cache), nodeIndex(-1) {}
+		Cursor(Reference<DecodeCache> cache, DeltaTree2* tree) : tree(tree), cache(cache), nodeIndex(-1) {}
 
-		Cursor(DecodeCache* cache, DeltaTree2* tree, int nodeIndex) : tree(tree), cache(cache), nodeIndex(nodeIndex) {}
+		Cursor(Reference<DecodeCache> cache, DeltaTree2* tree, int nodeIndex)
+		  : tree(tree), cache(cache), nodeIndex(nodeIndex) {}
 
 		// Copy constructor does not copy item because normally a copied cursor will be immediately moved.
 		Cursor(const Cursor& c) : tree(c.tree), cache(c.cache), nodeIndex(c.nodeIndex) {}
 
 		~Cursor() {
-			if (cache != nullptr) {
+			if (cache.isValid()) {
 				cache->updateUsedMemory();
 			}
 		}
@@ -1212,7 +1213,7 @@ public:
 		}
 
 		DeltaTree2* tree;
-		DecodeCache* cache;
+		Reference<DecodeCache> cache;
 		int nodeIndex;
 		mutable Optional<T> item;
 
