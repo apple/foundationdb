@@ -65,8 +65,9 @@ private:
 		state int64_t window = 0;
 
 		loop {
-			RangeResult range =
-			    wait(safeThreadFutureToFuture(tr->getRange(self->counters.range(), 1, Snapshot::True, Reverse::True)));
+			state typename TransactionT::template FutureT<RangeResult> rangeFuture =
+			    tr->getRange(self->counters.range(), 1, Snapshot::True, Reverse::True);
+			RangeResult range = wait(safeThreadFutureToFuture(rangeFuture));
 
 			if (range.size() > 0) {
 				start = self->counters.unpack(range[0].key).getInt(0);
@@ -83,11 +84,12 @@ private:
 
 				int64_t inc = 1;
 				tr->atomicOp(self->counters.get(start).key(), StringRef((uint8_t*)&inc, 8), MutationRef::AddValue);
-				Future<Optional<Value>> countFuture =
-				    safeThreadFutureToFuture(tr->get(self->counters.get(start).key(), Snapshot::True));
+
+				state typename TransactionT::template FutureT<Optional<Value>> countFuture =
+				    tr->get(self->counters.get(start).key(), Snapshot::True);
 				// }
 
-				Optional<Value> countValue = wait(countFuture);
+				Optional<Value> countValue = wait(safeThreadFutureToFuture(countFuture));
 
 				int64_t count = 0;
 				if (countValue.present()) {
@@ -110,15 +112,17 @@ private:
 				state int64_t candidate = deterministicRandom()->randomInt(start, start + window);
 
 				// if thread safety is needed, this should be locked {
-				state Future<RangeResult> latestCounterFuture =
-				    safeThreadFutureToFuture(tr->getRange(self->counters.range(), 1, Snapshot::True, Reverse::True));
-				state Future<Optional<Value>> candidateValueFuture =
-				    safeThreadFutureToFuture(tr->get(self->recent.get(candidate).key()));
+				state typename TransactionT::template FutureT<RangeResult> latestCounterFuture =
+				    tr->getRange(self->counters.range(), 1, Snapshot::True, Reverse::True);
+				state typename TransactionT::template FutureT<Optional<Value>> candidateValueFuture =
+				    tr->get(self->recent.get(candidate).key());
 				tr->setOption(FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE);
 				tr->set(self->recent.get(candidate).key(), ValueRef());
 				// }
 
-				wait(success(latestCounterFuture) && success(candidateValueFuture));
+				wait(success(safeThreadFutureToFuture(latestCounterFuture)) &&
+				     success(safeThreadFutureToFuture(candidateValueFuture)));
+
 				int64_t currentWindowStart = 0;
 				if (latestCounterFuture.get().size() > 0) {
 					currentWindowStart = self->counters.unpack(latestCounterFuture.get()[0].key).getInt(0);
