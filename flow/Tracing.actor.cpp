@@ -624,12 +624,15 @@ TEST_CASE("/flow/Tracing/AddEvents") {
 	span3.addEvent("commit_fail"_sr, 1234567.100, s3Attrs).addEvent("commit_succeed"_sr, 1111.001, s3Attrs);
 	ASSERT(span3.events[0].name.toString() == "commit_fail");
 	ASSERT(span3.events[0].time == 1234567.100);
+	ASSERT(span3.events[0].attributes.size() == 1);
 	ASSERT(span3.events[0].attributes.begin()->key.toString() == "xyz");
 	ASSERT(span3.events[0].attributes.begin()->value.toString() == "123");
 	ASSERT(span3.events[1].name.toString() == "commit_succeed");
 	ASSERT(span3.events[1].time == 1111.001);
-	ASSERT(span3.events[1].attributes.size() == 0);
-	return Void();
+	ASSERT(span3.events[1].attributes.size() == 1);
+	ASSERT(span3.events[1].attributes.begin()->key.toString() == "xyz");
+	ASSERT(span3.events[1].attributes.begin()->value.toString() == "123");
+		return Void();
 };
 
 TEST_CASE("/flow/Tracing/AddAttributes") {
