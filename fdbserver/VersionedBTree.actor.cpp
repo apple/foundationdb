@@ -3373,11 +3373,13 @@ public:
 	// Get snapshot as of the most recent committed version of the pager
 	Reference<IPagerSnapshot> getReadSnapshot(Version v) override;
 	void addSnapshot(Version version, KeyRef meta) {
-		ASSERT(snapshots.empty() || snapshots.back().version != version);
+		if (snapshots.empty()) {
+			oldestSnapshotVersion = version;
+		} else {
+			ASSERT(snapshots.back().version != version);
+		}
 
-		Promise<Void> expired;
-		snapshots.push_back(
-		    { version, expired, makeReference<DWALPagerSnapshot>(this, meta, version, expired.getFuture()) });
+		snapshots.push_back({ version, makeReference<DWALPagerSnapshot>(this, meta, version) });
 	}
 
 	// Set the pending oldest versiont to keep as of the next commit
@@ -3394,13 +3396,7 @@ public:
 
 	// Calculate the *effective* oldest version, which can be older than the one set in the last commit since we
 	// are allowing active snapshots to temporarily delay page reuse.
-	Version effectiveOldestVersion() {
-		if (snapshots.empty()) {
-			debug_printf("DWALPager(%s) snapshots list empty\n", filename.c_str());
-			return lastCommittedHeader.oldestVersion;
-		}
-		return std::min(lastCommittedHeader.oldestVersion, snapshots.front().version);
-	}
+	Version effectiveOldestVersion() { return std::min(lastCommittedHeader.oldestVersion, oldestSnapshotVersion); }
 
 	ACTOR static Future<Void> removeRemapEntry(DWALPager* self, RemappedPage p, Version oldestRetainedVersion) {
 		// Get iterator to the versioned page map entry for the original page
@@ -4037,7 +4033,6 @@ private:
 
 	struct SnapshotEntry {
 		Version version;
-		Promise<Void> expired;
 		Reference<DWALPagerSnapshot> snapshot;
 	};
 
@@ -4050,14 +4045,15 @@ private:
 	// TODO: Better data structure
 	PageToVersionedMapT remappedPages;
 
+	// Readable snapshots in version order
 	std::deque<SnapshotEntry> snapshots;
+	Version oldestSnapshotVersion;
 };
 
 // Prevents pager from reusing freed pages from version until the snapshot is destroyed
 class DWALPagerSnapshot : public IPagerSnapshot, public ReferenceCounted<DWALPagerSnapshot> {
 public:
-	DWALPagerSnapshot(DWALPager* pager, Key meta, Version version, Future<Void> expiredFuture)
-	  : pager(pager), expired(expiredFuture), version(version), metaKey(meta) {}
+	DWALPagerSnapshot(DWALPager* pager, Key meta, Version version) : pager(pager), version(version), metaKey(meta) {}
 	~DWALPagerSnapshot() override {}
 
 	Future<Reference<const ArenaPage>> getPhysicalPage(PagerEventReasons reason,
@@ -4066,9 +4062,7 @@ public:
 	                                                   int priority,
 	                                                   bool cacheable,
 	                                                   bool noHit) override {
-		if (expired.isError()) {
-			throw expired.getError();
-		}
+
 		return map(pager->readPageAtVersion(reason, level, pageID, priority, version, cacheable, noHit),
 		           [=](Reference<ArenaPage> p) { return Reference<const ArenaPage>(std::move(p)); });
 	}
@@ -4079,9 +4073,7 @@ public:
 	                                                        int priority,
 	                                                        bool cacheable,
 	                                                        bool noHit) override {
-		if (expired.isError()) {
-			throw expired.getError();
-		}
+
 		return map(pager->readMultiPage(reason, level, pageIDs, priority, cacheable, noHit),
 		           [=](Reference<ArenaPage> p) { return Reference<const ArenaPage>(std::move(p)); });
 	}
@@ -4095,7 +4087,6 @@ public:
 	void delref() override { ReferenceCounted<DWALPagerSnapshot>::delref(); }
 
 	DWALPager* pager;
-	Future<Void> expired;
 	Version version;
 	Key metaKey;
 };
@@ -4105,22 +4096,21 @@ void DWALPager::expireSnapshots(Version v) {
 	             filename.c_str(),
 	             v,
 	             (int)snapshots.size());
+
+	// While there is more than one snapshot and the front snapshot is older than v and has no other reference holders
 	while (snapshots.size() > 1 && snapshots.front().version < v && snapshots.front().snapshot->isSoleOwner()) {
 		debug_printf("DWALPager(%s) expiring snapshot for %" PRId64 " soleOwner=%d\n",
 		             filename.c_str(),
 		             snapshots.front().version,
 		             snapshots.front().snapshot->isSoleOwner());
-		// The snapshot contract could be made such that the expired promise isn't need anymore.  In practice it
-		// probably is already not needed but it will gracefully handle the case where a user begins a page read
-		// with a snapshot reference, keeps the page read future, and drops the snapshot reference.
-		snapshots.front().expired.sendError(transaction_too_old());
+
+		// Expire the snapshot and update the oldest snapshot version
 		snapshots.pop_front();
+		oldestSnapshotVersion = snapshots.front().version;
 	}
 }
 
 Reference<IPagerSnapshot> DWALPager::getReadSnapshot(Version v) {
-	ASSERT(!snapshots.empty());
-
 	auto i = std::upper_bound(snapshots.begin(), snapshots.end(), v, SnapshotEntryLessThanVersion());
 	if (i == snapshots.begin()) {
 		throw version_invalid();
