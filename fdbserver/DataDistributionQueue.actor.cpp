@@ -1027,6 +1027,31 @@ struct DDQueueData {
 
 		validate();
 	}
+
+	int getHighestPriorityRelocation() const {
+		int highestPriority{ 0 };
+		for (const auto& [priority, count] : priority_relocations) {
+			if (count > 0) {
+				highestPriority = std::max(highestPriority, priority);
+			}
+		}
+		return highestPriority;
+	}
+
+	// Returns the minimum number of replicas remaining on any team.
+	// If no replicas are missing, return Optional<int>{}, indicating that
+	// we can fall back to DatabaseConfiguration::storageTeamSize
+	Optional<int> getMinReplicasRemaining() const {
+		auto const highestPriority = getHighestPriorityRelocation();
+		if (highestPriority >= SERVER_KNOBS->PRIORITY_TEAM_0_LEFT) {
+			return 0;
+		} else if (highestPriority >= SERVER_KNOBS->PRIORITY_TEAM_1_LEFT) {
+			return 1;
+		} else if (highestPriority >= SERVER_KNOBS->PRIORITY_TEAM_2_LEFT) {
+			return 2;
+		}
+		return {};
+	}
 };
 
 static std::string destServersString(std::vector<std::pair<Reference<IDataDistributionTeam>, bool>> const& bestTeams) {
@@ -1698,6 +1723,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
                                          MoveKeysLock lock,
                                          PromiseStream<Promise<int64_t>> getAverageShardBytes,
                                          PromiseStream<Promise<int>> getUnhealthyRelocationCount,
+                                         FutureStream<Promise<Optional<int>>> getMinReplicasRemaining,
                                          UID distributorId,
                                          int teamSize,
                                          int singleRegionTeamSize,
@@ -1791,12 +1817,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 
 					recordMetrics = delay(SERVER_KNOBS->DD_QUEUE_LOGGING_INTERVAL, TaskPriority::FlushTrace);
 
-					int highestPriorityRelocation = 0;
-					for (auto it = self.priority_relocations.begin(); it != self.priority_relocations.end(); ++it) {
-						if (it->second) {
-							highestPriorityRelocation = std::max(highestPriorityRelocation, it->first);
-						}
-					}
+					auto const highestPriorityRelocation = self.getHighestPriorityRelocation();
 
 					TraceEvent("MovingData", distributorId)
 					    .detail("InFlight", self.activeRelocations)
@@ -1830,11 +1851,14 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 					                                // DataDistributorData::movingDataEventHolder. The track latest key
 					                                // we use here must match the key used in the holder.
 				}
-				when(wait(self.error.getFuture())) {} // Propagate errors from dataDistributionRelocator
-				when(wait(waitForAll(balancingFutures))) {}
+				when(Promise<Optional<int>> r = waitNext(getMinReplicasRemaining)) {
+					r.send(self.getMinReplicasRemaining());
+				}
 				when(Promise<int> r = waitNext(getUnhealthyRelocationCount.getFuture())) {
 					r.send(self.unhealthyRelocations);
 				}
+				when(wait(self.error.getFuture())) {} // Propagate errors from dataDistributionRelocator
+				when(wait(waitForAll(balancingFutures))) {}
 			}
 		}
 	} catch (Error& e) {

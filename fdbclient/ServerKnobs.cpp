@@ -109,6 +109,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// disk snapshot max timeout, to be put in TLog, storage and coordinator nodes
 	init( MAX_FORKED_PROCESS_OUTPUT,                            1024 );
 	init( SNAP_CREATE_MAX_TIMEOUT,                             300.0 );
+	init( MAX_SNAPSHOT_FAULT_TOLERANCE,                            1 );
 
 	// Data distribution queue
 	init( HEALTH_POLL_TIME,                                      1.0 );

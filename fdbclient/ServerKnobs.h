@@ -564,6 +564,9 @@ public:
 	// disk snapshot
 	int64_t MAX_FORKED_PROCESS_OUTPUT;
 	double SNAP_CREATE_MAX_TIMEOUT;
+	// Maximum number of storage servers a snapshot can fail to
+	// capture while still succeeding
+	int64_t MAX_SNAPSHOT_FAULT_TOLERANCE;
 
 	// Storage Metrics
 	double STORAGE_METRICS_AVERAGE_INTERVAL;
