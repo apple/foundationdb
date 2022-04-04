@@ -24,9 +24,8 @@
 #include "flow/actorcompiler.h" // has to be last include
 
 ICheckpointReader* newCheckpointReader(const CheckpointMetaData& checkpoint, UID logID) {
-	if (checkpoint.getFormat() == RocksDBColumnFamily) {
-		return newRocksDBCheckpointReader(checkpoint, logID);
-	} else if (checkpoint.getFormat() == RocksDB) {
+	const CheckpointFormat format = checkpoint.getFormat();
+	if (format == RocksDBColumnFamily || format == RocksDB) {
 		return newRocksDBCheckpointReader(checkpoint, logID);
 	} else {
 		throw not_implemented();
@@ -61,4 +60,17 @@ ACTOR Future<CheckpointMetaData> fetchCheckpoint(Database cx,
 	}
 
 	return result;
+}
+
+ACTOR Future<std::vector<CheckpointMetaData>> fetchCheckpoints(
+    Database cx,
+    std::vector<CheckpointMetaData> initialStates,
+    std::string dir,
+    std::function<Future<Void>(const CheckpointMetaData&)> cFun) {
+	std::vector<Future<CheckpointMetaData>> actors;
+	for (const auto& checkpoint : initialStates) {
+		actors.push_back(fetchCheckpoint(cx, checkpoint, dir, cFun));
+	}
+	std::vector<CheckpointMetaData> res = wait(getAll(actors));
+	return res;
 }

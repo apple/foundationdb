@@ -173,7 +173,7 @@ inline IKeyValueStore* openKVStore(KeyValueStoreType storeType,
                                    bool checkChecksums = false,
                                    bool checkIntegrity = false,
                                    bool openRemotely = false) {
-	if (openRemotely) {
+	if (openRemotely && storeType != KeyValueStoreType::SSD_ROCKSDB_V1) {
 		return openRemoteKVStore(storeType, filename, logID, memoryLimit, checkChecksums, checkIntegrity);
 	}
 	switch (storeType) {

@@ -1225,6 +1225,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				    .detail("RocksSequenceNumber", debugCheckpointSeq)
 				    .detail("CheckpointDir", checkpointDir);
 			} else {
+				std::cout << "1" << std::endl;
 				throw not_implemented();
 			}
 
@@ -1337,6 +1338,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				    .detail("Checkpoint", describe(a.checkpoints));
 				a.done.send(Void());
 			} else {
+				std::cout << "2" << std::endl;
 				throw not_implemented();
 			}
 		}
@@ -2008,6 +2010,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				    .detail("Dir", dir);
 			}
 		} else if (checkpoint.format == RocksDB) {
+			std::cout << "3" << std::endl;
 			throw not_implemented();
 		} else {
 			throw internal_error();

@@ -6209,7 +6209,7 @@ ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data,
 				TraceEvent("FetchShardFetchCheckpointBegin", data->thisServerID)
 				    .detail("MoveInShardID", shard->id)
 				    .detail("CheckpointMetaData", records[idx].toString());
-				// TODO: Persist the progress, for restarts.
+				// TODO: Persist the progress, for restarts, and fetch checkpoints in parallel.
 				CheckpointMetaData record = wait(fetchCheckpoint(data->cx, records[idx], dir));
 				localRecords[idx] = record;
 				break;

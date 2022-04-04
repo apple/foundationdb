@@ -150,11 +150,9 @@ private:
 		void action(OpenAction& a) {
 			ASSERT(cf == nullptr);
 
-			// std::cout << "Open RocksDB Checkpoint." << std::endl;
 			std::vector<std::string> columnFamilies;
 			rocksdb::Options options = getOptions();
 			rocksdb::Status status = rocksdb::DB::ListColumnFamilies(options, a.path, &columnFamilies);
-			// std::cout << "Open RocksDB Found Column Families: " << describe(columnFamilies) << std::endl;
 			if (std::find(columnFamilies.begin(), columnFamilies.end(), "default") == columnFamilies.end()) {
 				columnFamilies.push_back("default");
 			}
@@ -168,7 +166,6 @@ private:
 			std::vector<rocksdb::ColumnFamilyHandle*> handles;
 			status = rocksdb::DB::OpenForReadOnly(options, a.path, descriptors, &handles, &db);
 
-			// std::cout << "Open RocksDB Checkpoint Status." << status.ToString() << std::endl;
 			if (!status.ok()) {
 				logRocksDBError(status, "OpenForReadOnly");
 				a.done.sendError(statusToError(status));
@@ -183,8 +180,6 @@ private:
 			}
 
 			ASSERT(db != nullptr && cf != nullptr);
-
-			// std::cout << "Init Iterator." << std::endl;
 
 			begin = a.range.begin;
 			end = a.range.end;
@@ -255,7 +250,6 @@ private:
 				}
 			}
 
-			// std::cout << "RocksDBCheckpointReader close acton done" << std::endl;
 			TraceEvent("RocksDBCheckpointReader").detail("Path", a.path).detail("Method", "Close");
 			a.done.send(Void());
 		}
@@ -283,8 +277,6 @@ private:
 				return;
 			}
 
-			// std::cout << "Reading batch" << std::endl;
-
 			RangeResult result;
 			if (a.rowLimit == 0 || a.byteLimit == 0) {
 				a.result.send(result);
@@ -297,7 +289,6 @@ private:
 			rocksdb::Status s;
 			while (cursor->Valid() && toStringRef(cursor->key()) < end) {
 				KeyValueRef kv(toStringRef(cursor->key()), toStringRef(cursor->value()));
-				// std::cout << "Getting key " << cursor->key().ToString() << std::endl;
 				accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
 				result.push_back_deep(result.arena(), kv);
 				// Calling `cursor->Next()` is potentially expensive, so short-circut here just in case.
@@ -324,7 +315,6 @@ private:
 				return;
 			}
 
-			// std::cout << "Read Done." << cursor->status().ToString() << std::endl;
 			// throw end_of_stream();
 
 			if (result.empty()) {
@@ -355,7 +345,9 @@ public:
 		readThreads->addThread(new Reader(db), "fdb-rocksdb-checkpoint-reader");
 	}
 
-	Future<Void> init(StringRef token) override { throw not_implemented(); }
+	Future<Void> init(StringRef token) override {
+		throw not_implemented();
+	}
 
 	Future<Void> init(KeyRangeRef range) override {
 		if (openFuture.isValid()) {
@@ -374,7 +366,9 @@ public:
 		return res;
 	}
 
-	Future<Standalone<StringRef>> nextChunk(const int byteLimit) { throw not_implemented(); }
+	Future<Standalone<StringRef>> nextChunk(const int byteLimit) {
+		throw not_implemented();
+	}
 
 	Future<Void> close() { return doClose(this); }
 
@@ -388,13 +382,9 @@ private:
 		self->readThreads->post(a);
 		wait(f);
 
-		// std::cout << "Closed Action." << std::endl;
-
 		if (self != nullptr) {
 			wait(self->readThreads->stop());
 		}
-
-		// std::cout << "threads stopped." << std::endl;
 
 		if (self != nullptr) {
 			delete self;
@@ -420,9 +410,13 @@ public:
 
 	Future<Void> init(StringRef token) override;
 
-	Future<Void> init(KeyRangeRef range) override { throw not_implemented(); }
+	Future<Void> init(KeyRangeRef range) override {
+		throw not_implemented();
+	}
 
-	Future<RangeResult> nextKeyValues(const int rowLimit, const int byteLimit) override { throw not_implemented(); }
+	Future<RangeResult> nextKeyValues(const int rowLimit, const int byteLimit) override {
+		throw not_implemented();
+	}
 
 	// Returns the next chunk of serialized checkpoint.
 	Future<Standalone<StringRef>> nextChunk(const int byteLimit) override;
@@ -506,7 +500,6 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 		}
 	}
 
-	// std::cout << "FetchRocksCheckpointKeyValues found ss: " << ssi.toString() << std::endl;
 	ASSERT(ssi.id() == ssID);
 
 	state int attempt = 0;
@@ -548,7 +541,6 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 			state ReplyPromiseStream<FetchCheckpointKeyValuesStreamReply> stream =
 			    ssi.fetchCheckpointKeyValues.getReplyStream(
 			        FetchCheckpointKeyValuesRequest(metaData->checkpointID, range));
-			// std::cout << "FetchRocksCheckpointKeyValues stream." << std::endl;
 			TraceEvent("FetchCheckpointKeyValuesReceivingData")
 			    .detail("CheckpointID", metaData->checkpointID)
 			    .detail("Range", range.toString())

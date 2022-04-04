@@ -1139,6 +1139,11 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 
 		wait(prevCleanup);
 		if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+			auto inFlightRange = self->inFlight.rangeContaining(rd.keys.begin);
+			ASSERT(inFlightRange.range() == rd.keys);
+			ASSERT(inFlightRange.value().randomId == rd.randomId);
+			inFlightRange.value().cancellable = false;
+
 			auto f = self->dataMoves.intersectingRanges(rd.keys);
 			for (auto it = f.begin(); it != f.end(); ++it) {
 				KeyRangeRef kr(it->range().begin, it->range().end);

@@ -84,14 +84,11 @@ ERROR( change_feed_not_registered, 1060, "Change feed not registered" )
 ERROR( granule_assignment_conflict, 1061, "Conflicting attempts to assign blob granules" )
 ERROR( change_feed_cancelled, 1062, "Change feed was cancelled" )
 ERROR( blob_granule_file_load_error, 1063, "Error loading a blob file during granule materialization" )
-<<<<<<< HEAD
-ERROR( data_move_cancelled, 1064, "Data move was cancelled" )
-=======
 ERROR( blob_granule_transaction_too_old, 1064, "Read version is older than blob granule history supports" )
 ERROR( blob_manager_replaced, 1065, "This blob manager has been replaced." )
 ERROR( change_feed_popped, 1066, "Tried to read a version older than what has been popped from the change feed" )
 ERROR( remote_kvs_cancelled, 1067, "The remote key-value store is cancelled" )
->>>>>>> 38190ad7e787d759f88687e83af0ebabdbc600e8
+ERROR( data_move_cancelled, 1068, "Data move was cancelled" )
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )
