@@ -7,6 +7,8 @@ set(FDBSERVER_SRCS
   BackupWorker.actor.cpp
   BlobGranuleServerCommon.actor.cpp
   BlobGranuleServerCommon.actor.h
+  BlobGranuleValidation.actor.cpp
+  BlobGranuleValidation.actor.h
   BlobManager.actor.cpp
   BlobManagerInterface.h
   BlobWorker.actor.cpp

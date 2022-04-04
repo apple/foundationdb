@@ -638,6 +638,9 @@ public:
 		return tokens;
 	}
 
+	// True if both StringRefs reference exactly the same memory
+	bool same(const StringRef& s) const { return data == s.data && length == s.length; }
+
 private:
 	// Unimplemented; blocks conversion through std::string
 	StringRef(char*);

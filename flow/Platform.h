@@ -275,14 +275,12 @@ double
 timer(); // Returns the system real time clock with high precision.  May jump around when system time is adjusted!
 double timer_monotonic(); // Returns a high precision monotonic clock which is adjusted to be kind of similar to timer()
                           // at startup, but might not be a globally accurate time.
-uint64_t timer_int(); // Return timer as uint64_t
+uint64_t timer_int(); // Return timer as uint64_t representing epoch nanoseconds
 
 void getLocalTime(const time_t* timep, struct tm* result);
 
-// convert timestamp returned by timer_int() to Gmt format string
-std::string timerIntToGmt(uint64_t timestamp);
-
-std::string getGmtTimeStr(const time_t* time);
+// get GMT time string from an epoch seconds double
+std::string epochsToGMTString(double epochs);
 
 void setMemoryQuota(size_t limit);
 

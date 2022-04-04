@@ -294,6 +294,13 @@ private:
 };
 
 UID getSharedMemoryMachineId() {
+	// new UID to use if an existing one is not found
+	UID newUID = deterministicRandom()->randomUniqueID();
+
+#if DEBUG_DETERMINISM
+	// Don't use shared memory if DEBUG_DETERMINISM is set
+	return newUID;
+#else
 	UID* machineId = nullptr;
 	int numTries = 0;
 
@@ -306,7 +313,7 @@ UID getSharedMemoryMachineId() {
 			// "0" is the default parameter "addr"
 			boost::interprocess::managed_shared_memory segment(
 			    boost::interprocess::open_or_create, sharedMemoryIdentifier.c_str(), 1000, 0, p.permission);
-			machineId = segment.find_or_construct<UID>("machineId")(deterministicRandom()->randomUniqueID());
+			machineId = segment.find_or_construct<UID>("machineId")(newUID);
 			if (!machineId)
 				criticalError(
 				    FDB_EXIT_ERROR, "SharedMemoryError", "Could not locate or create shared memory - 'machineId'");
@@ -330,6 +337,7 @@ UID getSharedMemoryMachineId() {
 			}
 		}
 	}
+#endif
 }
 
 ACTOR void failAfter(Future<Void> trigger, ISimulator::ProcessInfo* m = g_simulator.getCurrentProcess()) {

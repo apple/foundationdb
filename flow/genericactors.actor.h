@@ -221,6 +221,7 @@ Future<T> delayed(Future<T> what, double time = 0.0, TaskPriority taskID = TaskP
 	}
 }
 
+// wait <interval> then call what() in a loop forever
 ACTOR template <class Func>
 Future<Void> recurring(Func what, double interval, TaskPriority taskID = TaskPriority::DefaultDelay) {
 	loop choose {
@@ -2047,15 +2048,6 @@ private:
 
 	Reference<UnsafeWeakFutureReferenceData> data;
 };
-
-// Call a lambda every <interval> seconds
-ACTOR template <typename Fn>
-Future<Void> repeatEvery(double interval, Fn fn) {
-	loop {
-		wait(delay(interval));
-		fn();
-	}
-}
 
 #include "flow/unactorcompiler.h"
 
