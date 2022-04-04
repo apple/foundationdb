@@ -32,6 +32,7 @@
 #include <boost/algorithm/string/classification.hpp>
 #include <boost/algorithm/string.hpp>
 #include "fdbrpc/IAsyncFile.h"
+#include "flow/Hostname.h"
 #include "flow/UnitTest.h"
 #include "fdbclient/rapidxml/rapidxml.hpp"
 #include "fdbclient/FDBAWSCredentialsProvider.h"

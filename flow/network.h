@@ -135,43 +135,6 @@ inline TaskPriority incrementPriorityIfEven(TaskPriority p) {
 
 class Void;
 
-struct Hostname {
-	std::string host;
-	std::string service; // decimal port number
-	bool isTLS;
-
-	Hostname(std::string host, std::string service, bool isTLS) : host(host), service(service), isTLS(isTLS) {}
-	Hostname() : host(""), service(""), isTLS(false) {}
-
-	bool operator==(const Hostname& r) const { return host == r.host && service == r.service && isTLS == r.isTLS; }
-	bool operator!=(const Hostname& r) const { return !(*this == r); }
-	bool operator<(const Hostname& r) const {
-		if (isTLS != r.isTLS)
-			return isTLS < r.isTLS;
-		else if (host != r.host)
-			return host < r.host;
-		return service < r.service;
-	}
-	bool operator>(const Hostname& r) const { return r < *this; }
-	bool operator<=(const Hostname& r) const { return !(*this > r); }
-	bool operator>=(const Hostname& r) const { return !(*this < r); }
-
-	// Allow hostnames in forms like following:
-	//    hostname:1234
-	//    host.name:1234
-	//    host-name:1234
-	//    host-name_part1.host-name_part2:1234:tls
-	static bool isHostname(const std::string& s) {
-		std::regex validation("^([\\w\\-]+\\.?)+:([\\d]+){1,}(:tls)?$");
-		std::regex ipv4Validation("^([\\d]{1,3}\\.?){4,}:([\\d]+){1,}(:tls)?$");
-		return !std::regex_match(s, ipv4Validation) && std::regex_match(s, validation);
-	}
-
-	static Hostname parse(const std::string& s);
-
-	std::string toString() const { return host + ":" + service + (isTLS ? ":tls" : ""); }
-};
-
 struct IPAddress {
 	typedef boost::asio::ip::address_v6::bytes_type IPAddressStore;
 	static_assert(std::is_same<IPAddressStore, std::array<uint8_t, 16>>::value,

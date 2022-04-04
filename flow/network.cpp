@@ -63,23 +63,6 @@ bool IPAddress::isValid() const {
 	return std::get<uint32_t>(addr) != 0;
 }
 
-Hostname Hostname::parse(const std::string& s) {
-	if (s.empty()) {
-		throw connection_string_invalid();
-	}
-
-	bool isTLS = false;
-	std::string f;
-	if (s.size() > 4 && strcmp(s.c_str() + s.size() - 4, ":tls") == 0) {
-		isTLS = true;
-		f = s.substr(0, s.size() - 4);
-	} else {
-		f = s;
-	}
-	auto colonPos = f.find_first_of(":");
-	return Hostname(f.substr(0, colonPos), f.substr(colonPos + 1), isTLS);
-}
-
 FDB_DEFINE_BOOLEAN_PARAM(NetworkAddressFromHostname);
 
 NetworkAddress NetworkAddress::parse(std::string const& s) {
@@ -360,64 +343,6 @@ TEST_CASE("/flow/network/ipaddress") {
 		auto addrParsed = IPAddress::parse(addr);
 		ASSERT(!addrParsed.present());
 	}
-
-	return Void();
-}
-
-TEST_CASE("/flow/network/hostname") {
-	std::string hn1s = "localhost:1234";
-	std::string hn2s = "host-name:1234";
-	std::string hn3s = "host.name:1234";
-	std::string hn4s = "host-name_part1.host-name_part2:1234:tls";
-
-	std::string hn5s = "127.0.0.1:1234";
-	std::string hn6s = "127.0.0.1:1234:tls";
-	std::string hn7s = "[2001:0db8:85a3:0000:0000:8a2e:0370:7334]:4800";
-	std::string hn8s = "[2001:0db8:85a3:0000:0000:8a2e:0370:7334]:4800:tls";
-	std::string hn9s = "2001:0db8:85a3:0000:0000:8a2e:0370:7334";
-	std::string hn10s = "2001:0db8:85a3:0000:0000:8a2e:0370:7334:tls";
-	std::string hn11s = "[::1]:4800";
-	std::string hn12s = "[::1]:4800:tls";
-	std::string hn13s = "1234";
-
-	auto hn1 = Hostname::parse(hn1s);
-	ASSERT(hn1.toString() == hn1s);
-	ASSERT(hn1.host == "localhost");
-	ASSERT(hn1.service == "1234");
-	ASSERT(!hn1.isTLS);
-
-	auto hn2 = Hostname::parse(hn2s);
-	ASSERT(hn2.toString() == hn2s);
-	ASSERT(hn2.host == "host-name");
-	ASSERT(hn2.service == "1234");
-	ASSERT(!hn2.isTLS);
-
-	auto hn3 = Hostname::parse(hn3s);
-	ASSERT(hn3.toString() == hn3s);
-	ASSERT(hn3.host == "host.name");
-	ASSERT(hn3.service == "1234");
-	ASSERT(!hn3.isTLS);
-
-	auto hn4 = Hostname::parse(hn4s);
-	ASSERT(hn4.toString() == hn4s);
-	ASSERT(hn4.host == "host-name_part1.host-name_part2");
-	ASSERT(hn4.service == "1234");
-	ASSERT(hn4.isTLS);
-
-	ASSERT(Hostname::isHostname(hn1s));
-	ASSERT(Hostname::isHostname(hn2s));
-	ASSERT(Hostname::isHostname(hn3s));
-	ASSERT(Hostname::isHostname(hn4s));
-
-	ASSERT(!Hostname::isHostname(hn5s));
-	ASSERT(!Hostname::isHostname(hn6s));
-	ASSERT(!Hostname::isHostname(hn7s));
-	ASSERT(!Hostname::isHostname(hn8s));
-	ASSERT(!Hostname::isHostname(hn9s));
-	ASSERT(!Hostname::isHostname(hn10s));
-	ASSERT(!Hostname::isHostname(hn11s));
-	ASSERT(!Hostname::isHostname(hn12s));
-	ASSERT(!Hostname::isHostname(hn13s));
 
 	return Void();
 }
