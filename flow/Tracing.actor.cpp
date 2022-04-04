@@ -180,7 +180,6 @@ ACTOR Future<Void> traceLog(int* pendingMessages, bool* sendError) {
 */
 
 struct UDPTracer : public ITracer {
-public:
 	// Serializes span fields as an array into the supplied TraceRequest
 	// buffer.
 	void serialize_span(const Span& span, TraceRequest& request) {
