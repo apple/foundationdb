@@ -1051,7 +1051,7 @@ struct DDQueueData {
 
 // return -1 if a.readload > b.readload
 int greaterReadLoad(Reference<IDataDistributionTeam> a, Reference<IDataDistributionTeam> b) {
-	auto r1 = a->getLoadReadBandwidth(true, 2), r2 = b->getLoadReadBandwidth(true, 2);
+	auto r1 = a->getLoadReadBandwidth(true, 10), r2 = b->getLoadReadBandwidth(true, 10);
 	return r1 == r2 ? 0 : (r1 > r2 ? -1 : 1);
 }
 
@@ -1387,7 +1387,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 				auto& destinationRef = healthyDestinations;
 				self->noErrorActors.add(
 				    trigger([destinationRef, readLoad]() mutable { destinationRef.addDataInFlightToTeam(-readLoad); },
-				            delay(SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL)));
+				            delay(SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL, TaskPriority::DataDistributionLow)));
 
 				// onFinished.send( rs );
 				if (!error.code()) {
@@ -1425,7 +1425,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 				auto& destinationRef = healthyDestinations;
 				self->noErrorActors.add(
 				    trigger([destinationRef, readLoad]() mutable { destinationRef.addDataInFlightToTeam(-readLoad); },
-				            delay(SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL)));
+				            delay(SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL, TaskPriority::DataDistributionLow)));
 				wait(delay(SERVER_KNOBS->RETRY_RELOCATESHARD_DELAY, TaskPriority::DataDistributionLaunch));
 			}
 		}
