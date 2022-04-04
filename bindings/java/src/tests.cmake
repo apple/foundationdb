@@ -52,7 +52,7 @@ set(JAVA_INTEGRATION_TESTS
   src/integration/com/apple/foundationdb/CycleMultiClientIntegrationTest.java
   src/integration/com/apple/foundationdb/SidebandMultiThreadClientTest.java
   src/integration/com/apple/foundationdb/RepeatableReadMultiThreadClientTest.java
-  src/integration/com/apple/foundationdb/RangeAndFlatMapQueryIntegrationTest.java
+  src/integration/com/apple/foundationdb/MappedRangeQueryIntegrationTest.java
 )
 
 # Resources that are used in integration testing, but are not explicitly test files (JUnit rules,

@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -51,6 +51,13 @@ struct TransactionWrapper : public ReferenceCounted<TransactionWrapper> {
 
 	// Gets a range of key-value pairs from the database specified by a pair of key selectors
 	virtual Future<RangeResult> getRange(KeySelectorRef& begin, KeySelectorRef& end, int limit, Reverse reverse) = 0;
+
+	virtual Future<MappedRangeResult> getMappedRange(KeySelector& begin,
+	                                                 KeySelector& end,
+	                                                 Key& mapper,
+	                                                 GetRangeLimits limits,
+	                                                 Snapshot snapshot,
+	                                                 Reverse reverse) = 0;
 
 	// Gets the key from the database specified by a given key selector
 	virtual Future<Key> getKey(KeySelectorRef& key) = 0;
@@ -117,6 +124,15 @@ struct FlowTransactionWrapper : public TransactionWrapper {
 		return transaction.getRange(begin, end, limit, Snapshot::False, reverse);
 	}
 
+	Future<MappedRangeResult> getMappedRange(KeySelector& begin,
+	                                         KeySelector& end,
+	                                         Key& mapper,
+	                                         GetRangeLimits limits,
+	                                         Snapshot snapshot,
+	                                         Reverse reverse) override {
+		return transaction.getMappedRange(begin, end, mapper, limits, snapshot, reverse);
+	}
+
 	// Gets the key from the database specified by a given key selector
 	Future<Key> getKey(KeySelectorRef& key) override { return transaction.getKey(key); }
 
@@ -181,6 +197,15 @@ struct ThreadTransactionWrapper : public TransactionWrapper {
 	// Gets a range of key-value pairs from the database specified by a pair of key selectors
 	Future<RangeResult> getRange(KeySelectorRef& begin, KeySelectorRef& end, int limit, Reverse reverse) override {
 		return unsafeThreadFutureToFuture(transaction->getRange(begin, end, limit, Snapshot::False, reverse));
+	}
+
+	Future<MappedRangeResult> getMappedRange(KeySelector& begin,
+	                                         KeySelector& end,
+	                                         Key& mapper,
+	                                         GetRangeLimits limits,
+	                                         Snapshot snapshot,
+	                                         Reverse reverse) override {
+		return unsafeThreadFutureToFuture(transaction->getMappedRange(begin, end, mapper, limits, snapshot, reverse));
 	}
 
 	// Gets the key from the database specified by a given key selector
@@ -365,6 +390,9 @@ struct ApiWorkload : TestWorkload {
 
 	// The transaction factory used to create transactions in this run
 	Reference<TransactionFactoryInterface> transactionFactory;
+
+	// Transaction type of the transaction factory above.
+	TransactionType transactionType;
 };
 
 #include "flow/unactorcompiler.h"

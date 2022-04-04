@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2019 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,17 +26,21 @@
 #include <vector>
 
 #include "fdbbackup/BackupTLSConfig.h"
+#include "fdbclient/BuildFlags.h"
+#include "fdbbackup/FileConverter.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
-#include "fdbbackup/FileConverter.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/IKnobCollection.h"
+#include "fdbclient/Knobs.h"
 #include "fdbclient/MutationList.h"
+#include "flow/ArgParseUtil.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
 #include "flow/serialize.h"
-#include "fdbclient/BuildFlags.h"
+
 #include "flow/actorcompiler.h" // has to be last include
 
 #define SevDecodeInfo SevVerbose
@@ -73,11 +77,13 @@ void printDecodeUsage() {
 	             "  --list-only    Print file list and exit.\n"
 	             "  -k KEY_PREFIX  Use the prefix for filtering mutations\n"
 	             "  --hex-prefix   HEX_PREFIX\n"
-	             "                 The prefix specified in HEX format, e.g., \\x05\\x01.\n"
+	             "                 The prefix specified in HEX format, e.g., \"\\\\x05\\\\x01\".\n"
 	             "  --begin-version-filter BEGIN_VERSION\n"
 	             "                 The version range's begin version (inclusive) for filtering.\n"
 	             "  --end-version-filter END_VERSION\n"
 	             "                 The version range's end version (exclusive) for filtering.\n"
+	             "  --knob-KNOBNAME KNOBVALUE\n"
+	             "                 Changes a knob value. KNOBNAME should be lowercase."
 	             "\n";
 	return;
 }
@@ -88,6 +94,7 @@ void printBuildInformation() {
 
 struct DecodeParams {
 	std::string container_url;
+	Optional<std::string> proxy;
 	std::string fileFilter; // only files match the filter will be decoded
 	bool log_enabled = true;
 	std::string log_dir, trace_format, trace_log_group;
@@ -96,6 +103,8 @@ struct DecodeParams {
 	std::string prefix; // Key prefix for filtering
 	Version beginVersionFilter = 0;
 	Version endVersionFilter = std::numeric_limits<Version>::max();
+
+	std::vector<std::pair<std::string, std::string>> knobs;
 
 	// Returns if [begin, end) overlap with the filter range
 	bool overlap(Version begin, Version end) const {
@@ -107,6 +116,10 @@ struct DecodeParams {
 		std::string s;
 		s.append("ContainerURL: ");
 		s.append(container_url);
+		if (proxy.present()) {
+			s.append(", Proxy: ");
+			s.append(proxy.get());
+		}
 		s.append(", FileFilter: ");
 		s.append(fileFilter);
 		if (log_enabled) {
@@ -130,7 +143,38 @@ struct DecodeParams {
 		if (!prefix.empty()) {
 			s.append(", KeyPrefix: ").append(printable(KeyRef(prefix)));
 		}
+		for (const auto& [knob, value] : knobs) {
+			s.append(", KNOB-").append(knob).append(" = ").append(value);
+		}
 		return s;
+	}
+
+	void updateKnobs() {
+		auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
+		for (const auto& [knobName, knobValueString] : knobs) {
+			try {
+				auto knobValue = g_knobs.parseKnobValue(knobName, knobValueString);
+				g_knobs.setKnob(knobName, knobValue);
+			} catch (Error& e) {
+				if (e.code() == error_code_invalid_option_value) {
+					std::cerr << "WARNING: Invalid value '" << knobValueString << "' for knob option '" << knobName
+					          << "'\n";
+					TraceEvent(SevWarnAlways, "InvalidKnobValue")
+					    .detail("Knob", printable(knobName))
+					    .detail("Value", printable(knobValueString));
+				} else {
+					std::cerr << "ERROR: Failed to set knob option '" << knobName << "': " << e.what() << "\n";
+					TraceEvent(SevError, "FailedToSetKnob")
+					    .errorUnsuppressed(e)
+					    .detail("Knob", printable(knobName))
+					    .detail("Value", printable(knobValueString));
+					throw;
+				}
+			}
+		}
+
+		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
+		g_knobs.initialize(Randomize::True, IsSimulated::False);
 	}
 };
 
@@ -255,6 +299,16 @@ int parseDecodeCommandLine(DecodeParams* param, CSimpleOpt* args) {
 		case OPT_BLOB_CREDENTIALS:
 			param->tlsConfig.blobCredentials.push_back(args->OptionArg());
 			break;
+
+		case OPT_KNOB: {
+			Optional<std::string> knobName = extractPrefixedArgument("--knob", args->OptionSyntax());
+			if (!knobName.present()) {
+				std::cerr << "ERROR: unable to parse knob option '" << args->OptionSyntax() << "'\n";
+				return FDB_EXIT_ERROR;
+			}
+			param->knobs.emplace_back(knobName.get(), args->OptionArg());
+			break;
+		}
 
 #ifndef TLS_DISABLED
 		case TLSConfig::OPT_TLS_PLUGIN:
@@ -457,7 +511,8 @@ ACTOR Future<Void> process_file(Reference<IBackupContainer> container, LogFile f
 					print = m.param1.startsWith(StringRef(params.prefix));
 				} else if (m.type == MutationRef::ClearRange) {
 					KeyRange range(KeyRangeRef(m.param1, m.param2));
-					print = range.contains(StringRef(params.prefix));
+					KeyRange range2 = prefixRange(StringRef(params.prefix));
+					print = range.intersects(range2);
 				} else {
 					ASSERT(false);
 				}
@@ -476,7 +531,8 @@ ACTOR Future<Void> process_file(Reference<IBackupContainer> container, LogFile f
 }
 
 ACTOR Future<Void> decode_logs(DecodeParams params) {
-	state Reference<IBackupContainer> container = IBackupContainer::openContainer(params.container_url);
+	state Reference<IBackupContainer> container =
+	    IBackupContainer::openContainer(params.container_url, params.proxy, {});
 	state UID uid = deterministicRandom()->randomUniqueID();
 	state BackupFileList listing = wait(container->dumpFileList());
 	// remove partitioned logs
@@ -550,6 +606,9 @@ int main(int argc, char** argv) {
 
 		StringRef url(param.container_url);
 		setupNetwork(0, UseMetrics::True);
+
+		// Must be called after setupNetwork() to be effective
+		param.updateKnobs();
 
 		TraceEvent::setNetworkThread();
 		openTraceFile(NetworkAddress(), 10 << 20, 500 << 20, param.log_dir, "decode", param.trace_log_group);

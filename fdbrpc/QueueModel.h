@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -93,7 +93,7 @@ public:
 	// 	 - futureVersion: indicates whether there was "future version" error or
 	//					  not.
 	void endRequest(uint64_t id, double latency, double penalty, double delta, bool clean, bool futureVersion);
-	QueueData& getMeasurement(uint64_t id);
+	QueueData const& getMeasurement(uint64_t id);
 
 	// Starts a new request to storage server with `id`. If the storage
 	// server contains a penalty, add it to the queue size, and return the

@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2021 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -51,5 +51,8 @@ enum WellKnownEndpoints {
 	WLTOKEN_PROCESS, // 22
 	WLTOKEN_RESERVED_COUNT // 23
 };
+
+static_assert(WLTOKEN_PROTOCOL_INFO ==
+              10); // Enforce that the value of this endpoint does not change per comment above.
 
 #endif

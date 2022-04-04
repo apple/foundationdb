@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,6 +27,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/BlobWorkerInterface.h" // TODO move the functions that depend on this out of here and into BlobWorkerInterface.h to remove this depdendency
 #include "fdbclient/StorageServerInterface.h"
+#include "Tenant.h"
 
 // Don't warn on constants being defined in this file.
 #pragma clang diagnostic push
@@ -68,6 +69,13 @@ void decodeKeyServersValue(std::map<Tag, UID> const& tag_uid,
                            std::vector<UID>& dest);
 
 extern const KeyRef clusterIdKey;
+
+// "\xff/checkpoint/[[UID]] := [[CheckpointMetaData]]"
+extern const KeyRef checkpointPrefix;
+const Key checkpointKeyFor(UID checkpointID);
+const Value checkpointValue(const CheckpointMetaData& checkpoint);
+UID decodeCheckpointKey(const KeyRef& key);
+CheckpointMetaData decodeCheckpointValue(const ValueRef& value);
 
 // "\xff/storageCacheServer/[[UID]] := StorageServerInterface"
 // This will be added by the cache server on initialization and removed by DD
@@ -489,7 +497,7 @@ const Value healthyZoneValue(StringRef const& zoneId, Version version);
 std::pair<Key, Version> decodeHealthyZoneValue(ValueRef const&);
 
 // All mutations done to this range are blindly copied into txnStateStore.
-// Used to create artifically large txnStateStore instances in testing.
+// Used to create artificially large txnStateStore instances in testing.
 extern const KeyRangeRef testOnlyTxnStateStorePrefixRange;
 
 // Snapshot + Incremental Restore
@@ -555,12 +563,20 @@ extern const KeyRangeRef blobGranuleSplitKeys;
 // \xff\x02/bgh/(beginKey,endKey,startVersion) = { granuleUID, [parentGranuleHistoryKeys] }
 extern const KeyRangeRef blobGranuleHistoryKeys;
 
-const Key blobGranuleFileKeyFor(UID granuleID, uint8_t fileType, Version fileVersion);
-std::tuple<UID, uint8_t, Version> decodeBlobGranuleFileKey(ValueRef const& value);
+// \xff\x02/bgp/(start,end) = (version, force)
+extern const KeyRangeRef blobGranulePruneKeys;
+extern const KeyRangeRef blobGranuleVersionKeys;
+extern const KeyRef blobGranulePruneChangeKey;
+
+const Key blobGranuleFileKeyFor(UID granuleID, Version fileVersion, uint8_t fileType);
+std::tuple<UID, Version, uint8_t> decodeBlobGranuleFileKey(KeyRef const& key);
 const KeyRange blobGranuleFileKeyRangeFor(UID granuleID);
 
-const Value blobGranuleFileValueFor(StringRef const& filename, int64_t offset, int64_t length);
-std::tuple<Standalone<StringRef>, int64_t, int64_t> decodeBlobGranuleFileValue(ValueRef const& value);
+const Value blobGranuleFileValueFor(StringRef const& filename, int64_t offset, int64_t length, int64_t fullFileLength);
+std::tuple<Standalone<StringRef>, int64_t, int64_t, int64_t> decodeBlobGranuleFileValue(ValueRef const& value);
+
+const Value blobGranulePruneValueFor(Version version, KeyRange range, bool force);
+std::tuple<Version, KeyRange, bool> decodeBlobGranulePruneValue(ValueRef const& value);
 
 const Value blobGranuleMappingValueFor(UID const& workerID);
 UID decodeBlobGranuleMappingValue(ValueRef const& value);
@@ -579,7 +595,7 @@ const Value blobGranuleSplitValueFor(BlobGranuleSplitState st);
 std::pair<BlobGranuleSplitState, Version> decodeBlobGranuleSplitValue(ValueRef const& value);
 
 const Key blobGranuleHistoryKeyFor(KeyRangeRef const& range, Version version);
-std::pair<KeyRange, Version> decodeBlobGranuleHistoryKey(KeyRef const& value);
+std::pair<KeyRange, Version> decodeBlobGranuleHistoryKey(KeyRef const& key);
 const KeyRange blobGranuleHistoryKeyRangeFor(KeyRangeRef const& range);
 
 const Value blobGranuleHistoryValueFor(Standalone<BlobGranuleHistoryValue> const& historyValue);
@@ -592,6 +608,16 @@ const Key blobWorkerListKeyFor(UID workerID);
 UID decodeBlobWorkerListKey(KeyRef const& key);
 const Value blobWorkerListValue(BlobWorkerInterface const& interface);
 BlobWorkerInterface decodeBlobWorkerListValue(ValueRef const& value);
+
+// State for the tenant map
+extern const KeyRangeRef tenantMapKeys;
+extern const KeyRef tenantMapPrefix;
+extern const KeyRef tenantMapPrivatePrefix;
+extern const KeyRef tenantLastIdKey;
+extern const KeyRef tenantDataPrefixKey;
+
+Value encodeTenantEntry(TenantMapEntry const& tenantEntry);
+TenantMapEntry decodeTenantEntry(ValueRef const& value);
 
 #pragma clang diagnostic pop
 

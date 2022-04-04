@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,6 +25,8 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
 {
    "cluster":{
        "storage_wiggler": {
+		 "wiggle_server_ids":["0ccb4e0feddb55"],
+		 "wiggle_server_addresses": ["127.0.0.1"],
          "primary": {
           	"last_round_start_datetime": "Wed Feb  4 09:36:37 2022 +0000",
 			"last_round_start_timestamp": 63811229797,
@@ -766,7 +768,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
              "ssd-1",
              "ssd-2",
              "ssd-redwood-1-experimental",
-             "ssd-rocksdb-experimental",
+             "ssd-rocksdb-v1",
              "memory",
              "memory-1",
              "memory-2",
@@ -779,7 +781,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
              "ssd-1",
              "ssd-2",
              "ssd-redwood-1-experimental",
-             "ssd-rocksdb-experimental",
+             "ssd-rocksdb-v1",
              "memory",
              "memory-1",
              "memory-2",
@@ -807,6 +809,13 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
              "disabled",
              "aggressive",
              "gradual"
+         ]},
+         "blob_granules_enabled":0,
+         "tenant_mode": {
+             "$enum":[
+             "disabled",
+             "optional_experimental",
+             "required_experimental"
          ]}
       },
       "data":{

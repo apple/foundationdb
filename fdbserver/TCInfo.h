@@ -28,6 +28,7 @@ class TCMachineTeamInfo;
 
 class TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	friend class TCServerInfoImpl;
+	friend class DDTeamCollectionUnitTest;
 	UID id;
 	bool inDesiredDC;
 	DDTeamCollection* collection;
@@ -45,7 +46,12 @@ class TCServerInfo : public ReferenceCounted<TCServerInfo> {
 
 	int64_t dataInFlightToServer;
 	std::vector<Reference<TCTeamInfo>> teams;
-	ErrorOr<GetStorageMetricsReply> serverMetrics;
+	ErrorOr<GetStorageMetricsReply> metrics;
+
+	GetStorageMetricsReply const& getMetrics() const { return metrics.get(); }
+
+	void setMetrics(GetStorageMetricsReply serverMetrics) { this->metrics = serverMetrics; }
+	void markTeamUnhealthy(int teamIndex);
 
 public:
 	Reference<TCMachineInfo> machine;
@@ -84,24 +90,22 @@ public:
 	void addTeam(Reference<TCTeamInfo> team) { teams.push_back(team); }
 	void removeTeamsContainingServer(UID removedServer);
 	void removeTeam(Reference<TCTeamInfo>);
-	GetStorageMetricsReply const& getServerMetrics() const { return serverMetrics.get(); }
-	bool serverMetricsPresent() const { return serverMetrics.present(); }
+	bool metricsPresent() const { return metrics.present(); }
 
 	bool isCorrectStoreType(KeyValueStoreType configStoreType) const {
 		// A new storage server's store type may not be set immediately.
 		// If a storage server does not reply its storeType, it will be tracked by failure monitor and removed.
 		return (storeType == configStoreType || storeType == KeyValueStoreType::END);
 	}
+	bool isWigglePausedServer() const;
+
+	std::pair<int64_t, int64_t> spaceBytes(bool includeInFlight = true) const;
+	int64_t loadBytes() const;
+	bool hasHealthyAvailableSpace(double minAvailableSpaceRatio) const;
 
 	Future<Void> updateServerMetrics();
 	static Future<Void> updateServerMetrics(Reference<TCServerInfo> server);
 	Future<Void> serverMetricsPolling();
-
-	// FIXME: Public for testing only:
-	void setServerMetrics(GetStorageMetricsReply serverMetrics) { this->serverMetrics = serverMetrics; }
-
-	// FIXME: Public for testing only:
-	void markTeamUnhealthy(int teamIndex);
 
 	~TCServerInfo();
 };
@@ -207,10 +211,11 @@ public:
 	void setHealthy(bool h) override { healthy = h; }
 	int getPriority() const override { return priority; }
 	void setPriority(int p) override { priority = p; }
-	void addref() override { ReferenceCounted<TCTeamInfo>::addref(); }
-	void delref() override { ReferenceCounted<TCTeamInfo>::delref(); }
+	void addref() const override { ReferenceCounted<TCTeamInfo>::addref(); }
+	void delref() const override { ReferenceCounted<TCTeamInfo>::delref(); }
 
 	bool hasServer(const UID& server) const;
+	bool hasWigglePausedServer() const;
 
 	void addServers(const std::vector<UID>& servers) override;
 
@@ -218,4 +223,6 @@ private:
 	// Calculate an "average" of the metrics replies that we received.  Penalize teams from which we did not receive all
 	// replies.
 	int64_t getLoadAverage() const;
+
+	bool allServersHaveHealthyAvailableSpace() const;
 };

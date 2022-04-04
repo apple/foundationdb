@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,12 +26,14 @@
 #endif
 
 #include <errno.h>
+#include "contrib/fmt-8.1.1/include/fmt/format.h"
 #include "flow/Platform.h"
 #include "flow/Platform.actor.h"
 #include "flow/Arena.h"
 
 #if (!defined(TLS_DISABLED) && !defined(_WIN32))
 #include "flow/StreamCipher.h"
+#include "flow/BlobCipher.h"
 #endif
 #include "flow/Trace.h"
 #include "flow/Error.h"
@@ -85,7 +87,7 @@
 #include <ftw.h>
 #include <pwd.h>
 #include <sched.h>
-#ifndef __aarch64__
+#if !defined(__aarch64__) && !defined(__powerpc64__)
 #include <cpuid.h>
 #endif
 
@@ -592,7 +594,7 @@ void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) {
 	struct statvfs buf;
 	if (statvfs(directory.c_str(), &buf)) {
 		Error e = systemErrorCodeToError();
-		TraceEvent(SevError, "GetDiskBytesStatvfsError").detail("Directory", directory).GetLastError().error(e);
+		TraceEvent(SevError, "GetDiskBytesStatvfsError").error(e).detail("Directory", directory).GetLastError();
 		throw e;
 	}
 
@@ -601,7 +603,7 @@ void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) {
 	struct statfs buf;
 	if (statfs(directory.c_str(), &buf)) {
 		Error e = systemErrorCodeToError();
-		TraceEvent(SevError, "GetDiskBytesStatfsError").detail("Directory", directory).GetLastError().error(e);
+		TraceEvent(SevError, "GetDiskBytesStatfsError").error(e).detail("Directory", directory).GetLastError();
 		throw e;
 	}
 
@@ -622,7 +624,7 @@ void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) {
 	ULARGE_INTEGER totalFreeSpace;
 	if (!GetDiskFreeSpaceEx(fullPath.c_str(), &freeSpace, &totalSpace, &totalFreeSpace)) {
 		Error e = systemErrorCodeToError();
-		TraceEvent(SevError, "DiskFreeError").detail("Path", fullPath).GetLastError().error(e);
+		TraceEvent(SevError, "DiskFreeError").error(e).detail("Path", fullPath).GetLastError();
 		throw e;
 	}
 	total = std::min((uint64_t)std::numeric_limits<int64_t>::max(), totalSpace.QuadPart);
@@ -1221,7 +1223,7 @@ void getDiskStatistics(std::string const& directory,
 	struct statfs buf;
 	if (statfs(directory.c_str(), &buf)) {
 		Error e = systemErrorCodeToError();
-		TraceEvent(SevError, "GetDiskStatisticsStatfsError").detail("Directory", directory).GetLastError().error(e);
+		TraceEvent(SevError, "GetDiskStatisticsStatfsError").error(e).detail("Directory", directory).GetLastError();
 		throw e;
 	}
 
@@ -2325,7 +2327,7 @@ bool deleteFile(std::string const& filename) {
 #error Port me!
 #endif
 	Error e = systemErrorCodeToError();
-	TraceEvent(SevError, "DeleteFile").detail("Filename", filename).GetLastError().error(e);
+	TraceEvent(SevError, "DeleteFile").error(e).detail("Filename", filename).GetLastError();
 	throw e;
 }
 
@@ -2353,7 +2355,7 @@ bool createDirectory(std::string const& directory) {
 		}
 	}
 	Error e = systemErrorCodeToError();
-	TraceEvent(SevError, "CreateDirectory").detail("Directory", directory).GetLastError().error(e);
+	TraceEvent(SevError, "CreateDirectory").error(e).detail("Directory", directory).GetLastError();
 	throw e;
 #elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 	size_t sep = 0;
@@ -2381,10 +2383,10 @@ bool createDirectory(std::string const& directory) {
 			}
 
 			TraceEvent(SevError, "CreateDirectory")
+			    .error(e)
 			    .detail("Directory", directory)
 			    .detailf("UnixErrorCode", "%x", errno)
-			    .detail("UnixError", strerror(mkdirErrno))
-			    .error(e);
+			    .detail("UnixError", strerror(mkdirErrno));
 			throw e;
 		}
 		createdDirectory();
@@ -2471,7 +2473,7 @@ std::string abspath(std::string const& path, bool resolveLinks, bool mustExist) 
 	if (path.empty()) {
 		Error e = platform_error();
 		Severity sev = e.code() == error_code_io_error ? SevError : SevWarnAlways;
-		TraceEvent(sev, "AbsolutePathError").detail("Path", path).error(e);
+		TraceEvent(sev, "AbsolutePathError").error(e).detail("Path", path);
 		throw e;
 	}
 
@@ -2489,7 +2491,7 @@ std::string abspath(std::string const& path, bool resolveLinks, bool mustExist) 
 		if (mustExist && !fileExists(clean)) {
 			Error e = systemErrorCodeToError();
 			Severity sev = e.code() == error_code_io_error ? SevError : SevWarnAlways;
-			TraceEvent(sev, "AbsolutePathError").detail("Path", path).GetLastError().error(e);
+			TraceEvent(sev, "AbsolutePathError").error(e).detail("Path", path).GetLastError();
 			throw e;
 		}
 		return clean;
@@ -2500,7 +2502,7 @@ std::string abspath(std::string const& path, bool resolveLinks, bool mustExist) 
 	if (!GetFullPathName(path.c_str(), MAX_PATH, nameBuffer, nullptr) || (mustExist && !fileExists(nameBuffer))) {
 		Error e = systemErrorCodeToError();
 		Severity sev = e.code() == error_code_io_error ? SevError : SevWarnAlways;
-		TraceEvent(sev, "AbsolutePathError").detail("Path", path).GetLastError().error(e);
+		TraceEvent(sev, "AbsolutePathError").error(e).detail("Path", path).GetLastError();
 		throw e;
 	}
 	// Not totally obvious from the help whether GetFullPathName canonicalizes slashes, so let's do it...
@@ -2527,7 +2529,7 @@ std::string abspath(std::string const& path, bool resolveLinks, bool mustExist) 
 		}
 		Error e = systemErrorCodeToError();
 		Severity sev = e.code() == error_code_io_error ? SevError : SevWarnAlways;
-		TraceEvent(sev, "AbsolutePathError").detail("Path", path).GetLastError().error(e);
+		TraceEvent(sev, "AbsolutePathError").error(e).detail("Path", path).GetLastError();
 		throw e;
 	}
 	return std::string(r);
@@ -3177,7 +3179,7 @@ int eraseDirectoryRecursive(std::string const& dir) {
 	   place */
 	if (error && errno != ENOENT) {
 		Error e = systemErrorCodeToError();
-		TraceEvent(SevError, "EraseDirectoryRecursiveError").detail("Directory", dir).GetLastError().error(e);
+		TraceEvent(SevError, "EraseDirectoryRecursiveError").error(e).detail("Directory", dir).GetLastError();
 		throw e;
 	}
 #else
@@ -3194,6 +3196,8 @@ bool isHwCrcSupported() {
 	return (info[2] & (1 << 20)) != 0;
 #elif defined(__aarch64__)
 	return true; /* force to use crc instructions */
+#elif defined(__powerpc64__)
+	return false; /* force not to use crc instructions */
 #elif defined(__unixish__)
 	uint32_t eax, ebx, ecx, edx, level = 1, count = 0;
 	__cpuid_count(level, count, eax, ebx, ecx, edx);
@@ -3228,6 +3232,10 @@ extern "C" void flushAndExit(int exitCode) {
 	flushTraceFileVoid();
 	fflush(stdout);
 	closeTraceFile();
+
+	// Flush all output streams. The original intent is to flush the outfile for contrib/debug_determinism.
+	fflush(nullptr);
+
 #ifdef USE_GCOV
 	__gcov_flush();
 #endif
@@ -3494,6 +3502,7 @@ void crashHandler(int sig) {
 #if (!defined(TLS_DISABLED) && !defined(_WIN32))
 	StreamCipherKey::cleanup();
 	StreamCipher::cleanup();
+	BlobCipherKeyCache::cleanup();
 #endif
 
 	fflush(stdout);
@@ -3746,6 +3755,40 @@ void fdb_probe_actor_exit(const char* name, unsigned long id, int index) {
 }
 #endif
 
+void throwExecPathError(Error e, char path[]) {
+	Severity sev = e.code() == error_code_io_error ? SevError : SevWarnAlways;
+	TraceEvent(sev, "GetPathError").error(e).detail("Path", path);
+	throw e;
+}
+
+std::string getExecPath() {
+	char path[1024];
+	uint32_t size = sizeof(path);
+#if defined(__APPLE__)
+	if (_NSGetExecutablePath(path, &size) == 0) {
+		return std::string(path);
+	} else {
+		throwExecPathError(platform_error(), path);
+	}
+#elif defined(__linux__)
+	ssize_t len = ::readlink("/proc/self/exe", path, size);
+	if (len != -1) {
+		path[len] = '\0';
+		return std::string(path);
+	} else {
+		throwExecPathError(platform_error(), path);
+	}
+#elif defined(_WIN32)
+	auto len = GetModuleFileName(nullptr, path, size);
+	if (len != 0) {
+		return std::string(path);
+	} else {
+		throwExecPathError(platform_error(), path);
+	}
+#endif
+	return "unsupported OS";
+}
+
 void setupRunLoopProfiler() {
 #ifdef __linux__
 	if (!profileThread && FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL > 0) {
@@ -3824,7 +3867,7 @@ TEST_CASE("/flow/Platform/getMemoryInfo") {
 	ASSERT(request[LiteralStringRef("SwapTotal:")] == 25165820);
 	ASSERT(request[LiteralStringRef("SwapFree:")] == 23680228);
 	for (auto& item : request) {
-		printf("%s:%ld\n", item.first.toString().c_str(), item.second);
+		fmt::print("{}:{}\n", item.first.toString().c_str(), item.second);
 	}
 
 	printf("UnitTest flow/Platform/getMemoryInfo 2\n");
@@ -3875,7 +3918,7 @@ TEST_CASE("/flow/Platform/getMemoryInfo") {
 	ASSERT(request[LiteralStringRef("SwapTotal:")] == 0);
 	ASSERT(request[LiteralStringRef("SwapFree:")] == 0);
 	for (auto& item : request) {
-		printf("%s:%ld\n", item.first.toString().c_str(), item.second);
+		fmt::print("{}:{}\n", item.first.toString().c_str(), item.second);
 	}
 
 	return Void();

@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@
 #include <string>
 #include <vector>
 
-#include "contrib/fmt-8.0.1/include/fmt/format.h"
+#include "contrib/fmt-8.1.1/include/fmt/format.h"
 #include "fdbclient/Knobs.h"
 #include "flow/Arena.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
@@ -41,8 +41,9 @@
 #include "flow/UnitTest.h"
 #include "fdbrpc/ReplicationPolicy.h"
 #include "fdbrpc/Replication.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 #include "fdbclient/Schemas.h"
+
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 bool isInteger(const std::string& s) {
 	if (s.empty())
@@ -174,6 +175,31 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 			}
 			out[p + key] = format("%d", type);
 		}
+
+		if (key == "blob_granules_enabled") {
+			int enabled = std::stoi(value);
+			if (enabled != 0 && enabled != 1) {
+				printf("Error: Only 0 or 1 are valid values for blob_granules_enabled. "
+				       "1 enables blob granules and 0 disables them.\n");
+				return out;
+			}
+			out[p + key] = value;
+		}
+
+		if (key == "tenant_mode") {
+			TenantMode tenantMode;
+			if (value == "disabled") {
+				tenantMode = TenantMode::DISABLED;
+			} else if (value == "optional_experimental") {
+				tenantMode = TenantMode::OPTIONAL_TENANT;
+			} else if (value == "required_experimental") {
+				tenantMode = TenantMode::REQUIRED;
+			} else {
+				printf("Error: Only disabled|optional_experimental|required_experimental are valid for tenant_mode.\n");
+				return out;
+			}
+			out[p + key] = format("%d", tenantMode);
+		}
 		return out;
 	}
 
@@ -188,7 +214,7 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 	} else if (mode == "ssd-redwood-1-experimental") {
 		logType = KeyValueStoreType::SSD_BTREE_V2;
 		storeType = KeyValueStoreType::SSD_REDWOOD_V1;
-	} else if (mode == "ssd-rocksdb-experimental") {
+	} else if (mode == "ssd-rocksdb-v1") {
 		logType = KeyValueStoreType::SSD_BTREE_V2;
 		storeType = KeyValueStoreType::SSD_ROCKSDB_V1;
 	} else if (mode == "memory" || mode == "memory-2") {
@@ -772,7 +798,7 @@ ACTOR Future<std::vector<NetworkAddress>> getCoordinators(Database cx) {
 
 ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
                                                                Reference<IQuorumChange> change,
-                                                               std::vector<NetworkAddress>* desiredCoordinators) {
+                                                               ClusterConnectionString* conn) {
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::USE_PROVISIONAL_PROXIES);
@@ -783,44 +809,47 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 		return CoordinatorsResult::BAD_DATABASE_STATE; // Someone deleted this key entirely?
 
 	state ClusterConnectionString old(currentKey.get().toString());
+	wait(old.resolveHostnames());
 	if (tr->getDatabase()->getConnectionRecord() &&
 	    old.clusterKeyName().toString() !=
 	        tr->getDatabase()->getConnectionRecord()->getConnectionString().clusterKeyName())
 		return CoordinatorsResult::BAD_DATABASE_STATE; // Someone changed the "name" of the database??
 
 	state CoordinatorsResult result = CoordinatorsResult::SUCCESS;
-	if (!desiredCoordinators->size()) {
-		std::vector<NetworkAddress> _desiredCoordinators = wait(change->getDesiredCoordinators(
+	if (!conn->coords.size()) {
+		std::vector<NetworkAddress> desiredCoordinatorAddresses = wait(change->getDesiredCoordinators(
 		    tr,
 		    old.coordinators(),
 		    Reference<ClusterConnectionMemoryRecord>(new ClusterConnectionMemoryRecord(old)),
 		    result));
-		*desiredCoordinators = _desiredCoordinators;
+		conn->coords = desiredCoordinatorAddresses;
 	}
 
 	if (result != CoordinatorsResult::SUCCESS)
 		return result;
 
-	if (!desiredCoordinators->size())
+	if (!conn->coordinators().size())
 		return CoordinatorsResult::INVALID_NETWORK_ADDRESSES;
 
-	std::sort(desiredCoordinators->begin(), desiredCoordinators->end());
+	std::sort(conn->coords.begin(), conn->coords.end());
+	std::sort(conn->hostnames.begin(), conn->hostnames.end());
 
 	std::string newName = change->getDesiredClusterKeyName();
 	if (newName.empty())
 		newName = old.clusterKeyName().toString();
 
-	if (old.coordinators() == *desiredCoordinators && old.clusterKeyName() == newName)
+	if (old.coordinators() == conn->coordinators() && old.clusterKeyName() == newName)
 		return CoordinatorsResult::SAME_NETWORK_ADDRESSES;
 
-	state ClusterConnectionString conn(*desiredCoordinators,
-	                                   StringRef(newName + ':' + deterministicRandom()->randomAlphaNumeric(32)));
+	std::string key(newName + ':' + deterministicRandom()->randomAlphaNumeric(32));
+	conn->parseKey(key);
+	conn->resetConnectionString();
 
 	if (g_network->isSimulated()) {
 		int i = 0;
 		int protectedCount = 0;
-		while ((protectedCount < ((desiredCoordinators->size() / 2) + 1)) && (i < desiredCoordinators->size())) {
-			auto process = g_simulator.getProcessByAddress((*desiredCoordinators)[i]);
+		while ((protectedCount < ((conn->coordinators().size() / 2) + 1)) && (i < conn->coordinators().size())) {
+			auto process = g_simulator.getProcessByAddress(conn->coordinators()[i]);
 			auto addresses = process->addresses;
 
 			if (!process->isReliable()) {
@@ -832,14 +861,14 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 			if (addresses.secondaryAddress.present()) {
 				g_simulator.protectedAddresses.insert(process->addresses.secondaryAddress.get());
 			}
-			TraceEvent("ProtectCoordinator").detail("Address", (*desiredCoordinators)[i]).backtrace();
+			TraceEvent("ProtectCoordinator").detail("Address", conn->coordinators()[i]).backtrace();
 			protectedCount++;
 			i++;
 		}
 	}
 
 	std::vector<Future<Optional<LeaderInfo>>> leaderServers;
-	ClientCoordinators coord(Reference<ClusterConnectionMemoryRecord>(new ClusterConnectionMemoryRecord(conn)));
+	ClientCoordinators coord(Reference<ClusterConnectionMemoryRecord>(new ClusterConnectionMemoryRecord(*conn)));
 
 	leaderServers.reserve(coord.clientLeaderServers.size());
 	for (int i = 0; i < coord.clientLeaderServers.size(); i++)
@@ -851,7 +880,7 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 		when(wait(waitForAll(leaderServers))) {}
 		when(wait(delay(5.0))) { return CoordinatorsResult::COORDINATOR_UNREACHABLE; }
 	}
-	tr->set(coordinatorsKey, conn.toString());
+	tr->set(coordinatorsKey, conn->toString());
 	return Optional<CoordinatorsResult>();
 }
 
@@ -1273,7 +1302,7 @@ ACTOR Future<Void> excludeServers(Database cx, std::vector<AddressExclusion> ser
 				wait(ryw.commit());
 				return Void();
 			} catch (Error& e) {
-				TraceEvent("ExcludeServersError").error(e, true);
+				TraceEvent("ExcludeServersError").errorUnsuppressed(e);
 				wait(ryw.onError(e));
 			}
 		}
@@ -1285,7 +1314,7 @@ ACTOR Future<Void> excludeServers(Database cx, std::vector<AddressExclusion> ser
 				wait(tr.commit());
 				return Void();
 			} catch (Error& e) {
-				TraceEvent("ExcludeServersError").error(e, true);
+				TraceEvent("ExcludeServersError").errorUnsuppressed(e);
 				wait(tr.onError(e));
 			}
 		}
@@ -1336,7 +1365,7 @@ ACTOR Future<Void> excludeLocalities(Database cx, std::unordered_set<std::string
 				wait(ryw.commit());
 				return Void();
 			} catch (Error& e) {
-				TraceEvent("ExcludeLocalitiesError").error(e, true);
+				TraceEvent("ExcludeLocalitiesError").errorUnsuppressed(e);
 				wait(ryw.onError(e));
 			}
 		}
@@ -1348,7 +1377,7 @@ ACTOR Future<Void> excludeLocalities(Database cx, std::unordered_set<std::string
 				wait(tr.commit());
 				return Void();
 			} catch (Error& e) {
-				TraceEvent("ExcludeLocalitiesError").error(e, true);
+				TraceEvent("ExcludeLocalitiesError").errorUnsuppressed(e);
 				wait(tr.onError(e));
 			}
 		}
@@ -1365,9 +1394,9 @@ ACTOR Future<Void> includeServers(Database cx, std::vector<AddressExclusion> ser
 				for (auto& s : servers) {
 					if (!s.isValid()) {
 						if (failed) {
-							ryw.clear(SpecialKeySpace::getManamentApiCommandRange("failed"));
+							ryw.clear(SpecialKeySpace::getManagementApiCommandRange("failed"));
 						} else {
-							ryw.clear(SpecialKeySpace::getManamentApiCommandRange("exclude"));
+							ryw.clear(SpecialKeySpace::getManagementApiCommandRange("exclude"));
 						}
 					} else {
 						Key addr =
@@ -1392,7 +1421,7 @@ ACTOR Future<Void> includeServers(Database cx, std::vector<AddressExclusion> ser
 				wait(ryw.commit());
 				return Void();
 			} catch (Error& e) {
-				TraceEvent("IncludeServersError").error(e, true);
+				TraceEvent("IncludeServersError").errorUnsuppressed(e);
 				wait(ryw.onError(e));
 			}
 		}
@@ -1449,7 +1478,7 @@ ACTOR Future<Void> includeServers(Database cx, std::vector<AddressExclusion> ser
 				wait(tr.commit());
 				return Void();
 			} catch (Error& e) {
-				TraceEvent("IncludeServersError").error(e, true);
+				TraceEvent("IncludeServersError").errorUnsuppressed(e);
 				wait(tr.onError(e));
 			}
 		}
@@ -1467,9 +1496,9 @@ ACTOR Future<Void> includeLocalities(Database cx, std::vector<std::string> local
 				ryw.setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 				if (includeAll) {
 					if (failed) {
-						ryw.clear(SpecialKeySpace::getManamentApiCommandRange("failedlocality"));
+						ryw.clear(SpecialKeySpace::getManagementApiCommandRange("failedlocality"));
 					} else {
-						ryw.clear(SpecialKeySpace::getManamentApiCommandRange("excludedlocality"));
+						ryw.clear(SpecialKeySpace::getManagementApiCommandRange("excludedlocality"));
 					}
 				} else {
 					for (const auto& l : localities) {
@@ -1487,7 +1516,7 @@ ACTOR Future<Void> includeLocalities(Database cx, std::vector<std::string> local
 				wait(ryw.commit());
 				return Void();
 			} catch (Error& e) {
-				TraceEvent("IncludeLocalitiesError").error(e, true);
+				TraceEvent("IncludeLocalitiesError").errorUnsuppressed(e);
 				wait(ryw.onError(e));
 			}
 		}
@@ -1535,7 +1564,7 @@ ACTOR Future<Void> includeLocalities(Database cx, std::vector<std::string> local
 				wait(tr.commit());
 				return Void();
 			} catch (Error& e) {
-				TraceEvent("IncludeLocalitiesError").error(e, true);
+				TraceEvent("IncludeLocalitiesError").errorUnsuppressed(e);
 				wait(tr.onError(e));
 			}
 		}
@@ -1907,7 +1936,7 @@ ACTOR Future<Void> mgmtSnapCreate(Database cx, Standalone<StringRef> snapCmd, UI
 		TraceEvent("SnapCreateSucceeded").detail("snapUID", snapUID);
 		return Void();
 	} catch (Error& e) {
-		TraceEvent(SevWarn, "SnapCreateFailed").detail("snapUID", snapUID).error(e);
+		TraceEvent(SevWarn, "SnapCreateFailed").error(e).detail("snapUID", snapUID);
 		throw;
 	}
 }
@@ -2198,7 +2227,7 @@ ACTOR Future<Void> advanceVersion(Database cx, Version v) {
 				tr.set(minRequiredCommitVersionKey, BinaryWriter::toValue(v + 1, Unversioned()));
 				wait(tr.commit());
 			} else {
-				printf("Current read version is %ld\n", rv);
+				fmt::print("Current read version is {}\n", rv);
 				return Void();
 			}
 		} catch (Error& e) {

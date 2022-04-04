@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -50,7 +50,7 @@ Future<T> traceAfter(Future<T> what, const char* type, const char* key, X value,
 		return val;
 	} catch (Error& e) {
 		if (traceErrors)
-			TraceEvent(type).error(e, true).detail(key, value);
+			TraceEvent(type).errorUnsuppressed(e).detail(key, value);
 		throw;
 	}
 }
@@ -67,7 +67,7 @@ Future<T> traceAfterCall(Future<T> what, const char* type, const char* key, X fu
 		return val;
 	} catch (Error& e) {
 		if (traceErrors)
-			TraceEvent(type).error(e, true);
+			TraceEvent(type).errorUnsuppressed(e);
 		throw;
 	}
 }
@@ -80,7 +80,7 @@ Future<Optional<T>> stopAfter(Future<T> what) {
 		ret = Optional<T>(_);
 	} catch (Error& e) {
 		bool ok = e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_delete ||
-		          e.code() == error_code_actor_cancelled;
+		          e.code() == error_code_actor_cancelled || e.code() == error_code_please_reboot_remote_kv_store;
 		TraceEvent(ok ? SevInfo : SevError, "StopAfterError").error(e);
 		if (!ok) {
 			fprintf(stderr, "Fatal Error: %s\n", e.what());
@@ -221,6 +221,7 @@ Future<T> delayed(Future<T> what, double time = 0.0, TaskPriority taskID = TaskP
 	}
 }
 
+// wait <interval> then call what() in a loop forever
 ACTOR template <class Func>
 Future<Void> recurring(Func what, double interval, TaskPriority taskID = TaskPriority::DefaultDelay) {
 	loop choose {
@@ -1117,6 +1118,12 @@ ACTOR template <class T>
 Future<T> tagError(Future<Void> future, Error e) {
 	wait(future);
 	throw e;
+}
+
+ACTOR template <class T>
+Future<T> detach(Future<T> f) {
+	T x = wait(f);
+	return x;
 }
 
 // If the future is ready, yields and returns. Otherwise, returns when future is set.

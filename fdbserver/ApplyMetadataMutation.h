@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -72,8 +72,9 @@ inline bool isMetadataMutation(MutationRef const& m) {
 	// FIXME: This is conservative - not everything in system keyspace is necessarily processed by
 	// applyMetadataMutations
 	if (m.type == MutationRef::SetValue) {
-		return m.param1.size() && m.param1[0] == systemKeys.begin[0] &&
-		       !m.param1.startsWith(nonMetadataSystemKeys.begin);
+		return (m.param1.size() && m.param1[0] == systemKeys.begin[0] &&
+		        !m.param1.startsWith(nonMetadataSystemKeys.begin)) ||
+		       m.param1.startsWith(changeFeedPrefix);
 	} else if (m.type == MutationRef::ClearRange) {
 		return m.param2.size() > 1 && m.param2[0] == systemKeys.begin[0] &&
 		       !nonMetadataSystemKeys.contains(KeyRangeRef(m.param1, m.param2));
@@ -93,6 +94,7 @@ void applyMetadataMutations(SpanID const& spanContext,
                             const VectorRef<MutationRef>& mutations,
                             LogPushData* pToCommit,
                             bool& confChange,
+                            Version version,
                             Version popVersion,
                             bool initialCommit);
 void applyMetadataMutations(SpanID const& spanContext,

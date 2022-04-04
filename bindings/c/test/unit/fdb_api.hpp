@@ -135,6 +135,18 @@ private:
 	KeyValueArrayFuture(FDBFuture* f) : Future(f) {}
 };
 
+class MappedKeyValueArrayFuture : public Future {
+public:
+	// Call this function instead of fdb_future_get_mappedkeyvalue_array when using
+	// the MappedKeyValueArrayFuture type. Its behavior is identical to
+	// fdb_future_get_mappedkeyvalue_array.
+	fdb_error_t get(const FDBMappedKeyValue** out_kv, int* out_count, fdb_bool_t* out_more);
+
+private:
+	friend class Transaction;
+	MappedKeyValueArrayFuture(FDBFuture* f) : Future(f) {}
+};
+
 class KeyRangeArrayFuture : public Future {
 public:
 	// Call this function instead of fdb_future_get_keyrange_array when using
@@ -191,6 +203,20 @@ public:
 	                                   int snap_command_length);
 };
 
+class Tenant final {
+public:
+	Tenant(FDBDatabase* db, const uint8_t* name, int name_length);
+	~Tenant();
+	Tenant(const Tenant&) = delete;
+	Tenant& operator=(const Tenant&) = delete;
+	Tenant(Tenant&&) = delete;
+	Tenant& operator=(Tenant&&) = delete;
+
+private:
+	friend class Transaction;
+	FDBTenant* tenant;
+};
+
 // Wrapper around FDBTransaction, providing the same set of calls as the C API.
 // Handles cleanup of memory, removing the need to call
 // fdb_transaction_destroy.
@@ -198,6 +224,7 @@ class Transaction final {
 public:
 	// Given an FDBDatabase, initializes a new transaction.
 	Transaction(FDBDatabase* db);
+	Transaction(Tenant& tenant);
 	~Transaction();
 
 	// Wrapper around fdb_transaction_reset.
@@ -254,7 +281,7 @@ public:
 
 	// WARNING: This feature is considered experimental at this time. It is only allowed when using snapshot isolation
 	// AND disabling read-your-writes. Returns a future which will be set to an FDBKeyValue array.
-	KeyValueArrayFuture get_range_and_flat_map(const uint8_t* begin_key_name,
+	MappedKeyValueArrayFuture get_mapped_range(const uint8_t* begin_key_name,
 	                                           int begin_key_name_length,
 	                                           fdb_bool_t begin_or_equal,
 	                                           int begin_offset,

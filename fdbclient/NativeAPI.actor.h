@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -132,12 +132,12 @@ void setupNetwork(uint64_t transportId = 0, UseMetrics = UseMetrics::False);
 //  call stopNetwork (from a non-networking thread) can cause the runNetwork() call to
 //  return.
 //
-// Throws network_already_setup if g_network has already been initalized
+// Throws network_already_setup if g_network has already been initialized
 void runNetwork();
 
 // See above.  Can be called from a thread that is not the "networking thread"
 //
-// Throws network_not_setup if g_network has not been initalized
+// Throws network_not_setup if g_network has not been initialized
 void stopNetwork();
 
 struct StorageMetrics;
@@ -157,6 +157,9 @@ struct TransactionOptions {
 	bool includePort : 1;
 	bool reportConflictingKeys : 1;
 	bool expensiveClearCostEstimation : 1;
+	bool useGrvCache : 1;
+	bool skipGrvCache : 1;
+	bool rawAccess : 1;
 
 	TransactionPriority priority;
 
@@ -234,6 +237,7 @@ struct Watch : public ReferenceCounted<Watch>, NonCopyable {
 
 struct TransactionState : ReferenceCounted<TransactionState> {
 	Database cx;
+	int64_t tenantId = TenantInfo::INVALID_TENANT;
 	Reference<TransactionLogInfo> trLogInfo;
 	TransactionOptions options;
 
@@ -255,19 +259,29 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	std::shared_ptr<CoalescedKeyRangeMap<Value>> conflictingKeys;
 
 	// Only available so that Transaction can have a default constructor, for use in state variables
-	TransactionState(TaskPriority taskID, SpanID spanID) : taskID(taskID), spanID(spanID) {}
+	TransactionState(TaskPriority taskID, SpanID spanID) : taskID(taskID), spanID(spanID), tenantSet(false) {}
 
 	// VERSION_VECTOR changed default values of readVersionObtainedFromGrvProxy
-	TransactionState(Database cx, TaskPriority taskID, SpanID spanID, Reference<TransactionLogInfo> trLogInfo)
-	  : cx(cx), trLogInfo(trLogInfo), options(cx), taskID(taskID), spanID(spanID),
-	    readVersionObtainedFromGrvProxy(true) {}
+	TransactionState(Database cx,
+	                 Optional<TenantName> tenant,
+	                 TaskPriority taskID,
+	                 SpanID spanID,
+	                 Reference<TransactionLogInfo> trLogInfo);
 
 	Reference<TransactionState> cloneAndReset(Reference<TransactionLogInfo> newTrLogInfo, bool generateNewSpan) const;
+	TenantInfo getTenantInfo();
+
+	Optional<TenantName> const& tenant();
+	bool hasTenant() const;
+
+private:
+	Optional<TenantName> tenant_;
+	bool tenantSet;
 };
 
 class Transaction : NonCopyable {
 public:
-	explicit Transaction(Database const& cx);
+	explicit Transaction(Database const& cx, Optional<TenantName> const& tenant = Optional<TenantName>());
 	~Transaction();
 
 	void setVersion(Version v);
@@ -310,13 +324,23 @@ public:
 		                reverse);
 	}
 
-	[[nodiscard]] Future<RangeResult> getRangeAndFlatMap(const KeySelector& begin,
-	                                                     const KeySelector& end,
-	                                                     const Key& mapper,
-	                                                     GetRangeLimits limits,
-	                                                     Snapshot = Snapshot::False,
-	                                                     Reverse = Reverse::False);
+	[[nodiscard]] Future<MappedRangeResult> getMappedRange(const KeySelector& begin,
+	                                                       const KeySelector& end,
+	                                                       const Key& mapper,
+	                                                       GetRangeLimits limits,
+	                                                       Snapshot = Snapshot::False,
+	                                                       Reverse = Reverse::False);
 
+private:
+	template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply, class RangeResultFamily>
+	Future<RangeResultFamily> getRangeInternal(const KeySelector& begin,
+	                                           const KeySelector& end,
+	                                           const Key& mapper,
+	                                           GetRangeLimits limits,
+	                                           Snapshot snapshot,
+	                                           Reverse reverse);
+
+public:
 	// A method for streaming data from the storage server that is more efficient than getRange when reading large
 	// amounts of data
 	[[nodiscard]] Future<Void> getRangeStream(const PromiseStream<Standalone<RangeResultRef>>& results,
@@ -434,6 +458,8 @@ public:
 		return Standalone<VectorRef<KeyRangeRef>>(tr.transaction.write_conflict_ranges, tr.arena);
 	}
 
+	Optional<TenantName> getTenant() { return trState->tenant(); }
+
 	Reference<TransactionState> trState;
 	std::vector<Reference<Watch>> watches;
 	Span span;
@@ -475,6 +501,25 @@ int64_t extractIntOption(Optional<StringRef> value,
 // states: coordinator, TLog and storage state
 ACTOR Future<Void> snapCreate(Database cx, Standalone<StringRef> snapCmd, UID snapUID);
 
+// Adds necessary mutation(s) to the transaction, so that *one* checkpoint will be created for
+// each and every shards overlapping with `range`. Each checkpoint will be created at a random
+// storage server for each shard.
+// All checkpoint(s) will be created at the transaction's commit version.
+Future<Void> createCheckpoint(Transaction* tr, KeyRangeRef range, CheckpointFormat format);
+
+// Same as above.
+Future<Void> createCheckpoint(Reference<ReadYourWritesTransaction> tr, KeyRangeRef range, CheckpointFormat format);
+
+// Gets checkpoint metadata for `keys` at the specific version, with the particular format.
+// One CheckpointMetaData will be returned for each distinctive shard.
+// The collective keyrange of the returned checkpoint(s) is a super-set of `keys`.
+// checkpoint_not_found() error will be returned if the specific checkpoint(s) cannot be found.
+ACTOR Future<std::vector<CheckpointMetaData>> getCheckpointMetaData(Database cx,
+                                                                    KeyRange keys,
+                                                                    Version version,
+                                                                    CheckpointFormat format,
+                                                                    double timeout = 5.0);
+
 // Checks with Data Distributor that it is safe to mark all servers in exclusions as failed
 ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion> exclusions);
 
@@ -485,6 +530,10 @@ inline uint64_t getWriteOperationCost(uint64_t bytes) {
 // Create a transaction to set the value of system key \xff/conf/perpetual_storage_wiggle. If enable == true, the value
 // will be 1. Otherwise, the value will be 0.
 ACTOR Future<Void> setPerpetualStorageWiggle(Database cx, bool enable, LockAware lockAware = LockAware::False);
+
+ACTOR Future<std::vector<std::pair<UID, StorageWiggleValue>>> readStorageWiggleValues(Database cx,
+                                                                                      bool primary,
+                                                                                      bool use_system_priority);
 
 #include "flow/unactorcompiler.h"
 #endif

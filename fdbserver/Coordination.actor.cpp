@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 
+#include <cstdint>
+
 #include "fdbclient/ConfigTransactionInterface.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/ConfigNode.h"
@@ -31,9 +33,9 @@
 #include "flow/UnitTest.h"
 #include "flow/IndexedSet.h"
 #include "fdbclient/MonitorLeader.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 #include "flow/network.h"
-#include <cstdint>
+
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 // This module implements coordinationServer() and the interfaces in CoordinationInterface.h
 
@@ -796,7 +798,7 @@ ACTOR Future<Void> coordinationServer(std::string dataFolder,
 		     store.getError() || configDatabaseServer);
 		throw internal_error();
 	} catch (Error& e) {
-		TraceEvent("CoordinationServerError", myID).error(e, true);
+		TraceEvent("CoordinationServerError", myID).errorUnsuppressed(e);
 		throw;
 	}
 }

@@ -10,6 +10,7 @@ set(FDBRPC_SRCS
   AsyncFileNonDurable.actor.cpp
   AsyncFileWriteChecker.cpp
   FailureMonitor.actor.cpp
+  FlowProcess.actor.h
   FlowTransport.actor.cpp
   genericactors.actor.h
   genericactors.actor.cpp
@@ -36,7 +37,7 @@ set(FDBRPC_SRCS
   TraceFileIO.cpp
   TSSComparison.h)
 
-if(WITH_TLS AND NOT WIN32)
+if(WITH_TLS)
   set(FDBRPC_SRCS
     ${FDBRPC_SRCS}
     AsyncFileEncrypted.actor.cpp)

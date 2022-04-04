@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -165,6 +165,7 @@ public:
 	                                   Key backupTag,
 	                                   Standalone<VectorRef<KeyRangeRef>> backupRanges,
 	                                   Key bcUrl,
+	                                   Optional<std::string> proxy,
 	                                   Version targetVersion,
 	                                   LockDB lockDB,
 	                                   UID randomUID,
@@ -187,6 +188,7 @@ public:
 	                        Optional<Database> cxOrig,
 	                        Key tagName,
 	                        Key url,
+	                        Optional<std::string> proxy,
 	                        Standalone<VectorRef<KeyRangeRef>> ranges,
 	                        WaitForComplete = WaitForComplete::True,
 	                        Version targetVersion = ::invalidVersion,
@@ -202,6 +204,7 @@ public:
 	                        Optional<Database> cxOrig,
 	                        Key tagName,
 	                        Key url,
+	                        Optional<std::string> proxy,
 	                        WaitForComplete waitForComplete = WaitForComplete::True,
 	                        Version targetVersion = ::invalidVersion,
 	                        Verbose verbose = Verbose::True,
@@ -219,6 +222,7 @@ public:
 		               cxOrig,
 		               tagName,
 		               url,
+		               proxy,
 		               rangeRef,
 		               waitForComplete,
 		               targetVersion,
@@ -263,6 +267,7 @@ public:
 
 	Future<Void> submitBackup(Reference<ReadYourWritesTransaction> tr,
 	                          Key outContainer,
+	                          Optional<std::string> proxy,
 	                          int initialSnapshotIntervalSeconds,
 	                          int snapshotIntervalSeconds,
 	                          std::string const& tagName,
@@ -273,6 +278,7 @@ public:
 	                          Optional<std::string> const& encryptionKeyFileName = {});
 	Future<Void> submitBackup(Database cx,
 	                          Key outContainer,
+	                          Optional<std::string> proxy,
 	                          int initialSnapshotIntervalSeconds,
 	                          int snapshotIntervalSeconds,
 	                          std::string const& tagName,
@@ -284,6 +290,7 @@ public:
 		return runRYWTransactionFailIfLocked(cx, [=](Reference<ReadYourWritesTransaction> tr) {
 			return submitBackup(tr,
 			                    outContainer,
+			                    proxy,
 			                    initialSnapshotIntervalSeconds,
 			                    snapshotIntervalSeconds,
 			                    tagName,
@@ -720,20 +727,37 @@ template <>
 inline Tuple Codec<Reference<IBackupContainer>>::pack(Reference<IBackupContainer> const& bc) {
 	Tuple tuple;
 	tuple.append(StringRef(bc->getURL()));
+
 	if (bc->getEncryptionKeyFileName().present()) {
 		tuple.append(bc->getEncryptionKeyFileName().get());
+	} else {
+		tuple.append(StringRef());
 	}
+
+	if (bc->getProxy().present()) {
+		tuple.append(StringRef(bc->getProxy().get()));
+	} else {
+		tuple.append(StringRef());
+	}
+
 	return tuple;
 }
 template <>
 inline Reference<IBackupContainer> Codec<Reference<IBackupContainer>>::unpack(Tuple const& val) {
-	ASSERT(val.size() == 1 || val.size() == 2);
+	ASSERT(val.size() >= 1);
 	auto url = val.getString(0).toString();
+
 	Optional<std::string> encryptionKeyFileName;
-	if (val.size() == 2) {
+	if (val.size() > 1 && !val.getString(1).empty()) {
 		encryptionKeyFileName = val.getString(1).toString();
 	}
-	return IBackupContainer::openContainer(url, encryptionKeyFileName);
+
+	Optional<std::string> proxy;
+	if (val.size() > 2 && !val.getString(2).empty()) {
+		proxy = val.getString(2).toString();
+	}
+
+	return IBackupContainer::openContainer(url, proxy, encryptionKeyFileName);
 }
 
 class BackupConfig : public KeyBackedConfig {

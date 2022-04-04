@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,7 +27,7 @@ ConfigKey ConfigKeyRef::decodeKey(KeyRef const& key) {
 	try {
 		tuple = Tuple::unpack(key);
 	} catch (Error& e) {
-		TraceEvent(SevWarnAlways, "FailedToUnpackConfigKey").detail("Key", printable(key)).error(e);
+		TraceEvent(SevWarnAlways, "FailedToUnpackConfigKey").error(e).detail("Key", printable(key));
 		throw invalid_config_db_key();
 	}
 	if (tuple.size() != 2) {
@@ -96,7 +96,7 @@ public:
 
 struct ToStringFunc {
 	std::string operator()(int v) const { return format("int:%d", v); }
-	std::string operator()(int64_t v) const { return format("int64_t:%ld", v); }
+	std::string operator()(int64_t v) const { return format("int64_t:%lld", v); }
 	std::string operator()(bool v) const { return format("bool:%d", v); }
 	std::string operator()(ValueRef v) const { return "string:" + v.toString(); }
 	std::string operator()(double v) const { return format("double:%lf", v); }

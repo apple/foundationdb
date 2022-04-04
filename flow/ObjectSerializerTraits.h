@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -108,13 +108,17 @@ struct vector_like_traits : std::false_type {
 	using iterator = void;
 	using insert_iterator = void;
 
+	// The number of entries in this vector
 	template <class Context>
 	static size_t num_entries(VectorLike&, Context&);
-	template <class Context>
-	static void reserve(VectorLike&, size_t, Context&);
 
+	// Return an insert_iterator starting with an empty vector. |size| is the
+	// number of elements to be inserted. Implementations may want to allocate
+	// enough memory up front to hold |size| elements.
 	template <class Context>
-	static insert_iterator insert(VectorLike&, Context&);
+	static insert_iterator insert(VectorLike&, size_t size, Context&);
+
+	// Return an iterator to read from this vector.
 	template <class Context>
 	static iterator begin(const VectorLike&, Context&);
 };

@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,9 +32,10 @@
 #include <numeric>
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/KeyBackedTypes.h"
-#include "flow/actorcompiler.h" // has to be last include
 #include <inttypes.h>
 #include <map>
+
+#include "flow/actorcompiler.h" // has to be last include
 
 const Key DatabaseBackupAgent::keyAddPrefix = LiteralStringRef("add_prefix");
 const Key DatabaseBackupAgent::keyRemovePrefix = LiteralStringRef("remove_prefix");
@@ -2142,7 +2143,7 @@ struct StartFullBackupTaskFunc : TaskFuncBase {
 				wait(tr->commit());
 				break;
 			} catch (Error& e) {
-				TraceEvent("SetDestUidOrBeginVersionError").error(e, true);
+				TraceEvent("SetDestUidOrBeginVersionError").errorUnsuppressed(e);
 				wait(tr->onError(e));
 			}
 		}
@@ -2907,7 +2908,7 @@ public:
 				TraceEvent("DBA_Abort").detail("CommitVersion", tr->getCommittedVersion());
 				break;
 			} catch (Error& e) {
-				TraceEvent("DBA_AbortError").error(e, true);
+				TraceEvent("DBA_AbortError").errorUnsuppressed(e);
 				wait(tr->onError(e));
 			}
 		}

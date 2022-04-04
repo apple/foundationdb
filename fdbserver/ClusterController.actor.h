@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2020 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -137,6 +137,7 @@ public:
 		std::map<NetworkAddress, std::pair<double, OpenDatabaseRequest>> clientStatus;
 		Future<Void> clientCounter;
 		int clientCount;
+		AsyncVar<bool> blobGranulesEnabled;
 
 		DBInfo()
 		  : clientInfo(new AsyncVar<ClientDBInfo>()), serverInfo(new AsyncVar<ServerDBInfo>()),
@@ -147,7 +148,8 @@ public:
 		                               EnableLocalityLoadBalance::True,
 		                               TaskPriority::DefaultEndpoint,
 		                               LockAware::True)), // SOMEDAY: Locality!
-		    unfinishedRecoveries(0), logGenerations(0), cachePopulated(false), clientCount(0) {
+		    unfinishedRecoveries(0), logGenerations(0), cachePopulated(false), clientCount(0),
+		    blobGranulesEnabled(config.blobGranulesEnabled) {
 			clientCounter = countClients(this);
 		}
 
@@ -1896,8 +1898,8 @@ public:
 					throw;
 				}
 				TraceEvent(SevWarn, "AttemptingRecruitmentInRemoteDc", id)
-				    .detail("SetPrimaryDesired", setPrimaryDesired)
-				    .error(e);
+				    .error(e)
+				    .detail("SetPrimaryDesired", setPrimaryDesired);
 				auto reply = findWorkersForConfigurationFromDC(req, regions[1].dcId, checkGoodRecruitment);
 				if (!setPrimaryDesired) {
 					std::vector<Optional<Key>> dcPriority;
@@ -3225,6 +3227,7 @@ public:
 	// recruitX is used to signal when role X needs to be (re)recruited.
 	// recruitingXID is used to track the ID of X's interface which is being recruited.
 	// We use AsyncVars to kill (i.e. halt) singletons that have been replaced.
+	double lastRecruitTime = 0;
 	AsyncVar<bool> recruitDistributor;
 	Optional<UID> recruitingDistributorID;
 	AsyncVar<bool> recruitRatekeeper;

@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -384,15 +384,15 @@ struct SpecialTraceMetricType
 
 TRACE_METRIC_TYPE(double, double);
 
-struct TraceEvent {
-	TraceEvent();
-	TraceEvent(const char* type, UID id = UID()); // Assumes SevInfo severity
-	TraceEvent(Severity, const char* type, UID id = UID());
-	TraceEvent(struct TraceInterval&, UID id = UID());
-	TraceEvent(Severity severity, struct TraceInterval& interval, UID id = UID());
-
-	TraceEvent(TraceEvent&& ev);
-	TraceEvent& operator=(TraceEvent&& ev);
+// The BaseTraceEvent class is the parent class of TraceEvent and provides all functionality on the TraceEvent except
+// for the functionality that can be used to suppress the trace event.
+//
+// This class is not intended to be used directly. Instead, this type is returned from most calls on trace events
+// (e.g. detail). This is done to disallow calling suppression functions anywhere but first in a chained sequence of
+// trace event function calls.
+struct BaseTraceEvent {
+	BaseTraceEvent(BaseTraceEvent&& ev);
+	BaseTraceEvent& operator=(BaseTraceEvent&& ev);
 
 	static void setNetworkThread();
 	static bool isNetworkThread();
@@ -400,16 +400,8 @@ struct TraceEvent {
 	static double getCurrentTime();
 	static std::string printRealTime(double time);
 
-	// Must be called directly after constructing the trace event
-	TraceEvent& error(const class Error& e, bool includeCancelled = false) {
-		if (enabled) {
-			return errorImpl(e, includeCancelled);
-		}
-		return *this;
-	}
-
 	template <class T>
-	typename std::enable_if<Traceable<T>::value, TraceEvent&>::type detail(std::string&& key, const T& value) {
+	typename std::enable_if<Traceable<T>::value, BaseTraceEvent&>::type detail(std::string&& key, const T& value) {
 		if (enabled && init()) {
 			auto s = Traceable<T>::toString(value);
 			addMetric(key.c_str(), value, s);
@@ -419,7 +411,7 @@ struct TraceEvent {
 	}
 
 	template <class T>
-	typename std::enable_if<Traceable<T>::value, TraceEvent&>::type detail(const char* key, const T& value) {
+	typename std::enable_if<Traceable<T>::value, BaseTraceEvent&>::type detail(const char* key, const T& value) {
 		if (enabled && init()) {
 			auto s = Traceable<T>::toString(value);
 			addMetric(key, value, s);
@@ -428,16 +420,19 @@ struct TraceEvent {
 		return *this;
 	}
 	template <class T>
-	typename std::enable_if<std::is_enum<T>::value, TraceEvent&>::type detail(const char* key, T value) {
+	typename std::enable_if<std::is_enum<T>::value, BaseTraceEvent&>::type detail(const char* key, T value) {
 		if (enabled && init()) {
 			setField(key, int64_t(value));
 			return detailImpl(std::string(key), format("%d", value), false);
 		}
 		return *this;
 	}
-	TraceEvent& detailf(std::string key, const char* valueFormat, ...);
+	BaseTraceEvent& detailf(std::string key, const char* valueFormat, ...);
 
-private:
+protected:
+	BaseTraceEvent();
+	BaseTraceEvent(Severity, const char* type, UID id = UID());
+
 	template <class T>
 	typename std::enable_if<SpecialTraceMetricType<T>::value, void>::type addMetric(const char* key,
 	                                                                                const T& value,
@@ -457,38 +452,32 @@ private:
 	void setField(const char* key, const std::string& value);
 	void setThreadId();
 
-	TraceEvent& errorImpl(const class Error& e, bool includeCancelled = false);
 	// Private version of detailf that does NOT write to the eventMetric.  This is to be used by other detail methods
 	// which can write field metrics of a more appropriate type than string but use detailf() to add to the TraceEvent.
-	TraceEvent& detailfNoMetric(std::string&& key, const char* valueFormat, ...);
-	TraceEvent& detailImpl(std::string&& key, std::string&& value, bool writeEventMetricField = true);
+	BaseTraceEvent& detailfNoMetric(std::string&& key, const char* valueFormat, ...);
+	BaseTraceEvent& detailImpl(std::string&& key, std::string&& value, bool writeEventMetricField = true);
 
 public:
-	TraceEvent& backtrace(const std::string& prefix = "");
-	TraceEvent& trackLatest(const std::string& trackingKey);
-	TraceEvent& sample(double sampleRate, bool logSampleRate = true);
-
+	BaseTraceEvent& backtrace(const std::string& prefix = "");
+	BaseTraceEvent& trackLatest(const std::string& trackingKey);
 	// Sets the maximum length a field can be before it gets truncated. A value of 0 uses the default, a negative value
 	// disables truncation. This should be called before the field whose length you want to change, and it can be
 	// changed multiple times in a single event.
-	TraceEvent& setMaxFieldLength(int maxFieldLength);
+	BaseTraceEvent& setMaxFieldLength(int maxFieldLength);
 
 	int getMaxFieldLength() const;
 
 	// Sets the maximum event length before the event gets suppressed and a warning is logged. A value of 0 uses the
 	// default, a negative value disables length suppression. This should be called before adding details.
-	TraceEvent& setMaxEventLength(int maxEventLength);
+	BaseTraceEvent& setMaxEventLength(int maxEventLength);
 
 	int getMaxEventLength() const;
 
-	// Cannot call other functions which could disable the trace event afterwords
-	TraceEvent& suppressFor(double duration, bool logSuppressedEventCount = true);
-
-	TraceEvent& GetLastError();
+	BaseTraceEvent& GetLastError();
 
 	bool isEnabled() const { return enabled; }
 
-	TraceEvent& setErrorKind(ErrorKind errorKind);
+	BaseTraceEvent& setErrorKind(ErrorKind errorKind);
 
 	explicit operator bool() const { return enabled; }
 
@@ -496,7 +485,7 @@ public:
 
 	void disable() { enabled = false; } // Disables the trace event so it doesn't get
 
-	~TraceEvent(); // Actually logs the event
+	virtual ~BaseTraceEvent(); // Actually logs the event
 
 	// Return the number of invocations of TraceEvent() at the specified logging level.
 	static unsigned long CountEventsLoggedAt(Severity);
@@ -505,7 +494,7 @@ public:
 
 	const TraceEventFields& getFields() const { return fields; }
 
-private:
+protected:
 	bool initialized;
 	bool enabled;
 	bool logged;
@@ -529,6 +518,36 @@ private:
 
 	bool init();
 	bool init(struct TraceInterval&);
+};
+
+// The TraceEvent class provides the implementation for BaseTraceEvent. The only functions that should be implemented
+// here are those that must be called first in a trace event call sequence, such as the suppression functions.
+struct TraceEvent : public BaseTraceEvent {
+	TraceEvent() {}
+	TraceEvent(const char* type, UID id = UID()); // Assumes SevInfo severity
+	TraceEvent(Severity, const char* type, UID id = UID());
+	TraceEvent(struct TraceInterval&, UID id = UID());
+	TraceEvent(Severity severity, struct TraceInterval& interval, UID id = UID());
+
+	BaseTraceEvent& error(const class Error& e) {
+		if (enabled) {
+			return errorImpl(e, false);
+		}
+		return *this;
+	}
+
+	TraceEvent& errorUnsuppressed(const class Error& e) {
+		if (enabled) {
+			return errorImpl(e, true);
+		}
+		return *this;
+	}
+
+	BaseTraceEvent& sample(double sampleRate, bool logSampleRate = true);
+	BaseTraceEvent& suppressFor(double duration, bool logSuppressedEventCount = true);
+
+private:
+	TraceEvent& errorImpl(const class Error& e, bool includeCancelled = false);
 };
 
 class StringRef;

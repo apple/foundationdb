@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -144,18 +144,31 @@ struct Hostname {
 	Hostname(std::string host, std::string service, bool isTLS) : host(host), service(service), isTLS(isTLS) {}
 	Hostname() : host(""), service(""), isTLS(false) {}
 
+	bool operator==(const Hostname& r) const { return host == r.host && service == r.service && isTLS == r.isTLS; }
+	bool operator!=(const Hostname& r) const { return !(*this == r); }
+	bool operator<(const Hostname& r) const {
+		if (isTLS != r.isTLS)
+			return isTLS < r.isTLS;
+		else if (host != r.host)
+			return host < r.host;
+		return service < r.service;
+	}
+	bool operator>(const Hostname& r) const { return r < *this; }
+	bool operator<=(const Hostname& r) const { return !(*this > r); }
+	bool operator>=(const Hostname& r) const { return !(*this < r); }
+
 	// Allow hostnames in forms like following:
 	//    hostname:1234
 	//    host.name:1234
 	//    host-name:1234
 	//    host-name_part1.host-name_part2:1234:tls
-	static bool isHostname(std::string& s) {
+	static bool isHostname(const std::string& s) {
 		std::regex validation("^([\\w\\-]+\\.?)+:([\\d]+){1,}(:tls)?$");
 		std::regex ipv4Validation("^([\\d]{1,3}\\.?){4,}:([\\d]+){1,}(:tls)?$");
 		return !std::regex_match(s, ipv4Validation) && std::regex_match(s, validation);
 	}
 
-	static Hostname parse(std::string const& str);
+	static Hostname parse(const std::string& s);
 
 	std::string toString() const { return host + ":" + service + (isTLS ? ":tls" : ""); }
 };
@@ -263,7 +276,7 @@ struct NetworkAddress {
 	  : NetworkAddress(ip, port, false, false, NetworkAddressFromHostname::False) {}
 
 	bool operator==(NetworkAddress const& r) const { return ip == r.ip && port == r.port && flags == r.flags; }
-	bool operator!=(NetworkAddress const& r) const { return ip != r.ip || port != r.port || flags != r.flags; }
+	bool operator!=(NetworkAddress const& r) const { return !(*this == r); }
 	bool operator<(NetworkAddress const& r) const {
 		if (flags != r.flags)
 			return flags < r.flags;
@@ -495,6 +508,10 @@ public:
 	virtual NetworkAddress getPeerAddress() const = 0;
 
 	virtual UID getDebugID() const = 0;
+
+	// At present, implemented by Sim2Conn where we want to disable bits flip for connections between parent process and
+	// child process, also reduce latency for this kind of connection
+	virtual bool isStableConnection() const { throw unsupported_operation(); }
 };
 
 class IListener {
@@ -554,6 +571,10 @@ public:
 	virtual double timer() = 0;
 	// A wrapper for directly getting the system time. The time returned by now() only updates in the run loop,
 	// so it cannot be used to measure times of functions that do not have wait statements.
+
+	// Simulation version of timer_int for convenience, based on timer()
+	// Returns epoch nanoseconds
+	uint64_t timer_int() { return (uint64_t)(g_network->timer() * 1e9); }
 
 	virtual double timer_monotonic() = 0;
 	// Similar to timer, but monotonic

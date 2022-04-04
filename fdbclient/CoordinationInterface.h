@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -93,7 +93,11 @@ public:
 	// This one should only be used when resolving asynchronously is impossible. For all other cases, resolveHostnames()
 	// should be preferred.
 	void resolveHostnamesBlocking();
+	// This function derives the member connectionString from the current key, coordinators and hostnames.
+	void resetConnectionString();
+
 	void resetToUnresolved();
+	void parseKey(const std::string& key);
 
 	ConnectionStringStatus status = RESOLVED;
 	AsyncTrigger resolveFinish;
@@ -103,7 +107,6 @@ public:
 
 private:
 	void parseConnString();
-	void parseKey(const std::string& key);
 	Key key, keyDesc;
 	std::string connectionString;
 };

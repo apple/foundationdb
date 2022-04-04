@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,6 +35,7 @@ public:
 
 	double SYSTEM_MONITOR_INTERVAL;
 	double NETWORK_BUSYNESS_MONITOR_INTERVAL; // The interval in which we should update the network busyness metric
+	double TSS_METRICS_LOGGING_INTERVAL;
 
 	double FAILURE_MAX_DELAY;
 	double FAILURE_MIN_DELAY;
@@ -48,6 +49,7 @@ public:
 	double MAX_GENERATIONS_OVERRIDE;
 	double MAX_GENERATIONS_SIM;
 
+	double COORDINATOR_HOSTNAME_RESOLVE_DELAY;
 	double COORDINATOR_RECONNECTION_DELAY;
 	int CLIENT_EXAMPLE_AMOUNT;
 	double MAX_CLIENT_STATUS_AGE;
@@ -60,6 +62,7 @@ public:
 	double WRONG_SHARD_SERVER_DELAY; // SOMEDAY: This delay can limit performance of retrieving data when the cache is
 	                                 // mostly wrong (e.g. dumping the database after a test)
 	double FUTURE_VERSION_RETRY_DELAY;
+	double UNKNOWN_TENANT_RETRY_DELAY;
 	int REPLY_BYTE_LIMIT;
 	double DEFAULT_BACKOFF;
 	double DEFAULT_MAX_BACKOFF;
@@ -78,6 +81,7 @@ public:
 	int64_t CHANGE_FEED_LOCATION_LIMIT;
 	int64_t CHANGE_FEED_CACHE_SIZE;
 	double CHANGE_FEED_POP_TIMEOUT;
+	int64_t CHANGE_FEED_STREAM_MIN_BYTES;
 
 	int MAX_BATCH_SIZE;
 	double GRV_BATCH_TIMEOUT;
@@ -87,6 +91,10 @@ public:
 	// When locationCache in DatabaseContext gets to be this size, items will be evicted
 	int LOCATION_CACHE_EVICTION_SIZE;
 	int LOCATION_CACHE_EVICTION_SIZE_SIM;
+	double LOCATION_CACHE_ENDPOINT_FAILURE_GRACE_PERIOD;
+	double LOCATION_CACHE_FAILED_ENDPOINT_RETRY_INTERVAL;
+	int TENANT_CACHE_EVICTION_SIZE;
+	int TENANT_CACHE_EVICTION_SIZE_SIM;
 
 	int GET_RANGE_SHARD_LIMIT;
 	int WARM_RANGE_SHARD_LIMIT;
@@ -121,6 +129,13 @@ public:
 	int64_t CORE_VERSIONSPERSECOND; // This is defined within the server but used for knobs based on server value
 	int LOG_RANGE_BLOCK_SIZE;
 	int MUTATION_BLOCK_SIZE;
+	double MAX_VERSION_CACHE_LAG; // The upper bound in seconds for OK amount of staleness when using a cached RV
+	double MAX_PROXY_CONTACT_LAG; // The upper bound in seconds for how often we want a response from the GRV proxies
+	double DEBUG_USE_GRV_CACHE_CHANCE; // Debug setting to change the chance for a regular GRV request to use the cache
+	bool FORCE_GRV_CACHE_OFF; // Panic button to turn off cache. Holds priority over other options.
+	double GRV_CACHE_RK_COOLDOWN; // Required number of seconds to pass after throttling to re-allow cache use
+	double GRV_SUSTAINED_THROTTLING_THRESHOLD; // If ALL GRV requests have been throttled in the last number of seconds
+	                                           // specified here, ratekeeper is throttling and not a false positive
 
 	// Taskbucket
 	double TASKBUCKET_LOGGING_DELAY;
@@ -255,8 +270,12 @@ public:
 	double BUSYNESS_SPIKE_START_THRESHOLD;
 	double BUSYNESS_SPIKE_SATURATED_THRESHOLD;
 
-	// blob granules
-	bool ENABLE_BLOB_GRANULES;
+	// multi-version client control
+	int MVC_CLIENTLIB_CHUNK_SIZE;
+	int MVC_CLIENTLIB_CHUNKS_PER_TRANSACTION;
+
+	// Blob Granules
+	int BG_MAX_GRANULE_PARALLELISM;
 
 	ClientKnobs(Randomize randomize);
 	void initialize(Randomize randomize);

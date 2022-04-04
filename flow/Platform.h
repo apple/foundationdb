@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -275,7 +275,7 @@ double
 timer(); // Returns the system real time clock with high precision.  May jump around when system time is adjusted!
 double timer_monotonic(); // Returns a high precision monotonic clock which is adjusted to be kind of similar to timer()
                           // at startup, but might not be a globally accurate time.
-uint64_t timer_int(); // Return timer as uint64_t
+uint64_t timer_int(); // Return timer as uint64_t representing epoch nanoseconds
 
 void getLocalTime(const time_t* timep, struct tm* result);
 
@@ -441,6 +441,8 @@ inline static uint64_t timestampCounter() {
 	asm volatile("mrs %0, cntvct_el0" : "=r"(timer));
 	return timer;
 }
+#elif defined(_powerpc64_)
+#include <emmintrin.h>
 #elif defined(__linux__)
 #include <x86intrin.h>
 #define timestampCounter() __rdtsc()
@@ -467,6 +469,12 @@ inline static uint64_t __rdtsc() {
 	return (lo | (hi << 32));
 }
 #endif
+#elif defined(__powerpc64__) || defined(__ppc64__)
+inline static uint64_t __rdtsc() {
+	uint64_t tb;
+	__asm__ volatile("mfspr %0, 268" : "=r"(tb));
+	return tb;
+}
 #endif
 
 #if defined(__linux__)
@@ -695,6 +703,9 @@ void* loadFunction(void* lib, const char* func_name);
 
 std::string exePath();
 
+// get the absolute path
+std::string getExecPath();
+
 #ifdef _WIN32
 inline static int ctzll(uint64_t value) {
 	unsigned long count = 0;
@@ -826,13 +837,15 @@ static inline uint64_t hwCrc32cU64(uint64_t crc, uint64_t v) {
 	return ret;
 }
 #else
+#ifndef __powerpc64__
 // Intel
 #define hwCrc32cU8(c, v) _mm_crc32_u8(c, v)
 #define hwCrc32cU32(c, v) _mm_crc32_u32(c, v)
 #define hwCrc32cU64(c, v) _mm_crc32_u64(c, v)
 #endif
+#endif
 
-#ifdef __aarch64__
+#if defined(__aarch64__)
 #define _MM_HINT_T0 0 /* dummy -- not used */
 #endif
 

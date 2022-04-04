@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,8 +36,9 @@
 #include "flow/DeterministicRandom.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/StorageServerInterface.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 #include "flow/network.h"
+
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 //#define SevCCheckInfo SevVerbose
 #define SevCCheckInfo SevInfo
@@ -296,7 +297,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					wait(::success(self->checkForExtraDataStores(cx, self)));
 
 					// Check blob workers are operating as expected
-					if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
+					if (configuration.blobGranulesEnabled) {
 						bool blobWorkersCorrect = wait(self->checkBlobWorkers(cx, configuration, self));
 						if (!blobWorkersCorrect)
 							self->testFailure("Blob workers incorrect");
@@ -430,9 +431,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			if (serverIndices.size()) {
 				KeyRangeRef range(cacheKey[k].key, (k < cacheKey.size() - 1) ? cacheKey[k + 1].key : allKeys.end);
 				cachedKeysLocationMap.insert(range, cacheServerInterfaces);
-				TraceEvent(SevDebug, "CheckCacheConsistency")
-				    .detail("CachedRange", range.toString())
-				    .detail("Index", k);
+				TraceEvent(SevDebug, "CheckCacheConsistency").detail("CachedRange", range).detail("Index", k);
 			}
 		}
 		// Second, insert corresponding storage servers into the list
@@ -545,8 +544,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 					wait(waitForAll(keyValueFutures));
 					TraceEvent(SevDebug, "CheckCacheConsistencyComparison")
-					    .detail("Begin", req.begin.toString())
-					    .detail("End", req.end.toString())
+					    .detail("Begin", req.begin)
+					    .detail("End", req.end)
 					    .detail("SSInterfaces", describe(iter_ss));
 
 					// Read the resulting entries
@@ -712,7 +711,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 						begin = firstGreaterThan(result[result.size() - 1].key);
 						ASSERT(begin.getKey() != allKeys.end);
 						lastStartSampleKey = lastSampleKey;
-						TraceEvent(SevDebug, "CacheConsistencyCheckNextBeginKey").detail("Key", begin.toString());
+						TraceEvent(SevDebug, "CacheConsistencyCheckNextBeginKey").detail("Key", begin);
 					} else
 						break;
 				} catch (Error& e) {
@@ -883,10 +882,16 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			for (int i = 0; i < commitProxyInfo->size(); i++)
 				keyServerLocationFutures.push_back(
 				    commitProxyInfo->get(i, &CommitProxyInterface::getKeyServersLocations)
-				        .getReplyUnlessFailedFor(
-				            GetKeyServerLocationsRequest(span.context, begin, end, limitKeyServers, false, Arena()),
-				            2,
-				            0));
+				        .getReplyUnlessFailedFor(GetKeyServerLocationsRequest(span.context,
+				                                                              Optional<TenantNameRef>(),
+				                                                              begin,
+				                                                              end,
+				                                                              limitKeyServers,
+				                                                              false,
+				                                                              latestVersion,
+				                                                              Arena()),
+				                                 2,
+				                                 0));
 
 			state bool keyServersInsertedForThisIteration = false;
 			choose {
@@ -1073,11 +1078,11 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				// If the storage server doesn't reply, then return -1
 				if (!reply.present()) {
 					TraceEvent("ConsistencyCheck_FailedToFetchMetrics")
+					    .error(reply.getError())
 					    .detail("Begin", printable(shard.begin))
 					    .detail("End", printable(shard.end))
 					    .detail("StorageServer", storageServers[i].id())
-					    .detail("IsTSS", storageServers[i].isTss() ? "True" : "False")
-					    .error(reply.getError());
+					    .detail("IsTSS", storageServers[i].isTss() ? "True" : "False");
 					estimatedBytes.push_back(-1);
 				}
 
@@ -1495,6 +1500,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 								    rangeResult.isError() ? rangeResult.getError() : rangeResult.get().error.get();
 
 								TraceEvent("ConsistencyCheck_StorageServerUnavailable")
+								    .errorUnsuppressed(e)
 								    .suppressFor(1.0)
 								    .detail("StorageServer", storageServers[j])
 								    .detail("ShardBegin", printable(range.begin))
@@ -1503,8 +1509,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 								    .detail("UID", storageServerInterfaces[j].id())
 								    .detail("GetKeyValuesToken",
 								            storageServerInterfaces[j].getKeyValues.getEndpoint().token)
-								    .detail("IsTSS", storageServerInterfaces[j].isTss() ? "True" : "False")
-								    .error(e);
+								    .detail("IsTSS", storageServerInterfaces[j].isTss() ? "True" : "False");
 
 								// All shards should be available in quiscence
 								if (self->performQuiescentChecks && !storageServerInterfaces[j].isTss()) {
@@ -1998,25 +2003,24 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		int numBlobWorkerProcesses = 0;
 		for (const auto& worker : workers) {
 			NetworkAddress addr = worker.interf.stableAddress();
+			bool inCCDc = worker.interf.locality.dcId() == ccDcId;
 			if (!configuration.isExcludedServer(worker.interf.addresses())) {
 				if (worker.processClass == ProcessClass::BlobWorkerClass) {
 					numBlobWorkerProcesses++;
 
-					// this is a worker with processClass == BWClass, so should have exactly one blob worker
-					if (blobWorkersByAddr[addr] == 0) {
-						TraceEvent("ConsistencyCheck_NoBWsOnBWClass")
+					// this is a worker with processClass == BWClass, so should have exactly one blob worker if it's in
+					// the same DC
+					int desiredBlobWorkersOnAddr = inCCDc ? 1 : 0;
+
+					if (blobWorkersByAddr[addr] != desiredBlobWorkersOnAddr) {
+						TraceEvent("ConsistencyCheck_WrongBWCountOnBWClass")
 						    .detail("Address", addr)
-						    .detail("NumBlobWorkersOnAddr", blobWorkersByAddr[addr]);
+						    .detail("NumBlobWorkersOnAddr", blobWorkersByAddr[addr])
+						    .detail("DesiredBlobWorkersOnAddr", desiredBlobWorkersOnAddr)
+						    .detail("BwDcId", worker.interf.locality.dcId())
+						    .detail("CcDcId", ccDcId);
 						return false;
 					}
-					/* TODO: replace above code with this once blob manager recovery is handled
-					if (blobWorkersByAddr[addr] != 1) {
-					    TraceEvent("ConsistencyCheck_NoBWOrManyBWsOnBWClass")
-					        .detail("Address", addr)
-					        .detail("NumBlobWorkersOnAddr", blobWorkersByAddr[addr]);
-					    return false;
-					}
-					*/
 				} else {
 					// this is a worker with processClass != BWClass, so there should be no BWs on it
 					if (blobWorkersByAddr[addr] > 0) {
@@ -2354,7 +2358,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		}
 
 		// Check BlobManager
-		if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES && db.blobManager.present() &&
+		if (config.blobGranulesEnabled && db.blobManager.present() &&
 		    (!nonExcludedWorkerProcessMap.count(db.blobManager.get().address()) ||
 		     nonExcludedWorkerProcessMap[db.blobManager.get().address()].processClass.machineClassFitness(
 		         ProcessClass::BlobManager) > fitnessLowerBound)) {
@@ -2370,13 +2374,13 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		}
 
 		// Check EncryptKeyProxy
-		if (SERVER_KNOBS->ENABLE_ENCRYPT_KEY_PROXY && db.encryptKeyProxy.present() &&
+		if (SERVER_KNOBS->ENABLE_ENCRYPTION && db.encryptKeyProxy.present() &&
 		    (!nonExcludedWorkerProcessMap.count(db.encryptKeyProxy.get().address()) ||
 		     nonExcludedWorkerProcessMap[db.encryptKeyProxy.get().address()].processClass.machineClassFitness(
 		         ProcessClass::EncryptKeyProxy) > fitnessLowerBound)) {
-			TraceEvent("ConsistencyCheck_EncyrptKeyProxyNotBest")
+			TraceEvent("ConsistencyCheck_EncryptKeyProxyNotBest")
 			    .detail("BestEncryptKeyProxyFitness", fitnessLowerBound)
-			    .detail("ExistingEncyrptKeyProxyFitness",
+			    .detail("ExistingEncryptKeyProxyFitness",
 			            nonExcludedWorkerProcessMap.count(db.encryptKeyProxy.get().address())
 			                ? nonExcludedWorkerProcessMap[db.encryptKeyProxy.get().address()]
 			                      .processClass.machineClassFitness(ProcessClass::EncryptKeyProxy)

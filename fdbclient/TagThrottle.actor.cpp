@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2020 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -45,6 +45,19 @@ void TagSet::addTag(TransactionTagRef tag) {
 
 size_t TagSet::size() const {
 	return tags.size();
+}
+
+std::string TagSet::toString(Capitalize capitalize) const {
+	ASSERT(!tags.empty());
+	if (tags.size() == 1) {
+		std::string start = capitalize ? "Tag" : "tag";
+		return format("%s `%s'", start.c_str(), tags[0].toString().c_str());
+	}
+	std::string result = capitalize ? "Tags (" : "tags (";
+	for (int index = 0; index < tags.size() - 1; ++index) {
+		result += format("`%s', ", tags[index].toString().c_str());
+	}
+	return result + format("`%s')", tags.back().toString().c_str());
 }
 
 // Format for throttle key:
@@ -109,4 +122,27 @@ TagThrottleValue TagThrottleValue::fromValue(const ValueRef& value) {
 	BinaryReader reader(value, IncludeVersion(ProtocolVersion::withTagThrottleValueReason()));
 	reader >> throttleValue;
 	return throttleValue;
+}
+
+FDB_DEFINE_BOOLEAN_PARAM(ContainsRecommended);
+FDB_DEFINE_BOOLEAN_PARAM(Capitalize);
+
+TEST_CASE("TagSet/toString") {
+	{
+		TagSet tagSet;
+		tagSet.addTag("a"_sr);
+		ASSERT(tagSet.toString() == "tag `a'");
+		ASSERT(tagSet.toString(Capitalize::True) == "Tag `a'");
+	}
+	{
+		// Order is not guaranteed when multiple tags are present
+		TagSet tagSet;
+		tagSet.addTag("a"_sr);
+		tagSet.addTag("b"_sr);
+		auto tagString = tagSet.toString();
+		ASSERT(tagString == "tags (`a', `b')" || tagString == "tags (`b', `a')");
+		auto capitalizedTagString = tagSet.toString(Capitalize::True);
+		ASSERT(capitalizedTagString == "Tags (`a', `b')" || capitalizedTagString == "Tags (`b', `a')");
+	}
+	return Void();
 }

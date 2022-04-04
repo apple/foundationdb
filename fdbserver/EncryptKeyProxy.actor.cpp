@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2021 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,14 +19,18 @@
  */
 
 #include "fdbserver/EncryptKeyProxyInterface.h"
+#include "fdbserver/SimEncryptVaultProxy.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "flow/Arena.h"
 #include "flow/Error.h"
 #include "flow/EventTypes.actor.h"
 #include "flow/FastRef.h"
+#include "flow/IRandom.h"
 #include "flow/Trace.h"
 #include "flow/genericactors.actor.h"
+#include "flow/network.h"
+
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct EncryptKeyProxyData : NonCopyable, ReferenceCounted<EncryptKeyProxyData> {
@@ -41,6 +45,17 @@ ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ekpInterface, 
 	state PromiseStream<Future<Void>> addActor;
 	state Future<Void> collection = actorCollection(self->addActor.getFuture());
 	self->addActor.send(traceRole(Role::ENCRYPT_KEY_PROXY, ekpInterface.id()));
+
+	SimEncryptVaultProxyInterface simEncryptVaultProxyInf;
+	if (g_network->isSimulated()) {
+
+		// In simulation construct an EncryptVaultProxy actor to satisfy encryption keys lookups otherwise satisfied by
+		// integrating external Encryption Key Management solutions.
+
+		const uint32_t maxEncryptKeys = deterministicRandom()->randomInt(1024, 2048);
+		simEncryptVaultProxyInf.initEndpoints();
+		self->addActor.send(simEncryptVaultProxyCore(simEncryptVaultProxyInf, maxEncryptKeys));
+	}
 
 	TraceEvent("EKP_Start", self->myId).log();
 
@@ -58,7 +73,7 @@ ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ekpInterface, 
 			}
 		}
 	} catch (Error& e) {
-		TraceEvent("EKP_Terminated", ekpInterface.id()).error(e, true);
+		TraceEvent("EKP_Terminated", ekpInterface.id()).errorUnsuppressed(e);
 	}
 
 	return Void();

@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -743,6 +743,13 @@ class Listener final : public IListener, ReferenceCounted<Listener> {
 public:
 	Listener(boost::asio::io_context& io_service, NetworkAddress listenAddress)
 	  : io_service(io_service), listenAddress(listenAddress), acceptor(io_service, tcpEndpoint(listenAddress)) {
+		// when port 0 is passed in, a random port will be opened
+		// set listenAddress as the address with the actual port opened instead of port 0
+		if (listenAddress.port == 0) {
+			this->listenAddress =
+			    NetworkAddress::parse(acceptor.local_endpoint().address().to_string().append(":").append(
+			        std::to_string(acceptor.local_endpoint().port())));
+		}
 		platform::setCloseOnExec(acceptor.native_handle());
 	}
 

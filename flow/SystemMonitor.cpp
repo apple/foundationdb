@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -43,7 +43,9 @@ double machineStartTime() {
 
 void systemMonitor() {
 	static StatisticsState statState = StatisticsState();
+#if !DEBUG_DETERMINISM
 	customSystemMonitor("ProcessMetrics", &statState, true);
+#endif
 }
 
 SystemStatistics getSystemStatistics() {
@@ -158,6 +160,7 @@ SystemStatistics customSystemMonitor(std::string const& eventName, StatisticsSta
 			    .DETAILALLOCATORMEMUSAGE(2048)
 			    .DETAILALLOCATORMEMUSAGE(4096)
 			    .DETAILALLOCATORMEMUSAGE(8192)
+			    .DETAILALLOCATORMEMUSAGE(16384)
 			    .detail("HugeArenaMemory", g_hugeArenaMemory.load())
 			    .detail("DCID", machineState.dcId)
 			    .detail("ZoneID", machineState.zoneId)
@@ -175,6 +178,7 @@ SystemStatistics customSystemMonitor(std::string const& eventName, StatisticsSta
 			total_memory += FastAllocator<2048>::getTotalMemory();
 			total_memory += FastAllocator<4096>::getTotalMemory();
 			total_memory += FastAllocator<8192>::getTotalMemory();
+			total_memory += FastAllocator<16384>::getTotalMemory();
 
 			uint64_t unused_memory = 0;
 			unused_memory += FastAllocator<16>::getApproximateMemoryUnused();
@@ -188,6 +192,7 @@ SystemStatistics customSystemMonitor(std::string const& eventName, StatisticsSta
 			unused_memory += FastAllocator<2048>::getApproximateMemoryUnused();
 			unused_memory += FastAllocator<4096>::getApproximateMemoryUnused();
 			unused_memory += FastAllocator<8192>::getApproximateMemoryUnused();
+			unused_memory += FastAllocator<16384>::getApproximateMemoryUnused();
 
 			if (total_memory > 0) {
 				TraceEvent("FastAllocMemoryUsage")

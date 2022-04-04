@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -450,6 +450,35 @@ ACTOR static Future<ResolveTransactionBatchReply> trackResolutionMetrics(Referen
 	return reply;
 }
 
+ErrorOr<Optional<TenantMapEntry>> getTenantEntry(ProxyCommitData* commitData,
+                                                 Optional<TenantNameRef> tenant,
+                                                 Optional<int64_t> tenantId,
+                                                 bool logOnFailure) {
+	if (tenant.present()) {
+		auto itr = commitData->tenantMap.find(tenant.get());
+		if (itr == commitData->tenantMap.end()) {
+			if (logOnFailure) {
+				TraceEvent(SevWarn, "CommitProxyUnknownTenant", commitData->dbgid).detail("Tenant", tenant.get());
+			}
+
+			return unknown_tenant();
+		} else if (tenantId.present() && tenantId.get() != itr->second.id) {
+			if (logOnFailure) {
+				TraceEvent(SevWarn, "CommitProxyTenantIdMismatch", commitData->dbgid)
+				    .detail("Tenant", tenant.get())
+				    .detail("TenantId", tenantId)
+				    .detail("ExistingId", itr->second.id);
+			}
+
+			return unknown_tenant();
+		}
+
+		return ErrorOr<Optional<TenantMapEntry>>(Optional<TenantMapEntry>(itr->second));
+	}
+
+	return Optional<TenantMapEntry>();
+}
+
 namespace CommitBatch {
 
 struct CommitBatchContext {
@@ -648,8 +677,8 @@ bool canReject(const std::vector<CommitTransactionRequest>& trs) {
 	for (const auto& tr : trs) {
 		if (tr.transaction.mutations.empty())
 			continue;
-		if (tr.transaction.mutations[0].param1.startsWith(LiteralStringRef("\xff")) ||
-		    tr.transaction.read_conflict_ranges.empty()) {
+		if (!tr.tenantInfo.name.present() && (tr.transaction.mutations[0].param1.startsWith(LiteralStringRef("\xff")) ||
+		                                      tr.transaction.read_conflict_ranges.empty())) {
 			return false;
 		}
 	}
@@ -763,7 +792,7 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 	state Span span("MP:getResolution"_loc, self->span.context);
 
 	ResolutionRequestBuilder requests(
-	    pProxyCommitData, self->commitVersion, self->prevVersion, pProxyCommitData->version, span);
+	    pProxyCommitData, self->commitVersion, self->prevVersion, pProxyCommitData->version.get(), span);
 	int conflictRangeCount = 0;
 	self->maxTransactionBytes = 0;
 	for (int t = 0; t < trs.size(); t++) {
@@ -858,6 +887,7 @@ void applyMetadataEffect(CommitBatchContext* self) {
 				                       self->resolution[0].stateMutations[versionIndex][transactionIndex].mutations,
 				                       /* pToCommit= */ nullptr,
 				                       self->forceRecovery,
+				                       /* version= */ self->commitVersion,
 				                       /* popVersion= */ 0,
 				                       /* initialCommit */ false);
 			}
@@ -941,16 +971,25 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 	int t;
 	for (t = 0; t < trs.size() && !self->forceRecovery; t++) {
 		if (self->committed[t] == ConflictBatch::TransactionCommitted && (!self->locked || trs[t].isLockAware())) {
-			self->commitCount++;
-			applyMetadataMutations(trs[t].spanContext,
-			                       *pProxyCommitData,
-			                       self->arena,
-			                       pProxyCommitData->logSystem,
-			                       trs[t].transaction.mutations,
-			                       SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? nullptr : &self->toCommit,
-			                       self->forceRecovery,
-			                       self->commitVersion + 1,
-			                       /* initialCommit= */ false);
+			ErrorOr<Optional<TenantMapEntry>> result = getTenantEntry(
+			    pProxyCommitData, trs[t].tenantInfo.name.castTo<TenantNameRef>(), trs[t].tenantInfo.tenantId, true);
+
+			if (result.isError()) {
+				self->committed[t] = ConflictBatch::TransactionTenantFailure;
+				trs[t].reply.sendError(result.getError());
+			} else {
+				self->commitCount++;
+				applyMetadataMutations(trs[t].spanContext,
+				                       *pProxyCommitData,
+				                       self->arena,
+				                       pProxyCommitData->logSystem,
+				                       trs[t].transaction.mutations,
+				                       SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? nullptr : &self->toCommit,
+				                       self->forceRecovery,
+				                       self->commitVersion,
+				                       self->commitVersion + 1,
+				                       /* initialCommit= */ false);
+			}
 		}
 		if (self->firstStateMutations) {
 			ASSERT(self->committed[t] == ConflictBatch::TransactionCommitted);
@@ -982,7 +1021,7 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 
 	auto fcm = pProxyCommitData->logAdapter->getCommitMessage();
 	self->storeCommits.emplace_back(fcm, pProxyCommitData->txnStateStore->commit());
-	pProxyCommitData->version = self->commitVersion;
+	pProxyCommitData->version.set(self->commitVersion);
 	if (!pProxyCommitData->validState.isSet())
 		pProxyCommitData->validState.send(Void());
 	ASSERT(self->commitVersion);
@@ -1197,7 +1236,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		    "CommitDebug", debugID.get().first(), "CommitProxyServer.commitBatch.ProcessingMutations");
 	}
 
-	self->isMyFirstBatch = !pProxyCommitData->version;
+	self->isMyFirstBatch = !pProxyCommitData->version.get();
 	self->oldCoordinators = pProxyCommitData->txnStateStore->readValue(coordinatorsKey).get();
 
 	assertResolutionStateMutationsSizeConsistent(self->resolution);
@@ -1476,6 +1515,9 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 			tr.reply.send(CommitID(self->commitVersion, t, self->metadataVersionAfter));
 		} else if (self->committed[t] == ConflictBatch::TransactionTooOld) {
 			tr.reply.sendError(transaction_too_old());
+		} else if (self->committed[t] == ConflictBatch::TransactionTenantFailure) {
+			// We already sent the error
+			ASSERT(tr.reply.isSet());
 		} else {
 			// If enable the option to report conflicting keys from resolvers, we send back all keyranges' indices
 			// through CommitID
@@ -1643,8 +1685,51 @@ ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsReques
 	wait(commitData->validState.getFuture());
 	wait(delay(0, TaskPriority::DefaultEndpoint));
 
+	state ErrorOr<Optional<TenantMapEntry>> tenantEntry;
+	state Version minTenantVersion =
+	    req.minTenantVersion == latestVersion ? commitData->stats.lastCommitVersionAssigned + 1 : req.minTenantVersion;
+
+	// If a large minTenantVersion is specified, we limit how long we wait for it to be available
+	state Future<Void> futureVersionDelay = minTenantVersion > commitData->stats.lastCommitVersionAssigned + 1
+	                                            ? delay(SERVER_KNOBS->FUTURE_VERSION_DELAY)
+	                                            : Never();
+
+	while (tenantEntry.isError()) {
+		bool finalQuery = commitData->version.get() >= minTenantVersion;
+		ErrorOr<Optional<TenantMapEntry>> _tenantEntry =
+		    getTenantEntry(commitData, req.tenant, Optional<int64_t>(), finalQuery);
+		tenantEntry = _tenantEntry;
+
+		if (tenantEntry.isError()) {
+			if (finalQuery) {
+				req.reply.sendError(tenant_not_found());
+				return Void();
+			} else {
+				choose {
+					// Wait until we are sure that we've received metadata updates through minTenantVersion
+					// If latestVersion is specified, this will wait until we have definitely received
+					// updates through the version at the time we received the request
+					when(wait(commitData->version.whenAtLeast(minTenantVersion))) {}
+					when(wait(futureVersionDelay)) {
+						req.reply.sendError(future_version());
+						return Void();
+					}
+				}
+			}
+		}
+	}
+
 	std::unordered_set<UID> tssMappingsIncluded;
 	GetKeyServerLocationsReply rep;
+
+	if (tenantEntry.get().present()) {
+		rep.tenantEntry = tenantEntry.get().get();
+		req.begin = req.begin.withPrefix(rep.tenantEntry.prefix, req.arena);
+		if (req.end.present()) {
+			req.end = req.end.get().withPrefix(rep.tenantEntry.prefix, req.arena);
+		}
+	}
+
 	if (!req.end.present()) {
 		auto r = req.reverse ? commitData->keyInfo.rangeContainingKeyBefore(req.begin)
 		                     : commitData->keyInfo.rangeContaining(req.begin);
@@ -1722,7 +1807,7 @@ ACTOR static Future<Void> rejoinServer(CommitProxyInterface proxy, ProxyCommitDa
 		GetStorageServerRejoinInfoRequest req = waitNext(proxy.getStorageServerRejoinInfo.getFuture());
 		if (commitData->txnStateStore->readValue(serverListKeyFor(req.id)).get().present()) {
 			GetStorageServerRejoinInfoReply rep;
-			rep.version = commitData->version;
+			rep.version = commitData->version.get();
 			rep.tag = decodeServerTagValue(commitData->txnStateStore->readValue(serverTagKeyFor(req.id)).get().get());
 			RangeResult history = commitData->txnStateStore->readRange(serverTagHistoryRangeFor(req.id)).get();
 			for (int i = history.size() - 1; i >= 0; i--) {
@@ -1922,17 +2007,17 @@ ACTOR Future<Void> proxySnapCreate(ProxySnapRequest snapReq, ProxyCommitData* co
 			wait(throwErrorOr(ddSnapReq));
 		} catch (Error& e) {
 			TraceEvent("SnapCommitProxy_DDSnapResponseError")
+			    .errorUnsuppressed(e)
 			    .detail("SnapPayload", snapReq.snapPayload)
-			    .detail("SnapUID", snapReq.snapUID)
-			    .error(e, true /*includeCancelled*/);
+			    .detail("SnapUID", snapReq.snapUID);
 			throw e;
 		}
 		snapReq.reply.send(Void());
 	} catch (Error& e) {
 		TraceEvent("SnapCommitProxy_SnapReqError")
+		    .errorUnsuppressed(e)
 		    .detail("SnapPayload", snapReq.snapPayload)
-		    .detail("SnapUID", snapReq.snapUID)
-		    .error(e, true /*includeCancelled*/);
+		    .detail("SnapUID", snapReq.snapUID);
 		if (e.code() != error_code_operation_cancelled) {
 			snapReq.reply.sendError(e);
 		} else {
@@ -1955,11 +2040,21 @@ ACTOR Future<Void> proxyCheckSafeExclusion(Reference<AsyncVar<ServerDBInfo> cons
 		return Void();
 	}
 	try {
-		state Future<ErrorOr<DistributorExclusionSafetyCheckReply>> safeFuture =
+		state Future<ErrorOr<DistributorExclusionSafetyCheckReply>> ddSafeFuture =
 		    db->get().distributor.get().distributorExclCheckReq.tryGetReply(
 		        DistributorExclusionSafetyCheckRequest(req.exclusions));
-		DistributorExclusionSafetyCheckReply _reply = wait(throwErrorOr(safeFuture));
+		DistributorExclusionSafetyCheckReply _reply = wait(throwErrorOr(ddSafeFuture));
 		reply.safe = _reply.safe;
+		if (db->get().blobManager.present()) {
+			TraceEvent("SafetyCheckCommitProxyBM").detail("BMID", db->get().blobManager.get().id());
+			state Future<ErrorOr<BlobManagerExclusionSafetyCheckReply>> bmSafeFuture =
+			    db->get().blobManager.get().blobManagerExclCheckReq.tryGetReply(
+			        BlobManagerExclusionSafetyCheckRequest(req.exclusions));
+			BlobManagerExclusionSafetyCheckReply _reply = wait(throwErrorOr(bmSafeFuture));
+			reply.safe &= _reply.safe;
+		} else {
+			TraceEvent("SafetyCheckCommitProxyNoBM");
+		}
 	} catch (Error& e) {
 		TraceEvent("SafetyCheckCommitProxyResponseError").error(e);
 		if (e.code() != error_code_operation_cancelled) {
@@ -2022,6 +2117,8 @@ struct TransactionStateResolveContext {
 
 	// Pointer to transaction state store, shortcut for commitData.txnStateStore
 	IKeyValueStore* pTxnStateStore = nullptr;
+
+	Future<Void> txnRecovery;
 
 	// Actor streams
 	PromiseStream<Future<Void>>* pActors = nullptr;
@@ -2111,6 +2208,7 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 		                       mutations,
 		                       /* pToCommit= */ nullptr,
 		                       confChanges,
+		                       /* version= */ 0,
 		                       /* popVersion= */ 0,
 		                       /* initialCommit= */ true);
 	} // loop
@@ -2137,6 +2235,9 @@ ACTOR Future<Void> processTransactionStateRequestPart(TransactionStateResolveCon
 	ASSERT(pContext->pActors != nullptr);
 
 	if (pContext->receivedSequences.count(request.sequence)) {
+		if (pContext->receivedSequences.size() == pContext->maxSequence) {
+			wait(pContext->txnRecovery);
+		}
 		// This part is already received. Still we will re-broadcast it to other CommitProxies
 		pContext->pActors->send(broadcastTxnRequest(request, SERVER_KNOBS->TXN_STATE_SEND_AMOUNT, true));
 		wait(yield());
@@ -2162,7 +2263,8 @@ ACTOR Future<Void> processTransactionStateRequestPart(TransactionStateResolveCon
 	if (pContext->receivedSequences.size() == pContext->maxSequence) {
 		// Received all components of the txnStateRequest
 		ASSERT(!pContext->processed);
-		wait(processCompleteTransactionStateRequest(pContext));
+		pContext->txnRecovery = processCompleteTransactionStateRequest(pContext);
+		wait(pContext->txnRecovery);
 		pContext->processed = true;
 	}
 
@@ -2344,7 +2446,7 @@ ACTOR Future<Void> commitProxyServer(CommitProxyInterface proxy,
 		                                                whitelistBinPaths);
 		wait(core || checkRemoved(db, req.recoveryCount, proxy));
 	} catch (Error& e) {
-		TraceEvent("CommitProxyTerminated", proxy.id()).error(e, true);
+		TraceEvent("CommitProxyTerminated", proxy.id()).errorUnsuppressed(e);
 
 		if (e.code() != error_code_worker_removed && e.code() != error_code_tlog_stopped &&
 		    e.code() != error_code_tlog_failed && e.code() != error_code_coordinators_changed &&

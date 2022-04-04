@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -719,7 +719,7 @@ ACTOR Future<Void> resolver(ResolverInterface resolver,
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled || e.code() == error_code_worker_removed) {
-			TraceEvent("ResolverTerminated", resolver.id()).error(e, true);
+			TraceEvent("ResolverTerminated", resolver.id()).errorUnsuppressed(e);
 			return Void();
 		}
 		throw;

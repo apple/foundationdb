@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@
  */
 
 #include <cinttypes>
-#include "contrib/fmt-8.0.1/include/fmt/format.h"
+#include "contrib/fmt-8.1.1/include/fmt/format.h"
 #include "fdbclient/BlobWorkerInterface.h"
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbserver/Status.h"
@@ -492,12 +492,7 @@ struct RolesInfo {
 			obj.setKeyRawNumber("query_queue_max", storageMetrics.getValue("QueryQueueMax"));
 			obj["total_queries"] = StatusCounter(storageMetrics.getValue("QueryQueue")).getStatus();
 			obj["finished_queries"] = StatusCounter(storageMetrics.getValue("FinishedQueries")).getStatus();
-			try { // FIXME: This field was added in a patch release, the try-catch can be removed for the 7.0 release
-				obj["low_priority_queries"] = StatusCounter(storageMetrics.getValue("LowPriorityQueries")).getStatus();
-			} catch (Error& e) {
-				if (e.code() != error_code_attribute_not_found)
-					throw e;
-			}
+			obj["low_priority_queries"] = StatusCounter(storageMetrics.getValue("LowPriorityQueries")).getStatus();
 			obj["bytes_queried"] = StatusCounter(storageMetrics.getValue("BytesQueried")).getStatus();
 			obj["keys_queried"] = StatusCounter(storageMetrics.getValue("RowsQueried")).getStatus();
 			obj["mutation_bytes"] = StatusCounter(storageMetrics.getValue("MutationBytes")).getStatus();
@@ -809,11 +804,11 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		roles.addRole("ratekeeper", db->get().ratekeeper.get());
 	}
 
-	if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES && db->get().blobManager.present()) {
+	if (configuration.present() && configuration.get().blobGranulesEnabled && db->get().blobManager.present()) {
 		roles.addRole("blob_manager", db->get().blobManager.get());
 	}
 
-	if (SERVER_KNOBS->ENABLE_ENCRYPT_KEY_PROXY && db->get().encryptKeyProxy.present()) {
+	if (SERVER_KNOBS->ENABLE_ENCRYPTION && db->get().encryptKeyProxy.present()) {
 		roles.addRole("encrypt_key_proxy", db->get().encryptKeyProxy.get());
 	}
 
@@ -880,7 +875,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		wait(yield());
 	}
 
-	if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
+	if (configuration.present() && configuration.get().blobGranulesEnabled) {
 		for (auto blobWorker : blobWorkers) {
 			roles.addRole("blob_worker", blobWorker);
 			wait(yield());
@@ -1038,7 +1033,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 			if (ssLag[address] >= 60) {
 				messages.push_back(JsonString::makeMessage(
 				    "storage_server_lagging",
-				    format("Storage server lagging by %ld seconds.", (int64_t)ssLag[address]).c_str()));
+				    format("Storage server lagging by %lld seconds.", (int64_t)ssLag[address]).c_str()));
 			}
 
 			// Store the message array into the status object that represents the worker process
@@ -1986,8 +1981,8 @@ ACTOR static Future<std::vector<std::pair<GrvProxyInterface, EventMap>>> getGrvP
 	return results;
 }
 
-// Returns the number of zones eligble for recruiting new tLogs after zone failures, to maintain the current replication
-// factor.
+// Returns the number of zones eligible for recruiting new tLogs after zone failures, to maintain the current
+// replication factor.
 static int getExtraTLogEligibleZones(const std::vector<WorkerDetails>& workers,
                                      const DatabaseConfiguration& configuration) {
 	std::set<StringRef> allZones;
@@ -2259,6 +2254,7 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(
 				reads.updateValues(StatusCounter(storageMetrics.getValue("FinishedQueries")));
 				readKeys.updateValues(StatusCounter(storageMetrics.getValue("RowsQueried")));
 				readBytes.updateValues(StatusCounter(storageMetrics.getValue("BytesQueried")));
+				lowPriorityReads.updateValues(StatusCounter(storageMetrics.getValue("LowPriorityQueries")));
 			}
 		}
 
@@ -2266,21 +2262,7 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(
 		operationsObj["reads"] = reads.getStatus();
 		keysObj["read"] = readKeys.getStatus();
 		bytesObj["read"] = readBytes.getStatus();
-
-		try {
-			for (auto& ss : storageServers.get()) {
-				TraceEventFields const& storageMetrics = ss.second.at("StorageMetrics");
-
-				if (storageMetrics.size() > 0) {
-					// FIXME: This field was added in a patch release, for the 7.0 release move this to above loop
-					lowPriorityReads.updateValues(StatusCounter(storageMetrics.getValue("LowPriorityQueries")));
-				}
-			}
-			operationsObj["low_priority_reads"] = lowPriorityReads.getStatus();
-		} catch (Error& e) {
-			if (e.code() != error_code_attribute_not_found)
-				throw e;
-		}
+		operationsObj["low_priority_reads"] = lowPriorityReads.getStatus();
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
 			throw;
@@ -2930,6 +2912,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		state JsonBuilderObject qos;
 		state JsonBuilderObject dataOverlay;
 		state JsonBuilderObject storageWiggler;
+		state std::unordered_set<UID> wiggleServers;
 
 		statusObj["protocol_version"] = format("%" PRIx64, g_network->protocolVersion().version());
 		statusObj["connection_string"] = coordinators.ccr->getConnectionString().toString();
@@ -3002,7 +2985,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			    errorOr(getGrvProxiesAndMetrics(db, address_workers));
 			state Future<ErrorOr<std::vector<BlobWorkerInterface>>> blobWorkersFuture;
 
-			if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
+			if (configuration.present() && configuration.get().blobGranulesEnabled) {
 				blobWorkersFuture = errorOr(timeoutError(getBlobWorkers(cx, true), 5.0));
 			}
 
@@ -3020,8 +3003,18 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			    clusterSummaryStatisticsFetcher(pMetrics, storageServerFuture, tLogFuture, &status_incomplete_reasons));
 
 			if (configuration.get().perpetualStorageWiggleSpeed > 0) {
-				wait(store(storageWiggler, storageWigglerStatsFetcher(configuration.get(), cx, true)));
-				statusObj["storage_wiggler"] = storageWiggler;
+				state Future<std::vector<std::pair<UID, StorageWiggleValue>>> primaryWiggleValues;
+				state Future<std::vector<std::pair<UID, StorageWiggleValue>>> remoteWiggleValues;
+
+				primaryWiggleValues = readStorageWiggleValues(cx, true, true);
+				remoteWiggleValues = readStorageWiggleValues(cx, false, true);
+				wait(store(storageWiggler, storageWigglerStatsFetcher(configuration.get(), cx, true)) &&
+				     success(primaryWiggleValues) && success(remoteWiggleValues));
+
+				for (auto& p : primaryWiggleValues.get())
+					wiggleServers.insert(p.first);
+				for (auto& p : remoteWiggleValues.get())
+					wiggleServers.insert(p.first);
 			}
 
 			state std::vector<JsonBuilderObject> workerStatuses = wait(getAll(futures2));
@@ -3130,7 +3123,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			}
 
 			// ...also blob workers
-			if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
+			if (configuration.present() && configuration.get().blobGranulesEnabled) {
 				ErrorOr<std::vector<BlobWorkerInterface>> _blobWorkers = wait(blobWorkersFuture);
 				if (_blobWorkers.present()) {
 					blobWorkers = _blobWorkers.get();
@@ -3180,12 +3173,26 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		statusObj["datacenter_lag"] = getLagObject(datacenterVersionDifference);
 
 		int activeTSSCount = 0;
+		JsonBuilderArray wiggleServerAddress;
 		for (auto& it : storageServers) {
 			if (it.first.isTss()) {
 				activeTSSCount++;
 			}
+			if (wiggleServers.count(it.first.id())) {
+				wiggleServerAddress.push_back(it.first.address().toString());
+			}
 		}
 		statusObj["active_tss_count"] = activeTSSCount;
+
+		if (!storageWiggler.empty()) {
+			JsonBuilderArray wiggleServerUID;
+			for (auto& id : wiggleServers)
+				wiggleServerUID.push_back(id.shortString());
+
+			storageWiggler["wiggle_server_ids"] = wiggleServerUID;
+			storageWiggler["wiggle_server_addresses"] = wiggleServerAddress;
+			statusObj["storage_wiggler"] = storageWiggler;
+		}
 
 		int totalDegraded = 0;
 		for (auto& it : workers) {

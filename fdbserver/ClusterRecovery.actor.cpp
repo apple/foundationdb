@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2019 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -471,7 +471,6 @@ ACTOR Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 			           self->dbgid)
 			    .detail("StatusCode", RecoveryStatus::fully_recovered)
 			    .detail("Status", RecoveryStatus::names[RecoveryStatus::fully_recovered])
-			    .detail("FullyRecoveredAtVersion", self->version)
 			    .detail("ClusterId", self->clusterId)
 			    .trackLatest(self->clusterRecoveryStateEventHolder->trackingKey);
 
@@ -512,145 +511,6 @@ ACTOR Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
 	}
 }
 
-std::pair<KeyRangeRef, bool> findRange(CoalescedKeyRangeMap<int>& key_resolver,
-                                       Standalone<VectorRef<ResolverMoveRef>>& movedRanges,
-                                       int src,
-                                       int dest) {
-	auto ranges = key_resolver.ranges();
-	auto prev = ranges.begin();
-	auto it = ranges.begin();
-	++it;
-	if (it == ranges.end()) {
-		if (ranges.begin().value() != src ||
-		    std::find(movedRanges.begin(), movedRanges.end(), ResolverMoveRef(ranges.begin()->range(), dest)) !=
-		        movedRanges.end())
-			throw operation_failed();
-		return std::make_pair(ranges.begin().range(), true);
-	}
-
-	std::set<int> borders;
-	// If possible expand an existing boundary between the two resolvers
-	for (; it != ranges.end(); ++it) {
-		if (it->value() == src && prev->value() == dest &&
-		    std::find(movedRanges.begin(), movedRanges.end(), ResolverMoveRef(it->range(), dest)) ==
-		        movedRanges.end()) {
-			return std::make_pair(it->range(), true);
-		}
-		if (it->value() == dest && prev->value() == src &&
-		    std::find(movedRanges.begin(), movedRanges.end(), ResolverMoveRef(prev->range(), dest)) ==
-		        movedRanges.end()) {
-			return std::make_pair(prev->range(), false);
-		}
-		if (it->value() == dest)
-			borders.insert(prev->value());
-		if (prev->value() == dest)
-			borders.insert(it->value());
-		++prev;
-	}
-
-	prev = ranges.begin();
-	it = ranges.begin();
-	++it;
-	// If possible create a new boundry which doesn't exist yet
-	for (; it != ranges.end(); ++it) {
-		if (it->value() == src && !borders.count(prev->value()) &&
-		    std::find(movedRanges.begin(), movedRanges.end(), ResolverMoveRef(it->range(), dest)) ==
-		        movedRanges.end()) {
-			return std::make_pair(it->range(), true);
-		}
-		if (prev->value() == src && !borders.count(it->value()) &&
-		    std::find(movedRanges.begin(), movedRanges.end(), ResolverMoveRef(prev->range(), dest)) ==
-		        movedRanges.end()) {
-			return std::make_pair(prev->range(), false);
-		}
-		++prev;
-	}
-
-	it = ranges.begin();
-	for (; it != ranges.end(); ++it) {
-		if (it->value() == src &&
-		    std::find(movedRanges.begin(), movedRanges.end(), ResolverMoveRef(it->range(), dest)) ==
-		        movedRanges.end()) {
-			return std::make_pair(it->range(), true);
-		}
-	}
-	throw operation_failed(); // we are already attempting to move all of the data one resolver is assigned, so do not
-	                          // move anything
-}
-
-ACTOR Future<Void> resolutionBalancing(Reference<ClusterRecoveryData> self) {
-	state CoalescedKeyRangeMap<int> key_resolver(
-	    0, SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? normalKeys.end : allKeys.end);
-	key_resolver.insert(SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? normalKeys : allKeys, 0);
-	loop {
-		wait(delay(SERVER_KNOBS->MIN_BALANCE_TIME, TaskPriority::ResolutionMetrics));
-		while (self->resolverChanges.get().size())
-			wait(self->resolverChanges.onChange());
-		state std::vector<Future<ResolutionMetricsReply>> futures;
-		for (auto& p : self->resolvers)
-			futures.push_back(
-			    brokenPromiseToNever(p.metrics.getReply(ResolutionMetricsRequest(), TaskPriority::ResolutionMetrics)));
-		wait(waitForAll(futures));
-		state IndexedSet<std::pair<int64_t, int>, NoMetric> metrics;
-
-		int64_t total = 0;
-		for (int i = 0; i < futures.size(); i++) {
-			total += futures[i].get().value;
-			metrics.insert(std::make_pair(futures[i].get().value, i), NoMetric());
-			//TraceEvent("ResolverMetric").detail("I", i).detail("Metric", futures[i].get());
-		}
-		if (metrics.lastItem()->first - metrics.begin()->first > SERVER_KNOBS->MIN_BALANCE_DIFFERENCE) {
-			try {
-				state int src = metrics.lastItem()->second;
-				state int dest = metrics.begin()->second;
-				state int64_t amount = std::min(metrics.lastItem()->first - total / self->resolvers.size(),
-				                                total / self->resolvers.size() - metrics.begin()->first) /
-				                       2;
-				state Standalone<VectorRef<ResolverMoveRef>> movedRanges;
-
-				loop {
-					state std::pair<KeyRangeRef, bool> range = findRange(key_resolver, movedRanges, src, dest);
-
-					ResolutionSplitRequest req;
-					req.front = range.second;
-					req.offset = amount;
-					req.range = range.first;
-
-					ResolutionSplitReply split =
-					    wait(brokenPromiseToNever(self->resolvers[metrics.lastItem()->second].split.getReply(
-					        req, TaskPriority::ResolutionMetrics)));
-					KeyRangeRef moveRange = range.second ? KeyRangeRef(range.first.begin, split.key)
-					                                     : KeyRangeRef(split.key, range.first.end);
-					movedRanges.push_back_deep(movedRanges.arena(), ResolverMoveRef(moveRange, dest));
-					TraceEvent("MovingResolutionRange")
-					    .detail("Src", src)
-					    .detail("Dest", dest)
-					    .detail("Amount", amount)
-					    .detail("StartRange", range.first)
-					    .detail("MoveRange", moveRange)
-					    .detail("Used", split.used)
-					    .detail("KeyResolverRanges", key_resolver.size());
-					amount -= split.used;
-					if (moveRange != range.first || amount <= 0)
-						break;
-				}
-				for (auto& it : movedRanges)
-					key_resolver.insert(it.range, it.dest);
-				// for(auto& it : key_resolver.ranges())
-				//	TraceEvent("KeyResolver").detail("Range", it.range()).detail("Value", it.value());
-
-				self->resolverChangesVersion = self->version + 1;
-				for (auto& p : self->commitProxies)
-					self->resolverNeedingChanges.insert(p.id());
-				self->resolverChanges.set(movedRanges);
-			} catch (Error& e) {
-				if (e.code() != error_code_operation_failed)
-					throw;
-			}
-		}
-	}
-}
-
 ACTOR Future<Void> changeCoordinators(Reference<ClusterRecoveryData> self) {
 	loop {
 		ChangeCoordinatorsRequest req = waitNext(self->clusterController.changeCoordinators.getFuture());
@@ -675,7 +535,9 @@ ACTOR Future<Void> changeCoordinators(Reference<ClusterRecoveryData> self) {
 		}
 
 		try {
-			wait(self->cstate.move(ClusterConnectionString(changeCoordinatorsRequest.newConnectionString.toString())));
+			state ClusterConnectionString conn(changeCoordinatorsRequest.newConnectionString.toString());
+			wait(conn.resolveHostnames());
+			wait(self->cstate.move(conn));
 		} catch (Error& e) {
 			if (e.code() != error_code_actor_cancelled)
 				changeCoordinatorsRequest.reply.sendError(e);
@@ -1127,8 +989,8 @@ ACTOR Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
 	     newTLogServers(self, recruits, oldLogSystem, &confChanges));
 
 	// Update recovery related information to the newly elected sequencer (master) process.
-	wait(brokenPromiseToNever(self->masterInterface.updateRecoveryData.getReply(
-	    UpdateRecoveryDataRequest(self->recoveryTransactionVersion, self->lastEpochEnd, self->commitProxies))));
+	wait(brokenPromiseToNever(self->masterInterface.updateRecoveryData.getReply(UpdateRecoveryDataRequest(
+	    self->recoveryTransactionVersion, self->lastEpochEnd, self->commitProxies, self->resolvers))));
 
 	return confChanges;
 }
@@ -1627,12 +1489,12 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 
 	recoverAndEndEpoch.cancel();
 
-	ASSERT(self->commitProxies.size() <= self->configuration.getDesiredCommitProxies());
-	ASSERT(self->commitProxies.size() >= 1);
-	ASSERT(self->grvProxies.size() <= self->configuration.getDesiredGrvProxies());
-	ASSERT(self->grvProxies.size() >= 1);
-	ASSERT(self->resolvers.size() <= self->configuration.getDesiredResolvers());
-	ASSERT(self->resolvers.size() >= 1);
+	ASSERT_LE(self->commitProxies.size(), self->configuration.getDesiredCommitProxies());
+	ASSERT_GE(self->commitProxies.size(), 1);
+	ASSERT_LE(self->grvProxies.size(), self->configuration.getDesiredGrvProxies());
+	ASSERT_GE(self->grvProxies.size(), 1);
+	ASSERT_LE(self->resolvers.size(), self->configuration.getDesiredResolvers());
+	ASSERT_GE(self->resolvers.size(), 1);
 
 	self->recoveryState = RecoveryState::RECOVERY_TRANSACTION;
 	TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_STATE_EVENT_NAME).c_str(), self->dbgid)
@@ -1812,14 +1674,6 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	    .detail("StoreType", self->configuration.storageServerStoreType)
 	    .detail("RecoveryDuration", recoveryDuration)
 	    .trackLatest(self->clusterRecoveryStateEventHolder->trackingKey);
-
-	TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_AVAILABLE_EVENT_NAME).c_str(),
-	           self->dbgid)
-	    .detail("AvailableAtVersion", self->version)
-	    .trackLatest(self->clusterRecoveryAvailableEventHolder->trackingKey);
-
-	if (self->resolvers.size() > 1)
-		self->addActor.send(resolutionBalancing(self));
 
 	self->addActor.send(changeCoordinators(self));
 	Database cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);

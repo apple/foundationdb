@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2021 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -49,6 +49,7 @@ struct RestoreRequest {
 	int index;
 	Key tagName;
 	Key url;
+	Optional<std::string> proxy;
 	Version targetVersion;
 	KeyRange range;
 	UID randomUid;
@@ -64,27 +65,29 @@ struct RestoreRequest {
 	explicit RestoreRequest(const int index,
 	                        const Key& tagName,
 	                        const Key& url,
+	                        const Optional<std::string>& proxy,
 	                        Version targetVersion,
 	                        const KeyRange& range,
 	                        const UID& randomUid,
 	                        Key& addPrefix,
 	                        Key removePrefix)
-	  : index(index), tagName(tagName), url(url), targetVersion(targetVersion), range(range), randomUid(randomUid),
-	    addPrefix(addPrefix), removePrefix(removePrefix) {}
+	  : index(index), tagName(tagName), url(url), proxy(proxy), targetVersion(targetVersion), range(range),
+	    randomUid(randomUid), addPrefix(addPrefix), removePrefix(removePrefix) {}
 
 	// To change this serialization, ProtocolVersion::RestoreRequestValue must be updated, and downgrades need to be
 	// considered
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, index, tagName, url, targetVersion, range, randomUid, addPrefix, removePrefix, reply);
+		serializer(ar, index, tagName, url, proxy, targetVersion, range, randomUid, addPrefix, removePrefix, reply);
 	}
 
 	std::string toString() const {
 		std::stringstream ss;
 		ss << "index:" << std::to_string(index) << " tagName:" << tagName.contents().toString()
-		   << " url:" << url.contents().toString() << " targetVersion:" << std::to_string(targetVersion)
-		   << " range:" << range.toString() << " randomUid:" << randomUid.toString()
-		   << " addPrefix:" << addPrefix.toString() << " removePrefix:" << removePrefix.toString();
+		   << " url:" << url.contents().toString() << " proxy:" << (proxy.present() ? proxy.get() : "")
+		   << " targetVersion:" << std::to_string(targetVersion) << " range:" << range.toString()
+		   << " randomUid:" << randomUid.toString() << " addPrefix:" << addPrefix.toString()
+		   << " removePrefix:" << removePrefix.toString();
 		return ss.str();
 	}
 };

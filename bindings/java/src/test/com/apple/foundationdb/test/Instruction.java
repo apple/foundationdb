@@ -33,11 +33,13 @@ import com.apple.foundationdb.tuple.Tuple;
 class Instruction extends Stack {
 	private static final String SUFFIX_SNAPSHOT = "_SNAPSHOT";
 	private static final String SUFFIX_DATABASE = "_DATABASE";
+	private static final String SUFFIX_TENANT = "_TENANT";
 
 	final String op;
 	final Tuple tokens;
 	final Context context;
 	final boolean isDatabase;
+	final boolean isTenant;
 	final boolean isSnapshot;
 	final Transaction tr;
 	final ReadTransaction readTr;
@@ -49,13 +51,22 @@ class Instruction extends Stack {
 		this.tokens = tokens;
 
 		String fullOp = tokens.getString(0);
-		isDatabase = fullOp.endsWith(SUFFIX_DATABASE);
+		boolean isDatabaseLocal = fullOp.endsWith(SUFFIX_DATABASE);
+		isTenant = fullOp.endsWith(SUFFIX_TENANT);
 		isSnapshot = fullOp.endsWith(SUFFIX_SNAPSHOT);
 
-		if(isDatabase) {
+		if(isDatabaseLocal) {
 			tr = null;
 			readTr = null;
 			op = fullOp.substring(0, fullOp.length() - SUFFIX_DATABASE.length());
+		}
+		else if(isTenant) {
+			tr = null;
+			readTr = null;
+			op = fullOp.substring(0, fullOp.length() - SUFFIX_TENANT.length());
+			if (!context.tenant.isPresent()) {
+				isDatabaseLocal = true;
+			}
 		}
 		else if(isSnapshot) {
 			tr = context.getCurrentTransaction();
@@ -68,22 +79,24 @@ class Instruction extends Stack {
 			op = fullOp;
 		}
 
-		tcx = isDatabase ? context.db : tr;
-		readTcx = isDatabase ? context.db : readTr;
+		isDatabase = isDatabaseLocal;
+
+		tcx = isDatabase ? context.db : isTenant ? context.tenant.get() : tr;
+		readTcx = isDatabase ? context.db : isTenant ? context.tenant.get() : readTr;
 	}
 
-	boolean setTransaction(Transaction newTr) {
-		if(!isDatabase) {
-			context.updateCurrentTransaction(newTr);
+	boolean replaceTransaction(Transaction newTr) {
+		if(!isDatabase && !isTenant) {
+			context.replaceTransaction(newTr);
 			return true;
 		}
 
 		return false;
 	}
 
-	boolean setTransaction(Transaction oldTr, Transaction newTr) {
-		if(!isDatabase) {
-			return context.updateCurrentTransaction(oldTr, newTr);
+	boolean replaceTransaction(Transaction oldTr, Transaction newTr) {
+		if(!isDatabase && !isTenant) {
+			return context.replaceTransaction(oldTr, newTr);
 		}
 
 		return false;

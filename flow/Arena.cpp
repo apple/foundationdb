@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2020 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -106,15 +106,24 @@ void* Arena::allocate4kAlignedBuffer(uint32_t size) {
 	return ArenaBlock::dependOn4kAlignedBuffer(impl, size);
 }
 
-size_t Arena::getSize() const {
+FDB_DEFINE_BOOLEAN_PARAM(FastInaccurateEstimate);
+
+size_t Arena::getSize(FastInaccurateEstimate fastInaccurateEstimate) const {
 	if (impl) {
 		allowAccess(impl.getPtr());
-		auto result = impl->totalSize();
+		size_t result;
+		if (fastInaccurateEstimate) {
+			result = impl->estimatedTotalSize();
+		} else {
+			result = impl->totalSize();
+		}
+
 		disallowAccess(impl.getPtr());
 		return result;
 	}
 	return 0;
 }
+
 bool Arena::hasFree(size_t size, const void* address) {
 	if (impl) {
 		allowAccess(impl.getPtr());
@@ -167,28 +176,38 @@ const void* ArenaBlock::getData() const {
 const void* ArenaBlock::getNextData() const {
 	return (const uint8_t*)getData() + used();
 }
-size_t ArenaBlock::totalSize() {
+
+size_t ArenaBlock::totalSize() const {
 	if (isTiny()) {
 		return size();
 	}
 
-	size_t s = size();
+	// Walk the entire tree to get an accurate size and store it in the estimate for
+	// each block, recursively.
+	totalSizeEstimate = size();
 	int o = nextBlockOffset;
 	while (o) {
 		ArenaBlockRef* r = (ArenaBlockRef*)((char*)getData() + o);
 		makeDefined(r, sizeof(ArenaBlockRef));
 		if (r->aligned4kBufferSize != 0) {
-			s += r->aligned4kBufferSize;
+			totalSizeEstimate += r->aligned4kBufferSize;
 		} else {
 			allowAccess(r->next);
-			s += r->next->totalSize();
+			totalSizeEstimate += r->next->totalSize();
 			disallowAccess(r->next);
 		}
 		o = r->nextBlockOffset;
 		makeNoAccess(r, sizeof(ArenaBlockRef));
 	}
-	return s;
+	return totalSizeEstimate;
 }
+size_t ArenaBlock::estimatedTotalSize() const {
+	if (isTiny()) {
+		return size();
+	}
+	return totalSizeEstimate;
+}
+
 // just for debugging:
 void ArenaBlock::getUniqueBlocks(std::set<ArenaBlock*>& a) {
 	a.insert(this);
@@ -232,6 +251,7 @@ void ArenaBlock::makeReference(ArenaBlock* next) {
 	makeNoAccess(r, sizeof(ArenaBlockRef));
 	nextBlockOffset = bigUsed;
 	bigUsed += sizeof(ArenaBlockRef);
+	totalSizeEstimate += next->estimatedTotalSize();
 }
 
 void* ArenaBlock::make4kAlignedBuffer(uint32_t size) {
@@ -245,6 +265,7 @@ void* ArenaBlock::make4kAlignedBuffer(uint32_t size) {
 	makeNoAccess(r, sizeof(ArenaBlockRef));
 	nextBlockOffset = bigUsed;
 	bigUsed += sizeof(ArenaBlockRef);
+	totalSizeEstimate += size;
 	return result;
 }
 
@@ -321,26 +342,27 @@ ArenaBlock* ArenaBlock::create(int dataSize, Reference<ArenaBlock>& next) {
 				b->bigSize = 256;
 				INSTRUMENT_ALLOCATE("Arena256");
 			} else if (reqSize <= 512) {
-				b = (ArenaBlock*)FastAllocator<512>::allocate();
+				b = (ArenaBlock*)new uint8_t[512];
 				b->bigSize = 512;
 				INSTRUMENT_ALLOCATE("Arena512");
 			} else if (reqSize <= 1024) {
-				b = (ArenaBlock*)FastAllocator<1024>::allocate();
+				b = (ArenaBlock*)new uint8_t[1024];
 				b->bigSize = 1024;
 				INSTRUMENT_ALLOCATE("Arena1024");
 			} else if (reqSize <= 2048) {
-				b = (ArenaBlock*)FastAllocator<2048>::allocate();
+				b = (ArenaBlock*)new uint8_t[2048];
 				b->bigSize = 2048;
 				INSTRUMENT_ALLOCATE("Arena2048");
 			} else if (reqSize <= 4096) {
-				b = (ArenaBlock*)FastAllocator<4096>::allocate();
+				b = (ArenaBlock*)new uint8_t[4096];
 				b->bigSize = 4096;
 				INSTRUMENT_ALLOCATE("Arena4096");
 			} else {
-				b = (ArenaBlock*)FastAllocator<8192>::allocate();
+				b = (ArenaBlock*)new uint8_t[8192];
 				b->bigSize = 8192;
 				INSTRUMENT_ALLOCATE("Arena8192");
 			}
+			b->totalSizeEstimate = b->bigSize;
 			b->tinySize = b->tinyUsed = NOT_TINY;
 			b->bigUsed = sizeof(ArenaBlock);
 		} else {
@@ -350,14 +372,17 @@ ArenaBlock* ArenaBlock::create(int dataSize, Reference<ArenaBlock>& next) {
 			b = (ArenaBlock*)new uint8_t[reqSize];
 			b->tinySize = b->tinyUsed = NOT_TINY;
 			b->bigSize = reqSize;
+			b->totalSizeEstimate = b->bigSize;
 			b->bigUsed = sizeof(ArenaBlock);
 
+#if !DEBUG_DETERMINISM
 			if (FLOW_KNOBS && g_allocation_tracing_disabled == 0 &&
 			    nondeterministicRandom()->random01() < (reqSize / FLOW_KNOBS->HUGE_ARENA_LOGGING_BYTES)) {
 				++g_allocation_tracing_disabled;
 				hugeArenaSample(reqSize);
 				--g_allocation_tracing_disabled;
 			}
+#endif
 			g_hugeArenaMemory.fetch_add(reqSize);
 
 			// If the new block has less free space than the old block, make the old block depend on it
@@ -435,26 +460,26 @@ void ArenaBlock::destroyLeaf() {
 			FastAllocator<256>::release(this);
 			INSTRUMENT_RELEASE("Arena256");
 		} else if (bigSize <= 512) {
-			FastAllocator<512>::release(this);
+			delete[] reinterpret_cast<uint8_t*>(this);
 			INSTRUMENT_RELEASE("Arena512");
 		} else if (bigSize <= 1024) {
-			FastAllocator<1024>::release(this);
+			delete[] reinterpret_cast<uint8_t*>(this);
 			INSTRUMENT_RELEASE("Arena1024");
 		} else if (bigSize <= 2048) {
-			FastAllocator<2048>::release(this);
+			delete[] reinterpret_cast<uint8_t*>(this);
 			INSTRUMENT_RELEASE("Arena2048");
 		} else if (bigSize <= 4096) {
-			FastAllocator<4096>::release(this);
+			delete[] reinterpret_cast<uint8_t*>(this);
 			INSTRUMENT_RELEASE("Arena4096");
 		} else if (bigSize <= 8192) {
-			FastAllocator<8192>::release(this);
+			delete[] reinterpret_cast<uint8_t*>(this);
 			INSTRUMENT_RELEASE("Arena8192");
 		} else {
 #ifdef ALLOC_INSTRUMENTATION
 			allocInstr["ArenaHugeKB"].dealloc((bigSize + 1023) >> 10);
 #endif
 			g_hugeArenaMemory.fetch_sub(bigSize);
-			delete[](uint8_t*) this;
+			delete[] reinterpret_cast<uint8_t*>(this);
 		}
 	}
 }
@@ -647,6 +672,83 @@ TEST_CASE("/flow/Arena/DefaultBoostHash") {
 	ASSERT(hashFunc(d) == hashFunc(e));
 	ASSERT(hashFunc(a) == hashFunc(a));
 	ASSERT(hashFunc(d) == hashFunc(d));
+
+	return Void();
+}
+
+TEST_CASE("/flow/Arena/Size") {
+	Arena a;
+	int fastSize, slowSize;
+
+	// Size estimates are accurate unless dependencies are added to an Arena via another Arena
+	// handle which points to a non-root node.
+	//
+	// Note that the ASSERT argument order matters, the estimate must be calculated first as
+	// the full accurate calculation will update the estimate
+	makeString(40, a);
+	fastSize = a.getSize(FastInaccurateEstimate::True);
+	slowSize = a.getSize();
+	ASSERT_EQ(fastSize, slowSize);
+
+	makeString(700, a);
+	fastSize = a.getSize(FastInaccurateEstimate::True);
+	slowSize = a.getSize();
+	ASSERT_EQ(fastSize, slowSize);
+
+	// Copy a at a point where it points to a large block with room for block references
+	Arena b = a;
+
+	// copy a at a point where there isn't room for more block references
+	makeString(1000, a);
+	Arena c = a;
+
+	makeString(1000, a);
+	makeString(1000, a);
+	fastSize = a.getSize(FastInaccurateEstimate::True);
+	slowSize = a.getSize();
+	ASSERT_EQ(fastSize, slowSize);
+
+	Standalone<StringRef> s = makeString(500);
+	a.dependsOn(s.arena());
+	fastSize = a.getSize(FastInaccurateEstimate::True);
+	slowSize = a.getSize();
+	ASSERT_EQ(fastSize, slowSize);
+
+	Standalone<StringRef> s2 = makeString(500);
+	a.dependsOn(s2.arena());
+	fastSize = a.getSize(FastInaccurateEstimate::True);
+	slowSize = a.getSize();
+	ASSERT_EQ(fastSize, slowSize);
+
+	// Add a dependency to b, which will fit in b's root and update b's size estimate
+	Standalone<StringRef> s3 = makeString(100);
+	b.dependsOn(s3.arena());
+	fastSize = b.getSize(FastInaccurateEstimate::True);
+	slowSize = b.getSize();
+	ASSERT_EQ(fastSize, slowSize);
+
+	// But now a's size estimate is out of date because the new reference in b's root is still
+	// in a's tree
+	fastSize = a.getSize(FastInaccurateEstimate::True);
+	slowSize = a.getSize();
+	ASSERT_LT(fastSize, slowSize);
+
+	// Now that a full size calc has been done on a, the estimate is up to date.
+	fastSize = a.getSize(FastInaccurateEstimate::True);
+	slowSize = a.getSize();
+	ASSERT_EQ(fastSize, slowSize);
+
+	// Add a dependency to c, which will NOT fit in c's root, so it will be added to a new
+	// root for c and that root will not be in a's tree so a's size and estimate remain
+	// unchanged and the same.  The size and estimate of c will also match.
+	Standalone<StringRef> s4 = makeString(100);
+	c.dependsOn(s4.arena());
+	fastSize = c.getSize(FastInaccurateEstimate::True);
+	slowSize = c.getSize();
+	ASSERT_EQ(fastSize, slowSize);
+	fastSize = a.getSize(FastInaccurateEstimate::True);
+	slowSize = a.getSize();
+	ASSERT_EQ(fastSize, slowSize);
 
 	return Void();
 }

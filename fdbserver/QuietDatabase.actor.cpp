@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,9 @@
  */
 
 #include <cinttypes>
+#include <vector>
+
+#include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/SystemData.h"
 #include "flow/ActorCollection.h"
 #include "fdbrpc/simulator.h"
@@ -233,6 +236,7 @@ ACTOR Future<std::vector<BlobWorkerInterface>> getBlobWorkers(Database cx, bool 
 		if (use_system_priority) {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 		}
+		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 		try {
 			RangeResult blobWorkersList = wait(tr.getRange(blobWorkerListKeys, CLIENT_KNOBS->TOO_MANY));
@@ -256,6 +260,7 @@ ACTOR Future<std::vector<StorageServerInterface>> getStorageServers(Database cx,
 		if (use_system_priority) {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 		}
+		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 		try {
 			RangeResult serverList = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
@@ -732,7 +737,7 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 				}
 			}
 		} catch (Error& e) {
-			TraceEvent(("QuietDatabase" + phase + "Error").c_str()).error(e, true);
+			TraceEvent(("QuietDatabase" + phase + "Error").c_str()).errorUnsuppressed(e);
 			if (e.code() != error_code_actor_cancelled && e.code() != error_code_attribute_not_found &&
 			    e.code() != error_code_timed_out)
 				TraceEvent(("QuietDatabase" + phase + "Error").c_str()).error(e);

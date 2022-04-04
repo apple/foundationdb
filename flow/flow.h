@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -61,7 +61,7 @@
 #define TEST(condition)                                                                                                \
 	if (!(condition)) {                                                                                                \
 	} else {                                                                                                           \
-		static TraceEvent* __test =                                                                                    \
+		static BaseTraceEvent* __test =                                                                                \
 		    &(TraceEvent(intToSeverity(FLOW_KNOBS->CODE_COV_TRACE_EVENT_SEVERITY), "CodeCoverage")                     \
 		          .detail("File", __FILE__)                                                                            \
 		          .detail("Line", __LINE__)                                                                            \
@@ -970,8 +970,10 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 	std::queue<T, Deque<T>> queue;
 	Promise<Void> onEmpty;
 	Error error;
+	Promise<Void> onError;
 
-	NotifiedQueue(int futures, int promises) : promises(promises), futures(futures), onEmpty(nullptr) {
+	NotifiedQueue(int futures, int promises)
+	  : promises(promises), futures(futures), onEmpty(nullptr), onError(nullptr) {
 		SingleCallback<T>::next = this;
 	}
 
@@ -979,6 +981,7 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 
 	bool isReady() const { return !queue.empty() || error.isValid(); }
 	bool isError() const { return queue.empty() && error.isValid(); } // the *next* thing queued is an error
+	bool hasError() const { return error.isValid(); } // there is an error queued
 	uint32_t size() const { return queue.size(); }
 
 	virtual T pop() {
@@ -1013,7 +1016,17 @@ struct NotifiedQueue : private SingleCallback<T>, FastAllocated<NotifiedQueue<T>
 		if (error.isValid())
 			return;
 
+		ASSERT(this->error.code() != error_code_success);
 		this->error = err;
+
+		// end_of_stream error is "expected", don't terminate reading stream early for this
+		// onError must be triggered before callback, otherwise callback could cause delPromiseRef/delFutureRef. This
+		// could destroy *this* in the callback, causing onError to be referenced after this object is destroyed.
+		if (err.code() != error_code_end_of_stream && err.code() != error_code_broken_promise && onError.isValid()) {
+			ASSERT(onError.canBeSet());
+			onError.sendError(err);
+		}
+
 		if (shouldFireImmediately()) {
 			SingleCallback<T>::next->error(err);
 		}
@@ -1062,10 +1075,13 @@ protected:
 		}
 		auto copy = std::move(queue.front());
 		queue.pop();
+		if (onEmpty.isValid() && queue.empty()) {
+			Promise<Void> hold = onEmpty;
+			onEmpty = Promise<Void>(nullptr);
+			hold.send(Void());
+		}
 		return copy;
 	}
-
-	bool hasError() { return error.isValid(); }
 
 	bool shouldFireImmediately() { return SingleCallback<T>::next != this; }
 };

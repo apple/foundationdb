@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,8 +20,9 @@
 
 #include <cinttypes>
 #include <memory>
+#include <string>
 
-#include "contrib/fmt-8.0.1/include/fmt/format.h"
+#include "contrib/fmt-8.1.1/include/fmt/format.h"
 #include "fdbrpc/simulator.h"
 #define BOOST_SYSTEM_NO_LIB
 #define BOOST_DATE_TIME_NO_LIB
@@ -121,20 +122,24 @@ void ISimulator::displayWorkers() const {
 int openCount = 0;
 
 struct SimClogging {
-	double getSendDelay(NetworkAddress from, NetworkAddress to) const { return halfLatency(); }
+	double getSendDelay(NetworkAddress from, NetworkAddress to, bool stableConnection = false) const {
+		// stable connection here means it's a local connection between processes on the same machine
+		// we expect it to have much lower latency
+		return (stableConnection ? 0.1 : 1.0) * halfLatency();
+	}
 
-	double getRecvDelay(NetworkAddress from, NetworkAddress to) {
+	double getRecvDelay(NetworkAddress from, NetworkAddress to, bool stableConnection = false) {
 		auto pair = std::make_pair(from.ip, to.ip);
 
 		double tnow = now();
-		double t = tnow + halfLatency();
-		if (!g_simulator.speedUpSimulation)
+		double t = tnow + (stableConnection ? 0.1 : 1.0) * halfLatency();
+		if (!g_simulator.speedUpSimulation && !stableConnection)
 			t += clogPairLatency[pair];
 
-		if (!g_simulator.speedUpSimulation && clogPairUntil.count(pair))
+		if (!g_simulator.speedUpSimulation && !stableConnection && clogPairUntil.count(pair))
 			t = std::max(t, clogPairUntil[pair]);
 
-		if (!g_simulator.speedUpSimulation && clogRecvUntil.count(to.ip))
+		if (!g_simulator.speedUpSimulation && !stableConnection && clogRecvUntil.count(to.ip))
 			t = std::max(t, clogRecvUntil[to.ip]);
 
 		return t - tnow;
@@ -182,8 +187,8 @@ SimClogging g_clogging;
 
 struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 	Sim2Conn(ISimulator::ProcessInfo* process)
-	  : opened(false), closedByCaller(false), process(process), dbgid(deterministicRandom()->randomUniqueID()),
-	    stopReceive(Never()) {
+	  : opened(false), closedByCaller(false), stableConnection(false), process(process),
+	    dbgid(deterministicRandom()->randomUniqueID()), stopReceive(Never()) {
 		pipes = sender(this) && receiver(this);
 	}
 
@@ -202,7 +207,18 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 		                                      process->address.ip,
 		                                      FLOW_KNOBS->MAX_CLOGGING_LATENCY * deterministicRandom()->random01());
 		sendBufSize = std::max<double>(deterministicRandom()->randomInt(0, 5000000), 25e6 * (latency + .002));
-		TraceEvent("Sim2Connection").detail("SendBufSize", sendBufSize).detail("Latency", latency);
+		// options like clogging or bitsflip are disabled for stable connections
+		stableConnection = std::any_of(process->childs.begin(),
+		                               process->childs.end(),
+		                               [&](ISimulator::ProcessInfo* child) { return child && child == peerProcess; }) ||
+		                   std::any_of(peerProcess->childs.begin(),
+		                               peerProcess->childs.end(),
+		                               [&](ISimulator::ProcessInfo* child) { return child && child == process; });
+
+		TraceEvent("Sim2Connection")
+		    .detail("SendBufSize", sendBufSize)
+		    .detail("Latency", latency)
+		    .detail("StableConnection", stableConnection);
 	}
 
 	~Sim2Conn() { ASSERT_ABORT(!opened || closedByCaller); }
@@ -221,6 +237,8 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 	Future<Void> onReadable() override { return whenReadable(this); }
 
 	bool isPeerGone() const { return !peer || peerProcess->failed; }
+
+	bool isStableConnection() const override { return stableConnection; }
 
 	void peerClosed() {
 		leakedConnectionTracker = trackLeakedConnection(this);
@@ -249,7 +267,7 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 		ASSERT(limit > 0);
 
 		int toSend = 0;
-		if (BUGGIFY) {
+		if (BUGGIFY && !stableConnection) {
 			toSend = std::min(limit, buffer->bytes_written - buffer->bytes_sent);
 		} else {
 			for (auto p = buffer; p; p = p->next) {
@@ -262,7 +280,7 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 			}
 		}
 		ASSERT(toSend);
-		if (BUGGIFY)
+		if (BUGGIFY && !stableConnection)
 			toSend = std::min(toSend, deterministicRandom()->randomInt(0, 1000));
 
 		if (!peer)
@@ -286,7 +304,7 @@ struct Sim2Conn final : IConnection, ReferenceCounted<Sim2Conn> {
 	NetworkAddress getPeerAddress() const override { return peerEndpoint; }
 	UID getDebugID() const override { return dbgid; }
 
-	bool opened, closedByCaller;
+	bool opened, closedByCaller, stableConnection;
 
 private:
 	ISimulator::ProcessInfo *process, *peerProcess;
@@ -336,10 +354,12 @@ private:
 			    deterministicRandom()->random01() < .5
 			        ? self->sentBytes.get()
 			        : deterministicRandom()->randomInt64(self->receivedBytes.get(), self->sentBytes.get() + 1);
-			wait(delay(g_clogging.getSendDelay(self->process->address, self->peerProcess->address)));
+			wait(delay(g_clogging.getSendDelay(
+			    self->process->address, self->peerProcess->address, self->isStableConnection())));
 			wait(g_simulator.onProcess(self->process));
 			ASSERT(g_simulator.getCurrentProcess() == self->process);
-			wait(delay(g_clogging.getRecvDelay(self->process->address, self->peerProcess->address)));
+			wait(delay(g_clogging.getRecvDelay(
+			    self->process->address, self->peerProcess->address, self->isStableConnection())));
 			ASSERT(g_simulator.getCurrentProcess() == self->process);
 			if (self->stopReceive.isReady()) {
 				wait(Future<Void>(Never()));
@@ -389,7 +409,9 @@ private:
 	}
 
 	void rollRandomClose() {
-		if (now() - g_simulator.lastConnectionFailure > g_simulator.connectionFailuresDisableDuration &&
+		// make sure connections between parenta and their childs are not closed
+		if (!stableConnection &&
+		    now() - g_simulator.lastConnectionFailure > g_simulator.connectionFailuresDisableDuration &&
 		    deterministicRandom()->random01() < .00001) {
 			g_simulator.lastConnectionFailure = now();
 			double a = deterministicRandom()->random01(), b = deterministicRandom()->random01();
@@ -865,7 +887,7 @@ public:
 
 		if (!ordered && !currentProcess->rebooting && machine == currentProcess &&
 		    !currentProcess->shutdownSignal.isSet() && FLOW_KNOBS->MAX_BUGGIFIED_DELAY > 0 &&
-		    deterministicRandom()->random01() < 0.25) { // FIXME: why doesnt this work when we are changing machines?
+		    deterministicRandom()->random01() < 0.25) { // FIXME: why doesn't this work when we are changing machines?
 			seconds += FLOW_KNOBS->MAX_BUGGIFIED_DELAY * pow(deterministicRandom()->random01(), 1000.0);
 		}
 
@@ -1101,6 +1123,10 @@ public:
 		if (mustBeDurable || deterministicRandom()->random01() < 0.5) {
 			state ISimulator::ProcessInfo* currentProcess = g_simulator.getCurrentProcess();
 			state TaskPriority currentTaskID = g_network->getCurrentTask();
+			TraceEvent(SevDebug, "Sim2DeleteFileImpl")
+			    .detail("CurrentProcess", currentProcess->toString())
+			    .detail("Filename", filename)
+			    .detail("Durable", mustBeDurable);
 			wait(g_simulator.onMachine(currentProcess));
 			try {
 				wait(::delay(0.05 * deterministicRandom()->random01()));
@@ -1118,16 +1144,17 @@ public:
 				throw err;
 			}
 		} else {
+			TraceEvent(SevDebug, "Sim2DeleteFileImplNonDurable")
+			    .detail("Filename", filename)
+			    .detail("Durable", mustBeDurable);
 			TEST(true); // Simulated non-durable delete
 			return Void();
 		}
 	}
 
-	ACTOR static Future<Void> runLoop(Sim2* self) {
-		state ISimulator::ProcessInfo* callingMachine = self->currentProcess;
+	static void runLoop(Sim2* self) {
+		ISimulator::ProcessInfo* callingMachine = self->currentProcess;
 		while (!self->isStopped) {
-			wait(self->net2->yield(TaskPriority::DefaultYield));
-
 			self->mutex.enter();
 			if (self->tasks.size() == 0) {
 				self->mutex.leave();
@@ -1144,18 +1171,13 @@ public:
 			self->yielded = false;
 		}
 		self->currentProcess = callingMachine;
-		self->net2->stop();
 		for (auto& fn : self->stopCallbacks) {
 			fn();
 		}
-		return Void();
 	}
 
 	// Implement ISimulator interface
-	void run() override {
-		Future<Void> loopFuture = runLoop(this);
-		net2->run();
-	}
+	void run() override { runLoop(this); }
 	ProcessInfo* newProcess(const char* name,
 	                        IPAddress ip,
 	                        uint16_t port,
@@ -1170,6 +1192,9 @@ public:
 		MachineInfo& machine = machines[locality.machineId().get()];
 		if (!machine.machineId.present())
 			machine.machineId = locality.machineId();
+		if (port == 0 && std::string(name) == "remote flow process") {
+			port = machine.getRandomPort();
+		}
 		for (int i = 0; i < machine.processes.size(); i++) {
 			if (machine.processes[i]->locality.machineId() !=
 			    locality.machineId()) { // SOMEDAY: compute ip from locality to avoid this check
@@ -1226,6 +1251,11 @@ public:
 		    .detail("MachineId", m->locality.machineId())
 		    .detail("Excluded", m->excluded)
 		    .detail("Cleared", m->cleared);
+
+		if (std::string(name) == "remote flow process") {
+			protectedAddresses.insert(m->address);
+			TraceEvent(SevDebug, "NewFlowProcessProtected").detail("Address", m->address);
+		}
 
 		// FIXME: Sometimes, connections to/from this process will explicitly close
 
@@ -1504,6 +1534,7 @@ public:
 		    .detail("MachineId", p->locality.machineId());
 		currentlyRebootingProcesses.insert(std::pair<NetworkAddress, ProcessInfo*>(p->address, p));
 		std::vector<ProcessInfo*>& processes = machines[p->locality.machineId().get()].processes;
+		machines[p->locality.machineId().get()].removeRemotePort(p->address.port);
 		if (p != processes.back()) {
 			auto it = std::find(processes.begin(), processes.end(), p);
 			std::swap(*it, processes.back());
@@ -1527,7 +1558,8 @@ public:
 			    .detail("Protected", protectedAddresses.count(machine->address))
 			    .backtrace();
 			// This will remove all the "tracked" messages that came from the machine being killed
-			latestEventCache.clear();
+			if (std::string(machine->name) != "remote flow process")
+				latestEventCache.clear();
 			machine->failed = true;
 		} else if (kt == InjectFaults) {
 			TraceEvent(SevWarn, "FaultMachine")
@@ -1555,7 +1587,8 @@ public:
 		} else {
 			ASSERT(false);
 		}
-		ASSERT(!protectedAddresses.count(machine->address) || machine->rebooting);
+		ASSERT(!protectedAddresses.count(machine->address) || machine->rebooting ||
+		       std::string(machine->name) == "remote flow process");
 	}
 	void rebootProcess(ProcessInfo* process, KillType kt) override {
 		if (kt == RebootProcessAndDelete && protectedAddresses.count(process->address)) {
@@ -2094,7 +2127,7 @@ public:
 				t.action.send(Void());
 				ASSERT(this->currentProcess == t.machine);
 			} catch (Error& e) {
-				TraceEvent(SevError, "UnhandledSimulationEventError").error(e, true);
+				TraceEvent(SevError, "UnhandledSimulationEventError").errorUnsuppressed(e);
 				killProcess(t.machine, KillInstantly);
 			}
 
@@ -2397,8 +2430,19 @@ ACTOR void doReboot(ISimulator::ProcessInfo* p, ISimulator::KillType kt) {
 		    kt ==
 		    ISimulator::RebootProcessAndDelete); // Simulated process rebooted with data and coordination state deletion
 
-		if (p->rebooting || !p->isReliable())
+		if (p->rebooting || !p->isReliable()) {
+			TraceEvent(SevDebug, "DoRebootFailed")
+			    .detail("Rebooting", p->rebooting)
+			    .detail("Reliable", p->isReliable());
 			return;
+		} else if (std::string(p->name) == "remote flow process") {
+			TraceEvent(SevDebug, "DoRebootFailed").detail("Name", p->name).detail("Address", p->address);
+			return;
+		} else if (p->getChilds().size()) {
+			TraceEvent(SevDebug, "DoRebootFailedOnParentProcess").detail("Address", p->address);
+			return;
+		}
+
 		TraceEvent("RebootingProcess")
 		    .detail("KillType", kt)
 		    .detail("Address", p->address)

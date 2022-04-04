@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,6 +34,8 @@
 #include "fdbrpc/IAsyncFile.h"
 #include "flow/UnitTest.h"
 #include "fdbclient/rapidxml/rapidxml.hpp"
+#include "fdbclient/FDBAWSCredentialsProvider.h"
+
 #include "flow/actorcompiler.h" // has to be last include
 
 using namespace rapidxml;
@@ -82,6 +84,7 @@ S3BlobStoreEndpoint::BlobKnobs::BlobKnobs() {
 	read_cache_blocks_per_file = CLIENT_KNOBS->BLOBSTORE_READ_CACHE_BLOCKS_PER_FILE;
 	max_send_bytes_per_second = CLIENT_KNOBS->BLOBSTORE_MAX_SEND_BYTES_PER_SECOND;
 	max_recv_bytes_per_second = CLIENT_KNOBS->BLOBSTORE_MAX_RECV_BYTES_PER_SECOND;
+	sdk_auth = false;
 }
 
 bool S3BlobStoreEndpoint::BlobKnobs::set(StringRef name, int value) {
@@ -118,6 +121,7 @@ bool S3BlobStoreEndpoint::BlobKnobs::set(StringRef name, int value) {
 	TRY_PARAM(read_cache_blocks_per_file, rcb);
 	TRY_PARAM(max_send_bytes_per_second, sbps);
 	TRY_PARAM(max_recv_bytes_per_second, rbps);
+	TRY_PARAM(sdk_auth, sa);
 #undef TRY_PARAM
 	return false;
 }
@@ -158,7 +162,8 @@ std::string S3BlobStoreEndpoint::BlobKnobs::getURLParameters() const {
 	return r;
 }
 
-Reference<S3BlobStoreEndpoint> S3BlobStoreEndpoint::fromString(std::string const& url,
+Reference<S3BlobStoreEndpoint> S3BlobStoreEndpoint::fromString(const std::string& url,
+                                                               const Optional<std::string>& proxy,
                                                                std::string* resourceFromURL,
                                                                std::string* error,
                                                                ParametersT* ignored_parameters) {
@@ -170,6 +175,17 @@ Reference<S3BlobStoreEndpoint> S3BlobStoreEndpoint::fromString(std::string const
 		StringRef prefix = t.eat("://");
 		if (prefix != LiteralStringRef("blobstore"))
 			throw format("Invalid blobstore URL prefix '%s'", prefix.toString().c_str());
+
+		Optional<std::string> proxyHost, proxyPort;
+		if (proxy.present()) {
+			if (!Hostname::isHostname(proxy.get()) && !NetworkAddress::parseOptional(proxy.get()).present()) {
+				throw format("'%s' is not a valid value for proxy. Format should be either IP:port or host:port.",
+				             proxy.get().c_str());
+			}
+			StringRef p(proxy.get());
+			proxyHost = p.eat(":").toString();
+			proxyPort = p.eat().toString();
+		}
 
 		Optional<StringRef> cred;
 		if (url.find("@") != std::string::npos) {
@@ -257,7 +273,8 @@ Reference<S3BlobStoreEndpoint> S3BlobStoreEndpoint::fromString(std::string const
 			creds = S3BlobStoreEndpoint::Credentials{ key.toString(), secret.toString(), securityToken.toString() };
 		}
 
-		return makeReference<S3BlobStoreEndpoint>(host.toString(), service.toString(), creds, knobs, extraHeaders);
+		return makeReference<S3BlobStoreEndpoint>(
+		    host.toString(), service.toString(), proxyHost, proxyPort, creds, knobs, extraHeaders);
 
 	} catch (std::string& err) {
 		if (error != nullptr)
@@ -500,13 +517,44 @@ ACTOR Future<Optional<json_spirit::mObject>> tryReadJSONFile(std::string path) {
 
 	} catch (Error& e) {
 		if (e.code() != error_code_actor_cancelled)
-			TraceEvent(SevWarn, errorEventType).error(e).suppressFor(60).detail("File", path);
+			TraceEvent(SevWarn, errorEventType).errorUnsuppressed(e).suppressFor(60).detail("File", path);
 	}
 
 	return Optional<json_spirit::mObject>();
 }
 
+// If the credentials expire, the connection will eventually fail and be discarded from the pool, and then a new
+// connection will be constructed, which will call this again to get updated credentials
+static S3BlobStoreEndpoint::Credentials getSecretSdk() {
+#ifdef BUILD_AWS_BACKUP
+	double elapsed = -timer_monotonic();
+	Aws::Auth::AWSCredentials awsCreds = FDBAWSCredentialsProvider::getAwsCredentials();
+	elapsed += timer_monotonic();
+
+	if (awsCreds.IsEmpty()) {
+		TraceEvent(SevWarn, "S3BlobStoreAWSCredsEmpty");
+		throw backup_auth_missing();
+	}
+
+	S3BlobStoreEndpoint::Credentials fdbCreds;
+	fdbCreds.key = awsCreds.GetAWSAccessKeyId();
+	fdbCreds.secret = awsCreds.GetAWSSecretKey();
+	fdbCreds.securityToken = awsCreds.GetSessionToken();
+
+	TraceEvent("S3BlobStoreGotSdkCredentials").suppressFor(60).detail("Duration", elapsed);
+
+	return fdbCreds;
+#else
+	TraceEvent(SevError, "S3BlobStoreNoSDK");
+	throw backup_auth_missing();
+#endif
+}
+
 ACTOR Future<Void> updateSecret_impl(Reference<S3BlobStoreEndpoint> b) {
+	if (b->knobs.sdk_auth) {
+		b->credentials = getSecretSdk();
+		return Void();
+	}
 	std::vector<std::string>* pFiles = (std::vector<std::string>*)g_network->global(INetwork::enBlobCredentialFiles);
 	if (pFiles == nullptr)
 		return Void();
@@ -538,7 +586,7 @@ ACTOR Future<Void> updateSecret_impl(Reference<S3BlobStoreEndpoint> b) {
 			JSONDoc accounts(doc.last().get_obj());
 			if (accounts.has(credentialsFileKey, false) && accounts.last().type() == json_spirit::obj_type) {
 				JSONDoc account(accounts.last());
-				S3BlobStoreEndpoint::Credentials creds;
+				S3BlobStoreEndpoint::Credentials creds = b->credentials.get();
 				if (b->lookupKey) {
 					std::string apiKey;
 					if (account.tryGet("api_key", apiKey))
@@ -589,11 +637,11 @@ ACTOR Future<S3BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<S3B
 			return rconn;
 		}
 	}
-	std::string service = b->service;
+	std::string host = b->host, service = b->service;
 	if (service.empty())
 		service = b->knobs.secure_connection ? "https" : "http";
 	state Reference<IConnection> conn =
-	    wait(INetworkConnections::net()->connect(b->host, service, b->knobs.secure_connection ? true : false));
+	    wait(INetworkConnections::net()->connect(host, service, b->knobs.secure_connection ? true : false));
 	wait(conn->connectHandshake());
 
 	TraceEvent("S3BlobStoreEndpointNewConnection")
@@ -601,7 +649,7 @@ ACTOR Future<S3BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<S3B
 	    .detail("RemoteEndpoint", conn->getPeerAddress())
 	    .detail("ExpiresIn", b->knobs.max_connection_life);
 
-	if (b->lookupKey || b->lookupSecret)
+	if (b->lookupKey || b->lookupSecret || b->knobs.sdk_auth)
 		wait(b->updateSecret());
 
 	return S3BlobStoreEndpoint::ReusableConnection({ conn, now() + b->knobs.max_connection_life });
@@ -744,7 +792,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<S3BlobStoreEndp
 
 		// Attach err to trace event if present, otherwise extract some stuff from the response
 		if (err.present()) {
-			event.error(err.get());
+			event.errorUnsuppressed(err.get());
 		}
 		event.suppressFor(60);
 		if (!err.present()) {
@@ -954,7 +1002,7 @@ ACTOR Future<Void> listObjectsStream_impl(Reference<S3BlobStoreEndpoint> bstore,
 		} catch (Error& e) {
 			if (e.code() != error_code_actor_cancelled)
 				TraceEvent(SevWarn, "S3BlobStoreEndpointListResultParseError")
-				    .error(e)
+				    .errorUnsuppressed(e)
 				    .suppressFor(60)
 				    .detail("Resource", fullResource);
 			throw http_bad_response();
@@ -1080,7 +1128,7 @@ ACTOR Future<std::vector<std::string>> listBuckets_impl(Reference<S3BlobStoreEnd
 		} catch (Error& e) {
 			if (e.code() != error_code_actor_cancelled)
 				TraceEvent(SevWarn, "S3BlobStoreEndpointListBucketResultParseError")
-				    .error(e)
+				    .errorUnsuppressed(e)
 				    .suppressFor(60)
 				    .detail("Resource", fullResource);
 			throw http_bad_response();
@@ -1574,7 +1622,7 @@ TEST_CASE("/backup/s3/v4headers") {
 	S3BlobStoreEndpoint::Credentials creds{ "AKIAIOSFODNN7EXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "" }
 	// GET without query parameters
 	{
-		S3BlobStoreEndpoint s3("s3.amazonaws.com", "s3", creds);
+		S3BlobStoreEndpoint s3("s3.amazonaws.com", "s3", "proxy", "port", creds);
 		std::string verb("GET");
 		std::string resource("/test.txt");
 		HTTP::Headers headers;
@@ -1589,7 +1637,7 @@ TEST_CASE("/backup/s3/v4headers") {
 
 	// GET with query parameters
 	{
-		S3BlobStoreEndpoint s3("s3.amazonaws.com", "s3", creds);
+		S3BlobStoreEndpoint s3("s3.amazonaws.com", "s3", "proxy", "port", creds);
 		std::string verb("GET");
 		std::string resource("/test/examplebucket?Action=DescribeRegions&Version=2013-10-15");
 		HTTP::Headers headers;
@@ -1604,7 +1652,7 @@ TEST_CASE("/backup/s3/v4headers") {
 
 	// POST
 	{
-		S3BlobStoreEndpoint s3("s3.us-west-2.amazonaws.com", "s3", creds);
+		S3BlobStoreEndpoint s3("s3.us-west-2.amazonaws.com", "s3", "proxy", "port", creds);
 		std::string verb("POST");
 		std::string resource("/simple.json");
 		HTTP::Headers headers;

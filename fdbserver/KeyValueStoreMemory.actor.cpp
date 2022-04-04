@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -634,7 +634,7 @@ private:
 			} catch (Error& e) {
 				bool ok = e.code() == error_code_operation_cancelled || e.code() == error_code_file_not_found ||
 				          e.code() == error_code_disk_adapter_reset;
-				TraceEvent(ok ? SevInfo : SevError, "ErrorDuringRecovery", dbgid).error(e, true);
+				TraceEvent(ok ? SevInfo : SevError, "ErrorDuringRecovery", dbgid).errorUnsuppressed(e);
 				if (e.code() != error_code_disk_adapter_reset) {
 					throw e;
 				}

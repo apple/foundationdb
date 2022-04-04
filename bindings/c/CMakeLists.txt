@@ -1,7 +1,6 @@
 set(FDB_C_SRCS
   fdb_c.cpp
-  foundationdb/fdb_c.h
-  ThreadCleanup.cpp)
+  foundationdb/fdb_c.h)
 
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/foundationdb)
 
@@ -18,6 +17,8 @@ endif()
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64" OR CMAKE_SYSTEM_PROCESSOR MATCHES "arm64")
   set(cpu "aarch64")
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(ppc64le|powerpc64le)")
+  set(cpu "ppc64le")
 endif()
 
 set(IS_ARM_MAC NO)
@@ -49,7 +50,7 @@ endif()
 add_dependencies(fdb_c fdb_c_generated fdb_c_options)
 add_dependencies(fdbclient fdb_c_options)
 add_dependencies(fdbclient_sampling fdb_c_options)
-target_link_libraries(fdb_c PUBLIC $<BUILD_INTERFACE:fdbclient>)
+target_link_libraries(fdb_c PRIVATE $<BUILD_INTERFACE:fdbclient>)
 if(APPLE)
   set(symbols ${CMAKE_CURRENT_BINARY_DIR}/fdb_c.symbols)
   add_custom_command(OUTPUT ${symbols}
@@ -74,10 +75,8 @@ if(WIN32)
   set_property(SOURCE ${asm_file} PROPERTY LANGUAGE ASM_MASM)
 endif()
 
-# The tests don't build on windows and ARM macs
-# doctest doesn't seem to compile on ARM macs, we should
-# check later whether this works
-if(NOT WIN32 AND NOT IS_ARM_MAC)
+# The tests don't build on windows
+if(NOT WIN32)
   set(MAKO_SRCS
     test/mako/mako.c
     test/mako/mako.h
@@ -92,38 +91,68 @@ if(NOT WIN32 AND NOT IS_ARM_MAC)
 
   set(UNIT_TEST_VERSION_510_SRCS test/unit/unit_tests_version_510.cpp)
   set(TRACE_PARTIAL_FILE_SUFFIX_TEST_SRCS test/unit/trace_partial_file_suffix_test.cpp)
-  set(DISCONNECTED_TIMEOUT_UNIT_TEST_SRCS 
+  set(DISCONNECTED_TIMEOUT_UNIT_TEST_SRCS
     test/unit/disconnected_timeout_tests.cpp
     test/unit/fdb_api.cpp
     test/unit/fdb_api.hpp)
+
+  set(API_TESTER_SRCS
+    test/apitester/fdb_c_api_tester.cpp
+    test/apitester/TesterApiWorkload.cpp
+    test/apitester/TesterApiWorkload.h
+    test/apitester/TesterApiWrapper.cpp
+    test/apitester/TesterApiWrapper.h
+    test/apitester/TesterTestSpec.cpp
+    test/apitester/TesterTestSpec.h
+    test/apitester/TesterCancelTransactionWorkload.cpp
+    test/apitester/TesterCorrectnessWorkload.cpp
+    test/apitester/TesterKeyValueStore.cpp
+    test/apitester/TesterKeyValueStore.h
+    test/apitester/TesterOptions.h
+    test/apitester/TesterScheduler.cpp
+    test/apitester/TesterScheduler.h
+    test/apitester/TesterTransactionExecutor.cpp
+    test/apitester/TesterTransactionExecutor.h
+    test/apitester/TesterUtil.cpp
+    test/apitester/TesterUtil.h
+    test/apitester/TesterWorkload.cpp
+    test/apitester/TesterWorkload.h
+    ../../flow/SimpleOpt.h
+  )
 
   if(OPEN_FOR_IDE)
     add_library(fdb_c_performance_test OBJECT test/performance_test.c test/test.h)
     add_library(fdb_c_ryw_benchmark OBJECT test/ryw_benchmark.c test/test.h)
     add_library(fdb_c_txn_size_test OBJECT test/txn_size_test.c test/test.h)
+    add_library(fdb_c_client_memory_test OBJECT test/client_memory_test.cpp test/unit/fdb_api.cpp test/unit/fdb_api.hpp)
     add_library(mako OBJECT ${MAKO_SRCS})
     add_library(fdb_c_setup_tests OBJECT test/unit/setup_tests.cpp)
     add_library(fdb_c_unit_tests OBJECT ${UNIT_TEST_SRCS})
     add_library(fdb_c_unit_tests_version_510 OBJECT ${UNIT_TEST_VERSION_510_SRCS})
     add_library(trace_partial_file_suffix_test OBJECT ${TRACE_PARTIAL_FILE_SUFFIX_TEST_SRCS})
     add_library(disconnected_timeout_unit_tests OBJECT ${DISCONNECTED_TIMEOUT_UNIT_TEST_SRCS})
+    add_library(fdb_c_api_tester OBJECT ${API_TESTER_SRCS})
   else()
     add_executable(fdb_c_performance_test test/performance_test.c test/test.h)
     add_executable(fdb_c_ryw_benchmark test/ryw_benchmark.c test/test.h)
     add_executable(fdb_c_txn_size_test test/txn_size_test.c test/test.h)
+    add_executable(fdb_c_client_memory_test test/client_memory_test.cpp test/unit/fdb_api.cpp test/unit/fdb_api.hpp)
     add_executable(mako ${MAKO_SRCS})
     add_executable(fdb_c_setup_tests test/unit/setup_tests.cpp)
     add_executable(fdb_c_unit_tests ${UNIT_TEST_SRCS})
     add_executable(fdb_c_unit_tests_version_510 ${UNIT_TEST_VERSION_510_SRCS})
     add_executable(trace_partial_file_suffix_test ${TRACE_PARTIAL_FILE_SUFFIX_TEST_SRCS})
     add_executable(disconnected_timeout_unit_tests ${DISCONNECTED_TIMEOUT_UNIT_TEST_SRCS})
+    add_executable(fdb_c_api_tester ${API_TESTER_SRCS})
     strip_debug_symbols(fdb_c_performance_test)
     strip_debug_symbols(fdb_c_ryw_benchmark)
     strip_debug_symbols(fdb_c_txn_size_test)
+    strip_debug_symbols(fdb_c_client_memory_test)
   endif()
-  target_link_libraries(fdb_c_performance_test PRIVATE fdb_c)
-  target_link_libraries(fdb_c_ryw_benchmark PRIVATE fdb_c)
-  target_link_libraries(fdb_c_txn_size_test PRIVATE fdb_c)
+  target_link_libraries(fdb_c_performance_test PRIVATE fdb_c Threads::Threads)
+  target_link_libraries(fdb_c_ryw_benchmark PRIVATE fdb_c Threads::Threads)
+  target_link_libraries(fdb_c_txn_size_test PRIVATE fdb_c Threads::Threads)
+  target_link_libraries(fdb_c_client_memory_test PRIVATE fdb_c Threads::Threads)
 
   add_dependencies(fdb_c_setup_tests doctest)
   add_dependencies(fdb_c_unit_tests doctest)
@@ -134,14 +163,20 @@ if(NOT WIN32 AND NOT IS_ARM_MAC)
   target_include_directories(fdb_c_unit_tests_version_510 PUBLIC ${DOCTEST_INCLUDE_DIR})
   target_include_directories(disconnected_timeout_unit_tests PUBLIC ${DOCTEST_INCLUDE_DIR})
   target_link_libraries(fdb_c_setup_tests PRIVATE fdb_c Threads::Threads)
-  target_link_libraries(fdb_c_unit_tests PRIVATE fdb_c Threads::Threads)
+  target_link_libraries(fdb_c_unit_tests PRIVATE fdb_c Threads::Threads fdbclient)
   target_link_libraries(fdb_c_unit_tests_version_510 PRIVATE fdb_c Threads::Threads)
-  target_link_libraries(trace_partial_file_suffix_test PRIVATE fdb_c Threads::Threads)
+  target_link_libraries(trace_partial_file_suffix_test PRIVATE fdb_c Threads::Threads flow)
   target_link_libraries(disconnected_timeout_unit_tests PRIVATE fdb_c Threads::Threads)
+
+if(USE_SANITIZER)
+  target_link_libraries(fdb_c_api_tester PRIVATE fdb_c toml11_target Threads::Threads fmt::fmt boost_asan)
+else()
+  target_link_libraries(fdb_c_api_tester PRIVATE fdb_c toml11_target Threads::Threads fmt::fmt boost_target)
+endif()
 
   # do not set RPATH for mako
   set_property(TARGET mako PROPERTY SKIP_BUILD_RPATH TRUE)
-  target_link_libraries(mako PRIVATE fdb_c)
+  target_link_libraries(mako PRIVATE fdb_c fdbclient)
 
   if(NOT OPEN_FOR_IDE)
     # Make sure that fdb_c.h is compatible with c90
@@ -164,6 +199,7 @@ if(NOT WIN32 AND NOT IS_ARM_MAC)
   add_custom_target(external_client DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so)
   add_dependencies(fdb_c_unit_tests external_client)
   add_dependencies(disconnected_timeout_unit_tests external_client)
+  add_dependencies(fdb_c_api_tester external_client)
 
   add_fdbclient_test(
     NAME fdb_c_setup_tests
@@ -200,6 +236,19 @@ if(NOT WIN32 AND NOT IS_ARM_MAC)
     COMMAND $<TARGET_FILE:disconnected_timeout_unit_tests>
             @CLUSTER_FILE@
             ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so
+            )
+  add_fdbclient_test(
+    NAME fdb_c_api_tests
+    DISABLE_LOG_DUMP
+    COMMAND ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/run_c_api_tests.py
+            --cluster-file
+            @CLUSTER_FILE@
+            --tester-binary
+            $<TARGET_FILE:fdb_c_api_tester>
+            --external-client-library
+            ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so
+            --test-dir
+            ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests
             )
 endif()
 

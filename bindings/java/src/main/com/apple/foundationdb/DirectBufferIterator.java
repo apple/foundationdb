@@ -32,11 +32,11 @@ import java.util.NoSuchElementException;
  * The serialization format of result is =>
  *     [int keyCount, boolean more, ListOf<(int keyLen, int valueLen, byte[] key, byte[] value)>]
  */
-class DirectBufferIterator implements Iterator<KeyValue>, AutoCloseable {
-	private ByteBuffer byteBuffer;
-	private int current = 0;
-	private int keyCount = -1;
-	private boolean more = false;
+abstract class DirectBufferIterator implements AutoCloseable {
+	protected ByteBuffer byteBuffer;
+	protected int current = 0;
+	protected int keyCount = -1;
+	protected boolean more = false;
 
 	public DirectBufferIterator(ByteBuffer buffer) {
 		byteBuffer = buffer;
@@ -55,29 +55,9 @@ class DirectBufferIterator implements Iterator<KeyValue>, AutoCloseable {
 		return keyCount > -1;
 	}
 
-	@Override
 	public boolean hasNext() {
 		assert (hasResultReady());
 		return current < keyCount;
-	}
-
-	@Override
-	public KeyValue next() {
-		assert (hasResultReady()); // Must be called once its ready.
-		if (!hasNext()) {
-			throw new NoSuchElementException();
-		}
-
-		final int keyLen = byteBuffer.getInt();
-		final int valueLen = byteBuffer.getInt();
-		byte[] key = new byte[keyLen];
-		byteBuffer.get(key);
-
-		byte[] value = new byte[valueLen];
-		byteBuffer.get(value);
-
-		current += 1;
-		return new KeyValue(key, value);
 	}
 
 	public ByteBuffer getBuffer() {

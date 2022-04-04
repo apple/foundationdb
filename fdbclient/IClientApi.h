@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@
 
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/Tenant.h"
 
 #include "flow/ThreadHelper.actor.h"
 
@@ -61,12 +62,12 @@ public:
 	                                           GetRangeLimits limits,
 	                                           bool snapshot = false,
 	                                           bool reverse = false) = 0;
-	virtual ThreadFuture<RangeResult> getRangeAndFlatMap(const KeySelectorRef& begin,
-	                                                     const KeySelectorRef& end,
-	                                                     const StringRef& mapper,
-	                                                     GetRangeLimits limits,
-	                                                     bool snapshot = false,
-	                                                     bool reverse = false) = 0;
+	virtual ThreadFuture<MappedRangeResult> getMappedRange(const KeySelectorRef& begin,
+	                                                       const KeySelectorRef& end,
+	                                                       const StringRef& mapper,
+	                                                       GetRangeLimits limits,
+	                                                       bool snapshot = false,
+	                                                       bool reverse = false) = 0;
 	virtual ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key) = 0;
 	virtual ThreadFuture<Standalone<StringRef>> getVersionstamp() = 0;
 
@@ -116,6 +117,18 @@ public:
 	// Only if it's a MultiVersionTransaction and the underlying transaction handler is null,
 	// it will return false
 	virtual bool isValid() { return true; }
+
+	virtual Optional<TenantName> getTenant() = 0;
+};
+
+class ITenant {
+public:
+	virtual ~ITenant() {}
+
+	virtual Reference<ITransaction> createTransaction() = 0;
+
+	virtual void addref() = 0;
+	virtual void delref() = 0;
 };
 
 // An interface that represents a connection to a cluster made by a client
@@ -123,6 +136,7 @@ class IDatabase {
 public:
 	virtual ~IDatabase() {}
 
+	virtual Reference<ITenant> openTenant(TenantNameRef tenantName) = 0;
 	virtual Reference<ITransaction> createTransaction() = 0;
 	virtual void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) = 0;
 	virtual double getMainThreadBusyness() = 0;
