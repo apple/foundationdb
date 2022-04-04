@@ -131,7 +131,8 @@ UID SimExternalConnection::getDebugID() const {
 }
 
 std::vector<NetworkAddress> SimExternalConnection::resolveTCPEndpointBlocking(const std::string& host,
-                                                                              const std::string& service) {
+                                                                              const std::string& service,
+                                                                              DNSCache* dnsCache) {
 	ip::tcp::resolver resolver(ios);
 	try {
 		auto iter = resolver.resolve(host, service);
@@ -147,20 +148,28 @@ std::vector<NetworkAddress> SimExternalConnection::resolveTCPEndpointBlocking(co
 			}
 			++iter;
 		}
+		if (addrs.empty()) {
+			throw lookup_failed();
+		}
+		dnsCache->add(host, service, addrs);
 		return addrs;
 	} catch (...) {
+		dnsCache->remove(host, service);
 		throw lookup_failed();
 	}
 }
 
-ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpointImpl(std::string host, std::string service) {
+ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpointImpl(std::string host,
+                                                                        std::string service,
+                                                                        DNSCache* dnsCache) {
 	wait(delayJittered(0.1));
-	return SimExternalConnection::resolveTCPEndpointBlocking(host, service);
+	return SimExternalConnection::resolveTCPEndpointBlocking(host, service, dnsCache);
 }
 
 Future<std::vector<NetworkAddress>> SimExternalConnection::resolveTCPEndpoint(const std::string& host,
-                                                                              const std::string& service) {
-	return resolveTCPEndpointImpl(host, service);
+                                                                              const std::string& service,
+                                                                              DNSCache* dnsCache) {
+	return resolveTCPEndpointImpl(host, service, dnsCache);
 }
 
 Future<Reference<IConnection>> SimExternalConnection::connect(NetworkAddress toAddr) {
