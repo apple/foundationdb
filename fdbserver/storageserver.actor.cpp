@@ -5035,10 +5035,14 @@ ACTOR Future<Version> fetchChangeFeed(StorageServer* data,
 	}
 }
 
-ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
-                                                       KeyRange keys,
-                                                       Version fetchVersion,
-                                                       UID fkId) {
+ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data, KeyRange keys, UID fkId) {
+
+	// Wait for current TLog batch to finish to ensure that we're fetching metadata at a version >= the version of the
+	// ChangeServerKeys mutation. This guarantees we don't miss any metadata between the previous batch's version
+	// (data->version) and the mutation version.
+	wait(data->version.whenAtLeast(data->version.get() + 1));
+	state Version fetchVersion = fetchVersion = data->version.get();
+
 	TraceEvent(SevDebug, "FetchChangeFeedMetadata", data->thisServerID)
 	    .detail("Range", keys.toString())
 	    .detail("FetchVersion", fetchVersion)
@@ -5258,8 +5262,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		    .detail("KeyEnd", shard->keys.end)
 		    .detail("Version", data->version.get());
 
-		state Future<std::vector<Key>> fetchCFMetadata =
-		    fetchChangeFeedMetadata(data, keys, data->version.get(), fetchKeysID);
+		state Future<std::vector<Key>> fetchCFMetadata = fetchChangeFeedMetadata(data, keys, fetchKeysID);
 
 		validate(data);
 
