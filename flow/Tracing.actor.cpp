@@ -323,7 +323,7 @@ private:
 
 	// Writes the given vector of linked SpanContext's to the request. If the vector is
 	// empty, the request is not modified.
-	inline void serialize_vector(const SmallVectorRef<OTELEvent>& vec, TraceRequest& request) {
+	inline void serialize_vector(const SmallVectorRef<OTELEventRef>& vec, TraceRequest& request) {
 		int size = vec.size();
 		if (size <= 15) {
 			request.write_byte(static_cast<uint8_t>(size) | 0b10010000);
@@ -360,7 +360,8 @@ private:
 		}
 	}
 
-	inline void serialize_map(const std::unordered_map<StringRef, StringRef>& map, TraceRequest& request) {
+	template <class Map>
+	inline void serialize_map(const Map& map, TraceRequest& request) {
 		int size = map.size();
 
 		if (size <= 15) {
@@ -598,29 +599,30 @@ TEST_CASE("/flow/Tracing/CreateOTELSpan") {
 };
 
 TEST_CASE("/flow/Tracing/AddEvents") {
-	// Use helper method to add an OTELEvent to an OTELSpan.
+	// Use helper method to add an OTELEventRef to an OTELSpan.
 	OTELSpan span1("span_with_event"_loc);
 	auto arena = span1.arena;
-	auto attr = KeyValueRef(arena, KeyValueRef(LiteralStringRef("foo"), LiteralStringRef("bar")));
-	span1.addEvent(StringRef(arena, LiteralStringRef("read_version")), 1.0, { attr });
+	SmallVectorRef<KeyValueRef> attrs;
+	attrs.push_back(arena, KeyValueRef("foo"_sr, "bar"_sr));
+	span1.addEvent(LiteralStringRef("read_version"), 1.0, attrs);
 	ASSERT(span1.events[0].name.toString() == "read_version");
 	ASSERT(span1.events[0].time == 1.0);
 	ASSERT(span1.events[0].attributes.begin()->key.toString() == "foo");
 	ASSERT(span1.events[0].attributes.begin()->value.toString() == "bar");
 
-	// Use helper method to add an OTELEvent with no attributes to an OTELSpan
+	// Use helper method to add an OTELEventRef with no attributes to an OTELSpan
 	OTELSpan span2("span_with_event"_loc);
 	span2.addEvent(StringRef(span2.arena, LiteralStringRef("commit_succeed")), 1234567.100);
 	ASSERT(span2.events[0].name.toString() == "commit_succeed");
 	ASSERT(span2.events[0].time == 1234567.100);
 	ASSERT(span2.events[0].attributes.size() == 0);
 
-	// Add fully constructed OTELEvent to OTELSpan passed by value.
+	// Add fully constructed OTELEventRef to OTELSpan passed by value.
 	OTELSpan span3("span_with_event"_loc);
 	auto s3Arena = span3.arena;
-	auto s3Attr = KeyValueRef(s3Arena, KeyValueRef(LiteralStringRef("xyz"), LiteralStringRef("123")));
-	span3.addEvent(OTELEvent(StringRef(s3Arena, LiteralStringRef("commit_fail")), 1234567.100, s3Arena, { s3Attr }))
-	    .addEvent(OTELEvent(StringRef(s3Arena, LiteralStringRef("commit_succeed")), 1111.001, s3Arena));
+	SmallVectorRef<KeyValueRef> s3Attrs;
+	s3Attrs.push_back(s3Arena, KeyValueRef("xyz"_sr, "123"_sr));
+	span3.addEvent("commit_fail"_sr, 1234567.100, s3Attrs).addEvent("commit_succeed"_sr, 1111.001, s3Attrs);
 	ASSERT(span3.events[0].name.toString() == "commit_fail");
 	ASSERT(span3.events[0].time == 1234567.100);
 	ASSERT(span3.events[0].attributes.begin()->key.toString() == "xyz");
@@ -636,8 +638,9 @@ TEST_CASE("/flow/Tracing/AddAttributes") {
 	auto arena = span1.arena;
 	span1.addAttribute(StringRef(arena, LiteralStringRef("foo")), StringRef(arena, LiteralStringRef("bar")));
 	span1.addAttribute(StringRef(arena, LiteralStringRef("operation")), StringRef(arena, LiteralStringRef("grv")));
-	ASSERT(span1.attributes[StringRef(arena, LiteralStringRef("foo"))].toString() == "bar");
-	ASSERT(span1.attributes[StringRef(arena, LiteralStringRef("operation"))].toString() == "grv");
+	ASSERT_EQ(span1.attributes.size(), 3); // Includes default attribute of "address"
+	ASSERT(span1.attributes[1] == KeyValueRef("foo"_sr, "bar"_sr));
+	ASSERT(span1.attributes[2] == KeyValueRef("operation"_sr, "grv"_sr));
 
 	OTELSpan span3("span_with_attrs"_loc);
 	auto s3Arena = span3.arena;
@@ -645,13 +648,10 @@ TEST_CASE("/flow/Tracing/AddAttributes") {
 	    .addAttribute(StringRef(s3Arena, LiteralStringRef("b")), LiteralStringRef("2"))
 	    .addAttribute(StringRef(s3Arena, LiteralStringRef("c")), LiteralStringRef("3"));
 
-	ASSERT(span3.attributes.size() == 4); // Includes default attribute of "address"
-	ASSERT(span3.attributes[StringRef(s3Arena, LiteralStringRef("a"))].toString() ==
-	       "1"); // Includes default attribute of "address"
-	ASSERT(span3.attributes[StringRef(s3Arena, LiteralStringRef("b"))].toString() ==
-	       "2"); // Includes default attribute of "address"
-	ASSERT(span3.attributes[StringRef(s3Arena, LiteralStringRef("c"))].toString() ==
-	       "3"); // Includes default attribute of "address"
+	ASSERT_EQ(span3.attributes.size(), 4); // Includes default attribute of "address"
+	ASSERT(span3.attributes[1] == KeyValueRef("a"_sr, "1"_sr));
+	ASSERT(span3.attributes[2] == KeyValueRef("b"_sr, "2"_sr));
+	ASSERT(span3.attributes[3] == KeyValueRef("c"_sr, "3"_sr));
 	return Void();
 };
 
@@ -783,11 +783,11 @@ TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
 	// Exercise all fluent interfaces, include links, events, and attributes.
 	OTELSpan span3("encoded_span_3"_loc);
 	auto s3Arena = span3.arena;
-	span3.addAttribute(StringRef(s3Arena, LiteralStringRef("operation")), StringRef(s3Arena, LiteralStringRef("grv")))
+	SmallVectorRef<KeyValueRef> attrs;
+	attrs.push_back(s3Arena, KeyValueRef("foo"_sr, "bar"_sr));
+	span3.addAttribute("operation"_sr, "grv"_sr)
 	    .addLink(SpanContext(UID(300, 301), 400, TraceFlags::sampled))
-	    .addEvent(StringRef(s3Arena, LiteralStringRef("event1")),
-	              100.101,
-	              { KeyValueRef(s3Arena, KeyValueRef(LiteralStringRef("foo"), LiteralStringRef("bar"))) });
+	    .addEvent(StringRef(s3Arena, LiteralStringRef("event1")), 100.101, attrs);
 	tracer.serialize_span(span3, request);
 	data = request.buffer.get();
 	ASSERT(data[0] == 0b10011110); // 14 element array.

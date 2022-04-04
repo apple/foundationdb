@@ -146,13 +146,14 @@ enum class SpanKind : uint8_t { INTERNAL = 0, CLIENT = 1, SERVER = 2, PRODUCER =
 
 enum class SpanStatus : uint8_t { UNSET = 0, OK = 1, ERR = 2 };
 
-struct OTELEvent {
-	OTELEvent() {}
-	OTELEvent(const StringRef& name,
-	          const double& time,
-	          Arena& arena,
-	          const std::initializer_list<KeyValueRef>& attributes = {})
-	  : name(name), time(time), attributes(arena, attributes.begin(), attributes.end()) {}
+struct OTELEventRef {
+	OTELEventRef() {}
+	OTELEventRef(const StringRef& name,
+	             const double& time,
+	             const SmallVectorRef<KeyValueRef>& attributes = SmallVectorRef<KeyValueRef>())
+	  : name(name), time(time), attributes(attributes) {}
+	OTELEventRef(Arena& arena, const OTELEventRef& other)
+	  : name(arena, other.name), time(other.time), attributes(arena, other.attributes) {}
 	StringRef name;
 	double time = 0.0;
 	SmallVectorRef<KeyValueRef> attributes;
@@ -185,7 +186,8 @@ public:
 		}
 		this->kind = SpanKind::SERVER;
 		this->status = SpanStatus::OK;
-		this->attributes["address"_sr] = g_network->getLocalAddress().toString();
+		this->attributes.push_back(
+		    this->arena, KeyValueRef("address"_sr, StringRef(this->arena, g_network->getLocalAddress().toString())));
 	}
 
 	OTELSpan(const Location& location,
@@ -266,19 +268,19 @@ public:
 		return *this;
 	}
 
-	OTELSpan& addEvent(const OTELEvent& event) {
-		events.push_back(arena, event);
+	OTELSpan& addEvent(const OTELEventRef& event) {
+		events.push_back_deep(arena, event);
 		return *this;
 	}
 
 	OTELSpan& addEvent(const StringRef& name,
 	                   const double& time,
-	                   const std::initializer_list<KeyValueRef>& attrs = {}) {
-		return addEvent(OTELEvent(name, time, this->arena, attrs));
+	                   const SmallVectorRef<KeyValueRef>& attrs = SmallVectorRef<KeyValueRef>()) {
+		return addEvent(OTELEventRef(name, time, attrs));
 	}
 
 	OTELSpan& addAttribute(const StringRef& key, const StringRef& value) {
-		attributes[key] = value;
+		attributes.push_back_deep(arena, KeyValueRef(key, value));
 		return *this;
 	}
 
@@ -289,8 +291,8 @@ public:
 	SpanKind kind;
 	SmallVectorRef<SpanContext> links;
 	double begin = 0.0, end = 0.0;
-	std::unordered_map<StringRef, StringRef> attributes;
-	SmallVectorRef<OTELEvent> events;
+	SmallVectorRef<KeyValueRef> attributes; // not necessarily sorted
+	SmallVectorRef<OTELEventRef> events;
 	SpanStatus status;
 };
 
