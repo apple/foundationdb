@@ -453,9 +453,6 @@ struct FastUDPTracer : public UDPTracer {
 		request_.reset();
 	}
 
-	// TODO - We could DRY this and trace(Span const& span) up. They both could inherit from some virtual interface with
-	// a serialize method something like SerializableSpan, and then we wouldn't need both functions. However if we're
-	// only keeping the new implementation, then there is no need as we'll remove the method below.
 	void trace(OTELSpan const& span) override {
 		prepare(span.location.name.size());
 		serialize_span(span, request_);
@@ -641,12 +638,6 @@ TEST_CASE("/flow/Tracing/AddAttributes") {
 	span1.addAttribute(StringRef(arena, LiteralStringRef("operation")), StringRef(arena, LiteralStringRef("grv")));
 	ASSERT(span1.attributes[StringRef(arena, LiteralStringRef("foo"))].toString() == "bar");
 	ASSERT(span1.attributes[StringRef(arena, LiteralStringRef("operation"))].toString() == "grv");
-
-	// TODO - Commented out for now until we agree on const std::string& vs. passing in StringRef
-	// OTELSpan span2("span_with_attrs"_loc);
-	// auto s2Arena = span2.arena;
-	// span2.addAttribute("operation", "ss:update");
-	// ASSERT(span2.attributes[StringRef(s2Arena, "operation")].toString() == "ss:update");
 
 	OTELSpan span3("span_with_attrs"_loc);
 	auto s3Arena = span3.arena;

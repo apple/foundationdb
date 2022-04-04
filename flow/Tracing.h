@@ -230,7 +230,6 @@ public:
 		links = std::move(o.links);
 		events = std::move(o.events);
 		status = o.status;
-		// TODO not moving attributes as we didn't move tags in Span impl
 		o.context = SpanContext();
 		o.parentContext = SpanContext();
 		o.kind = SpanKind::INTERNAL;
@@ -253,8 +252,6 @@ public:
 		std::swap(end, other.end);
 		std::swap(links, other.links);
 		std::swap(events, other.events);
-		// TODO - Should we leave out attributes? We did in the Span impl.
-		// std::swap(attributes, other.attributes);
 	}
 
 	OTELSpan& addLink(const SpanContext& linkContext) {
@@ -263,48 +260,23 @@ public:
 	}
 
 	OTELSpan& addLinks(const std::initializer_list<SpanContext>& linkContexts = {}) {
-		// No insert on SmallVectorRef? Do we need vector_like_traits from Arena.h line 1450?
 		for (auto const& sc : linkContexts) {
 			links.push_back(arena, sc);
 		}
 		return *this;
 	}
 
-	// TODO - Should we remove this. Potentially dangerous if the OTELEvent SmallVectorRef of attributes
-	// uses a different Arena than the OTELSpan?
 	OTELSpan& addEvent(const OTELEvent& event) {
 		events.push_back(arena, event);
 		return *this;
 	}
 
-	// TODO: causes ambiguity as StringRef has a std::string based constructor.
-	// Need to discuss with the team whether we want const std::string& or allow
-	// allow users to pass StringRef as first arg and let them deal with any separate Arena scope/memory issues.
-
-	// OTELSpan& addEvent(const std::string& name,
-	//                    const double& time,
-	//                    const std::initializer_list<KeyValueRef>& attrs = {}) {
-	// 	return addEvent(StringRef(arena, name), time, attrs);
-	// }
-
-	// TODO - Should we remove this in favor of above addEvent which is commented out? Potentially dangerous if the
-	// StringRef uses a different Arena than the OTELSpan?
 	OTELSpan& addEvent(const StringRef& name,
 	                   const double& time,
 	                   const std::initializer_list<KeyValueRef>& attrs = {}) {
 		return addEvent(OTELEvent(name, time, this->arena, attrs));
 	}
 
-	// TODO: Same ambiguity issue as above. Will check with team on preference.
-	// OTELSpan& addAttribute(const std::string& key, const std::string& value) {
-	// 	auto k = StringRef(this->arena, key);
-	// 	auto v = StringRef(this->arena, value);
-	// 	attributes[k] = v;
-	// 	return *this;
-	// }
-
-	// TODO - Should we remove this in favor of above AddAttribute which is commented out. Potentially dangerous if the
-	// StringRef Arena goes out of scope as it's not tied to this Arena?
 	OTELSpan& addAttribute(const StringRef& key, const StringRef& value) {
 		attributes[key] = value;
 		return *this;
