@@ -5690,8 +5690,6 @@ private:
 		}
 	};
 
-#warning update forensic fields
-
 	// Scans a vector of records and decides on page split points, returning a vector of 1+ pages to build
 	std::vector<PageToBuild> splitPages(const RedwoodRecordRef* lowerBound,
 	                                    const RedwoodRecordRef* upperBound,
@@ -7658,7 +7656,6 @@ public:
 		// This is a ref because snapshot will continue to hold the metakey value memory
 		KeyRef m = snapshot->getMetaKey();
 
-#warning this adds significant per-read overhead
 		return cursor->init(
 		    this,
 		    reason,
