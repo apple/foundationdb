@@ -566,7 +566,10 @@ public:
 	double SNAP_CREATE_MAX_TIMEOUT;
 	// Maximum number of storage servers a snapshot can fail to
 	// capture while still succeeding
-	int64_t MAX_SNAPSHOT_FAULT_TOLERANCE;
+	int64_t MAX_STORAGE_SNAPSHOT_FAULT_TOLERANCE;
+	// Maximum number of coordinators a snapshot can fail to
+	// capture while still succeeding
+	int64_t MAX_COORDINATOR_SNAPSHOT_FAULT_TOLERANCE;
 
 	// Storage Metrics
 	double STORAGE_METRICS_AVERAGE_INTERVAL;

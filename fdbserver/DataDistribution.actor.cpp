@@ -903,29 +903,29 @@ Future<Void> sendSnapReq(RequestStream<Req> stream, Req req, Error e) {
 	return Void();
 }
 
-// TODO: Remove duplicate code
 ACTOR template <class Req>
-Future<ErrorOr<Void>> trySendSnapReq(RequestStream<Req> stream, Req req, Error e) {
+Future<ErrorOr<Void>> trySendSnapReq(RequestStream<Req> stream, Req req) {
 	ErrorOr<REPLY_TYPE(Req)> reply = wait(stream.tryGetReply(req));
 	if (reply.isError()) {
 		TraceEvent("SnapDataDistributor_ReqError")
 		    .errorUnsuppressed(reply.getError())
-		    .detail("ConvertedErrorType", e.what())
 		    .detail("Peer", stream.getEndpoint().getPrimaryAddress());
-		return ErrorOr<Void>(e);
+		return ErrorOr<Void>(reply.getError());
 	}
 	return ErrorOr<Void>(Void());
 }
 
-// Returns the number of snapshot failures we can ignore while still still successfully snapshotting storage servers
-ACTOR static Future<int> getTolerableFailedSnapshots(Database cx,
-                                                     PromiseStream<Promise<Optional<int>>> getMinReplicasRemaining) {
-	// TODO: Also account for coordinators
+// Returns the number of storage snapshot failures we can ignore while still still successfully snapshotting storage
+// servers
+ACTOR static Future<int> getTolerableFailedStorageSnapshots(
+    Database cx,
+    PromiseStream<Promise<Optional<int>>> getMinReplicasRemaining) {
 	Promise<Optional<int>> minReplicasRemainingPromise;
 	getMinReplicasRemaining.send(minReplicasRemainingPromise);
 	state Optional<int> minReplicasRemaining = wait(minReplicasRemainingPromise.getFuture());
 	DatabaseConfiguration configuration = wait(getDatabaseConfiguration(cx));
-	auto faultTolerance = std::min<int>(SERVER_KNOBS->MAX_SNAPSHOT_FAULT_TOLERANCE, configuration.storageTeamSize);
+	auto faultTolerance =
+	    std::min<int>(SERVER_KNOBS->MAX_STORAGE_SNAPSHOT_FAULT_TOLERANCE, configuration.storageTeamSize);
 	if (minReplicasRemaining.present()) {
 		TEST(minReplicasRemaining.get() == 0); // Some data has 0 replicas across all storage servers
 		return std::min<int>(faultTolerance, std::max(minReplicasRemaining.get() - 1, 0));
@@ -935,6 +935,7 @@ ACTOR static Future<int> getTolerableFailedSnapshots(Database cx,
 
 ACTOR static Future<Void> waitForMost(std::vector<Future<ErrorOr<Void>>> futures,
                                       int faultTolerance,
+                                      Error e,
                                       double waitMultiplierForSlowFutures = 1.0) {
 	state std::vector<Future<bool>> successFutures;
 	state double startTime = now();
@@ -944,8 +945,7 @@ ACTOR static Future<Void> waitForMost(std::vector<Future<ErrorOr<Void>>> futures
 	}
 	bool success = wait(quorumEqualsTrue(successFutures, successFutures.size() - faultTolerance));
 	if (!success) {
-		// TODO: Throw one of the received errors instead?
-		throw operation_failed();
+		throw e;
 	}
 	wait(delay((now() - startTime) * waitMultiplierForSlowFutures) || waitForAll(successFutures));
 	return Void();
@@ -955,7 +955,7 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq,
                                     Reference<AsyncVar<ServerDBInfo> const> db,
                                     PromiseStream<Promise<Optional<int>>> getMinReplicasRemaining) {
 	state Database cx = openDBOnServer(db, TaskPriority::DefaultDelay, LockAware::True);
-	state int faultTolerance = wait(getTolerableFailedSnapshots(cx, getMinReplicasRemaining));
+
 	state ReadYourWritesTransaction tr(cx);
 	loop {
 		try {
@@ -990,6 +990,7 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq,
 		    .detail("SnapPayload", snapReq.snapPayload)
 		    .detail("SnapUID", snapReq.snapUID);
 		// snap local storage nodes
+		state int storageFaultTolerance = wait(getTolerableFailedStorageSnapshots(cx, getMinReplicasRemaining));
 		std::vector<WorkerInterface> storageWorkers =
 		    wait(transformErrors(getStorageWorkers(cx, db, true /* localOnly */), snap_storage_failed()));
 		TraceEvent("SnapDataDistributor_GotStorageWorkers")
@@ -998,12 +999,10 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq,
 		std::vector<Future<ErrorOr<Void>>> storageSnapReqs;
 		storageSnapReqs.reserve(storageWorkers.size());
 		for (const auto& worker : storageWorkers) {
-			storageSnapReqs.push_back(
-			    trySendSnapReq(worker.workerSnapReq,
-			                   WorkerSnapRequest(snapReq.snapPayload, snapReq.snapUID, "storage"_sr),
-			                   snap_storage_failed()));
+			storageSnapReqs.push_back(trySendSnapReq(
+			    worker.workerSnapReq, WorkerSnapRequest(snapReq.snapPayload, snapReq.snapUID, "storage"_sr)));
 		}
-		wait(waitForMost(storageSnapReqs, faultTolerance));
+		wait(waitForMost(storageSnapReqs, storageFaultTolerance, snap_storage_failed()));
 
 		TraceEvent("SnapDataDistributor_AfterSnapStorage")
 		    .detail("SnapPayload", snapReq.snapPayload)
@@ -1038,14 +1037,15 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq,
 		TraceEvent("SnapDataDistributor_GotCoordWorkers")
 		    .detail("SnapPayload", snapReq.snapPayload)
 		    .detail("SnapUID", snapReq.snapUID);
-		std::vector<Future<Void>> coordSnapReqs;
+		std::vector<Future<ErrorOr<Void>>> coordSnapReqs;
 		coordSnapReqs.reserve(coordWorkers.size());
 		for (const auto& worker : coordWorkers) {
-			coordSnapReqs.push_back(sendSnapReq(worker.workerSnapReq,
-			                                    WorkerSnapRequest(snapReq.snapPayload, snapReq.snapUID, "coord"_sr),
-			                                    snap_coord_failed()));
+			coordSnapReqs.push_back(trySendSnapReq(
+			    worker.workerSnapReq, WorkerSnapRequest(snapReq.snapPayload, snapReq.snapUID, "coord"_sr)));
 		}
-		wait(waitForAll(coordSnapReqs));
+		auto const coordFaultTolerance =
+		    std::min<int>(coordSnapReqs.size() / 2 - 1, SERVER_KNOBS->MAX_COORDINATOR_SNAPSHOT_FAULT_TOLERANCE);
+		wait(waitForMost(coordSnapReqs, coordFaultTolerance, snap_coord_failed()));
 		TraceEvent("SnapDataDistributor_AfterSnapCoords")
 		    .detail("SnapPayload", snapReq.snapPayload)
 		    .detail("SnapUID", snapReq.snapUID);
@@ -1318,43 +1318,39 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 	return Void();
 }
 
-namespace {
-
-Future<ErrorOr<Void>> goodTestFuture(double duration) {
+static Future<ErrorOr<Void>> goodTestFuture(double duration) {
 	return tag(delay(duration), ErrorOr<Void>(Void()));
 }
 
-Future<ErrorOr<Void>> badTestFuture(double duration, Error e) {
+static Future<ErrorOr<Void>> badTestFuture(double duration, Error e) {
 	return tag(delay(duration), ErrorOr<Void>(e));
 }
-
-} // namespace
 
 TEST_CASE("/DataDistribution/WaitForMost") {
 	state std::vector<Future<ErrorOr<Void>>> futures;
 	{
 		futures = { goodTestFuture(1), goodTestFuture(2), goodTestFuture(3) };
-		wait(waitForMost(futures, 1, 0.0)); // Don't wait for slowest future
+		wait(waitForMost(futures, 1, operation_failed(), 0.0)); // Don't wait for slowest future
 		ASSERT(!futures[2].isReady());
 	}
 	{
 		futures = { goodTestFuture(1), goodTestFuture(2), goodTestFuture(3) };
-		wait(waitForMost(futures, 0, 0.0)); // Wait for all futures
+		wait(waitForMost(futures, 0, operation_failed(), 0.0)); // Wait for all futures
 		ASSERT(futures[2].isReady());
 	}
 	{
 		futures = { goodTestFuture(1), goodTestFuture(2), goodTestFuture(3) };
-		wait(waitForMost(futures, 1, 1.0)); // Wait for slowest future
+		wait(waitForMost(futures, 1, operation_failed(), 1.0)); // Wait for slowest future
 		ASSERT(futures[2].isReady());
 	}
 	{
 		futures = { goodTestFuture(1), goodTestFuture(2), badTestFuture(1, success()) };
-		wait(waitForMost(futures, 1, 1.0)); // Error ignored
+		wait(waitForMost(futures, 1, operation_failed(), 1.0)); // Error ignored
 	}
 	{
 		futures = { goodTestFuture(1), goodTestFuture(2), badTestFuture(1, success()) };
 		try {
-			wait(waitForMost(futures, 0, 1.0));
+			wait(waitForMost(futures, 0, operation_failed(), 1.0));
 			ASSERT(false);
 		} catch (Error& e) {
 			ASSERT_EQ(e.code(), error_code_operation_failed);
