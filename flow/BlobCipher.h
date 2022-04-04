@@ -81,28 +81,22 @@ private:
 // This header is persisted along with encrypted buffer, it contains information necessary
 // to assist decrypting the buffers to serve read requests.
 //
-// The total space overhead is 56 bytes.
+// The total space overhead is 96 bytes.
 
 #pragma pack(push, 1) // exact fit - no padding
 typedef struct BlobCipherEncryptHeader {
+	static constexpr int headerSize = 96;
 	union {
 		struct {
 			uint8_t size; // reading first byte is sufficient to determine header
 			              // length. ALWAYS THE FIRST HEADER ELEMENT.
 			uint8_t headerVersion{};
 			uint8_t encryptMode{};
-			EncryptAuthTokenMode authTokenMode{};
+			uint8_t authTokenMode{};
 			uint8_t _reserved[4]{};
 		} flags;
 		uint64_t _padding{};
 	};
-
-	struct {
-		// Encryption domainId for the header
-		EncryptCipherDomainId encryptDomainId{};
-		// BaseCipher encryption key identifier.
-		EncryptCipherBaseKeyId baseCipherId{};
-	} cipherHeaderDetails;
 
 	// Cipher text encryption information
 	struct {
@@ -115,6 +109,13 @@ typedef struct BlobCipherEncryptHeader {
 		// Initialization vector used to encrypt the payload.
 		uint8_t iv[AES_256_IV_LENGTH];
 	} cipherTextDetails;
+
+	struct {
+		// Encryption domainId for the header
+		EncryptCipherDomainId encryptDomainId{};
+		// BaseCipher encryption key identifier.
+		EncryptCipherBaseKeyId baseCipherId{};
+	} cipherHeaderDetails;
 
 	// Encryption header is stored as plaintext on a persistent storage to assist reconstruction of cipher-key(s) for
 	// reads. FIPS compliance recommendation is to leverage cryptographic digest mechanism to generate 'authentication
@@ -144,11 +145,13 @@ typedef struct BlobCipherEncryptHeader {
 		} singleAuthToken;
 	};
 
-	BlobCipherEncryptHeader();
+	BlobCipherEncryptHeader() {}
 } BlobCipherEncryptHeader;
 #pragma pack(pop)
 
-// static_assert(sizeof(BlobCipherEncryptHeader) == sizeof(uint64_t) + , "FDBKeyValue / KeyValueRef size mismatch");
+// Ensure no struct-packing issues
+static_assert(sizeof(BlobCipherEncryptHeader) == BlobCipherEncryptHeader::headerSize,
+              "BlobCipherEncryptHeader size mismatch");
 
 // This interface is in-memory representation of CipherKey used for encryption/decryption information.
 // It caches base encryption key properties as well as caches the 'derived encryption' key obtained by applying

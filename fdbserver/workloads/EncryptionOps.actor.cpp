@@ -178,7 +178,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 			ASSERT(cipherLen > 0 && cipherLen <= AES_256_KEY_LENGTH);
 
 			cipherKeys = cipherKeyCache.getAllCiphers(id);
-			ASSERT(cipherKeys.size() == 1);
+			ASSERT_EQ(cipherKeys.size(), 1);
 		}
 
 		// insert the Encrypt Header cipherKey
@@ -224,9 +224,9 @@ struct EncryptionOpsWorkload : TestWorkload {
 		auto end = std::chrono::high_resolution_clock::now();
 
 		// validate encrypted buffer size and contents (not matching with plaintext)
-		ASSERT(encrypted->getLogicalSize() == len);
-		ASSERT(memcmp(encrypted->begin(), payload, len) != 0);
-		ASSERT(header->flags.headerVersion == EncryptBlobCipherAes265Ctr::ENCRYPT_HEADER_VERSION);
+		ASSERT_EQ(encrypted->getLogicalSize(), len);
+		ASSERT_NE(memcmp(encrypted->begin(), payload, len), 0);
+		ASSERT_EQ(header->flags.headerVersion, EncryptBlobCipherAes265Ctr::ENCRYPT_HEADER_VERSION);
 
 		metrics->updateEncryptionTime(std::chrono::duration<double, std::nano>(end - start).count());
 		return encrypted;
@@ -237,8 +237,8 @@ struct EncryptionOpsWorkload : TestWorkload {
 	                  const BlobCipherEncryptHeader& header,
 	                  uint8_t* originalPayload,
 	                  Reference<BlobCipherKey> orgCipherKey) {
-		ASSERT(header.flags.headerVersion == EncryptBlobCipherAes265Ctr::ENCRYPT_HEADER_VERSION);
-		ASSERT(header.flags.encryptMode == ENCRYPT_CIPHER_MODE_AES_256_CTR);
+		ASSERT_EQ(header.flags.headerVersion, EncryptBlobCipherAes265Ctr::ENCRYPT_HEADER_VERSION);
+		ASSERT_EQ(header.flags.encryptMode, ENCRYPT_CIPHER_MODE_AES_256_CTR);
 
 		auto& cipherKeyCache = BlobCipherKeyCache::getInstance();
 		Reference<BlobCipherKey> cipherKey = cipherKeyCache.getCipherKey(header.cipherTextDetails.encryptDomainId,
@@ -259,8 +259,8 @@ struct EncryptionOpsWorkload : TestWorkload {
 		auto end = std::chrono::high_resolution_clock::now();
 
 		// validate decrypted buffer size and contents (matching with original plaintext)
-		ASSERT(decrypted->getLogicalSize() == len);
-		ASSERT(memcmp(decrypted->begin(), originalPayload, len) == 0);
+		ASSERT_EQ(decrypted->getLogicalSize(), len);
+		ASSERT_EQ(memcmp(decrypted->begin(), originalPayload, len), 0);
 
 		metrics->updateDecryptionTime(std::chrono::duration<double, std::nano>(end - start).count());
 	}
@@ -303,9 +303,9 @@ struct EncryptionOpsWorkload : TestWorkload {
 
 			// Validate sanity of "getLatestCipher", especially when baseCipher gets updated
 			if (updateBaseCipher) {
-				ASSERT(cipherKey->getBaseCipherId() == nextBaseCipherId);
-				ASSERT(cipherKey->getBaseCipherLen() == baseCipherLen);
-				ASSERT(memcmp(cipherKey->rawBaseCipher(), baseCipher, baseCipherLen) == 0);
+				ASSERT_EQ(cipherKey->getBaseCipherId(), nextBaseCipherId);
+				ASSERT_EQ(cipherKey->getBaseCipherLen(), baseCipherLen);
+				ASSERT_EQ(memcmp(cipherKey->rawBaseCipher(), baseCipher, baseCipherLen), 0);
 			}
 
 			int dataLen = isFixedSizePayload() ? pageSize : deterministicRandom()->randomInt(100, maxBufSize);

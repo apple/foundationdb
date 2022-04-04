@@ -40,11 +40,6 @@ bool isEncryptHeaderAuthTokenModeValid(const EncryptAuthTokenMode mode) {
 }
 } // namespace
 
-// BlobCipherEncryptHeader
-BlobCipherEncryptHeader::BlobCipherEncryptHeader() {
-	flags.encryptMode = ENCRYPT_CIPHER_MODE_NONE;
-}
-
 // BlobCipherKey class methods
 
 BlobCipherKey::BlobCipherKey(const EncryptCipherDomainId& domainId,
@@ -590,6 +585,18 @@ StringRef HmacSha256DigestGen::digest(const unsigned char* data, size_t len, Are
 	return StringRef(digest, digestLen);
 }
 
+StringRef computeAuthToken(const uint8_t* payload,
+                           const int payloadLen,
+                           const uint8_t* key,
+                           const int keyLen,
+                           Arena& arena) {
+	HmacSha256DigestGen hmacGenerator(key, keyLen);
+	StringRef digest = hmacGenerator.digest(payload, payloadLen, arena);
+
+	ASSERT_GE(digest.size(), AUTH_TOKEN_SIZE);
+	return digest;
+}
+
 // Only used to link unit tests
 void forceLinkBlobCipherTests() {}
 
@@ -600,12 +607,13 @@ void forceLinkBlobCipherTests() {}
 // 4. Inserting of 'non-identical' cipherKey (already cached) more than once works as desired.
 // 5. Validation encryption ops (correctness):
 //  5.1. Encyrpt a buffer followed by decryption of the buffer, validate the contents.
-//  5.2. Simulate anomolies such as: EncyrptionHeader corruption, checkSum mismatch / encryptionMode mismatch etc.
+//  5.2. Simulate anomolies such as: EncyrptionHeader corruption, authToken mismatch / encryptionMode mismatch etc.
 // 6. Cache cleanup
 //  6.1  cleanup cipherKeys by given encryptDomainId
 //  6.2. Cleanup all cached cipherKeys
 TEST_CASE("flow/BlobCipher") {
 	TraceEvent("BlobCipherTest_Start").log();
+
 	// Construct a dummy External Key Manager representation and populate with some keys
 	class BaseCipher : public ReferenceCounted<BaseCipher>, NonCopyable {
 	public:
@@ -881,18 +889,6 @@ TEST_CASE("flow/BlobCipher") {
 
 	TraceEvent("BlobCipherTest_Done").log();
 	return Void();
-}
-
-StringRef computeAuthToken(const uint8_t* payload,
-                           const int payloadLen,
-                           const uint8_t* key,
-                           const int keyLen,
-                           Arena& arena) {
-	HmacSha256DigestGen hmacGenerator(key, keyLen);
-	StringRef digest = hmacGenerator.digest(payload, payloadLen, arena);
-
-	ASSERT_GE(digest.size(), AUTH_TOKEN_SIZE);
-	return digest;
 }
 
 #endif // ENCRYPTION_ENABLED

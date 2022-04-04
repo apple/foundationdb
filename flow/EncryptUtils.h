@@ -23,6 +23,7 @@
 #pragma once
 
 #include <cstdint>
+#include <limits>
 
 #define ENCRYPT_INVALID_DOMAIN_ID 0
 #define ENCRYPT_INVALID_CIPHER_KEY_ID 0
@@ -33,14 +34,26 @@
 #define ENCRYPT_HEADER_DOMAIN_ID -2
 
 using EncryptCipherDomainId = int64_t;
-using EncryptCipherRandomSalt = uint64_t;
 using EncryptCipherBaseKeyId = uint64_t;
+using EncryptCipherRandomSalt = uint64_t;
 
-typedef enum { ENCRYPT_CIPHER_MODE_NONE = 0, ENCRYPT_CIPHER_MODE_AES_256_CTR = 1 } EncryptCipherMode;
+typedef enum {
+	ENCRYPT_CIPHER_MODE_NONE = 0,
+	ENCRYPT_CIPHER_MODE_AES_256_CTR = 1,
+	ENCRYPT_CIPHER_MODE_LAST = 2
+} EncryptCipherMode;
+
+static_assert(EncryptCipherMode::ENCRYPT_CIPHER_MODE_LAST <= std::numeric_limits<uint8_t>::max(),
+              "EncryptCipherMode value overflow");
+
 typedef enum {
 	ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE = 0,
 	ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE = 1,
-	ENCRYPT_HEADER_AUTH_TOKEN_MODE_MULTI = 2
+	ENCRYPT_HEADER_AUTH_TOKEN_MODE_MULTI = 2,
+	ENCRYPT_HEADER_AUTH_TOKEN_LAST = 3 // Always the last element
 } EncryptAuthTokenMode;
+
+static_assert(EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_LAST <= std::numeric_limits<uint8_t>::max(),
+              "EncryptHeaderAuthToken value overflow");
 
 #endif
