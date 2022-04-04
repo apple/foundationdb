@@ -604,7 +604,7 @@ public:
 	                                              bool noHit) = 0;
 	virtual Future<Reference<ArenaPage>> readMultiPage(PagerEventReasons reason,
 	                                                   unsigned int level,
-	                                                   Standalone<VectorRef<PhysicalPageID>> pageIDs,
+	                                                   VectorRef<PhysicalPageID> pageIDs,
 	                                                   int priority,
 	                                                   bool cacheable,
 	                                                   bool noHit) = 0;

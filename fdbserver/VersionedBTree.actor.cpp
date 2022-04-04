@@ -3149,7 +3149,7 @@ public:
 
 	Future<Reference<ArenaPage>> readMultiPage(PagerEventReasons reason,
 	                                           unsigned int level,
-	                                           Standalone<VectorRef<PhysicalPageID>> pageIDs,
+	                                           VectorRef<PhysicalPageID> pageIDs,
 	                                           int priority,
 	                                           bool cacheable,
 	                                           bool noHit) override {
@@ -3235,24 +3235,6 @@ public:
 	                                               bool noHit) {
 		PhysicalPageID physicalID = getPhysicalPageID(logicalID, v);
 		return readPage(reason, level, physicalID, priority, cacheable, noHit);
-	}
-
-	Future<Reference<ArenaPage>> readMultiPageAtVersion(PagerEventReasons reason,
-	                                                    unsigned int level,
-	                                                    VectorRef<LogicalPageID> logicalIDs,
-	                                                    int priority,
-	                                                    Version v,
-	                                                    bool cacheable,
-	                                                    bool noHit) {
-		Standalone<VectorRef<PhysicalPageID>> ids;
-		ids.resize(ids.arena(), logicalIDs.size());
-		for (int i = 0; i < logicalIDs.size(); ++i) {
-			ids[i] = getPhysicalPageID(logicalIDs[i], v);
-		}
-		debug_printf("op=readMultiPageAtVersion, Logical %s => Physical %s\n",
-		             toString(logicalIDs).c_str(),
-		             toString(ids).c_str());
-		return readMultiPage(reason, level, ids, priority, cacheable, noHit);
 	}
 
 	void releaseExtentReadLock() override { concurrentExtentReads->release(); }
@@ -4093,14 +4075,14 @@ public:
 
 	Future<Reference<const ArenaPage>> getMultiPhysicalPage(PagerEventReasons reason,
 	                                                        unsigned int level,
-	                                                        VectorRef<LogicalPageID> pageIDs,
+	                                                        VectorRef<PhysicalPageID> pageIDs,
 	                                                        int priority,
 	                                                        bool cacheable,
 	                                                        bool noHit) override {
 		if (expired.isError()) {
 			throw expired.getError();
 		}
-		return map(pager->readMultiPageAtVersion(reason, level, pageIDs, priority, version, cacheable, noHit),
+		return map(pager->readMultiPage(reason, level, pageIDs, priority, cacheable, noHit),
 		           [=](Reference<ArenaPage> p) { return Reference<const ArenaPage>(std::move(p)); });
 	}
 
@@ -7158,11 +7140,14 @@ private:
 							auto& stats = g_redwoodMetrics.level(height);
 							while (cursor.valid()) {
 								if (cursor.get().value.present()) {
-									for (auto& p : cursor.get().getChildPage()) {
+									BTreeNodeLinkRef child = cursor.get().getChildPage();
+									// Nodes larger than 1 page are never remapped.
+									if (child.size() == 1) {
+										LogicalPageID& p = child.front();
 										if (parentInfo->maybeUpdated(p)) {
-											LogicalPageID newID =
+											PhysicalPageID newID =
 											    self->m_pager->detachRemappedPage(p, batch->writeVersion);
-											if (newID != invalidLogicalPageID) {
+											if (newID != invalidPhysicalPageID) {
 												debug_printf("%s Detach updated %u -> %u\n", context.c_str(), p, newID);
 												if (self->m_pBoundaryVerifier != nullptr) {
 													self->m_pBoundaryVerifier->update(batch->writeVersion, p, newID);
@@ -7215,23 +7200,23 @@ private:
 							for (auto& rec : modifier.rebuild) {
 								if (rec.value.present()) {
 									BTreeNodeLinkRef oldPages = rec.getChildPage();
-									BTreeNodeLinkRef newPages;
-									for (int i = 0; i < oldPages.size(); ++i) {
-										LogicalPageID p = oldPages[i];
+
+									// Nodes larger than 1 page are never remapped.
+									if (oldPages.size() == 1) {
+										LogicalPageID p = oldPages.front();
 										if (parentInfo->maybeUpdated(p)) {
-											LogicalPageID newID =
+											PhysicalPageID newID =
 											    self->m_pager->detachRemappedPage(p, batch->writeVersion);
-											if (newID != invalidLogicalPageID) {
-												// Rebuild record values reference original page memory so make a copy
-												if (newPages.empty()) {
-													newPages = BTreeNodeLinkRef(modifier.rebuild.arena(), oldPages);
-													rec.setChildPage(newPages);
-												}
+											if (newID != invalidPhysicalPageID) {
+												// Records in the rebuild vector reference original page memory so make
+												// a new child link in the rebuild arena
+												BTreeNodeLinkRef newPages = BTreeNodeLinkRef(
+												    modifier.rebuild.arena(), BTreeNodeLinkRef(&newID, 1));
+												rec.setChildPage(newPages);
 												debug_printf("%s Detach updated %u -> %u\n", context.c_str(), p, newID);
 												if (self->m_pBoundaryVerifier != nullptr) {
 													self->m_pBoundaryVerifier->update(batch->writeVersion, p, newID);
 												}
-												newPages[i] = newID;
 												++stats.metrics.detachChild;
 											}
 										}
