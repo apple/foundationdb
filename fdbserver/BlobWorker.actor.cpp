@@ -400,8 +400,7 @@ ACTOR Future<Void> updateGranuleSplitState(Transaction* tr,
 				fmt::print("{0} destroying old granule {1}\n", currentGranuleID.toString(), parentGranuleID.toString());
 			}
 
-			// FIXME: appears change feed destroy isn't working! ADD BACK
-			// wait(updateChangeFeed(tr, granuleIDToCFKey(parentGranuleID), ChangeFeedStatus::CHANGE_FEED_DESTROY));
+			wait(updateChangeFeed(tr, granuleIDToCFKey(parentGranuleID), ChangeFeedStatus::CHANGE_FEED_DESTROY));
 
 			Key oldGranuleLockKey = blobGranuleLockKeyFor(parentGranuleRange);
 			// FIXME: deleting granule lock can cause races where another granule with the same range starts way later
@@ -1840,6 +1839,12 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 		}
 		if (e.code() == error_code_change_feed_popped) {
 			TraceEvent("GranuleChangeFeedPopped", bwData->id)
+			    .detail("Granule", metadata->keyRange)
+			    .detail("GranuleID", startState.granuleID);
+			return Void();
+		}
+		if (e.code() == error_code_change_feed_not_registered) {
+			TraceEvent(SevInfo, "GranuleDestroyed", bwData->id)
 			    .detail("Granule", metadata->keyRange)
 			    .detail("GranuleID", startState.granuleID);
 			return Void();
