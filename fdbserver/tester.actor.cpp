@@ -196,8 +196,8 @@ int64_t getOption(VectorRef<KeyValueRef> options, Key key, int64_t defaultValue)
 double getOption(VectorRef<KeyValueRef> options, Key key, double defaultValue) {
 	for (int i = 0; i < options.size(); i++)
 		if (options[i].key == key) {
-			float r;
-			if (sscanf(options[i].value.toString().c_str(), "%f", &r)) {
+			double r;
+			if (sscanf(options[i].value.toString().c_str(), "%lf", &r)) {
 				options[i].value = LiteralStringRef("");
 				return r;
 			}

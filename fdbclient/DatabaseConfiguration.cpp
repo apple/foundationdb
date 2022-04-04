@@ -429,6 +429,9 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 	result["consistency_scan_restart"] = consistencyScanRestart;
 	result["consistency_scan_rate"] = consistencyScanMaxRate;
 	result["consistency_scan_interval"] = consistencyScanInterval;
+	TraceEvent(SevDebug, "ConsistencyScanConfig").
+			detail("ConsistencyScanMaxRate", consistencyScanMaxRate).
+		detail("ConsistencyScanInterval", consistencyScanInterval);
 	return result;
 }
 
@@ -662,13 +665,16 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	} else if (ck == LiteralStringRef("consistency_scan_rate")) {
 		int consistencyScanMaxRateMBPS;
 		parse(&consistencyScanMaxRateMBPS, value);
-		// parse(&consistencyScanMaxRate, value);
-		consistencyScanMaxRate = consistencyScanMaxRateMBPS * 1024 * 1024;
+		parse(&consistencyScanMaxRate, value);
+		//consistencyScanMaxRate = consistencyScanMaxRateMBPS * 1024 * 1024;
+		TraceEvent(SevDebug, "ConsistencyScanMaxRate").
+			detail("ConsistencyScanMaxRateMBPS", consistencyScanMaxRateMBPS).
+			detail("ConsistencyScanMaxRate", consistencyScanMaxRate);
 	} else if (ck == LiteralStringRef("consistency_scan_interval")) {
-		int consistencyScanIntervalDays;
-		parse(&consistencyScanIntervalDays, value);
-		// parse(&consistencyScanInterval, value);
-		consistencyScanInterval = consistencyScanIntervalDays * 24 * 60 * 60;
+		//int consistencyScanIntervalDays;
+		//parse(&consistencyScanIntervalDays, value);
+		parse(&consistencyScanInterval, value);
+		//consistencyScanInterval = consistencyScanIntervalDays * 24 * 60 * 60;
 	} else if (ck == LiteralStringRef("proxies")) {
 		overwriteProxiesCount();
 	} else if (ck == LiteralStringRef("blob_granules_enabled")) {

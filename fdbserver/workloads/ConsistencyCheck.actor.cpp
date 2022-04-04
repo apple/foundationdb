@@ -85,8 +85,10 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 	// Restart from the beginning if true, else try to resume based on the progress key saved during previous run
 	int restart;
-	double maxRate;
-	double targetInterval;
+	//double maxRate;
+	//double targetInterval;
+	int maxRate;
+	int targetInterval;
 
 	bool success;
 
@@ -123,6 +125,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 		repetitions = 0;
 		bytesReadInPreviousRound = 0;
+		TraceEvent("ConsistencyCheck_Init").detail("MaxRate", maxRate);
 	}
 
 	std::string description() const override { return "ConsistencyCheck"; }
@@ -199,6 +202,10 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				wait(self->suspendConsistencyCheck.onChange());
 			}
 			TraceEvent("ConsistencyCheck_StartingOrResuming").log();
+			TraceEvent("ConsistencyCheck_DeteremineLimitForThisRound").detail("MaxRate", self->maxRate).
+				detail("RateLimitMax", self->rateLimitMax).
+				detail("TargetInterval", self->targetInterval).
+				detail("BytesReadInPreviousRound", self->bytesReadInPreviousRound);
 			choose {
 				when(wait(self->runCheck(cx, self))) {
 					if (!self->indefinite)
@@ -1180,8 +1187,13 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		state int i = self->clientId * (self->shardSampleFactor + 1);
 		state int increment =
 		    (self->distributed && !self->firstClient) ? effectiveClientCount * self->shardSampleFactor : 1;
+		TraceEvent("ConsistencyCheck_DeteremineRateLimitForThisRound").detail("MaxRate", self->maxRate).
+			detail("RateLimitMax", self->rateLimitMax).
+			detail("TargetInterval", self->targetInterval).
+			detail("BytesReadInPreviousRound", self->bytesReadInPreviousRound);
 		// Honor self->maxRate and self->targetInterval if specified
-		state int maxRate = self->maxRate ? self->maxRate : self->rateLimitMax;
+		//state int maxRate = self->maxRate ? self->maxRate : self->rateLimitMax;
+		state int maxRate = self->rateLimitMax;
 		state int targetInterval = self->targetInterval
 		                               ? self->targetInterval
 		                               : CLIENT_KNOBS->CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME;
@@ -1591,6 +1603,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 							    setConsistencyCheckProgress(cx, reference.data[reference.data.size() - 1].key);
 							wait(fSetProgress);
 
+							TraceEvent("ConsistencyCheck_StoredProgressKey")
+							    .detail("ProgressKey", reference.data[reference.data.size() - 1].key.toString());
 							VectorRef<KeyValueRef> data = reference.data;
 							// Calculate the size of the shard, the variance of the shard size estimate, and the correct
 							// shard size estimate
@@ -1635,11 +1649,13 @@ struct ConsistencyCheckWorkload : TestWorkload {
 						}
 						// after requesting each shard, enforce rate limit based on how much data will likely be read
 						if (rateLimitForThisRound > 0) {
+							TraceEvent("ConsistencyCheck_RateLimit").detail("RateLimitForThisRound", rateLimitForThisRound).detail("TotalAmountRead", totalReadAmount);
 							wait(rateLimiter->getAllowance(totalReadAmount));
+							TraceEvent("ConsistencyCheck_AmountRead1").detail("TotalAmountRead", totalReadAmount);
 							// Set ratelimit to max allowed if current round has been going on for a while
 							if (now() - rateLimiterStartTime > 1.1 * targetInterval &&
 							    rateLimitForThisRound != maxRate) {
-								rateLimitForThisRound = self->maxRate;
+								rateLimitForThisRound = maxRate;
 								rateLimiter = Reference<IRateControl>(new SpeedLimit(rateLimitForThisRound, 1));
 								rateLimiterStartTime = now();
 								TraceEvent(SevInfo, "ConsistencyCheck_RateLimitSetMaxForThisRound")
@@ -1648,6 +1664,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 						}
 						bytesReadInRange += totalReadAmount;
 						bytesReadInthisRound += totalReadAmount;
+						TraceEvent("ConsistencyCheck_BytesRead").detail("BytesReadInRange", bytesReadInRange).
+							detail("BytesReadInthisRound", bytesReadInthisRound);
 
 						// Advance to the next set of entries
 						if (firstValidServer >= 0 && reference.more) {
@@ -1659,10 +1677,13 @@ struct ConsistencyCheckWorkload : TestWorkload {
 						} else
 							break;
 					} catch (Error& e) {
+						TraceEvent("ConsistencyCheck_Here").error(err);
 						if (e.code() != error_code_end_of_stream) {
 							state Error err = e;
 							wait(onErrorTr.onError(err));
 							TraceEvent("ConsistencyCheck_RetryDataConsistency").error(err);
+						} else {
+							TraceEvent("ConsistencyCheck_ErrorHere").error(err);
 						}
 					}
 				}

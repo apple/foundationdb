@@ -68,6 +68,9 @@ ACTOR Future<Void> consistencyChecker(ConsistencyCheckerInterface ckInterf,
 	testParams.set("maxRate", maxRate);
 	testParams.set("targetInterval", targetInterval);
 
+	TraceEvent(SevDebug, "ConsistencyCheckerConfig").
+			detail("ConsistencyScanMaxRate", maxRate).
+		detail("ConsistencyScanInterval", targetInterval);
 	try {
 		loop choose {
 			// Run consistency check workload. Pass in the DBConfig params as testParams
