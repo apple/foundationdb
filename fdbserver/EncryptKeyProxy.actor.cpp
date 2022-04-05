@@ -132,6 +132,11 @@ public:
 	template <class Reply>
 	using isEKPGetBaseCipherKeysByIdsReply = std::is_base_of<EKPGetBaseCipherKeysByIdsReply, Reply>;
 
+	// For errors occuring due to invalid input parameters such as: invalid encryptionDomainId or
+	// invalid baseCipherId, piggyback error with response to the client; approach allows clients
+	// to take necessary corrective actions such as: clearing up cache with invalid ids, log relevant
+	// details for further investigation etc.
+
 	template <class Reply>
 	typename std::enable_if<isEKPGetBaseCipherKeysByIdsReply<Reply>::value ||
 	                            isEKPGetLatestBaseCipherKeysReply<Reply>::value,
@@ -182,6 +187,7 @@ ACTOR Future<Void> getCipherKeysByBaseCipherKeyIds(Reference<EncryptKeyProxyData
 
 				// Record the fetched cipher details to the local cache for the future references
 				// Note: cache warm-up is done after reponding to the caller
+
 				for (auto& item : simKeyIdsReply.encryptKeyMap) {
 					// DomainId isn't available here, the caller must know the encryption domainId
 					ekpProxyData->insertIntoBaseCipherIdCache(0, item.first, item.second);
