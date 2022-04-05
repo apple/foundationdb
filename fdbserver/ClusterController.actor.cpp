@@ -2299,6 +2299,12 @@ public:
 	// This function returns true when the cluster controller determines it is worth forcing
 	// a master recovery in order to change the recruited processes in the transaction subsystem.
 	bool betterMasterExists() {
+		// Disable betterMasterExists when partitioned txn is enabled.
+		// TODO(PTXN): re-enable this once recovery works with PTXN.
+		if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
+			return false;
+		}
+
 		const ServerDBInfo dbi = db.serverInfo->get();
 
 		if (dbi.recoveryState < RecoveryState::ACCEPTING_COMMITS) {

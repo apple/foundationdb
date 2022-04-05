@@ -347,6 +347,7 @@ private:
 		auto teamid = decodeStorageTeamIdKey(m.param1);
 		auto team = decodeStorageTeams(m.param2);
 
+		// TODO(PTXN): decide whether this is the correct place to update tLogGroupCollection.
 		if (tLogGroupCollection->tryAddStorageTeam(teamid, team)) {
 			auto group = tLogGroupCollection->assignStorageTeam(teamid);
 		}
