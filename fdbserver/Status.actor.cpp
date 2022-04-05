@@ -1536,10 +1536,6 @@ struct LoadConfigurationResult {
 	  : fullReplication(true), healthyZoneSeconds(0), rebalanceDDIgnored(false), dataDistributionDisabled(false) {}
 };
 
-ACTOR Future<ProtocolVersion> getLatestSoftwareVersion(Database cx) {
-	return currentProtocolVersion;
-}
-
 ACTOR static Future<std::pair<Optional<DatabaseConfiguration>, Optional<LoadConfigurationResult>>>
 loadConfiguration(Database cx, JsonBuilderArray* messages, std::set<std::string>* status_incomplete_reasons) {
 	state Optional<DatabaseConfiguration> result;
@@ -3173,9 +3169,6 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		}
 		statusObj["incompatible_connections"] = incompatibleConnectionsArray;
 		statusObj["datacenter_lag"] = getLagObject(datacenterVersionDifference);
-
-		ProtocolVersion latestServerVersion = wait(getLatestSoftwareVersion(cx));
-		statusObj["latest_server_version"] = format("%" PRIx64, latestServerVersion.version());
 
 		int activeTSSCount = 0;
 		JsonBuilderArray wiggleServerAddress;
