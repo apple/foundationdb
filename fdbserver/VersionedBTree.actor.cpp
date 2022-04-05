@@ -812,7 +812,7 @@ public:
 				ASSERT(newOffset == 0);
 				p->endOffset = 0;
 				p->itemSpace = page->dataSize() - sizeof(QueuePage);
-				if (BUGGIFY) {
+				if (g_network->isSimulated() && deterministicRandom()->coinflip()) {
 					// Randomly reduce available item space to cause more queue pages to be needed
 					int reducedSpace = deterministicRandom()->randomInt(50, p->itemSpace);
 
@@ -867,7 +867,7 @@ public:
 			state bool needNewPage =
 			    self->pageID == invalidPhysicalPageID || self->offset + bytesNeeded > self->header()->itemSpace;
 
-			if (BUGGIFY) {
+			if (g_network->isSimulated()) {
 				// Sometimes (1% probability) decide a new page is needed as long as at least 1 item has been
 				// written (indicated by non-zero offset) to the current page.
 				if ((self->offset > 0) && deterministicRandom()->random01() < 0.01) {
@@ -892,7 +892,7 @@ public:
 				if (mustWait) {
 					needNewPage =
 					    self->pageID == invalidPhysicalPageID || self->offset + bytesNeeded > self->header()->itemSpace;
-					if (BUGGIFY) {
+					if (g_network->isSimulated()) {
 						// Sometimes (1% probability) decide a new page is needed as long as at least 1 item has been
 						// written (indicated by non-zero offset) to the current page.
 						if ((self->offset > 0) && deterministicRandom()->random01() < 0.01) {
@@ -5746,9 +5746,9 @@ private:
 		debug_printf("  Before shift: %s\n", ::toString(pages).c_str());
 
 		// If page count is > 1, try to balance slack between last two pages
-		// The buggify disables this balancing as this will result in more edge
-		// cases of pages with very few records.
-		if (pages.size() > 1 && !BUGGIFY) {
+		// In simulation, disable this balance half the time to create more edge cases
+		// of underfilled pages
+		if (pages.size() > 1 && !(g_network->isSimulated() && deterministicRandom()->coinflip())) {
 			PageToBuild& a = pages[pages.size() - 2];
 			PageToBuild& b = pages.back();
 
