@@ -2529,11 +2529,6 @@ ACTOR Future<SWVersion> testSoftwareVersionCompatibility(std::string folder, Pro
 			// Test whether the most newest software version that has been run on this cluster is
 			// compatible with the current software version
 			int64_t filesize = wait(versionFile.get()->size());
-			TraceEvent(SevInfo, "SWVersionFileSizeBeforeRead")
-			    .detail("File", versionFilePath)
-			    .detail("Size", filesize)
-			    .detail("FD", versionFile.get()->debugFD());
-
 			state Standalone<StringRef> buf = makeString(filesize);
 			wait(success(versionFile.get()->read(mutateString(buf), filesize, 0)));
 
@@ -2589,16 +2584,8 @@ ACTOR Future<Void> checkAndUpdateNewestSoftwareVersion(std::string folder,
 
 		SWVersion swVersion(latestVersion, currentVersion, minCompatibleVersion);
 		auto s = swVersionValue(swVersion);
-		TraceEvent(SevInfo, "SWVersionFileWriteSize").detail("Size", s.size()).detail("String", s.toString().c_str());
 		wait(versionFile.get()->write(s.toString().c_str(), s.size(), 0));
 		wait(versionFile.get()->sync());
-		wait(delay(0));
-		int64_t filesize = wait(versionFile.get()->size());
-		TraceEvent(SevInfo, "SWVersionFileSizeAfterWrite")
-		    .detail("File", versionFilePath)
-		    .detail("Size", filesize)
-		    .detail("FD", versionFile.get()->debugFD());
-
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
 			throw;
