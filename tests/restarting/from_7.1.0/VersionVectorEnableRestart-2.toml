@@ -1,6 +1,7 @@
 [[knobs]]
 enable_version_vector = true
 enable_version_vector_tlog_unicast = true
+proxy_use_resolver_private_mutations = true
 
 [[test]]
 testTitle='VersionVectorUpgrade'
