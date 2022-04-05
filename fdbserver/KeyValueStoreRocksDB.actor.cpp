@@ -1301,12 +1301,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				std::vector<std::string> sstFiles;
 				for (const auto& checkpoint : a.checkpoints) {
 					const RocksDBCheckpoint rocksCheckpoint = getRocksCheckpoint(checkpoint);
-					for (const auto& [range, file] : rocksCheckpoint.fetchedFiles) {
+					for (const auto& file : rocksCheckpoint.fetchedFiles) {
 						// std::cout << "Rocks Restoring: " << file << std::endl;
 						TraceEvent("RocksDBRestoreFile", id)
 						    .detail("Checkpoint", rocksCheckpoint.toString())
-						    .detail("File", file);
-						sstFiles.push_back(file);
+						    .detail("File", file.toString());
+						sstFiles.push_back(file.path);
 					}
 				}
 				//  =

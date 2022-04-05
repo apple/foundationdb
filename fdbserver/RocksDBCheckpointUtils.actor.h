@@ -35,6 +35,26 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
+struct CheckpointFile {
+	constexpr static FileIdentifier file_identifier = 13804348;
+	std::string path; // Checkpoint directory on the storage server.
+	KeyRange range;
+	int64_t size;
+
+	CheckpointFile() = default;
+	CheckpointFile(std::string path, KeyRange range, int64_t size) : path(path), range(range), size(size) {}
+
+	std::string toString() const {
+		return "CheckpointFile:\nFile Name: " + this->path + "\nRange: " + range.toString() +
+		       "\nSize: " + std::to_string(size) + "\n";
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, path, range, size);
+	}
+};
+
 // Copied from rocksdb/metadata.h, so that we can add serializer.
 struct SstFileMetaData {
 	constexpr static FileIdentifier file_identifier = 3804347;
@@ -203,7 +223,7 @@ struct RocksDBCheckpoint {
 	constexpr static FileIdentifier file_identifier = 13804347;
 	std::string checkpointDir; // Checkpoint directory on the storage server.
 	std::vector<std::string> sstFiles; // All checkpoint files.
-	std::vector<std::pair<KeyRange, std::string>> fetchedFiles; // Used for fetchCheckpoint, to record the progress.
+	std::vector<CheckpointFile> fetchedFiles; // Used for fetchCheckpoint, to record the progress.
 
 	CheckpointFormat format() const { return RocksDB; }
 
@@ -212,9 +232,9 @@ struct RocksDBCheckpoint {
 		for (const std::string& file : sstFiles) {
 			res += (file + "\n");
 		}
-		res+= "\nFetched files:\n";
-		for (const auto& [range, file] : fetchedFiles) {
-			res += (range.toString() + ": " + file + "\n");
+		res += "\nFetched files:\n";
+		for (const auto& file : fetchedFiles) {
+			res += file.toString();
 		}
 		return res;
 	}
@@ -232,6 +252,8 @@ ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
                                                         CheckpointMetaData initialState,
                                                         std::string dir,
                                                         std::function<Future<Void>(const CheckpointMetaData&)> cFun);
+
+int64_t getTotalFetchedBytes(const std::vector<CheckpointMetaData>& checkpoints);
 
 ACTOR Future<Void> deleteRocksCheckpoint(CheckpointMetaData checkpoint);
 

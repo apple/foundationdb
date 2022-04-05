@@ -1386,7 +1386,16 @@ void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
 		}
 	}
 
-	storage_engine_type = 4;
+	if (std::find(testConfig.storageEngineExcludeTypes.begin(), testConfig.storageEngineExcludeTypes.end(), 4) ==
+	    testConfig.storageEngineExcludeTypes.end()) {
+		storage_engine_type = 4;
+	}
+
+	if (storage_engine_type != 4) {
+		IKnobCollection::getMutableGlobalKnobCollection().setKnob("enable_physical_shard_move",
+		                                                          KnobValueRef::create(bool{ false }));
+		TraceEvent(SevDebug, "DisaablePhysicalShardMove").log();
+	}
 
 	switch (storage_engine_type) {
 	case 0: {
@@ -2370,6 +2379,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 	// TODO: reenable when backup/DR or BlobGranule supports tenants.
 	if (std::string_view(testFile).find("Backup") != std::string_view::npos ||
 	    std::string_view(testFile).find("BlobGranule") != std::string_view::npos || testConfig.extraDB != 0) {
+		testConfig.storageEngineExcludeTypes.push_back(4);
 		allowDefaultTenant = false;
 	}
 

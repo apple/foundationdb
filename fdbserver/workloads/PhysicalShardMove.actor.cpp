@@ -223,6 +223,7 @@ struct SSCheckpointWorkload : TestWorkload {
 				              false,
 				              deterministicRandom()->randomUniqueID(), // for logging only
 				              deterministicRandom()->randomUniqueID(),
+							  true,
 				              &ddEnabledState));
 				break;
 			} catch (Error& e) {

@@ -426,6 +426,7 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
                                         UID relocationIntervalId,
                                         UID dataMoveID,
                                         std::map<UID, StorageServerInterface>* tssMapping,
+                                        bool cancelConflictingDataMoves,
                                         const DDEnabledState* ddEnabledState) {
 	state TraceInterval interval("RelocateShard_StartMoveKeys");
 
@@ -584,7 +585,8 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 							TraceEvent(SevDebug, "StartMoveKeysDestIDExist", relocationIntervalId)
 							    .detail("Range", rangeIntersectKeys)
 							    .detail("DataMoveID", dataMoveID)
-							    .detail("DestID", destId).log();
+							    .detail("DestID", destId)
+							    .log();
 							ASSERT(!dest.empty());
 							if (destId == dataMoveID) {
 								TraceEvent(SevDebug, "StartMoveKeysRangeAlreadyCommitted", relocationIntervalId)
@@ -595,12 +597,14 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 							Optional<Value> val = wait(tr->get(dataMoveKeyFor(destId)));
 							ASSERT(val.present());
 							DataMoveMetaData _dataMove = decodeDataMoveValue(val.get());
-							TraceEvent(SevDebug, "StartMoveKeysFoundConflictingDataMove", relocationIntervalId)
+							TraceEvent(SevWarnAlways, "StartMoveKeysFoundConflictingDataMove", relocationIntervalId)
 							    .detail("Range", rangeIntersectKeys)
 							    .detail("DataMoveID", dataMoveID)
 							    .detail("ExistingDataMoveID", destId)
 							    .detail("ExistingDataMove", _dataMove.toString());
-							throw movekeys_conflict();
+							if (!cancelConflictingDataMoves) {
+								throw movekeys_conflict();
+							}
 						}
 
 						TraceEvent("StartMoveKeysOldRange", relocationIntervalId)
@@ -2203,6 +2207,7 @@ ACTOR Future<Void> moveKeys(Database cx,
                             bool hasRemote,
                             UID relocationIntervalId,
                             UID dataMoveID,
+                            bool cancelConflictingDataMoves,
                             const DDEnabledState* ddEnabledState) {
 	ASSERT(destinationTeam.size());
 	std::sort(destinationTeam.begin(), destinationTeam.end());
@@ -2218,6 +2223,7 @@ ACTOR Future<Void> moveKeys(Database cx,
 		                   relocationIntervalId,
 		                   dataMoveID,
 		                   &tssMapping,
+		                   cancelConflictingDataMoves,
 		                   ddEnabledState));
 
 		state Future<Void> completionSignaller =

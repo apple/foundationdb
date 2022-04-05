@@ -77,6 +77,7 @@ ACTOR Future<Void> moveKeys(Database occ,
                             bool hasRemote,
                             UID relocationIntervalId, // for logging only
                             UID dataMoveID,
+							bool cancelConflictingDataMoves,
                             const DDEnabledState* ddEnabledState);
 // Eventually moves the given keys to the given destination team
 // Caller is responsible for cancelling it before issuing an overlapping move,

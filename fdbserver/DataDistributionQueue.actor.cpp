@@ -1389,6 +1389,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 			                                         self->teamCollections.size() > 1,
 			                                         relocateShardInterval.pairID,
 			                                         rd.dataMoveID,
+													 false,
 			                                         ddEnabledState);
 			state Future<Void> pollHealth =
 			    signalledTransferComplete ? Never()
@@ -1413,6 +1414,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 								                      self->teamCollections.size() > 1,
 								                      relocateShardInterval.pairID,
 								                      rd.dataMoveID,
+													  false,
 								                      ddEnabledState);
 							} else {
 								self->fetchKeysComplete.insert(rd);

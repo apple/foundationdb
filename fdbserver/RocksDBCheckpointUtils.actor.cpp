@@ -342,12 +342,10 @@ public:
 		} else {
 			readThreads = createGenericThreadPool();
 		}
-		readThreads->addThread(new Reader(db), "fdb-rocksdb-checkpoint-reader");
+		readThreads->addThread(new Reader(db), "fdb-rocks-rd");
 	}
 
-	Future<Void> init(StringRef token) override {
-		throw not_implemented();
-	}
+	Future<Void> init(StringRef token) override { throw not_implemented(); }
 
 	Future<Void> init(KeyRangeRef range) override {
 		if (openFuture.isValid()) {
@@ -366,9 +364,7 @@ public:
 		return res;
 	}
 
-	Future<Standalone<StringRef>> nextChunk(const int byteLimit) {
-		throw not_implemented();
-	}
+	Future<Standalone<StringRef>> nextChunk(const int byteLimit) { throw not_implemented(); }
 
 	Future<Void> close() { return doClose(this); }
 
@@ -410,13 +406,9 @@ public:
 
 	Future<Void> init(StringRef token) override;
 
-	Future<Void> init(KeyRangeRef range) override {
-		throw not_implemented();
-	}
+	Future<Void> init(KeyRangeRef range) override { throw not_implemented(); }
 
-	Future<RangeResult> nextKeyValues(const int rowLimit, const int byteLimit) override {
-		throw not_implemented();
-	}
+	Future<RangeResult> nextKeyValues(const int rowLimit, const int byteLimit) override { throw not_implemented(); }
 
 	// Returns the next chunk of serialized checkpoint.
 	Future<Standalone<StringRef>> nextChunk(const int byteLimit) override;
@@ -480,8 +472,8 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 	    .detail("InitialState", metaData->toString())
 	    .detail("RocksCheckpoint", rcp.toString());
 
-	for (const auto& [shard, file] : rcp.fetchedFiles) {
-		ASSERT(!shard.intersects(range));
+	for (const auto& file : rcp.fetchedFiles) {
+		ASSERT(!file.range.intersects(range));
 	}
 
 	state UID ssID = metaData->ssID;
@@ -595,7 +587,7 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 			} else {
 				if (totalBytes > 0) {
 					RocksDBCheckpoint rcp = getRocksCheckpoint(*metaData);
-					rcp.fetchedFiles.emplace_back(range, localFile);
+					rcp.fetchedFiles.emplace_back(localFile, range, totalBytes);
 					rcp.checkpointDir = dir;
 					metaData->serializedCheckpoint = ObjectWriter::toValue(rcp, IncludeVersion());
 				}
@@ -848,6 +840,21 @@ ACTOR Future<Void> deleteRocksCheckpoint(CheckpointMetaData checkpoint) {
 	return Void();
 }
 #endif // SSD_ROCKSDB_EXPERIMENTAL
+
+int64_t getTotalFetchedBytes(const std::vector<CheckpointMetaData>& checkpoints) {
+	int64_t totalBytes = 0;
+	for (const auto& checkpoint : checkpoints) {
+		const CheckpointFormat format = checkpoint.getFormat();
+		if (format == RocksDBColumnFamily) {
+		} else if (format == RocksDB) {
+			auto rcp = getRocksCheckpoint(checkpoint);
+			for (const auto& file : rcp.fetchedFiles) {
+				totalBytes += file.size;
+			}
+		}
+	}
+	return totalBytes;
+}
 
 ICheckpointReader* newRocksDBCheckpointReader(const CheckpointMetaData& checkpoint, UID logID) {
 #ifdef SSD_ROCKSDB_EXPERIMENTAL

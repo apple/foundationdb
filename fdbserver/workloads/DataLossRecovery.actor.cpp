@@ -216,6 +216,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 				              false,
 				              UID(), // for logging only
 				              UID(),
+							  true,
 				              &ddEnabledState));
 				break;
 			} catch (Error& e) {
