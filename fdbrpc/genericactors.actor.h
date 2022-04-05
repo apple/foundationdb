@@ -72,7 +72,7 @@ Future<REPLY_TYPE(Req)> retryBrokenPromise(RequestStream<Req> to, Req request, T
 	}
 }
 
-template <class Req>
+ACTOR template <class Req>
 Future<ErrorOr<REPLY_TYPE(Req)>> tryGetReplyFromHostname(RequestStream<Req>* to,
                                                          Req request,
                                                          Hostname hostname,
@@ -81,7 +81,7 @@ Future<ErrorOr<REPLY_TYPE(Req)>> tryGetReplyFromHostname(RequestStream<Req>* to,
 	// If resolving fails, return lookup_failed().
 	// Otherwise, return tryGetReply(request).
 	try {
-		hostname.resolveBlocking();
+		wait(hostname.resolve());
 	} catch (...) {
 		return ErrorOr<REPLY_TYPE(Req)>(lookup_failed());
 	}
@@ -90,7 +90,7 @@ Future<ErrorOr<REPLY_TYPE(Req)>> tryGetReplyFromHostname(RequestStream<Req>* to,
 	return to->tryGetReply(request);
 }
 
-template <class Req>
+ACTOR template <class Req>
 Future<ErrorOr<REPLY_TYPE(Req)>> tryGetReplyFromHostname(RequestStream<Req>* to,
                                                          Req request,
                                                          Hostname hostname,
@@ -100,7 +100,7 @@ Future<ErrorOr<REPLY_TYPE(Req)>> tryGetReplyFromHostname(RequestStream<Req>* to,
 	// If resolving fails, return lookup_failed().
 	// Otherwise, return tryGetReply(request).
 	try {
-		hostname.resolveBlocking();
+		wait(hostname.resolve());
 	} catch (...) {
 		return ErrorOr<REPLY_TYPE(Req)>(lookup_failed());
 	}
@@ -114,11 +114,11 @@ Future<REPLY_TYPE(Req)> retryGetReplyFromHostname(RequestStream<Req>* to,
                                                   Req request,
                                                   Hostname hostname,
                                                   WellKnownEndpoints token) {
-	// Like to.getReply(request), except that a request_maybe_delivered exception results in re-resolving the hostname.
+	// Like tryGetReplyFromHostname, except that request_maybe_delivered results in re-resolving the hostname.
 	// Suitable for use with hostname, where RequestStream is NOT initialized yet.
 	// Not normally useful for endpoints initialized with NetworkAddress.
 	loop {
-		wait(hostname.resolve());
+		wait(hostname.resolveWithRetry());
 		state Optional<NetworkAddress> address = hostname.resolvedAddress;
 		*to = RequestStream<Req>(Endpoint::wellKnown({ address.get() }, token));
 		ErrorOr<REPLY_TYPE(Req)> reply = wait(to->tryGetReply(request));
@@ -143,11 +143,11 @@ Future<REPLY_TYPE(Req)> retryGetReplyFromHostname(RequestStream<Req>* to,
                                                   Hostname hostname,
                                                   WellKnownEndpoints token,
                                                   TaskPriority taskID) {
-	// Like to.getReply(request), except that a request_maybe_delivered exception results in re-resolving the hostname.
+	// Like tryGetReplyFromHostname, except that request_maybe_delivered results in re-resolving the hostname.
 	// Suitable for use with hostname, where RequestStream is NOT initialized yet.
 	// Not normally useful for endpoints initialized with NetworkAddress.
 	loop {
-		wait(hostname.resolve());
+		wait(hostname.resolveWithRetry());
 		state Optional<NetworkAddress> address = hostname.resolvedAddress;
 		*to = RequestStream<Req>(Endpoint::wellKnown({ address.get() }, token));
 		ErrorOr<REPLY_TYPE(Req)> reply = wait(to->tryGetReply(request, taskID));

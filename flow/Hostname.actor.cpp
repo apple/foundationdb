@@ -66,7 +66,7 @@ ACTOR Future<Void> resolveImpl(Hostname* self) {
 				self->status = Hostname::UNRESOLVED;
 				self->resolveFinish.trigger();
 				self->resolvedAddress = Optional<NetworkAddress>();
-				wait(delay(FLOW_KNOBS->HOSTNAME_RESOLVE_DELAY));
+				throw lookup_failed();
 			}
 		} else if (self->status == Hostname::RESOLVING) {
 			wait(self->resolveFinish.onTrigger());
@@ -83,8 +83,23 @@ ACTOR Future<Void> resolveImpl(Hostname* self) {
 	return Void();
 }
 
+ACTOR Future<Void> resolveWithRetryImpl(Hostname* self) {
+	loop {
+		try {
+			wait(resolveImpl(self));
+			return Void();
+		} catch (...) {
+			wait(delay(FLOW_KNOBS->HOSTNAME_RESOLVE_DELAY));
+		}
+	}
+}
+
 Future<Void> Hostname::resolve() {
 	return resolveImpl(this);
+}
+
+Future<Void> Hostname::resolveWithRetry() {
+	return resolveWithRetryImpl(this);
 }
 
 void Hostname::resolveBlocking() {
@@ -164,7 +179,14 @@ TEST_CASE("/flow/Hostname/hostname") {
 	ASSERT(hn4.status == Hostname::UNRESOLVED && !hn4.resolvedAddress.present());
 
 	try {
-		wait(timeoutError(hn2.resolve(), 1));
+		wait(hn2.resolve());
+	} catch (Error& e) {
+		ASSERT(e.code() == error_code_lookup_failed);
+	}
+	ASSERT(hn2.status == Hostname::UNRESOLVED && !hn2.resolvedAddress.present());
+
+	try {
+		wait(timeoutError(hn2.resolveWithRetry(), 1));
 	} catch (Error& e) {
 		ASSERT(e.code() == error_code_timed_out);
 	}
@@ -179,10 +201,21 @@ TEST_CASE("/flow/Hostname/hostname") {
 
 	state NetworkAddress address = NetworkAddress::parse("127.0.0.0:1234");
 	INetworkConnections::net()->addMockTCPEndpoint("host-name", "1234", { address });
+
+	// Test resolve.
 	wait(hn2.resolve());
 	ASSERT(hn2.status == Hostname::RESOLVED);
 	ASSERT(hn2.resolvedAddress.present() && hn2.resolvedAddress.get() == address);
 
+	// Test resolveWithRetry.
+	hn2.resetToUnresolved();
+	ASSERT(hn2.status == Hostname::UNRESOLVED && !hn2.resolvedAddress.present());
+
+	wait(hn2.resolveWithRetry());
+	ASSERT(hn2.status == Hostname::RESOLVED);
+	ASSERT(hn2.resolvedAddress.present() && hn2.resolvedAddress.get() == address);
+
+	// Test resolveBlocking.
 	hn2.resetToUnresolved();
 	ASSERT(hn2.status == Hostname::UNRESOLVED && !hn2.resolvedAddress.present());
 
