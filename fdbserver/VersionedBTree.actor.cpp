@@ -5285,6 +5285,8 @@ public:
 
 	Future<Void> commit(Version v) { return commit_impl(this, v); }
 
+	// Clear all btree data, allow pager remap to fully process its queue, and verify final
+	// page counts in pager and queues.
 	ACTOR static Future<Void> clearAllAndCheckSanity_impl(VersionedBTree* self) {
 		// Clear and commit
 		debug_printf("Clearing tree.\n");
@@ -6038,7 +6040,9 @@ private:
 			TraceEvent(SevError, "RedwoodBTreeUnexpectedNodeEncoding")
 			    .error(e)
 			    .detail("PhysicalPageID", page->getPhysicalPageID())
-			    .detail("IsEncrypted", page->isEncrypted());
+			    .detail("IsEncrypted", page->isEncrypted())
+			    .detail("EncodingTypeFound", page->getEncodingType())
+			    .detail("EncodingTypeExpected", self->m_encodingType);
 			throw e;
 		}
 
@@ -7727,6 +7731,23 @@ public:
 
 	ACTOR void shutdown(KeyValueStoreRedwood* self, bool dispose) {
 		TraceEvent(SevInfo, "RedwoodShutdown").detail("Filename", self->m_filename).detail("Dispose", dispose);
+
+		// In simulation, if the instance is being disposed of then sometimes run destructive sanity check.
+		if (g_network->isSimulated() && dispose && BUGGIFY) {
+			// Only proceed if the last commit is a success, but don't throw if it's not because shutdown
+			// should not throw.
+			wait(ready(self->m_lastCommit));
+			if (!self->m_lastCommit.isError()) {
+				// Run the destructive sanity, check but don't throw.
+				ErrorOr<Void> err = wait(errorOr(self->m_tree->clearAllAndCheckSanity()));
+				// If the test threw an error, it must be an injected fault or something has gone wrong.
+				ASSERT(!err.isError() || err.getError().isInjectedFault());
+			}
+		} else {
+			// The KVS user shouldn't be holding a commit future anymore so self shouldn't either.
+			self->m_lastCommit = Void();
+		}
+
 		if (self->m_error.canBeSet()) {
 			self->m_error.sendError(actor_cancelled()); // Ideally this should be shutdown_in_progress
 		}
@@ -7749,11 +7770,11 @@ public:
 	Future<Void> onClosed() const override { return m_closed.getFuture(); }
 
 	Future<Void> commit(bool sequential = false) override {
-		Future<Void> c = m_tree->commit(m_nextCommitVersion);
+		m_lastCommit = catchError(m_tree->commit(m_nextCommitVersion));
 		// Currently not keeping history
 		m_tree->setOldestReadableVersion(m_nextCommitVersion);
 		++m_nextCommitVersion;
-		return catchError(c);
+		return m_lastCommit;
 	}
 
 	KeyValueStoreType getType() const override { return KeyValueStoreType::SSD_REDWOOD_V1; }
@@ -7969,6 +7990,7 @@ private:
 	bool prefetch;
 	Version m_nextCommitVersion;
 	std::shared_ptr<IEncryptionKeyProvider> m_keyProvider;
+	Future<Void> m_lastCommit = Void();
 
 	template <typename T>
 	inline Future<T> catchError(Future<T> f) {
