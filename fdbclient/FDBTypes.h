@@ -1344,6 +1344,7 @@ struct DatabaseSharedState {
 	Mutex mutexLock;
 	GRVCacheSpace grvCacheSpace;
 	std::atomic<int> refCount;
+	void (*delRef)(DatabaseSharedState*);
 
 	DatabaseSharedState()
 	  : protocolVersion(currentProtocolVersion), mutexLock(Mutex()), grvCacheSpace(GRVCacheSpace()), refCount(0) {}

@@ -1693,8 +1693,7 @@ DatabaseContext::~DatabaseContext() {
 		grvUpdateHandler.cancel();
 	}
 	if (sharedStatePtr) {
-		sharedStatePtr->refCount--;
-		if (sharedStatePtr->refCount <= 0) {
+		if (--sharedStatePtr->refCount == 0) {
 			delete sharedStatePtr;
 			sharedStatePtr = nullptr;
 		}
@@ -6727,8 +6726,11 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 			if (requestTime - lastTime <= CLIENT_KNOBS->MAX_VERSION_CACHE_LAG && rv != Version(0)) {
 				ASSERT(!debug_checkVersionTime(rv, requestTime, "CheckStaleness"));
 				readVersion = rv;
+				TraceEvent("GetCachedReadVersion").detail("RV", rv);
 				return readVersion;
-			} // else go through regular GRV path
+			} else { // else go through regular GRV path
+				TraceEvent("GetRegularReadVersion");
+			}
 		}
 		++trState->cx->transactionReadVersions;
 		flags |= trState->options.getReadVersionFlags;
@@ -8178,9 +8180,20 @@ Future<Void> DatabaseContext::createSnapshot(StringRef uid, StringRef snapshot_c
 	return createSnapshotActor(this, UID::fromString(uid_str), snapshot_command);
 }
 
+void sharedStateDelRef(DatabaseSharedState* ssPtr) {
+	TraceEvent("SharedStateDelRef");
+	if (--ssPtr->refCount == 0) {
+		delete ssPtr;
+	}
+}
+
 Future<DatabaseSharedState*> DatabaseContext::initSharedState() {
 	ASSERT(!sharedStatePtr); // Don't re-initialize shared state if a pointer already exists
 	DatabaseSharedState* newState = new DatabaseSharedState();
+	// Increment refcount by 1 on creation to account for the one held in MultiVersionApi map
+	// Therefore, on initialization, refCount should be 2 (after also going to setSharedState)
+	newState->refCount++;
+	newState->delRef = &sharedStateDelRef;
 	setSharedState(newState);
 	return newState;
 }

@@ -1628,7 +1628,7 @@ void MultiVersionDatabase::DatabaseState::updateDatabase(Reference<IDatabase> ne
 			    .detail("ClusterFilePath", clusterFilePath);
 		}
 	}
-	if (db.isValid() && dbProtocolVersion.present()) {
+	if (db.isValid() && dbProtocolVersion.present() && MultiVersionApi::apiVersionAtLeast(710)) {
 		auto updateResult = MultiVersionApi::api->updateClusterSharedStateMap(clusterFilePath, db);
 		auto handler = mapThreadFuture<Void, Void>(updateResult, [this](ErrorOr<Void> result) {
 			dbVar->set(db);
@@ -2312,6 +2312,9 @@ ThreadFuture<Void> MultiVersionApi::updateClusterSharedStateMap(std::string clus
 
 void MultiVersionApi::clearClusterSharedStateMapEntry(std::string clusterFilePath) {
 	MutexHolder holder(lock);
+	TraceEvent("ClearingClusterSharedState").detail("ClusterFilePath", clusterFilePath);
+	auto ssPtr = clusterSharedStateMap[clusterFilePath].get();
+	ssPtr->delRef(ssPtr);
 	clusterSharedStateMap.erase(clusterFilePath);
 }
 
