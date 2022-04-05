@@ -2545,7 +2545,7 @@ ACTOR Future<SWVersion> testSoftwareVersionCompatibility(std::string folder, Pro
 					return swversion;
 				} else {
 					TraceEvent(SevInfo, "SWVersionIncompatible").log();
-					throw incomptible_software_version();
+					throw incompatible_software_version();
 				}
 			} catch (Error& e) {
 				TraceEvent(SevError, "ReadSWVersionFileError").error(e);
@@ -2651,13 +2651,141 @@ TEST_CASE("/fdbserver/worker/swversion/writeVerifyVersion") {
 	                                                                   ProtocolVersion::withTSS())));
 	ASSERT(!f.isError());
 
-	ErrorOr<SWVersion> swversion =
-	    wait(errorOr(testSoftwareVersionCompatibility(swversionTestDirName, currentProtocolVersion)));
+	ErrorOr<SWVersion> swversion = wait(errorOr(
+	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
 
 	ASSERT(!swversion.isError());
 	if (!swversion.isError()) {
-		ASSERT(swversion.get().latestProtocolVersion() == ProtocolVersion::withTenants().version());
-		ASSERT(swversion.get().lastProtocolVersion() == currentProtocolVersion.version());
+		ASSERT(swversion.get().latestProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
+		ASSERT(swversion.get().lastProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
+		ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withTSS().version());
+	}
+
+	platform::eraseDirectoryRecursive(swversionTestDirName);
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/worker/swversion/runCompatibleOlder") {
+	wait(Future<Void>(Void()));
+
+	platform::eraseDirectoryRecursive(swversionTestDirName);
+
+	if (!platform::createDirectory("sw-version-test")) {
+		TraceEvent(SevInfo, "CreatedDirectory").detail("Directory", "sw-version-test");
+		return Void();
+	}
+
+	ErrorOr<Void> f = wait(errorOr(checkAndUpdateNewestSoftwareVersion(swversionTestDirName,
+	                                                                   ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                                   ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                                   ProtocolVersion::withTSS())));
+	ASSERT(!f.isError());
+
+	ErrorOr<SWVersion> swversion = wait(errorOr(
+	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
+
+	ASSERT(!swversion.isError());
+	if (!swversion.isError()) {
+		ASSERT(swversion.get().latestProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
+		ASSERT(swversion.get().lastProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
+		ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withTSS().version());
+	}
+
+	ErrorOr<Void> f = wait(errorOr(checkAndUpdateNewestSoftwareVersion(swversionTestDirName,
+	                                                                   ProtocolVersion::withTSS(),
+	                                                                   ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                                   ProtocolVersion::withTSS())));
+
+	ErrorOr<SWVersion> swversion = wait(errorOr(
+	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
+
+	ASSERT(!swversion.isError());
+	if (!swversion.isError()) {
+		ASSERT(swversion.get().latestProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
+		ASSERT(swversion.get().lastProtocolVersion() == ProtocolVersion::withTSS().version());
+		ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withTSS().version());
+	}
+
+	platform::eraseDirectoryRecursive(swversionTestDirName);
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/worker/swversion/runIncompatibleOlder") {
+	wait(Future<Void>(Void()));
+
+	platform::eraseDirectoryRecursive(swversionTestDirName);
+
+	if (!platform::createDirectory("sw-version-test")) {
+		TraceEvent(SevInfo, "CreatedDirectory").detail("Directory", "sw-version-test");
+		return Void();
+	}
+
+	ErrorOr<Void> f = wait(errorOr(checkAndUpdateNewestSoftwareVersion(swversionTestDirName,
+	                                                                   ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                                   ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                                   ProtocolVersion::withTSS())));
+	ASSERT(!f.isError());
+
+	ErrorOr<SWVersion> swversion = wait(errorOr(
+	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
+
+	ASSERT(!swversion.isError());
+	if (!swversion.isError()) {
+		ASSERT(swversion.get().latestProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
+		ASSERT(swversion.get().lastProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
+		ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withTSS().version());
+	}
+
+	ErrorOr<SWVersion> swversion =
+	    wait(errorOr(testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withCacheRole())));
+
+	ASSERT(swversion.isError() && swversion.getError().code() == error_code_incompatible_software_version);
+
+	platform::eraseDirectoryRecursive(swversionTestDirName);
+
+	return Void();
+}
+
+TEST_CASE("/fdbserver/worker/swversion/runNewer") {
+	wait(Future<Void>(Void()));
+
+	platform::eraseDirectoryRecursive(swversionTestDirName);
+
+	if (!platform::createDirectory("sw-version-test")) {
+		TraceEvent(SevInfo, "CreatedDirectory").detail("Directory", "sw-version-test");
+		return Void();
+	}
+
+	ErrorOr<Void> f = wait(errorOr(checkAndUpdateNewestSoftwareVersion(swversionTestDirName,
+	                                                                   ProtocolVersion::withTSS(),
+	                                                                   ProtocolVersion::withTSS(),
+	                                                                   ProtocolVersion::withCacheRole())));
+	ASSERT(!f.isError());
+
+	ErrorOr<SWVersion> swversion = wait(errorOr(
+	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
+
+	ASSERT(!swversion.isError());
+	if (!swversion.isError()) {
+		ASSERT(swversion.get().latestProtocolVersion() == ProtocolVersion::withTSS().version());
+		ASSERT(swversion.get().lastProtocolVersion() == ProtocolVersion::withTSS().version());
+		ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withCacheRole().version());
+	}
+
+	ErrorOr<Void> f = wait(errorOr(checkAndUpdateNewestSoftwareVersion(swversionTestDirName,
+	                                                                   ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                                   ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                                   ProtocolVersion::withTSS())));
+
+	ErrorOr<SWVersion> swversion = wait(errorOr(
+	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
+
+	ASSERT(!swversion.isError());
+	if (!swversion.isError()) {
+		ASSERT(swversion.get().latestProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
+		ASSERT(swversion.get().lastProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
 		ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withTSS().version());
 	}
 
