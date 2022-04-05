@@ -1472,8 +1472,16 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 						}
 						ASSERT(mutations.front().version > metadata->bufferedDeltaVersion);
 
-						// If this assert trips we should have gotten change_feed_popped from SS and didn't
-						ASSERT(mutations.front().version >= metadata->activeCFData.get()->popVersion);
+						// Rare race from merge cursor where no individual server detected popped in their response
+						if (mutations.front().version < metadata->activeCFData.get()->popVersion) {
+							TEST(true); // Blob Worker detected popped instead of change feed
+							TraceEvent("BlobWorkerChangeFeedPopped", bwData->id)
+							    .detail("Granule", metadata->keyRange)
+							    .detail("GranuleID", startState.granuleID)
+							    .detail("MutationVersion", mutations.front().version)
+							    .detail("PopVersion", metadata->activeCFData.get()->popVersion);
+							throw change_feed_popped();
+						}
 					}
 					when(wait(inFlightFiles.empty() ? Never() : success(inFlightFiles.front().future))) {}
 				}
