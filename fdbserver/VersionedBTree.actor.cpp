@@ -10091,26 +10091,28 @@ TEST_CASE("Lredwood/correctness/btree") {
 	debug_printf("Waiting for verification to complete.\n");
 	wait(verifyTask);
 
-	// Reopen pager and btree with a remap cleanup window of 0 to reclaim all old pages
-	state Future<Void> closedFuture = btree->onClosed();
-	btree->close();
-	wait(closedFuture);
-	btree = new VersionedBTree(new DWALPager(pageSize,
-	                                         extentSize,
-	                                         file,
-	                                         pageCacheBytes,
-	                                         (BUGGIFY ? 0 : remapCleanupWindowBytes),
-	                                         concurrentExtentReads,
-	                                         pagerMemoryOnly,
-	                                         keyProvider),
-	                           file,
-	                           encodingType,
-	                           keyProvider);
-	wait(btree->init());
+	// Sometimes close and reopen before destructive sanity check
+	if (deterministicRandom()->coinflip()) {
+		Future<Void> closedFuture = btree->onClosed();
+		btree->close();
+		wait(closedFuture);
+		btree = new VersionedBTree(new DWALPager(pageSize,
+		                                         extentSize,
+		                                         file,
+		                                         pageCacheBytes,
+		                                         (BUGGIFY ? 0 : remapCleanupWindowBytes),
+		                                         concurrentExtentReads,
+		                                         pagerMemoryOnly,
+		                                         keyProvider),
+		                           file,
+		                           encodingType,
+		                           keyProvider);
+		wait(btree->init());
+	}
 
 	wait(btree->clearAllAndCheckSanity());
 
-	closedFuture = btree->onClosed();
+	Future<Void> closedFuture = btree->onClosed();
 	btree->close();
 	debug_printf("Closing.\n");
 	wait(closedFuture);
