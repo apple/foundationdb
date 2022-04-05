@@ -896,12 +896,12 @@ struct VectorRefPreserializer<T, VecSerStrategy::String> {
 
 	void invalidate() { _cached_size = -1; }
 	void add(const T& item) {
-		if (_cached_size > 0) {
+		if (_cached_size >= 0) {
 			_cached_size += _string_traits.getSize(item);
 		}
 	}
 	void remove(const T& item) {
-		if (_cached_size > 0) {
+		if (_cached_size >= 0) {
 			_cached_size -= _string_traits.getSize(item);
 		}
 	}

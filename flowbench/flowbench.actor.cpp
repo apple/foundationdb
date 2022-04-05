@@ -24,6 +24,8 @@
 #include "flow/ThreadHelper.actor.h"
 #include <thread>
 
+#include "flow/actorcompiler.h" // This must be the last include
+
 ACTOR template <class T>
 Future<T> stopNetworkAfter(Future<T> what) {
 	try {
