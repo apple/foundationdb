@@ -9,9 +9,26 @@ runSetup=false
     [[test.workload]]
     testName='Cycle'
     transactionsPerSecond=2500.0
-    nodeCount=2500
-    testDuration=10.0
+    nodeCount=1000
+    testDuration=30.0
     expectedRate=0
+    keyPrefix = 'cycle'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 1000
+    transactionsPerSecond = 2500.0
+    testDuration = 30.0
+    expectedRate = 0
+    keyPrefix = '!'
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 1000
+    transactionsPerSecond = 2500.0
+    testDuration = 30.0
+    expectedRate = 0
+    keyPrefix = 'ZZZ'
 
     [[test.workload]]
     testName='RandomClogging'
@@ -34,4 +51,4 @@ runSetup=false
     machinesToKill=10
     machinesToLeave=3
     reboot=true
-    testDuration=10.0
+    testDuration=60.0
