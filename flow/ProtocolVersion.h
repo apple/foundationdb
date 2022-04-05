@@ -199,20 +199,34 @@ static_assert(minInvalidProtocolVersion.version() >=
 static_assert((minInvalidProtocolVersion.version() & 0xFFFFFFLL) == 0, "Unexpected min invalid protocol version");
 
 struct SWVersion {
-	constexpr static FileIdentifier file_identifier = 13943984;
+	constexpr static FileIdentifier file_identifier = 13943914;
 
-	uint64_t latestProtocolVersion;
-	uint64_t lastProtocolVersion;
-	uint64_t lowestCompatibleProtocolVersion;
+private:
+	uint64_t _latestProtocolVersion;
+	uint64_t _lastProtocolVersion;
+	uint64_t _lowestCompatibleProtocolVersion;
 
-	SWVersion() { SWVersion(ProtocolVersion(), ProtocolVersion(), ProtocolVersion()); }
+public:
+	SWVersion() {
+		_latestProtocolVersion = 0;
+		_lastProtocolVersion = 0;
+		_lowestCompatibleProtocolVersion = 0;
+	}
 
 	SWVersion(ProtocolVersion latestVersion, ProtocolVersion lastVersion, ProtocolVersion minCompatibleVersion)
-	  : latestProtocolVersion(latestVersion.version()), lastProtocolVersion(lastVersion.version()),
-	    lowestCompatibleProtocolVersion(minCompatibleVersion.version()) {}
+	  : _latestProtocolVersion(latestVersion.version()), _lastProtocolVersion(lastVersion.version()),
+	    _lowestCompatibleProtocolVersion(minCompatibleVersion.version()) {}
+
+	bool isValid() const {
+		return (_latestProtocolVersion != 0 && _lastProtocolVersion != 0 && _lowestCompatibleProtocolVersion != 0);
+	}
+
+	uint64_t latestProtocolVersion() const { return _latestProtocolVersion; }
+	uint64_t lastProtocolVersion() const { return _lastProtocolVersion; }
+	uint64_t lowestCompatibleProtocolVersion() const { return _lowestCompatibleProtocolVersion; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, latestProtocolVersion, lastProtocolVersion, lowestCompatibleProtocolVersion);
+		serializer(ar, _latestProtocolVersion, _lastProtocolVersion, _lowestCompatibleProtocolVersion);
 	}
 };
