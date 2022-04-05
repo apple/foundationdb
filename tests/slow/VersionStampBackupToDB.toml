@@ -1,5 +1,7 @@
 [configuration]
 extraDB = 2
+# FIXME: re-enable rocks at some point
+storageEngineExcludeTypes = [4]
 
 [[test]]
 testTitle = 'VersionStampBackupToDB'

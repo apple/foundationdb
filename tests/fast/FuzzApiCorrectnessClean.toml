@@ -2,6 +2,10 @@
 StderrSeverity = 30
 allowDisablingTenants = false
 allowDefaultTenant = false
+[configuration]
+# FIXME: re-enable rocks at some point
+storageEngineExcludeTypes = [4]
+
 
 [[test]]
 testTitle = 'FuzzApiCorrectness'
