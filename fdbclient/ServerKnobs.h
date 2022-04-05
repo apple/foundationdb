@@ -810,6 +810,8 @@ public:
 	double BLOB_MANAGER_STATUS_EXP_BACKOFF_MIN;
 	double BLOB_MANAGER_STATUS_EXP_BACKOFF_MAX;
 	double BLOB_MANAGER_STATUS_EXP_BACKOFF_EXPONENT;
+	double BGCC_TIMEOUT;
+	double BGCC_MIN_INTERVAL;
 
 	ServerKnobs(Randomize, ClientKnobs*, IsSimulated);
 	void initialize(Randomize, ClientKnobs*, IsSimulated);

@@ -2550,6 +2550,7 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 
 			req.reply.send(feedReply);
 			if (req.begin == req.end) {
+				data->activeFeedQueries--;
 				req.reply.sendError(end_of_stream());
 				return Void();
 			}

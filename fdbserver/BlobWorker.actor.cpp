@@ -863,6 +863,23 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 	}
 }
 
+struct CounterHolder {
+	int* counter;
+	bool completed;
+
+	CounterHolder() : counter(nullptr), completed(true) {}
+	CounterHolder(int* counter) : counter(counter), completed(false) { (*counter)++; }
+
+	void complete() {
+		if (!completed) {
+			completed = true;
+			(*counter)--;
+		}
+	}
+
+	~CounterHolder() { complete(); }
+};
+
 ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bwData,
                                                     Reference<GranuleMetadata> metadata,
                                                     UID granuleID,
@@ -877,6 +894,8 @@ ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bw
 	}
 
 	wait(delay(0, TaskPriority::BlobWorkerUpdateFDB));
+
+	state CounterHolder pendingCounter(&bwData->stats.granulesPendingSplitCheck);
 
 	if (BW_DEBUG) {
 		fmt::print("Granule [{0} - {1}) checking with BM for re-snapshot after {2} bytes\n",
@@ -955,6 +974,8 @@ ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bw
 			           bwData->id.toString());
 		}
 	}
+
+	pendingCounter.complete();
 
 	if (BW_DEBUG) {
 		fmt::print("Granule [{0} - {1}) re-snapshotting after {2} bytes\n",
