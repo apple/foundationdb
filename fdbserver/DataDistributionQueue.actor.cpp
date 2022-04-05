@@ -1499,6 +1499,11 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 
 				// onFinished.send( rs );
 				if (!error.code()) {
+					TraceEvent("DataMoveStats", distributorId)
+					    .detail("Duration", now() - startTime)
+					    .detail("TotalBytes", metrics.bytes)
+					    .detail("Rate", (double)metrics.bytes / (now() - startTime))
+					    .detail("Result", "Success");
 					TraceEvent(relocateShardInterval.end(), distributorId)
 					    .detail("Duration", now() - startTime)
 					    .detail("Result", "Success");
