@@ -440,6 +440,7 @@ struct ChangeFeedInfo : ReferenceCounted<ChangeFeedInfo> {
 	Version metadataCreateVersion = invalidVersion;
 
 	bool removing = false;
+	bool destroyed = false;
 
 	KeyRangeMap<std::unordered_map<UID, Promise<Void>>> moveTriggers;
 
@@ -4944,7 +4945,9 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 			    .errorUnsuppressed(e)
 			    .detail("RangeID", rangeId.printable())
 			    .detail("Range", range.toString())
-			    .detail("EndVersion", endVersion);
+			    .detail("EndVersion", endVersion)
+			    .detail("Removing", changeFeedInfo->removing)
+			    .detail("Destroyed", changeFeedInfo->destroyed);
 			throw;
 		}
 	}
@@ -5070,7 +5073,7 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 	// ChangeServerKeys mutation. This guarantees we don't miss any metadata between the previous batch's version
 	// (data->version) and the mutation version.
 	wait(data->version.whenAtLeast(data->version.get() + 1));
-	state Version fetchVersion = fetchVersion = data->version.get();
+	state Version fetchVersion = data->version.get();
 
 	TraceEvent(SevDebug, "FetchChangeFeedMetadata", data->thisServerID)
 	    .detail("Range", keys.toString())
@@ -5082,7 +5085,7 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 	for (auto& r : ranges) {
 		for (auto& cfInfo : r.value()) {
 			auto feedCleanup = data->changeFeedCleanupDurable.find(cfInfo->id);
-			if (feedCleanup != data->changeFeedCleanupDurable.end() && cfInfo->removing) {
+			if (feedCleanup != data->changeFeedCleanupDurable.end() && cfInfo->removing && !cfInfo->destroyed) {
 				TEST(true); // re-fetching feed scheduled for deletion! Un-mark it as removing
 
 				cfInfo->removing = false;
@@ -5105,8 +5108,7 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 		}
 	}
 
-	state std::vector<OverlappingChangeFeedEntry> feeds =
-	    wait(data->cx->getOverlappingChangeFeeds(keys, fetchVersion + 1));
+	state std::vector<OverlappingChangeFeedEntry> feeds = wait(data->cx->getOverlappingChangeFeeds(keys, fetchVersion));
 	// handle change feeds removed while fetching overlapping
 	while (removals.getFuture().isReady()) {
 		Key remove = waitNext(removals.getFuture());
@@ -5248,7 +5250,6 @@ ACTOR Future<std::unordered_map<Key, Version>> dispatchChangeFeeds(StorageServer
 					}
 				}
 				if (done) {
-					data->changeFeedRemovals.erase(fetchKeysID);
 					return feedMaxFetched;
 				}
 			}
@@ -5657,6 +5658,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				feedFetchedVersions[newFetch.first] = newFetch.second;
 			}
 		}
+
+		data->changeFeedRemovals.erase(fetchKeysID);
 
 		shard->phase = AddingShard::Waiting;
 
@@ -6309,6 +6312,7 @@ private:
 				feed->second->emptyVersion = currentVersion - 1;
 				feed->second->stopVersion = currentVersion;
 				feed->second->removing = true;
+				feed->second->destroyed = true;
 				feed->second->moved(feed->second->range);
 				feed->second->newMutations.trigger();
 
