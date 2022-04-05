@@ -494,11 +494,9 @@ ACTOR Future<Void> newSeedServers(Reference<MasterData> self,
 			tag.id++;
 			idx++;
 
+			// Note that we don't add the private team here. Private team creation is done when system metadata is
+			// created in seedShardServers().
 			servers->emplace_back(newServer.get().interf, seedTeamId);
-
-			if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
-				servers->emplace_back(newServer.get().interf, newServer.get().interf.id());
-			}
 			ssInterfaces.push_back(newServer.get().interf);
 
 			if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {

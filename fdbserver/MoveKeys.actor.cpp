@@ -1598,6 +1598,11 @@ void seedShardServers(Arena& arena,
 			}
 		}
 
+		// Populate storageTeamIdKey for private teams.
+		for (const auto& [ss, teams] : serverToTeams) {
+			tr.set(arena, storageTeamIdKey(ss), encodeStorageTeams({ ss }));
+		}
+
 		if (!seedTeamSet) {
 			// Two corner case can reach here, serverToTeams.size() is 1 in both cases
 			// 1. the cluster only has 1 SS
