@@ -858,6 +858,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( BLOB_MANAGER_STATUS_EXP_BACKOFF_MAX,                   5.0 );
 	init( BLOB_MANAGER_STATUS_EXP_BACKOFF_EXPONENT,              1.5 );
 
+	init( BGCC_TIMEOUT,                   isSimulated ? 10.0 : 120.0 );
+	init( BGCC_MIN_INTERVAL,                isSimulated ? 1.0 : 10.0 );
+
 	// clang-format on
 
 	if (clientKnobs) {
