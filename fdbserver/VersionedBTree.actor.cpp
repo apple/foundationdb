@@ -6053,8 +6053,15 @@ private:
 	inline BTreePage::BinaryTree::Cursor getCursor(const ArenaPage* page,
 	                                               const RedwoodRecordRef& lowerBound,
 	                                               const RedwoodRecordRef& upperBound) {
-		if (!page->extra.valid()) {
-			debug_printf("Creating DecodeCache for ptr=%p lower=%s upper=%s %s\n",
+
+		Reference<BTreePage::BinaryTree::DecodeCache> cache;
+
+		if (page->extra.valid()) {
+			cache = page->extra.getReference<BTreePage::BinaryTree::DecodeCache>();
+		} else {
+			cache = makeReference<BTreePage::BinaryTree::DecodeCache>(lowerBound, upperBound, m_pDecodeCacheMemory);
+
+			debug_printf("Created DecodeCache for ptr=%p lower=%s upper=%s %s\n",
 			             page->data(),
 			             lowerBound.toString(false).c_str(),
 			             upperBound.toString(false).c_str(),
@@ -6066,12 +6073,13 @@ private:
 			                            upperBound)
 			                 .c_str());
 
-			page->extra =
-			    makeReference<BTreePage::BinaryTree::DecodeCache>(lowerBound, upperBound, m_pDecodeCacheMemory);
+			// Store decode cache into page based on height
+			if (((BTreePage*)page->data())->height >= SERVER_KNOBS->REDWOOD_DECODECACHE_REUSE_MIN_HEIGHT) {
+				page->extra = cache;
+			}
 		}
 
-		return BTreePage::BinaryTree::Cursor(page->extra.getReference<BTreePage::BinaryTree::DecodeCache>(),
-		                                     ((BTreePage*)page->mutateData())->tree());
+		return BTreePage::BinaryTree::Cursor(cache, ((BTreePage*)page->mutateData())->tree());
 	}
 
 	// Get cursor into a BTree node from a child link
