@@ -30,6 +30,8 @@ set(FLOW_SRCS
   Hash3.h
   Histogram.cpp
   Histogram.h
+  Hostname.actor.cpp
+  Hostname.h
   IDispatched.h
   IRandom.h
   IThreadPoolTest.actor.cpp

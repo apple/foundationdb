@@ -28,6 +28,7 @@
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/WellKnownEndpoints.h"
+#include "flow/Hostname.h"
 
 const int MAX_CLUSTER_FILE_BYTES = 60000;
 

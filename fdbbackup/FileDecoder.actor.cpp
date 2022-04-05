@@ -150,31 +150,10 @@ struct DecodeParams {
 	}
 
 	void updateKnobs() {
-		auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
-		for (const auto& [knobName, knobValueString] : knobs) {
-			try {
-				auto knobValue = g_knobs.parseKnobValue(knobName, knobValueString);
-				g_knobs.setKnob(knobName, knobValue);
-			} catch (Error& e) {
-				if (e.code() == error_code_invalid_option_value) {
-					std::cerr << "WARNING: Invalid value '" << knobValueString << "' for knob option '" << knobName
-					          << "'\n";
-					TraceEvent(SevWarnAlways, "InvalidKnobValue")
-					    .detail("Knob", printable(knobName))
-					    .detail("Value", printable(knobValueString));
-				} else {
-					std::cerr << "ERROR: Failed to set knob option '" << knobName << "': " << e.what() << "\n";
-					TraceEvent(SevError, "FailedToSetKnob")
-					    .errorUnsuppressed(e)
-					    .detail("Knob", printable(knobName))
-					    .detail("Value", printable(knobValueString));
-					throw;
-				}
-			}
-		}
+		IKnobCollection::setupKnobs(knobs);
 
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
-		g_knobs.initialize(Randomize::True, IsSimulated::False);
+		IKnobCollection::getMutableGlobalKnobCollection().initialize(Randomize::False, IsSimulated::False);
 	}
 };
 

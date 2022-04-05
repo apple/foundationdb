@@ -166,8 +166,12 @@ public:
 
 	Future<std::vector<NetworkAddress>> resolveTCPEndpoint(const std::string& host,
 	                                                       const std::string& service) override;
+	Future<std::vector<NetworkAddress>> resolveTCPEndpointWithDNSCache(const std::string& host,
+	                                                                   const std::string& service) override;
 	std::vector<NetworkAddress> resolveTCPEndpointBlocking(const std::string& host,
 	                                                       const std::string& service) override;
+	std::vector<NetworkAddress> resolveTCPEndpointBlockingWithDNSCache(const std::string& host,
+	                                                                   const std::string& service) override;
 	Reference<IListener> listen(NetworkAddress localAddr) override;
 
 	// INetwork interface
@@ -1837,6 +1841,14 @@ Future<Reference<IConnection>> Net2::connectExternal(NetworkAddress toAddr, cons
 	return connect(toAddr, host);
 }
 
+Future<Reference<IUDPSocket>> Net2::createUDPSocket(NetworkAddress toAddr) {
+	return UDPSocket::connect(&reactor.ios, toAddr, toAddr.ip.isV6());
+}
+
+Future<Reference<IUDPSocket>> Net2::createUDPSocket(bool isV6) {
+	return UDPSocket::connect(&reactor.ios, Optional<NetworkAddress>(), isV6);
+}
+
 ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl(Net2* self,
                                                                          std::string host,
                                                                          std::string service) {
@@ -1847,6 +1859,7 @@ ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl(Net2* s
 	tcpResolver.async_resolve(tcp::resolver::query(host, service),
 	                          [=](const boost::system::error_code& ec, tcp::resolver::iterator iter) {
 		                          if (ec) {
+			                          self->dnsCache.remove(host, service);
 			                          promise.sendError(lookup_failed());
 			                          return;
 		                          }
@@ -1866,6 +1879,7 @@ ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl(Net2* s
 		                          }
 
 		                          if (addrs.empty()) {
+			                          self->dnsCache.remove(host, service);
 			                          promise.sendError(lookup_failed());
 		                          } else {
 			                          promise.send(addrs);
@@ -1874,39 +1888,58 @@ ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl(Net2* s
 
 	wait(ready(result));
 	tcpResolver.cancel();
+	std::vector<NetworkAddress> ret = result.get();
+	self->dnsCache.add(host, service, ret);
 
-	return result.get();
-}
-
-Future<Reference<IUDPSocket>> Net2::createUDPSocket(NetworkAddress toAddr) {
-	return UDPSocket::connect(&reactor.ios, toAddr, toAddr.ip.isV6());
-}
-
-Future<Reference<IUDPSocket>> Net2::createUDPSocket(bool isV6) {
-	return UDPSocket::connect(&reactor.ios, Optional<NetworkAddress>(), isV6);
+	return ret;
 }
 
 Future<std::vector<NetworkAddress>> Net2::resolveTCPEndpoint(const std::string& host, const std::string& service) {
 	return resolveTCPEndpoint_impl(this, host, service);
 }
 
+Future<std::vector<NetworkAddress>> Net2::resolveTCPEndpointWithDNSCache(const std::string& host,
+                                                                         const std::string& service) {
+	Optional<std::vector<NetworkAddress>> cache = dnsCache.find(host, service);
+	if (cache.present()) {
+		return cache.get();
+	}
+	return resolveTCPEndpoint_impl(this, host, service);
+}
+
 std::vector<NetworkAddress> Net2::resolveTCPEndpointBlocking(const std::string& host, const std::string& service) {
 	tcp::resolver tcpResolver(reactor.ios);
-	tcp::resolver::query query(host, service);
-	auto iter = tcpResolver.resolve(query);
-	decltype(iter) end;
-	std::vector<NetworkAddress> addrs;
-	while (iter != end) {
-		auto endpoint = iter->endpoint();
-		auto addr = endpoint.address();
-		if (addr.is_v6()) {
-			addrs.emplace_back(IPAddress(addr.to_v6().to_bytes()), endpoint.port());
-		} else {
-			addrs.emplace_back(addr.to_v4().to_ulong(), endpoint.port());
+	try {
+		auto iter = tcpResolver.resolve(host, service);
+		decltype(iter) end;
+		std::vector<NetworkAddress> addrs;
+		while (iter != end) {
+			auto endpoint = iter->endpoint();
+			auto addr = endpoint.address();
+			if (addr.is_v6()) {
+				addrs.emplace_back(IPAddress(addr.to_v6().to_bytes()), endpoint.port());
+			} else {
+				addrs.emplace_back(addr.to_v4().to_ulong(), endpoint.port());
+			}
+			++iter;
 		}
-		++iter;
+		if (addrs.empty()) {
+			throw lookup_failed();
+		}
+		return addrs;
+	} catch (...) {
+		dnsCache.remove(host, service);
+		throw lookup_failed();
 	}
-	return addrs;
+}
+
+std::vector<NetworkAddress> Net2::resolveTCPEndpointBlockingWithDNSCache(const std::string& host,
+                                                                         const std::string& service) {
+	Optional<std::vector<NetworkAddress>> cache = dnsCache.find(host, service);
+	if (cache.present()) {
+		return cache.get();
+	}
+	return resolveTCPEndpointBlocking(host, service);
 }
 
 bool Net2::isAddressOnThisHost(NetworkAddress const& addr) const {

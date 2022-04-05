@@ -1780,42 +1780,17 @@ int main(int argc, char* argv[]) {
 		                                         Randomize::True,
 		                                         role == ServerRole::Simulation ? IsSimulated::True
 		                                                                        : IsSimulated::False);
-		IKnobCollection::getMutableGlobalKnobCollection().setKnob("log_directory", KnobValue::create(opts.logFolder));
-		IKnobCollection::getMutableGlobalKnobCollection().setKnob("conn_file", KnobValue::create(opts.connFile));
+		auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
+		g_knobs.setKnob("log_directory", KnobValue::create(opts.logFolder));
+		g_knobs.setKnob("conn_file", KnobValue::create(opts.connFile));
 		if (role != ServerRole::Simulation) {
-			IKnobCollection::getMutableGlobalKnobCollection().setKnob("commit_batches_mem_bytes_hard_limit",
-			                                                          KnobValue::create(int64_t{ opts.memLimit }));
+			g_knobs.setKnob("commit_batches_mem_bytes_hard_limit", KnobValue::create(int64_t{ opts.memLimit }));
 		}
 
-		for (const auto& [knobName, knobValueString] : opts.knobs) {
-			try {
-				auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
-				auto knobValue = g_knobs.parseKnobValue(knobName, knobValueString);
-				g_knobs.setKnob(knobName, knobValue);
-			} catch (Error& e) {
-				if (e.code() == error_code_invalid_option_value) {
-					fprintf(stderr,
-					        "WARNING: Invalid value '%s' for knob option '%s'\n",
-					        knobName.c_str(),
-					        knobValueString.c_str());
-					TraceEvent(SevWarnAlways, "InvalidKnobValue")
-					    .detail("Knob", printable(knobName))
-					    .detail("Value", printable(knobValueString));
-				} else {
-					fprintf(stderr, "ERROR: Failed to set knob option '%s': %s\n", knobName.c_str(), e.what());
-					TraceEvent(SevError, "FailedToSetKnob")
-					    .error(e)
-					    .detail("Knob", printable(knobName))
-					    .detail("Value", printable(knobValueString));
-					throw;
-				}
-			}
-		}
-		IKnobCollection::getMutableGlobalKnobCollection().setKnob("server_mem_limit",
-		                                                          KnobValue::create(int64_t{ opts.memLimit }));
+		IKnobCollection::setupKnobs(opts.knobs);
+		g_knobs.setKnob("server_mem_limit", KnobValue::create(int64_t{ opts.memLimit }));
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
-		IKnobCollection::getMutableGlobalKnobCollection().initialize(
-		    Randomize::True, role == ServerRole::Simulation ? IsSimulated::True : IsSimulated::False);
+		g_knobs.initialize(Randomize::True, role == ServerRole::Simulation ? IsSimulated::True : IsSimulated::False);
 
 		// evictionPolicyStringToEnum will throw an exception if the string is not recognized as a valid
 		EvictablePageCache::evictionPolicyStringToEnum(FLOW_KNOBS->CACHE_EVICTION_POLICY);
