@@ -2204,7 +2204,7 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 				if (it == pContext->pCommitData->ssToStorageTeam.end())
 					pContext->pCommitData->ssToStorageTeam.emplace(k, teamIDs);
 				else
-					it->second = teamIDs.getStorageTeams();
+					it->second = teamIDs;
 			}
 		}
 
