@@ -88,7 +88,10 @@ ACTOR Future<Void> resolveWithRetryImpl(Hostname* self) {
 		try {
 			wait(resolveImpl(self));
 			return Void();
-		} catch (...) {
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
 			wait(delay(FLOW_KNOBS->HOSTNAME_RESOLVE_DELAY));
 		}
 	}
