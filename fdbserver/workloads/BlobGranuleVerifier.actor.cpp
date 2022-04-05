@@ -179,23 +179,23 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 
 	// utility to prune <range> at pruneVersion=<version> with the <force> flag
 	ACTOR Future<Void> pruneAtVersion(Database cx, KeyRange range, Version version, bool force) {
-		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+		state Transaction tr(cx);
 		state Key pruneKey;
 		loop {
 			try {
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 				Value pruneValue = blobGranulePruneValueFor(version, range, force);
-				tr->atomicOp(
+				tr.atomicOp(
 				    addVersionStampAtEnd(blobGranulePruneKeys.begin), pruneValue, MutationRef::SetVersionstampedKey);
-				tr->set(blobGranulePruneChangeKey, deterministicRandom()->randomUniqueID().toString());
-				state Future<Standalone<StringRef>> fTrVs = tr->getVersionstamp();
-				wait(tr->commit());
+				tr.set(blobGranulePruneChangeKey, deterministicRandom()->randomUniqueID().toString());
+				state Future<Standalone<StringRef>> fTrVs = tr.getVersionstamp();
+				wait(tr.commit());
 				Standalone<StringRef> vs = wait(fTrVs);
 				pruneKey = blobGranulePruneKeys.begin.withSuffix(vs);
 				if (BGV_DEBUG) {
-					fmt::print("pruneAtVersion for range [{0} - {1}) at version {2} succeeded\n",
+					fmt::print("pruneAtVersion for range [{0} - {1}) at version {2} registered\n",
 					           range.begin.printable(),
 					           range.end.printable(),
 					           version);
@@ -209,24 +209,30 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 					           version,
 					           e.name());
 				}
-				wait(tr->onError(e));
+				wait(tr.onError(e));
 			}
 		}
-		tr->reset();
+		state Reference<ReadYourWritesTransaction> tr2 = makeReference<ReadYourWritesTransaction>(cx);
 		loop {
 			try {
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr2->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr2->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-				Optional<Value> pruneVal = wait(tr->get(pruneKey));
+				Optional<Value> pruneVal = wait(tr2->get(pruneKey));
 				if (!pruneVal.present()) {
+					if (BGV_DEBUG) {
+						fmt::print("pruneAtVersion for range [{0} - {1}) at version {2} succeeded\n",
+						           range.begin.printable(),
+						           range.end.printable(),
+						           version);
+					}
 					return Void();
 				}
-				state Future<Void> watchFuture = tr->watch(pruneKey);
-				wait(tr->commit());
+				state Future<Void> watchFuture = tr2->watch(pruneKey);
+				wait(tr2->commit());
 				wait(watchFuture);
 			} catch (Error& e) {
-				wait(tr->onError(e));
+				wait(tr2->onError(e));
 			}
 		}
 	}
