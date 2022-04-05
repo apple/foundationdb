@@ -152,6 +152,7 @@ std::shared_ptr<rocksdb::Cache> rocksdb_block_cache = nullptr;
 #define PERSIST_PREFIX "\xff\xff"
 const KeyRef persistVersion = LiteralStringRef(PERSIST_PREFIX "Version");
 const StringRef ROCKSDBSTORAGE_HISTOGRAM_GROUP = LiteralStringRef("RocksDBStorage");
+const StringRef ROCKSDBSTORAGE_HISTOGRAM_GROUP_ZHE = LiteralStringRef("RocksDBStorageZhe");
 const StringRef ROCKSDB_COMMIT_LATENCY_HISTOGRAM = LiteralStringRef("RocksDBCommitLatency");
 const StringRef ROCKSDB_COMMIT_ACTION_HISTOGRAM = LiteralStringRef("RocksDBCommitAction");
 const StringRef ROCKSDB_COMMIT_QUEUEWAIT_HISTOGRAM = LiteralStringRef("RocksDBCommitQueueWait");
@@ -863,6 +864,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		std::shared_ptr<ReadIteratorPool> readIterPool;
 		std::shared_ptr<PerfContextMetrics> perfContextMetrics;
 		int threadIndex;
+		ThreadReturnPromiseStream<std::tuple<int, const StringRef, double>>* metricPromiseStream;
 
 		explicit Writer(DB& db,
 		                CF& cf,
@@ -872,6 +874,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		                int threadIndex)
 		  : db(db), cf(cf), id(id), readIterPool(readIterPool), perfContextMetrics(perfContextMetrics),
 		    threadIndex(threadIndex),
+		    metricPromiseStream(new ThreadReturnPromiseStream<std::tuple<int, const StringRef, double>>()),
 		    rateLimiter(SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC > 0
 		                    ? rocksdb::NewGenericRateLimiter(
 		                          SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC, // rate_bytes_per_sec
@@ -1055,7 +1058,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			double commitBeginTime;
 			if (a.getHistograms) {
 				commitBeginTime = timer_monotonic();
-				commitQueueWaitHistogram->sampleSeconds(commitBeginTime - a.startTime);
+				// commitQueueWaitHistogram->sampleSeconds(commitBeginTime - a.startTime);
+				metricPromiseStream->send(
+				    std::make_tuple(threadIndex, ROCKSDB_COMMIT_QUEUEWAIT_HISTOGRAM, commitBeginTime - a.startTime));
 			}
 			Standalone<VectorRef<KeyRangeRef>> deletes;
 			DeleteVisitor dv(deletes, deletes.arena());
@@ -1079,7 +1084,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			s = db->Write(options, a.batchToCommit.get());
 			readIterPool->update();
 			if (a.getHistograms) {
-				writeHistogram->sampleSeconds(timer_monotonic() - writeBeginTime);
+				// writeHistogram->sampleSeconds(timer_monotonic() - writeBeginTime);
+				metricPromiseStream->send(
+				    std::make_tuple(threadIndex, ROCKSDB_WRITE_HISTOGRAM, timer_monotonic() - writeBeginTime));
 			}
 
 			if (!s.ok()) {
@@ -1095,13 +1102,19 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 					ASSERT(db->SuggestCompactRange(cf, &begin, &end).ok());
 				}
 				if (a.getHistograms) {
-					deleteCompactRangeHistogram->sampleSeconds(timer_monotonic() - compactRangeBeginTime);
+					// deleteCompactRangeHistogram->sampleSeconds(timer_monotonic() - compactRangeBeginTime);
+					metricPromiseStream->send(std::make_tuple(
+					    threadIndex, ROCKSDB_DELETE_COMPACTRANGE_HISTOGRAM, timer_monotonic() - compactRangeBeginTime));
 				}
 			}
 			if (a.getHistograms) {
 				double currTime = timer_monotonic();
-				commitActionHistogram->sampleSeconds(currTime - commitBeginTime);
-				commitLatencyHistogram->sampleSeconds(currTime - a.startTime);
+				// commitActionHistogram->sampleSeconds(currTime - commitBeginTime);
+				// commitLatencyHistogram->sampleSeconds(currTime - a.startTime);
+				metricPromiseStream->send(
+				    std::make_tuple(threadIndex, ROCKSDB_COMMIT_ACTION_HISTOGRAM, currTime - commitBeginTime));
+				metricPromiseStream->send(
+				    std::make_tuple(threadIndex, ROCKSDB_COMMIT_LATENCY_HISTOGRAM, currTime - a.startTime));
 			}
 			if (doPerfContextMetrics) {
 				perfContextMetrics->set(threadIndex);
@@ -1287,6 +1300,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		std::shared_ptr<ReadIteratorPool> readIterPool;
 		std::shared_ptr<PerfContextMetrics> perfContextMetrics;
 		int threadIndex;
+		ThreadReturnPromiseStream<std::tuple<int, const StringRef, double>>* metricPromiseStream;
 
 		explicit Reader(DB& db,
 		                CF& cf,
@@ -1295,6 +1309,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		                int threadIndex)
 		  : db(db), cf(cf), readIterPool(readIterPool), perfContextMetrics(perfContextMetrics),
 		    threadIndex(threadIndex),
+		    metricPromiseStream(new ThreadReturnPromiseStream<std::tuple<int, const StringRef, double>>()),
 		    readRangeLatencyHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
 		                                                      ROCKSDB_READRANGE_LATENCY_HISTOGRAM,
 		                                                      Histogram::Unit::microseconds)),
@@ -1374,7 +1389,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 			double readBeginTime = timer_monotonic();
 			if (a.getHistograms) {
-				readValueQueueWaitHistogram->sampleSeconds(readBeginTime - a.startTime);
+				// readValueQueueWaitHistogram->sampleSeconds(readBeginTime - a.startTime);
+				metricPromiseStream->send(
+				    std::make_tuple(threadIndex, ROCKSDB_READVALUE_QUEUEWAIT_HISTOGRAM, readBeginTime - a.startTime));
 			}
 			Optional<TraceBatch> traceBatch;
 			if (a.debugID.present()) {
@@ -1406,7 +1423,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 
 			if (a.getHistograms) {
-				readValueGetHistogram->sampleSeconds(timer_monotonic() - dbGetBeginTime);
+				// readValueGetHistogram->sampleSeconds(timer_monotonic() - dbGetBeginTime);
+				metricPromiseStream->send(
+				    std::make_tuple(threadIndex, ROCKSDB_READVALUE_GET_HISTOGRAM, timer_monotonic() - dbGetBeginTime));
 			}
 
 			if (a.debugID.present()) {
@@ -1424,8 +1443,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 			if (a.getHistograms) {
 				double currTime = timer_monotonic();
-				readValueActionHistogram->sampleSeconds(currTime - readBeginTime);
-				readValueLatencyHistogram->sampleSeconds(currTime - a.startTime);
+				// readValueActionHistogram->sampleSeconds(currTime - readBeginTime);
+				// readValueLatencyHistogram->sampleSeconds(currTime - a.startTime);
+				metricPromiseStream->send(
+				    std::make_tuple(threadIndex, ROCKSDB_READVALUE_ACTION_HISTOGRAM, currTime - readBeginTime));
+				metricPromiseStream->send(
+				    std::make_tuple(threadIndex, ROCKSDB_READVALUE_LATENCY_HISTOGRAM, currTime - a.startTime));
 			}
 			if (doPerfContextMetrics) {
 				perfContextMetrics->set(threadIndex);
@@ -1455,7 +1478,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 			double readBeginTime = timer_monotonic();
 			if (a.getHistograms) {
-				readPrefixQueueWaitHistogram->sampleSeconds(readBeginTime - a.startTime);
+				// readPrefixQueueWaitHistogram->sampleSeconds(readBeginTime - a.startTime);
+				metricPromiseStream->send(
+				    std::make_tuple(threadIndex, ROCKSDB_READPREFIX_QUEUEWAIT_HISTOGRAM, readBeginTime - a.startTime));
 			}
 			Optional<TraceBatch> traceBatch;
 			if (a.debugID.present()) {
@@ -1483,7 +1508,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			double dbGetBeginTime = a.getHistograms ? timer_monotonic() : 0;
 			auto s = db->Get(options, cf, toSlice(a.key), &value);
 			if (a.getHistograms) {
-				readPrefixGetHistogram->sampleSeconds(timer_monotonic() - dbGetBeginTime);
+				// readPrefixGetHistogram->sampleSeconds(timer_monotonic() - dbGetBeginTime);
+				metricPromiseStream->send(
+				    std::make_tuple(threadIndex, ROCKSDB_READPREFIX_GET_HISTOGRAM, timer_monotonic() - dbGetBeginTime));
 			}
 
 			if (a.debugID.present()) {
@@ -1503,8 +1530,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 			if (a.getHistograms) {
 				double currTime = timer_monotonic();
-				readPrefixActionHistogram->sampleSeconds(currTime - readBeginTime);
-				readPrefixLatencyHistogram->sampleSeconds(currTime - a.startTime);
+				// readPrefixActionHistogram->sampleSeconds(currTime - readBeginTime);
+				// readPrefixLatencyHistogram->sampleSeconds(currTime - a.startTime);
+				metricPromiseStream->send(
+				    std::make_tuple(threadIndex, ROCKSDB_READPREFIX_ACTION_HISTOGRAM, currTime - readBeginTime));
+				metricPromiseStream->send(
+				    std::make_tuple(threadIndex, ROCKSDB_READPREFIX_LATENCY_HISTOGRAM, currTime - a.startTime));
 			}
 			if (doPerfContextMetrics) {
 				perfContextMetrics->set(threadIndex);
@@ -1533,7 +1564,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 			double readBeginTime = timer_monotonic();
 			if (a.getHistograms) {
-				readRangeQueueWaitHistogram->sampleSeconds(readBeginTime - a.startTime);
+				// readRangeQueueWaitHistogram->sampleSeconds(readBeginTime - a.startTime);
+				metricPromiseStream->send(
+				    std::make_tuple(threadIndex, ROCKSDB_READRANGE_QUEUEWAIT_HISTOGRAM, readBeginTime - a.startTime));
 			}
 			if (readBeginTime - a.startTime > readRangeTimeout) {
 				TraceEvent(SevWarn, "KVSTimeout")
@@ -1554,7 +1587,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				double iterCreationBeginTime = a.getHistograms ? timer_monotonic() : 0;
 				ReadIterator readIter = readIterPool->getIterator();
 				if (a.getHistograms) {
-					readRangeNewIteratorHistogram->sampleSeconds(timer_monotonic() - iterCreationBeginTime);
+					// readRangeNewIteratorHistogram->sampleSeconds(timer_monotonic() - iterCreationBeginTime);
+					metricPromiseStream->send(std::make_tuple(threadIndex,
+					                                          ROCKSDB_READRANGE_NEWITERATOR_HISTOGRAM,
+					                                          timer_monotonic() - iterCreationBeginTime));
 				}
 				auto cursor = readIter.iter;
 				cursor->Seek(toSlice(a.keys.begin));
@@ -1582,7 +1618,10 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				double iterCreationBeginTime = a.getHistograms ? timer_monotonic() : 0;
 				ReadIterator readIter = readIterPool->getIterator();
 				if (a.getHistograms) {
-					readRangeNewIteratorHistogram->sampleSeconds(timer_monotonic() - iterCreationBeginTime);
+					// readRangeNewIteratorHistogram->sampleSeconds(timer_monotonic() - iterCreationBeginTime);
+					metricPromiseStream->send(std::make_tuple(threadIndex,
+					                                          ROCKSDB_READRANGE_NEWITERATOR_HISTOGRAM,
+					                                          timer_monotonic() - iterCreationBeginTime));
 				}
 				auto cursor = readIter.iter;
 				cursor->SeekForPrev(toSlice(a.keys.end));
@@ -1624,8 +1663,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			a.result.send(result);
 			if (a.getHistograms) {
 				double currTime = timer_monotonic();
-				readRangeActionHistogram->sampleSeconds(currTime - readBeginTime);
-				readRangeLatencyHistogram->sampleSeconds(currTime - a.startTime);
+				// readRangeActionHistogram->sampleSeconds(currTime - readBeginTime);
+				// readRangeLatencyHistogram->sampleSeconds(currTime - a.startTime);
+				metricPromiseStream->send(
+				    std::make_tuple(threadIndex, ROCKSDB_READRANGE_ACTION_HISTOGRAM, currTime - readBeginTime));
+				metricPromiseStream->send(
+				    std::make_tuple(threadIndex, ROCKSDB_READRANGE_LATENCY_HISTOGRAM, currTime - a.startTime));
 			}
 			if (doPerfContextMetrics) {
 				perfContextMetrics->set(threadIndex);
@@ -1651,6 +1694,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	FlowLock fetchSemaphore;
 	int numFetchWaiters;
 	std::shared_ptr<ReadIteratorPool> readIterPool;
+	std::vector<Future<Void>> actors;
 
 	struct Counters {
 		CounterCollection cc;
@@ -1688,12 +1732,35 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			writeThread = createGenericThreadPool();
 			readThreads = createGenericThreadPool();
 		}
-		writeThread->addThread(
-		    new Writer(db, defaultFdbCF, id, readIterPool, perfContextMetrics, SERVER_KNOBS->ROCKSDB_READ_PARALLELISM),
-		    "fdb-rocksdb-wr");
+		struct Writer* writer =
+		    new Writer(db, defaultFdbCF, id, readIterPool, perfContextMetrics, SERVER_KNOBS->ROCKSDB_READ_PARALLELISM);
+		if (SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE > 0) {
+			actors.push_back(updateHistogram(this, writer->metricPromiseStream->getFuture()));
+		}
+		writeThread->addThread(writer, "fdb-rocksdb-wr");
 		TraceEvent("RocksDBReadThreads").detail("KnobRocksDBReadParallelism", SERVER_KNOBS->ROCKSDB_READ_PARALLELISM);
 		for (unsigned i = 0; i < SERVER_KNOBS->ROCKSDB_READ_PARALLELISM; ++i) {
-			readThreads->addThread(new Reader(db, defaultFdbCF, readIterPool, perfContextMetrics, i), "fdb-rocksdb-re");
+			struct Reader* reader = new Reader(db, defaultFdbCF, readIterPool, perfContextMetrics, i);
+			if (SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE > 0) {
+				actors.push_back(updateHistogram(this, reader->metricPromiseStream->getFuture()));
+			}
+			readThreads->addThread(reader, "fdb-rocksdb-re");
+		}
+	}
+
+	ACTOR Future<Void> updateHistogram(RocksDBKeyValueStore* kvStore,
+	                                   FutureStream<std::tuple<int, const StringRef, double>> metricFutureStream) {
+		loop {
+			choose {
+				when(std::tuple<int, const StringRef, double> measure = waitNext(metricFutureStream)) {
+					const StringRef metricName = std::get<1>(measure);
+					double latency = std::get<2>(measure);
+					Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP_ZHE,
+					                        ROCKSDB_COMMIT_LATENCY_HISTOGRAM,
+					                        Histogram::Unit::microseconds)
+					    ->sampleSeconds(latency);
+				}
+			}
 		}
 	}
 
