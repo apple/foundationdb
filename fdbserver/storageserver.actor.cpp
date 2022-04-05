@@ -103,6 +103,18 @@ bool canReplyWith(Error e) {
 		return false;
 	};
 }
+
+// Checks if the key belongs to storage server private data. This is done by
+// verifying the first two bytes of the key. If the key starts with "\xff\xff"
+// which is after system keys, it is considered as the private data.
+inline bool isPrivateData(KeyRef key) {
+	if (key.startsWith(systemKeys.end)) {
+		TraceEvent(SevDebug, "FoundSystemKey").detail("Key", key);
+		return true;
+	}
+	return false;
+}
+
 } // namespace
 
 struct StorageServerBase;
@@ -271,7 +283,7 @@ struct UpdateEagerReadInfo {
 
 	void addMutation(MutationRef const& m) {
 		// SOMEDAY: Theoretically we can avoid a read if there is an earlier overlapping ClearRange
-		if (m.type == MutationRef::ClearRange && !m.param2.startsWith(systemKeys.end) &&
+		if (m.type == MutationRef::ClearRange && !isPrivateData(m.param2) &&
 		    SERVER_KNOBS->ENABLE_CLEAR_RANGE_EAGER_READS)
 			keyBegin.push_back(m.param2);
 		else if (m.type == MutationRef::CompareAndClear) {
@@ -1100,13 +1112,20 @@ public:
 
 namespace ptxn {
 
+const KeyRef SUBSCRIBED_STORAGE_TEAMS_KEY = "\xff\xff/storageserver/lastSubscribedStorageTeams"_sr;
+
 class StorageServer : public StorageServerBase {
 public:
 	std::shared_ptr<ptxn::PeekCursorBase> logCursor;
 
+	// The key used to inform this storage server the new list of storage teams.
+	KeyRef storageServerToTeamIDKey;
+
+	// The storage teams the storage server has subscribed
 	StorageServerStorageTeams storageServerStorageTeams;
 
-	const std::unordered_set<StorageTeamID>& getSubscribedStorageTeamIDs() const;
+	// Gets the storage teams the storage server has subscribed, excluding the private mutation team.
+	const std::set<StorageTeamID>& getSubscribedStorageTeamIDs() const;
 
 	StorageServer(IKeyValueStore* pKVStore,
 	              const Reference<const AsyncVar<ServerDBInfo>>& serverDBInfo,
@@ -1114,15 +1133,10 @@ public:
 	              const StorageTeamID& privateMutationsStorageTeamID_)
 	  : StorageServerBase(pKVStore, serverDBInfo, storageServerInterface),
 	    storageServerStorageTeams(privateMutationsStorageTeamID_) {}
-
-	void updateSubscribedStorageTeamIDs();
 };
 
-const std::unordered_set<StorageTeamID>& StorageServer::getSubscribedStorageTeamIDs() const {
-	ASSERT(logCursor);
-	auto ptr = dynamic_cast<merged::BroadcastedStorageTeamPeekCursorBase*>(logCursor.get());
-	ASSERT(ptr);
-	return ptr->getCursorStorageTeamIDs();
+const std::set<StorageTeamID>& StorageServer::getSubscribedStorageTeamIDs() const {
+	return storageServerStorageTeams.getStorageTeams();
 }
 
 } // namespace ptxn
@@ -4795,7 +4809,7 @@ public:
 			data->mutableData().createNewVersion(ver);
 		}
 
-		if (m.param1.startsWith(systemKeys.end)) {
+		if (isPrivateData(m.param1)) {
 			if ((m.type == MutationRef::SetValue) && m.param1.substr(1).startsWith(storageCachePrefix))
 				applyPrivateCacheData(data, m);
 			else {
@@ -5207,7 +5221,7 @@ ACTOR Future<Void> prepareEagerReadInfo(UpdateEagerReadInfo* pEagerReadInfo,
 			reader >> msg;
 			// TraceEvent(SevDebug, "SSReadingLog", pStorageServerContext->thisServerID).detail("Mutation", msg);
 
-			if (firstMutation && msg.param1.startsWith(systemKeys.end))
+			if (firstMutation && isPrivateData(msg.param1))
 				hasPrivateData = true;
 			firstMutation = false;
 
@@ -5551,7 +5565,7 @@ const StorageTeamID& getStoragePrivateMutationTeam(const ptxn::StorageServer& st
 	if (storageServerContext.storageTeamIDs.present() && storageServerContext.storageTeamIDs.get().size() == 1) {
 		return *storageServerContext.storageTeamIDs.get().begin();
 	} else {
-		return storageServerContext.thisServerID; // NOTE: Private team is same as SSID.
+		return storageServerContext.thisServerID; // NOTE: Private team is the same to SSID.
 	}
 }
 
@@ -5587,13 +5601,17 @@ std::vector<ptxn::TLogInterfaceBase*> getTLogInterfaceByStorageTeamID(const Serv
 
 void initializeUpdateCursor(ptxn::StorageServer& storageServerContext) {
 	auto referencedServerDBInfo = storageServerContext.db;
+
 	storageServerContext.logCursor = std::make_shared<merged::OrderedMutableTeamPeekCursor>(
 	    storageServerContext.thisServerID,
-	    getStoragePrivateMutationTeam(storageServerContext),
+	    storageServerContext.storageServerStorageTeams,
 	    [referencedServerDBInfo](const StorageTeamID& storageTeamID) -> auto {
 		    return getTLogInterfaceByStorageTeamID(referencedServerDBInfo->get(), storageTeamID);
-	    },
-	    storageServerContext.version.get() + 1);
+	    });
+
+	storageServerContext.storageServerToTeamIDKey =
+	    std::dynamic_pointer_cast<merged::OrderedMutableTeamPeekCursor>(storageServerContext.logCursor)
+	        ->getStorageServerToTeamIDKey();
 }
 
 ACTOR Future<Void> peekFromRemote(std::shared_ptr<ptxn::StorageServer> storageServerContext,
@@ -5696,7 +5714,7 @@ void PrepareEagerReadInfoMessageHandler::spanContextHandler(const SpanContextMes
 }
 
 void PrepareEagerReadInfoMessageHandler::mutationRefHandler(const MutationRef& mutationRef) {
-	hasPrivateData = firstMutation && mutationRef.param1.startsWith(systemKeys.end);
+	hasPrivateData = firstMutation && isPrivateData(mutationRef.param1);
 	firstMutation = false;
 
 	if (mutationRef.param1 == lastEpochEndPrivateKey) {
@@ -5748,7 +5766,7 @@ ACTOR Future<Void> prepareEagerReadInfo(UpdateEagerReadInfo* pEagerReadInfo,
 class ApplyMutationsFromCursorMessageHandler : public MessageHandlerBase {
 private:
 	SpanID& spanContext;
-	StorageServerBase* pStorageServerContext;
+	ptxn::StorageServer* pStorageServerContext;
 	int& mutationBytes;
 	Version& version;
 	StorageUpdater& storageUpdater;
@@ -5766,7 +5784,7 @@ protected:
 
 public:
 	ApplyMutationsFromCursorMessageHandler(SpanID& spanContext_,
-	                                       StorageServerBase* pStorageServerContext_,
+	                                       ptxn::StorageServer* pStorageServerContext_,
 	                                       int& mutationBytes_,
 	                                       Version& version_,
 	                                       StorageUpdater& storageUpdater_)
@@ -5838,6 +5856,10 @@ void ApplyMutationsFromCursorMessageHandler::mutationRefHandler(const MutationRe
 	++pStorageServerContext->counters.mutations;
 
 	::details::updateMutationTypeCounter(pStorageServerContext, mutationRef.type);
+
+	if (mutationRef.param1 == pStorageServerContext->storageServerToTeamIDKey) {
+		pStorageServerContext->storageServerStorageTeams = StorageServerStorageTeams(mutationRef.param2);
+	}
 
 	return;
 }
