@@ -438,6 +438,7 @@ ACTOR Future<UID> pickWorkerForAssign(Reference<BlobManagerData> bmData) {
 ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
                                      RangeAssignment assignment,
                                      Optional<UID> workerID,
+                                     int64_t epoch,
                                      int64_t seqNo) {
 	// WorkerId is set, except in case of assigning to any worker. Then we pick the worker to assign to in here
 
@@ -468,7 +469,7 @@ ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
 		           assignment.isAssign ? "assigning" : "revoking",
 		           assignment.keyRange.begin.printable(),
 		           assignment.keyRange.end.printable(),
-		           bmData->epoch,
+		           epoch,
 		           seqNo,
 		           workerID.get().toString());
 	}
@@ -481,7 +482,7 @@ ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
 			AssignBlobRangeRequest req;
 			req.keyRange = KeyRangeRef(StringRef(req.arena, assignment.keyRange.begin),
 			                           StringRef(req.arena, assignment.keyRange.end));
-			req.managerEpoch = bmData->epoch;
+			req.managerEpoch = epoch;
 			req.managerSeqno = seqNo;
 			req.type = assignment.assign.get().type;
 
@@ -497,7 +498,7 @@ ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
 			RevokeBlobRangeRequest req;
 			req.keyRange = KeyRangeRef(StringRef(req.arena, assignment.keyRange.begin),
 			                           StringRef(req.arena, assignment.keyRange.end));
-			req.managerEpoch = bmData->epoch;
+			req.managerEpoch = epoch;
 			req.managerSeqno = seqNo;
 			req.dispose = assignment.revoke.get().dispose;
 
@@ -637,10 +638,10 @@ ACTOR Future<Void> rangeAssigner(Reference<BlobManagerData> bmData) {
 				}
 				count++;
 			}
-			ASSERT(count == 1);
 			if (skip) {
 				continue;
 			}
+			ASSERT(count == 1);
 
 			if (assignment.worker.present() && assignment.worker.get().isValid()) {
 				if (BM_DEBUG) {
@@ -653,7 +654,7 @@ ACTOR Future<Void> rangeAssigner(Reference<BlobManagerData> bmData) {
 
 				bmData->workerAssignments.insert(assignment.keyRange, workerId);
 				bmData->assignsInProgress.insert(assignment.keyRange,
-				                                 doRangeAssignment(bmData, assignment, workerId, seqNo));
+				                                 doRangeAssignment(bmData, assignment, workerId, bmData->epoch, seqNo));
 				// If we know about the worker and this is not a continue, then this is a new range for the worker
 				if (bmData->workerStats.count(workerId) &&
 				    assignment.assign.get().type != AssignRequestType::Continue) {
@@ -662,8 +663,8 @@ ACTOR Future<Void> rangeAssigner(Reference<BlobManagerData> bmData) {
 			} else {
 				// Ensure the key boundaries are updated before we pick a worker
 				bmData->workerAssignments.insert(assignment.keyRange, UID());
-				bmData->assignsInProgress.insert(assignment.keyRange,
-				                                 doRangeAssignment(bmData, assignment, Optional<UID>(), seqNo));
+				bmData->assignsInProgress.insert(
+				    assignment.keyRange, doRangeAssignment(bmData, assignment, Optional<UID>(), bmData->epoch, seqNo));
 			}
 
 		} else {
@@ -677,7 +678,8 @@ ACTOR Future<Void> rangeAssigner(Reference<BlobManagerData> bmData) {
 				if (existingRange.range() == assignment.keyRange && existingRange.cvalue() == assignment.worker.get()) {
 					bmData->workerAssignments.insert(assignment.keyRange, UID());
 				}
-				bmData->addActor.send(doRangeAssignment(bmData, assignment, assignment.worker.get(), seqNo));
+				bmData->addActor.send(
+				    doRangeAssignment(bmData, assignment, assignment.worker.get(), bmData->epoch, seqNo));
 			} else {
 				auto currentAssignments = bmData->workerAssignments.intersectingRanges(assignment.keyRange);
 				for (auto& it : currentAssignments) {
@@ -693,7 +695,7 @@ ACTOR Future<Void> rangeAssigner(Reference<BlobManagerData> bmData) {
 					}
 
 					// revoke the range for the worker that owns it, not the worker specified in the revoke
-					bmData->addActor.send(doRangeAssignment(bmData, assignment, it.value(), seqNo));
+					bmData->addActor.send(doRangeAssignment(bmData, assignment, it.value(), bmData->epoch, seqNo));
 				}
 				bmData->workerAssignments.insert(assignment.keyRange, UID());
 			}
@@ -1356,26 +1358,6 @@ ACTOR Future<Void> monitorBlobWorkerStatus(Reference<BlobManagerData> bmData, Bl
 				// back is to split the range.
 				ASSERT(rep.doSplit);
 
-				// only evaluate for split if this worker currently owns the granule in this blob manager's mapping
-				auto currGranuleAssignment = bmData->workerAssignments.rangeContaining(rep.granuleRange.begin);
-				if (!(currGranuleAssignment.begin() == rep.granuleRange.begin &&
-				      currGranuleAssignment.end() == rep.granuleRange.end &&
-				      currGranuleAssignment.cvalue() == bwInterf.id())) {
-					if (BM_DEBUG) {
-						fmt::print("Manager {0} ignoring status from BW {1} for granule [{2} - {3}) since BW {4} owns "
-						           "[{5} - {6}).\n",
-						           bmData->epoch,
-						           bwInterf.id().toString().substr(0, 5),
-						           rep.granuleRange.begin.printable(),
-						           rep.granuleRange.end.printable(),
-						           currGranuleAssignment.cvalue().toString().substr(0, 5),
-						           currGranuleAssignment.begin().printable(),
-						           currGranuleAssignment.end().printable());
-					}
-					// FIXME: could send revoke request
-					continue;
-				}
-
 				// FIXME: We will need to go over all splits in the range once we're doing merges, instead of first one
 				auto lastSplitEval = bmData->splitEvaluations.rangeContaining(rep.granuleRange.begin);
 				if (rep.granuleRange.begin == lastSplitEval.begin() && rep.granuleRange.end == lastSplitEval.end() &&
@@ -1386,46 +1368,67 @@ ACTOR Future<Void> monitorBlobWorkerStatus(Reference<BlobManagerData> bmData, Bl
 						           rep.granuleRange.begin.printable(),
 						           rep.granuleRange.end.printable());
 					}
-				} else {
-					ASSERT(lastSplitEval.cvalue().epoch < rep.epoch ||
-					       (lastSplitEval.cvalue().epoch == rep.epoch && lastSplitEval.cvalue().seqno < rep.seqno));
-					if (lastSplitEval.cvalue().inProgress.isValid() && !lastSplitEval.cvalue().inProgress.isReady()) {
-						TEST(true); // racing BM splits
-						// For example, one worker asked BM to split, then died, granule was moved, new worker asks to
-						// split on recovery. We need to ensure that they are semantically the same split.
-						// We will just rely on the in-progress split to finish
-						if (BM_DEBUG) {
-							fmt::print("Manager {0} got split request for [{1} - {2}) @ ({3}, {4}), but already in "
-							           "progress from [{5} - {6}) @ ({7}, {8})\n",
-							           bmData->epoch,
-							           rep.granuleRange.begin.printable().c_str(),
-							           rep.granuleRange.end.printable().c_str(),
-							           rep.epoch,
-							           rep.seqno,
-							           lastSplitEval.begin().printable().c_str(),
-							           lastSplitEval.end().printable().c_str(),
-							           lastSplitEval.cvalue().epoch,
-							           lastSplitEval.cvalue().seqno);
-						}
-						// ignore the request, they will retry
-					} else {
-						if (BM_DEBUG) {
-							fmt::print("Manager {0} evaluating [{1} - {2}) @ ({3}, {4}) for split\n",
-							           bmData->epoch,
-							           rep.granuleRange.begin.printable().c_str(),
-							           rep.granuleRange.end.printable().c_str(),
-							           rep.epoch,
-							           rep.seqno);
-						}
-						Future<Void> doSplitEval = maybeSplitRange(bmData,
-						                                           bwInterf.id(),
-						                                           rep.granuleRange,
-						                                           rep.granuleID,
-						                                           rep.startVersion,
-						                                           rep.writeHotSplit);
-						bmData->splitEvaluations.insert(rep.granuleRange,
-						                                SplitEvaluation(rep.epoch, rep.seqno, doSplitEval));
+				} else if (!(lastSplitEval.cvalue().epoch < rep.epoch ||
+				             (lastSplitEval.cvalue().epoch == rep.epoch && lastSplitEval.cvalue().seqno < rep.seqno))) {
+					TEST(true); // BM got out-of-date split request
+					if (BM_DEBUG) {
+						fmt::print(
+						    "Manager {0} ignoring status from BW {1} for granule [{2} - {3}) since it already processed"
+						    "[{4} - {5}) @ ({6}, {7}).\n",
+						    bmData->epoch,
+						    bwInterf.id().toString().substr(0, 5),
+						    rep.granuleRange.begin.printable(),
+						    rep.granuleRange.end.printable(),
+						    lastSplitEval.begin().printable(),
+						    lastSplitEval.end().printable(),
+						    lastSplitEval.cvalue().epoch,
+						    lastSplitEval.cvalue().seqno);
 					}
+
+					// revoke range from out-of-date worker, but bypass rangeAssigner and hack (epoch, seqno) to be
+					// (requesting epoch, requesting seqno + 1) to ensure no race with then reassigning the range to the
+					// worker at a later version
+					RangeAssignment revokeOld;
+					revokeOld.isAssign = false;
+					revokeOld.worker = bwInterf.id();
+					revokeOld.keyRange = rep.granuleRange;
+					revokeOld.revoke = RangeRevokeData(false);
+
+					bmData->addActor.send(
+					    doRangeAssignment(bmData, revokeOld, bwInterf.id(), rep.epoch, rep.seqno + 1));
+				} else if (lastSplitEval.cvalue().inProgress.isValid() &&
+				           !lastSplitEval.cvalue().inProgress.isReady()) {
+					TEST(true); // racing BM splits
+					// For example, one worker asked BM to split, then died, granule was moved, new worker asks to
+					// split on recovery. We need to ensure that they are semantically the same split.
+					// We will just rely on the in-progress split to finish
+					if (BM_DEBUG) {
+						fmt::print("Manager {0} got split request for [{1} - {2}) @ ({3}, {4}), but already in "
+						           "progress from [{5} - {6}) @ ({7}, {8})\n",
+						           bmData->epoch,
+						           rep.granuleRange.begin.printable().c_str(),
+						           rep.granuleRange.end.printable().c_str(),
+						           rep.epoch,
+						           rep.seqno,
+						           lastSplitEval.begin().printable().c_str(),
+						           lastSplitEval.end().printable().c_str(),
+						           lastSplitEval.cvalue().epoch,
+						           lastSplitEval.cvalue().seqno);
+					}
+					// ignore the request, they will retry
+				} else {
+					if (BM_DEBUG) {
+						fmt::print("Manager {0} evaluating [{1} - {2}) @ ({3}, {4}) for split\n",
+						           bmData->epoch,
+						           rep.granuleRange.begin.printable().c_str(),
+						           rep.granuleRange.end.printable().c_str(),
+						           rep.epoch,
+						           rep.seqno);
+					}
+					Future<Void> doSplitEval = maybeSplitRange(
+					    bmData, bwInterf.id(), rep.granuleRange, rep.granuleID, rep.startVersion, rep.writeHotSplit);
+					bmData->splitEvaluations.insert(rep.granuleRange,
+					                                SplitEvaluation(rep.epoch, rep.seqno, doSplitEval));
 				}
 			}
 		} catch (Error& e) {

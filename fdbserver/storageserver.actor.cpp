@@ -5063,13 +5063,50 @@ ACTOR Future<Version> fetchChangeFeed(StorageServer* data,
 
 ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
                                                        KeyRange keys,
-                                                       Version fetchVersion,
-                                                       PromiseStream<Key> removals) {
+                                                       PromiseStream<Key> removals,
+                                                       UID fetchKeysID) {
+
+	// Wait for current TLog batch to finish to ensure that we're fetching metadata at a version >= the version of the
+	// ChangeServerKeys mutation. This guarantees we don't miss any metadata between the previous batch's version
+	// (data->version) and the mutation version.
+	wait(data->version.whenAtLeast(data->version.get() + 1));
+	state Version fetchVersion = fetchVersion = data->version.get();
+
 	TraceEvent(SevDebug, "FetchChangeFeedMetadata", data->thisServerID)
 	    .detail("Range", keys.toString())
-	    .detail("FetchVersion", fetchVersion);
-	state std::vector<OverlappingChangeFeedEntry> feeds =
-	    wait(data->cx->getOverlappingChangeFeeds(keys, fetchVersion + 1));
+	    .detail("FetchVersion", fetchVersion)
+	    .detail("FKID", fetchKeysID);
+
+	// before fetching feeds from other SS's, refresh any feeds we already have that are being marked as removed
+	auto ranges = data->keyChangeFeed.intersectingRanges(keys);
+	for (auto& r : ranges) {
+		for (auto& cfInfo : r.value()) {
+			auto feedCleanup = data->changeFeedCleanupDurable.find(cfInfo->id);
+			if (feedCleanup != data->changeFeedCleanupDurable.end() && cfInfo->removing) {
+				TEST(true); // re-fetching feed scheduled for deletion! Un-mark it as removing
+
+				cfInfo->removing = false;
+				// reset fetch versions because everything previously fetched was cleaned up
+				cfInfo->fetchVersion = invalidVersion;
+				cfInfo->durableFetchVersion = NotifiedVersion();
+
+				// Since cleanup put a mutation in the log to delete the change feed data, put one in the log to restore
+				// it
+				// We may just want to refactor this so updateStorage does explicit deletes based on
+				// changeFeedCleanupDurable and not use the mutation log at all for the change feed metadata cleanup.
+				// Then we wouldn't have to reset anything here
+				auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
+				data->addMutationToMutationLog(
+				    mLV,
+				    MutationRef(MutationRef::SetValue,
+				                persistChangeFeedKeys.begin.toString() + cfInfo->id.toString(),
+				                changeFeedSSValue(cfInfo->range, cfInfo->emptyVersion + 1, cfInfo->stopVersion)));
+			}
+		}
+	}
+
+	std::vector<OverlappingChangeFeedEntry> feeds = wait(data->cx->getOverlappingChangeFeeds(keys, fetchVersion + 1));
+	// handle change feeds removed while fetching overlapping
 	while (removals.getFuture().isReady()) {
 		Key remove = waitNext(removals.getFuture());
 		for (int i = 0; i < feeds.size(); i++) {
@@ -5078,6 +5115,7 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 			}
 		}
 	}
+
 	std::vector<Key> feedIds;
 	feedIds.reserve(feeds.size());
 	// create change feed metadata if it does not exist
@@ -5095,7 +5133,8 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 		    .detail("EmptyVersion", cfEntry.emptyVersion)
 		    .detail("StopVersion", cfEntry.stopVersion)
 		    .detail("Existing", existing)
-		    .detail("CleanupPendingVersion", cleanupPending ? cleanupEntry->second : invalidVersion);
+		    .detail("CleanupPendingVersion", cleanupPending ? cleanupEntry->second : invalidVersion)
+		    .detail("FKID", fkId);
 
 		bool addMutationToLog = false;
 		Reference<ChangeFeedInfo> changeFeedInfo;
@@ -5120,30 +5159,20 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 			addMutationToLog = true;
 		} else {
 			changeFeedInfo = existingEntry->second;
-			auto feedCleanup = data->changeFeedCleanupDurable.find(cfEntry.rangeId);
 
+			// we checked all feeds we already owned in this range at the start to reset them if they were removing, and
+			// this actor would have been cancelled if a later remove happened
+			ASSERT(!changeFeedInfo->removing);
 			if (cfEntry.stopVersion < changeFeedInfo->stopVersion) {
 				TEST(true); // Change feed updated stop version from fetch metadata
 				changeFeedInfo->stopVersion = cfEntry.stopVersion;
 				addMutationToLog = true;
 			}
 
-			if (feedCleanup != data->changeFeedCleanupDurable.end() && changeFeedInfo->removing) {
-				TEST(true); // re-fetching feed scheduled for deletion! Un-mark it as removing
-				if (cfEntry.emptyVersion < data->version.get()) {
-					changeFeedInfo->emptyVersion = cfEntry.emptyVersion;
-				}
-
-				changeFeedInfo->removing = false;
-				// reset fetch versions because everything previously fetched was cleaned up
-				changeFeedInfo->fetchVersion = invalidVersion;
-				changeFeedInfo->durableFetchVersion = NotifiedVersion();
-
-				// Since cleanup put a mutation in the log to delete the change feed data, put one in the log to restore
-				// it
-				// We may just want to refactor this so updateStorage does explicit deletes based on
-				// changeFeedCleanupDurable and not use the mutation log at all for the change feed metadata cleanup.
-				// Then we wouldn't have to reset anything here
+			// don't update empty version past SS version if SS is behind, it can cause issues
+			if (cfEntry.emptyVersion < data->version.get() && cfEntry.emptyVersion > changeFeedInfo->emptyVersion) {
+				TEST(true); // Change feed updated empty version from fetch metadata
+				changeFeedInfo->emptyVersion = cfEntry.emptyVersion;
 				addMutationToLog = true;
 			}
 		}
@@ -5283,8 +5312,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 		state PromiseStream<Key> removals;
 		data->changeFeedRemovals[fetchKeysID] = removals;
-		state Future<std::vector<Key>> fetchCFMetadata =
-		    fetchChangeFeedMetadata(data, keys, data->version.get(), removals);
+		state Future<std::vector<Key>> fetchCFMetadata = fetchChangeFeedMetadata(data, keys, removals, fetchKeysID);
 
 		validate(data);
 
@@ -5940,7 +5968,6 @@ void changeServerKeys(StorageServer* data,
 
 				auto feed = data->uidChangeFeed.find(f.first);
 				if (feed != data->uidChangeFeed.end()) {
-					feed->second->emptyVersion = version - 1;
 					feed->second->removing = true;
 					feed->second->moved(feed->second->range);
 					feed->second->newMutations.trigger();

@@ -756,7 +756,11 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData>
 				           bytesRead);
 			}
 			state Error err = e;
-			wait(tr->onError(e));
+			if (e.code() == error_code_server_overloaded) {
+				wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
+			} else {
+				wait(tr->onError(e));
+			}
 			retries++;
 			TEST(true); // Granule initial snapshot failed
 			// FIXME: why can't we supress error event?
@@ -1037,10 +1041,14 @@ static void handleCompletedDeltaFile(Reference<BlobWorkerData> bwData,
 // if we get an i/o error updating files, or a rollback, reassign the granule to ourselves and start fresh
 static bool granuleCanRetry(const Error& e) {
 	switch (e.code()) {
-	case error_code_please_reboot:
 	case error_code_io_error:
 	case error_code_io_timeout:
+	// FIXME: handle connection errors in tighter retry loop around individual files.
+	// FIXME: if these requests fail at a high enough rate, the whole worker should be marked as unhealthy and its
+	// granules should be moved away, as there may be some problem with this host contacting blob storage
 	case error_code_http_request_failed:
+	case error_code_connection_failed:
+	case error_code_lookup_failed: // dns
 		return true;
 	default:
 		return false;
@@ -1119,10 +1127,15 @@ static Version doGranuleRollback(Reference<GranuleMetadata> metadata,
 		}
 		metadata->pendingDeltaVersion = cfRollbackVersion;
 		if (BW_DEBUG) {
-			fmt::print("[{0} - {1}) rollback discarding all {2} in-memory mutations\n",
+			fmt::print("[{0} - {1}) rollback discarding all {2} in-memory mutations",
 			           metadata->keyRange.begin.printable(),
 			           metadata->keyRange.end.printable(),
 			           metadata->currentDeltas.size());
+			if (metadata->currentDeltas.size()) {
+				fmt::print(
+				    " {0} - {1}", metadata->currentDeltas.front().version, metadata->currentDeltas.back().version);
+			}
+			fmt::print("\n");
 		}
 
 		// discard all in-memory mutations
@@ -1150,6 +1163,8 @@ static Version doGranuleRollback(Reference<GranuleMetadata> metadata,
 
 		// FIXME: could binary search?
 		int mIdx = metadata->currentDeltas.size() - 1;
+		Version firstDiscarded = invalidVersion;
+		Version lastDiscarded = invalidVersion;
 		while (mIdx >= 0) {
 			if (metadata->currentDeltas[mIdx].version <= rollbackVersion) {
 				break;
@@ -1157,19 +1172,37 @@ static Version doGranuleRollback(Reference<GranuleMetadata> metadata,
 			for (auto& m : metadata->currentDeltas[mIdx].mutations) {
 				metadata->bufferedDeltaBytes -= m.totalSize();
 			}
+			if (firstDiscarded == invalidVersion) {
+				firstDiscarded = metadata->currentDeltas[mIdx].version;
+			}
+			lastDiscarded = metadata->currentDeltas[mIdx].version;
 			mIdx--;
 		}
-		mIdx++;
+
 		if (BW_DEBUG) {
-			fmt::print("[{0} - {1}) rollback discarding {2} in-memory mutations, {3} mutations and {4} bytes left\n",
+			fmt::print("[{0} - {1}) rollback discarding {2} in-memory mutations",
 			           metadata->keyRange.begin.printable(),
 			           metadata->keyRange.end.printable(),
-			           metadata->currentDeltas.size() - mIdx,
-			           mIdx,
-			           metadata->bufferedDeltaBytes);
+			           metadata->currentDeltas.size() - mIdx - 1);
+
+			if (firstDiscarded != invalidVersion) {
+				fmt::print(" {0} - {1}", lastDiscarded, firstDiscarded);
+			}
+
+			fmt::print(", {0} mutations", mIdx);
+			if (mIdx >= 0) {
+				fmt::print(
+				    " ({0} - {1})", metadata->currentDeltas.front().version, metadata->currentDeltas[mIdx].version);
+			}
+			fmt::print(" and {0} bytes left\n", metadata->bufferedDeltaBytes);
 		}
 
-		metadata->currentDeltas.resize(metadata->currentDeltas.arena(), mIdx);
+		if (mIdx < 0) {
+			metadata->currentDeltas = Standalone<GranuleDeltas>();
+			metadata->bufferedDeltaBytes = 0;
+		} else {
+			metadata->currentDeltas.resize(metadata->currentDeltas.arena(), mIdx + 1);
+		}
 
 		// delete all deltas in rollback range, but we can optimize here to just skip the uncommitted mutations
 		// directly and immediately pop the rollback out of inProgress to completed
@@ -1459,8 +1492,16 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 						}
 						ASSERT(mutations.front().version > metadata->bufferedDeltaVersion);
 
-						// If this assert trips we should have gotten change_feed_popped from SS and didn't
-						ASSERT(mutations.front().version >= metadata->activeCFData.get()->popVersion);
+						// Rare race from merge cursor where no individual server detected popped in their response
+						if (mutations.front().version < metadata->activeCFData.get()->popVersion) {
+							TEST(true); // Blob Worker detected popped instead of change feed
+							TraceEvent("BlobWorkerChangeFeedPopped", bwData->id)
+							    .detail("Granule", metadata->keyRange)
+							    .detail("GranuleID", startState.granuleID)
+							    .detail("MutationVersion", mutations.front().version)
+							    .detail("PopVersion", metadata->activeCFData.get()->popVersion);
+							throw change_feed_popped();
+						}
 					}
 					when(wait(inFlightFiles.empty() ? Never() : success(inFlightFiles.front().future))) {}
 				}
@@ -1623,6 +1664,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 									metadata->activeCFData.set(cfData);
 
 									justDidRollback = true;
+									lastDeltaVersion = cfRollbackVersion;
 									break;
 								}
 							}
@@ -1841,6 +1883,12 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			}
 		}
 	} catch (Error& e) {
+		if (BW_DEBUG) {
+			fmt::print("Granule file updater for [{0} - {1}) got error {2}, exiting\n",
+			           metadata->keyRange.begin.printable(),
+			           metadata->keyRange.end.printable(),
+			           e.name());
+		}
 		// Free last change feed data
 		metadata->activeCFData.set(Reference<ChangeFeedData>());
 
@@ -1871,12 +1919,6 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			return Void();
 		}
 		++bwData->stats.granuleUpdateErrors;
-		if (BW_DEBUG) {
-			fmt::print("Granule file updater for [{0} - {1}) got error {2}, exiting\n",
-			           metadata->keyRange.begin.printable(),
-			           metadata->keyRange.end.printable(),
-			           e.name());
-		}
 
 		if (granuleCanRetry(e)) {
 			TEST(true); // Granule close and re-open on error

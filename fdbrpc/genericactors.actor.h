@@ -225,6 +225,8 @@ void endStreamOnDisconnect(Future<Void> signal,
 				wait(signal || stream.onConnected());
 			}
 		}
+		// Notify BEFORE dropping last reference, causing broken_promise to send on stream before destructor is called
+		stream.notifyFailed();
 	}
 }
 
