@@ -5105,7 +5105,8 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 		}
 	}
 
-	std::vector<OverlappingChangeFeedEntry> feeds = wait(data->cx->getOverlappingChangeFeeds(keys, fetchVersion + 1));
+	state std::vector<OverlappingChangeFeedEntry> feeds =
+	    wait(data->cx->getOverlappingChangeFeeds(keys, fetchVersion + 1));
 	// handle change feeds removed while fetching overlapping
 	while (removals.getFuture().isReady()) {
 		Key remove = waitNext(removals.getFuture());
@@ -5134,7 +5135,7 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 		    .detail("StopVersion", cfEntry.stopVersion)
 		    .detail("Existing", existing)
 		    .detail("CleanupPendingVersion", cleanupPending ? cleanupEntry->second : invalidVersion)
-		    .detail("FKID", fkId);
+		    .detail("FKID", fetchKeysID);
 
 		bool addMutationToLog = false;
 		Reference<ChangeFeedInfo> changeFeedInfo;
