@@ -597,10 +597,10 @@ ACTOR Future<Void> rangeAssigner(Reference<BlobManagerData> bmData) {
 				}
 				count++;
 			}
-			ASSERT(count == 1);
 			if (skip) {
 				continue;
 			}
+			ASSERT(count == 1);
 
 			if (assignment.worker.present() && assignment.worker.get().isValid()) {
 				if (BM_DEBUG) {
