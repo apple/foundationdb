@@ -36,10 +36,10 @@ struct SpanContextMessage {
 	// never be mistaken for another message. See LogProtocolMessage.h for more
 	// information.
 
-	SpanID spanContext;
+	SpanContext spanContext;
 
 	SpanContextMessage() {}
-	SpanContextMessage(SpanID const& spanContext) : spanContext(spanContext) {}
+	SpanContextMessage(SpanContext const& spanContext) : spanContext(spanContext) {}
 
 	std::string toString() const {
 		return format(

@@ -190,7 +190,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	                     Version knownCommittedVersion,
 	                     Version minKnownCommittedVersion,
 	                     LogPushData& data,
-	                     SpanID const& spanContext,
+	                     SpanContext const& spanContext,
 	                     Optional<UID> debugID) final;
 
 	Reference<IPeekCursor> peekAll(UID dbgid, Version begin, Version end, Tag tag, bool parallelGetMore);

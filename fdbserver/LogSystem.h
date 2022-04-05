@@ -518,7 +518,7 @@ struct ILogSystem {
 	                             Version knownCommittedVersion,
 	                             Version minKnownCommittedVersion,
 	                             LogPushData& data,
-	                             SpanID const& spanContext,
+	                             SpanContext const& spanContext,
 	                             Optional<UID> debugID = Optional<UID>()) = 0;
 	// Waits for the version number of the bundle (in this epoch) to be prevVersion (i.e. for all pushes ordered
 	// earlier) Puts the given messages into the bundle, each with the given tags, and with message versions (version,
@@ -759,7 +759,7 @@ struct LogPushData : NonCopyable {
 	}
 
 	// Add transaction info to be written before the first mutation in the transaction.
-	void addTransactionInfo(SpanID const& context);
+	void addTransactionInfo(SpanContext const& context);
 
 	void writeMessage(StringRef rawMessageWithoutLength, bool usePreviousLocations);
 
@@ -788,7 +788,7 @@ private:
 	// field.
 	std::unordered_set<int> writtenLocations;
 	uint32_t subsequence;
-	SpanID spanContext;
+	SpanContext spanContext;
 
 	// Writes transaction info to the message stream at the given location if
 	// it has not already been written (for the current transaction). Returns

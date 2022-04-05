@@ -87,7 +87,7 @@ public:
 private:
 	// The following variables are incoming parameters
 
-	const SpanID& spanContext;
+	const SpanContext& spanContext;
 
 	const UID& dbgid;
 

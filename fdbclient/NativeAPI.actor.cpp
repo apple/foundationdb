@@ -774,7 +774,7 @@ ACTOR Future<Void> assertFailure(GrvProxyInterface remote, Future<ErrorOr<GetRea
 
 Future<Void> attemptGRVFromOldProxies(std::vector<GrvProxyInterface> oldProxies,
                                       std::vector<GrvProxyInterface> newProxies) {
-	Span span(deterministicRandom()->randomUniqueID(), "VerifyCausalReadRisky"_loc);
+	Span span("VerifyCausalReadRisky"_loc);
 	std::vector<Future<Void>> replies;
 	replies.reserve(oldProxies.size());
 	GetReadVersionRequest req(
@@ -2681,13 +2681,13 @@ void updateTssMappings(Database cx, const GetKeyServerLocationsReply& reply) {
 ACTOR Future<KeyRangeLocationInfo> getKeyLocation_internal(Database cx,
                                                            Optional<TenantName> tenant,
                                                            Key key,
-                                                           SpanID spanID,
+                                                           SpanContext spanContext,
                                                            Optional<UID> debugID,
                                                            UseProvisionalProxies useProvisionalProxies,
                                                            Reverse isBackward,
                                                            Version version) {
 
-	state Span span("NAPI:getKeyLocation"_loc, spanID);
+	state Span span("NAPI:getKeyLocation"_loc, spanContext);
 	if (isBackward) {
 		ASSERT(key != allKeys.begin && key <= allKeys.end);
 	} else {
@@ -2775,7 +2775,7 @@ Future<KeyRangeLocationInfo> getKeyLocation(Database const& cx,
                                             Optional<TenantName> const& tenant,
                                             Key const& key,
                                             F StorageServerInterface::*member,
-                                            SpanID spanID,
+                                            SpanContext spanContext,
                                             Optional<UID> debugID,
                                             UseProvisionalProxies useProvisionalProxies,
                                             Reverse isBackward,
@@ -2783,7 +2783,7 @@ Future<KeyRangeLocationInfo> getKeyLocation(Database const& cx,
 	// we first check whether this range is cached
 	Optional<KeyRangeLocationInfo> locationInfo = cx->getCachedLocation(tenant, key, isBackward);
 	if (!locationInfo.present()) {
-		return getKeyLocation_internal(cx, tenant, key, spanID, debugID, useProvisionalProxies, isBackward, version);
+		return getKeyLocation_internal(cx, tenant, key, spanContext, debugID, useProvisionalProxies, isBackward, version);
 	}
 
 	bool onlyEndpointFailedAndNeedRefresh = false;
@@ -2797,7 +2797,7 @@ Future<KeyRangeLocationInfo> getKeyLocation(Database const& cx,
 		cx->invalidateCache(locationInfo.get().tenantEntry.prefix, key);
 
 		// Refresh the cache with a new getKeyLocations made to proxies.
-		return getKeyLocation_internal(cx, tenant, key, spanID, debugID, useProvisionalProxies, isBackward, version);
+		return getKeyLocation_internal(cx, tenant, key, spanContext, debugID, useProvisionalProxies, isBackward, version);
 	}
 
 	return locationInfo.get();
@@ -2814,7 +2814,7 @@ Future<KeyRangeLocationInfo> getKeyLocation(Reference<TransactionState> trState,
 	                        useTenant ? trState->tenant() : Optional<TenantName>(),
 	                        key,
 	                        member,
-	                        trState->spanID,
+	                        trState->spanContext,
 	                        trState->debugID,
 	                        trState->useProvisionalProxies,
 	                        isBackward,
@@ -2836,11 +2836,11 @@ ACTOR Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations_internal(
     KeyRange keys,
     int limit,
     Reverse reverse,
-    SpanID spanID,
+    SpanContext spanContext,
     Optional<UID> debugID,
     UseProvisionalProxies useProvisionalProxies,
     Version version) {
-	state Span span("NAPI:getKeyRangeLocations"_loc, spanID);
+	state Span span("NAPI:getKeyRangeLocations"_loc, spanContext);
 	if (debugID.present())
 		g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getKeyLocations.Before");
 
@@ -2909,7 +2909,7 @@ Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations(Database const& c
                                                                int limit,
                                                                Reverse reverse,
                                                                F StorageServerInterface::*member,
-                                                               SpanID const& spanID,
+                                                               SpanContext const& spanContext,
                                                                Optional<UID> const& debugID,
                                                                UseProvisionalProxies useProvisionalProxies,
                                                                Version version) {
@@ -2919,7 +2919,7 @@ Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations(Database const& c
 	std::vector<KeyRangeLocationInfo> locations;
 	if (!cx->getCachedLocations(tenant, keys, locations, limit, reverse)) {
 		return getKeyRangeLocations_internal(
-		    cx, tenant, keys, limit, reverse, spanID, debugID, useProvisionalProxies, version);
+		    cx, tenant, keys, limit, reverse, spanContext, debugID, useProvisionalProxies, version);
 	}
 
 	bool foundFailed = false;
@@ -2940,7 +2940,7 @@ Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations(Database const& c
 	if (foundFailed) {
 		// Refresh the cache with a new getKeyRangeLocations made to proxies.
 		return getKeyRangeLocations_internal(
-		    cx, tenant, keys, limit, reverse, spanID, debugID, useProvisionalProxies, version);
+		    cx, tenant, keys, limit, reverse, spanContext, debugID, useProvisionalProxies, version);
 	}
 
 	return locations;
@@ -2960,7 +2960,7 @@ Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations(Reference<Transac
 	                              limit,
 	                              reverse,
 	                              member,
-	                              trState->spanID,
+	                              trState->spanContext,
 	                              trState->debugID,
 	                              trState->useProvisionalProxies,
 	                              version);
@@ -2989,7 +2989,7 @@ ACTOR Future<Void> warmRange_impl(Reference<TransactionState> trState, KeyRange 
 		                                       keys,
 		                                       CLIENT_KNOBS->WARM_RANGE_SHARD_LIMIT,
 		                                       Reverse::False,
-		                                       trState->spanID,
+		                                       trState->spanContext,
 		                                       trState->debugID,
 		                                       trState->useProvisionalProxies,
 		                                       version));
@@ -3041,15 +3041,15 @@ SpanID generateSpanID(bool transactionTracingSample, SpanID parentContext = Span
 TransactionState::TransactionState(Database cx,
                                    Optional<TenantName> tenant,
                                    TaskPriority taskID,
-                                   SpanID spanID,
+                                   SpanContext spanContext,
                                    Reference<TransactionLogInfo> trLogInfo)
-  : cx(cx), trLogInfo(trLogInfo), options(cx), taskID(taskID), spanID(spanID), tenant_(tenant),
+  : cx(cx), trLogInfo(trLogInfo), options(cx), taskID(taskID), spanContext(spanContext), tenant_(tenant),
     tenantSet(tenant.present()) {}
 
 Reference<TransactionState> TransactionState::cloneAndReset(Reference<TransactionLogInfo> newTrLogInfo,
                                                             bool generateNewSpan) const {
 
-	SpanID newSpanID = generateNewSpan ? generateSpanID(cx->transactionTracingSample) : spanID;
+	SpanID newSpanID = generateNewSpan ? generateSpanID(cx->transactionTracingSample) : spanContext;
 	Reference<TransactionState> newState =
 	    makeReference<TransactionState>(cx, tenant_, cx->taskID, newSpanID, newTrLogInfo);
 
@@ -3109,12 +3109,12 @@ ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
                                        UseTenant useTenant,
                                        TransactionRecordLogInfo recordLogInfo) {
 	state Version ver = wait(version);
-	state Span span("NAPI:getValue"_loc, trState->spanID);
+	state Span span("NAPI:getValue"_loc, trState->spanContext);
 	if (useTenant && trState->tenant().present()) {
-		span.addTag("tenant"_sr, trState->tenant().get());
+		span.addAttribute("tenant"_sr, trState->tenant().get());
 	}
 
-	span.addTag("key"_sr, key);
+	span.addAttribute("key"_sr, key);
 	trState->cx->validateVersion(ver);
 
 	loop {
@@ -3237,7 +3237,7 @@ ACTOR Future<Key> getKey(Reference<TransactionState> trState,
 	wait(success(version));
 
 	state Optional<UID> getKeyID = Optional<UID>();
-	state Span span("NAPI:getKey"_loc, trState->spanID);
+	state Span span("NAPI:getKey"_loc, trState->spanContext);
 	if (trState->debugID.present()) {
 		getKeyID = nondeterministicRandom()->randomUniqueID();
 
@@ -3332,8 +3332,8 @@ ACTOR Future<Key> getKey(Reference<TransactionState> trState,
 	}
 }
 
-ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version, SpanID spanContext) {
-	state Span span("NAPI:waitForCommittedVersion"_loc, { spanContext });
+ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version, SpanContext spanContext) {
+	state Span span("NAPI:waitForCommittedVersion"_loc, SpanContext(), { spanContext });
 	try {
 		loop {
 			choose {
@@ -3361,14 +3361,14 @@ ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version, Span
 }
 
 ACTOR Future<Version> getRawVersion(Reference<TransactionState> trState) {
-	state Span span("NAPI:getRawVersion"_loc, { trState->spanID });
+	state Span span("NAPI:getRawVersion"_loc, { trState->spanContext });
 	loop {
 		choose {
 			when(wait(trState->cx->onProxiesChanged())) {}
 			when(GetReadVersionReply v =
 			         wait(basicLoadBalance(trState->cx->getGrvProxies(UseProvisionalProxies::False),
 			                               &GrvProxyInterface::getConsistentReadVersion,
-			                               GetReadVersionRequest(trState->spanID, 0, TransactionPriority::IMMEDIATE),
+			                               GetReadVersionRequest(trState->spanContext, 0, TransactionPriority::IMMEDIATE),
 			                               trState->cx->taskID))) {
 				return v.version;
 			}
@@ -3382,7 +3382,7 @@ ACTOR Future<Void> readVersionBatcher(
     uint32_t flags);
 
 ACTOR Future<Version> watchValue(Database cx, Reference<const WatchParameters> parameters) {
-	state Span span("NAPI:watchValue"_loc, parameters->spanID);
+	state Span span("NAPI:watchValue"_loc, parameters->spanContext);
 	state Version ver = parameters->version;
 	cx->validateVersion(parameters->version);
 	ASSERT(parameters->version != latestVersion);
@@ -3392,7 +3392,7 @@ ACTOR Future<Version> watchValue(Database cx, Reference<const WatchParameters> p
 		                                                              parameters->tenant.name,
 		                                                              parameters->key,
 		                                                              &StorageServerInterface::watchValue,
-		                                                              parameters->spanID,
+		                                                              parameters->spanContext,
 		                                                              parameters->debugID,
 		                                                              parameters->useProvisionalProxies,
 		                                                              Reverse::False,
@@ -3611,7 +3611,7 @@ ACTOR Future<Void> watchValueMap(Future<Version> version,
                                  Optional<Value> value,
                                  Database cx,
                                  TagSet tags,
-                                 SpanID spanID,
+                                 SpanContext spanContext,
                                  TaskPriority taskID,
                                  Optional<UID> debugID,
                                  UseProvisionalProxies useProvisionalProxies) {
@@ -3619,7 +3619,7 @@ ACTOR Future<Void> watchValueMap(Future<Version> version,
 
 	wait(getWatchFuture(
 	    cx,
-	    makeReference<WatchParameters>(tenant, key, value, ver, tags, spanID, taskID, debugID, useProvisionalProxies)));
+	    makeReference<WatchParameters>(tenant, key, value, ver, tags, spanContext, taskID, debugID, useProvisionalProxies)));
 
 	return Void();
 }
@@ -3665,10 +3665,10 @@ Future<RangeResultFamily> getExactRange(Reference<TransactionState> trState,
                                         Reverse reverse,
                                         UseTenant useTenant) {
 	state RangeResultFamily output;
-	state Span span("NAPI:getExactRange"_loc, trState->spanID);
+	state Span span("NAPI:getExactRange"_loc, trState->spanContext);
 
 	if (useTenant && trState->tenant().present()) {
-		span.addTag("tenant"_sr, trState->tenant().get());
+		span.addAttribute("tenant"_sr, trState->tenant().get());
 	}
 
 	// printf("getExactRange( '%s', '%s' )\n", keys.begin.toString().c_str(), keys.end.toString().c_str());
@@ -4023,9 +4023,9 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 	state KeySelector originalBegin = begin;
 	state KeySelector originalEnd = end;
 	state RangeResultFamily output;
-	state Span span("NAPI:getRange"_loc, trState->spanID);
+	state Span span("NAPI:getRange"_loc, trState->spanContext);
 	if (useTenant && trState->tenant().present()) {
-		span.addTag("tenant"_sr, trState->tenant().get());
+		span.addAttribute("tenant"_sr, trState->tenant().get());
 	}
 
 	try {
@@ -4493,7 +4493,7 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
                                           GetRangeLimits limits,
                                           Snapshot snapshot,
                                           Reverse reverse,
-                                          SpanID spanContext) {
+                                          SpanContext spanContext) {
 	loop {
 		state std::vector<KeyRangeLocationInfo> locations =
 		    wait(getKeyRangeLocations(trState,
@@ -4784,7 +4784,7 @@ ACTOR Future<Void> getRangeStream(Reference<TransactionState> trState,
 
 	// FIXME: better handling to disable row limits
 	ASSERT(!limits.hasRowLimit());
-	state Span span("NAPI:getRangeStream"_loc, trState->spanID);
+	state Span span("NAPI:getRangeStream"_loc, trState->spanContext);
 
 	state Version version = wait(fVersion);
 	trState->cx->validateVersion(version);
@@ -4907,7 +4907,7 @@ Transaction::Transaction(Database const& cx, Optional<TenantName> const& tenant)
                                             cx->taskID,
                                             generateSpanID(cx->transactionTracingSample),
                                             createTrLogInfoProbabilistically(cx))),
-    span(trState->spanID, "Transaction"_loc), backoff(CLIENT_KNOBS->DEFAULT_BACKOFF), tr(trState->spanID) {
+    span(trState->spanContext, "Transaction"_loc), backoff(CLIENT_KNOBS->DEFAULT_BACKOFF), tr(trState->spanContext) {
 	if (DatabaseContext::debugUseTags) {
 		debugAddTags(trState);
 	}
@@ -5036,7 +5036,7 @@ ACTOR Future<Void> watch(Reference<Watch> watch,
                          Database cx,
                          Future<TenantInfo> tenant,
                          TagSet tags,
-                         SpanID spanID,
+                         SpanContext spanContext,
                          TaskPriority taskID,
                          Optional<UID> debugID,
                          UseProvisionalProxies useProvisionalProxies) {
@@ -5064,7 +5064,7 @@ ACTOR Future<Void> watch(Reference<Watch> watch,
 							                                   watch->value,
 							                                   cx,
 							                                   tags,
-							                                   spanID,
+							                                   spanContext,
 							                                   taskID,
 							                                   debugID,
 							                                   useProvisionalProxies);
@@ -5097,7 +5097,7 @@ Future<Void> Transaction::watch(Reference<Watch> watch) {
 	    populateAndGetTenant(
 	        trState, watch->key, readVersion.isValid() && readVersion.isReady() ? readVersion.get() : latestVersion),
 	    trState->options.readTags,
-	    trState->spanID,
+	    trState->spanContext,
 	    trState->taskID,
 	    trState->debugID,
 	    trState->useProvisionalProxies);
@@ -5585,7 +5585,7 @@ void TransactionOptions::reset(Database const& cx) {
 void Transaction::resetImpl(bool generateNewSpan) {
 	flushTrLogsIfEnabled();
 	trState = trState->cloneAndReset(createTrLogInfoProbabilistically(trState->cx), generateNewSpan);
-	tr = CommitTransactionRequest(trState->spanID);
+	tr = CommitTransactionRequest(trState->spanContext);
 	readVersion = Future<Version>();
 	metadataVersion = Promise<Optional<Key>>();
 	extraConflictRanges.clear();
@@ -5600,7 +5600,7 @@ void Transaction::reset() {
 
 void Transaction::fullReset() {
 	resetImpl(true);
-	span = Span(trState->spanID, "Transaction"_loc);
+	span = Span(trState->spanContext, "Transaction"_loc);
 	backoff = CLIENT_KNOBS->DEFAULT_BACKOFF;
 }
 
@@ -5721,8 +5721,8 @@ ACTOR void checkWrites(Reference<TransactionState> trState,
 ACTOR static Future<Void> commitDummyTransaction(Reference<TransactionState> trState, KeyRange range) {
 	state Transaction tr(trState->cx);
 	state int retries = 0;
-	state Span span("NAPI:dummyTransaction"_loc, trState->spanID);
-	tr.span.addParent(span.context);
+	state Span span("NAPI:dummyTransaction"_loc, trState->spanContext);
+	tr.span.parentContext = span.context;
 	loop {
 		try {
 			TraceEvent("CommitDummyTransaction").detail("Key", range.begin).detail("Retries", retries);
@@ -5765,7 +5765,7 @@ void Transaction::setupWatches() {
 			                                   watches[i]->value,
 			                                   trState->cx,
 			                                   trState->options.readTags,
-			                                   trState->spanID,
+			                                   trState->spanContext,
 			                                   trState->taskID,
 			                                   trState->debugID,
 			                                   trState->useProvisionalProxies));
@@ -6528,7 +6528,7 @@ ACTOR Future<Void> readVersionBatcher(DatabaseContext* cx,
 					}
 					g_traceBatch.addAttach("TransactionAttachID", req.debugID.get().first(), debugID.get().first());
 				}
-				span.addParent(req.spanContext);
+				span.addLink(req.context);
 				requests.push_back(req.reply);
 				for (auto tag : req.tags) {
 					++tags[tag];

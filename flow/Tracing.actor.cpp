@@ -41,28 +41,28 @@ constexpr float kQueueSizeLogInterval = 5.0;
 
 struct NoopTracer : ITracer {
 	TracerType type() const override { return TracerType::DISABLED; }
-	void trace(Span const& span) override {}
+	//void trace(Span const& span) override {}
 	void trace(OTELSpan const& span) override {}
 };
 
 struct LogfileTracer : ITracer {
 	TracerType type() const override { return TracerType::LOG_FILE; }
-	void trace(Span const& span) override {
-		TraceEvent te(SevInfo, "TracingSpan", span.context);
-		te.detail("Location", span.location.name)
-		    .detail("Begin", format("%.6f", span.begin))
-		    .detail("End", format("%.6f", span.end));
-		if (span.parents.size() == 1) {
-			te.detail("Parent", *span.parents.begin());
-		} else {
-			for (auto parent : span.parents) {
-				TraceEvent(SevInfo, "TracingSpanAddParent", span.context).detail("AddParent", parent);
-			}
-		}
-		for (const auto& [key, value] : span.tags) {
-			TraceEvent(SevInfo, "TracingSpanTag", span.context).detail("Key", key).detail("Value", value);
-		}
-	}
+	// void trace(Span const& span) override {
+	// 	TraceEvent te(SevInfo, "TracingSpan", span.context);
+	// 	te.detail("Location", span.location.name)
+	// 	    .detail("Begin", format("%.6f", span.begin))
+	// 	    .detail("End", format("%.6f", span.end));
+	// 	if (span.parents.size() == 1) {
+	// 		te.detail("Parent", *span.parents.begin());
+	// 	} else {
+	// 		for (auto parent : span.parents) {
+	// 			TraceEvent(SevInfo, "TracingSpanAddParent", span.context).detail("AddParent", parent);
+	// 		}
+	// 	}
+	// 	for (const auto& [key, value] : span.tags) {
+	// 		TraceEvent(SevInfo, "TracingSpanTag", span.context).detail("Key", key).detail("Value", value);
+	// 	}
+	// }
 	void trace(OTELSpan const& span) override {
 		TraceEvent te(SevInfo, "TracingSpan", span.context.traceID);
 		te.detail("SpanID", span.context.spanID)
@@ -182,30 +182,30 @@ ACTOR Future<Void> traceLog(int* pendingMessages, bool* sendError) {
 struct UDPTracer : public ITracer {
 	// Serializes span fields as an array into the supplied TraceRequest
 	// buffer.
-	void serialize_span(const Span& span, TraceRequest& request) {
-		// If you change the serialization format here, make sure to update the
-		// fluentd filter to be able to correctly parse the updated format! See
-		// the msgpack specification for more info on the bit patterns used
-		// here.
-		uint8_t size = 8;
-		if (span.parents.size() == 0)
-			--size;
-		request.write_byte(size | 0b10010000); // write as array
+	// void serialize_span(const Span& span, TraceRequest& request) {
+	// 	// If you change the serialization format here, make sure to update the
+	// 	// fluentd filter to be able to correctly parse the updated format! See
+	// 	// the msgpack specification for more info on the bit patterns used
+	// 	// here.
+	// 	uint8_t size = 8;
+	// 	if (span.parents.size() == 0)
+	// 		--size;
+	// 	request.write_byte(size | 0b10010000); // write as array
 
-		serialize_string(g_network->getLocalAddress().toString(), request); // ip:port
+	// 	serialize_string(g_network->getLocalAddress().toString(), request); // ip:port
 
-		serialize_value(span.context.first(), request, 0xcf); // trace id
-		serialize_value(span.context.second(), request, 0xcf); // token (span id)
+	// 	serialize_value(span.context.first(), request, 0xcf); // trace id
+	// 	serialize_value(span.context.second(), request, 0xcf); // token (span id)
 
-		serialize_value(span.begin, request, 0xcb); // start time
-		serialize_value(span.end - span.begin, request, 0xcb); // duration
+	// 	serialize_value(span.begin, request, 0xcb); // start time
+	// 	serialize_value(span.end - span.begin, request, 0xcb); // duration
 
-		serialize_string(span.location.name.toString(), request);
+	// 	serialize_string(span.location.name.toString(), request);
 
-		serialize_map(span.tags, request);
+	// 	serialize_map(span.tags, request);
 
-		serialize_vector(span.parents, request);
-	}
+	// 	serialize_vector(span.parents, request);
+	// }
 
 	void serialize_span(const OTELSpan& span, TraceRequest& request) {
 		uint16_t size = 14;
@@ -459,11 +459,11 @@ struct FastUDPTracer : public UDPTracer {
 		write();
 	}
 
-	void trace(Span const& span) override {
-		prepare(span.location.name.size());
-		serialize_span(span, request_);
-		write();
-	}
+	// void trace(Span const& span) override {
+	// 	prepare(span.location.name.size());
+	// 	serialize_span(span, request_);
+	// 	write();
+	// }
 
 private:
 	TraceRequest request_;
@@ -512,27 +512,27 @@ void openTracer(TracerType type) {
 
 ITracer::~ITracer() {}
 
-Span& Span::operator=(Span&& o) {
-	if (begin > 0.0 && context.second() > 0) {
-		end = g_network->now();
-		g_tracer->trace(*this);
-	}
-	arena = std::move(o.arena);
-	context = o.context;
-	begin = o.begin;
-	end = o.end;
-	location = o.location;
-	parents = std::move(o.parents);
-	o.begin = 0;
-	return *this;
-}
+// Span& Span::operator=(Span&& o) {
+// 	if (begin > 0.0 && context.second() > 0) {
+// 		end = g_network->now();
+// 		g_tracer->trace(*this);
+// 	}
+// 	arena = std::move(o.arena);
+// 	context = o.context;
+// 	begin = o.begin;
+// 	end = o.end;
+// 	location = o.location;
+// 	parents = std::move(o.parents);
+// 	o.begin = 0;
+// 	return *this;
+// }
 
-Span::~Span() {
-	if (begin > 0.0 && context.second() > 0) {
-		end = g_network->now();
-		g_tracer->trace(*this);
-	}
-}
+// Span::~Span() {
+// 	if (begin > 0.0 && context.second() > 0) {
+// 		end = g_network->now();
+// 		g_tracer->trace(*this);
+// 	}
+// }
 
 OTELSpan& OTELSpan::operator=(OTELSpan&& o) {
 	if (begin > 0.0 && o.context.isSampled() > 0) {

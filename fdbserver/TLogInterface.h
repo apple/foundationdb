@@ -294,7 +294,7 @@ struct TLogCommitReply {
 
 struct TLogCommitRequest {
 	constexpr static FileIdentifier file_identifier = 4022206;
-	SpanID spanContext;
+	SpanContext spanContext;
 	Arena arena;
 	Version prevVersion, version, knownCommittedVersion, minKnownCommittedVersion;
 
@@ -304,7 +304,7 @@ struct TLogCommitRequest {
 	Optional<UID> debugID;
 
 	TLogCommitRequest() {}
-	TLogCommitRequest(const SpanID& context,
+	TLogCommitRequest(const SpanContext& context,
 	                  const Arena& a,
 	                  Version prevVersion,
 	                  Version version,

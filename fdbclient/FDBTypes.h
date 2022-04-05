@@ -47,6 +47,7 @@ struct SpanContext {
 	SpanContext(Arena arena, const SpanContext& span)
 	  : traceID(span.traceID), spanID(span.spanID), m_Flags(span.m_Flags) {}
 	bool isSampled() const { return (m_Flags & TraceFlags::sampled) == TraceFlags::sampled; }
+	std::string toString() const;
 };
 
 typedef int64_t Version;
@@ -55,7 +56,7 @@ typedef uint64_t Sequence;
 typedef StringRef KeyRef;
 typedef StringRef ValueRef;
 typedef int64_t Generation;
-typedef UID SpanID;
+//typedef UID SpanID;
 
 enum {
 	tagLocalitySpecial = -1, // tag with this locality means it is invalidTag (id=0), txsTag (id=1), or cacheTag (id=2)

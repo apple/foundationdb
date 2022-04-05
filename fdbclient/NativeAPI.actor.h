@@ -243,7 +243,7 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 
 	Optional<UID> debugID;
 	TaskPriority taskID;
-	SpanID spanID;
+	SpanContext spanContext;
 	UseProvisionalProxies useProvisionalProxies = UseProvisionalProxies::False;
 
 	int numErrors = 0;
@@ -258,12 +258,12 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	std::shared_ptr<CoalescedKeyRangeMap<Value>> conflictingKeys;
 
 	// Only available so that Transaction can have a default constructor, for use in state variables
-	TransactionState(TaskPriority taskID, SpanID spanID) : taskID(taskID), spanID(spanID), tenantSet(false) {}
+	TransactionState(TaskPriority taskID, SpanContext spanContext) : taskID(taskID), spanContext(spanContext), tenantSet(false) {}
 
 	TransactionState(Database cx,
 	                 Optional<TenantName> tenant,
 	                 TaskPriority taskID,
-	                 SpanID spanID,
+	                 SpanContext spanContext,
 	                 Reference<TransactionLogInfo> trLogInfo);
 
 	Reference<TransactionState> cloneAndReset(Reference<TransactionLogInfo> newTrLogInfo, bool generateNewSpan) const;
@@ -485,7 +485,7 @@ private:
 	Future<Void> committing;
 };
 
-ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version, SpanID spanContext);
+ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version, SpanContext spanContext);
 ACTOR Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsList(Database cx,
                                                                                   KeyRange keys,
                                                                                   int shardLimit);

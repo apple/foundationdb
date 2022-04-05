@@ -33,78 +33,78 @@ inline Location operator"" _loc(const char* str, size_t size) {
 	return Location{ StringRef(reinterpret_cast<const uint8_t*>(str), size) };
 }
 
-struct Span {
-	Span(SpanID context, Location location, std::initializer_list<SpanID> const& parents = {})
-	  : context(context), begin(g_network->now()), location(location), parents(arena, parents.begin(), parents.end()) {
-		if (parents.size() > 0) {
-			// If the parents' token is 0 (meaning the trace should not be
-			// recorded), set the child token to 0 as well. Otherwise, generate
-			// a new, random token.
-			uint64_t traceId = 0;
-			if ((*parents.begin()).second() > 0) {
-				traceId = deterministicRandom()->randomUInt64();
-			}
-			this->context = SpanID((*parents.begin()).first(), traceId);
-		}
-	}
-	Span(Location location, std::initializer_list<SpanID> const& parents = {})
-	  : Span(UID(deterministicRandom()->randomUInt64(),
-	             deterministicRandom()->random01() < FLOW_KNOBS->TRACING_SAMPLE_RATE
-	                 ? deterministicRandom()->randomUInt64()
-	                 : 0),
-	         location,
-	         parents) {}
-	Span(Location location, SpanID context) : Span(location, { context }) {}
-	Span(const Span&) = delete;
-	Span(Span&& o) {
-		arena = std::move(o.arena);
-		context = o.context;
-		begin = o.begin;
-		end = o.end;
-		location = o.location;
-		parents = std::move(o.parents);
-		o.context = UID();
-		o.begin = 0.0;
-		o.end = 0.0;
-	}
-	Span() {}
-	~Span();
-	Span& operator=(Span&& o);
-	Span& operator=(const Span&) = delete;
-	void swap(Span& other) {
-		std::swap(arena, other.arena);
-		std::swap(context, other.context);
-		std::swap(begin, other.begin);
-		std::swap(end, other.end);
-		std::swap(location, other.location);
-		std::swap(parents, other.parents);
-	}
+// struct Span {
+// 	Span(SpanID context, Location location, std::initializer_list<SpanID> const& parents = {})
+// 	  : context(context), begin(g_network->now()), location(location), parents(arena, parents.begin(), parents.end()) {
+// 		if (parents.size() > 0) {
+// 			// If the parents' token is 0 (meaning the trace should not be
+// 			// recorded), set the child token to 0 as well. Otherwise, generate
+// 			// a new, random token.
+// 			uint64_t traceId = 0;
+// 			if ((*parents.begin()).second() > 0) {
+// 				traceId = deterministicRandom()->randomUInt64();
+// 			}
+// 			this->context = SpanID((*parents.begin()).first(), traceId);
+// 		}
+// 	}
+// 	Span(Location location, std::initializer_list<SpanID> const& parents = {})
+// 	  : Span(UID(deterministicRandom()->randomUInt64(),
+// 	             deterministicRandom()->random01() < FLOW_KNOBS->TRACING_SAMPLE_RATE
+// 	                 ? deterministicRandom()->randomUInt64()
+// 	                 : 0),
+// 	         location,
+// 	         parents) {}
+// 	Span(Location location, SpanID context) : Span(location, { context }) {}
+// 	Span(const Span&) = delete;
+// 	Span(Span&& o) {
+// 		arena = std::move(o.arena);
+// 		context = o.context;
+// 		begin = o.begin;
+// 		end = o.end;
+// 		location = o.location;
+// 		parents = std::move(o.parents);
+// 		o.context = UID();
+// 		o.begin = 0.0;
+// 		o.end = 0.0;
+// 	}
+// 	Span() {}
+// 	~Span();
+// 	Span& operator=(Span&& o);
+// 	Span& operator=(const Span&) = delete;
+// 	void swap(Span& other) {
+// 		std::swap(arena, other.arena);
+// 		std::swap(context, other.context);
+// 		std::swap(begin, other.begin);
+// 		std::swap(end, other.end);
+// 		std::swap(location, other.location);
+// 		std::swap(parents, other.parents);
+// 	}
 
-	void addParent(SpanID span) {
-		if (parents.size() == 0) {
-			uint64_t traceId = 0;
-			if (span.second() > 0) {
-				traceId = context.second() == 0 ? deterministicRandom()->randomUInt64() : context.second();
-			}
-			// Use first parent to set trace ID. This is non-ideal for spans
-			// with multiple parents, because the trace ID will associate the
-			// span with only one trace. A workaround is to look at the parent
-			// relationships instead of the trace ID. Another option in the
-			// future is to keep a list of trace IDs.
-			context = SpanID(span.first(), traceId);
-		}
-		parents.push_back(arena, span);
-	}
+// 	void addParent(SpanID span) {
+// 		if (parents.size() == 0) {
+// 			uint64_t traceId = 0;
+// 			if (span.second() > 0) {
+// 				traceId = context.second() == 0 ? deterministicRandom()->randomUInt64() : context.second();
+// 			}
+// 			// Use first parent to set trace ID. This is non-ideal for spans
+// 			// with multiple parents, because the trace ID will associate the
+// 			// span with only one trace. A workaround is to look at the parent
+// 			// relationships instead of the trace ID. Another option in the
+// 			// future is to keep a list of trace IDs.
+// 			context = SpanID(span.first(), traceId);
+// 		}
+// 		parents.push_back(arena, span);
+// 	}
 
-	void addTag(const StringRef& key, const StringRef& value) { tags[key] = value; }
+// 	void addTag(const StringRef& key, const StringRef& value) { tags[key] = value; }
 
-	Arena arena;
-	UID context = UID();
-	double begin = 0.0, end = 0.0;
-	Location location;
-	SmallVectorRef<SpanID> parents;
-	std::unordered_map<StringRef, StringRef> tags;
-};
+// 	Arena arena;
+// 	UID context = UID();
+// 	double begin = 0.0, end = 0.0;
+// 	Location location;
+// 	SmallVectorRef<SpanID> parents;
+// 	std::unordered_map<StringRef, StringRef> tags;
+// };
 
 // OTELSpan
 //
@@ -159,9 +159,9 @@ struct OTELEventRef {
 	SmallVectorRef<KeyValueRef> attributes;
 };
 
-class OTELSpan {
+class Span {
 public:
-	OTELSpan(const SpanContext& context,
+	Span(const SpanContext& context,
 	         const Location& location,
 	         const SpanContext& parentContext,
 	         const std::initializer_list<SpanContext>& links = {})
@@ -190,10 +190,10 @@ public:
 		    this->arena, KeyValueRef("address"_sr, StringRef(this->arena, g_network->getLocalAddress().toString())));
 	}
 
-	OTELSpan(const Location& location,
+	Span(const Location& location,
 	         const SpanContext& parent = SpanContext(),
 	         const std::initializer_list<SpanContext>& links = {})
-	  : OTELSpan(
+	  : Span(
 	        SpanContext(UID(deterministicRandom()->randomUInt64(), deterministicRandom()->randomUInt64()), // traceID
 	                    deterministicRandom()->randomUInt64(), // spanID
 	                    deterministicRandom()->random01() < FLOW_KNOBS->TRACING_SAMPLE_RATE // sampled or unsampled
@@ -203,16 +203,20 @@ public:
 	        parent,
 	        links) {}
 
-	OTELSpan(const Location& location, const SpanContext parent, const SpanContext& link)
-	  : OTELSpan(location, parent, { link }) {}
+	Span(const SpanContext& context, const Location& location)
+	  : Span(context, location, SpanContext()) {}
 
+	Span(const Location& location, const SpanContext parent, const SpanContext& link)
+	  : Span(location, parent, { link }) {}
+
+	//Span(const Location& location) : Span(location, SpanContext()) {}
 	// NOTE: This constructor is primarly for unit testing until we sort out how to enable/disable a Knob dynamically in
 	// a test.
-	OTELSpan(const Location& location,
+	Span(const Location& location,
 	         const std::function<double()>& rateProvider,
 	         const SpanContext& parent = SpanContext(),
 	         const std::initializer_list<SpanContext>& links = {})
-	  : OTELSpan(SpanContext(UID(deterministicRandom()->randomUInt64(), deterministicRandom()->randomUInt64()),
+	  : Span(SpanContext(UID(deterministicRandom()->randomUInt64(), deterministicRandom()->randomUInt64()),
 	                         deterministicRandom()->randomUInt64(),
 	                         deterministicRandom()->random01() < rateProvider() ? TraceFlags::sampled
 	                                                                            : TraceFlags::unsampled),
@@ -220,8 +224,8 @@ public:
 	             parent,
 	             links) {}
 
-	OTELSpan(const OTELSpan&) = delete;
-	OTELSpan(OTELSpan&& o) {
+	Span(const Span&) = delete;
+	Span(Span&& o) {
 		arena = std::move(o.arena);
 		context = o.context;
 		location = o.location;
@@ -239,11 +243,11 @@ public:
 		o.end = 0.0;
 		o.status = SpanStatus::UNSET;
 	}
-	OTELSpan() {}
-	~OTELSpan();
-	OTELSpan& operator=(OTELSpan&& o);
-	OTELSpan& operator=(const OTELSpan&) = delete;
-	void swap(OTELSpan& other) {
+	Span() {}
+	~Span();
+	Span& operator=(Span&& o);
+	Span& operator=(const Span&) = delete;
+	void swap(Span& other) {
 		std::swap(arena, other.arena);
 		std::swap(context, other.context);
 		std::swap(location, other.location);
@@ -256,30 +260,30 @@ public:
 		std::swap(events, other.events);
 	}
 
-	OTELSpan& addLink(const SpanContext& linkContext) {
+	Span& addLink(const SpanContext& linkContext) {
 		links.push_back(arena, linkContext);
 		return *this;
 	}
 
-	OTELSpan& addLinks(const std::initializer_list<SpanContext>& linkContexts = {}) {
+	Span& addLinks(const std::initializer_list<SpanContext>& linkContexts = {}) {
 		for (auto const& sc : linkContexts) {
 			links.push_back(arena, sc);
 		}
 		return *this;
 	}
 
-	OTELSpan& addEvent(const OTELEventRef& event) {
+	Span& addEvent(const OTELEventRef& event) {
 		events.push_back_deep(arena, event);
 		return *this;
 	}
 
-	OTELSpan& addEvent(const StringRef& name,
+	Span& addEvent(const StringRef& name,
 	                   const double& time,
 	                   const SmallVectorRef<KeyValueRef>& attrs = SmallVectorRef<KeyValueRef>()) {
 		return addEvent(OTELEventRef(name, time, attrs));
 	}
 
-	OTELSpan& addAttribute(const StringRef& key, const StringRef& value) {
+	Span& addAttribute(const StringRef& key, const StringRef& value) {
 		attributes.push_back_deep(arena, KeyValueRef(key, value));
 		return *this;
 	}
@@ -310,11 +314,24 @@ struct ITracer {
 	virtual ~ITracer();
 	virtual TracerType type() const = 0;
 	// passed ownership to the tracer
+	//virtual void trace(Span const& span) = 0;
 	virtual void trace(Span const& span) = 0;
-	virtual void trace(OTELSpan const& span) = 0;
 };
 
 void openTracer(TracerType type);
+
+// template <class T>
+// struct SpannedDeque : Deque<T> {
+// 	Span span;
+// 	explicit SpannedDeque(Location loc) : span(loc) {}
+// 	SpannedDeque(SpannedDeque&& other) : Deque<T>(std::move(other)), span(std::move(other.span)) {}
+// 	SpannedDeque(SpannedDeque const&) = delete;
+// 	SpannedDeque& operator=(SpannedDeque const&) = delete;
+// 	SpannedDeque& operator=(SpannedDeque&& other) {
+// 		*static_cast<Deque<T>*>(this) = std::move(other);
+// 		span = std::move(other.span);
+// 	}
+// };
 
 template <class T>
 struct SpannedDeque : Deque<T> {
@@ -324,19 +341,6 @@ struct SpannedDeque : Deque<T> {
 	SpannedDeque(SpannedDeque const&) = delete;
 	SpannedDeque& operator=(SpannedDeque const&) = delete;
 	SpannedDeque& operator=(SpannedDeque&& other) {
-		*static_cast<Deque<T>*>(this) = std::move(other);
-		span = std::move(other.span);
-	}
-};
-
-template <class T>
-struct OTELSpannedDeque : Deque<T> {
-	OTELSpan span;
-	explicit OTELSpannedDeque(Location loc) : span(loc) {}
-	OTELSpannedDeque(OTELSpannedDeque&& other) : Deque<T>(std::move(other)), span(std::move(other.span)) {}
-	OTELSpannedDeque(OTELSpannedDeque const&) = delete;
-	OTELSpannedDeque& operator=(OTELSpannedDeque const&) = delete;
-	OTELSpannedDeque& operator=(OTELSpannedDeque&& other) {
 		*static_cast<Deque<T>*>(this) = std::move(other);
 		span = std::move(other.span);
 	}
