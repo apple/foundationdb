@@ -152,7 +152,6 @@ std::shared_ptr<rocksdb::Cache> rocksdb_block_cache = nullptr;
 #define PERSIST_PREFIX "\xff\xff"
 const KeyRef persistVersion = LiteralStringRef(PERSIST_PREFIX "Version");
 const StringRef ROCKSDBSTORAGE_HISTOGRAM_GROUP = LiteralStringRef("RocksDBStorage");
-const StringRef ROCKSDBSTORAGE_HISTOGRAM_GROUP_ZHE = LiteralStringRef("RocksDBStorageZhe");
 const StringRef ROCKSDB_COMMIT_LATENCY_HISTOGRAM = LiteralStringRef("RocksDBCommitLatency");
 const StringRef ROCKSDB_COMMIT_ACTION_HISTOGRAM = LiteralStringRef("RocksDBCommitAction");
 const StringRef ROCKSDB_COMMIT_QUEUEWAIT_HISTOGRAM = LiteralStringRef("RocksDBCommitQueueWait");
@@ -856,11 +855,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 		UID id;
 		std::shared_ptr<rocksdb::RateLimiter> rateLimiter;
-		Reference<Histogram> commitLatencyHistogram;
-		Reference<Histogram> commitActionHistogram;
-		Reference<Histogram> commitQueueWaitHistogram;
-		Reference<Histogram> writeHistogram;
-		Reference<Histogram> deleteCompactRangeHistogram;
 		std::shared_ptr<ReadIteratorPool> readIterPool;
 		std::shared_ptr<PerfContextMetrics> perfContextMetrics;
 		int threadIndex;
@@ -882,22 +876,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		                          10, // fairness
 		                          rocksdb::RateLimiter::Mode::kWritesOnly,
 		                          SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_AUTO_TUNE)
-		                    : nullptr),
-		    commitLatencyHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
-		                                                   ROCKSDB_COMMIT_LATENCY_HISTOGRAM,
-		                                                   Histogram::Unit::microseconds)),
-		    commitActionHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
-		                                                  ROCKSDB_COMMIT_ACTION_HISTOGRAM,
-		                                                  Histogram::Unit::microseconds)),
-		    commitQueueWaitHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
-		                                                     ROCKSDB_COMMIT_QUEUEWAIT_HISTOGRAM,
-		                                                     Histogram::Unit::microseconds)),
-		    writeHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
-		                                           ROCKSDB_WRITE_HISTOGRAM,
-		                                           Histogram::Unit::microseconds)),
-		    deleteCompactRangeHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
-		                                                        ROCKSDB_DELETE_COMPACTRANGE_HISTOGRAM,
-		                                                        Histogram::Unit::microseconds)) {
+		                    : nullptr) {
 			if (SERVER_KNOBS->ROCKSDB_PERFCONTEXT_ENABLE) {
 				// Enable perf context on the same thread with the db thread
 				rocksdb::SetPerfLevel(rocksdb::PerfLevel::kEnableTimeExceptForMutex);
@@ -1058,7 +1037,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			double commitBeginTime;
 			if (a.getHistograms) {
 				commitBeginTime = timer_monotonic();
-				commitQueueWaitHistogram->sampleSeconds(commitBeginTime - a.startTime);
 				metricPromiseStream->send(std::make_tuple(
 				    threadIndex, ROCKSDB_COMMIT_QUEUEWAIT_HISTOGRAM.toString(), commitBeginTime - a.startTime));
 			}
@@ -1084,7 +1062,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			s = db->Write(options, a.batchToCommit.get());
 			readIterPool->update();
 			if (a.getHistograms) {
-				writeHistogram->sampleSeconds(timer_monotonic() - writeBeginTime);
 				metricPromiseStream->send(std::make_tuple(
 				    threadIndex, ROCKSDB_WRITE_HISTOGRAM.toString(), timer_monotonic() - writeBeginTime));
 			}
@@ -1102,7 +1079,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 					ASSERT(db->SuggestCompactRange(cf, &begin, &end).ok());
 				}
 				if (a.getHistograms) {
-					deleteCompactRangeHistogram->sampleSeconds(timer_monotonic() - compactRangeBeginTime);
 					metricPromiseStream->send(std::make_tuple(threadIndex,
 					                                          ROCKSDB_DELETE_COMPACTRANGE_HISTOGRAM.toString(),
 					                                          timer_monotonic() - compactRangeBeginTime));
@@ -1110,8 +1086,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 			if (a.getHistograms) {
 				double currTime = timer_monotonic();
-				commitActionHistogram->sampleSeconds(currTime - commitBeginTime);
-				commitLatencyHistogram->sampleSeconds(currTime - a.startTime);
 				metricPromiseStream->send(std::make_tuple(
 				    threadIndex, ROCKSDB_COMMIT_ACTION_HISTOGRAM.toString(), currTime - commitBeginTime));
 				metricPromiseStream->send(
@@ -1286,18 +1260,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		double readValueTimeout;
 		double readValuePrefixTimeout;
 		double readRangeTimeout;
-		Reference<Histogram> readRangeLatencyHistogram;
-		Reference<Histogram> readValueLatencyHistogram;
-		Reference<Histogram> readPrefixLatencyHistogram;
-		Reference<Histogram> readRangeActionHistogram;
-		Reference<Histogram> readValueActionHistogram;
-		Reference<Histogram> readPrefixActionHistogram;
-		Reference<Histogram> readRangeQueueWaitHistogram;
-		Reference<Histogram> readValueQueueWaitHistogram;
-		Reference<Histogram> readPrefixQueueWaitHistogram;
-		Reference<Histogram> readRangeNewIteratorHistogram;
-		Reference<Histogram> readValueGetHistogram;
-		Reference<Histogram> readPrefixGetHistogram;
 		std::shared_ptr<ReadIteratorPool> readIterPool;
 		std::shared_ptr<PerfContextMetrics> perfContextMetrics;
 		int threadIndex;
@@ -1310,43 +1272,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		                std::shared_ptr<PerfContextMetrics> perfContextMetrics,
 		                int threadIndex)
 		  : db(db), cf(cf), readIterPool(readIterPool), perfContextMetrics(perfContextMetrics),
-		    threadIndex(threadIndex),
-		    readRangeLatencyHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
-		                                                      ROCKSDB_READRANGE_LATENCY_HISTOGRAM,
-		                                                      Histogram::Unit::microseconds)),
-		    readValueLatencyHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
-		                                                      ROCKSDB_READVALUE_LATENCY_HISTOGRAM,
-		                                                      Histogram::Unit::microseconds)),
-		    readPrefixLatencyHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
-		                                                       ROCKSDB_READPREFIX_LATENCY_HISTOGRAM,
-		                                                       Histogram::Unit::microseconds)),
-		    readRangeActionHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
-		                                                     ROCKSDB_READRANGE_ACTION_HISTOGRAM,
-		                                                     Histogram::Unit::microseconds)),
-		    readValueActionHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
-		                                                     ROCKSDB_READVALUE_ACTION_HISTOGRAM,
-		                                                     Histogram::Unit::microseconds)),
-		    readPrefixActionHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
-		                                                      ROCKSDB_READPREFIX_ACTION_HISTOGRAM,
-		                                                      Histogram::Unit::microseconds)),
-		    readRangeQueueWaitHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
-		                                                        ROCKSDB_READRANGE_QUEUEWAIT_HISTOGRAM,
-		                                                        Histogram::Unit::microseconds)),
-		    readValueQueueWaitHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
-		                                                        ROCKSDB_READVALUE_QUEUEWAIT_HISTOGRAM,
-		                                                        Histogram::Unit::microseconds)),
-		    readPrefixQueueWaitHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
-		                                                         ROCKSDB_READPREFIX_QUEUEWAIT_HISTOGRAM,
-		                                                         Histogram::Unit::microseconds)),
-		    readRangeNewIteratorHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
-		                                                          ROCKSDB_READRANGE_NEWITERATOR_HISTOGRAM,
-		                                                          Histogram::Unit::microseconds)),
-		    readValueGetHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
-		                                                  ROCKSDB_READVALUE_GET_HISTOGRAM,
-		                                                  Histogram::Unit::microseconds)),
-		    readPrefixGetHistogram(Histogram::getHistogram(ROCKSDBSTORAGE_HISTOGRAM_GROUP,
-		                                                   ROCKSDB_READPREFIX_GET_HISTOGRAM,
-		                                                   Histogram::Unit::microseconds)) {
+		    threadIndex(threadIndex) {
 			if (g_network->isSimulated()) {
 				// In simulation, increasing the read operation timeouts to 5 minutes, as some of the tests have
 				// very high load and single read thread cannot process all the load within the timeouts.
@@ -1390,7 +1316,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 			double readBeginTime = timer_monotonic();
 			if (a.getHistograms) {
-				readValueQueueWaitHistogram->sampleSeconds(readBeginTime - a.startTime);
 				metricPromiseStream->send(std::make_tuple(
 				    threadIndex, ROCKSDB_READVALUE_QUEUEWAIT_HISTOGRAM.toString(), readBeginTime - a.startTime));
 			}
@@ -1424,7 +1349,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 
 			if (a.getHistograms) {
-				readValueGetHistogram->sampleSeconds(timer_monotonic() - dbGetBeginTime);
 				metricPromiseStream->send(std::make_tuple(
 				    threadIndex, ROCKSDB_READVALUE_GET_HISTOGRAM.toString(), timer_monotonic() - dbGetBeginTime));
 			}
@@ -1444,8 +1368,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 			if (a.getHistograms) {
 				double currTime = timer_monotonic();
-				readValueActionHistogram->sampleSeconds(currTime - readBeginTime);
-				readValueLatencyHistogram->sampleSeconds(currTime - a.startTime);
 				metricPromiseStream->send(std::make_tuple(
 				    threadIndex, ROCKSDB_READVALUE_ACTION_HISTOGRAM.toString(), currTime - readBeginTime));
 				metricPromiseStream->send(std::make_tuple(
@@ -1479,7 +1401,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 			double readBeginTime = timer_monotonic();
 			if (a.getHistograms) {
-				readPrefixQueueWaitHistogram->sampleSeconds(readBeginTime - a.startTime);
 				metricPromiseStream->send(std::make_tuple(
 				    threadIndex, ROCKSDB_READPREFIX_QUEUEWAIT_HISTOGRAM.toString(), readBeginTime - a.startTime));
 			}
@@ -1509,7 +1430,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			double dbGetBeginTime = a.getHistograms ? timer_monotonic() : 0;
 			auto s = db->Get(options, cf, toSlice(a.key), &value);
 			if (a.getHistograms) {
-				readPrefixGetHistogram->sampleSeconds(timer_monotonic() - dbGetBeginTime);
 				metricPromiseStream->send(std::make_tuple(
 				    threadIndex, ROCKSDB_READPREFIX_GET_HISTOGRAM.toString(), timer_monotonic() - dbGetBeginTime));
 			}
@@ -1531,8 +1451,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 			if (a.getHistograms) {
 				double currTime = timer_monotonic();
-				readPrefixActionHistogram->sampleSeconds(currTime - readBeginTime);
-				readPrefixLatencyHistogram->sampleSeconds(currTime - a.startTime);
 				metricPromiseStream->send(std::make_tuple(
 				    threadIndex, ROCKSDB_READPREFIX_ACTION_HISTOGRAM.toString(), currTime - readBeginTime));
 				metricPromiseStream->send(std::make_tuple(
@@ -1565,7 +1483,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 			double readBeginTime = timer_monotonic();
 			if (a.getHistograms) {
-				readRangeQueueWaitHistogram->sampleSeconds(readBeginTime - a.startTime);
 				metricPromiseStream->send(std::make_tuple(
 				    threadIndex, ROCKSDB_READRANGE_QUEUEWAIT_HISTOGRAM.toString(), readBeginTime - a.startTime));
 			}
@@ -1588,7 +1505,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				double iterCreationBeginTime = a.getHistograms ? timer_monotonic() : 0;
 				ReadIterator readIter = readIterPool->getIterator();
 				if (a.getHistograms) {
-					readRangeNewIteratorHistogram->sampleSeconds(timer_monotonic() - iterCreationBeginTime);
 					metricPromiseStream->send(std::make_tuple(threadIndex,
 					                                          ROCKSDB_READRANGE_NEWITERATOR_HISTOGRAM.toString(),
 					                                          timer_monotonic() - iterCreationBeginTime));
@@ -1619,7 +1535,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				double iterCreationBeginTime = a.getHistograms ? timer_monotonic() : 0;
 				ReadIterator readIter = readIterPool->getIterator();
 				if (a.getHistograms) {
-					readRangeNewIteratorHistogram->sampleSeconds(timer_monotonic() - iterCreationBeginTime);
 					metricPromiseStream->send(std::make_tuple(threadIndex,
 					                                          ROCKSDB_READRANGE_NEWITERATOR_HISTOGRAM.toString(),
 					                                          timer_monotonic() - iterCreationBeginTime));
@@ -1664,8 +1579,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			a.result.send(result);
 			if (a.getHistograms) {
 				double currTime = timer_monotonic();
-				readRangeActionHistogram->sampleSeconds(currTime - readBeginTime);
-				readRangeLatencyHistogram->sampleSeconds(currTime - a.startTime);
 				metricPromiseStream->send(std::make_tuple(
 				    threadIndex, ROCKSDB_READRANGE_ACTION_HISTOGRAM.toString(), currTime - readBeginTime));
 				metricPromiseStream->send(std::make_tuple(
@@ -1751,40 +1664,39 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 	ACTOR Future<Void> updateHistogram(FutureStream<std::tuple<int, std::string, double>> metricFutureStream) {
 		state Reference<Histogram> commitLatencyHistogram = Histogram::getHistogram(
-		    ROCKSDBSTORAGE_HISTOGRAM_GROUP_ZHE, ROCKSDB_COMMIT_LATENCY_HISTOGRAM, Histogram::Unit::microseconds);
+		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_COMMIT_LATENCY_HISTOGRAM, Histogram::Unit::microseconds);
 		state Reference<Histogram> commitActionHistogram = Histogram::getHistogram(
-		    ROCKSDBSTORAGE_HISTOGRAM_GROUP_ZHE, ROCKSDB_COMMIT_ACTION_HISTOGRAM, Histogram::Unit::microseconds);
+		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_COMMIT_ACTION_HISTOGRAM, Histogram::Unit::microseconds);
 		state Reference<Histogram> commitQueueWaitHistogram = Histogram::getHistogram(
-		    ROCKSDBSTORAGE_HISTOGRAM_GROUP_ZHE, ROCKSDB_COMMIT_QUEUEWAIT_HISTOGRAM, Histogram::Unit::microseconds);
+		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_COMMIT_QUEUEWAIT_HISTOGRAM, Histogram::Unit::microseconds);
 		state Reference<Histogram> writeHistogram = Histogram::getHistogram(
-		    ROCKSDBSTORAGE_HISTOGRAM_GROUP_ZHE, ROCKSDB_WRITE_HISTOGRAM, Histogram::Unit::microseconds);
+		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_WRITE_HISTOGRAM, Histogram::Unit::microseconds);
 		state Reference<Histogram> deleteCompactRangeHistogram = Histogram::getHistogram(
-		    ROCKSDBSTORAGE_HISTOGRAM_GROUP_ZHE, ROCKSDB_DELETE_COMPACTRANGE_HISTOGRAM, Histogram::Unit::microseconds);
+		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_DELETE_COMPACTRANGE_HISTOGRAM, Histogram::Unit::microseconds);
 		state Reference<Histogram> readRangeLatencyHistogram = Histogram::getHistogram(
-		    ROCKSDBSTORAGE_HISTOGRAM_GROUP_ZHE, ROCKSDB_READRANGE_LATENCY_HISTOGRAM, Histogram::Unit::microseconds);
+		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_READRANGE_LATENCY_HISTOGRAM, Histogram::Unit::microseconds);
 		state Reference<Histogram> readValueLatencyHistogram = Histogram::getHistogram(
-		    ROCKSDBSTORAGE_HISTOGRAM_GROUP_ZHE, ROCKSDB_READVALUE_LATENCY_HISTOGRAM, Histogram::Unit::microseconds);
+		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_READVALUE_LATENCY_HISTOGRAM, Histogram::Unit::microseconds);
 		state Reference<Histogram> readPrefixLatencyHistogram = Histogram::getHistogram(
-		    ROCKSDBSTORAGE_HISTOGRAM_GROUP_ZHE, ROCKSDB_READPREFIX_LATENCY_HISTOGRAM, Histogram::Unit::microseconds);
+		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_READPREFIX_LATENCY_HISTOGRAM, Histogram::Unit::microseconds);
 		state Reference<Histogram> readRangeActionHistogram = Histogram::getHistogram(
-		    ROCKSDBSTORAGE_HISTOGRAM_GROUP_ZHE, ROCKSDB_READRANGE_ACTION_HISTOGRAM, Histogram::Unit::microseconds);
+		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_READRANGE_ACTION_HISTOGRAM, Histogram::Unit::microseconds);
 		state Reference<Histogram> readValueActionHistogram = Histogram::getHistogram(
-		    ROCKSDBSTORAGE_HISTOGRAM_GROUP_ZHE, ROCKSDB_READVALUE_ACTION_HISTOGRAM, Histogram::Unit::microseconds);
+		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_READVALUE_ACTION_HISTOGRAM, Histogram::Unit::microseconds);
 		state Reference<Histogram> readPrefixActionHistogram = Histogram::getHistogram(
-		    ROCKSDBSTORAGE_HISTOGRAM_GROUP_ZHE, ROCKSDB_READPREFIX_ACTION_HISTOGRAM, Histogram::Unit::microseconds);
+		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_READPREFIX_ACTION_HISTOGRAM, Histogram::Unit::microseconds);
 		state Reference<Histogram> readRangeQueueWaitHistogram = Histogram::getHistogram(
-		    ROCKSDBSTORAGE_HISTOGRAM_GROUP_ZHE, ROCKSDB_READRANGE_QUEUEWAIT_HISTOGRAM, Histogram::Unit::microseconds);
+		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_READRANGE_QUEUEWAIT_HISTOGRAM, Histogram::Unit::microseconds);
 		state Reference<Histogram> readValueQueueWaitHistogram = Histogram::getHistogram(
-		    ROCKSDBSTORAGE_HISTOGRAM_GROUP_ZHE, ROCKSDB_READVALUE_QUEUEWAIT_HISTOGRAM, Histogram::Unit::microseconds);
+		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_READVALUE_QUEUEWAIT_HISTOGRAM, Histogram::Unit::microseconds);
 		state Reference<Histogram> readPrefixQueueWaitHistogram = Histogram::getHistogram(
-		    ROCKSDBSTORAGE_HISTOGRAM_GROUP_ZHE, ROCKSDB_READPREFIX_QUEUEWAIT_HISTOGRAM, Histogram::Unit::microseconds);
+		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_READPREFIX_QUEUEWAIT_HISTOGRAM, Histogram::Unit::microseconds);
 		state Reference<Histogram> readRangeNewIteratorHistogram = Histogram::getHistogram(
-		    ROCKSDBSTORAGE_HISTOGRAM_GROUP_ZHE, ROCKSDB_READRANGE_NEWITERATOR_HISTOGRAM, Histogram::Unit::microseconds);
+		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_READRANGE_NEWITERATOR_HISTOGRAM, Histogram::Unit::microseconds);
 		state Reference<Histogram> readValueGetHistogram = Histogram::getHistogram(
-		    ROCKSDBSTORAGE_HISTOGRAM_GROUP_ZHE, ROCKSDB_READVALUE_GET_HISTOGRAM, Histogram::Unit::microseconds);
+		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_READVALUE_GET_HISTOGRAM, Histogram::Unit::microseconds);
 		state Reference<Histogram> readPrefixGetHistogram = Histogram::getHistogram(
-		    ROCKSDBSTORAGE_HISTOGRAM_GROUP_ZHE, ROCKSDB_READPREFIX_GET_HISTOGRAM, Histogram::Unit::microseconds);
-
+		    ROCKSDBSTORAGE_HISTOGRAM_GROUP, ROCKSDB_READPREFIX_GET_HISTOGRAM, Histogram::Unit::microseconds);
 		loop {
 			choose {
 				when(std::tuple<int, std::string, double> measure = waitNext(metricFutureStream)) {
