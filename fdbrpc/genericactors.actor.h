@@ -87,7 +87,8 @@ Future<ErrorOr<REPLY_TYPE(Req)>> tryGetReplyFromHostname(RequestStream<Req>* to,
 	}
 	Optional<NetworkAddress> address = hostname.resolvedAddress;
 	*to = RequestStream<Req>(Endpoint::wellKnown({ address.get() }, token));
-	return to->tryGetReply(request);
+	ErrorOr<REPLY_TYPE(Req)> ret = wait(to->tryGetReply(request));
+	return ret;
 }
 
 ACTOR template <class Req>
@@ -106,7 +107,8 @@ Future<ErrorOr<REPLY_TYPE(Req)>> tryGetReplyFromHostname(RequestStream<Req>* to,
 	}
 	Optional<NetworkAddress> address = hostname.resolvedAddress;
 	*to = RequestStream<Req>(Endpoint::wellKnown({ address.get() }, token));
-	return to->tryGetReply(request, taskID);
+	ErrorOr<REPLY_TYPE(Req)> ret = wait(to->tryGetReply(request, taskID));
+	return ret;
 }
 
 ACTOR template <class Req>
