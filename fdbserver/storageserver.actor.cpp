@@ -5217,10 +5217,8 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 		auto existingEntry = data->uidChangeFeed.find(it);
 		if (existingEntry == data->uidChangeFeed.end() || existingEntry->second->destroyed) {
 			TEST(true); // feed refreshed but then destroyed elsewhere
+			continue;
 		}
-
-		// TODO REMOVE print
-		fmt::print("DBG: fetching feed {} was refreshed but not present!! assuming destroyed\n", it.printable());
 
 		Version cleanupVersion = data->data().getLatestVersion();
 
