@@ -354,10 +354,13 @@ static std::vector<std::vector<StringRef>> parseLine(std::string& line, bool& er
 			forcetoken = true;
 			break;
 		case ' ':
+		case '\n':
+		case '\t':
+		case '\r':
 			if (!quoted) {
 				if (i > offset || (forcetoken && i == offset))
 					buf.push_back(StringRef((uint8_t*)(line.data() + offset), i - offset));
-				offset = i = line.find_first_not_of(' ', i);
+				offset = i = line.find_first_not_of(" \n\t\r", i);
 				forcetoken = false;
 			} else
 				i++;
@@ -788,8 +791,9 @@ void configureGenerator(const char* text, const char* line, std::vector<std::str
 		                   "resolvers=",
 		                   "perpetual_storage_wiggle=",
 		                   "perpetual_storage_wiggle_locality=",
-		                   "storage_migration_type="
+		                   "storage_migration_type=",
 		                   "tenant_mode=",
+		                   "blob_granules_enabled=",
 		                   nullptr };
 	arrayGenerator(text, line, opts, lc);
 }
@@ -1017,33 +1021,10 @@ struct CLIOptions {
 	}
 
 	void setupKnobs() {
-		auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
-		for (const auto& [knobName, knobValueString] : knobs) {
-			try {
-				auto knobValue = g_knobs.parseKnobValue(knobName, knobValueString);
-				g_knobs.setKnob(knobName, knobValue);
-			} catch (Error& e) {
-				if (e.code() == error_code_invalid_option_value) {
-					fprintf(stderr,
-					        "WARNING: Invalid value '%s' for knob option '%s'\n",
-					        knobValueString.c_str(),
-					        knobName.c_str());
-					TraceEvent(SevWarnAlways, "InvalidKnobValue")
-					    .detail("Knob", printable(knobName))
-					    .detail("Value", printable(knobValueString));
-				} else {
-					fprintf(stderr, "ERROR: Failed to set knob option '%s': %s\n", knobName.c_str(), e.what());
-					TraceEvent(SevError, "FailedToSetKnob")
-					    .error(e)
-					    .detail("Knob", printable(knobName))
-					    .detail("Value", printable(knobValueString));
-					exit_code = FDB_EXIT_ERROR;
-				}
-			}
-		}
+		IKnobCollection::setupKnobs(knobs);
 
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
-		g_knobs.initialize(Randomize::False, IsSimulated::False);
+		IKnobCollection::getMutableGlobalKnobCollection().initialize(Randomize::False, IsSimulated::False);
 	}
 
 	int processArg(CSimpleOpt& args) {

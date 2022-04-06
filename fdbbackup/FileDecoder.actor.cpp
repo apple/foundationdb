@@ -22,21 +22,27 @@
 #include <cstdlib>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "fdbbackup/BackupTLSConfig.h"
+#include "fdbclient/BuildFlags.h"
+#include "fdbbackup/FileConverter.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
-#include "fdbbackup/FileConverter.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/IKnobCollection.h"
+#include "fdbclient/Knobs.h"
 #include "fdbclient/MutationList.h"
+#include "flow/ArgParseUtil.h"
 #include "flow/IRandom.h"
+#include "flow/Platform.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
 #include "flow/serialize.h"
-#include "fdbclient/BuildFlags.h"
+
 #include "flow/actorcompiler.h" // has to be last include
 
 #define SevDecodeInfo SevVerbose
@@ -73,11 +79,14 @@ void printDecodeUsage() {
 	             "  --list-only    Print file list and exit.\n"
 	             "  -k KEY_PREFIX  Use the prefix for filtering mutations\n"
 	             "  --hex-prefix   HEX_PREFIX\n"
-	             "                 The prefix specified in HEX format, e.g., \\x05\\x01.\n"
+	             "                 The prefix specified in HEX format, e.g., \"\\\\x05\\\\x01\".\n"
 	             "  --begin-version-filter BEGIN_VERSION\n"
 	             "                 The version range's begin version (inclusive) for filtering.\n"
 	             "  --end-version-filter END_VERSION\n"
 	             "                 The version range's end version (exclusive) for filtering.\n"
+	             "  --knob-KNOBNAME KNOBVALUE\n"
+	             "                 Changes a knob value. KNOBNAME should be lowercase.\n"
+	             "  -s, --save     Save a copy of downloaded files (default: not saving).\n"
 	             "\n";
 	return;
 }
@@ -88,14 +97,18 @@ void printBuildInformation() {
 
 struct DecodeParams {
 	std::string container_url;
+	Optional<std::string> proxy;
 	std::string fileFilter; // only files match the filter will be decoded
 	bool log_enabled = true;
 	std::string log_dir, trace_format, trace_log_group;
 	BackupTLSConfig tlsConfig;
 	bool list_only = false;
+	bool save_file_locally = false;
 	std::string prefix; // Key prefix for filtering
 	Version beginVersionFilter = 0;
 	Version endVersionFilter = std::numeric_limits<Version>::max();
+
+	std::vector<std::pair<std::string, std::string>> knobs;
 
 	// Returns if [begin, end) overlap with the filter range
 	bool overlap(Version begin, Version end) const {
@@ -107,6 +120,10 @@ struct DecodeParams {
 		std::string s;
 		s.append("ContainerURL: ");
 		s.append(container_url);
+		if (proxy.present()) {
+			s.append(", Proxy: ");
+			s.append(proxy.get());
+		}
 		s.append(", FileFilter: ");
 		s.append(fileFilter);
 		if (log_enabled) {
@@ -130,7 +147,18 @@ struct DecodeParams {
 		if (!prefix.empty()) {
 			s.append(", KeyPrefix: ").append(printable(KeyRef(prefix)));
 		}
+		for (const auto& [knob, value] : knobs) {
+			s.append(", KNOB-").append(knob).append(" = ").append(value);
+		}
+		s.append(", SaveFile: ").append(save_file_locally ? "true" : "false");
 		return s;
+	}
+
+	void updateKnobs() {
+		IKnobCollection::setupKnobs(knobs);
+
+		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
+		IKnobCollection::getMutableGlobalKnobCollection().initialize(Randomize::False, IsSimulated::False);
 	}
 };
 
@@ -256,6 +284,20 @@ int parseDecodeCommandLine(DecodeParams* param, CSimpleOpt* args) {
 			param->tlsConfig.blobCredentials.push_back(args->OptionArg());
 			break;
 
+		case OPT_KNOB: {
+			Optional<std::string> knobName = extractPrefixedArgument("--knob", args->OptionSyntax());
+			if (!knobName.present()) {
+				std::cerr << "ERROR: unable to parse knob option '" << args->OptionSyntax() << "'\n";
+				return FDB_EXIT_ERROR;
+			}
+			param->knobs.emplace_back(knobName.get(), args->OptionArg());
+			break;
+		}
+
+		case OPT_SAVE_FILE:
+			param->save_file_locally = true;
+			break;
+
 #ifndef TLS_DISABLED
 		case TLSConfig::OPT_TLS_PLUGIN:
 			args->OptionArg();
@@ -321,16 +363,17 @@ struct VersionedMutations {
  *
  *    DecodeProgress progress(logfile);
  *    wait(progress->openFile(container));
- *    while (!progress->finished()) {
- *        VersionedMutations m = wait(progress->getNextBatch());
- *        ...
+ *    while (1) {
+ *        Optional<VersionedMutations> batch = wait(progress->getNextBatch());
+ *        if (!batch.present()) break;
+ *        ... // process the batch mutations
  *    }
  *
  * Internally, the decoding process is done block by block -- each block is
  * decoded into a list of key/value pairs, which are then decoded into batches
  * of mutations. Because a version's mutations can be split into many key/value
- * pairs, the decoding of mutation batch needs to look ahead one more pair. So
- * at any time this object might have two blocks of data in memory.
+ * pairs, the decoding of mutation needs to look ahead to find all batches that
+ * belong to the same version.
  */
 class DecodeProgress {
 	std::vector<Standalone<VectorRef<KeyValueRef>>> blocks;
@@ -338,31 +381,30 @@ class DecodeProgress {
 
 public:
 	DecodeProgress() = default;
-	DecodeProgress(const LogFile& file) : file(file) {}
+	DecodeProgress(const LogFile& file, bool save) : file(file), save(save) {}
 
-	// If there are no more mutations to pull from the file.
-	bool finished() const { return done; }
+	~DecodeProgress() {
+		if (lfd != -1) {
+			close(lfd);
+		}
+	}
 
 	// Open and loads file into memory
 	Future<Void> openFile(Reference<IBackupContainer> container) { return openFileImpl(this, container); }
 
 	// The following are private APIs:
 
-	// PRECONDITION: finished() must return false before calling this function.
 	// Returns the next batch of mutations along with the arena backing it.
 	// Note the returned batch can be empty when the file has unfinished
 	// version batch data that are in the next file.
-	VersionedMutations getNextBatch() {
-		ASSERT(!finished());
-
-		VersionedMutations vms;
+	Optional<VersionedMutations> getNextBatch() {
 		for (auto& [version, m] : mutationBlocksByVersion) {
 			if (m.isComplete()) {
+				VersionedMutations vms;
 				vms.version = version;
-				std::vector<MutationRef> mutations = fileBackup::decodeMutationLogValue(m.serializedMutations);
-				TraceEvent("Decode").detail("Version", vms.version).detail("N", mutations.size());
-				vms.mutations.insert(vms.mutations.end(), mutations.begin(), mutations.end());
 				vms.serializedMutations = m.serializedMutations;
+				vms.mutations = fileBackup::decodeMutationLogValue(vms.serializedMutations);
+				TraceEvent("Decode").detail("Version", vms.version).detail("N", vms.mutations.size());
 				mutationBlocksByVersion.erase(version);
 				return vms;
 			}
@@ -372,13 +414,27 @@ public:
 		if (!mutationBlocksByVersion.empty()) {
 			TraceEvent(SevWarn, "UnfishedBlocks").detail("NumberOfVersions", mutationBlocksByVersion.size());
 		}
-		done = true;
-		return vms;
+		return Optional<VersionedMutations>();
 	}
 
 	ACTOR static Future<Void> openFileImpl(DecodeProgress* self, Reference<IBackupContainer> container) {
 		Reference<IAsyncFile> fd = wait(container->readFile(self->file.fileName));
 		self->fd = fd;
+		if (self->save) {
+			std::string dir = self->file.fileName;
+			std::size_t found = self->file.fileName.find_last_of('/');
+			if (found != std::string::npos) {
+				std::string path = self->file.fileName.substr(0, found);
+				if (!directoryExists(path)) {
+					platform::createDirectory(path);
+				}
+			}
+			self->lfd = open(self->file.fileName.c_str(), O_WRONLY | O_CREAT | O_TRUNC);
+			if (self->lfd == -1) {
+				TraceEvent(SevError, "OpenLocalFileFailed").detail("File", self->file.fileName);
+				throw platform_error();
+			}
+		}
 		while (!self->eof) {
 			wait(readAndDecodeFile(self));
 		}
@@ -403,9 +459,33 @@ public:
 			}
 
 			// Decode a file block into log_key and log_value chunks
-			Standalone<VectorRef<KeyValueRef>> chunks =
+			state Standalone<VectorRef<KeyValueRef>> chunks =
 			    wait(fileBackup::decodeMutationLogFileBlock(self->fd, self->offset, len));
 			self->blocks.push_back(chunks);
+
+			if (self->save) {
+				ASSERT(self->lfd != -1);
+
+				// Read the chunck one more time
+				state Standalone<StringRef> buf = makeString(len);
+				int rLen = wait(self->fd->read(mutateString(buf), len, self->offset));
+				if (rLen != len)
+					throw restore_bad_read();
+
+				int wlen = write(self->lfd, buf.begin(), len);
+				if (wlen != len) {
+					TraceEvent(SevError, "WriteLocalFileFailed")
+					    .detail("File", self->file.fileName)
+					    .detail("Offset", self->offset)
+					    .detail("Len", len)
+					    .detail("Wrote", wlen);
+					throw platform_error();
+				}
+				TraceEvent("WriteLocalFile")
+				    .detail("Name", self->file.fileName)
+				    .detail("Len", len)
+				    .detail("Offset", self->offset);
+			}
 
 			TraceEvent("ReadFile")
 			    .detail("Name", self->file.fileName)
@@ -429,7 +509,8 @@ public:
 	Reference<IAsyncFile> fd;
 	int64_t offset = 0;
 	bool eof = false;
-	bool done = false;
+	bool save = false;
+	int lfd = -1; // local file descriptor
 };
 
 ACTOR Future<Void> process_file(Reference<IBackupContainer> container, LogFile file, UID uid, DecodeParams params) {
@@ -438,10 +519,14 @@ ACTOR Future<Void> process_file(Reference<IBackupContainer> container, LogFile f
 		return Void();
 	}
 
-	state DecodeProgress progress(file);
+	state DecodeProgress progress(file, params.save_file_locally);
 	wait(progress.openFile(container));
-	while (!progress.finished()) {
-		VersionedMutations vms = progress.getNextBatch();
+	while (true) {
+		auto batch = progress.getNextBatch();
+		if (!batch.present())
+			break;
+
+		const VersionedMutations& vms = batch.get();
 		if (vms.version < params.beginVersionFilter || vms.version >= params.endVersionFilter) {
 			TraceEvent("SkipVersion").detail("Version", vms.version);
 			continue;
@@ -457,7 +542,8 @@ ACTOR Future<Void> process_file(Reference<IBackupContainer> container, LogFile f
 					print = m.param1.startsWith(StringRef(params.prefix));
 				} else if (m.type == MutationRef::ClearRange) {
 					KeyRange range(KeyRangeRef(m.param1, m.param2));
-					print = range.contains(StringRef(params.prefix));
+					KeyRange range2 = prefixRange(StringRef(params.prefix));
+					print = range.intersects(range2);
 				} else {
 					ASSERT(false);
 				}
@@ -476,7 +562,8 @@ ACTOR Future<Void> process_file(Reference<IBackupContainer> container, LogFile f
 }
 
 ACTOR Future<Void> decode_logs(DecodeParams params) {
-	state Reference<IBackupContainer> container = IBackupContainer::openContainer(params.container_url);
+	state Reference<IBackupContainer> container =
+	    IBackupContainer::openContainer(params.container_url, params.proxy, {});
 	state UID uid = deterministicRandom()->randomUniqueID();
 	state BackupFileList listing = wait(container->dumpFileList());
 	// remove partitioned logs
@@ -514,10 +601,10 @@ ACTOR Future<Void> decode_logs(DecodeParams params) {
 
 int main(int argc, char** argv) {
 	try {
-		CSimpleOpt* args =
-		    new CSimpleOpt(argc, argv, file_converter::gConverterOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
+		std::unique_ptr<CSimpleOpt> args(
+		    new CSimpleOpt(argc, argv, file_converter::gConverterOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE));
 		file_converter::DecodeParams param;
-		int status = file_converter::parseDecodeCommandLine(&param, args);
+		int status = file_converter::parseDecodeCommandLine(&param, args.get());
 		std::cout << "Params: " << param.toString() << "\n";
 		if (status != FDB_EXIT_SUCCESS) {
 			file_converter::printDecodeUsage();
@@ -550,6 +637,9 @@ int main(int argc, char** argv) {
 
 		StringRef url(param.container_url);
 		setupNetwork(0, UseMetrics::True);
+
+		// Must be called after setupNetwork() to be effective
+		param.updateKnobs();
 
 		TraceEvent::setNetworkThread();
 		openTraceFile(NetworkAddress(), 10 << 20, 500 << 20, param.log_dir, "decode", param.trace_log_group);

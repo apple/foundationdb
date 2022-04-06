@@ -1,0 +1,9 @@
+[[test]]
+testTitle = 'BlobManagerUnit'
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    maxTestCases = 0
+    testsMatching = /blobmanager/

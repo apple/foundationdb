@@ -262,7 +262,7 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf,
 				when(RestoreLoadFileRequest req = waitNext(loaderInterf.loadFile.getFuture())) {
 					requestTypeStr = "loadFile";
 					hasQueuedRequests = !self->loadingQueue.empty() || !self->sendingQueue.empty();
-					self->initBackupContainer(req.param.url);
+					self->initBackupContainer(req.param.url, req.param.proxy);
 					self->loadingQueue.push(req);
 					if (!hasQueuedRequests) {
 						self->hasPendingRequests->set(true);

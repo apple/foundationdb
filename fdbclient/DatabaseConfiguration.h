@@ -104,6 +104,8 @@ struct DatabaseConfiguration {
 	DatabaseConfiguration();
 
 	void applyMutation(MutationRef mutation);
+	// return true if mutation will cause configuration changes
+	bool involveMutation(MutationRef mutation);
 	bool set(KeyRef key,
 	         ValueRef value); // Returns true if a configuration option that requires recovery to take effect is changed
 	bool clear(KeyRangeRef keys);
@@ -250,6 +252,8 @@ struct DatabaseConfiguration {
 	// Storage Migration Type
 	StorageMigrationType storageMigrationType;
 
+	// Blob Granules
+	bool blobGranulesEnabled;
 	TenantMode tenantMode;
 
 	// Excluded servers (no state should be here)

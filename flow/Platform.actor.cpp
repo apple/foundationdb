@@ -33,6 +33,7 @@
 
 #if (!defined(TLS_DISABLED) && !defined(_WIN32))
 #include "flow/StreamCipher.h"
+#include "flow/BlobCipher.h"
 #endif
 #include "flow/Trace.h"
 #include "flow/Error.h"
@@ -1924,16 +1925,20 @@ void getLocalTime(const time_t* timep, struct tm* result) {
 #endif
 }
 
-std::string timerIntToGmt(uint64_t timestamp) {
-	auto time = (time_t)(timestamp / 1e9); // convert to second, see timer_int() implementation
-	return getGmtTimeStr(&time);
-}
+// Outputs a GMT time string for the given epoch seconds, which looks like
+// 2013-04-28 20:57:01.000 +0000
+std::string epochsToGMTString(double epochs) {
+	auto time = (time_t)epochs;
 
-std::string getGmtTimeStr(const time_t* time) {
 	char buff[50];
-	auto size = strftime(buff, 50, "%c %z", gmtime(time));
-	// printf(buff);
-	return std::string(std::begin(buff), std::begin(buff) + size);
+	auto size = strftime(buff, 50, "%Y-%m-%d %H:%M:%S", gmtime(&time));
+	std::string timeString = std::string(std::begin(buff), std::begin(buff) + size);
+
+	// Add fractional seconds and GMT timezone.
+	double integerPart;
+	timeString += format(".%03.3d +0000", (int)(1000 * modf(epochs, &integerPart)));
+
+	return timeString;
 }
 
 void setMemoryQuota(size_t limit) {
@@ -3501,6 +3506,7 @@ void crashHandler(int sig) {
 #if (!defined(TLS_DISABLED) && !defined(_WIN32))
 	StreamCipherKey::cleanup();
 	StreamCipher::cleanup();
+	BlobCipherKeyCache::cleanup();
 #endif
 
 	fflush(stdout);
@@ -3752,6 +3758,40 @@ void fdb_probe_actor_exit(const char* name, unsigned long id, int index) {
 	FDB_TRACE_PROBE(actor_exit, name, id, index);
 }
 #endif
+
+void throwExecPathError(Error e, char path[]) {
+	Severity sev = e.code() == error_code_io_error ? SevError : SevWarnAlways;
+	TraceEvent(sev, "GetPathError").error(e).detail("Path", path);
+	throw e;
+}
+
+std::string getExecPath() {
+	char path[1024];
+	uint32_t size = sizeof(path);
+#if defined(__APPLE__)
+	if (_NSGetExecutablePath(path, &size) == 0) {
+		return std::string(path);
+	} else {
+		throwExecPathError(platform_error(), path);
+	}
+#elif defined(__linux__)
+	ssize_t len = ::readlink("/proc/self/exe", path, size);
+	if (len != -1) {
+		path[len] = '\0';
+		return std::string(path);
+	} else {
+		throwExecPathError(platform_error(), path);
+	}
+#elif defined(_WIN32)
+	auto len = GetModuleFileName(nullptr, path, size);
+	if (len != 0) {
+		return std::string(path);
+	} else {
+		throwExecPathError(platform_error(), path);
+	}
+#endif
+	return "unsupported OS";
+}
 
 void setupRunLoopProfiler() {
 #ifdef __linux__
