@@ -475,11 +475,10 @@ protected:
 protected:
 	BroadcastedStorageTeamPeekCursorBase(std::unique_ptr<details::CursorContainerBase>&& pCursorContainer_,
 	                                     std::unique_ptr<details::CursorContainerBase>&& pCursorContainerSnapshot_,
-	                                     const Version& version_ = 0)
+	                                     const Version& version_ = -1)
 	  : pCursorContainer(std::move(pCursorContainer_)),
-	    remoteMoreAvailableSnapshot{ false, version_, std::move(pCursorContainerSnapshot_) }, currentVersion(version_) {
-
-	}
+	    remoteMoreAvailableSnapshot{ false, version_, std::move(pCursorContainerSnapshot_) },
+	    currentVersion(version_ + 1) {}
 
 	// Tries to fill the cursor heap, returns true if the cursorContainer is filled with cursors.
 	// If cursorContainer is not empty, the behavior is undefined.
@@ -513,7 +512,7 @@ protected:
 	virtual void nextImpl() override;
 
 public:
-	BroadcastedStorageTeamPeekCursor_Ordered(const Version& version_ = 0)
+	BroadcastedStorageTeamPeekCursor_Ordered(const Version& version_ = -1)
 	  : BroadcastedStorageTeamPeekCursorBase(std::make_unique<details::OrderedCursorContainer>(),
 	                                         std::make_unique<details::OrderedCursorContainer>(),
 	                                         version_) {}
@@ -528,7 +527,7 @@ protected:
 	virtual void nextImpl() override;
 
 public:
-	BroadcastedStorageTeamPeekCursor_Unordered(const Version& version_ = 0)
+	BroadcastedStorageTeamPeekCursor_Unordered(const Version& version_ = -1)
 	  : BroadcastedStorageTeamPeekCursorBase(std::make_unique<details::UnorderedCursorContainer>(),
 	                                         std::make_unique<details::UnorderedCursorContainer>(),
 	                                         version_) {}
