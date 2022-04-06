@@ -81,6 +81,11 @@ struct Hostname {
 	void resetToUnresolved();
 	HostnameStatus status = UNRESOLVED;
 	AsyncTrigger resolveFinish;
+
+    template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, host, service, isTLS, resolvedAddress, status);
+	}
 };
 
 #endif

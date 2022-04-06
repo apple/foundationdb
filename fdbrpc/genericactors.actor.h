@@ -87,7 +87,10 @@ Future<ErrorOr<REPLY_TYPE(Req)>> tryGetReplyFromHostname(RequestStream<Req>* to,
 	}
 	Optional<NetworkAddress> address = hostname.resolvedAddress;
 	*to = RequestStream<Req>(Endpoint::wellKnown({ address.get() }, token));
-	return to->tryGetReply(request);
+	// return to->tryGetReply(request);
+	Future<ErrorOr<REPLY_TYPE(Req)>> ret = to->tryGetReply(request);
+	return ret;
+	// return ErrorOr<REPLY_TYPE(Req)>(lookup_failed());
 }
 
 ACTOR template <class Req>
@@ -106,7 +109,10 @@ Future<ErrorOr<REPLY_TYPE(Req)>> tryGetReplyFromHostname(RequestStream<Req>* to,
 	}
 	Optional<NetworkAddress> address = hostname.resolvedAddress;
 	*to = RequestStream<Req>(Endpoint::wellKnown({ address.get() }, token));
-	return to->tryGetReply(request, taskID);
+	// return to->tryGetReply(request, taskID);
+	Future<ErrorOr<REPLY_TYPE(Req)>> ret = to->tryGetReply(request, taskID);
+	return ret;
+	// return ErrorOr<REPLY_TYPE(Req)>(lookup_failed());
 }
 
 ACTOR template <class Req>
