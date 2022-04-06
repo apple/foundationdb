@@ -440,6 +440,8 @@ struct ChangeFeedInfo : ReferenceCounted<ChangeFeedInfo> {
 	Version metadataCreateVersion = invalidVersion;
 
 	bool removing = false;
+	bool destroyed = false;
+	bool possiblyDestroyed = false;
 
 	KeyRangeMap<std::unordered_map<UID, Promise<Void>>> moveTriggers;
 
@@ -471,6 +473,15 @@ struct ChangeFeedInfo : ReferenceCounted<ChangeFeedInfo> {
 			triggerRange->value().erase(streamToRemove);
 		}
 		// TODO: may be more cleanup possible here
+	}
+
+	void destroy(Version destroyVersion) {
+		emptyVersion = destroyVersion - 1;
+		stopVersion = destroyVersion;
+		removing = true;
+		destroyed = true;
+		moved(range);
+		newMutations.trigger();
 	}
 };
 
@@ -4699,6 +4710,9 @@ ACTOR Future<Void> tryGetRange(PromiseStream<RangeResult> results, Transaction* 
 	}
 }
 
+// global validation that missing refreshed feeds were previously destroyed
+static std::unordered_set<Key> allDestroyedChangeFeeds;
+
 // We have to store the version the change feed was stopped at in the SS instead of just the stopped status
 // In addition to simplifying stopping logic, it enables communicating stopped status when fetching change feeds
 // from other SS correctly
@@ -4944,7 +4958,9 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 			    .errorUnsuppressed(e)
 			    .detail("RangeID", rangeId.printable())
 			    .detail("Range", range.toString())
-			    .detail("EndVersion", endVersion);
+			    .detail("EndVersion", endVersion)
+			    .detail("Removing", changeFeedInfo->removing)
+			    .detail("Destroyed", changeFeedInfo->destroyed);
 			throw;
 		}
 	}
@@ -5057,6 +5073,52 @@ ACTOR Future<Version> fetchChangeFeed(StorageServer* data,
 				throw;
 			}
 		}
+
+		// TODO REMOVE
+		fmt::print("DBG: Feed {} possibly destroyed {}, {} metadata create, {} desired committed\n",
+		           changeFeedInfo->id.printable(),
+		           changeFeedInfo->possiblyDestroyed,
+		           changeFeedInfo->metadataCreateVersion,
+		           data->desiredOldestVersion.get());
+
+		// if the change feed definitely used to exist, but we may have missed a destroy metadata change, assume it is
+		// destroyed
+		if (changeFeedInfo->possiblyDestroyed &&
+		    changeFeedInfo->metadataCreateVersion <= data->desiredOldestVersion.get()) {
+
+			Version cleanupVersion = data->data().getLatestVersion();
+
+			TraceEvent(SevDebug, "DestroyingChangeFeedFromFetch", data->thisServerID)
+			    .detail("RangeID", changeFeedInfo->id.printable())
+			    .detail("Range", changeFeedInfo->range.toString())
+			    .detail("Version", cleanupVersion);
+
+			if (g_network->isSimulated()) {
+				ASSERT(allDestroyedChangeFeeds.count(changeFeedInfo->id));
+			}
+
+			Key beginClearKey = changeFeedInfo->id.withPrefix(persistChangeFeedKeys.begin);
+
+			auto& mLV = data->addVersionToMutationLog(cleanupVersion);
+			data->addMutationToMutationLog(
+			    mLV, MutationRef(MutationRef::ClearRange, beginClearKey, keyAfter(beginClearKey)));
+			++data->counters.kvSystemClearRanges;
+			data->addMutationToMutationLog(mLV,
+			                               MutationRef(MutationRef::ClearRange,
+			                                           changeFeedDurableKey(changeFeedInfo->id, 0),
+			                                           changeFeedDurableKey(changeFeedInfo->id, cleanupVersion)));
+			++data->counters.kvSystemClearRanges;
+
+			changeFeedInfo->destroy(cleanupVersion);
+			data->changeFeedCleanupDurable[changeFeedInfo->id] = cleanupVersion;
+
+			for (auto& it : data->changeFeedRemovals) {
+				it.second.send(changeFeedInfo->id);
+			}
+
+			return invalidVersion;
+		}
+		// otherwise assume the feed just hasn't been created on the SS we tried to read it from yet, retry
 		wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
 	}
 }
@@ -5070,22 +5132,26 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 	// ChangeServerKeys mutation. This guarantees we don't miss any metadata between the previous batch's version
 	// (data->version) and the mutation version.
 	wait(data->version.whenAtLeast(data->version.get() + 1));
-	state Version fetchVersion = fetchVersion = data->version.get();
+	state Version fetchVersion = data->version.get();
 
 	TraceEvent(SevDebug, "FetchChangeFeedMetadata", data->thisServerID)
 	    .detail("Range", keys.toString())
 	    .detail("FetchVersion", fetchVersion)
 	    .detail("FKID", fetchKeysID);
 
+	state std::set<Key> refreshedFeedIds;
 	// before fetching feeds from other SS's, refresh any feeds we already have that are being marked as removed
 	auto ranges = data->keyChangeFeed.intersectingRanges(keys);
 	for (auto& r : ranges) {
 		for (auto& cfInfo : r.value()) {
 			auto feedCleanup = data->changeFeedCleanupDurable.find(cfInfo->id);
-			if (feedCleanup != data->changeFeedCleanupDurable.end() && cfInfo->removing) {
+			if (feedCleanup != data->changeFeedCleanupDurable.end() && cfInfo->removing && !cfInfo->destroyed) {
 				TEST(true); // re-fetching feed scheduled for deletion! Un-mark it as removing
+				refreshedFeedIds.insert(cfInfo->id);
 
 				cfInfo->removing = false;
+				// because we now have a gap in the metadata, it's possible this feed was destroyed
+				cfInfo->possiblyDestroyed = true;
 				// reset fetch versions because everything previously fetched was cleaned up
 				cfInfo->fetchVersion = invalidVersion;
 				cfInfo->durableFetchVersion = NotifiedVersion();
@@ -5101,11 +5167,20 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 				    MutationRef(MutationRef::SetValue,
 				                persistChangeFeedKeys.begin.toString() + cfInfo->id.toString(),
 				                changeFeedSSValue(cfInfo->range, cfInfo->emptyVersion + 1, cfInfo->stopVersion)));
+				TraceEvent(SevDebug, "ResetChangeFeedInfo", data->thisServerID)
+				    .detail("RangeID", cfInfo->id.printable())
+				    .detail("Range", cfInfo->range.toString())
+				    .detail("FetchVersion", fetchVersion)
+				    .detail("EmptyVersion", cfInfo->emptyVersion)
+				    .detail("StopVersion", cfInfo->stopVersion)
+				    .detail("CleanupPendingVersion",
+				            feedCleanup != data->changeFeedCleanupDurable.end() ? feedCleanup->second : invalidVersion)
+				    .detail("FKID", fetchKeysID);
 			}
 		}
 	}
 
-	std::vector<OverlappingChangeFeedEntry> feeds = wait(data->cx->getOverlappingChangeFeeds(keys, fetchVersion + 1));
+	state std::vector<OverlappingChangeFeedEntry> feeds = wait(data->cx->getOverlappingChangeFeeds(keys, fetchVersion));
 	// handle change feeds removed while fetching overlapping
 	while (removals.getFuture().isReady()) {
 		Key remove = waitNext(removals.getFuture());
@@ -5134,10 +5209,12 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 		    .detail("StopVersion", cfEntry.stopVersion)
 		    .detail("Existing", existing)
 		    .detail("CleanupPendingVersion", cleanupPending ? cleanupEntry->second : invalidVersion)
-		    .detail("FKID", fkId);
+		    .detail("FKID", fetchKeysID);
 
 		bool addMutationToLog = false;
 		Reference<ChangeFeedInfo> changeFeedInfo;
+
+		refreshedFeedIds.erase(cfEntry.rangeId);
 
 		if (!existing) {
 			TEST(cleanupPending); // Fetch change feed which is cleanup pending. This means there was a move away and a
@@ -5190,6 +5267,48 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 			       changeFeedInfo->mutations.front().version <= changeFeedInfo->emptyVersion) {
 				changeFeedInfo->mutations.pop_front();
 			}
+		}
+	}
+
+	TEST(!refreshedFeedIds.empty()); // Feed destroyed between move away and move back
+	for (auto& feedId : refreshedFeedIds) {
+		auto existingEntry = data->uidChangeFeed.find(feedId);
+		if (existingEntry == data->uidChangeFeed.end() || existingEntry->second->destroyed) {
+			TEST(true); // feed refreshed but then destroyed elsewhere
+			continue;
+		}
+
+		// TODO REMOVE print
+		fmt::print("DBG: fetching feed {} was refreshed but not present!! assuming destroyed\n", feedId.printable());
+
+		Version cleanupVersion = data->data().getLatestVersion();
+
+		TraceEvent(SevDebug, "DestroyingChangeFeedFromFetchMetadata", data->thisServerID)
+		    .detail("RangeID", feedId.printable())
+		    .detail("Range", existingEntry->second->range.toString())
+		    .detail("Version", cleanupVersion);
+
+		if (g_network->isSimulated()) {
+			ASSERT(allDestroyedChangeFeeds.count(feedId));
+		}
+
+		Key beginClearKey = feedId.withPrefix(persistChangeFeedKeys.begin);
+
+		auto& mLV = data->addVersionToMutationLog(cleanupVersion);
+		data->addMutationToMutationLog(mLV,
+		                               MutationRef(MutationRef::ClearRange, beginClearKey, keyAfter(beginClearKey)));
+		++data->counters.kvSystemClearRanges;
+		data->addMutationToMutationLog(mLV,
+		                               MutationRef(MutationRef::ClearRange,
+		                                           changeFeedDurableKey(feedId, 0),
+		                                           changeFeedDurableKey(feedId, cleanupVersion)));
+		++data->counters.kvSystemClearRanges;
+
+		existingEntry->second->destroy(cleanupVersion);
+		data->changeFeedCleanupDurable[feedId] = cleanupVersion;
+
+		for (auto& it : data->changeFeedRemovals) {
+			it.second.send(feedId);
 		}
 	}
 	return feedIds;
@@ -5247,7 +5366,6 @@ ACTOR Future<std::unordered_map<Key, Version>> dispatchChangeFeeds(StorageServer
 					}
 				}
 				if (done) {
-					data->changeFeedRemovals.erase(fetchKeysID);
 					return feedMaxFetched;
 				}
 			}
@@ -5656,6 +5774,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				feedFetchedVersions[newFetch.first] = newFetch.second;
 			}
 		}
+
+		data->changeFeedRemovals.erase(fetchKeysID);
 
 		shard->phase = AddingShard::Waiting;
 
@@ -6305,13 +6425,12 @@ private:
 				                                           changeFeedDurableKey(feed->second->id, currentVersion)));
 				++data->counters.kvSystemClearRanges;
 
-				feed->second->emptyVersion = currentVersion - 1;
-				feed->second->stopVersion = currentVersion;
-				feed->second->removing = true;
-				feed->second->moved(feed->second->range);
-				feed->second->newMutations.trigger();
-
+				feed->second->destroy(currentVersion);
 				data->changeFeedCleanupDurable[feed->first] = cleanupVersion;
+
+				if (g_network->isSimulated()) {
+					allDestroyedChangeFeeds.insert(changeFeedId);
+				}
 			}
 
 			if (status == ChangeFeedStatus::CHANGE_FEED_DESTROY) {
