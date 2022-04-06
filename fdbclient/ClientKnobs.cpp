@@ -35,7 +35,6 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( TOO_MANY,                            1000000 );
 
 	init( SYSTEM_MONITOR_INTERVAL,                 5.0 );
-	init( MEMORY_USAGE_CHECK_INTERVAL,             1.0 );
 	init( NETWORK_BUSYNESS_MONITOR_INTERVAL,       1.0 );
 	init( TSS_METRICS_LOGGING_INTERVAL,          120.0 ); // 2 minutes by default
 

@@ -46,6 +46,7 @@
 #include "flow/ArgParseUtil.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/FastRef.h"
+#include "flow/Knobs.h"
 #include "flow/Platform.h"
 #include "flow/SystemMonitor.h"
 
@@ -457,7 +458,7 @@ static void printProgramUsage(const char* name) {
 	       "  --debug-tls    Prints the TLS configuration and certificate chain, then exits.\n"
 	       "                 Useful in reporting and diagnosing TLS issues.\n"
 	       "  --build-flags  Print build information and exit.\n"
-	       "  --memory       Resident memory limit of the CLI (defaults to 8MiB).\n"
+	       "  --memory       Resident memory limit of the CLI (defaults to 8GiB).\n"
 	       "  -v, --version  Print FoundationDB CLI version information and exit.\n"
 	       "  -h, --help     Display this help and exit.\n");
 }
@@ -2239,7 +2240,8 @@ int main(int argc, char** argv) {
 		if (opt.exit_code != -1) {
 			return opt.exit_code;
 		}
-		Future<Void> memoryUsageMonitor = startMemoryUsageMonitor(opt.memLimit, 1.0);
+		Future<Void> memoryUsageMonitor =
+		    startMemoryUsageMonitor(opt.memLimit, FLOW_KNOBS->MEMORY_USAGE_CHECK_INTERVAL);
 		Future<int> cliFuture = runCli(opt);
 		Future<Void> timeoutFuture = opt.exit_timeout ? timeExit(opt.exit_timeout) : Never();
 		auto f = stopNetworkAfter(success(cliFuture) || timeoutFuture);

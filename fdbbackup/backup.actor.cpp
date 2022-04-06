@@ -3919,7 +3919,6 @@ int main(int argc, char* argv[]) {
 
 		Error::init();
 		std::set_new_handler(&platform::outOfMemory);
-		auto memoryUsageMonitor = startMemoryUsageMonitor(memLimit, CLIENT_KNOBS->MEMORY_USAGE_CHECK_INTERVAL);
 		setMemoryQuota(virtualMemLimit);
 
 		Database db;
@@ -3936,6 +3935,8 @@ int main(int argc, char* argv[]) {
 			fprintf(stderr, "ERROR: %s\n", e.what());
 			return FDB_EXIT_ERROR;
 		}
+
+		Future<Void> memoryUsageMonitor = startMemoryUsageMonitor(memLimit, FLOW_KNOBS->MEMORY_USAGE_CHECK_INTERVAL);
 
 		IKnobCollection::setupKnobs(knobs);
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs

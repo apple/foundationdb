@@ -635,7 +635,7 @@ static void printUsage(const char* name, bool devhelp) {
 	                 " Define a locality key. LOCALITYKEY is case-insensitive though"
 	                 " LOCALITYVALUE is not.");
 	printOptionUsage("-m SIZE, --memory SIZE",
-	                 " Resident memory limit. The default value is unlimited. When specified"
+	                 " Resident memory limit. The default value is 8GiB. When specified"
 	                 " without a unit, MiB is assumed.");
 	printOptionUsage("--memory-vsize SIZE",
 	                 " Virtual memory limit. The default value is unlimited. When specified"
@@ -1797,7 +1797,7 @@ int main(int argc, char* argv[]) {
 		auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
 		g_knobs.setKnob("log_directory", KnobValue::create(opts.logFolder));
 		g_knobs.setKnob("conn_file", KnobValue::create(opts.connFile));
-		if (role != ServerRole::Simulation) {
+		if (role != ServerRole::Simulation && opts.memLimit > 0) {
 			g_knobs.setKnob("commit_batches_mem_bytes_hard_limit",
 			                KnobValue::create(static_cast<int64_t>(opts.memLimit)));
 		}
@@ -1937,7 +1937,7 @@ int main(int argc, char* argv[]) {
 
 		Error::init();
 		std::set_new_handler(&platform::outOfMemory);
-		auto memoryUsageMonitor = startMemoryUsageMonitor(opts.memLimit, SERVER_KNOBS->MEMORY_USAGE_CHECK_INTERVAL);
+		auto memoryUsageMonitor = startMemoryUsageMonitor(opts.memLimit, FLOW_KNOBS->MEMORY_USAGE_CHECK_INTERVAL);
 		setMemoryQuota(opts.virtualMemLimit);
 
 		Future<Optional<Void>> f;

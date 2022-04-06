@@ -498,7 +498,6 @@ public:
 	std::string LOG_DIRECTORY;
 	std::string CONN_FILE;
 	int64_t SERVER_MEM_LIMIT;
-	double MEMORY_USAGE_CHECK_INTERVAL;
 	double SYSTEM_MONITOR_FREQUENCY;
 
 	// Ratekeeper

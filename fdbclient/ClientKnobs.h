@@ -34,7 +34,6 @@ public:
 	int TOO_MANY; // FIXME: this should really be split up so we can control these more specifically
 
 	double SYSTEM_MONITOR_INTERVAL;
-	double MEMORY_USAGE_CHECK_INTERVAL;
 	double NETWORK_BUSYNESS_MONITOR_INTERVAL; // The interval in which we should update the network busyness metric
 	double TSS_METRICS_LOGGING_INTERVAL;
 
