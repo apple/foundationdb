@@ -224,13 +224,16 @@ struct BlobManagerStats {
 	Counter ccRowsChecked;
 	Counter ccBytesChecked;
 	Counter ccMismatches;
+	Counter ccTimeouts;
+	Counter ccErrors;
 	Future<Void> logger;
 
 	// Current stats maintained for a given blob worker process
 	explicit BlobManagerStats(UID id, double interval, std::unordered_map<UID, BlobWorkerInterface>* workers)
 	  : cc("BlobManagerStats", id.toString()), granuleSplits("GranuleSplits", cc),
 	    granuleWriteHotSplits("GranuleWriteHotSplits", cc), ccGranulesChecked("CCGranulesChecked", cc),
-	    ccRowsChecked("CCRowsChecked", cc), ccBytesChecked("CCBytesChecked", cc), ccMismatches("CCMismatches", cc) {
+	    ccRowsChecked("CCRowsChecked", cc), ccBytesChecked("CCBytesChecked", cc), ccMismatches("CCMismatches", cc),
+	    ccTimeouts("CCTimeouts", cc), ccErrors("CCErrors", cc) {
 		specialCounter(cc, "WorkerCount", [workers]() { return workers->size(); });
 		logger = traceCounters("BlobManagerMetrics", id, interval, &cc, "BlobManagerMetrics");
 	}
@@ -2743,6 +2746,25 @@ static void blobManagerExclusionSafetyCheck(Reference<BlobManagerData> self,
 	req.reply.send(reply);
 }
 
+ACTOR Future<int64_t> bgccCheckGranule(Reference<BlobManagerData> bmData, KeyRange range) {
+	state std::pair<RangeResult, Version> fdbResult = wait(readFromFDB(bmData->db, range));
+
+	std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> blobResult =
+	    wait(readFromBlob(bmData->db, bmData->bstore, range, 0, fdbResult.second));
+
+	if (!compareFDBAndBlob(fdbResult.first, blobResult, range, fdbResult.second, BM_DEBUG)) {
+		++bmData->stats.ccMismatches;
+	}
+
+	int64_t bytesRead = fdbResult.first.expectedSize();
+
+	++bmData->stats.ccGranulesChecked;
+	bmData->stats.ccRowsChecked += fdbResult.first.size();
+	bmData->stats.ccBytesChecked += bytesRead;
+
+	return bytesRead;
+}
+
 // FIXME: could eventually make this more thorough by storing some state in the DB or something
 // FIXME: simpler solution could be to shuffle ranges
 ACTOR Future<Void> bgConsistencyCheck(Reference<BlobManagerData> bmData) {
@@ -2775,32 +2797,31 @@ ACTOR Future<Void> bgConsistencyCheck(Reference<BlobManagerData> bmData) {
 				tries--;
 			}
 
+			state int64_t allowanceBytes = SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES;
 			if (tries == 0) {
 				if (BM_DEBUG) {
 					printf("BGCC couldn't find random range to check, skipping\n");
 				}
-				wait(rateLimiter->getAllowance(SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES));
 			} else {
-				state std::pair<RangeResult, Version> fdbResult = wait(readFromFDB(bmData->db, range));
-
-				std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> blobResult =
-				    wait(readFromBlob(bmData->db, bmData->bstore, range, 0, fdbResult.second));
-
-				if (!compareFDBAndBlob(fdbResult.first, blobResult, range, fdbResult.second, BM_DEBUG)) {
-					++bmData->stats.ccMismatches;
+				try {
+					Optional<int64_t> bytesRead =
+					    wait(timeout(bgccCheckGranule(bmData, range), SERVER_KNOBS->BGCC_TIMEOUT));
+					if (bytesRead.present()) {
+						allowanceBytes = bytesRead.get();
+					} else {
+						++bmData->stats.ccTimeouts;
+					}
+				} catch (Error& e) {
+					if (e.code() == error_code_operation_cancelled) {
+						throw e;
+					}
+					TraceEvent(SevWarn, "BGCCError", bmData->id).error(e).detail("Epoch", bmData->epoch);
+					++bmData->stats.ccErrors;
 				}
-
-				int64_t bytesRead = fdbResult.first.expectedSize();
-
-				++bmData->stats.ccGranulesChecked;
-				bmData->stats.ccRowsChecked += fdbResult.first.size();
-				bmData->stats.ccBytesChecked += bytesRead;
-
-				// clear fdb result to release memory since it is a state variable
-				fdbResult = std::pair(RangeResult(), 0);
-
-				wait(rateLimiter->getAllowance(bytesRead));
 			}
+			// wait at least some interval if snapshot is small and to not overwhelm the system with reads (for example,
+			// empty database with one empty granule)
+			wait(rateLimiter->getAllowance(allowanceBytes) && delay(SERVER_KNOBS->BGCC_MIN_INTERVAL));
 		} else {
 			if (BM_DEBUG) {
 				fmt::print("BGCC found no workers, skipping\n", bmData->workerAssignments.size());

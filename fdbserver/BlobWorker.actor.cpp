@@ -400,8 +400,7 @@ ACTOR Future<Void> updateGranuleSplitState(Transaction* tr,
 				fmt::print("{0} destroying old granule {1}\n", currentGranuleID.toString(), parentGranuleID.toString());
 			}
 
-			// FIXME: appears change feed destroy isn't working! ADD BACK
-			// wait(updateChangeFeed(tr, granuleIDToCFKey(parentGranuleID), ChangeFeedStatus::CHANGE_FEED_DESTROY));
+			wait(updateChangeFeed(tr, granuleIDToCFKey(parentGranuleID), ChangeFeedStatus::CHANGE_FEED_DESTROY));
 
 			Key oldGranuleLockKey = blobGranuleLockKeyFor(parentGranuleRange);
 			// FIXME: deleting granule lock can cause races where another granule with the same range starts way later
@@ -863,6 +862,23 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 	}
 }
 
+struct CounterHolder {
+	int* counter;
+	bool completed;
+
+	CounterHolder() : counter(nullptr), completed(true) {}
+	CounterHolder(int* counter) : counter(counter), completed(false) { (*counter)++; }
+
+	void complete() {
+		if (!completed) {
+			completed = true;
+			(*counter)--;
+		}
+	}
+
+	~CounterHolder() { complete(); }
+};
+
 ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bwData,
                                                     Reference<GranuleMetadata> metadata,
                                                     UID granuleID,
@@ -877,6 +893,8 @@ ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bw
 	}
 
 	wait(delay(0, TaskPriority::BlobWorkerUpdateFDB));
+
+	state CounterHolder pendingCounter(&bwData->stats.granulesPendingSplitCheck);
 
 	if (BW_DEBUG) {
 		fmt::print("Granule [{0} - {1}) checking with BM for re-snapshot after {2} bytes\n",
@@ -955,6 +973,8 @@ ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bw
 			           bwData->id.toString());
 		}
 	}
+
+	pendingCounter.complete();
 
 	if (BW_DEBUG) {
 		fmt::print("Granule [{0} - {1}) re-snapshotting after {2} bytes\n",
@@ -1840,6 +1860,12 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 		}
 		if (e.code() == error_code_change_feed_popped) {
 			TraceEvent("GranuleChangeFeedPopped", bwData->id)
+			    .detail("Granule", metadata->keyRange)
+			    .detail("GranuleID", startState.granuleID);
+			return Void();
+		}
+		if (e.code() == error_code_change_feed_not_registered) {
+			TraceEvent(SevInfo, "GranuleDestroyed", bwData->id)
 			    .detail("Granule", metadata->keyRange)
 			    .detail("GranuleID", startState.granuleID);
 			return Void();

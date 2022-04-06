@@ -892,7 +892,8 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 
 			if (workerInDb) {
 				for (const auto& [address, peer] : allPeers) {
-					if (peer->pingLatencies.getPopulationSize() < SERVER_KNOBS->PEER_LATENCY_CHECK_MIN_POPULATION) {
+					if (peer->connectFailedCount == 0 &&
+					    peer->pingLatencies.getPopulationSize() < SERVER_KNOBS->PEER_LATENCY_CHECK_MIN_POPULATION) {
 						// Ignore peers that don't have enough samples.
 						// TODO(zhewu): Currently, FlowTransport latency monitor clears ping latency samples on a
 						// regular
@@ -909,7 +910,8 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 						// Note that currently we are not monitor storage servers, since lagging in storage servers
 						// today already can trigger server exclusion by data distributor.
 
-						if (peer->pingLatencies.percentile(SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE) >
+						if (peer->connectFailedCount >= SERVER_KNOBS->PEER_DEGRADATION_CONNECTION_FAILURE_COUNT ||
+						    peer->pingLatencies.percentile(SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE) >
 						        SERVER_KNOBS->PEER_LATENCY_DEGRADATION_THRESHOLD ||
 						    peer->timeoutCount / (double)(peer->pingLatencies.getPopulationSize()) >
 						        SERVER_KNOBS->PEER_TIMEOUT_PERCENTAGE_DEGRADATION_THRESHOLD) {
@@ -926,8 +928,9 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 							    .detail(
 							        "CheckedPercentileLatency",
 							        peer->pingLatencies.percentile(SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE))
-							    .detail("Count", peer->pingLatencies.getPopulationSize())
-							    .detail("TimeoutCount", peer->timeoutCount);
+							    .detail("PingCount", peer->pingLatencies.getPopulationSize())
+							    .detail("PingTimeoutCount", peer->timeoutCount)
+							    .detail("ConnectionFailureCount", peer->connectFailedCount);
 
 							req.degradedPeers.push_back(address);
 						}

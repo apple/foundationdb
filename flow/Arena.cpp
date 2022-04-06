@@ -304,11 +304,9 @@ void* ArenaBlock::allocate(Reference<ArenaBlock>& self, int bytes) {
 ArenaBlock* ArenaBlock::create(int dataSize, Reference<ArenaBlock>& next) {
 	ArenaBlock* b;
 	if (dataSize <= SMALL - TINY_HEADER && !next) {
-		if (dataSize <= 16 - TINY_HEADER) {
-			b = (ArenaBlock*)FastAllocator<16>::allocate();
-			b->tinySize = 16;
-			INSTRUMENT_ALLOCATE("Arena16");
-		} else if (dataSize <= 32 - TINY_HEADER) {
+		static_assert(sizeof(ArenaBlock) <= 32); // Need to allocate at least sizeof(ArenaBlock) for an ArenaBlock*. See
+		                                         // https://github.com/apple/foundationdb/issues/6753
+		if (dataSize <= 32 - TINY_HEADER) {
 			b = (ArenaBlock*)FastAllocator<32>::allocate();
 			b->tinySize = 32;
 			INSTRUMENT_ALLOCATE("Arena32");
@@ -442,10 +440,7 @@ void ArenaBlock::destroy() {
 
 void ArenaBlock::destroyLeaf() {
 	if (isTiny()) {
-		if (tinySize <= 16) {
-			FastAllocator<16>::release(this);
-			INSTRUMENT_RELEASE("Arena16");
-		} else if (tinySize <= 32) {
+		if (tinySize <= 32) {
 			FastAllocator<32>::release(this);
 			INSTRUMENT_RELEASE("Arena32");
 		} else {
