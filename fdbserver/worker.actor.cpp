@@ -1979,7 +1979,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 
 				// create kv and disk queue per TLog group
 				for (auto& group : req.tlogGroups) {
-					IKeyValueStore* data = keyValueStoreMemory(joinPath(folder, "loggroup"), group.logGroupId, 500e6);
+					IKeyValueStore* data =
+					    openKVStore(req.storeType, joinPath(folder, "loggroup"), group.logGroupId, 500e6);
 					IDiskQueue* queue = openDiskQueue(joinPath(folder, "logqueue-" + group.logGroupId.toString() + "-"),
 					                                  "fdq",
 					                                  group.logGroupId,
