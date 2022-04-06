@@ -89,7 +89,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 };
 
 ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionRequest req) {
-	// TODO - Link vs. Parent?
+	// TODO - ljoswiak link or parent?
 	state Span span("M:getVersion"_loc, { req.spanContext });
 	state std::map<UID, CommitProxyVersionReplies>::iterator proxyItr =
 	    self->lastCommitProxyVersionReplies.find(req.requestingProxy); // lastCommitProxyVersionReplies never changes

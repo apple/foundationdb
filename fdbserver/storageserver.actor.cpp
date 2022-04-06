@@ -1384,7 +1384,7 @@ void updateProcessStats(StorageServer* self) {
 #endif
 
 ACTOR Future<Version> waitForVersionActor(StorageServer* data, Version version, SpanContext spanContext) {
-	// TODO Link - or parent?
+	// TODO ljoswiak, link or parent?
 	state Span span("SS.WaitForVersion"_loc, { spanContext });
 	choose {
 		when(wait(data->version.whenAtLeast(version))) {
@@ -1715,7 +1715,7 @@ ACTOR Future<Void> watchValueSendReply(StorageServer* data,
                                        WatchValueRequest req,
                                        Future<Version> resp,
                                        SpanContext spanContext) {
-	// TODO - Parent or Link?
+	// TODO - ljoswiak, link or parent?
 	state Span span("SS:watchValue"_loc, { spanContext });
 	state double startTime = now();
 	++data->counters.watchQueries;
@@ -3162,9 +3162,8 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 	}
 
     
-	// TODO - Trace ID is now 2 unint64_t, need to discuss what you want to do here?
-	// Use first or change txID?
-	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.first();
+	// TODO - ljoswiak, mpilman - Trace ID is now 2 unint64_t, need to discuss what you want to do here?
+	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID.first();
 
 	++data->counters.getRangeQueries;
 	++data->counters.allQueries;
@@ -3654,9 +3653,8 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
 	}
 
- 	// TODO - Trace ID is now 2 unint64_t, need to discuss what you want to do here?
-	// Use first or change txID?
-	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.first();
+ 	// TODO - ljoswiak, mpilman discuss.
+	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID.first();
 
 	++data->counters.getMappedRangeQueries;
 	++data->counters.allQueries;
@@ -4066,9 +4064,8 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
 	}
 	state int64_t resultSize = 0;
-	// TODO - Trace ID is now 2 unint64_t, need to discuss what you want to do here?
-	// Use first or change txID?
-	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.first();
+	// TODO - ljoswiak, mpilman discuss.
+	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID.first();
 
 	++data->counters.getKeyQueries;
 	++data->counters.allQueries;
@@ -8182,7 +8179,7 @@ ACTOR Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream
 		state Span span("SS:serveWatchValueRequestsImpl"_loc, { req.spanContext });
 		// TODO - Trace ID is now 2 unint64_t, need to discuss what you want to do here?
 		// Use first or change txID?
-		getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.first();
+		getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID.first();
 
 		// case 1: no watch set for the current key
 		if (!metadata.isValid()) {
