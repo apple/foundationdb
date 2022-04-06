@@ -567,7 +567,7 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 				if (it == pContext->pResolverData->ssToStorageTeam.end())
 					pContext->pResolverData->ssToStorageTeam.emplace(k, teamIDs);
 				else
-					it->second.insert(teamIDs.getStorageTeams());
+					it->second = teamIDs;
 			}
 		}
 
