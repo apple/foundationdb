@@ -2071,7 +2071,7 @@ Future<T> forwardError(Future<T> f, Promise<Void> target) {
 			target.sendError(e);
 		}
 
-		throw e;
+		throw;
 	}
 }
 
@@ -2339,7 +2339,7 @@ public:
 
 			if (self->header.formatVersion != PagerCommitHeader::FORMAT_VERSION) {
 				Error e = unsupported_format_version();
-				TraceEvent(SevWarn, "RedwoodRecoveryFailedWrongVersion")
+				TraceEvent(SevWarnAlways, "RedwoodRecoveryFailedWrongVersion")
 				    .error(e)
 				    .detail("Filename", self->filename)
 				    .detail("Version", self->header.formatVersion)
@@ -7733,7 +7733,7 @@ public:
 			// should not throw.
 			wait(ready(self->m_lastCommit));
 			if (!self->m_lastCommit.isError()) {
-				// Run the destructive sanity, check but don't throw.
+				// Run the destructive sanity check, but don't throw.
 				ErrorOr<Void> err = wait(errorOr(self->m_tree->clearAllAndCheckSanity()));
 				// If the test threw an error, it must be an injected fault or something has gone wrong.
 				ASSERT(!err.isError() || err.getError().isInjectedFault());
