@@ -660,6 +660,11 @@ void DatabaseConfiguration::applyMutation(MutationRef m) {
 	}
 }
 
+bool DatabaseConfiguration::involveMutation(MutationRef m) {
+	return (m.type == MutationRef::SetValue && m.param1.startsWith(configKeysPrefix)) ||
+	       (m.type == MutationRef::ClearRange && KeyRangeRef(m.param1, m.param2).intersects(configKeys));
+}
+
 bool DatabaseConfiguration::set(KeyRef key, ValueRef value) {
 	makeConfigurationMutable();
 	mutableConfiguration.get()[key.toString()] = value.toString();
