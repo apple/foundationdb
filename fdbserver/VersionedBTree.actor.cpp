@@ -54,31 +54,20 @@
 
 #define REDWOOD_DEBUG 0
 
-// Only print redwood debug statements for a certain address. Useful in simulation with many redwood processes to reduce
-// log size.
-#define REDWOOD_DEBUG_ADDR 0
-// example addr:  "[abcd::4:0:1:4]:1"
-#define REDWOOD_DEBUG_ADDR_VAL "";
+// Only print debug info for a specific address
+static NetworkAddress g_debugAddress = NetworkAddress::parse("0.0.0.0:0");
+// Only print debug info after a specific time
+static double g_debugStart = 0;
+// Debug output stream
+static FILE* g_debugStream = stdout;
 
-#define debug_printf_stream stdout
 #define debug_printf_always(...)                                                                                       \
-	{                                                                                                                  \
+	if (now() >= g_debugStart &&                                                                                       \
+	    (!g_network->getLocalAddress().isValid() || g_network->getLocalAddress() == g_debugAddress)) {                 \
 		std::string prefix = format("%s %f %04d ", g_network->getLocalAddress().toString().c_str(), now(), __LINE__);  \
 		std::string msg = format(__VA_ARGS__);                                                                         \
-		fputs(addPrefix(prefix, msg).c_str(), debug_printf_stream);                                                    \
-		fflush(debug_printf_stream);                                                                                   \
-	}
-
-#define debug_printf_addr(...)                                                                                         \
-	{                                                                                                                  \
-		std::string addr = REDWOOD_DEBUG_ADDR_VAL;                                                                     \
-		if (!memcmp(addr.c_str(), g_network->getLocalAddress().toString().c_str(), addr.size())) {                     \
-			std::string prefix =                                                                                       \
-			    format("%s %f %04d ", g_network->getLocalAddress().toString().c_str(), now(), __LINE__);               \
-			std::string msg = format(__VA_ARGS__);                                                                     \
-			fputs(addPrefix(prefix, msg).c_str(), debug_printf_stream);                                                \
-			fflush(debug_printf_stream);                                                                               \
-		}                                                                                                              \
+		fputs(addPrefix(prefix, msg).c_str(), g_debugStream);                                                          \
+		fflush(g_debugStream);                                                                                         \
 	}
 
 #define debug_print(str) debug_printf("%s\n", str.c_str())
@@ -88,8 +77,6 @@
 #if defined(NO_INTELLISENSE)
 #if REDWOOD_DEBUG
 #define debug_printf debug_printf_always
-#elif REDWOOD_DEBUG_ADDR
-#define debug_printf debug_printf_addr
 #else
 #define debug_printf debug_printf_noop
 #endif
