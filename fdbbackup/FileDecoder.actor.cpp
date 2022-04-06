@@ -25,6 +25,10 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <fcntl.h>
+#ifdef _WIN32
+#include <io.h>
+#endif
 
 #include "fdbbackup/BackupTLSConfig.h"
 #include "fdbclient/BuildFlags.h"
