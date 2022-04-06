@@ -159,12 +159,23 @@ extern IKeyValueStore* keyValueStoreLogSystem(class IDiskQueue* queue,
                                               bool replaceContent,
                                               bool exactRecovery);
 
+extern IKeyValueStore* openRemoteKVStore(KeyValueStoreType storeType,
+                                         std::string const& filename,
+                                         UID logID,
+                                         int64_t memoryLimit,
+                                         bool checkChecksums = false,
+                                         bool checkIntegrity = false);
+
 inline IKeyValueStore* openKVStore(KeyValueStoreType storeType,
                                    std::string const& filename,
                                    UID logID,
                                    int64_t memoryLimit,
                                    bool checkChecksums = false,
-                                   bool checkIntegrity = false) {
+                                   bool checkIntegrity = false,
+                                   bool openRemotely = false) {
+	if (openRemotely) {
+		return openRemoteKVStore(storeType, filename, logID, memoryLimit, checkChecksums, checkIntegrity);
+	}
 	switch (storeType) {
 	case KeyValueStoreType::SSD_BTREE_V1:
 		return keyValueStoreSQLite(filename, logID, KeyValueStoreType::SSD_BTREE_V1, false, checkIntegrity);

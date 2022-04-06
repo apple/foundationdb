@@ -69,6 +69,11 @@ public:
 	static void setGlobalKnobCollection(Type, Randomize, IsSimulated);
 	static IKnobCollection const& getGlobalKnobCollection();
 	static IKnobCollection& getMutableGlobalKnobCollection();
+
+	// Sets up a list of <knob, value> pairs. If encounter a failure,
+	// immediately throws the error.
+	static void setupKnobs(const std::vector<std::pair<std::string, std::string>>& knobs);
+
 	static ConfigMutationRef createSetMutation(Arena, KeyRef, ValueRef);
 	static ConfigMutationRef createClearMutation(Arena, KeyRef);
 };

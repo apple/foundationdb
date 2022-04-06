@@ -44,6 +44,7 @@ struct BlobWorkerStats {
 	int numRangesAssigned;
 	int mutationBytesBuffered;
 	int activeReadRequests;
+	int granulesPendingSplitCheck;
 
 	Future<Void> logger;
 
@@ -62,10 +63,11 @@ struct BlobWorkerStats {
 	    readReqDeltaBytesReturned("ReadReqDeltaBytesReturned", cc), commitVersionChecks("CommitVersionChecks", cc),
 	    granuleUpdateErrors("GranuleUpdateErrors", cc), granuleRequestTimeouts("GranuleRequestTimeouts", cc),
 	    readRequestsWithBegin("ReadRequestsWithBegin", cc), readRequestsCollapsed("ReadRequestsCollapsed", cc),
-	    numRangesAssigned(0), mutationBytesBuffered(0), activeReadRequests(0) {
+	    numRangesAssigned(0), mutationBytesBuffered(0), activeReadRequests(0), granulesPendingSplitCheck(0) {
 		specialCounter(cc, "NumRangesAssigned", [this]() { return this->numRangesAssigned; });
 		specialCounter(cc, "MutationBytesBuffered", [this]() { return this->mutationBytesBuffered; });
 		specialCounter(cc, "ActiveReadRequests", [this]() { return this->activeReadRequests; });
+		specialCounter(cc, "GranulesPendingSplitCheck", [this]() { return this->granulesPendingSplitCheck; });
 
 		logger = traceCounters("BlobWorkerMetrics", id, interval, &cc, "BlobWorkerMetrics");
 	}
