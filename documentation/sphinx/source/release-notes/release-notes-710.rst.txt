@@ -27,6 +27,7 @@ Bindings
 
 Other Changes
 -------------
+* OpenTracing support is now deprecated in favor of OpenTelemetry tracing, which will be enabled in a future release. `(PR #6478) <https://github.com/apple/foundationdb/pull/6478/files>`_
 
 Earlier release notes
 ---------------------
