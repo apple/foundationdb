@@ -2179,7 +2179,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 		if (req.beginVersion > 0) {
 			fmt::print("{0} - {1}\n", req.beginVersion, req.readVersion);
 		} else {
-			fmt::print("{}", req.readVersion);
+			fmt::print("{}\n", req.readVersion);
 		}
 	}
 
@@ -2329,7 +2329,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 						throw wrong_shard_server();
 					}
 					Future<Void> waitForVersionFuture = waitForVersion(metadata, req.readVersion);
-					if (waitForVersionFuture.isReady()) {
+					if (waitForVersionFuture.isReady() && !waitForVersionFuture.isError()) {
 						// didn't wait, so no need to check rollback stuff
 						break;
 					}
