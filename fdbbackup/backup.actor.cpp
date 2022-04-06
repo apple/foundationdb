@@ -3434,7 +3434,7 @@ int main(int argc, char* argv[]) {
 		PartialBackup partial{ true };
 		DstOnly dstOnly{ false };
 		LocalityData localities;
-		uint64_t memLimit = 0; // unlimited
+		uint64_t memLimit = 8LL << 30;
 		uint64_t virtualMemLimit = 0; // unlimited
 		Optional<uint64_t> ti;
 		BackupTLSConfig tlsConfig;

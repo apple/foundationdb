@@ -1006,7 +1006,9 @@ struct CLIOptions {
 	NetworkAddressList publicAddresses, listenAddresses;
 
 	const char* targetKey = nullptr;
-	uint64_t memLimit = 0; // unlimited
+	uint64_t memLimit =
+	    8LL << 30; // Nice to maintain the same default value for memLimit and SERVER_KNOBS->SERVER_MEM_LIMIT and
+	               // SERVER_KNOBS->COMMIT_BATCHES_MEM_BYTES_HARD_LIMIT
 	uint64_t virtualMemLimit = 0; // unlimited
 	uint64_t storageMemLimit = 1LL << 30;
 	bool buggifyEnabled = false, faultInjectionEnabled = true, restarting = false;
@@ -1795,6 +1797,10 @@ int main(int argc, char* argv[]) {
 		auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
 		g_knobs.setKnob("log_directory", KnobValue::create(opts.logFolder));
 		g_knobs.setKnob("conn_file", KnobValue::create(opts.connFile));
+		if (role != ServerRole::Simulation) {
+			g_knobs.setKnob("commit_batches_mem_bytes_hard_limit",
+			                KnobValue::create(static_cast<int64_t>(opts.memLimit)));
+		}
 
 		IKnobCollection::setupKnobs(opts.knobs);
 		g_knobs.setKnob("server_mem_limit", KnobValue::create(static_cast<int64_t>(opts.memLimit)));

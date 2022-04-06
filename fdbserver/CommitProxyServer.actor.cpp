@@ -2182,7 +2182,9 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	// ((SERVER_MEM_LIMIT * COMMIT_BATCHES_MEM_FRACTION_OF_TOTAL) / COMMIT_BATCHES_MEM_TO_TOTAL_MEM_SCALE_FACTOR) is
 	// only a approximate formula for limiting the memory used. COMMIT_BATCHES_MEM_TO_TOTAL_MEM_SCALE_FACTOR is an
 	// estimate based on experiments and not an accurate one.
-	state int64_t commitBatchesMemoryLimit = SERVER_KNOBS->COMMIT_BATCHES_MEM_BYTES_HARD_LIMIT;
+	state int64_t commitBatchesMemoryLimit = (SERVER_KNOBS->COMMIT_BATCHES_MEM_BYTES_HARD_LIMIT > 0)
+	                                             ? SERVER_KNOBS->COMMIT_BATCHES_MEM_BYTES_HARD_LIMIT
+	                                             : 8LL << 30;
 	if (SERVER_KNOBS->SERVER_MEM_LIMIT > 0) {
 		commitBatchesMemoryLimit = std::min(
 		    commitBatchesMemoryLimit,

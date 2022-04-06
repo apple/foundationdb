@@ -80,7 +80,8 @@
 #include "fdbclient/SimpleIni.h"
 #include "fdbclient/versions.h"
 
-constexpr double RSS_CHECK_INTERVAL = 2.0; // seconds
+constexpr uint64_t DEFAULT_MEMORY_LIMIT = 8LL << 30;
+constexpr double MEMORY_CHECK_INTERVAL = 2.0; // seconds
 
 #ifdef __linux__
 typedef fd_set* fdb_fd_set;
@@ -575,15 +576,19 @@ public:
 		}
 
 		const char* mem_rss = get_value_multi(ini, "memory", ssection.c_str(), section.c_str(), "general", nullptr);
-		if (mem_rss) {
 #ifdef __linux__
+		if (mem_rss) {
 			memory_rss = parseWithSuffix(mem_rss, "MiB");
+		} else {
+			memory_rss = DEFAULT_MEMORY_LIMIT;
+		}
 #else
+		if (mem_rss) {
 			// While the memory check is not currently implemented on non-Linux by fdbmonitor, the "memory" option is
 			// still pass to fdbserver, which will crash itself if the limit is exceeded.
 			log_msg(SevWarn, "Memory monitoring by fdbmonitor is not supported by current system\n");
-#endif
 		}
+#endif
 
 		std::stringstream ss(binary);
 		std::copy(std::istream_iterator<std::string>(ss),
@@ -1634,8 +1639,8 @@ int main(int argc, char** argv) {
 			}
 		}
 		bool timeout_for_rss_check = false;
-		if (need_rss_check && end_time > last_rss_check + RSS_CHECK_INTERVAL) {
-			end_time = last_rss_check + RSS_CHECK_INTERVAL;
+		if (need_rss_check && end_time > last_rss_check + MEMORY_CHECK_INTERVAL) {
+			end_time = last_rss_check + MEMORY_CHECK_INTERVAL;
 			timeout_for_rss_check = true;
 		}
 		struct timespec tv;
