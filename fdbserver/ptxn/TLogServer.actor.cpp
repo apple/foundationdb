@@ -687,7 +687,10 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 		for (const auto& [id, data] : storageTeamData) {
 			ASSERT_WE_THINK(data->storageTeamId.isValid());
 		}
-		return storageTeamData[storageTeamID];
+		if (storageTeamData.find(storageTeamID) != storageTeamData.end()) {
+			return storageTeamData.at(storageTeamID);
+		}
+		return Reference<StorageTeamData>();
 	}
 
 	// For a given version, get the serialized messages
@@ -745,8 +748,6 @@ struct LogGenerationData : NonCopyable, public ReferenceCounted<LogGenerationDat
 	}
 
 	~LogGenerationData() {
-		endRole(Role::TRANSACTION_LOG, logId, "Error", true);
-
 		if (!terminated.isReady()) {
 			tlogGroupData->bytesDurable += bytesInput.getValue() - bytesDurable.getValue();
 			TraceEvent("TLogBytesWhenRemoved", logId)
@@ -1408,9 +1409,11 @@ ACTOR Future<Void> servicePeekRequest(
 	state Reference<LogGenerationData> logData = findLogData(self, "peek", req.storageTeamID, activeGeneration);
 	if (!logData.isValid()) {
 		req.reply.sendError(tlog_group_not_found());
+		return Void();
 	}
 	if (!logData->getStorageTeamData(req.storageTeamID).isValid()) {
 		req.reply.sendError(storage_team_id_not_found());
+		return Void();
 	}
 	// find group here
 	auto tLogGroupID =
@@ -1888,8 +1891,10 @@ ACTOR Future<Void> tLogCore(
 
 	try {
 		wait(error);
+		endRole(Role::TRANSACTION_LOG, tli.id(), "Error", true);
 		throw internal_error();
 	} catch (Error& e) {
+		endRole(Role::TRANSACTION_LOG, tli.id(), "Error", true);
 		if (e.code() != error_code_worker_removed)
 			throw;
 		for (auto& logGroup : *activeGeneration) {
