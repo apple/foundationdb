@@ -46,13 +46,16 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 	int numDomains;
 	std::vector<uint64_t> domainIds;
 	static std::atomic<int> seed;
+	bool enableTest;
 
-	EncryptKeyProxyTestWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), dbInfo(wcx.dbInfo) {
+	EncryptKeyProxyTestWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), dbInfo(wcx.dbInfo), enableTest(false) {
 		// assign unique encryptionDomainId range per workload clients
-		minDomainId = wcx.clientId * 500 + (++seed * 30) + 1;
-		maxDomainId = deterministicRandom()->randomInt(minDomainId, minDomainId + 50) + 5;
-
-		TraceEvent("EKPTest_Init").detail("MinDomainId", minDomainId).detail("MaxDomainId", maxDomainId);
+		if (wcx.clientId == 0) {
+			enableTest = true;
+			minDomainId = 1000 + (++seed * 30) + 1;
+			maxDomainId = deterministicRandom()->randomInt(minDomainId, minDomainId + 50) + 5;
+			TraceEvent("EKPTest_Init").detail("MinDomainId", minDomainId).detail("MaxDomainId", maxDomainId);
+		}
 	}
 
 	std::string description() const override { return "EncryptKeyProxyTest"; }
@@ -219,6 +222,9 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 
 	Future<Void> start(Database const& cx) override {
 		TEST(true); // Testing
+		if (!enableTest) {
+			return Void();
+		}
 		return testWorkload(dbInfo, this);
 	}
 
