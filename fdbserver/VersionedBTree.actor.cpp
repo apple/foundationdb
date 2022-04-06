@@ -8338,7 +8338,7 @@ ACTOR Future<Void> verify(VersionedBTree* btree,
 			printf("Verified version %" PRId64 "\n", v);
 		}
 	} catch (Error& e) {
-		if (e.code() != error_code_end_of_stream && e.code() != error_code_transaction_too_old) {
+		if (e.code() != error_code_end_of_stream) {
 			throw;
 		}
 	}
@@ -8347,32 +8347,24 @@ ACTOR Future<Void> verify(VersionedBTree* btree,
 
 // Does a random range read, doesn't trap/report errors
 ACTOR Future<Void> randomReader(VersionedBTree* btree, int64_t* pRecordsRead) {
-	try {
-		state VersionedBTree::BTreeCursor cur;
+	state VersionedBTree::BTreeCursor cur;
 
-		loop {
-			wait(yield());
-			if (!cur.intialized() || deterministicRandom()->random01() > .01) {
-				wait(btree->initBTreeCursor(&cur, btree->getLastCommittedVersion(), PagerEventReasons::RangeRead));
-			}
-
-			state KeyValue kv = randomKV(10, 0);
-			wait(cur.seekGTE(kv.key));
-			state int c = deterministicRandom()->randomInt(0, 100);
-			state bool direction = deterministicRandom()->coinflip();
-			while (cur.isValid() && c-- > 0) {
-				++*pRecordsRead;
-				wait(success(direction ? cur.moveNext() : cur.movePrev()));
-				wait(yield());
-			}
+	loop {
+		wait(yield());
+		if (!cur.intialized() || deterministicRandom()->random01() > .01) {
+			wait(btree->initBTreeCursor(&cur, btree->getLastCommittedVersion(), PagerEventReasons::RangeRead));
 		}
-	} catch (Error& e) {
-		if (e.code() != error_code_transaction_too_old) {
-			throw e;
+
+		state KeyValue kv = randomKV(10, 0);
+		wait(cur.seekGTE(kv.key));
+		state int c = deterministicRandom()->randomInt(0, 100);
+		state bool direction = deterministicRandom()->coinflip();
+		while (cur.isValid() && c-- > 0) {
+			++*pRecordsRead;
+			wait(success(direction ? cur.moveNext() : cur.movePrev()));
+			wait(yield());
 		}
 	}
-
-	return Void();
 }
 
 struct IntIntPair {
