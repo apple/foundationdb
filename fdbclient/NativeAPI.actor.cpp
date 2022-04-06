@@ -2687,6 +2687,7 @@ ACTOR Future<KeyRangeLocationInfo> getKeyLocation_internal(Database cx,
                                                            Reverse isBackward,
                                                            Version version) {
 
+    // TODO - ljoswiak. Parent or Link?
 	state Span span("NAPI:getKeyLocation"_loc, spanContext);
 	if (isBackward) {
 		ASSERT(key != allKeys.begin && key <= allKeys.end);

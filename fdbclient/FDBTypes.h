@@ -48,7 +48,7 @@ struct SpanContext {
 	  : traceID(span.traceID), spanID(span.spanID), m_Flags(span.m_Flags) {}
 	bool isSampled() const { return (m_Flags & TraceFlags::sampled) == TraceFlags::sampled; }
 	std::string toString() const;
-	bool isValid() const { return traceID.isValid(); }
+	bool isValid() const { return traceID.first() != 0 && traceID.second() != 0; }
 };
 
 typedef int64_t Version;
