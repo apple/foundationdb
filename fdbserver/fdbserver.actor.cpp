@@ -1795,10 +1795,6 @@ int main(int argc, char* argv[]) {
 		auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
 		g_knobs.setKnob("log_directory", KnobValue::create(opts.logFolder));
 		g_knobs.setKnob("conn_file", KnobValue::create(opts.connFile));
-		if (role != ServerRole::Simulation) {
-			g_knobs.setKnob("commit_batches_mem_bytes_hard_limit",
-			                KnobValue::create(static_cast<int64_t>(opts.memLimit)));
-		}
 
 		IKnobCollection::setupKnobs(opts.knobs);
 		g_knobs.setKnob("server_mem_limit", KnobValue::create(static_cast<int64_t>(opts.memLimit)));
