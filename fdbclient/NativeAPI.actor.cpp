@@ -1693,10 +1693,7 @@ DatabaseContext::~DatabaseContext() {
 		grvUpdateHandler.cancel();
 	}
 	if (sharedStatePtr) {
-		if (--sharedStatePtr->refCount == 0) {
-			delete sharedStatePtr;
-			sharedStatePtr = nullptr;
-		}
+		sharedStatePtr->delRef(sharedStatePtr);
 	}
 	for (auto it = server_interf.begin(); it != server_interf.end(); it = server_interf.erase(it))
 		it->second->notifyContextDestroyed();
@@ -6726,11 +6723,8 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 			if (requestTime - lastTime <= CLIENT_KNOBS->MAX_VERSION_CACHE_LAG && rv != Version(0)) {
 				ASSERT(!debug_checkVersionTime(rv, requestTime, "CheckStaleness"));
 				readVersion = rv;
-				TraceEvent("GetCachedReadVersion").detail("RV", rv);
 				return readVersion;
-			} else { // else go through regular GRV path
-				TraceEvent("GetRegularReadVersion");
-			}
+			} // else go through regular GRV path
 		}
 		++trState->cx->transactionReadVersions;
 		flags |= trState->options.getReadVersionFlags;
@@ -8181,7 +8175,6 @@ Future<Void> DatabaseContext::createSnapshot(StringRef uid, StringRef snapshot_c
 }
 
 void sharedStateDelRef(DatabaseSharedState* ssPtr) {
-	TraceEvent("SharedStateDelRef");
 	if (--ssPtr->refCount == 0) {
 		delete ssPtr;
 	}
