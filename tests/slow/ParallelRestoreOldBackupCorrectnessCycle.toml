@@ -1,7 +1,5 @@
 # Disable buggify for parallel restore
 #buggify=off
-# FIXME: re-enable rocks at some point
-storageEngineExcludeTypes = [4]
 
 [[test]]
 testTitle = 'BackupAndRestore'
