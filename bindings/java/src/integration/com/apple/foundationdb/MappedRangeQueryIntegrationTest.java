@@ -205,9 +205,9 @@ class MappedRangeQueryIntegrationTest {
 				for (int id = begin; id < end; id++) {
 					Assertions.assertTrue(results.hasNext());
 					MappedKeyValue mappedKeyValue = results.next();
-					assertByteArrayEquals(indexEntryKey(id), mappedKeyValue.getKey());
-					assertByteArrayEquals(EMPTY, mappedKeyValue.getValue());
-					assertByteArrayEquals(indexEntryKey(id), mappedKeyValue.getKey());
+					// Only check key and value when GET_MAPPED_RANGE_OMIT_NON_BOUNDARY_KV is turned off.
+					// assertByteArrayEquals(indexEntryKey(id), mappedKeyValue.getKey());
+					// assertByteArrayEquals(EMPTY, mappedKeyValue.getValue());
 
 					byte[] prefix = recordKeyPrefix(id);
 					assertByteArrayEquals(prefix, mappedKeyValue.getRangeBegin());

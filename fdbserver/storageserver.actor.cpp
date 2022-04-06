@@ -3605,11 +3605,16 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 		TraceEvent("MapperNotTuple").error(e).detail("Mapper", mapper.printable());
 		throw mapper_not_tuple();
 	}
-	state KeyValueRef* it = input.data.begin();
-	for (; it != input.data.end(); it++) {
+	state int sz = input.data.size();
+	state int i = 0;
+	for (; i < sz; i++) {
+		state KeyValueRef* it = &input.data[i];
 		state MappedKeyValueRef kvm;
-		kvm.key = it->key;
-		kvm.value = it->value;
+		if ((i == 0 || i == sz - 1) // It's boundary.
+		    || !SERVER_KNOBS->GET_MAPPED_RANGE_OMIT_NON_BOUNDARY_KV) {
+			kvm.key = it->key;
+			kvm.value = it->value;
+		}
 
 		state bool isRangeQuery = false;
 		state Key mappedKey = constructMappedKey(it, mappedKeyFormatTuple, isRangeQuery);

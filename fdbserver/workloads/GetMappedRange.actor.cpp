@@ -147,8 +147,10 @@ struct GetMappedRangeWorkload : ApiWorkload {
 	static void validateRecord(int expectedId, const MappedKeyValueRef* it, GetMappedRangeWorkload* self) {
 		//		std::cout << "validateRecord expectedId " << expectedId << " it->key " << printable(it->key) << "
 		// indexEntryKey(expectedId) " << printable(indexEntryKey(expectedId)) << std::endl;
-		ASSERT(it->key == indexEntryKey(expectedId));
-		ASSERT(it->value == EMPTY);
+		if (!SERVER_KNOBS->GET_MAPPED_RANGE_OMIT_NON_BOUNDARY_KV) {
+			ASSERT(it->key == indexEntryKey(expectedId));
+			ASSERT(it->value == EMPTY);
+		}
 
 		if (self->SPLIT_RECORDS) {
 			ASSERT(std::holds_alternative<GetRangeReqAndResultRef>(it->reqAndResult));

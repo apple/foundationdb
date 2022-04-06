@@ -749,6 +749,8 @@ struct GetRangeReqAndResultRef {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
+		// TODO: Skip "end" if the only difference with "begin" is that the last byte of the end is 0x01 (common for
+		// prefix searches)
 		serializer(ar, begin, end, result);
 	}
 };

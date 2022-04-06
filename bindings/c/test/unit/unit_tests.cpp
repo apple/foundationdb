@@ -996,8 +996,9 @@ TEST_CASE("fdb_transaction_get_mapped_range") {
 		int id = beginId;
 		for (int i = 0; i < expectSize; i++, id++) {
 			const auto& [key, value, begin, end, range_results] = result.mkvs[i];
-			CHECK(indexEntryKey(id).compare(key) == 0);
-			CHECK(EMPTY.compare(value) == 0);
+			// Only check key and value when GET_MAPPED_RANGE_OMIT_NON_BOUNDARY_KV is turned off.
+			// CHECK(indexEntryKey(id).compare(key) == 0);
+			// CHECK(EMPTY.compare(value) == 0);
 			CHECK(range_results.size() == SPLIT_SIZE);
 			for (int split = 0; split < SPLIT_SIZE; split++) {
 				auto& [k, v] = range_results[split];
