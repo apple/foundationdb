@@ -82,6 +82,8 @@ set(FLOW_SRCS
   XmlTraceLogFormatter.cpp
   XmlTraceLogFormatter.h
   actorcompiler.h
+  crc32_wrapper.c
+  crc32.S
   crc32c.h
   crc32c.cpp
   error_definitions.h
