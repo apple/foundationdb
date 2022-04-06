@@ -210,18 +210,10 @@ ACTOR Future<Void> handleIOErrors(Future<Void> actor, IClosable* store, UID id, 
 	state Future<ErrorOr<Void>> storeError = actor.isReady() ? Never() : errorOr(store->getError());
 	choose {
 		when(state ErrorOr<Void> e = wait(errorOr(actor))) {
-			TraceEvent(SevDebug, "HandleIOErrorsActorIsReady")
-			    .detail("Error", e.isError() ? e.getError().code() : -1)
-			    .detail("UID", id);
 			if (e.isError() && e.getError().code() == error_code_please_reboot) {
 				// no need to wait.
 			} else {
-				TraceEvent(SevDebug, "HandleIOErrorsActorBeforeOnClosed").detail("IsClosed", onClosed.isReady());
 				wait(onClosed);
-				TraceEvent(SevDebug, "HandleIOErrorsActorOnClosedFinished")
-				    .detail("StoreError",
-				            storeError.isReady() ? (storeError.get().isError() ? storeError.get().getError().code() : 0)
-				                                 : -1);
 			}
 			if (e.isError() && e.getError().code() == error_code_broken_promise && !storeError.isReady()) {
 				wait(delay(0.00001 + FLOW_KNOBS->MAX_BUGGIFIED_DELAY));
@@ -1574,8 +1566,11 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				    memoryLimit,
 				    false,
 				    validateDataFiles,
-				    SERVER_KNOBS->REMOTE_KV_STORE && /* testing mixed mode in simulation if remote kvs enabled*/
-				        (g_network->isSimulated() ? deterministicRandom()->coinflip() : true));
+				    SERVER_KNOBS->REMOTE_KV_STORE && /* testing mixed mode in simulation if remote kvs enabled */
+				        (g_network->isSimulated()
+				             ? (/* Disable for RocksDB */ s.storeType != KeyValueStoreType::SSD_ROCKSDB_V1 &&
+				                deterministicRandom()->coinflip())
+				             : true));
 				Future<Void> kvClosed = kv->onClosed();
 				filesClosed.add(kvClosed);
 
@@ -2147,8 +2142,11 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					    memoryLimit,
 					    false,
 					    false,
-					    SERVER_KNOBS->REMOTE_KV_STORE && /* testing mixed mode in simulation if remote kvs enabled*/
-					        (g_network->isSimulated() ? deterministicRandom()->coinflip() : true));
+					    SERVER_KNOBS->REMOTE_KV_STORE && /* testing mixed mode in simulation if remote kvs enabled */
+					        (g_network->isSimulated()
+					             ? (/* Disable for RocksDB */ req.storeType != KeyValueStoreType::SSD_ROCKSDB_V1 &&
+					                deterministicRandom()->coinflip())
+					             : true));
 
 					Future<Void> kvClosed = data->onClosed();
 					filesClosed.add(kvClosed);
