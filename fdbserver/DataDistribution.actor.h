@@ -76,6 +76,11 @@ struct IDataDistributionTeam {
 	}
 };
 
+FDB_DECLARE_BOOLEAN_PARAM(WantNewServers);
+FDB_DECLARE_BOOLEAN_PARAM(WantTrueBest);
+FDB_DECLARE_BOOLEAN_PARAM(PreferLowerUtilization);
+FDB_DECLARE_BOOLEAN_PARAM(TeamMustHaveShards);
+
 struct GetTeamRequest {
 	bool wantsNewServers;
 	bool wantsTrueBest;
@@ -87,10 +92,10 @@ struct GetTeamRequest {
 	Promise<std::pair<Optional<Reference<IDataDistributionTeam>>, bool>> reply;
 
 	GetTeamRequest() {}
-	GetTeamRequest(bool wantsNewServers,
-	               bool wantsTrueBest,
-	               bool preferLowerUtilization,
-	               bool teamMustHaveShards,
+	GetTeamRequest(WantNewServers wantsNewServers,
+	               WantTrueBest wantsTrueBest,
+	               PreferLowerUtilization preferLowerUtilization,
+	               TeamMustHaveShards teamMustHaveShards,
 	               double inflightPenalty = 1.0)
 	  : wantsNewServers(wantsNewServers), wantsTrueBest(wantsTrueBest), preferLowerUtilization(preferLowerUtilization),
 	    teamMustHaveShards(teamMustHaveShards), inflightPenalty(inflightPenalty) {}
