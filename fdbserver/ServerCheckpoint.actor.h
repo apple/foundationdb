@@ -39,8 +39,6 @@ public:
 	// starting point for the underlying checkpoint.
 	virtual Future<Void> init(StringRef token) = 0;
 
-	virtual Future<Void> init(KeyRangeRef range) = 0;
-
 	// Scans the checkpoint, and returns the key-value pairs.
 	virtual Future<RangeResult> nextKeyValues(const int rowLimit, const int ByteLimit) = 0;
 

@@ -2228,7 +2228,7 @@ ACTOR Future<Void> fetchCheckpointKeyValuesQ(StorageServer* self, FetchCheckpoin
 
 	try {
 		state ICheckpointReader* reader = newCheckpointReader(it->second, deterministicRandom()->randomUniqueID());
-		wait(reader->init(req.range));
+		wait(reader->init(BinaryWriter::toValue(req.range, IncludeVersion())));
 
 		// std::cout << "Init Checkpoint Done" << std::endl;
 

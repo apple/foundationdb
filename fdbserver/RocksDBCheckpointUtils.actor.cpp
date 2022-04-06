@@ -345,12 +345,12 @@ public:
 		readThreads->addThread(new Reader(db), "fdb-rocks-rd");
 	}
 
-	Future<Void> init(StringRef token) override { throw not_implemented(); }
-
-	Future<Void> init(KeyRangeRef range) override {
+	Future<Void> init(StringRef token) override {
 		if (openFuture.isValid()) {
 			return openFuture;
 		}
+
+		KeyRange range = BinaryReader::fromStringRef<KeyRange>(token, IncludeVersion());
 		auto a = std::make_unique<Reader::OpenAction>(this->path, range, this->version);
 		openFuture = a->done.getFuture();
 		readThreads->post(a.release());
@@ -405,8 +405,6 @@ public:
 	  : checkpoint_(checkpoint), id_(logID), file_(Reference<IAsyncFile>()), offset_(0) {}
 
 	Future<Void> init(StringRef token) override;
-
-	Future<Void> init(KeyRangeRef range) override { throw not_implemented(); }
 
 	Future<RangeResult> nextKeyValues(const int rowLimit, const int byteLimit) override { throw not_implemented(); }
 
