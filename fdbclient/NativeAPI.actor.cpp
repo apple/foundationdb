@@ -2841,6 +2841,7 @@ ACTOR Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations_internal(
     Optional<UID> debugID,
     UseProvisionalProxies useProvisionalProxies,
     Version version) {
+	// TODO - ljoswiak, parent or link?
 	state Span span("NAPI:getKeyRangeLocations"_loc, spanContext);
 	if (debugID.present())
 		g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getKeyLocations.Before");
@@ -3041,6 +3042,8 @@ ACTOR Future<Void> warmRange_impl(Reference<TransactionState> trState, KeyRange 
 // 	}
 // }
 
+// TODO - ljoswiak and mpilman. This will need some discussion and close inspection, looks like txnID
+// is intertwined with old first uint64_t of SpanID/UID which was previously used for traceId. 
 SpanContext generateSpanID(bool transactionTracingSample, SpanContext parentContext = SpanContext()) {
 	uint64_t txnId = deterministicRandom()->randomUInt64();
 	if (parentContext.isValid()) {
@@ -3130,6 +3133,7 @@ ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
                                        UseTenant useTenant,
                                        TransactionRecordLogInfo recordLogInfo) {
 	state Version ver = wait(version);
+	// TODO - ljoswiak, parent or link?
 	state Span span("NAPI:getValue"_loc, trState->spanContext);
 	if (useTenant && trState->tenant().present()) {
 		span.addAttribute("tenant"_sr, trState->tenant().get());
