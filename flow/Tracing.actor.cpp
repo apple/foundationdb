@@ -835,20 +835,20 @@ TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
 	auto index = 147;
 	// We & out the bits here that contain the length the initial 4 higher order bits are
 	// to signify this is a string of len <= 31 chars.
-	auto firstKeyLength = static_cast<uint8_t>(data[index] & 0b00001111);
+	auto firstKeyLength = static_cast<uint8_t>(data[index] & 0b00011111);
 	index++;
 	auto firstKey = readMPString(&data[index], firstKeyLength);
 	index += firstKeyLength;
-	auto firstValueLength = static_cast<uint8_t>(data[index] & 0b00001111);
+	auto firstValueLength = static_cast<uint8_t>(data[index] & 0b00011111);
 	index++;
 	auto firstValue = readMPString(&data[index], firstValueLength);
 	index += firstValueLength;
 	attributes[firstKey] = firstValue;
-	auto secondKeyLength = static_cast<uint8_t>(data[index] & 0b00001111);
+	auto secondKeyLength = static_cast<uint8_t>(data[index] & 0b00011111);
 	index++;
 	auto secondKey = readMPString(&data[index], secondKeyLength);
 	index += secondKeyLength;
-	auto secondValueLength = static_cast<uint8_t>(data[index] & 0b00001111);
+	auto secondValueLength = static_cast<uint8_t>(data[index] & 0b00011111);
 	index++;
 	auto secondValue = readMPString(&data[index], secondValueLength);
 	attributes[secondKey] = secondValue;
