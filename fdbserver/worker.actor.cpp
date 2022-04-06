@@ -242,7 +242,8 @@ ACTOR Future<Void> workerHandleErrors(FutureStream<ErrorInfo> errors) {
 			bool ok = err.error.code() == error_code_success || err.error.code() == error_code_please_reboot ||
 			          err.error.code() == error_code_actor_cancelled ||
 			          err.error.code() == error_code_coordinators_changed || // The worker server was cancelled
-			          err.error.code() == error_code_shutdown_in_progress;
+			          err.error.code() == error_code_shutdown_in_progress ||
+			          err.error.code() == error_code_storage_team_id_not_found;
 
 			if (!ok) {
 				err.error = checkIOTimeout(err.error); // Possibly convert error to io_timeout
@@ -1979,7 +1980,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 
 				// create kv and disk queue per TLog group
 				for (auto& group : req.tlogGroups) {
-					IKeyValueStore* data = keyValueStoreMemory(joinPath(folder, "loggroup"), group.logGroupId, 500e6);
+					IKeyValueStore* data = keyValueStoreMemory(
+					    joinPath(folder, "loggroup-" + group.logGroupId.toString() + "-"), group.logGroupId, 500e6);
 					IDiskQueue* queue = openDiskQueue(joinPath(folder, "logqueue-" + group.logGroupId.toString() + "-"),
 					                                  "fdq",
 					                                  group.logGroupId,
