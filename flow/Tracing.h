@@ -288,6 +288,15 @@ public:
 		return *this;
 	}
 
+	Span& addParentOrLink(const SpanContext& other) {
+		if (!parentContext.isValid()) {
+			parentContext = other;
+ 		} else {
+ 		links.push_back(arena, other);
+		}
+		return *this;
+	} 
+
 	Arena arena;
 	SpanContext context;
 	Location location;

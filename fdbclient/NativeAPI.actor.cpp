@@ -5759,7 +5759,7 @@ ACTOR static Future<Void> commitDummyTransaction(Reference<TransactionState> trS
 	//
 	// Need to determine if this behavior matches previously intended, here we'd just always set parent.
 	state Span span("NAPI:dummyTransaction"_loc, trState->spanContext);
-	tr.span.parentContext = span.context;
+	tr.span.addParentOrLink(span.context);
 	loop {
 		try {
 			TraceEvent("CommitDummyTransaction").detail("Key", range.begin).detail("Retries", retries);
