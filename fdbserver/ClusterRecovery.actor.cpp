@@ -1188,7 +1188,7 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 		// Cannot use a positive version epoch in simulation because of the
 		// clock starting at 0. A positive version epoch would mean the initial
 		// cluster version was negative.
-		self->versionEpoch = deterministicRandom()->randomInt64(-1e12, 0);
+		self->versionEpoch = deterministicRandom()->randomInt64(-1e6, 0);
 	}
 
 	// Versionstamped operations (particularly those applied from DR) define a minimum commit version
