@@ -564,7 +564,7 @@ void CommitBatchContext::setupTraceBatch() {
 
 			g_traceBatch.addAttach("CommitAttachID", tr.debugID.get().first(), debugID.get().first());
 		}
-		// TODO - OK to add link here rather than parent?
+		// TODO - ljoswiak OK to add link here rather than parent? RE: addParent side effect
 		span.addLink(tr.spanContext);
 	}
 
@@ -1192,7 +1192,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 			// simulation
 			TEST(true); // Semi-committed pipeline limited by MVCC window
 			//TraceEvent("ProxyWaitingForCommitted", pProxyCommitData->dbgid).detail("CommittedVersion", pProxyCommitData->committedVersion.get()).detail("NeedToCommit", commitVersion);
-			// TODO - parent or link?
+			// TODO - ljoswiak parent or link?
 			waitVersionSpan = Span("MP:overMaxReadTransactionLifeVersions"_loc, { span.context });
 			choose {
 				when(wait(pProxyCommitData->committedVersion.whenAtLeast(
@@ -1530,8 +1530,8 @@ void maybeAddTssMapping(GetKeyServerLocationsReply& reply,
 ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsRequest req, ProxyCommitData* commitData) {
 	// We can't respond to these requests until we have valid txnStateStore
 	getCurrentLineage()->modify(&TransactionLineage::operation) = TransactionLineage::Operation::GetKeyServersLocations;
-	// TODO - txID vs. TraceID now UID
-	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.first();
+	// TODO - ljoswiak, mpilman. OK to use first uint64_t of traceID?
+	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID.first();
 	wait(commitData->validState.getFuture());
 	wait(delay(0, TaskPriority::DefaultEndpoint));
 

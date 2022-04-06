@@ -3262,6 +3262,7 @@ ACTOR Future<Key> getKey(Reference<TransactionState> trState,
 	wait(success(version));
 
 	state Optional<UID> getKeyID = Optional<UID>();
+	// TODO - ljoswiak, parent or link?
 	state Span span("NAPI:getKey"_loc, trState->spanContext);
 	if (trState->debugID.present()) {
 		getKeyID = nondeterministicRandom()->randomUniqueID();
@@ -3358,6 +3359,7 @@ ACTOR Future<Key> getKey(Reference<TransactionState> trState,
 }
 
 ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version, SpanContext spanContext) {
+	// TODO - ljoswiak, Parent or link? Below is linked constructor with empty parent. 
 	state Span span("NAPI:waitForCommittedVersion"_loc, SpanContext(), { spanContext });
 	try {
 		loop {
@@ -3407,6 +3409,7 @@ ACTOR Future<Void> readVersionBatcher(
     uint32_t flags);
 
 ACTOR Future<Version> watchValue(Database cx, Reference<const WatchParameters> parameters) {
+	// TODO - ljoswiak parent or link?
 	state Span span("NAPI:watchValue"_loc, parameters->spanContext);
 	state Version ver = parameters->version;
 	cx->validateVersion(parameters->version);
@@ -3690,6 +3693,7 @@ Future<RangeResultFamily> getExactRange(Reference<TransactionState> trState,
                                         Reverse reverse,
                                         UseTenant useTenant) {
 	state RangeResultFamily output;
+	// TODO - ljoswiak parent or link?
 	state Span span("NAPI:getExactRange"_loc, trState->spanContext);
 
 	if (useTenant && trState->tenant().present()) {
@@ -4048,6 +4052,7 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 	state KeySelector originalBegin = begin;
 	state KeySelector originalEnd = end;
 	state RangeResultFamily output;
+	// TODO - ljoswiak parent or link?
 	state Span span("NAPI:getRange"_loc, trState->spanContext);
 	if (useTenant && trState->tenant().present()) {
 		span.addAttribute("tenant"_sr, trState->tenant().get());
@@ -4809,6 +4814,7 @@ ACTOR Future<Void> getRangeStream(Reference<TransactionState> trState,
 
 	// FIXME: better handling to disable row limits
 	ASSERT(!limits.hasRowLimit());
+	// TODO - ljoswiak parent or link
 	state Span span("NAPI:getRangeStream"_loc, trState->spanContext);
 
 	state Version version = wait(fVersion);
@@ -4932,6 +4938,7 @@ Transaction::Transaction(Database const& cx, Optional<TenantName> const& tenant)
                                             cx->taskID,
                                             generateSpanID(cx->transactionTracingSample),
                                             createTrLogInfoProbabilistically(cx))),
+	// TODO - does this make sense, using the existing span context (traceId, spanId) for the transaction
     span(trState->spanContext, "Transaction"_loc), backoff(CLIENT_KNOBS->DEFAULT_BACKOFF), tr(trState->spanContext) {
 	if (DatabaseContext::debugUseTags) {
 		debugAddTags(trState);
@@ -5746,6 +5753,11 @@ ACTOR void checkWrites(Reference<TransactionState> trState,
 ACTOR static Future<Void> commitDummyTransaction(Reference<TransactionState> trState, KeyRange range) {
 	state Transaction tr(trState->cx);
 	state int retries = 0;
+	// TODO - ljoswiak, mpilman. This will require some inspection. Here we're setting the parent context.
+	// Before you used addParent, however there is a side effect in that old function, due to no links. 
+	// You would check if there is no parent set and if so, you'd overwrite the traceids.
+	//
+	// Need to determine if this behavior matches previously intended, here we'd just always set parent.
 	state Span span("NAPI:dummyTransaction"_loc, trState->spanContext);
 	tr.span.parentContext = span.context;
 	loop {
@@ -5913,6 +5925,7 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
                                     Future<Version> readVersion) {
 	state TraceInterval interval("TransactionCommit");
 	state double startTime = now();
+	// TODO - ljoswiak, parent or link.
 	state Span span("NAPI:tryCommit"_loc, trState->spanContext);
 	state Optional<UID> debugID = trState->debugID;
 	if (debugID.present()) {
@@ -6406,6 +6419,8 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 		if (value.get().size() != 16) {
 			throw invalid_option_value();
 		}
+		// TODO - ljoswiak, mpilman. This creates a link with a 0 spanID. Before you were calling
+		// addParent with previously mentioned side effects.
 		span.addLink(SpanContext(BinaryReader::fromStringRef<UID>(value.get(), Unversioned()),0));
 		break;
 
@@ -6553,6 +6568,7 @@ ACTOR Future<Void> readVersionBatcher(DatabaseContext* cx,
 					}
 					g_traceBatch.addAttach("TransactionAttachID", req.debugID.get().first(), debugID.get().first());
 				}
+				// TODO - ljoswiak. Link seems appropriate here.
 				span.addLink(req.spanContext);
 				requests.push_back(req.reply);
 				for (auto tag : req.tags) {
@@ -6612,6 +6628,7 @@ ACTOR Future<Version> extractReadVersion(Reference<TransactionState> trState,
                                          SpanContext spanContext,
                                          Future<GetReadVersionReply> f,
                                          Promise<Optional<Value>> metadataVersion) {
+	// TODO - ljoswiak link or parent? This is linking on last parameter.
 	state Span span(spanContext, location, { trState->spanContext });
 	GetReadVersionReply rep = wait(f);
 	double replyTime = now();
@@ -6780,6 +6797,7 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 		}
 
 		Location location = "NAPI:getReadVersion"_loc;
+		// TODO - ljoswiak, mpilman, discuss generateSpanID use.
 		SpanContext spanContext = generateSpanID(trState->cx->transactionTracingSample, trState->spanContext);
 		auto const req = DatabaseContext::VersionRequest(spanContext, trState->options.tags, trState->debugID);
 		batcher.stream.send(req);
@@ -7253,6 +7271,7 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Reference<Transa
                                                                 KeyRange keys,
                                                                 int64_t chunkSize,
                                                                 Version version) {
+	// TODO - ljoswiak, link or parent?
 	state Span span("NAPI:GetRangeSplitPoints"_loc, trState->spanContext);
 
 	loop {
@@ -7817,6 +7836,7 @@ Reference<TransactionLogInfo> Transaction::createTrLogInfoProbabilistically(cons
 	return Reference<TransactionLogInfo>();
 }
 
+// TODO - ljoswiak, mpilman. Discuss 2 functions below and implications on txID.
 void Transaction::setTransactionID(uint64_t id) {
 	ASSERT(getSize() == 0);
 	trState->spanContext = SpanContext(UID(id, deterministicRandom()->randomUInt64()), trState->spanContext.spanID);
