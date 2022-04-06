@@ -121,7 +121,8 @@ public:
 					newServers[serverId] = ssi;
 
 					if (oldServers.count(serverId)) {
-						if (ssi.getValue.getEndpoint() != oldServers[serverId].getValue.getEndpoint()) {
+						if (ssi.getValue.getEndpoint() != oldServers[serverId].getValue.getEndpoint() ||
+						    ssi.isAcceptingRequests() != oldServers[serverId].isAcceptingRequests()) {
 							serverChanges.send(std::make_pair(serverId, Optional<StorageServerInterface>(ssi)));
 						}
 						oldServers.erase(serverId);
@@ -158,6 +159,7 @@ public:
 				    StorageQueuingMetricsRequest(), 0, 0)); // SOMEDAY: or tryGetReply?
 				if (reply.present()) {
 					myQueueInfo->value.update(reply.get(), self->smoothTotalDurableBytes);
+					myQueueInfo->value.acceptingRequests = ssi.isAcceptingRequests();
 				} else {
 					if (myQueueInfo->value.valid) {
 						TraceEvent("RkStorageServerDidNotRespond", self->id).detail("StorageServer", ssi.id());
@@ -487,7 +489,7 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 	// Look at each storage server's write queue and local rate, compute and store the desired rate ratio
 	for (auto i = storageQueueInfo.begin(); i != storageQueueInfo.end(); ++i) {
 		auto const& ss = i->value;
-		if (!ss.valid || (remoteDC.present() && ss.locality.dcId() == remoteDC))
+		if (!ss.valid || !ss.acceptingRequests || (remoteDC.present() && ss.locality.dcId() == remoteDC))
 			continue;
 		++sscount;
 
@@ -941,7 +943,7 @@ ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<S
 
 StorageQueueInfo::StorageQueueInfo(UID id, LocalityData locality)
   : busiestWriteTagEventHolder(makeReference<EventCacheHolder>(id.toString() + "/BusiestWriteTag")), valid(false),
-    id(id), locality(locality), smoothDurableBytes(SERVER_KNOBS->SMOOTHING_AMOUNT),
+    id(id), locality(locality), acceptingRequests(false), smoothDurableBytes(SERVER_KNOBS->SMOOTHING_AMOUNT),
     smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
     smoothDurableVersion(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothLatestVersion(SERVER_KNOBS->SMOOTHING_AMOUNT),
     smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT),

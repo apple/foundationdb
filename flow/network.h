@@ -507,6 +507,10 @@ public:
 	virtual NetworkAddress getPeerAddress() const = 0;
 
 	virtual UID getDebugID() const = 0;
+
+	// At present, implemented by Sim2Conn where we want to disable bits flip for connections between parent process and
+	// child process, also reduce latency for this kind of connection
+	virtual bool isStableConnection() const { throw unsupported_operation(); }
 };
 
 class IListener {
@@ -566,6 +570,10 @@ public:
 	virtual double timer() = 0;
 	// A wrapper for directly getting the system time. The time returned by now() only updates in the run loop,
 	// so it cannot be used to measure times of functions that do not have wait statements.
+
+	// Simulation version of timer_int for convenience, based on timer()
+	// Returns epoch nanoseconds
+	uint64_t timer_int() { return (uint64_t)(g_network->timer() * 1e9); }
 
 	virtual double timer_monotonic() = 0;
 	// Similar to timer, but monotonic
