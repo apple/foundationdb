@@ -46,6 +46,13 @@ typedef enum {
 static_assert(EncryptCipherMode::ENCRYPT_CIPHER_MODE_LAST <= std::numeric_limits<uint8_t>::max(),
               "EncryptCipherMode value overflow");
 
+// EncryptionHeader authentication modes
+// 1. NONE - No 'authentication token' generation needed for EncryptionHeader i.e. no protection against header OR
+// cipherText 'tampering' and/or bit rot/flip corruptions.
+// 2. Single/Multi - Encyrption header would generate one or more 'authentication tokens' to protect the header against
+// 'tempering' and/or bit rot/flip corruptions. Refer to BlobCipher.h for detailed usage recommendations.
+// 3. LAST - Invalid mode, used for static asserts.
+
 typedef enum {
 	ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE = 0,
 	ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE = 1,

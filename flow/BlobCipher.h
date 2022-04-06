@@ -365,6 +365,7 @@ private:
 	bool headerAuthTokenValidationDone;
 	bool authTokensValidationDone;
 
+	void verifyEncryptHeaderMetadata(const BlobCipherEncryptHeader& header);
 	void verifyAuthTokens(const uint8_t* ciphertext,
 	                      const int ciphertextLen,
 	                      const BlobCipherEncryptHeader& header,
