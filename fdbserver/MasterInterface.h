@@ -162,7 +162,7 @@ struct UpdateRecoveryDataRequest {
 	UpdateRecoveryDataRequest(Version recoveryTransactionVersion,
 	                          Version lastEpochEnd,
 	                          std::vector<CommitProxyInterface> commitProxies,
-	                          Optional<Version> versionEpoch)
+	                          Optional<int64_t> versionEpoch)
 	  : recoveryTransactionVersion(recoveryTransactionVersion), lastEpochEnd(lastEpochEnd),
 	    commitProxies(commitProxies), versionEpoch(versionEpoch) {}
 

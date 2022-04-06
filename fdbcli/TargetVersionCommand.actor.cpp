@@ -44,12 +44,12 @@ ACTOR static Future<Optional<VersionInfo>> getVersionInfo(Reference<IDatabase> d
 		try {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			state Version rv = wait(safeThreadFutureToFuture(tr->getReadVersion()));
-			Optional<Standalone<StringRef>> versionEpochValue =
-			    wait(safeThreadFutureToFuture(tr->get(versionEpochKey)));
-			if (!versionEpochValue.present()) {
+			state ThreadFuture<Optional<Value>> versionEpochValFuture = tr->get(versionEpochKey);
+			Optional<Value> versionEpochVal = wait(safeThreadFutureToFuture(versionEpochValFuture));
+			if (!versionEpochVal.present()) {
 				return Optional<VersionInfo>();
 			}
-			int64_t versionEpoch = BinaryReader::fromStringRef<Version>(versionEpochValue.get(), Unversioned());
+			int64_t versionEpoch = BinaryReader::fromStringRef<Version>(versionEpochVal.get(), Unversioned());
 			int64_t expected = g_network->timer() * CLIENT_KNOBS->CORE_VERSIONSPERSECOND - versionEpoch;
 			return VersionInfo{ rv, expected };
 		} catch (Error& e) {
