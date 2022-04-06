@@ -1142,8 +1142,18 @@ ACTOR Future<Void> tLogPopCore(TLogData* self, Tag inputTag, Version to, Referen
 	int8_t tagLocality = inputTag.locality;
 	if (isPseudoLocality(tagLocality)) {
 		if (logData->logSystem->get().isValid()) {
-			upTo = logData->logSystem->get()->popPseudoLocalityTag(inputTag, to);
-			tagLocality = tagLocalityLogRouter;
+			// if the configuration change from multi-region to single region mode, the delayed pop created during
+			// multi-region stage should be skipped. Same thing applies to the backup worker
+			if (isPseudoLocality(inputTag.locality) &&
+			    logData->logSystem->get()->hasPseudoLocality(inputTag.locality)) {
+				upTo = logData->logSystem->get()->popPseudoLocalityTag(inputTag, to);
+				tagLocality = tagLocalityLogRouter;
+			} else {
+				TraceEvent(SevWarn, "TLogPopNoPseudoLocality", self->dbgid)
+				    .detail("Locality", tagLocality)
+				    .detail("Version", upTo);
+				return Void();
+			}
 		} else {
 			TraceEvent(SevWarn, "TLogPopNoLogSystem", self->dbgid)
 			    .detail("Locality", tagLocality)
