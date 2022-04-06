@@ -936,6 +936,26 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 						}
 					}
 				}
+
+				if (SERVER_KNOBS->WORKER_HEALTH_REPORT_RECENT_DESTROYED_PEER) {
+					// When the worker cannot connect to a remote peer, the peer maybe erased from the list returned
+					// from getAllPeers(). Therefore, we also look through all the recent closed peers in the flow
+					// transport's health monitor. Note that all the closed peers stored here are caused by connection
+					// failure, but not normal connection close. Therefore, we report all such peers if they are also
+					// part of the transaction sub system.
+					for (const auto& address : FlowTransport::transport().healthMonitor()->getRecentClosedPeers()) {
+						if (allPeers.find(address) != allPeers.end()) {
+							// We have checked this peer in the above for loop.
+							continue;
+						}
+
+						if ((workerInPrimary && addressInDbAndPrimaryDc(address, dbInfo)) ||
+						    (!workerInPrimary && addressInDbAndRemoteDc(address, dbInfo))) {
+							TraceEvent("HealthMonitorDetectRecentClosedPeer").suppressFor(30).detail("Peer", address);
+							req.degradedPeers.push_back(address);
+						}
+					}
+				}
 			}
 
 			if (!req.degradedPeers.empty()) {
