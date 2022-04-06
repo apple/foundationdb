@@ -55,7 +55,7 @@ inline bool isSystemKey(KeyRef key) {
 class ApplyMetadataMutationsImpl {
 
 public:
-	ApplyMetadataMutationsImpl(const SpanID& spanContext_,
+	ApplyMetadataMutationsImpl(const SpanContext& spanContext_,
 	                           const UID& dbgid_,
 	                           Arena& arena_,
 	                           const VectorRef<MutationRef>& mutations_,
@@ -63,7 +63,7 @@ public:
 	  : spanContext(spanContext_), dbgid(dbgid_), arena(arena_), mutations(mutations_), txnStateStore(txnStateStore_),
 	    confChange(dummyConfChange) {}
 
-	ApplyMetadataMutationsImpl(const SpanID& spanContext_,
+	ApplyMetadataMutationsImpl(const SpanContext& spanContext_,
 	                           Arena& arena_,
 	                           const VectorRef<MutationRef>& mutations_,
 	                           ProxyCommitData& proxyCommitData_,
@@ -1157,7 +1157,7 @@ public:
 
 } // anonymous namespace
 
-void applyMetadataMutations(SpanID const& spanContext,
+void applyMetadataMutations(SpanContext const& spanContext,
                             ProxyCommitData& proxyCommitData,
                             Arena& arena,
                             Reference<ILogSystem> logSystem,
@@ -1181,7 +1181,7 @@ void applyMetadataMutations(SpanID const& spanContext,
 	    .apply();
 }
 
-void applyMetadataMutations(SpanID const& spanContext,
+void applyMetadataMutations(SpanContext const& spanContext,
                             const UID& dbgid,
                             Arena& arena,
                             const VectorRef<MutationRef>& mutations,

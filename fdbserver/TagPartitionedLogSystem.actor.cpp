@@ -507,7 +507,7 @@ Future<Version> TagPartitionedLogSystem::push(Version prevVersion,
                                               Version knownCommittedVersion,
                                               Version minKnownCommittedVersion,
                                               LogPushData& data,
-                                              SpanID const& spanContext,
+                                              SpanContext const& spanContext,
                                               Optional<UID> debugID) {
 	// FIXME: Randomize request order as in LegacyLogSystem?
 	std::vector<Future<Void>> quorumResults;

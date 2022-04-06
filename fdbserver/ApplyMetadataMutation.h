@@ -49,7 +49,7 @@ Reference<StorageInfo> getStorageInfo(UID id,
                                       std::map<UID, Reference<StorageInfo>>* storageCache,
                                       IKeyValueStore* txnStateStore);
 
-void applyMetadataMutations(SpanID const& spanContext,
+void applyMetadataMutations(SpanContext const& spanContext,
                             ProxyCommitData& proxyCommitData,
                             Arena& arena,
                             Reference<ILogSystem> logSystem,
@@ -59,7 +59,7 @@ void applyMetadataMutations(SpanID const& spanContext,
                             Version version,
                             Version popVersion,
                             bool initialCommit);
-void applyMetadataMutations(SpanID const& spanContext,
+void applyMetadataMutations(SpanContext const& spanContext,
                             const UID& dbgid,
                             Arena& arena,
                             const VectorRef<MutationRef>& mutations,

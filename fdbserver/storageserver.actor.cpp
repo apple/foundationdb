@@ -1383,7 +1383,8 @@ void updateProcessStats(StorageServer* self) {
 #pragma region Queries
 #endif
 
-ACTOR Future<Version> waitForVersionActor(StorageServer* data, Version version, SpanID spanContext) {
+ACTOR Future<Version> waitForVersionActor(StorageServer* data, Version version, SpanContext spanContext) {
+	// TODO Link - or parent?
 	state Span span("SS.WaitForVersion"_loc, { spanContext });
 	choose {
 		when(wait(data->version.whenAtLeast(version))) {
@@ -1404,7 +1405,7 @@ ACTOR Future<Version> waitForVersionActor(StorageServer* data, Version version, 
 	}
 }
 
-Future<Version> waitForVersion(StorageServer* data, Version version, SpanID spanContext) {
+Future<Version> waitForVersion(StorageServer* data, Version version, SpanContext spanContext) {
 	if (version == latestVersion) {
 		version = std::max(Version(1), data->version.get());
 	}
@@ -1604,9 +1605,9 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 // must be kept alive until the watch is finished.
 extern size_t WATCH_OVERHEAD_WATCHQ, WATCH_OVERHEAD_WATCHIMPL;
 
-ACTOR Future<Version> watchWaitForValueChange(StorageServer* data, SpanID parent, KeyRef key) {
+ACTOR Future<Version> watchWaitForValueChange(StorageServer* data, SpanContext parent, KeyRef key) {
 	state Location spanLocation = "SS:watchWaitForValueChange"_loc;
-	state Span span(spanLocation, { parent });
+	state Span span(spanLocation, parent);
 	state Reference<ServerWatchMetadata> metadata = data->getWatchMetadata(key);
 
 	if (metadata->debugID.present())
@@ -1713,7 +1714,8 @@ void checkCancelWatchImpl(StorageServer* data, WatchValueRequest req) {
 ACTOR Future<Void> watchValueSendReply(StorageServer* data,
                                        WatchValueRequest req,
                                        Future<Version> resp,
-                                       SpanID spanContext) {
+                                       SpanContext spanContext) {
+	// TODO - Parent or Link?
 	state Span span("SS:watchValue"_loc, { spanContext });
 	state double startTime = now();
 	++data->counters.watchQueries;
@@ -2792,7 +2794,7 @@ ACTOR Future<GetKeyValuesReply> readRange(StorageServer* data,
                                           KeyRange range,
                                           int limit,
                                           int* pLimitBytes,
-                                          SpanID parentSpan,
+                                          SpanContext parentSpan,
                                           IKeyValueStore::ReadType type,
                                           Optional<Key> tenantPrefix) {
 	state GetKeyValuesReply result;
@@ -3031,7 +3033,7 @@ ACTOR Future<Key> findKey(StorageServer* data,
                           Version version,
                           KeyRange range,
                           int* pOffset,
-                          SpanID parentSpan,
+                          SpanContext parentSpan,
                           IKeyValueStore::ReadType type)
 // Attempts to find the key indicated by sel in the data at version, within range.
 // Precondition: selectorInRange(sel, range)
@@ -3052,7 +3054,7 @@ ACTOR Future<Key> findKey(StorageServer* data,
 	state int sign = forward ? +1 : -1;
 	state bool skipEqualKey = sel.orEqual == forward;
 	state int distance = forward ? sel.offset : 1 - sel.offset;
-	state Span span("SS.findKey"_loc, { parentSpan });
+	state Span span("SS.findKey"_loc, parentSpan);
 
 	// Don't limit the number of bytes if this is a trivial key selector (there will be at most two items returned from
 	// the read range in this case)
@@ -3156,9 +3158,12 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 	    req.isFetchKeys ? IKeyValueStore::ReadType::FETCH : IKeyValueStore::ReadType::NORMAL;
 
 	if (req.tenantInfo.name.present()) {
-		span.addTag("tenant"_sr, req.tenantInfo.name.get());
+		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
 	}
 
+    
+	// TODO - Trace ID is now 2 unint64_t, need to discuss what you want to do here?
+	// Use first or change txID?
 	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.first();
 
 	++data->counters.getRangeQueries;
@@ -3646,9 +3651,11 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 	    req.isFetchKeys ? IKeyValueStore::ReadType::FETCH : IKeyValueStore::ReadType::NORMAL;
 
 	if (req.tenantInfo.name.present()) {
-		span.addTag("tenant"_sr, req.tenantInfo.name.get());
+		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
 	}
 
+ 	// TODO - Trace ID is now 2 unint64_t, need to discuss what you want to do here?
+	// Use first or change txID?
 	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.first();
 
 	++data->counters.getMappedRangeQueries;
@@ -3858,7 +3865,7 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 	    req.isFetchKeys ? IKeyValueStore::ReadType::FETCH : IKeyValueStore::ReadType::NORMAL;
 
 	if (req.tenantInfo.name.present()) {
-		span.addTag("tenant"_sr, req.tenantInfo.name.get());
+		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
 	}
 
 	req.reply.setByteLimit(SERVER_KNOBS->RANGESTREAM_LIMIT_BYTES);
@@ -4056,9 +4063,11 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 	state Span span("SS:getKey"_loc, { req.spanContext });
 	if (req.tenantInfo.name.present()) {
-		span.addTag("tenant"_sr, req.tenantInfo.name.get());
+		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
 	}
 	state int64_t resultSize = 0;
+	// TODO - Trace ID is now 2 unint64_t, need to discuss what you want to do here?
+	// Use first or change txID?
 	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.first();
 
 	++data->counters.getKeyQueries;
@@ -6670,7 +6679,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 
 		state Version ver = invalidVersion;
 		cloneCursor2->setProtocolVersion(data->logProtocol);
-		state SpanID spanContext = SpanID();
+		state SpanContext spanContext = SpanContext();
 		state double beforeTLogMsgsUpdates = now();
 		state std::set<Key> updatedChangeFeeds;
 		for (; cloneCursor2->hasMessage(); cloneCursor2->nextMessage()) {
@@ -6704,7 +6713,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				data->logProtocol = rd.protocolVersion();
 				data->storage.changeLogProtocol(ver, data->logProtocol);
 				cloneCursor2->setProtocolVersion(rd.protocolVersion());
-				spanContext = UID();
+				spanContext.traceID = UID();
 			} else if (rd.protocolVersion().hasSpanContext() && SpanContextMessage::isNextIn(rd)) {
 				SpanContextMessage scm;
 				rd >> scm;
@@ -6714,7 +6723,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				rd >> msg;
 
 				Span span("SS:update"_loc, { spanContext });
-				span.addTag("key"_sr, msg.param1);
+				span.addAttribute("key"_sr, msg.param1);
 
 				// Drop non-private mutations if TSS fault injection is enabled in simulation, or if this is a TSS in
 				// quarantine.
@@ -8171,6 +8180,8 @@ ACTOR Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream
 		state WatchValueRequest req = waitNext(stream);
 		state Reference<ServerWatchMetadata> metadata = self->getWatchMetadata(req.key.contents());
 		state Span span("SS:serveWatchValueRequestsImpl"_loc, { req.spanContext });
+		// TODO - Trace ID is now 2 unint64_t, need to discuss what you want to do here?
+		// Use first or change txID?
 		getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.first();
 
 		// case 1: no watch set for the current key

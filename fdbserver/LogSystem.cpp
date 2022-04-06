@@ -276,8 +276,8 @@ void LogPushData::addTxsTag() {
 	}
 }
 
-void LogPushData::addTransactionInfo(SpanID const& context) {
-	TEST(!spanContext.isValid()); // addTransactionInfo with invalid SpanID
+void LogPushData::addTransactionInfo(SpanContext const& context) {
+	TEST(!spanContext.isValid()); // addTransactionInfo with invalid SpanContext
 	spanContext = context;
 	writtenLocations.clear();
 }

@@ -3020,21 +3020,41 @@ ACTOR Future<Void> warmRange_impl(Reference<TransactionState> trState, KeyRange 
 	return Void();
 }
 
-SpanID generateSpanID(bool transactionTracingSample, SpanID parentContext = SpanID()) {
+// TODO - Do we need this? Seems like logic for this is duplicated in constructor of spans
+// and is escaping out here. Assuming we can probably encapsulate this in the object itself?
+// SpanID generateSpanID(bool transactionTracingSample, SpanID parentContext = SpanID()) {
+// 	uint64_t txnId = deterministicRandom()->randomUInt64();
+// 	if (parentContext.isValid()) {
+// 		if (parentContext.first() > 0) {
+// 			txnId = parentContext.first();
+// 		}
+// 		uint64_t tokenId = parentContext.second() > 0 ? deterministicRandom()->randomUInt64() : 0;
+// 		return SpanID(txnId, tokenId);
+// 	} else if (transactionTracingSample) {
+// 		uint64_t tokenId = deterministicRandom()->random01() <= FLOW_KNOBS->TRACING_SAMPLE_RATE
+// 		                       ? deterministicRandom()->randomUInt64()
+// 		                       : 0;
+// 		return SpanID(txnId, tokenId);
+// 	} else {
+// 		return SpanID(txnId, 0);
+// 	}
+// }
+
+SpanContext generateSpanID(bool transactionTracingSample, SpanContext parentContext = SpanContext()) {
 	uint64_t txnId = deterministicRandom()->randomUInt64();
 	if (parentContext.isValid()) {
-		if (parentContext.first() > 0) {
-			txnId = parentContext.first();
+		if (parentContext.traceID.first() > 0) {
+			txnId = parentContext.traceID.first();
 		}
-		uint64_t tokenId = parentContext.second() > 0 ? deterministicRandom()->randomUInt64() : 0;
-		return SpanID(txnId, tokenId);
+		uint64_t tokenId = parentContext.spanID > 0 ? deterministicRandom()->randomUInt64() : 0;
+		return SpanContext(UID(txnId, deterministicRandom()->randomUInt64()), tokenId);
 	} else if (transactionTracingSample) {
 		uint64_t tokenId = deterministicRandom()->random01() <= FLOW_KNOBS->TRACING_SAMPLE_RATE
 		                       ? deterministicRandom()->randomUInt64()
 		                       : 0;
-		return SpanID(txnId, tokenId);
+		return SpanContext(UID(txnId, deterministicRandom()->randomUInt64()), tokenId);
 	} else {
-		return SpanID(txnId, 0);
+		return SpanContext(UID(txnId, deterministicRandom()->randomUInt64()), 0);
 	}
 }
 
@@ -3049,9 +3069,9 @@ TransactionState::TransactionState(Database cx,
 Reference<TransactionState> TransactionState::cloneAndReset(Reference<TransactionLogInfo> newTrLogInfo,
                                                             bool generateNewSpan) const {
 
-	SpanID newSpanID = generateNewSpan ? generateSpanID(cx->transactionTracingSample) : spanContext;
+	SpanContext newSpanContext = generateNewSpan ? generateSpanID(cx->transactionTracingSample) : spanContext;
 	Reference<TransactionState> newState =
-	    makeReference<TransactionState>(cx, tenant_, cx->taskID, newSpanID, newTrLogInfo);
+	    makeReference<TransactionState>(cx, tenant_, cx->taskID, newSpanContext, newTrLogInfo);
 
 	if (!cx->apiVersionAtLeast(16)) {
 		newState->options = options;
@@ -5888,7 +5908,7 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
                                     Future<Version> readVersion) {
 	state TraceInterval interval("TransactionCommit");
 	state double startTime = now();
-	state Span span("NAPI:tryCommit"_loc, trState->spanID);
+	state Span span("NAPI:tryCommit"_loc, trState->spanContext);
 	state Optional<UID> debugID = trState->debugID;
 	if (debugID.present()) {
 		TraceEvent(interval.begin()).detail("Parent", debugID.get());
@@ -6381,7 +6401,7 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 		if (value.get().size() != 16) {
 			throw invalid_option_value();
 		}
-		span.addParent(BinaryReader::fromStringRef<UID>(value.get(), Unversioned()));
+		span.addLink(SpanContext(BinaryReader::fromStringRef<UID>(value.get(), Unversioned()),0));
 		break;
 
 	case FDBTransactionOptions::REPORT_CONFLICTING_KEYS:
@@ -6424,7 +6444,7 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 	}
 }
 
-ACTOR Future<GetReadVersionReply> getConsistentReadVersion(SpanID parentSpan,
+ACTOR Future<GetReadVersionReply> getConsistentReadVersion(SpanContext parentSpan,
                                                            DatabaseContext* cx,
                                                            uint32_t transactionCount,
                                                            TransactionPriority priority,
@@ -6528,7 +6548,7 @@ ACTOR Future<Void> readVersionBatcher(DatabaseContext* cx,
 					}
 					g_traceBatch.addAttach("TransactionAttachID", req.debugID.get().first(), debugID.get().first());
 				}
-				span.addLink(req.context);
+				span.addLink(req.spanContext);
 				requests.push_back(req.reply);
 				for (auto tag : req.tags) {
 					++tags[tag];
@@ -6584,10 +6604,10 @@ ACTOR Future<Void> readVersionBatcher(DatabaseContext* cx,
 
 ACTOR Future<Version> extractReadVersion(Reference<TransactionState> trState,
                                          Location location,
-                                         SpanID spanContext,
+                                         SpanContext spanContext,
                                          Future<GetReadVersionReply> f,
                                          Promise<Optional<Value>> metadataVersion) {
-	state Span span(spanContext, location, { trState->spanID });
+	state Span span(spanContext, location, { trState->spanContext });
 	GetReadVersionReply rep = wait(f);
 	double replyTime = now();
 	double latency = replyTime - trState->startTime;
@@ -6755,7 +6775,7 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 		}
 
 		Location location = "NAPI:getReadVersion"_loc;
-		UID spanContext = generateSpanID(trState->cx->transactionTracingSample, trState->spanID);
+		SpanContext spanContext = generateSpanID(trState->cx->transactionTracingSample, trState->spanContext);
 		auto const req = DatabaseContext::VersionRequest(spanContext, trState->options.tags, trState->debugID);
 		batcher.stream.send(req);
 		trState->startTime = now();
@@ -7228,7 +7248,7 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Reference<Transa
                                                                 KeyRange keys,
                                                                 int64_t chunkSize,
                                                                 Version version) {
-	state Span span("NAPI:GetRangeSplitPoints"_loc, trState->spanID);
+	state Span span("NAPI:GetRangeSplitPoints"_loc, trState->spanContext);
 
 	loop {
 		state std::vector<KeyRangeLocationInfo> locations =
@@ -7794,12 +7814,12 @@ Reference<TransactionLogInfo> Transaction::createTrLogInfoProbabilistically(cons
 
 void Transaction::setTransactionID(uint64_t id) {
 	ASSERT(getSize() == 0);
-	trState->spanID = SpanID(id, trState->spanID.second());
+	trState->spanContext = SpanContext(UID(id, deterministicRandom()->randomUInt64()), trState->spanContext.spanID);
 }
 
 void Transaction::setToken(uint64_t token) {
 	ASSERT(getSize() == 0);
-	trState->spanID = SpanID(trState->spanID.first(), token);
+	trState->spanContext = SpanContext(trState->spanContext.traceID, token);
 }
 
 void enableClientInfoLogging() {
