@@ -148,6 +148,7 @@ set(FDBCLIENT_SRCS
   VersionedMap.h
   VersionedMap.cpp
   VersionVector.h
+  VersionVector.cpp
   WellKnownEndpoints.h
   WriteMap.h
   json_spirit/json_spirit_error_position.h

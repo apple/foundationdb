@@ -35,6 +35,7 @@ void forceLinkParallelStreamTests();
 void forceLinkSimExternalConnectionTests();
 void forceLinkMutationLogReaderTests();
 void forceLinkIThreadPoolTests();
+void forceLinkVersionVectorTests();
 
 struct UnitTestWorkload : TestWorkload {
 	bool enabled;
@@ -80,6 +81,7 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkSimExternalConnectionTests();
 		forceLinkMutationLogReaderTests();
 		forceLinkIThreadPoolTests();
+		forceLinkVersionVectorTests();
 	}
 
 	std::string description() const override { return "UnitTests"; }

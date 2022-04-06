@@ -29,14 +29,19 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Knobs.h"
 
+static const int InvalidEncodedSize = 0;
+
 struct VersionVector {
-	boost::container::flat_map<Tag, Version> versions;
+	boost::container::flat_map<Tag, Version> versions; // An ordered map. (Note:
+	                                                   // changing this to an unordered
+	                                                   // map will break the
+	                                                   // serialization code below.)
 	Version maxVersion; // Specifies the max version in this version vector. (Note:
 	                    // there may or may not be a corresponding entry for this
 	                    // version in the "versions" map.)
 
-	VersionVector() : maxVersion(invalidVersion), cachedEncodedSize(0) {}
-	VersionVector(Version version) : maxVersion(version), cachedEncodedSize(0) {}
+	VersionVector() : maxVersion(invalidVersion), cachedEncodedSize(InvalidEncodedSize) {}
+	VersionVector(Version version) : maxVersion(version), cachedEncodedSize(InvalidEncodedSize) {}
 
 private:
 	// Only invoked by getDelta() and applyDelta(), where tag has been validated
@@ -46,11 +51,13 @@ private:
 		invalidateCachedEncodedSize();
 	}
 
+	inline void invalidateCachedEncodedSize() { cachedEncodedSize = InvalidEncodedSize; }
+
 	// Encoded version vector size. Introduced to help speed up serialization.
 	// @note This encoded size is not meant to be kept in sync with the updates
 	// that happen to the version vector.
-	// @note A value of 0 indicates that the encoded version vector size is not
-	// cached.
+	// @note A value of 0 (= InvalidEncodedSize) indicates that the encoded version
+	// vector size is not cached.
 	size_t cachedEncodedSize;
 
 public:
@@ -161,19 +168,38 @@ public:
 	bool operator!=(const VersionVector& vv) const { return maxVersion != vv.maxVersion; }
 	bool operator<(const VersionVector& vv) const { return maxVersion < vv.maxVersion; }
 
+	bool compare(const VersionVector& vv) {
+		if (maxVersion != vv.maxVersion) {
+			return false;
+		}
+
+		if (versions.size() != vv.versions.size()) {
+			return false;
+		}
+
+		auto iterA = versions.begin();
+		auto iterB = vv.versions.begin();
+		for (; iterA != versions.end(); iterA++, iterB++) {
+			if (iterA->first != iterB->first || iterA->second != iterB->second) {
+				return false;
+			}
+		}
+		ASSERT(iterB == vv.versions.end());
+
+		return true;
+	}
+
 	//
-	// Methods to set/get/check/invalidate cached encoded version vector size.
+	// Methods to set/get/check cached encoded version vector size.
 	//
 	void setCachedEncodedSize(size_t size) { cachedEncodedSize = size; }
 
-	bool isEncodedSizeCached() const { return cachedEncodedSize > 0; }
+	bool isEncodedSizeCached() const { return cachedEncodedSize != InvalidEncodedSize; }
 
 	size_t getCachedEncodedSize() const {
 		ASSERT(isEncodedSizeCached());
 		return cachedEncodedSize;
 	}
-
-	void invalidateCachedEncodedSize() { cachedEncodedSize = 0; }
 
 	//
 	// Methods to copy an encoded version vector into the serialization buffer.
@@ -206,17 +232,9 @@ public:
 				utlCount++;
 			}
 
-			if (tag.id > maxTagId) {
-				maxTagId = tag.id;
-			}
-
-			if (version < minCommitVersion) {
-				minCommitVersion = version;
-			}
-
-			if (version > maxCommitVersion) {
-				maxCommitVersion = version;
-			}
+			maxTagId = std::max(maxTagId, tag.id);
+			minCommitVersion = std::min(minCommitVersion, version);
+			maxCommitVersion = std::max(maxCommitVersion, version);
 		}
 	}
 
