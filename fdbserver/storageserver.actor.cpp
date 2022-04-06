@@ -8153,9 +8153,10 @@ ACTOR Future<Void> watchValueWaitForVersion(StorageServer* self,
                                             PromiseStream<WatchValueRequest> stream) {
 	state Span span("SS:watchValueWaitForVersion"_loc, { req.spanContext });
 	if (req.tenantInfo.name.present()) {
-		span.addTag("tenant"_sr, req.tenantInfo.name.get());
+		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
 	}
-	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.first();
+	// TODO - jloswiak, mpilman discuss.
+	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID.first();
 	try {
 		wait(success(waitForVersionNoTooOld(self, req.version)));
 		Optional<TenantMapEntry> entry = self->getTenantEntry(latestVersion, req.tenantInfo);
@@ -8177,8 +8178,7 @@ ACTOR Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream
 		state WatchValueRequest req = waitNext(stream);
 		state Reference<ServerWatchMetadata> metadata = self->getWatchMetadata(req.key.contents());
 		state Span span("SS:serveWatchValueRequestsImpl"_loc, { req.spanContext });
-		// TODO - Trace ID is now 2 unint64_t, need to discuss what you want to do here?
-		// Use first or change txID?
+		// TODO - ljoswiak, mpilman, discuss.
 		getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID.first();
 
 		// case 1: no watch set for the current key
