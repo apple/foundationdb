@@ -5134,7 +5134,7 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 	state Version fetchVersion = data->version.get();
 
 	TraceEvent(SevDebug, "FetchChangeFeedMetadata", data->thisServerID)
-	    .detail("Range", keys.toString())
+	    .detail("Range", keys)
 	    .detail("FetchVersion", fetchVersion)
 	    .detail("FKID", fetchKeysID);
 
@@ -5158,7 +5158,7 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 
 				TraceEvent(SevDebug, "ResetChangeFeedInfo", data->thisServerID)
 				    .detail("RangeID", cfInfo->id.printable())
-				    .detail("Range", cfInfo->range.toString())
+				    .detail("Range", cfInfo->range)
 				    .detail("FetchVersion", fetchVersion)
 				    .detail("EmptyVersion", cfInfo->emptyVersion)
 				    .detail("StopVersion", cfInfo->stopVersion)
@@ -5190,7 +5190,7 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 
 		TraceEvent(SevDebug, "FetchedChangeFeedInfo", data->thisServerID)
 		    .detail("RangeID", cfEntry.rangeId.printable())
-		    .detail("Range", cfEntry.range.toString())
+		    .detail("Range", cfEntry.range)
 		    .detail("FetchVersion", fetchVersion)
 		    .detail("EmptyVersion", cfEntry.emptyVersion)
 		    .detail("StopVersion", cfEntry.stopVersion)
@@ -5227,6 +5227,12 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 			addMutationToLog = true;
 		} else {
 			changeFeedInfo = existingEntry->second;
+
+			if (changeFeedInfo->destroyed) {
+				// race where multiple feeds fetched overlapping change feed, one realized feed was missing and marked
+				// it removed+destroyed, then this one fetched the same info
+				continue;
+			}
 
 			// we checked all feeds we already owned in this range at the start to reset them if they were removing, and
 			// this actor would have been cancelled if a later remove happened
@@ -5288,7 +5294,7 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 		                                  existingEntry->second->stopVersion)));
 		TraceEvent(SevDebug, "PersistingResetChangeFeedInfo", data->thisServerID)
 		    .detail("RangeID", existingEntry->second->id.printable())
-		    .detail("Range", existingEntry->second->range.toString())
+		    .detail("Range", existingEntry->second->range)
 		    .detail("FetchVersion", fetchVersion)
 		    .detail("EmptyVersion", existingEntry->second->emptyVersion)
 		    .detail("StopVersion", existingEntry->second->stopVersion)
@@ -5311,8 +5317,9 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 
 		TraceEvent(SevDebug, "DestroyingChangeFeedFromFetchMetadata", data->thisServerID)
 		    .detail("RangeID", feedId.printable())
-		    .detail("Range", existingEntry->second->range.toString())
-		    .detail("Version", cleanupVersion);
+		    .detail("Range", existingEntry->second->range)
+		    .detail("Version", cleanupVersion)
+		    .detail("FKID", fetchKeysID);
 
 		if (g_network->isSimulated()) {
 			ASSERT(allDestroyedChangeFeeds.count(feedId));
