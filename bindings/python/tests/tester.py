@@ -593,11 +593,11 @@ class Tester:
                     inst.push(b"WAITED_FOR_EMPTY")
                 elif inst.op == six.u("TENANT_CREATE"):
                     name = inst.pop()
-                    self.db.allocate_tenant(name)
+                    fdb.tenant_management.create_tenant(self.db, name)
                     inst.push(b"RESULT_NOT_PRESENT")
                 elif inst.op == six.u("TENANT_DELETE"):
                     name = inst.pop()
-                    self.db.delete_tenant(name)
+                    fdb.tenant_management.delete_tenant(self.db, name)
                     inst.push(b"RESULT_NOT_PRESENT")
                 elif inst.op == six.u("TENANT_SET_ACTIVE"):
                     name = inst.pop()
@@ -621,7 +621,8 @@ class Tester:
                         test_size_limit_option(db)
                         test_get_approximate_size(db)
 
-                        test_tenants(db)
+                        if fdb.get_api_version() >= 710:
+                            test_tenants(db)
 
                     except fdb.FDBError as e:
                         print("Unit tests failed: %s" % e.description)

@@ -100,6 +100,9 @@ def api_version(ver):
 
     _add_symbols(fdb.impl, list)
 
+    if ver >= 710:
+        import fdb.tenant_management
+
     if ver < 610:
         globals()["init"] = getattr(fdb.impl, "init")
         globals()["open"] = getattr(fdb.impl, "open_v609")

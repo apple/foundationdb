@@ -89,12 +89,19 @@ struct StorageServerInterface {
 	RequestStream<struct GetCheckpointRequest> checkpoint;
 	RequestStream<struct FetchCheckpointRequest> fetchCheckpoint;
 
-	explicit StorageServerInterface(UID uid) : uniqueID(uid) {}
-	StorageServerInterface() : uniqueID(deterministicRandom()->randomUniqueID()) {}
+private:
+	bool acceptingRequests;
+
+public:
+	explicit StorageServerInterface(UID uid) : uniqueID(uid) { acceptingRequests = false; }
+	StorageServerInterface() : uniqueID(deterministicRandom()->randomUniqueID()) { acceptingRequests = false; }
 	NetworkAddress address() const { return getValue.getEndpoint().getPrimaryAddress(); }
 	NetworkAddress stableAddress() const { return getValue.getEndpoint().getStableAddress(); }
 	Optional<NetworkAddress> secondaryAddress() const { return getValue.getEndpoint().addresses.secondaryAddress; }
 	UID id() const { return uniqueID; }
+	bool isAcceptingRequests() const { return acceptingRequests; }
+	void startAcceptingRequests() { acceptingRequests = true; }
+	void stopAcceptingRequests() { acceptingRequests = false; }
 	bool isTss() const { return tssPairID.present(); }
 	std::string toString() const { return id().shortString(); }
 	template <class Ar>
@@ -105,7 +112,11 @@ struct StorageServerInterface {
 
 		if (ar.protocolVersion().hasSmallEndpoints()) {
 			if (ar.protocolVersion().hasTSS()) {
-				serializer(ar, uniqueID, locality, getValue, tssPairID);
+				if (ar.protocolVersion().hasStorageInterfaceReadiness()) {
+					serializer(ar, uniqueID, locality, getValue, tssPairID, acceptingRequests);
+				} else {
+					serializer(ar, uniqueID, locality, getValue, tssPairID);
+				}
 			} else {
 				serializer(ar, uniqueID, locality, getValue);
 			}
@@ -924,7 +935,7 @@ struct OverlappingChangeFeedsReply {
 };
 
 struct OverlappingChangeFeedsRequest {
-	constexpr static FileIdentifier file_identifier = 10726174;
+	constexpr static FileIdentifier file_identifier = 7228462;
 	KeyRange range;
 	Version minVersion;
 	ReplyPromise<OverlappingChangeFeedsReply> reply;
@@ -939,7 +950,7 @@ struct OverlappingChangeFeedsRequest {
 };
 
 struct ChangeFeedVersionUpdateReply {
-	constexpr static FileIdentifier file_identifier = 11815134;
+	constexpr static FileIdentifier file_identifier = 4246160;
 	Version version = 0;
 
 	ChangeFeedVersionUpdateReply() {}

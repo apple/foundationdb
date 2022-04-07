@@ -1934,7 +1934,7 @@ ACTOR static Future<std::vector<std::pair<StorageServerInterface, EventMap>>> ge
 		if (metadata[i].present()) {
 			TraceEventFields metadataField;
 			metadataField.addField("CreatedTimeTimestamp", std::to_string(metadata[i].get().createdTime));
-			metadataField.addField("CreatedTimeDatetime", timerIntToGmt(metadata[i].get().createdTime));
+			metadataField.addField("CreatedTimeDatetime", epochsToGMTString(metadata[i].get().createdTime));
 			results[i].second.emplace("Metadata", metadataField);
 		} else if (!servers[i].isTss()) {
 			TraceEventFields metadataField;

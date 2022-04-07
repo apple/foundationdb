@@ -206,6 +206,7 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 				if (BW_DEBUG) {
 					fmt::print("BW {0} found new manager epoch {1}\n", id.toString(), currentManagerEpoch);
 				}
+				TraceEvent(SevDebug, "BlobWorkerFoundNewManager", id).detail("Epoch", epoch);
 			}
 
 			return true;
@@ -399,8 +400,7 @@ ACTOR Future<Void> updateGranuleSplitState(Transaction* tr,
 				fmt::print("{0} destroying old granule {1}\n", currentGranuleID.toString(), parentGranuleID.toString());
 			}
 
-			// FIXME: appears change feed destroy isn't working! ADD BACK
-			// wait(updateChangeFeed(tr, granuleIDToCFKey(parentGranuleID), ChangeFeedStatus::CHANGE_FEED_DESTROY));
+			wait(updateChangeFeed(tr, granuleIDToCFKey(parentGranuleID), ChangeFeedStatus::CHANGE_FEED_DESTROY));
 
 			Key oldGranuleLockKey = blobGranuleLockKeyFor(parentGranuleRange);
 			// FIXME: deleting granule lock can cause races where another granule with the same range starts way later
@@ -511,7 +511,8 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 				numIterations++;
 
 				Key dfKey = blobGranuleFileKeyFor(granuleID, currentDeltaVersion, 'D');
-				Value dfValue = blobGranuleFileValueFor(fname, 0, serializedSize);
+				// TODO change once we support file multiplexing
+				Value dfValue = blobGranuleFileValueFor(fname, 0, serializedSize, serializedSize);
 				tr->set(dfKey, dfValue);
 
 				if (oldGranuleComplete.present()) {
@@ -538,7 +539,8 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 				if (BUGGIFY_WITH_PROB(0.01)) {
 					wait(delay(deterministicRandom()->random01()));
 				}
-				return BlobFileIndex(currentDeltaVersion, fname, 0, serializedSize);
+				// FIXME: change when we implement multiplexing
+				return BlobFileIndex(currentDeltaVersion, fname, 0, serializedSize, serializedSize);
 			} catch (Error& e) {
 				wait(tr->onError(e));
 			}
@@ -648,7 +650,8 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 				wait(readAndCheckGranuleLock(tr, keyRange, epoch, seqno));
 				numIterations++;
 				Key snapshotFileKey = blobGranuleFileKeyFor(granuleID, version, 'S');
-				Key snapshotFileValue = blobGranuleFileValueFor(fname, 0, serializedSize);
+				// TODO change once we support file multiplexing
+				Key snapshotFileValue = blobGranuleFileValueFor(fname, 0, serializedSize, serializedSize);
 				tr->set(snapshotFileKey, snapshotFileValue);
 				// create granule history at version if this is a new granule with the initial dump from FDB
 				if (createGranuleHistory) {
@@ -692,7 +695,8 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 		wait(delay(deterministicRandom()->random01()));
 	}
 
-	return BlobFileIndex(version, fname, 0, serializedSize);
+	// FIXME: change when we implement multiplexing
+	return BlobFileIndex(version, fname, 0, serializedSize, serializedSize);
 }
 
 ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData> bwData,
@@ -731,7 +735,7 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData>
 			Future<Void> streamFuture =
 			    tr->getTransaction().getRangeStream(rowsStream, metadata->keyRange, GetRangeLimits(), Snapshot::True);
 			wait(streamFuture && success(snapshotWriter));
-			TraceEvent("BlobGranuleSnapshotFile", bwData->id)
+			TraceEvent(SevDebug, "BlobGranuleSnapshotFile", bwData->id)
 			    .detail("Granule", metadata->keyRange)
 			    .detail("Version", readVersion);
 			DEBUG_KEY_RANGE("BlobWorkerFDBSnapshot", readVersion, metadata->keyRange, bwData->id);
@@ -755,7 +759,8 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData>
 			wait(tr->onError(e));
 			retries++;
 			TEST(true); // Granule initial snapshot failed
-			TraceEvent(SevWarn, "BlobGranuleInitialSnapshotRetry", bwData->id)
+			// FIXME: why can't we supress error event?
+			TraceEvent(retries < 10 ? SevDebug : SevWarn, "BlobGranuleInitialSnapshotRetry", bwData->id)
 			    .error(err)
 			    .detail("Granule", metadata->keyRange)
 			    .detail("Count", retries);
@@ -797,7 +802,8 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 
 	ASSERT(snapshotVersion < version);
 
-	chunk.snapshotFile = BlobFilePointerRef(filenameArena, snapshotF.filename, snapshotF.offset, snapshotF.length);
+	chunk.snapshotFile = BlobFilePointerRef(
+	    filenameArena, snapshotF.filename, snapshotF.offset, snapshotF.length, snapshotF.fullFileLength);
 	compactBytesRead += snapshotF.length;
 	int deltaIdx = files.deltaFiles.size() - 1;
 	while (deltaIdx >= 0 && files.deltaFiles[deltaIdx].version > snapshotVersion) {
@@ -807,7 +813,8 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 	Version lastDeltaVersion = invalidVersion;
 	while (deltaIdx < files.deltaFiles.size() && files.deltaFiles[deltaIdx].version <= version) {
 		BlobFileIndex deltaF = files.deltaFiles[deltaIdx];
-		chunk.deltaFiles.emplace_back_deep(filenameArena, deltaF.filename, deltaF.offset, deltaF.length);
+		chunk.deltaFiles.emplace_back_deep(
+		    filenameArena, deltaF.filename, deltaF.offset, deltaF.length, deltaF.fullFileLength);
 		compactBytesRead += deltaF.length;
 		lastDeltaVersion = files.deltaFiles[deltaIdx].version;
 		deltaIdx++;
@@ -855,6 +862,23 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 	}
 }
 
+struct CounterHolder {
+	int* counter;
+	bool completed;
+
+	CounterHolder() : counter(nullptr), completed(true) {}
+	CounterHolder(int* counter) : counter(counter), completed(false) { (*counter)++; }
+
+	void complete() {
+		if (!completed) {
+			completed = true;
+			(*counter)--;
+		}
+	}
+
+	~CounterHolder() { complete(); }
+};
+
 ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bwData,
                                                     Reference<GranuleMetadata> metadata,
                                                     UID granuleID,
@@ -870,6 +894,8 @@ ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bw
 
 	wait(delay(0, TaskPriority::BlobWorkerUpdateFDB));
 
+	state CounterHolder pendingCounter(&bwData->stats.granulesPendingSplitCheck);
+
 	if (BW_DEBUG) {
 		fmt::print("Granule [{0} - {1}) checking with BM for re-snapshot after {2} bytes\n",
 		           metadata->keyRange.begin.printable(),
@@ -877,7 +903,7 @@ ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bw
 		           metadata->bytesInNewDeltaFiles);
 	}
 
-	TraceEvent("BlobGranuleSnapshotCheck", bwData->id)
+	TraceEvent(SevDebug, "BlobGranuleSnapshotCheck", bwData->id)
 	    .detail("Granule", metadata->keyRange)
 	    .detail("Version", reSnapshotVersion);
 
@@ -948,13 +974,15 @@ ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bw
 		}
 	}
 
+	pendingCounter.complete();
+
 	if (BW_DEBUG) {
 		fmt::print("Granule [{0} - {1}) re-snapshotting after {2} bytes\n",
 		           metadata->keyRange.begin.printable(),
 		           metadata->keyRange.end.printable(),
 		           bytesInNewDeltaFiles);
 	}
-	TraceEvent("BlobGranuleSnapshotFile", bwData->id)
+	TraceEvent(SevDebug, "BlobGranuleSnapshotFile", bwData->id)
 	    .detail("Granule", metadata->keyRange)
 	    .detail("Version", metadata->durableDeltaVersion.get());
 
@@ -1534,7 +1562,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 										           bwData->id.toString().substr(0, 5).c_str(),
 										           deltas.version,
 										           rollbackVersion);
-										TraceEvent(SevWarn, "GranuleRollback", bwData->id)
+										TraceEvent(SevDebug, "GranuleRollback", bwData->id)
 										    .detail("Granule", metadata->keyRange)
 										    .detail("Version", deltas.version)
 										    .detail("RollbackVersion", rollbackVersion);
@@ -1648,7 +1676,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 						           lastDeltaVersion,
 						           oldChangeFeedDataComplete.present() ? ". Finalizing " : "");
 					}
-					TraceEvent("BlobGranuleDeltaFile", bwData->id)
+					TraceEvent(SevDebug, "BlobGranuleDeltaFile", bwData->id)
 					    .detail("Granule", metadata->keyRange)
 					    .detail("Version", lastDeltaVersion);
 
@@ -1825,13 +1853,19 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 		}
 
 		if (e.code() == error_code_granule_assignment_conflict) {
-			TraceEvent(SevInfo, "GranuleAssignmentConflict", bwData->id)
+			TraceEvent("GranuleAssignmentConflict", bwData->id)
 			    .detail("Granule", metadata->keyRange)
 			    .detail("GranuleID", startState.granuleID);
 			return Void();
 		}
 		if (e.code() == error_code_change_feed_popped) {
-			TraceEvent(SevInfo, "GranuleGotChangeFeedPopped", bwData->id)
+			TraceEvent("GranuleChangeFeedPopped", bwData->id)
+			    .detail("Granule", metadata->keyRange)
+			    .detail("GranuleID", startState.granuleID);
+			return Void();
+		}
+		if (e.code() == error_code_change_feed_not_registered) {
+			TraceEvent(SevInfo, "GranuleDestroyed", bwData->id)
 			    .detail("Granule", metadata->keyRange)
 			    .detail("GranuleID", startState.granuleID);
 			return Void();
@@ -2573,7 +2607,16 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 				info.changeFeedStartVersion = tr.getCommittedVersion();
 			}
 
-			TraceEvent("GranuleOpen", bwData->id).detail("Granule", req.keyRange);
+			TraceEvent openEv("GranuleOpen", bwData->id);
+			openEv.detail("GranuleID", info.granuleID)
+			    .detail("Granule", req.keyRange)
+			    .detail("Epoch", req.managerEpoch)
+			    .detail("Seqno", req.managerSeqno)
+			    .detail("CFStartVersion", info.changeFeedStartVersion)
+			    .detail("PreviousDurableVersion", info.previousDurableVersion);
+			if (info.parentGranule.present()) {
+				openEv.detail("ParentGranuleID", info.parentGranule.get().second);
+			}
 
 			return info;
 		} catch (Error& e) {
@@ -2894,6 +2937,7 @@ ACTOR Future<Void> handleRangeRevoke(Reference<BlobWorkerData> bwData, RevokeBlo
 
 ACTOR Future<Void> registerBlobWorker(Reference<BlobWorkerData> bwData, BlobWorkerInterface interf) {
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(bwData->db);
+	TraceEvent("BlobWorkerRegister", bwData->id);
 	loop {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
@@ -2914,6 +2958,7 @@ ACTOR Future<Void> registerBlobWorker(Reference<BlobWorkerData> bwData, BlobWork
 			if (BW_DEBUG) {
 				fmt::print("Registered blob worker {}\n", interf.id().toString());
 			}
+			TraceEvent("BlobWorkerRegistered", bwData->id);
 			return Void();
 		} catch (Error& e) {
 			if (BW_DEBUG) {
@@ -3021,7 +3066,7 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 		if (BW_DEBUG) {
 			fmt::print("BW constructing backup container from {0}\n", SERVER_KNOBS->BG_URL);
 		}
-		self->bstore = BackupContainerFileSystem::openContainerFS(SERVER_KNOBS->BG_URL);
+		self->bstore = BackupContainerFileSystem::openContainerFS(SERVER_KNOBS->BG_URL, {}, {});
 		if (BW_DEBUG) {
 			printf("BW constructed backup container\n");
 		}
