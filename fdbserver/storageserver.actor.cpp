@@ -5073,7 +5073,8 @@ ACTOR Future<Version> fetchChangeFeed(StorageServer* data,
 		}
 
 		// TODO REMOVE
-		fmt::print("DBG: Feed {} possibly destroyed {}, {} metadata create, {} desired committed\n",
+		fmt::print("DBG: SS {} Feed {} possibly destroyed {}, {} metadata create, {} desired committed\n",
+		           data->thisServerID.toString().substr(0, 4),
 		           changeFeedInfo->id.printable(),
 		           changeFeedInfo->possiblyDestroyed,
 		           changeFeedInfo->metadataCreateVersion,
@@ -5138,6 +5139,7 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 	    .detail("FKID", fetchKeysID);
 
 	state std::set<Key> refreshedFeedIds;
+	state std::set<Key> destroyedFeedIds;
 	// before fetching feeds from other SS's, refresh any feeds we already have that are being marked as removed
 	auto ranges = data->keyChangeFeed.intersectingRanges(keys);
 	for (auto& r : ranges) {
@@ -5145,7 +5147,7 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 			auto feedCleanup = data->changeFeedCleanupDurable.find(cfInfo->id);
 			if (feedCleanup != data->changeFeedCleanupDurable.end() && cfInfo->removing && !cfInfo->destroyed) {
 				TEST(true); // re-fetching feed scheduled for deletion! Un-mark it as removing
-				refreshedFeedIds.insert(cfInfo->id);
+				destroyedFeedIds.insert(cfInfo->id);
 
 				cfInfo->removing = false;
 				// because we now have a gap in the metadata, it's possible this feed was destroyed
@@ -5154,25 +5156,12 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 				cfInfo->fetchVersion = invalidVersion;
 				cfInfo->durableFetchVersion = NotifiedVersion();
 
-				// Since cleanup put a mutation in the log to delete the change feed data, put one in the log to restore
-				// it
-				// We may just want to refactor this so updateStorage does explicit deletes based on
-				// changeFeedCleanupDurable and not use the mutation log at all for the change feed metadata cleanup.
-				// Then we wouldn't have to reset anything here
-				auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
-				data->addMutationToMutationLog(
-				    mLV,
-				    MutationRef(MutationRef::SetValue,
-				                persistChangeFeedKeys.begin.toString() + cfInfo->id.toString(),
-				                changeFeedSSValue(cfInfo->range, cfInfo->emptyVersion + 1, cfInfo->stopVersion)));
 				TraceEvent(SevDebug, "ResetChangeFeedInfo", data->thisServerID)
 				    .detail("RangeID", cfInfo->id.printable())
 				    .detail("Range", cfInfo->range.toString())
 				    .detail("FetchVersion", fetchVersion)
 				    .detail("EmptyVersion", cfInfo->emptyVersion)
 				    .detail("StopVersion", cfInfo->stopVersion)
-				    .detail("CleanupPendingVersion",
-				            feedCleanup != data->changeFeedCleanupDurable.end() ? feedCleanup->second : invalidVersion)
 				    .detail("FKID", fetchKeysID);
 			}
 		}
@@ -5212,7 +5201,11 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 		bool addMutationToLog = false;
 		Reference<ChangeFeedInfo> changeFeedInfo;
 
-		refreshedFeedIds.erase(cfEntry.rangeId);
+		auto fid = destroyedFeedIds.find(cfEntry.rangeId);
+		if (fid != destroyedFeedIds.end()) {
+			refreshedFeedIds.insert(cfEntry.rangeId);
+			destroyedFeedIds.erase(fid);
+		}
 
 		if (!existing) {
 			TEST(cleanupPending); // Fetch change feed which is cleanup pending. This means there was a move away and a
@@ -5268,8 +5261,41 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 		}
 	}
 
-	TEST(!refreshedFeedIds.empty()); // Feed destroyed between move away and move back
+	TEST(!refreshedFeedIds.empty()); // Feed refreshed between move away and move back
+	TEST(!destroyedFeedIds.empty()); // Feed destroyed between move away and move back
 	for (auto& feedId : refreshedFeedIds) {
+		auto existingEntry = data->uidChangeFeed.find(feedId);
+		if (existingEntry == data->uidChangeFeed.end() || existingEntry->second->destroyed) {
+			TEST(true); // feed refreshed
+			continue;
+		}
+
+		// Since cleanup put a mutation in the log to delete the change feed data, put one in the log to restore
+		// it
+		// We may just want to refactor this so updateStorage does explicit deletes based on
+		// changeFeedCleanupDurable and not use the mutation log at all for the change feed metadata cleanup.
+		// Then we wouldn't have to reset anything here or above
+		// Do the mutation log update here instead of above to ensure we only add it back to the mutation log if we're
+		// sure it wasn't deleted in the metadata gap
+		Version metadataVersion = data->data().getLatestVersion();
+		auto& mLV = data->addVersionToMutationLog(metadataVersion);
+		data->addMutationToMutationLog(
+		    mLV,
+		    MutationRef(MutationRef::SetValue,
+		                persistChangeFeedKeys.begin.toString() + existingEntry->second->id.toString(),
+		                changeFeedSSValue(existingEntry->second->range,
+		                                  existingEntry->second->emptyVersion + 1,
+		                                  existingEntry->second->stopVersion)));
+		TraceEvent(SevDebug, "PersistingResetChangeFeedInfo", data->thisServerID)
+		    .detail("RangeID", existingEntry->second->id.printable())
+		    .detail("Range", existingEntry->second->range.toString())
+		    .detail("FetchVersion", fetchVersion)
+		    .detail("EmptyVersion", existingEntry->second->emptyVersion)
+		    .detail("StopVersion", existingEntry->second->stopVersion)
+		    .detail("FKID", fetchKeysID)
+		    .detail("MetadataVersion", metadataVersion);
+	}
+	for (auto& feedId : destroyedFeedIds) {
 		auto existingEntry = data->uidChangeFeed.find(feedId);
 		if (existingEntry == data->uidChangeFeed.end() || existingEntry->second->destroyed) {
 			TEST(true); // feed refreshed but then destroyed elsewhere
@@ -5277,7 +5303,9 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 		}
 
 		// TODO REMOVE print
-		fmt::print("DBG: fetching feed {} was refreshed but not present!! assuming destroyed\n", feedId.printable());
+		fmt::print("DBG: SS {} fetching feed {} was refreshed but not present!! assuming destroyed\n",
+		           data->thisServerID.toString().substr(0, 4),
+		           feedId.printable());
 
 		Version cleanupVersion = data->data().getLatestVersion();
 
