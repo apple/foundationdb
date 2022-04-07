@@ -652,7 +652,70 @@ FDBFuture* fdb_transaction_get_mapped_range_impl(FDBTransaction* tr,
 }
 
 // TODO: Support FDB_API_ADDED in generate_asm.py and then this can be replaced with fdb_api_ptr_unimpl.
-FDBFuture* fdb_transaction_get_mapped_range_v699(FDBTransaction* tr,
+FDBFuture* fdb_transaction_get_range_and_flat_map_v699(FDBTransaction* tr,
+                                                       uint8_t const* begin_key_name,
+                                                       int begin_key_name_length,
+                                                       fdb_bool_t begin_or_equal,
+                                                       int begin_offset,
+                                                       uint8_t const* end_key_name,
+                                                       int end_key_name_length,
+                                                       fdb_bool_t end_or_equal,
+                                                       int end_offset,
+                                                       uint8_t const* mapper_name,
+                                                       int mapper_name_length,
+                                                       int limit,
+                                                       int target_bytes,
+                                                       FDBStreamingMode mode,
+                                                       int iteration,
+                                                       fdb_bool_t snapshot,
+                                                       fdb_bool_t reverse) {
+	fprintf(stderr, "UNIMPLEMENTED FDB API FUNCTION\n");
+	abort();
+}
+
+FDBFuture* fdb_transaction_get_range_and_flat_map_impl(FDBTransaction* tr,
+                                                       uint8_t const* begin_key_name,
+                                                       int begin_key_name_length,
+                                                       fdb_bool_t begin_or_equal,
+                                                       int begin_offset,
+                                                       uint8_t const* end_key_name,
+                                                       int end_key_name_length,
+                                                       fdb_bool_t end_or_equal,
+                                                       int end_offset,
+                                                       uint8_t const* mapper_name,
+                                                       int mapper_name_length,
+                                                       int limit,
+                                                       int target_bytes,
+                                                       FDBStreamingMode mode,
+                                                       int iteration,
+                                                       fdb_bool_t snapshot,
+                                                       fdb_bool_t reverse) {
+	fprintf(stderr, "GetRangeAndFlatMap is removed from 7.0. Please upgrade to 7.1 and use GetMappedRange\n");
+	abort();
+}
+
+FDBFuture* fdb_transaction_get_range_and_flat_map_v709(FDBTransaction* tr,
+                                                       uint8_t const* begin_key_name,
+                                                       int begin_key_name_length,
+                                                       fdb_bool_t begin_or_equal,
+                                                       int begin_offset,
+                                                       uint8_t const* end_key_name,
+                                                       int end_key_name_length,
+                                                       fdb_bool_t end_or_equal,
+                                                       int end_offset,
+                                                       uint8_t const* mapper_name,
+                                                       int mapper_name_length,
+                                                       int limit,
+                                                       int target_bytes,
+                                                       FDBStreamingMode mode,
+                                                       int iteration,
+                                                       fdb_bool_t snapshot,
+                                                       fdb_bool_t reverse) {
+	fprintf(stderr, "GetRangeAndFlatMap is removed from 7.0. Please upgrade to 7.1 and use GetMappedRange\n");
+	abort();
+}
+
+FDBFuture* fdb_transaction_get_mapped_range_v709(FDBTransaction* tr,
                                                  uint8_t const* begin_key_name,
                                                  int begin_key_name_length,
                                                  fdb_bool_t begin_or_equal,
@@ -900,13 +963,15 @@ extern "C" DLLEXPORT fdb_error_t fdb_select_api_version_impl(int runtime_version
 
 	// Versioned API changes -- descending order by version (new changes at top)
 	// FDB_API_CHANGED( function, ver ) means there is a new implementation as of ver, and a function function_(ver-1)
-	// is the old implementation FDB_API_REMOVED( function, ver ) means the function was removed as of ver, and
+	// is the old implementation. FDB_API_REMOVED( function, ver ) means the function was removed as of ver, and
 	// function_(ver-1) is the old implementation
 	//
 	// WARNING: use caution when implementing removed functions by calling public API functions. This can lead to
 	// undesired behavior when using the multi-version API. Instead, it is better to have both the removed and public
 	// functions call an internal implementation function. See fdb_create_database_impl for an example.
-	FDB_API_CHANGED(fdb_transaction_get_mapped_range, 700);
+	FDB_API_CHANGED(fdb_transaction_get_mapped_range, 710);
+	FDB_API_REMOVED(fdb_transaction_get_range_and_flat_map, 710);
+	FDB_API_CHANGED(fdb_transaction_get_range_and_flat_map, 700);
 	FDB_API_REMOVED(fdb_future_get_version, 620);
 	FDB_API_REMOVED(fdb_create_cluster, 610);
 	FDB_API_REMOVED(fdb_cluster_create_database, 610);
