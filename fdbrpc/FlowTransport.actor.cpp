@@ -920,7 +920,8 @@ void Peer::onIncomingConnection(Reference<Peer> self, Reference<IConnection> con
 		    .suppressFor(1.0)
 		    .detail("FromAddr", conn->getPeerAddress())
 		    .detail("CanonicalAddr", destination)
-		    .detail("IsPublic", destination.isPublic());
+		    .detail("IsPublic", destination.isPublic())
+		    .detail("Trusted", self->transport->allowList(conn->getPeerAddress().ip));
 
 		connect.cancel();
 		prependConnectPacket();
@@ -1009,7 +1010,9 @@ ACTOR static void deliver(TransportData* self,
 	} else if (destination.token.first() & TOKEN_STREAM_FLAG) {
 		// We don't have the (stream) endpoint 'token', notify the remote machine
 		if (receiver) {
-			TraceEvent(SevWarnAlways, "AttemptedRPCToPrivatePrevented").detail("From", peerAddress);
+			TraceEvent(SevWarnAlways, "AttemptedRPCToPrivatePrevented")
+			    .detail("From", peerAddress)
+			    .detail("Token", destination.token);
 			ASSERT(!self->isLocalAddress(destination.getPrimaryAddress()));
 			Reference<Peer> peer = self->getOrOpenPeer(destination.getPrimaryAddress());
 			sendPacket(self,
@@ -1529,6 +1532,10 @@ NetworkAddressList FlowTransport::getLocalAddresses() const {
 
 NetworkAddress FlowTransport::getLocalAddress() const {
 	return self->localAddresses.address;
+}
+
+void FlowTransport::setLocalAddress(NetworkAddress const& address) {
+	self->localAddresses.address = address;
 }
 
 const std::unordered_map<NetworkAddress, Reference<Peer>>& FlowTransport::getAllPeers() const {

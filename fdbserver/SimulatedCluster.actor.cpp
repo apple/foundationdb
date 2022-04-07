@@ -497,6 +497,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 	state IPAllowList allowList;
 
 	allowList.addTrustedSubnet("0.0.0.0/2"sv);
+	allowList.addTrustedSubnet("abcd::/16"sv);
 
 	loop {
 		auto waitTime =
@@ -2288,6 +2289,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 
 	// Build simulator allow list
 	allowList.addTrustedSubnet("0.0.0.0/2"sv);
+	allowList.addTrustedSubnet("abcd::/16"sv);
 	state bool allowDefaultTenant = testConfig.allowDefaultTenant;
 	state bool allowDisablingTenants = testConfig.allowDisablingTenants;
 

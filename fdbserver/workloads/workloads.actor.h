@@ -30,7 +30,10 @@
 #include "fdbserver/KnobProtectiveGroups.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbrpc/simulator.h"
-#include "flow/actorcompiler.h"
+
+#include <functional>
+
+#include "flow/actorcompiler.h" // has to be last import
 
 /*
  * Gets an Value from a list of key/value pairs, using a default value if the key is not present.
@@ -70,27 +73,38 @@ struct TestWorkload : NonCopyable, WorkloadContext, ReferenceCounted<TestWorkloa
 			phases |= TestWorkload::SETUP;
 	}
 	virtual ~TestWorkload(){};
+	virtual Future<Void> initialized() { return Void(); }
 	virtual std::string description() const = 0;
 	virtual Future<Void> setup(Database const& cx) { return Void(); }
 	virtual Future<Void> start(Database const& cx) = 0;
 	virtual Future<bool> check(Database const& cx) = 0;
-	virtual void getMetrics(std::vector<PerfMetric>& m) = 0;
+	virtual Future<std::vector<PerfMetric>> getMetrics() {
+		std::vector<PerfMetric> result;
+		getMetrics(result);
+		return result;
+	}
 
 	virtual double getCheckTimeout() const { return 3000; }
 
 	enum WorkloadPhase { SETUP = 1, EXECUTION = 2, CHECK = 4, METRICS = 8 };
+
+private:
+	virtual void getMetrics(std::vector<PerfMetric>& m) = 0;
 };
 
-struct ClientWorkloadImpl;
+struct WorkloadProcess;
 struct ClientWorkload : TestWorkload {
-	ClientWorkloadImpl* impl;
-	ClientWorkload(Reference<TestWorkload> const& child, WorkloadContext const& wcx);
+	WorkloadProcess* impl;
+	using CreateWorkload = std::function<Reference<TestWorkload>(WorkloadContext const&)>;
+	ClientWorkload(CreateWorkload const& childCreator, WorkloadContext const& wcx);
 	~ClientWorkload();
+	Future<Void> initialized() override;
 	std::string description() const override;
 	Future<Void> setup(Database const& cx) override;
 	Future<Void> start(Database const& cx) override;
 	Future<bool> check(Database const& cx) override;
 	void getMetrics(std::vector<PerfMetric>& m) override;
+	Future<std::vector<PerfMetric>> getMetrics() override;
 
 	double getCheckTimeout() const override;
 };
@@ -143,8 +157,8 @@ struct WorkloadFactory : IWorkloadFactory {
 	}
 	Reference<TestWorkload> create(WorkloadContext const& wcx) override {
 		if (g_network->isSimulated() && asClient) {
-			auto child = makeReference<WorkloadType>(wcx);
-			return makeReference<ClientWorkload>(child, wcx);
+			return makeReference<ClientWorkload>(
+			    [](WorkloadContext const& wcx) { return makeReference<WorkloadType>(wcx); }, wcx);
 		}
 		return makeReference<WorkloadType>(wcx);
 	}

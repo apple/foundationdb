@@ -45,7 +45,7 @@ struct AuthAllowedSubnet {
 		if (netmaskWeight % 8 > 0) {
 			// 2^(netmaskWeight % 8) - 1 sets the last (netmaskWeight % 8) number of bits to 1
 			// everything else will be zero. For example: 2^3 - 1 == 7 == 0b111
-			unsigned char bitmask = (1 << (netmaskWeight % 8)) - ((unsigned char)1);
+			unsigned char bitmask = (1 << (8 - (netmaskWeight % 8))) - ((unsigned char)1);
 			res[idx] ^= bitmask;
 			++idx;
 		}

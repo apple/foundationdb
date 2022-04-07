@@ -64,6 +64,7 @@ struct PrivateEndpoints : TestWorkload {
 			if (e.code() == error_code_actor_cancelled) {
 				throw;
 			} else if (e.code() == error_code_unauthorized_attempt) {
+				TraceEvent("SuccessPrivateEndpoint").log();
 				return Void();
 			} else {
 				TraceEvent(SevError, "WrongErrorCode").error(e);
@@ -109,16 +110,28 @@ struct PrivateEndpoints : TestWorkload {
 	ACTOR static Future<Void> _start(PrivateEndpoints* self, Database cx) {
 		state Reference<AsyncVar<ClientDBInfo>> clientInfo = cx->clientInfo;
 		state Future<Void> end;
+		TraceEvent("PrivateEndpointTestStartWait").detail("WaitTime", self->startAfter).log();
 		wait(delay(self->startAfter));
+		TraceEvent("PrivateEndpointTestStart").detail("RunFor", self->runFor).log();
 		end = delay(self->runFor);
-		loop {
-			auto testFuture = deterministicRandom()->randomChoice(self->testFunctions)(cx->clientInfo);
-			choose {
-				when(wait(testFuture)) { ++self->numSuccesses; }
-				when(wait(end)) { return Void(); }
+		try {
+			loop {
+				auto testFuture = deterministicRandom()->randomChoice(self->testFunctions)(cx->clientInfo);
+				choose {
+					when(wait(end)) {
+						TraceEvent("PrivateEndpointTestDone").log();
+						return Void();
+					}
+					when(wait(testFuture)) { ++self->numSuccesses; }
+				}
+				wait(delay(0.2));
 			}
-			wait(delay(0.2));
+		} catch (Error& e) {
+			TraceEvent(SevError, "PrivateEndpointTestError").errorUnsuppressed(e);
+			ASSERT(false);
 		}
+		UNREACHABLE();
+		return Void();
 	}
 };
 

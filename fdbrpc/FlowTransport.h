@@ -214,6 +214,9 @@ public:
 	// Returns first local NetworkAddress.
 	NetworkAddress getLocalAddress() const;
 
+	// Returns first local NetworkAddress.
+	void setLocalAddress(NetworkAddress const&);
+
 	// Returns all local NetworkAddress.
 	NetworkAddressList getLocalAddresses() const;
 

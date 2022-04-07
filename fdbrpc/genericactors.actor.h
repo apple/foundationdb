@@ -258,23 +258,22 @@ Future<T> sendCanceler(ReplyPromise<T> reply, ReliablePacket* send, Endpoint end
 	state bool didCancelReliable = false;
 	try {
 		loop {
+			if (IFailureMonitor::failureMonitor().permanentlyFailed(endpoint)) {
+				FlowTransport::transport().cancelReliable(send);
+				didCancelReliable = true;
+				if (IFailureMonitor::failureMonitor().knownUnauthorized(endpoint)) {
+					throw unauthorized_attempt();
+				} else {
+					wait(Never());
+				}
+			}
 			choose {
 				when(T t = wait(reply.getFuture())) {
 					FlowTransport::transport().cancelReliable(send);
 					didCancelReliable = true;
 					return t;
 				}
-				when(wait(IFailureMonitor::failureMonitor().onDisconnectOrFailure(endpoint))) {
-					if (IFailureMonitor::failureMonitor().permanentlyFailed(endpoint)) {
-						FlowTransport::transport().cancelReliable(send);
-						didCancelReliable = true;
-						if (IFailureMonitor::failureMonitor().knownUnauthorized(endpoint)) {
-							throw unauthorized_attempt();
-						} else {
-							wait(Never());
-						}
-					}
-				}
+				when(wait(IFailureMonitor::failureMonitor().onStateChanged(endpoint))) {}
 			}
 		}
 	} catch (Error& e) {
