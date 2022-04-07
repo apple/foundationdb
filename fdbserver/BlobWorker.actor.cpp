@@ -2309,14 +2309,14 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 				}
 
 				if (chunkFiles.snapshotFiles.empty()) {
-					// a snapshot file must have been pruned
+					// a snapshot file must have been purged
 					throw blob_granule_transaction_too_old();
 				}
 
 				ASSERT(!chunkFiles.deltaFiles.empty());
 				ASSERT(chunkFiles.deltaFiles.back().version > req.readVersion);
 				if (chunkFiles.snapshotFiles.front().version > req.readVersion) {
-					// a snapshot file must have been pruned
+					// a snapshot file must have been purged
 					throw blob_granule_transaction_too_old();
 				}
 			} else {

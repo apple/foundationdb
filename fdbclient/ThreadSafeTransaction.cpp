@@ -116,6 +116,20 @@ ThreadFuture<ProtocolVersion> ThreadSafeDatabase::getServerProtocol(Optional<Pro
 	    [db, expectedVersion]() -> Future<ProtocolVersion> { return db->getClusterProtocol(expectedVersion); });
 }
 
+ThreadFuture<Key> ThreadSafeDatabase::purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) {
+	DatabaseContext* db = this->db;
+	KeyRange range = keyRange;
+	return onMainThread([db, range, purgeVersion, force]() -> Future<Key> {
+		return db->purgeBlobGranules(range, purgeVersion, force);
+	});
+}
+
+ThreadFuture<Void> ThreadSafeDatabase::waitPurgeGranulesComplete(const KeyRef& purgeKey) {
+	DatabaseContext* db = this->db;
+	Key key = purgeKey;
+	return onMainThread([db, key]() -> Future<Void> { return db->waitPurgeGranulesComplete(key); });
+}
+
 ThreadSafeDatabase::ThreadSafeDatabase(std::string connFilename, int apiVersion) {
 	ClusterConnectionFile* connFile =
 	    new ClusterConnectionFile(ClusterConnectionFile::lookupClusterFileName(connFilename).first);

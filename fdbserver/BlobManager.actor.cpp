@@ -2291,13 +2291,13 @@ ACTOR Future<bool> fullyDeleteGranule(Reference<BlobManagerData> self, UID granu
 
 /*
  * For the granule with id granuleId, finds the first snapshot file at a
- * version <= pruneVersion and deletes all files older than it.
+ * version <= purgeVersion and deletes all files older than it.
  *
  * Assumption: this granule's startVersion might change because the first snapshot
  * file might be deleted. We will need to ensure we don't rely on the granule's startVersion
  * (that's persisted as part of the key), but rather use the granule's first snapshot's version when needed
  */
-ACTOR Future<Void> partiallyDeleteGranule(Reference<BlobManagerData> self, UID granuleId, Version pruneVersion) {
+ACTOR Future<Void> partiallyDeleteGranule(Reference<BlobManagerData> self, UID granuleId, Version purgeVersion) {
 	if (BM_DEBUG) {
 		fmt::print("Partially deleting granule {0}: init\n", granuleId.toString());
 	}
@@ -2305,7 +2305,7 @@ ACTOR Future<Void> partiallyDeleteGranule(Reference<BlobManagerData> self, UID g
 	// get files
 	GranuleFiles files = wait(loadHistoryFiles(self->db, granuleId));
 
-	// represents the version of the latest snapshot file in this granule with G.version < pruneVersion
+	// represents the version of the latest snapshot file in this granule with G.version < purgeVersion
 	Version latestSnapshotVersion = invalidVersion;
 
 	state std::vector<Future<Void>> deletions; // deletion work per file
@@ -2320,8 +2320,8 @@ ACTOR Future<Void> partiallyDeleteGranule(Reference<BlobManagerData> self, UID g
 			deletions.emplace_back(self->bstore->deleteFile(fname));
 			deletedFileKeys.emplace_back(blobGranuleFileKeyFor(granuleId, files.snapshotFiles[idx].version, 'S'));
 			filesToDelete.emplace_back(fname);
-		} else if (files.snapshotFiles[idx].version <= pruneVersion) {
-			// otherwise if this is the FIRST snapshot file with version < pruneVersion,
+		} else if (files.snapshotFiles[idx].version <= purgeVersion) {
+			// otherwise if this is the FIRST snapshot file with version < purgeVersion,
 			// then we found our latestSnapshotVersion (FIRST since we are traversing in reverse)
 			latestSnapshotVersion = files.snapshotFiles[idx].version;
 		}
@@ -2354,12 +2354,12 @@ ACTOR Future<Void> partiallyDeleteGranule(Reference<BlobManagerData> self, UID g
 	}
 
 	// TODO: the following comment relies on the assumption that BWs will not get requests to
-	// read data that was already pruned. confirm assumption is fine. otherwise, we'd need
-	// to communicate with BWs here and have them ack the pruneVersion
+	// read data that was already purged. confirm assumption is fine. otherwise, we'd need
+	// to communicate with BWs here and have them ack the purgeVersion
 
 	// delete the files before the corresponding metadata.
 	// this could lead to dangling pointers in fdb, but we should never read data older than
-	// pruneVersion anyways, and we can clean up the keys the next time around.
+	// purgeVersion anyways, and we can clean up the keys the next time around.
 	// deleting files before corresponding metadata reduces the # of orphaned files.
 	wait(waitForAll(deletions));
 
@@ -2391,19 +2391,19 @@ ACTOR Future<Void> partiallyDeleteGranule(Reference<BlobManagerData> self, UID g
 }
 
 /*
- * This method is used to prune the range [startKey, endKey) at (and including) pruneVersion.
+ * This method is used to purge the range [startKey, endKey) at (and including) purgeVersion.
  * To do this, we do a BFS traversal starting at the active granules. Then we classify granules
  * in the history as nodes that can be fully deleted (i.e. their files and history can be deleted)
  * and nodes that can be partially deleted (i.e. some of their files can be deleted).
- * Once all this is done, we finally clear the pruneIntent key, if possible, to indicate we are done
- * processing this prune intent.
+ * Once all this is done, we finally clear the purgeIntent key, if possible, to indicate we are done
+ * processing this purge intent.
  */
-ACTOR Future<Void> pruneRange(Reference<BlobManagerData> self, KeyRangeRef range, Version pruneVersion, bool force) {
+ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range, Version purgeVersion, bool force) {
 	if (BM_DEBUG) {
-		fmt::print("pruneRange starting for range [{0} - {1}) @ pruneVersion={2}, force={3}\n",
+		fmt::print("purgeRange starting for range [{0} - {1}) @ purgeVersion={2}, force={3}\n",
 		           range.begin.printable(),
 		           range.end.printable(),
-		           pruneVersion,
+		           purgeVersion,
 		           force);
 	}
 
@@ -2429,18 +2429,18 @@ ACTOR Future<Void> pruneRange(Reference<BlobManagerData> self, KeyRangeRef range
 	state KeyRangeMap<UID>::iterator activeRange;
 	for (activeRange = activeRanges.begin(); activeRange != activeRanges.end(); ++activeRange) {
 		if (BM_DEBUG) {
-			fmt::print("Checking if active range [{0} - {1}), owned by BW {2}, should be pruned\n",
+			fmt::print("Checking if active range [{0} - {1}), owned by BW {2}, should be purged\n",
 			           activeRange.begin().printable(),
 			           activeRange.end().printable(),
 			           activeRange.value().toString());
 		}
 
-		// assumption: prune boundaries must respect granule boundaries
+		// assumption: purge boundaries must respect granule boundaries
 		if (activeRange.begin() < range.begin || activeRange.end() > range.end) {
 			continue;
 		}
 
-		// TODO: if this is a force prune, then revoke the assignment from the corresponding BW first
+		// TODO: if this is a force purge, then revoke the assignment from the corresponding BW first
 		// so that it doesn't try to interact with the granule (i.e. force it to give up gLock).
 		// we'll need some way to ack that the revoke was successful
 
@@ -2514,17 +2514,17 @@ ACTOR Future<Void> pruneRange(Reference<BlobManagerData> self, KeyRangeRef range
 		}
 
 		// There are three cases this granule can fall into:
-		// - if the granule's end version is at or before the prune version or this is a force delete,
+		// - if the granule's end version is at or before the purge version or this is a force delete,
 		//   this granule should be completely deleted
-		// - else if the startVersion <= pruneVersion, then G.startVersion < pruneVersion < G.endVersion
+		// - else if the startVersion <= purgeVersion, then G.startVersion < purgeVersion < G.endVersion
 		//   and so this granule should be partially deleted
 		// - otherwise, this granule is active, so don't schedule it for deletion
-		if (force || endVersion <= pruneVersion) {
+		if (force || endVersion <= purgeVersion) {
 			if (BM_DEBUG) {
 				fmt::print("Granule {0} will be FULLY deleted\n", currHistoryNode.granuleID.toString());
 			}
 			toFullyDelete.push_back({ currHistoryNode.granuleID, historyKey });
-		} else if (startVersion < pruneVersion) {
+		} else if (startVersion < purgeVersion) {
 			if (BM_DEBUG) {
 				fmt::print("Granule {0} will be partially deleted\n", currHistoryNode.granuleID.toString());
 			}
@@ -2589,7 +2589,7 @@ ACTOR Future<Void> pruneRange(Reference<BlobManagerData> self, KeyRangeRef range
 			if (BM_DEBUG) {
 				fmt::print("Unable to fully delete granule {0}, doing partial delete instead\n", granuleId.toString());
 			}
-			partialDeletions.emplace_back(partiallyDeleteGranule(self, granuleId, pruneVersion));
+			partialDeletions.emplace_back(partiallyDeleteGranule(self, granuleId, purgeVersion));
 		}
 	}
 
@@ -2602,46 +2602,46 @@ ACTOR Future<Void> pruneRange(Reference<BlobManagerData> self, KeyRangeRef range
 		if (BM_DEBUG) {
 			fmt::print("About to partially delete granule {0}\n", granuleId.toString());
 		}
-		partialDeletions.emplace_back(partiallyDeleteGranule(self, granuleId, pruneVersion));
+		partialDeletions.emplace_back(partiallyDeleteGranule(self, granuleId, purgeVersion));
 	}
 
 	wait(waitForAll(partialDeletions));
 
 	// Now that all the necessary granules and their files have been deleted, we can
-	// clear the pruneIntent key to signify that the work is done. However, there could have been
-	// another pruneIntent that got written for this table while we were processing this one.
+	// clear the purgeIntent key to signify that the work is done. However, there could have been
+	// another purgeIntent that got written for this table while we were processing this one.
 	// If that is the case, we should not clear the key. Otherwise, we can just clear the key.
 
 	if (BM_DEBUG) {
-		fmt::print("Successfully pruned range [{0} - {1}) at pruneVersion={2}\n",
+		fmt::print("Successfully purged range [{0} - {1}) at purgeVersion={2}\n",
 		           range.begin.printable(),
 		           range.end.printable(),
-		           pruneVersion);
+		           purgeVersion);
 	}
 	return Void();
 }
 
 /*
- * This monitor watches for changes to a key K that gets updated whenever there is a new prune intent.
- * On this change, we scan through all blobGranulePruneKeys (which look like <startKey, endKey>=<prune_version,
- * force>) and prune any intents.
+ * This monitor watches for changes to a key K that gets updated whenever there is a new purge intent.
+ * On this change, we scan through all blobGranulePurgeKeys (which look like <startKey, endKey>=<purge_version,
+ * force>) and purge any intents.
  *
- * Once the prune has succeeded, we clear the key IF the version is still the same one that was pruned.
- * That way, if another prune intent arrived for the same range while we were working on an older one,
+ * Once the purge has succeeded, we clear the key IF the version is still the same one that was purged.
+ * That way, if another purge intent arrived for the same range while we were working on an older one,
  * we wouldn't end up clearing the intent.
  *
  * When watching for changes, we might end up in scenarios where we failed to do the work
- * for a prune intent even though the watch was triggered (maybe the BM had a blip). This is problematic
- * if the intent is a force and there isn't another prune intent for quite some time. To remedy this,
- * if we don't see a watch change in X (configurable) seconds, we will just sweep through the prune intents,
+ * for a purge intent even though the watch was triggered (maybe the BM had a blip). This is problematic
+ * if the intent is a force and there isn't another purge intent for quite some time. To remedy this,
+ * if we don't see a watch change in X (configurable) seconds, we will just sweep through the purge intents,
  * consolidating any work we might have missed before.
  *
- * Note: we could potentially use a changefeed here to get the exact pruneIntent that was added
+ * Note: we could potentially use a changefeed here to get the exact purgeIntent that was added
  * rather than iterating through all of them, but this might have too much overhead for latency
- * improvements we don't really need here (also we need to go over all prune intents anyways in the
- * case that the timer is up before any new prune intents arrive).
+ * improvements we don't really need here (also we need to go over all purge intents anyways in the
+ * case that the timer is up before any new purge intents arrive).
  */
-ACTOR Future<Void> monitorPruneKeys(Reference<BlobManagerData> self) {
+ACTOR Future<Void> monitorPurgeKeys(Reference<BlobManagerData> self) {
 	self->initBStore();
 
 	loop {
@@ -2650,35 +2650,35 @@ ACTOR Future<Void> monitorPruneKeys(Reference<BlobManagerData> self) {
 		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 		// Wait for the watch to change, or some time to expire (whichever comes first)
-		// before checking through the prune intents. We write a UID into the change key value
+		// before checking through the purge intents. We write a UID into the change key value
 		// so that we can still recognize when the watch key has been changed while we weren't
 		// monitoring it
 
-		state Key lastPruneKey = blobGranulePruneKeys.begin;
+		state Key lastPurgeKey = blobGranulePurgeKeys.begin;
 
 		loop {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-			state std::vector<Future<Void>> prunes;
-			state CoalescedKeyRangeMap<std::pair<Version, bool>> pruneMap;
-			pruneMap.insert(allKeys, std::make_pair<Version, bool>(0, false));
+			state std::vector<Future<Void>> purges;
+			state CoalescedKeyRangeMap<std::pair<Version, bool>> purgeMap;
+			purgeMap.insert(allKeys, std::make_pair<Version, bool>(0, false));
 			try {
 				// TODO: replace 10000 with a knob
-				state RangeResult pruneIntents = wait(tr->getRange(blobGranulePruneKeys, BUGGIFY ? 1 : 10000));
-				if (pruneIntents.size()) {
+				state RangeResult purgeIntents = wait(tr->getRange(blobGranulePurgeKeys, BUGGIFY ? 1 : 10000));
+				if (purgeIntents.size()) {
 					int rangeIdx = 0;
-					for (; rangeIdx < pruneIntents.size(); ++rangeIdx) {
-						Version pruneVersion;
+					for (; rangeIdx < purgeIntents.size(); ++rangeIdx) {
+						Version purgeVersion;
 						KeyRange range;
 						bool force;
-						std::tie(pruneVersion, range, force) =
-						    decodeBlobGranulePruneValue(pruneIntents[rangeIdx].value);
-						auto ranges = pruneMap.intersectingRanges(range);
+						std::tie(purgeVersion, range, force) =
+						    decodeBlobGranulePurgeValue(purgeIntents[rangeIdx].value);
+						auto ranges = purgeMap.intersectingRanges(range);
 						bool foundConflict = false;
 						for (auto it : ranges) {
-							if ((it.value().second && !force && it.value().first < pruneVersion) ||
-							    (!it.value().second && force && pruneVersion < it.value().first)) {
+							if ((it.value().second && !force && it.value().first < purgeVersion) ||
+							    (!it.value().second && force && purgeVersion < it.value().first)) {
 								foundConflict = true;
 								break;
 							}
@@ -2686,39 +2686,41 @@ ACTOR Future<Void> monitorPruneKeys(Reference<BlobManagerData> self) {
 						if (foundConflict) {
 							break;
 						}
-						pruneMap.insert(range, std::make_pair(pruneVersion, force));
+						purgeMap.insert(range, std::make_pair(purgeVersion, force));
 
-						fmt::print("about to prune range [{0} - {1}) @ {2}, force={3}\n",
-						           range.begin.printable(),
-						           range.end.printable(),
-						           pruneVersion,
-						           force ? "T" : "F");
+						if (BM_DEBUG) {
+							fmt::print("about to purge range [{0} - {1}) @ {2}, force={3}\n",
+							           range.begin.printable(),
+							           range.end.printable(),
+							           purgeVersion,
+							           force ? "T" : "F");
+						}
 					}
-					lastPruneKey = pruneIntents[rangeIdx - 1].key;
+					lastPurgeKey = purgeIntents[rangeIdx - 1].key;
 
-					for (auto it : pruneMap.ranges()) {
+					for (auto it : purgeMap.ranges()) {
 						if (it.value().first > 0) {
-							prunes.emplace_back(pruneRange(self, it.range(), it.value().first, it.value().second));
+							purges.emplace_back(purgeRange(self, it.range(), it.value().first, it.value().second));
 						}
 					}
 
-					// wait for this set of prunes to complete before starting the next ones since if we
-					// prune a range R at version V and while we are doing that, the time expires, we will
-					// end up trying to prune the same range again since the work isn't finished and the
-					// prunes will race
+					// wait for this set of purges to complete before starting the next ones since if we
+					// purge a range R at version V and while we are doing that, the time expires, we will
+					// end up trying to purge the same range again since the work isn't finished and the
+					// purges will race
 					//
 					// TODO: this isn't that efficient though. Instead we could keep metadata as part of the
-					// BM's memory that tracks which prunes are active. Once done, we can mark that work as
-					// done. If the BM fails then all prunes will fail and so the next BM will have a clear
+					// BM's memory that tracks which purges are active. Once done, we can mark that work as
+					// done. If the BM fails then all purges will fail and so the next BM will have a clear
 					// set of metadata (i.e. no work in progress) so we will end up doing the work in the
 					// new BM
 
-					wait(waitForAll(prunes));
+					wait(waitForAll(purges));
 					break;
 				} else {
-					state Future<Void> watchPruneIntentsChange = tr->watch(blobGranulePruneChangeKey);
+					state Future<Void> watchPurgeIntentsChange = tr->watch(blobGranulePurgeChangeKey);
 					wait(tr->commit());
-					wait(watchPruneIntentsChange);
+					wait(watchPurgeIntentsChange);
 					tr->reset();
 				}
 			} catch (Error& e) {
@@ -2731,7 +2733,7 @@ ACTOR Future<Void> monitorPruneKeys(Reference<BlobManagerData> self) {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				tr->clear(KeyRangeRef(blobGranulePruneKeys.begin, keyAfter(lastPruneKey)));
+				tr->clear(KeyRangeRef(blobGranulePurgeKeys.begin, keyAfter(lastPurgeKey)));
 				wait(tr->commit());
 				break;
 			} catch (Error& e) {
@@ -2740,7 +2742,7 @@ ACTOR Future<Void> monitorPruneKeys(Reference<BlobManagerData> self) {
 		}
 
 		if (BM_DEBUG) {
-			printf("Done pruning current set of prune intents.\n");
+			printf("Done pruning current set of purge intents.\n");
 		}
 	}
 }
@@ -2941,7 +2943,7 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 
 	self->addActor.send(doLockChecks(self));
 	self->addActor.send(monitorClientRanges(self));
-	self->addActor.send(monitorPruneKeys(self));
+	self->addActor.send(monitorPurgeKeys(self));
 	if (SERVER_KNOBS->BG_CONSISTENCY_CHECK_ENABLED) {
 		self->addActor.send(bgConsistencyCheck(self));
 	}

@@ -58,6 +58,9 @@ public:
 	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
 	ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) override;
 
+	ThreadFuture<Key> purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) override;
+	ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) override;
+
 private:
 	friend class ThreadSafeTenant;
 	friend class ThreadSafeTransaction;
