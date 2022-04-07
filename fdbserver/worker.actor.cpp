@@ -2620,7 +2620,6 @@ TEST_CASE("/fdbserver/worker/swversion/noversionhistory") {
 	ErrorOr<SWVersion> swversion = wait(errorOr(
 	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
 
-	ASSERT(!swversion.isError());
 	if (!swversion.isError()) {
 		ASSERT(!swversion.get().isValid());
 	}
@@ -2649,7 +2648,6 @@ TEST_CASE("/fdbserver/worker/swversion/writeVerifyVersion") {
 	ErrorOr<SWVersion> swversion = wait(errorOr(
 	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
 
-	ASSERT(!swversion.isError());
 	if (!swversion.isError()) {
 		ASSERT(swversion.get().latestProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
 		ASSERT(swversion.get().lastProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
@@ -2675,12 +2673,10 @@ TEST_CASE("/fdbserver/worker/swversion/runCompatibleOlder") {
 	                                                                   ProtocolVersion::withStorageInterfaceReadiness(),
 	                                                                   ProtocolVersion::withStorageInterfaceReadiness(),
 	                                                                   ProtocolVersion::withTSS())));
-	ASSERT(!f.isError());
 
 	ErrorOr<SWVersion> swversion = wait(errorOr(
 	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
 
-	ASSERT(!swversion.isError());
 	if (!swversion.isError()) {
 		ASSERT(swversion.get().latestProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
 		ASSERT(swversion.get().lastProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
@@ -2697,7 +2693,6 @@ TEST_CASE("/fdbserver/worker/swversion/runCompatibleOlder") {
 	ErrorOr<SWVersion> swversion = wait(errorOr(
 	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
 
-	ASSERT(!swversion.isError());
 	if (!swversion.isError()) {
 		ASSERT(swversion.get().latestProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
 		ASSERT(swversion.get().lastProtocolVersion() == ProtocolVersion::withTSS().version());
@@ -2781,7 +2776,6 @@ TEST_CASE("/fdbserver/worker/swversion/runNewer") {
 	ErrorOr<SWVersion> swversion = wait(errorOr(
 	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
 
-	ASSERT(!swversion.isError());
 	if (!swversion.isError()) {
 		ASSERT(swversion.get().latestProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
 		ASSERT(swversion.get().lastProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
