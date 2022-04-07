@@ -812,7 +812,6 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 		return CoordinatorsResult::BAD_DATABASE_STATE; // Someone deleted this key entirely?
 
 	state ClusterConnectionString old(currentKey.get().toString());
-	wait(old.resolveHostnames());
 	if (tr->getDatabase()->getConnectionRecord() &&
 	    old.clusterKeyName().toString() !=
 	        tr->getDatabase()->getConnectionRecord()->getConnectionString().clusterKeyName())

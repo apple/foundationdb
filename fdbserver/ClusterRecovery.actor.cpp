@@ -538,7 +538,6 @@ ACTOR Future<Void> changeCoordinators(Reference<ClusterRecoveryData> self) {
 
 		try {
 			state ClusterConnectionString conn(changeCoordinatorsRequest.newConnectionString.toString());
-			wait(conn.resolveHostnames());
 			wait(self->cstate.move(conn));
 		} catch (Error& e) {
 			if (e.code() != error_code_actor_cancelled)

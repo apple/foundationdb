@@ -1700,7 +1700,6 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 			try {
 				if (Hostname::isHostname(process_address_or_hostname_strs[index])) {
 					conn.hostnames.push_back(Hostname::parse(process_address_or_hostname_strs[index]));
-					conn.status = ClusterConnectionString::ConnectionStringStatus::UNRESOLVED;
 				} else {
 					NetworkAddress a = NetworkAddress::parse(process_address_or_hostname_strs[index]);
 					if (!a.isValid()) {
@@ -1724,7 +1723,6 @@ ACTOR static Future<Optional<std::string>> coordinatorsCommitActor(ReadYourWrite
 		}
 	}
 
-	wait(conn.resolveHostnames());
 	if (conn.coordinators().size())
 		change = specifiedQuorumChange(conn.coordinators());
 	else
