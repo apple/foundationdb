@@ -202,32 +202,32 @@ struct SWVersion {
 	constexpr static FileIdentifier file_identifier = 13943914;
 
 private:
-	uint64_t _latestProtocolVersion;
-	uint64_t _lastProtocolVersion;
+	uint64_t _newestProtocolVersion;
+	uint64_t _lastRunProtocolVersion;
 	uint64_t _lowestCompatibleProtocolVersion;
 
 public:
 	SWVersion() {
-		_latestProtocolVersion = 0;
-		_lastProtocolVersion = 0;
+		_newestProtocolVersion = 0;
+		_lastRunProtocolVersion = 0;
 		_lowestCompatibleProtocolVersion = 0;
 	}
 
 	SWVersion(ProtocolVersion latestVersion, ProtocolVersion lastVersion, ProtocolVersion minCompatibleVersion)
-	  : _latestProtocolVersion(latestVersion.version()), _lastProtocolVersion(lastVersion.version()),
+	  : _newestProtocolVersion(latestVersion.version()), _lastRunProtocolVersion(lastVersion.version()),
 	    _lowestCompatibleProtocolVersion(minCompatibleVersion.version()) {}
 
 	bool isValid() const {
-		return (_latestProtocolVersion != 0 && _lastProtocolVersion != 0 && _lowestCompatibleProtocolVersion != 0);
+		return (_newestProtocolVersion != 0 && _lastRunProtocolVersion != 0 && _lowestCompatibleProtocolVersion != 0);
 	}
 
-	uint64_t latestProtocolVersion() const { return _latestProtocolVersion; }
-	uint64_t lastProtocolVersion() const { return _lastProtocolVersion; }
+	uint64_t newestProtocolVersion() const { return _newestProtocolVersion; }
+	uint64_t lastRunProtocolVersion() const { return _lastRunProtocolVersion; }
 	uint64_t lowestCompatibleProtocolVersion() const { return _lowestCompatibleProtocolVersion; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, _latestProtocolVersion, _lastProtocolVersion, _lowestCompatibleProtocolVersion);
+		serializer(ar, _newestProtocolVersion, _lastRunProtocolVersion, _lowestCompatibleProtocolVersion);
 	}
 };
 
@@ -235,8 +235,8 @@ template <>
 struct Traceable<SWVersion> : std::true_type {
 	static std::string toString(const SWVersion& swVersion) {
 		return format("Newest: 0x%016lX, Last: 0x%016lX, MinCompatible: 0x%016lX",
-		              swVersion.latestProtocolVersion(),
-		              swVersion.lastProtocolVersion(),
+		              swVersion.newestProtocolVersion(),
+		              swVersion.lastRunProtocolVersion(),
 		              swVersion.lowestCompatibleProtocolVersion());
 	}
 };

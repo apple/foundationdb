@@ -2560,10 +2560,10 @@ ACTOR Future<SWVersion> testSoftwareVersionCompatibility(std::string folder, Pro
 	}
 }
 
-ACTOR Future<Void> checkAndUpdateNewestSoftwareVersion(std::string folder,
-                                                       ProtocolVersion currentVersion,
-                                                       ProtocolVersion latestVersion,
-                                                       ProtocolVersion minCompatibleVersion) {
+ACTOR Future<Void> updateNewestSoftwareVersion(std::string folder,
+                                               ProtocolVersion currentVersion,
+                                               ProtocolVersion latestVersion,
+                                               ProtocolVersion minCompatibleVersion) {
 
 	ASSERT(currentVersion >= minCompatibleVersion);
 
@@ -2574,7 +2574,6 @@ ACTOR Future<Void> checkAndUpdateNewestSoftwareVersion(std::string folder,
 
 		if (versionFile.isError() &&
 		    (versionFile.getError().code() != error_code_file_not_found || fileExists(versionFilePath))) {
-			TraceEvent(SevWarnAlways, "OpenSWVersionFileError").error(versionFile.getError());
 			throw versionFile.getError();
 		}
 
@@ -2585,9 +2584,6 @@ ACTOR Future<Void> checkAndUpdateNewestSoftwareVersion(std::string folder,
 
 		SWVersion swVersion(latestVersion, currentVersion, minCompatibleVersion);
 		auto s = swVersionValue(swVersion);
-		TraceEvent(SevInfo, "CheckAndUpdateNewestSoftwareVersion")
-		    .detail("SWVersion", swVersion)
-		    .detail("ValueSize", s.size());
 		ErrorOr<Void> e = wait(errorOr(newVersionFile->write(s.toString().c_str(), s.size(), 0)));
 		if (e.isError()) {
 			TraceEvent(SevWarnAlways, "WriteSWVersionFailed").error(e.getError());
@@ -2601,6 +2597,50 @@ ACTOR Future<Void> checkAndUpdateNewestSoftwareVersion(std::string folder,
 		TraceEvent(SevWarnAlways, "OpenWriteSWVersionFileError").error(e);
 		throw;
 	}
+
+	return Void();
+}
+
+ACTOR Future<Void> testAndUpdateSoftwareVersionCompatibility(std::string dataFolder, UID processIDUid) {
+	ErrorOr<SWVersion> swVersion = wait(errorOr(testSoftwareVersionCompatibility(dataFolder, currentProtocolVersion)));
+	if (swVersion.isError()) {
+		TraceEvent(SevWarnAlways, "SWVersionCompatibilityCheckError", processIDUid).error(swVersion.getError());
+		throw swVersion.getError();
+	}
+
+	TraceEvent(SevInfo, "SWVersionCompatible", processIDUid).detail("SWVersion", swVersion.get());
+
+	if (!swVersion.get().isValid() ||
+	    currentProtocolVersion > ProtocolVersion(swVersion.get().latestProtocolVersion())) {
+		ErrorOr<Void> updateSWVersion = wait(errorOr(updateNewestSoftwareVersion(
+		    dataFolder, currentProtocolVersion, currentProtocolVersion, minCompatibleProtocolVersion)));
+		if (updateSWVersion.isError()) {
+			TraceEvent(SevWarnAlways, "SWVersionNotWritten", processIDUid).error(updateSWVersion.getError());
+			throw updateSWVersion.getError();
+		} else {
+			TraceEvent(SevWarnAlways, "NewSWVersionWritten", processIDUid).log();
+		}
+	} else if (currentProtocolVersion < ProtocolVersion(swVersion.get().latestProtocolVersion())) {
+		ErrorOr<Void> updatedSWVersion = wait(
+		    errorOr(updateNewestSoftwareVersion(dataFolder,
+		                                        currentProtocolVersion,
+		                                        ProtocolVersion(swVersion.get().latestProtocolVersion()),
+		                                        ProtocolVersion(swVersion.get().lowestCompatibleProtocolVersion()))));
+		if (updatedSWVersion.isError()) {
+			TraceEvent(SevWarnAlways, "SWVersionNotWritten", processIDUid).error(updatedSWVersion.getError());
+		} else {
+			TraceEvent(SevWarnAlways, "SWVersionWritten", processIDUid).log();
+		}
+	}
+
+	ErrorOr<SWVersion> newSWVersion =
+	    wait(errorOr(testSoftwareVersionCompatibility(dataFolder, currentProtocolVersion)));
+	if (newSWVersion.isError()) {
+		TraceEvent(SevWarnAlways, "SWVersionCompatibilityCheckError", processIDUid).error(newSWVersion.getError());
+		throw newSWVersion.getError();
+	}
+
+	TraceEvent(SevInfo, "VerifiedNewSoftwareVersion", processIDUid).detail("SWVersion", newSWVersion.get());
 
 	return Void();
 }
@@ -2639,10 +2679,10 @@ TEST_CASE("/fdbserver/worker/swversion/writeVerifyVersion") {
 		return Void();
 	}
 
-	ErrorOr<Void> f = wait(errorOr(checkAndUpdateNewestSoftwareVersion(swversionTestDirName,
-	                                                                   ProtocolVersion::withStorageInterfaceReadiness(),
-	                                                                   ProtocolVersion::withStorageInterfaceReadiness(),
-	                                                                   ProtocolVersion::withTSS())));
+	ErrorOr<Void> f = wait(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
+	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                           ProtocolVersion::withTSS())));
 	ASSERT(!f.isError());
 
 	ErrorOr<SWVersion> swversion = wait(errorOr(
@@ -2669,10 +2709,10 @@ TEST_CASE("/fdbserver/worker/swversion/runCompatibleOlder") {
 		return Void();
 	}
 
-	ErrorOr<Void> f = wait(errorOr(checkAndUpdateNewestSoftwareVersion(swversionTestDirName,
-	                                                                   ProtocolVersion::withStorageInterfaceReadiness(),
-	                                                                   ProtocolVersion::withStorageInterfaceReadiness(),
-	                                                                   ProtocolVersion::withTSS())));
+	ErrorOr<Void> f = wait(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
+	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                           ProtocolVersion::withTSS())));
 
 	ErrorOr<SWVersion> swversion = wait(errorOr(
 	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
@@ -2685,10 +2725,10 @@ TEST_CASE("/fdbserver/worker/swversion/runCompatibleOlder") {
 		TraceEvent(SevInfo, "UT/swversion/runCompatibleOlder").detail("SWVersion", swversion.get());
 	}
 
-	ErrorOr<Void> f = wait(errorOr(checkAndUpdateNewestSoftwareVersion(swversionTestDirName,
-	                                                                   ProtocolVersion::withTSS(),
-	                                                                   ProtocolVersion::withStorageInterfaceReadiness(),
-	                                                                   ProtocolVersion::withTSS())));
+	ErrorOr<Void> f = wait(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
+	                                                           ProtocolVersion::withTSS(),
+	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                           ProtocolVersion::withTSS())));
 
 	ErrorOr<SWVersion> swversion = wait(errorOr(
 	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
@@ -2716,10 +2756,10 @@ TEST_CASE("/fdbserver/worker/swversion/runIncompatibleOlder") {
 		return Void();
 	}
 
-	ErrorOr<Void> f = wait(errorOr(checkAndUpdateNewestSoftwareVersion(swversionTestDirName,
-	                                                                   ProtocolVersion::withStorageInterfaceReadiness(),
-	                                                                   ProtocolVersion::withStorageInterfaceReadiness(),
-	                                                                   ProtocolVersion::withTSS())));
+	ErrorOr<Void> f = wait(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
+	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                           ProtocolVersion::withTSS())));
 	ASSERT(!f.isError());
 
 	ErrorOr<SWVersion> swversion = wait(errorOr(
@@ -2752,10 +2792,10 @@ TEST_CASE("/fdbserver/worker/swversion/runNewer") {
 		return Void();
 	}
 
-	ErrorOr<Void> f = wait(errorOr(checkAndUpdateNewestSoftwareVersion(swversionTestDirName,
-	                                                                   ProtocolVersion::withTSS(),
-	                                                                   ProtocolVersion::withTSS(),
-	                                                                   ProtocolVersion::withCacheRole())));
+	ErrorOr<Void> f = wait(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
+	                                                           ProtocolVersion::withTSS(),
+	                                                           ProtocolVersion::withTSS(),
+	                                                           ProtocolVersion::withCacheRole())));
 	ASSERT(!f.isError());
 
 	ErrorOr<SWVersion> swversion = wait(errorOr(
@@ -2768,10 +2808,10 @@ TEST_CASE("/fdbserver/worker/swversion/runNewer") {
 		ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withCacheRole().version());
 	}
 
-	ErrorOr<Void> f = wait(errorOr(checkAndUpdateNewestSoftwareVersion(swversionTestDirName,
-	                                                                   ProtocolVersion::withStorageInterfaceReadiness(),
-	                                                                   ProtocolVersion::withStorageInterfaceReadiness(),
-	                                                                   ProtocolVersion::withTSS())));
+	ErrorOr<Void> f = wait(errorOr(updateNewestSoftwareVersion(swversionTestDirName,
+	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                           ProtocolVersion::withStorageInterfaceReadiness(),
+	                                                           ProtocolVersion::withTSS())));
 
 	ErrorOr<SWVersion> swversion = wait(errorOr(
 	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
@@ -3086,47 +3126,9 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		localities.set(LocalityData::keyProcessId, processIDUid.toString());
 		// Only one process can execute on a dataFolder from this point onwards
 
-		Future<SWVersion> f = testSoftwareVersionCompatibility(dataFolder, currentProtocolVersion);
-		ErrorOr<SWVersion> swversion = wait(errorOr(f));
-		if (swversion.isError()) {
-			TraceEvent(SevWarnAlways, "SWVersionFileCompatibilityCheckError", processIDUid).error(swversion.getError());
-			throw swversion.getError();
-		} else {
-			TraceEvent(SevInfo, "SWVersionCompatible", processIDUid).detail("SWVersion", swversion.get());
-		}
-
-		if (!swversion.get().isValid() ||
-		    currentProtocolVersion > ProtocolVersion(swversion.get().latestProtocolVersion())) {
-			ErrorOr<Void> v = wait(errorOr(checkAndUpdateNewestSoftwareVersion(
-			    dataFolder, currentProtocolVersion, currentProtocolVersion, minCompatibleProtocolVersion)));
-			if (v.isError()) {
-				TraceEvent(SevWarnAlways, "SWVersionNotWritten", processIDUid).error(v.getError());
-			} else {
-				TraceEvent(SevWarnAlways, "NewSWVersionWritten", processIDUid).log();
-			}
-		} else if (currentProtocolVersion < ProtocolVersion(swversion.get().latestProtocolVersion())) {
-			ErrorOr<Void> v = wait(errorOr(checkAndUpdateNewestSoftwareVersion(
-			    dataFolder,
-			    currentProtocolVersion,
-			    ProtocolVersion(swversion.get().latestProtocolVersion()),
-			    ProtocolVersion(swversion.get().lowestCompatibleProtocolVersion()))));
-			if (v.isError()) {
-				TraceEvent(SevWarnAlways, "SWVersionNotWritten", processIDUid).error(v.getError());
-			} else {
-				TraceEvent(SevWarnAlways, "SWVersionWritten", processIDUid).log();
-			}
-		}
-
-		// wait(delay(0));
-
-		Future<SWVersion> f = testSoftwareVersionCompatibility(dataFolder, currentProtocolVersion);
-		ErrorOr<SWVersion> swversion = wait(errorOr(f));
-		if (swversion.isError()) {
-			TraceEvent(SevWarnAlways, "SWVersionFileCompatibilityCheckError", processIDUid).error(swversion.getError());
-			throw swversion.getError();
-		} else {
-			TraceEvent(SevInfo, "ReadBackCheckAndUpdateNewestSoftwareVersion", processIDUid)
-			    .detail("SWVersion", swversion.get());
+		ErrorOr<Void> f = wait(errorOr(testAndUpdateSoftwareVersionCompatibility(dataFolder, processIDUid)));
+		if (f.isError()) {
+			throw f.getError();
 		}
 
 		std::string fitnessFilePath = joinPath(dataFolder, "fitness");
