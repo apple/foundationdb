@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -93,6 +93,31 @@ IKnobCollection const& IKnobCollection::getGlobalKnobCollection() {
 
 IKnobCollection& IKnobCollection::getMutableGlobalKnobCollection() {
 	return *globalKnobCollection();
+}
+
+void IKnobCollection::setupKnobs(const std::vector<std::pair<std::string, std::string>>& knobs) {
+	auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
+	for (const auto& [knobName, knobValueString] : knobs) {
+		try {
+			auto knobValue = g_knobs.parseKnobValue(knobName, knobValueString);
+			g_knobs.setKnob(knobName, knobValue);
+		} catch (Error& e) {
+			if (e.code() == error_code_invalid_option_value) {
+				std::cerr << "WARNING: Invalid value '" << knobValueString << "' for knob option '" << knobName
+				          << "'\n";
+				TraceEvent(SevWarnAlways, "InvalidKnobValue")
+				    .detail("Knob", printable(knobName))
+				    .detail("Value", printable(knobValueString));
+			} else {
+				std::cerr << "ERROR: Failed to set knob option '" << knobName << "': " << e.what() << "\n";
+				TraceEvent(SevError, "FailedToSetKnob")
+				    .errorUnsuppressed(e)
+				    .detail("Knob", printable(knobName))
+				    .detail("Value", printable(knobValueString));
+				throw e;
+			}
+		}
+	}
 }
 
 ConfigMutationRef IKnobCollection::createSetMutation(Arena arena, KeyRef key, ValueRef value) {

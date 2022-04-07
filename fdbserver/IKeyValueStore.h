@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -159,12 +159,23 @@ extern IKeyValueStore* keyValueStoreLogSystem(class IDiskQueue* queue,
                                               bool replaceContent,
                                               bool exactRecovery);
 
+extern IKeyValueStore* openRemoteKVStore(KeyValueStoreType storeType,
+                                         std::string const& filename,
+                                         UID logID,
+                                         int64_t memoryLimit,
+                                         bool checkChecksums = false,
+                                         bool checkIntegrity = false);
+
 inline IKeyValueStore* openKVStore(KeyValueStoreType storeType,
                                    std::string const& filename,
                                    UID logID,
                                    int64_t memoryLimit,
                                    bool checkChecksums = false,
-                                   bool checkIntegrity = false) {
+                                   bool checkIntegrity = false,
+                                   bool openRemotely = false) {
+	if (openRemotely) {
+		return openRemoteKVStore(storeType, filename, logID, memoryLimit, checkChecksums, checkIntegrity);
+	}
 	switch (storeType) {
 	case KeyValueStoreType::SSD_BTREE_V1:
 		return keyValueStoreSQLite(filename, logID, KeyValueStoreType::SSD_BTREE_V1, false, checkIntegrity);

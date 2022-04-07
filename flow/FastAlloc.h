@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -178,7 +178,7 @@ void releaseAllThreadMagazines();
 int64_t getTotalUnusedAllocatedMemory();
 
 inline constexpr int nextFastAllocatedSize(int x) {
-	assert(x > 0 && x <= 8192);
+	assert(x > 0 && x <= 16384);
 	if (x <= 16)
 		return 16;
 	else if (x <= 32)
@@ -199,8 +199,10 @@ inline constexpr int nextFastAllocatedSize(int x) {
 		return 2048;
 	else if (x <= 4096)
 		return 4096;
-	else
+	else if (x <= 8192)
 		return 8192;
+	else
+		return 16384;
 }
 
 template <class Object>
@@ -210,13 +212,24 @@ public:
 		if (s != sizeof(Object))
 			abort();
 		INSTRUMENT_ALLOCATE(typeid(Object).name());
-		void* p = FastAllocator < sizeof(Object) <= 64 ? 64 : nextFastAllocatedSize(sizeof(Object)) > ::allocate();
-		return p;
+
+		if constexpr (sizeof(Object) <= 256) {
+			void* p = FastAllocator < sizeof(Object) <= 64 ? 64 : nextFastAllocatedSize(sizeof(Object)) > ::allocate();
+			return p;
+		} else {
+			void* p = new uint8_t[nextFastAllocatedSize(sizeof(Object))];
+			return p;
+		}
 	}
 
 	static void operator delete(void* s) {
 		INSTRUMENT_RELEASE(typeid(Object).name());
-		FastAllocator<sizeof(Object) <= 64 ? 64 : nextFastAllocatedSize(sizeof(Object))>::release(s);
+
+		if constexpr (sizeof(Object) <= 256) {
+			FastAllocator<sizeof(Object) <= 64 ? 64 : nextFastAllocatedSize(sizeof(Object))>::release(s);
+		} else {
+			delete[] reinterpret_cast<uint8_t*>(s);
+		}
 	}
 	// Redefine placement new so you can still use it
 	static void* operator new(size_t, void* p) { return p; }
@@ -236,18 +249,6 @@ public:
 		return FastAllocator<128>::allocate();
 	if (size <= 256)
 		return FastAllocator<256>::allocate();
-	if (size <= 512)
-		return FastAllocator<512>::allocate();
-	if (size <= 1024)
-		return FastAllocator<1024>::allocate();
-	if (size <= 2048)
-		return FastAllocator<2048>::allocate();
-	if (size <= 4096)
-		return FastAllocator<4096>::allocate();
-	if (size <= 8192)
-		return FastAllocator<8192>::allocate();
-	if (size <= 16384)
-		return FastAllocator<16384>::allocate();
 	return new uint8_t[size];
 }
 
@@ -264,21 +265,11 @@ inline void freeFast(int size, void* ptr) {
 		return FastAllocator<128>::release(ptr);
 	if (size <= 256)
 		return FastAllocator<256>::release(ptr);
-	if (size <= 512)
-		return FastAllocator<512>::release(ptr);
-	if (size <= 1024)
-		return FastAllocator<1024>::release(ptr);
-	if (size <= 2048)
-		return FastAllocator<2048>::release(ptr);
-	if (size <= 4096)
-		return FastAllocator<4096>::release(ptr);
-	if (size <= 8192)
-		return FastAllocator<8192>::release(ptr);
-	if (size <= 16384)
-		return FastAllocator<16384>::release(ptr);
 	delete[](uint8_t*) ptr;
 }
 
+// Allocate a block of memory aligned to 4096 bytes. Size must be a multiple of
+// 4096. Guaranteed not to return null. Use freeFast4kAligned to free.
 [[nodiscard]] inline void* allocateFast4kAligned(int size) {
 #if !defined(USE_JEMALLOC)
 	// Use FastAllocator for sizes it supports to avoid internal fragmentation in some implementations of aligned_alloc
@@ -296,6 +287,7 @@ inline void freeFast(int size, void* ptr) {
 	return result;
 }
 
+// Free a pointer returned from allocateFast4kAligned(size)
 inline void freeFast4kAligned(int size, void* ptr) {
 #if !defined(USE_JEMALLOC)
 	// Sizes supported by FastAllocator must be release via FastAllocator

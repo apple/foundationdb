@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2020 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -262,7 +262,7 @@ ACTOR Future<Void> restoreLoaderCore(RestoreLoaderInterface loaderInterf,
 				when(RestoreLoadFileRequest req = waitNext(loaderInterf.loadFile.getFuture())) {
 					requestTypeStr = "loadFile";
 					hasQueuedRequests = !self->loadingQueue.empty() || !self->sendingQueue.empty();
-					self->initBackupContainer(req.param.url);
+					self->initBackupContainer(req.param.url, req.param.proxy);
 					self->loadingQueue.push(req);
 					if (!hasQueuedRequests) {
 						self->hasPendingRequests->set(true);

@@ -88,6 +88,7 @@ def api_version(ver):
         'predicates',
         'Future',
         'Database',
+        'Tenant',
         'Transaction',
         'KeyValue',
         'KeySelector',
@@ -98,6 +99,9 @@ def api_version(ver):
     )
 
     _add_symbols(fdb.impl, list)
+
+    if ver >= 710:
+        import fdb.tenant_management
 
     if ver < 610:
         globals()["init"] = getattr(fdb.impl, "init")

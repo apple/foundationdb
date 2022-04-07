@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,6 +28,7 @@
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/WellKnownEndpoints.h"
+#include "flow/Hostname.h"
 
 const int MAX_CLUSTER_FILE_BYTES = 60000;
 
@@ -35,10 +36,12 @@ struct ClientLeaderRegInterface {
 	PublicRequestStream<struct GetLeaderRequest> getLeader;
 	PublicRequestStream<struct OpenDatabaseCoordRequest> openDatabase;
 	RequestStream<struct CheckDescriptorMutableRequest> checkDescriptorMutable;
+	Optional<Hostname> hostname;
 
 	ClientLeaderRegInterface() {}
 	ClientLeaderRegInterface(NetworkAddress remote);
 	ClientLeaderRegInterface(INetwork* local);
+	ClientLeaderRegInterface(Hostname hostname) : hostname(hostname) {}
 
 	bool operator==(const ClientLeaderRegInterface& rhs) const {
 		return getLeader == rhs.getLeader && openDatabase == rhs.openDatabase;

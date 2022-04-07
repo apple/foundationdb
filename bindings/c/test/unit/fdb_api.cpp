@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2020 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -138,6 +138,12 @@ Tenant::Tenant(FDBDatabase* db, const uint8_t* name, int name_length) {
 	}
 }
 
+Tenant::~Tenant() {
+	if (tenant != nullptr) {
+		fdb_tenant_destroy(tenant);
+	}
+}
+
 // Transaction
 Transaction::Transaction(FDBDatabase* db) {
 	if (fdb_error_t err = fdb_database_create_transaction(db, &tr_)) {
@@ -146,7 +152,7 @@ Transaction::Transaction(FDBDatabase* db) {
 	}
 }
 
-Transaction::Transaction(Tenant tenant) {
+Transaction::Transaction(Tenant& tenant) {
 	if (fdb_error_t err = fdb_tenant_create_transaction(tenant.tenant, &tr_)) {
 		std::cerr << fdb_get_error(err) << std::endl;
 		std::abort();

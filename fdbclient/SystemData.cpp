@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -587,27 +587,17 @@ const Key serverListKeyFor(UID serverID) {
 	return wr.toValue();
 }
 
-// TODO use flatbuffers depending on version
 const Value serverListValue(StorageServerInterface const& server) {
-	BinaryWriter wr(IncludeVersion(ProtocolVersion::withServerListValue()));
-	wr << server;
-	return wr.toValue();
+	auto protocolVersion = currentProtocolVersion;
+	protocolVersion.addObjectSerializerFlag();
+	return ObjectWriter::toValue(server, IncludeVersion(protocolVersion));
 }
+
 UID decodeServerListKey(KeyRef const& key) {
 	UID serverID;
 	BinaryReader rd(key.removePrefix(serverListKeys.begin), Unversioned());
 	rd >> serverID;
 	return serverID;
-}
-StorageServerInterface decodeServerListValue(ValueRef const& value) {
-	StorageServerInterface s;
-	BinaryReader reader(value, IncludeVersion());
-	reader >> s;
-	return s;
-}
-
-const Value serverListValueFB(StorageServerInterface const& server) {
-	return ObjectWriter::toValue(server, IncludeVersion());
 }
 
 StorageServerInterface decodeServerListValueFB(ValueRef const& value) {
@@ -615,6 +605,18 @@ StorageServerInterface decodeServerListValueFB(ValueRef const& value) {
 	ObjectReader reader(value.begin(), IncludeVersion());
 	reader.deserialize(s);
 	return s;
+}
+
+StorageServerInterface decodeServerListValue(ValueRef const& value) {
+	StorageServerInterface s;
+	BinaryReader reader(value, IncludeVersion());
+
+	if (!reader.protocolVersion().hasStorageInterfaceReadiness()) {
+		reader >> s;
+		return s;
+	}
+
+	return decodeServerListValueFB(value);
 }
 
 // processClassKeys.contains(k) iff k.startsWith( processClassKeys.begin ) because '/'+1 == '0'
@@ -1153,30 +1155,33 @@ const KeyRangeRef blobGranuleMappingKeys(LiteralStringRef("\xff\x02/bgm/"), Lite
 const KeyRangeRef blobGranuleLockKeys(LiteralStringRef("\xff\x02/bgl/"), LiteralStringRef("\xff\x02/bgl0"));
 const KeyRangeRef blobGranuleSplitKeys(LiteralStringRef("\xff\x02/bgs/"), LiteralStringRef("\xff\x02/bgs0"));
 const KeyRangeRef blobGranuleHistoryKeys(LiteralStringRef("\xff\x02/bgh/"), LiteralStringRef("\xff\x02/bgh0"));
+const KeyRangeRef blobGranulePruneKeys(LiteralStringRef("\xff\x02/bgp/"), LiteralStringRef("\xff\x02/bgp0"));
+const KeyRangeRef blobGranuleVersionKeys(LiteralStringRef("\xff\x02/bgv/"), LiteralStringRef("\xff\x02/bgv0"));
+const KeyRef blobGranulePruneChangeKey = LiteralStringRef("\xff\x02/bgpChange");
 
 const uint8_t BG_FILE_TYPE_DELTA = 'D';
 const uint8_t BG_FILE_TYPE_SNAPSHOT = 'S';
 
-const Key blobGranuleFileKeyFor(UID granuleID, uint8_t fileType, Version fileVersion) {
+const Key blobGranuleFileKeyFor(UID granuleID, Version fileVersion, uint8_t fileType) {
 	ASSERT(fileType == 'D' || fileType == 'S');
 	BinaryWriter wr(AssumeVersion(ProtocolVersion::withBlobGranule()));
 	wr.serializeBytes(blobGranuleFileKeys.begin);
 	wr << granuleID;
-	wr << fileType;
 	wr << bigEndian64(fileVersion);
+	wr << fileType;
 	return wr.toValue();
 }
 
-std::tuple<UID, uint8_t, Version> decodeBlobGranuleFileKey(KeyRef const& key) {
+std::tuple<UID, Version, uint8_t> decodeBlobGranuleFileKey(KeyRef const& key) {
 	UID granuleID;
-	uint8_t fileType;
 	Version fileVersion;
+	uint8_t fileType;
 	BinaryReader reader(key.removePrefix(blobGranuleFileKeys.begin), AssumeVersion(ProtocolVersion::withBlobGranule()));
 	reader >> granuleID;
-	reader >> fileType;
 	reader >> fileVersion;
+	reader >> fileType;
 	ASSERT(fileType == 'D' || fileType == 'S');
-	return std::tuple(granuleID, fileType, bigEndian64(fileVersion));
+	return std::tuple(granuleID, bigEndian64(fileVersion), fileType);
 }
 
 const KeyRange blobGranuleFileKeyRangeFor(UID granuleID) {
@@ -1187,23 +1192,45 @@ const KeyRange blobGranuleFileKeyRangeFor(UID granuleID) {
 	return KeyRangeRef(startKey, strinc(startKey));
 }
 
-const Value blobGranuleFileValueFor(StringRef const& filename, int64_t offset, int64_t length) {
+const Value blobGranuleFileValueFor(StringRef const& filename, int64_t offset, int64_t length, int64_t fullFileLength) {
 	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBlobGranule()));
 	wr << filename;
 	wr << offset;
 	wr << length;
+	wr << fullFileLength;
 	return wr.toValue();
 }
 
-std::tuple<Standalone<StringRef>, int64_t, int64_t> decodeBlobGranuleFileValue(ValueRef const& value) {
+std::tuple<Standalone<StringRef>, int64_t, int64_t, int64_t> decodeBlobGranuleFileValue(ValueRef const& value) {
 	StringRef filename;
 	int64_t offset;
 	int64_t length;
+	int64_t fullFileLength;
 	BinaryReader reader(value, IncludeVersion());
 	reader >> filename;
 	reader >> offset;
 	reader >> length;
-	return std::tuple(filename, offset, length);
+	reader >> fullFileLength;
+	return std::tuple(filename, offset, length, fullFileLength);
+}
+
+const Value blobGranulePruneValueFor(Version version, KeyRange range, bool force) {
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBlobGranule()));
+	wr << version;
+	wr << range;
+	wr << force;
+	return wr.toValue();
+}
+
+std::tuple<Version, KeyRange, bool> decodeBlobGranulePruneValue(ValueRef const& value) {
+	Version version;
+	KeyRange range;
+	bool force;
+	BinaryReader reader(value, IncludeVersion());
+	reader >> version;
+	reader >> range;
+	reader >> force;
+	return std::tuple(version, range, force);
 }
 
 const Value blobGranuleMappingValueFor(UID const& workerID) {
@@ -1284,7 +1311,8 @@ std::pair<BlobGranuleSplitState, Version> decodeBlobGranuleSplitValue(const Valu
 	BinaryReader reader(value, IncludeVersion());
 	reader >> st;
 	reader >> v;
-	return std::pair(st, v);
+
+	return std::pair(st, bigEndian64(v));
 }
 
 const Key blobGranuleHistoryKeyFor(KeyRangeRef const& range, Version version) {
@@ -1367,29 +1395,31 @@ const KeyRef tenantLastIdKey = "\xff/tenantLastId/"_sr;
 const KeyRef tenantDataPrefixKey = "\xff/tenantDataPrefix"_sr;
 
 // for tests
-void testSSISerdes(StorageServerInterface const& ssi, bool useFB) {
-	printf("ssi=\nid=%s\nlocality=%s\nisTss=%s\ntssId=%s\naddress=%s\ngetValue=%s\n\n\n",
+void testSSISerdes(StorageServerInterface const& ssi) {
+	printf("ssi=\nid=%s\nlocality=%s\nisTss=%s\ntssId=%s\nacceptingRequests=%s\naddress=%s\ngetValue=%s\n\n\n",
 	       ssi.id().toString().c_str(),
 	       ssi.locality.toString().c_str(),
 	       ssi.isTss() ? "true" : "false",
 	       ssi.isTss() ? ssi.tssPairID.get().toString().c_str() : "",
+	       ssi.isAcceptingRequests() ? "true" : "false",
 	       ssi.address().toString().c_str(),
 	       ssi.getValue.getEndpoint().token.toString().c_str());
 
-	StorageServerInterface ssi2 =
-	    (useFB) ? decodeServerListValueFB(serverListValueFB(ssi)) : decodeServerListValue(serverListValue(ssi));
+	StorageServerInterface ssi2 = decodeServerListValue(serverListValue(ssi));
 
-	printf("ssi2=\nid=%s\nlocality=%s\nisTss=%s\ntssId=%s\naddress=%s\ngetValue=%s\n\n\n",
+	printf("ssi2=\nid=%s\nlocality=%s\nisTss=%s\ntssId=%s\nacceptingRequests=%s\naddress=%s\ngetValue=%s\n\n\n",
 	       ssi2.id().toString().c_str(),
 	       ssi2.locality.toString().c_str(),
 	       ssi2.isTss() ? "true" : "false",
 	       ssi2.isTss() ? ssi2.tssPairID.get().toString().c_str() : "",
+	       ssi2.isAcceptingRequests() ? "true" : "false",
 	       ssi2.address().toString().c_str(),
 	       ssi2.getValue.getEndpoint().token.toString().c_str());
 
 	ASSERT(ssi.id() == ssi2.id());
 	ASSERT(ssi.locality == ssi2.locality);
 	ASSERT(ssi.isTss() == ssi2.isTss());
+	ASSERT(ssi.isAcceptingRequests() == ssi2.isAcceptingRequests());
 	if (ssi.isTss()) {
 		ASSERT(ssi2.tssPairID.get() == ssi2.tssPairID.get());
 	}
@@ -1411,13 +1441,11 @@ TEST_CASE("/SystemData/SerDes/SSI") {
 	ssi.locality = localityData;
 	ssi.initEndpoints();
 
-	testSSISerdes(ssi, false);
-	testSSISerdes(ssi, true);
+	testSSISerdes(ssi);
 
 	ssi.tssPairID = UID(0x2345234523452345, 0x1238123812381238);
 
-	testSSISerdes(ssi, false);
-	testSSISerdes(ssi, true);
+	testSSISerdes(ssi);
 	printf("ssi serdes test complete\n");
 
 	return Void();

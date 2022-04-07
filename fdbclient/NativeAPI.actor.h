@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -458,6 +458,10 @@ public:
 	Reference<TransactionState> trState;
 	std::vector<Reference<Watch>> watches;
 	Span span;
+
+	// used in template functions as returned Future type
+	template <typename Type>
+	using FutureT = Future<Type>;
 
 private:
 	Future<Version> getReadVersion(uint32_t flags);

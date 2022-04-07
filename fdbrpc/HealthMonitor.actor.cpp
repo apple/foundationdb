@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2020 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,6 +36,10 @@ void HealthMonitor::purgeOutdatedHistory() {
 			--count;
 			ASSERT(count >= 0);
 			peerClosedHistory.pop_front();
+
+			if (count == 0) {
+				peerClosedNum.erase(p.second);
+			}
 		} else {
 			break;
 		}
@@ -44,10 +48,27 @@ void HealthMonitor::purgeOutdatedHistory() {
 
 bool HealthMonitor::tooManyConnectionsClosed(const NetworkAddress& peerAddress) {
 	purgeOutdatedHistory();
+	if (peerClosedNum.find(peerAddress) == peerClosedNum.end()) {
+		return false;
+	}
 	return peerClosedNum[peerAddress] > FLOW_KNOBS->HEALTH_MONITOR_CONNECTION_MAX_CLOSED;
 }
 
 int HealthMonitor::closedConnectionsCount(const NetworkAddress& peerAddress) {
 	purgeOutdatedHistory();
+	if (peerClosedNum.find(peerAddress) == peerClosedNum.end()) {
+		return 0;
+	}
 	return peerClosedNum[peerAddress];
+}
+
+std::unordered_set<NetworkAddress> HealthMonitor::getRecentClosedPeers() {
+	purgeOutdatedHistory();
+	std::unordered_set<NetworkAddress> closedPeers;
+	for (const auto& [peerAddr, count] : peerClosedNum) {
+		if (count > 0) {
+			closedPeers.insert(peerAddr);
+		}
+	}
+	return closedPeers;
 }

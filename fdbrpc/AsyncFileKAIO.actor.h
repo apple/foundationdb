@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,14 +30,17 @@
 #define FLOW_ASYNCFILEKAIO_ACTOR_H
 
 #include "fdbrpc/IAsyncFile.h"
+
+#include <stdio.h>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/eventfd.h>
 #include <sys/syscall.h>
 #include "fdbrpc/linux_kaio.h"
+#include "fdbserver/Knobs.h"
 #include "flow/Knobs.h"
+#include "flow/Histogram.h"
 #include "flow/UnitTest.h"
-#include <stdio.h>
 #include "flow/crc32c.h"
 #include "flow/genericactors.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -45,6 +48,14 @@
 // Set this to true to enable detailed KAIO request logging, which currently is written to a hardcoded location
 // /data/v7/fdb/
 #define KAIO_LOGGING 0
+
+struct AsyncFileKAIOMetrics {
+	Reference<Histogram> readLatencyDist;
+	Reference<Histogram> writeLatencyDist;
+	Reference<Histogram> syncLatencyDist;
+} g_asyncFileKAIOMetrics;
+
+Future<Void> g_asyncFileKAIOHistogramLogger;
 
 DESCR struct SlowAioSubmit {
 	int64_t submitDuration; // ns
@@ -343,6 +354,7 @@ public:
 #endif
 
 		KAIOLogEvent(logFile, id, OpLogEntry::SYNC, OpLogEntry::START);
+		double start_time = now();
 
 		Future<Void> fsync = throwErrorIfFailed(
 		    Reference<AsyncFileKAIO>::addRef(this),
@@ -352,12 +364,11 @@ public:
 		submit(io, "write");
 		fsync=success(io->result.getFuture());*/
 
-#if KAIO_LOGGING
 		fsync = map(fsync, [=](Void r) mutable {
 			KAIOLogEvent(logFile, id, OpLogEntry::SYNC, OpLogEntry::COMPLETE);
+			g_asyncFileKAIOMetrics.syncLatencyDist->sampleSeconds(now() - start_time);
 			return r;
 		});
-#endif
 
 		if (flags & OPEN_ATOMIC_WRITE_AND_CREATE) {
 			flags &= ~OPEN_ATOMIC_WRITE_AND_CREATE;
@@ -630,6 +641,16 @@ private:
 			countFileLogicalReads.init(LiteralStringRef("AsyncFile.CountFileLogicalReads"), filename);
 			countLogicalWrites.init(LiteralStringRef("AsyncFile.CountLogicalWrites"));
 			countLogicalReads.init(LiteralStringRef("AsyncFile.CountLogicalReads"));
+			if (!g_asyncFileKAIOHistogramLogger.isValid()) {
+				auto& metrics = g_asyncFileKAIOMetrics;
+				metrics.readLatencyDist = Reference<Histogram>(new Histogram(
+				    Reference<HistogramRegistry>(), "AsyncFileKAIO", "ReadLatency", Histogram::Unit::microseconds));
+				metrics.writeLatencyDist = Reference<Histogram>(new Histogram(
+				    Reference<HistogramRegistry>(), "AsyncFileKAIO", "WriteLatency", Histogram::Unit::microseconds));
+				metrics.syncLatencyDist = Reference<Histogram>(new Histogram(
+				    Reference<HistogramRegistry>(), "AsyncFileKAIO", "SyncLatency", Histogram::Unit::microseconds));
+				g_asyncFileKAIOHistogramLogger = histogramLogger(SERVER_KNOBS->DISK_METRIC_LOGGING_INTERVAL);
+			}
 		}
 
 #if KAIO_LOGGING
@@ -749,8 +770,31 @@ private:
 					ctx.removeFromRequestList(iob);
 				}
 
+				auto& metrics = g_asyncFileKAIOMetrics;
+				switch (iob->aio_lio_opcode) {
+				case IO_CMD_PREAD:
+					metrics.readLatencyDist->sampleSeconds(now() - iob->startTime);
+					break;
+				case IO_CMD_PWRITE:
+					metrics.writeLatencyDist->sampleSeconds(now() - iob->startTime);
+					break;
+				}
+
 				iob->setResult(ev[i].result);
 			}
+		}
+	}
+
+	ACTOR static Future<Void> histogramLogger(double interval) {
+		state double currentTime;
+		loop {
+			currentTime = now();
+			wait(delay(interval));
+			double elapsed = now() - currentTime;
+			auto& metrics = g_asyncFileKAIOMetrics;
+			metrics.readLatencyDist->writeToLog(elapsed);
+			metrics.writeLatencyDist->writeToLog(elapsed);
+			metrics.syncLatencyDist->writeToLog(elapsed);
 		}
 	}
 };

@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@
 
 #ifndef FDBCLIENT_MULTIVERSIONTRANSACTION_H
 #define FDBCLIENT_MULTIVERSIONTRANSACTION_H
+#include "flow/ProtocolVersion.h"
 #pragma once
 
 #include "bindings/c/foundationdb/fdb_c_options.g.h"
@@ -95,8 +96,12 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 		void* userContext;
 
 		// Returns a unique id for the load. Asynchronous to support queueing multiple in parallel.
-		int64_t (
-		    *start_load_f)(const char* filename, int filenameLength, int64_t offset, int64_t length, void* context);
+		int64_t (*start_load_f)(const char* filename,
+		                        int filenameLength,
+		                        int64_t offset,
+		                        int64_t length,
+		                        int64_t fullFileLength,
+		                        void* context);
 
 		// Returns data for the load. Pass the loadId returned by start_load_f
 		uint8_t* (*get_load_f)(int64_t loadId, void* context);
@@ -107,6 +112,9 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 		// set this to true for testing if you don't want to read the granule files, just
 		// do the request to the blob workers
 		fdb_bool_t debugNoMaterialize;
+
+		// number of granules to load in parallel (default 1)
+		int granuleParallelism;
 	} FDBReadBlobGranuleContext;
 
 	typedef void (*FDBCallback)(FDBFuture* future, void* callback_parameter);
@@ -142,6 +150,9 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                     int uidLength,
 	                                     uint8_t const* snapshotCommmand,
 	                                     int snapshotCommandLength);
+	FDBFuture* (*databaseCreateSharedState)(FDBDatabase* database);
+	void (*databaseSetSharedState)(FDBDatabase* database, DatabaseSharedState* p);
+
 	double (*databaseGetMainThreadBusyness)(FDBDatabase* database);
 	FDBFuture* (*databaseGetServerProtocol)(FDBDatabase* database, uint64_t expectedVersion);
 
@@ -278,6 +289,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                            FDBMappedKeyValue const** outKVM,
 	                                            int* outCount,
 	                                            fdb_bool_t* outMore);
+	fdb_error_t (*futureGetSharedState)(FDBFuture* f, DatabaseSharedState** outPtr);
 	fdb_error_t (*futureSetCallback)(FDBFuture* f, FDBCallback callback, void* callback_parameter);
 	void (*futureCancel)(FDBFuture* f);
 	void (*futureDestroy)(FDBFuture* f);
@@ -425,6 +437,9 @@ public:
 	ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration) override;
 	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
 	ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) override;
+
+	ThreadFuture<DatabaseSharedState*> createSharedState() override;
+	void setSharedState(DatabaseSharedState* p) override;
 
 private:
 	const Reference<FdbCApi> api;
@@ -639,18 +654,30 @@ public:
 	void addref() override { ThreadSafeReferenceCounted<MultiVersionTenant>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<MultiVersionTenant>::delref(); }
 
-	Reference<ThreadSafeAsyncVar<Reference<ITenant>>> tenantVar;
-	const Standalone<StringRef> tenantName;
+	// A struct that manages the current connection state of the MultiVersionDatabase. This wraps the underlying
+	// IDatabase object that is currently interacting with the cluster.
+	struct TenantState : ThreadSafeReferenceCounted<TenantState> {
+		TenantState(Reference<MultiVersionDatabase> db, StringRef tenantName);
 
-private:
-	Reference<MultiVersionDatabase> db;
+		// Creates a new underlying tenant object whenever the database connection changes. This change is signaled
+		// to open transactions via an AsyncVar.
+		void updateTenant();
 
-	Mutex tenantLock;
-	ThreadFuture<Void> tenantUpdater;
+		// Cleans up local state to break reference cycles
+		void close();
 
-	// Creates a new underlying tenant object whenever the database connection changes. This change is signaled
-	// to open transactions via an AsyncVar.
-	void updateTenant();
+		Reference<ThreadSafeAsyncVar<Reference<ITenant>>> tenantVar;
+		const Standalone<StringRef> tenantName;
+
+		Reference<MultiVersionDatabase> db;
+
+		Mutex tenantLock;
+		ThreadFuture<Void> tenantUpdater;
+
+		bool closed;
+	};
+
+	Reference<TenantState> tenantState;
 };
 
 // An implementation of IDatabase that wraps a database created either locally or through a dynamically loaded
@@ -688,6 +715,9 @@ public:
 	ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration) override;
 	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
 	ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) override;
+
+	ThreadFuture<DatabaseSharedState*> createSharedState() override;
+	void setSharedState(DatabaseSharedState* p) override;
 
 	// private:
 
@@ -811,6 +841,8 @@ public:
 
 	bool callbackOnMainThread;
 	bool localClientDisabled;
+	ThreadFuture<Void> updateClusterSharedStateMap(std::string clusterFilePath, Reference<IDatabase> db);
+	void clearClusterSharedStateMapEntry(std::string clusterFilePath);
 
 	static bool apiVersionAtLeast(int minVersion);
 
@@ -834,6 +866,9 @@ private:
 	Reference<ClientInfo> localClient;
 	std::map<std::string, ClientDesc> externalClientDescriptions;
 	std::map<std::string, std::vector<Reference<ClientInfo>>> externalClients;
+	// Map of clusterFilePath -> DatabaseSharedState pointer Future
+	// Upon cluster version upgrade, clear the map entry for that cluster
+	std::map<std::string, ThreadFuture<DatabaseSharedState*>> clusterSharedStateMap;
 
 	bool networkStartSetup;
 	volatile bool networkSetup;

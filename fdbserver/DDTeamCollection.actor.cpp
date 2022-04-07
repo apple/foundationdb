@@ -23,6 +23,10 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 FDB_DEFINE_BOOLEAN_PARAM(IsPrimary);
+FDB_DEFINE_BOOLEAN_PARAM(IsInitialTeam);
+FDB_DEFINE_BOOLEAN_PARAM(IsRedundantTeam);
+FDB_DEFINE_BOOLEAN_PARAM(IsBadTeam);
+FDB_DEFINE_BOOLEAN_PARAM(WaitWiggle);
 
 namespace {
 
@@ -414,7 +418,7 @@ public:
 						if (servers.size() == self->configuration.storageTeamSize ||
 						    self->satisfiesPolicy(servers, self->configuration.storageTeamSize)) {
 							servers.resize(self->configuration.storageTeamSize);
-							self->addTeam(servers, true);
+							self->addTeam(servers, IsInitialTeam::True);
 							// self->traceTeamCollectionInfo(); // Trace at the end of the function
 						} else {
 							tempSet->clear();
@@ -432,7 +436,7 @@ public:
 								serverIds.push_back(*tempMap->getObject(it));
 							}
 							std::sort(serverIds.begin(), serverIds.end());
-							self->addTeam(serverIds.begin(), serverIds.end(), true);
+							self->addTeam(serverIds.begin(), serverIds.end(), IsInitialTeam::True);
 						}
 					} else {
 						serverIds.clear();
@@ -481,7 +485,7 @@ public:
 		state std::set<std::vector<UID>>::iterator teamIterEnd =
 		    self->primary ? initTeams->primaryTeams.end() : initTeams->remoteTeams.end();
 		for (; teamIter != teamIterEnd; ++teamIter) {
-			self->addTeam(teamIter->begin(), teamIter->end(), true);
+			self->addTeam(teamIter->begin(), teamIter->end(), IsInitialTeam::True);
 			wait(yield());
 		}
 
@@ -626,8 +630,8 @@ public:
 	// A badTeam can be unhealthy or just a redundantTeam removed by machineTeamRemover() or serverTeamRemover()
 	ACTOR static Future<Void> teamTracker(DDTeamCollection* self,
 	                                      Reference<TCTeamInfo> team,
-	                                      bool badTeam,
-	                                      bool redundantTeam) {
+	                                      IsBadTeam badTeam,
+	                                      IsRedundantTeam redundantTeam) {
 		state int lastServersLeft = team->size();
 		state bool lastAnyUndesired = false;
 		state bool lastAnyWigglingServer = false;
@@ -1286,7 +1290,7 @@ public:
 							bool addedNewBadTeam = false;
 							for (auto it : newBadTeams) {
 								if (self->removeTeam(it)) {
-									self->addTeam(it->getServers(), true);
+									self->addTeam(it->getServers(), IsInitialTeam::True);
 									addedNewBadTeam = true;
 								}
 							}
@@ -1377,7 +1381,10 @@ public:
 			bool foundSSToRemove = false;
 
 			for (auto& server : self->server_info) {
-				if (!server.second->isCorrectStoreType(self->configuration.storageServerStoreType)) {
+				// If this server isn't the right storage type and its wrong-type trigger has not yet been set
+				// then set it if we're in aggressive mode and log its presence either way.
+				if (!server.second->isCorrectStoreType(self->configuration.storageServerStoreType) &&
+				    !server.second->wrongStoreTypeToRemove.get()) {
 					// Server may be removed due to failure while the wrongStoreTypeToRemove is sent to the
 					// storageServerTracker. This race may cause the server to be removed before react to
 					// wrongStoreTypeToRemove
@@ -1390,12 +1397,16 @@ public:
 					TraceEvent("WrongStoreTypeRemover", self->distributorId)
 					    .detail("Server", server.first)
 					    .detail("StoreType", server.second->getStoreType())
-					    .detail("ConfiguredStoreType", self->configuration.storageServerStoreType);
-					break;
+					    .detail("ConfiguredStoreType", self->configuration.storageServerStoreType)
+					    .detail("RemovingNow",
+					            self->configuration.storageMigrationType == StorageMigrationType::AGGRESSIVE);
 				}
 			}
 
-			if (!foundSSToRemove) {
+			// Stop if no incorrect storage types were found, or if we're not in aggressive mode and can't act on any
+			// found. Aggressive mode is checked at this location so that in non-aggressive mode the loop will execute
+			// once and log any incorrect storage types found.
+			if (!foundSSToRemove || self->configuration.storageMigrationType != StorageMigrationType::AGGRESSIVE) {
 				break;
 			}
 		}
@@ -1405,7 +1416,7 @@ public:
 
 	// NOTE: this actor returns when the cluster is healthy and stable (no server is expected to be removed in a period)
 	// processingWiggle and processingUnhealthy indicate that some servers are going to be removed.
-	ACTOR static Future<Void> waitUntilHealthy(DDTeamCollection const* self, double extraDelay, bool waitWiggle) {
+	ACTOR static Future<Void> waitUntilHealthy(DDTeamCollection const* self, double extraDelay, WaitWiggle waitWiggle) {
 		state int waitCount = 0;
 		loop {
 			while (self->zeroHealthyTeams->get() || self->processingUnhealthy->get() ||
@@ -1701,7 +1712,7 @@ public:
 					// removeTeam() has side effect of swapping the last element to the current pos
 					// in the serverTeams vector in the machine team.
 					--teamIndex;
-					self->addTeam(team->getServers(), true, true);
+					self->addTeam(team->getServers(), IsInitialTeam::True, IsRedundantTeam::True);
 					TEST(true); // Removed machine team
 				}
 
@@ -1785,7 +1796,7 @@ public:
 				// The team will be marked as a bad team
 				bool foundTeam = self->removeTeam(st);
 				ASSERT(foundTeam);
-				self->addTeam(st->getServers(), true, true);
+				self->addTeam(st->getServers(), IsInitialTeam::True, IsRedundantTeam::True);
 				TEST(true); // Marked team as a bad team
 
 				self->doBuildTeams = true;
@@ -3359,8 +3370,10 @@ Future<Void> DDTeamCollection::buildTeams() {
 	return DDTeamCollectionImpl::buildTeams(this);
 }
 
-Future<Void> DDTeamCollection::teamTracker(Reference<TCTeamInfo> team, bool badTeam, bool redundantTeam) {
-	return DDTeamCollectionImpl::teamTracker(this, team, badTeam, redundantTeam);
+Future<Void> DDTeamCollection::teamTracker(Reference<TCTeamInfo> team,
+                                           IsBadTeam isBadTeam,
+                                           IsRedundantTeam isRedundantTeam) {
+	return DDTeamCollectionImpl::teamTracker(this, team, isBadTeam, isRedundantTeam);
 }
 
 Future<Void> DDTeamCollection::storageServerTracker(
@@ -3377,7 +3390,7 @@ Future<Void> DDTeamCollection::removeWrongStoreType() {
 	return DDTeamCollectionImpl::removeWrongStoreType(this);
 }
 
-Future<Void> DDTeamCollection::waitUntilHealthy(double extraDelay, bool waitWiggle) const {
+Future<Void> DDTeamCollection::waitUntilHealthy(double extraDelay, WaitWiggle waitWiggle) const {
 	return DDTeamCollectionImpl::waitUntilHealthy(this, extraDelay, waitWiggle);
 }
 
@@ -3805,13 +3818,13 @@ int DDTeamCollection::overlappingMachineMembers(std::vector<Standalone<StringRef
 }
 
 void DDTeamCollection::addTeam(const std::vector<Reference<TCServerInfo>>& newTeamServers,
-                               bool isInitialTeam,
-                               bool redundantTeam) {
+                               IsInitialTeam isInitialTeam,
+                               IsRedundantTeam redundantTeam) {
 	auto teamInfo = makeReference<TCTeamInfo>(newTeamServers);
 
 	// Move satisfiesPolicy to the end for performance benefit
-	bool badTeam =
-	    redundantTeam || teamInfo->size() != configuration.storageTeamSize || !satisfiesPolicy(teamInfo->getServers());
+	auto badTeam = IsBadTeam{ redundantTeam || teamInfo->size() != configuration.storageTeamSize ||
+		                      !satisfiesPolicy(teamInfo->getServers()) };
 
 	teamInfo->tracker = teamTracker(teamInfo, badTeam, redundantTeam);
 	// ASSERT( teamInfo->serverIDs.size() > 0 ); //team can be empty at DB initialization
@@ -4556,7 +4569,7 @@ int DDTeamCollection::addTeamsBestOf(int teamsToBuild, int desiredTeams, int max
 		}
 
 		// Step 4: Add the server team
-		addTeam(bestServerTeam.begin(), bestServerTeam.end(), false);
+		addTeam(bestServerTeam.begin(), bestServerTeam.end(), IsInitialTeam::False);
 		addedTeams++;
 	}
 
@@ -5257,8 +5270,8 @@ public:
 		// state int targetTeamsPerServer = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (teamSize + 1) / 2;
 		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
 
-		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
-		collection->addTeam(std::set<UID>({ UID(1, 0), UID(3, 0), UID(4, 0) }), true);
+		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), IsInitialTeam::True);
+		collection->addTeam(std::set<UID>({ UID(1, 0), UID(3, 0), UID(4, 0) }), IsInitialTeam::True);
 
 		state int result = collection->addTeamsBestOf(8, desiredTeams, maxTeams);
 
@@ -5287,8 +5300,8 @@ public:
 		state int teamSize = 3;
 		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
 
-		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
-		collection->addTeam(std::set<UID>({ UID(1, 0), UID(3, 0), UID(4, 0) }), true);
+		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), IsInitialTeam::True);
+		collection->addTeam(std::set<UID>({ UID(1, 0), UID(3, 0), UID(4, 0) }), IsInitialTeam::True);
 
 		collection->addBestMachineTeams(10);
 		int result = collection->addTeamsBestOf(10, desiredTeams, maxTeams);
@@ -5333,8 +5346,8 @@ public:
 		high_avail.available.bytes = 800 * 1024 * 1024;
 		high_avail.load.bytes = 90 * 1024 * 1024;
 
-		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
-		collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), true);
+		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), IsInitialTeam::True);
+		collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), IsInitialTeam::True);
 		collection->disableBuildingTeams();
 		collection->setCheckTeamDelay();
 
@@ -5389,8 +5402,8 @@ public:
 		high_avail.available.bytes = 800 * 1024 * 1024;
 		high_avail.load.bytes = 90 * 1024 * 1024;
 
-		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
-		collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), true);
+		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), IsInitialTeam::True);
+		collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), IsInitialTeam::True);
 		collection->disableBuildingTeams();
 		collection->setCheckTeamDelay();
 
@@ -5447,8 +5460,8 @@ public:
 		high_avail.available.bytes = 800 * 1024 * 1024;
 		high_avail.load.bytes = 90 * 1024 * 1024;
 
-		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
-		collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), true);
+		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), IsInitialTeam::True);
+		collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), IsInitialTeam::True);
 		collection->disableBuildingTeams();
 		collection->setCheckTeamDelay();
 
@@ -5502,8 +5515,8 @@ public:
 		high_avail.available.bytes = 800 * 1024 * 1024;
 		high_avail.load.bytes = 90 * 1024 * 1024;
 
-		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
-		collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), true);
+		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), IsInitialTeam::True);
+		collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), IsInitialTeam::True);
 		collection->disableBuildingTeams();
 		collection->setCheckTeamDelay();
 
@@ -5556,8 +5569,8 @@ public:
 		high_avail.available.bytes = 800 * 1024 * 1024;
 		high_avail.load.bytes = 90 * 1024 * 1024;
 
-		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
-		collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), true);
+		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), IsInitialTeam::True);
+		collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), IsInitialTeam::True);
 		collection->disableBuildingTeams();
 		collection->setCheckTeamDelay();
 
@@ -5615,9 +5628,9 @@ public:
 		high_avail.available.bytes = 800 * 1024 * 1024;
 		high_avail.load.bytes = 90 * 1024 * 1024;
 
-		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
-		collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), true);
-		collection->addTeam(std::set<UID>({ UID(3, 0), UID(4, 0), UID(5, 0) }), true);
+		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), IsInitialTeam::True);
+		collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), IsInitialTeam::True);
+		collection->addTeam(std::set<UID>({ UID(3, 0), UID(4, 0), UID(5, 0) }), IsInitialTeam::True);
 		collection->disableBuildingTeams();
 		collection->setCheckTeamDelay();
 
@@ -5668,8 +5681,8 @@ public:
 		high_avail.available.bytes = 800 * 1024 * 1024;
 		high_avail.load.bytes = 90 * 1024 * 1024;
 
-		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
-		collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), true);
+		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), IsInitialTeam::True);
+		collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), IsInitialTeam::True);
 		collection->disableBuildingTeams();
 		collection->setCheckTeamDelay();
 

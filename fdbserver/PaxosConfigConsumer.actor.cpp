@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -40,6 +40,9 @@ struct QuorumVersion {
 };
 
 class GetCommittedVersionQuorum {
+	// Set to the <secondToLastCommitted, lastCommitted> versions a quorum of
+	// ConfigNodes agree on, otherwise unset.
+	Promise<QuorumVersion> quorumVersion;
 	std::vector<Future<Void>> actors;
 	std::vector<ConfigFollowerInterface> cfis;
 	std::map<Version, std::vector<ConfigFollowerInterface>> replies;
@@ -52,9 +55,6 @@ class GetCommittedVersionQuorum {
 	Version lastSeenVersion;
 	size_t totalRepliesReceived{ 0 };
 	size_t maxAgreement{ 0 };
-	// Set to the <secondToLastCommitted, lastCommitted> versions a quorum of
-	// ConfigNodes agree on, otherwise unset.
-	Promise<QuorumVersion> quorumVersion;
 	// Stores the largest committed version out of all responses.
 	Version largestCommitted{ 0 };
 

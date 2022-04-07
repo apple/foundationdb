@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -156,6 +156,7 @@ struct BackupFileList {
 struct BackupDescription {
 	BackupDescription() : snapshotBytes(0) {}
 	std::string url;
+	Optional<std::string> proxy;
 	std::vector<KeyspaceSnapshotFile> snapshots;
 	int64_t snapshotBytes;
 	// The version before which everything has been deleted by an expire
@@ -294,11 +295,14 @@ public:
 
 	// Get an IBackupContainer based on a container spec string
 	static Reference<IBackupContainer> openContainer(const std::string& url,
-	                                                 const Optional<std::string>& encryptionKeyFileName = {});
+	                                                 const Optional<std::string>& proxy,
+	                                                 const Optional<std::string>& encryptionKeyFileName);
 	static std::vector<std::string> getURLFormats();
-	static Future<std::vector<std::string>> listContainers(const std::string& baseURL);
+	static Future<std::vector<std::string>> listContainers(const std::string& baseURL,
+	                                                       const Optional<std::string>& proxy);
 
 	std::string const& getURL() const { return URL; }
+	Optional<std::string> const& getProxy() const { return proxy; }
 	Optional<std::string> const& getEncryptionKeyFileName() const { return encryptionKeyFileName; }
 
 	static std::string lastOpenError;
@@ -306,6 +310,7 @@ public:
 	// TODO: change the following back to `private` once blob obj access is refactored
 protected:
 	std::string URL;
+	Optional<std::string> proxy;
 	Optional<std::string> encryptionKeyFileName;
 };
 

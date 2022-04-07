@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -297,7 +297,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					wait(::success(self->checkForExtraDataStores(cx, self)));
 
 					// Check blob workers are operating as expected
-					if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
+					if (configuration.blobGranulesEnabled) {
 						bool blobWorkersCorrect = wait(self->checkBlobWorkers(cx, configuration, self));
 						if (!blobWorkersCorrect)
 							self->testFailure("Blob workers incorrect");
@@ -2003,25 +2003,24 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		int numBlobWorkerProcesses = 0;
 		for (const auto& worker : workers) {
 			NetworkAddress addr = worker.interf.stableAddress();
+			bool inCCDc = worker.interf.locality.dcId() == ccDcId;
 			if (!configuration.isExcludedServer(worker.interf.addresses())) {
 				if (worker.processClass == ProcessClass::BlobWorkerClass) {
 					numBlobWorkerProcesses++;
 
-					// this is a worker with processClass == BWClass, so should have exactly one blob worker
-					if (blobWorkersByAddr[addr] == 0) {
-						TraceEvent("ConsistencyCheck_NoBWsOnBWClass")
+					// this is a worker with processClass == BWClass, so should have exactly one blob worker if it's in
+					// the same DC
+					int desiredBlobWorkersOnAddr = inCCDc ? 1 : 0;
+
+					if (blobWorkersByAddr[addr] != desiredBlobWorkersOnAddr) {
+						TraceEvent("ConsistencyCheck_WrongBWCountOnBWClass")
 						    .detail("Address", addr)
-						    .detail("NumBlobWorkersOnAddr", blobWorkersByAddr[addr]);
+						    .detail("NumBlobWorkersOnAddr", blobWorkersByAddr[addr])
+						    .detail("DesiredBlobWorkersOnAddr", desiredBlobWorkersOnAddr)
+						    .detail("BwDcId", worker.interf.locality.dcId())
+						    .detail("CcDcId", ccDcId);
 						return false;
 					}
-					/* TODO: replace above code with this once blob manager recovery is handled
-					if (blobWorkersByAddr[addr] != 1) {
-					    TraceEvent("ConsistencyCheck_NoBWOrManyBWsOnBWClass")
-					        .detail("Address", addr)
-					        .detail("NumBlobWorkersOnAddr", blobWorkersByAddr[addr]);
-					    return false;
-					}
-					*/
 				} else {
 					// this is a worker with processClass != BWClass, so there should be no BWs on it
 					if (blobWorkersByAddr[addr] > 0) {
@@ -2359,7 +2358,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		}
 
 		// Check BlobManager
-		if (CLIENT_KNOBS->ENABLE_BLOB_GRANULES && db.blobManager.present() &&
+		if (config.blobGranulesEnabled && db.blobManager.present() &&
 		    (!nonExcludedWorkerProcessMap.count(db.blobManager.get().address()) ||
 		     nonExcludedWorkerProcessMap[db.blobManager.get().address()].processClass.machineClassFitness(
 		         ProcessClass::BlobManager) > fitnessLowerBound)) {
@@ -2379,9 +2378,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		    (!nonExcludedWorkerProcessMap.count(db.encryptKeyProxy.get().address()) ||
 		     nonExcludedWorkerProcessMap[db.encryptKeyProxy.get().address()].processClass.machineClassFitness(
 		         ProcessClass::EncryptKeyProxy) > fitnessLowerBound)) {
-			TraceEvent("ConsistencyCheck_EncyrptKeyProxyNotBest")
+			TraceEvent("ConsistencyCheck_EncryptKeyProxyNotBest")
 			    .detail("BestEncryptKeyProxyFitness", fitnessLowerBound)
-			    .detail("ExistingEncyrptKeyProxyFitness",
+			    .detail("ExistingEncryptKeyProxyFitness",
 			            nonExcludedWorkerProcessMap.count(db.encryptKeyProxy.get().address())
 			                ? nonExcludedWorkerProcessMap[db.encryptKeyProxy.get().address()]
 			                      .processClass.machineClassFitness(ProcessClass::EncryptKeyProxy)

@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@
 #include "fdbclient/versions.h"
 #include "fdbclient/GenericManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "flow/ProtocolVersion.h"
 
 // Users of ThreadSafeTransaction might share Reference<ThreadSafe...> between different threads as long as they don't
 // call addRef (e.g. C API follows this). Therefore, it is unsafe to call (explicitly or implicitly) this->addRef in any
@@ -99,6 +100,16 @@ ThreadFuture<Void> ThreadSafeDatabase::createSnapshot(const StringRef& uid, cons
 	Key snapUID = uid;
 	Key cmd = snapshot_command;
 	return onMainThread([db, snapUID, cmd]() -> Future<Void> { return db->createSnapshot(snapUID, cmd); });
+}
+
+ThreadFuture<DatabaseSharedState*> ThreadSafeDatabase::createSharedState() {
+	DatabaseContext* db = this->db;
+	return onMainThread([db]() -> Future<DatabaseSharedState*> { return db->initSharedState(); });
+}
+
+void ThreadSafeDatabase::setSharedState(DatabaseSharedState* p) {
+	DatabaseContext* db = this->db;
+	onMainThreadVoid([db, p]() { db->setSharedState(p); }, nullptr);
 }
 
 // Return the main network thread busyness
@@ -319,9 +330,6 @@ ThreadResult<RangeResult> ThreadSafeTransaction::readBlobGranules(const KeyRange
                                                                   Version beginVersion,
                                                                   Optional<Version> readVersion,
                                                                   ReadBlobGranuleContext granule_context) {
-	// In V1 of api this is required, field is just for forward compatibility
-	ASSERT(beginVersion == 0);
-
 	// FIXME: prevent from calling this from another main thread!
 
 	ISingleThreadTransaction* tr = this->tr;

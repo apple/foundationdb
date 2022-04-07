@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -47,9 +47,13 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 static NetworkAddressList g_currentDeliveryPeerAddress = NetworkAddressList();
+static Future<Void> g_currentDeliveryPeerDisconnect;
 
 constexpr int PACKET_LEN_WIDTH = sizeof(uint32_t);
 const uint64_t TOKEN_STREAM_FLAG = 1;
+
+FDB_BOOLEAN_PARAM(InReadSocket);
+FDB_BOOLEAN_PARAM(IsStableConnection);
 
 class EndpointMap : NonCopyable {
 public:
@@ -594,28 +598,20 @@ ACTOR Future<Void> connectionWriter(Reference<Peer> self, Reference<IConnection>
 	}
 }
 
-ACTOR Future<Void> delayedHealthUpdate(NetworkAddress address) {
+ACTOR Future<Void> delayedHealthUpdate(NetworkAddress address, bool* tooManyConnectionsClosed) {
 	state double start = now();
-	state bool delayed = false;
 	loop {
 		if (FLOW_KNOBS->HEALTH_MONITOR_MARK_FAILED_UNSTABLE_CONNECTIONS &&
 		    FlowTransport::transport().healthMonitor()->tooManyConnectionsClosed(address) && address.isPublic()) {
-			if (!delayed) {
-				TraceEvent("TooManyConnectionsClosedMarkFailed")
-				    .detail("Dest", address)
-				    .detail("StartTime", start)
-				    .detail("ClosedCount", FlowTransport::transport().healthMonitor()->closedConnectionsCount(address));
-				IFailureMonitor::failureMonitor().setStatus(address, FailureStatus(true));
-			}
-			delayed = true;
 			wait(delayJittered(FLOW_KNOBS->MAX_RECONNECTION_TIME * 2.0));
 		} else {
-			if (delayed) {
+			if (*tooManyConnectionsClosed) {
 				TraceEvent("TooManyConnectionsClosedMarkAvailable")
 				    .detail("Dest", address)
 				    .detail("StartTime", start)
 				    .detail("TimeElapsed", now() - start)
 				    .detail("ClosedCount", FlowTransport::transport().healthMonitor()->closedConnectionsCount(address));
+				*tooManyConnectionsClosed = false;
 			}
 			IFailureMonitor::failureMonitor().setStatus(address, FailureStatus(false));
 			break;
@@ -635,6 +631,7 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 	state Future<Void> delayedHealthUpdateF;
 	state Optional<double> firstConnFailedTime = Optional<double>();
 	state int retryConnect = false;
+	state bool tooManyConnectionsClosed = false;
 
 	loop {
 		try {
@@ -684,7 +681,8 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 								IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(false));
 							}
 							if (self->unsent.empty()) {
-								delayedHealthUpdateF = delayedHealthUpdate(self->destination);
+								delayedHealthUpdateF =
+								    delayedHealthUpdate(self->destination, &tooManyConnectionsClosed);
 								choose {
 									when(wait(delayedHealthUpdateF)) {
 										conn->close();
@@ -724,7 +722,7 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 			try {
 				self->transport->countConnEstablished++;
 				if (!delayedHealthUpdateF.isValid())
-					delayedHealthUpdateF = delayedHealthUpdate(self->destination);
+					delayedHealthUpdateF = delayedHealthUpdate(self->destination, &tooManyConnectionsClosed);
 				wait(connectionWriter(self, conn) || reader || connectionMonitor(self) ||
 				     self->resetConnection.onTrigger());
 				TraceEvent("ConnectionReset", conn ? conn->getDebugID() : UID())
@@ -810,6 +808,17 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 			if (conn) {
 				if (self->destination.isPublic() && e.code() == error_code_connection_failed) {
 					FlowTransport::transport().healthMonitor()->reportPeerClosed(self->destination);
+					if (FLOW_KNOBS->HEALTH_MONITOR_MARK_FAILED_UNSTABLE_CONNECTIONS &&
+					    FlowTransport::transport().healthMonitor()->tooManyConnectionsClosed(self->destination) &&
+					    self->destination.isPublic()) {
+						TraceEvent("TooManyConnectionsClosedMarkFailed")
+						    .detail("Dest", self->destination)
+						    .detail(
+						        "ClosedCount",
+						        FlowTransport::transport().healthMonitor()->closedConnectionsCount(self->destination));
+						tooManyConnectionsClosed = true;
+						IFailureMonitor::failureMonitor().setStatus(self->destination, FailureStatus(true));
+					}
 				}
 
 				conn->close();
@@ -825,6 +834,9 @@ ACTOR Future<Void> connectionKeeper(Reference<Peer> self,
 
 			// Clients might send more packets in response, which needs to go out on the next connection
 			IFailureMonitor::failureMonitor().notifyDisconnect(self->destination);
+			Promise<Void> disconnect = self->disconnect;
+			self->disconnect = Promise<Void>();
+			disconnect.send(Void());
 
 			if (e.code() == error_code_actor_cancelled)
 				throw;
@@ -971,7 +983,8 @@ ACTOR static void deliver(TransportData* self,
                           NetworkAddress peerAddress,
                           Reference<AuthorizedTenants> authorizedTenants,
                           std::shared_ptr<ContextVariableMap> cvm,
-                          bool inReadSocket) {
+                          InReadSocket inReadSocket,
+                          Future<Void> disconnect) {
 	// We want to run the task at the right priority. If the priority is higher than the current priority (which is
 	// ReadSocket) we can just upgrade. Otherwise we'll context switch so that we don't block other tasks that might run
 	// with a higher priority. ReplyPromiseStream needs to guarantee that messages are received in the order they were
@@ -990,14 +1003,17 @@ ACTOR static void deliver(TransportData* self,
 		}
 		try {
 			g_currentDeliveryPeerAddress = destination.addresses;
+			g_currentDeliveryPeerDisconnect = disconnect;
 			StringRef data = reader.arenaReadAll();
 			ASSERT(data.size() > 8);
 			ArenaObjectReader objReader(reader.arena(), reader.arenaReadAll(), AssumeVersion(reader.protocolVersion()));
 			objReader.setContextVariableMap(cvm);
 			receiver->receive(objReader);
 			g_currentDeliveryPeerAddress = { NetworkAddress() };
+			g_currentDeliveryPeerDisconnect = Future<Void>();
 		} catch (Error& e) {
 			g_currentDeliveryPeerAddress = { NetworkAddress() };
+			g_currentDeliveryPeerDisconnect = Future<Void>();
 			TraceEvent(SevError, "ReceiverError")
 			    .error(e)
 			    .detail("Token", destination.token.toString())
@@ -1046,7 +1062,9 @@ static void scanPackets(TransportData* transport,
                         NetworkAddress const& peerAddress,
                         Reference<AuthorizedTenants> const& authorizedTenants,
                         std::shared_ptr<ContextVariableMap> cvm,
-                        ProtocolVersion peerProtocolVersion) {
+                        ProtocolVersion peerProtocolVersion,
+                        Future<Void> disconnect,
+                        IsStableConnection isStableConnection) {
 	// Find each complete packet in the given byte range and queue a ready task to deliver it.
 	// Remove the complete packets from the range by increasing unprocessed_begin.
 	// There won't be more than 64K of data plus one packet, so this shouldn't take a long time.
@@ -1085,7 +1103,7 @@ static void scanPackets(TransportData* transport,
 
 		if (checksumEnabled) {
 			bool isBuggifyEnabled = false;
-			if (g_network->isSimulated() &&
+			if (g_network->isSimulated() && !isStableConnection &&
 			    g_network->now() - g_simulator.lastConnectionFailure > g_simulator.connectionFailuresDisableDuration &&
 			    BUGGIFY_WITH_PROB(0.0001)) {
 				g_simulator.lastConnectionFailure = g_network->now();
@@ -1112,7 +1130,8 @@ static void scanPackets(TransportData* transport,
 				if (isBuggifyEnabled) {
 					TraceEvent(SevInfo, "ChecksumMismatchExp")
 					    .detail("PacketChecksum", packetChecksum)
-					    .detail("CalculatedChecksum", calculatedChecksum);
+					    .detail("CalculatedChecksum", calculatedChecksum)
+					    .detail("PeerAddress", peerAddress.toString());
 				} else {
 					TraceEvent(SevWarnAlways, "ChecksumMismatchUnexp")
 					    .detail("PacketChecksum", packetChecksum)
@@ -1166,7 +1185,8 @@ static void scanPackets(TransportData* transport,
 			        peerAddress,
 			        authorizedTenants,
 			        cvm,
-			        true);
+			        InReadSocket::True,
+			        disconnect);
 		}
 
 		unprocessed_begin = p = p + packetLen;
@@ -1374,7 +1394,9 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 						            peerAddress,
 						            authorizedTenants,
 						            cvm,
-						            peerProtocolVersion);
+						            peerProtocolVersion,
+						            peer->disconnect.getFuture(),
+						            IsStableConnection(g_network->isSimulated() && conn->isStableConnection()));
 					} else {
 						unprocessed_begin = unprocessed_end;
 						peer->resetPing.trigger();
@@ -1433,6 +1455,11 @@ ACTOR static Future<Void> listen(TransportData* self, NetworkAddress listenAddr)
 	state ActorCollectionNoErrors
 	    incoming; // Actors monitoring incoming connections that haven't yet been associated with a peer
 	state Reference<IListener> listener = INetworkConnections::net()->listen(listenAddr);
+	if (!g_network->isSimulated() && self->localAddresses.address.port == 0) {
+		TraceEvent(SevInfo, "UpdatingListenAddress")
+		    .detail("AssignedListenAddress", listener->getListenAddress().toString());
+		self->localAddresses.address = listener->getListenAddress();
+	}
 	state uint64_t connectionCount = 0;
 	try {
 		loop {
@@ -1575,6 +1602,10 @@ Endpoint FlowTransport::loadedEndpoint(const UID& token) {
 	return Endpoint(g_currentDeliveryPeerAddress, token);
 }
 
+Future<Void> FlowTransport::loadedDisconnect() {
+	return g_currentDeliveryPeerDisconnect;
+}
+
 void FlowTransport::addPeerReference(const Endpoint& endpoint, bool isStream) {
 	if (!isStream || !endpoint.getPrimaryAddress().isValid() || !endpoint.getPrimaryAddress().isPublic())
 		return;
@@ -1657,7 +1688,8 @@ static void sendLocal(TransportData* self, ISerializeSource const& what, const E
 		        NetworkAddress(),
 		        authorizedTenants,
 		        self->localCVM,
-		        false);
+		        InReadSocket::False,
+		        Never());
 	}
 }
 

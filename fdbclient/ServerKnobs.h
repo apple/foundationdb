@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -233,6 +233,14 @@ public:
 	double DD_FAILURE_TIME;
 	double DD_ZERO_HEALTHY_TEAM_DELAY;
 
+	// Run storage enginee on a child process on the same machine with storage process
+	bool REMOTE_KV_STORE;
+	// A delay to avoid race on file resources if the new kv store process started immediately after the previous kv
+	// store process died
+	double REMOTE_KV_STORE_INIT_DELAY;
+	// max waiting time for the remote kv store to initialize
+	double REMOTE_KV_STORE_MAX_INIT_DURATION;
+
 	// KeyValueStore SQLITE
 	int CLEAR_BUFFER_SIZE;
 	double READ_VALUE_TIME_ESTIMATE;
@@ -307,6 +315,7 @@ public:
 	int64_t ROCKSDB_CAN_COMMIT_COMPACT_BYTES_LIMIT;
 	int ROCKSDB_CAN_COMMIT_DELAY_ON_OVERLOAD;
 	int ROCKSDB_CAN_COMMIT_DELAY_TIMES_ON_OVERLOAD;
+	int64_t ROCKSDB_COMPACTION_READAHEAD_SIZE;
 
 	// Leader election
 	int MAX_NOTIFICATIONS;
@@ -469,6 +478,7 @@ public:
 	double RECRUITMENT_TIMEOUT;
 	int DBINFO_SEND_AMOUNT;
 	double DBINFO_BATCH_DELAY;
+	double SINGLETON_RECRUIT_BME_DELAY;
 
 	// Move Keys
 	double SHARD_READY_DELAY;
@@ -486,6 +496,7 @@ public:
 	double MIN_REBOOT_TIME;
 	double MAX_REBOOT_TIME;
 	std::string LOG_DIRECTORY;
+	std::string CONN_FILE;
 	int64_t SERVER_MEM_LIMIT;
 	double SYSTEM_MONITOR_FREQUENCY;
 
@@ -585,7 +596,9 @@ public:
 	int FETCH_KEYS_PARALLELISM_BYTES;
 	int FETCH_KEYS_PARALLELISM;
 	int FETCH_KEYS_LOWER_PRIORITY;
+	int FETCH_CHANGEFEED_PARALLELISM;
 	int BUGGIFY_BLOCK_BYTES;
+	int64_t STORAGE_RECOVERY_VERSION_LAG_LIMIT;
 	double STORAGE_DURABILITY_LAG_REJECT_THRESHOLD;
 	double STORAGE_DURABILITY_LAG_MIN_RATE;
 	int STORAGE_COMMIT_BYTES;
@@ -615,6 +628,8 @@ public:
 	double FETCH_KEYS_TOO_LONG_TIME_CRITERIA;
 	double MAX_STORAGE_COMMIT_TIME;
 	int64_t RANGESTREAM_LIMIT_BYTES;
+	int64_t CHANGEFEEDSTREAM_LIMIT_BYTES;
+	int64_t BLOBWORKERSTATUSSTREAM_LIMIT_BYTES;
 	bool ENABLE_CLEAR_RANGE_EAGER_READS;
 	bool QUICK_GET_VALUE_FALLBACK;
 	bool QUICK_GET_KEY_VALUES_FALLBACK;
@@ -645,6 +660,11 @@ public:
 	double PEER_LATENCY_DEGRADATION_PERCENTILE; // The percentile latency used to check peer health.
 	double PEER_LATENCY_DEGRADATION_THRESHOLD; // The latency threshold to consider a peer degraded.
 	double PEER_TIMEOUT_PERCENTAGE_DEGRADATION_THRESHOLD; // The percentage of timeout to consider a peer degraded.
+	int PEER_DEGRADATION_CONNECTION_FAILURE_COUNT; // The number of connection failures experienced during measurement
+	                                               // period to consider a peer degraded.
+	bool WORKER_HEALTH_REPORT_RECENT_DESTROYED_PEER; // When enabled, the worker's health monitor also report any recent
+	                                                 // destroyed peers who are part of the transaction system to
+	                                                 // cluster controller.
 
 	// Test harness
 	double WORKER_POLL_DELAY;
@@ -770,8 +790,9 @@ public:
 	// Cluster recovery
 	std::string CLUSTER_RECOVERY_EVENT_NAME_PREFIX;
 
-	// encrypt key proxy
+	// Encryption
 	bool ENABLE_ENCRYPTION;
+	std::string ENCRYPTION_MODE;
 
 	// blob granule stuff
 	// FIXME: configure url with database configuration instead of knob eventually
@@ -780,8 +801,22 @@ public:
 	int BG_SNAPSHOT_FILE_TARGET_BYTES;
 	int BG_DELTA_FILE_TARGET_BYTES;
 	int BG_DELTA_BYTES_BEFORE_COMPACT;
+	int BG_MAX_SPLIT_FANOUT;
+	int BG_HOT_SNAPSHOT_VERSIONS;
+	int BG_CONSISTENCY_CHECK_ENABLED;
+	int BG_CONSISTENCY_CHECK_TARGET_SPEED_KB;
 
+	int BLOB_WORKER_INITIAL_SNAPSHOT_PARALLELISM;
 	double BLOB_WORKER_TIMEOUT; // Blob Manager's reaction time to a blob worker failure
+	double BLOB_WORKER_REQUEST_TIMEOUT; // Blob Worker's server-side request timeout
+	double BLOB_WORKERLIST_FETCH_INTERVAL;
+	double BLOB_WORKER_BATCH_GRV_INTERVAL;
+
+	double BLOB_MANAGER_STATUS_EXP_BACKOFF_MIN;
+	double BLOB_MANAGER_STATUS_EXP_BACKOFF_MAX;
+	double BLOB_MANAGER_STATUS_EXP_BACKOFF_EXPONENT;
+	double BGCC_TIMEOUT;
+	double BGCC_MIN_INTERVAL;
 
 	ServerKnobs(Randomize, ClientKnobs*, IsSimulated);
 	void initialize(Randomize, ClientKnobs*, IsSimulated);

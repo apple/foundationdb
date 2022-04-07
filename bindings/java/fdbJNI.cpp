@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -663,6 +663,34 @@ JNIEXPORT jbyteArray JNICALL Java_com_apple_foundationdb_FutureKey_FutureKey_1ge
 	return result;
 }
 
+JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBDatabase_Database_1openTenant(JNIEnv* jenv,
+                                                                                     jobject,
+                                                                                     jlong dbPtr,
+                                                                                     jbyteArray tenantNameBytes) {
+	if (!dbPtr || !tenantNameBytes) {
+		throwParamNotNull(jenv);
+		return 0;
+	}
+	FDBDatabase* database = (FDBDatabase*)dbPtr;
+	FDBTenant* tenant;
+
+	uint8_t* barr = (uint8_t*)jenv->GetByteArrayElements(tenantNameBytes, JNI_NULL);
+	if (!barr) {
+		if (!jenv->ExceptionOccurred())
+			throwRuntimeEx(jenv, "Error getting handle to native resources");
+		return 0;
+	}
+
+	fdb_error_t err = fdb_database_open_tenant(database, barr, jenv->GetArrayLength(tenantNameBytes), &tenant);
+	if (err) {
+		safeThrow(jenv, getThrowable(jenv, err));
+		return 0;
+	}
+
+	jenv->ReleaseByteArrayElements(tenantNameBytes, (jbyte*)barr, JNI_ABORT);
+	return (jlong)tenant;
+}
+
 JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBDatabase_Database_1createTransaction(JNIEnv* jenv,
                                                                                             jobject,
                                                                                             jlong dbPtr) {
@@ -762,6 +790,31 @@ JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDB_Database_1create(JNIEnv*
 	}
 
 	return (jlong)db;
+}
+
+JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTenant_Tenant_1createTransaction(JNIEnv* jenv,
+                                                                                        jobject,
+                                                                                        jlong tPtr) {
+	if (!tPtr) {
+		throwParamNotNull(jenv);
+		return 0;
+	}
+	FDBTenant* tenant = (FDBTenant*)tPtr;
+	FDBTransaction* tr;
+	fdb_error_t err = fdb_tenant_create_transaction(tenant, &tr);
+	if (err) {
+		safeThrow(jenv, getThrowable(jenv, err));
+		return 0;
+	}
+	return (jlong)tr;
+}
+
+JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDBTenant_Tenant_1dispose(JNIEnv* jenv, jobject, jlong tPtr) {
+	if (!tPtr) {
+		throwParamNotNull(jenv);
+		return;
+	}
+	fdb_tenant_destroy((FDBTenant*)tPtr);
 }
 
 JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1setVersion(JNIEnv* jenv,

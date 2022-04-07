@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2020 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -2704,16 +2704,23 @@ Future<Optional<std::string>> FailedLocalitiesRangeImpl::commit(ReadYourWritesTr
 }
 
 ACTOR Future<RangeResult> getTenantList(ReadYourWritesTransaction* ryw, KeyRangeRef kr, GetRangeLimits limitsHint) {
-	KeyRangeRef tenantRange =
-	    kr.removePrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)
-	        .removePrefix(TenantMapRangeImpl::submoduleRange.begin);
 	state KeyRef managementPrefix =
 	    kr.begin.substr(0,
 	                    SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin.size() +
 	                        TenantMapRangeImpl::submoduleRange.begin.size());
 
-	std::map<TenantName, TenantMapEntry> tenants = wait(ManagementAPI::listTenantsTransaction(
-	    &ryw->getTransaction(), tenantRange.begin, tenantRange.end, limitsHint.rows));
+	kr = kr.removePrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin);
+	TenantNameRef beginTenant = kr.begin.removePrefix(TenantMapRangeImpl::submoduleRange.begin);
+
+	TenantNameRef endTenant = kr.end;
+	if (endTenant.startsWith(TenantMapRangeImpl::submoduleRange.begin)) {
+		endTenant = endTenant.removePrefix(TenantMapRangeImpl::submoduleRange.begin);
+	} else {
+		endTenant = "\xff"_sr;
+	}
+
+	std::map<TenantName, TenantMapEntry> tenants =
+	    wait(ManagementAPI::listTenantsTransaction(&ryw->getTransaction(), beginTenant, endTenant, limitsHint.rows));
 
 	RangeResult results;
 	for (auto tenant : tenants) {
@@ -2783,7 +2790,7 @@ Future<Optional<std::string>> TenantMapRangeImpl::commit(ReadYourWritesTransacti
 				TenantNameRef endTenant = range.end().removePrefix(
 				    SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin);
 				if (endTenant.startsWith(submoduleRange.begin)) {
-					endTenant = endTenant.removePrefix(submoduleRange.end);
+					endTenant = endTenant.removePrefix(submoduleRange.begin);
 				} else {
 					endTenant = "\xff"_sr;
 				}
