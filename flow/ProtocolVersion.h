@@ -230,3 +230,13 @@ public:
 		serializer(ar, _latestProtocolVersion, _lastProtocolVersion, _lowestCompatibleProtocolVersion);
 	}
 };
+
+template <>
+struct Traceable<SWVersion> : std::true_type {
+	static std::string toString(const SWVersion& swVersion) {
+		return format("Newest: 0x%016lX, Last: 0x%016lX, MinCompatible: 0x%016lX",
+		              swVersion.latestProtocolVersion(),
+		              swVersion.lastProtocolVersion(),
+		              swVersion.lowestCompatibleProtocolVersion());
+	}
+};
