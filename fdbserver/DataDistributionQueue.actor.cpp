@@ -1051,7 +1051,7 @@ struct DDQueueData {
 
 // return -1 if a.readload > b.readload
 int greaterReadLoad(Reference<IDataDistributionTeam> a, Reference<IDataDistributionTeam> b) {
-	auto r1 = a->getLoadReadBandwidth(true, 10), r2 = b->getLoadReadBandwidth(true, 10);
+	auto r1 = a->getLoadReadBandwidth(true, 2.0), r2 = b->getLoadReadBandwidth(true, 2.0);
 	return r1 == r2 ? 0 : (r1 > r2 ? -1 : 1);
 }
 
@@ -1073,6 +1073,18 @@ static std::string destServersString(std::vector<std::pair<Reference<IDataDistri
 	return std::move(ss).str();
 }
 
+inline bool isDiskRebalancePriority(int priority) {
+	return priority == SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM ||
+	       priority == SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM;
+}
+inline bool isMountainChopperPriority(int priority) {
+	return priority == SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM ||
+	       priority == SERVER_KNOBS->PRIORITY_REBALANCE_READ_OVERUTIL_TEAM;
+}
+inline bool isValleyFillerPriority(int priority) {
+	return priority == SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM ||
+	       priority == SERVER_KNOBS->PRIORITY_REBALANCE_READ_UNDERUTIL_TEAM;
+}
 // This actor relocates the specified keys to a good place.
 // The inFlightActor key range map stores the actor for each RelocateData
 ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd, const DDEnabledState* ddEnabledState) {
@@ -1140,7 +1152,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 						inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_ONE_LEFT;
 
 					auto req = GetTeamRequest(rd.wantsNewServers,
-					                          rd.priority == SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM,
+					                          isValleyFillerPriority(rd.priority),
 					                          true,
 					                          false,
 					                          inflightPenalty);
@@ -1387,7 +1399,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 				auto& destinationRef = healthyDestinations;
 				self->noErrorActors.add(
 				    trigger([destinationRef, readLoad]() mutable { destinationRef.addReadInFlightToTeam(-readLoad); },
-				            delay(SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL, TaskPriority::DataDistributionLow)));
+				            delay(SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL, TaskPriority::DataDistribution)));
 
 				// onFinished.send( rs );
 				if (!error.code()) {
@@ -1425,7 +1437,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 				auto& destinationRef = healthyDestinations;
 				self->noErrorActors.add(
 				    trigger([destinationRef, readLoad]() mutable { destinationRef.addReadInFlightToTeam(-readLoad); },
-				            delay(SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL, TaskPriority::DataDistributionLow)));
+				            delay(SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL, TaskPriority::DataDistribution)));
 				rd.completeDests.clear();
 				wait(delay(SERVER_KNOBS->RETRY_RELOCATESHARD_DELAY, TaskPriority::DataDistributionLaunch));
 			}
@@ -1462,14 +1474,6 @@ inline double getWorstCpu(const HealthMetrics& metrics) {
 	}
 	return cpu;
 }
-inline bool isDiskRebalancePriority(int priority) {
-	return priority == SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM ||
-	       priority == SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM;
-}
-inline bool isMountainChopperPriority(int priority) {
-	return priority == SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM ||
-	       priority == SERVER_KNOBS->PRIORITY_REBALANCE_READ_OVERUTIL_TEAM;
-}
 // Move the shard with highest read density of sourceTeam's to destTeam if sourceTeam has much more read load than
 // destTeam
 ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
@@ -1504,7 +1508,7 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 	if (metrics.keys.present() && metrics.bytes > 0) {
 		auto srcLoad = sourceTeam->getLoadReadBandwidth(), destLoad = destTeam->getLoadReadBandwidth();
 		if (abs(srcLoad - destLoad) <=
-		    10 * std::max(metrics.bytesReadPerKSecond, SERVER_KNOBS->SHARD_READ_HOT_BANDWITH_MIN_PER_KSECONDS)) {
+		    3 * std::max(metrics.bytesReadPerKSecond, SERVER_KNOBS->SHARD_READ_HOT_BANDWITH_MIN_PER_KSECONDS)) {
 			traceEvent->detail("SkipReason", "TeamTooSimilar")
 			    .detail("ShardReadBandwidth", metrics.bytesReadPerKSecond)
 			    .detail("SrcReadBandwidth", srcLoad);
@@ -1651,7 +1655,7 @@ ACTOR Future<Void> BgDDLoadRebalancer(DDQueueData* self, int teamCollectionIndex
 
 		try {
 			// FIXME: change back to BG_REBALANCE_SWITCH_CHECK_INTERVAL after test
-			state Future<Void> delayF = delay(0.1, TaskPriority::DataDistributionLaunch);
+			state Future<Void> delayF = delayJittered(0.1, TaskPriority::DataDistributionLaunch);
 			if ((now() - lastRead) > SERVER_KNOBS->BG_REBALANCE_SWITCH_CHECK_INTERVAL) {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				Optional<Value> val = wait(tr.get(rebalanceDDIgnoreKey));
