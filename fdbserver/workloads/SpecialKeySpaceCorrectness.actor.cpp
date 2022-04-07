@@ -957,7 +957,6 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				boost::split(
 				    process_addresses, coordinator_processes_key.get().toString(), [](char c) { return c == ','; });
 				ASSERT(process_addresses.size() == cs.coordinators().size() + cs.hostnames.size());
-				wait(cs.resolveHostnames());
 				// compare the coordinator process network addresses one by one
 				for (const auto& network_address : cs.coordinators()) {
 					ASSERT(std::find(process_addresses.begin(), process_addresses.end(), network_address.toString()) !=
@@ -1078,8 +1077,8 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					Optional<Value> res = wait(tx->get(coordinatorsKey));
 					ASSERT(res.present()); // Otherwise, database is in a bad state
 					state ClusterConnectionString csNew(res.get().toString());
-					wait(csNew.resolveHostnames());
-					ASSERT(csNew.coordinators().size() == old_coordinators_processes.size() + 1);
+					ASSERT(csNew.hostnames.size() + csNew.coordinators().size() ==
+					       old_coordinators_processes.size() + 1);
 					// verify the coordinators' addresses
 					for (const auto& network_address : csNew.coordinators()) {
 						std::string address_str = network_address.toString();

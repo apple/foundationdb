@@ -161,8 +161,7 @@ ACTOR Future<std::vector<WorkerInterface>> getCoordWorkers(Database cx,
 	if (!coordinators.present()) {
 		throw operation_failed();
 	}
-	state ClusterConnectionString ccs(coordinators.get().toString());
-	wait(ccs.resolveHostnames());
+	ClusterConnectionString ccs(coordinators.get().toString());
 	std::vector<NetworkAddress> coordinatorsAddr = ccs.coordinators();
 	std::set<NetworkAddress> coordinatorsAddrSet;
 	for (const auto& addr : coordinatorsAddr) {

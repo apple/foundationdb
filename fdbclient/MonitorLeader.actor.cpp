@@ -547,7 +547,6 @@ std::string ClusterConnectionString::toString() const {
 }
 
 ClientCoordinators::ClientCoordinators(Reference<IClusterConnectionRecord> ccr) : ccr(ccr) {
-	ASSERT(ccr->connectionStringStatus() == ClusterConnectionString::RESOLVED);
 	ClusterConnectionString cs = ccr->getConnectionString();
 	for (auto s = cs.coordinators().begin(); s != cs.coordinators().end(); ++s)
 		clientLeaderServers.push_back(ClientLeaderRegInterface(*s));
@@ -576,43 +575,15 @@ ClientLeaderRegInterface::ClientLeaderRegInterface(INetwork* local) {
 
 // Nominee is the worker among all workers that are considered as leader by one coordinator
 // This function contacts a coordinator coord to ask who is its nominee.
-// Note: for coordinators whose NetworkAddress is parsed out of a hostname, a connection failure will cause this actor
-// to throw `coordinators_changed()` error
 ACTOR Future<Void> monitorNominee(Key key,
                                   ClientLeaderRegInterface coord,
                                   AsyncTrigger* nomineeChange,
-                                  Optional<LeaderInfo>* info,
-                                  Optional<Hostname> hostname = Optional<Hostname>()) {
+                                  Optional<LeaderInfo>* info) {
 	loop {
-		state Optional<LeaderInfo> li;
-
-		if (coord.getLeader.getEndpoint().getPrimaryAddress().fromHostname) {
-			state ErrorOr<Optional<LeaderInfo>> rep =
-			    wait(coord.getLeader.tryGetReply(GetLeaderRequest(key, info->present() ? info->get().changeID : UID()),
-			                                     TaskPriority::CoordinationReply));
-			if (rep.isError()) {
-				// Connecting to nominee failed, most likely due to connection failed.
-				TraceEvent("MonitorNomineeError")
-				    .error(rep.getError())
-				    .detail("Hostname", hostname.present() ? hostname.get().toString() : "UnknownHostname")
-				    .detail("OldAddr", coord.getLeader.getEndpoint().getPrimaryAddress().toString());
-				if (rep.getError().code() == error_code_request_maybe_delivered) {
-					// Delay to prevent tight resolving loop due to outdated DNS cache
-					wait(delay(FLOW_KNOBS->HOSTNAME_RECONNECT_INIT_INTERVAL));
-					throw coordinators_changed();
-				} else {
-					throw rep.getError();
-				}
-			} else if (rep.present()) {
-				li = rep.get();
-			}
-		} else {
-			Optional<LeaderInfo> tmp =
-			    wait(retryBrokenPromise(coord.getLeader,
-			                            GetLeaderRequest(key, info->present() ? info->get().changeID : UID()),
-			                            TaskPriority::CoordinationReply));
-			li = tmp;
-		}
+		state Optional<LeaderInfo> li =
+		    wait(retryBrokenPromise(coord.getLeader,
+		                            GetLeaderRequest(key, info->present() ? info->get().changeID : UID()),
+		                            TaskPriority::CoordinationReply));
 
 		wait(Future<Void>(Void())); // Make sure we weren't cancelled
 
@@ -687,74 +658,54 @@ Optional<std::pair<LeaderInfo, bool>> getLeader(const std::vector<Optional<Leade
 ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration(Reference<IClusterConnectionRecord> connRecord,
                                                            Reference<AsyncVar<Value>> outSerializedLeaderInfo,
                                                            MonitorLeaderInfo info) {
+	state ClientCoordinators coordinators(info.intermediateConnRecord);
+	state AsyncTrigger nomineeChange;
+	state std::vector<Optional<LeaderInfo>> nominees;
+	state Future<Void> allActors;
+
+	nominees.resize(coordinators.clientLeaderServers.size());
+
+	state std::vector<Future<Void>> actors;
+	// Ask all coordinators if the worker is considered as a leader (leader nominee) by the coordinator.
+	actors.reserve(coordinators.clientLeaderServers.size());
+	for (int i = 0; i < coordinators.clientLeaderServers.size(); i++) {
+		actors.push_back(
+		    monitorNominee(coordinators.clusterKey, coordinators.clientLeaderServers[i], &nomineeChange, &nominees[i]));
+	}
+	allActors = waitForAll(actors);
+
 	loop {
-		wait(connRecord->resolveHostnames());
-		wait(info.intermediateConnRecord->resolveHostnames());
-		state ClientCoordinators coordinators(info.intermediateConnRecord);
-		state AsyncTrigger nomineeChange;
-		state std::vector<Optional<LeaderInfo>> nominees;
-		state Future<Void> allActors;
-
-		nominees.resize(coordinators.clientLeaderServers.size());
-
-		state std::vector<Future<Void>> actors;
-		// Ask all coordinators if the worker is considered as a leader (leader nominee) by the coordinator.
-		actors.reserve(coordinators.clientLeaderServers.size());
-		for (int i = 0; i < coordinators.clientLeaderServers.size(); i++) {
-			Optional<Hostname> hostname;
-			auto r = connRecord->getConnectionString().networkAddressToHostname.find(
-			    coordinators.clientLeaderServers[i].getLeader.getEndpoint().getPrimaryAddress());
-			if (r != connRecord->getConnectionString().networkAddressToHostname.end()) {
-				hostname = r->second;
+		Optional<std::pair<LeaderInfo, bool>> leader = getLeader(nominees);
+		TraceEvent("MonitorLeaderChange")
+		    .detail("NewLeader", leader.present() ? leader.get().first.changeID : UID(1, 1));
+		if (leader.present()) {
+			if (leader.get().first.forward) {
+				TraceEvent("MonitorLeaderForwarding")
+				    .detail("NewConnStr", leader.get().first.serializedInfo.toString())
+				    .detail("OldConnStr", info.intermediateConnRecord->getConnectionString().toString())
+				    .trackLatest("MonitorLeaderForwarding");
+				info.intermediateConnRecord = connRecord->makeIntermediateRecord(
+				    ClusterConnectionString(leader.get().first.serializedInfo.toString()));
+				return info;
 			}
-			actors.push_back(monitorNominee(
-			    coordinators.clusterKey, coordinators.clientLeaderServers[i], &nomineeChange, &nominees[i], hostname));
+			if (connRecord != info.intermediateConnRecord) {
+				if (!info.hasConnected) {
+					TraceEvent(SevWarnAlways, "IncorrectClusterFileContentsAtConnection")
+					    .detail("ClusterFile", connRecord->toString())
+					    .detail("StoredConnectionString", connRecord->getConnectionString().toString())
+					    .detail("CurrentConnectionString",
+					            info.intermediateConnRecord->getConnectionString().toString());
+				}
+				connRecord->setAndPersistConnectionString(info.intermediateConnRecord->getConnectionString());
+				info.intermediateConnRecord = connRecord;
+			}
+
+			info.hasConnected = true;
+			connRecord->notifyConnected();
+
+			outSerializedLeaderInfo->set(leader.get().first.serializedInfo);
 		}
-		allActors = waitForAll(actors);
-
-		loop {
-			Optional<std::pair<LeaderInfo, bool>> leader = getLeader(nominees);
-			TraceEvent("MonitorLeaderChange")
-			    .detail("NewLeader", leader.present() ? leader.get().first.changeID : UID(1, 1));
-			if (leader.present()) {
-				if (leader.get().first.forward) {
-					TraceEvent("MonitorLeaderForwarding")
-					    .detail("NewConnStr", leader.get().first.serializedInfo.toString())
-					    .detail("OldConnStr", info.intermediateConnRecord->getConnectionString().toString())
-					    .trackLatest("MonitorLeaderForwarding");
-					info.intermediateConnRecord = connRecord->makeIntermediateRecord(
-					    ClusterConnectionString(leader.get().first.serializedInfo.toString()));
-					return info;
-				}
-				if (connRecord != info.intermediateConnRecord) {
-					if (!info.hasConnected) {
-						TraceEvent(SevWarnAlways, "IncorrectClusterFileContentsAtConnection")
-						    .detail("ClusterFile", connRecord->toString())
-						    .detail("StoredConnectionString", connRecord->getConnectionString().toString())
-						    .detail("CurrentConnectionString",
-						            info.intermediateConnRecord->getConnectionString().toString());
-					}
-					connRecord->setAndPersistConnectionString(info.intermediateConnRecord->getConnectionString());
-					info.intermediateConnRecord = connRecord;
-				}
-
-				info.hasConnected = true;
-				connRecord->notifyConnected();
-
-				outSerializedLeaderInfo->set(leader.get().first.serializedInfo);
-			}
-			try {
-				wait(nomineeChange.onTrigger() || allActors);
-			} catch (Error& e) {
-				if (e.code() == error_code_coordinators_changed) {
-					TraceEvent("MonitorLeaderCoordinatorsChanged").suppressFor(1.0);
-					connRecord->getConnectionString().resetToUnresolved();
-					break;
-				} else {
-					throw e;
-				}
-			}
-		}
+		wait(nomineeChange.onTrigger() || allActors);
 	}
 }
 
@@ -887,8 +838,7 @@ ACTOR Future<Void> getClientInfoFromLeader(Reference<AsyncVar<Optional<ClusterCo
 ACTOR Future<Void> monitorLeaderAndGetClientInfo(Key clusterKey,
                                                  std::vector<NetworkAddress> coordinators,
                                                  ClientData* clientData,
-                                                 Reference<AsyncVar<Optional<LeaderInfo>>> leaderInfo,
-                                                 Reference<AsyncVar<Void>> coordinatorsChanged) {
+                                                 Reference<AsyncVar<Optional<LeaderInfo>>> leaderInfo) {
 	state std::vector<ClientLeaderRegInterface> clientLeaderServers;
 	state AsyncTrigger nomineeChange;
 	state std::vector<Optional<LeaderInfo>> nominees;
@@ -936,14 +886,7 @@ ACTOR Future<Void> monitorLeaderAndGetClientInfo(Key clusterKey,
 				leaderInfo->set(leader.get().first);
 			}
 		}
-		try {
-			wait(nomineeChange.onTrigger() || allActors);
-		} catch (Error& e) {
-			if (e.code() == error_code_coordinators_changed) {
-				coordinatorsChanged->trigger();
-			}
-			throw e;
-		}
+		wait(nomineeChange.onTrigger() || allActors);
 	}
 }
 
@@ -1072,15 +1015,9 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 			successIndex = index;
 		} else {
 			TEST(rep.getError().code() == error_code_failed_to_progress); // Coordinator cant talk to cluster controller
-			if (rep.getError().code() == error_code_coordinators_changed) {
-				throw coordinators_changed();
-			}
 			index = (index + 1) % addrs.size();
 			if (index == successIndex) {
 				wait(delay(CLIENT_KNOBS->COORDINATOR_RECONNECTION_DELAY));
-				// When the client fails talking to all coordinators, we throw coordinators_changed() and let the caller
-				// re-resolve the connection string and retry.
-				throw coordinators_changed();
 			}
 		}
 	}
@@ -1092,27 +1029,16 @@ ACTOR Future<Void> monitorProxies(
     Reference<AsyncVar<Optional<ClientLeaderRegInterface>>> coordinator,
     Reference<ReferencedObject<Standalone<VectorRef<ClientVersionRef>>>> supportedVersions,
     Key traceLogGroup) {
-	wait(connRecord->get()->resolveHostnames());
 	state MonitorLeaderInfo info(connRecord->get());
 	loop {
-		try {
-			wait(info.intermediateConnRecord->resolveHostnames());
-			choose {
-				when(MonitorLeaderInfo _info = wait(monitorProxiesOneGeneration(
-				         connRecord->get(), clientInfo, coordinator, info, supportedVersions, traceLogGroup))) {
-					info = _info;
-				}
-				when(wait(connRecord->onChange())) {
-					info.hasConnected = false;
-					info.intermediateConnRecord = connRecord->get();
-				}
+		choose {
+			when(MonitorLeaderInfo _info = wait(monitorProxiesOneGeneration(
+			         connRecord->get(), clientInfo, coordinator, info, supportedVersions, traceLogGroup))) {
+				info = _info;
 			}
-		} catch (Error& e) {
-			if (e.code() == error_code_coordinators_changed) {
-				TraceEvent("MonitorProxiesCoordinatorsChanged").suppressFor(1.0);
-				info.intermediateConnRecord->getConnectionString().resetToUnresolved();
-			} else {
-				throw e;
+			when(wait(connRecord->onChange())) {
+				info.hasConnected = false;
+				info.intermediateConnRecord = connRecord->get();
 			}
 		}
 	}

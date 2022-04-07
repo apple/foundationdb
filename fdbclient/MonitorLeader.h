@@ -77,8 +77,7 @@ Future<Void> monitorLeader(Reference<IClusterConnectionRecord> const& connFile,
 Future<Void> monitorLeaderAndGetClientInfo(Key const& clusterKey,
                                            std::vector<NetworkAddress> const& coordinators,
                                            ClientData* const& clientData,
-                                           Reference<AsyncVar<Optional<LeaderInfo>>> const& leaderInfo,
-                                           Reference<AsyncVar<Void>> const& coordinatorsChanged);
+                                           Reference<AsyncVar<Optional<LeaderInfo>>> const& leaderInfo);
 
 Future<Void> monitorProxies(
     Reference<AsyncVar<Reference<IClusterConnectionRecord>>> const& connRecord,
