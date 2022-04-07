@@ -415,3 +415,15 @@ SystemStatistics customSystemMonitor(std::string const& eventName, StatisticsSta
 	statState->networkState = netData;
 	return currentStats;
 }
+
+Future<Void> startMemoryUsageMonitor(uint64_t memLimit) {
+	if (memLimit == 0) {
+		return Void();
+	}
+	auto checkMemoryUsage = [=]() {
+		if (getResidentMemoryUsage() > memLimit) {
+			platform::outOfMemory();
+		}
+	};
+	return recurring(checkMemoryUsage, FLOW_KNOBS->MEMORY_USAGE_CHECK_INTERVAL);
+}

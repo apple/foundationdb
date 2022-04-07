@@ -67,97 +67,6 @@ public:
 	}
 };
 
-bool MockDNS::findMockTCPEndpoint(const std::string& host, const std::string& service) {
-	std::string hostname = host + ":" + service;
-	return hostnameToAddresses.find(hostname) != hostnameToAddresses.end();
-}
-
-void MockDNS::addMockTCPEndpoint(const std::string& host,
-                                 const std::string& service,
-                                 const std::vector<NetworkAddress>& addresses) {
-	if (findMockTCPEndpoint(host, service)) {
-		throw operation_failed();
-	}
-	hostnameToAddresses[host + ":" + service] = addresses;
-}
-
-void MockDNS::updateMockTCPEndpoint(const std::string& host,
-                                    const std::string& service,
-                                    const std::vector<NetworkAddress>& addresses) {
-	if (!findMockTCPEndpoint(host, service)) {
-		throw operation_failed();
-	}
-	hostnameToAddresses[host + ":" + service] = addresses;
-}
-
-void MockDNS::removeMockTCPEndpoint(const std::string& host, const std::string& service) {
-	if (!findMockTCPEndpoint(host, service)) {
-		throw operation_failed();
-	}
-	hostnameToAddresses.erase(host + ":" + service);
-}
-
-std::vector<NetworkAddress> MockDNS::getTCPEndpoint(const std::string& host, const std::string& service) {
-	if (!findMockTCPEndpoint(host, service)) {
-		throw operation_failed();
-	}
-	return hostnameToAddresses[host + ":" + service];
-}
-
-void MockDNS::clearMockTCPEndpoints() {
-	hostnameToAddresses.clear();
-}
-
-std::string MockDNS::toString() {
-	std::string ret;
-	for (auto it = hostnameToAddresses.begin(); it != hostnameToAddresses.end(); ++it) {
-		if (it != hostnameToAddresses.begin()) {
-			ret += ';';
-		}
-		ret += it->first + ',';
-		const std::vector<NetworkAddress>& addresses = it->second;
-		for (int i = 0; i < addresses.size(); ++i) {
-			ret += addresses[i].toString();
-			if (i != addresses.size() - 1) {
-				ret += ',';
-			}
-		}
-	}
-	return ret;
-}
-
-MockDNS MockDNS::parseFromString(const std::string& s) {
-	std::map<std::string, std::vector<NetworkAddress>> mockDNS;
-
-	for (int p = 0; p < s.length();) {
-		int pSemiColumn = s.find_first_of(';', p);
-		if (pSemiColumn == s.npos) {
-			pSemiColumn = s.length();
-		}
-		std::string oneMapping = s.substr(p, pSemiColumn - p);
-
-		std::string hostname;
-		std::vector<NetworkAddress> addresses;
-		for (int i = 0; i < oneMapping.length();) {
-			int pComma = oneMapping.find_first_of(',', i);
-			if (pComma == oneMapping.npos) {
-				pComma = oneMapping.length();
-			}
-			if (!i) {
-				// The first part is hostname
-				hostname = oneMapping.substr(i, pComma - i);
-			} else {
-				addresses.push_back(NetworkAddress::parse(oneMapping.substr(i, pComma - i)));
-			}
-			i = pComma + 1;
-		}
-		mockDNS[hostname] = addresses;
-		p = pSemiColumn + 1;
-	}
-
-	return MockDNS(mockDNS);
-}
-
 void SimExternalConnection::close() {
 	socket.close();
 }
@@ -222,33 +131,45 @@ UID SimExternalConnection::getDebugID() const {
 }
 
 std::vector<NetworkAddress> SimExternalConnection::resolveTCPEndpointBlocking(const std::string& host,
-                                                                              const std::string& service) {
+                                                                              const std::string& service,
+                                                                              DNSCache* dnsCache) {
 	ip::tcp::resolver resolver(ios);
-	ip::tcp::resolver::query query(host, service);
-	auto iter = resolver.resolve(query);
-	decltype(iter) end;
-	std::vector<NetworkAddress> addrs;
-	while (iter != end) {
-		auto endpoint = iter->endpoint();
-		auto addr = endpoint.address();
-		if (addr.is_v6()) {
-			addrs.emplace_back(IPAddress(addr.to_v6().to_bytes()), endpoint.port());
-		} else {
-			addrs.emplace_back(addr.to_v4().to_ulong(), endpoint.port());
+	try {
+		auto iter = resolver.resolve(host, service);
+		decltype(iter) end;
+		std::vector<NetworkAddress> addrs;
+		while (iter != end) {
+			auto endpoint = iter->endpoint();
+			auto addr = endpoint.address();
+			if (addr.is_v6()) {
+				addrs.emplace_back(IPAddress(addr.to_v6().to_bytes()), endpoint.port());
+			} else {
+				addrs.emplace_back(addr.to_v4().to_ulong(), endpoint.port());
+			}
+			++iter;
 		}
-		++iter;
+		if (addrs.empty()) {
+			throw lookup_failed();
+		}
+		dnsCache->add(host, service, addrs);
+		return addrs;
+	} catch (...) {
+		dnsCache->remove(host, service);
+		throw lookup_failed();
 	}
-	return addrs;
 }
 
-ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpointImpl(std::string host, std::string service) {
+ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpointImpl(std::string host,
+                                                                        std::string service,
+                                                                        DNSCache* dnsCache) {
 	wait(delayJittered(0.1));
-	return SimExternalConnection::resolveTCPEndpointBlocking(host, service);
+	return SimExternalConnection::resolveTCPEndpointBlocking(host, service, dnsCache);
 }
 
 Future<std::vector<NetworkAddress>> SimExternalConnection::resolveTCPEndpoint(const std::string& host,
-                                                                              const std::string& service) {
-	return resolveTCPEndpointImpl(host, service);
+                                                                              const std::string& service,
+                                                                              DNSCache* dnsCache) {
+	return resolveTCPEndpointImpl(host, service, dnsCache);
 }
 
 Future<Reference<IConnection>> SimExternalConnection::connect(NetworkAddress toAddr) {
@@ -309,51 +230,6 @@ TEST_CASE("fdbrpc/SimExternalClient") {
 }
 
 TEST_CASE("fdbrpc/MockDNS") {
-	state MockDNS mockDNS;
-	state std::vector<NetworkAddress> networkAddresses;
-	state NetworkAddress address1(IPAddress(0x13131313), 1);
-	state NetworkAddress address2(IPAddress(0x14141414), 2);
-	networkAddresses.push_back(address1);
-	networkAddresses.push_back(address2);
-	mockDNS.addMockTCPEndpoint("testhost1", "port1", networkAddresses);
-	ASSERT(mockDNS.findMockTCPEndpoint("testhost1", "port1"));
-	ASSERT(!mockDNS.findMockTCPEndpoint("testhost1", "port2"));
-	std::vector<NetworkAddress> resolvedNetworkAddresses = mockDNS.getTCPEndpoint("testhost1", "port1");
-	ASSERT(resolvedNetworkAddresses.size() == 2);
-	ASSERT(std::find(resolvedNetworkAddresses.begin(), resolvedNetworkAddresses.end(), address1) !=
-	       resolvedNetworkAddresses.end());
-	ASSERT(std::find(resolvedNetworkAddresses.begin(), resolvedNetworkAddresses.end(), address2) !=
-	       resolvedNetworkAddresses.end());
-	// Adding a hostname twice should fail.
-	try {
-		mockDNS.addMockTCPEndpoint("testhost1", "port1", networkAddresses);
-	} catch (Error& e) {
-		ASSERT(e.code() == error_code_operation_failed);
-	}
-	// Updating an unexisted hostname should fail.
-	try {
-		mockDNS.updateMockTCPEndpoint("testhost2", "port2", networkAddresses);
-	} catch (Error& e) {
-		ASSERT(e.code() == error_code_operation_failed);
-	}
-	// Removing an unexisted hostname should fail.
-	try {
-		mockDNS.removeMockTCPEndpoint("testhost2", "port2");
-	} catch (Error& e) {
-		ASSERT(e.code() == error_code_operation_failed);
-	}
-	mockDNS.clearMockTCPEndpoints();
-	// Updating any hostname right after clearing endpoints should fail.
-	try {
-		mockDNS.updateMockTCPEndpoint("testhost1", "port1", networkAddresses);
-	} catch (Error& e) {
-		ASSERT(e.code() == error_code_operation_failed);
-	}
-
-	return Void();
-}
-
-TEST_CASE("fdbrpc/MockTCPEndpoints") {
 	state std::vector<NetworkAddress> networkAddresses;
 	state NetworkAddress address1(IPAddress(0x13131313), 1);
 	networkAddresses.push_back(address1);
@@ -363,18 +239,6 @@ TEST_CASE("fdbrpc/MockTCPEndpoints") {
 	ASSERT(resolvedNetworkAddresses.size() == 1);
 	ASSERT(std::find(resolvedNetworkAddresses.begin(), resolvedNetworkAddresses.end(), address1) !=
 	       resolvedNetworkAddresses.end());
-	// Adding a hostname twice should fail.
-	try {
-		INetworkConnections::net()->addMockTCPEndpoint("testhost1", "port1", networkAddresses);
-	} catch (Error& e) {
-		ASSERT(e.code() == error_code_operation_failed);
-	}
-	// Removing an unexisted hostname should fail.
-	try {
-		INetworkConnections::net()->removeMockTCPEndpoint("testhost2", "port2");
-	} catch (Error& e) {
-		ASSERT(e.code() == error_code_operation_failed);
-	}
 	INetworkConnections::net()->removeMockTCPEndpoint("testhost1", "port1");
 	state NetworkAddress address2(IPAddress(0x14141414), 2);
 	networkAddresses.push_back(address2);
@@ -383,23 +247,6 @@ TEST_CASE("fdbrpc/MockTCPEndpoints") {
 	ASSERT(resolvedNetworkAddresses.size() == 2);
 	ASSERT(std::find(resolvedNetworkAddresses.begin(), resolvedNetworkAddresses.end(), address2) !=
 	       resolvedNetworkAddresses.end());
-
-	return Void();
-}
-
-TEST_CASE("fdbrpc/MockDNSParsing") {
-	std::string mockDNSString;
-	INetworkConnections::net()->parseMockDNSFromString(mockDNSString);
-	ASSERT(INetworkConnections::net()->convertMockDNSToString() == mockDNSString);
-
-	mockDNSString = "testhost1:port1,[::1]:4800:tls(fromHostname)";
-	INetworkConnections::net()->parseMockDNSFromString(mockDNSString);
-	ASSERT(INetworkConnections::net()->convertMockDNSToString() == mockDNSString);
-
-	mockDNSString = "testhost1:port1,[::1]:4800,[2001:db8:85a3::8a2e:370:7334]:4800;testhost2:port2,[2001:"
-	                "db8:85a3::8a2e:370:7334]:4800:tls(fromHostname),8.8.8.8:12";
-	INetworkConnections::net()->parseMockDNSFromString(mockDNSString);
-	ASSERT(INetworkConnections::net()->convertMockDNSToString() == mockDNSString);
 
 	return Void();
 }

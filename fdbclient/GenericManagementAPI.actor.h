@@ -65,6 +65,8 @@ enum class ConfigurationResult {
 	LOCKED_NOT_NEW,
 	SUCCESS_WARN_PPW_GRADUAL,
 	SUCCESS,
+	SUCCESS_WARN_ROCKSDB_EXPERIMENTAL,
+	DATABASE_CREATED_WARN_ROCKSDB_EXPERIMENTAL,
 };
 
 enum class CoordinatorsResult {
@@ -124,6 +126,21 @@ ConfigurationResult buildConfiguration(
 bool isCompleteConfiguration(std::map<std::string, std::string> const& options);
 
 ConfigureAutoResult parseConfig(StatusObject const& status);
+
+template <typename Transaction, class T>
+struct transaction_future_type {
+	using type = typename Transaction::template FutureT<T>;
+};
+
+template <typename Transaction, class T>
+struct transaction_future_type<Transaction*, T> {
+	using type = typename transaction_future_type<Transaction, T>::type;
+};
+
+template <typename Transaction, class T>
+struct transaction_future_type<Reference<Transaction>, T> {
+	using type = typename transaction_future_type<Transaction, T>::type;
+};
 
 // Management API written in template code to support both IClientAPI and NativeAPI
 namespace ManagementAPI {
@@ -275,6 +292,7 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 	state bool oldReplicationUsesDcId = false;
 	state bool warnPPWGradual = false;
 	state bool warnChangeStorageNoMigrate = false;
+	state bool warnRocksDBIsExperimental = false;
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -462,6 +480,9 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 					} else if (newConfig.storageMigrationType == StorageMigrationType::GRADUAL &&
 					           newConfig.perpetualStorageWiggleSpeed == 0) {
 						warnPPWGradual = true;
+					} else if (newConfig.storageServerStoreType != oldConfig.storageServerStoreType &&
+					           newConfig.storageServerStoreType == KeyValueStoreType::SSD_ROCKSDB_V1) {
+						warnRocksDBIsExperimental = true;
 					}
 				}
 			}
@@ -510,6 +531,9 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 						Optional<Value> v = wait(safeThreadFutureToFuture(vF));
 						if (v != m[initIdKey.toString()])
 							return ConfigurationResult::DATABASE_ALREADY_CREATED;
+						else if (m[configKeysPrefix.toString() + "storage_engine"] ==
+						         std::to_string(KeyValueStoreType::SSD_ROCKSDB_V1))
+							return ConfigurationResult::DATABASE_CREATED_WARN_ROCKSDB_EXPERIMENTAL;
 						else
 							return ConfigurationResult::DATABASE_CREATED;
 					} catch (Error& e2) {
@@ -523,6 +547,8 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 
 	if (warnPPWGradual) {
 		return ConfigurationResult::SUCCESS_WARN_PPW_GRADUAL;
+	} else if (warnRocksDBIsExperimental) {
+		return ConfigurationResult::SUCCESS_WARN_ROCKSDB_EXPERIMENTAL;
 	} else {
 		return ConfigurationResult::SUCCESS;
 	}
@@ -636,7 +662,8 @@ Future<Optional<TenantMapEntry>> tryGetTenantTransaction(Transaction tr, TenantN
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 	tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 
-	Optional<Value> val = wait(safeThreadFutureToFuture(tr->get(tenantMapKey)));
+	state typename transaction_future_type<Transaction, Optional<Value>>::type tenantFuture = tr->get(tenantMapKey);
+	Optional<Value> val = wait(safeThreadFutureToFuture(tenantFuture));
 	return val.map<TenantMapEntry>([](Optional<Value> v) { return decodeTenantEntry(v.get()); });
 }
 
@@ -688,10 +715,13 @@ Future<Optional<TenantMapEntry>> createTenantTransaction(Transaction tr, TenantN
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 	state Future<Optional<TenantMapEntry>> tenantEntryFuture = tryGetTenantTransaction(tr, name);
-	state Future<Optional<Value>> tenantDataPrefixFuture = safeThreadFutureToFuture(tr->get(tenantDataPrefixKey));
-	state Future<Optional<Value>> lastIdFuture = safeThreadFutureToFuture(tr->get(tenantLastIdKey));
+	state typename transaction_future_type<Transaction, Optional<Value>>::type tenantDataPrefixFuture =
+	    tr->get(tenantDataPrefixKey);
+	state typename transaction_future_type<Transaction, Optional<Value>>::type lastIdFuture = tr->get(tenantLastIdKey);
+	state typename transaction_future_type<Transaction, Optional<Value>>::type tenantModeFuture =
+	    tr->get(configKeysPrefix.withSuffix("tenant_mode"_sr));
 
-	Optional<Value> tenantMode = wait(safeThreadFutureToFuture(tr->get(configKeysPrefix.withSuffix("tenant_mode"_sr))));
+	Optional<Value> tenantMode = wait(safeThreadFutureToFuture(tenantModeFuture));
 
 	if (!tenantMode.present() || tenantMode.get() == StringRef(format("%d", TenantMode::DISABLED))) {
 		throw tenants_disabled();
@@ -702,13 +732,15 @@ Future<Optional<TenantMapEntry>> createTenantTransaction(Transaction tr, TenantN
 		return Optional<TenantMapEntry>();
 	}
 
-	state Optional<Value> lastIdVal = wait(lastIdFuture);
-	Optional<Value> tenantDataPrefix = wait(tenantDataPrefixFuture);
+	state Optional<Value> lastIdVal = wait(safeThreadFutureToFuture(lastIdFuture));
+	Optional<Value> tenantDataPrefix = wait(safeThreadFutureToFuture(tenantDataPrefixFuture));
 
 	state TenantMapEntry newTenant(lastIdVal.present() ? TenantMapEntry::prefixToId(lastIdVal.get()) + 1 : 0,
 	                               tenantDataPrefix.present() ? (KeyRef)tenantDataPrefix.get() : ""_sr);
 
-	RangeResult contents = wait(safeThreadFutureToFuture(tr->getRange(prefixRange(newTenant.prefix), 1)));
+	state typename transaction_future_type<Transaction, RangeResult>::type prefixRangeFuture =
+	    tr->getRange(prefixRange(newTenant.prefix), 1);
+	RangeResult contents = wait(safeThreadFutureToFuture(prefixRangeFuture));
 	if (!contents.empty()) {
 		throw tenant_prefix_allocator_conflict();
 	}
@@ -774,7 +806,9 @@ Future<Void> deleteTenantTransaction(Transaction tr, TenantNameRef name) {
 		return Void();
 	}
 
-	RangeResult contents = wait(safeThreadFutureToFuture(tr->getRange(prefixRange(tenantEntry.get().prefix), 1)));
+	state typename transaction_future_type<Transaction, RangeResult>::type prefixRangeFuture =
+	    tr->getRange(prefixRange(tenantEntry.get().prefix), 1);
+	RangeResult contents = wait(safeThreadFutureToFuture(prefixRangeFuture));
 	if (!contents.empty()) {
 		throw tenant_not_empty();
 	}
@@ -832,8 +866,9 @@ Future<std::map<TenantName, TenantMapEntry>> listTenantsTransaction(Transaction 
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 	tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 
-	RangeResult results = wait(safeThreadFutureToFuture(
-	    tr->getRange(firstGreaterOrEqual(range.begin), firstGreaterOrEqual(range.end), limit)));
+	state typename transaction_future_type<Transaction, RangeResult>::type listFuture =
+	    tr->getRange(firstGreaterOrEqual(range.begin), firstGreaterOrEqual(range.end), limit);
+	RangeResult results = wait(safeThreadFutureToFuture(listFuture));
 
 	std::map<TenantName, TenantMapEntry> tenants;
 	for (auto kv : results) {
