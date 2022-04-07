@@ -86,6 +86,7 @@ struct GranuleMetadata : NonCopyable, ReferenceCounted<GranuleMetadata> {
 	NotifiedVersion durableSnapshotVersion; // same as delta vars, except for snapshots
 	Version pendingSnapshotVersion = 0;
 	Version initialSnapshotVersion = invalidVersion;
+	Version historyVersion = invalidVersion;
 	Version knownCommittedVersion;
 
 	int64_t originalEpoch;
@@ -939,13 +940,8 @@ ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bw
 					break;
 				}
 
-				bwData->currentManagerStatusStream.get().send(GranuleStatusReply(metadata->keyRange,
-				                                                                 true,
-				                                                                 writeHot,
-				                                                                 statusEpoch,
-				                                                                 statusSeqno,
-				                                                                 granuleID,
-				                                                                 metadata->initialSnapshotVersion));
+				bwData->currentManagerStatusStream.get().send(GranuleStatusReply(
+				    metadata->keyRange, true, writeHot, statusEpoch, statusSeqno, granuleID, metadata->historyVersion));
 				break;
 			} catch (Error& e) {
 				if (e.code() == error_code_operation_cancelled) {
@@ -1361,6 +1357,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			metadata->pendingSnapshotVersion = metadata->files.snapshotFiles.back().version;
 			metadata->durableSnapshotVersion.set(metadata->pendingSnapshotVersion);
 			metadata->initialSnapshotVersion = metadata->files.snapshotFiles.front().version;
+			metadata->historyVersion = startState.history.get().version;
 		} else {
 			if (startState.blobFilesToSnapshot.present()) {
 				startVersion = startState.previousDurableVersion;
@@ -1383,6 +1380,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			}
 			metadata->initialSnapshotVersion = startVersion;
 			metadata->pendingSnapshotVersion = startVersion;
+			metadata->historyVersion = startState.history.present() ? startState.history.get().version : startVersion;
 		}
 
 		metadata->durableDeltaVersion.set(startVersion);
