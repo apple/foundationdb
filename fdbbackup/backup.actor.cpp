@@ -3936,7 +3936,7 @@ int main(int argc, char* argv[]) {
 			return FDB_EXIT_ERROR;
 		}
 
-		Future<Void> memoryUsageMonitor = startMemoryUsageMonitor(memLimit, FLOW_KNOBS->MEMORY_USAGE_CHECK_INTERVAL);
+		Future<Void> memoryUsageMonitor = startMemoryUsageMonitor(memLimit);
 
 		IKnobCollection::setupKnobs(knobs);
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs

@@ -1937,7 +1937,7 @@ int main(int argc, char* argv[]) {
 
 		Error::init();
 		std::set_new_handler(&platform::outOfMemory);
-		auto memoryUsageMonitor = startMemoryUsageMonitor(opts.memLimit, FLOW_KNOBS->MEMORY_USAGE_CHECK_INTERVAL);
+		Future<Void> memoryUsageMonitor = startMemoryUsageMonitor(opts.memLimit);
 		setMemoryQuota(opts.virtualMemLimit);
 
 		Future<Optional<Void>> f;

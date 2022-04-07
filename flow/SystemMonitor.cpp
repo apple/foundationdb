@@ -416,7 +416,7 @@ SystemStatistics customSystemMonitor(std::string const& eventName, StatisticsSta
 	return currentStats;
 }
 
-Future<Void> startMemoryUsageMonitor(uint64_t memLimit, double interval) {
+Future<Void> startMemoryUsageMonitor(uint64_t memLimit) {
 	if (memLimit == 0) {
 		return Void();
 	}
@@ -425,5 +425,5 @@ Future<Void> startMemoryUsageMonitor(uint64_t memLimit, double interval) {
 			platform::outOfMemory();
 		}
 	};
-	return recurring(checkMemoryUsage, interval);
+	return recurring(checkMemoryUsage, FLOW_KNOBS->MEMORY_USAGE_CHECK_INTERVAL);
 }

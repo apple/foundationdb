@@ -46,7 +46,6 @@
 #include "flow/ArgParseUtil.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/FastRef.h"
-#include "flow/Knobs.h"
 #include "flow/Platform.h"
 #include "flow/SystemMonitor.h"
 
@@ -2240,8 +2239,7 @@ int main(int argc, char** argv) {
 		if (opt.exit_code != -1) {
 			return opt.exit_code;
 		}
-		Future<Void> memoryUsageMonitor =
-		    startMemoryUsageMonitor(opt.memLimit, FLOW_KNOBS->MEMORY_USAGE_CHECK_INTERVAL);
+		Future<Void> memoryUsageMonitor = startMemoryUsageMonitor(opt.memLimit);
 		Future<int> cliFuture = runCli(opt);
 		Future<Void> timeoutFuture = opt.exit_timeout ? timeExit(opt.exit_timeout) : Never();
 		auto f = stopNetworkAfter(success(cliFuture) || timeoutFuture);
