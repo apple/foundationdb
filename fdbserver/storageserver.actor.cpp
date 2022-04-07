@@ -5592,7 +5592,8 @@ void initializeUpdateCursor(ptxn::StorageServer& storageServerContext) {
 	    getStoragePrivateMutationTeam(storageServerContext),
 	    [referencedServerDBInfo](const StorageTeamID& storageTeamID) -> auto {
 		    return getTLogInterfaceByStorageTeamID(referencedServerDBInfo->get(), storageTeamID);
-	    });
+	    },
+	    storageServerContext.version.get() + 1);
 }
 
 ACTOR Future<Void> peekFromRemote(std::shared_ptr<ptxn::StorageServer> storageServerContext,

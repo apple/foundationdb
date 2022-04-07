@@ -305,7 +305,7 @@ Future<Void> runMergedCursorTest(ptxn::test::TestTLogPeekMergeCursorOptions opti
 
 	// Initialize the cursor
 	state Arena messageArena;
-	state std::shared_ptr<CursorType> mergedCursor = std::make_shared<CursorType>();
+	state std::shared_ptr<CursorType> mergedCursor = std::make_shared<CursorType>(/* version */ 0);
 	const std::vector<ptxn::StorageTeamID>& storageTeamIDs = ptxn::test::TestEnvironment::getTLogGroup().storageTeamIDs;
 	for (const auto& storageTeamID : storageTeamIDs) {
 		std::shared_ptr<ptxn::TLogInterface_PassivelyPull> pInterface =
@@ -378,7 +378,7 @@ TEST_CASE("/fdbserver/ptxn/test/tLogPeek/cursor/advanceTo") {
 	state Arena messageArena;
 	// Unordered cursor cannot correctly advanceTo
 	state std::shared_ptr<ptxn::merged::BroadcastedStorageTeamPeekCursor_Ordered> mergedCursor =
-	    std::make_shared<ptxn::merged::BroadcastedStorageTeamPeekCursor_Ordered>();
+	    std::make_shared<ptxn::merged::BroadcastedStorageTeamPeekCursor_Ordered>(/* version */ 0);
 	const std::vector<ptxn::StorageTeamID>& storageTeamIDs = ptxn::test::TestEnvironment::getTLogGroup().storageTeamIDs;
 	for (const auto& storageTeamID : storageTeamIDs) {
 		std::shared_ptr<ptxn::TLogInterface_PassivelyPull> pInterface =
@@ -518,7 +518,7 @@ TEST_CASE("/fdbserver/ptxn/test/tLogPeek/cursor/merged/OrderedMutableTeamPeekCur
 	        .privateMutationsStorageTeamID;
 
 	pCursor = std::make_shared<ptxn::merged::OrderedMutableTeamPeekCursor>(
-	    storageServerIDs[0], privateMutationsStorageTeamID, getTLogInterfaceByStorageTeamID);
+	    storageServerIDs[0], privateMutationsStorageTeamID, getTLogInterfaceByStorageTeamID, /* version */ 0);
 
 	state Arena storageArena;
 	state std::vector<ptxn::VersionSubsequenceMessage> messagesFromTLogs =

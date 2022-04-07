@@ -98,7 +98,7 @@ public:
 	MutableTeamPeekCursor(const UID serverID_,
 	                      const StorageTeamID& privateMutationStorageTeamID_,
 	                      const TLogInterfaceByStorageTeamIDFunc& getTLogInterfaceByStorageTeamID_,
-	                      const Version& initialVersion_ = 0)
+	                      const Version& initialVersion_)
 
 	  : // This minus one in BaseClass is necessary since all new cursor will start with BaseClass::currentVersion + 1
 	    BaseClass(initialVersion_ - 1), serverID(serverID_),
@@ -119,7 +119,7 @@ public:
 	MutableTeamPeekCursor(const UID serverID_,
 	                      const StorageServerStorageTeams& storageTeams_,
 	                      const TLogInterfaceByStorageTeamIDFunc& getTLogInterfaceByStorageTeamID_,
-	                      const Version& initialVersion_ = 0)
+	                      const Version& initialVersion_)
 	  : MutableTeamPeekCursor(serverID_,
 	                          storageTeams_.getPrivateMutationsStorageTeamID(),
 	                          getTLogInterfaceByStorageTeamID_,
