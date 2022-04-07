@@ -51,7 +51,9 @@ ACTOR Future<bool> createTenantCommandActor(Reference<IDatabase> db, std::vector
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		try {
 			if (!doneExistenceCheck) {
-				Optional<Value> existingTenant = wait(safeThreadFutureToFuture(tr->get(tenantNameKey)));
+				// Hold the reference to the standalone's memory
+				state ThreadFuture<Optional<Value>> existingTenantFuture = tr->get(tenantNameKey);
+				Optional<Value> existingTenant = wait(safeThreadFutureToFuture(existingTenantFuture));
 				if (existingTenant.present()) {
 					throw tenant_already_exists();
 				}
@@ -96,7 +98,9 @@ ACTOR Future<bool> deleteTenantCommandActor(Reference<IDatabase> db, std::vector
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		try {
 			if (!doneExistenceCheck) {
-				Optional<Value> existingTenant = wait(safeThreadFutureToFuture(tr->get(tenantNameKey)));
+				// Hold the reference to the standalone's memory
+				state ThreadFuture<Optional<Value>> existingTenantFuture = tr->get(tenantNameKey);
+				Optional<Value> existingTenant = wait(safeThreadFutureToFuture(existingTenantFuture));
 				if (!existingTenant.present()) {
 					throw tenant_not_found();
 				}
@@ -163,8 +167,10 @@ ACTOR Future<bool> listTenantsCommandActor(Reference<IDatabase> db, std::vector<
 
 	loop {
 		try {
-			RangeResult tenants = wait(safeThreadFutureToFuture(
-			    tr->getRange(firstGreaterOrEqual(beginTenantKey), firstGreaterOrEqual(endTenantKey), limit)));
+			// Hold the reference to the standalone's memory
+			state ThreadFuture<RangeResult> kvsFuture =
+			    tr->getRange(firstGreaterOrEqual(beginTenantKey), firstGreaterOrEqual(endTenantKey), limit);
+			RangeResult tenants = wait(safeThreadFutureToFuture(kvsFuture));
 
 			if (tenants.empty()) {
 				if (tokens.size() == 1) {
@@ -213,7 +219,9 @@ ACTOR Future<bool> getTenantCommandActor(Reference<IDatabase> db, std::vector<St
 
 	loop {
 		try {
-			Optional<Value> tenant = wait(safeThreadFutureToFuture(tr->get(tenantNameKey)));
+			// Hold the reference to the standalone's memory
+			state ThreadFuture<Optional<Value>> tenantFuture = tr->get(tenantNameKey);
+			Optional<Value> tenant = wait(safeThreadFutureToFuture(tenantFuture));
 			if (!tenant.present()) {
 				throw tenant_not_found();
 			}
