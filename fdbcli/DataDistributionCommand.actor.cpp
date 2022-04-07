@@ -61,20 +61,25 @@ ACTOR Future<Void> setDDMode(Reference<IDatabase> db, int mode) {
 	}
 }
 
-ACTOR Future<Void> setDDIgnoreRebalanceSwitch(Reference<IDatabase> db, int DDIgnoreOption) {
+ACTOR Future<Void> setDDIgnoreRebalanceSwitch(Reference<IDatabase> db, uint8_t DDIgnoreOptionMask, bool setMaskedBit) {
 	state Reference<ITransaction> tr = db->createTransaction();
 	loop {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		try {
-			if (DDIgnoreOption > 0) {
-				Optional<Value> v = wait(safeThreadFutureToFuture(tr->get(fdb_cli::ddIgnoreRebalanceSpecialKey)));
-				if (v.present() && v.get().size() > 0) {
-					int oldValue = BinaryReader::fromStringRef<int>(v.get(), Unversioned());
-					tr->set(fdb_cli::ddIgnoreRebalanceSpecialKey,
-					        BinaryWriter::toValue(DDIgnoreOption & oldValue, Unversioned()));
+			Optional<Value> v = wait(safeThreadFutureToFuture(tr->get(fdb_cli::ddIgnoreRebalanceSpecialKey)));
+			uint8_t oldValue = 0; // nothing is disabled
+			if (v.present()) {
+				if (v.get().size() > 0) {
+					oldValue = BinaryReader::fromStringRef<uint8_t>(v.get(), Unversioned());
 				} else {
-					tr->set(fdb_cli::ddIgnoreRebalanceSpecialKey, BinaryWriter::toValue(DDIgnoreOption, Unversioned()));
+					// In old version (<= 7.1), the value is an empty string, which means all DD rebalance functions are
+					// disabled
+					oldValue = DDIgnore::ALL;
 				}
+			}
+			uint8_t newValue = setMaskedBit ? (oldValue | DDIgnoreOptionMask) : (oldValue & (~DDIgnoreOptionMask));
+			if (newValue > 0) {
+				tr->set(fdb_cli::ddIgnoreRebalanceSpecialKey, BinaryWriter::toValue(newValue, Unversioned()));
 			} else {
 				tr->clear(fdb_cli::ddIgnoreRebalanceSpecialKey);
 			}
@@ -84,6 +89,16 @@ ACTOR Future<Void> setDDIgnoreRebalanceSwitch(Reference<IDatabase> db, int DDIgn
 			wait(safeThreadFutureToFuture(tr->onError(e)));
 		}
 	}
+}
+
+// set masked bit
+Future<Void> setDDIgnoreRebalanceOn(Reference<IDatabase> db, uint8_t DDIgnoreOptionMask) {
+	return setDDIgnoreRebalanceSwitch(db, DDIgnoreOptionMask, true);
+}
+
+// reset masked bit
+Future<Void> setDDIgnoreRebalanceOff(Reference<IDatabase> db, uint8_t DDIgnoreOptionMask) {
+	return setDDIgnoreRebalanceSwitch(db, DDIgnoreOptionMask, false);
 }
 
 } // namespace
@@ -112,13 +127,13 @@ ACTOR Future<bool> dataDistributionCommandActor(Reference<IDatabase> db, std::ve
 				wait(success((setHealthyZone(db, LiteralStringRef("IgnoreSSFailures"), 0))));
 				printf("Data distribution is disabled for storage server failures.\n");
 			} else if (tokencmp(tokens[2], "rebalance")) {
-				wait(setDDIgnoreRebalanceSwitch(db, DDIgnore::REBALANCE_DISK | DDIgnore::REBALANCE_READ));
+				wait(setDDIgnoreRebalanceOn(db, DDIgnore::REBALANCE_DISK | DDIgnore::REBALANCE_READ));
 				printf("Data distribution is disabled for rebalance.\n");
 			} else if (tokencmp(tokens[2], "rebalance_disk")) {
-				wait(setDDIgnoreRebalanceSwitch(db, DDIgnore::REBALANCE_DISK));
+				wait(setDDIgnoreRebalanceOn(db, DDIgnore::REBALANCE_DISK));
 				printf("Data distribution is disabled for rebalance_disk.\n");
 			} else if (tokencmp(tokens[2], "rebalance_read")) {
-				wait(setDDIgnoreRebalanceSwitch(db, DDIgnore::REBALANCE_READ));
+				wait(setDDIgnoreRebalanceOn(db, DDIgnore::REBALANCE_READ));
 				printf("Data distribution is disabled for rebalance_read.\n");
 			} else {
 				printf(usage);
@@ -129,13 +144,13 @@ ACTOR Future<bool> dataDistributionCommandActor(Reference<IDatabase> db, std::ve
 				wait(success((clearHealthyZone(db, false, true))));
 				printf("Data distribution is enabled for storage server failures.\n");
 			} else if (tokencmp(tokens[2], "rebalance")) {
-				wait(setDDIgnoreRebalanceSwitch(db, 0));
+				wait(setDDIgnoreRebalanceOff(db, DDIgnore::REBALANCE_DISK | DDIgnore::REBALANCE_READ));
 				printf("Data distribution is enabled for rebalance.\n");
 			} else if (tokencmp(tokens[2], "rebalance_disk")) {
-				wait(setDDIgnoreRebalanceSwitch(db, ~DDIgnore::REBALANCE_DISK));
+				wait(setDDIgnoreRebalanceOff(db, DDIgnore::REBALANCE_DISK));
 				printf("Data distribution is enabled for rebalance_disk.\n");
 			} else if (tokencmp(tokens[2], "rebalance_read")) {
-				wait(setDDIgnoreRebalanceSwitch(db, ~DDIgnore::REBALANCE_READ));
+				wait(setDDIgnoreRebalanceOff(db, DDIgnore::REBALANCE_READ));
 				printf("Data distribution is enabled for rebalance_read.\n");
 			} else {
 				printf(usage);

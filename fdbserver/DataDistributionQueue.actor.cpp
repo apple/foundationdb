@@ -1462,6 +1462,14 @@ inline double getWorstCpu(const HealthMetrics& metrics) {
 	}
 	return cpu;
 }
+inline bool isDiskRebalancePriority(int priority) {
+	return priority == SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM ||
+	       priority == SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM;
+}
+inline bool isMountainChopperPriority(int priority) {
+	return priority == SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM ||
+	       priority == SERVER_KNOBS->PRIORITY_REBALANCE_READ_OVERUTIL_TEAM;
+}
 // Move the shard with highest read density of sourceTeam's to destTeam if sourceTeam has much more read load than
 // destTeam
 ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
@@ -1496,7 +1504,7 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 	if (metrics.keys.present() && metrics.bytes > 0) {
 		auto srcLoad = sourceTeam->getLoadReadBandwidth(), destLoad = destTeam->getLoadReadBandwidth();
 		if (abs(srcLoad - destLoad) <=
-		    3 * std::max(metrics.bytesReadPerKSecond, SERVER_KNOBS->SHARD_READ_HOT_BANDWITH_MIN_PER_KSECONDS)) {
+		    10 * std::max(metrics.bytesReadPerKSecond, SERVER_KNOBS->SHARD_READ_HOT_BANDWITH_MIN_PER_KSECONDS)) {
 			traceEvent->detail("SkipReason", "TeamTooSimilar")
 			    .detail("ShardReadBandwidth", metrics.bytesReadPerKSecond)
 			    .detail("SrcReadBandwidth", srcLoad);
@@ -1619,14 +1627,13 @@ ACTOR Future<Void> getSrcDestTeams(DDQueueData* self,
 	return Void();
 }
 
-ACTOR Future<Void> BgDDMountainChopper(DDQueueData* self, int teamCollectionIndex) {
+ACTOR Future<Void> BgDDLoadRebalancer(DDQueueData* self, int teamCollectionIndex, int ddPriority) {
 	state double rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL;
 	state int resetCount = SERVER_KNOBS->DD_REBALANCE_RESET_AMOUNT;
 	state Transaction tr(self->cx);
 	state double lastRead = 0;
 	state bool skipCurrentLoop = false;
-	state bool disableReadBalance = false;
-	state bool disableDiskBalance = false;
+	state const bool readRebalance = !isDiskRebalancePriority(ddPriority);
 
 	loop {
 		state bool moved = false;
@@ -1634,7 +1641,8 @@ ACTOR Future<Void> BgDDMountainChopper(DDQueueData* self, int teamCollectionInde
 		state Reference<IDataDistributionTeam> destTeam;
 		state GetTeamRequest srcReq;
 		state GetTeamRequest destReq;
-		state TraceEvent traceEvent("BgDDMountainChopper", self->distributorId);
+		state TraceEvent traceEvent(isMountainChopperPriority(ddPriority) ? "BgDDMountainChopper" : "BgDDValleyFiller",
+		                            self->distributorId);
 		traceEvent.suppressFor(5.0).detail("PollingInterval", rebalancePollingInterval);
 
 		if (*self->lastLimited > 0) {
@@ -1654,14 +1662,14 @@ ACTOR Future<Void> BgDDMountainChopper(DDQueueData* self, int teamCollectionInde
 						rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL;
 					}
 					skipCurrentLoop = false;
-					disableReadBalance = false;
-					disableDiskBalance = false;
 				} else {
 					if (val.get().size() > 0) {
-						int ddIgnore = BinaryReader::fromStringRef<int>(val.get(), Unversioned());
-						disableDiskBalance = (ddIgnore & DDIgnore::REBALANCE_DISK) > 0;
-						disableReadBalance = (ddIgnore & DDIgnore::REBALANCE_READ) > 0;
-						skipCurrentLoop = disableReadBalance && disableDiskBalance;
+						int ddIgnore = BinaryReader::fromStringRef<uint8_t>(val.get(), Unversioned());
+						if (readRebalance) {
+							skipCurrentLoop = (ddIgnore & DDIgnore::REBALANCE_READ) > 0;
+						} else {
+							skipCurrentLoop = (ddIgnore & DDIgnore::REBALANCE_DISK) > 0;
+						}
 					} else {
 						skipCurrentLoop = true;
 					}
@@ -1669,7 +1677,8 @@ ACTOR Future<Void> BgDDMountainChopper(DDQueueData* self, int teamCollectionInde
 			}
 
 			traceEvent.detail("Enabled",
-			                  skipCurrentLoop ? "None" : (disableReadBalance ? "NoReadBalance" : "NoDiskBalance"));
+			                  readRebalance ? (skipCurrentLoop ? "NoReadRebalance" : "ReadRebalance")
+			                                : (skipCurrentLoop ? "NoDiskRebalance" : "DiskRebalance"));
 
 			wait(delayF);
 			if (skipCurrentLoop) {
@@ -1679,29 +1688,27 @@ ACTOR Future<Void> BgDDMountainChopper(DDQueueData* self, int teamCollectionInde
 				continue;
 			}
 
-			traceEvent.detail("QueuedRelocations",
-			                  self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM]);
-			if (self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM] <
-			    SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
-				// FIXME: read balance and disk balance shouldn't be mutual exclusive in the future
-				srcReq = GetTeamRequest(true, true, false, true);
-				destReq = GetTeamRequest(true, false, true, false);
-				if (!disableReadBalance) {
+			traceEvent.detail("QueuedRelocations", self->priority_relocations[ddPriority]);
+			// FIXME: find a proper number for SERVER_KNOBS->DD_REBALANCE_PARALLELISM
+			if (self->priority_relocations[ddPriority] < 25) {
+				if (isMountainChopperPriority(ddPriority)) {
+					srcReq = GetTeamRequest(true, true, false, true);
+					destReq = GetTeamRequest(true, false, true, false);
+				} else {
+					srcReq = GetTeamRequest(true, false, false, true);
+					destReq = GetTeamRequest(true, true, true, false);
+				}
+				if (readRebalance) {
 					srcReq.teamSorter = lessReadLoad;
 					destReq.teamSorter = greaterReadLoad;
 				}
 				// clang-format off
-				wait(getSrcDestTeams(self, teamCollectionIndex, srcReq, destReq, &sourceTeam, &destTeam,
-				                     SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM,&traceEvent));
+				wait(getSrcDestTeams(self, teamCollectionIndex, srcReq, destReq, &sourceTeam, &destTeam,ddPriority,&traceEvent));
 				if (sourceTeam.isValid() && destTeam.isValid()) {
-					if (!disableReadBalance) {
-						wait(store(moved,rebalanceReadLoad(self,SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM,
-						                             sourceTeam, destTeam,teamCollectionIndex == 0,
-						                             &traceEvent)));
+					if (readRebalance) {
+						wait(store(moved,rebalanceReadLoad(self,ddPriority, sourceTeam, destTeam,teamCollectionIndex == 0,&traceEvent)));
 					} else {
-						wait(store(moved,rebalanceTeams(self,SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM,
-						                          sourceTeam, destTeam,teamCollectionIndex == 0,
-						                          &traceEvent)));
+						wait(store(moved,rebalanceTeams(self,ddPriority, sourceTeam, destTeam,teamCollectionIndex == 0,&traceEvent)));
 					}
 				}
 				// clang-format on
@@ -1891,8 +1898,11 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 	state Future<Void> launchQueuedWorkTimeout = Never();
 
 	for (int i = 0; i < teamCollections.size(); i++) {
-		balancingFutures.push_back(BgDDMountainChopper(&self, i));
-		balancingFutures.push_back(BgDDValleyFiller(&self, i));
+		balancingFutures.push_back(BgDDLoadRebalancer(&self, i, SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM));
+		balancingFutures.push_back(BgDDLoadRebalancer(&self, i, SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM));
+		balancingFutures.push_back(BgDDLoadRebalancer(&self, i, SERVER_KNOBS->PRIORITY_REBALANCE_READ_OVERUTIL_TEAM));
+		balancingFutures.push_back(BgDDLoadRebalancer(&self, i, SERVER_KNOBS->PRIORITY_REBALANCE_READ_UNDERUTIL_TEAM));
+		// balancingFutures.push_back(BgDDValleyFiller(&self, i));
 	}
 	balancingFutures.push_back(delayedAsyncVar(self.rawProcessingUnhealthy, processingUnhealthy, 0));
 	balancingFutures.push_back(delayedAsyncVar(self.rawProcessingWiggle, processingWiggle, 0));
@@ -1976,6 +1986,10 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 					            self.priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM])
 					    .detail("PriorityRebalanceOverutilizedTeam",
 					            self.priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM])
+					    .detail("PriorityRebalanceReadUnderutilTeam",
+					            self.priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_READ_UNDERUTIL_TEAM])
+					    .detail("PriorityRebalanceReadOverutilTeam",
+					            self.priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_READ_OVERUTIL_TEAM])
 					    .detail("PriorityStorageWiggle",
 					            self.priority_relocations[SERVER_KNOBS->PRIORITY_PERPETUAL_STORAGE_WIGGLE])
 					    .detail("PriorityTeamHealthy", self.priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_HEALTHY])
