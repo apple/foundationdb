@@ -37,9 +37,9 @@
 
 struct CheckpointFile {
 	constexpr static FileIdentifier file_identifier = 13804348;
-	std::string path; // Checkpoint directory on the storage server.
+	std::string path;
 	KeyRange range;
-	int64_t size;
+	int64_t size; // Logical bytes of the checkpoint.
 
 	CheckpointFile() = default;
 	CheckpointFile(std::string path, KeyRange range, int64_t size) : path(path), range(range), size(size) {}
@@ -228,9 +228,9 @@ struct RocksDBCheckpoint {
 	CheckpointFormat format() const { return RocksDB; }
 
 	std::string toString() const {
-		std::string res = "RocksDBCheckpoint:\nCheckpoint dir:\n" + checkpointDir + "\nFiles:\n";
+		std::string res = "RocksDBCheckpoint:\nCheckpoint dir: " + checkpointDir + "\nFiles: ";
 		for (const std::string& file : sstFiles) {
-			res += (file + "\n");
+			res += (file + " ");
 		}
 		res += "\nFetched files:\n";
 		for (const auto& file : fetchedFiles) {
@@ -253,8 +253,10 @@ ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
                                                         std::string dir,
                                                         std::function<Future<Void>(const CheckpointMetaData&)> cFun);
 
+// Returns the total logical bytes of all *fetched* checkpoints.
 int64_t getTotalFetchedBytes(const std::vector<CheckpointMetaData>& checkpoints);
 
+// Clean up on-disk files associated with checkpoint.
 ACTOR Future<Void> deleteRocksCheckpoint(CheckpointMetaData checkpoint);
 
 ICheckpointReader* newRocksDBCheckpointReader(const CheckpointMetaData& checkpoint, UID logID);

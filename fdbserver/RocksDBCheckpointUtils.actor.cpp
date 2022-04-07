@@ -21,20 +21,14 @@
 #include "fdbserver/RocksDBCheckpointUtils.actor.h"
 
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
-
 #include <rocksdb/db.h>
 #include <rocksdb/env.h>
 #include <rocksdb/options.h>
-#include <rocksdb/rate_limiter.h>
 #include <rocksdb/slice.h>
 #include <rocksdb/slice_transform.h>
-#include <rocksdb/statistics.h>
-#include <rocksdb/table.h>
 #include <rocksdb/types.h>
 #include <rocksdb/version.h>
-
 #endif // SSD_ROCKSDB_EXPERIMENTAL
-#include "fdbserver/RocksDBCheckpointUtils.actor.h"
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.actor.h"
@@ -47,24 +41,23 @@
 #include "flow/flow.h"
 
 #include "flow/actorcompiler.h" // has to be last include
-#ifdef SSD_ROCKSDB_EXPERIMENTAL
 
+#ifdef SSD_ROCKSDB_EXPERIMENTAL
 // Enforcing rocksdb version to be 6.22.1 or greater.
 static_assert(ROCKSDB_MAJOR >= 6, "Unsupported rocksdb version. Update the rocksdb to 6.22.1 version");
 static_assert(ROCKSDB_MAJOR == 6 ? ROCKSDB_MINOR >= 22 : true,
               "Unsupported rocksdb version. Update the rocksdb to 6.22.1 version");
 static_assert((ROCKSDB_MAJOR == 6 && ROCKSDB_MINOR == 22) ? ROCKSDB_PATCH >= 1 : true,
               "Unsupported rocksdb version. Update the rocksdb to 6.22.1 version");
-
 #endif // SSD_ROCKSDB_EXPERIMENTAL
 
 namespace {
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 
-#define PERSIST_PREFIX "\xff\xff"
-const KeyRef persistVersion = LiteralStringRef(PERSIST_PREFIX "Version");
 using DB = rocksdb::DB*;
 using CF = rocksdb::ColumnFamilyHandle*;
+
+const KeyRef persistVersion = "\xff\xffVersion"_sr;
 
 rocksdb::Slice toSlice(StringRef s) {
 	return rocksdb::Slice(reinterpret_cast<const char*>(s.begin()), s.size());
@@ -81,8 +74,6 @@ rocksdb::ColumnFamilyOptions getCFOptions() {
 
 rocksdb::Options getOptions() {
 	rocksdb::Options options({}, getCFOptions());
-
-	// options.avoid_unnecessary_blocking_io = true;
 	options.create_if_missing = false;
 	options.db_log_dir = SERVER_KNOBS->LOG_DIRECTORY;
 	return options;
@@ -114,27 +105,21 @@ Error statusToError(const rocksdb::Status& s) {
 	}
 }
 
+// RocksDBCheckpointReader reads a RocksDB checkpoint, and returns the key-value pairs via nextKeyValues.
 class RocksDBCheckpointReader : public ICheckpointReader {
+public:
+	RocksDBCheckpointReader(const CheckpointMetaData& checkpoint, UID logID);
+
+	Future<Void> init(StringRef token) override;
+
+	Future<RangeResult> nextKeyValues(const int rowLimit, const int byteLimit) override;
+
+	Future<Standalone<StringRef>> nextChunk(const int byteLimit) { throw not_implemented(); }
+
+	Future<Void> close() { return doClose(this); }
+
 private:
 	struct Reader : IThreadPoolReceiver {
-		explicit Reader(DB& db) : db(db), cf(nullptr) {
-			if (g_network->isSimulated()) {
-				// In simulation, increasing the read operation timeouts to 5 minutes, as some of the tests have
-				// very high load and single read thread cannot process all the load within the timeouts.
-				readRangeTimeout = 5 * 60;
-			} else {
-				readRangeTimeout = SERVER_KNOBS->ROCKSDB_READ_RANGE_TIMEOUT;
-			}
-		}
-
-		~Reader() override {
-			// if (db) {
-			// 	delete db;
-			// }
-		}
-
-		void init() override {}
-
 		struct OpenAction : TypedAction<Reader, OpenAction> {
 			OpenAction(std::string path, KeyRange range, Version version)
 			  : path(std::move(path)), range(range), version(version) {}
@@ -147,74 +132,6 @@ private:
 			ThreadReturnPromise<Void> done;
 		};
 
-		void action(OpenAction& a) {
-			ASSERT(cf == nullptr);
-
-			std::vector<std::string> columnFamilies;
-			rocksdb::Options options = getOptions();
-			rocksdb::Status status = rocksdb::DB::ListColumnFamilies(options, a.path, &columnFamilies);
-			if (std::find(columnFamilies.begin(), columnFamilies.end(), "default") == columnFamilies.end()) {
-				columnFamilies.push_back("default");
-			}
-
-			rocksdb::ColumnFamilyOptions cfOptions = getCFOptions();
-			std::vector<rocksdb::ColumnFamilyDescriptor> descriptors;
-			for (const std::string& name : columnFamilies) {
-				descriptors.push_back(rocksdb::ColumnFamilyDescriptor{ name, cfOptions });
-			}
-
-			std::vector<rocksdb::ColumnFamilyHandle*> handles;
-			status = rocksdb::DB::OpenForReadOnly(options, a.path, descriptors, &handles, &db);
-
-			if (!status.ok()) {
-				logRocksDBError(status, "OpenForReadOnly");
-				a.done.sendError(statusToError(status));
-				return;
-			}
-
-			for (rocksdb::ColumnFamilyHandle* handle : handles) {
-				if (handle->GetName() == SERVER_KNOBS->DEFAULT_FDB_ROCKSDB_COLUMN_FAMILY) {
-					cf = handle;
-					break;
-				}
-			}
-
-			ASSERT(db != nullptr && cf != nullptr);
-
-			begin = a.range.begin;
-			end = a.range.end;
-
-			TraceEvent(SevInfo, "RocksDBCheckpointReaderInit")
-			    .detail("Path", a.path)
-			    .detail("Method", "OpenForReadOnly")
-			    .detail("ColumnFamily", cf->GetName())
-			    .detail("Begin", begin)
-			    .detail("End", end);
-
-			rocksdb::PinnableSlice value;
-			rocksdb::ReadOptions readOptions = getReadOptions();
-			status = db->Get(readOptions, cf, toSlice(persistVersion), &value);
-
-			if (!status.ok() && !status.IsNotFound()) {
-				logRocksDBError(status, "Checkpoint");
-				a.done.sendError(statusToError(status));
-				return;
-			}
-
-			const Version version = status.IsNotFound()
-			                            ? latestVersion
-			                            : BinaryReader::fromStringRef<Version>(toStringRef(value), Unversioned());
-
-			ASSERT(version == a.version);
-
-			// rocksdb::ReadOptions readOptions = getReadOptions();
-			// readOptions.iterate_upper_bound = &end;
-			cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(readOptions, cf));
-			cursor->Seek(toSlice(begin));
-
-			a.done.send(Void());
-		}
-
 		struct CloseAction : TypedAction<Reader, CloseAction> {
 			CloseAction(std::string path, bool deleteOnClose) : path(path), deleteOnClose(deleteOnClose) {}
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
@@ -223,36 +140,6 @@ private:
 			bool deleteOnClose;
 			ThreadReturnPromise<Void> done;
 		};
-
-		void action(CloseAction& a) {
-			if (db == nullptr) {
-				a.done.send(Void());
-				return;
-			}
-
-			rocksdb::Status s = db->Close();
-			if (!s.ok()) {
-				logRocksDBError(s, "Close");
-			}
-
-			if (a.deleteOnClose) {
-				std::set<std::string> columnFamilies{ "default" };
-				columnFamilies.insert(SERVER_KNOBS->DEFAULT_FDB_ROCKSDB_COLUMN_FAMILY);
-				std::vector<rocksdb::ColumnFamilyDescriptor> descriptors;
-				for (const std::string& name : columnFamilies) {
-					descriptors.push_back(rocksdb::ColumnFamilyDescriptor{ name, getCFOptions() });
-				}
-				s = rocksdb::DestroyDB(a.path, getOptions(), descriptors);
-				if (!s.ok()) {
-					logRocksDBError(s, "Destroy");
-				} else {
-					TraceEvent("RocksDBCheckpointReader").detail("Path", a.path).detail("Method", "Destroy");
-				}
-			}
-
-			TraceEvent("RocksDBCheckpointReader").detail("Path", a.path).detail("Method", "Close");
-			a.done.send(Void());
-		}
 
 		struct ReadRangeAction : TypedAction<Reader, ReadRangeAction>, FastAllocated<ReadRangeAction> {
 			ReadRangeAction(int rowLimit, int byteLimit)
@@ -265,65 +152,16 @@ private:
 			ThreadReturnPromise<RangeResult> result;
 		};
 
-		void action(ReadRangeAction& a) {
-			const double readBeginTime = timer_monotonic();
+		explicit Reader(DB& db);
+		~Reader() override {}
 
-			if (readBeginTime - a.startTime > readRangeTimeout) {
-				TraceEvent(SevWarn, "RocksDBCheckpointReaderError")
-				    .detail("Error", "Read range request timedout")
-				    .detail("Method", "ReadRangeAction")
-				    .detail("Timeout value", readRangeTimeout);
-				a.result.sendError(transaction_too_old());
-				return;
-			}
+		void init() override {}
 
-			RangeResult result;
-			if (a.rowLimit == 0 || a.byteLimit == 0) {
-				a.result.send(result);
-				return;
-			}
+		void action(OpenAction& a);
 
-			ASSERT(a.rowLimit > 0);
+		void action(CloseAction& a);
 
-			int accumulatedBytes = 0;
-			rocksdb::Status s;
-			while (cursor->Valid() && toStringRef(cursor->key()) < end) {
-				KeyValueRef kv(toStringRef(cursor->key()), toStringRef(cursor->value()));
-				accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
-				result.push_back_deep(result.arena(), kv);
-				// Calling `cursor->Next()` is potentially expensive, so short-circut here just in case.
-				cursor->Next();
-				if (result.size() >= a.rowLimit || accumulatedBytes >= a.byteLimit) {
-					break;
-				}
-				if (timer_monotonic() - a.startTime > readRangeTimeout) {
-					TraceEvent(SevWarn, "RocksDBCheckpointReaderError")
-					    .detail("Error", "Read range request timedout")
-					    .detail("Method", "ReadRangeAction")
-					    .detail("Timeout value", readRangeTimeout);
-					a.result.sendError(transaction_too_old());
-					delete (cursor.release());
-					return;
-				}
-			}
-
-			s = cursor->status();
-
-			if (!s.ok()) {
-				logRocksDBError(s, "ReadRange");
-				a.result.sendError(statusToError(s));
-				return;
-			}
-
-			// throw end_of_stream();
-
-			if (result.empty()) {
-				delete (cursor.release());
-				a.result.sendError(end_of_stream());
-			} else {
-				a.result.send(result);
-			}
-		}
+		void action(ReadRangeAction& a);
 
 		DB& db;
 		CF cf;
@@ -333,61 +171,7 @@ private:
 		std::unique_ptr<rocksdb::Iterator> cursor;
 	};
 
-public:
-	RocksDBCheckpointReader(const CheckpointMetaData& checkpoint, UID logID) : id(logID), version(checkpoint.version) {
-		RocksDBCheckpoint rocksCheckpoint = getRocksCheckpoint(checkpoint);
-		this->path = rocksCheckpoint.checkpointDir;
-		if (g_network->isSimulated()) {
-			readThreads = CoroThreadPool::createThreadPool();
-		} else {
-			readThreads = createGenericThreadPool();
-		}
-		readThreads->addThread(new Reader(db), "fdb-rocks-rd");
-	}
-
-	Future<Void> init(StringRef token) override {
-		if (openFuture.isValid()) {
-			return openFuture;
-		}
-
-		KeyRange range = BinaryReader::fromStringRef<KeyRange>(token, IncludeVersion());
-		auto a = std::make_unique<Reader::OpenAction>(this->path, range, this->version);
-		openFuture = a->done.getFuture();
-		readThreads->post(a.release());
-		return openFuture;
-	}
-
-	Future<RangeResult> nextKeyValues(const int rowLimit, const int byteLimit) override {
-		auto a = std::make_unique<Reader::ReadRangeAction>(rowLimit, byteLimit);
-		auto res = a->result.getFuture();
-		readThreads->post(a.release());
-		return res;
-	}
-
-	Future<Standalone<StringRef>> nextChunk(const int byteLimit) { throw not_implemented(); }
-
-	Future<Void> close() { return doClose(this); }
-
-private:
-	ACTOR static Future<Void> doClose(RocksDBCheckpointReader* self) {
-		if (self == nullptr)
-			return Void();
-
-		auto a = new Reader::CloseAction(self->path, false);
-		auto f = a->done.getFuture();
-		self->readThreads->post(a);
-		wait(f);
-
-		if (self != nullptr) {
-			wait(self->readThreads->stop());
-		}
-
-		if (self != nullptr) {
-			delete self;
-		}
-
-		return Void();
-	}
+	ACTOR static Future<Void> doClose(RocksDBCheckpointReader* self);
 
 	DB db = nullptr;
 	std::string path;
@@ -397,8 +181,223 @@ private:
 	Future<Void> openFuture;
 };
 
+RocksDBCheckpointReader::RocksDBCheckpointReader(const CheckpointMetaData& checkpoint, UID logID)
+  : id(logID), version(checkpoint.version) {
+	RocksDBCheckpoint rocksCheckpoint = getRocksCheckpoint(checkpoint);
+	this->path = rocksCheckpoint.checkpointDir;
+	if (g_network->isSimulated()) {
+		readThreads = CoroThreadPool::createThreadPool();
+	} else {
+		readThreads = createGenericThreadPool();
+	}
+	readThreads->addThread(new Reader(db), "fdb-rocks-rd");
+}
+
+Future<Void> RocksDBCheckpointReader::init(StringRef token) {
+	if (openFuture.isValid()) {
+		return openFuture;
+	}
+
+	KeyRange range = BinaryReader::fromStringRef<KeyRange>(token, IncludeVersion());
+	auto a = std::make_unique<Reader::OpenAction>(this->path, range, this->version);
+	openFuture = a->done.getFuture();
+	readThreads->post(a.release());
+	return openFuture;
+}
+
+Future<RangeResult> RocksDBCheckpointReader::nextKeyValues(const int rowLimit, const int byteLimit) {
+	auto a = std::make_unique<Reader::ReadRangeAction>(rowLimit, byteLimit);
+	auto res = a->result.getFuture();
+	readThreads->post(a.release());
+	return res;
+}
+
+RocksDBCheckpointReader::Reader::Reader(DB& db) : db(db), cf(nullptr) {
+	if (g_network->isSimulated()) {
+		// In simulation, increasing the read operation timeouts to 5 minutes, as some of the tests have
+		// very high load and single read thread cannot process all the load within the timeouts.
+		readRangeTimeout = 5 * 60;
+	} else {
+		readRangeTimeout = SERVER_KNOBS->ROCKSDB_READ_RANGE_TIMEOUT;
+	}
+}
+void RocksDBCheckpointReader::Reader::action(RocksDBCheckpointReader::Reader::OpenAction& a) {
+	ASSERT(cf == nullptr);
+
+	std::vector<std::string> columnFamilies;
+	rocksdb::Options options = getOptions();
+	rocksdb::Status status = rocksdb::DB::ListColumnFamilies(options, a.path, &columnFamilies);
+	if (std::find(columnFamilies.begin(), columnFamilies.end(), "default") == columnFamilies.end()) {
+		columnFamilies.push_back("default");
+	}
+
+	rocksdb::ColumnFamilyOptions cfOptions = getCFOptions();
+	std::vector<rocksdb::ColumnFamilyDescriptor> descriptors;
+	for (const std::string& name : columnFamilies) {
+		descriptors.push_back(rocksdb::ColumnFamilyDescriptor{ name, cfOptions });
+	}
+
+	std::vector<rocksdb::ColumnFamilyHandle*> handles;
+	status = rocksdb::DB::OpenForReadOnly(options, a.path, descriptors, &handles, &db);
+
+	if (!status.ok()) {
+		logRocksDBError(status, "OpenForReadOnly");
+		a.done.sendError(statusToError(status));
+		return;
+	}
+
+	for (rocksdb::ColumnFamilyHandle* handle : handles) {
+		if (handle->GetName() == SERVER_KNOBS->DEFAULT_FDB_ROCKSDB_COLUMN_FAMILY) {
+			cf = handle;
+			break;
+		}
+	}
+
+	ASSERT(db != nullptr && cf != nullptr);
+
+	begin = a.range.begin;
+	end = a.range.end;
+
+	TraceEvent(SevInfo, "RocksDBCheckpointReaderInit")
+	    .detail("Path", a.path)
+	    .detail("Method", "OpenForReadOnly")
+	    .detail("ColumnFamily", cf->GetName())
+	    .detail("Begin", begin)
+	    .detail("End", end);
+
+	rocksdb::PinnableSlice value;
+	rocksdb::ReadOptions readOptions = getReadOptions();
+	status = db->Get(readOptions, cf, toSlice(persistVersion), &value);
+
+	if (!status.ok() && !status.IsNotFound()) {
+		logRocksDBError(status, "Checkpoint");
+		a.done.sendError(statusToError(status));
+		return;
+	}
+
+	const Version version =
+	    status.IsNotFound() ? latestVersion : BinaryReader::fromStringRef<Version>(toStringRef(value), Unversioned());
+
+	ASSERT(version == a.version);
+
+	readOptions.iterate_upper_bound = &end;
+	cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(readOptions, cf));
+	cursor->Seek(toSlice(begin));
+
+	a.done.send(Void());
+}
+
+void RocksDBCheckpointReader::Reader::action(RocksDBCheckpointReader::Reader::CloseAction& a) {
+	if (db == nullptr) {
+		a.done.send(Void());
+		return;
+	}
+
+	rocksdb::Status s = db->Close();
+	if (!s.ok()) {
+		logRocksDBError(s, "Close");
+	}
+
+	if (a.deleteOnClose) {
+		std::set<std::string> columnFamilies{ "default" };
+		columnFamilies.insert(SERVER_KNOBS->DEFAULT_FDB_ROCKSDB_COLUMN_FAMILY);
+		std::vector<rocksdb::ColumnFamilyDescriptor> descriptors;
+		for (const std::string& name : columnFamilies) {
+			descriptors.push_back(rocksdb::ColumnFamilyDescriptor{ name, getCFOptions() });
+		}
+		s = rocksdb::DestroyDB(a.path, getOptions(), descriptors);
+		if (!s.ok()) {
+			logRocksDBError(s, "Destroy");
+		} else {
+			TraceEvent("RocksDBCheckpointReader").detail("Path", a.path).detail("Method", "Destroy");
+		}
+	}
+
+	TraceEvent("RocksDBCheckpointReader").detail("Path", a.path).detail("Method", "Close");
+	a.done.send(Void());
+}
+
+void RocksDBCheckpointReader::Reader::action(RocksDBCheckpointReader::Reader::ReadRangeAction& a) {
+	const double readBeginTime = timer_monotonic();
+
+	if (readBeginTime - a.startTime > readRangeTimeout) {
+		TraceEvent(SevWarn, "RocksDBCheckpointReaderError")
+		    .detail("Error", "Read range request timedout")
+		    .detail("Method", "ReadRangeAction")
+		    .detail("Timeout value", readRangeTimeout);
+		a.result.sendError(transaction_too_old());
+		return;
+	}
+
+	RangeResult result;
+	if (a.rowLimit == 0 || a.byteLimit == 0) {
+		a.result.send(result);
+		return;
+	}
+
+	ASSERT(a.rowLimit > 0);
+
+	int accumulatedBytes = 0;
+	rocksdb::Status s;
+	while (cursor->Valid() && toStringRef(cursor->key()) < end) {
+		KeyValueRef kv(toStringRef(cursor->key()), toStringRef(cursor->value()));
+		accumulatedBytes += sizeof(KeyValueRef) + kv.expectedSize();
+		result.push_back_deep(result.arena(), kv);
+		cursor->Next();
+		if (result.size() >= a.rowLimit || accumulatedBytes >= a.byteLimit) {
+			break;
+		}
+		if (timer_monotonic() - a.startTime > readRangeTimeout) {
+			TraceEvent(SevWarn, "RocksDBCheckpointReaderError")
+			    .detail("Error", "Read range request timedout")
+			    .detail("Method", "ReadRangeAction")
+			    .detail("Timeout value", readRangeTimeout);
+			a.result.sendError(transaction_too_old());
+			delete (cursor.release());
+			return;
+		}
+	}
+
+	s = cursor->status();
+
+	if (!s.ok()) {
+		logRocksDBError(s, "ReadRange");
+		a.result.sendError(statusToError(s));
+		delete (cursor.release());
+		return;
+	}
+
+	if (result.empty()) {
+		delete (cursor.release());
+		a.result.sendError(end_of_stream());
+	} else {
+		a.result.send(result);
+	}
+}
+
+ACTOR Future<Void> RocksDBCheckpointReader::doClose(RocksDBCheckpointReader* self) {
+	if (self == nullptr)
+		return Void();
+
+	auto a = new RocksDBCheckpointReader::Reader::CloseAction(self->path, false);
+	auto f = a->done.getFuture();
+	self->readThreads->post(a);
+	wait(f);
+
+	if (self != nullptr) {
+		wait(self->readThreads->stop());
+	}
+
+	if (self != nullptr) {
+		delete self;
+	}
+
+	return Void();
+}
 #endif // SSD_ROCKSDB_EXPERIMENTAL
 
+// RocksDBCFCheckpointReader reads a exported RocksDB Column Family checkpoint, and returns the serialized checkpoint
+// via nextChunk.
 class RocksDBCFCheckpointReader : public ICheckpointReader {
 public:
 	RocksDBCFCheckpointReader(const CheckpointMetaData& checkpoint, UID logID)
@@ -408,7 +407,6 @@ public:
 
 	Future<RangeResult> nextKeyValues(const int rowLimit, const int byteLimit) override { throw not_implemented(); }
 
-	// Returns the next chunk of serialized checkpoint.
 	Future<Standalone<StringRef>> nextChunk(const int byteLimit) override;
 
 	Future<Void> close() override;
@@ -455,172 +453,6 @@ private:
 	int offset_;
 	std::string path_;
 };
-
-#ifdef SSD_ROCKSDB_EXPERIMENTAL
-ACTOR Future<Void> fetchCheckpointRange(Database cx,
-                                        std::shared_ptr<CheckpointMetaData> metaData,
-                                        KeyRange range,
-                                        std::string dir,
-                                        std::shared_ptr<rocksdb::SstFileWriter> writer,
-                                        std::function<Future<Void>(const CheckpointMetaData&)> cFun,
-                                        int maxRetries = 3) {
-	state std::string localFile = dir + "/" + metaData->checkpointID.toString() + ".sst";
-	RocksDBCheckpoint rcp = getRocksCheckpoint(*metaData);
-	TraceEvent("FetchCheckpointRange")
-	    .detail("InitialState", metaData->toString())
-	    .detail("RocksCheckpoint", rcp.toString());
-
-	for (const auto& file : rcp.fetchedFiles) {
-		ASSERT(!file.range.intersects(range));
-	}
-
-	state UID ssID = metaData->ssID;
-	state Transaction tr(cx);
-	state StorageServerInterface ssi;
-	loop {
-		try {
-			Optional<Value> ss = wait(tr.get(serverListKeyFor(ssID)));
-			if (!ss.present()) {
-				throw checkpoint_not_found();
-			}
-			ssi = decodeServerListValue(ss.get());
-			break;
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
-
-	ASSERT(ssi.id() == ssID);
-
-	state int attempt = 0;
-	state int64_t totalBytes = 0;
-	state rocksdb::Status status;
-	state Optional<Error> error;
-	loop {
-		totalBytes = 0;
-		++attempt;
-		try {
-			TraceEvent("FetchCheckpointRangeBegin")
-			    .detail("CheckpointID", metaData->checkpointID)
-			    .detail("Range", range.toString())
-			    .detail("TargetStorageServerUID", ssID)
-			    .detail("LocalFile", localFile)
-			    .detail("Attempt", attempt)
-			    .log();
-			// status = writer.Finish();
-			// if (!status.ok()) {
-			// 	std::cout << "SstFileWriter close failure: " << status.ToString() << std::endl;
-			// 	break;
-			// }
-
-			wait(IAsyncFileSystem::filesystem()->deleteFile(localFile, true));
-			status = writer->Open(localFile);
-			if (!status.ok()) {
-				Error e = statusToError(status);
-				std::cout << "SstFileWriter open failure: " << status.ToString() << std::endl;
-				TraceEvent("FetchCheckpointRangeOpenFileError")
-				    .detail("LocalFile", localFile)
-				    .detail("Status", status.ToString());
-				throw e;
-			}
-			// const int64_t flags = IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE |
-			//                       IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_NO_AIO;
-			// state Reference<IAsyncFile> asyncFile = wait(IAsyncFileSystem::filesystem()->open(localFile, flags,
-			// 0666));
-
-			state ReplyPromiseStream<FetchCheckpointKeyValuesStreamReply> stream =
-			    ssi.fetchCheckpointKeyValues.getReplyStream(
-			        FetchCheckpointKeyValuesRequest(metaData->checkpointID, range));
-			TraceEvent("FetchCheckpointKeyValuesReceivingData")
-			    .detail("CheckpointID", metaData->checkpointID)
-			    .detail("Range", range.toString())
-			    .detail("TargetStorageServerUID", ssID.toString())
-			    .detail("LocalFile", localFile)
-			    .detail("Attempt", attempt)
-			    .log();
-
-			loop {
-				FetchCheckpointKeyValuesStreamReply rep = waitNext(stream.getFuture());
-				// wait(asyncFile->write(rep.data.begin(), rep.size, offset));
-				// wait(asyncFile->flush());
-				//  += rep.data.size();
-				for (int i = 0; i < rep.data.size(); ++i) {
-					// std::cout << "Writing key: " << rep.data[i].key.toString()
-					//           << ", value: " << rep.data[i].value.toString() << std::endl;
-					status = writer->Put(toSlice(rep.data[i].key), toSlice(rep.data[i].value));
-					if (!status.ok()) {
-						Error e = statusToError(status);
-						std::cout << "SstFileWriter put failure: " << status.ToString() << std::endl;
-						TraceEvent("FetchCheckpointRangeWriteError")
-						    .detail("LocalFile", localFile)
-						    .detail("Key", rep.data[i].key.toString())
-						    .detail("Value", rep.data[i].value.toString())
-						    .detail("Status", status.ToString());
-						throw e;
-					}
-					totalBytes += rep.data[i].expectedSize();
-				}
-			}
-		} catch (Error& e) {
-			Error err = e;
-			if (totalBytes > 0) {
-				status = writer->Finish();
-				if (!status.ok()) {
-					std::cout << "SstFileWriter finish error: " << status.ToString() << std::endl;
-					err = statusToError(status);
-				}
-			}
-			if (err.code() != error_code_end_of_stream) {
-				TraceEvent("FetchCheckpointFileError")
-				    .errorUnsuppressed(err)
-				    .detail("CheckpointID", metaData->checkpointID)
-				    .detail("Range", range.toString())
-				    .detail("TargetStorageServerUID", ssID.toString())
-				    .detail("LocalFile", localFile)
-				    .detail("Attempt", attempt);
-				if (attempt >= maxRetries) {
-					error = err;
-					break;
-				}
-			} else {
-				if (totalBytes > 0) {
-					RocksDBCheckpoint rcp = getRocksCheckpoint(*metaData);
-					rcp.fetchedFiles.emplace_back(localFile, range, totalBytes);
-					rcp.checkpointDir = dir;
-					metaData->serializedCheckpoint = ObjectWriter::toValue(rcp, IncludeVersion());
-				}
-				// TODO: This won't work since it is not transactional.
-				// if (cFun) {
-				// 	wait(cFun(*metaData));
-				// }
-				if (!fileExists(localFile)) {
-					TraceEvent("FetchCheckpointRangeEndFileNotFound")
-					    .detail("CheckpointID", metaData->checkpointID)
-					    .detail("Range", range.toString())
-					    .detail("TargetStorageServerUID", ssID.toString())
-					    .detail("LocalFile", localFile)
-					    .detail("Attempt", attempt)
-					    .detail("TotalBytes", totalBytes);
-				} else {
-					TraceEvent("FetchCheckpointRangeEnd")
-					    .detail("CheckpointID", metaData->checkpointID)
-					    .detail("Range", range.toString())
-					    .detail("TargetStorageServerUID", ssID.toString())
-					    .detail("LocalFile", localFile)
-					    .detail("Attempt", attempt)
-					    .detail("TotalBytes", totalBytes);
-					break;
-				}
-			}
-		}
-	}
-
-	if (error.present()) {
-		throw error.get();
-	}
-
-	return Void();
-}
 
 Future<Void> RocksDBCFCheckpointReader::init(StringRef token) {
 	ASSERT_EQ(this->checkpoint_.getFormat(), RocksDBColumnFamily);
@@ -751,6 +583,151 @@ ACTOR Future<Void> fetchCheckpointFile(Database cx,
 	}
 }
 
+#ifdef SSD_ROCKSDB_EXPERIMENTAL
+// TODO: Return when a file exceeds a limit.
+ACTOR Future<Void> fetchCheckpointRange(Database cx,
+                                        std::shared_ptr<CheckpointMetaData> metaData,
+                                        KeyRange range,
+                                        std::string dir,
+                                        std::shared_ptr<rocksdb::SstFileWriter> writer,
+                                        std::function<Future<Void>(const CheckpointMetaData&)> cFun,
+                                        int maxRetries = 3) {
+	state std::string localFile = dir + "/" + metaData->checkpointID.toString() + ".sst";
+	RocksDBCheckpoint rcp = getRocksCheckpoint(*metaData);
+	TraceEvent("FetchCheckpointRange")
+	    .detail("InitialState", metaData->toString())
+	    .detail("RocksCheckpoint", rcp.toString());
+
+	for (const auto& file : rcp.fetchedFiles) {
+		ASSERT(!file.range.intersects(range));
+	}
+
+	state UID ssID = metaData->ssID;
+	state Transaction tr(cx);
+	state StorageServerInterface ssi;
+	loop {
+		try {
+			Optional<Value> ss = wait(tr.get(serverListKeyFor(ssID)));
+			if (!ss.present()) {
+				throw checkpoint_not_found();
+			}
+			ssi = decodeServerListValue(ss.get());
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+
+	ASSERT(ssi.id() == ssID);
+
+	state int attempt = 0;
+	state int64_t totalBytes = 0;
+	state rocksdb::Status status;
+	state Optional<Error> error;
+	loop {
+		totalBytes = 0;
+		++attempt;
+		try {
+			TraceEvent("FetchCheckpointRangeBegin")
+			    .detail("CheckpointID", metaData->checkpointID)
+			    .detail("Range", range.toString())
+			    .detail("TargetStorageServerUID", ssID)
+			    .detail("LocalFile", localFile)
+			    .detail("Attempt", attempt)
+			    .log();
+
+			wait(IAsyncFileSystem::filesystem()->deleteFile(localFile, true));
+			status = writer->Open(localFile);
+			if (!status.ok()) {
+				Error e = statusToError(status);
+				TraceEvent(SevError, "FetchCheckpointRangeOpenFileError")
+				    .detail("LocalFile", localFile)
+				    .detail("Status", status.ToString());
+				throw e;
+			}
+
+			state ReplyPromiseStream<FetchCheckpointKeyValuesStreamReply> stream =
+			    ssi.fetchCheckpointKeyValues.getReplyStream(
+			        FetchCheckpointKeyValuesRequest(metaData->checkpointID, range));
+			TraceEvent(SevDebug, "FetchCheckpointKeyValuesReceivingData")
+			    .detail("CheckpointID", metaData->checkpointID)
+			    .detail("Range", range.toString())
+			    .detail("TargetStorageServerUID", ssID.toString())
+			    .detail("LocalFile", localFile)
+			    .detail("Attempt", attempt)
+			    .log();
+
+			loop {
+				FetchCheckpointKeyValuesStreamReply rep = waitNext(stream.getFuture());
+				for (int i = 0; i < rep.data.size(); ++i) {
+					status = writer->Put(toSlice(rep.data[i].key), toSlice(rep.data[i].value));
+					if (!status.ok()) {
+						Error e = statusToError(status);
+						TraceEvent(SevError, "FetchCheckpointRangeWriteError")
+						    .detail("LocalFile", localFile)
+						    .detail("Key", rep.data[i].key.toString())
+						    .detail("Value", rep.data[i].value.toString())
+						    .detail("Status", status.ToString());
+						throw e;
+					}
+					totalBytes += rep.data[i].expectedSize();
+				}
+			}
+		} catch (Error& e) {
+			Error err = e;
+			if (totalBytes > 0) {
+				status = writer->Finish();
+				if (!status.ok()) {
+					err = statusToError(status);
+				}
+			}
+			if (err.code() != error_code_end_of_stream) {
+				TraceEvent("FetchCheckpointFileError")
+				    .errorUnsuppressed(err)
+				    .detail("CheckpointID", metaData->checkpointID)
+				    .detail("Range", range.toString())
+				    .detail("TargetStorageServerUID", ssID.toString())
+				    .detail("LocalFile", localFile)
+				    .detail("Attempt", attempt);
+				if (attempt >= maxRetries) {
+					error = err;
+					break;
+				}
+			} else {
+				if (totalBytes > 0) {
+					RocksDBCheckpoint rcp = getRocksCheckpoint(*metaData);
+					rcp.fetchedFiles.emplace_back(localFile, range, totalBytes);
+					rcp.checkpointDir = dir;
+					metaData->serializedCheckpoint = ObjectWriter::toValue(rcp, IncludeVersion());
+				}
+				if (!fileExists(localFile)) {
+					TraceEvent("FetchCheckpointRangeEndFileNotFound")
+					    .detail("CheckpointID", metaData->checkpointID)
+					    .detail("Range", range.toString())
+					    .detail("TargetStorageServerUID", ssID.toString())
+					    .detail("LocalFile", localFile)
+					    .detail("Attempt", attempt)
+					    .detail("TotalBytes", totalBytes);
+				} else {
+					TraceEvent("FetchCheckpointRangeEnd")
+					    .detail("CheckpointID", metaData->checkpointID)
+					    .detail("Range", range.toString())
+					    .detail("TargetStorageServerUID", ssID.toString())
+					    .detail("LocalFile", localFile)
+					    .detail("Attempt", attempt)
+					    .detail("TotalBytes", totalBytes);
+					break;
+				}
+			}
+		}
+	}
+
+	if (error.present()) {
+		throw error.get();
+	}
+
+	return Void();
+}
 #endif // SSD_ROCKSDB_EXPERIMENTAL
 } // namespace
 
@@ -779,7 +756,6 @@ ACTOR Future<CheckpointMetaData> fetchRocksDBCheckpoint(Database cx,
 		}
 		wait(waitForAll(fs));
 	} else if (metaData->format == RocksDB) {
-		// RocksDBCheckpoint rcp = getRocksCheckpoint(*metaData);
 		std::shared_ptr<rocksdb::SstFileWriter> writer =
 		    std::make_shared<rocksdb::SstFileWriter>(rocksdb::EnvOptions(), rocksdb::Options());
 		wait(fetchCheckpointRange(cx, metaData, metaData->range, dir, writer, cFun));
