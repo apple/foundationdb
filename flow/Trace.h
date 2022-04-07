@@ -35,6 +35,7 @@
 
 #define TRACE_DEFAULT_ROLL_SIZE (10 << 20)
 #define TRACE_DEFAULT_MAX_LOGS_SIZE (10 * TRACE_DEFAULT_ROLL_SIZE)
+#define PRINTABLE_COMPRESS_NULLS 0
 
 inline int fastrand() {
 	static int g_seed = 0;
@@ -343,19 +344,36 @@ struct TraceableStringImpl : std::true_type {
 		}
 		std::string result;
 		result.reserve(size - nonPrintables + (nonPrintables * 4) + numBackslashes);
+		int numNull = 0;
 		for (auto iter = TraceableString<T>::begin(value); !TraceableString<T>::atEnd(value, iter); ++iter) {
 			if (*iter == '\\') {
+				if (numNull > 0) {
+					result += format("[%d]", numNull);
+					numNull = 0;
+				}
 				result.push_back('\\');
 				result.push_back('\\');
 			} else if (isPrintable(*iter)) {
+				if (numNull > 0) {
+					result += format("[%d]", numNull);
+					numNull = 0;
+				}
 				result.push_back(*iter);
 			} else {
 				const uint8_t byte = *iter;
-				result.push_back('\\');
-				result.push_back('x');
-				result.push_back(base16Char(byte / 16));
-				result.push_back(base16Char(byte));
+				if (PRINTABLE_COMPRESS_NULLS && byte == 0) {
+					numNull++;
+				} else {
+					result.push_back('\\');
+					result.push_back('x');
+					result.push_back(base16Char(byte / 16));
+					result.push_back(base16Char(byte));
+				}
 			}
+		}
+		if (numNull > 0) {
+			result += format("[%d]", numNull);
+			numNull = 0;
 		}
 		return result;
 	}
