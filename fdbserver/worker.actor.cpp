@@ -2560,10 +2560,8 @@ ACTOR Future<SWVersion> testSoftwareVersionCompatibility(std::string folder, Pro
 				SWVersion swversion = ObjectReader::fromStringRef<SWVersion>(buf, IncludeVersion());
 				ProtocolVersion lowestCompatibleVersion(swversion.lowestCompatibleProtocolVersion());
 				if (currentVersion >= lowestCompatibleVersion) {
-					TraceEvent(SevInfo, "SWVersionCompatible").log();
 					return swversion;
 				} else {
-					TraceEvent(SevInfo, "SWVersionIncompatible").log();
 					throw incompatible_software_version();
 				}
 			} catch (Error& e) {
@@ -2632,23 +2630,24 @@ ACTOR Future<Void> testAndUpdateSoftwareVersionCompatibility(std::string dataFol
 	TraceEvent(SevInfo, "SWVersionCompatible", processIDUid).detail("SWVersion", swVersion.get());
 
 	if (!swVersion.get().isValid() ||
-	    currentProtocolVersion > ProtocolVersion(swVersion.get().latestProtocolVersion())) {
-		ErrorOr<Void> updateSWVersion = wait(errorOr(updateNewestSoftwareVersion(
+	    currentProtocolVersion > ProtocolVersion(swVersion.get().newestProtocolVersion())) {
+		ErrorOr<Void> updatedSWVersion = wait(errorOr(updateNewestSoftwareVersion(
 		    dataFolder, currentProtocolVersion, currentProtocolVersion, minCompatibleProtocolVersion)));
-		if (updateSWVersion.isError()) {
-			TraceEvent(SevWarnAlways, "SWVersionNotWritten", processIDUid).error(updateSWVersion.getError());
-			throw updateSWVersion.getError();
+		if (updatedSWVersion.isError()) {
+			TraceEvent(SevWarnAlways, "SWVersionNotWritten", processIDUid).error(updatedSWVersion.getError());
+			throw updatedSWVersion.getError();
 		} else {
 			TraceEvent(SevWarnAlways, "NewSWVersionWritten", processIDUid).log();
 		}
-	} else if (currentProtocolVersion < ProtocolVersion(swVersion.get().latestProtocolVersion())) {
+	} else if (currentProtocolVersion < ProtocolVersion(swVersion.get().newestProtocolVersion())) {
 		ErrorOr<Void> updatedSWVersion = wait(
 		    errorOr(updateNewestSoftwareVersion(dataFolder,
 		                                        currentProtocolVersion,
-		                                        ProtocolVersion(swVersion.get().latestProtocolVersion()),
+		                                        ProtocolVersion(swVersion.get().newestProtocolVersion()),
 		                                        ProtocolVersion(swVersion.get().lowestCompatibleProtocolVersion()))));
 		if (updatedSWVersion.isError()) {
 			TraceEvent(SevWarnAlways, "SWVersionNotWritten", processIDUid).error(updatedSWVersion.getError());
+			throw updatedSWVersion.getError();
 		} else {
 			TraceEvent(SevWarnAlways, "SWVersionWritten", processIDUid).log();
 		}
@@ -2710,8 +2709,8 @@ TEST_CASE("/fdbserver/worker/swversion/writeVerifyVersion") {
 	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
 
 	if (!swversion.isError()) {
-		ASSERT(swversion.get().latestProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
-		ASSERT(swversion.get().lastProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
+		ASSERT(swversion.get().newestProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
+		ASSERT(swversion.get().lastRunProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
 		ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withTSS().version());
 	}
 
@@ -2739,8 +2738,8 @@ TEST_CASE("/fdbserver/worker/swversion/runCompatibleOlder") {
 	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
 
 	if (!swversion.isError()) {
-		ASSERT(swversion.get().latestProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
-		ASSERT(swversion.get().lastProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
+		ASSERT(swversion.get().newestProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
+		ASSERT(swversion.get().lastRunProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
 		ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withTSS().version());
 
 		TraceEvent(SevInfo, "UT/swversion/runCompatibleOlder").detail("SWVersion", swversion.get());
@@ -2755,8 +2754,8 @@ TEST_CASE("/fdbserver/worker/swversion/runCompatibleOlder") {
 	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
 
 	if (!swversion.isError()) {
-		ASSERT(swversion.get().latestProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
-		ASSERT(swversion.get().lastProtocolVersion() == ProtocolVersion::withTSS().version());
+		ASSERT(swversion.get().newestProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
+		ASSERT(swversion.get().lastRunProtocolVersion() == ProtocolVersion::withTSS().version());
 		ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withTSS().version());
 
 		TraceEvent(SevInfo, "UT/swversion/runCompatibleOlder").detail("SWVersion", swversion.get());
@@ -2788,8 +2787,8 @@ TEST_CASE("/fdbserver/worker/swversion/runIncompatibleOlder") {
 
 	ASSERT(!swversion.isError());
 	if (!swversion.isError()) {
-		ASSERT(swversion.get().latestProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
-		ASSERT(swversion.get().lastProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
+		ASSERT(swversion.get().newestProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
+		ASSERT(swversion.get().lastRunProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
 		ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withTSS().version());
 	}
 
@@ -2824,8 +2823,8 @@ TEST_CASE("/fdbserver/worker/swversion/runNewer") {
 
 	ASSERT(!swversion.isError());
 	if (!swversion.isError()) {
-		ASSERT(swversion.get().latestProtocolVersion() == ProtocolVersion::withTSS().version());
-		ASSERT(swversion.get().lastProtocolVersion() == ProtocolVersion::withTSS().version());
+		ASSERT(swversion.get().newestProtocolVersion() == ProtocolVersion::withTSS().version());
+		ASSERT(swversion.get().lastRunProtocolVersion() == ProtocolVersion::withTSS().version());
 		ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withCacheRole().version());
 	}
 
@@ -2838,8 +2837,8 @@ TEST_CASE("/fdbserver/worker/swversion/runNewer") {
 	    testSoftwareVersionCompatibility(swversionTestDirName, ProtocolVersion::withStorageInterfaceReadiness())));
 
 	if (!swversion.isError()) {
-		ASSERT(swversion.get().latestProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
-		ASSERT(swversion.get().lastProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
+		ASSERT(swversion.get().newestProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
+		ASSERT(swversion.get().lastRunProtocolVersion() == ProtocolVersion::withStorageInterfaceReadiness().version());
 		ASSERT(swversion.get().lowestCompatibleProtocolVersion() == ProtocolVersion::withTSS().version());
 	}
 
