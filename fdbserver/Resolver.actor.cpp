@@ -586,7 +586,6 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 			std::vector<UID> src, dest;
 			ServerCacheInfo info;
 			std::vector<ptxn::StorageTeamID> srcDstTeams = decodeKeyServersValue(tag_uid, kv.value, src, dest);
-			decodeKeyServersValue(tag_uid, kv.value, src, dest);
 
 			updateTagInfo(src, info, srcDstTeams, info.src_info);
 			updateTagInfo(dest, info, srcDstTeams, info.dest_info);
