@@ -113,7 +113,7 @@ void populateVersionVector(VersionVector& vv,
 
 	// Populate localities.
 	for (int i = 0; localities.size() < (size_t)localityCount; i++) {
-		int8_t locality = deterministicRandom()->randomInt(tagLocalityInvalid+1, INT8_MAX);
+		int8_t locality = deterministicRandom()->randomInt(tagLocalityInvalid + 1, INT8_MAX);
 		if (std::find(localities.begin(), localities.end(), locality) == localities.end()) {
 			localities.push_back(locality);
 		}
@@ -159,6 +159,9 @@ void populateVersionVector(VersionVector& vv,
 	int tagIndex = 0;
 	for (int i = 0; i < localities.size() && tagIndex < tagCount; i++) {
 		for (int j = 0; j < tagsPerLocality && tagIndex < tagCount; j++, tagIndex++) {
+			if (Tag(localities[i], ids[tagIndex]) == invalidTag) {
+				continue; // skip this tag (this version also gets skipped, that's fine)
+			}
 			if (versions[tagIndex] == vv.getMaxVersion()) {
 				tags.emplace(localities[i], ids[tagIndex]);
 				continue; // skip this version; this tag will get the next higher version
