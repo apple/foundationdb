@@ -1374,15 +1374,28 @@ Reference<LogGenerationData> findLogData(
 	return tlogGroup->second;
 }
 
-void serializeMemoryData(const std::vector<std::pair<Version, Standalone<StringRef>>>& values,
-                         TLogSubsequencedMessageSerializer& serializer,
-                         const std::unordered_set<Version>& versionsFromDisk = {}) {
+// corner case : version V is in memory when peeking from memory(happens first)
+// when read from disk, version V is now in disk because spill just happened
+// data on V would be serialized twice and cause version order bug.
+// thus skip it here.
+void serializeMemoryDataSpillByValue(const std::vector<std::pair<Version, Standalone<StringRef>>>& values,
+                                     TLogSubsequencedMessageSerializer& serializer,
+                                     const std::unordered_set<Version>& versionsFromDisk = {}) {
 	for (auto& value : values) {
 		if (versionsFromDisk.find(value.first) != versionsFromDisk.end()) {
-			// corner case : version V is in memory when peeking from memory(happens first)
-			// when read from disk, version V is now in disk because spill just happened
-			// data on V would be serialized twice and cause version order bug.
-			// thus skip it here.
+			continue;
+		}
+		serializer.writeSerializedVersionSection(value.second);
+	}
+}
+
+// similar to serializeMemoryDataSpillByValue, but data from multiple versions can be combined
+// and use the latest version as key.
+void serializeMemoryDataSpillByReference(const std::vector<std::pair<Version, Standalone<StringRef>>>& values,
+                                         TLogSubsequencedMessageSerializer& serializer,
+                                         const Version& latestVersionFromDisk = invalidVersion) {
+	for (auto& value : values) {
+		if (value.first <= latestVersionFromDisk) {
 			continue;
 		}
 		serializer.writeSerializedVersionSection(value.second);
@@ -1399,7 +1412,10 @@ ACTOR Future<Void> servicePeekRequest(
     bool reqOnlySpilled = false) {
 	state std::vector<std::pair<Version, Standalone<StringRef>>> values;
 	state TLogSubsequencedMessageSerializer serializer(req.storageTeamID); // aggregate all values from disk
-	state std::unordered_set<Version> versionsFromDisk; // store versions from disk, to avoid duplicate peek
+	state std::unordered_set<Version>
+	    versionsFromDisk; // for spill by value: versions from disk, to avoid duplicate peek
+	state Version latestVersionFromDisk =
+	    invalidVersion; // for spill by reference: latest version from disk to avoid duplicate peek
 
 	// block until dbInfo is ready, otherwise we won't find the correct TLog group
 	while (self->dbInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
@@ -1492,7 +1508,7 @@ ACTOR Future<Void> servicePeekRequest(
 				endVersion = decodeStorageTeamMessagesKey(kvs.end()[-1].key) + 1;
 				onlySpilled = true;
 			} else {
-				serializeMemoryData(values, serializer, versionsFromDisk);
+				serializeMemoryDataSpillByValue(values, serializer, versionsFromDisk);
 			}
 		} else {
 			// FIXME: Limit to approximately DESIRED_TOTATL_BYTES somehow.
@@ -1512,7 +1528,7 @@ ACTOR Future<Void> servicePeekRequest(
 				auto& kv = kvrefs[i];
 				VectorRef<SpilledData> spilledData;
 				Version currentVersion = decodeVersionFromStorageTeamMessageRefs(kv.key);
-				versionsFromDisk.insert(currentVersion);
+				latestVersionFromDisk = std::max(latestVersionFromDisk, currentVersion);
 				BinaryReader r(kv.value, AssumeVersion(logData->protocolVersion));
 				r >> spilledData;
 				for (const SpilledData& sd : spilledData) {
@@ -1588,7 +1604,7 @@ ACTOR Future<Void> servicePeekRequest(
 				endVersion = lastRefMessageVersion + 1;
 				onlySpilled = true;
 			} else {
-				serializeMemoryData(values, serializer, versionsFromDisk);
+				serializeMemoryDataSpillByReference(values, serializer, latestVersionFromDisk);
 			}
 		}
 	} else {
@@ -1596,7 +1612,8 @@ ACTOR Future<Void> servicePeekRequest(
 			endVersion = logData->persistentDataDurableVersion + 1;
 		} else {
 			peekMessagesFromMemory(req, &values, firstVersion, endVersion, logData);
-			serializeMemoryData(values, serializer);
+			serializeMemoryDataSpillByReference(
+			    values, serializer); // it does not read from disk at all, so both methods are fine
 		}
 		//TraceEvent("TLogPeekResults", self->dbgid).detail("ForAddress", replyPromise.getEndpoint().getPrimaryAddress()).detail("MessageBytes", messages.getLength()).detail("NextEpoch", next_pos.epoch).detail("NextSeq", next_pos.sequence).detail("NowSeq", self->sequence.getNextSequence());
 	}
@@ -2548,13 +2565,11 @@ ACTOR Future<Void> updatePersistentData(Reference<TLogGroupData> self,
 				anyData = true;
 				teamData->nothingPersistent = false; // update nothingPersistent because now doing spilling
 
-				std::unordered_map<Version, int> um;
 				if (logData->shouldSpillByValue(teamData->storageTeamId)) {
 					wr = BinaryWriter(Unversioned());
 					// write real data here as the value to be persisted.
 					for (; msg != teamData->versionMessages.end() && msg->first == currentVersion; ++msg) {
 						wr.serializeBytes(msg->second);
-						um[currentVersion] = msg->second.size();
 					}
 					self->persistentData->set(KeyValueRef(
 					    persistStorageTeamMessagesKey(logData->logId, teamData->storageTeamId, currentVersion),
