@@ -26,6 +26,7 @@
 #include "fdbclient/ClientVersion.h"
 #include "fdbclient/LocalClientAPI.h"
 
+#include "flow/ThreadPrimitives.h"
 #include "flow/network.h"
 #include "flow/Platform.h"
 #include "flow/ProtocolVersion.h"
@@ -469,6 +470,26 @@ ThreadFuture<Void> DLDatabase::createSnapshot(const StringRef& uid, const String
 	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) { return Void(); });
 }
 
+ThreadFuture<DatabaseSharedState*> DLDatabase::createSharedState() {
+	if (!api->databaseCreateSharedState) {
+		return unsupported_operation();
+	}
+	FdbCApi::FDBFuture* f = api->databaseCreateSharedState(db);
+	return toThreadFuture<DatabaseSharedState*>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		DatabaseSharedState* res;
+		FdbCApi::fdb_error_t error = api->futureGetSharedState(f, &res);
+		ASSERT(!error);
+		return res;
+	});
+}
+
+void DLDatabase::setSharedState(DatabaseSharedState* p) {
+	if (!api->databaseSetSharedState) {
+		throw unsupported_operation();
+	}
+	api->databaseSetSharedState(db, p);
+}
+
 // Get network thread busyness
 double DLDatabase::getMainThreadBusyness() {
 	if (api->databaseGetMainThreadBusyness != nullptr) {
@@ -545,6 +566,10 @@ void DLApi::init() {
 	loadClientFunction(&api->createDatabase, lib, fdbCPath, "fdb_create_database", headerVersion >= 610);
 
 	loadClientFunction(&api->databaseOpenTenant, lib, fdbCPath, "fdb_database_open_tenant", headerVersion >= 710);
+	loadClientFunction(
+	    &api->databaseCreateSharedState, lib, fdbCPath, "fdb_database_create_shared_state", headerVersion >= 710);
+	loadClientFunction(
+	    &api->databaseSetSharedState, lib, fdbCPath, "fdb_database_set_shared_state", headerVersion >= 710);
 	loadClientFunction(
 	    &api->databaseCreateTransaction, lib, fdbCPath, "fdb_database_create_transaction", headerVersion >= 0);
 	loadClientFunction(&api->databaseSetOption, lib, fdbCPath, "fdb_database_set_option", headerVersion >= 0);
@@ -643,6 +668,7 @@ void DLApi::init() {
 	    &api->futureGetKeyValueArray, lib, fdbCPath, "fdb_future_get_keyvalue_array", headerVersion >= 0);
 	loadClientFunction(
 	    &api->futureGetMappedKeyValueArray, lib, fdbCPath, "fdb_future_get_mappedkeyvalue_array", headerVersion >= 700);
+	loadClientFunction(&api->futureGetSharedState, lib, fdbCPath, "fdb_future_get_shared_state", headerVersion >= 710);
 	loadClientFunction(&api->futureSetCallback, lib, fdbCPath, "fdb_future_set_callback", headerVersion >= 0);
 	loadClientFunction(&api->futureCancel, lib, fdbCPath, "fdb_future_cancel", headerVersion >= 0);
 	loadClientFunction(&api->futureDestroy, lib, fdbCPath, "fdb_future_destroy", headerVersion >= 0);
@@ -780,7 +806,7 @@ void MultiVersionTransaction::updateTransaction() {
 	TransactionInfo newTr;
 	if (tenant.present()) {
 		ASSERT(tenant.get());
-		auto currentTenant = tenant.get()->tenantVar->get();
+		auto currentTenant = tenant.get()->tenantState->tenantVar->get();
 		if (currentTenant.value) {
 			newTr.transaction = currentTenant.value->createTransaction();
 		}
@@ -1080,7 +1106,7 @@ ThreadFuture<Void> MultiVersionTransaction::onError(Error const& e) {
 
 Optional<TenantName> MultiVersionTransaction::getTenant() {
 	if (tenant.present()) {
-		return tenant.get()->tenantName;
+		return tenant.get()->tenantState->tenantName;
 	} else {
 		return Optional<TenantName>();
 	}
@@ -1214,20 +1240,27 @@ bool MultiVersionTransaction::isValid() {
 
 // MultiVersionTenant
 MultiVersionTenant::MultiVersionTenant(Reference<MultiVersionDatabase> db, StringRef tenantName)
-  : tenantVar(new ThreadSafeAsyncVar<Reference<ITenant>>(Reference<ITenant>(nullptr))), tenantName(tenantName), db(db) {
-	updateTenant();
+  : tenantState(makeReference<TenantState>(db, tenantName)) {}
+
+MultiVersionTenant::~MultiVersionTenant() {
+	tenantState->close();
 }
 
-MultiVersionTenant::~MultiVersionTenant() {}
-
 Reference<ITransaction> MultiVersionTenant::createTransaction() {
-	return Reference<ITransaction>(new MultiVersionTransaction(
-	    db, Reference<MultiVersionTenant>::addRef(this), db->dbState->transactionDefaultOptions));
+	return Reference<ITransaction>(new MultiVersionTransaction(tenantState->db,
+	                                                           Reference<MultiVersionTenant>::addRef(this),
+	                                                           tenantState->db->dbState->transactionDefaultOptions));
+}
+
+MultiVersionTenant::TenantState::TenantState(Reference<MultiVersionDatabase> db, StringRef tenantName)
+  : tenantVar(new ThreadSafeAsyncVar<Reference<ITenant>>(Reference<ITenant>(nullptr))), tenantName(tenantName), db(db),
+    closed(false) {
+	updateTenant();
 }
 
 // Creates a new underlying tenant object whenever the database connection changes. This change is signaled
 // to open transactions via an AsyncVar.
-void MultiVersionTenant::updateTenant() {
+void MultiVersionTenant::TenantState::updateTenant() {
 	Reference<ITenant> tenant;
 	auto currentDb = db->dbState->dbVar->get();
 	if (currentDb.value) {
@@ -1238,11 +1271,25 @@ void MultiVersionTenant::updateTenant() {
 
 	tenantVar->set(tenant);
 
+	Reference<TenantState> self = Reference<TenantState>::addRef(this);
+
 	MutexHolder holder(tenantLock);
-	tenantUpdater = mapThreadFuture<Void, Void>(currentDb.onChange, [this](ErrorOr<Void> result) {
-		updateTenant();
+	if (closed) {
+		return;
+	}
+
+	tenantUpdater = mapThreadFuture<Void, Void>(currentDb.onChange, [self](ErrorOr<Void> result) {
+		self->updateTenant();
 		return Void();
 	});
+}
+
+void MultiVersionTenant::TenantState::close() {
+	MutexHolder holder(tenantLock);
+	closed = true;
+	if (tenantUpdater.isValid()) {
+		tenantUpdater.cancel();
+	}
 }
 
 // MultiVersionDatabase
@@ -1255,7 +1302,6 @@ MultiVersionDatabase::MultiVersionDatabase(MultiVersionApi* api,
   : dbState(new DatabaseState(clusterFilePath, versionMonitorDb)) {
 	dbState->db = db;
 	dbState->dbVar->set(db);
-
 	if (openConnectors) {
 		if (!api->localClientDisabled) {
 			dbState->addClient(api->getLocalClient());
@@ -1370,6 +1416,18 @@ ThreadFuture<Void> MultiVersionDatabase::createSnapshot(const StringRef& uid, co
 	return abortableFuture(f, dbState->dbVar->get().onChange);
 }
 
+ThreadFuture<DatabaseSharedState*> MultiVersionDatabase::createSharedState() {
+	auto dbVar = dbState->dbVar->get();
+	auto f = dbVar.value ? dbVar.value->createSharedState() : ThreadFuture<DatabaseSharedState*>(Never());
+	return abortableFuture(f, dbVar.onChange);
+}
+
+void MultiVersionDatabase::setSharedState(DatabaseSharedState* p) {
+	if (dbState->db) {
+		dbState->db->setSharedState(p);
+	}
+}
+
 // Get network thread busyness
 // Return the busyness for the main thread. When using external clients, take the larger of the local client
 // and the external client's busyness.
@@ -1476,6 +1534,11 @@ void MultiVersionDatabase::DatabaseState::protocolVersionChanged(ProtocolVersion
 		TraceEvent("ProtocolVersionChanged")
 		    .detail("NewProtocolVersion", protocolVersion)
 		    .detail("OldProtocolVersion", dbProtocolVersion);
+		// When the protocol version changes, clear the corresponding entry in the shared state map
+		// so it can be re-initialized. Only do so if there was a valid previous protocol version.
+		if (dbProtocolVersion.present()) {
+			MultiVersionApi::api->clearClusterSharedStateMapEntry(clusterFilePath);
+		}
 
 		dbProtocolVersion = protocolVersion;
 
@@ -1586,8 +1649,15 @@ void MultiVersionDatabase::DatabaseState::updateDatabase(Reference<IDatabase> ne
 			    .detail("ClusterFilePath", clusterFilePath);
 		}
 	}
-
-	dbVar->set(db);
+	if (db.isValid() && dbProtocolVersion.present() && MultiVersionApi::apiVersionAtLeast(710)) {
+		auto updateResult = MultiVersionApi::api->updateClusterSharedStateMap(clusterFilePath, db);
+		auto handler = mapThreadFuture<Void, Void>(updateResult, [this](ErrorOr<Void> result) {
+			dbVar->set(db);
+			return ErrorOr<Void>(Void());
+		});
+	} else {
+		dbVar->set(db);
+	}
 
 	ASSERT(protocolVersionMonitor.isValid());
 	protocolVersionMonitor.cancel();
@@ -2241,6 +2311,31 @@ void MultiVersionApi::updateSupportedVersions() {
 		setNetworkOption(FDBNetworkOptions::SUPPORTED_CLIENT_VERSIONS,
 		                 StringRef(versionStr.begin(), versionStr.size()));
 	}
+}
+
+ThreadFuture<Void> MultiVersionApi::updateClusterSharedStateMap(std::string clusterFilePath, Reference<IDatabase> db) {
+	MutexHolder holder(lock);
+	if (clusterSharedStateMap.find(clusterFilePath) == clusterSharedStateMap.end()) {
+		clusterSharedStateMap[clusterFilePath] = db->createSharedState();
+	} else {
+		ThreadFuture<DatabaseSharedState*> entry = clusterSharedStateMap[clusterFilePath];
+		return mapThreadFuture<DatabaseSharedState*, Void>(entry, [db](ErrorOr<DatabaseSharedState*> result) {
+			if (result.isError()) {
+				return ErrorOr<Void>(result.getError());
+			}
+			auto ssPtr = result.get();
+			db->setSharedState(ssPtr);
+			return ErrorOr<Void>(Void());
+		});
+	}
+	return Void();
+}
+
+void MultiVersionApi::clearClusterSharedStateMapEntry(std::string clusterFilePath) {
+	MutexHolder holder(lock);
+	auto ssPtr = clusterSharedStateMap[clusterFilePath].get();
+	ssPtr->delRef(ssPtr);
+	clusterSharedStateMap.erase(clusterFilePath);
 }
 
 std::vector<std::string> parseOptionValues(std::string valueStr) {

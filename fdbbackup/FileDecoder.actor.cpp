@@ -22,8 +22,13 @@
 #include <cstdlib>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <string>
 #include <vector>
+#include <fcntl.h>
+#ifdef _WIN32
+#include <io.h>
+#endif
 
 #include "fdbbackup/BackupTLSConfig.h"
 #include "fdbclient/BuildFlags.h"
@@ -37,6 +42,7 @@
 #include "fdbclient/MutationList.h"
 #include "flow/ArgParseUtil.h"
 #include "flow/IRandom.h"
+#include "flow/Platform.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
 #include "flow/serialize.h"
@@ -83,7 +89,8 @@ void printDecodeUsage() {
 	             "  --end-version-filter END_VERSION\n"
 	             "                 The version range's end version (exclusive) for filtering.\n"
 	             "  --knob-KNOBNAME KNOBVALUE\n"
-	             "                 Changes a knob value. KNOBNAME should be lowercase."
+	             "                 Changes a knob value. KNOBNAME should be lowercase.\n"
+	             "  -s, --save     Save a copy of downloaded files (default: not saving).\n"
 	             "\n";
 	return;
 }
@@ -100,6 +107,7 @@ struct DecodeParams {
 	std::string log_dir, trace_format, trace_log_group;
 	BackupTLSConfig tlsConfig;
 	bool list_only = false;
+	bool save_file_locally = false;
 	std::string prefix; // Key prefix for filtering
 	Version beginVersionFilter = 0;
 	Version endVersionFilter = std::numeric_limits<Version>::max();
@@ -146,35 +154,15 @@ struct DecodeParams {
 		for (const auto& [knob, value] : knobs) {
 			s.append(", KNOB-").append(knob).append(" = ").append(value);
 		}
+		s.append(", SaveFile: ").append(save_file_locally ? "true" : "false");
 		return s;
 	}
 
 	void updateKnobs() {
-		auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
-		for (const auto& [knobName, knobValueString] : knobs) {
-			try {
-				auto knobValue = g_knobs.parseKnobValue(knobName, knobValueString);
-				g_knobs.setKnob(knobName, knobValue);
-			} catch (Error& e) {
-				if (e.code() == error_code_invalid_option_value) {
-					std::cerr << "WARNING: Invalid value '" << knobValueString << "' for knob option '" << knobName
-					          << "'\n";
-					TraceEvent(SevWarnAlways, "InvalidKnobValue")
-					    .detail("Knob", printable(knobName))
-					    .detail("Value", printable(knobValueString));
-				} else {
-					std::cerr << "ERROR: Failed to set knob option '" << knobName << "': " << e.what() << "\n";
-					TraceEvent(SevError, "FailedToSetKnob")
-					    .errorUnsuppressed(e)
-					    .detail("Knob", printable(knobName))
-					    .detail("Value", printable(knobValueString));
-					throw;
-				}
-			}
-		}
+		IKnobCollection::setupKnobs(knobs);
 
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
-		g_knobs.initialize(Randomize::True, IsSimulated::False);
+		IKnobCollection::getMutableGlobalKnobCollection().initialize(Randomize::False, IsSimulated::False);
 	}
 };
 
@@ -310,6 +298,10 @@ int parseDecodeCommandLine(DecodeParams* param, CSimpleOpt* args) {
 			break;
 		}
 
+		case OPT_SAVE_FILE:
+			param->save_file_locally = true;
+			break;
+
 #ifndef TLS_DISABLED
 		case TLSConfig::OPT_TLS_PLUGIN:
 			args->OptionArg();
@@ -375,16 +367,17 @@ struct VersionedMutations {
  *
  *    DecodeProgress progress(logfile);
  *    wait(progress->openFile(container));
- *    while (!progress->finished()) {
- *        VersionedMutations m = wait(progress->getNextBatch());
- *        ...
+ *    while (1) {
+ *        Optional<VersionedMutations> batch = wait(progress->getNextBatch());
+ *        if (!batch.present()) break;
+ *        ... // process the batch mutations
  *    }
  *
  * Internally, the decoding process is done block by block -- each block is
  * decoded into a list of key/value pairs, which are then decoded into batches
  * of mutations. Because a version's mutations can be split into many key/value
- * pairs, the decoding of mutation batch needs to look ahead one more pair. So
- * at any time this object might have two blocks of data in memory.
+ * pairs, the decoding of mutation needs to look ahead to find all batches that
+ * belong to the same version.
  */
 class DecodeProgress {
 	std::vector<Standalone<VectorRef<KeyValueRef>>> blocks;
@@ -392,31 +385,30 @@ class DecodeProgress {
 
 public:
 	DecodeProgress() = default;
-	DecodeProgress(const LogFile& file) : file(file) {}
+	DecodeProgress(const LogFile& file, bool save) : file(file), save(save) {}
 
-	// If there are no more mutations to pull from the file.
-	bool finished() const { return done; }
+	~DecodeProgress() {
+		if (lfd != -1) {
+			close(lfd);
+		}
+	}
 
 	// Open and loads file into memory
 	Future<Void> openFile(Reference<IBackupContainer> container) { return openFileImpl(this, container); }
 
 	// The following are private APIs:
 
-	// PRECONDITION: finished() must return false before calling this function.
 	// Returns the next batch of mutations along with the arena backing it.
 	// Note the returned batch can be empty when the file has unfinished
 	// version batch data that are in the next file.
-	VersionedMutations getNextBatch() {
-		ASSERT(!finished());
-
-		VersionedMutations vms;
+	Optional<VersionedMutations> getNextBatch() {
 		for (auto& [version, m] : mutationBlocksByVersion) {
 			if (m.isComplete()) {
+				VersionedMutations vms;
 				vms.version = version;
-				std::vector<MutationRef> mutations = fileBackup::decodeMutationLogValue(m.serializedMutations);
-				TraceEvent("Decode").detail("Version", vms.version).detail("N", mutations.size());
-				vms.mutations.insert(vms.mutations.end(), mutations.begin(), mutations.end());
 				vms.serializedMutations = m.serializedMutations;
+				vms.mutations = fileBackup::decodeMutationLogValue(vms.serializedMutations);
+				TraceEvent("Decode").detail("Version", vms.version).detail("N", vms.mutations.size());
 				mutationBlocksByVersion.erase(version);
 				return vms;
 			}
@@ -426,13 +418,27 @@ public:
 		if (!mutationBlocksByVersion.empty()) {
 			TraceEvent(SevWarn, "UnfishedBlocks").detail("NumberOfVersions", mutationBlocksByVersion.size());
 		}
-		done = true;
-		return vms;
+		return Optional<VersionedMutations>();
 	}
 
 	ACTOR static Future<Void> openFileImpl(DecodeProgress* self, Reference<IBackupContainer> container) {
 		Reference<IAsyncFile> fd = wait(container->readFile(self->file.fileName));
 		self->fd = fd;
+		if (self->save) {
+			std::string dir = self->file.fileName;
+			std::size_t found = self->file.fileName.find_last_of('/');
+			if (found != std::string::npos) {
+				std::string path = self->file.fileName.substr(0, found);
+				if (!directoryExists(path)) {
+					platform::createDirectory(path);
+				}
+			}
+			self->lfd = open(self->file.fileName.c_str(), O_WRONLY | O_CREAT | O_TRUNC);
+			if (self->lfd == -1) {
+				TraceEvent(SevError, "OpenLocalFileFailed").detail("File", self->file.fileName);
+				throw platform_error();
+			}
+		}
 		while (!self->eof) {
 			wait(readAndDecodeFile(self));
 		}
@@ -457,9 +463,33 @@ public:
 			}
 
 			// Decode a file block into log_key and log_value chunks
-			Standalone<VectorRef<KeyValueRef>> chunks =
+			state Standalone<VectorRef<KeyValueRef>> chunks =
 			    wait(fileBackup::decodeMutationLogFileBlock(self->fd, self->offset, len));
 			self->blocks.push_back(chunks);
+
+			if (self->save) {
+				ASSERT(self->lfd != -1);
+
+				// Read the chunck one more time
+				state Standalone<StringRef> buf = makeString(len);
+				int rLen = wait(self->fd->read(mutateString(buf), len, self->offset));
+				if (rLen != len)
+					throw restore_bad_read();
+
+				int wlen = write(self->lfd, buf.begin(), len);
+				if (wlen != len) {
+					TraceEvent(SevError, "WriteLocalFileFailed")
+					    .detail("File", self->file.fileName)
+					    .detail("Offset", self->offset)
+					    .detail("Len", len)
+					    .detail("Wrote", wlen);
+					throw platform_error();
+				}
+				TraceEvent("WriteLocalFile")
+				    .detail("Name", self->file.fileName)
+				    .detail("Len", len)
+				    .detail("Offset", self->offset);
+			}
 
 			TraceEvent("ReadFile")
 			    .detail("Name", self->file.fileName)
@@ -483,7 +513,8 @@ public:
 	Reference<IAsyncFile> fd;
 	int64_t offset = 0;
 	bool eof = false;
-	bool done = false;
+	bool save = false;
+	int lfd = -1; // local file descriptor
 };
 
 ACTOR Future<Void> process_file(Reference<IBackupContainer> container, LogFile file, UID uid, DecodeParams params) {
@@ -492,10 +523,14 @@ ACTOR Future<Void> process_file(Reference<IBackupContainer> container, LogFile f
 		return Void();
 	}
 
-	state DecodeProgress progress(file);
+	state DecodeProgress progress(file, params.save_file_locally);
 	wait(progress.openFile(container));
-	while (!progress.finished()) {
-		VersionedMutations vms = progress.getNextBatch();
+	while (true) {
+		auto batch = progress.getNextBatch();
+		if (!batch.present())
+			break;
+
+		const VersionedMutations& vms = batch.get();
 		if (vms.version < params.beginVersionFilter || vms.version >= params.endVersionFilter) {
 			TraceEvent("SkipVersion").detail("Version", vms.version);
 			continue;
@@ -570,10 +605,10 @@ ACTOR Future<Void> decode_logs(DecodeParams params) {
 
 int main(int argc, char** argv) {
 	try {
-		CSimpleOpt* args =
-		    new CSimpleOpt(argc, argv, file_converter::gConverterOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE);
+		std::unique_ptr<CSimpleOpt> args(
+		    new CSimpleOpt(argc, argv, file_converter::gConverterOptions, SO_O_EXACT | SO_O_HYPHEN_TO_UNDERSCORE));
 		file_converter::DecodeParams param;
-		int status = file_converter::parseDecodeCommandLine(&param, args);
+		int status = file_converter::parseDecodeCommandLine(&param, args.get());
 		std::cout << "Params: " << param.toString() << "\n";
 		if (status != FDB_EXIT_SUCCESS) {
 			file_converter::printDecodeUsage();

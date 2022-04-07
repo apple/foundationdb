@@ -63,16 +63,19 @@ private: // data
 	StringRef binaryPath;
 };
 
+class IClosable; // Forward declaration
+
 // FIXME: move this function to a common location
 // spawns a process pointed by `binPath` and the arguments provided at `paramList`,
-// if the process spawned takes more than `maxWaitTime` then it will be killed
-// if isSync is set to true then the process will be synchronously executed
-// if async and in simulator then delay spawning the process to max of maxSimDelayTime
+// if the process spawned takes more than `maxWaitTime` then it will be killed, if `maxWaitTime` < 0, then there won't
+// be timeout if isSync is set to true then the process will be synchronously executed if async and in simulator then
+// delay spawning the process to max of maxSimDelayTime
 ACTOR Future<int> spawnProcess(std::string binPath,
                                std::vector<std::string> paramList,
                                double maxWaitTime,
                                bool isSync,
-                               double maxSimDelayTime);
+                               double maxSimDelayTime,
+                               IClosable* parent = nullptr);
 
 // helper to run all the work related to running the exec command
 ACTOR Future<int> execHelper(ExecCmdValueString* execArg, UID snapUID, std::string folder, std::string role);
