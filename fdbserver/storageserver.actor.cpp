@@ -476,8 +476,6 @@ struct ChangeFeedInfo : ReferenceCounted<ChangeFeedInfo> {
 	}
 
 	void destroy(Version destroyVersion) {
-		emptyVersion = destroyVersion - 1;
-		stopVersion = destroyVersion;
 		removing = true;
 		destroyed = true;
 		moved(range);
