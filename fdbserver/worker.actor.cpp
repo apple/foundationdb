@@ -948,12 +948,10 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 			const auto& allPeers = FlowTransport::transport().getAllPeers();
 			UpdateWorkerHealthRequest req;
 
-			enum WorkerLocation { None, Primary, PrimarySatellite, Remote };
+			enum WorkerLocation { None, Primary, Remote };
 			WorkerLocation workerLocation = None;
 			if (addressesInDbAndPrimaryDc(interf.addresses(), dbInfo)) {
 				workerLocation = Primary;
-			} else if (addressesInDbAndPrimarySatelliteDc(interf.addresses(), dbInfo)) {
-				workerLocation = PrimarySatellite;
 			} else if (addressesInDbAndRemoteDc(interf.addresses(), dbInfo)) {
 				workerLocation = Remote;
 			}
