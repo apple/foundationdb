@@ -177,8 +177,8 @@ class UpgradeTest:
                 continue
             num_proc = len(status["cluster"]["processes"])
             if (num_proc < self.cluster.process_number):
-                print("Health check: {} of {} processes found. Retrying",
-                      num_proc, self.cluster.process_number)
+                print("Health check: {} of {} processes found. Retrying".format(
+                    num_proc, self.cluster.process_number))
                 time.sleep(1)
                 continue
             assert num_proc == self.cluster.process_number, "Number of processes: expected: {}, actual: {}".format(
