@@ -1149,6 +1149,7 @@ ACTOR Future<Void> tLogPopCore(TLogData* self, Tag inputTag, Version to, Referen
 				upTo = logData->logSystem->get()->popPseudoLocalityTag(inputTag, to);
 				tagLocality = tagLocalityLogRouter;
 			} else {
+				ASSERT_WE_THINK(tagLocality == tagLocalityLogRouterMapped);
 				TraceEvent(SevWarn, "TLogPopNoPseudoLocality", self->dbgid)
 				    .detail("Locality", tagLocality)
 				    .detail("Version", upTo);
