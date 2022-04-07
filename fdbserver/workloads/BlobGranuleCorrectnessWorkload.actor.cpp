@@ -29,6 +29,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/SystemData.h"
+#include "fdbserver/BlobGranuleValidation.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
@@ -271,36 +272,6 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		return Void();
 	}
 
-	// FIXME: typedef this pair type and/or chunk list
-	ACTOR Future<std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>>> readFromBlob(
-	    Database cx,
-	    BlobGranuleCorrectnessWorkload* self,
-	    KeyRange range,
-	    Version beginVersion,
-	    Version readVersion) {
-		state RangeResult out;
-		state Standalone<VectorRef<BlobGranuleChunkRef>> chunks;
-		state Transaction tr(cx);
-
-		loop {
-			try {
-				Standalone<VectorRef<BlobGranuleChunkRef>> chunks_ =
-				    wait(tr.readBlobGranules(range, beginVersion, readVersion));
-				chunks = chunks_;
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
-
-		for (const BlobGranuleChunkRef& chunk : chunks) {
-			RangeResult chunkRows = wait(readBlobGranule(chunk, range, beginVersion, readVersion, self->bstore));
-			out.arena().dependsOn(chunkRows.arena());
-			out.append(out.arena(), chunkRows.begin(), chunkRows.size());
-		}
-		return std::pair(out, chunks);
-	}
-
 	// handle retries + errors
 	// It's ok to reset the transaction here because its read version is only used for reading the granule mapping from
 	// the system keyspace
@@ -326,7 +297,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 				Version rv = wait(self->doGrv(&tr));
 				state Version readVersion = rv;
 				std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> blob =
-				    wait(self->readFromBlob(cx, self, threadData->directoryRange, 0, readVersion));
+				    wait(readFromBlob(cx, self->bstore, threadData->directoryRange, 0, readVersion));
 				fmt::print("Directory {0} got {1} RV {2}\n",
 				           threadData->directoryID,
 				           doSetup ? "initial" : "final",
@@ -690,7 +661,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 				}
 
 				std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> blob =
-				    wait(self->readFromBlob(cx, self, range, beginVersion, readVersion));
+				    wait(readFromBlob(cx, self->bstore, range, beginVersion, readVersion));
 				self->validateResult(threadData, blob, startKey, endKey, beginVersion, readVersion);
 
 				int resultBytes = blob.first.expectedSize();
@@ -884,7 +855,7 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 				fmt::print("Directory {0} doing final data check @ {1}\n", threadData->directoryID, readVersion);
 			}
 			std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> blob =
-			    wait(self->readFromBlob(cx, self, threadData->directoryRange, 0, readVersion));
+			    wait(readFromBlob(cx, self->bstore, threadData->directoryRange, 0, readVersion));
 			result = self->validateResult(threadData, blob, 0, std::numeric_limits<uint32_t>::max(), 0, readVersion);
 			finalRowsValidated = blob.first.size();
 

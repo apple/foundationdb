@@ -1,5 +1,5 @@
 /*
- * HealthMonitor.h
+ * fdb_c_types.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,26 +18,30 @@
  * limitations under the License.
  */
 
-#ifndef FDBRPC_HEALTH_MONITOR_H
-#define FDBRPC_HEALTH_MONITOR_H
+#ifndef FDB_C_TYPES_H
+#define FDB_C_TYPES_H
+#pragma once
 
-#include <deque>
-#include <unordered_map>
+#ifndef DLLEXPORT
+#define DLLEXPORT
+#endif
 
-#include <flow/flow.h>
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-class HealthMonitor {
-public:
-	void reportPeerClosed(const NetworkAddress& peerAddress);
-	bool tooManyConnectionsClosed(const NetworkAddress& peerAddress);
-	int closedConnectionsCount(const NetworkAddress& peerAddress);
-	std::unordered_set<NetworkAddress> getRecentClosedPeers();
+/* Pointers to these opaque types represent objects in the FDB API */
+typedef struct FDB_future FDBFuture;
+typedef struct FDB_result FDBResult;
+typedef struct FDB_cluster FDBCluster;
+typedef struct FDB_database FDBDatabase;
+typedef struct FDB_tenant FDBTenant;
+typedef struct FDB_transaction FDBTransaction;
 
-private:
-	void purgeOutdatedHistory();
+typedef int fdb_error_t;
+typedef int fdb_bool_t;
 
-	std::deque<std::pair<double, NetworkAddress>> peerClosedHistory;
-	std::unordered_map<NetworkAddress, int> peerClosedNum;
-};
-
-#endif // FDBRPC_HEALTH_MONITOR_H
+#ifdef __cplusplus
+}
+#endif
+#endif
