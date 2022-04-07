@@ -2165,14 +2165,69 @@ ACTOR Future<GranuleFiles> loadHistoryFiles(Reference<BlobManagerData> bmData, U
 
 // FIXME: trace events for pruning
 
+ACTOR Future<bool> canDeleteFullGranule(Reference<BlobManagerData> self, UID granuleId) {
+	state Transaction tr(self->db);
+	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+	state KeyRange splitRange = blobGranuleSplitKeyRangeFor(granuleId);
+
+	loop {
+		try {
+			state RangeResult splitState = wait(tr.getRange(splitRange, SERVER_KNOBS->BG_MAX_SPLIT_FANOUT));
+			state int i = 0;
+			for (; i < splitState.size(); i++) {
+				UID parent, child;
+				BlobGranuleSplitState st;
+				Version v;
+				std::tie(parent, child) = decodeBlobGranuleSplitKey(splitState[i].key);
+				std::tie(st, v) = decodeBlobGranuleSplitValue(splitState[i].value);
+				// if split state is done, this granule has definitely persisted a snapshot
+				if (st >= BlobGranuleSplitState::Done) {
+					continue;
+				}
+				// if split state isn't even assigned, this granule has definitely not persisted a snapshot
+				if (st <= BlobGranuleSplitState::Initialized) {
+					return false;
+				}
+
+				ASSERT(st == BlobGranuleSplitState::Assigned);
+				// if assigned, granule may or may not have snapshotted. Check files to confirm. Since a re-snapshot is
+				// the first file written for a new granule, any files present mean it has re-snapshotted from this
+				// granule
+				KeyRange granuleFileRange = blobGranuleFileKeyRangeFor(child);
+				RangeResult files = wait(tr.getRange(granuleFileRange, 1));
+				if (files.empty()) {
+					return false;
+				}
+			}
+
+			if (splitState.empty() || !splitState.more) {
+				break;
+			}
+			splitRange = KeyRangeRef(keyAfter(splitState.back().key), splitRange.end);
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+	return true;
+}
+
 /*
  * Deletes all files pertaining to the granule with id granuleId and
  * also removes the history entry for this granule from the system keyspace
  * TODO: ensure cannot fully delete granule that is still splitting!
  */
-ACTOR Future<Void> fullyDeleteGranule(Reference<BlobManagerData> self, UID granuleId, Key historyKey) {
+ACTOR Future<bool> fullyDeleteGranule(Reference<BlobManagerData> self, UID granuleId, Key historyKey) {
 	if (BM_DEBUG) {
 		fmt::print("Fully deleting granule {0}: init\n", granuleId.toString());
+	}
+
+	// if granule is still splitting and files are needed for new sub-granules to re-snapshot, we can only partially
+	// delete the granule, since we need to keep the last snapshot and deltas for splitting
+	bool canFullyDelete = wait(canDeleteFullGranule(self, granuleId));
+	if (!canFullyDelete) {
+		return false;
 	}
 
 	// get files
@@ -2231,7 +2286,7 @@ ACTOR Future<Void> fullyDeleteGranule(Reference<BlobManagerData> self, UID granu
 		fmt::print("Fully deleting granule {0}: success\n", granuleId.toString());
 	}
 
-	return Void();
+	return true;
 }
 
 /*
@@ -2516,25 +2571,32 @@ ACTOR Future<Void> pruneRange(Reference<BlobManagerData> self, KeyRangeRef range
 	// we won't run into any issues with trying to "re-delete" a blob file since deleting
 	// a file that doesn't exist is considered successful
 
+	state std::vector<Future<Void>> partialDeletions;
 	state int i;
 	if (BM_DEBUG) {
 		fmt::print("{0} granules to fully delete\n", toFullyDelete.size());
 	}
 	for (i = toFullyDelete.size() - 1; i >= 0; --i) {
-		UID granuleId;
+		state UID granuleId;
 		Key historyKey;
 		std::tie(granuleId, historyKey) = toFullyDelete[i];
 		// FIXME: consider batching into a single txn (need to take care of txn size limit)
 		if (BM_DEBUG) {
 			fmt::print("About to fully delete granule {0}\n", granuleId.toString());
 		}
-		wait(fullyDeleteGranule(self, granuleId, historyKey));
+		bool success = wait(fullyDeleteGranule(self, granuleId, historyKey));
+		if (!success) {
+			if (BM_DEBUG) {
+				fmt::print("Unable to fully delete granule {0}, doing partial delete instead\n", granuleId.toString());
+			}
+			partialDeletions.emplace_back(partiallyDeleteGranule(self, granuleId, pruneVersion));
+		}
 	}
 
 	if (BM_DEBUG) {
 		fmt::print("{0} granules to partially delete\n", toPartiallyDelete.size());
 	}
-	std::vector<Future<Void>> partialDeletions;
+
 	for (i = toPartiallyDelete.size() - 1; i >= 0; --i) {
 		UID granuleId = toPartiallyDelete[i];
 		if (BM_DEBUG) {
