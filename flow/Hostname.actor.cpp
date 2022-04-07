@@ -61,6 +61,7 @@ ACTOR Future<Void> resolveImpl(Hostname* self) {
 				}
 				self->resolvedAddress = address;
 				self->status = Hostname::RESOLVED;
+				self->resolveFinish.trigger();
 				break;
 			} catch (...) {
 				self->status = Hostname::UNRESOLVED;
