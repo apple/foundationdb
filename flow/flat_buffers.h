@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,6 +35,7 @@
 #include <cstring>
 #include <array>
 #include <unordered_map>
+#include <unordered_set>
 #include <deque>
 #include "flow/FileIdentifier.h"
 #include "flow/ObjectSerializerTraits.h"
@@ -114,16 +115,17 @@ struct vector_like_traits<std::vector<T, Alloc>> : std::true_type {
 	static size_t num_entries(const Vec& v, Context&) {
 		return v.size();
 	}
+
+	// Return an insert_iterator starting with an empty vector. |size| is the
+	// number of elements to be inserted. Implementations may want to allocate
+	// enough memory up front to hold |size| elements.
 	template <class Context>
-	static void reserve(Vec& v, size_t size, Context&) {
+	static insert_iterator insert(Vec& v, size_t size, Context&) {
 		v.clear();
 		v.reserve(size);
-	}
-
-	template <class Context>
-	static insert_iterator insert(Vec& v, Context&) {
 		return std::back_inserter(v);
 	}
+
 	template <class Context>
 	static iterator begin(const Vec& v, Context&) {
 		return v.begin();
@@ -141,16 +143,16 @@ struct vector_like_traits<std::deque<T, Alloc>> : std::true_type {
 	static size_t num_entries(const Deq& v, Context&) {
 		return v.size();
 	}
-	template <class Context>
-	static void reserve(Deq& v, size_t size, Context&) {
-		v.resize(size);
-		v.clear();
-	}
 
+	// Return an insert_iterator starting with an empty vector. |size| is the
+	// number of elements to be inserted. Implementations may want to allocate
+	// enough memory up front to hold |size| elements.
 	template <class Context>
-	static insert_iterator insert(Deq& v, Context&) {
+	static insert_iterator insert(Deq& v, size_t size, Context&) {
+		v.clear();
 		return std::back_inserter(v);
 	}
+
 	template <class Context>
 	static iterator begin(const Deq& v, Context&) {
 		return v.begin();
@@ -168,12 +170,15 @@ struct vector_like_traits<std::array<T, N>> : std::true_type {
 	static size_t num_entries(const Vec& v, Context&) {
 		return N;
 	}
+
+	// Return an insert_iterator starting with an empty vector. |size| is the
+	// number of elements to be inserted. Implementations may want to allocate
+	// enough memory up front to hold |size| elements.
 	template <class Context>
-	static void reserve(Vec& v, size_t size, Context&) {}
-	template <class Context>
-	static insert_iterator insert(Vec& v, Context&) {
+	static insert_iterator insert(Vec& v, size_t s, Context&) {
 		return v.begin();
 	}
+
 	template <class Context>
 	static iterator begin(const Vec& v, Context&) {
 		return v.begin();
@@ -191,13 +196,16 @@ struct vector_like_traits<std::map<Key, T, Compare, Allocator>> : std::true_type
 	static size_t num_entries(const Vec& v, Context&) {
 		return v.size();
 	}
-	template <class Context>
-	static void reserve(Vec& v, size_t size, Context&) {}
 
+	// Return an insert_iterator starting with an empty vector. |size| is the
+	// number of elements to be inserted. Implementations may want to allocate
+	// enough memory up front to hold |size| elements.
 	template <class Context>
-	static insert_iterator insert(Vec& v, Context&) {
+	static insert_iterator insert(Vec& v, size_t s, Context&) {
+		v.clear();
 		return std::inserter(v, v.end());
 	}
+
 	template <class Context>
 	static iterator begin(const Vec& v, Context&) {
 		return v.begin();
@@ -214,13 +222,17 @@ struct vector_like_traits<std::unordered_map<Key, T, Hash, Pred, Allocator>> : s
 	static size_t num_entries(const Vec& v, Context&) {
 		return v.size();
 	}
-	template <class Context>
-	static void reserve(Vec& v, size_t size, Context&) {}
 
+	// Return an insert_iterator starting with an empty vector. |size| is the
+	// number of elements to be inserted. Implementations may want to allocate
+	// enough memory up front to hold |size| elements.
 	template <class Context>
-	static insert_iterator insert(Vec& v, Context&) {
+	static insert_iterator insert(Vec& v, size_t size, Context&) {
+		v.clear();
+		v.reserve(size);
 		return std::inserter(v, v.end());
 	}
+
 	template <class Context>
 	static iterator begin(const Vec& v, Context&) {
 		return v.begin();
@@ -238,13 +250,42 @@ struct vector_like_traits<std::set<Key, Compare, Allocator>> : std::true_type {
 	static size_t num_entries(const Vec& v, Context&) {
 		return v.size();
 	}
-	template <class Context>
-	static void reserve(Vec&, size_t, Context&) {}
 
+	// Return an insert_iterator starting with an empty vector. |size| is the
+	// number of elements to be inserted. Implementations may want to allocate
+	// enough memory up front to hold |size| elements.
 	template <class Context>
-	static insert_iterator insert(Vec& v, Context&) {
+	static insert_iterator insert(Vec& v, size_t size, Context&) {
+		v.clear();
 		return std::inserter(v, v.end());
 	}
+
+	template <class Context>
+	static iterator begin(const Vec& v, Context&) {
+		return v.begin();
+	}
+};
+template <class Key, class Hash, class KeyEqual, class Allocator>
+struct vector_like_traits<std::unordered_set<Key, Hash, KeyEqual, Allocator>> : std::true_type {
+	using Vec = std::unordered_set<Key, Hash, KeyEqual, Allocator>;
+	using value_type = Key;
+	using iterator = typename Vec::const_iterator;
+	using insert_iterator = std::insert_iterator<Vec>;
+
+	template <class Context>
+	static size_t num_entries(const Vec& v, Context&) {
+		return v.size();
+	}
+
+	// Return an insert_iterator starting with an empty vector. |size| is the
+	// number of elements to be inserted. Implementations may want to allocate
+	// enough memory up front to hold |size| elements.
+	template <class Context>
+	static insert_iterator insert(Vec& v, size_t size, Context&) {
+		v.reserve(size);
+		return std::inserter(v, v.end());
+	}
+
 	template <class Context>
 	static iterator begin(const Vec& v, Context&) {
 		return v.begin();
@@ -920,8 +961,7 @@ struct LoadMember {
 			current += current_offset;
 			uint32_t numEntries = interpret_as<uint32_t>(current);
 			current += sizeof(uint32_t);
-			VectorTraits::reserve(member, numEntries, context);
-			auto inserter = VectorTraits::insert(member, context);
+			auto inserter = VectorTraits::insert(member, numEntries, context);
 			for (int i = 0; i < numEntries; ++i) {
 				T value;
 				if (types_current[i] > 0) {
@@ -1056,8 +1096,7 @@ struct LoadSaveHelper : Context {
 		current += current_offset;
 		uint32_t numEntries = interpret_as<uint32_t>(current);
 		current += sizeof(uint32_t);
-		VectorTraits::reserve(member, numEntries, this->context());
-		auto inserter = VectorTraits::insert(member, this->context());
+		auto inserter = VectorTraits::insert(member, numEntries, this->context());
 		for (uint32_t i = 0; i < numEntries; ++i) {
 			T value;
 			load_helper(value, current, this->context());

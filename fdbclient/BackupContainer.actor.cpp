@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -256,7 +256,8 @@ std::vector<std::string> IBackupContainer::getURLFormats() {
 
 // Get an IBackupContainer based on a container URL string
 Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& url,
-                                                            Optional<std::string> const& encryptionKeyFileName) {
+                                                            const Optional<std::string>& proxy,
+                                                            const Optional<std::string>& encryptionKeyFileName) {
 	static std::map<std::string, Reference<IBackupContainer>> m_cache;
 
 	Reference<IBackupContainer>& r = m_cache[url];
@@ -273,7 +274,7 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 			// The URL parameters contain blobstore endpoint tunables as well as possible backup-specific options.
 			S3BlobStoreEndpoint::ParametersT backupParams;
 			Reference<S3BlobStoreEndpoint> bstore =
-			    S3BlobStoreEndpoint::fromString(url, &resource, &lastOpenError, &backupParams);
+			    S3BlobStoreEndpoint::fromString(url, proxy, &resource, &lastOpenError, &backupParams);
 
 			if (resource.empty())
 				throw backup_invalid_url();
@@ -317,7 +318,7 @@ Reference<IBackupContainer> IBackupContainer::openContainer(const std::string& u
 
 // Get a list of URLS to backup containers based on some a shorter URL.  This function knows about some set of supported
 // URL types which support this sort of backup discovery.
-ACTOR Future<std::vector<std::string>> listContainers_impl(std::string baseURL) {
+ACTOR Future<std::vector<std::string>> listContainers_impl(std::string baseURL, Optional<std::string> proxy) {
 	try {
 		StringRef u(baseURL);
 		if (u.startsWith("file://"_sr)) {
@@ -327,8 +328,8 @@ ACTOR Future<std::vector<std::string>> listContainers_impl(std::string baseURL) 
 			std::string resource;
 
 			S3BlobStoreEndpoint::ParametersT backupParams;
-			Reference<S3BlobStoreEndpoint> bstore =
-			    S3BlobStoreEndpoint::fromString(baseURL, &resource, &IBackupContainer::lastOpenError, &backupParams);
+			Reference<S3BlobStoreEndpoint> bstore = S3BlobStoreEndpoint::fromString(
+			    baseURL, proxy, &resource, &IBackupContainer::lastOpenError, &backupParams);
 
 			if (!resource.empty()) {
 				TraceEvent(SevWarn, "BackupContainer")
@@ -370,8 +371,9 @@ ACTOR Future<std::vector<std::string>> listContainers_impl(std::string baseURL) 
 	}
 }
 
-Future<std::vector<std::string>> IBackupContainer::listContainers(const std::string& baseURL) {
-	return listContainers_impl(baseURL);
+Future<std::vector<std::string>> IBackupContainer::listContainers(const std::string& baseURL,
+                                                                  const Optional<std::string>& proxy) {
+	return listContainers_impl(baseURL, proxy);
 }
 
 ACTOR Future<Version> timeKeeperVersionFromDatetime(std::string datetime, Database db) {

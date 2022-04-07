@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -53,6 +53,13 @@
 extern "C" int g_expect_full_pointermap;
 extern const char* getSourceVersion();
 
+ISimulator::ISimulator()
+  : desiredCoordinators(1), physicalDatacenters(1), processesPerMachine(0), listenersPerProcess(1), usableRegions(1),
+    allowLogSetKills(true), tssMode(TSSMode::Disabled), isStopped(false), lastConnectionFailure(0),
+    connectionFailuresDisableDuration(0), speedUpSimulation(false), backupAgents(BackupAgentType::WaitForType),
+    drAgents(BackupAgentType::WaitForType), allSwapsDisabled(false) {}
+ISimulator::~ISimulator() = default;
+
 using namespace std::literals;
 
 // TODO: Defining these here is just asking for ODR violations.
@@ -69,6 +76,10 @@ std::string describe(int const& val) {
 namespace {
 
 const int MACHINE_REBOOT_TIME = 10;
+
+// The max number of extra blob worker machines we might (i.e. randomly) add to the simulated cluster.
+// Note that this is in addition to the two we always have.
+const int NUM_EXTRA_BW_MACHINES = 5;
 
 bool destructed = false;
 
@@ -252,6 +263,9 @@ class TestConfig {
 			if (attrib == "disableHostname") {
 				disableHostname = strcmp(value.c_str(), "true") == 0;
 			}
+			if (attrib == "disableRemoteKVS") {
+				disableRemoteKVS = strcmp(value.c_str(), "true") == 0;
+			}
 			if (attrib == "restartInfoLocation") {
 				isFirstTestInRestart = true;
 			}
@@ -261,6 +275,12 @@ class TestConfig {
 				} else {
 					configDBType = configDBTypeFromString(value);
 				}
+			}
+			if (attrib == "randomlyRenameZoneId") {
+				randomlyRenameZoneId = strcmp(value.c_str(), "true") == 0;
+			}
+			if (attrib == "blobGranulesEnabled") {
+				blobGranulesEnabled = strcmp(value.c_str(), "true") == 0;
 			}
 		}
 
@@ -281,12 +301,14 @@ public:
 	bool disableTss = false;
 	// 7.1 cannot be downgraded to 7.0 and below after enabling hostname, so disable hostname for 7.0 downgrade tests
 	bool disableHostname = false;
+	// remote key value store is a child process spawned by the SS process to run the storage engine
+	bool disableRemoteKVS = false;
 	// Storage Engine Types: Verify match with SimulationConfig::generateNormalConfig
 	//	0 = "ssd"
 	//	1 = "memory"
 	//	2 = "memory-radixtree-beta"
 	//	3 = "ssd-redwood-1-experimental"
-	//	4 = "ssd-rocksdb-experimental"
+	//	4 = "ssd-rocksdb-v1"
 	// Requires a comma-separated list of numbers WITHOUT whitespaces
 	std::vector<int> storageEngineExcludeTypes;
 	// Set the maximum TLog version that can be selected for a test
@@ -298,7 +320,9 @@ public:
 	Optional<bool> generateFearless, buggify;
 	Optional<int> datacenters, desiredTLogCount, commitProxyCount, grvProxyCount, resolverCount, storageEngineType,
 	    stderrSeverity, machineCount, processesPerMachine, coordinators;
+	bool blobGranulesEnabled = false;
 	Optional<std::string> config;
+	bool randomlyRenameZoneId = false;
 
 	bool allowDefaultTenant = true;
 	bool allowDisablingTenants = true;
@@ -338,6 +362,7 @@ public:
 		    .add("maxTLogVersion", &maxTLogVersion)
 		    .add("disableTss", &disableTss)
 		    .add("disableHostname", &disableHostname)
+		    .add("disableRemoteKVS", &disableRemoteKVS)
 		    .add("simpleConfig", &simpleConfig)
 		    .add("generateFearless", &generateFearless)
 		    .add("datacenters", &datacenters)
@@ -354,8 +379,10 @@ public:
 		    .add("coordinators", &coordinators)
 		    .add("configDB", &configDBType)
 		    .add("extraMachineCountDC", &extraMachineCountDC)
+		    .add("blobGranulesEnabled", &blobGranulesEnabled)
 		    .add("allowDefaultTenant", &allowDefaultTenant)
-		    .add("allowDisablingTenants", &allowDisablingTenants);
+		    .add("allowDisablingTenants", &allowDisablingTenants)
+		    .add("randomlyRenameZoneId", &randomlyRenameZoneId);
 		try {
 			auto file = toml::parse(testFile);
 			if (file.contains("configuration") && toml::find(file, "configuration").is_table()) {
@@ -1030,6 +1057,11 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 
 	auto configDBType = testConfig.getConfigDBType();
 
+	// Randomly change data center id names to test that localities
+	// can be modified on cluster restart
+	bool renameZoneIds = testConfig.randomlyRenameZoneId ? deterministicRandom()->random01() < 0.1 : false;
+	TEST(renameZoneIds); // Zone ID names altered in restart test
+
 	// allows multiple ipAddr entries
 	ini.SetMultiKey();
 
@@ -1050,13 +1082,18 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 		bool enableExtraDB = (testConfig.extraDB == 3);
 		ClusterConnectionString conn(ini.GetValue("META", "connectionString"));
 		if (enableExtraDB) {
-			g_simulator.extraDB = new ClusterConnectionString(ini.GetValue("META", "connectionString"));
+			g_simulator.extraDB = std::make_unique<ClusterConnectionString>(ini.GetValue("META", "connectionString"));
 		}
 		if (!testConfig.disableHostname) {
 			auto mockDNSStr = ini.GetValue("META", "mockDNS");
 			if (mockDNSStr != nullptr) {
 				INetworkConnections::net()->parseMockDNSFromString(mockDNSStr);
 			}
+		}
+		if (testConfig.disableRemoteKVS) {
+			IKnobCollection::getMutableGlobalKnobCollection().setKnob("remote_kv_store",
+			                                                          KnobValueRef::create(bool{ false }));
+			TraceEvent(SevDebug, "DisaableRemoteKVS").log();
 		}
 		*pConnString = conn;
 		*pTesterCount = testerCount;
@@ -1078,7 +1115,11 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 			if (zoneIDini == nullptr) {
 				zoneId = machineId;
 			} else {
-				zoneId = StringRef(zoneIDini);
+				auto zoneIdStr = std::string(zoneIDini);
+				if (renameZoneIds) {
+					zoneIdStr = "modified/" + zoneIdStr;
+				}
+				zoneId = Standalone<StringRef>(zoneIdStr);
 			}
 
 			ProcessClass::ClassType cType =
@@ -1133,7 +1174,7 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 			}
 
 			LocalityData localities(Optional<Standalone<StringRef>>(), zoneId, machineId, dcUID);
-			localities.set(LiteralStringRef("data_hall"), dcUID);
+			localities.set("data_hall"_sr, dcUID);
 
 			// SOMEDAY: parse backup agent from test file
 			systemActors->push_back(reportErrors(
@@ -1365,7 +1406,7 @@ void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
 	}
 	case 4: {
 		TEST(true); // Simulated cluster using RocksDB storage engine
-		set_config("ssd-rocksdb-experimental");
+		set_config("ssd-rocksdb-v1");
 		// Tests using the RocksDB engine are necessarily non-deterministic because of RocksDB
 		// background threads.
 		TraceEvent(SevWarnAlways, "RocksDBNonDeterminism")
@@ -1806,6 +1847,11 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	if (testConfig.configureLocked) {
 		startingConfigString += " locked";
 	}
+	if (testConfig.disableRemoteKVS) {
+		IKnobCollection::getMutableGlobalKnobCollection().setKnob("remote_kv_store",
+		                                                          KnobValueRef::create(bool{ false }));
+		TraceEvent(SevDebug, "DisaableRemoteKVS").log();
+	}
 	auto configDBType = testConfig.getConfigDBType();
 	for (auto kv : startingConfigJSON) {
 		if ("tss_storage_engine" == kv.first) {
@@ -2031,9 +2077,9 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	deterministicRandom()->randomShuffle(coordinatorAddresses);
 
 	ASSERT_EQ(coordinatorAddresses.size(), coordinatorCount);
-	ClusterConnectionString conn(coordinatorAddresses, LiteralStringRef("TestCluster:0"));
+	ClusterConnectionString conn(coordinatorAddresses, "TestCluster:0"_sr);
 	if (useHostname) {
-		conn = ClusterConnectionString(coordinatorHostnames, LiteralStringRef("TestCluster:0"));
+		conn = ClusterConnectionString(coordinatorHostnames, "TestCluster:0"_sr);
 	}
 
 	// If extraDB==0, leave g_simulator.extraDB as null because the test does not use DR.
@@ -2041,21 +2087,21 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		// The DR database can be either a new database or itself
 		g_simulator.extraDB =
 		    BUGGIFY
-		        ? (useHostname ? new ClusterConnectionString(coordinatorHostnames, LiteralStringRef("TestCluster:0"))
-		                       : new ClusterConnectionString(coordinatorAddresses, LiteralStringRef("TestCluster:0")))
+		        ? (useHostname ? std::make_unique<ClusterConnectionString>(coordinatorHostnames, "TestCluster:0"_sr)
+		                       : std::make_unique<ClusterConnectionString>(coordinatorAddresses, "TestCluster:0"_sr))
 		        : (useHostname
-		               ? new ClusterConnectionString(extraCoordinatorHostnames, LiteralStringRef("ExtraCluster:0"))
-		               : new ClusterConnectionString(extraCoordinatorAddresses, LiteralStringRef("ExtraCluster:0")));
+		               ? std::make_unique<ClusterConnectionString>(extraCoordinatorHostnames, "ExtraCluster:0"_sr)
+		               : std::make_unique<ClusterConnectionString>(extraCoordinatorAddresses, "ExtraCluster:0"_sr));
 	} else if (testConfig.extraDB == 2) {
 		// The DR database is a new database
 		g_simulator.extraDB =
-		    useHostname ? new ClusterConnectionString(extraCoordinatorHostnames, LiteralStringRef("ExtraCluster:0"))
-		                : new ClusterConnectionString(extraCoordinatorAddresses, LiteralStringRef("ExtraCluster:0"));
+		    useHostname ? std::make_unique<ClusterConnectionString>(extraCoordinatorHostnames, "ExtraCluster:0"_sr)
+		                : std::make_unique<ClusterConnectionString>(extraCoordinatorAddresses, "ExtraCluster:0"_sr);
 	} else if (testConfig.extraDB == 3) {
 		// The DR database is the same database
-		g_simulator.extraDB =
-		    useHostname ? new ClusterConnectionString(coordinatorHostnames, LiteralStringRef("TestCluster:0"))
-		                : new ClusterConnectionString(coordinatorAddresses, LiteralStringRef("TestCluster:0"));
+		g_simulator.extraDB = useHostname
+		                          ? std::make_unique<ClusterConnectionString>(coordinatorHostnames, "TestCluster:0"_sr)
+		                          : std::make_unique<ClusterConnectionString>(coordinatorAddresses, "TestCluster:0"_sr);
 	}
 
 	*pConnString = conn;
@@ -2085,16 +2131,20 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		       coordinatorCount);
 		ASSERT_LE(dcCoordinators, machines);
 
-		// FIXME: temporarily code to test storage cache
+		// FIXME: we hardcode some machines to specifically test storage cache and blob workers
 		// TODO: caching disabled for this merge
-		if (dc == 0) {
-			machines++;
+		int storageCacheMachines = dc == 0 ? 1 : 0;
+		int blobWorkerMachines = 0;
+		if (testConfig.blobGranulesEnabled) {
+			int blobWorkerProcesses = 1 + deterministicRandom()->randomInt(0, NUM_EXTRA_BW_MACHINES + 1);
+			blobWorkerMachines = std::max(1, blobWorkerProcesses / processesPerMachine);
 		}
 
-		int useSeedForMachine = deterministicRandom()->randomInt(0, machines);
+		int totalMachines = machines + storageCacheMachines + blobWorkerMachines;
+		int useSeedForMachine = deterministicRandom()->randomInt(0, totalMachines);
 		Standalone<StringRef> zoneId;
 		Standalone<StringRef> newZoneId;
-		for (int machine = 0; machine < machines; machine++) {
+		for (int machine = 0; machine < totalMachines; machine++) {
 			Standalone<StringRef> machineId(deterministicRandom()->randomUniqueID().toString());
 			if (machine == 0 || machineCount - dataCenters <= 4 || assignedMachines != 4 ||
 			    simconfig.db.regions.size() || deterministicRandom()->random01() < 0.5) {
@@ -2124,11 +2174,19 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 				}
 			}
 
-			// FIXME: temporarily code to test storage cache
+			// FIXME: hack to add machines specifically to test storage cache and blob workers
 			// TODO: caching disabled for this merge
-			if (machine == machines - 1 && dc == 0) {
-				processClass = ProcessClass(ProcessClass::StorageCacheClass, ProcessClass::CommandLineSource);
-				nonVersatileMachines++;
+			// `machines` here is the normal (non-temporary) machines that totalMachines comprises of
+			if (machine >= machines) {
+				if (storageCacheMachines > 0 && dc == 0) {
+					processClass = ProcessClass(ProcessClass::StorageCacheClass, ProcessClass::CommandLineSource);
+					nonVersatileMachines++;
+					storageCacheMachines--;
+				} else if (blobWorkerMachines > 0) { // add blob workers to every DC
+					processClass = ProcessClass(ProcessClass::BlobWorkerClass, ProcessClass::CommandLineSource);
+					nonVersatileMachines++;
+					blobWorkerMachines--;
+				}
 			}
 
 			std::vector<IPAddress> ips;
@@ -2143,7 +2201,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 
 			// check the sslEnablementMap using only one ip
 			LocalityData localities(Optional<Standalone<StringRef>>(), zoneId, machineId, dcUID);
-			localities.set(LiteralStringRef("data_hall"), dcUID);
+			localities.set("data_hall"_sr, dcUID);
 			systemActors->push_back(reportErrors(simulatedMachine(conn,
 			                                                      ips,
 			                                                      sslEnabled,
@@ -2170,7 +2228,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 				Standalone<StringRef> newMachineId(deterministicRandom()->randomUniqueID().toString());
 
 				LocalityData localities(Optional<Standalone<StringRef>>(), newZoneId, newMachineId, dcUID);
-				localities.set(LiteralStringRef("data_hall"), dcUID);
+				localities.set("data_hall"_sr, dcUID);
 				systemActors->push_back(reportErrors(simulatedMachine(*g_simulator.extraDB,
 				                                                      extraIps,
 				                                                      sslEnabled,
@@ -2303,8 +2361,9 @@ ACTOR void setupAndRun(std::string dataFolder,
 
 	// Disable the default tenant in backup and DR tests for now. This is because backup does not currently duplicate
 	// the tenant map and related state.
-	// TODO: reenable when backup/DR supports tenants.
-	if (std::string_view(testFile).find("Backup") != std::string_view::npos || testConfig.extraDB != 0) {
+	// TODO: reenable when backup/DR or BlobGranule supports tenants.
+	if (std::string_view(testFile).find("Backup") != std::string_view::npos ||
+	    std::string_view(testFile).find("BlobGranule") != std::string_view::npos || testConfig.extraDB != 0) {
 		allowDefaultTenant = false;
 	}
 
@@ -2373,7 +2432,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 			                  100.0));
 			// FIXME: snapshot restore does not support multi-region restore, hence restore it as single region always
 			if (restoring) {
-				startingConfiguration = LiteralStringRef("usable_regions=1");
+				startingConfiguration = "usable_regions=1"_sr;
 			}
 		} else {
 			g_expect_full_pointermap = 1;

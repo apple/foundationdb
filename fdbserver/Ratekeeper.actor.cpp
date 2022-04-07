@@ -121,7 +121,8 @@ public:
 					newServers[serverId] = ssi;
 
 					if (oldServers.count(serverId)) {
-						if (ssi.getValue.getEndpoint() != oldServers[serverId].getValue.getEndpoint()) {
+						if (ssi.getValue.getEndpoint() != oldServers[serverId].getValue.getEndpoint() ||
+						    ssi.isAcceptingRequests() != oldServers[serverId].isAcceptingRequests()) {
 							serverChanges.send(std::make_pair(serverId, Optional<StorageServerInterface>(ssi)));
 						}
 						oldServers.erase(serverId);
@@ -157,32 +158,8 @@ public:
 				ErrorOr<StorageQueuingMetricsReply> reply = wait(ssi.getQueuingMetrics.getReplyUnlessFailedFor(
 				    StorageQueuingMetricsRequest(), 0, 0)); // SOMEDAY: or tryGetReply?
 				if (reply.present()) {
-					myQueueInfo->value.valid = true;
-					myQueueInfo->value.prevReply = myQueueInfo->value.lastReply;
-					myQueueInfo->value.lastReply = reply.get();
-					if (myQueueInfo->value.prevReply.instanceID != reply.get().instanceID) {
-						myQueueInfo->value.smoothDurableBytes.reset(reply.get().bytesDurable);
-						myQueueInfo->value.verySmoothDurableBytes.reset(reply.get().bytesDurable);
-						myQueueInfo->value.smoothInputBytes.reset(reply.get().bytesInput);
-						myQueueInfo->value.smoothFreeSpace.reset(reply.get().storageBytes.available);
-						myQueueInfo->value.smoothTotalSpace.reset(reply.get().storageBytes.total);
-						myQueueInfo->value.smoothDurableVersion.reset(reply.get().durableVersion);
-						myQueueInfo->value.smoothLatestVersion.reset(reply.get().version);
-					} else {
-						self->smoothTotalDurableBytes.addDelta(reply.get().bytesDurable -
-						                                       myQueueInfo->value.prevReply.bytesDurable);
-						myQueueInfo->value.smoothDurableBytes.setTotal(reply.get().bytesDurable);
-						myQueueInfo->value.verySmoothDurableBytes.setTotal(reply.get().bytesDurable);
-						myQueueInfo->value.smoothInputBytes.setTotal(reply.get().bytesInput);
-						myQueueInfo->value.smoothFreeSpace.setTotal(reply.get().storageBytes.available);
-						myQueueInfo->value.smoothTotalSpace.setTotal(reply.get().storageBytes.total);
-						myQueueInfo->value.smoothDurableVersion.setTotal(reply.get().durableVersion);
-						myQueueInfo->value.smoothLatestVersion.setTotal(reply.get().version);
-					}
-
-					myQueueInfo->value.busiestReadTag = reply.get().busiestTag;
-					myQueueInfo->value.busiestReadTagFractionalBusyness = reply.get().busiestTagFractionalBusyness;
-					myQueueInfo->value.busiestReadTagRate = reply.get().busiestTagRate;
+					myQueueInfo->value.update(reply.get(), self->smoothTotalDurableBytes);
+					myQueueInfo->value.acceptingRequests = ssi.isAcceptingRequests();
 				} else {
 					if (myQueueInfo->value.valid) {
 						TraceEvent("RkStorageServerDidNotRespond", self->id).detail("StorageServer", ssi.id());
@@ -210,24 +187,7 @@ public:
 				ErrorOr<TLogQueuingMetricsReply> reply = wait(tli.getQueuingMetrics.getReplyUnlessFailedFor(
 				    TLogQueuingMetricsRequest(), 0, 0)); // SOMEDAY: or tryGetReply?
 				if (reply.present()) {
-					myQueueInfo->value.valid = true;
-					myQueueInfo->value.prevReply = myQueueInfo->value.lastReply;
-					myQueueInfo->value.lastReply = reply.get();
-					if (myQueueInfo->value.prevReply.instanceID != reply.get().instanceID) {
-						myQueueInfo->value.smoothDurableBytes.reset(reply.get().bytesDurable);
-						myQueueInfo->value.verySmoothDurableBytes.reset(reply.get().bytesDurable);
-						myQueueInfo->value.smoothInputBytes.reset(reply.get().bytesInput);
-						myQueueInfo->value.smoothFreeSpace.reset(reply.get().storageBytes.available);
-						myQueueInfo->value.smoothTotalSpace.reset(reply.get().storageBytes.total);
-					} else {
-						self->smoothTotalDurableBytes.addDelta(reply.get().bytesDurable -
-						                                       myQueueInfo->value.prevReply.bytesDurable);
-						myQueueInfo->value.smoothDurableBytes.setTotal(reply.get().bytesDurable);
-						myQueueInfo->value.verySmoothDurableBytes.setTotal(reply.get().bytesDurable);
-						myQueueInfo->value.smoothInputBytes.setTotal(reply.get().bytesInput);
-						myQueueInfo->value.smoothFreeSpace.setTotal(reply.get().storageBytes.available);
-						myQueueInfo->value.smoothTotalSpace.setTotal(reply.get().storageBytes.total);
-					}
+					myQueueInfo->value.update(reply.get(), self->smoothTotalDurableBytes);
 				} else {
 					if (myQueueInfo->value.valid) {
 						TraceEvent("RkTLogDidNotRespond", self->id).detail("TransactionLog", tli.id());
@@ -290,9 +250,7 @@ public:
 		self.addActor.send(traceRole(Role::RATEKEEPER, rkInterf.id()));
 
 		self.addActor.send(self.monitorThrottlingChanges());
-		Ratekeeper* selfPtr = &self; // let flow compiler capture self
-		self.addActor.send(recurring([selfPtr]() { selfPtr->refreshStorageServerCommitCost(); },
-		                             SERVER_KNOBS->TAG_MEASUREMENT_INTERVAL));
+		self.addActor.send(self.refreshStorageServerCommitCosts());
 
 		TraceEvent("RkTLogQueueSizeParameters", rkInterf.id())
 		    .detail("Target", SERVER_KNOBS->TARGET_BYTES_PER_TLOG)
@@ -412,6 +370,19 @@ public:
 		return Void();
 	}
 
+	ACTOR static Future<Void> refreshStorageServerCommitCosts(Ratekeeper* self) {
+		state double lastBusiestCommitTagPick;
+		loop {
+			lastBusiestCommitTagPick = now();
+			wait(delay(SERVER_KNOBS->TAG_MEASUREMENT_INTERVAL));
+			double elapsed = now() - lastBusiestCommitTagPick;
+			// for each SS, select the busiest commit tag from ssTrTagCommitCost
+			for (auto& [ssId, ssQueueInfo] : self->storageQueueInfo) {
+				ssQueueInfo.refreshCommitCost(elapsed);
+			}
+		}
+	}
+
 }; // class RatekeeperImpl
 
 Future<Void> Ratekeeper::configurationMonitor() {
@@ -464,11 +435,8 @@ Ratekeeper::Ratekeeper(UID id, Database db)
                 SERVER_KNOBS->TARGET_BYTES_PER_TLOG_BATCH,
                 SERVER_KNOBS->SPRING_BYTES_TLOG_BATCH,
                 SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE_BATCH,
-                SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS_BATCH),
-    lastBusiestCommitTagPick(0.0) {
+                SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS_BATCH) {
 	tagThrottler = std::make_unique<TagThrottler>(db, id);
-	expiredTagThrottleCleanup = recurring([this]() { ThrottleApi::expire(this->db.getReference()); },
-	                                      SERVER_KNOBS->TAG_THROTTLE_EXPIRED_CLEANUP_INTERVAL);
 }
 
 void Ratekeeper::updateCommitCostEstimation(
@@ -478,9 +446,7 @@ void Ratekeeper::updateCommitCostEstimation(
 		if (tagCostIt == costEstimation.end())
 			continue;
 		for (const auto& [tagName, cost] : tagCostIt->second) {
-			it->value.tagCostEst[tagName] += cost;
-			it->value.totalWriteCosts += cost.getCostSum();
-			it->value.totalWriteOps += cost.getOpsSum();
+			it->value.addCommitCost(tagName, cost);
 		}
 	}
 }
@@ -523,7 +489,7 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 	// Look at each storage server's write queue and local rate, compute and store the desired rate ratio
 	for (auto i = storageQueueInfo.begin(); i != storageQueueInfo.end(); ++i) {
 		auto const& ss = i->value;
-		if (!ss.valid || (remoteDC.present() && ss.locality.dcId() == remoteDC))
+		if (!ss.valid || !ss.acceptingRequests || (remoteDC.present() && ss.locality.dcId() == remoteDC))
 			continue;
 		++sscount;
 
@@ -558,10 +524,10 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 			}
 		}
 
-		int64_t storageQueue = ss.lastReply.bytesInput - ss.smoothDurableBytes.smoothTotal();
+		int64_t storageQueue = ss.getStorageQueueBytes();
 		worstStorageQueueStorageServer = std::max(worstStorageQueueStorageServer, storageQueue);
 
-		int64_t storageDurabilityLag = ss.smoothLatestVersion.smoothTotal() - ss.smoothDurableVersion.smoothTotal();
+		int64_t storageDurabilityLag = ss.getDurabilityLag();
 		worstDurabilityLag = std::max(worstDurabilityLag, storageDurabilityLag);
 
 		storageDurabilityLagReverseIndex.insert(std::make_pair(-1 * storageDurabilityLag, &ss));
@@ -575,7 +541,7 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 		double targetRateRatio = std::min((storageQueue - targetBytes + springBytes) / (double)springBytes, 2.0);
 
 		if (limits->priority == TransactionPriority::DEFAULT) {
-			addActor.send(tagThrottler->tryAutoThrottleTag(ss, storageQueue, storageDurabilityLag));
+			addActor.send(tagThrottler->tryUpdateAutoThrottling(ss));
 		}
 
 		double inputRate = ss.smoothInputBytes.smoothRate();
@@ -763,11 +729,11 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 			auto& tl = it.value;
 			if (!tl.valid)
 				continue;
-			maxTLVer = std::max(maxTLVer, tl.lastReply.v);
+			maxTLVer = std::max(maxTLVer, tl.getLastCommittedVersion());
 		}
 
 		if (minSSVer != std::numeric_limits<Version>::max() && maxTLVer != std::numeric_limits<Version>::min()) {
-			// writeToReadLatencyLimit: 0 = infinte speed; 1 = TL durable speed ; 2 = half TL durable speed
+			// writeToReadLatencyLimit: 0 = infinite speed; 1 = TL durable speed ; 2 = half TL durable speed
 			writeToReadLatencyLimit =
 			    ((maxTLVer - minLimitingSSVer) - limits->maxVersionDifference / 2) / (limits->maxVersionDifference / 4);
 			worstVersionLag = std::max((Version)0, maxTLVer - minSSVer);
@@ -966,54 +932,137 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 	}
 }
 
-Future<Void> Ratekeeper::refreshStorageServerCommitCost() {
-	if (lastBusiestCommitTagPick == 0) { // the first call should be skipped
-		lastBusiestCommitTagPick = now();
-		return Void();
-	}
-	double elapsed = now() - lastBusiestCommitTagPick;
-	// for each SS, select the busiest commit tag from ssTrTagCommitCost
-	for (auto it = storageQueueInfo.begin(); it != storageQueueInfo.end(); ++it) {
-		it->value.busiestWriteTag.reset();
-		TransactionTag busiestTag;
-		TransactionCommitCostEstimation maxCost;
-		double maxRate = 0, maxBusyness = 0;
-		for (const auto& [tag, cost] : it->value.tagCostEst) {
-			double rate = cost.getCostSum() / elapsed;
-			if (rate > maxRate) {
-				busiestTag = tag;
-				maxRate = rate;
-				maxCost = cost;
-			}
-		}
-		if (maxRate > SERVER_KNOBS->MIN_TAG_WRITE_PAGES_RATE) {
-			it->value.busiestWriteTag = busiestTag;
-			// TraceEvent("RefreshSSCommitCost").detail("TotalWriteCost", it->value.totalWriteCost).detail("TotalWriteOps",it->value.totalWriteOps);
-			ASSERT(it->value.totalWriteCosts > 0);
-			maxBusyness = double(maxCost.getCostSum()) / it->value.totalWriteCosts;
-			it->value.busiestWriteTagFractionalBusyness = maxBusyness;
-			it->value.busiestWriteTagRate = maxRate;
-		}
-
-		TraceEvent("BusiestWriteTag", it->key)
-		    .detail("Elapsed", elapsed)
-		    .detail("Tag", printable(busiestTag))
-		    .detail("TagOps", maxCost.getOpsSum())
-		    .detail("TagCost", maxCost.getCostSum())
-		    .detail("TotalCost", it->value.totalWriteCosts)
-		    .detail("Reported", it->value.busiestWriteTag.present())
-		    .trackLatest(it->value.busiestWriteTagEventHolder->trackingKey);
-
-		// reset statistics
-		it->value.tagCostEst.clear();
-		it->value.totalWriteOps = 0;
-		it->value.totalWriteCosts = 0;
-	}
-	lastBusiestCommitTagPick = now();
-	return Void();
+Future<Void> Ratekeeper::refreshStorageServerCommitCosts() {
+	return RatekeeperImpl::refreshStorageServerCommitCosts(this);
 }
 
 ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	wait(Ratekeeper::run(rkInterf, dbInfo));
 	return Void();
 }
+
+StorageQueueInfo::StorageQueueInfo(UID id, LocalityData locality)
+  : busiestWriteTagEventHolder(makeReference<EventCacheHolder>(id.toString() + "/BusiestWriteTag")), valid(false),
+    id(id), locality(locality), acceptingRequests(false), smoothDurableBytes(SERVER_KNOBS->SMOOTHING_AMOUNT),
+    smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
+    smoothDurableVersion(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothLatestVersion(SERVER_KNOBS->SMOOTHING_AMOUNT),
+    smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT),
+    limitReason(limitReason_t::unlimited) {
+	// FIXME: this is a tacky workaround for a potential uninitialized use in trackStorageServerQueueInfo
+	lastReply.instanceID = -1;
+}
+
+void StorageQueueInfo::addCommitCost(TransactionTagRef tagName, TransactionCommitCostEstimation const& cost) {
+	tagCostEst[tagName] += cost;
+	totalWriteCosts += cost.getCostSum();
+	totalWriteOps += cost.getOpsSum();
+}
+
+void StorageQueueInfo::update(StorageQueuingMetricsReply const& reply, Smoother& smoothTotalDurableBytes) {
+	valid = true;
+	auto prevReply = std::move(lastReply);
+	lastReply = reply;
+	if (prevReply.instanceID != reply.instanceID) {
+		smoothDurableBytes.reset(reply.bytesDurable);
+		verySmoothDurableBytes.reset(reply.bytesDurable);
+		smoothInputBytes.reset(reply.bytesInput);
+		smoothFreeSpace.reset(reply.storageBytes.available);
+		smoothTotalSpace.reset(reply.storageBytes.total);
+		smoothDurableVersion.reset(reply.durableVersion);
+		smoothLatestVersion.reset(reply.version);
+	} else {
+		smoothTotalDurableBytes.addDelta(reply.bytesDurable - prevReply.bytesDurable);
+		smoothDurableBytes.setTotal(reply.bytesDurable);
+		verySmoothDurableBytes.setTotal(reply.bytesDurable);
+		smoothInputBytes.setTotal(reply.bytesInput);
+		smoothFreeSpace.setTotal(reply.storageBytes.available);
+		smoothTotalSpace.setTotal(reply.storageBytes.total);
+		smoothDurableVersion.setTotal(reply.durableVersion);
+		smoothLatestVersion.setTotal(reply.version);
+	}
+
+	busiestReadTags = reply.busiestTags;
+}
+
+void StorageQueueInfo::refreshCommitCost(double elapsed) {
+	busiestWriteTags.clear();
+	TransactionTag busiestTag;
+	TransactionCommitCostEstimation maxCost;
+	double maxRate = 0, maxBusyness = 0;
+	for (const auto& [tag, cost] : tagCostEst) {
+		double rate = cost.getCostSum() / elapsed;
+		if (rate > maxRate) {
+			busiestTag = tag;
+			maxRate = rate;
+			maxCost = cost;
+		}
+	}
+	if (maxRate > SERVER_KNOBS->MIN_TAG_WRITE_PAGES_RATE) {
+		// TraceEvent("RefreshSSCommitCost").detail("TotalWriteCost", totalWriteCost).detail("TotalWriteOps",totalWriteOps);
+		ASSERT_GT(totalWriteCosts, 0);
+		maxBusyness = double(maxCost.getCostSum()) / totalWriteCosts;
+		busiestWriteTags.emplace_back(busiestTag, maxRate, maxBusyness);
+	}
+
+	TraceEvent("BusiestWriteTag", id)
+	    .detail("Elapsed", elapsed)
+	    .detail("Tag", printable(busiestTag))
+	    .detail("TagOps", maxCost.getOpsSum())
+	    .detail("TagCost", maxCost.getCostSum())
+	    .detail("TotalCost", totalWriteCosts)
+	    .detail("Reported", !busiestWriteTags.empty())
+	    .trackLatest(busiestWriteTagEventHolder->trackingKey);
+
+	// reset statistics
+	tagCostEst.clear();
+	totalWriteOps = 0;
+	totalWriteCosts = 0;
+}
+
+TLogQueueInfo::TLogQueueInfo(UID id)
+  : valid(false), id(id), smoothDurableBytes(SERVER_KNOBS->SMOOTHING_AMOUNT),
+    smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
+    smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT) {
+	// FIXME: this is a tacky workaround for a potential uninitialized use in trackTLogQueueInfo (copied from
+	// storageQueueInfO)
+	lastReply.instanceID = -1;
+}
+
+void TLogQueueInfo::update(TLogQueuingMetricsReply const& reply, Smoother& smoothTotalDurableBytes) {
+	valid = true;
+	auto prevReply = std::move(lastReply);
+	lastReply = reply;
+	if (prevReply.instanceID != reply.instanceID) {
+		smoothDurableBytes.reset(reply.bytesDurable);
+		verySmoothDurableBytes.reset(reply.bytesDurable);
+		smoothInputBytes.reset(reply.bytesInput);
+		smoothFreeSpace.reset(reply.storageBytes.available);
+		smoothTotalSpace.reset(reply.storageBytes.total);
+	} else {
+		smoothTotalDurableBytes.addDelta(reply.bytesDurable - prevReply.bytesDurable);
+		smoothDurableBytes.setTotal(reply.bytesDurable);
+		verySmoothDurableBytes.setTotal(reply.bytesDurable);
+		smoothInputBytes.setTotal(reply.bytesInput);
+		smoothFreeSpace.setTotal(reply.storageBytes.available);
+		smoothTotalSpace.setTotal(reply.storageBytes.total);
+	}
+}
+
+RatekeeperLimits::RatekeeperLimits(TransactionPriority priority,
+                                   std::string context,
+                                   int64_t storageTargetBytes,
+                                   int64_t storageSpringBytes,
+                                   int64_t logTargetBytes,
+                                   int64_t logSpringBytes,
+                                   double maxVersionDifference,
+                                   int64_t durabilityLagTargetVersions)
+  : tpsLimit(std::numeric_limits<double>::infinity()), tpsLimitMetric(StringRef("Ratekeeper.TPSLimit" + context)),
+    reasonMetric(StringRef("Ratekeeper.Reason" + context)), storageTargetBytes(storageTargetBytes),
+    storageSpringBytes(storageSpringBytes), logTargetBytes(logTargetBytes), logSpringBytes(logSpringBytes),
+    maxVersionDifference(maxVersionDifference),
+    durabilityLagTargetVersions(
+        durabilityLagTargetVersions +
+        SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS), // The read transaction life versions are expected to not
+    // be durable on the storage servers
+    lastDurabilityLag(0), durabilityLagLimit(std::numeric_limits<double>::infinity()), priority(priority),
+    context(context), rkUpdateEventCacheHolder(makeReference<EventCacheHolder>("RkUpdate" + context)) {}

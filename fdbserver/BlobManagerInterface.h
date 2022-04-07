@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,6 +30,8 @@ struct BlobManagerInterface {
 	constexpr static FileIdentifier file_identifier = 369169;
 	RequestStream<ReplyPromise<Void>> waitFailure;
 	RequestStream<struct HaltBlobManagerRequest> haltBlobManager;
+	RequestStream<struct HaltBlobGranulesRequest> haltBlobGranules;
+	RequestStream<struct BlobManagerExclusionSafetyCheckRequest> blobManagerExclCheckReq;
 	struct LocalityData locality;
 	UID myId;
 
@@ -44,7 +46,7 @@ struct BlobManagerInterface {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, waitFailure, haltBlobManager, locality, myId);
+		serializer(ar, waitFailure, haltBlobManager, haltBlobGranules, blobManagerExclCheckReq, locality, myId);
 	}
 };
 
@@ -59,6 +61,48 @@ struct HaltBlobManagerRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, requesterID, reply);
+	}
+};
+
+struct HaltBlobGranulesRequest {
+	constexpr static FileIdentifier file_identifier = 904267;
+	UID requesterID;
+	ReplyPromise<Void> reply;
+
+	HaltBlobGranulesRequest() {}
+	explicit HaltBlobGranulesRequest(UID uid) : requesterID(uid) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, requesterID, reply);
+	}
+};
+
+struct BlobManagerExclusionSafetyCheckReply {
+	constexpr static FileIdentifier file_identifier = 8068627;
+	bool safe;
+
+	BlobManagerExclusionSafetyCheckReply() : safe(false) {}
+	explicit BlobManagerExclusionSafetyCheckReply(bool safe) : safe(safe) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, safe);
+	}
+};
+
+struct BlobManagerExclusionSafetyCheckRequest {
+	constexpr static FileIdentifier file_identifier = 1996387;
+	std::vector<AddressExclusion> exclusions;
+	ReplyPromise<BlobManagerExclusionSafetyCheckReply> reply;
+
+	BlobManagerExclusionSafetyCheckRequest() {}
+	explicit BlobManagerExclusionSafetyCheckRequest(std::vector<AddressExclusion> exclusions)
+	  : exclusions(exclusions) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, exclusions, reply);
 	}
 };
 

@@ -1,0 +1,34 @@
+[configuration]
+blobGranulesEnabled = true 
+# FIXME: re-enable rocks at some point
+storageEngineExcludeTypes = [4]
+
+[[test]]
+testTitle = 'BlobGranuleCorrectness'
+
+    [[test.workload]]
+    testName = 'BlobGranuleCorrectnessWorkload'
+    testDuration = 120.0
+
+    [[test.workload]]
+    testName = 'RandomClogging'
+    testDuration = 120.0
+
+    [[test.workload]]
+    testName = 'Rollback'
+    meanDelay = 30.0
+    testDuration = 120.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 120.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 120.0

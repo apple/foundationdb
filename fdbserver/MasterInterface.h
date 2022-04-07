@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,14 +23,15 @@
 #pragma once
 
 #include "fdbclient/CommitProxyInterface.h"
-#include "fdbclient/FDBTypes.h"
-#include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/DatabaseConfiguration.h"
-#include "fdbserver/TLogInterface.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/Notified.h"
+#include "fdbclient/StorageServerInterface.h"
+#include "fdbserver/ResolverInterface.h"
+#include "fdbserver/TLogInterface.h"
 
-typedef uint64_t DBRecoveryCount;
+using DBRecoveryCount = uint64_t;
 
 struct MasterInterface {
 	constexpr static FileIdentifier file_identifier = 5979145;
@@ -155,20 +156,22 @@ struct UpdateRecoveryDataRequest {
 	Version recoveryTransactionVersion;
 	Version lastEpochEnd;
 	std::vector<CommitProxyInterface> commitProxies;
+	std::vector<ResolverInterface> resolvers;
 	Optional<int64_t> versionEpoch;
 	ReplyPromise<Void> reply;
 
-	UpdateRecoveryDataRequest() {}
+	UpdateRecoveryDataRequest() = default;
 	UpdateRecoveryDataRequest(Version recoveryTransactionVersion,
 	                          Version lastEpochEnd,
-	                          std::vector<CommitProxyInterface> commitProxies,
+	                          const std::vector<CommitProxyInterface>& commitProxies,
+	                          const std::vector<ResolverInterface>& resolvers,
 	                          Optional<int64_t> versionEpoch)
 	  : recoveryTransactionVersion(recoveryTransactionVersion), lastEpochEnd(lastEpochEnd),
-	    commitProxies(commitProxies), versionEpoch(versionEpoch) {}
+	    commitProxies(commitProxies), resolvers(resolvers), versionEpoch(versionEpoch) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, recoveryTransactionVersion, lastEpochEnd, commitProxies, reply, versionEpoch);
+		serializer(ar, recoveryTransactionVersion, lastEpochEnd, commitProxies, resolvers, versionEpoch, reply);
 	}
 };
 

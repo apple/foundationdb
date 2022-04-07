@@ -6,9 +6,25 @@ assert_no_version_h(fdbmonitor)
 if(UNIX AND NOT APPLE)
     target_link_libraries(fdbmonitor PRIVATE rt)
 endif()
-# FIXME: This include directory is an ugly hack. We probably want to fix this
+# FIXME: This include directory is an ugly hack. We probably want to fix this.
 # as soon as we get rid of the old build system
 target_link_libraries(fdbmonitor PUBLIC Threads::Threads)
+
+# We don't compile fdbmonitor with thread sanitizer instrumentation, since this
+# appears to change its behavior (it no longer seems to restart killed
+# processes). fdbmonitor is single-threaded anyway.
+get_target_property(fdbmonitor_options fdbmonitor COMPILE_OPTIONS)
+if (NOT "${fdbmonitor_options}" STREQUAL "fdbmonitor_options-NOTFOUND")
+  list(REMOVE_ITEM fdbmonitor_options "-fsanitize=thread")
+  set_property(TARGET fdbmonitor PROPERTY COMPILE_OPTIONS ${fdbmonitor_options})
+endif ()
+
+get_target_property(fdbmonitor_options fdbmonitor LINK_OPTIONS)
+
+if (NOT "${fdbmonitor_options}" STREQUAL "fdbmonitor_options-NOTFOUND")
+  list(REMOVE_ITEM fdbmonitor_options "-fsanitize=thread")
+  set_property(TARGET fdbmonitor PROPERTY LINK_OPTIONS ${fdbmonitor_options})
+endif ()
 
 if(GENERATE_DEBUG_PACKAGES)
   fdb_install(TARGETS fdbmonitor DESTINATION fdbmonitor COMPONENT server)

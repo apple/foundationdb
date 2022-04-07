@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,6 +31,7 @@ struct GenerationRegInterface {
 	constexpr static FileIdentifier file_identifier = 16726744;
 	RequestStream<struct GenerationRegReadRequest> read;
 	RequestStream<struct GenerationRegWriteRequest> write;
+	Optional<Hostname> hostname;
 
 	// read(key,gen2) returns (value,gen,rgen).
 	//   If there was no prior write(_,_,0) or a data loss fault,
@@ -54,6 +55,7 @@ struct GenerationRegInterface {
 	GenerationRegInterface() {}
 	GenerationRegInterface(NetworkAddress remote);
 	GenerationRegInterface(INetwork* local);
+	GenerationRegInterface(Hostname hostname) : hostname(hostname){};
 };
 
 struct UniqueGeneration {
@@ -128,6 +130,7 @@ struct LeaderElectionRegInterface : ClientLeaderRegInterface {
 	LeaderElectionRegInterface() {}
 	LeaderElectionRegInterface(NetworkAddress remote);
 	LeaderElectionRegInterface(INetwork* local);
+	LeaderElectionRegInterface(Hostname hostname) : ClientLeaderRegInterface(hostname) {}
 };
 
 struct CandidacyRequest {

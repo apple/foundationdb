@@ -8,6 +8,8 @@ set(FLOW_SRCS
   ArgParseUtil.h
   AsioReactor.h
   BooleanParam.h
+  BlobCipher.h
+  BlobCipher.cpp
   CompressedInt.actor.cpp
   CompressedInt.h
   Deque.cpp
@@ -28,6 +30,8 @@ set(FLOW_SRCS
   Hash3.h
   Histogram.cpp
   Histogram.h
+  Hostname.actor.cpp
+  Hostname.h
   IDispatched.h
   IRandom.h
   IThreadPoolTest.actor.cpp

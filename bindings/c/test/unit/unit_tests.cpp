@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2020 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@
 
 // Unit tests for the FoundationDB C API.
 
+#include "fdb_c_options.g.h"
 #define FDB_API_VERSION 710
 #include <foundationdb/fdb_c.h>
 #include <assert.h>
@@ -948,11 +949,9 @@ std::map<std::string, std::string> fillInRecords(int n) {
 	return data;
 }
 
-GetMappedRangeResult getMappedIndexEntries(int beginId, int endId, fdb::Transaction& tr) {
+GetMappedRangeResult getMappedIndexEntries(int beginId, int endId, fdb::Transaction& tr, std::string mapper) {
 	std::string indexEntryKeyBegin = indexEntryKey(beginId);
 	std::string indexEntryKeyEnd = indexEntryKey(endId);
-
-	std::string mapper = Tuple().append(prefix).append(RECORD).append("{K[3]}"_sr).append("{...}"_sr).pack().toString();
 
 	return get_mapped_range(
 	    tr,
@@ -966,6 +965,11 @@ GetMappedRangeResult getMappedIndexEntries(int beginId, int endId, fdb::Transact
 	    /* iteration */ 0,
 	    /* snapshot */ false,
 	    /* reverse */ 0);
+}
+
+GetMappedRangeResult getMappedIndexEntries(int beginId, int endId, fdb::Transaction& tr) {
+	std::string mapper = Tuple().append(prefix).append(RECORD).append("{K[3]}"_sr).append("{...}"_sr).pack().toString();
+	return getMappedIndexEntries(beginId, endId, tr, mapper);
 }
 
 TEST_CASE("fdb_transaction_get_mapped_range") {
@@ -1008,7 +1012,6 @@ TEST_CASE("fdb_transaction_get_mapped_range") {
 TEST_CASE("fdb_transaction_get_mapped_range_restricted_to_serializable") {
 	std::string mapper = Tuple().append(prefix).append(RECORD).append("{K[3]}"_sr).pack().toString();
 	fdb::Transaction tr(db);
-	fdb_check(tr.set_option(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE, nullptr, 0));
 	auto result = get_mapped_range(
 	    tr,
 	    FDB_KEYSEL_FIRST_GREATER_OR_EQUAL((const uint8_t*)indexEntryKey(0).c_str(), indexEntryKey(0).size()),
@@ -1038,9 +1041,34 @@ TEST_CASE("fdb_transaction_get_mapped_range_restricted_to_ryw_enable") {
 	    /* target_bytes */ 0,
 	    /* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL,
 	    /* iteration */ 0,
-	    /* snapshot */ true,
+	    /* snapshot */ false,
 	    /* reverse */ 0);
 	ASSERT(result.err == error_code_unsupported_operation);
+}
+
+void assertNotTuple(std::string str) {
+	try {
+		Tuple::unpack(str);
+	} catch (Error& e) {
+		return;
+	}
+	UNREACHABLE();
+}
+
+TEST_CASE("fdb_transaction_get_mapped_range_fail_on_mapper_not_tuple") {
+	// A string that cannot be parsed as tuple.
+	// "\x15:\x152\x15E\x15\x09\x15\x02\x02MySimpleRecord$repeater-version\x00\x15\x013\x00\x00\x00\x00\x1aU\x90\xba\x00\x00\x00\x02\x15\x04"
+	std::string mapper = {
+		'\x15', ':',    '\x15', '2', '\x15', 'E',    '\x15', '\t',   '\x15', '\x02', '\x02', 'M',
+		'y',    'S',    'i',    'm', 'p',    'l',    'e',    'R',    'e',    'c',    'o',    'r',
+		'd',    '$',    'r',    'e', 'p',    'e',    'a',    't',    'e',    'r',    '-',    'v',
+		'e',    'r',    's',    'i', 'o',    'n',    '\x00', '\x15', '\x01', '3',    '\x00', '\x00',
+		'\x00', '\x00', '\x1a', 'U', '\x90', '\xba', '\x00', '\x00', '\x00', '\x02', '\x15', '\x04'
+	};
+	assertNotTuple(mapper);
+	fdb::Transaction tr(db);
+	auto result = getMappedIndexEntries(1, 3, tr, mapper);
+	ASSERT(result.err == error_code_mapper_not_tuple);
 }
 
 TEST_CASE("fdb_transaction_get_range reverse") {
@@ -2430,6 +2458,38 @@ TEST_CASE("Tenant create, access, and delete") {
 		break;
 	}
 
+	while (1) {
+		StringRef begin = "\xff\xff/management/tenant_map/"_sr;
+		StringRef end = "\xff\xff/management/tenant_map0"_sr;
+
+		fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, nullptr, 0));
+		fdb::KeyValueArrayFuture f = tr.get_range(FDB_KEYSEL_FIRST_GREATER_OR_EQUAL(begin.begin(), begin.size()),
+		                                          FDB_KEYSEL_FIRST_GREATER_OR_EQUAL(end.begin(), end.size()),
+		                                          /* limit */ 0,
+		                                          /* target_bytes */ 0,
+		                                          /* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL,
+		                                          /* iteration */ 0,
+		                                          /* snapshot */ false,
+		                                          /* reverse */ 0);
+
+		fdb_error_t err = wait_future(f);
+		if (err) {
+			fdb::EmptyFuture f2 = tr.on_error(err);
+			fdb_check(wait_future(f2));
+			continue;
+		}
+
+		FDBKeyValue const* outKv;
+		int outCount;
+		int outMore;
+		fdb_check(f.get(&outKv, &outCount, &outMore));
+		CHECK(outCount == 1);
+		CHECK(StringRef(outKv->key, outKv->key_length) == StringRef(tenantName).withPrefix(begin));
+
+		tr.reset();
+		break;
+	}
+
 	fdb::Tenant tenant(db, reinterpret_cast<const uint8_t*>(tenantName.c_str()), tenantName.size());
 	fdb::Transaction tr2(tenant);
 
@@ -2502,6 +2562,152 @@ TEST_CASE("Tenant create, access, and delete") {
 			fdb_check(wait_future(f2));
 			continue;
 		}
+	}
+}
+
+int64_t granule_start_load_fail(const char* filename,
+                                int filenameLength,
+                                int64_t offset,
+                                int64_t length,
+                                int64_t fullFileLength,
+                                void* userContext) {
+	CHECK(false);
+	return -1;
+}
+
+uint8_t* granule_get_load_fail(int64_t loadId, void* userContext) {
+	CHECK(false);
+	return nullptr;
+}
+
+void granule_free_load_fail(int64_t loadId, void* userContext) {
+	CHECK(false);
+}
+
+TEST_CASE("Blob Granule Functions") {
+	auto confValue =
+	    get_value("\xff/conf/blob_granules_enabled", /* snapshot */ false, { FDB_TR_OPTION_READ_SYSTEM_KEYS });
+	if (!confValue.has_value() || confValue.value() != "1") {
+		return;
+	}
+
+	// write some data
+
+	insert_data(db, create_data({ { "bg1", "a" }, { "bg2", "b" }, { "bg3", "c" } }));
+
+	// because wiring up files is non-trivial, just test the calls complete with the expected no_materialize error
+	FDBReadBlobGranuleContext granuleContext;
+	granuleContext.userContext = nullptr;
+	granuleContext.start_load_f = &granule_start_load_fail;
+	granuleContext.get_load_f = &granule_get_load_fail;
+	granuleContext.free_load_f = &granule_free_load_fail;
+	granuleContext.debugNoMaterialize = true;
+	granuleContext.granuleParallelism = 1;
+
+	// dummy values
+	FDBKeyValue const* out_kv;
+	int out_count;
+	int out_more;
+
+	fdb::Transaction tr(db);
+	int64_t originalReadVersion = -1;
+
+	// test no materialize gets error but completes, save read version
+	while (1) {
+		fdb_check(tr.set_option(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE, nullptr, 0));
+		// -2 is latest version
+		fdb::KeyValueArrayResult r = tr.read_blob_granules(key("bg"), key("bh"), 0, -2, granuleContext);
+		fdb_error_t err = r.get(&out_kv, &out_count, &out_more);
+		if (err && err != 2037 /* blob_granule_not_materialized */) {
+			fdb::EmptyFuture f2 = tr.on_error(err);
+			fdb_check(wait_future(f2));
+			continue;
+		}
+
+		CHECK(err == 2037 /* blob_granule_not_materialized */);
+
+		// If read done, save read version. Should have already used read version so this shouldn't error
+		fdb::Int64Future grvFuture = tr.get_read_version();
+		fdb_error_t grvErr = wait_future(grvFuture);
+		CHECK(!grvErr);
+		CHECK(!grvFuture.get(&originalReadVersion));
+
+		CHECK(originalReadVersion > 0);
+
+		tr.reset();
+		break;
+	}
+
+	// test with begin version > 0
+	while (1) {
+		fdb_check(tr.set_option(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE, nullptr, 0));
+		// -2 is latest version, read version should be >= originalReadVersion
+		fdb::KeyValueArrayResult r =
+		    tr.read_blob_granules(key("bg"), key("bh"), originalReadVersion, -2, granuleContext);
+		fdb_error_t err = r.get(&out_kv, &out_count, &out_more);
+		;
+		if (err && err != 2037 /* blob_granule_not_materialized */) {
+			fdb::EmptyFuture f2 = tr.on_error(err);
+			fdb_check(wait_future(f2));
+			continue;
+		}
+
+		CHECK(err == 2037 /* blob_granule_not_materialized */);
+
+		tr.reset();
+		break;
+	}
+
+	// test with prior read version completes after delay larger than normal MVC window
+	// TODO: should we not do this?
+	std::this_thread::sleep_for(std::chrono::milliseconds(6000));
+	while (1) {
+		fdb_check(tr.set_option(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE, nullptr, 0));
+		fdb::KeyValueArrayResult r =
+		    tr.read_blob_granules(key("bg"), key("bh"), 0, originalReadVersion, granuleContext);
+		fdb_error_t err = r.get(&out_kv, &out_count, &out_more);
+		if (err && err != 2037 /* blob_granule_not_materialized */) {
+			fdb::EmptyFuture f2 = tr.on_error(err);
+			fdb_check(wait_future(f2));
+			continue;
+		}
+
+		CHECK(err == 2037 /* blob_granule_not_materialized */);
+
+		tr.reset();
+		break;
+	}
+
+	// test ranges
+
+	while (1) {
+		fdb::KeyRangeArrayFuture f = tr.get_blob_granule_ranges(key("bg"), key("bh"));
+		fdb_error_t err = wait_future(f);
+		if (err) {
+			fdb::EmptyFuture f2 = tr.on_error(err);
+			fdb_check(wait_future(f2));
+			continue;
+		}
+
+		const FDBKeyRange* out_kr;
+		int out_count;
+		fdb_check(f.get(&out_kr, &out_count));
+
+		CHECK(out_count >= 1);
+		// check key ranges are in order
+		for (int i = 0; i < out_count; i++) {
+			// key range start < end
+			CHECK(std::string((const char*)out_kr[i].begin_key, out_kr[i].begin_key_length) <
+			      std::string((const char*)out_kr[i].end_key, out_kr[i].end_key_length));
+		}
+		// Ranges themselves are sorted
+		for (int i = 0; i < out_count - 1; i++) {
+			CHECK(std::string((const char*)out_kr[i].end_key, out_kr[i].end_key_length) <=
+			      std::string((const char*)out_kr[i + 1].begin_key, out_kr[i + 1].begin_key_length));
+		}
+
+		tr.reset();
+		break;
 	}
 }
 

@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -296,7 +296,7 @@ Future<Void> StorageWiggler::restoreStats() {
 	return map(readFuture, assignFunc);
 }
 Future<Void> StorageWiggler::startWiggle() {
-	metrics.last_wiggle_start = timer_int();
+	metrics.last_wiggle_start = StorageMetadataType::currentTime();
 	if (shouldStartNewRound()) {
 		metrics.last_round_start = metrics.last_wiggle_start;
 	}
@@ -304,7 +304,7 @@ Future<Void> StorageWiggler::startWiggle() {
 }
 
 Future<Void> StorageWiggler::finishWiggle() {
-	metrics.last_wiggle_finish = timer_int();
+	metrics.last_wiggle_finish = StorageMetadataType::currentTime();
 	metrics.finished_wiggle += 1;
 	auto duration = metrics.last_wiggle_finish - metrics.last_wiggle_start;
 	metrics.smoothed_wiggle_duration.setTotal((double)duration);

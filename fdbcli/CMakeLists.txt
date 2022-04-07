@@ -25,6 +25,7 @@ set(FDBCLI_SRCS
   StatusCommand.actor.cpp
   SuspendCommand.actor.cpp
   TargetVersionCommand.actor.cpp
+  TenantCommands.actor.cpp
   ThrottleCommand.actor.cpp
   TriggerDDTeamInfoLogCommand.actor.cpp
   TssqCommand.actor.cpp

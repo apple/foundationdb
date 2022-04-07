@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@
 #ifndef FLOW_SIMULATOR_H
 #define FLOW_SIMULATOR_H
 #include "flow/ProtocolVersion.h"
+#include <algorithm>
 #include <string>
 #pragma once
 
@@ -37,12 +38,6 @@ enum ClogMode { ClogDefault, ClogAll, ClogSend, ClogReceive };
 
 class ISimulator : public INetwork {
 public:
-	ISimulator()
-	  : desiredCoordinators(1), physicalDatacenters(1), processesPerMachine(0), listenersPerProcess(1),
-	    extraDB(nullptr), usableRegions(1), allowLogSetKills(true), tssMode(TSSMode::Disabled), isStopped(false),
-	    lastConnectionFailure(0), connectionFailuresDisableDuration(0), speedUpSimulation(false),
-	    backupAgents(BackupAgentType::WaitForType), drAgents(BackupAgentType::WaitForType), allSwapsDisabled(false) {}
-
 	// Order matters!
 	enum KillType {
 		KillInstantly,
@@ -93,6 +88,8 @@ public:
 
 		ProtocolVersion protocolVersion;
 
+		std::vector<ProcessInfo*> childs;
+
 		ProcessInfo(const char* name,
 		            LocalityData locality,
 		            ProcessClass startingClass,
@@ -123,6 +120,7 @@ public:
 			   << " fault_injection_p2:" << fault_injection_p2;
 			return ss.str();
 		}
+		std::vector<ProcessInfo*> const& getChilds() const { return childs; }
 
 		// Return true if the class type is suitable for stateful roles, such as tLog and StorageServer.
 		bool isAvailableClass() const {
@@ -208,7 +206,30 @@ public:
 		std::set<std::string> closingFiles;
 		Optional<Standalone<StringRef>> machineId;
 
-		MachineInfo() : machineProcess(nullptr) {}
+		const uint16_t remotePortStart;
+		std::vector<uint16_t> usedRemotePorts;
+
+		MachineInfo() : machineProcess(nullptr), remotePortStart(1000) {}
+
+		short getRandomPort() {
+			for (uint16_t i = remotePortStart; i < 60000; i++) {
+				if (std::find(usedRemotePorts.begin(), usedRemotePorts.end(), i) == usedRemotePorts.end()) {
+					TraceEvent(SevDebug, "RandomPortOpened").detail("PortNum", i);
+					usedRemotePorts.push_back(i);
+					return i;
+				}
+			}
+			UNREACHABLE();
+		}
+
+		void removeRemotePort(uint16_t port) {
+			if (port < remotePortStart)
+				return;
+			auto pos = std::find(usedRemotePorts.begin(), usedRemotePorts.end(), port);
+			if (pos != usedRemotePorts.end()) {
+				usedRemotePorts.erase(pos);
+			}
+		}
 	};
 
 	ProcessInfo* getProcess(Endpoint const& endpoint) { return getProcessByAddress(endpoint.getPrimaryAddress()); }
@@ -393,7 +414,7 @@ public:
 	int listenersPerProcess;
 	std::set<NetworkAddress> protectedAddresses;
 	std::map<NetworkAddress, ProcessInfo*> currentlyRebootingProcesses;
-	class ClusterConnectionString* extraDB;
+	std::unique_ptr<class ClusterConnectionString> extraDB;
 	Reference<IReplicationPolicy> storagePolicy;
 	Reference<IReplicationPolicy> tLogPolicy;
 	int32_t tLogWriteAntiQuorum;
@@ -455,6 +476,9 @@ public:
 			return iter->second;
 		return false;
 	}
+
+	ISimulator();
+	virtual ~ISimulator();
 
 protected:
 	Mutex mutex;

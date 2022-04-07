@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -175,6 +175,17 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 			}
 			out[p + key] = format("%d", type);
 		}
+
+		if (key == "blob_granules_enabled") {
+			int enabled = std::stoi(value);
+			if (enabled != 0 && enabled != 1) {
+				printf("Error: Only 0 or 1 are valid values for blob_granules_enabled. "
+				       "1 enables blob granules and 0 disables them.\n");
+				return out;
+			}
+			out[p + key] = value;
+		}
+
 		if (key == "tenant_mode") {
 			TenantMode tenantMode;
 			if (value == "disabled") {
@@ -203,7 +214,7 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 	} else if (mode == "ssd-redwood-1-experimental") {
 		logType = KeyValueStoreType::SSD_BTREE_V2;
 		storeType = KeyValueStoreType::SSD_REDWOOD_V1;
-	} else if (mode == "ssd-rocksdb-experimental") {
+	} else if (mode == "ssd-rocksdb-v1") {
 		logType = KeyValueStoreType::SSD_BTREE_V2;
 		storeType = KeyValueStoreType::SSD_ROCKSDB_V1;
 	} else if (mode == "memory" || mode == "memory-2") {

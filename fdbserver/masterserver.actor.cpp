@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,29 +21,13 @@
 #include <algorithm>
 #include <iterator>
 
-#include "fdbclient/NativeAPI.actor.h"
-#include "fdbclient/Notified.h"
-#include "fdbclient/SystemData.h"
-#include "fdbrpc/FailureMonitor.h"
-#include "fdbrpc/PerfMetric.h"
 #include "fdbrpc/sim_validation.h"
-#include "fdbrpc/simulator.h"
-#include "fdbserver/ApplyMetadataMutation.h"
-#include "fdbserver/BackupProgress.actor.h"
-#include "fdbserver/ConflictSet.h"
 #include "fdbserver/CoordinatedState.h"
 #include "fdbserver/CoordinationInterface.h" // copy constructors for ServerCoordinators class
-#include "fdbserver/DBCoreState.h"
-#include "fdbserver/DataDistribution.actor.h"
-#include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
-#include "fdbserver/LogSystemDiskQueueAdapter.h"
 #include "fdbserver/MasterInterface.h"
-#include "fdbserver/ProxyCommitData.actor.h"
-#include "fdbserver/RecoveryState.h"
+#include "fdbserver/ResolutionBalancer.actor.h"
 #include "fdbserver/ServerDBInfo.h"
-#include "fdbserver/WaitFailure.h"
-#include "fdbserver/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
 #include "flow/Trace.h"
 
@@ -64,17 +48,13 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 
 	Version version; // The last version assigned to a proxy by getVersion()
 	double lastVersionTime;
-	IKeyValueStore* txnStateStore;
 	Optional<Version> referenceVersion;
 
-	std::vector<CommitProxyInterface> commitProxies;
 	std::map<UID, CommitProxyVersionReplies> lastCommitProxyVersionReplies;
 
 	MasterInterface myInterface;
 
-	AsyncVar<Standalone<VectorRef<ResolverMoveRef>>> resolverChanges;
-	Version resolverChangesVersion;
-	std::set<UID> resolverNeedingChanges;
+	ResolutionBalancer resolutionBalancer;
 
 	bool forceRecovery;
 
@@ -84,19 +64,19 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	Counter reportLiveCommittedVersionRequests;
 
 	Future<Void> logger;
+	Future<Void> balancer;
 
 	MasterData(Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
 	           MasterInterface const& myInterface,
 	           ServerCoordinators const& coordinators,
 	           ClusterControllerFullInterface const& clusterController,
 	           Standalone<StringRef> const& dbId,
-	           PromiseStream<Future<Void>> const& addActor,
 	           bool forceRecovery)
 
 	  : dbgid(myInterface.id()), lastEpochEnd(invalidVersion), recoveryTransactionVersion(invalidVersion),
 	    liveCommittedVersion(invalidVersion), databaseLocked(false), minKnownCommittedVersion(invalidVersion),
-	    coordinators(coordinators), version(invalidVersion), lastVersionTime(0), txnStateStore(nullptr),
-	    myInterface(myInterface), forceRecovery(forceRecovery), cc("Master", dbgid.toString()),
+	    coordinators(coordinators), version(invalidVersion), lastVersionTime(0), myInterface(myInterface),
+	    resolutionBalancer(&version), forceRecovery(forceRecovery), cc("Master", dbgid.toString()),
 	    getCommitVersionRequests("GetCommitVersionRequests", cc),
 	    getLiveCommittedVersionRequests("GetLiveCommittedVersionRequests", cc),
 	    reportLiveCommittedVersionRequests("ReportLiveCommittedVersionRequests", cc) {
@@ -105,11 +85,9 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 			TraceEvent(SevError, "ForcedRecoveryRequiresDcID").log();
 			forceRecovery = false;
 		}
+		balancer = resolutionBalancer.resolutionBalancing();
 	}
-	~MasterData() {
-		if (txnStateStore)
-			txnStateStore->close();
-	}
+	~MasterData() = default;
 };
 
 ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionRequest req) {
@@ -185,14 +163,7 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 			TEST(maxVersionGap); // Maximum possible version gap
 			self->lastVersionTime = t1;
 
-			if (self->resolverNeedingChanges.count(req.requestingProxy)) {
-				rep.resolverChanges = self->resolverChanges.get();
-				rep.resolverChangesVersion = self->resolverChangesVersion;
-				self->resolverNeedingChanges.erase(req.requestingProxy);
-
-				if (self->resolverNeedingChanges.empty())
-					self->resolverChanges.set(Standalone<VectorRef<ResolverMoveRef>>());
-			}
+			self->resolutionBalancer.setChangesInReply(req.requestingProxy, rep);
 		}
 
 		rep.version = self->version;
@@ -214,16 +185,11 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 ACTOR Future<Void> provideVersions(Reference<MasterData> self) {
 	state ActorCollection versionActors(false);
 
-	for (auto& p : self->commitProxies)
-		self->lastCommitProxyVersionReplies[p.id()] = CommitProxyVersionReplies();
-
-	loop {
-		choose {
-			when(GetCommitVersionRequest req = waitNext(self->myInterface.getCommitVersion.getFuture())) {
-				versionActors.add(getVersion(self, req));
-			}
-			when(wait(versionActors.getResult())) {}
+	loop choose {
+		when(GetCommitVersionRequest req = waitNext(self->myInterface.getCommitVersion.getFuture())) {
+			versionActors.add(getVersion(self, req));
 		}
+		when(wait(versionActors.getResult())) {}
 	}
 }
 
@@ -270,35 +236,35 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 
 ACTOR Future<Void> updateRecoveryData(Reference<MasterData> self) {
 	loop {
-		choose {
-			when(UpdateRecoveryDataRequest req = waitNext(self->myInterface.updateRecoveryData.getFuture())) {
-				TraceEvent("UpdateRecoveryData", self->dbgid)
-				    .detail("RecoveryTxnVersion", req.recoveryTransactionVersion)
-				    .detail("LastEpochEnd", req.lastEpochEnd)
-				    .detail("NumCommitProxies", req.commitProxies.size())
-				    .detail("VersionEpoch", req.versionEpoch);
+		UpdateRecoveryDataRequest req = waitNext(self->myInterface.updateRecoveryData.getFuture());
+		TraceEvent("UpdateRecoveryData", self->dbgid)
+		    .detail("RecoveryTxnVersion", req.recoveryTransactionVersion)
+		    .detail("LastEpochEnd", req.lastEpochEnd)
+		    .detail("NumCommitProxies", req.commitProxies.size())
+		    .detail("VersionEpoch", req.versionEpoch);
 
-				if (self->recoveryTransactionVersion == invalidVersion ||
-				    req.recoveryTransactionVersion > self->recoveryTransactionVersion) {
-					self->recoveryTransactionVersion = req.recoveryTransactionVersion;
-				}
-				if (self->lastEpochEnd == invalidVersion || req.lastEpochEnd > self->lastEpochEnd) {
-					self->lastEpochEnd = req.lastEpochEnd;
-				}
-				if (req.commitProxies.size() > 0) {
-					self->commitProxies = req.commitProxies;
-					self->lastCommitProxyVersionReplies.clear();
+		if (self->recoveryTransactionVersion == invalidVersion ||
+		    req.recoveryTransactionVersion > self->recoveryTransactionVersion) {
+			self->recoveryTransactionVersion = req.recoveryTransactionVersion;
+		}
+		if (self->lastEpochEnd == invalidVersion || req.lastEpochEnd > self->lastEpochEnd) {
+			self->lastEpochEnd = req.lastEpochEnd;
+		}
+		if (req.commitProxies.size() > 0) {
+			self->lastCommitProxyVersionReplies.clear();
 
-					for (auto& p : self->commitProxies) {
-						self->lastCommitProxyVersionReplies[p.id()] = CommitProxyVersionReplies();
-					}
-				}
-				if (req.versionEpoch.present()) {
-					self->referenceVersion = req.versionEpoch.get();
-				}
-				req.reply.send(Void());
+			for (auto& p : req.commitProxies) {
+				self->lastCommitProxyVersionReplies[p.id()] = CommitProxyVersionReplies();
 			}
 		}
+		if (req.versionEpoch.present()) {
+			self->referenceVersion = req.versionEpoch.get();
+		}
+
+		self->resolutionBalancer.setCommitProxies(req.commitProxies);
+		self->resolutionBalancer.setResolvers(req.resolvers);
+
+		req.reply.send(Void());
 	}
 }
 
@@ -343,8 +309,8 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
 
 	state Future<Void> onDBChange = Void();
 	state PromiseStream<Future<Void>> addActor;
-	state Reference<MasterData> self(new MasterData(
-	    db, mi, coordinators, db->get().clusterInterface, LiteralStringRef(""), addActor, forceRecovery));
+	state Reference<MasterData> self(
+	    new MasterData(db, mi, coordinators, db->get().clusterInterface, LiteralStringRef(""), forceRecovery));
 	state Future<Void> collection = actorCollection(addActor.getFuture());
 
 	addActor.send(traceRole(Role::MASTER, mi.id()));

@@ -4,7 +4,7 @@
 *
 * This source file is part of the FoundationDB open source project
 *
-* Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+* Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -238,7 +238,7 @@ ACTOR Future<Void> echoClient() {
 	return Void();
 }
 
-struct SimpleKeyValueStoreInteface {
+struct SimpleKeyValueStoreInterface {
 	constexpr static FileIdentifier file_identifier = 8226647;
 	RequestStream<struct GetKVInterface> connect;
 	RequestStream<struct GetRequest> get;
@@ -253,7 +253,7 @@ struct SimpleKeyValueStoreInteface {
 
 struct GetKVInterface {
 	constexpr static FileIdentifier file_identifier = 8062308;
-	ReplyPromise<SimpleKeyValueStoreInteface> reply;
+	ReplyPromise<SimpleKeyValueStoreInterface> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -297,7 +297,7 @@ struct ClearRequest {
 };
 
 ACTOR Future<Void> kvStoreServer() {
-	state SimpleKeyValueStoreInteface inf;
+	state SimpleKeyValueStoreInterface inf;
 	state std::map<std::string, std::string> store;
 	inf.connect.makeWellKnownEndpoint(WLTOKEN_SIMPLE_KV_SERVER, TaskPriority::DefaultEndpoint);
 	loop {
@@ -333,17 +333,17 @@ ACTOR Future<Void> kvStoreServer() {
 	}
 }
 
-ACTOR Future<SimpleKeyValueStoreInteface> connect() {
+ACTOR Future<SimpleKeyValueStoreInterface> connect() {
 	std::cout << format("%llu: Connect...\n", uint64_t(g_network->now()));
-	SimpleKeyValueStoreInteface c;
+	SimpleKeyValueStoreInterface c;
 	c.connect = RequestStream<GetKVInterface>(Endpoint::wellKnown({ serverAddress }, WLTOKEN_SIMPLE_KV_SERVER));
-	SimpleKeyValueStoreInteface result = wait(c.connect.getReply(GetKVInterface()));
+	SimpleKeyValueStoreInterface result = wait(c.connect.getReply(GetKVInterface()));
 	std::cout << format("%llu: done..\n", uint64_t(g_network->now()));
 	return result;
 }
 
 ACTOR Future<Void> kvSimpleClient() {
-	state SimpleKeyValueStoreInteface server = wait(connect());
+	state SimpleKeyValueStoreInterface server = wait(connect());
 	std::cout << format("Set %s -> %s\n", "foo", "bar");
 	SetRequest setRequest;
 	setRequest.key = "foo";
@@ -356,7 +356,7 @@ ACTOR Future<Void> kvSimpleClient() {
 	return Void();
 }
 
-ACTOR Future<Void> kvClient(SimpleKeyValueStoreInteface server, std::shared_ptr<uint64_t> ops) {
+ACTOR Future<Void> kvClient(SimpleKeyValueStoreInterface server, std::shared_ptr<uint64_t> ops) {
 	state Future<Void> timeout = delay(20);
 	state int rangeSize = 2 << 12;
 	loop {
@@ -397,7 +397,7 @@ ACTOR Future<Void> throughputMeasurement(std::shared_ptr<uint64_t> operations) {
 }
 
 ACTOR Future<Void> multipleClients() {
-	SimpleKeyValueStoreInteface server = wait(connect());
+	SimpleKeyValueStoreInterface server = wait(connect());
 	auto ops = std::make_shared<uint64_t>(0);
 	std::vector<Future<Void>> clients(100);
 	for (auto& f : clients) {

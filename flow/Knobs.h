@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -113,6 +113,7 @@ class FlowKnobs : public KnobsImpl<FlowKnobs> {
 public:
 	int AUTOMATIC_TRACE_DUMP;
 	double PREVENT_FAST_SPIN_DELAY;
+	double HOSTNAME_RESOLVE_DELAY;
 	double CACHE_REFRESH_INTERVAL_WHEN_ALL_ALTERNATIVES_FAILED;
 
 	double DELAY_JITTER_OFFSET;

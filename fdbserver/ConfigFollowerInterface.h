@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@
 
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/ConfigKnobs.h"
+#include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"
 
@@ -215,10 +216,12 @@ public:
 	RequestStream<ConfigFollowerCompactRequest> compact;
 	RequestStream<ConfigFollowerRollforwardRequest> rollforward;
 	RequestStream<ConfigFollowerGetCommittedVersionRequest> getCommittedVersion;
+	Optional<Hostname> hostname;
 
 	ConfigFollowerInterface();
 	void setupWellKnownEndpoints();
 	ConfigFollowerInterface(NetworkAddress const& remote);
+	ConfigFollowerInterface(Hostname hostname) : hostname(hostname) {}
 	bool operator==(ConfigFollowerInterface const& rhs) const;
 	bool operator!=(ConfigFollowerInterface const& rhs) const;
 	UID id() const { return _id; }
@@ -226,6 +229,6 @@ public:
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, _id, getSnapshotAndChanges, getChanges, compact, rollforward, getCommittedVersion);
+		serializer(ar, _id, getSnapshotAndChanges, getChanges, compact, rollforward, getCommittedVersion, hostname);
 	}
 };
