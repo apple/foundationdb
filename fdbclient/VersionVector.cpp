@@ -99,7 +99,7 @@ TEST_CASE("/fdbclient/VersionVector/simpleVV") {
 // @param maxTagId maximum value of any tag id in the cluster
 // @param maxCommitVersionDelta maximum difference between commit versions in the version vector
 // @note assumes each locality contains the same number of tags
-// @note picks locality values randomly from range [INT8_MIN, INT8_MAX)
+// @note picks locality values randomly from range [tagLocalityInvalid+1, INT8_MAX)
 void populateVersionVector(VersionVector& vv,
                            int tagCount,
                            int localityCount,
@@ -113,7 +113,7 @@ void populateVersionVector(VersionVector& vv,
 
 	// Populate localities.
 	for (int i = 0; localities.size() < (size_t)localityCount; i++) {
-		int8_t locality = deterministicRandom()->randomInt(INT8_MIN, INT8_MAX);
+		int8_t locality = deterministicRandom()->randomInt(tagLocalityInvalid+1, INT8_MAX);
 		if (std::find(localities.begin(), localities.end(), locality) == localities.end()) {
 			localities.push_back(locality);
 		}
@@ -172,8 +172,6 @@ void populateVersionVector(VersionVector& vv,
 		}
 	}
 	ASSERT(tagIndex == tagCount);
-
-	std::cout << "Size: " << vv.size() << std::endl;
 }
 
 TEST_CASE("/fdbclient/VersionVector/testA") {
