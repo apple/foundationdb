@@ -99,10 +99,15 @@ LeaderElectionRegInterface::LeaderElectionRegInterface(INetwork* local) : Client
 
 ServerCoordinators::ServerCoordinators(Reference<IClusterConnectionRecord> ccr) : ClientCoordinators(ccr) {
 	ClusterConnectionString cs = ccr->getConnectionString();
-	for (auto s = cs.coordinators().begin(); s != cs.coordinators().end(); ++s) {
-		leaderElectionServers.emplace_back(*s);
-		stateServers.emplace_back(*s);
-		configServers.emplace_back(*s);
+	for (auto h : cs.hostnames) {
+		leaderElectionServers.emplace_back(h);
+		stateServers.emplace_back(h);
+		configServers.emplace_back(h);
+	}
+	for (auto s : cs.coordinators()) {
+		leaderElectionServers.emplace_back(s);
+		stateServers.emplace_back(s);
+		configServers.emplace_back(s);
 	}
 }
 

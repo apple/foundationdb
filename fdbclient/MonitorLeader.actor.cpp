@@ -243,13 +243,27 @@ TEST_CASE("/fdbclient/MonitorLeader/ConnectionString/hostname") {
 	std::string connectionString = "TestCluster:0@localhost:1234,host-name:5678";
 	std::string hn1 = "localhost", port1 = "1234", hn2 = "host-name", port2 = "5678";
 	std::vector<Hostname> hostnames;
-	hostnames.push_back(Hostname::parse(hn1 + ":" + port1));
-	hostnames.push_back(Hostname::parse(hn2 + ":" + port2));
 
-	ClusterConnectionString cs(hostnames, LiteralStringRef("TestCluster:0"));
-	ASSERT(cs.hostnames.size() == 2);
-	ASSERT(cs.coordinators().size() == 0);
-	ASSERT(cs.toString() == connectionString);
+	{
+		hostnames.push_back(Hostname::parse(hn1 + ":" + port1));
+		hostnames.push_back(Hostname::parse(hn2 + ":" + port2));
+
+		ClusterConnectionString cs(hostnames, LiteralStringRef("TestCluster:0"));
+		ASSERT(cs.hostnames.size() == 2);
+		ASSERT(cs.coordinators().size() == 0);
+		ASSERT(cs.toString() == connectionString);
+	}
+
+	{
+		hostnames.clear();
+		hostnames.push_back(Hostname::parse(hn1 + ":" + port1));
+		hostnames.push_back(Hostname::parse(hn1 + ":" + port1));
+		try {
+			ClusterConnectionString cs(hostnames, LiteralStringRef("TestCluster:0"));
+		} catch (Error& e) {
+			ASSERT(e.code() == error_code_connection_string_invalid);
+		}
+	}
 
 	return Void();
 }
@@ -375,7 +389,8 @@ TEST_CASE("/fdbclient/MonitorLeader/parseConnectionString/fuzz") {
 
 ClusterConnectionString::ClusterConnectionString(const std::vector<NetworkAddress>& servers, Key key)
   : coords(servers) {
-	if (std::unique(coords.begin(), coords.end()) != coords.end()) {
+	std::set<NetworkAddress> s(servers.begin(), servers.end());
+	if (s.size() != servers.size()) {
 		throw connection_string_invalid();
 	}
 	std::string keyString = key.toString();
@@ -383,7 +398,8 @@ ClusterConnectionString::ClusterConnectionString(const std::vector<NetworkAddres
 }
 
 ClusterConnectionString::ClusterConnectionString(const std::vector<Hostname>& hosts, Key key) : hostnames(hosts) {
-	if (std::unique(hostnames.begin(), hostnames.end()) != hostnames.end()) {
+	std::set<Hostname> h(hosts.begin(), hosts.end());
+	if (h.size() != hosts.size()) {
 		throw connection_string_invalid();
 	}
 	std::string keyString = key.toString();
@@ -439,9 +455,13 @@ std::string ClusterConnectionString::toString() const {
 
 ClientCoordinators::ClientCoordinators(Reference<IClusterConnectionRecord> ccr) : ccr(ccr) {
 	ClusterConnectionString cs = ccr->getConnectionString();
-	for (auto s = cs.coordinators().begin(); s != cs.coordinators().end(); ++s)
-		clientLeaderServers.push_back(ClientLeaderRegInterface(*s));
 	clusterKey = cs.clusterKey();
+	for (auto h : cs.hostnames) {
+		clientLeaderServers.push_back(ClientLeaderRegInterface(h));
+	}
+	for (auto s : cs.coordinators()) {
+		clientLeaderServers.push_back(ClientLeaderRegInterface(s));
+	}
 }
 
 ClientCoordinators::ClientCoordinators(Key clusterKey, std::vector<NetworkAddress> coordinators)
