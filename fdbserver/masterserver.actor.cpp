@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include <algorithm>
 #include <iterator>
 
 #include "fdbrpc/sim_validation.h"
@@ -47,6 +48,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 
 	Version version; // The last version assigned to a proxy by getVersion()
 	double lastVersionTime;
+	Optional<Version> referenceVersion;
 
 	std::map<UID, CommitProxyVersionReplies> lastCommitProxyVersionReplies;
 
@@ -125,11 +127,35 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 			if (BUGGIFY) {
 				t1 = self->lastVersionTime;
 			}
-			rep.prevVersion = self->version;
-			self->version +=
+
+			// Versions should roughly follow wall-clock time, based on the
+			// system clock of the current machine and an FDB-specific epoch.
+			// Calculate the expected version and determine whether we need to
+			// hand out versions faster or slower to stay in sync with the
+			// clock.
+			Version toAdd =
 			    std::max<Version>(1,
 			                      std::min<Version>(SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS,
 			                                        SERVER_KNOBS->VERSIONS_PER_SECOND * (t1 - self->lastVersionTime)));
+
+			rep.prevVersion = self->version;
+			if (self->referenceVersion.present()) {
+				Version expected =
+				    g_network->timer() * SERVER_KNOBS->VERSIONS_PER_SECOND - self->referenceVersion.get();
+
+				// Attempt to jump directly to the expected version. But make
+				// sure that versions are still being handed out at a rate
+				// around VERSIONS_PER_SECOND. This rate is scaled depending on
+				// how far off the calculated version is from the expected
+				// version.
+				int64_t maxOffset = std::min(static_cast<int64_t>(toAdd * SERVER_KNOBS->MAX_VERSION_RATE_MODIFIER),
+				                             SERVER_KNOBS->MAX_VERSION_RATE_OFFSET);
+				self->version =
+				    std::clamp(expected, self->version + toAdd - maxOffset, self->version + toAdd + maxOffset);
+				ASSERT_GT(self->version, rep.prevVersion);
+			} else {
+				self->version = self->version + toAdd;
+			}
 
 			TEST(self->version - rep.prevVersion == 1); // Minimum possible version gap
 
@@ -214,7 +240,8 @@ ACTOR Future<Void> updateRecoveryData(Reference<MasterData> self) {
 		TraceEvent("UpdateRecoveryData", self->dbgid)
 		    .detail("RecoveryTxnVersion", req.recoveryTransactionVersion)
 		    .detail("LastEpochEnd", req.lastEpochEnd)
-		    .detail("NumCommitProxies", req.commitProxies.size());
+		    .detail("NumCommitProxies", req.commitProxies.size())
+		    .detail("VersionEpoch", req.versionEpoch);
 
 		if (self->recoveryTransactionVersion == invalidVersion ||
 		    req.recoveryTransactionVersion > self->recoveryTransactionVersion) {
@@ -229,6 +256,16 @@ ACTOR Future<Void> updateRecoveryData(Reference<MasterData> self) {
 			for (auto& p : req.commitProxies) {
 				self->lastCommitProxyVersionReplies[p.id()] = CommitProxyVersionReplies();
 			}
+		}
+		if (req.versionEpoch.present()) {
+			self->referenceVersion = req.versionEpoch.get();
+		} else if (BUGGIFY) {
+			// Cannot use a positive version epoch in simulation because of the
+			// clock starting at 0. A positive version epoch would mean the initial
+			// cluster version was negative.
+			// TODO: Increase the size of this interval after fixing the issue
+			// with restoring ranges with large version gaps.
+			self->referenceVersion = deterministicRandom()->randomInt64(-1e6, 0);
 		}
 
 		self->resolutionBalancer.setCommitProxies(req.commitProxies);

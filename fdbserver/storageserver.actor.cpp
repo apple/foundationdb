@@ -795,6 +795,9 @@ public:
 	Reference<ILogSystem::IPeekCursor> logCursor;
 
 	Promise<UID> clusterId;
+	// The version the cluster starts on. This value is not persisted and may
+	// not be valid after a recovery.
+	Version initialClusterVersion = invalidVersion;
 	UID thisServerID;
 	Optional<UID> tssPairID; // if this server is a tss, this is the id of its (ss) pair
 	Optional<UID> ssPairID; // if this server is an ss, this is the id of its (tss) pair
@@ -5849,7 +5852,8 @@ void changeServerKeys(StorageServer* data,
 			data->watches.triggerRange(range.begin, range.end);
 		} else if (!dataAvailable) {
 			// SOMEDAY: Avoid restarting adding/transferred shards
-			if (version == 0) { // bypass fetchkeys; shard is known empty at version 0
+			// bypass fetchkeys; shard is known empty at initial cluster version
+			if (version == data->initialClusterVersion - 1) {
 				TraceEvent("ChangeServerKeysInitialRange", data->thisServerID)
 				    .detail("Begin", range.begin)
 				    .detail("End", range.end);
@@ -6734,7 +6738,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 					    .detail("Version", cloneCursor2->version().toString());
 				} else if (ver != invalidVersion) { // This change belongs to a version < minVersion
 					DEBUG_MUTATION("SSPeek", ver, msg, data->thisServerID);
-					if (ver == 1) {
+					if (ver == data->initialClusterVersion) {
 						//TraceEvent("SSPeekMutation", data->thisServerID).log();
 						// The following trace event may produce a value with special characters
 						TraceEvent("SSPeekMutation", data->thisServerID)
@@ -6850,6 +6854,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			proposedOldestVersion = std::min(proposedOldestVersion, data->version.get() - 1);
 			proposedOldestVersion = std::max(proposedOldestVersion, data->oldestVersion.get());
 			proposedOldestVersion = std::max(proposedOldestVersion, data->desiredOldestVersion.get());
+			proposedOldestVersion = std::max(proposedOldestVersion, data->initialClusterVersion);
 
 			//TraceEvent("StorageServerUpdated", data->thisServerID).detail("Ver", ver).detail("DataVersion", data->version.get())
 			//	.detail("LastTLogVersion", data->lastTLogVersion).detail("NewOldest",
@@ -8715,6 +8720,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  StorageServerInterface ssi,
                                  Tag seedTag,
                                  UID clusterId,
+                                 Version startVersion,
                                  Version tssSeedVersion,
                                  ReplyPromise<InitializeStorageReply> recruitReply,
                                  Reference<AsyncVar<ServerDBInfo> const> db,
@@ -8722,6 +8728,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 	state StorageServer self(persistentData, db, ssi);
 	state Future<Void> ssCore;
 	self.clusterId.send(clusterId);
+	self.initialClusterVersion = startVersion;
 	if (ssi.isTss()) {
 		self.setTssPair(ssi.tssPairID.get());
 		ASSERT(self.isTss());

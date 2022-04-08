@@ -823,6 +823,7 @@ std::vector<std::pair<UID, Version>> decodeBackupStartedValue(const ValueRef& va
 const KeyRef coordinatorsKey = LiteralStringRef("\xff/coordinators");
 const KeyRef logsKey = LiteralStringRef("\xff/logs");
 const KeyRef minRequiredCommitVersionKey = LiteralStringRef("\xff/minRequiredCommitVersion");
+const KeyRef versionEpochKey = LiteralStringRef("\xff/versionEpoch");
 
 const KeyRef globalKeysPrefix = LiteralStringRef("\xff/globals");
 const KeyRef lastEpochEndKey = LiteralStringRef("\xff/globals/lastEpochEnd");

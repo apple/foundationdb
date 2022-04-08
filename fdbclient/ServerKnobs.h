@@ -39,6 +39,8 @@ public:
 	int64_t MAX_WRITE_TRANSACTION_LIFE_VERSIONS;
 	double MAX_COMMIT_BATCH_INTERVAL; // Each commit proxy generates a CommitTransactionBatchRequest at least this
 	                                  // often, so that versions always advance smoothly
+	double MAX_VERSION_RATE_MODIFIER;
+	int64_t MAX_VERSION_RATE_OFFSET;
 
 	// TLogs
 	bool PEEK_USING_STREAMING;

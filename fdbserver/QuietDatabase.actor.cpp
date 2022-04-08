@@ -598,6 +598,31 @@ ACTOR Future<bool> getStorageServersRecruiting(Database cx, WorkerInterface dist
 	}
 }
 
+// Gets the difference between the expected version (based on the version
+// epoch) and the actual version.
+ACTOR Future<int64_t> getVersionOffset(Database cx,
+                                       WorkerInterface distributorWorker,
+                                       Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+	loop {
+		state Transaction tr(cx);
+		try {
+			TraceEvent("GetVersionOffset").detail("Stage", "ReadingVersionEpoch");
+
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			state Version rv = wait(tr.getReadVersion());
+			Optional<Standalone<StringRef>> versionEpochValue = wait(tr.get(versionEpochKey));
+			if (!versionEpochValue.present()) {
+				return 0;
+			}
+			int64_t versionEpoch = BinaryReader::fromStringRef<int64_t>(versionEpochValue.get(), Unversioned());
+			int64_t versionOffset = abs(rv - (g_network->timer() * SERVER_KNOBS->VERSIONS_PER_SECOND - versionEpoch));
+			return versionOffset;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
 ACTOR Future<Void> repairDeadDatacenter(Database cx,
                                         Reference<AsyncVar<ServerDBInfo> const> dbInfo,
                                         std::string context) {
@@ -652,7 +677,8 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
                                         int64_t maxTLogQueueGate = 5e6,
                                         int64_t maxStorageServerQueueGate = 5e6,
                                         int64_t maxDataDistributionQueueSize = 0,
-                                        int64_t maxPoppedVersionLag = 30e6) {
+                                        int64_t maxPoppedVersionLag = 30e6,
+                                        int64_t maxVersionOffset = 1e6) {
 	state Future<Void> reconfig =
 	    reconfigureAfter(cx, 100 + (deterministicRandom()->random01() * 100), dbInfo, "QuietDatabase");
 	state Future<int64_t> dataInFlight;
@@ -662,6 +688,7 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 	state Future<int64_t> storageQueueSize;
 	state Future<bool> dataDistributionActive;
 	state Future<bool> storageServersRecruiting;
+	state Future<int64_t> versionOffset;
 	auto traceMessage = "QuietDatabase" + phase + "Begin";
 	TraceEvent(traceMessage.c_str()).log();
 
@@ -698,10 +725,11 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 			storageQueueSize = getMaxStorageServerQueueSize(cx, dbInfo);
 			dataDistributionActive = getDataDistributionActive(cx, distributorWorker);
 			storageServersRecruiting = getStorageServersRecruiting(cx, distributorWorker, distributorUID);
+			versionOffset = getVersionOffset(cx, distributorWorker, dbInfo);
 
 			wait(success(dataInFlight) && success(tLogQueueInfo) && success(dataDistributionQueueSize) &&
 			     success(teamCollectionValid) && success(storageQueueSize) && success(dataDistributionActive) &&
-			     success(storageServersRecruiting));
+			     success(storageServersRecruiting) && success(versionOffset));
 
 			TraceEvent(("QuietDatabase" + phase).c_str())
 			    .detail("DataInFlight", dataInFlight.get())
@@ -717,13 +745,17 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 			    .detail("MaxStorageServerQueueGate", maxStorageServerQueueGate)
 			    .detail("DataDistributionActive", dataDistributionActive.get())
 			    .detail("StorageServersRecruiting", storageServersRecruiting.get())
+			    .detail("RecoveryCount", dbInfo->get().recoveryCount)
+			    .detail("VersionOffset", versionOffset.get())
 			    .detail("NumSuccesses", numSuccesses);
 
+			maxVersionOffset += dbInfo->get().recoveryCount * SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT;
 			if (dataInFlight.get() > dataInFlightGate || tLogQueueInfo.get().first > maxTLogQueueGate ||
 			    tLogQueueInfo.get().second > maxPoppedVersionLag ||
 			    dataDistributionQueueSize.get() > maxDataDistributionQueueSize ||
 			    storageQueueSize.get() > maxStorageServerQueueGate || !dataDistributionActive.get() ||
-			    storageServersRecruiting.get() || !teamCollectionValid.get()) {
+			    storageServersRecruiting.get() || versionOffset.get() > maxVersionOffset ||
+			    !teamCollectionValid.get()) {
 
 				wait(delay(1.0));
 				numSuccesses = 0;
@@ -779,6 +811,10 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 				auto key = "NotReady" + std::to_string(notReadyCount++);
 				evt.detail(key.c_str(), "storageServersRecruiting");
 			}
+			if (versionOffset.isReady() && versionOffset.isError()) {
+				auto key = "NotReady" + std::to_string(notReadyCount++);
+				evt.detail(key.c_str(), "versionOffset");
+			}
 			wait(delay(1.0));
 			numSuccesses = 0;
 		}
@@ -794,7 +830,8 @@ Future<Void> quietDatabase(Database const& cx,
                            int64_t maxTLogQueueGate,
                            int64_t maxStorageServerQueueGate,
                            int64_t maxDataDistributionQueueSize,
-                           int64_t maxPoppedVersionLag) {
+                           int64_t maxPoppedVersionLag,
+                           int64_t maxVersionOffset) {
 	return waitForQuietDatabase(cx,
 	                            dbInfo,
 	                            phase,
@@ -802,5 +839,6 @@ Future<Void> quietDatabase(Database const& cx,
 	                            maxTLogQueueGate,
 	                            maxStorageServerQueueGate,
 	                            maxDataDistributionQueueSize,
-	                            maxPoppedVersionLag);
+	                            maxPoppedVersionLag,
+	                            maxVersionOffset);
 }
