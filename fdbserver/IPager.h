@@ -451,6 +451,10 @@ public:
 			h->writeTime = now();
 		}
 	}
+
+	// These should be updated before writing a BTree page.  Note that the logical ID that refers to a page can change
+	// after the page is written, if its parent is updated to point directly to its physical page ID.  Therefore, the
+	// last known logical page ID should always be updated before writing an updated version of a BTree page.
 	void setLogicalPageInfo(LogicalPageID lastKnownLogicalPageID, LogicalPageID lastKnownParentLogicalPageID) {
 		if (page->headerVersion == 1) {
 			RedwoodHeaderV1* h = page->getMainHeader<RedwoodHeaderV1>();

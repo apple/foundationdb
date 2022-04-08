@@ -5207,6 +5207,9 @@ public:
 			debug_printf("new root %s\n", toString(self->m_header.root).c_str());
 
 			Reference<ArenaPage> page = wait(makeEmptyRoot(self));
+
+			// Newly allocated page so logical id = physical id and it's a new empty root so no parent
+			page->setLogicalPageInfo(self->m_header.root.front(), invalidLogicalPageID);
 			self->m_pager->updatePage(PagerEventReasons::MetaData, nonBtreeLevel, self->m_header.root, page);
 
 			LogicalPageID newQueuePage = wait(self->m_pager->newPageID());
@@ -5755,7 +5758,8 @@ private:
 	                                                                        VectorRef<RedwoodRecordRef> entries,
 	                                                                        unsigned int height,
 	                                                                        Version v,
-	                                                                        BTreeNodeLinkRef previousID) {
+	                                                                        BTreeNodeLinkRef previousID,
+	                                                                        LogicalPageID parentID) {
 		ASSERT(entries.size() > 0);
 
 		state Standalone<VectorRef<RedwoodRecordRef>> records;
@@ -5871,6 +5875,7 @@ private:
 			// If we are only writing 1 BTree node and its block count is 1 and the original node also had 1 block
 			// then try to update the page atomically so its logical page ID does not change
 			if (pagesToBuild.size() == 1 && p.blockCount == 1 && previousID.size() == 1) {
+				page->setLogicalPageInfo(previousID.front(), parentID);
 				LogicalPageID id = wait(
 				    self->m_pager->atomicUpdatePage(PagerEventReasons::Commit, height, previousID.front(), page, v));
 				childPageID.push_back(records.arena(), id);
@@ -5903,18 +5908,17 @@ private:
 					self->freeBTreePage(height, previousID, v);
 				}
 
-				state Standalone<VectorRef<LogicalPageID>> emptyPages;
-				emptyPages.resize(emptyPages.arena(), p.blockCount);
+				childPageID.resize(records.arena(), p.blockCount);
 				state int i = 0;
-				for (i = 0; i < emptyPages.size(); ++i) {
+				for (i = 0; i < childPageID.size(); ++i) {
 					LogicalPageID id = wait(self->m_pager->newPageID());
-					emptyPages[i] = id;
+					childPageID[i] = id;
 				}
-				debug_printf("writePages: newPages %s", toString(emptyPages).c_str());
-				self->m_pager->updatePage(PagerEventReasons::Commit, height, emptyPages, page);
-				for (const LogicalPageID id : emptyPages) {
-					childPageID.push_back(records.arena(), id);
-				}
+				debug_printf("writePages: newPages %s", toString(childPageID).c_str());
+
+				// Newly allocated page so logical id = physical id
+				page->setLogicalPageInfo(childPageID.front(), parentID);
+				self->m_pager->updatePage(PagerEventReasons::Commit, height, childPageID, page);
 			}
 
 			if (self->m_pBoundaryVerifier != nullptr) {
@@ -5965,8 +5969,8 @@ private:
 		while (records.size() > 1) {
 			self->m_header.height = ++height;
 			ASSERT(height < std::numeric_limits<int8_t>::max());
-			Standalone<VectorRef<RedwoodRecordRef>> newRecords =
-			    wait(writePages(self, &dbBegin, &dbEnd, records, height, version, BTreeNodeLinkRef()));
+			Standalone<VectorRef<RedwoodRecordRef>> newRecords = wait(
+			    writePages(self, &dbBegin, &dbEnd, records, height, version, BTreeNodeLinkRef(), invalidLogicalPageID));
 			debug_printf("Wrote a new root level at version %" PRId64 " height %d size %d pages\n",
 			             version,
 			             height,
@@ -6096,6 +6100,7 @@ private:
 	// updateBTreePage is only called from commitSubTree function so write reason is always btree commit
 	ACTOR static Future<BTreeNodeLinkRef> updateBTreePage(VersionedBTree* self,
 	                                                      BTreeNodeLinkRef oldID,
+	                                                      LogicalPageID parentID,
 	                                                      Arena* arena,
 	                                                      Reference<ArenaPage> page,
 	                                                      Version writeVersion) {
@@ -6118,29 +6123,26 @@ private:
 
 		state unsigned int height = (unsigned int)((const BTreePage*)page->data())->height;
 		if (oldID.size() == 1) {
+			page->setLogicalPageInfo(oldID.front(), parentID);
 			LogicalPageID id = wait(
 			    self->m_pager->atomicUpdatePage(PagerEventReasons::Commit, height, oldID.front(), page, writeVersion));
 			newID.front() = id;
 			return newID;
 		}
-		state Standalone<VectorRef<LogicalPageID>> emptyPages;
+
 		state int i = 0;
-		emptyPages.resize(emptyPages.arena(), oldID.size());
 		for (i = 0; i < oldID.size(); ++i) {
 			LogicalPageID id = wait(self->m_pager->newPageID());
-			emptyPages[i] = id;
+			newID[i] = id;
 		}
 		debug_printf("updateBTreePage(%s, %s): newPages %s",
 		             ::toString(oldID).c_str(),
 		             ::toString(writeVersion).c_str(),
-		             toString(emptyPages).c_str());
+		             toString(newID).c_str());
 
-		self->m_pager->updatePage(PagerEventReasons::Commit, height, emptyPages, page);
-		i = 0;
-		for (const LogicalPageID id : emptyPages) {
-			newID[i] = id;
-			++i;
-		}
+		// Newly allocated page so logical id = physical id
+		page->setLogicalPageInfo(newID.front(), parentID);
+		self->m_pager->updatePage(PagerEventReasons::Commit, height, newID, page);
 
 		if (self->m_pBoundaryVerifier != nullptr) {
 			self->m_pBoundaryVerifier->update(writeVersion, oldID.front(), newID.front());
@@ -6471,6 +6473,7 @@ private:
 	    VersionedBTree* self,
 	    CommitBatch* batch,
 	    BTreeNodeLinkRef rootID,
+	    LogicalPageID parentID,
 	    unsigned int height,
 	    MutationBuffer::const_iterator mBegin, // greatest mutation boundary <= subtreeLowerBound->key
 	    MutationBuffer::const_iterator mEnd, // least boundary >= subtreeUpperBound->key
@@ -6799,8 +6802,12 @@ private:
 					debug_print(addPrefix(context, update->toString()));
 				} else {
 					// Otherwise update it.
-					BTreeNodeLinkRef newID = wait(self->updateBTreePage(
-					    self, rootID, &update->newLinks.arena(), pageCopy.castTo<ArenaPage>(), batch->writeVersion));
+					BTreeNodeLinkRef newID = wait(self->updateBTreePage(self,
+					                                                    rootID,
+					                                                    parentID,
+					                                                    &update->newLinks.arena(),
+					                                                    pageCopy.castTo<ArenaPage>(),
+					                                                    batch->writeVersion));
 
 					debug_printf("%s Leaf node updated in-place at version %s, new contents:\n",
 					             context.c_str(),
@@ -6836,7 +6843,8 @@ private:
 			                                                                        merged,
 			                                                                        height,
 			                                                                        batch->writeVersion,
-			                                                                        rootID));
+			                                                                        rootID,
+			                                                                        parentID));
 
 			// Put new links into update and tell update that pages were rebuilt
 			update->rebuilt(entries);
@@ -7010,7 +7018,8 @@ private:
 				debug_printf("%s Recursing for %s\n", context.c_str(), toString(pageID).c_str());
 				debug_print(addPrefix(context, u.toString()));
 
-				recursions.push_back(self->commitSubtree(self, batch, pageID, height - 1, mBegin, mEnd, &u));
+				recursions.push_back(
+				    self->commitSubtree(self, batch, pageID, rootID.front(), height - 1, mBegin, mEnd, &u));
 			}
 
 			debug_printf("%s Recursions from internal page started. pageSize=%d level=%d children=%d slices=%zu "
@@ -7140,6 +7149,7 @@ private:
 
 						BTreeNodeLinkRef newID = wait(self->updateBTreePage(self,
 						                                                    rootID,
+						                                                    parentID,
 						                                                    &update->newLinks.arena(),
 						                                                    pageCopy.castTo<ArenaPage>(),
 						                                                    batch->writeVersion));
@@ -7200,7 +7210,8 @@ private:
 						                    modifier.rebuild,
 						                    height,
 						                    batch->writeVersion,
-						                    rootID));
+						                    rootID,
+						                    parentID));
 						update->rebuilt(newChildEntries);
 
 						debug_printf("%s Internal page rebuilt, returning slice:\n", context.c_str());
@@ -7268,7 +7279,8 @@ private:
 		--mBegin;
 		MutationBuffer::const_iterator mEnd = batch.mutations->lower_bound(all.subtreeUpperBound.key);
 
-		wait(commitSubtree(self, &batch, rootNodeLink, self->m_header.height, mBegin, mEnd, &all));
+		wait(
+		    commitSubtree(self, &batch, rootNodeLink, invalidLogicalPageID, self->m_header.height, mBegin, mEnd, &all));
 
 		// If the old root was deleted, write a new empty tree root node and free the old roots
 		if (all.childrenChanged) {
@@ -7279,6 +7291,8 @@ private:
 				self->m_header.height = 1;
 
 				Reference<ArenaPage> page = wait(makeEmptyRoot(self));
+				// Newly allocated page so logical id = physical id and there is no parent as this is a new root
+				page->setLogicalPageInfo(rootNodeLink.front(), invalidLogicalPageID);
 				self->m_pager->updatePage(PagerEventReasons::Commit, self->m_header.height, rootNodeLink, page);
 			} else {
 				Standalone<VectorRef<RedwoodRecordRef>> newRootRecords(all.newLinks, all.newLinks.arena());
