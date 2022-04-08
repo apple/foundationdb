@@ -226,6 +226,10 @@ struct BlobManagerStats {
 	Counter ccMismatches;
 	Counter ccTimeouts;
 	Counter ccErrors;
+	Counter purgesProcessed;
+	Counter granulesFullyPurged;
+	Counter granulesPartiallyPurged;
+	Counter filesPurged;
 	Future<Void> logger;
 
 	// Current stats maintained for a given blob worker process
@@ -233,7 +237,9 @@ struct BlobManagerStats {
 	  : cc("BlobManagerStats", id.toString()), granuleSplits("GranuleSplits", cc),
 	    granuleWriteHotSplits("GranuleWriteHotSplits", cc), ccGranulesChecked("CCGranulesChecked", cc),
 	    ccRowsChecked("CCRowsChecked", cc), ccBytesChecked("CCBytesChecked", cc), ccMismatches("CCMismatches", cc),
-	    ccTimeouts("CCTimeouts", cc), ccErrors("CCErrors", cc) {
+	    ccTimeouts("CCTimeouts", cc), ccErrors("CCErrors", cc), purgesProcessed("PurgesProcessed", cc),
+	    granulesFullyPurged("GranulesFullyPurged", cc), granulesPartiallyPurged("GranulesPartiallyPurged", cc),
+	    filesPurged("FilesPurged", cc) {
 		specialCounter(cc, "WorkerCount", [workers]() { return workers->size(); });
 		logger = traceCounters("BlobManagerMetrics", id, interval, &cc, "BlobManagerMetrics");
 	}
@@ -2216,9 +2222,11 @@ ACTOR Future<bool> canDeleteFullGranule(Reference<BlobManagerData> self, UID gra
 /*
  * Deletes all files pertaining to the granule with id granuleId and
  * also removes the history entry for this granule from the system keyspace
- * TODO: ensure cannot fully delete granule that is still splitting!
  */
-ACTOR Future<bool> fullyDeleteGranule(Reference<BlobManagerData> self, UID granuleId, Key historyKey) {
+ACTOR Future<bool> fullyDeleteGranule(Reference<BlobManagerData> self,
+                                      UID granuleId,
+                                      Key historyKey,
+                                      Version purgeVersion) {
 	if (BM_DEBUG) {
 		fmt::print("Fully deleting granule {0}: init\n", granuleId.toString());
 	}
@@ -2227,6 +2235,10 @@ ACTOR Future<bool> fullyDeleteGranule(Reference<BlobManagerData> self, UID granu
 	// delete the granule, since we need to keep the last snapshot and deltas for splitting
 	bool canFullyDelete = wait(canDeleteFullGranule(self, granuleId));
 	if (!canFullyDelete) {
+		TraceEvent("GranuleCannotFullPurge", self->id)
+		    .detail("Epoch", self->epoch)
+		    .detail("GranuleID", granuleId)
+		    .detail("PurgeVersion", purgeVersion);
 		return false;
 	}
 
@@ -2234,7 +2246,7 @@ ACTOR Future<bool> fullyDeleteGranule(Reference<BlobManagerData> self, UID granu
 	GranuleFiles files = wait(loadHistoryFiles(self->db, granuleId));
 
 	std::vector<Future<Void>> deletions;
-	std::vector<std::string> filesToDelete; // TODO: remove, just for debugging
+	state std::vector<std::string> filesToDelete; // TODO: remove, just for debugging
 
 	for (auto snapshotFile : files.snapshotFiles) {
 		std::string fname = snapshotFile.filename;
@@ -2249,7 +2261,7 @@ ACTOR Future<bool> fullyDeleteGranule(Reference<BlobManagerData> self, UID granu
 	}
 
 	if (BM_DEBUG) {
-		fmt::print("Fully deleting granule {0}: deleting {1} files\n", granuleId.toString(), deletions.size());
+		fmt::print("Fully deleting granule {0}: deleting {1} files\n", granuleId.toString(), filesToDelete.size());
 		for (auto filename : filesToDelete) {
 			fmt::print(" - {}\n", filename.c_str());
 		}
@@ -2285,6 +2297,15 @@ ACTOR Future<bool> fullyDeleteGranule(Reference<BlobManagerData> self, UID granu
 	if (BM_DEBUG) {
 		fmt::print("Fully deleting granule {0}: success\n", granuleId.toString());
 	}
+
+	TraceEvent("GranuleFullPurge", self->id)
+	    .detail("Epoch", self->epoch)
+	    .detail("GranuleID", granuleId)
+	    .detail("PurgeVersion", purgeVersion)
+	    .detail("FilesPurged", filesToDelete.size());
+
+	++self->stats.granulesFullyPurged;
+	self->stats.filesPurged += filesToDelete.size();
 
 	return true;
 }
@@ -2347,7 +2368,7 @@ ACTOR Future<Void> partiallyDeleteGranule(Reference<BlobManagerData> self, UID g
 	}
 
 	if (BM_DEBUG) {
-		fmt::print("Partially deleting granule {0}: deleting {1} files\n", granuleId.toString(), deletions.size());
+		fmt::print("Partially deleting granule {0}: deleting {1} files\n", granuleId.toString(), filesToDelete.size());
 		for (auto filename : filesToDelete) {
 			fmt::print(" - {0}\n", filename);
 		}
@@ -2387,6 +2408,15 @@ ACTOR Future<Void> partiallyDeleteGranule(Reference<BlobManagerData> self, UID g
 	if (BM_DEBUG) {
 		fmt::print("Partially deleting granule {0}: success\n", granuleId.toString());
 	}
+	TraceEvent("GranulePartialPurge", self->id)
+	    .detail("Epoch", self->epoch)
+	    .detail("GranuleID", granuleId)
+	    .detail("PurgeVersion", purgeVersion)
+	    .detail("FilesPurged", filesToDelete.size());
+
+	++self->stats.granulesPartiallyPurged;
+	self->stats.filesPurged += filesToDelete.size();
+
 	return Void();
 }
 
@@ -2406,6 +2436,12 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 		           purgeVersion,
 		           force);
 	}
+
+	TraceEvent("PurgeGranulesBegin", self->id)
+	    .detail("Epoch", self->epoch)
+	    .detail("Range", range)
+	    .detail("PurgeVersion", purgeVersion)
+	    .detail("Force", force);
 
 	// queue of <range, startVersion, endVersion> for BFS traversal of history
 	state std::queue<std::tuple<KeyRange, Version, Version>> historyEntryQueue;
@@ -2584,7 +2620,7 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 		if (BM_DEBUG) {
 			fmt::print("About to fully delete granule {0}\n", granuleId.toString());
 		}
-		bool success = wait(fullyDeleteGranule(self, granuleId, historyKey));
+		bool success = wait(fullyDeleteGranule(self, granuleId, historyKey, purgeVersion));
 		if (!success) {
 			if (BM_DEBUG) {
 				fmt::print("Unable to fully delete granule {0}, doing partial delete instead\n", granuleId.toString());
@@ -2618,6 +2654,14 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 		           range.end.printable(),
 		           purgeVersion);
 	}
+
+	TraceEvent("PurgeGranulesComplete", self->id)
+	    .detail("Epoch", self->epoch)
+	    .detail("Range", range)
+	    .detail("PurgeVersion", purgeVersion)
+	    .detail("Force", force);
+
+	++self->stats.purgesProcessed;
 	return Void();
 }
 
