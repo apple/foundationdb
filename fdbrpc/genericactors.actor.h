@@ -83,8 +83,16 @@ Future<ErrorOr<REPLY_TYPE(Req)>> tryGetReplyFromHostname(RequestStream<Req>* to,
 	try {
 		NetworkAddress address = wait(hostname.resolve());
 		*to = RequestStream<Req>(Endpoint::wellKnown({ address }, token));
-		ErrorOr<REPLY_TYPE(Req)> ret = wait(to->tryGetReply(request));
-		return ret;
+		ErrorOr<REPLY_TYPE(Req)> reply = wait(to->tryGetReply(request));
+		if (reply.isError()) {
+			resetReply(request);
+			if (reply.getError().code() == error_code_request_maybe_delivered) {
+				// Connection failure.
+				hostname.resetToUnresolved();
+				INetworkConnections::net()->removeCachedDNS(hostname.host, hostname.service);
+			}
+		}
+		return reply;
 	} catch (...) {
 		return ErrorOr<REPLY_TYPE(Req)>(lookup_failed());
 	}
@@ -102,8 +110,16 @@ Future<ErrorOr<REPLY_TYPE(Req)>> tryGetReplyFromHostname(RequestStream<Req>* to,
 	try {
 		NetworkAddress address = wait(hostname.resolve());
 		*to = RequestStream<Req>(Endpoint::wellKnown({ address }, token));
-		ErrorOr<REPLY_TYPE(Req)> ret = wait(to->tryGetReply(request, taskID));
-		return ret;
+		ErrorOr<REPLY_TYPE(Req)> reply = wait(to->tryGetReply(request, taskID));
+		if (reply.isError()) {
+			resetReply(request);
+			if (reply.getError().code() == error_code_request_maybe_delivered) {
+				// Connection failure.
+				hostname.resetToUnresolved();
+				INetworkConnections::net()->removeCachedDNS(hostname.host, hostname.service);
+			}
+		}
+		return reply;
 	} catch (...) {
 		return ErrorOr<REPLY_TYPE(Req)>(lookup_failed());
 	}
