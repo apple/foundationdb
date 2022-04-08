@@ -2334,7 +2334,10 @@ ThreadFuture<Void> MultiVersionApi::updateClusterSharedStateMap(std::string clus
 void MultiVersionApi::clearClusterSharedStateMapEntry(std::string clusterFilePath) {
 	MutexHolder holder(lock);
 	auto mapEntry = clusterSharedStateMap.find(clusterFilePath);
-	if (mapEntry == clusterSharedStateMap.end()) return;
+	if (mapEntry == clusterSharedStateMap.end()) {
+		TraceEvent(SevError, "ClusterSharedStateMapEntryNotFound").detail("ClusterFilePath", clusterFilePath);
+		return;
+	}
 	auto ssPtr = mapEntry->second.get();
 	ssPtr->delRef(ssPtr);
 	clusterSharedStateMap.erase(mapEntry);
