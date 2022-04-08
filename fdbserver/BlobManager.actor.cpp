@@ -216,7 +216,7 @@ struct SplitEvaluation {
 struct BlobManagerStats {
 	CounterCollection cc;
 
-	// FIXME: pruning stats
+	// FIXME: purging stats
 
 	Counter granuleSplits;
 	Counter granuleWriteHotSplits;
@@ -2163,7 +2163,7 @@ ACTOR Future<GranuleFiles> loadHistoryFiles(Reference<BlobManagerData> bmData, U
 	}
 }
 
-// FIXME: trace events for pruning
+// FIXME: trace events for purging
 
 ACTOR Future<bool> canDeleteFullGranule(Reference<BlobManagerData> self, UID granuleId) {
 	state Transaction tr(self->db);
@@ -2742,7 +2742,7 @@ ACTOR Future<Void> monitorPurgeKeys(Reference<BlobManagerData> self) {
 		}
 
 		if (BM_DEBUG) {
-			printf("Done pruning current set of purge intents.\n");
+			printf("Done clearing current set of purge intents.\n");
 		}
 	}
 }

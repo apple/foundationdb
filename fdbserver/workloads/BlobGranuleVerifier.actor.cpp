@@ -64,7 +64,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	int64_t bytesRead = 0;
 	int64_t purges = 0;
 	std::vector<Future<Void>> clients;
-	bool enablePruning;
+	bool enablePurging;
 
 	DatabaseConfiguration config;
 
@@ -80,8 +80,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		timeTravelLimit = getOption(options, LiteralStringRef("timeTravelLimit"), testDuration);
 		timeTravelBufferSize = getOption(options, LiteralStringRef("timeTravelBufferSize"), 100000000);
 		threads = getOption(options, LiteralStringRef("threads"), 1);
-		// TODO CHANGE
-		enablePruning = getOption(options, LiteralStringRef("enablePruning"), true /*sharedRandomNumber % 2 == 0*/);
+		enablePurging = getOption(options, LiteralStringRef("enablePurging"), false /*sharedRandomNumber % 2 == 0*/);
 		ASSERT(threads >= 1);
 
 		if (BGV_DEBUG) {
@@ -220,7 +219,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR Future<Void> verifyGranules(Database cx, BlobGranuleVerifierWorkload* self, bool allowPruning) {
+	ACTOR Future<Void> verifyGranules(Database cx, BlobGranuleVerifierWorkload* self, bool allowPurging) {
 		state double last = now();
 		state double endTime = last + self->testDuration;
 		state std::map<double, OldRead> timeTravelChecks;
@@ -255,8 +254,8 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 
 					try {
 						state Version newPurgeVersion = 0;
-						state bool doPruning = allowPruning && deterministicRandom()->random01() < 0.5;
-						if (doPruning) {
+						state bool doPurging = allowPurging && deterministicRandom()->random01() < 0.5;
+						if (doPurging) {
 							Version maxPurgeVersion = oldRead.v;
 							for (auto& it : timeTravelChecks) {
 								maxPurgeVersion = std::min(it.second.v, maxPurgeVersion);
@@ -268,7 +267,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 								wait(cx->waitPurgeGranulesComplete(purgeKey));
 								self->purges++;
 							} else {
-								doPruning = false;
+								doPurging = false;
 							}
 						}
 						std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> reReadResult =
@@ -278,7 +277,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 						}
 						self->timeTravelReads++;
 
-						if (doPruning) {
+						if (doPurging) {
 							wait(self->killBlobWorkers(cx, self));
 							std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> versionRead =
 							    wait(readFromBlob(cx, self->bstore, oldRead.range, 0, prevPurgeVersion));
@@ -345,10 +344,10 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	Future<Void> start(Database const& cx) override {
 		clients.reserve(threads + 1);
 		clients.push_back(timeout(findGranules(cx, this), testDuration, Void()));
-		if (enablePruning && clientId == 0) {
+		if (enablePurging && clientId == 0) {
 			clients.push_back(
 			    timeout(reportErrors(verifyGranules(cx, this, true), "BlobGranuleVerifier"), testDuration, Void()));
-		} else if (!enablePruning) {
+		} else if (!enablePurging) {
 			for (int i = 0; i < threads; i++) {
 				clients.push_back(timeout(
 				    reportErrors(verifyGranules(cx, this, false), "BlobGranuleVerifier"), testDuration, Void()));
