@@ -915,7 +915,7 @@ struct TLogVersion {
 		MIN_SUPPORTED = V2,
 		MAX_SUPPORTED = V7,
 		MIN_RECRUITABLE = V6,
-		DEFAULT = V6,
+		DEFAULT = V7,
 	} version;
 
 	TLogVersion() : version(UNSET) {}
