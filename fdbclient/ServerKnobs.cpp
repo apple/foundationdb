@@ -720,6 +720,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( PEER_LATENCY_DEGRADATION_PERCENTILE,                  0.90 );
 	init( PEER_LATENCY_DEGRADATION_THRESHOLD,                   0.05 );
 	init( PEER_TIMEOUT_PERCENTAGE_DEGRADATION_THRESHOLD,         0.1 );
+	init( PEER_DEGRADATION_CONNECTION_FAILURE_COUNT,               1 );
+	init( WORKER_HEALTH_REPORT_RECENT_DESTROYED_PEER,           true );
 
 	// Test harness
 	init( WORKER_POLL_DELAY,                                     1.0 );
@@ -858,6 +860,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( BLOB_MANAGER_STATUS_EXP_BACKOFF_MIN,                   0.1 );
 	init( BLOB_MANAGER_STATUS_EXP_BACKOFF_MAX,                   5.0 );
 	init( BLOB_MANAGER_STATUS_EXP_BACKOFF_EXPONENT,              1.5 );
+
+	init( BGCC_TIMEOUT,                   isSimulated ? 10.0 : 120.0 );
+	init( BGCC_MIN_INTERVAL,                isSimulated ? 1.0 : 10.0 );
 
 	// clang-format on
 

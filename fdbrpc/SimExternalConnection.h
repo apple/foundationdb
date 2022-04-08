@@ -28,34 +28,6 @@
 
 #include <boost/asio.hpp>
 
-// MockDNS is a class maintaining a <hostname, vector<NetworkAddress>> mapping, mocking a DNS in simulation.
-class MockDNS {
-public:
-	MockDNS() {}
-	explicit MockDNS(const std::map<std::string, std::vector<NetworkAddress>>& mockDNS)
-	  : hostnameToAddresses(mockDNS) {}
-
-	bool findMockTCPEndpoint(const std::string& host, const std::string& service);
-	void addMockTCPEndpoint(const std::string& host,
-	                        const std::string& service,
-	                        const std::vector<NetworkAddress>& addresses);
-	void updateMockTCPEndpoint(const std::string& host,
-	                           const std::string& service,
-	                           const std::vector<NetworkAddress>& addresses);
-	void removeMockTCPEndpoint(const std::string& host, const std::string& service);
-	void clearMockTCPEndpoints();
-	std::vector<NetworkAddress> getTCPEndpoint(const std::string& host, const std::string& service);
-
-	void operator=(MockDNS const& rhs) { hostnameToAddresses = rhs.hostnameToAddresses; }
-	// Convert hostnameToAddresses to string. The format is:
-	// hostname1,host1Address1,host1Address2;hostname2,host2Address1,host2Address2...
-	std::string toString();
-	static MockDNS parseFromString(const std::string& s);
-
-private:
-	std::map<std::string, std::vector<NetworkAddress>> hostnameToAddresses;
-};
-
 class SimExternalConnection final : public IConnection, public ReferenceCounted<SimExternalConnection> {
 	boost::asio::ip::tcp::socket socket;
 	SimExternalConnection(boost::asio::ip::tcp::socket&& socket);
@@ -76,8 +48,12 @@ public:
 	int write(SendBuffer const* buffer, int limit) override;
 	NetworkAddress getPeerAddress() const override;
 	UID getDebugID() const override;
-	static Future<std::vector<NetworkAddress>> resolveTCPEndpoint(const std::string& host, const std::string& service);
-	static std::vector<NetworkAddress> resolveTCPEndpointBlocking(const std::string& host, const std::string& service);
+	static Future<std::vector<NetworkAddress>> resolveTCPEndpoint(const std::string& host,
+	                                                              const std::string& service,
+	                                                              DNSCache* dnsCache);
+	static std::vector<NetworkAddress> resolveTCPEndpointBlocking(const std::string& host,
+	                                                              const std::string& service,
+	                                                              DNSCache* dnsCache);
 	static Future<Reference<IConnection>> connect(NetworkAddress toAddr);
 };
 

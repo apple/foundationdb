@@ -559,7 +559,7 @@ ACTOR Future<Void> monitorNominee(Key key,
 				    .detail("OldAddr", coord.getLeader.getEndpoint().getPrimaryAddress().toString());
 				if (rep.getError().code() == error_code_request_maybe_delivered) {
 					// Delay to prevent tight resolving loop due to outdated DNS cache
-					wait(delay(CLIENT_KNOBS->COORDINATOR_HOSTNAME_RESOLVE_DELAY));
+					wait(delay(FLOW_KNOBS->HOSTNAME_RESOLVE_DELAY));
 					throw coordinators_changed();
 				} else {
 					throw rep.getError();

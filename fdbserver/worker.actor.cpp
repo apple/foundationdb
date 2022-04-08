@@ -210,18 +210,10 @@ ACTOR Future<Void> handleIOErrors(Future<Void> actor, IClosable* store, UID id, 
 	state Future<ErrorOr<Void>> storeError = actor.isReady() ? Never() : errorOr(store->getError());
 	choose {
 		when(state ErrorOr<Void> e = wait(errorOr(actor))) {
-			TraceEvent(SevDebug, "HandleIOErrorsActorIsReady")
-			    .detail("Error", e.isError() ? e.getError().code() : -1)
-			    .detail("UID", id);
 			if (e.isError() && e.getError().code() == error_code_please_reboot) {
 				// no need to wait.
 			} else {
-				TraceEvent(SevDebug, "HandleIOErrorsActorBeforeOnClosed").detail("IsClosed", onClosed.isReady());
 				wait(onClosed);
-				TraceEvent(SevDebug, "HandleIOErrorsActorOnClosedFinished")
-				    .detail("StoreError",
-				            storeError.isReady() ? (storeError.get().isError() ? storeError.get().getError().code() : 0)
-				                                 : -1);
 			}
 			if (e.isError() && e.getError().code() == error_code_broken_promise && !storeError.isReady()) {
 				wait(delay(0.00001 + FLOW_KNOBS->MAX_BUGGIFIED_DELAY));
@@ -892,7 +884,8 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 
 			if (workerInDb) {
 				for (const auto& [address, peer] : allPeers) {
-					if (peer->pingLatencies.getPopulationSize() < SERVER_KNOBS->PEER_LATENCY_CHECK_MIN_POPULATION) {
+					if (peer->connectFailedCount == 0 &&
+					    peer->pingLatencies.getPopulationSize() < SERVER_KNOBS->PEER_LATENCY_CHECK_MIN_POPULATION) {
 						// Ignore peers that don't have enough samples.
 						// TODO(zhewu): Currently, FlowTransport latency monitor clears ping latency samples on a
 						// regular
@@ -909,7 +902,8 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 						// Note that currently we are not monitor storage servers, since lagging in storage servers
 						// today already can trigger server exclusion by data distributor.
 
-						if (peer->pingLatencies.percentile(SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE) >
+						if (peer->connectFailedCount >= SERVER_KNOBS->PEER_DEGRADATION_CONNECTION_FAILURE_COUNT ||
+						    peer->pingLatencies.percentile(SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE) >
 						        SERVER_KNOBS->PEER_LATENCY_DEGRADATION_THRESHOLD ||
 						    peer->timeoutCount / (double)(peer->pingLatencies.getPopulationSize()) >
 						        SERVER_KNOBS->PEER_TIMEOUT_PERCENTAGE_DEGRADATION_THRESHOLD) {
@@ -926,9 +920,30 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 							    .detail(
 							        "CheckedPercentileLatency",
 							        peer->pingLatencies.percentile(SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE))
-							    .detail("Count", peer->pingLatencies.getPopulationSize())
-							    .detail("TimeoutCount", peer->timeoutCount);
+							    .detail("PingCount", peer->pingLatencies.getPopulationSize())
+							    .detail("PingTimeoutCount", peer->timeoutCount)
+							    .detail("ConnectionFailureCount", peer->connectFailedCount);
 
+							req.degradedPeers.push_back(address);
+						}
+					}
+				}
+
+				if (SERVER_KNOBS->WORKER_HEALTH_REPORT_RECENT_DESTROYED_PEER) {
+					// When the worker cannot connect to a remote peer, the peer maybe erased from the list returned
+					// from getAllPeers(). Therefore, we also look through all the recent closed peers in the flow
+					// transport's health monitor. Note that all the closed peers stored here are caused by connection
+					// failure, but not normal connection close. Therefore, we report all such peers if they are also
+					// part of the transaction sub system.
+					for (const auto& address : FlowTransport::transport().healthMonitor()->getRecentClosedPeers()) {
+						if (allPeers.find(address) != allPeers.end()) {
+							// We have checked this peer in the above for loop.
+							continue;
+						}
+
+						if ((workerInPrimary && addressInDbAndPrimaryDc(address, dbInfo)) ||
+						    (!workerInPrimary && addressInDbAndRemoteDc(address, dbInfo))) {
+							TraceEvent("HealthMonitorDetectRecentClosedPeer").suppressFor(30).detail("Peer", address);
 							req.degradedPeers.push_back(address);
 						}
 					}
@@ -1551,8 +1566,11 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				    memoryLimit,
 				    false,
 				    validateDataFiles,
-				    SERVER_KNOBS->REMOTE_KV_STORE && /* testing mixed mode in simulation if remote kvs enabled*/
-				        (g_network->isSimulated() ? deterministicRandom()->coinflip() : true));
+				    SERVER_KNOBS->REMOTE_KV_STORE && /* testing mixed mode in simulation if remote kvs enabled */
+				        (g_network->isSimulated()
+				             ? (/* Disable for RocksDB */ s.storeType != KeyValueStoreType::SSD_ROCKSDB_V1 &&
+				                deterministicRandom()->coinflip())
+				             : true));
 				Future<Void> kvClosed = kv->onClosed();
 				filesClosed.add(kvClosed);
 
@@ -2124,8 +2142,11 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					    memoryLimit,
 					    false,
 					    false,
-					    SERVER_KNOBS->REMOTE_KV_STORE && /* testing mixed mode in simulation if remote kvs enabled*/
-					        (g_network->isSimulated() ? deterministicRandom()->coinflip() : true));
+					    SERVER_KNOBS->REMOTE_KV_STORE && /* testing mixed mode in simulation if remote kvs enabled */
+					        (g_network->isSimulated()
+					             ? (/* Disable for RocksDB */ req.storeType != KeyValueStoreType::SSD_ROCKSDB_V1 &&
+					                deterministicRandom()->coinflip())
+					             : true));
 
 					Future<Void> kvClosed = data->onClosed();
 					filesClosed.add(kvClosed);

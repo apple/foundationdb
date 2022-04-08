@@ -662,6 +662,11 @@ public:
 	double PEER_LATENCY_DEGRADATION_PERCENTILE; // The percentile latency used to check peer health.
 	double PEER_LATENCY_DEGRADATION_THRESHOLD; // The latency threshold to consider a peer degraded.
 	double PEER_TIMEOUT_PERCENTAGE_DEGRADATION_THRESHOLD; // The percentage of timeout to consider a peer degraded.
+	int PEER_DEGRADATION_CONNECTION_FAILURE_COUNT; // The number of connection failures experienced during measurement
+	                                               // period to consider a peer degraded.
+	bool WORKER_HEALTH_REPORT_RECENT_DESTROYED_PEER; // When enabled, the worker's health monitor also report any recent
+	                                                 // destroyed peers who are part of the transaction system to
+	                                                 // cluster controller.
 
 	// Test harness
 	double WORKER_POLL_DELAY;
@@ -812,6 +817,8 @@ public:
 	double BLOB_MANAGER_STATUS_EXP_BACKOFF_MIN;
 	double BLOB_MANAGER_STATUS_EXP_BACKOFF_MAX;
 	double BLOB_MANAGER_STATUS_EXP_BACKOFF_EXPONENT;
+	double BGCC_TIMEOUT;
+	double BGCC_MIN_INTERVAL;
 
 	ServerKnobs(Randomize, ClientKnobs*, IsSimulated);
 	void initialize(Randomize, ClientKnobs*, IsSimulated);
