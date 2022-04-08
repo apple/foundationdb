@@ -5063,6 +5063,7 @@ ACTOR Future<Version> fetchChangeFeed(StorageServer* data,
 		}
 	}
 
+	state bool seenNotRegistered = false;
 	loop {
 		try {
 			Version maxFetched = wait(fetchChangeFeedApplier(data,
@@ -5088,11 +5089,14 @@ ACTOR Future<Version> fetchChangeFeed(StorageServer* data,
 		           changeFeedInfo->metadataCreateVersion,
 		           data->desiredOldestVersion.get());
 
-		// if the change feed definitely used to exist, but we may have missed a destroy metadata change, assume it is
-		// destroyed
-		if (changeFeedInfo->possiblyDestroyed &&
-		    changeFeedInfo->metadataCreateVersion <= data->desiredOldestVersion.get()) {
-
+		// There are two reasons for change_feed_not_registered:
+		//   1. The feed was just created, but the ss mutation stream is ahead of the GRV that fetchChangeFeedApplier
+		//   uses to read the change feed data from the database. In this case we need to wait and retry
+		//   2. The feed was destroyed, but we missed a metadata update telling us this. In this case we need to destroy
+		//   the feed
+		// endVersion >= the metadata create version, so we can safely use it as a proxy
+		if (beginVersion != 0 || seenNotRegistered || endVersion <= data->desiredOldestVersion.get()) {
+			// If any of these are true, the feed must be destroyed.
 			Version cleanupVersion = data->data().getLatestVersion();
 
 			TraceEvent(SevDebug, "DestroyingChangeFeedFromFetch", data->thisServerID)
@@ -5125,8 +5129,11 @@ ACTOR Future<Version> fetchChangeFeed(StorageServer* data,
 
 			return invalidVersion;
 		}
-		// otherwise assume the feed just hasn't been created on the SS we tried to read it from yet, retry
-		wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
+
+		// otherwise assume the feed just hasn't been created on the SS we tried to read it from yet, wait for it to
+		// definitely be committed and retry
+		seenNotRegistered = true;
+		wait(data->desiredOldestVersion.whenAtLeast(endVersion));
 	}
 }
 
