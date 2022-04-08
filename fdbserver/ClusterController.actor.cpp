@@ -2191,6 +2191,7 @@ ACTOR Future<Void> startEncryptKeyProxy(ClusterControllerData* self) {
 					TraceEvent("CCEKP_UpdateInf", self->id)
 					    .detail("Id", self->db.serverInfo->get().encryptKeyProxy.get().id());
 				}
+				checkOutstandingRequests(self);
 				return Void();
 			}
 		} catch (Error& e) {

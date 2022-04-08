@@ -28,6 +28,7 @@
 #include "flow/FastRef.h"
 #include "flow/Trace.h"
 #include "flow/IRandom.h"
+#include "flow/flow.h"
 #include "flow/xxhash.h"
 
 #include <atomic>
@@ -49,7 +50,6 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 	bool enableTest;
 
 	EncryptKeyProxyTestWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), dbInfo(wcx.dbInfo), enableTest(false) {
-		// assign unique encryptionDomainId range per workload clients
 		if (wcx.clientId == 0) {
 			enableTest = true;
 			minDomainId = 1000 + (++seed * 30) + 1;
@@ -63,29 +63,47 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 	Future<Void> setup(Database const& ctx) override { return Void(); }
 
 	ACTOR Future<Void> simEmptyDomainIdCache(EncryptKeyProxyTestWorkload* self) {
+		TraceEvent("SimEmptyDomainIdCache_Start").log();
+
 		for (int i = 0; i < self->numDomains / 2; i++) {
 			self->domainIds.emplace_back(self->minDomainId + i);
 		}
 
-		EKPGetLatestBaseCipherKeysRequest req(deterministicRandom()->randomUniqueID(), self->domainIds);
-		EKPGetLatestBaseCipherKeysReply rep = wait(self->ekpInf.getLatestBaseCipherKeys.getReply(req));
+		state int nAttempts = 0;
+		loop {
+			EKPGetLatestBaseCipherKeysRequest req(deterministicRandom()->randomUniqueID(), self->domainIds);
+			ErrorOr<EKPGetLatestBaseCipherKeysReply> rep = wait(self->ekpInf.getLatestBaseCipherKeys.tryGetReply(req));
+			if (rep.present()) {
 
-		ASSERT(!rep.error.present());
-		ASSERT_EQ(rep.baseCipherDetailMap.size(), self->domainIds.size());
+				ASSERT(!rep.get().error.present());
+				ASSERT_EQ(rep.get().baseCipherDetailMap.size(), self->domainIds.size());
 
-		for (const uint64_t id : self->domainIds) {
-			ASSERT(rep.baseCipherDetailMap.find(id) != rep.baseCipherDetailMap.end());
+				for (const uint64_t id : self->domainIds) {
+					ASSERT(rep.get().baseCipherDetailMap.find(id) != rep.get().baseCipherDetailMap.end());
+				}
+
+				// Ensure no hits reported by the cache.
+				if (nAttempts == 0) {
+					ASSERT_EQ(rep.get().numHits, 0);
+				} else {
+					ASSERT_GE(rep.get().numHits, 0);
+				}
+				break;
+			} else {
+				nAttempts++;
+				wait(delay(0.0));
+			}
 		}
 
-		// Ensure no hits reported by the cache.
-		ASSERT_EQ(rep.numHits, 0);
-
+		TraceEvent("SimEmptyDomainIdCache_Done").log();
 		return Void();
 	}
 
 	ACTOR Future<Void> simPartialDomainIdCache(EncryptKeyProxyTestWorkload* self) {
 		state int expectedHits;
 		state int expectedMisses;
+
+		TraceEvent("SimPartialDomainIdCache_Start").log();
 
 		self->domainIds.clear();
 
@@ -96,27 +114,47 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 
 		expectedMisses = deterministicRandom()->randomInt(1, self->numDomains / 2);
 		for (int i = 0; i < expectedMisses; i++) {
-			self->domainIds.emplace_back(self->minDomainId + i + self->numDomains / 2);
-		}
-		EKPGetLatestBaseCipherKeysRequest req(deterministicRandom()->randomUniqueID(), self->domainIds);
-		EKPGetLatestBaseCipherKeysReply rep = wait(self->ekpInf.getLatestBaseCipherKeys.getReply(req));
-
-		ASSERT(!rep.error.present());
-		ASSERT_EQ(rep.baseCipherDetailMap.size(), self->domainIds.size());
-
-		for (const uint64_t id : self->domainIds) {
-			ASSERT(rep.baseCipherDetailMap.find(id) != rep.baseCipherDetailMap.end());
+			self->domainIds.emplace_back(self->minDomainId + i + self->numDomains / 2 + 1);
 		}
 
-		// Ensure desired cache-hit counts
-		ASSERT_EQ(rep.numHits, expectedHits);
+		state int nAttempts = 0;
+		loop {
+			// Test case given is measuring correctness for cache hit/miss scenarios is designed to have strict
+			// assertions. However, in simulation runs, RPCs can be force failed to inject retries, hence, code leverage
+			// tryGetReply to ensure at-most once delivery of message, further, assertions are relaxed to account of
+			// cache warm-up due to retries.
+			EKPGetLatestBaseCipherKeysRequest req(deterministicRandom()->randomUniqueID(), self->domainIds);
+			ErrorOr<EKPGetLatestBaseCipherKeysReply> rep = wait(self->ekpInf.getLatestBaseCipherKeys.tryGetReply(req));
+			if (rep.present()) {
+				ASSERT(!rep.get().error.present());
+				ASSERT_EQ(rep.get().baseCipherDetailMap.size(), self->domainIds.size());
+
+				for (const uint64_t id : self->domainIds) {
+					ASSERT(rep.get().baseCipherDetailMap.find(id) != rep.get().baseCipherDetailMap.end());
+				}
+
+				// Ensure desired cache-hit counts
+				if (nAttempts == 0) {
+					ASSERT_EQ(rep.get().numHits, expectedHits);
+				} else {
+					ASSERT_GE(rep.get().numHits, expectedHits);
+				}
+				break;
+			} else {
+				nAttempts++;
+				wait(delay(0.0));
+			}
+		}
 		self->domainIds.clear();
 
+		TraceEvent("SimPartialDomainIdCache_Done").log();
 		return Void();
 	}
 
 	ACTOR Future<Void> simRandomBaseCipherIdCache(EncryptKeyProxyTestWorkload* self) {
 		state int expectedHits;
+
+		TraceEvent("SimRandomDomainIdCache_Start").log();
 
 		self->domainIds.clear();
 		for (int i = 0; i < self->numDomains; i++) {
@@ -173,10 +211,13 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 			}
 		}
 
+		TraceEvent("SimRandomDomainIdCache_Done").log();
 		return Void();
 	}
 
 	ACTOR Future<Void> simLookupInvalidKeyId(EncryptKeyProxyTestWorkload* self) {
+		TraceEvent("SimLookupInvalidKeyId_Start").log();
+
 		// Prepare a lookup with valid and invalid keyIds - SimEncryptKmsProxy should throw encrypt_key_not_found()
 		std::vector<uint64_t> baseCipherIds(self->cipherIds);
 		baseCipherIds.emplace_back(SERVER_KNOBS->SIM_KMS_MAX_KEYS + 10);
@@ -187,6 +228,7 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 		ASSERT(rep.error.present());
 		ASSERT_EQ(rep.error.get().code(), error_code_encrypt_key_not_found);
 
+		TraceEvent("SimLookupInvalidKeyId_Done").log();
 		return Void();
 	}
 

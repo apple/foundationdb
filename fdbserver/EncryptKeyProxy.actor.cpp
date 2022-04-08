@@ -377,8 +377,8 @@ ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ekpInterface, 
 				wait(getLatestCipherKeys(self, simKmsProxyInf, req));
 			}
 			when(HaltEncryptKeyProxyRequest req = waitNext(ekpInterface.haltEncryptKeyProxy.getFuture())) {
-				req.reply.send(Void());
 				TraceEvent("EKP_Halted", self->myId).detail("ReqID", req.requesterID);
+				req.reply.send(Void());
 				break;
 			}
 			when(wait(collection)) {
