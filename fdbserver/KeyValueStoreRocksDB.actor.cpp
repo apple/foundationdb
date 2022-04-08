@@ -1804,13 +1804,11 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	ACTOR Future<Void> checkRocksdbState(RocksDBKeyValueStore* self) {
 		state uint64_t estPendCompactBytes;
 		state int count = SERVER_KNOBS->ROCKSDB_CAN_COMMIT_DELAY_TIMES_ON_OVERLOAD;
-		self->db->GetAggregatedIntProperty(rocksdb::DB::Properties::kEstimatePendingCompactionBytes,
-		                                   &estPendCompactBytes);
+		self->db->GetIntProperty(rocksdb::DB::Properties::kEstimatePendingCompactionBytes, &estPendCompactBytes);
 		while (count && estPendCompactBytes > SERVER_KNOBS->ROCKSDB_CAN_COMMIT_COMPACT_BYTES_LIMIT) {
 			wait(delay(SERVER_KNOBS->ROCKSDB_CAN_COMMIT_DELAY_ON_OVERLOAD));
 			count--;
-			self->db->GetAggregatedIntProperty(rocksdb::DB::Properties::kEstimatePendingCompactionBytes,
-			                                   &estPendCompactBytes);
+			self->db->GetIntProperty(rocksdb::DB::Properties::kEstimatePendingCompactionBytes, &estPendCompactBytes);
 		}
 
 		return Void();
