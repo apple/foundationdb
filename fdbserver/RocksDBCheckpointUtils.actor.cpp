@@ -280,7 +280,6 @@ void RocksDBCheckpointReader::Reader::action(RocksDBCheckpointReader::Reader::Op
 
 	ASSERT(version == a.version);
 
-	readOptions.iterate_upper_bound = &end;
 	cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(readOptions, cf));
 	cursor->Seek(toSlice(begin));
 
