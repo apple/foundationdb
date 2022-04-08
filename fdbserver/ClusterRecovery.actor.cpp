@@ -1047,11 +1047,6 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	Optional<Standalone<StringRef>> versionEpochValue = wait(self->txnStateStore->readValue(versionEpochKey));
 	if (versionEpochValue.present()) {
 		self->versionEpoch = BinaryReader::fromStringRef<int64_t>(versionEpochValue.get(), Unversioned());
-	} else if (BUGGIFY) {
-		// Cannot use a positive version epoch in simulation because of the
-		// clock starting at 0. A positive version epoch would mean the initial
-		// cluster version was negative.
-		self->versionEpoch = deterministicRandom()->randomInt64(-1e6, 0);
 	}
 
 	// Versionstamped operations (particularly those applied from DR) define a minimum commit version
@@ -1601,11 +1596,6 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	// Write cluster ID into txnStateStore if it is missing.
 	if (!clusterIdExists) {
 		tr.set(recoveryCommitRequest.arena, clusterIdKey, BinaryWriter::toValue(self->clusterId, Unversioned()));
-	}
-	if (g_network->isSimulated() && self->versionEpoch.present()) {
-		tr.set(recoveryCommitRequest.arena,
-		       versionEpochKey,
-		       BinaryWriter::toValue(self->versionEpoch.get(), Unversioned()));
 	}
 
 	applyMetadataMutations(SpanID(),

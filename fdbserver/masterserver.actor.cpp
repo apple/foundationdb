@@ -259,6 +259,13 @@ ACTOR Future<Void> updateRecoveryData(Reference<MasterData> self) {
 		}
 		if (req.versionEpoch.present()) {
 			self->referenceVersion = req.versionEpoch.get();
+		} else if (BUGGIFY) {
+			// Cannot use a positive version epoch in simulation because of the
+			// clock starting at 0. A positive version epoch would mean the initial
+			// cluster version was negative.
+			// TODO: Increase the size of this interval after fixing the issue
+			// with restoring ranges with large version gaps.
+			self->referenceVersion = deterministicRandom()->randomInt64(-1e6, 0);
 		}
 
 		self->resolutionBalancer.setCommitProxies(req.commitProxies);
