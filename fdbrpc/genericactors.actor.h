@@ -80,22 +80,21 @@ Future<ErrorOr<REPLY_TYPE(Req)>> tryGetReplyFromHostname(RequestStream<Req>* to,
 	// A wrapper of tryGetReply(request), except that the request is sent to an address resolved from a hostname.
 	// If resolving fails, return lookup_failed().
 	// Otherwise, return tryGetReply(request).
-	try {
-		NetworkAddress address = wait(hostname.resolve());
-		*to = RequestStream<Req>(Endpoint::wellKnown({ address }, token));
-		ErrorOr<REPLY_TYPE(Req)> reply = wait(to->tryGetReply(request));
-		if (reply.isError()) {
-			resetReply(request);
-			if (reply.getError().code() == error_code_request_maybe_delivered) {
-				// Connection failure.
-				hostname.resetToUnresolved();
-				INetworkConnections::net()->removeCachedDNS(hostname.host, hostname.service);
-			}
-		}
-		return reply;
-	} catch (...) {
+	Optional<NetworkAddress> address = wait(hostname.resolve());
+	if (!address.present()) {
 		return ErrorOr<REPLY_TYPE(Req)>(lookup_failed());
 	}
+	*to = RequestStream<Req>(Endpoint::wellKnown({ address.get() }, token));
+	ErrorOr<REPLY_TYPE(Req)> reply = wait(to->tryGetReply(request));
+	if (reply.isError()) {
+		resetReply(request);
+		if (reply.getError().code() == error_code_request_maybe_delivered) {
+			// Connection failure.
+			hostname.resetToUnresolved();
+			INetworkConnections::net()->removeCachedDNS(hostname.host, hostname.service);
+		}
+	}
+	return reply;
 }
 
 ACTOR template <class Req>
@@ -107,22 +106,21 @@ Future<ErrorOr<REPLY_TYPE(Req)>> tryGetReplyFromHostname(RequestStream<Req>* to,
 	// A wrapper of tryGetReply(request), except that the request is sent to an address resolved from a hostname.
 	// If resolving fails, return lookup_failed().
 	// Otherwise, return tryGetReply(request).
-	try {
-		NetworkAddress address = wait(hostname.resolve());
-		*to = RequestStream<Req>(Endpoint::wellKnown({ address }, token));
-		ErrorOr<REPLY_TYPE(Req)> reply = wait(to->tryGetReply(request, taskID));
-		if (reply.isError()) {
-			resetReply(request);
-			if (reply.getError().code() == error_code_request_maybe_delivered) {
-				// Connection failure.
-				hostname.resetToUnresolved();
-				INetworkConnections::net()->removeCachedDNS(hostname.host, hostname.service);
-			}
-		}
-		return reply;
-	} catch (...) {
+	Optional<NetworkAddress> address = wait(hostname.resolve());
+	if (!address.present()) {
 		return ErrorOr<REPLY_TYPE(Req)>(lookup_failed());
 	}
+	*to = RequestStream<Req>(Endpoint::wellKnown({ address.get() }, token));
+	ErrorOr<REPLY_TYPE(Req)> reply = wait(to->tryGetReply(request, taskID));
+	if (reply.isError()) {
+		resetReply(request);
+		if (reply.getError().code() == error_code_request_maybe_delivered) {
+			// Connection failure.
+			hostname.resetToUnresolved();
+			INetworkConnections::net()->removeCachedDNS(hostname.host, hostname.service);
+		}
+	}
+	return reply;
 }
 
 ACTOR template <class Req>
@@ -134,7 +132,7 @@ Future<REPLY_TYPE(Req)> retryGetReplyFromHostname(RequestStream<Req>* to,
 	// Suitable for use with hostname, where RequestStream is NOT initialized yet.
 	// Not normally useful for endpoints initialized with NetworkAddress.
 	loop {
-		state NetworkAddress address = wait(hostname.resolveWithRetry());
+		NetworkAddress address = wait(hostname.resolveWithRetry());
 		*to = RequestStream<Req>(Endpoint::wellKnown({ address }, token));
 		ErrorOr<REPLY_TYPE(Req)> reply = wait(to->tryGetReply(request));
 		if (reply.isError()) {
@@ -162,7 +160,7 @@ Future<REPLY_TYPE(Req)> retryGetReplyFromHostname(RequestStream<Req>* to,
 	// Suitable for use with hostname, where RequestStream is NOT initialized yet.
 	// Not normally useful for endpoints initialized with NetworkAddress.
 	loop {
-		state NetworkAddress address = wait(hostname.resolveWithRetry());
+		NetworkAddress address = wait(hostname.resolveWithRetry());
 		*to = RequestStream<Req>(Endpoint::wellKnown({ address }, token));
 		ErrorOr<REPLY_TYPE(Req)> reply = wait(to->tryGetReply(request, taskID));
 		if (reply.isError()) {

@@ -2549,15 +2549,14 @@ ACTOR Future<Void> clusterControllerCore(Reference<IClusterConnectionRecord> con
 			state std::unordered_set<NetworkAddress> coordinatorAddresses;
 			std::vector<Future<Void>> fs;
 			for (auto& hostname : ccs.hostnames) {
-				fs.push_back(map(hostname.resolve(), [&](NetworkAddress const& addr) -> Void {
-					coordinatorAddresses.insert(addr);
+				fs.push_back(map(hostname.resolve(), [&](Optional<NetworkAddress> const& addr) -> Void {
+					if (addr.present()) {
+						coordinatorAddresses.insert(addr.get());
+					}
 					return Void();
 				}));
 			}
-			try {
-				wait(waitForAll(fs));
-			} catch (...) {
-			}
+			wait(waitForAll(fs));
 
 			for (const auto& coord : ccs.coordinators()) {
 				coordinatorAddresses.insert(coord);
