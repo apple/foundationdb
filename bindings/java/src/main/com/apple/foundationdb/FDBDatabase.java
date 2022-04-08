@@ -201,6 +201,26 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 	}
 
 	@Override
+	public CompletableFuture<byte[]> purgeBlobGranules(byte[] beginKey, byte[] endKey, long purgeVersion, boolean force, Executor executor) {
+		pointerReadLock.lock();
+		try {
+			return new FutureKey(Database_purgeBlobGranules(getPtr(), beginKey, endKey, purgeVersion, force), executor, eventKeeper);
+		} finally {
+			pointerReadLock.unlock();
+		}
+	}
+
+	@Override
+	public CompletableFuture<Void> waitPurgeGranulesComplete(byte[] purgeKey, Executor executor) {
+		pointerReadLock.lock();
+		try {
+			return new FutureVoid(Database_waitPurgeGranulesComplete(getPtr(), purgeKey), executor);
+		} finally {
+			pointerReadLock.unlock();
+		}
+	}
+
+	@Override
 	public Executor getExecutor() {
 		return executor;
 	}
@@ -215,4 +235,6 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 	private native void Database_dispose(long cPtr);
 	private native void Database_setOption(long cPtr, int code, byte[] value) throws FDBException;
 	private native double Database_getMainThreadBusyness(long cPtr);
+	private native long Database_purgeBlobGranules(long cPtr, byte[] beginKey, byte[] endKey, long purgeVersion, boolean force);
+	private native long Database_waitPurgeGranulesComplete(long cPtr, byte[] purgeKey);
 }
