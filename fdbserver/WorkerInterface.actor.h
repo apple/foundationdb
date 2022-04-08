@@ -1203,7 +1203,9 @@ Future<T> ioTimeoutError(Future<T> what, double time) {
 	}
 	Future<Void> end = lowPriorityDelay(time);
 	choose {
-		when(T t = wait(what)) { return t; }
+		when(T t = wait(what)) {
+			return t;
+		}
 		when(wait(end)) {
 			Error err = io_timeout();
 			if (g_network->isSimulated() && !g_simulator.getCurrentProcess()->isReliable()) {
@@ -1231,7 +1233,9 @@ Future<T> ioDegradedOrTimeoutError(Future<T> what,
 	if (degradedTime < errTime) {
 		Future<Void> degradedEnd = lowPriorityDelay(degradedTime);
 		choose {
-			when(T t = wait(what)) { return t; }
+			when(T t = wait(what)) {
+				return t;
+			}
 			when(wait(degradedEnd)) {
 				TEST(true); // TLog degraded
 				TraceEvent(SevWarnAlways, "IoDegraded").log();
@@ -1242,7 +1246,9 @@ Future<T> ioDegradedOrTimeoutError(Future<T> what,
 
 	Future<Void> end = lowPriorityDelay(errTime - degradedTime);
 	choose {
-		when(T t = wait(what)) { return t; }
+		when(T t = wait(what)) {
+			return t;
+		}
 		when(wait(end)) {
 			Error err = io_timeout();
 			if (g_network->isSimulated() && !g_simulator.getCurrentProcess()->isReliable()) {
