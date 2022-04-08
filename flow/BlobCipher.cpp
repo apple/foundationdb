@@ -424,7 +424,7 @@ void DecryptBlobCipherAes256Ctr::verifyHeaderAuthToken(const BlobCipherEncryptHe
 		TraceEvent("VerifyEncryptBlobHeader_AuthTokenMismatch")
 		    .detail("HeaderVersion", header.flags.headerVersion)
 		    .detail("HeaderMode", header.flags.encryptMode)
-		    .detail("MultiAuthToken_HeaderAuthToken",
+		    .detail("MultiAuthHeaderAuthToken",
 		            StringRef(arena, &header.multiAuthTokens.headerAuthToken[0], AUTH_TOKEN_SIZE).toString())
 		    .detail("ComputedHeaderAuthToken", computedHeaderAuthToken.toString());
 		throw encrypt_header_authtoken_mismatch();
@@ -480,7 +480,7 @@ void DecryptBlobCipherAes256Ctr::verifyHeaderMultiAuthToken(const uint8_t* ciphe
 		TraceEvent("VerifyEncryptBlobHeader_AuthTokenMismatch")
 		    .detail("HeaderVersion", header.flags.headerVersion)
 		    .detail("HeaderMode", header.flags.encryptMode)
-		    .detail("MultiAuthToken_CipherTextAuthToken",
+		    .detail("MultiAuthCipherTextAuthToken",
 		            StringRef(arena, &header.multiAuthTokens.cipherTextAuthToken[0], AUTH_TOKEN_SIZE).toString())
 		    .detail("ComputedCipherTextAuthToken", computedCipherTextAuthToken.toString());
 		throw encrypt_header_authtoken_mismatch();
