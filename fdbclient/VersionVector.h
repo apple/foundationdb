@@ -71,6 +71,7 @@ public:
 
 	void setVersion(const Tag& tag, Version version) {
 		ASSERT(tag != invalidTag);
+		ASSERT(tag.locality > tagLocalityInvalid);
 		ASSERT(version > maxVersion);
 		versions[tag] = version;
 		maxVersion = version;
@@ -81,6 +82,7 @@ public:
 		ASSERT(version > maxVersion);
 		for (auto& tag : tags) {
 			ASSERT(tag != invalidTag);
+			ASSERT(tag.locality > tagLocalityInvalid);
 			versions[tag] = version;
 		}
 		maxVersion = version;
@@ -279,7 +281,7 @@ public:
 	// Copy "value" into the serialization buffer.
 	template <typename T>
 	void serialize(uint8_t*& out, T value) const {
-		*reinterpret_cast<T*>(out) = value;
+		memcpy(out, &value, sizeof(T));
 		out += sizeof(T);
 	}
 
@@ -482,6 +484,9 @@ public:
 	*/
 };
 
+// @note in order to disable version vector encoding during serializaiton comment out the
+// struct below and uncomment the serialize method above. The plan is to do performance tests
+// and choose an appropriate solution based on the results of those tests.
 template <>
 struct dynamic_size_traits<VersionVector> : std::true_type {
 	template <class Context>
