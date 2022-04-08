@@ -25,7 +25,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitTransaction.h"
 
-struct SpanContextMessage {
+struct OTELSpanContextMessage {
 	// This message is pushed into the the transaction logs' memory to inform
 	// it what transaction subsequent mutations were a part of. This allows
 	// transaction logs and storage servers to associate mutations with a
@@ -38,8 +38,8 @@ struct SpanContextMessage {
 
 	SpanContext spanContext;
 
-	SpanContextMessage() {}
-	SpanContextMessage(SpanContext const& spanContext) : spanContext(spanContext) {}
+	OTELSpanContextMessage() {}
+	OTELSpanContextMessage(SpanContext const& spanContext) : spanContext(spanContext) {}
 
 	std::string toString() const {
 		return format(
@@ -48,11 +48,11 @@ struct SpanContextMessage {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		uint8_t poly = MutationRef::Reserved_For_SpanContextMessage;
+		uint8_t poly = MutationRef::Reserved_For_OTELSpanContextMessage;
 		serializer(ar, poly, spanContext);
 	}
 
-	static bool startsSpanContextMessage(uint8_t byte) { return byte == MutationRef::Reserved_For_SpanContextMessage; }
+	static bool startsSpanContextMessage(uint8_t byte) { return byte == MutationRef::Reserved_For_OTELSpanContextMessage; }
 	template <class Ar>
 	static bool isNextIn(Ar& ar) {
 		return startsSpanContextMessage(*(const uint8_t*)ar.peekBytes(1));
