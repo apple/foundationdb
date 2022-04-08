@@ -2711,8 +2711,8 @@ TEST_CASE("Blob Granule Functions") {
 
 	// do a purge + wait at that version to purge everything before originalReadVersion
 
-	fdb::Database database;
-	fdb::KeyFuture purgeKeyFuture = database.purge_blob_granules(db, key("bg"), key("bh"), originalReadVersion, false);
+	fdb::KeyFuture purgeKeyFuture =
+	    fdb::Database::purge_blob_granules(db, key("bg"), key("bh"), originalReadVersion, false);
 
 	fdb_check(wait_future(purgeKeyFuture));
 
@@ -2723,7 +2723,7 @@ TEST_CASE("Blob Granule Functions") {
 
 	std::string purgeKey((const char*)purgeKeyData, purgeKeyLen);
 
-	fdb::EmptyFuture waitPurgeFuture = database.wait_purge_granules_complete(db, purgeKey);
+	fdb::EmptyFuture waitPurgeFuture = fdb::Database::wait_purge_granules_complete(db, purgeKey);
 	fdb_check(wait_future(waitPurgeFuture));
 
 	// re-read again at the purge version to make sure it is still valid
