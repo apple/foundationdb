@@ -1,3 +1,5 @@
+storageEngineExcludeTypes=3
+
 ;write 1000 Keys ending with even number
 testTitle=SnapSimplePre
 clearAfterTest=false

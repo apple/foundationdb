@@ -88,6 +88,13 @@ ERROR( blob_granule_transaction_too_old, 1064, "Read version is older than blob 
 ERROR( blob_manager_replaced, 1065, "This blob manager has been replaced." )
 ERROR( change_feed_popped, 1066, "Tried to read a version older than what has been popped from the change feed" )
 ERROR( remote_kvs_cancelled, 1067, "The remote key-value store is cancelled" )
+ERROR( page_header_wrong_page_id, 1068, "Page header does not match location on disk" )
+ERROR( page_header_checksum_failed, 1069, "Page header checksum failed" )
+ERROR( page_header_version_not_supported, 1070, "Page header version is not supported" )
+ERROR( page_encoding_not_supported, 1071, "Page encoding type is not supported or not valid" )
+ERROR( page_decoding_failed, 1072, "Page content decoding failed" )
+ERROR( unexpected_encoding_type, 1073, "Page content decoding failed" )
+ERROR( encryption_key_not_found, 1074, "Encryption key not found" )
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )
