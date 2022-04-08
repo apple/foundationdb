@@ -32,7 +32,7 @@ import (
 func ExampleOpenDefault() {
 	var e error
 
-	e = fdb.APIVersion(710)
+	e = fdb.APIVersion(720)
 	if e != nil {
 		fmt.Printf("Unable to set API version: %v\n", e)
 		return
@@ -52,7 +52,7 @@ func ExampleOpenDefault() {
 }
 
 func TestVersionstamp(t *testing.T) {
-	fdb.MustAPIVersion(710)
+	fdb.MustAPIVersion(720)
 	db := fdb.MustOpenDefault()
 
 	setVs := func(t fdb.Transactor, key fdb.Key) (fdb.FutureKey, error) {
@@ -98,7 +98,7 @@ func TestVersionstamp(t *testing.T) {
 }
 
 func TestReadTransactionOptions(t *testing.T) {
-	fdb.MustAPIVersion(710)
+	fdb.MustAPIVersion(720)
 	db := fdb.MustOpenDefault()
 	_, e := db.ReadTransact(func(rtr fdb.ReadTransaction) (interface{}, error) {
 		rtr.Options().SetAccessSystemKeys();
@@ -111,7 +111,7 @@ func TestReadTransactionOptions(t *testing.T) {
 
 
 func ExampleTransactor() {
-	fdb.MustAPIVersion(710)
+	fdb.MustAPIVersion(720)
 	db := fdb.MustOpenDefault()
 
 	setOne := func(t fdb.Transactor, key fdb.Key, value []byte) error {
@@ -162,7 +162,7 @@ func ExampleTransactor() {
 }
 
 func ExampleReadTransactor() {
-	fdb.MustAPIVersion(710)
+	fdb.MustAPIVersion(720)
 	db := fdb.MustOpenDefault()
 
 	getOne := func(rt fdb.ReadTransactor, key fdb.Key) ([]byte, error) {
@@ -215,7 +215,7 @@ func ExampleReadTransactor() {
 }
 
 func ExamplePrefixRange() {
-	fdb.MustAPIVersion(710)
+	fdb.MustAPIVersion(720)
 	db := fdb.MustOpenDefault()
 
 	tr, e := db.CreateTransaction()
@@ -254,7 +254,7 @@ func ExamplePrefixRange() {
 }
 
 func ExampleRangeIterator() {
-	fdb.MustAPIVersion(710)
+	fdb.MustAPIVersion(720)
 	db := fdb.MustOpenDefault()
 
 	tr, e := db.CreateTransaction()

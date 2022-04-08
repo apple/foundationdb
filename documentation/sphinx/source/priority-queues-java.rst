@@ -74,7 +74,7 @@ Here's a basic implementation of the model:
         private static final Random randno;
 
         static{
-            fdb = FDB.selectAPIVersion(710);
+            fdb = FDB.selectAPIVersion(720);
             db = fdb.open();
             pq = new Subspace(Tuple.from("P"));
 
