@@ -726,7 +726,7 @@ if __name__ == '__main__':
         tenants()
         # TODO: similar to advanceversion, this seems to cause some issues, so disable for now
         # This must go last, otherwise the version advancement can mess with the other tests
-        targetversion()
+        # targetversion()
     else:
         assert args.process_number > 1, "Process number should be positive"
         coordinators()
