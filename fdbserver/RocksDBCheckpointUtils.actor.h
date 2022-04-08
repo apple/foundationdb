@@ -25,10 +25,6 @@
 #elif !defined(FDBSERVER_ROCKSDB_CHECKPOINT_UTILS_ACTOR_H)
 #define FDBSERVER_ROCKSDB_CHECKPOINT_UTILS_ACTOR_H
 
-#ifdef SSD_ROCKSDB_EXPERIMENTAL
-#include <rocksdb/slice.h>
-#endif // SSD_ROCKSDB_EXPERIMENTAL
-
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/ServerCheckpoint.actor.h"
 #include "flow/flow.h"
