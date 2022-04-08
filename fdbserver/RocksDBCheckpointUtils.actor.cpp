@@ -605,9 +605,14 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 	state Transaction tr(cx);
 	state StorageServerInterface ssi;
 	loop {
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		try {
 			Optional<Value> ss = wait(tr.get(serverListKeyFor(ssID)));
 			if (!ss.present()) {
+				TraceEvent(SevWarnAlways, "FetchCheckpointRangeStorageServerNotFound")
+				    .detail("SSID", ssID)
+				    .detail("InitialState", metaData->toString());
 				throw checkpoint_not_found();
 			}
 			ssi = decodeServerListValue(ss.get());
