@@ -1933,24 +1933,14 @@ Future<RangeResult> VersionEpochImpl::getRange(ReadYourWritesTransaction* ryw,
 	return getVersionEpochActor(ryw, kr);
 }
 
-ACTOR static Future<Optional<std::string>> versionEpochCommitActor(ReadYourWritesTransaction* ryw, int64_t v) {
-	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
-	ryw->getTransaction().setOption(FDBTransactionOptions::RAW_ACCESS);
-	ryw->getTransaction().set(versionEpochKey, BinaryWriter::toValue(v, Unversioned()));
-	return Optional<std::string>();
-}
-
 Future<Optional<std::string>> VersionEpochImpl::commit(ReadYourWritesTransaction* ryw) {
 	auto versionEpoch =
 	    ryw->getSpecialKeySpaceWriteMap()[SpecialKeySpace::getManagementApiCommandPrefix("versionepoch")].second;
 	if (versionEpoch.present()) {
-		try {
-			int64_t v = boost::lexical_cast<int64_t>(versionEpoch.get().toString());
-			return versionEpochCommitActor(ryw, v);
-		} catch (boost::bad_lexical_cast& e) {
-			return Optional<std::string>(ManagementAPIError::toJsonString(
-			    false, "versionepoch", "Invalid epoch (int64_t) argument: " + versionEpoch.get().toString()));
-		}
+		int64_t epoch = BinaryReader::fromStringRef<int64_t>(versionEpoch.get(), Unversioned());
+		ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
+		ryw->getTransaction().setOption(FDBTransactionOptions::RAW_ACCESS);
+		ryw->getTransaction().set(versionEpochKey, BinaryWriter::toValue(epoch, Unversioned()));
 	} else {
 		ryw->getTransaction().clear(versionEpochKey);
 	}

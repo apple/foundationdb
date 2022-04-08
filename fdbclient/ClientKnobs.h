@@ -275,9 +275,6 @@ public:
 	// Blob Granules
 	int BG_MAX_GRANULE_PARALLELISM;
 
-	// versions
-	int64_t DEFAULT_VERSION_EPOCH;
-
 	ClientKnobs(Randomize randomize);
 	void initialize(Randomize randomize);
 };

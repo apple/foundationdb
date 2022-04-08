@@ -1,5 +1,5 @@
 /*
- * TargetVersionCommand.actor.cpp
+ * VersionEpochCommand.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -23,6 +23,7 @@
 #include "fdbcli/fdbcli.actor.h"
 
 #include "fdbclient/IClientApi.h"
+#include "fdbclient/ManagementAPI.actor.h"
 
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
@@ -49,7 +50,7 @@ ACTOR static Future<Optional<VersionInfo>> getVersionInfo(Reference<IDatabase> d
 			if (!versionEpochVal.present()) {
 				return Optional<VersionInfo>();
 			}
-			int64_t versionEpoch = BinaryReader::fromStringRef<Version>(versionEpochVal.get(), Unversioned());
+			int64_t versionEpoch = BinaryReader::fromStringRef<int64_t>(versionEpochVal.get(), Unversioned());
 			int64_t expected = g_network->timer() * CLIENT_KNOBS->CORE_VERSIONSPERSECOND - versionEpoch;
 			return VersionInfo{ rv, expected };
 		} catch (Error& e) {
@@ -71,19 +72,21 @@ ACTOR static Future<Optional<int64_t>> getVersionEpoch(Reference<ITransaction> t
 	}
 }
 
-ACTOR Future<bool> targetVersionCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
+ACTOR Future<bool> versionEpochCommandActor(Reference<IDatabase> db, Database cx, std::vector<StringRef> tokens) {
 	if (tokens.size() <= 3) {
+		state Reference<ITransaction> tr = db->createTransaction();
 		if (tokens.size() == 1) {
 			Optional<VersionInfo> versionInfo = wait(getVersionInfo(db));
 			if (versionInfo.present()) {
+				int64_t diff = versionInfo.get().expectedVersion - versionInfo.get().version;
 				printf("Version:    %" PRId64 "\n", versionInfo.get().version);
 				printf("Expected:   %" PRId64 "\n", versionInfo.get().expectedVersion);
-				printf("Difference: %" PRId64 "\n", versionInfo.get().expectedVersion - versionInfo.get().version);
+				printf("Difference: %" PRId64 " (%.2fs)\n", diff, 1.0 * diff / CLIENT_KNOBS->VERSIONS_PER_SECOND);
 			} else {
 				printf("Version epoch is unset\n");
 			}
 			return true;
-		} else if (tokens.size() == 2 && tokencmp(tokens[1], "getepoch")) {
+		} else if (tokens.size() == 2 && tokencmp(tokens[1], "get")) {
 			Optional<int64_t> versionEpoch = wait(getVersionEpoch(db->createTransaction()));
 			if (versionEpoch.present()) {
 				printf("Current version epoch is %" PRId64 "\n", versionEpoch.get());
@@ -91,64 +94,61 @@ ACTOR Future<bool> targetVersionCommandActor(Reference<IDatabase> db, std::vecto
 				printf("Version epoch is unset\n");
 			}
 			return true;
-		} else if (tokens.size() == 2 && tokencmp(tokens[1], "clearepoch")) {
+		} else if (tokens.size() == 2 && tokencmp(tokens[1], "disable")) {
 			// Clearing the version epoch means versions will no longer attempt
 			// to advance at the same rate as the clock. The current version
 			// will remain unchanged.
-			state Reference<ITransaction> clearTr = db->createTransaction();
 			loop {
 				try {
-					clearTr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+					tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 					Optional<int64_t> versionEpoch = wait(getVersionEpoch(db->createTransaction()));
 					if (!versionEpoch.present()) {
 						return true;
 					} else {
-						clearTr->clear(versionEpochSpecialKey);
-						wait(safeThreadFutureToFuture(clearTr->commit()));
+						tr->clear(versionEpochSpecialKey);
+						wait(safeThreadFutureToFuture(tr->commit()));
 					}
 				} catch (Error& e) {
-					wait(safeThreadFutureToFuture(clearTr->onError(e)));
+					wait(safeThreadFutureToFuture(tr->onError(e)));
 				}
 			}
-		} else if (tokens.size() == 3) {
+		} else if ((tokens.size() == 2 && tokencmp(tokens[1], "enable")) ||
+		           (tokens.size() == 3 && tokencmp(tokens[1], "set"))) {
 			state int64_t v;
-			int n = 0;
-			if (sscanf(tokens[2].toString().c_str(), "%" SCNd64 "%n", &v, &n) != 1 || n != tokens[2].size()) {
-				printUsage(tokens[0]);
-				return false;
-			}
-
-			state int64_t newVersionEpoch = -1;
-			if (tokencmp(tokens[1], "setepoch")) {
-				newVersionEpoch = v;
-			} else if (tokencmp(tokens[1], "add")) {
-				Optional<int64_t> versionEpoch = wait(getVersionEpoch(db->createTransaction()));
-				newVersionEpoch = versionEpoch.orDefault(CLIENT_KNOBS->DEFAULT_VERSION_EPOCH) + v;
+			if (tokens.size() == 3) {
+				int n = 0;
+				if (sscanf(tokens[2].toString().c_str(), "%" SCNd64 "%n", &v, &n) != 1 || n != tokens[2].size()) {
+					printUsage(tokens[0]);
+					return false;
+				}
 			} else {
-				printUsage(tokens[0]);
-				return false;
+				v = 0; // default version epoch
 			}
 
-			state Reference<ITransaction> tr = db->createTransaction();
 			loop {
 				try {
 					tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 					Optional<int64_t> versionEpoch = wait(getVersionEpoch(tr));
-					if (!versionEpoch.present() || newVersionEpoch != versionEpoch.get()) {
-						// Since this transaction causes a recovery, it will
-						// almost certainly receive commit_unknown_result.
-						// Re-read the version epoch on each loop to check
-						// whether the change has been committed successfully.
-						tr->set(versionEpochSpecialKey, boost::lexical_cast<std::string>(newVersionEpoch));
+					if (!versionEpoch.present() || (versionEpoch.get() != v && tokens.size() == 3)) {
+						tr->set(versionEpochSpecialKey, BinaryWriter::toValue(v, Unversioned()));
 						wait(safeThreadFutureToFuture(tr->commit()));
 					} else {
-						printf("Current version epoch is %" PRId64 "\n", versionEpoch.get());
+						printf("Version epoch enabled. Run `versionepoch commit` to irreversibly jump to the target "
+						       "version\n");
 						return true;
 					}
 				} catch (Error& e) {
 					wait(safeThreadFutureToFuture(tr->onError(e)));
 				}
 			}
+		} else if (tokens.size() == 2 && tokencmp(tokens[1], "commit")) {
+			Optional<VersionInfo> versionInfo = wait(getVersionInfo(db));
+			if (versionInfo.present()) {
+				wait(advanceVersion(cx, versionInfo.get().expectedVersion));
+			} else {
+				printf("Must set the version epoch before committing it (see `versionepoch enable`)\n");
+			}
+			return true;
 		}
 	}
 
@@ -157,14 +157,18 @@ ACTOR Future<bool> targetVersionCommandActor(Reference<IDatabase> db, std::vecto
 }
 
 CommandFactory versionEpochFactory(
-    "targetversion",
-    CommandHelp("targetversion [<getepoch|clearepoch|setepoch|add> [EPOCH]]",
+    "versionepoch",
+    CommandHelp("versionepoch [<enable|commit|set|disable> [EPOCH]]",
                 "Read or write the version epoch",
                 "If no arguments are specified, reports the offset between the expected version "
-                "and the actual version. Otherwise, reads, clears, or sets the version epoch. "
-                "The add command adds the number of versions specified to the current version "
-                "(value can be negative). If the version of the cluster will increase as a result "
-                "of this command, a recovery will occur and a one time jump to the larger version "
-                "made. Otherwise, the rate at which versions are given out will be decreased until "
-                "the cluster version is synchronized with the new target."));
+                "and the actual version. Otherwise, enables, disables, or commits the version epoch. "
+                "Setting the version epoch can be irreversible since it can cause a large verison jump. "
+                "Thus, the version epoch must first by enabled with the enable or set command. This "
+                "causes a recovery. Once the version epoch has been set, versions may be given out at "
+                "a faster or slower rate to attempt to match the actual version to the expected version, "
+                "based on the version epoch. After setting the version, run the commit command to perform "
+                "a one time jump to the expected version. This is useful when there is a very large gap "
+                "between the current version and the expected version. Note that once a version jump has "
+                "occurred, it cannot be undone. Run this command without any arguments to see the current "
+                "and expected version."));
 } // namespace fdb_cli

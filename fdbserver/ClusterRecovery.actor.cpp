@@ -1041,15 +1041,12 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	self->txnStateStore =
 	    keyValueStoreLogSystem(self->txnStateLogAdapter, self->dbgid, self->memoryLimit, false, false, true);
 
-	// Version 0 occurs at the version epoch. The version epoch can be set
-	// through the management API, otherwise a default timestamp is used. The
-	// version epoch is the number of microseconds since the Unix epoch.
-	// TODO: Set `versionEpochKey` to the default value on new clusters to
-	// enable new clusters to use a version in-step with wall clock time.
+	// Version 0 occurs at the version epoch. The version epoch is the number
+	// of microseconds since the Unix epoch. It can be set through fdbcli.
 	self->versionEpoch.reset();
 	Optional<Standalone<StringRef>> versionEpochValue = wait(self->txnStateStore->readValue(versionEpochKey));
 	if (versionEpochValue.present()) {
-		self->versionEpoch = BinaryReader::fromStringRef<Version>(versionEpochValue.get(), Unversioned());
+		self->versionEpoch = BinaryReader::fromStringRef<int64_t>(versionEpochValue.get(), Unversioned());
 	} else if (BUGGIFY) {
 		// Cannot use a positive version epoch in simulation because of the
 		// clock starting at 0. A positive version epoch would mean the initial
@@ -1067,30 +1064,21 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	if (requiredCommitVersion.present()) {
 		minRequiredCommitVersion = BinaryReader::fromStringRef<Version>(requiredCommitVersion.get(), Unversioned());
 	}
+	if (g_network->isSimulated() && self->versionEpoch.present()) {
+		minRequiredCommitVersion = std::max(
+		    minRequiredCommitVersion,
+		    static_cast<Version>(g_network->timer() * SERVER_KNOBS->VERSIONS_PER_SECOND - self->versionEpoch.get()));
+	}
 
 	// Recover version info
 	self->lastEpochEnd = oldLogSystem->getEnd() - 1;
 	if (self->lastEpochEnd == 0) {
-		// Set the initial cluster version equal to the current timestamp in
-		// microseconds, relative to a defined epoch. Versions advance at
-		// roughly one million versions per second, so one version equals one
-		// microsecond.
-		self->recoveryTransactionVersion =
-		    self->versionEpoch.present()
-		        ? g_network->timer() * SERVER_KNOBS->VERSIONS_PER_SECOND - self->versionEpoch.get()
-		        : 1;
+		self->recoveryTransactionVersion = 1;
 	} else {
 		if (self->forceRecovery) {
 			self->recoveryTransactionVersion = self->lastEpochEnd + SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT_FORCED;
 		} else {
 			self->recoveryTransactionVersion = self->lastEpochEnd + SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT;
-		}
-
-		if (self->versionEpoch.present()) {
-			self->recoveryTransactionVersion =
-			    std::max(self->recoveryTransactionVersion,
-			             static_cast<Version>(g_network->timer() * SERVER_KNOBS->VERSIONS_PER_SECOND -
-			                                  self->versionEpoch.get()));
 		}
 
 		if (self->recoveryTransactionVersion < minRequiredCommitVersion)
