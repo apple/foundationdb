@@ -5067,7 +5067,7 @@ public:
 
 		BTreePage* btpage = (BTreePage*)page->mutateData();
 		btpage->init(1, 0);
-		btpage->tree()->build(page->dataSize(), nullptr, nullptr, nullptr, nullptr);
+		btpage->tree()->build(page->dataSize() - sizeof(BTreePage), nullptr, nullptr, nullptr, nullptr);
 		return page;
 	}
 
@@ -5746,13 +5746,6 @@ private:
 		}
 
 		return pages;
-	}
-
-	void makeEmptyRoot(Reference<ArenaPage> page) {
-		BTreePage* btpage = (BTreePage*)page->mutateData();
-		btpage->height = 1;
-		btpage->kvBytes = 0;
-		btpage->tree()->build(page->dataSize(), nullptr, nullptr, nullptr, nullptr);
 	}
 
 	// Writes entries to 1 or more pages and return a vector of boundary keys with their ArenaPage(s)
