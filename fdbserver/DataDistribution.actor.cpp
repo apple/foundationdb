@@ -974,8 +974,9 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		    wait(transformErrors(getStorageWorkers(cx, db, true /* localOnly */), snap_storage_failed()));
 		const auto& [storageWorkers, storageFailures] = storageWorkersAndFailures;
 		auto const storageFaultTolerance =
-		    std::min(static_cast<int>(SERVER_KNOBS->MAX_STORAGE_SNAPSHOT_FAULT_TOLERANCE) - storageFailures,
-		             configuration.storageTeamSize - 1);
+		    std::min(static_cast<int>(SERVER_KNOBS->MAX_STORAGE_SNAPSHOT_FAULT_TOLERANCE),
+		             configuration.storageTeamSize - 1) -
+		    storageFailures;
 		if (storageFaultTolerance < 0) {
 			TEST(true); // Too many failed storage servers to complete snapshot
 			throw snap_storage_failed();
