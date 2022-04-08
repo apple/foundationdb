@@ -19,7 +19,7 @@ from local_cluster import LocalCluster, random_secret_string
 
 
 SUPPORTED_PLATFORMS = ["x86_64"]
-SUPPORTED_VERSIONS = ["7.1.0", "7.0.0", "6.3.23",
+SUPPORTED_VERSIONS = ["7.1.0", "7.0.0", "6.3.24", "6.3.23",
                       "6.3.22", "6.3.18", "6.3.17", "6.3.16", "6.3.15", "6.3.13", "6.3.12", "6.3.9", "6.2.30",
                       "6.2.29", "6.2.28", "6.2.27", "6.2.26", "6.2.25", "6.2.24", "6.2.23", "6.2.22", "6.2.21",
                       "6.2.20", "6.2.19", "6.2.18", "6.2.17", "6.2.16", "6.2.15", "6.2.10", "6.1.13", "6.1.12",
@@ -369,10 +369,12 @@ class UpgradeTest:
                 print(line)
             err_cnt += 1
 
-            if err_cnt > 0:
-                print(
-                    ">>>>>>>>>>>>>>>>>>>> Found {} severity 40 events - the test fails", err_cnt)
-            return err_cnt == 0
+        if err_cnt > 0:
+            print(
+                ">>>>>>>>>>>>>>>>>>>> Found {} severity 40 events - the test fails", err_cnt)
+        else:
+            print("No error found in logs")
+        return err_cnt == 0
 
     # Dump the last cluster configuration and cluster logs
     def dump_cluster_logs(self):
