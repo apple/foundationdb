@@ -968,11 +968,14 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		    .detail("SnapPayload", snapReq.snapPayload)
 		    .detail("SnapUID", snapReq.snapUID);
 		// snap local storage nodes
+		// TODO: Atomically read  configuration and storage worker list in a single transaction
+		state DatabaseConfiguration configuration = wait(getDatabaseConfiguration(cx));
 		std::pair<std::vector<WorkerInterface>, int> storageWorkersAndFailures =
 		    wait(transformErrors(getStorageWorkers(cx, db, true /* localOnly */), snap_storage_failed()));
 		const auto& [storageWorkers, storageFailures] = storageWorkersAndFailures;
 		auto const storageFaultTolerance =
-		    static_cast<int>(SERVER_KNOBS->MAX_STORAGE_SNAPSHOT_FAULT_TOLERANCE) - storageFailures;
+		    std::min(static_cast<int>(SERVER_KNOBS->MAX_STORAGE_SNAPSHOT_FAULT_TOLERANCE) - storageFailures,
+		             configuration.storageTeamSize - 1);
 		if (storageFaultTolerance < 0) {
 			TEST(true); // Too many failed storage servers to complete snapshot
 			throw snap_storage_failed();
