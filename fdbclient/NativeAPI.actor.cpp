@@ -71,6 +71,7 @@
 #include "flow/Error.h"
 #include "flow/FastRef.h"
 #include "flow/IRandom.h"
+#include "flow/ProtocolVersion.h"
 #include "flow/flow.h"
 #include "flow/genericactors.actor.h"
 #include "flow/Knobs.h"
@@ -214,7 +215,25 @@ void DatabaseContext::removeTssMapping(StorageServerInterface const& ssi) {
 	}
 }
 
+void updateCachedReadVersionShared(double t, Version v, DatabaseSharedState* p) {
+	MutexHolder mutex(p->mutexLock);
+	if (v >= p->grvCacheSpace.cachedReadVersion) {
+		TraceEvent(SevDebug, "CacheReadVersionUpdate")
+		    .detail("Version", v)
+		    .detail("CurTime", t)
+		    .detail("LastVersion", p->grvCacheSpace.cachedReadVersion)
+		    .detail("LastTime", p->grvCacheSpace.lastGrvTime);
+		p->grvCacheSpace.cachedReadVersion = v;
+		if (t > p->grvCacheSpace.lastGrvTime) {
+			p->grvCacheSpace.lastGrvTime = t;
+		}
+	}
+}
+
 void DatabaseContext::updateCachedReadVersion(double t, Version v) {
+	if (sharedStatePtr) {
+		return updateCachedReadVersionShared(t, v, sharedStatePtr);
+	}
 	if (v >= cachedReadVersion) {
 		TraceEvent(SevDebug, "CachedReadVersionUpdate")
 		    .detail("Version", v)
@@ -233,10 +252,18 @@ void DatabaseContext::updateCachedReadVersion(double t, Version v) {
 }
 
 Version DatabaseContext::getCachedReadVersion() {
+	if (sharedStatePtr) {
+		MutexHolder mutex(sharedStatePtr->mutexLock);
+		return sharedStatePtr->grvCacheSpace.cachedReadVersion;
+	}
 	return cachedReadVersion;
 }
 
 double DatabaseContext::getLastGrvTime() {
+	if (sharedStatePtr) {
+		MutexHolder mutex(sharedStatePtr->mutexLock);
+		return sharedStatePtr->grvCacheSpace.lastGrvTime;
+	}
 	return lastGrvTime;
 }
 
@@ -1363,11 +1390,12 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
     transactionsExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc),
     transactionGrvFullBatches("NumGrvFullBatches", cc), transactionGrvTimedOutBatches("NumGrvTimedOutBatches", cc),
     latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000),
-    bytesPerCommit(1000), bgLatencies(1000), bgGranulesPerRequest(1000), outstandingWatches(0), lastGrvTime(0.0),
-    cachedReadVersion(0), lastRkBatchThrottleTime(0.0), lastRkDefaultThrottleTime(0.0), lastProxyRequestTime(0.0),
-    transactionTracingSample(false), taskID(taskID), clientInfo(clientInfo), clientInfoMonitor(clientInfoMonitor),
-    coordinator(coordinator), apiVersion(apiVersion), mvCacheInsertLocation(0), healthMetricsLastUpdated(0),
-    detailedHealthMetricsLastUpdated(0), smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
+    bytesPerCommit(1000), bgLatencies(1000), bgGranulesPerRequest(1000), outstandingWatches(0), sharedStatePtr(nullptr),
+    lastGrvTime(0.0), cachedReadVersion(0), lastRkBatchThrottleTime(0.0), lastRkDefaultThrottleTime(0.0),
+    lastProxyRequestTime(0.0), transactionTracingSample(false), taskID(taskID), clientInfo(clientInfo),
+    clientInfoMonitor(clientInfoMonitor), coordinator(coordinator), apiVersion(apiVersion), mvCacheInsertLocation(0),
+    healthMetricsLastUpdated(0), detailedHealthMetricsLastUpdated(0),
+    smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
     specialKeySpace(std::make_unique<SpecialKeySpace>(specialKeys.begin, specialKeys.end, /* test */ false)),
     connectToDatabaseEventCacheHolder(format("ConnectToDatabase/%s", dbId.toString().c_str())) {
 	dbId = deterministicRandom()->randomUniqueID();
@@ -1663,6 +1691,9 @@ DatabaseContext::~DatabaseContext() {
 	tssMismatchHandler.cancel();
 	if (grvUpdateHandler.isValid()) {
 		grvUpdateHandler.cancel();
+	}
+	if (sharedStatePtr) {
+		sharedStatePtr->delRef(sharedStatePtr);
 	}
 	for (auto it = server_interf.begin(); it != server_interf.end(); it = server_interf.erase(it))
 		it->second->notifyContextDestroyed();
@@ -8186,6 +8217,29 @@ Future<Void> DatabaseContext::createSnapshot(StringRef uid, StringRef snapshot_c
 		throw snap_invalid_uid_string();
 	}
 	return createSnapshotActor(this, UID::fromString(uid_str), snapshot_command);
+}
+
+void sharedStateDelRef(DatabaseSharedState* ssPtr) {
+	if (--ssPtr->refCount == 0) {
+		delete ssPtr;
+	}
+}
+
+Future<DatabaseSharedState*> DatabaseContext::initSharedState() {
+	ASSERT(!sharedStatePtr); // Don't re-initialize shared state if a pointer already exists
+	DatabaseSharedState* newState = new DatabaseSharedState();
+	// Increment refcount by 1 on creation to account for the one held in MultiVersionApi map
+	// Therefore, on initialization, refCount should be 2 (after also going to setSharedState)
+	newState->refCount++;
+	newState->delRef = &sharedStateDelRef;
+	setSharedState(newState);
+	return newState;
+}
+
+void DatabaseContext::setSharedState(DatabaseSharedState* p) {
+	ASSERT(p->protocolVersion == currentProtocolVersion);
+	sharedStatePtr = p;
+	sharedStatePtr->refCount++;
 }
 
 ACTOR Future<Void> storageFeedVersionUpdater(StorageServerInterface interf, ChangeFeedStorageData* self) {

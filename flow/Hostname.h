@@ -75,6 +75,7 @@ struct Hostname {
 	Optional<NetworkAddress> resolvedAddress;
 	enum HostnameStatus { UNRESOLVED, RESOLVING, RESOLVED };
 	Future<Void> resolve();
+	Future<Void> resolveWithRetry();
 	void resolveBlocking(); // This one should only be used when resolving asynchronously is impossible.
 	                        // For all other cases, resolve() should be preferred.
 	void resetToUnresolved();

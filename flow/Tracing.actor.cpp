@@ -690,7 +690,7 @@ TEST_CASE("/flow/Tracing/AddLinks") {
 	return Void();
 };
 
-uint64_t swapUint16BE(uint8_t* index) {
+uint16_t swapUint16BE(uint8_t* index) {
 	uint16_t value;
 	memcpy(&value, index, sizeof(value));
 	return fromBigEndian16(value);
@@ -712,6 +712,26 @@ double swapDoubleBE(uint8_t* index) {
 }
 
 std::string readMPString(uint8_t* index, int len) {
+	uint8_t data[len + 1];
+	std::copy(index, index + len, data);
+	data[len] = '\0';
+	return reinterpret_cast<char*>(data);
+}
+
+std::string readMPString(uint8_t* index) {
+	auto len = 0;
+	switch (*index) {
+	case 0xda:
+		index++; // read the size in the next 2 bytes
+		len = swapUint16BE(index);
+		index += 2; // move index past the size bytes
+		break;
+	default:
+		// We & out the bits here that contain the length the initial 3 higher order bits are
+		// to signify this is a string of len <= 31 chars.
+		len = static_cast<uint8_t>(*index & 0b00011111);
+		index++;
+	}
 	uint8_t data[len + 1];
 	std::copy(index, index + len, data);
 	data[len] = '\0';
@@ -754,9 +774,7 @@ TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
 	ASSERT(data[46] == 0xcf);
 	ASSERT(swapUint64BE(&data[47]) == 1);
 	// Read and verify span name
-	ASSERT(data[55] == (0b10100000 | strlen("encoded_span")));
-	ASSERT(strncmp(readMPString(&data[56], strlen("encoded_span")).c_str(), "encoded_span", strlen("encoded_span")) ==
-	       0);
+	ASSERT(readMPString(&data[55]) == "encoded_span");
 	// Verify begin/end is encoded, we don't care about the values
 	ASSERT(data[68] == 0xcb);
 	ASSERT(data[77] == 0xcb);
@@ -795,10 +813,7 @@ TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
 	ASSERT(data[0] == 0b10011110); // 14 element array.
 	// We don't care about the next 54 bytes as there is no parent and a randomly assigned Trace and SpanID
 	// Read and verify span name
-	ASSERT(data[55] == (0b10100000 | strlen("encoded_span_3")));
-	ASSERT(strncmp(readMPString(&data[56], strlen("encoded_span_3")).c_str(),
-	               "encoded_span_3",
-	               strlen("encoded_span_3")) == 0);
+	ASSERT(readMPString(&data[55]) == "encoded_span_3");
 	// Verify begin/end is encoded, we don't care about the values
 	ASSERT(data[70] == 0xcb);
 	ASSERT(data[79] == 0xcb);
@@ -818,43 +833,32 @@ TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
 	ASSERT(swapUint64BE(&data[112]) == 400);
 	// Events
 	ASSERT(data[120] == 0b10010001); // empty
-	ASSERT(data[121] == (0b10100000 | strlen("event1")));
-	ASSERT(strncmp(readMPString(&data[122], strlen("event1")).c_str(), "event1", strlen("event1")) == 0);
+	ASSERT(readMPString(&data[121]) == "event1");
 	ASSERT(data[128] == 0xcb);
 	ASSERT(swapDoubleBE(&data[129]) == 100.101);
 	// Events Attributes
 	ASSERT(data[137] == 0b10000001); // single k/v pair
-	ASSERT(data[138] == 0b10100011); // length of key string "foo" == 3
-	ASSERT(strncmp(readMPString(&data[139], strlen("foo")).c_str(), "foo", strlen("foo")) == 0);
-	ASSERT(data[142] == 0b10100011); // length of key string "bar" == 3
-	ASSERT(strncmp(readMPString(&data[143], strlen("bar")).c_str(), "bar", strlen("bar")) == 0);
+	ASSERT(readMPString(&data[138]) == "foo");
+	ASSERT(readMPString(&data[142]) == "bar");
 	// Attributes
 	ASSERT(data[146] == 0b10000010); // two k/v pair
 	// Reconstruct map from MessagePack wire format data and verify.
 	std::unordered_map<std::string, std::string> attributes;
 	auto index = 147;
-	// We & out the bits here that contain the length the initial 4 higher order bits are
-	// to signify this is a string of len <= 31 chars.
-	auto firstKeyLength = static_cast<uint8_t>(data[index] & 0b00011111);
-	index++;
-	auto firstKey = readMPString(&data[index], firstKeyLength);
-	index += firstKeyLength;
-	auto firstValueLength = static_cast<uint8_t>(data[index] & 0b00011111);
-	index++;
-	auto firstValue = readMPString(&data[index], firstValueLength);
-	index += firstValueLength;
+
+	auto firstKey = readMPString(&data[index]);
+	index += firstKey.length() + 1; // +1 for control byte
+	auto firstValue = readMPString(&data[index]);
+	index += firstValue.length() + 1; // +1 for control byte
 	attributes[firstKey] = firstValue;
-	auto secondKeyLength = static_cast<uint8_t>(data[index] & 0b00011111);
-	index++;
-	auto secondKey = readMPString(&data[index], secondKeyLength);
-	index += secondKeyLength;
-	auto secondValueLength = static_cast<uint8_t>(data[index] & 0b00011111);
-	index++;
-	auto secondValue = readMPString(&data[index], secondValueLength);
+
+	auto secondKey = readMPString(&data[index]);
+	index += secondKey.length() + 1; // +1 for control byte
+	auto secondValue = readMPString(&data[index]);
 	attributes[secondKey] = secondValue;
 	// We don't know what the value for address will be, so just verify it is in the map.
 	ASSERT(attributes.find("address") != attributes.end());
-	ASSERT(strncmp(attributes["operation"].c_str(), "grv", strlen("grv")) == 0);
+	ASSERT(attributes["operation"] == "grv");
 
 	request.reset();
 
@@ -876,9 +880,7 @@ TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
 	// We don't care about the next 54 bytes as there is no parent and a randomly assigned Trace and SpanID
 	// Read and verify span name
 	ASSERT(data[55] == 0xda);
-	auto locationLength = swapUint16BE(&data[56]);
-	ASSERT(locationLength == strlen(longString));
-	ASSERT(strncmp(readMPString(&data[58], locationLength).c_str(), longString, strlen(longString)) == 0);
+	ASSERT(readMPString(&data[55]) == longString);
 	return Void();
 };
 #endif
