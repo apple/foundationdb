@@ -226,8 +226,8 @@ public:
 		if (bufferSize > 0) {
 			buffer = (uint8_t*)arena.allocate4kAlignedBuffer(bufferSize);
 
-			// Mark any unused page portion defined
-			VALGRIND_MAKE_MEM_DEFINED(buffer + logicalSize, bufferSize - logicalSize);
+			// Zero unused region
+			memset(buffer + logicalSize, 0, bufferSize - logicalSize);
 		} else {
 			buffer = nullptr;
 		}

@@ -1715,8 +1715,8 @@ public:
 		ASSERT(size() <= spaceAvailable);
 		nodeBytesFree = spaceAvailable - size();
 
-		// Mark unused available space as defined
-		VALGRIND_MAKE_MEM_DEFINED((uint8_t*)this + size(), nodeBytesFree);
+		// Zero unused available space
+		memset((uint8_t*)this + size(), 0, nodeBytesFree);
 
 		return size();
 	}

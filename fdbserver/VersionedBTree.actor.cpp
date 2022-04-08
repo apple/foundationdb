@@ -731,8 +731,8 @@ public:
 			ASSERT(mode == WRITE);
 			debug_printf("FIFOQueue::Cursor(%s) writePage\n", toString().c_str());
 
-			// Mark the unused part of the item space as defined
-			VALGRIND_MAKE_MEM_DEFINED(header()->begin() + offset, header()->itemSpace - header()->endOffset);
+			// Zero unused space within itemspace
+			memset(header()->begin() + header()->endOffset, 0, header()->itemSpace - header()->endOffset);
 
 			queue->pager->updatePage(
 			    PagerEventReasons::MetaData, nonBtreeLevel, VectorRef<PhysicalPageID>(&pageID, 1), page);
@@ -803,8 +803,8 @@ public:
 					// Randomly reduce available item space to cause more queue pages to be needed
 					int reducedSpace = deterministicRandom()->randomInt(50, p->itemSpace);
 
-					// Mark the eliminated item space as initialized
-					VALGRIND_MAKE_MEM_DEFINED(header()->begin() + reducedSpace, p->itemSpace - reducedSpace);
+					// Zero the eliminated space
+					memset(header()->begin() + reducedSpace, 0, p->itemSpace - reducedSpace);
 
 					p->itemSpace = reducedSpace;
 				}
