@@ -178,7 +178,7 @@ void releaseAllThreadMagazines();
 int64_t getTotalUnusedAllocatedMemory();
 
 inline constexpr int nextFastAllocatedSize(int x) {
-	assert(x > 0 && x <= 8192);
+	assert(x > 0 && x <= 16384);
 	if (x <= 16)
 		return 16;
 	else if (x <= 32)
@@ -199,8 +199,10 @@ inline constexpr int nextFastAllocatedSize(int x) {
 		return 2048;
 	else if (x <= 4096)
 		return 4096;
-	else
+	else if (x <= 8192)
 		return 8192;
+	else
+		return 16384;
 }
 
 template <class Object>

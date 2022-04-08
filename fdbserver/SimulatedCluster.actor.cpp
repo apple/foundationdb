@@ -263,6 +263,9 @@ class TestConfig {
 			if (attrib == "disableHostname") {
 				disableHostname = strcmp(value.c_str(), "true") == 0;
 			}
+			if (attrib == "disableRemoteKVS") {
+				disableRemoteKVS = strcmp(value.c_str(), "true") == 0;
+			}
 			if (attrib == "restartInfoLocation") {
 				isFirstTestInRestart = true;
 			}
@@ -298,6 +301,8 @@ public:
 	bool disableTss = false;
 	// 7.1 cannot be downgraded to 7.0 and below after enabling hostname, so disable hostname for 7.0 downgrade tests
 	bool disableHostname = false;
+	// remote key value store is a child process spawned by the SS process to run the storage engine
+	bool disableRemoteKVS = false;
 	// Storage Engine Types: Verify match with SimulationConfig::generateNormalConfig
 	//	0 = "ssd"
 	//	1 = "memory"
@@ -357,6 +362,7 @@ public:
 		    .add("maxTLogVersion", &maxTLogVersion)
 		    .add("disableTss", &disableTss)
 		    .add("disableHostname", &disableHostname)
+		    .add("disableRemoteKVS", &disableRemoteKVS)
 		    .add("simpleConfig", &simpleConfig)
 		    .add("generateFearless", &generateFearless)
 		    .add("datacenters", &datacenters)
@@ -1083,6 +1089,11 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 			if (mockDNSStr != nullptr) {
 				INetworkConnections::net()->parseMockDNSFromString(mockDNSStr);
 			}
+		}
+		if (testConfig.disableRemoteKVS) {
+			IKnobCollection::getMutableGlobalKnobCollection().setKnob("remote_kv_store",
+			                                                          KnobValueRef::create(bool{ false }));
+			TraceEvent(SevDebug, "DisaableRemoteKVS").log();
 		}
 		*pConnString = conn;
 		*pTesterCount = testerCount;
@@ -1835,6 +1846,11 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	std::string startingConfigString = "new";
 	if (testConfig.configureLocked) {
 		startingConfigString += " locked";
+	}
+	if (testConfig.disableRemoteKVS) {
+		IKnobCollection::getMutableGlobalKnobCollection().setKnob("remote_kv_store",
+		                                                          KnobValueRef::create(bool{ false }));
+		TraceEvent(SevDebug, "DisaableRemoteKVS").log();
 	}
 	auto configDBType = testConfig.getConfigDBType();
 	for (auto kv : startingConfigJSON) {

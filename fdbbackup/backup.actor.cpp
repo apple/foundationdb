@@ -24,6 +24,7 @@
 #include "flow/Arena.h"
 #include "flow/ArgParseUtil.h"
 #include "flow/Error.h"
+#include "flow/SystemMonitor.h"
 #include "flow/Trace.h"
 #define BOOST_DATE_TIME_NO_LIB
 #include <boost/interprocess/managed_shared_memory.hpp>
@@ -171,6 +172,7 @@ enum {
 	OPT_KNOB,
 	OPT_TRACE_LOG_GROUP,
 	OPT_MEMLIMIT,
+	OPT_VMEMLIMIT,
 	OPT_LOCALITY,
 
 	// DB constants
@@ -212,6 +214,7 @@ CSimpleOpt::SOption g_rgAgentOptions[] = {
 	{ OPT_LOCALITY, "--locality-", SO_REQ_SEP },
 	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
 	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
+	{ OPT_VMEMLIMIT, "--memory-vsize", SO_REQ_SEP },
 	{ OPT_HELP, "-?", SO_NONE },
 	{ OPT_HELP, "-h", SO_NONE },
 	{ OPT_HELP, "--help", SO_NONE },
@@ -257,6 +260,7 @@ CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 	{ OPT_CRASHONERROR, "--crash", SO_NONE },
 	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
 	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
+	{ OPT_VMEMLIMIT, "--memory-vsize", SO_REQ_SEP },
 	{ OPT_HELP, "-?", SO_NONE },
 	{ OPT_HELP, "-h", SO_NONE },
 	{ OPT_HELP, "--help", SO_NONE },
@@ -283,6 +287,7 @@ CSimpleOpt::SOption g_rgBackupModifyOptions[] = {
 	{ OPT_CRASHONERROR, "--crash", SO_NONE },
 	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
 	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
+	{ OPT_VMEMLIMIT, "--memory-vsize", SO_REQ_SEP },
 	{ OPT_HELP, "-?", SO_NONE },
 	{ OPT_HELP, "-h", SO_NONE },
 	{ OPT_HELP, "--help", SO_NONE },
@@ -323,6 +328,7 @@ CSimpleOpt::SOption g_rgBackupStatusOptions[] = {
 	{ OPT_CRASHONERROR, "--crash", SO_NONE },
 	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
 	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
+	{ OPT_VMEMLIMIT, "--memory-vsize", SO_REQ_SEP },
 	{ OPT_HELP, "-?", SO_NONE },
 	{ OPT_HELP, "-h", SO_NONE },
 	{ OPT_HELP, "--help", SO_NONE },
@@ -352,6 +358,7 @@ CSimpleOpt::SOption g_rgBackupAbortOptions[] = {
 	{ OPT_CRASHONERROR, "--crash", SO_NONE },
 	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
 	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
+	{ OPT_VMEMLIMIT, "--memory-vsize", SO_REQ_SEP },
 	{ OPT_HELP, "-?", SO_NONE },
 	{ OPT_HELP, "-h", SO_NONE },
 	{ OPT_HELP, "--help", SO_NONE },
@@ -378,6 +385,7 @@ CSimpleOpt::SOption g_rgBackupCleanupOptions[] = {
 	{ OPT_CRASHONERROR, "--crash", SO_NONE },
 	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
 	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
+	{ OPT_VMEMLIMIT, "--memory-vsize", SO_REQ_SEP },
 	{ OPT_HELP, "-?", SO_NONE },
 	{ OPT_HELP, "-h", SO_NONE },
 	{ OPT_HELP, "--help", SO_NONE },
@@ -410,6 +418,7 @@ CSimpleOpt::SOption g_rgBackupDiscontinueOptions[] = {
 	{ OPT_CRASHONERROR, "--crash", SO_NONE },
 	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
 	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
+	{ OPT_VMEMLIMIT, "--memory-vsize", SO_REQ_SEP },
 	{ OPT_HELP, "-?", SO_NONE },
 	{ OPT_HELP, "-h", SO_NONE },
 	{ OPT_HELP, "--help", SO_NONE },
@@ -440,6 +449,7 @@ CSimpleOpt::SOption g_rgBackupWaitOptions[] = {
 	{ OPT_CRASHONERROR, "--crash", SO_NONE },
 	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
 	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
+	{ OPT_VMEMLIMIT, "--memory-vsize", SO_REQ_SEP },
 	{ OPT_HELP, "-?", SO_NONE },
 	{ OPT_HELP, "-h", SO_NONE },
 	{ OPT_HELP, "--help", SO_NONE },
@@ -466,6 +476,7 @@ CSimpleOpt::SOption g_rgBackupPauseOptions[] = {
 	{ OPT_CRASHONERROR, "--crash", SO_NONE },
 	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
 	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
+	{ OPT_VMEMLIMIT, "--memory-vsize", SO_REQ_SEP },
 	{ OPT_HELP, "-?", SO_NONE },
 	{ OPT_HELP, "-h", SO_NONE },
 	{ OPT_HELP, "--help", SO_NONE },
@@ -495,6 +506,7 @@ CSimpleOpt::SOption g_rgBackupExpireOptions[] = {
 	{ OPT_CRASHONERROR, "--crash", SO_NONE },
 	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
 	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
+	{ OPT_VMEMLIMIT, "--memory-vsize", SO_REQ_SEP },
 	{ OPT_HELP, "-?", SO_NONE },
 	{ OPT_HELP, "-h", SO_NONE },
 	{ OPT_HELP, "--help", SO_NONE },
@@ -531,6 +543,7 @@ CSimpleOpt::SOption g_rgBackupDeleteOptions[] = {
 	{ OPT_CRASHONERROR, "--crash", SO_NONE },
 	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
 	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
+	{ OPT_VMEMLIMIT, "--memory-vsize", SO_REQ_SEP },
 	{ OPT_HELP, "-?", SO_NONE },
 	{ OPT_HELP, "-h", SO_NONE },
 	{ OPT_HELP, "--help", SO_NONE },
@@ -561,6 +574,7 @@ CSimpleOpt::SOption g_rgBackupDescribeOptions[] = {
 	{ OPT_CRASHONERROR, "--crash", SO_NONE },
 	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
 	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
+	{ OPT_VMEMLIMIT, "--memory-vsize", SO_REQ_SEP },
 	{ OPT_HELP, "-?", SO_NONE },
 	{ OPT_HELP, "-h", SO_NONE },
 	{ OPT_HELP, "--help", SO_NONE },
@@ -593,6 +607,7 @@ CSimpleOpt::SOption g_rgBackupDumpOptions[] = {
 	{ OPT_CRASHONERROR, "--crash", SO_NONE },
 	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
 	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
+	{ OPT_VMEMLIMIT, "--memory-vsize", SO_REQ_SEP },
 	{ OPT_HELP, "-?", SO_NONE },
 	{ OPT_HELP, "-h", SO_NONE },
 	{ OPT_HELP, "--help", SO_NONE },
@@ -640,6 +655,7 @@ CSimpleOpt::SOption g_rgBackupListOptions[] = {
 	{ OPT_CRASHONERROR, "--crash", SO_NONE },
 	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
 	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
+	{ OPT_VMEMLIMIT, "--memory-vsize", SO_REQ_SEP },
 	{ OPT_HELP, "-?", SO_NONE },
 	{ OPT_HELP, "-h", SO_NONE },
 	{ OPT_HELP, "--help", SO_NONE },
@@ -675,6 +691,7 @@ CSimpleOpt::SOption g_rgBackupQueryOptions[] = {
 	{ OPT_CRASHONERROR, "--crash", SO_NONE },
 	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
 	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
+	{ OPT_VMEMLIMIT, "--memory-vsize", SO_REQ_SEP },
 	{ OPT_HELP, "-?", SO_NONE },
 	{ OPT_HELP, "-h", SO_NONE },
 	{ OPT_HELP, "--help", SO_NONE },
@@ -720,6 +737,7 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 	{ OPT_CRASHONERROR, "--crash", SO_NONE },
 	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
 	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
+	{ OPT_VMEMLIMIT, "--memory-vsize", SO_REQ_SEP },
 	{ OPT_HELP, "-?", SO_NONE },
 	{ OPT_HELP, "-h", SO_NONE },
 	{ OPT_HELP, "--help", SO_NONE },
@@ -757,6 +775,7 @@ CSimpleOpt::SOption g_rgDBAgentOptions[] = {
 	{ OPT_LOCALITY, "--locality-", SO_REQ_SEP },
 	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
 	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
+	{ OPT_VMEMLIMIT, "--memory-vsize", SO_REQ_SEP },
 	{ OPT_HELP, "-?", SO_NONE },
 	{ OPT_HELP, "-h", SO_NONE },
 	{ OPT_HELP, "--help", SO_NONE },
@@ -788,6 +807,7 @@ CSimpleOpt::SOption g_rgDBStartOptions[] = {
 	{ OPT_CRASHONERROR, "--crash", SO_NONE },
 	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
 	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
+	{ OPT_VMEMLIMIT, "--memory-vsize", SO_REQ_SEP },
 	{ OPT_HELP, "-?", SO_NONE },
 	{ OPT_HELP, "-h", SO_NONE },
 	{ OPT_HELP, "--help", SO_NONE },
@@ -820,6 +840,7 @@ CSimpleOpt::SOption g_rgDBStatusOptions[] = {
 	{ OPT_CRASHONERROR, "--crash", SO_NONE },
 	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
 	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
+	{ OPT_VMEMLIMIT, "--memory-vsize", SO_REQ_SEP },
 	{ OPT_HELP, "-?", SO_NONE },
 	{ OPT_HELP, "-h", SO_NONE },
 	{ OPT_HELP, "--help", SO_NONE },
@@ -851,6 +872,7 @@ CSimpleOpt::SOption g_rgDBSwitchOptions[] = {
 	{ OPT_CRASHONERROR, "--crash", SO_NONE },
 	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
 	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
+	{ OPT_VMEMLIMIT, "--memory-vsize", SO_REQ_SEP },
 	{ OPT_HELP, "-?", SO_NONE },
 	{ OPT_HELP, "-h", SO_NONE },
 	{ OPT_HELP, "--help", SO_NONE },
@@ -883,6 +905,7 @@ CSimpleOpt::SOption g_rgDBAbortOptions[] = {
 	{ OPT_CRASHONERROR, "--crash", SO_NONE },
 	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
 	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
+	{ OPT_VMEMLIMIT, "--memory-vsize", SO_REQ_SEP },
 	{ OPT_HELP, "-?", SO_NONE },
 	{ OPT_HELP, "-h", SO_NONE },
 	{ OPT_HELP, "--help", SO_NONE },
@@ -911,6 +934,7 @@ CSimpleOpt::SOption g_rgDBPauseOptions[] = {
 	{ OPT_CRASHONERROR, "--crash", SO_NONE },
 	{ OPT_MEMLIMIT, "-m", SO_REQ_SEP },
 	{ OPT_MEMLIMIT, "--memory", SO_REQ_SEP },
+	{ OPT_VMEMLIMIT, "--memory-vsize", SO_REQ_SEP },
 	{ OPT_HELP, "-?", SO_NONE },
 	{ OPT_HELP, "-h", SO_NONE },
 	{ OPT_HELP, "--help", SO_NONE },
@@ -3411,6 +3435,7 @@ int main(int argc, char* argv[]) {
 		DstOnly dstOnly{ false };
 		LocalityData localities;
 		uint64_t memLimit = 8LL << 30;
+		uint64_t virtualMemLimit = 0; // unlimited
 		Optional<uint64_t> ti;
 		BackupTLSConfig tlsConfig;
 		Version dumpBegin = 0;
@@ -3756,6 +3781,15 @@ int main(int argc, char* argv[]) {
 				}
 				memLimit = ti.get();
 				break;
+			case OPT_VMEMLIMIT:
+				ti = parse_with_suffix(args->OptionArg(), "MiB");
+				if (!ti.present()) {
+					fprintf(stderr, "ERROR: Could not parse virtual memory limit from `%s'\n", args->OptionArg());
+					printHelpTeaser(argv[0]);
+					flushAndExit(FDB_EXIT_ERROR);
+				}
+				virtualMemLimit = ti.get();
+				break;
 			case OPT_BLOB_CREDENTIALS:
 				tlsConfig.blobCredentials.push_back(args->OptionArg());
 				break;
@@ -3885,7 +3919,7 @@ int main(int argc, char* argv[]) {
 
 		Error::init();
 		std::set_new_handler(&platform::outOfMemory);
-		setMemoryQuota(memLimit);
+		setMemoryQuota(virtualMemLimit);
 
 		Database db;
 		Database sourceDb;
@@ -3902,33 +3936,11 @@ int main(int argc, char* argv[]) {
 			return FDB_EXIT_ERROR;
 		}
 
-		auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
-		for (const auto& [knobName, knobValueString] : knobs) {
-			try {
-				auto knobValue = g_knobs.parseKnobValue(knobName, knobValueString);
-				g_knobs.setKnob(knobName, knobValue);
-			} catch (Error& e) {
-				if (e.code() == error_code_invalid_option_value) {
-					fprintf(stderr,
-					        "WARNING: Invalid value '%s' for knob option '%s'\n",
-					        knobValueString.c_str(),
-					        knobName.c_str());
-					TraceEvent(SevWarnAlways, "InvalidKnobValue")
-					    .detail("Knob", printable(knobName))
-					    .detail("Value", printable(knobValueString));
-				} else {
-					fprintf(stderr, "ERROR: Failed to set knob option '%s': %s\n", knobName.c_str(), e.what());
-					TraceEvent(SevError, "FailedToSetKnob")
-					    .error(e)
-					    .detail("Knob", printable(knobName))
-					    .detail("Value", printable(knobValueString));
-					throw;
-				}
-			}
-		}
+		Future<Void> memoryUsageMonitor = startMemoryUsageMonitor(memLimit);
 
+		IKnobCollection::setupKnobs(knobs);
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
-		g_knobs.initialize(Randomize::False, IsSimulated::False);
+		IKnobCollection::getMutableGlobalKnobCollection().initialize(Randomize::False, IsSimulated::False);
 
 		TraceEvent("ProgramStart")
 		    .setMaxEventLength(12000)

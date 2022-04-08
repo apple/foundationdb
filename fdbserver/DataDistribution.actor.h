@@ -299,15 +299,17 @@ struct StorageWiggleMetrics {
 	// round statistics
 	// One StorageServer wiggle round is considered 'complete', when all StorageServers with creationTime < T are
 	// wiggled
-	uint64_t last_round_start = 0; // wall timer: timer_int()
-	uint64_t last_round_finish = 0;
+	// Start and finish are in epoch seconds
+	double last_round_start = 0;
+	double last_round_finish = 0;
 	TimerSmoother smoothed_round_duration;
 	int finished_round = 0; // finished round since storage wiggle is open
 
 	// step statistics
 	// 1 wiggle step as 1 storage server is wiggled in the current round
-	uint64_t last_wiggle_start = 0; // wall timer: timer_int()
-	uint64_t last_wiggle_finish = 0;
+	// Start and finish are in epoch seconds
+	double last_wiggle_start = 0;
+	double last_wiggle_finish = 0;
 	TimerSmoother smoothed_wiggle_duration;
 	int finished_wiggle = 0; // finished step since storage wiggle is open
 
@@ -365,15 +367,15 @@ struct StorageWiggleMetrics {
 
 	StatusObject toJSON() const {
 		StatusObject result;
-		result["last_round_start_datetime"] = timerIntToGmt(last_round_start);
-		result["last_round_finish_datetime"] = timerIntToGmt(last_round_finish);
+		result["last_round_start_datetime"] = epochsToGMTString(last_round_start);
+		result["last_round_finish_datetime"] = epochsToGMTString(last_round_finish);
 		result["last_round_start_timestamp"] = last_round_start;
 		result["last_round_finish_timestamp"] = last_round_finish;
 		result["smoothed_round_seconds"] = smoothed_round_duration.smoothTotal();
 		result["finished_round"] = finished_round;
 
-		result["last_wiggle_start_datetime"] = timerIntToGmt(last_wiggle_start);
-		result["last_wiggle_finish_datetime"] = timerIntToGmt(last_wiggle_finish);
+		result["last_wiggle_start_datetime"] = epochsToGMTString(last_wiggle_start);
+		result["last_wiggle_finish_datetime"] = epochsToGMTString(last_wiggle_finish);
 		result["last_wiggle_start_timestamp"] = last_wiggle_start;
 		result["last_wiggle_finish_timestamp"] = last_wiggle_finish;
 		result["smoothed_wiggle_seconds"] = smoothed_wiggle_duration.smoothTotal();

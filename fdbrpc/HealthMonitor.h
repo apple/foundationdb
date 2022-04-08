@@ -31,6 +31,7 @@ public:
 	void reportPeerClosed(const NetworkAddress& peerAddress);
 	bool tooManyConnectionsClosed(const NetworkAddress& peerAddress);
 	int closedConnectionsCount(const NetworkAddress& peerAddress);
+	std::unordered_set<NetworkAddress> getRecentClosedPeers();
 
 private:
 	void purgeOutdatedHistory();
