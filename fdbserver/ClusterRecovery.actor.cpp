@@ -1602,7 +1602,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	if (!clusterIdExists) {
 		tr.set(recoveryCommitRequest.arena, clusterIdKey, BinaryWriter::toValue(self->clusterId, Unversioned()));
 	}
-	if (self->versionEpoch.present()) {
+	if (g_network->isSimulated() && self->versionEpoch.present()) {
 		tr.set(recoveryCommitRequest.arena,
 		       versionEpochKey,
 		       BinaryWriter::toValue(self->versionEpoch.get(), Unversioned()));

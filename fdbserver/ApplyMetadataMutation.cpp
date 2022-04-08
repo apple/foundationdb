@@ -1043,9 +1043,6 @@ private:
 		if (range.contains(writeRecoveryKey)) {
 			txnStateStore->clear(singleKeyRange(writeRecoveryKey));
 		}
-		if (range.contains(versionEpochKey)) {
-			txnStateStore->clear(singleKeyRange(versionEpochKey));
-		}
 		if (range.intersects(testOnlyTxnStateStorePrefixRange)) {
 			txnStateStore->clear(range & testOnlyTxnStateStorePrefixRange);
 		}
