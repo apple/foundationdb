@@ -36,10 +36,12 @@ struct ClientLeaderRegInterface {
 	RequestStream<struct GetLeaderRequest> getLeader;
 	RequestStream<struct OpenDatabaseCoordRequest> openDatabase;
 	RequestStream<struct CheckDescriptorMutableRequest> checkDescriptorMutable;
+	Optional<Hostname> hostname;
 
 	ClientLeaderRegInterface() {}
 	ClientLeaderRegInterface(NetworkAddress remote);
 	ClientLeaderRegInterface(INetwork* local);
+	ClientLeaderRegInterface(Hostname hostname) : hostname(hostname) {}
 
 	bool operator==(const ClientLeaderRegInterface& rhs) const {
 		return getLeader == rhs.getLeader && openDatabase == rhs.openDatabase;
