@@ -1386,7 +1386,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 				auto readLoad = metrics.bytesReadPerKSecond;
 				auto& destinationRef = healthyDestinations;
 				self->noErrorActors.add(
-				    trigger([destinationRef, readLoad]() mutable { destinationRef.addDataInFlightToTeam(-readLoad); },
+				    trigger([destinationRef, readLoad]() mutable { destinationRef.addReadInFlightToTeam(-readLoad); },
 				            delay(SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL)));
 
 				// onFinished.send( rs );
@@ -1424,7 +1424,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 				auto readLoad = metrics.bytesReadPerKSecond;
 				auto& destinationRef = healthyDestinations;
 				self->noErrorActors.add(
-				    trigger([destinationRef, readLoad]() mutable { destinationRef.addDataInFlightToTeam(-readLoad); },
+				    trigger([destinationRef, readLoad]() mutable { destinationRef.addReadInFlightToTeam(-readLoad); },
 				            delay(SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL)));
 				wait(delay(SERVER_KNOBS->RETRY_RELOCATESHARD_DELAY, TaskPriority::DataDistributionLaunch));
 			}
