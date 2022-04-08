@@ -1,5 +1,5 @@
 /*
- * HealthMonitor.h
+ * fdb_c_internal.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,26 +18,35 @@
  * limitations under the License.
  */
 
-#ifndef FDBRPC_HEALTH_MONITOR_H
-#define FDBRPC_HEALTH_MONITOR_H
+#ifndef FDB_C_INTERNAL_H
+#define FDB_C_INTERNAL_H
+#include "flow/ProtocolVersion.h"
+#pragma once
 
-#include <deque>
-#include <unordered_map>
+#ifndef DLLEXPORT
+#define DLLEXPORT
+#endif
 
-#include <flow/flow.h>
+#ifndef WARN_UNUSED_RESULT
+#define WARN_UNUSED_RESULT
+#endif
 
-class HealthMonitor {
-public:
-	void reportPeerClosed(const NetworkAddress& peerAddress);
-	bool tooManyConnectionsClosed(const NetworkAddress& peerAddress);
-	int closedConnectionsCount(const NetworkAddress& peerAddress);
-	std::unordered_set<NetworkAddress> getRecentClosedPeers();
+#include "fdb_c_types.h"
 
-private:
-	void purgeOutdatedHistory();
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-	std::deque<std::pair<double, NetworkAddress>> peerClosedHistory;
-	std::unordered_map<NetworkAddress, int> peerClosedNum;
-};
+// forward declaration and typedef
+typedef struct DatabaseSharedState DatabaseSharedState;
 
-#endif // FDBRPC_HEALTH_MONITOR_H
+DLLEXPORT FDBFuture* fdb_database_create_shared_state(FDBDatabase* db);
+
+DLLEXPORT void fdb_database_set_shared_state(FDBDatabase* db, DatabaseSharedState* p);
+
+DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_shared_state(FDBFuture* f, DatabaseSharedState** outPtr);
+
+#ifdef __cplusplus
+}
+#endif
+#endif

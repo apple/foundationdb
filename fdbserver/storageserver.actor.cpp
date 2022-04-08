@@ -158,7 +158,6 @@ struct AddingShard : NonCopyable {
 	Future<Void> fetchClient; // holds FetchKeys() actor
 	Promise<Void> fetchComplete;
 	Promise<Void> readWrite;
-	PromiseStream<Key> changeFeedRemovals;
 
 	// During the Fetching phase, it saves newer mutations whose version is greater or equal to fetchClient's
 	// fetchVersion, while the shard is still busy catching up with fetchClient. It applies these updates after fetching
@@ -1936,20 +1935,22 @@ ACTOR Future<Void> overlappingChangeFeedsQ(StorageServer* data, OverlappingChang
 	std::map<Key, std::tuple<KeyRange, Version, Version>> rangeIds;
 	for (auto r : ranges) {
 		for (auto& it : r.value()) {
-			// Can't tell other SS about a change feed create or stopVersion that may get rolled back, and we only need
-			// to tell it about the metadata if req.minVersion > metadataVersion, since it will get the information from
-			// its own private mutations if it hasn't processed up that version yet
-			metadataVersion = std::max(metadataVersion, it->metadataCreateVersion);
+			if (!it->removing) {
+				// Can't tell other SS about a change feed create or stopVersion that may get rolled back, and we only
+				// need to tell it about the metadata if req.minVersion > metadataVersion, since it will get the
+				// information from its own private mutations if it hasn't processed up that version yet
+				metadataVersion = std::max(metadataVersion, it->metadataCreateVersion);
 
-			Version stopVersion;
-			if (it->stopVersion != MAX_VERSION && req.minVersion > it->stopVersion) {
-				stopVersion = it->stopVersion;
-				metadataVersion = std::max(metadataVersion, stopVersion);
-			} else {
-				stopVersion = MAX_VERSION;
+				Version stopVersion;
+				if (it->stopVersion != MAX_VERSION && req.minVersion > it->stopVersion) {
+					stopVersion = it->stopVersion;
+					metadataVersion = std::max(metadataVersion, stopVersion);
+				} else {
+					stopVersion = MAX_VERSION;
+				}
+
+				rangeIds[it->id] = std::tuple(it->range, it->emptyVersion, stopVersion);
 			}
-
-			rangeIds[it->id] = std::tuple(it->range, it->emptyVersion, stopVersion);
 		}
 	}
 	state OverlappingChangeFeedsReply reply;
@@ -2599,6 +2600,7 @@ ACTOR Future<Void> changeFeedStreamQ(StorageServer* data, ChangeFeedStreamReques
 
 			req.reply.send(feedReply);
 			if (req.begin == req.end) {
+				data->activeFeedQueries--;
 				req.reply.sendError(end_of_stream());
 				return Void();
 			}
@@ -5117,11 +5119,23 @@ ACTOR Future<Version> fetchChangeFeed(StorageServer* data,
 	}
 }
 
-ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data, KeyRange keys, Version fetchVersion) {
+ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
+                                                       KeyRange keys,
+                                                       Version fetchVersion,
+                                                       PromiseStream<Key> removals) {
 	TraceEvent(SevDebug, "FetchChangeFeedMetadata", data->thisServerID)
 	    .detail("Range", keys.toString())
 	    .detail("FetchVersion", fetchVersion);
-	std::vector<OverlappingChangeFeedEntry> feeds = wait(data->cx->getOverlappingChangeFeeds(keys, fetchVersion + 1));
+	state std::vector<OverlappingChangeFeedEntry> feeds =
+	    wait(data->cx->getOverlappingChangeFeeds(keys, fetchVersion + 1));
+	while (removals.getFuture().isReady()) {
+		Key remove = waitNext(removals.getFuture());
+		for (int i = 0; i < feeds.size(); i++) {
+			if (feeds[i].rangeId == remove) {
+				swapAndPop(&feeds, i--);
+			}
+		}
+	}
 	std::vector<Key> feedIds;
 	feedIds.reserve(feeds.size());
 	// create change feed metadata if it does not exist
@@ -5217,19 +5231,19 @@ ACTOR Future<std::unordered_map<Key, Version>> dispatchChangeFeeds(StorageServer
                                                                    KeyRange keys,
                                                                    Version beginVersion,
                                                                    Version endVersion,
-                                                                   std::vector<Key> feedIds,
+                                                                   PromiseStream<Key> removals,
+                                                                   std::vector<Key>* feedIds,
                                                                    std::unordered_set<Key> newFeedIds) {
 	state std::unordered_map<Key, Version> feedMaxFetched;
-	if (feedIds.empty() && newFeedIds.empty()) {
+	if (feedIds->empty() && newFeedIds.empty()) {
 		return feedMaxFetched;
 	}
 
 	// find overlapping range feeds
 	state std::map<Key, Future<Version>> feedFetches;
-	state PromiseStream<Key> removals;
-	data->changeFeedRemovals[fetchKeysID] = removals;
+
 	try {
-		for (auto& feedId : feedIds) {
+		for (auto& feedId : *feedIds) {
 			auto feedIt = data->uidChangeFeed.find(feedId);
 			// feed may have been moved away or deleted after move was scheduled, do nothing in that case
 			if (feedIt != data->uidChangeFeed.end() && !feedIt->second->removing) {
@@ -5267,7 +5281,15 @@ ACTOR Future<std::unordered_map<Key, Version>> dispatchChangeFeeds(StorageServer
 				}
 			}
 			choose {
-				when(Key remove = waitNext(removals.getFuture())) { feedFetches.erase(remove); }
+				when(state Key remove = waitNext(removals.getFuture())) {
+					wait(delay(0));
+					feedFetches.erase(remove);
+					for (int i = 0; i < feedIds->size(); i++) {
+						if ((*feedIds)[i] == remove) {
+							swapAndPop(feedIds, i--);
+						}
+					}
+				}
 				when(wait(success(nextFeed))) {}
 			}
 		}
@@ -5314,9 +5336,13 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		TraceEvent(SevDebug, interval.begin(), data->thisServerID)
 		    .detail("KeyBegin", shard->keys.begin)
 		    .detail("KeyEnd", shard->keys.end)
-		    .detail("Version", data->version.get());
+		    .detail("Version", data->version.get())
+		    .detail("FKID", fetchKeysID);
 
-		state Future<std::vector<Key>> fetchCFMetadata = fetchChangeFeedMetadata(data, keys, data->version.get());
+		state PromiseStream<Key> removals;
+		data->changeFeedRemovals[fetchKeysID] = removals;
+		state Future<std::vector<Key>> fetchCFMetadata =
+		    fetchChangeFeedMetadata(data, keys, data->version.get(), removals);
 
 		validate(data);
 
@@ -5544,7 +5570,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		// we have written)
 
 		state Future<std::unordered_map<Key, Version>> feedFetchMain = dispatchChangeFeeds(
-		    data, fetchKeysID, keys, 0, fetchVersion + 1, changeFeedsToFetch, std::unordered_set<Key>());
+		    data, fetchKeysID, keys, 0, fetchVersion + 1, removals, &changeFeedsToFetch, std::unordered_set<Key>());
 
 		state Future<Void> fetchDurable = data->durableVersion.whenAtLeast(data->storageVersion() + 1);
 		state Future<Void> dataArrive = data->version.whenAtLeast(fetchVersion);
@@ -5590,7 +5616,9 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		for (auto& r : ranges) {
 			for (auto& cfInfo : r.value()) {
 				TEST(true); // SS fetching new change feed that didn't exist when fetch started
-				newChangeFeeds.insert(cfInfo->id);
+				if (!cfInfo->removing) {
+					newChangeFeeds.insert(cfInfo->id);
+				}
 			}
 		}
 		for (auto& cfId : changeFeedsToFetch) {
@@ -5599,8 +5627,15 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		// This is split into two fetches to reduce tail. Fetch [0 - fetchVersion+1)
 		// once fetchVersion is finalized, and [fetchVersion+1, transferredVersion) here once transferredVersion is
 		// finalized. Also fetch new change feeds alongside it
-		state Future<std::unordered_map<Key, Version>> feedFetchTransferred = dispatchChangeFeeds(
-		    data, fetchKeysID, keys, fetchVersion + 1, shard->transferredVersion, changeFeedsToFetch, newChangeFeeds);
+		state Future<std::unordered_map<Key, Version>> feedFetchTransferred =
+		    dispatchChangeFeeds(data,
+		                        fetchKeysID,
+		                        keys,
+		                        fetchVersion + 1,
+		                        shard->transferredVersion,
+		                        removals,
+		                        &changeFeedsToFetch,
+		                        newChangeFeeds);
 
 		TraceEvent(SevDebug, "FetchKeysHaveData", data->thisServerID)
 		    .detail("FKID", interval.pairID)
@@ -5690,7 +5725,9 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		TraceEvent(SevDebug, interval.end(), data->thisServerID)
 		    .errorUnsuppressed(e)
 		    .detail("Version", data->version.get());
-
+		if (!data->shuttingDown) {
+			data->changeFeedRemovals.erase(fetchKeysID);
+		}
 		if (e.code() == error_code_actor_cancelled && !data->shuttingDown && shard->phase >= AddingShard::Fetching) {
 			if (shard->phase < AddingShard::FetchingCF) {
 				data->storage.clearRange(keys);
@@ -6282,7 +6319,7 @@ private:
 				feed->second->stopVersion = currentVersion;
 				addMutationToLog = true;
 			}
-			if (status == ChangeFeedStatus::CHANGE_FEED_DESTROY && !createdFeed) {
+			if (status == ChangeFeedStatus::CHANGE_FEED_DESTROY && !createdFeed && feed != data->uidChangeFeed.end()) {
 				TraceEvent(SevDebug, "DestroyingChangeFeed", data->thisServerID)
 				    .detail("RangeID", changeFeedId.printable())
 				    .detail("Range", changeFeedRange.toString())
@@ -6306,6 +6343,12 @@ private:
 				feed->second->newMutations.trigger();
 
 				data->changeFeedCleanupDurable[feed->first] = cleanupVersion;
+			}
+
+			if (status == ChangeFeedStatus::CHANGE_FEED_DESTROY) {
+				for (auto& it : data->changeFeedRemovals) {
+					it.second.send(changeFeedId);
+				}
 			}
 
 			if (addMutationToLog) {

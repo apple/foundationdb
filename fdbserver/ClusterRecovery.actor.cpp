@@ -870,7 +870,8 @@ ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster(Reference<Clust
 					    .detail("MType", m->type)
 					    .detail("Param1", m->param1)
 					    .detail("Param2", m->param2);
-					if (isMetadataMutation(*m)) {
+					// emergency transaction only mean to do configuration change
+					if (parent->configuration.involveMutation(*m)) {
 						// We keep the mutations and write conflict ranges from this transaction, but not its read
 						// conflict ranges
 						Standalone<CommitTransactionRef> out;
