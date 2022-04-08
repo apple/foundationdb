@@ -35,11 +35,10 @@ void HealthMonitor::purgeOutdatedHistory() {
 			auto& count = peerClosedNum[p.second];
 			--count;
 			ASSERT(count >= 0);
-			peerClosedHistory.pop_front();
-
 			if (count == 0) {
 				peerClosedNum.erase(p.second);
 			}
+			peerClosedHistory.pop_front();
 		} else {
 			break;
 		}
