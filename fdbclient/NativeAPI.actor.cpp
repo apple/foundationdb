@@ -9184,3 +9184,86 @@ Future<Void> DatabaseContext::popChangeFeedMutations(Key rangeID, Version versio
 Reference<DatabaseContext::TransactionT> DatabaseContext::createTransaction() {
 	return makeReference<ReadYourWritesTransaction>(Database(Reference<DatabaseContext>::addRef(this)));
 }
+
+ACTOR Future<Key> purgeBlobGranulesActor(Reference<DatabaseContext> db,
+                                         KeyRange range,
+                                         Version purgeVersion,
+                                         bool force) {
+	state Database cx(db);
+	state Transaction tr(cx);
+	state Key purgeKey;
+
+	// FIXME: implement force
+	if (!force) {
+		throw unsupported_operation();
+	}
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+			Value purgeValue = blobGranulePurgeValueFor(purgeVersion, range, force);
+			tr.atomicOp(
+			    addVersionStampAtEnd(blobGranulePurgeKeys.begin), purgeValue, MutationRef::SetVersionstampedKey);
+			tr.set(blobGranulePurgeChangeKey, deterministicRandom()->randomUniqueID().toString());
+			state Future<Standalone<StringRef>> fTrVs = tr.getVersionstamp();
+			wait(tr.commit());
+			Standalone<StringRef> vs = wait(fTrVs);
+			purgeKey = blobGranulePurgeKeys.begin.withSuffix(vs);
+			if (BG_REQUEST_DEBUG) {
+				fmt::print("purgeBlobGranules for range [{0} - {1}) at version {2} registered {3}\n",
+				           range.begin.printable(),
+				           range.end.printable(),
+				           purgeVersion,
+				           purgeKey.printable());
+			}
+			break;
+		} catch (Error& e) {
+			if (BG_REQUEST_DEBUG) {
+				fmt::print("purgeBlobGranules for range [{0} - {1}) at version {2} encountered error {3}\n",
+				           range.begin.printable(),
+				           range.end.printable(),
+				           purgeVersion,
+				           e.name());
+			}
+			wait(tr.onError(e));
+		}
+	}
+	return purgeKey;
+}
+
+Future<Key> DatabaseContext::purgeBlobGranules(KeyRange range, Version purgeVersion, bool force) {
+	return purgeBlobGranulesActor(Reference<DatabaseContext>::addRef(this), range, purgeVersion, force);
+}
+
+ACTOR Future<Void> waitPurgeGranulesCompleteActor(Reference<DatabaseContext> db, Key purgeKey) {
+	state Database cx(db);
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+			Optional<Value> purgeVal = wait(tr->get(purgeKey));
+			if (!purgeVal.present()) {
+				if (BG_REQUEST_DEBUG) {
+					fmt::print("purgeBlobGranules for {0} succeeded\n", purgeKey.printable());
+				}
+				return Void();
+			}
+			if (BG_REQUEST_DEBUG) {
+				fmt::print("purgeBlobGranules for {0} watching\n", purgeKey.printable());
+			}
+			state Future<Void> watchFuture = tr->watch(purgeKey);
+			wait(tr->commit());
+			wait(watchFuture);
+			tr->reset();
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+}
+
+Future<Void> DatabaseContext::waitPurgeGranulesComplete(Key purgeKey) {
+	return waitPurgeGranulesCompleteActor(Reference<DatabaseContext>::addRef(this), purgeKey);
+}
