@@ -1917,6 +1917,12 @@ ACTOR Future<Void> overlappingChangeFeedsQ(StorageServer* data, OverlappingChang
 	for (auto& it : rangeIds) {
 		reply.rangeIds.push_back(OverlappingChangeFeedEntry(
 		    it.first, std::get<0>(it.second), std::get<1>(it.second), std::get<2>(it.second)));
+		TraceEvent(SevDebug, "OverlappingChangeFeedEntry", data->thisServerID)
+		    .detail("MinVersion", req.minVersion)
+		    .detail("FeedID", it.first)
+		    .detail("Range", std::get<0>(it.second))
+		    .detail("EmptyVersion", std::get<1>(it.second))
+		    .detail("StopVersion", std::get<2>(it.second));
 	}
 
 	// Make sure all of the metadata we are sending won't get rolled back
@@ -4751,33 +4757,35 @@ ACTOR Future<Void> changeFeedPopQ(StorageServer* self, ChangeFeedPopRequest req)
 	    .detail("RangeID", req.rangeID.printable())
 	    .detail("Version", req.version)
 	    .detail("SSVersion", self->version.get())
-	    .detail("Range", req.range.toString());
+	    .detail("Range", req.range);
 
 	if (req.version - 1 > feed->second->emptyVersion) {
 		feed->second->emptyVersion = req.version - 1;
 		while (!feed->second->mutations.empty() && feed->second->mutations.front().version < req.version) {
 			feed->second->mutations.pop_front();
 		}
-		Version durableVersion = self->data().getLatestVersion();
-		auto& mLV = self->addVersionToMutationLog(durableVersion);
-		self->addMutationToMutationLog(
-		    mLV,
-		    MutationRef(
-		        MutationRef::SetValue,
-		        persistChangeFeedKeys.begin.toString() + feed->second->id.toString(),
-		        changeFeedSSValue(feed->second->range, feed->second->emptyVersion + 1, feed->second->stopVersion)));
-		if (feed->second->storageVersion != invalidVersion) {
-			++self->counters.kvSystemClearRanges;
-			self->addMutationToMutationLog(mLV,
-			                               MutationRef(MutationRef::ClearRange,
-			                                           changeFeedDurableKey(feed->second->id, 0),
-			                                           changeFeedDurableKey(feed->second->id, req.version)));
-			if (req.version > feed->second->storageVersion) {
-				feed->second->storageVersion = invalidVersion;
-				feed->second->durableVersion = invalidVersion;
+		if (!feed->second->destroyed) {
+			Version durableVersion = self->data().getLatestVersion();
+			auto& mLV = self->addVersionToMutationLog(durableVersion);
+			self->addMutationToMutationLog(
+			    mLV,
+			    MutationRef(
+			        MutationRef::SetValue,
+			        persistChangeFeedKeys.begin.toString() + feed->second->id.toString(),
+			        changeFeedSSValue(feed->second->range, feed->second->emptyVersion + 1, feed->second->stopVersion)));
+			if (feed->second->storageVersion != invalidVersion) {
+				++self->counters.kvSystemClearRanges;
+				self->addMutationToMutationLog(mLV,
+				                               MutationRef(MutationRef::ClearRange,
+				                                           changeFeedDurableKey(feed->second->id, 0),
+				                                           changeFeedDurableKey(feed->second->id, req.version)));
+				if (req.version > feed->second->storageVersion) {
+					feed->second->storageVersion = invalidVersion;
+					feed->second->durableVersion = invalidVersion;
+				}
 			}
+			wait(self->durableVersion.whenAtLeast(durableVersion));
 		}
-		wait(self->durableVersion.whenAtLeast(durableVersion));
 	}
 	req.reply.send(Void());
 	return Void();
@@ -6422,7 +6430,10 @@ private:
 							feed->second->durableVersion = invalidVersion;
 						}
 					}
-					addMutationToLog = true;
+					if (!feed->second->destroyed) {
+						// if feed is destroyed, adding an extra mutation here would re-create it if SS restarted
+						addMutationToLog = true;
+					}
 				}
 
 			} else if (status == ChangeFeedStatus::CHANGE_FEED_CREATE && createdFeed) {
