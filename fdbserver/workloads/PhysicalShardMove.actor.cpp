@@ -77,7 +77,7 @@ struct SSCheckpointWorkload : TestWorkload {
 
 		// Create checkpoint.
 		state Transaction tr(cx);
-		state CheckpointFormat format = RocksDBColumnFamily;
+		state CheckpointFormat format = deterministicRandom()->random01() < 0.5 ? RocksDBColumnFamily : RocksDB;
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -115,7 +115,7 @@ struct SSCheckpointWorkload : TestWorkload {
 		TraceEvent("TestCheckpointFetched")
 		    .detail("Range", KeyRangeRef(key, endKey).toString())
 		    .detail("Version", version)
-		    .detail("Shards", records.size());
+		    .detail("Checkpoints", describe(records));
 
 		state std::string pwd = platform::getWorkingDirectory();
 		state std::string folder = pwd + "/checkpoints";
@@ -123,13 +123,15 @@ struct SSCheckpointWorkload : TestWorkload {
 		ASSERT(platform::createDirectory(folder));
 
 		// Fetch checkpoint.
+		state std::vector<CheckpointMetaData> fetchedCheckpoints;
 		state int i = 0;
 		for (; i < records.size(); ++i) {
 			loop {
 				TraceEvent("TestFetchingCheckpoint").detail("Checkpoint", records[i].toString());
 				try {
 					state CheckpointMetaData record = wait(fetchCheckpoint(cx, records[0], folder));
-					TraceEvent("TestCheckpointFetched").detail("Checkpoint", records[i].toString());
+					fetchedCheckpoints.push_back(record);
+					TraceEvent("TestCheckpointFetched").detail("Checkpoint", record.toString());
 					break;
 				} catch (Error& e) {
 					TraceEvent("TestFetchCheckpointError")
@@ -146,8 +148,9 @@ struct SSCheckpointWorkload : TestWorkload {
 		// Restore KVS.
 		state IKeyValueStore* kvStore = keyValueStoreRocksDB(
 		    rocksDBTestDir, deterministicRandom()->randomUniqueID(), KeyValueStoreType::SSD_ROCKSDB_V1);
+		wait(kvStore->init());
 		try {
-			wait(kvStore->restore(records));
+			wait(kvStore->restore(fetchedCheckpoints));
 		} catch (Error& e) {
 			TraceEvent(SevError, "TestRestoreCheckpointError")
 			    .errorUnsuppressed(e)
