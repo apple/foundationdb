@@ -81,14 +81,13 @@ Future<ErrorOr<REPLY_TYPE(Req)>> tryGetReplyFromHostname(RequestStream<Req>* to,
 	// If resolving fails, return lookup_failed().
 	// Otherwise, return tryGetReply(request).
 	try {
-		wait(hostname.resolve());
+		NetworkAddress address = wait(hostname.resolve());
+		*to = RequestStream<Req>(Endpoint::wellKnown({ address }, token));
+		ErrorOr<REPLY_TYPE(Req)> ret = wait(to->tryGetReply(request));
+		return ret;
 	} catch (...) {
 		return ErrorOr<REPLY_TYPE(Req)>(lookup_failed());
 	}
-	Optional<NetworkAddress> address = hostname.resolvedAddress;
-	*to = RequestStream<Req>(Endpoint::wellKnown({ address.get() }, token));
-	ErrorOr<REPLY_TYPE(Req)> ret = wait(to->tryGetReply(request));
-	return ret;
 }
 
 ACTOR template <class Req>
@@ -101,14 +100,13 @@ Future<ErrorOr<REPLY_TYPE(Req)>> tryGetReplyFromHostname(RequestStream<Req>* to,
 	// If resolving fails, return lookup_failed().
 	// Otherwise, return tryGetReply(request).
 	try {
-		wait(hostname.resolve());
+		NetworkAddress address = wait(hostname.resolve());
+		*to = RequestStream<Req>(Endpoint::wellKnown({ address }, token));
+		ErrorOr<REPLY_TYPE(Req)> ret = wait(to->tryGetReply(request, taskID));
+		return ret;
 	} catch (...) {
 		return ErrorOr<REPLY_TYPE(Req)>(lookup_failed());
 	}
-	Optional<NetworkAddress> address = hostname.resolvedAddress;
-	*to = RequestStream<Req>(Endpoint::wellKnown({ address.get() }, token));
-	ErrorOr<REPLY_TYPE(Req)> ret = wait(to->tryGetReply(request, taskID));
-	return ret;
 }
 
 ACTOR template <class Req>
@@ -120,9 +118,8 @@ Future<REPLY_TYPE(Req)> retryGetReplyFromHostname(RequestStream<Req>* to,
 	// Suitable for use with hostname, where RequestStream is NOT initialized yet.
 	// Not normally useful for endpoints initialized with NetworkAddress.
 	loop {
-		wait(hostname.resolveWithRetry());
-		state Optional<NetworkAddress> address = hostname.resolvedAddress;
-		*to = RequestStream<Req>(Endpoint::wellKnown({ address.get() }, token));
+		state NetworkAddress address = wait(hostname.resolveWithRetry());
+		*to = RequestStream<Req>(Endpoint::wellKnown({ address }, token));
 		ErrorOr<REPLY_TYPE(Req)> reply = wait(to->tryGetReply(request));
 		if (reply.isError()) {
 			resetReply(request);
@@ -149,9 +146,8 @@ Future<REPLY_TYPE(Req)> retryGetReplyFromHostname(RequestStream<Req>* to,
 	// Suitable for use with hostname, where RequestStream is NOT initialized yet.
 	// Not normally useful for endpoints initialized with NetworkAddress.
 	loop {
-		wait(hostname.resolveWithRetry());
-		state Optional<NetworkAddress> address = hostname.resolvedAddress;
-		*to = RequestStream<Req>(Endpoint::wellKnown({ address.get() }, token));
+		state NetworkAddress address = wait(hostname.resolveWithRetry());
+		*to = RequestStream<Req>(Endpoint::wellKnown({ address }, token));
 		ErrorOr<REPLY_TYPE(Req)> reply = wait(to->tryGetReply(request, taskID));
 		if (reply.isError()) {
 			resetReply(request);
