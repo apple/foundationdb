@@ -612,6 +612,18 @@ private:
 		TEST(true); // Recovering at a higher version.
 	}
 
+	void checkSetVersionEpochKey(MutationRef m) {
+		if (m.param1 != versionEpochKey) {
+			return;
+		}
+		int64_t versionEpoch = BinaryReader::fromStringRef<int64_t>(m.param2, Unversioned());
+		TraceEvent("VersionEpoch", dbgid).detail("Epoch", versionEpoch);
+		if (!initialCommit)
+			txnStateStore->set(KeyValueRef(m.param1, m.param2));
+		confChange = true;
+		TEST(true); // Setting version epoch
+	}
+
 	void checkSetWriteRecoverKey(MutationRef m) {
 		if (m.param1 != writeRecoveryKey) {
 			return;
@@ -990,6 +1002,16 @@ private:
 		}
 	}
 
+	void checkClearVersionEpochKeys(MutationRef m, KeyRangeRef range) {
+		if (!range.contains(versionEpochKey)) {
+			return;
+		}
+		if (!initialCommit)
+			txnStateStore->clear(singleKeyRange(versionEpochKey));
+		TraceEvent("MutationRequiresRestart", dbgid).detail("M", m);
+		confChange = true;
+	}
+
 	void checkClearTenantMapPrefix(KeyRangeRef range) {
 		if (tenantMapKeys.intersects(range)) {
 			if (tenantMap) {
@@ -1155,6 +1177,7 @@ public:
 				checkSetGlobalKeys(m);
 				checkSetWriteRecoverKey(m);
 				checkSetMinRequiredCommitVersionKey(m);
+				checkSetVersionEpochKey(m);
 				checkSetTenantMapPrefix(m);
 				checkSetOtherKeys(m);
 			} else if (m.type == MutationRef::ClearRange && isSystemKey(m.param2)) {
@@ -1171,6 +1194,7 @@ public:
 				checkClearLogRangesRange(range);
 				checkClearTssMappingKeys(m, range);
 				checkClearTssQuarantineKeys(m, range);
+				checkClearVersionEpochKeys(m, range);
 				checkClearTenantMapPrefix(range);
 				checkClearMiscRangeKeys(range);
 			}

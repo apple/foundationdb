@@ -41,6 +41,8 @@ public:
 	bool ENABLE_VERSION_VECTOR_TLOG_UNICAST;
 	double MAX_COMMIT_BATCH_INTERVAL; // Each commit proxy generates a CommitTransactionBatchRequest at least this
 	                                  // often, so that versions always advance smoothly
+	double MAX_VERSION_RATE_MODIFIER;
+	int64_t MAX_VERSION_RATE_OFFSET;
 
 	// TLogs
 	bool PEEK_USING_STREAMING;
@@ -585,6 +587,12 @@ public:
 	// disk snapshot
 	int64_t MAX_FORKED_PROCESS_OUTPUT;
 	double SNAP_CREATE_MAX_TIMEOUT;
+	// Maximum number of storage servers a snapshot can fail to
+	// capture while still succeeding
+	int64_t MAX_STORAGE_SNAPSHOT_FAULT_TOLERANCE;
+	// Maximum number of coordinators a snapshot can fail to
+	// capture while still succeeding
+	int64_t MAX_COORDINATOR_SNAPSHOT_FAULT_TOLERANCE;
 
 	// Storage Metrics
 	double STORAGE_METRICS_AVERAGE_INTERVAL;

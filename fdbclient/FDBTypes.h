@@ -22,6 +22,7 @@
 #define FDBCLIENT_FDBTYPES_H
 
 #include <algorithm>
+#include <cinttypes>
 #include <set>
 #include <string>
 #include <vector>
