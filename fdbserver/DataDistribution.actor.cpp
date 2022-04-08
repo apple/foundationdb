@@ -516,7 +516,6 @@ ACTOR Future<Void> monitorBatchLimitedTime(Reference<AsyncVar<ServerDBInfo> cons
 // Runs the data distribution algorithm for FDB, including the DD Queue, DD tracker, and DD team collection
 ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
                                     PromiseStream<GetMetricsListRequest> getShardMetricsList,
-                                    FutureStream<Promise<Optional<int>>> getMinReplicasRemaining,
                                     const DDEnabledState* ddEnabledState) {
 	state double lastLimited = 0;
 	self->addActor.send(monitorBatchLimitedTime(self->dbInfo, &lastLimited));
@@ -755,7 +754,6 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			                                                          lock,
 			                                                          getAverageShardBytes,
 			                                                          getUnhealthyRelocationCount.getFuture(),
-			                                                          getMinReplicasRemaining,
 			                                                          self->ddId,
 			                                                          storageTeamSize,
 			                                                          configuration.storageTeamSize,
@@ -915,24 +913,6 @@ Future<ErrorOr<Void>> trySendSnapReq(RequestStream<Req> stream, Req req) {
 	return ErrorOr<Void>(Void());
 }
 
-// Returns the number of storage snapshot failures we can ignore while still still successfully snapshotting storage
-// servers
-ACTOR static Future<int> getTolerableFailedStorageSnapshots(
-    Database cx,
-    PromiseStream<Promise<Optional<int>>> getMinReplicasRemaining) {
-	Promise<Optional<int>> minReplicasRemainingPromise;
-	getMinReplicasRemaining.send(minReplicasRemainingPromise);
-	state Optional<int> minReplicasRemaining = wait(minReplicasRemainingPromise.getFuture());
-	DatabaseConfiguration configuration = wait(getDatabaseConfiguration(cx));
-	auto faultTolerance =
-	    std::min<int>(SERVER_KNOBS->MAX_STORAGE_SNAPSHOT_FAULT_TOLERANCE, configuration.storageTeamSize);
-	if (minReplicasRemaining.present()) {
-		TEST(minReplicasRemaining.get() == 0); // Some data has 0 replicas across all storage servers
-		return std::min<int>(faultTolerance, std::max(minReplicasRemaining.get() - 1, 0));
-	}
-	return faultTolerance;
-}
-
 ACTOR static Future<Void> waitForMost(std::vector<Future<ErrorOr<Void>>> futures,
                                       int faultTolerance,
                                       Error e,
@@ -951,9 +931,7 @@ ACTOR static Future<Void> waitForMost(std::vector<Future<ErrorOr<Void>>> futures
 	return Void();
 }
 
-ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq,
-                                    Reference<AsyncVar<ServerDBInfo> const> db,
-                                    PromiseStream<Promise<Optional<int>>> getMinReplicasRemaining) {
+ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<AsyncVar<ServerDBInfo> const> db) {
 	state Database cx = openDBOnServer(db, TaskPriority::DefaultDelay, LockAware::True);
 
 	state ReadYourWritesTransaction tr(cx);
@@ -990,9 +968,16 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq,
 		    .detail("SnapPayload", snapReq.snapPayload)
 		    .detail("SnapUID", snapReq.snapUID);
 		// snap local storage nodes
-		state int storageFaultTolerance = wait(getTolerableFailedStorageSnapshots(cx, getMinReplicasRemaining));
-		std::vector<WorkerInterface> storageWorkers =
+		state DatabaseConfiguration configuration = wait(getDatabaseConfiguration(cx));
+		std::pair<std::vector<WorkerInterface>, int> storageWorkersAndFailures =
 		    wait(transformErrors(getStorageWorkers(cx, db, true /* localOnly */), snap_storage_failed()));
+		const auto& [storageWorkers, storageFailures] = storageWorkersAndFailures;
+		auto const storageFaultTolerance =
+		    static_cast<int>(SERVER_KNOBS->MAX_STORAGE_SNAPSHOT_FAULT_TOLERANCE) - storageFailures;
+		if (storageFaultTolerance < 0) {
+			TEST(true); // Too many failed storage servers to complete snapshot
+			throw snap_storage_failed();
+		}
 		TraceEvent("SnapDataDistributor_GotStorageWorkers")
 		    .detail("SnapPayload", snapReq.snapPayload)
 		    .detail("SnapUID", snapReq.snapUID);
@@ -1095,7 +1080,6 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq,
 
 ACTOR Future<Void> ddSnapCreate(DistributorSnapRequest snapReq,
                                 Reference<AsyncVar<ServerDBInfo> const> db,
-                                PromiseStream<Promise<Optional<int>>> getMinReplicasRemaining,
                                 DDEnabledState* ddEnabledState) {
 	state Future<Void> dbInfoChange = db->onChange();
 	if (!ddEnabledState->setDDEnabled(false, snapReq.snapUID)) {
@@ -1114,7 +1098,7 @@ ACTOR Future<Void> ddSnapCreate(DistributorSnapRequest snapReq,
 				    .detail("SnapUID", snapReq.snapUID);
 				snapReq.reply.sendError(snap_with_recovery_unsupported());
 			}
-			when(wait(ddSnapCreateCore(snapReq, db, getMinReplicasRemaining))) {
+			when(wait(ddSnapCreateCore(snapReq, db))) {
 				TraceEvent("SnapDDCreateSuccess")
 				    .detail("SnapPayload", snapReq.snapPayload)
 				    .detail("SnapUID", snapReq.snapUID);
@@ -1269,7 +1253,6 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 	state Reference<DataDistributorData> self(new DataDistributorData(db, di.id()));
 	state Future<Void> collection = actorCollection(self->addActor.getFuture());
 	state PromiseStream<GetMetricsListRequest> getShardMetricsList;
-	state PromiseStream<Promise<Optional<int>>> getMinReplicasRemaining;
 	state Database cx = openDBOnServer(db, TaskPriority::DefaultDelay, LockAware::True);
 	state ActorCollection actors(false);
 	state DDEnabledState ddEnabledState;
@@ -1280,11 +1263,11 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 		TraceEvent("DataDistributorRunning", di.id());
 		self->addActor.send(waitFailureServer(di.waitFailure.getFuture()));
 		self->addActor.send(cacheServerWatcher(&cx));
-		state Future<Void> distributor = reportErrorsExcept(
-		    dataDistribution(self, getShardMetricsList, getMinReplicasRemaining.getFuture(), &ddEnabledState),
-		    "DataDistribution",
-		    di.id(),
-		    &normalDataDistributorErrors());
+		state Future<Void> distributor =
+		    reportErrorsExcept(dataDistribution(self, getShardMetricsList, &ddEnabledState),
+		                       "DataDistribution",
+		                       di.id(),
+		                       &normalDataDistributorErrors());
 
 		loop choose {
 			when(wait(distributor || collection)) {
@@ -1300,7 +1283,7 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 				actors.add(ddGetMetrics(req, getShardMetricsList));
 			}
 			when(DistributorSnapRequest snapReq = waitNext(di.distributorSnapReq.getFuture())) {
-				actors.add(ddSnapCreate(snapReq, db, getMinReplicasRemaining, &ddEnabledState));
+				actors.add(ddSnapCreate(snapReq, db, &ddEnabledState));
 			}
 			when(DistributorExclusionSafetyCheckRequest exclCheckReq =
 			         waitNext(di.distributorExclCheckReq.getFuture())) {
