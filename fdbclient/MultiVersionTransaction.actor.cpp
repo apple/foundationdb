@@ -1536,7 +1536,7 @@ void MultiVersionDatabase::DatabaseState::protocolVersionChanged(ProtocolVersion
 		    .detail("OldProtocolVersion", dbProtocolVersion);
 		// When the protocol version changes, clear the corresponding entry in the shared state map
 		// so it can be re-initialized. Only do so if there was a valid previous protocol version.
-		if (dbProtocolVersion.present()) {
+		if (dbProtocolVersion.present() && MultiVersionApi::apiVersionAtLeast(710)) {
 			MultiVersionApi::api->clearClusterSharedStateMapEntry(clusterFilePath);
 		}
 
@@ -2333,9 +2333,11 @@ ThreadFuture<Void> MultiVersionApi::updateClusterSharedStateMap(std::string clus
 
 void MultiVersionApi::clearClusterSharedStateMapEntry(std::string clusterFilePath) {
 	MutexHolder holder(lock);
-	auto ssPtr = clusterSharedStateMap[clusterFilePath].get();
+	auto mapEntry = clusterSharedStateMap.find(clusterFilePath);
+	if (mapEntry == clusterSharedStateMap.end()) return;
+	auto ssPtr = mapEntry->second.get();
 	ssPtr->delRef(ssPtr);
-	clusterSharedStateMap.erase(clusterFilePath);
+	clusterSharedStateMap.erase(mapEntry);
 }
 
 std::vector<std::string> parseOptionValues(std::string valueStr) {
