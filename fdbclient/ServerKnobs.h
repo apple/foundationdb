@@ -464,6 +464,14 @@ public:
 	                                               // failover.
 	int CC_FAILOVER_DUE_TO_HEALTH_MAX_DEGRADATION; // The maximum number of degraded servers that can trigger a
 	                                               // failover.
+	bool CC_ENABLE_ENTIRE_SATELLITE_MONITORING; // When enabled, gray failure tries to detect whether the entire
+	                                            // satellite DC is degraded.
+	int CC_SATELLITE_DEGRADATION_MIN_COMPLAINER; // When the network between primary and satellite becomes bad, all the
+	                                             // workers in primary may have bad network talking to the satellite.
+	                                             // This is the minimum amount of complainer for a satellite worker to
+	                                             // be determined as degraded worker.
+	int CC_SATELLITE_DEGRADATION_MIN_BAD_SERVER; // The minimum amount of degraded server in satellite DC to be
+	                                             // determined as degraded satellite.
 
 	// Knobs used to select the best policy (via monte carlo)
 	int POLICY_RATING_TESTS; // number of tests per policy (in order to compare)
@@ -657,11 +665,18 @@ public:
 	bool ENABLE_WORKER_HEALTH_MONITOR;
 	double WORKER_HEALTH_MONITOR_INTERVAL; // Interval between two health monitor health check.
 	int PEER_LATENCY_CHECK_MIN_POPULATION; // The minimum number of latency samples required to check a peer.
-	double PEER_LATENCY_DEGRADATION_PERCENTILE; // The percentile latency used to check peer health.
+	double PEER_LATENCY_DEGRADATION_PERCENTILE; // The percentile latency used to check peer health among workers inside
+	                                            // primary or remote DC.
 	double PEER_LATENCY_DEGRADATION_THRESHOLD; // The latency threshold to consider a peer degraded.
+	double PEER_LATENCY_DEGRADATION_PERCENTILE_SATELLITE; // The percentile latency used to check peer health between
+	                                                      // primary and primary satellite.
+	double PEER_LATENCY_DEGRADATION_THRESHOLD_SATELLITE; // The latency threshold to consider a peer degraded.
 	double PEER_TIMEOUT_PERCENTAGE_DEGRADATION_THRESHOLD; // The percentage of timeout to consider a peer degraded.
 	int PEER_DEGRADATION_CONNECTION_FAILURE_COUNT; // The number of connection failures experienced during measurement
 	                                               // period to consider a peer degraded.
+	bool WORKER_HEALTH_REPORT_RECENT_DESTROYED_PEER; // When enabled, the worker's health monitor also report any recent
+	                                                 // destroyed peers who are part of the transaction system to
+	                                                 // cluster controller.
 
 	// Test harness
 	double WORKER_POLL_DELAY;

@@ -29,6 +29,7 @@
 #include <unordered_map>
 #pragma once
 
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/CommitProxyInterface.h"
@@ -371,6 +372,9 @@ public:
 	Future<std::vector<OverlappingChangeFeedEntry>> getOverlappingChangeFeeds(KeyRangeRef ranges, Version minVersion);
 	Future<Void> popChangeFeedMutations(Key rangeID, Version version);
 
+	Future<Key> purgeBlobGranules(KeyRange keyRange, Version purgeVersion, bool force = false);
+	Future<Void> waitPurgeGranulesComplete(Key purgeKey);
+
 	// private:
 	explicit DatabaseContext(Reference<AsyncVar<Reference<IClusterConnectionRecord>>> connectionRecord,
 	                         Reference<AsyncVar<ClientDBInfo>> clientDBInfo,
@@ -518,6 +522,11 @@ public:
 
 	int outstandingWatches;
 	int maxOutstandingWatches;
+
+	// Manage any shared state that may be used by MVC
+	DatabaseSharedState* sharedStatePtr;
+	Future<DatabaseSharedState*> initSharedState();
+	void setSharedState(DatabaseSharedState* p);
 
 	// GRV Cache
 	// Database-level read version cache storing the most recent successful GRV as well as the time it was requested.

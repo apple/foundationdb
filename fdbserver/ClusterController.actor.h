@@ -2981,9 +2981,16 @@ public:
 		}
 	}
 
+	struct DegradationInfo {
+		std::unordered_set<NetworkAddress>
+		    degradedServers; // The servers that the cluster controller is considered as degraded. The servers in this
+		                     // list are not excluded unless they are added to `excludedDegradedServers`.
+
+		bool degradedSatellite = false; // Indicates that the entire satellite DC is degraded.
+	};
 	// Returns a list of servers who are experiencing degraded links. These are candidates to perform exclusion. Note
 	// that only one endpoint of a bad link will be included in this list.
-	std::unordered_set<NetworkAddress> getServersWithDegradedLink() {
+	DegradationInfo getDegradationInfo() {
 		updateRecoveredWorkers();
 
 		// Build a map keyed by measured degraded peer. This map gives the info that who complains a particular server.
@@ -3014,7 +3021,11 @@ public:
 		//
 		// For example, if server A is already considered as a degraded server, and A complains B, we won't add B as
 		// degraded since A is already considered as degraded.
+		//
+		// In the meantime, we also count the number of satellite workers got complained. If enough number of satellite
+		// workers are degraded, this may indicates that the whole network between primary and satellite is bad.
 		std::unordered_set<NetworkAddress> currentDegradedServers;
+		int satelliteBadServerCount = 0;
 		for (const auto& [complainerCount, badServer] : count2DegradedPeer) {
 			for (const auto& complainer : degradedLinkDst2Src[badServer]) {
 				if (currentDegradedServers.find(complainer) == currentDegradedServers.end()) {
@@ -3022,23 +3033,36 @@ public:
 					break;
 				}
 			}
+
+			if (SERVER_KNOBS->CC_ENABLE_ENTIRE_SATELLITE_MONITORING &&
+			    addressInDbAndPrimarySatelliteDc(badServer, db.serverInfo) &&
+			    complainerCount >= SERVER_KNOBS->CC_SATELLITE_DEGRADATION_MIN_COMPLAINER) {
+				++satelliteBadServerCount;
+			}
 		}
 
 		// For degraded server that are complained by more than SERVER_KNOBS->CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE, we
 		// don't know if it is a hot server, or the network is bad. We remove from the returned degraded server list.
-		std::unordered_set<NetworkAddress> currentDegradedServersWithinLimit;
+		DegradationInfo currentDegradationInfo;
 		for (const auto& badServer : currentDegradedServers) {
 			if (degradedLinkDst2Src[badServer].size() <= SERVER_KNOBS->CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE) {
-				currentDegradedServersWithinLimit.insert(badServer);
+				currentDegradationInfo.degradedServers.insert(badServer);
 			}
 		}
-		return currentDegradedServersWithinLimit;
+
+		// If enough number of satellite workers are bad, we mark the entire satellite is bad. Note that this needs to
+		// be used with caution (controlled by CC_ENABLE_ENTIRE_SATELLITE_MONITORING knob), since the slow workers may
+		// also be caused by workload.
+		if (satelliteBadServerCount >= SERVER_KNOBS->CC_SATELLITE_DEGRADATION_MIN_BAD_SERVER) {
+			currentDegradationInfo.degradedSatellite = true;
+		}
+		return currentDegradationInfo;
 	}
 
 	// Whether the transaction system (in primary DC if in HA setting) contains degraded servers.
 	bool transactionSystemContainsDegradedServers() {
 		const ServerDBInfo dbi = db.serverInfo->get();
-		for (const auto& excludedServer : degradedServers) {
+		for (const auto& excludedServer : degradationInfo.degradedServers) {
 			if (dbi.master.addresses().contains(excludedServer)) {
 				return true;
 			}
@@ -3083,7 +3107,7 @@ public:
 			return false;
 		}
 
-		for (const auto& excludedServer : degradedServers) {
+		for (const auto& excludedServer : degradationInfo.degradedServers) {
 			if (addressInDbAndRemoteDc(excludedServer, db.serverInfo)) {
 				return true;
 			}
@@ -3121,7 +3145,7 @@ public:
 	// Returns true when the cluster controller should trigger a recovery due to degraded servers used in the
 	// transaction system in the primary data center.
 	bool shouldTriggerRecoveryDueToDegradedServers() {
-		if (degradedServers.size() > SERVER_KNOBS->CC_MAX_EXCLUSION_DUE_TO_HEALTH) {
+		if (degradationInfo.degradedServers.size() > SERVER_KNOBS->CC_MAX_EXCLUSION_DUE_TO_HEALTH) {
 			return false;
 		}
 
@@ -3154,8 +3178,14 @@ public:
 			return false;
 		}
 
-		if (degradedServers.size() < SERVER_KNOBS->CC_FAILOVER_DUE_TO_HEALTH_MIN_DEGRADATION ||
-		    degradedServers.size() > SERVER_KNOBS->CC_FAILOVER_DUE_TO_HEALTH_MAX_DEGRADATION) {
+		bool remoteIsHealthy = !remoteTransactionSystemContainsDegradedServers();
+		if (degradationInfo.degradedSatellite && remoteIsHealthy) {
+			// If the satellite DC is bad, a failover is desired despite the number of degraded servers.
+			return true;
+		}
+
+		if (degradationInfo.degradedServers.size() < SERVER_KNOBS->CC_FAILOVER_DUE_TO_HEALTH_MIN_DEGRADATION ||
+		    degradationInfo.degradedServers.size() > SERVER_KNOBS->CC_FAILOVER_DUE_TO_HEALTH_MAX_DEGRADATION) {
 			return false;
 		}
 
@@ -3165,7 +3195,7 @@ public:
 			return false;
 		}
 
-		return transactionSystemContainsDegradedServers() && !remoteTransactionSystemContainsDegradedServers();
+		return transactionSystemContainsDegradedServers() && remoteIsHealthy;
 	}
 
 	int recentRecoveryCountDueToHealth() {
@@ -3248,9 +3278,7 @@ public:
 		// TODO(zhewu): Include disk and CPU signals.
 	};
 	std::unordered_map<NetworkAddress, WorkerHealth> workerHealth;
-	std::unordered_set<NetworkAddress>
-	    degradedServers; // The servers that the cluster controller is considered as degraded. The servers in this list
-	                     // are not excluded unless they are added to `excludedDegradedServers`.
+	DegradationInfo degradationInfo;
 	std::unordered_set<NetworkAddress>
 	    excludedDegradedServers; // The degraded servers to be excluded when assigning workers to roles.
 	std::queue<double> recentHealthTriggeredRecoveryTime;

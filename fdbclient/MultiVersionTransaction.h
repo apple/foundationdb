@@ -20,6 +20,7 @@
 
 #ifndef FDBCLIENT_MULTIVERSIONTRANSACTION_H
 #define FDBCLIENT_MULTIVERSIONTRANSACTION_H
+#include "flow/ProtocolVersion.h"
 #pragma once
 
 #include "bindings/c/foundationdb/fdb_c_options.g.h"
@@ -149,8 +150,21 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                     int uidLength,
 	                                     uint8_t const* snapshotCommmand,
 	                                     int snapshotCommandLength);
+	FDBFuture* (*databaseCreateSharedState)(FDBDatabase* database);
+	void (*databaseSetSharedState)(FDBDatabase* database, DatabaseSharedState* p);
+
 	double (*databaseGetMainThreadBusyness)(FDBDatabase* database);
 	FDBFuture* (*databaseGetServerProtocol)(FDBDatabase* database, uint64_t expectedVersion);
+
+	FDBFuture* (*purgeBlobGranules)(FDBDatabase* db,
+	                                uint8_t const* begin_key_name,
+	                                int begin_key_name_length,
+	                                uint8_t const* end_key_name,
+	                                int end_key_name_length,
+	                                int64_t purge_version,
+	                                fdb_bool_t force);
+
+	FDBFuture* (*waitPurgeGranulesComplete)(FDBDatabase* db, uint8_t const* purge_key_name, int purge_key_name_length);
 
 	// Tenant
 	fdb_error_t (*tenantCreateTransaction)(FDBTenant* tenant, FDBTransaction** outTransaction);
@@ -285,6 +299,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                            FDBMappedKeyValue const** outKVM,
 	                                            int* outCount,
 	                                            fdb_bool_t* outMore);
+	fdb_error_t (*futureGetSharedState)(FDBFuture* f, DatabaseSharedState** outPtr);
 	fdb_error_t (*futureSetCallback)(FDBFuture* f, FDBCallback callback, void* callback_parameter);
 	void (*futureCancel)(FDBFuture* f);
 	void (*futureDestroy)(FDBFuture* f);
@@ -432,6 +447,12 @@ public:
 	ThreadFuture<int64_t> rebootWorker(const StringRef& address, bool check, int duration) override;
 	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
 	ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) override;
+
+	ThreadFuture<Key> purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) override;
+	ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) override;
+
+	ThreadFuture<DatabaseSharedState*> createSharedState() override;
+	void setSharedState(DatabaseSharedState* p) override;
 
 private:
 	const Reference<FdbCApi> api;
@@ -708,6 +729,12 @@ public:
 	ThreadFuture<Void> forceRecoveryWithDataLoss(const StringRef& dcid) override;
 	ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) override;
 
+	ThreadFuture<Key> purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) override;
+	ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) override;
+
+	ThreadFuture<DatabaseSharedState*> createSharedState() override;
+	void setSharedState(DatabaseSharedState* p) override;
+
 	// private:
 
 	struct LegacyVersionMonitor;
@@ -830,6 +857,8 @@ public:
 
 	bool callbackOnMainThread;
 	bool localClientDisabled;
+	ThreadFuture<Void> updateClusterSharedStateMap(std::string clusterFilePath, Reference<IDatabase> db);
+	void clearClusterSharedStateMapEntry(std::string clusterFilePath);
 
 	static bool apiVersionAtLeast(int minVersion);
 
@@ -853,6 +882,9 @@ private:
 	Reference<ClientInfo> localClient;
 	std::map<std::string, ClientDesc> externalClientDescriptions;
 	std::map<std::string, std::vector<Reference<ClientInfo>>> externalClients;
+	// Map of clusterFilePath -> DatabaseSharedState pointer Future
+	// Upon cluster version upgrade, clear the map entry for that cluster
+	std::map<std::string, ThreadFuture<DatabaseSharedState*>> clusterSharedStateMap;
 
 	bool networkStartSetup;
 	volatile bool networkSetup;
