@@ -20,6 +20,7 @@
 
 #ifndef FDBCLIENT_THREADSAFETRANSACTION_H
 #define FDBCLIENT_THREADSAFETRANSACTION_H
+#include "flow/ProtocolVersion.h"
 #pragma once
 
 #include "fdbclient/ReadYourWrites.h"
@@ -60,6 +61,9 @@ public:
 
 	ThreadFuture<Key> purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) override;
 	ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) override;
+
+	ThreadFuture<DatabaseSharedState*> createSharedState() override;
+	void setSharedState(DatabaseSharedState* p) override;
 
 private:
 	friend class ThreadSafeTenant;

@@ -20,6 +20,7 @@
 
 #ifndef FDBCLIENT_ICLIENTAPI_H
 #define FDBCLIENT_ICLIENTAPI_H
+#include "flow/ProtocolVersion.h"
 #pragma once
 
 #include "fdbclient/FDBOptions.g.h"
@@ -151,8 +152,14 @@ public:
 	// Management API, create snapshot
 	virtual ThreadFuture<Void> createSnapshot(const StringRef& uid, const StringRef& snapshot_command) = 0;
 
+	// purge blob granules api. purgeBlobGranules is asynchronus, calling waitPurgeGranulesComplete after guarantees
+	// completion.
 	virtual ThreadFuture<Key> purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) = 0;
 	virtual ThreadFuture<Void> waitPurgeGranulesComplete(const KeyRef& purgeKey) = 0;
+
+	// Interface to manage shared state across multiple connections to the same Database
+	virtual ThreadFuture<DatabaseSharedState*> createSharedState() = 0;
+	virtual void setSharedState(DatabaseSharedState* p) = 0;
 
 	// used in template functions as the Transaction type that can be created through createTransaction()
 	using TransactionT = ITransaction;
