@@ -77,6 +77,7 @@ struct MutationRef {
 		AndV2,
 		CompareAndClear,
 		Reserved_For_SpanContextMessage /* See fdbserver/SpanContextMessage.h */,
+		Reserved_For_OTELSpanContextMessage,
 		MAX_ATOMIC_OP
 	};
 	// This is stored this way for serialization purposes.

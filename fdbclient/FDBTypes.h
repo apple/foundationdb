@@ -49,8 +49,15 @@ struct SpanContext {
 	SpanContext(Arena arena, const SpanContext& span)
 	  : traceID(span.traceID), spanID(span.spanID), m_Flags(span.m_Flags) {}
 	bool isSampled() const { return (m_Flags & TraceFlags::sampled) == TraceFlags::sampled; }
-	std::string toString() const;
+	std::string toString() const {
+		return format("%016llx%016llx%016llx", traceID.first(), traceID.second(), spanID);
+	};
 	bool isValid() const { return traceID.first() != 0 && traceID.second() != 0; }
+
+	template <class Ar>
+	force_inline void serialize(Ar& ar) {
+		serializer(ar, traceID, spanID, m_Flags);
+	}
 };
 
 typedef int64_t Version;

@@ -1,5 +1,5 @@
 /*
- * SpanContextMessage.h
+ * OTELSpanContextMessage.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#ifndef FDBSERVER_SPANCONTEXTMESSAGE_H
-#define FDBSERVER_SPANCONTEXTMESSAGE_H
+#ifndef FDBSERVER_OTELSPANCONTEXTMESSAGE_H
+#define FDBSERVER_OTELSPANCONTEXTMESSAGE_H
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
@@ -43,7 +43,7 @@ struct OTELSpanContextMessage {
 
 	std::string toString() const {
 		return format(
-		    "code: %d, span context: %s", MutationRef::Reserved_For_SpanContextMessage, spanContext.toString().c_str());
+		    "code: %d, span context: %s", MutationRef::Reserved_For_OTELSpanContextMessage, spanContext.toString().c_str());
 	}
 
 	template <class Ar>
@@ -52,10 +52,10 @@ struct OTELSpanContextMessage {
 		serializer(ar, poly, spanContext);
 	}
 
-	static bool startsSpanContextMessage(uint8_t byte) { return byte == MutationRef::Reserved_For_OTELSpanContextMessage; }
+	static bool startsOTELSpanContextMessage(uint8_t byte) { return byte == MutationRef::Reserved_For_OTELSpanContextMessage; }
 	template <class Ar>
 	static bool isNextIn(Ar& ar) {
-		return startsSpanContextMessage(*(const uint8_t*)ar.peekBytes(1));
+		return startsOTELSpanContextMessage(*(const uint8_t*)ar.peekBytes(1));
 	}
 };
 

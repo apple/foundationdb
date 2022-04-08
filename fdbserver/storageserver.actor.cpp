@@ -24,8 +24,10 @@
 #include <unordered_map>
 
 #include "contrib/fmt-8.1.1/include/fmt/format.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/LoadBalance.h"
+#include "fdbserver/OTELSpanContextMessage.h"
 #include "flow/ActorCollection.h"
 #include "flow/Arena.h"
 #include "flow/Error.h"
@@ -6594,6 +6596,10 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				           SpanContextMessage::isNextIn(cloneReader)) {
 					SpanContextMessage scm;
 					cloneReader >> scm;
+				} else if (cloneReader.protocolVersion().hasOTELSpanContext() &&
+				           OTELSpanContextMessage::isNextIn(cloneReader)) {
+					OTELSpanContextMessage scm;
+					cloneReader >> scm;
 				} else {
 					MutationRef msg;
 					cloneReader >> msg;
@@ -6714,7 +6720,11 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			} else if (rd.protocolVersion().hasSpanContext() && SpanContextMessage::isNextIn(rd)) {
 				SpanContextMessage scm;
 				rd >> scm;
-				spanContext = scm.spanContext;
+				spanContext = SpanContext(UID(scm.spanContext.first(), scm.spanContext.second()), 0, scm.spanContext.first() != 0 && scm.spanContext.second() != 0 ? TraceFlags::sampled : TraceFlags::unsampled);
+			} else if (rd.protocolVersion().hasOTELSpanContext() && OTELSpanContextMessage::isNextIn(rd)) {
+				OTELSpanContextMessage scm;
+				rd >> scm;
+				spanContext = scm.spanContext; 
 			} else {
 				MutationRef msg;
 				rd >> msg;

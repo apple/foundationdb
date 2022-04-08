@@ -31,14 +31,14 @@
 // used and should not be changed from 0.
 //                                                         xyzdev
 //                                                         vvvv
-constexpr uint64_t currentProtocolVersionValue = 0x0FDB00B071010000LL;
+constexpr uint64_t currentProtocolVersionValue = 0x0FDB00B072010000LL;
 
 // The first protocol version that cannot be downgraded from. Ordinarily, this will be two release versions larger
 // than the current version, meaning that we only support downgrades between consecutive release versions.
-constexpr uint64_t minInvalidProtocolVersionValue = 0x0FDB00B073000000LL;
+constexpr uint64_t minInvalidProtocolVersionValue = 0x0FDB00B074000000LL;
 
 #define PROTOCOL_VERSION_FEATURE(v, x)                                                                                 \
-	static_assert((v & 0xF0FFFFLL) == 0 || v < 0x0FDB00B071000000LL, "Unexpected feature protocol version");           \
+	static_assert((v & 0xF0FFFFLL) == 0 || v < 0x0FDB00B072000000LL, "Unexpected feature protocol version");           \
 	static_assert(v <= currentProtocolVersionValue, "Feature protocol version too large");                             \
 	struct x {                                                                                                         \
 		static constexpr uint64_t protocolVersion = v;                                                                 \
@@ -163,6 +163,7 @@ public: // introduced features
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B071010000LL, PerpetualWiggleMetadata);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B071010000LL, Tenants);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B071010000LL, StorageInterfaceReadiness);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B071020000LL, OTELSpanContext);
 };
 
 template <>
