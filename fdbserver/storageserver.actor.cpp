@@ -1142,6 +1142,8 @@ public:
 	AsyncVar<bool> fetchKeysBudgetUsed;
 	std::vector<Promise<FetchInjectionInfo*>> readyFetchKeys;
 
+	FlowLock serveFetchCheckpointParallelismLock;
+
 	int64_t instanceID;
 
 	Promise<Void> otherError;
@@ -1287,6 +1289,12 @@ public:
 			});
 			specialCounter(
 			    cc, "FetchChangeFeedWaiting", [self]() { return self->fetchChangeFeedParallelismLock.waiters(); });
+			specialCounter(cc, "ServeFetchCheckpointActive", [self]() {
+				return self->serveFetchCheckpointParallelismLock.activePermits();
+			});
+			specialCounter(cc, "ServeFetchCheckpointWaiting", [self]() {
+				return self->serveFetchCheckpointParallelismLock.waiters();
+			});
 			specialCounter(cc, "QueryQueueMax", [self]() { return self->getAndResetMaxQueryQueueSize(); });
 			specialCounter(cc, "BytesStored", [self]() { return self->metrics.byteSample.getEstimate(allKeys); });
 			specialCounter(cc, "ActiveWatches", [self]() { return self->numWatches; });
@@ -1342,6 +1350,7 @@ public:
 	    fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM),
 	    fetchChangeFeedParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM),
 	    fetchKeysBytesBudget(SERVER_KNOBS->STORAGE_FETCH_BYTES), fetchKeysBudgetUsed(false),
+	    serveFetchCheckpointParallelismLock(SERVER_KNOBS->SERVE_FETCH_CHECKPOINT_PARALLELISM),
 	    instanceID(deterministicRandom()->randomUniqueID().first()), shuttingDown(false), behind(false),
 	    versionBehind(false), debug_inApplyUpdate(false), debug_lastValidateTime(0), lastBytesInputEBrake(0),
 	    lastDurableVersionEBrake(0), maxQueryQueue(0), transactionTagCounter(ssi.id()), counters(this),
@@ -2212,6 +2221,9 @@ ACTOR Future<Void> fetchCheckpointQ(StorageServer* self, FetchCheckpointRequest 
 }
 
 ACTOR Future<Void> fetchCheckpointKeyValuesQ(StorageServer* self, FetchCheckpointKeyValuesRequest req) {
+	wait(self->serveFetchCheckpointParallelismLock.take(TaskPriority::DefaultYield));
+	state FlowLock::Releaser holder(self->serveFetchCheckpointParallelismLock);
+
 	TraceEvent("ServeFetchCheckpointKeyValuesBegin", self->thisServerID)
 	    .detail("CheckpointID", req.checkpointID)
 	    .detail("Range", req.range);
@@ -2227,49 +2239,32 @@ ACTOR Future<Void> fetchCheckpointKeyValuesQ(StorageServer* self, FetchCheckpoin
 	}
 
 	try {
-		state ICheckpointReader* reader = newCheckpointReader(it->second, deterministicRandom()->randomUniqueID());
+		state ICheckpointReader* reader = newCheckpointReader(it->second, self->thisServerID);
 		wait(reader->init(BinaryWriter::toValue(req.range, IncludeVersion())));
-
-		// std::cout << "Init Checkpoint Done" << std::endl;
 
 		loop {
 			state RangeResult res =
 			    wait(reader->nextKeyValues(CLIENT_KNOBS->REPLY_BYTE_LIMIT, CLIENT_KNOBS->REPLY_BYTE_LIMIT));
 			if (!res.empty()) {
-				TraceEvent("FetchCheckpontKeyValuesReadRange", self->thisServerID)
+				TraceEvent(SevDebug, "FetchCheckpontKeyValuesReadRange", self->thisServerID)
 				    .detail("CheckpointID", req.checkpointID)
 				    .detail("Begin", res.front().key)
 				    .detail("End", res.back().key)
 				    .detail("Size", res.size());
 			} else {
-				TraceEvent("FetchCheckpontKeyValuesReadRange", self->thisServerID)
-				    .detail("CheckpointID", req.checkpointID)
-				    .detail("Size", res.size());
+				TraceEvent(SevWarn, "FetchCheckpontKeyValuesEmptyRange", self->thisServerID)
+				    .detail("CheckpointID", req.checkpointID);
 			}
-			// std::cout << "Read checkpoint range size:" << res.size() << std::endl;
+
 			wait(req.reply.onReady());
 			FetchCheckpointKeyValuesStreamReply reply;
 			reply.arena.dependsOn(res.arena());
-			reply.data.reserve(reply.arena, res.size());
-			// std::cout << "Before kvs." << reply.expectedSize() << std::endl;
-			// reply.arena.dependsOn(res.arena());
-
+			// reply.data.reserve(reply.arena, res.size());
 			for (int i = 0; i < res.size(); ++i) {
-				// std::cout << "Key:" << res[i].key.toString() << "Value: " << res[i].value.toString() << std::endl;
 				reply.data.push_back(reply.arena, res[i]);
-				// reply.data.push_back_deep(reply.data.arena(), res[i].key, res[i].value);
 			}
-			// for (const auto* kv = res.begin(); kv != res.end(); ++kv) {
-			// 	std::cout << "KV:" << kv->key.toString() << std::endl;
-			// 	reply.data.push_back_deep(reply.arena, *kv);
-			// }
-			// std::cout << "Packed kvs." << reply.expectedSize() << std::endl;
-			// for (int i = 0; i < reply.data.size(); ++i) {
-			// 	std::cout << "Key:" << reply.data[i].key.toString() << "Value: " << reply.data[i].value.toString()
-			// 	          << std::endl;
-			// }
+
 			req.reply.send(reply);
-			// std::cout << "Sent." << std::endl;
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_end_of_stream) {

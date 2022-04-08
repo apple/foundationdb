@@ -904,7 +904,6 @@ struct FetchCheckpointRequest {
 	}
 };
 
-//
 struct FetchCheckpointKeyValuesStreamReply : public ReplyPromiseStreamReply {
 	constexpr static FileIdentifier file_identifier = 13804353;
 	Arena arena;
