@@ -312,8 +312,9 @@ getStorageWorkers(Database cx, Reference<AsyncVar<ServerDBInfo> const> dbInfo, b
 				    .detail("Reason", "Could not find worker for storage server")
 				    .detail("SS", server.id());
 				++failures;
+			} else {
+				workerInterfaces.push_back(itr->second);
 			}
-			workerInterfaces.push_back(itr->second);
 		}
 	}
 	return result;
