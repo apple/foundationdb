@@ -130,14 +130,6 @@ EmptyFuture Database::create_snapshot(FDBDatabase* db,
 	return EmptyFuture(fdb_database_create_snapshot(db, uid, uid_length, snap_command, snap_command_length));
 }
 
-static KeyFuture purge_blob_granules(FDBDatabase* db,
-                                     std::string_view begin_key,
-                                     std::string_view end_key,
-                                     int64_t purge_version,
-                                     fdb_bool_t force);
-
-static EmptyFuture wait_purge_granules_complete(FDBDatabase* db, std::string_view purge_key);
-
 KeyFuture Database::purge_blob_granules(FDBDatabase* db,
                                         std::string_view begin_key,
                                         std::string_view end_key,

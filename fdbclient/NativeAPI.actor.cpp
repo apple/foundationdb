@@ -9133,7 +9133,10 @@ ACTOR Future<Key> purgeBlobGranulesActor(Reference<DatabaseContext> db,
 	state Transaction tr(cx);
 	state Key purgeKey;
 
-	ASSERT(force == false); // FIXME: implement force
+	// FIXME: implement force
+	if (!force) {
+		throw unsupported_operation();
+	}
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
