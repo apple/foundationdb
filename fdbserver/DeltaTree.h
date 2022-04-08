@@ -1276,9 +1276,7 @@ public:
 		}
 
 		// Switch the cursor to point to a new DeltaTree
-		// if noReset is true, then the current decoded item will NOT be reset, so be sure that the original tree will
-		// have a lifetime that exceeds this cursor as the decoded item may point into the original tree.
-		void switchTree(DeltaTree2* newTree, bool noReset = false) {
+		void switchTree(DeltaTree2* newTree) {
 			tree = newTree;
 			// Reset item because it may point into tree memory
 			item.reset();

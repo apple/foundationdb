@@ -2657,11 +2657,12 @@ public:
 	Future<LogicalPageID> newExtentPageID(QueueID queueID) override { return newExtentPageID_impl(this, queueID); }
 
 	ACTOR static Future<Void> writePhysicalBlock(DWALPager* self,
-	                                             uint8_t* data,
+	                                             Reference<ArenaPage> page,
+	                                             int blockNum,
+	                                             int blockSize,
+	                                             PhysicalPageID pageID,
 	                                             PagerEventReasons reason,
 	                                             unsigned int level,
-	                                             PhysicalPageID pageID,
-	                                             int blockSize,
 	                                             bool header) {
 
 		state PriorityMultiLock::Lock lock = wait(self->ioLock.lock(header ? ioMaxPriority : ioMinPriority));
@@ -2685,7 +2686,7 @@ public:
 
 		// Note:  Not using forwardError here so a write error won't be discovered until commit time.
 		debug_printf("DWALPager(%s) op=writeBlock %s\n", self->filename.c_str(), toString(pageID).c_str());
-		wait(self->pageFile->write((void*)data, blockSize, (int64_t)pageID * blockSize));
+		wait(self->pageFile->write(page->rawData() + (blockNum * blockSize), blockSize, (int64_t)pageID * blockSize));
 		debug_printf("DWALPager(%s) op=writeBlockDone %s\n", self->filename.c_str(), toString(pageID).c_str());
 		return Void();
 	}
@@ -2710,7 +2711,6 @@ public:
 		return Void();
 	}
 
-	// The caller must keep page in scope until future is ready
 	Future<Void> writePhysicalPage(PagerEventReasons reason,
 	                               unsigned int level,
 	                               Standalone<VectorRef<PhysicalPageID>> pageIDs,
@@ -2738,20 +2738,14 @@ public:
 		int blockSize = header ? smallestPhysicalBlock : physicalPageSize;
 		Future<Void> f;
 		if (pageIDs.size() == 1) {
-			f = writePhysicalBlock(this, page->rawData(), reason, level, pageIDs.front(), blockSize, header);
+			f = writePhysicalBlock(this, page, 0, blockSize, pageIDs.front(), reason, level, header);
 		} else {
 			std::vector<Future<Void>> writers;
 			for (int i = 0; i < pageIDs.size(); ++i) {
-				Future<Void> p = writePhysicalBlock(
-				    this, page->rawData() + (i * blockSize), reason, level, pageIDs[i], blockSize, header);
+				Future<Void> p = writePhysicalBlock(this, page, i, blockSize, pageIDs[i], reason, level, header);
 				writers.push_back(p);
 			}
 			f = waitForAll(writers);
-		}
-
-		// If the page was copied, hold the copy alive until f is ready
-		if (copy) {
-			f = holdWhile(page, f);
 		}
 
 		operations.push_back(f);
@@ -6357,7 +6351,7 @@ private:
 			int i = 0;
 			if (updating) {
 				// Update must be done in the new tree, not the original tree where the end cursor will be from
-				end.switchTree(btPage()->tree(), true);
+				end.switchTree(btPage()->tree());
 
 				// TODO: insert recs in a random order to avoid new subtree being entirely right child links
 				while (i != recs.size()) {
@@ -6429,7 +6423,7 @@ private:
 					if (c != u.cEnd) {
 						cloneForUpdate();
 						// must point c to the tree to erase from
-						c.switchTree(btPage()->tree(), true);
+						c.switchTree(btPage()->tree());
 					}
 
 					while (c != u.cEnd) {

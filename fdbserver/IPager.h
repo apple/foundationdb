@@ -202,9 +202,9 @@ private:
 // 4k-aligned memory held by an Arena
 //
 // Page Format:
-//    VersionHeader - describes main header version, encoding type, and offsets of subheaders and payload.
+//    PageHeader - describes main header version, encoding type, and offsets of subheaders and payload.
 //    MainHeader - structure based on header version.  It is responsible for protecting all bytes
-//                 of VersionHeader, MainHeader, and EncodingHeader with some sort of checksum.
+//                 of PageHeader, MainHeader, and EncodingHeader with some sort of checksum.
 //    EncodingHeader - structure based on encoding type.  It is responsible for protecting and
 //                     possibly encrypting all payload bytes.
 //    Payload - User accessible bytes, protected and possibly encrypted based on the encoding
@@ -253,7 +253,7 @@ public:
 	// header versions and encoding type headers could change size as offset information
 	// is stored to enable efficient jumping to the encoding header or payload.
 	// Page members are only initialized in init()
-	struct Page {
+	struct PageHeader {
 		uint8_t headerVersion;
 		EncodingType encodingType;
 
@@ -379,7 +379,7 @@ public:
 
 	// Get the usable size for a new page of pageSize using HEADER_WRITE_VERSION with encoding type t
 	static int getUsableSize(int pageSize, EncodingType t) {
-		return pageSize - sizeof(Page) - sizeof(RedwoodHeaderV1) - encodingHeaderSize(t);
+		return pageSize - sizeof(PageHeader) - sizeof(RedwoodHeaderV1) - encodingHeaderSize(t);
 	}
 
 	// Initialize the header for a new page so that the payload can be written to
@@ -389,9 +389,9 @@ public:
 	//       Payload can be written to with mutateData() and dataSize()
 	void init(EncodingType t, PageType pageType, uint8_t pageSubType, uint8_t pageFormat = 0) {
 		// Carefully cast away constness to modify page header
-		Page* p = const_cast<Page*>(page);
+		PageHeader* p = const_cast<PageHeader*>(page);
 		p->headerVersion = HEADER_WRITE_VERSION;
-		p->encodingHeaderOffset = sizeof(Page) + sizeof(RedwoodHeaderV1);
+		p->encodingHeaderOffset = sizeof(PageHeader) + sizeof(RedwoodHeaderV1);
 		p->encodingType = t;
 		p->payloadOffset = page->encodingHeaderOffset + encodingHeaderSize(t);
 
@@ -533,7 +533,7 @@ public:
 
 	const Arena& getArena() const { return arena; }
 
-	static bool isEncodingTypeEncrypted(EncodingType t) { return t != EncodingType::XXHash64; }
+	static bool isEncodingTypeEncrypted(EncodingType t) { return t == EncodingType::XOREncryption; }
 
 	// Returns true if the page's encoding type employs encryption
 	bool isEncrypted() const { return isEncodingTypeEncrypted(getEncodingType()); }
@@ -554,7 +554,7 @@ private:
 	// For convenience, it is unioned with a Page pointer which defines the page structure
 	union {
 		uint8_t* buffer;
-		const Page* page;
+		const PageHeader* page;
 	};
 
 	// Pointer and length of page space available to the user
