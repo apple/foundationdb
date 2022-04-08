@@ -75,6 +75,9 @@ struct WorkloadConfig {
 	// Total number of clients
 	int numClients;
 
+	// Selected FDB API version
+	int apiVersion;
+
 	// Workload options: as key-value pairs
 	std::unordered_map<std::string, std::string> options;
 

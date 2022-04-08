@@ -71,8 +71,11 @@ private:
 			    }
 			    auto results = std::make_shared<std::vector<std::optional<std::string>>>();
 			    execTransaction(
-			        [kvPairs, results](auto ctx) {
-				        ctx->tx()->setOption(FDB_TR_OPTION_USE_GRV_CACHE);
+			        [kvPairs, results, this](auto ctx) {
+				        if (apiVersion >= 710) {
+					        // Test GRV caching in 7.1 and later
+					        ctx->tx()->setOption(FDB_TR_OPTION_USE_GRV_CACHE);
+				        }
 				        auto futures = std::make_shared<std::vector<Future>>();
 				        for (const auto& kv : *kvPairs) {
 					        futures->push_back(ctx->tx()->get(kv.key, false));

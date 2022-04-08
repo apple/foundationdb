@@ -39,6 +39,7 @@ ApiWorkload::ApiWorkload(const WorkloadConfig& config) : WorkloadBase(config) {
 	numRandomOpLeft = 0;
 	stopReceived = false;
 	checkingProgress = false;
+	apiVersion = config.apiVersion;
 }
 
 IWorkloadControlIfc* ApiWorkload::getControlIfc() {

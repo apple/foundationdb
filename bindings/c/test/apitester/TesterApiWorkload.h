@@ -50,6 +50,9 @@ public:
 	virtual void randomOperation(TTaskFct cont);
 
 protected:
+	// Selected FDB API version
+	int apiVersion;
+
 	// The minimum length of a key
 	int minKeyLength;
 
