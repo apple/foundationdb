@@ -178,7 +178,6 @@ void releaseAllThreadMagazines();
 int64_t getTotalUnusedAllocatedMemory();
 
 inline constexpr int nextFastAllocatedSize(int x) {
-
 	assert(x > 0 && x <= 16384);
 	if (x <= 16)
 		return 16;

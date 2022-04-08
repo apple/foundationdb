@@ -210,18 +210,10 @@ ACTOR Future<Void> handleIOErrors(Future<Void> actor, IClosable* store, UID id, 
 	state Future<ErrorOr<Void>> storeError = actor.isReady() ? Never() : errorOr(store->getError());
 	choose {
 		when(state ErrorOr<Void> e = wait(errorOr(actor))) {
-			TraceEvent(SevDebug, "HandleIOErrorsActorIsReady")
-			    .detail("Error", e.isError() ? e.getError().code() : -1)
-			    .detail("UID", id);
 			if (e.isError() && e.getError().code() == error_code_please_reboot) {
 				// no need to wait.
 			} else {
-				TraceEvent(SevDebug, "HandleIOErrorsActorBeforeOnClosed").detail("IsClosed", onClosed.isReady());
 				wait(onClosed);
-				TraceEvent(SevDebug, "HandleIOErrorsActorOnClosedFinished")
-				    .detail("StoreError",
-				            storeError.isReady() ? (storeError.get().isError() ? storeError.get().getError().code() : 0)
-				                                 : -1);
 			}
 			if (e.isError() && e.getError().code() == error_code_broken_promise && !storeError.isReady()) {
 				wait(delay(0.00001 + FLOW_KNOBS->MAX_BUGGIFIED_DELAY));
@@ -786,6 +778,82 @@ TEST_CASE("/fdbserver/worker/addressInDbAndPrimaryDc") {
 
 } // namespace
 
+// Returns true if `address` is used in the db (indicated by `dbInfo`) transaction system and in the db's primary
+// satellite DC.
+bool addressInDbAndPrimarySatelliteDc(const NetworkAddress& address, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+	for (const auto& logSet : dbInfo->get().logSystemConfig.tLogs) {
+		if (logSet.isLocal && logSet.locality == tagLocalitySatellite) {
+			for (const auto& tlog : logSet.tLogs) {
+				if (tlog.present() && tlog.interf().addresses().contains(address)) {
+					return true;
+				}
+			}
+		}
+	}
+
+	return false;
+}
+
+bool addressesInDbAndPrimarySatelliteDc(const NetworkAddressList& addresses,
+                                        Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+	return addressInDbAndPrimarySatelliteDc(addresses.address, dbInfo) ||
+	       (addresses.secondaryAddress.present() &&
+	        addressInDbAndPrimarySatelliteDc(addresses.secondaryAddress.get(), dbInfo));
+}
+
+namespace {
+
+TEST_CASE("/fdbserver/worker/addressInDbAndPrimarySatelliteDc") {
+	// Setup a ServerDBInfo for test.
+	ServerDBInfo testDbInfo;
+	LocalityData testLocal;
+	testLocal.set(LiteralStringRef("dcid"), StringRef(std::to_string(1)));
+	testDbInfo.master.locality = testLocal;
+
+	// First, create an empty TLogInterface, and check that it shouldn't be considered as in satellite DC.
+	testDbInfo.logSystemConfig.tLogs.push_back(TLogSet());
+	testDbInfo.logSystemConfig.tLogs.back().isLocal = true;
+	testDbInfo.logSystemConfig.tLogs.back().locality = tagLocalitySatellite;
+	testDbInfo.logSystemConfig.tLogs.back().tLogs.push_back(OptionalInterface<TLogInterface>());
+	ASSERT(!addressInDbAndPrimarySatelliteDc(g_network->getLocalAddress(),
+	                                         makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
+
+	// Create a satellite tlog, and it should be considered as in primary satellite DC.
+	NetworkAddress satelliteTLogAddress(IPAddress(0x13131313), 1);
+	TLogInterface satelliteTLog(testLocal);
+	satelliteTLog.initEndpoints();
+	satelliteTLog.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ satelliteTLogAddress }, UID(1, 2)));
+	testDbInfo.logSystemConfig.tLogs.back().tLogs.push_back(OptionalInterface(satelliteTLog));
+	ASSERT(addressInDbAndPrimarySatelliteDc(satelliteTLogAddress, makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
+
+	// Create a primary TLog, and it shouldn't be considered as in primary Satellite DC.
+	NetworkAddress primaryTLogAddress(IPAddress(0x26262626), 1);
+	testDbInfo.logSystemConfig.tLogs.push_back(TLogSet());
+	testDbInfo.logSystemConfig.tLogs.back().isLocal = true;
+	TLogInterface primaryTLog(testLocal);
+	primaryTLog.initEndpoints();
+	primaryTLog.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ primaryTLogAddress }, UID(1, 2)));
+	testDbInfo.logSystemConfig.tLogs.back().tLogs.push_back(OptionalInterface(primaryTLog));
+	ASSERT(!addressInDbAndPrimarySatelliteDc(primaryTLogAddress, makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
+
+	// Create a remote TLog, and it should be considered as in remote DC.
+	NetworkAddress remoteTLogAddress(IPAddress(0x37373737), 1);
+	LocalityData fakeRemote;
+	fakeRemote.set(LiteralStringRef("dcid"), StringRef(std::to_string(2)));
+	TLogInterface remoteTLog(fakeRemote);
+	remoteTLog.initEndpoints();
+	remoteTLog.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ remoteTLogAddress }, UID(1, 2)));
+
+	testDbInfo.logSystemConfig.tLogs.push_back(TLogSet());
+	testDbInfo.logSystemConfig.tLogs.back().isLocal = false;
+	testDbInfo.logSystemConfig.tLogs.back().tLogs.push_back(OptionalInterface(remoteTLog));
+	ASSERT(!addressInDbAndPrimarySatelliteDc(remoteTLogAddress, makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
+
+	return Void();
+}
+
+} // namespace
+
 bool addressInDbAndRemoteDc(const NetworkAddress& address, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	const auto& dbi = dbInfo->get();
 
@@ -880,17 +948,15 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 			const auto& allPeers = FlowTransport::transport().getAllPeers();
 			UpdateWorkerHealthRequest req;
 
-			bool workerInDb = false;
-			bool workerInPrimary = false;
+			enum WorkerLocation { None, Primary, Remote };
+			WorkerLocation workerLocation = None;
 			if (addressesInDbAndPrimaryDc(interf.addresses(), dbInfo)) {
-				workerInDb = true;
-				workerInPrimary = true;
+				workerLocation = Primary;
 			} else if (addressesInDbAndRemoteDc(interf.addresses(), dbInfo)) {
-				workerInDb = true;
-				workerInPrimary = false;
+				workerLocation = Remote;
 			}
 
-			if (workerInDb) {
+			if (workerLocation != None) {
 				for (const auto& [address, peer] : allPeers) {
 					if (peer->connectFailedCount == 0 &&
 					    peer->pingLatencies.getPopulationSize() < SERVER_KNOBS->PEER_LATENCY_CHECK_MIN_POPULATION) {
@@ -903,35 +969,69 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 						//              last ping latencies logged.
 						continue;
 					}
-
-					if ((workerInPrimary && addressInDbAndPrimaryDc(address, dbInfo)) ||
-					    (!workerInPrimary && addressInDbAndRemoteDc(address, dbInfo))) {
-						// Only monitoring the servers that in the primary or remote DC's transaction systems.
-						// Note that currently we are not monitor storage servers, since lagging in storage servers
-						// today already can trigger server exclusion by data distributor.
+					bool degradedPeer = false;
+					if ((workerLocation == Primary && addressInDbAndPrimaryDc(address, dbInfo)) ||
+					    (workerLocation == Remote && addressInDbAndRemoteDc(address, dbInfo))) {
+						// Monitors intra DC latencies between servers that in the primary or remote DC's transaction
+						// systems. Note that currently we are not monitor storage servers, since lagging in storage
+						// servers today already can trigger server exclusion by data distributor.
 
 						if (peer->connectFailedCount >= SERVER_KNOBS->PEER_DEGRADATION_CONNECTION_FAILURE_COUNT ||
 						    peer->pingLatencies.percentile(SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE) >
 						        SERVER_KNOBS->PEER_LATENCY_DEGRADATION_THRESHOLD ||
 						    peer->timeoutCount / (double)(peer->pingLatencies.getPopulationSize()) >
 						        SERVER_KNOBS->PEER_TIMEOUT_PERCENTAGE_DEGRADATION_THRESHOLD) {
-							// This is a degraded peer.
-							TraceEvent("HealthMonitorDetectDegradedPeer")
-							    .suppressFor(30)
-							    .detail("Peer", address)
-							    .detail("Elapsed", now() - peer->lastLoggedTime)
-							    .detail("MinLatency", peer->pingLatencies.min())
-							    .detail("MaxLatency", peer->pingLatencies.max())
-							    .detail("MeanLatency", peer->pingLatencies.mean())
-							    .detail("MedianLatency", peer->pingLatencies.median())
-							    .detail("CheckedPercentile", SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE)
-							    .detail(
-							        "CheckedPercentileLatency",
-							        peer->pingLatencies.percentile(SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE))
-							    .detail("PingCount", peer->pingLatencies.getPopulationSize())
-							    .detail("PingTimeoutCount", peer->timeoutCount)
-							    .detail("ConnectionFailureCount", peer->connectFailedCount);
+							degradedPeer = true;
+						}
+					} else if (workerLocation == Primary && addressInDbAndPrimarySatelliteDc(address, dbInfo)) {
+						// Monitors inter DC latencies between servers in primary and primary satellite DC. Note that
+						// TLog workers in primary satellite DC are on the critical path of serving a commit.
+						if (peer->connectFailedCount >= SERVER_KNOBS->PEER_DEGRADATION_CONNECTION_FAILURE_COUNT ||
+						    peer->pingLatencies.percentile(
+						        SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE_SATELLITE) >
+						        SERVER_KNOBS->PEER_LATENCY_DEGRADATION_THRESHOLD_SATELLITE ||
+						    peer->timeoutCount / (double)(peer->pingLatencies.getPopulationSize()) >
+						        SERVER_KNOBS->PEER_TIMEOUT_PERCENTAGE_DEGRADATION_THRESHOLD) {
+							degradedPeer = true;
+						}
+					}
 
+					if (degradedPeer) {
+						TraceEvent("HealthMonitorDetectDegradedPeer")
+						    .suppressFor(30)
+						    .detail("Peer", address)
+						    .detail("Elapsed", now() - peer->lastLoggedTime)
+						    .detail("MinLatency", peer->pingLatencies.min())
+						    .detail("MaxLatency", peer->pingLatencies.max())
+						    .detail("MeanLatency", peer->pingLatencies.mean())
+						    .detail("MedianLatency", peer->pingLatencies.median())
+						    .detail("CheckedPercentile", SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE)
+						    .detail("CheckedPercentileLatency",
+						            peer->pingLatencies.percentile(SERVER_KNOBS->PEER_LATENCY_DEGRADATION_PERCENTILE))
+						    .detail("PingCount", peer->pingLatencies.getPopulationSize())
+						    .detail("PingTimeoutCount", peer->timeoutCount)
+						    .detail("ConnectionFailureCount", peer->connectFailedCount);
+
+						req.degradedPeers.push_back(address);
+					}
+				}
+
+				if (SERVER_KNOBS->WORKER_HEALTH_REPORT_RECENT_DESTROYED_PEER) {
+					// When the worker cannot connect to a remote peer, the peer maybe erased from the list returned
+					// from getAllPeers(). Therefore, we also look through all the recent closed peers in the flow
+					// transport's health monitor. Note that all the closed peers stored here are caused by connection
+					// failure, but not normal connection close. Therefore, we report all such peers if they are also
+					// part of the transaction sub system.
+					for (const auto& address : FlowTransport::transport().healthMonitor()->getRecentClosedPeers()) {
+						if (allPeers.find(address) != allPeers.end()) {
+							// We have checked this peer in the above for loop.
+							continue;
+						}
+
+						if ((workerLocation == Primary && addressInDbAndPrimaryDc(address, dbInfo)) ||
+						    (workerLocation == Remote && addressInDbAndRemoteDc(address, dbInfo)) ||
+						    (workerLocation == Primary && addressInDbAndPrimarySatelliteDc(address, dbInfo))) {
+							TraceEvent("HealthMonitorDetectRecentClosedPeer").suppressFor(30).detail("Peer", address);
 							req.degradedPeers.push_back(address);
 						}
 					}
@@ -1554,8 +1654,11 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				    memoryLimit,
 				    false,
 				    validateDataFiles,
-				    SERVER_KNOBS->REMOTE_KV_STORE && /* testing mixed mode in simulation if remote kvs enabled*/
-				        (g_network->isSimulated() ? deterministicRandom()->coinflip() : true));
+				    SERVER_KNOBS->REMOTE_KV_STORE && /* testing mixed mode in simulation if remote kvs enabled */
+				        (g_network->isSimulated()
+				             ? (/* Disable for RocksDB */ s.storeType != KeyValueStoreType::SSD_ROCKSDB_V1 &&
+				                deterministicRandom()->coinflip())
+				             : true));
 				Future<Void> kvClosed = kv->onClosed();
 				filesClosed.add(kvClosed);
 
@@ -2128,8 +2231,11 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					    memoryLimit,
 					    false,
 					    false,
-					    SERVER_KNOBS->REMOTE_KV_STORE && /* testing mixed mode in simulation if remote kvs enabled*/
-					        (g_network->isSimulated() ? deterministicRandom()->coinflip() : true));
+					    SERVER_KNOBS->REMOTE_KV_STORE && /* testing mixed mode in simulation if remote kvs enabled */
+					        (g_network->isSimulated()
+					             ? (/* Disable for RocksDB */ req.storeType != KeyValueStoreType::SSD_ROCKSDB_V1 &&
+					                deterministicRandom()->coinflip())
+					             : true));
 
 					Future<Void> kvClosed = data->onClosed();
 					filesClosed.add(kvClosed);

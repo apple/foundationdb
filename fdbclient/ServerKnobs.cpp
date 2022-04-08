@@ -529,6 +529,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( CC_HEALTH_TRIGGER_FAILOVER,                          false );
 	init( CC_FAILOVER_DUE_TO_HEALTH_MIN_DEGRADATION,               5 );
 	init( CC_FAILOVER_DUE_TO_HEALTH_MAX_DEGRADATION,              10 );
+	init( CC_ENABLE_ENTIRE_SATELLITE_MONITORING,               false );
+	init( CC_SATELLITE_DEGRADATION_MIN_COMPLAINER,                 3 );
+	init( CC_SATELLITE_DEGRADATION_MIN_BAD_SERVER,                 3 );
 
 	init( INCOMPATIBLE_PEERS_LOGGING_INTERVAL,                   600 ); if( randomize && BUGGIFY ) INCOMPATIBLE_PEERS_LOGGING_INTERVAL = 60.0;
 	init( EXPECTED_MASTER_FITNESS,            ProcessClass::UnsetFit );
@@ -719,8 +722,11 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( PEER_LATENCY_CHECK_MIN_POPULATION,                      30 );
 	init( PEER_LATENCY_DEGRADATION_PERCENTILE,                  0.90 );
 	init( PEER_LATENCY_DEGRADATION_THRESHOLD,                   0.05 );
+	init( PEER_LATENCY_DEGRADATION_PERCENTILE_SATELLITE,        0.90 );
+	init( PEER_LATENCY_DEGRADATION_THRESHOLD_SATELLITE,          0.1 );
 	init( PEER_TIMEOUT_PERCENTAGE_DEGRADATION_THRESHOLD,         0.1 );
 	init( PEER_DEGRADATION_CONNECTION_FAILURE_COUNT,               1 );
+	init( WORKER_HEALTH_REPORT_RECENT_DESTROYED_PEER,           true );
 
 	// Test harness
 	init( WORKER_POLL_DELAY,                                     1.0 );

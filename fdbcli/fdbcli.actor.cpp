@@ -42,10 +42,12 @@
 #include "fdbclient/Tuple.h"
 
 #include "fdbclient/ThreadSafeTransaction.h"
+#include "flow/flow.h"
 #include "flow/ArgParseUtil.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/FastRef.h"
 #include "flow/Platform.h"
+#include "flow/SystemMonitor.h"
 
 #include "flow/TLSConfig.actor.h"
 #include "flow/ThreadHelper.actor.h"
@@ -98,6 +100,7 @@ enum {
 	OPT_KNOB,
 	OPT_DEBUG_TLS,
 	OPT_API_VERSION,
+	OPT_MEMORY,
 };
 
 CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
@@ -121,6 +124,7 @@ CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
 	                                  { OPT_KNOB, "--knob-", SO_REQ_SEP },
 	                                  { OPT_DEBUG_TLS, "--debug-tls", SO_NONE },
 	                                  { OPT_API_VERSION, "--api-version", SO_REQ_SEP },
+	                                  { OPT_MEMORY, "--memory", SO_REQ_SEP },
 
 #ifndef TLS_DISABLED
 	                                  TLS_OPTION_FLAGS
@@ -453,6 +457,7 @@ static void printProgramUsage(const char* name) {
 	       "  --debug-tls    Prints the TLS configuration and certificate chain, then exits.\n"
 	       "                 Useful in reporting and diagnosing TLS issues.\n"
 	       "  --build-flags  Print build information and exit.\n"
+	       "  --memory       Resident memory limit of the CLI (defaults to 8GiB).\n"
 	       "  -v, --version  Print FoundationDB CLI version information and exit.\n"
 	       "  -h, --help     Display this help and exit.\n");
 }
@@ -990,6 +995,7 @@ struct CLIOptions {
 	std::string tlsVerifyPeers;
 	std::string tlsCAPath;
 	std::string tlsPassword;
+	uint64_t memLimit = 8uLL << 30;
 
 	std::vector<std::pair<std::string, std::string>> knobs;
 
@@ -1051,6 +1057,11 @@ struct CLIOptions {
 				        FDB_API_VERSION);
 				return 1;
 			}
+			break;
+		}
+		case OPT_MEMORY: {
+			std::string memoryArg(args.OptionArg());
+			memLimit = parse_with_suffix(memoryArg, "MiB").orDefault(8uLL << 30);
 			break;
 		}
 		case OPT_TRACE:
@@ -2124,8 +2135,6 @@ int main(int argc, char** argv) {
 	platformInit();
 	Error::init();
 	std::set_new_handler(&platform::outOfMemory);
-	uint64_t memLimit = 8LL << 30;
-	setMemoryQuota(memLimit);
 
 	registerCrashHandler();
 
@@ -2237,6 +2246,7 @@ int main(int argc, char** argv) {
 		if (opt.exit_code != -1) {
 			return opt.exit_code;
 		}
+		Future<Void> memoryUsageMonitor = startMemoryUsageMonitor(opt.memLimit);
 		Future<int> cliFuture = runCli(opt);
 		Future<Void> timeoutFuture = opt.exit_timeout ? timeExit(opt.exit_timeout) : Never();
 		auto f = stopNetworkAfter(success(cliFuture) || timeoutFuture);

@@ -29,6 +29,8 @@
 #include <unordered_set>
 
 #include "flow/Arena.h"
+#include "flow/FastRef.h"
+#include "flow/ProtocolVersion.h"
 #include "flow/flow.h"
 
 enum class TraceFlags : uint8_t { unsampled = 0b00000000, sampled = 0b00000001 };
@@ -1350,6 +1352,29 @@ struct TenantMode {
 	}
 
 	uint32_t mode;
+};
+struct GRVCacheSpace {
+	Version cachedReadVersion;
+	double lastGrvTime;
+
+	GRVCacheSpace() : cachedReadVersion(Version(0)), lastGrvTime(0.0) {}
+};
+
+// This structure can be extended in the future to include additional features that required a shared state
+struct DatabaseSharedState {
+	// These two members should always be listed first, in this order.
+	// This is to preserve compatibility with future updates of this shared state
+	// and ensures the MVC does not attempt to access methods incorrectly
+	// due to newly introduced offsets in the structure.
+	const ProtocolVersion protocolVersion;
+	void (*delRef)(DatabaseSharedState*);
+
+	Mutex mutexLock;
+	GRVCacheSpace grvCacheSpace;
+	std::atomic<int> refCount;
+
+	DatabaseSharedState()
+	  : protocolVersion(currentProtocolVersion), mutexLock(Mutex()), grvCacheSpace(GRVCacheSpace()), refCount(0) {}
 };
 
 inline bool isValidPerpetualStorageWiggleLocality(std::string locality) {

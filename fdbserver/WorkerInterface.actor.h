@@ -1145,6 +1145,10 @@ ACTOR Future<Void> backupWorker(BackupInterface bi,
 
 void registerThreadForProfiling();
 
+// Returns true if `address` is used in the db (indicated by `dbInfo`) transaction system and in the db's primary
+// satellite DC.
+bool addressInDbAndPrimarySatelliteDc(const NetworkAddress& address, Reference<AsyncVar<ServerDBInfo> const> dbInfo);
+
 // Returns true if `address` is used in the db (indicated by `dbInfo`) transaction system and in the db's remote DC.
 bool addressInDbAndRemoteDc(const NetworkAddress& address, Reference<AsyncVar<ServerDBInfo> const> dbInfo);
 
