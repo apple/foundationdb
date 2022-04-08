@@ -968,7 +968,6 @@ ACTOR Future<Void> ddSnapCreateCore(DistributorSnapRequest snapReq, Reference<As
 		    .detail("SnapPayload", snapReq.snapPayload)
 		    .detail("SnapUID", snapReq.snapUID);
 		// snap local storage nodes
-		state DatabaseConfiguration configuration = wait(getDatabaseConfiguration(cx));
 		std::pair<std::vector<WorkerInterface>, int> storageWorkersAndFailures =
 		    wait(transformErrors(getStorageWorkers(cx, db, true /* localOnly */), snap_storage_failed()));
 		const auto& [storageWorkers, storageFailures] = storageWorkersAndFailures;
