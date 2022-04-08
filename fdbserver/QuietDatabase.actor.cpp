@@ -277,9 +277,8 @@ ACTOR Future<std::vector<StorageServerInterface>> getStorageServers(Database cx,
 	}
 }
 
-ACTOR Future<std::vector<WorkerInterface>> getStorageWorkers(Database cx,
-                                                             Reference<AsyncVar<ServerDBInfo> const> dbInfo,
-                                                             bool localOnly) {
+ACTOR Future<std::pair<std::vector<WorkerInterface>, int>>
+getStorageWorkers(Database cx, Reference<AsyncVar<ServerDBInfo> const> dbInfo, bool localOnly) {
 	state std::vector<StorageServerInterface> servers = wait(getStorageServers(cx));
 	state std::map<NetworkAddress, WorkerInterface> workersMap;
 	std::vector<WorkerDetails> workers = wait(getWorkers(dbInfo));
@@ -299,7 +298,9 @@ ACTOR Future<std::vector<WorkerInterface>> getStorageWorkers(Database cx,
 	}
 	auto masterDcId = dbInfo->get().master.locality.dcId();
 
-	std::vector<WorkerInterface> result;
+	std::pair<std::vector<WorkerInterface>, int> result;
+	auto& [workerInterfaces, failures] = result;
+	failures = 0;
 	for (const auto& server : servers) {
 		TraceEvent(SevDebug, "DcIdInfo")
 		    .detail("ServerLocalityID", server.locality.dcId())
@@ -310,9 +311,10 @@ ACTOR Future<std::vector<WorkerInterface>> getStorageWorkers(Database cx,
 				TraceEvent(SevWarn, "GetStorageWorkers")
 				    .detail("Reason", "Could not find worker for storage server")
 				    .detail("SS", server.id());
-				throw operation_failed();
+				++failures;
+			} else {
+				workerInterfaces.push_back(itr->second);
 			}
-			result.push_back(itr->second);
 		}
 	}
 	return result;
