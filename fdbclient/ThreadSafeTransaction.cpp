@@ -461,6 +461,14 @@ Version ThreadSafeTransaction::getCommittedVersion() {
 	return tr->getCommittedVersion();
 }
 
+VersionVector ThreadSafeTransaction::getVersionVector() {
+	return tr->getVersionVector();
+}
+
+UID ThreadSafeTransaction::getSpanID() {
+	return tr->getSpanID();
+}
+
 ThreadFuture<int64_t> ThreadSafeTransaction::getApproximateSize() {
 	ISingleThreadTransaction* tr = this->tr;
 	return onMainThread([tr]() -> Future<int64_t> { return tr->getApproximateSize(); });

@@ -105,6 +105,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	Optional<Version> recoveredAt;
 	Version knownCommittedVersion;
 	Version backupStartVersion = invalidVersion; // max(tLogs[0].startVersion, previous epochEnd).
+	std::map<UID, Version> rvLogs; // recovery versions per tlog
 	LocalityData locality;
 	// For each currently running popFromLog actor, outstandingPops is
 	// (logID, tag)->(max popped version, durableKnownCommittedVersion).
@@ -191,7 +192,8 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	                     Version minKnownCommittedVersion,
 	                     LogPushData& data,
 	                     SpanID const& spanContext,
-	                     Optional<UID> debugID) final;
+	                     Optional<UID> debugID,
+	                     Optional<std::unordered_map<uint16_t, Version>> tpcvMap) final;
 
 	Reference<IPeekCursor> peekAll(UID dbgid, Version begin, Version end, Tag tag, bool parallelGetMore);
 
@@ -306,11 +308,11 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	LogEpoch getOldestBackupEpoch() const final;
 
 	void setOldestBackupEpoch(LogEpoch epoch) final;
-
 	ACTOR static Future<Void> monitorLog(Reference<AsyncVar<OptionalInterface<TLogInterface>>> logServer,
 	                                     Reference<AsyncVar<bool>> failed);
 
-	Optional<std::pair<Version, Version>> static getDurableVersion(
+	// returns the log group's knownComittedVersion, DV, and a vector of TLogLockResults for each tLog in the group.
+	Optional<std::tuple<Version, Version, std::vector<TLogLockResult>>> static getDurableVersion(
 	    UID dbgid,
 	    LogLockInfo lockInfo,
 	    std::vector<Reference<AsyncVar<bool>>> failed = std::vector<Reference<AsyncVar<bool>>>(),
