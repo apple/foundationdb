@@ -2042,6 +2042,14 @@ ACTOR Future<Void> blobGranuleLoadHistory(Reference<BlobWorkerData> bwData,
 			int skipped = historyEntryStack.size() - 1 - i;
 
 			while (i >= 0) {
+				auto intersectingRanges = bwData->granuleHistory.intersectingRanges(historyEntryStack[i]->range);
+				std::vector<std::pair<KeyRange, Reference<GranuleHistoryEntry>>> newerHistory;
+				for (auto& r : intersectingRanges) {
+					if (r.value().isValid() && r.value()->endVersion >= historyEntryStack[i]->endVersion) {
+						newerHistory.push_back(std::make_pair(r.range(), r.value()));
+					}
+				}
+
 				auto prevRanges = bwData->granuleHistory.rangeContaining(historyEntryStack[i]->range.begin);
 
 				if (prevRanges.value().isValid() &&
@@ -2052,6 +2060,9 @@ ACTOR Future<Void> blobGranuleLoadHistory(Reference<BlobWorkerData> bwData,
 				}
 
 				bwData->granuleHistory.insert(historyEntryStack[i]->range, historyEntryStack[i]);
+				for (auto& it : newerHistory) {
+					bwData->granuleHistory.insert(it.first, it.second);
+				}
 				i--;
 			}
 
@@ -2250,7 +2261,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 			state KeyRange chunkRange;
 			state GranuleFiles chunkFiles;
 
-			if (metadata->initialSnapshotVersion > req.readVersion) {
+			if (req.readVersion < metadata->historyVersion) {
 				TEST(true); // Granule Time Travel Read
 				// this is a time travel query, find previous granule
 				if (metadata->historyLoaded.canBeSet()) {
@@ -2266,7 +2277,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 				Reference<GranuleHistoryEntry> cur = bwData->granuleHistory.rangeContaining(historySearchKey).value();
 
 				// FIXME: use skip pointers here
-				Version expectedEndVersion = metadata->initialSnapshotVersion;
+				Version expectedEndVersion = metadata->historyVersion;
 				if (cur.isValid()) {
 					ASSERT(cur->endVersion == expectedEndVersion);
 				}
@@ -2320,6 +2331,11 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 					throw blob_granule_transaction_too_old();
 				}
 			} else {
+				if (req.readVersion < metadata->initialSnapshotVersion) {
+					// a snapshot file must have been pruned
+					throw blob_granule_transaction_too_old();
+				}
+
 				TEST(true); // Granule Active Read
 				// this is an active granule query
 				loop {

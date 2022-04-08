@@ -2171,17 +2171,18 @@ ACTOR Future<GranuleFiles> loadHistoryFiles(Reference<BlobManagerData> bmData, U
 
 // FIXME: trace events for purging
 
-ACTOR Future<bool> canDeleteFullGranule(Reference<BlobManagerData> self, UID granuleId) {
+ACTOR Future<Void> canDeleteFullGranule(Reference<BlobManagerData> self, UID granuleId) {
 	state Transaction tr(self->db);
-	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-
 	state KeyRange splitRange = blobGranuleSplitKeyRangeFor(granuleId);
 
 	loop {
 		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
 			state RangeResult splitState = wait(tr.getRange(splitRange, SERVER_KNOBS->BG_MAX_SPLIT_FANOUT));
 			state int i = 0;
+			state bool retry = false;
 			for (; i < splitState.size(); i++) {
 				UID parent, child;
 				BlobGranuleSplitState st;
@@ -2194,7 +2195,8 @@ ACTOR Future<bool> canDeleteFullGranule(Reference<BlobManagerData> self, UID gra
 				}
 				// if split state isn't even assigned, this granule has definitely not persisted a snapshot
 				if (st <= BlobGranuleSplitState::Initialized) {
-					return false;
+					retry = true;
+					break;
 				}
 
 				ASSERT(st == BlobGranuleSplitState::Assigned);
@@ -2204,26 +2206,31 @@ ACTOR Future<bool> canDeleteFullGranule(Reference<BlobManagerData> self, UID gra
 				KeyRange granuleFileRange = blobGranuleFileKeyRangeFor(child);
 				RangeResult files = wait(tr.getRange(granuleFileRange, 1));
 				if (files.empty()) {
-					return false;
+					retry = true;
+					break;
 				}
 			}
-
-			if (splitState.empty() || !splitState.more) {
-				break;
+			if (retry) {
+				tr.reset();
+				wait(delay(1.0));
+			} else {
+				if (splitState.empty() || !splitState.more) {
+					break;
+				}
+				splitRange = KeyRangeRef(keyAfter(splitState.back().key), splitRange.end);
 			}
-			splitRange = KeyRangeRef(keyAfter(splitState.back().key), splitRange.end);
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
 	}
-	return true;
+	return Void();
 }
 
 /*
  * Deletes all files pertaining to the granule with id granuleId and
  * also removes the history entry for this granule from the system keyspace
  */
-ACTOR Future<bool> fullyDeleteGranule(Reference<BlobManagerData> self,
+ACTOR Future<Void> fullyDeleteGranule(Reference<BlobManagerData> self,
                                       UID granuleId,
                                       Key historyKey,
                                       Version purgeVersion) {
@@ -2233,14 +2240,7 @@ ACTOR Future<bool> fullyDeleteGranule(Reference<BlobManagerData> self,
 
 	// if granule is still splitting and files are needed for new sub-granules to re-snapshot, we can only partially
 	// delete the granule, since we need to keep the last snapshot and deltas for splitting
-	bool canFullyDelete = wait(canDeleteFullGranule(self, granuleId));
-	if (!canFullyDelete) {
-		TraceEvent("GranuleCannotFullPurge", self->id)
-		    .detail("Epoch", self->epoch)
-		    .detail("GranuleID", granuleId)
-		    .detail("PurgeVersion", purgeVersion);
-		return false;
-	}
+	wait(canDeleteFullGranule(self, granuleId));
 
 	// get files
 	GranuleFiles files = wait(loadHistoryFiles(self->db, granuleId));
@@ -2307,7 +2307,7 @@ ACTOR Future<bool> fullyDeleteGranule(Reference<BlobManagerData> self,
 	++self->stats.granulesFullyPurged;
 	self->stats.filesPurged += filesToDelete.size();
 
-	return true;
+	return Void();
 }
 
 /*
@@ -2620,13 +2620,7 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 		if (BM_DEBUG) {
 			fmt::print("About to fully delete granule {0}\n", granuleId.toString());
 		}
-		bool success = wait(fullyDeleteGranule(self, granuleId, historyKey, purgeVersion));
-		if (!success) {
-			if (BM_DEBUG) {
-				fmt::print("Unable to fully delete granule {0}, doing partial delete instead\n", granuleId.toString());
-			}
-			partialDeletions.emplace_back(partiallyDeleteGranule(self, granuleId, purgeVersion));
-		}
+		wait(fullyDeleteGranule(self, granuleId, historyKey, purgeVersion));
 	}
 
 	if (BM_DEBUG) {
