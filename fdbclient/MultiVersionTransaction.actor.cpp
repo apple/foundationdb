@@ -609,7 +609,7 @@ void DLApi::init() {
 	                   headerVersion >= 0);
 	loadClientFunction(&api->transactionGetRange, lib, fdbCPath, "fdb_transaction_get_range", headerVersion >= 0);
 	loadClientFunction(
-	    &api->transactionGetMappedRange, lib, fdbCPath, "fdb_transaction_get_mapped_range", headerVersion >= 700);
+	    &api->transactionGetMappedRange, lib, fdbCPath, "fdb_transaction_get_mapped_range", headerVersion >= 710);
 	loadClientFunction(
 	    &api->transactionGetVersionstamp, lib, fdbCPath, "fdb_transaction_get_versionstamp", headerVersion >= 410);
 	loadClientFunction(&api->transactionSet, lib, fdbCPath, "fdb_transaction_set", headerVersion >= 0);
@@ -667,7 +667,7 @@ void DLApi::init() {
 	loadClientFunction(
 	    &api->futureGetKeyValueArray, lib, fdbCPath, "fdb_future_get_keyvalue_array", headerVersion >= 0);
 	loadClientFunction(
-	    &api->futureGetMappedKeyValueArray, lib, fdbCPath, "fdb_future_get_mappedkeyvalue_array", headerVersion >= 700);
+	    &api->futureGetMappedKeyValueArray, lib, fdbCPath, "fdb_future_get_mappedkeyvalue_array", headerVersion >= 710);
 	loadClientFunction(&api->futureGetSharedState, lib, fdbCPath, "fdb_future_get_shared_state", headerVersion >= 710);
 	loadClientFunction(&api->futureSetCallback, lib, fdbCPath, "fdb_future_set_callback", headerVersion >= 0);
 	loadClientFunction(&api->futureCancel, lib, fdbCPath, "fdb_future_cancel", headerVersion >= 0);
@@ -1536,7 +1536,7 @@ void MultiVersionDatabase::DatabaseState::protocolVersionChanged(ProtocolVersion
 		    .detail("OldProtocolVersion", dbProtocolVersion);
 		// When the protocol version changes, clear the corresponding entry in the shared state map
 		// so it can be re-initialized. Only do so if there was a valid previous protocol version.
-		if (dbProtocolVersion.present()) {
+		if (dbProtocolVersion.present() && MultiVersionApi::apiVersionAtLeast(710)) {
 			MultiVersionApi::api->clearClusterSharedStateMapEntry(clusterFilePath);
 		}
 
@@ -2333,9 +2333,14 @@ ThreadFuture<Void> MultiVersionApi::updateClusterSharedStateMap(std::string clus
 
 void MultiVersionApi::clearClusterSharedStateMapEntry(std::string clusterFilePath) {
 	MutexHolder holder(lock);
-	auto ssPtr = clusterSharedStateMap[clusterFilePath].get();
+	auto mapEntry = clusterSharedStateMap.find(clusterFilePath);
+	if (mapEntry == clusterSharedStateMap.end()) {
+		TraceEvent(SevError, "ClusterSharedStateMapEntryNotFound").detail("ClusterFilePath", clusterFilePath);
+		return;
+	}
+	auto ssPtr = mapEntry->second.get();
 	ssPtr->delRef(ssPtr);
-	clusterSharedStateMap.erase(clusterFilePath);
+	clusterSharedStateMap.erase(mapEntry);
 }
 
 std::vector<std::string> parseOptionValues(std::string valueStr) {
