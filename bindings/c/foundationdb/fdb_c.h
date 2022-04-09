@@ -90,7 +90,7 @@ typedef struct key {
 	const uint8_t* key;
 	int key_length;
 } FDBKey;
-#if FDB_API_VERSION >= 720
+#if FDB_API_VERSION >= 630
 typedef struct keyvalue {
 	const uint8_t* key;
 	int key_length;
