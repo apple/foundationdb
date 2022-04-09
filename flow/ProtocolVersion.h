@@ -31,7 +31,7 @@
 // used and should not be changed from 0.
 //                                                         xyzdev
 //                                                         vvvv
-constexpr uint64_t currentProtocolVersionValue = 0x0FDB00B071010000LL;
+constexpr uint64_t currentProtocolVersionValue = 0x0FDB00B072000001LL;
 
 // The first protocol version that cannot be downgraded from. Ordinarily, this will be two release versions larger
 // than the current version, meaning that we only support downgrades between consecutive release versions.
