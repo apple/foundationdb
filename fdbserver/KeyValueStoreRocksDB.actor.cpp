@@ -2047,7 +2047,7 @@ void RocksDBKeyValueStore::Writer::action(RestoreAction& a) {
 		    .detail("Checkpoint", a.checkpoints[0].toString())
 		    .detail("RocksDBCF", getRocksCF(a.checkpoints[0]).toString());
 
-		if (g_network->isSimulated() && cf != nullptr) {
+		if (cf != nullptr) {
 			ASSERT(db->DropColumnFamily(cf).ok());
 		}
 
