@@ -29,35 +29,11 @@
 class WorkloadProcessState {
 	IPAddress childAddress;
 	std::string processName;
-	Future<Void> init;
+	Future<Void> processActor;
+	Promise<Void> init;
 
 	WorkloadProcessState(int clientId) : clientId(clientId) {
-		auto self = g_simulator.getCurrentProcess();
-		if (self->address.isV6()) {
-			childAddress =
-			    IPAddress::parse(fmt::format("2001:fdb1:fdb2:fdb3:fdb4:fdb5:fdb6:{:04x}", clientId + 2)).get();
-		} else {
-			childAddress = IPAddress::parse(fmt::format("192.168.0.{}", clientId + 2)).get();
-		}
-		//TraceEvent("TestClientStart", id).detail("ClusterFileLocation", child->ccr->getLocation()).log();
-		processName = fmt::format("TestClient{}", clientId);
-		Standalone<StringRef> newZoneId(deterministicRandom()->randomUniqueID().toString());
-		auto locality = LocalityData(Optional<Standalone<StringRef>>(), newZoneId, newZoneId, self->locality.dcId());
-		auto dataFolder = joinPath(popPath(self->dataFolder), deterministicRandom()->randomUniqueID().toString());
-		platform::createDirectory(dataFolder);
-		TraceEvent("StartingClientForWorkload", id).detail("Name", processName).detail("Address", childAddress);
-		childProcess = g_simulator.newProcess(processName.c_str(),
-		                                      childAddress,
-		                                      1,
-		                                      self->address.isTLS(),
-		                                      1,
-		                                      locality,
-		                                      ProcessClass(ProcessClass::TesterClass, ProcessClass::AutoSource),
-		                                      dataFolder.c_str(),
-		                                      self->coordinationFolder,
-		                                      self->protocolVersion);
-		childProcess->excludeFromRestarts = true;
-		init = doInitialize(this);
+		processActor = processStart(this);
 	}
 
 	~WorkloadProcessState() {
@@ -65,25 +41,64 @@ class WorkloadProcessState {
 		g_simulator.destroyProcess(childProcess);
 	}
 
-	static std::vector<std::pair<WorkloadProcessState*, int>>& states() {
-		static std::vector<std::pair<WorkloadProcessState*, int>> res;
-		return res;
+	ACTOR static Future<Void> initializationDone(WorkloadProcessState* self, ISimulator::ProcessInfo* parent) {
+		wait(g_simulator.onProcess(parent, TaskPriority::DefaultYield));
+		self->init.send(Void());
+		wait(Never());
+		ASSERT(false); // does not happen
+		return Void();
 	}
 
-	ACTOR static Future<Void> doInitialize(WorkloadProcessState* self) {
+	ACTOR static Future<Void> processStart(WorkloadProcessState* self) {
 		state ISimulator::ProcessInfo* parent = g_simulator.getCurrentProcess();
+		state std::vector<Future<Void>> futures;
+		if (parent->address.isV6()) {
+			self->childAddress =
+			    IPAddress::parse(fmt::format("2001:fdb1:fdb2:fdb3:fdb4:fdb5:fdb6:{:04x}", self->clientId + 2)).get();
+		} else {
+			self->childAddress = IPAddress::parse(fmt::format("192.168.0.{}", self->clientId + 2)).get();
+		}
+		//TraceEvent("TestClientStart", id).detail("ClusterFileLocation", child->ccr->getLocation()).log();
+		self->processName = fmt::format("TestClient{}", self->clientId);
+		Standalone<StringRef> newZoneId(deterministicRandom()->randomUniqueID().toString());
+		auto locality = LocalityData(Optional<Standalone<StringRef>>(), newZoneId, newZoneId, parent->locality.dcId());
+		auto dataFolder = joinPath(popPath(parent->dataFolder), deterministicRandom()->randomUniqueID().toString());
+		platform::createDirectory(dataFolder);
+		TraceEvent("StartingClientForWorkload", self->id).detail("Name", self->processName).detail("Address", self->childAddress);
+		self->childProcess = g_simulator.newProcess(self->processName.c_str(),
+		                                      self->childAddress,
+		                                      1,
+		                                      parent->address.isTLS(),
+		                                      1,
+		                                      locality,
+		                                      ProcessClass(ProcessClass::TesterClass, ProcessClass::AutoSource),
+		                                      dataFolder.c_str(),
+		                                      parent->coordinationFolder,
+		                                      parent->protocolVersion);
+		self->childProcess->excludeFromRestarts = true;
 		wait(g_simulator.onProcess(self->childProcess, TaskPriority::DefaultYield));
 		try {
 			FlowTransport::createInstance(true, 1, WLTOKEN_RESERVED_COUNT);
 			Sim2FileSystem::newFileSystem();
 			auto addr = g_simulator.getCurrentProcess()->address;
-			FlowTransport::transport().setLocalAddress(addr);
-			TraceEvent("WorkloadProcessInitialized", self->id);
-		} catch (...) {
+			futures.push_back(FlowTransport::transport().bind(addr, addr));
+			futures.push_back(success((self->childProcess->onShutdown())));
+			TraceEvent("WorkloadProcessInitialized", self->id).log();
+			futures.push_back(initializationDone(self, parent));
+			wait(waitForAny(futures));
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				return Void();
+			}
 			ASSERT(false);
 		}
-		wait(g_simulator.onProcess(parent, TaskPriority::DefaultYield));
+		ASSERT(false);
 		return Void();
+	}
+
+	static std::vector<std::pair<WorkloadProcessState*, int>>& states() {
+		static std::vector<std::pair<WorkloadProcessState*, int>> res;
+		return res;
 	}
 
 public:
@@ -105,7 +120,7 @@ public:
 		}
 	}
 
-	Future<Void> initialized() const { return init; }
+	Future<Void> initialized() const { return init.getFuture(); }
 
 	UID id = deterministicRandom()->randomUniqueID();
 	int clientId;

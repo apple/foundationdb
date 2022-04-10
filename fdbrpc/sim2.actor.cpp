@@ -445,6 +445,7 @@ private:
 		TraceEvent(SevError, "LeakedConnection", self->dbgid)
 		    .error(connection_leaked())
 		    .detail("MyAddr", self->process->address)
+			.detail("IsPublic", self->process->address.isPublic())
 		    .detail("PeerAddr", self->peerEndpoint)
 		    .detail("PeerId", self->peerId)
 		    .detail("Opened", self->opened);
