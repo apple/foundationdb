@@ -32,9 +32,7 @@ class WorkloadProcessState {
 	Future<Void> processActor;
 	Promise<Void> init;
 
-	WorkloadProcessState(int clientId) : clientId(clientId) {
-		processActor = processStart(this);
-	}
+	WorkloadProcessState(int clientId) : clientId(clientId) { processActor = processStart(this); }
 
 	~WorkloadProcessState() {
 		TraceEvent("ShutdownClientForWorkload", id).log();
@@ -64,17 +62,19 @@ class WorkloadProcessState {
 		auto locality = LocalityData(Optional<Standalone<StringRef>>(), newZoneId, newZoneId, parent->locality.dcId());
 		auto dataFolder = joinPath(popPath(parent->dataFolder), deterministicRandom()->randomUniqueID().toString());
 		platform::createDirectory(dataFolder);
-		TraceEvent("StartingClientForWorkload", self->id).detail("Name", self->processName).detail("Address", self->childAddress);
+		TraceEvent("StartingClientForWorkload", self->id)
+		    .detail("Name", self->processName)
+		    .detail("Address", self->childAddress);
 		self->childProcess = g_simulator.newProcess(self->processName.c_str(),
-		                                      self->childAddress,
-		                                      1,
-		                                      parent->address.isTLS(),
-		                                      1,
-		                                      locality,
-		                                      ProcessClass(ProcessClass::TesterClass, ProcessClass::AutoSource),
-		                                      dataFolder.c_str(),
-		                                      parent->coordinationFolder,
-		                                      parent->protocolVersion);
+		                                            self->childAddress,
+		                                            1,
+		                                            parent->address.isTLS(),
+		                                            1,
+		                                            locality,
+		                                            ProcessClass(ProcessClass::TesterClass, ProcessClass::AutoSource),
+		                                            dataFolder.c_str(),
+		                                            parent->coordinationFolder,
+		                                            parent->protocolVersion);
 		self->childProcess->excludeFromRestarts = true;
 		wait(g_simulator.onProcess(self->childProcess, TaskPriority::DefaultYield));
 		try {
