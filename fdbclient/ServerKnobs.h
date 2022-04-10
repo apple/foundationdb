@@ -37,8 +37,12 @@ public:
 	int64_t MAX_VERSIONS_IN_FLIGHT_FORCED;
 	int64_t MAX_READ_TRANSACTION_LIFE_VERSIONS;
 	int64_t MAX_WRITE_TRANSACTION_LIFE_VERSIONS;
+	bool ENABLE_VERSION_VECTOR;
+	bool ENABLE_VERSION_VECTOR_TLOG_UNICAST;
 	double MAX_COMMIT_BATCH_INTERVAL; // Each commit proxy generates a CommitTransactionBatchRequest at least this
 	                                  // often, so that versions always advance smoothly
+	double MAX_VERSION_RATE_MODIFIER;
+	int64_t MAX_VERSION_RATE_OFFSET;
 
 	// TLogs
 	bool PEEK_USING_STREAMING;
@@ -106,6 +110,7 @@ public:
 	double PUSH_STATS_SLOW_AMOUNT;
 	double PUSH_STATS_SLOW_RATIO;
 	int TLOG_POP_BATCH_SIZE;
+	double BLOCKING_PEEK_TIMEOUT;
 	bool PEEK_BATCHING_EMPTY_MSG;
 	double PEEK_BATCHING_EMPTY_MSG_INTERVAL;
 
@@ -316,6 +321,7 @@ public:
 	int ROCKSDB_CAN_COMMIT_DELAY_ON_OVERLOAD;
 	int ROCKSDB_CAN_COMMIT_DELAY_TIMES_ON_OVERLOAD;
 	int64_t ROCKSDB_COMPACTION_READAHEAD_SIZE;
+	int64_t ROCKSDB_BLOCK_SIZE;
 
 	// Leader election
 	int MAX_NOTIFICATIONS;
@@ -372,6 +378,7 @@ public:
 	int TXN_STATE_SEND_AMOUNT;
 	double REPORT_TRANSACTION_COST_ESTIMATION_DELAY;
 	bool PROXY_REJECT_BATCH_QUEUED_TOO_LONG;
+	bool PROXY_USE_RESOLVER_PRIVATE_MUTATIONS;
 
 	int RESET_MASTER_BATCHES;
 	int RESET_RESOLVER_BATCHES;
@@ -581,6 +588,12 @@ public:
 	// disk snapshot
 	int64_t MAX_FORKED_PROCESS_OUTPUT;
 	double SNAP_CREATE_MAX_TIMEOUT;
+	// Maximum number of storage servers a snapshot can fail to
+	// capture while still succeeding
+	int64_t MAX_STORAGE_SNAPSHOT_FAULT_TOLERANCE;
+	// Maximum number of coordinators a snapshot can fail to
+	// capture while still succeeding
+	int64_t MAX_COORDINATOR_SNAPSHOT_FAULT_TOLERANCE;
 
 	// Storage Metrics
 	double STORAGE_METRICS_AVERAGE_INTERVAL;
@@ -794,6 +807,7 @@ public:
 	double REDWOOD_METRICS_INTERVAL;
 	double REDWOOD_HISTOGRAM_INTERVAL;
 	bool REDWOOD_EVICT_UPDATED_PAGES; // Whether to prioritize eviction of updated pages from cache.
+	int REDWOOD_DECODECACHE_REUSE_MIN_HEIGHT; // Minimum height for which to keep and reuse page decode caches
 
 	// Server request latency measurement
 	int LATENCY_SAMPLE_SIZE;

@@ -1099,21 +1099,16 @@ void haltRegisteringOrCurrentSingleton(ClusterControllerData* self,
 
 void registerWorker(RegisterWorkerRequest req,
                     ClusterControllerData* self,
-                    ServerCoordinators coordinators,
+                    std::unordered_set<NetworkAddress> coordinatorAddresses,
                     ConfigBroadcaster* configBroadcaster) {
 	const WorkerInterface& w = req.wi;
 	ProcessClass newProcessClass = req.processClass;
 	auto info = self->id_worker.find(w.locality.processId());
 	ClusterControllerPriorityInfo newPriorityInfo = req.priorityInfo;
 	newPriorityInfo.processClassFitness = newProcessClass.machineClassFitness(ProcessClass::ClusterController);
-	Optional<ConfigFollowerInterface> cfi;
 	bool isCoordinator =
-	    std::find_if(coordinators.configServers.begin(),
-	                 coordinators.configServers.end(),
-	                 [&req](const ConfigFollowerInterface& cfi) {
-		                 return cfi.address() == req.wi.address() || (req.wi.secondaryAddress().present() &&
-		                                                              cfi.address() == req.wi.secondaryAddress().get());
-	                 }) != coordinators.configServers.end();
+	    (coordinatorAddresses.count(req.wi.address()) > 0) ||
+	    (req.wi.secondaryAddress().present() && coordinatorAddresses.count(req.wi.secondaryAddress().get()) > 0);
 
 	for (auto it : req.incompatiblePeers) {
 		self->db.incompatibleConnections[it] = now() + SERVER_KNOBS->INCOMPATIBLE_PEERS_LOGGING_INTERVAL;
@@ -2547,10 +2542,30 @@ ACTOR Future<Void> clusterControllerCore(Reference<IClusterConnectionRecord> con
 		when(RecruitBlobWorkerRequest req = waitNext(interf.recruitBlobWorker.getFuture())) {
 			clusterRecruitBlobWorker(&self, req);
 		}
-		when(RegisterWorkerRequest req = waitNext(interf.registerWorker.getFuture())) {
+		when(state RegisterWorkerRequest req = waitNext(interf.registerWorker.getFuture())) {
 			++self.registerWorkerRequests;
-			registerWorker(
-			    req, &self, coordinators, (configDBType == ConfigDBType::DISABLED) ? nullptr : &configBroadcaster);
+			state ClusterConnectionString ccs = coordinators.ccr->getConnectionString();
+
+			state std::unordered_set<NetworkAddress> coordinatorAddresses;
+			std::vector<Future<Void>> fs;
+			for (auto& hostname : ccs.hostnames) {
+				fs.push_back(map(hostname.resolve(), [&](Optional<NetworkAddress> const& addr) -> Void {
+					if (addr.present()) {
+						coordinatorAddresses.insert(addr.get());
+					}
+					return Void();
+				}));
+			}
+			wait(waitForAll(fs));
+
+			for (const auto& coord : ccs.coordinators()) {
+				coordinatorAddresses.insert(coord);
+			}
+
+			registerWorker(req,
+			               &self,
+			               coordinatorAddresses,
+			               (configDBType == ConfigDBType::DISABLED) ? nullptr : &configBroadcaster);
 		}
 		when(GetWorkersRequest req = waitNext(interf.getWorkers.getFuture())) {
 			++self.getWorkersRequests;

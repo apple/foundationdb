@@ -273,7 +273,8 @@ Future<Void> quietDatabase(Database const& cx,
                            int64_t maxTLogQueueGate = 5e6,
                            int64_t maxStorageServerQueueGate = 5e6,
                            int64_t maxDataDistributionQueueSize = 0,
-                           int64_t maxPoppedVersionLag = 30e6);
+                           int64_t maxPoppedVersionLag = 30e6,
+                           int64_t maxVersionOffset = 1e6);
 
 /**
  * A utility function for testing error situations. It succeeds if the given test
