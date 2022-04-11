@@ -50,6 +50,11 @@ int netmaskWeightImpl(std::array<unsigned char, Sz> const& addr) {
 
 } // namespace
 
+AuthAllowedSubnet::AuthAllowedSubnet(IPAddress const& baseAddress, IPAddress const& addressMask)
+  : baseAddress(baseAddress), addressMask(addressMask) {
+	ASSERT(baseAddress.isV4() == addressMask.isV4());
+}
+
 IPAddress AuthAllowedSubnet::netmask() const {
 	if (addressMask.isV4()) {
 		uint32_t res = 0xffffffff ^ addressMask.toV4();
@@ -109,6 +114,30 @@ void AuthAllowedSubnet::printIP(std::string_view txt, IPAddress const& address) 
 	}
 	fmt::print("\n");
 }
+
+template <std::size_t sz>
+std::array<unsigned char, sz> AuthAllowedSubnet::createBitMask(std::array<unsigned char, sz> const& addr,
+                                                               int netmaskWeight) {
+	std::array<unsigned char, sz> res;
+	res.fill((unsigned char)0xff);
+	int idx = netmaskWeight / 8;
+	if (netmaskWeight % 8 > 0) {
+		// 2^(netmaskWeight % 8) - 1 sets the last (netmaskWeight % 8) number of bits to 1
+		// everything else will be zero. For example: 2^3 - 1 == 7 == 0b111
+		unsigned char bitmask = (1 << (8 - (netmaskWeight % 8))) - ((unsigned char)1);
+		res[idx] ^= bitmask;
+		++idx;
+	}
+	for (; idx < res.size(); ++idx) {
+		res[idx] = (unsigned char)0;
+	}
+	return res;
+}
+
+template std::array<unsigned char, 4> AuthAllowedSubnet::createBitMask<4>(const std::array<unsigned char, 4>& addr,
+                                                                          int netmaskWeight);
+template std::array<unsigned char, 16> AuthAllowedSubnet::createBitMask<16>(const std::array<unsigned char, 16>& addr,
+                                                                            int netmaskWeight);
 
 // helpers for testing
 namespace {

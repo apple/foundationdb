@@ -56,13 +56,12 @@ class WorkloadProcessState {
 		} else {
 			self->childAddress = IPAddress::parse(fmt::format("192.168.0.{}", self->clientId + 2)).get();
 		}
-		//TraceEvent("TestClientStart", id).detail("ClusterFileLocation", child->ccr->getLocation()).log();
 		self->processName = fmt::format("TestClient{}", self->clientId);
 		Standalone<StringRef> newZoneId(deterministicRandom()->randomUniqueID().toString());
 		auto locality = LocalityData(Optional<Standalone<StringRef>>(), newZoneId, newZoneId, parent->locality.dcId());
 		auto dataFolder = joinPath(popPath(parent->dataFolder), deterministicRandom()->randomUniqueID().toString());
 		platform::createDirectory(dataFolder);
-		TraceEvent("StartingClientForWorkload", self->id)
+		TraceEvent("StartingClientWorkloadProcess", self->id)
 		    .detail("Name", self->processName)
 		    .detail("Address", self->childAddress);
 		self->childProcess = g_simulator.newProcess(self->processName.c_str(),
@@ -83,7 +82,7 @@ class WorkloadProcessState {
 			auto addr = g_simulator.getCurrentProcess()->address;
 			futures.push_back(FlowTransport::transport().bind(addr, addr));
 			futures.push_back(success((self->childProcess->onShutdown())));
-			TraceEvent("WorkloadProcessInitialized", self->id).log();
+			TraceEvent("ClientWorkloadProcessInitialized", self->id).log();
 			futures.push_back(initializationDone(self, parent));
 			wait(waitForAny(futures));
 		} catch (Error& e) {
@@ -96,28 +95,19 @@ class WorkloadProcessState {
 		return Void();
 	}
 
-	static std::vector<std::pair<WorkloadProcessState*, int>>& states() {
-		static std::vector<std::pair<WorkloadProcessState*, int>> res;
+	static std::vector<WorkloadProcessState*>& states() {
+		static std::vector<WorkloadProcessState*> res;
 		return res;
 	}
 
 public:
 	static WorkloadProcessState* instance(int clientId) {
-		states().resize(std::max(states().size(), size_t(clientId + 1)), std::make_pair(nullptr, 0));
+		states().resize(std::max(states().size(), size_t(clientId + 1)), nullptr);
 		auto& res = states()[clientId];
-		if (res.first == nullptr) {
-			res = std::make_pair(new WorkloadProcessState(clientId), 0);
+		if (res == nullptr) {
+			res = new WorkloadProcessState(clientId);
 		}
-		++res.second;
-		return res.first;
-	}
-	static void done(WorkloadProcessState* processState) {
-		auto& p = states()[processState->clientId];
-		ASSERT(p.first == processState);
-		if (--p.second == 0) {
-			// delete p.first;
-			// p.first = nullptr;
-		}
+		return res;
 	}
 
 	Future<Void> initialized() const { return init.getFuture(); }
@@ -201,7 +191,7 @@ struct WorkloadProcess {
 			res = r;
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
-				ASSERT(false);
+				ASSERT(g_simulator.getCurrentProcess() == parent);
 				throw;
 			}
 			err = e;
@@ -212,8 +202,6 @@ struct WorkloadProcess {
 		}
 		return res;
 	}
-
-	~WorkloadProcess() { WorkloadProcessState::done(processState); }
 };
 
 ClientWorkload::ClientWorkload(CreateWorkload const& childCreator, WorkloadContext const& wcx)

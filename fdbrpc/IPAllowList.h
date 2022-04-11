@@ -29,31 +29,12 @@ struct AuthAllowedSubnet {
 	IPAddress baseAddress;
 	IPAddress addressMask;
 
-	AuthAllowedSubnet(IPAddress const& baseAddress, IPAddress const& addressMask)
-	  : baseAddress(baseAddress), addressMask(addressMask) {
-		ASSERT(baseAddress.isV4() == addressMask.isV4());
-	}
+	AuthAllowedSubnet(IPAddress const& baseAddress, IPAddress const& addressMask);
 
 	static AuthAllowedSubnet fromString(std::string_view addressString);
 
 	template <std::size_t sz>
-	static auto createBitMask(std::array<unsigned char, sz> const& addr, int netmaskWeight)
-	    -> std::array<unsigned char, sz> {
-		std::array<unsigned char, sz> res;
-		res.fill((unsigned char)0xff);
-		int idx = netmaskWeight / 8;
-		if (netmaskWeight % 8 > 0) {
-			// 2^(netmaskWeight % 8) - 1 sets the last (netmaskWeight % 8) number of bits to 1
-			// everything else will be zero. For example: 2^3 - 1 == 7 == 0b111
-			unsigned char bitmask = (1 << (8 - (netmaskWeight % 8))) - ((unsigned char)1);
-			res[idx] ^= bitmask;
-			++idx;
-		}
-		for (; idx < res.size(); ++idx) {
-			res[idx] = (unsigned char)0;
-		}
-		return res;
-	}
+	static std::array<unsigned char, sz> createBitMask(std::array<unsigned char, sz> const& addr, int netmaskWeight);
 
 	bool operator()(IPAddress const& address) const {
 		if (addressMask.isV4() != address.isV4()) {

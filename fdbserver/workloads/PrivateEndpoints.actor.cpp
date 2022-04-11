@@ -59,23 +59,20 @@ struct PrivateEndpoints : TestWorkload {
 			T t = wait(f);
 			(void)t;
 			ASSERT(false);
-			return Void();
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
 				throw;
 			} else if (e.code() == error_code_unauthorized_attempt) {
 				TraceEvent("SuccessPrivateEndpoint").log();
-				return Void();
 			} else if (e.code() == error_code_request_maybe_delivered) {
 				// this is also fine, because even when calling private endpoints
 				// we might see connection failures
 				TraceEvent("SuccessRequestMaybeDelivered").log();
-				return Void();
 			} else {
 				TraceEvent(SevError, "WrongErrorCode").error(e);
-				return Void();
 			}
 		}
+		return Void();
 	}
 
 	template <class I, class RT>
