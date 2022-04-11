@@ -35,6 +35,7 @@
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/TagThrottle.actor.h"
 #include "fdbclient/Tenant.h"
+#include "flow/Tracing.h"
 #include "flow/UnitTest.h"
 
 // Dead code, removed in the next protocol version
