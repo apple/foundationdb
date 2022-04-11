@@ -202,7 +202,7 @@ class TestRunner(object):
         self.args.types = list(reduce(lambda t1, t2: filter(t1.__contains__, t2), map(lambda tester: tester.types, self.testers)))
 
         self.args.no_directory_snapshot_ops = self.args.no_directory_snapshot_ops or any([not tester.directory_snapshot_ops_enabled for tester in self.testers])
-        self.args.no_tenants = self.args.no_tenants or any([not tester.tenants_enabled for tester in self.testers]) or self.args.api_version < 720
+        self.args.no_tenants = self.args.no_tenants or any([not tester.tenants_enabled for tester in self.testers]) or self.args.api_version < 710
 
     def print_test(self):
         test_instructions = self._generate_test()
