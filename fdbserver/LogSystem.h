@@ -25,6 +25,7 @@
 #include <vector>
 
 #include "fdbserver/SpanContextMessage.h"
+#include "fdbserver/OTELSpanContextMessage.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbclient/DatabaseConfiguration.h"
