@@ -340,26 +340,27 @@ bool LogPushData::writeTransactionInfo(int location, uint32_t subseq) {
 	wr << uint32_t(0) << subseq << uint16_t(prev_tags.size());
 	for (auto& tag : prev_tags)
 		wr << tag;
- 	if (logSystem->getTLogVersion() >= TLogVersion::V7) {
-		OTELSpanContextMessage contextMessage(SpanContext);
+	if (logSystem->getTLogVersion() >= TLogVersion::V7) {
+		OTELSpanContextMessage contextMessage(spanContext);
 		wr << contextMessage;
-    } else {
-		// When we're on a TLog version below 7, but the front end of the system (i.e. proxy, sequencer, resolver) 
-		// is using OpenTelemetry tracing (i.e above 7.2), we need to convert the OpenTelemetry Span data model 
+	} else {
+		// When we're on a TLog version below 7, but the front end of the system (i.e. proxy, sequencer, resolver)
+		// is using OpenTelemetry tracing (i.e above 7.2), we need to convert the OpenTelemetry Span data model
 		// i.e. 16 bytes for traceId, 8 bytes for spanId, to the OpenTracing spec, which is 8 bytes for traceId
-		// and 8 bytes for spanId. That means we need to drop some data. 
+		// and 8 bytes for spanId. That means we need to drop some data.
 		//
-		// As a workaround for this special case we've decide to drop is the 8 bytes 
+		// As a workaround for this special case we've decide to drop is the 8 bytes
 		// for spanId. Therefore we're passing along the full 16 byte traceId to the storage server with 0 for spanID.
-		// This will result in a follows from relationship for the storage span within the trace rather than a parent->child.
+		// This will result in a follows from relationship for the storage span within the trace rather than a
+		// parent->child.
 		SpanContextMessage contextMessage;
 		if (spanContext.isSampled()) {
-    	contextMessage = SpanContextMessage(UID(spanContext.traceID.first(), spanContext.traceID.second()));
+			contextMessage = SpanContextMessage(UID(spanContext.traceID.first(), spanContext.traceID.second()));
 		} else {
-    	contextMessage = SpanContextMessage(UID(0,0));
+			contextMessage = SpanContextMessage(UID(0, 0));
 		}
-        wr << contextMessage;
-    }
+		wr << contextMessage;
+	}
 	int length = wr.getLength() - offset;
 	*(uint32_t*)((uint8_t*)wr.getData() + offset) = length - sizeof(uint32_t);
 	return true;

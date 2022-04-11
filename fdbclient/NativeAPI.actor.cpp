@@ -2718,7 +2718,7 @@ ACTOR Future<KeyRangeLocationInfo> getKeyLocation_internal(Database cx,
                                                            Reverse isBackward,
                                                            Version version) {
 
-    // TODO - ljoswiak. Parent or Link?
+	// TODO - ljoswiak. Parent or Link?
 	state Span span("NAPI:getKeyLocation"_loc, spanContext);
 	if (isBackward) {
 		ASSERT(key != allKeys.begin && key <= allKeys.end);
@@ -2815,7 +2815,8 @@ Future<KeyRangeLocationInfo> getKeyLocation(Database const& cx,
 	// we first check whether this range is cached
 	Optional<KeyRangeLocationInfo> locationInfo = cx->getCachedLocation(tenant, key, isBackward);
 	if (!locationInfo.present()) {
-		return getKeyLocation_internal(cx, tenant, key, spanContext, debugID, useProvisionalProxies, isBackward, version);
+		return getKeyLocation_internal(
+		    cx, tenant, key, spanContext, debugID, useProvisionalProxies, isBackward, version);
 	}
 
 	bool onlyEndpointFailedAndNeedRefresh = false;
@@ -2829,7 +2830,8 @@ Future<KeyRangeLocationInfo> getKeyLocation(Database const& cx,
 		cx->invalidateCache(locationInfo.get().tenantEntry.prefix, key);
 
 		// Refresh the cache with a new getKeyLocations made to proxies.
-		return getKeyLocation_internal(cx, tenant, key, spanContext, debugID, useProvisionalProxies, isBackward, version);
+		return getKeyLocation_internal(
+		    cx, tenant, key, spanContext, debugID, useProvisionalProxies, isBackward, version);
 	}
 
 	return locationInfo.get();
@@ -3074,7 +3076,7 @@ ACTOR Future<Void> warmRange_impl(Reference<TransactionState> trState, KeyRange 
 // }
 
 // TODO - ljoswiak and mpilman. This will need some discussion and close inspection, looks like txnID
-// is intertwined with old first uint64_t of SpanID/UID which was previously used for traceId. 
+// is intertwined with old first uint64_t of SpanID/UID which was previously used for traceId.
 SpanContext generateSpanID(bool transactionTracingSample, SpanContext parentContext = SpanContext()) {
 	uint64_t txnId = deterministicRandom()->randomUInt64();
 	if (parentContext.isValid()) {
@@ -3390,7 +3392,7 @@ ACTOR Future<Key> getKey(Reference<TransactionState> trState,
 }
 
 ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version, SpanContext spanContext) {
-	// TODO - ljoswiak, Parent or link? Below is linked constructor with empty parent. 
+	// TODO - ljoswiak, Parent or link? Below is linked constructor with empty parent.
 	state Span span("NAPI:waitForCommittedVersion"_loc, SpanContext(), { spanContext });
 	try {
 		loop {
@@ -3423,11 +3425,11 @@ ACTOR Future<Version> getRawVersion(Reference<TransactionState> trState) {
 	loop {
 		choose {
 			when(wait(trState->cx->onProxiesChanged())) {}
-			when(GetReadVersionReply v =
-			         wait(basicLoadBalance(trState->cx->getGrvProxies(UseProvisionalProxies::False),
-			                               &GrvProxyInterface::getConsistentReadVersion,
-			                               GetReadVersionRequest(trState->spanContext, 0, TransactionPriority::IMMEDIATE),
-			                               trState->cx->taskID))) {
+			when(GetReadVersionReply v = wait(
+			         basicLoadBalance(trState->cx->getGrvProxies(UseProvisionalProxies::False),
+			                          &GrvProxyInterface::getConsistentReadVersion,
+			                          GetReadVersionRequest(trState->spanContext, 0, TransactionPriority::IMMEDIATE),
+			                          trState->cx->taskID))) {
 				return v.version;
 			}
 		}
@@ -3676,9 +3678,9 @@ ACTOR Future<Void> watchValueMap(Future<Version> version,
                                  UseProvisionalProxies useProvisionalProxies) {
 	state Version ver = wait(version);
 
-	wait(getWatchFuture(
-	    cx,
-	    makeReference<WatchParameters>(tenant, key, value, ver, tags, spanContext, taskID, debugID, useProvisionalProxies)));
+	wait(getWatchFuture(cx,
+	                    makeReference<WatchParameters>(
+	                        tenant, key, value, ver, tags, spanContext, taskID, debugID, useProvisionalProxies)));
 
 	return Void();
 }
@@ -4969,7 +4971,7 @@ Transaction::Transaction(Database const& cx, Optional<TenantName> const& tenant)
                                             cx->taskID,
                                             generateSpanID(cx->transactionTracingSample),
                                             createTrLogInfoProbabilistically(cx))),
-	// TODO - does this make sense, using the existing span context (traceId, spanId) for the transaction
+    // TODO - does this make sense, using the existing span context (traceId, spanId) for the transaction
     span(trState->spanContext, "Transaction"_loc), backoff(CLIENT_KNOBS->DEFAULT_BACKOFF), tr(trState->spanContext) {
 	if (DatabaseContext::debugUseTags) {
 		debugAddTags(trState);
@@ -5785,7 +5787,7 @@ ACTOR static Future<Void> commitDummyTransaction(Reference<TransactionState> trS
 	state Transaction tr(trState->cx);
 	state int retries = 0;
 	// TODO - ljoswiak, mpilman. This will require some inspection. Here we're setting the parent context.
-	// Before you used addParent, however there is a side effect in that old function, due to no links. 
+	// Before you used addParent, however there is a side effect in that old function, due to no links.
 	// You would check if there is no parent set and if so, you'd overwrite the traceids.
 	//
 	// Need to determine if this behavior matches previously intended, here we'd just always set parent.
@@ -6452,7 +6454,7 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 		}
 		// TODO - ljoswiak, mpilman. This creates a link with a 0 spanID. Before you were calling
 		// addParent with previously mentioned side effects.
-		span.addLink(SpanContext(BinaryReader::fromStringRef<UID>(value.get(), Unversioned()),0));
+		span.addLink(SpanContext(BinaryReader::fromStringRef<UID>(value.get(), Unversioned()), 0));
 		break;
 
 	case FDBTransactionOptions::REPORT_CONFLICTING_KEYS:

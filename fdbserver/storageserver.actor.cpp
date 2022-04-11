@@ -3163,7 +3163,6 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
 	}
 
-    
 	// TODO - ljoswiak, mpilman - Trace ID is now 2 unint64_t, need to discuss what you want to do here?
 	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID.first();
 
@@ -3655,7 +3654,7 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
 	}
 
- 	// TODO - ljoswiak, mpilman discuss.
+	// TODO - ljoswiak, mpilman discuss.
 	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID.first();
 
 	++data->counters.getMappedRangeQueries;
@@ -6720,11 +6719,15 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			} else if (rd.protocolVersion().hasSpanContext() && SpanContextMessage::isNextIn(rd)) {
 				SpanContextMessage scm;
 				rd >> scm;
-				spanContext = SpanContext(UID(scm.spanContext.first(), scm.spanContext.second()), 0, scm.spanContext.first() != 0 && scm.spanContext.second() != 0 ? TraceFlags::sampled : TraceFlags::unsampled);
+				spanContext =
+				    SpanContext(UID(scm.spanContext.first(), scm.spanContext.second()),
+				                0,
+				                scm.spanContext.first() != 0 && scm.spanContext.second() != 0 ? TraceFlags::sampled
+				                                                                              : TraceFlags::unsampled);
 			} else if (rd.protocolVersion().hasOTELSpanContext() && OTELSpanContextMessage::isNextIn(rd)) {
 				OTELSpanContextMessage scm;
 				rd >> scm;
-				spanContext = scm.spanContext; 
+				spanContext = scm.spanContext;
 			} else {
 				MutationRef msg;
 				rd >> msg;

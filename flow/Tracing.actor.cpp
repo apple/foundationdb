@@ -41,7 +41,7 @@ constexpr float kQueueSizeLogInterval = 5.0;
 
 struct NoopTracer : ITracer {
 	TracerType type() const override { return TracerType::DISABLED; }
-	//void trace(Span const& span) override {}
+	// void trace(Span const& span) override {}
 	void trace(Span const& span) override {}
 };
 
@@ -754,8 +754,8 @@ TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
 	// Test - constructor OTELSpan(const Location& location, const SpanContext parent, const SpanContext& link)
 	// Will delegate to other constructors.
 	Span span2("encoded_span"_loc,
-	               SpanContext(UID(100, 101), 1, TraceFlags::sampled),
-	               SpanContext(UID(200, 201), 2, TraceFlags::sampled));
+	           SpanContext(UID(100, 101), 1, TraceFlags::sampled),
+	           SpanContext(UID(200, 201), 2, TraceFlags::sampled));
 	tracer.serialize_span(span2, request);
 	data = request.buffer.get();
 	ASSERT(data[0] == 0b10011110); // 14 element array.

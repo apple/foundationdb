@@ -22,6 +22,7 @@
 #define FDBSERVER_OTELSPANCONTEXTMESSAGE_H
 #pragma once
 
+#include "flow/Tracing.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitTransaction.h"
 
@@ -42,8 +43,9 @@ struct OTELSpanContextMessage {
 	OTELSpanContextMessage(SpanContext const& spanContext) : spanContext(spanContext) {}
 
 	std::string toString() const {
-		return format(
-		    "code: %d, span context: %s", MutationRef::Reserved_For_OTELSpanContextMessage, spanContext.toString().c_str());
+		return format("code: %d, span context: %s",
+		              MutationRef::Reserved_For_OTELSpanContextMessage,
+		              spanContext.toString().c_str());
 	}
 
 	template <class Ar>
@@ -52,7 +54,9 @@ struct OTELSpanContextMessage {
 		serializer(ar, poly, spanContext);
 	}
 
-	static bool startsOTELSpanContextMessage(uint8_t byte) { return byte == MutationRef::Reserved_For_OTELSpanContextMessage; }
+	static bool startsOTELSpanContextMessage(uint8_t byte) {
+		return byte == MutationRef::Reserved_For_OTELSpanContextMessage;
+	}
 	template <class Ar>
 	static bool isNextIn(Ar& ar) {
 		return startsOTELSpanContextMessage(*(const uint8_t*)ar.peekBytes(1));
