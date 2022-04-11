@@ -621,7 +621,7 @@ class Tester:
                         test_size_limit_option(db)
                         test_get_approximate_size(db)
 
-                        if fdb.get_api_version() >= 720:
+                        if fdb.get_api_version() >= 710:
                             test_tenants(db)
 
                     except fdb.FDBError as e:
