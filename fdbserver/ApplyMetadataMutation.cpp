@@ -156,7 +156,6 @@ private:
 		if (!m.param1.startsWith(keyServersPrefix)) {
 			return;
 		}
-		// TraceEvent("checkSetKeyServersPrefix").detail("ToCommit", toCommit  ? 1 : 0);
 
 		if (!initialCommit)
 			txnStateStore->set(KeyValueRef(m.param1, m.param2));
@@ -208,7 +207,6 @@ private:
 		if (!m.param1.startsWith(serverKeysPrefix)) {
 			return;
 		}
-		// TraceEvent("checkSetServerKeysPrefix");
 
 		if (toCommit) {
 			Tag tag = decodeServerTagValue(
@@ -231,7 +229,6 @@ private:
 		if (!m.param1.startsWith(serverTagPrefix)) {
 			return;
 		}
-		// TraceEvent("checkSetServerTagsPrefix").detail("ToCommit", toCommit  ? 1 : 0);
 
 		UID id = decodeServerTagKey(m.param1);
 		Tag tag = decodeServerTagValue(m.param2);
@@ -300,7 +297,6 @@ private:
 		if (!m.param1.startsWith(cacheKeysPrefix) || toCommit == nullptr) {
 			return;
 		}
-		// TraceEvent("checkSetCacheKeysPrefix");
 		// Create a private mutation for cache servers
 		// This is done to make the cache servers aware of the cached key-ranges
 		MutationRef privatized = m;
@@ -392,7 +388,6 @@ private:
 		if (!m.param1.startsWith(tssMappingKeys.begin)) {
 			return;
 		}
-		// TraceEvent("checkSetTSSMappingKeys");
 
 		// Normally uses key backed map, so have to use same unpacking code here.
 		UID ssId = Codec<UID>::unpack(Tuple::unpack(m.param1.removePrefix(tssMappingKeys.begin)));
@@ -427,7 +422,6 @@ private:
 		if (!toCommit) {
 			return;
 		}
-		// TraceEvent("checkSetTSSQuarantineKeys");
 		UID tssId = decodeTssQuarantineKey(m.param1);
 		Optional<Value> ssiV = txnStateStore->readValue(serverListKeyFor(tssId)).get();
 		if (!ssiV.present()) {
@@ -537,7 +531,6 @@ private:
 		if (!toCommit) {
 			return;
 		}
-		// TraceEvent("checkSetGlobalKeys");
 		// Notifies all servers that a Master's server epoch ends
 		auto allServers = txnStateStore->readRange(serverTagKeys).get();
 		std::set<Tag> allTags;
@@ -617,6 +610,18 @@ private:
 			txnStateStore->set(KeyValueRef(m.param1, m.param2));
 		confChange = true;
 		TEST(true); // Recovering at a higher version.
+	}
+
+	void checkSetVersionEpochKey(MutationRef m) {
+		if (m.param1 != versionEpochKey) {
+			return;
+		}
+		int64_t versionEpoch = BinaryReader::fromStringRef<int64_t>(m.param2, Unversioned());
+		TraceEvent("VersionEpoch", dbgid).detail("Epoch", versionEpoch);
+		if (!initialCommit)
+			txnStateStore->set(KeyValueRef(m.param1, m.param2));
+		confChange = true;
+		TEST(true); // Setting version epoch
 	}
 
 	void checkSetWriteRecoverKey(MutationRef m) {
@@ -729,7 +734,6 @@ private:
 		if (!serverTagKeys.intersects(range)) {
 			return;
 		}
-		// TraceEvent("checkClearServerTagKeys");
 		// Storage server removal always happens in a separate version from any prior writes (or any subsequent
 		// reuse of the tag) so we can safely destroy the tag here without any concern about intra-batch
 		// ordering
@@ -998,6 +1002,16 @@ private:
 		}
 	}
 
+	void checkClearVersionEpochKeys(MutationRef m, KeyRangeRef range) {
+		if (!range.contains(versionEpochKey)) {
+			return;
+		}
+		if (!initialCommit)
+			txnStateStore->clear(singleKeyRange(versionEpochKey));
+		TraceEvent("MutationRequiresRestart", dbgid).detail("M", m);
+		confChange = true;
+	}
+
 	void checkClearTenantMapPrefix(KeyRangeRef range) {
 		if (tenantMapKeys.intersects(range)) {
 			if (tenantMap) {
@@ -1079,7 +1093,6 @@ private:
 		if (cachedRangeInfo.size() == 0 || !toCommit) {
 			return;
 		}
-		// TraceEvent("tagStorageServersForCachedKeyRanges");
 
 		std::map<KeyRef, MutationRef>::iterator itr;
 		KeyRef keyBegin, keyEnd;
@@ -1164,6 +1177,7 @@ public:
 				checkSetGlobalKeys(m);
 				checkSetWriteRecoverKey(m);
 				checkSetMinRequiredCommitVersionKey(m);
+				checkSetVersionEpochKey(m);
 				checkSetTenantMapPrefix(m);
 				checkSetOtherKeys(m);
 			} else if (m.type == MutationRef::ClearRange && isSystemKey(m.param2)) {
@@ -1180,6 +1194,7 @@ public:
 				checkClearLogRangesRange(range);
 				checkClearTssMappingKeys(m, range);
 				checkClearTssQuarantineKeys(m, range);
+				checkClearVersionEpochKeys(m, range);
 				checkClearTenantMapPrefix(range);
 				checkClearMiscRangeKeys(range);
 			}

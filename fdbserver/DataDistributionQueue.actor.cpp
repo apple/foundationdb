@@ -1027,6 +1027,16 @@ struct DDQueueData {
 
 		validate();
 	}
+
+	int getHighestPriorityRelocation() const {
+		int highestPriority{ 0 };
+		for (const auto& [priority, count] : priority_relocations) {
+			if (count > 0) {
+				highestPriority = std::max(highestPriority, priority);
+			}
+		}
+		return highestPriority;
+	}
 };
 
 static std::string destServersString(std::vector<std::pair<Reference<IDataDistributionTeam>, bool>> const& bestTeams) {
@@ -1698,7 +1708,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
                                          Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
                                          MoveKeysLock lock,
                                          PromiseStream<Promise<int64_t>> getAverageShardBytes,
-                                         PromiseStream<Promise<int>> getUnhealthyRelocationCount,
+                                         FutureStream<Promise<int>> getUnhealthyRelocationCount,
                                          UID distributorId,
                                          int teamSize,
                                          int singleRegionTeamSize,
@@ -1792,12 +1802,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 
 					recordMetrics = delay(SERVER_KNOBS->DD_QUEUE_LOGGING_INTERVAL, TaskPriority::FlushTrace);
 
-					int highestPriorityRelocation = 0;
-					for (auto it = self.priority_relocations.begin(); it != self.priority_relocations.end(); ++it) {
-						if (it->second) {
-							highestPriorityRelocation = std::max(highestPriorityRelocation, it->first);
-						}
-					}
+					auto const highestPriorityRelocation = self.getHighestPriorityRelocation();
 
 					TraceEvent("MovingData", distributorId)
 					    .detail("InFlight", self.activeRelocations)
@@ -1833,9 +1838,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 				}
 				when(wait(self.error.getFuture())) {} // Propagate errors from dataDistributionRelocator
 				when(wait(waitForAll(balancingFutures))) {}
-				when(Promise<int> r = waitNext(getUnhealthyRelocationCount.getFuture())) {
-					r.send(self.unhealthyRelocations);
-				}
+				when(Promise<int> r = waitNext(getUnhealthyRelocationCount)) { r.send(self.unhealthyRelocations); }
 			}
 		}
 	} catch (Error& e) {

@@ -103,7 +103,7 @@ using namespace std::literals;
 // clang-format off
 enum {
 	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_TRACER, OPT_NEWCONSOLE,
-	OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RESTORING, OPT_RANDOMSEED, OPT_KEY, OPT_MEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_CACHEMEMLIMIT, OPT_MACHINEID,
+	OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RESTORING, OPT_RANDOMSEED, OPT_KEY, OPT_MEMLIMIT, OPT_VMEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_CACHEMEMLIMIT, OPT_MACHINEID,
 	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_BUILD_FLAGS, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR,
 	OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_UNITTESTPARAM, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
@@ -153,6 +153,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_KEY,                   "--key",                       SO_REQ_SEP },
 	{ OPT_MEMLIMIT,              "-m",                          SO_REQ_SEP },
 	{ OPT_MEMLIMIT,              "--memory",                    SO_REQ_SEP },
+	{ OPT_VMEMLIMIT,             "--memory-vsize",              SO_REQ_SEP },
 	{ OPT_STORAGEMEMLIMIT,       "-M",                          SO_REQ_SEP },
 	{ OPT_STORAGEMEMLIMIT,       "--storage-memory",            SO_REQ_SEP },
 	{ OPT_CACHEMEMLIMIT,         "--cache-memory",              SO_REQ_SEP },
@@ -634,7 +635,10 @@ static void printUsage(const char* name, bool devhelp) {
 	                 " Define a locality key. LOCALITYKEY is case-insensitive though"
 	                 " LOCALITYVALUE is not.");
 	printOptionUsage("-m SIZE, --memory SIZE",
-	                 " Memory limit. The default value is 8GiB. When specified"
+	                 " Resident memory limit. The default value is 8GiB. When specified"
+	                 " without a unit, MiB is assumed.");
+	printOptionUsage("--memory-vsize SIZE",
+	                 " Virtual memory limit. The default value is unlimited. When specified"
 	                 " without a unit, MiB is assumed.");
 	printOptionUsage("-M SIZE, --storage-memory SIZE",
 	                 " Maximum amount of memory used for storage. The default"
@@ -1002,9 +1006,10 @@ struct CLIOptions {
 	NetworkAddressList publicAddresses, listenAddresses;
 
 	const char* targetKey = nullptr;
-	int64_t memLimit =
+	uint64_t memLimit =
 	    8LL << 30; // Nice to maintain the same default value for memLimit and SERVER_KNOBS->SERVER_MEM_LIMIT and
 	               // SERVER_KNOBS->COMMIT_BATCHES_MEM_BYTES_HARD_LIMIT
+	uint64_t virtualMemLimit = 0; // unlimited
 	uint64_t storageMemLimit = 1LL << 30;
 	bool buggifyEnabled = false, faultInjectionEnabled = true, restarting = false;
 	Optional<Standalone<StringRef>> zoneId;
@@ -1434,6 +1439,15 @@ private:
 				}
 				memLimit = ti.get();
 				break;
+			case OPT_VMEMLIMIT:
+				ti = parse_with_suffix(args.OptionArg(), "MiB");
+				if (!ti.present()) {
+					fprintf(stderr, "ERROR: Could not parse virtual memory limit from `%s'\n", args.OptionArg());
+					printHelpTeaser(argv[0]);
+					flushAndExit(FDB_EXIT_ERROR);
+				}
+				virtualMemLimit = ti.get();
+				break;
 			case OPT_STORAGEMEMLIMIT:
 				ti = parse_with_suffix(args.OptionArg(), "MB");
 				if (!ti.present()) {
@@ -1780,47 +1794,28 @@ int main(int argc, char* argv[]) {
 		                                         Randomize::True,
 		                                         role == ServerRole::Simulation ? IsSimulated::True
 		                                                                        : IsSimulated::False);
-		IKnobCollection::getMutableGlobalKnobCollection().setKnob("log_directory", KnobValue::create(opts.logFolder));
-		IKnobCollection::getMutableGlobalKnobCollection().setKnob("conn_file", KnobValue::create(opts.connFile));
-		if (role != ServerRole::Simulation) {
-			IKnobCollection::getMutableGlobalKnobCollection().setKnob("commit_batches_mem_bytes_hard_limit",
-			                                                          KnobValue::create(int64_t{ opts.memLimit }));
+		auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
+		g_knobs.setKnob("log_directory", KnobValue::create(opts.logFolder));
+		g_knobs.setKnob("conn_file", KnobValue::create(opts.connFile));
+		if (role != ServerRole::Simulation && opts.memLimit > 0) {
+			g_knobs.setKnob("commit_batches_mem_bytes_hard_limit",
+			                KnobValue::create(static_cast<int64_t>(opts.memLimit)));
 		}
 
-		for (const auto& [knobName, knobValueString] : opts.knobs) {
-			try {
-				auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
-				auto knobValue = g_knobs.parseKnobValue(knobName, knobValueString);
-				g_knobs.setKnob(knobName, knobValue);
-			} catch (Error& e) {
-				if (e.code() == error_code_invalid_option_value) {
-					fprintf(stderr,
-					        "WARNING: Invalid value '%s' for knob option '%s'\n",
-					        knobName.c_str(),
-					        knobValueString.c_str());
-					TraceEvent(SevWarnAlways, "InvalidKnobValue")
-					    .detail("Knob", printable(knobName))
-					    .detail("Value", printable(knobValueString));
-				} else {
-					fprintf(stderr, "ERROR: Failed to set knob option '%s': %s\n", knobName.c_str(), e.what());
-					TraceEvent(SevError, "FailedToSetKnob")
-					    .error(e)
-					    .detail("Knob", printable(knobName))
-					    .detail("Value", printable(knobValueString));
-					throw;
-				}
-			}
-		}
-		IKnobCollection::getMutableGlobalKnobCollection().setKnob("server_mem_limit",
-		                                                          KnobValue::create(int64_t{ opts.memLimit }));
+		IKnobCollection::setupKnobs(opts.knobs);
+		g_knobs.setKnob("server_mem_limit", KnobValue::create(static_cast<int64_t>(opts.memLimit)));
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
-		IKnobCollection::getMutableGlobalKnobCollection().initialize(
-		    Randomize::True, role == ServerRole::Simulation ? IsSimulated::True : IsSimulated::False);
+		g_knobs.initialize(Randomize::True, role == ServerRole::Simulation ? IsSimulated::True : IsSimulated::False);
 
 		// evictionPolicyStringToEnum will throw an exception if the string is not recognized as a valid
 		EvictablePageCache::evictionPolicyStringToEnum(FLOW_KNOBS->CACHE_EVICTION_POLICY);
 
-		if (opts.memLimit <= FLOW_KNOBS->PAGE_CACHE_4K) {
+		if (opts.memLimit > 0 && opts.virtualMemLimit > 0 && opts.memLimit > opts.virtualMemLimit) {
+			fprintf(stderr, "ERROR : --memory-vsize has to be no less than --memory");
+			flushAndExit(FDB_EXIT_ERROR);
+		}
+
+		if (opts.memLimit > 0 && opts.memLimit <= FLOW_KNOBS->PAGE_CACHE_4K) {
 			fprintf(stderr, "ERROR: --memory has to be larger than --cache-memory\n");
 			flushAndExit(FDB_EXIT_ERROR);
 		}
@@ -1937,11 +1932,13 @@ int main(int argc, char* argv[]) {
 		    .detail("BuggifyEnabled", opts.buggifyEnabled)
 		    .detail("FaultInjectionEnabled", opts.faultInjectionEnabled)
 		    .detail("MemoryLimit", opts.memLimit)
+		    .detail("VirtualMemoryLimit", opts.virtualMemLimit)
 		    .trackLatest("ProgramStart");
 
 		Error::init();
 		std::set_new_handler(&platform::outOfMemory);
-		setMemoryQuota(opts.memLimit);
+		Future<Void> memoryUsageMonitor = startMemoryUsageMonitor(opts.memLimit);
+		setMemoryQuota(opts.virtualMemLimit);
 
 		Future<Optional<Void>> f;
 

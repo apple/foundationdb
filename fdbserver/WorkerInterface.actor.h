@@ -769,11 +769,13 @@ struct InitializeStorageRequest {
 	Optional<std::pair<UID, Version>>
 	    tssPairIDAndVersion; // Only set if recruiting a tss. Will be the UID and Version of its SS pair.
 	UID clusterId; // Unique cluster identifier. Only needed at recruitment, will be read from txnStateStore on recovery
+	Version initialClusterVersion;
 	ReplyPromise<InitializeStorageReply> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, seedTag, reqId, interfaceId, storeType, reply, tssPairIDAndVersion, clusterId);
+		serializer(
+		    ar, seedTag, reqId, interfaceId, storeType, reply, tssPairIDAndVersion, clusterId, initialClusterVersion);
 	}
 };
 
@@ -1088,6 +1090,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  StorageServerInterface ssi,
                                  Tag seedTag,
                                  UID clusterId,
+                                 Version startVersion,
                                  Version tssSeedVersion,
                                  ReplyPromise<InitializeStorageReply> recruitReply,
                                  Reference<AsyncVar<ServerDBInfo> const> db,
@@ -1143,6 +1146,10 @@ ACTOR Future<Void> backupWorker(BackupInterface bi,
                                 Reference<AsyncVar<ServerDBInfo> const> db);
 
 void registerThreadForProfiling();
+
+// Returns true if `address` is used in the db (indicated by `dbInfo`) transaction system and in the db's primary
+// satellite DC.
+bool addressInDbAndPrimarySatelliteDc(const NetworkAddress& address, Reference<AsyncVar<ServerDBInfo> const> dbInfo);
 
 // Returns true if `address` is used in the db (indicated by `dbInfo`) transaction system and in the db's remote DC.
 bool addressInDbAndRemoteDc(const NetworkAddress& address, Reference<AsyncVar<ServerDBInfo> const> dbInfo);

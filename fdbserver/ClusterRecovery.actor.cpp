@@ -343,6 +343,7 @@ ACTOR Future<Void> newSeedServers(Reference<ClusterRecoveryData> self,
 		isr.reqId = deterministicRandom()->randomUniqueID();
 		isr.interfaceId = deterministicRandom()->randomUniqueID();
 		isr.clusterId = self->clusterId;
+		isr.initialClusterVersion = self->recoveryTransactionVersion;
 
 		ErrorOr<InitializeStorageReply> newServer = wait(recruits.storageServers[idx].storage.tryGetReply(isr));
 
@@ -870,7 +871,8 @@ ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster(Reference<Clust
 					    .detail("MType", m->type)
 					    .detail("Param1", m->param1)
 					    .detail("Param2", m->param2);
-					if (isMetadataMutation(*m)) {
+					// emergency transaction only mean to do configuration change
+					if (parent->configuration.involveMutation(*m)) {
 						// We keep the mutations and write conflict ranges from this transaction, but not its read
 						// conflict ranges
 						Standalone<CommitTransactionRef> out;
@@ -989,8 +991,12 @@ ACTOR Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
 	     newTLogServers(self, recruits, oldLogSystem, &confChanges));
 
 	// Update recovery related information to the newly elected sequencer (master) process.
-	wait(brokenPromiseToNever(self->masterInterface.updateRecoveryData.getReply(UpdateRecoveryDataRequest(
-	    self->recoveryTransactionVersion, self->lastEpochEnd, self->commitProxies, self->resolvers))));
+	wait(brokenPromiseToNever(
+	    self->masterInterface.updateRecoveryData.getReply(UpdateRecoveryDataRequest(self->recoveryTransactionVersion,
+	                                                                                self->lastEpochEnd,
+	                                                                                self->commitProxies,
+	                                                                                self->resolvers,
+	                                                                                self->versionEpoch))));
 
 	return confChanges;
 }
@@ -1042,6 +1048,14 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	self->txnStateStore =
 	    keyValueStoreLogSystem(self->txnStateLogAdapter, self->dbgid, self->memoryLimit, false, false, true);
 
+	// Version 0 occurs at the version epoch. The version epoch is the number
+	// of microseconds since the Unix epoch. It can be set through fdbcli.
+	self->versionEpoch.reset();
+	Optional<Standalone<StringRef>> versionEpochValue = wait(self->txnStateStore->readValue(versionEpochKey));
+	if (versionEpochValue.present()) {
+		self->versionEpoch = BinaryReader::fromStringRef<int64_t>(versionEpochValue.get(), Unversioned());
+	}
+
 	// Versionstamped operations (particularly those applied from DR) define a minimum commit version
 	// that we may recover to, as they embed the version in user-readable data and require that no
 	// transactions will be committed at a lower version.
@@ -1051,6 +1065,11 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 	Version minRequiredCommitVersion = -1;
 	if (requiredCommitVersion.present()) {
 		minRequiredCommitVersion = BinaryReader::fromStringRef<Version>(requiredCommitVersion.get(), Unversioned());
+	}
+	if (g_network->isSimulated() && self->versionEpoch.present()) {
+		minRequiredCommitVersion = std::max(
+		    minRequiredCommitVersion,
+		    static_cast<Version>(g_network->timer() * SERVER_KNOBS->VERSIONS_PER_SECOND - self->versionEpoch.get()));
 	}
 
 	// Recover version info
@@ -1064,12 +1083,12 @@ ACTOR Future<Void> readTransactionSystemState(Reference<ClusterRecoveryData> sel
 			self->recoveryTransactionVersion = self->lastEpochEnd + SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT;
 		}
 
-		if (BUGGIFY) {
-			self->recoveryTransactionVersion +=
-			    deterministicRandom()->randomInt64(0, SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT);
-		}
 		if (self->recoveryTransactionVersion < minRequiredCommitVersion)
 			self->recoveryTransactionVersion = minRequiredCommitVersion;
+	}
+
+	if (BUGGIFY) {
+		self->recoveryTransactionVersion += deterministicRandom()->randomInt64(0, 10000000);
 	}
 
 	TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_RECOVERED_EVENT_NAME).c_str(),

@@ -63,23 +63,6 @@ bool IPAddress::isValid() const {
 	return std::get<uint32_t>(addr) != 0;
 }
 
-Hostname Hostname::parse(const std::string& s) {
-	if (s.empty()) {
-		throw connection_string_invalid();
-	}
-
-	bool isTLS = false;
-	std::string f;
-	if (s.size() > 4 && strcmp(s.c_str() + s.size() - 4, ":tls") == 0) {
-		isTLS = true;
-		f = s.substr(0, s.size() - 4);
-	} else {
-		f = s;
-	}
-	auto colonPos = f.find_first_of(":");
-	return Hostname(f.substr(0, colonPos), f.substr(colonPos + 1), isTLS);
-}
-
 FDB_DEFINE_BOOLEAN_PARAM(NetworkAddressFromHostname);
 
 NetworkAddress NetworkAddress::parse(std::string const& s) {
@@ -178,6 +161,118 @@ std::string formatIpPort(const IPAddress& ip, uint16_t port) {
 	return format(patt, ip.toString().c_str(), port);
 }
 
+Optional<std::vector<NetworkAddress>> DNSCache::find(const std::string& host, const std::string& service) {
+	auto it = hostnameToAddresses.find(host + ":" + service);
+	if (it != hostnameToAddresses.end()) {
+		return it->second;
+	}
+	return {};
+}
+
+void DNSCache::add(const std::string& host, const std::string& service, const std::vector<NetworkAddress>& addresses) {
+	hostnameToAddresses[host + ":" + service] = addresses;
+}
+
+void DNSCache::remove(const std::string& host, const std::string& service) {
+	auto it = hostnameToAddresses.find(host + ":" + service);
+	if (it != hostnameToAddresses.end()) {
+		hostnameToAddresses.erase(it);
+	}
+}
+
+void DNSCache::clear() {
+	hostnameToAddresses.clear();
+}
+
+std::string DNSCache::toString() {
+	std::string ret;
+	for (auto it = hostnameToAddresses.begin(); it != hostnameToAddresses.end(); ++it) {
+		if (it != hostnameToAddresses.begin()) {
+			ret += ';';
+		}
+		ret += it->first + ',';
+		const std::vector<NetworkAddress>& addresses = it->second;
+		for (int i = 0; i < addresses.size(); ++i) {
+			ret += addresses[i].toString();
+			if (i != addresses.size() - 1) {
+				ret += ',';
+			}
+		}
+	}
+	return ret;
+}
+
+DNSCache DNSCache::parseFromString(const std::string& s) {
+	std::map<std::string, std::vector<NetworkAddress>> dnsCache;
+
+	for (int p = 0; p < s.length();) {
+		int pSemiColumn = s.find_first_of(';', p);
+		if (pSemiColumn == s.npos) {
+			pSemiColumn = s.length();
+		}
+		std::string oneMapping = s.substr(p, pSemiColumn - p);
+
+		std::string hostname;
+		std::vector<NetworkAddress> addresses;
+		for (int i = 0; i < oneMapping.length();) {
+			int pComma = oneMapping.find_first_of(',', i);
+			if (pComma == oneMapping.npos) {
+				pComma = oneMapping.length();
+			}
+			if (!i) {
+				// The first part is hostname
+				hostname = oneMapping.substr(i, pComma - i);
+			} else {
+				addresses.push_back(NetworkAddress::parse(oneMapping.substr(i, pComma - i)));
+			}
+			i = pComma + 1;
+		}
+		dnsCache[hostname] = addresses;
+		p = pSemiColumn + 1;
+	}
+
+	return DNSCache(dnsCache);
+}
+
+TEST_CASE("/flow/DNSCache") {
+	DNSCache dnsCache;
+	std::vector<NetworkAddress> networkAddresses;
+	NetworkAddress address1(IPAddress(0x13131313), 1), address2(IPAddress(0x14141414), 2);
+	networkAddresses.push_back(address1);
+	networkAddresses.push_back(address2);
+	dnsCache.add("testhost1", "port1", networkAddresses);
+	ASSERT(dnsCache.find("testhost1", "port1").present());
+	ASSERT(!dnsCache.find("testhost1", "port2").present());
+	std::vector<NetworkAddress> resolvedNetworkAddresses = dnsCache.find("testhost1", "port1").get();
+	ASSERT(resolvedNetworkAddresses.size() == 2);
+	ASSERT(std::find(resolvedNetworkAddresses.begin(), resolvedNetworkAddresses.end(), address1) !=
+	       resolvedNetworkAddresses.end());
+	ASSERT(std::find(resolvedNetworkAddresses.begin(), resolvedNetworkAddresses.end(), address2) !=
+	       resolvedNetworkAddresses.end());
+	dnsCache.remove("testhost1", "port1");
+	ASSERT(!dnsCache.find("testhost1", "port1").present());
+	dnsCache.add("testhost1", "port2", networkAddresses);
+	ASSERT(dnsCache.find("testhost1", "port2").present());
+	dnsCache.clear();
+	ASSERT(!dnsCache.find("testhost1", "port2").present());
+
+	return Void();
+}
+
+TEST_CASE("/flow/DNSCacheParsing") {
+	std::string dnsCacheString;
+	ASSERT(DNSCache::parseFromString(dnsCacheString).toString() == dnsCacheString);
+
+	dnsCacheString = "testhost1:port1,[::1]:4800:tls(fromHostname)";
+	ASSERT(DNSCache::parseFromString(dnsCacheString).toString() == dnsCacheString);
+
+	dnsCacheString = "testhost1:port1,[::1]:4800,[2001:db8:85a3::8a2e:370:7334]:4800;testhost2:port2,[2001:db8:85a3::"
+	                 "8a2e:370:7334]:4800:tls(fromHostname),8.8.8.8:12";
+	ASSERT(DNSCache::parseFromString(dnsCacheString).toString() == dnsCacheString);
+
+	return Void();
+}
+
 Future<Reference<IConnection>> INetworkConnections::connect(const std::string& host,
                                                             const std::string& service,
                                                             bool isTLS) {
@@ -248,64 +343,6 @@ TEST_CASE("/flow/network/ipaddress") {
 		auto addrParsed = IPAddress::parse(addr);
 		ASSERT(!addrParsed.present());
 	}
-
-	return Void();
-}
-
-TEST_CASE("/flow/network/hostname") {
-	std::string hn1s = "localhost:1234";
-	std::string hn2s = "host-name:1234";
-	std::string hn3s = "host.name:1234";
-	std::string hn4s = "host-name_part1.host-name_part2:1234:tls";
-
-	std::string hn5s = "127.0.0.1:1234";
-	std::string hn6s = "127.0.0.1:1234:tls";
-	std::string hn7s = "[2001:0db8:85a3:0000:0000:8a2e:0370:7334]:4800";
-	std::string hn8s = "[2001:0db8:85a3:0000:0000:8a2e:0370:7334]:4800:tls";
-	std::string hn9s = "2001:0db8:85a3:0000:0000:8a2e:0370:7334";
-	std::string hn10s = "2001:0db8:85a3:0000:0000:8a2e:0370:7334:tls";
-	std::string hn11s = "[::1]:4800";
-	std::string hn12s = "[::1]:4800:tls";
-	std::string hn13s = "1234";
-
-	auto hn1 = Hostname::parse(hn1s);
-	ASSERT(hn1.toString() == hn1s);
-	ASSERT(hn1.host == "localhost");
-	ASSERT(hn1.service == "1234");
-	ASSERT(!hn1.isTLS);
-
-	auto hn2 = Hostname::parse(hn2s);
-	ASSERT(hn2.toString() == hn2s);
-	ASSERT(hn2.host == "host-name");
-	ASSERT(hn2.service == "1234");
-	ASSERT(!hn2.isTLS);
-
-	auto hn3 = Hostname::parse(hn3s);
-	ASSERT(hn3.toString() == hn3s);
-	ASSERT(hn3.host == "host.name");
-	ASSERT(hn3.service == "1234");
-	ASSERT(!hn3.isTLS);
-
-	auto hn4 = Hostname::parse(hn4s);
-	ASSERT(hn4.toString() == hn4s);
-	ASSERT(hn4.host == "host-name_part1.host-name_part2");
-	ASSERT(hn4.service == "1234");
-	ASSERT(hn4.isTLS);
-
-	ASSERT(Hostname::isHostname(hn1s));
-	ASSERT(Hostname::isHostname(hn2s));
-	ASSERT(Hostname::isHostname(hn3s));
-	ASSERT(Hostname::isHostname(hn4s));
-
-	ASSERT(!Hostname::isHostname(hn5s));
-	ASSERT(!Hostname::isHostname(hn6s));
-	ASSERT(!Hostname::isHostname(hn7s));
-	ASSERT(!Hostname::isHostname(hn8s));
-	ASSERT(!Hostname::isHostname(hn9s));
-	ASSERT(!Hostname::isHostname(hn10s));
-	ASSERT(!Hostname::isHostname(hn11s));
-	ASSERT(!Hostname::isHostname(hn12s));
-	ASSERT(!Hostname::isHostname(hn13s));
 
 	return Void();
 }

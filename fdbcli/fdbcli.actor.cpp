@@ -42,10 +42,12 @@
 #include "fdbclient/Tuple.h"
 
 #include "fdbclient/ThreadSafeTransaction.h"
+#include "flow/flow.h"
 #include "flow/ArgParseUtil.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/FastRef.h"
 #include "flow/Platform.h"
+#include "flow/SystemMonitor.h"
 
 #include "flow/TLSConfig.actor.h"
 #include "flow/ThreadHelper.actor.h"
@@ -98,6 +100,7 @@ enum {
 	OPT_KNOB,
 	OPT_DEBUG_TLS,
 	OPT_API_VERSION,
+	OPT_MEMORY,
 };
 
 CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
@@ -121,6 +124,7 @@ CSimpleOpt::SOption g_rgOptions[] = { { OPT_CONNFILE, "-C", SO_REQ_SEP },
 	                                  { OPT_KNOB, "--knob-", SO_REQ_SEP },
 	                                  { OPT_DEBUG_TLS, "--debug-tls", SO_NONE },
 	                                  { OPT_API_VERSION, "--api-version", SO_REQ_SEP },
+	                                  { OPT_MEMORY, "--memory", SO_REQ_SEP },
 
 #ifndef TLS_DISABLED
 	                                  TLS_OPTION_FLAGS
@@ -453,6 +457,7 @@ static void printProgramUsage(const char* name) {
 	       "  --debug-tls    Prints the TLS configuration and certificate chain, then exits.\n"
 	       "                 Useful in reporting and diagnosing TLS issues.\n"
 	       "  --build-flags  Print build information and exit.\n"
+	       "  --memory       Resident memory limit of the CLI (defaults to 8GiB).\n"
 	       "  -v, --version  Print FoundationDB CLI version information and exit.\n"
 	       "  -h, --help     Display this help and exit.\n");
 }
@@ -990,6 +995,7 @@ struct CLIOptions {
 	std::string tlsVerifyPeers;
 	std::string tlsCAPath;
 	std::string tlsPassword;
+	uint64_t memLimit = 8uLL << 30;
 
 	std::vector<std::pair<std::string, std::string>> knobs;
 
@@ -1021,33 +1027,10 @@ struct CLIOptions {
 	}
 
 	void setupKnobs() {
-		auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
-		for (const auto& [knobName, knobValueString] : knobs) {
-			try {
-				auto knobValue = g_knobs.parseKnobValue(knobName, knobValueString);
-				g_knobs.setKnob(knobName, knobValue);
-			} catch (Error& e) {
-				if (e.code() == error_code_invalid_option_value) {
-					fprintf(stderr,
-					        "WARNING: Invalid value '%s' for knob option '%s'\n",
-					        knobValueString.c_str(),
-					        knobName.c_str());
-					TraceEvent(SevWarnAlways, "InvalidKnobValue")
-					    .detail("Knob", printable(knobName))
-					    .detail("Value", printable(knobValueString));
-				} else {
-					fprintf(stderr, "ERROR: Failed to set knob option '%s': %s\n", knobName.c_str(), e.what());
-					TraceEvent(SevError, "FailedToSetKnob")
-					    .error(e)
-					    .detail("Knob", printable(knobName))
-					    .detail("Value", printable(knobValueString));
-					exit_code = FDB_EXIT_ERROR;
-				}
-			}
-		}
+		IKnobCollection::setupKnobs(knobs);
 
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
-		g_knobs.initialize(Randomize::False, IsSimulated::False);
+		IKnobCollection::getMutableGlobalKnobCollection().initialize(Randomize::False, IsSimulated::False);
 	}
 
 	int processArg(CSimpleOpt& args) {
@@ -1074,6 +1057,11 @@ struct CLIOptions {
 				        FDB_API_VERSION);
 				return 1;
 			}
+			break;
+		}
+		case OPT_MEMORY: {
+			std::string memoryArg(args.OptionArg());
+			memLimit = parse_with_suffix(memoryArg, "MiB").orDefault(8uLL << 30);
 			break;
 		}
 		case OPT_TRACE:
@@ -1658,6 +1646,13 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					continue;
 				}
 
+				if (tokencmp(tokens[0], "versionepoch")) {
+					bool _result = wait(makeInterruptable(versionEpochCommandActor(db, localDb, tokens)));
+					if (!_result)
+						is_error = true;
+					continue;
+				}
+
 				if (tokencmp(tokens[0], "kill")) {
 					getTransaction(db, managementTenant, tr, options, intrans);
 					bool _result = wait(makeInterruptable(killCommandActor(db, tr, tokens, &address_interface)));
@@ -2140,8 +2135,6 @@ int main(int argc, char** argv) {
 	platformInit();
 	Error::init();
 	std::set_new_handler(&platform::outOfMemory);
-	uint64_t memLimit = 8LL << 30;
-	setMemoryQuota(memLimit);
 
 	registerCrashHandler();
 
@@ -2253,6 +2246,7 @@ int main(int argc, char** argv) {
 		if (opt.exit_code != -1) {
 			return opt.exit_code;
 		}
+		Future<Void> memoryUsageMonitor = startMemoryUsageMonitor(opt.memLimit);
 		Future<int> cliFuture = runCli(opt);
 		Future<Void> timeoutFuture = opt.exit_timeout ? timeExit(opt.exit_timeout) : Never();
 		auto f = stopNetworkAfter(success(cliFuture) || timeoutFuture);

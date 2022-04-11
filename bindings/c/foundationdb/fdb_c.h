@@ -58,20 +58,11 @@
 #include <stdint.h>
 
 #include "fdb_c_options.g.h"
+#include "fdb_c_types.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-/* Pointers to these opaque types represent objects in the FDB API */
-typedef struct FDB_future FDBFuture;
-typedef struct FDB_result FDBResult;
-typedef struct FDB_database FDBDatabase;
-typedef struct FDB_tenant FDBTenant;
-typedef struct FDB_transaction FDBTransaction;
-
-typedef int fdb_error_t;
-typedef int fdb_bool_t;
 
 DLLEXPORT const char* fdb_get_error(fdb_error_t code);
 
@@ -307,6 +298,18 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_create_snapshot(FDBDatabase
 DLLEXPORT WARN_UNUSED_RESULT double fdb_database_get_main_thread_busyness(FDBDatabase* db);
 
 DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_get_server_protocol(FDBDatabase* db, uint64_t expected_version);
+
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_purge_blob_granules(FDBDatabase* db,
+                                                                         uint8_t const* begin_key_name,
+                                                                         int begin_key_name_length,
+                                                                         uint8_t const* end_key_name,
+                                                                         int end_key_name_length,
+                                                                         int64_t purge_version,
+                                                                         fdb_bool_t force);
+
+DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_database_wait_purge_granules_complete(FDBDatabase* db,
+                                                                                  uint8_t const* purge_key_name,
+                                                                                  int purge_key_name_length);
 
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_tenant_create_transaction(FDBTenant* tenant,
                                                                        FDBTransaction** out_transaction);
