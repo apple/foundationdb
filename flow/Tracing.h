@@ -33,6 +33,32 @@ inline Location operator"" _loc(const char* str, size_t size) {
 	return Location{ StringRef(reinterpret_cast<const uint8_t*>(str), size) };
 }
 
+enum class TraceFlags : uint8_t { unsampled = 0b00000000, sampled = 0b00000001 };
+
+inline TraceFlags operator&(TraceFlags lhs, TraceFlags rhs) {
+	return static_cast<TraceFlags>(static_cast<std::underlying_type_t<TraceFlags>>(lhs) &
+	                               static_cast<std::underlying_type_t<TraceFlags>>(rhs));
+}
+
+struct SpanContext {
+	UID traceID;
+	uint64_t spanID;
+	TraceFlags m_Flags;
+	SpanContext() : traceID(UID()), spanID(0), m_Flags(TraceFlags::unsampled) {}
+	SpanContext(UID traceID, uint64_t spanID, TraceFlags flags) : traceID(traceID), spanID(spanID), m_Flags(flags) {}
+	SpanContext(UID traceID, uint64_t spanID) : traceID(traceID), spanID(spanID), m_Flags(TraceFlags::unsampled) {}
+	SpanContext(Arena arena, const SpanContext& span)
+	  : traceID(span.traceID), spanID(span.spanID), m_Flags(span.m_Flags) {}
+	bool isSampled() const { return (m_Flags & TraceFlags::sampled) == TraceFlags::sampled; }
+	std::string toString() const { return format("%016llx%016llx%016llx", traceID.first(), traceID.second(), spanID); };
+	bool isValid() const { return traceID.first() != 0 && traceID.second() != 0; }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, traceID, spanID, m_Flags);
+	}
+};
+
 // struct Span {
 // 	Span(SpanID context, Location location, std::initializer_list<SpanID> const& parents = {})
 // 	  : context(context), begin(g_network->now()), location(location), parents(arena, parents.begin(), parents.end()) {
@@ -162,9 +188,9 @@ struct OTELEventRef {
 class Span {
 public:
 	Span(const SpanContext& context,
-	         const Location& location,
-	         const SpanContext& parentContext,
-	         const std::initializer_list<SpanContext>& links = {})
+	     const Location& location,
+	     const SpanContext& parentContext,
+	     const std::initializer_list<SpanContext>& links = {})
 	  : context(context), location(location), parentContext(parentContext), links(arena, links.begin(), links.end()),
 	    begin(g_network->now()) {
 		// We've simplified the logic here, essentially we're now always setting trace and span ids and relying on the
@@ -191,38 +217,36 @@ public:
 	}
 
 	Span(const Location& location,
-	         const SpanContext& parent = SpanContext(),
-	         const std::initializer_list<SpanContext>& links = {})
-	  : Span(
-	        SpanContext(UID(deterministicRandom()->randomUInt64(), deterministicRandom()->randomUInt64()), // traceID
-	                    deterministicRandom()->randomUInt64(), // spanID
-	                    deterministicRandom()->random01() < FLOW_KNOBS->TRACING_SAMPLE_RATE // sampled or unsampled
-	                        ? TraceFlags::sampled
-	                        : TraceFlags::unsampled),
-	        location,
-	        parent,
-	        links) {}
+	     const SpanContext& parent = SpanContext(),
+	     const std::initializer_list<SpanContext>& links = {})
+	  : Span(SpanContext(UID(deterministicRandom()->randomUInt64(), deterministicRandom()->randomUInt64()), // traceID
+	                     deterministicRandom()->randomUInt64(), // spanID
+	                     deterministicRandom()->random01() < FLOW_KNOBS->TRACING_SAMPLE_RATE // sampled or unsampled
+	                         ? TraceFlags::sampled
+	                         : TraceFlags::unsampled),
+	         location,
+	         parent,
+	         links) {}
 
-	Span(const SpanContext& context, const Location& location)
-	  : Span(context, location, SpanContext()) {}
+	Span(const SpanContext& context, const Location& location) : Span(context, location, SpanContext()) {}
 
 	Span(const Location& location, const SpanContext parent, const SpanContext& link)
 	  : Span(location, parent, { link }) {}
 
-	//Span(const Location& location) : Span(location, SpanContext()) {}
-	// NOTE: This constructor is primarly for unit testing until we sort out how to enable/disable a Knob dynamically in
-	// a test.
+	// Span(const Location& location) : Span(location, SpanContext()) {}
+	//  NOTE: This constructor is primarly for unit testing until we sort out how to enable/disable a Knob dynamically
+	//  in a test.
 	Span(const Location& location,
-	         const std::function<double()>& rateProvider,
-	         const SpanContext& parent = SpanContext(),
-	         const std::initializer_list<SpanContext>& links = {})
+	     const std::function<double()>& rateProvider,
+	     const SpanContext& parent = SpanContext(),
+	     const std::initializer_list<SpanContext>& links = {})
 	  : Span(SpanContext(UID(deterministicRandom()->randomUInt64(), deterministicRandom()->randomUInt64()),
-	                         deterministicRandom()->randomUInt64(),
-	                         deterministicRandom()->random01() < rateProvider() ? TraceFlags::sampled
-	                                                                            : TraceFlags::unsampled),
-	             location,
-	             parent,
-	             links) {}
+	                     deterministicRandom()->randomUInt64(),
+	                     deterministicRandom()->random01() < rateProvider() ? TraceFlags::sampled
+	                                                                        : TraceFlags::unsampled),
+	         location,
+	         parent,
+	         links) {}
 
 	Span(const Span&) = delete;
 	Span(Span&& o) {
@@ -278,8 +302,8 @@ public:
 	}
 
 	Span& addEvent(const StringRef& name,
-	                   const double& time,
-	                   const SmallVectorRef<KeyValueRef>& attrs = SmallVectorRef<KeyValueRef>()) {
+	               const double& time,
+	               const SmallVectorRef<KeyValueRef>& attrs = SmallVectorRef<KeyValueRef>()) {
 		return addEvent(OTELEventRef(name, time, attrs));
 	}
 
@@ -291,11 +315,11 @@ public:
 	Span& addParentOrLink(const SpanContext& other) {
 		if (!parentContext.isValid()) {
 			parentContext = other;
- 		} else {
- 		links.push_back(arena, other);
+		} else {
+			links.push_back(arena, other);
 		}
 		return *this;
-	} 
+	}
 
 	Arena arena;
 	SpanContext context;
@@ -323,7 +347,7 @@ struct ITracer {
 	virtual ~ITracer();
 	virtual TracerType type() const = 0;
 	// passed ownership to the tracer
-	//virtual void trace(Span const& span) = 0;
+	// virtual void trace(Span const& span) = 0;
 	virtual void trace(Span const& span) = 0;
 };
 
