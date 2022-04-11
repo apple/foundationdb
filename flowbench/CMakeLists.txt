@@ -12,6 +12,7 @@ set(FLOWBENCH_SRCS
   BenchRef.cpp
   BenchStream.actor.cpp
   BenchTimer.cpp
+  BenchVersionVector.cpp
   GlobalData.h
   GlobalData.cpp)
 

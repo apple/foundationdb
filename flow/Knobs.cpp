@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -40,6 +40,7 @@ FlowKnobs const* FLOW_KNOBS = &bootstrapGlobalFlowKnobs;
 void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( AUTOMATIC_TRACE_DUMP,                                  1 );
 	init( PREVENT_FAST_SPIN_DELAY,                             .01 );
+	init( HOSTNAME_RESOLVE_DELAY,                              .05 );
 	init( CACHE_REFRESH_INTERVAL_WHEN_ALL_ALTERNATIVES_FAILED, 1.0 );
 
 	init( DELAY_JITTER_OFFSET,                                 0.9 );
@@ -66,6 +67,8 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( FAST_ALLOC_LOGGING_BYTES,                           10e6 );
 	init( HUGE_ARENA_LOGGING_BYTES,                          100e6 );
 	init( HUGE_ARENA_LOGGING_INTERVAL,                         5.0 );
+
+	init( MEMORY_USAGE_CHECK_INTERVAL,                         1.0 );
 
 	// Chaos testing - enabled for simulation by default
 	init( ENABLE_CHAOS_FEATURES,                       isSimulated );
@@ -263,6 +266,12 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( HEALTH_MONITOR_MARK_FAILED_UNSTABLE_CONNECTIONS,    true );
 	init( HEALTH_MONITOR_CLIENT_REQUEST_INTERVAL_SECS,          30 );
 	init( HEALTH_MONITOR_CONNECTION_MAX_CLOSED,                  5 );
+
+	// Encryption
+	init( ENCRYPT_CIPHER_KEY_CACHE_TTL, isSimulated ? 120 : 10 * 60 );
+	if ( randomize && BUGGIFY) { ENCRYPT_CIPHER_KEY_CACHE_TTL = deterministicRandom()->randomInt(50, 100); }
+	init( ENCRYPT_KEY_REFRESH_INTERVAL,   isSimulated ? 60 : 8 * 60 );
+	if ( randomize && BUGGIFY) { ENCRYPT_KEY_REFRESH_INTERVAL = deterministicRandom()->randomInt(20, 40); }
 }
 // clang-format on
 
@@ -344,6 +353,26 @@ bool Knobs::setKnob(std::string const& knob, std::string const& value) {
 	*string_knobs[knob].value = value;
 	explicitlySetKnobs.insert(toLower(knob));
 	return true;
+}
+
+ParsedKnobValue Knobs::getKnob(const std::string& name) const {
+	if (double_knobs.count(name) > 0) {
+		return ParsedKnobValue{ *double_knobs.at(name).value };
+	}
+	if (int64_knobs.count(name) > 0) {
+		return ParsedKnobValue{ *int64_knobs.at(name).value };
+	}
+	if (int_knobs.count(name) > 0) {
+		return ParsedKnobValue{ *int_knobs.at(name).value };
+	}
+	if (string_knobs.count(name) > 0) {
+		return ParsedKnobValue{ *string_knobs.at(name).value };
+	}
+	if (bool_knobs.count(name) > 0) {
+		return ParsedKnobValue{ *bool_knobs.at(name).value };
+	}
+
+	return ParsedKnobValue{ NoKnobFound() };
 }
 
 bool Knobs::isAtomic(std::string const& knob) const {

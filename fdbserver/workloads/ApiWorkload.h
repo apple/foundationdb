@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -52,6 +52,13 @@ struct TransactionWrapper : public ReferenceCounted<TransactionWrapper> {
 	// Gets a range of key-value pairs from the database specified by a pair of key selectors
 	virtual Future<RangeResult> getRange(KeySelectorRef& begin, KeySelectorRef& end, int limit, Reverse reverse) = 0;
 
+	virtual Future<MappedRangeResult> getMappedRange(KeySelector& begin,
+	                                                 KeySelector& end,
+	                                                 Key& mapper,
+	                                                 GetRangeLimits limits,
+	                                                 Snapshot snapshot,
+	                                                 Reverse reverse) = 0;
+
 	// Gets the key from the database specified by a given key selector
 	virtual Future<Key> getKey(KeySelectorRef& key) = 0;
 
@@ -69,6 +76,12 @@ struct TransactionWrapper : public ReferenceCounted<TransactionWrapper> {
 
 	// Gets the committed version of a transaction
 	virtual Version getCommittedVersion() = 0;
+
+	// Gets the version vector cached in a transaction
+	virtual VersionVector getVersionVector() = 0;
+
+	// Gets the spanID of a transaction
+	virtual UID getSpanID() = 0;
 
 	// Prints debugging messages for a transaction; not implemented for all transaction types
 	virtual void debugTransaction(UID debugId) {}
@@ -111,6 +124,15 @@ struct FlowTransactionWrapper : public TransactionWrapper {
 		return transaction.getRange(begin, end, limit, Snapshot::False, reverse);
 	}
 
+	Future<MappedRangeResult> getMappedRange(KeySelector& begin,
+	                                         KeySelector& end,
+	                                         Key& mapper,
+	                                         GetRangeLimits limits,
+	                                         Snapshot snapshot,
+	                                         Reverse reverse) override {
+		return transaction.getMappedRange(begin, end, mapper, limits, snapshot, reverse);
+	}
+
 	// Gets the key from the database specified by a given key selector
 	Future<Key> getKey(KeySelectorRef& key) override { return transaction.getKey(key); }
 
@@ -135,6 +157,12 @@ struct FlowTransactionWrapper : public TransactionWrapper {
 
 	// Gets the committed version of a transaction
 	Version getCommittedVersion() override { return transaction.getCommittedVersion(); }
+
+	// Gets the version vector cached in a transaction
+	VersionVector getVersionVector() override { return transaction.getVersionVector(); }
+
+	// Gets the spanID of a transaction
+	UID getSpanID() override { return transaction.getSpanID(); }
 
 	// Prints debugging messages for a transaction
 	void debugTransaction(UID debugId) override { transaction.debugTransaction(debugId); }
@@ -171,6 +199,15 @@ struct ThreadTransactionWrapper : public TransactionWrapper {
 		return unsafeThreadFutureToFuture(transaction->getRange(begin, end, limit, Snapshot::False, reverse));
 	}
 
+	Future<MappedRangeResult> getMappedRange(KeySelector& begin,
+	                                         KeySelector& end,
+	                                         Key& mapper,
+	                                         GetRangeLimits limits,
+	                                         Snapshot snapshot,
+	                                         Reverse reverse) override {
+		return unsafeThreadFutureToFuture(transaction->getMappedRange(begin, end, mapper, limits, snapshot, reverse));
+	}
+
 	// Gets the key from the database specified by a given key selector
 	Future<Key> getKey(KeySelectorRef& key) override { return unsafeThreadFutureToFuture(transaction->getKey(key)); }
 
@@ -188,6 +225,12 @@ struct ThreadTransactionWrapper : public TransactionWrapper {
 
 	// Gets the committed version of a transaction
 	Version getCommittedVersion() override { return transaction->getCommittedVersion(); }
+
+	// Gets the version vector cached in a transaction
+	VersionVector getVersionVector() override { return transaction->getVersionVector(); }
+
+	// Gets the spanID of a transaction
+	UID getSpanID() override { return transaction->getSpanID(); }
 
 	void addReadConflictRange(KeyRangeRef const& keys) override { transaction->addReadConflictRange(keys); }
 };
@@ -347,6 +390,9 @@ struct ApiWorkload : TestWorkload {
 
 	// The transaction factory used to create transactions in this run
 	Reference<TransactionFactoryInterface> transactionFactory;
+
+	// Transaction type of the transaction factory above.
+	TransactionType transactionType;
 };
 
 #include "flow/unactorcompiler.h"

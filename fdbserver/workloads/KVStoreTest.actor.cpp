@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@
 
 #include <ctime>
 #include <cinttypes>
-#include "contrib/fmt-8.0.1/include/fmt/format.h"
+#include "contrib/fmt-8.1.1/include/fmt/format.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "flow/ActorCollection.h"
@@ -386,7 +386,7 @@ ACTOR Future<Void> testKVStore(KVStoreTestWorkload* workload) {
 		test.store = keyValueStoreSQLite(fn, id, KeyValueStoreType::SSD_REDWOOD_V1);
 	else if (workload->storeType == "ssd-redwood-1-experimental")
 		test.store = keyValueStoreRedwoodV1(fn, id);
-	else if (workload->storeType == "ssd-rocksdb-experimental")
+	else if (workload->storeType == "ssd-rocksdb-v1")
 		test.store = keyValueStoreRocksDB(fn, id, KeyValueStoreType::SSD_ROCKSDB_V1);
 	else if (workload->storeType == "memory")
 		test.store = keyValueStoreMemory(fn, id, 500e6);

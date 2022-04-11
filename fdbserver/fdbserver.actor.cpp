@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,6 +35,8 @@
 #include <boost/algorithm/string.hpp>
 #include <boost/interprocess/managed_shared_memory.hpp>
 
+#include <fmt/printf.h>
+
 #include "fdbclient/ActorLineageProfiler.h"
 #include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/IKnobCollection.h"
@@ -45,16 +47,21 @@
 #include "fdbclient/WellKnownEndpoints.h"
 #include "fdbclient/SimpleIni.h"
 #include "fdbrpc/AsyncFileCached.actor.h"
+#include "fdbrpc/IPAllowList.h"
+#include "fdbrpc/FlowProcess.actor.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/PerfMetric.h"
+#include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/ConflictSet.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/CoroFlow.h"
 #include "fdbserver/DataDistribution.actor.h"
+#include "fdbserver/FDBExecHelper.actor.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/NetworkTest.h"
+#include "fdbserver/RemoteIKeyValueStore.actor.h"
 #include "fdbserver/RestoreWorkerInterface.actor.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/SimulatedCluster.h"
@@ -74,10 +81,13 @@
 #include "flow/WriteOnlySet.h"
 #include "flow/UnitTest.h"
 #include "flow/FaultInjection.h"
+#include "flow/flow.h"
+#include "flow/network.h"
 
 #if defined(__linux__) || defined(__FreeBSD__)
 #include <execinfo.h>
 #include <signal.h>
+#include <sys/prctl.h>
 #ifdef ALLOC_INSTRUMENTATION
 #include <cxxabi.h>
 #endif
@@ -96,11 +106,12 @@ using namespace std::literals;
 // clang-format off
 enum {
 	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_TRACER, OPT_NEWCONSOLE,
-	OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RESTORING, OPT_RANDOMSEED, OPT_KEY, OPT_MEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_CACHEMEMLIMIT, OPT_MACHINEID,
+	OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RESTORING, OPT_RANDOMSEED, OPT_KEY, OPT_MEMLIMIT, OPT_VMEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_CACHEMEMLIMIT, OPT_MACHINEID,
 	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_BUILD_FLAGS, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR,
 	OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_UNITTESTPARAM, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
 	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE, OPT_CONFIG_PATH, OPT_USE_TEST_CONFIG_DB, OPT_FAULT_INJECTION, OPT_PROFILER, OPT_PRINT_SIMTIME,
+	OPT_FLOW_PROCESS_NAME, OPT_FLOW_PROCESS_ENDPOINT, OPT_IP_TRUSTED_MASK
 };
 
 CSimpleOpt::SOption g_rgOptions[] = {
@@ -146,6 +157,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_KEY,                   "--key",                       SO_REQ_SEP },
 	{ OPT_MEMLIMIT,              "-m",                          SO_REQ_SEP },
 	{ OPT_MEMLIMIT,              "--memory",                    SO_REQ_SEP },
+	{ OPT_VMEMLIMIT,             "--memory-vsize",              SO_REQ_SEP },
 	{ OPT_STORAGEMEMLIMIT,       "-M",                          SO_REQ_SEP },
 	{ OPT_STORAGEMEMLIMIT,       "--storage-memory",            SO_REQ_SEP },
 	{ OPT_CACHEMEMLIMIT,         "--cache-memory",              SO_REQ_SEP },
@@ -187,8 +199,11 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_USE_TEST_CONFIG_DB,    "--use-test-config-db",        SO_NONE },
 	{ OPT_FAULT_INJECTION,       "-fi",                         SO_REQ_SEP },
 	{ OPT_FAULT_INJECTION,       "--fault-injection",           SO_REQ_SEP },
-	{ OPT_PROFILER,	             "--profiler-",                 SO_REQ_SEP},
+	{ OPT_PROFILER,	             "--profiler-",                 SO_REQ_SEP },
 	{ OPT_PRINT_SIMTIME,         "--print-sim-time",             SO_NONE },
+	{ OPT_FLOW_PROCESS_NAME,     "--process-name",              SO_REQ_SEP },
+	{ OPT_FLOW_PROCESS_ENDPOINT, "--process-endpoint",          SO_REQ_SEP },
+	{ OPT_IP_TRUSTED_MASK,       "--trusted-subnet-",           SO_REQ_SEP },
 
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
@@ -285,6 +300,13 @@ private:
 };
 
 UID getSharedMemoryMachineId() {
+	// new UID to use if an existing one is not found
+	UID newUID = deterministicRandom()->randomUniqueID();
+
+#if DEBUG_DETERMINISM
+	// Don't use shared memory if DEBUG_DETERMINISM is set
+	return newUID;
+#else
 	UID* machineId = nullptr;
 	int numTries = 0;
 
@@ -294,10 +316,10 @@ UID getSharedMemoryMachineId() {
 	std::string sharedMemoryIdentifier = "fdbserver_shared_memory_id";
 	loop {
 		try {
-			// "0" is the default parameter "addr"
+			// "0" is the default netPrefix "addr"
 			boost::interprocess::managed_shared_memory segment(
 			    boost::interprocess::open_or_create, sharedMemoryIdentifier.c_str(), 1000, 0, p.permission);
-			machineId = segment.find_or_construct<UID>("machineId")(deterministicRandom()->randomUniqueID());
+			machineId = segment.find_or_construct<UID>("machineId")(newUID);
 			if (!machineId)
 				criticalError(
 				    FDB_EXIT_ERROR, "SharedMemoryError", "Could not locate or create shared memory - 'machineId'");
@@ -321,6 +343,7 @@ UID getSharedMemoryMachineId() {
 			}
 		}
 	}
+#endif
 }
 
 ACTOR void failAfter(Future<Void> trigger, ISimulator::ProcessInfo* m = g_simulator.getCurrentProcess()) {
@@ -617,7 +640,10 @@ static void printUsage(const char* name, bool devhelp) {
 	                 " Define a locality key. LOCALITYKEY is case-insensitive though"
 	                 " LOCALITYVALUE is not.");
 	printOptionUsage("-m SIZE, --memory SIZE",
-	                 " Memory limit. The default value is 8GiB. When specified"
+	                 " Resident memory limit. The default value is 8GiB. When specified"
+	                 " without a unit, MiB is assumed.");
+	printOptionUsage("--memory-vsize SIZE",
+	                 " Virtual memory limit. The default value is unlimited. When specified"
 	                 " without a unit, MiB is assumed.");
 	printOptionUsage("-M SIZE, --storage-memory SIZE",
 	                 " Maximum amount of memory used for storage. The default"
@@ -959,7 +985,8 @@ enum class ServerRole {
 	SkipListTest,
 	Test,
 	VersionedMapTest,
-	UnitTests
+	UnitTests,
+	FlowProcess
 };
 struct CLIOptions {
 	std::string commandLine;
@@ -984,9 +1011,10 @@ struct CLIOptions {
 	NetworkAddressList publicAddresses, listenAddresses;
 
 	const char* targetKey = nullptr;
-	int64_t memLimit =
+	uint64_t memLimit =
 	    8LL << 30; // Nice to maintain the same default value for memLimit and SERVER_KNOBS->SERVER_MEM_LIMIT and
 	               // SERVER_KNOBS->COMMIT_BATCHES_MEM_BYTES_HARD_LIMIT
+	uint64_t virtualMemLimit = 0; // unlimited
 	uint64_t storageMemLimit = 1LL << 30;
 	bool buggifyEnabled = false, faultInjectionEnabled = true, restarting = false;
 	Optional<Standalone<StringRef>> zoneId;
@@ -1015,7 +1043,10 @@ struct CLIOptions {
 	UnitTestParameters testParams;
 
 	std::map<std::string, std::string> profilerConfig;
+	std::string flowProcessName;
+	Endpoint flowProcessEndpoint;
 	bool printSimTime = false;
+	IPAllowList allowList;
 
 	static CLIOptions parseArgs(int argc, char* argv[]) {
 		CLIOptions opts;
@@ -1142,6 +1173,15 @@ private:
 				localities.set(key, Standalone<StringRef>(std::string(args.OptionArg())));
 				break;
 			}
+			case OPT_IP_TRUSTED_MASK: {
+				Optional<std::string> subnetKey = extractPrefixedArgument("--trusted-subnet", args.OptionSyntax());
+				if (!subnetKey.present()) {
+					fprintf(stderr, "ERROR: unable to parse locality key '%s'\n", args.OptionSyntax());
+					flushAndExit(FDB_EXIT_ERROR);
+				}
+				allowList.addTrustedSubnet(args.OptionArg());
+				break;
+			}
 			case OPT_VERSION:
 				printVersion();
 				flushAndExit(FDB_EXIT_SUCCESS);
@@ -1193,6 +1233,8 @@ private:
 					role = ServerRole::ConsistencyCheck;
 				else if (!strcmp(sRole, "unittests"))
 					role = ServerRole::UnitTests;
+				else if (!strcmp(sRole, "flowprocess"))
+					role = ServerRole::FlowProcess;
 				else {
 					fprintf(stderr, "ERROR: Unknown role `%s'\n", sRole);
 					printHelpTeaser(argv[0]);
@@ -1412,6 +1454,15 @@ private:
 				}
 				memLimit = ti.get();
 				break;
+			case OPT_VMEMLIMIT:
+				ti = parse_with_suffix(args.OptionArg(), "MiB");
+				if (!ti.present()) {
+					fprintf(stderr, "ERROR: Could not parse virtual memory limit from `%s'\n", args.OptionArg());
+					printHelpTeaser(argv[0]);
+					flushAndExit(FDB_EXIT_ERROR);
+				}
+				virtualMemLimit = ti.get();
+				break;
 			case OPT_STORAGEMEMLIMIT:
 				ti = parse_with_suffix(args.OptionArg(), "MB");
 				if (!ti.present()) {
@@ -1517,6 +1568,42 @@ private:
 			case OPT_USE_TEST_CONFIG_DB:
 				configDBType = ConfigDBType::SIMPLE;
 				break;
+			case OPT_FLOW_PROCESS_NAME:
+				flowProcessName = args.OptionArg();
+				std::cout << flowProcessName << std::endl;
+				break;
+			case OPT_FLOW_PROCESS_ENDPOINT: {
+				std::vector<std::string> strings;
+				std::cout << args.OptionArg() << std::endl;
+				boost::split(strings, args.OptionArg(), [](char c) { return c == ','; });
+				for (auto& str : strings) {
+					std::cout << str << " ";
+				}
+				std::cout << "\n";
+				if (strings.size() != 3) {
+					std::cerr << "Invalid argument, expected 3 elements in --process-endpoint got " << strings.size()
+					          << std::endl;
+					flushAndExit(FDB_EXIT_ERROR);
+				}
+				try {
+					auto addr = NetworkAddress::parse(strings[0]);
+					uint64_t fst = std::stoul(strings[1]);
+					uint64_t snd = std::stoul(strings[2]);
+					UID token(fst, snd);
+					NetworkAddressList l;
+					l.address = addr;
+					flowProcessEndpoint = Endpoint(l, token);
+					std::cout << "flowProcessEndpoint: " << flowProcessEndpoint.getPrimaryAddress().toString()
+					          << ", token: " << flowProcessEndpoint.token.toString() << "\n";
+				} catch (Error& e) {
+					std::cerr << "Could not parse network address " << strings[0] << std::endl;
+					flushAndExit(FDB_EXIT_ERROR);
+				} catch (std::exception& e) {
+					std::cerr << "Could not parse token " << strings[1] << "," << strings[2] << std::endl;
+					flushAndExit(FDB_EXIT_ERROR);
+				}
+				break;
+			}
 			case OPT_PRINT_SIMTIME:
 				printSimTime = true;
 				break;
@@ -1722,46 +1809,28 @@ int main(int argc, char* argv[]) {
 		                                         Randomize::True,
 		                                         role == ServerRole::Simulation ? IsSimulated::True
 		                                                                        : IsSimulated::False);
-		IKnobCollection::getMutableGlobalKnobCollection().setKnob("log_directory", KnobValue::create(opts.logFolder));
-		if (role != ServerRole::Simulation) {
-			IKnobCollection::getMutableGlobalKnobCollection().setKnob("commit_batches_mem_bytes_hard_limit",
-			                                                          KnobValue::create(int64_t{ opts.memLimit }));
+		auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
+		g_knobs.setKnob("log_directory", KnobValue::create(opts.logFolder));
+		g_knobs.setKnob("conn_file", KnobValue::create(opts.connFile));
+		if (role != ServerRole::Simulation && opts.memLimit > 0) {
+			g_knobs.setKnob("commit_batches_mem_bytes_hard_limit",
+			                KnobValue::create(static_cast<int64_t>(opts.memLimit)));
 		}
 
-		for (const auto& [knobName, knobValueString] : opts.knobs) {
-			try {
-				auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
-				auto knobValue = g_knobs.parseKnobValue(knobName, knobValueString);
-				g_knobs.setKnob(knobName, knobValue);
-			} catch (Error& e) {
-				if (e.code() == error_code_invalid_option_value) {
-					fprintf(stderr,
-					        "WARNING: Invalid value '%s' for knob option '%s'\n",
-					        knobName.c_str(),
-					        knobValueString.c_str());
-					TraceEvent(SevWarnAlways, "InvalidKnobValue")
-					    .detail("Knob", printable(knobName))
-					    .detail("Value", printable(knobValueString));
-				} else {
-					fprintf(stderr, "ERROR: Failed to set knob option '%s': %s\n", knobName.c_str(), e.what());
-					TraceEvent(SevError, "FailedToSetKnob")
-					    .error(e)
-					    .detail("Knob", printable(knobName))
-					    .detail("Value", printable(knobValueString));
-					throw;
-				}
-			}
-		}
-		IKnobCollection::getMutableGlobalKnobCollection().setKnob("server_mem_limit",
-		                                                          KnobValue::create(int64_t{ opts.memLimit }));
+		IKnobCollection::setupKnobs(opts.knobs);
+		g_knobs.setKnob("server_mem_limit", KnobValue::create(static_cast<int64_t>(opts.memLimit)));
 		// Reinitialize knobs in order to update knobs that are dependent on explicitly set knobs
-		IKnobCollection::getMutableGlobalKnobCollection().initialize(
-		    Randomize::True, role == ServerRole::Simulation ? IsSimulated::True : IsSimulated::False);
+		g_knobs.initialize(Randomize::True, role == ServerRole::Simulation ? IsSimulated::True : IsSimulated::False);
 
 		// evictionPolicyStringToEnum will throw an exception if the string is not recognized as a valid
 		EvictablePageCache::evictionPolicyStringToEnum(FLOW_KNOBS->CACHE_EVICTION_POLICY);
 
-		if (opts.memLimit <= FLOW_KNOBS->PAGE_CACHE_4K) {
+		if (opts.memLimit > 0 && opts.virtualMemLimit > 0 && opts.memLimit > opts.virtualMemLimit) {
+			fprintf(stderr, "ERROR : --memory-vsize has to be no less than --memory");
+			flushAndExit(FDB_EXIT_ERROR);
+		}
+
+		if (opts.memLimit > 0 && opts.memLimit <= FLOW_KNOBS->PAGE_CACHE_4K) {
 			fprintf(stderr, "ERROR: --memory has to be larger than --cache-memory\n");
 			flushAndExit(FDB_EXIT_ERROR);
 		}
@@ -1799,11 +1868,11 @@ int main(int argc, char* argv[]) {
 		} else {
 			g_network = newNet2(opts.tlsConfig, opts.useThreadPool, true);
 			g_network->addStopCallback(Net2FileSystem::stop);
-			FlowTransport::createInstance(false, 1, WLTOKEN_RESERVED_COUNT);
+			FlowTransport::createInstance(false, 1, WLTOKEN_RESERVED_COUNT, &opts.allowList);
 			opts.buildNetwork(argv[0]);
 
-			const bool expectsPublicAddress =
-			    (role == ServerRole::FDBD || role == ServerRole::NetworkTestServer || role == ServerRole::Restore);
+			const bool expectsPublicAddress = (role == ServerRole::FDBD || role == ServerRole::NetworkTestServer ||
+			                                   role == ServerRole::Restore || role == ServerRole::FlowProcess);
 			if (opts.publicAddressStrs.empty()) {
 				if (expectsPublicAddress) {
 					fprintf(stderr, "ERROR: The -p or --public-address option is required\n");
@@ -1878,11 +1947,13 @@ int main(int argc, char* argv[]) {
 		    .detail("BuggifyEnabled", opts.buggifyEnabled)
 		    .detail("FaultInjectionEnabled", opts.faultInjectionEnabled)
 		    .detail("MemoryLimit", opts.memLimit)
+		    .detail("VirtualMemoryLimit", opts.virtualMemLimit)
 		    .trackLatest("ProgramStart");
 
 		Error::init();
 		std::set_new_handler(&platform::outOfMemory);
-		setMemoryQuota(opts.memLimit);
+		Future<Void> memoryUsageMonitor = startMemoryUsageMonitor(opts.memLimit);
+		setMemoryQuota(opts.virtualMemLimit);
 
 		Future<Optional<Void>> f;
 
@@ -2085,6 +2156,7 @@ int main(int argc, char* argv[]) {
 			                       opts.localities));
 			g_network->run();
 		} else if (role == ServerRole::Test) {
+			TraceEvent("NonSimulationTest").detail("TestFile", opts.testFile);
 			setupRunLoopProfiler();
 			auto m = startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId);
 			f = stopAfter(runTests(
@@ -2138,6 +2210,19 @@ int main(int argc, char* argv[]) {
 			}
 
 			f = result;
+		} else if (role == ServerRole::FlowProcess) {
+			TraceEvent(SevDebug, "StartingFlowProcess").detail("From", "fdbserver");
+#if defined(__linux__) || defined(__FreeBSD__)
+			prctl(PR_SET_PDEATHSIG, SIGTERM);
+			if (getppid() == 1) /* parent already died before prctl */
+				flushAndExit(FDB_EXIT_SUCCESS);
+#endif
+
+			if (opts.flowProcessName == "KeyValueStoreProcess") {
+				ProcessFactory<KeyValueStoreProcess>(opts.flowProcessName.c_str());
+			}
+			f = stopAfter(runFlowProcess(opts.flowProcessName, opts.flowProcessEndpoint));
+			g_network->run();
 		} else if (role == ServerRole::KVFileDump) {
 			f = stopAfter(KVFileDump(opts.kvFile));
 			g_network->run();

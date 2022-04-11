@@ -23,6 +23,7 @@ package com.apple.foundationdb;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.function.Function;
+import com.apple.foundationdb.tuple.Tuple;
 
 /**
  * A mutable, lexicographically ordered mapping from binary keys to binary values.
@@ -41,11 +42,82 @@ import java.util.function.Function;
  */
 public interface Database extends AutoCloseable, TransactionContext {
 	/**
-	 * Creates a {@link Transaction} that operates on this {@code Database}.<br>
+	 * Opens an existing tenant to be used for running transactions.<br>
+	 * <br>
+	 * <b>Note:</b> opening a tenant does not check its existence in the cluster. If the tenant does not exist,
+	 * attempts to read or write data with it will fail.
+	 *
+	 * @param tenantName The name of the tenant to open.
+	 * @return a {@link Tenant} that can be used to create transactions that will operate in the tenant's key-space.
+	 */
+	default Tenant openTenant(byte[] tenantName) {
+		return openTenant(tenantName, getExecutor());
+	}
+
+	/**
+	 * Opens an existing tenant to be used for running transactions. This is a convenience method that generates the
+	 * tenant name by packing a {@code Tuple}.<br>
+	 * <br>
+	 * <b>Note:</b> opening a tenant does not check its existence in the cluster. If the tenant does not exist,
+	 * attempts to read or write data with it will fail.
+	 *
+	 * @param tenantName The name of the tenant to open, as a Tuple.
+	 * @return a {@link Tenant} that can be used to create transactions that will operate in the tenant's key-space.
+	 */
+	Tenant openTenant(Tuple tenantName);
+
+	/**
+	 * Opens an existing tenant to be used for running transactions.
+	 *
+	 * @param tenantName The name of the tenant to open.
+	 * @param e the {@link Executor} to use when executing asynchronous callbacks.
+	 * @return a {@link Tenant} that can be used to create transactions that will operate in the tenant's key-space.
+	 */
+	Tenant openTenant(byte[] tenantName, Executor e);
+
+	/**
+	 * Opens an existing tenant to be used for running transactions. This is a convenience method that generates the
+	 * tenant name by packing a {@code Tuple}.
+	 *
+	 * @param tenantName The name of the tenant to open, as a Tuple.
+	 * @param e the {@link Executor} to use when executing asynchronous callbacks.
+	 * @return a {@link Tenant} that can be used to create transactions that will operate in the tenant's key-space.
+	 */
+	Tenant openTenant(Tuple tenantName, Executor e);
+
+	/**
+	 * Opens an existing tenant to be used for running transactions.
+	 *
+	 * @param tenantName The name of the tenant to open.
+	 * @param e the {@link Executor} to use when executing asynchronous callbacks.
+	 * @param eventKeeper the {@link EventKeeper} to use when tracking instrumented calls for the tenant's transactions.
+	 * @return a {@link Tenant} that can be used to create transactions that will operate in the tenant's key-space.
+	 */
+	Tenant openTenant(byte[] tenantName, Executor e, EventKeeper eventKeeper);
+
+	/**
+	 * Opens an existing tenant to be used for running transactions. This is a convenience method that generates the
+	 * tenant name by packing a {@code Tuple}.
+	 *
+	 * @param tenantName The name of the tenant to open, as a Tuple.
+	 * @param e the {@link Executor} to use when executing asynchronous callbacks.
+	 * @param eventKeeper the {@link EventKeeper} to use when tracking instrumented calls for the tenant's transactions.
+	 * @return a {@link Tenant} that can be used to create transactions that will operate in the tenant's key-space.
+	 */
+	Tenant openTenant(Tuple tenantName, Executor e, EventKeeper eventKeeper);
+
+	/**
+	 * Creates a {@link Transaction} that operates on this {@code Database}. Creating a transaction
+	 *  in this way does not associate it with a {@code Tenant}, and as a result the transaction will
+	 *  operate on the entire key-space for the database.<br>
 	 * <br>
 	 * <b>Note:</b> Java transactions automatically set the {@link TransactionOptions#setUsedDuringCommitProtectionDisable}
 	 *  option. This is because the Java bindings disallow use of {@code Transaction} objects after
-	 *  {@link Transaction#onError} is called.
+	 *  {@link Transaction#onError} is called.<br>
+	 * <br>
+	 * <b>Note:</b> Transactions created directly on a {@code Database} object cannot be used in a cluster
+	 *  that requires tenant-based access. To run transactions in those clusters, you must first open a tenant
+	 *  with {@link #openTenant(byte[])}.
 	 *
 	 * @return a newly created {@code Transaction} that reads from and writes to this {@code Database}.
 	 */

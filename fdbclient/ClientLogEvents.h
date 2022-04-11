@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -41,7 +41,8 @@ enum class TransactionPriorityType : int { PRIORITY_DEFAULT = 0, PRIORITY_BATCH 
 static_assert(sizeof(TransactionPriorityType) == 4, "transaction_profiling_analyzer.py assumes this field has size 4");
 
 struct Event {
-	Event(EventType t, double ts, const Optional<Standalone<StringRef>>& dc) : type(t), startTs(ts) {
+	Event(EventType t, double ts, const Optional<Standalone<StringRef>>& dc, const Optional<TenantName>& tenant)
+	  : type(t), startTs(ts), tenant(tenant) {
 		if (dc.present())
 			dcId = dc.get();
 	}
@@ -49,7 +50,9 @@ struct Event {
 
 	template <typename Ar>
 	Ar& serialize(Ar& ar) {
-		if (ar.protocolVersion().version() >= (uint64_t)0x0FDB00B063010001LL) {
+		if (ar.protocolVersion().hasTenants()) {
+			return serializer(ar, type, startTs, dcId, tenant);
+		} else if (ar.protocolVersion().version() >= (uint64_t)0x0FDB00B063010001LL) {
 			return serializer(ar, type, startTs, dcId);
 		} else {
 			return serializer(ar, type, startTs);
@@ -59,8 +62,10 @@ struct Event {
 	EventType type{ EventType::UNSET };
 	double startTs{ 0 };
 	Key dcId{};
+	Optional<TenantName> tenant{};
 
 	void logEvent(std::string id, int maxFieldLength) const {}
+	void augmentTraceEvent(TraceEvent& event) const { event.detail("Tenant", tenant); }
 };
 
 struct EventGetVersion : public Event {
@@ -77,7 +82,9 @@ struct EventGetVersion : public Event {
 	double latency;
 
 	void logEvent(std::string id, int maxFieldLength) const {
-		TraceEvent("TransactionTrace_GetVersion").detail("TransactionID", id).detail("Latency", latency);
+		TraceEvent event("TransactionTrace_GetVersion");
+		event.detail("TransactionID", id).detail("Latency", latency);
+		augmentTraceEvent(event);
 	}
 };
 
@@ -97,10 +104,9 @@ struct EventGetVersion_V2 : public Event {
 	TransactionPriorityType priorityType{ TransactionPriorityType::UNSET };
 
 	void logEvent(std::string id, int maxFieldLength) const {
-		TraceEvent("TransactionTrace_GetVersion")
-		    .detail("TransactionID", id)
-		    .detail("Latency", latency)
-		    .detail("PriorityType", priorityType);
+		TraceEvent event("TransactionTrace_GetVersion");
+		event.detail("TransactionID", id).detail("Latency", latency).detail("PriorityType", priorityType);
+		augmentTraceEvent(event);
 	}
 };
 
@@ -110,8 +116,9 @@ struct EventGetVersion_V3 : public Event {
 	                   const Optional<Standalone<StringRef>>& dcId,
 	                   double lat,
 	                   TransactionPriority priority,
-	                   Version version)
-	  : Event(EventType::GET_VERSION_LATENCY, ts, dcId), latency(lat), readVersion(version) {
+	                   Version version,
+	                   const Optional<TenantName>& tenant)
+	  : Event(EventType::GET_VERSION_LATENCY, ts, dcId, tenant), latency(lat), readVersion(version) {
 		switch (priority) {
 		// Unfortunately, the enum serialized here disagrees with the enum used elsewhere for the values used by each
 		// priority
@@ -143,17 +150,23 @@ struct EventGetVersion_V3 : public Event {
 	Version readVersion;
 
 	void logEvent(std::string id, int maxFieldLength) const {
-		TraceEvent("TransactionTrace_GetVersion")
-		    .detail("TransactionID", id)
+		TraceEvent event("TransactionTrace_GetVersion");
+		event.detail("TransactionID", id)
 		    .detail("Latency", latency)
 		    .detail("PriorityType", priorityType)
 		    .detail("ReadVersion", readVersion);
+		augmentTraceEvent(event);
 	}
 };
 
 struct EventGet : public Event {
-	EventGet(double ts, const Optional<Standalone<StringRef>>& dcId, double lat, int size, const KeyRef& in_key)
-	  : Event(EventType::GET_LATENCY, ts, dcId), latency(lat), valueSize(size), key(in_key) {}
+	EventGet(double ts,
+	         const Optional<Standalone<StringRef>>& dcId,
+	         double lat,
+	         int size,
+	         const KeyRef& in_key,
+	         const Optional<TenantName>& tenant)
+	  : Event(EventType::GET_LATENCY, ts, dcId, tenant), latency(lat), valueSize(size), key(in_key) {}
 	EventGet() {}
 
 	template <typename Ar>
@@ -169,13 +182,14 @@ struct EventGet : public Event {
 	Key key;
 
 	void logEvent(std::string id, int maxFieldLength) const {
-		TraceEvent("TransactionTrace_Get")
-		    .setMaxEventLength(-1)
+		TraceEvent event("TransactionTrace_Get");
+		event.setMaxEventLength(-1)
 		    .detail("TransactionID", id)
 		    .detail("Latency", latency)
 		    .detail("ValueSizeBytes", valueSize)
 		    .setMaxFieldLength(maxFieldLength)
 		    .detail("Key", key);
+		augmentTraceEvent(event);
 	}
 };
 
@@ -185,8 +199,9 @@ struct EventGetRange : public Event {
 	              double lat,
 	              int size,
 	              const KeyRef& start_key,
-	              const KeyRef& end_key)
-	  : Event(EventType::GET_RANGE_LATENCY, ts, dcId), latency(lat), rangeSize(size), startKey(start_key),
+	              const KeyRef& end_key,
+	              const Optional<TenantName>& tenant)
+	  : Event(EventType::GET_RANGE_LATENCY, ts, dcId, tenant), latency(lat), rangeSize(size), startKey(start_key),
 	    endKey(end_key) {}
 	EventGetRange() {}
 
@@ -204,14 +219,15 @@ struct EventGetRange : public Event {
 	Key endKey;
 
 	void logEvent(std::string id, int maxFieldLength) const {
-		TraceEvent("TransactionTrace_GetRange")
-		    .setMaxEventLength(-1)
+		TraceEvent event("TransactionTrace_GetRange");
+		event.setMaxEventLength(-1)
 		    .detail("TransactionID", id)
 		    .detail("Latency", latency)
 		    .detail("RangeSizeBytes", rangeSize)
 		    .setMaxFieldLength(maxFieldLength)
 		    .detail("StartKey", startKey)
 		    .detail("EndKey", endKey);
+		augmentTraceEvent(event);
 	}
 };
 
@@ -234,36 +250,40 @@ struct EventCommit : public Event {
 
 	void logEvent(std::string id, int maxFieldLength) const {
 		for (auto& read_range : req.transaction.read_conflict_ranges) {
-			TraceEvent("TransactionTrace_Commit_ReadConflictRange")
-			    .setMaxEventLength(-1)
+			TraceEvent ev1("TransactionTrace_Commit_ReadConflictRange");
+			ev1.setMaxEventLength(-1)
 			    .detail("TransactionID", id)
 			    .setMaxFieldLength(maxFieldLength)
 			    .detail("Begin", read_range.begin)
 			    .detail("End", read_range.end);
+			augmentTraceEvent(ev1);
 		}
 
 		for (auto& write_range : req.transaction.write_conflict_ranges) {
-			TraceEvent("TransactionTrace_Commit_WriteConflictRange")
-			    .setMaxEventLength(-1)
+			TraceEvent ev2("TransactionTrace_Commit_WriteConflictRange");
+			ev2.setMaxEventLength(-1)
 			    .detail("TransactionID", id)
 			    .setMaxFieldLength(maxFieldLength)
 			    .detail("Begin", write_range.begin)
 			    .detail("End", write_range.end);
+			augmentTraceEvent(ev2);
 		}
 
 		for (auto& mutation : req.transaction.mutations) {
-			TraceEvent("TransactionTrace_Commit_Mutation")
-			    .setMaxEventLength(-1)
+			TraceEvent ev3("TransactionTrace_Commit_Mutation");
+			ev3.setMaxEventLength(-1)
 			    .detail("TransactionID", id)
 			    .setMaxFieldLength(maxFieldLength)
 			    .detail("Mutation", mutation);
+			augmentTraceEvent(ev3);
 		}
 
-		TraceEvent("TransactionTrace_Commit")
-		    .detail("TransactionID", id)
+		TraceEvent ev4("TransactionTrace_Commit");
+		ev4.detail("TransactionID", id)
 		    .detail("Latency", latency)
 		    .detail("NumMutations", numMutations)
 		    .detail("CommitSizeBytes", commitBytes);
+		augmentTraceEvent(ev4);
 	}
 };
 
@@ -275,8 +295,9 @@ struct EventCommit_V2 : public Event {
 	               int mut,
 	               int bytes,
 	               Version version,
-	               const CommitTransactionRequest& commit_req)
-	  : Event(EventType::COMMIT_LATENCY, ts, dcId), latency(lat), numMutations(mut), commitBytes(bytes),
+	               const CommitTransactionRequest& commit_req,
+	               const Optional<TenantName>& tenant)
+	  : Event(EventType::COMMIT_LATENCY, ts, dcId, tenant), latency(lat), numMutations(mut), commitBytes(bytes),
 	    commitVersion(version), req(commit_req) {}
 	EventCommit_V2() {}
 
@@ -298,43 +319,51 @@ struct EventCommit_V2 : public Event {
 
 	void logEvent(std::string id, int maxFieldLength) const {
 		for (auto& read_range : req.transaction.read_conflict_ranges) {
-			TraceEvent("TransactionTrace_Commit_ReadConflictRange")
-			    .setMaxEventLength(-1)
+			TraceEvent ev1("TransactionTrace_Commit_ReadConflictRange");
+			ev1.setMaxEventLength(-1)
 			    .detail("TransactionID", id)
 			    .setMaxFieldLength(maxFieldLength)
 			    .detail("Begin", read_range.begin)
 			    .detail("End", read_range.end);
+			augmentTraceEvent(ev1);
 		}
 
 		for (auto& write_range : req.transaction.write_conflict_ranges) {
-			TraceEvent("TransactionTrace_Commit_WriteConflictRange")
-			    .setMaxEventLength(-1)
+			TraceEvent ev2("TransactionTrace_Commit_WriteConflictRange");
+			ev2.setMaxEventLength(-1)
 			    .detail("TransactionID", id)
 			    .setMaxFieldLength(maxFieldLength)
 			    .detail("Begin", write_range.begin)
 			    .detail("End", write_range.end);
+			augmentTraceEvent(ev2);
 		}
 
 		for (auto& mutation : req.transaction.mutations) {
-			TraceEvent("TransactionTrace_Commit_Mutation")
-			    .setMaxEventLength(-1)
+			TraceEvent ev3("TransactionTrace_Commit_Mutation");
+			ev3.setMaxEventLength(-1)
 			    .detail("TransactionID", id)
 			    .setMaxFieldLength(maxFieldLength)
 			    .detail("Mutation", mutation);
+			augmentTraceEvent(ev3);
 		}
 
-		TraceEvent("TransactionTrace_Commit")
-		    .detail("TransactionID", id)
+		TraceEvent ev4("TransactionTrace_Commit");
+		ev4.detail("TransactionID", id)
 		    .detail("CommitVersion", commitVersion)
 		    .detail("Latency", latency)
 		    .detail("NumMutations", numMutations)
 		    .detail("CommitSizeBytes", commitBytes);
+		augmentTraceEvent(ev4);
 	}
 };
 
 struct EventGetError : public Event {
-	EventGetError(double ts, const Optional<Standalone<StringRef>>& dcId, int err_code, const KeyRef& in_key)
-	  : Event(EventType::ERROR_GET, ts, dcId), errCode(err_code), key(in_key) {}
+	EventGetError(double ts,
+	              const Optional<Standalone<StringRef>>& dcId,
+	              int err_code,
+	              const KeyRef& in_key,
+	              const Optional<TenantName>& tenant)
+	  : Event(EventType::ERROR_GET, ts, dcId, tenant), errCode(err_code), key(in_key) {}
 	EventGetError() {}
 
 	template <typename Ar>
@@ -349,12 +378,13 @@ struct EventGetError : public Event {
 	Key key;
 
 	void logEvent(std::string id, int maxFieldLength) const {
-		TraceEvent("TransactionTrace_GetError")
-		    .setMaxEventLength(-1)
+		TraceEvent event("TransactionTrace_GetError");
+		event.setMaxEventLength(-1)
 		    .detail("TransactionID", id)
 		    .detail("ErrCode", errCode)
 		    .setMaxFieldLength(maxFieldLength)
 		    .detail("Key", key);
+		augmentTraceEvent(event);
 	}
 };
 
@@ -363,8 +393,9 @@ struct EventGetRangeError : public Event {
 	                   const Optional<Standalone<StringRef>>& dcId,
 	                   int err_code,
 	                   const KeyRef& start_key,
-	                   const KeyRef& end_key)
-	  : Event(EventType::ERROR_GET_RANGE, ts, dcId), errCode(err_code), startKey(start_key), endKey(end_key) {}
+	                   const KeyRef& end_key,
+	                   const Optional<TenantName>& tenant)
+	  : Event(EventType::ERROR_GET_RANGE, ts, dcId, tenant), errCode(err_code), startKey(start_key), endKey(end_key) {}
 	EventGetRangeError() {}
 
 	template <typename Ar>
@@ -380,13 +411,14 @@ struct EventGetRangeError : public Event {
 	Key endKey;
 
 	void logEvent(std::string id, int maxFieldLength) const {
-		TraceEvent("TransactionTrace_GetRangeError")
-		    .setMaxEventLength(-1)
+		TraceEvent event("TransactionTrace_GetRangeError");
+		event.setMaxEventLength(-1)
 		    .detail("TransactionID", id)
 		    .detail("ErrCode", errCode)
 		    .setMaxFieldLength(maxFieldLength)
 		    .detail("StartKey", startKey)
 		    .detail("EndKey", endKey);
+		augmentTraceEvent(event);
 	}
 };
 
@@ -394,8 +426,9 @@ struct EventCommitError : public Event {
 	EventCommitError(double ts,
 	                 const Optional<Standalone<StringRef>>& dcId,
 	                 int err_code,
-	                 const CommitTransactionRequest& commit_req)
-	  : Event(EventType::ERROR_COMMIT, ts, dcId), errCode(err_code), req(commit_req) {}
+	                 const CommitTransactionRequest& commit_req,
+	                 const Optional<TenantName>& tenant)
+	  : Event(EventType::ERROR_COMMIT, ts, dcId, tenant), errCode(err_code), req(commit_req) {}
 	EventCommitError() {}
 
 	template <typename Ar>
@@ -412,32 +445,37 @@ struct EventCommitError : public Event {
 
 	void logEvent(std::string id, int maxFieldLength) const {
 		for (auto& read_range : req.transaction.read_conflict_ranges) {
-			TraceEvent("TransactionTrace_CommitError_ReadConflictRange")
-			    .setMaxEventLength(-1)
+			TraceEvent ev1("TransactionTrace_CommitError_ReadConflictRange");
+			ev1.setMaxEventLength(-1)
 			    .detail("TransactionID", id)
 			    .setMaxFieldLength(maxFieldLength)
 			    .detail("Begin", read_range.begin)
 			    .detail("End", read_range.end);
+			augmentTraceEvent(ev1);
 		}
 
 		for (auto& write_range : req.transaction.write_conflict_ranges) {
-			TraceEvent("TransactionTrace_CommitError_WriteConflictRange")
-			    .setMaxEventLength(-1)
+			TraceEvent ev2("TransactionTrace_CommitError_WriteConflictRange");
+			ev2.setMaxEventLength(-1)
 			    .detail("TransactionID", id)
 			    .setMaxFieldLength(maxFieldLength)
 			    .detail("Begin", write_range.begin)
 			    .detail("End", write_range.end);
+			augmentTraceEvent(ev2);
 		}
 
 		for (auto& mutation : req.transaction.mutations) {
-			TraceEvent("TransactionTrace_CommitError_Mutation")
-			    .setMaxEventLength(-1)
+			TraceEvent ev3("TransactionTrace_CommitError_Mutation");
+			ev3.setMaxEventLength(-1)
 			    .detail("TransactionID", id)
 			    .setMaxFieldLength(maxFieldLength)
 			    .detail("Mutation", mutation);
+			augmentTraceEvent(ev3);
 		}
 
-		TraceEvent("TransactionTrace_CommitError").detail("TransactionID", id).detail("ErrCode", errCode);
+		TraceEvent ev4("TransactionTrace_CommitError");
+		ev4.detail("TransactionID", id).detail("ErrCode", errCode);
+		augmentTraceEvent(ev4);
 	}
 };
 } // namespace FdbClientLogEvents

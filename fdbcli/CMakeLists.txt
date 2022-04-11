@@ -24,10 +24,12 @@ set(FDBCLI_SRCS
   SnapshotCommand.actor.cpp
   StatusCommand.actor.cpp
   SuspendCommand.actor.cpp
+  TenantCommands.actor.cpp
   ThrottleCommand.actor.cpp
   TriggerDDTeamInfoLogCommand.actor.cpp
   TssqCommand.actor.cpp
   Util.actor.cpp
+  VersionEpochCommand.actor.cpp
   linenoise/linenoise.h)
 
 if(NOT WIN32)

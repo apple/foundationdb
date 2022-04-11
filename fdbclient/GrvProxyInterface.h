@@ -4,7 +4,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2020 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,7 +36,7 @@ struct GrvProxyInterface {
 	Optional<Key> processId;
 	bool provisional;
 
-	RequestStream<struct GetReadVersionRequest>
+	PublicRequestStream<struct GetReadVersionRequest>
 	    getConsistentReadVersion; // Returns a version which (1) is committed, and (2) is >= the latest version reported
 	                              // committed (by a commit response) when this request was sent
 	//   (at some point between when this request is sent and when its response is received, the latest version reported

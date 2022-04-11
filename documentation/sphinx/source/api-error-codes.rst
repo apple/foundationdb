@@ -160,6 +160,22 @@ FoundationDB may return the following error codes from API functions. If you nee
 | special_keys_api_failure                      | 2117| Api call through special keys failed. For more information, read the           |
 |                                               |     | ``0xff0xff/error_message`` key                                                 |
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+
+| tenant_name_required                          | 2130| Tenant name must be specified to access data in the cluster                    |
++-----------------------------------------------+-----+--------------------------------------------------------------------------------+
+| tenant_not_found                              | 2131| Tenant does not exist                                                          |
++-----------------------------------------------+-----+--------------------------------------------------------------------------------+
+| tenant_already_exists                         | 2132| A tenant with the given name already exists                                    |
++-----------------------------------------------+-----+--------------------------------------------------------------------------------+
+| tenant_not_empty                              | 2133| Cannot delete a non-empty tenant                                               |
++-----------------------------------------------+-----+--------------------------------------------------------------------------------+
+| invalid_tenant_name                           | 2134| Tenant name cannot begin with \xff                                             |
++-----------------------------------------------+-----+--------------------------------------------------------------------------------+
+| tenant_prefix_allocator_conflict              | 2135| The database already has keys stored at the prefix allocated for the tenant    |
++-----------------------------------------------+-----+--------------------------------------------------------------------------------+
+| tenants_disabled                              | 2136| Tenants have been disabled in the cluster                                      |
++-----------------------------------------------+-----+--------------------------------------------------------------------------------+
+| unknown_tenant                                | 2137| Tenant is not available from this server                                       |
++-----------------------------------------------+-----+--------------------------------------------------------------------------------+
 | api_version_unset                             | 2200| API version is not set                                                         |
 +-----------------------------------------------+-----+--------------------------------------------------------------------------------+
 | api_version_already_set                       | 2201| API version may be set only once                                               |

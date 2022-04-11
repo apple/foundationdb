@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -222,6 +222,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		try {
 			wait(backupAgent->submitBackup(cx,
 			                               StringRef(backupContainer),
+			                               {},
 			                               deterministicRandom()->randomInt(0, 60),
 			                               deterministicRandom()->randomInt(0, 100),
 			                               tag.toString(),
@@ -377,6 +378,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				                                  cx,
 				                                  self->backupTag,
 				                                  KeyRef(lastBackupContainer),
+				                                  {},
 				                                  WaitForComplete::True,
 				                                  ::invalidVersion,
 				                                  Verbose::True,
@@ -478,6 +480,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 					// the configuration to disable backup workers before restore.
 					extraBackup = backupAgent.submitBackup(cx,
 					                                       LiteralStringRef("file://simfdb/backups/"),
+					                                       {},
 					                                       deterministicRandom()->randomInt(0, 60),
 					                                       deterministicRandom()->randomInt(0, 100),
 					                                       self->backupTag.toString(),
@@ -523,7 +526,8 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				    .detail("BackupTag", printable(self->backupTag));
 				// start restoring
 
-				auto container = IBackupContainer::openContainer(lastBackupContainer->getURL());
+				auto container =
+				    IBackupContainer::openContainer(lastBackupContainer->getURL(), lastBackupContainer->getProxy(), {});
 				BackupDescription desc = wait(container->describeBackup());
 				ASSERT(self->usePartitionedLogs == desc.partitioned);
 				ASSERT(desc.minRestorableVersion.present()); // We must have a valid backup now.
@@ -566,6 +570,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				                                       self->backupTag,
 				                                       self->backupRanges,
 				                                       KeyRef(lastBackupContainer->getURL()),
+				                                       lastBackupContainer->getProxy(),
 				                                       targetVersion,
 				                                       self->locked,
 				                                       randomID,

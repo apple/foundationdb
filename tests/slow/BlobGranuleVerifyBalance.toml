@@ -1,0 +1,53 @@
+[configuration]
+blobGranulesEnabled = true
+# FIXME: re-enable rocks at some point
+storageEngineExcludeTypes = [4]
+
+[[test]]
+testTitle = 'BlobGranuleVerifyBalance'
+
+    [[test.workload]]
+    testName = 'DDBalance'
+    testDuration = 120.0
+    transactionsPerSecond = 250.0
+    binCount = 1000
+    writesPerTransaction = 5
+    keySpaceDriftFactor = 10
+    moversPerClient = 10
+    actorsPerClient = 100
+    nodes = 100000
+
+    [[test.workload]]
+    testName = 'BlobGranuleVerifier'
+    testDuration = 120.0
+
+    [[test.workload]]
+    testName = 'RandomClogging'
+    testDuration = 120.0
+    swizzle = 1
+
+    [[test.workload]]
+    testName = 'Rollback'
+    testDuration = 120.0
+    meanDelay = 10.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 120.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 120.0
+
+    [[test.workload]]
+    testName = 'RemoveServersSafely'
+    minDelay = 0
+    maxDelay = 100
+    kill1Timeout = 30
+    kill2Timeout = 6000

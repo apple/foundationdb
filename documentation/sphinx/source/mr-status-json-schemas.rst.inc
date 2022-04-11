@@ -701,7 +701,7 @@
              "ssd-1",
              "ssd-2",
              "ssd-redwood-1-experimental",
-             "ssd-rocksdb-experimental",
+             "ssd-rocksdb-v1",
              "memory",
              "memory-1",
              "memory-2",
@@ -714,7 +714,7 @@
              "ssd-1",
              "ssd-2",
              "ssd-redwood-1-experimental",
-             "ssd-rocksdb-experimental",
+             "ssd-rocksdb-v1",
              "memory",
              "memory-1",
              "memory-2",
@@ -742,6 +742,12 @@
              "disabled",
              "gradual",
              "aggressive"
+         ]},
+         "tenant_mode": {
+             "$enum":[
+             "disabled",
+             "optional_experimental",
+             "required_experimental"
          ]}
       },
       "data":{

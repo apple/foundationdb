@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -169,7 +169,7 @@ void ClusterConnectionString::resolveHostnamesBlocking() {
 }
 
 void ClusterConnectionString::resetToUnresolved() {
-	if (hostnames.size() > 0) {
+	if (status == RESOLVED && hostnames.size() > 0) {
 		coords.clear();
 		hostnames.clear();
 		networkAddressToHostname.clear();
@@ -360,6 +360,32 @@ TEST_CASE("/fdbclient/MonitorLeader/ConnectionString") {
 	} catch (Error& e) {
 		ASSERT(e.code() == error_code_connection_string_invalid);
 	}
+
+	return Void();
+}
+
+TEST_CASE("/fdbclient/MonitorLeader/PartialResolve") {
+	std::string connectionString = "TestCluster:0@host.name:1234,host-name:5678";
+	std::string hn = "host-name", port = "5678";
+
+	state NetworkAddress address = NetworkAddress::parse("1.0.0.0:5678");
+
+	INetworkConnections::net()->addMockTCPEndpoint(hn, port, { address });
+
+	state ClusterConnectionString cs(connectionString);
+
+	state std::unordered_set<NetworkAddress> coordinatorAddresses;
+	std::vector<Future<Void>> fs;
+	for (auto& hostname : cs.hostnames) {
+		fs.push_back(map(hostname.resolve(), [&](Optional<NetworkAddress> const& addr) -> Void {
+			if (addr.present()) {
+				coordinatorAddresses.insert(addr.get());
+			}
+			return Void();
+		}));
+	}
+	wait(waitForAll(fs));
+	ASSERT(coordinatorAddresses.size() == 1 && coordinatorAddresses.count(address) == 1);
 
 	return Void();
 }
@@ -558,8 +584,8 @@ ACTOR Future<Void> monitorNominee(Key key,
 				    .detail("Hostname", hostname.present() ? hostname.get().toString() : "UnknownHostname")
 				    .detail("OldAddr", coord.getLeader.getEndpoint().getPrimaryAddress().toString());
 				if (rep.getError().code() == error_code_request_maybe_delivered) {
-					// 50 milliseconds delay to prevent tight resolving loop due to outdated DNS cache
-					wait(delay(0.05));
+					// Delay to prevent tight resolving loop due to outdated DNS cache
+					wait(delay(FLOW_KNOBS->HOSTNAME_RESOLVE_DELAY));
 					throw coordinators_changed();
 				} else {
 					throw rep.getError();
@@ -589,7 +615,6 @@ ACTOR Future<Void> monitorNominee(Key key,
 
 			if (li.present() && li.get().forward)
 				wait(Future<Void>(Never()));
-			wait(Future<Void>(Void()));
 		}
 	}
 }
