@@ -59,90 +59,17 @@ struct SpanContext {
 	}
 };
 
-// struct Span {
-// 	Span(SpanID context, Location location, std::initializer_list<SpanID> const& parents = {})
-// 	  : context(context), begin(g_network->now()), location(location), parents(arena, parents.begin(), parents.end()) {
-// 		if (parents.size() > 0) {
-// 			// If the parents' token is 0 (meaning the trace should not be
-// 			// recorded), set the child token to 0 as well. Otherwise, generate
-// 			// a new, random token.
-// 			uint64_t traceId = 0;
-// 			if ((*parents.begin()).second() > 0) {
-// 				traceId = deterministicRandom()->randomUInt64();
-// 			}
-// 			this->context = SpanID((*parents.begin()).first(), traceId);
-// 		}
-// 	}
-// 	Span(Location location, std::initializer_list<SpanID> const& parents = {})
-// 	  : Span(UID(deterministicRandom()->randomUInt64(),
-// 	             deterministicRandom()->random01() < FLOW_KNOBS->TRACING_SAMPLE_RATE
-// 	                 ? deterministicRandom()->randomUInt64()
-// 	                 : 0),
-// 	         location,
-// 	         parents) {}
-// 	Span(Location location, SpanID context) : Span(location, { context }) {}
-// 	Span(const Span&) = delete;
-// 	Span(Span&& o) {
-// 		arena = std::move(o.arena);
-// 		context = o.context;
-// 		begin = o.begin;
-// 		end = o.end;
-// 		location = o.location;
-// 		parents = std::move(o.parents);
-// 		o.context = UID();
-// 		o.begin = 0.0;
-// 		o.end = 0.0;
-// 	}
-// 	Span() {}
-// 	~Span();
-// 	Span& operator=(Span&& o);
-// 	Span& operator=(const Span&) = delete;
-// 	void swap(Span& other) {
-// 		std::swap(arena, other.arena);
-// 		std::swap(context, other.context);
-// 		std::swap(begin, other.begin);
-// 		std::swap(end, other.end);
-// 		std::swap(location, other.location);
-// 		std::swap(parents, other.parents);
-// 	}
-
-// 	void addParent(SpanID span) {
-// 		if (parents.size() == 0) {
-// 			uint64_t traceId = 0;
-// 			if (span.second() > 0) {
-// 				traceId = context.second() == 0 ? deterministicRandom()->randomUInt64() : context.second();
-// 			}
-// 			// Use first parent to set trace ID. This is non-ideal for spans
-// 			// with multiple parents, because the trace ID will associate the
-// 			// span with only one trace. A workaround is to look at the parent
-// 			// relationships instead of the trace ID. Another option in the
-// 			// future is to keep a list of trace IDs.
-// 			context = SpanID(span.first(), traceId);
-// 		}
-// 		parents.push_back(arena, span);
-// 	}
-
-// 	void addTag(const StringRef& key, const StringRef& value) { tags[key] = value; }
-
-// 	Arena arena;
-// 	UID context = UID();
-// 	double begin = 0.0, end = 0.0;
-// 	Location location;
-// 	SmallVectorRef<SpanID> parents;
-// 	std::unordered_map<StringRef, StringRef> tags;
-// };
-
-// OTELSpan
+// Span
 //
-// OTELSpan is a tracing implementation which, for the most part, complies with the W3C Trace Context specification
+// Span is a tracing implementation which, for the most part, complies with the W3C Trace Context specification
 // https://www.w3.org/TR/trace-context/ and the OpenTelemetry API
 // https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/api.md.
 //
-// The major differences between OTELSpan and the current Span implementation, which is based off the OpenTracing.io
+// The major differences between Span and the 7.0 Span implementation, which is based off the OpenTracing.io
 // specification https://opentracing.io/ are as follows.
 // https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/trace/api.md#span
 //
-// OTELSpans have...
+// OpenTelemetry Spans have...
 // 1. A SpanContext which consists of 3 attributes.
 //
 // TraceId - A valid trace identifier is a 16-byte array with at least one non-zero byte.
@@ -172,13 +99,13 @@ enum class SpanKind : uint8_t { INTERNAL = 0, CLIENT = 1, SERVER = 2, PRODUCER =
 
 enum class SpanStatus : uint8_t { UNSET = 0, OK = 1, ERR = 2 };
 
-struct OTELEventRef {
-	OTELEventRef() {}
-	OTELEventRef(const StringRef& name,
+struct SpanEventRef {
+	SpanEventRef() {}
+	SpanEventRef(const StringRef& name,
 	             const double& time,
 	             const SmallVectorRef<KeyValueRef>& attributes = SmallVectorRef<KeyValueRef>())
 	  : name(name), time(time), attributes(attributes) {}
-	OTELEventRef(Arena& arena, const OTELEventRef& other)
+	SpanEventRef(Arena& arena, const SpanEventRef& other)
 	  : name(arena, other.name), time(other.time), attributes(arena, other.attributes) {}
 	StringRef name;
 	double time = 0.0;
@@ -296,7 +223,7 @@ public:
 		return *this;
 	}
 
-	Span& addEvent(const OTELEventRef& event) {
+	Span& addEvent(const SpanEventRef& event) {
 		events.push_back_deep(arena, event);
 		return *this;
 	}
@@ -304,7 +231,7 @@ public:
 	Span& addEvent(const StringRef& name,
 	               const double& time,
 	               const SmallVectorRef<KeyValueRef>& attrs = SmallVectorRef<KeyValueRef>()) {
-		return addEvent(OTELEventRef(name, time, attrs));
+		return addEvent(SpanEventRef(name, time, attrs));
 	}
 
 	Span& addAttribute(const StringRef& key, const StringRef& value) {
@@ -329,7 +256,7 @@ public:
 	SmallVectorRef<SpanContext> links;
 	double begin = 0.0, end = 0.0;
 	SmallVectorRef<KeyValueRef> attributes; // not necessarily sorted
-	SmallVectorRef<OTELEventRef> events;
+	SmallVectorRef<SpanEventRef> events;
 	SpanStatus status;
 };
 
