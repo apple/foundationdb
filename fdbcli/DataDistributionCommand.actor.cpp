@@ -67,7 +67,8 @@ ACTOR Future<Void> setDDIgnoreRebalanceSwitch(Reference<IDatabase> db, int DDIgn
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		try {
 			if (DDIgnoreOption > 0) {
-				Optional<Value> v = wait(safeThreadFutureToFuture(tr->get(fdb_cli::ddIgnoreRebalanceSpecialKey)));
+				state ThreadFuture<Optional<Value>> resultFuture = tr->get(fdb_cli::ddIgnoreRebalanceSpecialKey);
+				Optional<Value> v = wait(safeThreadFutureToFuture(resultFuture));
 				if (v.present() && v.get().size() > 0) {
 					int oldValue = BinaryReader::fromStringRef<int>(v.get(), Unversioned());
 					tr->set(fdb_cli::ddIgnoreRebalanceSpecialKey,
