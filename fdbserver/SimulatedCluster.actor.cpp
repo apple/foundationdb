@@ -26,6 +26,7 @@
 #include <toml.hpp>
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/simulator.h"
+#include "fdbrpc/IPAllowList.h"
 #include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/DatabaseContext.h"
@@ -520,6 +521,10 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 	state ISimulator::ProcessInfo* simProcess = g_simulator.getCurrentProcess();
 	state UID randomId = nondeterministicRandom()->randomUniqueID();
 	state int cycles = 0;
+	state IPAllowList allowList;
+
+	allowList.addTrustedSubnet("0.0.0.0/2"sv);
+	allowList.addTrustedSubnet("abcd::/16"sv);
 
 	loop {
 		auto waitTime =
@@ -579,7 +584,8 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 				// making progress
 				FlowTransport::createInstance(processClass == ProcessClass::TesterClass || runBackupAgents == AgentOnly,
 				                              1,
-				                              WLTOKEN_RESERVED_COUNT);
+				                              WLTOKEN_RESERVED_COUNT,
+				                              &allowList);
 				Sim2FileSystem::newFileSystem();
 
 				std::vector<Future<Void>> futures;
@@ -2334,10 +2340,14 @@ ACTOR void setupAndRun(std::string dataFolder,
 	state Standalone<StringRef> startingConfiguration;
 	state int testerCount = 1;
 	state TestConfig testConfig;
+	state IPAllowList allowList;
 	testConfig.readFromConfig(testFile);
 	g_simulator.hasDiffProtocolProcess = testConfig.startIncompatibleProcess;
 	g_simulator.setDiffProtocol = false;
 
+	// Build simulator allow list
+	allowList.addTrustedSubnet("0.0.0.0/2"sv);
+	allowList.addTrustedSubnet("abcd::/16"sv);
 	state bool allowDefaultTenant = testConfig.allowDefaultTenant;
 	state bool allowDisablingTenants = testConfig.allowDisablingTenants;
 
@@ -2382,7 +2392,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 	}
 
 	// TODO (IPv6) Use IPv6?
-	wait(g_simulator.onProcess(
+	auto testSystem =
 	    g_simulator.newProcess("TestSystem",
 	                           IPAddress(0x01010101),
 	                           1,
@@ -2395,10 +2405,11 @@ ACTOR void setupAndRun(std::string dataFolder,
 	                           ProcessClass(ProcessClass::TesterClass, ProcessClass::CommandLineSource),
 	                           "",
 	                           "",
-	                           currentProtocolVersion),
-	    TaskPriority::DefaultYield));
+	                           currentProtocolVersion);
+	testSystem->excludeFromRestarts = true;
+	wait(g_simulator.onProcess(testSystem, TaskPriority::DefaultYield));
 	Sim2FileSystem::newFileSystem();
-	FlowTransport::createInstance(true, 1, WLTOKEN_RESERVED_COUNT);
+	FlowTransport::createInstance(true, 1, WLTOKEN_RESERVED_COUNT, &allowList);
 	TEST(true); // Simulation start
 
 	state Optional<TenantName> defaultTenant;

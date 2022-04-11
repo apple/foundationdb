@@ -43,13 +43,13 @@ struct CommitProxyInterface {
 
 	Optional<Key> processId;
 	bool provisional;
-	RequestStream<struct CommitTransactionRequest> commit;
-	RequestStream<struct GetReadVersionRequest>
+	PublicRequestStream<struct CommitTransactionRequest> commit;
+	PublicRequestStream<struct GetReadVersionRequest>
 	    getConsistentReadVersion; // Returns a version which (1) is committed, and (2) is >= the latest version reported
 	                              // committed (by a commit response) when this request was sent
 	                              //   (at some point between when this request is sent and when its response is
 	                              //   received, the latest version reported committed)
-	RequestStream<struct GetKeyServerLocationsRequest> getKeyServersLocations;
+	PublicRequestStream<struct GetKeyServerLocationsRequest> getKeyServersLocations;
 	RequestStream<struct GetStorageServerRejoinInfoRequest> getStorageServerRejoinInfo;
 
 	RequestStream<ReplyPromise<Void>> waitFailure;
@@ -72,9 +72,9 @@ struct CommitProxyInterface {
 		serializer(ar, processId, provisional, commit);
 		if (Archive::isDeserializing) {
 			getConsistentReadVersion =
-			    RequestStream<struct GetReadVersionRequest>(commit.getEndpoint().getAdjustedEndpoint(1));
+			    PublicRequestStream<struct GetReadVersionRequest>(commit.getEndpoint().getAdjustedEndpoint(1));
 			getKeyServersLocations =
-			    RequestStream<struct GetKeyServerLocationsRequest>(commit.getEndpoint().getAdjustedEndpoint(2));
+			    PublicRequestStream<struct GetKeyServerLocationsRequest>(commit.getEndpoint().getAdjustedEndpoint(2));
 			getStorageServerRejoinInfo =
 			    RequestStream<struct GetStorageServerRejoinInfoRequest>(commit.getEndpoint().getAdjustedEndpoint(3));
 			waitFailure = RequestStream<ReplyPromise<Void>>(commit.getEndpoint().getAdjustedEndpoint(4));

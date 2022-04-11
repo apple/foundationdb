@@ -35,6 +35,8 @@
 #include <boost/algorithm/string.hpp>
 #include <boost/interprocess/managed_shared_memory.hpp>
 
+#include <fmt/printf.h>
+
 #include "fdbclient/ActorLineageProfiler.h"
 #include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/IKnobCollection.h"
@@ -45,6 +47,7 @@
 #include "fdbclient/WellKnownEndpoints.h"
 #include "fdbclient/SimpleIni.h"
 #include "fdbrpc/AsyncFileCached.actor.h"
+#include "fdbrpc/IPAllowList.h"
 #include "fdbrpc/FlowProcess.actor.h"
 #include "fdbrpc/Net2FileSystem.h"
 #include "fdbrpc/PerfMetric.h"
@@ -107,7 +110,8 @@ enum {
 	OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_BUILD_FLAGS, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR,
 	OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_UNITTESTPARAM, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE,
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
-	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE, OPT_CONFIG_PATH, OPT_USE_TEST_CONFIG_DB, OPT_FAULT_INJECTION, OPT_PROFILER, OPT_PRINT_SIMTIME, OPT_FLOW_PROCESS_NAME, OPT_FLOW_PROCESS_ENDPOINT
+	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE, OPT_CONFIG_PATH, OPT_USE_TEST_CONFIG_DB, OPT_FAULT_INJECTION, OPT_PROFILER, OPT_PRINT_SIMTIME,
+	OPT_FLOW_PROCESS_NAME, OPT_FLOW_PROCESS_ENDPOINT, OPT_IP_TRUSTED_MASK
 };
 
 CSimpleOpt::SOption g_rgOptions[] = {
@@ -199,6 +203,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_PRINT_SIMTIME,         "--print-sim-time",             SO_NONE },
 	{ OPT_FLOW_PROCESS_NAME,     "--process-name",              SO_REQ_SEP },
 	{ OPT_FLOW_PROCESS_ENDPOINT, "--process-endpoint",          SO_REQ_SEP },
+	{ OPT_IP_TRUSTED_MASK,       "--trusted-subnet-",           SO_REQ_SEP },
 
 #ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
@@ -311,7 +316,7 @@ UID getSharedMemoryMachineId() {
 	std::string sharedMemoryIdentifier = "fdbserver_shared_memory_id";
 	loop {
 		try {
-			// "0" is the default parameter "addr"
+			// "0" is the default netPrefix "addr"
 			boost::interprocess::managed_shared_memory segment(
 			    boost::interprocess::open_or_create, sharedMemoryIdentifier.c_str(), 1000, 0, p.permission);
 			machineId = segment.find_or_construct<UID>("machineId")(newUID);
@@ -1041,6 +1046,7 @@ struct CLIOptions {
 	std::string flowProcessName;
 	Endpoint flowProcessEndpoint;
 	bool printSimTime = false;
+	IPAllowList allowList;
 
 	static CLIOptions parseArgs(int argc, char* argv[]) {
 		CLIOptions opts;
@@ -1165,6 +1171,15 @@ private:
 				Standalone<StringRef> key = StringRef(localityKey.get());
 				std::transform(key.begin(), key.end(), mutateString(key), ::tolower);
 				localities.set(key, Standalone<StringRef>(std::string(args.OptionArg())));
+				break;
+			}
+			case OPT_IP_TRUSTED_MASK: {
+				Optional<std::string> subnetKey = extractPrefixedArgument("--trusted-subnet", args.OptionSyntax());
+				if (!subnetKey.present()) {
+					fprintf(stderr, "ERROR: unable to parse locality key '%s'\n", args.OptionSyntax());
+					flushAndExit(FDB_EXIT_ERROR);
+				}
+				allowList.addTrustedSubnet(args.OptionArg());
 				break;
 			}
 			case OPT_VERSION:
@@ -1853,7 +1868,7 @@ int main(int argc, char* argv[]) {
 		} else {
 			g_network = newNet2(opts.tlsConfig, opts.useThreadPool, true);
 			g_network->addStopCallback(Net2FileSystem::stop);
-			FlowTransport::createInstance(false, 1, WLTOKEN_RESERVED_COUNT);
+			FlowTransport::createInstance(false, 1, WLTOKEN_RESERVED_COUNT, &opts.allowList);
 			opts.buildNetwork(argv[0]);
 
 			const bool expectsPublicAddress = (role == ServerRole::FDBD || role == ServerRole::NetworkTestServer ||

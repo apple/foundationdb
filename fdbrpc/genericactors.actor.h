@@ -32,8 +32,8 @@
 #include "flow/Hostname.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-ACTOR template <class Req>
-Future<REPLY_TYPE(Req)> retryBrokenPromise(RequestStream<Req> to, Req request) {
+ACTOR template <class Req, bool P>
+Future<REPLY_TYPE(Req)> retryBrokenPromise(RequestStream<Req, P> to, Req request) {
 	// Like to.getReply(request), except that a broken_promise exception results in retrying request immediately.
 	// Suitable for use with well known endpoints, which are likely to return to existence after the other process
 	// restarts. Not normally useful for ordinary endpoints, which conventionally are permanently destroyed after
@@ -52,8 +52,8 @@ Future<REPLY_TYPE(Req)> retryBrokenPromise(RequestStream<Req> to, Req request) {
 	}
 }
 
-ACTOR template <class Req>
-Future<REPLY_TYPE(Req)> retryBrokenPromise(RequestStream<Req> to, Req request, TaskPriority taskID) {
+ACTOR template <class Req, bool P>
+Future<REPLY_TYPE(Req)> retryBrokenPromise(RequestStream<Req, P> to, Req request, TaskPriority taskID) {
 	// Like to.getReply(request), except that a broken_promise exception results in retrying request immediately.
 	// Suitable for use with well known endpoints, which are likely to return to existence after the other process
 	// restarts. Not normally useful for ordinary endpoints, which conventionally are permanently destroyed after
@@ -350,7 +350,11 @@ Future<ErrorOr<X>> waitValueOrSignal(Future<X> value,
 		try {
 			choose {
 				when(X x = wait(value)) { return x; }
-				when(wait(signal)) { return ErrorOr<X>(request_maybe_delivered()); }
+				when(wait(signal)) {
+					return ErrorOr<X>(IFailureMonitor::failureMonitor().knownUnauthorized(endpoint)
+					                      ? unauthorized_attempt()
+					                      : request_maybe_delivered());
+				}
 			}
 		} catch (Error& e) {
 			if (signal.isError()) {
@@ -373,12 +377,31 @@ Future<ErrorOr<X>> waitValueOrSignal(Future<X> value,
 
 ACTOR template <class T>
 Future<T> sendCanceler(ReplyPromise<T> reply, ReliablePacket* send, Endpoint endpoint) {
+	state bool didCancelReliable = false;
 	try {
-		T t = wait(reply.getFuture());
-		FlowTransport::transport().cancelReliable(send);
-		return t;
+		loop {
+			if (IFailureMonitor::failureMonitor().permanentlyFailed(endpoint)) {
+				FlowTransport::transport().cancelReliable(send);
+				didCancelReliable = true;
+				if (IFailureMonitor::failureMonitor().knownUnauthorized(endpoint)) {
+					throw unauthorized_attempt();
+				} else {
+					wait(Never());
+				}
+			}
+			choose {
+				when(T t = wait(reply.getFuture())) {
+					FlowTransport::transport().cancelReliable(send);
+					didCancelReliable = true;
+					return t;
+				}
+				when(wait(IFailureMonitor::failureMonitor().onStateChanged(endpoint))) {}
+			}
+		}
 	} catch (Error& e) {
-		FlowTransport::transport().cancelReliable(send);
+		if (!didCancelReliable) {
+			FlowTransport::transport().cancelReliable(send);
+		}
 		if (e.code() == error_code_broken_promise) {
 			IFailureMonitor::failureMonitor().endpointNotFound(endpoint);
 		}
