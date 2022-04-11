@@ -67,6 +67,8 @@ struct VersionedMessage {
 			return false;
 		if (reader.protocolVersion().hasSpanContext() && SpanContextMessage::isNextIn(reader))
 			return false;
+		if (reader.protocolVersion().hasOTELSpanContext() && OTELSpanContextMessage::isNextIn(reader))
+			return false;
 
 		reader >> *m;
 		return normalKeys.contains(m->param1) || m->param1 == metadataVersionKey;

@@ -1594,7 +1594,7 @@ Future<RangeResult> TracingOptionsImpl::getRange(ReadYourWritesTransaction* ryw,
 			    result.arena(),
 			    KeyValueRef(key,
 			                std::string(std::to_string(ryw->getTransactionState()->spanContext.traceID.first()) +
-			                            std::to_string(ryw->getTransactionState()->spanContext.traceID.first()))));
+			                            std::to_string(ryw->getTransactionState()->spanContext.traceID.second()))));
 		} else if (key.endsWith(kTracingTokenKey)) {
 			result.push_back_deep(result.arena(),
 			                      KeyValueRef(key, std::to_string(ryw->getTransactionState()->spanContext.spanID)));

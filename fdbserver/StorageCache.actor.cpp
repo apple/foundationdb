@@ -1897,6 +1897,10 @@ ACTOR Future<Void> pullAsyncData(StorageCacheData* data) {
 					           SpanContextMessage::isNextIn(cloneReader)) {
 						SpanContextMessage scm;
 						cloneReader >> scm;
+					} else if (cloneReader.protocolVersion().hasOTELSpanContext() &&
+					           OTELSpanContextMessage::isNextIn(cloneReader)) {
+						OTELSpanContextMessage scm;
+						cloneReader >> scm;
 					} else {
 						MutationRef msg;
 						cloneReader >> msg;
