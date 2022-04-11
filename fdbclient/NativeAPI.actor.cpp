@@ -3055,43 +3055,22 @@ ACTOR Future<Void> warmRange_impl(Reference<TransactionState> trState, KeyRange 
 	return Void();
 }
 
-// TODO - Do we need this? Seems like logic for this is duplicated in constructor of spans
-// and is escaping out here. Assuming we can probably encapsulate this in the object itself?
-// SpanID generateSpanID(bool transactionTracingSample, SpanID parentContext = SpanID()) {
-// 	uint64_t txnId = deterministicRandom()->randomUInt64();
-// 	if (parentContext.isValid()) {
-// 		if (parentContext.first() > 0) {
-// 			txnId = parentContext.first();
-// 		}
-// 		uint64_t tokenId = parentContext.second() > 0 ? deterministicRandom()->randomUInt64() : 0;
-// 		return SpanID(txnId, tokenId);
-// 	} else if (transactionTracingSample) {
-// 		uint64_t tokenId = deterministicRandom()->random01() <= FLOW_KNOBS->TRACING_SAMPLE_RATE
-// 		                       ? deterministicRandom()->randomUInt64()
-// 		                       : 0;
-// 		return SpanID(txnId, tokenId);
-// 	} else {
-// 		return SpanID(txnId, 0);
-// 	}
-// }
-
-// TODO - ljoswiak and mpilman. This will need some discussion and close inspection, looks like txnID
-// is intertwined with old first uint64_t of SpanID/UID which was previously used for traceId.
+// TODO - ljoswiak and mpilman. This will need some close inspection. 
 SpanContext generateSpanID(bool transactionTracingSample, SpanContext parentContext = SpanContext()) {
-	uint64_t txnId = deterministicRandom()->randomUInt64();
+	UID txnId = UID(deterministicRandom()->randomUInt64(), deterministicRandom()->randomUInt64());
 	if (parentContext.isValid()) {
 		if (parentContext.traceID.first() > 0) {
-			txnId = parentContext.traceID.first();
+			txnId = parentContext.traceID;
 		}
-		uint64_t tokenId = parentContext.spanID > 0 ? deterministicRandom()->randomUInt64() : 0;
-		return SpanContext(UID(txnId, deterministicRandom()->randomUInt64()), tokenId);
+		uint64_t spanId = parentContext.spanID > 0 ? deterministicRandom()->randomUInt64() : 0;
+		return SpanContext(txnId, spanId);
 	} else if (transactionTracingSample) {
-		uint64_t tokenId = deterministicRandom()->random01() <= FLOW_KNOBS->TRACING_SAMPLE_RATE
+		uint64_t spanId = deterministicRandom()->random01() <= FLOW_KNOBS->TRACING_SAMPLE_RATE
 		                       ? deterministicRandom()->randomUInt64()
 		                       : 0;
-		return SpanContext(UID(txnId, deterministicRandom()->randomUInt64()), tokenId);
+		return SpanContext(txnId, spanId, spanId > 0 ? TraceFlags::sampled : TraceFlags::unsampled);
 	} else {
-		return SpanContext(UID(txnId, deterministicRandom()->randomUInt64()), 0);
+		return SpanContext(txnId, 0);
 	}
 }
 

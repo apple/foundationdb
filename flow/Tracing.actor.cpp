@@ -47,22 +47,6 @@ struct NoopTracer : ITracer {
 
 struct LogfileTracer : ITracer {
 	TracerType type() const override { return TracerType::LOG_FILE; }
-	// void trace(Span const& span) override {
-	// 	TraceEvent te(SevInfo, "TracingSpan", span.context);
-	// 	te.detail("Location", span.location.name)
-	// 	    .detail("Begin", format("%.6f", span.begin))
-	// 	    .detail("End", format("%.6f", span.end));
-	// 	if (span.parents.size() == 1) {
-	// 		te.detail("Parent", *span.parents.begin());
-	// 	} else {
-	// 		for (auto parent : span.parents) {
-	// 			TraceEvent(SevInfo, "TracingSpanAddParent", span.context).detail("AddParent", parent);
-	// 		}
-	// 	}
-	// 	for (const auto& [key, value] : span.tags) {
-	// 		TraceEvent(SevInfo, "TracingSpanTag", span.context).detail("Key", key).detail("Value", value);
-	// 	}
-	// }
 	void trace(Span const& span) override {
 		TraceEvent te(SevInfo, "TracingSpan", span.context.traceID);
 		te.detail("SpanID", span.context.spanID)
@@ -182,31 +166,6 @@ ACTOR Future<Void> traceLog(int* pendingMessages, bool* sendError) {
 struct UDPTracer : public ITracer {
 	// Serializes span fields as an array into the supplied TraceRequest
 	// buffer.
-	// void serialize_span(const Span& span, TraceRequest& request) {
-	// 	// If you change the serialization format here, make sure to update the
-	// 	// fluentd filter to be able to correctly parse the updated format! See
-	// 	// the msgpack specification for more info on the bit patterns used
-	// 	// here.
-	// 	uint8_t size = 8;
-	// 	if (span.parents.size() == 0)
-	// 		--size;
-	// 	request.write_byte(size | 0b10010000); // write as array
-
-	// 	serialize_string(g_network->getLocalAddress().toString(), request); // ip:port
-
-	// 	serialize_value(span.context.first(), request, 0xcf); // trace id
-	// 	serialize_value(span.context.second(), request, 0xcf); // token (span id)
-
-	// 	serialize_value(span.begin, request, 0xcb); // start time
-	// 	serialize_value(span.end - span.begin, request, 0xcb); // duration
-
-	// 	serialize_string(span.location.name.toString(), request);
-
-	// 	serialize_map(span.tags, request);
-
-	// 	serialize_vector(span.parents, request);
-	// }
-
 	void serialize_span(const Span& span, TraceRequest& request) {
 		uint16_t size = 14;
 		request.write_byte(size | 0b10010000); // write as array
@@ -274,30 +233,6 @@ private:
 		serialize_string(reinterpret_cast<const uint8_t*>(str.data()), str.size(), request);
 	}
 
-	// Writes the given vector of SpanIDs to the request. If the vector is
-	// empty, the request is not modified.
-	// inline void serialize_vector(const SmallVectorRef<SpanID>& vec, TraceRequest& request) {
-	// 	int size = vec.size();
-	// 	if (size == 0) {
-	// 		return;
-	// 	}
-	// 	if (size <= 15) {
-	// 		request.write_byte(static_cast<uint8_t>(size) | 0b10010000);
-	// 	} else if (size <= 65535) {
-	// 		request.write_byte(0xdc);
-	// 		request.write_byte(reinterpret_cast<const uint8_t*>(&size)[1]);
-	// 		request.write_byte(reinterpret_cast<const uint8_t*>(&size)[0]);
-	// 	} else {
-	// 		TraceEvent(SevWarn, "TracingSpanSerializeVector")
-	// 		    .detail("Failed to MessagePack encode very large vector", size);
-	// 		ASSERT_WE_THINK(false);
-	// 	}
-
-	// 	for (const auto& parentContext : vec) {
-	// 		serialize_value(parentContext.second(), request, 0xcf);
-	// 	}
-	// }
-
 	// Writes the given vector of linked SpanContext's to the request. If the vector is
 	// empty, the request is not modified.
 	inline void serialize_vector(const SmallVectorRef<SpanContext>& vec, TraceRequest& request) {
@@ -322,7 +257,7 @@ private:
 
 	// Writes the given vector of linked SpanContext's to the request. If the vector is
 	// empty, the request is not modified.
-	inline void serialize_vector(const SmallVectorRef<OTELEventRef>& vec, TraceRequest& request) {
+	inline void serialize_vector(const SmallVectorRef<SpanEventRef>& vec, TraceRequest& request) {
 		int size = vec.size();
 		if (size <= 15) {
 			request.write_byte(static_cast<uint8_t>(size) | 0b10010000);
@@ -459,12 +394,6 @@ struct FastUDPTracer : public UDPTracer {
 		write();
 	}
 
-	// void trace(Span const& span) override {
-	// 	prepare(span.location.name.size());
-	// 	serialize_span(span, request_);
-	// 	write();
-	// }
-
 private:
 	TraceRequest request_;
 
@@ -511,28 +440,6 @@ void openTracer(TracerType type) {
 }
 
 ITracer::~ITracer() {}
-
-// Span& Span::operator=(Span&& o) {
-// 	if (begin > 0.0 && context.second() > 0) {
-// 		end = g_network->now();
-// 		g_tracer->trace(*this);
-// 	}
-// 	arena = std::move(o.arena);
-// 	context = o.context;
-// 	begin = o.begin;
-// 	end = o.end;
-// 	location = o.location;
-// 	parents = std::move(o.parents);
-// 	o.begin = 0;
-// 	return *this;
-// }
-
-// Span::~Span() {
-// 	if (begin > 0.0 && context.second() > 0) {
-// 		end = g_network->now();
-// 		g_tracer->trace(*this);
-// 	}
-// }
 
 Span& Span::operator=(Span&& o) {
 	if (begin > 0.0 && o.context.isSampled() > 0) {
