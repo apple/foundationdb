@@ -50,7 +50,6 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( MAX_GENERATIONS_OVERRIDE,                  0 );
 	init( MAX_GENERATIONS_SIM,                      50 ); //Disable network connections after this many generations in simulation, should be less than RECOVERY_DELAY_START_GENERATION
 
-	init( COORDINATOR_HOSTNAME_RESOLVE_DELAY,     0.05 );
 	init( COORDINATOR_RECONNECTION_DELAY,          1.0 );
 	init( CLIENT_EXAMPLE_AMOUNT,                    20 );
 	init( MAX_CLIENT_STATUS_AGE,                   1.0 );

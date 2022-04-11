@@ -28,6 +28,8 @@
 
 #include "flow/genericactors.actor.h"
 #include "fdbrpc/fdbrpc.h"
+#include "fdbclient/WellKnownEndpoints.h"
+#include "flow/Hostname.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 ACTOR template <class Req>
@@ -66,6 +68,112 @@ Future<REPLY_TYPE(Req)> retryBrokenPromise(RequestStream<Req> to, Req request, T
 			resetReply(request);
 			wait(delayJittered(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY, taskID));
 			TEST(true); // retryBrokenPromise with taskID
+		}
+	}
+}
+
+ACTOR template <class Req>
+Future<ErrorOr<REPLY_TYPE(Req)>> tryGetReplyFromHostname(RequestStream<Req>* to,
+                                                         Req request,
+                                                         Hostname hostname,
+                                                         WellKnownEndpoints token) {
+	// A wrapper of tryGetReply(request), except that the request is sent to an address resolved from a hostname.
+	// If resolving fails, return lookup_failed().
+	// Otherwise, return tryGetReply(request).
+	Optional<NetworkAddress> address = wait(hostname.resolve());
+	if (!address.present()) {
+		return ErrorOr<REPLY_TYPE(Req)>(lookup_failed());
+	}
+	*to = RequestStream<Req>(Endpoint::wellKnown({ address.get() }, token));
+	ErrorOr<REPLY_TYPE(Req)> reply = wait(to->tryGetReply(request));
+	if (reply.isError()) {
+		resetReply(request);
+		if (reply.getError().code() == error_code_request_maybe_delivered) {
+			// Connection failure.
+			hostname.resetToUnresolved();
+			INetworkConnections::net()->removeCachedDNS(hostname.host, hostname.service);
+		}
+	}
+	return reply;
+}
+
+ACTOR template <class Req>
+Future<ErrorOr<REPLY_TYPE(Req)>> tryGetReplyFromHostname(RequestStream<Req>* to,
+                                                         Req request,
+                                                         Hostname hostname,
+                                                         WellKnownEndpoints token,
+                                                         TaskPriority taskID) {
+	// A wrapper of tryGetReply(request), except that the request is sent to an address resolved from a hostname.
+	// If resolving fails, return lookup_failed().
+	// Otherwise, return tryGetReply(request).
+	Optional<NetworkAddress> address = wait(hostname.resolve());
+	if (!address.present()) {
+		return ErrorOr<REPLY_TYPE(Req)>(lookup_failed());
+	}
+	*to = RequestStream<Req>(Endpoint::wellKnown({ address.get() }, token));
+	ErrorOr<REPLY_TYPE(Req)> reply = wait(to->tryGetReply(request, taskID));
+	if (reply.isError()) {
+		resetReply(request);
+		if (reply.getError().code() == error_code_request_maybe_delivered) {
+			// Connection failure.
+			hostname.resetToUnresolved();
+			INetworkConnections::net()->removeCachedDNS(hostname.host, hostname.service);
+		}
+	}
+	return reply;
+}
+
+ACTOR template <class Req>
+Future<REPLY_TYPE(Req)> retryGetReplyFromHostname(RequestStream<Req>* to,
+                                                  Req request,
+                                                  Hostname hostname,
+                                                  WellKnownEndpoints token) {
+	// Like tryGetReplyFromHostname, except that request_maybe_delivered results in re-resolving the hostname.
+	// Suitable for use with hostname, where RequestStream is NOT initialized yet.
+	// Not normally useful for endpoints initialized with NetworkAddress.
+	loop {
+		NetworkAddress address = wait(hostname.resolveWithRetry());
+		*to = RequestStream<Req>(Endpoint::wellKnown({ address }, token));
+		ErrorOr<REPLY_TYPE(Req)> reply = wait(to->tryGetReply(request));
+		if (reply.isError()) {
+			resetReply(request);
+			if (reply.getError().code() == error_code_request_maybe_delivered) {
+				// Connection failure.
+				hostname.resetToUnresolved();
+				INetworkConnections::net()->removeCachedDNS(hostname.host, hostname.service);
+			} else {
+				throw reply.getError();
+			}
+		} else {
+			return reply.get();
+		}
+	}
+}
+
+ACTOR template <class Req>
+Future<REPLY_TYPE(Req)> retryGetReplyFromHostname(RequestStream<Req>* to,
+                                                  Req request,
+                                                  Hostname hostname,
+                                                  WellKnownEndpoints token,
+                                                  TaskPriority taskID) {
+	// Like tryGetReplyFromHostname, except that request_maybe_delivered results in re-resolving the hostname.
+	// Suitable for use with hostname, where RequestStream is NOT initialized yet.
+	// Not normally useful for endpoints initialized with NetworkAddress.
+	loop {
+		NetworkAddress address = wait(hostname.resolveWithRetry());
+		*to = RequestStream<Req>(Endpoint::wellKnown({ address }, token));
+		ErrorOr<REPLY_TYPE(Req)> reply = wait(to->tryGetReply(request, taskID));
+		if (reply.isError()) {
+			resetReply(request);
+			if (reply.getError().code() == error_code_request_maybe_delivered) {
+				// Connection failure.
+				hostname.resetToUnresolved();
+				INetworkConnections::net()->removeCachedDNS(hostname.host, hostname.service);
+			} else {
+				throw reply.getError();
+			}
+		} else {
+			return reply.get();
 		}
 	}
 }
@@ -225,6 +333,8 @@ void endStreamOnDisconnect(Future<Void> signal,
 				wait(signal || stream.onConnected());
 			}
 		}
+		// Notify BEFORE dropping last reference, causing broken_promise to send on stream before destructor is called
+		stream.notifyFailed();
 	}
 }
 

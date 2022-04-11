@@ -72,6 +72,7 @@
 #include "flow/FastRef.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
+#include "flow/ProtocolVersion.h"
 #include "flow/flow.h"
 #include "flow/genericactors.actor.h"
 #include "flow/Knobs.h"
@@ -261,7 +262,25 @@ void DatabaseContext::getLatestCommitVersions(const Reference<LocationInfo>& loc
 	}
 }
 
+void updateCachedReadVersionShared(double t, Version v, DatabaseSharedState* p) {
+	MutexHolder mutex(p->mutexLock);
+	if (v >= p->grvCacheSpace.cachedReadVersion) {
+		TraceEvent(SevDebug, "CacheReadVersionUpdate")
+		    .detail("Version", v)
+		    .detail("CurTime", t)
+		    .detail("LastVersion", p->grvCacheSpace.cachedReadVersion)
+		    .detail("LastTime", p->grvCacheSpace.lastGrvTime);
+		p->grvCacheSpace.cachedReadVersion = v;
+		if (t > p->grvCacheSpace.lastGrvTime) {
+			p->grvCacheSpace.lastGrvTime = t;
+		}
+	}
+}
+
 void DatabaseContext::updateCachedReadVersion(double t, Version v) {
+	if (sharedStatePtr) {
+		return updateCachedReadVersionShared(t, v, sharedStatePtr);
+	}
 	if (v >= cachedReadVersion) {
 		TraceEvent(SevDebug, "CachedReadVersionUpdate")
 		    .detail("Version", v)
@@ -280,10 +299,18 @@ void DatabaseContext::updateCachedReadVersion(double t, Version v) {
 }
 
 Version DatabaseContext::getCachedReadVersion() {
+	if (sharedStatePtr) {
+		MutexHolder mutex(sharedStatePtr->mutexLock);
+		return sharedStatePtr->grvCacheSpace.cachedReadVersion;
+	}
 	return cachedReadVersion;
 }
 
 double DatabaseContext::getLastGrvTime() {
+	if (sharedStatePtr) {
+		MutexHolder mutex(sharedStatePtr->mutexLock);
+		return sharedStatePtr->grvCacheSpace.lastGrvTime;
+	}
 	return lastGrvTime;
 }
 
@@ -1411,7 +1438,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
     transactionGrvFullBatches("NumGrvFullBatches", cc), transactionGrvTimedOutBatches("NumGrvTimedOutBatches", cc),
     transactionsStaleVersionVectors("NumStaleVersionVectors", cc), latencies(1000), readLatencies(1000),
     commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), bgLatencies(1000),
-    bgGranulesPerRequest(1000), outstandingWatches(0), lastGrvTime(0.0), cachedReadVersion(0),
+    bgGranulesPerRequest(1000), outstandingWatches(0), sharedStatePtr(nullptr), lastGrvTime(0.0), cachedReadVersion(0),
     lastRkBatchThrottleTime(0.0), lastRkDefaultThrottleTime(0.0), lastProxyRequestTime(0.0),
     transactionTracingSample(false), taskID(taskID), clientInfo(clientInfo), clientInfoMonitor(clientInfoMonitor),
     coordinator(coordinator), apiVersion(apiVersion), mvCacheInsertLocation(0), healthMetricsLastUpdated(0),
@@ -1538,6 +1565,12 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 		    SpecialKeySpace::IMPLTYPE::READWRITE,
 		    std::make_unique<AdvanceVersionImpl>(
 		        singleKeyRange(LiteralStringRef("min_required_commit_version"))
+		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
+		registerSpecialKeySpaceModule(
+		    SpecialKeySpace::MODULE::MANAGEMENT,
+		    SpecialKeySpace::IMPLTYPE::READWRITE,
+		    std::make_unique<VersionEpochImpl>(
+		        singleKeyRange(LiteralStringRef("version_epoch"))
 		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
 		registerSpecialKeySpaceModule(
 		    SpecialKeySpace::MODULE::MANAGEMENT,
@@ -1712,6 +1745,9 @@ DatabaseContext::~DatabaseContext() {
 	tssMismatchHandler.cancel();
 	if (grvUpdateHandler.isValid()) {
 		grvUpdateHandler.cancel();
+	}
+	if (sharedStatePtr) {
+		sharedStatePtr->delRef(sharedStatePtr);
 	}
 	for (auto it = server_interf.begin(); it != server_interf.end(); it = server_interf.erase(it))
 		it->second->notifyContextDestroyed();
@@ -8267,6 +8303,29 @@ Future<Void> DatabaseContext::createSnapshot(StringRef uid, StringRef snapshot_c
 	return createSnapshotActor(this, UID::fromString(uid_str), snapshot_command);
 }
 
+void sharedStateDelRef(DatabaseSharedState* ssPtr) {
+	if (--ssPtr->refCount == 0) {
+		delete ssPtr;
+	}
+}
+
+Future<DatabaseSharedState*> DatabaseContext::initSharedState() {
+	ASSERT(!sharedStatePtr); // Don't re-initialize shared state if a pointer already exists
+	DatabaseSharedState* newState = new DatabaseSharedState();
+	// Increment refcount by 1 on creation to account for the one held in MultiVersionApi map
+	// Therefore, on initialization, refCount should be 2 (after also going to setSharedState)
+	newState->refCount++;
+	newState->delRef = &sharedStateDelRef;
+	setSharedState(newState);
+	return newState;
+}
+
+void DatabaseContext::setSharedState(DatabaseSharedState* p) {
+	ASSERT(p->protocolVersion == currentProtocolVersion);
+	sharedStatePtr = p;
+	sharedStatePtr->refCount++;
+}
+
 ACTOR Future<Void> storageFeedVersionUpdater(StorageServerInterface interf, ChangeFeedStorageData* self) {
 	state Promise<Void> destroyed = self->destroyed;
 	loop {
@@ -9247,4 +9306,87 @@ Future<Void> DatabaseContext::popChangeFeedMutations(Key rangeID, Version versio
 
 Reference<DatabaseContext::TransactionT> DatabaseContext::createTransaction() {
 	return makeReference<ReadYourWritesTransaction>(Database(Reference<DatabaseContext>::addRef(this)));
+}
+
+ACTOR Future<Key> purgeBlobGranulesActor(Reference<DatabaseContext> db,
+                                         KeyRange range,
+                                         Version purgeVersion,
+                                         bool force) {
+	state Database cx(db);
+	state Transaction tr(cx);
+	state Key purgeKey;
+
+	// FIXME: implement force
+	if (!force) {
+		throw unsupported_operation();
+	}
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+			Value purgeValue = blobGranulePurgeValueFor(purgeVersion, range, force);
+			tr.atomicOp(
+			    addVersionStampAtEnd(blobGranulePurgeKeys.begin), purgeValue, MutationRef::SetVersionstampedKey);
+			tr.set(blobGranulePurgeChangeKey, deterministicRandom()->randomUniqueID().toString());
+			state Future<Standalone<StringRef>> fTrVs = tr.getVersionstamp();
+			wait(tr.commit());
+			Standalone<StringRef> vs = wait(fTrVs);
+			purgeKey = blobGranulePurgeKeys.begin.withSuffix(vs);
+			if (BG_REQUEST_DEBUG) {
+				fmt::print("purgeBlobGranules for range [{0} - {1}) at version {2} registered {3}\n",
+				           range.begin.printable(),
+				           range.end.printable(),
+				           purgeVersion,
+				           purgeKey.printable());
+			}
+			break;
+		} catch (Error& e) {
+			if (BG_REQUEST_DEBUG) {
+				fmt::print("purgeBlobGranules for range [{0} - {1}) at version {2} encountered error {3}\n",
+				           range.begin.printable(),
+				           range.end.printable(),
+				           purgeVersion,
+				           e.name());
+			}
+			wait(tr.onError(e));
+		}
+	}
+	return purgeKey;
+}
+
+Future<Key> DatabaseContext::purgeBlobGranules(KeyRange range, Version purgeVersion, bool force) {
+	return purgeBlobGranulesActor(Reference<DatabaseContext>::addRef(this), range, purgeVersion, force);
+}
+
+ACTOR Future<Void> waitPurgeGranulesCompleteActor(Reference<DatabaseContext> db, Key purgeKey) {
+	state Database cx(db);
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+			Optional<Value> purgeVal = wait(tr->get(purgeKey));
+			if (!purgeVal.present()) {
+				if (BG_REQUEST_DEBUG) {
+					fmt::print("purgeBlobGranules for {0} succeeded\n", purgeKey.printable());
+				}
+				return Void();
+			}
+			if (BG_REQUEST_DEBUG) {
+				fmt::print("purgeBlobGranules for {0} watching\n", purgeKey.printable());
+			}
+			state Future<Void> watchFuture = tr->watch(purgeKey);
+			wait(tr->commit());
+			wait(watchFuture);
+			tr->reset();
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+}
+
+Future<Void> DatabaseContext::waitPurgeGranulesComplete(Key purgeKey) {
+	return waitPurgeGranulesCompleteActor(Reference<DatabaseContext>::addRef(this), purgeKey);
 }

@@ -364,6 +364,32 @@ TEST_CASE("/fdbclient/MonitorLeader/ConnectionString") {
 	return Void();
 }
 
+TEST_CASE("/fdbclient/MonitorLeader/PartialResolve") {
+	std::string connectionString = "TestCluster:0@host.name:1234,host-name:5678";
+	std::string hn = "host-name", port = "5678";
+
+	state NetworkAddress address = NetworkAddress::parse("1.0.0.0:5678");
+
+	INetworkConnections::net()->addMockTCPEndpoint(hn, port, { address });
+
+	state ClusterConnectionString cs(connectionString);
+
+	state std::unordered_set<NetworkAddress> coordinatorAddresses;
+	std::vector<Future<Void>> fs;
+	for (auto& hostname : cs.hostnames) {
+		fs.push_back(map(hostname.resolve(), [&](Optional<NetworkAddress> const& addr) -> Void {
+			if (addr.present()) {
+				coordinatorAddresses.insert(addr.get());
+			}
+			return Void();
+		}));
+	}
+	wait(waitForAll(fs));
+	ASSERT(coordinatorAddresses.size() == 1 && coordinatorAddresses.count(address) == 1);
+
+	return Void();
+}
+
 TEST_CASE("/flow/FlatBuffers/LeaderInfo") {
 	{
 		LeaderInfo in;
@@ -559,7 +585,7 @@ ACTOR Future<Void> monitorNominee(Key key,
 				    .detail("OldAddr", coord.getLeader.getEndpoint().getPrimaryAddress().toString());
 				if (rep.getError().code() == error_code_request_maybe_delivered) {
 					// Delay to prevent tight resolving loop due to outdated DNS cache
-					wait(delay(CLIENT_KNOBS->COORDINATOR_HOSTNAME_RESOLVE_DELAY));
+					wait(delay(FLOW_KNOBS->HOSTNAME_RESOLVE_DELAY));
 					throw coordinators_changed();
 				} else {
 					throw rep.getError();

@@ -260,6 +260,45 @@ def suspend(logger):
     assert get_value_from_status_json(False, 'client', 'database_status', 'available')
 
 
+def extract_version_epoch(cli_output):
+    return int(cli_output.split("\n")[-1].split(" ")[-1])
+
+
+@enable_logging()
+def targetversion(logger):
+    version1 = run_fdbcli_command('targetversion getepoch')
+    assert version1 == "Version epoch is unset"
+    version2 = int(run_fdbcli_command('getversion'))
+    logger.debug("read version: {}".format(version2))
+    assert version2 >= 0
+    # set the version epoch to the default value
+    logger.debug("setting version epoch to default")
+    run_fdbcli_command('targetversion add 0')
+    # get the version epoch
+    versionepoch1 = extract_version_epoch(run_fdbcli_command('targetversion getepoch'))
+    logger.debug("version epoch: {}".format(versionepoch1))
+    # make sure the version increased
+    version3 = int(run_fdbcli_command('getversion'))
+    logger.debug("read version: {}".format(version3))
+    assert version3 >= version2
+    # slightly increase the version epoch
+    versionepoch2 = extract_version_epoch(run_fdbcli_command("targetversion setepoch {}".format(versionepoch1 + 1000000)))
+    logger.debug("version epoch: {}".format(versionepoch2))
+    assert versionepoch2 == versionepoch1 + 1000000
+    # slightly decrease the version epoch
+    versionepoch3 = extract_version_epoch(run_fdbcli_command("targetversion add {}".format(-1000000)))
+    logger.debug("version epoch: {}".format(versionepoch3))
+    assert versionepoch3 == versionepoch2 - 1000000 == versionepoch1
+    # the versions should still be increasing
+    version4 = int(run_fdbcli_command('getversion'))
+    logger.debug("read version: {}".format(version4))
+    assert version4 >= version3
+    # clear the version epoch and make sure it is now unset
+    run_fdbcli_command("targetversion clearepoch")
+    version5 = run_fdbcli_command('targetversion getepoch')
+    assert version5 == "Version epoch is unset"
+
+
 def get_value_from_status_json(retry, *args):
     while True:
         result = json.loads(run_fdbcli_command('status', 'json'))
@@ -685,6 +724,9 @@ if __name__ == '__main__':
         throttle()
         triggerddteaminfolog()
         tenants()
+        # TODO: similar to advanceversion, this seems to cause some issues, so disable for now
+        # This must go last, otherwise the version advancement can mess with the other tests
+        # targetversion()
     else:
         assert args.process_number > 1, "Process number should be positive"
         coordinators()

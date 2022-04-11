@@ -216,7 +216,7 @@ struct SplitEvaluation {
 struct BlobManagerStats {
 	CounterCollection cc;
 
-	// FIXME: pruning stats
+	// FIXME: purging stats
 
 	Counter granuleSplits;
 	Counter granuleWriteHotSplits;
@@ -224,13 +224,22 @@ struct BlobManagerStats {
 	Counter ccRowsChecked;
 	Counter ccBytesChecked;
 	Counter ccMismatches;
+	Counter ccTimeouts;
+	Counter ccErrors;
+	Counter purgesProcessed;
+	Counter granulesFullyPurged;
+	Counter granulesPartiallyPurged;
+	Counter filesPurged;
 	Future<Void> logger;
 
 	// Current stats maintained for a given blob worker process
 	explicit BlobManagerStats(UID id, double interval, std::unordered_map<UID, BlobWorkerInterface>* workers)
 	  : cc("BlobManagerStats", id.toString()), granuleSplits("GranuleSplits", cc),
 	    granuleWriteHotSplits("GranuleWriteHotSplits", cc), ccGranulesChecked("CCGranulesChecked", cc),
-	    ccRowsChecked("CCRowsChecked", cc), ccBytesChecked("CCBytesChecked", cc), ccMismatches("CCMismatches", cc) {
+	    ccRowsChecked("CCRowsChecked", cc), ccBytesChecked("CCBytesChecked", cc), ccMismatches("CCMismatches", cc),
+	    ccTimeouts("CCTimeouts", cc), ccErrors("CCErrors", cc), purgesProcessed("PurgesProcessed", cc),
+	    granulesFullyPurged("GranulesFullyPurged", cc), granulesPartiallyPurged("GranulesPartiallyPurged", cc),
+	    filesPurged("FilesPurged", cc) {
 		specialCounter(cc, "WorkerCount", [workers]() { return workers->size(); });
 		logger = traceCounters("BlobManagerMetrics", id, interval, &cc, "BlobManagerMetrics");
 	}
@@ -435,6 +444,7 @@ ACTOR Future<UID> pickWorkerForAssign(Reference<BlobManagerData> bmData) {
 ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
                                      RangeAssignment assignment,
                                      Optional<UID> workerID,
+                                     int64_t epoch,
                                      int64_t seqNo) {
 	// WorkerId is set, except in case of assigning to any worker. Then we pick the worker to assign to in here
 
@@ -465,7 +475,7 @@ ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
 		           assignment.isAssign ? "assigning" : "revoking",
 		           assignment.keyRange.begin.printable(),
 		           assignment.keyRange.end.printable(),
-		           bmData->epoch,
+		           epoch,
 		           seqNo,
 		           workerID.get().toString());
 	}
@@ -478,7 +488,7 @@ ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
 			AssignBlobRangeRequest req;
 			req.keyRange = KeyRangeRef(StringRef(req.arena, assignment.keyRange.begin),
 			                           StringRef(req.arena, assignment.keyRange.end));
-			req.managerEpoch = bmData->epoch;
+			req.managerEpoch = epoch;
 			req.managerSeqno = seqNo;
 			req.type = assignment.assign.get().type;
 
@@ -494,7 +504,7 @@ ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
 			RevokeBlobRangeRequest req;
 			req.keyRange = KeyRangeRef(StringRef(req.arena, assignment.keyRange.begin),
 			                           StringRef(req.arena, assignment.keyRange.end));
-			req.managerEpoch = bmData->epoch;
+			req.managerEpoch = epoch;
 			req.managerSeqno = seqNo;
 			req.dispose = assignment.revoke.get().dispose;
 
@@ -634,10 +644,10 @@ ACTOR Future<Void> rangeAssigner(Reference<BlobManagerData> bmData) {
 				}
 				count++;
 			}
-			ASSERT(count == 1);
 			if (skip) {
 				continue;
 			}
+			ASSERT(count == 1);
 
 			if (assignment.worker.present() && assignment.worker.get().isValid()) {
 				if (BM_DEBUG) {
@@ -650,7 +660,7 @@ ACTOR Future<Void> rangeAssigner(Reference<BlobManagerData> bmData) {
 
 				bmData->workerAssignments.insert(assignment.keyRange, workerId);
 				bmData->assignsInProgress.insert(assignment.keyRange,
-				                                 doRangeAssignment(bmData, assignment, workerId, seqNo));
+				                                 doRangeAssignment(bmData, assignment, workerId, bmData->epoch, seqNo));
 				// If we know about the worker and this is not a continue, then this is a new range for the worker
 				if (bmData->workerStats.count(workerId) &&
 				    assignment.assign.get().type != AssignRequestType::Continue) {
@@ -659,8 +669,8 @@ ACTOR Future<Void> rangeAssigner(Reference<BlobManagerData> bmData) {
 			} else {
 				// Ensure the key boundaries are updated before we pick a worker
 				bmData->workerAssignments.insert(assignment.keyRange, UID());
-				bmData->assignsInProgress.insert(assignment.keyRange,
-				                                 doRangeAssignment(bmData, assignment, Optional<UID>(), seqNo));
+				bmData->assignsInProgress.insert(
+				    assignment.keyRange, doRangeAssignment(bmData, assignment, Optional<UID>(), bmData->epoch, seqNo));
 			}
 
 		} else {
@@ -674,7 +684,8 @@ ACTOR Future<Void> rangeAssigner(Reference<BlobManagerData> bmData) {
 				if (existingRange.range() == assignment.keyRange && existingRange.cvalue() == assignment.worker.get()) {
 					bmData->workerAssignments.insert(assignment.keyRange, UID());
 				}
-				bmData->addActor.send(doRangeAssignment(bmData, assignment, assignment.worker.get(), seqNo));
+				bmData->addActor.send(
+				    doRangeAssignment(bmData, assignment, assignment.worker.get(), bmData->epoch, seqNo));
 			} else {
 				auto currentAssignments = bmData->workerAssignments.intersectingRanges(assignment.keyRange);
 				for (auto& it : currentAssignments) {
@@ -690,7 +701,7 @@ ACTOR Future<Void> rangeAssigner(Reference<BlobManagerData> bmData) {
 					}
 
 					// revoke the range for the worker that owns it, not the worker specified in the revoke
-					bmData->addActor.send(doRangeAssignment(bmData, assignment, it.value(), seqNo));
+					bmData->addActor.send(doRangeAssignment(bmData, assignment, it.value(), bmData->epoch, seqNo));
 				}
 				bmData->workerAssignments.insert(assignment.keyRange, UID());
 			}
@@ -1353,26 +1364,6 @@ ACTOR Future<Void> monitorBlobWorkerStatus(Reference<BlobManagerData> bmData, Bl
 				// back is to split the range.
 				ASSERT(rep.doSplit);
 
-				// only evaluate for split if this worker currently owns the granule in this blob manager's mapping
-				auto currGranuleAssignment = bmData->workerAssignments.rangeContaining(rep.granuleRange.begin);
-				if (!(currGranuleAssignment.begin() == rep.granuleRange.begin &&
-				      currGranuleAssignment.end() == rep.granuleRange.end &&
-				      currGranuleAssignment.cvalue() == bwInterf.id())) {
-					if (BM_DEBUG) {
-						fmt::print("Manager {0} ignoring status from BW {1} for granule [{2} - {3}) since BW {4} owns "
-						           "[{5} - {6}).\n",
-						           bmData->epoch,
-						           bwInterf.id().toString().substr(0, 5),
-						           rep.granuleRange.begin.printable(),
-						           rep.granuleRange.end.printable(),
-						           currGranuleAssignment.cvalue().toString().substr(0, 5),
-						           currGranuleAssignment.begin().printable(),
-						           currGranuleAssignment.end().printable());
-					}
-					// FIXME: could send revoke request
-					continue;
-				}
-
 				// FIXME: We will need to go over all splits in the range once we're doing merges, instead of first one
 				auto lastSplitEval = bmData->splitEvaluations.rangeContaining(rep.granuleRange.begin);
 				if (rep.granuleRange.begin == lastSplitEval.begin() && rep.granuleRange.end == lastSplitEval.end() &&
@@ -1383,46 +1374,67 @@ ACTOR Future<Void> monitorBlobWorkerStatus(Reference<BlobManagerData> bmData, Bl
 						           rep.granuleRange.begin.printable(),
 						           rep.granuleRange.end.printable());
 					}
-				} else {
-					ASSERT(lastSplitEval.cvalue().epoch < rep.epoch ||
-					       (lastSplitEval.cvalue().epoch == rep.epoch && lastSplitEval.cvalue().seqno < rep.seqno));
-					if (lastSplitEval.cvalue().inProgress.isValid() && !lastSplitEval.cvalue().inProgress.isReady()) {
-						TEST(true); // racing BM splits
-						// For example, one worker asked BM to split, then died, granule was moved, new worker asks to
-						// split on recovery. We need to ensure that they are semantically the same split.
-						// We will just rely on the in-progress split to finish
-						if (BM_DEBUG) {
-							fmt::print("Manager {0} got split request for [{1} - {2}) @ ({3}, {4}), but already in "
-							           "progress from [{5} - {6}) @ ({7}, {8})\n",
-							           bmData->epoch,
-							           rep.granuleRange.begin.printable().c_str(),
-							           rep.granuleRange.end.printable().c_str(),
-							           rep.epoch,
-							           rep.seqno,
-							           lastSplitEval.begin().printable().c_str(),
-							           lastSplitEval.end().printable().c_str(),
-							           lastSplitEval.cvalue().epoch,
-							           lastSplitEval.cvalue().seqno);
-						}
-						// ignore the request, they will retry
-					} else {
-						if (BM_DEBUG) {
-							fmt::print("Manager {0} evaluating [{1} - {2}) @ ({3}, {4}) for split\n",
-							           bmData->epoch,
-							           rep.granuleRange.begin.printable().c_str(),
-							           rep.granuleRange.end.printable().c_str(),
-							           rep.epoch,
-							           rep.seqno);
-						}
-						Future<Void> doSplitEval = maybeSplitRange(bmData,
-						                                           bwInterf.id(),
-						                                           rep.granuleRange,
-						                                           rep.granuleID,
-						                                           rep.startVersion,
-						                                           rep.writeHotSplit);
-						bmData->splitEvaluations.insert(rep.granuleRange,
-						                                SplitEvaluation(rep.epoch, rep.seqno, doSplitEval));
+				} else if (!(lastSplitEval.cvalue().epoch < rep.epoch ||
+				             (lastSplitEval.cvalue().epoch == rep.epoch && lastSplitEval.cvalue().seqno < rep.seqno))) {
+					TEST(true); // BM got out-of-date split request
+					if (BM_DEBUG) {
+						fmt::print(
+						    "Manager {0} ignoring status from BW {1} for granule [{2} - {3}) since it already processed"
+						    "[{4} - {5}) @ ({6}, {7}).\n",
+						    bmData->epoch,
+						    bwInterf.id().toString().substr(0, 5),
+						    rep.granuleRange.begin.printable(),
+						    rep.granuleRange.end.printable(),
+						    lastSplitEval.begin().printable(),
+						    lastSplitEval.end().printable(),
+						    lastSplitEval.cvalue().epoch,
+						    lastSplitEval.cvalue().seqno);
 					}
+
+					// revoke range from out-of-date worker, but bypass rangeAssigner and hack (epoch, seqno) to be
+					// (requesting epoch, requesting seqno + 1) to ensure no race with then reassigning the range to the
+					// worker at a later version
+					RangeAssignment revokeOld;
+					revokeOld.isAssign = false;
+					revokeOld.worker = bwInterf.id();
+					revokeOld.keyRange = rep.granuleRange;
+					revokeOld.revoke = RangeRevokeData(false);
+
+					bmData->addActor.send(
+					    doRangeAssignment(bmData, revokeOld, bwInterf.id(), rep.epoch, rep.seqno + 1));
+				} else if (lastSplitEval.cvalue().inProgress.isValid() &&
+				           !lastSplitEval.cvalue().inProgress.isReady()) {
+					TEST(true); // racing BM splits
+					// For example, one worker asked BM to split, then died, granule was moved, new worker asks to
+					// split on recovery. We need to ensure that they are semantically the same split.
+					// We will just rely on the in-progress split to finish
+					if (BM_DEBUG) {
+						fmt::print("Manager {0} got split request for [{1} - {2}) @ ({3}, {4}), but already in "
+						           "progress from [{5} - {6}) @ ({7}, {8})\n",
+						           bmData->epoch,
+						           rep.granuleRange.begin.printable().c_str(),
+						           rep.granuleRange.end.printable().c_str(),
+						           rep.epoch,
+						           rep.seqno,
+						           lastSplitEval.begin().printable().c_str(),
+						           lastSplitEval.end().printable().c_str(),
+						           lastSplitEval.cvalue().epoch,
+						           lastSplitEval.cvalue().seqno);
+					}
+					// ignore the request, they will retry
+				} else {
+					if (BM_DEBUG) {
+						fmt::print("Manager {0} evaluating [{1} - {2}) @ ({3}, {4}) for split\n",
+						           bmData->epoch,
+						           rep.granuleRange.begin.printable().c_str(),
+						           rep.granuleRange.end.printable().c_str(),
+						           rep.epoch,
+						           rep.seqno);
+					}
+					Future<Void> doSplitEval = maybeSplitRange(
+					    bmData, bwInterf.id(), rep.granuleRange, rep.granuleID, rep.startVersion, rep.writeHotSplit);
+					bmData->splitEvaluations.insert(rep.granuleRange,
+					                                SplitEvaluation(rep.epoch, rep.seqno, doSplitEval));
 				}
 			}
 		} catch (Error& e) {
@@ -2157,23 +2169,84 @@ ACTOR Future<GranuleFiles> loadHistoryFiles(Reference<BlobManagerData> bmData, U
 	}
 }
 
-// FIXME: trace events for pruning
+// FIXME: trace events for purging
+
+ACTOR Future<Void> canDeleteFullGranule(Reference<BlobManagerData> self, UID granuleId) {
+	state Transaction tr(self->db);
+	state KeyRange splitRange = blobGranuleSplitKeyRangeFor(granuleId);
+
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+
+			state RangeResult splitState = wait(tr.getRange(splitRange, SERVER_KNOBS->BG_MAX_SPLIT_FANOUT));
+			state int i = 0;
+			state bool retry = false;
+			for (; i < splitState.size(); i++) {
+				UID parent, child;
+				BlobGranuleSplitState st;
+				Version v;
+				std::tie(parent, child) = decodeBlobGranuleSplitKey(splitState[i].key);
+				std::tie(st, v) = decodeBlobGranuleSplitValue(splitState[i].value);
+				// if split state is done, this granule has definitely persisted a snapshot
+				if (st >= BlobGranuleSplitState::Done) {
+					continue;
+				}
+				// if split state isn't even assigned, this granule has definitely not persisted a snapshot
+				if (st <= BlobGranuleSplitState::Initialized) {
+					retry = true;
+					break;
+				}
+
+				ASSERT(st == BlobGranuleSplitState::Assigned);
+				// if assigned, granule may or may not have snapshotted. Check files to confirm. Since a re-snapshot is
+				// the first file written for a new granule, any files present mean it has re-snapshotted from this
+				// granule
+				KeyRange granuleFileRange = blobGranuleFileKeyRangeFor(child);
+				RangeResult files = wait(tr.getRange(granuleFileRange, 1));
+				if (files.empty()) {
+					retry = true;
+					break;
+				}
+			}
+			if (retry) {
+				tr.reset();
+				wait(delay(1.0));
+			} else {
+				if (splitState.empty() || !splitState.more) {
+					break;
+				}
+				splitRange = KeyRangeRef(keyAfter(splitState.back().key), splitRange.end);
+			}
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+	return Void();
+}
 
 /*
  * Deletes all files pertaining to the granule with id granuleId and
  * also removes the history entry for this granule from the system keyspace
- * TODO: ensure cannot fully delete granule that is still splitting!
  */
-ACTOR Future<Void> fullyDeleteGranule(Reference<BlobManagerData> self, UID granuleId, Key historyKey) {
+ACTOR Future<Void> fullyDeleteGranule(Reference<BlobManagerData> self,
+                                      UID granuleId,
+                                      Key historyKey,
+                                      Version purgeVersion) {
 	if (BM_DEBUG) {
 		fmt::print("Fully deleting granule {0}: init\n", granuleId.toString());
 	}
+
+	// if granule is still splitting and files are needed for new sub-granules to re-snapshot, we can only partially
+	// delete the granule, since we need to keep the last snapshot and deltas for splitting
+	wait(canDeleteFullGranule(self, granuleId));
 
 	// get files
 	GranuleFiles files = wait(loadHistoryFiles(self->db, granuleId));
 
 	std::vector<Future<Void>> deletions;
-	std::vector<std::string> filesToDelete; // TODO: remove, just for debugging
+	state std::vector<std::string> filesToDelete; // TODO: remove, just for debugging
 
 	for (auto snapshotFile : files.snapshotFiles) {
 		std::string fname = snapshotFile.filename;
@@ -2188,7 +2261,7 @@ ACTOR Future<Void> fullyDeleteGranule(Reference<BlobManagerData> self, UID granu
 	}
 
 	if (BM_DEBUG) {
-		fmt::print("Fully deleting granule {0}: deleting {1} files\n", granuleId.toString(), deletions.size());
+		fmt::print("Fully deleting granule {0}: deleting {1} files\n", granuleId.toString(), filesToDelete.size());
 		for (auto filename : filesToDelete) {
 			fmt::print(" - {}\n", filename.c_str());
 		}
@@ -2225,18 +2298,27 @@ ACTOR Future<Void> fullyDeleteGranule(Reference<BlobManagerData> self, UID granu
 		fmt::print("Fully deleting granule {0}: success\n", granuleId.toString());
 	}
 
+	TraceEvent("GranuleFullPurge", self->id)
+	    .detail("Epoch", self->epoch)
+	    .detail("GranuleID", granuleId)
+	    .detail("PurgeVersion", purgeVersion)
+	    .detail("FilesPurged", filesToDelete.size());
+
+	++self->stats.granulesFullyPurged;
+	self->stats.filesPurged += filesToDelete.size();
+
 	return Void();
 }
 
 /*
  * For the granule with id granuleId, finds the first snapshot file at a
- * version <= pruneVersion and deletes all files older than it.
+ * version <= purgeVersion and deletes all files older than it.
  *
  * Assumption: this granule's startVersion might change because the first snapshot
  * file might be deleted. We will need to ensure we don't rely on the granule's startVersion
  * (that's persisted as part of the key), but rather use the granule's first snapshot's version when needed
  */
-ACTOR Future<Void> partiallyDeleteGranule(Reference<BlobManagerData> self, UID granuleId, Version pruneVersion) {
+ACTOR Future<Void> partiallyDeleteGranule(Reference<BlobManagerData> self, UID granuleId, Version purgeVersion) {
 	if (BM_DEBUG) {
 		fmt::print("Partially deleting granule {0}: init\n", granuleId.toString());
 	}
@@ -2244,7 +2326,7 @@ ACTOR Future<Void> partiallyDeleteGranule(Reference<BlobManagerData> self, UID g
 	// get files
 	GranuleFiles files = wait(loadHistoryFiles(self->db, granuleId));
 
-	// represents the version of the latest snapshot file in this granule with G.version < pruneVersion
+	// represents the version of the latest snapshot file in this granule with G.version < purgeVersion
 	Version latestSnapshotVersion = invalidVersion;
 
 	state std::vector<Future<Void>> deletions; // deletion work per file
@@ -2259,8 +2341,8 @@ ACTOR Future<Void> partiallyDeleteGranule(Reference<BlobManagerData> self, UID g
 			deletions.emplace_back(self->bstore->deleteFile(fname));
 			deletedFileKeys.emplace_back(blobGranuleFileKeyFor(granuleId, files.snapshotFiles[idx].version, 'S'));
 			filesToDelete.emplace_back(fname);
-		} else if (files.snapshotFiles[idx].version <= pruneVersion) {
-			// otherwise if this is the FIRST snapshot file with version < pruneVersion,
+		} else if (files.snapshotFiles[idx].version <= purgeVersion) {
+			// otherwise if this is the FIRST snapshot file with version < purgeVersion,
 			// then we found our latestSnapshotVersion (FIRST since we are traversing in reverse)
 			latestSnapshotVersion = files.snapshotFiles[idx].version;
 		}
@@ -2286,19 +2368,19 @@ ACTOR Future<Void> partiallyDeleteGranule(Reference<BlobManagerData> self, UID g
 	}
 
 	if (BM_DEBUG) {
-		fmt::print("Partially deleting granule {0}: deleting {1} files\n", granuleId.toString(), deletions.size());
+		fmt::print("Partially deleting granule {0}: deleting {1} files\n", granuleId.toString(), filesToDelete.size());
 		for (auto filename : filesToDelete) {
 			fmt::print(" - {0}\n", filename);
 		}
 	}
 
 	// TODO: the following comment relies on the assumption that BWs will not get requests to
-	// read data that was already pruned. confirm assumption is fine. otherwise, we'd need
-	// to communicate with BWs here and have them ack the pruneVersion
+	// read data that was already purged. confirm assumption is fine. otherwise, we'd need
+	// to communicate with BWs here and have them ack the purgeVersion
 
 	// delete the files before the corresponding metadata.
 	// this could lead to dangling pointers in fdb, but we should never read data older than
-	// pruneVersion anyways, and we can clean up the keys the next time around.
+	// purgeVersion anyways, and we can clean up the keys the next time around.
 	// deleting files before corresponding metadata reduces the # of orphaned files.
 	wait(waitForAll(deletions));
 
@@ -2326,25 +2408,40 @@ ACTOR Future<Void> partiallyDeleteGranule(Reference<BlobManagerData> self, UID g
 	if (BM_DEBUG) {
 		fmt::print("Partially deleting granule {0}: success\n", granuleId.toString());
 	}
+	TraceEvent("GranulePartialPurge", self->id)
+	    .detail("Epoch", self->epoch)
+	    .detail("GranuleID", granuleId)
+	    .detail("PurgeVersion", purgeVersion)
+	    .detail("FilesPurged", filesToDelete.size());
+
+	++self->stats.granulesPartiallyPurged;
+	self->stats.filesPurged += filesToDelete.size();
+
 	return Void();
 }
 
 /*
- * This method is used to prune the range [startKey, endKey) at (and including) pruneVersion.
+ * This method is used to purge the range [startKey, endKey) at (and including) purgeVersion.
  * To do this, we do a BFS traversal starting at the active granules. Then we classify granules
  * in the history as nodes that can be fully deleted (i.e. their files and history can be deleted)
  * and nodes that can be partially deleted (i.e. some of their files can be deleted).
- * Once all this is done, we finally clear the pruneIntent key, if possible, to indicate we are done
- * processing this prune intent.
+ * Once all this is done, we finally clear the purgeIntent key, if possible, to indicate we are done
+ * processing this purge intent.
  */
-ACTOR Future<Void> pruneRange(Reference<BlobManagerData> self, KeyRangeRef range, Version pruneVersion, bool force) {
+ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range, Version purgeVersion, bool force) {
 	if (BM_DEBUG) {
-		fmt::print("pruneRange starting for range [{0} - {1}) @ pruneVersion={2}, force={3}\n",
+		fmt::print("purgeRange starting for range [{0} - {1}) @ purgeVersion={2}, force={3}\n",
 		           range.begin.printable(),
 		           range.end.printable(),
-		           pruneVersion,
+		           purgeVersion,
 		           force);
 	}
+
+	TraceEvent("PurgeGranulesBegin", self->id)
+	    .detail("Epoch", self->epoch)
+	    .detail("Range", range)
+	    .detail("PurgeVersion", purgeVersion)
+	    .detail("Force", force);
 
 	// queue of <range, startVersion, endVersion> for BFS traversal of history
 	state std::queue<std::tuple<KeyRange, Version, Version>> historyEntryQueue;
@@ -2368,18 +2465,18 @@ ACTOR Future<Void> pruneRange(Reference<BlobManagerData> self, KeyRangeRef range
 	state KeyRangeMap<UID>::iterator activeRange;
 	for (activeRange = activeRanges.begin(); activeRange != activeRanges.end(); ++activeRange) {
 		if (BM_DEBUG) {
-			fmt::print("Checking if active range [{0} - {1}), owned by BW {2}, should be pruned\n",
+			fmt::print("Checking if active range [{0} - {1}), owned by BW {2}, should be purged\n",
 			           activeRange.begin().printable(),
 			           activeRange.end().printable(),
 			           activeRange.value().toString());
 		}
 
-		// assumption: prune boundaries must respect granule boundaries
+		// assumption: purge boundaries must respect granule boundaries
 		if (activeRange.begin() < range.begin || activeRange.end() > range.end) {
 			continue;
 		}
 
-		// TODO: if this is a force prune, then revoke the assignment from the corresponding BW first
+		// TODO: if this is a force purge, then revoke the assignment from the corresponding BW first
 		// so that it doesn't try to interact with the granule (i.e. force it to give up gLock).
 		// we'll need some way to ack that the revoke was successful
 
@@ -2453,17 +2550,17 @@ ACTOR Future<Void> pruneRange(Reference<BlobManagerData> self, KeyRangeRef range
 		}
 
 		// There are three cases this granule can fall into:
-		// - if the granule's end version is at or before the prune version or this is a force delete,
+		// - if the granule's end version is at or before the purge version or this is a force delete,
 		//   this granule should be completely deleted
-		// - else if the startVersion <= pruneVersion, then G.startVersion < pruneVersion < G.endVersion
+		// - else if the startVersion <= purgeVersion, then G.startVersion < purgeVersion < G.endVersion
 		//   and so this granule should be partially deleted
 		// - otherwise, this granule is active, so don't schedule it for deletion
-		if (force || endVersion <= pruneVersion) {
+		if (force || endVersion <= purgeVersion) {
 			if (BM_DEBUG) {
 				fmt::print("Granule {0} will be FULLY deleted\n", currHistoryNode.granuleID.toString());
 			}
 			toFullyDelete.push_back({ currHistoryNode.granuleID, historyKey });
-		} else if (startVersion < pruneVersion) {
+		} else if (startVersion < purgeVersion) {
 			if (BM_DEBUG) {
 				fmt::print("Granule {0} will be partially deleted\n", currHistoryNode.granuleID.toString());
 			}
@@ -2510,70 +2607,79 @@ ACTOR Future<Void> pruneRange(Reference<BlobManagerData> self, KeyRangeRef range
 	// we won't run into any issues with trying to "re-delete" a blob file since deleting
 	// a file that doesn't exist is considered successful
 
+	state std::vector<Future<Void>> partialDeletions;
 	state int i;
 	if (BM_DEBUG) {
 		fmt::print("{0} granules to fully delete\n", toFullyDelete.size());
 	}
 	for (i = toFullyDelete.size() - 1; i >= 0; --i) {
-		UID granuleId;
+		state UID granuleId;
 		Key historyKey;
 		std::tie(granuleId, historyKey) = toFullyDelete[i];
 		// FIXME: consider batching into a single txn (need to take care of txn size limit)
 		if (BM_DEBUG) {
 			fmt::print("About to fully delete granule {0}\n", granuleId.toString());
 		}
-		wait(fullyDeleteGranule(self, granuleId, historyKey));
+		wait(fullyDeleteGranule(self, granuleId, historyKey, purgeVersion));
 	}
 
 	if (BM_DEBUG) {
 		fmt::print("{0} granules to partially delete\n", toPartiallyDelete.size());
 	}
-	std::vector<Future<Void>> partialDeletions;
+
 	for (i = toPartiallyDelete.size() - 1; i >= 0; --i) {
 		UID granuleId = toPartiallyDelete[i];
 		if (BM_DEBUG) {
 			fmt::print("About to partially delete granule {0}\n", granuleId.toString());
 		}
-		partialDeletions.emplace_back(partiallyDeleteGranule(self, granuleId, pruneVersion));
+		partialDeletions.emplace_back(partiallyDeleteGranule(self, granuleId, purgeVersion));
 	}
 
 	wait(waitForAll(partialDeletions));
 
 	// Now that all the necessary granules and their files have been deleted, we can
-	// clear the pruneIntent key to signify that the work is done. However, there could have been
-	// another pruneIntent that got written for this table while we were processing this one.
+	// clear the purgeIntent key to signify that the work is done. However, there could have been
+	// another purgeIntent that got written for this table while we were processing this one.
 	// If that is the case, we should not clear the key. Otherwise, we can just clear the key.
 
 	if (BM_DEBUG) {
-		fmt::print("Successfully pruned range [{0} - {1}) at pruneVersion={2}\n",
+		fmt::print("Successfully purged range [{0} - {1}) at purgeVersion={2}\n",
 		           range.begin.printable(),
 		           range.end.printable(),
-		           pruneVersion);
+		           purgeVersion);
 	}
+
+	TraceEvent("PurgeGranulesComplete", self->id)
+	    .detail("Epoch", self->epoch)
+	    .detail("Range", range)
+	    .detail("PurgeVersion", purgeVersion)
+	    .detail("Force", force);
+
+	++self->stats.purgesProcessed;
 	return Void();
 }
 
 /*
- * This monitor watches for changes to a key K that gets updated whenever there is a new prune intent.
- * On this change, we scan through all blobGranulePruneKeys (which look like <startKey, endKey>=<prune_version,
- * force>) and prune any intents.
+ * This monitor watches for changes to a key K that gets updated whenever there is a new purge intent.
+ * On this change, we scan through all blobGranulePurgeKeys (which look like <startKey, endKey>=<purge_version,
+ * force>) and purge any intents.
  *
- * Once the prune has succeeded, we clear the key IF the version is still the same one that was pruned.
- * That way, if another prune intent arrived for the same range while we were working on an older one,
+ * Once the purge has succeeded, we clear the key IF the version is still the same one that was purged.
+ * That way, if another purge intent arrived for the same range while we were working on an older one,
  * we wouldn't end up clearing the intent.
  *
  * When watching for changes, we might end up in scenarios where we failed to do the work
- * for a prune intent even though the watch was triggered (maybe the BM had a blip). This is problematic
- * if the intent is a force and there isn't another prune intent for quite some time. To remedy this,
- * if we don't see a watch change in X (configurable) seconds, we will just sweep through the prune intents,
+ * for a purge intent even though the watch was triggered (maybe the BM had a blip). This is problematic
+ * if the intent is a force and there isn't another purge intent for quite some time. To remedy this,
+ * if we don't see a watch change in X (configurable) seconds, we will just sweep through the purge intents,
  * consolidating any work we might have missed before.
  *
- * Note: we could potentially use a changefeed here to get the exact pruneIntent that was added
+ * Note: we could potentially use a changefeed here to get the exact purgeIntent that was added
  * rather than iterating through all of them, but this might have too much overhead for latency
- * improvements we don't really need here (also we need to go over all prune intents anyways in the
- * case that the timer is up before any new prune intents arrive).
+ * improvements we don't really need here (also we need to go over all purge intents anyways in the
+ * case that the timer is up before any new purge intents arrive).
  */
-ACTOR Future<Void> monitorPruneKeys(Reference<BlobManagerData> self) {
+ACTOR Future<Void> monitorPurgeKeys(Reference<BlobManagerData> self) {
 	self->initBStore();
 
 	loop {
@@ -2582,35 +2688,35 @@ ACTOR Future<Void> monitorPruneKeys(Reference<BlobManagerData> self) {
 		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 		// Wait for the watch to change, or some time to expire (whichever comes first)
-		// before checking through the prune intents. We write a UID into the change key value
+		// before checking through the purge intents. We write a UID into the change key value
 		// so that we can still recognize when the watch key has been changed while we weren't
 		// monitoring it
 
-		state Key lastPruneKey = blobGranulePruneKeys.begin;
+		state Key lastPurgeKey = blobGranulePurgeKeys.begin;
 
 		loop {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-			state std::vector<Future<Void>> prunes;
-			state CoalescedKeyRangeMap<std::pair<Version, bool>> pruneMap;
-			pruneMap.insert(allKeys, std::make_pair<Version, bool>(0, false));
+			state std::vector<Future<Void>> purges;
+			state CoalescedKeyRangeMap<std::pair<Version, bool>> purgeMap;
+			purgeMap.insert(allKeys, std::make_pair<Version, bool>(0, false));
 			try {
 				// TODO: replace 10000 with a knob
-				state RangeResult pruneIntents = wait(tr->getRange(blobGranulePruneKeys, BUGGIFY ? 1 : 10000));
-				if (pruneIntents.size()) {
+				state RangeResult purgeIntents = wait(tr->getRange(blobGranulePurgeKeys, BUGGIFY ? 1 : 10000));
+				if (purgeIntents.size()) {
 					int rangeIdx = 0;
-					for (; rangeIdx < pruneIntents.size(); ++rangeIdx) {
-						Version pruneVersion;
+					for (; rangeIdx < purgeIntents.size(); ++rangeIdx) {
+						Version purgeVersion;
 						KeyRange range;
 						bool force;
-						std::tie(pruneVersion, range, force) =
-						    decodeBlobGranulePruneValue(pruneIntents[rangeIdx].value);
-						auto ranges = pruneMap.intersectingRanges(range);
+						std::tie(purgeVersion, range, force) =
+						    decodeBlobGranulePurgeValue(purgeIntents[rangeIdx].value);
+						auto ranges = purgeMap.intersectingRanges(range);
 						bool foundConflict = false;
 						for (auto it : ranges) {
-							if ((it.value().second && !force && it.value().first < pruneVersion) ||
-							    (!it.value().second && force && pruneVersion < it.value().first)) {
+							if ((it.value().second && !force && it.value().first < purgeVersion) ||
+							    (!it.value().second && force && purgeVersion < it.value().first)) {
 								foundConflict = true;
 								break;
 							}
@@ -2618,39 +2724,41 @@ ACTOR Future<Void> monitorPruneKeys(Reference<BlobManagerData> self) {
 						if (foundConflict) {
 							break;
 						}
-						pruneMap.insert(range, std::make_pair(pruneVersion, force));
+						purgeMap.insert(range, std::make_pair(purgeVersion, force));
 
-						fmt::print("about to prune range [{0} - {1}) @ {2}, force={3}\n",
-						           range.begin.printable(),
-						           range.end.printable(),
-						           pruneVersion,
-						           force ? "T" : "F");
+						if (BM_DEBUG) {
+							fmt::print("about to purge range [{0} - {1}) @ {2}, force={3}\n",
+							           range.begin.printable(),
+							           range.end.printable(),
+							           purgeVersion,
+							           force ? "T" : "F");
+						}
 					}
-					lastPruneKey = pruneIntents[rangeIdx - 1].key;
+					lastPurgeKey = purgeIntents[rangeIdx - 1].key;
 
-					for (auto it : pruneMap.ranges()) {
+					for (auto it : purgeMap.ranges()) {
 						if (it.value().first > 0) {
-							prunes.emplace_back(pruneRange(self, it.range(), it.value().first, it.value().second));
+							purges.emplace_back(purgeRange(self, it.range(), it.value().first, it.value().second));
 						}
 					}
 
-					// wait for this set of prunes to complete before starting the next ones since if we
-					// prune a range R at version V and while we are doing that, the time expires, we will
-					// end up trying to prune the same range again since the work isn't finished and the
-					// prunes will race
+					// wait for this set of purges to complete before starting the next ones since if we
+					// purge a range R at version V and while we are doing that, the time expires, we will
+					// end up trying to purge the same range again since the work isn't finished and the
+					// purges will race
 					//
 					// TODO: this isn't that efficient though. Instead we could keep metadata as part of the
-					// BM's memory that tracks which prunes are active. Once done, we can mark that work as
-					// done. If the BM fails then all prunes will fail and so the next BM will have a clear
+					// BM's memory that tracks which purges are active. Once done, we can mark that work as
+					// done. If the BM fails then all purges will fail and so the next BM will have a clear
 					// set of metadata (i.e. no work in progress) so we will end up doing the work in the
 					// new BM
 
-					wait(waitForAll(prunes));
+					wait(waitForAll(purges));
 					break;
 				} else {
-					state Future<Void> watchPruneIntentsChange = tr->watch(blobGranulePruneChangeKey);
+					state Future<Void> watchPurgeIntentsChange = tr->watch(blobGranulePurgeChangeKey);
 					wait(tr->commit());
-					wait(watchPruneIntentsChange);
+					wait(watchPurgeIntentsChange);
 					tr->reset();
 				}
 			} catch (Error& e) {
@@ -2663,7 +2771,7 @@ ACTOR Future<Void> monitorPruneKeys(Reference<BlobManagerData> self) {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				tr->clear(KeyRangeRef(blobGranulePruneKeys.begin, keyAfter(lastPruneKey)));
+				tr->clear(KeyRangeRef(blobGranulePurgeKeys.begin, keyAfter(lastPurgeKey)));
 				wait(tr->commit());
 				break;
 			} catch (Error& e) {
@@ -2672,7 +2780,7 @@ ACTOR Future<Void> monitorPruneKeys(Reference<BlobManagerData> self) {
 		}
 
 		if (BM_DEBUG) {
-			printf("Done pruning current set of prune intents.\n");
+			printf("Done clearing current set of purge intents.\n");
 		}
 	}
 }
@@ -2743,6 +2851,25 @@ static void blobManagerExclusionSafetyCheck(Reference<BlobManagerData> self,
 	req.reply.send(reply);
 }
 
+ACTOR Future<int64_t> bgccCheckGranule(Reference<BlobManagerData> bmData, KeyRange range) {
+	state std::pair<RangeResult, Version> fdbResult = wait(readFromFDB(bmData->db, range));
+
+	std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> blobResult =
+	    wait(readFromBlob(bmData->db, bmData->bstore, range, 0, fdbResult.second));
+
+	if (!compareFDBAndBlob(fdbResult.first, blobResult, range, fdbResult.second, BM_DEBUG)) {
+		++bmData->stats.ccMismatches;
+	}
+
+	int64_t bytesRead = fdbResult.first.expectedSize();
+
+	++bmData->stats.ccGranulesChecked;
+	bmData->stats.ccRowsChecked += fdbResult.first.size();
+	bmData->stats.ccBytesChecked += bytesRead;
+
+	return bytesRead;
+}
+
 // FIXME: could eventually make this more thorough by storing some state in the DB or something
 // FIXME: simpler solution could be to shuffle ranges
 ACTOR Future<Void> bgConsistencyCheck(Reference<BlobManagerData> bmData) {
@@ -2775,32 +2902,31 @@ ACTOR Future<Void> bgConsistencyCheck(Reference<BlobManagerData> bmData) {
 				tries--;
 			}
 
+			state int64_t allowanceBytes = SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES;
 			if (tries == 0) {
 				if (BM_DEBUG) {
 					printf("BGCC couldn't find random range to check, skipping\n");
 				}
-				wait(rateLimiter->getAllowance(SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES));
 			} else {
-				state std::pair<RangeResult, Version> fdbResult = wait(readFromFDB(bmData->db, range));
-
-				std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> blobResult =
-				    wait(readFromBlob(bmData->db, bmData->bstore, range, 0, fdbResult.second));
-
-				if (!compareFDBAndBlob(fdbResult.first, blobResult, range, fdbResult.second, BM_DEBUG)) {
-					++bmData->stats.ccMismatches;
+				try {
+					Optional<int64_t> bytesRead =
+					    wait(timeout(bgccCheckGranule(bmData, range), SERVER_KNOBS->BGCC_TIMEOUT));
+					if (bytesRead.present()) {
+						allowanceBytes = bytesRead.get();
+					} else {
+						++bmData->stats.ccTimeouts;
+					}
+				} catch (Error& e) {
+					if (e.code() == error_code_operation_cancelled) {
+						throw e;
+					}
+					TraceEvent(SevWarn, "BGCCError", bmData->id).error(e).detail("Epoch", bmData->epoch);
+					++bmData->stats.ccErrors;
 				}
-
-				int64_t bytesRead = fdbResult.first.expectedSize();
-
-				++bmData->stats.ccGranulesChecked;
-				bmData->stats.ccRowsChecked += fdbResult.first.size();
-				bmData->stats.ccBytesChecked += bytesRead;
-
-				// clear fdb result to release memory since it is a state variable
-				fdbResult = std::pair(RangeResult(), 0);
-
-				wait(rateLimiter->getAllowance(bytesRead));
 			}
+			// wait at least some interval if snapshot is small and to not overwhelm the system with reads (for example,
+			// empty database with one empty granule)
+			wait(rateLimiter->getAllowance(allowanceBytes) && delay(SERVER_KNOBS->BGCC_MIN_INTERVAL));
 		} else {
 			if (BM_DEBUG) {
 				fmt::print("BGCC found no workers, skipping\n", bmData->workerAssignments.size());
@@ -2855,7 +2981,7 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 
 	self->addActor.send(doLockChecks(self));
 	self->addActor.send(monitorClientRanges(self));
-	self->addActor.send(monitorPruneKeys(self));
+	self->addActor.send(monitorPurgeKeys(self));
 	if (SERVER_KNOBS->BG_CONSISTENCY_CHECK_ENABLED) {
 		self->addActor.send(bgConsistencyCheck(self));
 	}
