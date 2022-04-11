@@ -478,7 +478,7 @@ protected:
 	                                     const Version& version_)
 	  : pCursorContainer(std::move(pCursorContainer_)),
 	    remoteMoreAvailableSnapshot{ false, version_, std::move(pCursorContainerSnapshot_) },
-	    currentVersion(version_) {}
+	    currentVersion(version_ - 1) {}
 
 	// Tries to fill the cursor heap, returns true if the cursorContainer is filled with cursors.
 	// If cursorContainer is not empty, the behavior is undefined.

@@ -100,8 +100,7 @@ public:
 	                      const TLogInterfaceByStorageTeamIDFunc& getTLogInterfaceByStorageTeamID_,
 	                      const Version& initialVersion_)
 
-	  : // This minus one in BaseClass is necessary since all new cursor will start with BaseClass::currentVersion + 1
-	    BaseClass(initialVersion_ - 1), serverID(serverID_),
+	  : BaseClass(initialVersion_), serverID(serverID_),
 	    storageServerToTeamIDKey(::storageServerToTeamIdKey(serverID_)),
 	    storageTeamIDsSnapshot(privateMutationStorageTeamID_), storageTeamIDs(privateMutationStorageTeamID_),
 	    newStorageTeamIDs(privateMutationStorageTeamID_),
