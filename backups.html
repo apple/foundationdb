@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>Backup, Restore, and Replication for Disaster Recovery &#8212; FoundationDB 6.3</title>
+    <title>Backup, Restore, and Replication for Disaster Recovery &#8212; FoundationDB 7.1</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.3.23',
+        VERSION:     '7.1.0',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -50,7 +50,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>6.3</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.1</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -85,6 +85,7 @@
 <li><a class="reference internal" href="#limitations">Limitations</a></li>
 <li><a class="reference internal" href="#tools">Tools</a></li>
 <li><a class="reference internal" href="#backup-urls">Backup URLs</a></li>
+<li><a class="reference internal" href="#signing-protocol">Signing Protocol</a></li>
 <li><a class="reference internal" href="#blob-credential-files">Blob Credential Files</a></li>
 <li><a class="reference internal" href="#tls-support">TLS Support</a></li>
 <li><a class="reference internal" href="#fdbbackup-command-line-tool"><code class="docutils literal"><span class="pre">fdbbackup</span></code> command line tool</a><ul>
@@ -98,6 +99,7 @@
 <li><a class="reference internal" href="#expire"><code class="docutils literal"><span class="pre">expire</span></code></a></li>
 <li><a class="reference internal" href="#describe"><code class="docutils literal"><span class="pre">describe</span></code></a></li>
 <li><a class="reference internal" href="#list"><code class="docutils literal"><span class="pre">list</span></code></a></li>
+<li><a class="reference internal" href="#tags"><code class="docutils literal"><span class="pre">tags</span></code></a></li>
 <li><a class="reference internal" href="#cleanup"><code class="docutils literal"><span class="pre">cleanup</span></code></a></li>
 </ul>
 </li>
@@ -158,6 +160,7 @@
 <li><a class="reference internal" href="#limitations">Limitations</a></li>
 <li><a class="reference internal" href="#tools">Tools</a></li>
 <li><a class="reference internal" href="#backup-urls">Backup URLs</a></li>
+<li><a class="reference internal" href="#signing-protocol">Signing Protocol</a></li>
 <li><a class="reference internal" href="#blob-credential-files">Blob Credential Files</a></li>
 <li><a class="reference internal" href="#tls-support">TLS Support</a></li>
 <li><a class="reference internal" href="#fdbbackup-command-line-tool"><code class="docutils literal"><span class="pre">fdbbackup</span></code> command line tool</a><ul>
@@ -171,6 +174,7 @@
 <li><a class="reference internal" href="#expire"><code class="docutils literal"><span class="pre">expire</span></code></a></li>
 <li><a class="reference internal" href="#describe"><code class="docutils literal"><span class="pre">describe</span></code></a></li>
 <li><a class="reference internal" href="#list"><code class="docutils literal"><span class="pre">list</span></code></a></li>
+<li><a class="reference internal" href="#tags"><code class="docutils literal"><span class="pre">tags</span></code></a></li>
 <li><a class="reference internal" href="#cleanup"><code class="docutils literal"><span class="pre">cleanup</span></code></a></li>
 </ul>
 </li>
@@ -274,7 +278,7 @@ Note that since paths must be absolute this will result in three slashes (/) in 
 <p><em>connect_timeout</em> (or <em>cto</em>) - Number of seconds to wait for a connect request to succeed.</p>
 <p><em>max_connection_life</em> (or <em>mcl</em>) - Maximum number of seconds to reuse a single TCP connection.</p>
 <p><em>request_timeout_min</em> (or <em>rtom</em>) - Minimum number of seconds to wait for a request to succeed after a connection is established.</p>
-<p><em>request_tries</em> (or <em>rt</em>) - Number of times to try each request until a parseable HTTP response other than 429 is received.</p>
+<p><em>request_tries</em> (or <em>rt</em>) - Number of times to try each request until a parsable HTTP response other than 429 is received.</p>
 <p><em>requests_per_second</em> (or <em>rps</em>) - Max number of requests to start per second.</p>
 <p><em>list_requests_per_second</em> (or <em>lrps</em>) - Max number of list requests to start per second.</p>
 <p><em>write_requests_per_second</em> (or <em>wrps</em>) - Max number of write requests to start per second.</p>
@@ -297,10 +301,15 @@ Note that since paths must be absolute this will result in three slashes (/) in 
 <div><strong>Example</strong>: The URL parameter <em>header=x-amz-storage-class:REDUCED_REDUNDANCY</em> would send the HTTP header required to use the reduced redundancy storage option in the S3 API.</div></blockquote>
 </div></blockquote>
 </div>
+<div class="section" id="signing-protocol">
+<h2>Signing Protocol</h2>
+<p>AWS signature version 4 is the default signing protocol choice. This boolean knob <code class="docutils literal"><span class="pre">--knob_http_request_aws_v4_header</span></code> can be used to select between v4 style and v2 style signatures.
+If the knob is set to <code class="docutils literal"><span class="pre">true</span></code> then v4 signature will be used and if set to <code class="docutils literal"><span class="pre">false</span></code> then v2 signature will be used.</p>
+</div>
 <div class="section" id="blob-credential-files">
 <span id="id1"></span><h2>Blob Credential Files</h2>
 <p>In order to help safeguard blob store credentials, the &lt;SECRET&gt; can optionally be omitted from blobstore:// URLs on the command line.  Omitted secrets will be resolved at connect time using 1 or more Blob Credential files.</p>
-<p>Blob Credential files can be specified on the command line (via &#8211;blob_credentials &lt;FILE&gt;) or via the environment variable FDB_BLOB_CREDENTIALS which can be set to a colon-separated list of files.  The command line takes priority over the environment variable however all files from both sources will be used.</p>
+<p>Blob Credential files can be specified on the command line (via &#8211;blob-credentials &lt;FILE&gt;) or via the environment variable FDB_BLOB_CREDENTIALS which can be set to a colon-separated list of files.  The command line takes priority over the environment variable however all files from both sources will be used.</p>
 <p>At connect time, the specified files are read in order and the first matching account specification (<a class="reference external" href="mailto:user&#37;&#52;&#48;host">user<span>&#64;</span>host</a>)
 will be used to obtain the secret key.</p>
 <p>The Blob Credential File format is JSON with the following schema:</p>
@@ -375,23 +384,23 @@ certificates and sessions.</td>
 <dd>The Backup URL which the subcommand should read, write, or modify.  For <code class="docutils literal"><span class="pre">start</span></code> and <code class="docutils literal"><span class="pre">modify</span></code> operations, the Backup URL must be accessible by the <code class="docutils literal"><span class="pre">backup_agent</span></code> processes.</dd>
 <dt><code class="docutils literal"><span class="pre">-t</span> <span class="pre">&lt;TAG&gt;</span></code></dt>
 <dd>A &#8220;tag&#8221; is a named slot in which a backup task executes.  Backups on different named tags make progress and are controlled independently, though their executions are handled by the same set of backup agent processes.  Any number of unique backup tags can be active at once.  It the tag is not specified, the default tag name &#8220;default&#8221; is used.</dd>
-<dt><code class="docutils literal"><span class="pre">--blob_credentials</span> <span class="pre">&lt;FILE&gt;</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">--blob-credentials</span> <span class="pre">&lt;FILE&gt;</span></code></dt>
 <dd>Use FILE as a <a class="reference internal" href="#blob-credential-files"><span class="std std-ref">Blob Credential File</span></a>.  Can be used multiple times.</dd>
 </dl>
 <div class="section" id="start">
 <span id="backup-start"></span><h3><code class="docutils literal"><span class="pre">start</span></code></h3>
 <p>The <code class="docutils literal"><span class="pre">start</span></code> subcommand is used to start a backup.  If there is already a backup in progress, the command will fail and the current backup will be unaffected.  Otherwise, a backup is started. If the wait option is used, the command will wait for the backup to complete; otherwise, it returns immediately.</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span>user@host$ fdbbackup start [-t &lt;TAG&gt;] -d &lt;BACKUP_URL&gt; [-z] [-s &lt;DURATION&gt;] [--partitioned_log_experimental] [-w] [-k &#39;&lt;BEGIN&gt;[ &lt;END&gt;]&#39;]...
+<div class="highlight-default"><div class="highlight"><pre><span></span>user@host$ fdbbackup start [-t &lt;TAG&gt;] -d &lt;BACKUP_URL&gt; [-z] [-s &lt;DURATION&gt;] [--partitioned-log-experimental] [-w] [-k &#39;&lt;BEGIN&gt;[ &lt;END&gt;]&#39;]...
 </pre></div>
 </div>
 <dl class="docutils">
 <dt><code class="docutils literal"><span class="pre">-z</span></code></dt>
 <dd>Perform the backup continuously rather than terminating once a restorable backup is achieved.  Database mutations within the backup&#8217;s target key ranges will be continuously written to the backup as well as repeated inconsistent snapshots at the configured snapshot rate.</dd>
-<dt><code class="docutils literal"><span class="pre">-s</span> <span class="pre">&lt;DURATION&gt;</span></code> or <code class="docutils literal"><span class="pre">--snapshot_interval</span> <span class="pre">&lt;DURATION&gt;</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">-s</span> <span class="pre">&lt;DURATION&gt;</span></code> or <code class="docutils literal"><span class="pre">--snapshot-interval</span> <span class="pre">&lt;DURATION&gt;</span></code></dt>
 <dd>Specifies the duration, in seconds, of the inconsistent snapshots written to the backup in continuous mode.  The default is 864000 which is 10 days.</dd>
-<dt><code class="docutils literal"><span class="pre">--initial_snapshot_interval</span> <span class="pre">&lt;DURATION&gt;</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">--initial-snapshot-interval</span> <span class="pre">&lt;DURATION&gt;</span></code></dt>
 <dd>Specifies the duration, in seconds, of the first inconsistent snapshot written to the backup.  The default is 0, which means as fast as possible.</dd>
-<dt><code class="docutils literal"><span class="pre">--partitioned_log_experimental</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">--partitioned-log-experimental</span></code></dt>
 <dd>Specifies the backup uses the partitioned mutation logs generated by backup workers. Since FDB version 6.3, this option is experimental and requires using fast restore for restoring the database from the generated files. The default is to use non-partitioned mutation logs generated by backup agents.</dd>
 <dt><code class="docutils literal"><span class="pre">-w</span></code></dt>
 <dd>Wait for the backup to complete with behavior identical to that of the <a class="reference internal" href="#backup-wait"><span class="std std-ref">wait command</span></a>.</dd>
@@ -408,17 +417,17 @@ user@host$ fdbbackup start -k &#39;@pp1e b*n*nn*&#39; -k &#39;#an&amp;0 p^n3app!
 <div class="section" id="modify">
 <h3><code class="docutils literal"><span class="pre">modify</span></code></h3>
 <p>The <code class="docutils literal"><span class="pre">modify</span></code> subcommand is used to modify parameters of a running backup.  All specified changes are made in a single transaction.</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span>user@host$ fdbbackup modify [-t &lt;TAG&gt;] [-d &lt;BACKUP_URL&gt;] [-s &lt;DURATION&gt;] [--active_snapshot_interval &lt;DURATION&gt;] [--verify_uid &lt;UID&gt;]
+<div class="highlight-default"><div class="highlight"><pre><span></span>user@host$ fdbbackup modify [-t &lt;TAG&gt;] [-d &lt;BACKUP_URL&gt;] [-s &lt;DURATION&gt;] [--active-snapshot-interval &lt;DURATION&gt;] [--verify-uid &lt;UID&gt;]
 </pre></div>
 </div>
 <dl class="docutils">
 <dt><code class="docutils literal"><span class="pre">-d</span> <span class="pre">&lt;BACKUP_URL&gt;</span></code></dt>
 <dd>Sets a new Backup URL for the backup to write to.  This is most likely to be used to change only URL parameters or account information.  However, it can also be used to start writing to a new destination mid-backup.  The new old location will cease gaining any additional restorability, while the new location will not be restorable until a new snapshot begins and completes.  Full restorability would be regained, however, if the contents of the two destinations were to be combined by the user.</dd>
-<dt><code class="docutils literal"><span class="pre">-s</span> <span class="pre">&lt;DURATION&gt;</span></code> or <code class="docutils literal"><span class="pre">--snapshot_interval</span> <span class="pre">&lt;DURATION&gt;</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">-s</span> <span class="pre">&lt;DURATION&gt;</span></code> or <code class="docutils literal"><span class="pre">--snapshot-interval</span> <span class="pre">&lt;DURATION&gt;</span></code></dt>
 <dd>Sets a new duration for backup snapshots, in seconds.</dd>
-<dt><code class="docutils literal"><span class="pre">--active_snapshot_interval</span> <span class="pre">&lt;DURATION&gt;</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">--active-snapshot-interval</span> <span class="pre">&lt;DURATION&gt;</span></code></dt>
 <dd>Sets new duration for the backup&#8217;s currently active snapshot, in seconds, relative to the start of the snapshot.</dd>
-<dt><code class="docutils literal"><span class="pre">--verify_uid</span> <span class="pre">&lt;UID&gt;</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">--verify-uid</span> <span class="pre">&lt;UID&gt;</span></code></dt>
 <dd>Specifies a UID to verify against the BackupUID of the running backup.  If provided, the UID is verified in the same transaction which sets the new backup parameters (if the UID matches).</dd>
 </dl>
 </div>
@@ -474,18 +483,18 @@ user@host$ fdbbackup start -k &#39;@pp1e b*n*nn*&#39; -k &#39;#an&amp;0 p^n3app!
 <p>The expiration CUTOFF must be specified by one of the two following arguments:</p>
 <blockquote>
 <div><dl class="docutils">
-<dt><code class="docutils literal"><span class="pre">--expire_before_timestamp</span> <span class="pre">&lt;DATETIME&gt;</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">--expire-before-timestamp</span> <span class="pre">&lt;DATETIME&gt;</span></code></dt>
 <dd>Specifies the expiration cutoff to DATETIME.  Requires a cluster file and will use version/timestamp metadata in the database to convert DATETIME to a database commit version.  DATETIME must be in the form &#8220;YYYY/MM/DD.HH:MI:SS+hhmm&#8221;, for example &#8220;2018/12/31.23:59:59-0800&#8221;.</dd>
-<dt><code class="docutils literal"><span class="pre">--expire_before_version</span> <span class="pre">&lt;VERSION&gt;</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">--expire-before-version</span> <span class="pre">&lt;VERSION&gt;</span></code></dt>
 <dd>Specifies the cutoff by a database commit version.</dd>
 </dl>
 </div></blockquote>
 <p>Optionally, the user can specify a minimum RESTORABILITY guarantee with one of the following options.</p>
 <blockquote>
 <div><dl class="docutils">
-<dt><code class="docutils literal"><span class="pre">--restorable_after_timestamp</span> <span class="pre">&lt;DATETIME&gt;</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">--restorable-after-timestamp</span> <span class="pre">&lt;DATETIME&gt;</span></code></dt>
 <dd>Specifies that the backup must be restorable to DATETIME and later.  Requires a cluster file and will use version/timestamp metadata in the database to convert DATETIME to a database commit version.  DATETIME must be in the form &#8220;YYYY/MM/DD.HH:MI:SS+hhmm&#8221;, for example &#8220;2018/12/31.23:59:59-0800&#8221;.</dd>
-<dt><code class="docutils literal"><span class="pre">--restorable_after_version</span> <span class="pre">&lt;VERSION&gt;</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">--restorable-after-version</span> <span class="pre">&lt;VERSION&gt;</span></code></dt>
 <dd>Specifies that the backup must be restorable as of VERSION and later.</dd>
 </dl>
 </div></blockquote>
@@ -497,11 +506,11 @@ user@host$ fdbbackup start -k &#39;@pp1e b*n*nn*&#39; -k &#39;#an&amp;0 p^n3app!
 <div class="section" id="describe">
 <h3><code class="docutils literal"><span class="pre">describe</span></code></h3>
 <p>The <code class="docutils literal"><span class="pre">describe</span></code> subcommand will analyze the given backup and print a summary of the snapshot and mutation data versions it contains as well as the version range of restorability the backup can currently provide.</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span>user@host$ fdbbackup describe -d &lt;BACKUP_URL&gt; [--version_timestamps] [-C &lt;CLUSTER_FILE&gt;]
+<div class="highlight-default"><div class="highlight"><pre><span></span>user@host$ fdbbackup describe -d &lt;BACKUP_URL&gt; [--version-timestamps] [-C &lt;CLUSTER_FILE&gt;]
 </pre></div>
 </div>
 <dl class="docutils">
-<dt><code class="docutils literal"><span class="pre">--version_timestamps</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">--version-timestamps</span></code></dt>
 <dd>If the originating cluster is still available and is passed on the command line, this option can be specified in order for all versions in the output to also be converted to timestamps for better human readability.</dd>
 </dl>
 </div>
@@ -512,20 +521,27 @@ user@host$ fdbbackup start -k &#39;@pp1e b*n*nn*&#39; -k &#39;#an&amp;0 p^n3app!
 </pre></div>
 </div>
 <dl class="docutils">
-<dt><code class="docutils literal"><span class="pre">-b</span> <span class="pre">&lt;BASE_URL&gt;</span></code> or <code class="docutils literal"><span class="pre">--base_url</span> <span class="pre">&lt;BASE_URL&gt;</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">-b</span> <span class="pre">&lt;BASE_URL&gt;</span></code> or <code class="docutils literal"><span class="pre">--base-url</span> <span class="pre">&lt;BASE_URL&gt;</span></code></dt>
 <dd>This a shortened Backup URL which looks just like a Backup URL but without the backup &lt;name&gt; so that the list command will discover and list all of the backups in the bucket.</dd>
 </dl>
+</div>
+<div class="section" id="tags">
+<h3><code class="docutils literal"><span class="pre">tags</span></code></h3>
+<p>The <code class="docutils literal"><span class="pre">tags</span></code> subcommand will list the tags of all backups on a source cluster.</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span>user@host$ fdbbackup tags [-C &lt;CLUSTER_FILE&gt;]
+</pre></div>
+</div>
 </div>
 <div class="section" id="cleanup">
 <h3><code class="docutils literal"><span class="pre">cleanup</span></code></h3>
 <p>The <code class="docutils literal"><span class="pre">cleanup</span></code> subcommand will list orphaned backups and DRs and optionally remove their mutations.</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span>user@host$ fdbbackup cleanup [--delete_data] [--min_cleanup_seconds] [-C &lt;CLUSTER_FILE&gt;]
+<div class="highlight-default"><div class="highlight"><pre><span></span>user@host$ fdbbackup cleanup [--delete-data] [--min-cleanup-seconds] [-C &lt;CLUSTER_FILE&gt;]
 </pre></div>
 </div>
 <dl class="docutils">
-<dt><code class="docutils literal"><span class="pre">--delete_data</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">--delete-data</span></code></dt>
 <dd>This flag will cause <code class="docutils literal"><span class="pre">cleanup</span></code> to remove mutations for the most stale backup or DR.</dd>
-<dt><code class="docutils literal"><span class="pre">--min_cleanup_seconds</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">--min-cleanup-seconds</span></code></dt>
 <dd>Specifies the amount of time a backup or DR needs to be stale before <code class="docutils literal"><span class="pre">cleanup</span></code> will remove mutations for it. By default this is set to one hour.</dd>
 </dl>
 </div>
@@ -551,9 +567,9 @@ user@host$ fdbbackup start -k &#39;@pp1e b*n*nn*&#39; -k &#39;#an&amp;0 p^n3app!
 <p class="last">If multiple restore tasks are in progress they should be restoring to different prefixes or the result is undefined.</p>
 </div>
 </dd>
-<dt><code class="docutils literal"><span class="pre">--blob_credentials</span> <span class="pre">&lt;FILE&gt;</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">--blob-credentials</span> <span class="pre">&lt;FILE&gt;</span></code></dt>
 <dd>Use FILE as a <a class="reference internal" href="#blob-credential-files"><span class="std std-ref">Blob Credential File</span></a>.  Can be used multiple times.</dd>
-<dt><code class="docutils literal"><span class="pre">--dest_cluster_file</span> <span class="pre">&lt;CONNFILE&gt;</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">--dest-cluster-file</span> <span class="pre">&lt;CONNFILE&gt;</span></code></dt>
 <dd>Required.  Path to the cluster file that should be used to connect to the FoundationDB cluster you are restoring to.</dd>
 </dl>
 <div class="section" id="restore-start">
@@ -568,9 +584,9 @@ user@host$ fdbbackup start -k &#39;@pp1e b*n*nn*&#39; -k &#39;#an&amp;0 p^n3app!
 <dd>Wait for the restore to reach a final state (such as complete) before exiting.  Prints a progress update every few seconds.  Behavior is identical to that of the wait command.</dd>
 <dt><code class="docutils literal"><span class="pre">-k</span> <span class="pre">&lt;KEYS&gt;</span></code></dt>
 <dd>Specify list of key ranges from the backup to restore to the database</dd>
-<dt><code class="docutils literal"><span class="pre">--remove_prefix</span> <span class="pre">&lt;PREFIX&gt;</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">--remove-prefix</span> <span class="pre">&lt;PREFIX&gt;</span></code></dt>
 <dd>Remove PREFIX from the keys read from the backup</dd>
-<dt><code class="docutils literal"><span class="pre">--add_prefix</span> <span class="pre">&lt;PREFIX&gt;</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">--add-prefix</span> <span class="pre">&lt;PREFIX&gt;</span></code></dt>
 <dd>Add PREFIX to restored keys before writing them to the database</dd>
 <dt><code class="docutils literal"><span class="pre">-n</span></code></dt>
 <dd>Perform a trial run without actually restoring any data.</dd>
@@ -578,9 +594,9 @@ user@host$ fdbbackup start -k &#39;@pp1e b*n*nn*&#39; -k &#39;#an&amp;0 p^n3app!
 <dd>Instead of the latest version the backup can be restored to, restore to VERSION.</dd>
 <dt><code class="docutils literal"><span class="pre">--timestamp</span> <span class="pre">&lt;DATETIME&gt;</span></code></dt>
 <dd>Instead of the latest version the backup can be restored to, restore to a version from approximately the given timestamp.  Requires orig_cluster_file to be specified.  DATETIME must be in the form &#8220;YYYY/MM/DD.HH:MI:SS+hhmm&#8221;, for example &#8220;2018/12/31.23:59:59-0800&#8221;.</dd>
-<dt><code class="docutils literal"><span class="pre">--orig_cluster_file</span> <span class="pre">&lt;CONNFILE&gt;</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">--orig-cluster-file</span> <span class="pre">&lt;CONNFILE&gt;</span></code></dt>
 <dd>The cluster file for the original database from which the backup was created.  The original database is only needed to convert a &#8211;timestamp argument to a database version.</dd>
-<dt><code class="docutils literal"><span class="pre">--inconsistent_snapshot_only</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">--inconsistent-snapshot-only</span></code></dt>
 <dd>Ignore mutation log files during the restore to speedup the process. Because only range files are restored, this option gives an inconsistent snapshot in most cases and is not recommended to use.</dd>
 </dl>
 </div>
@@ -612,7 +628,7 @@ user@host$ fdbbackup start -k &#39;@pp1e b*n*nn*&#39; -k &#39;#an&amp;0 p^n3app!
 <dd><p class="first">Specify the path to the <code class="docutils literal"><span class="pre">fdb.cluster</span></code> file that should be used to connect to the FoundationDB cluster you want to back up.</p>
 <p class="last">If not specified, a <a class="reference internal" href="administration.html#default-cluster-file"><span class="std std-ref">default cluster file</span></a> will be used.</p>
 </dd>
-<dt><code class="docutils literal"><span class="pre">--blob_credentials</span> <span class="pre">&lt;FILE&gt;</span></code></dt>
+<dt><code class="docutils literal"><span class="pre">--blob-credentials</span> <span class="pre">&lt;FILE&gt;</span></code></dt>
 <dd>Use FILE as a <a class="reference internal" href="#blob-credential-files"><span class="std std-ref">Blob Credential File</span></a>.  Can be used multiple times.</dd>
 </dl>
 </div>
@@ -703,8 +719,8 @@ user@host$ fdbbackup start -k &#39;@pp1e b*n*nn*&#39; -k &#39;#an&amp;0 p^n3app!
       
     </p>
     <p>
-        &copy; Copyright 2013-2022 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jan 07, 2022.<br/>
+        &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Apr 09, 2022.<br/>
     </p>
   </div>
 </footer>

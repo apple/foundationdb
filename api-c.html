@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>C API &#8212; FoundationDB 6.3</title>
+    <title>C API &#8212; FoundationDB 7.1</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.3.23',
+        VERSION:     '7.1.0',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -52,7 +52,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>6.3</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.1</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -92,6 +92,7 @@
 <li><a class="reference internal" href="#network">Network</a></li>
 <li><a class="reference internal" href="#future">Future</a></li>
 <li><a class="reference internal" href="#database">Database</a></li>
+<li><a class="reference internal" href="#tenant">Tenant</a></li>
 <li><a class="reference internal" href="#transaction">Transaction</a><ul>
 <li><a class="reference internal" href="#snapshot-reads">Snapshot reads</a></li>
 </ul>
@@ -152,6 +153,7 @@
 <li><a class="reference internal" href="#network">Network</a></li>
 <li><a class="reference internal" href="#future">Future</a></li>
 <li><a class="reference internal" href="#database">Database</a></li>
+<li><a class="reference internal" href="#tenant">Tenant</a></li>
 <li><a class="reference internal" href="#transaction">Transaction</a><ul>
 <li><a class="reference internal" href="#snapshot-reads">Snapshot reads</a></li>
 </ul>
@@ -201,8 +203,8 @@
 </div>
 <div class="section" id="api-versioning">
 <h2>API versioning</h2>
-<p>Prior to including <code class="docutils literal"><span class="pre">fdb_c.h</span></code>, you must define the <code class="docutils literal"><span class="pre">FDB_API_VERSION</span></code> macro. This, together with the <a class="reference internal" href="#c.fdb_select_api_version" title="fdb_select_api_version"><code class="xref c c-func docutils literal"><span class="pre">fdb_select_api_version()</span></code></a> function, allows programs written against an older version of the API to compile and run with newer versions of the C library. The current version of the FoundationDB C API is 630.</p>
-<div class="highlight-c"><div class="highlight"><pre><span></span><span class="cp">#define FDB_API_VERSION 630</span>
+<p>Prior to including <code class="docutils literal"><span class="pre">fdb_c.h</span></code>, you must define the <code class="docutils literal"><span class="pre">FDB_API_VERSION</span></code> macro. This, together with the <a class="reference internal" href="#c.fdb_select_api_version" title="fdb_select_api_version"><code class="xref c c-func docutils literal"><span class="pre">fdb_select_api_version()</span></code></a> function, allows programs written against an older version of the API to compile and run with newer versions of the C library. The current version of the FoundationDB C API is 710.</p>
+<div class="highlight-c"><div class="highlight"><pre><span></span><span class="cp">#define FDB_API_VERSION 710</span>
 <span class="cp">#include</span><span class="w"> </span><span class="cpf">&lt;foundationdb/fdb_c.h&gt;</span><span class="cp"></span>
 </pre></div>
 </div>
@@ -234,7 +236,7 @@
 <p class="last">Language bindings which themselves expose API versioning will usually pass the version requested by the application.</p>
 </dd>
 <dt><code class="docutils literal"><span class="pre">header_version</span></code></dt>
-<dd>The version of the ABI (application binary interface) that the calling code expects to find in the shared library. If you are using an FFI, this <em>must</em> correspond to the version of the API you are using as a reference (currently 630). For example, the number of arguments that a function takes may be affected by this value, and an incorrect value is unlikely to yield success.</dd>
+<dd>The version of the ABI (application binary interface) that the calling code expects to find in the shared library. If you are using an FFI, this <em>must</em> correspond to the version of the API you are using as a reference (currently 710). For example, the number of arguments that a function takes may be affected by this value, and an incorrect value is unlikely to yield success.</dd>
 </dl>
 <div class="admonition warning">
 <p class="first admonition-title">Warning</p>
@@ -413,6 +415,13 @@ void <code class="descname">fdb_future_release_memory</code><span class="sig-par
 </dd></dl>
 
 <dl class="function">
+<dt id="c.fdb_future_get_key_array">
+<a class="reference internal" href="#c.fdb_error_t" title="fdb_error_t">fdb_error_t</a> <code class="descname">fdb_future_get_key_array</code><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBFuture" title="FDBFuture">FDBFuture</a>*<em>&nbsp;f</em>, FDBKey const**<em>&nbsp;out_key_array</em>, int*<em>&nbsp;out_count</em><span class="sig-paren">)</span></dt>
+<dd><p>Extracts an array of <code class="xref c c-type docutils literal"><span class="pre">FDBKey</span></code> from an <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture*</span></code></a> into a caller-provided variable of type <code class="docutils literal"><span class="pre">FDBKey*</span></code>. The size of the array will also be extracted and passed back by a caller-provided variable of type <code class="docutils literal"><span class="pre">int</span></code> <code class="docutils literal"><span class="pre">future</span></code> must represent a result of the appropriate type (i.e. must have been returned by a function documented as returning this type), or the results are undefined.</p>
+<p>Returns zero if <code class="docutils literal"><span class="pre">future</span></code> is ready and not in an error state, and a non-zero <a class="reference internal" href="api-error-codes.html#developer-guide-error-codes"><span class="std std-ref">error code</span></a> otherwise (in which case the value of any out parameter is undefined).</p>
+</dd></dl>
+
+<dl class="function">
 <dt id="c.fdb_future_get_key">
 <a class="reference internal" href="#c.fdb_error_t" title="fdb_error_t">fdb_error_t</a> <code class="descname">fdb_future_get_key</code><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBFuture" title="FDBFuture">FDBFuture</a>*<em>&nbsp;future</em>, uint8_t const**<em>&nbsp;out_key</em>, int*<em>&nbsp;out_key_length</em><span class="sig-paren">)</span></dt>
 <dd><p>Extracts a key from an <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> into caller-provided variables of type <code class="docutils literal"><span class="pre">uint8_t*</span></code> (a pointer to the beginning of the key) and <code class="docutils literal"><span class="pre">int</span></code> (the length of the key). <code class="docutils literal"><span class="pre">future</span></code> must represent a result of the appropriate type (i.e. must have been returned by a function documented as returning this type), or the results are undefined.</p>
@@ -532,9 +541,108 @@ void <code class="descname">fdb_database_destroy</code><span class="sig-paren">(
 </dd></dl>
 
 <dl class="function">
+<dt id="c.fdb_database_open_tenant">
+<a class="reference internal" href="#c.fdb_error_t" title="fdb_error_t">fdb_error_t</a> <code class="descname">fdb_database_open_tenant</code><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBDatabase" title="FDBDatabase">FDBDatabase</a>*<em>&nbsp;database</em>, uint8_t const*<em>&nbsp;tenant_name</em>, int<em>&nbsp;tenant_name_length</em>, <a class="reference internal" href="#c.FDBTenant" title="FDBTenant">FDBTenant</a>**<em>&nbsp;out_tenant</em><span class="sig-paren">)</span></dt>
+<dd><p>Opens a tenant on the given database. All transactions created by this tenant will operate on the tenant&#8217;s key-space. The caller assumes ownership of the <a class="reference internal" href="#c.FDBTenant" title="FDBTenant"><code class="xref c c-type docutils literal"><span class="pre">FDBTenant</span></code></a> object and must destroy it with <a class="reference internal" href="#c.fdb_tenant_destroy" title="fdb_tenant_destroy"><code class="xref c c-func docutils literal"><span class="pre">fdb_tenant_destroy()</span></code></a>.</p>
+<dl class="docutils">
+<dt><code class="docutils literal"><span class="pre">tenant_name</span></code></dt>
+<dd>The name of the tenant being accessed, as a byte string.</dd>
+<dt><code class="docutils literal"><span class="pre">tenant_name_length</span></code></dt>
+<dd>The length of the tenant name byte string.</dd>
+<dt><code class="docutils literal"><span class="pre">*out_tenant</span></code></dt>
+<dd>Set to point to the newly created <a class="reference internal" href="#c.FDBTenant" title="FDBTenant"><code class="xref c c-type docutils literal"><span class="pre">FDBTenant</span></code></a>.</dd>
+</dl>
+</dd></dl>
+
+<dl class="function">
 <dt id="c.fdb_database_create_transaction">
 <a class="reference internal" href="#c.fdb_error_t" title="fdb_error_t">fdb_error_t</a> <code class="descname">fdb_database_create_transaction</code><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBDatabase" title="FDBDatabase">FDBDatabase</a>*<em>&nbsp;database</em>, <a class="reference internal" href="#c.FDBTransaction" title="FDBTransaction">FDBTransaction</a>**<em>&nbsp;out_transaction</em><span class="sig-paren">)</span></dt>
-<dd><p>Creates a new transaction on the given database. The caller assumes ownership of the <a class="reference internal" href="#c.FDBTransaction" title="FDBTransaction"><code class="xref c c-type docutils literal"><span class="pre">FDBTransaction</span></code></a> object and must destroy it with <a class="reference internal" href="#c.fdb_transaction_destroy" title="fdb_transaction_destroy"><code class="xref c c-func docutils literal"><span class="pre">fdb_transaction_destroy()</span></code></a>.</p>
+<dd><p>Creates a new transaction on the given database without using a tenant, meaning that it will operate on the entire database key-space. The caller assumes ownership of the <a class="reference internal" href="#c.FDBTransaction" title="FDBTransaction"><code class="xref c c-type docutils literal"><span class="pre">FDBTransaction</span></code></a> object and must destroy it with <a class="reference internal" href="#c.fdb_transaction_destroy" title="fdb_transaction_destroy"><code class="xref c c-func docutils literal"><span class="pre">fdb_transaction_destroy()</span></code></a>.</p>
+<dl class="docutils">
+<dt><code class="docutils literal"><span class="pre">*out_transaction</span></code></dt>
+<dd>Set to point to the newly created <a class="reference internal" href="#c.FDBTransaction" title="FDBTransaction"><code class="xref c c-type docutils literal"><span class="pre">FDBTransaction</span></code></a>.</dd>
+</dl>
+</dd></dl>
+
+<dl class="function">
+<dt id="c.fdb_database_reboot_worker">
+<a class="reference internal" href="#c.FDBFuture" title="FDBFuture">FDBFuture</a>* <code class="descname">fdb_database_reboot_worker</code><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBDatabase" title="FDBDatabase">FDBDatabase</a>*<em>&nbsp;database</em>, uint8_t const*<em>&nbsp;address</em>, int<em>&nbsp;address_length</em>, <a class="reference internal" href="#c.fdb_bool_t" title="fdb_bool_t">fdb_bool_t</a><em>&nbsp;check</em>, int<em>&nbsp;duration</em><span class="sig-paren">)</span></dt>
+<dd><p>Reboot the specified process in the database.</p>
+<p>Returns an <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> which will be set to a <code class="xref c c-type docutils literal"><span class="pre">int64_t</span></code> which represents whether the reboot request is sent or not. In particular, 1 means request sent and 0 means failure (e.g. the process with the specified address does not exist). You must first wait for the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> to be ready, check for errors, call <a class="reference internal" href="#c.fdb_future_get_int64" title="fdb_future_get_int64"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_get_int64()</span></code></a> to extract the result, and then destroy the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> with <a class="reference internal" href="#c.fdb_future_destroy" title="fdb_future_destroy"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_destroy()</span></code></a>.</p>
+<dl class="docutils">
+<dt><code class="docutils literal"><span class="pre">address</span></code></dt>
+<dd>A pointer to the network address of the process.</dd>
+<dt><code class="docutils literal"><span class="pre">address_length</span></code></dt>
+<dd>The length of the parameter specified by <code class="docutils literal"><span class="pre">address</span></code>.</dd>
+<dt><code class="docutils literal"><span class="pre">check</span></code></dt>
+<dd>whether to perform a storage engine integrity check. In particular, the check-on-reboot is implemented by writing a check/validation file on disk as breadcrumb for the process to find after reboot, at which point it will eat the breadcrumb file and pass true to the integrityCheck parameter of the openKVStore() factory method.</dd>
+<dt><code class="docutils literal"><span class="pre">duration</span></code></dt>
+<dd>If positive, the process will be first suspended for <code class="docutils literal"><span class="pre">duration</span></code> seconds before being rebooted.</dd>
+</dl>
+</dd></dl>
+
+<dl class="function">
+<dt id="c.fdb_database_force_recovery_with_data_loss">
+<a class="reference internal" href="#c.FDBFuture" title="FDBFuture">FDBFuture</a>* <code class="descname">fdb_database_force_recovery_with_data_loss</code><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBDatabase" title="FDBDatabase">FDBDatabase</a>*<em>&nbsp;database</em>, uint8_t const*<em>&nbsp;dcId</em>, int<em>&nbsp;dcId_length</em><span class="sig-paren">)</span></dt>
+<dd><p>Force the database to recover into the given datacenter.</p>
+<p>This function is only useful in a fearless configuration where you want to recover your database even with losing recently committed mutations.</p>
+<p>In particular, the function will set usable_regions to 1 and the amount of mutations that will be lost depends on how far behind the remote datacenter is.</p>
+<p>The function will change the region configuration to have a positive priority for the chosen dcId, and a negative priority for all other dcIds.</p>
+<p>In particular, no error will be thrown if the given dcId does not exist. It will just not attempt to force a recovery.</p>
+<p>If the database has already recovered, the function does nothing. Thus it&#8217;s safe to call it multiple times.</p>
+<p>Returns an <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> representing an empty value. You must first wait for the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> to be ready, check for errors, and then destroy the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> with <a class="reference internal" href="#c.fdb_future_destroy" title="fdb_future_destroy"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_destroy()</span></code></a>.</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="c.fdb_database_create_snapshot">
+<a class="reference internal" href="#c.FDBFuture" title="FDBFuture">FDBFuture</a>* <code class="descname">fdb_database_create_snapshot</code><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBDatabase" title="FDBDatabase">FDBDatabase</a>*<em>&nbsp;database</em>, uint8_t const*<em>&nbsp;snapshot_command</em>, int<em>&nbsp;snapshot_command_length</em><span class="sig-paren">)</span></dt>
+<dd><p>Create a snapshot of the database.</p>
+<dl class="docutils">
+<dt><code class="docutils literal"><span class="pre">uid</span></code></dt>
+<dd><p class="first">A UID used to create snapshot. A valid uid is a 32-length hex string, otherwise, it will fail with error_code_snap_invalid_uid_string.</p>
+<p class="last">It is the user&#8217;s responsibility to make sure the given <code class="docutils literal"><span class="pre">uid</span></code> is unique.</p>
+</dd>
+<dt><code class="docutils literal"><span class="pre">uid_length</span></code></dt>
+<dd>The length of the parameter specified by <code class="docutils literal"><span class="pre">uid</span></code></dd>
+<dt><code class="docutils literal"><span class="pre">snapshot_command</span></code></dt>
+<dd><p class="first">A pointer to all the snapshot command arguments.</p>
+<p class="last">In particular, if the original <code class="docutils literal"><span class="pre">fdbcli</span></code> command is <code class="docutils literal"><span class="pre">snapshot</span> <span class="pre">&lt;arg1&gt;</span> <span class="pre">&lt;arg2&gt;</span> <span class="pre">&lt;argN&gt;</span></code>, then the string <code class="docutils literal"><span class="pre">snapshot_command</span></code> points to is <code class="docutils literal"><span class="pre">&lt;arg1&gt;</span> <span class="pre">&lt;arg2&gt;</span> <span class="pre">&lt;argN&gt;</span></code>.</p>
+</dd>
+<dt><code class="docutils literal"><span class="pre">snapshot_command_length</span></code></dt>
+<dd>The length of the parameter specified by <code class="docutils literal"><span class="pre">snapshot_command</span></code></dd>
+</dl>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">The function is exposing the functionality of the fdbcli command <code class="docutils literal"><span class="pre">snapshot</span></code>. Please take a look at the documentation before using (see <a class="reference internal" href="disk-snapshot-backup.html#disk-snapshot-backups"><span class="std std-ref">Disk snapshot backup and Restore</span></a>).</p>
+</div>
+</dd></dl>
+
+<dl class="function">
+<dt id="c.fdb_database_get_main_thread_busyness">
+double <code class="descname">fdb_database_get_main_thread_busyness</code><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBDatabase" title="FDBDatabase">FDBDatabase</a>*<em>&nbsp;database</em><span class="sig-paren">)</span></dt>
+<dd><p>Returns a value where 0 indicates that the client is idle and 1 (or larger) indicates that the client is saturated. By default, this value is updated every second.</p>
+</dd></dl>
+
+</div>
+<div class="section" id="tenant">
+<h2>Tenant</h2>
+<p><code class="docutils literal"><span class="pre">FDBTenant</span></code> represents a FoundationDB tenant. Tenants are optional named transaction domains that can be used to provide multiple disjoint key-spaces to client applications. A transaction created in a tenant will be limited to the keys contained within that tenant, and transactions operating on different tenants can use the same key names without interfering with each other.</p>
+<dl class="type">
+<dt id="c.FDBTenant">
+<code class="descname">FDBTenant</code></dt>
+<dd><p>An opaque type that represents a tenant in the FoundationDB C API.</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="c.fdb_tenant_destroy">
+void <code class="descname">fdb_tenant_destroy</code><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBTenant" title="FDBTenant">FDBTenant</a>*<em>&nbsp;tenant</em><span class="sig-paren">)</span></dt>
+<dd><p>Destroys an <a class="reference internal" href="#c.FDBTenant" title="FDBTenant"><code class="xref c c-type docutils literal"><span class="pre">FDBTenant</span></code></a> object. It must be called exactly once for each successful call to <code class="xref c c-func docutils literal"><span class="pre">fdb_database_create_tenant()</span></code>. This function only destroys a handle to the tenant &#8211; the tenant and its data will be fine!</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="c.fdb_tenant_create_transaction">
+<a class="reference internal" href="#c.fdb_error_t" title="fdb_error_t">fdb_error_t</a> <code class="descname">fdb_tenant_create_transaction</code><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBTenant" title="FDBTenant">FDBTenant</a>*<em>&nbsp;tenant</em>, FDBTronsaction<em>&nbsp;**out_transaction</em><span class="sig-paren">)</span></dt>
+<dd><p>Creates a new transaction on the given tenant. This transaction will operate within the tenant&#8217;s key-space and cannot access data outside the tenant. The caller assumes ownership of the <a class="reference internal" href="#c.FDBTransaction" title="FDBTransaction"><code class="xref c c-type docutils literal"><span class="pre">FDBTransaction</span></code></a> object and must destroy it with <a class="reference internal" href="#c.fdb_transaction_destroy" title="fdb_transaction_destroy"><code class="xref c c-func docutils literal"><span class="pre">fdb_transaction_destroy()</span></code></a>.</p>
 <dl class="docutils">
 <dt><code class="docutils literal"><span class="pre">*out_transaction</span></code></dt>
 <dd>Set to point to the newly created <a class="reference internal" href="#c.FDBTransaction" title="FDBTransaction"><code class="xref c c-type docutils literal"><span class="pre">FDBTransaction</span></code></a>.</dd>
@@ -610,6 +718,17 @@ void <code class="descname">fdb_transaction_set_read_version</code><span class="
 <p class="last">The estimated size is calculated based on the sampling done by FDB server. The sampling algorithm works roughly in this way: the larger the key-value pair is, the more likely it would be sampled and the more accurate its sampled size would be. And due to that reason it is recommended to use this API to query against large ranges for accuracy considerations. For a rough reference, if the returned size is larger than 3MB, one can consider the size to be accurate.</p>
 </div>
 <p>Returns an <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> which will be set to the estimated size of the key range given. You must first wait for the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> to be ready, check for errors, call <a class="reference internal" href="#c.fdb_future_get_int64" title="fdb_future_get_int64"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_get_int64()</span></code></a> to extract the size, and then destroy the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> with <a class="reference internal" href="#c.fdb_future_destroy" title="fdb_future_destroy"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_destroy()</span></code></a>.</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="c.fdb_transaction_get_range_split_points">
+<a class="reference internal" href="#c.FDBFuture" title="FDBFuture">FDBFuture</a>* <code class="descname">fdb_transaction_get_range_split_points</code><span class="sig-paren">(</span><a class="reference internal" href="#c.FDBTransaction" title="FDBTransaction">FDBTransaction</a>*<em>&nbsp;tr</em>, uint8_t const*<em>&nbsp;begin_key_name</em>, int<em>&nbsp;begin_key_name_length</em>, uint8_t const*<em>&nbsp;end_key_name</em>, int<em>&nbsp;end_key_name_length</em>, int64_t<em>&nbsp;chunk_size</em><span class="sig-paren">)</span></dt>
+<dd><p>Returns a list of keys that can split the given range into (roughly) equally sized chunks based on <code class="docutils literal"><span class="pre">chunk_size</span></code>.</p>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">The returned split points contain the start key and end key of the given range</p>
+</div>
+<p>Returns an <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> which will be set to the list of split points. You must first wait for the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> to be ready, check for errors, call <a class="reference internal" href="#c.fdb_future_get_key_array" title="fdb_future_get_key_array"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_get_key_array()</span></code></a> to extract the array, and then destroy the <a class="reference internal" href="#c.FDBFuture" title="FDBFuture"><code class="xref c c-type docutils literal"><span class="pre">FDBFuture</span></code></a> with <a class="reference internal" href="#c.fdb_future_destroy" title="fdb_future_destroy"><code class="xref c c-func docutils literal"><span class="pre">fdb_future_destroy()</span></code></a>.</p>
 </dd></dl>
 
 <dl class="function">
@@ -1006,8 +1125,8 @@ const char* <code class="descname">fdb_get_error</code><span class="sig-paren">(
       
     </p>
     <p>
-        &copy; Copyright 2013-2022 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jan 07, 2022.<br/>
+        &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Apr 09, 2022.<br/>
     </p>
   </div>
 </footer>

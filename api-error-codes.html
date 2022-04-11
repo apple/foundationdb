@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>Error Codes &#8212; FoundationDB 6.3</title>
+    <title>Error Codes &#8212; FoundationDB 7.1</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.3.23',
+        VERSION:     '7.1.0',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -52,7 +52,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>6.3</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.1</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -212,7 +212,7 @@
 </tr>
 <tr class="row-even"><td>proxy_memory_limit_exceeded</td>
 <td>1042</td>
-<td>Proxy commit memory limit exceeded</td>
+<td>CommitProxy commit memory limit exceeded</td>
 </tr>
 <tr class="row-odd"><td>batch_transaction_throttled</td>
 <td>1051</td>
@@ -428,6 +428,56 @@ Refer to the <code class="docutils literal"><span class="pre">SPECIAL_KEY_SPACE_
 <td>Special key space range read does not intersect a module.
 Refer to the <code class="docutils literal"><span class="pre">SPECIAL_KEY_SPACE_RELAXED</span></code> transaction option for more details.</td>
 </tr>
+<tr class="row-even"><td>special_keys_write_disabled</td>
+<td>2114</td>
+<td>Special key space is not allowed to write by default. Refer
+to the <code class="docutils literal"><span class="pre">SPECIAL_KEY_SPACE_ENABLE_WRITES</span></code> transaction option for more details.</td>
+</tr>
+<tr class="row-odd"><td>special_keys_no_write_module_found</td>
+<td>2115</td>
+<td>Special key space key or keyrange in set or clear does not intersect a module.</td>
+</tr>
+<tr class="row-even"><td>special_keys_cross_module_write</td>
+<td>2116</td>
+<td>Special key space clear crosses modules</td>
+</tr>
+<tr class="row-odd"><td>special_keys_api_failure</td>
+<td>2117</td>
+<td>Api call through special keys failed. For more information, read the
+<code class="docutils literal"><span class="pre">0xff0xff/error_message</span></code> key</td>
+</tr>
+<tr class="row-even"><td>tenant_name_required</td>
+<td>2130</td>
+<td>Tenant name must be specified to access data in the cluster</td>
+</tr>
+<tr class="row-odd"><td>tenant_not_found</td>
+<td>2131</td>
+<td>Tenant does not exist</td>
+</tr>
+<tr class="row-even"><td>tenant_already_exists</td>
+<td>2132</td>
+<td>A tenant with the given name already exists</td>
+</tr>
+<tr class="row-odd"><td>tenant_not_empty</td>
+<td>2133</td>
+<td>Cannot delete a non-empty tenant</td>
+</tr>
+<tr class="row-even"><td>invalid_tenant_name</td>
+<td>2134</td>
+<td>Tenant name cannot begin with xff</td>
+</tr>
+<tr class="row-odd"><td>tenant_prefix_allocator_conflict</td>
+<td>2135</td>
+<td>The database already has keys stored at the prefix allocated for the tenant</td>
+</tr>
+<tr class="row-even"><td>tenants_disabled</td>
+<td>2136</td>
+<td>Tenants have been disabled in the cluster</td>
+</tr>
+<tr class="row-odd"><td>unknown_tenant</td>
+<td>2137</td>
+<td>Tenant is not available from this server</td>
+</tr>
 <tr class="row-even"><td>api_version_unset</td>
 <td>2200</td>
 <td>API version is not set</td>
@@ -479,8 +529,8 @@ Refer to the <code class="docutils literal"><span class="pre">SPECIAL_KEY_SPACE_
       
     </p>
     <p>
-        &copy; Copyright 2013-2022 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jan 07, 2022.<br/>
+        &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Apr 09, 2022.<br/>
     </p>
   </div>
 </footer>

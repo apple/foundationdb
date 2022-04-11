@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>Client Testing &#8212; FoundationDB 6.3</title>
+    <title>Client Testing &#8212; FoundationDB 7.1</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.3.23',
+        VERSION:     '7.1.0',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -52,7 +52,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>6.3</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.1</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -179,7 +179,7 @@
 <h1>Testing Error Handling with Buggify</h1>
 <p>FoundationDB clients need to handle errors correctly. Wrong error handling can lead to many bugs - in the worst case it can
 lead to a corrupted database. Because of this it is important that an application or layer author tests properly their
-application during failure scenarios. But this is non-trivial. In a developement environment cluster failures are very
+application during failure scenarios. But this is non-trivial. In a development environment cluster failures are very
 unlikely and it is therefore possible that certain types of exceptions are never tested in a controlled environment.</p>
 <p>The simplest way of testing for these kind of errors is a simple mechanism called <code class="docutils literal"><span class="pre">Buggify</span></code>. If this option is enabled
 in the client, the client will randomly throw errors that an application might see in a production environment. Enable this
@@ -479,7 +479,7 @@ processes with the class test. So above 2-step process becomes a bit more comple
 <ol class="arabic simple">
 <li>Write the test (same as above).</li>
 <li>Set up a cluster with as many test clients as you want.</li>
-<li>Run the orchestor to actually execute the test.</li>
+<li>Run the orchestrator to actually execute the test.</li>
 </ol>
 <p>Step 1. is explained further up. For step 2., please refer to the general FoundationDB
 configuration. The main difference to a normal FoundationDB cluster is that some processes
@@ -490,14 +490,14 @@ example this file would create a server with 8 processes of which 4 would act as
 <span class="na">group</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">foundationdb</span><span class="w"></span>
 
 <span class="k">[general]</span><span class="w"></span>
-<span class="na">restart_delay</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">60</span><span class="w"></span>
-<span class="na">cluster_file</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">/etc/foundationdb/fdb.cluster</span><span class="w"></span>
+<span class="na">restart-delay</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">60</span><span class="w"></span>
+<span class="na">cluster-file</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">/etc/foundationdb/fdb.cluster</span><span class="w"></span>
 
 <span class="c1">## Default parameters for individual fdbserver processes</span><span class="w"></span>
 <span class="k">[fdbserver]</span><span class="w"></span>
 <span class="na">command</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">/usr/sbin/fdbserver</span><span class="w"></span>
-<span class="na">public_address</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">auto:$ID</span><span class="w"></span>
-<span class="na">listen_address</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">public</span><span class="w"></span>
+<span class="na">public-address</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">auto:$ID</span><span class="w"></span>
+<span class="na">listen-address</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">public</span><span class="w"></span>
 <span class="na">datadir</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">/var/lib/foundationdb/data/$ID</span><span class="w"></span>
 <span class="na">logdir</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">/var/log/foundationdb</span><span class="w"></span>
 
@@ -543,8 +543,8 @@ with the <code class="docutils literal"><span class="pre">multitest</span></code
       
     </p>
     <p>
-        &copy; Copyright 2013-2022 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jan 07, 2022.<br/>
+        &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Apr 09, 2022.<br/>
     </p>
   </div>
 </footer>

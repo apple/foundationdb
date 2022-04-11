@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>Disk snapshot backup and Restore &#8212; FoundationDB 6.3</title>
+    <title>Disk snapshot backup and Restore &#8212; FoundationDB 7.1</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.3.23',
+        VERSION:     '7.1.0',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -50,7 +50,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>6.3</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.1</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -273,7 +273,7 @@ that is invoking the snapshot</td>
 </tr>
 </tbody>
 </table>
-<p><code class="docutils literal"><span class="pre">snapshot</span> <span class="pre">create</span> <span class="pre">binary</span></code> will not be invoked on processes which does not have any persistent data (for example, Cluster Controller or Master or MasterProxy). Since these processes are stateless, there is no need for a snapshot. Any specialized configuration knobs used for one of these stateless processes need to be copied and restored externally.</p>
+<p><code class="docutils literal"><span class="pre">snapshot</span> <span class="pre">create</span> <span class="pre">binary</span></code> will not be invoked on processes which does not have any persistent data (for example, Cluster Controller or Master or CommitProxy). Since these processes are stateless, there is no need for a snapshot. Any specialized configuration knobs used for one of these stateless processes need to be copied and restored externally.</p>
 </div>
 <div class="section" id="management-of-disk-snapshots">
 <h3>Management of disk snapshots</h3>
@@ -578,8 +578,8 @@ fdb&gt; get key2
       
     </p>
     <p>
-        &copy; Copyright 2013-2022 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jan 07, 2022.<br/>
+        &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Apr 09, 2022.<br/>
     </p>
   </div>
 </footer>

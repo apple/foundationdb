@@ -9,7 +9,7 @@ Scaling
 
 FoundationDB scales linearly with the number of cores in a cluster over a wide range of sizes.
 
-.. image:: /images/scaling.png
+.. image:: images/scaling.png
 
 Here, a cluster of commodity hardware scales to **8.2 million** operations/sec doing a 90% read and 10% write workload with 16 byte keys and values between 8 and 100 bytes.
 
@@ -24,7 +24,7 @@ Latency
 
 FoundationDB has low latencies over a broad range of workloads that only increase modestly as the cluster approaches saturation.
 
-.. image:: /images/latency.png
+.. image:: images/latency.png
 
 When run at less than **75% load**, FoundationDB typically has the following latencies:
 
@@ -53,7 +53,7 @@ Throughput (per core)
 
 FoundationDB provides good throughput for the full range of read and write workloads, with two fully durable storage engine options.
 
-.. image:: /images/throughput.png
+.. image:: images/throughput.png
 
 FoundationDB offers two :ref:`storage engines <configuration-storage-engine>`, optimized for distinct use cases, both of which write to disk before reporting transactions committed. For each storage engine, the graph shows throughput of a single FoundationDB process running on a **single core** with saturating read/write workloads ranging from 100% reads to 100% writes, all with 16 byte keys and values between 8 and 100 bytes. Throughput for the unmixed workloads is about:
 
@@ -79,7 +79,7 @@ Concurrency
 
 FoundationDB is designed to achieve great performance under high concurrency from a large number of clients.
 
-.. image:: /images/concurrency.png
+.. image:: images/concurrency.png
 
 Its asynchronous design allows it to handle very high concurrency, and for a typical workload with 90% reads and 10% writes, maximum throughput is reached at about 200 concurrent operations. This number of operations was achieved with **20** concurrent transactions per FoundationDB process each running 10 operations with 16 byte keys and values between 8 and 100 bytes.
 

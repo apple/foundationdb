@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>Administration &#8212; FoundationDB 6.3</title>
+    <title>Administration &#8212; FoundationDB 7.1</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.3.23',
+        VERSION:     '7.1.0',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -52,7 +52,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>6.3</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.1</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -87,6 +87,7 @@
 <li><a class="reference internal" href="#macos">macOS</a></li>
 </ul>
 </li>
+<li><a class="reference internal" href="#start-stop-and-restart-behavior">Start, stop and restart behavior</a></li>
 <li><a class="reference internal" href="#cluster-files">Cluster files</a><ul>
 <li><a class="reference internal" href="#default-cluster-file">Default cluster file</a></li>
 <li><a class="reference internal" href="#specifying-the-cluster-file">Specifying the cluster file</a></li>
@@ -189,6 +190,7 @@
 <li><a class="reference internal" href="#macos">macOS</a></li>
 </ul>
 </li>
+<li><a class="reference internal" href="#start-stop-and-restart-behavior">Start, stop and restart behavior</a></li>
 <li><a class="reference internal" href="#cluster-files">Cluster files</a><ul>
 <li><a class="reference internal" href="#default-cluster-file">Default cluster file</a></li>
 <li><a class="reference internal" href="#specifying-the-cluster-file">Specifying the cluster file</a></li>
@@ -264,7 +266,6 @@
 <div class="section" id="starting-and-stopping">
 <span id="administration-running-foundationdb"></span><h2>Starting and stopping</h2>
 <p>After installation, FoundationDB is set to start automatically. You can manually start and stop the database with the commands shown below.</p>
-<p>These commands start and stop the <code class="docutils literal"><span class="pre">fdbmonitor</span></code> process, which in turn starts <code class="docutils literal"><span class="pre">fdbserver</span></code> and <code class="docutils literal"><span class="pre">backup-agent</span></code> processes.  See <a class="reference internal" href="#administration-fdbmonitor"><span class="std std-ref">fdbmonitor and fdbserver</span></a> for details.</p>
 <div class="section" id="linux">
 <h3>Linux</h3>
 <p>On Linux, FoundationDB is started and stopped using the <code class="docutils literal"><span class="pre">service</span></code> command as follows:</p>
@@ -293,6 +294,12 @@ host:~ user$ sudo launchctl unload /Library/LaunchDaemons/com.foundationdb.fdbmo
 </pre></div>
 </div>
 </div>
+</div>
+<div class="section" id="start-stop-and-restart-behavior">
+<h2>Start, stop and restart behavior</h2>
+<p>These commands above start and stop the <code class="docutils literal"><span class="pre">fdbmonitor</span></code> process, which in turn starts <code class="docutils literal"><span class="pre">fdbserver</span></code> and <code class="docutils literal"><span class="pre">backup-agent</span></code> processes.  See <a class="reference internal" href="#administration-fdbmonitor"><span class="std std-ref">fdbmonitor and fdbserver</span></a> for details.</p>
+<p>After any child process has terminated by any reason, <code class="docutils literal"><span class="pre">fdbmonitor</span></code> tries to restart it. See <a class="reference internal" href="configuration.html#configuration-restarting"><span class="std std-ref">restarting parameters</span></a>.</p>
+<p>When <code class="docutils literal"><span class="pre">fdbmonitor</span></code> itself is killed unexpectedly (for example, by the <code class="docutils literal"><span class="pre">out-of-memory</span> <span class="pre">killer</span></code>), all the child processes are also terminated. Then the operating system is responsible for restarting it. See <a class="reference internal" href="configuration.html#configuration-restart-fdbmonitor"><span class="std std-ref">Configuring autorestart of fdbmonitor</span></a>.</p>
 </div>
 <div class="section" id="cluster-files">
 <span id="foundationdb-cluster-file"></span><h2>Cluster files</h2>
@@ -399,7 +406,7 @@ host:~ user$ sudo launchctl unload /Library/LaunchDaemons/com.foundationdb.fdbmo
 </pre></div>
 </div>
 </li>
-<li><p class="first">If you have previously <a class="reference internal" href="#removing-machines-from-a-cluster"><span class="std std-ref">excluded</span></a> a machine from the cluster, you will need to take it off the exclusion list using the <code class="docutils literal"><span class="pre">include</span> <span class="pre">&lt;ip&gt;</span></code> command of fdbcli before it can be a full participant in the cluster.</p>
+<li><p class="first">If you have previously <a class="reference internal" href="#removing-machines-from-a-cluster"><span class="std std-ref">excluded</span></a> a machine from the cluster, you will need to take it off the exclusion list using the <code class="docutils literal"><span class="pre">include</span> <span class="pre">&lt;ip&gt;</span></code> or <code class="docutils literal"><span class="pre">include</span> <span class="pre">&lt;locality&gt;</span></code> command of fdbcli before it can be a full participant in the cluster.</p>
 </li>
 </ol>
 <div class="admonition note">
@@ -421,12 +428,12 @@ Using cluster file `/etc/foundationdb/fdb.cluster&#39;.
 The database is available.
 
 Welcome to the fdbcli. For help, type `help&#39;.
-fdb&gt; exclude 1.2.3.4 1.2.3.5 1.2.3.6
+fdb&gt; exclude 1.2.3.4 1.2.3.5 1.2.3.6 locality_dcid:primary-satellite locality_zoneid:primary-satellite-log-2 locality_machineid:primary-stateless-1 locality_processid:223be2da244ca0182375364e4d122c30 or any locality
 Waiting for state to be removed from all excluded servers.  This may take a while.
 It is now safe to remove these machines or processes from the cluster.
 </pre></div>
 </div>
-<p><code class="docutils literal"><span class="pre">exclude</span></code> can be used to exclude either machines (by specifying an IP address) or individual processes (by specifying an <code class="docutils literal"><span class="pre">IP</span></code>:<code class="docutils literal"><span class="pre">PORT</span></code> pair).</p>
+<p><code class="docutils literal"><span class="pre">exclude</span></code> can be used to exclude either machines (by specifying an IP address) or individual processes (by specifying an <code class="docutils literal"><span class="pre">IP</span></code>:<code class="docutils literal"><span class="pre">PORT</span></code> pair or by specifying a locality match).</p>
 <div class="admonition note">
 <p class="first admonition-title">Note</p>
 <p class="last">Addresses have the form <code class="docutils literal"><span class="pre">IP</span></code>:<code class="docutils literal"><span class="pre">PORT</span></code>. This form is used even if TLS is enabled.</p>
@@ -451,6 +458,7 @@ user@host3$ sudo update-rc.d foundationdb disable
 <li><p class="first">If you ever want to add a removed machine back to the cluster, you will have to take it off the excluded servers list to which it was added in step 3. This can be done using the <code class="docutils literal"><span class="pre">include</span></code> command of <code class="docutils literal"><span class="pre">fdbcli</span></code>. If attempting to re-include a failed server, this can be done using the <code class="docutils literal"><span class="pre">include</span> <span class="pre">failed</span></code> command of <code class="docutils literal"><span class="pre">fdbcli</span></code>. Typing <code class="docutils literal"><span class="pre">exclude</span></code> with no parameters will tell you the current list of excluded and failed machines.</p>
 </li>
 </ol>
+<p>As of api version 700, excluding servers can be done with the <a class="reference internal" href="special-keys.html#special-key-space-management-module"><span class="std std-ref">special key space management module</span></a> as well.</p>
 </div>
 <div class="section" id="moving-a-cluster">
 <h2>Moving a cluster</h2>
@@ -475,7 +483,8 @@ Configuration:
   Redundancy mode        - triple
   Storage engine         - ssd-2
   Coordinators           - 5
-  Desired Proxies        - 5
+  Desired GRV Proxies    - 1
+  Desired Commit Proxies - 4
   Desired Logs           - 8
 
 Cluster:
@@ -526,67 +535,70 @@ Client time: 03/19/18 08:51:51
 <tr class="row-odd"><td>Coordinators</td>
 <td>The number of FoundationDB coordination servers</td>
 </tr>
-<tr class="row-even"><td>Desired Proxies</td>
-<td>Number of proxies desired. If replication mode is 3 then default number of proxies is 3</td>
+<tr class="row-even"><td>Desired GRV Proxies</td>
+<td>Number of GRV proxies desired. (default 1)</td>
 </tr>
-<tr class="row-odd"><td>Desired Logs</td>
+<tr class="row-odd"><td>Desired Commit Proxies</td>
+<td>Number of commit proxies desired. If replication mode is 3 then default number of commit proxies is 3</td>
+</tr>
+<tr class="row-even"><td>Desired Logs</td>
 <td>Number of logs desired. If replication mode is 3 then default number of logs is 3</td>
 </tr>
-<tr class="row-even"><td>FoundationDB processes</td>
+<tr class="row-odd"><td>FoundationDB processes</td>
 <td>Number of FoundationDB processes participating in the cluster</td>
 </tr>
-<tr class="row-odd"><td>Machines</td>
+<tr class="row-even"><td>Machines</td>
 <td>Number of physical machines running at least one FoundationDB process that is participating in the cluster</td>
 </tr>
-<tr class="row-even"><td>Memory availability</td>
+<tr class="row-odd"><td>Memory availability</td>
 <td>RAM per process on machine with least available (see details below)</td>
 </tr>
-<tr class="row-odd"><td>Retransmissions rate</td>
+<tr class="row-even"><td>Retransmissions rate</td>
 <td>Ratio of retransmitted packets to the total number of packets.</td>
 </tr>
-<tr class="row-even"><td>Fault tolerance</td>
+<tr class="row-odd"><td>Fault tolerance</td>
 <td>Maximum number of machines that can fail without losing data or availability (number for losing data will be reported separately if lower)</td>
 </tr>
-<tr class="row-odd"><td>Server time</td>
+<tr class="row-even"><td>Server time</td>
 <td>Timestamp from the server</td>
 </tr>
-<tr class="row-even"><td>Replication health</td>
+<tr class="row-odd"><td>Replication health</td>
 <td>A qualitative estimate of the health of data replication</td>
 </tr>
-<tr class="row-odd"><td>Moving data</td>
+<tr class="row-even"><td>Moving data</td>
 <td>Amount of data currently in movement between machines</td>
 </tr>
-<tr class="row-even"><td>Sum of key-value sizes</td>
+<tr class="row-odd"><td>Sum of key-value sizes</td>
 <td>Estimated total size of keys and values stored (not including any overhead or replication)</td>
 </tr>
-<tr class="row-odd"><td>Disk space used</td>
+<tr class="row-even"><td>Disk space used</td>
 <td>Overall disk space used by the cluster</td>
 </tr>
-<tr class="row-even"><td>Storage server</td>
+<tr class="row-odd"><td>Storage server</td>
 <td>Free space for storage on the server with least available. For <code class="docutils literal"><span class="pre">ssd</span></code> storage engine, includes only disk; for <code class="docutils literal"><span class="pre">memory</span></code> storage engine, includes both RAM and disk.</td>
 </tr>
-<tr class="row-odd"><td>Log server</td>
+<tr class="row-even"><td>Log server</td>
 <td>Free space for log server on the server with least available.</td>
 </tr>
-<tr class="row-even"><td>Read rate</td>
+<tr class="row-odd"><td>Read rate</td>
 <td>The current number of reads per second</td>
 </tr>
-<tr class="row-odd"><td>Write rate</td>
+<tr class="row-even"><td>Write rate</td>
 <td>The current number of writes per second</td>
 </tr>
-<tr class="row-even"><td>Transaction started</td>
+<tr class="row-odd"><td>Transaction started</td>
 <td>The current number of transactions started per second</td>
 </tr>
-<tr class="row-odd"><td>Transaction committed</td>
+<tr class="row-even"><td>Transaction committed</td>
 <td>The current number of transactions committed per second</td>
 </tr>
-<tr class="row-even"><td>Conflict rate</td>
+<tr class="row-odd"><td>Conflict rate</td>
 <td>The current number of conflicts per second</td>
 </tr>
-<tr class="row-odd"><td>Running backups</td>
+<tr class="row-even"><td>Running backups</td>
 <td>Number of backups currently running. Different backups could be backing up to different prefixes and/or to different targets.</td>
 </tr>
-<tr class="row-even"><td>Running DRs</td>
+<tr class="row-odd"><td>Running DRs</td>
 <td>Number of DRs currently running. Different DRs could be streaming different prefixes and/or to different DR clusters.</td>
 </tr>
 </tbody>
@@ -869,7 +881,7 @@ From the output of <code class="docutils literal"><span class="pre">status</span
 <span class="p">}</span>
 </pre></div>
 </div>
-<p>The <code class="docutils literal"><span class="pre">grv_latency_bands</span></code> and <code class="docutils literal"><span class="pre">commit_latency_bands</span></code> objects will only be logged for <code class="docutils literal"><span class="pre">proxy</span></code> roles, and <code class="docutils literal"><span class="pre">read_latency_bands</span></code> will only be logged for storage roles. Each threshold is represented as a key in the map, and its associated value will be the total number of requests in the lifetime of the process with a latency smaller than the threshold but larger than the next smaller threshold.</p>
+<p>The <code class="docutils literal"><span class="pre">grv_latency_bands</span></code> objects will only be logged for <code class="docutils literal"><span class="pre">grv_proxy</span></code> roles, <code class="docutils literal"><span class="pre">commit_latency_bands</span></code> objects will only be logged for <code class="docutils literal"><span class="pre">commit_proxy</span></code> roles, and <code class="docutils literal"><span class="pre">read_latency_bands</span></code> will only be logged for storage roles. Each threshold is represented as a key in the map, and its associated value will be the total number of requests in the lifetime of the process with a latency smaller than the threshold but larger than the next smaller threshold.</p>
 <p>For example, <code class="docutils literal"><span class="pre">0.1:</span> <span class="pre">1</span></code> in <code class="docutils literal"><span class="pre">read_latency_bands</span></code> indicates that there has been 1 read request with a latency in the range <code class="docutils literal"><span class="pre">[0.01,</span> <span class="pre">0.1)</span></code>. For the smallest specified threshold, the lower bound is 0 (e.g. <code class="docutils literal"><span class="pre">[0,</span> <span class="pre">0.01)</span></code> in the example above). Requests that took longer than any defined latency band will be reported in the <code class="docutils literal"><span class="pre">inf</span></code> (infinity) band. Requests that were filtered by the configuration (e.g. using <code class="docutils literal"><span class="pre">max_read_bytes</span></code>) are reported in the <code class="docutils literal"><span class="pre">filtered</span></code> category.</p>
 <p>Because each threshold reports latencies strictly in the range between the next lower threshold and itself, it may be necessary to sum up the counts for multiple bands to determine the total number of requests below a certain threshold.</p>
 <div class="admonition note">
@@ -937,7 +949,7 @@ From the output of <code class="docutils literal"><span class="pre">status</span
 <div class="section" id="datacenters">
 <h3>Datacenters</h3>
 <p>FoundationDB is datacenter aware and supports operation across datacenters. In a multiple-datacenter configuration, it is recommended that you set the <a class="reference internal" href="configuration.html#configuration-choosing-redundancy-mode"><span class="std std-ref">redundancy mode</span></a> to <code class="docutils literal"><span class="pre">three_datacenter</span></code> and that you set the <code class="docutils literal"><span class="pre">locality_dcid</span></code> parameter for all FoundationDB processes in <a class="reference internal" href="configuration.html#foundationdb-conf"><span class="std std-ref">foundationdb.conf</span></a>.</p>
-<p>If you specify the <code class="docutils literal"><span class="pre">--datacenter_id</span></code> option to any FoundationDB process in your cluster, you should specify it to all such processes. Processes which do not have a specified datacenter ID on the command line are considered part of a default &#8220;unset&#8221; datacenter. FoundationDB will incorrectly believe that these processes are failure-isolated from other datacenters, which can reduce performance and fault tolerance.</p>
+<p>If you specify the <code class="docutils literal"><span class="pre">--datacenter-id</span></code> option to any FoundationDB process in your cluster, you should specify it to all such processes. Processes which do not have a specified datacenter ID on the command line are considered part of a default &#8220;unset&#8221; datacenter. FoundationDB will incorrectly believe that these processes are failure-isolated from other datacenters, which can reduce performance and fault tolerance.</p>
 </div>
 <div class="section" id="re-creating-a-database">
 <h3>(Re)creating a database</h3>
@@ -1006,13 +1018,13 @@ From the output of <code class="docutils literal"><span class="pre">status</span
 <h3>Perform the upgrade</h3>
 <p>For <strong>Ubuntu</strong>, perform the upgrade using the dpkg command:</p>
 <pre class="literal-block">
-user&#64;host$ sudo dpkg -i foundationdb-clients_6.3.23-1_amd64.deb \
-foundationdb-server_6.3.23-1_amd64.deb
+user&#64;host$ sudo dpkg -i foundationdb-clients_7.1.0-1_amd64.deb \
+foundationdb-server_7.1.0-1_amd64.deb
 </pre>
 <p>For <strong>RHEL/CentOS</strong>, perform the upgrade using the rpm command:</p>
 <pre class="literal-block">
-user&#64;host$ sudo rpm -Uvh foundationdb-clients-6.3.23-1.el7.x86_64.rpm \
-foundationdb-server-6.3.23-1.el7.x86_64.rpm
+user&#64;host$ sudo rpm -Uvh foundationdb-clients-7.1.0-1.el7.x86_64.rpm \
+foundationdb-server-7.1.0-1.el7.x86_64.rpm
 </pre>
 <p>The <code class="docutils literal"><span class="pre">foundationdb-clients</span></code> package also installs the <a class="reference internal" href="api-c.html"><span class="doc">C</span></a> API. If your clients use <a class="reference internal" href="api-ruby.html"><span class="doc">Ruby</span></a>, <a class="reference internal" href="api-python.html"><span class="doc">Python</span></a>, <a class="reference external" href="javadoc/index.html">Java</a>, or <a class="reference external" href="https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb">Go</a>, follow the instructions in the corresponding language documentation to install the APIs.</p>
 </div>
@@ -1092,8 +1104,8 @@ foundationdb-server-6.3.23-1.el7.x86_64.rpm
       
     </p>
     <p>
-        &copy; Copyright 2013-2022 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jan 07, 2022.<br/>
+        &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Apr 09, 2022.<br/>
     </p>
   </div>
 </footer>

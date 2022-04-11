@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>Command Line Interface &#8212; FoundationDB 6.3</title>
+    <title>Command Line Interface &#8212; FoundationDB 7.1</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.3.23',
+        VERSION:     '7.1.0',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -50,7 +50,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>6.3</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.1</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -91,10 +91,15 @@
 <li><a class="reference internal" href="#redundancy-mode">redundancy mode</a></li>
 <li><a class="reference internal" href="#storage-engine">storage engine</a></li>
 <li><a class="reference internal" href="#process-types">process types</a></li>
+<li><a class="reference internal" href="#perpetual-storage-wiggle">perpetual storage wiggle</a></li>
+<li><a class="reference internal" href="#storage-migration-type">storage migration type</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#consistencycheck">consistencycheck</a></li>
 <li><a class="reference internal" href="#coordinators">coordinators</a></li>
+<li><a class="reference internal" href="#createtenant">createtenant</a></li>
+<li><a class="reference internal" href="#defaulttenant">defaulttenant</a></li>
+<li><a class="reference internal" href="#deletetenant">deletetenant</a></li>
 <li><a class="reference internal" href="#exclude">exclude</a></li>
 <li><a class="reference internal" href="#exit">exit</a></li>
 <li><a class="reference internal" href="#fileconfigure">fileconfigure</a></li>
@@ -102,6 +107,7 @@
 <li><a class="reference internal" href="#get">get</a></li>
 <li><a class="reference internal" href="#getrange">getrange</a></li>
 <li><a class="reference internal" href="#getrangekeys">getrangekeys</a></li>
+<li><a class="reference internal" href="#gettenant">gettenant</a></li>
 <li><a class="reference internal" href="#getversion">getversion</a></li>
 <li><a class="reference internal" href="#help">help</a><ul>
 <li><a class="reference internal" href="#help-escaping">help escaping</a></li>
@@ -110,6 +116,7 @@
 </li>
 <li><a class="reference internal" href="#include">include</a></li>
 <li><a class="reference internal" href="#kill">kill</a></li>
+<li><a class="reference internal" href="#listtenants">listtenants</a></li>
 <li><a class="reference internal" href="#lock">lock</a></li>
 <li><a class="reference internal" href="#maintenance">maintenance</a></li>
 <li><a class="reference internal" href="#option">option</a></li>
@@ -141,7 +148,9 @@
 </li>
 <li><a class="reference internal" href="#triggerddteaminfolog">triggerddteaminfolog</a></li>
 <li><a class="reference internal" href="#unlock">unlock</a></li>
+<li><a class="reference internal" href="#usetenant">usetenant</a></li>
 <li><a class="reference internal" href="#writemode">writemode</a></li>
+<li><a class="reference internal" href="#tssq">tssq</a></li>
 </ul>
 </li>
 </ul>
@@ -191,10 +200,15 @@
 <li><a class="reference internal" href="#redundancy-mode">redundancy mode</a></li>
 <li><a class="reference internal" href="#storage-engine">storage engine</a></li>
 <li><a class="reference internal" href="#process-types">process types</a></li>
+<li><a class="reference internal" href="#perpetual-storage-wiggle">perpetual storage wiggle</a></li>
+<li><a class="reference internal" href="#storage-migration-type">storage migration type</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#consistencycheck">consistencycheck</a></li>
 <li><a class="reference internal" href="#coordinators">coordinators</a></li>
+<li><a class="reference internal" href="#createtenant">createtenant</a></li>
+<li><a class="reference internal" href="#defaulttenant">defaulttenant</a></li>
+<li><a class="reference internal" href="#deletetenant">deletetenant</a></li>
 <li><a class="reference internal" href="#exclude">exclude</a></li>
 <li><a class="reference internal" href="#exit">exit</a></li>
 <li><a class="reference internal" href="#fileconfigure">fileconfigure</a></li>
@@ -202,6 +216,7 @@
 <li><a class="reference internal" href="#get">get</a></li>
 <li><a class="reference internal" href="#getrange">getrange</a></li>
 <li><a class="reference internal" href="#getrangekeys">getrangekeys</a></li>
+<li><a class="reference internal" href="#gettenant">gettenant</a></li>
 <li><a class="reference internal" href="#getversion">getversion</a></li>
 <li><a class="reference internal" href="#help">help</a><ul>
 <li><a class="reference internal" href="#help-escaping">help escaping</a></li>
@@ -210,6 +225,7 @@
 </li>
 <li><a class="reference internal" href="#include">include</a></li>
 <li><a class="reference internal" href="#kill">kill</a></li>
+<li><a class="reference internal" href="#listtenants">listtenants</a></li>
 <li><a class="reference internal" href="#lock">lock</a></li>
 <li><a class="reference internal" href="#maintenance">maintenance</a></li>
 <li><a class="reference internal" href="#option">option</a></li>
@@ -241,7 +257,9 @@
 </li>
 <li><a class="reference internal" href="#triggerddteaminfolog">triggerddteaminfolog</a></li>
 <li><a class="reference internal" href="#unlock">unlock</a></li>
+<li><a class="reference internal" href="#usetenant">usetenant</a></li>
 <li><a class="reference internal" href="#writemode">writemode</a></li>
+<li><a class="reference internal" href="#tssq">tssq</a></li>
 </ul>
 </li>
 </ul>
@@ -297,8 +315,9 @@ fdb&gt;
 </div>
 <div class="section" id="configure">
 <h3>configure</h3>
-<p>The <code class="docutils literal"><span class="pre">configure</span></code> command changes the database configuration. Its syntax is <code class="docutils literal"><span class="pre">configure</span> <span class="pre">[new]</span> <span class="pre">[single|double|triple|three_data_hall|three_datacenter]</span> <span class="pre">[ssd|memory]</span> <span class="pre">[proxies=&lt;N&gt;]</span> <span class="pre">[resolvers=&lt;N&gt;]</span> <span class="pre">[logs=&lt;N&gt;]</span></code>.</p>
+<p>The <code class="docutils literal"><span class="pre">configure</span></code> command changes the database configuration. Its syntax is <code class="docutils literal"><span class="pre">configure</span> <span class="pre">[new|tss]</span> <span class="pre">[single|double|triple|three_data_hall|three_datacenter]</span> <span class="pre">[ssd|memory]</span> <span class="pre">[grv_proxies=&lt;N&gt;]</span> <span class="pre">[commit_proxies=&lt;N&gt;]</span> <span class="pre">[resolvers=&lt;N&gt;]</span> <span class="pre">[logs=&lt;N&gt;]</span> <span class="pre">[count=&lt;TSS_COUNT&gt;]</span> <span class="pre">[perpetual_storage_wiggle=&lt;WIGGLE_SPEED&gt;]</span> <span class="pre">[perpetual_storage_wiggle_locality=&lt;&lt;LOCALITY_KEY&gt;:&lt;LOCALITY_VALUE&gt;|0&gt;]</span> <span class="pre">[storage_migration_type={disabled|aggressive|gradual}]</span> <span class="pre">[tenant_mode={disabled|optional_experimental|required_experimental}]</span></code>.</p>
 <p>The <code class="docutils literal"><span class="pre">new</span></code> option, if present, initializes a new database with the given configuration rather than changing the configuration of an existing one. When <code class="docutils literal"><span class="pre">new</span></code> is used, both a redundancy mode and a storage engine must be specified.</p>
+<p>The <code class="docutils literal"><span class="pre">tss</span></code> option, if present, changes the Testing Storage Server (TSS) configuration for a cluster. When used for the first time, both a count and a storage engine must be specified. For more details, see <a class="reference internal" href="tss.html#testing-storage-server"><span class="std std-ref">Testing Storage Server (TSS)</span></a>.</p>
 <div class="section" id="redundancy-mode">
 <h4>redundancy mode</h4>
 <p>Redundancy modes define storage requirements, required cluster size, and resilience to failure. The available redundancy modes are:</p>
@@ -325,12 +344,32 @@ fdb&gt;
 <p>A FoundationDB cluster employs server processes of different types. It automatically allocates these processes in default numbers appropriate for small-to-medium sized clusters.</p>
 <p>For large clusters, you can manually set the allocated number of processes of a given type. Valid process types are:</p>
 <ul class="simple">
-<li><code class="docutils literal"><span class="pre">proxies</span></code></li>
+<li><code class="docutils literal"><span class="pre">grv_proxies</span></code></li>
+<li><code class="docutils literal"><span class="pre">commit_proxies</span></code></li>
 <li><code class="docutils literal"><span class="pre">resolvers</span></code></li>
 <li><code class="docutils literal"><span class="pre">logs</span></code></li>
 </ul>
-<p>Set the process using <code class="docutils literal"><span class="pre">configure</span> <span class="pre">[proxies|resolvers|logs]=&lt;N&gt;</span></code>, where <code class="docutils literal"><span class="pre">&lt;N&gt;</span></code> is an integer greater than 0, or -1 to reset the value to its default.</p>
+<p>Set the process using <code class="docutils literal"><span class="pre">configure</span> <span class="pre">[grv_proxies|commit_proxies|resolvers|logs]=&lt;N&gt;</span></code>, where <code class="docutils literal"><span class="pre">&lt;N&gt;</span></code> is an integer greater than 0, or -1 to reset the value to its default.</p>
 <p>For recommendations on appropriate values for process types in large clusters, see <a class="reference internal" href="configuration.html#guidelines-process-class-config"><span class="std std-ref">Guidelines for setting process class</span></a>.</p>
+</div>
+<div class="section" id="perpetual-storage-wiggle">
+<h4>perpetual storage wiggle</h4>
+<p><code class="docutils literal"><span class="pre">perpetual_storage_wiggle</span></code> sets the value speed (a.k.a., the number of processes that the Data Distributor should wiggle at a time). Currently, only 0 and 1 are supported. The value 0 means to disable the perpetual storage wiggle.
+<code class="docutils literal"><span class="pre">perpetual_storage_wiggle_locality</span></code> sets the process filter for wiggling. The processes that match the given locality key and locality value are only wiggled. The value 0 will disable the locality filter and matches all the processes for wiggling.</p>
+<p>For more details, see <a class="reference internal" href="perpetual-storage-wiggle.html#perpetual-storage-wiggle"><span class="std std-ref">Perpetual Storage Wiggle</span></a>.</p>
+</div>
+<div class="section" id="storage-migration-type">
+<h4>storage migration type</h4>
+<p>Set the storage migration type, or how FDB should migrate to a new storage engine if the value is changed.
+The default is <code class="docutils literal"><span class="pre">disabled</span></code>, which means changing the storage engine will not be possible.</p>
+<ul class="simple">
+<li><code class="docutils literal"><span class="pre">disabled</span></code></li>
+<li><code class="docutils literal"><span class="pre">gradual</span></code></li>
+<li><code class="docutils literal"><span class="pre">aggressive</span></code></li>
+</ul>
+<p><code class="docutils literal"><span class="pre">gradual</span></code> replaces a single storage at a time when the <code class="docutils literal"><span class="pre">perpetual</span> <span class="pre">storage</span> <span class="pre">wiggle</span></code> is active. This requires the perpetual storage wiggle to be set to a non-zero value to actually migrate storage servers. It is somewhat slow but very safe. This is the recommended method for all production clusters.
+<code class="docutils literal"><span class="pre">aggressive</span></code> tries to replace as many storages as it can at once, and will recruit a new storage server on the same process as the old one. This will be faster, but can potentially hit degraded performance or OOM with two storages on the same process. The main benefit over <code class="docutils literal"><span class="pre">gradual</span></code> is that this doesn&#8217;t need to take one storage out of rotation, so it works for small or development clusters that have the same number of storage processes as the replication factor. Note that <code class="docutils literal"><span class="pre">aggressive</span></code> is not exclusive to running the perpetual wiggle.
+<code class="docutils literal"><span class="pre">disabled</span></code> means that if the storage engine is changed, fdb will not move the cluster over to the new storage engine. This will disable the perpetual wiggle from rewriting storage files.</p>
 </div>
 </div>
 <div class="section" id="consistencycheck">
@@ -347,12 +386,29 @@ fdb&gt;
 <p>If <code class="docutils literal"><span class="pre">description=&lt;DESC&gt;</span></code> is specified, the description field in the cluster file is changed to <code class="docutils literal"><span class="pre">&lt;DESC&gt;</span></code>, which must match <code class="docutils literal"><span class="pre">[A-Za-z0-9_]+</span></code>.</p>
 <p>For more information on setting the cluster description, see <a class="reference internal" href="configuration.html#configuration-setting-cluster-description"><span class="std std-ref">Changing the cluster description</span></a>.</p>
 </div>
+<div class="section" id="createtenant">
+<h3>createtenant</h3>
+<p>The <code class="docutils literal"><span class="pre">createtenant</span></code> command is used to create new tenants in the cluster. Its syntax is <code class="docutils literal"><span class="pre">createtenant</span> <span class="pre">&lt;TENANT_NAME&gt;</span></code>.</p>
+<p>The tenant name can be any byte string that does not begin with the <code class="docutils literal"><span class="pre">\xff</span></code> byte. If the tenant already exists, <code class="docutils literal"><span class="pre">fdbcli</span></code> will report an error.</p>
+</div>
+<div class="section" id="defaulttenant">
+<h3>defaulttenant</h3>
+<p>The <code class="docutils literal"><span class="pre">defaulttenant</span></code> command configures <code class="docutils literal"><span class="pre">fdbcli</span></code> to run its commands without a tenant. This is the default behavior.</p>
+<p>The active tenant cannot be changed while a transaction (using <code class="docutils literal"><span class="pre">begin</span></code>) is open.</p>
+</div>
+<div class="section" id="deletetenant">
+<h3>deletetenant</h3>
+<p>The <code class="docutils literal"><span class="pre">deletetenant</span></code> command is used to delete tenants from the cluster. Its syntax is <code class="docutils literal"><span class="pre">deletetenant</span> <span class="pre">&lt;TENANT_NAME&gt;</span></code>.</p>
+<p>In order to delete a tenant, it must be empty. To delete a tenant with data, first clear that data using the <code class="docutils literal"><span class="pre">clear</span></code> command. If the tenant does not exist, <code class="docutils literal"><span class="pre">fdbcli</span></code> will report an error.</p>
+</div>
 <div class="section" id="exclude">
 <h3>exclude</h3>
-<p>The <code class="docutils literal"><span class="pre">exclude</span></code> command excludes servers from the database or marks them as failed. Its syntax is <code class="docutils literal"><span class="pre">exclude</span> <span class="pre">[failed]</span> <span class="pre">&lt;ADDRESS...&gt;</span></code>. If no addresses are specified, the command provides the set of excluded and failed servers.</p>
-<p>For each IP address or IP:port pair in <code class="docutils literal"><span class="pre">&lt;ADDRESS...&gt;</span></code>, the command adds the address to the set of excluded servers. It then waits until all database state has been safely moved off the specified servers.</p>
+<p>The <code class="docutils literal"><span class="pre">exclude</span></code> command excludes servers from the database or marks them as failed. Its syntax is <code class="docutils literal"><span class="pre">exclude</span> <span class="pre">[failed]</span> <span class="pre">[&lt;ADDRESS...&gt;]</span> <span class="pre">[locality_dcid:&lt;excludedcid&gt;]</span> <span class="pre">[locality_zoneid:&lt;excludezoneid&gt;]</span> <span class="pre">[locality_machineid:&lt;excludemachineid&gt;]</span> <span class="pre">[locality_processid:&lt;excludeprocessid&gt;]</span> <span class="pre">or</span> <span class="pre">any</span> <span class="pre">locality</span></code>. If no addresses are specified, the command provides the set of excluded and failed servers and localities.</p>
+<p>For each IP address or IP:port pair in <code class="docutils literal"><span class="pre">&lt;ADDRESS...&gt;</span></code> or locality (which include anything set on LocalityData like dcid, zoneid, machineid, processid), the command adds the address/locality to the set of excluded servers and localities. It then waits until all database state has been safely moved off the specified servers.</p>
 <p>If the <code class="docutils literal"><span class="pre">failed</span></code> keyword is specified, the address is marked as failed and added to the set of failed servers. It will not wait for the database state to move off the specified servers.</p>
 <p>For more information on excluding servers, see <a class="reference internal" href="administration.html#removing-machines-from-a-cluster"><span class="std std-ref">Removing machines from a cluster</span></a>.</p>
+<p>Warning about potential dataloss <code class="docutils literal"><span class="pre">failed</span></code> option: if a server is the last one in some team(s), excluding it with <code class="docutils literal"><span class="pre">failed</span></code> will lose all data in the team(s), and hence <code class="docutils literal"><span class="pre">failed</span></code> should only be set when the server(s) have permanently failed.</p>
+<p>In the case all servers of a team have failed permanently, excluding all the servers will clean up the corresponding keyrange, and fix the invalid metadata. The keyrange will be assigned to a new team as an empty shard.</p>
 </div>
 <div class="section" id="exit">
 <h3>exit</h3>
@@ -383,6 +439,11 @@ fdb&gt;
 <h3>getrangekeys</h3>
 <p>The <code class="docutils literal"><span class="pre">getrangekeys</span></code> command fetches keys in a range. Its syntax is <code class="docutils literal"><span class="pre">getrangekeys</span> <span class="pre">&lt;BEGINKEY&gt;</span> <span class="pre">[ENDKEY]</span> <span class="pre">[LIMIT]</span></code>. It displays up to <code class="docutils literal"><span class="pre">&lt;LIMIT&gt;</span></code> keys for keys between <code class="docutils literal"><span class="pre">&lt;BEGINKEY&gt;</span></code> (inclusive) and <code class="docutils literal"><span class="pre">&lt;ENDKEY&gt;</span></code> (exclusive). If <code class="docutils literal"><span class="pre">&lt;ENDKEY&gt;</span></code> is omitted, then the range will include all keys starting with <code class="docutils literal"><span class="pre">&lt;BEGINKEY&gt;</span></code>. <code class="docutils literal"><span class="pre">&lt;LIMIT&gt;</span></code> defaults to 25 if omitted.</p>
 <p>Note that <a class="reference internal" href="#cli-escaping"><span class="std std-ref">characters can be escaped</span></a> when specifying keys (or values) in <code class="docutils literal"><span class="pre">fdbcli</span></code>.</p>
+</div>
+<div class="section" id="gettenant">
+<h3>gettenant</h3>
+<p>The <code class="docutils literal"><span class="pre">gettenant</span></code> command fetches metadata for a given tenant and displays it. Its syntax is <code class="docutils literal"><span class="pre">gettenant</span> <span class="pre">&lt;TENANT_NAME&gt;</span></code>.</p>
+<p>Included in the output of this command are the <code class="docutils literal"><span class="pre">id</span></code> and <code class="docutils literal"><span class="pre">prefix</span></code> assigned to the tenant. If the tenant does not exist, <code class="docutils literal"><span class="pre">fdbcli</span></code> will report an error.</p>
 </div>
 <div class="section" id="getversion">
 <h3>getversion</h3>
@@ -417,11 +478,11 @@ fdb&gt;
 </div>
 <div class="section" id="include">
 <h3>include</h3>
-<p>The <code class="docutils literal"><span class="pre">include</span></code> command permits previously excluded or failed servers to rejoin the database. Its syntax is <code class="docutils literal"><span class="pre">include</span> <span class="pre">[failed]</span> <span class="pre">all|&lt;ADDRESS...&gt;</span></code>.</p>
+<p>The <code class="docutils literal"><span class="pre">include</span></code> command permits previously excluded or failed servers/localities to rejoin the database. Its syntax is <code class="docutils literal"><span class="pre">include</span> <span class="pre">[failed]</span> <span class="pre">all|[&lt;ADDRESS...&gt;]</span> <span class="pre">[locality_dcid:&lt;excludedcid&gt;]</span> <span class="pre">[locality_zoneid:&lt;excludezoneid&gt;]</span> <span class="pre">[locality_machineid:&lt;excludemachineid&gt;]</span> <span class="pre">[locality_processid:&lt;excludeprocessid&gt;]</span> <span class="pre">or</span> <span class="pre">any</span> <span class="pre">locality</span></code>.</p>
 <p>The <code class="docutils literal"><span class="pre">failed</span></code> keyword is required if the servers were previously marked as failed rather than excluded.</p>
-<p>If <code class="docutils literal"><span class="pre">all</span></code> is specified, the excluded servers list is cleared. This will not clear the failed servers list.</p>
-<p>If <code class="docutils literal"><span class="pre">failed</span> <span class="pre">all</span></code> or <code class="docutils literal"><span class="pre">all</span> <span class="pre">failed</span></code> is specified, the failed servers list is cleared. This will not clear the excluded servers list.</p>
-<p>For each IP address or IP:port pair in <code class="docutils literal"><span class="pre">&lt;ADDRESS...&gt;</span></code>, the command removes any matching exclusions from the excluded servers list. (A specified IP will match all <code class="docutils literal"><span class="pre">IP:*</span></code> exclusion entries).</p>
+<p>If <code class="docutils literal"><span class="pre">all</span></code> is specified, the excluded servers and localities list is cleared. This will not clear the failed servers and localities list.</p>
+<p>If <code class="docutils literal"><span class="pre">failed</span> <span class="pre">all</span></code> or <code class="docutils literal"><span class="pre">all</span> <span class="pre">failed</span></code> is specified, the failed servers and localities list is cleared. This will not clear the excluded servers and localities list.</p>
+<p>For each IP address or IP:port pair in <code class="docutils literal"><span class="pre">&lt;ADDRESS...&gt;</span></code> or locality, the command removes any matching exclusions from the excluded servers/localities list. (A specified IP will match all <code class="docutils literal"><span class="pre">IP:*</span></code> exclusion entries).</p>
 <p>For information on adding machines to a cluster, see <a class="reference internal" href="administration.html#adding-machines-to-a-cluster"><span class="std std-ref">Adding machines to a cluster</span></a>.</p>
 </div>
 <div class="section" id="kill">
@@ -435,6 +496,11 @@ fdb&gt;
 <p>Attempts to kill all specified processes. Each address should include the IP and port of the process being targeted.</p>
 <p><code class="docutils literal"><span class="pre">kill</span> <span class="pre">all</span></code></p>
 <p>Attempts to kill all known processes in the cluster.</p>
+</div>
+<div class="section" id="listtenants">
+<h3>listtenants</h3>
+<p>The <code class="docutils literal"><span class="pre">listtenants</span></code> command prints the names of tenants in the cluster. Its syntax is <code class="docutils literal"><span class="pre">listtenants</span> <span class="pre">[BEGIN]</span> <span class="pre">[END]</span> <span class="pre">[LIMIT]</span></code>.</p>
+<p>By default, the <code class="docutils literal"><span class="pre">listtenants</span></code> command will print up to 100 entries from the entire range of tenants. A narrower sub-range can be printed using the optional <code class="docutils literal"><span class="pre">[BEGIN]</span></code> and <code class="docutils literal"><span class="pre">[END]</span></code> parameters, and the limit can be changed by specifying an integer <code class="docutils literal"><span class="pre">[LIMIT]</span></code> parameter.</p>
 </div>
 <div class="section" id="lock">
 <h3>lock</h3>
@@ -462,7 +528,7 @@ fdb&gt;
 <div class="section" id="client">
 <h4>client</h4>
 <p><code class="docutils literal"><span class="pre">profile</span> <span class="pre">client</span> <span class="pre">&lt;get|set&gt;</span></code></p>
-<p>Reads or sets parameters of client transaction sampling. Use <code class="docutils literal"><span class="pre">get</span></code> to list the current parameters, and <code class="docutils literal"><span class="pre">set</span> <span class="pre">&lt;RATE|default&gt;</span> <span class="pre">&lt;SIZE|default&gt;</span></code> to set them. <code class="docutils literal"><span class="pre">RATE</span></code> is the fraction of transactions to be sampled, and <code class="docutils literal"><span class="pre">SIZE</span></code> is the amount (in bytes) of sampled data to store in the database.</p>
+<p>Reads or sets parameters of client transaction sampling. Use <code class="docutils literal"><span class="pre">get</span></code> to list the current parameters, and <code class="docutils literal"><span class="pre">set</span> <span class="pre">&lt;RATE|default&gt;</span> <span class="pre">&lt;SIZE|default&gt;</span></code> to set them. <code class="docutils literal"><span class="pre">RATE</span></code> is the fraction of transactions to be sampled, and <code class="docutils literal"><span class="pre">SIZE</span></code> is the amount (in bytes) of sampled data to store in the database. For more information, see <a class="reference internal" href="transaction-profiler-analyzer.html"><span class="doc">Transaction profiling and analyzing</span></a>.</p>
 </div>
 <div class="section" id="list">
 <h4>list</h4>
@@ -496,7 +562,7 @@ fdb&gt;
 <div class="section" id="setclass">
 <h3>setclass</h3>
 <p>The <code class="docutils literal"><span class="pre">setclass</span></code> command can be used to change the <a class="reference internal" href="configuration.html#guidelines-process-class-config"><span class="std std-ref">process class</span></a> for a given process. Its syntax is <code class="docutils literal"><span class="pre">setclass</span> <span class="pre">[&lt;ADDRESS&gt;</span> <span class="pre">&lt;CLASS&gt;]</span></code>. If no arguments are specified, then the process classes of all processes are listed. Setting the class to <code class="docutils literal"><span class="pre">default</span></code> to revert to the process class specified on the command line.</p>
-<p>The available process classes are <code class="docutils literal"><span class="pre">unset</span></code>, <code class="docutils literal"><span class="pre">storage</span></code>, <code class="docutils literal"><span class="pre">transaction</span></code>, <code class="docutils literal"><span class="pre">resolution</span></code>, <code class="docutils literal"><span class="pre">proxy</span></code>, <code class="docutils literal"><span class="pre">master</span></code>, <code class="docutils literal"><span class="pre">test</span></code>, <code class="docutils literal"><span class="pre">unset</span></code>, <code class="docutils literal"><span class="pre">stateless</span></code>, <code class="docutils literal"><span class="pre">log</span></code>, <code class="docutils literal"><span class="pre">router</span></code>, <code class="docutils literal"><span class="pre">cluster_controller</span></code>, <code class="docutils literal"><span class="pre">fast_restore</span></code>, <code class="docutils literal"><span class="pre">data_distributor</span></code>, <code class="docutils literal"><span class="pre">coordinator</span></code>, <code class="docutils literal"><span class="pre">ratekeeper</span></code>, <code class="docutils literal"><span class="pre">storage_cache</span></code>, <code class="docutils literal"><span class="pre">backup</span></code>, and <code class="docutils literal"><span class="pre">default</span></code>.</p>
+<p>The available process classes are <code class="docutils literal"><span class="pre">unset</span></code>, <code class="docutils literal"><span class="pre">storage</span></code>, <code class="docutils literal"><span class="pre">transaction</span></code>, <code class="docutils literal"><span class="pre">resolution</span></code>, <code class="docutils literal"><span class="pre">grv_proxy</span></code>, <code class="docutils literal"><span class="pre">commit_proxy</span></code>, <code class="docutils literal"><span class="pre">master</span></code>, <code class="docutils literal"><span class="pre">test</span></code>, <code class="docutils literal"><span class="pre">unset</span></code>, <code class="docutils literal"><span class="pre">stateless</span></code>, <code class="docutils literal"><span class="pre">log</span></code>, <code class="docutils literal"><span class="pre">router</span></code>, <code class="docutils literal"><span class="pre">cluster_controller</span></code>, <code class="docutils literal"><span class="pre">fast_restore</span></code>, <code class="docutils literal"><span class="pre">data_distributor</span></code>, <code class="docutils literal"><span class="pre">coordinator</span></code>, <code class="docutils literal"><span class="pre">ratekeeper</span></code>, <code class="docutils literal"><span class="pre">storage_cache</span></code>, <code class="docutils literal"><span class="pre">backup</span></code>, and <code class="docutils literal"><span class="pre">default</span></code>.</p>
 </div>
 <div class="section" id="sleep">
 <h3>sleep</h3>
@@ -564,15 +630,15 @@ print cluster statistics.</p>
 <div class="section" id="disable">
 <h4>disable</h4>
 <p><code class="docutils literal"><span class="pre">throttle</span> <span class="pre">disable</span> <span class="pre">auto</span></code></p>
-<p>Disables cluster auto-throttling for busy transaction tags. This does not disable any currently active throttles. To do so, run the following command after disabling auto-throttling:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="o">&gt;</span> <span class="n">throttle</span> <span class="n">off</span> <span class="n">auto</span>
-</pre></div>
-</div>
+<p>Disables cluster auto-throttling for busy transaction tags. This may not disable currently active throttles immediately, seconds of delay is expected.</p>
 </div>
 <div class="section" id="id2">
 <h4>list</h4>
-<p><code class="docutils literal"><span class="pre">throttle</span> <span class="pre">list</span> <span class="pre">[LIMIT]</span></code></p>
-<p>Prints a list of currently active transaction tag throttles.</p>
+<p><code class="docutils literal"><span class="pre">throttle</span> <span class="pre">list</span> <span class="pre">[throttled|recommended|all]</span> <span class="pre">[LIMIT]</span></code></p>
+<p>Prints a list of currently active transaction tag throttles, or recommended transaction tag throttles if auto-throttling is disabled.</p>
+<p><code class="docutils literal"><span class="pre">throttled</span></code> - list active transaction tag throttles.</p>
+<p><code class="docutils literal"><span class="pre">recommended</span></code> - list transaction tag throttles recommended by the ratekeeper, but not active yet.</p>
+<p><code class="docutils literal"><span class="pre">all</span></code> - list both active and recommended transaction tag throttles.</p>
 <p><code class="docutils literal"><span class="pre">LIMIT</span></code> - The number of throttles to print. Defaults to 100.</p>
 </div>
 </div>
@@ -584,6 +650,13 @@ print cluster statistics.</p>
 <h3>unlock</h3>
 <p>The <code class="docutils literal"><span class="pre">unlock</span></code> command unlocks the database with the specified lock UID. Because this is a potentially dangerous operation, users must copy a passphrase before the unlock command is executed.</p>
 </div>
+<div class="section" id="usetenant">
+<h3>usetenant</h3>
+<p>The <code class="docutils literal"><span class="pre">usetenant</span></code> command configures <code class="docutils literal"><span class="pre">fdbcli</span></code> to run transactions within the specified tenant. Its syntax is <code class="docutils literal"><span class="pre">usetenant</span> <span class="pre">&lt;TENANT_NAME&gt;</span></code>.</p>
+<p>When configured, transactions will read and write keys from the key-space associated with the specified tenant. By default, <code class="docutils literal"><span class="pre">fdbcli</span></code> runs without a tenant. Management operations that modify keys (e.g. <code class="docutils literal"><span class="pre">exclude</span></code>) will not operate within the tenant.</p>
+<p>If the tenant chosen does not exist, <code class="docutils literal"><span class="pre">fdbcli</span></code> will report an error.</p>
+<p>The active tenant cannot be changed while a transaction (using <code class="docutils literal"><span class="pre">begin</span></code>) is open.</p>
+</div>
 <div class="section" id="writemode">
 <h3>writemode</h3>
 <p>Controls whether or not <code class="docutils literal"><span class="pre">fdbcli</span></code> can perform sets and clears.</p>
@@ -591,6 +664,16 @@ print cluster statistics.</p>
 <p>Disables writing from <code class="docutils literal"><span class="pre">fdbcli</span></code> (the default). In this mode, attempting to set or clear keys will result in an error.</p>
 <p><code class="docutils literal"><span class="pre">writemode</span> <span class="pre">on</span></code></p>
 <p>Enables writing from <code class="docutils literal"><span class="pre">fdbcli</span></code>.</p>
+</div>
+<div class="section" id="tssq">
+<h3>tssq</h3>
+<p>Utility commands for handling quarantining Testing Storage Servers. For more information on this, see <a class="reference internal" href="tss.html#testing-storage-server"><span class="std std-ref">Testing Storage Server (TSS)</span></a>.</p>
+<p><code class="docutils literal"><span class="pre">tssq</span> <span class="pre">start</span> <span class="pre">&lt;StorageUID&gt;</span></code></p>
+<p>Manually quarantines a TSS process, if it is not already quarantined.</p>
+<p><code class="docutils literal"><span class="pre">tssq</span> <span class="pre">stop</span> <span class="pre">&lt;StorageUID&gt;</span></code></p>
+<p>Removes a TSS process from quarantine, disposing of the TSS and allowing Data Distribution to recruit a new storage process on the worker.</p>
+<p><code class="docutils literal"><span class="pre">tssq</span> <span class="pre">list</span></code>:</p>
+<p>Lists the storage UIDs of all TSS processes currently in quarantine.</p>
 </div>
 </div>
 </div>
@@ -614,8 +697,8 @@ print cluster statistics.</p>
       
     </p>
     <p>
-        &copy; Copyright 2013-2022 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jan 07, 2022.<br/>
+        &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Apr 09, 2022.<br/>
     </p>
   </div>
 </footer>

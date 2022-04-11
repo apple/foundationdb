@@ -5,7 +5,7 @@ FoundationDB Architecture
 Coordinators
 ============
 
-All clients and servers connect to a FoundationDB cluster with a cluster file, which contains the IP:PORT of the coordinators. Both the clients and servers use the coordinators to connect with the cluster controller. The servers will attempt to become the cluster controller if one does not exist, and register with the cluster controller once one has been elected. Clients use the cluster controller to keep an up-to-date list of proxies.
+All clients and servers connect to a FoundationDB cluster with a cluster file, which contains the IP:PORT of the coordinators. Both the clients and servers use the coordinators to connect with the cluster controller. The servers will attempt to become the cluster controller if one does not exist, and register with the cluster controller once one has been elected. Clients use the cluster controller to keep an up-to-date list of GRV proxies and commit proxies.
 
 Cluster Controller
 ==================
@@ -15,12 +15,12 @@ The cluster controller is a singleton elected by a majority of coordinators. It 
 Master
 ======
 
-The master is responsible for coordinating the transition of the write sub-system from one generation to the next. The write sub-system includes the master, proxies, resolvers, and transaction logs. The three roles are treated as a unit, and if any of them fail, we will recruit a replacement for all three roles. The master provides the commit versions for batches of the mutations to the proxies, runs data distribution algorithm, and runs ratekeeper.
+The master is responsible for coordinating the transition of the write sub-system from one generation to the next. The write sub-system includes the master, GRV proxies, commit proxies, resolvers, and transaction logs. The three roles are treated as a unit, and if any of them fail, we will recruit a replacement for all three roles. The master keeps commit proxies' committed version, provides read version for GRV proxies, provides the commit versions for batches of the mutations to the commit proxies, runs data distribution algorithm, and runs ratekeeper.
 
-Proxies
-=======
+GRV Proxies and Commit Proxies
+==============================
 
-The proxies are responsible for providing read versions, committing transactions, and tracking the storage servers responsible for each range of keys. To provide a read version, a proxy will ask all other proxies to see the largest committed version at this point in time, while simultaneously checking that the transaction logs have not been stopped. Ratekeeper will artificially slow down the rate at which the proxy provides read versions.
+The GRV proxies are responsible for providing read versions. The commit proxies are responsible for committing transactions, and tracking the storage servers responsible for each range of keys. To provide a read version, a GRV proxy will ask master the largest committed version at this point in time, while simultaneously checking that the transaction logs have not been stopped. Ratekeeper will artificially slow down the rate at which the GRV proxy provides read versions.
 
 Commits are accomplished by:
 
@@ -33,7 +33,7 @@ The key space starting with the '\xff' byte is reserved for system metadata. All
 Transaction Logs
 ================
 
-The transaction logs make mutations durable to disk for fast commit latencies. The logs receive commits from the proxy in version order, and only respond to the proxy once the data has been written and fsync'ed to an append only mutation log on disk. Before the data is even written to disk we forward it to the storage servers responsible for that mutation. Once the storage servers have made the mutation durable, they pop it from the log. This generally happens roughly 6 seconds after the mutation was originally committed to the log. We only read from the log's disk when the process has been rebooted. If a storage server has failed, mutations bound for that storage server will build up on the logs. Once data distribution makes a different storage server responsible for all of the missing storage server's data we will discard the log data bound for the failed server.
+The transaction logs make mutations durable to disk for fast commit latencies. The logs receive commits from the commit proxy in version order, and only respond to the commit proxy once the data has been written and fsync'ed to an append only mutation log on disk. Before the data is even written to disk we forward it to the storage servers responsible for that mutation. Once the storage servers have made the mutation durable, they pop it from the log. This generally happens roughly 6 seconds after the mutation was originally committed to the log. We only read from the log's disk when the process has been rebooted. If a storage server has failed, mutations bound for that storage server will build up on the logs. Once data distribution makes a different storage server responsible for all of the missing storage server's data we will discard the log data bound for the failed server.
 
 Resolvers
 =========
@@ -48,4 +48,4 @@ The vast majority of processes in a cluster are storage servers. Storage servers
 Clients
 =======
 
-Clients must get a read version at the start of every transaction. During the transaction all of the reads are done at that read version, and write are kept in memory until transaction is committed. When the transaction is committed, all of the reads and writes are sent to the proxy. If the transaction conflicts with another transaction the client is responsible for retrying the transaction. By default, reading a key that was written in the same transaction will return the newly written value.
+Clients must get a read version at the start of every transaction. During the transaction all of the reads are done at that read version, and write are kept in memory until transaction is committed. When the transaction is committed, all of the reads and writes are sent to the commit proxy. If the transaction conflicts with another transaction the client is responsible for retrying the transaction. By default, reading a key that was written in the same transaction will return the newly written value.

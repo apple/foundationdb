@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>Client Design &#8212; FoundationDB 6.3</title>
+    <title>Client Design &#8212; FoundationDB 7.1</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.3.23',
+        VERSION:     '7.1.0',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -52,7 +52,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>6.3</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.1</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -132,7 +132,7 @@
       
   <div class="section" id="client-design">
 <h1>Client Design</h1>
-<p>FoundationDB supports language bindings for application development using the ordered key-value store. The following documents cover use of the bindings, from getting started and design principles to best practices and data modeling. The latest changes are detailed in <a class="reference internal" href="release-notes/release-notes-630.html#release-notes"><span class="std std-ref">Release Notes</span></a>.</p>
+<p>FoundationDB supports language bindings for application development using the ordered key-value store. The following documents cover use of the bindings, from getting started and design principles to best practices and data modeling. The latest changes are detailed in <a class="reference internal" href="release-notes/release-notes-710.html#release-notes"><span class="std std-ref">Release Notes</span></a>.</p>
 <ul class="simple">
 <li><a class="reference internal" href="getting-started-mac.html"><span class="doc">Getting Started on macOS</span></a> explains how to install a local FoundationDB server suitable for development on macOS.</li>
 <li><a class="reference internal" href="getting-started-linux.html"><span class="doc">Getting Started on Linux</span></a> explains how to install a local FoundationDB server suitable for development on Linux.</li>
@@ -143,7 +143,9 @@
 <li><a class="reference internal" href="api-general.html"><span class="doc">Using FoundationDB Clients</span></a> contains information on FoundationDB clients applicable across all language bindings.</li>
 <li><a class="reference internal" href="transaction-tagging.html"><span class="doc">Transaction Tagging</span></a> contains information about using transaction tags in your client code to enable targeted transaction throttling.</li>
 <li><a class="reference internal" href="api-version-upgrade-guide.html"><span class="doc">API Version Upgrade Guide</span></a> contains information about upgrading client code to a new API version.</li>
+<li><a class="reference internal" href="transaction-profiler-analyzer.html"><span class="doc">Transaction profiling and analyzing</span></a> contains information about enabling transaction profiling and analyzing.</li>
 <li><a class="reference internal" href="known-limitations.html"><span class="doc">Known Limitations</span></a> describes both long-term design limitations of FoundationDB and short-term limitations applicable to the current version.</li>
+<li><a class="reference internal" href="tenants.html"><span class="doc">Tenants</span></a> describes the use of the tenants feature to define named transaction domains.</li>
 </ul>
 <div class="toctree-wrapper compound">
 </div>
@@ -168,8 +170,8 @@
       
     </p>
     <p>
-        &copy; Copyright 2013-2022 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jan 07, 2022.<br/>
+        &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Apr 09, 2022.<br/>
     </p>
   </div>
 </footer>

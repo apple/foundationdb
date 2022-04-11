@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>Transaction Tagging &#8212; FoundationDB 6.3</title>
+    <title>Transaction Tagging &#8212; FoundationDB 7.1</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.3.23',
+        VERSION:     '7.1.0',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -52,7 +52,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>6.3</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.1</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -160,8 +160,8 @@
 <h2>Adding tags to transactions</h2>
 <p>Tags are added to transaction by using transaction options. Each transaction can include up to five tags, and each tag must not exceed 16 characters. There are two options that can be used to add tags:</p>
 <ul class="simple">
-<li><code class="docutils literal"><span class="pre">TAG</span></code> - Adds a tag to the transaction. This tag will not be used for auto-throttling and is not included with read requests. Tags set in this way can only be throttled manually.</li>
-<li><code class="docutils literal"><span class="pre">AUTO_THROTTLE_TAG</span></code> - Adds a tag to the transaction that can be both automatically and manually throttled. To support busy tag detection, these tags may be sent as part of read requests.</li>
+<li><code class="docutils literal"><span class="pre">TAG</span></code> - Adds a tag to the transaction. This tag will not be used for auto-throttling and is not included with read or commit requests. Tags set in this way can only be throttled manually.</li>
+<li><code class="docutils literal"><span class="pre">AUTO_THROTTLE_TAG</span></code> - Adds a tag to the transaction that can be both automatically and manually throttled. To support busy tag detection, these tags may be sent as part of read or commit requests.</li>
 </ul>
 <p>See the documentation for your particular language binding for details about setting this option.</p>
 <div class="admonition note">
@@ -170,7 +170,7 @@
 </div>
 <div class="admonition note">
 <p class="first admonition-title">Note</p>
-<p class="last">Tags must be included as part of all get read version requests, and a sample of read requests will include auto-throttled tags. Additionally, each tag imposes additional costs with those requests. It is therefore recommended that you not use excessive numbers or lengths of transaction tags.</p>
+<p class="last">Tags must be included as part of all get read version requests, and a sample of read and commit requests will include auto-throttled tags. Additionally, each tag imposes additional costs with those requests. It is therefore recommended that you not use excessive numbers or lengths of transaction tags.</p>
 </div>
 </div>
 <div class="section" id="tag-throttling-overview">
@@ -193,7 +193,7 @@
 </div>
 <div class="section" id="automatic-transaction-tag-throttling">
 <h2>Automatic transaction tag throttling</h2>
-<p>When using the <code class="docutils literal"><span class="pre">AUTO_THROTTLE_TAG</span></code> transaction option, the cluster will monitor read activity for the chosen tags and may choose to reduce a tag&#8217;s transaction rate limit if a storage server gets busy enough and has a sufficient portion of its read traffic coming from that one tag.</p>
+<p>When using the <code class="docutils literal"><span class="pre">AUTO_THROTTLE_TAG</span></code> transaction option, the cluster will monitor activity for the chosen tags and may choose to reduce a tag&#8217;s transaction rate limit if a storage server gets busy enough and has a sufficient portion of its traffic coming from that one tag.</p>
 <p>When a tag is auto-throttled, the default priority transaction rate will be decreased to reduce the percentage of traffic attributable to that tag to a reasonable amount of total traffic on the affected storage server(s), and batch priority transactions for that tag will be stopped completely.</p>
 <p>Auto-throttles are created with a duration of a few minutes, at the end of which the cluster will try to gradually lift the limit. If the cluster detects that it needs to continue throttling the tag, then the duration of the throttle will be extended.</p>
 </div>
@@ -234,8 +234,8 @@
       
     </p>
     <p>
-        &copy; Copyright 2013-2022 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jan 07, 2022.<br/>
+        &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Apr 09, 2022.<br/>
     </p>
   </div>
 </footer>

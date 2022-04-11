@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>FDB HA Write Path: How a mutation travels in FDB HA &#8212; FoundationDB 6.3</title>
+    <title>FDB HA Write Path: How a mutation travels in FDB HA &#8212; FoundationDB 7.1</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.3.23',
+        VERSION:     '7.1.0',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -52,7 +52,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>6.3</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.1</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -200,7 +200,7 @@
 <ul class="simple">
 <li>As FDB evolves to HA, tags are used by not only primary tLogs but also satellite tLogs, log router, and remote tLogs;</li>
 <li>As FDB scales and we work to reduce the recovery time, a special tag for transaction state store (txnStateStore) is introduced;</li>
-<li>and so on.</li>
+<li>FDB also have transaction tags which are used for transaction throttling, not for the tag-partitioned log system mentioned in this article. See <a class="reference internal" href="transaction-tagging.html#transaction-tagging"><span class="std std-ref">Transaction Tagging</span></a></li>
 </ul>
 <p>To distinguish the types of tags used for different purposes at different locations (primary DC or remote DC), we introduce Tag structure, which has two fields:</p>
 <ul>
@@ -234,14 +234,14 @@
 <li>3 tags for primary DC. Assume they are (0, 1), (0, 2), and (0,5). The tag ids are decided by which primary SSes will eventually save the mutation;</li>
 <li>3 tags for remote DC. Assume they are (1, 3), (1, 6), (1, 10). The tag ids are decided by which remote SSes will eventually save the mutation;</li>
 <li>1 tag for log router. Assume it is (-2, 3), where -2 is the locality value for all log router tags. The tag id is randomly chosen by proxy as well.</li>
-<li>No tag for satellite tLog. The &#8220;satellite TLog locality&#8221; -5 in the code is used when recruiting a satellite TLog to tell it that it is a satellite TLog. This causes the TLog to only index log router tags (-2) and not bother indexing any of the &gt;0 tags.</li>
+<li>No tag for satellite tLog. The &#8220;satellite TLog locality&#8221; -5 in the code is used when recruiting a satellite TLog to tell it that it is a satellite TLog. This causes the satellite TLog to only index log router tags (-2) and not bother indexing any of the &gt;0 tags.</li>
 </ul>
 <p>Why do we need log routers? Why cannot we let remote tLog directly pull data from primary tLogs?</p>
 <p>The main reason is to avoid shipping the mutation across WAN multiple times. If you attach remote SS&#8217;s tags, the same mutation will cross WAN 3 times. In contrast, the router tag reduces it to only 1 time.</p>
 <p>Why do we randomly assign tag id for satellite tLogs and log routers?</p>
 <p>Another alternative is to use remote SSes’ tags to decide which satellite tLog and log routers a shard should always go to. We tried that approach before and compared its performance with randomly assigned tags. Evaluation showed that randomly assigning a mutation to satellite tLogs and log routers provide lower latency and higher throughput for these two types of logs. This is somewhat expected: When we randomly assign a mutation to a satellite tlog (and log router), we may assign mutations in the same shard to different satellite tLogs (and log routers). The randomness happens to balance load on the logs.</p>
 <p>Proxy groups mutations with the same tag as messages. Proxy then synchronously pushes these mutation messages to tLogs based on the tags. Proxy cannot acknowledge that the transaction is committed until the message has been durable on all primary and satellite tLogs.</p>
-<p><strong>Commit empty messages to tLogs.</strong> When a proxy commits a tagged mutation message at version V1 to tLogs, it also has to commit an empty message at the same version V1 to the rest of tLogs. This makes sure every tLog has the same versions of messages, even though some messages are empty. This is a trick used in FDB to let all tLogs march at the same versions. The reason why FDB does the trick is because the master hands out segments of versions as &#8216;from v1 to v2&#8217;, and the TLogs need to be able to piece all of them back together into one consistent timeline. It may or may not be a good design decision, because a slow tLog can delay other tLogs of the same kind. We may want to revisit the design later.</p>
+<p><strong>Commit empty messages to tLogs.</strong> When a proxy commits a tagged mutation message at version V1 to tLogs, it also has to commit an empty message at the same version V1 to the rest of tLogs. This makes sure every tLog has the same versions of messages, even though some messages are empty. This is a trick used in FDB to let all tLogs march at the same versions. The reason why FDB does the trick is that the master hands out segments of versions as &#8216;from v1 to v2&#8217;, and the TLogs need to be able to piece all of them back together into one consistent timeline. It may or may not be a good design decision, because a slow tLog can delay other tLogs of the same kind. We may want to revisit the design later.</p>
 </div>
 <div class="section" id="at-primary-tlogs-and-satellite-tlogs">
 <h3>At primary tLogs and satellite tLogs</h3>
@@ -325,8 +325,8 @@
       
     </p>
     <p>
-        &copy; Copyright 2013-2022 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jan 07, 2022.<br/>
+        &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Apr 09, 2022.<br/>
     </p>
   </div>
 </footer>

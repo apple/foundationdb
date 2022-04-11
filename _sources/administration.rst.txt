@@ -28,8 +28,6 @@ Starting and stopping
 
 After installation, FoundationDB is set to start automatically. You can manually start and stop the database with the commands shown below.
 
-These commands start and stop the ``fdbmonitor`` process, which in turn starts ``fdbserver`` and ``backup-agent`` processes.  See :ref:`administration_fdbmonitor` for details.
-
 Linux
 -----
 
@@ -57,6 +55,15 @@ On macOS, FoundationDB is started and stopped using ``launchctl`` as follows::
 It can be stopped and prevented from starting at boot as follows::
 
     host:~ user$ sudo launchctl unload -w /Library/LaunchDaemons/com.foundationdb.fdbmonitor.plist
+
+Start, stop and restart behavior
+=================================
+
+These commands above start and stop the ``fdbmonitor`` process, which in turn starts ``fdbserver`` and ``backup-agent`` processes.  See :ref:`administration_fdbmonitor` for details.
+
+After any child process has terminated by any reason, ``fdbmonitor`` tries to restart it. See :ref:`restarting parameters <configuration-restarting>`.
+
+When ``fdbmonitor`` itself is killed unexpectedly (for example, by the ``out-of-memory killer``), all the child processes are also terminated. Then the operating system is responsible for restarting it. See :ref:`Configuring autorestart of fdbmonitor <configuration-restart-fdbmonitor>`.
 
 .. _foundationdb-cluster-file:
 
@@ -175,7 +182,7 @@ You can add new machines to a cluster at any time:
 
     user@host2$ sudo service foundationdb restart
 
-5) If you have previously :ref:`excluded <removing-machines-from-a-cluster>` a machine from the cluster, you will need to take it off the exclusion list using the ``include <ip>`` command of fdbcli before it can be a full participant in the cluster.
+5) If you have previously :ref:`excluded <removing-machines-from-a-cluster>` a machine from the cluster, you will need to take it off the exclusion list using the ``include <ip>`` or ``include <locality>`` command of fdbcli before it can be a full participant in the cluster.
 
 .. note:: Addresses have the form ``IP``:``PORT``. This form is used even if TLS is enabled.
 
@@ -200,12 +207,12 @@ To temporarily or permanently remove one or more machines from a FoundationDB cl
     The database is available.
 
     Welcome to the fdbcli. For help, type `help'.
-    fdb> exclude 1.2.3.4 1.2.3.5 1.2.3.6
+    fdb> exclude 1.2.3.4 1.2.3.5 1.2.3.6 locality_dcid:primary-satellite locality_zoneid:primary-satellite-log-2 locality_machineid:primary-stateless-1 locality_processid:223be2da244ca0182375364e4d122c30 or any locality
     Waiting for state to be removed from all excluded servers.  This may take a while.
     It is now safe to remove these machines or processes from the cluster.
 
 
-``exclude`` can be used to exclude either machines (by specifying an IP address) or individual processes (by specifying an ``IP``:``PORT`` pair).
+``exclude`` can be used to exclude either machines (by specifying an IP address) or individual processes (by specifying an ``IP``:``PORT`` pair or by specifying a locality match).
 
 .. note:: Addresses have the form ``IP``:``PORT``. This form is used even if TLS is enabled.
 
@@ -227,6 +234,8 @@ If you interrupt the exclude command with Ctrl-C after seeing the "waiting for s
 6) You can optionally :ref:`uninstall <administration-removing>` the FoundationDB server package entirely and/or delete database files on removed servers.
 
 7) If you ever want to add a removed machine back to the cluster, you will have to take it off the excluded servers list to which it was added in step 3. This can be done using the ``include`` command of ``fdbcli``. If attempting to re-include a failed server, this can be done using the ``include failed`` command of ``fdbcli``. Typing ``exclude`` with no parameters will tell you the current list of excluded and failed machines.
+
+As of api version 700, excluding servers can be done with the :ref:`special key space management module <special-key-space-management-module>` as well.
 
 Moving a cluster
 ================
@@ -257,7 +266,8 @@ Use the ``status`` command of ``fdbcli`` to determine if the cluster is up and r
       Redundancy mode        - triple
       Storage engine         - ssd-2
       Coordinators           - 5
-      Desired Proxies        - 5
+      Desired GRV Proxies    - 1
+      Desired Commit Proxies - 4
       Desired Logs           - 8
 
     Cluster:
@@ -297,7 +307,8 @@ The summary fields are interpreted as follows:
 Redundancy mode         The currently configured redundancy mode (see the section :ref:`configuration-choosing-redundancy-mode`)
 Storage engine          The currently configured storage engine (see the section :ref:`configuration-configuring-storage-subsystem`)
 Coordinators            The number of FoundationDB coordination servers
-Desired Proxies         Number of proxies desired. If replication mode is 3 then default number of proxies is 3
+Desired GRV Proxies     Number of GRV proxies desired. (default 1)
+Desired Commit Proxies  Number of commit proxies desired. If replication mode is 3 then default number of commit proxies is 3
 Desired Logs            Number of logs desired. If replication mode is 3 then default number of logs is 3
 FoundationDB processes  Number of FoundationDB processes participating in the cluster
 Machines                Number of physical machines running at least one FoundationDB process that is participating in the cluster
@@ -563,7 +574,7 @@ When configured, the ``status json`` output will include additional fields to re
     filtered: 1
   }
 
-The ``grv_latency_bands`` and ``commit_latency_bands`` objects will only be logged for ``proxy`` roles, and ``read_latency_bands`` will only be logged for storage roles. Each threshold is represented as a key in the map, and its associated value will be the total number of requests in the lifetime of the process with a latency smaller than the threshold but larger than the next smaller threshold. 
+The ``grv_latency_bands`` objects will only be logged for ``grv_proxy`` roles, ``commit_latency_bands`` objects will only be logged for ``commit_proxy`` roles, and ``read_latency_bands`` will only be logged for storage roles. Each threshold is represented as a key in the map, and its associated value will be the total number of requests in the lifetime of the process with a latency smaller than the threshold but larger than the next smaller threshold. 
 
 For example, ``0.1: 1`` in ``read_latency_bands`` indicates that there has been 1 read request with a latency in the range ``[0.01, 0.1)``. For the smallest specified threshold, the lower bound is 0 (e.g. ``[0, 0.01)`` in the example above). Requests that took longer than any defined latency band will be reported in the ``inf`` (infinity) band. Requests that were filtered by the configuration (e.g. using ``max_read_bytes``) are reported in the ``filtered`` category.
 
@@ -657,7 +668,7 @@ Datacenters
 
 FoundationDB is datacenter aware and supports operation across datacenters. In a multiple-datacenter configuration, it is recommended that you set the :ref:`redundancy mode <configuration-choosing-redundancy-mode>` to ``three_datacenter`` and that you set the ``locality_dcid`` parameter for all FoundationDB processes in :ref:`foundationdb.conf <foundationdb-conf>`.
 
-If you specify the ``--datacenter_id`` option to any FoundationDB process in your cluster, you should specify it to all such processes. Processes which do not have a specified datacenter ID on the command line are considered part of a default "unset" datacenter. FoundationDB will incorrectly believe that these processes are failure-isolated from other datacenters, which can reduce performance and fault tolerance.
+If you specify the ``--datacenter-id`` option to any FoundationDB process in your cluster, you should specify it to all such processes. Processes which do not have a specified datacenter ID on the command line are considered part of a default "unset" datacenter. FoundationDB will incorrectly believe that these processes are failure-isolated from other datacenters, which can reduce performance and fault tolerance.
 
 (Re)creating a database
 -----------------------

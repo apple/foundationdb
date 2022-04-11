@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>Configuration &#8212; FoundationDB 6.3</title>
+    <title>Configuration &#8212; FoundationDB 7.1</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.3.23',
+        VERSION:     '7.1.0',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -52,7 +52,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>6.3</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.1</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -92,6 +92,10 @@
 <li><a class="reference internal" href="#fdbserver-section"><code class="docutils literal"><span class="pre">[fdbserver]</span></code> section</a></li>
 <li><a class="reference internal" href="#fdbserver-id-section-s"><code class="docutils literal"><span class="pre">[fdbserver.&lt;ID&gt;]</span></code> section(s)</a></li>
 <li><a class="reference internal" href="#backup-agent-sections">Backup agent sections</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#configuring-autorestart-of-fdbmonitor">Configuring autorestart of fdbmonitor</a><ul>
+<li><a class="reference internal" href="#linux-rhel-centos">Linux (RHEL/CentOS)</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#choosing-a-redundancy-mode">Choosing a redundancy mode</a><ul>
@@ -179,6 +183,10 @@
 <li><a class="reference internal" href="#fdbserver-section"><code class="docutils literal"><span class="pre">[fdbserver]</span></code> section</a></li>
 <li><a class="reference internal" href="#fdbserver-id-section-s"><code class="docutils literal"><span class="pre">[fdbserver.&lt;ID&gt;]</span></code> section(s)</a></li>
 <li><a class="reference internal" href="#backup-agent-sections">Backup agent sections</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#configuring-autorestart-of-fdbmonitor">Configuring autorestart of fdbmonitor</a><ul>
+<li><a class="reference internal" href="#linux-rhel-centos">Linux (RHEL/CentOS)</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#choosing-a-redundancy-mode">Choosing a redundancy mode</a><ul>
@@ -415,64 +423,67 @@ Coordinators changed
 <div class="section" id="general-section">
 <h3><code class="docutils literal"><span class="pre">[general]</span></code> section</h3>
 <div class="highlight-ini"><div class="highlight"><pre><span></span><span class="k">[general]</span><span class="w"></span>
-<span class="na">cluster_file</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">/etc/foundationdb/fdb.cluster</span><span class="w"></span>
-<span class="na">restart_delay</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">60</span><span class="w"></span>
-<span class="c1">## restart_backoff and restart_delay_reset_interval default to the value that is used for restart_delay</span><span class="w"></span>
-<span class="c1"># initial_restart_delay = 0</span><span class="w"></span>
-<span class="c1"># restart_backoff = 60.0</span><span class="w"></span>
-<span class="c1"># restart_delay_reset_interval = 60</span><span class="w"></span>
-<span class="c1"># delete_envvars =</span><span class="w"></span>
-<span class="c1"># kill_on_configuration_change = true</span><span class="w"></span>
-<span class="c1"># disable_lifecycle_logging = false</span><span class="w"></span>
+<span class="na">cluster-file</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">/etc/foundationdb/fdb.cluster</span><span class="w"></span>
+<span class="na">restart-delay</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">60</span><span class="w"></span>
+<span class="c1">## restart-backoff and restart-delay-reset-interval default to the value that is used for restart-delay</span><span class="w"></span>
+<span class="c1"># initial-restart-delay = 0</span><span class="w"></span>
+<span class="c1"># restart-backoff = 60.0</span><span class="w"></span>
+<span class="c1"># restart-delay-reset-interval = 60</span><span class="w"></span>
+<span class="c1"># delete-envvars =</span><span class="w"></span>
+<span class="c1"># kill-on-configuration-change = true</span><span class="w"></span>
+<span class="c1"># disable-lifecycle-logging = false</span><span class="w"></span>
 </pre></div>
 </div>
 <p>Contains settings applicable to all processes (e.g. fdbserver, backup_agent).</p>
 <ul class="simple">
-<li><code class="docutils literal"><span class="pre">cluster_file</span></code>: Specifies the location of the cluster file. This file and the directory that contains it must be writable by all processes (i.e. by the user or group set in the <code class="docutils literal"><span class="pre">[fdbmonitor]</span></code> section).</li>
-<li><code class="docutils literal"><span class="pre">delete_envvars</span></code>: A space separated list of environment variables to remove from the environments of child processes. This can be used if the <code class="docutils literal"><span class="pre">fdbmonitor</span></code> process needs to be run with environment variables that are undesired in its children.</li>
-<li><code class="docutils literal"><span class="pre">kill_on_configuration_change</span></code>: If <code class="docutils literal"><span class="pre">true</span></code>, affected processes will be restarted whenever the configuration file changes. Defaults to <code class="docutils literal"><span class="pre">true</span></code>.</li>
-<li><code class="docutils literal"><span class="pre">disable_lifecycle_logging</span></code>: If <code class="docutils literal"><span class="pre">true</span></code>, <code class="docutils literal"><span class="pre">fdbmonitor</span></code> will not write log events when processes start or terminate. Defaults to <code class="docutils literal"><span class="pre">false</span></code>.</li>
+<li><code class="docutils literal"><span class="pre">cluster-file</span></code>: Specifies the location of the cluster file. This file and the directory that contains it must be writable by all processes (i.e. by the user or group set in the <code class="docutils literal"><span class="pre">[fdbmonitor]</span></code> section).</li>
+<li><code class="docutils literal"><span class="pre">delete-envvars</span></code>: A space separated list of environment variables to remove from the environments of child processes. This can be used if the <code class="docutils literal"><span class="pre">fdbmonitor</span></code> process needs to be run with environment variables that are undesired in its children.</li>
+<li><code class="docutils literal"><span class="pre">kill-on-configuration-change</span></code>: If <code class="docutils literal"><span class="pre">true</span></code>, affected processes will be restarted whenever the configuration file changes. Defaults to <code class="docutils literal"><span class="pre">true</span></code>.</li>
+<li><code class="docutils literal"><span class="pre">disable-lifecycle-logging</span></code>: If <code class="docutils literal"><span class="pre">true</span></code>, <code class="docutils literal"><span class="pre">fdbmonitor</span></code> will not write log events when processes start or terminate. Defaults to <code class="docutils literal"><span class="pre">false</span></code>.</li>
 </ul>
-<p>The <code class="docutils literal"><span class="pre">[general]</span></code> section also contains some parameters to control how processes are restarted when they die. <code class="docutils literal"><span class="pre">fdbmonitor</span></code> uses backoff logic to prevent a process that dies repeatedly from cycling too quickly, and it also introduces up to +/-10% random jitter into the delay to avoid multiple processes all restarting simultaneously. <code class="docutils literal"><span class="pre">fdbmonitor</span></code> tracks separate backoff state for each process, so the restarting of one process will have no effect on the backoff behavior of another.</p>
+<p id="configuration-restarting">The <code class="docutils literal"><span class="pre">[general]</span></code> section also contains some parameters to control how processes are restarted when they die. <code class="docutils literal"><span class="pre">fdbmonitor</span></code> uses backoff logic to prevent a process that dies repeatedly from cycling too quickly, and it also introduces up to +/-10% random jitter into the delay to avoid multiple processes all restarting simultaneously. <code class="docutils literal"><span class="pre">fdbmonitor</span></code> tracks separate backoff state for each process, so the restarting of one process will have no effect on the backoff behavior of another.</p>
 <ul class="simple">
-<li><code class="docutils literal"><span class="pre">restart_delay</span></code>: The maximum number of seconds (subject to jitter) that fdbmonitor will delay before restarting a failed process.</li>
-<li><code class="docutils literal"><span class="pre">initial_restart_delay</span></code>: The number of seconds <code class="docutils literal"><span class="pre">fdbmonitor</span></code> waits to restart a process the first time it dies. Defaults to 0 (i.e. the process gets restarted immediately).</li>
-<li><code class="docutils literal"><span class="pre">restart_backoff</span></code>: Controls how quickly <code class="docutils literal"><span class="pre">fdbmonitor</span></code> backs off when a process dies repeatedly. The previous delay (or 1, if the previous delay is 0) is multiplied by <code class="docutils literal"><span class="pre">restart_backoff</span></code> to get the next delay, maxing out at the value of <code class="docutils literal"><span class="pre">restart_delay</span></code>. Defaults to the value of <code class="docutils literal"><span class="pre">restart_delay</span></code>, meaning that the second and subsequent failures will all delay <code class="docutils literal"><span class="pre">restart_delay</span></code> between restarts.</li>
-<li><code class="docutils literal"><span class="pre">restart_delay_reset_interval</span></code>: The number of seconds a process must be running before resetting the backoff back to the value of <code class="docutils literal"><span class="pre">initial_restart_delay</span></code>. Defaults to the value of <code class="docutils literal"><span class="pre">restart_delay</span></code>.</li>
+<li><code class="docutils literal"><span class="pre">restart-delay</span></code>: The maximum number of seconds (subject to jitter) that fdbmonitor will delay before restarting a failed process.</li>
+<li><code class="docutils literal"><span class="pre">initial-restart-delay</span></code>: The number of seconds <code class="docutils literal"><span class="pre">fdbmonitor</span></code> waits to restart a process the first time it dies. Defaults to 0 (i.e. the process gets restarted immediately).</li>
+<li><code class="docutils literal"><span class="pre">restart-backoff</span></code>: Controls how quickly <code class="docutils literal"><span class="pre">fdbmonitor</span></code> backs off when a process dies repeatedly. The previous delay (or 1, if the previous delay is 0) is multiplied by <code class="docutils literal"><span class="pre">restart-backoff</span></code> to get the next delay, maxing out at the value of <code class="docutils literal"><span class="pre">restart-delay</span></code>. Defaults to the value of <code class="docutils literal"><span class="pre">restart-delay</span></code>, meaning that the second and subsequent failures will all delay <code class="docutils literal"><span class="pre">restart-delay</span></code> between restarts.</li>
+<li><code class="docutils literal"><span class="pre">restart-delay-reset-interval</span></code>: The number of seconds a process must be running before resetting the backoff back to the value of <code class="docutils literal"><span class="pre">initial-restart-delay</span></code>. Defaults to the value of <code class="docutils literal"><span class="pre">restart-delay</span></code>.</li>
 </ul>
+<blockquote>
+<div>These <code class="docutils literal"><span class="pre">restart-</span></code> parameters are not applicable to the <code class="docutils literal"><span class="pre">fdbmonitor</span></code> process itself. See <a class="reference internal" href="#configuration-restart-fdbmonitor"><span class="std std-ref">Configuring autorestart of fdbmonitor</span></a> for details.</div></blockquote>
 <p>As an example, let&#8217;s say the following parameters have been set:</p>
-<div class="highlight-ini"><div class="highlight"><pre><span></span><span class="na">restart_delay</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">60</span><span class="w"></span>
-<span class="na">initial_restart_delay</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">0</span><span class="w"></span>
-<span class="na">restart_backoff</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">2.0</span><span class="w"></span>
-<span class="na">restart_delay_reset_interval</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">180</span><span class="w"></span>
+<div class="highlight-ini"><div class="highlight"><pre><span></span><span class="na">restart-delay</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">60</span><span class="w"></span>
+<span class="na">initial-restart-delay</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">0</span><span class="w"></span>
+<span class="na">restart-backoff</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">2.0</span><span class="w"></span>
+<span class="na">restart-delay-reset-interval</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">180</span><span class="w"></span>
 </pre></div>
 </div>
 <p>The progression of delays for a process that fails repeatedly would be <code class="docutils literal"><span class="pre">0,</span> <span class="pre">2,</span> <span class="pre">4,</span> <span class="pre">8,</span> <span class="pre">16,</span> <span class="pre">32,</span> <span class="pre">60,</span> <span class="pre">60,</span> <span class="pre">...</span></code>, each subject to a 10% random jitter. After the process stays alive for 180 seconds, the backoff would reset and the next failure would restart the process immediately.</p>
-<p>Using the default parameters, a process will restart immediately if it fails and then delay <code class="docutils literal"><span class="pre">restart_delay</span></code> seconds if it fails again within <code class="docutils literal"><span class="pre">restart_delay</span></code> seconds.</p>
+<p>Using the default parameters, a process will restart immediately if it fails and then delay <code class="docutils literal"><span class="pre">restart-delay</span></code> seconds if it fails again within <code class="docutils literal"><span class="pre">restart-delay</span></code> seconds.</p>
 </div>
 <div class="section" id="fdbserver-section">
 <span id="foundationdb-conf-fdbserver"></span><h3><code class="docutils literal"><span class="pre">[fdbserver]</span></code> section</h3>
 <div class="highlight-ini"><div class="highlight"><pre><span></span><span class="c1">## Default parameters for individual fdbserver processes</span><span class="w"></span>
 <span class="k">[fdbserver]</span><span class="w"></span>
 <span class="na">command</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">/usr/sbin/fdbserver</span><span class="w"></span>
-<span class="na">public_address</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">auto:$ID</span><span class="w"></span>
-<span class="na">listen_address</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">public</span><span class="w"></span>
+<span class="na">public-address</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">auto:$ID</span><span class="w"></span>
+<span class="na">listen-address</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">public</span><span class="w"></span>
 <span class="na">datadir</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">/var/lib/foundationdb/data/$ID</span><span class="w"></span>
 <span class="na">logdir</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">/var/log/foundationdb</span><span class="w"></span>
 <span class="c1"># logsize = 10MiB</span><span class="w"></span>
 <span class="c1"># maxlogssize = 100MiB</span><span class="w"></span>
 <span class="c1"># class =</span><span class="w"></span>
 <span class="c1"># memory = 8GiB</span><span class="w"></span>
-<span class="c1"># storage_memory = 1GiB</span><span class="w"></span>
-<span class="c1"># cache_memory = 2GiB</span><span class="w"></span>
-<span class="c1"># locality_machineid =</span><span class="w"></span>
-<span class="c1"># locality_zoneid =</span><span class="w"></span>
-<span class="c1"># locality_data_hall =</span><span class="w"></span>
-<span class="c1"># locality_dcid =</span><span class="w"></span>
-<span class="c1"># io_trust_seconds = 20</span><span class="w"></span>
+<span class="c1"># memory-vsize =</span><span class="w"></span>
+<span class="c1"># storage-memory = 1GiB</span><span class="w"></span>
+<span class="c1"># cache-memory = 2GiB</span><span class="w"></span>
+<span class="c1"># locality-machineid =</span><span class="w"></span>
+<span class="c1"># locality-zoneid =</span><span class="w"></span>
+<span class="c1"># locality-data-hall =</span><span class="w"></span>
+<span class="c1"># locality-dcid =</span><span class="w"></span>
+<span class="c1"># io-trust-seconds = 20</span><span class="w"></span>
 </pre></div>
 </div>
-<p>Contains default parameters for all fdbserver processes on this machine. These same options can be overridden for individual processes in their respective <code class="docutils literal"><span class="pre">[fdbserver.&lt;ID&gt;]</span></code> sections. In this section, the ID of the individual fdbserver can be substituted by using the <code class="docutils literal"><span class="pre">$ID</span></code> variable in the value. For example, <code class="docutils literal"><span class="pre">public_address</span> <span class="pre">=</span> <span class="pre">auto:$ID</span></code> makes each fdbserver listen on a port equal to its ID.</p>
+<p>Contains default parameters for all fdbserver processes on this machine. These same options can be overridden for individual processes in their respective <code class="docutils literal"><span class="pre">[fdbserver.&lt;ID&gt;]</span></code> sections. In this section, the ID of the individual fdbserver can be substituted by using the <code class="docutils literal"><span class="pre">$ID</span></code> variable in the value. For example, <code class="docutils literal"><span class="pre">public-address</span> <span class="pre">=</span> <span class="pre">auto:$ID</span></code> makes each fdbserver listen on a port equal to its ID.</p>
 <div class="admonition note">
 <p class="first admonition-title">Note</p>
 <p class="last">Sizes must be specified as a number of bytes followed by one of the multiplicative suffixes B=1, KB=10<sup>3</sup>, KiB=2<sup>10</sup>, MB=10<sup>6</sup>, MiB=2<sup>20</sup>, GB=10<sup>9</sup>, GiB=2<sup>30</sup>, TB=10<sup>12</sup>, or TiB=2<sup>40</sup>.</p>
@@ -483,21 +494,22 @@ Coordinators changed
 </div>
 <ul class="simple">
 <li><code class="docutils literal"><span class="pre">command</span></code>: The location of the <code class="docutils literal"><span class="pre">fdbserver</span></code> binary.</li>
-<li><code class="docutils literal"><span class="pre">public_address</span></code>: The publicly visible IP:Port of the process. If <code class="docutils literal"><span class="pre">auto</span></code>, the address will be the one used to communicate with the coordination servers.</li>
-<li><code class="docutils literal"><span class="pre">listen_address</span></code>: The IP:Port that the server socket should bind to. If <code class="docutils literal"><span class="pre">public</span></code>, it will be the same as the public_address.</li>
+<li><code class="docutils literal"><span class="pre">public-address</span></code>: The publicly visible IP:Port of the process. If <code class="docutils literal"><span class="pre">auto</span></code>, the address will be the one used to communicate with the coordination servers.</li>
+<li><code class="docutils literal"><span class="pre">listen-address</span></code>: The IP:Port that the server socket should bind to. If <code class="docutils literal"><span class="pre">public</span></code>, it will be the same as the public-address.</li>
 <li><code class="docutils literal"><span class="pre">datadir</span></code>: A writable directory (by root or by the user set in the [fdbmonitor] section) where persistent data files will be stored.</li>
 <li><code class="docutils literal"><span class="pre">logdir</span></code>: A writable directory (by root or by the user set in the [fdbmonitor] section) where FoundationDB will store log files.</li>
 <li><code class="docutils literal"><span class="pre">logsize</span></code>: Roll over to a new log file after the current log file reaches the specified size. The default value is 10MiB.</li>
 <li><code class="docutils literal"><span class="pre">maxlogssize</span></code>: Delete the oldest log file when the total size of all log files exceeds the specified size. If set to 0B, old log files will not be deleted. The default value is 100MiB.</li>
 <li><code class="docutils literal"><span class="pre">class</span></code>: Process class specifying the roles that will be taken in the cluster. Recommended options are <code class="docutils literal"><span class="pre">storage</span></code>, <code class="docutils literal"><span class="pre">transaction</span></code>, <code class="docutils literal"><span class="pre">stateless</span></code>. See <a class="reference internal" href="#guidelines-process-class-config"><span class="std std-ref">Guidelines for setting process class</span></a> for process class config recommendations.</li>
-<li><code class="docutils literal"><span class="pre">memory</span></code>: Maximum memory used by the process. The default value is 8GiB. When specified without a unit, MiB is assumed. This parameter does not change the memory allocation of the program. Rather, it sets a hard limit beyond which the process will kill itself and be restarted. The default value of 8GiB is double the intended memory usage in the default configuration (providing an emergency buffer to deal with memory leaks or similar problems). It is <em>not</em> recommended to decrease the value of this parameter below its default value. It may be <em>increased</em> if you wish to allocate a very large amount of storage engine memory or cache. In particular, when the <code class="docutils literal"><span class="pre">storage_memory</span></code>  or <code class="docutils literal"><span class="pre">cache_memory</span></code> parameters are increased, the <code class="docutils literal"><span class="pre">memory</span></code> parameter should be increased by an equal amount.</li>
-<li><code class="docutils literal"><span class="pre">storage_memory</span></code>: Maximum memory used for data storage. This parameter is used <em>only</em> with memory storage engine, not the ssd storage engine. The default value is 1GiB. When specified without a unit, MB is assumed. Clusters will be restricted to using this amount of memory per process for purposes of data storage. Memory overhead associated with storing the data is counted against this total. If you increase the <code class="docutils literal"><span class="pre">storage_memory</span></code> parameter, you should also increase the <code class="docutils literal"><span class="pre">memory</span></code> parameter by the same amount.</li>
-<li><code class="docutils literal"><span class="pre">cache_memory</span></code>: Maximum memory used for caching pages from disk. The default value is 2GiB. When specified without a unit, MiB is assumed. If you increase the <code class="docutils literal"><span class="pre">cache_memory</span></code> parameter, you should also increase the <code class="docutils literal"><span class="pre">memory</span></code> parameter by the same amount.</li>
-<li><code class="docutils literal"><span class="pre">locality_machineid</span></code>: Machine identifier key. All processes on a machine should share a unique id. By default, processes on a machine determine a unique id to share. This does not generally need to be set.</li>
-<li><code class="docutils literal"><span class="pre">locality_zoneid</span></code>: Zone identifier key.  Processes that share a zone id are considered non-unique for the purposes of data replication. If unset, defaults to machine id.</li>
-<li><code class="docutils literal"><span class="pre">locality_dcid</span></code>: Datacenter identifier key. All processes physically located in a datacenter should share the id. No default value. If you are depending on datacenter based replication this must be set on all processes.</li>
-<li><code class="docutils literal"><span class="pre">locality_data_hall</span></code>: Data hall identifier key. All processes physically located in a data hall should share the id. No default value. If you are depending on data hall based replication this must be set on all processes.</li>
-<li><code class="docutils literal"><span class="pre">io_trust_seconds</span></code>: Time in seconds that a read or write operation is allowed to take before timing out with an error. If an operation times out, all future operations on that file will fail with an error as well. Only has an effect when using AsyncFileKAIO in Linux. If unset, defaults to 0 which means timeout is disabled.</li>
+<li><code class="docutils literal"><span class="pre">memory</span></code>: Maximum resident memory used by the process. The default value is 8GiB. When specified without a unit, MiB is assumed. Setting to 0 means unlimited. This parameter does not change the memory allocation of the program. Rather, it sets a hard limit beyond which the process will kill itself and be restarted. The default value of 8GiB is double the intended memory usage in the default configuration (providing an emergency buffer to deal with memory leaks or similar problems). It is <em>not</em> recommended to decrease the value of this parameter below its default value. It may be <em>increased</em> if you wish to allocate a very large amount of storage engine memory or cache. In particular, when the <code class="docutils literal"><span class="pre">storage-memory</span></code>  or <code class="docutils literal"><span class="pre">cache-memory</span></code> parameters are increased, the <code class="docutils literal"><span class="pre">memory</span></code> parameter should be increased by an equal amount.</li>
+<li><code class="docutils literal"><span class="pre">memory-vsize</span></code>: Maximum virtual memory used by the process. The default value is 0, which means unlimited. When specified without a unit, MiB is assumed. Same as <code class="docutils literal"><span class="pre">memory</span></code>, this parameter does not change the memory allocation of the program. Rather, it sets a hard limit beyond which the process will kill itself and be restarted.</li>
+<li><code class="docutils literal"><span class="pre">storage-memory</span></code>: Maximum memory used for data storage. This parameter is used <em>only</em> with memory storage engine, not the ssd storage engine. The default value is 1GiB. When specified without a unit, MB is assumed. Clusters will be restricted to using this amount of memory per process for purposes of data storage. Memory overhead associated with storing the data is counted against this total. If you increase the <code class="docutils literal"><span class="pre">storage-memory</span></code> parameter, you should also increase the <code class="docutils literal"><span class="pre">memory</span></code> parameter by the same amount.</li>
+<li><code class="docutils literal"><span class="pre">cache-memory</span></code>: Maximum memory used for caching pages from disk. The default value is 2GiB. When specified without a unit, MiB is assumed. If you increase the <code class="docutils literal"><span class="pre">cache-memory</span></code> parameter, you should also increase the <code class="docutils literal"><span class="pre">memory</span></code> parameter by the same amount.</li>
+<li><code class="docutils literal"><span class="pre">locality-machineid</span></code>: Machine identifier key. All processes on a machine should share a unique id. By default, processes on a machine determine a unique id to share. This does not generally need to be set.</li>
+<li><code class="docutils literal"><span class="pre">locality-zoneid</span></code>: Zone identifier key.  Processes that share a zone id are considered non-unique for the purposes of data replication. If unset, defaults to machine id.</li>
+<li><code class="docutils literal"><span class="pre">locality-dcid</span></code>: Datacenter identifier key. All processes physically located in a datacenter should share the id. No default value. If you are depending on datacenter based replication this must be set on all processes.</li>
+<li><code class="docutils literal"><span class="pre">locality-data-hall</span></code>: Data hall identifier key. All processes physically located in a data hall should share the id. No default value. If you are depending on data hall based replication this must be set on all processes.</li>
+<li><code class="docutils literal"><span class="pre">io-trust-seconds</span></code>: Time in seconds that a read or write operation is allowed to take before timing out with an error. If an operation times out, all future operations on that file will fail with an error as well. Only has an effect when using AsyncFileKAIO in Linux. If unset, defaults to 0 which means timeout is disabled.</li>
 </ul>
 <div class="admonition note">
 <p class="first admonition-title">Note</p>
@@ -522,6 +534,20 @@ Coordinators changed
 </pre></div>
 </div>
 <p>These sections run and configure the backup agent process used for <a class="reference internal" href="backups.html"><span class="doc">point-in-time backups</span></a> of FoundationDB. These don&#8217;t usually need to be modified. The structure and functionality is similar to the <code class="docutils literal"><span class="pre">[fdbserver]</span></code> and <code class="docutils literal"><span class="pre">[fdbserver.&lt;ID&gt;]</span></code> sections.</p>
+</div>
+</div>
+<div class="section" id="configuring-autorestart-of-fdbmonitor">
+<span id="configuration-restart-fdbmonitor"></span><h2>Configuring autorestart of fdbmonitor</h2>
+<p>Configuring the restart parameters for <code class="docutils literal"><span class="pre">fdbmonitor</span></code> is operating system-specific.</p>
+<div class="section" id="linux-rhel-centos">
+<h3>Linux (RHEL/CentOS)</h3>
+<blockquote>
+<div><code class="docutils literal"><span class="pre">systemd</span></code> controls the <code class="docutils literal"><span class="pre">foundationdb</span></code> service. When <code class="docutils literal"><span class="pre">fdbmonitor</span></code> is killed unexpectedly, by default, systemd restarts it in 60 seconds. To adjust this value you have to create a file <code class="docutils literal"><span class="pre">/etc/systemd/system/foundationdb.service.d/override.conf</span></code> with the overriding values. For example:</div></blockquote>
+<div class="highlight-ini"><div class="highlight"><pre><span></span><span class="k">[Service]</span><span class="w"></span>
+<span class="na">RestartSec</span><span class="o">=</span><span class="s">20s</span><span class="w"></span>
+</pre></div>
+</div>
+<p>To disable auto-restart of <code class="docutils literal"><span class="pre">fdbmonitor</span></code>, put <code class="docutils literal"><span class="pre">Restart=no</span></code> in the same section.</p>
 </div>
 </div>
 <div class="section" id="choosing-a-redundancy-mode">
@@ -798,12 +824,12 @@ Disk identifier: 0xe5169faa
 <p>If a region failover occurs, clients will generally only see a latency spike of a few seconds.</p>
 <div class="section" id="specifying-datacenters">
 <h3>Specifying datacenters</h3>
-<p>To use region configurations all processes in the cluster need to specify in which datacenter they are located. This can be done on the command line with either <code class="docutils literal"><span class="pre">--locality_dcid</span></code> or <code class="docutils literal"><span class="pre">--datacenter_id</span></code>. This datacenter identifier is case sensitive.</p>
-<p>Clients should also specify their datacenter with the database option <code class="docutils literal"><span class="pre">datacenter_id</span></code>. If a client does not specify their datacenter, they will use latency estimates to balance traffic between the two regions. This will result in about 5% of requests being served by the remote regions, so reads will suffer from high tail latencies.</p>
+<p>To use region configurations all processes in the cluster need to specify in which datacenter they are located. This can be done on the command line with either <code class="docutils literal"><span class="pre">--locality-dcid</span></code> or <code class="docutils literal"><span class="pre">--datacenter-id</span></code>. This datacenter identifier is case sensitive.</p>
+<p>Clients should also specify their datacenter with the database option <code class="docutils literal"><span class="pre">datacenter-id</span></code>. If a client does not specify their datacenter, they will use latency estimates to balance traffic between the two regions. This will result in about 5% of requests being served by the remote regions, so reads will suffer from high tail latencies.</p>
 </div>
 <div class="section" id="changing-the-region-configuration">
 <h3>Changing the region configuration</h3>
-<p>To change the region configure, use the <code class="docutils literal"><span class="pre">fileconfigure</span></code> command <code class="docutils literal"><span class="pre">fdbcli</span></code>. For example:</p>
+<p>To change the region configuration, use the <code class="docutils literal"><span class="pre">fileconfigure</span></code> command <code class="docutils literal"><span class="pre">fdbcli</span></code>. For example:</p>
 <div class="highlight-default"><div class="highlight"><pre><span></span>user@host$ fdbcli
 Using cluster file `/etc/foundationdb/fdb.cluster&#39;.
 
@@ -960,16 +986,17 @@ Configuration changed.
 </div>
 <div class="section" id="guidelines-for-setting-process-class">
 <span id="guidelines-process-class-config"></span><h2>Guidelines for setting process class</h2>
-<p>In a FoundationDB cluster, each of the <code class="docutils literal"><span class="pre">fdbserver</span></code> processes perform different tasks. Each process is recruited to do a particular task based on its process <code class="docutils literal"><span class="pre">class</span></code>. For example, processes with <code class="docutils literal"><span class="pre">class=storage</span></code> are given preference to be recruited for doing storage server tasks, <code class="docutils literal"><span class="pre">class=transaction</span></code> are for log server processes and <code class="docutils literal"><span class="pre">class=stateless</span></code> are for stateless processes like proxies, resolvers, etc.,</p>
-<p>The recommended minimum number of <code class="docutils literal"><span class="pre">class=transaction</span></code> (log server) processes is 8 (active) + 2 (standby) and the recommended minimum number for <code class="docutils literal"><span class="pre">class=stateless</span></code> processes is 4 (proxy) + 1 (resolver) + 1 (cluster controller) + 1 (master) + 2 (standby). It is better to spread the transaction and stateless processes across as many machines as possible.</p>
+<p>In a FoundationDB cluster, each of the <code class="docutils literal"><span class="pre">fdbserver</span></code> processes perform different tasks. Each process is recruited to do a particular task based on its process <code class="docutils literal"><span class="pre">class</span></code>. For example, processes with <code class="docutils literal"><span class="pre">class=storage</span></code> are given preference to be recruited for doing storage server tasks, <code class="docutils literal"><span class="pre">class=transaction</span></code> are for log server processes and <code class="docutils literal"><span class="pre">class=stateless</span></code> are for stateless processes like commit proxies, resolvers, etc.,</p>
+<p>The recommended minimum number of <code class="docutils literal"><span class="pre">class=transaction</span></code> (log server) processes is 8 (active) + 2 (standby) and the recommended minimum number for <code class="docutils literal"><span class="pre">class=stateless</span></code> processes is 1 (GRV proxy) + 3 (commit proxy) + 1 (resolver) + 1 (cluster controller) + 1 (master) + 2 (standby). It is better to spread the transaction and stateless processes across as many machines as possible.</p>
 <p><code class="docutils literal"><span class="pre">fdbcli</span></code> is used to set the desired number of processes of a particular process type. To do so, you would issue the <code class="docutils literal"><span class="pre">fdbcli</span></code> commands:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">fdb</span><span class="o">&gt;</span> <span class="n">configure</span> <span class="n">proxies</span><span class="o">=</span><span class="mi">5</span>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">fdb</span><span class="o">&gt;</span> <span class="n">configure</span> <span class="n">grv_proxies</span><span class="o">=</span><span class="mi">1</span>
+<span class="n">fdb</span><span class="o">&gt;</span> <span class="n">configure</span> <span class="n">grv_proxies</span><span class="o">=</span><span class="mi">4</span>
 <span class="n">fdb</span><span class="o">&gt;</span> <span class="n">configure</span> <span class="n">logs</span><span class="o">=</span><span class="mi">8</span>
 </pre></div>
 </div>
 <div class="admonition note">
 <p class="first admonition-title">Note</p>
-<p class="last">In the present release, the default value for proxies and log servers is 3 and for resolvers is 1. You should not set the value of a process type to less than its default.</p>
+<p class="last">In the present release, the default value for commit proxies and log servers is 3 and for GRV proxies and resolvers is 1. You should not set the value of a process type to less than its default.</p>
 </div>
 <div class="admonition warning">
 <p class="first admonition-title">Warning</p>
@@ -998,8 +1025,8 @@ Configuration changed.
       
     </p>
     <p>
-        &copy; Copyright 2013-2022 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jan 07, 2022.<br/>
+        &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Apr 09, 2022.<br/>
     </p>
   </div>
 </footer>

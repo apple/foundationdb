@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>Machine-Readable Status &#8212; FoundationDB 6.3</title>
+    <title>Machine-Readable Status &#8212; FoundationDB 7.1</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.3.23',
+        VERSION:     '7.1.0',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -50,7 +50,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>6.3</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.1</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -194,7 +194,9 @@
                <span class="s2">&quot;storage&quot;</span><span class="p">,</span>
                <span class="s2">&quot;transaction&quot;</span><span class="p">,</span>
                <span class="s2">&quot;resolution&quot;</span><span class="p">,</span>
-               <span class="s2">&quot;proxy&quot;</span><span class="p">,</span>
+               <span class="s2">&quot;stateless&quot;</span><span class="p">,</span>
+               <span class="s2">&quot;commit_proxy&quot;</span><span class="p">,</span>
+               <span class="s2">&quot;grv_proxy&quot;</span><span class="p">,</span>
                <span class="s2">&quot;master&quot;</span><span class="p">,</span>
                <span class="s2">&quot;test&quot;</span><span class="p">,</span>
                <span class="s2">&quot;storage_cache&quot;</span>
@@ -230,7 +232,8 @@
                <span class="s2">&quot;role&quot;</span><span class="o">:</span><span class="p">{</span>
                   <span class="s2">&quot;$enum&quot;</span><span class="o">:</span><span class="p">[</span>
                      <span class="s2">&quot;master&quot;</span><span class="p">,</span>
-                     <span class="s2">&quot;proxy&quot;</span><span class="p">,</span>
+                     <span class="s2">&quot;commit_proxy&quot;</span><span class="p">,</span>
+                     <span class="s2">&quot;grv_proxy&quot;</span><span class="p">,</span>
                      <span class="s2">&quot;log&quot;</span><span class="p">,</span>
                      <span class="s2">&quot;storage&quot;</span><span class="p">,</span>
                      <span class="s2">&quot;resolver&quot;</span><span class="p">,</span>
@@ -298,30 +301,30 @@
                   <span class="s2">&quot;counter&quot;</span><span class="o">:</span><span class="mf">0</span><span class="p">,</span>
                   <span class="s2">&quot;roughness&quot;</span><span class="o">:</span><span class="mf">0.0</span>
                <span class="p">},</span>
-               <span class="s2">&quot;grv_latency_statistics&quot;</span><span class="o">:</span><span class="p">{</span>
+               <span class="s2">&quot;grv_latency_statistics&quot;</span><span class="o">:</span><span class="p">{</span> <span class="c1">// GRV Latency metrics are grouped according to priority (currently batch or default).</span>
                   <span class="s2">&quot;default&quot;</span><span class="o">:</span><span class="p">{</span>
-                     <span class="s2">&quot;count&quot;</span><span class="o">:</span><span class="mf">0</span><span class="p">,</span>
-                     <span class="s2">&quot;min&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
-                     <span class="s2">&quot;max&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
-                     <span class="s2">&quot;median&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
-                     <span class="s2">&quot;mean&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
-                     <span class="s2">&quot;p25&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
-                     <span class="s2">&quot;p90&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
-                     <span class="s2">&quot;p95&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
-                     <span class="s2">&quot;p99&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
-                     <span class="s2">&quot;p99.9&quot;</span><span class="o">:</span><span class="mf">0.0</span>
+                      <span class="s2">&quot;count&quot;</span><span class="o">:</span><span class="mf">0</span><span class="p">,</span>
+                      <span class="s2">&quot;min&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                      <span class="s2">&quot;max&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                      <span class="s2">&quot;median&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                      <span class="s2">&quot;mean&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                      <span class="s2">&quot;p25&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                      <span class="s2">&quot;p90&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                      <span class="s2">&quot;p95&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                      <span class="s2">&quot;p99&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                      <span class="s2">&quot;p99.9&quot;</span><span class="o">:</span><span class="mf">0.0</span>
                   <span class="p">},</span>
                   <span class="s2">&quot;batch&quot;</span><span class="o">:</span><span class="p">{</span>
-                     <span class="s2">&quot;count&quot;</span><span class="o">:</span><span class="mf">0</span><span class="p">,</span>
-                     <span class="s2">&quot;min&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
-                     <span class="s2">&quot;max&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
-                     <span class="s2">&quot;median&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
-                     <span class="s2">&quot;mean&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
-                     <span class="s2">&quot;p25&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
-                     <span class="s2">&quot;p90&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
-                     <span class="s2">&quot;p95&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
-                     <span class="s2">&quot;p99&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
-                     <span class="s2">&quot;p99.9&quot;</span><span class="o">:</span><span class="mf">0.0</span>
+                      <span class="s2">&quot;count&quot;</span><span class="o">:</span><span class="mf">0</span><span class="p">,</span>
+                      <span class="s2">&quot;min&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                      <span class="s2">&quot;max&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                      <span class="s2">&quot;median&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                      <span class="s2">&quot;mean&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                      <span class="s2">&quot;p25&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                      <span class="s2">&quot;p90&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                      <span class="s2">&quot;p95&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                      <span class="s2">&quot;p99&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
+                      <span class="s2">&quot;p99.9&quot;</span><span class="o">:</span><span class="mf">0.0</span>
                   <span class="p">}</span>
                <span class="p">},</span>
                <span class="s2">&quot;read_latency_statistics&quot;</span><span class="o">:</span><span class="p">{</span>
@@ -375,6 +378,13 @@
                   <span class="s2">&quot;estimated_cost&quot;</span><span class="o">:</span><span class="p">{</span>
                      <span class="s2">&quot;hz&quot;</span><span class="o">:</span><span class="mf">0.0</span>
                   <span class="p">}</span>
+               <span class="p">},</span>
+               <span class="s2">&quot;busiest_write_tag&quot;</span><span class="o">:</span><span class="p">{</span>
+                  <span class="s2">&quot;tag&quot;</span><span class="o">:</span> <span class="s2">&quot;&quot;</span><span class="p">,</span>
+                  <span class="s2">&quot;fractional_cost&quot;</span><span class="o">:</span> <span class="mf">0.0</span><span class="p">,</span>
+                  <span class="s2">&quot;estimated_cost&quot;</span><span class="o">:</span><span class="p">{</span>
+                     <span class="s2">&quot;hz&quot;</span><span class="o">:</span><span class="mf">0.0</span>
+                  <span class="p">}</span>
                <span class="p">}</span>
             <span class="p">}</span>
          <span class="p">],</span>
@@ -413,7 +423,7 @@
          <span class="s2">&quot;excluded&quot;</span><span class="o">:</span><span class="kc">false</span><span class="p">,</span>
          <span class="s2">&quot;address&quot;</span><span class="o">:</span><span class="s2">&quot;1.2.3.4:1234&quot;</span><span class="p">,</span>
          <span class="s2">&quot;disk&quot;</span><span class="o">:</span><span class="p">{</span>
-            <span class="s2">&quot;free_bytes&quot;</span><span class="o">:</span><span class="mf">3451233456234</span><span class="p">,</span> <span class="c1">// an estimate of how many bytes are free to allocate to fdbservers without swapping</span>
+            <span class="s2">&quot;free_bytes&quot;</span><span class="o">:</span><span class="mf">3451233456234</span><span class="p">,</span>
             <span class="s2">&quot;reads&quot;</span><span class="o">:</span><span class="p">{</span>
                <span class="s2">&quot;hz&quot;</span><span class="o">:</span><span class="mf">0.0</span><span class="p">,</span>
                <span class="s2">&quot;counter&quot;</span><span class="o">:</span><span class="mf">0</span><span class="p">,</span>
@@ -425,7 +435,7 @@
                <span class="s2">&quot;counter&quot;</span><span class="o">:</span><span class="mf">0</span><span class="p">,</span>
                <span class="s2">&quot;sectors&quot;</span><span class="o">:</span><span class="mf">0</span>
             <span class="p">},</span>
-            <span class="s2">&quot;total_bytes&quot;</span><span class="o">:</span><span class="mf">123412341234</span> <span class="c1">// an estimate of total physical RAM</span>
+            <span class="s2">&quot;total_bytes&quot;</span><span class="o">:</span><span class="mf">123412341234</span>
          <span class="p">},</span>
          <span class="s2">&quot;uptime_seconds&quot;</span><span class="o">:</span><span class="mf">1234.2345</span><span class="p">,</span>
          <span class="s2">&quot;cpu&quot;</span><span class="o">:</span><span class="p">{</span>
@@ -532,11 +542,14 @@
       <span class="s2">&quot;batch_released_transactions_per_second&quot;</span><span class="o">:</span><span class="mf">0</span><span class="p">,</span>
       <span class="s2">&quot;released_transactions_per_second&quot;</span><span class="o">:</span><span class="mf">0</span><span class="p">,</span>
       <span class="s2">&quot;throttled_tags&quot;</span><span class="o">:</span><span class="p">{</span>
-         <span class="s2">&quot;auto&quot;</span><span class="o">:</span><span class="p">{</span>
-            <span class="s2">&quot;count&quot;</span><span class="o">:</span><span class="mf">0</span><span class="p">,</span>
+         <span class="s2">&quot;auto&quot;</span> <span class="o">:</span> <span class="p">{</span>
+             <span class="s2">&quot;busy_read&quot;</span> <span class="o">:</span> <span class="mf">0</span><span class="p">,</span>
+             <span class="s2">&quot;busy_write&quot;</span> <span class="o">:</span> <span class="mf">0</span><span class="p">,</span>
+             <span class="s2">&quot;count&quot;</span> <span class="o">:</span> <span class="mf">0</span><span class="p">,</span>
+             <span class="s2">&quot;recommended_only&quot;</span><span class="o">:</span><span class="mf">0</span>
          <span class="p">},</span>
-         <span class="s2">&quot;manual&quot;</span><span class="o">:</span><span class="p">{</span>
-            <span class="s2">&quot;count&quot;</span><span class="o">:</span><span class="mf">0</span>
+         <span class="s2">&quot;manual&quot;</span> <span class="o">:</span> <span class="p">{</span>
+             <span class="s2">&quot;count&quot;</span> <span class="o">:</span> <span class="mf">0</span>
          <span class="p">}</span>
       <span class="p">},</span>
       <span class="s2">&quot;limiting_queue_bytes_storage_server&quot;</span><span class="o">:</span><span class="mf">0</span><span class="p">,</span>
@@ -564,6 +577,7 @@
       <span class="s2">&quot;seconds&quot;</span><span class="o">:</span><span class="mf">1.0</span><span class="p">,</span>
       <span class="s2">&quot;versions&quot;</span><span class="o">:</span><span class="mf">1000000</span>
    <span class="p">},</span>
+   <span class="s2">&quot;active_tss_count&quot;</span><span class="o">:</span><span class="mf">0</span><span class="p">,</span>
    <span class="s2">&quot;degraded_processes&quot;</span><span class="o">:</span><span class="mf">0</span><span class="p">,</span>
    <span class="s2">&quot;database_available&quot;</span><span class="o">:</span><span class="kc">true</span><span class="p">,</span>
    <span class="s2">&quot;database_lock_state&quot;</span><span class="o">:</span><span class="p">{</span>
@@ -661,8 +675,10 @@
       <span class="p">}</span>
    <span class="p">],</span>
    <span class="s2">&quot;recovery_state&quot;</span><span class="o">:</span><span class="p">{</span>
+      <span class="s2">&quot;seconds_since_last_recovered&quot;</span><span class="o">:</span><span class="mf">1</span><span class="p">,</span>
       <span class="s2">&quot;required_resolvers&quot;</span><span class="o">:</span><span class="mf">1</span><span class="p">,</span>
-      <span class="s2">&quot;required_proxies&quot;</span><span class="o">:</span><span class="mf">1</span><span class="p">,</span>
+      <span class="s2">&quot;required_commit_proxies&quot;</span><span class="o">:</span><span class="mf">1</span><span class="p">,</span>
+      <span class="s2">&quot;required_grv_proxies&quot;</span><span class="o">:</span><span class="mf">1</span><span class="p">,</span>
       <span class="s2">&quot;name&quot;</span><span class="o">:</span><span class="p">{</span> <span class="c1">// &quot;fully_recovered&quot; is the healthy state; other states are normal to transition through but not to persist in</span>
          <span class="s2">&quot;$enum&quot;</span><span class="o">:</span><span class="p">[</span>
             <span class="s2">&quot;reading_coordinated_state&quot;</span><span class="p">,</span>
@@ -851,8 +867,21 @@
           <span class="s2">&quot;ssd&quot;</span><span class="p">,</span>
           <span class="s2">&quot;ssd-1&quot;</span><span class="p">,</span>
           <span class="s2">&quot;ssd-2&quot;</span><span class="p">,</span>
-          <span class="s2">&quot;ssd-redwood-experimental&quot;</span><span class="p">,</span>
-          <span class="s2">&quot;ssd-rocksdb-experimental&quot;</span><span class="p">,</span>
+          <span class="s2">&quot;ssd-redwood-1-experimental&quot;</span><span class="p">,</span>
+          <span class="s2">&quot;ssd-rocksdb-v1&quot;</span><span class="p">,</span>
+          <span class="s2">&quot;memory&quot;</span><span class="p">,</span>
+          <span class="s2">&quot;memory-1&quot;</span><span class="p">,</span>
+          <span class="s2">&quot;memory-2&quot;</span><span class="p">,</span>
+          <span class="s2">&quot;memory-radixtree-beta&quot;</span>
+      <span class="p">]},</span>
+      <span class="s2">&quot;tss_count&quot;</span><span class="o">:</span><span class="mf">1</span><span class="p">,</span>
+      <span class="s2">&quot;tss_storage_engine&quot;</span><span class="o">:</span><span class="p">{</span>
+      <span class="s2">&quot;$enum&quot;</span><span class="o">:</span><span class="p">[</span>
+          <span class="s2">&quot;ssd&quot;</span><span class="p">,</span>
+          <span class="s2">&quot;ssd-1&quot;</span><span class="p">,</span>
+          <span class="s2">&quot;ssd-2&quot;</span><span class="p">,</span>
+          <span class="s2">&quot;ssd-redwood-1-experimental&quot;</span><span class="p">,</span>
+          <span class="s2">&quot;ssd-rocksdb-v1&quot;</span><span class="p">,</span>
           <span class="s2">&quot;memory&quot;</span><span class="p">,</span>
           <span class="s2">&quot;memory-1&quot;</span><span class="p">,</span>
           <span class="s2">&quot;memory-2&quot;</span><span class="p">,</span>
@@ -861,14 +890,32 @@
       <span class="s2">&quot;coordinators_count&quot;</span><span class="o">:</span><span class="mf">1</span><span class="p">,</span>
       <span class="s2">&quot;excluded_servers&quot;</span><span class="o">:</span><span class="p">[</span>
          <span class="p">{</span>
-            <span class="s2">&quot;address&quot;</span><span class="o">:</span><span class="s2">&quot;10.0.4.1&quot;</span>
+            <span class="s2">&quot;address&quot;</span><span class="o">:</span><span class="s2">&quot;10.0.4.1&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;locality&quot;</span><span class="o">:</span><span class="s2">&quot;locality_processid:e9816ca4a89ff64ddb7ba2a5ec10b75b&quot;</span>
          <span class="p">}</span>
       <span class="p">],</span>
-      <span class="s2">&quot;auto_proxies&quot;</span><span class="o">:</span><span class="mf">3</span><span class="p">,</span>
+      <span class="s2">&quot;auto_commit_proxies&quot;</span><span class="o">:</span><span class="mf">3</span><span class="p">,</span>
+      <span class="s2">&quot;auto_grv_proxies&quot;</span><span class="o">:</span><span class="mf">1</span><span class="p">,</span>
       <span class="s2">&quot;auto_resolvers&quot;</span><span class="o">:</span><span class="mf">1</span><span class="p">,</span>
       <span class="s2">&quot;auto_logs&quot;</span><span class="o">:</span><span class="mf">3</span><span class="p">,</span>
-      <span class="s2">&quot;proxies&quot;</span><span class="o">:</span><span class="mf">5</span><span class="p">,</span> <span class="c1">// this field will be absent if a value has not been explicitly set</span>
+      <span class="s2">&quot;commit_proxies&quot;</span><span class="o">:</span><span class="mf">5</span><span class="p">,</span> <span class="c1">// this field will be absent if a value has not been explicitly set</span>
+      <span class="s2">&quot;grv_proxies&quot;</span><span class="o">:</span><span class="mf">1</span><span class="p">,</span> <span class="c1">// this field will be absent if a value has not been explicitly set</span>
+      <span class="s2">&quot;proxies&quot;</span><span class="o">:</span><span class="mf">6</span><span class="p">,</span> <span class="c1">// this field will be absent if a value has not been explicitly set</span>
       <span class="s2">&quot;backup_worker_enabled&quot;</span><span class="o">:</span><span class="mf">1</span><span class="p">,</span>
+      <span class="s2">&quot;perpetual_storage_wiggle&quot;</span><span class="o">:</span> <span class="mf">0</span><span class="p">,</span>
+      <span class="s2">&quot;perpetual_storage_wiggle_locality&quot;</span><span class="o">:</span><span class="s2">&quot;0&quot;</span><span class="p">,</span>
+      <span class="s2">&quot;storage_migration_type&quot;</span><span class="o">:</span><span class="p">{</span>
+      <span class="s2">&quot;$enum&quot;</span><span class="o">:</span><span class="p">[</span>
+          <span class="s2">&quot;disabled&quot;</span><span class="p">,</span>
+          <span class="s2">&quot;gradual&quot;</span><span class="p">,</span>
+          <span class="s2">&quot;aggressive&quot;</span>
+      <span class="p">]},</span>
+      <span class="s2">&quot;tenant_mode&quot;</span><span class="o">:</span> <span class="p">{</span>
+          <span class="s2">&quot;$enum&quot;</span><span class="o">:</span><span class="p">[</span>
+          <span class="s2">&quot;disabled&quot;</span><span class="p">,</span>
+          <span class="s2">&quot;optional_experimental&quot;</span><span class="p">,</span>
+          <span class="s2">&quot;required_experimental&quot;</span>
+      <span class="p">]}</span>
    <span class="p">},</span>
    <span class="s2">&quot;data&quot;</span><span class="o">:</span><span class="p">{</span>
       <span class="s2">&quot;least_operating_space_bytes_log_server&quot;</span><span class="o">:</span><span class="mf">0</span><span class="p">,</span>
@@ -928,7 +975,8 @@
              <span class="p">}</span>
          <span class="p">}</span>
       <span class="p">],</span>
-      <span class="s2">&quot;least_operating_space_bytes_storage_server&quot;</span><span class="o">:</span><span class="mf">0</span>
+      <span class="s2">&quot;least_operating_space_bytes_storage_server&quot;</span><span class="o">:</span><span class="mf">0</span><span class="p">,</span>
+      <span class="s2">&quot;max_machine_failures_without_losing_data&quot;</span><span class="o">:</span><span class="mf">0</span>
    <span class="p">},</span>
    <span class="s2">&quot;machines&quot;</span><span class="o">:</span><span class="p">{</span>
       <span class="s2">&quot;$map_key=machineid&quot;</span><span class="o">:</span><span class="p">{</span>
@@ -967,7 +1015,8 @@
       <span class="s2">&quot;coordinators&quot;</span><span class="o">:</span><span class="p">[</span>
          <span class="p">{</span>
             <span class="s2">&quot;reachable&quot;</span><span class="o">:</span><span class="kc">true</span><span class="p">,</span>
-            <span class="s2">&quot;address&quot;</span><span class="o">:</span><span class="s2">&quot;127.0.0.1:4701&quot;</span>
+            <span class="s2">&quot;address&quot;</span><span class="o">:</span><span class="s2">&quot;127.0.0.1:4701&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;protocol&quot;</span><span class="o">:</span><span class="s2">&quot;0fdb00b070010001&quot;</span>
          <span class="p">}</span>
       <span class="p">],</span>
       <span class="s2">&quot;quorum_reachable&quot;</span><span class="o">:</span><span class="kc">true</span>
@@ -1243,6 +1292,29 @@
 </tr>
 </tbody>
 </table>
+<p>The JSON path <code class="docutils literal"><span class="pre">cluster.qos.throttled_tags</span></code>, when it exists, is an Object containing <code class="docutils literal"><span class="pre">&quot;auto&quot;</span></code> , <code class="docutils literal"><span class="pre">&quot;manual&quot;</span></code> and <code class="docutils literal"><span class="pre">&quot;recommended&quot;</span></code>.  The possible fields for those object are in the following table:</p>
+<table border="1" class="docutils">
+<colgroup>
+<col width="40%" />
+<col width="60%" />
+</colgroup>
+<thead valign="bottom">
+<tr class="row-odd"><th class="head">Name</th>
+<th class="head">Description</th>
+</tr>
+</thead>
+<tbody valign="top">
+<tr class="row-even"><td>count</td>
+<td>How many tags are throttled</td>
+</tr>
+<tr class="row-odd"><td>busy_read</td>
+<td>How many tags are throttled because of busy read</td>
+</tr>
+<tr class="row-even"><td>busy_write</td>
+<td>How many tags are throttled because of busy write</td>
+</tr>
+</tbody>
+</table>
 </div>
 </div>
 </div>
@@ -1266,8 +1338,8 @@
       
     </p>
     <p>
-        &copy; Copyright 2013-2022 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jan 07, 2022.<br/>
+        &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Apr 09, 2022.<br/>
     </p>
   </div>
 </footer>

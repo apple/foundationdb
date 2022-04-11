@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>Hierarchical Documents &#8212; FoundationDB 6.3</title>
+    <title>Hierarchical Documents &#8212; FoundationDB 7.1</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.3.23',
+        VERSION:     '7.1.0',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -52,7 +52,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>6.3</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.1</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -210,7 +210,7 @@
     <span class="kd">private</span> <span class="kd">static</span> <span class="kd">final</span> <span class="kt">long</span> <span class="n">EMPTY_ARRAY</span> <span class="o">=</span> <span class="o">-</span><span class="mi">1</span><span class="p">;</span>
 
     <span class="kd">static</span> <span class="p">{</span>
-        <span class="n">fdb</span> <span class="o">=</span> <span class="n">FDB</span><span class="p">.</span><span class="na">selectAPIVersion</span><span class="p">(</span><span class="mi">630</span><span class="p">);</span>
+        <span class="n">fdb</span> <span class="o">=</span> <span class="n">FDB</span><span class="p">.</span><span class="na">selectAPIVersion</span><span class="p">(</span><span class="mi">710</span><span class="p">);</span>
         <span class="n">db</span> <span class="o">=</span> <span class="n">fdb</span><span class="p">.</span><span class="na">open</span><span class="p">();</span>
         <span class="n">docSpace</span> <span class="o">=</span> <span class="k">new</span> <span class="n">Subspace</span><span class="p">(</span><span class="n">Tuple</span><span class="p">.</span><span class="na">from</span><span class="p">(</span><span class="s">&quot;D&quot;</span><span class="p">));</span>
     <span class="p">}</span>
@@ -396,8 +396,8 @@
       
     </p>
     <p>
-        &copy; Copyright 2013-2022 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jan 07, 2022.<br/>
+        &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Apr 09, 2022.<br/>
     </p>
   </div>
 </footer>

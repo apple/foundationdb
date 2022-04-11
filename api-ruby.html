@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>Ruby API &#8212; FoundationDB 6.3</title>
+    <title>Ruby API &#8212; FoundationDB 7.1</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.3.23',
+        VERSION:     '7.1.0',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -52,7 +52,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>6.3</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.1</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -231,7 +231,7 @@ must be installed. If you upgrade a language binding to a new version, you may n
 <dl class="function">
 <dt id="FDB.api_version">
 <code class="descclassname">FDB.</code><code class="descname">api_version</code><span class="sig-paren">(</span><em>version</em><span class="sig-paren">)</span></dt>
-<dd><p>Specifies the version of the API that the application uses. This allows future versions of FoundationDB to make API changes without breaking existing programs.  The current version of the API is 630.</p>
+<dd><p>Specifies the version of the API that the application uses. This allows future versions of FoundationDB to make API changes without breaking existing programs.  The current version of the API is 710.</p>
 </dd></dl>
 
 <div class="admonition note">
@@ -246,13 +246,13 @@ must be installed. If you upgrade a language binding to a new version, you may n
 <p class="first admonition-title">Warning</p>
 <p class="last">When using the <a class="reference internal" href="api-general.html#multi-version-client-api"><span class="std std-ref">multi-version client API</span></a>, setting an API version that is not supported by a particular client library will prevent that client from being used to connect to the cluster. In particular, you should not advance the API version of your application after upgrading your client until the cluster has also been upgraded.</p>
 </div>
-<p>For API changes between version 14 and 630 (for the purpose of porting older programs), see <a class="reference internal" href="release-notes/release-notes-630.html#release-notes"><span class="std std-ref">Release Notes</span></a> and <a class="reference internal" href="api-version-upgrade-guide.html"><span class="doc">API Version Upgrade Guide</span></a>.</p>
+<p>For API changes between version 14 and 710 (for the purpose of porting older programs), see <a class="reference internal" href="release-notes/release-notes-710.html#release-notes"><span class="std std-ref">Release Notes</span></a> and <a class="reference internal" href="api-version-upgrade-guide.html"><span class="doc">API Version Upgrade Guide</span></a>.</p>
 </div>
 <div class="section" id="opening-a-database">
 <h2>Opening a database</h2>
 <p>After requiring the <code class="docutils literal"><span class="pre">FDB</span></code> gem and selecting an API version, you probably want to open a <a class="reference internal" href="#FDB::Database" title="FDB::Database"><code class="xref rb rb-class docutils literal"><span class="pre">Database</span></code></a> using <a class="reference internal" href="#FDB.open" title="FDB.open"><code class="xref rb rb-func docutils literal"><span class="pre">open</span></code></a>:</p>
 <div class="highlight-ruby"><div class="highlight"><pre><span></span><span class="nb">require</span> <span class="s1">&#39;fdb&#39;</span>
-<span class="no">FDB</span><span class="o">.</span><span class="n">api_version</span> <span class="mi">630</span>
+<span class="no">FDB</span><span class="o">.</span><span class="n">api_version</span> <span class="mi">710</span>
 <span class="n">db</span> <span class="o">=</span> <span class="no">FDB</span><span class="o">.</span><span class="n">open</span>
 </pre></div>
 </div>
@@ -1108,12 +1108,19 @@ both the caching and the increased network bandwidth.</p>
 <h3>Transaction misc functions</h3>
 <dl class="method">
 <dt id="FDB::Transaction.get_estimated_range_size_bytes">
-<code class="descclassname">Transaction.</code><code class="descname">get_estimated_range_size_bytes</code><span class="sig-paren">(</span><em>begin_key</em>, <em>end_key</em><span class="sig-paren">)</span></dt>
+<code class="descclassname">Transaction.</code><code class="descname">get_estimated_range_size_bytes</code><span class="sig-paren">(</span><em>begin_key</em>, <em>end_key</em><span class="sig-paren">)</span> &#x2192; Int64Future</dt>
 <dd><p>Gets the estimated byte size of the given key range. Returns a <a class="reference internal" href="#FDB::Int64Future" title="FDB::Int64Future"><code class="xref rb rb-class docutils literal"><span class="pre">Int64Future</span></code></a>.</p>
 <div class="admonition note">
 <p class="first admonition-title">Note</p>
 <p class="last">The estimated size is calculated based on the sampling done by FDB server. The sampling algorithm works roughly in this way: the larger the key-value pair is, the more likely it would be sampled and the more accurate its sampled size would be. And due to that reason it is recommended to use this API to query against large ranges for accuracy considerations. For a rough reference, if the returned size is larger than 3MB, one can consider the size to be accurate.</p>
 </div>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Transaction.get_range_split_points">
+<code class="descclassname">Transaction.</code><code class="descname">get_range_split_points</code><span class="sig-paren">(</span><em>begin_key</em>, <em>end_key</em>, <em>chunk_size</em><span class="sig-paren">)</span> &#x2192; FutureKeyArray</dt>
+<dd><p>Gets a list of keys that can split the given range into (roughly) equally sized chunks based on <code class="docutils literal"><span class="pre">chunk_size</span></code>. Returns a <code class="xref rb rb-class docutils literal"><span class="pre">FutureKeyArray</span></code>.
+.. note:: The returned split points contain the start key and end key of the given range</p>
 </dd></dl>
 
 <dl class="method">
@@ -1878,8 +1885,8 @@ of the UUID bytes.</p>
       
     </p>
     <p>
-        &copy; Copyright 2013-2022 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jan 07, 2022.<br/>
+        &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Apr 09, 2022.<br/>
     </p>
   </div>
 </footer>

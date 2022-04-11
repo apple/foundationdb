@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>FoundationDB 6.3 &#8212; FoundationDB 6.3</title>
+    <title>FoundationDB 7.1 &#8212; FoundationDB 7.1</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '6.3.23',
+        VERSION:     '7.1.0',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -51,7 +51,7 @@
         </button>
         <a class="navbar-brand" href="#">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>6.3</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.1</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -80,7 +80,7 @@
   <ul class="dropdown-menu localtoc"
       role="menu"
       aria-labelledby="dLabelLocalToc"><ul>
-<li><a class="reference internal" href="#">FoundationDB 6.3</a><ul>
+<li><a class="reference internal" href="#">FoundationDB 7.1</a><ul>
 <li><a class="reference internal" href="#overview">Overview</a></li>
 <li><a class="reference internal" href="#documentation">Documentation</a></li>
 </ul>
@@ -122,7 +122,7 @@
   <div class="row">
       <div class="col-md-3">
         <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
-<li><a class="reference internal" href="#">FoundationDB 6.3</a><ul>
+<li><a class="reference internal" href="#">FoundationDB 7.1</a><ul>
 <li><a class="reference internal" href="#overview">Overview</a></li>
 <li><a class="reference internal" href="#documentation">Documentation</a></li>
 </ul>
@@ -134,7 +134,7 @@
     <div class="col-md-9 content">
       
   <div class="section" id="foundationdb-version">
-<h1>FoundationDB 6.3</h1>
+<h1>FoundationDB 7.1</h1>
 <div class="section" id="overview">
 <h2>Overview</h2>
 <p>FoundationDB is a distributed database designed to handle large volumes of structured data across clusters of commodity servers. It organizes data as an ordered key-value store and employs <a class="reference internal" href="transaction-manifesto.html"><span class="doc">ACID transactions</span></a> for all operations. It is especially well-suited for read/write workloads but also has excellent <a class="reference internal" href="performance.html"><span class="doc">performance</span></a> for write-intensive workloads. Users interact with the database using a <a class="reference internal" href="api-reference.html"><span class="doc">API language binding</span></a>. You can <a class="reference internal" href="local-dev.html"><span class="doc">begin local development</span></a> today.</p>
@@ -146,7 +146,7 @@
 <p><strong>Administrators easily scale and handle hardware failures.</strong> FoundationDB is easy to install, grow, and manage. It has a distributed architecture that gracefully scales out and handles faults while acting like a single ACID database.</p>
 <p><strong>FoundationDB has industry-leading performance.</strong> FoundationDB provides amazing performance on commodity hardware, allowing you to support very heavy loads at low cost.</p>
 <p><strong>FoundationDB supports flexible application architectures.</strong> Your application can talk directly to FoundationDB, to a layer, or both. Layers provide new capability on top of FoundationDB but are stateless.</p>
-<p>The latest changes are detailed in <a class="reference internal" href="release-notes/release-notes-630.html#release-notes"><span class="std std-ref">Release Notes</span></a>. The documentation has the following sections:</p>
+<p>The latest changes are detailed in <a class="reference internal" href="release-notes/release-notes-710.html#release-notes"><span class="std std-ref">Release Notes</span></a>. The documentation has the following sections:</p>
 <ul class="simple">
 <li><a class="reference internal" href="why-foundationdb.html"><span class="doc">Why FoundationDB</span></a> describes the technical alternatives involved in NoSQL database design and explains the advantages of transaction processing at scale.</li>
 <li><a class="reference internal" href="technical-overview.html"><span class="doc">Technical Overview</span></a> explains the engineering design of FoundationDB, with detailed information on its features, architecture, and performance.</li>
@@ -155,6 +155,9 @@
 <li><a class="reference internal" href="api-reference.html"><span class="doc">API Reference</span></a> give a detailed description of the API for each language.</li>
 <li><a class="reference internal" href="tutorials.html"><span class="doc">Tutorials</span></a> provide simple examples of client design using FoundationDB.</li>
 <li><a class="reference internal" href="administration.html"><span class="doc">Administration</span></a> contains documentation on administering FoundationDB.</li>
+<li><a class="reference internal" href="monitored-metrics.html"><span class="doc">Monitored Metrics</span></a> contains documentation on monitoring and alerting for FoundationDB.</li>
+<li><a class="reference internal" href="redwood.html"><span class="doc">Redwood Storage Engine</span></a> contains documentation on Redwood Storage Engine.</li>
+<li><a class="reference internal" href="visibility.html"><span class="doc">Visibility Documents</span></a> contains documentation related to Visibility into FoundationDB.</li>
 </ul>
 <div class="toctree-wrapper compound">
 </div>
@@ -180,8 +183,8 @@
       
     </p>
     <p>
-        &copy; Copyright 2013-2022 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jan 07, 2022.<br/>
+        &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Apr 09, 2022.<br/>
     </p>
   </div>
 </footer>

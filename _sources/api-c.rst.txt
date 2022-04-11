@@ -6,6 +6,7 @@
 .. |database-type| replace:: ``FDBDatabase``
 .. |database-class| replace:: :type:`FDBDatabase`
 .. |database-auto| replace:: FIXME
+.. |tenant-type| replace:: ``FDBTenant``
 .. |transaction-class| replace:: FIXME
 .. |get-key-func| replace:: :func:`fdb_transaction_get_key()`
 .. |get-range-func| replace:: :func:`fdb_transaction_get_range()`
@@ -133,7 +134,7 @@ API versioning
 
 Prior to including ``fdb_c.h``, you must define the ``FDB_API_VERSION`` macro. This, together with the :func:`fdb_select_api_version()` function, allows programs written against an older version of the API to compile and run with newer versions of the C library. The current version of the FoundationDB C API is |api-version|. ::
 
-  #define FDB_API_VERSION 630
+  #define FDB_API_VERSION 710
   #include <foundationdb/fdb_c.h>
 
 .. function:: fdb_error_t fdb_select_api_version(int version)
@@ -301,6 +302,12 @@ See :ref:`developer-guide-programming-with-futures` for further (language-indepe
 
    |future-get-return1| |future-get-return2|.
 
+.. function:: fdb_error_t fdb_future_get_key_array( FDBFuture* f, FDBKey const** out_key_array, int* out_count)
+
+   Extracts an array of :type:`FDBKey` from an :type:`FDBFuture*` into a caller-provided variable of type ``FDBKey*``. The size of the array will also be extracted and passed back by a caller-provided variable of type ``int`` |future-warning|
+
+   |future-get-return1| |future-get-return2|.
+
 .. function:: fdb_error_t fdb_future_get_key(FDBFuture* future, uint8_t const** out_key, int* out_key_length)
 
    Extracts a key from an :type:`FDBFuture` into caller-provided variables of type ``uint8_t*`` (a pointer to the beginning of the key) and ``int`` (the length of the key). |future-warning|
@@ -413,9 +420,100 @@ An |database-blurb1| Modifications to a database are performed via transactions.
 
    |option-doc|
 
+.. function:: fdb_error_t fdb_database_open_tenant(FDBDatabase* database, uint8_t const* tenant_name, int tenant_name_length, FDBTenant** out_tenant)
+
+   Opens a tenant on the given database. All transactions created by this tenant will operate on the tenant's key-space. The caller assumes ownership of the :type:`FDBTenant` object and must destroy it with :func:`fdb_tenant_destroy()`.
+
+   ``tenant_name``
+      The name of the tenant being accessed, as a byte string.
+   ``tenant_name_length``
+      The length of the tenant name byte string.
+   ``*out_tenant``
+      Set to point to the newly created :type:`FDBTenant`.
+
 .. function:: fdb_error_t fdb_database_create_transaction(FDBDatabase* database, FDBTransaction** out_transaction)
 
-   Creates a new transaction on the given database. The caller assumes ownership of the :type:`FDBTransaction` object and must destroy it with :func:`fdb_transaction_destroy()`.
+   Creates a new transaction on the given database without using a tenant, meaning that it will operate on the entire database key-space. The caller assumes ownership of the :type:`FDBTransaction` object and must destroy it with :func:`fdb_transaction_destroy()`.
+
+   ``*out_transaction``
+      Set to point to the newly created :type:`FDBTransaction`.
+
+.. function:: FDBFuture* fdb_database_reboot_worker(FDBDatabase* database, uint8_t const* address, int address_length, fdb_bool_t check, int duration)
+
+   Reboot the specified process in the database.
+
+   |future-return0| a :type:`int64_t` which represents whether the reboot request is sent or not. In particular, 1 means request sent and 0 means failure (e.g. the process with the specified address does not exist). |future-return1| call :func:`fdb_future_get_int64()` to extract the result, |future-return2|
+
+   ``address``
+        A pointer to the network address of the process.
+
+   ``address_length``
+        |length-of| ``address``.
+   
+   ``check``
+        whether to perform a storage engine integrity check. In particular, the check-on-reboot is implemented by writing a check/validation file on disk as breadcrumb for the process to find after reboot, at which point it will eat the breadcrumb file and pass true to the integrityCheck parameter of the openKVStore() factory method.
+   
+   ``duration``
+        If positive, the process will be first suspended for ``duration`` seconds before being rebooted.
+
+.. function:: FDBFuture* fdb_database_force_recovery_with_data_loss(FDBDatabase* database, uint8_t const* dcId, int dcId_length)
+
+   Force the database to recover into the given datacenter.
+
+   This function is only useful in a fearless configuration where you want to recover your database even with losing recently committed mutations.
+   
+   In particular, the function will set usable_regions to 1 and the amount of mutations that will be lost depends on how far behind the remote datacenter is.
+   
+   The function will change the region configuration to have a positive priority for the chosen dcId, and a negative priority for all other dcIds.
+
+   In particular, no error will be thrown if the given dcId does not exist. It will just not attempt to force a recovery.
+   
+   If the database has already recovered, the function does nothing. Thus it's safe to call it multiple times.
+
+   |future-returnvoid|
+
+.. function:: FDBFuture* fdb_database_create_snapshot(FDBDatabase* database, uint8_t const* snapshot_command, int snapshot_command_length)
+
+   Create a snapshot of the database.
+
+   ``uid``
+         A UID used to create snapshot. A valid uid is a 32-length hex string, otherwise, it will fail with error_code_snap_invalid_uid_string.
+
+         It is the user's responsibility to make sure the given ``uid`` is unique.
+   
+   ``uid_length``
+         |length-of| ``uid``
+
+   ``snapshot_command``
+         A pointer to all the snapshot command arguments.
+
+         In particular, if the original ``fdbcli`` command is ``snapshot <arg1> <arg2> <argN>``, then the string ``snapshot_command`` points to is ``<arg1> <arg2> <argN>``.
+   
+   ``snapshot_command_length``
+         |length-of| ``snapshot_command``
+   
+   .. note:: The function is exposing the functionality of the fdbcli command ``snapshot``. Please take a look at the documentation before using (see :ref:`disk-snapshot-backups`).
+
+.. function:: double fdb_database_get_main_thread_busyness(FDBDatabase* database)
+
+   Returns a value where 0 indicates that the client is idle and 1 (or larger) indicates that the client is saturated. By default, this value is updated every second.
+
+Tenant
+======
+
+|tenant-blurb1|
+
+.. type:: FDBTenant
+
+   An opaque type that represents a tenant in the FoundationDB C API.
+
+.. function:: void fdb_tenant_destroy(FDBTenant* tenant)
+
+   Destroys an :type:`FDBTenant` object. It must be called exactly once for each successful call to :func:`fdb_database_create_tenant()`. This function only destroys a handle to the tenant -- the tenant and its data will be fine!
+
+.. function:: fdb_error_t fdb_tenant_create_transaction(FDBTenant* tenant, FDBTronsaction **out_transaction)
+
+   Creates a new transaction on the given tenant. This transaction will operate within the tenant's key-space and cannot access data outside the tenant. The caller assumes ownership of the :type:`FDBTransaction` object and must destroy it with :func:`fdb_transaction_destroy()`.
 
    ``*out_transaction``
       Set to point to the newly created :type:`FDBTransaction`.
@@ -481,6 +579,14 @@ Applications must provide error handling and an appropriate retry loop around th
    .. note:: The estimated size is calculated based on the sampling done by FDB server. The sampling algorithm works roughly in this way: the larger the key-value pair is, the more likely it would be sampled and the more accurate its sampled size would be. And due to that reason it is recommended to use this API to query against large ranges for accuracy considerations. For a rough reference, if the returned size is larger than 3MB, one can consider the size to be accurate.
 
    |future-return0| the estimated size of the key range given. |future-return1| call :func:`fdb_future_get_int64()` to extract the size, |future-return2|
+
+.. function:: FDBFuture* fdb_transaction_get_range_split_points( FDBTransaction* tr, uint8_t const* begin_key_name, int begin_key_name_length, uint8_t const* end_key_name, int end_key_name_length, int64_t chunk_size)
+
+   Returns a list of keys that can split the given range into (roughly) equally sized chunks based on ``chunk_size``.
+
+   .. note:: The returned split points contain the start key and end key of the given range
+
+   |future-return0| the list of split points. |future-return1| call :func:`fdb_future_get_key_array()` to extract the array, |future-return2|
 
 .. function:: FDBFuture* fdb_transaction_get_key(FDBTransaction* transaction, uint8_t const* key_name, int key_name_length, fdb_bool_t or_equal, int offset, fdb_bool_t snapshot)
 
