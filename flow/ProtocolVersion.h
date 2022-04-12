@@ -62,7 +62,6 @@ public: // constants
 	static constexpr uint64_t objectSerializerFlag = 0x1000000000000000LL;
 	static constexpr uint64_t compatibleProtocolVersionMask = 0xFFFFFFFFFFFF0000LL;
 	static constexpr uint64_t minValidProtocolVersion = 0x0FDB00A200060001LL;
-	static constexpr uint64_t invalidProtocolVersion = 0x0FDB00A100000000LL;
 
 public:
 	constexpr explicit ProtocolVersion(uint64_t version) : _version(version) {}
@@ -77,8 +76,6 @@ public:
 		return ProtocolVersion(_version & compatibleProtocolVersionMask);
 	}
 	constexpr bool isValid() const { return version() >= minValidProtocolVersion; }
-
-	constexpr bool isInvalidMagic() const { return version() == invalidProtocolVersion; }
 
 	constexpr uint64_t version() const { return _version & versionFlagMask; }
 	constexpr uint64_t versionWithFlags() const { return _version; }
@@ -169,7 +166,6 @@ public: // introduced features
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B071010000LL, PerpetualWiggleMetadata);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B071010000LL, Tenants);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B071010000LL, StorageInterfaceReadiness);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B071010000LL, SWVersionTracking);
 };
 
 template <>
