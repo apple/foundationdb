@@ -208,7 +208,7 @@ struct CommitTransactionRef {
 			if (ar.protocolVersion().hasReportConflictingKeys()) {
 				serializer(ar, report_conflicting_keys);
 			}
-			if (ar.protocolVersion().hasSpanContext()) {
+			if (ar.protocolVersion().version() >= (uint64_t)0x0FDB00B071000000LL) {
 				serializer(ar, lock_aware, spanContext);
 			}
 		}
