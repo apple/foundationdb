@@ -485,17 +485,6 @@ public:
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
 };
 
-class ClientProfilingImpl : public SpecialKeyRangeRWImpl {
-public:
-	explicit ClientProfilingImpl(KeyRangeRef kr);
-	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
-	                             KeyRangeRef kr,
-	                             GetRangeLimits limitsHint) const override;
-	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
-	void clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) override;
-	void clear(ReadYourWritesTransaction* ryw, const KeyRef& key) override;
-};
-
 class ActorLineageImpl : public SpecialKeyRangeReadImpl {
 public:
 	explicit ActorLineageImpl(KeyRangeRef kr);

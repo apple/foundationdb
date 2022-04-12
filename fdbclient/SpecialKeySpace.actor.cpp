@@ -108,9 +108,6 @@ std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandT
 	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
 	{ "versionepoch",
 	  singleKeyRange(LiteralStringRef("version_epoch")).withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
-	{ "profile",
-	  KeyRangeRef(LiteralStringRef("profiling/"), LiteralStringRef("profiling0"))
-	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
 	{ "maintenance",
 	  KeyRangeRef(LiteralStringRef("maintenance/"), LiteralStringRef("maintenance0"))
 	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
@@ -1945,120 +1942,6 @@ Future<Optional<std::string>> VersionEpochImpl::commit(ReadYourWritesTransaction
 		ryw->getTransaction().clear(versionEpochKey);
 	}
 	return Optional<std::string>();
-}
-
-ClientProfilingImpl::ClientProfilingImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
-
-ACTOR static Future<RangeResult> ClientProfilingGetRangeActor(ReadYourWritesTransaction* ryw,
-                                                              KeyRef prefix,
-                                                              KeyRangeRef kr) {
-	state RangeResult result;
-	// client_txn_sample_rate
-	state Key sampleRateKey = LiteralStringRef("client_txn_sample_rate").withPrefix(prefix);
-
-	ryw->getTransaction().setOption(FDBTransactionOptions::RAW_ACCESS);
-
-	if (kr.contains(sampleRateKey)) {
-		auto entry = ryw->getSpecialKeySpaceWriteMap()[sampleRateKey];
-		if (!ryw->readYourWritesDisabled() && entry.first) {
-			// clear is forbidden
-			ASSERT(entry.second.present());
-			result.push_back_deep(result.arena(), KeyValueRef(sampleRateKey, entry.second.get()));
-		} else {
-			Optional<Value> f = wait(ryw->getTransaction().get(fdbClientInfoTxnSampleRate));
-			std::string sampleRateStr = "default";
-			if (f.present()) {
-				const double sampleRateDbl = BinaryReader::fromStringRef<double>(f.get(), Unversioned());
-				if (!std::isinf(sampleRateDbl)) {
-					sampleRateStr = boost::lexical_cast<std::string>(sampleRateDbl);
-				}
-			}
-			result.push_back_deep(result.arena(), KeyValueRef(sampleRateKey, Value(sampleRateStr)));
-		}
-	}
-	// client_txn_size_limit
-	state Key txnSizeLimitKey = LiteralStringRef("client_txn_size_limit").withPrefix(prefix);
-	if (kr.contains(txnSizeLimitKey)) {
-		auto entry = ryw->getSpecialKeySpaceWriteMap()[txnSizeLimitKey];
-		if (!ryw->readYourWritesDisabled() && entry.first) {
-			// clear is forbidden
-			ASSERT(entry.second.present());
-			result.push_back_deep(result.arena(), KeyValueRef(txnSizeLimitKey, entry.second.get()));
-		} else {
-			Optional<Value> f = wait(ryw->getTransaction().get(fdbClientInfoTxnSizeLimit));
-			std::string sizeLimitStr = "default";
-			if (f.present()) {
-				const int64_t sizeLimit = BinaryReader::fromStringRef<int64_t>(f.get(), Unversioned());
-				if (sizeLimit != -1) {
-					sizeLimitStr = boost::lexical_cast<std::string>(sizeLimit);
-				}
-			}
-			result.push_back_deep(result.arena(), KeyValueRef(txnSizeLimitKey, Value(sizeLimitStr)));
-		}
-	}
-	return result;
-}
-
-// TODO : add limitation on set operation
-Future<RangeResult> ClientProfilingImpl::getRange(ReadYourWritesTransaction* ryw,
-                                                  KeyRangeRef kr,
-                                                  GetRangeLimits limitsHint) const {
-	return ClientProfilingGetRangeActor(ryw, getKeyRange().begin, kr);
-}
-
-Future<Optional<std::string>> ClientProfilingImpl::commit(ReadYourWritesTransaction* ryw) {
-	ryw->getTransaction().setOption(FDBTransactionOptions::RAW_ACCESS);
-
-	// client_txn_sample_rate
-	Key sampleRateKey = LiteralStringRef("client_txn_sample_rate").withPrefix(getKeyRange().begin);
-	auto rateEntry = ryw->getSpecialKeySpaceWriteMap()[sampleRateKey];
-
-	if (rateEntry.first && rateEntry.second.present()) {
-		std::string sampleRateStr = rateEntry.second.get().toString();
-		double sampleRate;
-		if (sampleRateStr == "default")
-			sampleRate = std::numeric_limits<double>::infinity();
-		else {
-			try {
-				sampleRate = boost::lexical_cast<double>(sampleRateStr);
-			} catch (boost::bad_lexical_cast& e) {
-				return Optional<std::string>(ManagementAPIError::toJsonString(
-				    false, "profile", "Invalid transaction sample rate(double): " + sampleRateStr));
-			}
-		}
-		ryw->getTransaction().set(fdbClientInfoTxnSampleRate, BinaryWriter::toValue(sampleRate, Unversioned()));
-	}
-	// client_txn_size_limit
-	Key txnSizeLimitKey = LiteralStringRef("client_txn_size_limit").withPrefix(getKeyRange().begin);
-	auto sizeLimitEntry = ryw->getSpecialKeySpaceWriteMap()[txnSizeLimitKey];
-	if (sizeLimitEntry.first && sizeLimitEntry.second.present()) {
-		std::string sizeLimitStr = sizeLimitEntry.second.get().toString();
-		int64_t sizeLimit;
-		if (sizeLimitStr == "default")
-			sizeLimit = -1;
-		else {
-			try {
-				sizeLimit = boost::lexical_cast<int64_t>(sizeLimitStr);
-			} catch (boost::bad_lexical_cast& e) {
-				return Optional<std::string>(ManagementAPIError::toJsonString(
-				    false, "profile", "Invalid transaction size limit(int64_t): " + sizeLimitStr));
-			}
-		}
-		ryw->getTransaction().set(fdbClientInfoTxnSizeLimit, BinaryWriter::toValue(sizeLimit, Unversioned()));
-	}
-	return Optional<std::string>();
-}
-
-void ClientProfilingImpl::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& range) {
-	return throwSpecialKeyApiFailure(
-	    ryw, "profile", "Clear range is forbidden for profile client. You can set it to default to disable profiling.");
-}
-
-void ClientProfilingImpl::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
-	return throwSpecialKeyApiFailure(
-	    ryw,
-	    "profile",
-	    "Clear operation is forbidden for profile client. You can set it to default to disable profiling.");
 }
 
 ActorLineageImpl::ActorLineageImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
