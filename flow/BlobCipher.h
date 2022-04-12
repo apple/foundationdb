@@ -25,7 +25,7 @@
 #include <unordered_map>
 #include <vector>
 
-#if (!defined(TLS_DISABLED) && !defined(_WIN32))
+#if (!defined(TLS_DISABLED))
 #define ENCRYPTION_ENABLED 1
 #else
 #define ENCRYPTION_ENABLED 0

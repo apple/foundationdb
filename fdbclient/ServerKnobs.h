@@ -821,6 +821,9 @@ public:
 	std::string ENCRYPTION_MODE;
 	int SIM_KMS_MAX_KEYS;
 
+	// Key Management Service (KMS) Connector
+	std::string KMS_CONNECTOR_TYPE;
+
 	// blob granule stuff
 	// FIXME: configure url with database configuration instead of knob eventually
 	std::string BG_URL;
