@@ -32,7 +32,7 @@
 
 namespace FdbApiTester {
 
-constexpr int LONG_WAIT_TIME_US = 100000;
+constexpr int LONG_WAIT_TIME_US = 1000000;
 
 void TransactionActorBase::complete(fdb_error_t err) {
 	error = err;

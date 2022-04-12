@@ -28,7 +28,7 @@ SUPPORTED_VERSIONS = ["7.2.0", "7.1.0", "7.0.0", "6.3.24", "6.3.23",
 FDB_DOWNLOAD_ROOT = "https://github.com/apple/foundationdb/releases/download/"
 CURRENT_VERSION = "7.2.0"
 HEALTH_CHECK_TIMEOUT_SEC = 5
-PROGRESS_CHECK_TIMEOUT_SEC = 500
+PROGRESS_CHECK_TIMEOUT_SEC = 30
 
 
 def make_executable(path):
@@ -441,7 +441,7 @@ if __name__ == "__main__":
         print("data-dir: {}".format(test.data))
         print("cluster-file: {}".format(test.etc.joinpath("fdb.cluster")))
         errcode = test.exec_test(args)
-        if test.check_cluster_logs():
+        if not test.check_cluster_logs():
             errcode = 1 if errcode == 0 else errcode
         if errcode != 0 and not args.disable_log_dump:
             test.dump_cluster_logs()
