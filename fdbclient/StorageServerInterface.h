@@ -63,13 +63,13 @@ struct StorageServerInterface {
 	UID uniqueID;
 	Optional<UID> tssPairID;
 
-	RequestStream<struct GetValueRequest> getValue;
-	RequestStream<struct GetKeyRequest> getKey;
+	PublicRequestStream<struct GetValueRequest> getValue;
+	PublicRequestStream<struct GetKeyRequest> getKey;
 
 	// Throws a wrong_shard_server if the keys in the request or result depend on data outside this server OR if a large
 	// selector offset prevents all data from being read in one range read
-	RequestStream<struct GetKeyValuesRequest> getKeyValues;
-	RequestStream<struct GetMappedKeyValuesRequest> getMappedKeyValues;
+	PublicRequestStream<struct GetKeyValuesRequest> getKeyValues;
+	PublicRequestStream<struct GetMappedKeyValuesRequest> getMappedKeyValues;
 
 	RequestStream<struct GetShardStateRequest> getShardState;
 	RequestStream<struct WaitMetricsRequest> waitMetrics;
@@ -79,17 +79,17 @@ struct StorageServerInterface {
 	RequestStream<struct StorageQueuingMetricsRequest> getQueuingMetrics;
 
 	RequestStream<ReplyPromise<KeyValueStoreType>> getKeyValueStoreType;
-	RequestStream<struct WatchValueRequest> watchValue;
+	PublicRequestStream<struct WatchValueRequest> watchValue;
 	RequestStream<struct ReadHotSubRangeRequest> getReadHotRanges;
 	RequestStream<struct SplitRangeRequest> getRangeSplitPoints;
-	RequestStream<struct GetKeyValuesStreamRequest> getKeyValuesStream;
-	RequestStream<struct ChangeFeedStreamRequest> changeFeedStream;
-	RequestStream<struct OverlappingChangeFeedsRequest> overlappingChangeFeeds;
-	RequestStream<struct ChangeFeedPopRequest> changeFeedPop;
-	RequestStream<struct ChangeFeedVersionUpdateRequest> changeFeedVersionUpdate;
-	RequestStream<struct GetCheckpointRequest> checkpoint;
-	RequestStream<struct FetchCheckpointRequest> fetchCheckpoint;
-	RequestStream<struct FetchCheckpointKeyValuesRequest> fetchCheckpointKeyValues;
+	PublicRequestStream<struct GetKeyValuesStreamRequest> getKeyValuesStream;
+	PublicRequestStream<struct ChangeFeedStreamRequest> changeFeedStream;
+	PublicRequestStream<struct OverlappingChangeFeedsRequest> overlappingChangeFeeds;
+	PublicRequestStream<struct ChangeFeedPopRequest> changeFeedPop;
+	PublicRequestStream<struct ChangeFeedVersionUpdateRequest> changeFeedVersionUpdate;
+	PublicRequestStream<struct GetCheckpointRequest> checkpoint;
+	PublicRequestStream<struct FetchCheckpointRequest> fetchCheckpoint;
+	PublicRequestStream<struct FetchCheckpointKeyValuesRequest> fetchCheckpointKeyValues;
 
 private:
 	bool acceptingRequests;
@@ -123,8 +123,9 @@ public:
 				serializer(ar, uniqueID, locality, getValue);
 			}
 			if (Ar::isDeserializing) {
-				getKey = RequestStream<struct GetKeyRequest>(getValue.getEndpoint().getAdjustedEndpoint(1));
-				getKeyValues = RequestStream<struct GetKeyValuesRequest>(getValue.getEndpoint().getAdjustedEndpoint(2));
+				getKey = PublicRequestStream<struct GetKeyRequest>(getValue.getEndpoint().getAdjustedEndpoint(1));
+				getKeyValues =
+				    PublicRequestStream<struct GetKeyValuesRequest>(getValue.getEndpoint().getAdjustedEndpoint(2));
 				getShardState =
 				    RequestStream<struct GetShardStateRequest>(getValue.getEndpoint().getAdjustedEndpoint(3));
 				waitMetrics = RequestStream<struct WaitMetricsRequest>(getValue.getEndpoint().getAdjustedEndpoint(4));
@@ -136,27 +137,29 @@ public:
 				    RequestStream<struct StorageQueuingMetricsRequest>(getValue.getEndpoint().getAdjustedEndpoint(8));
 				getKeyValueStoreType =
 				    RequestStream<ReplyPromise<KeyValueStoreType>>(getValue.getEndpoint().getAdjustedEndpoint(9));
-				watchValue = RequestStream<struct WatchValueRequest>(getValue.getEndpoint().getAdjustedEndpoint(10));
+				watchValue =
+				    PublicRequestStream<struct WatchValueRequest>(getValue.getEndpoint().getAdjustedEndpoint(10));
 				getReadHotRanges =
 				    RequestStream<struct ReadHotSubRangeRequest>(getValue.getEndpoint().getAdjustedEndpoint(11));
 				getRangeSplitPoints =
 				    RequestStream<struct SplitRangeRequest>(getValue.getEndpoint().getAdjustedEndpoint(12));
-				getKeyValuesStream =
-				    RequestStream<struct GetKeyValuesStreamRequest>(getValue.getEndpoint().getAdjustedEndpoint(13));
-				getMappedKeyValues =
-				    RequestStream<struct GetMappedKeyValuesRequest>(getValue.getEndpoint().getAdjustedEndpoint(14));
+				getKeyValuesStream = PublicRequestStream<struct GetKeyValuesStreamRequest>(
+				    getValue.getEndpoint().getAdjustedEndpoint(13));
+				getMappedKeyValues = PublicRequestStream<struct GetMappedKeyValuesRequest>(
+				    getValue.getEndpoint().getAdjustedEndpoint(14));
 				changeFeedStream =
-				    RequestStream<struct ChangeFeedStreamRequest>(getValue.getEndpoint().getAdjustedEndpoint(15));
-				overlappingChangeFeeds =
-				    RequestStream<struct OverlappingChangeFeedsRequest>(getValue.getEndpoint().getAdjustedEndpoint(16));
+				    PublicRequestStream<struct ChangeFeedStreamRequest>(getValue.getEndpoint().getAdjustedEndpoint(15));
+				overlappingChangeFeeds = PublicRequestStream<struct OverlappingChangeFeedsRequest>(
+				    getValue.getEndpoint().getAdjustedEndpoint(16));
 				changeFeedPop =
-				    RequestStream<struct ChangeFeedPopRequest>(getValue.getEndpoint().getAdjustedEndpoint(17));
-				changeFeedVersionUpdate = RequestStream<struct ChangeFeedVersionUpdateRequest>(
+				    PublicRequestStream<struct ChangeFeedPopRequest>(getValue.getEndpoint().getAdjustedEndpoint(17));
+				changeFeedVersionUpdate = PublicRequestStream<struct ChangeFeedVersionUpdateRequest>(
 				    getValue.getEndpoint().getAdjustedEndpoint(18));
-				checkpoint = RequestStream<struct GetCheckpointRequest>(getValue.getEndpoint().getAdjustedEndpoint(19));
+				checkpoint =
+				    PublicRequestStream<struct GetCheckpointRequest>(getValue.getEndpoint().getAdjustedEndpoint(19));
 				fetchCheckpoint =
-				    RequestStream<struct FetchCheckpointRequest>(getValue.getEndpoint().getAdjustedEndpoint(20));
-				fetchCheckpointKeyValues = RequestStream<struct FetchCheckpointKeyValuesRequest>(
+				    PublicRequestStream<struct FetchCheckpointRequest>(getValue.getEndpoint().getAdjustedEndpoint(20));
+				fetchCheckpointKeyValues = PublicRequestStream<struct FetchCheckpointKeyValuesRequest>(
 				    getValue.getEndpoint().getAdjustedEndpoint(21));
 			}
 		} else {

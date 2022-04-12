@@ -105,11 +105,11 @@ namespace {
 TransactionLineageCollector transactionLineageCollector;
 NameLineageCollector nameLineageCollector;
 
-template <class Interface, class Request>
+template <class Interface, class Request, bool P>
 Future<REPLY_TYPE(Request)> loadBalance(
     DatabaseContext* ctx,
     const Reference<LocationInfo> alternatives,
-    RequestStream<Request> Interface::*channel,
+    RequestStream<Request, P> Interface::*channel,
     const Request& request = Request(),
     TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint,
     AtMostOnce atMostOnce =
@@ -2541,7 +2541,7 @@ void stopNetwork() {
 	if (!g_network)
 		throw network_not_setup();
 
-	TraceEvent("ClientStopNetwork");
+	TraceEvent("ClientStopNetwork").log();
 	g_network->stop();
 	closeTraceFile();
 }
@@ -3771,7 +3771,7 @@ void transformRangeLimits(GetRangeLimits limits, Reverse reverse, GetKeyValuesFa
 }
 
 template <class GetKeyValuesFamilyRequest>
-RequestStream<GetKeyValuesFamilyRequest> StorageServerInterface::*getRangeRequestStream() {
+PublicRequestStream<GetKeyValuesFamilyRequest> StorageServerInterface::*getRangeRequestStream() {
 	if constexpr (std::is_same<GetKeyValuesFamilyRequest, GetKeyValuesRequest>::value) {
 		return &StorageServerInterface::getKeyValues;
 	} else if (std::is_same<GetKeyValuesFamilyRequest, GetMappedKeyValuesRequest>::value) {
@@ -4597,9 +4597,9 @@ static Future<Void> tssStreamComparison(Request request,
 
 // Currently only used for GetKeyValuesStream but could easily be plugged for other stream types
 // User of the stream has to forward the SS's responses to the returned promise stream, if it is set
-template <class Request>
+template <class Request, bool P>
 Optional<TSSDuplicateStreamData<REPLYSTREAM_TYPE(Request)>>
-maybeDuplicateTSSStreamFragment(Request& req, QueueModel* model, RequestStream<Request> const* ssStream) {
+maybeDuplicateTSSStreamFragment(Request& req, QueueModel* model, RequestStream<Request, P> const* ssStream) {
 	if (model) {
 		Optional<TSSEndpointData> tssData = model->getTssData(ssStream->getEndpoint().token.first());
 

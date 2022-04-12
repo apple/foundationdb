@@ -312,6 +312,10 @@ ERROR( encrypt_invalid_id, 2706, "Invalid encryption domainId or encryption ciph
 ERROR( unknown_error, 4000, "An unknown error occurred" )  // C++ exception not of type Error
 ERROR( internal_error, 4100, "An internal error occurred" )
 ERROR( not_implemented, 4200, "Not implemented yet" )
+
+// 6xxx Authorization and authentication error codes
+ERROR( permission_denied, 6000, "Client tried to access unauthorized data" )
+ERROR( unauthorized_attempt, 6001, "A untrusted client tried to send a message to a private endpoint" )
 // clang-format on
 
 #undef ERROR

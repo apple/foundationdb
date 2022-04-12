@@ -29,6 +29,9 @@
 #include "fdbclient/Tenant.h"
 #include "fdbrpc/Stats.h"
 #include "fdbserver/Knobs.h"
+#include "fdbserver/LogSystem.h"
+#include "fdbserver/MasterInterface.h"
+#include "fdbserver/ResolverInterface.h"
 #include "fdbserver/LogSystemDiskQueueAdapter.h"
 #include "flow/IRandom.h"
 
@@ -193,8 +196,8 @@ struct ProxyCommitData {
 	NotifiedVersion latestLocalCommitBatchResolving;
 	NotifiedVersion latestLocalCommitBatchLogging;
 
-	RequestStream<GetReadVersionRequest> getConsistentReadVersion;
-	RequestStream<CommitTransactionRequest> commit;
+	PublicRequestStream<GetReadVersionRequest> getConsistentReadVersion;
+	PublicRequestStream<CommitTransactionRequest> commit;
 	Database cx;
 	Reference<AsyncVar<ServerDBInfo> const> db;
 	EventMetricHandle<SingleKeyMutation> singleKeyMutationEvent;
@@ -273,9 +276,9 @@ struct ProxyCommitData {
 
 	ProxyCommitData(UID dbgid,
 	                MasterInterface master,
-	                RequestStream<GetReadVersionRequest> getConsistentReadVersion,
+	                PublicRequestStream<GetReadVersionRequest> getConsistentReadVersion,
 	                Version recoveryTransactionVersion,
-	                RequestStream<CommitTransactionRequest> commit,
+	                PublicRequestStream<CommitTransactionRequest> commit,
 	                Reference<AsyncVar<ServerDBInfo> const> db,
 	                bool firstProxy)
 	  : dbgid(dbgid), commitBatchesMemBytesCount(0),

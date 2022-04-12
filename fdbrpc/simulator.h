@@ -87,6 +87,7 @@ public:
 		UID uid;
 
 		ProtocolVersion protocolVersion;
+		bool excludeFromRestarts = false;
 
 		std::vector<ProcessInfo*> childs;
 

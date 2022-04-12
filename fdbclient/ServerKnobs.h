@@ -819,6 +819,7 @@ public:
 	// Encryption
 	bool ENABLE_ENCRYPTION;
 	std::string ENCRYPTION_MODE;
+	int SIM_KMS_MAX_KEYS;
 
 	// blob granule stuff
 	// FIXME: configure url with database configuration instead of knob eventually
