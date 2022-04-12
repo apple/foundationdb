@@ -292,7 +292,7 @@ fdb_install(
   DESTINATION lib
   COMPONENT clients)
 fdb_install(
-  FILES foundationdb/fdb_c.h
+  FILES foundationdb/fdb_c.h foundationdb/fdb_c_types.h foundationdb/fdb_c_internal.h
   ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/fdb_c_options.g.h
   ${CMAKE_SOURCE_DIR}/fdbclient/vexillographer/fdb.options
   DESTINATION include
