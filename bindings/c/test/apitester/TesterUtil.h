@@ -27,6 +27,7 @@
 #include <ostream>
 #include <optional>
 #include <fmt/format.h>
+#include <chrono>
 
 namespace fmt {
 
@@ -84,6 +85,21 @@ void print_internal_error(const char* msg, const char* file, int line);
 			abort();                                                                                                   \
 		}                                                                                                              \
 	} while (false) // For use in destructors, where throwing exceptions is extremely dangerous
+
+using TimePoint = std::chrono::steady_clock::time_point;
+using TimeDuration = std::chrono::microseconds::rep;
+
+static inline TimePoint timeNow() {
+	return std::chrono::steady_clock::now();
+}
+
+static inline TimeDuration timeElapsedInUs(const TimePoint& start, const TimePoint& end) {
+	return std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+}
+
+static inline TimeDuration timeElapsedInUs(const TimePoint& start) {
+	return timeElapsedInUs(start, timeNow());
+}
 
 } // namespace FdbApiTester
 

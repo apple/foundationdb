@@ -22,6 +22,7 @@
 #include <cstdio>
 #include <algorithm>
 #include <ctype.h>
+#include <chrono>
 
 namespace FdbApiTester {
 

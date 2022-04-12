@@ -20,6 +20,7 @@
 
 #include "TesterTransactionExecutor.h"
 #include "TesterUtil.h"
+#include "foundationdb/fdb_c_types.h"
 #include "test/apitester/TesterScheduler.h"
 #include <memory>
 #include <unordered_map>
@@ -30,6 +31,8 @@
 #include <fmt/format.h>
 
 namespace FdbApiTester {
+
+constexpr int LONG_WAIT_TIME_US = 100000;
 
 void TransactionActorBase::complete(fdb_error_t err) {
 	error = err;
@@ -70,7 +73,8 @@ public:
 	                       std::shared_ptr<ITransactionActor> txActor,
 	                       TTaskFct cont,
 	                       IScheduler* scheduler)
-	  : fdbTx(tx), txActor(txActor), contAfterDone(cont), scheduler(scheduler), txState(TxState::IN_PROGRESS) {}
+	  : fdbTx(tx), txActor(txActor), contAfterDone(cont), scheduler(scheduler), txState(TxState::IN_PROGRESS),
+	    commitCalled(false) {}
 
 	// A state machine:
 	// IN_PROGRESS -> (ON_ERROR -> IN_PROGRESS)* [-> ON_ERROR] -> DONE
@@ -87,6 +91,7 @@ public:
 		if (txState != TxState::IN_PROGRESS) {
 			return;
 		}
+		commitCalled = true;
 		lock.unlock();
 		Future f = fdbTx.commit();
 		auto thisRef = shared_from_this();
@@ -147,6 +152,7 @@ protected:
 			std::unique_lock<std::mutex> lock(mutex);
 			txState = TxState::IN_PROGRESS;
 			lock.unlock();
+			commitCalled = false;
 			txActor->start();
 		}
 	}
@@ -171,6 +177,15 @@ protected:
 
 	// onError future used in ON_ERROR state
 	Future onErrorFuture;
+
+	// The error code on which onError was called
+	fdb_error_t onErrorArg;
+
+	// The time point of calling onError
+	TimePoint onErrorCallTimePoint;
+
+	// Transaction is committed or being committed
+	bool commitCalled;
 };
 
 /**
@@ -197,12 +212,21 @@ protected:
 			return;
 		}
 		lock.unlock();
+		auto start = timeNow();
 		fdb_error_t err = fdb_future_block_until_ready(f.fdbFuture());
 		if (err) {
 			transactionFailed(err);
 			return;
 		}
 		err = f.getError();
+		auto waitTimeUs = timeElapsedInUs(start);
+		if (waitTimeUs > LONG_WAIT_TIME_US) {
+			fmt::print("Long waiting time on a future: {}us, return code {} ({}), commit called: {}\n",
+			           waitTimeUs,
+			           err,
+			           fdb_get_error(err),
+			           commitCalled);
+		}
 		if (err == error_code_transaction_cancelled) {
 			return;
 		}
@@ -225,10 +249,21 @@ protected:
 
 		ASSERT(!onErrorFuture);
 		onErrorFuture = fdbTx.onError(err);
+
+		auto start = timeNow();
 		fdb_error_t err2 = fdb_future_block_until_ready(onErrorFuture.fdbFuture());
 		if (err2) {
 			transactionFailed(err2);
 			return;
+		}
+		auto waitTimeUs = timeElapsedInUs(start);
+		if (waitTimeUs > LONG_WAIT_TIME_US) {
+			fdb_error_t err3 = onErrorFuture.getError();
+			fmt::print("Long waiting time on onError({}) future: {}us, return code {} ({})\n",
+			           err,
+			           waitTimeUs,
+			           err3,
+			           fdb_get_error(err3));
 		}
 		auto thisRef = std::static_pointer_cast<BlockingTransactionContext>(shared_from_this());
 		scheduler->schedule([thisRef]() { thisRef->handleOnErrorResult(); });
@@ -252,7 +287,7 @@ protected:
 		if (txState != TxState::IN_PROGRESS) {
 			return;
 		}
-		callbackMap[f.fdbFuture()] = CallbackInfo{ f, cont, shared_from_this(), retryOnError };
+		callbackMap[f.fdbFuture()] = CallbackInfo{ f, cont, shared_from_this(), retryOnError, timeNow() };
 		lock.unlock();
 		fdb_error_t err = fdb_future_set_callback(f.fdbFuture(), futureReadyCallback, this);
 		if (err) {
@@ -269,6 +304,7 @@ protected:
 	}
 
 	void onFutureReady(FDBFuture* f) {
+		auto endTime = timeNow();
 		injectRandomSleep();
 		// Hold a reference to this to avoid it to be
 		// destroyed before releasing the mutex
@@ -283,6 +319,11 @@ protected:
 		}
 		lock.unlock();
 		fdb_error_t err = fdb_future_get_error(f);
+		auto waitTimeUs = timeElapsedInUs(cbInfo.startTime, endTime);
+		if (waitTimeUs > LONG_WAIT_TIME_US) {
+			fmt::print(
+			    "Long waiting time on a future: {}us, return code {} ({})\n", waitTimeUs, err, fdb_get_error(err));
+		}
 		if (err == error_code_transaction_cancelled) {
 			return;
 		}
@@ -303,7 +344,9 @@ protected:
 		lock.unlock();
 
 		ASSERT(!onErrorFuture);
+		onErrorArg = err;
 		onErrorFuture = tx()->onError(err);
+		onErrorCallTimePoint = timeNow();
 		onErrorThisRef = std::static_pointer_cast<AsyncTransactionContext>(shared_from_this());
 		fdb_error_t err2 = fdb_future_set_callback(onErrorFuture.fdbFuture(), onErrorReadyCallback, this);
 		if (err2) {
@@ -318,6 +361,15 @@ protected:
 	}
 
 	void onErrorReady(FDBFuture* f) {
+		auto waitTimeUs = timeElapsedInUs(onErrorCallTimePoint);
+		if (waitTimeUs > LONG_WAIT_TIME_US) {
+			fdb_error_t err = onErrorFuture.getError();
+			fmt::print("Long waiting time on onError({}): {}us, return code {} ({})\n",
+			           onErrorArg,
+			           waitTimeUs,
+			           err,
+			           fdb_get_error(err));
+		}
 		injectRandomSleep();
 		auto thisRef = onErrorThisRef;
 		onErrorThisRef = {};
@@ -353,6 +405,7 @@ protected:
 		TTaskFct cont;
 		std::shared_ptr<ITransactionContext> thisRef;
 		bool retryOnError;
+		TimePoint startTime;
 	};
 
 	// Map for keeping track of future waits and holding necessary object references
