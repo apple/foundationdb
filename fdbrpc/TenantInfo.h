@@ -39,9 +39,6 @@ struct TenantInfo {
 
 	TenantInfo() : tenantId(INVALID_TENANT) {}
 	TenantInfo(TenantName name, int64_t tenantId) : name(name), tenantId(tenantId) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {}
 };
 
 #endif // FDBRPC_TENANTINFO_H_
