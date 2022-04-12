@@ -205,7 +205,7 @@ const Value serverListValue(StorageServerInterface const&);
 UID decodeServerListKey(KeyRef const&);
 StorageServerInterface decodeServerListValue(ValueRef const&);
 
-const Value swVersionValue(SWVersion const& swversion);
+Value swVersionValue(SWVersion const& swversion);
 SWVersion decodeSWVersionValue(ValueRef const&);
 
 //    "\xff/processClass/[[processID]]" := "[[ProcessClass]]"
