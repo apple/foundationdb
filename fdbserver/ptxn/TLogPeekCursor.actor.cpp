@@ -250,7 +250,7 @@ StorageTeamPeekCursor::StorageTeamPeekCursor(const Version& beginVersion_,
                                              const bool reportEmptyVersion_)
   : VersionSubsequencePeekCursorBase(), storageTeamID(storageTeamID_), pTLogInterfaces(pTLogInterfaces_),
     pAttachArena(pArena_), deserializer(emptyCursorHeader(), /* reportEmptyVersion_ */ true),
-    wrappedDeserializerIter(deserializer.begin(), pArena_), beginVersion(beginVersion_),
+    wrappedDeserializerIter(deserializer.begin(), &localArena), beginVersion(beginVersion_),
     reportEmptyVersion(reportEmptyVersion_), rpcVersion(beginVersion_) {
 
 	for (const auto pTLogInterface : pTLogInterfaces) {
