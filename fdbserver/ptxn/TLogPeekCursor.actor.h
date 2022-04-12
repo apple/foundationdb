@@ -257,6 +257,11 @@ private:
 	// it will not be GCed after the ACTOR terminates.
 	Arena workArena;
 
+	// This is the cursor-wide arena that has the same lifetime as the cursor. This arena is used to depend on all the
+	// parsed mutationRef to make sure that the data is still around before the next iteration.
+	// TODO(PTXN): remove this arena once we switch to use ArenaReader.
+	Arena localArena;
+
 	// The version the cursor begins, all versions that are smaller than beginVersion will be ignored by remote TLog
 	const Version beginVersion;
 
