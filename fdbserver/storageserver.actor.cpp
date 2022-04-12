@@ -5547,12 +5547,7 @@ void updateVersion(StorageServerBase* pStorageServerContext,
 namespace ptxn {
 
 const StorageTeamID& getStoragePrivateMutationTeam(const ptxn::StorageServer& storageServerContext) {
-	// FIXME Rethink this
-	if (storageServerContext.storageTeamIDs.present() && storageServerContext.storageTeamIDs.get().size() == 1) {
-		return *storageServerContext.storageTeamIDs.get().begin();
-	} else {
-		return storageServerContext.thisServerID; // NOTE: Private team is same as SSID.
-	}
+	return storageServerContext.thisServerID; // NOTE: Private team is same as SSID.
 }
 
 std::vector<ptxn::TLogInterfaceBase*> getTLogInterfaceByStorageTeamID(const ServerDBInfo& serverDBInfo,
@@ -5994,7 +5989,10 @@ ACTOR Future<Void> update(std::shared_ptr<ptxn::StorageServer> storageServerCont
 		// Need a local copy of error as there is a wait in the catch clause
 		state Error error_ = error;
 		if (error.code() != error_code_worker_removed && error.code() != error_code_please_reboot) {
-			TraceEvent(SevError, "SSUpdateError", storageServerContext->thisServerID).error(error).backtrace();
+			TraceEvent(
+			    g_network->isSimulated() ? SevWarn : SevWarnAlways, "SSUpdateError", storageServerContext->thisServerID)
+			    .error(error)
+			    .backtrace();
 		} else if (error.code() == error_code_please_reboot) {
 			wait(storageServerContext->durableInProgress);
 		}
@@ -7680,7 +7678,10 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 
 	if (storageTeams.present()) {
 		const auto& storageTeamIDs = storageTeams.get();
-		self->storageTeamIDs = std::set<ptxn::StorageTeamID>(std::begin(storageTeamIDs), std::end(storageTeamIDs));
+		self->storageTeamIDs = std::set<ptxn::StorageTeamID>(
+		    ++std::begin(storageTeamIDs),
+		    std::end(storageTeamIDs)); // Skip private team since it is known to be the SSID of this storage server.
+		                               // TODO(PTXN): rethink this.
 		for (const auto& storageTeamID : self->storageTeamIDs.get()) {
 			TraceEvent("StorageServerInit", ssi.id()).detail("StorageTeamID", storageTeamID);
 		}
