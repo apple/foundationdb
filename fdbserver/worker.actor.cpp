@@ -2750,8 +2750,6 @@ ACTOR Future<Void> testAndUpdateSoftwareVersionCompatibility(std::string dataFol
 static const std::string swversionTestDirName = "sw-version-test";
 
 TEST_CASE("/fdbserver/worker/swversion/noversionhistory") {
-	wait(Future<Void>(Void()));
-
 	if (!platform::createDirectory("sw-version-test")) {
 		TraceEvent(SevWarnAlways, "FailedToCreateDirectory").detail("Directory", "sw-version-test");
 		return Void();
@@ -2770,8 +2768,6 @@ TEST_CASE("/fdbserver/worker/swversion/noversionhistory") {
 }
 
 TEST_CASE("/fdbserver/worker/swversion/writeVerifyVersion") {
-	wait(Future<Void>(Void()));
-
 	if (!platform::createDirectory("sw-version-test")) {
 		TraceEvent(SevWarnAlways, "FailedToCreateDirectory").detail("Directory", "sw-version-test");
 		return Void();
@@ -2797,8 +2793,6 @@ TEST_CASE("/fdbserver/worker/swversion/writeVerifyVersion") {
 }
 
 TEST_CASE("/fdbserver/worker/swversion/runCompatibleOlder") {
-	wait(Future<Void>(Void()));
-
 	if (!platform::createDirectory("sw-version-test")) {
 		TraceEvent(SevWarnAlways, "FailedToCreateDirectory").detail("Directory", "sw-version-test");
 		return Void();
@@ -2840,8 +2834,6 @@ TEST_CASE("/fdbserver/worker/swversion/runCompatibleOlder") {
 }
 
 TEST_CASE("/fdbserver/worker/swversion/runIncompatibleOlder") {
-	wait(Future<Void>(Void()));
-
 	if (!platform::createDirectory("sw-version-test")) {
 		TraceEvent(SevWarnAlways, "FailedToCreateDirectory").detail("Directory", "sw-version-test");
 		return Void();
@@ -2872,8 +2864,6 @@ TEST_CASE("/fdbserver/worker/swversion/runIncompatibleOlder") {
 }
 
 TEST_CASE("/fdbserver/worker/swversion/runNewer") {
-	wait(Future<Void>(Void()));
-
 	if (!platform::createDirectory("sw-version-test")) {
 		TraceEvent(SevWarnAlways, "FailedToCreateDirectory").detail("Directory", "sw-version-test");
 		return Void();
