@@ -99,7 +99,6 @@ public:
 	                      const StorageTeamID& privateMutationStorageTeamID_,
 	                      const TLogInterfaceByStorageTeamIDFunc& getTLogInterfaceByStorageTeamID_,
 	                      const Version& initialVersion_)
-
 	  : BaseClass(initialVersion_), serverID(serverID_),
 	    storageServerToTeamIDKey(::storageServerToTeamIdKey(serverID_)),
 	    storageTeamIDsSnapshot(privateMutationStorageTeamID_), storageTeamIDs(privateMutationStorageTeamID_),

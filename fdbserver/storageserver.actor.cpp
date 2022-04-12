@@ -5607,7 +5607,8 @@ void initializeUpdateCursor(ptxn::StorageServer& storageServerContext) {
 	    storageServerContext.storageServerStorageTeams,
 	    [referencedServerDBInfo](const StorageTeamID& storageTeamID) -> auto {
 		    return getTLogInterfaceByStorageTeamID(referencedServerDBInfo->get(), storageTeamID);
-	    });
+	    },
+		storageServerContext.version.get() + 1);
 
 	storageServerContext.storageServerToTeamIDKey =
 	    std::dynamic_pointer_cast<merged::OrderedMutableTeamPeekCursor>(storageServerContext.logCursor)
