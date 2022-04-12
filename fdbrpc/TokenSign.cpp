@@ -184,16 +184,6 @@ TEST_CASE("/fdbrpc/TokenSign") {
 		auto arena = token.arena();
 		auto& rng = *deterministicRandom();
 		token.expiresAt = timer_monotonic() * (0.5 + rng.random01());
-		if (auto set_ip = rng.randomInt(0, 3)) {
-			if (set_ip == 1) {
-				token.ipAddress = IPAddress(rng.randomUInt32());
-			} else {
-				auto v6 = std::array<uint8_t, 16>{};
-				for (auto& byte : v6)
-					byte = rng.randomUInt32() & 255;
-				token.ipAddress = IPAddress(v6);
-			}
-		}
 		auto random_stringref = [&arena, &rng]() {
 			const auto len = rng.randomInt(1, 21);
 			auto s_raw = new (arena) uint8_t[len];

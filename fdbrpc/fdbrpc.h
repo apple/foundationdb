@@ -662,7 +662,11 @@ struct NetNotifiedQueue final : NotifiedQueue<T>, FlowReceiver, FastAllocated<Ne
 		this->addPromiseRef();
 		T message;
 		reader.deserialize(message);
-		this->send(std::move(message));
+		if (!message.verify()) {
+			message.reply.sendError(permission_denied());
+		} else {
+			this->send(std::move(message));
+		}
 		this->delPromiseRef();
 	}
 	bool isStream() const override { return true; }

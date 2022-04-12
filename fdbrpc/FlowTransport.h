@@ -289,6 +289,8 @@ public:
 
 	HealthMonitor* healthMonitor();
 
+	void authorizationTokenAdd(StringRef signedToken);
+
 private:
 	class TransportData* self;
 };

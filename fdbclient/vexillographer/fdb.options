@@ -145,6 +145,10 @@ description is not currently required but encouraged.
             description="This option tells a child on a multiversion client what transport ID to use."
             paramType="Int" paramDescription="Transport ID for the child connection"
             hidden="true" />
+    <Option name="authorization_token_add" code="2000"
+            description="Add a given authorization token to the network thread so that future requests are authorized"
+            paramType="String" paramDescription="A signed token serialized using flatbuffers"
+            hidden="true" />
   </Scope>
 
   <Scope name="DatabaseOption">

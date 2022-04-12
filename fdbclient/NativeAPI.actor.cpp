@@ -2449,6 +2449,10 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 	case FDBNetworkOptions::EXTERNAL_CLIENT:
 		networkOptions.primaryClient = false;
 		break;
+	case FDBNetworkOptions::AUTHORIZATION_TOKEN_ADD:
+		validateOptionValuePresent(value);
+		FlowTransport::transport().authorizationTokenAdd(value.get());
+		break;
 	default:
 		break;
 	}

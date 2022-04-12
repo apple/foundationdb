@@ -26,16 +26,18 @@
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/FileIdentifier.h"
+#include "fdbrpc/TenantInfo.h"
+#include "fdbrpc/TenantInfo.h"
 
 struct Token {
 	static constexpr FileIdentifier file_identifier = 1523118;
+	Arena arena;
 	double expiresAt;
-	IPAddress ipAddress;
-	VectorRef<StringRef> tenants;
+	VectorRef<TenantNameRef> tenants;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, expiresAt, ipAddress, tenants);
+		serializer(ar, expiresAt, tenants, arena);
 	}
 };
 

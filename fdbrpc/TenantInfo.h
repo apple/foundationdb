@@ -22,52 +22,26 @@
 #ifndef FDBRPC_TENANTINFO_H_
 #define FDBRPC_TENANTINFO_H_
 #include "flow/Arena.h"
-#include "fdbrpc/fdbrpc.h"
-#include <set>
 
-struct TenantInfoRef {
-	TenantInfoRef() {}
-	TenantInfoRef(Arena& p, StringRef toCopy) : tenantName(StringRef(p, toCopy)) {}
-	TenantInfoRef(Arena& p, TenantInfoRef toCopy)
-	  : tenantName(toCopy.tenantName.present() ? Optional<StringRef>(StringRef(p, toCopy.tenantName.get()))
-	                                           : Optional<StringRef>()) {}
-	// Empty tenant name means that the peer is trusted
-	Optional<StringRef> tenantName;
+typedef StringRef TenantNameRef;
+typedef Standalone<TenantNameRef> TenantName;
 
-	bool operator<(TenantInfoRef const& other) const {
-		if (!other.tenantName.present()) {
-			return false;
-		}
-		if (!tenantName.present()) {
-			return true;
-		}
-		return tenantName.get() < other.tenantName.get();
-	}
+struct TenantInfo {
+	static const int64_t INVALID_TENANT = -1;
 
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, tenantName);
-	}
-};
-
-struct AuthorizedTenants : ReferenceCounted<AuthorizedTenants> {
-	Arena arena;
-	std::set<TenantInfoRef> authorizedTenants;
+	Optional<TenantName> name;
+	int64_t tenantId;
+	// this field is not serialized and instead set by FlowTransport during
+	// deserialization. This field indicates whether the client is trusted.
+	// Untrusted clients are generally expected to set a TenantName
 	bool trusted = false;
-};
+	bool verified = false;
 
-// TODO: receive and validate token instead
-struct AuthorizationRequest {
-	constexpr static FileIdentifier file_identifier = 11499331;
-
-	Arena arena;
-	VectorRef<TenantInfoRef> tenants;
-	ReplyPromise<Void> reply;
+	TenantInfo() : tenantId(INVALID_TENANT) {}
+	TenantInfo(TenantName name, int64_t tenantId) : name(name), tenantId(tenantId) {}
 
 	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, tenants, reply, arena);
-	}
+	void serialize(Ar& ar) {}
 };
 
 #endif // FDBRPC_TENANTINFO_H_

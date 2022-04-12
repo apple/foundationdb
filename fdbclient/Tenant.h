@@ -24,10 +24,8 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/VersionedMap.h"
+#include "fdbrpc/TenantInfo.h"
 #include "flow/flat_buffers.h"
-
-typedef StringRef TenantNameRef;
-typedef Standalone<TenantNameRef> TenantName;
 
 struct TenantMapEntry {
 	constexpr static FileIdentifier file_identifier = 12247338;

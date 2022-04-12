@@ -27,7 +27,7 @@
 #include <memcheck.h>
 #endif
 
-#include "fdbrpc/TenantInfo.h"
+#include "fdbrpc/TenantAuth.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/HealthMonitor.h"
@@ -246,15 +246,15 @@ struct TenantAuthorizer final : NetworkMessageReceiver {
 		AuthorizationRequest req;
 		try {
 			reader.deserialize(req);
-			// TODO: verify that token is valid
+			// TODO: check signature
+			Token token = ObjectReader::fromStringRef<Token>(req.token.token, Unversioned());
 			AuthorizedTenants& auth = reader.variable<AuthorizedTenants>("AuthorizedTenants");
-			for (auto const& t : req.tenants) {
-				auth.authorizedTenants.insert(TenantInfoRef(auth.arena, t));
+			for (const auto& t : token.tenants) {
+				auth.authorizedTenants.insert(t);
 			}
-			req.reply.send(Void());
 		} catch (Error& e) {
 			if (e.code() == error_code_permission_denied) {
-				req.reply.sendError(e);
+				TraceEvent(SevError, "ReceivedInvalidToken").detail("From", g_currentDeliveryPeerAddress.address).log();
 			} else {
 				throw;
 			}
@@ -332,6 +332,8 @@ public:
 
 	Future<Void> multiVersionCleanup;
 	Future<Void> pingLogger;
+
+	std::vector<SignedToken> tokens;
 };
 
 ACTOR Future<Void> pingLatencyLogger(TransportData* self) {
@@ -1903,4 +1905,21 @@ void FlowTransport::createInstance(bool isClient,
 
 HealthMonitor* FlowTransport::healthMonitor() {
 	return &self->healthMonitor;
+}
+
+void FlowTransport::authorizationTokenAdd(StringRef signedToken) {
+	auto token = ObjectReader::fromStringRef<SignedToken>(signedToken, Unversioned());
+	self->tokens.push_back(token);
+	AuthorizationRequest req;
+	req.token = token;
+	// send the token to all existing peers
+	for (auto peer : self->peers) {
+		NetworkAddressList addr;
+		addr.address = peer.first;
+		sendPacket(self,
+		           peer.second,
+		           SerializeSource<AuthorizationRequest>(req),
+		           Endpoint::wellKnown(addr, WLTOKEN_AUTH_TENANT),
+		           false);
+	}
 }

@@ -240,21 +240,6 @@ struct ServerCacheInfo {
 	}
 };
 
-struct TenantInfo {
-	static const int64_t INVALID_TENANT = -1;
-
-	Optional<TenantName> name;
-	int64_t tenantId;
-
-	TenantInfo() : tenantId(INVALID_TENANT) {}
-	TenantInfo(TenantName name, int64_t tenantId) : name(name), tenantId(tenantId) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, name, tenantId);
-	}
-};
-
 struct GetValueReply : public LoadBalancedReply {
 	constexpr static FileIdentifier file_identifier = 1378929;
 	Optional<Value> value;
@@ -281,6 +266,8 @@ struct GetValueRequest : TimedRequest {
 	VersionVector ssLatestCommitVersions; // includes the latest commit versions, as known
 	                                      // to this client, of all storage replicas that
 	                                      // serve the given key
+
+	bool verify() const { return tenantInfo.verified; }
 
 	GetValueRequest() {}
 	GetValueRequest(SpanID spanContext,
