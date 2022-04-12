@@ -27,7 +27,7 @@
 #include <unordered_map>
 #include <vector>
 
-#define FDB_API_VERSION 710
+#define FDB_API_VERSION 720
 
 namespace FdbApiTester {
 

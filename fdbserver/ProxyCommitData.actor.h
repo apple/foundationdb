@@ -29,6 +29,9 @@
 #include "fdbclient/Tenant.h"
 #include "fdbrpc/Stats.h"
 #include "fdbserver/Knobs.h"
+#include "fdbserver/LogSystem.h"
+#include "fdbserver/MasterInterface.h"
+#include "fdbserver/ResolverInterface.h"
 #include "fdbserver/LogSystemDiskQueueAdapter.h"
 #include "flow/IRandom.h"
 
@@ -177,6 +180,9 @@ struct ProxyCommitData {
 	uint64_t commitVersionRequestNumber;
 	uint64_t mostRecentProcessedRequestNumber;
 	KeyRangeMap<Deque<std::pair<Version, int>>> keyResolvers;
+	// When all resolvers process system keys (for private mutations), the "keyResolvers"
+	// only tracks normalKeys. This is used for tracking versions for systemKeys.
+	Deque<Version> systemKeyVersions;
 	KeyRangeMap<ServerCacheInfo> keyInfo; // keyrange -> all storage servers in all DCs for the keyrange
 	KeyRangeMap<bool> cacheInfo;
 	std::map<Key, ApplyMutationsData> uid_applyMutationsData;
@@ -190,8 +196,8 @@ struct ProxyCommitData {
 	NotifiedVersion latestLocalCommitBatchResolving;
 	NotifiedVersion latestLocalCommitBatchLogging;
 
-	RequestStream<GetReadVersionRequest> getConsistentReadVersion;
-	RequestStream<CommitTransactionRequest> commit;
+	PublicRequestStream<GetReadVersionRequest> getConsistentReadVersion;
+	PublicRequestStream<CommitTransactionRequest> commit;
 	Database cx;
 	Reference<AsyncVar<ServerDBInfo> const> db;
 	EventMetricHandle<SingleKeyMutation> singleKeyMutationEvent;
@@ -270,9 +276,9 @@ struct ProxyCommitData {
 
 	ProxyCommitData(UID dbgid,
 	                MasterInterface master,
-	                RequestStream<GetReadVersionRequest> getConsistentReadVersion,
+	                PublicRequestStream<GetReadVersionRequest> getConsistentReadVersion,
 	                Version recoveryTransactionVersion,
-	                RequestStream<CommitTransactionRequest> commit,
+	                PublicRequestStream<CommitTransactionRequest> commit,
 	                Reference<AsyncVar<ServerDBInfo> const> db,
 	                bool firstProxy)
 	  : dbgid(dbgid), commitBatchesMemBytesCount(0),

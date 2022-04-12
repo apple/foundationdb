@@ -33,7 +33,7 @@ public class BlockingBenchmark {
 	private static final int PARALLEL = 100;
 
 	public static void main(String[] args) throws InterruptedException {
-		FDB fdb = FDB.selectAPIVersion(710);
+		FDB fdb = FDB.selectAPIVersion(720);
 
 		// The cluster file DOES NOT need to be valid, although it must exist.
 		//  This is because the database is never really contacted in this test.

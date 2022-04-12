@@ -34,7 +34,7 @@ import com.apple.foundationdb.Transaction;
 import com.apple.foundationdb.async.AsyncIterable;
 
 public class RangeTest {
-	private static final int API_VERSION = 710;
+	private static final int API_VERSION = 720;
 
 	public static void main(String[] args) {
 		System.out.println("About to use version " + API_VERSION);

@@ -823,6 +823,7 @@ std::vector<std::pair<UID, Version>> decodeBackupStartedValue(const ValueRef& va
 const KeyRef coordinatorsKey = LiteralStringRef("\xff/coordinators");
 const KeyRef logsKey = LiteralStringRef("\xff/logs");
 const KeyRef minRequiredCommitVersionKey = LiteralStringRef("\xff/minRequiredCommitVersion");
+const KeyRef versionEpochKey = LiteralStringRef("\xff/versionEpoch");
 
 const KeyRef globalKeysPrefix = LiteralStringRef("\xff/globals");
 const KeyRef lastEpochEndKey = LiteralStringRef("\xff/globals/lastEpochEnd");
@@ -1155,9 +1156,9 @@ const KeyRangeRef blobGranuleMappingKeys(LiteralStringRef("\xff\x02/bgm/"), Lite
 const KeyRangeRef blobGranuleLockKeys(LiteralStringRef("\xff\x02/bgl/"), LiteralStringRef("\xff\x02/bgl0"));
 const KeyRangeRef blobGranuleSplitKeys(LiteralStringRef("\xff\x02/bgs/"), LiteralStringRef("\xff\x02/bgs0"));
 const KeyRangeRef blobGranuleHistoryKeys(LiteralStringRef("\xff\x02/bgh/"), LiteralStringRef("\xff\x02/bgh0"));
-const KeyRangeRef blobGranulePruneKeys(LiteralStringRef("\xff\x02/bgp/"), LiteralStringRef("\xff\x02/bgp0"));
+const KeyRangeRef blobGranulePurgeKeys(LiteralStringRef("\xff\x02/bgp/"), LiteralStringRef("\xff\x02/bgp0"));
 const KeyRangeRef blobGranuleVersionKeys(LiteralStringRef("\xff\x02/bgv/"), LiteralStringRef("\xff\x02/bgv0"));
-const KeyRef blobGranulePruneChangeKey = LiteralStringRef("\xff\x02/bgpChange");
+const KeyRef blobGranulePurgeChangeKey = LiteralStringRef("\xff\x02/bgpChange");
 
 const uint8_t BG_FILE_TYPE_DELTA = 'D';
 const uint8_t BG_FILE_TYPE_SNAPSHOT = 'S';
@@ -1214,7 +1215,7 @@ std::tuple<Standalone<StringRef>, int64_t, int64_t, int64_t> decodeBlobGranuleFi
 	return std::tuple(filename, offset, length, fullFileLength);
 }
 
-const Value blobGranulePruneValueFor(Version version, KeyRange range, bool force) {
+const Value blobGranulePurgeValueFor(Version version, KeyRange range, bool force) {
 	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBlobGranule()));
 	wr << version;
 	wr << range;
@@ -1222,7 +1223,7 @@ const Value blobGranulePruneValueFor(Version version, KeyRange range, bool force
 	return wr.toValue();
 }
 
-std::tuple<Version, KeyRange, bool> decodeBlobGranulePruneValue(ValueRef const& value) {
+std::tuple<Version, KeyRange, bool> decodeBlobGranulePurgeValue(ValueRef const& value) {
 	Version version;
 	KeyRange range;
 	bool force;

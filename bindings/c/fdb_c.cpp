@@ -21,7 +21,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "flow/ProtocolVersion.h"
 #include <cstdint>
-#define FDB_API_VERSION 710
+#define FDB_API_VERSION 720
 #define FDB_INCLUDE_LEGACY_TYPES
 
 #include "fdbclient/MultiVersionTransaction.h"
@@ -464,6 +464,27 @@ extern "C" DLLEXPORT FDBFuture* fdb_database_get_server_protocol(FDBDatabase* db
 	                                uint64_t>(DB(db)->getServerProtocol(expected), [](ErrorOr<ProtocolVersion> result) {
 		                return result.map<uint64_t>([](ProtocolVersion pv) { return pv.versionWithFlags(); });
 	                }).extractPtr());
+}
+
+extern "C" DLLEXPORT FDBFuture* fdb_database_purge_blob_granules(FDBDatabase* db,
+                                                                 uint8_t const* begin_key_name,
+                                                                 int begin_key_name_length,
+                                                                 uint8_t const* end_key_name,
+                                                                 int end_key_name_length,
+                                                                 int64_t purge_version,
+                                                                 fdb_bool_t force) {
+	return (FDBFuture*)(DB(db)
+	                        ->purgeBlobGranules(KeyRangeRef(StringRef(begin_key_name, begin_key_name_length),
+	                                                        StringRef(end_key_name, end_key_name_length)),
+	                                            purge_version,
+	                                            force)
+	                        .extractPtr());
+}
+extern "C" DLLEXPORT FDBFuture* fdb_database_wait_purge_granules_complete(FDBDatabase* db,
+                                                                          uint8_t const* purge_key_name,
+                                                                          int purge_key_name_length) {
+	return (
+	    FDBFuture*)(DB(db)->waitPurgeGranulesComplete(StringRef(purge_key_name, purge_key_name_length)).extractPtr());
 }
 
 extern "C" DLLEXPORT fdb_error_t fdb_tenant_create_transaction(FDBTenant* tenant, FDBTransaction** out_transaction) {

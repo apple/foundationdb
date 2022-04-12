@@ -294,6 +294,9 @@ rocksdb::ColumnFamilyOptions getCFOptions() {
 		}
 		bbOpts.block_cache = rocksdb_block_cache;
 	}
+	if (SERVER_KNOBS->ROCKSDB_BLOCK_SIZE > 0) {
+		bbOpts.block_size = SERVER_KNOBS->ROCKSDB_BLOCK_SIZE;
+	}
 
 	options.table_factory.reset(rocksdb::NewBlockBasedTableFactory(bbOpts));
 
@@ -790,6 +793,7 @@ ACTOR Future<Void> rocksDBMetricLogger(std::shared_ptr<rocksdb::Statistics> stat
 		{ "EstPendCompactBytes", rocksdb::DB::Properties::kEstimatePendingCompactionBytes },
 		{ "BlockCacheUsage", rocksdb::DB::Properties::kBlockCacheUsage },
 		{ "BlockCachePinnedUsage", rocksdb::DB::Properties::kBlockCachePinnedUsage },
+		{ "LiveSstFilesSize", rocksdb::DB::Properties::kLiveSstFilesSize },
 	};
 
 	state std::unordered_map<std::string, uint64_t> readIteratorPoolStats = {
@@ -811,7 +815,8 @@ ACTOR Future<Void> rocksDBMetricLogger(std::shared_ptr<rocksdb::Statistics> stat
 		for (auto& p : propertyStats) {
 			auto& [name, property] = p;
 			stat = 0;
-			ASSERT(db->GetIntProperty(property, &stat));
+			// GetAggregatedIntProperty gets the aggregated int property from all column families.
+			ASSERT(db->GetAggregatedIntProperty(property, &stat));
 			e.detail(name, stat);
 		}
 
@@ -1933,7 +1938,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 	StorageBytes getStorageBytes() const override {
 		uint64_t live = 0;
-		ASSERT(db->GetIntProperty(rocksdb::DB::Properties::kLiveSstFilesSize, &live));
+		ASSERT(db->GetAggregatedIntProperty(rocksdb::DB::Properties::kLiveSstFilesSize, &live));
 
 		int64_t free;
 		int64_t total;

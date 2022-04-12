@@ -35,7 +35,7 @@ void forceLinkBLockCiherTests();
 void forceLinkParallelStreamTests();
 void forceLinkSimExternalConnectionTests();
 void forceLinkMutationLogReaderTests();
-void forceLinkSimEncryptVaultProxyTests();
+void forceLinkSimEncryptKmsProxyTests();
 void forceLinkIThreadPoolTests();
 
 struct UnitTestWorkload : TestWorkload {
@@ -82,7 +82,7 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkParallelStreamTests();
 		forceLinkSimExternalConnectionTests();
 		forceLinkMutationLogReaderTests();
-		forceLinkSimEncryptVaultProxyTests();
+		forceLinkSimEncryptKmsProxyTests();
 		forceLinkIThreadPoolTests();
 	}
 

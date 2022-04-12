@@ -41,6 +41,9 @@ ConfigFollowerInterface::ConfigFollowerInterface(NetworkAddress const& remote)
     rollforward(Endpoint::wellKnown({ remote }, WLTOKEN_CONFIGFOLLOWER_ROLLFORWARD)),
     getCommittedVersion(Endpoint::wellKnown({ remote }, WLTOKEN_CONFIGFOLLOWER_GETCOMMITTEDVERSION)) {}
 
+ConfigFollowerInterface::ConfigFollowerInterface(Hostname const& remote)
+  : _id(deterministicRandom()->randomUniqueID()), hostname(remote) {}
+
 bool ConfigFollowerInterface::operator==(ConfigFollowerInterface const& rhs) const {
 	return _id == rhs._id;
 }
