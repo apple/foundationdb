@@ -625,7 +625,6 @@ void CommitBatchContext::evaluateBatchSize() {
 void CommitBatchContext::trackStorageTeams(const std::set<ptxn::StorageTeamID>& storageTeams) {
 	ASSERT(!pProxyCommitData->tLogGroupCollection->groups().empty());
 	auto tLogGroupId = pProxyCommitData->tLogGroupCollection->assignStorageTeam(*storageTeams.begin())->id();
-	auto allStorageTeamIDs = pProxyCommitData->getAllStorageTeamIDs();
 	if (!pGroupMessageBuilders.count(tLogGroupId)) {
 		pGroupMessageBuilders.emplace(tLogGroupId,
 		                              std::make_shared<ptxn::ProxySubsequencedMessageSerializer>(commitVersion));
@@ -663,7 +662,6 @@ void CommitBatchContext::findOverlappingTLogGroups() {
 		TraceEvent("EmptyCommits", pProxyCommitData->dbgid);
 		// This is an empty commit controlled by MAX_COMMIT_BATCH_INTERVAL.
 		// We force writing to all groups.
-		auto allStorageTeamIDs = pProxyCommitData->getAllStorageTeamIDs();
 		for (const auto& groupRef : pProxyCommitData->tLogGroupCollection->groups()) {
 			pGroupMessageBuilders.emplace(groupRef->id(),
 			                              std::make_shared<ptxn::ProxySubsequencedMessageSerializer>(commitVersion));
@@ -864,7 +862,6 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 	// add empty txn here
 	ASSERT(self->resolution.size());
 	self->previousCommitVersionByGroup.swap(self->resolution[0].previousCommitVersions);
-	auto allStorageTeamIDs = self->pProxyCommitData->getAllStorageTeamIDs();
 	for (auto& it : self->previousCommitVersionByGroup) {
 		if (self->pGroupMessageBuilders.count(it.first) == 0) {
 			self->pGroupMessageBuilders[it.first] =
@@ -1411,20 +1408,21 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	self->commitStartTime = now();
 	pProxyCommitData->lastStartCommit = self->commitStartTime;
 
-	for (auto& tLogGroup : pProxyCommitData->tLogGroupCollection->groups()) {
-		const auto tLogGroupID = tLogGroup->id();
-		const auto& storageTeamIDs = pProxyCommitData->tLogGroupCollection->getGroup(tLogGroupID)->storageTeams();
-		if (self->pGroupMessageBuilders.count(tLogGroupID)) {
-			reinterpret_cast<ptxn::BroadcastedSubsequencedMessageSerializer*>(
-			    self->pGroupMessageBuilders[tLogGroupID].get())
-			    ->touchStorageTeamIDs(storageTeamIDs);
-		} else {
-			self->pGroupMessageBuilders[tLogGroupID] =
-			    std::make_shared<ptxn::BroadcastedSubsequencedMessageSerializer>(self->commitVersion, storageTeamIDs);
-		}
-	}
-
 	if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
+		for (auto& tLogGroup : pProxyCommitData->tLogGroupCollection->groups()) {
+			const auto tLogGroupID = tLogGroup->id();
+			const auto& storageTeamIDs = pProxyCommitData->tLogGroupCollection->getGroup(tLogGroupID)->storageTeams();
+			if (self->pGroupMessageBuilders.count(tLogGroupID)) {
+				reinterpret_cast<ptxn::BroadcastedSubsequencedMessageSerializer*>(
+				    self->pGroupMessageBuilders[tLogGroupID].get())
+				    ->touchStorageTeamIDs(storageTeamIDs);
+			} else {
+				self->pGroupMessageBuilders[tLogGroupID] =
+				    std::make_shared<ptxn::BroadcastedSubsequencedMessageSerializer>(self->commitVersion,
+				                                                                     storageTeamIDs);
+			}
+		}
+
 		std::vector<Future<Version>> pushResults;
 		pushResults.reserve(self->pGroupMessageBuilders.size());
 		for (auto& [groupId, _] : self->pGroupMessageBuilders) {
