@@ -129,8 +129,6 @@ public:
 	}
 
 	const StorageServerStorageTeams getStorageTeamIDs() const { return storageTeamIDs; }
-
-	const KeyRef getStorageServerToTeamIDKey() const { return storageServerToTeamIDKey; }
 };
 
 template <typename BaseClass>

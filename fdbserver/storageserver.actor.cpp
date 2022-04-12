@@ -1119,7 +1119,7 @@ public:
 	std::shared_ptr<ptxn::PeekCursorBase> logCursor;
 
 	// The key used to inform this storage server the new list of storage teams.
-	KeyRef storageServerToTeamIDKey;
+	Key storageServerToTeamIDKey;
 
 	// The storage teams the storage server has subscribed
 	StorageServerStorageTeams storageServerStorageTeams;
@@ -1132,6 +1132,7 @@ public:
 	              const StorageServerInterface& storageServerInterface,
 	              const StorageTeamID& privateMutationsStorageTeamID_)
 	  : StorageServerBase(pKVStore, serverDBInfo, storageServerInterface),
+	    storageServerToTeamIDKey(::storageServerToTeamIdKey(thisServerID)),
 	    storageServerStorageTeams(privateMutationsStorageTeamID_) {}
 };
 
@@ -5608,11 +5609,7 @@ void initializeUpdateCursor(ptxn::StorageServer& storageServerContext) {
 	    [referencedServerDBInfo](const StorageTeamID& storageTeamID) -> auto {
 		    return getTLogInterfaceByStorageTeamID(referencedServerDBInfo->get(), storageTeamID);
 	    },
-		storageServerContext.version.get() + 1);
-
-	storageServerContext.storageServerToTeamIDKey =
-	    std::dynamic_pointer_cast<merged::OrderedMutableTeamPeekCursor>(storageServerContext.logCursor)
-	        ->getStorageServerToTeamIDKey();
+	    storageServerContext.version.get() + 1);
 }
 
 ACTOR Future<Void> peekFromRemote(std::shared_ptr<ptxn::StorageServer> storageServerContext,
