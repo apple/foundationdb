@@ -65,8 +65,9 @@ ACTOR Future<Void> setDDIgnoreRebalanceSwitch(Reference<IDatabase> db, uint8_t D
 	state Reference<ITransaction> tr = db->createTransaction();
 	loop {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
+		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		try {
-			state ThreadFuture<Optional<Value>> resultFuture = tr->get(fdb_cli::ddIgnoreRebalanceSpecialKey);
+			state ThreadFuture<Optional<Value>> resultFuture = tr->get(rebalanceDDIgnoreKey);
 			Optional<Value> v = wait(safeThreadFutureToFuture(resultFuture));
 			uint8_t oldValue = 0; // nothing is disabled
 			if (v.present()) {
@@ -77,8 +78,9 @@ ACTOR Future<Void> setDDIgnoreRebalanceSwitch(Reference<IDatabase> db, uint8_t D
 					// disabled
 					oldValue = DDIgnore::ALL;
 				}
+				// printf("oldValue: %d Mask: %d V:%d\n", oldValue, DDIgnoreOptionMask, v.get().size());
 			}
-			uint8_t newValue = setMaskedBit ? (oldValue | DDIgnoreOptionMask) : (oldValue & (~DDIgnoreOptionMask));
+			uint8_t newValue = setMaskedBit ? (oldValue | DDIgnoreOptionMask) : (oldValue & ~DDIgnoreOptionMask);
 			if (newValue > 0) {
 				tr->set(fdb_cli::ddIgnoreRebalanceSpecialKey, BinaryWriter::toValue(newValue, Unversioned()));
 			} else {
