@@ -2825,13 +2825,12 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 	state std::vector<InitializeTLogRequest> reqs(recr.tLogs.size());
 
 	state std::vector<Future<ptxn::TLogInterface_PassivelyPull>> ptxnInitializationReplies;
-	state std::vector<ptxn::InitializePtxnTLogRequest> ptxnReqs(recr.tLogs.size());
+	state std::vector<ptxn::InitializePtxnTLogRequest> ptxnReqs;
+	state std::vector<int> ptxnPickedTlogIndex;
 
-	logSystem->tLogs[0]->tLogLocalities.resize(recr.tLogs.size());
-	if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
-		logSystem->tLogs[0]->logServersPtxn.resize(recr.tLogs.size());
-	} else {
+	if (!SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 		// Dummy interfaces, so that logSystem->getPushLocations() below uses the correct size
+		logSystem->tLogs[0]->tLogLocalities.resize(recr.tLogs.size());
 		logSystem->tLogs[0]->logServers.resize(recr.tLogs.size());
 	}
 	logSystem->tLogs[0]->updateLocalitySet(localities);
@@ -2879,7 +2878,7 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 
 	if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 		for (int i = 0; i < recr.tLogs.size(); i++) {
-			ptxn::InitializePtxnTLogRequest& req = ptxnReqs[i];
+			ptxn::InitializePtxnTLogRequest req;
 			req.recruitmentID = logSystem->recruitmentID;
 			req.logVersion = configuration.tLogVersion;
 			req.storeType = configuration.tLogDataStoreType;
@@ -2902,12 +2901,16 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 				groups.push_back(ptxn::TLogGroup(tlogGroup->id()));
 			}
 			req.tlogGroups = groups;
-		}
-		ptxnInitializationReplies.reserve(recr.tLogs.size());
-		for (int i = 0; i < recr.tLogs.size(); ++i) {
+
+			if (groups.empty()) {
+				continue;
+			}
+
+			ptxnReqs.push_back(req);
+			ptxnPickedTlogIndex.push_back(i);
 			ptxnInitializationReplies.push_back(transformErrors(
 			    throwErrorOr(recr.tLogs[i].ptxnTLog.getReplyUnlessFailedFor(
-			        ptxnReqs[i], SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
+			        ptxnReqs.back(), SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
 			    master_recovery_failed()));
 		}
 	} else {
@@ -3031,7 +3034,7 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 	if (SERVER_KNOBS->ENABLE_PARTITIONED_TRANSACTIONS) {
 		state std::unordered_map<UID, ptxn::TLogInterface_PassivelyPull> id2Interface;
 		state int i = 0;
-		for (i = 0; i < reqs.size(); i++) {
+		for (i = 0; i < ptxnReqs.size(); i++) {
 			ASSERT(ptxnReqs[i].isPrimary);
 			// wait for interfaces being built from TLogServer, then construct id -> interface mapping
 			// cannot use more standard `getReplyUnlessFailedFor`, because it is waiting on `reply` field, here we
@@ -3040,11 +3043,11 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 			// tLogGroupCollection uses workerInterface to build groups during master recruitment,
 			// so this call should be deprecated.
 			// tLogGroupCollection->addWorkers({ serverNew });
-			logSystem->tLogs[0]->logServersPtxn[i] =
+			logSystem->tLogs[0]->logServersPtxn.push_back(
 			    makeReference<AsyncVar<OptionalInterface<ptxn::TLogInterface_PassivelyPull>>>(
-			        OptionalInterface<ptxn::TLogInterface_PassivelyPull>(serverNew));
-			logSystem->tLogs[0]->tLogLocalities[i] = recr.tLogs[i].locality;
-			id2Interface[recr.tLogs[i].id()] = serverNew;
+			        OptionalInterface<ptxn::TLogInterface_PassivelyPull>(serverNew)));
+			logSystem->tLogs[0]->tLogLocalities.push_back(recr.tLogs[ptxnPickedTlogIndex[i]].locality);
+			id2Interface[recr.tLogs[ptxnPickedTlogIndex[i]].id()] = serverNew;
 		}
 
 		for (const TLogGroupRef& group : tLogGroupCollection->groups()) {
