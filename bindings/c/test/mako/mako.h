@@ -3,7 +3,7 @@
 #pragma once
 
 #ifndef FDB_API_VERSION
-#define FDB_API_VERSION 710
+#define FDB_API_VERSION 720
 #endif
 
 #include <foundationdb/fdb_c.h>

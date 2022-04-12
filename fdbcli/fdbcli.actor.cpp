@@ -71,7 +71,7 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-#define FDB_API_VERSION 710
+#define FDB_API_VERSION 720
 /*
  * While we could just use the MultiVersionApi instance directly, this #define allows us to swap in any other IClientApi
  * instance (e.g. from ThreadSafeApi)
