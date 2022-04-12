@@ -219,23 +219,35 @@ public class TenantManagement {
 	 * @param begin The beginning of the range of tenants to list.
 	 * @param end The end of the range of the tenants to list.
 	 * @param limit The maximum number of tenants to return from this request.
-	 * @return an iterator where each item is a byte array with the tenant name and value.
+	 * @return an iterator where each item is a KeyValue object where the key is the tenant name
+	 * and the value is the unprocessed JSON string containing the tenant's metadata
 	 */
-	public static CloseableAsyncIterator<byte[]> listTenants(Database db, byte[] begin, byte[] end, int limit) {
+	public static CloseableAsyncIterator<KeyValue> listTenants(Database db, byte[] begin, byte[] end, int limit) {
 		return listTenants_internal(db.createTransaction(), begin, end, limit);
 	}
 
-	public static CloseableAsyncIterator<byte[]> listTenants(Database db, Tuple begin, Tuple end, int limit) {
+	/**
+	 * Lists all tenants in between the range specified. The number of tenants listed can be restricted.
+	 * This is a convenience method that generates the begin and end ranges by packing two {@code Tuple}s.
+	 *
+	 * @param db The database used to create a transaction for listing the tenants.
+	 * @param begin The beginning of the range of tenants to list.
+	 * @param end The end of the range of the tenants to list.
+	 * @param limit The maximum number of tenants to return from this request.
+	 * @return an iterator where each item is a KeyValue object where the key is the tenant name
+	 * and the value is the unprocessed JSON string containing the tenant's metadata
+	 */
+	public static CloseableAsyncIterator<KeyValue> listTenants(Database db, Tuple begin, Tuple end, int limit) {
 		return listTenants_internal(db.createTransaction(), begin.pack(), end.pack(), limit);
 	}
 
-	private static CloseableAsyncIterator<byte[]> listTenants_internal(Transaction tr, byte[] begin, byte[] end,
+	private static CloseableAsyncIterator<KeyValue> listTenants_internal(Transaction tr, byte[] begin, byte[] end,
 	                                                                   int limit) {
 		return new TenantAsyncIterator(tr, begin, end, limit);
 	}
 
 	// Templates taken from BoundaryIterator LocalityUtil.java
-	static class TenantAsyncIterator implements CloseableAsyncIterator<byte[]> {
+	static class TenantAsyncIterator implements CloseableAsyncIterator<KeyValue> {
 		Transaction tr;
 		final byte[] begin;
 		final byte[] end;
@@ -268,15 +280,12 @@ public class TenantManagement {
 			return iter.hasNext();
 		}
 		@Override
-		public byte[] next() {
+		public KeyValue next() {
 			KeyValue kv = iter.next();
 			byte[] tenant = ByteArrayUtil.replace(kv.getKey(), 0, kv.getKey().length, TENANT_MAP_PREFIX, null);
 			byte[] value = kv.getValue();
 
-			List<byte[]> parts = Arrays.asList(tenant, value);
-			byte[] separator = ": ".getBytes();
-
-			byte[] result = ByteArrayUtil.join(separator, parts);
+			KeyValue result = new KeyValue(tenant, value);
 			return result;
 		}
 
