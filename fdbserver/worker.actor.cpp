@@ -3211,10 +3211,7 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		localities.set(LocalityData::keyProcessId, processIDUid.toString());
 		// Only one process can execute on a dataFolder from this point onwards
 
-		ErrorOr<Void> f = wait(errorOr(testAndUpdateSoftwareVersionCompatibility(dataFolder, processIDUid)));
-		if (f.isError()) {
-			throw f.getError();
-		}
+		wait(testAndUpdateSoftwareVersionCompatibility(dataFolder, processIDUid));
 
 		std::string fitnessFilePath = joinPath(dataFolder, "fitness");
 		auto cc = makeReference<AsyncVar<Optional<ClusterControllerFullInterface>>>();
