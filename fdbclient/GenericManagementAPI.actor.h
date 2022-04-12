@@ -65,6 +65,8 @@ enum class ConfigurationResult {
 	LOCKED_NOT_NEW,
 	SUCCESS_WARN_PPW_GRADUAL,
 	SUCCESS,
+	SUCCESS_WARN_ROCKSDB_EXPERIMENTAL,
+	DATABASE_CREATED_WARN_ROCKSDB_EXPERIMENTAL,
 };
 
 enum class CoordinatorsResult {
@@ -290,6 +292,7 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 	state bool oldReplicationUsesDcId = false;
 	state bool warnPPWGradual = false;
 	state bool warnChangeStorageNoMigrate = false;
+	state bool warnRocksDBIsExperimental = false;
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -477,6 +480,9 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 					} else if (newConfig.storageMigrationType == StorageMigrationType::GRADUAL &&
 					           newConfig.perpetualStorageWiggleSpeed == 0) {
 						warnPPWGradual = true;
+					} else if (newConfig.storageServerStoreType != oldConfig.storageServerStoreType &&
+					           newConfig.storageServerStoreType == KeyValueStoreType::SSD_ROCKSDB_V1) {
+						warnRocksDBIsExperimental = true;
 					}
 				}
 			}
@@ -525,6 +531,9 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 						Optional<Value> v = wait(safeThreadFutureToFuture(vF));
 						if (v != m[initIdKey.toString()])
 							return ConfigurationResult::DATABASE_ALREADY_CREATED;
+						else if (m[configKeysPrefix.toString() + "storage_engine"] ==
+						         std::to_string(KeyValueStoreType::SSD_ROCKSDB_V1))
+							return ConfigurationResult::DATABASE_CREATED_WARN_ROCKSDB_EXPERIMENTAL;
 						else
 							return ConfigurationResult::DATABASE_CREATED;
 					} catch (Error& e2) {
@@ -538,6 +547,8 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 
 	if (warnPPWGradual) {
 		return ConfigurationResult::SUCCESS_WARN_PPW_GRADUAL;
+	} else if (warnRocksDBIsExperimental) {
+		return ConfigurationResult::SUCCESS_WARN_ROCKSDB_EXPERIMENTAL;
 	} else {
 		return ConfigurationResult::SUCCESS;
 	}

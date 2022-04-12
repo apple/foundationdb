@@ -326,6 +326,7 @@ struct NetNotifiedQueueWithAcknowledgements final : NotifiedQueue<T>,
 	AcknowledgementReceiver acknowledgements;
 	Endpoint requestStreamEndpoint;
 	bool sentError = false;
+	bool notifiedFailed = false;
 	Promise<Void> onConnect;
 
 	NetNotifiedQueueWithAcknowledgements(int futures, int promises)
@@ -402,14 +403,20 @@ struct NetNotifiedQueueWithAcknowledgements final : NotifiedQueue<T>,
 		return res;
 	}
 
-	~NetNotifiedQueueWithAcknowledgements() {
-		if (acknowledgements.getRawEndpoint().isValid() && acknowledgements.isRemoteEndpoint() && !this->hasError()) {
+	void notifyFailed() {
+		if (!notifiedFailed && acknowledgements.getRawEndpoint().isValid() && acknowledgements.isRemoteEndpoint() &&
+		    !this->hasError()) {
 			// Notify the server that a client is not using this ReplyPromiseStream anymore
 			FlowTransport::transport().sendUnreliable(
 			    SerializeSource<ErrorOr<AcknowledgementReply>>(operation_obsolete()),
 			    acknowledgements.getEndpoint(TaskPriority::ReadSocket),
 			    false);
+			notifiedFailed = true;
 		}
+	}
+
+	~NetNotifiedQueueWithAcknowledgements() {
+		notifyFailed();
 		if (isRemoteEndpoint() && !sentError && !acknowledgements.failures.isReady()) {
 			// Notify the client ReplyPromiseStream was cancelled before sending an error, so the storage server must
 			// have died
@@ -504,6 +511,8 @@ public:
 		}
 		return queue->onConnect.getFuture();
 	}
+
+	void notifyFailed() { queue->notifyFailed(); }
 
 	~ReplyPromiseStream() {
 		if (queue)

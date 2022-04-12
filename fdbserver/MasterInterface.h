@@ -157,19 +157,21 @@ struct UpdateRecoveryDataRequest {
 	Version lastEpochEnd;
 	std::vector<CommitProxyInterface> commitProxies;
 	std::vector<ResolverInterface> resolvers;
+	Optional<int64_t> versionEpoch;
 	ReplyPromise<Void> reply;
 
 	UpdateRecoveryDataRequest() = default;
 	UpdateRecoveryDataRequest(Version recoveryTransactionVersion,
 	                          Version lastEpochEnd,
 	                          const std::vector<CommitProxyInterface>& commitProxies,
-	                          const std::vector<ResolverInterface>& resolvers)
+	                          const std::vector<ResolverInterface>& resolvers,
+	                          Optional<int64_t> versionEpoch)
 	  : recoveryTransactionVersion(recoveryTransactionVersion), lastEpochEnd(lastEpochEnd),
-	    commitProxies(commitProxies), resolvers(resolvers) {}
+	    commitProxies(commitProxies), resolvers(resolvers), versionEpoch(versionEpoch) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, recoveryTransactionVersion, lastEpochEnd, commitProxies, resolvers, reply);
+		serializer(ar, recoveryTransactionVersion, lastEpochEnd, commitProxies, resolvers, versionEpoch, reply);
 	}
 };
 

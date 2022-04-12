@@ -39,6 +39,8 @@ public:
 	int64_t MAX_WRITE_TRANSACTION_LIFE_VERSIONS;
 	double MAX_COMMIT_BATCH_INTERVAL; // Each commit proxy generates a CommitTransactionBatchRequest at least this
 	                                  // often, so that versions always advance smoothly
+	double MAX_VERSION_RATE_MODIFIER;
+	int64_t MAX_VERSION_RATE_OFFSET;
 
 	// TLogs
 	bool PEEK_USING_STREAMING;
@@ -466,6 +468,14 @@ public:
 	                                               // failover.
 	int CC_FAILOVER_DUE_TO_HEALTH_MAX_DEGRADATION; // The maximum number of degraded servers that can trigger a
 	                                               // failover.
+	bool CC_ENABLE_ENTIRE_SATELLITE_MONITORING; // When enabled, gray failure tries to detect whether the entire
+	                                            // satellite DC is degraded.
+	int CC_SATELLITE_DEGRADATION_MIN_COMPLAINER; // When the network between primary and satellite becomes bad, all the
+	                                             // workers in primary may have bad network talking to the satellite.
+	                                             // This is the minimum amount of complainer for a satellite worker to
+	                                             // be determined as degraded worker.
+	int CC_SATELLITE_DEGRADATION_MIN_BAD_SERVER; // The minimum amount of degraded server in satellite DC to be
+	                                             // determined as degraded satellite.
 
 	// Knobs used to select the best policy (via monte carlo)
 	int POLICY_RATING_TESTS; // number of tests per policy (in order to compare)
@@ -575,6 +585,12 @@ public:
 	// disk snapshot
 	int64_t MAX_FORKED_PROCESS_OUTPUT;
 	double SNAP_CREATE_MAX_TIMEOUT;
+	// Maximum number of storage servers a snapshot can fail to
+	// capture while still succeeding
+	int64_t MAX_STORAGE_SNAPSHOT_FAULT_TOLERANCE;
+	// Maximum number of coordinators a snapshot can fail to
+	// capture while still succeeding
+	int64_t MAX_COORDINATOR_SNAPSHOT_FAULT_TOLERANCE;
 
 	// Storage Metrics
 	double STORAGE_METRICS_AVERAGE_INTERVAL;
@@ -659,8 +675,12 @@ public:
 	bool ENABLE_WORKER_HEALTH_MONITOR;
 	double WORKER_HEALTH_MONITOR_INTERVAL; // Interval between two health monitor health check.
 	int PEER_LATENCY_CHECK_MIN_POPULATION; // The minimum number of latency samples required to check a peer.
-	double PEER_LATENCY_DEGRADATION_PERCENTILE; // The percentile latency used to check peer health.
+	double PEER_LATENCY_DEGRADATION_PERCENTILE; // The percentile latency used to check peer health among workers inside
+	                                            // primary or remote DC.
 	double PEER_LATENCY_DEGRADATION_THRESHOLD; // The latency threshold to consider a peer degraded.
+	double PEER_LATENCY_DEGRADATION_PERCENTILE_SATELLITE; // The percentile latency used to check peer health between
+	                                                      // primary and primary satellite.
+	double PEER_LATENCY_DEGRADATION_THRESHOLD_SATELLITE; // The latency threshold to consider a peer degraded.
 	double PEER_TIMEOUT_PERCENTAGE_DEGRADATION_THRESHOLD; // The percentage of timeout to consider a peer degraded.
 	int PEER_DEGRADATION_CONNECTION_FAILURE_COUNT; // The number of connection failures experienced during measurement
 	                                               // period to consider a peer degraded.
@@ -784,6 +804,7 @@ public:
 	double REDWOOD_METRICS_INTERVAL;
 	double REDWOOD_HISTOGRAM_INTERVAL;
 	bool REDWOOD_EVICT_UPDATED_PAGES; // Whether to prioritize eviction of updated pages from cache.
+	int REDWOOD_DECODECACHE_REUSE_MIN_HEIGHT; // Minimum height for which to keep and reuse page decode caches
 
 	// Server request latency measurement
 	int LATENCY_SAMPLE_SIZE;

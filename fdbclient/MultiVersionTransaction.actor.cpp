@@ -516,6 +516,38 @@ ThreadFuture<ProtocolVersion> DLDatabase::getServerProtocol(Optional<ProtocolVer
 	});
 }
 
+ThreadFuture<Key> DLDatabase::purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) {
+	if (!api->purgeBlobGranules) {
+		return unsupported_operation();
+	}
+	FdbCApi::FDBFuture* f = api->purgeBlobGranules(db,
+	                                               keyRange.begin.begin(),
+	                                               keyRange.begin.size(),
+	                                               keyRange.end.begin(),
+	                                               keyRange.end.size(),
+	                                               purgeVersion,
+	                                               force);
+
+	return toThreadFuture<Key>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		const uint8_t* key;
+		int keyLength;
+		FdbCApi::fdb_error_t error = api->futureGetKey(f, &key, &keyLength);
+		ASSERT(!error);
+
+		// The memory for this is stored in the FDBFuture and is released when the future gets destroyed
+		return Key(KeyRef(key, keyLength), Arena());
+	});
+}
+
+ThreadFuture<Void> DLDatabase::waitPurgeGranulesComplete(const KeyRef& purgeKey) {
+	if (!api->waitPurgeGranulesComplete) {
+		return unsupported_operation();
+	}
+
+	FdbCApi::FDBFuture* f = api->waitPurgeGranulesComplete(db, purgeKey.begin(), purgeKey.size());
+	return toThreadFuture<Void>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) { return Void(); });
+}
+
 // DLApi
 
 // Loads the specified function from a dynamic library
@@ -591,6 +623,15 @@ void DLApi::init() {
 	    &api->databaseCreateSnapshot, lib, fdbCPath, "fdb_database_create_snapshot", headerVersion >= 700);
 
 	loadClientFunction(
+	    &api->purgeBlobGranules, lib, fdbCPath, "fdb_database_purge_blob_granules", headerVersion >= 710);
+
+	loadClientFunction(&api->waitPurgeGranulesComplete,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_database_wait_purge_granules_complete",
+	                   headerVersion >= 710);
+
+	loadClientFunction(
 	    &api->tenantCreateTransaction, lib, fdbCPath, "fdb_tenant_create_transaction", headerVersion >= 710);
 	loadClientFunction(&api->tenantDestroy, lib, fdbCPath, "fdb_tenant_destroy", headerVersion >= 710);
 
@@ -609,7 +650,7 @@ void DLApi::init() {
 	                   headerVersion >= 0);
 	loadClientFunction(&api->transactionGetRange, lib, fdbCPath, "fdb_transaction_get_range", headerVersion >= 0);
 	loadClientFunction(
-	    &api->transactionGetMappedRange, lib, fdbCPath, "fdb_transaction_get_mapped_range", headerVersion >= 700);
+	    &api->transactionGetMappedRange, lib, fdbCPath, "fdb_transaction_get_mapped_range", headerVersion >= 710);
 	loadClientFunction(
 	    &api->transactionGetVersionstamp, lib, fdbCPath, "fdb_transaction_get_versionstamp", headerVersion >= 410);
 	loadClientFunction(&api->transactionSet, lib, fdbCPath, "fdb_transaction_set", headerVersion >= 0);
@@ -667,7 +708,7 @@ void DLApi::init() {
 	loadClientFunction(
 	    &api->futureGetKeyValueArray, lib, fdbCPath, "fdb_future_get_keyvalue_array", headerVersion >= 0);
 	loadClientFunction(
-	    &api->futureGetMappedKeyValueArray, lib, fdbCPath, "fdb_future_get_mappedkeyvalue_array", headerVersion >= 700);
+	    &api->futureGetMappedKeyValueArray, lib, fdbCPath, "fdb_future_get_mappedkeyvalue_array", headerVersion >= 710);
 	loadClientFunction(&api->futureGetSharedState, lib, fdbCPath, "fdb_future_get_shared_state", headerVersion >= 710);
 	loadClientFunction(&api->futureSetCallback, lib, fdbCPath, "fdb_future_set_callback", headerVersion >= 0);
 	loadClientFunction(&api->futureCancel, lib, fdbCPath, "fdb_future_cancel", headerVersion >= 0);
@@ -1442,6 +1483,17 @@ double MultiVersionDatabase::getMainThreadBusyness() {
 	return localClientBusyness;
 }
 
+ThreadFuture<Key> MultiVersionDatabase::purgeBlobGranules(const KeyRangeRef& keyRange,
+                                                          Version purgeVersion,
+                                                          bool force) {
+	auto f = dbState->db ? dbState->db->purgeBlobGranules(keyRange, purgeVersion, force) : ThreadFuture<Key>(Never());
+	return abortableFuture(f, dbState->dbVar->get().onChange);
+}
+ThreadFuture<Void> MultiVersionDatabase::waitPurgeGranulesComplete(const KeyRef& purgeKey) {
+	auto f = dbState->db ? dbState->db->waitPurgeGranulesComplete(purgeKey) : ThreadFuture<Void>(Never());
+	return abortableFuture(f, dbState->dbVar->get().onChange);
+}
+
 // Returns the protocol version reported by the coordinator this client is connected to
 // If an expected version is given, the future won't return until the protocol version is different than expected
 // Note: this will never return if the server is running a protocol from FDB 5.0 or older
@@ -1536,7 +1588,7 @@ void MultiVersionDatabase::DatabaseState::protocolVersionChanged(ProtocolVersion
 		    .detail("OldProtocolVersion", dbProtocolVersion);
 		// When the protocol version changes, clear the corresponding entry in the shared state map
 		// so it can be re-initialized. Only do so if there was a valid previous protocol version.
-		if (dbProtocolVersion.present()) {
+		if (dbProtocolVersion.present() && MultiVersionApi::apiVersionAtLeast(710)) {
 			MultiVersionApi::api->clearClusterSharedStateMapEntry(clusterFilePath);
 		}
 
@@ -2333,9 +2385,14 @@ ThreadFuture<Void> MultiVersionApi::updateClusterSharedStateMap(std::string clus
 
 void MultiVersionApi::clearClusterSharedStateMapEntry(std::string clusterFilePath) {
 	MutexHolder holder(lock);
-	auto ssPtr = clusterSharedStateMap[clusterFilePath].get();
+	auto mapEntry = clusterSharedStateMap.find(clusterFilePath);
+	if (mapEntry == clusterSharedStateMap.end()) {
+		TraceEvent(SevError, "ClusterSharedStateMapEntryNotFound").detail("ClusterFilePath", clusterFilePath);
+		return;
+	}
+	auto ssPtr = mapEntry->second.get();
 	ssPtr->delRef(ssPtr);
-	clusterSharedStateMap.erase(clusterFilePath);
+	clusterSharedStateMap.erase(mapEntry);
 }
 
 std::vector<std::string> parseOptionValues(std::string valueStr) {

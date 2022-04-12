@@ -106,6 +106,8 @@ std::unordered_map<std::string, KeyRange> SpecialKeySpace::managementApiCommandT
 	{ "advanceversion",
 	  singleKeyRange(LiteralStringRef("min_required_commit_version"))
 	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
+	{ "versionepoch",
+	  singleKeyRange(LiteralStringRef("version_epoch")).withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
 	{ "profile",
 	  KeyRangeRef(LiteralStringRef("profiling/"), LiteralStringRef("profiling0"))
 	      .withPrefix(moduleToBoundary[MODULE::MANAGEMENT].begin) },
@@ -1905,6 +1907,42 @@ Future<Optional<std::string>> AdvanceVersionImpl::commit(ReadYourWritesTransacti
 		}
 	} else {
 		ryw->getTransaction().clear(minRequiredCommitVersionKey);
+	}
+	return Optional<std::string>();
+}
+
+ACTOR static Future<RangeResult> getVersionEpochActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
+	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
+	ryw->getTransaction().setOption(FDBTransactionOptions::RAW_ACCESS);
+	Optional<Value> val = wait(ryw->getTransaction().get(versionEpochKey));
+	RangeResult result;
+	if (val.present()) {
+		int64_t versionEpoch = BinaryReader::fromStringRef<int64_t>(val.get(), Unversioned());
+		ValueRef version(result.arena(), boost::lexical_cast<std::string>(versionEpoch));
+		result.push_back_deep(result.arena(), KeyValueRef(kr.begin, version));
+	}
+	return result;
+}
+
+VersionEpochImpl::VersionEpochImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
+
+Future<RangeResult> VersionEpochImpl::getRange(ReadYourWritesTransaction* ryw,
+                                               KeyRangeRef kr,
+                                               GetRangeLimits limitsHint) const {
+	ASSERT(kr == getKeyRange());
+	return getVersionEpochActor(ryw, kr);
+}
+
+Future<Optional<std::string>> VersionEpochImpl::commit(ReadYourWritesTransaction* ryw) {
+	auto versionEpoch =
+	    ryw->getSpecialKeySpaceWriteMap()[SpecialKeySpace::getManagementApiCommandPrefix("versionepoch")].second;
+	if (versionEpoch.present()) {
+		int64_t epoch = BinaryReader::fromStringRef<int64_t>(versionEpoch.get(), Unversioned());
+		ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
+		ryw->getTransaction().setOption(FDBTransactionOptions::RAW_ACCESS);
+		ryw->getTransaction().set(versionEpochKey, BinaryWriter::toValue(epoch, Unversioned()));
+	} else {
+		ryw->getTransaction().clear(versionEpochKey);
 	}
 	return Optional<std::string>();
 }
