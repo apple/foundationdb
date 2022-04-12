@@ -1850,7 +1850,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	if (testConfig.disableRemoteKVS) {
 		IKnobCollection::getMutableGlobalKnobCollection().setKnob("remote_kv_store",
 		                                                          KnobValueRef::create(bool{ false }));
-		TraceEvent(SevDebug, "DisaableRemoteKVS").log();
+		TraceEvent(SevDebug, "DisableRemoteKVS").log();
 	}
 	auto configDBType = testConfig.getConfigDBType();
 	for (auto kv : startingConfigJSON) {
