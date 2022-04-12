@@ -619,7 +619,7 @@ StorageServerInterface decodeServerListValue(ValueRef const& value) {
 	return decodeServerListValueFB(value);
 }
 
-const Value swVersionValue(SWVersion const& swversion) {
+Value swVersionValue(SWVersion const& swversion) {
 	auto protocolVersion = currentProtocolVersion;
 	protocolVersion.addObjectSerializerFlag();
 	return ObjectWriter::toValue(swversion, IncludeVersion(protocolVersion));
