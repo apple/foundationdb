@@ -269,8 +269,8 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_7.0.0/SnapCycleRestart-1.txt
                restarting/from_7.0.0/SnapCycleRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/to_7.2.0/ConfigureStorageMigrationTestRestart-1.toml
-               restarting/to_7.2.0/ConfigureStorageMigrationTestRestart-2.toml)
+    TEST_FILES restarting/to_7.1.0/ConfigureStorageMigrationTestRestart-1.toml
+               restarting/to_7.1.0/ConfigureStorageMigrationTestRestart-2.toml)
   add_fdb_test(
     TEST_FILES restarting/from_7.1.0/ConfigureStorageMigrationTestRestart-1.toml
                restarting/from_7.1.0/ConfigureStorageMigrationTestRestart-2.toml)
