@@ -3,6 +3,7 @@ set(FDBRPC_SRCS
   AsyncFileEIO.actor.h
   AsyncFileEncrypted.h
   AsyncFileKAIO.actor.h
+  AsyncFileIOUring.actor.h
   AsyncFileNonDurable.actor.h
   AsyncFileReadAhead.actor.h
   AsyncFileWinASIO.actor.h
@@ -110,3 +111,13 @@ if(${COROUTINE_IMPL} STREQUAL libcoro)
   target_link_libraries(fdbrpc PRIVATE coro)
   target_link_libraries(fdbrpc_sampling PRIVATE coro)
 endif()
+
+if(WITH_LIBURING)
+  find_package(uring)
+
+  target_include_directories(fdbrpc PRIVATE ${uring_INCLUDE_DIR})
+  target_link_libraries(fdbrpc PRIVATE ${uring_LIBRARIES})
+
+  target_include_directories(fdbrpc_sampling PRIVATE ${uring_INCLUDE_DIR})
+  target_link_libraries(fdbrpc_sampling PRIVATE ${uring_LIBRARIES})
+endif() 
