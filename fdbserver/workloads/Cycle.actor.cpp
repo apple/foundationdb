@@ -108,7 +108,7 @@ struct CycleWorkload : TestWorkload {
 					state Span span("CycleClient"_loc);
 					TraceEvent("CycleTracingTransaction", span.context.traceID).log();
 					tr.setOption(FDBTransactionOptions::SPAN_PARENT,
-					             BinaryWriter::toValue(span.context, Unversioned()));
+					             BinaryWriter::toValue(span.context, IncludeVersion()));
 				}
 				while (true) {
 					try {

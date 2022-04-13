@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbserver/OTELSpanContextMessage.h"
 #include "flow/Arena.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/NativeAPI.actor.h"
@@ -1979,6 +1980,9 @@ ACTOR Future<Void> pullAsyncData(StorageCacheData* data) {
 				} else if (reader.protocolVersion().hasSpanContext() && SpanContextMessage::isNextIn(reader)) {
 					SpanContextMessage scm;
 					reader >> scm;
+				} else if (reader.protocolVersion().hasOTELSpanContext() && OTELSpanContextMessage::isNextIn(reader)) {
+					OTELSpanContextMessage oscm;
+					reader >> oscm;
 				} else {
 					MutationRef msg;
 					reader >> msg;

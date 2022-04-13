@@ -6538,12 +6538,11 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 
 	case FDBTransactionOptions::SPAN_PARENT:
 		validateOptionValuePresent(value);
+		// TODO - ljoswiak, mpilman. Why is size here not failing?  
 		if (value.get().size() != 16) {
 			throw invalid_option_value();
 		}
-		// TODO - ljoswiak, mpilman. This creates a link with a 0 spanID. Before you were calling
-		// addParent with previously mentioned side effects.
-		span.addLink(SpanContext(BinaryReader::fromStringRef<UID>(value.get(), Unversioned()), 0));
+		span.addLink(BinaryReader::fromStringRef<SpanContext>(value.get(), IncludeVersion()));
 		break;
 
 	case FDBTransactionOptions::REPORT_CONFLICTING_KEYS:
