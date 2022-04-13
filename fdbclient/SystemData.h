@@ -51,18 +51,21 @@ extern const KeyRef afterAllKeys;
 //	as data movement occurs.
 extern const KeyRangeRef keyServersKeys, keyServersKeyServersKeys;
 extern const KeyRef keyServersPrefix, keyServersEnd, keyServersKeyServersKey;
+extern const UID unassignedShardId;
 const Key keyServersKey(const KeyRef& k);
 const KeyRef keyServersKey(const KeyRef& k, Arena& arena);
 const Value keyServersValue(RangeResult result,
                             const std::vector<UID>& src,
                             const std::vector<UID>& dest = std::vector<UID>());
-const Value keyServersValue(RangeResult result,
-                            const std::vector<UID>& src,
+const Value keyServersValue(const std::vector<UID>& src,
                             const std::vector<UID>& dest,
                             const UID& srcID,
                             const UID& destID);
 const Value keyServersValue(const std::vector<Tag>& srcTag, const std::vector<Tag>& destTag = std::vector<Tag>());
-const Value keyServersValue(const std::vector<Tag>& srcTag, const UID& id);
+const Value keyServersValue(const std::vector<Tag>& srcTag,
+                            const std::vector<Tag>& destTag,
+                            const UID& srcId,
+                            const UID& destId);
 // `result` must be the full result of getting serverTagKeys
 void decodeKeyServersValue(RangeResult result,
                            const ValueRef& value,
@@ -80,12 +83,6 @@ void decodeKeyServersValue(std::map<Tag, UID> const& tag_uid,
                            const ValueRef& value,
                            std::vector<UID>& src,
                            std::vector<UID>& dest);
-void decodeKeyServersValue(std::map<Tag, UID> const& tag_uid,
-                           const ValueRef& value,
-                           std::vector<UID>& src,
-                           std::vector<UID>& dest,
-                           UID& srcID,
-                           UID& destID);
 
 extern const KeyRef clusterIdKey;
 
@@ -138,7 +135,7 @@ const Key serverKeysPrefixFor(UID serverID);
 UID serverKeysDecodeServer(const KeyRef& key);
 bool serverHasKey(ValueRef storedValue);
 const Value serverKeysValue(const UID& id);
-void decodeServerKeysValue(const ValueRef& value, UID& id);
+void decodeServerKeysValue(const ValueRef& value, bool& assigned, bool& emptyRange, UID& id);
 
 extern const KeyRangeRef conflictingKeysRange;
 extern const ValueRef conflictingKeysTrue, conflictingKeysFalse;

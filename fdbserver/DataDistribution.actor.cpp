@@ -48,7 +48,7 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-void DataMove::addShard(const DDShardInfo& shard) {
+void DataMove::addShard(const DDShardInfo& shard, int priority) {
 	if (!valid) {
 		return;
 	}
@@ -177,7 +177,7 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Data
 				auto ssi = decodeServerListValue(serverList.get()[i].value);
 				UID ssID = decodeServerListKey(serverList.get()[i].key);
 				TraceEvent("DDInitDataServer", distributorId)
-					.detail("TotalServers", serverList.get().size())
+				    .detail("TotalServers", serverList.get().size())
 				    .detail("Server", ssi.id())
 				    .detail("KeyID", ssID)
 				    .detail("IsTss", ssi.isTss());
@@ -230,11 +230,16 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Data
 				succeeded = true;
 
 				std::vector<UID> src, dest, last;
+				UID srcId, destId;
 
 				// for each range
 				for (int i = 0; i < keyServers.size() - 1; i++) {
 					DDShardInfo info(keyServers[i].key);
-					decodeKeyServersValue(UIDtoTagMap, keyServers[i].value, src, dest);
+					if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+						decodeKeyServersValue(UIDtoTagMap, keyServers[i].value, src, dest, srcId, destId);
+					} else {
+						decodeKeyServersValue(UIDtoTagMap, keyServers[i].value, src, dest);
+					}
 					if (remoteDcIds.size()) {
 						auto srcIter = team_cache.find(src);
 						if (srcIter == team_cache.end()) {

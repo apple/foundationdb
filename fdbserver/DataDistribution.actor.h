@@ -24,12 +24,14 @@
 #elif !defined(FDBSERVER_DATA_DISTRIBUTION_ACTOR_H)
 #define FDBSERVER_DATA_DISTRIBUTION_ACTOR_H
 
-#include <boost/heap/skew_heap.hpp>
-#include <boost/heap/policies.hpp>
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbserver/MoveKeys.actor.h"
-#include "fdbserver/LogSystem.h"
 #include "fdbclient/RunTransaction.actor.h"
+#include "fdbserver/Knobs.h"
+#include "fdbserver/LogSystem.h"
+#include "fdbserver/MoveKeys.actor.h"
+#include <boost/heap/policies.hpp>
+#include <boost/heap/skew_heap.hpp>
+
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct DDShardInfo;
@@ -56,7 +58,7 @@ struct DataMove {
 	explicit DataMove(const DataMoveMetaData& meta, bool restore)
 	  : meta(meta), restore(restore), valid(true), startTime(now()) {}
 
-	void addShard(const DDShardInfo& shard);
+	void addShard(const DDShardInfo& shard, int priority = SERVER_KNOBS->PRIORITY_RECOVER_MOVE);
 };
 
 struct RelocateShard {
@@ -247,8 +249,11 @@ struct DDShardInfo {
 	std::vector<UID> primaryDest;
 	std::vector<UID> remoteDest;
 	bool hasDest;
+	UID id;
 
-	explicit DDShardInfo(Key key) : key(key), hasDest(false) {}
+	explicit DDShardInfo(Key key) : DDShardInfo(key, unassignedShardId) {}
+
+	DDShardInfo(Key key, UID id) : key(key), hasDest(false), id(id) {}
 };
 
 struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {

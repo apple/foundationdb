@@ -7416,9 +7416,7 @@ private:
 			startKey = m.param1;
 
 			if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
-				decodeServerKeysValue(m.param2, dataMoveId);
-				nowAssigned = dataMoveId.isValid();
-				emptyRange = m.param2 == serverKeysTrueEmptyRange;
+				decodeServerKeysValue(m.param2, nowAssigned, emptyRange, dataMoveId);
 			} else {
 				nowAssigned = m.param2 != serverKeysFalse;
 				emptyRange = m.param2 == serverKeysTrueEmptyRange;
