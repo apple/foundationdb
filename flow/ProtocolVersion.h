@@ -38,7 +38,7 @@ constexpr uint64_t currentProtocolVersionValue = 0x0FDB00B072000000LL;
 constexpr uint64_t minInvalidProtocolVersionValue = 0x0FDB00B074000000LL;
 
 // The lowest protocol version that can be downgraded to.
-constexpr uint64_t minCompatibleProtocolVersionValue = 0x0FDB00B070000000LL;
+constexpr uint64_t minCompatibleProtocolVersionValue = 0x0FDB00B071000000LL;
 
 #define PROTOCOL_VERSION_FEATURE(v, x)                                                                                 \
 	static_assert((v & 0xF0FFFFLL) == 0 || v < 0x0FDB00B071000000LL, "Unexpected feature protocol version");           \
