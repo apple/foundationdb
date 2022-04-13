@@ -21,8 +21,9 @@
 #include <algorithm>
 #include <tuple>
 
-#include <fdbclient/DatabaseContext.h>
 #include "fdbclient/Atomic.h"
+#include "fdbclient/CommitTransaction.h"
+#include "fdbclient/DatabaseContext.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/CommitProxyInterface.h"
@@ -47,6 +48,7 @@
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
+#include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/Knobs.h"
 #include "flow/Trace.h"
@@ -86,14 +88,19 @@ ACTOR void discardCommit(UID id, Future<LogSystemDiskQueueAdapter::CommitMessage
 }
 
 struct ResolutionRequestBuilder {
-	ProxyCommitData* self;
+	const ProxyCommitData* self;
+
+	// One request per resolver.
 	std::vector<ResolveTransactionBatchRequest> requests;
+
+	// Txn i to resolvers that have i'th data sent
 	std::vector<std::vector<int>> transactionResolverMap;
 	std::vector<CommitTransactionRef*> outTr;
-	std::vector<std::vector<std::vector<int>>>
-	    txReadConflictRangeIndexMap; // Used to report conflicting keys, the format is
-	                                 // [CommitTransactionRef_Index][Resolver_Index][Read_Conflict_Range_Index_on_Resolver]
-	                                 // -> read_conflict_range's original index in the commitTransactionRef
+
+	// Used to report conflicting keys, the format is
+	// [CommitTransactionRef_Index][Resolver_Index][Read_Conflict_Range_Index_on_Resolver]
+	// -> read_conflict_range's original index in the commitTransactionRef
+	std::vector<std::vector<std::vector<int>>> txReadConflictRangeIndexMap;
 
 	ResolutionRequestBuilder(ProxyCommitData* self,
 	                         Version version,
@@ -120,35 +127,10 @@ struct ResolutionRequestBuilder {
 		return *out;
 	}
 
-	void addTransaction(CommitTransactionRequest& trRequest, int transactionNumberInBatch) {
-		auto& trIn = trRequest.transaction;
-		// SOMEDAY: There are a couple of unnecessary O( # resolvers ) steps here
-		outTr.assign(requests.size(), nullptr);
-		ASSERT(transactionNumberInBatch >= 0 && transactionNumberInBatch < 32768);
-
-		bool isTXNStateTransaction = false;
-		for (auto& m : trIn.mutations) {
-			if (m.type == MutationRef::SetVersionstampedKey) {
-				transformVersionstampMutation(m, &MutationRef::param1, requests[0].version, transactionNumberInBatch);
-				trIn.write_conflict_ranges.push_back(requests[0].arena, singleKeyRange(m.param1, requests[0].arena));
-			} else if (m.type == MutationRef::SetVersionstampedValue) {
-				transformVersionstampMutation(m, &MutationRef::param2, requests[0].version, transactionNumberInBatch);
-			}
-			if (isMetadataMutation(m)) {
-				isTXNStateTransaction = true;
-				getOutTransaction(0, trIn.read_snapshot).mutations.push_back(requests[0].arena, m);
-			}
-		}
-		if (isTXNStateTransaction && !trRequest.isLockAware()) {
-			// This mitigates https://github.com/apple/foundationdb/issues/3647. Since this transaction is not lock
-			// aware, if this transaction got a read version then \xff/dbLocked must not have been set at this
-			// transaction's read snapshot. If that changes by commit time, then it won't commit on any proxy because of
-			// a conflict. A client could set a read version manually so this isn't totally bulletproof.
-			trIn.read_conflict_ranges.push_back(trRequest.arena, KeyRangeRef(databaseLockedKey, databaseLockedKeyEnd));
-		}
-		std::vector<std::vector<int>> rCRIndexMap(
-		    requests.size()); // [resolver_index][read_conflict_range_index_on_the_resolver]
-		                      // -> read_conflict_range's original index
+	// Returns a read conflict index map: [resolver_index][read_conflict_range_index_on_the_resolver]
+	// -> read_conflict_range's original index
+	std::vector<std::vector<int>> addReadConflictRanges(CommitTransactionRef& trIn) {
+		std::vector<std::vector<int>> rCRIndexMap(requests.size());
 		for (int idx = 0; idx < trIn.read_conflict_ranges.size(); ++idx) {
 			const auto& r = trIn.read_conflict_ranges[idx];
 			auto ranges = self->keyResolvers.intersectingRanges(r);
@@ -161,6 +143,11 @@ struct ResolutionRequestBuilder {
 						break;
 				}
 			}
+			if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS && systemKeys.intersects(r)) {
+				for (int k = 0; k < self->resolvers.size(); k++) {
+					resolvers.insert(k);
+				}
+			}
 			ASSERT(resolvers.size());
 			for (int resolver : resolvers) {
 				getOutTransaction(resolver, trIn.read_snapshot)
@@ -168,23 +155,76 @@ struct ResolutionRequestBuilder {
 				rCRIndexMap[resolver].push_back(idx);
 			}
 		}
-		txReadConflictRangeIndexMap.push_back(std::move(rCRIndexMap));
+		return rCRIndexMap;
+	}
+
+	void addWriteConflictRanges(CommitTransactionRef& trIn) {
 		for (auto& r : trIn.write_conflict_ranges) {
 			auto ranges = self->keyResolvers.intersectingRanges(r);
 			std::set<int> resolvers;
-			for (auto& ir : ranges)
-				resolvers.insert(ir.value().back().second);
+			for (auto& ir : ranges) {
+				auto& version_resolver = ir.value();
+				if (!version_resolver.empty()) {
+					resolvers.insert(version_resolver.back().second);
+				}
+			}
+			if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS && systemKeys.intersects(r)) {
+				for (int k = 0; k < self->resolvers.size(); k++) {
+					resolvers.insert(k);
+				}
+			}
 			ASSERT(resolvers.size());
 			for (int resolver : resolvers)
 				getOutTransaction(resolver, trIn.read_snapshot)
 				    .write_conflict_ranges.push_back(requests[resolver].arena, r);
 		}
-		if (isTXNStateTransaction)
+	}
+
+	void addTransaction(CommitTransactionRequest& trRequest, Version ver, int transactionNumberInBatch) {
+		auto& trIn = trRequest.transaction;
+		// SOMEDAY: There are a couple of unnecessary O( # resolvers ) steps here
+		outTr.assign(requests.size(), nullptr);
+		ASSERT(transactionNumberInBatch >= 0 && transactionNumberInBatch < 32768);
+
+		bool isTXNStateTransaction = false;
+		for (auto& m : trIn.mutations) {
+			DEBUG_MUTATION("AddTr", ver, m, self->dbgid).detail("Idx", transactionNumberInBatch);
+			if (m.type == MutationRef::SetVersionstampedKey) {
+				transformVersionstampMutation(m, &MutationRef::param1, requests[0].version, transactionNumberInBatch);
+				trIn.write_conflict_ranges.push_back(requests[0].arena, singleKeyRange(m.param1, requests[0].arena));
+			} else if (m.type == MutationRef::SetVersionstampedValue) {
+				transformVersionstampMutation(m, &MutationRef::param2, requests[0].version, transactionNumberInBatch);
+			}
+			if (isMetadataMutation(m)) {
+				isTXNStateTransaction = true;
+				auto& tr = getOutTransaction(0, trIn.read_snapshot);
+				tr.mutations.push_back(requests[0].arena, m);
+				tr.lock_aware = trRequest.isLockAware();
+			}
+		}
+		if (isTXNStateTransaction && !trRequest.isLockAware()) {
+			// This mitigates https://github.com/apple/foundationdb/issues/3647. Since this transaction is not lock
+			// aware, if this transaction got a read version then \xff/dbLocked must not have been set at this
+			// transaction's read snapshot. If that changes by commit time, then it won't commit on any proxy because of
+			// a conflict. A client could set a read version manually so this isn't totally bulletproof.
+			trIn.read_conflict_ranges.push_back(trRequest.arena, KeyRangeRef(databaseLockedKey, databaseLockedKeyEnd));
+		}
+
+		std::vector<std::vector<int>> rCRIndexMap = addReadConflictRanges(trIn);
+		txReadConflictRangeIndexMap.push_back(std::move(rCRIndexMap));
+
+		addWriteConflictRanges(trIn);
+
+		if (isTXNStateTransaction) {
 			for (int r = 0; r < requests.size(); r++) {
 				int transactionNumberInRequest =
 				    &getOutTransaction(r, trIn.read_snapshot) - requests[r].transactions.begin();
 				requests[r].txnStateTransactions.push_back(requests[r].arena, transactionNumberInRequest);
 			}
+			// Note only Resolver 0 got the correct spanContext, which means
+			// the reply from Resolver 0 has the right one back.
+			getOutTransaction(0, trIn.read_snapshot).spanContext = trRequest.spanContext;
+		}
 
 		std::vector<int> resolversUsed;
 		for (int r = 0; r < outTr.size(); r++)
@@ -520,13 +560,63 @@ struct CommitBatchContext {
 
 	double commitStartTime;
 
+	std::unordered_map<uint16_t, Version> tpcvMap; // obtained from resolver
+	std::set<Tag> writtenTags; // final set tags written to in the batch
+	std::set<Tag> writtenTagsPreResolution; // tags written to in the batch not including any changes from the resolver.
+
 	CommitBatchContext(ProxyCommitData*, const std::vector<CommitTransactionRequest>*, const int);
 
 	void setupTraceBatch();
 
+	std::set<Tag> getWrittenTagsPreResolution();
+
 private:
 	void evaluateBatchSize();
 };
+
+std::set<Tag> CommitBatchContext::getWrittenTagsPreResolution() {
+	std::set<Tag> transactionTags;
+	std::vector<Tag> cacheVector = { cacheTag };
+	for (int transactionNum = 0; transactionNum < trs.size(); transactionNum++) {
+		int mutationNum = 0;
+		VectorRef<MutationRef>* pMutations = &trs[transactionNum].transaction.mutations;
+		for (; mutationNum < pMutations->size(); mutationNum++) {
+			auto& m = (*pMutations)[mutationNum];
+			if (isSingleKeyMutation((MutationRef::Type)m.type)) {
+				auto& tags = pProxyCommitData->tagsForKey(m.param1);
+				transactionTags.insert(tags.begin(), tags.end());
+				if (pProxyCommitData->cacheInfo[m.param1]) {
+					transactionTags.insert(cacheTag);
+				}
+			} else if (m.type == MutationRef::ClearRange) {
+				KeyRangeRef clearRange(KeyRangeRef(m.param1, m.param2));
+				auto ranges = pProxyCommitData->keyInfo.intersectingRanges(clearRange);
+				auto firstRange = ranges.begin();
+				++firstRange;
+				if (firstRange == ranges.end()) {
+					std::set<Tag> filteredTags;
+					ranges.begin().value().populateTags();
+					filteredTags.insert(ranges.begin().value().tags.begin(), ranges.begin().value().tags.end());
+					transactionTags.insert(ranges.begin().value().tags.begin(), ranges.begin().value().tags.end());
+				} else {
+					std::set<Tag> allSources;
+					for (auto r : ranges) {
+						r.value().populateTags();
+						allSources.insert(r.value().tags.begin(), r.value().tags.end());
+						transactionTags.insert(r.value().tags.begin(), r.value().tags.end());
+					}
+				}
+				if (pProxyCommitData->needsCacheTag(clearRange)) {
+					transactionTags.insert(cacheTag);
+				}
+			} else {
+				UNREACHABLE();
+			}
+		}
+	}
+
+	return transactionTags;
+}
 
 CommitBatchContext::CommitBatchContext(ProxyCommitData* const pProxyCommitData_,
                                        const std::vector<CommitTransactionRequest>* trs_,
@@ -656,6 +746,9 @@ ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 		    "CommitDebug", debugID.get().first(), "CommitProxyServer.commitBatch.GettingCommitVersion");
 	}
 
+	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+		self->writtenTagsPreResolution = self->getWrittenTagsPreResolution();
+	}
 	GetCommitVersionRequest req(span.context,
 	                            pProxyCommitData->commitVersionRequestNumber++,
 	                            pProxyCommitData->mostRecentProcessedRequestNumber,
@@ -703,7 +796,7 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 	int conflictRangeCount = 0;
 	self->maxTransactionBytes = 0;
 	for (int t = 0; t < trs.size(); t++) {
-		requests.addTransaction(trs[t], t);
+		requests.addTransaction(trs[t], self->commitVersion, t);
 		conflictRangeCount +=
 		    trs[t].transaction.read_conflict_ranges.size() + trs[t].transaction.write_conflict_ranges.size();
 		//TraceEvent("MPTransactionDump", self->dbgid).detail("Snapshot", trs[t].transaction.read_snapshot);
@@ -720,6 +813,7 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 	std::vector<Future<ResolveTransactionBatchReply>> replies;
 	for (int r = 0; r < pProxyCommitData->resolvers.size(); r++) {
 		requests.requests[r].debugID = self->debugID;
+		requests.requests[r].writtenTags = self->writtenTagsPreResolution;
 		replies.push_back(trackResolutionMetrics(pProxyCommitData->stats.resolverDist[r],
 		                                         brokenPromiseToNever(pProxyCommitData->resolvers[r].resolve.getReply(
 		                                             requests.requests[r], TaskPriority::ProxyResolverReply))));
@@ -757,9 +851,11 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 }
 
 void assertResolutionStateMutationsSizeConsistent(const std::vector<ResolveTransactionBatchReply>& resolution) {
-
 	for (int r = 1; r < resolution.size(); r++) {
 		ASSERT(resolution[r].stateMutations.size() == resolution[0].stateMutations.size());
+		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+			ASSERT_EQ(resolution[0].tpcvMap.size(), resolution[r].tpcvMap.size());
+		}
 		for (int s = 0; s < resolution[r].stateMutations.size(); s++) {
 			ASSERT(resolution[r].stateMutations[s].size() == resolution[0].stateMutations[s].size());
 		}
@@ -888,7 +984,7 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 				                       self->arena,
 				                       pProxyCommitData->logSystem,
 				                       trs[t].transaction.mutations,
-				                       &self->toCommit,
+				                       SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? nullptr : &self->toCommit,
 				                       self->forceRecovery,
 				                       self->commitVersion,
 				                       self->commitVersion + 1,
@@ -905,6 +1001,17 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 		for (; t < trs.size(); t++)
 			self->committed[t] = ConflictBatch::TransactionConflict;
 		TraceEvent(SevWarn, "RestartingTxnSubsystem", pProxyCommitData->dbgid).detail("Stage", "AwaitCommit");
+	}
+	if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
+		// Resolver also calculates forceRecovery and only applies metadata mutations
+		// in the same set of transactions as this proxy.
+		ResolveTransactionBatchReply& reply = self->resolution[0];
+		self->toCommit.setMutations(reply.privateMutationCount, reply.privateMutations);
+		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
+			// TraceEvent("ResolverReturn").detail("ReturnTags",reply.writtenTags).detail("TPCVsize",reply.tpcvMap.size()).detail("ReqTags",self->writtenTagsPreResolution);
+			self->tpcvMap = reply.tpcvMap;
+		}
+		self->toCommit.addWrittenTags(reply.writtenTags);
 	}
 
 	self->lockedKey = pProxyCommitData->txnStateStore->readValue(databaseLockedKey).get();
@@ -1012,7 +1119,6 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 					// Fast path
 					DEBUG_MUTATION("ProxyCommit", self->commitVersion, m, pProxyCommitData->dbgid)
 					    .detail("To", ranges.begin().value().tags);
-
 					ranges.begin().value().populateTags();
 					self->toCommit.addTags(ranges.begin().value().tags);
 
@@ -1046,9 +1152,10 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 							trCost->get().clearIdxCosts.pop_front();
 						}
 					}
-					DEBUG_MUTATION("ProxyCommit", self->commitVersion, m, pProxyCommitData->dbgid)
-					    .detail("To", allSources);
 
+					DEBUG_MUTATION("ProxyCommit", self->commitVersion, m)
+					    .detail("Dbgid", pProxyCommitData->dbgid)
+					    .detail("To", allSources);
 					self->toCommit.addTags(allSources);
 				}
 
@@ -1175,6 +1282,8 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		                        &self->computeStart));
 	}
 
+	self->toCommit.saveTags(self->writtenTags);
+
 	pProxyCommitData->stats.mutations += self->mutationCount;
 	pProxyCommitData->stats.mutationBytes += self->mutationBytes;
 
@@ -1200,8 +1309,11 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 					break;
 				}
 				when(wait(pProxyCommitData->cx->onProxiesChanged())) {}
+				// @todo probably there is no need to get the (entire) version vector from the sequencer
+				// in this case, and if so, consider adding a flag to the request to tell the sequencer
+				// to not send the version vector information.
 				when(GetRawCommittedVersionReply v = wait(pProxyCommitData->master.getLiveCommittedVersion.getReply(
-				         GetRawCommittedVersionRequest(waitVersionSpan.context, debugID),
+				         GetRawCommittedVersionRequest(waitVersionSpan.context, debugID, invalidVersion),
 				         TaskPriority::GetLiveCommittedVersionReply))) {
 					if (v.version > pProxyCommitData->committedVersion.get()) {
 						pProxyCommitData->locked = v.locked;
@@ -1238,22 +1350,30 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 	if (self->prevVersion && self->commitVersion - self->prevVersion < SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT / 2)
 		debug_advanceMaxCommittedVersion(UID(), self->commitVersion); //< Is this valid?
 
-	//TraceEvent("ProxyPush", pProxyCommitData->dbgid).detail("PrevVersion", prevVersion).detail("Version", commitVersion)
-	//	.detail("TransactionsSubmitted", trs.size()).detail("TransactionsCommitted", commitCount).detail("TxsPopTo",
-	// msg.popTo);
+	// TraceEvent("ProxyPush", pProxyCommitData->dbgid)
+	//     .detail("PrevVersion", self->prevVersion)
+	//     .detail("Version", self->commitVersion)
+	//     .detail("TransactionsSubmitted", trs.size())
+	//     .detail("TransactionsCommitted", self->commitCount)
+	//     .detail("TxsPopTo", self->msg.popTo);
 
 	if (self->prevVersion && self->commitVersion - self->prevVersion < SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT / 2)
 		debug_advanceMaxCommittedVersion(UID(), self->commitVersion);
 
 	self->commitStartTime = now();
 	pProxyCommitData->lastStartCommit = self->commitStartTime;
+	Optional<std::unordered_map<uint16_t, Version>> tpcvMap = Optional<std::unordered_map<uint16_t, Version>>();
+	if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
+		tpcvMap = self->tpcvMap;
+	}
 	self->loggingComplete = pProxyCommitData->logSystem->push(self->prevVersion,
 	                                                          self->commitVersion,
 	                                                          pProxyCommitData->committedVersion.get(),
 	                                                          pProxyCommitData->minKnownCommittedVersion,
 	                                                          self->toCommit,
 	                                                          span.context,
-	                                                          self->debugID);
+	                                                          self->debugID,
+	                                                          tpcvMap);
 
 	float ratio = self->toCommit.getEmptyMessageRatio();
 	pProxyCommitData->stats.commitBatchingEmptyMessageRatio.addMeasurement(ratio);
@@ -1338,7 +1458,9 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 		debug_advanceMinCommittedVersion(UID(), self->commitVersion);
 	}
 
-	//TraceEvent("ProxyPushed", pProxyCommitData->dbgid).detail("PrevVersion", prevVersion).detail("Version", commitVersion);
+	// TraceEvent("ProxyPushed", pProxyCommitData->dbgid)
+	//     .detail("PrevVersion", self->prevVersion)
+	//     .detail("Version", self->commitVersion);
 	if (debugID.present())
 		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "CommitProxyServer.commitBatch.AfterLogPush");
 
@@ -1353,13 +1475,21 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 	// self->committedVersion by reporting commit version first before updating self->committedVersion. Otherwise, a
 	// client may get a commit version that the master is not aware of, and next GRV request may get a version less than
 	// self->committedVersion.
+
 	TEST(pProxyCommitData->committedVersion.get() > self->commitVersion); // later version was reported committed first
+
 	if (self->commitVersion >= pProxyCommitData->committedVersion.get()) {
+		state Optional<std::set<Tag>> writtenTags;
+		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
+			writtenTags = self->writtenTags;
+		}
 		wait(pProxyCommitData->master.reportLiveCommittedVersion.getReply(
 		    ReportRawCommittedVersionRequest(self->commitVersion,
 		                                     self->lockedAfter,
 		                                     self->metadataVersionAfter,
-		                                     pProxyCommitData->minKnownCommittedVersion),
+		                                     pProxyCommitData->minKnownCommittedVersion,
+		                                     self->prevVersion,
+		                                     writtenTags),
 		    TaskPriority::ProxyMasterVersionReply));
 	}
 	if (self->commitVersion > pProxyCommitData->committedVersion.get()) {
@@ -1444,7 +1574,19 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 			if (r->value().size() && r->value().front().first < oldestVersion)
 				r->value().front().first = 0;
 		}
-		pProxyCommitData->keyResolvers.coalesce(allKeys);
+		if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
+			// Only normal key space, because \xff key space is processed by all resolvers.
+			pProxyCommitData->keyResolvers.coalesce(normalKeys);
+			auto& versions = pProxyCommitData->systemKeyVersions;
+			while (versions.size() > 1 && versions[1] < oldestVersion) {
+				versions.pop_front();
+			}
+			if (!versions.empty() && versions[0] < oldestVersion) {
+				versions[0] = 0;
+			}
+		} else {
+			pProxyCommitData->keyResolvers.coalesce(allKeys);
+		}
 		if (pProxyCommitData->keyResolvers.size() != lastSize)
 			TraceEvent("KeyResolverSize", pProxyCommitData->dbgid)
 			    .detail("Size", pProxyCommitData->keyResolvers.size());
@@ -1523,6 +1665,16 @@ void maybeAddTssMapping(GetKeyServerLocationsReply& reply,
 			reply.resultsTssMapping.push_back(*mappingItr);
 		}
 		included.insert(ssId);
+	}
+}
+
+void addTagMapping(GetKeyServerLocationsReply& reply, ProxyCommitData* commitData) {
+	for (const auto& [_, shard] : reply.results) {
+		for (auto& ssi : shard) {
+			auto iter = commitData->storageCache.find(ssi.id());
+			ASSERT_WE_THINK(iter != commitData->storageCache.end());
+			reply.resultsTagMapping.emplace_back(ssi.id(), iter->second->tag);
+		}
 	}
 }
 
@@ -1620,6 +1772,7 @@ ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsReques
 			--r;
 		}
 	}
+	addTagMapping(rep, commitData);
 	req.reply.send(rep);
 	++commitData->stats.keyServerLocationOut;
 	return Void();
@@ -2167,9 +2320,12 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 		                            "ToResolver_" + commitData.resolvers[i].id().toString(),
 		                            Histogram::Unit::microseconds));
 	}
-	auto rs = commitData.keyResolvers.modify(allKeys);
+
+	// Initialize keyResolvers map
+	auto rs = commitData.keyResolvers.modify(SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? normalKeys : allKeys);
 	for (auto r = rs.begin(); r != rs.end(); ++r)
 		r->value().emplace_back(0, 0);
+	commitData.systemKeyVersions.push_back(0);
 
 	commitData.logSystem = ILogSystem::fromServerDBInfo(proxy.id(), commitData.db->get(), false, addActor);
 	commitData.logAdapter =
@@ -2182,10 +2338,13 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	// ((SERVER_MEM_LIMIT * COMMIT_BATCHES_MEM_FRACTION_OF_TOTAL) / COMMIT_BATCHES_MEM_TO_TOTAL_MEM_SCALE_FACTOR) is
 	// only a approximate formula for limiting the memory used. COMMIT_BATCHES_MEM_TO_TOTAL_MEM_SCALE_FACTOR is an
 	// estimate based on experiments and not an accurate one.
-	state int64_t commitBatchesMemoryLimit = std::min(
-	    SERVER_KNOBS->COMMIT_BATCHES_MEM_BYTES_HARD_LIMIT,
-	    static_cast<int64_t>((SERVER_KNOBS->SERVER_MEM_LIMIT * SERVER_KNOBS->COMMIT_BATCHES_MEM_FRACTION_OF_TOTAL) /
-	                         SERVER_KNOBS->COMMIT_BATCHES_MEM_TO_TOTAL_MEM_SCALE_FACTOR));
+	state int64_t commitBatchesMemoryLimit = SERVER_KNOBS->COMMIT_BATCHES_MEM_BYTES_HARD_LIMIT;
+	if (SERVER_KNOBS->SERVER_MEM_LIMIT > 0) {
+		commitBatchesMemoryLimit = std::min(
+		    commitBatchesMemoryLimit,
+		    static_cast<int64_t>((SERVER_KNOBS->SERVER_MEM_LIMIT * SERVER_KNOBS->COMMIT_BATCHES_MEM_FRACTION_OF_TOTAL) /
+		                         SERVER_KNOBS->COMMIT_BATCHES_MEM_TO_TOTAL_MEM_SCALE_FACTOR));
+	}
 	TraceEvent(SevInfo, "CommitBatchesMemoryLimit").detail("BytesLimit", commitBatchesMemoryLimit);
 
 	addActor.send(monitorRemoteCommitted(&commitData));

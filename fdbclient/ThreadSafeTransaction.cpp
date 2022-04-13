@@ -25,6 +25,7 @@
 #include "fdbclient/versions.h"
 #include "fdbclient/GenericManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "flow/ProtocolVersion.h"
 
 // Users of ThreadSafeTransaction might share Reference<ThreadSafe...> between different threads as long as they don't
 // call addRef (e.g. C API follows this). Therefore, it is unsafe to call (explicitly or implicitly) this->addRef in any
@@ -101,6 +102,16 @@ ThreadFuture<Void> ThreadSafeDatabase::createSnapshot(const StringRef& uid, cons
 	return onMainThread([db, snapUID, cmd]() -> Future<Void> { return db->createSnapshot(snapUID, cmd); });
 }
 
+ThreadFuture<DatabaseSharedState*> ThreadSafeDatabase::createSharedState() {
+	DatabaseContext* db = this->db;
+	return onMainThread([db]() -> Future<DatabaseSharedState*> { return db->initSharedState(); });
+}
+
+void ThreadSafeDatabase::setSharedState(DatabaseSharedState* p) {
+	DatabaseContext* db = this->db;
+	onMainThreadVoid([db, p]() { db->setSharedState(p); }, nullptr);
+}
+
 // Return the main network thread busyness
 double ThreadSafeDatabase::getMainThreadBusyness() {
 	ASSERT(g_network);
@@ -114,6 +125,20 @@ ThreadFuture<ProtocolVersion> ThreadSafeDatabase::getServerProtocol(Optional<Pro
 	DatabaseContext* db = this->db;
 	return onMainThread(
 	    [db, expectedVersion]() -> Future<ProtocolVersion> { return db->getClusterProtocol(expectedVersion); });
+}
+
+ThreadFuture<Key> ThreadSafeDatabase::purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) {
+	DatabaseContext* db = this->db;
+	KeyRange range = keyRange;
+	return onMainThread([db, range, purgeVersion, force]() -> Future<Key> {
+		return db->purgeBlobGranules(range, purgeVersion, force);
+	});
+}
+
+ThreadFuture<Void> ThreadSafeDatabase::waitPurgeGranulesComplete(const KeyRef& purgeKey) {
+	DatabaseContext* db = this->db;
+	Key key = purgeKey;
+	return onMainThread([db, key]() -> Future<Void> { return db->waitPurgeGranulesComplete(key); });
 }
 
 ThreadSafeDatabase::ThreadSafeDatabase(std::string connFilename, int apiVersion) {
@@ -434,6 +459,14 @@ ThreadFuture<Void> ThreadSafeTransaction::commit() {
 Version ThreadSafeTransaction::getCommittedVersion() {
 	// This should be thread safe when called legally, but it is fragile
 	return tr->getCommittedVersion();
+}
+
+VersionVector ThreadSafeTransaction::getVersionVector() {
+	return tr->getVersionVector();
+}
+
+UID ThreadSafeTransaction::getSpanID() {
+	return tr->getSpanID();
 }
 
 ThreadFuture<int64_t> ThreadSafeTransaction::getApproximateSize() {

@@ -25,6 +25,7 @@
 #include "fdbserver/LogSystemDiskQueueAdapter.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/GrvProxyInterface.h"
+#include "fdbclient/VersionVector.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbrpc/sim_validation.h"
@@ -238,7 +239,7 @@ struct GrvProxyData {
 
 	GrvProxyStats stats;
 	MasterInterface master;
-	RequestStream<GetReadVersionRequest> getConsistentReadVersion;
+	PublicRequestStream<GetReadVersionRequest> getConsistentReadVersion;
 	Reference<ILogSystem> logSystem;
 
 	Database cx;
@@ -247,10 +248,14 @@ struct GrvProxyData {
 	Optional<LatencyBandConfig> latencyBandConfig;
 	double lastStartCommit;
 	double lastCommitLatency;
+	LatencySample versionVectorSizeOnGRVReply;
 	int updateCommitRequests;
 	NotifiedDouble lastCommitTime;
 
 	Version minKnownCommittedVersion; // we should ask master for this version.
+
+	// Cache of the latest commit versions of storage servers.
+	VersionVector ssVersionVectorCache;
 
 	void updateLatencyBandConfig(Optional<LatencyBandConfig> newLatencyBandConfig) {
 		if (newLatencyBandConfig.present() != latencyBandConfig.present() ||
@@ -270,12 +275,16 @@ struct GrvProxyData {
 
 	GrvProxyData(UID dbgid,
 	             MasterInterface master,
-	             RequestStream<GetReadVersionRequest> getConsistentReadVersion,
+	             PublicRequestStream<GetReadVersionRequest> getConsistentReadVersion,
 	             Reference<AsyncVar<ServerDBInfo> const> db)
 	  : dbgid(dbgid), stats(dbgid), master(master), getConsistentReadVersion(getConsistentReadVersion),
 	    cx(openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True)), db(db), lastStartCommit(0),
-	    lastCommitLatency(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION), updateCommitRequests(0), lastCommitTime(0),
-	    minKnownCommittedVersion(invalidVersion) {}
+	    lastCommitLatency(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION),
+	    versionVectorSizeOnGRVReply("VersionVectorSizeOnGRVReply",
+	                                dbgid,
+	                                SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                                SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	    updateCommitRequests(0), lastCommitTime(0), minKnownCommittedVersion(invalidVersion) {}
 };
 
 ACTOR Future<Void> healthMetricsRequestServer(GrvProxyInterface grvProxy,
@@ -552,7 +561,8 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(SpanID parentSpan,
 	state double grvStart = now();
 	state Future<GetRawCommittedVersionReply> replyFromMasterFuture;
 	replyFromMasterFuture = grvProxyData->master.getLiveCommittedVersion.getReply(
-	    GetRawCommittedVersionRequest(span.context, debugID), TaskPriority::GetLiveCommittedVersionReply);
+	    GetRawCommittedVersionRequest(span.context, debugID, grvProxyData->ssVersionVectorCache.getMaxVersion()),
+	    TaskPriority::GetLiveCommittedVersionReply);
 
 	if (!SERVER_KNOBS->ALWAYS_CAUSAL_READ_RISKY && !(flags & GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY)) {
 		wait(updateLastCommit(grvProxyData, debugID));
@@ -571,7 +581,8 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(SpanID parentSpan,
 	GetRawCommittedVersionReply repFromMaster = wait(replyFromMasterFuture);
 	grvProxyData->minKnownCommittedVersion =
 	    std::max(grvProxyData->minKnownCommittedVersion, repFromMaster.minKnownCommittedVersion);
-
+	// TODO add to "status json"
+	grvProxyData->ssVersionVectorCache.applyDelta(repFromMaster.ssVersionVectorDelta);
 	grvProxyData->stats.grvGetCommittedVersionRpcDist->sampleSeconds(now() - grvConfirmEpochLive);
 	GetReadVersionReply rep;
 	rep.version = repFromMaster.version;
@@ -603,6 +614,7 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(SpanID parentSpan,
 // Update GRV statistics according to the request's priority.
 ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
                                   std::vector<GetReadVersionRequest> requests,
+                                  GrvProxyData* grvProxyData,
                                   GrvProxyStats* stats,
                                   Version minKnownCommittedVersion,
                                   PrioritizedTransactionTagMap<ClientTagThrottleLimits> throttledTags,
@@ -634,6 +646,9 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
 		}
 		reply.midShardSize = midShardSize;
 		reply.tagThrottleInfo.clear();
+		grvProxyData->ssVersionVectorCache.getDelta(request.maxVersion, reply.ssVersionVectorDelta);
+		grvProxyData->versionVectorSizeOnGRVReply.addMeasurement(reply.ssVersionVectorDelta.size());
+		reply.proxyId = grvProxyData->dbgid;
 
 		if (!request.tags.empty()) {
 			auto& priorityThrottledTags = throttledTags[request.priority];
@@ -936,6 +951,7 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 				                                                                       batchPriTransactionsStarted[i]);
 				addActor.send(sendGrvReplies(readVersionReply,
 				                             start[i],
+				                             grvProxyData,
 				                             &grvProxyData->stats,
 				                             grvProxyData->minKnownCommittedVersion,
 				                             throttledTags,

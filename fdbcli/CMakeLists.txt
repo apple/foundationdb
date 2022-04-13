@@ -29,6 +29,7 @@ set(FDBCLI_SRCS
   TriggerDDTeamInfoLogCommand.actor.cpp
   TssqCommand.actor.cpp
   Util.actor.cpp
+  VersionEpochCommand.actor.cpp
   linenoise/linenoise.h)
 
 if(NOT WIN32)

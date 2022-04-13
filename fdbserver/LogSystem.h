@@ -22,6 +22,7 @@
 #define FDBSERVER_LOGSYSTEM_H
 
 #include <set>
+#include <stdint.h>
 #include <vector>
 
 #include "fdbserver/SpanContextMessage.h"
@@ -519,7 +520,9 @@ struct ILogSystem {
 	                             Version minKnownCommittedVersion,
 	                             LogPushData& data,
 	                             SpanID const& spanContext,
-	                             Optional<UID> debugID = Optional<UID>()) = 0;
+	                             Optional<UID> debugID = Optional<UID>(),
+	                             Optional<std::unordered_map<uint16_t, Version>> tpcvMap =
+	                                 Optional<std::unordered_map<uint16_t, Version>>()) = 0;
 	// Waits for the version number of the bundle (in this epoch) to be prevVersion (i.e. for all pushes ordered
 	// earlier) Puts the given messages into the bundle, each with the given tags, and with message versions (version,
 	// 0) - (version, N) Changes the version number of the bundle to be version (unblocking the next push) Returns when
@@ -761,12 +764,45 @@ struct LogPushData : NonCopyable {
 	// Add transaction info to be written before the first mutation in the transaction.
 	void addTransactionInfo(SpanID const& context);
 
+	// copy written_tags, after filtering, into given set
+	void saveTags(std::set<Tag>& filteredTags) const {
+		for (const auto& tag : written_tags) {
+			filteredTags.insert(tag);
+		}
+	}
+
+	void addWrittenTags(const std::set<Tag>& tags) { written_tags.insert(tags.begin(), tags.end()); }
+
+	void getLocations(const std::set<Tag>& tags, std::set<uint16_t>& writtenTLogs) {
+		std::vector<Tag> vtags(tags.begin(), tags.end());
+		std::vector<int> msg_locations;
+		logSystem->getPushLocations(vtags, msg_locations, false /*allLocations*/);
+		writtenTLogs.insert(msg_locations.begin(), msg_locations.end());
+	}
+
+	void getLocations(const std::vector<Tag>& vtags, std::set<uint16_t>& writtenTLogs) {
+		std::vector<int> msg_locations;
+		logSystem->getPushLocations(vtags, msg_locations, false /*allLocations*/);
+		writtenTLogs.insert(msg_locations.begin(), msg_locations.end());
+	}
+
+	// store tlogs as represented by index
+	void saveLocations(std::set<uint16_t>& writtenTLogs) {
+		writtenTLogs.insert(msg_locations.begin(), msg_locations.end());
+	}
+
+	void setShardChanged() { shardChanged = true; }
+	bool isShardChanged() const { return shardChanged; }
+
 	void writeMessage(StringRef rawMessageWithoutLength, bool usePreviousLocations);
 
 	template <class T>
 	void writeTypedMessage(T const& item, bool metadataMessage = false, bool allLocations = false);
 
 	Standalone<StringRef> getMessages(int loc) { return messagesWriter[loc].toValue(); }
+
+	// Returns all locations' messages, including empty ones.
+	std::vector<Standalone<StringRef>> getAllMessages();
 
 	// Records if a tlog (specified by "loc") will receive an empty version batch message.
 	// "value" is the message returned by getMessages() call.
@@ -776,10 +812,18 @@ struct LogPushData : NonCopyable {
 	// MUST be called after getMessages() and recordEmptyMessage().
 	float getEmptyMessageRatio() const;
 
+	// Returns the total number of mutations.
+	uint32_t getMutationCount() const { return subsequence; }
+
+	// Sets mutations for all internal writers. "mutations" is the output from
+	// getAllMessages() and is used before writing any other mutations.
+	void setMutations(uint32_t totalMutations, VectorRef<StringRef> mutations);
+
 private:
 	Reference<ILogSystem> logSystem;
 	std::vector<Tag> next_message_tags;
 	std::vector<Tag> prev_tags;
+	std::set<Tag> written_tags;
 	std::vector<BinaryWriter> messagesWriter;
 	std::vector<bool> messagesWritten; // if messagesWriter has written anything
 	std::vector<int> msg_locations;
@@ -789,6 +833,7 @@ private:
 	std::unordered_set<int> writtenLocations;
 	uint32_t subsequence;
 	SpanID spanContext;
+	bool shardChanged = false; // if keyServers has any changes, i.e., shard boundary modifications.
 
 	// Writes transaction info to the message stream at the given location if
 	// it has not already been written (for the current transaction). Returns
@@ -860,6 +905,7 @@ void LogPushData::writeTypedMessage(T const& item, bool metadataMessage, bool al
 			wr.serializeBytes((uint8_t*)from.getData() + firstOffset, firstLength);
 		}
 	}
+	written_tags.insert(next_message_tags.begin(), next_message_tags.end());
 	next_message_tags.clear();
 }
 

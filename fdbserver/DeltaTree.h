@@ -1177,15 +1177,16 @@ public:
 	struct Cursor {
 		Cursor() : cache(nullptr), nodeIndex(-1) {}
 
-		Cursor(DecodeCache* cache, DeltaTree2* tree) : tree(tree), cache(cache), nodeIndex(-1) {}
+		Cursor(Reference<DecodeCache> cache, DeltaTree2* tree) : tree(tree), cache(cache), nodeIndex(-1) {}
 
-		Cursor(DecodeCache* cache, DeltaTree2* tree, int nodeIndex) : tree(tree), cache(cache), nodeIndex(nodeIndex) {}
+		Cursor(Reference<DecodeCache> cache, DeltaTree2* tree, int nodeIndex)
+		  : tree(tree), cache(cache), nodeIndex(nodeIndex) {}
 
 		// Copy constructor does not copy item because normally a copied cursor will be immediately moved.
 		Cursor(const Cursor& c) : tree(c.tree), cache(c.cache), nodeIndex(c.nodeIndex) {}
 
 		~Cursor() {
-			if (cache != nullptr) {
+			if (cache.isValid()) {
 				cache->updateUsedMemory();
 			}
 		}
@@ -1212,7 +1213,7 @@ public:
 		}
 
 		DeltaTree2* tree;
-		DecodeCache* cache;
+		Reference<DecodeCache> cache;
 		int nodeIndex;
 		mutable Optional<T> item;
 
@@ -1274,6 +1275,7 @@ public:
 			return item.get();
 		}
 
+		// Switch the cursor to point to a new DeltaTree
 		void switchTree(DeltaTree2* newTree) {
 			tree = newTree;
 			// Reset item because it may point into tree memory
@@ -1709,7 +1711,13 @@ public:
 		} else {
 			nodeBytesUsed = 0;
 		}
+
+		ASSERT(size() <= spaceAvailable);
 		nodeBytesFree = spaceAvailable - size();
+
+		// Zero unused available space
+		memset((uint8_t*)this + size(), 0, nodeBytesFree);
+
 		return size();
 	}
 
@@ -1782,8 +1790,15 @@ private:
 		node.setLeftChildOffset(largeNodes, leftChildOffset);
 		node.setRightChildOffset(largeNodes, rightChildOffset);
 
-		deltatree_printf("%p: Serialized %s as %s\n", this, item.toString().c_str(), node.toString(this).c_str());
+		int written = wptr - (uint8_t*)&node;
+		deltatree_printf("Built subtree tree=%p subtreeRoot=%p written=%d end=%p serialized subtreeRoot %s as %s \n",
+		                 this,
+		                 &node,
+		                 written,
+		                 (uint8_t*)&node + written,
+		                 item.toString().c_str(),
+		                 node.toString(this).c_str());
 
-		return wptr - (uint8_t*)&node;
+		return written;
 	}
 };

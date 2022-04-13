@@ -1099,21 +1099,16 @@ void haltRegisteringOrCurrentSingleton(ClusterControllerData* self,
 
 void registerWorker(RegisterWorkerRequest req,
                     ClusterControllerData* self,
-                    ServerCoordinators coordinators,
+                    std::unordered_set<NetworkAddress> coordinatorAddresses,
                     ConfigBroadcaster* configBroadcaster) {
 	const WorkerInterface& w = req.wi;
 	ProcessClass newProcessClass = req.processClass;
 	auto info = self->id_worker.find(w.locality.processId());
 	ClusterControllerPriorityInfo newPriorityInfo = req.priorityInfo;
 	newPriorityInfo.processClassFitness = newProcessClass.machineClassFitness(ProcessClass::ClusterController);
-	Optional<ConfigFollowerInterface> cfi;
 	bool isCoordinator =
-	    std::find_if(coordinators.configServers.begin(),
-	                 coordinators.configServers.end(),
-	                 [&req](const ConfigFollowerInterface& cfi) {
-		                 return cfi.address() == req.wi.address() || (req.wi.secondaryAddress().present() &&
-		                                                              cfi.address() == req.wi.secondaryAddress().get());
-	                 }) != coordinators.configServers.end();
+	    (coordinatorAddresses.count(req.wi.address()) > 0) ||
+	    (req.wi.secondaryAddress().present() && coordinatorAddresses.count(req.wi.secondaryAddress().get()) > 0);
 
 	for (auto it : req.incompatiblePeers) {
 		self->db.incompatibleConnections[it] = now() + SERVER_KNOBS->INCOMPATIBLE_PEERS_LOGGING_INTERVAL;
@@ -2191,6 +2186,7 @@ ACTOR Future<Void> startEncryptKeyProxy(ClusterControllerData* self) {
 					TraceEvent("CCEKP_UpdateInf", self->id)
 					    .detail("Id", self->db.serverInfo->get().encryptKeyProxy.get().id());
 				}
+				checkOutstandingRequests(self);
 				return Void();
 			}
 		} catch (Error& e) {
@@ -2410,24 +2406,26 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 				wait(lowPriorityDelay(SERVER_KNOBS->CC_WORKER_HEALTH_CHECKING_INTERVAL));
 			}
 
-			self->degradedServers = self->getServersWithDegradedLink();
+			self->degradationInfo = self->getDegradationInfo();
 
 			// Compare `self->degradedServers` with `self->excludedDegradedServers` and remove those that have
 			// recovered.
 			for (auto it = self->excludedDegradedServers.begin(); it != self->excludedDegradedServers.end();) {
-				if (self->degradedServers.find(*it) == self->degradedServers.end()) {
+				if (self->degradationInfo.degradedServers.find(*it) == self->degradationInfo.degradedServers.end()) {
 					self->excludedDegradedServers.erase(it++);
 				} else {
 					++it;
 				}
 			}
 
-			if (!self->degradedServers.empty()) {
+			if (!self->degradationInfo.degradedServers.empty() || self->degradationInfo.degradedSatellite) {
 				std::string degradedServerString;
-				for (const auto& server : self->degradedServers) {
+				for (const auto& server : self->degradationInfo.degradedServers) {
 					degradedServerString += server.toString() + " ";
 				}
-				TraceEvent("ClusterControllerHealthMonitor").detail("DegradedServers", degradedServerString);
+				TraceEvent("ClusterControllerHealthMonitor")
+				    .detail("DegradedServers", degradedServerString)
+				    .detail("DegradedSatellite", self->degradationInfo.degradedSatellite);
 
 				// Check if the cluster controller should trigger a recovery to exclude any degraded servers from
 				// the transaction system.
@@ -2435,7 +2433,7 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 					if (SERVER_KNOBS->CC_HEALTH_TRIGGER_RECOVERY) {
 						if (self->recentRecoveryCountDueToHealth() < SERVER_KNOBS->CC_MAX_HEALTH_RECOVERY_COUNT) {
 							self->recentHealthTriggeredRecoveryTime.push(now());
-							self->excludedDegradedServers = self->degradedServers;
+							self->excludedDegradedServers = self->degradationInfo.degradedServers;
 							TraceEvent("DegradedServerDetectedAndTriggerRecovery")
 							    .detail("RecentRecoveryCountDueToHealth", self->recentRecoveryCountDueToHealth());
 							self->db.forceMasterFailure.trigger();
@@ -2545,10 +2543,30 @@ ACTOR Future<Void> clusterControllerCore(Reference<IClusterConnectionRecord> con
 		when(RecruitBlobWorkerRequest req = waitNext(interf.recruitBlobWorker.getFuture())) {
 			clusterRecruitBlobWorker(&self, req);
 		}
-		when(RegisterWorkerRequest req = waitNext(interf.registerWorker.getFuture())) {
+		when(state RegisterWorkerRequest req = waitNext(interf.registerWorker.getFuture())) {
 			++self.registerWorkerRequests;
-			registerWorker(
-			    req, &self, coordinators, (configDBType == ConfigDBType::DISABLED) ? nullptr : &configBroadcaster);
+			state ClusterConnectionString ccs = coordinators.ccr->getConnectionString();
+
+			state std::unordered_set<NetworkAddress> coordinatorAddresses;
+			std::vector<Future<Void>> fs;
+			for (auto& hostname : ccs.hostnames) {
+				fs.push_back(map(hostname.resolve(), [&](Optional<NetworkAddress> const& addr) -> Void {
+					if (addr.present()) {
+						coordinatorAddresses.insert(addr.get());
+					}
+					return Void();
+				}));
+			}
+			wait(waitForAll(fs));
+
+			for (const auto& coord : ccs.coordinators()) {
+				coordinatorAddresses.insert(coord);
+			}
+
+			registerWorker(req,
+			               &self,
+			               coordinatorAddresses,
+			               (configDBType == ConfigDBType::DISABLED) ? nullptr : &configBroadcaster);
 		}
 		when(GetWorkersRequest req = waitNext(interf.getWorkers.getFuture())) {
 			++self.getWorkersRequests;
@@ -2784,7 +2802,7 @@ TEST_CASE("/fdbserver/clustercontroller/updateRecoveredWorkers") {
 	return Void();
 }
 
-TEST_CASE("/fdbserver/clustercontroller/getServersWithDegradedLink") {
+TEST_CASE("/fdbserver/clustercontroller/getDegradationInfo") {
 	// Create a testing ClusterControllerData. Most of the internal states do not matter in this test.
 	ClusterControllerData data(ClusterControllerFullInterface(),
 	                           LocalityData(),
@@ -2800,18 +2818,18 @@ TEST_CASE("/fdbserver/clustercontroller/getServersWithDegradedLink") {
 	// cluster controller.
 	{
 		data.workerHealth[worker].degradedPeers[badPeer1] = { now(), now() };
-		ASSERT(data.getServersWithDegradedLink().empty());
+		ASSERT(data.getDegradationInfo().degradedServers.empty());
 		data.workerHealth.clear();
 	}
 
-	// Test that when there is only one reported degraded link, getServersWithDegradedLink can return correct
+	// Test that when there is only one reported degraded link, getDegradationInfo can return correct
 	// degraded server.
 	{
 		data.workerHealth[worker].degradedPeers[badPeer1] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
 			                                                  now() };
-		auto degradedServers = data.getServersWithDegradedLink();
-		ASSERT(degradedServers.size() == 1);
-		ASSERT(degradedServers.find(badPeer1) != degradedServers.end());
+		auto degradationInfo = data.getDegradationInfo();
+		ASSERT(degradationInfo.degradedServers.size() == 1);
+		ASSERT(degradationInfo.degradedServers.find(badPeer1) != degradationInfo.degradedServers.end());
 		data.workerHealth.clear();
 	}
 
@@ -2821,10 +2839,10 @@ TEST_CASE("/fdbserver/clustercontroller/getServersWithDegradedLink") {
 			                                                  now() };
 		data.workerHealth[badPeer1].degradedPeers[worker] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
 			                                                  now() };
-		auto degradedServers = data.getServersWithDegradedLink();
-		ASSERT(degradedServers.size() == 1);
-		ASSERT(degradedServers.find(worker) != degradedServers.end() ||
-		       degradedServers.find(badPeer1) != degradedServers.end());
+		auto degradationInfo = data.getDegradationInfo();
+		ASSERT(degradationInfo.degradedServers.size() == 1);
+		ASSERT(degradationInfo.degradedServers.find(worker) != degradationInfo.degradedServers.end() ||
+		       degradationInfo.degradedServers.find(badPeer1) != degradationInfo.degradedServers.end());
 		data.workerHealth.clear();
 	}
 
@@ -2839,9 +2857,9 @@ TEST_CASE("/fdbserver/clustercontroller/getServersWithDegradedLink") {
 			                                                  now() };
 		data.workerHealth[badPeer2].degradedPeers[worker] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
 			                                                  now() };
-		auto degradedServers = data.getServersWithDegradedLink();
-		ASSERT(degradedServers.size() == 1);
-		ASSERT(degradedServers.find(worker) != degradedServers.end());
+		auto degradationInfo = data.getDegradationInfo();
+		ASSERT(degradationInfo.degradedServers.size() == 1);
+		ASSERT(degradationInfo.degradedServers.find(worker) != degradationInfo.degradedServers.end());
 		data.workerHealth.clear();
 	}
 
@@ -2856,7 +2874,7 @@ TEST_CASE("/fdbserver/clustercontroller/getServersWithDegradedLink") {
 			                                                  now() };
 		data.workerHealth[badPeer4].degradedPeers[worker] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
 			                                                  now() };
-		ASSERT(data.getServersWithDegradedLink().empty());
+		ASSERT(data.getDegradationInfo().degradedServers.empty());
 		data.workerHealth.clear();
 	}
 
@@ -2880,7 +2898,7 @@ TEST_CASE("/fdbserver/clustercontroller/getServersWithDegradedLink") {
 			                                                  now() };
 		data.workerHealth[badPeer4].degradedPeers[worker] = { now() - SERVER_KNOBS->CC_MIN_DEGRADATION_INTERVAL - 1,
 			                                                  now() };
-		ASSERT(data.getServersWithDegradedLink().empty());
+		ASSERT(data.getDegradationInfo().degradedServers.empty());
 		data.workerHealth.clear();
 	}
 
@@ -2963,7 +2981,8 @@ TEST_CASE("/fdbserver/clustercontroller/shouldTriggerRecoveryDueToDegradedServer
 	testDbInfo.logSystemConfig.tLogs.push_back(remoteTLogSet);
 
 	GrvProxyInterface proxyInterf;
-	proxyInterf.getConsistentReadVersion = RequestStream<struct GetReadVersionRequest>(Endpoint({ proxy }, testUID));
+	proxyInterf.getConsistentReadVersion =
+	    PublicRequestStream<struct GetReadVersionRequest>(Endpoint({ proxy }, testUID));
 	testDbInfo.client.grvProxies.push_back(proxyInterf);
 
 	ResolverInterface resolverInterf;
@@ -2977,42 +2996,42 @@ TEST_CASE("/fdbserver/clustercontroller/shouldTriggerRecoveryDueToDegradedServer
 	ASSERT(!data.shouldTriggerRecoveryDueToDegradedServers());
 
 	// Trigger recovery when master is degraded.
-	data.degradedServers.insert(master);
+	data.degradationInfo.degradedServers.insert(master);
 	ASSERT(data.shouldTriggerRecoveryDueToDegradedServers());
-	data.degradedServers.clear();
+	data.degradationInfo.degradedServers.clear();
 
 	// Trigger recovery when primary TLog is degraded.
-	data.degradedServers.insert(tlog);
+	data.degradationInfo.degradedServers.insert(tlog);
 	ASSERT(data.shouldTriggerRecoveryDueToDegradedServers());
-	data.degradedServers.clear();
+	data.degradationInfo.degradedServers.clear();
 
 	// No recovery when satellite Tlog is degraded.
-	data.degradedServers.insert(satelliteTlog);
+	data.degradationInfo.degradedServers.insert(satelliteTlog);
 	ASSERT(!data.shouldTriggerRecoveryDueToDegradedServers());
-	data.degradedServers.clear();
+	data.degradationInfo.degradedServers.clear();
 
 	// No recovery when remote tlog is degraded.
-	data.degradedServers.insert(remoteTlog);
+	data.degradationInfo.degradedServers.insert(remoteTlog);
 	ASSERT(!data.shouldTriggerRecoveryDueToDegradedServers());
-	data.degradedServers.clear();
+	data.degradationInfo.degradedServers.clear();
 
 	// No recovery when log router is degraded.
-	data.degradedServers.insert(logRouter);
+	data.degradationInfo.degradedServers.insert(logRouter);
 	ASSERT(!data.shouldTriggerRecoveryDueToDegradedServers());
-	data.degradedServers.clear();
+	data.degradationInfo.degradedServers.clear();
 
 	// No recovery when backup worker is degraded.
-	data.degradedServers.insert(backup);
+	data.degradationInfo.degradedServers.insert(backup);
 	ASSERT(!data.shouldTriggerRecoveryDueToDegradedServers());
-	data.degradedServers.clear();
+	data.degradationInfo.degradedServers.clear();
 
 	// Trigger recovery when proxy is degraded.
-	data.degradedServers.insert(proxy);
+	data.degradationInfo.degradedServers.insert(proxy);
 	ASSERT(data.shouldTriggerRecoveryDueToDegradedServers());
-	data.degradedServers.clear();
+	data.degradationInfo.degradedServers.clear();
 
 	// Trigger recovery when resolver is degraded.
-	data.degradedServers.insert(resolver);
+	data.degradationInfo.degradedServers.insert(resolver);
 	ASSERT(data.shouldTriggerRecoveryDueToDegradedServers());
 
 	return Void();
@@ -3072,11 +3091,12 @@ TEST_CASE("/fdbserver/clustercontroller/shouldTriggerFailoverDueToDegradedServer
 	testDbInfo.logSystemConfig.tLogs.push_back(remoteTLogSet);
 
 	GrvProxyInterface grvProxyInterf;
-	grvProxyInterf.getConsistentReadVersion = RequestStream<struct GetReadVersionRequest>(Endpoint({ proxy }, testUID));
+	grvProxyInterf.getConsistentReadVersion =
+	    PublicRequestStream<struct GetReadVersionRequest>(Endpoint({ proxy }, testUID));
 	testDbInfo.client.grvProxies.push_back(grvProxyInterf);
 
 	CommitProxyInterface commitProxyInterf;
-	commitProxyInterf.commit = RequestStream<struct CommitTransactionRequest>(Endpoint({ proxy2 }, testUID));
+	commitProxyInterf.commit = PublicRequestStream<struct CommitTransactionRequest>(Endpoint({ proxy2 }, testUID));
 	testDbInfo.client.commitProxies.push_back(commitProxyInterf);
 
 	ResolverInterface resolverInterf;
@@ -3090,16 +3110,16 @@ TEST_CASE("/fdbserver/clustercontroller/shouldTriggerFailoverDueToDegradedServer
 	ASSERT(!data.shouldTriggerFailoverDueToDegradedServers());
 
 	// No failover when small number of degraded servers
-	data.degradedServers.insert(master);
+	data.degradationInfo.degradedServers.insert(master);
 	ASSERT(!data.shouldTriggerFailoverDueToDegradedServers());
-	data.degradedServers.clear();
+	data.degradationInfo.degradedServers.clear();
 
 	// Trigger failover when enough servers in the txn system are degraded.
-	data.degradedServers.insert(master);
-	data.degradedServers.insert(tlog);
-	data.degradedServers.insert(proxy);
-	data.degradedServers.insert(proxy2);
-	data.degradedServers.insert(resolver);
+	data.degradationInfo.degradedServers.insert(master);
+	data.degradationInfo.degradedServers.insert(tlog);
+	data.degradationInfo.degradedServers.insert(proxy);
+	data.degradationInfo.degradedServers.insert(proxy2);
+	data.degradationInfo.degradedServers.insert(resolver);
 	ASSERT(data.shouldTriggerFailoverDueToDegradedServers());
 
 	// No failover when usable region is 1.
@@ -3108,18 +3128,29 @@ TEST_CASE("/fdbserver/clustercontroller/shouldTriggerFailoverDueToDegradedServer
 	data.db.config.usableRegions = 2;
 
 	// No failover when remote is also degraded.
-	data.degradedServers.insert(remoteTlog);
+	data.degradationInfo.degradedServers.insert(remoteTlog);
 	ASSERT(!data.shouldTriggerFailoverDueToDegradedServers());
-	data.degradedServers.clear();
+	data.degradationInfo.degradedServers.clear();
 
 	// No failover when some are not from transaction system
-	data.degradedServers.insert(NetworkAddress(IPAddress(0x13131313), 1));
-	data.degradedServers.insert(NetworkAddress(IPAddress(0x13131313), 2));
-	data.degradedServers.insert(NetworkAddress(IPAddress(0x13131313), 3));
-	data.degradedServers.insert(NetworkAddress(IPAddress(0x13131313), 4));
-	data.degradedServers.insert(NetworkAddress(IPAddress(0x13131313), 5));
+	data.degradationInfo.degradedServers.insert(NetworkAddress(IPAddress(0x13131313), 1));
+	data.degradationInfo.degradedServers.insert(NetworkAddress(IPAddress(0x13131313), 2));
+	data.degradationInfo.degradedServers.insert(NetworkAddress(IPAddress(0x13131313), 3));
+	data.degradationInfo.degradedServers.insert(NetworkAddress(IPAddress(0x13131313), 4));
+	data.degradationInfo.degradedServers.insert(NetworkAddress(IPAddress(0x13131313), 5));
 	ASSERT(!data.shouldTriggerFailoverDueToDegradedServers());
-	data.degradedServers.clear();
+	data.degradationInfo.degradedServers.clear();
+
+	// Trigger failover when satellite is degraded.
+	data.degradationInfo.degradedSatellite = true;
+	ASSERT(data.shouldTriggerFailoverDueToDegradedServers());
+	data.degradationInfo.degradedServers.clear();
+
+	// No failover when satellite is degraded, but remote is not healthy.
+	data.degradationInfo.degradedSatellite = true;
+	data.degradationInfo.degradedServers.insert(remoteTlog);
+	ASSERT(!data.shouldTriggerFailoverDueToDegradedServers());
+	data.degradationInfo.degradedServers.clear();
 
 	return Void();
 }

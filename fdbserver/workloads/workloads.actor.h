@@ -30,7 +30,10 @@
 #include "fdbserver/KnobProtectiveGroups.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbrpc/simulator.h"
-#include "flow/actorcompiler.h"
+
+#include <functional>
+
+#include "flow/actorcompiler.h" // has to be last import
 
 /*
  * Gets an Value from a list of key/value pairs, using a default value if the key is not present.
@@ -51,6 +54,7 @@ struct WorkloadContext {
 	int clientId, clientCount;
 	int64_t sharedRandomNumber;
 	Reference<AsyncVar<struct ServerDBInfo> const> dbInfo;
+	Reference<IClusterConnectionRecord> ccr;
 
 	WorkloadContext();
 	WorkloadContext(const WorkloadContext&);
@@ -69,15 +73,40 @@ struct TestWorkload : NonCopyable, WorkloadContext, ReferenceCounted<TestWorkloa
 			phases |= TestWorkload::SETUP;
 	}
 	virtual ~TestWorkload(){};
+	virtual Future<Void> initialized() { return Void(); }
 	virtual std::string description() const = 0;
 	virtual Future<Void> setup(Database const& cx) { return Void(); }
 	virtual Future<Void> start(Database const& cx) = 0;
 	virtual Future<bool> check(Database const& cx) = 0;
-	virtual void getMetrics(std::vector<PerfMetric>& m) = 0;
+	virtual Future<std::vector<PerfMetric>> getMetrics() {
+		std::vector<PerfMetric> result;
+		getMetrics(result);
+		return result;
+	}
 
 	virtual double getCheckTimeout() const { return 3000; }
 
 	enum WorkloadPhase { SETUP = 1, EXECUTION = 2, CHECK = 4, METRICS = 8 };
+
+private:
+	virtual void getMetrics(std::vector<PerfMetric>& m) = 0;
+};
+
+struct WorkloadProcess;
+struct ClientWorkload : TestWorkload {
+	WorkloadProcess* impl;
+	using CreateWorkload = std::function<Reference<TestWorkload>(WorkloadContext const&)>;
+	ClientWorkload(CreateWorkload const& childCreator, WorkloadContext const& wcx);
+	~ClientWorkload();
+	Future<Void> initialized() override;
+	std::string description() const override;
+	Future<Void> setup(Database const& cx) override;
+	Future<Void> start(Database const& cx) override;
+	Future<bool> check(Database const& cx) override;
+	void getMetrics(std::vector<PerfMetric>& m) override;
+	Future<std::vector<PerfMetric>> getMetrics() override;
+
+	double getCheckTimeout() const override;
 };
 
 struct KVWorkload : TestWorkload {
@@ -122,8 +151,17 @@ struct IWorkloadFactory : ReferenceCounted<IWorkloadFactory> {
 
 template <class WorkloadType>
 struct WorkloadFactory : IWorkloadFactory {
-	WorkloadFactory(const char* name) { factories()[name] = Reference<IWorkloadFactory>::addRef(this); }
-	Reference<TestWorkload> create(WorkloadContext const& wcx) override { return makeReference<WorkloadType>(wcx); }
+	bool asClient;
+	WorkloadFactory(const char* name, bool asClient = false) : asClient(asClient) {
+		factories()[name] = Reference<IWorkloadFactory>::addRef(this);
+	}
+	Reference<TestWorkload> create(WorkloadContext const& wcx) override {
+		if (g_network->isSimulated() && asClient) {
+			return makeReference<ClientWorkload>(
+			    [](WorkloadContext const& wcx) { return makeReference<WorkloadType>(wcx); }, wcx);
+		}
+		return makeReference<WorkloadType>(wcx);
+	}
 };
 
 #define REGISTER_WORKLOAD(classname) WorkloadFactory<classname> classname##WorkloadFactory(#classname)
@@ -235,7 +273,8 @@ Future<Void> quietDatabase(Database const& cx,
                            int64_t maxTLogQueueGate = 5e6,
                            int64_t maxStorageServerQueueGate = 5e6,
                            int64_t maxDataDistributionQueueSize = 0,
-                           int64_t maxPoppedVersionLag = 30e6);
+                           int64_t maxPoppedVersionLag = 30e6,
+                           int64_t maxVersionOffset = 1e6);
 
 /**
  * A utility function for testing error situations. It succeeds if the given test

@@ -78,14 +78,14 @@ struct LoadBalancedReply {
 Optional<LoadBalancedReply> getLoadBalancedReply(const LoadBalancedReply* reply);
 Optional<LoadBalancedReply> getLoadBalancedReply(const void*);
 
-ACTOR template <class Req, class Resp, class Interface, class Multi>
+ACTOR template <class Req, class Resp, class Interface, class Multi, bool P>
 Future<Void> tssComparison(Req req,
                            Future<ErrorOr<Resp>> fSource,
                            Future<ErrorOr<Resp>> fTss,
                            TSSEndpointData tssData,
                            uint64_t srcEndpointId,
                            Reference<MultiInterface<Multi>> ssTeam,
-                           RequestStream<Req> Interface::*channel) {
+                           RequestStream<Req, P> Interface::*channel) {
 	state double startTime = now();
 	state Future<Optional<ErrorOr<Resp>>> fTssWithTimeout = timeout(fTss, FLOW_KNOBS->LOAD_BALANCE_TSS_TIMEOUT);
 	state int finished = 0;
@@ -157,7 +157,7 @@ Future<Void> tssComparison(Req req,
 					state std::vector<Future<ErrorOr<Resp>>> restOfTeamFutures;
 					restOfTeamFutures.reserve(ssTeam->size() - 1);
 					for (int i = 0; i < ssTeam->size(); i++) {
-						RequestStream<Req> const* si = &ssTeam->get(i, channel);
+						RequestStream<Req, P> const* si = &ssTeam->get(i, channel);
 						if (si->getEndpoint().token.first() !=
 						    srcEndpointId) { // don't re-request to SS we already have a response from
 							resetReply(req);
@@ -242,7 +242,7 @@ FDB_DECLARE_BOOLEAN_PARAM(AtMostOnce);
 FDB_DECLARE_BOOLEAN_PARAM(TriedAllOptions);
 
 // Stores state for a request made by the load balancer
-template <class Request, class Interface, class Multi>
+template <class Request, class Interface, class Multi, bool P>
 struct RequestData : NonCopyable {
 	typedef ErrorOr<REPLY_TYPE(Request)> Reply;
 
@@ -257,12 +257,12 @@ struct RequestData : NonCopyable {
 	// This is true once setupRequest is called, even though at that point the response is Never().
 	bool isValid() { return response.isValid(); }
 
-	static void maybeDuplicateTSSRequest(RequestStream<Request> const* stream,
+	static void maybeDuplicateTSSRequest(RequestStream<Request, P> const* stream,
 	                                     Request& request,
 	                                     QueueModel* model,
 	                                     Future<Reply> ssResponse,
 	                                     Reference<MultiInterface<Multi>> alternatives,
-	                                     RequestStream<Request> Interface::*channel) {
+	                                     RequestStream<Request, P> Interface::*channel) {
 		if (model) {
 			// Send parallel request to TSS pair, if it exists
 			Optional<TSSEndpointData> tssData = model->getTssData(stream->getEndpoint().token.first());
@@ -271,7 +271,7 @@ struct RequestData : NonCopyable {
 				TEST(true); // duplicating request to TSS
 				resetReply(request);
 				// FIXME: optimize to avoid creating new netNotifiedQueue for each message
-				RequestStream<Request> tssRequestStream(tssData.get().endpoint);
+				RequestStream<Request, P> tssRequestStream(tssData.get().endpoint);
 				Future<ErrorOr<REPLY_TYPE(Request)>> fTssResult = tssRequestStream.tryGetReply(request);
 				model->addActor.send(tssComparison(request,
 				                                   ssResponse,
@@ -288,11 +288,11 @@ struct RequestData : NonCopyable {
 	void startRequest(
 	    double backoff,
 	    TriedAllOptions triedAllOptions,
-	    RequestStream<Request> const* stream,
+	    RequestStream<Request, P> const* stream,
 	    Request& request,
 	    QueueModel* model,
 	    Reference<MultiInterface<Multi>> alternatives, // alternatives and channel passed through for TSS check
-	    RequestStream<Request> Interface::*channel) {
+	    RequestStream<Request, P> Interface::*channel) {
 		modelHolder = Reference<ModelHolder>();
 		requestStarted = false;
 
@@ -438,18 +438,18 @@ struct RequestData : NonCopyable {
 // list of servers.
 // When model is set, load balance among alternatives in the same DC aims to balance request queue length on these
 // interfaces. If too many interfaces in the same DC are bad, try remote interfaces.
-ACTOR template <class Interface, class Request, class Multi>
+ACTOR template <class Interface, class Request, class Multi, bool P>
 Future<REPLY_TYPE(Request)> loadBalance(
     Reference<MultiInterface<Multi>> alternatives,
-    RequestStream<Request> Interface::*channel,
+    RequestStream<Request, P> Interface::*channel,
     Request request = Request(),
     TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint,
     AtMostOnce atMostOnce =
         AtMostOnce::False, // if true, throws request_maybe_delivered() instead of retrying automatically
     QueueModel* model = nullptr) {
 
-	state RequestData<Request, Interface, Multi> firstRequestData;
-	state RequestData<Request, Interface, Multi> secondRequestData;
+	state RequestData<Request, Interface, Multi, P> firstRequestData;
+	state RequestData<Request, Interface, Multi, P> secondRequestData;
 
 	state Optional<uint64_t> firstRequestEndpoint;
 	state Future<Void> secondDelay = Never();
@@ -488,7 +488,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 				break;
 			}
 
-			RequestStream<Request> const* thisStream = &alternatives->get(i, channel);
+			RequestStream<Request, P> const* thisStream = &alternatives->get(i, channel);
 			if (!IFailureMonitor::failureMonitor().getState(thisStream->getEndpoint()).failed) {
 				auto const& qd = model->getMeasurement(thisStream->getEndpoint().token.first());
 				if (now() > qd.failedUntil) {
@@ -527,7 +527,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 			// go through all the remote servers again, since we may have
 			// skipped it.
 			for (int i = alternatives->countBest(); i < alternatives->size(); i++) {
-				RequestStream<Request> const* thisStream = &alternatives->get(i, channel);
+				RequestStream<Request, P> const* thisStream = &alternatives->get(i, channel);
 				if (!IFailureMonitor::failureMonitor().getState(thisStream->getEndpoint()).failed) {
 					auto const& qd = model->getMeasurement(thisStream->getEndpoint().token.first());
 					if (now() > qd.failedUntil) {
@@ -574,7 +574,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 			if (ev.isEnabled()) {
 				ev.log();
 				for (int alternativeNum = 0; alternativeNum < alternatives->size(); alternativeNum++) {
-					RequestStream<Request> const* thisStream = &alternatives->get(alternativeNum, channel);
+					RequestStream<Request, P> const* thisStream = &alternatives->get(alternativeNum, channel);
 					TraceEvent(SevWarn, "LoadBalanceTooLongEndpoint")
 					    .detail("Addr", thisStream->getEndpoint().getPrimaryAddress())
 					    .detail("Token", thisStream->getEndpoint().token)
@@ -586,7 +586,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 		// Find an alternative, if any, that is not failed, starting with
 		// nextAlt. This logic matters only if model == nullptr. Otherwise, the
 		// bestAlt and nextAlt have been decided.
-		state RequestStream<Request> const* stream = nullptr;
+		state RequestStream<Request, P> const* stream = nullptr;
 		for (int alternativeNum = 0; alternativeNum < alternatives->size(); alternativeNum++) {
 			int useAlt = nextAlt;
 			if (nextAlt == startAlt)
@@ -724,9 +724,9 @@ Optional<BasicLoadBalancedReply> getBasicLoadBalancedReply(const BasicLoadBalanc
 Optional<BasicLoadBalancedReply> getBasicLoadBalancedReply(const void*);
 
 // A simpler version of LoadBalance that does not send second requests where the list of servers are always fresh
-ACTOR template <class Interface, class Request, class Multi>
+ACTOR template <class Interface, class Request, class Multi, bool P>
 Future<REPLY_TYPE(Request)> basicLoadBalance(Reference<ModelInterface<Multi>> alternatives,
-                                             RequestStream<Request> Interface::*channel,
+                                             RequestStream<Request, P> Interface::*channel,
                                              Request request = Request(),
                                              TaskPriority taskID = TaskPriority::DefaultPromiseEndpoint,
                                              AtMostOnce atMostOnce = AtMostOnce::False) {
@@ -749,7 +749,7 @@ Future<REPLY_TYPE(Request)> basicLoadBalance(Reference<ModelInterface<Multi>> al
 	state int useAlt;
 	loop {
 		// Find an alternative, if any, that is not failed, starting with nextAlt
-		state RequestStream<Request> const* stream = nullptr;
+		state RequestStream<Request, P> const* stream = nullptr;
 		for (int alternativeNum = 0; alternativeNum < alternatives->size(); alternativeNum++) {
 			useAlt = nextAlt;
 			if (nextAlt == startAlt)
