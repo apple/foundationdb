@@ -14,7 +14,7 @@ OpIterator getOpBegin(Arguments const& args) noexcept {
 	for (auto op = 0; op < MAX_OP; op++) {
 		if (isAbstractOp(op) || args.txnspec.ops[op][OP_COUNT] == 0)
 			continue;
-		return OpIterator{op, 0, 0};
+		return OpIterator{ op, 0, 0 };
 	}
 	return OpEnd;
 }
@@ -25,12 +25,12 @@ OpIterator getOpNext(Arguments const& args, OpIterator current) noexcept {
 	auto [op, count, step] = current;
 	assert(op < MAX_OP && !isAbstractOp(op));
 	if (opTable[op].steps() > step + 1)
-		return OpIterator{op, count, step + 1};
+		return OpIterator{ op, count, step + 1 };
 	count++;
 	for (; op < MAX_OP; op++, count = 0) {
 		if (isAbstractOp(op) || args.txnspec.ops[op][OP_COUNT] <= count)
 			continue;
-		return OpIterator{op, count, 0};
+		return OpIterator{ op, count, 0 };
 	}
 	return OpEnd;
 }

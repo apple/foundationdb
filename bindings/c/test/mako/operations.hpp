@@ -95,20 +95,14 @@ struct OpIterator {
 		return op == other.op && count == other.count && step == other.step;
 	}
 
-	bool operator!=(const OpIterator& other) const noexcept {
-		return !(*this == other);
-	}
+	bool operator!=(const OpIterator& other) const noexcept { return !(*this == other); }
 
-	StepKind stepKind() const noexcept {
-		return opTable[op].stepKind(step);
-	}
+	StepKind stepKind() const noexcept { return opTable[op].stepKind(step); }
 
-	char const* opName() const noexcept {
-		return getOpName(op);
-	}
+	char const* opName() const noexcept { return getOpName(op); }
 };
 
-constexpr const OpIterator OpEnd = OpIterator{MAX_OP, -1, -1};
+constexpr const OpIterator OpEnd = OpIterator{ MAX_OP, -1, -1 };
 
 OpIterator getOpBegin(Arguments const& args) noexcept;
 

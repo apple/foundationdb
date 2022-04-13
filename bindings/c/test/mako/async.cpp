@@ -91,7 +91,7 @@ void ResumableStateForRunWorkload::runOneTick() {
 	}
 	auto f = Future{};
 	// to minimize context switch overhead, repeat immediately completed ops
-	// in a loop, not async continuation.
+	// in a loop, not an async continuation.
 repeat_immediate_steps:
 	f = opTable[iter.op].stepFunction(iter.step)(tx, args, key1, key2, val);
 	if (!f) {
@@ -108,11 +108,11 @@ repeat_immediate_steps:
 			if (iter.stepKind() != StepKind::ON_ERROR) {
 				if (auto err = f.error()) {
 					logr.printWithLogLevel(err.retryable() ? VERBOSE_WARN : VERBOSE_NONE,
-										   "ERROR",
-										   "{}:{} returned '{}'",
-										   iter.opName(),
-										   iter.step,
-										   err.what());
+					                       "ERROR",
+					                       "{}:{} returned '{}'",
+					                       iter.opName(),
+					                       iter.step,
+					                       err.what());
 					tx.onError(err).then([this, state = shared_from_this()](Future f) {
 						const auto rc = handleForOnError(tx, f, fmt::format("{}:{}", iter.opName(), iter.step));
 						if (rc == FutureRC::RETRY) {
@@ -204,9 +204,9 @@ void ResumableStateForRunWorkload::onTaskSuccess() {
 			if (auto err = f.error()) {
 				// commit had errors
 				logr.printWithLogLevel(err.retryable() ? VERBOSE_WARN : VERBOSE_NONE,
-									   "ERROR",
-									   "Post-iteration commit returned error: {}",
-									   err.what());
+				                       "ERROR",
+				                       "Post-iteration commit returned error: {}",
+				                       err.what());
 				tx.onError(err).then([this, state = shared_from_this()](Future f) {
 					const auto rc = handleForOnError(tx, f, "ON_ERROR");
 					if (rc == FutureRC::CONFLICT)
