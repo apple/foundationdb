@@ -13,7 +13,7 @@ and then added to your classpath.<br>
 <h1>Getting started</h1>
 To start using FoundationDB from Java, create an instance of the 
 {@link com.apple.foundationdb.FDB FoundationDB API interface} with the version of the
-API that you want to use (this release of the FoundationDB Java API supports versions between {@code 510} and {@code 710}).
+API that you want to use (this release of the FoundationDB Java API supports versions between {@code 510} and {@code 720}).
 With this API object you can then open {@link com.apple.foundationdb.Cluster Cluster}s and
 {@link com.apple.foundationdb.Database Database}s and start using
 {@link com.apple.foundationdb.Transaction Transaction}s.
@@ -29,7 +29,7 @@ import com.apple.foundationdb.tuple.Tuple;
 
 public class Example {
   public static void main(String[] args) {
-    FDB fdb = FDB.selectAPIVersion(710);
+    FDB fdb = FDB.selectAPIVersion(720);
 
     try(Database db = fdb.open()) {
       // Run an operation on the database

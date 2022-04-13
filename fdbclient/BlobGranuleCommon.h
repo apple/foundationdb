@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -52,19 +52,20 @@ struct BlobFilePointerRef {
 	StringRef filename;
 	int64_t offset;
 	int64_t length;
+	int64_t fullFileLength;
 
 	BlobFilePointerRef() {}
-	BlobFilePointerRef(Arena& to, const std::string& filename, int64_t offset, int64_t length)
-	  : filename(to, filename), offset(offset), length(length) {}
+	BlobFilePointerRef(Arena& to, const std::string& filename, int64_t offset, int64_t length, int64_t fullFileLength)
+	  : filename(to, filename), offset(offset), length(length), fullFileLength(fullFileLength) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, filename, offset, length);
+		serializer(ar, filename, offset, length, fullFileLength);
 	}
 
 	std::string toString() const {
 		std::stringstream ss;
-		ss << filename.toString() << ":" << offset << ":" << length;
+		ss << filename.toString() << ":" << offset << ":" << length << ":" << fullFileLength;
 		return std::move(ss).str();
 	}
 };
@@ -77,17 +78,18 @@ struct BlobGranuleChunkRef {
 	constexpr static FileIdentifier file_identifier = 865198;
 	KeyRangeRef keyRange;
 	Version includedVersion;
+	Version snapshotVersion;
 	Optional<BlobFilePointerRef> snapshotFile; // not set if it's an incremental read
 	VectorRef<BlobFilePointerRef> deltaFiles;
 	GranuleDeltas newDeltas;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keyRange, includedVersion, snapshotFile, deltaFiles, newDeltas);
+		serializer(ar, keyRange, includedVersion, snapshotVersion, snapshotFile, deltaFiles, newDeltas);
 	}
 };
 
-enum BlobGranuleSplitState { Unknown = 0, Started = 1, Assigned = 2, Done = 3 };
+enum BlobGranuleSplitState { Unknown = 0, Initialized = 1, Assigned = 2, Done = 3 };
 
 struct BlobGranuleHistoryValue {
 	constexpr static FileIdentifier file_identifier = 991434;

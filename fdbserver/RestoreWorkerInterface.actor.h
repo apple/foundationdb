@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -251,7 +251,7 @@ struct RestoreControllerInterface : RestoreRoleInterface {
 
 // RestoreAsset uniquely identifies the work unit done by restore roles;
 // It is used to ensure exact-once processing on restore loader and applier;
-// By combining all RestoreAssets across all verstion batches, restore should process all mutations in
+// By combining all RestoreAssets across all version batches, restore should process all mutations in
 // backup range and log files up to the target restore version.
 struct RestoreAsset {
 	UID uid;
@@ -368,6 +368,7 @@ struct LoadingParam {
 
 	bool isRangeFile;
 	Key url;
+	Optional<std::string> proxy;
 	Optional<Version> rangeVersion; // range file's version
 
 	int64_t blockSize;
@@ -386,12 +387,13 @@ struct LoadingParam {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, isRangeFile, url, rangeVersion, blockSize, asset);
+		serializer(ar, isRangeFile, url, proxy, rangeVersion, blockSize, asset);
 	}
 
 	std::string toString() const {
 		std::stringstream str;
 		str << "isRangeFile:" << isRangeFile << " url:" << url.toString()
+		    << " proxy:" << (proxy.present() ? proxy.get() : "")
 		    << " rangeVersion:" << (rangeVersion.present() ? rangeVersion.get() : -1) << " blockSize:" << blockSize
 		    << " RestoreAsset:" << asset.toString();
 		return str.str();

@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,6 +34,7 @@ struct BlobWorkerInterface {
 	RequestStream<struct BlobGranuleFileRequest> blobGranuleFileRequest;
 	RequestStream<struct AssignBlobRangeRequest> assignBlobRangeRequest;
 	RequestStream<struct RevokeBlobRangeRequest> revokeBlobRangeRequest;
+	RequestStream<struct GetGranuleAssignmentsRequest> granuleAssignmentsRequest;
 	RequestStream<struct GranuleStatusStreamRequest> granuleStatusStreamRequest;
 	RequestStream<struct HaltBlobWorkerRequest> haltBlobWorker;
 
@@ -43,7 +44,18 @@ struct BlobWorkerInterface {
 	BlobWorkerInterface() {}
 	explicit BlobWorkerInterface(const struct LocalityData& l, UID id) : locality(l), myId(id) {}
 
-	void initEndpoints() {}
+	void initEndpoints() {
+		// TODO: specify endpoint priorities?
+		std::vector<std::pair<FlowReceiver*, TaskPriority>> streams;
+		streams.push_back(waitFailure.getReceiver());
+		streams.push_back(blobGranuleFileRequest.getReceiver());
+		streams.push_back(assignBlobRangeRequest.getReceiver());
+		streams.push_back(revokeBlobRangeRequest.getReceiver());
+		streams.push_back(granuleAssignmentsRequest.getReceiver());
+		streams.push_back(granuleStatusStreamRequest.getReceiver());
+		streams.push_back(haltBlobWorker.getReceiver());
+		FlowTransport::transport().addEndpoints(streams);
+	}
 	UID id() const { return myId; }
 	NetworkAddress address() const { return blobGranuleFileRequest.getEndpoint().getPrimaryAddress(); }
 	NetworkAddress stableAddress() const { return blobGranuleFileRequest.getEndpoint().getStableAddress(); }
@@ -53,15 +65,22 @@ struct BlobWorkerInterface {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar,
-		           waitFailure,
-		           blobGranuleFileRequest,
-		           assignBlobRangeRequest,
-		           revokeBlobRangeRequest,
-		           granuleStatusStreamRequest,
-		           haltBlobWorker,
-		           locality,
-		           myId);
+		// use adjusted endpoints
+		serializer(ar, myId, locality, waitFailure);
+		if (Archive::isDeserializing) {
+			blobGranuleFileRequest =
+			    RequestStream<struct BlobGranuleFileRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(1));
+			assignBlobRangeRequest =
+			    RequestStream<struct AssignBlobRangeRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(2));
+			revokeBlobRangeRequest =
+			    RequestStream<struct RevokeBlobRangeRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(3));
+			granuleAssignmentsRequest =
+			    RequestStream<struct GetGranuleAssignmentsRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(4));
+			granuleStatusStreamRequest =
+			    RequestStream<struct GranuleStatusStreamRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(5));
+			haltBlobWorker =
+			    RequestStream<struct HaltBlobWorkerRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(6));
+		}
 	}
 };
 
@@ -84,26 +103,14 @@ struct BlobGranuleFileRequest {
 	KeyRangeRef keyRange;
 	Version beginVersion = 0;
 	Version readVersion;
+	bool canCollapseBegin = true;
 	ReplyPromise<BlobGranuleFileReply> reply;
 
 	BlobGranuleFileRequest() {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keyRange, beginVersion, readVersion, reply, arena);
-	}
-};
-
-struct AssignBlobRangeReply {
-	constexpr static FileIdentifier file_identifier = 6431923;
-	bool epochOk; // false if the worker has seen a new manager
-
-	AssignBlobRangeReply() {}
-	explicit AssignBlobRangeReply(bool epochOk) : epochOk(epochOk) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, epochOk);
+		serializer(ar, keyRange, beginVersion, readVersion, canCollapseBegin, reply, arena);
 	}
 };
 
@@ -114,7 +121,7 @@ struct RevokeBlobRangeRequest {
 	int64_t managerEpoch;
 	int64_t managerSeqno;
 	bool dispose;
-	ReplyPromise<AssignBlobRangeReply> reply;
+	ReplyPromise<Void> reply;
 
 	RevokeBlobRangeRequest() {}
 
@@ -123,6 +130,12 @@ struct RevokeBlobRangeRequest {
 		serializer(ar, keyRange, managerEpoch, managerSeqno, dispose, reply, arena);
 	}
 };
+
+/*
+ * Continue: Blob worker should continue handling a granule that was evaluated for a split
+ * Normal: Blob worker should open the granule and start processing it
+ */
+enum AssignRequestType { Normal = 0, Continue = 1 };
 
 struct AssignBlobRangeRequest {
 	constexpr static FileIdentifier file_identifier = 905381;
@@ -133,16 +146,15 @@ struct AssignBlobRangeRequest {
 	// If continueAssignment is true, this is just to instruct the worker that it *still* owns the range, so it should
 	// re-snapshot it and continue.
 
-	// For an initial assignment, reassignent, split, or merge, continueAssignment==false.
-	bool continueAssignment;
+	AssignRequestType type;
 
-	ReplyPromise<AssignBlobRangeReply> reply;
+	ReplyPromise<Void> reply;
 
 	AssignBlobRangeRequest() {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, keyRange, managerEpoch, managerSeqno, continueAssignment, reply, arena);
+		serializer(ar, keyRange, managerEpoch, managerSeqno, type, reply, arena);
 	}
 };
 
@@ -153,22 +165,22 @@ struct GranuleStatusReply : public ReplyPromiseStreamReply {
 
 	KeyRange granuleRange;
 	bool doSplit;
+	bool writeHotSplit;
 	int64_t epoch;
 	int64_t seqno;
 	UID granuleID;
 	Version startVersion;
-	Version latestVersion;
 
 	GranuleStatusReply() {}
 	explicit GranuleStatusReply(KeyRange range,
 	                            bool doSplit,
+	                            bool writeHotSplit,
 	                            int64_t epoch,
 	                            int64_t seqno,
 	                            UID granuleID,
-	                            Version startVersion,
-	                            Version latestVersion)
-	  : granuleRange(range), doSplit(doSplit), epoch(epoch), seqno(seqno), granuleID(granuleID),
-	    startVersion(startVersion), latestVersion(latestVersion) {}
+	                            Version startVersion)
+	  : granuleRange(range), doSplit(doSplit), writeHotSplit(writeHotSplit), epoch(epoch), seqno(seqno),
+	    granuleID(granuleID), startVersion(startVersion) {}
 
 	int expectedSize() const { return sizeof(GranuleStatusReply) + granuleRange.expectedSize(); }
 
@@ -179,11 +191,11 @@ struct GranuleStatusReply : public ReplyPromiseStreamReply {
 		           ReplyPromiseStreamReply::sequence,
 		           granuleRange,
 		           doSplit,
+		           writeHotSplit,
 		           epoch,
 		           seqno,
 		           granuleID,
-		           startVersion,
-		           latestVersion);
+		           startVersion);
 	}
 };
 
@@ -217,6 +229,44 @@ struct HaltBlobWorkerRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, managerEpoch, requesterID, reply);
+	}
+};
+
+struct GranuleAssignmentRef {
+	KeyRangeRef range;
+	int64_t epochAssigned;
+	int64_t seqnoAssigned;
+
+	GranuleAssignmentRef() {}
+
+	explicit GranuleAssignmentRef(KeyRangeRef range, int64_t epochAssigned, int64_t seqnoAssigned)
+	  : range(range), epochAssigned(epochAssigned), seqnoAssigned(seqnoAssigned) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, range, epochAssigned, seqnoAssigned);
+	}
+};
+
+struct GetGranuleAssignmentsReply {
+	constexpr static FileIdentifier file_identifier = 9191718;
+	Arena arena;
+	VectorRef<GranuleAssignmentRef> assignments;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, assignments, arena);
+	}
+};
+
+struct GetGranuleAssignmentsRequest {
+	constexpr static FileIdentifier file_identifier = 4121494;
+	int64_t managerEpoch;
+	ReplyPromise<GetGranuleAssignmentsReply> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, managerEpoch, reply);
 	}
 };
 

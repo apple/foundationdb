@@ -1,3 +1,6 @@
+[[configuration]]
+randomlyRenameZoneId=true
+
 [[test]]
 testTitle='CloggedConfigureDatabaseTest'
 runSetup=false

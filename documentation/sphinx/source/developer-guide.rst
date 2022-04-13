@@ -8,6 +8,7 @@
 .. |database-type| replace:: ``Database``
 .. |database-class| replace:: ``Database``
 .. |database-auto| replace:: FIXME
+.. |tenant-type| replace:: FIXME
 .. |transaction-class| replace:: ``Transaction``
 .. |get-key-func| replace:: get_key()
 .. |get-range-func| replace:: get_range()
@@ -271,6 +272,16 @@ Directory partitions have the following drawbacks, and in general they should no
 * Directories cannot be moved between different partitions.
 * Directories in a partition have longer prefixes than their counterparts outside of partitions, which reduces performance. Nesting partitions inside of other partitions results in even longer prefixes.
 * The root directory of a partition cannot be used to pack/unpack keys and therefore cannot be used to create subspaces. You must create at least one subdirectory of a partition in order to store content in it.
+
+Tenants
+-------
+
+:doc:`tenants` in FoundationDB provide a way to divide the cluster key-space into named transaction domains. Each tenant has a byte-string name that can be used to open transactions on the tenant's data, and tenant transactions are not permitted to access data outside of the tenant. Tenants can be useful for enforcing separation between unrelated use-cases.
+
+Tenants and directories
+~~~~~~~~~~~~~~~~~~~~~~~
+
+Because tenants enforce that transactions operate within the tenant boundaries, it is not recommended to use a global directory layer shared between tenants. It is possible, however, to use the directory layer within each tenant. To do so, simply use the directory layer as normal with tenant transactions.
 
 Working with the APIs
 =====================
@@ -915,7 +926,7 @@ When using FoundationDB we strongly recommend users to use the retry-loop. In Py
        except FDBError as e:
            tr.on_error(e.code).wait()
 
-This is also what the transaction decoration in python does, if you pass a ``Database`` object to a decorated function. There are some interesting properies of this retry loop:
+This is also what the transaction decoration in python does, if you pass a ``Database`` object to a decorated function. There are some interesting properties of this retry loop:
 
 * We never create a new transaction within that loop. Instead ``tr.on_error`` will create a soft reset on the transaction.
 * ``tr.on_error`` returns a future. This is because ``on_error`` will do back off to make sure we don't overwhelm the cluster.

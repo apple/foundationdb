@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,16 +21,17 @@
 #include <map>
 #include <vector>
 
-#include "contrib/fmt-8.0.1/include/fmt/format.h"
+#include "contrib/fmt-8.1.1/include/fmt/format.h"
 #include "fdbclient/AsyncFileS3BlobStore.actor.h"
 #include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/BlobGranuleFiles.h"
 #include "fdbclient/BlobGranuleReader.actor.h"
 #include "fdbclient/BlobWorkerCommon.h"
 #include "fdbclient/BlobWorkerInterface.h"
+#include "fdbclient/FDBTypes.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-// TODO more efficient data structure besides std::map? PTree is unecessary since this isn't versioned, but some other
+// TODO more efficient data structure besides std::map? PTree is unnecessary since this isn't versioned, but some other
 // sorted thing could work. And if it used arenas it'd probably be more efficient with allocations, since everything
 // else is in 1 arena and discarded at the end.
 
@@ -52,7 +53,6 @@ ACTOR Future<Standalone<StringRef>> readFile(Reference<BackupContainerFileSystem
 		StringRef dataRef(data, f.length);
 		return Standalone<StringRef>(dataRef, arena);
 	} catch (Error& e) {
-		printf("Reading file %s got error %s\n", f.toString().c_str(), e.name());
 		throw e;
 	}
 }
@@ -64,22 +64,25 @@ ACTOR Future<Standalone<StringRef>> readFile(Reference<BackupContainerFileSystem
 // sub-functions that BlobGranuleFiles actually exposes?
 ACTOR Future<RangeResult> readBlobGranule(BlobGranuleChunkRef chunk,
                                           KeyRangeRef keyRange,
+                                          Version beginVersion,
                                           Version readVersion,
                                           Reference<BackupContainerFileSystem> bstore,
                                           Optional<BlobWorkerStats*> stats) {
 
-	// TODO REMOVE with V2 of protocol
+	// TODO REMOVE with early replying
 	ASSERT(readVersion == chunk.includedVersion);
-	ASSERT(chunk.snapshotFile.present());
 
 	state Arena arena;
 
 	try {
-		Future<Standalone<StringRef>> readSnapshotFuture = readFile(bstore, chunk.snapshotFile.get());
-		state std::vector<Future<Standalone<StringRef>>> readDeltaFutures;
-		if (stats.present()) {
-			++stats.get()->s3GetReqs;
+		Future<Standalone<StringRef>> readSnapshotFuture;
+		if (chunk.snapshotFile.present()) {
+			readSnapshotFuture = readFile(bstore, chunk.snapshotFile.get());
+			if (stats.present()) {
+				++stats.get()->s3GetReqs;
+			}
 		}
+		state std::vector<Future<Standalone<StringRef>>> readDeltaFutures;
 
 		readDeltaFutures.reserve(chunk.deltaFiles.size());
 		for (BlobFilePointerRef deltaFile : chunk.deltaFiles) {
@@ -89,8 +92,12 @@ ACTOR Future<RangeResult> readBlobGranule(BlobGranuleChunkRef chunk,
 			}
 		}
 
-		state Standalone<StringRef> snapshotData = wait(readSnapshotFuture);
-		arena.dependsOn(snapshotData.arena());
+		state Optional<StringRef> snapshotData; // not present if snapshotFile isn't present
+		if (chunk.snapshotFile.present()) {
+			state Standalone<StringRef> s = wait(readSnapshotFuture);
+			arena.dependsOn(s.arena());
+			snapshotData = s;
+		}
 
 		state int numDeltaFiles = chunk.deltaFiles.size();
 		state StringRef* deltaData = new (arena) StringRef[numDeltaFiles];
@@ -103,10 +110,9 @@ ACTOR Future<RangeResult> readBlobGranule(BlobGranuleChunkRef chunk,
 			arena.dependsOn(data.arena());
 		}
 
-		return materializeBlobGranule(chunk, keyRange, readVersion, snapshotData, deltaData);
+		return materializeBlobGranule(chunk, keyRange, beginVersion, readVersion, snapshotData, deltaData);
 
 	} catch (Error& e) {
-		printf("Reading blob granule got error %s\n", e.name());
 		throw e;
 	}
 }
@@ -121,18 +127,12 @@ ACTOR Future<Void> readBlobGranules(BlobGranuleFileRequest request,
 	try {
 		state int i;
 		for (i = 0; i < reply.chunks.size(); i++) {
-			/*printf("ReadBlobGranules processing chunk %d [%s - %s)\n",
-			       i,
-			       reply.chunks[i].keyRange.begin.printable().c_str(),
-			       reply.chunks[i].keyRange.end.printable().c_str());*/
-			RangeResult chunkResult =
-			    wait(readBlobGranule(reply.chunks[i], request.keyRange, request.readVersion, bstore));
+			RangeResult chunkResult = wait(
+			    readBlobGranule(reply.chunks[i], request.keyRange, request.beginVersion, request.readVersion, bstore));
 			results.send(std::move(chunkResult));
 		}
-		// printf("ReadBlobGranules done, sending EOS\n");
 		results.sendError(end_of_stream());
 	} catch (Error& e) {
-		printf("ReadBlobGranules got error %s\n", e.name());
 		results.sendError(e);
 	}
 

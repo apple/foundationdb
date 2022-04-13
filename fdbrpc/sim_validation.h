@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -47,5 +47,8 @@ bool debug_checkMaxRestoredVersion(UID id, int64_t version, std::string context,
 
 bool debug_isCheckRelocationDuration();
 void debug_setCheckRelocationDuration(bool check);
+
+void debug_advanceVersionTimestamp(int64_t version, double t);
+bool debug_checkVersionTime(int64_t version, double t, std::string context, Severity sev = SevError);
 
 #endif

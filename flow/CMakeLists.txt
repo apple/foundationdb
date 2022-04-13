@@ -8,6 +8,8 @@ set(FLOW_SRCS
   ArgParseUtil.h
   AsioReactor.h
   BooleanParam.h
+  BlobCipher.h
+  BlobCipher.cpp
   CompressedInt.actor.cpp
   CompressedInt.h
   Deque.cpp
@@ -28,6 +30,8 @@ set(FLOW_SRCS
   Hash3.h
   Histogram.cpp
   Histogram.h
+  Hostname.actor.cpp
+  Hostname.h
   IDispatched.h
   IRandom.h
   IThreadPoolTest.actor.cpp
@@ -100,7 +104,7 @@ set(FLOW_SRCS
   xxhash.c
   xxhash.h)
 
-if(WITH_TLS AND NOT WIN32)
+if(WITH_TLS)
   set(FLOW_SRCS
     ${FLOW_SRCS}
     StreamCipher.cpp)
@@ -134,6 +138,7 @@ target_link_libraries(flow PUBLIC fmt::fmt)
 
 add_flow_target(STATIC_LIBRARY NAME flow_sampling SRCS ${FLOW_SRCS})
 target_link_libraries(flow_sampling PRIVATE stacktrace)
+target_link_libraries(flow_sampling PUBLIC fmt::fmt)
 target_compile_definitions(flow_sampling PRIVATE -DENABLE_SAMPLING)
 if(WIN32)
   add_dependencies(flow_sampling_actors flow_actors)

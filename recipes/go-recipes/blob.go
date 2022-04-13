@@ -79,7 +79,7 @@ func read_blob(t fdb.ReadTransactor, blob_subspace subspace.Subspace) ([]byte, e
 }
 
 func main() {
-	fdb.MustAPIVersion(710)
+	fdb.MustAPIVersion(720)
 
 	db := fdb.MustOpenDefault()
 

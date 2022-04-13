@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -110,6 +110,8 @@ struct NetSAV final : SAV<T>, FlowReceiver, FastAllocated<NetSAV<T>> {
 			SAV<T>::sendAndDelPromiseRef(message.get().asUnderlyingType());
 		}
 	}
+
+	bool isPublic() const override { return true; }
 };
 
 template <class T>
@@ -274,7 +276,7 @@ struct AcknowledgementReply {
 	}
 };
 
-// Registered on the server to recieve acknowledgements that the client has received stream data. This prevents the
+// Registered on the server to receive acknowledgements that the client has received stream data. This prevents the
 // server from sending too much data to the client if the client is not consuming it.
 struct AcknowledgementReceiver final : FlowReceiver, FastAllocated<AcknowledgementReceiver> {
 	using FastAllocated<AcknowledgementReceiver>::operator new;
@@ -289,6 +291,8 @@ struct AcknowledgementReceiver final : FlowReceiver, FastAllocated<Acknowledgeme
 
 	AcknowledgementReceiver() : ready(nullptr) {}
 	AcknowledgementReceiver(const Endpoint& remoteEndpoint) : FlowReceiver(remoteEndpoint, false), ready(nullptr) {}
+
+	bool isPublic() const override { return true; }
 
 	void receive(ArenaObjectReader& reader) override {
 		ErrorOr<AcknowledgementReply> message;
@@ -326,15 +330,18 @@ struct NetNotifiedQueueWithAcknowledgements final : NotifiedQueue<T>,
 	AcknowledgementReceiver acknowledgements;
 	Endpoint requestStreamEndpoint;
 	bool sentError = false;
+	bool notifiedFailed = false;
+	Promise<Void> onConnect;
 
-	NetNotifiedQueueWithAcknowledgements(int futures, int promises) : NotifiedQueue<T>(futures, promises) {}
+	NetNotifiedQueueWithAcknowledgements(int futures, int promises)
+	  : NotifiedQueue<T>(futures, promises), onConnect(nullptr) {}
 	NetNotifiedQueueWithAcknowledgements(int futures, int promises, const Endpoint& remoteEndpoint)
-	  : NotifiedQueue<T>(futures, promises), FlowReceiver(remoteEndpoint, true) {
+	  : NotifiedQueue<T>(futures, promises), FlowReceiver(remoteEndpoint, true), onConnect(nullptr) {
 		// A ReplyPromiseStream will be terminated on the server side if the network connection with the client breaks
-		acknowledgements.failures = tagError<Void>(
-		    makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnect(remoteEndpoint.getPrimaryAddress()),
-		    operation_obsolete());
+		acknowledgements.failures = tagError<Void>(FlowTransport::transport().loadedDisconnect(), operation_obsolete());
 	}
+
+	bool isPublic() const override { return true; }
 
 	void destroy() override { delete this; }
 	void receive(ArenaObjectReader& reader) override {
@@ -350,11 +357,17 @@ struct NetNotifiedQueueWithAcknowledgements final : NotifiedQueue<T>,
 				// GetKeyValuesStream requests on the same endpoint will fail
 				IFailureMonitor::failureMonitor().endpointNotFound(requestStreamEndpoint);
 			}
+			if (onConnect.isValid() && onConnect.canBeSet()) {
+				onConnect.send(Void());
+			}
 			this->sendError(message.getError());
 		} else {
 			if (message.get().asUnderlyingType().acknowledgeToken.present()) {
 				acknowledgements = AcknowledgementReceiver(
 				    FlowTransport::transport().loadedEndpoint(message.get().asUnderlyingType().acknowledgeToken.get()));
+				if (onConnect.isValid() && onConnect.canBeSet()) {
+					onConnect.send(Void());
+				}
 			}
 			if (acknowledgements.sequence != message.get().asUnderlyingType().sequence) {
 				TraceEvent(SevError, "StreamSequenceMismatch")
@@ -396,14 +409,20 @@ struct NetNotifiedQueueWithAcknowledgements final : NotifiedQueue<T>,
 		return res;
 	}
 
-	~NetNotifiedQueueWithAcknowledgements() {
-		if (acknowledgements.getRawEndpoint().isValid() && acknowledgements.isRemoteEndpoint() && !this->hasError()) {
+	void notifyFailed() {
+		if (!notifiedFailed && acknowledgements.getRawEndpoint().isValid() && acknowledgements.isRemoteEndpoint() &&
+		    !this->hasError()) {
 			// Notify the server that a client is not using this ReplyPromiseStream anymore
 			FlowTransport::transport().sendUnreliable(
 			    SerializeSource<ErrorOr<AcknowledgementReply>>(operation_obsolete()),
 			    acknowledgements.getEndpoint(TaskPriority::ReadSocket),
 			    false);
+			notifiedFailed = true;
 		}
+	}
+
+	~NetNotifiedQueueWithAcknowledgements() {
+		notifyFailed();
 		if (isRemoteEndpoint() && !sentError && !acknowledgements.failures.isReady()) {
 			// Notify the client ReplyPromiseStream was cancelled before sending an error, so the storage server must
 			// have died
@@ -487,6 +506,20 @@ public:
 
 	void setRequestStreamEndpoint(const Endpoint& endpoint) { queue->requestStreamEndpoint = endpoint; }
 
+	bool connected() { return queue->acknowledgements.getRawEndpoint().isValid() || queue->error.isValid(); }
+
+	Future<Void> onConnected() {
+		if (connected()) {
+			return Void();
+		}
+		if (!queue->onConnect.isValid()) {
+			queue->onConnect = Promise<Void>();
+		}
+		return queue->onConnect.getFuture();
+	}
+
+	void notifyFailed() { queue->notifyFailed(); }
+
 	~ReplyPromiseStream() {
 		if (queue)
 			queue->delPromiseRef();
@@ -511,6 +544,19 @@ public:
 			queue->onEmpty = Promise<Void>();
 		}
 		return queue->onEmpty.getFuture();
+	}
+
+	bool isError() const { return !queue->isError(); }
+
+	// throws, used to short circuit waiting on the queue if there has been an unexpected error
+	Future<Void> onError() {
+		if (queue->hasError() && queue->error.code() != error_code_end_of_stream) {
+			throw queue->error;
+		}
+		if (!queue->onError.isValid()) {
+			queue->onError = Promise<Void>();
+		}
+		return queue->onError.getFuture();
 	}
 
 	uint32_t size() const { return queue->size(); }
@@ -602,10 +648,10 @@ struct serializable_traits<ReplyPromiseStream<T>> : std::true_type {
 	}
 };
 
-template <class T>
-struct NetNotifiedQueue final : NotifiedQueue<T>, FlowReceiver, FastAllocated<NetNotifiedQueue<T>> {
-	using FastAllocated<NetNotifiedQueue<T>>::operator new;
-	using FastAllocated<NetNotifiedQueue<T>>::operator delete;
+template <class T, bool IsPublic>
+struct NetNotifiedQueue final : NotifiedQueue<T>, FlowReceiver, FastAllocated<NetNotifiedQueue<T, IsPublic>> {
+	using FastAllocated<NetNotifiedQueue<T, IsPublic>>::operator new;
+	using FastAllocated<NetNotifiedQueue<T, IsPublic>>::operator delete;
 
 	NetNotifiedQueue(int futures, int promises) : NotifiedQueue<T>(futures, promises) {}
 	NetNotifiedQueue(int futures, int promises, const Endpoint& remoteEndpoint)
@@ -620,9 +666,10 @@ struct NetNotifiedQueue final : NotifiedQueue<T>, FlowReceiver, FastAllocated<Ne
 		this->delPromiseRef();
 	}
 	bool isStream() const override { return true; }
+	bool isPublic() const override { return IsPublic; }
 };
 
-template <class T>
+template <class T, bool IsPublic = false>
 class RequestStream {
 public:
 	// stream.send( request )
@@ -686,6 +733,9 @@ public:
 			Future<Void> disc =
 			    makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnectOrFailure(getEndpoint(taskID));
 			if (disc.isReady()) {
+				if (IFailureMonitor::failureMonitor().knownUnauthorized(getEndpoint(taskID))) {
+					return ErrorOr<REPLY_TYPE(X)>(unauthorized_attempt());
+				}
 				return ErrorOr<REPLY_TYPE(X)>(request_maybe_delivered());
 			}
 			Reference<Peer> peer =
@@ -704,6 +754,9 @@ public:
 			Future<Void> disc =
 			    makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnectOrFailure(getEndpoint());
 			if (disc.isReady()) {
+				if (IFailureMonitor::failureMonitor().knownUnauthorized(getEndpoint())) {
+					return ErrorOr<REPLY_TYPE(X)>(unauthorized_attempt());
+				}
 				return ErrorOr<REPLY_TYPE(X)>(request_maybe_delivered());
 			}
 			Reference<Peer> peer =
@@ -729,10 +782,13 @@ public:
 			Future<Void> disc =
 			    makeDependent<T>(IFailureMonitor::failureMonitor()).onDisconnectOrFailure(getEndpoint());
 			auto& p = getReplyPromiseStream(value);
-			Reference<Peer> peer =
-			    FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(), true);
-			// FIXME: defer sending the message until we know the connection is established
-			endStreamOnDisconnect(disc, p, getEndpoint(), peer);
+			if (disc.isReady()) {
+				p.sendError(request_maybe_delivered());
+			} else {
+				Reference<Peer> peer =
+				    FlowTransport::transport().sendUnreliable(SerializeSource<T>(value), getEndpoint(), true);
+				endStreamOnDisconnect(disc, p, getEndpoint(), peer);
+			}
 			return p;
 		} else {
 			send(value);
@@ -778,13 +834,13 @@ public:
 		return getReplyUnlessFailedFor(ReplyPromise<X>(), sustainedFailureDuration, sustainedFailureSlope);
 	}
 
-	explicit RequestStream(const Endpoint& endpoint) : queue(new NetNotifiedQueue<T>(0, 1, endpoint)) {}
+	explicit RequestStream(const Endpoint& endpoint) : queue(new NetNotifiedQueue<T, IsPublic>(0, 1, endpoint)) {}
 
 	FutureStream<T> getFuture() const {
 		queue->addFutureRef();
 		return FutureStream<T>(queue);
 	}
-	RequestStream() : queue(new NetNotifiedQueue<T>(0, 1)) {}
+	RequestStream() : queue(new NetNotifiedQueue<T, IsPublic>(0, 1)) {}
 	explicit RequestStream(PeerCompatibilityPolicy policy) : RequestStream() {
 		queue->setPeerCompatibilityPolicy(policy);
 	}
@@ -818,8 +874,8 @@ public:
 		queue->makeWellKnownEndpoint(Endpoint::Token(-1, wlTokenID), taskID);
 	}
 
-	bool operator==(const RequestStream<T>& rhs) const { return queue == rhs.queue; }
-	bool operator!=(const RequestStream<T>& rhs) const { return !(*this == rhs); }
+	bool operator==(const RequestStream<T, IsPublic>& rhs) const { return queue == rhs.queue; }
+	bool operator!=(const RequestStream<T, IsPublic>& rhs) const { return !(*this == rhs); }
 	bool isEmpty() const { return !queue->isReady(); }
 	uint32_t size() const { return queue->size(); }
 
@@ -828,32 +884,37 @@ public:
 	}
 
 private:
-	NetNotifiedQueue<T>* queue;
+	NetNotifiedQueue<T, IsPublic>* queue;
 };
 
-template <class Ar, class T>
-void save(Ar& ar, const RequestStream<T>& value) {
+template <class T>
+using PrivateRequestStream = RequestStream<T, false>;
+template <class T>
+using PublicRequestStream = RequestStream<T, true>;
+
+template <class Ar, class T, bool P>
+void save(Ar& ar, const RequestStream<T, P>& value) {
 	auto const& ep = value.getEndpoint();
 	ar << ep;
 	UNSTOPPABLE_ASSERT(
 	    ep.getPrimaryAddress().isValid()); // No serializing PromiseStreams on a client with no public address
 }
 
-template <class Ar, class T>
-void load(Ar& ar, RequestStream<T>& value) {
+template <class Ar, class T, bool P>
+void load(Ar& ar, RequestStream<T, P>& value) {
 	Endpoint endpoint;
 	ar >> endpoint;
-	value = RequestStream<T>(endpoint);
+	value = RequestStream<T, P>(endpoint);
 }
 
-template <class T>
-struct serializable_traits<RequestStream<T>> : std::true_type {
+template <class T, bool P>
+struct serializable_traits<RequestStream<T, P>> : std::true_type {
 	template <class Archiver>
-	static void serialize(Archiver& ar, RequestStream<T>& stream) {
+	static void serialize(Archiver& ar, RequestStream<T, P>& stream) {
 		if constexpr (Archiver::isDeserializing) {
 			Endpoint endpoint;
 			serializer(ar, endpoint);
-			stream = RequestStream<T>(endpoint);
+			stream = RequestStream<T, P>(endpoint);
 		} else {
 			const auto& ep = stream.getEndpoint();
 			serializer(ar, ep);

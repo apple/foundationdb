@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1077,7 +1077,7 @@ public:
 
 		Node* node(DeltaTree2* tree) const { return tree->nodeAt(nodeOffset); }
 
-		std::string toString() {
+		std::string toString() const {
 			return format("DecodedNode{nodeOffset=%d leftChildIndex=%d rightChildIndex=%d leftParentIndex=%d "
 			              "rightParentIndex=%d}",
 			              (int)nodeOffset,
@@ -1095,20 +1095,48 @@ public:
 	// DecodedNodes are stored in a contiguous vector, which sometimes must be expanded, so care
 	// must be taken to resolve DecodedNode pointers again after the DecodeCache has new entries added.
 	struct DecodeCache : FastAllocated<DecodeCache>, ReferenceCounted<DecodeCache> {
-		DecodeCache(const T& lowerBound = T(), const T& upperBound = T())
-		  : lowerBound(arena, lowerBound), upperBound(arena, upperBound) {
+		DecodeCache(const T& lowerBound = T(), const T& upperBound = T(), int64_t* pMemoryTracker = nullptr)
+		  : lowerBound(arena, lowerBound), upperBound(arena, upperBound), lastKnownUsedMemory(0),
+		    pMemoryTracker(pMemoryTracker) {
 			decodedNodes.reserve(10);
 			deltatree_printf("DecodedNode size: %d\n", sizeof(DecodedNode));
+		}
+
+		~DecodeCache() {
+			if (pMemoryTracker != nullptr) {
+				// Do not update, only subtract the last known amount which would have been
+				// published to the counter
+				*pMemoryTracker -= lastKnownUsedMemory;
+			}
 		}
 
 		Arena arena;
 		T lowerBound;
 		T upperBound;
 
+		// Track the amount of memory used by the vector and arena and publish updates to some counter.
+		// Note that no update is pushed on construction because a Cursor will surely soon follow.
+		// Updates are pushed to the counter on
+		//    DecodeCache clear
+		//    DecodeCache destruction
+		//    Cursor destruction
+		// as those are the most efficient times to publish an update.
+		int lastKnownUsedMemory;
+		int64_t* pMemoryTracker;
+
 		// Index 0 is always the root
 		std::vector<DecodedNode> decodedNodes;
 
 		DecodedNode& get(int index) { return decodedNodes[index]; }
+
+		void updateUsedMemory() {
+			int usedNow = sizeof(DeltaTree2) + arena.getSize(FastInaccurateEstimate::True) +
+			              (decodedNodes.capacity() * sizeof(DecodedNode));
+			if (pMemoryTracker != nullptr) {
+				*pMemoryTracker += (usedNow - lastKnownUsedMemory);
+			}
+			lastKnownUsedMemory = usedNow;
+		}
 
 		template <class... Args>
 		int emplace_new(Args&&... args) {
@@ -1125,6 +1153,20 @@ public:
 			lowerBound = T(a, lowerBound);
 			upperBound = T(a, upperBound);
 			arena = a;
+			updateUsedMemory();
+		}
+
+		std::string toString() const {
+			std::string s = format("DecodeCache{%p\n", this);
+			s += format("upperBound %s\n", upperBound.toString().c_str());
+			s += format("lowerBound %s\n", lowerBound.toString().c_str());
+			s += format("arenaSize %d\n", arena.getSize());
+			s += format("decodedNodes %d {\n", decodedNodes.size());
+			for (auto const& n : decodedNodes) {
+				s += format("  %s\n", n.toString().c_str());
+			}
+			s += format("}}\n");
+			return s;
 		}
 	};
 
@@ -1135,12 +1177,19 @@ public:
 	struct Cursor {
 		Cursor() : cache(nullptr), nodeIndex(-1) {}
 
-		Cursor(DecodeCache* cache, DeltaTree2* tree) : tree(tree), cache(cache), nodeIndex(-1) {}
+		Cursor(Reference<DecodeCache> cache, DeltaTree2* tree) : tree(tree), cache(cache), nodeIndex(-1) {}
 
-		Cursor(DecodeCache* cache, DeltaTree2* tree, int nodeIndex) : tree(tree), cache(cache), nodeIndex(nodeIndex) {}
+		Cursor(Reference<DecodeCache> cache, DeltaTree2* tree, int nodeIndex)
+		  : tree(tree), cache(cache), nodeIndex(nodeIndex) {}
 
 		// Copy constructor does not copy item because normally a copied cursor will be immediately moved.
 		Cursor(const Cursor& c) : tree(c.tree), cache(c.cache), nodeIndex(c.nodeIndex) {}
+
+		~Cursor() {
+			if (cache.isValid()) {
+				cache->updateUsedMemory();
+			}
+		}
 
 		Cursor next() const {
 			Cursor c = *this;
@@ -1164,7 +1213,7 @@ public:
 		}
 
 		DeltaTree2* tree;
-		DecodeCache* cache;
+		Reference<DecodeCache> cache;
 		int nodeIndex;
 		mutable Optional<T> item;
 
@@ -1226,6 +1275,7 @@ public:
 			return item.get();
 		}
 
+		// Switch the cursor to point to a new DeltaTree
 		void switchTree(DeltaTree2* newTree) {
 			tree = newTree;
 			// Reset item because it may point into tree memory
@@ -1545,7 +1595,17 @@ public:
 			T leftBase = leftBaseIndex == -1 ? cache->lowerBound : get(cache->get(leftBaseIndex));
 			T rightBase = rightBaseIndex == -1 ? cache->upperBound : get(cache->get(rightBaseIndex));
 
-			int common = leftBase.getCommonPrefixLen(rightBase, skipLen);
+			// If seek has reached a non-edge node then whatever bytes the left and right bases
+			// have in common are definitely in common with k.  However, for an edge node there
+			// is no guarantee, as one of the bases will be the lower or upper decode boundary
+			// and it is possible to add elements to the DeltaTree beyond those boundaries.
+			int common;
+			if (leftBaseIndex == -1 || rightBaseIndex == -1) {
+				common = 0;
+			} else {
+				common = leftBase.getCommonPrefixLen(rightBase, skipLen);
+			}
+
 			int commonWithLeftParent = k.getCommonPrefixLen(leftBase, common);
 			int commonWithRightParent = k.getCommonPrefixLen(rightBase, common);
 			bool borrowFromLeft = commonWithLeftParent >= commonWithRightParent;
@@ -1641,7 +1701,7 @@ public:
 		int count = end - begin;
 		numItems = count;
 		nodeBytesDeleted = 0;
-		initialHeight = (uint8_t)log2(count) + 1;
+		initialHeight = count == 0 ? 0 : (uint8_t)log2(count) + 1;
 		maxHeight = 0;
 
 		// The boundary leading to the new page acts as the last time we branched right
@@ -1651,7 +1711,13 @@ public:
 		} else {
 			nodeBytesUsed = 0;
 		}
+
+		ASSERT(size() <= spaceAvailable);
 		nodeBytesFree = spaceAvailable - size();
+
+		// Zero unused available space
+		memset((uint8_t*)this + size(), 0, nodeBytesFree);
+
 		return size();
 	}
 
@@ -1724,8 +1790,15 @@ private:
 		node.setLeftChildOffset(largeNodes, leftChildOffset);
 		node.setRightChildOffset(largeNodes, rightChildOffset);
 
-		deltatree_printf("%p: Serialized %s as %s\n", this, item.toString().c_str(), node.toString(this).c_str());
+		int written = wptr - (uint8_t*)&node;
+		deltatree_printf("Built subtree tree=%p subtreeRoot=%p written=%d end=%p serialized subtreeRoot %s as %s \n",
+		                 this,
+		                 &node,
+		                 written,
+		                 (uint8_t*)&node + written,
+		                 item.toString().c_str(),
+		                 node.toString(this).c_str());
 
-		return wptr - (uint8_t*)&node;
+		return written;
 	}
 };
