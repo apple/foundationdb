@@ -844,6 +844,9 @@ int parseTransaction(Arguments& args, char const* optarg) {
 		} else if (strncmp(ptr, "i", 1) == 0) {
 			op = OP_INSERT;
 			ptr++;
+		} else if (strncmp(ptr, "o", 1) == 0) {
+			op = OP_OVERWRITE;
+			ptr++;
 		} else if (strncmp(ptr, "cr", 2) == 0) {
 			op = OP_CLEARRANGE;
 			rangeop = 1;
