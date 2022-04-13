@@ -1109,10 +1109,10 @@ VersionVector MultiVersionTransaction::getVersionVector() {
 	return VersionVector();
 }
 
-SpanContext MultiVersionTransaction::getSpanID() {
+SpanContext MultiVersionTransaction::getSpanContext() {
 	auto tr = getTransaction();
 	if (tr.transaction) {
-		return tr.transaction->getSpanID();
+		return tr.transaction->getSpanContext();
 	}
 
 	return SpanContext();
