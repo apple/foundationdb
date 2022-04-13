@@ -1775,8 +1775,8 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 		actors.push_back(reportErrors(testerServerCore(iTesters[0], connRecord, db, locality), "TesterServerCore"));
 		tests = runTests(cc, ci, iTesters, testSet.testSpecs, startingConfiguration, locality);
 	} else {
-		tests = reportErrors(runTests(cc, ci, testSet.testSpecs, at, minTestersExpected, startingConfiguration, locality),
-		                     "RunTests");
+		tests = reportErrors(
+		    runTests(cc, ci, testSet.testSpecs, at, minTestersExpected, startingConfiguration, locality), "RunTests");
 	}
 
 	choose {
