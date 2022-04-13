@@ -1696,8 +1696,12 @@ ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsReques
 
 	while (tenantEntry.isError()) {
 		bool finalQuery = commitData->version.get() >= minTenantVersion;
+		Optional<TenantNameRef> tenantName;
+		if (req.tenant.name.present()) {
+			tenantName = req.tenant.name.get();
+		}
 		ErrorOr<Optional<TenantMapEntry>> _tenantEntry =
-		    getTenantEntry(commitData, req.tenant, Optional<int64_t>(), finalQuery);
+		    getTenantEntry(commitData, tenantName, Optional<int64_t>(), finalQuery);
 		tenantEntry = _tenantEntry;
 
 		if (tenantEntry.isError()) {
