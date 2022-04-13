@@ -23,6 +23,7 @@
 #include "foundationdb/fdb_c_types.h"
 #include "test/apitester/TesterScheduler.h"
 #include <memory>
+#include <stdexcept>
 #include <unordered_map>
 #include <mutex>
 #include <atomic>
@@ -33,6 +34,7 @@
 namespace FdbApiTester {
 
 constexpr int LONG_WAIT_TIME_US = 1000000;
+constexpr int LARGE_NUMBER_OF_RETRIES = 5;
 
 void TransactionActorBase::complete(fdb_error_t err) {
 	error = err;
@@ -72,9 +74,10 @@ public:
 	TransactionContextBase(FDBTransaction* tx,
 	                       std::shared_ptr<ITransactionActor> txActor,
 	                       TTaskFct cont,
-	                       IScheduler* scheduler)
-	  : fdbTx(tx), txActor(txActor), contAfterDone(cont), scheduler(scheduler), txState(TxState::IN_PROGRESS),
-	    commitCalled(false) {}
+	                       IScheduler* scheduler,
+	                       int retryLimit)
+	  : fdbTx(tx), txActor(txActor), contAfterDone(cont), scheduler(scheduler), retryLimit(retryLimit),
+	    txState(TxState::IN_PROGRESS), commitCalled(false) {}
 
 	// A state machine:
 	// IN_PROGRESS -> (ON_ERROR -> IN_PROGRESS)* [-> ON_ERROR] -> DONE
@@ -107,6 +110,11 @@ public:
 		}
 		txState = TxState::DONE;
 		lock.unlock();
+		if (retriedErrors.size() >= LARGE_NUMBER_OF_RETRIES) {
+			fmt::print("Transaction succeeded after {} retries on errors: {}\n",
+			           retriedErrors.size(),
+			           fmt::join(retriedErrors, ", "));
+		}
 		// cancel transaction so that any pending operations on it
 		// fail gracefully
 		fdbTx.cancel();
@@ -151,10 +159,27 @@ protected:
 		} else {
 			std::unique_lock<std::mutex> lock(mutex);
 			txState = TxState::IN_PROGRESS;
-			lock.unlock();
 			commitCalled = false;
+			lock.unlock();
 			txActor->start();
 		}
+	}
+
+	// Checks if a transaction can be retried. Fails the transaction if the check fails
+	bool canRetry(fdb_error_t lastErr) {
+		ASSERT(txState == TxState::ON_ERROR);
+		retriedErrors.push_back(lastErr);
+		if (retryLimit == 0 || retriedErrors.size() <= retryLimit) {
+			if (retriedErrors.size() == LARGE_NUMBER_OF_RETRIES) {
+				fmt::print("Transaction already retried {} times, on errors: {}\n",
+				           retriedErrors.size(),
+				           fmt::join(retriedErrors, ", "));
+			}
+			return true;
+		}
+		fmt::print("Transaction retry limit reached. Retried on errors: {}\n", fmt::join(retriedErrors, ", "));
+		transactionFailed(lastErr);
+		return false;
 	}
 
 	// FDB transaction
@@ -172,6 +197,9 @@ protected:
 	// Reference to the scheduler
 	IScheduler* scheduler;
 
+	// Retry limit
+	int retryLimit;
+
 	// Transaction execution state
 	TxState txState;
 
@@ -186,6 +214,9 @@ protected:
 
 	// Transaction is committed or being committed
 	bool commitCalled;
+
+	// A history of errors on which the transaction was retried
+	std::vector<fdb_error_t> retriedErrors;
 };
 
 /**
@@ -196,8 +227,9 @@ public:
 	BlockingTransactionContext(FDBTransaction* tx,
 	                           std::shared_ptr<ITransactionActor> txActor,
 	                           TTaskFct cont,
-	                           IScheduler* scheduler)
-	  : TransactionContextBase(tx, txActor, cont, scheduler) {}
+	                           IScheduler* scheduler,
+	                           int retryLimit)
+	  : TransactionContextBase(tx, txActor, cont, scheduler, retryLimit) {}
 
 protected:
 	void doContinueAfter(Future f, TTaskFct cont, bool retryOnError) override {
@@ -247,8 +279,13 @@ protected:
 		txState = TxState::ON_ERROR;
 		lock.unlock();
 
+		if (!canRetry(err)) {
+			return;
+		}
+
 		ASSERT(!onErrorFuture);
 		onErrorFuture = fdbTx.onError(err);
+		onErrorArg = err;
 
 		auto start = timeNow();
 		fdb_error_t err2 = fdb_future_block_until_ready(onErrorFuture.fdbFuture());
@@ -260,7 +297,7 @@ protected:
 		if (waitTimeUs > LONG_WAIT_TIME_US) {
 			fdb_error_t err3 = onErrorFuture.getError();
 			fmt::print("Long waiting time on onError({}) future: {:.3f}s, return code {} ({})\n",
-			           err,
+			           onErrorArg,
 			           microsecToSec(waitTimeUs),
 			           err3,
 			           fdb_get_error(err3));
@@ -278,8 +315,9 @@ public:
 	AsyncTransactionContext(FDBTransaction* tx,
 	                        std::shared_ptr<ITransactionActor> txActor,
 	                        TTaskFct cont,
-	                        IScheduler* scheduler)
-	  : TransactionContextBase(tx, txActor, cont, scheduler) {}
+	                        IScheduler* scheduler,
+	                        int retryLimit)
+	  : TransactionContextBase(tx, txActor, cont, scheduler, retryLimit) {}
 
 protected:
 	void doContinueAfter(Future f, TTaskFct cont, bool retryOnError) override {
@@ -299,8 +337,16 @@ protected:
 	}
 
 	static void futureReadyCallback(FDBFuture* f, void* param) {
-		AsyncTransactionContext* txCtx = (AsyncTransactionContext*)param;
-		txCtx->onFutureReady(f);
+		try {
+			AsyncTransactionContext* txCtx = (AsyncTransactionContext*)param;
+			txCtx->onFutureReady(f);
+		} catch (std::runtime_error& err) {
+			fmt::print("Unexpected exception in callback {}\n", err.what());
+			abort();
+		} catch (...) {
+			fmt::print("Unknown error in callback\n");
+			abort();
+		}
 	}
 
 	void onFutureReady(FDBFuture* f) {
@@ -345,6 +391,10 @@ protected:
 		txState = TxState::ON_ERROR;
 		lock.unlock();
 
+		if (!canRetry(err)) {
+			return;
+		}
+
 		ASSERT(!onErrorFuture);
 		onErrorArg = err;
 		onErrorFuture = tx()->onError(err);
@@ -358,8 +408,16 @@ protected:
 	}
 
 	static void onErrorReadyCallback(FDBFuture* f, void* param) {
-		AsyncTransactionContext* txCtx = (AsyncTransactionContext*)param;
-		txCtx->onErrorReady(f);
+		try {
+			AsyncTransactionContext* txCtx = (AsyncTransactionContext*)param;
+			txCtx->onErrorReady(f);
+		} catch (std::runtime_error& err) {
+			fmt::print("Unexpected exception in callback {}\n", err.what());
+			abort();
+		} catch (...) {
+			fmt::print("Unknown error in callback\n");
+			abort();
+		}
 	}
 
 	void onErrorReady(FDBFuture* f) {
@@ -440,9 +498,11 @@ protected:
 		} else {
 			std::shared_ptr<ITransactionContext> ctx;
 			if (options.blockOnFutures) {
-				ctx = std::make_shared<BlockingTransactionContext>(tx, txActor, cont, scheduler);
+				ctx = std::make_shared<BlockingTransactionContext>(
+				    tx, txActor, cont, scheduler, options.transactionRetryLimit);
 			} else {
-				ctx = std::make_shared<AsyncTransactionContext>(tx, txActor, cont, scheduler);
+				ctx = std::make_shared<AsyncTransactionContext>(
+				    tx, txActor, cont, scheduler, options.transactionRetryLimit);
 			}
 			txActor->init(ctx);
 			txActor->start();

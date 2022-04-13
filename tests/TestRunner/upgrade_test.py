@@ -29,6 +29,8 @@ FDB_DOWNLOAD_ROOT = "https://github.com/apple/foundationdb/releases/download/"
 CURRENT_VERSION = "7.2.0"
 HEALTH_CHECK_TIMEOUT_SEC = 5
 PROGRESS_CHECK_TIMEOUT_SEC = 30
+TRANSACTION_RETRY_LIMIT = 100
+RUN_WITH_GDB = False
 
 
 def make_executable(path):
@@ -243,7 +245,10 @@ class UpgradeTest:
                         '--output-pipe', self.output_pipe_path,
                         '--api-version', str(self.api_version),
                         '--log',
-                        '--log-dir', self.log]
+                        '--log-dir', self.log,
+                        '--transaction-retry-limit', str(TRANSACTION_RETRY_LIMIT)]
+            if (RUN_WITH_GDB):
+                cmd_args = ['gdb', '-ex', 'run', '--args'] + cmd_args
             print("Executing test command: {}".format(
                 " ".join([str(c) for c in cmd_args])))
 
@@ -264,7 +269,8 @@ class UpgradeTest:
     def progress_check(self, ctrl_pipe):
         self.progress_event.clear()
         os.write(ctrl_pipe, b"CHECK\n")
-        self.progress_event.wait(PROGRESS_CHECK_TIMEOUT_SEC)
+        self.progress_event.wait(
+            None if RUN_WITH_GDB else PROGRESS_CHECK_TIMEOUT_SEC)
         if (self.progress_event.is_set()):
             print("Progress check: OK")
         else:
@@ -327,7 +333,7 @@ class UpgradeTest:
         test_retcode = 1
         try:
             workload_thread = Thread(
-                target=self.exec_workload, args=(args.test_file))
+                target=self.exec_workload, args=(args.test_file,))
             workload_thread.start()
 
             reader_thread = Thread(target=self.output_pipe_reader)
@@ -414,7 +420,6 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         '--test-file',
-        nargs='+',
         help='A .toml file describing a test workload to be generated with fdb_c_api_tester',
         required=True,
     )
@@ -430,10 +435,18 @@ if __name__ == "__main__":
         help='Do not dump cluster log on error',
         action="store_true"
     )
+    parser.add_argument(
+        '--run-with-gdb',
+        help='Execute the tester binary from gdb',
+        action="store_true"
+    )
     args = parser.parse_args()
     if (args.process_number == 0):
         args.process_number = random.randint(1, 5)
         print("Testing with {} processes".format(args.process_number))
+
+    if (args.run_with_gdb):
+        RUN_WITH_GDB = True
 
     errcode = 1
     with UpgradeTest(args.build_dir, args.upgrade_path, args.process_number) as test:

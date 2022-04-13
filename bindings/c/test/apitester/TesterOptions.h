@@ -42,6 +42,7 @@ public:
 	std::string testFile;
 	std::string inputPipeName;
 	std::string outputPipeName;
+	int transactionRetryLimit = 0;
 	int numFdbThreads;
 	int numClientThreads;
 	int numDatabases;

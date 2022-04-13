@@ -50,7 +50,8 @@ enum TesterOptionId {
 	OPT_TEST_FILE,
 	OPT_INPUT_PIPE,
 	OPT_OUTPUT_PIPE,
-	OPT_FDB_API_VERSION
+	OPT_FDB_API_VERSION,
+	OPT_TRANSACTION_RETRY_LIMIT
 };
 
 CSimpleOpt::SOption TesterOptionDefs[] = //
@@ -71,6 +72,7 @@ CSimpleOpt::SOption TesterOptionDefs[] = //
 	  { OPT_INPUT_PIPE, "--input-pipe", SO_REQ_SEP },
 	  { OPT_OUTPUT_PIPE, "--output-pipe", SO_REQ_SEP },
 	  { OPT_FDB_API_VERSION, "--api-version", SO_REQ_SEP },
+	  { OPT_TRANSACTION_RETRY_LIMIT, "--transaction-retry-limit", SO_REQ_SEP },
 	  SO_END_OF_OPTIONS };
 
 void printProgramUsage(const char* execName) {
@@ -104,6 +106,8 @@ void printProgramUsage(const char* execName) {
 	       "                 Name of the output pipe for communication with the test controller.\n"
 	       "  --api-version VERSION\n"
 	       "                 Required FDB API version (default %d).\n"
+	       "  --transaction-retry-limit NUMBER\n"
+	       "				 Maximum number of retries per tranaction (default: 0 - unlimited)\n"
 	       "  -f, --test-file FILE\n"
 	       "                 Test file to run.\n"
 	       "  -h, --help     Display this help and exit.\n",
@@ -129,15 +133,14 @@ bool validateTraceFormat(std::string_view format) {
 
 const int MIN_TESTABLE_API_VERSION = 400;
 
-void processApiVersionOption(const std::string& optionName, const std::string& value, int& res) {
+void processIntOption(const std::string& optionName, const std::string& value, int minValue, int maxValue, int& res) {
 	char* endptr;
 	res = strtol(value.c_str(), &endptr, 10);
 	if (*endptr != '\0') {
 		throw TesterError(fmt::format("Invalid value {} for {}", value, optionName));
 	}
-	if (res < MIN_TESTABLE_API_VERSION || res > FDB_API_VERSION) {
-		throw TesterError(fmt::format(
-		    "Value for {} must be between {} and {}", optionName, MIN_TESTABLE_API_VERSION, FDB_API_VERSION));
+	if (res < minValue || res > maxValue) {
+		throw TesterError(fmt::format("Value for {} must be between {} and {}", optionName, minValue, maxValue));
 	}
 }
 
@@ -191,7 +194,11 @@ bool processArg(TesterOptions& options, const CSimpleOpt& args) {
 		options.outputPipeName = args.OptionArg();
 		break;
 	case OPT_FDB_API_VERSION:
-		processApiVersionOption(args.OptionText(), args.OptionArg(), options.apiVersion);
+		processIntOption(
+		    args.OptionText(), args.OptionArg(), MIN_TESTABLE_API_VERSION, FDB_API_VERSION, options.apiVersion);
+		break;
+	case OPT_TRANSACTION_RETRY_LIMIT:
+		processIntOption(args.OptionText(), args.OptionArg(), 0, 1000, options.transactionRetryLimit);
 		break;
 	}
 	return true;
@@ -284,6 +291,7 @@ bool runWorkloads(TesterOptions& options) {
 		txExecOptions.blockOnFutures = options.testSpec.blockOnFutures;
 		txExecOptions.numDatabases = options.numDatabases;
 		txExecOptions.databasePerTransaction = options.testSpec.databasePerTransaction;
+		txExecOptions.transactionRetryLimit = options.transactionRetryLimit;
 
 		std::unique_ptr<IScheduler> scheduler = createScheduler(options.numClientThreads);
 		std::unique_ptr<ITransactionExecutor> txExecutor = createTransactionExecutor(txExecOptions);

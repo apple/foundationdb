@@ -110,7 +110,7 @@ void WorkloadBase::execTransaction(std::shared_ptr<ITransactionActor> tx, TTaskF
 		if (tx->getErrorCode() == error_code_success) {
 			cont();
 		} else {
-			std::string msg = fmt::format("Transaction failed with error: {} ({}})", err, fdb_get_error(err));
+			std::string msg = fmt::format("Transaction failed with error: {} ({})", err, fdb_get_error(err));
 			if (failOnError) {
 				error(msg);
 				failed = true;
