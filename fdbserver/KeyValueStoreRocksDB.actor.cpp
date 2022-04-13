@@ -1660,30 +1660,35 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 		if (SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE > 0) {
 			collection = actorCollection(addActor.getFuture());
-		}
-		for (int i = 0; i < SERVER_KNOBS->ROCKSDB_READ_PARALLELISM + 1; i++) {
-			// ROCKSDB_READ_PARALLELISM readers and 1 writer
-			metricPromiseStreams.emplace_back(
-			    std::make_unique<ThreadReturnPromiseStream<std::pair<std::string, double>>>());
-			if (SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE > 0) {
+			for (int i = 0; i < SERVER_KNOBS->ROCKSDB_READ_PARALLELISM + 1; i++) {
+				// ROCKSDB_READ_PARALLELISM readers and 1 writer
+				metricPromiseStreams.emplace_back(
+				    std::make_unique<ThreadReturnPromiseStream<std::pair<std::string, double>>>());
 				addActor.send(updateHistogram(metricPromiseStreams[i]->getFuture()));
 			}
 		}
-		if (SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE > 0) {
-			actorErrorListener = errorListenActor(collection);
-		}
+
+		// the writer uses SERVER_KNOBS->ROCKSDB_READ_PARALLELISM as its threadIndex
+		// threadIndex is used for metricPromiseStreams and perfContextMetrics
 		writeThread->addThread(new Writer(db,
 		                                  defaultFdbCF,
 		                                  id,
 		                                  readIterPool,
 		                                  perfContextMetrics,
 		                                  SERVER_KNOBS->ROCKSDB_READ_PARALLELISM,
-		                                  metricPromiseStreams[SERVER_KNOBS->ROCKSDB_READ_PARALLELISM].get()),
+		                                  SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE > 0
+		                                      ? metricPromiseStreams[SERVER_KNOBS->ROCKSDB_READ_PARALLELISM].get()
+		                                      : nullptr),
 		                       "fdb-rocksdb-wr");
 		TraceEvent("RocksDBReadThreads").detail("KnobRocksDBReadParallelism", SERVER_KNOBS->ROCKSDB_READ_PARALLELISM);
 		for (unsigned i = 0; i < SERVER_KNOBS->ROCKSDB_READ_PARALLELISM; ++i) {
 			readThreads->addThread(
-			    new Reader(db, defaultFdbCF, readIterPool, perfContextMetrics, i, metricPromiseStreams[i].get()),
+			    new Reader(db,
+			               defaultFdbCF,
+			               readIterPool,
+			               perfContextMetrics,
+			               i,
+			               SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE > 0 ? metricPromiseStreams[i].get() : nullptr),
 			    "fdb-rocksdb-re");
 		}
 	}
