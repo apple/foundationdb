@@ -82,7 +82,7 @@ public:
 	    tssMapping(&proxyCommitData_.tssMapping), tenantMap(&proxyCommitData_.tenantMap),
 	    initialCommit(initialCommit_) {}
 
-	ApplyMetadataMutationsImpl(const SpanID& spanContext_,
+	ApplyMetadataMutationsImpl(const SpanContext& spanContext_,
 	                           ResolverData& resolverData_,
 	                           const VectorRef<MutationRef>& mutations_)
 	  : spanContext(spanContext_), dbgid(resolverData_.dbgid), arena(resolverData_.arena), mutations(mutations_),
