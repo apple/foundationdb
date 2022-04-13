@@ -1086,7 +1086,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				}
 				if (a.getHistograms) {
 					metricPromiseStream->send(std::make_pair(ROCKSDB_DELETE_COMPACTRANGE_HISTOGRAM.toString(),
-					                                        timer_monotonic() - compactRangeBeginTime));
+					                                         timer_monotonic() - compactRangeBeginTime));
 				}
 			}
 			if (a.getHistograms) {
@@ -1511,7 +1511,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				ReadIterator readIter = readIterPool->getIterator();
 				if (a.getHistograms) {
 					metricPromiseStream->send(std::make_pair(ROCKSDB_READRANGE_NEWITERATOR_HISTOGRAM.toString(),
-					                                        timer_monotonic() - iterCreationBeginTime));
+					                                         timer_monotonic() - iterCreationBeginTime));
 				}
 				auto cursor = readIter.iter;
 				cursor->Seek(toSlice(a.keys.begin));
@@ -1540,7 +1540,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				ReadIterator readIter = readIterPool->getIterator();
 				if (a.getHistograms) {
 					metricPromiseStream->send(std::make_pair(ROCKSDB_READRANGE_NEWITERATOR_HISTOGRAM.toString(),
-					                                        timer_monotonic() - iterCreationBeginTime));
+					                                         timer_monotonic() - iterCreationBeginTime));
 				}
 				auto cursor = readIter.iter;
 				cursor->SeekForPrev(toSlice(a.keys.end));
