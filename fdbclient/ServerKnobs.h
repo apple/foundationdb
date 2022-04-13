@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -37,8 +37,12 @@ public:
 	int64_t MAX_VERSIONS_IN_FLIGHT_FORCED;
 	int64_t MAX_READ_TRANSACTION_LIFE_VERSIONS;
 	int64_t MAX_WRITE_TRANSACTION_LIFE_VERSIONS;
+	bool ENABLE_VERSION_VECTOR;
+	bool ENABLE_VERSION_VECTOR_TLOG_UNICAST;
 	double MAX_COMMIT_BATCH_INTERVAL; // Each commit proxy generates a CommitTransactionBatchRequest at least this
 	                                  // often, so that versions always advance smoothly
+	double MAX_VERSION_RATE_MODIFIER;
+	int64_t MAX_VERSION_RATE_OFFSET;
 
 	// TLogs
 	bool PEEK_USING_STREAMING;
@@ -106,16 +110,19 @@ public:
 	double PUSH_STATS_SLOW_AMOUNT;
 	double PUSH_STATS_SLOW_RATIO;
 	int TLOG_POP_BATCH_SIZE;
+	double BLOCKING_PEEK_TIMEOUT;
 	bool PEEK_BATCHING_EMPTY_MSG;
 	double PEEK_BATCHING_EMPTY_MSG_INTERVAL;
 
 	// Data distribution queue
 	double HEALTH_POLL_TIME;
 	double BEST_TEAM_STUCK_DELAY;
+	double DEST_OVERLOADED_DELAY;
 	double BG_REBALANCE_POLLING_INTERVAL;
 	double BG_REBALANCE_SWITCH_CHECK_INTERVAL;
 	double DD_QUEUE_LOGGING_INTERVAL;
 	double RELOCATION_PARALLELISM_PER_SOURCE_SERVER;
+	double RELOCATION_PARALLELISM_PER_DEST_SERVER;
 	int DD_QUEUE_MAX_KEY_SERVERS;
 	int DD_REBALANCE_PARALLELISM;
 	int DD_REBALANCE_RESET_AMOUNT;
@@ -231,6 +238,14 @@ public:
 	double DD_FAILURE_TIME;
 	double DD_ZERO_HEALTHY_TEAM_DELAY;
 
+	// Run storage enginee on a child process on the same machine with storage process
+	bool REMOTE_KV_STORE;
+	// A delay to avoid race on file resources if the new kv store process started immediately after the previous kv
+	// store process died
+	double REMOTE_KV_STORE_INIT_DELAY;
+	// max waiting time for the remote kv store to initialize
+	double REMOTE_KV_STORE_MAX_INIT_DURATION;
+
 	// KeyValueStore SQLITE
 	int CLEAR_BUFFER_SIZE;
 	double READ_VALUE_TIME_ESTIMATE;
@@ -254,6 +269,7 @@ public:
 	int SQLITE_READER_THREADS;
 	int SQLITE_WRITE_WINDOW_LIMIT;
 	double SQLITE_WRITE_WINDOW_SECONDS;
+	int64_t SQLITE_CURSOR_MAX_LIFETIME_BYTES;
 
 	// KeyValueStoreSqlite spring cleaning
 	double SPRING_CLEANING_NO_ACTION_INTERVAL;
@@ -295,8 +311,17 @@ public:
 	bool ROCKSDB_READ_RANGE_REUSE_ITERATORS;
 	int64_t ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC;
 	bool ROCKSDB_WRITE_RATE_LIMITER_AUTO_TUNE;
+	std::string DEFAULT_FDB_ROCKSDB_COLUMN_FAMILY;
 	bool ROCKSDB_PERFCONTEXT_ENABLE; // Enable rocks perf context metrics. May cause performance overhead
 	double ROCKSDB_PERFCONTEXT_SAMPLE_RATE;
+	int ROCKSDB_MAX_SUBCOMPACTIONS;
+	int64_t ROCKSDB_SOFT_PENDING_COMPACT_BYTES_LIMIT;
+	int64_t ROCKSDB_HARD_PENDING_COMPACT_BYTES_LIMIT;
+	int64_t ROCKSDB_CAN_COMMIT_COMPACT_BYTES_LIMIT;
+	int ROCKSDB_CAN_COMMIT_DELAY_ON_OVERLOAD;
+	int ROCKSDB_CAN_COMMIT_DELAY_TIMES_ON_OVERLOAD;
+	int64_t ROCKSDB_COMPACTION_READAHEAD_SIZE;
+	int64_t ROCKSDB_BLOCK_SIZE;
 
 	// Leader election
 	int MAX_NOTIFICATIONS;
@@ -353,6 +378,7 @@ public:
 	int TXN_STATE_SEND_AMOUNT;
 	double REPORT_TRANSACTION_COST_ESTIMATION_DELAY;
 	bool PROXY_REJECT_BATCH_QUEUED_TOO_LONG;
+	bool PROXY_USE_RESOLVER_PRIVATE_MUTATIONS;
 
 	int RESET_MASTER_BATCHES;
 	int RESET_RESOLVER_BATCHES;
@@ -445,6 +471,14 @@ public:
 	                                               // failover.
 	int CC_FAILOVER_DUE_TO_HEALTH_MAX_DEGRADATION; // The maximum number of degraded servers that can trigger a
 	                                               // failover.
+	bool CC_ENABLE_ENTIRE_SATELLITE_MONITORING; // When enabled, gray failure tries to detect whether the entire
+	                                            // satellite DC is degraded.
+	int CC_SATELLITE_DEGRADATION_MIN_COMPLAINER; // When the network between primary and satellite becomes bad, all the
+	                                             // workers in primary may have bad network talking to the satellite.
+	                                             // This is the minimum amount of complainer for a satellite worker to
+	                                             // be determined as degraded worker.
+	int CC_SATELLITE_DEGRADATION_MIN_BAD_SERVER; // The minimum amount of degraded server in satellite DC to be
+	                                             // determined as degraded satellite.
 
 	// Knobs used to select the best policy (via monte carlo)
 	int POLICY_RATING_TESTS; // number of tests per policy (in order to compare)
@@ -459,6 +493,7 @@ public:
 	double RECRUITMENT_TIMEOUT;
 	int DBINFO_SEND_AMOUNT;
 	double DBINFO_BATCH_DELAY;
+	double SINGLETON_RECRUIT_BME_DELAY;
 
 	// Move Keys
 	double SHARD_READY_DELAY;
@@ -476,6 +511,7 @@ public:
 	double MIN_REBOOT_TIME;
 	double MAX_REBOOT_TIME;
 	std::string LOG_DIRECTORY;
+	std::string CONN_FILE;
 	int64_t SERVER_MEM_LIMIT;
 	double SYSTEM_MONITOR_FREQUENCY;
 
@@ -552,6 +588,12 @@ public:
 	// disk snapshot
 	int64_t MAX_FORKED_PROCESS_OUTPUT;
 	double SNAP_CREATE_MAX_TIMEOUT;
+	// Maximum number of storage servers a snapshot can fail to
+	// capture while still succeeding
+	int64_t MAX_STORAGE_SNAPSHOT_FAULT_TOLERANCE;
+	// Maximum number of coordinators a snapshot can fail to
+	// capture while still succeeding
+	int64_t MAX_COORDINATOR_SNAPSHOT_FAULT_TOLERANCE;
 
 	// Storage Metrics
 	double STORAGE_METRICS_AVERAGE_INTERVAL;
@@ -575,7 +617,9 @@ public:
 	int FETCH_KEYS_PARALLELISM_BYTES;
 	int FETCH_KEYS_PARALLELISM;
 	int FETCH_KEYS_LOWER_PRIORITY;
+	int FETCH_CHANGEFEED_PARALLELISM;
 	int BUGGIFY_BLOCK_BYTES;
+	int64_t STORAGE_RECOVERY_VERSION_LAG_LIMIT;
 	double STORAGE_DURABILITY_LAG_REJECT_THRESHOLD;
 	double STORAGE_DURABILITY_LAG_MIN_RATE;
 	int STORAGE_COMMIT_BYTES;
@@ -605,9 +649,14 @@ public:
 	double FETCH_KEYS_TOO_LONG_TIME_CRITERIA;
 	double MAX_STORAGE_COMMIT_TIME;
 	int64_t RANGESTREAM_LIMIT_BYTES;
+	int64_t CHANGEFEEDSTREAM_LIMIT_BYTES;
+	int64_t BLOBWORKERSTATUSSTREAM_LIMIT_BYTES;
 	bool ENABLE_CLEAR_RANGE_EAGER_READS;
 	bool QUICK_GET_VALUE_FALLBACK;
 	bool QUICK_GET_KEY_VALUES_FALLBACK;
+	int CHECKPOINT_TRANSFER_BLOCK_BYTES;
+	int QUICK_GET_KEY_VALUES_LIMIT;
+	int QUICK_GET_KEY_VALUES_LIMIT_BYTES;
 
 	// Wait Failure
 	int MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS;
@@ -629,9 +678,18 @@ public:
 	bool ENABLE_WORKER_HEALTH_MONITOR;
 	double WORKER_HEALTH_MONITOR_INTERVAL; // Interval between two health monitor health check.
 	int PEER_LATENCY_CHECK_MIN_POPULATION; // The minimum number of latency samples required to check a peer.
-	double PEER_LATENCY_DEGRADATION_PERCENTILE; // The percentile latency used to check peer health.
+	double PEER_LATENCY_DEGRADATION_PERCENTILE; // The percentile latency used to check peer health among workers inside
+	                                            // primary or remote DC.
 	double PEER_LATENCY_DEGRADATION_THRESHOLD; // The latency threshold to consider a peer degraded.
+	double PEER_LATENCY_DEGRADATION_PERCENTILE_SATELLITE; // The percentile latency used to check peer health between
+	                                                      // primary and primary satellite.
+	double PEER_LATENCY_DEGRADATION_THRESHOLD_SATELLITE; // The latency threshold to consider a peer degraded.
 	double PEER_TIMEOUT_PERCENTAGE_DEGRADATION_THRESHOLD; // The percentage of timeout to consider a peer degraded.
+	int PEER_DEGRADATION_CONNECTION_FAILURE_COUNT; // The number of connection failures experienced during measurement
+	                                               // period to consider a peer degraded.
+	bool WORKER_HEALTH_REPORT_RECENT_DESTROYED_PEER; // When enabled, the worker's health monitor also report any recent
+	                                                 // destroyed peers who are part of the transaction system to
+	                                                 // cluster controller.
 
 	// Test harness
 	double WORKER_POLL_DELAY;
@@ -644,6 +702,7 @@ public:
 	double COORDINATOR_LEADER_CONNECTION_TIMEOUT;
 
 	// Dynamic Knobs (implementation)
+	double COMPACTION_INTERVAL;
 	double UPDATE_NODE_TIMEOUT;
 	double GET_COMMITTED_VERSION_TIMEOUT;
 	double GET_SNAPSHOT_AND_CHANGES_TIMEOUT;
@@ -740,13 +799,15 @@ public:
 	                                  // queue is empty
 	int REDWOOD_LAZY_CLEAR_MAX_PAGES; // Maximum number of pages to free before ending a lazy clear cycle, unless the
 	                                  // queue is empty
-	int64_t REDWOOD_REMAP_CLEANUP_WINDOW; // Remap remover lag interval in which to coalesce page writes
-	double REDWOOD_REMAP_CLEANUP_LAG; // Maximum allowed remap remover lag behind the cleanup window as a multiple of
-	                                  // the window size
+	int64_t REDWOOD_REMAP_CLEANUP_WINDOW_BYTES; // Total size of remapped pages to keep before being removed by
+	                                            // remap cleanup
+	double REDWOOD_REMAP_CLEANUP_TOLERANCE_RATIO; // Maximum ratio of the remap cleanup window that remap cleanup is
+	                                              // allowed to be ahead or behind
 	int REDWOOD_PAGEFILE_GROWTH_SIZE_PAGES; // Number of pages to grow page file by
 	double REDWOOD_METRICS_INTERVAL;
 	double REDWOOD_HISTOGRAM_INTERVAL;
 	bool REDWOOD_EVICT_UPDATED_PAGES; // Whether to prioritize eviction of updated pages from cache.
+	int REDWOOD_DECODECACHE_REUSE_MIN_HEIGHT; // Minimum height for which to keep and reuse page decode caches
 
 	// Server request latency measurement
 	int LATENCY_SAMPLE_SIZE;
@@ -755,8 +816,10 @@ public:
 	// Cluster recovery
 	std::string CLUSTER_RECOVERY_EVENT_NAME_PREFIX;
 
-	// encrypt key proxy
-	bool ENABLE_ENCRYPT_KEY_PROXY;
+	// Encryption
+	bool ENABLE_ENCRYPTION;
+	std::string ENCRYPTION_MODE;
+	int SIM_KMS_MAX_KEYS;
 
 	// blob granule stuff
 	// FIXME: configure url with database configuration instead of knob eventually
@@ -765,8 +828,22 @@ public:
 	int BG_SNAPSHOT_FILE_TARGET_BYTES;
 	int BG_DELTA_FILE_TARGET_BYTES;
 	int BG_DELTA_BYTES_BEFORE_COMPACT;
+	int BG_MAX_SPLIT_FANOUT;
+	int BG_HOT_SNAPSHOT_VERSIONS;
+	int BG_CONSISTENCY_CHECK_ENABLED;
+	int BG_CONSISTENCY_CHECK_TARGET_SPEED_KB;
 
+	int BLOB_WORKER_INITIAL_SNAPSHOT_PARALLELISM;
 	double BLOB_WORKER_TIMEOUT; // Blob Manager's reaction time to a blob worker failure
+	double BLOB_WORKER_REQUEST_TIMEOUT; // Blob Worker's server-side request timeout
+	double BLOB_WORKERLIST_FETCH_INTERVAL;
+	double BLOB_WORKER_BATCH_GRV_INTERVAL;
+
+	double BLOB_MANAGER_STATUS_EXP_BACKOFF_MIN;
+	double BLOB_MANAGER_STATUS_EXP_BACKOFF_MAX;
+	double BLOB_MANAGER_STATUS_EXP_BACKOFF_EXPONENT;
+	double BGCC_TIMEOUT;
+	double BGCC_MIN_INTERVAL;
 
 	ServerKnobs(Randomize, ClientKnobs*, IsSimulated);
 	void initialize(Randomize, ClientKnobs*, IsSimulated);

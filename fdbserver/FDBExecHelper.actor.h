@@ -1,3 +1,23 @@
+/*
+ * FDBExecHelper.actor.h
+ *
+ * This source file is part of the FoundationDB open source project
+ *
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 #pragma once
 #if defined(NO_INTELLISENSE) && !defined(FDBSERVER_EXEC_HELPER_ACTOR_G_H)
 #define FDBSERVER_EXEC_HELPER_ACTOR_G_H
@@ -10,8 +30,9 @@
 #include <map>
 #include "flow/Arena.h"
 #include "flow/flow.h"
-#include "flow/actorcompiler.h"
 #include "fdbclient/FDBTypes.h"
+
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 // execute/snapshot command takes two arguments: <param1> <param2>
 // param1 - represents the command type/name
@@ -42,16 +63,19 @@ private: // data
 	StringRef binaryPath;
 };
 
+class IClosable; // Forward declaration
+
 // FIXME: move this function to a common location
 // spawns a process pointed by `binPath` and the arguments provided at `paramList`,
-// if the process spawned takes more than `maxWaitTime` then it will be killed
-// if isSync is set to true then the process will be synchronously executed
-// if async and in simulator then delay spawning the process to max of maxSimDelayTime
+// if the process spawned takes more than `maxWaitTime` then it will be killed, if `maxWaitTime` < 0, then there won't
+// be timeout if isSync is set to true then the process will be synchronously executed if async and in simulator then
+// delay spawning the process to max of maxSimDelayTime
 ACTOR Future<int> spawnProcess(std::string binPath,
                                std::vector<std::string> paramList,
                                double maxWaitTime,
                                bool isSync,
-                               double maxSimDelayTime);
+                               double maxSimDelayTime,
+                               IClosable* parent = nullptr);
 
 // helper to run all the work related to running the exec command
 ACTOR Future<int> execHelper(ExecCmdValueString* execArg, UID snapUID, std::string folder, std::string role);

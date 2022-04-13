@@ -26,7 +26,7 @@ public class SidebandMultiThreadClientTest {
     private static final int txnCnt = 1000;
 
     public static void main(String[] args) throws Exception {
-        FDB fdb = FDB.selectAPIVersion(710);
+        FDB fdb = FDB.selectAPIVersion(720);
         setupThreads(fdb);
         Collection<Database> dbs = clientHelper.openDatabases(fdb); // the clientHelper will close the databases for us
         for (Database db : dbs) {

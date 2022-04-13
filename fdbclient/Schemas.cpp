@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,35 +24,37 @@
 const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
 {
    "cluster":{
-       "storage_wiggler": {
+      "storage_wiggler": {
+         "wiggle_server_ids":["0ccb4e0feddb55"],
+         "wiggle_server_addresses": ["127.0.0.1"],
          "primary": {
-          	"last_round_start_datetime": "Wed Feb  4 09:36:37 2022 +0000",
-			"last_round_start_timestamp": 63811229797,
-			"last_round_finish_datetime": "Thu Jan  1 00:00:00 1970 +0000",
-			"last_round_finish_timestamp": 0,
-			"smoothed_round_seconds": 1,
-			"finished_round": 1,
-			"last_wiggle_start_datetime": "Wed Feb  4 09:36:37 2022 +0000",
-			"last_wiggle_start_timestamp": 63811229797,
-			"last_wiggle_finish_datetime": "Thu Jan  1 00:00:00 1970 +0000",
-			"last_wiggle_finish_timestamp": 0,
-			"smoothed_wiggle_seconds": 1,
-			"finished_wiggle": 1
-          },
-          "remote": {
-          	"last_round_start_datetime": "Wed Feb  4 09:36:37 2022 +0000",
-			"last_round_start_timestamp": 63811229797,
-			"last_round_finish_datetime": "Thu Jan  1 00:00:00 1970 +0000",
-			"last_round_finish_timestamp": 0,
-			"smoothed_round_seconds": 1,
-			"finished_round": 1,
-			"last_wiggle_start_datetime": "Wed Feb  4 09:36:37 2022 +0000",
-			"last_wiggle_start_timestamp": 63811229797,
-			"last_wiggle_finish_datetime": "Thu Jan  1 00:00:00 1970 +0000",
-			"last_wiggle_finish_timestamp": 0,
-			"smoothed_wiggle_seconds": 1,
-			"finished_wiggle": 1
-          }
+            "last_round_start_datetime": "2022-04-02 00:05:05.123 +0000",
+            "last_round_start_timestamp": 1648857905.123,
+            "last_round_finish_datetime": "1970-01-01 00:00:00.000 +0000",
+            "last_round_finish_timestamp": 0,
+            "smoothed_round_seconds": 1,
+            "finished_round": 1,
+            "last_wiggle_start_datetime": "2022-04-02 00:05:05.123 +0000",
+            "last_wiggle_start_timestamp": 1648857905.123,
+            "last_wiggle_finish_datetime": "1970-01-01 00:00:00.000 +0000",
+            "last_wiggle_finish_timestamp": 0,
+            "smoothed_wiggle_seconds": 1,
+            "finished_wiggle": 1
+         },
+         "remote": {
+            "last_round_start_datetime": "2022-04-02 00:05:05.123 +0000",
+            "last_round_start_timestamp": 1648857905.123,
+            "last_round_finish_datetime": "1970-01-01 00:00:00.000 +0000",
+            "last_round_finish_timestamp": 0,
+            "smoothed_round_seconds": 1,
+            "finished_round": 1,
+            "last_wiggle_start_datetime": "2022-04-02 00:05:05.123 +0000",
+            "last_wiggle_start_timestamp": 1648857905.123,
+            "last_wiggle_finish_datetime": "1970-01-01 00:00:00.000 +0000",
+            "last_wiggle_finish_timestamp": 0,
+            "smoothed_wiggle_seconds": 1,
+            "finished_wiggle": 1
+         }
       },
       "layers":{
          "_valid":true,
@@ -134,7 +136,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                      ]
                   },
                   "storage_metadata":{
-                     "created_time_datetime":"Thu Jan  1 00:00:00 1970 +0000",
+                     "created_time_datetime":"1970-01-01 00:00:00.000 +0000",
                      "created_time_timestamp": 0
                   },
                   "data_version":12341234,
@@ -766,7 +768,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
              "ssd-1",
              "ssd-2",
              "ssd-redwood-1-experimental",
-             "ssd-rocksdb-experimental",
+             "ssd-rocksdb-v1",
              "memory",
              "memory-1",
              "memory-2",
@@ -779,7 +781,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
              "ssd-1",
              "ssd-2",
              "ssd-redwood-1-experimental",
-             "ssd-rocksdb-experimental",
+             "ssd-rocksdb-v1",
              "memory",
              "memory-1",
              "memory-2",
@@ -807,6 +809,13 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
              "disabled",
              "aggressive",
              "gradual"
+         ]},
+         "blob_granules_enabled":0,
+         "tenant_mode": {
+             "$enum":[
+             "disabled",
+             "optional_experimental",
+             "required_experimental"
          ]}
       },
       "data":{

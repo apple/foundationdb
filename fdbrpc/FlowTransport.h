@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,7 +31,13 @@
 #include "flow/Net2Packet.h"
 #include "fdbrpc/ContinuousSample.h"
 
-enum { WLTOKEN_ENDPOINT_NOT_FOUND = 0, WLTOKEN_PING_PACKET, WLTOKEN_FIRST_AVAILABLE };
+enum {
+	WLTOKEN_ENDPOINT_NOT_FOUND = 0,
+	WLTOKEN_PING_PACKET,
+	WLTOKEN_AUTH_TENANT,
+	WLTOKEN_UNAUTHORIZED_ENDPOINT,
+	WLTOKEN_FIRST_AVAILABLE
+};
 
 #pragma pack(push, 4)
 class Endpoint {
@@ -129,6 +135,7 @@ class NetworkMessageReceiver {
 public:
 	virtual void receive(ArenaObjectReader&) = 0;
 	virtual bool isStream() const { return false; }
+	virtual bool isPublic() const = 0;
 	virtual PeerCompatibilityPolicy peerCompatibilityPolicy() const {
 		return { RequirePeer::Exactly, g_network->protocolVersion() };
 	}
@@ -169,6 +176,7 @@ struct Peer : public ReferenceCounted<Peer> {
 	int connectIncomingCount;
 	int connectFailedCount;
 	ContinuousSample<double> connectLatencies;
+	Promise<Void> disconnect;
 
 	explicit Peer(TransportData* transport, NetworkAddress const& destination);
 
@@ -181,14 +189,19 @@ struct Peer : public ReferenceCounted<Peer> {
 	void onIncomingConnection(Reference<Peer> self, Reference<IConnection> conn, Future<Void> reader);
 };
 
+class IPAllowList;
+
 class FlowTransport {
 public:
-	FlowTransport(uint64_t transportId, int maxWellKnownEndpoints);
+	FlowTransport(uint64_t transportId, int maxWellKnownEndpoints, IPAllowList const* allowList);
 	~FlowTransport();
 
 	// Creates a new FlowTransport and makes FlowTransport::transport() return it.  This uses g_network->global()
 	// variables, so it will be private to a simulation.
-	static void createInstance(bool isClient, uint64_t transportId, int maxWellKnownEndpoints);
+	static void createInstance(bool isClient,
+	                           uint64_t transportId,
+	                           int maxWellKnownEndpoints,
+	                           IPAllowList const* allowList = nullptr);
 
 	static bool isClient() { return g_network->global(INetwork::enClientFailureMonitor) != nullptr; }
 
@@ -201,6 +214,9 @@ public:
 
 	// Returns first local NetworkAddress.
 	NetworkAddress getLocalAddress() const;
+
+	// Returns first local NetworkAddress.
+	void setLocalAddress(NetworkAddress const&);
 
 	// Returns all local NetworkAddress.
 	NetworkAddressList getLocalAddresses() const;
@@ -269,6 +285,7 @@ public:
 	static NetworkAddressList getGlobalLocalAddresses() { return transport().getLocalAddresses(); }
 
 	Endpoint loadedEndpoint(const UID& token);
+	Future<Void> loadedDisconnect();
 
 	HealthMonitor* healthMonitor();
 

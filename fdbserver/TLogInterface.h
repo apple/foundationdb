@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -132,10 +132,12 @@ struct TLogLockResult {
 	constexpr static FileIdentifier file_identifier = 11822027;
 	Version end;
 	Version knownCommittedVersion;
+	std::deque<std::tuple<Version, int>> unknownCommittedVersions;
+	UID id;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, end, knownCommittedVersion);
+		serializer(ar, end, knownCommittedVersion, unknownCommittedVersions, id);
 	}
 };
 
@@ -301,6 +303,7 @@ struct TLogCommitRequest {
 	StringRef messages; // Each message prefixed by a 4-byte length
 
 	ReplyPromise<TLogCommitReply> reply;
+	int tLogCount;
 	Optional<UID> debugID;
 
 	TLogCommitRequest() {}
@@ -311,10 +314,11 @@ struct TLogCommitRequest {
 	                  Version knownCommittedVersion,
 	                  Version minKnownCommittedVersion,
 	                  StringRef messages,
+	                  int tLogCount,
 	                  Optional<UID> debugID)
 	  : spanContext(context), arena(a), prevVersion(prevVersion), version(version),
 	    knownCommittedVersion(knownCommittedVersion), minKnownCommittedVersion(minKnownCommittedVersion),
-	    messages(messages), debugID(debugID) {}
+	    messages(messages), tLogCount(tLogCount), debugID(debugID) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar,
@@ -326,6 +330,7 @@ struct TLogCommitRequest {
 		           reply,
 		           arena,
 		           debugID,
+		           tLogCount,
 		           spanContext);
 	}
 };

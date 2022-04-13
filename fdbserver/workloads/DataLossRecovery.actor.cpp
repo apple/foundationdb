@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2021 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@
 
 #include <cstdint>
 #include <limits>
+#include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbserver/MoveKeys.actor.h"
@@ -105,6 +106,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 
 		loop {
 			try {
+				tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 				state Optional<Value> res = wait(timeoutError(tr.get(key), 30.0));
 				const bool equal = !expectedValue.isError() && res == expectedValue.get();
 				if (!equal) {
@@ -126,6 +128,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 		state Transaction tr(cx);
 		loop {
 			try {
+				tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 				if (value.present()) {
 					tr.set(key, value.get());
 				} else {
@@ -193,6 +196,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 
 		loop {
 			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				BinaryWriter wrMyOwner(Unversioned());
 				wrMyOwner << owner;
 				tr.set(moveKeysLockOwnerKey, wrMyOwner.toValue());
@@ -228,6 +232,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 		state Transaction validateTr(cx);
 		loop {
 			try {
+				validateTr.setOption(FDBTransactionOptions::RAW_ACCESS);
 				Standalone<VectorRef<const char*>> addresses = wait(validateTr.getAddressesForKey(keys.begin));
 				// The move function is not what we are testing here, crash the test if the move fails.
 				ASSERT(addresses.size() == 1);

@@ -1,0 +1,50 @@
+[configuration]
+blobGranulesEnabled = true 
+# FIXME: re-enable rocks at some point
+storageEngineExcludeTypes = [4]
+
+[[test]]
+testTitle = 'BlobGranuleVerifyLarge'
+
+    [[test.workload]]
+    testName = 'ReadWrite'
+    testDuration = 120.0
+    transactionsPerSecond = 200
+    writesPerTransactionA = 5
+    readsPerTransactionA = 1
+    writesPerTransactionB = 10
+    readsPerTransactionB = 1
+    alpha = 0.5
+    nodeCount = 2000000
+    valueBytes = 128
+    discardEdgeMeasurements = false
+    warmingDelay = 10.0
+    setup = false
+
+    [[test.workload]]
+    testName = 'BlobGranuleVerifier'
+    testDuration = 120.0
+
+    [[test.workload]]
+    testName = 'RandomClogging'
+    testDuration = 120.0
+
+    [[test.workload]]
+    testName = 'Rollback'
+    meanDelay = 30.0
+    testDuration = 120.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 120.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 120.0
+

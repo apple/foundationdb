@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@
  */
 
 #include "flow/flat_buffers.h"
+#include "flow/FileIdentifier.h"
 #include "flow/UnitTest.h"
 #include "flow/Arena.h"
 #include "flow/serialize.h"
@@ -26,6 +27,7 @@
 
 #include <algorithm>
 #include <iomanip>
+#include <unordered_set>
 #include <variant>
 
 namespace detail {
@@ -361,12 +363,21 @@ struct string_serialized_traits<Void> : std::true_type {
 namespace unit_tests {
 
 struct Y1 {
+	constexpr static FileIdentifier file_identifier = 338229;
 	int a;
 
 	template <class Archiver>
 	void serialize(Archiver& ar) {
 		serializer(ar, a);
 	}
+};
+
+struct Y1Hasher {
+	std::size_t operator()(const Y1& y) const noexcept { return std::hash<int>()(y.a); }
+};
+
+struct Y1Equal {
+	bool operator()(const Y1& l, const Y1& r) const { return l.a == r.a; }
 };
 
 struct Y2 {
@@ -559,6 +570,45 @@ TEST_CASE("/flow/FlatBuffers/EmptyPreSerVectorRefs") {
 	ASSERT(xs.size() == kSize);
 	for (const auto& x : xs) {
 		ASSERT(x.size() == 0);
+	}
+	return Void();
+}
+
+TEST_CASE("/flow/FlatBuffers/EmptyUnorderedSet") {
+	int kSize = deterministicRandom()->randomInt(0, 100);
+	Standalone<StringRef> msg =
+	    ObjectWriter::toValue(std::vector<std::unordered_set<Y1, Y1Hasher, Y1Equal>>(kSize), Unversioned());
+	ObjectReader rd(msg.begin(), Unversioned());
+	std::vector<std::unordered_set<Y1, Y1Hasher, Y1Equal>> xs;
+	rd.deserialize(xs);
+	ASSERT(xs.size() == kSize);
+	for (const auto& x : xs) {
+		ASSERT(x.size() == 0);
+	}
+	return Void();
+}
+
+TEST_CASE("/flow/FlatBuffers/NonEmptyUnorderedSet") {
+	int kSize = deterministicRandom()->randomInt(0, 100);
+	std::vector<std::unordered_set<Y1, Y1Hasher, Y1Equal>> src;
+	std::unordered_set<Y1, Y1Hasher, Y1Equal> s;
+	for (int i = 0; i < kSize; i++) {
+		Y1 y;
+		y.a = i;
+		s.insert(y);
+	}
+	src.push_back(s);
+
+	Standalone<StringRef> msg = ObjectWriter::toValue(src, Unversioned());
+	ObjectReader rd(msg.begin(), Unversioned());
+	std::vector<std::unordered_set<Y1, Y1Hasher, Y1Equal>> xs;
+	rd.deserialize(xs);
+	ASSERT(xs.size() == 1);
+	ASSERT(xs[0].size() == kSize);
+	for (int i = 0; i < kSize; i++) {
+		Y1 y;
+		y.a = i;
+		ASSERT(xs[0].find(y) != xs[0].end());
 	}
 	return Void();
 }

@@ -23,6 +23,10 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 FDB_DEFINE_BOOLEAN_PARAM(IsPrimary);
+FDB_DEFINE_BOOLEAN_PARAM(IsInitialTeam);
+FDB_DEFINE_BOOLEAN_PARAM(IsRedundantTeam);
+FDB_DEFINE_BOOLEAN_PARAM(IsBadTeam);
+FDB_DEFINE_BOOLEAN_PARAM(WaitWiggle);
 
 namespace {
 
@@ -35,6 +39,11 @@ auto get(MapContainer& m, K const& k) -> decltype(m.at(k)) {
 }
 
 } // namespace
+
+FDB_DEFINE_BOOLEAN_PARAM(WantNewServers);
+FDB_DEFINE_BOOLEAN_PARAM(WantTrueBest);
+FDB_DEFINE_BOOLEAN_PARAM(PreferLowerUtilization);
+FDB_DEFINE_BOOLEAN_PARAM(TeamMustHaveShards);
 
 class DDTeamCollectionImpl {
 	ACTOR static Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self) {
@@ -200,8 +209,9 @@ public:
 			}
 
 			int64_t bestLoadBytes = 0;
+			bool wigglingBestOption = false; // best option contains server in paused wiggle state
 			Optional<Reference<IDataDistributionTeam>> bestOption;
-			std::vector<Reference<IDataDistributionTeam>> randomTeams;
+			std::vector<Reference<TCTeamInfo>> randomTeams;
 			const std::set<UID> completeSources(req.completeSources.begin(), req.completeSources.end());
 
 			// Note: this block does not apply any filters from the request
@@ -249,9 +259,18 @@ public:
 						    (!req.teamMustHaveShards ||
 						     self->shardsAffectedByTeamFailure->hasShards(ShardsAffectedByTeamFailure::Team(
 						         self->teams[currentIndex]->getServerIDs(), self->primary)))) {
+
+							// bestOption doesn't contain wiggling SS while current team does. Don't replace bestOption
+							// in this case
+							if (bestOption.present() && !wigglingBestOption &&
+							    self->teams[currentIndex]->hasWigglePausedServer()) {
+								continue;
+							}
+
 							bestLoadBytes = loadBytes;
 							bestOption = self->teams[currentIndex];
 							bestIndex = currentIndex;
+							wigglingBestOption = self->teams[bestIndex]->hasWigglePausedServer();
 						}
 					}
 				}
@@ -262,7 +281,7 @@ public:
 				while (randomTeams.size() < SERVER_KNOBS->BEST_TEAM_OPTION_COUNT &&
 				       nTries < SERVER_KNOBS->BEST_TEAM_MAX_TEAM_TRIES) {
 					// If unhealthy team is majority, we may not find an ok dest in this while loop
-					Reference<IDataDistributionTeam> dest = deterministicRandom()->randomChoice(self->teams);
+					Reference<TCTeamInfo> dest = deterministicRandom()->randomChoice(self->teams);
 
 					bool ok = dest->isHealthy() && (!req.preferLowerUtilization ||
 					                                dest->hasHealthyAvailableSpace(self->medianAvailableSpace));
@@ -298,8 +317,16 @@ public:
 					int64_t loadBytes = randomTeams[i]->getLoadBytes(true, req.inflightPenalty);
 					if (!bestOption.present() || (req.preferLowerUtilization && loadBytes < bestLoadBytes) ||
 					    (!req.preferLowerUtilization && loadBytes > bestLoadBytes)) {
+
+						// bestOption doesn't contain wiggling SS while current team does. Don't replace bestOption
+						// in this case
+						if (bestOption.present() && !wigglingBestOption && randomTeams[i]->hasWigglePausedServer()) {
+							continue;
+						}
+
 						bestLoadBytes = loadBytes;
 						bestOption = randomTeams[i];
+						wigglingBestOption = randomTeams[i]->hasWigglePausedServer();
 					}
 				}
 			}
@@ -396,7 +423,7 @@ public:
 						if (servers.size() == self->configuration.storageTeamSize ||
 						    self->satisfiesPolicy(servers, self->configuration.storageTeamSize)) {
 							servers.resize(self->configuration.storageTeamSize);
-							self->addTeam(servers, true);
+							self->addTeam(servers, IsInitialTeam::True);
 							// self->traceTeamCollectionInfo(); // Trace at the end of the function
 						} else {
 							tempSet->clear();
@@ -414,7 +441,7 @@ public:
 								serverIds.push_back(*tempMap->getObject(it));
 							}
 							std::sort(serverIds.begin(), serverIds.end());
-							self->addTeam(serverIds.begin(), serverIds.end(), true);
+							self->addTeam(serverIds.begin(), serverIds.end(), IsInitialTeam::True);
 						}
 					} else {
 						serverIds.clear();
@@ -463,7 +490,7 @@ public:
 		state std::set<std::vector<UID>>::iterator teamIterEnd =
 		    self->primary ? initTeams->primaryTeams.end() : initTeams->remoteTeams.end();
 		for (; teamIter != teamIterEnd; ++teamIter) {
-			self->addTeam(teamIter->begin(), teamIter->end(), true);
+			self->addTeam(teamIter->begin(), teamIter->end(), IsInitialTeam::True);
 			wait(yield());
 		}
 
@@ -608,8 +635,8 @@ public:
 	// A badTeam can be unhealthy or just a redundantTeam removed by machineTeamRemover() or serverTeamRemover()
 	ACTOR static Future<Void> teamTracker(DDTeamCollection* self,
 	                                      Reference<TCTeamInfo> team,
-	                                      bool badTeam,
-	                                      bool redundantTeam) {
+	                                      IsBadTeam badTeam,
+	                                      IsRedundantTeam redundantTeam) {
 		state int lastServersLeft = team->size();
 		state bool lastAnyUndesired = false;
 		state bool lastAnyWigglingServer = false;
@@ -1268,7 +1295,7 @@ public:
 							bool addedNewBadTeam = false;
 							for (auto it : newBadTeams) {
 								if (self->removeTeam(it)) {
-									self->addTeam(it->getServers(), true);
+									self->addTeam(it->getServers(), IsInitialTeam::True);
 									addedNewBadTeam = true;
 								}
 							}
@@ -1359,7 +1386,10 @@ public:
 			bool foundSSToRemove = false;
 
 			for (auto& server : self->server_info) {
-				if (!server.second->isCorrectStoreType(self->configuration.storageServerStoreType)) {
+				// If this server isn't the right storage type and its wrong-type trigger has not yet been set
+				// then set it if we're in aggressive mode and log its presence either way.
+				if (!server.second->isCorrectStoreType(self->configuration.storageServerStoreType) &&
+				    !server.second->wrongStoreTypeToRemove.get()) {
 					// Server may be removed due to failure while the wrongStoreTypeToRemove is sent to the
 					// storageServerTracker. This race may cause the server to be removed before react to
 					// wrongStoreTypeToRemove
@@ -1372,12 +1402,16 @@ public:
 					TraceEvent("WrongStoreTypeRemover", self->distributorId)
 					    .detail("Server", server.first)
 					    .detail("StoreType", server.second->getStoreType())
-					    .detail("ConfiguredStoreType", self->configuration.storageServerStoreType);
-					break;
+					    .detail("ConfiguredStoreType", self->configuration.storageServerStoreType)
+					    .detail("RemovingNow",
+					            self->configuration.storageMigrationType == StorageMigrationType::AGGRESSIVE);
 				}
 			}
 
-			if (!foundSSToRemove) {
+			// Stop if no incorrect storage types were found, or if we're not in aggressive mode and can't act on any
+			// found. Aggressive mode is checked at this location so that in non-aggressive mode the loop will execute
+			// once and log any incorrect storage types found.
+			if (!foundSSToRemove || self->configuration.storageMigrationType != StorageMigrationType::AGGRESSIVE) {
 				break;
 			}
 		}
@@ -1387,7 +1421,7 @@ public:
 
 	// NOTE: this actor returns when the cluster is healthy and stable (no server is expected to be removed in a period)
 	// processingWiggle and processingUnhealthy indicate that some servers are going to be removed.
-	ACTOR static Future<Void> waitUntilHealthy(DDTeamCollection const* self, double extraDelay, bool waitWiggle) {
+	ACTOR static Future<Void> waitUntilHealthy(DDTeamCollection const* self, double extraDelay, WaitWiggle waitWiggle) {
 		state int waitCount = 0;
 		loop {
 			while (self->zeroHealthyTeams->get() || self->processingUnhealthy->get() ||
@@ -1683,7 +1717,7 @@ public:
 					// removeTeam() has side effect of swapping the last element to the current pos
 					// in the serverTeams vector in the machine team.
 					--teamIndex;
-					self->addTeam(team->getServers(), true, true);
+					self->addTeam(team->getServers(), IsInitialTeam::True, IsRedundantTeam::True);
 					TEST(true); // Removed machine team
 				}
 
@@ -1767,7 +1801,7 @@ public:
 				// The team will be marked as a bad team
 				bool foundTeam = self->removeTeam(st);
 				ASSERT(foundTeam);
-				self->addTeam(st->getServers(), true, true);
+				self->addTeam(st->getServers(), IsInitialTeam::True, IsRedundantTeam::True);
 				TEST(true); // Marked team as a bad team
 
 				self->doBuildTeams = true;
@@ -2828,25 +2862,8 @@ public:
 
 	// read the current map of `perpetualStorageWiggleIDPrefix`, then restore wigglingId.
 	ACTOR static Future<Void> readStorageWiggleMap(DDTeamCollection* self) {
-
-		state const Key readKey =
-		    perpetualStorageWiggleIDPrefix.withSuffix(self->primary ? "primary/"_sr : "remote/"_sr);
-		state KeyBackedObjectMap<UID, StorageWiggleValue, decltype(IncludeVersion())> metadataMap(readKey,
-		                                                                                          IncludeVersion());
-		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(self->cx));
-		state std::vector<std::pair<UID, StorageWiggleValue>> res;
-		// read the wiggling pairs
-		loop {
-			try {
-				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-				wait(store(res, metadataMap.getRange(tr, UID(0, 0), Optional<UID>(), CLIENT_KNOBS->TOO_MANY)));
-				wait(tr->commit());
-				break;
-			} catch (Error& e) {
-				wait(tr->onError(e));
-			}
-		}
+		state std::vector<std::pair<UID, StorageWiggleValue>> res =
+		    wait(readStorageWiggleValues(self->cx, self->primary, false));
 		if (res.size() > 0) {
 			// SOMEDAY: support wiggle multiple SS at once
 			ASSERT(!self->wigglingId.present()); // only single process wiggle is allowed
@@ -3358,8 +3375,10 @@ Future<Void> DDTeamCollection::buildTeams() {
 	return DDTeamCollectionImpl::buildTeams(this);
 }
 
-Future<Void> DDTeamCollection::teamTracker(Reference<TCTeamInfo> team, bool badTeam, bool redundantTeam) {
-	return DDTeamCollectionImpl::teamTracker(this, team, badTeam, redundantTeam);
+Future<Void> DDTeamCollection::teamTracker(Reference<TCTeamInfo> team,
+                                           IsBadTeam isBadTeam,
+                                           IsRedundantTeam isRedundantTeam) {
+	return DDTeamCollectionImpl::teamTracker(this, team, isBadTeam, isRedundantTeam);
 }
 
 Future<Void> DDTeamCollection::storageServerTracker(
@@ -3376,7 +3395,7 @@ Future<Void> DDTeamCollection::removeWrongStoreType() {
 	return DDTeamCollectionImpl::removeWrongStoreType(this);
 }
 
-Future<Void> DDTeamCollection::waitUntilHealthy(double extraDelay, bool waitWiggle) const {
+Future<Void> DDTeamCollection::waitUntilHealthy(double extraDelay, WaitWiggle waitWiggle) const {
 	return DDTeamCollectionImpl::waitUntilHealthy(this, extraDelay, waitWiggle);
 }
 
@@ -3628,6 +3647,10 @@ void DDTeamCollection::removeLaggingStorageServer(Key zoneId) {
 		disableFailingLaggingServers.set(false);
 }
 
+bool DDTeamCollection::isWigglePausedServer(const UID& server) const {
+	return pauseWiggle && pauseWiggle->get() && wigglingId == server;
+}
+
 std::vector<UID> DDTeamCollection::getRandomHealthyTeam(const UID& excludeServer) {
 	std::vector<int> candidates, backup;
 	for (int i = 0; i < teams.size(); ++i) {
@@ -3800,13 +3823,13 @@ int DDTeamCollection::overlappingMachineMembers(std::vector<Standalone<StringRef
 }
 
 void DDTeamCollection::addTeam(const std::vector<Reference<TCServerInfo>>& newTeamServers,
-                               bool isInitialTeam,
-                               bool redundantTeam) {
+                               IsInitialTeam isInitialTeam,
+                               IsRedundantTeam redundantTeam) {
 	auto teamInfo = makeReference<TCTeamInfo>(newTeamServers);
 
 	// Move satisfiesPolicy to the end for performance benefit
-	bool badTeam =
-	    redundantTeam || teamInfo->size() != configuration.storageTeamSize || !satisfiesPolicy(teamInfo->getServers());
+	auto badTeam = IsBadTeam{ redundantTeam || teamInfo->size() != configuration.storageTeamSize ||
+		                      !satisfiesPolicy(teamInfo->getServers()) };
 
 	teamInfo->tracker = teamTracker(teamInfo, badTeam, redundantTeam);
 	// ASSERT( teamInfo->serverIDs.size() > 0 ); //team can be empty at DB initialization
@@ -4551,7 +4574,7 @@ int DDTeamCollection::addTeamsBestOf(int teamsToBuild, int desiredTeams, int max
 		}
 
 		// Step 4: Add the server team
-		addTeam(bestServerTeam.begin(), bestServerTeam.end(), false);
+		addTeam(bestServerTeam.begin(), bestServerTeam.end(), IsInitialTeam::False);
 		addedTeams++;
 	}
 
@@ -5252,8 +5275,8 @@ public:
 		// state int targetTeamsPerServer = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (teamSize + 1) / 2;
 		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
 
-		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
-		collection->addTeam(std::set<UID>({ UID(1, 0), UID(3, 0), UID(4, 0) }), true);
+		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), IsInitialTeam::True);
+		collection->addTeam(std::set<UID>({ UID(1, 0), UID(3, 0), UID(4, 0) }), IsInitialTeam::True);
 
 		state int result = collection->addTeamsBestOf(8, desiredTeams, maxTeams);
 
@@ -5282,8 +5305,8 @@ public:
 		state int teamSize = 3;
 		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
 
-		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
-		collection->addTeam(std::set<UID>({ UID(1, 0), UID(3, 0), UID(4, 0) }), true);
+		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), IsInitialTeam::True);
+		collection->addTeam(std::set<UID>({ UID(1, 0), UID(3, 0), UID(4, 0) }), IsInitialTeam::True);
 
 		collection->addBestMachineTeams(10);
 		int result = collection->addTeamsBestOf(10, desiredTeams, maxTeams);
@@ -5328,15 +5351,15 @@ public:
 		high_avail.available.bytes = 800 * 1024 * 1024;
 		high_avail.load.bytes = 90 * 1024 * 1024;
 
-		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
-		collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), true);
+		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), IsInitialTeam::True);
+		collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), IsInitialTeam::True);
 		collection->disableBuildingTeams();
 		collection->setCheckTeamDelay();
 
-		collection->server_info[UID(1, 0)]->setServerMetrics(mid_avail);
-		collection->server_info[UID(2, 0)]->setServerMetrics(high_avail);
-		collection->server_info[UID(3, 0)]->setServerMetrics(high_avail);
-		collection->server_info[UID(4, 0)]->setServerMetrics(high_avail);
+		collection->server_info[UID(1, 0)]->setMetrics(mid_avail);
+		collection->server_info[UID(2, 0)]->setMetrics(high_avail);
+		collection->server_info[UID(3, 0)]->setMetrics(high_avail);
+		collection->server_info[UID(4, 0)]->setMetrics(high_avail);
 
 		/*
 		 * Suppose  1, 2 and 3 are complete sources, i.e., they have all shards in
@@ -5344,14 +5367,10 @@ public:
 		 * don't strictly need new servers and all of these servers are healthy,
 		 * maintain status quo.
 		 */
-
-		bool wantsNewServers = false;
-		bool wantsTrueBest = true;
-		bool preferLowerUtilization = true;
-		bool teamMustHaveShards = false;
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
-		state GetTeamRequest req(wantsNewServers, wantsTrueBest, preferLowerUtilization, teamMustHaveShards);
+		state GetTeamRequest req(
+		    WantNewServers::False, WantTrueBest::True, PreferLowerUtilization::True, TeamMustHaveShards::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5384,15 +5403,15 @@ public:
 		high_avail.available.bytes = 800 * 1024 * 1024;
 		high_avail.load.bytes = 90 * 1024 * 1024;
 
-		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
-		collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), true);
+		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), IsInitialTeam::True);
+		collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), IsInitialTeam::True);
 		collection->disableBuildingTeams();
 		collection->setCheckTeamDelay();
 
-		collection->server_info[UID(1, 0)]->setServerMetrics(mid_avail);
-		collection->server_info[UID(2, 0)]->setServerMetrics(high_avail);
-		collection->server_info[UID(3, 0)]->setServerMetrics(high_avail);
-		collection->server_info[UID(4, 0)]->setServerMetrics(high_avail);
+		collection->server_info[UID(1, 0)]->setMetrics(mid_avail);
+		collection->server_info[UID(2, 0)]->setMetrics(high_avail);
+		collection->server_info[UID(3, 0)]->setMetrics(high_avail);
+		collection->server_info[UID(4, 0)]->setMetrics(high_avail);
 		collection->server_info[UID(1, 0)]->markTeamUnhealthy(0);
 
 		/*
@@ -5401,14 +5420,10 @@ public:
 		 * strictly need new servers but '1' is not healthy, see that the other team of
 		 * complete sources is selected.
 		 */
-
-		bool wantsNewServers = false;
-		bool wantsTrueBest = true;
-		bool preferLowerUtilization = true;
-		bool teamMustHaveShards = false;
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0), UID(4, 0) };
 
-		state GetTeamRequest req(wantsNewServers, wantsTrueBest, preferLowerUtilization, teamMustHaveShards);
+		state GetTeamRequest req(
+		    WantNewServers::False, WantTrueBest::True, PreferLowerUtilization::True, TeamMustHaveShards::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5442,8 +5457,8 @@ public:
 		high_avail.available.bytes = 800 * 1024 * 1024;
 		high_avail.load.bytes = 90 * 1024 * 1024;
 
-		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
-		collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), true);
+		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), IsInitialTeam::True);
+		collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), IsInitialTeam::True);
 		collection->disableBuildingTeams();
 		collection->setCheckTeamDelay();
 
@@ -5452,18 +5467,15 @@ public:
 		 * least utilized, if the caller says they preferLowerUtilization.
 		 */
 
-		collection->server_info[UID(1, 0)]->setServerMetrics(mid_avail);
-		collection->server_info[UID(2, 0)]->setServerMetrics(high_avail);
-		collection->server_info[UID(3, 0)]->setServerMetrics(high_avail);
-		collection->server_info[UID(4, 0)]->setServerMetrics(high_avail);
+		collection->server_info[UID(1, 0)]->setMetrics(mid_avail);
+		collection->server_info[UID(2, 0)]->setMetrics(high_avail);
+		collection->server_info[UID(3, 0)]->setMetrics(high_avail);
+		collection->server_info[UID(4, 0)]->setMetrics(high_avail);
 
-		bool wantsNewServers = true;
-		bool wantsTrueBest = true;
-		bool preferLowerUtilization = true;
-		bool teamMustHaveShards = false;
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
-		state GetTeamRequest req(wantsNewServers, wantsTrueBest, preferLowerUtilization, teamMustHaveShards);
+		state GetTeamRequest req(
+		    WantNewServers::True, WantTrueBest::True, PreferLowerUtilization::True, TeamMustHaveShards::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5497,28 +5509,24 @@ public:
 		high_avail.available.bytes = 800 * 1024 * 1024;
 		high_avail.load.bytes = 90 * 1024 * 1024;
 
-		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
-		collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), true);
+		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), IsInitialTeam::True);
+		collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), IsInitialTeam::True);
 		collection->disableBuildingTeams();
 		collection->setCheckTeamDelay();
 
-		collection->server_info[UID(1, 0)]->setServerMetrics(mid_avail);
-		collection->server_info[UID(2, 0)]->setServerMetrics(high_avail);
-		collection->server_info[UID(3, 0)]->setServerMetrics(high_avail);
-		collection->server_info[UID(4, 0)]->setServerMetrics(high_avail);
+		collection->server_info[UID(1, 0)]->setMetrics(mid_avail);
+		collection->server_info[UID(2, 0)]->setMetrics(high_avail);
+		collection->server_info[UID(3, 0)]->setMetrics(high_avail);
+		collection->server_info[UID(4, 0)]->setMetrics(high_avail);
 
 		/*
 		 * Among server teams that have healthy space available, pick the team that is
 		 * most utilized, if the caller says they don't preferLowerUtilization.
 		 */
-
-		bool wantsNewServers = true;
-		bool wantsTrueBest = true;
-		bool preferLowerUtilization = false;
-		bool teamMustHaveShards = false;
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
-		state GetTeamRequest req(wantsNewServers, wantsTrueBest, preferLowerUtilization, teamMustHaveShards);
+		state GetTeamRequest req(
+		    WantNewServers::True, WantTrueBest::True, PreferLowerUtilization::False, TeamMustHaveShards::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5551,15 +5559,15 @@ public:
 		high_avail.available.bytes = 800 * 1024 * 1024;
 		high_avail.load.bytes = 90 * 1024 * 1024;
 
-		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
-		collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), true);
+		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), IsInitialTeam::True);
+		collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), IsInitialTeam::True);
 		collection->disableBuildingTeams();
 		collection->setCheckTeamDelay();
 
-		collection->server_info[UID(1, 0)]->setServerMetrics(high_avail);
-		collection->server_info[UID(2, 0)]->setServerMetrics(low_avail);
-		collection->server_info[UID(3, 0)]->setServerMetrics(high_avail);
-		collection->server_info[UID(4, 0)]->setServerMetrics(low_avail);
+		collection->server_info[UID(1, 0)]->setMetrics(high_avail);
+		collection->server_info[UID(2, 0)]->setMetrics(low_avail);
+		collection->server_info[UID(3, 0)]->setMetrics(high_avail);
+		collection->server_info[UID(4, 0)]->setMetrics(low_avail);
 		collection->server_info[UID(1, 0)]->markTeamUnhealthy(0);
 
 		/*
@@ -5567,14 +5575,10 @@ public:
 		 * space, decline to pick that team. Every server must have some minimum
 		 * free space defined by the MIN_AVAILABLE_SPACE server knob.
 		 */
-
-		bool wantsNewServers = true;
-		bool wantsTrueBest = true;
-		bool preferLowerUtilization = true;
-		bool teamMustHaveShards = false;
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
-		state GetTeamRequest req(wantsNewServers, wantsTrueBest, preferLowerUtilization, teamMustHaveShards);
+		state GetTeamRequest req(
+		    WantNewServers::True, WantTrueBest::True, PreferLowerUtilization::True, TeamMustHaveShards::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5610,17 +5614,17 @@ public:
 		high_avail.available.bytes = 800 * 1024 * 1024;
 		high_avail.load.bytes = 90 * 1024 * 1024;
 
-		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), true);
-		collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), true);
-		collection->addTeam(std::set<UID>({ UID(3, 0), UID(4, 0), UID(5, 0) }), true);
+		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), IsInitialTeam::True);
+		collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), IsInitialTeam::True);
+		collection->addTeam(std::set<UID>({ UID(3, 0), UID(4, 0), UID(5, 0) }), IsInitialTeam::True);
 		collection->disableBuildingTeams();
 		collection->setCheckTeamDelay();
 
-		collection->server_info[UID(1, 0)]->setServerMetrics(high_avail);
-		collection->server_info[UID(2, 0)]->setServerMetrics(low_avail);
-		collection->server_info[UID(3, 0)]->setServerMetrics(high_avail);
-		collection->server_info[UID(4, 0)]->setServerMetrics(low_avail);
-		collection->server_info[UID(5, 0)]->setServerMetrics(high_avail);
+		collection->server_info[UID(1, 0)]->setMetrics(high_avail);
+		collection->server_info[UID(2, 0)]->setMetrics(low_avail);
+		collection->server_info[UID(3, 0)]->setMetrics(high_avail);
+		collection->server_info[UID(4, 0)]->setMetrics(low_avail);
+		collection->server_info[UID(5, 0)]->setMetrics(high_avail);
 		collection->server_info[UID(1, 0)]->markTeamUnhealthy(0);
 
 		/*
@@ -5628,14 +5632,10 @@ public:
 		 * test that each server has at least MIN_AVAILABLE_SPACE_RATIO (server knob)
 		 * percentage points of capacity free before picking that team.
 		 */
-
-		bool wantsNewServers = true;
-		bool wantsTrueBest = true;
-		bool preferLowerUtilization = true;
-		bool teamMustHaveShards = false;
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
-		state GetTeamRequest req(wantsNewServers, wantsTrueBest, preferLowerUtilization, teamMustHaveShards);
+		state GetTeamRequest req(
+		    WantNewServers::True, WantTrueBest::True, PreferLowerUtilization::True, TeamMustHaveShards::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5643,6 +5643,59 @@ public:
 		std::pair<Optional<Reference<IDataDistributionTeam>>, bool> resTeam = req.reply.getFuture().get();
 
 		ASSERT(!resTeam.first.present());
+
+		return Void();
+	}
+
+	ACTOR static Future<Void> GetTeam_DeprioritizeWigglePausedTeam() {
+		Reference<IReplicationPolicy> policy = Reference<IReplicationPolicy>(
+		    new PolicyAcross(3, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+		state int processSize = 5;
+		state int teamSize = 3;
+		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
+		GetStorageMetricsReply mid_avail;
+		mid_avail.capacity.bytes = 1000 * 1024 * 1024;
+		mid_avail.available.bytes = 400 * 1024 * 1024;
+		mid_avail.load.bytes = 100 * 1024 * 1024;
+
+		GetStorageMetricsReply high_avail;
+		high_avail.capacity.bytes = 1000 * 1024 * 1024;
+		high_avail.available.bytes = 800 * 1024 * 1024;
+		high_avail.load.bytes = 90 * 1024 * 1024;
+
+		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), IsInitialTeam::True);
+		collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), IsInitialTeam::True);
+		collection->disableBuildingTeams();
+		collection->setCheckTeamDelay();
+
+		/*
+		 * Among server teams that have healthy space available, pick the team that is
+		 * least utilized, if the caller says they preferLowerUtilization.
+		 */
+
+		collection->server_info[UID(1, 0)]->setMetrics(mid_avail);
+		collection->server_info[UID(2, 0)]->setMetrics(high_avail);
+		collection->server_info[UID(3, 0)]->setMetrics(high_avail);
+		collection->server_info[UID(4, 0)]->setMetrics(high_avail);
+
+		collection->wigglingId = UID(4, 0);
+		collection->pauseWiggle = makeReference<AsyncVar<bool>>(true);
+
+		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
+
+		state GetTeamRequest req(
+		    WantNewServers::True, WantTrueBest::True, PreferLowerUtilization::True, TeamMustHaveShards::False);
+		req.completeSources = completeSources;
+
+		wait(collection->getTeam(req));
+
+		std::pair<Optional<Reference<IDataDistributionTeam>>, bool> resTeam = req.reply.getFuture().get();
+
+		std::set<UID> expectedServers{ UID(1, 0), UID(2, 0), UID(3, 0) };
+		ASSERT(resTeam.first.present());
+		auto servers = resTeam.first.get()->getServerIDs();
+		const std::set<UID> selectedServers(servers.begin(), servers.end());
+		ASSERT(expectedServers == selectedServers);
 
 		return Void();
 	}
@@ -5705,5 +5758,10 @@ TEST_CASE("/DataDistribution/GetTeam/ServerUtilizationBelowCutoff") {
 
 TEST_CASE("/DataDistribution/GetTeam/ServerUtilizationNearCutoff") {
 	wait(DDTeamCollectionUnitTest::GetTeam_ServerUtilizationNearCutoff());
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/GetTeam/DeprioritizeWigglePausedTeam") {
+	wait(DDTeamCollectionUnitTest::GetTeam_DeprioritizeWigglePausedTeam());
 	return Void();
 }

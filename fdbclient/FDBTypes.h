@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,13 +22,36 @@
 #define FDBCLIENT_FDBTYPES_H
 
 #include <algorithm>
+#include <cinttypes>
 #include <set>
 #include <string>
 #include <vector>
 #include <unordered_set>
+#include <boost/functional/hash.hpp>
 
 #include "flow/Arena.h"
+#include "flow/FastRef.h"
+#include "flow/ProtocolVersion.h"
 #include "flow/flow.h"
+
+enum class TraceFlags : uint8_t { unsampled = 0b00000000, sampled = 0b00000001 };
+
+inline TraceFlags operator&(TraceFlags lhs, TraceFlags rhs) {
+	return static_cast<TraceFlags>(static_cast<std::underlying_type_t<TraceFlags>>(lhs) &
+	                               static_cast<std::underlying_type_t<TraceFlags>>(rhs));
+}
+
+struct SpanContext {
+	UID traceID;
+	uint64_t spanID;
+	TraceFlags m_Flags;
+	SpanContext() : traceID(UID()), spanID(0), m_Flags(TraceFlags::unsampled) {}
+	SpanContext(UID traceID, uint64_t spanID, TraceFlags flags) : traceID(traceID), spanID(spanID), m_Flags(flags) {}
+	SpanContext(UID traceID, uint64_t spanID) : traceID(traceID), spanID(spanID), m_Flags(TraceFlags::unsampled) {}
+	SpanContext(Arena arena, const SpanContext& span)
+	  : traceID(span.traceID), spanID(span.spanID), m_Flags(span.m_Flags) {}
+	bool isSampled() const { return (m_Flags & TraceFlags::sampled) == TraceFlags::sampled; }
+};
 
 typedef int64_t Version;
 typedef uint64_t LogEpoch;
@@ -72,6 +95,8 @@ struct Tag {
 	bool operator<(const Tag& r) const { return locality < r.locality || (locality == r.locality && id < r.id); }
 
 	int toTagDataIndex() const { return locality >= 0 ? 2 * locality : 1 - (2 * locality); }
+
+	bool isNonPrimaryTLogType() const { return locality < 0; }
 
 	std::string toString() const { return format("%d:%d", locality, id); }
 
@@ -125,6 +150,18 @@ template <>
 struct Traceable<Tag> : std::true_type {
 	static std::string toString(const Tag& value) { return value.toString(); }
 };
+
+namespace std {
+template <>
+struct hash<Tag> {
+	std::size_t operator()(const Tag& tag) const {
+		std::size_t seed = 0;
+		boost::hash_combine(seed, std::hash<int8_t>{}(tag.locality));
+		boost::hash_combine(seed, std::hash<uint16_t>{}(tag.id));
+		return seed;
+	}
+};
+} // namespace std
 
 static const Tag invalidTag{ tagLocalitySpecial, 0 };
 static const Tag txsTag{ tagLocalitySpecial, 1 };
@@ -475,6 +512,7 @@ using KeyRange = Standalone<KeyRangeRef>;
 using KeyValue = Standalone<KeyValueRef>;
 using KeySelector = Standalone<struct KeySelectorRef>;
 using RangeResult = Standalone<struct RangeResultRef>;
+using MappedRangeResult = Standalone<struct MappedRangeResultRef>;
 
 enum { invalidVersion = -1, latestVersion = -2, MAX_VERSION = std::numeric_limits<int64_t>::max() };
 
@@ -546,6 +584,7 @@ public:
 	KeyRef getKey() const { return key; }
 
 	void setKey(KeyRef const& key);
+	void setKeyUnlimited(KeyRef const& key);
 
 	std::string toString() const;
 
@@ -593,6 +632,11 @@ inline bool selectorInRange(KeySelectorRef const& sel, KeyRangeRef const& range)
 	return sel.getKey() >= range.begin && (sel.isBackward() ? sel.getKey() <= range.end : sel.getKey() < range.end);
 }
 
+template <>
+struct Traceable<KeySelectorRef> : std::true_type {
+	static std::string toString(const KeySelectorRef& value) { return value.toString(); }
+};
+
 template <class Val>
 struct KeyRangeWith : KeyRange {
 	Val value;
@@ -610,6 +654,8 @@ KeyRangeWith<Val> keyRangeWith(const KeyRangeRef& range, const Val& value) {
 	return KeyRangeWith<Val>(range, value);
 }
 
+struct MappedKeyValueRef;
+
 struct GetRangeLimits {
 	enum { ROW_LIMIT_UNLIMITED = -1, BYTE_LIMIT_UNLIMITED = -1 };
 
@@ -623,6 +669,8 @@ struct GetRangeLimits {
 
 	void decrement(VectorRef<KeyValueRef> const& data);
 	void decrement(KeyValueRef const& data);
+	void decrement(VectorRef<MappedKeyValueRef> const& data);
+	void decrement(MappedKeyValueRef const& data);
 
 	// True if either the row or byte limit has been reached
 	bool isReached();
@@ -641,11 +689,12 @@ struct GetRangeLimits {
 };
 
 struct RangeResultRef : VectorRef<KeyValueRef> {
+	constexpr static FileIdentifier file_identifier = 3985192;
 	bool more; // True if (but not necessarily only if) values remain in the *key* range requested (possibly beyond the
 	           // limits requested) False implies that no such values remain
 	Optional<KeyRef> readThrough; // Only present when 'more' is true. When present, this value represent the end (or
 	                              // beginning if reverse) of the range which was read to produce these results. This is
-	                              // guarenteed to be less than the requested range.
+	                              // guaranteed to be less than the requested range.
 	bool readToBegin;
 	bool readThroughEnd;
 
@@ -683,6 +732,114 @@ struct Traceable<RangeResultRef> : std::true_type {
 	}
 };
 
+// Similar to KeyValueRef, but result can be empty.
+struct GetValueReqAndResultRef {
+	KeyRef key;
+	Optional<ValueRef> result;
+
+	GetValueReqAndResultRef() {}
+	GetValueReqAndResultRef(Arena& a, const GetValueReqAndResultRef& copyFrom)
+	  : key(a, copyFrom.key), result(a, copyFrom.result) {}
+
+	bool operator==(const GetValueReqAndResultRef& rhs) const { return key == rhs.key && result == rhs.result; }
+	bool operator!=(const GetValueReqAndResultRef& rhs) const { return !(rhs == *this); }
+	int expectedSize() const { return key.expectedSize() + result.expectedSize(); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, key, result);
+	}
+};
+
+struct GetRangeReqAndResultRef {
+	KeySelectorRef begin, end;
+	RangeResultRef result;
+
+	GetRangeReqAndResultRef() {}
+	//	KeyValueRef(const KeyRef& key, const ValueRef& value) : key(key), value(value) {}
+	GetRangeReqAndResultRef(Arena& a, const GetRangeReqAndResultRef& copyFrom)
+	  : begin(a, copyFrom.begin), end(a, copyFrom.end), result(a, copyFrom.result) {}
+
+	bool operator==(const GetRangeReqAndResultRef& rhs) const {
+		return begin == rhs.begin && end == rhs.end && result == rhs.result;
+	}
+	bool operator!=(const GetRangeReqAndResultRef& rhs) const { return !(rhs == *this); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, begin, end, result);
+	}
+};
+
+using MappedReqAndResultRef = std::variant<GetValueReqAndResultRef, GetRangeReqAndResultRef>;
+
+struct MappedKeyValueRef : KeyValueRef {
+	// Save the original key value at the base (KeyValueRef).
+
+	MappedReqAndResultRef reqAndResult;
+
+	MappedKeyValueRef() = default;
+	MappedKeyValueRef(Arena& a, const MappedKeyValueRef& copyFrom) : KeyValueRef(a, copyFrom) {
+		const auto& reqAndResultCopyFrom = copyFrom.reqAndResult;
+		if (std::holds_alternative<GetValueReqAndResultRef>(reqAndResultCopyFrom)) {
+			auto getValue = std::get<GetValueReqAndResultRef>(reqAndResultCopyFrom);
+			reqAndResult = GetValueReqAndResultRef(a, getValue);
+		} else if (std::holds_alternative<GetRangeReqAndResultRef>(reqAndResultCopyFrom)) {
+			auto getRange = std::get<GetRangeReqAndResultRef>(reqAndResultCopyFrom);
+			reqAndResult = GetRangeReqAndResultRef(a, getRange);
+		} else {
+			throw internal_error();
+		}
+	}
+
+	bool operator==(const MappedKeyValueRef& rhs) const {
+		return static_cast<const KeyValueRef&>(*this) == static_cast<const KeyValueRef&>(rhs) &&
+		       reqAndResult == rhs.reqAndResult;
+	}
+	bool operator!=(const MappedKeyValueRef& rhs) const { return !(rhs == *this); }
+
+	// It relies on the base to provide the expectedSize. TODO: Consider add the underlying request and key values into
+	// expected size?
+	//	int expectedSize() const { return ((KeyValueRef*)this)->expectedSisze() + reqA }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, ((KeyValueRef&)*this), reqAndResult);
+	}
+};
+
+struct MappedRangeResultRef : VectorRef<MappedKeyValueRef> {
+	// Additional information on range result. See comments on RangeResultRef.
+	bool more;
+	Optional<KeyRef> readThrough;
+	bool readToBegin;
+	bool readThroughEnd;
+
+	MappedRangeResultRef() : more(false), readToBegin(false), readThroughEnd(false) {}
+	MappedRangeResultRef(Arena& p, const MappedRangeResultRef& toCopy)
+	  : VectorRef<MappedKeyValueRef>(p, toCopy), more(toCopy.more),
+	    readThrough(toCopy.readThrough.present() ? KeyRef(p, toCopy.readThrough.get()) : Optional<KeyRef>()),
+	    readToBegin(toCopy.readToBegin), readThroughEnd(toCopy.readThroughEnd) {}
+	MappedRangeResultRef(const VectorRef<MappedKeyValueRef>& value,
+	                     bool more,
+	                     Optional<KeyRef> readThrough = Optional<KeyRef>())
+	  : VectorRef<MappedKeyValueRef>(value), more(more), readThrough(readThrough), readToBegin(false),
+	    readThroughEnd(false) {}
+	MappedRangeResultRef(bool readToBegin, bool readThroughEnd)
+	  : more(false), readToBegin(readToBegin), readThroughEnd(readThroughEnd) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, ((VectorRef<MappedKeyValueRef>&)*this), more, readThrough, readToBegin, readThroughEnd);
+	}
+
+	std::string toString() const {
+		return "more:" + std::to_string(more) +
+		       " readThrough:" + (readThrough.present() ? readThrough.get().toString() : "[unset]") +
+		       " readToBegin:" + std::to_string(readToBegin) + " readThroughEnd:" + std::to_string(readThroughEnd);
+	}
+};
+
 struct KeyValueStoreType {
 	constexpr static FileIdentifier file_identifier = 6560359;
 	// These enumerated values are stored in the database configuration, so should NEVER be changed.
@@ -712,7 +869,7 @@ struct KeyValueStoreType {
 		case SSD_REDWOOD_V1:
 			return "ssd-redwood-1-experimental";
 		case SSD_ROCKSDB_V1:
-			return "ssd-rocksdb-experimental";
+			return "ssd-rocksdb-v1";
 		case MEMORY:
 			return "memory";
 		case MEMORY_RADIXTREE:
@@ -839,6 +996,7 @@ struct TLogSpillType {
 
 // Contains the amount of free and total space for a storage server, in bytes
 struct StorageBytes {
+	constexpr static FileIdentifier file_identifier = 3928581;
 	// Free space on the filesystem
 	int64_t free;
 	// Total space on the filesystem
@@ -1175,6 +1333,65 @@ struct StorageMigrationType {
 	uint32_t type;
 };
 
+struct TenantMode {
+	// These enumerated values are stored in the database configuration, so can NEVER be changed.  Only add new ones
+	// just before END.
+	// Note: OPTIONAL_TENANT is not named OPTIONAL because of a collision with a Windows macro.
+	enum Mode { DISABLED = 0, OPTIONAL_TENANT = 1, REQUIRED = 2, END = 3 };
+
+	TenantMode() : mode(DISABLED) {}
+	TenantMode(Mode mode) : mode(mode) {
+		if ((uint32_t)mode >= END) {
+			this->mode = DISABLED;
+		}
+	}
+	operator Mode() const { return Mode(mode); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, mode);
+	}
+
+	std::string toString() const {
+		switch (mode) {
+		case DISABLED:
+			return "disabled";
+		case OPTIONAL_TENANT:
+			return "optional_experimental";
+		case REQUIRED:
+			return "required_experimental";
+		default:
+			ASSERT(false);
+		}
+		return "";
+	}
+
+	uint32_t mode;
+};
+struct GRVCacheSpace {
+	Version cachedReadVersion;
+	double lastGrvTime;
+
+	GRVCacheSpace() : cachedReadVersion(Version(0)), lastGrvTime(0.0) {}
+};
+
+// This structure can be extended in the future to include additional features that required a shared state
+struct DatabaseSharedState {
+	// These two members should always be listed first, in this order.
+	// This is to preserve compatibility with future updates of this shared state
+	// and ensures the MVC does not attempt to access methods incorrectly
+	// due to newly introduced offsets in the structure.
+	const ProtocolVersion protocolVersion;
+	void (*delRef)(DatabaseSharedState*);
+
+	Mutex mutexLock;
+	GRVCacheSpace grvCacheSpace;
+	std::atomic<int> refCount;
+
+	DatabaseSharedState()
+	  : protocolVersion(currentProtocolVersion), mutexLock(Mutex()), grvCacheSpace(GRVCacheSpace()), refCount(0) {}
+};
+
 inline bool isValidPerpetualStorageWiggleLocality(std::string locality) {
 	int pos = locality.find(':');
 	// locality should be either 0 or in the format '<non_empty_string>:<non_empty_string>'
@@ -1187,7 +1404,12 @@ struct ReadBlobGranuleContext {
 	void* userContext;
 
 	// Returns a unique id for the load. Asynchronous to support queueing multiple in parallel.
-	int64_t (*start_load_f)(const char* filename, int filenameLength, int64_t offset, int64_t length, void* context);
+	int64_t (*start_load_f)(const char* filename,
+	                        int filenameLength,
+	                        int64_t offset,
+	                        int64_t length,
+	                        int64_t fullFileLength,
+	                        void* context);
 
 	// Returns data for the load. Pass the loadId returned by start_load_f
 	uint8_t* (*get_load_f)(int64_t loadId, void* context);
@@ -1198,17 +1420,20 @@ struct ReadBlobGranuleContext {
 	// Set this to true for testing if you don't want to read the granule files,
 	// just do the request to the blob workers
 	bool debugNoMaterialize;
+
+	// number of granules to load in parallel (default 1)
+	int granuleParallelism = 1;
 };
 
 // Store metadata associated with each storage server. Now it only contains data be used in perpetual storage wiggle.
 struct StorageMetadataType {
 	constexpr static FileIdentifier file_identifier = 732123;
-	// when the SS is initialized
-	uint64_t createdTime; // comes from currentTime()
+	// when the SS is initialized, in epoch seconds, comes from currentTime()
+	double createdTime;
 	StorageMetadataType() : createdTime(0) {}
 	StorageMetadataType(uint64_t t) : createdTime(t) {}
 
-	static uint64_t currentTime() { return g_network->timer() * 1e9; }
+	static double currentTime() { return g_network->timer(); }
 
 	// To change this serialization, ProtocolVersion::StorageMetadata must be updated, and downgrades need
 	// to be considered

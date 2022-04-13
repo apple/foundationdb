@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2020 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,14 +18,17 @@
  * limitations under the License.
  */
 
+#include "fdbclient/Knobs.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/TransactionLineage.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/LogSystemDiskQueueAdapter.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/GrvProxyInterface.h"
+#include "fdbclient/VersionVector.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
+#include "fdbrpc/sim_validation.h"
 #include "flow/flow.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -44,6 +47,11 @@ struct GrvProxyStats {
 	// how much of the GRV requests queue was processed in one attempt to hand out read version.
 	double percentageOfDefaultGRVQueueProcessed;
 	double percentageOfBatchGRVQueueProcessed;
+
+	bool lastBatchQueueThrottled;
+	bool lastDefaultQueueThrottled;
+	double batchThrottleStartTime;
+	double defaultThrottleStartTime;
 
 	LatencySample defaultTxnGRVTimeInQueue;
 	LatencySample batchTxnGRVTimeInQueue;
@@ -97,10 +105,12 @@ struct GrvProxyStats {
 	    updatesFromRatekeeper("UpdatesFromRatekeeper", cc), leaseTimeouts("LeaseTimeouts", cc), systemGRVQueueSize(0),
 	    defaultGRVQueueSize(0), batchGRVQueueSize(0), transactionRateAllowed(0), batchTransactionRateAllowed(0),
 	    transactionLimit(0), batchTransactionLimit(0), percentageOfDefaultGRVQueueProcessed(0),
-	    percentageOfBatchGRVQueueProcessed(0), defaultTxnGRVTimeInQueue("DefaultTxnGRVTimeInQueue",
-	                                                                    id,
-	                                                                    SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                                                                    SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	    percentageOfBatchGRVQueueProcessed(0), lastBatchQueueThrottled(false), lastDefaultQueueThrottled(false),
+	    batchThrottleStartTime(0.0), defaultThrottleStartTime(0.0),
+	    defaultTxnGRVTimeInQueue("DefaultTxnGRVTimeInQueue",
+	                             id,
+	                             SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                             SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
 	    batchTxnGRVTimeInQueue("BatchTxnGRVTimeInQueue",
 	                           id,
 	                           SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
@@ -229,7 +239,7 @@ struct GrvProxyData {
 
 	GrvProxyStats stats;
 	MasterInterface master;
-	RequestStream<GetReadVersionRequest> getConsistentReadVersion;
+	PublicRequestStream<GetReadVersionRequest> getConsistentReadVersion;
 	Reference<ILogSystem> logSystem;
 
 	Database cx;
@@ -238,10 +248,14 @@ struct GrvProxyData {
 	Optional<LatencyBandConfig> latencyBandConfig;
 	double lastStartCommit;
 	double lastCommitLatency;
+	LatencySample versionVectorSizeOnGRVReply;
 	int updateCommitRequests;
 	NotifiedDouble lastCommitTime;
 
 	Version minKnownCommittedVersion; // we should ask master for this version.
+
+	// Cache of the latest commit versions of storage servers.
+	VersionVector ssVersionVectorCache;
 
 	void updateLatencyBandConfig(Optional<LatencyBandConfig> newLatencyBandConfig) {
 		if (newLatencyBandConfig.present() != latencyBandConfig.present() ||
@@ -261,12 +275,16 @@ struct GrvProxyData {
 
 	GrvProxyData(UID dbgid,
 	             MasterInterface master,
-	             RequestStream<GetReadVersionRequest> getConsistentReadVersion,
+	             PublicRequestStream<GetReadVersionRequest> getConsistentReadVersion,
 	             Reference<AsyncVar<ServerDBInfo> const> db)
 	  : dbgid(dbgid), stats(dbgid), master(master), getConsistentReadVersion(getConsistentReadVersion),
 	    cx(openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True)), db(db), lastStartCommit(0),
-	    lastCommitLatency(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION), updateCommitRequests(0), lastCommitTime(0),
-	    minKnownCommittedVersion(invalidVersion) {}
+	    lastCommitLatency(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION),
+	    versionVectorSizeOnGRVReply("VersionVectorSizeOnGRVReply",
+	                                dbgid,
+	                                SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                                SERVER_KNOBS->LATENCY_SAMPLE_SIZE),
+	    updateCommitRequests(0), lastCommitTime(0), minKnownCommittedVersion(invalidVersion) {}
 };
 
 ACTOR Future<Void> healthMetricsRequestServer(GrvProxyInterface grvProxy,
@@ -543,7 +561,8 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(SpanID parentSpan,
 	state double grvStart = now();
 	state Future<GetRawCommittedVersionReply> replyFromMasterFuture;
 	replyFromMasterFuture = grvProxyData->master.getLiveCommittedVersion.getReply(
-	    GetRawCommittedVersionRequest(span.context, debugID), TaskPriority::GetLiveCommittedVersionReply);
+	    GetRawCommittedVersionRequest(span.context, debugID, grvProxyData->ssVersionVectorCache.getMaxVersion()),
+	    TaskPriority::GetLiveCommittedVersionReply);
 
 	if (!SERVER_KNOBS->ALWAYS_CAUSAL_READ_RISKY && !(flags & GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY)) {
 		wait(updateLastCommit(grvProxyData, debugID));
@@ -562,7 +581,8 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(SpanID parentSpan,
 	GetRawCommittedVersionReply repFromMaster = wait(replyFromMasterFuture);
 	grvProxyData->minKnownCommittedVersion =
 	    std::max(grvProxyData->minKnownCommittedVersion, repFromMaster.minKnownCommittedVersion);
-
+	// TODO add to "status json"
+	grvProxyData->ssVersionVectorCache.applyDelta(repFromMaster.ssVersionVectorDelta);
 	grvProxyData->stats.grvGetCommittedVersionRpcDist->sampleSeconds(now() - grvConfirmEpochLive);
 	GetReadVersionReply rep;
 	rep.version = repFromMaster.version;
@@ -589,11 +609,12 @@ ACTOR Future<GetReadVersionReply> getLiveCommittedVersion(SpanID parentSpan,
 	return rep;
 }
 
-// Returns the current read version (or minimum known committed verison if requested),
+// Returns the current read version (or minimum known committed version if requested),
 // to each request in the provided list. Also check if the request should be throttled.
 // Update GRV statistics according to the request's priority.
 ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
                                   std::vector<GetReadVersionRequest> requests,
+                                  GrvProxyData* grvProxyData,
                                   GrvProxyStats* stats,
                                   Version minKnownCommittedVersion,
                                   PrioritizedTransactionTagMap<ClientTagThrottleLimits> throttledTags,
@@ -625,6 +646,9 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
 		}
 		reply.midShardSize = midShardSize;
 		reply.tagThrottleInfo.clear();
+		grvProxyData->ssVersionVectorCache.getDelta(request.maxVersion, reply.ssVersionVectorDelta);
+		grvProxyData->versionVectorSizeOnGRVReply.addMeasurement(reply.ssVersionVectorDelta.size());
+		reply.proxyId = grvProxyData->dbgid;
 
 		if (!request.tags.empty()) {
 			auto& priorityThrottledTags = throttledTags[request.priority];
@@ -647,6 +671,22 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
 			}
 		}
 
+		if (stats->lastBatchQueueThrottled) {
+			// Check if this throttling has been sustained for a certain amount of time to avoid false positives
+			if (now() - stats->batchThrottleStartTime > CLIENT_KNOBS->GRV_SUSTAINED_THROTTLING_THRESHOLD) {
+				reply.rkBatchThrottled = true;
+			}
+		}
+		if (stats->lastDefaultQueueThrottled) {
+			// Check if this throttling has been sustained for a certain amount of time to avoid false positives
+			if (now() - stats->defaultThrottleStartTime > CLIENT_KNOBS->GRV_SUSTAINED_THROTTLING_THRESHOLD) {
+				// Consider the batch queue throttled if the default is throttled
+				// to deal with a potential lull in activity for that priority.
+				// Avoids mistakenly thinking batch is unthrottled while default is still throttled.
+				reply.rkBatchThrottled = true;
+				reply.rkDefaultThrottled = true;
+			}
+		}
 		request.reply.send(reply);
 		++stats->txnRequestOut;
 	}
@@ -838,11 +878,26 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 				grvProxyData->stats.batchTxnGRVTimeInQueue.addMeasurement(currentTime - req.requestTime());
 				--grvProxyData->stats.batchGRVQueueSize;
 			}
-
 			start[req.flags & 1].push_back(std::move(req));
 			static_assert(GetReadVersionRequest::FLAG_CAUSAL_READ_RISKY == 1, "Implementation dependent on flag value");
 			transactionQueue->pop_front();
 			requestsToStart++;
+		}
+		if (!batchQueue.empty()) {
+			if (!grvProxyData->stats.lastBatchQueueThrottled) {
+				grvProxyData->stats.lastBatchQueueThrottled = true;
+				grvProxyData->stats.batchThrottleStartTime = now();
+			}
+		} else {
+			grvProxyData->stats.lastBatchQueueThrottled = false;
+		}
+		if (!defaultQueue.empty()) {
+			if (!grvProxyData->stats.lastDefaultQueueThrottled) {
+				grvProxyData->stats.lastDefaultQueueThrottled = true;
+				grvProxyData->stats.defaultThrottleStartTime = now();
+			}
+		} else {
+			grvProxyData->stats.lastDefaultQueueThrottled = false;
 		}
 
 		if (!systemQueue.empty() || !defaultQueue.empty() || !batchQueue.empty()) {
@@ -896,6 +951,7 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 				                                                                       batchPriTransactionsStarted[i]);
 				addActor.send(sendGrvReplies(readVersionReply,
 				                             start[i],
+				                             grvProxyData,
 				                             &grvProxyData->stats,
 				                             grvProxyData->minKnownCommittedVersion,
 				                             throttledTags,

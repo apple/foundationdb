@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,8 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/PaxosConfigTransaction.h"
 #include "flow/actorcompiler.h" // must be last include
+
+using ConfigTransactionInfo = ModelInterface<ConfigTransactionInterface>;
 
 class CommitQuorum {
 	ActorCollection actors{ false };
@@ -224,10 +226,12 @@ class PaxosConfigTransactionImpl {
 		loop {
 			try {
 				ConfigGeneration generation = wait(self->getGenerationQuorum.getGeneration());
-				// TODO: Load balance
+				state Reference<ConfigTransactionInfo> configNodes(
+				    new ConfigTransactionInfo(self->getGenerationQuorum.getReadReplicas()));
 				ConfigTransactionGetReply reply =
-				    wait(timeoutError(self->getGenerationQuorum.getReadReplicas()[0].get.getReply(
-				                          ConfigTransactionGetRequest{ generation, configKey }),
+				    wait(timeoutError(basicLoadBalance(configNodes,
+				                                       &ConfigTransactionInterface::get,
+				                                       ConfigTransactionGetRequest{ generation, configKey }),
 				                      CLIENT_KNOBS->GET_KNOB_TIMEOUT));
 				if (reply.value.present()) {
 					return reply.value.get().toValue();
@@ -245,10 +249,12 @@ class PaxosConfigTransactionImpl {
 
 	ACTOR static Future<RangeResult> getConfigClasses(PaxosConfigTransactionImpl* self) {
 		ConfigGeneration generation = wait(self->getGenerationQuorum.getGeneration());
-		// TODO: Load balance
+		state Reference<ConfigTransactionInfo> configNodes(
+		    new ConfigTransactionInfo(self->getGenerationQuorum.getReadReplicas()));
 		ConfigTransactionGetConfigClassesReply reply =
-		    wait(retryBrokenPromise(self->getGenerationQuorum.getReadReplicas()[0].getClasses,
-		                            ConfigTransactionGetConfigClassesRequest{ generation }));
+		    wait(basicLoadBalance(configNodes,
+		                          &ConfigTransactionInterface::getClasses,
+		                          ConfigTransactionGetConfigClassesRequest{ generation }));
 		RangeResult result;
 		result.reserve(result.arena(), reply.configClasses.size());
 		for (const auto& configClass : reply.configClasses) {
@@ -259,10 +265,12 @@ class PaxosConfigTransactionImpl {
 
 	ACTOR static Future<RangeResult> getKnobs(PaxosConfigTransactionImpl* self, Optional<Key> configClass) {
 		ConfigGeneration generation = wait(self->getGenerationQuorum.getGeneration());
-		// TODO: Load balance
+		state Reference<ConfigTransactionInfo> configNodes(
+		    new ConfigTransactionInfo(self->getGenerationQuorum.getReadReplicas()));
 		ConfigTransactionGetKnobsReply reply =
-		    wait(retryBrokenPromise(self->getGenerationQuorum.getReadReplicas()[0].getKnobs,
-		                            ConfigTransactionGetKnobsRequest{ generation, configClass }));
+		    wait(basicLoadBalance(configNodes,
+		                          &ConfigTransactionInterface::getKnobs,
+		                          ConfigTransactionGetKnobsRequest{ generation, configClass }));
 		RangeResult result;
 		result.reserve(result.arena(), reply.knobNames.size());
 		for (const auto& knobName : reply.knobNames) {
@@ -461,6 +469,6 @@ PaxosConfigTransaction::PaxosConfigTransaction() = default;
 
 PaxosConfigTransaction::~PaxosConfigTransaction() = default;
 
-void PaxosConfigTransaction::setDatabase(Database const& cx) {
+void PaxosConfigTransaction::construct(Database const& cx) {
 	impl = PImpl<PaxosConfigTransactionImpl>::create(cx);
 }

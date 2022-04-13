@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,19 +22,23 @@
 #include <utility>
 #include <vector>
 
-#include "contrib/fmt-8.0.1/include/fmt/format.h"
+#include "contrib/fmt-8.1.1/include/fmt/format.h"
 #include "fdbclient/BlobGranuleReader.actor.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/SystemData.h"
+#include "fdbserver/BlobGranuleValidation.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/genericactors.actor.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-#define BGV_DEBUG false
+#define BGV_DEBUG true
 
 /*
  * This workload is designed to verify the correctness of the blob data produced by the blob workers.
@@ -58,7 +62,11 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	int64_t timeTravelTooOld = 0;
 	int64_t rowsRead = 0;
 	int64_t bytesRead = 0;
+	int64_t purges = 0;
 	std::vector<Future<Void>> clients;
+	bool enablePurging;
+
+	DatabaseConfiguration config;
 
 	Reference<BackupContainerFileSystem> bstore;
 	AsyncVar<Standalone<VectorRef<KeyRangeRef>>> granuleRanges;
@@ -72,6 +80,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		timeTravelLimit = getOption(options, LiteralStringRef("timeTravelLimit"), testDuration);
 		timeTravelBufferSize = getOption(options, LiteralStringRef("timeTravelBufferSize"), 100000000);
 		threads = getOption(options, LiteralStringRef("threads"), 1);
+		enablePurging = getOption(options, LiteralStringRef("enablePurging"), false /*sharedRandomNumber % 2 == 0*/);
 		ASSERT(threads >= 1);
 
 		if (BGV_DEBUG) {
@@ -83,13 +92,13 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 				if (BGV_DEBUG) {
 					printf("Blob Granule Verifier constructing simulated backup container\n");
 				}
-				bstore = BackupContainerFileSystem::openContainerFS("file://fdbblob/");
+				bstore = BackupContainerFileSystem::openContainerFS("file://fdbblob/", {}, {});
 			} else {
 				if (BGV_DEBUG) {
 					printf("Blob Granule Verifier constructing backup container from %s\n",
 					       SERVER_KNOBS->BG_URL.c_str());
 				}
-				bstore = BackupContainerFileSystem::openContainerFS(SERVER_KNOBS->BG_URL);
+				bstore = BackupContainerFileSystem::openContainerFS(SERVER_KNOBS->BG_URL, {}, {});
 				if (BGV_DEBUG) {
 					printf("Blob Granule Verifier constructed backup container\n");
 				}
@@ -126,19 +135,22 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	}
 
 	std::string description() const override { return "BlobGranuleVerifier"; }
-	Future<Void> setup(Database const& cx) override {
-		if (!CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
+	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
+
+	ACTOR Future<Void> _setup(Database cx, BlobGranuleVerifierWorkload* self) {
+		if (!self->doSetup) {
+			wait(delay(0));
 			return Void();
 		}
 
-		if (doSetup) {
-			double initialDelay = deterministicRandom()->random01() * (maxDelay - minDelay) + minDelay;
-			if (BGV_DEBUG) {
-				printf("BGW setup initial delay of %.3f\n", initialDelay);
-			}
-			return setUpBlobRange(cx, delay(initialDelay));
+		wait(success(ManagementAPI::changeConfig(cx.getReference(), "blob_granules_enabled=1", true)));
+
+		double initialDelay = deterministicRandom()->random01() * (self->maxDelay - self->minDelay) + self->minDelay;
+		if (BGV_DEBUG) {
+			printf("BGW setup initial delay of %.3f\n", initialDelay);
 		}
-		return delay(0);
+		wait(self->setUpBlobRange(cx, delay(initialDelay)));
+		return Void();
 	}
 
 	ACTOR Future<Void> findGranules(Database cx, BlobGranuleVerifierWorkload* self) {
@@ -157,139 +169,6 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		}
 	}
 
-	// assumes we can read the whole range in one transaction at a single version
-	ACTOR Future<std::pair<RangeResult, Version>> readFromFDB(Database cx, KeyRange range) {
-		state Version v;
-		state RangeResult out;
-		state Transaction tr(cx);
-		state KeyRange currentRange = range;
-		loop {
-			try {
-				RangeResult r = wait(tr.getRange(currentRange, CLIENT_KNOBS->TOO_MANY));
-				out.arena().dependsOn(r.arena());
-				out.append(out.arena(), r.begin(), r.size());
-				if (r.more) {
-					currentRange = KeyRangeRef(keyAfter(r.back().key), currentRange.end);
-				} else {
-					Version _v = wait(tr.getReadVersion());
-					v = _v;
-					break;
-				}
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
-		return std::pair(out, v);
-	}
-
-	// FIXME: typedef this pair type and/or chunk list
-	ACTOR Future<std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>>>
-	readFromBlob(Database cx, BlobGranuleVerifierWorkload* self, KeyRange range, Version version) {
-		state RangeResult out;
-		state Standalone<VectorRef<BlobGranuleChunkRef>> chunks;
-		state Transaction tr(cx);
-
-		loop {
-			try {
-				Standalone<VectorRef<BlobGranuleChunkRef>> chunks_ = wait(tr.readBlobGranules(range, 0, version));
-				chunks = chunks_;
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
-
-		for (const BlobGranuleChunkRef& chunk : chunks) {
-			RangeResult chunkRows = wait(readBlobGranule(chunk, range, version, self->bstore));
-			out.arena().dependsOn(chunkRows.arena());
-			out.append(out.arena(), chunkRows.begin(), chunkRows.size());
-		}
-		return std::pair(out, chunks);
-	}
-
-	bool compareResult(RangeResult fdb,
-	                   std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> blob,
-	                   KeyRange range,
-	                   Version v,
-	                   bool initialRequest) {
-		bool correct = fdb == blob.first;
-		if (!correct) {
-			mismatches++;
-			TraceEvent ev(SevError, "GranuleMismatch");
-			ev.detail("RangeStart", range.begin)
-			    .detail("RangeEnd", range.end)
-			    .detail("Version", v)
-			    .detail("RequestType", initialRequest ? "RealTime" : "TimeTravel")
-			    .detail("FDBSize", fdb.size())
-			    .detail("BlobSize", blob.first.size());
-
-			if (BGV_DEBUG) {
-				fmt::print("\nMismatch for [{0} - {1}) @ {2} ({3}). F({4}) B({5}):\n",
-				           range.begin.printable(),
-				           range.end.printable(),
-				           v,
-				           initialRequest ? "RealTime" : "TimeTravel",
-				           fdb.size(),
-				           blob.first.size());
-
-				Optional<KeyValueRef> lastCorrect;
-				for (int i = 0; i < std::max(fdb.size(), blob.first.size()); i++) {
-					if (i >= fdb.size() || i >= blob.first.size() || fdb[i] != blob.first[i]) {
-						printf("  Found mismatch at %d.\n", i);
-						if (lastCorrect.present()) {
-							printf("    last correct: %s=%s\n",
-							       lastCorrect.get().key.printable().c_str(),
-							       lastCorrect.get().value.printable().c_str());
-						}
-						if (i < fdb.size()) {
-							printf(
-							    "    FDB: %s=%s\n", fdb[i].key.printable().c_str(), fdb[i].value.printable().c_str());
-						} else {
-							printf("    FDB: <missing>\n");
-						}
-						if (i < blob.first.size()) {
-							printf("    BLB: %s=%s\n",
-							       blob.first[i].key.printable().c_str(),
-							       blob.first[i].value.printable().c_str());
-						} else {
-							printf("    BLB: <missing>\n");
-						}
-						printf("\n");
-						break;
-					}
-					if (i < fdb.size()) {
-						lastCorrect = fdb[i];
-					} else {
-						lastCorrect = blob.first[i];
-					}
-				}
-
-				printf("Chunks:\n");
-				for (auto& chunk : blob.second) {
-					printf("[%s - %s)\n",
-					       chunk.keyRange.begin.printable().c_str(),
-					       chunk.keyRange.end.printable().c_str());
-
-					printf("  SnapshotFile:\n    %s\n",
-					       chunk.snapshotFile.present() ? chunk.snapshotFile.get().toString().c_str() : "<none>");
-					printf("  DeltaFiles:\n");
-					for (auto& df : chunk.deltaFiles) {
-						printf("    %s\n", df.toString().c_str());
-					}
-					printf("  Deltas: (%d)", chunk.newDeltas.size());
-					if (chunk.newDeltas.size() > 0) {
-						fmt::print(" with version [{0} - {1}]",
-						           chunk.newDeltas[0].version,
-						           chunk.newDeltas[chunk.newDeltas.size() - 1].version);
-					}
-					fmt::print("  IncludedVersion: {}\n", chunk.includedVersion);
-				}
-				printf("\n");
-			}
-		}
-		return correct;
-	}
-
 	struct OldRead {
 		KeyRange range;
 		Version v;
@@ -299,11 +178,54 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		OldRead(KeyRange range, Version v, RangeResult oldResult) : range(range), v(v), oldResult(oldResult) {}
 	};
 
-	ACTOR Future<Void> verifyGranules(Database cx, BlobGranuleVerifierWorkload* self) {
+	ACTOR Future<Void> killBlobWorkers(Database cx, BlobGranuleVerifierWorkload* self) {
+		state Transaction tr(cx);
+		state std::set<UID> knownWorkers;
+		state bool first = true;
+		loop {
+			try {
+				RangeResult r = wait(tr.getRange(blobWorkerListKeys, CLIENT_KNOBS->TOO_MANY));
+
+				state std::vector<UID> haltIds;
+				state std::vector<Future<ErrorOr<Void>>> haltRequests;
+				for (auto& it : r) {
+					BlobWorkerInterface interf = decodeBlobWorkerListValue(it.value);
+					if (first) {
+						knownWorkers.insert(interf.id());
+					}
+					if (knownWorkers.count(interf.id())) {
+						haltIds.push_back(interf.id());
+						haltRequests.push_back(interf.haltBlobWorker.tryGetReply(HaltBlobWorkerRequest(1e6, UID())));
+					}
+				}
+				first = false;
+				wait(waitForAll(haltRequests));
+				bool allPresent = true;
+				for (int i = 0; i < haltRequests.size(); i++) {
+					if (haltRequests[i].get().present()) {
+						knownWorkers.erase(haltIds[i]);
+					} else {
+						allPresent = false;
+					}
+				}
+				if (allPresent) {
+					return Void();
+				} else {
+					wait(delay(1.0));
+				}
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+
+	ACTOR Future<Void> verifyGranules(Database cx, BlobGranuleVerifierWorkload* self, bool allowPurging) {
 		state double last = now();
 		state double endTime = last + self->testDuration;
 		state std::map<double, OldRead> timeTravelChecks;
 		state int64_t timeTravelChecksMemory = 0;
+		state Version prevPurgeVersion = -1;
+		state UID dbgId = debugRandom()->randomUniqueID();
 
 		TraceEvent("BlobGranuleVerifierStart");
 		if (BGV_DEBUG) {
@@ -325,15 +247,57 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 					state OldRead oldRead = timeTravelIt->second;
 					timeTravelChecksMemory -= oldRead.oldResult.expectedSize();
 					timeTravelIt = timeTravelChecks.erase(timeTravelIt);
+					if (prevPurgeVersion == -1) {
+						prevPurgeVersion = oldRead.v;
+					}
 					// advance iterator before doing read, so if it gets error we don't retry it
 
 					try {
+						state Version newPurgeVersion = 0;
+						state bool doPurging = allowPurging && deterministicRandom()->random01() < 0.5;
+						if (doPurging) {
+							Version maxPurgeVersion = oldRead.v;
+							for (auto& it : timeTravelChecks) {
+								maxPurgeVersion = std::min(it.second.v, maxPurgeVersion);
+							}
+							if (prevPurgeVersion < maxPurgeVersion) {
+								newPurgeVersion = deterministicRandom()->randomInt64(prevPurgeVersion, maxPurgeVersion);
+								prevPurgeVersion = std::max(prevPurgeVersion, newPurgeVersion);
+								Key purgeKey = wait(cx->purgeBlobGranules(normalKeys, newPurgeVersion, false));
+								wait(cx->waitPurgeGranulesComplete(purgeKey));
+								self->purges++;
+							} else {
+								doPurging = false;
+							}
+						}
 						std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> reReadResult =
-						    wait(self->readFromBlob(cx, self, oldRead.range, oldRead.v));
-						self->compareResult(oldRead.oldResult, reReadResult, oldRead.range, oldRead.v, false);
+						    wait(readFromBlob(cx, self->bstore, oldRead.range, 0, oldRead.v));
+						if (!compareFDBAndBlob(oldRead.oldResult, reReadResult, oldRead.range, oldRead.v, BGV_DEBUG)) {
+							self->mismatches++;
+						}
 						self->timeTravelReads++;
+
+						if (doPurging) {
+							wait(self->killBlobWorkers(cx, self));
+							std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> versionRead =
+							    wait(readFromBlob(cx, self->bstore, oldRead.range, 0, prevPurgeVersion));
+							try {
+								Version minSnapshotVersion = newPurgeVersion;
+								for (auto& it : versionRead.second) {
+									minSnapshotVersion = std::min(minSnapshotVersion, it.snapshotVersion);
+								}
+								std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> versionRead =
+								    wait(readFromBlob(cx, self->bstore, oldRead.range, 0, minSnapshotVersion - 1));
+								ASSERT(false);
+							} catch (Error& e) {
+								if (e.code() == error_code_actor_cancelled) {
+									throw;
+								}
+								ASSERT(e.code() == error_code_blob_granule_transaction_too_old);
+							}
+						}
 					} catch (Error& e) {
-						if (e.code() == error_code_transaction_too_old) {
+						if (e.code() == error_code_blob_granule_transaction_too_old) {
 							self->timeTravelTooOld++;
 							// TODO: add debugging info for when this is a failure
 						}
@@ -344,10 +308,10 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 				int rIndex = deterministicRandom()->randomInt(0, self->granuleRanges.get().size());
 				state KeyRange range = self->granuleRanges.get()[rIndex];
 
-				state std::pair<RangeResult, Version> fdb = wait(self->readFromFDB(cx, range));
+				state std::pair<RangeResult, Version> fdb = wait(readFromFDB(cx, range));
 				std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> blob =
-				    wait(self->readFromBlob(cx, self, range, fdb.second));
-				if (self->compareResult(fdb.first, blob, range, fdb.second, true)) {
+				    wait(readFromBlob(cx, self->bstore, range, 0, fdb.second));
+				if (compareFDBAndBlob(fdb.first, blob, range, fdb.second, BGV_DEBUG)) {
 					// TODO: bias for immediately re-reading to catch rollback cases
 					double reReadTime = currentTime + deterministicRandom()->random01() * self->timeTravelLimit;
 					int memory = fdb.first.expectedSize();
@@ -356,6 +320,8 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 						timeTravelChecks[reReadTime] = OldRead(range, fdb.second, fdb.first);
 						timeTravelChecksMemory += memory;
 					}
+				} else {
+					self->mismatches++;
 				}
 				self->rowsRead += fdb.first.size();
 				self->bytesRead += fdb.first.expectedSize();
@@ -365,8 +331,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 				if (e.code() == error_code_operation_cancelled) {
 					throw;
 				}
-				if (e.code() != error_code_transaction_too_old && e.code() != error_code_wrong_shard_server &&
-				    BGV_DEBUG) {
+				if (e.code() != error_code_blob_granule_transaction_too_old && BGV_DEBUG) {
 					printf("BGVerifier got unexpected error %s\n", e.name());
 				}
 				self->errors++;
@@ -377,32 +342,65 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	}
 
 	Future<Void> start(Database const& cx) override {
-		if (!CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
-			return Void();
-		}
-
 		clients.reserve(threads + 1);
 		clients.push_back(timeout(findGranules(cx, this), testDuration, Void()));
-		for (int i = 0; i < threads; i++) {
+		if (enablePurging && clientId == 0) {
 			clients.push_back(
-			    timeout(reportErrors(verifyGranules(cx, this), "BlobGranuleVerifier"), testDuration, Void()));
+			    timeout(reportErrors(verifyGranules(cx, this, true), "BlobGranuleVerifier"), testDuration, Void()));
+		} else if (!enablePurging) {
+			for (int i = 0; i < threads; i++) {
+				clients.push_back(timeout(
+				    reportErrors(verifyGranules(cx, this, false), "BlobGranuleVerifier"), testDuration, Void()));
+			}
 		}
 		return delay(testDuration);
+	}
+
+	// handle retries + errors
+	// It's ok to reset the transaction here because its read version is only used for reading the granule mapping from
+	// the system keyspace
+	ACTOR Future<Version> doGrv(Transaction* tr) {
+		loop {
+			try {
+				Version readVersion = wait(tr->getReadVersion());
+				return readVersion;
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
+		}
 	}
 
 	ACTOR Future<bool> _check(Database cx, BlobGranuleVerifierWorkload* self) {
 		// check error counts, and do an availability check at the end
 
 		state Transaction tr(cx);
-		state Version readVersion = wait(tr.getReadVersion());
+		state Version readVersion = wait(self->doGrv(&tr));
+		state Version startReadVersion = readVersion;
 		state int checks = 0;
 
 		state KeyRange last;
 		state bool availabilityPassed = true;
-		state Standalone<VectorRef<KeyRangeRef>> allRanges = self->granuleRanges.get();
+
+		state Standalone<VectorRef<KeyRangeRef>> allRanges;
+		if (self->granuleRanges.get().empty()) {
+			if (BGV_DEBUG) {
+				fmt::print("Waiting to get granule ranges for check\n");
+			}
+			state Future<Void> rangeFetcher = self->findGranules(cx, self);
+			loop {
+				wait(self->granuleRanges.onChange());
+				if (!self->granuleRanges.get().empty()) {
+					break;
+				}
+			}
+			rangeFetcher.cancel();
+			if (BGV_DEBUG) {
+				fmt::print("Got granule ranges for check\n");
+			}
+		}
+		allRanges = self->granuleRanges.get();
 		for (auto& range : allRanges) {
 			state KeyRange r = range;
-			state PromiseStream<Standalone<BlobGranuleChunkRef>> chunkStream;
 			if (BGV_DEBUG) {
 				fmt::print("Final availability check [{0} - {1}) @ {2}\n",
 				           r.begin.printable(),
@@ -412,18 +410,32 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 
 			try {
 				loop {
-					tr.reset();
 					try {
 						Standalone<VectorRef<BlobGranuleChunkRef>> chunks =
 						    wait(tr.readBlobGranules(r, 0, readVersion));
 						ASSERT(chunks.size() > 0);
 						last = chunks.back().keyRange;
 						checks += chunks.size();
+
+						break;
 					} catch (Error& e) {
-						wait(tr.onError(e));
+						// it's possible for blob granules to never get opened for the entire test due to fault
+						// injection. If we get blob_granule_transaction_too_old, for the latest read version, the
+						// granule still needs to open. Wait for that to happen at a higher read version.
+						if (e.code() == error_code_blob_granule_transaction_too_old) {
+							wait(delay(1.0));
+							tr.reset();
+							Version rv = wait(self->doGrv(&tr));
+							readVersion = rv;
+						} else {
+							wait(tr.onError(e));
+						}
 					}
 				}
 			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					throw;
+				}
 				if (e.code() == error_code_end_of_stream) {
 					break;
 				}
@@ -441,7 +453,11 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 				break;
 			}
 		}
-		fmt::print("Blob Granule Verifier finished with:\n");
+		if (BGV_DEBUG && startReadVersion != readVersion) {
+			fmt::print("Availability check updated read version from {0} to {1}\n", startReadVersion, readVersion);
+		}
+		bool result = availabilityPassed && self->mismatches == 0 && (checks > 0) && (self->timeTravelTooOld == 0);
+		fmt::print("Blob Granule Verifier {0} {1}:\n", self->clientId, result ? "passed" : "failed");
 		fmt::print("  {} successful final granule checks\n", checks);
 		fmt::print("  {} failed final granule checks\n", availabilityPassed ? 0 : 1);
 		fmt::print("  {} mismatches\n", self->mismatches);
@@ -451,18 +467,18 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		fmt::print("  {} time travel reads\n", self->timeTravelReads);
 		fmt::print("  {} rows\n", self->rowsRead);
 		fmt::print("  {} bytes\n", self->bytesRead);
-		// FIXME: add above as details
-		TraceEvent("BlobGranuleVerifierChecked");
-		return availabilityPassed && self->mismatches == 0 && checks > 0 && self->timeTravelTooOld == 0;
+		fmt::print("  {} purges\n", self->purges);
+		// FIXME: add above as details to trace event
+
+		TraceEvent("BlobGranuleVerifierChecked").detail("Result", result);
+
+		// For some reason simulation is still passing when this fails?.. so assert for now
+		ASSERT(result);
+
+		return result;
 	}
 
-	Future<bool> check(Database const& cx) override {
-		if (!CLIENT_KNOBS->ENABLE_BLOB_GRANULES) {
-			return true;
-		}
-
-		return _check(cx, this);
-	}
+	Future<bool> check(Database const& cx) override { return _check(cx, this); }
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 

@@ -74,6 +74,9 @@
 .. |database-sync| replace::
     The convenience methods provided by |database-type| have the same signature as the corresponding methods of ``Transaction``. However, most of the |database-type| methods are fully synchronous. (An exception is the methods for watches.) As a result, the |database-type| methods do not support the use of :ref:`implicit parallelism with futures <developer-guide-programming-with-futures>`.
 
+.. |tenant-blurb1| replace::
+    |tenant-type| represents a FoundationDB tenant. Tenants are optional named transaction domains that can be used to provide multiple disjoint key-spaces to client applications. A transaction created in a tenant will be limited to the keys contained within that tenant, and transactions operating on different tenants can use the same key names without interfering with each other.
+
 .. |keysel-blurb1| replace::
     FoundationDB's lexicographically ordered data model permits finding keys based on their order (for example, finding the first key in the database greater than a given key). Key selectors represent a description of a key in the database that could be resolved to an actual key by |get-key-func| or used directly as the beginning or end of a range in |get-range-func|.
 
@@ -148,7 +151,7 @@
 .. |atomic-versionstamps-tuple-warning-value| replace::
     At this time, versionstamped values are not compatible with the Tuple layer except in Java, Python, and Go. Note that this implies versionstamped values may not be used with the Subspace and Directory layers except in those languages.
 
-.. |api-version| replace:: 710
+.. |api-version| replace:: 720
 
 .. |streaming-mode-blurb1| replace::
     When using |get-range-func| and similar interfaces, API clients can request large ranges of the database to iterate over.  Making such a request doesn't necessarily mean that the client will consume all of the data in the range - sometimes the client doesn't know how far it intends to iterate in advance.  FoundationDB tries to balance latency and bandwidth by requesting data for iteration in batches.

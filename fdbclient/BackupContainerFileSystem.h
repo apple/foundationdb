@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@
 #define FDBCLIENT_BACKUP_CONTAINER_FILESYSTEM_H
 #pragma once
 
-#include "contrib/fmt-8.0.1/include/fmt/format.h"
+#include "contrib/fmt-8.1.1/include/fmt/format.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/FDBTypes.h"
 #include "flow/Trace.h"
@@ -81,9 +81,9 @@ public:
 	Future<bool> exists() override = 0;
 
 	// TODO: refactor this to separate out the "deal with blob store" stuff from the backup business logic
-	static Reference<BackupContainerFileSystem> openContainerFS(
-	    const std::string& url,
-	    const Optional<std::string>& encryptionKeyFileName = {});
+	static Reference<BackupContainerFileSystem> openContainerFS(const std::string& url,
+	                                                            const Optional<std::string>& proxy,
+	                                                            const Optional<std::string>& encryptionKeyFileName);
 
 	// Get a list of fileNames and their sizes in the container under the given path
 	// Although not required, an implementation can avoid traversing unwanted subfolders

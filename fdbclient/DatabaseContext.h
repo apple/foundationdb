@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,10 +29,12 @@
 #include <unordered_map>
 #pragma once
 
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/SpecialKeySpace.actor.h"
+#include "fdbclient/VersionVector.h"
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/MultiInterface.h"
 #include "flow/TDMetric.actor.h"
@@ -107,13 +109,13 @@ public:
 
 	void addReleased(int released) { smoothReleased.addDelta(released); }
 
-	bool expired() { return expiration <= now(); }
+	bool expired() const { return expiration <= now(); }
 
 	void updateChecked() { lastCheck = now(); }
 
-	bool canRecheck() { return lastCheck < now() - CLIENT_KNOBS->TAG_THROTTLE_RECHECK_INTERVAL; }
+	bool canRecheck() const { return lastCheck < now() - CLIENT_KNOBS->TAG_THROTTLE_RECHECK_INTERVAL; }
 
-	double throttleDuration() {
+	double throttleDuration() const {
 		if (expiration <= now()) {
 			return 0.0;
 		}
@@ -133,6 +135,7 @@ public:
 };
 
 struct WatchParameters : public ReferenceCounted<WatchParameters> {
+	const TenantInfo tenant;
 	const Key key;
 	const Optional<Value> value;
 
@@ -143,7 +146,8 @@ struct WatchParameters : public ReferenceCounted<WatchParameters> {
 	const Optional<UID> debugID;
 	const UseProvisionalProxies useProvisionalProxies;
 
-	WatchParameters(Key key,
+	WatchParameters(TenantInfo tenant,
+	                Key key,
 	                Optional<Value> value,
 	                Version version,
 	                TagSet tags,
@@ -151,8 +155,8 @@ struct WatchParameters : public ReferenceCounted<WatchParameters> {
 	                TaskPriority taskID,
 	                Optional<UID> debugID,
 	                UseProvisionalProxies useProvisionalProxies)
-	  : key(key), value(value), version(version), tags(tags), spanID(spanID), taskID(taskID), debugID(debugID),
-	    useProvisionalProxies(useProvisionalProxies) {}
+	  : tenant(tenant), key(key), value(value), version(version), tags(tags), spanID(spanID), taskID(taskID),
+	    debugID(debugID), useProvisionalProxies(useProvisionalProxies) {}
 };
 
 class WatchMetadata : public ReferenceCounted<WatchMetadata> {
@@ -179,6 +183,7 @@ struct ChangeFeedStorageData : ReferenceCounted<ChangeFeedStorageData> {
 	NotifiedVersion version;
 	NotifiedVersion desired;
 	Promise<Void> destroyed;
+	UID interfToken;
 
 	~ChangeFeedStorageData() { destroyed.send(Void()); }
 };
@@ -194,6 +199,10 @@ struct ChangeFeedData : ReferenceCounted<ChangeFeedData> {
 	std::vector<Reference<ChangeFeedStorageData>> storageData;
 	AsyncVar<int> notAtLatest;
 	Promise<Void> refresh;
+	Version maxSeenVersion;
+	Version endVersion = invalidVersion;
+	Version popVersion =
+	    invalidVersion; // like TLog pop version, set by SS and client can check it to see if they missed data
 
 	ChangeFeedData() : notAtLatest(1) {}
 };
@@ -201,6 +210,16 @@ struct ChangeFeedData : ReferenceCounted<ChangeFeedData> {
 struct EndpointFailureInfo {
 	double startTime = 0;
 	double lastRefreshTime = 0;
+};
+
+struct KeyRangeLocationInfo {
+	TenantMapEntry tenantEntry;
+	KeyRange range;
+	Reference<LocationInfo> locations;
+
+	KeyRangeLocationInfo() {}
+	KeyRangeLocationInfo(TenantMapEntry tenantEntry, KeyRange range, Reference<LocationInfo> locations)
+	  : tenantEntry(tenantEntry), range(range), locations(locations) {}
 };
 
 class DatabaseContext : public ReferenceCounted<DatabaseContext>, public FastAllocated<DatabaseContext>, NonCopyable {
@@ -234,17 +253,26 @@ public:
 		                                    lockAware,
 		                                    internal,
 		                                    apiVersion,
-		                                    switchable));
+		                                    switchable,
+		                                    defaultTenant));
 	}
 
-	std::pair<KeyRange, Reference<LocationInfo>> getCachedLocation(const KeyRef&, Reverse isBackward = Reverse::False);
-	bool getCachedLocations(const KeyRangeRef&,
-	                        std::vector<std::pair<KeyRange, Reference<LocationInfo>>>&,
+	Optional<KeyRangeLocationInfo> getCachedLocation(const Optional<TenantName>& tenant,
+	                                                 const KeyRef&,
+	                                                 Reverse isBackward = Reverse::False);
+	bool getCachedLocations(const Optional<TenantName>& tenant,
+	                        const KeyRangeRef&,
+	                        std::vector<KeyRangeLocationInfo>&,
 	                        int limit,
 	                        Reverse reverse);
-	Reference<LocationInfo> setCachedLocation(const KeyRangeRef&, const std::vector<struct StorageServerInterface>&);
-	void invalidateCache(const KeyRef&, Reverse isBackward = Reverse::False);
-	void invalidateCache(const KeyRangeRef&);
+	void cacheTenant(const TenantName& tenant, const TenantMapEntry& tenantEntry);
+	Reference<LocationInfo> setCachedLocation(const Optional<TenantName>& tenant,
+	                                          const TenantMapEntry& tenantEntry,
+	                                          const KeyRangeRef&,
+	                                          const std::vector<struct StorageServerInterface>&);
+	void invalidateCachedTenant(const TenantNameRef& tenant);
+	void invalidateCache(const KeyRef& tenantPrefix, const KeyRef& key, Reverse isBackward = Reverse::False);
+	void invalidateCache(const KeyRef& tenantPrefix, const KeyRangeRef& keys);
 
 	// Records that `endpoint` is failed on a healthy server.
 	void setFailedEndpointOnHealthyServer(const Endpoint& endpoint);
@@ -261,6 +289,7 @@ public:
 	Reference<CommitProxyInfo> getCommitProxies(UseProvisionalProxies useProvisionalProxies);
 	Future<Reference<CommitProxyInfo>> getCommitProxiesFuture(UseProvisionalProxies useProvisionalProxies);
 	Reference<GrvProxyInfo> getGrvProxies(UseProvisionalProxies useProvisionalProxies);
+	bool isCurrentGrvProxy(UID proxyId) const;
 	Future<Void> onProxiesChanged() const;
 	Future<HealthMetrics> getHealthMetrics(bool detailed);
 	// Pass a negative value for `shardLimit` to indicate no limit on the shard number.
@@ -271,6 +300,10 @@ public:
 	                                                                    StorageMetrics const& permittedError,
 	                                                                    int shardLimit,
 	                                                                    int expectedShardCount);
+	Future<Void> splitStorageMetricsStream(PromiseStream<Key> const& resultsStream,
+	                                       KeyRange const& keys,
+	                                       StorageMetrics const& limit,
+	                                       StorageMetrics const& estimated);
 	Future<Standalone<VectorRef<KeyRef>>> splitStorageMetrics(KeyRange const& keys,
 	                                                          StorageMetrics const& limit,
 	                                                          StorageMetrics const& estimated);
@@ -287,9 +320,9 @@ public:
 	void removeWatch();
 
 	// watch map operations
-	Reference<WatchMetadata> getWatchMetadata(KeyRef key) const;
-	Key setWatchMetadata(Reference<WatchMetadata> metadata);
-	void deleteWatchMetadata(KeyRef key);
+	Reference<WatchMetadata> getWatchMetadata(int64_t tenantId, KeyRef key) const;
+	void setWatchMetadata(Reference<WatchMetadata> metadata);
+	void deleteWatchMetadata(int64_t tenant, KeyRef key);
 	void clearWatchMetadata();
 
 	void setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value);
@@ -334,10 +367,15 @@ public:
 	                                 Key rangeID,
 	                                 Version begin = 0,
 	                                 Version end = std::numeric_limits<Version>::max(),
-	                                 KeyRange range = allKeys);
+	                                 KeyRange range = allKeys,
+	                                 int replyBufferSize = -1,
+	                                 bool canReadPopped = true);
 
 	Future<std::vector<OverlappingChangeFeedEntry>> getOverlappingChangeFeeds(KeyRangeRef ranges, Version minVersion);
 	Future<Void> popChangeFeedMutations(Key rangeID, Version version);
+
+	Future<Key> purgeBlobGranules(KeyRange keyRange, Version purgeVersion, bool force = false);
+	Future<Void> waitPurgeGranulesComplete(Key purgeKey);
 
 	// private:
 	explicit DatabaseContext(Reference<AsyncVar<Reference<IClusterConnectionRecord>>> connectionRecord,
@@ -350,7 +388,8 @@ public:
 	                         LockAware,
 	                         IsInternal = IsInternal::True,
 	                         int apiVersion = Database::API_VERSION_LATEST,
-	                         IsSwitchable = IsSwitchable::False);
+	                         IsSwitchable = IsSwitchable::False,
+	                         Optional<TenantName> defaultTenant = Optional<TenantName>());
 
 	explicit DatabaseContext(const Error& err);
 
@@ -363,6 +402,7 @@ public:
 	Future<Void> monitorTssInfoChange;
 	Future<Void> tssMismatchHandler;
 	PromiseStream<std::pair<UID, std::vector<DetailedTSSMismatch>>> tssMismatchStream;
+	Future<Void> grvUpdateHandler;
 	Reference<CommitProxyInfo> commitProxies;
 	Reference<GrvProxyInfo> grvProxies;
 	bool proxyProvisional; // Provisional commit proxy and grv proxy are used at the same time.
@@ -370,6 +410,10 @@ public:
 	LocalityData clientLocality;
 	QueueModel queueModel;
 	EnableLocalityLoadBalance enableLocalityLoadBalance{ EnableLocalityLoadBalance::False };
+
+	// The tenant used when none is specified for a transaction. Ordinarily this is unspecified, in which case the raw
+	// key-space is used.
+	Optional<TenantName> defaultTenant;
 
 	struct VersionRequest {
 		SpanID spanContext;
@@ -406,8 +450,10 @@ public:
 
 	// Cache of location information
 	int locationCacheSize;
+	int tenantCacheSize;
 	CoalescedKeyRangeMap<Reference<LocationInfo>> locationCache;
 	std::unordered_map<Endpoint, EndpointFailureInfo> failedEndpointsOnHealthyServersInfo;
+	std::unordered_map<TenantName, TenantMapEntry> tenantCache;
 
 	std::map<UID, StorageServerInfo*> server_interf;
 	std::map<UID, BlobWorkerInterface> blobWorker_interf; // blob workers don't change endpoints for the same ID
@@ -421,6 +467,12 @@ public:
 	std::unordered_map<UID, Reference<ChangeFeedStorageData>> changeFeedUpdaters;
 
 	Reference<ChangeFeedStorageData> getStorageData(StorageServerInterface interf);
+
+	// map from ssid -> ss tag
+	// @note this map allows the client to identify the latest commit versions
+	// of storage servers (note that "ssVersionVectorCache" identifies storage
+	// servers by their tags).
+	std::unordered_map<UID, Tag> ssidTagMapping;
 
 	UID dbId;
 	IsInternal internal; // Only contexts created through the C client and fdbcli are non-internal
@@ -445,7 +497,7 @@ public:
 	Counter transactionGetKeyRequests;
 	Counter transactionGetValueRequests;
 	Counter transactionGetRangeRequests;
-	Counter transactionGetRangeAndFlatMapRequests;
+	Counter transactionGetMappedRangeRequests;
 	Counter transactionGetRangeStreamRequests;
 	Counter transactionWatchRequests;
 	Counter transactionGetAddressesForKeyRequests;
@@ -472,18 +524,39 @@ public:
 	Counter transactionsExpensiveClearCostEstCount;
 	Counter transactionGrvFullBatches;
 	Counter transactionGrvTimedOutBatches;
+	Counter transactionsStaleVersionVectors;
 
 	ContinuousSample<double> latencies, readLatencies, commitLatencies, GRVLatencies, mutationsPerCommit,
-	    bytesPerCommit;
+	    bytesPerCommit, bgLatencies, bgGranulesPerRequest;
 
 	int outstandingWatches;
 	int maxOutstandingWatches;
+
+	// Manage any shared state that may be used by MVC
+	DatabaseSharedState* sharedStatePtr;
+	Future<DatabaseSharedState*> initSharedState();
+	void setSharedState(DatabaseSharedState* p);
+
+	// GRV Cache
+	// Database-level read version cache storing the most recent successful GRV as well as the time it was requested.
+	double lastGrvTime;
+	Version cachedReadVersion;
+	void updateCachedReadVersion(double t, Version v);
+	Version getCachedReadVersion();
+	double getLastGrvTime();
+	double lastRkBatchThrottleTime;
+	double lastRkDefaultThrottleTime;
+	// Cached RVs can be updated through commits, and using cached RVs avoids the proxies altogether
+	// Because our checks for ratekeeper throttling requires communication with the proxies,
+	// we want to track the last time in order to periodically contact the proxy to check for throttling
+	double lastProxyRequestTime;
 
 	int snapshotRywEnabled;
 
 	bool transactionTracingSample;
 	double verifyCausalReadsProp = 0.0;
 	bool blobGranuleNoMaterialize = false;
+	bool anyBlobGranuleRequests = false;
 
 	Future<Void> logger;
 	Future<Void> throttleExpirer;
@@ -528,6 +601,9 @@ public:
 	static bool debugUseTags;
 	static const std::vector<std::string> debugTransactionTagChoices;
 
+	// Cache of the latest commit versions of storage servers.
+	VersionVector ssVersionVectorCache;
+
 	// Adds or updates the specified (SS, TSS) pair in the TSS mapping (if not already present).
 	// Requests to the storage server will be duplicated to the TSS.
 	void addTssMapping(StorageServerInterface const& ssi, StorageServerInterface const& tssi);
@@ -536,6 +612,17 @@ public:
 	// Requests to the storage server will no longer be duplicated to its pair TSS.
 	void removeTssMapping(StorageServerInterface const& ssi);
 
+	// Adds or updates the specified (UID, Tag) pair in the tag mapping.
+	void addSSIdTagMapping(const UID& uid, const Tag& tag);
+
+	// Returns the latest commit versions that mutated the specified storage servers
+	/// @note returns the latest commit version for a storage server only if the latest
+	// commit version of that storage server is below the specified "readVersion".
+	void getLatestCommitVersions(const Reference<LocationInfo>& locationInfo,
+	                             Version readVersion,
+	                             Reference<TransactionState> info,
+	                             VersionVector& latestCommitVersions);
+
 	// used in template functions to create a transaction
 	using TransactionT = ReadYourWritesTransaction;
 	Reference<TransactionT> createTransaction();
@@ -543,7 +630,8 @@ public:
 	EventCacheHolder connectToDatabaseEventCacheHolder;
 
 private:
-	std::unordered_map<Key, Reference<WatchMetadata>> watchMap;
+	std::unordered_map<std::pair<int64_t, Key>, Reference<WatchMetadata>, boost::hash<std::pair<int64_t, Key>>>
+	    watchMap;
 };
 
 #endif
