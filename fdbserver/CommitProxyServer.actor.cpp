@@ -34,7 +34,9 @@
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/ConflictSet.h"
 #include "fdbserver/DataDistributorInterface.h"
+#include "fdbserver/EncryptedMutationMessage.h"
 #include "fdbserver/FDBExecHelper.actor.h"
+#include "fdbserver/GetEncryptCipherKeys.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogSystem.h"
@@ -48,6 +50,7 @@
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
+#include "flow/BlobCipher.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/Knobs.h"
@@ -641,6 +644,9 @@ struct CommitBatchContext {
 	std::set<Tag> writtenTags; // final set tags written to in the batch
 	std::set<Tag> writtenTagsPreResolution; // tags written to in the batch not including any changes from the resolver.
 
+	// Cipher keys to be used to encrypt mutations
+	std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKeys;
+
 	CommitBatchContext(ProxyCommitData*, const std::vector<CommitTransactionRequest>*, const int);
 
 	void setupTraceBatch();
@@ -897,6 +903,29 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 	self->transactionResolverMap.swap(requests.transactionResolverMap);
 	// Used to report conflicting keys
 	self->txReadConflictRangeIndexMap.swap(requests.txReadConflictRangeIndexMap);
+
+	// Fetch cipher keys if needed.
+	state Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> getCipherKeys;
+	if (SERVER_KNOBS->ENABLE_TLOG_ENCRYPTION) {
+		std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainName> encryptDomains = {
+			{ SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME },
+			{ ENCRYPT_HEADER_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME }
+		};
+		for (int t = 0; t < trs.size(); t++) {
+			int64_t tenantId = trs[t].tenantInfo.tenantId;
+			Optional<TenantName> tenantName = trs[t].tenantInfo.name;
+			if (tenantId != TenantInfo::INVALID_TENANT) {
+				if (!tenantName.present()) {
+					TraceEvent(SevWarn, "CommitProxyGetEncryptCipherKeys_MissingTenantName")
+					    .detail("TenantId", tenantId);
+					throw encrypt_domain_name_missing();
+				}
+				encryptDomains[tenantId] = tenantName.get();
+			}
+		}
+		getCipherKeys = getLatestEncryptCipherKeys(pProxyCommitData->db, encryptDomains);
+	}
+
 	self->releaseFuture = releaseResolvingAfter(pProxyCommitData, self->releaseDelay, self->localBatchNumber);
 
 	if (self->localBatchNumber - self->pProxyCommitData->latestLocalCommitBatchLogging.get() >
@@ -920,6 +949,11 @@ ACTOR Future<Void> getResolution(CommitBatchContext* self) {
 	if (self->debugID.present()) {
 		g_traceBatch.addEvent(
 		    "CommitDebug", self->debugID.get().first(), "CommitProxyServer.commitBatch.AfterResolution");
+	}
+
+	if (SERVER_KNOBS->ENABLE_TLOG_ENCRYPTION) {
+		std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKeys = wait(getCipherKeys);
+		self->cipherKeys = cipherKeys;
 	}
 
 	return Void();
@@ -961,6 +995,7 @@ void applyMetadataEffect(CommitBatchContext* self) {
 				                       self->pProxyCommitData->logSystem,
 				                       self->resolution[0].stateMutations[versionIndex][transactionIndex].mutations,
 				                       /* pToCommit= */ nullptr,
+				                       /* pCipherKeys= */ nullptr,
 				                       self->forceRecovery,
 				                       /* version= */ self->commitVersion,
 				                       /* popVersion= */ 0,
@@ -1060,6 +1095,7 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 				                       pProxyCommitData->logSystem,
 				                       trs[t].transaction.mutations,
 				                       SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS ? nullptr : &self->toCommit,
+				                       SERVER_KNOBS->ENABLE_TLOG_ENCRYPTION ? &self->cipherKeys : nullptr,
 				                       self->forceRecovery,
 				                       self->commitVersion,
 				                       self->commitVersion + 1,
@@ -1111,6 +1147,19 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 	return Void();
 }
 
+void writeMutation(CommitBatchContext* self, int64_t tenantId, const MutationRef& mutation) {
+	// TODO: encrypt system keys after support encrypting txnStateStore.
+	if (!SERVER_KNOBS->ENABLE_TLOG_ENCRYPTION) {
+		self->toCommit.writeTypedMessage(mutation);
+		return;
+	}
+	Arena arena;
+	static_assert(TenantInfo::INVALID_TENANT == ENCRYPT_INVALID_DOMAIN_ID);
+	EncryptCipherDomainId domainId =
+	    tenantId == TenantInfo::INVALID_TENANT ? SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID : tenantId;
+	self->toCommit.writeTypedMessage(EncryptedMutationMessage::encrypt(arena, self->cipherKeys, domainId, mutation));
+}
+
 /// This second pass through committed transactions assigns the actual mutations to the appropriate storage servers'
 /// tags
 ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
@@ -1127,6 +1176,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 		state Optional<ClientTrCommitCostEstimation>* trCost = &trs[self->transactionNum].commitCostEstimation;
 		state int mutationNum = 0;
 		state VectorRef<MutationRef>* pMutations = &trs[self->transactionNum].transaction.mutations;
+		state int64_t tenantId = trs[self->transactionNum].tenantInfo.tenantId;
 
 		self->toCommit.addTransactionInfo(trs[self->transactionNum].spanContext);
 
@@ -1184,7 +1234,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				if (pProxyCommitData->cacheInfo[m.param1]) {
 					self->toCommit.addTag(cacheTag);
 				}
-				self->toCommit.writeTypedMessage(m);
+				writeMutation(self, tenantId, m);
 			} else if (m.type == MutationRef::ClearRange) {
 				KeyRangeRef clearRange(KeyRangeRef(m.param1, m.param2));
 				auto ranges = pProxyCommitData->keyInfo.intersectingRanges(clearRange);
@@ -1237,7 +1287,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				if (pProxyCommitData->needsCacheTag(clearRange)) {
 					self->toCommit.addTag(cacheTag);
 				}
-				self->toCommit.writeTypedMessage(m);
+				writeMutation(self, tenantId, m);
 			} else {
 				UNREACHABLE();
 			}
@@ -2297,6 +2347,7 @@ ACTOR Future<Void> processCompleteTransactionStateRequest(TransactionStateResolv
 		                       Reference<ILogSystem>(),
 		                       mutations,
 		                       /* pToCommit= */ nullptr,
+		                       /* pCipherKeys= */ nullptr,
 		                       confChanges,
 		                       /* version= */ 0,
 		                       /* popVersion= */ 0,
@@ -2388,7 +2439,8 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 
 	// Wait until we can load the "real" logsystem, since we don't support switching them currently
 	while (!(masterLifetime.isEqual(commitData.db->get().masterLifetime) &&
-	         commitData.db->get().recoveryState >= RecoveryState::RECOVERY_TRANSACTION)) {
+	         commitData.db->get().recoveryState >= RecoveryState::RECOVERY_TRANSACTION &&
+	         (!SERVER_KNOBS->ENABLE_TLOG_ENCRYPTION || commitData.db->get().encryptKeyProxy.present()))) {
 		//TraceEvent("ProxyInit2", proxy.id()).detail("LSEpoch", db->get().logSystemConfig.epoch).detail("Need", epoch);
 		wait(commitData.db->onChange());
 	}

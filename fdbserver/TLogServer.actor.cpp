@@ -28,7 +28,6 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
-#include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/SpanContextMessage.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/Knobs.h"
