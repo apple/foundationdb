@@ -2211,6 +2211,7 @@ int main(int argc, char* argv[]) {
 
 			f = result;
 		} else if (role == ServerRole::FlowProcess) {
+			auto m = startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId);
 			TraceEvent(SevDebug, "StartingFlowProcess").detail("From", "fdbserver");
 #if defined(__linux__) || defined(__FreeBSD__)
 			prctl(PR_SET_PDEATHSIG, SIGTERM);

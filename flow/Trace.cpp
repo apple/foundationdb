@@ -37,6 +37,7 @@
 #include "flow/EventTypes.actor.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/MetricSample.h"
+#include "flow/network.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -559,6 +560,11 @@ public:
 		universalFields[name] = value;
 	}
 
+	void setLocalAddress(const NetworkAddress& addr) {
+		MutexHolder holder(mutex);
+		this->localAddress = addr;
+	}
+
 	Future<Void> pingWriterThread() {
 		auto ping = new WriterThread::Ping;
 		auto f = ping->ack.getFuture();
@@ -802,6 +808,10 @@ void setTraceLogGroup(const std::string& logGroup) {
 
 void addUniversalTraceField(const std::string& name, const std::string& value) {
 	g_traceLog.addUniversalTraceField(name, value);
+}
+
+void setTraceLocalAddress(const NetworkAddress& addr) {
+	g_traceLog.setLocalAddress(addr);
 }
 
 BaseTraceEvent::BaseTraceEvent() : initialized(true), enabled(false), logged(true) {}

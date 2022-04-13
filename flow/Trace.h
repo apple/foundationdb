@@ -649,6 +649,7 @@ void removeTraceRole(std::string const& role);
 void retrieveTraceLogIssues(std::set<std::string>& out);
 void setTraceLogGroup(const std::string& role);
 void addUniversalTraceField(std::string const& name, std::string const& value);
+void setTraceLocalAddress(const NetworkAddress& addr);
 uint64_t getTraceThreadId();
 
 template <class T>

@@ -19,6 +19,7 @@
  */
 
 #include "fdbrpc/FlowTransport.h"
+#include "flow/Trace.h"
 #include "flow/network.h"
 
 #include <cstdint>
@@ -1459,6 +1460,7 @@ ACTOR static Future<Void> listen(TransportData* self, NetworkAddress listenAddr)
 		TraceEvent(SevInfo, "UpdatingListenAddress")
 		    .detail("AssignedListenAddress", listener->getListenAddress().toString());
 		self->localAddresses.address = listener->getListenAddress();
+		setTraceLocalAddress(listener->getListenAddress());
 	}
 	state uint64_t connectionCount = 0;
 	try {
