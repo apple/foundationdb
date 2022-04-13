@@ -507,14 +507,9 @@ Future<Version> TagPartitionedLogSystem::push(Version prevVersion,
                                               Version knownCommittedVersion,
                                               Version minKnownCommittedVersion,
                                               LogPushData& data,
-<<<<<<< HEAD
                                               SpanContext const& spanContext,
-                                              Optional<UID> debugID) {
-=======
-                                              SpanID const& spanContext,
                                               Optional<UID> debugID,
                                               Optional<std::unordered_map<uint16_t, Version>> tpcvMap) {
->>>>>>> main
 	// FIXME: Randomize request order as in LegacyLogSystem?
 	std::vector<Future<Void>> quorumResults;
 	std::vector<Future<TLogCommitReply>> allReplies;

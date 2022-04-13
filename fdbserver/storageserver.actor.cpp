@@ -1419,9 +1419,6 @@ ACTOR Future<Version> waitForVersionActor(StorageServer* data, Version version, 
 	}
 }
 
-<<<<<<< HEAD
-Future<Version> waitForVersion(StorageServer* data, Version version, SpanContext spanContext) {
-=======
 // If the latest commit version that mutated the shard(s) being served by the specified storage
 // server is below the client specified read version then do a read at the latest commit version
 // of the storage server.
@@ -1439,8 +1436,7 @@ Version getLatestCommitVersion(VersionVector& ssLatestCommitVersions, Tag& tag) 
 	return commitVersion;
 }
 
-Future<Version> waitForVersion(StorageServer* data, Version version, SpanID spanContext) {
->>>>>>> main
+Future<Version> waitForVersion(StorageServer* data, Version version, SpanContext spanContext) {
 	if (version == latestVersion) {
 		version = std::max(Version(1), data->version.get());
 	}
@@ -1461,7 +1457,7 @@ Future<Version> waitForVersion(StorageServer* data, Version version, SpanID span
 	return waitForVersionActor(data, version, spanContext);
 }
 
-Future<Version> waitForVersion(StorageServer* data, Version commitVersion, Version readVersion, SpanID spanContext) {
+Future<Version> waitForVersion(StorageServer* data, Version commitVersion, Version readVersion, SpanContext spanContext) {
 	ASSERT(commitVersion == invalidVersion || commitVersion < readVersion);
 
 	if (commitVersion == invalidVersion) {
