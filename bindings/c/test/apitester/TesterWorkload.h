@@ -41,7 +41,7 @@ public:
 	// Stop the workload
 	virtual void stop() = 0;
 
-	// Check and if the test is progressing from the point of calling
+	// Check if the test is progressing from the point of calling
 	// Progress must be confirmed by calling confirmProgress on the workload manager
 	virtual void checkProgress() = 0;
 };
@@ -159,7 +159,7 @@ public:
 	WorkloadManager(ITransactionExecutor* txExecutor, IScheduler* scheduler)
 	  : txExecutor(txExecutor), scheduler(scheduler), numWorkloadsFailed(0) {}
 
-	// Open names pipes for communication with the test controller
+	// Open named pipes for communication with the test controller
 	void openControlPipes(const std::string& inputPipeName, const std::string& outputPipeName);
 
 	// Add a workload
@@ -193,10 +193,10 @@ private:
 	// To be called by a workload to notify that it is done
 	void workloadDone(IWorkload* workload, bool failed);
 
-	// To be called by a workload to confirm a successfull progress check
+	// To be called by a workload to confirm a successful progress check
 	void confirmProgress(IWorkload* workload);
 
-	// Receive and handing control commands from the input pipe
+	// Receive and handle control commands from the input pipe
 	void readControlInput(std::string pipeName);
 
 	// Handle STOP command received from the test controller
@@ -223,7 +223,7 @@ private:
 	// Thread for receiving test control commands
 	std::thread ctrlInputThread;
 
-	// Output pipe for emmitting test control events
+	// Output pipe for emitting test control events
 	std::ofstream outputPipe;
 };
 

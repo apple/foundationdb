@@ -46,6 +46,7 @@ enum TesterOptionId {
 	OPT_KNOB,
 	OPT_EXTERNAL_CLIENT_LIBRARY,
 	OPT_EXTERNAL_CLIENT_DIRECTORY,
+	OPT_DISABLE_LOCAL_CLIENT,
 	OPT_TEST_FILE,
 	OPT_INPUT_PIPE,
 	OPT_OUTPUT_PIPE,
@@ -64,6 +65,7 @@ CSimpleOpt::SOption TesterOptionDefs[] = //
 	  { OPT_KNOB, "--knob-", SO_REQ_SEP },
 	  { OPT_EXTERNAL_CLIENT_LIBRARY, "--external-client-library", SO_REQ_SEP },
 	  { OPT_EXTERNAL_CLIENT_DIRECTORY, "--external-client-dir", SO_REQ_SEP },
+	  { OPT_DISABLE_LOCAL_CLIENT, "--disable-local-client", SO_NONE },
 	  { OPT_TEST_FILE, "-f", SO_REQ_SEP },
 	  { OPT_TEST_FILE, "--test-file", SO_REQ_SEP },
 	  { OPT_INPUT_PIPE, "--input-pipe", SO_REQ_SEP },
@@ -94,6 +96,8 @@ void printProgramUsage(const char* execName) {
 	       "                 Path to the external client library.\n"
 	       "  --external-client-dir DIR\n"
 	       "                 Directory containing external client libraries.\n"
+	       "  --disable-local-client DIR\n"
+	       "                 Disable the local client, i.e. use only external client libraries.\n"
 	       "  --input-pipe NAME\n"
 	       "                 Name of the input pipe for communication with the test controller.\n"
 	       "  --output-pipe NAME\n"
@@ -173,6 +177,9 @@ bool processArg(TesterOptions& options, const CSimpleOpt& args) {
 	case OPT_EXTERNAL_CLIENT_DIRECTORY:
 		options.externalClientDir = args.OptionArg();
 		break;
+	case OPT_DISABLE_LOCAL_CLIENT:
+		options.disableLocalClient = true;
+		break;
 	case OPT_TEST_FILE:
 		options.testFile = args.OptionArg();
 		options.testSpec = readTomlTestSpec(options.testFile);
@@ -227,9 +234,15 @@ void applyNetworkOptions(TesterOptions& options) {
 		fdb_check(
 		    FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_EXTERNAL_CLIENT_LIBRARY, options.externalClientLibrary));
 	} else if (!options.externalClientDir.empty()) {
-		fdb_check(FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_DISABLE_LOCAL_CLIENT));
+		if (options.disableLocalClient) {
+			fdb_check(FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_DISABLE_LOCAL_CLIENT));
+		}
 		fdb_check(
 		    FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_EXTERNAL_CLIENT_DIRECTORY, options.externalClientDir));
+	} else {
+		if (options.disableLocalClient) {
+			throw TesterError("Invalid options: Cannot disable local client if no external library is provided");
+		}
 	}
 
 	if (options.testSpec.multiThreaded) {

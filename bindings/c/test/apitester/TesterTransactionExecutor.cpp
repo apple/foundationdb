@@ -221,8 +221,8 @@ protected:
 		err = f.getError();
 		auto waitTimeUs = timeElapsedInUs(start);
 		if (waitTimeUs > LONG_WAIT_TIME_US) {
-			fmt::print("Long waiting time on a future: {}us, return code {} ({}), commit called: {}\n",
-			           waitTimeUs,
+			fmt::print("Long waiting time on a future: {:.3f}s, return code {} ({}), commit called: {}\n",
+			           microsecToSec(waitTimeUs),
 			           err,
 			           fdb_get_error(err),
 			           commitCalled);
@@ -259,9 +259,9 @@ protected:
 		auto waitTimeUs = timeElapsedInUs(start);
 		if (waitTimeUs > LONG_WAIT_TIME_US) {
 			fdb_error_t err3 = onErrorFuture.getError();
-			fmt::print("Long waiting time on onError({}) future: {}us, return code {} ({})\n",
+			fmt::print("Long waiting time on onError({}) future: {:.3f}s, return code {} ({})\n",
 			           err,
-			           waitTimeUs,
+			           microsecToSec(waitTimeUs),
 			           err3,
 			           fdb_get_error(err3));
 		}
@@ -321,8 +321,10 @@ protected:
 		fdb_error_t err = fdb_future_get_error(f);
 		auto waitTimeUs = timeElapsedInUs(cbInfo.startTime, endTime);
 		if (waitTimeUs > LONG_WAIT_TIME_US) {
-			fmt::print(
-			    "Long waiting time on a future: {}us, return code {} ({})\n", waitTimeUs, err, fdb_get_error(err));
+			fmt::print("Long waiting time on a future: {:.3f}s, return code {} ({})\n",
+			           microsecToSec(waitTimeUs),
+			           err,
+			           fdb_get_error(err));
 		}
 		if (err == error_code_transaction_cancelled) {
 			return;
@@ -364,9 +366,9 @@ protected:
 		auto waitTimeUs = timeElapsedInUs(onErrorCallTimePoint);
 		if (waitTimeUs > LONG_WAIT_TIME_US) {
 			fdb_error_t err = onErrorFuture.getError();
-			fmt::print("Long waiting time on onError({}): {}us, return code {} ({})\n",
+			fmt::print("Long waiting time on onError({}): {:.3f}s, return code {} ({})\n",
 			           onErrorArg,
-			           waitTimeUs,
+			           microsecToSec(waitTimeUs),
 			           err,
 			           fdb_get_error(err));
 		}

@@ -238,6 +238,7 @@ class UpgradeTest:
                         '--cluster-file', self.cluster.cluster_file,
                         '--test-file', test_file,
                         '--external-client-dir', self.external_lib_dir,
+                        '--disable-local-client',
                         '--input-pipe', self.input_pipe_path,
                         '--output-pipe', self.output_pipe_path,
                         '--api-version', str(self.api_version),

@@ -26,7 +26,7 @@
 
 namespace FdbApiTester {
 
-std::string lower_case(const std::string& str) {
+std::string lowerCase(const std::string& str) {
 	std::string res = str;
 	std::transform(res.begin(), res.end(), res.begin(), ::tolower);
 	return res;

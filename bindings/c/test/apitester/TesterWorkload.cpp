@@ -66,7 +66,7 @@ bool WorkloadConfig::getBoolOption(const std::string& name, bool defaultVal) con
 	if (iter == options.end()) {
 		return defaultVal;
 	} else {
-		std::string val = lower_case(iter->second);
+		std::string val = lowerCase(iter->second);
 		if (val == "true") {
 			return true;
 		} else if (val == "false") {
@@ -280,7 +280,7 @@ void WorkloadManager::confirmProgress(IWorkload* workload) {
 	}
 	lock.unlock();
 	if (allConfirmed) {
-		// Notify the test controller about the successfull progress check
+		// Notify the test controller about the successful progress check
 		ASSERT(outputPipe.is_open());
 		outputPipe << "CHECK_OK" << std::endl;
 	}

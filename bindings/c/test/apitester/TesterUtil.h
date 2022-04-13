@@ -49,7 +49,7 @@ struct formatter<std::optional<T>> : fmt::formatter<T> {
 
 namespace FdbApiTester {
 
-std::string lower_case(const std::string& str);
+std::string lowerCase(const std::string& str);
 
 class Random {
 public:
@@ -99,6 +99,10 @@ static inline TimeDuration timeElapsedInUs(const TimePoint& start, const TimePoi
 
 static inline TimeDuration timeElapsedInUs(const TimePoint& start) {
 	return timeElapsedInUs(start, timeNow());
+}
+
+static inline double microsecToSec(TimeDuration timeUs) {
+	return timeUs / 1000000.0;
 }
 
 } // namespace FdbApiTester

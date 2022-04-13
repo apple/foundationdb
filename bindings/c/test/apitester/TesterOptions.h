@@ -38,6 +38,7 @@ public:
 	std::string logGroup;
 	std::string externalClientLibrary;
 	std::string externalClientDir;
+	bool disableLocalClient = false;
 	std::string testFile;
 	std::string inputPipeName;
 	std::string outputPipeName;
