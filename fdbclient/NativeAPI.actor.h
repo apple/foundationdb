@@ -436,7 +436,7 @@ public:
 
 	void debugTransaction(UID dID) { trState->debugID = dID; }
 	VersionVector getVersionVector() const;
-	UID getSpanID() const { return trState->spanID; }
+	SpanContext getSpanID() const { return trState->spanContext; }
 
 	Future<Void> commitMutations();
 	void setupWatches();
