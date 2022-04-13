@@ -53,6 +53,12 @@ Arguments
 
 - | ``-t | --threads <threads>``
   | Number of threads per worker process (Default: 1)
+  | With ``--async_xacts <xacts>`` == 0 (Default), each of the ``<threads>`` operates on a transaction object with blocking API calls
+  | Otherwise, all of the ``<threads>`` run an asynchronous job scheduler, serving ``<xacts>`` transactions
+
+- | ``--async_xacts <xacts>``
+  | Number of transactions per worker process to run asynchronously (Default: 0)
+  | ``<xacts>`` > 0 switches the execution mode to non-blocking (See ``-t | --threads``)
 
 - | ``-r | --rows <rows>``
   | Number of rows initially populated (Default: 100000)
