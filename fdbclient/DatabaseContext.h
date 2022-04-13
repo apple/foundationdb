@@ -34,7 +34,6 @@
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/SpecialKeySpace.actor.h"
-#include "fdbclient/VersionVector.h"
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/MultiInterface.h"
 #include "flow/TDMetric.actor.h"
@@ -289,7 +288,6 @@ public:
 	Reference<CommitProxyInfo> getCommitProxies(UseProvisionalProxies useProvisionalProxies);
 	Future<Reference<CommitProxyInfo>> getCommitProxiesFuture(UseProvisionalProxies useProvisionalProxies);
 	Reference<GrvProxyInfo> getGrvProxies(UseProvisionalProxies useProvisionalProxies);
-	bool isCurrentGrvProxy(UID proxyId) const;
 	Future<Void> onProxiesChanged() const;
 	Future<HealthMetrics> getHealthMetrics(bool detailed);
 	// Pass a negative value for `shardLimit` to indicate no limit on the shard number.
@@ -468,12 +466,6 @@ public:
 
 	Reference<ChangeFeedStorageData> getStorageData(StorageServerInterface interf);
 
-	// map from ssid -> ss tag
-	// @note this map allows the client to identify the latest commit versions
-	// of storage servers (note that "ssVersionVectorCache" identifies storage
-	// servers by their tags).
-	std::unordered_map<UID, Tag> ssidTagMapping;
-
 	UID dbId;
 	IsInternal internal; // Only contexts created through the C client and fdbcli are non-internal
 
@@ -524,7 +516,6 @@ public:
 	Counter transactionsExpensiveClearCostEstCount;
 	Counter transactionGrvFullBatches;
 	Counter transactionGrvTimedOutBatches;
-	Counter transactionsStaleVersionVectors;
 
 	ContinuousSample<double> latencies, readLatencies, commitLatencies, GRVLatencies, mutationsPerCommit,
 	    bytesPerCommit, bgLatencies, bgGranulesPerRequest;
@@ -601,9 +592,6 @@ public:
 	static bool debugUseTags;
 	static const std::vector<std::string> debugTransactionTagChoices;
 
-	// Cache of the latest commit versions of storage servers.
-	VersionVector ssVersionVectorCache;
-
 	// Adds or updates the specified (SS, TSS) pair in the TSS mapping (if not already present).
 	// Requests to the storage server will be duplicated to the TSS.
 	void addTssMapping(StorageServerInterface const& ssi, StorageServerInterface const& tssi);
@@ -611,17 +599,6 @@ public:
 	// Removes the storage server and its TSS pair from the TSS mapping (if present).
 	// Requests to the storage server will no longer be duplicated to its pair TSS.
 	void removeTssMapping(StorageServerInterface const& ssi);
-
-	// Adds or updates the specified (UID, Tag) pair in the tag mapping.
-	void addSSIdTagMapping(const UID& uid, const Tag& tag);
-
-	// Returns the latest commit versions that mutated the specified storage servers
-	/// @note returns the latest commit version for a storage server only if the latest
-	// commit version of that storage server is below the specified "readVersion".
-	void getLatestCommitVersions(const Reference<LocationInfo>& locationInfo,
-	                             Version readVersion,
-	                             Reference<TransactionState> info,
-	                             VersionVector& latestCommitVersions);
 
 	// used in template functions to create a transaction
 	using TransactionT = ReadYourWritesTransaction;

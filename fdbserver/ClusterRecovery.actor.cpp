@@ -226,7 +226,6 @@ ACTOR Future<Void> newResolvers(Reference<ClusterRecoveryData> self, RecruitFrom
 	std::vector<Future<ResolverInterface>> initializationReplies;
 	for (int i = 0; i < recr.resolvers.size(); i++) {
 		InitializeResolverRequest req;
-		req.masterLifetime = self->masterLifetime;
 		req.recoveryCount = self->cstate.myDBState.recoveryCount + 1;
 		req.commitProxyCount = recr.commitProxies.size();
 		req.resolverCount = recr.resolvers.size();
@@ -1010,12 +1009,6 @@ ACTOR Future<Void> updateLocalityForDcId(Optional<Key> dcId,
 		if (ver == invalidVersion) {
 			ver = oldLogSystem->getKnownCommittedVersion();
 		}
-		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-			// Do not try to split peeks between data centers in peekTxns() to recover mem kvstore.
-			// This recovery optimization won't work in UNICAST mode.
-			loc.first = -1;
-		}
-
 		locality->set(PeekTxsInfo(loc.first, loc.second, ver));
 		TraceEvent("UpdatedLocalityForDcId")
 		    .detail("DcId", dcId)
@@ -1171,12 +1164,7 @@ ACTOR Future<Void> sendInitialCommitToResolvers(Reference<ClusterRecoveryData> s
 	for (auto& it : self->commitProxies) {
 		endpoints.push_back(it.txnState.getEndpoint());
 	}
-	if (SERVER_KNOBS->PROXY_USE_RESOLVER_PRIVATE_MUTATIONS) {
-		// Broadcasts transaction state store to resolvers.
-		for (auto& it : self->resolvers) {
-			endpoints.push_back(it.txnState.getEndpoint());
-		}
-	}
+
 	loop {
 		if (!data.size())
 			break;

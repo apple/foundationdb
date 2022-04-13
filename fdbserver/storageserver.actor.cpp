@@ -1416,23 +1416,6 @@ ACTOR Future<Version> waitForVersionActor(StorageServer* data, Version version, 
 	}
 }
 
-// If the latest commit version that mutated the shard(s) being served by the specified storage
-// server is below the client specified read version then do a read at the latest commit version
-// of the storage server.
-Version getRealReadVersion(VersionVector& ssLatestCommitVersions, Tag& tag, Version specifiedReadVersion) {
-	Version realReadVersion =
-	    ssLatestCommitVersions.hasVersion(tag) ? ssLatestCommitVersions.getVersion(tag) : specifiedReadVersion;
-	ASSERT(realReadVersion <= specifiedReadVersion);
-	return realReadVersion;
-}
-
-// Find the latest commit version of the given tag.
-Version getLatestCommitVersion(VersionVector& ssLatestCommitVersions, Tag& tag) {
-	Version commitVersion =
-	    ssLatestCommitVersions.hasVersion(tag) ? ssLatestCommitVersions.getVersion(tag) : invalidVersion;
-	return commitVersion;
-}
-
 Future<Version> waitForVersion(StorageServer* data, Version version, SpanID spanContext) {
 	if (version == latestVersion) {
 		version = std::max(Version(1), data->version.get());
@@ -1452,37 +1435,6 @@ Future<Version> waitForVersion(StorageServer* data, Version version, SpanID span
 		TraceEvent("WaitForVersion1000x").log();
 	}
 	return waitForVersionActor(data, version, spanContext);
-}
-
-Future<Version> waitForVersion(StorageServer* data, Version commitVersion, Version readVersion, SpanID spanContext) {
-	ASSERT(commitVersion == invalidVersion || commitVersion < readVersion);
-
-	if (commitVersion == invalidVersion) {
-		return waitForVersion(data, readVersion, spanContext);
-	}
-
-	if (readVersion == latestVersion) {
-		readVersion = std::max(Version(1), data->version.get());
-	}
-
-	if (readVersion < data->oldestVersion.get() || readVersion <= 0) {
-		return transaction_too_old();
-	} else {
-		if (commitVersion < data->oldestVersion.get()) {
-			return data->oldestVersion.get();
-		} else if (commitVersion <= data->version.get()) {
-			return commitVersion;
-		}
-	}
-
-	if ((data->behind || data->versionBehind) && commitVersion > data->version.get()) {
-		return process_behind();
-	}
-
-	if (deterministicRandom()->random01() < 0.001) {
-		TraceEvent("WaitForVersion1000x");
-	}
-	return waitForVersionActor(data, std::max(commitVersion, data->oldestVersion.get()), spanContext);
 }
 
 ACTOR Future<Version> waitForVersionNoTooOld(StorageServer* data, Version version) {
@@ -1553,8 +1505,7 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 			                      "getValueQ.DoRead"); //.detail("TaskID", g_network->getCurrentTask());
 
 		state Optional<Value> v;
-		Version commitVersion = getLatestCommitVersion(req.ssLatestCommitVersions, data->tag);
-		state Version version = wait(waitForVersion(data, commitVersion, req.version, req.spanContext));
+		state Version version = wait(waitForVersion(data, req.version, req.spanContext));
 		if (req.debugID.present())
 			g_traceBatch.addEvent("GetValueDebug",
 			                      req.debugID.get().first(),
@@ -1690,7 +1641,7 @@ ACTOR Future<Version> watchWaitForValueChange(StorageServer* data, SpanID parent
 			TEST(latest >= minVersion &&
 			     latest < data->data().latestVersion); // Starting watch loop with latestVersion > data->version
 			GetValueRequest getReq(
-			    span.context, TenantInfo(), metadata->key, latest, metadata->tags, metadata->debugID, VersionVector());
+			    span.context, TenantInfo(), metadata->key, latest, metadata->tags, metadata->debugID);
 			state Future<Void> getValue = getValueQ(
 			    data, getReq); // we are relying on the delay zero at the top of getValueQ, if removed we need one here
 			GetValueReply reply = wait(getReq.reply.getFuture());
@@ -2818,8 +2769,7 @@ ACTOR Future<GetValueReqAndResultRef> quickGetValue(StorageServer* data,
 			                    key,
 			                    version,
 			                    pOriginalReq->tags,
-			                    pOriginalReq->debugID,
-			                    VersionVector());
+			                    pOriginalReq->debugID);
 			// Note that it does not use readGuard to avoid server being overloaded here. Throttling is enforced at the
 			// original request level, rather than individual underlying lookups. The reason is that throttle any
 			// individual underlying lookup will fail the original request, which is not productive.
@@ -3246,9 +3196,7 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 	try {
 		if (req.debugID.present())
 			g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValues.Before");
-
-		Version commitVersion = getLatestCommitVersion(req.ssLatestCommitVersions, data->tag);
-		state Version version = wait(waitForVersion(data, commitVersion, req.version, span.context));
+		state Version version = wait(waitForVersion(data, req.version, span.context));
 
 		state Optional<TenantMapEntry> tenantEntry = data->getTenantEntry(version, req.tenantInfo);
 		state Optional<Key> tenantPrefix = tenantEntry.map<Key>([](TenantMapEntry e) { return e.prefix; });
@@ -3429,7 +3377,6 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 		req.limitBytes = SERVER_KNOBS->QUICK_GET_KEY_VALUES_LIMIT_BYTES;
 		req.isFetchKeys = false;
 		req.tags = pOriginalReq->tags;
-		req.ssLatestCommitVersions = VersionVector();
 		req.debugID = pOriginalReq->debugID;
 
 		// Note that it does not use readGuard to avoid server being overloaded here. Throttling is enforced at the
@@ -3740,9 +3687,7 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 		if (req.debugID.present())
 			g_traceBatch.addEvent(
 			    "TransactionDebug", req.debugID.get().first(), "storageserver.getMappedKeyValues.Before");
-		// VERSION_VECTOR change
-		Version commitVersion = getLatestCommitVersion(req.ssLatestCommitVersions, data->tag);
-		state Version version = wait(waitForVersion(data, commitVersion, req.version, span.context));
+		state Version version = wait(waitForVersion(data, req.version, span.context));
 
 		state Optional<TenantMapEntry> tenantEntry = data->getTenantEntry(req.version, req.tenantInfo);
 		state Optional<Key> tenantPrefix = tenantEntry.map<Key>([](TenantMapEntry e) { return e.prefix; });
@@ -3953,9 +3898,7 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 		if (req.debugID.present())
 			g_traceBatch.addEvent(
 			    "TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValuesStream.Before");
-
-		Version commitVersion = getLatestCommitVersion(req.ssLatestCommitVersions, data->tag);
-		state Version version = wait(waitForVersion(data, commitVersion, req.version, span.context));
+		state Version version = wait(waitForVersion(data, req.version, span.context));
 
 		state Optional<TenantMapEntry> tenantEntry = data->getTenantEntry(version, req.tenantInfo);
 		state Optional<Key> tenantPrefix = tenantEntry.map<Key>([](TenantMapEntry e) { return e.prefix; });
@@ -4147,8 +4090,7 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 	wait(data->getQueryDelay());
 
 	try {
-		Version commitVersion = getLatestCommitVersion(req.ssLatestCommitVersions, data->tag);
-		state Version version = wait(waitForVersion(data, commitVersion, req.version, req.spanContext));
+		state Version version = wait(waitForVersion(data, req.version, req.spanContext));
 
 		state Optional<TenantMapEntry> tenantEntry = data->getTenantEntry(version, req.tenantInfo);
 		if (tenantEntry.present()) {
@@ -6296,7 +6238,7 @@ public:
 			} else if ((m.type == MutationRef::SetValue) && m.param1.substr(1).startsWith(checkpointPrefix)) {
 				registerPendingCheckpoint(data, m, ver);
 			} else {
-				applyPrivateData(data, ver, m);
+				applyPrivateData(data, m);
 			}
 		} else {
 			if (MUTATION_TRACKING_ENABLED) {
@@ -6324,8 +6266,8 @@ private:
 	KeyRef cacheStartKey;
 	bool processedCacheStartKey;
 
-	void applyPrivateData(StorageServer* data, Version ver, MutationRef const& m) {
-		TraceEvent(SevDebug, "SSPrivateMutation", data->thisServerID).detail("Mutation", m).detail("Version", ver);
+	void applyPrivateData(StorageServer* data, MutationRef const& m) {
+		TraceEvent(SevDebug, "SSPrivateMutation", data->thisServerID).detail("Mutation", m);
 
 		if (processedStartKey) {
 			// Because of the implementation of the krm* functions, we expect changes in pairs, [begin,end)
@@ -8472,13 +8414,8 @@ ACTOR Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream
 			loop {
 				try {
 					state Version latest = self->version.get();
-					GetValueRequest getReq(span.context,
-					                       TenantInfo(),
-					                       metadata->key,
-					                       latest,
-					                       metadata->tags,
-					                       metadata->debugID,
-					                       VersionVector());
+					GetValueRequest getReq(
+					    span.context, TenantInfo(), metadata->key, latest, metadata->tags, metadata->debugID);
 					state Future<Void> getValue = getValueQ(self, getReq);
 					GetValueReply reply = wait(getReq.reply.getFuture());
 					metadata = self->getWatchMetadata(req.key.contents());

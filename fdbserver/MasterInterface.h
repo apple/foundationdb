@@ -25,8 +25,6 @@
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/DatabaseConfiguration.h"
-#include "fdbclient/VersionVector.h"
-#include "fdbserver/TLogInterface.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/StorageServerInterface.h"
@@ -153,15 +151,6 @@ struct GetCommitVersionRequest {
 	}
 };
 
-struct GetTLogPrevCommitVersionReply {
-	constexpr static FileIdentifier file_identifier = 16683183;
-	GetTLogPrevCommitVersionReply() {}
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar);
-	}
-};
-
 struct UpdateRecoveryDataRequest {
 	constexpr static FileIdentifier file_identifier = 13605417;
 	Version recoveryTransactionVersion;
@@ -192,23 +181,20 @@ struct ReportRawCommittedVersionRequest {
 	bool locked;
 	Optional<Value> metadataVersion;
 	Version minKnownCommittedVersion;
-	Optional<Version> prevVersion; // if present, wait for prevVersion to be committed before replying
-	Optional<std::set<Tag>> writtenTags;
+
 	ReplyPromise<Void> reply;
 
 	ReportRawCommittedVersionRequest() : version(invalidVersion), locked(false), minKnownCommittedVersion(0) {}
 	ReportRawCommittedVersionRequest(Version version,
 	                                 bool locked,
 	                                 Optional<Value> metadataVersion,
-	                                 Version minKnownCommittedVersion,
-	                                 Optional<Version> prevVersion,
-	                                 Optional<std::set<Tag>> writtenTags = Optional<std::set<Tag>>())
+	                                 Version minKnownCommittedVersion)
 	  : version(version), locked(locked), metadataVersion(metadataVersion),
-	    minKnownCommittedVersion(minKnownCommittedVersion), prevVersion(prevVersion), writtenTags(writtenTags) {}
+	    minKnownCommittedVersion(minKnownCommittedVersion) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, locked, metadataVersion, minKnownCommittedVersion, prevVersion, writtenTags, reply);
+		serializer(ar, version, locked, metadataVersion, minKnownCommittedVersion, reply);
 	}
 };
 

@@ -27,8 +27,6 @@
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/LogProtocolMessage.h"
 #include "fdbserver/LogSystem.h"
-#include "flow/Error.h"
-#include "flow/Trace.h"
 
 Reference<StorageInfo> getStorageInfo(UID id,
                                       std::map<UID, Reference<StorageInfo>>* storageCache,
@@ -46,6 +44,10 @@ Reference<StorageInfo> getStorageInfo(UID id,
 	return storageInfo;
 }
 namespace {
+
+inline bool isSystemKey(KeyRef key) {
+	return key.size() && key[0] == systemKeys.begin[0];
+}
 
 // It is incredibly important that any modifications to txnStateStore are done in such a way that the same operations
 // will be done on all commit proxies at the same time. Otherwise, the data stored in txnStateStore will become
@@ -81,15 +83,6 @@ public:
 	    storageCache(&proxyCommitData_.storageCache), tag_popped(&proxyCommitData_.tag_popped),
 	    tssMapping(&proxyCommitData_.tssMapping), tenantMap(&proxyCommitData_.tenantMap),
 	    initialCommit(initialCommit_) {}
-
-	ApplyMetadataMutationsImpl(const SpanID& spanContext_,
-	                           ResolverData& resolverData_,
-	                           const VectorRef<MutationRef>& mutations_)
-	  : spanContext(spanContext_), dbgid(resolverData_.dbgid), arena(resolverData_.arena), mutations(mutations_),
-	    txnStateStore(resolverData_.txnStateStore), toCommit(resolverData_.toCommit),
-	    confChange(resolverData_.confChanges), logSystem(resolverData_.logSystem), popVersion(resolverData_.popVersion),
-	    keyInfo(resolverData_.keyInfo), storageCache(resolverData_.storageCache),
-	    initialCommit(resolverData_.initialCommit), forResolver(true) {}
 
 private:
 	// The following variables are incoming parameters
@@ -129,9 +122,6 @@ private:
 
 	// true if the mutations were already written to the txnStateStore as part of recovery
 	bool initialCommit = false;
-
-	// true if called from Resolver
-	bool forResolver = false;
 
 private:
 	// The following variables are used internally
@@ -198,16 +188,12 @@ private:
 		}
 		uniquify(info.tags);
 		keyInfo->insert(insertRange, info);
-		if (toCommit && SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-			toCommit->setShardChanged();
-		}
 	}
 
 	void checkSetServerKeysPrefix(MutationRef m) {
 		if (!m.param1.startsWith(serverKeysPrefix)) {
 			return;
 		}
-
 		if (toCommit) {
 			Tag tag = decodeServerTagValue(
 			    txnStateStore->readValue(serverTagKeyFor(serverKeysDecodeServer(m.param1))).get().get());
@@ -229,7 +215,6 @@ private:
 		if (!m.param1.startsWith(serverTagPrefix)) {
 			return;
 		}
-
 		UID id = decodeServerTagKey(m.param1);
 		Tag tag = decodeServerTagValue(m.param2);
 
@@ -238,10 +223,8 @@ private:
 			privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 			TraceEvent("ServerTag", dbgid).detail("Server", id).detail("Tag", tag.toString());
 
-			TraceEvent(SevDebug, "SendingPrivatized_ServerTag", dbgid).detail("M", "LogProtocolMessage");
 			toCommit->addTag(tag);
 			toCommit->writeTypedMessage(LogProtocolMessage(), true);
-			TraceEvent(SevDebug, "SendingPrivatized_ServerTag", dbgid).detail("M", privatized);
 			toCommit->addTag(tag);
 			toCommit->writeTypedMessage(privatized);
 		}
@@ -271,7 +254,7 @@ private:
 	void checkSetStorageCachePrefix(MutationRef m) {
 		if (!m.param1.startsWith(storageCachePrefix))
 			return;
-		if (cacheInfo || forResolver) {
+		if (cacheInfo) {
 			KeyRef k = m.param1.removePrefix(storageCachePrefix);
 
 			// Create a private mutation for storage servers
@@ -282,7 +265,7 @@ private:
 				//TraceEvent(SevDebug, "SendingPrivateMutation", dbgid).detail("Original", m.toString()).detail("Privatized", privatized.toString());
 				cachedRangeInfo[k] = privatized;
 			}
-			if (cacheInfo && k != allKeys.end) {
+			if (k != allKeys.end) {
 				KeyRef end = cacheInfo->rangeContaining(k).end();
 				std::vector<uint16_t> serverIndices;
 				decodeStorageCacheValue(m.param2, serverIndices);
@@ -297,11 +280,11 @@ private:
 		if (!m.param1.startsWith(cacheKeysPrefix) || toCommit == nullptr) {
 			return;
 		}
+
 		// Create a private mutation for cache servers
 		// This is done to make the cache servers aware of the cached key-ranges
 		MutationRef privatized = m;
 		privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
-		TraceEvent(SevDebug, "SendingPrivatized_CacheTag", dbgid).detail("M", privatized);
 		toCommit->addTag(cacheTag);
 		toCommit->writeTypedMessage(privatized);
 	}
@@ -353,7 +336,6 @@ private:
 				}
 				toCommit->addTags(allSources);
 			}
-			TraceEvent(SevDebug, "SendingPrivatized_ChangeFeed", dbgid).detail("M", privatized);
 			toCommit->writeTypedMessage(privatized);
 		}
 	}
@@ -388,7 +370,6 @@ private:
 		if (!m.param1.startsWith(tssMappingKeys.begin)) {
 			return;
 		}
-
 		// Normally uses key backed map, so have to use same unpacking code here.
 		UID ssId = Codec<UID>::unpack(Tuple::unpack(m.param1.removePrefix(tssMappingKeys.begin)));
 		UID tssId = Codec<UID>::unpack(Tuple::unpack(m.param2));
@@ -406,7 +387,6 @@ private:
 
 			Optional<Value> tagV = txnStateStore->readValue(serverTagKeyFor(ssId)).get();
 			if (tagV.present()) {
-				TraceEvent(SevDebug, "SendingPrivatized_TSSID", dbgid).detail("M", privatized);
 				toCommit->addTag(decodeServerTagValue(tagV.get()));
 				toCommit->writeTypedMessage(privatized);
 			}
@@ -435,7 +415,6 @@ private:
 		if (tagV.present()) {
 			MutationRef privatized = m;
 			privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
-			TraceEvent(SevDebug, "SendingPrivatized_TSSQuarantine", dbgid).detail("M", privatized);
 			toCommit->addTag(decodeServerTagValue(tagV.get()));
 			toCommit->writeTypedMessage(privatized);
 		}
@@ -531,6 +510,7 @@ private:
 		if (!toCommit) {
 			return;
 		}
+
 		// Notifies all servers that a Master's server epoch ends
 		auto allServers = txnStateStore->readRange(serverTagKeys).get();
 		std::set<Tag> allTags;
@@ -553,12 +533,10 @@ private:
 		if (m.param1 == lastEpochEndKey) {
 			toCommit->addTags(allTags);
 			toCommit->writeTypedMessage(LogProtocolMessage(), true);
-			TraceEvent(SevDebug, "SendingPrivatized_GlobalKeys", dbgid).detail("M", "LogProtocolMessage");
 		}
 
 		MutationRef privatized = m;
 		privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
-		TraceEvent(SevDebug, "SendingPrivatized_GlobalKeys", dbgid).detail("M", privatized);
 		toCommit->addTags(allTags);
 		toCommit->writeTypedMessage(privatized);
 	}
@@ -680,9 +658,6 @@ private:
 			                clearRange.begin == StringRef()
 			                    ? ServerCacheInfo()
 			                    : keyInfo->rangeContainingKeyBefore(clearRange.begin).value());
-			if (toCommit && SERVER_KNOBS->ENABLE_VERSION_VECTOR_TLOG_UNICAST) {
-				toCommit->setShardChanged();
-			}
 		}
 
 		if (!initialCommit)
@@ -724,7 +699,10 @@ private:
 	}
 
 	void checkClearTagLocalityListKeys(KeyRangeRef range) {
-		if (!tagLocalityListKeys.intersects(range) || initialCommit) {
+		if (!tagLocalityListKeys.intersects(range)) {
+			return;
+		}
+		if (initialCommit) {
 			return;
 		}
 		txnStateStore->clear(range & tagLocalityListKeys);
@@ -734,6 +712,7 @@ private:
 		if (!serverTagKeys.intersects(range)) {
 			return;
 		}
+
 		// Storage server removal always happens in a separate version from any prior writes (or any subsequent
 		// reuse of the tag) so we can safely destroy the tag here without any concern about intra-batch
 		// ordering
@@ -746,18 +725,13 @@ private:
 				    .detail("PopVersion", popVersion)
 				    .detail("Tag", tag.toString())
 				    .detail("Server", decodeServerTagKey(kv.key));
-				if (!forResolver) {
-					logSystem->pop(popVersion, decodeServerTagValue(kv.value));
-					(*tag_popped)[tag] = popVersion;
-				}
-				ASSERT_WE_THINK(forResolver ^ (tag_popped != nullptr));
+				logSystem->pop(popVersion, decodeServerTagValue(kv.value));
+				(*tag_popped)[tag] = popVersion;
 
 				if (toCommit) {
 					MutationRef privatized = m;
 					privatized.param1 = kv.key.withPrefix(systemKeys.begin, arena);
 					privatized.param2 = keyAfter(kv.key, arena).withPrefix(systemKeys.begin, arena);
-
-					TraceEvent(SevDebug, "SendingPrivatized_ClearServerTag", dbgid).detail("M", privatized);
 
 					toCommit->addTag(decodeServerTagValue(kv.value));
 					toCommit->writeTypedMessage(privatized);
@@ -781,8 +755,6 @@ private:
 								privatized.param2 =
 								    keyAfter(maybeTssRange.begin, arena).withPrefix(systemKeys.begin, arena);
 
-								TraceEvent(SevDebug, "SendingPrivatized_TSSClearServerTag", dbgid)
-								    .detail("M", privatized);
 								toCommit->addTag(decodeServerTagValue(tagV.get()));
 								toCommit->writeTypedMessage(privatized);
 							}
@@ -816,11 +788,8 @@ private:
 				    .detail("PopVersion", popVersion)
 				    .detail("Tag", tag.toString())
 				    .detail("Version", decodeServerTagHistoryKey(kv.key));
-				if (!forResolver) {
-					logSystem->pop(popVersion, tag);
-					(*tag_popped)[tag] = popVersion;
-				}
-				ASSERT_WE_THINK(forResolver ^ (tag_popped != nullptr));
+				logSystem->pop(popVersion, tag);
+				(*tag_popped)[tag] = popVersion;
 			}
 		}
 		if (!initialCommit)
@@ -967,7 +936,6 @@ private:
 			MutationRef privatized = m;
 			privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 			privatized.param2 = m.param2.withPrefix(systemKeys.begin, arena);
-			TraceEvent(SevDebug, "SendingPrivatized_ClearTSSMapping", dbgid).detail("M", privatized);
 			toCommit->addTag(decodeServerTagValue(tagV.get()));
 			toCommit->writeTypedMessage(privatized);
 		}
@@ -994,7 +962,6 @@ private:
 					MutationRef privatized = m;
 					privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 					privatized.param2 = m.param2.withPrefix(systemKeys.begin, arena);
-					TraceEvent(SevDebug, "SendingPrivatized_ClearTSSQuarantine", dbgid).detail("M", privatized);
 					toCommit->addTag(decodeServerTagValue(tagV.get()));
 					toCommit->writeTypedMessage(privatized);
 				}
@@ -1142,9 +1109,6 @@ private:
 			}
 
 			// Add the tags to both begin and end mutations
-			TraceEvent(SevDebug, "SendingPrivatized_CachedKeyRange", dbgid)
-			    .detail("MBegin", mutationBegin)
-			    .detail("MEnd", mutationEnd);
 			toCommit->addTags(allTags);
 			toCommit->writeTypedMessage(mutationBegin);
 			toCommit->addTags(allTags);
@@ -1239,12 +1203,6 @@ void applyMetadataMutations(SpanID const& spanContext,
 	                           popVersion,
 	                           initialCommit)
 	    .apply();
-}
-
-void applyMetadataMutations(SpanID const& spanContext,
-                            ResolverData& resolverData,
-                            const VectorRef<MutationRef>& mutations) {
-	ApplyMetadataMutationsImpl(spanContext, resolverData, mutations).apply();
 }
 
 void applyMetadataMutations(SpanID const& spanContext,

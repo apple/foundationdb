@@ -27,7 +27,6 @@
 #include <string>
 #include <vector>
 #include <unordered_set>
-#include <boost/functional/hash.hpp>
 
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
@@ -96,8 +95,6 @@ struct Tag {
 
 	int toTagDataIndex() const { return locality >= 0 ? 2 * locality : 1 - (2 * locality); }
 
-	bool isNonPrimaryTLogType() const { return locality < 0; }
-
 	std::string toString() const { return format("%d:%d", locality, id); }
 
 	template <class Ar>
@@ -150,18 +147,6 @@ template <>
 struct Traceable<Tag> : std::true_type {
 	static std::string toString(const Tag& value) { return value.toString(); }
 };
-
-namespace std {
-template <>
-struct hash<Tag> {
-	std::size_t operator()(const Tag& tag) const {
-		std::size_t seed = 0;
-		boost::hash_combine(seed, std::hash<int8_t>{}(tag.locality));
-		boost::hash_combine(seed, std::hash<uint16_t>{}(tag.id));
-		return seed;
-	}
-};
-} // namespace std
 
 static const Tag invalidTag{ tagLocalitySpecial, 0 };
 static const Tag txsTag{ tagLocalitySpecial, 1 };
