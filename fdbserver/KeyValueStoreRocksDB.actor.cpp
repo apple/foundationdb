@@ -865,6 +865,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		std::shared_ptr<PerfContextMetrics> perfContextMetrics;
 		int threadIndex;
 		ThreadReturnPromiseStream<std::pair<std::string, double>>* metricPromiseStream;
+		// ThreadReturnPromiseStream pair.first stores the histogram name and
+		// pair.second stores the corresponding measured latency (seconds)
 
 		explicit Writer(DB& db,
 		                CF& cf,
@@ -1269,6 +1271,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		std::shared_ptr<PerfContextMetrics> perfContextMetrics;
 		int threadIndex;
 		ThreadReturnPromiseStream<std::pair<std::string, double>>* metricPromiseStream;
+		// ThreadReturnPromiseStream pair.first stores the histogram name and
+		// pair.second stores the corresponding measured latency (seconds)
 
 		explicit Reader(DB& db,
 		                CF& cf,
@@ -1612,6 +1616,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	int numFetchWaiters;
 	std::shared_ptr<ReadIteratorPool> readIterPool;
 	std::vector<std::unique_ptr<ThreadReturnPromiseStream<std::pair<std::string, double>>>> metricPromiseStreams;
+	// ThreadReturnPromiseStream pair.first stores the histogram name and
+	// pair.second stores the corresponding measured latency (seconds)
 	Future<Void> actorErrorListener;
 	Future<Void> collection;
 	PromiseStream<Future<Void>> addActor;
