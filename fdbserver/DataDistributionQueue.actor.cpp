@@ -1780,7 +1780,7 @@ ACTOR Future<Void> BgDDMountainChopper(DDQueueData* self, int teamCollectionInde
 		state std::pair<Optional<Reference<IDataDistributionTeam>>, bool> randomTeam;
 		state bool moved = false;
 		state TraceEvent traceEvent("BgDDMountainChopper", self->distributorId);
-		traceEvent.suppressFor(5.0).detail("PollingInterval", rebalancePollingInterval);
+		traceEvent.suppressFor(5.0).detail("PollingInterval", rebalancePollingInterval).detail("Rebalance", "Disk");
 
 		if (*self->lastLimited > 0) {
 			traceEvent.detail("SecondsSinceLastLimited", now() - *self->lastLimited);
@@ -1790,13 +1790,23 @@ ACTOR Future<Void> BgDDMountainChopper(DDQueueData* self, int teamCollectionInde
 			state Future<Void> delayF = delay(rebalancePollingInterval, TaskPriority::DataDistributionLaunch);
 			if ((now() - lastRead) > SERVER_KNOBS->BG_REBALANCE_SWITCH_CHECK_INTERVAL) {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				Optional<Value> val = wait(tr.get(rebalanceDDIgnoreKey));
 				lastRead = now();
-				if (skipCurrentLoop && !val.present()) {
+				if (!val.present()) {
 					// reset loop interval
-					rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL;
+					if (skipCurrentLoop) {
+						rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL;
+					}
+					skipCurrentLoop = false;
+				} else {
+					if (val.get().size() > 0) {
+						int ddIgnore = BinaryReader::fromStringRef<uint8_t>(val.get(), Unversioned());
+						skipCurrentLoop = (ddIgnore & DDIgnore::REBALANCE_DISK) > 0;
+					} else {
+						skipCurrentLoop = true;
+					}
 				}
-				skipCurrentLoop = val.present();
 			}
 
 			traceEvent.detail("Enabled", !skipCurrentLoop);
@@ -1892,7 +1902,7 @@ ACTOR Future<Void> BgDDValleyFiller(DDQueueData* self, int teamCollectionIndex) 
 		state std::pair<Optional<Reference<IDataDistributionTeam>>, bool> randomTeam;
 		state bool moved = false;
 		state TraceEvent traceEvent("BgDDValleyFiller", self->distributorId);
-		traceEvent.suppressFor(5.0).detail("PollingInterval", rebalancePollingInterval);
+		traceEvent.suppressFor(5.0).detail("PollingInterval", rebalancePollingInterval).detail("Rebalance", "Disk");
 
 		if (*self->lastLimited > 0) {
 			traceEvent.detail("SecondsSinceLastLimited", now() - *self->lastLimited);
@@ -1902,13 +1912,23 @@ ACTOR Future<Void> BgDDValleyFiller(DDQueueData* self, int teamCollectionIndex) 
 			state Future<Void> delayF = delay(rebalancePollingInterval, TaskPriority::DataDistributionLaunch);
 			if ((now() - lastRead) > SERVER_KNOBS->BG_REBALANCE_SWITCH_CHECK_INTERVAL) {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				Optional<Value> val = wait(tr.get(rebalanceDDIgnoreKey));
 				lastRead = now();
-				if (skipCurrentLoop && !val.present()) {
+				if (!val.present()) {
 					// reset loop interval
-					rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL;
+					if (skipCurrentLoop) {
+						rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL;
+					}
+					skipCurrentLoop = false;
+				} else {
+					if (val.get().size() > 0) {
+						int ddIgnore = BinaryReader::fromStringRef<uint8_t>(val.get(), Unversioned());
+						skipCurrentLoop = (ddIgnore & DDIgnore::REBALANCE_DISK) > 0;
+					} else {
+						skipCurrentLoop = true;
+					}
 				}
-				skipCurrentLoop = val.present();
 			}
 
 			traceEvent.detail("Enabled", !skipCurrentLoop);
@@ -2032,16 +2052,17 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 	state Future<Void> launchQueuedWorkTimeout = Never();
 
 	for (int i = 0; i < teamCollections.size(); i++) {
-		balancingFutures.push_back(BgDDLoadRebalance(&self, i, SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM));
-		balancingFutures.push_back(BgDDLoadRebalance(&self, i, SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM));
+		// FIXME: Use BgDDLoadBalance for disk rebalance too after DD simulation test proof.
+		// balancingFutures.push_back(BgDDLoadRebalance(&self, i, SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM));
+		// balancingFutures.push_back(BgDDLoadRebalance(&self, i, SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM));
 		if (SERVER_KNOBS->READ_SAMPLING_ENABLED == true) {
 			balancingFutures.push_back(
 			    BgDDLoadRebalance(&self, i, SERVER_KNOBS->PRIORITY_REBALANCE_READ_OVERUTIL_TEAM));
 			balancingFutures.push_back(
 			    BgDDLoadRebalance(&self, i, SERVER_KNOBS->PRIORITY_REBALANCE_READ_UNDERUTIL_TEAM));
 		}
-		// balancingFutures.push_back(BgDDMountainChopper(&self, i));
-		// balancingFutures.push_back(BgDDValleyFiller(&self, i));
+		balancingFutures.push_back(BgDDMountainChopper(&self, i));
+		balancingFutures.push_back(BgDDValleyFiller(&self, i));
 	}
 	balancingFutures.push_back(delayedAsyncVar(self.rawProcessingUnhealthy, processingUnhealthy, 0));
 	balancingFutures.push_back(delayedAsyncVar(self.rawProcessingWiggle, processingWiggle, 0));
