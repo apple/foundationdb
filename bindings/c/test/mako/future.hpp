@@ -1,7 +1,7 @@
 #ifndef MAKO_FUTURE_HPP
 #define MAKO_FUTURE_HPP
 
-#include <fdb.hpp>
+#include <fdb_api.hpp>
 #include <cassert>
 #include <string_view>
 #include "logger.hpp"

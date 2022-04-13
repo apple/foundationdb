@@ -12,7 +12,7 @@
 #include <list>
 #include <vector>
 #include <string_view>
-#include <fdb.hpp>
+#include <fdb_api.hpp>
 #include <pthread.h>
 #include <sys/types.h>
 #include <stdbool.h>

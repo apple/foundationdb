@@ -33,7 +33,7 @@
 #include <boost/asio.hpp>
 #include <fmt/format.h>
 #include <fmt/printf.h>
-#include <fdb.hpp>
+#include <fdb_api.hpp>
 #include "fdbclient/zipf.h"
 #include "logger.hpp"
 #include "mako.hpp"

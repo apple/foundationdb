@@ -3,7 +3,7 @@
 
 #include <cstdint>
 #include <memory>
-#include <fdb.hpp>
+#include <fdb_api.hpp>
 
 namespace mako::blob_granules::local_file {
 

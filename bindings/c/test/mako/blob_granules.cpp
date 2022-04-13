@@ -1,7 +1,7 @@
 #include "blob_granules.hpp"
 #include "logger.hpp"
 #include <cstdio>
-#include <fdb.hpp>
+#include <fdb_api.hpp>
 
 extern thread_local mako::Logger logr;
 

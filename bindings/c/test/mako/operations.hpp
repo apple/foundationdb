@@ -1,7 +1,7 @@
 #ifndef MAKO_OPERATIONS_HPP
 #define MAKO_OPERATIONS_HPP
 
-#include <fdb.hpp>
+#include <fdb_api.hpp>
 #include <array>
 #include <cassert>
 #include <string_view>

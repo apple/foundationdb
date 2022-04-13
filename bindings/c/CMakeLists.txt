@@ -112,7 +112,7 @@ if(NOT WIN32 AND NOT IS_ARM_MAC)
     test/unit/fdb_api.hpp)
 
   add_library(fdb_cpp INTERFACE)
-  target_sources(fdb_cpp INTERFACE test/fdb.hpp)
+  target_sources(fdb_cpp INTERFACE test/fdb_api.hpp)
   target_include_directories(fdb_cpp INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/test)
   target_link_libraries(fdb_cpp INTERFACE fmt::fmt)
   if(OPEN_FOR_IDE)
