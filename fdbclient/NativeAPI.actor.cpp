@@ -21,6 +21,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <iterator>
 #include <regex>
 #include <unordered_set>
@@ -6538,8 +6539,10 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 
 	case FDBTransactionOptions::SPAN_PARENT:
 		validateOptionValuePresent(value);
-		// TODO - ljoswiak, mpilman. Why is size here not failing?  
-		if (value.get().size() != 16) {
+		// TODO - size of SpanContext member variables is 25, so likely
+		// padding added for alignment. ljoswiak mentioned we might
+		// be able to change serialze function to save padding here?
+		if (value.get().size() != 33) {
 			throw invalid_option_value();
 		}
 		span.addLink(BinaryReader::fromStringRef<SpanContext>(value.get(), IncludeVersion()));
