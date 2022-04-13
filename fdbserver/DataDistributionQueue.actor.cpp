@@ -1024,6 +1024,7 @@ struct DDQueueData {
 			inFlightActors.cancel(KeyRangeRef(ranges.front().begin, ranges.back().end));
 			inFlight.insert(rd.keys, rd);
 
+			// TODO: Make sure the uniqueness of dataMoveId;
 			for (int r = 0; r < ranges.size(); r++) {
 				RelocateData& rrs = inFlight.rangeContaining(ranges[r].begin)->value();
 				rrs.keys = ranges[r];

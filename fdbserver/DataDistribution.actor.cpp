@@ -237,6 +237,8 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Data
 					DDShardInfo info(keyServers[i].key);
 					if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 						decodeKeyServersValue(UIDtoTagMap, keyServers[i].value, src, dest, srcId, destId);
+						info.srcId = srcId;
+						info.destId = destId;
 					} else {
 						decodeKeyServersValue(UIDtoTagMap, keyServers[i].value, src, dest);
 					}
@@ -761,21 +763,17 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			state Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure(new ShardsAffectedByTeamFailure);
 
 			state KeyRangeMap<std::shared_ptr<DataMove>> dataMoveMap(std::make_shared<DataMove>());
-			if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+			if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 				for (int i = 0; i < initData->dataMoves.size(); ++i) {
 					const auto& meta = initData->dataMoves[i];
 					TraceEvent("DDInitFoundDataMove", self->ddId)
 					    .detail("DataMoveID", meta.id)
 					    .detail("DataMove", meta.toString());
 					auto ranges = dataMoveMap.intersectingRanges(meta.range);
-					// ASSERT(ranges.size() == 1);
 					for (auto& r : ranges) {
 						ASSERT(!r.value()->valid);
 					}
 					dataMoveMap.insert(meta.range, std::make_shared<DataMove>(meta, true));
-					// RelocateShard rs(dataMove.range, dataMove.priority, true);
-					// rs.dataMove = dataMove;
-					// output.send(rs);
 				}
 			}
 
@@ -798,7 +796,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 				}
 
 				shardsAffectedByTeamFailure->moveShard(keys, teams);
-				if (initData->shards[shard].hasDest && !SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+				if (initData->shards[shard].hasDest) {
 					// This shard is already in flight.  Ideally we should use dest in ShardsAffectedByTeamFailure and
 					// generate a dataDistributionRelocator directly in DataDistributionQueue to track it, but it's
 					// easier to just (with low priority) schedule it for movement.
@@ -806,18 +804,39 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 					if (!unhealthy && configuration.usableRegions > 1) {
 						unhealthy = initData->shards[shard].remoteSrc.size() != configuration.storageTeamSize;
 					}
-					output.send(RelocateShard(
-					    keys, unhealthy ? SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY : SERVER_KNOBS->PRIORITY_RECOVER_MOVE));
+					auto& iShard = initData->shards[shard];
+					if (iShard.destId == uninitializedShardId) {
+						// When SHARD_ENCODE_LOCATION_METADATA is enabled, and older version of data move is loaded, it
+						// can be scheduled as a `restore` data move.
+						if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+							auto ranges = dataMoveMap.intersectingRanges(keys);
+							for (auto& r : ranges) {
+								ASSERT(!r.value()->valid);
+							}
+							DataMoveMetaData meta(deterministicRandom()->randomUniqueID(), keys);
+							meta.src = iShard.primarySrc;
+							meta.src.insert(meta.src.end(), iShard.remoteSrc.begin(), iShard.remoteSrc.end());
+							meta.dest = iShard.primaryDest;
+							meta.dest.insert(meta.dest.end(), iShard.remoteDest.begin(), iShard.remoteDest.end());
+							std::sort(meta.src.begin(), meta.src.end());
+							std::sort(meta.dest.begin(), meta.dest.end());
+							dataMoveMap.insert(keys, std::make_shared<DataMove>(meta, true));
+						} else {
+							output.send(RelocateShard(keys,
+							                          unhealthy ? SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY
+							                                    : SERVER_KNOBS->PRIORITY_RECOVER_MOVE));
+						}
+					}
 				}
 
-				if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+				if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 					dataMoveMap[keys.begin]->addShard(initData->shards[shard]);
 				}
 
 				wait(yield(TaskPriority::DataDistribution));
 			}
 
-			if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+			if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 				state int idx = 0;
 				for (; idx < initData->dataMoves.size(); ++idx) {
 					const auto& meta = initData->dataMoves[idx];

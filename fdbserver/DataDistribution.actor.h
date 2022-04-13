@@ -249,11 +249,12 @@ struct DDShardInfo {
 	std::vector<UID> primaryDest;
 	std::vector<UID> remoteDest;
 	bool hasDest;
-	UID id;
+	UID srcId;
+	UID destId;
 
-	explicit DDShardInfo(Key key) : DDShardInfo(key, unassignedShardId) {}
+	explicit DDShardInfo(Key key) : DDShardInfo(key, uninitializedShardId, uninitializedShardId) {}
 
-	DDShardInfo(Key key, UID id) : key(key), hasDest(false), id(id) {}
+	DDShardInfo(Key key, UID srcId, UID destId) : key(key), hasDest(false), srcId(srcId), destId(destId) {}
 };
 
 struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {

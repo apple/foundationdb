@@ -473,11 +473,11 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 
 					wait(checkMoveKeysLock(&(tr->getTransaction()), lock, ddEnabledState));
 
-					if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+					if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 						Optional<Value> val = wait(tr->get(dataMoveKeyFor(dataMoveID)));
 						if (val.present()) {
-							DataMoveMetaData _dataMove = decodeDataMoveValue(val.get());
-							dataMove = _dataMove;
+							DataMoveMetaData tmpDataMove = decodeDataMoveValue(val.get());
+							dataMove = tmpDataMove;
 							TraceEvent(SevDebug, "StartMoveKeysFoundDataMove", relocationIntervalId)
 							    .detail("DataMoveID", dataMoveID)
 							    .detail("DataMove", dataMove.toString());
@@ -559,7 +559,7 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 						state std::vector<UID> dest;
 						state UID srcId;
 						state UID destId;
-						if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+						if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 							decodeKeyServersValue(UIDtoTagMap, old[oldIndex].value, src, dest, srcId, destId);
 							TraceEvent(SevDebug, "StartMoveKeysProcessingShard", relocationIntervalId)
 							    .detail("DataMoveID", dataMoveID)
@@ -569,12 +569,6 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 							    .detail("SrcID", srcId)
 							    .detail("DestID", destId)
 							    .detail("ReadVersion", tr->getReadVersion().get());
-							// if (!srcId.isValid()) {
-							// 	srcId = deterministicRandom()->randomUniqueID();
-							// 	TraceEvent(SevWarn, "StartMoveKeysBackfillTeamId", relocationIntervalId)
-							// 	    .detail("Range", rangeIntersectKeys)
-							// 	    .detail("NewTeamID", srcId);
-							// }
 						} else {
 							decodeKeyServersValue(UIDtoTagMap, old[oldIndex].value, src, dest);
 						}
@@ -596,12 +590,12 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 							}
 							Optional<Value> val = wait(tr->get(dataMoveKeyFor(destId)));
 							ASSERT(val.present());
-							DataMoveMetaData _dataMove = decodeDataMoveValue(val.get());
+							DataMoveMetaData tmpDataMove = decodeDataMoveValue(val.get());
 							TraceEvent(SevWarnAlways, "StartMoveKeysFoundConflictingDataMove", relocationIntervalId)
 							    .detail("Range", rangeIntersectKeys)
 							    .detail("DataMoveID", dataMoveID)
 							    .detail("ExistingDataMoveID", destId)
-							    .detail("ExistingDataMove", _dataMove.toString());
+							    .detail("ExistingDataMove", tmpDataMove.toString());
 							if (!cancelConflictingDataMoves) {
 								throw movekeys_conflict();
 							}
@@ -620,7 +614,7 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 						uniquify(src);
 
 						// Update dest servers for this range to be equal to servers
-						if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+						if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 							krmSetPreviouslyEmptyRange(&(tr->getTransaction()),
 							                           keyServersPrefix,
 							                           rangeIntersectKeys,
@@ -644,7 +638,7 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 						// Keep track of src shards so that we can preserve their values when we overwrite serverKeys
 						for (auto& uid : src) {
 							shardMap[uid].push_back(old.arena(), rangeIntersectKeys);
-							if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+							if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 								physicalShardMap[uid].push_back(physicalShard);
 							}
 							// TraceEvent("StartMoveKeysShardMapAdd", relocationIntervalId).detail("Server", uid);
@@ -679,7 +673,7 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 					std::vector<Future<Void>> actors;
 					for (oldDest = oldDests.begin(); oldDest != oldDests.end(); ++oldDest) {
 						if (std::find(servers.begin(), servers.end(), *oldDest) == servers.end()) {
-							if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+							if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 								actors.push_back(removeOldDestinationsWithPhysicalShard(
 								    tr, *oldDest, physicalShardMap[*oldDest], currentKeys));
 							} else {

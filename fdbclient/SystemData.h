@@ -51,7 +51,7 @@ extern const KeyRef afterAllKeys;
 //	as data movement occurs.
 extern const KeyRangeRef keyServersKeys, keyServersKeyServersKeys;
 extern const KeyRef keyServersPrefix, keyServersEnd, keyServersKeyServersKey;
-extern const UID unassignedShardId;
+extern const UID uninitializedShardId;
 const Key keyServersKey(const KeyRef& k);
 const KeyRef keyServersKey(const KeyRef& k, Arena& arena);
 const Value keyServersValue(RangeResult result,
