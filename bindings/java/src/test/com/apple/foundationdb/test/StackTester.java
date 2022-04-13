@@ -429,6 +429,13 @@ public class StackTester {
 				byte[] tenantName = (byte[])inst.popParam().join();
 				inst.push(TenantManagement.deleteTenant(inst.context.db, tenantName));
 			}
+			else if (op == StackOperation.TENANT_LIST) {
+				List<Object> params = inst.popParams(3).join();
+				byte[] begin = (byte[])params.get(0);
+				byte[] end = (byte[])params.get(1);
+				int limit = StackUtils.getInt(params.get(2));
+				inst.push(TenantManagement.listTenants(inst.context.db, begin, end, limit));
+			}
 			else if (op == StackOperation.TENANT_SET_ACTIVE) {
 				byte[] tenantName = (byte[])inst.popParam().join();
 				inst.context.setTenant(Optional.of(tenantName));

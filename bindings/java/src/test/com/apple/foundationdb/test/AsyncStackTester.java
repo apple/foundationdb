@@ -483,6 +483,14 @@ public class AsyncStackTester {
 				inst.push(TenantManagement.deleteTenant(inst.context.db, tenantName));
 			}, FDB.DEFAULT_EXECUTOR);
 		}
+		else if (op == StackOperation.TENANT_LIST) {
+			return inst.popParams(3).thenAcceptAsync(params -> {
+				byte[] begin = (byte[])params.get(0);
+				byte[] end = (byte[])params.get(1);
+				int limit = StackUtils.getInt(params.get(2));
+				inst.push(TenantManagement.listTenants(inst.context.db, begin, end, limit));
+			}, FDB.DEFAULT_EXECUTOR);
+		}
 		else if (op == StackOperation.TENANT_SET_ACTIVE) {
 			return inst.popParam().thenAcceptAsync(param -> {
 				byte[] tenantName = (byte[])param;

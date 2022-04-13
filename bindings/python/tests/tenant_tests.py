@@ -59,6 +59,10 @@ def test_tenant_operations(db):
     fdb.tenant_management.create_tenant(db, b'tenant1')
     fdb.tenant_management.create_tenant(db, b'tenant2')
 
+    tenant_list = fdb.tenant_management.list_tenants(db, b'a', b'z', 10).to_list()
+    assert tenant_list[0] == b'tenant1'
+    assert tenant_list[1] == b'tenant2'
+
     tenant1 = db.open_tenant(b'tenant1')
     tenant2 = db.open_tenant(b'tenant2')
 
