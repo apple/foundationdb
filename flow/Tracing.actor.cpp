@@ -41,7 +41,6 @@ constexpr float kQueueSizeLogInterval = 5.0;
 
 struct NoopTracer : ITracer {
 	TracerType type() const override { return TracerType::DISABLED; }
-	// void trace(Span const& span) override {}
 	void trace(Span const& span) override {}
 };
 
