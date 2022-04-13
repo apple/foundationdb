@@ -19,23 +19,30 @@
  */
 
 #pragma once
-#include <cstdint>
 #include "flow/Trace.h"
+#include <cstdint>
 
-// This version impacts both communications and the deserialization of certain database and IKeyValueStore keys.
+// This version impacts both communications and the deserialization of certain
+// database and IKeyValueStore keys.
 //
-// The convention is that 'x' and 'y' should match the major and minor version of the software, and 'z' should be 0.
-// To make a change without a corresponding increase to the x.y version, increment the 'dev' digit.
+// The convention is that 'x' and 'y' should match the major and minor version
+// of the software, and 'z' should be 0. To make a change without a
+// corresponding increase to the x.y version, increment the 'dev' digit.
 //
-// The last 2 bytes (4 digits) of the protocol version do not affect compatibility. These two bytes are not currently
-// used and should not be changed from 0.
+// The last 2 bytes (4 digits) of the protocol version do not affect
+// compatibility. These two bytes are not currently used and should not be
+// changed from 0.
 //                                                         xyzdev
 //                                                         vvvv
 constexpr uint64_t currentProtocolVersionValue = 0x0FDB00B072000000LL;
 
-// The first protocol version that cannot be downgraded from. Ordinarily, this will be two release versions larger
-// than the current version, meaning that we only support downgrades between consecutive release versions.
+// The first protocol version that cannot be downgraded from. Ordinarily, this
+// will be two release versions larger than the current version, meaning that we
+// only support downgrades between consecutive release versions.
 constexpr uint64_t minInvalidProtocolVersionValue = 0x0FDB00B074000000LL;
+
+// The lowest protocol version that can be downgraded to.
+constexpr uint64_t minCompatibleProtocolVersionValue = 0x0FDB00B071000000LL;
 
 #define PROTOCOL_VERSION_FEATURE(v, x)                                                                                 \
 	static_assert((v & 0xF0FFFFLL) == 0 || v < 0x0FDB00B071000000LL, "Unexpected feature protocol version");           \
@@ -46,11 +53,11 @@ constexpr uint64_t minInvalidProtocolVersionValue = 0x0FDB00B074000000LL;
 	constexpr bool has##x() const { return this->version() >= x ::protocolVersion; }                                   \
 	static constexpr ProtocolVersion with##x() { return ProtocolVersion(x ::protocolVersion); }
 
-// ProtocolVersion wraps a uint64_t to make it type safe. It will know about the current versions.
-// The default constructor will initialize the version to 0 (which is an invalid
-// version). ProtocolVersion objects should never be compared to version numbers
-// directly. Instead one should always use the type-safe version types from which
-// this class inherits all.
+// ProtocolVersion wraps a uint64_t to make it type safe. It will know about the
+// current versions. The default constructor will initialize the version to 0
+// (which is an invalid version). ProtocolVersion objects should never be
+// compared to version numbers directly. Instead one should always use the
+// type-safe version types from which this class inherits all.
 class ProtocolVersion {
 	uint64_t _version;
 
@@ -59,6 +66,7 @@ public: // constants
 	static constexpr uint64_t objectSerializerFlag = 0x1000000000000000LL;
 	static constexpr uint64_t compatibleProtocolVersionMask = 0xFFFFFFFFFFFF0000LL;
 	static constexpr uint64_t minValidProtocolVersion = 0x0FDB00A200060001LL;
+	static constexpr uint64_t invalidProtocolVersion = 0x0FDB00A100000000LL;
 
 public:
 	constexpr explicit ProtocolVersion(uint64_t version) : _version(version) {}
@@ -68,11 +76,14 @@ public:
 		return (other.version() & compatibleProtocolVersionMask) == (version() & compatibleProtocolVersionMask);
 	}
 
-	// Returns a normalized protocol version that will be the same for all compatible versions
+	// Returns a normalized protocol version that will be the same for all
+	// compatible versions
 	constexpr ProtocolVersion normalizedVersion() const {
 		return ProtocolVersion(_version & compatibleProtocolVersionMask);
 	}
 	constexpr bool isValid() const { return version() >= minValidProtocolVersion; }
+
+	constexpr bool isInvalidMagic() const { return version() == invalidProtocolVersion; }
 
 	constexpr uint64_t version() const { return _version & versionFlagMask; }
 	constexpr uint64_t versionWithFlags() const { return _version; }
@@ -85,9 +96,10 @@ public:
 	constexpr void removeAllFlags() { _version = version(); }
 
 	// comparison operators
-	// Comparison operators ignore the flags - this is because the version flags are stored in the
-	// most significant byte which can make comparison confusing. Also, generally, when one wants to
-	// compare versions, we are usually not interested in the flags.
+	// Comparison operators ignore the flags - this is because the version flags
+	// are stored in the most significant byte which can make comparison
+	// confusing. Also, generally, when one wants to compare versions, we are
+	// usually not interested in the flags.
 	constexpr bool operator==(const ProtocolVersion other) const { return version() == other.version(); }
 	constexpr bool operator!=(const ProtocolVersion other) const { return version() != other.version(); }
 	constexpr bool operator<=(const ProtocolVersion other) const { return version() <= other.version(); }
@@ -96,11 +108,12 @@ public:
 	constexpr bool operator>(const ProtocolVersion other) const { return version() > other.version(); }
 
 public: // introduced features
-	// The 5th digit from right is dev version, for example, 2 in 0x0FDB00B061020000LL;
-	// It was used to identify a protocol change (e.g., interface change) between major/minor versions (say 5.1 and 5.2)
-	// We stopped using the dev version consistently in the past.
-	// To ensure binaries work across patch releases (e.g., 6.2.0 to 6.2.22), we require that the protocol version be
-	// the same for each of them.
+	// The 5th digit from right is dev version, for example, 2 in
+	// 0x0FDB00B061020000LL; It was used to identify a protocol change (e.g.,
+	// interface change) between major/minor versions (say 5.1 and 5.2) We stopped
+	// using the dev version consistently in the past. To ensure binaries work
+	// across patch releases (e.g., 6.2.0 to 6.2.22), we require that the protocol
+	// version be the same for each of them.
 	PROTOCOL_VERSION_FEATURE(0x0FDB00A200090000LL, Watches);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00A2000D0000LL, MovableCoordinatedState);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00A340000000LL, ProcessID);
@@ -164,6 +177,7 @@ public: // introduced features
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B071010000LL, Tenants);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B071010000LL, StorageInterfaceReadiness);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B071010000LL, ResolverPrivateMutations);
+	PROTOCOL_VERSION_FEATURE(0x0FDB00B072000000LL, SWVersionTracking);
 };
 
 template <>
@@ -175,15 +189,18 @@ struct Traceable<ProtocolVersion> : std::true_type {
 
 constexpr ProtocolVersion currentProtocolVersion(currentProtocolVersionValue);
 constexpr ProtocolVersion minInvalidProtocolVersion(minInvalidProtocolVersionValue);
+constexpr ProtocolVersion minCompatibleProtocolVersion(minCompatibleProtocolVersionValue);
 
-// This assert is intended to help prevent incrementing the leftmost digits accidentally. It will probably need to
-// change when we reach version 10.
+// This assert is intended to help prevent incrementing the leftmost digits
+// accidentally. It will probably need to change when we reach version 10.
 static_assert(currentProtocolVersion.version() < 0x0FDB00B100000000LL, "Unexpected protocol version");
 
-// The last two bytes of the protocol version are currently masked out in compatibility checks. We do not use them,
-// so prevent them from being inadvertently changed.
+// The last two bytes of the protocol version are currently masked out in
+// compatibility checks. We do not use them, so prevent them from being
+// inadvertently changed.
 //
-// We also do not modify the protocol version for patch releases, so prevent modifying the patch version digit.
+// We also do not modify the protocol version for patch releases, so prevent
+// modifying the patch version digit.
 static_assert((currentProtocolVersion.version() & 0xF0FFFFLL) == 0, "Unexpected protocol version");
 
 // Downgrades must support at least one minor version.
@@ -191,6 +208,6 @@ static_assert(minInvalidProtocolVersion.version() >=
                   (currentProtocolVersion.version() & 0xFFFFFFFFFF000000LL) + 0x0000000002000000,
               "Downgrades must support one minor version");
 
-// The min invalid protocol version should be the smallest possible protocol version associated with a minor release
-// version.
+// The min invalid protocol version should be the smallest possible protocol
+// version associated with a minor release version.
 static_assert((minInvalidProtocolVersion.version() & 0xFFFFFFLL) == 0, "Unexpected min invalid protocol version");
