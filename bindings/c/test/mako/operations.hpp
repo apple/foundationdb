@@ -88,9 +88,27 @@ char const* getOpName(int ops_code);
 
 extern const std::array<Operation, MAX_OP> opTable;
 
-using OpIterator = std::tuple<int /*op*/, int /*count*/, int /*step*/>;
+struct OpIterator {
+	int op, count, step;
 
-constexpr const OpIterator OpEnd = OpIterator(MAX_OP, -1, -1);
+	bool operator==(const OpIterator& other) const noexcept {
+		return op == other.op && count == other.count && step == other.step;
+	}
+
+	bool operator!=(const OpIterator& other) const noexcept {
+		return !(*this == other);
+	}
+
+	StepKind stepKind() const noexcept {
+		return opTable[op].stepKind(step);
+	}
+
+	char const* opName() const noexcept {
+		return getOpName(op);
+	}
+};
+
+constexpr const OpIterator OpEnd = OpIterator{MAX_OP, -1, -1};
 
 OpIterator getOpBegin(Arguments const& args) noexcept;
 

@@ -718,7 +718,7 @@ int workerProcessMain(Arguments const& args, int worker_id, shared_memory::Acces
 		}
 	} else {
 		logr.debug("running async mode with {} concurrent transactions", args.async_xacts);
-		boost::asio::io_context ctx;
+		auto ctx = boost::asio::io_context{};
 		using WorkGuard = boost::asio::executor_work_guard<boost::asio::io_context::executor_type>;
 		auto wg = WorkGuard(ctx.get_executor());
 		auto worker_threads = std::vector<std::thread>(args.num_threads);

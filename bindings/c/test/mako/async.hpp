@@ -62,7 +62,7 @@ struct ResumableStateForRunWorkload : std::enable_shared_from_this<ResumableStat
 	std::atomic<int>& stopcount;
 	std::atomic<int> const& signal;
 	int max_iters;
-	OpIterator op_iter;
+	OpIterator iter;
 	LatencySampleBinArray sample_bins;
 	fdb::ByteString key1;
 	fdb::ByteString key2;
@@ -83,9 +83,9 @@ struct ResumableStateForRunWorkload : std::enable_shared_from_this<ResumableStat
 	                             std::atomic<int>& stopcount,
 	                             std::atomic<int> const& signal,
 	                             int max_iters,
-	                             OpIterator op_iter)
+	                             OpIterator iter)
 	  : logr(logr), db(db), tx(tx), io_context(io_context), args(args), stats(stats), stopcount(stopcount),
-	    signal(signal), max_iters(max_iters), op_iter(op_iter), needs_commit(false) {
+	    signal(signal), max_iters(max_iters), iter(iter), needs_commit(false) {
 		key1.reserve(args.key_length);
 		key2.reserve(args.key_length);
 		val.reserve(args.value_length);
@@ -96,7 +96,8 @@ struct ResumableStateForRunWorkload : std::enable_shared_from_this<ResumableStat
 	}
 	void postNextTick();
 	void runOneTick();
-	void onStepSuccess();
+	void updateStepStats();
+	void onTaskSuccess();
 };
 
 using RunWorkloadStateHandle = std::shared_ptr<ResumableStateForRunWorkload>;
