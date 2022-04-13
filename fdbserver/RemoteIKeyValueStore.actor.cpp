@@ -178,6 +178,8 @@ ACTOR static Future<int> flowProcessRunner(RemoteIKeyValueStore* self, Promise<V
 		                              SERVER_KNOBS->CONN_FILE,
 		                              "--logdir",
 		                              SERVER_KNOBS->LOG_DIRECTORY,
+		                              "--trace-format",
+		                              getTraceFormatExtension(),
 		                              "-p",
 		                              flowProcessAddr,
 		                              "--process-name",

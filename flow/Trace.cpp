@@ -565,6 +565,11 @@ public:
 		this->localAddress = addr;
 	}
 
+	void disposeWriter() {
+		writer->addref();
+		writer.clear();
+	}
+
 	Future<Void> pingWriterThread() {
 		auto ping = new WriterThread::Ping;
 		auto f = ping->ack.getFuture();
@@ -812,6 +817,14 @@ void addUniversalTraceField(const std::string& name, const std::string& value) {
 
 void setTraceLocalAddress(const NetworkAddress& addr) {
 	g_traceLog.setLocalAddress(addr);
+}
+
+void disposeTraceFileWriter() {
+	g_traceLog.disposeWriter();
+}
+
+std::string getTraceFormatExtension() {
+	return std::string(g_traceLog.formatter->getExtension());
 }
 
 BaseTraceEvent::BaseTraceEvent() : initialized(true), enabled(false), logged(true) {}
