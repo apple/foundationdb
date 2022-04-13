@@ -3129,7 +3129,7 @@ ACTOR Future<Void> warmRange_impl(Reference<TransactionState> trState, KeyRange 
 	return Void();
 }
 
-// TODO - ljoswiak and mpilman. This will need some close inspection. 
+// TODO - ljoswiak and mpilman. This will need some close inspection.
 SpanContext generateSpanID(bool transactionTracingSample, SpanContext parentContext = SpanContext()) {
 	UID txnId = UID(deterministicRandom()->randomUInt64(), deterministicRandom()->randomUInt64());
 	if (parentContext.isValid()) {
@@ -3140,8 +3140,8 @@ SpanContext generateSpanID(bool transactionTracingSample, SpanContext parentCont
 		return SpanContext(txnId, spanId);
 	} else if (transactionTracingSample) {
 		uint64_t spanId = deterministicRandom()->random01() <= FLOW_KNOBS->TRACING_SAMPLE_RATE
-		                       ? deterministicRandom()->randomUInt64()
-		                       : 0;
+		                      ? deterministicRandom()->randomUInt64()
+		                      : 0;
 		return SpanContext(txnId, spanId, spanId > 0 ? TraceFlags::sampled : TraceFlags::unsampled);
 	} else {
 		return SpanContext(txnId, 0);
@@ -3153,8 +3153,8 @@ TransactionState::TransactionState(Database cx,
                                    TaskPriority taskID,
                                    SpanContext spanContext,
                                    Reference<TransactionLogInfo> trLogInfo)
-  : cx(cx), trLogInfo(trLogInfo), options(cx), taskID(taskID), spanContext(spanContext), readVersionObtainedFromGrvProxy(true),
-    tenant_(tenant), tenantSet(tenant.present()) {}
+  : cx(cx), trLogInfo(trLogInfo), options(cx), taskID(taskID), spanContext(spanContext),
+    readVersionObtainedFromGrvProxy(true), tenant_(tenant), tenantSet(tenant.present()) {}
 
 Reference<TransactionState> TransactionState::cloneAndReset(Reference<TransactionLogInfo> newTrLogInfo,
                                                             bool generateNewSpan) const {

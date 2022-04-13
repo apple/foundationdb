@@ -1457,7 +1457,10 @@ Future<Version> waitForVersion(StorageServer* data, Version version, SpanContext
 	return waitForVersionActor(data, version, spanContext);
 }
 
-Future<Version> waitForVersion(StorageServer* data, Version commitVersion, Version readVersion, SpanContext spanContext) {
+Future<Version> waitForVersion(StorageServer* data,
+                               Version commitVersion,
+                               Version readVersion,
+                               SpanContext spanContext) {
 	ASSERT(commitVersion == invalidVersion || commitVersion < readVersion);
 
 	if (commitVersion == invalidVersion) {

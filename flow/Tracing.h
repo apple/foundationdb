@@ -57,22 +57,6 @@ struct SpanContext {
 	void serialize(Ar& ar) {
 		serializer(ar, traceID, spanID, m_Flags);
 	}
-
-	// template <class Ar>
-	// void serialize_unversioned(
-	//     Ar& ar) { 
-	// 	serializer(ar, traceID, spanID, m_Flags);
-	// }
-
-	// template <class Ar>
-	// void load(Ar& ar, SpanContext& spanContext) {
-	// 	spanContext.serialize_unversioned(ar);
-	// }
-
-	// template <class Ar>
-	// void save(Ar& ar, SpanContext const& spanContext) {
-	// 	const_cast<SpanContext&>(spanContext).serialize_unversioned(ar);
-	// }
 };
 
 // Span
