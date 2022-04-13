@@ -23,17 +23,19 @@
 #include <unordered_set>
 #pragma once
 
-#include <stdint.h>
+#include <algorithm>
 #include <array>
+#include <boost/container/flat_map.hpp>
+#include <deque>
 #include <set>
-#include "flow/ProtocolVersion.h"
-#include "flow/Error.h"
+#include <stdint.h>
+
 #include "flow/Arena.h"
+#include "flow/Error.h"
 #include "flow/FileIdentifier.h"
 #include "flow/ObjectSerializer.h"
+#include "flow/ProtocolVersion.h"
 #include "flow/network.h"
-#include <algorithm>
-#include <deque>
 
 // Though similar, is_binary_serializable cannot be replaced by std::is_pod, as doing so would prefer
 // memcpy over a defined serialize() method on a POD struct.  As not all of our structs are packed,
@@ -265,6 +267,27 @@ inline void save(Archive& ar, const std::map<K, V>& value) {
 }
 template <class Archive, class K, class V>
 inline void load(Archive& ar, std::map<K, V>& value) {
+	int s;
+	ar >> s;
+	value.clear();
+	for (int i = 0; i < s; ++i) {
+		std::pair<K, V> p;
+		ar >> p.first >> p.second;
+		value.emplace(p);
+	}
+	ASSERT(ar.protocolVersion().isValid());
+}
+
+template <class Archive, class K, class V>
+inline void save(Archive& ar, const boost::container::flat_map<K, V>& value) {
+	ar << (int)value.size();
+	for (const auto& it : value) {
+		ar << it.first << it.second;
+	}
+	ASSERT(ar.protocolVersion().isValid());
+}
+template <class Archive, class K, class V>
+inline void load(Archive& ar, boost::container::flat_map<K, V>& value) {
 	int s;
 	ar >> s;
 	value.clear();

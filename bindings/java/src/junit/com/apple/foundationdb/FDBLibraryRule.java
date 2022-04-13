@@ -37,7 +37,7 @@ public class FDBLibraryRule implements BeforeAllCallback {
 
 	public FDBLibraryRule(int apiVersion) { this.apiVersion = apiVersion; }
 
-	public static FDBLibraryRule current() { return new FDBLibraryRule(710); }
+	public static FDBLibraryRule current() { return new FDBLibraryRule(720); }
 
 	public static FDBLibraryRule v63() { return new FDBLibraryRule(630); }
 

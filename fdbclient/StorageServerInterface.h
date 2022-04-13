@@ -37,6 +37,7 @@
 #include "fdbclient/Tenant.h"
 #include "flow/Tracing.h"
 #include "flow/UnitTest.h"
+#include "fdbclient/VersionVector.h"
 
 // Dead code, removed in the next protocol version
 struct VersionReply {
@@ -63,13 +64,13 @@ struct StorageServerInterface {
 	UID uniqueID;
 	Optional<UID> tssPairID;
 
-	RequestStream<struct GetValueRequest> getValue;
-	RequestStream<struct GetKeyRequest> getKey;
+	PublicRequestStream<struct GetValueRequest> getValue;
+	PublicRequestStream<struct GetKeyRequest> getKey;
 
 	// Throws a wrong_shard_server if the keys in the request or result depend on data outside this server OR if a large
 	// selector offset prevents all data from being read in one range read
-	RequestStream<struct GetKeyValuesRequest> getKeyValues;
-	RequestStream<struct GetMappedKeyValuesRequest> getMappedKeyValues;
+	PublicRequestStream<struct GetKeyValuesRequest> getKeyValues;
+	PublicRequestStream<struct GetMappedKeyValuesRequest> getMappedKeyValues;
 
 	RequestStream<struct GetShardStateRequest> getShardState;
 	RequestStream<struct WaitMetricsRequest> waitMetrics;
@@ -79,16 +80,17 @@ struct StorageServerInterface {
 	RequestStream<struct StorageQueuingMetricsRequest> getQueuingMetrics;
 
 	RequestStream<ReplyPromise<KeyValueStoreType>> getKeyValueStoreType;
-	RequestStream<struct WatchValueRequest> watchValue;
+	PublicRequestStream<struct WatchValueRequest> watchValue;
 	RequestStream<struct ReadHotSubRangeRequest> getReadHotRanges;
 	RequestStream<struct SplitRangeRequest> getRangeSplitPoints;
-	RequestStream<struct GetKeyValuesStreamRequest> getKeyValuesStream;
-	RequestStream<struct ChangeFeedStreamRequest> changeFeedStream;
-	RequestStream<struct OverlappingChangeFeedsRequest> overlappingChangeFeeds;
-	RequestStream<struct ChangeFeedPopRequest> changeFeedPop;
-	RequestStream<struct ChangeFeedVersionUpdateRequest> changeFeedVersionUpdate;
-	RequestStream<struct GetCheckpointRequest> checkpoint;
-	RequestStream<struct FetchCheckpointRequest> fetchCheckpoint;
+	PublicRequestStream<struct GetKeyValuesStreamRequest> getKeyValuesStream;
+	PublicRequestStream<struct ChangeFeedStreamRequest> changeFeedStream;
+	PublicRequestStream<struct OverlappingChangeFeedsRequest> overlappingChangeFeeds;
+	PublicRequestStream<struct ChangeFeedPopRequest> changeFeedPop;
+	PublicRequestStream<struct ChangeFeedVersionUpdateRequest> changeFeedVersionUpdate;
+	PublicRequestStream<struct GetCheckpointRequest> checkpoint;
+	PublicRequestStream<struct FetchCheckpointRequest> fetchCheckpoint;
+	PublicRequestStream<struct FetchCheckpointKeyValuesRequest> fetchCheckpointKeyValues;
 
 private:
 	bool acceptingRequests;
@@ -122,8 +124,9 @@ public:
 				serializer(ar, uniqueID, locality, getValue);
 			}
 			if (Ar::isDeserializing) {
-				getKey = RequestStream<struct GetKeyRequest>(getValue.getEndpoint().getAdjustedEndpoint(1));
-				getKeyValues = RequestStream<struct GetKeyValuesRequest>(getValue.getEndpoint().getAdjustedEndpoint(2));
+				getKey = PublicRequestStream<struct GetKeyRequest>(getValue.getEndpoint().getAdjustedEndpoint(1));
+				getKeyValues =
+				    PublicRequestStream<struct GetKeyValuesRequest>(getValue.getEndpoint().getAdjustedEndpoint(2));
 				getShardState =
 				    RequestStream<struct GetShardStateRequest>(getValue.getEndpoint().getAdjustedEndpoint(3));
 				waitMetrics = RequestStream<struct WaitMetricsRequest>(getValue.getEndpoint().getAdjustedEndpoint(4));
@@ -135,26 +138,30 @@ public:
 				    RequestStream<struct StorageQueuingMetricsRequest>(getValue.getEndpoint().getAdjustedEndpoint(8));
 				getKeyValueStoreType =
 				    RequestStream<ReplyPromise<KeyValueStoreType>>(getValue.getEndpoint().getAdjustedEndpoint(9));
-				watchValue = RequestStream<struct WatchValueRequest>(getValue.getEndpoint().getAdjustedEndpoint(10));
+				watchValue =
+				    PublicRequestStream<struct WatchValueRequest>(getValue.getEndpoint().getAdjustedEndpoint(10));
 				getReadHotRanges =
 				    RequestStream<struct ReadHotSubRangeRequest>(getValue.getEndpoint().getAdjustedEndpoint(11));
 				getRangeSplitPoints =
 				    RequestStream<struct SplitRangeRequest>(getValue.getEndpoint().getAdjustedEndpoint(12));
-				getKeyValuesStream =
-				    RequestStream<struct GetKeyValuesStreamRequest>(getValue.getEndpoint().getAdjustedEndpoint(13));
-				getMappedKeyValues =
-				    RequestStream<struct GetMappedKeyValuesRequest>(getValue.getEndpoint().getAdjustedEndpoint(14));
+				getKeyValuesStream = PublicRequestStream<struct GetKeyValuesStreamRequest>(
+				    getValue.getEndpoint().getAdjustedEndpoint(13));
+				getMappedKeyValues = PublicRequestStream<struct GetMappedKeyValuesRequest>(
+				    getValue.getEndpoint().getAdjustedEndpoint(14));
 				changeFeedStream =
-				    RequestStream<struct ChangeFeedStreamRequest>(getValue.getEndpoint().getAdjustedEndpoint(15));
-				overlappingChangeFeeds =
-				    RequestStream<struct OverlappingChangeFeedsRequest>(getValue.getEndpoint().getAdjustedEndpoint(16));
+				    PublicRequestStream<struct ChangeFeedStreamRequest>(getValue.getEndpoint().getAdjustedEndpoint(15));
+				overlappingChangeFeeds = PublicRequestStream<struct OverlappingChangeFeedsRequest>(
+				    getValue.getEndpoint().getAdjustedEndpoint(16));
 				changeFeedPop =
-				    RequestStream<struct ChangeFeedPopRequest>(getValue.getEndpoint().getAdjustedEndpoint(17));
-				changeFeedVersionUpdate = RequestStream<struct ChangeFeedVersionUpdateRequest>(
+				    PublicRequestStream<struct ChangeFeedPopRequest>(getValue.getEndpoint().getAdjustedEndpoint(17));
+				changeFeedVersionUpdate = PublicRequestStream<struct ChangeFeedVersionUpdateRequest>(
 				    getValue.getEndpoint().getAdjustedEndpoint(18));
-				checkpoint = RequestStream<struct GetCheckpointRequest>(getValue.getEndpoint().getAdjustedEndpoint(19));
+				checkpoint =
+				    PublicRequestStream<struct GetCheckpointRequest>(getValue.getEndpoint().getAdjustedEndpoint(19));
 				fetchCheckpoint =
-				    RequestStream<struct FetchCheckpointRequest>(getValue.getEndpoint().getAdjustedEndpoint(20));
+				    PublicRequestStream<struct FetchCheckpointRequest>(getValue.getEndpoint().getAdjustedEndpoint(20));
+				fetchCheckpointKeyValues = PublicRequestStream<struct FetchCheckpointKeyValuesRequest>(
+				    getValue.getEndpoint().getAdjustedEndpoint(21));
 			}
 		} else {
 			ASSERT(Ar::isDeserializing);
@@ -204,6 +211,7 @@ public:
 		streams.push_back(changeFeedVersionUpdate.getReceiver());
 		streams.push_back(checkpoint.getReceiver());
 		streams.push_back(fetchCheckpoint.getReceiver());
+		streams.push_back(fetchCheckpointKeyValues.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -271,6 +279,9 @@ struct GetValueRequest : TimedRequest {
 	Optional<TagSet> tags;
 	Optional<UID> debugID;
 	ReplyPromise<GetValueReply> reply;
+	VersionVector ssLatestCommitVersions; // includes the latest commit versions, as known
+	                                      // to this client, of all storage replicas that
+	                                      // serve the given key
 
 	GetValueRequest() {}
 	GetValueRequest(SpanContext spanContext,
@@ -278,12 +289,14 @@ struct GetValueRequest : TimedRequest {
 	                const Key& key,
 	                Version ver,
 	                Optional<TagSet> tags,
-	                Optional<UID> debugID)
-	  : spanContext(spanContext), tenantInfo(tenantInfo), key(key), version(ver), tags(tags), debugID(debugID) {}
+	                Optional<UID> debugID,
+	                VersionVector latestCommitVersions)
+	  : spanContext(spanContext), tenantInfo(tenantInfo), key(key), version(ver), tags(tags), debugID(debugID),
+	    ssLatestCommitVersions(latestCommitVersions) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, key, version, tags, debugID, reply, spanContext, tenantInfo);
+		serializer(ar, key, version, tags, debugID, reply, spanContext, tenantInfo, ssLatestCommitVersions);
 	}
 };
 
@@ -361,6 +374,9 @@ struct GetKeyValuesRequest : TimedRequest {
 	Optional<TagSet> tags;
 	Optional<UID> debugID;
 	ReplyPromise<GetKeyValuesReply> reply;
+	VersionVector ssLatestCommitVersions; // includes the latest commit versions, as known
+	                                      // to this client, of all storage replicas that
+	                                      // serve the given key
 
 	GetKeyValuesRequest() : isFetchKeys(false) {}
 
@@ -378,7 +394,8 @@ struct GetKeyValuesRequest : TimedRequest {
 		           reply,
 		           spanContext,
 		           tenantInfo,
-		           arena);
+		           arena,
+		           ssLatestCommitVersions);
 	}
 };
 
@@ -413,6 +430,9 @@ struct GetMappedKeyValuesRequest : TimedRequest {
 	Optional<TagSet> tags;
 	Optional<UID> debugID;
 	ReplyPromise<GetMappedKeyValuesReply> reply;
+	VersionVector ssLatestCommitVersions; // includes the latest commit versions, as known
+	                                      // to this client, of all storage replicas that
+	                                      // serve the given key range
 
 	GetMappedKeyValuesRequest() : isFetchKeys(false) {}
 	template <class Ar>
@@ -430,7 +450,8 @@ struct GetMappedKeyValuesRequest : TimedRequest {
 		           reply,
 		           spanContext,
 		           tenantInfo,
-		           arena);
+		           arena,
+		           ssLatestCommitVersions);
 	}
 };
 
@@ -473,6 +494,9 @@ struct GetKeyValuesStreamRequest {
 	Optional<TagSet> tags;
 	Optional<UID> debugID;
 	ReplyPromiseStream<GetKeyValuesStreamReply> reply;
+	VersionVector ssLatestCommitVersions; // includes the latest commit versions, as known
+	                                      // to this client, of all storage replicas that
+	                                      // serve the given key range
 
 	GetKeyValuesStreamRequest() : isFetchKeys(false) {}
 
@@ -490,7 +514,8 @@ struct GetKeyValuesStreamRequest {
 		           reply,
 		           spanContext,
 		           tenantInfo,
-		           arena);
+		           arena,
+		           ssLatestCommitVersions);
 	}
 };
 
@@ -518,6 +543,9 @@ struct GetKeyRequest : TimedRequest {
 	Optional<TagSet> tags;
 	Optional<UID> debugID;
 	ReplyPromise<GetKeyReply> reply;
+	VersionVector ssLatestCommitVersions; // includes the latest commit versions, as known
+	                                      // to this client, of all storage replicas that
+	                                      // serve the given key
 
 	GetKeyRequest() {}
 
@@ -526,12 +554,14 @@ struct GetKeyRequest : TimedRequest {
 	              KeySelectorRef const& sel,
 	              Version version,
 	              Optional<TagSet> tags,
-	              Optional<UID> debugID)
-	  : spanContext(spanContext), tenantInfo(tenantInfo), sel(sel), version(version), debugID(debugID) {}
+	              Optional<UID> debugID,
+	              VersionVector latestCommitVersions)
+	  : spanContext(spanContext), tenantInfo(tenantInfo), sel(sel), version(version), debugID(debugID),
+	    ssLatestCommitVersions(latestCommitVersions) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, sel, version, tags, debugID, reply, spanContext, tenantInfo, arena);
+		serializer(ar, sel, version, tags, debugID, reply, spanContext, tenantInfo, arena, ssLatestCommitVersions);
 	}
 };
 
@@ -895,6 +925,37 @@ struct FetchCheckpointRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, checkpointID, token, reply);
+	}
+};
+
+struct FetchCheckpointKeyValuesStreamReply : public ReplyPromiseStreamReply {
+	constexpr static FileIdentifier file_identifier = 13804353;
+	Arena arena;
+	VectorRef<KeyValueRef> data;
+
+	FetchCheckpointKeyValuesStreamReply() = default;
+
+	int expectedSize() const { return data.expectedSize(); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, ReplyPromiseStreamReply::acknowledgeToken, ReplyPromiseStreamReply::sequence, data, arena);
+	}
+};
+
+// Fetch checkpoint in the format of key-value pairs.
+struct FetchCheckpointKeyValuesRequest {
+	constexpr static FileIdentifier file_identifier = 13804354;
+	UID checkpointID;
+	KeyRange range;
+	ReplyPromiseStream<FetchCheckpointKeyValuesStreamReply> reply;
+
+	FetchCheckpointKeyValuesRequest() = default;
+	FetchCheckpointKeyValuesRequest(UID checkpointID, KeyRange range) : checkpointID(checkpointID), range(range) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, checkpointID, range, reply);
 	}
 };
 

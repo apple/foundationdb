@@ -762,14 +762,14 @@ TEST_CASE("/fdbserver/worker/addressInDbAndPrimaryDc") {
 	NetworkAddress grvProxyAddress(IPAddress(0x26262626), 1);
 	GrvProxyInterface grvProxyInterf;
 	grvProxyInterf.getConsistentReadVersion =
-	    RequestStream<struct GetReadVersionRequest>(Endpoint({ grvProxyAddress }, UID(1, 2)));
+	    PublicRequestStream<struct GetReadVersionRequest>(Endpoint({ grvProxyAddress }, UID(1, 2)));
 	testDbInfo.client.grvProxies.push_back(grvProxyInterf);
 	ASSERT(addressInDbAndPrimaryDc(grvProxyAddress, makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
 
 	NetworkAddress commitProxyAddress(IPAddress(0x37373737), 1);
 	CommitProxyInterface commitProxyInterf;
 	commitProxyInterf.commit =
-	    RequestStream<struct CommitTransactionRequest>(Endpoint({ commitProxyAddress }, UID(1, 2)));
+	    PublicRequestStream<struct CommitTransactionRequest>(Endpoint({ commitProxyAddress }, UID(1, 2)));
 	testDbInfo.client.commitProxies.push_back(commitProxyInterf);
 	ASSERT(addressInDbAndPrimaryDc(commitProxyAddress, makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
 
@@ -2183,6 +2183,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				                 [&req](const auto& p) { return p.second != req.storeType; }) ||
 				     req.seedTag != invalidTag)) {
 					ASSERT(req.clusterId.isValid());
+					ASSERT(req.initialClusterVersion >= 0);
 					LocalLineage _;
 					getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::Storage;
 					bool isTss = req.tssPairIDAndVersion.present();
@@ -2244,6 +2245,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                               recruited,
 					                               req.seedTag,
 					                               req.clusterId,
+					                               req.initialClusterVersion,
 					                               isTss ? req.tssPairIDAndVersion.get().second : 0,
 					                               storageReady,
 					                               dbInfo,

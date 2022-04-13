@@ -335,6 +335,11 @@ public:
 	bool HEALTH_MONITOR_MARK_FAILED_UNSTABLE_CONNECTIONS;
 	int HEALTH_MONITOR_CLIENT_REQUEST_INTERVAL_SECS;
 	int HEALTH_MONITOR_CONNECTION_MAX_CLOSED;
+
+	// Encryption
+	int64_t ENCRYPT_CIPHER_KEY_CACHE_TTL;
+	int64_t ENCRYPT_KEY_REFRESH_INTERVAL;
+
 	FlowKnobs(class Randomize, class IsSimulated);
 	void initialize(class Randomize, class IsSimulated);
 };

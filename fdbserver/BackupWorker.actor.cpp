@@ -433,6 +433,7 @@ struct BackupData {
 			GetReadVersionRequest request(span.context,
 			                              0,
 			                              TransactionPriority::DEFAULT,
+			                              invalidVersion,
 			                              GetReadVersionRequest::FLAG_USE_MIN_KNOWN_COMMITTED_VERSION);
 			choose {
 				when(wait(self->cx->onProxiesChanged())) {}
@@ -441,6 +442,7 @@ struct BackupData {
 				                               &GrvProxyInterface::getConsistentReadVersion,
 				                               request,
 				                               self->cx->taskID))) {
+					self->cx->ssVersionVectorCache.applyDelta(reply.ssVersionVectorDelta);
 					return reply.version;
 				}
 			}
@@ -746,7 +748,6 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self, Version popVersion, int
 			continue;
 
 		DEBUG_MUTATION("addMutation", message.version.version, m)
-		    .detail("Version", message.version.toString())
 		    .detail("KCV", self->minKnownCommittedVersion)
 		    .detail("SavedVersion", self->savedVersion);
 

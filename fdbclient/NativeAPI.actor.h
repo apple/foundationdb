@@ -245,6 +245,7 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	TaskPriority taskID;
 	SpanContext spanContext;
 	UseProvisionalProxies useProvisionalProxies = UseProvisionalProxies::False;
+	bool readVersionObtainedFromGrvProxy;
 
 	int numErrors = 0;
 	double startTime = 0;
@@ -261,6 +262,7 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	TransactionState(TaskPriority taskID, SpanContext spanContext)
 	  : taskID(taskID), spanContext(spanContext), tenantSet(false) {}
 
+	// VERSION_VECTOR changed default values of readVersionObtainedFromGrvProxy
 	TransactionState(Database cx,
 	                 Optional<TenantName> tenant,
 	                 TaskPriority taskID,
@@ -431,7 +433,10 @@ public:
 	void reset();
 	void fullReset();
 	double getBackoff(int errCode);
+
 	void debugTransaction(UID dID) { trState->debugID = dID; }
+	VersionVector getVersionVector() const;
+	UID getSpanID() const { return trState->spanID; }
 
 	Future<Void> commitMutations();
 	void setupWatches();

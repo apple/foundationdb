@@ -227,7 +227,8 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 	double testDuration;
 	int additionalDBs;
 	bool allowDescriptorChange;
-	bool allowTestStorageMigration;
+	bool allowTestStorageMigration; // allow change storage migration and perpetual wiggle conf
+	bool storageMigrationCompatibleConf; // only allow generating configuration suitable for storage migration test
 	bool waitStoreTypeCheck;
 	bool downgradeTest1; // if this is true, don't pick up downgrade incompatible config
 	std::vector<Future<Void>> clients;
@@ -239,6 +240,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 		    getOption(options, LiteralStringRef("allowDescriptorChange"), SERVER_KNOBS->ENABLE_CROSS_CLUSTER_SUPPORT);
 		allowTestStorageMigration =
 		    getOption(options, "allowTestStorageMigration"_sr, false) && g_simulator.allowStorageMigrationTypeChange;
+		storageMigrationCompatibleConf = getOption(options, "storageMigrationCompatibleConf"_sr, false);
 		waitStoreTypeCheck = getOption(options, "waitStoreTypeCheck"_sr, false);
 		downgradeTest1 = getOption(options, "downgradeTest1"_sr, false);
 		g_simulator.usableRegions = 1;
@@ -349,7 +351,11 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 			}
 			state int randomChoice;
 			if (self->allowTestStorageMigration) {
-				randomChoice = deterministicRandom()->randomInt(4, 9);
+				randomChoice = (deterministicRandom()->random01() < 0.375) ? deterministicRandom()->randomInt(0, 3)
+				                                                           : deterministicRandom()->randomInt(4, 9);
+			} else if (self->storageMigrationCompatibleConf) {
+				randomChoice = (deterministicRandom()->random01() < 3.0 / 7) ? deterministicRandom()->randomInt(0, 3)
+				                                                             : deterministicRandom()->randomInt(4, 8);
 			} else {
 				randomChoice = deterministicRandom()->randomInt(0, 8);
 			}

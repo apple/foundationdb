@@ -568,7 +568,7 @@ ACTOR Future<Void> applyMutations(Database cx,
                                   Key removePrefix,
                                   Version beginVersion,
                                   Version* endVersion,
-                                  RequestStream<CommitTransactionRequest> commit,
+                                  PublicRequestStream<CommitTransactionRequest> commit,
                                   NotifiedVersion* committedVersion,
                                   Reference<KeyRangeMap<Version>> keyVersion);
 ACTOR Future<Void> cleanupBackup(Database cx, DeleteData deleteData);

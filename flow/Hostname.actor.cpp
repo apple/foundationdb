@@ -46,7 +46,7 @@ void Hostname::resetToUnresolved() {
 	}
 }
 
-ACTOR Future<Void> resolveImpl(Hostname* self) {
+ACTOR Future<Optional<NetworkAddress>> resolveImpl(Hostname* self) {
 	loop {
 		if (self->status == Hostname::UNRESOLVED) {
 			self->status = Hostname::RESOLVING;
@@ -61,51 +61,52 @@ ACTOR Future<Void> resolveImpl(Hostname* self) {
 				}
 				self->resolvedAddress = address;
 				self->status = Hostname::RESOLVED;
-				break;
+				self->resolveFinish.trigger();
+				return self->resolvedAddress.get();
 			} catch (...) {
 				self->status = Hostname::UNRESOLVED;
 				self->resolveFinish.trigger();
 				self->resolvedAddress = Optional<NetworkAddress>();
-				throw lookup_failed();
+				return Optional<NetworkAddress>();
 			}
 		} else if (self->status == Hostname::RESOLVING) {
 			wait(self->resolveFinish.onTrigger());
 			if (self->status == Hostname::RESOLVED) {
-				break;
+				return self->resolvedAddress.get();
 			}
 			// Otherwise, this means other threads failed on resolve, so here we go back to the loop and try to resolve
 			// again.
 		} else {
 			// status is RESOLVED, nothing to do.
-			break;
+			return self->resolvedAddress.get();
 		}
 	}
-	return Void();
 }
 
-ACTOR Future<Void> resolveWithRetryImpl(Hostname* self) {
+ACTOR Future<NetworkAddress> resolveWithRetryImpl(Hostname* self) {
 	loop {
 		try {
-			wait(resolveImpl(self));
-			return Void();
-		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) {
-				throw;
+			Optional<NetworkAddress> address = wait(resolveImpl(self));
+			if (address.present()) {
+				return address.get();
 			}
 			wait(delay(FLOW_KNOBS->HOSTNAME_RESOLVE_DELAY));
+		} catch (Error& e) {
+			ASSERT(e.code() == error_code_actor_cancelled);
+			throw;
 		}
 	}
 }
 
-Future<Void> Hostname::resolve() {
+Future<Optional<NetworkAddress>> Hostname::resolve() {
 	return resolveImpl(this);
 }
 
-Future<Void> Hostname::resolveWithRetry() {
+Future<NetworkAddress> Hostname::resolveWithRetry() {
 	return resolveWithRetryImpl(this);
 }
 
-void Hostname::resolveBlocking() {
+Optional<NetworkAddress> Hostname::resolveBlocking() {
 	if (status != RESOLVED) {
 		try {
 			std::vector<NetworkAddress> addresses =
@@ -121,9 +122,9 @@ void Hostname::resolveBlocking() {
 		} catch (...) {
 			status = UNRESOLVED;
 			resolvedAddress = Optional<NetworkAddress>();
-			throw lookup_failed();
 		}
 	}
+	return resolvedAddress;
 }
 
 TEST_CASE("/flow/Hostname/hostname") {
@@ -181,50 +182,44 @@ TEST_CASE("/flow/Hostname/hostname") {
 	ASSERT(hn3.status == Hostname::UNRESOLVED && !hn3.resolvedAddress.present());
 	ASSERT(hn4.status == Hostname::UNRESOLVED && !hn4.resolvedAddress.present());
 
-	try {
-		wait(hn2.resolve());
-	} catch (Error& e) {
-		ASSERT(e.code() == error_code_lookup_failed);
-	}
-	ASSERT(hn2.status == Hostname::UNRESOLVED && !hn2.resolvedAddress.present());
+	state Optional<NetworkAddress> emptyAddress = wait(hn2.resolve());
+	ASSERT(hn2.status == Hostname::UNRESOLVED && !hn2.resolvedAddress.present() && !emptyAddress.present());
 
 	try {
-		wait(timeoutError(hn2.resolveWithRetry(), 1));
+		NetworkAddress _ = wait(timeoutError(hn2.resolveWithRetry(), 1));
 	} catch (Error& e) {
 		ASSERT(e.code() == error_code_timed_out);
 	}
 	ASSERT(hn2.status == Hostname::UNRESOLVED && !hn2.resolvedAddress.present());
 
-	try {
-		hn2.resolveBlocking();
-	} catch (Error& e) {
-		ASSERT(e.code() == error_code_lookup_failed);
-	}
-	ASSERT(hn2.status == Hostname::UNRESOLVED && !hn2.resolvedAddress.present());
+	emptyAddress = hn2.resolveBlocking();
+	ASSERT(hn2.status == Hostname::UNRESOLVED && !hn2.resolvedAddress.present() && !emptyAddress.present());
 
-	state NetworkAddress address = NetworkAddress::parse("127.0.0.0:1234");
-	INetworkConnections::net()->addMockTCPEndpoint("host-name", "1234", { address });
+	state NetworkAddress addressSource = NetworkAddress::parse("127.0.0.0:1234");
+	INetworkConnections::net()->addMockTCPEndpoint("host-name", "1234", { addressSource });
 
 	// Test resolve.
-	wait(hn2.resolve());
+	state Optional<NetworkAddress> optionalAddress = wait(hn2.resolve());
 	ASSERT(hn2.status == Hostname::RESOLVED);
-	ASSERT(hn2.resolvedAddress.present() && hn2.resolvedAddress.get() == address);
+	ASSERT(hn2.resolvedAddress.get() == addressSource && optionalAddress.get() == addressSource);
+	optionalAddress = Optional<NetworkAddress>();
 
 	// Test resolveWithRetry.
 	hn2.resetToUnresolved();
 	ASSERT(hn2.status == Hostname::UNRESOLVED && !hn2.resolvedAddress.present());
 
-	wait(hn2.resolveWithRetry());
+	state NetworkAddress address = wait(hn2.resolveWithRetry());
 	ASSERT(hn2.status == Hostname::RESOLVED);
-	ASSERT(hn2.resolvedAddress.present() && hn2.resolvedAddress.get() == address);
+	ASSERT(hn2.resolvedAddress.get() == addressSource && address == addressSource);
 
 	// Test resolveBlocking.
 	hn2.resetToUnresolved();
 	ASSERT(hn2.status == Hostname::UNRESOLVED && !hn2.resolvedAddress.present());
 
-	hn2.resolveBlocking();
+	optionalAddress = hn2.resolveBlocking();
 	ASSERT(hn2.status == Hostname::RESOLVED);
-	ASSERT(hn2.resolvedAddress.present() && hn2.resolvedAddress.get() == address);
+	ASSERT(hn2.resolvedAddress.get() == addressSource && optionalAddress.get() == addressSource);
+	optionalAddress = Optional<NetworkAddress>();
 
 	return Void();
 }

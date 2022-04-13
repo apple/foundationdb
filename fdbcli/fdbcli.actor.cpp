@@ -71,7 +71,7 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-#define FDB_API_VERSION 710
+#define FDB_API_VERSION 720
 /*
  * While we could just use the MultiVersionApi instance directly, this #define allows us to swap in any other IClientApi
  * instance (e.g. from ThreadSafeApi)
@@ -1641,6 +1641,13 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 				if (tokencmp(tokens[0], "advanceversion")) {
 					bool _result = wait(makeInterruptable(advanceVersionCommandActor(db, tokens)));
+					if (!_result)
+						is_error = true;
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "versionepoch")) {
+					bool _result = wait(makeInterruptable(versionEpochCommandActor(db, localDb, tokens)));
 					if (!_result)
 						is_error = true;
 					continue;

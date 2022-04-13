@@ -51,7 +51,7 @@ public class CycleMultiClientIntegrationTest {
     private static List<String> expected = new ArrayList<>(Arrays.asList("0", "1", "2", "3"));
 
     public static void main(String[] args) throws Exception {
-        FDB fdb = FDB.selectAPIVersion(710);
+        FDB fdb = FDB.selectAPIVersion(720);
         setupThreads(fdb);
         Collection<Database> dbs = clientHelper.openDatabases(fdb); // the clientHelper will close the databases for us
         System.out.println("Starting tests");

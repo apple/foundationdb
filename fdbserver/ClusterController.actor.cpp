@@ -1099,21 +1099,16 @@ void haltRegisteringOrCurrentSingleton(ClusterControllerData* self,
 
 void registerWorker(RegisterWorkerRequest req,
                     ClusterControllerData* self,
-                    ServerCoordinators coordinators,
+                    std::unordered_set<NetworkAddress> coordinatorAddresses,
                     ConfigBroadcaster* configBroadcaster) {
 	const WorkerInterface& w = req.wi;
 	ProcessClass newProcessClass = req.processClass;
 	auto info = self->id_worker.find(w.locality.processId());
 	ClusterControllerPriorityInfo newPriorityInfo = req.priorityInfo;
 	newPriorityInfo.processClassFitness = newProcessClass.machineClassFitness(ProcessClass::ClusterController);
-	Optional<ConfigFollowerInterface> cfi;
 	bool isCoordinator =
-	    std::find_if(coordinators.configServers.begin(),
-	                 coordinators.configServers.end(),
-	                 [&req](const ConfigFollowerInterface& cfi) {
-		                 return cfi.address() == req.wi.address() || (req.wi.secondaryAddress().present() &&
-		                                                              cfi.address() == req.wi.secondaryAddress().get());
-	                 }) != coordinators.configServers.end();
+	    (coordinatorAddresses.count(req.wi.address()) > 0) ||
+	    (req.wi.secondaryAddress().present() && coordinatorAddresses.count(req.wi.secondaryAddress().get()) > 0);
 
 	for (auto it : req.incompatiblePeers) {
 		self->db.incompatibleConnections[it] = now() + SERVER_KNOBS->INCOMPATIBLE_PEERS_LOGGING_INTERVAL;
@@ -2191,6 +2186,7 @@ ACTOR Future<Void> startEncryptKeyProxy(ClusterControllerData* self) {
 					TraceEvent("CCEKP_UpdateInf", self->id)
 					    .detail("Id", self->db.serverInfo->get().encryptKeyProxy.get().id());
 				}
+				checkOutstandingRequests(self);
 				return Void();
 			}
 		} catch (Error& e) {
@@ -2547,10 +2543,30 @@ ACTOR Future<Void> clusterControllerCore(Reference<IClusterConnectionRecord> con
 		when(RecruitBlobWorkerRequest req = waitNext(interf.recruitBlobWorker.getFuture())) {
 			clusterRecruitBlobWorker(&self, req);
 		}
-		when(RegisterWorkerRequest req = waitNext(interf.registerWorker.getFuture())) {
+		when(state RegisterWorkerRequest req = waitNext(interf.registerWorker.getFuture())) {
 			++self.registerWorkerRequests;
-			registerWorker(
-			    req, &self, coordinators, (configDBType == ConfigDBType::DISABLED) ? nullptr : &configBroadcaster);
+			state ClusterConnectionString ccs = coordinators.ccr->getConnectionString();
+
+			state std::unordered_set<NetworkAddress> coordinatorAddresses;
+			std::vector<Future<Void>> fs;
+			for (auto& hostname : ccs.hostnames) {
+				fs.push_back(map(hostname.resolve(), [&](Optional<NetworkAddress> const& addr) -> Void {
+					if (addr.present()) {
+						coordinatorAddresses.insert(addr.get());
+					}
+					return Void();
+				}));
+			}
+			wait(waitForAll(fs));
+
+			for (const auto& coord : ccs.coordinators()) {
+				coordinatorAddresses.insert(coord);
+			}
+
+			registerWorker(req,
+			               &self,
+			               coordinatorAddresses,
+			               (configDBType == ConfigDBType::DISABLED) ? nullptr : &configBroadcaster);
 		}
 		when(GetWorkersRequest req = waitNext(interf.getWorkers.getFuture())) {
 			++self.getWorkersRequests;
@@ -2965,7 +2981,8 @@ TEST_CASE("/fdbserver/clustercontroller/shouldTriggerRecoveryDueToDegradedServer
 	testDbInfo.logSystemConfig.tLogs.push_back(remoteTLogSet);
 
 	GrvProxyInterface proxyInterf;
-	proxyInterf.getConsistentReadVersion = RequestStream<struct GetReadVersionRequest>(Endpoint({ proxy }, testUID));
+	proxyInterf.getConsistentReadVersion =
+	    PublicRequestStream<struct GetReadVersionRequest>(Endpoint({ proxy }, testUID));
 	testDbInfo.client.grvProxies.push_back(proxyInterf);
 
 	ResolverInterface resolverInterf;
@@ -3074,11 +3091,12 @@ TEST_CASE("/fdbserver/clustercontroller/shouldTriggerFailoverDueToDegradedServer
 	testDbInfo.logSystemConfig.tLogs.push_back(remoteTLogSet);
 
 	GrvProxyInterface grvProxyInterf;
-	grvProxyInterf.getConsistentReadVersion = RequestStream<struct GetReadVersionRequest>(Endpoint({ proxy }, testUID));
+	grvProxyInterf.getConsistentReadVersion =
+	    PublicRequestStream<struct GetReadVersionRequest>(Endpoint({ proxy }, testUID));
 	testDbInfo.client.grvProxies.push_back(grvProxyInterf);
 
 	CommitProxyInterface commitProxyInterf;
-	commitProxyInterf.commit = RequestStream<struct CommitTransactionRequest>(Endpoint({ proxy2 }, testUID));
+	commitProxyInterf.commit = PublicRequestStream<struct CommitTransactionRequest>(Endpoint({ proxy2 }, testUID));
 	testDbInfo.client.commitProxies.push_back(commitProxyInterf);
 
 	ResolverInterface resolverInterf;

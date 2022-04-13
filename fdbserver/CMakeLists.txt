@@ -134,8 +134,8 @@ set(FDBSERVER_SRCS
   ServerDBInfo.actor.h
   ServerDBInfo.h
   SigStack.cpp
-  SimEncryptVaultProxy.actor.cpp
-  SimEncryptVaultProxy.actor.h
+  SimEncryptKmsProxy.actor.cpp
+  SimEncryptKmsProxy.actor.h
   SimpleConfigConsumer.actor.cpp
   SimpleConfigConsumer.h
   SimulatedCluster.actor.cpp
@@ -199,6 +199,7 @@ set(FDBSERVER_SRCS
   workloads/ChangeFeeds.actor.cpp
   workloads/ClearSingleRange.actor.cpp
   workloads/ClientTransactionProfileCorrectness.actor.cpp
+  workloads/ClientWorkload.actor.cpp
   workloads/ClogSingleConnection.actor.cpp
   workloads/CommitBugCheck.actor.cpp
   workloads/ConfigIncrement.actor.cpp
@@ -218,6 +219,7 @@ set(FDBSERVER_SRCS
   workloads/DiskFailureInjection.actor.cpp
   workloads/DummyWorkload.actor.cpp
   workloads/EncryptionOps.actor.cpp
+  workloads/EncryptKeyProxyTest.actor.cpp
   workloads/ExternalWorkload.actor.cpp
   workloads/FastTriggeredWatches.actor.cpp
   workloads/FileSystem.actor.cpp
@@ -251,6 +253,7 @@ set(FDBSERVER_SRCS
   workloads/PhysicalShardMove.actor.cpp
   workloads/Ping.actor.cpp
   workloads/PopulateTPCC.actor.cpp
+  workloads/PrivateEndpoints.actor.cpp
   workloads/ProtocolVersion.actor.cpp
   workloads/PubSubMultiples.actor.cpp
   workloads/QueuePush.actor.cpp
