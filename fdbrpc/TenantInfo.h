@@ -35,7 +35,13 @@ struct TenantInfo {
 	// deserialization. This field indicates whether the client is trusted.
 	// Untrusted clients are generally expected to set a TenantName
 	bool trusted = false;
+	// Is set during deserialization. It will be set to true if the tenant
+	// name is set and the client is authorized to use this tenant.
 	bool verified = false;
+
+	// Helper function for most endpoints that read/write data. This returns true iff
+	// the client is trying to access data of a tenant it is authorized to use.
+	bool hasAuthorizedTenant() const { return trusted || (name.present() && verified); }
 
 	TenantInfo() : tenantId(INVALID_TENANT) {}
 	TenantInfo(TenantName name, int64_t tenantId) : name(name), tenantId(tenantId) {}

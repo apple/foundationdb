@@ -27,7 +27,7 @@
 #include <memcheck.h>
 #endif
 
-#include "fdbrpc/TenantAuth.h"
+#include "fdbrpc/TenantAuth.actor.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/HealthMonitor.h"

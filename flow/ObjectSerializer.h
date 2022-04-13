@@ -28,6 +28,12 @@
 
 using ContextVariableMap = std::unordered_map<std::string_view, void*>;
 
+template <class T>
+struct HasVariableMap_t : std::false_type {};
+
+template <class T>
+constexpr bool HasVariableMap = HasVariableMap_t<T>::value;
+
 template <class Ar>
 struct LoadContext {
 	Ar* ar;
@@ -53,6 +59,11 @@ struct LoadContext {
 	void addArena(Arena& arena) { arena = ar->arena(); }
 
 	LoadContext& context() { return *this; }
+
+	template <class T, class Archiver = Ar>
+	std::enable_if_t<HasVariableMap<Archiver>, T&> variable(std::string_view name) {
+		return ar->template variable<T>(name);
+	}
 };
 
 template <class Ar, class Allocator>
@@ -266,6 +277,11 @@ private:
 	uint8_t* data = nullptr;
 	int size = 0;
 };
+
+template <>
+struct HasVariableMap_t<ObjectReader> : std::true_type {};
+template <>
+struct HasVariableMap_t<ArenaObjectReader> : std::true_type {};
 
 // this special case is needed - the code expects
 // Standalone<T> and T to be equivalent for serialization

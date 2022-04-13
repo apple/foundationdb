@@ -28,7 +28,6 @@
 
 #include <string_view>
 
-#include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/TenantInfo.h"
 #include "fdbrpc/TokenSign.h"
 
@@ -60,9 +59,9 @@ struct serializable_traits<TenantInfo> : std::true_type {
 		using namespace std::literals;
 		serializer(ar, v.name, v.tenantId);
 		if constexpr (Archiver::isDeserializing) {
-			AuthorizedTenants& authorizedTenants = ar.template variable<AuthorizedTenants>("AuthorizedTenants"sv);
+			AuthorizedTenants& authorizedTenants = ar.context().template variable<AuthorizedTenants>("AuthorizedTenants"sv);
 			v.trusted = authorizedTenants.trusted;
-			v.verified = !v.name.present() || authorizedTenants.authorizedTenants.count(v.name.get()) != 0;
+			v.verified = v.trusted || !v.name.present() || authorizedTenants.authorizedTenants.count(v.name.get()) != 0;
 		}
 	}
 };

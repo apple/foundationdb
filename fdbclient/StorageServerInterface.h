@@ -31,6 +31,7 @@
 #include "fdbrpc/LoadBalance.actor.h"
 #include "fdbrpc/Stats.h"
 #include "fdbrpc/TimedRequest.h"
+#include "fdbrpc/TenantAuth.actor.h"
 #include "fdbrpc/TSSComparison.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/TagThrottle.actor.h"
@@ -83,13 +84,13 @@ struct StorageServerInterface {
 	RequestStream<struct ReadHotSubRangeRequest> getReadHotRanges;
 	RequestStream<struct SplitRangeRequest> getRangeSplitPoints;
 	PublicRequestStream<struct GetKeyValuesStreamRequest> getKeyValuesStream;
-	PublicRequestStream<struct ChangeFeedStreamRequest> changeFeedStream;
-	PublicRequestStream<struct OverlappingChangeFeedsRequest> overlappingChangeFeeds;
-	PublicRequestStream<struct ChangeFeedPopRequest> changeFeedPop;
-	PublicRequestStream<struct ChangeFeedVersionUpdateRequest> changeFeedVersionUpdate;
-	PublicRequestStream<struct GetCheckpointRequest> checkpoint;
-	PublicRequestStream<struct FetchCheckpointRequest> fetchCheckpoint;
-	PublicRequestStream<struct FetchCheckpointKeyValuesRequest> fetchCheckpointKeyValues;
+	RequestStream<struct ChangeFeedStreamRequest> changeFeedStream;
+	RequestStream<struct OverlappingChangeFeedsRequest> overlappingChangeFeeds;
+	RequestStream<struct ChangeFeedPopRequest> changeFeedPop;
+	RequestStream<struct ChangeFeedVersionUpdateRequest> changeFeedVersionUpdate;
+	RequestStream<struct GetCheckpointRequest> checkpoint;
+	RequestStream<struct FetchCheckpointRequest> fetchCheckpoint;
+	RequestStream<struct FetchCheckpointKeyValuesRequest> fetchCheckpointKeyValues;
 
 private:
 	bool acceptingRequests;
@@ -148,18 +149,18 @@ public:
 				getMappedKeyValues = PublicRequestStream<struct GetMappedKeyValuesRequest>(
 				    getValue.getEndpoint().getAdjustedEndpoint(14));
 				changeFeedStream =
-				    PublicRequestStream<struct ChangeFeedStreamRequest>(getValue.getEndpoint().getAdjustedEndpoint(15));
-				overlappingChangeFeeds = PublicRequestStream<struct OverlappingChangeFeedsRequest>(
+				    RequestStream<struct ChangeFeedStreamRequest>(getValue.getEndpoint().getAdjustedEndpoint(15));
+				overlappingChangeFeeds = RequestStream<struct OverlappingChangeFeedsRequest>(
 				    getValue.getEndpoint().getAdjustedEndpoint(16));
 				changeFeedPop =
-				    PublicRequestStream<struct ChangeFeedPopRequest>(getValue.getEndpoint().getAdjustedEndpoint(17));
-				changeFeedVersionUpdate = PublicRequestStream<struct ChangeFeedVersionUpdateRequest>(
+				    RequestStream<struct ChangeFeedPopRequest>(getValue.getEndpoint().getAdjustedEndpoint(17));
+				changeFeedVersionUpdate = RequestStream<struct ChangeFeedVersionUpdateRequest>(
 				    getValue.getEndpoint().getAdjustedEndpoint(18));
 				checkpoint =
-				    PublicRequestStream<struct GetCheckpointRequest>(getValue.getEndpoint().getAdjustedEndpoint(19));
+				    RequestStream<struct GetCheckpointRequest>(getValue.getEndpoint().getAdjustedEndpoint(19));
 				fetchCheckpoint =
-				    PublicRequestStream<struct FetchCheckpointRequest>(getValue.getEndpoint().getAdjustedEndpoint(20));
-				fetchCheckpointKeyValues = PublicRequestStream<struct FetchCheckpointKeyValuesRequest>(
+				    RequestStream<struct FetchCheckpointRequest>(getValue.getEndpoint().getAdjustedEndpoint(20));
+				fetchCheckpointKeyValues = RequestStream<struct FetchCheckpointKeyValuesRequest>(
 				    getValue.getEndpoint().getAdjustedEndpoint(21));
 			}
 		} else {
@@ -267,7 +268,7 @@ struct GetValueRequest : TimedRequest {
 	                                      // to this client, of all storage replicas that
 	                                      // serve the given key
 
-	bool verify() const { return tenantInfo.verified; }
+	bool verify() const { return tenantInfo.hasAuthorizedTenant(); }
 
 	GetValueRequest() {}
 	GetValueRequest(SpanID spanContext,
@@ -323,6 +324,8 @@ struct WatchValueRequest {
 	  : spanContext(spanContext), tenantInfo(tenantInfo), key(key), value(value), version(ver), tags(tags),
 	    debugID(debugID) {}
 
+	bool verify() const { return tenantInfo.hasAuthorizedTenant(); }
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, key, value, version, tags, debugID, reply, spanContext, tenantInfo);
@@ -365,6 +368,8 @@ struct GetKeyValuesRequest : TimedRequest {
 	                                      // serve the given key
 
 	GetKeyValuesRequest() : isFetchKeys(false) {}
+
+	bool verify() const { return tenantInfo.hasAuthorizedTenant(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -421,6 +426,9 @@ struct GetMappedKeyValuesRequest : TimedRequest {
 	                                      // serve the given key range
 
 	GetMappedKeyValuesRequest() : isFetchKeys(false) {}
+
+	bool verify() const { return tenantInfo.hasAuthorizedTenant(); }
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar,
@@ -486,6 +494,8 @@ struct GetKeyValuesStreamRequest {
 
 	GetKeyValuesStreamRequest() : isFetchKeys(false) {}
 
+	bool verify() const { return tenantInfo.hasAuthorizedTenant(); }
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar,
@@ -532,6 +542,8 @@ struct GetKeyRequest : TimedRequest {
 	VersionVector ssLatestCommitVersions; // includes the latest commit versions, as known
 	                                      // to this client, of all storage replicas that
 	                                      // serve the given key
+
+	bool verify() const { return tenantInfo.hasAuthorizedTenant(); }
 
 	GetKeyRequest() {}
 

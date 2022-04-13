@@ -32,6 +32,8 @@ set(FDBRPC_SRCS
   SimExternalConnection.h
   Stats.actor.cpp
   Stats.h
+  TenantInfo.h
+  TenantAuth.actor.h
   sim2.actor.cpp
   sim_validation.cpp
   TimedRequest.h
