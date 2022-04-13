@@ -24,6 +24,7 @@
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbserver/Status.h"
 #include "flow/ITrace.h"
+#include "flow/ProtocolVersion.h"
 #include "flow/Trace.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
@@ -1527,6 +1528,10 @@ ACTOR static Future<Void> logRangeWarningFetcher(Database cx,
 	return Void();
 }
 
+ACTOR Future<ProtocolVersion> getLatestSoftwareVersion(Database cx) {
+	return currentProtocolVersion;
+}
+
 struct LoadConfigurationResult {
 	bool fullReplication;
 	Optional<Key> healthyZone;
@@ -2917,7 +2922,9 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		statusObj["protocol_version"] = format("%" PRIx64, g_network->protocolVersion().version());
 		statusObj["connection_string"] = coordinators.ccr->getConnectionString().toString();
 		statusObj["bounce_impact"] = getBounceImpactInfo(statusCode);
-		// statusObj["latest_server_version"] = format("%" PRIx64, latestServerVersion.version());
+
+		ProtocolVersion latestServerVersion = wait(getLatestSoftwareVersion(cx));
+		statusObj["latest_server_version"] = format("%" PRIx64, latestServerVersion.version());
 
 		state Optional<DatabaseConfiguration> configuration;
 		state Optional<LoadConfigurationResult> loadResult;
