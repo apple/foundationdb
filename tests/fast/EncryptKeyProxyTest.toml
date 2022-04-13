@@ -1,0 +1,8 @@
+[[knobs]]
+enable_encryption = true
+
+[[test]]
+testTitle = 'EncryptKeyProxy'
+
+    [[test.workload]]
+    testName = 'EncryptKeyProxyTest'

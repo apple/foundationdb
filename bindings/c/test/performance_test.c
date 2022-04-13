@@ -641,7 +641,7 @@ void runTests(struct ResultSet* rs) {
 int main(int argc, char** argv) {
 	srand(time(NULL));
 	struct ResultSet* rs = newResultSet();
-	checkError(fdb_select_api_version(710), "select API version", rs);
+	checkError(fdb_select_api_version(720), "select API version", rs);
 	printf("Running performance test at client version: %s\n", fdb_get_client_version());
 
 	valueStr = (uint8_t*)malloc((sizeof(uint8_t)) * valueSize);

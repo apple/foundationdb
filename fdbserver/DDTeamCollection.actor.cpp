@@ -40,6 +40,11 @@ auto get(MapContainer& m, K const& k) -> decltype(m.at(k)) {
 
 } // namespace
 
+FDB_DEFINE_BOOLEAN_PARAM(WantNewServers);
+FDB_DEFINE_BOOLEAN_PARAM(WantTrueBest);
+FDB_DEFINE_BOOLEAN_PARAM(PreferLowerUtilization);
+FDB_DEFINE_BOOLEAN_PARAM(TeamMustHaveShards);
+
 class DDTeamCollectionImpl {
 	ACTOR static Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self) {
 		state double start = now();
@@ -5362,14 +5367,10 @@ public:
 		 * don't strictly need new servers and all of these servers are healthy,
 		 * maintain status quo.
 		 */
-
-		bool wantsNewServers = false;
-		bool wantsTrueBest = true;
-		bool preferLowerUtilization = true;
-		bool teamMustHaveShards = false;
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
-		state GetTeamRequest req(wantsNewServers, wantsTrueBest, preferLowerUtilization, teamMustHaveShards);
+		state GetTeamRequest req(
+		    WantNewServers::False, WantTrueBest::True, PreferLowerUtilization::True, TeamMustHaveShards::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5419,14 +5420,10 @@ public:
 		 * strictly need new servers but '1' is not healthy, see that the other team of
 		 * complete sources is selected.
 		 */
-
-		bool wantsNewServers = false;
-		bool wantsTrueBest = true;
-		bool preferLowerUtilization = true;
-		bool teamMustHaveShards = false;
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0), UID(4, 0) };
 
-		state GetTeamRequest req(wantsNewServers, wantsTrueBest, preferLowerUtilization, teamMustHaveShards);
+		state GetTeamRequest req(
+		    WantNewServers::False, WantTrueBest::True, PreferLowerUtilization::True, TeamMustHaveShards::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5475,13 +5472,10 @@ public:
 		collection->server_info[UID(3, 0)]->setMetrics(high_avail);
 		collection->server_info[UID(4, 0)]->setMetrics(high_avail);
 
-		bool wantsNewServers = true;
-		bool wantsTrueBest = true;
-		bool preferLowerUtilization = true;
-		bool teamMustHaveShards = false;
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
-		state GetTeamRequest req(wantsNewServers, wantsTrueBest, preferLowerUtilization, teamMustHaveShards);
+		state GetTeamRequest req(
+		    WantNewServers::True, WantTrueBest::True, PreferLowerUtilization::True, TeamMustHaveShards::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5529,14 +5523,10 @@ public:
 		 * Among server teams that have healthy space available, pick the team that is
 		 * most utilized, if the caller says they don't preferLowerUtilization.
 		 */
-
-		bool wantsNewServers = true;
-		bool wantsTrueBest = true;
-		bool preferLowerUtilization = false;
-		bool teamMustHaveShards = false;
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
-		state GetTeamRequest req(wantsNewServers, wantsTrueBest, preferLowerUtilization, teamMustHaveShards);
+		state GetTeamRequest req(
+		    WantNewServers::True, WantTrueBest::True, PreferLowerUtilization::False, TeamMustHaveShards::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5585,14 +5575,10 @@ public:
 		 * space, decline to pick that team. Every server must have some minimum
 		 * free space defined by the MIN_AVAILABLE_SPACE server knob.
 		 */
-
-		bool wantsNewServers = true;
-		bool wantsTrueBest = true;
-		bool preferLowerUtilization = true;
-		bool teamMustHaveShards = false;
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
-		state GetTeamRequest req(wantsNewServers, wantsTrueBest, preferLowerUtilization, teamMustHaveShards);
+		state GetTeamRequest req(
+		    WantNewServers::True, WantTrueBest::True, PreferLowerUtilization::True, TeamMustHaveShards::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5646,14 +5632,10 @@ public:
 		 * test that each server has at least MIN_AVAILABLE_SPACE_RATIO (server knob)
 		 * percentage points of capacity free before picking that team.
 		 */
-
-		bool wantsNewServers = true;
-		bool wantsTrueBest = true;
-		bool preferLowerUtilization = true;
-		bool teamMustHaveShards = false;
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
-		state GetTeamRequest req(wantsNewServers, wantsTrueBest, preferLowerUtilization, teamMustHaveShards);
+		state GetTeamRequest req(
+		    WantNewServers::True, WantTrueBest::True, PreferLowerUtilization::True, TeamMustHaveShards::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5699,13 +5681,10 @@ public:
 		collection->wigglingId = UID(4, 0);
 		collection->pauseWiggle = makeReference<AsyncVar<bool>>(true);
 
-		bool wantsNewServers = true;
-		bool wantsTrueBest = true;
-		bool preferLowerUtilization = true;
-		bool teamMustHaveShards = false;
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
-		state GetTeamRequest req(wantsNewServers, wantsTrueBest, preferLowerUtilization, teamMustHaveShards);
+		state GetTeamRequest req(
+		    WantNewServers::True, WantTrueBest::True, PreferLowerUtilization::True, TeamMustHaveShards::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
