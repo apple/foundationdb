@@ -27,7 +27,7 @@
 #include <optional>
 #include <memory>
 
-#define FDB_API_VERSION 710
+#define FDB_API_VERSION 720
 #include "bindings/c/foundationdb/fdb_c.h"
 
 #undef ERROR

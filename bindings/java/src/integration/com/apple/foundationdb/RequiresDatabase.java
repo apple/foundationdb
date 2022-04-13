@@ -80,7 +80,7 @@ public class RequiresDatabase implements ExecutionCondition, BeforeAllCallback {
 		 * assume that if we are here, then canRunIntegrationTest() is returning true and we don't have to bother
 		 * checking it.
 		 */
-		try (Database db = FDB.selectAPIVersion(710).open()) {
+		try (Database db = FDB.selectAPIVersion(720).open()) {
 			db.run(tr -> {
 				CompletableFuture<byte[]> future = tr.get("test".getBytes());
 

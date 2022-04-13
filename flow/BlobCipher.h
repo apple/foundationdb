@@ -19,6 +19,7 @@
  */
 #pragma once
 
+#include "flow/network.h"
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -36,7 +37,7 @@
 #include "flow/EncryptUtils.h"
 #include "flow/FastRef.h"
 #include "flow/flow.h"
-#include "flow/xxhash.h"
+#include "flow/genericactors.actor.h"
 
 #include <openssl/aes.h>
 #include <openssl/engine.h>
@@ -265,8 +266,13 @@ private:
 
 using BlobCipherDomainCacheMap = std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKeyIdCache>>;
 
-class BlobCipherKeyCache : NonCopyable {
+class BlobCipherKeyCache : NonCopyable, public ReferenceCounted<BlobCipherKeyCache> {
 public:
+	// Public visibility constructior ONLY to assist FlowSingleton instance creation.
+	// API Note: Constructor is expected to be instantiated only in simulation mode.
+
+	explicit BlobCipherKeyCache(bool ignored) { ASSERT(g_network->isSimulated()); }
+
 	// Enable clients to insert base encryption cipher details to the BlobCipherKeyCache.
 	// The cipherKeys are indexed using 'baseCipherId', given cipherKeys are immutable,
 	// attempting to re-insert same 'identical' cipherKey is treated as a NOP (success),
@@ -294,17 +300,22 @@ public:
 
 	void resetEncyrptDomainId(const EncryptCipherDomainId domainId);
 
-	static BlobCipherKeyCache& getInstance() {
-		static BlobCipherKeyCache instance;
-		return instance;
+	static Reference<BlobCipherKeyCache> getInstance() {
+		if (g_network->isSimulated()) {
+			return FlowSingleton<BlobCipherKeyCache>::getInstance(
+			    []() { return makeReference<BlobCipherKeyCache>(g_network->isSimulated()); });
+		} else {
+			static BlobCipherKeyCache instance;
+			return Reference<BlobCipherKeyCache>::addRef(&instance);
+		}
 	}
+
 	// Ensures cached encryption key(s) (plaintext) never gets persisted as part
 	// of FDB process/core dump.
 	static void cleanup() noexcept;
 
 private:
 	BlobCipherDomainCacheMap domainCacheMap;
-	static constexpr uint64_t CIPHER_KEY_CACHE_TTL_SEC = 10 * 60L;
 
 	BlobCipherKeyCache() {}
 };

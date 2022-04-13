@@ -82,6 +82,11 @@ struct IDataDistributionTeam {
 	}
 };
 
+FDB_DECLARE_BOOLEAN_PARAM(WantNewServers);
+FDB_DECLARE_BOOLEAN_PARAM(WantTrueBest);
+FDB_DECLARE_BOOLEAN_PARAM(PreferLowerUtilization);
+FDB_DECLARE_BOOLEAN_PARAM(TeamMustHaveShards);
+
 struct GetTeamRequest {
 	bool wantsNewServers; // In additional to servers in completeSources, try to find teams with new server
 	bool wantsTrueBest;
@@ -99,10 +104,10 @@ struct GetTeamRequest {
 	    teamSorter; // => -1 if a.score < b.score, 0 if equal, 1 if larger, the reply will choose the largest one
 
 	GetTeamRequest() {}
-	GetTeamRequest(bool wantsNewServers,
-	               bool wantsTrueBest,
-	               bool preferLowerUtilization,
-	               bool teamMustHaveShards,
+	GetTeamRequest(WantNewServers wantsNewServers,
+	               WantTrueBest wantsTrueBest,
+	               PreferLowerUtilization preferLowerUtilization,
+	               TeamMustHaveShards teamMustHaveShards,
 	               double inflightPenalty = 1.0)
 	  : wantsNewServers(wantsNewServers), wantsTrueBest(wantsTrueBest), preferLowerUtilization(preferLowerUtilization),
 	    teamMustHaveShards(teamMustHaveShards), inflightPenalty(inflightPenalty) {}

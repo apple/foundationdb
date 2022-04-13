@@ -1161,8 +1161,12 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 					    rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT)
 						inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_ONE_LEFT;
 
-					auto req = GetTeamRequest(
-					    rd.wantsNewServers, isValleyFillerPriority(rd.priority), true, false, inflightPenalty);
+					auto req = GetTeamRequest(WantNewServers(rd.wantsNewServers),
+					                          WantTrueBest(isValleyFillerPriority(rd.priority)),
+					                          PreferLowerUtilization::True,
+					                          TeamMustHaveShards::False,
+					                          inflightPenalty);
+
 					req.src = rd.src;
 					req.completeSources = rd.completeSources;
 
@@ -1704,11 +1708,23 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueueData* self, int teamCollectionIndex,
 
 			if (self->priority_relocations[ddPriority] < SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
 				if (isMountainChopperPriority(ddPriority)) {
-					srcReq = GetTeamRequest(true, true, false, true);
-					destReq = GetTeamRequest(true, false, true, false);
+					srcReq = GetTeamRequest(WantNewServers::True,
+					                        WantTrueBest::True,
+					                        PreferLowerUtilization::False,
+					                        TeamMustHaveShards::True);
+					destReq = GetTeamRequest(WantNewServers::True,
+					                         WantTrueBest::False,
+					                         PreferLowerUtilization::True,
+					                         TeamMustHaveShards::False);
 				} else {
-					srcReq = GetTeamRequest(true, false, false, true);
-					destReq = GetTeamRequest(true, true, true, false);
+					srcReq = GetTeamRequest(WantNewServers::True,
+					                        WantTrueBest::False,
+					                        PreferLowerUtilization::False,
+					                        TeamMustHaveShards::True);
+					destReq = GetTeamRequest(WantNewServers::True,
+					                         WantTrueBest::True,
+					                         PreferLowerUtilization::True,
+					                         TeamMustHaveShards::False);
 				}
 				if (readRebalance) {
 					srcReq.teamSorter = lessReadLoad;
@@ -1760,15 +1776,9 @@ ACTOR Future<Void> BgDDMountainChopper(DDQueueData* self, int teamCollectionInde
 	state Transaction tr(self->cx);
 	state double lastRead = 0;
 	state bool skipCurrentLoop = false;
-	state bool disableReadBalance = false;
-	state bool disableDiskBalance = false;
-
 	loop {
+		state std::pair<Optional<Reference<IDataDistributionTeam>>, bool> randomTeam;
 		state bool moved = false;
-		state Reference<IDataDistributionTeam> sourceTeam;
-		state Reference<IDataDistributionTeam> destTeam;
-		state GetTeamRequest srcReq;
-		state GetTeamRequest destReq;
 		state TraceEvent traceEvent("BgDDMountainChopper", self->distributorId);
 		traceEvent.suppressFor(5.0).detail("PollingInterval", rebalancePollingInterval);
 
@@ -1777,34 +1787,19 @@ ACTOR Future<Void> BgDDMountainChopper(DDQueueData* self, int teamCollectionInde
 		}
 
 		try {
-			// FIXME: change back to BG_REBALANCE_SWITCH_CHECK_INTERVAL after test
-			state Future<Void> delayF = delay(0.1, TaskPriority::DataDistributionLaunch);
+			state Future<Void> delayF = delay(rebalancePollingInterval, TaskPriority::DataDistributionLaunch);
 			if ((now() - lastRead) > SERVER_KNOBS->BG_REBALANCE_SWITCH_CHECK_INTERVAL) {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				Optional<Value> val = wait(tr.get(rebalanceDDIgnoreKey));
 				lastRead = now();
-				if (!val.present()) {
+				if (skipCurrentLoop && !val.present()) {
 					// reset loop interval
-					if (skipCurrentLoop) {
-						rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL;
-					}
-					skipCurrentLoop = false;
-					disableReadBalance = false;
-					disableDiskBalance = false;
-				} else {
-					if (val.get().size() > 0) {
-						int ddIgnore = BinaryReader::fromStringRef<uint8_t>(val.get(), Unversioned());
-						disableDiskBalance = (ddIgnore & DDIgnore::REBALANCE_DISK) > 0;
-						disableReadBalance = (ddIgnore & DDIgnore::REBALANCE_READ) > 0;
-						skipCurrentLoop = disableReadBalance && disableDiskBalance;
-					} else {
-						skipCurrentLoop = true;
-					}
+					rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL;
 				}
+				skipCurrentLoop = val.present();
 			}
 
-			traceEvent.detail("Enabled",
-			                  skipCurrentLoop ? "None" : (disableReadBalance ? "NoReadBalance" : "NoDiskBalance"));
+			traceEvent.detail("Enabled", !skipCurrentLoop);
 
 			wait(delayF);
 			if (skipCurrentLoop) {
@@ -1818,29 +1813,45 @@ ACTOR Future<Void> BgDDMountainChopper(DDQueueData* self, int teamCollectionInde
 			                  self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM]);
 			if (self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM] <
 			    SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
-				// FIXME: read balance and disk balance shouldn't be mutual exclusive in the future
-				srcReq = GetTeamRequest(true, true, false, true);
-				destReq = GetTeamRequest(true, false, true, false);
-				if (!disableReadBalance) {
-					srcReq.teamSorter = lessReadLoad;
-					destReq.teamSorter = greaterReadLoad;
-				}
-				// clang-format off
-				wait(getSrcDestTeams(self, teamCollectionIndex, srcReq, destReq, &sourceTeam, &destTeam,
-				                     SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM,&traceEvent));
-				if (sourceTeam.isValid() && destTeam.isValid()) {
-					if (!disableReadBalance) {
-						wait(store(moved,rebalanceReadLoad(self,SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM,
-						                             sourceTeam, destTeam,teamCollectionIndex == 0,
-						                             &traceEvent)));
-					} else {
-						wait(store(moved,rebalanceTeams(self,SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM,
-						                          sourceTeam, destTeam,teamCollectionIndex == 0,
-						                          &traceEvent)));
+				std::pair<Optional<Reference<IDataDistributionTeam>>, bool> _randomTeam =
+				    wait(brokenPromiseToNever(self->teamCollections[teamCollectionIndex].getTeam.getReply(
+				        GetTeamRequest(WantNewServers::True,
+				                       WantTrueBest::False,
+				                       PreferLowerUtilization::True,
+				                       TeamMustHaveShards::False))));
+				randomTeam = _randomTeam;
+				traceEvent.detail("DestTeam",
+				                  printable(randomTeam.first.map<std::string>(
+				                      [](const Reference<IDataDistributionTeam>& team) { return team->getDesc(); })));
+
+				if (randomTeam.first.present()) {
+					std::pair<Optional<Reference<IDataDistributionTeam>>, bool> loadedTeam =
+					    wait(brokenPromiseToNever(self->teamCollections[teamCollectionIndex].getTeam.getReply(
+					        GetTeamRequest(WantNewServers::True,
+					                       WantTrueBest::True,
+					                       PreferLowerUtilization::False,
+					                       TeamMustHaveShards::True))));
+
+					traceEvent.detail(
+					    "SourceTeam",
+					    printable(loadedTeam.first.map<std::string>(
+					        [](const Reference<IDataDistributionTeam>& team) { return team->getDesc(); })));
+
+					if (loadedTeam.first.present()) {
+						bool _moved = wait(rebalanceTeams(self,
+						                                  SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM,
+						                                  loadedTeam.first.get(),
+						                                  randomTeam.first.get(),
+						                                  teamCollectionIndex == 0,
+						                                  &traceEvent));
+						moved = _moved;
+						if (moved) {
+							resetCount = 0;
+						} else {
+							resetCount++;
+						}
 					}
 				}
-				// clang-format on
-				moved ? resetCount = 0 : resetCount++;
 			}
 
 			if (now() - (*self->lastLimited) < SERVER_KNOBS->BG_DD_SATURATION_DELAY) {
@@ -1876,15 +1887,10 @@ ACTOR Future<Void> BgDDValleyFiller(DDQueueData* self, int teamCollectionIndex) 
 	state Transaction tr(self->cx);
 	state double lastRead = 0;
 	state bool skipCurrentLoop = false;
-	state bool disableReadBalance = false;
-	state bool disableDiskBalance = false;
 
 	loop {
+		state std::pair<Optional<Reference<IDataDistributionTeam>>, bool> randomTeam;
 		state bool moved = false;
-		state Reference<IDataDistributionTeam> sourceTeam;
-		state Reference<IDataDistributionTeam> destTeam;
-		state GetTeamRequest srcReq;
-		state GetTeamRequest destReq;
 		state TraceEvent traceEvent("BgDDValleyFiller", self->distributorId);
 		traceEvent.suppressFor(5.0).detail("PollingInterval", rebalancePollingInterval);
 
@@ -1893,34 +1899,19 @@ ACTOR Future<Void> BgDDValleyFiller(DDQueueData* self, int teamCollectionIndex) 
 		}
 
 		try {
-			// FIXME: change back to BG_REBALANCE_SWITCH_CHECK_INTERVAL after test
-			state Future<Void> delayF = delay(0.1, TaskPriority::DataDistributionLaunch);
+			state Future<Void> delayF = delay(rebalancePollingInterval, TaskPriority::DataDistributionLaunch);
 			if ((now() - lastRead) > SERVER_KNOBS->BG_REBALANCE_SWITCH_CHECK_INTERVAL) {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				Optional<Value> val = wait(tr.get(rebalanceDDIgnoreKey));
 				lastRead = now();
-				if (!val.present()) {
+				if (skipCurrentLoop && !val.present()) {
 					// reset loop interval
-					if (skipCurrentLoop) {
-						rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL;
-					}
-					skipCurrentLoop = false;
-					disableReadBalance = false;
-					disableDiskBalance = false;
-				} else if (val.present()) {
-					if (val.get().size() > 0) {
-						int ddIgnore = BinaryReader::fromStringRef<uint8_t>(val.get(), Unversioned());
-						disableDiskBalance = (ddIgnore & DDIgnore::REBALANCE_DISK) > 0;
-						disableReadBalance = (ddIgnore & DDIgnore::REBALANCE_READ) > 0;
-						skipCurrentLoop = disableReadBalance && disableDiskBalance;
-					} else {
-						skipCurrentLoop = true;
-					}
+					rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL;
 				}
+				skipCurrentLoop = val.present();
 			}
 
-			traceEvent.detail("Enabled",
-			                  skipCurrentLoop ? "None" : (disableReadBalance ? "NoReadBalance" : "NoDiskBalance"));
+			traceEvent.detail("Enabled", !skipCurrentLoop);
 
 			wait(delayF);
 			if (skipCurrentLoop) {
@@ -1934,30 +1925,45 @@ ACTOR Future<Void> BgDDValleyFiller(DDQueueData* self, int teamCollectionIndex) 
 			                  self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM]);
 			if (self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM] <
 			    SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
-				// FIXME: read balance and disk balance shouldn't be mutual exclusive in the future
-				srcReq = GetTeamRequest(true, false, false, true);
-				destReq = GetTeamRequest(true, true, true, false);
-				if (!disableReadBalance) {
-					srcReq.teamSorter = lessReadLoad; // less read load map to lower score
-					destReq.teamSorter = greaterReadLoad;
-				}
+				std::pair<Optional<Reference<IDataDistributionTeam>>, bool> _randomTeam =
+				    wait(brokenPromiseToNever(self->teamCollections[teamCollectionIndex].getTeam.getReply(
+				        GetTeamRequest(WantNewServers::True,
+				                       WantTrueBest::False,
+				                       PreferLowerUtilization::False,
+				                       TeamMustHaveShards::True))));
+				randomTeam = _randomTeam;
+				traceEvent.detail("SourceTeam",
+				                  printable(randomTeam.first.map<std::string>(
+				                      [](const Reference<IDataDistributionTeam>& team) { return team->getDesc(); })));
 
-				// clang-format off
-				wait(getSrcDestTeams(self, teamCollectionIndex, srcReq, destReq, &sourceTeam, &destTeam,
-				                     SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM,&traceEvent));
-				if (sourceTeam.isValid() && destTeam.isValid()) {
-					if (!disableReadBalance) {
-						wait(store(moved,rebalanceReadLoad(self,SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM,
-						                             sourceTeam, destTeam,teamCollectionIndex == 0,
-						                             &traceEvent)));
-					} else {
-						wait(store(moved,rebalanceTeams(self,SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM,
-						                          sourceTeam, destTeam,teamCollectionIndex == 0,
-						                          &traceEvent)));
+				if (randomTeam.first.present()) {
+					std::pair<Optional<Reference<IDataDistributionTeam>>, bool> unloadedTeam =
+					    wait(brokenPromiseToNever(self->teamCollections[teamCollectionIndex].getTeam.getReply(
+					        GetTeamRequest(WantNewServers::True,
+					                       WantTrueBest::True,
+					                       PreferLowerUtilization::True,
+					                       TeamMustHaveShards::False))));
+
+					traceEvent.detail(
+					    "DestTeam",
+					    printable(unloadedTeam.first.map<std::string>(
+					        [](const Reference<IDataDistributionTeam>& team) { return team->getDesc(); })));
+
+					if (unloadedTeam.first.present()) {
+						bool _moved = wait(rebalanceTeams(self,
+						                                  SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM,
+						                                  randomTeam.first.get(),
+						                                  unloadedTeam.first.get(),
+						                                  teamCollectionIndex == 0,
+						                                  &traceEvent));
+						moved = _moved;
+						if (moved) {
+							resetCount = 0;
+						} else {
+							resetCount++;
+						}
 					}
 				}
-				// clang-format on
-				moved ? resetCount = 0 : resetCount++;
 			}
 
 			if (now() - (*self->lastLimited) < SERVER_KNOBS->BG_DD_SATURATION_DELAY) {
@@ -2028,7 +2034,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 	for (int i = 0; i < teamCollections.size(); i++) {
 		balancingFutures.push_back(BgDDLoadRebalance(&self, i, SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM));
 		balancingFutures.push_back(BgDDLoadRebalance(&self, i, SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM));
-		if(SERVER_KNOBS->READ_SAMPLING_ENABLED == true) {
+		if (SERVER_KNOBS->READ_SAMPLING_ENABLED == true) {
 			balancingFutures.push_back(
 			    BgDDLoadRebalance(&self, i, SERVER_KNOBS->PRIORITY_REBALANCE_READ_OVERUTIL_TEAM));
 			balancingFutures.push_back(

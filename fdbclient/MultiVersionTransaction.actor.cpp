@@ -25,6 +25,7 @@
 #include "fdbclient/MultiVersionAssignmentVars.h"
 #include "fdbclient/ClientVersion.h"
 #include "fdbclient/LocalClientAPI.h"
+#include "fdbclient/VersionVector.h"
 
 #include "flow/ThreadPrimitives.h"
 #include "flow/network.h"
@@ -384,6 +385,10 @@ ThreadFuture<Void> DLTransaction::onError(Error const& e) {
 
 void DLTransaction::reset() {
 	api->transactionReset(tr);
+}
+
+VersionVector DLTransaction::getVersionVector() {
+	return VersionVector(); // not implemented
 }
 
 // DLTenant
@@ -907,6 +912,7 @@ void MultiVersionTransaction::setVersion(Version v) {
 		tr.transaction->setVersion(v);
 	}
 }
+
 ThreadFuture<Version> MultiVersionTransaction::getReadVersion() {
 	auto tr = getTransaction();
 	auto f = tr.transaction ? tr.transaction->getReadVersion() : makeTimeout<Version>();
@@ -1092,6 +1098,24 @@ Version MultiVersionTransaction::getCommittedVersion() {
 	}
 
 	return invalidVersion;
+}
+
+VersionVector MultiVersionTransaction::getVersionVector() {
+	auto tr = getTransaction();
+	if (tr.transaction) {
+		return tr.transaction->getVersionVector();
+	}
+
+	return VersionVector();
+}
+
+UID MultiVersionTransaction::getSpanID() {
+	auto tr = getTransaction();
+	if (tr.transaction) {
+		return tr.transaction->getSpanID();
+	}
+
+	return UID();
 }
 
 ThreadFuture<int64_t> MultiVersionTransaction::getApproximateSize() {

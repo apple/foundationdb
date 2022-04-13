@@ -35,8 +35,9 @@ void forceLinkBLockCiherTests();
 void forceLinkParallelStreamTests();
 void forceLinkSimExternalConnectionTests();
 void forceLinkMutationLogReaderTests();
-void forceLinkSimEncryptVaultProxyTests();
+void forceLinkSimEncryptKmsProxyTests();
 void forceLinkIThreadPoolTests();
+void forceLinkVersionVectorTests();
 
 struct UnitTestWorkload : TestWorkload {
 	bool enabled;
@@ -82,8 +83,9 @@ struct UnitTestWorkload : TestWorkload {
 		forceLinkParallelStreamTests();
 		forceLinkSimExternalConnectionTests();
 		forceLinkMutationLogReaderTests();
-		forceLinkSimEncryptVaultProxyTests();
+		forceLinkSimEncryptKmsProxyTests();
 		forceLinkIThreadPoolTests();
+		forceLinkVersionVectorTests();
 	}
 
 	std::string description() const override { return "UnitTests"; }

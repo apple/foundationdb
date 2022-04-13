@@ -26,7 +26,7 @@ import com.apple.foundationdb.tuple.Tuple;
 
 public class Example {
 	public static void main(String[] args) {
-		FDB fdb = FDB.selectAPIVersion(710);
+		FDB fdb = FDB.selectAPIVersion(720);
 
 		try(Database db = fdb.open()) {
 			// Run an operation on the database

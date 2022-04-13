@@ -355,7 +355,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				                                                           : deterministicRandom()->randomInt(4, 9);
 			} else if (self->storageMigrationCompatibleConf) {
 				randomChoice = (deterministicRandom()->random01() < 3.0 / 7) ? deterministicRandom()->randomInt(0, 3)
-				                                                             : deterministicRandom()->randomInt(5, 9);
+				                                                             : deterministicRandom()->randomInt(4, 8);
 			} else {
 				randomChoice = deterministicRandom()->randomInt(0, 8);
 			}
