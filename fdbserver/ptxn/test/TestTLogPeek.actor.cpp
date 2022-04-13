@@ -517,8 +517,11 @@ TEST_CASE("/fdbserver/ptxn/test/tLogPeek/cursor/merged/OrderedMutableTeamPeekCur
 	        ptxn::test::TestEnvironment::getTLogGroup())
 	        .privateMutationsStorageTeamID;
 
-	pCursor = std::make_shared<ptxn::merged::OrderedMutableTeamPeekCursor>(
-	    storageServerIDs[0], privateMutationsStorageTeamID, getTLogInterfaceByStorageTeamID, /* version */ 0);
+	pCursor = std::make_shared<ptxn::merged::OrderedMutableTeamPeekCursor>(storageServerIDs[0],
+	                                                                       privateMutationsStorageTeamID,
+	                                                                       Optional<std::set<ptxn::StorageTeamID>>(),
+	                                                                       getTLogInterfaceByStorageTeamID,
+	                                                                       /* version */ 0);
 
 	state Arena storageArena;
 	state std::vector<ptxn::VersionSubsequenceMessage> messagesFromTLogs =
