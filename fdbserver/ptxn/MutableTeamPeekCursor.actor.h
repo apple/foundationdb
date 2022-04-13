@@ -97,6 +97,7 @@ protected:
 public:
 	MutableTeamPeekCursor(const UID serverID_,
 	                      const StorageTeamID& privateMutationStorageTeamID_,
+	                      const Optional<std::set<ptxn::StorageTeamID>>& initialTeams_,
 	                      const TLogInterfaceByStorageTeamIDFunc& getTLogInterfaceByStorageTeamID_,
 	                      const Version& initialVersion_)
 
@@ -109,24 +110,19 @@ public:
 		const auto& privateMutationStorageTeamID = storageTeamIDs.getPrivateMutationsStorageTeamID();
 
 		BaseClass::addCursor(createCursor(privateMutationStorageTeamID));
+		if (initialTeams_.present()) {
+			for (const auto& team : initialTeams_.get()) {
+				storageTeamIDs.insert(team);
+				storageTeamIDsSnapshot.insert(team);
+				newStorageTeamIDs.insert(team);
+				BaseClass::addCursor(createCursor(team));
+			}
+		}
 
 		TraceEvent("MutableTeamPeekCursorCreated")
 		    .detail("ServerID", serverID)
-		    .detail("PrivateMutationStorageTeamID", privateMutationStorageTeamID);
-	}
-
-	MutableTeamPeekCursor(const UID serverID_,
-	                      const StorageServerStorageTeams& storageTeams_,
-	                      const TLogInterfaceByStorageTeamIDFunc& getTLogInterfaceByStorageTeamID_,
-	                      const Version& initialVersion_)
-	  : MutableTeamPeekCursor(serverID_,
-	                          storageTeams_.getPrivateMutationsStorageTeamID(),
-	                          getTLogInterfaceByStorageTeamID_,
-	                          initialVersion_) {
-
-		for (const auto& storageTeamID : storageTeams_.getStorageTeams()) {
-			BaseClass::addCursor(createCursor(storageTeamID));
-		}
+		    .detail("PrivateMutationStorageTeamID", privateMutationStorageTeamID)
+		    .detail("StartTeam", initialTeams_.present() ? describe(initialTeams_.get()) : "None");
 	}
 
 	const StorageServerStorageTeams getStorageTeamIDs() const { return storageTeamIDs; }

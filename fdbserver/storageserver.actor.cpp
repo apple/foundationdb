@@ -5581,12 +5581,13 @@ std::vector<ptxn::TLogInterfaceBase*> getTLogInterfaceByStorageTeamID(const Serv
 }
 
 void initializeUpdateCursor(ptxn::StorageServer& storageServerContext) {
-	auto referencedServerDBInfo = storageServerContext.db;
+	ServerDBInfo copiedServerDbInfo = storageServerContext.db->get();
 	storageServerContext.logCursor = std::make_shared<merged::OrderedMutableTeamPeekCursor>(
 	    storageServerContext.thisServerID,
 	    getStoragePrivateMutationTeam(storageServerContext),
-	    [referencedServerDBInfo](const StorageTeamID& storageTeamID) -> auto {
-		    return getTLogInterfaceByStorageTeamID(referencedServerDBInfo->get(), storageTeamID);
+	    storageServerContext.storageTeamIDs,
+	    [copiedServerDbInfo](const StorageTeamID& storageTeamID) -> auto {
+		    return getTLogInterfaceByStorageTeamID(copiedServerDbInfo, storageTeamID);
 	    },
 	    storageServerContext.version.get() + 1);
 }
