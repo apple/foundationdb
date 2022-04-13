@@ -1549,7 +1549,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 	for (; idx < tests.size(); idx++) {
 		printf("%f Run test:%s start\n", now(), tests[idx].title.toString().c_str());
 		knobProtectiveGroup = std::make_unique<KnobProtectiveGroup>(tests[idx].overrideKnobs);
-		wait(success(runTest(cx, testers, tests[idx], dbInfo, defaultTenant)));
+		wait(success(runTest(cx, testers, tests[idx], dbInfo)));
 		knobProtectiveGroup.reset(nullptr);
 		printf("%f Run test:%s Done.\n", now(), tests[idx].title.toString().c_str());
 		// do we handle a failure here?
