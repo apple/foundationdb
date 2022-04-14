@@ -63,4 +63,13 @@ Future<Reference<Response>> doRequest(Reference<IConnection> const& conn,
                                       int64_t* const& pSent,
                                       Reference<IRateControl> const& recvRate,
                                       const std::string& requestHeader = std::string());
+
+constexpr int HTTP_STATUS_CODE_UNAUTHORIZED = 401;
+constexpr int HTTP_STATUS_CODE_NOT_ACCEPTABLE = 406;
+constexpr int HTTP_STATUS_CODE_TOO_MANY_REQUESTS = 429;
+constexpr int HTTP_STATUS_CODE_INTERNAL_SERVER_ERROR = 500;
+constexpr int HTTP_STATUS_CODE_BAD_GATEWAY = 502;
+constexpr int HTTP_STATUS_CODE_SERVICE_UNAVAILABLE = 503;
+
+constexpr int HTTP_RETRYAFTER_DELAY_SECS = 300;
 } // namespace HTTP

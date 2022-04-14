@@ -106,6 +106,8 @@ set(FDBCLIENT_SRCS
   SpecialKeySpace.actor.h
   ReadYourWrites.actor.cpp
   ReadYourWrites.h
+  RESTClient.h
+  RESTClient.actor.cpp
   RestoreInterface.cpp
   RestoreInterface.h
   RunTransaction.actor.h
