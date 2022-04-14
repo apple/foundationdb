@@ -698,9 +698,12 @@ Future<T> safeThreadFutureToFutureImpl(ThreadFuture<T> threadFuture) {
 	try {
 		wait(onReady);
 	} catch (Error& e) {
-		ASSERT(e.code() == error_code_actor_cancelled);
+		// broken_promise can be thrown if the network is already shut down
+		ASSERT(e.code() == error_code_operation_cancelled || e.code() == error_code_broken_promise);
 		// prerequisite: we have exclusive ownership of the threadFuture
-		threadFuture.cancel();
+		if (e.code() == error_code_operation_cancelled) {
+			threadFuture.cancel();
+		}
 		throw e;
 	}
 	// threadFuture should be ready
