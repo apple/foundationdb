@@ -1191,6 +1191,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 		ccf = makeReference<ClusterConnectionFile>(resolvedClusterFile.first);
 		wait(ccf->resolveHostnames());
 	} catch (Error& e) {
+		if (e.code() == error_code_operation_cancelled) {
+			throw;
+		}
 		fprintf(stderr, "%s\n", ClusterConnectionFile::getErrorString(resolvedClusterFile, e).c_str());
 		return 1;
 	}
@@ -1236,6 +1239,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 			wait(delay(3.0) || success(safeThreadFutureToFuture(tr->getReadVersion())));
 			break;
 		} catch (Error& e) {
+			if (e.code() == error_code_operation_cancelled) {
+				throw;
+			}
 			if (e.code() == error_code_cluster_version_changed) {
 				wait(safeThreadFutureToFuture(tr->onError(e)));
 			} else {
@@ -2023,6 +2029,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 			TraceEvent(SevInfo, "CLICommandLog", randomID).detail("Command", line).detail("IsError", is_error);
 
 		} catch (Error& e) {
+			if (e.code() == error_code_operation_cancelled) {
+				throw;
+			}
 			if (e.code() == error_code_tenant_name_required) {
 				printAtCol("ERROR: tenant name required. Use the `usetenant' command to select a tenant or enable the "
 				           "`RAW_ACCESS' option to read raw keys.",
