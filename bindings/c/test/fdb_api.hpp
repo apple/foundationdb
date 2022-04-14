@@ -26,6 +26,7 @@
 #define FDB_API_VERSION 720
 #endif
 
+#include <cassert>
 #include <cstdint>
 #include <memory>
 #include <stdexcept>
