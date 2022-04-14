@@ -19,8 +19,8 @@
  */
 
 #pragma once
-#include "flow/Trace.h"
 #include <cstdint>
+#include "flow/Trace.h"
 
 // This version impacts both communications and the deserialization of certain database and IKeyValueStore keys.
 //
@@ -36,9 +36,6 @@ constexpr uint64_t currentProtocolVersionValue = 0x0FDB00B072000000LL;
 // The first protocol version that cannot be downgraded from. Ordinarily, this will be two release versions larger
 // than the current version, meaning that we only support downgrades between consecutive release versions.
 constexpr uint64_t minInvalidProtocolVersionValue = 0x0FDB00B074000000LL;
-
-// The lowest protocol version that can be downgraded to.
-constexpr uint64_t minCompatibleProtocolVersionValue = 0x0FDB00B071000000LL;
 
 #define PROTOCOL_VERSION_FEATURE(v, x)                                                                                 \
 	static_assert((v & 0xF0FFFFLL) == 0 || v < 0x0FDB00B071000000LL, "Unexpected feature protocol version");           \
@@ -62,7 +59,6 @@ public: // constants
 	static constexpr uint64_t objectSerializerFlag = 0x1000000000000000LL;
 	static constexpr uint64_t compatibleProtocolVersionMask = 0xFFFFFFFFFFFF0000LL;
 	static constexpr uint64_t minValidProtocolVersion = 0x0FDB00A200060001LL;
-	static constexpr uint64_t invalidProtocolVersion = 0x0FDB00A100000000LL;
 
 public:
 	constexpr explicit ProtocolVersion(uint64_t version) : _version(version) {}
@@ -77,8 +73,6 @@ public:
 		return ProtocolVersion(_version & compatibleProtocolVersionMask);
 	}
 	constexpr bool isValid() const { return version() >= minValidProtocolVersion; }
-
-	constexpr bool isInvalidMagic() const { return version() == invalidProtocolVersion; }
 
 	constexpr uint64_t version() const { return _version & versionFlagMask; }
 	constexpr uint64_t versionWithFlags() const { return _version; }
@@ -170,7 +164,6 @@ public: // introduced features
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B071010000LL, Tenants);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B071010000LL, StorageInterfaceReadiness);
 	PROTOCOL_VERSION_FEATURE(0x0FDB00B071010000LL, ResolverPrivateMutations);
-	PROTOCOL_VERSION_FEATURE(0x0FDB00B072000000LL, SWVersionTracking);
 };
 
 template <>
@@ -182,7 +175,6 @@ struct Traceable<ProtocolVersion> : std::true_type {
 
 constexpr ProtocolVersion currentProtocolVersion(currentProtocolVersionValue);
 constexpr ProtocolVersion minInvalidProtocolVersion(minInvalidProtocolVersionValue);
-constexpr ProtocolVersion minCompatibleProtocolVersion(minCompatibleProtocolVersionValue);
 
 // This assert is intended to help prevent incrementing the leftmost digits accidentally. It will probably need to
 // change when we reach version 10.
