@@ -3235,7 +3235,7 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 	}
 
 	// TODO - ljoswiak, mpilman - Trace ID is now 2 unint64_t, need to discuss what you want to do here?
-	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID.first();
+	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID;
 
 	++data->counters.getRangeQueries;
 	++data->counters.allQueries;
@@ -3729,7 +3729,7 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 	}
 
 	// TODO - ljoswiak, mpilman discuss.
-	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID.first();
+	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID;
 
 	++data->counters.getMappedRangeQueries;
 	++data->counters.allQueries;
@@ -4144,7 +4144,7 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 	}
 	state int64_t resultSize = 0;
 	// TODO - ljoswiak, mpilman discuss.
-	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID.first();
+	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID;
 
 	++data->counters.getKeyQueries;
 	++data->counters.allQueries;
@@ -8432,7 +8432,7 @@ ACTOR Future<Void> watchValueWaitForVersion(StorageServer* self,
 		span.addAttribute("tenant"_sr, req.tenantInfo.name.get());
 	}
 	// TODO - jloswiak, mpilman discuss.
-	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID.first();
+	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID;
 	try {
 		wait(success(waitForVersionNoTooOld(self, req.version)));
 		Optional<TenantMapEntry> entry = self->getTenantEntry(latestVersion, req.tenantInfo);
@@ -8450,12 +8450,12 @@ ACTOR Future<Void> watchValueWaitForVersion(StorageServer* self,
 
 ACTOR Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream<WatchValueRequest> stream) {
 	loop {
-		getCurrentLineage()->modify(&TransactionLineage::txID) = 0;
+		getCurrentLineage()->modify(&TransactionLineage::txID) = UID();
 		state WatchValueRequest req = waitNext(stream);
 		state Reference<ServerWatchMetadata> metadata = self->getWatchMetadata(req.key.contents());
 		state Span span("SS:serveWatchValueRequestsImpl"_loc, { req.spanContext });
 		// TODO - ljoswiak, mpilman, discuss.
-		getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID.first();
+		getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID;
 
 		// case 1: no watch set for the current key
 		if (!metadata.isValid()) {

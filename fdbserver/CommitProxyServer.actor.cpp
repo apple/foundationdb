@@ -1683,7 +1683,7 @@ ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsReques
 	// We can't respond to these requests until we have valid txnStateStore
 	getCurrentLineage()->modify(&TransactionLineage::operation) = TransactionLineage::Operation::GetKeyServersLocations;
 	// TODO - ljoswiak, mpilman. OK to use first uint64_t of traceID?
-	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID.first();
+	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID;
 	wait(commitData->validState.getFuture());
 	wait(delay(0, TaskPriority::DefaultEndpoint));
 
