@@ -3135,7 +3135,11 @@ SpanContext generateSpanID(bool transactionTracingSample, SpanContext parentCont
 		uint64_t spanId = parentContext.spanID > 0 ? deterministicRandom()->randomUInt64() : 0;
 		return SpanContext(txnId, spanId);
 	} else if (transactionTracingSample) {
-		return SpanContext(txnId, deterministicRandom()->randomUInt64(), deterministicRandom()->random01() <= FLOW_KNOBS->TRACING_SAMPLE_RATE ? TraceFlags::sampled : TraceFlags::unsampled);
+		return SpanContext(txnId,
+		                   deterministicRandom()->randomUInt64(),
+		                   deterministicRandom()->random01() <= FLOW_KNOBS->TRACING_SAMPLE_RATE
+		                       ? TraceFlags::sampled
+		                       : TraceFlags::unsampled);
 	} else {
 		return SpanContext(txnId, 0);
 	}
