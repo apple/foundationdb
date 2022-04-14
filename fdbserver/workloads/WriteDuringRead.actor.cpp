@@ -114,7 +114,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 
 	std::string description() const override { return "WriteDuringRead"; }
 
-	ACTOR Future<Void> setupImpl(WriteDuringReadWorkload *self, Database cx) {
+	ACTOR Future<Void> setupImpl(WriteDuringReadWorkload* self, Database cx) {
 		// If we are operating in the default tenant but enable raw access, we should only write keys
 		// in the tenant's key-space.
 		if (self->useSystemKeys && cx->defaultTenant.present() && self->keyPrefix < systemKeys.begin) {
@@ -124,9 +124,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 		return Void();
 	}
 
-	Future<Void> setup(Database const& cx) override {
-		return setupImpl(this, cx);
-	}
+	Future<Void> setup(Database const& cx) override { return setupImpl(this, cx); }
 
 	Future<Void> start(Database const& cx) override {
 		if (clientId == 0)

@@ -758,8 +758,8 @@ ACTOR Future<Void> clearData(Database cx) {
 			// If the result is non-empty, it is possible that there is some bad interaction between the test
 			// and the optional simulated default tenant:
 			//
-			// 1. If the test is creating/deleting tenants itself, then it should disable the default tenant. 
-			// 2. If the test is opening Database objects itself, then it needs to propagate the default tenant 
+			// 1. If the test is creating/deleting tenants itself, then it should disable the default tenant.
+			// 2. If the test is opening Database objects itself, then it needs to propagate the default tenant
 			//    value from the existing Database.
 			// 3. If the test is using raw access or system key access and writing to the normal key-space, then
 			//    it should disable the default tenant.
