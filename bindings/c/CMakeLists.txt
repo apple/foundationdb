@@ -252,6 +252,25 @@ endif()
             --test-dir
             ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests
             )
+
+  add_test(NAME fdb_c_upgrade_single_threaded
+      COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+            --build-dir ${CMAKE_BINARY_DIR}
+            --disable-log-dump
+            --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadSingleThr.toml
+            --upgrade-path "6.3.23" "7.0.0" "6.3.23"
+            --process-number 1
+    )
+
+    add_test(NAME fdb_c_upgrade_multi_threaded
+    COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+          --build-dir ${CMAKE_BINARY_DIR}
+          --disable-log-dump
+          --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
+          --upgrade-path "6.3.23" "7.0.0" "6.3.23"
+          --process-number 3
+    )
+
 endif()
 
 set(c_workloads_srcs

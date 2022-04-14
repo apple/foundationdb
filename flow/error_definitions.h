@@ -315,6 +315,7 @@ ERROR( not_implemented, 4200, "Not implemented yet" )
 // 6xxx Authorization and authentication error codes
 ERROR( permission_denied, 6000, "Client tried to access unauthorized data" )
 ERROR( unauthorized_attempt, 6001, "A untrusted client tried to send a message to a private endpoint" )
+ERROR( digital_signature_ops_error, 6002, "Digital signature operation error" )
 // clang-format on
 
 #undef ERROR

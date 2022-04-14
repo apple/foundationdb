@@ -5,9 +5,8 @@ import os
 import shutil
 import subprocess
 import sys
-from local_cluster import LocalCluster
+from local_cluster import LocalCluster, random_secret_string
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
-from random import choice
 from pathlib import Path
 
 
@@ -18,8 +17,7 @@ class TempCluster:
         assert self.build_dir.is_dir(), "{} is not a directory".format(build_dir)
         tmp_dir = self.build_dir.joinpath(
             "tmp",
-            "".join(choice(LocalCluster.valid_letters_for_secret)
-                    for i in range(16)),
+            random_secret_string(16)
         )
         tmp_dir.mkdir(parents=True)
         self.cluster = LocalCluster(
