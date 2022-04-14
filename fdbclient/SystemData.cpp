@@ -1456,11 +1456,12 @@ TEST_CASE("/SystemData/SerDes/SSI") {
 	ssi.uniqueID = UID(0x1234123412341234, 0x5678567856785678);
 	ssi.locality = localityData;
 	ssi.initEndpoints();
+	ssi.startAcceptingRequests();
 
 	testSSISerdes(ssi);
 
 	ssi.tssPairID = UID(0x2345234523452345, 0x1238123812381238);
-
+	ssi.stopAcceptingRequests();
 	testSSISerdes(ssi);
 	printf("ssi serdes test complete\n");
 

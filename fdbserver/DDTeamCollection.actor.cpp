@@ -5676,10 +5676,10 @@ public:
 		collection->disableBuildingTeams();
 		collection->setCheckTeamDelay();
 
-		bool wantsNewServers = true;
-		bool wantsTrueBest = true;
-		bool preferLowerUtilization = true;
-		bool teamMustHaveShards = false;
+		auto wantsNewServers = WantNewServers::True;
+		auto wantsTrueBest = WantTrueBest::True;
+		auto preferLowerUtilization = PreferLowerUtilization::True;
+		auto teamMustHaveShards = TeamMustHaveShards::False;
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
 		state GetTeamRequest req(wantsNewServers, wantsTrueBest, preferLowerUtilization, teamMustHaveShards);
@@ -5689,7 +5689,7 @@ public:
 			return r1 == r2 ? 0 : (r1 > r2 ? -1 : 1);
 		};
 
-		state GetTeamRequest reqHigh(wantsNewServers, wantsTrueBest, false, teamMustHaveShards);
+		state GetTeamRequest reqHigh(wantsNewServers, wantsTrueBest, PreferLowerUtilization::False, teamMustHaveShards);
 		reqHigh.teamSorter = [](Reference<IDataDistributionTeam> a, Reference<IDataDistributionTeam> b) {
 			auto r1 = a->getLoadReadBandwidth(), r2 = b->getLoadReadBandwidth();
 			return r1 == r2 ? 0 : (r1 < r2 ? -1 : 1);
