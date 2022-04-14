@@ -74,6 +74,11 @@ const std::array<Operation, MAX_OP> opTable{
 	    { { StepKind::READ,
 	        [](Transaction tx, Arguments const&, ByteString&, ByteString&, ByteString&) {
 	            return tx.getReadVersion().eraseType();
+	        },
+	        [](Future f, Transaction, Arguments const&, ByteString&, ByteString&, ByteString&) {
+	            if (f && !f.error()) {
+		            f.get<future_var::Int64>();
+	            }
 	        } } },
 	    false },
 	  { "GET",
@@ -82,6 +87,11 @@ const std::array<Operation, MAX_OP> opTable{
 	            const auto num = nextKey(args);
 	            genKey(key, KEY_PREFIX, args, num);
 	            return tx.get(key, false /*snapshot*/).eraseType();
+	        },
+	        [](Future f, Transaction, Arguments const&, ByteString&, ByteString&, ByteString& val) {
+	            if (f && !f.error()) {
+		            f.get<future_var::Value>();
+	            }
 	        } } },
 	    false },
 	  { "GETRANGE",
@@ -103,6 +113,11 @@ const std::array<Operation, MAX_OP> opTable{
 	                                                                        false /*snapshot*/,
 	                                                                        args.txnspec.ops[OP_GETRANGE][OP_REVERSE])
 	                .eraseType();
+	        },
+	        [](Future f, Transaction, Arguments const&, ByteString&, ByteString&, ByteString& val) {
+	            if (f && !f.error()) {
+		            f.get<future_var::KeyValueArray>();
+	            }
 	        } } },
 	    false },
 	  { "SGET",
@@ -111,6 +126,11 @@ const std::array<Operation, MAX_OP> opTable{
 	            const auto num = nextKey(args);
 	            genKey(key, KEY_PREFIX, args, num);
 	            return tx.get(key, true /*snapshot*/).eraseType();
+	        },
+	        [](Future f, Transaction, Arguments const&, ByteString&, ByteString&, ByteString& val) {
+	            if (f && !f.error()) {
+		            f.get<future_var::Value>();
+	            }
 	        } } },
 	    false },
 	  { "SGETRANGE",
@@ -134,9 +154,12 @@ const std::array<Operation, MAX_OP> opTable{
 	                                                                        true /*snapshot*/,
 	                                                                        args.txnspec.ops[OP_SGETRANGE][OP_REVERSE])
 	                .eraseType();
-	        }
-
-	    } },
+	        },
+	        [](Future f, Transaction, Arguments const&, ByteString&, ByteString&, ByteString& val) {
+	            if (f && !f.error()) {
+		            f.get<future_var::KeyValueArray>();
+	            }
+	        } } },
 	    false },
 	  { "UPDATE",
 	    { { StepKind::READ,
@@ -144,6 +167,11 @@ const std::array<Operation, MAX_OP> opTable{
 	            const auto num = nextKey(args);
 	            genKey(key, KEY_PREFIX, args, num);
 	            return tx.get(key, false /*snapshot*/).eraseType();
+	        },
+	        [](Future f, Transaction, Arguments const&, ByteString&, ByteString&, ByteString& val) {
+	            if (f && !f.error()) {
+		            f.get<future_var::Value>();
+	            }
 	        } },
 	      { StepKind::IMM,
 	        [](Transaction tx, Arguments const& args, ByteString& key, ByteString&, ByteString& value) {
@@ -290,8 +318,11 @@ const std::array<Operation, MAX_OP> opTable{
 
 	            auto api_context = blob_granules::local_file::createApiContext(user_context, args.bg_materialize_files);
 
-	            auto r =
-	                tx.readBlobGranules(begin, end, 0 /*begin_version*/, -1 /*end_version, use txn's*/, api_context);
+	            auto r = tx.readBlobGranules(begin,
+	                                         end,
+	                                         0 /* beginVersion*/,
+	                                         -2, /* endVersion. -2 (latestVersion) is use txn read version */
+	                                         api_context);
 
 	            user_context.clear();
 

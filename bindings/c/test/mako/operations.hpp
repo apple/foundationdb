@@ -79,8 +79,20 @@ using StepFunction = fdb::Future (*)(fdb::Transaction tx,
                                      fdb::ByteString& /*key2*/,
                                      fdb::ByteString& /*value*/);
 
+using PostStepFunction = void (*)(fdb::Future,
+                                  fdb::Transaction tx,
+                                  Arguments const&,
+                                  fdb::ByteString& /*key1*/,
+                                  fdb::ByteString& /*key2*/,
+                                  fdb::ByteString& /*value*/);
+
+struct Step {
+	StepKind kind;
+	StepFunction step_func_;
+	PostStepFunction post_step_func_{ nullptr };
+};
+
 class Operation {
-	using Step = std::pair<StepKind, StepFunction>;
 	std::string_view name_;
 	std::vector<Step> steps_;
 	bool needs_commit_;
@@ -93,11 +105,12 @@ public:
 
 	StepKind stepKind(int step) const noexcept {
 		assert(step < steps());
-		return steps_[step].first;
+		return steps_[step].kind;
 	}
 
-	StepFunction stepFunction(int step) const noexcept { return steps_[step].second; }
+	StepFunction stepFunction(int step) const noexcept { return steps_[step].step_func_; }
 
+	PostStepFunction postStepFunction(int step) const noexcept { return steps_[step].post_step_func_; }
 	// how many steps in this op?
 	int steps() const noexcept { return static_cast<int>(steps_.size()); }
 	// does the op needs to commit some time after its final step?

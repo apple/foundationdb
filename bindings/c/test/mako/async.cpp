@@ -125,6 +125,8 @@ repeat_immediate_steps:
 	} else {
 		// step is blocking. register a continuation and return
 		f.then([this, state = shared_from_this()](Future f) {
+			if (auto postStepFn = opTable[iter.op].postStepFunction(iter.step))
+				postStepFn(f, tx, args, key1, key2, val);
 			if (iter.stepKind() != StepKind::ON_ERROR) {
 				if (auto err = f.error()) {
 					logr.printWithLogLevel(err.retryable() ? VERBOSE_WARN : VERBOSE_NONE,

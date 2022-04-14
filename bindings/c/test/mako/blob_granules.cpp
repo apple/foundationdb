@@ -27,7 +27,12 @@ extern thread_local mako::Logger logr;
 
 namespace mako::blob_granules::local_file {
 
-int64_t startLoad(const char* filename, int filenameLength, int64_t offset, int64_t length, void* userContext) {
+int64_t startLoad(const char* filename,
+                  int filenameLength,
+                  int64_t offset,
+                  int64_t length,
+                  int64_t fullFileLength,
+                  void* userContext) {
 	FILE* fp;
 	char full_fname[PATH_MAX]{
 		0,
@@ -103,6 +108,7 @@ fdb::native::FDBReadBlobGranuleContext createApiContext(UserContext& ctx, bool m
 	ret.get_load_f = &getLoad;
 	ret.free_load_f = &freeLoad;
 	ret.debugNoMaterialize = !materialize_files;
+	ret.granuleParallelism = 2; // TODO make knob or setting for changing this?
 	return ret;
 }
 

@@ -233,6 +233,8 @@ int runOneTask(Transaction tx, Arguments const& args, ThreadStatistics& stats, L
 				future_rc = waitAndHandleForOnError(tx, f, opTable[op].name());
 			}
 		}
+		if (auto postStepFn = opTable[op].postStepFunction(step))
+			postStepFn(f, tx, args, key1, key2, val);
 		watch_step.stop();
 		if (future_rc != FutureRC::OK) {
 			if (future_rc == FutureRC::CONFLICT) {
