@@ -22,7 +22,7 @@
 
 #if defined(NO_INTELLISENSE) && !defined(FDBRPC_TENANT_AUTH_ACTOR_G_H)
 #define FDBRPC_TENANT_AUTH_ACTOR_G_H
-#include "fdbrpc/TenantInfo.actor.g.h"
+#include "fdbrpc/TenantAuth.actor.g.h"
 #elif !defined(FDBRPC_TENANT_AUTH_ACTOR_H)
 #define FDBRPC_TENANT_AUTH_ACTOR_H
 
@@ -59,9 +59,16 @@ struct serializable_traits<TenantInfo> : std::true_type {
 		using namespace std::literals;
 		serializer(ar, v.name, v.tenantId);
 		if constexpr (Archiver::isDeserializing) {
-			AuthorizedTenants& authorizedTenants = ar.context().template variable<AuthorizedTenants>("AuthorizedTenants"sv);
-			v.trusted = authorizedTenants.trusted;
-			v.verified = v.trusted || !v.name.present() || authorizedTenants.authorizedTenants.count(v.name.get()) != 0;
+			try {
+				Reference<AuthorizedTenants>& authorizedTenants =
+				    std::any_cast<Reference<AuthorizedTenants>&>(ar.context().variable("AuthorizedTenants"sv));
+				v.trusted = authorizedTenants->trusted;
+				v.verified =
+				    v.trusted || !v.name.present() || authorizedTenants->authorizedTenants.count(v.name.get()) != 0;
+			} catch (std::out_of_range& e) {
+				TraceEvent(SevError, "AttemptedReadTenantInfoWithNoAuth").backtrace();
+				ASSERT(false);
+			}
 		}
 	}
 };

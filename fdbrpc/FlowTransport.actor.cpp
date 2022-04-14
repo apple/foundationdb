@@ -248,9 +248,10 @@ struct TenantAuthorizer final : NetworkMessageReceiver {
 			reader.deserialize(req);
 			// TODO: check signature
 			Token token = ObjectReader::fromStringRef<Token>(req.token.token, Unversioned());
-			AuthorizedTenants& auth = reader.variable<AuthorizedTenants>("AuthorizedTenants");
+			Reference<AuthorizedTenants>& auth =
+			    std::any_cast<Reference<AuthorizedTenants>&>(reader.variable("AuthorizedTenants"));
 			for (const auto& t : token.tenants) {
-				auth.authorizedTenants.insert(t);
+				auth->authorizedTenants.insert(t);
 			}
 		} catch (Error& e) {
 			if (e.code() == error_code_permission_denied) {
@@ -399,6 +400,9 @@ TransportData::TransportData(uint64_t transportId, int maxWellKnownEndpoints, IP
     allowList(allowList == nullptr ? IPAllowList() : *allowList) {
 	degraded = makeReference<AsyncVar<bool>>(false);
 	pingLogger = pingLatencyLogger(this);
+	auto auth = makeReference<AuthorizedTenants>();
+	auth->trusted = true;
+	(*localCVM)["AuthorizedTenants"] = auth;
 }
 
 #define CONNECT_PACKET_V0 0x0FDB00A444020001LL
@@ -1238,8 +1242,8 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 	state std::shared_ptr<ContextVariableMap> cvm = std::make_shared<ContextVariableMap>();
 	peerAddress = conn->getPeerAddress();
 	authorizedTenants->trusted = transport->allowList(conn->getPeerAddress().ip);
-	(*cvm)["AuthorizedTenants"] = &authorizedTenants;
-	(*cvm)["PeerAddress"] = &peerAddress;
+	(*cvm)["AuthorizedTenants"] = authorizedTenants;
+	(*cvm)["PeerAddress"] = peerAddress;
 
 	authorizedTenants->trusted = transport->allowList(peerAddress.ip);
 	if (!peer) {
