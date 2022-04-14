@@ -48,7 +48,7 @@ Monitor
 =======
 
 * The ``status`` command will report the IP address of the Storage Server under wiggling.
-* The ``status json`` command in the FDB :ref:`command line interface <command-line-interface>` will show the current `perpetual_storage_wiggle` value. Plus, the ``cluster.storage_wiggler`` field reports storage wiggle details.
+* The ``status json`` command in the FDB :ref:`command line interface <command-line-interface>` will show the current ``perpetual_storage_wiggle`` value. Plus, the ``cluster.storage_wiggler`` field reports storage wiggle details.
 
 Trace Events
 ----------------------
