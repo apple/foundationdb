@@ -221,7 +221,7 @@ public:
 	ConfigFollowerInterface();
 	void setupWellKnownEndpoints();
 	ConfigFollowerInterface(NetworkAddress const& remote);
-	ConfigFollowerInterface(Hostname hostname) : hostname(hostname) {}
+	ConfigFollowerInterface(Hostname const& hostname);
 	bool operator==(ConfigFollowerInterface const& rhs) const;
 	bool operator!=(ConfigFollowerInterface const& rhs) const;
 	UID id() const { return _id; }

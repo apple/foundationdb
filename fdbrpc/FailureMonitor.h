@@ -93,6 +93,9 @@ public:
 	// Only use this function when the endpoint is known to be failed
 	virtual void endpointNotFound(Endpoint const&) = 0;
 
+	// Inform client that it was trying to send a message to a private endpoint
+	virtual void unauthorizedEndpoint(Endpoint const&) = 0;
+
 	// The next time the known status for the endpoint changes, returns the new status.
 	virtual Future<Void> onStateChanged(Endpoint const& endpoint) = 0;
 
@@ -107,6 +110,9 @@ public:
 
 	// Returns true if the endpoint will never become available.
 	virtual bool permanentlyFailed(Endpoint const& endpoint) const = 0;
+
+	// Returns true if we known we're not allowed to send messages to the remote endpoint
+	virtual bool knownUnauthorized(Endpoint const&) const = 0;
 
 	// Called by FlowTransport when a connection closes and a prior request or reply might be lost
 	virtual void notifyDisconnect(NetworkAddress const&) = 0;
@@ -139,9 +145,11 @@ public:
 
 class SimpleFailureMonitor : public IFailureMonitor {
 public:
+	enum class FailedReason { NOT_FOUND, UNAUTHORIZED };
 	SimpleFailureMonitor();
 	void setStatus(NetworkAddress const& address, FailureStatus const& status) override;
 	void endpointNotFound(Endpoint const&) override;
+	void unauthorizedEndpoint(Endpoint const&) override;
 	void notifyDisconnect(NetworkAddress const&) override;
 
 	Future<Void> onStateChanged(Endpoint const& endpoint) override;
@@ -151,6 +159,7 @@ public:
 	Future<Void> onDisconnect(NetworkAddress const& address) override;
 	bool onlyEndpointFailed(Endpoint const& endpoint) const override;
 	bool permanentlyFailed(Endpoint const& endpoint) const override;
+	bool knownUnauthorized(Endpoint const&) const override;
 
 	void reset();
 
@@ -158,7 +167,7 @@ private:
 	std::unordered_map<NetworkAddress, FailureStatus> addressStatus;
 	YieldedAsyncMap<Endpoint, bool> endpointKnownFailed;
 	AsyncMap<NetworkAddress, bool> disconnectTriggers;
-	std::unordered_set<Endpoint> failedEndpoints;
+	std::unordered_map<Endpoint, FailedReason> failedEndpoints;
 
 	friend class OnStateChangedActorActor;
 };

@@ -36,7 +36,7 @@ struct GrvProxyInterface {
 	Optional<Key> processId;
 	bool provisional;
 
-	RequestStream<struct GetReadVersionRequest>
+	PublicRequestStream<struct GetReadVersionRequest>
 	    getConsistentReadVersion; // Returns a version which (1) is committed, and (2) is >= the latest version reported
 	                              // committed (by a commit response) when this request was sent
 	//   (at some point between when this request is sent and when its response is received, the latest version reported

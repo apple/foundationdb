@@ -95,6 +95,7 @@ ERROR( page_encoding_not_supported, 1071, "Page encoding type is not supported o
 ERROR( page_decoding_failed, 1072, "Page content decoding failed" )
 ERROR( unexpected_encoding_type, 1073, "Page content decoding failed" )
 ERROR( encryption_key_not_found, 1074, "Encryption key not found" )
+ERROR( stale_version_vector, 1075, "Client version vector is stale" )
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )
@@ -310,6 +311,11 @@ ERROR( encrypt_invalid_id, 2706, "Invalid encryption domainId or encryption ciph
 ERROR( unknown_error, 4000, "An unknown error occurred" )  // C++ exception not of type Error
 ERROR( internal_error, 4100, "An internal error occurred" )
 ERROR( not_implemented, 4200, "Not implemented yet" )
+
+// 6xxx Authorization and authentication error codes
+ERROR( permission_denied, 6000, "Client tried to access unauthorized data" )
+ERROR( unauthorized_attempt, 6001, "A untrusted client tried to send a message to a private endpoint" )
+ERROR( digital_signature_ops_error, 6002, "Digital signature operation error" )
 // clang-format on
 
 #undef ERROR

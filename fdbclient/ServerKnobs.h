@@ -37,6 +37,8 @@ public:
 	int64_t MAX_VERSIONS_IN_FLIGHT_FORCED;
 	int64_t MAX_READ_TRANSACTION_LIFE_VERSIONS;
 	int64_t MAX_WRITE_TRANSACTION_LIFE_VERSIONS;
+	bool ENABLE_VERSION_VECTOR;
+	bool ENABLE_VERSION_VECTOR_TLOG_UNICAST;
 	double MAX_COMMIT_BATCH_INTERVAL; // Each commit proxy generates a CommitTransactionBatchRequest at least this
 	                                  // often, so that versions always advance smoothly
 	double MAX_VERSION_RATE_MODIFIER;
@@ -108,6 +110,7 @@ public:
 	double PUSH_STATS_SLOW_AMOUNT;
 	double PUSH_STATS_SLOW_RATIO;
 	int TLOG_POP_BATCH_SIZE;
+	double BLOCKING_PEEK_TIMEOUT;
 	bool PEEK_BATCHING_EMPTY_MSG;
 	double PEEK_BATCHING_EMPTY_MSG_INTERVAL;
 
@@ -318,6 +321,7 @@ public:
 	int ROCKSDB_CAN_COMMIT_DELAY_ON_OVERLOAD;
 	int ROCKSDB_CAN_COMMIT_DELAY_TIMES_ON_OVERLOAD;
 	int64_t ROCKSDB_COMPACTION_READAHEAD_SIZE;
+	int64_t ROCKSDB_BLOCK_SIZE;
 
 	// Leader election
 	int MAX_NOTIFICATIONS;
@@ -374,6 +378,7 @@ public:
 	int TXN_STATE_SEND_AMOUNT;
 	double REPORT_TRANSACTION_COST_ESTIMATION_DELAY;
 	bool PROXY_REJECT_BATCH_QUEUED_TOO_LONG;
+	bool PROXY_USE_RESOLVER_PRIVATE_MUTATIONS;
 
 	int RESET_MASTER_BATCHES;
 	int RESET_RESOLVER_BATCHES;
@@ -814,6 +819,7 @@ public:
 	// Encryption
 	bool ENABLE_ENCRYPTION;
 	std::string ENCRYPTION_MODE;
+	int SIM_KMS_MAX_KEYS;
 
 	// blob granule stuff
 	// FIXME: configure url with database configuration instead of knob eventually

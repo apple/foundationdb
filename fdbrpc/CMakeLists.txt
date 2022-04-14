@@ -16,6 +16,7 @@ set(FDBRPC_SRCS
   genericactors.actor.cpp
   HealthMonitor.actor.cpp
   IAsyncFile.actor.cpp
+  IPAllowList.cpp
   LoadBalance.actor.cpp
   LoadBalance.actor.h
   Locality.cpp
@@ -34,6 +35,8 @@ set(FDBRPC_SRCS
   sim2.actor.cpp
   sim_validation.cpp
   TimedRequest.h
+  TokenSign.h
+  TokenSign.cpp
   TraceFileIO.cpp
   TSSComparison.h)
 

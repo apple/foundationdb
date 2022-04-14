@@ -27,7 +27,7 @@
 #include <unordered_map>
 #include <vector>
 
-#define FDB_API_VERSION 710
+#define FDB_API_VERSION 720
 
 namespace FdbApiTester {
 
@@ -41,9 +41,6 @@ struct WorkloadSpec {
 struct TestSpec {
 	// Title of the test
 	std::string title;
-
-	// FDB API version, using the latest version by default
-	int apiVersion = FDB_API_VERSION;
 
 	// Use blocking waits on futures instead of scheduling callbacks
 	bool blockOnFutures = false;
