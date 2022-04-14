@@ -258,7 +258,7 @@ endif()
             --build-dir ${CMAKE_BINARY_DIR}
             --disable-log-dump
             --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadSingleThr.toml
-            --upgrade-path "6.2.30" "6.3.23" "7.0.0" "6.3.23"
+            --upgrade-path "6.3.23" "7.0.0" "6.3.23"
             --process-number 1
     )
 
