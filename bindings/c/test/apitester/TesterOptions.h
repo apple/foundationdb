@@ -29,13 +29,20 @@ namespace FdbApiTester {
 
 class TesterOptions {
 public:
+	// FDB API version, using the latest version by default
+	int apiVersion = FDB_API_VERSION;
 	std::string clusterFile;
 	bool trace = false;
 	std::string traceDir;
-	std::string traceFormat;
+	std::string traceFormat = "xml";
 	std::string logGroup;
 	std::string externalClientLibrary;
+	std::string externalClientDir;
+	bool disableLocalClient = false;
 	std::string testFile;
+	std::string inputPipeName;
+	std::string outputPipeName;
+	int transactionRetryLimit = 0;
 	int numFdbThreads;
 	int numClientThreads;
 	int numDatabases;

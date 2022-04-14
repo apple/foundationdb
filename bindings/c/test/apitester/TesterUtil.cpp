@@ -20,8 +20,17 @@
 
 #include "TesterUtil.h"
 #include <cstdio>
+#include <algorithm>
+#include <ctype.h>
+#include <chrono>
 
 namespace FdbApiTester {
+
+std::string lowerCase(const std::string& str) {
+	std::string res = str;
+	std::transform(res.begin(), res.end(), res.begin(), ::tolower);
+	return res;
+}
 
 Random::Random() {
 	std::random_device dev;
@@ -53,6 +62,7 @@ bool Random::randomBool(double trueRatio) {
 
 void print_internal_error(const char* msg, const char* file, int line) {
 	fprintf(stderr, "Assertion %s failed @ %s %d:\n", msg, file, line);
+	fflush(stderr);
 }
 
 } // namespace FdbApiTester
