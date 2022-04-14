@@ -216,7 +216,6 @@ ERROR( client_lib_already_exists, 2119, "Client library with same identifier alr
 ERROR( client_lib_not_found, 2120, "Client library for the given identifier not found." )
 ERROR( client_lib_not_available, 2121, "Client library exists, but is not available for download." )
 ERROR( client_lib_invalid_binary, 2122, "Invalid client library binary." )
-ERROR( dsa_error, 2123, "Digital signature algorithm error" )
 
 ERROR( tenant_name_required, 2130, "Tenant name must be specified to access data in the cluster" )
 ERROR( tenant_not_found, 2131, "Tenant does not exist" )
@@ -316,6 +315,7 @@ ERROR( not_implemented, 4200, "Not implemented yet" )
 // 6xxx Authorization and authentication error codes
 ERROR( permission_denied, 6000, "Client tried to access unauthorized data" )
 ERROR( unauthorized_attempt, 6001, "A untrusted client tried to send a message to a private endpoint" )
+ERROR( digital_signature_ops_error, 6002, "Digital signature operation error" )
 // clang-format on
 
 #undef ERROR

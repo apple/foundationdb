@@ -29,7 +29,7 @@
 #include "fdbrpc/TenantInfo.h"
 #include "fdbrpc/TenantInfo.h"
 
-struct Token {
+struct AuthTokenRef {
 	static constexpr FileIdentifier file_identifier = 1523118;
 	Arena arena;
 	double expiresAt;
@@ -41,7 +41,7 @@ struct Token {
 	}
 };
 
-struct SignedToken {
+struct SignedAuthTokenRef {
 	static constexpr FileIdentifier file_identifier = 5916732;
 	StringRef token;
 	StringRef keyName;
@@ -53,8 +53,8 @@ struct SignedToken {
 	}
 };
 
-Standalone<SignedToken> signToken(Token token, StringRef keyName, StringRef privateKeyDer);
+Standalone<SignedAuthTokenRef> signToken(AuthTokenRef token, StringRef keyName, StringRef privateKeyDer);
 
-bool verifyToken(SignedToken signedToken, StringRef publicKeyDer);
+bool verifyToken(SignedAuthTokenRef signedToken, StringRef publicKeyDer);
 
 #endif // FDBRPC_TOKEN_SIGN_H

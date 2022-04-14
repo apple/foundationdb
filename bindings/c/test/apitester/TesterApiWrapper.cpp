@@ -28,7 +28,7 @@ namespace {
 
 void fdb_check(fdb_error_t e) {
 	if (e) {
-		fmt::print(stderr, "Unexpected error: %s\n", fdb_get_error(e));
+		fmt::print(stderr, "Unexpected error: {}\n", fdb_get_error(e));
 		std::abort();
 	}
 }
