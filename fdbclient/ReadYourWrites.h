@@ -177,7 +177,7 @@ public:
 
 	Reference<const TransactionState> getTransactionState() const { return tr.trState; }
 
-	void setTransactionID(uint64_t id);
+	void setTransactionID(UID id);
 	void setToken(uint64_t token);
 
 	// Read from the special key space readConflictRangeKeysRange
