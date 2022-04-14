@@ -2791,7 +2791,6 @@ ACTOR Future<KeyRangeLocationInfo> getKeyLocation_internal(Database cx,
                                                            Reverse isBackward,
                                                            Version version) {
 
-	// TODO - ljoswiak. Parent or Link?
 	state Span span("NAPI:getKeyLocation"_loc, spanContext);
 	if (isBackward) {
 		ASSERT(key != allKeys.begin && key <= allKeys.end);
@@ -2947,7 +2946,6 @@ ACTOR Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations_internal(
     Optional<UID> debugID,
     UseProvisionalProxies useProvisionalProxies,
     Version version) {
-	// TODO - ljoswiak, parent or link?
 	state Span span("NAPI:getKeyRangeLocations"_loc, spanContext);
 	if (debugID.present())
 		g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getKeyLocations.Before");
@@ -3219,7 +3217,6 @@ ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
                                        UseTenant useTenant,
                                        TransactionRecordLogInfo recordLogInfo) {
 	state Version ver = wait(version);
-	// TODO - ljoswiak, parent or link?
 	state Span span("NAPI:getValue"_loc, trState->spanContext);
 	if (useTenant && trState->tenant().present()) {
 		span.addAttribute("tenant"_sr, trState->tenant().get());
@@ -3351,7 +3348,6 @@ ACTOR Future<Key> getKey(Reference<TransactionState> trState,
 	wait(success(version));
 
 	state Optional<UID> getKeyID = Optional<UID>();
-	// TODO - ljoswiak, parent or link?
 	state Span span("NAPI:getKey"_loc, trState->spanContext);
 	if (trState->debugID.present()) {
 		getKeyID = nondeterministicRandom()->randomUniqueID();
