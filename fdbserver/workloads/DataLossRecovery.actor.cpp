@@ -106,7 +106,6 @@ struct DataLossRecoveryWorkload : TestWorkload {
 
 		loop {
 			try {
-				tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 				state Optional<Value> res = wait(timeoutError(tr.get(key), 30.0));
 				const bool equal = !expectedValue.isError() && res == expectedValue.get();
 				if (!equal) {
@@ -128,7 +127,6 @@ struct DataLossRecoveryWorkload : TestWorkload {
 		state Transaction tr(cx);
 		loop {
 			try {
-				tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 				if (value.present()) {
 					tr.set(key, value.get());
 				} else {
@@ -232,7 +230,6 @@ struct DataLossRecoveryWorkload : TestWorkload {
 		state Transaction validateTr(cx);
 		loop {
 			try {
-				validateTr.setOption(FDBTransactionOptions::RAW_ACCESS);
 				Standalone<VectorRef<const char*>> addresses = wait(validateTr.getAddressesForKey(keys.begin));
 				// The move function is not what we are testing here, crash the test if the move fails.
 				ASSERT(addresses.size() == 1);
