@@ -25,6 +25,7 @@
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/WaitFailure.h"
 
+#include "flow/ProtocolVersion.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 static std::set<int> const& normalClusterRecoveryErrors() {
@@ -1408,6 +1409,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 
 	if (self->cstate.prevDBState.lowestCompatibleServerVersion > currentProtocolVersion) {
 		TraceEvent(SevWarnAlways, "IncompatbleServerVersion", self->dbgid).log();
+		throw internal_error();
 	}
 
 	self->recoveryState = RecoveryState::LOCKING_CSTATE;
@@ -1466,8 +1468,8 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	DBCoreState newState = self->cstate.myDBState;
 	newState.recoveryCount++;
 	newState.recoveryCount++;
-	if (self->cstate.myDBState.newestServerVersion.isInvalidMagic() ||
-	    self->cstate.myDBState.newestServerVersion < currentProtocolVersion) {
+	if (self->cstate.prevDBState.newestServerVersion.isInvalidMagic() ||
+	    self->cstate.prevDBState.newestServerVersion < currentProtocolVersion) {
 		ASSERT(self->cstate.myDBState.lowestCompatibleServerVersion.isInvalidMagic() ||
 		       !self->cstate.myDBState.newestServerVersion.isInvalidMagic());
 		newState.newestServerVersion = currentProtocolVersion;
@@ -1620,6 +1622,12 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	// Write cluster ID into txnStateStore if it is missing.
 	if (!clusterIdExists) {
 		tr.set(recoveryCommitRequest.arena, clusterIdKey, BinaryWriter::toValue(self->clusterId, Unversioned()));
+	}
+
+	if (currentProtocolVersion > self->cstate.prevDBState.newestServerVersion) {
+		tr.set(recoveryCommitRequest.arena,
+		       newestProtocolVersionKey,
+		       BinaryWriter::toValue(currentProtocolVersion.version(), Unversioned()));
 	}
 
 	applyMetadataMutations(SpanID(),

@@ -70,6 +70,14 @@ void decodeKeyServersValue(std::map<Tag, UID> const& tag_uid,
 
 extern const KeyRef clusterIdKey;
 
+// Key whose value stores the newest software version.
+// This is not used to enforce software version compatibility. This is just
+// a copy of information stored in the DBCoreState. That information is
+// used during recovery to make sure that only versions of software
+// that are compatible with the database are run.
+// "\xff/newestProtocolVersion"
+extern const KeyRef newestProtocolVersionKey;
+
 // "\xff/checkpoint/[[UID]] := [[CheckpointMetaData]]"
 extern const KeyRef checkpointPrefix;
 const Key checkpointKeyFor(UID checkpointID);
