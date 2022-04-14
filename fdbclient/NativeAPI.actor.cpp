@@ -3131,9 +3131,7 @@ ACTOR Future<Void> warmRange_impl(Reference<TransactionState> trState, KeyRange 
 SpanContext generateSpanID(bool transactionTracingSample, SpanContext parentContext = SpanContext()) {
 	UID txnId = UID(deterministicRandom()->randomUInt64(), deterministicRandom()->randomUInt64());
 	if (parentContext.isValid()) {
-		if (parentContext.traceID.first() > 0) {
-			txnId = parentContext.traceID;
-		}
+		txnId = parentContext.traceID;
 		uint64_t spanId = parentContext.spanID > 0 ? deterministicRandom()->randomUInt64() : 0;
 		return SpanContext(txnId, spanId);
 	} else if (transactionTracingSample) {
