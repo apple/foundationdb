@@ -287,6 +287,7 @@ struct TenantManagementWorkload : TestWorkload {
 
 		loop {
 			try {
+				tr->reset();
 				if (operationType == OperationType::SPECIAL_KEYS) {
 					tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 					Key key = self->specialKeysTenantMapPrefix.withSuffix(tenant);
