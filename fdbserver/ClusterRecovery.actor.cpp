@@ -1630,12 +1630,6 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 		tr.set(recoveryCommitRequest.arena, clusterIdKey, BinaryWriter::toValue(self->clusterId, Unversioned()));
 	}
 
-	if (currentProtocolVersion > self->cstate.prevDBState.newestServerVersion) {
-		tr.set(recoveryCommitRequest.arena,
-		       newestProtocolVersionKey,
-		       BinaryWriter::toValue(currentProtocolVersion.version(), Unversioned()));
-	}
-
 	applyMetadataMutations(SpanID(),
 	                       self->dbgid,
 	                       recoveryCommitRequest.arena,

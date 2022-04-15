@@ -1528,21 +1528,6 @@ ACTOR static Future<Void> logRangeWarningFetcher(Database cx,
 	return Void();
 }
 
-ACTOR Future<ProtocolVersion> getNewestProtocolVersion(Database cx) {
-	state ReadYourWritesTransaction tr(cx);
-	loop {
-		try {
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			Optional<Value> newestProtocolVersion = wait(tr.get(newestProtocolVersionKey));
-			ASSERT(newestProtocolVersion.present());
-			return BinaryReader::fromStringRef<ProtocolVersion>(newestProtocolVersion.get(), Unversioned());
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
-}
-
 ACTOR Future<ProtocolVersion> getNewestProtocolVersion(Database cx, WorkerDetails ccWorker) {
 
 	try {
@@ -2957,9 +2942,6 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		statusObj["connection_string"] = coordinators.ccr->getConnectionString().toString();
 		statusObj["bounce_impact"] = getBounceImpactInfo(statusCode);
 		statusObj["latest_server_version"] = format("%" PRIx64, newestProtocolVersion.version());
-
-		// ProtocolVersion newestProtocolVersion = wait(getNewestProtocolVersion(cx));
-		// statusObj["latest_server_version"] = format("%" PRIx64, newestProtocolVersion.version());
 
 		state Optional<DatabaseConfiguration> configuration;
 		state Optional<LoadConfigurationResult> loadResult;

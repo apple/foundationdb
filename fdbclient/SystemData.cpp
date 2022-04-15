@@ -43,8 +43,6 @@ const KeyRangeRef keyServersKeyServersKeys(LiteralStringRef("\xff/keyServers/\xf
                                            LiteralStringRef("\xff/keyServers/\xff/keyServers0"));
 const KeyRef keyServersKeyServersKey = keyServersKeyServersKeys.begin;
 
-const KeyRef newestProtocolVersionKey = LiteralStringRef("\xff/newestProtocolVersion");
-
 const Key keyServersKey(const KeyRef& k) {
 	return k.withPrefix(keyServersPrefix);
 }
