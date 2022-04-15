@@ -60,13 +60,14 @@ ACTOR Future<Void> readGranuleFiles(Transaction* tr, Key* startKey, Key endKey, 
 			Standalone<StringRef> filename;
 			int64_t offset;
 			int64_t length;
+			int64_t fullFileLength;
 
 			std::tie(gid, version, fileType) = decodeBlobGranuleFileKey(it.key);
 			ASSERT(gid == granuleID);
 
-			std::tie(filename, offset, length) = decodeBlobGranuleFileValue(it.value);
+			std::tie(filename, offset, length, fullFileLength) = decodeBlobGranuleFileValue(it.value);
 
-			BlobFileIndex idx(version, filename.toString(), offset, length);
+			BlobFileIndex idx(version, filename.toString(), offset, length, fullFileLength);
 			if (fileType == 'S') {
 				ASSERT(files->snapshotFiles.empty() || files->snapshotFiles.back().version < idx.version);
 				files->snapshotFiles.push_back(idx);
@@ -168,14 +169,16 @@ void GranuleFiles::getFiles(Version beginVersion,
 	Version lastIncluded = invalidVersion;
 	if (snapshotF != snapshotFiles.end()) {
 		chunk.snapshotVersion = snapshotF->version;
-		chunk.snapshotFile = BlobFilePointerRef(replyArena, snapshotF->filename, snapshotF->offset, snapshotF->length);
+		chunk.snapshotFile = BlobFilePointerRef(
+		    replyArena, snapshotF->filename, snapshotF->offset, snapshotF->length, snapshotF->fullFileLength);
 		lastIncluded = chunk.snapshotVersion;
 	} else {
 		chunk.snapshotVersion = invalidVersion;
 	}
 
 	while (deltaF != deltaFiles.end() && deltaF->version < readVersion) {
-		chunk.deltaFiles.emplace_back_deep(replyArena, deltaF->filename, deltaF->offset, deltaF->length);
+		chunk.deltaFiles.emplace_back_deep(
+		    replyArena, deltaF->filename, deltaF->offset, deltaF->length, deltaF->fullFileLength);
 		deltaBytesCounter += deltaF->length;
 		ASSERT(lastIncluded < deltaF->version);
 		lastIncluded = deltaF->version;
@@ -183,7 +186,8 @@ void GranuleFiles::getFiles(Version beginVersion,
 	}
 	// include last delta file that passes readVersion, if it exists
 	if (deltaF != deltaFiles.end() && lastIncluded < readVersion) {
-		chunk.deltaFiles.emplace_back_deep(replyArena, deltaF->filename, deltaF->offset, deltaF->length);
+		chunk.deltaFiles.emplace_back_deep(
+		    replyArena, deltaF->filename, deltaF->offset, deltaF->length, deltaF->fullFileLength);
 		deltaBytesCounter += deltaF->length;
 		lastIncluded = deltaF->version;
 	}
@@ -194,7 +198,7 @@ static std::string makeTestFileName(Version v) {
 }
 
 static BlobFileIndex makeTestFile(Version v, int64_t len) {
-	return BlobFileIndex(v, makeTestFileName(v), 0, len);
+	return BlobFileIndex(v, makeTestFileName(v), 0, len, len);
 }
 
 static void checkFile(int expectedVersion, const BlobFilePointerRef& actualFile) {

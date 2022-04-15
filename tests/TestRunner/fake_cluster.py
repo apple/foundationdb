@@ -4,10 +4,10 @@ import os
 import shutil
 import subprocess
 import sys
-from local_cluster import LocalCluster
+from local_cluster import random_secret_string
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from pathlib import Path
-from random import choice
+
 
 class ClusterFileGenerator:
     def __init__(self, output_dir: str):
@@ -15,8 +15,7 @@ class ClusterFileGenerator:
         assert self.output_dir.exists(), "{} does not exist".format(output_dir)
         assert self.output_dir.is_dir(), "{} is not a directory".format(output_dir)
         self.tmp_dir = self.output_dir.joinpath(
-            'tmp',
-            ''.join(choice(LocalCluster.valid_letters_for_secret) for i in range(16)))
+            'tmp', random_secret_string(16))
         self.tmp_dir.mkdir(parents=True)
         self.cluster_file_path = self.tmp_dir.joinpath('fdb.cluster')
 
@@ -43,11 +42,13 @@ if __name__ == '__main__':
     Before the command is executed, the following arguments will be preprocessed:
     - All occurrences of @CLUSTER_FILE@ will be replaced with the path to the generated cluster file.
 
-    The environment variable FDB_CLUSTER_FILE is set to the generated cluster file for the command if 
+    The environment variable FDB_CLUSTER_FILE is set to the generated cluster file for the command if
     it is not set already.
     """)
-    parser.add_argument('--output-dir', '-o', metavar='OUTPUT_DIRECTORY', help='Directory where output files are written', required=True)
-    parser.add_argument('cmd', metavar="COMMAND", nargs="+", help="The command to run")
+    parser.add_argument('--output-dir', '-o', metavar='OUTPUT_DIRECTORY',
+                        help='Directory where output files are written', required=True)
+    parser.add_argument('cmd', metavar="COMMAND",
+                        nargs="+", help="The command to run")
     args = parser.parse_args()
     errcode = 1
 
@@ -61,7 +62,9 @@ if __name__ == '__main__':
                 cmd_args.append(cmd)
 
         env = dict(**os.environ)
-        env['FDB_CLUSTER_FILE'] = env.get('FDB_CLUSTER_FILE', generator.cluster_file_path)
-        errcode = subprocess.run(cmd_args, stdout=sys.stdout, stderr=sys.stderr, env=env).returncode
+        env['FDB_CLUSTER_FILE'] = env.get(
+            'FDB_CLUSTER_FILE', generator.cluster_file_path)
+        errcode = subprocess.run(
+            cmd_args, stdout=sys.stdout, stderr=sys.stderr, env=env).returncode
 
     sys.exit(errcode)

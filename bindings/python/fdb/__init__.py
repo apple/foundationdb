@@ -52,7 +52,7 @@ def get_api_version():
 
 
 def api_version(ver):
-    header_version = 710
+    header_version = 720
 
     if '_version' in globals():
         if globals()['_version'] != ver:
@@ -99,6 +99,9 @@ def api_version(ver):
     )
 
     _add_symbols(fdb.impl, list)
+
+    if ver >= 710:
+        import fdb.tenant_management
 
     if ver < 610:
         globals()["init"] = getattr(fdb.impl, "init")

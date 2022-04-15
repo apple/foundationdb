@@ -1,6 +1,8 @@
 set(FDB_C_SRCS
   fdb_c.cpp
-  foundationdb/fdb_c.h)
+  foundationdb/fdb_c.h
+  foundationdb/fdb_c_internal.h
+  foundationdb/fdb_c_types.h)
 
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/foundationdb)
 
@@ -124,6 +126,7 @@ if(NOT WIN32)
     add_library(fdb_c_performance_test OBJECT test/performance_test.c test/test.h)
     add_library(fdb_c_ryw_benchmark OBJECT test/ryw_benchmark.c test/test.h)
     add_library(fdb_c_txn_size_test OBJECT test/txn_size_test.c test/test.h)
+    add_library(fdb_c_client_memory_test OBJECT test/client_memory_test.cpp test/unit/fdb_api.cpp test/unit/fdb_api.hpp)
     add_library(mako OBJECT ${MAKO_SRCS})
     add_library(fdb_c_setup_tests OBJECT test/unit/setup_tests.cpp)
     add_library(fdb_c_unit_tests OBJECT ${UNIT_TEST_SRCS})
@@ -249,6 +252,25 @@ endif()
             --test-dir
             ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests
             )
+
+  add_test(NAME fdb_c_upgrade_single_threaded
+      COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+            --build-dir ${CMAKE_BINARY_DIR}
+            --disable-log-dump
+            --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadSingleThr.toml
+            --upgrade-path "6.3.23" "7.0.0" "6.3.23"
+            --process-number 1
+    )
+
+    add_test(NAME fdb_c_upgrade_multi_threaded
+    COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+          --build-dir ${CMAKE_BINARY_DIR}
+          --disable-log-dump
+          --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
+          --upgrade-path "6.3.23" "7.0.0" "6.3.23"
+          --process-number 3
+    )
+
 endif()
 
 set(c_workloads_srcs

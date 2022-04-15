@@ -38,6 +38,7 @@
 #include <boost/algorithm/string/classification.hpp>
 #include <boost/algorithm/string.hpp>
 #include "fdbrpc/IAsyncFile.h"
+#include "flow/Hostname.h"
 #include "flow/UnitTest.h"
 #include "fdbclient/rapidxml/rapidxml.hpp"
 #include "fdbclient/FDBAWSCredentialsProvider.h"
@@ -168,7 +169,8 @@ std::string S3BlobStoreEndpoint::BlobKnobs::getURLParameters() const {
 	return r;
 }
 
-Reference<S3BlobStoreEndpoint> S3BlobStoreEndpoint::fromString(std::string const& url,
+Reference<S3BlobStoreEndpoint> S3BlobStoreEndpoint::fromString(const std::string& url,
+                                                               const Optional<std::string>& proxy,
                                                                std::string* resourceFromURL,
                                                                std::string* error,
                                                                ParametersT* ignored_parameters) {
@@ -180,6 +182,17 @@ Reference<S3BlobStoreEndpoint> S3BlobStoreEndpoint::fromString(std::string const
 		StringRef prefix = t.eat("://");
 		if (prefix != LiteralStringRef("blobstore"))
 			throw format("Invalid blobstore URL prefix '%s'", prefix.toString().c_str());
+
+		Optional<std::string> proxyHost, proxyPort;
+		if (proxy.present()) {
+			if (!Hostname::isHostname(proxy.get()) && !NetworkAddress::parseOptional(proxy.get()).present()) {
+				throw format("'%s' is not a valid value for proxy. Format should be either IP:port or host:port.",
+				             proxy.get().c_str());
+			}
+			StringRef p(proxy.get());
+			proxyHost = p.eat(":").toString();
+			proxyPort = p.eat().toString();
+		}
 
 		Optional<StringRef> cred;
 		if (url.find("@") != std::string::npos) {
@@ -267,7 +280,8 @@ Reference<S3BlobStoreEndpoint> S3BlobStoreEndpoint::fromString(std::string const
 			creds = S3BlobStoreEndpoint::Credentials{ key.toString(), secret.toString(), securityToken.toString() };
 		}
 
-		return makeReference<S3BlobStoreEndpoint>(host.toString(), service.toString(), creds, knobs, extraHeaders);
+		return makeReference<S3BlobStoreEndpoint>(
+		    host.toString(), service.toString(), proxyHost, proxyPort, creds, knobs, extraHeaders);
 
 	} catch (std::string& err) {
 		if (error != nullptr)
@@ -630,11 +644,11 @@ ACTOR Future<S3BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<S3B
 			return rconn;
 		}
 	}
-	std::string service = b->service;
+	std::string host = b->host, service = b->service;
 	if (service.empty())
 		service = b->knobs.secure_connection ? "https" : "http";
 	state Reference<IConnection> conn =
-	    wait(INetworkConnections::net()->connect(b->host, service, b->knobs.secure_connection ? true : false));
+	    wait(INetworkConnections::net()->connect(host, service, b->knobs.secure_connection ? true : false));
 	wait(conn->connectHandshake());
 
 	TraceEvent("S3BlobStoreEndpointNewConnection")
@@ -1615,7 +1629,7 @@ TEST_CASE("/backup/s3/v4headers") {
 	S3BlobStoreEndpoint::Credentials creds{ "AKIAIOSFODNN7EXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "" }
 	// GET without query parameters
 	{
-		S3BlobStoreEndpoint s3("s3.amazonaws.com", "s3", creds);
+		S3BlobStoreEndpoint s3("s3.amazonaws.com", "s3", "proxy", "port", creds);
 		std::string verb("GET");
 		std::string resource("/test.txt");
 		HTTP::Headers headers;
@@ -1630,7 +1644,7 @@ TEST_CASE("/backup/s3/v4headers") {
 
 	// GET with query parameters
 	{
-		S3BlobStoreEndpoint s3("s3.amazonaws.com", "s3", creds);
+		S3BlobStoreEndpoint s3("s3.amazonaws.com", "s3", "proxy", "port", creds);
 		std::string verb("GET");
 		std::string resource("/test/examplebucket?Action=DescribeRegions&Version=2013-10-15");
 		HTTP::Headers headers;
@@ -1645,7 +1659,7 @@ TEST_CASE("/backup/s3/v4headers") {
 
 	// POST
 	{
-		S3BlobStoreEndpoint s3("s3.us-west-2.amazonaws.com", "s3", creds);
+		S3BlobStoreEndpoint s3("s3.us-west-2.amazonaws.com", "s3", "proxy", "port", creds);
 		std::string verb("POST");
 		std::string resource("/simple.json");
 		HTTP::Headers headers;

@@ -30,6 +30,8 @@ set(FLOW_SRCS
   Hash3.h
   Histogram.cpp
   Histogram.h
+  Hostname.actor.cpp
+  Hostname.h
   IDispatched.h
   IRandom.h
   IThreadPoolTest.actor.cpp
@@ -136,6 +138,7 @@ target_link_libraries(flow PUBLIC fmt::fmt)
 
 add_flow_target(STATIC_LIBRARY NAME flow_sampling SRCS ${FLOW_SRCS})
 target_link_libraries(flow_sampling PRIVATE stacktrace)
+target_link_libraries(flow_sampling PUBLIC fmt::fmt)
 target_compile_definitions(flow_sampling PRIVATE -DENABLE_SAMPLING)
 if(WIN32)
   add_dependencies(flow_sampling_actors flow_actors)

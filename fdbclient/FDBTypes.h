@@ -22,13 +22,36 @@
 #define FDBCLIENT_FDBTYPES_H
 
 #include <algorithm>
+#include <cinttypes>
 #include <set>
 #include <string>
 #include <vector>
 #include <unordered_set>
+#include <boost/functional/hash.hpp>
 
 #include "flow/Arena.h"
+#include "flow/FastRef.h"
+#include "flow/ProtocolVersion.h"
 #include "flow/flow.h"
+
+enum class TraceFlags : uint8_t { unsampled = 0b00000000, sampled = 0b00000001 };
+
+inline TraceFlags operator&(TraceFlags lhs, TraceFlags rhs) {
+	return static_cast<TraceFlags>(static_cast<std::underlying_type_t<TraceFlags>>(lhs) &
+	                               static_cast<std::underlying_type_t<TraceFlags>>(rhs));
+}
+
+struct SpanContext {
+	UID traceID;
+	uint64_t spanID;
+	TraceFlags m_Flags;
+	SpanContext() : traceID(UID()), spanID(0), m_Flags(TraceFlags::unsampled) {}
+	SpanContext(UID traceID, uint64_t spanID, TraceFlags flags) : traceID(traceID), spanID(spanID), m_Flags(flags) {}
+	SpanContext(UID traceID, uint64_t spanID) : traceID(traceID), spanID(spanID), m_Flags(TraceFlags::unsampled) {}
+	SpanContext(Arena arena, const SpanContext& span)
+	  : traceID(span.traceID), spanID(span.spanID), m_Flags(span.m_Flags) {}
+	bool isSampled() const { return (m_Flags & TraceFlags::sampled) == TraceFlags::sampled; }
+};
 
 typedef int64_t Version;
 typedef uint64_t LogEpoch;
@@ -72,6 +95,8 @@ struct Tag {
 	bool operator<(const Tag& r) const { return locality < r.locality || (locality == r.locality && id < r.id); }
 
 	int toTagDataIndex() const { return locality >= 0 ? 2 * locality : 1 - (2 * locality); }
+
+	bool isNonPrimaryTLogType() const { return locality < 0; }
 
 	std::string toString() const { return format("%d:%d", locality, id); }
 
@@ -125,6 +150,18 @@ template <>
 struct Traceable<Tag> : std::true_type {
 	static std::string toString(const Tag& value) { return value.toString(); }
 };
+
+namespace std {
+template <>
+struct hash<Tag> {
+	std::size_t operator()(const Tag& tag) const {
+		std::size_t seed = 0;
+		boost::hash_combine(seed, std::hash<int8_t>{}(tag.locality));
+		boost::hash_combine(seed, std::hash<uint16_t>{}(tag.id));
+		return seed;
+	}
+};
+} // namespace std
 
 static const Tag invalidTag{ tagLocalitySpecial, 0 };
 static const Tag txsTag{ tagLocalitySpecial, 1 };
@@ -652,6 +689,7 @@ struct GetRangeLimits {
 };
 
 struct RangeResultRef : VectorRef<KeyValueRef> {
+	constexpr static FileIdentifier file_identifier = 3985192;
 	bool more; // True if (but not necessarily only if) values remain in the *key* range requested (possibly beyond the
 	           // limits requested) False implies that no such values remain
 	Optional<KeyRef> readThrough; // Only present when 'more' is true. When present, this value represent the end (or
@@ -831,7 +869,7 @@ struct KeyValueStoreType {
 		case SSD_REDWOOD_V1:
 			return "ssd-redwood-1-experimental";
 		case SSD_ROCKSDB_V1:
-			return "ssd-rocksdb-experimental";
+			return "ssd-rocksdb-v1";
 		case MEMORY:
 			return "memory";
 		case MEMORY_RADIXTREE:
@@ -958,6 +996,7 @@ struct TLogSpillType {
 
 // Contains the amount of free and total space for a storage server, in bytes
 struct StorageBytes {
+	constexpr static FileIdentifier file_identifier = 3928581;
 	// Free space on the filesystem
 	int64_t free;
 	// Total space on the filesystem
@@ -1329,6 +1368,29 @@ struct TenantMode {
 
 	uint32_t mode;
 };
+struct GRVCacheSpace {
+	Version cachedReadVersion;
+	double lastGrvTime;
+
+	GRVCacheSpace() : cachedReadVersion(Version(0)), lastGrvTime(0.0) {}
+};
+
+// This structure can be extended in the future to include additional features that required a shared state
+struct DatabaseSharedState {
+	// These two members should always be listed first, in this order.
+	// This is to preserve compatibility with future updates of this shared state
+	// and ensures the MVC does not attempt to access methods incorrectly
+	// due to newly introduced offsets in the structure.
+	const ProtocolVersion protocolVersion;
+	void (*delRef)(DatabaseSharedState*);
+
+	Mutex mutexLock;
+	GRVCacheSpace grvCacheSpace;
+	std::atomic<int> refCount;
+
+	DatabaseSharedState()
+	  : protocolVersion(currentProtocolVersion), mutexLock(Mutex()), grvCacheSpace(GRVCacheSpace()), refCount(0) {}
+};
 
 inline bool isValidPerpetualStorageWiggleLocality(std::string locality) {
 	int pos = locality.find(':');
@@ -1366,12 +1428,12 @@ struct ReadBlobGranuleContext {
 // Store metadata associated with each storage server. Now it only contains data be used in perpetual storage wiggle.
 struct StorageMetadataType {
 	constexpr static FileIdentifier file_identifier = 732123;
-	// when the SS is initialized
-	uint64_t createdTime; // comes from currentTime()
+	// when the SS is initialized, in epoch seconds, comes from currentTime()
+	double createdTime;
 	StorageMetadataType() : createdTime(0) {}
 	StorageMetadataType(uint64_t t) : createdTime(t) {}
 
-	static uint64_t currentTime() { return g_network->timer() * 1e9; }
+	static double currentTime() { return g_network->timer(); }
 
 	// To change this serialization, ProtocolVersion::StorageMetadata must be updated, and downgrades need
 	// to be considered

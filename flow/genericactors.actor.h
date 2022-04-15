@@ -22,7 +22,10 @@
 
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
 // version.
+#include "flow/FastRef.h"
+#include "flow/network.h"
 #include <utility>
+#include <functional>
 #if defined(NO_INTELLISENSE) && !defined(FLOW_GENERICACTORS_ACTOR_G_H)
 #define FLOW_GENERICACTORS_ACTOR_G_H
 #include "flow/genericactors.actor.g.h"
@@ -80,7 +83,7 @@ Future<Optional<T>> stopAfter(Future<T> what) {
 		ret = Optional<T>(_);
 	} catch (Error& e) {
 		bool ok = e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_delete ||
-		          e.code() == error_code_actor_cancelled;
+		          e.code() == error_code_actor_cancelled || e.code() == error_code_please_reboot_remote_kv_store;
 		TraceEvent(ok ? SevInfo : SevError, "StopAfterError").error(e);
 		if (!ok) {
 			fprintf(stderr, "Fatal Error: %s\n", e.what());
@@ -221,6 +224,7 @@ Future<T> delayed(Future<T> what, double time = 0.0, TaskPriority taskID = TaskP
 	}
 }
 
+// wait <interval> then call what() in a loop forever
 ACTOR template <class Func>
 Future<Void> recurring(Func what, double interval, TaskPriority taskID = TaskPriority::DefaultDelay) {
 	loop choose {
@@ -2048,14 +2052,35 @@ private:
 	Reference<UnsafeWeakFutureReferenceData> data;
 };
 
-// Call a lambda every <interval> seconds
-ACTOR template <typename Fn>
-Future<Void> repeatEvery(double interval, Fn fn) {
-	loop {
-		wait(delay(interval));
-		fn();
+// Utility class to provide FLOW compliant singleton pattern.
+// In similuation, the approach allows per-virtual process singleton as desired compared to one singleton instance
+// shared across all virtual processes if 'static singleton' pattern is implemented.
+//
+// API NOTE: Client are expected to pass functor allowing instantiation of the template class
+template <class T>
+class FlowSingleton {
+public:
+	static Reference<T> getInstance(std::function<Reference<T>()> func) {
+		ASSERT(g_network->isSimulated());
+
+		auto cItr = instanceMap.find(g_network->getLocalAddress());
+		if (cItr == instanceMap.end()) {
+			instanceMap.emplace(g_network->getLocalAddress(), func());
+			return instanceMap[g_network->getLocalAddress()];
+		} else {
+			return cItr->second;
+		}
 	}
-}
+
+	static int getCount() { return instanceMap.size(); }
+	static void resetInstances() { instanceMap.clear(); }
+
+private:
+	static std::unordered_map<NetworkAddress, Reference<T>> instanceMap;
+};
+
+template <class T>
+std::unordered_map<NetworkAddress, Reference<T>> FlowSingleton<T>::instanceMap;
 
 #include "flow/unactorcompiler.h"
 

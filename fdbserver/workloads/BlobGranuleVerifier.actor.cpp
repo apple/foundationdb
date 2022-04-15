@@ -28,6 +28,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/SystemData.h"
+#include "fdbserver/BlobGranuleValidation.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
@@ -61,8 +62,9 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	int64_t timeTravelTooOld = 0;
 	int64_t rowsRead = 0;
 	int64_t bytesRead = 0;
+	int64_t purges = 0;
 	std::vector<Future<Void>> clients;
-	bool enablePruning;
+	bool enablePurging;
 
 	DatabaseConfiguration config;
 
@@ -78,7 +80,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		timeTravelLimit = getOption(options, LiteralStringRef("timeTravelLimit"), testDuration);
 		timeTravelBufferSize = getOption(options, LiteralStringRef("timeTravelBufferSize"), 100000000);
 		threads = getOption(options, LiteralStringRef("threads"), 1);
-		enablePruning = getOption(options, LiteralStringRef("enablePruning"), false /*sharedRandomNumber % 2 == 0*/);
+		enablePurging = getOption(options, LiteralStringRef("enablePurging"), false /*sharedRandomNumber % 2 == 0*/);
 		ASSERT(threads >= 1);
 
 		if (BGV_DEBUG) {
@@ -90,13 +92,13 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 				if (BGV_DEBUG) {
 					printf("Blob Granule Verifier constructing simulated backup container\n");
 				}
-				bstore = BackupContainerFileSystem::openContainerFS("file://fdbblob/");
+				bstore = BackupContainerFileSystem::openContainerFS("file://fdbblob/", {}, {});
 			} else {
 				if (BGV_DEBUG) {
 					printf("Blob Granule Verifier constructing backup container from %s\n",
 					       SERVER_KNOBS->BG_URL.c_str());
 				}
-				bstore = BackupContainerFileSystem::openContainerFS(SERVER_KNOBS->BG_URL);
+				bstore = BackupContainerFileSystem::openContainerFS(SERVER_KNOBS->BG_URL, {}, {});
 				if (BGV_DEBUG) {
 					printf("Blob Granule Verifier constructed backup container\n");
 				}
@@ -167,154 +169,6 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		}
 	}
 
-	// assumes we can read the whole range in one transaction at a single version
-	ACTOR Future<std::pair<RangeResult, Version>> readFromFDB(Database cx, KeyRange range) {
-		state bool first = true;
-		state Version v;
-		state RangeResult out;
-		state Transaction tr(cx);
-		state KeyRange currentRange = range;
-		loop {
-			try {
-				state RangeResult r = wait(tr.getRange(currentRange, CLIENT_KNOBS->TOO_MANY));
-				Version grv = wait(tr.getReadVersion());
-				// need consistent version snapshot of range
-				if (first) {
-					v = grv;
-					first = false;
-				} else if (v != grv) {
-					// reset the range and restart the read at a higher version
-					TraceEvent(SevDebug, "BGVFDBReadReset").detail("ReadVersion", v);
-					TEST(true); // BGV transaction reset
-					fmt::print("Resetting BGV GRV {0} -> {1}\n", v, grv);
-					first = true;
-					out = RangeResult();
-					currentRange = range;
-					tr.reset();
-					continue;
-				}
-				out.arena().dependsOn(r.arena());
-				out.append(out.arena(), r.begin(), r.size());
-				if (r.more) {
-					currentRange = KeyRangeRef(keyAfter(r.back().key), currentRange.end);
-				} else {
-					break;
-				}
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
-		return std::pair(out, v);
-	}
-
-	// FIXME: typedef this pair type and/or chunk list
-	ACTOR Future<std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>>>
-	readFromBlob(Database cx, BlobGranuleVerifierWorkload* self, KeyRange range, Version version) {
-		state RangeResult out;
-		state Standalone<VectorRef<BlobGranuleChunkRef>> chunks;
-		state Transaction tr(cx);
-
-		loop {
-			try {
-				Standalone<VectorRef<BlobGranuleChunkRef>> chunks_ = wait(tr.readBlobGranules(range, 0, version));
-				chunks = chunks_;
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
-
-		for (const BlobGranuleChunkRef& chunk : chunks) {
-			RangeResult chunkRows = wait(readBlobGranule(chunk, range, 0, version, self->bstore));
-			out.arena().dependsOn(chunkRows.arena());
-			out.append(out.arena(), chunkRows.begin(), chunkRows.size());
-		}
-		return std::pair(out, chunks);
-	}
-
-	bool compareResult(RangeResult fdb,
-	                   std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> blob,
-	                   KeyRange range,
-	                   Version v,
-	                   bool initialRequest) {
-		bool correct = fdb == blob.first;
-		if (!correct) {
-			mismatches++;
-			TraceEvent ev(SevError, "GranuleMismatch");
-			ev.detail("RangeStart", range.begin)
-			    .detail("RangeEnd", range.end)
-			    .detail("Version", v)
-			    .detail("RequestType", initialRequest ? "RealTime" : "TimeTravel")
-			    .detail("FDBSize", fdb.size())
-			    .detail("BlobSize", blob.first.size());
-
-			if (BGV_DEBUG) {
-				fmt::print("\nMismatch for [{0} - {1}) @ {2} ({3}). F({4}) B({5}):\n",
-				           range.begin.printable(),
-				           range.end.printable(),
-				           v,
-				           initialRequest ? "RealTime" : "TimeTravel",
-				           fdb.size(),
-				           blob.first.size());
-
-				Optional<KeyValueRef> lastCorrect;
-				for (int i = 0; i < std::max(fdb.size(), blob.first.size()); i++) {
-					if (i >= fdb.size() || i >= blob.first.size() || fdb[i] != blob.first[i]) {
-						printf("  Found mismatch at %d.\n", i);
-						if (lastCorrect.present()) {
-							printf("    last correct: %s=%s\n",
-							       lastCorrect.get().key.printable().c_str(),
-							       lastCorrect.get().value.printable().c_str());
-						}
-						if (i < fdb.size()) {
-							printf(
-							    "    FDB: %s=%s\n", fdb[i].key.printable().c_str(), fdb[i].value.printable().c_str());
-						} else {
-							printf("    FDB: <missing>\n");
-						}
-						if (i < blob.first.size()) {
-							printf("    BLB: %s=%s\n",
-							       blob.first[i].key.printable().c_str(),
-							       blob.first[i].value.printable().c_str());
-						} else {
-							printf("    BLB: <missing>\n");
-						}
-						printf("\n");
-						break;
-					}
-					if (i < fdb.size()) {
-						lastCorrect = fdb[i];
-					} else {
-						lastCorrect = blob.first[i];
-					}
-				}
-
-				printf("Chunks:\n");
-				for (auto& chunk : blob.second) {
-					printf("[%s - %s)\n",
-					       chunk.keyRange.begin.printable().c_str(),
-					       chunk.keyRange.end.printable().c_str());
-
-					printf("  SnapshotFile:\n    %s\n",
-					       chunk.snapshotFile.present() ? chunk.snapshotFile.get().toString().c_str() : "<none>");
-					printf("  DeltaFiles:\n");
-					for (auto& df : chunk.deltaFiles) {
-						printf("    %s\n", df.toString().c_str());
-					}
-					printf("  Deltas: (%d)", chunk.newDeltas.size());
-					if (chunk.newDeltas.size() > 0) {
-						fmt::print(" with version [{0} - {1}]",
-						           chunk.newDeltas[0].version,
-						           chunk.newDeltas[chunk.newDeltas.size() - 1].version);
-					}
-					fmt::print("  IncludedVersion: {}\n", chunk.includedVersion);
-				}
-				printf("\n");
-			}
-		}
-		return correct;
-	}
-
 	struct OldRead {
 		KeyRange range;
 		Version v;
@@ -323,60 +177,6 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		OldRead() {}
 		OldRead(KeyRange range, Version v, RangeResult oldResult) : range(range), v(v), oldResult(oldResult) {}
 	};
-
-	// utility to prune <range> at pruneVersion=<version> with the <force> flag
-	ACTOR Future<Void> pruneAtVersion(Database cx, KeyRange range, Version version, bool force) {
-		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
-		state Key pruneKey;
-		loop {
-			try {
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-
-				Value pruneValue = blobGranulePruneValueFor(version, range, force);
-				tr->atomicOp(
-				    addVersionStampAtEnd(blobGranulePruneKeys.begin), pruneValue, MutationRef::SetVersionstampedKey);
-				tr->set(blobGranulePruneChangeKey, deterministicRandom()->randomUniqueID().toString());
-				state Future<Standalone<StringRef>> fTrVs = tr->getVersionstamp();
-				wait(tr->commit());
-				Standalone<StringRef> vs = wait(fTrVs);
-				pruneKey = blobGranulePruneKeys.begin.withSuffix(vs);
-				if (BGV_DEBUG) {
-					fmt::print("pruneAtVersion for range [{0} - {1}) at version {2} succeeded\n",
-					           range.begin.printable(),
-					           range.end.printable(),
-					           version);
-				}
-				break;
-			} catch (Error& e) {
-				if (BGV_DEBUG) {
-					fmt::print("pruneAtVersion for range [{0} - {1}) at version {2} encountered error {3}\n",
-					           range.begin.printable(),
-					           range.end.printable(),
-					           version,
-					           e.name());
-				}
-				wait(tr->onError(e));
-			}
-		}
-		tr->reset();
-		loop {
-			try {
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-
-				Optional<Value> pruneVal = wait(tr->get(pruneKey));
-				if (!pruneVal.present()) {
-					return Void();
-				}
-				state Future<Void> watchFuture = tr->watch(pruneKey);
-				wait(tr->commit());
-				wait(watchFuture);
-			} catch (Error& e) {
-				wait(tr->onError(e));
-			}
-		}
-	}
 
 	ACTOR Future<Void> killBlobWorkers(Database cx, BlobGranuleVerifierWorkload* self) {
 		state Transaction tr(cx);
@@ -419,12 +219,12 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR Future<Void> verifyGranules(Database cx, BlobGranuleVerifierWorkload* self, bool allowPruning) {
+	ACTOR Future<Void> verifyGranules(Database cx, BlobGranuleVerifierWorkload* self, bool allowPurging) {
 		state double last = now();
 		state double endTime = last + self->testDuration;
 		state std::map<double, OldRead> timeTravelChecks;
 		state int64_t timeTravelChecksMemory = 0;
-		state Version prevPruneVersion = -1;
+		state Version prevPurgeVersion = -1;
 		state UID dbgId = debugRandom()->randomUniqueID();
 
 		TraceEvent("BlobGranuleVerifierStart");
@@ -447,43 +247,47 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 					state OldRead oldRead = timeTravelIt->second;
 					timeTravelChecksMemory -= oldRead.oldResult.expectedSize();
 					timeTravelIt = timeTravelChecks.erase(timeTravelIt);
-					if (prevPruneVersion == -1) {
-						prevPruneVersion = oldRead.v;
+					if (prevPurgeVersion == -1) {
+						prevPurgeVersion = oldRead.v;
 					}
 					// advance iterator before doing read, so if it gets error we don't retry it
 
 					try {
-						state Version newPruneVersion = 0;
-						state bool doPruning = allowPruning && deterministicRandom()->random01() < 0.5;
-						if (doPruning) {
-							Version maxPruneVersion = oldRead.v;
+						state Version newPurgeVersion = 0;
+						state bool doPurging = allowPurging && deterministicRandom()->random01() < 0.5;
+						if (doPurging) {
+							Version maxPurgeVersion = oldRead.v;
 							for (auto& it : timeTravelChecks) {
-								maxPruneVersion = std::min(it.second.v, maxPruneVersion);
+								maxPurgeVersion = std::min(it.second.v, maxPurgeVersion);
 							}
-							if (prevPruneVersion < maxPruneVersion) {
-								newPruneVersion = deterministicRandom()->randomInt64(prevPruneVersion, maxPruneVersion);
-								prevPruneVersion = std::max(prevPruneVersion, newPruneVersion);
-								wait(self->pruneAtVersion(cx, normalKeys, newPruneVersion, false));
+							if (prevPurgeVersion < maxPurgeVersion) {
+								newPurgeVersion = deterministicRandom()->randomInt64(prevPurgeVersion, maxPurgeVersion);
+								prevPurgeVersion = std::max(prevPurgeVersion, newPurgeVersion);
+								Key purgeKey = wait(cx->purgeBlobGranules(normalKeys, newPurgeVersion, false));
+								wait(cx->waitPurgeGranulesComplete(purgeKey));
+								self->purges++;
 							} else {
-								doPruning = false;
+								doPurging = false;
 							}
 						}
 						std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> reReadResult =
-						    wait(self->readFromBlob(cx, self, oldRead.range, oldRead.v));
-						self->compareResult(oldRead.oldResult, reReadResult, oldRead.range, oldRead.v, false);
+						    wait(readFromBlob(cx, self->bstore, oldRead.range, 0, oldRead.v));
+						if (!compareFDBAndBlob(oldRead.oldResult, reReadResult, oldRead.range, oldRead.v, BGV_DEBUG)) {
+							self->mismatches++;
+						}
 						self->timeTravelReads++;
 
-						if (doPruning) {
+						if (doPurging) {
 							wait(self->killBlobWorkers(cx, self));
 							std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> versionRead =
-							    wait(self->readFromBlob(cx, self, oldRead.range, prevPruneVersion));
+							    wait(readFromBlob(cx, self->bstore, oldRead.range, 0, prevPurgeVersion));
 							try {
-								Version minSnapshotVersion = newPruneVersion;
+								Version minSnapshotVersion = newPurgeVersion;
 								for (auto& it : versionRead.second) {
 									minSnapshotVersion = std::min(minSnapshotVersion, it.snapshotVersion);
 								}
 								std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> versionRead =
-								    wait(self->readFromBlob(cx, self, oldRead.range, minSnapshotVersion - 1));
+								    wait(readFromBlob(cx, self->bstore, oldRead.range, 0, minSnapshotVersion - 1));
 								ASSERT(false);
 							} catch (Error& e) {
 								if (e.code() == error_code_actor_cancelled) {
@@ -504,10 +308,10 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 				int rIndex = deterministicRandom()->randomInt(0, self->granuleRanges.get().size());
 				state KeyRange range = self->granuleRanges.get()[rIndex];
 
-				state std::pair<RangeResult, Version> fdb = wait(self->readFromFDB(cx, range));
+				state std::pair<RangeResult, Version> fdb = wait(readFromFDB(cx, range));
 				std::pair<RangeResult, Standalone<VectorRef<BlobGranuleChunkRef>>> blob =
-				    wait(self->readFromBlob(cx, self, range, fdb.second));
-				if (self->compareResult(fdb.first, blob, range, fdb.second, true)) {
+				    wait(readFromBlob(cx, self->bstore, range, 0, fdb.second));
+				if (compareFDBAndBlob(fdb.first, blob, range, fdb.second, BGV_DEBUG)) {
 					// TODO: bias for immediately re-reading to catch rollback cases
 					double reReadTime = currentTime + deterministicRandom()->random01() * self->timeTravelLimit;
 					int memory = fdb.first.expectedSize();
@@ -516,6 +320,8 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 						timeTravelChecks[reReadTime] = OldRead(range, fdb.second, fdb.first);
 						timeTravelChecksMemory += memory;
 					}
+				} else {
+					self->mismatches++;
 				}
 				self->rowsRead += fdb.first.size();
 				self->bytesRead += fdb.first.expectedSize();
@@ -538,10 +344,10 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	Future<Void> start(Database const& cx) override {
 		clients.reserve(threads + 1);
 		clients.push_back(timeout(findGranules(cx, this), testDuration, Void()));
-		if (enablePruning && clientId == 0) {
+		if (enablePurging && clientId == 0) {
 			clients.push_back(
 			    timeout(reportErrors(verifyGranules(cx, this, true), "BlobGranuleVerifier"), testDuration, Void()));
-		} else if (!enablePruning) {
+		} else if (!enablePurging) {
 			for (int i = 0; i < threads; i++) {
 				clients.push_back(timeout(
 				    reportErrors(verifyGranules(cx, this, false), "BlobGranuleVerifier"), testDuration, Void()));
@@ -661,6 +467,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		fmt::print("  {} time travel reads\n", self->timeTravelReads);
 		fmt::print("  {} rows\n", self->rowsRead);
 		fmt::print("  {} bytes\n", self->bytesRead);
+		fmt::print("  {} purges\n", self->purges);
 		// FIXME: add above as details to trace event
 
 		TraceEvent("BlobGranuleVerifierChecked").detail("Result", result);

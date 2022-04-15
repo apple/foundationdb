@@ -39,7 +39,7 @@
 
 #pragma once
 
-#define FDB_API_VERSION 710
+#define FDB_API_VERSION 720
 #include <foundationdb/fdb_c.h>
 
 #include <string>
@@ -97,6 +97,7 @@ public:
 
 private:
 	friend class Transaction;
+	friend class Database;
 	KeyFuture(FDBFuture* f) : Future(f) {}
 };
 
@@ -201,11 +202,24 @@ public:
 	                                   int uid_length,
 	                                   const uint8_t* snap_command,
 	                                   int snap_command_length);
+
+	static KeyFuture purge_blob_granules(FDBDatabase* db,
+	                                     std::string_view begin_key,
+	                                     std::string_view end_key,
+	                                     int64_t purge_version,
+	                                     fdb_bool_t force);
+
+	static EmptyFuture wait_purge_granules_complete(FDBDatabase* db, std::string_view purge_key);
 };
 
 class Tenant final {
 public:
 	Tenant(FDBDatabase* db, const uint8_t* name, int name_length);
+	~Tenant();
+	Tenant(const Tenant&) = delete;
+	Tenant& operator=(const Tenant&) = delete;
+	Tenant(Tenant&&) = delete;
+	Tenant& operator=(Tenant&&) = delete;
 
 private:
 	friend class Transaction;
@@ -219,7 +233,7 @@ class Transaction final {
 public:
 	// Given an FDBDatabase, initializes a new transaction.
 	Transaction(FDBDatabase* db);
-	Transaction(Tenant tenant);
+	Transaction(Tenant& tenant);
 	~Transaction();
 
 	// Wrapper around fdb_transaction_reset.

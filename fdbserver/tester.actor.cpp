@@ -48,7 +48,7 @@ WorkloadContext::WorkloadContext() {}
 
 WorkloadContext::WorkloadContext(const WorkloadContext& r)
   : options(r.options), clientId(r.clientId), clientCount(r.clientCount), sharedRandomNumber(r.sharedRandomNumber),
-    dbInfo(r.dbInfo) {}
+    dbInfo(r.dbInfo), ccr(r.ccr) {}
 
 WorkloadContext::~WorkloadContext() {}
 
@@ -326,34 +326,51 @@ struct CompoundWorkload : TestWorkload {
 		}
 		return allTrue(all);
 	}
-	void getMetrics(std::vector<PerfMetric>& m) override {
-		for (int w = 0; w < workloads.size(); w++) {
+
+	ACTOR static Future<std::vector<PerfMetric>> getMetrics(CompoundWorkload* self) {
+		state std::vector<Future<std::vector<PerfMetric>>> results;
+		for (int w = 0; w < self->workloads.size(); w++) {
 			std::vector<PerfMetric> p;
-			workloads[w]->getMetrics(p);
-			for (int i = 0; i < p.size(); i++)
-				m.push_back(p[i].withPrefix(workloads[w]->description() + "."));
+			results.push_back(self->workloads[w]->getMetrics());
 		}
+		wait(waitForAll(results));
+		std::vector<PerfMetric> res;
+		for (int i = 0; i < results.size(); ++i) {
+			auto const& p = results[i].get();
+			for (auto const& m : p) {
+				res.push_back(m.withPrefix(self->workloads[i]->description() + "."));
+			}
+		}
+		return res;
 	}
+
+	Future<std::vector<PerfMetric>> getMetrics() override { return getMetrics(this); }
 	double getCheckTimeout() const override {
 		double m = 0;
 		for (int w = 0; w < workloads.size(); w++)
 			m = std::max(workloads[w]->getCheckTimeout(), m);
 		return m;
 	}
+
+	void getMetrics(std::vector<PerfMetric>&) override { ASSERT(false); }
 };
 
-Reference<TestWorkload> getWorkloadIface(WorkloadRequest work,
-                                         VectorRef<KeyValueRef> options,
-                                         Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
-	Value testName = getOption(options, LiteralStringRef("testName"), LiteralStringRef("no-test-specified"));
+ACTOR Future<Reference<TestWorkload>> getWorkloadIface(WorkloadRequest work,
+                                                       Reference<IClusterConnectionRecord> ccr,
+                                                       VectorRef<KeyValueRef> options,
+                                                       Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+	state Reference<TestWorkload> workload;
+	state Value testName = getOption(options, LiteralStringRef("testName"), LiteralStringRef("no-test-specified"));
 	WorkloadContext wcx;
 	wcx.clientId = work.clientId;
 	wcx.clientCount = work.clientCount;
+	wcx.ccr = ccr;
 	wcx.dbInfo = dbInfo;
 	wcx.options = options;
 	wcx.sharedRandomNumber = work.sharedRandomNumber;
 
-	auto workload = IWorkloadFactory::create(testName.toString(), wcx);
+	workload = IWorkloadFactory::create(testName.toString(), wcx);
+	wait(workload->initialized());
 
 	auto unconsumedOptions = checkAllOptionsConsumed(workload ? workload->options : VectorRef<KeyValueRef>());
 	if (!workload || unconsumedOptions.size()) {
@@ -378,24 +395,33 @@ Reference<TestWorkload> getWorkloadIface(WorkloadRequest work,
 	return workload;
 }
 
-Reference<TestWorkload> getWorkloadIface(WorkloadRequest work, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+ACTOR Future<Reference<TestWorkload>> getWorkloadIface(WorkloadRequest work,
+                                                       Reference<IClusterConnectionRecord> ccr,
+                                                       Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+	state WorkloadContext wcx;
+	state std::vector<Future<Reference<TestWorkload>>> ifaces;
 	if (work.options.size() < 1) {
 		TraceEvent(SevError, "TestCreationError").detail("Reason", "No options provided");
 		fprintf(stderr, "ERROR: No options were provided for workload.\n");
 		throw test_specification_invalid();
 	}
-	if (work.options.size() == 1)
-		return getWorkloadIface(work, work.options[0], dbInfo);
+	if (work.options.size() == 1) {
+		Reference<TestWorkload> res = wait(getWorkloadIface(work, ccr, work.options[0], dbInfo));
+		return res;
+	}
 
-	WorkloadContext wcx;
 	wcx.clientId = work.clientId;
 	wcx.clientCount = work.clientCount;
 	wcx.sharedRandomNumber = work.sharedRandomNumber;
 	// FIXME: Other stuff not filled in; why isn't this constructed here and passed down to the other
 	// getWorkloadIface()?
+	for (int i = 0; i < work.options.size(); i++) {
+		ifaces.push_back(getWorkloadIface(work, ccr, work.options[i], dbInfo));
+	}
+	wait(waitForAll(ifaces));
 	auto compound = makeReference<CompoundWorkload>(wcx);
 	for (int i = 0; i < work.options.size(); i++) {
-		compound->add(getWorkloadIface(work, work.options[i], dbInfo));
+		compound->add(ifaces[i].getValue());
 	}
 	return compound;
 }
@@ -494,7 +520,7 @@ ACTOR Future<Void> testDatabaseLiveness(Database cx,
 		try {
 			state double start = now();
 			auto traceMsg = "PingingDatabaseLiveness_" + context;
-			TraceEvent(traceMsg.c_str());
+			TraceEvent(traceMsg.c_str()).log();
 			wait(timeoutError(pingDatabase(cx), databasePingDelay));
 			double pingTime = now() - start;
 			ASSERT(pingTime > 0);
@@ -607,10 +633,9 @@ ACTOR Future<Void> runWorkloadAsync(Database cx,
 		when(ReplyPromise<std::vector<PerfMetric>> req = waitNext(workIface.metrics.getFuture())) {
 			state ReplyPromise<std::vector<PerfMetric>> s_req = req;
 			try {
-				std::vector<PerfMetric> m;
-				workload->getMetrics(m);
+				std::vector<PerfMetric> m = wait(workload->getMetrics());
 				TraceEvent("WorkloadSendMetrics", workIface.id()).detail("Count", m.size());
-				req.send(m);
+				s_req.send(m);
 			} catch (Error& e) {
 				if (e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_delete)
 					throw;
@@ -649,7 +674,7 @@ ACTOR Future<Void> testerServerWorkload(WorkloadRequest work,
 
 		// add test for "done" ?
 		TraceEvent("WorkloadReceived", workIface.id()).detail("Title", work.title);
-		auto workload = getWorkloadIface(work, dbInfo);
+		Reference<TestWorkload> workload = wait(getWorkloadIface(work, ccr, dbInfo));
 		if (!workload) {
 			TraceEvent("TestCreationError").detail("Reason", "Workload could not be created");
 			fprintf(stderr, "ERROR: The workload could not be created.\n");
@@ -704,6 +729,9 @@ ACTOR Future<Void> testerServerCore(TesterInterface interf,
 
 ACTOR Future<Void> clearData(Database cx) {
 	state Transaction tr(cx);
+	state UID debugID = debugRandom()->randomUniqueID();
+	TraceEvent("TesterClearingDatabaseStart", debugID).log();
+	tr.debugTransaction(debugID);
 	loop {
 		try {
 			// This transaction needs to be self-conflicting, but not conflict consistently with
@@ -712,10 +740,10 @@ ACTOR Future<Void> clearData(Database cx) {
 			tr.makeSelfConflicting();
 			wait(success(tr.getReadVersion())); // required since we use addReadConflictRange but not get
 			wait(tr.commit());
-			TraceEvent("TesterClearingDatabase").detail("AtVersion", tr.getCommittedVersion());
+			TraceEvent("TesterClearingDatabase", debugID).detail("AtVersion", tr.getCommittedVersion());
 			break;
 		} catch (Error& e) {
-			TraceEvent(SevWarn, "TesterClearingDatabaseError").error(e);
+			TraceEvent(SevWarn, "TesterClearingDatabaseError", debugID).error(e);
 			wait(tr.onError(e));
 		}
 	}
@@ -1092,7 +1120,8 @@ std::map<std::string, std::function<void(const std::string&)>> testSpecGlobalKey
 	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedMaxTLogVersion", ""); } },
 	{ "disableTss", [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedDisableTSS", ""); } },
 	{ "disableHostname",
-	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedDisableHostname", ""); } }
+	  [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedDisableHostname", ""); } },
+	{ "disableRemoteKVS", [](const std::string& value) { TraceEvent("TestParserTest").detail("ParsedRemoteKVS", ""); } }
 };
 
 std::map<std::string, std::function<void(const std::string& value, TestSpec* spec)>> testSpecTestKeys = {
@@ -1305,17 +1334,58 @@ std::string toml_to_string(const T& value) {
 	}
 }
 
-std::vector<TestSpec> readTOMLTests_(std::string fileName) {
-	TestSpec spec;
+struct TestSet {
+	KnobKeyValuePairs overrideKnobs;
+	std::vector<TestSpec> testSpecs;
+};
+
+namespace {
+
+// In the current TOML scope, look for "knobs" field. If exists, translate all
+// key value pairs into KnobKeyValuePairs
+KnobKeyValuePairs getOverriddenKnobKeyValues(const toml::value& context) {
+	KnobKeyValuePairs result;
+
+	try {
+		const toml::array& overrideKnobs = toml::find(context, "knobs").as_array();
+		for (const toml::value& knob : overrideKnobs) {
+			for (const auto& [key, value_] : knob.as_table()) {
+				const std::string& value = toml_to_string(value_);
+				ParsedKnobValue parsedValue = CLIENT_KNOBS->parseKnobValue(key, value);
+				if (std::get_if<NoKnobFound>(&parsedValue)) {
+					parsedValue = SERVER_KNOBS->parseKnobValue(key, value);
+				}
+				if (std::get_if<NoKnobFound>(&parsedValue)) {
+					TraceEvent(SevError, "TestSpecUnrecognizedKnob")
+					    .detail("KnobName", key)
+					    .detail("OverrideValue", value);
+					continue;
+				}
+				result.set(key, parsedValue);
+			}
+		}
+	} catch (const std::out_of_range&) {
+		// No knobs field in this scope, this is not an error
+	}
+
+	return result;
+}
+
+} // namespace
+
+TestSet readTOMLTests_(std::string fileName) {
 	Standalone<VectorRef<KeyValueRef>> workloadOptions;
-	std::vector<TestSpec> result;
+	TestSet result;
 
 	const toml::value& conf = toml::parse(fileName);
+
+	// Parse the global knob changes
+	result.overrideKnobs = getOverriddenKnobKeyValues(conf);
 
 	// Then parse each test
 	const toml::array& tests = toml::find(conf, "test").as_array();
 	for (const toml::value& test : tests) {
-		spec = TestSpec();
+		TestSpec spec;
 
 		// First handle all test-level settings
 		for (const auto& [k, v] : test.as_table()) {
@@ -1346,29 +1416,9 @@ std::vector<TestSpec> readTOMLTests_(std::string fileName) {
 		}
 
 		// And then copy the knob attributes to spec.overrideKnobs
-		try {
-			const toml::array& overrideKnobs = toml::find(test, "knobs").as_array();
-			for (const toml::value& knob : overrideKnobs) {
-				for (const auto& [key, value_] : knob.as_table()) {
-					const std::string& value = toml_to_string(value_);
-					ParsedKnobValue parsedValue = CLIENT_KNOBS->parseKnobValue(key, value);
-					if (std::get_if<NoKnobFound>(&parsedValue)) {
-						parsedValue = SERVER_KNOBS->parseKnobValue(key, value);
-					}
-					if (std::get_if<NoKnobFound>(&parsedValue)) {
-						TraceEvent(SevError, "TestSpecUnrecognizedKnob")
-						    .detail("KnobName", key)
-						    .detail("OverrideValue", value);
-						continue;
-					}
-					spec.overrideKnobs.set(key, parsedValue);
-				}
-			}
-		} catch (const std::out_of_range&) {
-			// no knob overridden
-		}
+		spec.overrideKnobs = getOverriddenKnobKeyValues(test);
 
-		result.push_back(spec);
+		result.testSpecs.push_back(spec);
 	}
 
 	return result;
@@ -1376,7 +1426,7 @@ std::vector<TestSpec> readTOMLTests_(std::string fileName) {
 
 // A hack to catch and log std::exception, because TOML11 has very useful
 // error messages, but the actor framework can't handle std::exception.
-std::vector<TestSpec> readTOMLTests(std::string fileName) {
+TestSet readTOMLTests(std::string fileName) {
 	try {
 		return readTOMLTests_(fileName);
 	} catch (std::exception& e) {
@@ -1679,7 +1729,8 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
                             LocalityData locality,
                             UnitTestParameters testOptions,
                             Optional<TenantName> defaultTenant) {
-	state std::vector<TestSpec> testSpecs;
+	state TestSet testSet;
+	state std::unique_ptr<KnobProtectiveGroup> knobProtectiveGroup(nullptr);
 	auto cc = makeReference<AsyncVar<Optional<ClusterControllerFullInterface>>>();
 	auto ci = makeReference<AsyncVar<Optional<ClusterInterface>>>();
 	std::vector<Future<Void>> actors;
@@ -1710,7 +1761,7 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 		options.push_back_deep(options.arena(),
 		                       KeyValueRef(LiteralStringRef("shuffleShards"), LiteralStringRef("true")));
 		spec.options.push_back_deep(spec.options.arena(), options);
-		testSpecs.push_back(spec);
+		testSet.testSpecs.push_back(spec);
 	} else if (whatToRun == TEST_TYPE_UNIT_TESTS) {
 		TestSpec spec;
 		Standalone<VectorRef<KeyValueRef>> options;
@@ -1726,7 +1777,7 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 			options.push_back_deep(options.arena(), KeyValueRef(kv.first, kv.second));
 		}
 		spec.options.push_back_deep(spec.options.arena(), options);
-		testSpecs.push_back(spec);
+		testSet.testSpecs.push_back(spec);
 	} else {
 		std::ifstream ifs;
 		ifs.open(fileName.c_str(), std::ifstream::in);
@@ -1739,11 +1790,11 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 		}
 		enableClientInfoLogging(); // Enable Client Info logging by default for tester
 		if (boost::algorithm::ends_with(fileName, ".txt")) {
-			testSpecs = readTests(ifs);
+			testSet.testSpecs = readTests(ifs);
 		} else if (boost::algorithm::ends_with(fileName, ".toml")) {
 			// TOML is weird about opening the file as binary on windows, so we
 			// just let TOML re-open the file instead of using ifs.
-			testSpecs = readTOMLTests(fileName);
+			testSet = readTOMLTests(fileName);
 		} else {
 			TraceEvent(SevError, "TestHarnessFail")
 			    .detail("Reason", "unknown tests specification extension")
@@ -1753,6 +1804,7 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 		ifs.close();
 	}
 
+	knobProtectiveGroup = std::make_unique<KnobProtectiveGroup>(testSet.overrideKnobs);
 	Future<Void> tests;
 	if (at == TEST_HERE) {
 		auto db = makeReference<AsyncVar<ServerDBInfo>>();
@@ -1760,10 +1812,10 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 		actors.push_back(
 		    reportErrors(monitorServerDBInfo(cc, LocalityData(), db), "MonitorServerDBInfo")); // FIXME: Locality
 		actors.push_back(reportErrors(testerServerCore(iTesters[0], connRecord, db, locality), "TesterServerCore"));
-		tests = runTests(cc, ci, iTesters, testSpecs, startingConfiguration, locality, defaultTenant);
+		tests = runTests(cc, ci, iTesters, testSet.testSpecs, startingConfiguration, locality, defaultTenant);
 	} else {
 		tests = reportErrors(
-		    runTests(cc, ci, testSpecs, at, minTestersExpected, startingConfiguration, locality, defaultTenant),
+		    runTests(cc, ci, testSet.testSpecs, at, minTestersExpected, startingConfiguration, locality, defaultTenant),
 		    "RunTests");
 	}
 

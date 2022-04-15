@@ -49,13 +49,13 @@ public:
 	double MAX_GENERATIONS_OVERRIDE;
 	double MAX_GENERATIONS_SIM;
 
-	double COORDINATOR_HOSTNAME_RESOLVE_DELAY;
 	double COORDINATOR_RECONNECTION_DELAY;
 	int CLIENT_EXAMPLE_AMOUNT;
 	double MAX_CLIENT_STATUS_AGE;
 	int MAX_COMMIT_PROXY_CONNECTIONS;
 	int MAX_GRV_PROXY_CONNECTIONS;
 	double STATUS_IDLE_TIMEOUT;
+	bool SEND_ENTIRE_VERSION_VECTOR;
 
 	// wrong_shard_server sometimes comes from the only nonfailed server, so we need to avoid a fast spin
 	double WRONG_SHARD_SERVER_DELAY; // SOMEDAY: This delay can limit performance of retrieving data when the cache is

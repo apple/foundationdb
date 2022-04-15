@@ -268,4 +268,4 @@ struct CycleWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<CycleWorkload> CycleWorkloadFactory("Cycle");
+WorkloadFactory<CycleWorkload> CycleWorkloadFactory("Cycle", true);

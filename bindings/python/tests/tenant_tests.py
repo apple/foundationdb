@@ -24,11 +24,24 @@ import json
 from fdb.tuple import pack
 
 if __name__ == '__main__':
-    fdb.api_version(710)
+    fdb.api_version(720)
+
+def cleanup_tenant(db, tenant_name):
+    try:
+        tenant = db.open_tenant(tenant_name)
+        del tenant[:]
+        fdb.tenant_management.delete_tenant(db, tenant_name)
+    except fdb.FDBError as e:
+        if e.code == 2131: # tenant not found
+            pass
+        else:
+            raise
 
 def test_tenant_tuple_name(db):
     tuplename=(b'test', b'level', b'hierarchy', 3, 1.24, 'str')
-    db.allocate_tenant(tuplename)
+    cleanup_tenant(db, tuplename)
+
+    fdb.tenant_management.create_tenant(db, tuplename)
 
     tenant=db.open_tenant(tuplename)
     tenant[b'foo'] = b'bar'
@@ -36,25 +49,15 @@ def test_tenant_tuple_name(db):
     assert tenant[b'foo'] == b'bar'
 
     del tenant[b'foo']
-    db.delete_tenant(tuplename)
+    fdb.tenant_management.delete_tenant(db, tuplename)
 
-def cleanup_tenant(db, tenant_name):
-    try:
-        tenant = db.open_tenant(tenant_name)
-        del tenant[:]
-        db.delete_tenant(tenant_name)
-    except fdb.FDBError as e:
-        if e.code == 2131: # tenant not found
-            pass
-        else:
-            raise
 
 def test_tenant_operations(db):
     cleanup_tenant(db, b'tenant1')
     cleanup_tenant(db, b'tenant2')
 
-    db.allocate_tenant(b'tenant1')
-    db.allocate_tenant(b'tenant2')
+    fdb.tenant_management.create_tenant(db, b'tenant1')
+    fdb.tenant_management.create_tenant(db, b'tenant2')
 
     tenant1 = db.open_tenant(b'tenant1')
     tenant2 = db.open_tenant(b'tenant2')
@@ -90,7 +93,7 @@ def test_tenant_operations(db):
     assert db[prefix2 + b'tenant_test_key'] == b'tenant2'
     assert db[b'tenant_test_key'] == b'no_tenant'
 
-    db.delete_tenant(b'tenant1')
+    fdb.tenant_management.delete_tenant(db, b'tenant1')
     try:
         tenant1[b'tenant_test_key']
         assert False
@@ -98,7 +101,7 @@ def test_tenant_operations(db):
         assert e.code == 2131 # tenant not found
 
     del tenant2[:]
-    db.delete_tenant(b'tenant2')
+    fdb.tenant_management.delete_tenant(db, b'tenant2')
 
     assert db[prefix1 + b'tenant_test_key'] == None
     assert db[prefix2 + b'tenant_test_key'] == None
@@ -108,9 +111,70 @@ def test_tenant_operations(db):
 
     assert db[b'tenant_test_key'] == None
 
+def test_tenant_operation_retries(db):
+    cleanup_tenant(db, b'tenant1')
+    cleanup_tenant(db, b'tenant2')
+
+    # Test that the tenant creation only performs the existence check once
+    fdb.tenant_management._create_tenant_impl(db, b'tenant1', [], force_existence_check_maybe_committed=True)
+
+    # An attempt to create the tenant again should fail
+    try:
+        fdb.tenant_management.create_tenant(db, b'tenant1')
+        assert False
+    except fdb.FDBError as e:
+        assert e.code == 2132 # tenant already exists
+
+    # Using a transaction skips the existence check
+    tr = db.create_transaction()
+    fdb.tenant_management.create_tenant(tr, b'tenant1')
+
+    # Test that a concurrent tenant creation doesn't interfere with the existence check logic
+    tr = db.create_transaction()
+    existence_check_marker = []
+    fdb.tenant_management._create_tenant_impl(tr, b'tenant2', existence_check_marker)
+
+    fdb.tenant_management.create_tenant(db, b'tenant2')
+
+    tr = db.create_transaction()
+    try:
+        fdb.tenant_management._create_tenant_impl(tr, b'tenant2', existence_check_marker)
+        tr.commit().wait()
+    except fdb.FDBError as e:
+        tr.on_error(e).wait()
+
+    # Test that tenant deletion only performs the existence check once
+    fdb.tenant_management._delete_tenant_impl(db, b'tenant1', [], force_existence_check_maybe_committed=True)
+
+    # An attempt to delete the tenant again should fail
+    try:
+        fdb.tenant_management.delete_tenant(db, b'tenant1')
+        assert False
+    except fdb.FDBError as e:
+        assert e.code == 2131 # tenant not found
+
+    # Using a transaction skips the existence check
+    tr = db.create_transaction()
+    fdb.tenant_management.delete_tenant(tr, b'tenant1')
+
+    # Test that a concurrent tenant deletion doesn't interfere with the existence check logic
+    tr = db.create_transaction()
+    existence_check_marker = []
+    fdb.tenant_management._delete_tenant_impl(tr, b'tenant2', existence_check_marker)
+
+    fdb.tenant_management.delete_tenant(db, b'tenant2')
+
+    tr = db.create_transaction()
+    try:
+        fdb.tenant_management._delete_tenant_impl(tr, b'tenant2', existence_check_marker)
+        tr.commit().wait()
+    except fdb.FDBError as e:
+        tr.on_error(e).wait()
+
 def test_tenants(db):
     test_tenant_tuple_name(db)
     test_tenant_operations(db)
+    test_tenant_operation_retries(db)
 
 # Expect a cluster file as input. This test will write to the FDB cluster, so
 # be aware of potential side effects.

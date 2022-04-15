@@ -81,6 +81,7 @@ enum class TaskPriority {
 	GetConsistentReadVersion = 8500,
 	GetLiveCommittedVersionReply = 8490,
 	GetLiveCommittedVersion = 8480,
+	GetTLogPrevCommitVersion = 8400,
 	UpdateRecoveryTransactionVersion = 8470,
 	DefaultPromiseEndpoint = 8000,
 	DefaultOnMainThread = 7500,
@@ -131,43 +132,6 @@ inline TaskPriority incrementPriorityIfEven(TaskPriority p) {
 }
 
 class Void;
-
-struct Hostname {
-	std::string host;
-	std::string service; // decimal port number
-	bool isTLS;
-
-	Hostname(std::string host, std::string service, bool isTLS) : host(host), service(service), isTLS(isTLS) {}
-	Hostname() : host(""), service(""), isTLS(false) {}
-
-	bool operator==(const Hostname& r) const { return host == r.host && service == r.service && isTLS == r.isTLS; }
-	bool operator!=(const Hostname& r) const { return !(*this == r); }
-	bool operator<(const Hostname& r) const {
-		if (isTLS != r.isTLS)
-			return isTLS < r.isTLS;
-		else if (host != r.host)
-			return host < r.host;
-		return service < r.service;
-	}
-	bool operator>(const Hostname& r) const { return r < *this; }
-	bool operator<=(const Hostname& r) const { return !(*this > r); }
-	bool operator>=(const Hostname& r) const { return !(*this < r); }
-
-	// Allow hostnames in forms like following:
-	//    hostname:1234
-	//    host.name:1234
-	//    host-name:1234
-	//    host-name_part1.host-name_part2:1234:tls
-	static bool isHostname(const std::string& s) {
-		std::regex validation("^([\\w\\-]+\\.?)+:([\\d]+){1,}(:tls)?$");
-		std::regex ipv4Validation("^([\\d]{1,3}\\.?){4,}:([\\d]+){1,}(:tls)?$");
-		return !std::regex_match(s, ipv4Validation) && std::regex_match(s, validation);
-	}
-
-	static Hostname parse(const std::string& s);
-
-	std::string toString() const { return host + ":" + service + (isTLS ? ":tls" : ""); }
-};
 
 struct IPAddress {
 	typedef boost::asio::ip::address_v6::bytes_type IPAddressStore;
@@ -504,6 +468,10 @@ public:
 	virtual NetworkAddress getPeerAddress() const = 0;
 
 	virtual UID getDebugID() const = 0;
+
+	// At present, implemented by Sim2Conn where we want to disable bits flip for connections between parent process and
+	// child process, also reduce latency for this kind of connection
+	virtual bool isStableConnection() const { throw unsupported_operation(); }
 };
 
 class IListener {
@@ -563,6 +531,10 @@ public:
 	virtual double timer() = 0;
 	// A wrapper for directly getting the system time. The time returned by now() only updates in the run loop,
 	// so it cannot be used to measure times of functions that do not have wait statements.
+
+	// Simulation version of timer_int for convenience, based on timer()
+	// Returns epoch nanoseconds
+	uint64_t timer_int() { return (uint64_t)(g_network->timer() * 1e9); }
 
 	virtual double timer_monotonic() = 0;
 	// Similar to timer, but monotonic
@@ -686,6 +658,27 @@ public:
 	virtual boost::asio::ip::udp::socket::native_handle_type native_handle() = 0;
 };
 
+// DNSCache is a class maintaining a <hostname, vector<NetworkAddress>> mapping.
+class DNSCache {
+public:
+	DNSCache() = default;
+	explicit DNSCache(const std::map<std::string, std::vector<NetworkAddress>>& dnsCache)
+	  : hostnameToAddresses(dnsCache) {}
+
+	Optional<std::vector<NetworkAddress>> find(const std::string& host, const std::string& service);
+	void add(const std::string& host, const std::string& service, const std::vector<NetworkAddress>& addresses);
+	void remove(const std::string& host, const std::string& service);
+	void clear();
+
+	// Convert hostnameToAddresses to string. The format is:
+	// hostname1,host1Address1,host1Address2;hostname2,host2Address1,host2Address2...
+	std::string toString();
+	static DNSCache parseFromString(const std::string& s);
+
+private:
+	std::map<std::string, std::vector<NetworkAddress>> hostnameToAddresses;
+};
+
 class INetworkConnections {
 public:
 	// Methods for making and accepting network connections.  Logically this is part of the INetwork abstraction
@@ -713,10 +706,17 @@ public:
 	// NetworkAddresses
 	virtual Future<std::vector<NetworkAddress>> resolveTCPEndpoint(const std::string& host,
 	                                                               const std::string& service) = 0;
+	// Similar to resolveTCPEndpoint(), except that this one uses DNS cache.
+	virtual Future<std::vector<NetworkAddress>> resolveTCPEndpointWithDNSCache(const std::string& host,
+	                                                                           const std::string& service) = 0;
 	// Resolve host name and service name. This one should only be used when resolving asynchronously is impossible. For
 	// all other cases, resolveTCPEndpoint() should be preferred.
 	virtual std::vector<NetworkAddress> resolveTCPEndpointBlocking(const std::string& host,
 	                                                               const std::string& service) = 0;
+	// Resolve host name and service name with DNS cache. This one should only be used when resolving asynchronously is
+	// impossible. For all other cases, resolveTCPEndpointWithDNSCache() should be preferred.
+	virtual std::vector<NetworkAddress> resolveTCPEndpointBlockingWithDNSCache(const std::string& host,
+	                                                                           const std::string& service) = 0;
 
 	// Convenience function to resolve host/service and connect to one of its NetworkAddresses randomly
 	// isTLS has to be a parameter here because it is passed to connect() as part of the toAddr object.
@@ -730,6 +730,11 @@ public:
 	static INetworkConnections* net() {
 		return static_cast<INetworkConnections*>((void*)g_network->global(INetwork::enNetworkConnections));
 	}
+
+	void removeCachedDNS(const std::string& host, const std::string& service) { dnsCache.remove(host, service); }
+
+	DNSCache dnsCache;
+
 	// Returns the interface that should be used to make and accept socket connections
 };
 

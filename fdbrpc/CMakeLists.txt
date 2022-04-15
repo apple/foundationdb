@@ -10,11 +10,13 @@ set(FDBRPC_SRCS
   AsyncFileNonDurable.actor.cpp
   AsyncFileWriteChecker.cpp
   FailureMonitor.actor.cpp
+  FlowProcess.actor.h
   FlowTransport.actor.cpp
   genericactors.actor.h
   genericactors.actor.cpp
   HealthMonitor.actor.cpp
   IAsyncFile.actor.cpp
+  IPAllowList.cpp
   LoadBalance.actor.cpp
   LoadBalance.actor.h
   Locality.cpp
@@ -33,6 +35,8 @@ set(FDBRPC_SRCS
   sim2.actor.cpp
   sim_validation.cpp
   TimedRequest.h
+  TokenSign.h
+  TokenSign.cpp
   TraceFileIO.cpp
   TSSComparison.h)
 

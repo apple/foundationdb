@@ -1294,6 +1294,8 @@ ACTOR static Future<double> doCommitProbe(Future<double> grvProbe, Transaction* 
 
 	ASSERT(sourceTr->getReadVersion().isReady());
 	tr->setVersion(sourceTr->getReadVersion().get());
+	tr->getDatabase()->ssVersionVectorCache = sourceTr->getDatabase()->ssVersionVectorCache;
+	tr->trState->readVersionObtainedFromGrvProxy = sourceTr->trState->readVersionObtainedFromGrvProxy;
 
 	state double start = g_network->timer_monotonic();
 
@@ -1934,7 +1936,7 @@ ACTOR static Future<std::vector<std::pair<StorageServerInterface, EventMap>>> ge
 		if (metadata[i].present()) {
 			TraceEventFields metadataField;
 			metadataField.addField("CreatedTimeTimestamp", std::to_string(metadata[i].get().createdTime));
-			metadataField.addField("CreatedTimeDatetime", timerIntToGmt(metadata[i].get().createdTime));
+			metadataField.addField("CreatedTimeDatetime", epochsToGMTString(metadata[i].get().createdTime));
 			results[i].second.emplace("Metadata", metadataField);
 		} else if (!servers[i].isTss()) {
 			TraceEventFields metadataField;

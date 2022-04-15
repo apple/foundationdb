@@ -963,7 +963,7 @@ struct DynamicFieldBase {
 		if (getDerivedTypeName() == metricTypeName<T>())
 			return (DynamicField<T>*)this;
 
-		TraceEvent(SevWarnAlways, "ScopeEventFieldTypeMismatch")
+		TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "ScopeEventFieldTypeMismatch")
 		    .detail("EventType", eventType.toString())
 		    .detail("FieldName", fieldName().toString())
 		    .detail("OldType", getDerivedTypeName().toString())
