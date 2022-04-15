@@ -1543,6 +1543,25 @@ ACTOR Future<ProtocolVersion> getNewestProtocolVersion(Database cx) {
 	}
 }
 
+ACTOR Future<ProtocolVersion> getNewestProtocolVersion(Database cx, WorkerDetails ccWorker) {
+
+	try {
+		state Future<TraceEventFields> swVersionF = timeoutError(
+		    ccWorker.interf.eventLogRequest.getReply(EventLogRequest("SWVersionCompatibilityChecked"_sr)), 1.0);
+
+		wait(success(swVersionF));
+		const TraceEventFields& swVersionTrace = swVersionF.get();
+		int64_t newestProtocolVersionValue = atoi(swVersionTrace.getValue("NewestServerVersion").c_str());
+		return ProtocolVersion(newestProtocolVersionValue);
+
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled)
+			throw;
+
+		return ProtocolVersion();
+	}
+}
+
 struct LoadConfigurationResult {
 	bool fullReplication;
 	Optional<Key> healthyZone;
@@ -2896,6 +2915,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			messages.push_back(message);
 		}
 
+		state ProtocolVersion newestProtocolVersion = wait(getNewestProtocolVersion(cx, ccWorker));
+
 		// construct status information for cluster subsections
 		state int statusCode = (int)RecoveryStatus::END;
 		state JsonBuilderObject recoveryStateStatus = wait(
@@ -2933,9 +2954,10 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		statusObj["protocol_version"] = format("%" PRIx64, g_network->protocolVersion().version());
 		statusObj["connection_string"] = coordinators.ccr->getConnectionString().toString();
 		statusObj["bounce_impact"] = getBounceImpactInfo(statusCode);
-
-		ProtocolVersion newestProtocolVersion = wait(getNewestProtocolVersion(cx));
 		statusObj["latest_server_version"] = format("%" PRIx64, newestProtocolVersion.version());
+
+		// ProtocolVersion newestProtocolVersion = wait(getNewestProtocolVersion(cx));
+		// statusObj["latest_server_version"] = format("%" PRIx64, newestProtocolVersion.version());
 
 		state Optional<DatabaseConfiguration> configuration;
 		state Optional<LoadConfigurationResult> loadResult;

@@ -1409,7 +1409,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	wait(self->cstate.read());
 
 	if (self->cstate.prevDBState.lowestCompatibleServerVersion > currentProtocolVersion) {
-		TraceEvent(SevWarnAlways, "IncompatbleServerVersion", self->dbgid).log();
+		TraceEvent(SevWarnAlways, "IncompatibleServerVersion", self->dbgid).log();
 		throw internal_error();
 	}
 
@@ -1477,6 +1477,11 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 		newState.lowestCompatibleServerVersion = minCompatibleProtocolVersion;
 	}
 	wait(self->cstate.write(newState) || recoverAndEndEpoch);
+
+	TraceEvent("SWVersionCompatibilityChecked", self->dbgid)
+	    .detail("NewestServerVersion", self->cstate.myDBState.newestServerVersion)
+	    .detail("LowestCompatibleVersion", self->cstate.myDBState.lowestCompatibleServerVersion)
+	    .trackLatest(self->swVersionCheckedEventHolder->trackingKey);
 
 	self->recoveryState = RecoveryState::RECRUITING;
 
