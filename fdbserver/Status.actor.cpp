@@ -1551,13 +1551,15 @@ ACTOR Future<ProtocolVersion> getNewestProtocolVersion(Database cx, WorkerDetail
 
 		wait(success(swVersionF));
 		const TraceEventFields& swVersionTrace = swVersionF.get();
-		int64_t newestProtocolVersionValue = atoi(swVersionTrace.getValue("NewestServerVersion").c_str());
+		int64_t newestProtocolVersionValue =
+		    std::stoull(swVersionTrace.getValue("NewestServerVersion").c_str(), nullptr, 16);
 		return ProtocolVersion(newestProtocolVersionValue);
 
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
 			throw;
 
+		TraceEvent(SevWarnAlways, "SWVersionStatusFailed").error(e);
 		return ProtocolVersion();
 	}
 }
