@@ -253,6 +253,7 @@ endif()
             ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests
             )
 
+if(NOT USE_SANITIZER)
   add_test(NAME fdb_c_upgrade_single_threaded
       COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
             --build-dir ${CMAKE_BINARY_DIR}
@@ -262,7 +263,7 @@ endif()
             --process-number 1
     )
 
-    add_test(NAME fdb_c_upgrade_multi_threaded
+  add_test(NAME fdb_c_upgrade_multi_threaded
     COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
           --build-dir ${CMAKE_BINARY_DIR}
           --disable-log-dump
@@ -270,6 +271,7 @@ endif()
           --upgrade-path "6.3.23" "7.0.0" "6.3.23"
           --process-number 3
     )
+endif()
 
 endif()
 
