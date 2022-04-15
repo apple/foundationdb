@@ -18,6 +18,11 @@
  * limitations under the License.
  */
 
+#ifndef FDBRPC_HTTP_H
+#define FDBRPC_HTTP_H
+
+#pragma once
+
 #include "flow/flow.h"
 #include "flow/Net2Packet.h"
 #include "fdbrpc/IRateControl.h"
@@ -64,6 +69,10 @@ Future<Reference<Response>> doRequest(Reference<IConnection> const& conn,
                                       Reference<IRateControl> const& recvRate,
                                       const std::string& requestHeader = std::string());
 
+constexpr int HTTP_STATUS_CODE_OK = 200;
+constexpr int HTTP_STATUS_CODE_CREATED = 201;
+constexpr int HTTP_STATUS_CODE_ACCEPTED = 202;
+constexpr int HTTP_STATUS_CODE_NO_CONTENT = 204;
 constexpr int HTTP_STATUS_CODE_UNAUTHORIZED = 401;
 constexpr int HTTP_STATUS_CODE_NOT_ACCEPTABLE = 406;
 constexpr int HTTP_STATUS_CODE_TOO_MANY_REQUESTS = 429;
@@ -72,4 +81,14 @@ constexpr int HTTP_STATUS_CODE_BAD_GATEWAY = 502;
 constexpr int HTTP_STATUS_CODE_SERVICE_UNAVAILABLE = 503;
 
 constexpr int HTTP_RETRYAFTER_DELAY_SECS = 300;
+
+const std::string HTTP_VERB_GET = "GET";
+const std::string HTTP_VERB_HEAD = "HEAD";
+const std::string HTTP_VERB_DELETE = "DELETE";
+const std::string HTTP_VERB_TRACE = "TRACE";
+const std::string HTTP_VERB_PUT = "PUT";
+const std::string HTTP_VERB_POST = "POST";
+
 } // namespace HTTP
+
+#endif

@@ -284,14 +284,6 @@ void ClientKnobs::initialize(Randomize randomize) {
 	// Blob granules
 	init( BG_MAX_GRANULE_PARALLELISM,                10 );
 
-	// REST Client
-	init( REST_CLIENT_MAX_CONNECTIONPOOL_SIZE,                   10 );
-	init( REST_CLIENT_CONNECT_TRIES,                             10 );
-	init( REST_CLIENT_CONNECT_TIMEOUT,                           10 );
-	init( REST_CLIENT_MAX_CONNECTION_LIFE,                      120 );
-	init( REST_CLIENT_REQUEST_TRIES,                             10 );
-	init( REST_CLIENT_REQUEST_TIMEOUT_SEC,                      120 );
-
 	// clang-format on
 }
 

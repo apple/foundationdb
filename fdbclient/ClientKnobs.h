@@ -276,14 +276,6 @@ public:
 	// Blob Granules
 	int BG_MAX_GRANULE_PARALLELISM;
 
-	// REST Client
-	int REST_CLIENT_MAX_CONNECTIONPOOL_SIZE;
-	int REST_CLIENT_CONNECT_TRIES;
-	int REST_CLIENT_CONNECT_TIMEOUT;
-	int REST_CLIENT_MAX_CONNECTION_LIFE;
-	int REST_CLIENT_REQUEST_TRIES;
-	int REST_CLIENT_REQUEST_TIMEOUT_SEC;
-
 	ClientKnobs(Randomize randomize);
 	void initialize(Randomize randomize);
 };
