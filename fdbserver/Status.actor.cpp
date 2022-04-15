@@ -1528,7 +1528,20 @@ ACTOR static Future<Void> logRangeWarningFetcher(Database cx,
 	return Void();
 }
 
-ACTOR Future<ProtocolVersion> getNewestProtocolVersion(Database cx, WorkerDetails ccWorker) {
+struct ProtocolVersionData {
+	ProtocolVersion runningProtocolVersion;
+	ProtocolVersion newestProtocolVersion;
+	ProtocolVersion lowestCompatibleProtocolVersion;
+	ProtocolVersionData()
+	  : runningProtocolVersion(currentProtocolVersion), newestProtocolVersion(ProtocolVersion()),
+	    lowestCompatibleProtocolVersion(ProtocolVersion()) {}
+
+	ProtocolVersionData(uint64_t newestProtocolVersionValue, uint64_t lowestCompatibleProtocolVersionValue)
+	  : runningProtocolVersion(currentProtocolVersion), newestProtocolVersion(newestProtocolVersionValue),
+	    lowestCompatibleProtocolVersion(lowestCompatibleProtocolVersionValue) {}
+};
+
+ACTOR Future<ProtocolVersionData> getNewestProtocolVersion(Database cx, WorkerDetails ccWorker) {
 
 	try {
 		state Future<TraceEventFields> swVersionF = timeoutError(
@@ -1537,15 +1550,18 @@ ACTOR Future<ProtocolVersion> getNewestProtocolVersion(Database cx, WorkerDetail
 		wait(success(swVersionF));
 		const TraceEventFields& swVersionTrace = swVersionF.get();
 		int64_t newestProtocolVersionValue =
-		    std::stoull(swVersionTrace.getValue("NewestServerVersion").c_str(), nullptr, 16);
-		return ProtocolVersion(newestProtocolVersionValue);
+		    std::stoull(swVersionTrace.getValue("NewestProtocolVersion").c_str(), nullptr, 16);
+		int64_t lowestCompatibleProtocolVersionValue =
+		    std::stoull(swVersionTrace.getValue("LowestCompatibleProtocolVersion").c_str(), nullptr, 16);
 
+		return ProtocolVersionData(newestProtocolVersionValue, lowestCompatibleProtocolVersionValue);
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
 			throw;
 
 		TraceEvent(SevWarnAlways, "SWVersionStatusFailed").error(e);
-		return ProtocolVersion();
+
+		return ProtocolVersionData();
 	}
 }
 
@@ -2902,7 +2918,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			messages.push_back(message);
 		}
 
-		state ProtocolVersion newestProtocolVersion = wait(getNewestProtocolVersion(cx, ccWorker));
+		state ProtocolVersionData protocolVersion = wait(getNewestProtocolVersion(cx, ccWorker));
 
 		// construct status information for cluster subsections
 		state int statusCode = (int)RecoveryStatus::END;
@@ -2941,7 +2957,9 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		statusObj["protocol_version"] = format("%" PRIx64, g_network->protocolVersion().version());
 		statusObj["connection_string"] = coordinators.ccr->getConnectionString().toString();
 		statusObj["bounce_impact"] = getBounceImpactInfo(statusCode);
-		statusObj["latest_server_version"] = format("%" PRIx64, newestProtocolVersion.version());
+		statusObj["newest_protocol_version"] = format("%" PRIx64, protocolVersion.newestProtocolVersion.version());
+		statusObj["lowest_compatible_protocol_version"] =
+		    format("%" PRIx64, protocolVersion.lowestCompatibleProtocolVersion.version());
 
 		state Optional<DatabaseConfiguration> configuration;
 		state Optional<LoadConfigurationResult> loadResult;

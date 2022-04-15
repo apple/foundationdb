@@ -141,13 +141,13 @@ struct DBCoreState {
 	DBRecoveryCount recoveryCount; // Increases with sequential successful recoveries.
 	LogSystemType logSystemType;
 	std::set<int8_t> pseudoLocalities;
-	ProtocolVersion newestServerVersion;
-	ProtocolVersion lowestCompatibleServerVersion;
+	ProtocolVersion newestProtocolVersion;
+	ProtocolVersion lowestCompatibleProtocolVersion;
 
 	DBCoreState()
 	  : logRouterTags(0), txsTags(0), recoveryCount(0), logSystemType(LogSystemType::empty),
-	    newestServerVersion(ProtocolVersion::invalidProtocolVersion),
-	    lowestCompatibleServerVersion(ProtocolVersion::invalidProtocolVersion) {}
+	    newestProtocolVersion(ProtocolVersion::invalidProtocolVersion),
+	    lowestCompatibleProtocolVersion(ProtocolVersion::invalidProtocolVersion) {}
 
 	std::vector<UID> getPriorCommittedLogServers() {
 		std::vector<UID> priorCommittedLogServers;
@@ -186,7 +186,7 @@ struct DBCoreState {
 				serializer(ar, txsTags);
 			}
 			if (ar.protocolVersion().hasSWVersionTracking()) {
-				serializer(ar, newestServerVersion, lowestCompatibleServerVersion);
+				serializer(ar, newestProtocolVersion, lowestCompatibleProtocolVersion);
 			}
 		} else if (ar.isDeserializing) {
 			tLogs.push_back(CoreTLogSet());

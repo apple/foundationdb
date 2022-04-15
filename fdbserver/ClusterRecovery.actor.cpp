@@ -1408,8 +1408,8 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 
 	wait(self->cstate.read());
 
-	if (self->cstate.prevDBState.lowestCompatibleServerVersion > currentProtocolVersion) {
-		TraceEvent(SevWarnAlways, "IncompatibleServerVersion", self->dbgid).log();
+	if (self->cstate.prevDBState.lowestCompatibleProtocolVersion > currentProtocolVersion) {
+		TraceEvent(SevWarnAlways, "IncompatibleProtocolVersion", self->dbgid).log();
 		throw internal_error();
 	}
 
@@ -1469,18 +1469,18 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	DBCoreState newState = self->cstate.myDBState;
 	newState.recoveryCount++;
 	newState.recoveryCount++;
-	if (self->cstate.prevDBState.newestServerVersion.isInvalidMagic() ||
-	    self->cstate.prevDBState.newestServerVersion < currentProtocolVersion) {
-		ASSERT(self->cstate.myDBState.lowestCompatibleServerVersion.isInvalidMagic() ||
-		       !self->cstate.myDBState.newestServerVersion.isInvalidMagic());
-		newState.newestServerVersion = currentProtocolVersion;
-		newState.lowestCompatibleServerVersion = minCompatibleProtocolVersion;
+	if (self->cstate.prevDBState.newestProtocolVersion.isInvalidMagic() ||
+	    self->cstate.prevDBState.newestProtocolVersion < currentProtocolVersion) {
+		ASSERT(self->cstate.myDBState.lowestCompatibleProtocolVersion.isInvalidMagic() ||
+		       !self->cstate.myDBState.newestProtocolVersion.isInvalidMagic());
+		newState.newestProtocolVersion = currentProtocolVersion;
+		newState.lowestCompatibleProtocolVersion = minCompatibleProtocolVersion;
 	}
 	wait(self->cstate.write(newState) || recoverAndEndEpoch);
 
-	TraceEvent("SWVersionCompatibilityChecked", self->dbgid)
-	    .detail("NewestServerVersion", self->cstate.myDBState.newestServerVersion)
-	    .detail("LowestCompatibleVersion", self->cstate.myDBState.lowestCompatibleServerVersion)
+	TraceEvent("ProtocolVersionCompatibilityChecked", self->dbgid)
+	    .detail("NewestProtocolVersion", self->cstate.myDBState.newestProtocolVersion)
+	    .detail("LowestCompatibleProtocolVersion", self->cstate.myDBState.lowestCompatibleProtocolVersion)
 	    .trackLatest(self->swVersionCheckedEventHolder->trackingKey);
 
 	self->recoveryState = RecoveryState::RECRUITING;
