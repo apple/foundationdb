@@ -7974,7 +7974,6 @@ Reference<TransactionLogInfo> Transaction::createTrLogInfoProbabilistically(cons
 	return Reference<TransactionLogInfo>();
 }
 
-// TODO - ljoswiak, mpilman. Discuss 2 functions below and implications on txID.
 void Transaction::setTransactionID(UID id) {
 	ASSERT(getSize() == 0);
 	trState->spanContext = SpanContext(id, trState->spanContext.spanID);
