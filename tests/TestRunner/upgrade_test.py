@@ -18,7 +18,7 @@ from urllib import request
 from local_cluster import LocalCluster, random_secret_string
 
 
-SUPPORTED_PLATFORMS = ["x86_64"]
+SUPPORTED_PLATFORMS = ["x86_64", "aarch64"]
 SUPPORTED_VERSIONS = ["7.2.0", "7.1.0", "7.0.0", "6.3.24", "6.3.23",
                       "6.3.22", "6.3.18", "6.3.17", "6.3.16", "6.3.15", "6.3.13", "6.3.12", "6.3.9", "6.2.30",
                       "6.2.29", "6.2.28", "6.2.27", "6.2.26", "6.2.25", "6.2.24", "6.2.23", "6.2.22", "6.2.21",
