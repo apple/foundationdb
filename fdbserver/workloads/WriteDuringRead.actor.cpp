@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbclient/ReadYourWrites.h"
@@ -113,7 +114,17 @@ struct WriteDuringReadWorkload : TestWorkload {
 
 	std::string description() const override { return "WriteDuringRead"; }
 
-	Future<Void> setup(Database const& cx) override { return Void(); }
+	ACTOR Future<Void> setupImpl(WriteDuringReadWorkload* self, Database cx) {
+		// If we are operating in the default tenant but enable raw access, we should only write keys
+		// in the tenant's key-space.
+		if (self->useSystemKeys && cx->defaultTenant.present() && self->keyPrefix < systemKeys.begin) {
+			TenantMapEntry entry = wait(ManagementAPI::getTenant(cx.getReference(), cx->defaultTenant.get()));
+			self->keyPrefix = entry.prefix.withSuffix(self->keyPrefix).toString();
+		}
+		return Void();
+	}
+
+	Future<Void> setup(Database const& cx) override { return setupImpl(this, cx); }
 
 	Future<Void> start(Database const& cx) override {
 		if (clientId == 0)
@@ -694,7 +705,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 	Key getKeyForIndex(int idx) {
 		idx += minNode;
 		if (adjacentKeys) {
-			return Key(idx ? keyPrefix + std::string(idx, '\x00') : "");
+			return Key(keyPrefix + (idx ? std::string(idx, '\x00') : ""));
 		} else {
 			return Key(keyPrefix + format("%010d", idx));
 		}
