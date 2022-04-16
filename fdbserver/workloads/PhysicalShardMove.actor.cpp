@@ -46,6 +46,7 @@ std::string printValue(const ErrorOr<Optional<Value>>& value) {
 struct SSCheckpointWorkload : TestWorkload {
 	FlowLock startMoveKeysParallelismLock;
 	FlowLock finishMoveKeysParallelismLock;
+	FlowLock cleanUpDataMoveParallelismLock;
 	const bool enabled;
 	bool pass;
 
@@ -208,7 +209,13 @@ struct SSCheckpointWorkload : TestWorkload {
 					state DataMoveMetaData dataMove = decodeDataMoveValue(dataMoves[i].value);
 					ASSERT(dataMoveID == dataMove.id);
 					TraceEvent("TestCancelDataMoveBegin").detail("DataMove", dataMove.toString());
-					wait(cleanUpDataMove(cx, dataMoveID, moveKeysLock, dataMove.range, true, &ddEnabledState));
+					wait(cleanUpDataMove(cx,
+					                     dataMoveID,
+					                     moveKeysLock,
+					                     &self->cleanUpDataMoveParallelismLock,
+					                     dataMove.range,
+					                     true,
+					                     &ddEnabledState));
 					TraceEvent("TestCancelDataMoveEnd").detail("DataMove", dataMove.toString());
 				}
 
@@ -223,7 +230,7 @@ struct SSCheckpointWorkload : TestWorkload {
 				              false,
 				              deterministicRandom()->randomUniqueID(), // for logging only
 				              deterministicRandom()->randomUniqueID(),
-							  true,
+				              true,
 				              &ddEnabledState));
 				break;
 			} catch (Error& e) {

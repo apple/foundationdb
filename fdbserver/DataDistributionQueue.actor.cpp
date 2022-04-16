@@ -424,6 +424,7 @@ struct DDQueueData {
 
 	FlowLock startMoveKeysParallelismLock;
 	FlowLock finishMoveKeysParallelismLock;
+	FlowLock cleanUpDataMoveParallelismLock;
 	Reference<FlowLock> fetchSourceLock;
 
 	int activeRelocations;
@@ -523,7 +524,7 @@ struct DDQueueData {
 	  : distributorId(mid), lock(lock), cx(cx), teamCollections(teamCollections), shardsAffectedByTeamFailure(sABTF),
 	    getAverageShardBytes(getAverageShardBytes),
 	    startMoveKeysParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
-	    finishMoveKeysParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
+	    finishMoveKeysParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM), cleanUpDataMoveParallelismLock(1),
 	    fetchSourceLock(new FlowLock(SERVER_KNOBS->DD_FETCH_SOURCE_PARALLELISM)), activeRelocations(0),
 	    queuedRelocations(0), bytesWritten(0), teamSize(teamSize), singleRegionTeamSize(singleRegionTeamSize),
 	    output(output), input(input), getShardMetrics(getShardMetrics), lastLimited(lastLimited), lastInterval(0),
@@ -1073,7 +1074,8 @@ ACTOR Future<Void> cancelDataMove(struct DDQueueData* self, KeyRange range, cons
 		    .detail("Range", keys);
 		auto [iter, inserted] = dms.insert(it->value());
 		ASSERT(inserted);
-		cleanup.push_back(cleanUpDataMove(self->cx, it->value(), self->lock, keys, true, ddEnabledState));
+		cleanup.push_back(cleanUpDataMove(
+		    self->cx, it->value(), self->lock, &self->cleanUpDataMoveParallelismLock, keys, true, ddEnabledState));
 	}
 	wait(waitForAll(cleanup));
 	auto ranges = self->dataMoves.getAffectedRangesAfterInsertion(range);
@@ -1389,7 +1391,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 			                                         self->teamCollections.size() > 1,
 			                                         relocateShardInterval.pairID,
 			                                         rd.dataMoveID,
-													 false,
+			                                         false,
 			                                         ddEnabledState);
 			state Future<Void> pollHealth =
 			    signalledTransferComplete ? Never()
@@ -1414,7 +1416,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 								                      self->teamCollections.size() > 1,
 								                      relocateShardInterval.pairID,
 								                      rd.dataMoveID,
-													  false,
+								                      false,
 								                      ddEnabledState);
 							} else {
 								self->fetchKeysComplete.insert(rd);

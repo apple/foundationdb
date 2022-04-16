@@ -749,11 +749,12 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 					    .errorUnsuppressed(e)
 					    .detail("DataMoveID", dataMoveID)
 					    .detail("DataMoveRange", keys)
-					    .detail("NewDataMoveMetaData", dataMove.toString());
+					    .detail("CurrentDataMoveMetaData", dataMove.toString());
 					state Error err = e;
 					if (err.code() == error_code_move_to_removed_server)
 						throw;
 					wait(tr->onError(e));
+					dataMove = DataMoveMetaData();
 
 					if (retries % 10 == 0) {
 						TraceEvent(
@@ -888,9 +889,11 @@ ACTOR static Future<Void> finishMoveShard(Database occ,
 	state KeyRange keys = targetKeys;
 	state Future<Void> warningLogger = logWarningAfter("FinishMoveShardTooLong", 600, destinationTeam);
 	state int retries = 0;
-	state FlowLock::Releaser releaser;
 	state DataMoveMetaData dataMove;
 	state bool complete = false;
+
+	wait(finishMoveKeysParallelismLock->take(TaskPriority::DataDistributionLaunch));
+	state FlowLock::Releaser releaser = FlowLock::Releaser(*finishMoveKeysParallelismLock);
 
 	ASSERT(!destinationTeam.empty());
 
@@ -912,10 +915,6 @@ ACTOR static Future<Void> finishMoveShard(Database occ,
 				tr.trState->taskID = TaskPriority::MoveKeys;
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-
-				releaser.release();
-				wait(finishMoveKeysParallelismLock->take(TaskPriority::DataDistributionLaunch));
-				releaser = FlowLock::Releaser(*finishMoveKeysParallelismLock);
 
 				wait(checkMoveKeysLock(&tr, lock, ddEnabledState));
 
@@ -2052,11 +2051,15 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 ACTOR Future<Void> cleanUpDataMove(Database occ,
                                    UID dataMoveID,
                                    MoveKeysLock lock,
+                                   FlowLock* cleanUpDataMoveParallelismLock,
                                    KeyRange keys,
                                    bool removeFromDest,
                                    const DDEnabledState* ddEnabledState) {
 	TraceEvent(SevDebug, "CleanUpDataMoveBegin", dataMoveID).detail("DataMoveID", dataMoveID);
 	state bool complete = false;
+
+	wait(cleanUpDataMoveParallelismLock->take(TaskPriority::DataDistributionLaunch));
+	state FlowLock::Releaser releaser = FlowLock::Releaser(*cleanUpDataMoveParallelismLock);
 
 	try {
 		loop {
@@ -2133,14 +2136,17 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 					                           currentShards[i + 1].value);
 					std::vector<Future<Void>> actors;
 					for (const UID& ssId : dest) {
-						if (std::find(src.begin(), src.end(), ssId) == src.end()) {
-							TraceEvent("CleanUpDataMoveDestRange", dataMoveID)
-							    .detail("DataMoveID", dataMoveID)
-							    .detail("Range", rangeIntersectKeys)
-							    .detail("DestServer", ssId);
-							actors.push_back(krmSetRangeCoalescing(
-							    tr, serverKeysPrefixFor(ssId), rangeIntersectKeys, allKeys, serverKeysValue(UID())));
+						UID id;
+						if (std::find(src.begin(), src.end(), ssId) != src.end()) {
+							id = srcId;
 						}
+						TraceEvent("CleanUpDataMoveDestRange", dataMoveID)
+						    .detail("DataMoveID", dataMoveID)
+						    .detail("Range", rangeIntersectKeys)
+						    .detail("DestServer", ssId)
+						    .detail("DestID", id);
+						actors.push_back(krmSetRangeCoalescing(
+						    tr, serverKeysPrefixFor(ssId), rangeIntersectKeys, allKeys, serverKeysValue(id)));
 					}
 					wait(waitForAll(actors));
 				}
