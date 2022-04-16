@@ -27,16 +27,52 @@
 #define FDBRPC_TENANT_AUTH_ACTOR_H
 
 #include <string_view>
+#include <queue>
 
 #include "fdbrpc/TenantInfo.h"
 #include "fdbrpc/TokenSign.h"
+#include "flow/flow.h"
 
 #include "flow/actorcompiler.h" // has to be last include
 
-struct AuthorizedTenants : ReferenceCounted<AuthorizedTenants> {
-	Arena arena;
-	std::set<TenantNameRef> authorizedTenants;
-	bool trusted = false;
+class AuthorizedTenants : public ReferenceCounted<AuthorizedTenants> {
+	friend class TransportData;
+	using QueueMember = std::pair<double, TenantNameRef>;
+	struct Cmp {
+		bool operator()(QueueMember const& lhs, QueueMember const& rhs) const { return lhs.first > rhs.first; }
+	};
+	bool trusted;
+	Future<Void> cleaner;
+	ACTOR static Future<Void> clean(AuthorizedTenants* self) {
+		loop {
+			while (!self->queue.empty() && self->queue.top().first <= now()) {
+				auto const& t = self->queue.top();
+				self->authorizedTenants.erase(t.second);
+				self->queue.pop();
+			}
+			Future<Void> nextExpire = self->queue.empty() ? Never() : delay(self->queue.top().first - now());
+			choose {
+				when(wait(nextExpire)) {}
+				when(wait(self->insert.onTrigger())) {}
+			}
+		}
+	}
+	std::priority_queue<QueueMember, std::vector<QueueMember>, Cmp> queue;
+	std::set<TenantName> authorizedTenants;
+	AsyncTrigger insert;
+
+public:
+	AuthorizedTenants(bool trusted = false) : trusted(trusted) { cleaner = clean(this); }
+	void add(double expire, VectorRef<TenantNameRef> const& tenants) {
+		for (auto tenant : tenants) {
+			TenantName t(tenant);
+			queue.emplace(expire, t);
+			authorizedTenants.insert(std::move(t));
+		}
+		insert.trigger();
+	}
+	bool contains(TenantNameRef tenant) const { return authorizedTenants.count(tenant) != 0; }
+	bool isTrusted() const { return trusted; }
 };
 
 // TODO: receive and validate token instead
@@ -44,11 +80,11 @@ struct AuthorizationRequest {
 	constexpr static FileIdentifier file_identifier = 11499331;
 
 	Arena arena;
-	SignedToken token;
+	VectorRef<SignedAuthTokenRef> tokens;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, token, arena);
+		serializer(ar, tokens, arena);
 	}
 };
 
@@ -62,9 +98,8 @@ struct serializable_traits<TenantInfo> : std::true_type {
 			try {
 				Reference<AuthorizedTenants>& authorizedTenants =
 				    std::any_cast<Reference<AuthorizedTenants>&>(ar.context().variable("AuthorizedTenants"sv));
-				v.trusted = authorizedTenants->trusted;
-				v.verified =
-				    v.trusted || !v.name.present() || authorizedTenants->authorizedTenants.count(v.name.get()) != 0;
+				v.trusted = authorizedTenants->isTrusted();
+				v.verified = v.trusted || !v.name.present() || authorizedTenants->contains(v.name.get());
 			} catch (std::out_of_range& e) {
 				TraceEvent(SevError, "AttemptedReadTenantInfoWithNoAuth").backtrace();
 				ASSERT(false);

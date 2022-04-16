@@ -58,10 +58,7 @@ public:
 	throw digital_signature_ops_error();
 }
 
-struct KeyPairRef {
-	StringRef privateKey;
-	StringRef publicKey;
-};
+} // namespace
 
 Standalone<KeyPairRef> generateEcdsaKeyPair() {
 	auto params = std::add_pointer_t<EVP_PKEY>();
@@ -110,12 +107,10 @@ Standalone<KeyPairRef> generateEcdsaKeyPair() {
 	return ret;
 }
 
-} // namespace
-
 Standalone<SignedAuthTokenRef> signToken(AuthTokenRef token, StringRef keyName, StringRef privateKeyDer) {
 	auto ret = Standalone<SignedAuthTokenRef>{};
 	auto arena = ret.arena();
-	auto writer = ObjectWriter([&arena](size_t len) { return new (arena) uint8_t[len]; }, IncludeVersion());
+	auto writer = ObjectWriter([&arena](size_t len) { return new (arena) uint8_t[len]; }, Unversioned());
 	writer.serialize(token);
 	auto tokenStr = writer.toStringRef();
 
@@ -184,16 +179,6 @@ TEST_CASE("/fdbrpc/TokenSign") {
 		auto arena = token.arena();
 		auto& rng = *deterministicRandom();
 		token.expiresAt = timer_monotonic() * (0.5 + rng.random01());
-		if (auto setIp = rng.randomInt(0, 3)) {
-			if (setIp == 1) {
-				token.ipAddress = IPAddress(rng.randomUInt32());
-			} else {
-				auto v6 = std::array<uint8_t, 16>{};
-				for (auto& byte : v6)
-					byte = rng.randomUInt32() & 255;
-				token.ipAddress = IPAddress(v6);
-			}
-		}
 		auto genRandomStringRef = [&arena, &rng]() {
 			const auto len = rng.randomInt(1, 21);
 			auto strRaw = new (arena) uint8_t[len];

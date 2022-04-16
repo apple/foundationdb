@@ -291,6 +291,11 @@ public:
 
 	void authorizationTokenAdd(StringRef signedToken);
 
+	Optional<StringRef> getPublicKeyByName(StringRef name) const;
+	// Adds or replaces a public key
+	void addPublicKey(StringRef name, StringRef key);
+	void removePublicKey(StringRef name);
+
 private:
 	class TransportData* self;
 };

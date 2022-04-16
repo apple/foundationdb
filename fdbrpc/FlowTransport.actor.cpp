@@ -28,6 +28,7 @@
 #endif
 
 #include "fdbrpc/TenantAuth.actor.h"
+#include "fdbrpc/TokenSign.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/HealthMonitor.h"
@@ -244,14 +245,21 @@ struct TenantAuthorizer final : NetworkMessageReceiver {
 	}
 	void receive(ArenaObjectReader& reader) override {
 		AuthorizationRequest req;
+		auto transport = FlowTransport::transport();
 		try {
 			reader.deserialize(req);
-			// TODO: check signature
-			Token token = ObjectReader::fromStringRef<Token>(req.token.token, Unversioned());
-			Reference<AuthorizedTenants>& auth =
-			    std::any_cast<Reference<AuthorizedTenants>&>(reader.variable("AuthorizedTenants"));
-			for (const auto& t : token.tenants) {
-				auth->authorizedTenants.insert(t);
+			for (const auto& t : req.tokens) {
+				auto key = transport.getPublicKeyByName(t.keyName);
+				if (key.present() && verifyToken(t, key.get())) {
+					auto token = ObjectReader::fromStringRef<AuthTokenRef>(t.token, Unversioned());
+					Reference<AuthorizedTenants>& auth =
+					    std::any_cast<Reference<AuthorizedTenants>&>(reader.variable("AuthorizedTenants"));
+					auth->add(token.expiresAt, token.tenants);
+				} else {
+					TraceEvent(SevWarn, "InvalidSignature")
+					    .detail("From", g_currentDeliveryPeerAddress.address)
+					    .detail("Reason", key.present() ? "VerificationFailed" : "KeyNotFound");
+				}
 			}
 		} catch (Error& e) {
 			if (e.code() == error_code_permission_denied) {
@@ -278,6 +286,42 @@ struct UnauthorizedEndpointReceiver final : NetworkMessageReceiver {
 	}
 	bool isPublic() const override { return true; }
 };
+
+template <class T, class Container = std::vector<T>, class Cmp = std::less<T>>
+class IterablePriorityQueue {
+	Container queue;
+	Cmp cmp;
+	using const_iterator = typename Container::const_iterator;
+
+public:
+	void push(T const& val) {
+		queue.push_back(val);
+		std::push_heap(queue.begin(), queue.end(), cmp);
+	}
+	void push(T&& val) {
+		queue.push_back(std::move(val));
+		std::push_heap(queue.begin(), queue.end(), cmp);
+	}
+	template <class... Args>
+	void emplace(Args&&... args) {
+		queue.emplace_back(std::forward<Args>(args)...);
+		std::push_heap(queue.begin(), queue.end(), cmp);
+	}
+	const T& front() const { return queue.begin(); }
+	void pop() {
+		queue.pop_front();
+		std::pop_heap(queue.begin(), queue.end(), cmp);
+	}
+	const_iterator begin() const { return queue.begin(); }
+	const_iterator end() const { return queue.end(); }
+	bool empty() const { return queue.empty(); }
+};
+
+using SignedAuthTokenTTL = std::pair<double, SignedAuthToken>;
+struct SignedAuthTokenTTLCmp {
+	bool operator()(const SignedAuthTokenTTL& lhs, const SignedAuthTokenTTL& rhs) { return lhs.first > rhs.first; }
+};
+using TokenQueue = IterablePriorityQueue<SignedAuthTokenTTL, std::vector<SignedAuthTokenTTL>, SignedAuthTokenTTLCmp>;
 
 class TransportData {
 public:
@@ -334,7 +378,8 @@ public:
 	Future<Void> multiVersionCleanup;
 	Future<Void> pingLogger;
 
-	std::vector<SignedToken> tokens;
+	TokenQueue tokens;
+	std::unordered_map<Standalone<StringRef>, Standalone<StringRef>> publicKeys;
 };
 
 ACTOR Future<Void> pingLatencyLogger(TransportData* self) {
@@ -480,6 +525,11 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
                                            Promise<Reference<struct Peer>> onConnected);
 
 static void sendLocal(TransportData* self, ISerializeSource const& what, const Endpoint& destination);
+static void writePacket(PacketBuffer* pb,
+                        PacketWriter& wr,
+                        Endpoint destination,
+                        ISerializeSource const& what,
+                        bool& warnAlwaysForLargePacket);
 static ReliablePacket* sendPacket(TransportData* self,
                                   Reference<Peer> peer,
                                   ISerializeSource const& what,
@@ -903,6 +953,18 @@ void Peer::prependConnectPacket() {
 	PacketBuffer* pb_first = PacketBuffer::create();
 	PacketWriter wr(pb_first, nullptr, Unversioned());
 	pkt.serialize(wr);
+	if (!transport->tokens.empty()) {
+		AuthorizationRequest req;
+		for (auto t : transport->tokens) {
+			req.tokens.push_back(req.arena, t.second);
+		}
+		++transport->countPacketsGenerated;
+		writePacket(pb_first,
+		            wr,
+		            Endpoint::wellKnown({ destination }, WLTOKEN_AUTH_TENANT),
+		            SerializeSource<AuthorizationRequest>(req),
+		            transport->warnAlwaysForLargePacket);
+	}
 	unsent.prependWriteBuffer(pb_first, wr.finish());
 }
 
@@ -1003,7 +1065,7 @@ ACTOR static void deliver(TransportData* self,
 	}
 
 	auto receiver = self->endpoints.get(destination.token);
-	if (receiver && (authorizedTenants->trusted || receiver->isPublic())) {
+	if (receiver && (authorizedTenants->isTrusted() || receiver->isPublic())) {
 		if (!checkCompatible(receiver->peerCompatibilityPolicy(), reader.protocolVersion())) {
 			return;
 		}
@@ -1238,14 +1300,12 @@ ACTOR static Future<Void> connectionReader(TransportData* transport,
 	state bool incompatibleProtocolVersionNewer = false;
 	state NetworkAddress peerAddress;
 	state ProtocolVersion peerProtocolVersion;
-	state Reference<AuthorizedTenants> authorizedTenants = makeReference<AuthorizedTenants>();
 	state std::shared_ptr<ContextVariableMap> cvm = std::make_shared<ContextVariableMap>();
+	state Reference<AuthorizedTenants> authorizedTenants =
+	    makeReference<AuthorizedTenants>(transport->allowList(conn->getPeerAddress().ip));
 	peerAddress = conn->getPeerAddress();
-	authorizedTenants->trusted = transport->allowList(conn->getPeerAddress().ip);
 	(*cvm)["AuthorizedTenants"] = authorizedTenants;
-	(*cvm)["PeerAddress"] = peerAddress;
 
-	authorizedTenants->trusted = transport->allowList(peerAddress.ip);
 	if (!peer) {
 		ASSERT(!peerAddress.isPublic());
 	}
@@ -1549,6 +1609,11 @@ ACTOR static Future<Void> multiVersionCleanupWorker(TransportData* self) {
 FlowTransport::FlowTransport(uint64_t transportId, int maxWellKnownEndpoints, IPAllowList const* allowList)
   : self(new TransportData(transportId, maxWellKnownEndpoints, allowList)) {
 	self->multiVersionCleanup = multiVersionCleanupWorker(self);
+	if (g_network->isSimulated()) {
+		for (auto const& p : g_simulator.authKeys) {
+			self->publicKeys.emplace(p.first, p.second.publicKey);
+		}
+	}
 }
 
 FlowTransport::~FlowTransport() {
@@ -1685,8 +1750,7 @@ static void sendLocal(TransportData* self, ISerializeSource const& what, const E
 	ASSERT(copy.size() > 0);
 	TaskPriority priority = self->endpoints.getPriority(destination.token);
 	if (priority != TaskPriority::UnknownEndpoint || (destination.token.first() & TOKEN_STREAM_FLAG) != 0) {
-		Reference<AuthorizedTenants> authorizedTenants = makeReference<AuthorizedTenants>();
-		authorizedTenants->trusted = true;
+		Reference<AuthorizedTenants> authorizedTenants = makeReference<AuthorizedTenants>(true);
 		deliver(self,
 		        destination,
 		        priority,
@@ -1699,34 +1763,14 @@ static void sendLocal(TransportData* self, ISerializeSource const& what, const E
 	}
 }
 
-static ReliablePacket* sendPacket(TransportData* self,
-                                  Reference<Peer> peer,
-                                  ISerializeSource const& what,
-                                  const Endpoint& destination,
-                                  bool reliable) {
+static void writePacket(PacketBuffer* pb,
+                        PacketWriter& wr,
+                        Endpoint destination,
+                        ISerializeSource const& what,
+                        bool& warnAlwaysForLargePacket) {
 	const bool checksumEnabled = !destination.getPrimaryAddress().isTLS();
-	++self->countPacketsGenerated;
-
-	// If there isn't an open connection, a public address, or the peer isn't compatible, we can't send
-	if (!peer || (peer->outgoingConnectionIdle && !destination.getPrimaryAddress().isPublic()) ||
-	    (peer->incompatibleProtocolVersionNewer &&
-	     destination.token != Endpoint::wellKnownToken(WLTOKEN_PING_PACKET))) {
-		TEST(true); // Can't send to private address without a compatible open connection
-		return nullptr;
-	}
-
-	bool firstUnsent = peer->unsent.empty();
-
-	PacketBuffer* pb = peer->unsent.getWriteBuffer();
-	ReliablePacket* rp = reliable ? new ReliablePacket : 0;
-
 	int prevBytesWritten = pb->bytes_written;
 	PacketBuffer* checksumPb = pb;
-
-	PacketWriter wr(pb,
-	                rp,
-	                AssumeVersion(g_network->protocolVersion())); // SOMEDAY: Can we downgrade to talk to older peers?
-
 	// Reserve some space for packet length and checksum, write them after serializing data
 	SplitBuffer packetInfoBuffer;
 	uint32_t len;
@@ -1808,7 +1852,7 @@ static ReliablePacket* sendPacket(TransportData* self,
 		    .detail("Length", (int)len);
 		// throw platform_error();  // FIXME: How to recover from this situation?
 	} else if (len > FLOW_KNOBS->PACKET_WARNING) {
-		TraceEvent(self->warnAlwaysForLargePacket ? SevWarnAlways : SevWarn, "LargePacketSent")
+		TraceEvent(warnAlwaysForLargePacket ? SevWarnAlways : SevWarn, "LargePacketSent")
 		    .suppressFor(1.0)
 		    .detail("ToPeer", destination.getPrimaryAddress())
 		    .detail("Length", (int)len)
@@ -1816,7 +1860,7 @@ static ReliablePacket* sendPacket(TransportData* self,
 		    .backtrace();
 
 		if (g_network->isSimulated())
-			self->warnAlwaysForLargePacket = false;
+			warnAlwaysForLargePacket = false;
 	}
 
 #if VALGRIND
@@ -1828,6 +1872,33 @@ static ReliablePacket* sendPacket(TransportData* self,
 		checkbuf = checkbuf->next;
 	}
 #endif
+}
+
+static ReliablePacket* sendPacket(TransportData* self,
+                                  Reference<Peer> peer,
+                                  ISerializeSource const& what,
+                                  const Endpoint& destination,
+                                  bool reliable) {
+	++self->countPacketsGenerated;
+
+	// If there isn't an open connection, a public address, or the peer isn't compatible, we can't send
+	if (!peer || (peer->outgoingConnectionIdle && !destination.getPrimaryAddress().isPublic()) ||
+	    (peer->incompatibleProtocolVersionNewer &&
+	     destination.token != Endpoint::wellKnownToken(WLTOKEN_PING_PACKET))) {
+		TEST(true); // Can't send to private address without a compatible open connection
+		return nullptr;
+	}
+
+	bool firstUnsent = peer->unsent.empty();
+
+	PacketBuffer* pb = peer->unsent.getWriteBuffer();
+	ReliablePacket* rp = reliable ? new ReliablePacket : 0;
+
+	PacketWriter wr(pb,
+	                rp,
+	                AssumeVersion(g_network->protocolVersion())); // SOMEDAY: Can we downgrade to talk to older peers?
+
+	writePacket(pb, wr, destination, what, self->warnAlwaysForLargePacket);
 
 	peer->send(pb, rp, firstUnsent);
 	if (destination.token != Endpoint::wellKnownToken(WLTOKEN_PING_PACKET)) {
@@ -1912,10 +1983,17 @@ HealthMonitor* FlowTransport::healthMonitor() {
 }
 
 void FlowTransport::authorizationTokenAdd(StringRef signedToken) {
-	auto token = ObjectReader::fromStringRef<SignedToken>(signedToken, Unversioned());
-	self->tokens.push_back(token);
+	auto tokenRef = ObjectReader::fromStringRef<SignedAuthTokenRef>(signedToken, Unversioned());
+	SignedAuthToken token(tokenRef);
+	// we need the TTL to invalidate tokens on the client side
+	auto authToken = ObjectReader::fromStringRef<AuthTokenRef>(token.token, Unversioned());
+	if (authToken.expiresAt < now()) {
+		TraceEvent(SevWarnAlways, "AddedExpiredToken").detail("Expired", authToken.expiresAt);
+		return;
+	}
+	self->tokens.emplace(authToken.expiresAt, token);
 	AuthorizationRequest req;
-	req.token = token;
+	req.tokens.push_back(req.arena, token);
 	// send the token to all existing peers
 	for (auto peer : self->peers) {
 		NetworkAddressList addr;
@@ -1926,4 +2004,20 @@ void FlowTransport::authorizationTokenAdd(StringRef signedToken) {
 		           Endpoint::wellKnown(addr, WLTOKEN_AUTH_TENANT),
 		           false);
 	}
+}
+
+Optional<StringRef> FlowTransport::getPublicKeyByName(StringRef name) const {
+	auto iter = self->publicKeys.find(name);
+	if (iter != self->publicKeys.end()) {
+		return iter->second;
+	}
+	return Optional<StringRef>{};
+}
+
+void FlowTransport::addPublicKey(StringRef name, StringRef key) {
+	self->publicKeys[name] = key;
+}
+
+void FlowTransport::removePublicKey(StringRef name) {
+	self->publicKeys.erase(name);
 }

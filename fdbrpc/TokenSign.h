@@ -31,18 +31,21 @@
 
 struct AuthTokenRef {
 	static constexpr FileIdentifier file_identifier = 1523118;
-	Arena arena;
 	double expiresAt;
 	VectorRef<TenantNameRef> tenants;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, expiresAt, tenants, arena);
+		serializer(ar, expiresAt, tenants);
 	}
 };
 
 struct SignedAuthTokenRef {
 	static constexpr FileIdentifier file_identifier = 5916732;
+	SignedAuthTokenRef() {}
+	SignedAuthTokenRef(Arena& p, const SignedAuthTokenRef& other)
+	  : token(p, other.token), keyName(p, other.keyName), signature(p, other.signature) {}
+
 	StringRef token;
 	StringRef keyName;
 	StringRef signature;
@@ -51,10 +54,23 @@ struct SignedAuthTokenRef {
 	void serialize(Ar& ar) {
 		serializer(ar, token, keyName, signature);
 	}
+
+	int expectedSize() const { return token.size() + keyName.size() + signature.size(); }
 };
 
-Standalone<SignedAuthTokenRef> signToken(AuthTokenRef token, StringRef keyName, StringRef privateKeyDer);
+using SignedAuthToken = Standalone<SignedAuthTokenRef>;
+
+SignedAuthToken signToken(AuthTokenRef token, StringRef keyName, StringRef privateKeyDer);
 
 bool verifyToken(SignedAuthTokenRef signedToken, StringRef publicKeyDer);
+
+// Below method is intented to be used for testing only
+
+struct KeyPairRef {
+	StringRef privateKey;
+	StringRef publicKey;
+};
+
+Standalone<KeyPairRef> generateEcdsaKeyPair();
 
 #endif // FDBRPC_TOKEN_SIGN_H

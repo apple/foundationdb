@@ -20,19 +20,20 @@
 
 #ifndef FLOW_SIMULATOR_H
 #define FLOW_SIMULATOR_H
-#include "flow/ProtocolVersion.h"
+#pragma once
 #include <algorithm>
 #include <string>
-#pragma once
+#include <random>
 
 #include "flow/flow.h"
 #include "flow/Histogram.h"
-#include "fdbrpc/FailureMonitor.h"
-#include "fdbrpc/Locality.h"
-#include "fdbrpc/IAsyncFile.h"
+#include "flow/ProtocolVersion.h"
 #include "flow/TDMetric.actor.h"
-#include <random>
+#include "fdbrpc/FailureMonitor.h"
+#include "fdbrpc/IAsyncFile.h"
+#include "fdbrpc/Locality.h"
 #include "fdbrpc/ReplicationPolicy.h"
+#include "fdbrpc/TokenSign.h"
 
 enum ClogMode { ClogDefault, ClogAll, ClogSend, ClogReceive };
 
@@ -455,6 +456,8 @@ public:
 	bool setDiffProtocol; // true if a process with a different protocol version has been started
 
 	bool allowStorageMigrationTypeChange = false;
+
+	std::unordered_map<Standalone<StringRef>, Standalone<KeyPairRef>> authKeys;
 
 	flowGlobalType global(int id) const final { return getCurrentProcess()->global(id); };
 	void setGlobal(size_t id, flowGlobalType v) final { getCurrentProcess()->setGlobal(id, v); };

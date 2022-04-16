@@ -20,19 +20,31 @@
 
 #include <cstring>
 
+#include "flow/Arena.h"
+#include "flow/IRandom.h"
+#include "flow/Trace.h"
+#include "flow/serialize.h"
+#include "fdbrpc/simulator.h"
+#include "fdbrpc/TokenSign.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
-#include "flow/Arena.h"
-#include "flow/IRandom.h"
-#include "flow/Trace.h"
-#include "flow/serialize.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-struct CycleWorkload : TestWorkload {
+template <bool MultiTenancy>
+struct CycleMembers {};
+
+template <>
+struct CycleMembers<true> {
+	TenantName tenant;
+	SignedAuthToken token;
+};
+
+template <bool MultiTenancy>
+struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 	int actorCount, nodeCount;
 	double testDuration, transactionsPerSecond, minExpectedTransactionsPerSecond, traceParentProbability;
 	Key keyPrefix;
@@ -51,17 +63,41 @@ struct CycleWorkload : TestWorkload {
 		keyPrefix = unprintable(getOption(options, "keyPrefix"_sr, LiteralStringRef("")).toString());
 		traceParentProbability = getOption(options, "traceParentProbability "_sr, 0.01);
 		minExpectedTransactionsPerSecond = transactionsPerSecond * getOption(options, "expectedRate"_sr, 0.7);
+		if constexpr (MultiTenancy) {
+			this->tenant = getOption(options, "tenant"_sr, "CycleTenant"_sr);
+			AuthTokenRef authToken;
+			// make it confortably longer than the timeout of the workload
+			authToken.expiresAt = now() + getCheckTimeout() + 100;
+			authToken.tenants.push_back_deep(this->token.arena(), this->tenant);
+			// we currently don't support this workload to be run outside of simulation
+			ASSERT(g_network->isSimulated());
+			auto k = g_simulator.authKeys.begin();
+			this->token = signToken(authToken, k->first, k->second.privateKey);
+		}
 	}
 
 	std::string description() const override { return "CycleWorkload"; }
-	Future<Void> setup(Database const& cx) override { return bulkSetup(cx, this, nodeCount, Promise<double>()); }
+	Future<Void> setup(Database const& cx) override {
+		if constexpr (MultiTenancy) {
+			cx->defaultTenant = this->tenant;
+			Value v = ObjectWriter::toValue(this->token, Unversioned());
+			FlowTransport::transport().authorizationTokenAdd(v);
+		}
+		return bulkSetup(cx, this, nodeCount, Promise<double>());
+	}
 	Future<Void> start(Database const& cx) override {
+		if constexpr (MultiTenancy) {
+			cx->defaultTenant = this->tenant;
+		}
 		for (int c = 0; c < actorCount; c++)
 			clients.push_back(
 			    timeout(cycleClient(cx->clone(), this, actorCount / transactionsPerSecond), testDuration, Void()));
 		return delay(testDuration);
 	}
 	Future<bool> check(Database const& cx) override {
+		if constexpr (MultiTenancy) {
+			cx->defaultTenant = this->tenant;
+		}
 		int errors = 0;
 		for (int c = 0; c < clients.size(); c++)
 			errors += clients[c].isError();
@@ -231,6 +267,7 @@ struct CycleWorkload : TestWorkload {
 		}
 		return true;
 	}
+
 	ACTOR Future<bool> cycleCheck(Database cx, CycleWorkload* self, bool ok) {
 		if (self->transactions.getMetric().value() < self->testDuration * self->minExpectedTransactionsPerSecond) {
 			TraceEvent(SevWarnAlways, "TestFailure")
@@ -268,4 +305,5 @@ struct CycleWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<CycleWorkload> CycleWorkloadFactory("Cycle", true);
+WorkloadFactory<CycleWorkload<false>> CycleWorkloadFactory("Cycle", false);
+WorkloadFactory<CycleWorkload<true>> TenantCycleWorkloadFactory("TenantCycle", true);
