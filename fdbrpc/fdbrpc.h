@@ -652,7 +652,7 @@ template <class T, class = int>
 struct HasReply_t : std::false_type {};
 
 template <class T>
-struct HasReply_t<T, decltype((void) T::reply, 0)> : std::true_type {};
+struct HasReply_t<T, decltype((void)T::reply, 0)> : std::true_type {};
 
 template <class T>
 constexpr bool HasReply = HasReply_t<T>::value;

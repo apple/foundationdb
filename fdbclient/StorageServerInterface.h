@@ -150,14 +150,13 @@ public:
 				    getValue.getEndpoint().getAdjustedEndpoint(14));
 				changeFeedStream =
 				    RequestStream<struct ChangeFeedStreamRequest>(getValue.getEndpoint().getAdjustedEndpoint(15));
-				overlappingChangeFeeds = RequestStream<struct OverlappingChangeFeedsRequest>(
-				    getValue.getEndpoint().getAdjustedEndpoint(16));
+				overlappingChangeFeeds =
+				    RequestStream<struct OverlappingChangeFeedsRequest>(getValue.getEndpoint().getAdjustedEndpoint(16));
 				changeFeedPop =
 				    RequestStream<struct ChangeFeedPopRequest>(getValue.getEndpoint().getAdjustedEndpoint(17));
 				changeFeedVersionUpdate = RequestStream<struct ChangeFeedVersionUpdateRequest>(
 				    getValue.getEndpoint().getAdjustedEndpoint(18));
-				checkpoint =
-				    RequestStream<struct GetCheckpointRequest>(getValue.getEndpoint().getAdjustedEndpoint(19));
+				checkpoint = RequestStream<struct GetCheckpointRequest>(getValue.getEndpoint().getAdjustedEndpoint(19));
 				fetchCheckpoint =
 				    RequestStream<struct FetchCheckpointRequest>(getValue.getEndpoint().getAdjustedEndpoint(20));
 				fetchCheckpointKeyValues = RequestStream<struct FetchCheckpointKeyValuesRequest>(
