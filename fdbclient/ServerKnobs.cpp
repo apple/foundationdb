@@ -554,7 +554,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( MOVE_SHARD_KRM_BYTE_LIMIT,                             1e6 );
 	init( MAX_SKIP_TAGS,                                           1 ); //The TLogs require tags to be densely packed to be memory efficient, so be careful increasing this knob
 	init( MAX_ADDED_SOURCES_MULTIPLIER,                          2.0 );
-	init( ENABLE_PHYSICAL_SHARD_MOVE,                           true );
+	init( ENABLE_PHYSICAL_SHARD_MOVE,                          false );
 	init( FETCH_SHARD_BUFFER_BYTE_LIMIT,                        20e6 );
 	init(DELETE_CHECKPOINTS_WHEN_SHARD_MOVED_OUT,              false );
 

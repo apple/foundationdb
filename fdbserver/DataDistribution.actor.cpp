@@ -189,7 +189,7 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution(Data
 				}
 			}
 
-			if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+			if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 				RangeResult dataMoves = wait(tr.getRange(dataMoveKeys, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!dataMoves.more && dataMoves.size() < CLIENT_KNOBS->TOO_MANY);
 				for (int i = 0; i < dataMoves.size(); ++i) {
@@ -761,7 +761,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 			state Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure(new ShardsAffectedByTeamFailure);
 
 			state KeyRangeMap<std::shared_ptr<DataMove>> dataMoveMap(std::make_shared<DataMove>());
-			if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+			if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 				for (int i = 0; i < initData->dataMoves.size(); ++i) {
 					const auto& meta = initData->dataMoves[i];
 					TraceEvent("DDInitFoundDataMove", self->ddId)
@@ -798,7 +798,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 				}
 
 				shardsAffectedByTeamFailure->moveShard(keys, teams);
-				if (initData->shards[shard].hasDest && !SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+				if (initData->shards[shard].hasDest && CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 					// This shard is already in flight.  Ideally we should use dest in ShardsAffectedByTeamFailure and
 					// generate a dataDistributionRelocator directly in DataDistributionQueue to track it, but it's
 					// easier to just (with low priority) schedule it for movement.
@@ -810,14 +810,14 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributorData> self,
 					    keys, unhealthy ? SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY : SERVER_KNOBS->PRIORITY_RECOVER_MOVE));
 				}
 
-				if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+				if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 					dataMoveMap[keys.begin]->addShard(initData->shards[shard]);
 				}
 
 				wait(yield(TaskPriority::DataDistribution));
 			}
 
-			if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+			if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 				state int idx = 0;
 				for (; idx < initData->dataMoves.size(); ++idx) {
 					const auto& meta = initData->dataMoves[idx];

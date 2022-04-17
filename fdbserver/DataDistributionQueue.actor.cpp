@@ -414,6 +414,16 @@ ACTOR Future<Void> dataDistributionRelocator(struct DDQueueData* self,
                                              const DDEnabledState* ddEnabledState);
 
 struct DDQueueData {
+	struct DDDataMove {
+		DDDataMove() = default;
+		explicit DDDataMove(UID id) : id(id) {}
+
+		bool isValid() const { return id.isValid(); }
+
+		UID id;
+		Future<Void> cancel;
+	};
+
 	UID distributorId;
 	MoveKeysLock lock;
 	Database cx;
@@ -446,7 +456,7 @@ struct DDQueueData {
 	KeyRangeMap<RelocateData> inFlight;
 	// Track all actors that relocates specified keys to a good place; Key: keyRange; Value: actor
 	KeyRangeActorMap inFlightActors;
-	KeyRangeMap<UID> dataMoves;
+	KeyRangeMap<DDDataMove> dataMoves;
 
 	Promise<Void> error;
 	PromiseStream<RelocateData> dataTransferComplete;
@@ -524,7 +534,8 @@ struct DDQueueData {
 	  : distributorId(mid), lock(lock), cx(cx), teamCollections(teamCollections), shardsAffectedByTeamFailure(sABTF),
 	    getAverageShardBytes(getAverageShardBytes),
 	    startMoveKeysParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
-	    finishMoveKeysParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM), cleanUpDataMoveParallelismLock(1),
+	    finishMoveKeysParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
+	    cleanUpDataMoveParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
 	    fetchSourceLock(new FlowLock(SERVER_KNOBS->DD_FETCH_SOURCE_PARALLELISM)), activeRelocations(0),
 	    queuedRelocations(0), bytesWritten(0), teamSize(teamSize), singleRegionTeamSize(singleRegionTeamSize),
 	    output(output), input(input), getShardMetrics(getShardMetrics), lastLimited(lastLimited), lastInterval(0),
@@ -1007,7 +1018,7 @@ struct DDQueueData {
 			}
 
 			Future<Void> fCleanup =
-			    SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE ? cancelDataMove(this, rd.keys, ddEnabledState) : Void();
+			    CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA ? cancelDataMove(this, rd.keys, ddEnabledState) : Void();
 
 			// If there is a job in flight that wants data relocation which we are about to cancel/modify,
 			//     make sure that we keep the relocation intent for the job that we launch
@@ -1059,28 +1070,36 @@ struct DDQueueData {
 };
 
 ACTOR Future<Void> cancelDataMove(struct DDQueueData* self, KeyRange range, const DDEnabledState* ddEnabledState) {
-	ASSERT(SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE);
+	ASSERT(CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 
 	std::vector<Future<Void>> cleanup;
 	auto f = self->dataMoves.intersectingRanges(range);
-	std::unordered_set<UID> dms;
+	// std::unordered_map<UID, DDDataMove> dms;
 	for (auto it = f.begin(); it != f.end(); ++it) {
 		if (!it->value().isValid()) {
 			continue;
 		}
 		KeyRange keys = KeyRangeRef(it->range().begin, it->range().end);
 		TraceEvent(SevDebug, "DDQueueCancelDataMove", self->distributorId)
-		    .detail("DataMoveID", it->value())
+		    .detail("DataMoveID", it->value().id)
 		    .detail("Range", keys);
-		auto [iter, inserted] = dms.insert(it->value());
-		ASSERT(inserted);
-		cleanup.push_back(cleanUpDataMove(
-		    self->cx, it->value(), self->lock, &self->cleanUpDataMoveParallelismLock, keys, true, ddEnabledState));
+		// auto [iter, inserted] = dms.insert(it->value());
+		// ASSERT(inserted);
+		if (!it->value().cancel.isValid()) {
+			it->value().cancel = cleanUpDataMove(self->cx,
+			                                     it->value().id,
+			                                     self->lock,
+			                                     &self->cleanUpDataMoveParallelismLock,
+			                                     keys,
+			                                     true,
+			                                     ddEnabledState);
+		}
+		cleanup.push_back(it->value().cancel);
 	}
 	wait(waitForAll(cleanup));
 	auto ranges = self->dataMoves.getAffectedRangesAfterInsertion(range);
 	if (!ranges.empty()) {
-		self->dataMoves.insert(KeyRangeRef(ranges.front().begin, ranges.back().end), UID());
+		self->dataMoves.insert(KeyRangeRef(ranges.front().begin, ranges.back().end), DDQueueData::DDDataMove());
 	}
 	return Void();
 }
@@ -1140,7 +1159,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 		}
 
 		wait(prevCleanup);
-		if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+		if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 			auto inFlightRange = self->inFlight.rangeContaining(rd.keys.begin);
 			ASSERT(inFlightRange.range() == rd.keys);
 			ASSERT(inFlightRange.value().randomId == rd.randomId);
@@ -1149,7 +1168,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 			auto f = self->dataMoves.intersectingRanges(rd.keys);
 			for (auto it = f.begin(); it != f.end(); ++it) {
 				KeyRangeRef kr(it->range().begin, it->range().end);
-				const UID mId = it->value();
+				const UID mId = it->value().id;
 				if (mId.isValid() && mId != rd.dataMoveID) {
 					TraceEvent("DDRelocatorConflictingDataMove", distributorId)
 					    .detail("CurrentDataMoveID", rd.dataMoveID)
@@ -1162,7 +1181,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 					return Void();
 				}
 			}
-			self->dataMoves.insert(rd.keys, rd.dataMoveID);
+			self->dataMoves.insert(rd.keys, DDQueueData::DDDataMove(rd.dataMoveID));
 		}
 
 		state StorageMetrics metrics =
@@ -1185,7 +1204,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self,
 				bestTeams.clear();
 				// Get team from teamCollections in different DCs and find the best one
 				while (tciIndex < self->teamCollections.size()) {
-					if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE && rd.restore) {
+					if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA && rd.restore) {
 						auto req = GetTeamRequest(tciIndex == 0 ? rd.dataMove->primaryDest : rd.dataMove->remoteDest);
 						Future<std::pair<Optional<Reference<IDataDistributionTeam>>, bool>> fbestTeam =
 						    brokenPromiseToNever(self->teamCollections[tciIndex].getTeam.getReply(req));

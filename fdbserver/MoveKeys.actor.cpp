@@ -43,7 +43,7 @@ struct Shard {
 ACTOR Future<Optional<DataMoveMetaData>> getDataMoveMetaData(Database cx, UID dataMoveID) {
 	state Optional<DataMoveMetaData> dataMove;
 	state Transaction tr(cx);
-	if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+	if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 		loop {
 			try {
 				Optional<Value> val = wait(tr.get(dataMoveKeyFor(dataMoveID)));
@@ -473,7 +473,7 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 
 					wait(checkMoveKeysLock(&(tr->getTransaction()), lock, ddEnabledState));
 
-					if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+					if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 						Optional<Value> val = wait(tr->get(dataMoveKeyFor(dataMoveID)));
 						if (val.present()) {
 							DataMoveMetaData _dataMove = decodeDataMoveValue(val.get());
@@ -524,10 +524,10 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 					// iteration of the outer loop)
 					state KeyRange currentKeys = KeyRangeRef(begin, keys.end);
 
-					const int rowLimit = SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE
+					const int rowLimit = CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA
 					                         ? SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT
 					                         : SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT;
-					const int byteLimit = SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE
+					const int byteLimit = CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA
 					                          ? SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT
 					                          : SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES;
 					state RangeResult old = wait(krmGetRanges(tr, keyServersPrefix, currentKeys, rowLimit, byteLimit));
@@ -559,7 +559,7 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 						state std::vector<UID> dest;
 						state UID srcId;
 						state UID destId;
-						if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+						if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 							decodeKeyServersValue(UIDtoTagMap, old[oldIndex].value, src, dest, srcId, destId);
 							TraceEvent(SevDebug, "StartMoveKeysProcessingShard", relocationIntervalId)
 							    .detail("DataMoveID", dataMoveID)
@@ -620,7 +620,7 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 						uniquify(src);
 
 						// Update dest servers for this range to be equal to servers
-						if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+						if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 							krmSetPreviouslyEmptyRange(&(tr->getTransaction()),
 							                           keyServersPrefix,
 							                           rangeIntersectKeys,
@@ -644,20 +644,23 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 						// Keep track of src shards so that we can preserve their values when we overwrite serverKeys
 						for (auto& uid : src) {
 							shardMap[uid].push_back(old.arena(), rangeIntersectKeys);
-							if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+							if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 								physicalShardMap[uid].push_back(physicalShard);
 							}
 							// TraceEvent("StartMoveKeysShardMapAdd", relocationIntervalId).detail("Server", uid);
 						}
 
-						if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+						if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 							UID checkpointID = deterministicRandom()->randomUniqueID();
 							for (const UID& ssID : src) {
-								// TODO: Combine checkpoint on the same source server.
-								CheckpointMetaData checkpoint(rangeIntersectKeys, RocksDB, ssID, checkpointID);
-								checkpoint.setState(CheckpointMetaData::Pending);
-								checkpoint.dataMoveID = dataMoveID;
-								tr->set(checkpointKeyFor(ssID, dataMoveID, checkpointID), checkpointValue(checkpoint));
+								if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+									// TODO: Combine checkpoint on the same source server.
+									CheckpointMetaData checkpoint(rangeIntersectKeys, RocksDB, ssID, checkpointID);
+									checkpoint.setState(CheckpointMetaData::Pending);
+									checkpoint.dataMoveID = dataMoveID;
+									tr->set(checkpointKeyFor(ssID, dataMoveID, checkpointID),
+									        checkpointValue(checkpoint));
+								}
 								dataMove.src.insert(ssID);
 							}
 							TraceEvent("InitiatedCheckpoint")
@@ -679,7 +682,7 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 					std::vector<Future<Void>> actors;
 					for (oldDest = oldDests.begin(); oldDest != oldDests.end(); ++oldDest) {
 						if (std::find(servers.begin(), servers.end(), *oldDest) == servers.end()) {
-							if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+							if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 								actors.push_back(removeOldDestinationsWithPhysicalShard(
 								    tr, *oldDest, physicalShardMap[*oldDest], currentKeys));
 							} else {
@@ -694,7 +697,7 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 						// Since we are setting this for the entire range, serverKeys and keyServers aren't guaranteed
 						// to have the same shard boundaries If that invariant was important, we would have to move this
 						// inside the loop above and also set it for the src servers
-						if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+						if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 							actors.push_back(krmSetRangeCoalescing(tr,
 							                                       serverKeysPrefixFor(servers[i]),
 							                                       currentKeys,
@@ -885,7 +888,7 @@ ACTOR static Future<Void> finishMoveShard(Database occ,
                                           UID relocationIntervalId,
                                           std::map<UID, StorageServerInterface> tssMapping,
                                           const DDEnabledState* ddEnabledState) {
-	ASSERT(SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE);
+	ASSERT(CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 	state KeyRange keys = targetKeys;
 	state Future<Void> warningLogger = logWarningAfter("FinishMoveShardTooLong", 600, destinationTeam);
 	state int retries = 0;
@@ -1192,7 +1195,7 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 					wait(checkMoveKeysLock(&tr, lock, ddEnabledState));
 
 					state KeyRange currentKeys = KeyRangeRef(begin, keys.end);
-					if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+					if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 						Optional<Value> val = wait(tr.get(dataMoveKeyFor(dataMoveID)));
 						if (val.present()) {
 							dataMove = decodeDataMoveValue(val.get());
@@ -1246,7 +1249,7 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 					// Iterate through the beginning of keyServers until we find one that hasn't already been processed
 					int currentIndex;
 					for (currentIndex = 0; currentIndex < keyServers.size() - 1 && alreadyMoved; currentIndex++) {
-						if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+						if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 							decodeKeyServersValue(
 							    UIDtoTagMap, keyServers[currentIndex].value, src, dest, srcId, destId);
 							TraceEvent(SevDebug, "FinishMoveKeysProcessShard", relocationIntervalId)
@@ -1480,7 +1483,7 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 						// update keyServers, serverKeys
 						// SOMEDAY: Doing these in parallel is safe because none of them overlap or touch (one per
 						// server)
-						if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+						if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 							wait(krmSetRangeCoalescing(&tr,
 							                           keyServersPrefix,
 							                           currentKeys,
@@ -1495,7 +1498,7 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 						std::vector<Future<Void>> actors;
 						while (asi != allServers.end()) {
 							bool destHasServer = std::find(dest.begin(), dest.end(), *asi) != dest.end();
-							if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+							if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 								actors.push_back(krmSetRangeCoalescing(&tr,
 								                                       serverKeysPrefixFor(*asi),
 								                                       currentKeys,
@@ -1515,10 +1518,12 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 
 						wait(waitForAll(actors));
 
-						if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+						if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 							if (currentKeys.end == keys.end) {
-								for (const UID& ssID : dataMove.src) {
-									tr.clear(checkpointKeyRangeFor(ssID, dataMoveID));
+								if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+									for (const UID& ssID : dataMove.src) {
+										tr.clear(checkpointKeyRangeFor(ssID, dataMoveID));
+									}
 								}
 								tr.clear(dataMoveKeyFor(dataMoveID));
 								TraceEvent("CleanUpDataMoveCheckpoint", dataMoveID)
@@ -1767,7 +1772,7 @@ ACTOR Future<bool> canRemoveStorageServer(Reference<ReadYourWritesTransaction> t
 
 	// Return true if the entire range is false.  Since these values are coalesced, we can return false if there is more
 	// than one result
-	if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+	if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 		UID teamId;
 		bool assigned, emptyRange;
 		decodeServerKeysValue(keys[0].value, assigned, emptyRange, teamId);
@@ -1933,7 +1938,7 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 				state int i = 0;
 				for (; i < keyServers.size() - 1; ++i) {
 					state KeyValueRef it = keyServers[i];
-					if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+					if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 						decodeKeyServersValue(UIDtoTagMap, it.value, src, dest, srcId, destId);
 					} else {
 						decodeKeyServersValue(UIDtoTagMap, it.value, src, dest);
@@ -2012,7 +2017,7 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 						    .detail("Key", it.key)
 						    .detail("ValueSrc", describe(src))
 						    .detail("ValueDest", describe(dest));
-						if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+						if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 							tr.set(keyServersKey(it.key), keyServersValue(src, dest, srcId, destId));
 						} else {
 							tr.set(keyServersKey(it.key), keyServersValue(UIDtoTagMap, src, dest));
@@ -2024,7 +2029,7 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 				TraceEvent(SevDebug, "FailedServerSetRange", serverID)
 				    .detail("Begin", currentKeys.begin)
 				    .detail("End", currentKeys.end);
-				if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+				if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 					wait(krmSetRangeCoalescing(
 					    &tr, serverKeysPrefixFor(serverID), currentKeys, allKeys, serverKeysValue(UID())));
 				} else {
@@ -2136,17 +2141,15 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 					                           currentShards[i + 1].value);
 					std::vector<Future<Void>> actors;
 					for (const UID& ssId : dest) {
-						UID id;
-						if (std::find(src.begin(), src.end(), ssId) != src.end()) {
-							id = srcId;
+						if (std::find(src.begin(), src.end(), ssId) == src.end()) {
+							TraceEvent("CleanUpDataMoveDestRange", destId)
+							    .detail("DataMoveID", dataMoveID)
+							    .detail("Range", rangeIntersectKeys)
+							    .detail("DestServer", ssId);
+							// .detail("DestID", id);
+							actors.push_back(krmSetRangeCoalescing(
+							    tr, serverKeysPrefixFor(ssId), rangeIntersectKeys, allKeys, serverKeysValue(UID())));
 						}
-						TraceEvent("CleanUpDataMoveDestRange", dataMoveID)
-						    .detail("DataMoveID", dataMoveID)
-						    .detail("Range", rangeIntersectKeys)
-						    .detail("DestServer", ssId)
-						    .detail("DestID", id);
-						actors.push_back(krmSetRangeCoalescing(
-						    tr, serverKeysPrefixFor(ssId), rangeIntersectKeys, allKeys, serverKeysValue(id)));
 					}
 					wait(waitForAll(actors));
 				}
@@ -2233,7 +2236,7 @@ ACTOR Future<Void> moveKeys(Database cx,
 		state Future<Void> completionSignaller =
 		    checkFetchingState(cx, healthyDestinations, keys, dataMovementComplete, relocationIntervalId, tssMapping);
 
-		if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+		if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 			wait(finishMoveShard(cx,
 			                     keys,
 			                     dataMoveID,
@@ -2322,7 +2325,7 @@ void seedShardServers(Arena& arena, CommitTransactionRef& tr, std::vector<Storag
 	// to a specific
 	//   key (keyServersKeyServersKey)
 
-	if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+	if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 		const UID teamId = deterministicRandom()->randomUniqueID();
 		ksValue = keyServersValue(serverSrcUID, /*dest=*/std::vector<UID>(), teamId, UID());
 		krmSetPreviouslyEmptyRange(tr, arena, keyServersPrefix, KeyRangeRef(KeyRef(), allKeys.end), ksValue, Value());
