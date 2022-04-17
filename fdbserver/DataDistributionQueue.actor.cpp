@@ -1587,7 +1587,7 @@ ACTOR static Future<bool> rebalanceTeams(DDQueueData* self,
 	int64_t destBytes = destTeam->getLoadBytes();
 
 	bool sourceAndDestTooSimilar =
-	    sourceBytes - destBytes <= 3 * std::max<int64_t>(SERVER_KNOBS->MIN_SHARD_BYTES, metrics.bytes);
+	    abs(sourceBytes - destBytes) <= 3 * std::max<int64_t>(SERVER_KNOBS->MIN_SHARD_BYTES, metrics.bytes);
 	traceEvent->detail("SourceBytes", sourceBytes)
 	    .detail("DestBytes", destBytes)
 	    .detail("ShardBytes", metrics.bytes)
@@ -1668,7 +1668,7 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueueData* self, int teamCollectionIndex,
 
 		try {
 			// FIXME: change back to BG_REBALANCE_SWITCH_CHECK_INTERVAL after test
-			state Future<Void> delayF = delay(0.1, TaskPriority::DataDistributionLaunch);
+			state Future<Void> delayF = delay(rebalancePollingInterval, TaskPriority::DataDistributionLaunch);
 			if ((now() - lastRead) > SERVER_KNOBS->BG_REBALANCE_SWITCH_CHECK_INTERVAL) {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
@@ -2055,7 +2055,7 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 		// FIXME: Use BgDDLoadBalance for disk rebalance too after DD simulation test proof.
 		// balancingFutures.push_back(BgDDLoadRebalance(&self, i, SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM));
 		// balancingFutures.push_back(BgDDLoadRebalance(&self, i, SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM));
-		if (SERVER_KNOBS->READ_SAMPLING_ENABLED == true) {
+		if (SERVER_KNOBS->READ_SAMPLING_ENABLED) {
 			balancingFutures.push_back(
 			    BgDDLoadRebalance(&self, i, SERVER_KNOBS->PRIORITY_REBALANCE_READ_OVERUTIL_TEAM));
 			balancingFutures.push_back(

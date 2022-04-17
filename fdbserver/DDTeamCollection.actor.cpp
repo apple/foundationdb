@@ -5684,16 +5684,10 @@ public:
 
 		state GetTeamRequest req(wantsNewServers, wantsTrueBest, preferLowerUtilization, teamMustHaveShards);
 		req.completeSources = completeSources;
-		req.teamSorter = [](Reference<IDataDistributionTeam> a, Reference<IDataDistributionTeam> b) {
-			auto r1 = a->getLoadReadBandwidth(), r2 = b->getLoadReadBandwidth();
-			return r1 == r2 ? 0 : (r1 > r2 ? -1 : 1);
-		};
+		req.teamSorter = greaterReadLoad;
 
 		state GetTeamRequest reqHigh(wantsNewServers, wantsTrueBest, PreferLowerUtilization::False, teamMustHaveShards);
-		reqHigh.teamSorter = [](Reference<IDataDistributionTeam> a, Reference<IDataDistributionTeam> b) {
-			auto r1 = a->getLoadReadBandwidth(), r2 = b->getLoadReadBandwidth();
-			return r1 == r2 ? 0 : (r1 < r2 ? -1 : 1);
-		};
+		reqHigh.teamSorter = lessReadLoad;
 
 		wait(collection->getTeam(req) && collection->getTeam(reqHigh));
 		std::pair<Optional<Reference<IDataDistributionTeam>>, bool> resTeam = req.reply.getFuture().get(),

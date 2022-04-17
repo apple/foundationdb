@@ -481,6 +481,9 @@ struct StorageWiggler : ReferenceCounted<StorageWiggler> {
 
 ACTOR Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses(
     Transaction* tr);
-
+// return -1 if a.readload > b.readload
+int greaterReadLoad(Reference<IDataDistributionTeam> a, Reference<IDataDistributionTeam> b);
+// return -1 if a.readload < b.readload
+int lessReadLoad(Reference<IDataDistributionTeam> a, Reference<IDataDistributionTeam> b);
 #include "flow/unactorcompiler.h"
 #endif
