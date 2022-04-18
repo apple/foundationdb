@@ -40,7 +40,10 @@ FlowKnobs const* FLOW_KNOBS = &bootstrapGlobalFlowKnobs;
 void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( AUTOMATIC_TRACE_DUMP,                                  1 );
 	init( PREVENT_FAST_SPIN_DELAY,                             .01 );
-	init( HOSTNAME_RESOLVE_DELAY,                              .05 );
+	init( HOSTNAME_RESOLVE_INIT_INTERVAL,                      .05 );
+	init( HOSTNAME_RESOLVE_MAX_INTERVAL,                       1.0 );
+	init( HOSTNAME_RECONNECT_INIT_INTERVAL,                    .05 );
+	init( HOSTNAME_RECONNECT_MAX_INTERVAL,                     1.0 );
 	init( CACHE_REFRESH_INTERVAL_WHEN_ALL_ALTERNATIVES_FAILED, 1.0 );
 
 	init( DELAY_JITTER_OFFSET,                                 0.9 );
