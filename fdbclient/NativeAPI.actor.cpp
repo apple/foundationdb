@@ -6540,6 +6540,8 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 		if (value.get().size() != 33) {
 			throw invalid_option_value();
 		}
+		// TODO - Should this be AddParentOrLink
+		TEST(true); // Adding link in FDBTransactionOptions::SPAN_PARENT
 		span.addLink(BinaryReader::fromStringRef<SpanContext>(value.get(), IncludeVersion()));
 		break;
 

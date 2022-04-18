@@ -6978,12 +6978,14 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			} else if (rd.protocolVersion().hasSpanContext() && SpanContextMessage::isNextIn(rd)) {
 				SpanContextMessage scm;
 				rd >> scm;
+				TEST(true); // storageserveractor converting SpanContextMessage into OTEL SpanContext
 				spanContext =
 				    SpanContext(UID(scm.spanContext.first(), scm.spanContext.second()),
 				                0,
 				                scm.spanContext.first() != 0 && scm.spanContext.second() != 0 ? TraceFlags::sampled
 				                                                                              : TraceFlags::unsampled);
 			} else if (rd.protocolVersion().hasOTELSpanContext() && OTELSpanContextMessage::isNextIn(rd)) {
+				TEST(true); // storageserveractor reading OTELSpanContextMessage
 				OTELSpanContextMessage scm;
 				rd >> scm;
 				spanContext = scm.spanContext;

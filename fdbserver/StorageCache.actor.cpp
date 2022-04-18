@@ -1981,6 +1981,7 @@ ACTOR Future<Void> pullAsyncData(StorageCacheData* data) {
 					SpanContextMessage scm;
 					reader >> scm;
 				} else if (reader.protocolVersion().hasOTELSpanContext() && OTELSpanContextMessage::isNextIn(reader)) {
+					TEST(true); // StorageCache reading OTELSpanContextMessage
 					OTELSpanContextMessage oscm;
 					reader >> oscm;
 				} else {
