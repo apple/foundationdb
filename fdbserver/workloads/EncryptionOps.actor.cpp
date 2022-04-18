@@ -209,6 +209,28 @@ struct EncryptionOpsWorkload : TestWorkload {
 		TraceEvent("UpdateBaseCipher").detail("DomainId", encryptDomainId).detail("BaseCipherId", *nextBaseCipherId);
 	}
 
+	Reference<BlobCipherKey> getEncryptionKey(const EncryptCipherDomainId& domainId,
+	                                          const EncryptCipherBaseKeyId& baseCipherId) {
+		const bool simCacheMiss = deterministicRandom()->randomInt(1, 100) < 15;
+
+		Reference<BlobCipherKeyCache> cipherKeyCache = BlobCipherKeyCache::getInstance();
+		Reference<BlobCipherKey> cipherKey = cipherKeyCache->getCipherKey(domainId, baseCipherId);
+
+		if (simCacheMiss) {
+			TraceEvent("SimKeyCacheMiss").detail("EncyrptDomainId", domainId).detail("BaseCipherId", baseCipherId);
+			// simulate KeyCache miss that may happen during decryption; insert a CipherKey with known 'salt'
+			cipherKeyCache->insertCipherKey(domainId,
+			                                baseCipherId,
+			                                cipherKey->rawBaseCipher(),
+			                                cipherKey->getBaseCipherLen(),
+			                                cipherKey->getSalt());
+			// Ensure the update was a NOP
+			Reference<BlobCipherKey> cKey = cipherKeyCache->getCipherKey(domainId, baseCipherId);
+			ASSERT(cKey->isEqual(cipherKey));
+		}
+		return cipherKey;
+	}
+
 	Reference<EncryptBuf> doEncryption(Reference<BlobCipherKey> textCipherKey,
 	                                   Reference<BlobCipherKey> headerCipherKey,
 	                                   uint8_t* payload,
@@ -240,11 +262,10 @@ struct EncryptionOpsWorkload : TestWorkload {
 		ASSERT_EQ(header.flags.headerVersion, EncryptBlobCipherAes265Ctr::ENCRYPT_HEADER_VERSION);
 		ASSERT_EQ(header.flags.encryptMode, ENCRYPT_CIPHER_MODE_AES_256_CTR);
 
-		Reference<BlobCipherKeyCache> cipherKeyCache = BlobCipherKeyCache::getInstance();
-		Reference<BlobCipherKey> cipherKey = cipherKeyCache->getCipherKey(header.cipherTextDetails.encryptDomainId,
-		                                                                  header.cipherTextDetails.baseCipherId);
-		Reference<BlobCipherKey> headerCipherKey = cipherKeyCache->getCipherKey(
-		    header.cipherHeaderDetails.encryptDomainId, header.cipherHeaderDetails.baseCipherId);
+		Reference<BlobCipherKey> cipherKey =
+		    getEncryptionKey(header.cipherTextDetails.encryptDomainId, header.cipherTextDetails.baseCipherId);
+		Reference<BlobCipherKey> headerCipherKey =
+		    getEncryptionKey(header.cipherHeaderDetails.encryptDomainId, header.cipherHeaderDetails.baseCipherId);
 		ASSERT(cipherKey.isValid());
 		ASSERT(cipherKey->isEqual(orgCipherKey));
 

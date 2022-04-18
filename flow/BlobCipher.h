@@ -82,11 +82,11 @@ private:
 // This header is persisted along with encrypted buffer, it contains information necessary
 // to assist decrypting the buffers to serve read requests.
 //
-// The total space overhead is 96 bytes.
+// The total space overhead is 104 bytes.
 
 #pragma pack(push, 1) // exact fit - no padding
 typedef struct BlobCipherEncryptHeader {
-	static constexpr int headerSize = 96;
+	static constexpr int headerSize = 104;
 	union {
 		struct {
 			uint8_t size; // reading first byte is sufficient to determine header
@@ -101,7 +101,7 @@ typedef struct BlobCipherEncryptHeader {
 
 	// Cipher text encryption information
 	struct {
-		// Encyrption domain boundary identifier.
+		// Encryption domain boundary identifier.
 		EncryptCipherDomainId encryptDomainId{};
 		// BaseCipher encryption key identifier
 		EncryptCipherBaseKeyId baseCipherId{};
@@ -116,6 +116,8 @@ typedef struct BlobCipherEncryptHeader {
 		EncryptCipherDomainId encryptDomainId{};
 		// BaseCipher encryption key identifier.
 		EncryptCipherBaseKeyId baseCipherId{};
+		// Random salt
+		EncryptCipherRandomSalt salt{};
 	} cipherHeaderDetails;
 
 	// Encryption header is stored as plaintext on a persistent storage to assist reconstruction of cipher-key(s) for
@@ -164,6 +166,11 @@ public:
 	              const EncryptCipherBaseKeyId& baseCiphId,
 	              const uint8_t* baseCiph,
 	              int baseCiphLen);
+	BlobCipherKey(const EncryptCipherDomainId& domainId,
+	              const EncryptCipherBaseKeyId& baseCiphId,
+	              const uint8_t* baseCiph,
+	              int baseCiphLen,
+	              const EncryptCipherRandomSalt& salt);
 
 	uint8_t* data() const { return cipher.get(); }
 	uint64_t getCreationTime() const { return creationTime; }
@@ -249,8 +256,26 @@ public:
 	// Given cipherKeys are immutable, attempting to re-insert same 'identical' cipherKey
 	// is treated as a NOP (success), however, an attempt to update cipherKey would throw
 	// 'encrypt_update_cipher' exception.
+	//
+	// API NOTE: Recommended usecase is to update encryption cipher-key is updated the external
+	// keyManagementSolution to limit an encryption key lifetime
 
 	void insertBaseCipherKey(EncryptCipherBaseKeyId baseCipherId, const uint8_t* baseCipher, int baseCipherLen);
+
+	// API enables inserting base encryption cipher details to the BlobCipherKeyIdCache
+	// Given cipherKeys are immutable, attempting to re-insert same 'identical' cipherKey
+	// is treated as a NOP (success), however, an attempt to update cipherKey would throw
+	// 'encrypt_update_cipher' exception.
+	//
+	// API NOTE: Recommended usecase is to update encryption cipher-key regeneration while performing
+	// decryption. The encryptionheader would contain relevant details including: 'encryptDomainId',
+	// 'baseCipherId' & 'salt'. The caller needs to fetch 'baseCipherKey' detail and re-populate KeyCache.
+	// Also, the invocation will NOT update the latest cipher-key details.
+
+	void insertBaseCipherKey(EncryptCipherBaseKeyId baseCipherId,
+	                         const uint8_t* baseCipher,
+	                         int baseCipherLen,
+	                         const EncryptCipherRandomSalt& salt);
 
 	// API cleanup the cache by dropping all cached cipherKeys
 	void cleanup();
@@ -277,12 +302,32 @@ public:
 	// The cipherKeys are indexed using 'baseCipherId', given cipherKeys are immutable,
 	// attempting to re-insert same 'identical' cipherKey is treated as a NOP (success),
 	// however, an attempt to update cipherKey would throw 'encrypt_update_cipher' exception.
+	//
+	// API NOTE: Recommended usecase is to update encryption cipher-key is updated the external
+	// keyManagementSolution to limit an encryption key lifetime
 
 	void insertCipherKey(const EncryptCipherDomainId& domainId,
 	                     const EncryptCipherBaseKeyId& baseCipherId,
 	                     const uint8_t* baseCipher,
 	                     int baseCipherLen);
-	// API returns the last insert cipherKey for a given encyryption domain Id.
+
+	// Enable clients to insert base encryption cipher details to the BlobCipherKeyCache.
+	// The cipherKeys are indexed using 'baseCipherId', given cipherKeys are immutable,
+	// attempting to re-insert same 'identical' cipherKey is treated as a NOP (success),
+	// however, an attempt to update cipherKey would throw 'encrypt_update_cipher' exception.
+	//
+	// API NOTE: Recommended usecase is to update encryption cipher-key regeneration while performing
+	// decryption. The encryptionheader would contain relevant details including: 'encryptDomainId',
+	// 'baseCipherId' & 'salt'. The caller needs to fetch 'baseCipherKey' detail and re-populate KeyCache.
+	// Also, the invocation will NOT update the latest cipher-key details.
+
+	void insertCipherKey(const EncryptCipherDomainId& domainId,
+	                     const EncryptCipherBaseKeyId& baseCipherId,
+	                     const uint8_t* baseCipher,
+	                     int baseCipherLen,
+	                     const EncryptCipherRandomSalt& salt);
+
+	// API returns the last insert cipherKey for a given encryption domain Id.
 	// If none exists, it would throw 'encrypt_key_not_found' exception.
 
 	Reference<BlobCipherKey> getLatestCipherKey(const EncryptCipherDomainId& domainId);
@@ -298,7 +343,7 @@ public:
 	// API enables dropping all 'cached' cipherKeys for a given encryption domain Id.
 	// Useful to cleanup cache if an encryption domain gets removed/destroyed etc.
 
-	void resetEncyrptDomainId(const EncryptCipherDomainId domainId);
+	void resetEncryptDomainId(const EncryptCipherDomainId domainId);
 
 	static Reference<BlobCipherKeyCache> getInstance() {
 		if (g_network->isSimulated()) {
@@ -364,7 +409,7 @@ public:
 	                              const BlobCipherEncryptHeader& header,
 	                              Arena&);
 
-	// Enable caller to validate encryption header auth-token (if available) without needing to read the full encyrpted
+	// Enable caller to validate encryption header auth-token (if available) without needing to read the full encrypted
 	// payload. The call is NOP unless header.flags.authTokenMode == ENCRYPT_HEADER_AUTH_TOKEN_MODE_MULTI.
 
 	void verifyHeaderAuthToken(const BlobCipherEncryptHeader& header, Arena& arena);
