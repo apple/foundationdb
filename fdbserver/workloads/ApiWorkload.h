@@ -80,7 +80,7 @@ struct TransactionWrapper : public ReferenceCounted<TransactionWrapper> {
 	// Gets the version vector cached in a transaction
 	virtual VersionVector getVersionVector() = 0;
 
-	// Gets the spanID of a transaction
+	// Gets the spanContext of a transaction
 	virtual SpanContext getSpanContext() = 0;
 
 	// Prints debugging messages for a transaction; not implemented for all transaction types
@@ -229,7 +229,7 @@ struct ThreadTransactionWrapper : public TransactionWrapper {
 	// Gets the version vector cached in a transaction
 	VersionVector getVersionVector() override { return transaction->getVersionVector(); }
 
-	// Gets the spanID of a transaction
+	// Gets the spanContext of a transaction
 	SpanContext getSpanContext() override { return transaction->getSpanContext(); }
 
 	void addReadConflictRange(KeyRangeRef const& keys) override { transaction->addReadConflictRange(keys); }

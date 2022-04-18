@@ -1398,8 +1398,7 @@ void updateProcessStats(StorageServer* self) {
 #endif
 
 ACTOR Future<Version> waitForVersionActor(StorageServer* data, Version version, SpanContext spanContext) {
-	// TODO ljoswiak, link or parent?
-	state Span span("SS.WaitForVersion"_loc, { spanContext });
+	state Span span("SS.WaitForVersion"_loc, spanContext);
 	choose {
 		when(wait(data->version.whenAtLeast(version))) {
 			// FIXME: A bunch of these can block with or without the following delay 0.
@@ -1781,8 +1780,7 @@ ACTOR Future<Void> watchValueSendReply(StorageServer* data,
                                        WatchValueRequest req,
                                        Future<Version> resp,
                                        SpanContext spanContext) {
-	// TODO - ljoswiak, link or parent?
-	state Span span("SS:watchValue"_loc, { spanContext });
+	state Span span("SS:watchValue"_loc, spanContext);
 	state double startTime = now();
 	++data->counters.watchQueries;
 	++data->numWatches;

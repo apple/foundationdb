@@ -654,7 +654,6 @@ void CommitBatchContext::setupTraceBatch() {
 
 			g_traceBatch.addAttach("CommitAttachID", tr.debugID.get().first(), debugID.get().first());
 		}
-		// TODO - ljoswiak OK to add link here rather than parent? RE: addParent side effect
 		span.addLink(tr.spanContext);
 	}
 
@@ -1301,8 +1300,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 			// simulation
 			TEST(true); // Semi-committed pipeline limited by MVCC window
 			//TraceEvent("ProxyWaitingForCommitted", pProxyCommitData->dbgid).detail("CommittedVersion", pProxyCommitData->committedVersion.get()).detail("NeedToCommit", commitVersion);
-			// TODO - ljoswiak parent or link?
-			waitVersionSpan = Span("MP:overMaxReadTransactionLifeVersions"_loc, { span.context });
+			waitVersionSpan = Span("MP:overMaxReadTransactionLifeVersions"_loc, span.context);
 			choose {
 				when(wait(pProxyCommitData->committedVersion.whenAtLeast(
 				    self->commitVersion - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS))) {

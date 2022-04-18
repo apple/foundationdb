@@ -274,7 +274,6 @@ struct ITracer {
 	virtual ~ITracer();
 	virtual TracerType type() const = 0;
 	// passed ownership to the tracer
-	// virtual void trace(Span const& span) = 0;
 	virtual void trace(Span const& span) = 0;
 };
 
