@@ -1099,7 +1099,7 @@ void haltRegisteringOrCurrentSingleton(ClusterControllerData* self,
 
 void registerWorker(RegisterWorkerRequest req,
                     ClusterControllerData* self,
-                    std::unordered_set<NetworkAddress> coordinatorAddresses,
+                    std::vector<NetworkAddress> coordinatorAddresses,
                     ConfigBroadcaster* configBroadcaster) {
 	const WorkerInterface& w = req.wi;
 	ProcessClass newProcessClass = req.processClass;
@@ -1107,8 +1107,11 @@ void registerWorker(RegisterWorkerRequest req,
 	ClusterControllerPriorityInfo newPriorityInfo = req.priorityInfo;
 	newPriorityInfo.processClassFitness = newProcessClass.machineClassFitness(ProcessClass::ClusterController);
 	bool isCoordinator =
-	    (coordinatorAddresses.count(req.wi.address()) > 0) ||
-	    (req.wi.secondaryAddress().present() && coordinatorAddresses.count(req.wi.secondaryAddress().get()) > 0);
+	    (std::find(coordinatorAddresses.begin(), coordinatorAddresses.end(), req.wi.address()) !=
+	     coordinatorAddresses.end()) ||
+	    (req.wi.secondaryAddress().present() &&
+	     std::find(coordinatorAddresses.begin(), coordinatorAddresses.end(), req.wi.secondaryAddress().get()) !=
+	         coordinatorAddresses.end());
 
 	for (auto it : req.incompatiblePeers) {
 		self->db.incompatibleConnections[it] = now() + SERVER_KNOBS->INCOMPATIBLE_PEERS_LOGGING_INTERVAL;
@@ -2544,23 +2547,8 @@ ACTOR Future<Void> clusterControllerCore(Reference<IClusterConnectionRecord> con
 		}
 		when(state RegisterWorkerRequest req = waitNext(interf.registerWorker.getFuture())) {
 			++self.registerWorkerRequests;
-			state ClusterConnectionString ccs = coordinators.ccr->getConnectionString();
-
-			state std::unordered_set<NetworkAddress> coordinatorAddresses;
-			std::vector<Future<Void>> fs;
-			for (auto& hostname : ccs.hostnames) {
-				fs.push_back(map(hostname.resolve(), [&](Optional<NetworkAddress> const& addr) -> Void {
-					if (addr.present()) {
-						coordinatorAddresses.insert(addr.get());
-					}
-					return Void();
-				}));
-			}
-			wait(waitForAll(fs));
-
-			for (const auto& coord : ccs.coordinators()) {
-				coordinatorAddresses.insert(coord);
-			}
+			ClusterConnectionString ccs = coordinators.ccr->getConnectionString();
+			state std::vector<NetworkAddress> coordinatorAddresses = wait(ccs.tryResolveHostnames());
 
 			registerWorker(req,
 			               &self,
