@@ -160,7 +160,6 @@ struct SSCheckpointWorkload : TestWorkload {
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 				state RangeResult res = wait(tr.getRange(KeyRangeRef(key, endKey), CLIENT_KNOBS->TOO_MANY));
 				break;
 			} catch (Error& e) {
@@ -186,7 +185,6 @@ struct SSCheckpointWorkload : TestWorkload {
 
 		loop {
 			try {
-				tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 				state Optional<Value> res = wait(timeoutError(tr.get(key), 30.0));
 				const bool equal = !expectedValue.isError() && res == expectedValue.get();
 				if (!equal) {
@@ -209,7 +207,6 @@ struct SSCheckpointWorkload : TestWorkload {
 		state Version version;
 		loop {
 			try {
-				tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 				if (value.present()) {
 					tr.set(key, value.get());
 				} else {

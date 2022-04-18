@@ -143,7 +143,7 @@ ACTOR static Future<Void> extractClientInfo(Reference<AsyncVar<ServerDBInfo> con
 	loop {
 		ClientDBInfo ni = db->get().client;
 		shrinkProxyList(ni, lastCommitProxyUIDs, lastCommitProxies, lastGrvProxyUIDs, lastGrvProxies);
-		info->set(ni);
+		info->setUnconditional(ni);
 		wait(db->onChange());
 	}
 }

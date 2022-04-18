@@ -32,7 +32,33 @@ ApiWorkload::ApiWorkload(const WorkloadConfig& config) : WorkloadBase(config) {
 	maxKeysPerTransaction = config.getIntOption("maxKeysPerTransaction", 50);
 	initialSize = config.getIntOption("initialSize", 1000);
 	readExistingKeysRatio = config.getFloatOption("readExistingKeysRatio", 0.9);
+	runUntilStop = config.getBoolOption("runUntilStop", false);
+	numRandomOperations = config.getIntOption("numRandomOperations", 1000);
+	numOperationsForProgressCheck = config.getIntOption("numOperationsForProgressCheck", 10);
 	keyPrefix = fmt::format("{}/", workloadId);
+	numRandomOpLeft = 0;
+	stopReceived = false;
+	checkingProgress = false;
+	apiVersion = config.apiVersion;
+}
+
+IWorkloadControlIfc* ApiWorkload::getControlIfc() {
+	if (runUntilStop) {
+		return this;
+	} else {
+		return nullptr;
+	}
+}
+
+void ApiWorkload::stop() {
+	ASSERT(runUntilStop);
+	stopReceived = true;
+}
+
+void ApiWorkload::checkProgress() {
+	ASSERT(runUntilStop);
+	numRandomOpLeft = numOperationsForProgressCheck;
+	checkingProgress = true;
 }
 
 void ApiWorkload::start() {
@@ -46,6 +72,37 @@ void ApiWorkload::start() {
 			});
 		});
 	});
+}
+
+void ApiWorkload::runTests() {
+	if (!runUntilStop) {
+		numRandomOpLeft = numRandomOperations;
+	}
+	randomOperations();
+}
+
+void ApiWorkload::randomOperations() {
+	if (runUntilStop) {
+		if (stopReceived)
+			return;
+		if (checkingProgress) {
+			int numLeft = numRandomOpLeft--;
+			if (numLeft == 0) {
+				checkingProgress = false;
+				confirmProgress();
+			}
+		}
+	} else {
+		int numLeft = numRandomOpLeft--;
+		if (numLeft == 0)
+			return;
+	}
+	randomOperation([this]() { randomOperations(); });
+}
+
+void ApiWorkload::randomOperation(TTaskFct cont) {
+	// Must be overridden if used
+	ASSERT(false);
 }
 
 std::string ApiWorkload::randomKeyName() {
