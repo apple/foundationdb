@@ -31,7 +31,7 @@
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/RatekeeperInterface.h"
-#include "fdbserver/ConsistencyCheckerInterface.h"
+#include "fdbserver/ConsistencyScanInterface.h"
 #include "fdbserver/BlobManagerInterface.h"
 #include "fdbserver/ResolverInterface.h"
 #include "fdbclient/BlobWorkerInterface.h"
@@ -56,9 +56,9 @@ struct WorkerInterface {
 	RequestStream<struct InitializeGrvProxyRequest> grvProxy;
 	RequestStream<struct InitializeDataDistributorRequest> dataDistributor;
 	RequestStream<struct InitializeRatekeeperRequest> ratekeeper;
-	RequestStream<struct InitializeConsistencyCheckerRequest> consistencyChecker;
 	RequestStream<struct InitializeBlobManagerRequest> blobManager;
 	RequestStream<struct InitializeBlobWorkerRequest> blobWorker;
+	RequestStream<struct InitializeConsistencyScanRequest> consistencyScan;
 	RequestStream<struct InitializeResolverRequest> resolver;
 	RequestStream<struct InitializeStorageRequest> storage;
 	RequestStream<struct InitializeLogRouterRequest> logRouter;
@@ -113,9 +113,9 @@ struct WorkerInterface {
 		           grvProxy,
 		           dataDistributor,
 		           ratekeeper,
-		           consistencyChecker,
 		           blobManager,
 		           blobWorker,
+		           consistencyScan,
 		           resolver,
 		           storage,
 		           logRouter,
@@ -432,7 +432,7 @@ struct RegisterWorkerRequest {
 	Optional<RatekeeperInterface> ratekeeperInterf;
 	Optional<BlobManagerInterface> blobManagerInterf;
 	Optional<EncryptKeyProxyInterface> encryptKeyProxyInterf;
-	Optional<ConsistencyCheckerInterface> consistencyCheckerInterf;
+	Optional<ConsistencyScanInterface> consistencyScanInterf;
 	Standalone<VectorRef<StringRef>> issues;
 	std::vector<NetworkAddress> incompatiblePeers;
 	ReplyPromise<RegisterWorkerReply> reply;
@@ -452,13 +452,13 @@ struct RegisterWorkerRequest {
 	                      Optional<RatekeeperInterface> rkInterf,
 	                      Optional<BlobManagerInterface> bmInterf,
 	                      Optional<EncryptKeyProxyInterface> ekpInterf,
-	                      Optional<ConsistencyCheckerInterface> ckInterf,
+	                      Optional<ConsistencyScanInterface> csInterf,
 	                      bool degraded,
 	                      Version lastSeenKnobVersion,
 	                      ConfigClassSet knobConfigClassSet)
 	  : wi(wi), initialClass(initialClass), processClass(processClass), priorityInfo(priorityInfo),
 	    generation(generation), distributorInterf(ddInterf), ratekeeperInterf(rkInterf), blobManagerInterf(bmInterf),
-	    encryptKeyProxyInterf(ekpInterf), consistencyCheckerInterf(ckInterf), degraded(degraded),
+	    encryptKeyProxyInterf(ekpInterf), consistencyScanInterf(csInterf), degraded(degraded),
 	    lastSeenKnobVersion(lastSeenKnobVersion), knobConfigClassSet(knobConfigClassSet), requestDbInfo(false) {}
 
 	template <class Ar>
@@ -471,9 +471,9 @@ struct RegisterWorkerRequest {
 		           generation,
 		           distributorInterf,
 		           ratekeeperInterf,
-		           consistencyCheckerInterf,
 		           blobManagerInterf,
 		           encryptKeyProxyInterf,
+		           consistencyScanInterf,
 		           issues,
 		           incompatiblePeers,
 		           reply,
@@ -726,20 +726,23 @@ struct InitializeRatekeeperRequest {
 	}
 };
 
-struct InitializeConsistencyCheckerRequest {
+struct InitializeConsistencyScanRequest {
 	constexpr static FileIdentifier file_identifier = 3104275;
 	UID reqId;
-	int64_t restart;
-	double maxRate;
-	double targetInterval;
-	ReplyPromise<ConsistencyCheckerInterface> reply;
+	//int64_t restart;
+	//double maxRate;
+	//double targetInterval;
+	//KeyRef progressKey;
+	ReplyPromise<ConsistencyScanInterface> reply;
 
-	InitializeConsistencyCheckerRequest() {}
-	explicit InitializeConsistencyCheckerRequest(UID uid, int64_t restart, double maxRate, double targetInterval)
-	  : reqId(uid), restart(restart), maxRate(maxRate), targetInterval(targetInterval) {}
+	InitializeConsistencyScanRequest() {}
+	explicit InitializeConsistencyScanRequest(UID uid) : reqId(uid) {}
+	//explicit InitializeConsistencyScanRequest(UID uid, int64_t restart, double maxRate, double targetInterval, KeyRef progressKey)
+	//	: reqId(uid), restart(restart), maxRate(maxRate), targetInterval(targetInterval), progressKey(progressKey) {}
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, reqId, restart, maxRate, targetInterval, reply);
+		serializer(ar, reqId, reply);
+		//serializer(ar, reqId, restart, maxRate, targetInterval, reply);
 	}
 };
 
@@ -1001,7 +1004,7 @@ struct Role {
 	static const Role COORDINATOR;
 	static const Role BACKUP;
 	static const Role ENCRYPT_KEY_PROXY;
-	static const Role CONSISTENCYCHECKER;
+	static const Role CONSISTENCYSCAN;
 
 	std::string roleName;
 	std::string abbreviation;
@@ -1041,8 +1044,8 @@ struct Role {
 			return ENCRYPT_KEY_PROXY;
 		case ProcessClass::Worker:
 			return WORKER;
-		case ProcessClass::ConsistencyChecker:
-			return CONSISTENCYCHECKER;
+		case ProcessClass::ConsistencyScan:
+			return CONSISTENCYSCAN;
 		case ProcessClass::NoRole:
 		default:
 			ASSERT(false);
@@ -1158,12 +1161,13 @@ ACTOR Future<Void> logRouter(TLogInterface interf,
                              Reference<AsyncVar<ServerDBInfo> const> db);
 ACTOR Future<Void> dataDistributor(DataDistributorInterface ddi, Reference<AsyncVar<ServerDBInfo> const> db);
 ACTOR Future<Void> ratekeeper(RatekeeperInterface rki, Reference<AsyncVar<ServerDBInfo> const> db);
-ACTOR Future<Void> consistencyChecker(ConsistencyCheckerInterface ckInterf,
-                                      Reference<AsyncVar<ServerDBInfo> const> dbInfo,
-                                      int64_t restart,
-                                      double maxRate,
-                                      double targetInterval,
-                                      Reference<IClusterConnectionRecord> connRecord);
+ACTOR Future<Void> consistencyScan(ConsistencyScanInterface csInterf,
+								   Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+								   //int64_t restart,
+								   //double maxRate,
+								   //double targetInterval,
+								   //KeyRef progressKey,
+								   Reference<IClusterConnectionRecord> connRecord);
 ACTOR Future<Void> blobManager(BlobManagerInterface bmi, Reference<AsyncVar<ServerDBInfo> const> db, int64_t epoch);
 ACTOR Future<Void> storageCacheServer(StorageServerInterface interf,
                                       uint16_t id,

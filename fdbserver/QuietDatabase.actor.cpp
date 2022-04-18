@@ -669,15 +669,16 @@ ACTOR Future<Void> waitForQuietDatabase(Database cx,
 	if (g_network->isSimulated())
 		wait(delay(5.0));
 
-	TraceEvent("QuietDatabaseWaitingOnFullRecovery").log();
-	while (dbInfo->get().recoveryState != RecoveryState::FULLY_RECOVERED) {
-		TraceEvent("QuietDatabaseWaitingOnRecovery").detail("State", dbInfo->get().recoveryState);
-		wait(delay(10.0));
-	}
-	TraceEvent("QuietDatabaseDoneWaitingOnRecovery").detail("State", dbInfo->get().recoveryState);
+	//TraceEvent("QuietDatabaseWaitingOnFullRecovery").log();
+	TraceEvent("QuietDatabaseWaitingOnRecovery").detail("State", dbInfo->get().recoveryState);
+	//while (dbInfo->get().recoveryState != RecoveryState::FULLY_RECOVERED) {
+	//	TraceEvent("QuietDatabaseWaitingOnRecovery").detail("State", dbInfo->get().recoveryState);
+	//	wait(delay(10.0));
+	//}
 	while (dbInfo->get().recoveryState != RecoveryState::FULLY_RECOVERED) {
 		wait(dbInfo->onChange());
 	}
+	TraceEvent("QuietDatabaseRecovered").detail("State", dbInfo->get().recoveryState);
 
 	// The quiet database check (which runs at the end of every test) will always time out due to active data movement.
 	// To get around this, quiet Database will disable the perpetual wiggle in the setup phase.

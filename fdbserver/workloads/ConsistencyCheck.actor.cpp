@@ -85,10 +85,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 	// Restart from the beginning if true, else try to resume based on the progress key saved during previous run
 	int restart;
-	//double maxRate;
-	//double targetInterval;
 	int maxRate;
 	int targetInterval;
+	KeyRef progressKey;
 
 	bool success;
 
@@ -117,6 +116,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		restart = getOption(options, LiteralStringRef("restart"), 1);
 		maxRate = getOption(options, LiteralStringRef("maxRate"), 0);
 		targetInterval = getOption(options, LiteralStringRef("targetInterval"), 0);
+		progressKey = getOption(options, KeyRef(LiteralStringRef("progressKey")), (KeyRef()));
 		suspendConsistencyCheck.set(true);
 
 		success = true;
@@ -197,6 +197,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 	ACTOR Future<Void> _start(Database cx, ConsistencyCheckWorkload* self) {
 		loop {
+			TraceEvent("ConsistencyCheck_Starting").log();
 			while (self->suspendConsistencyCheck.get()) {
 				TraceEvent("ConsistencyCheck_Suspended").log();
 				wait(self->suspendConsistencyCheck.onChange());
@@ -1154,16 +1155,24 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<Void> setConsistencyCheckProgress(Database cx, Key key) {
-		state ReadYourWritesTransaction tr(cx);
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 		loop {
 			try {
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				tr.set(consistencyCheckProgressKey, key);
-				wait(tr.commit());
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				state Optional<Value> val = wait(ConsistencyScanInfo::getInfo(tr));
+				if (!val.present()) {
+					//TODO: shouldn't happen
+					TraceEvent("ConsistencyScanInfoEmpty").log();
+					return Void();
+				}
+				ConsistencyScanInfo consistencyScanInfo = ObjectReader::fromStringRef<ConsistencyScanInfo>(val.get(), IncludeVersion());
+				consistencyScanInfo.progress_key = key;
+				wait(ConsistencyScanInfo::setInfo(tr, consistencyScanInfo));
+				wait(tr->commit());
 				return Void();
 			} catch (Error& e) {
-				wait(tr.onError(e));
+				wait(tr->onError(e));
 			}
 		}
 	}
@@ -1187,13 +1196,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		state int i = self->clientId * (self->shardSampleFactor + 1);
 		state int increment =
 		    (self->distributed && !self->firstClient) ? effectiveClientCount * self->shardSampleFactor : 1;
-		TraceEvent("ConsistencyCheck_DeteremineRateLimitForThisRound").detail("MaxRate", self->maxRate).
-			detail("RateLimitMax", self->rateLimitMax).
-			detail("TargetInterval", self->targetInterval).
-			detail("BytesReadInPreviousRound", self->bytesReadInPreviousRound);
 		// Honor self->maxRate and self->targetInterval if specified
-		//state int maxRate = self->maxRate ? self->maxRate : self->rateLimitMax;
-		state int maxRate = self->rateLimitMax;
+		state int maxRate = self->maxRate ? self->maxRate : self->rateLimitMax;
 		state int targetInterval = self->targetInterval
 		                               ? self->targetInterval
 		                               : CLIENT_KNOBS->CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME;
@@ -1207,7 +1211,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		state double rateLimiterStartTime = now();
 		state int64_t bytesReadInthisRound = 0;
 		state bool resume = !(self->restart || self->shuffleShards);
-		state KeyRef prevReadKey;
 
 		state double dbSize = 100e12;
 		if (g_network->isSimulated()) {
@@ -1216,26 +1219,27 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			dbSize = _dbSize;
 		}
 
-		// TODO: NEELAM: See if we remembered progress from a previous run
-		if (resume) {
-			TraceEvent("ConsistencyCheck_Resuming").log();
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			Optional<Value> value = wait(tr.get(consistencyCheckProgressKey));
-			if (value.present()) {
-				prevReadKey = value.get();
-				TraceEvent("ConsistencyCheck_ResumingAt").detail("Key", prevReadKey.toString());
-			}
-		}
+		// TODO: NEELAM: Enable this when the rest works
+		// See if we remembered progress from a previous run
+		//if (resume) {
+		//	TraceEvent("ConsistencyCheck_Resuming").log();
+		//	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		//	Optional<Value> value = wait(tr.get(consistencyCheckProgressKey));
+		//	if (value.present()) {
+		//		prevReadKey = value.get();
+		//		TraceEvent("ConsistencyCheck_ResumingAt").detail("Key", prevReadKey.toString());
+		//	}
+		//}
 
 		state std::vector<KeyRangeRef> ranges;
 
 		for (int k = 0; k < keyLocations.size() - 1; k++) {
 			// TODO: NEELAM: check if this is sufficient
-			if (resume && keyLocations[k].key < prevReadKey) {
+			if (resume && keyLocations[k].key < self->progressKey) {
 				TraceEvent("ConsistencyCheck_SkippingRange")
 				    .detail("KeyBegin", keyLocations[k].key.toString())
 				    .detail("KeyEnd", keyLocations[k + 1].key.toString())
-				    .detail("PrevKey", prevReadKey.toString());
+				    .detail("PrevKey", self->progressKey.toString());
 				continue;
 			}
 			KeyRangeRef range(keyLocations[k].key, keyLocations[k + 1].key);
@@ -1382,7 +1386,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 						// Get the min version of the storage servers
 						Version version = wait(self->getVersion(cx, self));
 
-						state GetKeyValuesStreamRequest req;
+						state GetKeyValuesRequest req;
 						req.begin = begin;
 						req.end = firstGreaterOrEqual(range.end);
 						req.limit = 1e4;
@@ -1391,79 +1395,43 @@ struct ConsistencyCheckWorkload : TestWorkload {
 						req.tags = TagSet();
 
 						// Try getting the entries in the specified range
-						state std::vector<FutureStream<GetKeyValuesStreamReply>> keyValueFutures;
+						state std::vector<Future<ErrorOr<GetKeyValuesReply>>> keyValueFutures;
 						state int j = 0;
 						TraceEvent("ConsistencyCheck_StoringGetFutures")
 						    .detail("SSISize", storageServerInterfaces.size());
+						for (j = 0; j < storageServerInterfaces.size(); j++) {
+							resetReply(req);
+							keyValueFutures.push_back(
+							  storageServerInterfaces[j].getKeyValues.getReplyUnlessFailedFor(req, 2, 0));
+						}
+
+						wait(waitForAll(keyValueFutures));
 
 						// Read the resulting entries
 						state int firstValidServer = -1;
-						state GetKeyValuesStreamReply reference;
 						totalReadAmount = 0;
 						for (j = 0; j < storageServerInterfaces.size(); j++) {
-							state GetKeyValuesStreamReply current;
-							try {
-								TraceEvent("ConsistencyCheck_GetKeyValuesStream").detail("Iter", j);
-								resetReply(req);
-								GetKeyValuesStreamReply _current = waitNext(
-								    storageServerInterfaces[j].getKeyValuesStream.getReplyStream(req).getFuture());
-								TraceEvent("ConsistencyCheck_GetKeyValuesStream")
-								    .detail("DataSize", _current.data.size())
-								    .detail("More", _current.more)
-								    .detail("CurShardBegin", req.begin.getKey())
-								    .detail(format("StorageServer%d", j).c_str(), storageServers[j].toString());
-								current = _current;
-							} catch (Error& e) {
-								if (e.code() != error_code_end_of_stream ||
-								    e.code() == error_code_operation_cancelled) {
-									// If the data is not available and we aren't relocating this shard
-									if (!isRelocating) {
-										printf("Error %d - %s\n", e.code(), e.name());
-										TraceEvent("ConsistencyCheck_StorageServerUnavailable")
-										    .errorUnsuppressed(e)
-										    .suppressFor(1.0)
-										    .detail("StorageServer", storageServers[j])
-										    .detail("ShardBegin", printable(range.begin))
-										    .detail("ShardEnd", printable(range.end))
-										    .detail("Address", storageServerInterfaces[j].address())
-										    .detail("UID", storageServerInterfaces[j].id())
-										    .detail("GetKeyValuesToken",
-										            storageServerInterfaces[j].getKeyValues.getEndpoint().token)
-										    .detail("IsTSS", storageServerInterfaces[j].isTss() ? "True" : "False");
-
-										// All shards should be available in quiscence
-										if (self->performQuiescentChecks && !storageServerInterfaces[j].isTss()) {
-											self->testFailure("Storage server unavailable");
-											return false;
-										}
-									} else {
-										TraceEvent("ConsistencyCheck_Here").detail("Iter", j);
-									} // TODO: else continue?
-								} else {
-									current = GetKeyValuesStreamReply();
-									TraceEvent("ConsistencyCheck_EndofStream")
-									    .detail("DataSize", current.data.size())
-									    .detail("More", current.more)
-									    .detail(format("StorageServer%d", j).c_str(), storageServers[j].toString());
-								}
-							}
+							ErrorOr<GetKeyValuesReply> rangeResult = keyValueFutures[j].get();
 
 							// Compare the results with other storage servers
-							if (current.data.size()) {
+							if (rangeResult.present() && !rangeResult.get().error.present()) {
+								state GetKeyValuesReply current = rangeResult.get();
+								TraceEvent("ConsistencyCheck_GetKeyValues").detail("DataSize", current.data.size())
+									.detail(format("StorageServer%d", j).c_str(), storageServers[j].toString())
+									.detail("More", current.more);
 								totalReadAmount += current.data.expectedSize();
-								TraceEvent("ConsistencyCheck_GetKeyValuesStream")
-								    .detail("CurDataSize", current.data.size());
 								// If we haven't encountered a valid storage server yet, then mark this as the baseline
 								// to compare against
 								if (firstValidServer == -1) {
+									TraceEvent("ConsistencyCheck_FirstValidServer").detail("Iter", j);
 									firstValidServer = j;
-									reference = current;
-									TraceEvent("ConsistencyCheck_FirstValidServer")
-									    .detail("Iter", j)
-									    .detail("DataSize", reference.data.size());
 									// Compare this shard against the first
 								} else {
+									GetKeyValuesReply reference = keyValueFutures[firstValidServer].get().get();
+									TraceEvent("ConsistencyCheck_CheckingDataConsistency").log();
+
 									if (current.data != reference.data || current.more != reference.more) {
+										TraceEvent("ConsistencyCheck_DataInconsistent").log();
 										// Be especially verbose if in simulation
 										if (g_network->isSimulated()) {
 											int invalidIndex = -1;
@@ -1593,19 +1561,45 @@ struct ConsistencyCheckWorkload : TestWorkload {
 									}
 								}
 							}
+
+							// If the data is not available and we aren't relocating this shard
+							else if (!isRelocating) {
+								Error e =
+								  rangeResult.isError() ? rangeResult.getError() : rangeResult.get().error.get();
+
+								TraceEvent("ConsistencyCheck_StorageServerUnavailable")
+									.errorUnsuppressed(e)
+									.suppressFor(1.0)
+									.detail("StorageServer", storageServers[j])
+									.detail("ShardBegin", printable(range.begin))
+									.detail("ShardEnd", printable(range.end))
+									.detail("Address", storageServerInterfaces[j].address())
+									.detail("UID", storageServerInterfaces[j].id())
+									.detail("GetKeyValuesToken",
+											storageServerInterfaces[j].getKeyValues.getEndpoint().token)
+									.detail("IsTSS", storageServerInterfaces[j].isTss() ? "True" : "False");
+
+								// All shards should be available in quiscence
+								if (self->performQuiescentChecks && !storageServerInterfaces[j].isTss()) {
+									self->testFailure("Storage server unavailable");
+									return false;
+								}
+							}
+							TraceEvent("ConsistencyCheck_CheckedDataConsistency").detail("Iteration", j);
 						}
 
+						TraceEvent("ConsistencyCheck_CheckedDataConsistencyAllSSs").log();
 						if (firstValidServer >= 0) {
+							state VectorRef<KeyValueRef> data = keyValueFutures[firstValidServer].get().get().data;
 							// Remember the last key of the range we just verified
-							TraceEvent("ConsistencyCheck_StoringProgressKey")
-							    .detail("ProgressKey", reference.data[reference.data.size() - 1].key.toString());
-							state Future<Void> fSetProgress =
-							    setConsistencyCheckProgress(cx, reference.data[reference.data.size() - 1].key);
-							wait(fSetProgress);
+							if (data.size()) {
+								TraceEvent("ConsistencyCheck_StoringProgressKey")
+									.detail("ProgressKey", data[data.size() - 1].key.toString());
+								state Future<Void> fSetProgress =
+									setConsistencyCheckProgress(cx, data[data.size() - 1].key);
+								wait(fSetProgress);
+							}
 
-							TraceEvent("ConsistencyCheck_StoredProgressKey")
-							    .detail("ProgressKey", reference.data[reference.data.size() - 1].key.toString());
-							VectorRef<KeyValueRef> data = reference.data;
 							// Calculate the size of the shard, the variance of the shard size estimate, and the correct
 							// shard size estimate
 							for (int k = 0; k < data.size(); k++) {
@@ -1668,8 +1662,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 							detail("BytesReadInthisRound", bytesReadInthisRound);
 
 						// Advance to the next set of entries
-						if (firstValidServer >= 0 && reference.more) {
-							VectorRef<KeyValueRef> result = reference.data;
+						if (firstValidServer >= 0 && keyValueFutures[firstValidServer].get().get().more) {
+							VectorRef<KeyValueRef> result = keyValueFutures[firstValidServer].get().get().data;
 							ASSERT(result.size() > 0);
 							begin = firstGreaterThan(result[result.size() - 1].key);
 							ASSERT(begin.getKey() != allKeys.end);
@@ -1677,14 +1671,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 						} else
 							break;
 					} catch (Error& e) {
-						TraceEvent("ConsistencyCheck_Here").error(err);
-						if (e.code() != error_code_end_of_stream) {
-							state Error err = e;
-							wait(onErrorTr.onError(err));
-							TraceEvent("ConsistencyCheck_RetryDataConsistency").error(err);
-						} else {
-							TraceEvent("ConsistencyCheck_ErrorHere").error(err);
-						}
+						state Error err = e;
+						wait(onErrorTr.onError(err));
+						TraceEvent("ConsistencyCheck_RetryDataConsistency").error(err);
 					}
 				}
 

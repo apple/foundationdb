@@ -265,9 +265,7 @@ CommandFactory configureFactory(
         "commit_proxies=<COMMIT_PROXIES>|grv_proxies=<GRV_PROXIES>|logs=<LOGS>|resolvers=<RESOLVERS>>*|"
         "count=<TSS_COUNT>|perpetual_storage_wiggle=<WIGGLE_SPEED>|perpetual_storage_wiggle_locality="
         "<<LOCALITY_KEY>:<LOCALITY_VALUE>|0>|storage_migration_type={disabled|gradual|aggressive}"
-        "|tenant_mode={disabled|optional_experimental|required_experimental}|blob_granules_enabled={0|1}|"
-        "consistency_scan_enabled={0|1}|consistency_scan_restart={0|1}|consistency_scan_rate=<SCAN_MAX_RATE>|"
-        "consistency_scan_interval=<SCAN_INTERVAL>",
+        "|tenant_mode={disabled|optional_experimental|required_experimental}|blob_granules_enabled={0|1}",
         "change the database configuration",
         "The `new' option, if present, initializes a new database with the given configuration rather than changing "
         "the configuration of an existing one. When used, both a redundancy mode and a storage engine must be "
@@ -301,13 +299,6 @@ CommandFactory configureFactory(
         "tenant_mode=<disabled|optional_experimental|required_experimental>: Sets the tenant mode for the cluster. If "
         "optional, then transactions can be run with or without specifying tenants. If required, all data must be "
         "accessed using tenants.\n\n"
-        "consistency_scan_enabled if set to 1, means the consistency scan role will scan all shards of "
-        "the database to validate data consistency.\n\n"
-        "consistency_scan_restart if set to 1, means the consistency scan will scan everything from the beginning.\n\n"
-        "consistency_scan_rate=<SCAN_RATE>: Specifies the max date scan rate in MBPS to be used by the consistecy "
-        "checker.\n\n"
-        "consistency_scan_interval=<SCAN_INTERVAL>: Specifies the overall interval in days to finish the entire scan of"
-        "all database shards.\n\n"
         "See the FoundationDB Administration Guide for more information."));
 
 } // namespace fdb_cli

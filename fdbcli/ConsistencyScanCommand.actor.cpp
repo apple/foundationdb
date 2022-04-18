@@ -26,31 +26,33 @@
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
-#include "fdbserver/ConsistencyCheckerInterface.h"
+#include "fdbserver/ConsistencyScanInterface.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace fdb_cli {
 
 //const KeyRef consistencyCheckSpecialKey = LiteralStringRef("\xff\xff/management/consistency_check_suspended");
 
-ACTOR Future<bool> consistencyScanCommandActor(Reference<ITransaction> tr,
-                                                std::vector<StringRef> tokens,
-                                                bool intrans) {
+ACTOR Future<bool> consistencyScanCommandActor(Database db,
+											   std::vector<StringRef> tokens) {
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
 	// Here we do not proceed in a try-catch loop since the transaction is always supposed to succeed.
 	// If not, the outer loop catch block(fdbcli.actor.cpp) will handle the error and print out the error message
+	state int usageError = 0;
 	tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 	if (tokens.size() == 1) {
-		// hold the returned standalone object's memory
-		state ThreadFuture<Optional<Value>> consistencyScanInfoF = tr->get(consistencyScanInfoKey);
-		Optional<Value> consistencyScanInfo = wait(safeThreadFutureToFuture(consistencyScanInfoF));
-		if (consistencyScanInfo.get().present()) {
-			printf(ObjectReader::fromStringRef<ConsistencyScanInfo>(consistencyScan.get().get(), IncludeVersion()).toString);
+		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		state Optional<Value> consistencyScanInfo = wait(ConsistencyScanInfo::getInfo(tr));
+		wait(tr->commit());
+		if (consistencyScanInfo.present()) {
+			printf("Consistency Scan Info: %s\n", ObjectReader::fromStringRef<ConsistencyScanInfo>(consistencyScanInfo.get(), IncludeVersion()).toString().c_str());
 		}
-	} else if (tokens.size() == 2 && tokencmp(tokens[1], "off")) {
+	} else if ((tokens.size() == 2) && tokencmp(tokens[1], "off")) {
 		ConsistencyScanInfo ckInfo = ConsistencyScanInfo();
-		tr->set(consistencyScanInfoKey, ckInfo);
-	} else if (tokencmp(tokens[1], "on" && tokens.size() == 8)) {
+		wait(ConsistencyScanInfo::setInfo(tr, ckInfo));
+	} else if ((tokencmp(tokens[1], "on") && tokens.size() == 8)) {
 		ConsistencyScanInfo ckInfo = ConsistencyScanInfo();
+		ckInfo.consistency_scan_enabled = true;
 		if (tokencmp(tokens[2], "restart")) {
 			if (tokencmp(tokens[3], "0")) {
 				ckInfo.restart = false;
@@ -76,14 +78,24 @@ ACTOR Future<bool> consistencyScanCommandActor(Reference<ITransaction> tr,
 		if (tokencmp(tokens[6], "targetInterval")) {
 			char* end;
 			ckInfo.target_interval = std::strtod((const char*)tokens[7].begin(), &end);
-			if (!std::isspace(*end)) {
+			if (*end != '\0') {
 				fprintf(stderr, "ERROR: %s failed to parse.\n", printable(tokens[7]).c_str());
 				return false;
 			}
 		} else {
 			usageError = 1;
 		}
-		tr->set(consistencyScanInfoKey, ckInfo);
+		//tr->set(consistencyScanInfoKey, ckInfo);
+		wait(ConsistencyScanInfo::setInfo(tr, ckInfo));
+		wait(tr->commit());
+		// TODO: remove (printing for debug purpose)
+		tr->reset();
+		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		state Optional<Value> consistencyScanInfoGet = wait(ConsistencyScanInfo::getInfo(tr));
+		wait(tr->commit());
+		if (consistencyScanInfoGet.present()) {
+			printf("Consistency Scan Info: %s\n", ObjectReader::fromStringRef<ConsistencyScanInfo>(consistencyScanInfoGet.get(), IncludeVersion()).toString().c_str());
+		}
 	} else {
 		usageError = 1;
 	}
@@ -92,12 +104,10 @@ ACTOR Future<bool> consistencyScanCommandActor(Reference<ITransaction> tr,
 		printUsage(tokens[0]);
 		return false;
 	}
-	if (!intrans)
-		wait(safeThreadFutureToFuture(tr->commit()));
 	return true;
 }
 
-CommandFactory consistencyCheckFactory(
+CommandFactory consistencyScanFactory(
     "consistencyscan",
     CommandHelp(
         "consistencyscan [on|off] <ARGS>",

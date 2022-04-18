@@ -254,12 +254,6 @@ struct DatabaseConfiguration {
 	bool blobGranulesEnabled;
 	TenantMode tenantMode;
 
-	// Shard Consistency Scan config
-	int64_t consistencyScanEnabled;
-	int64_t consistencyScanRestart;
-	double consistencyScanMaxRate;
-	double consistencyScanInterval;
-
 	// Excluded servers (no state should be here)
 	bool isExcludedServer(NetworkAddressList) const;
 	bool isExcludedLocality(const LocalityData& locality) const;

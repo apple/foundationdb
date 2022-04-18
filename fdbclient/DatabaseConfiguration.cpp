@@ -53,10 +53,6 @@ void DatabaseConfiguration::resetInternal() {
 	storageMigrationType = StorageMigrationType::DEFAULT;
 	blobGranulesEnabled = false;
 	tenantMode = TenantMode::DISABLED;
-	consistencyScanEnabled = false;
-	consistencyScanRestart = 1;
-	consistencyScanMaxRate = CLIENT_KNOBS->CONSISTENCY_CHECK_RATE_LIMIT_MAX;
-	consistencyScanInterval = CLIENT_KNOBS->CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME;
 }
 
 int toInt(ValueRef const& v) {
@@ -227,10 +223,7 @@ bool DatabaseConfiguration::isValid() const {
 	      (perpetualStorageWiggleSpeed == 0 || perpetualStorageWiggleSpeed == 1) &&
 	      isValidPerpetualStorageWiggleLocality(perpetualStorageWiggleLocality) &&
 	      storageMigrationType != StorageMigrationType::UNSET && tenantMode >= TenantMode::DISABLED &&
-	      tenantMode < TenantMode::END &&
-	      // TODO: NEELAM: check
-	      (consistencyScanEnabled == 0 || consistencyScanEnabled == 1) && consistencyScanMaxRate >= 0 &&
-	      consistencyScanInterval >= 0)) {
+	      tenantMode < TenantMode::END)) {
 		return false;
 	}
 	std::set<Key> dcIds;
@@ -425,13 +418,6 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 	result["storage_migration_type"] = storageMigrationType.toString();
 	result["blob_granules_enabled"] = (int32_t)blobGranulesEnabled;
 	result["tenant_mode"] = tenantMode.toString();
-	result["consistency_scan_enabled"] = consistencyScanEnabled;
-	result["consistency_scan_restart"] = consistencyScanRestart;
-	result["consistency_scan_rate"] = consistencyScanMaxRate;
-	result["consistency_scan_interval"] = consistencyScanInterval;
-	TraceEvent(SevDebug, "ConsistencyScanConfig").
-			detail("ConsistencyScanMaxRate", consistencyScanMaxRate).
-		detail("ConsistencyScanInterval", consistencyScanInterval);
 	return result;
 }
 
@@ -658,23 +644,6 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	} else if (ck == LiteralStringRef("tenant_mode")) {
 		parse((&type), value);
 		tenantMode = (TenantMode::Mode)type;
-	} else if (ck == LiteralStringRef("consistency_scan_enabled")) {
-		parse(&consistencyScanEnabled, value);
-	} else if (ck == LiteralStringRef("consistency_scan_restart")) {
-		parse(&consistencyScanRestart, value);
-	} else if (ck == LiteralStringRef("consistency_scan_rate")) {
-		int consistencyScanMaxRateMBPS;
-		parse(&consistencyScanMaxRateMBPS, value);
-		parse(&consistencyScanMaxRate, value);
-		//consistencyScanMaxRate = consistencyScanMaxRateMBPS * 1024 * 1024;
-		TraceEvent(SevDebug, "ConsistencyScanMaxRate").
-			detail("ConsistencyScanMaxRateMBPS", consistencyScanMaxRateMBPS).
-			detail("ConsistencyScanMaxRate", consistencyScanMaxRate);
-	} else if (ck == LiteralStringRef("consistency_scan_interval")) {
-		//int consistencyScanIntervalDays;
-		//parse(&consistencyScanIntervalDays, value);
-		parse(&consistencyScanInterval, value);
-		//consistencyScanInterval = consistencyScanIntervalDays * 24 * 60 * 60;
 	} else if (ck == LiteralStringRef("proxies")) {
 		overwriteProxiesCount();
 	} else if (ck == LiteralStringRef("blob_granules_enabled")) {

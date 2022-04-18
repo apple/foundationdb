@@ -51,7 +51,7 @@ struct WorkerInfo : NonCopyable {
 	Future<Void> haltDistributor;
 	Future<Void> haltBlobManager;
 	Future<Void> haltEncryptKeyProxy;
-	Future<Void> haltConsistencyChecker;
+	Future<Void> haltConsistencyScan;
 	Standalone<VectorRef<StringRef>> issues;
 
 	WorkerInfo()
@@ -73,7 +73,7 @@ struct WorkerInfo : NonCopyable {
 	  : watcher(std::move(r.watcher)), reply(std::move(r.reply)), gen(r.gen), reboots(r.reboots),
 	    initialClass(r.initialClass), priorityInfo(r.priorityInfo), details(std::move(r.details)),
 	    haltRatekeeper(r.haltRatekeeper), haltDistributor(r.haltDistributor), haltBlobManager(r.haltBlobManager),
-	    haltEncryptKeyProxy(r.haltEncryptKeyProxy), haltConsistencyChecker(r.haltConsistencyChecker), issues(r.issues) {
+	    haltEncryptKeyProxy(r.haltEncryptKeyProxy), haltConsistencyScan(r.haltConsistencyScan), issues(r.issues) {
 	}
 	void operator=(WorkerInfo&& r) noexcept {
 		watcher = std::move(r.watcher);
@@ -87,7 +87,7 @@ struct WorkerInfo : NonCopyable {
 		haltDistributor = r.haltDistributor;
 		haltBlobManager = r.haltBlobManager;
 		haltEncryptKeyProxy = r.haltEncryptKeyProxy;
-		haltConsistencyChecker = r.haltConsistencyChecker;
+		haltConsistencyScan = r.haltConsistencyScan;
 		issues = r.issues;
 	}
 };
@@ -188,11 +188,11 @@ public:
 			serverInfo->set(newInfo);
 		}
 
-		void setConsistencyChecker(const ConsistencyCheckerInterface& interf) {
+		void setConsistencyScan(const ConsistencyScanInterface& interf) {
 			auto newInfo = serverInfo->get();
 			newInfo.id = deterministicRandom()->randomUniqueID();
 			newInfo.infoGeneration = ++dbInfoCount;
-			newInfo.consistencyChecker = interf;
+			newInfo.consistencyScan = interf;
 			serverInfo->set(newInfo);
 		}
 
@@ -208,8 +208,8 @@ public:
 				newInfo.blobManager = Optional<BlobManagerInterface>();
 			} else if (t == ProcessClass::EncryptKeyProxyClass) {
 				newInfo.encryptKeyProxy = Optional<EncryptKeyProxyInterface>();
-			} else if (t == ProcessClass::ConsistencyCheckerClass) {
-				newInfo.consistencyChecker = Optional<ConsistencyCheckerInterface>();
+			} else if (t == ProcessClass::ConsistencyScanClass) {
+				newInfo.consistencyScan = Optional<ConsistencyScanInterface>();
 			}
 			serverInfo->set(newInfo);
 		}
@@ -305,8 +305,8 @@ public:
 		        db.serverInfo->get().blobManager.get().locality.processId() == processId) ||
 		       (db.serverInfo->get().encryptKeyProxy.present() &&
 		        db.serverInfo->get().encryptKeyProxy.get().locality.processId() == processId) ||
-		       (db.serverInfo->get().consistencyChecker.present() &&
-		        db.serverInfo->get().consistencyChecker.get().locality.processId() == processId);
+		       (db.serverInfo->get().consistencyScan.present() &&
+		        db.serverInfo->get().consistencyScan.get().locality.processId() == processId);
 	}
 
 	WorkerDetails getStorageWorker(RecruitStorageRequest const& req) {
@@ -2877,7 +2877,7 @@ public:
 		const auto& pid = worker.interf.locality.processId();
 		if ((role != ProcessClass::DataDistributor && role != ProcessClass::Ratekeeper &&
 		     role != ProcessClass::BlobManager && role != ProcessClass::EncryptKeyProxy &&
-		     role != ProcessClass::ConsistencyChecker) ||
+		     role != ProcessClass::ConsistencyScan) ||
 		    pid == masterProcessId.get()) {
 			return false;
 		}
@@ -3252,8 +3252,8 @@ public:
 	Optional<UID> recruitingBlobManagerID;
 	AsyncVar<bool> recruitEncryptKeyProxy;
 	Optional<UID> recruitingEncryptKeyProxyID;
-	AsyncVar<bool> recruitConsistencyChecker;
-	Optional<UID> recruitingConsistencyCheckerID;
+	AsyncVar<bool> recruitConsistencyScan;
+	Optional<UID> recruitingConsistencyScanID;
 
 	// Stores the health information from a particular worker's perspective.
 	struct WorkerHealth {
@@ -3293,7 +3293,7 @@ public:
 	    goodRecruitmentTime(Never()), goodRemoteRecruitmentTime(Never()), datacenterVersionDifference(0),
 	    versionDifferenceUpdated(false), remoteDCMonitorStarted(false), remoteTransactionSystemDegraded(false),
 	    recruitDistributor(false), recruitRatekeeper(false), recruitBlobManager(false), recruitEncryptKeyProxy(false),
-	    recruitConsistencyChecker(false), clusterControllerMetrics("ClusterController", id.toString()),
+	    recruitConsistencyScan(false), clusterControllerMetrics("ClusterController", id.toString()),
 	    openDatabaseRequests("OpenDatabaseRequests", clusterControllerMetrics),
 	    registerWorkerRequests("RegisterWorkerRequests", clusterControllerMetrics),
 	    getWorkersRequests("GetWorkersRequests", clusterControllerMetrics),

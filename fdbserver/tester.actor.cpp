@@ -954,6 +954,8 @@ ACTOR Future<Void> checkConsistency(Database cx,
 	if (doTSSCheck) {
 		performTSSCheck = LiteralStringRef("true");
 	}
+	TraceEvent("TesterCheckConsistency").detail("PerformQuiescent", performQuiescent);
+	performQuiescent = LiteralStringRef("false");
 	spec.title = LiteralStringRef("ConsistencyCheck");
 	spec.databasePingDelay = databasePingDelay;
 	spec.timeout = 32000;
@@ -1005,6 +1007,7 @@ ACTOR Future<bool> runTest(Database cx,
 		testResults = _testResults;
 		logMetrics(testResults.metrics);
 	} catch (Error& e) {
+		TraceEvent(SevDebug, "TestFailure").error(e);
 		if (e.code() == error_code_timed_out) {
 			TraceEvent(SevError, "TestFailure")
 			    .error(e)
@@ -1718,11 +1721,12 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 		options.push_back_deep(options.arena(),
 		                       KeyValueRef(LiteralStringRef("testName"), LiteralStringRef("ConsistencyCheck")));
 		options.push_back_deep(options.arena(), KeyValueRef(LiteralStringRef("rateLimitMax"), StringRef(rateLimitMax)));
-		// Use unit test options as test spec options when privided
+		// Use unit test options as test spec options when provided
 		if (testOptions.params.size()) {
 			for (auto& kv : testOptions.params) {
 				options.push_back_deep(options.arena(), KeyValueRef(kv.first, kv.second));
 			}
+			//spec.runConsistencyCheck = false;
 		} else {
 			options.push_back_deep(options.arena(),
 			                       KeyValueRef(LiteralStringRef("performQuiescentChecks"), LiteralStringRef("false")));
@@ -1736,9 +1740,9 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 			                       KeyValueRef(LiteralStringRef("shuffleShards"), LiteralStringRef("true")));
 		}
 		// TODO: remove
-		printf("runTests: Options:\n");
-		for (int q = 0; q < options.size(); q++)
-			fprintf(stdout, " '%s' = '%s'\n", options[q].key.toString().c_str(), options[q].value.toString().c_str());
+		//printf("runTests: Options:\n");
+		//for (int q = 0; q < options.size(); q++)
+		//	fprintf(stdout, " '%s' = '%s'\n", options[q].key.toString().c_str(), options[q].value.toString().c_str());
 		spec.options.push_back_deep(spec.options.arena(), options);
 		testSpecs.push_back(spec);
 	} else if (whatToRun == TEST_TYPE_UNIT_TESTS) {

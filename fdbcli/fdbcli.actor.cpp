@@ -794,10 +794,6 @@ void configureGenerator(const char* text, const char* line, std::vector<std::str
 		                   "storage_migration_type=",
 		                   "tenant_mode=",
 		                   "blob_granules_enabled=",
-		                   "consistency_scan_enabled=",
-		                   "consistency_scan_restart=",
-		                   "consistency_scan_rate=",
-		                   "consistency_scan_interval=",
 		                   nullptr };
 	arrayGenerator(text, line, opts, lc);
 }
@@ -1696,6 +1692,13 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				if (tokencmp(tokens[0], "consistencycheck")) {
 					getTransaction(db, managementTenant, tr, options, intrans);
 					bool _result = wait(makeInterruptable(consistencyCheckCommandActor(tr, tokens, intrans)));
+					if (!_result)
+						is_error = true;
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "consistencyscan")) {
+					bool _result = wait(makeInterruptable(consistencyScanCommandActor(localDb, tokens)));
 					if (!_result)
 						is_error = true;
 					continue;

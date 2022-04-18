@@ -6,6 +6,7 @@ set(FDBCLI_SRCS
   CacheRangeCommand.actor.cpp
   ConfigureCommand.actor.cpp
   ConsistencyCheckCommand.actor.cpp
+  ConsistencyScanCommand.actor.cpp
   CoordinatorsCommand.actor.cpp
   DataDistributionCommand.actor.cpp
   ExcludeCommand.actor.cpp

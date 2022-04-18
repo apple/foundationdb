@@ -136,6 +136,9 @@ ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
 ACTOR Future<bool> consistencyCheckCommandActor(Reference<ITransaction> tr,
                                                 std::vector<StringRef> tokens,
                                                 bool intrans);
+// consistency scan command
+ACTOR Future<bool> consistencyScanCommandActor(Database localDb,
+											   std::vector<StringRef> tokens);
 // coordinators command
 ACTOR Future<bool> coordinatorsCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // createtenant command

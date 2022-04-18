@@ -33,6 +33,7 @@
 #include "fdbserver/ClusterRecovery.actor.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbserver/DataDistribution.actor.h"
+#include "fdbserver/ConsistencyScanInterface.h"
 #include "flow/UnitTest.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/RecoveryState.h"
@@ -808,8 +809,8 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		roles.addRole("blob_manager", db->get().blobManager.get());
 	}
 
-	if (db->get().consistencyChecker.present()) {
-		roles.addRole("consistency_checker", db->get().consistencyChecker.get());
+	if (db->get().consistencyScan.present()) {
+		roles.addRole("consistency_scan", db->get().consistencyScan.get());
 	}
 
 	if (SERVER_KNOBS->ENABLE_ENCRYPTION && db->get().encryptKeyProxy.present()) {
@@ -2778,6 +2779,26 @@ ACTOR Future<JsonBuilderObject> storageWigglerStatsFetcher(DatabaseConfiguration
 	}
 	return res;
 }
+
+// read consistencyScanInfo through Read-only tx
+ACTOR Future<Optional<Value>> consistencyScanInfoFetcher(Database cx) {
+	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+	state Optional<Value> val;
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			wait(store(val, ConsistencyScanInfo::getInfo(tr)));
+			wait(tr->commit());
+			break;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+
+	TraceEvent("ConsistencyScanInfoFetcher").log();
+	return val.get();
+}
+
 // constructs the cluster section of the json status output
 ACTOR Future<StatusReply> clusterGetStatus(
     Reference<AsyncVar<ServerDBInfo>> db,
@@ -2797,7 +2818,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 	state WorkerDetails ccWorker; // Cluster-Controller worker
 	state WorkerDetails ddWorker; // DataDistributor worker
 	state WorkerDetails rkWorker; // Ratekeeper worker
-	state WorkerDetails ckWorker; // ConsistencyChecker worker
+	state WorkerDetails csWorker; // ConsistencyScan worker
 
 	try {
 		// Get the master Worker interface
@@ -2844,17 +2865,17 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			rkWorker = _rkWorker.get();
 		}
 
-		// Get the ConsistencyChecker worker interface
-		Optional<WorkerDetails> _ckWorker;
-		if (db->get().consistencyChecker.present()) {
-			_ckWorker = getWorker(workers, db->get().consistencyChecker.get().address());
+		// Get the ConsistencyScan worker interface
+		Optional<WorkerDetails> _csWorker;
+		if (db->get().consistencyScan.present()) {
+			_csWorker = getWorker(workers, db->get().consistencyScan.get().address());
 		}
 
-		if (!db->get().consistencyChecker.present() || !_ckWorker.present()) {
-			messages.push_back(JsonString::makeMessage("unreachable_consistencyChecker_worker",
-			                                           "Unable to locate the consistencyChecker worker."));
+		if (!db->get().consistencyScan.present() || !_csWorker.present()) {
+			messages.push_back(JsonString::makeMessage("unreachable_consistencyScan_worker",
+			                                           "Unable to locate the consistencyScan worker."));
 		} else {
-			ckWorker = _ckWorker.get();
+			csWorker = _csWorker.get();
 		}
 
 		// Get latest events for various event types from ALL workers
@@ -3228,6 +3249,29 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			    JsonBuilder::makeMessage("client_issues", "Some clients of this cluster have issues.");
 			clientIssueMessage["issues"] = clientIssuesArr;
 			messages.push_back(clientIssueMessage);
+		}
+
+		// Fetch Consistency Scan Information
+		//state Future<Optional<Value>> consistencyScan = consistencyScanInfoFetcher(cx);
+		//wait(success(consistencyScan));
+		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+		state Optional<Value> val;
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				wait(store(val, ConsistencyScanInfo::getInfo(tr)));
+				wait(tr->commit());
+				break;
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
+		}
+		if (val.present()) {
+			ConsistencyScanInfo consistencyScanInfo = ObjectReader::fromStringRef<ConsistencyScanInfo>(val.get(), IncludeVersion());
+			TraceEvent("StatusConsistencyScanGotVal").log();
+			//if (consistencyScan.get().present()) {
+			//statusObj["consistency_scan_info"] = ObjectReader::fromStringRef<ConsistencyScanInfo>(consistencyScan.get().get(), IncludeVersion()).toJSON();
+			statusObj["consistency_scan_info"] = consistencyScanInfo.toJSON();
 		}
 
 		// Create the status_incomplete message if there were any reasons that the status is incomplete.

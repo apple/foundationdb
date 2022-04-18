@@ -201,23 +201,6 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 			out[p + key] = format("%d", tenantMode);
 		}
 
-		if (key == "consistency_scan_enabled" && isInteger(value)) {
-			out[p + key] = value;
-			printf("consistency_scan_enabled: %s\n", value.c_str());
-		}
-		// TODO: NEELAM: should we check if consistency_scan_enabled is set first?
-		if (key == "consistency_scan_restart" && isInteger(value)) {
-			out[p + key] = value;
-			printf("consistency_scan_restart: %s\n", value.c_str());
-		}
-		if (key == "consistency_scan_rate") { //} && isInteger(value)) {
-			out[p + key] = value;
-			printf("consistency_scan_rate: %s\n", value.c_str());
-		}
-		if (key == "consistency_scan_interval") { //} && isInteger(value)) {
-			out[p + key] = value;
-			printf("consistency_scan_interval: %s\n", value.c_str());
-		}
 		return out;
 	}
 

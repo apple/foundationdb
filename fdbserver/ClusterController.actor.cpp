@@ -138,25 +138,29 @@ struct DataDistributorSingleton : Singleton<DataDistributorInterface> {
 	}
 };
 
-struct ConsistencyCheckerSingleton : Singleton<ConsistencyCheckerInterface> {
+struct ConsistencyScanSingleton : Singleton<ConsistencyScanInterface> {
 
-	ConsistencyCheckerSingleton(const Optional<ConsistencyCheckerInterface>& interface) : Singleton(interface) {}
+	ConsistencyScanSingleton(const Optional<ConsistencyScanInterface>& interface) : Singleton(interface) {}
 
-	Role getRole() const { return Role::CONSISTENCYCHECKER; }
-	ProcessClass::ClusterRole getClusterRole() const { return ProcessClass::ConsistencyChecker; }
+	Role getRole() const { return Role::CONSISTENCYSCAN; }
+	ProcessClass::ClusterRole getClusterRole() const { return ProcessClass::ConsistencyScan; }
 
 	void setInterfaceToDbInfo(ClusterControllerData* cc) const {
 		if (interface.present()) {
-			cc->db.setConsistencyChecker(interface.get());
+			TraceEvent("CCCK_SetInf", cc->id).detail("Id", interface.get().id());
+			cc->db.setConsistencyScan(interface.get());
 		}
 	}
 	void halt(ClusterControllerData* cc, Optional<Standalone<StringRef>> pid) const {
 		if (interface.present()) {
-			cc->id_worker[pid].haltConsistencyChecker = brokenPromiseToNever(
-			    interface.get().haltConsistencyChecker.getReply(HaltConsistencyCheckerRequest(cc->id)));
+			cc->id_worker[pid].haltConsistencyScan = brokenPromiseToNever(
+			    interface.get().haltConsistencyScan.getReply(HaltConsistencyScanRequest(cc->id)));
 		}
 	}
-	void recruit(ClusterControllerData* cc) const { cc->recruitConsistencyChecker.set(true); }
+	void recruit(ClusterControllerData* cc) const {
+		cc->lastRecruitTime = now();
+		cc->recruitConsistencyScan.set(true);
+	}
 };
 
 struct BlobManagerSingleton : Singleton<BlobManagerInterface> {
@@ -264,7 +268,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			dbInfo.distributor = db->serverInfo->get().distributor;
 			dbInfo.ratekeeper = db->serverInfo->get().ratekeeper;
 			dbInfo.blobManager = db->serverInfo->get().blobManager;
-			dbInfo.consistencyChecker = db->serverInfo->get().consistencyChecker;
+			dbInfo.consistencyScan = db->serverInfo->get().consistencyScan;
 			dbInfo.encryptKeyProxy = db->serverInfo->get().encryptKeyProxy;
 			dbInfo.latencyBandConfig = db->serverInfo->get().latencyBandConfig;
 			dbInfo.myLocality = db->serverInfo->get().myLocality;
@@ -624,9 +628,6 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	// note: this map doesn't consider pids used by existing singletons
 	std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
 
-	int recruitCK = 1;
-	// recruitCK = self->db.config.consistencyScanEnabled;
-
 	// We prefer spreading out other roles more than separating singletons on their own process
 	// so we artificially amplify the pid count for the processes used by non-singleton roles.
 	// In other words, we make the processes used for other roles less desirable to be used
@@ -638,10 +639,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	// Try to find a new process for each singleton.
 	WorkerDetails newRKWorker = findNewProcessForSingleton(self, ProcessClass::Ratekeeper, id_used);
 	WorkerDetails newDDWorker = findNewProcessForSingleton(self, ProcessClass::DataDistributor, id_used);
-	WorkerDetails newCKWorker;
-
-	if (recruitCK)
-		newCKWorker = findNewProcessForSingleton(self, ProcessClass::ConsistencyChecker, id_used);
+	WorkerDetails newCSWorker = findNewProcessForSingleton(self, ProcessClass::ConsistencyScan, id_used);
 
 	WorkerDetails newBMWorker;
 	if (self->db.blobGranulesEnabled.get()) {
@@ -656,9 +654,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	// Find best possible fitnesses for each singleton.
 	auto bestFitnessForRK = findBestFitnessForSingleton(self, newRKWorker, ProcessClass::Ratekeeper);
 	auto bestFitnessForDD = findBestFitnessForSingleton(self, newDDWorker, ProcessClass::DataDistributor);
-	ProcessClass::Fitness bestFitnessForCK;
-	if (recruitCK)
-		bestFitnessForCK = findBestFitnessForSingleton(self, newCKWorker, ProcessClass::ConsistencyChecker);
+	auto bestFitnessForCS = findBestFitnessForSingleton(self, newCSWorker, ProcessClass::ConsistencyScan);
 
 	ProcessClass::Fitness bestFitnessForBM;
 	if (self->db.blobGranulesEnabled.get()) {
@@ -673,7 +669,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	auto& db = self->db.serverInfo->get();
 	auto rkSingleton = RatekeeperSingleton(db.ratekeeper);
 	auto ddSingleton = DataDistributorSingleton(db.distributor);
-	ConsistencyCheckerSingleton ckSingleton(db.consistencyChecker);
+	ConsistencyScanSingleton csSingleton(db.consistencyScan);
 	BlobManagerSingleton bmSingleton(db.blobManager);
 	EncryptKeyProxySingleton ekpSingleton(db.encryptKeyProxy);
 
@@ -685,11 +681,8 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	bool ddHealthy = isHealthySingleton<DataDistributorInterface>(
 	    self, newDDWorker, ddSingleton, bestFitnessForDD, self->recruitingDistributorID);
 
-	bool ckHealthy = true;
-	if (recruitCK) {
-		ckHealthy = isHealthySingleton<ConsistencyCheckerInterface>(
-		    self, newCKWorker, ckSingleton, bestFitnessForCK, self->recruitingConsistencyCheckerID);
-	}
+	bool csHealthy = isHealthySingleton<ConsistencyScanInterface>(
+		self, newCSWorker, csSingleton, bestFitnessForCS, self->recruitingConsistencyScanID);
 
 	bool bmHealthy = true;
 	if (self->db.blobGranulesEnabled.get()) {
@@ -704,7 +697,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	}
 	// if any of the singletons are unhealthy (rerecruited or not stable), then do not
 	// consider any further re-recruitments
-	if (!(rkHealthy && ddHealthy && bmHealthy && ekpHealthy && ckHealthy)) {
+	if (!(rkHealthy && ddHealthy && bmHealthy && ekpHealthy && csHealthy)) {
 		return;
 	}
 
@@ -712,8 +705,10 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	// check if we can colocate the singletons in a more optimal way
 	Optional<Standalone<StringRef>> currRKProcessId = rkSingleton.interface.get().locality.processId();
 	Optional<Standalone<StringRef>> currDDProcessId = ddSingleton.interface.get().locality.processId();
+	Optional<Standalone<StringRef>> currCSProcessId = csSingleton.interface.get().locality.processId();
 	Optional<Standalone<StringRef>> newRKProcessId = newRKWorker.interf.locality.processId();
 	Optional<Standalone<StringRef>> newDDProcessId = newDDWorker.interf.locality.processId();
+	Optional<Standalone<StringRef>> newCSProcessId = newCSWorker.interf.locality.processId();
 
 	Optional<Standalone<StringRef>> currBMProcessId, newBMProcessId;
 	if (self->db.blobGranulesEnabled.get()) {
@@ -727,14 +722,8 @@ void checkBetterSingletons(ClusterControllerData* self) {
 		newEKPProcessId = newEKPWorker.interf.locality.processId();
 	}
 
-	Optional<Standalone<StringRef>> currCKProcessId, newCKProcessId;
-	if (recruitCK) {
-		currCKProcessId = ckSingleton.interface.get().locality.processId();
-		newCKProcessId = newCKWorker.interf.locality.processId();
-	}
-
-	std::vector<Optional<Standalone<StringRef>>> currPids = { currRKProcessId, currDDProcessId };
-	std::vector<Optional<Standalone<StringRef>>> newPids = { newRKProcessId, newDDProcessId };
+	std::vector<Optional<Standalone<StringRef>>> currPids = { currRKProcessId, currDDProcessId, currCSProcessId };
+	std::vector<Optional<Standalone<StringRef>>> newPids = { newRKProcessId, newDDProcessId, newCSProcessId };
 	if (self->db.blobGranulesEnabled.get()) {
 		currPids.emplace_back(currBMProcessId);
 		newPids.emplace_back(newBMProcessId);
@@ -743,11 +732,6 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	if (SERVER_KNOBS->ENABLE_ENCRYPTION) {
 		currPids.emplace_back(currEKPProcessId);
 		newPids.emplace_back(newEKPProcessId);
-	}
-
-	if (recruitCK) {
-		currPids.emplace_back(currCKProcessId);
-		newPids.emplace_back(newCKProcessId);
 	}
 
 	auto currColocMap = getColocCounts(currPids);
@@ -765,18 +749,12 @@ void checkBetterSingletons(ClusterControllerData* self) {
 		ASSERT(newColocMap[newEKPProcessId] == 0);
 	}
 
-	// if the knob is disabled, the CK coloc counts should have no affect on the coloc counts check below
-	if (!recruitCK) {
-		ASSERT(currColocMap[currCKProcessId] == 0);
-		ASSERT(newColocMap[newCKProcessId] == 0);
-	}
-
 	// if the new coloc counts are collectively better (i.e. each singleton's coloc count has not increased)
 	if (newColocMap[newRKProcessId] <= currColocMap[currRKProcessId] &&
 	    newColocMap[newDDProcessId] <= currColocMap[currDDProcessId] &&
 	    newColocMap[newBMProcessId] <= currColocMap[currBMProcessId] &&
 	    newColocMap[newEKPProcessId] <= currColocMap[currEKPProcessId] &&
-	    newColocMap[newCKProcessId] <= currColocMap[currCKProcessId]) {
+	    newColocMap[newCSProcessId] <= currColocMap[currCSProcessId]) {
 		// rerecruit the singleton for which we have found a better process, if any
 		if (newColocMap[newRKProcessId] < currColocMap[currRKProcessId]) {
 			rkSingleton.recruit(self);
@@ -786,8 +764,8 @@ void checkBetterSingletons(ClusterControllerData* self) {
 			bmSingleton.recruit(self);
 		} else if (SERVER_KNOBS->ENABLE_ENCRYPTION && newColocMap[newEKPProcessId] < currColocMap[currEKPProcessId]) {
 			ekpSingleton.recruit(self);
-		} else if (recruitCK && newColocMap[newCKProcessId] < currColocMap[currCKProcessId]) {
-			ckSingleton.recruit(self);
+		} else if (newColocMap[newCSProcessId] < currColocMap[currCSProcessId]) {
+			csSingleton.recruit(self);
 		}
 	}
 }
@@ -1332,11 +1310,11 @@ void registerWorker(RegisterWorkerRequest req,
 		    self, w, currSingleton, registeringSingleton, self->recruitingEncryptKeyProxyID);
 	}
 
-	if (self->db.config.consistencyScanEnabled && req.consistencyCheckerInterf.present()) {
-		auto currSingleton = ConsistencyCheckerSingleton(self->db.serverInfo->get().consistencyChecker);
-		auto registeringSingleton = ConsistencyCheckerSingleton(req.consistencyCheckerInterf);
-		haltRegisteringOrCurrentSingleton<ConsistencyCheckerInterface>(
-		    self, w, currSingleton, registeringSingleton, self->recruitingConsistencyCheckerID);
+	if (req.consistencyScanInterf.present()) {
+		auto currSingleton = ConsistencyScanSingleton(self->db.serverInfo->get().consistencyScan);
+		auto registeringSingleton = ConsistencyScanSingleton(req.consistencyScanInterf);
+		haltRegisteringOrCurrentSingleton<ConsistencyScanInterface>(
+		    self, w, currSingleton, registeringSingleton, self->recruitingConsistencyScanID);
 	}
 
 	// Notify the worker to register again with new process class/exclusive property
@@ -2176,70 +2154,68 @@ ACTOR Future<Void> monitorRatekeeper(ClusterControllerData* self) {
 	}
 }
 
-ACTOR Future<Void> startConsistencyChecker(ClusterControllerData* self) {
+ACTOR Future<Void> startConsistencyScan(ClusterControllerData* self) {
 	wait(delay(0.0)); // If master fails at the same time, give it a chance to clear master PID.
-
-	TraceEvent("CCStartConsistencyChecker", self->id).log();
+	TraceEvent("CCStartConsistencyScan", self->id).log();
 	loop {
 		try {
-			state bool no_consistencyChecker = !self->db.serverInfo->get().consistencyChecker.present();
+			state bool no_consistencyScan = !self->db.serverInfo->get().consistencyScan.present();
 			while (!self->masterProcessId.present() ||
 			       self->masterProcessId != self->db.serverInfo->get().master.locality.processId() ||
 			       self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
 				wait(self->db.serverInfo->onChange() || delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY));
 			}
-			if (no_consistencyChecker && self->db.serverInfo->get().consistencyChecker.present()) {
-				// Existing consistencyChecker registers while waiting, so skip.
+			if (no_consistencyScan && self->db.serverInfo->get().consistencyScan.present()) {
+				// Existing consistencyScan registers while waiting, so skip.
 				return Void();
 			}
 
 			std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
-			WorkerFitnessInfo ckWorker = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId,
-			                                                                ProcessClass::ConsistencyChecker,
+			WorkerFitnessInfo csWorker = self->getWorkerForRoleInDatacenter(self->clusterControllerDcId,
+			                                                                ProcessClass::ConsistencyScan,
 			                                                                ProcessClass::NeverAssign,
 			                                                                self->db.config,
 			                                                                id_used);
-			InitializeConsistencyCheckerRequest req(deterministicRandom()->randomUniqueID(),
-			                                        self->db.config.consistencyScanRestart,
-			                                        self->db.config.consistencyScanMaxRate,
-			                                        self->db.config.consistencyScanInterval);
-			state WorkerDetails worker = ckWorker.worker;
-			if (self->onMasterIsBetter(worker, ProcessClass::ConsistencyChecker)) {
+
+
+			InitializeConsistencyScanRequest req(deterministicRandom()->randomUniqueID());
+			state WorkerDetails worker = csWorker.worker;
+			if (self->onMasterIsBetter(worker, ProcessClass::ConsistencyScan)) {
 				worker = self->id_worker[self->masterProcessId.get()].details;
 			}
 
-			self->recruitingConsistencyCheckerID = req.reqId;
-			TraceEvent("CCRecruitConsistencyChecker", self->id)
+			self->recruitingConsistencyScanID = req.reqId;
+			TraceEvent("CCRecruitConsistencyScan", self->id)
 			    .detail("Addr", worker.interf.address())
-			    .detail("CKID", req.reqId);
+			    .detail("CSID", req.reqId);
 
-			ErrorOr<ConsistencyCheckerInterface> interf = wait(worker.interf.consistencyChecker.getReplyUnlessFailedFor(
-			    req, SERVER_KNOBS->WAIT_FOR_CONSISTENCYCHECKER_JOIN_DELAY, 0));
+			ErrorOr<ConsistencyScanInterface> interf = wait(worker.interf.consistencyScan.getReplyUnlessFailedFor(
+			    req, SERVER_KNOBS->WAIT_FOR_CONSISTENCYSCAN_JOIN_DELAY, 0));
 			if (interf.present()) {
-				self->recruitConsistencyChecker.set(false);
-				self->recruitingConsistencyCheckerID = interf.get().id();
-				const auto& consistencyChecker = self->db.serverInfo->get().consistencyChecker;
-				TraceEvent("CCConsistencyCheckerRecruited", self->id)
+				self->recruitConsistencyScan.set(false);
+				self->recruitingConsistencyScanID = interf.get().id();
+				const auto& consistencyScan = self->db.serverInfo->get().consistencyScan;
+				TraceEvent("CCConsistencyScanRecruited", self->id)
 				    .detail("Addr", worker.interf.address())
 				    .detail("CKID", interf.get().id());
-				if (consistencyChecker.present() && consistencyChecker.get().id() != interf.get().id() &&
-				    self->id_worker.count(consistencyChecker.get().locality.processId())) {
-					TraceEvent("CCHaltConsistencyCheckerAfterRecruit", self->id)
-					    .detail("CKID", consistencyChecker.get().id())
+				if (consistencyScan.present() && consistencyScan.get().id() != interf.get().id() &&
+				    self->id_worker.count(consistencyScan.get().locality.processId())) {
+					TraceEvent("CCHaltConsistencyScanAfterRecruit", self->id)
+					    .detail("CKID", consistencyScan.get().id())
 					    .detail("DcID", printable(self->clusterControllerDcId));
-					ConsistencyCheckerSingleton(consistencyChecker)
-					    .halt(self, consistencyChecker.get().locality.processId());
+					ConsistencyScanSingleton(consistencyScan)
+					    .halt(self, consistencyScan.get().locality.processId());
 				}
-				if (!consistencyChecker.present() || consistencyChecker.get().id() != interf.get().id()) {
-					self->db.setConsistencyChecker(interf.get());
+				if (!consistencyScan.present() || consistencyScan.get().id() != interf.get().id()) {
+					self->db.setConsistencyScan(interf.get());
 				}
 				checkOutstandingRequests(self);
 				return Void();
 			} else {
-				TraceEvent("CCConsistencyCheckerRecruitEmpty", self->id).log();
+				TraceEvent("CCConsistencyScanRecruitEmpty", self->id).log();
 			}
 		} catch (Error& e) {
-			TraceEvent("CCConsistencyCheckerRecruitError", self->id).error(e);
+			TraceEvent("CCConsistencyScanRecruitError", self->id).error(e);
 			if (e.code() != error_code_no_more_servers) {
 				throw;
 			}
@@ -2248,36 +2224,29 @@ ACTOR Future<Void> startConsistencyChecker(ClusterControllerData* self) {
 	}
 }
 
-ACTOR Future<Void> monitorConsistencyChecker(ClusterControllerData* self) {
+ACTOR Future<Void> monitorConsistencyScan(ClusterControllerData* self) {
 	while (self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+		TraceEvent("CCMonitorConsistencyScanWaitingForRecovery", self->id).log();
 		wait(self->db.serverInfo->onChange());
 	}
 
-	TraceEvent("CCMonitorConsistencyChecker", self->id).log();
+	TraceEvent("CCMonitorConsistencyScan", self->id).log();
 	loop {
-		if (self->db.serverInfo->get().consistencyChecker.present() && !self->recruitConsistencyChecker.get()) {
-			// TODO: NEELAM: check
-			if (!self->db.config.consistencyScanEnabled) {
-				TraceEvent("CCConsistencyCheckerHalting", self->id)
-				    .detail("CKID", self->db.serverInfo->get().consistencyChecker.get().id());
-				const auto& consistencyChecker = self->db.serverInfo->get().consistencyChecker;
-				ConsistencyCheckerSingleton(consistencyChecker)
-				    .halt(self, consistencyChecker.get().locality.processId());
-			}
+		if (self->db.serverInfo->get().consistencyScan.present() && !self->recruitConsistencyScan.get()) {
+			state Future<Void> wfClient = waitFailureClient(self->db.serverInfo->get().consistencyScan.get().waitFailure,
+															SERVER_KNOBS->CONSISTENCYSCAN_FAILURE_TIME);
 			choose {
-				when(wait(waitFailureClient(self->db.serverInfo->get().consistencyChecker.get().waitFailure,
-				                            SERVER_KNOBS->CONSISTENCYCHECKER_FAILURE_TIME))) {
-					TraceEvent("CCConsistencyCheckerDied", self->id)
-					    .detail("CKID", self->db.serverInfo->get().consistencyChecker.get().id());
-					self->db.clearInterf(ProcessClass::ConsistencyCheckerClass);
+				when(wait(wfClient)) {
+					TraceEvent("CCMonitorConsistencyScanDied", self->id)
+						.detail("CKID", self->db.serverInfo->get().consistencyScan.get().id());
+					self->db.clearInterf(ProcessClass::ConsistencyScanClass);
 				}
-				when(wait(self->recruitConsistencyChecker.onChange())) {}
+				when(wait(self->recruitConsistencyScan.onChange())) {
+				}
 			}
-		} else if (self->db.config.consistencyScanEnabled) {
-			TraceEvent("CCMonitorConsistencyCheckerStarting", self->id).log();
-			wait(startConsistencyChecker(self));
 		} else {
-			wait(delay(5.0));
+			TraceEvent("CCMonitorConsistencyScanStarting", self->id).log();
+			wait(startConsistencyScan(self));
 		}
 	}
 }
@@ -2682,7 +2651,8 @@ ACTOR Future<Void> clusterControllerCore(Reference<IClusterConnectionRecord> con
 	self.addActor.send(monitorRatekeeper(&self));
 	self.addActor.send(monitorBlobManager(&self));
 	self.addActor.send(watchBlobGranulesConfigKey(&self));
-	self.addActor.send(monitorConsistencyChecker(&self));
+	self.addActor.send(monitorConsistencyScan(&self));
+	//self.addActor.send(watchConsistencyScanInfoKey(&self));
 	self.addActor.send(dbInfoUpdater(&self));
 	self.addActor.send(traceCounters("ClusterControllerMetrics",
 	                                 self.id,

@@ -153,7 +153,7 @@ public:
 				return false;
 			case ProcessClass::RatekeeperClass:
 				return false;
-			case ProcessClass::ConsistencyCheckerClass:
+			case ProcessClass::ConsistencyScanClass:
 				return false;
 			case ProcessClass::BlobManagerClass:
 				return false;

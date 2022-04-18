@@ -240,9 +240,9 @@ ProcessClass::Fitness ProcessClass::machineClassFitness(ClusterRole role) const 
 		default:
 			return ProcessClass::WorstFit;
 		}
-	case ProcessClass::ConsistencyChecker:
+	case ProcessClass::ConsistencyScan:
 		switch (_class) {
-		case ProcessClass::ConsistencyCheckerClass:
+		case ProcessClass::ConsistencyScanClass:
 			return ProcessClass::BestFit;
 		case ProcessClass::StatelessClass:
 			return ProcessClass::GoodFit;

@@ -1397,4 +1397,5 @@ struct StorageWiggleValue {
 		serializer(ar, id);
 	}
 };
+
 #endif

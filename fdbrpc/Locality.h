@@ -43,7 +43,7 @@ struct ProcessClass {
 		DataDistributorClass,
 		CoordinatorClass,
 		RatekeeperClass,
-		ConsistencyCheckerClass,
+		ConsistencyScanClass,
 		StorageCacheClass,
 		BackupClass,
 		GrvProxyClass,
@@ -73,7 +73,7 @@ struct ProcessClass {
 		ClusterController,
 		DataDistributor,
 		Ratekeeper,
-		ConsistencyChecker,
+		ConsistencyScan,
 		BlobManager,
 		BlobWorker,
 		StorageCache,
@@ -112,7 +112,7 @@ public:
 		else if (s=="data_distributor") _class = DataDistributorClass;
 		else if (s=="coordinator") _class = CoordinatorClass;
 		else if (s=="ratekeeper") _class = RatekeeperClass;
-		else if (s=="consistency_checker") _class = ConsistencyCheckerClass;
+		else if (s=="consistency_scan") _class = ConsistencyScanClass;
 		else if (s=="blob_manager") _class = BlobManagerClass;
 		else if (s=="blob_worker") _class = BlobWorkerClass;
 		else if (s=="storage_cache") _class = StorageCacheClass;
@@ -143,7 +143,7 @@ public:
 		else if (classStr=="data_distributor") _class = DataDistributorClass;
 		else if (classStr=="coordinator") _class = CoordinatorClass;
 		else if (classStr=="ratekeeper") _class = RatekeeperClass;
-		else if (classStr=="consistency_checker") _class = ConsistencyCheckerClass;
+		else if (classStr=="consistency_scan") _class = ConsistencyScanClass;
 		else if (classStr=="blob_manager") _class = BlobManagerClass;
 		else if (classStr=="blob_worker") _class = BlobWorkerClass;
 		else if (classStr=="storage_cache") _class = StorageCacheClass;
@@ -184,7 +184,7 @@ public:
 			case DataDistributorClass: return "data_distributor";
 			case CoordinatorClass: return "coordinator";
 			case RatekeeperClass: return "ratekeeper";
-			case ConsistencyCheckerClass: return "consistency_checker";
+			case ConsistencyScanClass: return "consistency_scan";
 			case BlobManagerClass: return "blob_manager";
 			case BlobWorkerClass: return "blob_worker";
 			case StorageCacheClass: return "storage_cache";

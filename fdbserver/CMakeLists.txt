@@ -25,8 +25,8 @@ set(FDBSERVER_SRCS
   ConfigNode.actor.cpp
   ConfigNode.h
   ConflictSet.h
-  ConsistencyChecker.actor.cpp
-  ConsistencyCheckerInterface.h
+  ConsistencyScan.actor.cpp
+  ConsistencyScanInterface.h
   CoordinatedState.actor.cpp
   CoordinatedState.h
   Coordination.actor.cpp

@@ -550,7 +550,7 @@ ACTOR Future<Void> registrationClient(
     Reference<AsyncVar<Optional<RatekeeperInterface>> const> rkInterf,
     Reference<AsyncVar<Optional<std::pair<int64_t, BlobManagerInterface>>> const> bmInterf,
     Reference<AsyncVar<Optional<EncryptKeyProxyInterface>> const> ekpInterf,
-    Reference<AsyncVar<Optional<ConsistencyCheckerInterface>> const> ckInterf,
+    Reference<AsyncVar<Optional<ConsistencyScanInterface>> const> csInterf,
     Reference<AsyncVar<bool> const> degraded,
     Reference<IClusterConnectionRecord> connRecord,
     Reference<AsyncVar<std::set<std::string>> const> issues,
@@ -589,7 +589,7 @@ ACTOR Future<Void> registrationClient(
 		                              bmInterf->get().present() ? bmInterf->get().get().second
 		                                                        : Optional<BlobManagerInterface>(),
 		                              ekpInterf->get(),
-		                              ckInterf->get(),
+		                              csInterf->get(),
 		                              degraded->get(),
 		                              localConfig->lastSeenVersion(),
 		                              localConfig->configClassSet());
@@ -651,7 +651,7 @@ ACTOR Future<Void> registrationClient(
 			when(wait(ccInterface->onChange())) { break; }
 			when(wait(ddInterf->onChange())) { break; }
 			when(wait(rkInterf->onChange())) { break; }
-			when(wait(ckInterf->onChange())) { break; }
+			when(wait(csInterf->onChange())) { break; }
 			when(wait(bmInterf->onChange())) { break; }
 			when(wait(ekpInterf->onChange())) { break; }
 			when(wait(degraded->onChange())) { break; }
@@ -677,7 +677,7 @@ bool addressInDbAndPrimaryDc(const NetworkAddress& address, Reference<AsyncVar<S
 		return true;
 	}
 
-	if (dbi.consistencyChecker.present() && dbi.consistencyChecker.get().address() == address) {
+	if (dbi.consistencyScan.present() && dbi.consistencyScan.get().address() == address) {
 		return true;
 	}
 
@@ -1450,8 +1450,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	    new AsyncVar<Optional<std::pair<int64_t, BlobManagerInterface>>>());
 	state Reference<AsyncVar<Optional<EncryptKeyProxyInterface>>> ekpInterf(
 	    new AsyncVar<Optional<EncryptKeyProxyInterface>>());
-	state Reference<AsyncVar<Optional<ConsistencyCheckerInterface>>> ckInterf(
-	    new AsyncVar<Optional<ConsistencyCheckerInterface>>());
+	state Reference<AsyncVar<Optional<ConsistencyScanInterface>>> csInterf(
+	    new AsyncVar<Optional<ConsistencyScanInterface>>());
 	state Future<Void> handleErrors = workerHandleErrors(errors.getFuture()); // Needs to be stopped last
 	state ActorCollection errorForwarders(false);
 	state Future<Void> loggingTrigger = Void();
@@ -1735,7 +1735,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		                                       rkInterf,
 		                                       bmEpochAndInterf,
 		                                       ekpInterf,
-		                                       ckInterf,
+		                                       csInterf,
 		                                       degraded,
 		                                       connRecord,
 		                                       issues,
@@ -1934,32 +1934,33 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				printf("Ratekeeper_InitRequestDone\n");
 				req.reply.send(recruited);
 			}
-			when(InitializeConsistencyCheckerRequest req = waitNext(interf.consistencyChecker.getFuture())) {
+			when(InitializeConsistencyScanRequest req = waitNext(interf.consistencyScan.getFuture())) {
 				LocalLineage _;
-				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::ConsistencyChecker;
-				TraceEvent("ConsistencyChecker_InitRequest", req.reqId).log();
-				ConsistencyCheckerInterface recruited(locality, req.reqId);
+				getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::ConsistencyScan;
+				TraceEvent("ConsistencyScan_InitRequest", req.reqId).log();
+				ConsistencyScanInterface recruited(locality, req.reqId);
 				recruited.initEndpoints();
 
-				if (ckInterf->get().present()) {
-					recruited = ckInterf->get().get();
-					TEST(true); // Recruited while already a consistencychecker.
+				if (csInterf->get().present()) {
+					recruited = csInterf->get().get();
+					TEST(true); // Recruited while already a consistencyscan.
 				} else {
-					startRole(Role::CONSISTENCYCHECKER, recruited.id(), interf.id());
+					startRole(Role::CONSISTENCYSCAN, recruited.id(), interf.id());
 					DUMPTOKEN(recruited.waitFailure);
-					DUMPTOKEN(recruited.haltConsistencyChecker);
+					DUMPTOKEN(recruited.haltConsistencyScan);
 
-					Future<Void> consistencyCheckerProcess =
-					    consistencyChecker(recruited, dbInfo, req.restart, req.maxRate, req.targetInterval, connRecord);
+					Future<Void> consistencyScanProcess =
+					    consistencyScan(recruited, dbInfo, connRecord);
+					//consistencyScan(recruited, dbInfo, req.restart, req.maxRate, req.targetInterval, req.progressKey, connRecord);
 					errorForwarders.add(forwardError(errors,
-					                                 Role::CONSISTENCYCHECKER,
+					                                 Role::CONSISTENCYSCAN,
 					                                 recruited.id(),
-					                                 setWhenDoneOrError(consistencyCheckerProcess,
-					                                                    ckInterf,
-					                                                    Optional<ConsistencyCheckerInterface>())));
-					ckInterf->set(Optional<ConsistencyCheckerInterface>(recruited));
+					                                 setWhenDoneOrError(consistencyScanProcess,
+					                                                    csInterf,
+					                                                    Optional<ConsistencyScanInterface>())));
+					csInterf->set(Optional<ConsistencyScanInterface>(recruited));
 				}
-				TraceEvent("ConsistencyChecker_InitRequest", req.reqId).detail("ConsistencyCheckerId", recruited.id());
+				TraceEvent("ConsistencyScan_InitRequest", req.reqId).detail("ConsistencyScanId", recruited.id());
 				req.reply.send(recruited);
 			}
 			when(InitializeBlobManagerRequest req = waitNext(interf.blobManager.getFuture())) {
@@ -2922,4 +2923,4 @@ const Role Role::STORAGE_CACHE("StorageCache", "SC");
 const Role Role::COORDINATOR("Coordinator", "CD");
 const Role Role::BACKUP("Backup", "BK");
 const Role Role::ENCRYPT_KEY_PROXY("EncryptKeyProxy", "EP");
-const Role Role::CONSISTENCYCHECKER("ConsistencyChecker", "CK");
+const Role Role::CONSISTENCYSCAN("ConsistencyScan", "CS");

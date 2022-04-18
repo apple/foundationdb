@@ -130,7 +130,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                         "blob_manager",
                         "blob_worker",
                         "encrypt_key_proxy",
-                        "consistency_checker",
+                        "consistency_scan",
                         "storage_cache",
                         "router",
                         "coordinator"
@@ -536,7 +536,7 @@ const KeyRef JSONSchemas::statusSchema = LiteralStringRef(R"statusSchema(
                   "unreachable_ratekeeper_worker",
                   "unreachable_blobManager_worker",
                   "unreachable_encryptKeyProxy_worker",
-                  "unreachable_consistencyChecker_worker",
+                  "unreachable_consistencyScan_worker",
                   "unreadable_configuration",
                   "full_replication_timeout",
                   "client_issues",
