@@ -96,13 +96,13 @@ struct PrivateEndpoints : TestWorkload {
 		runFor = getOption(options, "runFor"_sr, 10.0);
 		addTestFor(&GrvProxyInterface::waitFailure);
 		addTestFor(&GrvProxyInterface::getHealthMetrics);
-		//addTestFor(&CommitProxyInterface::getStorageServerRejoinInfo);
+		// addTestFor(&CommitProxyInterface::getStorageServerRejoinInfo);
 		addTestFor(&CommitProxyInterface::waitFailure);
-		//addTestFor(&CommitProxyInterface::txnState);
-		//addTestFor(&CommitProxyInterface::getHealthMetrics);
-		//addTestFor(&CommitProxyInterface::proxySnapReq);
+		// addTestFor(&CommitProxyInterface::txnState);
+		// addTestFor(&CommitProxyInterface::getHealthMetrics);
+		// addTestFor(&CommitProxyInterface::proxySnapReq);
 		addTestFor(&CommitProxyInterface::exclusionSafetyCheckReq);
-		//addTestFor(&CommitProxyInterface::getDDMetrics);
+		// addTestFor(&CommitProxyInterface::getDDMetrics);
 	}
 	std::string description() const override { return WorkloadName; }
 	Future<Void> start(Database const& cx) override { return _start(this, cx); }
