@@ -3446,7 +3446,7 @@ ACTOR Future<Key> getKey(Reference<TransactionState> trState,
 }
 
 ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version, SpanContext spanContext) {
-	state Span span("NAPI:waitForCommittedVersion"_loc, SpanContext(), { spanContext });
+	state Span span("NAPI:waitForCommittedVersion"_loc, spanContext);
 	try {
 		loop {
 			choose {
