@@ -180,7 +180,7 @@ public:
 	// We've determined for initial tracing release, spans with only a location will not be traced. 
 	// Generally these are for background processes, some are called infrequently, while others may be high volume. 
 	// TODO: review and address in subsequent PRs.
-	Span(const Location& location) {}
+	Span(const Location& location) : location(location), begin(g_network->now()) {}
 
 	Span(const Span&) = delete;
 	Span(Span&& o) {
@@ -224,7 +224,8 @@ public:
 		if (!context.isSampled() && linkContext.isSampled()) {
 			context.m_Flags = TraceFlags::sampled;	
 			// If for some reason this span isn't valid, we need to give it a 
-			// traceID and spanID.
+			// traceID and spanID. This case is currently hit in CommitProxyServer 
+			// CommitBatchContext::CommitBatchContext and CommitBatchContext::setupTraceBatch.
 			if (!context.isValid()) {
 				context.traceID = deterministicRandom()->randomUniqueID();
 				context.spanID = deterministicRandom()->randomUInt64();
