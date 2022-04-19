@@ -851,6 +851,7 @@ ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster(Reference<Clust
 				rep.version = parent->lastEpochEnd;
 				rep.locked = locked;
 				rep.metadataVersion = metadataVersion;
+				rep.proxyId = parent->provisionalGrvProxies[0].id();
 				req.reply.send(rep);
 			} else
 				req.reply.send(Never()); // We can't perform causally consistent reads without recovering

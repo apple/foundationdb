@@ -26,21 +26,10 @@ namespace FdbApiTester {
 
 class ApiCorrectnessWorkload : public ApiWorkload {
 public:
-	ApiCorrectnessWorkload(const WorkloadConfig& config) : ApiWorkload(config) {
-		numRandomOperations = config.getIntOption("numRandomOperations", 1000);
-		numOpLeft = numRandomOperations;
-	}
-
-	void runTests() override { randomOperations(); }
+	ApiCorrectnessWorkload(const WorkloadConfig& config) : ApiWorkload(config) {}
 
 private:
 	enum OpType { OP_INSERT, OP_GET, OP_CLEAR, OP_CLEAR_RANGE, OP_COMMIT_READ, OP_LAST = OP_COMMIT_READ };
-
-	// The number of operations to be executed
-	int numRandomOperations;
-
-	// Operations counter
-	int numOpLeft;
 
 	void randomInsertOp(TTaskFct cont) {
 		int numKeys = Random::get().randomInt(1, maxKeysPerTransaction);
@@ -82,8 +71,11 @@ private:
 			    }
 			    auto results = std::make_shared<std::vector<std::optional<std::string>>>();
 			    execTransaction(
-			        [kvPairs, results](auto ctx) {
-				        ctx->tx()->setOption(FDB_TR_OPTION_USE_GRV_CACHE);
+			        [kvPairs, results, this](auto ctx) {
+				        if (apiVersion >= 710) {
+					        // Test GRV caching in 7.1 and later
+					        ctx->tx()->setOption(FDB_TR_OPTION_USE_GRV_CACHE);
+				        }
 				        auto futures = std::make_shared<std::vector<Future>>();
 				        for (const auto& kv : *kvPairs) {
 					        futures->push_back(ctx->tx()->get(kv.key, false));
@@ -210,14 +202,6 @@ private:
 			randomCommitReadOp(cont);
 			break;
 		}
-	}
-
-	void randomOperations() {
-		if (numOpLeft == 0)
-			return;
-
-		numOpLeft--;
-		randomOperation([this]() { randomOperations(); });
 	}
 };
 
