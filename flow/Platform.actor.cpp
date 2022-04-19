@@ -2040,7 +2040,7 @@ static void enableLargePages() {
 static void* mmapInternal(size_t length, int flags, bool guardPages) {
 	if (guardPages) {
 		constexpr size_t pageSize = 4096;
-		length += 2 * 4096; // Map enough for the guard pages
+		length += 2 * pageSize; // Map enough for the guard pages
 		void* resultWithGuardPages = mmap(nullptr, length, PROT_READ | PROT_WRITE, flags, -1, 0);
 		mprotect(resultWithGuardPages, pageSize, PROT_NONE); // left guard page
 		mprotect((void*)(uintptr_t(resultWithGuardPages) + length - pageSize), pageSize, PROT_NONE); // right guard page
