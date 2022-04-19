@@ -3446,7 +3446,6 @@ ACTOR Future<Key> getKey(Reference<TransactionState> trState,
 }
 
 ACTOR Future<Version> waitForCommittedVersion(Database cx, Version version, SpanContext spanContext) {
-	// TODO - ljoswiak, Parent or link? Below is linked constructor with empty parent.
 	state Span span("NAPI:waitForCommittedVersion"_loc, SpanContext(), { spanContext });
 	try {
 		loop {
