@@ -850,7 +850,7 @@ ACTOR Future<Void> assertFailure(GrvProxyInterface remote, Future<ErrorOr<GetRea
 Future<Void> attemptGRVFromOldProxies(std::vector<GrvProxyInterface> oldProxies,
                                       std::vector<GrvProxyInterface> newProxies) {
 	auto debugID = nondeterministicRandom()->randomUniqueID();
-	g_traceBatch.addEvent("AttemptGRVFromOldProxyDebug", debugID.first(), "NativeAPI.attemptGRVFromOldProxies.start");
+	g_traceBatch.addEvent("AttemptGRVFromOldProxyDebug", debugID.first(), "NativeAPI.attemptGRVFromOldProxies.Start");
 	Span span("VerifyCausalReadRisky"_loc);
 	std::vector<Future<Void>> replies;
 	replies.reserve(oldProxies.size());
@@ -3128,24 +3128,6 @@ ACTOR Future<Void> warmRange_impl(Reference<TransactionState> trState, KeyRange 
 
 	return Void();
 }
-
-// TODO - ljoswiak and mpilman. This will need some close inspection.
-// SpanContext generateSpanID(bool transactionTracingSample, SpanContext parentContext = SpanContext()) {
-// 	UID txnId = UID(deterministicRandom()->randomUInt64(), deterministicRandom()->randomUInt64());
-// 	if (parentContext.isValid()) {
-// 		txnId = parentContext.traceID;
-// 		uint64_t spanId = parentContext.spanID > 0 ? deterministicRandom()->randomUInt64() : 0;
-// 		return SpanContext(txnId, spanId);
-// 	} else if (transactionTracingSample) {
-// 		return SpanContext(txnId,
-// 		                   deterministicRandom()->randomUInt64(),
-// 		                   deterministicRandom()->random01() <= FLOW_KNOBS->TRACING_SAMPLE_RATE
-// 		                       ? TraceFlags::sampled
-// 		                       : TraceFlags::unsampled);
-// 	} else {
-// 		return SpanContext(txnId, 0);
-// 	}
-// }
 
 SpanContext generateSpanID(bool transactionTracingSample, SpanContext parentContext = SpanContext()) {
 	if (parentContext.isValid()) {
