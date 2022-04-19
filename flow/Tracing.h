@@ -256,6 +256,14 @@ public:
 		return *this;
 	}
 
+	Span& setParent(const SpanContext& parent) {
+		parentContext = parent;
+		context.traceID = parent.traceID;
+		context.spanID = deterministicRandom()->randomUInt64();
+		context.m_Flags = parent.m_Flags;
+		return *this;
+	}
+
 	Span& addParentOrLink(const SpanContext& other) {
 		if (!parentContext.isValid()) {
 			parentContext = other;
