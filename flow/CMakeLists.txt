@@ -84,6 +84,9 @@ set(FLOW_SRCS
   actorcompiler.h
   crc32c.h
   crc32c.cpp
+  crc32.S
+  crc32_wrapper.h
+  crc32_wrapper.c
   error_definitions.h
   ${CMAKE_CURRENT_BINARY_DIR}/SourceVersion.h
   flat_buffers.cpp
