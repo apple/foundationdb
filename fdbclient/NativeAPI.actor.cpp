@@ -6541,6 +6541,7 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 		}
 		// TODO - Should this be AddParentOrLink
 		TEST(true); // Adding link in FDBTransactionOptions::SPAN_PARENT
+		// TODO - rjenkins, create new 
 		span.addLink(BinaryReader::fromStringRef<SpanContext>(value.get(), IncludeVersion()));
 		break;
 
@@ -6760,7 +6761,7 @@ ACTOR Future<Version> extractReadVersion(Reference<TransactionState> trState,
                                          Future<GetReadVersionReply> f,
                                          Promise<Optional<Value>> metadataVersion) {
 	// TODO - ljoswiak link or parent? This is linking on last parameter.
-	state Span span(spanContext, location, { trState->spanContext });
+	state Span span(spanContext, location, trState->spanContext);
 	GetReadVersionReply rep = wait(f);
 	double replyTime = now();
 	double latency = replyTime - trState->startTime;
