@@ -114,35 +114,6 @@ struct SpanEventRef {
 
 class Span {
 public:
-	// Span(const SpanContext& context,
-	//      const Location& location,
-	//      const SpanContext& parentContext,
-	//      const std::initializer_list<SpanContext>& links = {})
-	//   : context(context), location(location), parentContext(parentContext), links(arena, links.begin(), links.end()),
-	//     begin(g_network->now()) {
-	// 	// We've simplified the logic here, essentially we're now always setting trace and span ids and relying on the
-	// 	// TraceFlags to determine if we're sampling. Therefore if the parent is sampled, we simply overwrite this
-	// 	// span's traceID with the parent trace id.
-	// 	if (parentContext.isSampled()) {
-	// 		this->context.traceID = UID(parentContext.traceID.first(), parentContext.traceID.second());
-	// 		this->context.m_Flags = TraceFlags::sampled;
-	// 	} else {
-	// 		// However there are two other cases.
-	// 		// 1. A legitamite parent span exists but it was not selected for tracing.
-	// 		// 2. There is no actual parent, just a default arg parent provided by the constructor AND the "child" span
-	// 		// was selected for sampling. For case 1. we handle below by marking the child as unsampled. For case 2 we
-	// 		// needn't do anything, and can rely on the values in this OTELSpan
-	// 		if (parentContext.traceID.first() != 0 && parentContext.traceID.second() != 0 &&
-	// 		    parentContext.spanID != 0) {
-	// 			this->context.m_Flags = TraceFlags::unsampled;
-	// 		}
-	// 	}
-	// 	this->kind = SpanKind::SERVER;
-	// 	this->status = SpanStatus::OK;
-	// 	this->attributes.push_back(
-	// 	    this->arena, KeyValueRef("address"_sr, StringRef(this->arena, g_network->getLocalAddress().toString())));
-	// }
-
 	// Construct a Span with a given context, location, parentContext and optional links.
 	//
 	// N.B. While this constructor receives a parentContext it does not overwrite the traceId of the Span's context.
