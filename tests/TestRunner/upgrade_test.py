@@ -353,6 +353,17 @@ class UpgradeTest:
                 test_retcode = self.tester_retcode
         return test_retcode
 
+    def grep_logs_for_events(self, severity):
+        return (
+            subprocess.getoutput(
+                "grep -r 'Severity=\"{}\"' {}".format(
+                    severity,
+                    self.cluster.log.as_posix())
+            )
+            .rstrip()
+            .splitlines()
+        )
+
     # Check the cluster log for errors
     def check_cluster_logs(self, error_limit=100):
         sev40s = (
@@ -380,8 +391,27 @@ class UpgradeTest:
             print(
                 ">>>>>>>>>>>>>>>>>>>> Found {} severity 40 events - the test fails", err_cnt)
         else:
-            print("No error found in logs")
+            print("No errors found in logs")
         return err_cnt == 0
+
+    # Check the server and client logs for warnings and dump them
+    def dump_warnings_in_logs(self, limit=100):
+        sev30s = (
+            subprocess.getoutput(
+                "grep -r 'Severity=\"30\"' {}".format(
+                    self.cluster.log.as_posix())
+            )
+            .rstrip()
+            .splitlines()
+        )
+
+        if (len(sev30s) == 0):
+            print("No warnings found in logs")
+        else:
+            print(">>>>>>>>>>>>>>>>>>>> Found {} severity 30 events (warnings):".format(
+                len(sev30s)))
+            for line in sev30s[:limit]:
+                print(line)
 
     # Dump the last cluster configuration and cluster logs
     def dump_cluster_logs(self):
@@ -457,6 +487,7 @@ if __name__ == "__main__":
         errcode = test.exec_test(args)
         if not test.check_cluster_logs():
             errcode = 1 if errcode == 0 else errcode
+        test.dump_warnings_in_logs()
         if errcode != 0 and not args.disable_log_dump:
             test.dump_cluster_logs()
 
