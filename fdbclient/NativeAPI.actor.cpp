@@ -5049,7 +5049,7 @@ Transaction::Transaction(Database const& cx, Optional<TenantName> const& tenant)
                                             cx->taskID,
                                             generateSpanID(cx->transactionTracingSample),
                                             createTrLogInfoProbabilistically(cx))),
-    // TODO - does this make sense, using the existing span context (traceId, spanId) for the transaction
+    // TODO - Review with Lukas. 
     span(trState->spanContext, "Transaction"_loc), backoff(CLIENT_KNOBS->DEFAULT_BACKOFF), tr(trState->spanContext) {
 	if (DatabaseContext::debugUseTags) {
 		debugAddTags(trState);
