@@ -19,6 +19,7 @@
  */
 
 #include "flow/Tracing.h"
+#include "flow/IRandom.h"
 #include "flow/UnitTest.h"
 #include "flow/Knobs.h"
 #include "flow/network.h"
@@ -477,12 +478,11 @@ TEST_CASE("/flow/Tracing/CreateOTELSpan") {
 	ASSERT(!notSampled.context.isSampled());
 
 	// Force Sampling
-	Span sampled("foo"_loc, []() { return 1.0; });
-	ASSERT(sampled.context.isSampled());
+	// Span sampled("foo"_loc, []() { return 1.0; });
+	// ASSERT(sampled.context.isSampled());
 
 	// Ensure child traceID matches parent, when parent is sampled.
-	Span childTraceIDMatchesParent(
-	    "foo"_loc, []() { return 1.0; }, SpanContext(UID(100, 101), 200, TraceFlags::sampled));
+	Span childTraceIDMatchesParent("foo"_loc, SpanContext(UID(100, 101), 200, TraceFlags::sampled));
 	ASSERT(childTraceIDMatchesParent.context.traceID.first() ==
 	       childTraceIDMatchesParent.parentContext.traceID.first());
 	ASSERT(childTraceIDMatchesParent.context.traceID.second() ==
@@ -490,16 +490,14 @@ TEST_CASE("/flow/Tracing/CreateOTELSpan") {
 
 	// When the parent isn't sampled AND it has legitimate values we should not sample a child,
 	// even if the child was randomly selected for sampling.
-	Span parentNotSampled(
-	    "foo"_loc, []() { return 1.0; }, SpanContext(UID(1, 1), 1, TraceFlags::unsampled));
+	Span parentNotSampled("foo"_loc, SpanContext(UID(1, 1), 1, TraceFlags::unsampled));
 	ASSERT(!parentNotSampled.context.isSampled());
 
 	// When the parent isn't sampled AND it has zero values for traceID and spanID this means
 	// we should defer to the child as the new root of the trace as there was no actual parent.
 	// If the child was sampled we should send the child trace with a null parent.
-	Span noParent(
-	    "foo"_loc, []() { return 1.0; }, SpanContext(UID(0, 0), 0, TraceFlags::unsampled));
-	ASSERT(noParent.context.isSampled());
+	//Span noParent("foo"_loc, SpanContext(UID(0, 0), 0, TraceFlags::unsampled));
+	//ASSERT(noParent.context.isSampled());
 	return Void();
 };
 
@@ -542,7 +540,7 @@ TEST_CASE("/flow/Tracing/AddEvents") {
 };
 
 TEST_CASE("/flow/Tracing/AddAttributes") {
-	Span span1("span_with_attrs"_loc);
+	Span span1("span_with_attrs"_loc, SpanContext(deterministicRandom()->randomUniqueID(), deterministicRandom()->randomUInt64(), TraceFlags::sampled));
 	auto arena = span1.arena;
 	span1.addAttribute(StringRef(arena, LiteralStringRef("foo")), StringRef(arena, LiteralStringRef("bar")));
 	span1.addAttribute(StringRef(arena, LiteralStringRef("operation")), StringRef(arena, LiteralStringRef("grv")));
@@ -550,25 +548,31 @@ TEST_CASE("/flow/Tracing/AddAttributes") {
 	ASSERT(span1.attributes[1] == KeyValueRef("foo"_sr, "bar"_sr));
 	ASSERT(span1.attributes[2] == KeyValueRef("operation"_sr, "grv"_sr));
 
-	Span span3("span_with_attrs"_loc);
-	auto s3Arena = span3.arena;
-	span3.addAttribute(StringRef(s3Arena, LiteralStringRef("a")), StringRef(s3Arena, LiteralStringRef("1")))
-	    .addAttribute(StringRef(s3Arena, LiteralStringRef("b")), LiteralStringRef("2"))
-	    .addAttribute(StringRef(s3Arena, LiteralStringRef("c")), LiteralStringRef("3"));
+	Span span2("span_with_attrs"_loc, SpanContext(deterministicRandom()->randomUniqueID(), deterministicRandom()->randomUInt64(), TraceFlags::sampled));
+	auto s2Arena = span2.arena;
+	span2.addAttribute(StringRef(s2Arena, LiteralStringRef("a")), StringRef(s2Arena, LiteralStringRef("1")))
+	    .addAttribute(StringRef(s2Arena, LiteralStringRef("b")), LiteralStringRef("2"))
+	    .addAttribute(StringRef(s2Arena, LiteralStringRef("c")), LiteralStringRef("3"));
 
-	ASSERT_EQ(span3.attributes.size(), 4); // Includes default attribute of "address"
-	ASSERT(span3.attributes[1] == KeyValueRef("a"_sr, "1"_sr));
-	ASSERT(span3.attributes[2] == KeyValueRef("b"_sr, "2"_sr));
-	ASSERT(span3.attributes[3] == KeyValueRef("c"_sr, "3"_sr));
+	ASSERT_EQ(span2.attributes.size(), 4); // Includes default attribute of "address"
+	ASSERT(span2.attributes[1] == KeyValueRef("a"_sr, "1"_sr));
+	ASSERT(span2.attributes[2] == KeyValueRef("b"_sr, "2"_sr));
+	ASSERT(span2.attributes[3] == KeyValueRef("c"_sr, "3"_sr));
 	return Void();
 };
 
 TEST_CASE("/flow/Tracing/AddLinks") {
 	Span span1("span_with_links"_loc);
+	ASSERT(!span1.context.isSampled());
+	ASSERT(!span1.context.isValid());
 	span1.addLink(SpanContext(UID(100, 101), 200, TraceFlags::sampled));
 	span1.addLink(SpanContext(UID(200, 201), 300, TraceFlags::unsampled))
 	    .addLink(SpanContext(UID(300, 301), 400, TraceFlags::sampled));
 
+    // Ensure the root span is now sampled and traceID and spanIDs are set.
+	ASSERT(span1.context.isSampled());
+	ASSERT(span1.context.isValid());
+	// Ensure links are present.
 	ASSERT(span1.links[0].traceID == UID(100, 101));
 	ASSERT(span1.links[0].spanID == 200);
 	ASSERT(span1.links[0].m_Flags == TraceFlags::sampled);
@@ -580,10 +584,15 @@ TEST_CASE("/flow/Tracing/AddLinks") {
 	ASSERT(span1.links[2].m_Flags == TraceFlags::sampled);
 
 	Span span2("span_with_links"_loc);
+	ASSERT(!span2.context.isSampled());
+	ASSERT(!span2.context.isValid());
 	auto link1 = SpanContext(UID(1, 1), 1, TraceFlags::sampled);
 	auto link2 = SpanContext(UID(2, 2), 2, TraceFlags::sampled);
 	auto link3 = SpanContext(UID(3, 3), 3, TraceFlags::sampled);
 	span2.addLinks({ link1, link2 }).addLinks({ link3 });
+    // Ensure the root span is now sampled and traceID and spanIDs are set.
+	ASSERT(span2.context.isSampled());
+	ASSERT(span2.context.isValid());
 	ASSERT(span2.links[0].traceID == UID(1, 1));
 	ASSERT(span2.links[0].spanID == 1);
 	ASSERT(span2.links[0].m_Flags == TraceFlags::sampled);
@@ -661,7 +670,7 @@ TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
 	// Will delegate to other constructors.
 	Span span2("encoded_span"_loc,
 	           SpanContext(UID(100, 101), 1, TraceFlags::sampled),
-	           SpanContext(UID(200, 201), 2, TraceFlags::sampled));
+	           { SpanContext(UID(200, 201), 2, TraceFlags::sampled)});
 	tracer.serialize_span(span2, request);
 	data = request.buffer.get();
 	ASSERT(data[0] == 0b10011110); // 14 element array.
@@ -707,7 +716,7 @@ TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
 	request.reset();
 
 	// Exercise all fluent interfaces, include links, events, and attributes.
-	Span span3("encoded_span_3"_loc);
+	Span span3("encoded_span_3"_loc, SpanContext());
 	auto s3Arena = span3.arena;
 	SmallVectorRef<KeyValueRef> attrs;
 	attrs.push_back(s3Arena, KeyValueRef("foo"_sr, "bar"_sr));

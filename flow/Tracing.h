@@ -51,7 +51,7 @@ struct SpanContext {
 	  : traceID(span.traceID), spanID(span.spanID), m_Flags(span.m_Flags) {}
 	bool isSampled() const { return (m_Flags & TraceFlags::sampled) == TraceFlags::sampled; }
 	std::string toString() const { return format("%016llx%016llx%016llx", traceID.first(), traceID.second(), spanID); };
-	bool isValid() const { return traceID.first() != 0 && traceID.second() != 0; }
+	bool isValid() const { return traceID.first() != 0 && traceID.second() != 0 && spanID != 0; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -114,66 +114,73 @@ struct SpanEventRef {
 
 class Span {
 public:
+	// Span(const SpanContext& context,
+	//      const Location& location,
+	//      const SpanContext& parentContext,
+	//      const std::initializer_list<SpanContext>& links = {})
+	//   : context(context), location(location), parentContext(parentContext), links(arena, links.begin(), links.end()),
+	//     begin(g_network->now()) {
+	// 	// We've simplified the logic here, essentially we're now always setting trace and span ids and relying on the
+	// 	// TraceFlags to determine if we're sampling. Therefore if the parent is sampled, we simply overwrite this
+	// 	// span's traceID with the parent trace id.
+	// 	if (parentContext.isSampled()) {
+	// 		this->context.traceID = UID(parentContext.traceID.first(), parentContext.traceID.second());
+	// 		this->context.m_Flags = TraceFlags::sampled;
+	// 	} else {
+	// 		// However there are two other cases.
+	// 		// 1. A legitamite parent span exists but it was not selected for tracing.
+	// 		// 2. There is no actual parent, just a default arg parent provided by the constructor AND the "child" span
+	// 		// was selected for sampling. For case 1. we handle below by marking the child as unsampled. For case 2 we
+	// 		// needn't do anything, and can rely on the values in this OTELSpan
+	// 		if (parentContext.traceID.first() != 0 && parentContext.traceID.second() != 0 &&
+	// 		    parentContext.spanID != 0) {
+	// 			this->context.m_Flags = TraceFlags::unsampled;
+	// 		}
+	// 	}
+	// 	this->kind = SpanKind::SERVER;
+	// 	this->status = SpanStatus::OK;
+	// 	this->attributes.push_back(
+	// 	    this->arena, KeyValueRef("address"_sr, StringRef(this->arena, g_network->getLocalAddress().toString())));
+	// }
+
+	// Construct a Span with a given context, location, parentContext and optional links.
+	//
+	// N.B. While this constructor receives a parentContext it does not overwrite the traceId of the Span's context.
+	// Therefore it is the responsibility of the caller to ensure the traceID and m_Flags of both the context and parentContext
+	// are identical if the caller wishes to establish a parent/child relationship between these spans. We do this
+	// to avoid needless comparisons or copies as this constructor is only called once in NativeAPI.actor.cpp and from
+	// below in the by the Span(location, parent, links) constructor. The Span(location, parent, links) constructor is used broadly
+	// and performs the copy of the parent's traceID and m_Flags.
 	Span(const SpanContext& context,
 	     const Location& location,
 	     const SpanContext& parentContext,
 	     const std::initializer_list<SpanContext>& links = {})
 	  : context(context), location(location), parentContext(parentContext), links(arena, links.begin(), links.end()),
 	    begin(g_network->now()) {
-		// We've simplified the logic here, essentially we're now always setting trace and span ids and relying on the
-		// TraceFlags to determine if we're sampling. Therefore if the parent is sampled, we simply overwrite this
-		// span's traceID with the parent trace id.
-		if (parentContext.isSampled()) {
-			this->context.traceID = UID(parentContext.traceID.first(), parentContext.traceID.second());
-			this->context.m_Flags = TraceFlags::sampled;
-		} else {
-			// However there are two other cases.
-			// 1. A legitamite parent span exists but it was not selected for tracing.
-			// 2. There is no actual parent, just a default arg parent provided by the constructor AND the "child" span
-			// was selected for sampling. For case 1. we handle below by marking the child as unsampled. For case 2 we
-			// needn't do anything, and can rely on the values in this OTELSpan
-			if (parentContext.traceID.first() != 0 && parentContext.traceID.second() != 0 &&
-			    parentContext.spanID != 0) {
-				this->context.m_Flags = TraceFlags::unsampled;
-			}
-		}
 		this->kind = SpanKind::SERVER;
 		this->status = SpanStatus::OK;
 		this->attributes.push_back(
 		    this->arena, KeyValueRef("address"_sr, StringRef(this->arena, g_network->getLocalAddress().toString())));
 	}
 
+	// Construct Span with a location, parent, and optional links.
+	// This constructor copies the parent's traceID creating a parent->child relationship between Spans. 
+	// Additionally we inherit the m_Flags of the parent, thus enabling or disabling sampling to match the parent.
 	Span(const Location& location,
-	     const SpanContext& parent = SpanContext(),
+	     const SpanContext& parent,
 	     const std::initializer_list<SpanContext>& links = {})
-	  : Span(SpanContext(UID(deterministicRandom()->randomUInt64(), deterministicRandom()->randomUInt64()), // traceID
-	                     deterministicRandom()->randomUInt64(), // spanID
-	                     deterministicRandom()->random01() < FLOW_KNOBS->TRACING_SAMPLE_RATE // sampled or unsampled
-	                         ? TraceFlags::sampled
-	                         : TraceFlags::unsampled),
+	  : Span(SpanContext(parent.traceID, deterministicRandom()->randomUInt64(), parent.m_Flags),
 	         location,
 	         parent,
 	         links) {}
 
+	// Construct Span without parent. Used for creating a root span, or when the parent is not known at construction time. 
 	Span(const SpanContext& context, const Location& location) : Span(context, location, SpanContext()) {}
 
-	Span(const Location& location, const SpanContext parent, const SpanContext& link)
-	  : Span(location, parent, { link }) {}
-
-	// Span(const Location& location) : Span(location, SpanContext()) {}
-	//  NOTE: This constructor is primarly for unit testing until we sort out how to enable/disable a Knob dynamically
-	//  in a test.
-	Span(const Location& location,
-	     const std::function<double()>& rateProvider,
-	     const SpanContext& parent = SpanContext(),
-	     const std::initializer_list<SpanContext>& links = {})
-	  : Span(SpanContext(UID(deterministicRandom()->randomUInt64(), deterministicRandom()->randomUInt64()),
-	                     deterministicRandom()->randomUInt64(),
-	                     deterministicRandom()->random01() < rateProvider() ? TraceFlags::sampled
-	                                                                        : TraceFlags::unsampled),
-	         location,
-	         parent,
-	         links) {}
+	// We've determined for initial tracing release, spans with only a location will not be traced. 
+	// Generally these are for background processes, some are called infrequently, while others may be high volume. 
+	// TODO: review and address in subsequent PRs.
+	Span(const Location& location) {}
 
 	Span(const Span&) = delete;
 	Span(Span&& o) {
@@ -213,12 +220,22 @@ public:
 
 	Span& addLink(const SpanContext& linkContext) {
 		links.push_back(arena, linkContext);
+		// Check if link is sampled, if so sample this span.
+		if (!context.isSampled() && linkContext.isSampled()) {
+			context.m_Flags = TraceFlags::sampled;	
+			// If for some reason this span isn't valid, we need to give it a 
+			// traceID and spanID.
+			if (!context.isValid()) {
+				context.traceID = deterministicRandom()->randomUniqueID();
+				context.spanID = deterministicRandom()->randomUInt64();
+			}
+		}
 		return *this;
 	}
 
 	Span& addLinks(const std::initializer_list<SpanContext>& linkContexts = {}) {
 		for (auto const& sc : linkContexts) {
-			links.push_back(arena, sc);
+			addLink(sc);
 		}
 		return *this;
 	}
