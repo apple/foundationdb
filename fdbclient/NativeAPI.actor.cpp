@@ -849,6 +849,8 @@ ACTOR Future<Void> assertFailure(GrvProxyInterface remote, Future<ErrorOr<GetRea
 
 Future<Void> attemptGRVFromOldProxies(std::vector<GrvProxyInterface> oldProxies,
                                       std::vector<GrvProxyInterface> newProxies) {
+	auto debugID = nondeterministicRandom()->randomUniqueID();
+	g_traceBatch.addEvent("AttemptGRVFromOldProxyDebug", debugID.first(), "NativeAPI.attemptGRVFromOldProxies.start");
 	Span span("VerifyCausalReadRisky"_loc);
 	std::vector<Future<Void>> replies;
 	replies.reserve(oldProxies.size());
@@ -5890,8 +5892,7 @@ ACTOR static Future<Void> commitDummyTransaction(Reference<TransactionState> trS
 	// You would check if there is no parent set and if so, you'd overwrite the traceids.
 	//
 	// Need to determine if this behavior matches previously intended, here we'd just always set parent.
-	state Span span("NAPI:dummyTransaction"_loc, trState->spanContext);
-	// tr.span.addParentOrLink(span.context);
+	state Span span(trState->spanContext, "NAPI:dummyTransaction"_loc, span.context);
 	loop {
 		try {
 			TraceEvent("CommitDummyTransaction").detail("Key", range.begin).detail("Retries", retries);
@@ -6554,9 +6555,7 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 		if (value.get().size() != 33) {
 			throw invalid_option_value();
 		}
-		// TODO - Should this be AddParentOrLink
 		TEST(true); // Adding link in FDBTransactionOptions::SPAN_PARENT
-		// TODO - rjenkins, create new
 		span.setParent(BinaryReader::fromStringRef<SpanContext>(value.get(), IncludeVersion()));
 		break;
 
@@ -6715,7 +6714,6 @@ ACTOR Future<Void> readVersionBatcher(DatabaseContext* cx,
 					}
 					g_traceBatch.addAttach("TransactionAttachID", req.debugID.get().first(), debugID.get().first());
 				}
-				// TODO - ljoswiak. Link seems appropriate here.
 				span.addLink(req.spanContext);
 				requests.push_back(req.reply);
 				for (auto tag : req.tags) {
