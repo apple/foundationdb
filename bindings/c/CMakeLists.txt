@@ -253,6 +253,7 @@ endif()
             ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests
             )
 
+if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(ppc64le|powerpc64le)")
 if(NOT USE_SANITIZER)
   add_test(NAME fdb_c_upgrade_single_threaded
       COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
@@ -272,7 +273,7 @@ if(NOT USE_SANITIZER)
           --process-number 3
     )
 endif()
-
+endif()
 endif()
 
 set(c_workloads_srcs
