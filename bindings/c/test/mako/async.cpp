@@ -107,7 +107,7 @@ void ResumableStateForRunWorkload::runOneTick() {
 	assert(iter != OpEnd);
 	watch_step.start();
 	if (iter.step == 0 /* first step */) {
-		watch_per_op[iter.op] = Stopwatch(watch_step.getStart());
+		watch_op = Stopwatch(watch_step.getStart());
 	}
 	auto f = Future{};
 	// to minimize context switch overhead, repeat immediately completed ops
@@ -208,9 +208,9 @@ void ResumableStateForRunWorkload::updateStepStats() {
 	if (iter.step + 1 == opTable[iter.op].steps()) {
 		if (opTable[iter.op].needsCommit())
 			needs_commit = true;
-		watch_per_op[iter.op].setStop(watch_step.getStop());
+		watch_op.setStop(watch_step.getStop());
 		if (do_sample) {
-			const auto op_latency = watch_per_op[iter.op].diff();
+			const auto op_latency = watch_op.diff();
 			stats.addLatency(iter.op, op_latency);
 			sample_bins[iter.op].put(op_latency);
 		}

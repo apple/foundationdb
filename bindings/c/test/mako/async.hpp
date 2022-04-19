@@ -87,8 +87,8 @@ struct ResumableStateForRunWorkload : std::enable_shared_from_this<ResumableStat
 	fdb::ByteString key1;
 	fdb::ByteString key2;
 	fdb::ByteString val;
-	std::array<Stopwatch, MAX_OP> watch_per_op;
 	Stopwatch watch_step;
+	Stopwatch watch_op;
 	Stopwatch watch_commit;
 	Stopwatch watch_tx;
 	Stopwatch watch_task;

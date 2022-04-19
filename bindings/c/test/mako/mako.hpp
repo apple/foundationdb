@@ -22,7 +22,7 @@
 #define MAKO_HPP
 
 #ifndef FDB_API_VERSION
-#define FDB_API_VERSION 710
+#define FDB_API_VERSION 720
 #endif
 
 #include <array>
@@ -43,10 +43,6 @@
 #else
 #include <limits.h>
 #endif
-#include "operations.hpp"
-#include "shm.hpp"
-#include "stats.hpp"
-#include "time.hpp"
 
 namespace mako {
 
@@ -83,6 +79,28 @@ enum ArgKind {
 	ARG_CLIENT_THREADS_PER_VERSION,
 	ARG_JSON_REPORT,
 	ARG_BG_FILE_PATH // if blob granule files are stored locally, mako will read and materialize them if this is set
+};
+
+/* transaction specification */
+enum OpKind {
+	OP_GETREADVERSION,
+	OP_GET,
+	OP_GETRANGE,
+	OP_SGET,
+	OP_SGETRANGE,
+	OP_UPDATE,
+	OP_INSERT,
+	OP_INSERTRANGE,
+	OP_OVERWRITE,
+	OP_CLEAR,
+	OP_SETCLEAR,
+	OP_CLEARRANGE,
+	OP_SETCLEARRANGE,
+	OP_COMMIT,
+	OP_TRANSACTION, /* pseudo-operation - cumulative time for the operation + commit */
+	OP_TASK, /* pseudo-operation - cumulative time for each iteraton in runWorkload */
+	OP_READ_BG,
+	MAX_OP /* must be the last item */
 };
 
 enum TPSChangeTypes { TPS_SIN, TPS_SQUARE, TPS_PULSE };
@@ -152,17 +170,6 @@ struct Arguments {
 constexpr const int SIGNAL_RED = 0;
 constexpr const int SIGNAL_GREEN = 1;
 constexpr const int SIGNAL_OFF = 2;
-
-/* args for threads */
-struct alignas(64) ThreadArgs {
-	int worker_id;
-	int thread_id;
-	pid_t parent_id;
-	LatencySampleBinArray sample_bins;
-	Arguments const* args;
-	shared_memory::Access shm;
-	fdb::Database database; // database to work with
-};
 
 } // namespace mako
 

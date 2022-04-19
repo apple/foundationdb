@@ -54,12 +54,32 @@
 #include <fmt/printf.h>
 #include <fdb_api.hpp>
 #include "fdbclient/zipf.h"
+
+#include "async.hpp"
+#include "future.hpp"
 #include "logger.hpp"
 #include "mako.hpp"
+#include "operations.hpp"
 #include "process.hpp"
 #include "utils.hpp"
-#include "future.hpp"
-#include "async.hpp"
+#include "shm.hpp"
+#include "stats.hpp"
+#include "time.hpp"
+
+namespace mako {
+
+/* args for threads */
+struct alignas(64) ThreadArgs {
+	int worker_id;
+	int thread_id;
+	pid_t parent_id;
+	LatencySampleBinArray sample_bins;
+	Arguments const* args;
+	shared_memory::Access shm;
+	fdb::Database database; // database to work with
+};
+
+} // namespace mako
 
 using namespace fdb;
 using namespace mako;
@@ -201,7 +221,7 @@ int populate(Transaction tx,
 }
 
 /* run one iteration of configured task */
-int runOneTask(Transaction tx,
+int runOneTask(Transaction& tx,
                Arguments const& args,
                ThreadStatistics& stats,
                LatencySampleBinArray& sample_bins,
@@ -209,25 +229,19 @@ int runOneTask(Transaction tx,
                ByteString& key2,
                ByteString& val) {
 	const auto do_sample = (stats.getOpCount(OP_TASK) % args.sampling) == 0;
-	auto watch_task = Stopwatch{};
-	auto watch_tx = Stopwatch{};
+	auto watch_task = Stopwatch(StartAtCtor{});
+	auto watch_tx = Stopwatch(watch_task.getStart());
 	auto watch_op = Stopwatch{};
-	if (do_sample) {
-		watch_tx.start();
-		watch_task = Stopwatch(watch_tx.getStart());
-	}
 
 	auto op_iter = getOpBegin(args);
 	auto needs_commit = false;
+task_begin:
 	while (op_iter != OpEnd) {
 		const auto [op, count, step] = op_iter;
 		const auto step_kind = opTable[op].stepKind(step);
-		auto watch_step = Stopwatch{};
-		if (do_sample) {
-			watch_step.start();
-			if (step == 0 /* first step */)
-				watch_op = Stopwatch(watch_step.getStart());
-		}
+		auto watch_step = Stopwatch(StartAtCtor{});
+		if (step == 0 /* first step */)
+			watch_op = Stopwatch(watch_step.getStart());
 		auto f = opTable[op].stepFunction(step)(tx, args, key1, key2, val);
 		auto future_rc = FutureRC::OK;
 		if (f) {
@@ -239,8 +253,7 @@ int runOneTask(Transaction tx,
 		}
 		if (auto postStepFn = opTable[op].postStepFunction(step))
 			postStepFn(f, tx, args, key1, key2, val);
-		if (do_sample)
-			watch_step.stop();
+		watch_step.stop();
 		if (future_rc != FutureRC::OK) {
 			if (future_rc == FutureRC::CONFLICT) {
 				stats.incrConflictCount();
@@ -279,8 +292,8 @@ int runOneTask(Transaction tx,
 		if (step + 1 == opTable[op].steps() /* last step */) {
 			if (opTable[op].needsCommit())
 				needs_commit = true;
+			watch_op.setStop(watch_step.getStop());
 			if (do_sample) {
-				watch_op.setStop(watch_step.getStop());
 				const auto op_latency = watch_op.diff();
 				stats.addLatency(op, op_latency);
 				sample_bins[op].put(op_latency);
@@ -289,46 +302,40 @@ int runOneTask(Transaction tx,
 		}
 		// move to next op
 		op_iter = getOpNext(args, op_iter);
-
-		// reached the end?
-		if (op_iter == OpEnd && (needs_commit || args.commit_get)) {
-			auto watch_commit = Stopwatch();
-			if (do_sample)
-				watch_commit.start();
-			auto f = tx.commit();
-			const auto rc = waitAndHandleError(tx, f, "COMMIT_AT_TX_END");
+	}
+	// reached the end?
+	if (needs_commit || args.commit_get) {
+		auto watch_commit = Stopwatch(StartAtCtor{});
+		auto f = tx.commit();
+		const auto rc = waitAndHandleError(tx, f, "COMMIT_AT_TX_END");
+		watch_commit.stop();
+		watch_tx.setStop(watch_commit.getStop());
+		auto tx_resetter = ExitGuard([&watch_tx, &tx]() {
+			tx.reset();
+			watch_tx.startFromStop();
+		});
+		if (rc == FutureRC::OK) {
 			if (do_sample) {
-				watch_commit.stop();
-				watch_tx.setStop(watch_commit.getStop());
+				const auto commit_latency = watch_commit.diff();
+				const auto tx_duration = watch_tx.diff();
+				stats.addLatency(OP_COMMIT, commit_latency);
+				stats.addLatency(OP_TRANSACTION, tx_duration);
+				sample_bins[OP_COMMIT].put(commit_latency);
+				sample_bins[OP_TRANSACTION].put(tx_duration);
 			}
-			auto tx_resetter = ExitGuard([&do_sample, &watch_tx, &tx]() {
-				tx.reset();
-				if (do_sample)
-					watch_tx.startFromStop();
-			});
-			if (rc == FutureRC::OK) {
-				if (do_sample) {
-					const auto commit_latency = watch_commit.diff();
-					const auto tx_duration = watch_tx.diff();
-					stats.addLatency(OP_COMMIT, commit_latency);
-					stats.addLatency(OP_TRANSACTION, tx_duration);
-					sample_bins[OP_COMMIT].put(commit_latency);
-					sample_bins[OP_TRANSACTION].put(tx_duration);
-				}
-				stats.incrOpCount(OP_COMMIT);
-				stats.incrOpCount(OP_TRANSACTION);
-			} else {
-				if (rc == FutureRC::CONFLICT)
-					stats.incrConflictCount();
-				else
-					stats.incrErrorCount(OP_COMMIT);
-				if (rc == FutureRC::ABORT) {
-					return -1;
-				}
-				// restart from beginning
-				op_iter = getOpBegin(args);
+			stats.incrOpCount(OP_COMMIT);
+			stats.incrOpCount(OP_TRANSACTION);
+		} else {
+			if (rc == FutureRC::CONFLICT)
+				stats.incrConflictCount();
+			else
+				stats.incrErrorCount(OP_COMMIT);
+			if (rc == FutureRC::ABORT) {
+				return -1;
 			}
-			needs_commit = false;
+			// restart from beginning
+			op_iter = getOpBegin(args);
+			goto task_begin;
 		}
 	}
 	// one task iteration has completed successfully

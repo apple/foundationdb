@@ -30,31 +30,6 @@ extern thread_local mako::Logger logr;
 
 namespace mako {
 
-OpIterator getOpBegin(Arguments const& args) noexcept {
-	for (auto op = 0; op < MAX_OP; op++) {
-		if (isAbstractOp(op) || args.txnspec.ops[op][OP_COUNT] == 0)
-			continue;
-		return OpIterator{ op, 0, 0 };
-	}
-	return OpEnd;
-}
-
-OpIterator getOpNext(Arguments const& args, OpIterator current) noexcept {
-	if (OpEnd == current)
-		return OpEnd;
-	auto [op, count, step] = current;
-	assert(op < MAX_OP && !isAbstractOp(op));
-	if (opTable[op].steps() > step + 1)
-		return OpIterator{ op, count, step + 1 };
-	count++;
-	for (; op < MAX_OP; op++, count = 0) {
-		if (isAbstractOp(op) || args.txnspec.ops[op][OP_COUNT] <= count)
-			continue;
-		return OpIterator{ op, count, 0 };
-	}
-	return OpEnd;
-}
-
 using namespace fdb;
 
 inline int nextKey(Arguments const& args) {
@@ -63,40 +38,36 @@ inline int nextKey(Arguments const& args) {
 	return urand(0, args.rows - 1);
 }
 
-char const* getOpName(int ops_code) {
-	if (ops_code >= 0 && ops_code < MAX_OP)
-		return opTable[ops_code].name().data();
-	return "";
-}
-
 const std::array<Operation, MAX_OP> opTable{
 	{ { "GRV",
 	    { { StepKind::READ,
-	        [](Transaction tx, Arguments const&, ByteString&, ByteString&, ByteString&) {
+	        [](Transaction& tx, Arguments const&, ByteString&, ByteString&, ByteString&) {
 	            return tx.getReadVersion().eraseType();
 	        },
-	        [](Future f, Transaction, Arguments const&, ByteString&, ByteString&, ByteString&) {
+	        [](Future& f, Transaction&, Arguments const&, ByteString&, ByteString&, ByteString&) {
 	            if (f && !f.error()) {
 		            f.get<future_var::Int64>();
 	            }
 	        } } },
+	    1,
 	    false },
 	  { "GET",
 	    { { StepKind::READ,
-	        [](Transaction tx, Arguments const& args, ByteString& key, ByteString&, ByteString&) {
+	        [](Transaction& tx, Arguments const& args, ByteString& key, ByteString&, ByteString&) {
 	            const auto num = nextKey(args);
 	            genKey(key, KEY_PREFIX, args, num);
 	            return tx.get(key, false /*snapshot*/).eraseType();
 	        },
-	        [](Future f, Transaction, Arguments const&, ByteString&, ByteString&, ByteString& val) {
+	        [](Future& f, Transaction&, Arguments const&, ByteString&, ByteString&, ByteString& val) {
 	            if (f && !f.error()) {
 		            f.get<future_var::Value>();
 	            }
 	        } } },
+	    1,
 	    false },
 	  { "GETRANGE",
 	    { { StepKind::READ,
-	        [](Transaction tx, Arguments const& args, ByteString& begin, ByteString& end, ByteString&) {
+	        [](Transaction& tx, Arguments const& args, ByteString& begin, ByteString& end, ByteString&) {
 	            const auto num_begin = nextKey(args);
 	            genKey(begin, KEY_PREFIX, args, num_begin);
 	            auto num_end = num_begin + args.txnspec.ops[OP_GETRANGE][OP_RANGE] - 1;
@@ -114,30 +85,32 @@ const std::array<Operation, MAX_OP> opTable{
 	                                                                        args.txnspec.ops[OP_GETRANGE][OP_REVERSE])
 	                .eraseType();
 	        },
-	        [](Future f, Transaction, Arguments const&, ByteString&, ByteString&, ByteString& val) {
+	        [](Future& f, Transaction&, Arguments const&, ByteString&, ByteString&, ByteString& val) {
 	            if (f && !f.error()) {
 		            f.get<future_var::KeyValueArray>();
 	            }
 	        } } },
+	    1,
 	    false },
 	  { "SGET",
 	    { { StepKind::READ,
-	        [](Transaction tx, Arguments const& args, ByteString& key, ByteString&, ByteString&) {
+	        [](Transaction& tx, Arguments const& args, ByteString& key, ByteString&, ByteString&) {
 	            const auto num = nextKey(args);
 	            genKey(key, KEY_PREFIX, args, num);
 	            return tx.get(key, true /*snapshot*/).eraseType();
 	        },
-	        [](Future f, Transaction, Arguments const&, ByteString&, ByteString&, ByteString& val) {
+	        [](Future& f, Transaction&, Arguments const&, ByteString&, ByteString&, ByteString& val) {
 	            if (f && !f.error()) {
 		            f.get<future_var::Value>();
 	            }
 	        } } },
+	    1,
 	    false },
 	  { "SGETRANGE",
 	    { {
 
 	        StepKind::READ,
-	        [](Transaction tx, Arguments const& args, ByteString& begin, ByteString& end, ByteString&) {
+	        [](Transaction& tx, Arguments const& args, ByteString& begin, ByteString& end, ByteString&) {
 	            const auto num_begin = nextKey(args);
 	            genKey(begin, KEY_PREFIX, args, num_begin);
 	            auto num_end = num_begin + args.txnspec.ops[OP_SGETRANGE][OP_RANGE] - 1;
@@ -155,34 +128,36 @@ const std::array<Operation, MAX_OP> opTable{
 	                                                                        args.txnspec.ops[OP_SGETRANGE][OP_REVERSE])
 	                .eraseType();
 	        },
-	        [](Future f, Transaction, Arguments const&, ByteString&, ByteString&, ByteString& val) {
+	        [](Future& f, Transaction&, Arguments const&, ByteString&, ByteString&, ByteString& val) {
 	            if (f && !f.error()) {
 		            f.get<future_var::KeyValueArray>();
 	            }
 	        } } },
+	    1,
 	    false },
 	  { "UPDATE",
 	    { { StepKind::READ,
-	        [](Transaction tx, Arguments const& args, ByteString& key, ByteString&, ByteString&) {
+	        [](Transaction& tx, Arguments const& args, ByteString& key, ByteString&, ByteString&) {
 	            const auto num = nextKey(args);
 	            genKey(key, KEY_PREFIX, args, num);
 	            return tx.get(key, false /*snapshot*/).eraseType();
 	        },
-	        [](Future f, Transaction, Arguments const&, ByteString&, ByteString&, ByteString& val) {
+	        [](Future& f, Transaction&, Arguments const&, ByteString&, ByteString&, ByteString& val) {
 	            if (f && !f.error()) {
 		            f.get<future_var::Value>();
 	            }
 	        } },
 	      { StepKind::IMM,
-	        [](Transaction tx, Arguments const& args, ByteString& key, ByteString&, ByteString& value) {
+	        [](Transaction& tx, Arguments const& args, ByteString& key, ByteString&, ByteString& value) {
 	            randomString(value, args.value_length);
 	            tx.set(key, value);
 	            return Future();
 	        } } },
+	    2,
 	    true },
 	  { "INSERT",
 	    { { StepKind::IMM,
-	        [](Transaction tx, Arguments const& args, ByteString& key, ByteString&, ByteString& value) {
+	        [](Transaction& tx, Arguments const& args, ByteString& key, ByteString&, ByteString& value) {
 	            genKeyPrefix(key, KEY_PREFIX, args);
 	            // concat([padding], key_prefix, random_string): reasonably unique
 	            randomString<false /*clear-before-append*/>(key, args.key_length - static_cast<int>(key.size()));
@@ -190,10 +165,11 @@ const std::array<Operation, MAX_OP> opTable{
 	            tx.set(key, value);
 	            return Future();
 	        } } },
+	    1,
 	    true },
 	  { "INSERTRANGE",
 	    { { StepKind::IMM,
-	        [](Transaction tx, Arguments const& args, ByteString& key, ByteString&, ByteString& value) {
+	        [](Transaction& tx, Arguments const& args, ByteString& key, ByteString&, ByteString& value) {
 	            genKeyPrefix(key, KEY_PREFIX, args);
 	            const auto prefix_len = static_cast<int>(key.size());
 	            const auto range = args.txnspec.ops[OP_INSERTRANGE][OP_RANGE];
@@ -211,27 +187,30 @@ const std::array<Operation, MAX_OP> opTable{
 	            }
 	            return Future();
 	        } } },
+	    1,
 	    true },
 	  { "OVERWRITE",
 	    { { StepKind::IMM,
-	        [](Transaction tx, Arguments const& args, ByteString& key, ByteString&, ByteString& value) {
+	        [](Transaction& tx, Arguments const& args, ByteString& key, ByteString&, ByteString& value) {
 	            genKey(key, KEY_PREFIX, args, nextKey(args));
 	            randomString(value, args.value_length);
 	            tx.set(key, value);
 	            return Future();
 	        } } },
+	    1,
 	    true },
 	  { "CLEAR",
 	    { { StepKind::IMM,
-	        [](Transaction tx, Arguments const& args, ByteString& key, ByteString&, ByteString&) {
+	        [](Transaction& tx, Arguments const& args, ByteString& key, ByteString&, ByteString&) {
 	            genKey(key, KEY_PREFIX, args, nextKey(args));
 	            tx.clear(key);
 	            return Future();
 	        } } },
+	    1,
 	    true },
 	  { "SETCLEAR",
 	    { { StepKind::COMMIT,
-	        [](Transaction tx, Arguments const& args, ByteString& key, ByteString&, ByteString& value) {
+	        [](Transaction& tx, Arguments const& args, ByteString& key, ByteString&, ByteString& value) {
 	            genKeyPrefix(key, KEY_PREFIX, args);
 	            const auto prefix_len = static_cast<int>(key.size());
 	            randomString<false /*append-after-clear*/>(key, args.key_length - prefix_len);
@@ -240,15 +219,16 @@ const std::array<Operation, MAX_OP> opTable{
 	            return tx.commit().eraseType();
 	        } },
 	      { StepKind::IMM,
-	        [](Transaction tx, Arguments const& args, ByteString& key, ByteString&, ByteString&) {
+	        [](Transaction& tx, Arguments const& args, ByteString& key, ByteString&, ByteString&) {
 	            tx.reset(); // assuming commit from step 0 worked.
 	            tx.clear(key); // key should forward unchanged from step 0
 	            return Future();
 	        } } },
+	    2,
 	    true },
 	  { "CLEARRANGE",
 	    { { StepKind::IMM,
-	        [](Transaction tx, Arguments const& args, ByteString& begin, ByteString& end, ByteString&) {
+	        [](Transaction& tx, Arguments const& args, ByteString& begin, ByteString& end, ByteString&) {
 	            const auto num_begin = nextKey(args);
 	            genKey(begin, KEY_PREFIX, args, num_begin);
 	            const auto range = args.txnspec.ops[OP_CLEARRANGE][OP_RANGE];
@@ -257,10 +237,11 @@ const std::array<Operation, MAX_OP> opTable{
 	            tx.clearRange(begin, end);
 	            return Future();
 	        } } },
+	    1,
 	    true },
 	  { "SETCLEARRANGE",
 	    { { StepKind::COMMIT,
-	        [](Transaction tx, Arguments const& args, ByteString& key_begin, ByteString& key, ByteString& value) {
+	        [](Transaction& tx, Arguments const& args, ByteString& key_begin, ByteString& key, ByteString& value) {
 	            genKeyPrefix(key, KEY_PREFIX, args);
 	            const auto prefix_len = static_cast<int>(key.size());
 	            const auto range = args.txnspec.ops[OP_SETCLEARRANGE][OP_RANGE];
@@ -285,18 +266,19 @@ const std::array<Operation, MAX_OP> opTable{
 	            return tx.commit().eraseType();
 	        } },
 	      { StepKind::IMM,
-	        [](Transaction tx, Arguments const& args, ByteString& begin, ByteString& end, ByteString&) {
+	        [](Transaction& tx, Arguments const& args, ByteString& begin, ByteString& end, ByteString&) {
 	            tx.reset();
 	            tx.clearRange(begin, end);
 	            return Future();
 	        } } },
+	    2,
 	    true },
-	  { "COMMIT", { { StepKind::NONE, nullptr } }, false },
-	  { "TRANSACTION", { { StepKind::NONE, nullptr } }, false },
-	  { "TASK", { { StepKind::NONE, nullptr } }, false },
+	  { "COMMIT", { { StepKind::NONE, nullptr } }, 0, false },
+	  { "TRANSACTION", { { StepKind::NONE, nullptr } }, 0, false },
+	  { "TASK", { { StepKind::NONE, nullptr } }, 0, false },
 	  { "READBLOBGRANULE",
 	    { { StepKind::ON_ERROR,
-	        [](Transaction tx, Arguments const& args, ByteString& begin, ByteString& end, ByteString&) {
+	        [](Transaction& tx, Arguments const& args, ByteString& begin, ByteString& end, ByteString&) {
 	            const auto num_begin = nextKey(args);
 	            genKey(begin, KEY_PREFIX, args, num_begin);
 	            const auto range = args.txnspec.ops[OP_READ_BG][OP_RANGE];
@@ -337,6 +319,7 @@ const std::array<Operation, MAX_OP> opTable{
 	            logr.printWithLogLevel(level, "ERROR", "get_keyvalue_array() after readBlobGranules(): {}", err.what());
 	            return tx.onError(err).eraseType();
 	        } } },
+	    1,
 	    false } }
 };
 
