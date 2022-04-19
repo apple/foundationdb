@@ -2037,6 +2037,7 @@ static void enableLargePages() {
 #endif
 }
 
+#ifndef _WIN32
 static void* mmapInternal(size_t length, int flags, bool guardPages) {
 	if (guardPages) {
 		constexpr size_t pageSize = 4096;
@@ -2049,6 +2050,7 @@ static void* mmapInternal(size_t length, int flags, bool guardPages) {
 		return mmap(nullptr, length, PROT_READ | PROT_WRITE, flags, -1, 0);
 	}
 }
+#endif
 
 static void* allocateInternal(size_t length, bool largePages, bool guardPages) {
 
