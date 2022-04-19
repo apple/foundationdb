@@ -274,20 +274,20 @@ append_hw(uint32_t crc, const uint8_t* buf, size_t len) {
 #endif
 
 uint32_t ppc_hw(uint32_t crc, const uint8_t* input, size_t length) {
-        return CRC32_FUNCTION(0, (unsigned char*)input, (unsigned long)length);
+	return CRC32_FUNCTION(0, (unsigned char*)input, (unsigned long)length);
 }
 #endif
 
 static bool hw_available = platform::isHwCrcSupported();
 
 extern "C" uint32_t crc32c_append(uint32_t crc, const uint8_t* input, size_t length) {
-        if (hw_available) {
+	if (hw_available) {
 #ifdef __powerpc64__
-                return ppc_hw(crc, input, length);
+		return ppc_hw(crc, input, length);
 #endif
 #ifndef __powerpc64__
-                return append_hw(crc, input, length);
+		return append_hw(crc, input, length);
 #endif
-        } else
-                return append_table(crc, input, length);
+	} else
+		return append_table(crc, input, length);
 }
