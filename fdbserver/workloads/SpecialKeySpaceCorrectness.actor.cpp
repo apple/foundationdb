@@ -1172,51 +1172,6 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		} catch (Error& e) {
 			wait(tx->onError(e));
 		}
-		// profile client get
-		loop {
-			try {
-				tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				// client_txn_sample_rate
-				state Optional<Value> txnSampleRate =
-				    wait(tx->get(LiteralStringRef("client_txn_sample_rate")
-				                     .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("profile"))));
-				ASSERT(txnSampleRate.present());
-				Optional<Value> txnSampleRateKey = wait(tx->get(fdbClientInfoTxnSampleRate));
-				if (txnSampleRateKey.present()) {
-					const double sampleRateDbl =
-					    BinaryReader::fromStringRef<double>(txnSampleRateKey.get(), Unversioned());
-					if (!std::isinf(sampleRateDbl)) {
-						ASSERT(txnSampleRate.get().toString() == boost::lexical_cast<std::string>(sampleRateDbl));
-					} else {
-						ASSERT(txnSampleRate.get().toString() == "default");
-					}
-				} else {
-					ASSERT(txnSampleRate.get().toString() == "default");
-				}
-				// client_txn_size_limit
-				state Optional<Value> txnSizeLimit =
-				    wait(tx->get(LiteralStringRef("client_txn_size_limit")
-				                     .withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("profile"))));
-				ASSERT(txnSizeLimit.present());
-				Optional<Value> txnSizeLimitKey = wait(tx->get(fdbClientInfoTxnSizeLimit));
-				if (txnSizeLimitKey.present()) {
-					const int64_t sizeLimit =
-					    BinaryReader::fromStringRef<int64_t>(txnSizeLimitKey.get(), Unversioned());
-					if (sizeLimit != -1) {
-						ASSERT(txnSizeLimit.get().toString() == boost::lexical_cast<std::string>(sizeLimit));
-					} else {
-						ASSERT(txnSizeLimit.get().toString() == "default");
-					}
-				} else {
-					ASSERT(txnSizeLimit.get().toString() == "default");
-				}
-				tx->reset();
-				break;
-			} catch (Error& e) {
-				TraceEvent(SevDebug, "ProfileClientGet").error(e);
-				wait(tx->onError(e));
-			}
-		}
 		// data_distribution & maintenance get
 		loop {
 			try {

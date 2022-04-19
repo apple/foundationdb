@@ -17,6 +17,8 @@ API version 720
 General
 -------
 
+* Special keys ``\xff\xff/management/profiling/<client_txn_sample_rate|client_txn_size_limit>`` are removed in 7.2 and the functionality it provides is now covered by the global configuration module.
+
 .. _api-version-upgrade-guide-710:
 
 API version 710
