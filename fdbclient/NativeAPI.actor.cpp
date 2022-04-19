@@ -3146,20 +3146,17 @@ ACTOR Future<Void> warmRange_impl(Reference<TransactionState> trState, KeyRange 
 // }
 
 SpanContext generateSpanID(bool transactionTracingSample, SpanContext parentContext = SpanContext()) {
-	if (!parentContext.isValid() && !transactionTracingSample) {
-		return SpanContext();
-	}
-
-	UID txnId = UID(deterministicRandom()->randomUInt64(), deterministicRandom()->randomUInt64());
 	if (parentContext.isValid()) {
 		return SpanContext(parentContext.traceID, deterministicRandom()->randomUInt64(), parentContext.m_Flags);
-	} else if (transactionTracingSample) {
+	} 
+	if (transactionTracingSample) {
 		return SpanContext(deterministicRandom()->randomUniqueID(),
 		                   deterministicRandom()->randomUInt64(),
 		                   deterministicRandom()->random01() <= FLOW_KNOBS->TRACING_SAMPLE_RATE
 		                       ? TraceFlags::sampled
 		                       : TraceFlags::unsampled);
-	} 
+	}
+	return SpanContext();
 }
 
 TransactionState::TransactionState(Database cx,
