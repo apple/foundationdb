@@ -27,9 +27,11 @@
 #include <ostream>
 #include <optional>
 #include <fmt/format.h>
+#include <chrono>
 
 namespace fmt {
 
+// fmt::format formatting for std::optional<T>
 template <typename T>
 struct formatter<std::optional<T>> : fmt::formatter<T> {
 
@@ -46,6 +48,8 @@ struct formatter<std::optional<T>> : fmt::formatter<T> {
 } // namespace fmt
 
 namespace FdbApiTester {
+
+std::string lowerCase(const std::string& str);
 
 class Random {
 public:
@@ -81,6 +85,25 @@ void print_internal_error(const char* msg, const char* file, int line);
 			abort();                                                                                                   \
 		}                                                                                                              \
 	} while (false) // For use in destructors, where throwing exceptions is extremely dangerous
+
+using TimePoint = std::chrono::steady_clock::time_point;
+using TimeDuration = std::chrono::microseconds::rep;
+
+static inline TimePoint timeNow() {
+	return std::chrono::steady_clock::now();
+}
+
+static inline TimeDuration timeElapsedInUs(const TimePoint& start, const TimePoint& end) {
+	return std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+}
+
+static inline TimeDuration timeElapsedInUs(const TimePoint& start) {
+	return timeElapsedInUs(start, timeNow());
+}
+
+static inline double microsecToSec(TimeDuration timeUs) {
+	return timeUs / 1000000.0;
+}
 
 } // namespace FdbApiTester
 
