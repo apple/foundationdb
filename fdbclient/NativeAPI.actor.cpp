@@ -4153,7 +4153,6 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 	state KeySelector originalBegin = begin;
 	state KeySelector originalEnd = end;
 	state RangeResultFamily output;
-	// TODO - ljoswiak parent or link?
 	state Span span("NAPI:getRange"_loc, trState->spanContext);
 	if (useTenant && trState->tenant().present()) {
 		span.addAttribute("tenant"_sr, trState->tenant().get());
@@ -4923,7 +4922,6 @@ ACTOR Future<Void> getRangeStream(Reference<TransactionState> trState,
 
 	// FIXME: better handling to disable row limits
 	ASSERT(!limits.hasRowLimit());
-	// TODO - ljoswiak parent or link
 	state Span span("NAPI:getRangeStream"_loc, trState->spanContext);
 
 	state Version version = wait(fVersion);
@@ -5047,7 +5045,6 @@ Transaction::Transaction(Database const& cx, Optional<TenantName> const& tenant)
                                             cx->taskID,
                                             generateSpanID(cx->transactionTracingSample),
                                             createTrLogInfoProbabilistically(cx))),
-    // TODO - Review with Lukas.
     span(trState->spanContext, "Transaction"_loc), backoff(CLIENT_KNOBS->DEFAULT_BACKOFF), tr(trState->spanContext) {
 	if (DatabaseContext::debugUseTags) {
 		debugAddTags(trState);
@@ -5868,11 +5865,6 @@ ACTOR void checkWrites(Reference<TransactionState> trState,
 ACTOR static Future<Void> commitDummyTransaction(Reference<TransactionState> trState, KeyRange range) {
 	state Transaction tr(trState->cx);
 	state int retries = 0;
-	// TODO - ljoswiak, mpilman. This will require some inspection. Here we're setting the parent context.
-	// Before you used addParent, however there is a side effect in that old function, due to no links.
-	// You would check if there is no parent set and if so, you'd overwrite the traceids.
-	//
-	// Need to determine if this behavior matches previously intended, here we'd just always set parent.
 	state Span span(trState->spanContext, "NAPI:dummyTransaction"_loc, span.context);
 	loop {
 		try {
@@ -6039,7 +6031,6 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState,
                                     Future<Version> readVersion) {
 	state TraceInterval interval("TransactionCommit");
 	state double startTime = now();
-	// TODO - ljoswiak, parent or link.
 	state Span span("NAPI:tryCommit"_loc, trState->spanContext);
 	state Optional<UID> debugID = trState->debugID;
 	if (debugID.present()) {
@@ -6530,9 +6521,6 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 
 	case FDBTransactionOptions::SPAN_PARENT:
 		validateOptionValuePresent(value);
-		// TODO - size of SpanContext member variables is 25, so likely
-		// padding added for alignment. ljoswiak mentioned we might
-		// be able to change serialze function to save padding here?
 		if (value.get().size() != 33) {
 			throw invalid_option_value();
 		}
@@ -6754,7 +6742,6 @@ ACTOR Future<Version> extractReadVersion(Reference<TransactionState> trState,
                                          SpanContext spanContext,
                                          Future<GetReadVersionReply> f,
                                          Promise<Optional<Value>> metadataVersion) {
-	// TODO - ljoswiak link or parent? This is linking on last parameter.
 	state Span span(spanContext, location, trState->spanContext);
 	GetReadVersionReply rep = wait(f);
 	double replyTime = now();
@@ -6928,7 +6915,6 @@ Future<Version> Transaction::getReadVersion(uint32_t flags) {
 		}
 
 		Location location = "NAPI:getReadVersion"_loc;
-		// TODO - ljoswiak, mpilman, discuss generateSpanID use.
 		SpanContext spanContext = generateSpanID(trState->cx->transactionTracingSample, trState->spanContext);
 		auto const req = DatabaseContext::VersionRequest(spanContext, trState->options.tags, trState->debugID);
 		batcher.stream.send(req);
@@ -7405,7 +7391,6 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(Reference<Transa
                                                                 KeyRange keys,
                                                                 int64_t chunkSize,
                                                                 Version version) {
-	// TODO - ljoswiak, link or parent?
 	state Span span("NAPI:GetRangeSplitPoints"_loc, trState->spanContext);
 
 	loop {
