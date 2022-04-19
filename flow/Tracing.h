@@ -146,11 +146,11 @@ public:
 	// Construct a Span with a given context, location, parentContext and optional links.
 	//
 	// N.B. While this constructor receives a parentContext it does not overwrite the traceId of the Span's context.
-	// Therefore it is the responsibility of the caller to ensure the traceID and m_Flags of both the context and parentContext
-	// are identical if the caller wishes to establish a parent/child relationship between these spans. We do this
-	// to avoid needless comparisons or copies as this constructor is only called once in NativeAPI.actor.cpp and from
-	// below in the by the Span(location, parent, links) constructor. The Span(location, parent, links) constructor is used broadly
-	// and performs the copy of the parent's traceID and m_Flags.
+	// Therefore it is the responsibility of the caller to ensure the traceID and m_Flags of both the context and
+	// parentContext are identical if the caller wishes to establish a parent/child relationship between these spans. We
+	// do this to avoid needless comparisons or copies as this constructor is only called once in NativeAPI.actor.cpp
+	// and from below in the by the Span(location, parent, links) constructor. The Span(location, parent, links)
+	// constructor is used broadly and performs the copy of the parent's traceID and m_Flags.
 	Span(const SpanContext& context,
 	     const Location& location,
 	     const SpanContext& parentContext,
@@ -164,21 +164,20 @@ public:
 	}
 
 	// Construct Span with a location, parent, and optional links.
-	// This constructor copies the parent's traceID creating a parent->child relationship between Spans. 
+	// This constructor copies the parent's traceID creating a parent->child relationship between Spans.
 	// Additionally we inherit the m_Flags of the parent, thus enabling or disabling sampling to match the parent.
-	Span(const Location& location,
-	     const SpanContext& parent,
-	     const std::initializer_list<SpanContext>& links = {})
+	Span(const Location& location, const SpanContext& parent, const std::initializer_list<SpanContext>& links = {})
 	  : Span(SpanContext(parent.traceID, deterministicRandom()->randomUInt64(), parent.m_Flags),
 	         location,
 	         parent,
 	         links) {}
 
-	// Construct Span without parent. Used for creating a root span, or when the parent is not known at construction time. 
+	// Construct Span without parent. Used for creating a root span, or when the parent is not known at construction
+	// time.
 	Span(const SpanContext& context, const Location& location) : Span(context, location, SpanContext()) {}
 
-	// We've determined for initial tracing release, spans with only a location will not be traced. 
-	// Generally these are for background processes, some are called infrequently, while others may be high volume. 
+	// We've determined for initial tracing release, spans with only a location will not be traced.
+	// Generally these are for background processes, some are called infrequently, while others may be high volume.
 	// TODO: review and address in subsequent PRs.
 	Span(const Location& location) : location(location), begin(g_network->now()) {}
 
@@ -222,9 +221,9 @@ public:
 		links.push_back(arena, linkContext);
 		// Check if link is sampled, if so sample this span.
 		if (!context.isSampled() && linkContext.isSampled()) {
-			context.m_Flags = TraceFlags::sampled;	
-			// If for some reason this span isn't valid, we need to give it a 
-			// traceID and spanID. This case is currently hit in CommitProxyServer 
+			context.m_Flags = TraceFlags::sampled;
+			// If for some reason this span isn't valid, we need to give it a
+			// traceID and spanID. This case is currently hit in CommitProxyServer
 			// CommitBatchContext::CommitBatchContext and CommitBatchContext::setupTraceBatch.
 			if (!context.isValid()) {
 				context.traceID = deterministicRandom()->randomUniqueID();

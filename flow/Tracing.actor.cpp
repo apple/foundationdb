@@ -496,8 +496,8 @@ TEST_CASE("/flow/Tracing/CreateOTELSpan") {
 	// When the parent isn't sampled AND it has zero values for traceID and spanID this means
 	// we should defer to the child as the new root of the trace as there was no actual parent.
 	// If the child was sampled we should send the child trace with a null parent.
-	//Span noParent("foo"_loc, SpanContext(UID(0, 0), 0, TraceFlags::unsampled));
-	//ASSERT(noParent.context.isSampled());
+	// Span noParent("foo"_loc, SpanContext(UID(0, 0), 0, TraceFlags::unsampled));
+	// ASSERT(noParent.context.isSampled());
 	return Void();
 };
 
@@ -540,7 +540,10 @@ TEST_CASE("/flow/Tracing/AddEvents") {
 };
 
 TEST_CASE("/flow/Tracing/AddAttributes") {
-	Span span1("span_with_attrs"_loc, SpanContext(deterministicRandom()->randomUniqueID(), deterministicRandom()->randomUInt64(), TraceFlags::sampled));
+	Span span1("span_with_attrs"_loc,
+	           SpanContext(deterministicRandom()->randomUniqueID(),
+	                       deterministicRandom()->randomUInt64(),
+	                       TraceFlags::sampled));
 	auto arena = span1.arena;
 	span1.addAttribute(StringRef(arena, LiteralStringRef("foo")), StringRef(arena, LiteralStringRef("bar")));
 	span1.addAttribute(StringRef(arena, LiteralStringRef("operation")), StringRef(arena, LiteralStringRef("grv")));
@@ -548,7 +551,10 @@ TEST_CASE("/flow/Tracing/AddAttributes") {
 	ASSERT(span1.attributes[1] == KeyValueRef("foo"_sr, "bar"_sr));
 	ASSERT(span1.attributes[2] == KeyValueRef("operation"_sr, "grv"_sr));
 
-	Span span2("span_with_attrs"_loc, SpanContext(deterministicRandom()->randomUniqueID(), deterministicRandom()->randomUInt64(), TraceFlags::sampled));
+	Span span2("span_with_attrs"_loc,
+	           SpanContext(deterministicRandom()->randomUniqueID(),
+	                       deterministicRandom()->randomUInt64(),
+	                       TraceFlags::sampled));
 	auto s2Arena = span2.arena;
 	span2.addAttribute(StringRef(s2Arena, LiteralStringRef("a")), StringRef(s2Arena, LiteralStringRef("1")))
 	    .addAttribute(StringRef(s2Arena, LiteralStringRef("b")), LiteralStringRef("2"))
@@ -569,7 +575,7 @@ TEST_CASE("/flow/Tracing/AddLinks") {
 	span1.addLink(SpanContext(UID(200, 201), 300, TraceFlags::unsampled))
 	    .addLink(SpanContext(UID(300, 301), 400, TraceFlags::sampled));
 
-    // Ensure the root span is now sampled and traceID and spanIDs are set.
+	// Ensure the root span is now sampled and traceID and spanIDs are set.
 	ASSERT(span1.context.isSampled());
 	ASSERT(span1.context.isValid());
 	// Ensure links are present.
@@ -590,7 +596,7 @@ TEST_CASE("/flow/Tracing/AddLinks") {
 	auto link2 = SpanContext(UID(2, 2), 2, TraceFlags::sampled);
 	auto link3 = SpanContext(UID(3, 3), 3, TraceFlags::sampled);
 	span2.addLinks({ link1, link2 }).addLinks({ link3 });
-    // Ensure the root span is now sampled and traceID and spanIDs are set.
+	// Ensure the root span is now sampled and traceID and spanIDs are set.
 	ASSERT(span2.context.isSampled());
 	ASSERT(span2.context.isValid());
 	ASSERT(span2.links[0].traceID == UID(1, 1));
@@ -670,7 +676,7 @@ TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
 	// Will delegate to other constructors.
 	Span span2("encoded_span"_loc,
 	           SpanContext(UID(100, 101), 1, TraceFlags::sampled),
-	           { SpanContext(UID(200, 201), 2, TraceFlags::sampled)});
+	           { SpanContext(UID(200, 201), 2, TraceFlags::sampled) });
 	tracer.serialize_span(span2, request);
 	data = request.buffer.get();
 	ASSERT(data[0] == 0b10011110); // 14 element array.

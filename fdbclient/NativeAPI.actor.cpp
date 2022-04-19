@@ -3148,7 +3148,7 @@ ACTOR Future<Void> warmRange_impl(Reference<TransactionState> trState, KeyRange 
 SpanContext generateSpanID(bool transactionTracingSample, SpanContext parentContext = SpanContext()) {
 	if (parentContext.isValid()) {
 		return SpanContext(parentContext.traceID, deterministicRandom()->randomUInt64(), parentContext.m_Flags);
-	} 
+	}
 	if (transactionTracingSample) {
 		return SpanContext(deterministicRandom()->randomUniqueID(),
 		                   deterministicRandom()->randomUInt64(),
@@ -5063,7 +5063,7 @@ Transaction::Transaction(Database const& cx, Optional<TenantName> const& tenant)
                                             cx->taskID,
                                             generateSpanID(cx->transactionTracingSample),
                                             createTrLogInfoProbabilistically(cx))),
-    // TODO - Review with Lukas. 
+    // TODO - Review with Lukas.
     span(trState->spanContext, "Transaction"_loc), backoff(CLIENT_KNOBS->DEFAULT_BACKOFF), tr(trState->spanContext) {
 	if (DatabaseContext::debugUseTags) {
 		debugAddTags(trState);
@@ -6555,7 +6555,7 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 		}
 		// TODO - Should this be AddParentOrLink
 		TEST(true); // Adding link in FDBTransactionOptions::SPAN_PARENT
-		// TODO - rjenkins, create new 
+		// TODO - rjenkins, create new
 		span.addLink(BinaryReader::fromStringRef<SpanContext>(value.get(), IncludeVersion()));
 		break;
 
