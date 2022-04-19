@@ -90,17 +90,19 @@ struct PrivateEndpoints : TestWorkload {
 	}
 
 	explicit PrivateEndpoints(WorkloadContext const& wcx) : TestWorkload(wcx) {
+		// The commented out request streams below can't be default initialized properly
+		// as they won't initialize all of their memory which causes valgrind to complain.
 		startAfter = getOption(options, "startAfter"_sr, 10.0);
 		runFor = getOption(options, "runFor"_sr, 10.0);
 		addTestFor(&GrvProxyInterface::waitFailure);
 		addTestFor(&GrvProxyInterface::getHealthMetrics);
-		addTestFor(&CommitProxyInterface::getStorageServerRejoinInfo);
+		// addTestFor(&CommitProxyInterface::getStorageServerRejoinInfo);
 		addTestFor(&CommitProxyInterface::waitFailure);
-		addTestFor(&CommitProxyInterface::txnState);
-		addTestFor(&CommitProxyInterface::getHealthMetrics);
-		addTestFor(&CommitProxyInterface::proxySnapReq);
+		// addTestFor(&CommitProxyInterface::txnState);
+		// addTestFor(&CommitProxyInterface::getHealthMetrics);
+		// addTestFor(&CommitProxyInterface::proxySnapReq);
 		addTestFor(&CommitProxyInterface::exclusionSafetyCheckReq);
-		addTestFor(&CommitProxyInterface::getDDMetrics);
+		// addTestFor(&CommitProxyInterface::getDDMetrics);
 	}
 	std::string description() const override { return WorkloadName; }
 	Future<Void> start(Database const& cx) override { return _start(this, cx); }
