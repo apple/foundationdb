@@ -277,8 +277,8 @@ The framework will ingore all modules added at the version larger than the api v
 For example, if a module is added in version 7.0 but the client set the api version as 6.3, then the module it not available to the client.
 According to the definition of this contract, anytime you want to remove or update existing modules, you need to keep the old implementation to let the client get the same behavior when it's using the old api version.
 
-To remove a certain module, while calling the function `registerSpecialKeySpaceModule` in `NativeAPI.actor.cpp` during initialization, pass the correct parameter to it to let the framework not add the module after the specified version.
+To remove a certain module, while calling the function ``registerSpecialKeySpaceModule`` in ``NativeAPI.actor.cpp`` during initialization, pass the correct parameter to it to let the framework not add the module after the specified version.
 
 To update the implementation of any modules, add the new implementation and use ``API_VERSION`` to switch between different implementations.
 
-Add a note in `api-version-upgrade-guide.rst` after you make the change.
+Add a note in ``api-version-upgrade-guide.rst`` after you make the change.
