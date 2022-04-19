@@ -264,9 +264,14 @@ clients can connect FoundationDB transactions to outside events.
 #. ``\xff\xff/tracing/transaction_id := <transaction_id>`` Read/write. A 64-bit integer transaction ID which follows the transaction as it moves through FoundationDB. All transactions are assigned a random transaction ID on creation, and this key can be read to surface the randomly generated ID. Alternatively, set this key to provide a custom identifier. When setting this key, provide a string in the form of a 64-bit integer, which will be automatically converted to the appropriate type.
 #. ``\xff\xff/tracing/token := <tracing_enabled>`` Read/write. Set to true/false to enable or disable tracing for the transaction, respectively. If read, returns a 64-bit integer set to 0 if tracing has been disabled, or a random 64-bit integer otherwise (this integers value has no meaning to the client other than to determine whether the transaction will be traced).
 
-.. [#conflicting_keys] In practice, the transaction probably committed successfully. However, if you're running multiple resolvers then it's possible for a transaction to cause another to abort even if it doesn't commit successfully.
-.. [#max_read_transaction_life_versions] The number 5000000 comes from the server knob MAX_READ_TRANSACTION_LIFE_VERSIONS
-.. [#special_key_space_enable_writes] Enabling this option enables other transaction options, such as ``ACCESS_SYSTEM_KEYS``. This may change in the future.
+.. _special-key-space-deprecation:
+
+Deprecation
+=================
+
+Below are the deprecated special keys and related informations.
+
+#. ``\xff\xff/management/profiling/<client_txn_sample_rate|client_txn_size_limit>`` Deprecated in version 7.2. The corresponding functionalities are now covered by the global configuration module. For details, see :doc:`global-configuration`.
 
 Versioning
 =================
@@ -277,8 +282,10 @@ The framework will ingore all modules added at the version larger than the api v
 For example, if a module is added in version 7.0 but the client set the api version as 6.3, then the module it not available to the client.
 According to the definition of this contract, anytime you want to remove or update existing modules, you need to keep the old implementation to let the client get the same behavior when it's using the old api version.
 
-To remove a certain module, while calling the function ``registerSpecialKeySpaceModule`` in ``NativeAPI.actor.cpp`` during initialization, pass the correct parameter to it to let the framework not add the module after the specified version.
+- To remove a certain module, specify the API version where the function is being deprecated in the ``registerSpecialKeySpaceModule`` function. When a client specifies an API version greater than or equal to the deprecation version, the module will not be available.
+- To update the implementation of any modules, add the new implementation and use ``API_VERSION`` to switch between different implementations.
+- Add a note in ``api-version-upgrade-guide.rst`` after you make the change.
 
-To update the implementation of any modules, add the new implementation and use ``API_VERSION`` to switch between different implementations.
-
-Add a note in ``api-version-upgrade-guide.rst`` after you make the change.
+.. [#conflicting_keys] In practice, the transaction probably committed successfully. However, if you're running multiple resolvers then it's possible for a transaction to cause another to abort even if it doesn't commit successfully.
+.. [#max_read_transaction_life_versions] The number 5000000 comes from the server knob MAX_READ_TRANSACTION_LIFE_VERSIONS
+.. [#special_key_space_enable_writes] Enabling this option enables other transaction options, such as ``ACCESS_SYSTEM_KEYS``. This may change in the future.

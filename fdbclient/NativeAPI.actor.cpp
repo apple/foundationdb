@@ -1232,7 +1232,7 @@ void DatabaseContext::registerSpecialKeySpaceModule(SpecialKeySpace::MODULE modu
                                                     SpecialKeySpace::IMPLTYPE type,
                                                     std::unique_ptr<SpecialKeyRangeReadImpl>&& impl,
                                                     int deprecatedVersion) {
-	// if deprecated, add the implementation when the api version is less than the depracated version
+	// if deprecated, add the implementation when the api version is less than the deprecated version
 	if (deprecatedVersion == -1 || apiVersion < deprecatedVersion) {
 		specialKeySpace->registerKeyRange(module, type, impl->getKeyRange(), impl.get());
 		specialKeySpaceModules.push_back(std::move(impl));
