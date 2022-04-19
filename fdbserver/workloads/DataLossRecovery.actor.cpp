@@ -134,7 +134,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 				} else {
 					tr.clear(key);
 				}
-				wait(timeoutError(tr.commit(), 30.0));
+				wait(tr.commit());
 				break;
 			} catch (Error& e) {
 				wait(tr.onError(e));
