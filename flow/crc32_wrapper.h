@@ -27,6 +27,7 @@
 
 #ifdef __powerpc64__
 
+//clang-format on
 extern "C" {
 	unsigned int crc32_vpmsum(unsigned int crc, unsigned char *p, unsigned long len); 
 }

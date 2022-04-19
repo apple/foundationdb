@@ -27,8 +27,6 @@
  *  b) the Apache License, Version 2.0
  */
 
-//clang-format off
-
 #if defined (__clang__)
 #ifndef __ALTIVEC__
 #define __ALTIVEC__

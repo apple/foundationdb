@@ -25,6 +25,8 @@
 #define VMX_ALIGN_MASK	(VMX_ALIGN-1)
 
 #ifdef REFLECT
+
+//clang-format on
 static unsigned int crc32_align(unsigned int crc, unsigned char *p,
 			       unsigned long len)
 {
@@ -42,6 +44,7 @@ static unsigned int crc32_align(unsigned int crc, unsigned char *p,
 }
 #endif
 
+//clang-format off
 #ifndef CRC32_FUNCTION
 #define CRC32_FUNCTION     crc32_vpmsum
 #endif
@@ -49,7 +52,7 @@ static unsigned int crc32_align(unsigned int crc, unsigned char *p,
 #define CRC32_FUNCTION_ASM __crc32_vpmsum
 #endif
 
-
+//clang-format on
 unsigned int CRC32_FUNCTION_ASM(unsigned int crc, unsigned char *p,
 			    unsigned long len);
 
