@@ -3128,21 +3128,38 @@ ACTOR Future<Void> warmRange_impl(Reference<TransactionState> trState, KeyRange 
 }
 
 // TODO - ljoswiak and mpilman. This will need some close inspection.
+// SpanContext generateSpanID(bool transactionTracingSample, SpanContext parentContext = SpanContext()) {
+// 	UID txnId = UID(deterministicRandom()->randomUInt64(), deterministicRandom()->randomUInt64());
+// 	if (parentContext.isValid()) {
+// 		txnId = parentContext.traceID;
+// 		uint64_t spanId = parentContext.spanID > 0 ? deterministicRandom()->randomUInt64() : 0;
+// 		return SpanContext(txnId, spanId);
+// 	} else if (transactionTracingSample) {
+// 		return SpanContext(txnId,
+// 		                   deterministicRandom()->randomUInt64(),
+// 		                   deterministicRandom()->random01() <= FLOW_KNOBS->TRACING_SAMPLE_RATE
+// 		                       ? TraceFlags::sampled
+// 		                       : TraceFlags::unsampled);
+// 	} else {
+// 		return SpanContext(txnId, 0);
+// 	}
+// }
+
 SpanContext generateSpanID(bool transactionTracingSample, SpanContext parentContext = SpanContext()) {
+	if (!parentContext.isValid() && !transactionTracingSample) {
+		return SpanContext();
+	}
+
 	UID txnId = UID(deterministicRandom()->randomUInt64(), deterministicRandom()->randomUInt64());
 	if (parentContext.isValid()) {
-		txnId = parentContext.traceID;
-		uint64_t spanId = parentContext.spanID > 0 ? deterministicRandom()->randomUInt64() : 0;
-		return SpanContext(txnId, spanId);
+		return SpanContext(parentContext.traceID, deterministicRandom()->randomUInt64(), parentContext.m_Flags);
 	} else if (transactionTracingSample) {
-		return SpanContext(txnId,
+		return SpanContext(deterministicRandom()->randomUniqueID(),
 		                   deterministicRandom()->randomUInt64(),
 		                   deterministicRandom()->random01() <= FLOW_KNOBS->TRACING_SAMPLE_RATE
 		                       ? TraceFlags::sampled
 		                       : TraceFlags::unsampled);
-	} else {
-		return SpanContext(txnId, 0);
-	}
+	} 
 }
 
 TransactionState::TransactionState(Database cx,
