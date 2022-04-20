@@ -1395,7 +1395,7 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		if (estimatedDelay >= SERVER_KNOBS->MAX_COMPUTE_DURATION_LOG_CUTOFF ||
 		    self->computeDuration >= SERVER_KNOBS->MAX_COMPUTE_DURATION_LOG_CUTOFF) {
 			TraceEvent(SevInfo, "LongComputeDuration")
-			    .suppressFor(5.0)
+			    .suppressFor(10.0)
 			    .detail("EstimatedComputeDuration", estimatedDelay)
 			    .detail("ComputeDuration", self->computeDuration)
 			    .detail("ComputePerOperation", computePerOperation)
