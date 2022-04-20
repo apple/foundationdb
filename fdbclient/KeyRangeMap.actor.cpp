@@ -170,7 +170,6 @@ static Future<Void> krmSetRangeCoalescing_(Transaction* tr,
                                            KeyRange maxRange,
                                            Value value) {
 	ASSERT(maxRange.contains(range));
-
 	state KeyRange withPrefix =
 	    KeyRangeRef(mapPrefix.toString() + range.begin.toString(), mapPrefix.toString() + range.end.toString());
 	state KeyRange maxWithPrefix =
@@ -231,6 +230,15 @@ static Future<Void> krmSetRangeCoalescing_(Transaction* tr,
 		endKey = withPrefix.end;
 		endValue = existingValue;
 	}
+
+	TraceEvent(SevDebug, "KrmSetRangeCoalescing")
+	    .detail("Range", range)
+	    .detail("MaxRange", maxRange)
+	    .detail("Value", value)
+	    .detail("BeginKey", beginKey)
+	    .detail("BeginValue", beginValue)
+	    .detail("EndKey", endKey)
+	    .detail("EndValue", endValue);
 
 	tr->clear(KeyRangeRef(beginKey, endKey));
 

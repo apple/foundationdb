@@ -7071,12 +7071,12 @@ void changeServerKeys(StorageServer* data,
                       Optional<MoveInShardMetaData> moveInShardMetaData = Optional<MoveInShardMetaData>()) {
 	ASSERT(!keys.empty());
 
-	// TraceEvent("ChangeServerKeys", data->thisServerID)
-	//     .detail("KeyBegin", keys.begin)
-	//     .detail("KeyEnd", keys.end)
-	//     .detail("NowAssigned", nowAssigned)
-	//     .detail("Version", version)
-	//     .detail("Context", changeServerKeysContextName[(int)context]);
+	TraceEvent("ChangeServerKeys", data->thisServerID)
+	    .detail("KeyBegin", keys.begin)
+	    .detail("KeyEnd", keys.end)
+	    .detail("NowAssigned", nowAssigned)
+	    .detail("Version", version)
+	    .detail("Context", changeServerKeysContextName[(int)context]);
 	validate(data);
 
 	// TODO(alexmiller): Figure out how to selectively enable spammy data distribution events.
