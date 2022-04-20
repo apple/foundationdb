@@ -207,7 +207,7 @@ const std::array<Operation, MAX_OP> opTable{
 	            randomString(value.data(), args.value_length);
 
 	            // key[0..args.key_length] := concat(prefix, random_string, num[0..range_digits])
-	            const auto range = args.txnspec.ops[OP_INSERTRANGE][OP_RANGE];
+	            const auto range = args.txnspec.ops[OP_SETCLEARRANGE][OP_RANGE];
 	            assert(range > 0);
 	            const auto range_digits = digits(range);
 	            const auto random_len = args.key_length - intSize(KEY_PREFIX) - range_digits;
