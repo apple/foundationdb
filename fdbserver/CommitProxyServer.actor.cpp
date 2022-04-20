@@ -1268,23 +1268,9 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 
 	self->computeDuration += g_network->timer() - self->computeStart;
 	if (self->batchOperations > 0) {
+		double estimatedDelay = computeReleaseDelay(self, self->latencyBucket);
 		double computePerOperation =
 		    std::min(SERVER_KNOBS->MAX_COMPUTE_PER_OPERATION, self->computeDuration / self->batchOperations);
-
-		double estimatedDelay = computeReleaseDelay(self, self->latencyBucket);
-		if (estimatedDelay >= SERVER_KNOBS->MAX_COMPUTE_DURATION_LOG_CUTOFF ||
-		    self->computeDuration >= SERVER_KNOBS->MAX_COMPUTE_DURATION_LOG_CUTOFF) {
-			TraceEvent(SevInfo, "LongComputeDuration")
-			    .suppressFor(10.0)
-			    .detail("EstimatedComputeDuration", estimatedDelay)
-			    .detail("ComputeDuration", self->computeDuration)
-			    .detail("ComputePerOperation", computePerOperation)
-			    .detail("LatencyBucket", self->latencyBucket)
-			    .detail("UpdatedComputePerOperationEstimate",
-			            pProxyCommitData->commitComputePerOperation[self->latencyBucket])
-			    .detail("BatchBytes", self->batchBytes)
-			    .detail("BatchOperations", self->batchOperations);
-		}
 
 		if (computePerOperation <= pProxyCommitData->commitComputePerOperation[self->latencyBucket]) {
 			pProxyCommitData->commitComputePerOperation[self->latencyBucket] = computePerOperation;
@@ -1300,6 +1286,20 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		pProxyCommitData->stats.minComputeNS =
 		    std::min<int64_t>(pProxyCommitData->stats.minComputeNS,
 		                      1e9 * pProxyCommitData->commitComputePerOperation[self->latencyBucket]);
+
+		if (estimatedDelay >= SERVER_KNOBS->MAX_COMPUTE_DURATION_LOG_CUTOFF ||
+		    self->computeDuration >= SERVER_KNOBS->MAX_COMPUTE_DURATION_LOG_CUTOFF) {
+			TraceEvent(SevInfo, "LongComputeDuration")
+			    .suppressFor(10.0)
+			    .detail("EstimatedComputeDuration", estimatedDelay)
+			    .detail("ComputeDuration", self->computeDuration)
+			    .detail("ComputePerOperation", computePerOperation)
+			    .detail("LatencyBucket", self->latencyBucket)
+			    .detail("UpdatedComputePerOperationEstimate",
+			            pProxyCommitData->commitComputePerOperation[self->latencyBucket])
+			    .detail("BatchBytes", self->batchBytes)
+			    .detail("BatchOperations", self->batchOperations);
+		}
 	}
 
 	pProxyCommitData->stats.processingMutationDist->sampleSeconds(now() - postResolutionQueuing);
