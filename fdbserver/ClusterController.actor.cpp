@@ -1097,15 +1097,18 @@ void haltRegisteringOrCurrentSingleton(ClusterControllerData* self,
 	}
 }
 
-void registerWorker(RegisterWorkerRequest req,
-                    ClusterControllerData* self,
-                    std::vector<NetworkAddress> coordinatorAddresses,
-                    ConfigBroadcaster* configBroadcaster) {
+ACTOR Future<Void> registerWorker(RegisterWorkerRequest req,
+                                  ClusterControllerData* self,
+                                  ClusterConnectionString cs,
+                                  ConfigBroadcaster* configBroadcaster) {
+	std::vector<NetworkAddress> coordinatorAddresses = wait(cs.tryResolveHostnames());
+
 	const WorkerInterface& w = req.wi;
 	ProcessClass newProcessClass = req.processClass;
 	auto info = self->id_worker.find(w.locality.processId());
 	ClusterControllerPriorityInfo newPriorityInfo = req.priorityInfo;
 	newPriorityInfo.processClassFitness = newProcessClass.machineClassFitness(ProcessClass::ClusterController);
+
 	bool isCoordinator =
 	    (std::find(coordinatorAddresses.begin(), coordinatorAddresses.end(), req.wi.address()) !=
 	     coordinatorAddresses.end()) ||
@@ -1274,6 +1277,8 @@ void registerWorker(RegisterWorkerRequest req,
 	if (!req.reply.isSet() && newPriorityInfo != req.priorityInfo) {
 		req.reply.send(RegisterWorkerReply(newProcessClass, newPriorityInfo));
 	}
+
+	return Void();
 }
 
 #define TIME_KEEPER_VERSION LiteralStringRef("1")
@@ -2546,15 +2551,12 @@ ACTOR Future<Void> clusterControllerCore(Reference<IClusterConnectionRecord> con
 		when(RecruitBlobWorkerRequest req = waitNext(interf.recruitBlobWorker.getFuture())) {
 			clusterRecruitBlobWorker(&self, req);
 		}
-		when(state RegisterWorkerRequest req = waitNext(interf.registerWorker.getFuture())) {
+		when(RegisterWorkerRequest req = waitNext(interf.registerWorker.getFuture())) {
 			++self.registerWorkerRequests;
-			ClusterConnectionString ccs = coordinators.ccr->getConnectionString();
-			state std::vector<NetworkAddress> coordinatorAddresses = wait(ccs.tryResolveHostnames());
-
-			registerWorker(req,
-			               &self,
-			               coordinatorAddresses,
-			               (configDBType == ConfigDBType::DISABLED) ? nullptr : &configBroadcaster);
+			self.addActor.send(registerWorker(req,
+			                                  &self,
+			                                  coordinators.ccr->getConnectionString(),
+			                                  (configDBType == ConfigDBType::DISABLED) ? nullptr : &configBroadcaster));
 		}
 		when(GetWorkersRequest req = waitNext(interf.getWorkers.getFuture())) {
 			++self.getWorkersRequests;
