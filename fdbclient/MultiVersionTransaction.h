@@ -378,7 +378,7 @@ public:
 	ThreadFuture<Void> commit() override;
 	Version getCommittedVersion() override;
 	VersionVector getVersionVector() override;
-	UID getSpanID() override { return UID(); };
+	SpanContext getSpanContext() override { return SpanContext(); };
 	ThreadFuture<int64_t> getApproximateSize() override;
 
 	void setOption(FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;
@@ -567,7 +567,7 @@ public:
 	ThreadFuture<Void> commit() override;
 	Version getCommittedVersion() override;
 	VersionVector getVersionVector() override;
-	UID getSpanID() override;
+	SpanContext getSpanContext() override;
 	ThreadFuture<int64_t> getApproximateSize() override;
 
 	void setOption(FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) override;

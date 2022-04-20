@@ -36,6 +36,7 @@
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/TagThrottle.actor.h"
 #include "fdbclient/Tenant.h"
+#include "flow/Tracing.h"
 #include "flow/UnitTest.h"
 #include "fdbclient/VersionVector.h"
 
@@ -256,7 +257,7 @@ struct GetValueReply : public LoadBalancedReply {
 
 struct GetValueRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 8454530;
-	SpanID spanContext;
+	SpanContext spanContext;
 	TenantInfo tenantInfo;
 	Key key;
 	Version version;
@@ -270,7 +271,7 @@ struct GetValueRequest : TimedRequest {
 	bool verify() const { return tenantInfo.hasAuthorizedTenant(); }
 
 	GetValueRequest() {}
-	GetValueRequest(SpanID spanContext,
+	GetValueRequest(SpanContext spanContext,
 	                const TenantInfo& tenantInfo,
 	                const Key& key,
 	                Version ver,
@@ -302,7 +303,7 @@ struct WatchValueReply {
 
 struct WatchValueRequest {
 	constexpr static FileIdentifier file_identifier = 14747733;
-	SpanID spanContext;
+	SpanContext spanContext;
 	TenantInfo tenantInfo;
 	Key key;
 	Optional<Value> value;
@@ -313,7 +314,7 @@ struct WatchValueRequest {
 
 	WatchValueRequest() {}
 
-	WatchValueRequest(SpanID spanContext,
+	WatchValueRequest(SpanContext spanContext,
 	                  TenantInfo tenantInfo,
 	                  const Key& key,
 	                  Optional<Value> value,
@@ -349,7 +350,7 @@ struct GetKeyValuesReply : public LoadBalancedReply {
 
 struct GetKeyValuesRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 6795746;
-	SpanID spanContext;
+	SpanContext spanContext;
 	Arena arena;
 	TenantInfo tenantInfo;
 	KeySelectorRef begin, end;
@@ -409,7 +410,7 @@ struct GetMappedKeyValuesReply : public LoadBalancedReply {
 
 struct GetMappedKeyValuesRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 6795747;
-	SpanID spanContext;
+	SpanContext spanContext;
 	Arena arena;
 	TenantInfo tenantInfo;
 	KeySelectorRef begin, end;
@@ -477,7 +478,7 @@ struct GetKeyValuesStreamReply : public ReplyPromiseStreamReply {
 
 struct GetKeyValuesStreamRequest {
 	constexpr static FileIdentifier file_identifier = 6795746;
-	SpanID spanContext;
+	SpanContext spanContext;
 	Arena arena;
 	TenantInfo tenantInfo;
 	KeySelectorRef begin, end;
@@ -530,7 +531,7 @@ struct GetKeyReply : public LoadBalancedReply {
 
 struct GetKeyRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 10457870;
-	SpanID spanContext;
+	SpanContext spanContext;
 	Arena arena;
 	TenantInfo tenantInfo;
 	KeySelectorRef sel;
@@ -546,7 +547,7 @@ struct GetKeyRequest : TimedRequest {
 
 	GetKeyRequest() {}
 
-	GetKeyRequest(SpanID spanContext,
+	GetKeyRequest(SpanContext spanContext,
 	              TenantInfo tenantInfo,
 	              KeySelectorRef const& sel,
 	              Version version,
@@ -833,7 +834,7 @@ struct ChangeFeedStreamReply : public ReplyPromiseStreamReply {
 
 struct ChangeFeedStreamRequest {
 	constexpr static FileIdentifier file_identifier = 6795746;
-	SpanID spanContext;
+	SpanContext spanContext;
 	Arena arena;
 	Key rangeID;
 	Version begin = 0;

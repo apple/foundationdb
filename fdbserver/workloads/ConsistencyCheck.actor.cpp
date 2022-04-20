@@ -873,7 +873,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		state Key begin = kr.begin;
 		state Key end = kr.end;
 		state int limitKeyServers = BUGGIFY ? 1 : 100;
-		state Span span(deterministicRandom()->randomUniqueID(), "WL:ConsistencyCheck"_loc);
+		state Span span(SpanContext(deterministicRandom()->randomUniqueID(), deterministicRandom()->randomUInt64()),
+		                "WL:ConsistencyCheck"_loc);
 
 		while (begin < end) {
 			state Reference<CommitProxyInfo> commitProxyInfo =

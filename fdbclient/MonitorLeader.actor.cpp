@@ -1055,7 +1055,7 @@ ACTOR Future<MonitorLeaderInfo> monitorProxiesOneGeneration(
 
 			auto& ni = rep.get().mutate();
 			shrinkProxyList(ni, lastCommitProxyUIDs, lastCommitProxies, lastGrvProxyUIDs, lastGrvProxies);
-			clientInfo->set(ni);
+			clientInfo->setUnconditional(ni);
 			successIndex = index;
 		} else {
 			TEST(rep.getError().code() == error_code_failed_to_progress); // Coordinator cant talk to cluster controller
