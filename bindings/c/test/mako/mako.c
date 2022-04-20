@@ -2635,7 +2635,11 @@ void print_report(mako_args_t* args,
 						fseek(f, 0, 0);
 						index = 0;
 						while (index < numPoints) {
-							fread(&dataPoints[op][k++], sizeof(uint64_t), 1, f);
+							size_t nread = fread(&dataPoints[op][k++], sizeof(uint64_t), 1, f);
+							if (nread != 1) {
+								fprintf(stderr, "ERROR: read failed\n");
+								exit(1);
+							}
 							++index;
 						}
 						fclose(f);
@@ -2759,7 +2763,11 @@ void print_report(mako_args_t* args,
 
 	char command_remove[NAME_MAX] = { '\0' };
 	sprintf(command_remove, "rm -rf %s%d", TEMP_DATA_STORE, *pid_main);
-	system(command_remove);
+	int ret = system(command_remove);
+	if (ret != 0) {
+		fprintf(stderr, "ERROR: system() call failed\n");
+		exit(ret);
+	}
 
 	for (op = 0; op < MAX_OP; op++) {
 		if (args->txnspec.ops[op][OP_COUNT] > 0 || op == OP_TRANSACTION) {
