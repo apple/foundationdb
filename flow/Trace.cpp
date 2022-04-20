@@ -53,7 +53,7 @@
 // 2. To avoid a historically documented but unknown crash that occurs when logging allocations
 //    during an open trace event
 thread_local int g_allocation_tracing_disabled = 1;
-thread_local unsigned tracedLines = 0;
+unsigned tracedLines = 0;
 thread_local int failedLineOverflow = 0;
 
 ITraceLogIssuesReporter::~ITraceLogIssuesReporter() {}
