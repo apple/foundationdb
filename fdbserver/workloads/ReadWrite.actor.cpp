@@ -798,7 +798,8 @@ struct ReadWriteWorkload : KVWorkload {
 	// calculate hot server count
 	void setHotServers() {
 		hotServerCount = ceil(hotServerFraction * serverShards.size());
-		std::cout << "Choose " << hotServerCount <<"/" << serverShards.size() <<" hot servers: [";
+		std::cout << "Choose " << hotServerCount << "/" << serverShards.size() << "/" << serverInterfaces.size()
+		          << " hot servers: [";
 		int begin = currentHotRound * hotServerCount;
 		for (int i = 0; i < hotServerCount; ++i) {
 			int idx = (begin + i) % serverShards.size();

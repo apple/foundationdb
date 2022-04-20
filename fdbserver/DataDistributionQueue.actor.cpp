@@ -1453,8 +1453,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 				    trigger([destinationRef, readLoad]() mutable { destinationRef.addReadInFlightToTeam(-readLoad); },
 				            delay(SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL)));
 
-				// completeDest(rd, self->destBusymap);
-				// rd.completeDests.clear();
+				completeDest(rd, self->destBusymap);
+				rd.completeDests.clear();
 
 				wait(delay(SERVER_KNOBS->RETRY_RELOCATESHARD_DELAY, TaskPriority::DataDistributionLaunch));
 			}
