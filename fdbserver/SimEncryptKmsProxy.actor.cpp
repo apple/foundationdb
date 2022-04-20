@@ -73,11 +73,14 @@ ACTOR Future<Void> simEncryptKmsProxyCore(SimKmsProxyInterface interf) {
 				state SimGetEncryptKeysByKeyIdsReply keysByIdsRep;
 
 				// Lookup corresponding EncryptKeyCtx for input keyId
-				for (SimEncryptKeyId keyId : req.encryptKeyIds) {
-					const auto& itr = kmsProxyCtx.simEncryptKeyStore.find(keyId);
+				for (const auto& item : req.encryptKeyIdMap) {
+					const auto& itr = kmsProxyCtx.simEncryptKeyStore.find(item.first);
 					if (itr != kmsProxyCtx.simEncryptKeyStore.end()) {
-						keysByIdsRep.encryptKeyMap.emplace(keyId,
-						                                   StringRef(keysByIdsRep.arena, itr->second.get()->key));
+						keysByIdsRep.encryptKeyDetails.emplace_back(
+						    item.second,
+						    itr->first,
+						    StringRef(keysByIdsRep.arena, itr->second.get()->key),
+						    keysByIdsRep.arena);
 					} else {
 						success = false;
 						break;
@@ -99,9 +102,8 @@ ACTOR Future<Void> simEncryptKmsProxyCore(SimKmsProxyInterface interf) {
 					SimEncryptKeyId keyId = domainId % SERVER_KNOBS->SIM_KMS_MAX_KEYS;
 					const auto& itr = kmsProxyCtx.simEncryptKeyStore.find(keyId);
 					if (itr != kmsProxyCtx.simEncryptKeyStore.end()) {
-						keysByDomainIdRep.encryptKeyMap.emplace(
-						    domainId,
-						    SimEncryptKeyDetails(keyId, StringRef(itr->second.get()->key), keysByDomainIdRep.arena));
+						keysByDomainIdRep.encryptKeyDetails.emplace_back(
+						    domainId, keyId, StringRef(itr->second.get()->key), keysByDomainIdRep.arena);
 					} else {
 						success = false;
 						break;
@@ -137,10 +139,10 @@ ACTOR Future<Void> testRunWorkload(SimKmsProxyInterface inf, uint32_t nEncryptio
 			domainIdsReq.encryptDomainIds.push_back(i);
 		}
 		SimGetEncryptKeyByDomainIdReply domainIdsReply = wait(inf.encryptKeyLookupByDomainId.getReply(domainIdsReq));
-		for (auto& element : domainIdsReply.encryptKeyMap) {
-			domainIdKeyMap.emplace(element.first,
-			                       std::make_unique<SimEncryptKeyCtx>(element.second.encryptKeyId,
-			                                                          element.second.encryptKey.toString().c_str()));
+		for (auto& element : domainIdsReply.encryptKeyDetails) {
+			domainIdKeyMap.emplace(
+			    element.encryptDomainId,
+			    std::make_unique<SimEncryptKeyCtx>(element.encryptKeyId, element.encryptKey.toString().c_str()));
 		}
 
 		// randomly pick any domainId and validate if lookupByKeyId result matches
@@ -149,20 +151,20 @@ ACTOR Future<Void> testRunWorkload(SimKmsProxyInterface inf, uint32_t nEncryptio
 		for (i = 0; i < maxIterations; i++) {
 			state int idx = deterministicRandom()->randomInt(0, maxDomainIds);
 			state SimEncryptKeyCtx* ctx = domainIdKeyMap[idx].get();
-			keyIdsReq.encryptKeyIds.push_back(ctx->id);
+			keyIdsReq.encryptKeyIdMap.emplace(ctx->id, idx);
 			validationMap[ctx->id] = StringRef(ctx->key);
 		}
 		SimGetEncryptKeysByKeyIdsReply keyIdsReply = wait(inf.encryptKeyLookupByKeyIds.getReply(keyIdsReq));
-		ASSERT(keyIdsReply.encryptKeyMap.size() == validationMap.size());
-		for (const auto& element : keyIdsReply.encryptKeyMap) {
-			ASSERT(validationMap[element.first].compare(element.second) == 0);
+		ASSERT(keyIdsReply.encryptKeyDetails.size() == validationMap.size());
+		for (const auto& element : keyIdsReply.encryptKeyDetails) {
+			ASSERT(validationMap[element.encryptDomainId].compare(element.encryptKey) == 0);
 		}
 	}
 
 	{
 		// Verify unknown key access returns the error
 		state SimGetEncryptKeysByKeyIdsRequest req;
-		req.encryptKeyIds.push_back(maxEncryptionKeys + 1);
+		req.encryptKeyIdMap.emplace(maxEncryptionKeys + 1, 1);
 		try {
 			SimGetEncryptKeysByKeyIdsReply reply = wait(inf.encryptKeyLookupByKeyIds.getReply(req));
 		} catch (Error& e) {
