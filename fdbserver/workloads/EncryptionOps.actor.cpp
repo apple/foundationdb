@@ -121,7 +121,6 @@ struct EncryptionOpsWorkload : TestWorkload {
 	EncryptCipherDomainId maxDomainId;
 	EncryptCipherBaseKeyId minBaseCipherId;
 	EncryptCipherBaseKeyId headerBaseCipherId;
-	EncryptCipherRandomSalt headerRandomSalt;
 
 	EncryptionOpsWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		mode = getOption(options, LiteralStringRef("fixedSize"), 1);
@@ -135,7 +134,6 @@ struct EncryptionOpsWorkload : TestWorkload {
 		maxDomainId = deterministicRandom()->randomInt(minDomainId, minDomainId + 10) + 5;
 		minBaseCipherId = 100;
 		headerBaseCipherId = wcx.clientId * 100 + 1;
-		headerRandomSalt = wcx.clientId * 100 + 1;
 
 		metrics = std::make_unique<WorkloadMetrics>();
 
@@ -185,8 +183,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 
 		// insert the Encrypt Header cipherKey
 		generateRandomBaseCipher(AES_256_KEY_LENGTH, &buff[0], &cipherLen);
-		cipherKeyCache->insertCipherKey(
-		    ENCRYPT_HEADER_DOMAIN_ID, headerBaseCipherId, buff, cipherLen, headerRandomSalt);
+		cipherKeyCache->insertCipherKey(ENCRYPT_HEADER_DOMAIN_ID, headerBaseCipherId, buff, cipherLen);
 
 		TraceEvent("SetupCipherEssentials_Done").detail("MinDomainId", minDomainId).detail("MaxDomainId", maxDomainId);
 	}
@@ -210,29 +207,6 @@ struct EncryptionOpsWorkload : TestWorkload {
 
 		ASSERT(*baseCipherLen > 0 && *baseCipherLen <= AES_256_KEY_LENGTH);
 		TraceEvent("UpdateBaseCipher").detail("DomainId", encryptDomainId).detail("BaseCipherId", *nextBaseCipherId);
-	}
-
-	Reference<BlobCipherKey> getEncryptionKey(const EncryptCipherDomainId& domainId,
-	                                          const EncryptCipherBaseKeyId& baseCipherId,
-	                                          const EncryptCipherRandomSalt& salt) {
-		const bool simCacheMiss = deterministicRandom()->randomInt(1, 100) < 15;
-
-		Reference<BlobCipherKeyCache> cipherKeyCache = BlobCipherKeyCache::getInstance();
-		Reference<BlobCipherKey> cipherKey = cipherKeyCache->getCipherKey(domainId, baseCipherId, salt);
-
-		if (simCacheMiss) {
-			TraceEvent("SimKeyCacheMiss").detail("EncyrptDomainId", domainId).detail("BaseCipherId", baseCipherId);
-			// simulate KeyCache miss that may happen during decryption; insert a CipherKey with known 'salt'
-			cipherKeyCache->insertCipherKey(domainId,
-			                                baseCipherId,
-			                                cipherKey->rawBaseCipher(),
-			                                cipherKey->getBaseCipherLen(),
-			                                cipherKey->getSalt());
-			// Ensure the update was a NOP
-			Reference<BlobCipherKey> cKey = cipherKeyCache->getCipherKey(domainId, baseCipherId, salt);
-			ASSERT(cKey->isEqual(cipherKey));
-		}
-		return cipherKey;
 	}
 
 	Reference<EncryptBuf> doEncryption(Reference<BlobCipherKey> textCipherKey,
@@ -266,12 +240,11 @@ struct EncryptionOpsWorkload : TestWorkload {
 		ASSERT_EQ(header.flags.headerVersion, EncryptBlobCipherAes265Ctr::ENCRYPT_HEADER_VERSION);
 		ASSERT_EQ(header.flags.encryptMode, ENCRYPT_CIPHER_MODE_AES_256_CTR);
 
-		Reference<BlobCipherKey> cipherKey = getEncryptionKey(header.cipherTextDetails.encryptDomainId,
-		                                                      header.cipherTextDetails.baseCipherId,
-		                                                      header.cipherTextDetails.salt);
-		Reference<BlobCipherKey> headerCipherKey = getEncryptionKey(header.cipherHeaderDetails.encryptDomainId,
-		                                                            header.cipherHeaderDetails.baseCipherId,
-		                                                            header.cipherHeaderDetails.salt);
+		Reference<BlobCipherKeyCache> cipherKeyCache = BlobCipherKeyCache::getInstance();
+		Reference<BlobCipherKey> cipherKey = cipherKeyCache->getCipherKey(header.cipherTextDetails.encryptDomainId,
+		                                                                  header.cipherTextDetails.baseCipherId);
+		Reference<BlobCipherKey> headerCipherKey = cipherKeyCache->getCipherKey(
+		    header.cipherHeaderDetails.encryptDomainId, header.cipherHeaderDetails.baseCipherId);
 		ASSERT(cipherKey.isValid());
 		ASSERT(cipherKey->isEqual(orgCipherKey));
 
@@ -324,7 +297,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 			Reference<BlobCipherKey> cipherKey = cipherKeyCache->getLatestCipherKey(encryptDomainId);
 			// Each client working with their own version of encryptHeaderCipherKey, avoid using getLatest()
 			Reference<BlobCipherKey> headerCipherKey =
-			    cipherKeyCache->getCipherKey(ENCRYPT_HEADER_DOMAIN_ID, headerBaseCipherId, headerRandomSalt);
+			    cipherKeyCache->getCipherKey(ENCRYPT_HEADER_DOMAIN_ID, headerBaseCipherId);
 			auto end = std::chrono::high_resolution_clock::now();
 			metrics->updateKeyDerivationTime(std::chrono::duration<double, std::nano>(end - start).count());
 
