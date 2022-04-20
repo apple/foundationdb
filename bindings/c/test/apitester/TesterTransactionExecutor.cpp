@@ -490,7 +490,7 @@ class TransactionExecutorBase : public ITransactionExecutor {
 public:
 	TransactionExecutorBase(const TransactionExecutorOptions& options) : options(options), scheduler(nullptr) {}
 
-	void init(IScheduler* scheduler, const char* clusterFile, std::string bgBasePath) override {
+	void init(IScheduler* scheduler, const char* clusterFile, const std::string& bgBasePath) override {
 		this->scheduler = scheduler;
 		this->clusterFile = clusterFile;
 		this->bgBasePath = bgBasePath;
@@ -534,7 +534,7 @@ public:
 
 	~DBPoolTransactionExecutor() override { release(); }
 
-	void init(IScheduler* scheduler, const char* clusterFile, std::string bgBasePath) override {
+	void init(IScheduler* scheduler, const char* clusterFile, const std::string& bgBasePath) override {
 		TransactionExecutorBase::init(scheduler, clusterFile, bgBasePath);
 		for (int i = 0; i < options.numDatabases; i++) {
 			FDBDatabase* db;

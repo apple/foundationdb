@@ -255,9 +255,9 @@ endif()
             )
 
   add_fdbclient_test(
-    NAME fdb_c_api_tests_bg
+    NAME fdb_c_api_tests_blob_granule
     DISABLE_LOG_DUMP
-    API_TEST_BG_ENABLED
+    API_TEST_BLOB_GRANULES_ENABLED
     COMMAND ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/run_c_api_tests.py
             --cluster-file
             @CLUSTER_FILE@
@@ -266,8 +266,8 @@ endif()
             --external-client-library
             ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so
             --test-dir
-            ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests
-            --bg-enabled
+            ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/blobgranuletests
+            --blob-granule-local-file-path
             @DATA_DIR@/fdbblob/
             )
 

@@ -208,7 +208,9 @@ static void granule_free_load(int64_t loadId, void* context) {
 	ctx->loadsInProgress.erase(it);
 }
 
-KeyValuesResult Transaction::readBlobGranules(std::string_view begin, std::string_view end, std::string basePath) {
+KeyValuesResult Transaction::readBlobGranules(std::string_view begin,
+                                              std::string_view end,
+                                              const std::string& basePath) {
 	ASSERT(tx_);
 
 	TesterGranuleContext testerContext;

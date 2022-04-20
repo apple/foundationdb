@@ -54,8 +54,8 @@ def run_tester(args, test_file):
     if args.external_client_library is not None:
         cmd += ["--external-client-library", args.external_client_library]
     
-    if args.bg_enabled is not None:
-        cmd += ["--bg-local-base-path", args.bg_enabled]
+    if args.blob_granule_local_file_path is not None:
+        cmd += ["--blob-granule-local-file-path", args.blob_granule_local_file_path]
 
     get_logger().info('\nRunning tester \'%s\'...' % ' '.join(cmd))
     proc = Popen(cmd, stdout=sys.stdout, stderr=sys.stderr)
@@ -82,15 +82,9 @@ def run_tester(args, test_file):
     get_logger().info('')
     return ret_code
 
-def include_bg_test(bg_enabled, fname):
-    is_bg_test = fname.startswith("CApiBlobGranule")
-    return (not is_bg_test) or bg_enabled
-
 def run_tests(args):
     num_failed = 0
-    # don't run blob granule tests unless bg_enabled
-    test_files = [f for f in os.listdir(args.test_dir)
-                  if os.path.isfile(os.path.join(args.test_dir, f)) and f.endswith(".toml") and include_bg_test(args.bg_enabled, f)]
+    test_files = [f for f in os.listdir(args.test_dir) if os.path.isfile(os.path.join(args.test_dir, f)) and f.endswith(".toml")]
 
     for test_file in test_files:
         get_logger().info('=========================================================')
@@ -118,8 +112,8 @@ def parse_args(argv):
                         help='The timeout in seconds for running each individual test. (default 300)')
     parser.add_argument('--logging-level', type=str, default='INFO',
                         choices=['ERROR', 'WARNING', 'INFO', 'DEBUG'], help='Specifies the level of detail in the tester output (default=\'INFO\').')
-    parser.add_argument('--bg-enabled', type=str, default=None,
-                        help='Enable blob granule tests if set, value is path to local bg files')
+    parser.add_argument('--blob-granule-local-file-path', type=str, default=None,
+                        help='Enable blob granule tests if set, value is path to local blob granule files')
 
     return parser.parse_args(argv)
 

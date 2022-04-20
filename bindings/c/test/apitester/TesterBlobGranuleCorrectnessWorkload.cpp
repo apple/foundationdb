@@ -37,65 +37,6 @@ private:
 	enum OpType { OP_INSERT, OP_CLEAR, OP_CLEAR_RANGE, OP_READ, OP_GET_RANGES, OP_LAST = OP_GET_RANGES };
 	std::vector<OpType> excludedOpTypes;
 
-	void randomInsertOp(TTaskFct cont) {
-		int numKeys = Random::get().randomInt(1, maxKeysPerTransaction);
-		auto kvPairs = std::make_shared<std::vector<KeyValue>>();
-		for (int i = 0; i < numKeys; i++) {
-			kvPairs->push_back(KeyValue{ randomNotExistingKey(), randomValue() });
-		}
-		execTransaction(
-		    [kvPairs](auto ctx) {
-			    for (const KeyValue& kv : *kvPairs) {
-				    ctx->tx()->set(kv.key, kv.value);
-			    }
-			    ctx->commit();
-		    },
-		    [this, kvPairs, cont]() {
-			    for (const KeyValue& kv : *kvPairs) {
-				    store.set(kv.key, kv.value);
-			    }
-			    schedule(cont);
-		    });
-	}
-
-	void randomClearOp(TTaskFct cont) {
-		int numKeys = Random::get().randomInt(1, maxKeysPerTransaction);
-		auto keys = std::make_shared<std::vector<std::string>>();
-		for (int i = 0; i < numKeys; i++) {
-			keys->push_back(randomExistingKey());
-		}
-		execTransaction(
-		    [keys](auto ctx) {
-			    for (const auto& key : *keys) {
-				    ctx->tx()->clear(key);
-			    }
-			    ctx->commit();
-		    },
-		    [this, keys, cont]() {
-			    for (const auto& key : *keys) {
-				    store.clear(key);
-			    }
-			    schedule(cont);
-		    });
-	}
-
-	void randomClearRangeOp(TTaskFct cont) {
-		std::string begin = randomKeyName();
-		std::string end = randomKeyName();
-		if (begin > end) {
-			std::swap(begin, end);
-		}
-		execTransaction(
-		    [begin, end](auto ctx) {
-			    ctx->tx()->clearRange(begin, end);
-			    ctx->commit();
-		    },
-		    [this, begin, end, cont]() {
-			    store.clear(begin, end);
-			    schedule(cont);
-		    });
-	}
-
 	void randomReadOp(TTaskFct cont) {
 		std::string begin = randomKeyName();
 		std::string end = randomKeyName();

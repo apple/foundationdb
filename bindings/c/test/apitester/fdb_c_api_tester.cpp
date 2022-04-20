@@ -52,7 +52,7 @@ enum TesterOptionId {
 	OPT_OUTPUT_PIPE,
 	OPT_FDB_API_VERSION,
 	OPT_TRANSACTION_RETRY_LIMIT,
-	OPT_BG_LOCAL_BASE_PATH
+	OPT_BLOB_GRANULE_LOCAL_FILE_PATH
 };
 
 CSimpleOpt::SOption TesterOptionDefs[] = //
@@ -74,7 +74,7 @@ CSimpleOpt::SOption TesterOptionDefs[] = //
 	  { OPT_OUTPUT_PIPE, "--output-pipe", SO_REQ_SEP },
 	  { OPT_FDB_API_VERSION, "--api-version", SO_REQ_SEP },
 	  { OPT_TRANSACTION_RETRY_LIMIT, "--transaction-retry-limit", SO_REQ_SEP },
-	  { OPT_BG_LOCAL_BASE_PATH, "--bg-local-base-path", SO_REQ_SEP },
+	  { OPT_BLOB_GRANULE_LOCAL_FILE_PATH, "--blob-granule-local-file-path", SO_REQ_SEP },
 	  SO_END_OF_OPTIONS };
 
 void printProgramUsage(const char* execName) {
@@ -110,7 +110,7 @@ void printProgramUsage(const char* execName) {
 	       "                 Required FDB API version (default %d).\n"
 	       "  --transaction-retry-limit NUMBER\n"
 	       "				 Maximum number of retries per tranaction (default: 0 - unlimited)\n"
-	       "  --bg-local-base-path PATH\n"
+	       "  --blob-granule-local-file-path PATH\n"
 	       "				 Path to blob granule files on local filesystem\n"
 	       "  -f, --test-file FILE\n"
 	       "                 Test file to run.\n"
@@ -204,7 +204,7 @@ bool processArg(TesterOptions& options, const CSimpleOpt& args) {
 	case OPT_TRANSACTION_RETRY_LIMIT:
 		processIntOption(args.OptionText(), args.OptionArg(), 0, 1000, options.transactionRetryLimit);
 		break;
-	case OPT_BG_LOCAL_BASE_PATH:
+	case OPT_BLOB_GRANULE_LOCAL_FILE_PATH:
 		options.bgBasePath = args.OptionArg();
 		break;
 	}

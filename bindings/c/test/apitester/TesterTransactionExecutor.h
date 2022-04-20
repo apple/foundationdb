@@ -139,7 +139,7 @@ struct TransactionExecutorOptions {
 class ITransactionExecutor {
 public:
 	virtual ~ITransactionExecutor() {}
-	virtual void init(IScheduler* sched, const char* clusterFile, std::string bgBasePath = "") = 0;
+	virtual void init(IScheduler* sched, const char* clusterFile, const std::string& bgBasePath) = 0;
 	virtual void execute(std::shared_ptr<ITransactionActor> tx, TTaskFct cont) = 0;
 };
 
