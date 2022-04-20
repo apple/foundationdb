@@ -22,6 +22,7 @@
 #include <numeric>
 #include <vector>
 
+#include "fdbclient/FDBTypes.h"
 #include "flow/ActorCollection.h"
 #include "flow/FastRef.h"
 #include "flow/Trace.h"
@@ -1491,7 +1492,9 @@ class DDBalancerImpl {
 	}
 
 public:
-	ACTOR static Future<Void> BgDDMountainChopper(DDQueueData* self, int teamCollectionIndex) {
+	ACTOR static Future<Void> BgDDMountainChopper(DDQueueData* self,
+	                                              TeamCollectionInterface teamCollection,
+	                                              bool isPrimary) {
 		state double rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL;
 		state int resetCount = SERVER_KNOBS->DD_REBALANCE_RESET_AMOUNT;
 		state Transaction tr(self->cx);
@@ -1534,12 +1537,11 @@ public:
 				                  self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM]);
 				if (self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM] <
 				    SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
-					std::pair<Optional<Reference<IDataDistributionTeam>>, bool> _randomTeam =
-					    wait(brokenPromiseToNever(self->teamCollections[teamCollectionIndex].getTeam.getReply(
-					        GetTeamRequest(WantNewServers::True,
-					                       WantTrueBest::False,
-					                       PreferLowerUtilization::True,
-					                       TeamMustHaveShards::False))));
+					std::pair<Optional<Reference<IDataDistributionTeam>>, bool> _randomTeam = wait(brokenPromiseToNever(
+					    teamCollection.getTeam.getReply(GetTeamRequest(WantNewServers::True,
+					                                                   WantTrueBest::False,
+					                                                   PreferLowerUtilization::True,
+					                                                   TeamMustHaveShards::False))));
 					randomTeam = _randomTeam;
 					traceEvent.detail(
 					    "DestTeam",
@@ -1548,11 +1550,11 @@ public:
 
 					if (randomTeam.first.present()) {
 						std::pair<Optional<Reference<IDataDistributionTeam>>, bool> loadedTeam =
-						    wait(brokenPromiseToNever(self->teamCollections[teamCollectionIndex].getTeam.getReply(
-						        GetTeamRequest(WantNewServers::True,
-						                       WantTrueBest::True,
-						                       PreferLowerUtilization::False,
-						                       TeamMustHaveShards::True))));
+						    wait(brokenPromiseToNever(
+						        teamCollection.getTeam.getReply(GetTeamRequest(WantNewServers::True,
+						                                                       WantTrueBest::True,
+						                                                       PreferLowerUtilization::False,
+						                                                       TeamMustHaveShards::True))));
 
 						traceEvent.detail(
 						    "SourceTeam",
@@ -1564,7 +1566,7 @@ public:
 							                                  SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM,
 							                                  loadedTeam.first.get(),
 							                                  randomTeam.first.get(),
-							                                  teamCollectionIndex == 0,
+							                                  isPrimary,
 							                                  &traceEvent));
 							moved = _moved;
 							if (moved) {
@@ -1603,7 +1605,9 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> BgDDValleyFiller(DDQueueData* self, int teamCollectionIndex) {
+	ACTOR static Future<Void> BgDDValleyFiller(DDQueueData* self,
+	                                           TeamCollectionInterface teamCollection,
+	                                           bool isPrimary) {
 		state double rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL;
 		state int resetCount = SERVER_KNOBS->DD_REBALANCE_RESET_AMOUNT;
 		state Transaction tr(self->cx);
@@ -1647,12 +1651,11 @@ public:
 				                  self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM]);
 				if (self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM] <
 				    SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
-					std::pair<Optional<Reference<IDataDistributionTeam>>, bool> _randomTeam =
-					    wait(brokenPromiseToNever(self->teamCollections[teamCollectionIndex].getTeam.getReply(
-					        GetTeamRequest(WantNewServers::True,
-					                       WantTrueBest::False,
-					                       PreferLowerUtilization::False,
-					                       TeamMustHaveShards::True))));
+					std::pair<Optional<Reference<IDataDistributionTeam>>, bool> _randomTeam = wait(brokenPromiseToNever(
+					    teamCollection.getTeam.getReply(GetTeamRequest(WantNewServers::True,
+					                                                   WantTrueBest::False,
+					                                                   PreferLowerUtilization::False,
+					                                                   TeamMustHaveShards::True))));
 					randomTeam = _randomTeam;
 					traceEvent.detail(
 					    "SourceTeam",
@@ -1661,11 +1664,11 @@ public:
 
 					if (randomTeam.first.present()) {
 						std::pair<Optional<Reference<IDataDistributionTeam>>, bool> unloadedTeam =
-						    wait(brokenPromiseToNever(self->teamCollections[teamCollectionIndex].getTeam.getReply(
-						        GetTeamRequest(WantNewServers::True,
-						                       WantTrueBest::True,
-						                       PreferLowerUtilization::True,
-						                       TeamMustHaveShards::False))));
+						    wait(brokenPromiseToNever(
+						        teamCollection.getTeam.getReply(GetTeamRequest(WantNewServers::True,
+						                                                       WantTrueBest::True,
+						                                                       PreferLowerUtilization::True,
+						                                                       TeamMustHaveShards::False))));
 
 						traceEvent.detail(
 						    "DestTeam",
@@ -1677,7 +1680,7 @@ public:
 							                                  SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM,
 							                                  randomTeam.first.get(),
 							                                  unloadedTeam.first.get(),
-							                                  teamCollectionIndex == 0,
+							                                  isPrimary,
 							                                  &traceEvent));
 							moved = _moved;
 							if (moved) {
@@ -1714,6 +1717,27 @@ public:
 			traceEvent.detail("Moved", moved);
 			traceEvent.log();
 		}
+	}
+};
+
+class DDBalancer {
+	friend class DDBalancerImpl;
+
+private:
+	DDQueueData* self;
+	int teamCollectionIndex;
+
+public:
+	DDBalancer(DDQueueData* self, int teamCollectionIndex) : self(self), teamCollectionIndex(teamCollectionIndex) {}
+
+	Future<Void> BgDDMountainChopper() {
+		return DDBalancerImpl::BgDDMountainChopper(
+		    self, self->teamCollections[teamCollectionIndex], teamCollectionIndex == 0);
+	}
+
+	Future<Void> BgDDValleyFiller() {
+		return DDBalancerImpl::BgDDValleyFiller(
+		    self, self->teamCollections[teamCollectionIndex], teamCollectionIndex == 0);
 	}
 };
 
@@ -1759,9 +1783,11 @@ public:
 		state Future<Void> launchQueuedWorkTimeout = Never();
 
 		for (int i = 0; i < teamCollections.size(); i++) {
-			balancingFutures.push_back(DDBalancerImpl::BgDDMountainChopper(&self, i));
-			balancingFutures.push_back(DDBalancerImpl::BgDDValleyFiller(&self, i));
+			DDBalancer b(&self, i);
+			balancingFutures.push_back(b.BgDDMountainChopper());
+			balancingFutures.push_back(b.BgDDValleyFiller());
 		}
+
 		balancingFutures.push_back(delayedAsyncVar(self.rawProcessingUnhealthy, processingUnhealthy, 0));
 		balancingFutures.push_back(delayedAsyncVar(self.rawProcessingWiggle, processingWiggle, 0));
 
