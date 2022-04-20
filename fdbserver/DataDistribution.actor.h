@@ -262,22 +262,27 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
                                            KeyRangeMap<ShardTrackedData>* shards,
                                            bool* trackerCancelled);
 
-ACTOR Future<Void> dataDistributionQueue(Database cx,
-                                         PromiseStream<RelocateShard> output,
-                                         FutureStream<RelocateShard> input,
-                                         PromiseStream<GetMetricsRequest> getShardMetrics,
-                                         Reference<AsyncVar<bool>> processingUnhealthy,
-                                         Reference<AsyncVar<bool>> processingWiggle,
-                                         std::vector<TeamCollectionInterface> teamCollection,
-                                         Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
-                                         MoveKeysLock lock,
-                                         PromiseStream<Promise<int64_t>> getAverageShardBytes,
-                                         FutureStream<Promise<int>> getUnhealthyRelocationCount,
-                                         UID distributorId,
-                                         int teamSize,
-                                         int singleRegionTeamSize,
-                                         double* lastLimited,
-                                         const DDEnabledState* ddEnabledState);
+class DDQueue {
+	friend class DDQueueImpl;
+
+public:
+	static Future<Void> run(Database cx,
+	                        PromiseStream<RelocateShard> output,
+	                        FutureStream<RelocateShard> input,
+	                        PromiseStream<GetMetricsRequest> getShardMetrics,
+	                        Reference<AsyncVar<bool>> processingUnhealthy,
+	                        Reference<AsyncVar<bool>> processingWiggle,
+	                        std::vector<TeamCollectionInterface> teamCollections,
+	                        Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
+	                        MoveKeysLock lock,
+	                        PromiseStream<Promise<int64_t>> getAverageShardBytes,
+	                        FutureStream<Promise<int>> getUnhealthyRelocationCount,
+	                        UID distributorId,
+	                        int teamSize,
+	                        int singleRegionTeamSize,
+	                        double* lastLimited,
+	                        const DDEnabledState* ddEnabledState);
+};
 
 // Holds the permitted size and IO Bounds for a shard
 struct ShardSizeBounds {

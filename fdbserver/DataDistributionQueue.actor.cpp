@@ -1418,6 +1418,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 	}
 }
 
+class DDBalancerImpl {};
+
 // Move a random shard from sourceTeam if sourceTeam has much more data than provided destTeam
 ACTOR static Future<bool> rebalanceTeams(DDQueueData* self,
                                          int priority,
@@ -1711,154 +1713,195 @@ ACTOR Future<Void> BgDDValleyFiller(DDQueueData* self, int teamCollectionIndex) 
 	}
 }
 
-ACTOR Future<Void> dataDistributionQueue(Database cx,
-                                         PromiseStream<RelocateShard> output,
-                                         FutureStream<RelocateShard> input,
-                                         PromiseStream<GetMetricsRequest> getShardMetrics,
-                                         Reference<AsyncVar<bool>> processingUnhealthy,
-                                         Reference<AsyncVar<bool>> processingWiggle,
-                                         std::vector<TeamCollectionInterface> teamCollections,
-                                         Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
-                                         MoveKeysLock lock,
-                                         PromiseStream<Promise<int64_t>> getAverageShardBytes,
-                                         FutureStream<Promise<int>> getUnhealthyRelocationCount,
-                                         UID distributorId,
-                                         int teamSize,
-                                         int singleRegionTeamSize,
-                                         double* lastLimited,
-                                         const DDEnabledState* ddEnabledState) {
-	state DDQueueData self(distributorId,
-	                       lock,
-	                       cx,
-	                       teamCollections,
-	                       shardsAffectedByTeamFailure,
-	                       getAverageShardBytes,
-	                       teamSize,
-	                       singleRegionTeamSize,
-	                       output,
-	                       input,
-	                       getShardMetrics,
-	                       lastLimited);
-	state std::set<UID> serversToLaunchFrom;
-	state KeyRange keysToLaunchFrom;
-	state RelocateData launchData;
-	state Future<Void> recordMetrics = delay(SERVER_KNOBS->DD_QUEUE_LOGGING_INTERVAL);
+class DDQueueImpl {
+public:
+	ACTOR static Future<Void> run(Database cx,
+	                              PromiseStream<RelocateShard> output,
+	                              FutureStream<RelocateShard> input,
+	                              PromiseStream<GetMetricsRequest> getShardMetrics,
+	                              Reference<AsyncVar<bool>> processingUnhealthy,
+	                              Reference<AsyncVar<bool>> processingWiggle,
+	                              std::vector<TeamCollectionInterface> teamCollections,
+	                              Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
+	                              MoveKeysLock lock,
+	                              PromiseStream<Promise<int64_t>> getAverageShardBytes,
+	                              FutureStream<Promise<int>> getUnhealthyRelocationCount,
+	                              UID distributorId,
+	                              int teamSize,
+	                              int singleRegionTeamSize,
+	                              double* lastLimited,
+	                              const DDEnabledState* ddEnabledState) {
+		state DDQueueData self(distributorId,
+		                       lock,
+		                       cx,
+		                       teamCollections,
+		                       shardsAffectedByTeamFailure,
+		                       getAverageShardBytes,
+		                       teamSize,
+		                       singleRegionTeamSize,
+		                       output,
+		                       input,
+		                       getShardMetrics,
+		                       lastLimited);
+		state std::set<UID> serversToLaunchFrom;
+		state KeyRange keysToLaunchFrom;
+		state RelocateData launchData;
+		state Future<Void> recordMetrics = delay(SERVER_KNOBS->DD_QUEUE_LOGGING_INTERVAL);
 
-	state std::vector<Future<Void>> balancingFutures;
+		state std::vector<Future<Void>> balancingFutures;
 
-	state ActorCollectionNoErrors actors;
-	state PromiseStream<KeyRange> rangesComplete;
-	state Future<Void> launchQueuedWorkTimeout = Never();
+		state ActorCollectionNoErrors actors;
+		state PromiseStream<KeyRange> rangesComplete;
+		state Future<Void> launchQueuedWorkTimeout = Never();
 
-	for (int i = 0; i < teamCollections.size(); i++) {
-		balancingFutures.push_back(BgDDMountainChopper(&self, i));
-		balancingFutures.push_back(BgDDValleyFiller(&self, i));
-	}
-	balancingFutures.push_back(delayedAsyncVar(self.rawProcessingUnhealthy, processingUnhealthy, 0));
-	balancingFutures.push_back(delayedAsyncVar(self.rawProcessingWiggle, processingWiggle, 0));
-
-	try {
-		loop {
-			self.validate();
-
-			// For the given servers that caused us to go around the loop, find the next item(s) that can be launched.
-			if (launchData.startTime != -1) {
-				// Launch dataDistributionRelocator actor to relocate the launchData
-				self.launchQueuedWork(launchData, ddEnabledState);
-				launchData = RelocateData();
-			} else if (!keysToLaunchFrom.empty()) {
-				self.launchQueuedWork(keysToLaunchFrom, ddEnabledState);
-				keysToLaunchFrom = KeyRangeRef();
-			}
-
-			ASSERT(launchData.startTime == -1 && keysToLaunchFrom.empty());
-
-			choose {
-				when(RelocateShard rs = waitNext(self.input)) {
-					bool wasEmpty = serversToLaunchFrom.empty();
-					self.queueRelocation(rs, serversToLaunchFrom);
-					if (wasEmpty && !serversToLaunchFrom.empty())
-						launchQueuedWorkTimeout = delay(0, TaskPriority::DataDistributionLaunch);
-				}
-				when(wait(launchQueuedWorkTimeout)) {
-					self.launchQueuedWork(serversToLaunchFrom, ddEnabledState);
-					serversToLaunchFrom = std::set<UID>();
-					launchQueuedWorkTimeout = Never();
-				}
-				when(RelocateData results = waitNext(self.fetchSourceServersComplete.getFuture())) {
-					// This when is triggered by queueRelocation() which is triggered by sending self.input
-					self.completeSourceFetch(results);
-					launchData = results;
-				}
-				when(RelocateData done = waitNext(self.dataTransferComplete.getFuture())) {
-					complete(done, self.busymap, self.destBusymap);
-					if (serversToLaunchFrom.empty() && !done.src.empty())
-						launchQueuedWorkTimeout = delay(0, TaskPriority::DataDistributionLaunch);
-					serversToLaunchFrom.insert(done.src.begin(), done.src.end());
-				}
-				when(RelocateData done = waitNext(self.relocationComplete.getFuture())) {
-					self.activeRelocations--;
-					self.finishRelocation(done.priority, done.healthPriority);
-					self.fetchKeysComplete.erase(done);
-					// self.logRelocation( done, "ShardRelocatorDone" );
-					actors.add(tag(delay(0, TaskPriority::DataDistributionLaunch), done.keys, rangesComplete));
-					if (g_network->isSimulated() && debug_isCheckRelocationDuration() && now() - done.startTime > 60) {
-						TraceEvent(SevWarnAlways, "RelocationDurationTooLong")
-						    .detail("Duration", now() - done.startTime);
-						debug_setCheckRelocationDuration(false);
-					}
-				}
-				when(KeyRange done = waitNext(rangesComplete.getFuture())) { keysToLaunchFrom = done; }
-				when(wait(recordMetrics)) {
-					Promise<int64_t> req;
-					getAverageShardBytes.send(req);
-
-					recordMetrics = delay(SERVER_KNOBS->DD_QUEUE_LOGGING_INTERVAL, TaskPriority::FlushTrace);
-
-					auto const highestPriorityRelocation = self.getHighestPriorityRelocation();
-
-					TraceEvent("MovingData", distributorId)
-					    .detail("InFlight", self.activeRelocations)
-					    .detail("InQueue", self.queuedRelocations)
-					    .detail("AverageShardSize", req.getFuture().isReady() ? req.getFuture().get() : -1)
-					    .detail("UnhealthyRelocations", self.unhealthyRelocations)
-					    .detail("HighestPriority", highestPriorityRelocation)
-					    .detail("BytesWritten", self.bytesWritten)
-					    .detail("PriorityRecoverMove", self.priority_relocations[SERVER_KNOBS->PRIORITY_RECOVER_MOVE])
-					    .detail("PriorityRebalanceUnderutilizedTeam",
-					            self.priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM])
-					    .detail("PriorityRebalanceOverutilizedTeam",
-					            self.priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM])
-					    .detail("PriorityStorageWiggle",
-					            self.priority_relocations[SERVER_KNOBS->PRIORITY_PERPETUAL_STORAGE_WIGGLE])
-					    .detail("PriorityTeamHealthy", self.priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_HEALTHY])
-					    .detail("PriorityTeamContainsUndesiredServer",
-					            self.priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER])
-					    .detail("PriorityTeamRedundant",
-					            self.priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT])
-					    .detail("PriorityMergeShard", self.priority_relocations[SERVER_KNOBS->PRIORITY_MERGE_SHARD])
-					    .detail("PriorityPopulateRegion",
-					            self.priority_relocations[SERVER_KNOBS->PRIORITY_POPULATE_REGION])
-					    .detail("PriorityTeamUnhealthy",
-					            self.priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY])
-					    .detail("PriorityTeam2Left", self.priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_2_LEFT])
-					    .detail("PriorityTeam1Left", self.priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_1_LEFT])
-					    .detail("PriorityTeam0Left", self.priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_0_LEFT])
-					    .detail("PrioritySplitShard", self.priority_relocations[SERVER_KNOBS->PRIORITY_SPLIT_SHARD])
-					    .trackLatest("MovingData"); // This trace event's trackLatest lifetime is controlled by
-					                                // DataDistributorData::movingDataEventHolder. The track latest key
-					                                // we use here must match the key used in the holder.
-				}
-				when(wait(self.error.getFuture())) {} // Propagate errors from dataDistributionRelocator
-				when(wait(waitForAll(balancingFutures))) {}
-				when(Promise<int> r = waitNext(getUnhealthyRelocationCount)) { r.send(self.unhealthyRelocations); }
-			}
+		for (int i = 0; i < teamCollections.size(); i++) {
+			balancingFutures.push_back(BgDDMountainChopper(&self, i));
+			balancingFutures.push_back(BgDDValleyFiller(&self, i));
 		}
-	} catch (Error& e) {
-		if (e.code() != error_code_broken_promise && // FIXME: Get rid of these broken_promise errors every time we are
-		                                             // killed by the master dying
-		    e.code() != error_code_movekeys_conflict)
-			TraceEvent(SevError, "DataDistributionQueueError", distributorId).error(e);
-		throw e;
+		balancingFutures.push_back(delayedAsyncVar(self.rawProcessingUnhealthy, processingUnhealthy, 0));
+		balancingFutures.push_back(delayedAsyncVar(self.rawProcessingWiggle, processingWiggle, 0));
+
+		try {
+			loop {
+				self.validate();
+
+				// For the given servers that caused us to go around the loop, find the next item(s) that can be
+				// launched.
+				if (launchData.startTime != -1) {
+					// Launch dataDistributionRelocator actor to relocate the launchData
+					self.launchQueuedWork(launchData, ddEnabledState);
+					launchData = RelocateData();
+				} else if (!keysToLaunchFrom.empty()) {
+					self.launchQueuedWork(keysToLaunchFrom, ddEnabledState);
+					keysToLaunchFrom = KeyRangeRef();
+				}
+
+				ASSERT(launchData.startTime == -1 && keysToLaunchFrom.empty());
+
+				choose {
+					when(RelocateShard rs = waitNext(self.input)) {
+						bool wasEmpty = serversToLaunchFrom.empty();
+						self.queueRelocation(rs, serversToLaunchFrom);
+						if (wasEmpty && !serversToLaunchFrom.empty())
+							launchQueuedWorkTimeout = delay(0, TaskPriority::DataDistributionLaunch);
+					}
+					when(wait(launchQueuedWorkTimeout)) {
+						self.launchQueuedWork(serversToLaunchFrom, ddEnabledState);
+						serversToLaunchFrom = std::set<UID>();
+						launchQueuedWorkTimeout = Never();
+					}
+					when(RelocateData results = waitNext(self.fetchSourceServersComplete.getFuture())) {
+						// This when is triggered by queueRelocation() which is triggered by sending self.input
+						self.completeSourceFetch(results);
+						launchData = results;
+					}
+					when(RelocateData done = waitNext(self.dataTransferComplete.getFuture())) {
+						complete(done, self.busymap, self.destBusymap);
+						if (serversToLaunchFrom.empty() && !done.src.empty())
+							launchQueuedWorkTimeout = delay(0, TaskPriority::DataDistributionLaunch);
+						serversToLaunchFrom.insert(done.src.begin(), done.src.end());
+					}
+					when(RelocateData done = waitNext(self.relocationComplete.getFuture())) {
+						self.activeRelocations--;
+						self.finishRelocation(done.priority, done.healthPriority);
+						self.fetchKeysComplete.erase(done);
+						// self.logRelocation( done, "ShardRelocatorDone" );
+						actors.add(tag(delay(0, TaskPriority::DataDistributionLaunch), done.keys, rangesComplete));
+						if (g_network->isSimulated() && debug_isCheckRelocationDuration() &&
+						    now() - done.startTime > 60) {
+							TraceEvent(SevWarnAlways, "RelocationDurationTooLong")
+							    .detail("Duration", now() - done.startTime);
+							debug_setCheckRelocationDuration(false);
+						}
+					}
+					when(KeyRange done = waitNext(rangesComplete.getFuture())) { keysToLaunchFrom = done; }
+					when(wait(recordMetrics)) {
+						Promise<int64_t> req;
+						getAverageShardBytes.send(req);
+
+						recordMetrics = delay(SERVER_KNOBS->DD_QUEUE_LOGGING_INTERVAL, TaskPriority::FlushTrace);
+
+						auto const highestPriorityRelocation = self.getHighestPriorityRelocation();
+
+						TraceEvent("MovingData", distributorId)
+						    .detail("InFlight", self.activeRelocations)
+						    .detail("InQueue", self.queuedRelocations)
+						    .detail("AverageShardSize", req.getFuture().isReady() ? req.getFuture().get() : -1)
+						    .detail("UnhealthyRelocations", self.unhealthyRelocations)
+						    .detail("HighestPriority", highestPriorityRelocation)
+						    .detail("BytesWritten", self.bytesWritten)
+						    .detail("PriorityRecoverMove",
+						            self.priority_relocations[SERVER_KNOBS->PRIORITY_RECOVER_MOVE])
+						    .detail("PriorityRebalanceUnderutilizedTeam",
+						            self.priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM])
+						    .detail("PriorityRebalanceOverutilizedTeam",
+						            self.priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM])
+						    .detail("PriorityStorageWiggle",
+						            self.priority_relocations[SERVER_KNOBS->PRIORITY_PERPETUAL_STORAGE_WIGGLE])
+						    .detail("PriorityTeamHealthy",
+						            self.priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_HEALTHY])
+						    .detail("PriorityTeamContainsUndesiredServer",
+						            self.priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER])
+						    .detail("PriorityTeamRedundant",
+						            self.priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT])
+						    .detail("PriorityMergeShard", self.priority_relocations[SERVER_KNOBS->PRIORITY_MERGE_SHARD])
+						    .detail("PriorityPopulateRegion",
+						            self.priority_relocations[SERVER_KNOBS->PRIORITY_POPULATE_REGION])
+						    .detail("PriorityTeamUnhealthy",
+						            self.priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY])
+						    .detail("PriorityTeam2Left", self.priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_2_LEFT])
+						    .detail("PriorityTeam1Left", self.priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_1_LEFT])
+						    .detail("PriorityTeam0Left", self.priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_0_LEFT])
+						    .detail("PrioritySplitShard", self.priority_relocations[SERVER_KNOBS->PRIORITY_SPLIT_SHARD])
+						    .trackLatest("MovingData"); // This trace event's trackLatest lifetime is controlled by
+						                                // DataDistributorData::movingDataEventHolder. The track latest
+						                                // key we use here must match the key used in the holder.
+					}
+					when(wait(self.error.getFuture())) {} // Propagate errors from dataDistributionRelocator
+					when(wait(waitForAll(balancingFutures))) {}
+					when(Promise<int> r = waitNext(getUnhealthyRelocationCount)) { r.send(self.unhealthyRelocations); }
+				}
+			}
+		} catch (Error& e) {
+			if (e.code() != error_code_broken_promise && // FIXME: Get rid of these broken_promise errors every time we
+			                                             // are killed by the master dying
+			    e.code() != error_code_movekeys_conflict)
+				TraceEvent(SevError, "DataDistributionQueueError", distributorId).error(e);
+			throw e;
+		}
 	}
+};
+
+Future<Void> DDQueue::run(Database cx,
+                          PromiseStream<RelocateShard> output,
+                          FutureStream<RelocateShard> input,
+                          PromiseStream<GetMetricsRequest> getShardMetrics,
+                          Reference<AsyncVar<bool>> processingUnhealthy,
+                          Reference<AsyncVar<bool>> processingWiggle,
+                          std::vector<TeamCollectionInterface> teamCollections,
+                          Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
+                          MoveKeysLock lock,
+                          PromiseStream<Promise<int64_t>> getAverageShardBytes,
+                          FutureStream<Promise<int>> getUnhealthyRelocationCount,
+                          UID distributorId,
+                          int teamSize,
+                          int singleRegionTeamSize,
+                          double* lastLimited,
+                          const DDEnabledState* ddEnabledState) {
+	return DDQueueImpl::run(cx,
+	                        output,
+	                        input,
+	                        getShardMetrics,
+	                        processingUnhealthy,
+	                        processingWiggle,
+	                        teamCollections,
+	                        shardsAffectedByTeamFailure,
+	                        lock,
+	                        getAverageShardBytes,
+	                        getUnhealthyRelocationCount,
+	                        distributorId,
+	                        teamSize,
+	                        singleRegionTeamSize,
+	                        lastLimited,
+	                        ddEnabledState);
 }
