@@ -102,10 +102,11 @@ void ResumableStateForRunWorkload::postNextTick() {
 
 void ResumableStateForRunWorkload::runOneTick() {
 	assert(iter != OpEnd);
+	if (iter.step == 0 /* first step */)
+		prepareKeys(iter.op, key1, key2, args);
 	watch_step.start();
-	if (iter.step == 0 /* first step */) {
+	if (iter.step == 0)
 		watch_op = Stopwatch(watch_step.getStart());
-	}
 	auto f = Future{};
 	// to minimize context switch overhead, repeat immediately completed ops
 	// in a loop, not an async continuation.

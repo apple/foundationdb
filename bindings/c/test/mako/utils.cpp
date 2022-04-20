@@ -27,25 +27,7 @@
 
 namespace mako {
 
-/* uniform-distribution random */
-int urand(int low, int high) {
-	double r = rand() / (1.0 + RAND_MAX);
-	int range = high - low + 1;
-	return (int)((r * range) + low);
-}
-
-/* return the first key to be inserted */
-int insertBegin(int rows, int p_idx, int t_idx, int total_p, int total_t) {
-	double interval = (double)rows / total_p / total_t;
-	return (int)(round(interval * ((p_idx * total_t) + t_idx)));
-}
-
 /* return the last key to be inserted */
-int insertEnd(int rows, int p_idx, int t_idx, int total_p, int total_t) {
-	double interval = (double)rows / total_p / total_t;
-	return (int)(round(interval * ((p_idx * total_t) + t_idx + 1) - 1));
-}
-
 /* devide val equally among threads */
 int computeThreadPortion(int val, int p_idx, int t_idx, int total_p, int total_t) {
 	int interval = val / total_p / total_t;

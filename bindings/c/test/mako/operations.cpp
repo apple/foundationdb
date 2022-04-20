@@ -23,7 +23,6 @@
 #include "mako.hpp"
 #include "logger.hpp"
 #include "utils.hpp"
-#include "fdbclient/zipf.h"
 #include <array>
 
 extern thread_local mako::Logger logr;
@@ -31,12 +30,6 @@ extern thread_local mako::Logger logr;
 namespace mako {
 
 using namespace fdb;
-
-inline int nextKey(Arguments const& args) {
-	if (args.zipf)
-		return zipfian_next();
-	return urand(0, args.rows - 1);
-}
 
 const std::array<Operation, MAX_OP> opTable{
 	{ { "GRV",
@@ -54,8 +47,6 @@ const std::array<Operation, MAX_OP> opTable{
 	  { "GET",
 	    { { StepKind::READ,
 	        [](Transaction& tx, Arguments const& args, ByteString& key, ByteString&, ByteString&) {
-	            const auto num = nextKey(args);
-	            genKey(key, KEY_PREFIX, args, num);
 	            return tx.get(key, false /*snapshot*/).eraseType();
 	        },
 	        [](Future& f, Transaction&, Arguments const&, ByteString&, ByteString&, ByteString& val) {
@@ -68,12 +59,6 @@ const std::array<Operation, MAX_OP> opTable{
 	  { "GETRANGE",
 	    { { StepKind::READ,
 	        [](Transaction& tx, Arguments const& args, ByteString& begin, ByteString& end, ByteString&) {
-	            const auto num_begin = nextKey(args);
-	            genKey(begin, KEY_PREFIX, args, num_begin);
-	            auto num_end = num_begin + args.txnspec.ops[OP_GETRANGE][OP_RANGE] - 1;
-	            if (num_end > args.rows - 1)
-		            num_end = args.rows - 1;
-	            genKey(end, KEY_PREFIX, args, num_end);
 	            return tx
 	                .getRange<key_select::Inclusive, key_select::Inclusive>(begin,
 	                                                                        end,
@@ -95,8 +80,6 @@ const std::array<Operation, MAX_OP> opTable{
 	  { "SGET",
 	    { { StepKind::READ,
 	        [](Transaction& tx, Arguments const& args, ByteString& key, ByteString&, ByteString&) {
-	            const auto num = nextKey(args);
-	            genKey(key, KEY_PREFIX, args, num);
 	            return tx.get(key, true /*snapshot*/).eraseType();
 	        },
 	        [](Future& f, Transaction&, Arguments const&, ByteString&, ByteString&, ByteString& val) {
@@ -111,12 +94,6 @@ const std::array<Operation, MAX_OP> opTable{
 
 	        StepKind::READ,
 	        [](Transaction& tx, Arguments const& args, ByteString& begin, ByteString& end, ByteString&) {
-	            const auto num_begin = nextKey(args);
-	            genKey(begin, KEY_PREFIX, args, num_begin);
-	            auto num_end = num_begin + args.txnspec.ops[OP_SGETRANGE][OP_RANGE] - 1;
-	            if (num_end > args.rows - 1)
-		            num_end = args.rows - 1;
-	            genKey(end, KEY_PREFIX, args, num_end);
 	            return tx
 	                .getRange<key_select::Inclusive, key_select::Inclusive>(begin,
 	                                                                        end,
@@ -138,8 +115,6 @@ const std::array<Operation, MAX_OP> opTable{
 	  { "UPDATE",
 	    { { StepKind::READ,
 	        [](Transaction& tx, Arguments const& args, ByteString& key, ByteString&, ByteString&) {
-	            const auto num = nextKey(args);
-	            genKey(key, KEY_PREFIX, args, num);
 	            return tx.get(key, false /*snapshot*/).eraseType();
 	        },
 	        [](Future& f, Transaction&, Arguments const&, ByteString&, ByteString&, ByteString& val) {
@@ -192,7 +167,6 @@ const std::array<Operation, MAX_OP> opTable{
 	  { "OVERWRITE",
 	    { { StepKind::IMM,
 	        [](Transaction& tx, Arguments const& args, ByteString& key, ByteString&, ByteString& value) {
-	            genKey(key, KEY_PREFIX, args, nextKey(args));
 	            randomString(value, args.value_length);
 	            tx.set(key, value);
 	            return Future();
@@ -202,7 +176,6 @@ const std::array<Operation, MAX_OP> opTable{
 	  { "CLEAR",
 	    { { StepKind::IMM,
 	        [](Transaction& tx, Arguments const& args, ByteString& key, ByteString&, ByteString&) {
-	            genKey(key, KEY_PREFIX, args, nextKey(args));
 	            tx.clear(key);
 	            return Future();
 	        } } },
@@ -213,7 +186,7 @@ const std::array<Operation, MAX_OP> opTable{
 	        [](Transaction& tx, Arguments const& args, ByteString& key, ByteString&, ByteString& value) {
 	            genKeyPrefix(key, KEY_PREFIX, args);
 	            const auto prefix_len = static_cast<int>(key.size());
-	            randomString<false /*append-after-clear*/>(key, args.key_length - prefix_len);
+	            randomString<false /*clear-before-append*/>(key, args.key_length - prefix_len);
 	            randomString(value, args.value_length);
 	            tx.set(key, value);
 	            return tx.commit().eraseType();
@@ -229,11 +202,6 @@ const std::array<Operation, MAX_OP> opTable{
 	  { "CLEARRANGE",
 	    { { StepKind::IMM,
 	        [](Transaction& tx, Arguments const& args, ByteString& begin, ByteString& end, ByteString&) {
-	            const auto num_begin = nextKey(args);
-	            genKey(begin, KEY_PREFIX, args, num_begin);
-	            const auto range = args.txnspec.ops[OP_CLEARRANGE][OP_RANGE];
-	            assert(range > 0);
-	            genKey(end, KEY_PREFIX, args, std::min(args.rows - 1, num_begin + range - 1));
 	            tx.clearRange(begin, end);
 	            return Future();
 	        } } },
@@ -278,11 +246,6 @@ const std::array<Operation, MAX_OP> opTable{
 	  { "READBLOBGRANULE",
 	    { { StepKind::ON_ERROR,
 	        [](Transaction& tx, Arguments const& args, ByteString& begin, ByteString& end, ByteString&) {
-	            const auto num_begin = nextKey(args);
-	            genKey(begin, KEY_PREFIX, args, num_begin);
-	            const auto range = args.txnspec.ops[OP_READ_BG][OP_RANGE];
-	            assert(range > 0);
-	            genKey(end, KEY_PREFIX, args, std::min(args.rows - 1, num_begin + range - 1));
 	            auto err = Error{};
 
 	            err = tx.setOptionNothrow(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE, BytesRef());

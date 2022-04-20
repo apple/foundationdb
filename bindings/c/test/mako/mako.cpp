@@ -237,8 +237,10 @@ transaction_begin:
 	while (op_iter != OpEnd) {
 		const auto& [op, count, step] = op_iter;
 		const auto step_kind = opTable[op].stepKind(step);
-		auto watch_step = Stopwatch(StartAtCtor{});
 		if (step == 0 /* first step */)
+			prepareKeys(op, key1, key2, args);
+		auto watch_step = Stopwatch(StartAtCtor{});
+		if (step == 0)
 			watch_op = Stopwatch(watch_step.getStart());
 		auto f = opTable[op].stepFunction(step)(tx, args, key1, key2, val);
 		auto future_rc = FutureRC::OK;

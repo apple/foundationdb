@@ -33,10 +33,6 @@
 
 namespace mako {
 
-constexpr const int OP_COUNT = 0;
-constexpr const int OP_RANGE = 1;
-constexpr const int OP_REVERSE = 2;
-
 // determines how resultant future will be handled
 enum class StepKind {
 	NONE, ///< not part of the table: OP_TRANSACTION, OP_COMMIT

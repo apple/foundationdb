@@ -22,7 +22,9 @@
 #define UTILS_HPP
 #pragma once
 
+#include "macro.hpp"
 #include "mako.hpp"
+#include "fdbclient/zipf.h"
 #include <cassert>
 #include <chrono>
 #include <cstdint>
@@ -34,7 +36,17 @@ namespace mako {
 
 /* uniform-distribution random */
 /* return a uniform random number between low and high, both inclusive */
-int urand(int low, int high);
+force_inline int urand(int low, int high) {
+	double r = rand() / (1.0 + RAND_MAX);
+	int range = high - low + 1;
+	return (int)((r * range) + low);
+}
+
+force_inline int nextKey(Arguments const& args) {
+	if (args.zipf)
+		return zipfian_next();
+	return urand(0, args.rows - 1);
+}
 
 /* random string */
 template <bool Clear = true, typename Char>
@@ -65,10 +77,16 @@ void randomNumericString(std::basic_string<Char>& str, int len) {
  * and the total number of processes, total_p, and threads, total_t,
  * returns the first row number assigned to this partition.
  */
-int insertBegin(int rows, int p_idx, int t_idx, int total_p, int total_t);
+force_inline int insertBegin(int rows, int p_idx, int t_idx, int total_p, int total_t) {
+	double interval = (double)rows / total_p / total_t;
+	return (int)(round(interval * ((p_idx * total_t) + t_idx)));
+}
 
 /* similar to insertBegin, insertEnd returns the last row numer */
-int insertEnd(int rows, int p_idx, int t_idx, int total_p, int total_t);
+force_inline int insertEnd(int rows, int p_idx, int t_idx, int total_p, int total_t) {
+	double interval = (double)rows / total_p / total_t;
+	return (int)(round(interval * ((p_idx * total_t) + t_idx + 1) - 1));
+}
 
 /* devide a value equally among threads */
 int computeThreadPortion(int val, int p_idx, int t_idx, int total_p, int total_t);
@@ -118,6 +136,16 @@ void genKey(std::basic_string<Char>& str, std::string_view prefix, Arguments con
 	for (auto i = 0; i < args.row_digits; i++) {
 		str[pos + (args.row_digits - i - 1)] = (num % 10) + '0';
 		num /= 10;
+	}
+}
+
+template <typename Char>
+void prepareKeys(int op, std::basic_string<Char>& key1, std::basic_string<Char>& key2, Arguments const& args) {
+	const auto key1_num = nextKey(args);
+	genKey(key1, KEY_PREFIX, args, key1_num);
+	if (args.txnspec.ops[op][OP_RANGE] > 0) {
+		const auto key2_num = std::min(key1_num + args.txnspec.ops[op][OP_RANGE] - 1, args.rows - 1);
+		genKey(key2, KEY_PREFIX, args, key2_num);
 	}
 }
 

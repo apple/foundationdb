@@ -81,6 +81,10 @@ enum ArgKind {
 	ARG_BG_FILE_PATH // if blob granule files are stored locally, mako will read and materialize them if this is set
 };
 
+constexpr const int OP_COUNT = 0;
+constexpr const int OP_RANGE = 1;
+constexpr const int OP_REVERSE = 2;
+
 /* transaction specification */
 enum OpKind {
 	OP_GETREADVERSION,
