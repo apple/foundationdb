@@ -78,7 +78,7 @@ public:
 	}
 	constexpr bool isValid() const { return version() >= minValidProtocolVersion; }
 
-	constexpr bool isInvalidMagic() const { return version() == invalidProtocolVersion; }
+	constexpr bool isInvalid() const { return version() == invalidProtocolVersion; }
 
 	constexpr uint64_t version() const { return _version & versionFlagMask; }
 	constexpr uint64_t versionWithFlags() const { return _version; }

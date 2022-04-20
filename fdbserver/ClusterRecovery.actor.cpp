@@ -1469,10 +1469,10 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	DBCoreState newState = self->cstate.myDBState;
 	newState.recoveryCount++;
 	newState.recoveryCount++;
-	if (self->cstate.prevDBState.newestProtocolVersion.isInvalidMagic() ||
+	if (self->cstate.prevDBState.newestProtocolVersion.isInvalid() ||
 	    self->cstate.prevDBState.newestProtocolVersion < currentProtocolVersion) {
-		ASSERT(self->cstate.myDBState.lowestCompatibleProtocolVersion.isInvalidMagic() ||
-		       !self->cstate.myDBState.newestProtocolVersion.isInvalidMagic());
+		ASSERT(self->cstate.myDBState.lowestCompatibleProtocolVersion.isInvalid() ||
+		       !self->cstate.myDBState.newestProtocolVersion.isInvalid());
 		newState.newestProtocolVersion = currentProtocolVersion;
 		newState.lowestCompatibleProtocolVersion = minCompatibleProtocolVersion;
 	}
