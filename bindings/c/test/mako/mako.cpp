@@ -88,15 +88,21 @@ thread_local Logger logr = Logger(MainProcess{}, VERBOSE_DEFAULT);
 
 /* cleanup database */
 int cleanup(Transaction tx, Arguments const& args) {
-	auto beginstr = ByteString{};
-	beginstr.reserve(args.key_length);
-	genKeyPrefix(beginstr, KEY_PREFIX, args);
-	beginstr.push_back(0);
-
-	auto endstr = ByteString{};
-	endstr.reserve(args.key_length);
-	genKeyPrefix(endstr, KEY_PREFIX, args);
-	endstr.push_back(0xff);
+	const auto prefix_len = args.prefixpadding ? args.key_length - args.row_digits : intSize(KEY_PREFIX);
+	auto genprefix = [&args](ByteString& s) {
+		const auto padding_len = args.key_length - intSize(KEY_PREFIX) - args.row_digits;
+		auto pos = 0;
+		if (args.prefixpadding) {
+			memset(s.data(), 'x', padding_len);
+			pos += padding_len;
+		}
+		const auto key_prefix_len = intSize(KEY_PREFIX);
+		memcpy(&s[pos], KEY_PREFIX.data(), key_prefix_len);
+	};
+	auto beginstr = ByteString(prefix_len + 1, '\0');
+	genprefix(beginstr);
+	auto endstr = ByteString(prefix_len + 1, '\xff');
+	genprefix(endstr);
 
 	auto watch = Stopwatch(StartAtCtor{});
 
@@ -133,8 +139,8 @@ int populate(Transaction tx,
 
 	auto keystr = ByteString{};
 	auto valstr = ByteString{};
-	keystr.reserve(args.key_length);
-	valstr.reserve(args.value_length);
+	keystr.resize(args.key_length);
+	valstr.resize(args.value_length);
 	const auto num_commit_every = args.txnspec.ops[OP_INSERT][OP_COUNT];
 	const auto num_seconds_trace_every = args.txntrace;
 	auto watch_total = Stopwatch(StartAtCtor{});
@@ -145,9 +151,9 @@ int populate(Transaction tx,
 
 	for (auto i = key_begin; i <= key_end; i++) {
 		/* sequential keys */
-		genKey(keystr, KEY_PREFIX, args, i);
+		genKey(keystr.data(), KEY_PREFIX, args, i);
 		/* random values */
-		randomString(valstr, args.value_length);
+		randomString(valstr.data(), args.value_length);
 
 		while (thread_tps > 0 && xacts >= thread_tps /* throttle */) {
 			if (toIntegerSeconds(watch_throttle.stop().diff()) >= 1) {
@@ -369,11 +375,11 @@ int runWorkload(Transaction tx,
 
 	// reuse memory for keys to avoid realloc overhead
 	auto key1 = ByteString{};
-	key1.reserve(args.key_length);
+	key1.resize(args.key_length);
 	auto key2 = ByteString{};
-	key2.reserve(args.key_length);
+	key2.resize(args.key_length);
 	auto val = ByteString{};
-	val.reserve(args.value_length);
+	val.resize(args.value_length);
 
 	/* main transaction loop */
 	while (1) {

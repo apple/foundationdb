@@ -124,7 +124,7 @@ const std::array<Operation, MAX_OP> opTable{
 	        } },
 	      { StepKind::IMM,
 	        [](Transaction& tx, Arguments const& args, ByteString& key, ByteString&, ByteString& value) {
-	            randomString(value, args.value_length);
+	            randomString(value.data(), args.value_length);
 	            tx.set(key, value);
 	            return Future();
 	        } } },
@@ -133,10 +133,9 @@ const std::array<Operation, MAX_OP> opTable{
 	  { "INSERT",
 	    { { StepKind::IMM,
 	        [](Transaction& tx, Arguments const& args, ByteString& key, ByteString&, ByteString& value) {
-	            genKeyPrefix(key, KEY_PREFIX, args);
-	            // concat([padding], key_prefix, random_string): reasonably unique
-	            randomString<false /*clear-before-append*/>(key, args.key_length - static_cast<int>(key.size()));
-	            randomString(value, args.value_length);
+	            // key[0..args.key_length] := concat(key_prefix, random_string)
+	            randomString(key.data() + intSize(KEY_PREFIX), args.key_length - intSize(KEY_PREFIX));
+	            randomString(value.data(), args.value_length);
 	            tx.set(key, value);
 	            return Future();
 	        } } },
@@ -145,20 +144,17 @@ const std::array<Operation, MAX_OP> opTable{
 	  { "INSERTRANGE",
 	    { { StepKind::IMM,
 	        [](Transaction& tx, Arguments const& args, ByteString& key, ByteString&, ByteString& value) {
-	            genKeyPrefix(key, KEY_PREFIX, args);
-	            const auto prefix_len = static_cast<int>(key.size());
+	            randomString(value.data(), args.value_length);
+
+	            // key[0..args.key_length] := concat(prefix, random_string, num[0..range_digits])
 	            const auto range = args.txnspec.ops[OP_INSERTRANGE][OP_RANGE];
 	            assert(range > 0);
 	            const auto range_digits = digits(range);
-	            assert(args.key_length - prefix_len >= range_digits);
-	            const auto rand_len = args.key_length - prefix_len - range_digits;
-	            // concat([padding], prefix, random_string, range_digits)
-	            randomString<false /*clear-before-append*/>(key, rand_len);
-	            randomString(value, args.value_length);
+	            const auto random_len = args.key_length - intSize(KEY_PREFIX) - range_digits;
+	            randomString(&key[intSize(KEY_PREFIX)], random_len);
 	            for (auto i = 0; i < range; i++) {
-		            fmt::format_to(std::back_inserter(key), "{0:0{1}d}", i, range_digits);
+		            numericWithFill(&key[args.key_length - range_digits], range_digits, i);
 		            tx.set(key, value);
-		            key.resize(key.size() - static_cast<size_t>(range_digits));
 	            }
 	            return Future();
 	        } } },
@@ -167,7 +163,7 @@ const std::array<Operation, MAX_OP> opTable{
 	  { "OVERWRITE",
 	    { { StepKind::IMM,
 	        [](Transaction& tx, Arguments const& args, ByteString& key, ByteString&, ByteString& value) {
-	            randomString(value, args.value_length);
+	            randomString(value.data(), args.value_length);
 	            tx.set(key, value);
 	            return Future();
 	        } } },
@@ -184,10 +180,8 @@ const std::array<Operation, MAX_OP> opTable{
 	  { "SETCLEAR",
 	    { { StepKind::COMMIT,
 	        [](Transaction& tx, Arguments const& args, ByteString& key, ByteString&, ByteString& value) {
-	            genKeyPrefix(key, KEY_PREFIX, args);
-	            const auto prefix_len = static_cast<int>(key.size());
-	            randomString<false /*clear-before-append*/>(key, args.key_length - prefix_len);
-	            randomString(value, args.value_length);
+	            randomString(&key[KEY_PREFIX.size()], args.key_length - intSize(KEY_PREFIX));
+	            randomString(value.data(), args.value_length);
 	            tx.set(key, value);
 	            return tx.commit().eraseType();
 	        } },
@@ -210,26 +204,19 @@ const std::array<Operation, MAX_OP> opTable{
 	  { "SETCLEARRANGE",
 	    { { StepKind::COMMIT,
 	        [](Transaction& tx, Arguments const& args, ByteString& key_begin, ByteString& key, ByteString& value) {
-	            genKeyPrefix(key, KEY_PREFIX, args);
-	            const auto prefix_len = static_cast<int>(key.size());
-	            const auto range = args.txnspec.ops[OP_SETCLEARRANGE][OP_RANGE];
+	            randomString(value.data(), args.value_length);
+
+	            // key[0..args.key_length] := concat(prefix, random_string, num[0..range_digits])
+	            const auto range = args.txnspec.ops[OP_INSERTRANGE][OP_RANGE];
 	            assert(range > 0);
 	            const auto range_digits = digits(range);
-	            assert(args.key_length - prefix_len >= range_digits);
-	            const auto rand_len = args.key_length - prefix_len - range_digits;
-	            // concat([padding], prefix, random_string, range_digits)
-	            randomString<false /*clear-before-append*/>(key, rand_len);
-	            randomString(value, args.value_length);
-	            for (auto i = 0; i <= range; i++) {
-		            fmt::format_to(std::back_inserter(key), "{0:0{1}d}", i, range_digits);
-		            if (i == range)
-			            break; // preserve "exclusive last"
-		            // preserve first key for step 1
-		            if (i == 0)
-			            key_begin = key;
+	            const auto random_len = args.key_length - intSize(KEY_PREFIX) - range_digits;
+	            randomString(&key[KEY_PREFIX.size()], random_len);
+	            for (auto i = 0; i < range; i++) {
+		            numericWithFill(&key[args.key_length - range_digits], range_digits, i);
 		            tx.set(key, value);
-		            // preserve last key for step 1
-		            key.resize(key.size() - static_cast<size_t>(range_digits));
+		            if (i == 0)
+			            key_begin.assign(key);
 	            }
 	            return tx.commit().eraseType();
 	        } },

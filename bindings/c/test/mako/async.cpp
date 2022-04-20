@@ -40,8 +40,8 @@ void ResumableStateForPopulate::postNextTick() {
 void ResumableStateForPopulate::runOneTick() {
 	const auto num_commit_every = args.txnspec.ops[OP_INSERT][OP_COUNT];
 	for (auto i = key_checkpoint; i <= key_end; i++) {
-		genKey(keystr, KEY_PREFIX, args, i);
-		randomString(valstr, args.value_length);
+		genKey(keystr.data(), KEY_PREFIX, args, i);
+		randomString(valstr.data(), args.value_length);
 		tx.set(keystr, valstr);
 		stats.incrOpCount(OP_INSERT);
 		if (i == key_end || (i - key_begin + 1) % num_commit_every == 0) {

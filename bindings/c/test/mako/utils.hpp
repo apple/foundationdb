@@ -28,6 +28,7 @@
 #include <cassert>
 #include <chrono>
 #include <cstdint>
+#include <string_view>
 #include <type_traits>
 
 #include <fmt/format.h>
@@ -48,15 +49,16 @@ force_inline int nextKey(Arguments const& args) {
 	return urand(0, args.rows - 1);
 }
 
+force_inline int intSize(std::string_view sv) {
+	return static_cast<int>(sv.size());
+}
+
 /* random string */
-template <bool Clear = true, typename Char>
-void randomString(std::basic_string<Char>& str, int len) {
-	if constexpr (Clear)
-		str.clear();
+template <typename Char>
+void randomString(Char* str, int len) {
 	assert(len >= 0);
-	str.reserve(str.size() + static_cast<size_t>(len));
 	for (auto i = 0; i < len; i++) {
-		str.push_back('!' + urand(0, 'z' - '!')); /* generage a char from '!' to 'z' */
+		str[i] = ('!' + urand(0, 'z' - '!')); /* generate a char from '!' to 'z' */
 	}
 }
 
@@ -105,47 +107,37 @@ int computeThreadPortion(int val, int p_idx, int t_idx, int total_p, int total_t
 /* get the number of digits */
 int digits(int num);
 
-/* fill (str) with configured key prefix: i.e. non-numeric part
- * (str) is appended with concat([padding], PREFIX)
- */
-template <bool Clear = true, typename Char>
-void genKeyPrefix(std::basic_string<Char>& str, std::string_view prefix, Arguments const& args) {
-	// concat('x' * padding_len, key_prefix)
-	if constexpr (Clear)
-		str.clear();
-	const auto padding_len =
-	    args.prefixpadding ? (args.key_length - args.row_digits - static_cast<int>(prefix.size())) : 0;
-	assert(padding_len >= 0);
-	str.reserve(str.size() + padding_len + prefix.size());
-	for (auto i = 0; i < padding_len; i++)
-		str.push_back('x');
-	str.append(reinterpret_cast<Char const*>(prefix.data()), prefix.size());
+/* fill memory slice [str, str + len) as stringified, zero-padded num */
+template <typename Char>
+void numericWithFill(Char* str, int len, int num) {
+	static_assert(sizeof(Char) == 1);
+	assert(num >= 0);
+	for (auto i = len - 1; i >= 0; i--) {
+		str[i] = (num % 10) + '0';
+		num /= 10;
+	}
 }
 
 /* generate a key for a given key number */
 /* prefix is "mako" by default, prefixpadding = 1 means 'x' will be in front rather than trailing the keyname */
 template <typename Char>
-void genKey(std::basic_string<Char>& str, std::string_view prefix, Arguments const& args, int num) {
+void genKey(Char* str, std::string_view prefix, Arguments const& args, int num) {
 	static_assert(sizeof(Char) == 1);
-	str.clear();
-	str.resize(args.key_length, 'x');
+	memset(str, 'x', args.key_length);
 	const auto prefix_len = static_cast<int>(prefix.size());
 	auto pos = args.prefixpadding ? (args.key_length - prefix_len - args.row_digits) : 0;
-	memcpy(&str[pos], prefix.data(), prefix.size());
+	memcpy(&str[pos], prefix.data(), prefix_len);
 	pos += prefix_len;
-	for (auto i = 0; i < args.row_digits; i++) {
-		str[pos + (args.row_digits - i - 1)] = (num % 10) + '0';
-		num /= 10;
-	}
+	numericWithFill(&str[pos], args.row_digits, num);
 }
 
 template <typename Char>
 void prepareKeys(int op, std::basic_string<Char>& key1, std::basic_string<Char>& key2, Arguments const& args) {
 	const auto key1_num = nextKey(args);
-	genKey(key1, KEY_PREFIX, args, key1_num);
+	genKey(key1.data(), KEY_PREFIX, args, key1_num);
 	if (args.txnspec.ops[op][OP_RANGE] > 0) {
 		const auto key2_num = std::min(key1_num + args.txnspec.ops[op][OP_RANGE] - 1, args.rows - 1);
-		genKey(key2, KEY_PREFIX, args, key2_num);
+		genKey(key2.data(), KEY_PREFIX, args, key2_num);
 	}
 }
 

@@ -62,8 +62,8 @@ struct ResumableStateForPopulate : std::enable_shared_from_this<ResumableStateFo
 	                          int key_end)
 	  : logr(logr), db(db), tx(tx), io_context(io_context), args(args), stats(stats), stopcount(stopcount),
 	    key_begin(key_begin), key_end(key_end), key_checkpoint(key_begin) {
-		keystr.reserve(args.key_length);
-		valstr.reserve(args.value_length);
+		keystr.resize(args.key_length);
+		valstr.resize(args.value_length);
 	}
 	void runOneTick();
 	void postNextTick();
@@ -105,9 +105,9 @@ struct ResumableStateForRunWorkload : std::enable_shared_from_this<ResumableStat
 	                             OpIterator iter)
 	  : logr(logr), db(db), tx(tx), io_context(io_context), args(args), stats(stats), stopcount(stopcount),
 	    signal(signal), max_iters(max_iters), iter(iter), needs_commit(false) {
-		key1.reserve(args.key_length);
-		key2.reserve(args.key_length);
-		val.reserve(args.value_length);
+		key1.resize(args.key_length);
+		key2.resize(args.key_length);
+		val.resize(args.value_length);
 	}
 	void signalEnd() noexcept { stopcount.fetch_add(1); }
 	bool ended() noexcept {
