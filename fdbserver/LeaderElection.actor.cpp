@@ -51,7 +51,7 @@ ACTOR Future<Void> submitCandidacy(Key key,
 				    .detail("OldAddr", coord.candidacy.getEndpoint().getPrimaryAddress().toString());
 				if (rep.getError().code() == error_code_request_maybe_delivered) {
 					// Delay to prevent tight resolving loop due to outdated DNS cache
-					wait(delay(FLOW_KNOBS->HOSTNAME_RESOLVE_DELAY));
+					wait(delay(FLOW_KNOBS->HOSTNAME_RECONNECT_INIT_INTERVAL));
 					throw coordinators_changed();
 				} else {
 					throw rep.getError();
