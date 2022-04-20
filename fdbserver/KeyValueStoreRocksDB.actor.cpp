@@ -1809,7 +1809,13 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 
 	void close() override { doClose(this, false); }
 
-	KeyValueStoreType getType() const override { return KeyValueStoreType(KeyValueStoreType::SSD_ROCKSDB_V1); }
+	KeyValueStoreType getType() const override {
+		if (SERVER_KNOBS->ENABLE_SHARDED_ROCKSDB)
+			// pretend KVSRocks as KVSShardedRocks
+			return KeyValueStoreType(KeyValueStoreType::SSD_SHARDED_ROCKSDB);
+		else
+			return KeyValueStoreType(KeyValueStoreType::SSD_ROCKSDB_V1);
+	}
 
 	Future<Void> init() override {
 		if (openFuture.isValid()) {

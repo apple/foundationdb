@@ -66,7 +66,9 @@ enum class ConfigurationResult {
 	SUCCESS_WARN_PPW_GRADUAL,
 	SUCCESS,
 	SUCCESS_WARN_ROCKSDB_EXPERIMENTAL,
+	SUCCESS_WARN_SHARDED_ROCKSDB_EXPERIMENTAL,
 	DATABASE_CREATED_WARN_ROCKSDB_EXPERIMENTAL,
+	DATABASE_CREATED_WARN_SHARDED_ROCKSDB_EXPERIMENTAL,
 };
 
 enum class CoordinatorsResult {
@@ -293,6 +295,7 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 	state bool warnPPWGradual = false;
 	state bool warnChangeStorageNoMigrate = false;
 	state bool warnRocksDBIsExperimental = false;
+	state bool warnShardedRocksDBIsExperimental = false;
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -483,6 +486,9 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 					} else if (newConfig.storageServerStoreType != oldConfig.storageServerStoreType &&
 					           newConfig.storageServerStoreType == KeyValueStoreType::SSD_ROCKSDB_V1) {
 						warnRocksDBIsExperimental = true;
+					} else if (newConfig.storageServerStoreType != oldConfig.storageServerStoreType &&
+					           newConfig.storageServerStoreType == KeyValueStoreType::SSD_SHARDED_ROCKSDB) {
+						warnShardedRocksDBIsExperimental = true;
 					}
 				}
 			}
@@ -534,6 +540,9 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 						else if (m[configKeysPrefix.toString() + "storage_engine"] ==
 						         std::to_string(KeyValueStoreType::SSD_ROCKSDB_V1))
 							return ConfigurationResult::DATABASE_CREATED_WARN_ROCKSDB_EXPERIMENTAL;
+						else if (m[configKeysPrefix.toString() + "storage_engine"] ==
+						         std::to_string(KeyValueStoreType::SSD_SHARDED_ROCKSDB))
+							return ConfigurationResult::DATABASE_CREATED_WARN_SHARDED_ROCKSDB_EXPERIMENTAL;
 						else
 							return ConfigurationResult::DATABASE_CREATED;
 					} catch (Error& e2) {
@@ -549,6 +558,8 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 		return ConfigurationResult::SUCCESS_WARN_PPW_GRADUAL;
 	} else if (warnRocksDBIsExperimental) {
 		return ConfigurationResult::SUCCESS_WARN_ROCKSDB_EXPERIMENTAL;
+	} else if (warnShardedRocksDBIsExperimental) {
+		return ConfigurationResult::SUCCESS_WARN_SHARDED_ROCKSDB_EXPERIMENTAL;
 	} else {
 		return ConfigurationResult::SUCCESS;
 	}
