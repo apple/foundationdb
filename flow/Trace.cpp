@@ -397,7 +397,7 @@ public:
 		bufferLength += fields.sizeBytes();
 
 		if (g_network && g_network->isSimulated()) {
-			// If we have queued up a large number of events in simulation, then throw an error. This makes it easier to
+			// Throw an error if we have queued up a large number of events in simulation. This makes it easier to
 			// diagnose cases where we get stuck in a loop logging trace events that eventually runs out of memory.
 			// Without this we would never see any trace events from that loop, and it would be more difficult to
 			// identify where the process is actually stuck.
