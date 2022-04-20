@@ -99,28 +99,26 @@ void genKeyPrefix(std::basic_string<Char>& str, std::string_view prefix, Argumen
 	    args.prefixpadding ? (args.key_length - args.row_digits - static_cast<int>(prefix.size())) : 0;
 	assert(padding_len >= 0);
 	str.reserve(str.size() + padding_len + prefix.size());
-	fmt::format_to(std::back_inserter(str), "{0:x>{1}}{2}", "", padding_len, prefix);
+	for (auto i = 0; i < padding_len; i++)
+		str.push_back('x');
+	str.append(reinterpret_cast<Char const*>(prefix.data()), prefix.size());
 }
 
 /* generate a key for a given key number */
 /* prefix is "mako" by default, prefixpadding = 1 means 'x' will be in front rather than trailing the keyname */
-template <bool Clear = true, typename Char>
+template <typename Char>
 void genKey(std::basic_string<Char>& str, std::string_view prefix, Arguments const& args, int num) {
 	static_assert(sizeof(Char) == 1);
-	const auto pad_len = args.prefixpadding ? args.key_length - (static_cast<int>(prefix.size()) + args.row_digits) : 0;
-	assert(pad_len >= 0);
-	if constexpr (Clear)
-		str.clear();
-	str.reserve(str.size() + static_cast<size_t>(args.key_length));
-	fmt::format_to(std::back_inserter(str),
-	               "{0:x>{1}}{2}{3:0{4}d}{5:x>{6}}",
-	               "",
-	               pad_len,
-	               prefix,
-	               num,
-	               args.row_digits,
-	               "",
-	               args.key_length - pad_len - static_cast<int>(prefix.size()) - args.row_digits);
+	str.clear();
+	str.resize(args.key_length, 'x');
+	const auto prefix_len = static_cast<int>(prefix.size());
+	auto pos = args.prefixpadding ? (args.key_length - prefix_len - args.row_digits) : 0;
+	memcpy(&str[pos], prefix.data(), prefix.size());
+	pos += prefix_len;
+	for (auto i = 0; i < args.row_digits; i++) {
+		str[pos + (args.row_digits - i - 1)] = (num % 10) + '0';
+		num /= 10;
+	}
 }
 
 // invoke user-provided callable when object goes out of scope.

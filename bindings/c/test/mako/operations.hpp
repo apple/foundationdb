@@ -126,9 +126,7 @@ force_inline OpIterator getOpBegin(Arguments const& args) noexcept {
 }
 
 force_inline OpIterator getOpNext(Arguments const& args, OpIterator current) noexcept {
-	if (OpEnd == current)
-		return OpEnd;
-	auto [op, count, step] = current;
+	auto& [op, count, step] = current;
 	assert(op < MAX_OP && !isAbstractOp(op));
 	if (opTable[op].steps() > step + 1)
 		return OpIterator{ op, count, step + 1 };

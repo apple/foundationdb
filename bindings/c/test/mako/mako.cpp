@@ -235,7 +235,7 @@ int runOneTransaction(Transaction& tx,
 	auto needs_commit = false;
 transaction_begin:
 	while (op_iter != OpEnd) {
-		const auto [op, count, step] = op_iter;
+		const auto& [op, count, step] = op_iter;
 		const auto step_kind = opTable[op].stepKind(step);
 		auto watch_step = Stopwatch(StartAtCtor{});
 		if (step == 0 /* first step */)
