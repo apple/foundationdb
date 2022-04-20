@@ -111,6 +111,8 @@ if __name__ == "__main__":
                 cmd_args.append(str(cluster.log))
             elif cmd == "@ETC_DIR@":
                 cmd_args.append(str(cluster.etc))
+            elif cmd.startswith("@DATA_DIR@"):
+                cmd_args.append(str(cluster.data) + cmd[len("@DATA_DIR@"):])
             else:
                 cmd_args.append(cmd)
         env = dict(**os.environ)

@@ -49,6 +49,7 @@ public:
 	int numClients;
 	std::vector<std::pair<std::string, std::string>> knobs;
 	TestSpec testSpec;
+	std::string bgBasePath;
 };
 
 } // namespace FdbApiTester

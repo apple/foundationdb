@@ -106,6 +106,7 @@ if(NOT WIN32)
     test/apitester/TesterApiWrapper.h
     test/apitester/TesterTestSpec.cpp
     test/apitester/TesterTestSpec.h
+    test/apitester/TesterBlobGranuleCorrectnessWorkload.cpp
     test/apitester/TesterCancelTransactionWorkload.cpp
     test/apitester/TesterCorrectnessWorkload.cpp
     test/apitester/TesterKeyValueStore.cpp
@@ -266,6 +267,8 @@ endif()
             ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so
             --test-dir
             ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests
+            --bg-enabled
+            @DATA_DIR@/fdbblob/
             )
 
   if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" AND NOT USE_SANITIZER)
