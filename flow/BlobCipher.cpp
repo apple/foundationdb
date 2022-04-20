@@ -133,15 +133,11 @@ BlobCipherKeyIdCacheKey BlobCipherKeyIdCache::getCacheKey(const EncryptCipherBas
 }
 
 Reference<BlobCipherKey> BlobCipherKeyIdCache::getLatestCipherKey() {
-	if (keyIdCache.empty()) {
-		// Cache is empty, nothing more to do.
-		throw encrypt_key_not_found();
+	// ENCRYPT_INVALID_CIPHER_KEY_ID indicate there was no key inserted. In this case we return empty key instead of
+	// throwing encrypt_invalid_id.
+	if (latestBaseCipherKeyId == ENCRYPT_INVALID_CIPHER_KEY_ID) {
+		return Reference<BlobCipherKey>();
 	}
-
-	// Ensure latestCipher details sanity
-	ASSERT_GT(latestBaseCipherKeyId, ENCRYPT_INVALID_CIPHER_KEY_ID);
-	ASSERT_GT(latestRandomSalt, ENCRYPT_INVALID_RANDOM_SALT);
-
 	return getCipherByBaseCipherId(latestBaseCipherKeyId, latestRandomSalt);
 }
 
@@ -149,41 +145,31 @@ Reference<BlobCipherKey> BlobCipherKeyIdCache::getCipherByBaseCipherId(const Enc
                                                                        const EncryptCipherRandomSalt& salt) {
 	BlobCipherKeyIdCacheMapCItr itr = keyIdCache.find(getCacheKey(baseCipherKeyId, salt));
 	if (itr == keyIdCache.end()) {
-		TraceEvent("CipherByBaseCipherId_KeyMissing")
-		    .detail("DomainId", domainId)
-		    .detail("BaseCipherId", baseCipherKeyId)
-		    .detail("Salt", salt);
-		throw encrypt_key_not_found();
+		return Reference<BlobCipherKey>();
 	}
 	return itr->second;
 }
 
-void BlobCipherKeyIdCache::insertBaseCipherKey(const EncryptCipherBaseKeyId& baseCipherId,
-                                               const uint8_t* baseCipher,
-                                               int baseCipherLen) {
+Reference<BlobCipherKey> BlobCipherKeyIdCache::insertBaseCipherKey(const EncryptCipherBaseKeyId& baseCipherId,
+                                                                   const uint8_t* baseCipher,
+                                                                   int baseCipherLen) {
 	ASSERT_GT(baseCipherId, ENCRYPT_INVALID_CIPHER_KEY_ID);
 
 	// BaseCipherKeys are immutable, given the routine invocation updates 'latestCipher',
 	// ensure no key-tampering is done
-	try {
-		Reference<BlobCipherKey> cipherKey = getLatestCipherKey();
-		if (cipherKey.isValid() && cipherKey->getBaseCipherId() == baseCipherId) {
-			if (memcmp(cipherKey->rawBaseCipher(), baseCipher, baseCipherLen) == 0) {
-				TraceEvent("InsertBaseCipherKey_AlreadyPresent")
-				    .detail("BaseCipherKeyId", baseCipherId)
-				    .detail("DomainId", domainId);
-				// Key is already present; nothing more to do.
-				return;
-			} else {
-				TraceEvent("InsertBaseCipherKey_UpdateCipher")
-				    .detail("BaseCipherKeyId", baseCipherId)
-				    .detail("DomainId", domainId);
-				throw encrypt_update_cipher();
-			}
-		}
-	} catch (Error& e) {
-		if (e.code() != error_code_encrypt_key_not_found) {
-			throw e;
+	Reference<BlobCipherKey> latestCipherKey = getLatestCipherKey();
+	if (latestCipherKey.isValid() && latestCipherKey->getBaseCipherId() == baseCipherId) {
+		if (memcmp(latestCipherKey->rawBaseCipher(), baseCipher, baseCipherLen) == 0) {
+			TraceEvent("InsertBaseCipherKey_AlreadyPresent")
+			    .detail("BaseCipherKeyId", baseCipherId)
+			    .detail("DomainId", domainId);
+			// Key is already present; nothing more to do.
+			return latestCipherKey;
+		} else {
+			TraceEvent("InsertBaseCipherKey_UpdateCipher")
+			    .detail("BaseCipherKeyId", baseCipherId)
+			    .detail("DomainId", domainId);
+			throw encrypt_update_cipher();
 		}
 	}
 
@@ -195,6 +181,8 @@ void BlobCipherKeyIdCache::insertBaseCipherKey(const EncryptCipherBaseKeyId& bas
 	// Update the latest BaseCipherKeyId for the given encryption domain
 	latestBaseCipherKeyId = baseCipherId;
 	latestRandomSalt = cipherKey->getSalt();
+
+	return cipherKey;
 }
 
 void BlobCipherKeyIdCache::insertBaseCipherKey(const EncryptCipherBaseKeyId& baseCipherId,
@@ -246,10 +234,10 @@ std::vector<Reference<BlobCipherKey>> BlobCipherKeyIdCache::getAllCipherKeys() {
 
 // BlobCipherKeyCache class methods
 
-void BlobCipherKeyCache::insertCipherKey(const EncryptCipherDomainId& domainId,
-                                         const EncryptCipherBaseKeyId& baseCipherId,
-                                         const uint8_t* baseCipher,
-                                         int baseCipherLen) {
+Reference<BlobCipherKey> BlobCipherKeyCache::insertCipherKey(const EncryptCipherDomainId& domainId,
+                                                             const EncryptCipherBaseKeyId& baseCipherId,
+                                                             const uint8_t* baseCipher,
+                                                             int baseCipherLen) {
 	if (domainId == ENCRYPT_INVALID_DOMAIN_ID || baseCipherId == ENCRYPT_INVALID_CIPHER_KEY_ID) {
 		throw encrypt_invalid_id();
 	}
@@ -259,12 +247,14 @@ void BlobCipherKeyCache::insertCipherKey(const EncryptCipherDomainId& domainId,
 		if (domainItr == domainCacheMap.end()) {
 			// Add mapping to track new encryption domain
 			Reference<BlobCipherKeyIdCache> keyIdCache = makeReference<BlobCipherKeyIdCache>(domainId);
-			keyIdCache->insertBaseCipherKey(baseCipherId, baseCipher, baseCipherLen);
+			Reference<BlobCipherKey> cipherKey =
+			    keyIdCache->insertBaseCipherKey(baseCipherId, baseCipher, baseCipherLen);
 			domainCacheMap.emplace(domainId, keyIdCache);
+			return cipherKey;
 		} else {
 			// Track new baseCipher keys
 			Reference<BlobCipherKeyIdCache> keyIdCache = domainItr->second;
-			keyIdCache->insertBaseCipherKey(baseCipherId, baseCipher, baseCipherLen);
+			return keyIdCache->insertBaseCipherKey(baseCipherId, baseCipher, baseCipherLen);
 		}
 
 		TraceEvent("InsertCipherKey").detail("DomainId", domainId).detail("BaseCipherKeyId", baseCipherId);
@@ -311,19 +301,23 @@ void BlobCipherKeyCache::insertCipherKey(const EncryptCipherDomainId& domainId,
 }
 
 Reference<BlobCipherKey> BlobCipherKeyCache::getLatestCipherKey(const EncryptCipherDomainId& domainId) {
+	if (domainId == ENCRYPT_INVALID_DOMAIN_ID) {
+		TraceEvent("GetLatestCipherKey_DomainNotFound").detail("DomainId", domainId);
+		throw encrypt_invalid_id();
+	}
 	auto domainItr = domainCacheMap.find(domainId);
 	if (domainItr == domainCacheMap.end()) {
 		TraceEvent("GetLatestCipherKey_DomainNotFound").detail("DomainId", domainId);
-		throw encrypt_key_not_found();
+		return Reference<BlobCipherKey>();
 	}
 
 	Reference<BlobCipherKeyIdCache> keyIdCache = domainItr->second;
 	Reference<BlobCipherKey> cipherKey = keyIdCache->getLatestCipherKey();
-	if ((now() - cipherKey->getCreationTime()) > FLOW_KNOBS->ENCRYPT_CIPHER_KEY_CACHE_TTL) {
+	if (cipherKey.isValid() && (now() - cipherKey->getCreationTime()) > FLOW_KNOBS->ENCRYPT_CIPHER_KEY_CACHE_TTL) {
 		TraceEvent("GetLatestCipherKey_ExpiredTTL")
 		    .detail("DomainId", domainId)
 		    .detail("BaseCipherId", cipherKey->getBaseCipherId());
-		throw encrypt_key_ttl_expired();
+		return Reference<BlobCipherKey>();
 	}
 
 	return cipherKey;
@@ -334,8 +328,7 @@ Reference<BlobCipherKey> BlobCipherKeyCache::getCipherKey(const EncryptCipherDom
                                                           const EncryptCipherRandomSalt& salt) {
 	auto domainItr = domainCacheMap.find(domainId);
 	if (domainItr == domainCacheMap.end()) {
-		TraceEvent("GetCipherKey_MissingDomainId").detail("DomainId", domainId);
-		throw encrypt_key_not_found();
+		return Reference<BlobCipherKey>();
 	}
 
 	Reference<BlobCipherKeyIdCache> keyIdCache = domainItr->second;
@@ -345,7 +338,7 @@ Reference<BlobCipherKey> BlobCipherKeyCache::getCipherKey(const EncryptCipherDom
 void BlobCipherKeyCache::resetEncryptDomainId(const EncryptCipherDomainId domainId) {
 	auto domainItr = domainCacheMap.find(domainId);
 	if (domainItr == domainCacheMap.end()) {
-		throw encrypt_key_not_found();
+		return;
 	}
 
 	Reference<BlobCipherKeyIdCache> keyIdCache = domainItr->second;
@@ -779,9 +772,22 @@ TEST_CASE("flow/BlobCipher") {
 	}
 	ASSERT_EQ(domainKeyMap.size(), maxDomainId);
 
+	Reference<BlobCipherKeyCache> cipherKeyCache = BlobCipherKeyCache::getInstance();
+
+	// validate getLatestCipherKey return empty when there's no cipher key
+	TraceEvent("BlobCipherTest_LatestKeyNotExists").log();
+	Reference<BlobCipherKey> latestKeyNonexists =
+	    cipherKeyCache->getLatestCipherKey(deterministicRandom()->randomInt(minDomainId, maxDomainId));
+	ASSERT(!latestKeyNonexists.isValid());
+	try {
+		cipherKeyCache->getLatestCipherKey(ENCRYPT_INVALID_DOMAIN_ID);
+		ASSERT(false); // shouldn't get here
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_encrypt_invalid_id);
+	}
+
 	// insert BlobCipher keys into BlobCipherKeyCache map and validate
 	TraceEvent("BlobCipherTest_InsertKeys").log();
-	Reference<BlobCipherKeyCache> cipherKeyCache = BlobCipherKeyCache::getInstance();
 	for (auto& domainItr : domainKeyMap) {
 		for (auto& baseKeyItr : domainItr.second) {
 			Reference<BaseCipher> baseCipher = baseKeyItr.second;

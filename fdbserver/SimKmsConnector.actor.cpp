@@ -42,7 +42,7 @@ struct SimEncryptKeyCtx {
 	EncryptCipherBaseKeyId id;
 	SimEncryptKey key;
 
-	explicit SimEncryptKeyCtx(EncryptCipherBaseKeyId kId, const char* data) : id(kId), key(data) {}
+	explicit SimEncryptKeyCtx(EncryptCipherBaseKeyId kId, const char* data) : id(kId), key(data, AES_256_KEY_LENGTH) {}
 };
 
 struct SimKmsConnectorContext {
@@ -53,7 +53,7 @@ struct SimKmsConnectorContext {
 		uint8_t buffer[AES_256_KEY_LENGTH];
 
 		// Construct encryption keyStore.
-		for (int i = 0; i < maxEncryptionKeys; i++) {
+		for (int i = 1; i <= maxEncryptionKeys; i++) {
 			generateRandomData(&buffer[0], AES_256_KEY_LENGTH);
 			SimEncryptKeyCtx ctx(i, reinterpret_cast<const char*>(buffer));
 			simEncryptKeyStore[i] = std::make_unique<SimEncryptKeyCtx>(i, reinterpret_cast<const char*>(buffer));
@@ -103,7 +103,7 @@ ACTOR Future<Void> simKmsConnectorCore_impl(KmsConnectorInterface interf) {
 				// mean multiple domains gets mapped to the same encryption key which is fine, the EncryptKeyStore
 				// guarantees that keyId -> plaintext encryptKey mapping is idempotent.
 				for (EncryptCipherDomainId domainId : req.encryptDomainIds) {
-					EncryptCipherBaseKeyId keyId = domainId % SERVER_KNOBS->SIM_KMS_MAX_KEYS;
+					EncryptCipherBaseKeyId keyId = 1 + abs(domainId) % SERVER_KNOBS->SIM_KMS_MAX_KEYS;
 					const auto& itr = ctx->simEncryptKeyStore.find(keyId);
 					if (itr != ctx->simEncryptKeyStore.end()) {
 						keysByDomainIdRep.cipherKeyDetails.emplace_back(

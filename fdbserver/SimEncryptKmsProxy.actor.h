@@ -36,7 +36,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 using SimEncryptKeyId = uint64_t;
-using SimEncryptDomainId = uint64_t;
+using SimEncryptDomainId = int64_t;
 using SimEncryptKey = std::string;
 
 struct SimKmsProxyInterface {
