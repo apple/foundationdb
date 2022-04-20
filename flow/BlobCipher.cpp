@@ -129,6 +129,9 @@ BlobCipherKeyIdCacheKey BlobCipherKeyIdCache::getCacheKey(const EncryptCipherBas
 }
 
 Reference<BlobCipherKey> BlobCipherKeyIdCache::getLatestCipherKey() {
+	if (latestBaseCipherKeyId == ENCRYPT_INVALID_CIPHER_KEY_ID) {
+		return Reference<BlobCipherKey>();
+	}
 	return getCipherByBaseCipherId(latestBaseCipherKeyId, latestRandomSalt);
 }
 
@@ -154,7 +157,7 @@ void BlobCipherKeyIdCache::insertBaseCipherKey(const EncryptCipherBaseKeyId& bas
 	// ensure no key-tampering is done
 	try {
 		Reference<BlobCipherKey> cipherKey = getLatestCipherKey();
-		if (cipherKey->getBaseCipherId() == baseCipherId) {
+		if (cipherKey.isValid() && cipherKey->getBaseCipherId() == baseCipherId) {
 			if (memcmp(cipherKey->rawBaseCipher(), baseCipher, baseCipherLen) == 0) {
 				TraceEvent("InsertBaseCipherKey_AlreadyPresent")
 				    .detail("BaseCipherKeyId", baseCipherId)
@@ -299,7 +302,7 @@ Reference<BlobCipherKey> BlobCipherKeyCache::getLatestCipherKey(const EncryptCip
 	auto domainItr = domainCacheMap.find(domainId);
 	if (domainItr == domainCacheMap.end()) {
 		TraceEvent("GetLatestCipherKey_DomainNotFound").detail("DomainId", domainId);
-		throw encrypt_key_not_found();
+		return Reference<BlobCipherKey>();
 	}
 
 	Reference<BlobCipherKeyIdCache> keyIdCache = domainItr->second;
@@ -308,7 +311,7 @@ Reference<BlobCipherKey> BlobCipherKeyCache::getLatestCipherKey(const EncryptCip
 		TraceEvent("GetLatestCipherKey_ExpiredTTL")
 		    .detail("DomainId", domainId)
 		    .detail("BaseCipherId", cipherKey->getBaseCipherId());
-		throw encrypt_key_ttl_expired();
+		return Reference<BlobCipherKey>();
 	}
 
 	return cipherKey;
@@ -764,9 +767,16 @@ TEST_CASE("flow/BlobCipher") {
 	}
 	ASSERT_EQ(domainKeyMap.size(), maxDomainId);
 
+	Reference<BlobCipherKeyCache> cipherKeyCache = BlobCipherKeyCache::getInstance();
+
+	// validate getLatestCipherKey return empty when there's no cipher key
+	TraceEvent("BlobCipherTest_LatestKeyNotExists").log();
+	Reference<BlobCipherKey> latestKeyNonexists =
+	    cipherKeyCache->getLatestCipherKey(deterministicRandom()->randomInt(minDomainId, maxDomainId));
+	ASSERT(!latestKeyNonexists.isValid());
+
 	// insert BlobCipher keys into BlobCipherKeyCache map and validate
 	TraceEvent("BlobCipherTest_InsertKeys").log();
-	Reference<BlobCipherKeyCache> cipherKeyCache = BlobCipherKeyCache::getInstance();
 	for (auto& domainItr : domainKeyMap) {
 		for (auto& baseKeyItr : domainItr.second) {
 			Reference<BaseCipher> baseCipher = baseKeyItr.second;
