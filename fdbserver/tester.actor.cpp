@@ -747,6 +747,41 @@ ACTOR Future<Void> clearData(Database cx) {
 			wait(tr.onError(e));
 		}
 	}
+
+	tr = Transaction(cx);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::RAW_ACCESS);
+			state RangeResult rangeResult = wait(tr.getRange(normalKeys, 1));
+			state Optional<Key> tenantPrefix;
+
+			// If the result is non-empty, it is possible that there is some bad interaction between the test
+			// and the optional simulated default tenant:
+			//
+			// 1. If the test is creating/deleting tenants itself, then it should disable the default tenant.
+			// 2. If the test is opening Database objects itself, then it needs to propagate the default tenant
+			//    value from the existing Database.
+			// 3. If the test is using raw access or system key access and writing to the normal key-space, then
+			//    it should disable the default tenant.
+			if (!rangeResult.empty()) {
+				if (cx->defaultTenant.present()) {
+					TenantMapEntry entry = wait(ManagementAPI::getTenant(cx.getReference(), cx->defaultTenant.get()));
+					tenantPrefix = entry.prefix;
+				}
+
+				TraceEvent(SevError, "TesterClearFailure")
+				    .detail("DefaultTenant", cx->defaultTenant)
+				    .detail("TenantPrefix", tenantPrefix)
+				    .detail("FirstKey", rangeResult[0].key);
+
+				ASSERT(false);
+			}
+			break;
+		} catch (Error& e) {
+			TraceEvent(SevWarn, "TesterCheckDatabaseClearedError").error(e);
+			wait(tr.onError(e));
+		}
+	}
 	return Void();
 }
 
