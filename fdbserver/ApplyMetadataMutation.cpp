@@ -53,7 +53,7 @@ namespace {
 class ApplyMetadataMutationsImpl {
 
 public:
-	ApplyMetadataMutationsImpl(const SpanID& spanContext_,
+	ApplyMetadataMutationsImpl(const SpanContext& spanContext_,
 	                           const UID& dbgid_,
 	                           Arena& arena_,
 	                           const VectorRef<MutationRef>& mutations_,
@@ -61,7 +61,7 @@ public:
 	  : spanContext(spanContext_), dbgid(dbgid_), arena(arena_), mutations(mutations_), txnStateStore(txnStateStore_),
 	    confChange(dummyConfChange) {}
 
-	ApplyMetadataMutationsImpl(const SpanID& spanContext_,
+	ApplyMetadataMutationsImpl(const SpanContext& spanContext_,
 	                           Arena& arena_,
 	                           const VectorRef<MutationRef>& mutations_,
 	                           ProxyCommitData& proxyCommitData_,
@@ -82,7 +82,7 @@ public:
 	    tssMapping(&proxyCommitData_.tssMapping), tenantMap(&proxyCommitData_.tenantMap),
 	    initialCommit(initialCommit_) {}
 
-	ApplyMetadataMutationsImpl(const SpanID& spanContext_,
+	ApplyMetadataMutationsImpl(const SpanContext& spanContext_,
 	                           ResolverData& resolverData_,
 	                           const VectorRef<MutationRef>& mutations_)
 	  : spanContext(spanContext_), dbgid(resolverData_.dbgid), arena(resolverData_.arena), mutations(mutations_),
@@ -94,7 +94,7 @@ public:
 private:
 	// The following variables are incoming parameters
 
-	const SpanID& spanContext;
+	const SpanContext& spanContext;
 
 	const UID& dbgid;
 
@@ -1217,7 +1217,7 @@ public:
 
 } // anonymous namespace
 
-void applyMetadataMutations(SpanID const& spanContext,
+void applyMetadataMutations(SpanContext const& spanContext,
                             ProxyCommitData& proxyCommitData,
                             Arena& arena,
                             Reference<ILogSystem> logSystem,
@@ -1241,13 +1241,13 @@ void applyMetadataMutations(SpanID const& spanContext,
 	    .apply();
 }
 
-void applyMetadataMutations(SpanID const& spanContext,
+void applyMetadataMutations(SpanContext const& spanContext,
                             ResolverData& resolverData,
                             const VectorRef<MutationRef>& mutations) {
 	ApplyMetadataMutationsImpl(spanContext, resolverData, mutations).apply();
 }
 
-void applyMetadataMutations(SpanID const& spanContext,
+void applyMetadataMutations(SpanContext const& spanContext,
                             const UID& dbgid,
                             Arena& arena,
                             const VectorRef<MutationRef>& mutations,
