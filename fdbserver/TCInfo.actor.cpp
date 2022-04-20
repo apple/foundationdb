@@ -387,6 +387,7 @@ int64_t TCTeamInfo::getLoadBytes(bool includeInFlight, double inflightPenalty) c
 	return (physicalBytes + (inflightPenalty * inFlightBytes)) * availableSpaceMultiplier;
 }
 
+// average read bandwidth within a team
 double TCTeamInfo::getLoadReadBandwidth(bool includeInFlight, double inflightPenalty) const {
 	// FIXME: consider team load variance
 	double sum = 0;
@@ -400,7 +401,8 @@ double TCTeamInfo::getLoadReadBandwidth(bool includeInFlight, double inflightPen
 		}
 	}
 	return (size == 0 ? 0 : sum / size) +
-	       (includeInFlight ? inflightPenalty * getReadInFlightToTeam() / servers.size() : 0);
+	       // we don't need to divide the inflight bandwidth because when added it the bandwidth is from single server
+	       (includeInFlight ? inflightPenalty * getReadInFlightToTeam() : 0);
 }
 
 int64_t TCTeamInfo::getMinAvailableSpace(bool includeInFlight) const {

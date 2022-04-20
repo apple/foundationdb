@@ -416,16 +416,19 @@ void launchDest(RelocateData& relocation,
 		}
 	}
 }
+void completeDest(RelocateData const& relocation, std::map<UID, Busyness>& destBusymap) {
+	int destWorkFactor = getDestWorkFactor();
+	for (UID id : relocation.completeDests) {
+		destBusymap[id].removeWork(relocation.priority, destWorkFactor);
+	}
+}
 
 void complete(RelocateData const& relocation, std::map<UID, Busyness>& busymap, std::map<UID, Busyness>& destBusymap) {
 	ASSERT(relocation.workFactor > 0);
 	for (int i = 0; i < relocation.src.size(); i++)
 		busymap[relocation.src[i]].removeWork(relocation.priority, relocation.workFactor);
 
-	int destWorkFactor = getDestWorkFactor();
-	for (UID id : relocation.completeDests) {
-		destBusymap[id].removeWork(relocation.priority, destWorkFactor);
-	}
+	completeDest(relocation, destBusymap);
 }
 
 ACTOR Future<Void> dataDistributionRelocator(struct DDQueueData* self,
@@ -1071,13 +1074,13 @@ struct DDQueueData {
 	}
 };
 
-// return -1 if a.readload > b.readload
+// return -1 if a.readload > b.readload, usually for choose dest team with low read load
 int greaterReadLoad(Reference<IDataDistributionTeam> a, Reference<IDataDistributionTeam> b) {
 	auto r1 = a->getLoadReadBandwidth(true, 2), r2 = b->getLoadReadBandwidth(true, 2);
 	return r1 == r2 ? 0 : (r1 > r2 ? -1 : 1);
 }
 
-// return -1 if a.readload < b.readload
+// return -1 if a.readload < b.readload, usually for choose source team with high read load
 int lessReadLoad(Reference<IDataDistributionTeam> a, Reference<IDataDistributionTeam> b) {
 	auto r1 = a->getLoadReadBandwidth(), r2 = b->getLoadReadBandwidth();
 	return r1 == r2 ? 0 : (r1 < r2 ? -1 : 1);
@@ -1449,7 +1452,10 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 				self->noErrorActors.add(
 				    trigger([destinationRef, readLoad]() mutable { destinationRef.addReadInFlightToTeam(-readLoad); },
 				            delay(SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL)));
-				rd.completeDests.clear();
+
+				// completeDest(rd, self->destBusymap);
+				// rd.completeDests.clear();
+
 				wait(delay(SERVER_KNOBS->RETRY_RELOCATESHARD_DELAY, TaskPriority::DataDistributionLaunch));
 			}
 		}
@@ -1517,12 +1523,14 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 		return false;
 	}
 	if (metrics.keys.present() && metrics.bytes > 0) {
-		auto srcLoad = sourceTeam->getLoadReadBandwidth(), destLoad = destTeam->getLoadReadBandwidth();
-		if (abs(srcLoad - destLoad) <=
-		    3 * std::max(metrics.bytesReadPerKSecond, SERVER_KNOBS->SHARD_READ_HOT_BANDWITH_MIN_PER_KSECONDS)) {
-			traceEvent->detail("SkipReason", "TeamTooSimilar")
-			    .detail("ShardReadBandwidth", metrics.bytesReadPerKSecond)
-			    .detail("SrcReadBandwidth", srcLoad);
+		auto srcLoad = sourceTeam->getLoadReadBandwidth(false), destLoad = destTeam->getLoadReadBandwidth();
+		traceEvent->detail("ShardReadBandwidth", metrics.bytesReadPerKSecond)
+		    .detail("SrcReadBandwidth", srcLoad)
+		    .detail("DestReadBandwidth", destLoad);
+
+		if (srcLoad - destLoad <=
+		    5 * std::max(metrics.bytesReadPerKSecond, SERVER_KNOBS->SHARD_READ_HOT_BANDWITH_MIN_PER_KSECONDS)) {
+			traceEvent->detail("SkipReason", "TeamTooSimilar");
 			return false;
 		}
 		//  Verify the shard is still in ShardsAffectedByTeamFailure
@@ -1587,7 +1595,7 @@ ACTOR static Future<bool> rebalanceTeams(DDQueueData* self,
 	int64_t destBytes = destTeam->getLoadBytes();
 
 	bool sourceAndDestTooSimilar =
-	    abs(sourceBytes - destBytes) <= 3 * std::max<int64_t>(SERVER_KNOBS->MIN_SHARD_BYTES, metrics.bytes);
+	    sourceBytes - destBytes <= 3 * std::max<int64_t>(SERVER_KNOBS->MIN_SHARD_BYTES, metrics.bytes);
 	traceEvent->detail("SourceBytes", sourceBytes)
 	    .detail("DestBytes", destBytes)
 	    .detail("ShardBytes", metrics.bytes)
@@ -1648,6 +1656,7 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueueData* self, int teamCollectionIndex,
 	state Transaction tr(self->cx);
 	state double lastRead = 0;
 	state bool skipCurrentLoop = false;
+	state Future<Void> delayF = Never();
 	state const bool readRebalance = !isDiskRebalancePriority(ddPriority);
 	state const char* eventName = isMountainChopperPriority(ddPriority) ? "BgDDMountainChopper" : "BgDDValleyFiller";
 
@@ -1668,7 +1677,7 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueueData* self, int teamCollectionIndex,
 
 		try {
 			// FIXME: change back to BG_REBALANCE_SWITCH_CHECK_INTERVAL after test
-			state Future<Void> delayF = delay(rebalancePollingInterval, TaskPriority::DataDistributionLaunch);
+			delayF = delay(0.1, TaskPriority::DataDistributionLaunch);
 			if ((now() - lastRead) > SERVER_KNOBS->BG_REBALANCE_SWITCH_CHECK_INTERVAL) {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
@@ -1701,6 +1710,7 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueueData* self, int teamCollectionIndex,
 				// set loop interval to avoid busy wait here.
 				rebalancePollingInterval =
 				    std::max(rebalancePollingInterval, SERVER_KNOBS->BG_REBALANCE_SWITCH_CHECK_INTERVAL);
+				tr.reset();
 				continue;
 			}
 
@@ -1816,6 +1826,7 @@ ACTOR Future<Void> BgDDMountainChopper(DDQueueData* self, int teamCollectionInde
 				// set loop interval to avoid busy wait here.
 				rebalancePollingInterval =
 				    std::max(rebalancePollingInterval, SERVER_KNOBS->BG_REBALANCE_SWITCH_CHECK_INTERVAL);
+				tr.reset();
 				continue;
 			}
 
@@ -1938,6 +1949,7 @@ ACTOR Future<Void> BgDDValleyFiller(DDQueueData* self, int teamCollectionIndex) 
 				// set loop interval to avoid busy wait here.
 				rebalancePollingInterval =
 				    std::max(rebalancePollingInterval, SERVER_KNOBS->BG_REBALANCE_SWITCH_CHECK_INTERVAL);
+				tr.reset();
 				continue;
 			}
 
@@ -2120,7 +2132,9 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 						debug_setCheckRelocationDuration(false);
 					}
 				}
-				when(KeyRange done = waitNext(rangesComplete.getFuture())) { keysToLaunchFrom = done; }
+				when(KeyRange done = waitNext(rangesComplete.getFuture())) {
+					keysToLaunchFrom = done;
+				}
 				when(wait(recordMetrics)) {
 					Promise<int64_t> req;
 					getAverageShardBytes.send(req);
@@ -2167,7 +2181,9 @@ ACTOR Future<Void> dataDistributionQueue(Database cx,
 				}
 				when(wait(self.error.getFuture())) {} // Propagate errors from dataDistributionRelocator
 				when(wait(waitForAll(balancingFutures))) {}
-				when(Promise<int> r = waitNext(getUnhealthyRelocationCount)) { r.send(self.unhealthyRelocations); }
+				when(Promise<int> r = waitNext(getUnhealthyRelocationCount)) {
+					r.send(self.unhealthyRelocations);
+				}
 			}
 		}
 	} catch (Error& e) {
