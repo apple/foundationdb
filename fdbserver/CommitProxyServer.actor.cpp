@@ -618,6 +618,7 @@ ACTOR Future<Void> preresolutionProcessing(CommitBatchContext* self) {
 	// Pre-resolution the commits
 	TEST(pProxyCommitData->latestLocalCommitBatchResolving.get() < localBatchNumber - 1); // Wait for local batch
 	wait(pProxyCommitData->latestLocalCommitBatchResolving.whenAtLeast(localBatchNumber - 1));
+	pProxyCommitData->stats.computeLatency.addMeasurement(now() - timeStart);
 	double queuingDelay = g_network->now() - timeStart;
 	pProxyCommitData->stats.commitBatchQueuingDist->sampleSeconds(queuingDelay);
 	if ((queuingDelay > (double)SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS / SERVER_KNOBS->VERSIONS_PER_SECOND ||
@@ -1281,6 +1282,18 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		pProxyCommitData->stats.minComputeNS =
 		    std::min<int64_t>(pProxyCommitData->stats.minComputeNS,
 		                      1e9 * pProxyCommitData->commitComputePerOperation[self->latencyBucket]);
+
+		if (self->computeDuration >= SERVER_KNOBS->MAX_COMPUTE_DURATION_LOG_CUTOFF) {
+			TraceEvent(SevInfo, "LongComputeDuration")
+			    .suppressFor(5.0)
+			    .detail("ComputeDuration", self->computeDuration)
+			    .detail("ComputePerOperation", computePerOperation)
+			    .detail("LatencyBucket", self->latencyBucket)
+			    .detail("UpdatedComputePerOperationEstimate",
+			            pProxyCommitData->commitComputePerOperation[self->latencyBucket])
+			    .detail("BatchBytes", self->batchBytes)
+			    .detail("BatchOperations", self->batchOperations);
+		}
 	}
 
 	pProxyCommitData->stats.processingMutationDist->sampleSeconds(now() - postResolutionQueuing);
