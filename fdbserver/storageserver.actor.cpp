@@ -3694,6 +3694,12 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 			// Use the mappedKey as the prefix of the range query.
 			GetRangeReqAndResultRef getRange =
 			    wait(quickGetKeyValues(data, mappedKey, input.version, &(result.arena), pOriginalReq));
+			// If a secondary query has more, only return the results until the previous fully completed secondary
+			// query.
+			if (getRange.result.more) {
+				result.more = true;
+				break;
+			}
 			kvm.reqAndResult = getRange;
 		} else {
 			GetValueReqAndResultRef getValue =
