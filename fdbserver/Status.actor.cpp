@@ -1533,8 +1533,7 @@ struct ProtocolVersionData {
 	ProtocolVersion newestProtocolVersion;
 	ProtocolVersion lowestCompatibleProtocolVersion;
 	ProtocolVersionData()
-	  : runningProtocolVersion(currentProtocolVersion), newestProtocolVersion(ProtocolVersion()),
-	    lowestCompatibleProtocolVersion(ProtocolVersion()) {}
+	  : runningProtocolVersion(currentProtocolVersion) {}
 
 	ProtocolVersionData(uint64_t newestProtocolVersionValue, uint64_t lowestCompatibleProtocolVersionValue)
 	  : runningProtocolVersion(currentProtocolVersion), newestProtocolVersion(newestProtocolVersionValue),
