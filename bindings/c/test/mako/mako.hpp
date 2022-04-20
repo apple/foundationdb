@@ -97,8 +97,7 @@ enum OpKind {
 	OP_CLEARRANGE,
 	OP_SETCLEARRANGE,
 	OP_COMMIT,
-	OP_TRANSACTION, /* pseudo-operation - cumulative time for the operation + commit */
-	OP_TASK, /* pseudo-operation - cumulative time for each iteraton in runWorkload */
+	OP_TRANSACTION, /* pseudo-operation - time it takes to run one iteration of ops sequence */
 	OP_READ_BG,
 	MAX_OP /* must be the last item */
 };

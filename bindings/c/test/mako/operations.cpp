@@ -275,7 +275,6 @@ const std::array<Operation, MAX_OP> opTable{
 	    true },
 	  { "COMMIT", { { StepKind::NONE, nullptr } }, 0, false },
 	  { "TRANSACTION", { { StepKind::NONE, nullptr } }, 0, false },
-	  { "TASK", { { StepKind::NONE, nullptr } }, 0, false },
 	  { "READBLOBGRANULE",
 	    { { StepKind::ON_ERROR,
 	        [](Transaction& tx, Arguments const& args, ByteString& begin, ByteString& end, ByteString&) {

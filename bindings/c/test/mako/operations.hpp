@@ -48,7 +48,7 @@ enum class StepKind {
 
 // Ops that doesn't have concrete steps to execute and are there for measurements only
 force_inline bool isAbstractOp(int op) noexcept {
-	return op == OP_COMMIT || op == OP_TRANSACTION; // || op == OP_TASK;
+	return op == OP_COMMIT || op == OP_TRANSACTION;
 }
 
 using StepFunction = fdb::Future (*)(fdb::Transaction& tx,

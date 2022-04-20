@@ -91,7 +91,6 @@ struct ResumableStateForRunWorkload : std::enable_shared_from_this<ResumableStat
 	Stopwatch watch_op;
 	Stopwatch watch_commit;
 	Stopwatch watch_tx;
-	Stopwatch watch_task;
 	bool needs_commit;
 
 	ResumableStateForRunWorkload(Logger logr,
@@ -112,12 +111,12 @@ struct ResumableStateForRunWorkload : std::enable_shared_from_this<ResumableStat
 	}
 	void signalEnd() noexcept { stopcount.fetch_add(1); }
 	bool ended() noexcept {
-		return (max_iters != -1 && max_iters >= stats.getOpCount(OP_TASK)) || signal.load() == SIGNAL_RED;
+		return (max_iters != -1 && max_iters >= stats.getOpCount(OP_TRANSACTION)) || signal.load() == SIGNAL_RED;
 	}
 	void postNextTick();
 	void runOneTick();
 	void updateStepStats();
-	void onTaskSuccess();
+	void onTransactionSuccess();
 };
 
 using RunWorkloadStateHandle = std::shared_ptr<ResumableStateForRunWorkload>;

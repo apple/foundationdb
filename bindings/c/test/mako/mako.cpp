@@ -179,7 +179,7 @@ int populate(Transaction tx,
 
 		/* commit every 100 inserts (default) or if this is the last key */
 		if (i == key_end || (i - key_begin + 1) % num_commit_every == 0) {
-			const auto do_sample = (stats.getOpCount(OP_TASK) % args.sampling) == 0;
+			const auto do_sample = (stats.getOpCount(OP_TRANSACTION) % args.sampling) == 0;
 			auto watch_commit = Stopwatch(StartAtCtor{});
 			auto future_commit = tx.commit();
 			const auto rc = waitAndHandleError(tx, future_commit, "COMMIT_POPULATE_INSERT");
@@ -207,7 +207,6 @@ int populate(Transaction tx,
 			stats.incrOpCount(OP_COMMIT);
 			stats.incrOpCount(OP_TRANSACTION);
 
-			stats.incrOpCount(OP_TASK);
 			xacts++; /* for throttling */
 		}
 	}
@@ -220,22 +219,21 @@ int populate(Transaction tx,
 	return 0;
 }
 
-/* run one iteration of configured task */
-int runOneTask(Transaction& tx,
-               Arguments const& args,
-               ThreadStatistics& stats,
-               LatencySampleBinArray& sample_bins,
-               ByteString& key1,
-               ByteString& key2,
-               ByteString& val) {
-	const auto do_sample = (stats.getOpCount(OP_TASK) % args.sampling) == 0;
-	auto watch_task = Stopwatch(StartAtCtor{});
-	auto watch_tx = Stopwatch(watch_task.getStart());
+/* run one iteration of configured transaction */
+int runOneTransaction(Transaction& tx,
+                      Arguments const& args,
+                      ThreadStatistics& stats,
+                      LatencySampleBinArray& sample_bins,
+                      ByteString& key1,
+                      ByteString& key2,
+                      ByteString& val) {
+	const auto do_sample = (stats.getOpCount(OP_TRANSACTION) % args.sampling) == 0;
+	auto watch_tx = Stopwatch(StartAtCtor{});
 	auto watch_op = Stopwatch{};
 
 	auto op_iter = getOpBegin(args);
 	auto needs_commit = false;
-task_begin:
+transaction_begin:
 	while (op_iter != OpEnd) {
 		const auto [op, count, step] = op_iter;
 		const auto step_kind = opTable[op].stepKind(step);
@@ -274,17 +272,11 @@ task_begin:
 			// reset transaction boundary
 			if (do_sample) {
 				const auto step_latency = watch_step.diff();
-				watch_tx.setStop(watch_step.getStop());
-				const auto tx_duration = watch_tx.diff();
 				stats.addLatency(OP_COMMIT, step_latency);
-				stats.addLatency(OP_TRANSACTION, tx_duration);
 				sample_bins[OP_COMMIT].put(step_latency);
-				sample_bins[OP_TRANSACTION].put(tx_duration);
-				watch_tx.startFromStop(); // new tx begins
 			}
 			tx.reset();
 			stats.incrOpCount(OP_COMMIT);
-			stats.incrOpCount(OP_TRANSACTION);
 			needs_commit = false;
 		}
 
@@ -309,22 +301,14 @@ task_begin:
 		auto f = tx.commit();
 		const auto rc = waitAndHandleError(tx, f, "COMMIT_AT_TX_END");
 		watch_commit.stop();
-		watch_tx.setStop(watch_commit.getStop());
-		auto tx_resetter = ExitGuard([&watch_tx, &tx]() {
-			tx.reset();
-			watch_tx.startFromStop();
-		});
+		auto tx_resetter = ExitGuard([&tx]() { tx.reset(); });
 		if (rc == FutureRC::OK) {
 			if (do_sample) {
 				const auto commit_latency = watch_commit.diff();
-				const auto tx_duration = watch_tx.diff();
 				stats.addLatency(OP_COMMIT, commit_latency);
-				stats.addLatency(OP_TRANSACTION, tx_duration);
 				sample_bins[OP_COMMIT].put(commit_latency);
-				sample_bins[OP_TRANSACTION].put(tx_duration);
 			}
 			stats.incrOpCount(OP_COMMIT);
-			stats.incrOpCount(OP_TRANSACTION);
 		} else {
 			if (rc == FutureRC::CONFLICT)
 				stats.incrConflictCount();
@@ -335,16 +319,16 @@ task_begin:
 			}
 			// restart from beginning
 			op_iter = getOpBegin(args);
-			goto task_begin;
+			goto transaction_begin;
 		}
 	}
-	// one task iteration has completed successfully
+	// one transaction has completed successfully
 	if (do_sample) {
-		const auto task_duration = watch_task.stop().diff();
-		sample_bins[OP_TASK].put(task_duration);
-		stats.addLatency(OP_TASK, task_duration);
+		const auto tx_duration = watch_tx.stop().diff();
+		sample_bins[OP_TRANSACTION].put(tx_duration);
+		stats.addLatency(OP_TRANSACTION, tx_duration);
 	}
-	stats.incrOpCount(OP_TASK);
+	stats.incrOpCount(OP_TRANSACTION);
 	/* make sure to reset transaction */
 	tx.reset();
 	return 0;
@@ -439,13 +423,13 @@ int runWorkload(Transaction tx,
 			}
 		}
 
-		rc = runOneTask(tx, args, stats, sample_bins, key1, key2, val);
+		rc = runOneTransaction(tx, args, stats, sample_bins, key1, key2, val);
 		if (rc) {
-			logr.warn("runOneTask failed ({})", rc);
+			logr.warn("runOneTransaction failed ({})", rc);
 		}
 
 		if (thread_iters != -1) {
-			if (thread_iters >= xacts) {
+			if (thread_iters >= total_xacts) {
 				/* xact limit reached */
 				break;
 			}
@@ -552,7 +536,6 @@ void runAsyncWorkload(Arguments const& args,
 			                                                   max_iters,
 			                                                   getOpBegin(args));
 			states[i] = state;
-			state->watch_task.start();
 			state->watch_tx.start();
 		}
 		while (shm.headerConst().signal.load() != SIGNAL_GREEN)
@@ -1356,7 +1339,7 @@ void printStats(Arguments const& args, ThreadStatistics const* stats, double con
 		}
 	}
 	/* TPS */
-	const auto tps = (current.getOpCount(OP_TASK) - prev.getOpCount(OP_TASK)) / duration_sec;
+	const auto tps = (current.getOpCount(OP_TRANSACTION) - prev.getOpCount(OP_TRANSACTION)) / duration_sec;
 	putFieldFloat(tps, 2);
 	if (fp) {
 		fprintf(fp, "\"tps\": %.2f,", tps);
@@ -1473,9 +1456,9 @@ void printReport(Arguments const& args,
 			break;
 		}
 	}
-	const auto tps_f = final_stats.getOpCount(OP_TASK) / duration_sec;
+	const auto tps_f = final_stats.getOpCount(OP_TRANSACTION) / duration_sec;
 	const auto tps_i = static_cast<uint64_t>(tps_f);
-	fmt::printf("Total Xacts:       %8lu\n", final_stats.getOpCount(OP_TASK));
+	fmt::printf("Total Xacts:       %8lu\n", final_stats.getOpCount(OP_TRANSACTION));
 	fmt::printf("Total Conflicts:   %8lu\n", final_stats.getConflictCount());
 	fmt::printf("Total Errors:      %8lu\n", final_stats.getTotalErrorCount());
 	fmt::printf("Overall TPS:       %8lu\n\n", tps_i);
@@ -1487,7 +1470,7 @@ void printReport(Arguments const& args,
 		fmt::fprintf(fp, "\"totalThreads\": %d,", args.num_threads);
 		fmt::fprintf(fp, "\"totalAsyncXacts\": %d,", args.async_xacts);
 		fmt::fprintf(fp, "\"targetTPS\": %d,", args.tpsmax);
-		fmt::fprintf(fp, "\"totalXacts\": %lu,", final_stats.getOpCount(OP_TASK));
+		fmt::fprintf(fp, "\"totalXacts\": %lu,", final_stats.getOpCount(OP_TRANSACTION));
 		fmt::fprintf(fp, "\"totalConflicts\": %lu,", final_stats.getConflictCount());
 		fmt::fprintf(fp, "\"totalErrors\": %lu,", final_stats.getTotalErrorCount());
 		fmt::fprintf(fp, "\"overallTPS\": %lu,", tps_i);
@@ -1503,7 +1486,7 @@ void printReport(Arguments const& args,
 	}
 	auto first_op = true;
 	for (auto op = 0; op < MAX_OP; op++) {
-		if ((args.txnspec.ops[op][OP_COUNT] > 0 && op != OP_TASK && op != OP_TRANSACTION) || op == OP_COMMIT) {
+		if ((args.txnspec.ops[op][OP_COUNT] > 0 && op != OP_TRANSACTION) || op == OP_COMMIT) {
 			putField(final_stats.getOpCount(op));
 			if (fp) {
 				if (first_op) {
@@ -1517,7 +1500,7 @@ void printReport(Arguments const& args,
 	}
 
 	/* TPS */
-	const auto tps = final_stats.getOpCount(OP_TASK) / duration_sec;
+	const auto tps = final_stats.getOpCount(OP_TRANSACTION) / duration_sec;
 	putFieldFloat(tps, 2);
 
 	/* Conflicts */

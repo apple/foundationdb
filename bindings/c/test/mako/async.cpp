@@ -65,19 +65,16 @@ void ResumableStateForPopulate::runOneTick() {
 					// successfully committed
 					watch_commit.stop();
 					watch_tx.setStop(watch_commit.getStop());
-					if (stats.getOpCount(OP_TASK) % args.sampling == 0) {
+					if (stats.getOpCount(OP_TRANSACTION) % args.sampling == 0) {
 						const auto commit_latency = watch_commit.diff();
 						const auto tx_duration = watch_tx.diff();
 						stats.addLatency(OP_COMMIT, commit_latency);
 						stats.addLatency(OP_TRANSACTION, tx_duration);
-						stats.addLatency(OP_TASK, tx_duration);
 						sample_bins[OP_COMMIT].put(commit_latency);
 						sample_bins[OP_TRANSACTION].put(tx_duration);
-						sample_bins[OP_TASK].put(tx_duration);
 					}
 					stats.incrOpCount(OP_COMMIT);
 					stats.incrOpCount(OP_TRANSACTION);
-					stats.incrOpCount(OP_TASK);
 					tx.reset();
 					watch_tx.startFromStop();
 					key_checkpoint = i + 1;
@@ -119,7 +116,7 @@ repeat_immediate_steps:
 		updateStepStats();
 		iter = getOpNext(args, iter);
 		if (iter == OpEnd)
-			onTaskSuccess();
+			onTransactionSuccess();
 		else
 			goto repeat_immediate_steps;
 	} else {
@@ -156,7 +153,7 @@ repeat_immediate_steps:
 					updateStepStats();
 					iter = getOpNext(args, iter);
 					if (iter == OpEnd) {
-						onTaskSuccess();
+						onTransactionSuccess();
 					} else {
 						postNextTick();
 					}
@@ -186,22 +183,16 @@ void ResumableStateForRunWorkload::updateStepStats() {
 	logr.debug("Step {}:{} succeeded", iter.opName(), iter.step);
 	// step successful
 	watch_step.stop();
-	const auto do_sample = stats.getOpCount(OP_TASK) % args.sampling == 0;
+	const auto do_sample = stats.getOpCount(OP_TRANSACTION) % args.sampling == 0;
 	if (iter.stepKind() == StepKind::COMMIT) {
 		// reset transaction boundary
 		const auto step_latency = watch_step.diff();
-		watch_tx.setStop(watch_step.getStop());
 		if (do_sample) {
-			const auto tx_duration = watch_tx.diff();
 			stats.addLatency(OP_COMMIT, step_latency);
-			stats.addLatency(OP_TRANSACTION, tx_duration);
 			sample_bins[OP_COMMIT].put(step_latency);
-			sample_bins[OP_TRANSACTION].put(tx_duration);
 		}
 		tx.reset();
-		watch_tx.startFromStop();
 		stats.incrOpCount(OP_COMMIT);
-		stats.incrOpCount(OP_TRANSACTION);
 		needs_commit = false;
 	}
 	// op completed successfully
@@ -218,7 +209,7 @@ void ResumableStateForRunWorkload::updateStepStats() {
 	}
 }
 
-void ResumableStateForRunWorkload::onTaskSuccess() {
+void ResumableStateForRunWorkload::onTransactionSuccess() {
 	if (needs_commit || args.commit_get) {
 		// task completed, need to commit before finish
 		watch_commit.start();
@@ -251,24 +242,18 @@ void ResumableStateForRunWorkload::onTaskSuccess() {
 				// commit successful
 				watch_commit.stop();
 				watch_tx.setStop(watch_commit.getStop());
-				watch_task.setStop(watch_commit.getStop());
-				if (stats.getOpCount(OP_TASK) % args.sampling == 0) {
+				if (stats.getOpCount(OP_TRANSACTION) % args.sampling == 0) {
 					const auto commit_latency = watch_commit.diff();
 					const auto tx_duration = watch_tx.diff();
-					const auto task_duration = watch_task.diff();
 					stats.addLatency(OP_COMMIT, commit_latency);
 					stats.addLatency(OP_TRANSACTION, commit_latency);
-					stats.addLatency(OP_TASK, task_duration);
 					sample_bins[OP_COMMIT].put(commit_latency);
 					sample_bins[OP_TRANSACTION].put(tx_duration);
-					sample_bins[OP_TASK].put(task_duration);
 				}
 				stats.incrOpCount(OP_COMMIT);
 				stats.incrOpCount(OP_TRANSACTION);
-				stats.incrOpCount(OP_TASK);
 				tx.reset();
 				watch_tx.startFromStop();
-				watch_task.startFromStop();
 				if (ended()) {
 					signalEnd();
 				} else {
@@ -279,15 +264,15 @@ void ResumableStateForRunWorkload::onTaskSuccess() {
 			}
 		});
 	} else {
-		// task completed but no need to commit
-		watch_task.stop();
-		if (stats.getOpCount(OP_TASK) % args.sampling == 0) {
-			const auto task_duration = watch_task.diff();
-			stats.addLatency(OP_TASK, task_duration);
-			sample_bins[OP_TASK].put(task_duration);
+		// transaction completed but no need to commit
+		watch_tx.stop();
+		if (stats.getOpCount(OP_TRANSACTION) % args.sampling == 0) {
+			const auto tx_duration = watch_tx.diff();
+			stats.addLatency(OP_TRANSACTION, tx_duration);
+			sample_bins[OP_TRANSACTION].put(tx_duration);
 		}
-		stats.incrOpCount(OP_TASK);
-		watch_task.startFromStop();
+		stats.incrOpCount(OP_TRANSACTION);
+		watch_tx.startFromStop();
 		tx.reset();
 		if (ended()) {
 			signalEnd();
