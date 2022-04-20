@@ -104,6 +104,10 @@ public:
 
 	ConnectionStringStatus status = RESOLVED;
 	AsyncTrigger resolveFinish;
+	// This function tries to resolve all hostnames once, and return them with coords.
+	// Best effort, does not guarantee that the resolves succeed.
+	Future<std::vector<NetworkAddress>> tryResolveHostnames();
+
 	std::vector<NetworkAddress> coords;
 	std::vector<Hostname> hostnames;
 	std::unordered_map<NetworkAddress, Hostname> networkAddressToHostname;
