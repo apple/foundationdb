@@ -25,6 +25,7 @@
 #include <cassert>
 #include <string_view>
 #include "logger.hpp"
+#include "macro.hpp"
 
 extern thread_local mako::Logger logr;
 
@@ -33,7 +34,7 @@ namespace mako {
 enum class FutureRC { OK, RETRY, CONFLICT, ABORT };
 
 template <class FutureType>
-FutureRC handleForOnError(fdb::Transaction tx, FutureType f, std::string_view step) {
+force_inline FutureRC handleForOnError(fdb::Transaction& tx, FutureType& f, std::string_view step) {
 	if (auto err = f.error()) {
 		if (err.is(1020 /*not_committed*/)) {
 			return FutureRC::CONFLICT;
@@ -51,7 +52,7 @@ FutureRC handleForOnError(fdb::Transaction tx, FutureType f, std::string_view st
 }
 
 template <class FutureType>
-FutureRC waitAndHandleForOnError(fdb::Transaction tx, FutureType f, std::string_view step) {
+force_inline FutureRC waitAndHandleForOnError(fdb::Transaction& tx, FutureType& f, std::string_view step) {
 	assert(f);
 	if (auto err = f.blockUntilReady()) {
 		logr.error("'{}' found while waiting for on_error() future, step: {}", err.what(), step);
@@ -62,7 +63,7 @@ FutureRC waitAndHandleForOnError(fdb::Transaction tx, FutureType f, std::string_
 
 // wait on any non-immediate tx-related step to complete. Follow up with on_error().
 template <class FutureType>
-FutureRC waitAndHandleError(fdb::Transaction tx, FutureType f, std::string_view step) {
+force_inline FutureRC waitAndHandleError(fdb::Transaction& tx, FutureType& f, std::string_view step) {
 	assert(f);
 	auto err = fdb::Error{};
 	if ((err = f.blockUntilReady())) {

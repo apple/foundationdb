@@ -55,22 +55,10 @@ force_inline int intSize(std::string_view sv) {
 
 /* random string */
 template <typename Char>
-void randomString(Char* str, int len) {
+force_inline void randomString(Char* str, int len) {
 	assert(len >= 0);
 	for (auto i = 0; i < len; i++) {
 		str[i] = ('!' + urand(0, 'z' - '!')); /* generate a char from '!' to 'z' */
-	}
-}
-
-/* random numeric string */
-template <bool Clear = true, typename Char>
-void randomNumericString(std::basic_string<Char>& str, int len) {
-	if constexpr (Clear)
-		str.clear();
-	assert(len >= 0);
-	str.reserve(str.size() + static_cast<size_t>(len));
-	for (auto i = 0; i < len; i++) {
-		str.push_back('0' + urand(0, 9)); /* generage a char from '0' to '9' */
 	}
 }
 
@@ -109,12 +97,12 @@ int digits(int num);
 
 /* fill memory slice [str, str + len) as stringified, zero-padded num */
 template <typename Char>
-void numericWithFill(Char* str, int len, int num) {
+force_inline void numericWithFill(Char* str, int len, int num) {
 	static_assert(sizeof(Char) == 1);
 	assert(num >= 0);
-	for (auto i = len - 1; i >= 0; i--) {
+	memset(str, '0', len);
+	for (auto i = len - 1; num > 0 && i >= 0; i--, num /= 10) {
 		str[i] = (num % 10) + '0';
-		num /= 10;
 	}
 }
 
@@ -132,7 +120,10 @@ void genKey(Char* str, std::string_view prefix, Arguments const& args, int num) 
 }
 
 template <typename Char>
-void prepareKeys(int op, std::basic_string<Char>& key1, std::basic_string<Char>& key2, Arguments const& args) {
+force_inline void prepareKeys(int op,
+                              std::basic_string<Char>& key1,
+                              std::basic_string<Char>& key2,
+                              Arguments const& args) {
 	const auto key1_num = nextKey(args);
 	genKey(key1.data(), KEY_PREFIX, args, key1_num);
 	if (args.txnspec.ops[op][OP_RANGE] > 0) {
