@@ -465,8 +465,8 @@ VersionVector ThreadSafeTransaction::getVersionVector() {
 	return tr->getVersionVector();
 }
 
-UID ThreadSafeTransaction::getSpanID() {
-	return tr->getSpanID();
+SpanContext ThreadSafeTransaction::getSpanContext() {
+	return tr->getSpanContext();
 }
 
 ThreadFuture<int64_t> ThreadSafeTransaction::getApproximateSize() {
