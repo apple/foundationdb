@@ -129,6 +129,8 @@ BlobCipherKeyIdCacheKey BlobCipherKeyIdCache::getCacheKey(const EncryptCipherBas
 }
 
 Reference<BlobCipherKey> BlobCipherKeyIdCache::getLatestCipherKey() {
+	// ENCRYPT_INVALID_CIPHER_KEY_ID indicate there was no key inserted. In this case we return empty key instead of
+	// throwing encrypt_invalid_id.
 	if (latestBaseCipherKeyId == ENCRYPT_INVALID_CIPHER_KEY_ID) {
 		return Reference<BlobCipherKey>();
 	}
