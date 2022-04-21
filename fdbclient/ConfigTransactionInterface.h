@@ -200,9 +200,12 @@ public:
 	class RequestStream<ConfigTransactionGetKnobsRequest> getKnobs;
 	class RequestStream<ConfigTransactionCommitRequest> commit;
 
+	Optional<Hostname> hostname;
+
 	ConfigTransactionInterface();
 	void setupWellKnownEndpoints();
 	ConfigTransactionInterface(NetworkAddress const& remote);
+	ConfigTransactionInterface(Hostname const& remote);
 
 	bool operator==(ConfigTransactionInterface const& rhs) const;
 	bool operator!=(ConfigTransactionInterface const& rhs) const;
@@ -210,6 +213,6 @@ public:
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, getGeneration, get, getClasses, getKnobs, commit);
+		serializer(ar, getGeneration, get, getClasses, getKnobs, commit, hostname);
 	}
 };
