@@ -409,7 +409,6 @@ struct DDQueueData {
 
 	std::vector<TeamCollectionInterface> teamCollections;
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
-	PromiseStream<Promise<int64_t>> getAverageShardBytes;
 
 	FlowLock startMoveKeysParallelismLock;
 	FlowLock finishMoveKeysParallelismLock;
@@ -504,7 +503,6 @@ public:
 	            Database cx,
 	            std::vector<TeamCollectionInterface> teamCollections,
 	            Reference<ShardsAffectedByTeamFailure> sABTF,
-	            PromiseStream<Promise<int64_t>> getAverageShardBytes,
 	            int teamSize,
 	            int singleRegionTeamSize,
 	            PromiseStream<RelocateShard> output,
@@ -512,7 +510,6 @@ public:
 	            PromiseStream<GetMetricsRequest> getShardMetrics,
 	            double* lastLimited)
 	  : distributorId(mid), lock(lock), cx(cx), teamCollections(teamCollections), shardsAffectedByTeamFailure(sABTF),
-	    getAverageShardBytes(getAverageShardBytes),
 	    startMoveKeysParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
 	    finishMoveKeysParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
 	    fetchSourceLock(new FlowLock(SERVER_KNOBS->DD_FETCH_SOURCE_PARALLELISM)), activeRelocations(0),
@@ -1427,10 +1424,32 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 	}
 }
 
+class DDBalancer {
+	friend class DDBalancerImpl;
+
+private:
+	DDQueueData* queue;
+	int teamCollectionIndex;
+	PromiseStream<Promise<int64_t>> getAverageShardBytes;
+	PromiseStream<GetMetricsRequest> getShardMetrics;
+
+public:
+	DDBalancer(DDQueueData* queue,
+	           int teamCollectionIndex,
+	           PromiseStream<Promise<int64_t>> getAverageShardBytes,
+	           PromiseStream<GetMetricsRequest> getShardMetrics)
+	  : queue(queue), teamCollectionIndex(teamCollectionIndex), getAverageShardBytes(getAverageShardBytes),
+	    getShardMetrics(getShardMetrics) {}
+
+	Future<Void> BgDDMountainChopper();
+	Future<Void> BgDDValleyFiller();
+};
+
 class DDBalancerImpl {
 
 	// Move a random shard from sourceTeam if sourceTeam has much more data than provided destTeam
-	ACTOR static Future<bool> rebalanceTeams(DDQueueData* self,
+	ACTOR static Future<bool> rebalanceTeams(DDBalancer* self,
+	                                         DDQueueData* queue,
 	                                         int priority,
 	                                         Reference<IDataDistributionTeam const> sourceTeam,
 	                                         Reference<IDataDistributionTeam const> destTeam,
@@ -1445,7 +1464,7 @@ class DDBalancerImpl {
 		self->getAverageShardBytes.send(req);
 
 		state int64_t averageShardBytes = wait(req.getFuture());
-		state std::vector<KeyRange> shards = self->shardsAffectedByTeamFailure->getShardsFor(
+		state std::vector<KeyRange> shards = queue->shardsAffectedByTeamFailure->getShardsFor(
 		    ShardsAffectedByTeamFailure::Team(sourceTeam->getServerIDs(), primary));
 
 		traceEvent->detail("AverageShardBytes", averageShardBytes).detail("ShardsInSource", shards.size());
@@ -1485,12 +1504,12 @@ class DDBalancerImpl {
 		}
 
 		// Verify the shard is still in ShardsAffectedByTeamFailure
-		shards = self->shardsAffectedByTeamFailure->getShardsFor(
+		shards = queue->shardsAffectedByTeamFailure->getShardsFor(
 		    ShardsAffectedByTeamFailure::Team(sourceTeam->getServerIDs(), primary));
 		for (int i = 0; i < shards.size(); i++) {
 			if (moveShard == shards[i]) {
 				traceEvent->detail("ShardStillPresent", true);
-				self->output.send(RelocateShard(moveShard, priority));
+				queue->output.send(RelocateShard(moveShard, priority));
 				return true;
 			}
 		}
@@ -1500,22 +1519,23 @@ class DDBalancerImpl {
 	}
 
 public:
-	ACTOR static Future<Void> BgDDMountainChopper(DDQueueData* self,
+	ACTOR static Future<Void> BgDDMountainChopper(DDBalancer* self,
+	                                              DDQueueData* queue,
 	                                              TeamCollectionInterface teamCollection,
 	                                              bool isPrimary) {
 		state double rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL;
 		state int resetCount = SERVER_KNOBS->DD_REBALANCE_RESET_AMOUNT;
-		state Transaction tr(self->cx);
+		state Transaction tr(queue->cx);
 		state double lastRead = 0;
 		state bool skipCurrentLoop = false;
 		loop {
 			state std::pair<Optional<Reference<IDataDistributionTeam>>, bool> randomTeam;
 			state bool moved = false;
-			state TraceEvent traceEvent("BgDDMountainChopper", self->distributorId);
+			state TraceEvent traceEvent("BgDDMountainChopper", queue->distributorId);
 			traceEvent.suppressFor(5.0).detail("PollingInterval", rebalancePollingInterval);
 
-			if (self->lastLimitedTime() > 0) {
-				traceEvent.detail("SecondsSinceLastLimited", now() - self->lastLimitedTime());
+			if (queue->lastLimitedTime() > 0) {
+				traceEvent.detail("SecondsSinceLastLimited", now() - queue->lastLimitedTime());
 			}
 
 			try {
@@ -1542,7 +1562,7 @@ public:
 				}
 
 				int pendingRelocations =
-				    self->pendingRelocationsAtPriority(SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM);
+				    queue->pendingRelocationsAtPriority(SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM);
 				traceEvent.detail("QueuedRelocations", pendingRelocations);
 				if (pendingRelocations < SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
 					std::pair<Optional<Reference<IDataDistributionTeam>>, bool> _randomTeam = wait(brokenPromiseToNever(
@@ -1571,6 +1591,7 @@ public:
 
 						if (loadedTeam.first.present()) {
 							bool _moved = wait(rebalanceTeams(self,
+							                                  queue,
 							                                  SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM,
 							                                  loadedTeam.first.get(),
 							                                  randomTeam.first.get(),
@@ -1586,7 +1607,7 @@ public:
 					}
 				}
 
-				if (now() - (self->lastLimitedTime()) < SERVER_KNOBS->BG_DD_SATURATION_DELAY) {
+				if (now() - (queue->lastLimitedTime()) < SERVER_KNOBS->BG_DD_SATURATION_DELAY) {
 					rebalancePollingInterval = std::min(SERVER_KNOBS->BG_DD_MAX_WAIT,
 					                                    rebalancePollingInterval * SERVER_KNOBS->BG_DD_INCREASE_RATE);
 				} else {
@@ -1613,23 +1634,24 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> BgDDValleyFiller(DDQueueData* self,
+	ACTOR static Future<Void> BgDDValleyFiller(DDBalancer* self,
+	                                           DDQueueData* queue,
 	                                           TeamCollectionInterface teamCollection,
 	                                           bool isPrimary) {
 		state double rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL;
 		state int resetCount = SERVER_KNOBS->DD_REBALANCE_RESET_AMOUNT;
-		state Transaction tr(self->cx);
+		state Transaction tr(queue->cx);
 		state double lastRead = 0;
 		state bool skipCurrentLoop = false;
 
 		loop {
 			state std::pair<Optional<Reference<IDataDistributionTeam>>, bool> randomTeam;
 			state bool moved = false;
-			state TraceEvent traceEvent("BgDDValleyFiller", self->distributorId);
+			state TraceEvent traceEvent("BgDDValleyFiller", queue->distributorId);
 			traceEvent.suppressFor(5.0).detail("PollingInterval", rebalancePollingInterval);
 
-			if (self->lastLimitedTime() > 0) {
-				traceEvent.detail("SecondsSinceLastLimited", now() - self->lastLimitedTime());
+			if (queue->lastLimitedTime() > 0) {
+				traceEvent.detail("SecondsSinceLastLimited", now() - queue->lastLimitedTime());
 			}
 
 			try {
@@ -1656,7 +1678,7 @@ public:
 				}
 
 				int pendingRelocations =
-				    self->pendingRelocationsAtPriority(SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM);
+				    queue->pendingRelocationsAtPriority(SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM);
 				traceEvent.detail("QueuedRelocations", pendingRelocations);
 				if (pendingRelocations < SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
 					std::pair<Optional<Reference<IDataDistributionTeam>>, bool> _randomTeam = wait(brokenPromiseToNever(
@@ -1685,6 +1707,7 @@ public:
 
 						if (unloadedTeam.first.present()) {
 							bool _moved = wait(rebalanceTeams(self,
+							                                  queue,
 							                                  SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM,
 							                                  randomTeam.first.get(),
 							                                  unloadedTeam.first.get(),
@@ -1700,7 +1723,7 @@ public:
 					}
 				}
 
-				if (now() - (self->lastLimitedTime()) < SERVER_KNOBS->BG_DD_SATURATION_DELAY) {
+				if (now() - (queue->lastLimitedTime()) < SERVER_KNOBS->BG_DD_SATURATION_DELAY) {
 					rebalancePollingInterval = std::min(SERVER_KNOBS->BG_DD_MAX_WAIT,
 					                                    rebalancePollingInterval * SERVER_KNOBS->BG_DD_INCREASE_RATE);
 				} else {
@@ -1728,26 +1751,15 @@ public:
 	}
 };
 
-class DDBalancer {
-	friend class DDBalancerImpl;
+Future<Void> DDBalancer::BgDDMountainChopper() {
+	return DDBalancerImpl::BgDDMountainChopper(
+	    this, queue, queue->teamCollections[teamCollectionIndex], teamCollectionIndex == 0);
+}
 
-private:
-	DDQueueData* self;
-	int teamCollectionIndex;
-
-public:
-	DDBalancer(DDQueueData* self, int teamCollectionIndex) : self(self), teamCollectionIndex(teamCollectionIndex) {}
-
-	Future<Void> BgDDMountainChopper() {
-		return DDBalancerImpl::BgDDMountainChopper(
-		    self, self->teamCollections[teamCollectionIndex], teamCollectionIndex == 0);
-	}
-
-	Future<Void> BgDDValleyFiller() {
-		return DDBalancerImpl::BgDDValleyFiller(
-		    self, self->teamCollections[teamCollectionIndex], teamCollectionIndex == 0);
-	}
-};
+Future<Void> DDBalancer::BgDDValleyFiller() {
+	return DDBalancerImpl::BgDDValleyFiller(
+	    this, queue, queue->teamCollections[teamCollectionIndex], teamCollectionIndex == 0);
+}
 
 class DDQueueImpl {
 public:
@@ -1772,7 +1784,6 @@ public:
 		                       cx,
 		                       teamCollections,
 		                       shardsAffectedByTeamFailure,
-		                       getAverageShardBytes,
 		                       teamSize,
 		                       singleRegionTeamSize,
 		                       output,
@@ -1791,7 +1802,7 @@ public:
 		state Future<Void> launchQueuedWorkTimeout = Never();
 
 		for (int i = 0; i < teamCollections.size(); i++) {
-			DDBalancer b(&self, i);
+			DDBalancer b(&self, i, getAverageShardBytes, getShardMetrics);
 			balancingFutures.push_back(b.BgDDMountainChopper());
 			balancingFutures.push_back(b.BgDDValleyFiller());
 		}
