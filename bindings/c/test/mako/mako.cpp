@@ -1674,7 +1674,11 @@ void printReport(Arguments const& args,
 						fseek(fp, 0, 0);
 						for (auto index = 0u; index < num_points; index++) {
 							auto value = uint64_t{};
-							fread(&value, sizeof(uint64_t), 1, fp);
+							auto nread = fread(&value, sizeof(uint64_t), 1, fp);
+							if (nread != 1) {
+								logr.error("Read sample returned {}", nread);
+								break;
+							}
 							data_points[op].push_back(value);
 						}
 					};
@@ -1796,7 +1800,10 @@ void printReport(Arguments const& args,
 	}
 
 	const auto command_remove = fmt::format("rm -rf {}{}", TEMP_DATA_STORE, pid_main);
-	system(command_remove.c_str());
+	if (auto rc = system(command_remove.c_str())) {
+		logr.error("Command {} returned {}", command_remove, rc);
+		return;
+	}
 }
 
 int statsProcessMain(Arguments const& args,
