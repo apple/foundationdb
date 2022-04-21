@@ -91,7 +91,7 @@ class FDBTenantList(object):
     def to_list(self):
         return list(self.__iter__())
 
-    def __iter__(self, mode=None):
+    def __iter__(self):
         while True:
             result = self._iter.__next__()
 

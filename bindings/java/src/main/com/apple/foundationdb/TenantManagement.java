@@ -282,7 +282,7 @@ public class TenantManagement {
 		@Override
 		public KeyValue next() {
 			KeyValue kv = iter.next();
-			byte[] tenant = ByteArrayUtil.replace(kv.getKey(), 0, kv.getKey().length, TENANT_MAP_PREFIX, null);
+			byte[] tenant = Arrays.copyOfRange(kv.getKey(), TENANT_MAP_PREFIX.length, kv.getKey().length);
 			byte[] value = kv.getValue();
 
 			KeyValue result = new KeyValue(tenant, value);

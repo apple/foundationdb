@@ -600,6 +600,10 @@ class ApiTest(Test):
                 instructions.append(op)
             elif op == 'TENANT_CLEAR_ACTIVE':
                 instructions.append(op)
+            elif op == 'TENANT_LIST':
+                instructions.push_args(b'', b'\xff', 10)
+                instructions.append(op)
+                self.add_strings(1)
             else:
                 assert False, 'Unknown operation: ' + op
 

@@ -604,6 +604,12 @@ class Tester:
                     self.tenant = self.db.open_tenant(name)
                 elif inst.op == six.u("TENANT_CLEAR_ACTIVE"):
                     self.tenant = None
+                elif inst.op == six.u("TENANT_LIST"):
+                    begin = inst.pop()
+                    end = inst.pop()
+                    limit = inst.pop()
+                    tenant_list = fdb.tenant_management.list_tenants(self.db, begin, end, limit)
+                    inst.push(tenant_list)
                 elif inst.op == six.u("UNIT_TESTS"):
                     try:
                         test_db_options(db)
