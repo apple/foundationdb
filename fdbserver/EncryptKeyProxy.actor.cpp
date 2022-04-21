@@ -156,30 +156,30 @@ ACTOR Future<Void> getCipherKeysByBaseCipherKeyIds(Reference<EncryptKeyProxyData
 	// Scan the cached cipher-keys and filter our baseCipherIds locally cached
 	// for the rest, reachout to KMS to fetch the required details
 
-	std::unordered_map<EncryptBaseCipherId, EncryptDomainId> lookupCipherIdMap;
+	std::vector<std::pair<EncryptBaseCipherId, EncryptDomainId>> lookupCipherIds;
 	state std::vector<EKPBaseCipherDetails> cachedCipherDetails;
 
 	state EKPGetBaseCipherKeysByIdsRequest keysByIds = req;
 	state EKPGetBaseCipherKeysByIdsReply keyIdsReply;
 
-	for (const auto& item : req.baseCipherIdMap) {
+	for (const auto& item : req.baseCipherIds) {
 		const auto itr = ekpProxyData->baseCipherKeyIdCache.find(item.first);
 		if (itr != ekpProxyData->baseCipherKeyIdCache.end()) {
 			ASSERT(itr->second.isValid());
 			cachedCipherDetails.emplace_back(
 			    itr->second.domainId, itr->second.baseCipherId, itr->second.baseCipherKey, keyIdsReply.arena);
 		} else {
-			lookupCipherIdMap.emplace(item.first, item.second);
+			lookupCipherIds.emplace_back(std::make_pair(item.first, item.second));
 		}
 	}
 
 	ekpProxyData->baseCipherKeyIdCacheHits += cachedCipherDetails.size();
-	ekpProxyData->baseCipherKeyIdCacheMisses += lookupCipherIdMap.size();
+	ekpProxyData->baseCipherKeyIdCacheMisses += lookupCipherIds.size();
 
 	if (g_network->isSimulated()) {
-		if (!lookupCipherIdMap.empty()) {
+		if (!lookupCipherIds.empty()) {
 			try {
-				SimGetEncryptKeysByKeyIdsRequest simKeyIdsReq(lookupCipherIdMap);
+				SimGetEncryptKeysByKeyIdsRequest simKeyIdsReq(lookupCipherIds);
 				SimGetEncryptKeysByKeyIdsReply simKeyIdsReply =
 				    wait(simKmsInterface.encryptKeyLookupByKeyIds.getReply(simKeyIdsReq));
 

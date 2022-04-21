@@ -102,16 +102,16 @@ struct SimGetEncryptKeysByKeyIdsReply {
 
 struct SimGetEncryptKeysByKeyIdsRequest {
 	constexpr static FileIdentifier file_identifier = 6913396;
-	std::unordered_map<SimEncryptKeyId, SimEncryptDomainId> encryptKeyIdMap;
+	std::vector<std::pair<SimEncryptKeyId, SimEncryptDomainId>> encryptKeyIds;
 	ReplyPromise<SimGetEncryptKeysByKeyIdsReply> reply;
 
 	SimGetEncryptKeysByKeyIdsRequest() {}
-	explicit SimGetEncryptKeysByKeyIdsRequest(const std::unordered_map<SimEncryptKeyId, SimEncryptDomainId>& keyIdMap)
-	  : encryptKeyIdMap(keyIdMap) {}
+	explicit SimGetEncryptKeysByKeyIdsRequest(const std::vector<std::pair<SimEncryptKeyId, SimEncryptDomainId>>& keyIds)
+	  : encryptKeyIds(keyIds) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, encryptKeyIdMap, reply);
+		serializer(ar, encryptKeyIds, reply);
 	}
 };
 

@@ -124,16 +124,16 @@ struct EKPGetBaseCipherKeysByIdsReply {
 struct EKPGetBaseCipherKeysByIdsRequest {
 	constexpr static FileIdentifier file_identifier = 4930263;
 	UID requesterID;
-	std::unordered_map<uint64_t, int64_t> baseCipherIdMap;
+	std::vector<std::pair<uint64_t, int64_t>> baseCipherIds;
 	ReplyPromise<EKPGetBaseCipherKeysByIdsReply> reply;
 
 	EKPGetBaseCipherKeysByIdsRequest() : requesterID(deterministicRandom()->randomUniqueID()) {}
-	explicit EKPGetBaseCipherKeysByIdsRequest(UID uid, const std::unordered_map<uint64_t, int64_t>& idMap)
-	  : requesterID(uid), baseCipherIdMap(idMap) {}
+	explicit EKPGetBaseCipherKeysByIdsRequest(UID uid, const std::vector<std::pair<uint64_t, int64_t>>& ids)
+	  : requesterID(uid), baseCipherIds(ids) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, requesterID, baseCipherIdMap, reply);
+		serializer(ar, requesterID, baseCipherIds, reply);
 	}
 };
 

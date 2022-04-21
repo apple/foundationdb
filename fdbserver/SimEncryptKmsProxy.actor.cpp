@@ -20,6 +20,7 @@
 
 #include <memory>
 #include <unordered_map>
+#include <utility>
 
 #include "fdbrpc/sim_validation.h"
 #include "fdbserver/Knobs.h"
@@ -29,6 +30,7 @@
 #include "flow/IRandom.h"
 #include "flow/ITrace.h"
 #include "flow/StreamCipher.h"
+#include "flow/Trace.h"
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 #include "flow/network.h"
@@ -73,7 +75,7 @@ ACTOR Future<Void> simEncryptKmsProxyCore(SimKmsProxyInterface interf) {
 				state SimGetEncryptKeysByKeyIdsReply keysByIdsRep;
 
 				// Lookup corresponding EncryptKeyCtx for input keyId
-				for (const auto& item : req.encryptKeyIdMap) {
+				for (const auto& item : req.encryptKeyIds) {
 					const auto& itr = kmsProxyCtx.simEncryptKeyStore.find(item.first);
 					if (itr != kmsProxyCtx.simEncryptKeyStore.end()) {
 						keysByIdsRep.encryptKeyDetails.emplace_back(
@@ -146,15 +148,24 @@ ACTOR Future<Void> testRunWorkload(SimKmsProxyInterface inf, uint32_t nEncryptio
 		}
 
 		// randomly pick any domainId and validate if lookupByKeyId result matches
-		SimGetEncryptKeysByKeyIdsRequest keyIdsReq;
 		state std::unordered_map<SimEncryptKeyId, StringRef> validationMap;
+		std::unordered_map<SimEncryptKeyId, SimEncryptDomainId> idsToLookup;
 		for (i = 0; i < maxIterations; i++) {
 			state int idx = deterministicRandom()->randomInt(0, maxDomainIds);
 			state SimEncryptKeyCtx* ctx = domainIdKeyMap[idx].get();
-			keyIdsReq.encryptKeyIdMap.emplace(ctx->id, idx);
 			validationMap[ctx->id] = StringRef(ctx->key);
+			idsToLookup.emplace(ctx->id, idx);
 		}
-		SimGetEncryptKeysByKeyIdsReply keyIdsReply = wait(inf.encryptKeyLookupByKeyIds.getReply(keyIdsReq));
+
+		state SimGetEncryptKeysByKeyIdsRequest keyIdsReq;
+		for (const auto& item : idsToLookup) {
+			keyIdsReq.encryptKeyIds.emplace_back(std::make_pair(item.first, item.second));
+		}
+		state SimGetEncryptKeysByKeyIdsReply keyIdsReply = wait(inf.encryptKeyLookupByKeyIds.getReply(keyIdsReq));
+		/* TraceEvent("Lookup")
+		    .detail("KeyIdReqSize", keyIdsReq.encryptKeyIds.size())
+		    .detail("KeyIdsRepSz", keyIdsReply.encryptKeyDetails.size())
+		    .detail("ValSz", validationMap.size()); */
 		ASSERT(keyIdsReply.encryptKeyDetails.size() == validationMap.size());
 		for (const auto& element : keyIdsReply.encryptKeyDetails) {
 			ASSERT(validationMap[element.encryptDomainId].compare(element.encryptKey) == 0);
@@ -164,7 +175,7 @@ ACTOR Future<Void> testRunWorkload(SimKmsProxyInterface inf, uint32_t nEncryptio
 	{
 		// Verify unknown key access returns the error
 		state SimGetEncryptKeysByKeyIdsRequest req;
-		req.encryptKeyIdMap.emplace(maxEncryptionKeys + 1, 1);
+		req.encryptKeyIds.emplace_back(std::make_pair(maxEncryptionKeys + 1, 1));
 		try {
 			SimGetEncryptKeysByKeyIdsReply reply = wait(inf.encryptKeyLookupByKeyIds.getReply(req));
 		} catch (Error& e) {

@@ -33,6 +33,7 @@
 
 #include <atomic>
 #include <boost/range/const_iterator.hpp>
+#include <utility>
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -205,9 +206,9 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 
 			EKPGetBaseCipherKeysByIdsRequest req;
 			for (int i = idx; i < nIds && i < self->cipherIds.size(); i++) {
-				req.baseCipherIdMap.emplace(self->cipherIds[i], 1);
+				req.baseCipherIds.emplace_back(std::make_pair(self->cipherIds[i], 1));
 			}
-			expectedHits = req.baseCipherIdMap.size();
+			expectedHits = req.baseCipherIds.size();
 			EKPGetBaseCipherKeysByIdsReply rep = wait(self->ekpInf.getBaseCipherKeysByIds.getReply(req));
 
 			ASSERT(!rep.error.present());
@@ -240,12 +241,12 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 		TraceEvent("SimLookupInvalidKeyId_Start").log();
 
 		// Prepare a lookup with valid and invalid keyIds - SimEncryptKmsProxy should throw encrypt_key_not_found()
-		std::unordered_map<uint64_t, int64_t> baseCipherIdMap;
+		std::vector<std::pair<uint64_t, int64_t>> baseCipherIds;
 		for (auto id : self->cipherIds) {
-			baseCipherIdMap.emplace(id, 1);
+			baseCipherIds.emplace_back(std::make_pair(id, 1));
 		}
-		baseCipherIdMap.emplace(SERVER_KNOBS->SIM_KMS_MAX_KEYS + 10, 1);
-		EKPGetBaseCipherKeysByIdsRequest req(deterministicRandom()->randomUniqueID(), baseCipherIdMap);
+		baseCipherIds.emplace_back(std::make_pair(SERVER_KNOBS->SIM_KMS_MAX_KEYS + 10, 1));
+		EKPGetBaseCipherKeysByIdsRequest req(deterministicRandom()->randomUniqueID(), baseCipherIds);
 		EKPGetBaseCipherKeysByIdsReply rep = wait(self->ekpInf.getBaseCipherKeysByIds.getReply(req));
 
 		ASSERT_EQ(rep.baseCipherDetails.size(), 0);
