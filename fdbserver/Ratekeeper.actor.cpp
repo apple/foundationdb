@@ -111,8 +111,8 @@ public:
 					    .detail("Latency", now() - self->lastSSListFetchedTimestamp);
 				}
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				std::vector<std::pair<StorageServerInterface, ProcessClass>> results =
-				    wait(getServerListAndProcessClasses(&tr));
+				std::vector<std::pair<StorageServerInterface, ProcessClass>> results = wait(timeoutError(
+				    getServerListAndProcessClasses(&tr), SERVER_KNOBS->GET_SERVER_LIST_AND_PROCESS_CLASSES_TIMEOUT));
 				self->lastSSListFetchedTimestamp = now();
 
 				std::map<UID, StorageServerInterface> newServers;
