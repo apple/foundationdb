@@ -1996,8 +1996,9 @@ std::vector<std::pair<std::string, bool>> MultiVersionApi::copyExternalLibraryPe
 		for (int ii = 0; ii < threadCount; ++ii) {
 			std::string filename = basename(path);
 
-			char tempName[PATH_MAX + 12];
-			sprintf(tempName, "/tmp/%s-XXXXXX", filename.c_str());
+			constexpr int MAX_TMP_NAME_LENGTH = PATH_MAX + 12;
+			char tempName[MAX_TMP_NAME_LENGTH];
+			snprintf(tempName, MAX_TMP_NAME_LENGTH, "%s/%s-XXXXXX", tmpDir.c_str(), filename.c_str());
 			int tempFd = mkstemp(tempName);
 			int fd;
 
@@ -2143,6 +2144,9 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 		// multiple client threads are not supported on windows.
 		threadCount = extractIntOption(value, 1, 1);
 #endif
+	} else if (option == FDBNetworkOptions::CLIENT_TMP_DIR) {
+		validateOption(value, true, false, false);
+		tmpDir = abspath(value.get().toString());
 	} else {
 		forwardOption = true;
 	}
