@@ -323,6 +323,12 @@ ACTOR Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getSe
     Transaction* tr) {
 	state Future<std::vector<ProcessData>> workers = getWorkers(tr);
 	state Future<RangeResult> serverList = tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
+
+	// Inject a long delay to trigger a timeout in the getServerListAndProcessClasses
+	if (BUGGIFY) {
+		wait(delay(5.0));
+	}
+
 	wait(success(workers) && success(serverList));
 	ASSERT(!serverList.get().more && serverList.get().size() < CLIENT_KNOBS->TOO_MANY);
 

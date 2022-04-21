@@ -142,7 +142,10 @@ public:
 				if (e.code() != error_code_actor_cancelled) {
 					TraceEvent("RatekeeperGetSSListError", self->id).errorUnsuppressed(e).suppressFor(1.0);
 				}
-				wait(tr.onError(e));
+				// If the process is timed out, just retry in this case.
+				if (e.code() != error_code_timed_out) {
+					wait(tr.onError(e));
+				}
 			}
 		}
 	}
