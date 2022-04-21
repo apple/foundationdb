@@ -444,7 +444,6 @@ struct DDQueueData {
 	FutureStream<RelocateShard> input;
 	PromiseStream<GetMetricsRequest> getShardMetrics;
 
-	double* lastLimited;
 	double lastInterval;
 	int suppressIntervals;
 
@@ -452,11 +451,15 @@ struct DDQueueData {
 	                                                  // one, so delay a small time before settling on a new number.
 	Reference<AsyncVar<bool>> rawProcessingWiggle;
 
-	std::map<int, int> priority_relocations;
 	int unhealthyRelocations;
 
 	Reference<EventCacheHolder> movedKeyServersEventHolder;
 
+private:
+	std::map<int, int> priority_relocations;
+	double* lastLimited;
+
+public:
 	void startRelocation(int priority, int healthPriority) {
 		// Although PRIORITY_TEAM_REDUNDANT has lower priority than split and merge shard movement,
 		// we must count it into unhealthyRelocations; because team removers relies on unhealthyRelocations to
@@ -514,10 +517,10 @@ struct DDQueueData {
 	    finishMoveKeysParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
 	    fetchSourceLock(new FlowLock(SERVER_KNOBS->DD_FETCH_SOURCE_PARALLELISM)), activeRelocations(0),
 	    queuedRelocations(0), bytesWritten(0), teamSize(teamSize), singleRegionTeamSize(singleRegionTeamSize),
-	    output(output), input(input), getShardMetrics(getShardMetrics), lastLimited(lastLimited), lastInterval(0),
-	    suppressIntervals(0), rawProcessingUnhealthy(new AsyncVar<bool>(false)),
-	    rawProcessingWiggle(new AsyncVar<bool>(false)), unhealthyRelocations(0),
-	    movedKeyServersEventHolder(makeReference<EventCacheHolder>("MovedKeyServers")) {}
+	    output(output), input(input), getShardMetrics(getShardMetrics), lastInterval(0), suppressIntervals(0),
+	    rawProcessingUnhealthy(new AsyncVar<bool>(false)), rawProcessingWiggle(new AsyncVar<bool>(false)),
+	    unhealthyRelocations(0), movedKeyServersEventHolder(makeReference<EventCacheHolder>("MovedKeyServers")),
+	    lastLimited(lastLimited) {}
 
 	void validate() {
 		if (EXPENSIVE_VALIDATION) {
@@ -1038,6 +1041,11 @@ struct DDQueueData {
 		}
 		return highestPriority;
 	}
+
+	int pendingRelocationsAtPriority(int priority) { return priority_relocations[priority]; }
+
+public:
+	double lastLimitedTime() const { return *lastLimited; }
 };
 
 static std::string destServersString(std::vector<std::pair<Reference<IDataDistributionTeam>, bool>> const& bestTeams) {
@@ -1506,8 +1514,8 @@ public:
 			state TraceEvent traceEvent("BgDDMountainChopper", self->distributorId);
 			traceEvent.suppressFor(5.0).detail("PollingInterval", rebalancePollingInterval);
 
-			if (*self->lastLimited > 0) {
-				traceEvent.detail("SecondsSinceLastLimited", now() - *self->lastLimited);
+			if (self->lastLimitedTime() > 0) {
+				traceEvent.detail("SecondsSinceLastLimited", now() - self->lastLimitedTime());
 			}
 
 			try {
@@ -1533,10 +1541,10 @@ public:
 					continue;
 				}
 
-				traceEvent.detail("QueuedRelocations",
-				                  self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM]);
-				if (self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM] <
-				    SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
+				int pendingRelocations =
+				    self->pendingRelocationsAtPriority(SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM);
+				traceEvent.detail("QueuedRelocations", pendingRelocations);
+				if (pendingRelocations < SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
 					std::pair<Optional<Reference<IDataDistributionTeam>>, bool> _randomTeam = wait(brokenPromiseToNever(
 					    teamCollection.getTeam.getReply(GetTeamRequest(WantNewServers::True,
 					                                                   WantTrueBest::False,
@@ -1578,7 +1586,7 @@ public:
 					}
 				}
 
-				if (now() - (*self->lastLimited) < SERVER_KNOBS->BG_DD_SATURATION_DELAY) {
+				if (now() - (self->lastLimitedTime()) < SERVER_KNOBS->BG_DD_SATURATION_DELAY) {
 					rebalancePollingInterval = std::min(SERVER_KNOBS->BG_DD_MAX_WAIT,
 					                                    rebalancePollingInterval * SERVER_KNOBS->BG_DD_INCREASE_RATE);
 				} else {
@@ -1620,8 +1628,8 @@ public:
 			state TraceEvent traceEvent("BgDDValleyFiller", self->distributorId);
 			traceEvent.suppressFor(5.0).detail("PollingInterval", rebalancePollingInterval);
 
-			if (*self->lastLimited > 0) {
-				traceEvent.detail("SecondsSinceLastLimited", now() - *self->lastLimited);
+			if (self->lastLimitedTime() > 0) {
+				traceEvent.detail("SecondsSinceLastLimited", now() - self->lastLimitedTime());
 			}
 
 			try {
@@ -1647,10 +1655,10 @@ public:
 					continue;
 				}
 
-				traceEvent.detail("QueuedRelocations",
-				                  self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM]);
-				if (self->priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM] <
-				    SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
+				int pendingRelocations =
+				    self->pendingRelocationsAtPriority(SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM);
+				traceEvent.detail("QueuedRelocations", pendingRelocations);
+				if (pendingRelocations < SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
 					std::pair<Optional<Reference<IDataDistributionTeam>>, bool> _randomTeam = wait(brokenPromiseToNever(
 					    teamCollection.getTeam.getReply(GetTeamRequest(WantNewServers::True,
 					                                                   WantTrueBest::False,
@@ -1692,7 +1700,7 @@ public:
 					}
 				}
 
-				if (now() - (*self->lastLimited) < SERVER_KNOBS->BG_DD_SATURATION_DELAY) {
+				if (now() - (self->lastLimitedTime()) < SERVER_KNOBS->BG_DD_SATURATION_DELAY) {
 					rebalancePollingInterval = std::min(SERVER_KNOBS->BG_DD_MAX_WAIT,
 					                                    rebalancePollingInterval * SERVER_KNOBS->BG_DD_INCREASE_RATE);
 				} else {
@@ -1861,28 +1869,36 @@ public:
 						    .detail("HighestPriority", highestPriorityRelocation)
 						    .detail("BytesWritten", self.bytesWritten)
 						    .detail("PriorityRecoverMove",
-						            self.priority_relocations[SERVER_KNOBS->PRIORITY_RECOVER_MOVE])
-						    .detail("PriorityRebalanceUnderutilizedTeam",
-						            self.priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM])
-						    .detail("PriorityRebalanceOverutilizedTeam",
-						            self.priority_relocations[SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM])
+						            self.pendingRelocationsAtPriority(SERVER_KNOBS->PRIORITY_RECOVER_MOVE))
+						    .detail(
+						        "PriorityRebalanceUnderutilizedTeam",
+						        self.pendingRelocationsAtPriority(SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM))
+						    .detail(
+						        "PriorityRebalanceOverutilizedTeam",
+						        self.pendingRelocationsAtPriority(SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM))
 						    .detail("PriorityStorageWiggle",
-						            self.priority_relocations[SERVER_KNOBS->PRIORITY_PERPETUAL_STORAGE_WIGGLE])
+						            self.pendingRelocationsAtPriority(SERVER_KNOBS->PRIORITY_PERPETUAL_STORAGE_WIGGLE))
 						    .detail("PriorityTeamHealthy",
-						            self.priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_HEALTHY])
+						            self.pendingRelocationsAtPriority(SERVER_KNOBS->PRIORITY_TEAM_HEALTHY))
 						    .detail("PriorityTeamContainsUndesiredServer",
-						            self.priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER])
+						            self.pendingRelocationsAtPriority(
+						                SERVER_KNOBS->PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER))
 						    .detail("PriorityTeamRedundant",
-						            self.priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT])
-						    .detail("PriorityMergeShard", self.priority_relocations[SERVER_KNOBS->PRIORITY_MERGE_SHARD])
+						            self.pendingRelocationsAtPriority(SERVER_KNOBS->PRIORITY_TEAM_REDUNDANT))
+						    .detail("PriorityMergeShard",
+						            self.pendingRelocationsAtPriority(SERVER_KNOBS->PRIORITY_MERGE_SHARD))
 						    .detail("PriorityPopulateRegion",
-						            self.priority_relocations[SERVER_KNOBS->PRIORITY_POPULATE_REGION])
+						            self.pendingRelocationsAtPriority(SERVER_KNOBS->PRIORITY_POPULATE_REGION))
 						    .detail("PriorityTeamUnhealthy",
-						            self.priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY])
-						    .detail("PriorityTeam2Left", self.priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_2_LEFT])
-						    .detail("PriorityTeam1Left", self.priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_1_LEFT])
-						    .detail("PriorityTeam0Left", self.priority_relocations[SERVER_KNOBS->PRIORITY_TEAM_0_LEFT])
-						    .detail("PrioritySplitShard", self.priority_relocations[SERVER_KNOBS->PRIORITY_SPLIT_SHARD])
+						            self.pendingRelocationsAtPriority(SERVER_KNOBS->PRIORITY_TEAM_UNHEALTHY))
+						    .detail("PriorityTeam2Left",
+						            self.pendingRelocationsAtPriority(SERVER_KNOBS->PRIORITY_TEAM_2_LEFT))
+						    .detail("PriorityTeam1Left",
+						            self.pendingRelocationsAtPriority(SERVER_KNOBS->PRIORITY_TEAM_1_LEFT))
+						    .detail("PriorityTeam0Left",
+						            self.pendingRelocationsAtPriority(SERVER_KNOBS->PRIORITY_TEAM_0_LEFT))
+						    .detail("PrioritySplitShard",
+						            self.pendingRelocationsAtPriority(SERVER_KNOBS->PRIORITY_SPLIT_SHARD))
 						    .trackLatest("MovingData"); // This trace event's trackLatest lifetime is controlled by
 						                                // DataDistributorData::movingDataEventHolder. The track latest
 						                                // key we use here must match the key used in the holder.
