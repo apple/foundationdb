@@ -531,8 +531,9 @@ extern const KeyRef changeFeedPrivatePrefix;
 extern const KeyRangeRef changeFeedDurableKeys;
 extern const KeyRef changeFeedDurablePrefix;
 
-const Value changeFeedDurableKey(Key const& feed, Version version);
-std::pair<Key, Version> decodeChangeFeedDurableKey(ValueRef const& key);
+const Value changeFeedDurableKey(Key const& feed, Version version, uint16_t chunkId);
+std::tuple<Key, Version, uint16_t> decodeChangeFeedDurableKey(ValueRef const& key);
+const KeyRange changeFeedDurableKeyRange(Key const& feed, Version beginVersion, Version endVersion);
 const Value changeFeedDurableValue(Standalone<VectorRef<MutationRef>> const& mutations, Version knownCommittedVersion);
 std::pair<Standalone<VectorRef<MutationRef>>, Version> decodeChangeFeedDurableValue(ValueRef const& value);
 

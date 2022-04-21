@@ -24,6 +24,7 @@
 #include <unordered_map>
 
 #include "contrib/fmt-8.1.1/include/fmt/format.h"
+#include "fdbclient/CommitTransaction.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/LoadBalance.h"
 #include "flow/ActorCollection.h"
@@ -246,6 +247,20 @@ public:
 	}
 };
 
+// top bit is last chunk or not, remaining part is non-negative chunk id
+static uint16_t changeFeedChunkId(int16_t chunkId, bool lastChunk) {
+	ASSERT(chunkId >= 0);
+	if (!lastChunk) {
+		return chunkId;
+	}
+	return chunkId | 0x8000;
+}
+
+static void parseChangeFeedChunkId(uint16_t rawChunkId, uint16_t& chunkId, bool& lastChunk) {
+	lastChunk = (rawChunkId & 0x8000) != 0;
+	chunkId = rawChunkId & 0x7fff;
+}
+
 struct StorageServerDisk {
 	explicit StorageServerDisk(struct StorageServer* data, IKeyValueStore* storage) : data(data), storage(storage) {}
 
@@ -305,6 +320,65 @@ struct StorageServerDisk {
 		return storage->deleteCheckpoint(checkpoint);
 	}
 
+	void writeChangeFeedValue(const Key& feedId, const Standalone<MutationsAndVersionRef>& value) {
+		int64_t expectedSize = value.expectedSize();
+		int64_t limitBytes = SERVER_KNOBS->CHANGEFEED_CHUNK_LIMIT_BYTES;
+		if (SERVER_KNOBS->ENABLE_CHANGEFEED_CHUNK_VALUES && BUGGIFY && value.mutations.size() > 1 &&
+		    deterministicRandom()->random01() < 0.01) {
+			// Force chunking, but limit number of chunks.
+			limitBytes = expectedSize / deterministicRandom()->randomInt(1, 4);
+		}
+
+		// chunk this up over multiple values if it is large
+		bool lastChunk = !SERVER_KNOBS->ENABLE_CHANGEFEED_CHUNK_VALUES || expectedSize <= limitBytes;
+		TEST(lastChunk); // Change feed value in single chunk
+		TEST(!lastChunk); // Change feed value in not single chunk
+
+		if (SERVER_KNOBS->ENABLE_CHANGEFEED_CHUNK_VALUES) {
+			// always must clear previous values before writing if there were potentially multiple chunks
+			clearRange(changeFeedDurableKeyRange(feedId, value.version, value.version + 1));
+		}
+
+		if (lastChunk) {
+			uint16_t rawChunkId = changeFeedChunkId(0, true);
+			writeKeyValue(KeyValueRef(changeFeedDurableKey(feedId, value.version, rawChunkId),
+			                          changeFeedDurableValue(value.mutations, value.knownCommittedVersion)));
+		} else {
+			uint16_t chunkId = 0;
+			int currentChunkSize = 0;
+			Standalone<VectorRef<MutationRef>> chunkMutations;
+			for (int i = 0; i < value.mutations.size(); i++) {
+				// If this mutation would push us over the chunk size limit and we have mutations to write, write them
+				// as a new chunk.
+				int mutationExpectedSize = value.mutations[i].expectedSize();
+				if (currentChunkSize + mutationExpectedSize > limitBytes && !chunkMutations.empty()) {
+					// TODO move back inline
+					uint16_t rawChunkId = changeFeedChunkId(chunkId, false);
+					writeKeyValue(KeyValueRef(changeFeedDurableKey(feedId, value.version, rawChunkId),
+					                          changeFeedDurableValue(chunkMutations, value.knownCommittedVersion)));
+
+					// reset for new chunk
+					chunkId++;
+					currentChunkSize = 0;
+					chunkMutations = Standalone<VectorRef<MutationRef>>();
+				}
+				chunkMutations.push_back(chunkMutations.arena(), value.mutations[i]);
+				currentChunkSize += mutationExpectedSize;
+			}
+			uint16_t rawChunkId = changeFeedChunkId(chunkId, true);
+			writeKeyValue(KeyValueRef(changeFeedDurableKey(feedId, value.version, rawChunkId),
+			                          changeFeedDurableValue(chunkMutations, value.knownCommittedVersion)));
+		}
+	}
+
+	Future<Standalone<VectorRef<MutationsAndVersionRef>>> readChangeFeedValues(const Key& feedId,
+	                                                                           Version beginVersion,
+	                                                                           Version endVersion,
+	                                                                           bool* more,
+	                                                                           int byteLimit = 1 << 30) {
+		return readChangeFeedValuesActor(this, feedId, beginVersion, endVersion, more, byteLimit);
+	}
+
 	KeyValueStoreType getKeyValueStoreType() const { return storage->getType(); }
 	StorageBytes getStorageBytes() const { return storage->getStorageBytes(); }
 	std::tuple<size_t, size_t, size_t> getSize() const { return storage->getSize(); }
@@ -327,6 +401,92 @@ private:
 			return r[0].key;
 		else
 			return range.end;
+	}
+
+	static void addChangeFeedDataToResult(Standalone<VectorRef<MutationsAndVersionRef>>& result,
+	                                      MutationsAndVersionRef& build,
+	                                      int16_t& prevChunkId,
+	                                      const RangeResult& res,
+	                                      const Key& feedId) {
+		for (auto& kv : res) {
+			Key id;
+			Version version, knownCommittedVersion;
+			uint16_t rawChunkId, chunkId;
+			bool lastChunk;
+			Standalone<VectorRef<MutationRef>> mutations;
+			std::tie(id, version, rawChunkId) = decodeChangeFeedDurableKey(kv.key);
+			std::tie(mutations, knownCommittedVersion) = decodeChangeFeedDurableValue(kv.value);
+			parseChangeFeedChunkId(rawChunkId, chunkId, lastChunk);
+
+			result.arena().dependsOn(mutations.arena());
+			ASSERT(id == feedId);
+			ASSERT(prevChunkId + 1 == chunkId);
+			if (chunkId == 0) {
+				build.version = version;
+				build.knownCommittedVersion = knownCommittedVersion;
+				build.mutations = mutations;
+			} else {
+				TEST(true); // Read CF value with multiple chunks
+				ASSERT(build.version == version);
+				ASSERT(build.knownCommittedVersion == knownCommittedVersion);
+				build.mutations.append(result.arena(), mutations.begin(), mutations.size());
+			}
+
+			prevChunkId = chunkId;
+
+			if (lastChunk) {
+				result.push_back(result.arena(), build);
+				build = MutationsAndVersionRef();
+				prevChunkId = -1;
+				ASSERT(build.version == invalidVersion);
+			}
+		}
+	}
+
+	ACTOR static Future<Standalone<VectorRef<MutationsAndVersionRef>>> readChangeFeedValuesActor(
+	    StorageServerDisk* self,
+	    Key feedId,
+	    Version beginVersion,
+	    Version endVersion,
+	    bool* more,
+	    int byteLimit) {
+
+		state Standalone<VectorRef<MutationsAndVersionRef>> result;
+		state MutationsAndVersionRef build;
+		state KeyRange keyRange = changeFeedDurableKeyRange(feedId, beginVersion, endVersion);
+		state int16_t prevChunkId = -1;
+
+		++(*self->kvScans);
+		RangeResult res = wait(self->storage->readRange(keyRange, 1 << 30, byteLimit));
+		*more = res.more;
+
+		addChangeFeedDataToResult(result, build, prevChunkId, res, feedId);
+
+		// cases:
+		//  1. build.version == invalid version, we have a complete set of mutations
+		//  2. build.version != invalid version, we do not have a complete set of mutations
+		//    a. We have a complete set of mutations before the last incomplete one. Discard the last incomplete one
+		//       in build and use the prior complete set
+		//    b. There is only one incomplete set of mutations (a very large commit at a single version). We must
+		//       continue reading to get the full set of mutations for this version in build.
+		if (build.version != invalidVersion) {
+			ASSERT(more);
+			ASSERT(!build.mutations.empty());
+			ASSERT(prevChunkId >= 0);
+
+			TEST(result.empty()); // continue reading due to massive change feed mutation value
+			TEST(!result.empty()); // truncate last partially read change feed chunk
+
+			while (result.empty()) {
+				// read rest of this chunk
+				++(*self->kvScans);
+				keyRange = KeyRangeRef(changeFeedDurableKey(feedId, build.version, prevChunkId + 1), keyRange.end);
+				RangeResult res2 = wait(self->storage->readRange(keyRange, 1 << 30, byteLimit));
+				addChangeFeedDataToResult(result, build, prevChunkId, res2, feedId);
+			}
+		}
+
+		return result;
 	}
 };
 
@@ -2093,7 +2253,6 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 	state ChangeFeedStreamReply reply;
 	state ChangeFeedStreamReply memoryReply;
 	state int remainingLimitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
-	state int remainingDurableBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
 	state Version startVersion = data->version.get();
 
 	if (DEBUG_CF_TRACE) {
@@ -2169,6 +2328,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 	state bool readDurable = feedInfo->durableVersion != invalidVersion && req.begin <= feedInfo->durableVersion;
 	state bool readFetched = req.begin <= fetchStorageVersion && !atLatest;
 	state bool waitFetched = false;
+	state bool moreFromDisk = false;
 	if (req.end > emptyVersion + 1 && (readDurable || readFetched)) {
 		if (readFetched && req.begin <= feedInfo->fetchVersion) {
 			waitFetched = true;
@@ -2183,33 +2343,31 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 			// To let update storage finish
 			wait(delay(0));
 		}
-		RangeResult res = wait(
-		    data->storage.readRange(KeyRangeRef(changeFeedDurableKey(req.rangeID, std::max(req.begin, emptyVersion)),
-		                                        changeFeedDurableKey(req.rangeID, req.end)),
-		                            1 << 30,
-		                            remainingDurableBytes));
 
-		data->counters.kvScanBytes += res.logicalSize();
+		int byteLimit = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
+		if (BUGGIFY && deterministicRandom()->random01() < 0.1) {
+			// shrink byte limit, but don't do every time as it slows down reads
+			byteLimit = 1 << deterministicRandom()->randomInt(0, 16);
+		}
+		Standalone<VectorRef<MutationsAndVersionRef>> res = wait(data->storage.readChangeFeedValues(
+		    req.rangeID, std::max(req.begin, emptyVersion), req.end, &moreFromDisk, byteLimit));
 
 		if (!inverted && !req.range.empty()) {
 			data->checkChangeCounter(changeCounter, req.range);
 		}
 
+		reply.arena.dependsOn(res.arena());
+
 		// TODO eventually: only do verify in simulation?
 		int memoryVerifyIdx = 0;
-
 		Version lastVersion = req.begin - 1;
 		Version lastKnownCommitted = invalidVersion;
-		for (auto& kv : res) {
-			Key id;
-			Version version, knownCommittedVersion;
-			Standalone<VectorRef<MutationRef>> mutations;
-			std::tie(id, version) = decodeChangeFeedDurableKey(kv.key);
-			std::tie(mutations, knownCommittedVersion) = decodeChangeFeedDurableValue(kv.value);
 
+		// filter mutations and do validation
+		for (auto& mutations : res) {
 			// gap validation
 			while (memoryVerifyIdx < memoryReply.mutations.size() &&
-			       version > memoryReply.mutations[memoryVerifyIdx].version) {
+			       mutations.version > memoryReply.mutations[memoryVerifyIdx].version) {
 				if (req.canReadPopped) {
 					// There are weird cases where SS fetching mixed with SS durability and popping can mean there are
 					// gaps before the popped version temporarily
@@ -2231,7 +2389,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 					           req.rangeID.printable().substr(0, 6),
 					           streamUID.toString().substr(0, 8),
 					           memoryReply.mutations[memoryVerifyIdx].version,
-					           version,
+					           mutations.version,
 					           feedInfo->emptyVersion,
 					           emptyVersion);
 
@@ -2248,24 +2406,26 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 			}
 
 			auto m = filterMutations(
-			    reply.arena, MutationsAndVersionRef(mutations, version, knownCommittedVersion), req.range, inverted);
+			    reply.arena,
+			    MutationsAndVersionRef(mutations.mutations, mutations.version, mutations.knownCommittedVersion),
+			    req.range,
+			    inverted);
 			if (m.mutations.size()) {
-				reply.arena.dependsOn(mutations.arena());
 				reply.mutations.push_back(reply.arena, m);
 
 				if (memoryVerifyIdx < memoryReply.mutations.size() &&
-				    version == memoryReply.mutations[memoryVerifyIdx].version) {
+				    mutations.version == memoryReply.mutations[memoryVerifyIdx].version) {
 					// We could do validation of mutations here too, but it's complicated because clears can get split
 					// and stuff
 					memoryVerifyIdx++;
 				}
 			} else if (memoryVerifyIdx < memoryReply.mutations.size() &&
-			           version == memoryReply.mutations[memoryVerifyIdx].version) {
+			           mutations.version == memoryReply.mutations[memoryVerifyIdx].version) {
 				fmt::print("ERROR: SS {0} CF {1} SQ {2} has mutation at {3} in memory but all filtered out on disk!\n",
 				           data->thisServerID.toString().substr(0, 4),
 				           req.rangeID.printable().substr(0, 6),
 				           streamUID.toString().substr(0, 8),
-				           version);
+				           mutations.version);
 
 				fmt::print("  Memory: ({})\n", memoryReply.mutations[memoryVerifyIdx].mutations.size());
 				for (auto& it : memoryReply.mutations[memoryVerifyIdx].mutations) {
@@ -2277,14 +2437,10 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 				}
 				ASSERT(false);
 			}
-			remainingDurableBytes -=
-			    sizeof(KeyValueRef) +
-			    kv.expectedSize(); // This is tracking the size on disk rather than the reply size
-			                       // because we cannot add mutations from memory if there are potentially more on disk
-			lastVersion = version;
-			lastKnownCommitted = knownCommittedVersion;
+			lastVersion = mutations.version;
+			lastKnownCommitted = mutations.knownCommittedVersion;
 		}
-		if (remainingDurableBytes > 0) {
+		if (!moreFromDisk) {
 			reply.arena.dependsOn(memoryReply.arena);
 			auto it = memoryReply.mutations.begin();
 			int totalCount = memoryReply.mutations.size();
@@ -2307,10 +2463,10 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		reply = memoryReply;
 	}
 
-	bool gotAll = remainingLimitBytes > 0 && remainingDurableBytes > 0 && data->version.get() == startVersion;
+	bool gotAll = remainingLimitBytes > 0 && !moreFromDisk && data->version.get() == startVersion;
 	Version finalVersion = std::min(req.end - 1, dequeVersion);
 	if ((reply.mutations.empty() || reply.mutations.back().version < finalVersion) && remainingLimitBytes > 0 &&
-	    remainingDurableBytes > 0) {
+	    !moreFromDisk) {
 		TEST(true); // Change feed adding empty version after empty results
 		reply.mutations.push_back(
 		    reply.arena, MutationsAndVersionRef(finalVersion, finalVersion == dequeVersion ? dequeKnownCommit : 0));
@@ -4836,10 +4992,9 @@ ACTOR Future<Void> changeFeedPopQ(StorageServer* self, ChangeFeedPopRequest req)
 			        changeFeedSSValue(feed->second->range, feed->second->emptyVersion + 1, feed->second->stopVersion)));
 			if (feed->second->storageVersion != invalidVersion) {
 				++self->counters.kvSystemClearRanges;
-				self->addMutationToMutationLog(mLV,
-				                               MutationRef(MutationRef::ClearRange,
-				                                           changeFeedDurableKey(feed->second->id, 0),
-				                                           changeFeedDurableKey(feed->second->id, req.version)));
+				KeyRange clearCFRange = changeFeedDurableKeyRange(feed->second->id, 0, req.version);
+				self->addMutationToMutationLog(
+				    mLV, MutationRef(MutationRef::ClearRange, clearCFRange.begin, clearCFRange.end));
 				if (req.version > feed->second->storageVersion) {
 					feed->second->storageVersion = invalidVersion;
 					feed->second->durableVersion = invalidVersion;
@@ -4926,11 +5081,10 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 					                changeFeedSSValue(changeFeedInfo->range,
 					                                  changeFeedInfo->emptyVersion + 1,
 					                                  changeFeedInfo->stopVersion)));
+
+					KeyRange clearCFRange = changeFeedDurableKeyRange(changeFeedInfo->id, 0, feedResults->popVersion);
 					data->addMutationToMutationLog(
-					    mLV,
-					    MutationRef(MutationRef::ClearRange,
-					                changeFeedDurableKey(changeFeedInfo->id, 0),
-					                changeFeedDurableKey(changeFeedInfo->id, feedResults->popVersion)));
+					    mLV, MutationRef(MutationRef::ClearRange, clearCFRange.begin, clearCFRange.end));
 					++data->counters.kvSystemClearRanges;
 				}
 
@@ -4966,10 +5120,12 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 							}
 						}
 
-						data->storage.writeKeyValue(
-						    KeyValueRef(changeFeedDurableKey(rangeId, remoteVersion),
-						                changeFeedDurableValue(remoteResult[remoteLoc].mutations,
-						                                       remoteResult[remoteLoc].knownCommittedVersion)));
+						data->storage.writeChangeFeedValue(
+						    rangeId,
+						    MutationsAndVersionRef(remoteResult[remoteLoc].mutations,
+						                           remoteVersion,
+						                           remoteResult[remoteLoc].knownCommittedVersion));
+
 						++data->counters.kvSystemClearRanges;
 						changeFeedInfo->fetchVersion = std::max(changeFeedInfo->fetchVersion, remoteVersion);
 
@@ -4992,8 +5148,7 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 							ASSERT(firstVersion != invalidVersion);
 							ASSERT(lastVersion != invalidVersion);
 							data->storage.clearRange(
-							    KeyRangeRef(changeFeedDurableKey(changeFeedInfo->id, firstVersion),
-							                changeFeedDurableKey(changeFeedInfo->id, lastVersion + 1)));
+							    changeFeedDurableKeyRange(changeFeedInfo->id, firstVersion, lastVersion + 1));
 							++data->counters.kvSystemClearRanges;
 							firstVersion = invalidVersion;
 							lastVersion = invalidVersion;
@@ -5046,10 +5201,9 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 		                persistChangeFeedKeys.begin.toString() + changeFeedInfo->id.toString(),
 		                changeFeedSSValue(
 		                    changeFeedInfo->range, changeFeedInfo->emptyVersion + 1, changeFeedInfo->stopVersion)));
-		data->addMutationToMutationLog(mLV,
-		                               MutationRef(MutationRef::ClearRange,
-		                                           changeFeedDurableKey(changeFeedInfo->id, 0),
-		                                           changeFeedDurableKey(changeFeedInfo->id, feedResults->popVersion)));
+
+		KeyRange clearCFRange = changeFeedDurableKeyRange(changeFeedInfo->id, 0, feedResults->popVersion);
+		data->addMutationToMutationLog(mLV, MutationRef(MutationRef::ClearRange, clearCFRange.begin, clearCFRange.end));
 		++data->counters.kvSystemClearRanges;
 	}
 
@@ -5061,10 +5215,10 @@ ACTOR Future<Version> fetchChangeFeedApplier(StorageServer* data,
 		Version endClear = std::min(lastVersion + 1, changeFeedInfo->emptyVersion);
 		if (endClear > firstVersion) {
 			auto& mLV2 = data->addVersionToMutationLog(data->data().getLatestVersion());
+
+			KeyRange clearCFRange = changeFeedDurableKeyRange(changeFeedInfo->id, firstVersion, endClear);
 			data->addMutationToMutationLog(mLV2,
-			                               MutationRef(MutationRef::ClearRange,
-			                                           changeFeedDurableKey(changeFeedInfo->id, firstVersion),
-			                                           changeFeedDurableKey(changeFeedInfo->id, endClear)));
+			                               MutationRef(MutationRef::ClearRange, clearCFRange.begin, clearCFRange.end));
 			++data->counters.kvSystemClearRanges;
 		}
 	}
@@ -5175,10 +5329,10 @@ ACTOR Future<Version> fetchChangeFeed(StorageServer* data,
 			data->addMutationToMutationLog(
 			    mLV, MutationRef(MutationRef::ClearRange, beginClearKey, keyAfter(beginClearKey)));
 			++data->counters.kvSystemClearRanges;
+			KeyRange clearCFRange = changeFeedDurableKeyRange(changeFeedInfo->id, 0, cleanupVersion);
 			data->addMutationToMutationLog(mLV,
-			                               MutationRef(MutationRef::ClearRange,
-			                                           changeFeedDurableKey(changeFeedInfo->id, 0),
-			                                           changeFeedDurableKey(changeFeedInfo->id, cleanupVersion)));
+			                               MutationRef(MutationRef::ClearRange, clearCFRange.begin, clearCFRange.end));
+
 			++data->counters.kvSystemClearRanges;
 
 			changeFeedInfo->destroy(cleanupVersion);
@@ -5407,10 +5561,8 @@ ACTOR Future<std::vector<Key>> fetchChangeFeedMetadata(StorageServer* data,
 		data->addMutationToMutationLog(mLV,
 		                               MutationRef(MutationRef::ClearRange, beginClearKey, keyAfter(beginClearKey)));
 		++data->counters.kvSystemClearRanges;
-		data->addMutationToMutationLog(mLV,
-		                               MutationRef(MutationRef::ClearRange,
-		                                           changeFeedDurableKey(feedId, 0),
-		                                           changeFeedDurableKey(feedId, cleanupVersion)));
+		KeyRange clearCFRange = changeFeedDurableKeyRange(feedId, 0, cleanupVersion);
+		data->addMutationToMutationLog(mLV, MutationRef(MutationRef::ClearRange, clearCFRange.begin, clearCFRange.end));
 		++data->counters.kvSystemClearRanges;
 
 		existingEntry->second->destroy(cleanupVersion);
@@ -6186,10 +6338,10 @@ void changeServerKeys(StorageServer* data,
 				data->addMutationToMutationLog(
 				    mLV, MutationRef(MutationRef::ClearRange, beginClearKey, keyAfter(beginClearKey)));
 				++data->counters.kvSystemClearRanges;
-				data->addMutationToMutationLog(mLV,
-				                               MutationRef(MutationRef::ClearRange,
-				                                           changeFeedDurableKey(f.first, 0),
-				                                           changeFeedDurableKey(f.first, version)));
+
+				KeyRange clearCFRange = changeFeedDurableKeyRange(f.first, 0, version);
+				data->addMutationToMutationLog(
+				    mLV, MutationRef(MutationRef::ClearRange, clearCFRange.begin, clearCFRange.end));
 
 				// We can't actually remove this change feed fully until the mutations clearing its data become durable.
 				// If the SS restarted at version R before the clearing mutations became durable at version D (R < D),
@@ -6532,10 +6684,10 @@ private:
 				data->addMutationToMutationLog(
 				    mLV, MutationRef(MutationRef::ClearRange, beginClearKey, keyAfter(beginClearKey)));
 				++data->counters.kvSystemClearRanges;
-				data->addMutationToMutationLog(mLV,
-				                               MutationRef(MutationRef::ClearRange,
-				                                           changeFeedDurableKey(feed->second->id, 0),
-				                                           changeFeedDurableKey(feed->second->id, currentVersion)));
+				KeyRange clearCFRange = changeFeedDurableKeyRange(feed->second->id, 0, currentVersion);
+				data->addMutationToMutationLog(
+				    mLV, MutationRef(MutationRef::ClearRange, clearCFRange.begin, clearCFRange.end));
+
 				++data->counters.kvSystemClearRanges;
 
 				feed->second->destroy(currentVersion);
@@ -6562,10 +6714,10 @@ private:
 				                    feed->second->range, feed->second->emptyVersion + 1, feed->second->stopVersion)));
 				if (popMutationLog) {
 					++data->counters.kvSystemClearRanges;
-					data->addMutationToMutationLog(mLV,
-					                               MutationRef(MutationRef::ClearRange,
-					                                           changeFeedDurableKey(feed->second->id, 0),
-					                                           changeFeedDurableKey(feed->second->id, popVersion)));
+
+					KeyRange clearCFRange = changeFeedDurableKeyRange(feed->second->id, 0, popVersion);
+					data->addMutationToMutationLog(
+					    mLV, MutationRef(MutationRef::ClearRange, clearCFRange.begin, clearCFRange.end));
 				}
 			}
 		} else if ((m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange) &&
@@ -7295,9 +7447,8 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 					} else if (it.version > newOldestVersion) {
 						break;
 					}
-					data->storage.writeKeyValue(
-					    KeyValueRef(changeFeedDurableKey(info->second->id, it.version),
-					                changeFeedDurableValue(it.mutations, it.knownCommittedVersion)));
+					data->storage.writeChangeFeedValue(
+					    info->second->id, MutationsAndVersionRef(it.mutations, it.version, it.knownCommittedVersion));
 					// FIXME: there appears to be a bug somewhere where the exact same mutation appears twice in a row
 					// in the stream. We should fix this assert to be strictly > and re-enable it
 					ASSERT(it.version >= info->second->storageVersion);

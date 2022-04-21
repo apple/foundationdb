@@ -1109,21 +1109,38 @@ std::tuple<KeyRange, Version, ChangeFeedStatus> decodeChangeFeedValue(ValueRef c
 const KeyRangeRef changeFeedDurableKeys(LiteralStringRef("\xff\xff/cf/"), LiteralStringRef("\xff\xff/cf0"));
 const KeyRef changeFeedDurablePrefix = changeFeedDurableKeys.begin;
 
-const Value changeFeedDurableKey(Key const& feed, Version version) {
+const Value changeFeedDurableKey(Key const& feed, Version version, uint16_t chunkId) {
 	BinaryWriter wr(AssumeVersion(ProtocolVersion::withChangeFeed()));
 	wr.serializeBytes(changeFeedDurablePrefix);
 	wr << feed;
 	wr << bigEndian64(version);
+	wr << bigEndian16(chunkId);
 	return wr.toValue();
 }
-std::pair<Key, Version> decodeChangeFeedDurableKey(ValueRef const& key) {
+std::tuple<Key, Version, uint16_t> decodeChangeFeedDurableKey(ValueRef const& key) {
 	Key feed;
 	Version version;
+	uint16_t chunkId;
 	BinaryReader reader(key.removePrefix(changeFeedDurablePrefix), AssumeVersion(ProtocolVersion::withChangeFeed()));
 	reader >> feed;
 	reader >> version;
-	return std::make_pair(feed, bigEndian64(version));
+	reader >> chunkId;
+	return std::tuple(feed, bigEndian64(version), bigEndian16(chunkId));
 }
+
+const KeyRange changeFeedDurableKeyRange(Key const& feed, Version beginVersion, Version endVersion) {
+	BinaryWriter wrBegin(AssumeVersion(ProtocolVersion::withChangeFeed()));
+	wrBegin.serializeBytes(changeFeedDurablePrefix);
+	wrBegin << feed;
+	wrBegin << bigEndian64(beginVersion);
+
+	BinaryWriter wrEnd(AssumeVersion(ProtocolVersion::withChangeFeed()));
+	wrEnd.serializeBytes(changeFeedDurablePrefix);
+	wrEnd << feed;
+	wrEnd << bigEndian64(endVersion);
+	return KeyRangeRef(wrBegin.toValue(), wrEnd.toValue());
+}
+
 const Value changeFeedDurableValue(Standalone<VectorRef<MutationRef>> const& mutations, Version knownCommittedVersion) {
 	BinaryWriter wr(IncludeVersion(ProtocolVersion::withChangeFeed()));
 	wr << mutations;
