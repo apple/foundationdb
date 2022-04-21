@@ -257,7 +257,7 @@ public:
 	                                    const EncryptCipherRandomSalt& salt);
 
 	// API returns the last inserted cipherKey.
-	// If none exists, 'encrypt_key_not_found' is thrown.
+	// If none exists, null reference is returned.
 
 	Reference<BlobCipherKey> getLatestCipherKey();
 
@@ -344,7 +344,8 @@ public:
 	                     const EncryptCipherRandomSalt& salt);
 
 	// API returns the last insert cipherKey for a given encryption domain Id.
-	// If none exists, it would throw 'encrypt_key_not_found' exception.
+	// If domain Id is invalid, it would throw 'encrypt_invalid_id' exception,
+	// otherwise, and if none exists, it would return null reference.
 
 	Reference<BlobCipherKey> getLatestCipherKey(const EncryptCipherDomainId& domainId);
 

@@ -299,6 +299,10 @@ void BlobCipherKeyCache::insertCipherKey(const EncryptCipherDomainId& domainId,
 }
 
 Reference<BlobCipherKey> BlobCipherKeyCache::getLatestCipherKey(const EncryptCipherDomainId& domainId) {
+	if (domainId == ENCRYPT_INVALID_DOMAIN_ID) {
+		TraceEvent("GetLatestCipherKey_DomainNotFound").detail("DomainId", domainId);
+		throw encrypt_invalid_id();
+	}
 	auto domainItr = domainCacheMap.find(domainId);
 	if (domainItr == domainCacheMap.end()) {
 		TraceEvent("GetLatestCipherKey_DomainNotFound").detail("DomainId", domainId);
@@ -774,6 +778,12 @@ TEST_CASE("flow/BlobCipher") {
 	Reference<BlobCipherKey> latestKeyNonexists =
 	    cipherKeyCache->getLatestCipherKey(deterministicRandom()->randomInt(minDomainId, maxDomainId));
 	ASSERT(!latestKeyNonexists.isValid());
+	try {
+		cipherKeyCache->getLatestCipherKey(ENCRYPT_INVALID_DOMAIN_ID);
+		ASSERT(false); // shouldn't get here
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_encrypt_invalid_id);
+	}
 
 	// insert BlobCipher keys into BlobCipherKeyCache map and validate
 	TraceEvent("BlobCipherTest_InsertKeys").log();
