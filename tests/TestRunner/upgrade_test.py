@@ -17,7 +17,6 @@ from urllib import request
 
 from local_cluster import LocalCluster, random_secret_string
 
-
 SUPPORTED_PLATFORMS = ["x86_64"]
 SUPPORTED_VERSIONS = ["7.2.0", "7.1.1", "7.1.0", "7.0.0", "6.3.24", "6.3.23",
                       "6.3.22", "6.3.18", "6.3.17", "6.3.16", "6.3.15", "6.3.13", "6.3.12", "6.3.9", "6.2.30",
@@ -53,17 +52,17 @@ def version_from_str(ver_str):
 
 def api_version_from_str(ver_str):
     ver_tuple = version_from_str(ver_str)
-    return ver_tuple[0]*100+ver_tuple[1]*10
+    return ver_tuple[0] * 100 + ver_tuple[1] * 10
 
 
 def version_before(ver_str1, ver_str2):
     return version_from_str(ver_str1) < version_from_str(ver_str2)
 
 
-def random_sleep(minSec, maxSec):
-    timeSec = random.uniform(minSec, maxSec)
-    print("Sleeping for {0:.3f}s".format(timeSec))
-    time.sleep(timeSec)
+def random_sleep(min_sec, max_sec):
+    time_sec = random.uniform(min_sec, max_sec)
+    print("Sleeping for {0:.3f}s".format(time_sec))
+    time.sleep(time_sec)
 
 
 class UpgradeTest:
@@ -111,6 +110,13 @@ class UpgradeTest:
         os.mkfifo(self.input_pipe_path)
         os.mkfifo(self.output_pipe_path)
         self.progress_event = Event()
+        self.external_lib_dir = None
+        self.cluster_version = None
+        self.api_version = None
+        self.tester_retcode = None
+        self.tester_proc = None
+        self.output_pipe = None
+        self.tester_bin = None
 
     def binary_path(self, version, bin_name):
         if version == CURRENT_VERSION:
@@ -125,9 +131,9 @@ class UpgradeTest:
             return self.download_dir.joinpath(version)
 
     # Download an old binary of a given version from a remote repository
-    def download_old_binary(self, version, target_bin_name, remote_bin_name, makeExecutable):
+    def download_old_binary(self, version, target_bin_name, remote_bin_name, make_executable):
         local_file = self.binary_path(version, target_bin_name)
-        if (local_file.exists()):
+        if local_file.exists():
             return
         self.download_dir.joinpath(version).mkdir(
             parents=True, exist_ok=True)
@@ -137,7 +143,7 @@ class UpgradeTest:
         request.urlretrieve(remote_file, local_file)
         print("Download complete")
         assert local_file.exists(), "{} does not exist".format(local_file)
-        if makeExecutable:
+        if make_executable:
             make_executable(local_file)
 
     # Download all old binaries required for testing the specified upgrade path
@@ -173,12 +179,12 @@ class UpgradeTest:
         while retries < timeout_sec:
             retries += 1
             status = self.cluster.get_status()
-            if not "processes" in status["cluster"]:
+            if "processes" not in status["cluster"]:
                 print("Health check: no processes found. Retrying")
                 time.sleep(1)
                 continue
             num_proc = len(status["cluster"]["processes"])
-            if (num_proc < self.cluster.process_number):
+            if num_proc < self.cluster.process_number:
                 print("Health check: {} of {} processes found. Retrying".format(
                     num_proc, self.cluster.process_number))
                 time.sleep(1)
@@ -200,7 +206,7 @@ class UpgradeTest:
         self.cluster.fdbserver_binary = self.binary_path(version, "fdbserver")
         self.cluster.fdbcli_binary = self.binary_path(version, "fdbcli")
         self.cluster.set_env_var = "LD_LIBRARY_PATH", self.lib_dir(version)
-        if (version_before(version, "7.1.0")):
+        if version_before(version, "7.1.0"):
             self.cluster.use_legacy_conf_syntax = True
         self.cluster.save_config()
         self.cluster_version = version
@@ -224,7 +230,7 @@ class UpgradeTest:
         self.cluster.stop_cluster()
         shutil.rmtree(self.tmp_dir)
 
-     # Determine FDB API version matching the upgrade path
+    # Determine FDB API version matching the upgrade path
     def determine_api_version(self):
         self.api_version = api_version_from_str(CURRENT_VERSION)
         for version in self.upgrade_path:
@@ -247,7 +253,7 @@ class UpgradeTest:
                         '--log',
                         '--log-dir', self.log,
                         '--transaction-retry-limit', str(TRANSACTION_RETRY_LIMIT)]
-            if (RUN_WITH_GDB):
+            if RUN_WITH_GDB:
                 cmd_args = ['gdb', '-ex', 'run', '--args'] + cmd_args
             print("Executing test command: {}".format(
                 " ".join([str(c) for c in cmd_args])))
@@ -257,7 +263,7 @@ class UpgradeTest:
             self.tester_retcode = self.tester_proc.wait()
             self.tester_proc = None
 
-            if (self.tester_retcode != 0):
+            if self.tester_retcode != 0:
                 print("Tester failed with return code {}".format(
                     self.tester_retcode))
         except Exception:
@@ -271,7 +277,7 @@ class UpgradeTest:
         os.write(ctrl_pipe, b"CHECK\n")
         self.progress_event.wait(
             None if RUN_WITH_GDB else PROGRESS_CHECK_TIMEOUT_SEC)
-        if (self.progress_event.is_set()):
+        if self.progress_event.is_set():
             print("Progress check: OK")
         else:
             assert False, "Progress check failed after upgrade to version {}".format(
@@ -286,7 +292,7 @@ class UpgradeTest:
             for line in self.output_pipe:
                 msg = line.strip()
                 print("Received {}".format(msg))
-                if (msg == "CHECK_OK"):
+                if msg == "CHECK_OK":
                     self.progress_event.set()
             self.output_pipe.close()
         except Exception as e:
@@ -319,7 +325,7 @@ class UpgradeTest:
                 print("Killing the tester process")
                 self.tester_proc.kill()
                 workload_thread.join(5)
-            except:
+            except Exception:
                 print("Failed to kill the tester process")
 
     # The main method implementing the test:
@@ -380,10 +386,11 @@ class UpgradeTest:
             # When running ASAN we expect to see this message. Boost coroutine should be using the
             # correct asan annotations so that it shouldn't produce any false positives.
             if line.endswith(
-                "WARNING: ASan doesn't fully support makecontext/swapcontext functions and may produce false positives in some cases!"
+                    "WARNING: ASan doesn't fully support makecontext/swapcontext functions and may produce false "
+                    "positives in some cases! "
             ):
                 continue
-            if (err_cnt < error_limit):
+            if err_cnt < error_limit:
                 print(line)
             err_cnt += 1
 
@@ -405,7 +412,7 @@ class UpgradeTest:
             .splitlines()
         )
 
-        if (len(sev30s) == 0):
+        if len(sev30s) == 0:
             print("No warnings found in logs")
         else:
             print(">>>>>>>>>>>>>>>>>>>> Found {} severity 30 events (warnings):".format(
@@ -471,11 +478,11 @@ if __name__ == "__main__":
         action="store_true"
     )
     args = parser.parse_args()
-    if (args.process_number == 0):
+    if args.process_number == 0:
         args.process_number = random.randint(1, 5)
         print("Testing with {} processes".format(args.process_number))
 
-    if (args.run_with_gdb):
+    if args.run_with_gdb:
         RUN_WITH_GDB = True
 
     errcode = 1

@@ -35,8 +35,8 @@ def is_port_in_use(port):
 valid_letters_for_secret = string.ascii_letters + string.digits
 
 
-def random_secret_string(len):
-    return ''.join(random.choice(valid_letters_for_secret) for i in range(len))
+def random_secret_string(length):
+    return ''.join(random.choice(valid_letters_for_secret) for _ in range(length))
 
 
 class LocalCluster:
@@ -100,7 +100,7 @@ logdir = {logdir}
         self.process_number = process_number
         self.ip_address = '127.0.0.1' if ip_address is None else ip_address
         self.first_port = port
-        if (self.first_port is not None):
+        if self.first_port is not None:
             self.last_used_port = int(self.first_port)-1
         self.server_ports = [self.__next_port()
                              for _ in range(self.process_number)]
@@ -116,7 +116,7 @@ logdir = {logdir}
             self.save_config()
 
     def __next_port(self):
-        if (self.first_port is None):
+        if self.first_port is None:
             return get_free_port()
         else:
             self.last_used_port += 1
@@ -126,7 +126,7 @@ logdir = {logdir}
         new_conf_file = self.conf_file.parent / (self.conf_file.name + '.new')
         with open(new_conf_file, 'x') as f:
             conf_template = LocalCluster.configuration_template
-            if (self.use_legacy_conf_syntax):
+            if self.use_legacy_conf_syntax:
                 conf_template = conf_template.replace("-", "_")
             f.write(conf_template.format(
                 etcdir=self.etc,
@@ -178,7 +178,7 @@ logdir = {logdir}
 
     def ensure_ports_released(self, timeout_sec=5):
         sec = 0
-        while (sec < timeout_sec):
+        while sec < timeout_sec:
             in_use = False
             for port in self.server_ports:
                 if is_port_in_use(port):
@@ -200,7 +200,7 @@ logdir = {logdir}
 
     def create_database(self, storage='ssd', enable_tenants=True):
         db_config = 'configure new single {}'.format(storage)
-        if (enable_tenants):
+        if enable_tenants:
             db_config += " tenant_mode=optional_experimental"
         args = [self.fdbcli_binary, '-C',
                 self.cluster_file, '--exec', db_config]

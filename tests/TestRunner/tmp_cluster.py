@@ -124,9 +124,11 @@ if __name__ == "__main__":
         )
 
         for line in sev40s:
-            # When running ASAN we expect to see this message. Boost coroutine should be using the correct asan annotations so that it shouldn't produce any false positives.
+            # When running ASAN we expect to see this message. Boost coroutine should be using the correct asan
+            # annotations so that it shouldn't produce any false positives.
             if line.endswith(
-                "WARNING: ASan doesn't fully support makecontext/swapcontext functions and may produce false positives in some cases!"
+                "WARNING: ASan doesn't fully support makecontext/swapcontext functions and may produce false "
+                "positives in some cases! "
             ):
                 continue
             print(">>>>>>>>>>>>>>>>>>>> Found severity 40 events - the test fails")
