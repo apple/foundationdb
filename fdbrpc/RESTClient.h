@@ -66,25 +66,29 @@ public:
 	// RESTConnectionPool is used to leverage cached connection if any for 'host:service' pair. API then leverage
 	// HTTP::doRequest to accomplish the specified operation
 
-	Future<Reference<HTTP::Response>> doGet(std::string fullUrl, Optional<HTTP::Headers> optHeaders);
-	Future<Reference<HTTP::Response>> doHead(std::string fullUrl, Optional<HTTP::Headers> optHeaders);
-	Future<Reference<HTTP::Response>> doDelete(std::string fullUrl, Optional<HTTP::Headers> optHeaders);
-	Future<Reference<HTTP::Response>> doTrace(std::string fullUrl, Optional<HTTP::Headers> optHeaders);
-	Future<Reference<HTTP::Response>> doPut(std::string fullUrl,
-	                                        std::string requestBody,
-	                                        Optional<HTTP::Headers> optHeaders);
-	Future<Reference<HTTP::Response>> doPost(std::string fullUrl,
-	                                         std::string requestBody,
-	                                         Optional<HTTP::Headers> optHeaders);
+	Future<Reference<HTTP::Response>> doGet(const std::string& fullUrl,
+	                                        Optional<HTTP::Headers> optHeaders = Optional<HTTP::Headers>());
+	Future<Reference<HTTP::Response>> doHead(const std::string& fullUrl,
+	                                         Optional<HTTP::Headers> optHeaders = Optional<HTTP::Headers>());
+	Future<Reference<HTTP::Response>> doDelete(const std::string& fullUrl,
+	                                           Optional<HTTP::Headers> optHeaders = Optional<HTTP::Headers>());
+	Future<Reference<HTTP::Response>> doTrace(const std::string& fullUrl,
+	                                          Optional<HTTP::Headers> optHeaders = Optional<HTTP::Headers>());
+	Future<Reference<HTTP::Response>> doPut(const std::string& fullUrl,
+	                                        const std::string& requestBody,
+	                                        Optional<HTTP::Headers> optHeaders = Optional<HTTP::Headers>());
+	Future<Reference<HTTP::Response>> doPost(const std::string& fullUrl,
+	                                         const std::string& requestBody,
+	                                         Optional<HTTP::Headers> optHeaders = Optional<HTTP::Headers>());
 
-	static std::string getStatsKey(const std::string& host, std::string& service) { return host + ":" + service; }
+	static std::string getStatsKey(const std::string& host, const std::string& service) { return host + ":" + service; }
 
 private:
-	Future<Reference<HTTP::Response>> doGetHeadDeleteOrTrace(std::string verb,
+	Future<Reference<HTTP::Response>> doGetHeadDeleteOrTrace(const std::string& verb,
 	                                                         Optional<HTTP::Headers> optHeaders,
 	                                                         RESTUrl* url,
 	                                                         std::set<unsigned int> successCodes);
-	Future<Reference<HTTP::Response>> doPutOrPost(std::string verb,
+	Future<Reference<HTTP::Response>> doPutOrPost(const std::string& verb,
 	                                              Optional<HTTP::Headers> headers,
 	                                              RESTUrl* url,
 	                                              std::set<unsigned int> successCodes);
