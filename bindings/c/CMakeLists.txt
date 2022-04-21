@@ -295,6 +295,7 @@ fdb_install(
   FILES foundationdb/fdb_c.h
   ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/fdb_c_options.g.h
   ${CMAKE_SOURCE_DIR}/fdbclient/vexillographer/fdb.options
+  ${CMAKE_SOURCE_DIR}/bindings/c/foundationdb/fdb_c_types.h
   DESTINATION include
   DESTINATION_SUFFIX /foundationdb
   COMPONENT clients)
