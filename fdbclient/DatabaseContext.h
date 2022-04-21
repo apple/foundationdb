@@ -595,9 +595,9 @@ public:
 	std::vector<std::unique_ptr<SpecialKeyRangeReadImpl>> specialKeySpaceModules;
 	std::unique_ptr<SpecialKeySpace> specialKeySpace;
 	void registerSpecialKeysImpl(SpecialKeySpace::MODULE module,
-	                                   SpecialKeySpace::IMPLTYPE type,
-	                                   std::unique_ptr<SpecialKeyRangeReadImpl>&& impl,
-	                                   int deprecatedVersion = -1);
+	                             SpecialKeySpace::IMPLTYPE type,
+	                             std::unique_ptr<SpecialKeyRangeReadImpl>&& impl,
+	                             int deprecatedVersion = -1);
 
 	static bool debugUseTags;
 	static const std::vector<std::string> debugTransactionTagChoices;
