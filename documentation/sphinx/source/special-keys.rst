@@ -277,7 +277,7 @@ Versioning
 
 For how FDB clients deal with versioning, see :ref:`api-versions`. The special key space deals with versioning by using the ``API_VERSION`` passed to initialize the client. Any module added at a version larger than the API version set by the client will be inaccessible. For example, if a module is added in version 7.0 and the client sets its API version to 630, then the module will not available. When removing or updating existing modules, module developers need to continue to provide the old behavior for clients that specify old API versions.
 
-To remove the functionality of a certain special key(s), specify the API version where the function is being deprecated in the ``registerSpecialKeySpaceModule`` function. When a client specifies an API version greater than or equal to the deprecation version, the functionality will not be available. Move and update the its documentation to :ref:`special-key-space-deprecation`.
+To remove the functionality of a certain special key(s), specify the API version where the function is being deprecated in the ``registerSpecialKeysImpl`` function. When a client specifies an API version greater than or equal to the deprecation version, the functionality will not be available. Move and update the its documentation to :ref:`special-key-space-deprecation`.
 
 To update the implementation of any special keys, add the new implementation and use ``API_VERSION`` to switch between different implementations.
 
