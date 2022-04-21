@@ -66,7 +66,7 @@ public-address = {ip_address}:$ID
 listen-address = public
 datadir = {datadir}/$ID
 logdir = {logdir}
-knob_bg_url=file://{datadir}/fdbblob/
+{bg_knob_line}
 # logsize = 10MiB
 # maxlogssize = 100MiB
 # machine-id =
@@ -133,14 +133,18 @@ knob_bg_url=file://{datadir}/fdbblob/
         new_conf_file = self.conf_file.parent / (self.conf_file.name + '.new')
         with open(new_conf_file, 'x') as f:
             conf_template = LocalCluster.configuration_template
+            bg_knob_line = ""
             if (self.use_legacy_conf_syntax):
                 conf_template = conf_template.replace("-", "_")
+            if (self.blob_granules_enabled):
+                bg_knob_line = "knob_bg_url=file://" + str(self.data) + "/fdbblob/"
             f.write(conf_template.format(
                 etcdir=self.etc,
                 fdbserver_bin=self.fdbserver_binary,
                 datadir=self.data,
                 logdir=self.log,
-                ip_address=self.ip_address
+                ip_address=self.ip_address,
+                bg_knob_line=bg_knob_line
             ))
             # By default, the cluster only has one process
             # If a port number is given and process_number > 1, we will use subsequent numbers
