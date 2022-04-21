@@ -191,7 +191,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	                     Version knownCommittedVersion,
 	                     Version minKnownCommittedVersion,
 	                     LogPushData& data,
-	                     SpanID const& spanContext,
+	                     SpanContext const& spanContext,
 	                     Optional<UID> debugID,
 	                     Optional<std::unordered_map<uint16_t, Version>> tpcvMap) final;
 

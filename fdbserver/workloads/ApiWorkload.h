@@ -80,8 +80,8 @@ struct TransactionWrapper : public ReferenceCounted<TransactionWrapper> {
 	// Gets the version vector cached in a transaction
 	virtual VersionVector getVersionVector() = 0;
 
-	// Gets the spanID of a transaction
-	virtual UID getSpanID() = 0;
+	// Gets the spanContext of a transaction
+	virtual SpanContext getSpanContext() = 0;
 
 	// Prints debugging messages for a transaction; not implemented for all transaction types
 	virtual void debugTransaction(UID debugId) {}
@@ -161,8 +161,8 @@ struct FlowTransactionWrapper : public TransactionWrapper {
 	// Gets the version vector cached in a transaction
 	VersionVector getVersionVector() override { return transaction.getVersionVector(); }
 
-	// Gets the spanID of a transaction
-	UID getSpanID() override { return transaction.getSpanID(); }
+	// Gets the spanContext of a transaction
+	SpanContext getSpanContext() override { return transaction.getSpanContext(); }
 
 	// Prints debugging messages for a transaction
 	void debugTransaction(UID debugId) override { transaction.debugTransaction(debugId); }
@@ -229,8 +229,8 @@ struct ThreadTransactionWrapper : public TransactionWrapper {
 	// Gets the version vector cached in a transaction
 	VersionVector getVersionVector() override { return transaction->getVersionVector(); }
 
-	// Gets the spanID of a transaction
-	UID getSpanID() override { return transaction->getSpanID(); }
+	// Gets the spanContext of a transaction
+	SpanContext getSpanContext() override { return transaction->getSpanContext(); }
 
 	void addReadConflictRange(KeyRangeRef const& keys) override { transaction->addReadConflictRange(keys); }
 };
