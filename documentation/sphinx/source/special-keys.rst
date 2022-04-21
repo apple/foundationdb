@@ -265,21 +265,23 @@ clients can connect FoundationDB transactions to outside events.
 
 .. _special-key-space-deprecation:
 
-Deprecation
-=================
+Deprecated Keys
+===============
 
-Below are the deprecated special keys and related informations.
+Listed below are the special keys that have been deprecated. Special key(s) will no longer be accessible when the client specifies an API version equal to or larger than the version where they were deprecated. Clients specifying older API versions will be able to continue using the deprecated key(s).
 
-#. ``\xff\xff/management/profiling/<client_txn_sample_rate|client_txn_size_limit>`` Deprecated as of 7.2. The corresponding functionalities are now covered by the global configuration module. For details, see :doc:`global-configuration`. Read/write. Changing these two keys will change the corresponding system keys ``\xff\x02/fdbClientInfo/<client_txn_sample_rate|client_txn_size_limit>``, respectively. The value of ``\xff\xff/management/client_txn_sample_rate`` is a literal text of ``double``, and the value of ``\xff\xff/management/client_txn_size_limit`` is a literal text of ``int64_t``. A special value ``default`` can be set to or read from these two keys, representing the client profiling is disabled. In addition, ``clear`` in this range is not allowed. For more details, see help text of ``fdbcli`` command ``profile client``.
+#. ``\xff\xff/management/profiling/<client_txn_sample_rate|client_txn_size_limit>`` Deprecated as of API version 7.2. The corresponding functionalities are now covered by the global configuration module. For details, see :doc:`global-configuration`. Read/write. Changing these two keys will change the corresponding system keys ``\xff\x02/fdbClientInfo/<client_txn_sample_rate|client_txn_size_limit>``, respectively. The value of ``\xff\xff/management/client_txn_sample_rate`` is a literal text of ``double``, and the value of ``\xff\xff/management/client_txn_size_limit`` is a literal text of ``int64_t``. A special value ``default`` can be set to or read from these two keys, representing the client profiling is disabled. In addition, ``clear`` in this range is not allowed. For more details, see help text of ``fdbcli`` command ``profile client``.
 
 Versioning
-=================
+==========
 
-For how FDB clients deal with versioning, see :ref:`api-versions`. The special key space deals with the versioning by using the ``API_VERSION`` that passed to initilialize the client. The framework will ingore all modules added at the version larger than the api version set by the client. For example, if a module is added in version 7.0 but the client set the api version as 6.3, then the module it not available to the client. According to the definition of this contract, anytime you want to remove or update existing modules, you need to keep the old implementation to let the client get the same behavior when it's using the old api version.
+For how FDB clients deal with versioning, see :ref:`api-versions`. The special key space deals with versioning by using the ``API_VERSION`` passed to initialize the client. Any module added at a version larger than the API version set by the client will be inaccessible. For example, if a module is added in version 7.0 and the client sets its API version to 630, then the module will not available. When removing or updating existing modules, module developers need to continue to provide the old behavior for clients that specify old API versions.
 
-- To remove a certain module, specify the API version where the function is being deprecated in the ``registerSpecialKeySpaceModule`` function. When a client specifies an API version greater than or equal to the deprecation version, the module will not be available.
-- To update the implementation of any modules, add the new implementation and use ``API_VERSION`` to switch between different implementations.
-- Add a note in ``api-version-upgrade-guide.rst`` after you make the change.
+To remove the functionality of a certain special key(s), specify the API version where the function is being deprecated in the ``registerSpecialKeySpaceModule`` function. When a client specifies an API version greater than or equal to the deprecation version, the functionality will not be available. Move and update the its documentation to :ref:`special-key-space-deprecation`.
+
+To update the implementation of any special keys, add the new implementation and use ``API_VERSION`` to switch between different implementations.
+
+Add notes in ``api-version-upgrade-guide.rst`` if you either remove or update a special key(s) implementation.
 
 .. [#conflicting_keys] In practice, the transaction probably committed successfully. However, if you're running multiple resolvers then it's possible for a transaction to cause another to abort even if it doesn't commit successfully.
 .. [#max_read_transaction_life_versions] The number 5000000 comes from the server knob MAX_READ_TRANSACTION_LIFE_VERSIONS
