@@ -74,6 +74,7 @@ struct Hostname {
 
 	Optional<NetworkAddress> resolvedAddress;
 	enum HostnameStatus { UNRESOLVED, RESOLVING, RESOLVED };
+	// The resolve functions below use DNS cache.
 	Future<Optional<NetworkAddress>> resolve();
 	Future<NetworkAddress> resolveWithRetry();
 	Optional<NetworkAddress> resolveBlocking(); // This one should only be used when resolving asynchronously is
@@ -81,6 +82,11 @@ struct Hostname {
 	void resetToUnresolved();
 	HostnameStatus status = UNRESOLVED;
 	AsyncTrigger resolveFinish;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, host, service, isTLS, resolvedAddress, status);
+	}
 };
 
 #endif
