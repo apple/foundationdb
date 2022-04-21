@@ -1427,7 +1427,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 	}
 }
 
-class DDBalancer {
+class DDBalancer : public ReferenceCounted<DDBalancer> {
 	friend class DDBalancerImpl;
 
 private:
@@ -1517,22 +1517,20 @@ class DDBalancerImpl {
 	}
 
 public:
-	ACTOR static Future<Void> BgDDMountainChopper(DDQueueData* queue,
-	                                              TeamCollectionInterface teamCollection,
-	                                              bool isPrimary) {
+	ACTOR static Future<Void> BgDDMountainChopper(DDBalancer* self) {
 		state double rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL;
 		state int resetCount = SERVER_KNOBS->DD_REBALANCE_RESET_AMOUNT;
-		state Transaction tr(queue->cx);
+		state Transaction tr(self->queue->cx);
 		state double lastRead = 0;
 		state bool skipCurrentLoop = false;
 		loop {
 			state std::pair<Optional<Reference<IDataDistributionTeam>>, bool> randomTeam;
 			state bool moved = false;
-			state TraceEvent traceEvent("BgDDMountainChopper", queue->distributorId);
+			state TraceEvent traceEvent("BgDDMountainChopper", self->queue->distributorId);
 			traceEvent.suppressFor(5.0).detail("PollingInterval", rebalancePollingInterval);
 
-			if (queue->lastLimitedTime() > 0) {
-				traceEvent.detail("SecondsSinceLastLimited", now() - queue->lastLimitedTime());
+			if (self->queue->lastLimitedTime() > 0) {
+				traceEvent.detail("SecondsSinceLastLimited", now() - self->queue->lastLimitedTime());
 			}
 
 			try {
@@ -1559,14 +1557,14 @@ public:
 				}
 
 				int pendingRelocations =
-				    queue->pendingRelocationsAtPriority(SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM);
+				    self->queue->pendingRelocationsAtPriority(SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM);
 				traceEvent.detail("QueuedRelocations", pendingRelocations);
 				if (pendingRelocations < SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
 					std::pair<Optional<Reference<IDataDistributionTeam>>, bool> _randomTeam = wait(brokenPromiseToNever(
-					    teamCollection.getTeam.getReply(GetTeamRequest(WantNewServers::True,
-					                                                   WantTrueBest::False,
-					                                                   PreferLowerUtilization::True,
-					                                                   TeamMustHaveShards::False))));
+					    self->teamCollection.getTeam.getReply(GetTeamRequest(WantNewServers::True,
+					                                                         WantTrueBest::False,
+					                                                         PreferLowerUtilization::True,
+					                                                         TeamMustHaveShards::False))));
 					randomTeam = _randomTeam;
 					traceEvent.detail(
 					    "DestTeam",
@@ -1576,10 +1574,10 @@ public:
 					if (randomTeam.first.present()) {
 						std::pair<Optional<Reference<IDataDistributionTeam>>, bool> loadedTeam =
 						    wait(brokenPromiseToNever(
-						        teamCollection.getTeam.getReply(GetTeamRequest(WantNewServers::True,
-						                                                       WantTrueBest::True,
-						                                                       PreferLowerUtilization::False,
-						                                                       TeamMustHaveShards::True))));
+						        self->teamCollection.getTeam.getReply(GetTeamRequest(WantNewServers::True,
+						                                                             WantTrueBest::True,
+						                                                             PreferLowerUtilization::False,
+						                                                             TeamMustHaveShards::True))));
 
 						traceEvent.detail(
 						    "SourceTeam",
@@ -1587,11 +1585,11 @@ public:
 						        [](const Reference<IDataDistributionTeam>& team) { return team->getDesc(); })));
 
 						if (loadedTeam.first.present()) {
-							bool _moved = wait(rebalanceTeams(queue,
+							bool _moved = wait(rebalanceTeams(self->queue,
 							                                  SERVER_KNOBS->PRIORITY_REBALANCE_OVERUTILIZED_TEAM,
 							                                  loadedTeam.first.get(),
 							                                  randomTeam.first.get(),
-							                                  isPrimary,
+							                                  self->tcIsPrimary,
 							                                  &traceEvent));
 							moved = _moved;
 							if (moved) {
@@ -1603,7 +1601,7 @@ public:
 					}
 				}
 
-				if (now() - (queue->lastLimitedTime()) < SERVER_KNOBS->BG_DD_SATURATION_DELAY) {
+				if (now() - (self->queue->lastLimitedTime()) < SERVER_KNOBS->BG_DD_SATURATION_DELAY) {
 					rebalancePollingInterval = std::min(SERVER_KNOBS->BG_DD_MAX_WAIT,
 					                                    rebalancePollingInterval * SERVER_KNOBS->BG_DD_INCREASE_RATE);
 				} else {
@@ -1630,23 +1628,21 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> BgDDValleyFiller(DDQueueData* queue,
-	                                           TeamCollectionInterface teamCollection,
-	                                           bool isPrimary) {
+	ACTOR static Future<Void> BgDDValleyFiller(DDBalancer* self) {
 		state double rebalancePollingInterval = SERVER_KNOBS->BG_REBALANCE_POLLING_INTERVAL;
 		state int resetCount = SERVER_KNOBS->DD_REBALANCE_RESET_AMOUNT;
-		state Transaction tr(queue->cx);
+		state Transaction tr(self->queue->cx);
 		state double lastRead = 0;
 		state bool skipCurrentLoop = false;
 
 		loop {
 			state std::pair<Optional<Reference<IDataDistributionTeam>>, bool> randomTeam;
 			state bool moved = false;
-			state TraceEvent traceEvent("BgDDValleyFiller", queue->distributorId);
+			state TraceEvent traceEvent("BgDDValleyFiller", self->queue->distributorId);
 			traceEvent.suppressFor(5.0).detail("PollingInterval", rebalancePollingInterval);
 
-			if (queue->lastLimitedTime() > 0) {
-				traceEvent.detail("SecondsSinceLastLimited", now() - queue->lastLimitedTime());
+			if (self->queue->lastLimitedTime() > 0) {
+				traceEvent.detail("SecondsSinceLastLimited", now() - self->queue->lastLimitedTime());
 			}
 
 			try {
@@ -1673,14 +1669,14 @@ public:
 				}
 
 				int pendingRelocations =
-				    queue->pendingRelocationsAtPriority(SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM);
+				    self->queue->pendingRelocationsAtPriority(SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM);
 				traceEvent.detail("QueuedRelocations", pendingRelocations);
 				if (pendingRelocations < SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
 					std::pair<Optional<Reference<IDataDistributionTeam>>, bool> _randomTeam = wait(brokenPromiseToNever(
-					    teamCollection.getTeam.getReply(GetTeamRequest(WantNewServers::True,
-					                                                   WantTrueBest::False,
-					                                                   PreferLowerUtilization::False,
-					                                                   TeamMustHaveShards::True))));
+					    self->teamCollection.getTeam.getReply(GetTeamRequest(WantNewServers::True,
+					                                                         WantTrueBest::False,
+					                                                         PreferLowerUtilization::False,
+					                                                         TeamMustHaveShards::True))));
 					randomTeam = _randomTeam;
 					traceEvent.detail(
 					    "SourceTeam",
@@ -1690,10 +1686,10 @@ public:
 					if (randomTeam.first.present()) {
 						std::pair<Optional<Reference<IDataDistributionTeam>>, bool> unloadedTeam =
 						    wait(brokenPromiseToNever(
-						        teamCollection.getTeam.getReply(GetTeamRequest(WantNewServers::True,
-						                                                       WantTrueBest::True,
-						                                                       PreferLowerUtilization::True,
-						                                                       TeamMustHaveShards::False))));
+						        self->teamCollection.getTeam.getReply(GetTeamRequest(WantNewServers::True,
+						                                                             WantTrueBest::True,
+						                                                             PreferLowerUtilization::True,
+						                                                             TeamMustHaveShards::False))));
 
 						traceEvent.detail(
 						    "DestTeam",
@@ -1701,11 +1697,11 @@ public:
 						        [](const Reference<IDataDistributionTeam>& team) { return team->getDesc(); })));
 
 						if (unloadedTeam.first.present()) {
-							bool _moved = wait(rebalanceTeams(queue,
+							bool _moved = wait(rebalanceTeams(self->queue,
 							                                  SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM,
 							                                  randomTeam.first.get(),
 							                                  unloadedTeam.first.get(),
-							                                  isPrimary,
+							                                  self->tcIsPrimary,
 							                                  &traceEvent));
 							moved = _moved;
 							if (moved) {
@@ -1717,7 +1713,7 @@ public:
 					}
 				}
 
-				if (now() - (queue->lastLimitedTime()) < SERVER_KNOBS->BG_DD_SATURATION_DELAY) {
+				if (now() - (self->queue->lastLimitedTime()) < SERVER_KNOBS->BG_DD_SATURATION_DELAY) {
 					rebalancePollingInterval = std::min(SERVER_KNOBS->BG_DD_MAX_WAIT,
 					                                    rebalancePollingInterval * SERVER_KNOBS->BG_DD_INCREASE_RATE);
 				} else {
@@ -1746,11 +1742,11 @@ public:
 };
 
 Future<Void> DDBalancer::BgDDMountainChopper() {
-	return DDBalancerImpl::BgDDMountainChopper(queue, teamCollection, tcIsPrimary);
+	return DDBalancerImpl::BgDDMountainChopper(this);
 }
 
 Future<Void> DDBalancer::BgDDValleyFiller() {
-	return DDBalancerImpl::BgDDValleyFiller(queue, teamCollection, tcIsPrimary);
+	return DDBalancerImpl::BgDDValleyFiller(this);
 }
 
 class DDQueueImpl {
@@ -1788,7 +1784,7 @@ public:
 		state RelocateData launchData;
 		state Future<Void> recordMetrics = delay(SERVER_KNOBS->DD_QUEUE_LOGGING_INTERVAL);
 
-		state std::vector<DDBalancer> balancers;
+		state std::vector<Reference<DDBalancer>> balancers;
 		state std::vector<Future<Void>> balancingFutures;
 
 		state ActorCollectionNoErrors actors;
@@ -1796,9 +1792,9 @@ public:
 		state Future<Void> launchQueuedWorkTimeout = Never();
 
 		for (int i = 0; i < teamCollections.size(); i++) {
-			DDBalancer b(&self, teamCollections[i], i == 0);
-			balancingFutures.push_back(b.BgDDMountainChopper());
-			balancingFutures.push_back(b.BgDDValleyFiller());
+			Reference<DDBalancer> b = makeReference<DDBalancer>(&self, teamCollections[i], i == 0);
+			balancingFutures.push_back(b.getPtr()->BgDDMountainChopper());
+			balancingFutures.push_back(b.getPtr()->BgDDValleyFiller());
 			balancers.push_back(b);
 		}
 
