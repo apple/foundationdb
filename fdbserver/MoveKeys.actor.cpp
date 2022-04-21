@@ -295,6 +295,159 @@ Future<Void> removeOldDestinations(Reference<ReadYourWritesTransaction> tr,
 	return waitForAll(actors);
 }
 
+ACTOR Future<Void> restoreServerKeys(Transaction* tr, UID ssId, KeyRange range, std::vector<Shard> shards) {
+	state Key mapPrefix = serverKeysPrefixFor(ssId);
+	if (shards.empty()) {
+		wait(krmSetRangeCoalescing(tr, mapPrefix, range, allKeys, serverKeysFalse));
+		return Void();
+	}
+
+	state KeyRange withPrefix =
+	    KeyRangeRef(mapPrefix.toString() + range.begin.toString(), mapPrefix.toString() + range.end.toString());
+	state KeyRange maxWithPrefix =
+	    KeyRangeRef(mapPrefix.toString() + allKeys.begin.toString(), mapPrefix.toString() + allKeys.end.toString());
+
+	state std::vector<Future<RangeResult>> keys;
+	keys.push_back(
+	    tr->getRange(lastLessThan(withPrefix.begin), firstGreaterOrEqual(withPrefix.begin), 1, Snapshot::True));
+	keys.push_back(
+	    tr->getRange(lastLessOrEqual(withPrefix.end), firstGreaterThan(withPrefix.end) + 1, 2, Snapshot::True));
+	wait(waitForAll(keys));
+
+	// Determine how far to extend this range at the beginning
+	auto beginRange = keys[0].get();
+	bool hasBegin = beginRange.size() > 0 && beginRange[0].key.startsWith(mapPrefix);
+	Value beginValue = hasBegin ? beginRange[0].value : serverKeysFalse;
+
+	Key beginKey = withPrefix.begin;
+	Value value = range.begin == shards[0].range.begin ? serverKeysValue(shards[0].id) : serverKeysFalse;
+	if (beginValue == value) {
+		bool outsideRange = !hasBegin || beginRange[0].key < maxWithPrefix.begin;
+		beginKey = outsideRange ? maxWithPrefix.begin : beginRange[0].key;
+	}
+
+	std::vector<KeyValue> kvs;
+	if (beginKey < withPrefix.begin) {
+		kvs.push_back(KeyValueRef(beginKey, value));
+	}
+	Key preEnd = range.begin;
+	for (int i = 0; i < shards.size(); ++i) {
+		const Shard& shard = shards[i];
+		if (shard.range.begin > preEnd && (kvs.empty() || kvs.back().value != serverKeysFalse)) {
+			kvs.push_back(KeyValueRef(preEnd.withPrefix(mapPrefix), serverKeysFalse));
+		}
+		preEnd = shard.range.end;
+		Value cv = serverKeysValue(shard.id);
+		if (kvs.empty() || cv != kvs.back().value) {
+			kvs.push_back(KeyValueRef(shard.range.begin.withPrefix(mapPrefix), cv));
+		}
+	}
+	if (range.end > preEnd) {
+		kvs.push_back(KeyValueRef(preEnd.withPrefix(mapPrefix), serverKeysFalse));
+	}
+
+	// Determine how far to extend this range at the end
+	auto endRange = keys[1].get();
+	bool hasEnd = endRange.size() >= 1 && endRange[0].key.startsWith(mapPrefix) && endRange[0].key <= withPrefix.end;
+	bool hasNext = (endRange.size() == 2 && endRange[1].key.startsWith(mapPrefix)) ||
+	               (endRange.size() == 1 && withPrefix.end < endRange[0].key && endRange[0].key.startsWith(mapPrefix));
+	Value existingValue = hasEnd ? endRange[0].value : serverKeysFalse;
+
+	Key endKey;
+	Value endValue;
+	const bool valueMatches = kvs.back().value == existingValue;
+
+	// Case 1: Coalesce completely with the following range
+	if (hasNext && endRange.back().key <= maxWithPrefix.end && valueMatches) {
+		endKey = endRange.back().key;
+		endValue = endRange.back().value;
+	}
+
+	// Case 2: Coalesce with the following range only up to the end of allKeys
+	else if (valueMatches) {
+		endKey = maxWithPrefix.end;
+		endValue = existingValue;
+	}
+
+	// Case 3: Don't coalesce
+	else {
+		endKey = withPrefix.end;
+		endValue = existingValue;
+	}
+
+	kvs.push_back(KeyValueRef(endKey, endValue));
+
+	for (int i = 0; i < kvs.size(); ++i) {
+		TraceEvent(SevDebug, "RestoreServerKeys").detail("SSID", ssId).detail("Range", range).detail("Point", kvs[i]);
+	}
+
+	KeyRange conflictRange = KeyRangeRef(hasBegin ? beginRange[0].key : mapPrefix, withPrefix.begin);
+	if (!conflictRange.empty()) {
+		tr->addReadConflictRange(conflictRange);
+	}
+	conflictRange = KeyRangeRef(hasEnd ? endRange[0].key : mapPrefix,
+	                            hasNext ? keyAfter(endRange.end()[-1].key) : strinc(mapPrefix));
+	if (!conflictRange.empty()) {
+		tr->addReadConflictRange(conflictRange);
+	}
+
+	tr->clear(KeyRangeRef(beginKey, endKey));
+
+	for (int i = 0; i < kvs.size() - 1; ++i) {
+		// int j = i + 1;
+		// while (j < kvs.size() && kvs[j].value == kvs[i].value) {
+		// 	++j;
+		// }
+		ASSERT(kvs[i].value != kvs[i + 1].value || kvs[i + 1].key.removePrefix(mapPrefix) == allKeys.end);
+		tr->set(kvs[i].key, kvs[i].value);
+		tr->set(kvs[i + 1].key, kvs[i + 1].value);
+		// i = j;
+	}
+
+	return Void();
+}
+
+Future<Void> removeOldDestinationsWithPhysicalShard(Transaction* tr,
+                                                    UID oldDest,
+                                                    std::vector<Shard> shards,
+                                                    KeyRangeRef currentKeys,
+                                                    UID logId) {
+	KeyRef beginKey = currentKeys.begin;
+
+	std::vector<Future<Void>> actors;
+	for (int i = 0; i < shards.size(); ++i) {
+		if (beginKey < shards[i].range.begin) {
+			actors.push_back(krmSetRangeCoalescing(tr,
+			                                       serverKeysPrefixFor(oldDest),
+			                                       KeyRangeRef(beginKey, shards[i].range.begin),
+			                                       allKeys,
+			                                       serverKeysFalse));
+			TraceEvent(SevDebug, "CleanUpDataMoveSetServerKeyRange", logId)
+			    .detail("StorageServerID", oldDest)
+			    .detail("RemoveKeyRange", KeyRangeRef(beginKey, shards[i].range.begin));
+		}
+		actors.push_back(krmSetRangeCoalescing(
+		    tr, serverKeysPrefixFor(oldDest), shards[i].range, allKeys, serverKeysValue(shards[i].id)));
+		TraceEvent(SevDebug, "CleanUpDataMoveSetServerKeyRange", logId)
+		    .detail("StorageServerID", oldDest)
+		    .detail("AssignKeyRange", shards[i].range)
+		    .detail("ShardID", shards[i].id);
+		beginKey = shards[i].range.end;
+	}
+
+	ASSERT(beginKey <= currentKeys.end);
+
+	if (beginKey < currentKeys.end) {
+		actors.push_back(krmSetRangeCoalescing(
+		    tr, serverKeysPrefixFor(oldDest), KeyRangeRef(beginKey, currentKeys.end), allKeys, serverKeysFalse));
+		TraceEvent(SevDebug, "CleanUpDataMoveSetServerKeyRange", logId)
+		    .detail("StorageServerID", oldDest)
+		    .detail("RemoveKeyRange", KeyRangeRef(beginKey, currentKeys.end));
+	}
+
+	return waitForAll(actors);
+}
+
 Future<Void> removeOldDestinationsWithPhysicalShard(Reference<ReadYourWritesTransaction> tr,
                                                     UID oldDest,
                                                     std::vector<Shard> shards,
@@ -969,6 +1122,372 @@ ACTOR Future<Void> checkFetchingState(Database cx,
 	}
 }
 
+// ACTOR static Future<Void> startMoveShards(Database occ,
+//                                           KeyRange keys,
+//                                           std::vector<UID> servers,
+//                                           MoveKeysLock lock,
+//                                           FlowLock* startMoveKeysLock,
+//                                           UID relocationIntervalId,
+//                                           UID dataMoveID,
+//                                           std::map<UID, StorageServerInterface>* tssMapping,
+//                                           bool cancelConflictingDataMoves,
+//                                           const DDEnabledState* ddEnabledState) {
+// 	state Future<Void> warningLogger = logWarningAfter("StartMoveShardsTooLong", 600, servers);
+
+// 	wait(startMoveKeysLock->take(TaskPriority::DataDistributionLaunch));
+// 	state FlowLock::Releaser releaser(*startMoveKeysLock);
+// 	state DataMoveMetaData dataMove;
+
+// 	TraceEvent(SevDebug, "StartMoveShardsBegin", relocationIntervalId).detail("DataMoveID", dataMoveID);
+
+// 	try {
+// 		state Key begin = keys.begin;
+// 		state int batches = 0;
+// 		state int shards = 0;
+// 		state int maxRetries = 0;
+
+// 		// If it's multiple transaction, how do we achieve atomicity?
+// 		// This process can be split up into multiple transactions if there are too many existing overlapping shards
+// 		// In that case, each iteration of this loop will have begin set to the end of the last processed shard
+// 		while (begin < keys.end) {
+// 			TEST(begin > keys.begin); // Multi-transactional startMoveKeys
+// 			batches++;
+
+// 			state Transaction tr(occ);
+// 			state int retries = 0;
+
+// 			loop {
+// 				try {
+// 					retries++;
+
+// 					// Keep track of old dests that may need to have ranges removed from serverKeys
+// 					state std::set<UID> oldDests;
+
+// 					// Keep track of shards for all src servers so that we can preserve their values in serverKeys
+// 					state Map<UID, VectorRef<KeyRangeRef>> shardMap;
+// 					state std::unordered_map<UID, std::vector<Shard>> physicalShardMap;
+
+// 					tr.getTransaction().trState->taskID = TaskPriority::MoveKeys;
+// 					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+// 					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
+// 					wait(checkMoveKeysLock(&(tr.getTransaction()), lock, ddEnabledState));
+
+// 					if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+// 						Optional<Value> val = wait(tr.get(dataMoveKeyFor(dataMoveID)));
+// 						if (val.present()) {
+// 							DataMoveMetaData _dataMove = decodeDataMoveValue(val.get());
+// 							dataMove = _dataMove;
+// 							TraceEvent(SevDebug, "StartMoveKeysFoundDataMove", relocationIntervalId)
+// 							    .detail("DataMoveID", dataMoveID)
+// 							    .detail("DataMove", dataMove.toString());
+// 							if (dataMove.getPhase() == DataMoveMetaData::Deleting) {
+// 								TraceEvent(SevWarn, "StartMoveKeysDataMove", relocationIntervalId)
+// 								    .detail("DataMoveBeingDeleted", dataMoveID);
+// 								throw data_move_cancelled();
+// 							}
+// 							if (dataMove.getPhase() == DataMoveMetaData::Running) {
+// 								TraceEvent(SevWarn, "StartMoveKeysDataMove", relocationIntervalId)
+// 								    .detail("DataMoveAlreadyCommitted", dataMoveID);
+// 								return Void();
+// 							}
+// 						} else {
+// 							dataMove.id = dataMoveID;
+// 							TraceEvent(SevDebug, "StartMoveKeysNewDataMove", relocationIntervalId)
+// 							    .detail("DataMoveRange", keys)
+// 							    .detail("DataMoveID", dataMoveID);
+// 						}
+// 					}
+// 					if (!loadedTssMapping) {
+// 						// share transaction for loading tss mapping with the rest of start move keys
+// 						wait(readTSSMappingRYW(tr, tssMapping));
+// 						loadedTssMapping = true;
+// 					}
+
+// 					std::vector<Future<Optional<Value>>> serverListEntries;
+// 					serverListEntries.reserve(servers.size());
+// 					for (int s = 0; s < servers.size(); s++)
+// 						serverListEntries.push_back(tr.get(serverListKeyFor(servers[s])));
+// 					state std::vector<Optional<Value>> serverListValues = wait(getAll(serverListEntries));
+
+// 					for (int s = 0; s < serverListValues.size(); s++) {
+// 						if (!serverListValues[s].present()) {
+// 							// Attempt to move onto a server that isn't in serverList (removed or never added to the
+// 							// database) This can happen (why?) and is handled by the data distribution algorithm
+// 							// FIXME: Answer why this can happen?
+// 							TEST(true); // start move keys moving to a removed server
+// 							throw move_to_removed_server();
+// 						}
+// 					}
+
+// 					// Get all existing shards overlapping keys (exclude any that have been processed in a previous
+// 					// iteration of the outer loop)
+// 					state KeyRange currentKeys = KeyRangeRef(begin, keys.end);
+
+// 					const int rowLimit = CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA
+// 					                         ? SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT
+// 					                         : SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT;
+// 					const int byteLimit = CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA
+// 					                          ? SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT
+// 					                          : SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES;
+// 					state RangeResult old = wait(krmGetRanges(tr, keyServersPrefix, currentKeys, rowLimit, byteLimit));
+
+// 					// Determine the last processed key (which will be the beginning for the next iteration)
+// 					state Key endKey = old.end()[-1].key;
+// 					currentKeys = KeyRangeRef(currentKeys.begin, endKey);
+
+// 					// TraceEvent("StartMoveKeysBatch", relocationIntervalId)
+// 					//     .detail("KeyBegin", currentKeys.begin.toString())
+// 					//     .detail("KeyEnd", currentKeys.end.toString());
+
+// 					// printf("Moving '%s'-'%s' (%d) to %d servers\n", keys.begin.toString().c_str(),
+// 					// keys.end.toString().c_str(), old.size(), servers.size()); for(int i=0; i<old.size(); i++)
+// 					// 	printf("'%s': '%s'\n", old[i].key.toString().c_str(), old[i].value.toString().c_str());
+
+// 					// Check that enough servers for each shard are in the correct state
+// 					state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+// 					ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
+// 					state std::vector<std::vector<UID>> addAsSource = wait(additionalSources(
+// 					    old, tr, servers.size(), SERVER_KNOBS->MAX_ADDED_SOURCES_MULTIPLIER * servers.size()));
+
+// 					// For each intersecting range, update keyServers[range] dest to be servers and clear existing dest
+// 					// servers from serverKeys
+// 					state int oldIndex = 0;
+// 					for (; oldIndex < old.size() - 1; ++oldIndex) {
+// 						state KeyRangeRef rangeIntersectKeys(old[oldIndex].key, old[oldIndex + 1].key);
+// 						state std::vector<UID> src;
+// 						state std::vector<UID> dest;
+// 						state UID srcId;
+// 						state UID destId;
+// 						if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+// 							decodeKeyServersValue(UIDtoTagMap, old[oldIndex].value, src, dest, srcId, destId);
+// 							TraceEvent(SevDebug, "StartMoveKeysProcessingShard", relocationIntervalId)
+// 							    .detail("DataMoveID", dataMoveID)
+// 							    .detail("Range", rangeIntersectKeys)
+// 							    .detail("OldSrc", describe(src))
+// 							    .detail("OldDest", describe(dest))
+// 							    .detail("SrcID", srcId)
+// 							    .detail("DestID", destId)
+// 							    .detail("ReadVersion", tr.getReadVersion().get());
+// 							// if (!srcId.isValid()) {
+// 							// 	srcId = deterministicRandom()->randomUniqueID();
+// 							// 	TraceEvent(SevWarn, "StartMoveKeysBackfillTeamId", relocationIntervalId)
+// 							// 	    .detail("Range", rangeIntersectKeys)
+// 							// 	    .detail("NewTeamID", srcId);
+// 							// }
+// 						} else {
+// 							decodeKeyServersValue(UIDtoTagMap, old[oldIndex].value, src, dest);
+// 						}
+
+// 						state Shard physicalShard(rangeIntersectKeys, srcId);
+
+// 						if (destId.isValid()) {
+// 							TraceEvent(SevDebug, "StartMoveKeysDestIDExist", relocationIntervalId)
+// 							    .detail("Range", rangeIntersectKeys)
+// 							    .detail("DataMoveID", dataMoveID)
+// 							    .detail("DestID", destId)
+// 							    .log();
+// 							ASSERT(!dest.empty());
+// 							if (destId == dataMoveID) {
+// 								TraceEvent(SevDebug, "StartMoveKeysRangeAlreadyCommitted", relocationIntervalId)
+// 								    .detail("Range", rangeIntersectKeys)
+// 								    .detail("DataMoveID", dataMoveID);
+// 								continue;
+// 							}
+// 							Optional<Value> val = wait(tr.get(dataMoveKeyFor(destId)));
+// 							ASSERT(val.present());
+// 							DataMoveMetaData _dataMove = decodeDataMoveValue(val.get());
+// 							TraceEvent(SevWarnAlways, "StartMoveKeysFoundConflictingDataMove", relocationIntervalId)
+// 							    .detail("Range", rangeIntersectKeys)
+// 							    .detail("DataMoveID", dataMoveID)
+// 							    .detail("ExistingDataMoveID", destId)
+// 							    .detail("ExistingDataMove", _dataMove.toString());
+// 							if (!cancelConflictingDataMoves) {
+// 								throw movekeys_conflict();
+// 							}
+// 						}
+
+// 						TraceEvent("StartMoveKeysOldRange", relocationIntervalId)
+// 						    .detail("KeyBegin", rangeIntersectKeys.begin.toString())
+// 						    .detail("KeyEnd", rangeIntersectKeys.end.toString())
+// 						    .detail("OldSrc", describe(src))
+// 						    .detail("OldDest", describe(dest))
+// 						    .detail("ReadVersion", tr.getReadVersion().get());
+
+// 						for (auto& uid : addAsSource[oldIndex]) {
+// 							src.push_back(uid);
+// 						}
+// 						uniquify(src);
+
+// 						// Update dest servers for this range to be equal to servers
+// 						if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+// 							krmSetPreviouslyEmptyRange(&(tr.getTransaction()),
+// 							                           keyServersPrefix,
+// 							                           rangeIntersectKeys,
+// 							                           keyServersValue(src, servers, srcId, dataMoveID),
+// 							                           old[oldIndex + 1].value);
+// 						} else {
+// 							krmSetPreviouslyEmptyRange(&(tr.getTransaction()),
+// 							                           keyServersPrefix,
+// 							                           rangeIntersectKeys,
+// 							                           keyServersValue(UIDtoTagMap, src, servers),
+// 							                           old[oldIndex + 1].value);
+// 						}
+
+// 						// Track old destination servers.  They may be removed from serverKeys soon, since they are
+// 						// about to be overwritten in keyServers
+// 						for (auto s = dest.begin(); s != dest.end(); ++s) {
+// 							oldDests.insert(*s);
+// 							// TraceEvent("StartMoveKeysOldDestAdd", relocationIntervalId).detail("Server", *s);
+// 						}
+
+// 						// Keep track of src shards so that we can preserve their values when we overwrite serverKeys
+// 						for (auto& uid : src) {
+// 							shardMap[uid].push_back(old.arena(), rangeIntersectKeys);
+// 							if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+// 								physicalShardMap[uid].push_back(physicalShard);
+// 							}
+// 							// TraceEvent("StartMoveKeysShardMapAdd", relocationIntervalId).detail("Server", uid);
+// 						}
+
+// 						if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+// 							UID checkpointID = deterministicRandom()->randomUniqueID();
+// 							for (const UID& ssID : src) {
+// 								if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
+// 									// TODO: Combine checkpoint on the same source server.
+// 									CheckpointMetaData checkpoint(rangeIntersectKeys, RocksDB, ssID, checkpointID);
+// 									checkpoint.setState(CheckpointMetaData::Pending);
+// 									checkpoint.dataMoveID = dataMoveID;
+// 									tr.set(checkpointKeyFor(ssID, dataMoveID, checkpointID),
+// 									        checkpointValue(checkpoint));
+// 								}
+// 								dataMove.src.insert(ssID);
+// 							}
+// 							TraceEvent("InitiatedCheckpoint")
+// 							    .detail("Shard", rangeIntersectKeys.toString())
+// 							    .detail("CheckpointID", checkpointID)
+// 							    .detail("DataMoveID", dataMoveID)
+// 							    .detail("SrcServers", describe(src))
+// 							    .detail("ReadVersion", tr.getReadVersion().get());
+// 						}
+// 					}
+
+// 					state std::set<UID>::iterator oldDest;
+
+// 					// Remove old dests from serverKeys.  In order for krmSetRangeCoalescing to work correctly in the
+// 					// same prefix for a single transaction, we must do most of the coalescing ourselves.  Only the
+// 					// shards on the boundary of currentRange are actually coalesced with the ranges outside of
+// 					// currentRange. For all shards internal to currentRange, we overwrite all consecutive keys whose
+// 					// value is or should be serverKeysFalse in a single write
+// 					std::vector<Future<Void>> actors;
+// 					for (oldDest = oldDests.begin(); oldDest != oldDests.end(); ++oldDest) {
+// 						if (std::find(servers.begin(), servers.end(), *oldDest) == servers.end()) {
+// 							if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+// 								actors.push_back(removeOldDestinationsWithPhysicalShard(
+// 								    tr, *oldDest, physicalShardMap[*oldDest], currentKeys, dataMoveID));
+// 							} else {
+// 								actors.push_back(removeOldDestinations(tr, *oldDest, shardMap[*oldDest], currentKeys));
+// 							}
+// 						}
+// 					}
+
+// 					// Update serverKeys to include keys (or the currently processed subset of keys) for each SS in
+// 					// servers
+// 					for (int i = 0; i < servers.size(); i++) {
+// 						// Since we are setting this for the entire range, serverKeys and keyServers aren't guaranteed
+// 						// to have the same shard boundaries If that invariant was important, we would have to move this
+// 						// inside the loop above and also set it for the src servers
+// 						if (CLIENT_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+// 							actors.push_back(krmSetRangeCoalescing(tr,
+// 							                                       serverKeysPrefixFor(servers[i]),
+// 							                                       currentKeys,
+// 							                                       allKeys,
+// 							                                       serverKeysValue(dataMoveID)));
+// 						} else {
+// 							actors.push_back(krmSetRangeCoalescing(
+// 							    tr, serverKeysPrefixFor(servers[i]), currentKeys, allKeys, serverKeysTrue));
+// 						}
+// 					}
+
+// 					if (dataMove.getPhase() == DataMoveMetaData::Prepare) {
+// 						ASSERT(dataMove.range.begin == keys.begin);
+// 					}
+// 					dataMove.range = KeyRangeRef(keys.begin, currentKeys.end);
+// 					dataMove.dest.insert(servers.begin(), servers.end());
+// 					if (currentKeys.end == keys.end) {
+// 						dataMove.setPhase(DataMoveMetaData::Running);
+// 						TraceEvent(SevDebug, "StartMoveKeysDataMoveComplete", dataMoveID)
+// 						    .detail("DataMoveID", dataMoveID)
+// 						    .detail("DataMove", dataMove.toString());
+// 					} else {
+// 						dataMove.setPhase(DataMoveMetaData::Prepare);
+// 						TraceEvent("StartMoveKeysDataMovePartial", dataMoveID)
+// 						    .detail("DataMoveID", dataMoveID)
+// 						    .detail("CurrentRange", currentKeys)
+// 						    .detail("DataMoveRange", keys)
+// 						    .detail("NewDataMoveMetaData", dataMove.toString());
+// 					}
+// 					tr.set(dataMoveKeyFor(dataMoveID), dataMoveValue(dataMove));
+
+// 					wait(waitForAll(actors));
+
+// 					wait(tr.commit());
+
+// 					TraceEvent("DataMoveMetaDataCommit", dataMove.id)
+// 					    .detail("DataMoveID", dataMoveID)
+// 					    .detail("DataMoveKey", dataMoveKeyFor(dataMoveID))
+// 					    .detail("CommitVersion", tr.getCommittedVersion())
+// 					    .detail("DeltaRange", currentKeys.toString())
+// 					    .detail("Range", dataMove.range.toString())
+// 					    .detail("DataMove", dataMove.toString());
+
+// 					/*TraceEvent("StartMoveKeysCommitDone", relocationIntervalId)
+// 					    .detail("CommitVersion", tr.getCommittedVersion())
+// 					    .detail("ShardsInBatch", old.size() - 1);*/
+// 					begin = endKey;
+// 					shards += old.size() - 1;
+// 					break;
+// 				} catch (Error& e) {
+// 					TraceEvent(SevDebug, "StartMoveKeysError", dataMoveID)
+// 					    .errorUnsuppressed(e)
+// 					    .detail("DataMoveID", dataMoveID)
+// 					    .detail("DataMoveRange", keys)
+// 					    .detail("CurrentDataMoveMetaData", dataMove.toString());
+// 					state Error err = e;
+// 					if (err.code() == error_code_move_to_removed_server)
+// 						throw;
+// 					wait(tr.onError(e));
+// 					dataMove = DataMoveMetaData();
+
+// 					if (retries % 10 == 0) {
+// 						TraceEvent(
+// 						    retries == 50 ? SevWarnAlways : SevWarn, "StartMoveKeysRetrying", relocationIntervalId)
+// 						    .error(err)
+// 						    .detail("Keys", keys)
+// 						    .detail("BeginKey", begin)
+// 						    .detail("NumTries", retries);
+// 					}
+// 				}
+// 			}
+
+// 			if (retries > maxRetries) {
+// 				maxRetries = retries;
+// 			}
+// 		}
+
+// 		// printf("Committed moving '%s'-'%s' (version %lld)\n", keys.begin.toString().c_str(),
+// 		// keys.end.toString().c_str(), tr->getCommittedVersion());
+// 		TraceEvent(SevDebug, interval.end(), relocationIntervalId)
+// 		    .detail("Batches", batches)
+// 		    .detail("Shards", shards)
+// 		    .detail("MaxRetries", maxRetries);
+// 	} catch (Error& e) {
+// 		TraceEvent(SevDebug, interval.end(), relocationIntervalId).errorUnsuppressed(e);
+// 		throw;
+// 	}
+
+// 	return Void();
+// }
 ACTOR static Future<Void> finishMoveShard(Database occ,
                                           KeyRange targetKeys,
                                           UID dataMoveID,
@@ -2163,18 +2682,19 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 
 	try {
 		loop {
-			state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(occ);
+			// state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(occ);
+			state Transaction tr(occ);
 			state std::unordered_map<UID, std::vector<Shard>> physicalShardMap;
 			state std::set<UID> oldDests;
 			state KeyRange range;
 
 			try {
-				tr->getTransaction().trState->taskID = TaskPriority::MoveKeys;
-				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				wait(checkMoveKeysLock(&(tr->getTransaction()), lock, ddEnabledState));
+				tr.trState->taskID = TaskPriority::MoveKeys;
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				wait(checkMoveKeysLock(&tr, lock, ddEnabledState));
 
-				Optional<Value> val = wait(tr->get(dataMoveKeyFor(dataMoveID)));
+				Optional<Value> val = wait(tr.get(dataMoveKeyFor(dataMoveID)));
 				if (val.present()) {
 					state DataMoveMetaData dataMove = decodeDataMoveValue(val.get());
 					TraceEvent(SevDebug, "CleanUpDataMoveMetaData", dataMoveID)
@@ -2190,7 +2710,7 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 				dataMove.setPhase(DataMoveMetaData::Deleting);
 
 				// state KeyRange currentRange = KeyRangeRef(begin, range.end);
-				state RangeResult currentShards = wait(krmGetRanges(tr,
+				state RangeResult currentShards = wait(krmGetRanges(&tr,
 				                                                    keyServersPrefix,
 				                                                    range,
 				                                                    SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT,
@@ -2199,7 +2719,7 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 				ASSERT(range.begin == currentShards.front().key);
 				range = KeyRangeRef(range.begin, currentShards.back().key);
 
-				state RangeResult UIDtoTagMap = wait(tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+				state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
 
 				// For each intersecting range, clear existing dest servers and checkpoints on all src servers.
@@ -2224,7 +2744,7 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 					    .detail("Dest", describe(dest))
 					    .detail("SrcID", srcId)
 					    .detail("DestID", destId)
-					    .detail("ReadVersion", tr->getReadVersion().get());
+					    .detail("ReadVersion", tr.getReadVersion().get());
 
 					if (destId != dataMoveID) {
 						TraceEvent("CleanUpDataMoveSkipShard", dataMoveID)
@@ -2234,7 +2754,7 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 						    .detail("Dest", describe(dest))
 						    .detail("SrcID", srcId)
 						    .detail("DestID", destId)
-						    .detail("ReadVersion", tr->getReadVersion().get());
+						    .detail("ReadVersion", tr.getReadVersion().get());
 						continue;
 					}
 
@@ -2242,7 +2762,7 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 						oldDests.insert(uid);
 					}
 
-					krmSetPreviouslyEmptyRange(&(tr->getTransaction()),
+					krmSetPreviouslyEmptyRange(&tr,
 					                           keyServersPrefix,
 					                           rangeIntersectKeys,
 					                           keyServersValue(src, {}, srcId, UID()),
@@ -2265,10 +2785,10 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 				if (range.end == dataMove.range.end) {
 					if (SERVER_KNOBS->ENABLE_PHYSICAL_SHARD_MOVE) {
 						for (const UID& ssID : dataMove.src) {
-							tr->clear(checkpointKeyRangeFor(ssID, dataMoveID));
+							tr.clear(checkpointKeyRangeFor(ssID, dataMoveID));
 						}
 					}
-					tr->clear(dataMoveKeyFor(dataMoveID));
+					tr.clear(dataMoveKeyFor(dataMoveID));
 					complete = true;
 					TraceEvent("CleanUpDataMoveCheckpoint", dataMoveID)
 					    .detail("DataMoveID", dataMoveID)
@@ -2277,7 +2797,7 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 				} else {
 					dataMove.range = KeyRangeRef(range.end, dataMove.range.end);
 					dataMove.setPhase(DataMoveMetaData::Deleting);
-					tr->set(dataMoveKeyFor(dataMoveID), dataMoveValue(dataMove));
+					tr.set(dataMoveKeyFor(dataMoveID), dataMoveValue(dataMove));
 					TraceEvent("CleanUpDataMovePartial", dataMoveID)
 					    .detail("DataMoveID", dataMoveID)
 					    .detail("CurrentRange", range)
@@ -2286,12 +2806,11 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 
 				std::vector<Future<Void>> actors;
 				for (const auto& uid : oldDests) {
-					actors.push_back(
-					    removeOldDestinationsWithPhysicalShard(tr, uid, physicalShardMap[uid], range, dataMoveID));
+					actors.push_back(restoreServerKeys(&tr, uid, range, physicalShardMap[uid]));
 				}
 				wait(waitForAll(actors));
 
-				wait(tr->commit());
+				wait(tr.commit());
 
 				TraceEvent("CleanUpDataMoveCommitted", dataMoveID)
 				    .detail("DataMoveID", dataMoveID)
@@ -2301,7 +2820,7 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 				}
 			} catch (Error& e) {
 				state Error err = e;
-				wait(tr->onError(e));
+				wait(tr.onError(e));
 
 				TraceEvent(SevWarn, "CleanUpDataMoveRetriableError", dataMoveID)
 				    .error(err)

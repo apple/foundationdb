@@ -33,11 +33,13 @@
 // keys in debugKeys and the ranges in debugRanges.
 // Each entry is a pair of (label, keyOrRange) and the Label will be attached to the
 // MutationTracking TraceEvent for easier searching/recognition.
-std::vector<std::pair<const char*, KeyRef>> debugKeys = { { "SomeKey", "foo"_sr } };
-std::vector<std::pair<const char*, KeyRangeRef>> debugRanges = {
-	{ "serverKeys", { "\xff/serverKeys/"_sr, "\xff/serverKeys0"_sr } },
-	{ "keyServers", { "\xff/keyServers/"_sr, "\xff/keyServers0"_sr } }
-};
+std::vector<std::pair<const char*, KeyRef>> debugKeys = { { "TestKeyATracking", "TestKeyA"_sr } };
+// std::vector<std::pair<const char*, KeyRangeRef>> debugRanges = {
+// 	{ "MyServerKeys",
+// 	  { "\xff/serverKeys/\xbf\x8b\x0a\xf9(\x89\xe8~LH\x14\xd9]\xf3\x90\x95/"_sr,
+// 	    "\xff/serverKeys/\xbf\x8b\x0a\xf9(\x89\xe8~LH\x14\xd9]\xf3\x90\x95\xff"_sr } }
+// };
+std::vector<std::pair<const char*, KeyRangeRef>> debugRanges = {};
 
 TraceEvent debugMutationEnabled(const char* context, Version version, MutationRef const& mutation, UID id) {
 	const char* label = nullptr;

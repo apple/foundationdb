@@ -128,29 +128,31 @@ struct SSCheckpointWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Version> writeAndVerify(SSCheckpointWorkload* self, Database cx, Key key, Optional<Value> value) {
-		state Transaction tr(cx);
+		// state Transaction tr(cx);
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 		state Version version;
 		loop {
 			state UID debugID = deterministicRandom()->randomUniqueID();
 			try {
-				// tr.setOption(FDBTransactionOptions::DEBUG_DUMP);
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr.debugTransaction(debugID);
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->debugTransaction(debugID);
 				if (value.present()) {
-					tr.set(key, value.get());
+					tr->set(key, value.get());
+					tr->set("Test?"_sr, value.get());
+					tr->set(key, value.get());
 				} else {
-					tr.clear(key);
+					tr->clear(key);
 				}
-				wait(timeoutError(tr.commit(), 30.0));
-				version = tr.getCommittedVersion();
+				wait(timeoutError(tr->commit(), 30.0));
+				version = tr->getCommittedVersion();
 				break;
 			} catch (Error& e) {
 				TraceEvent("TestCommitError").errorUnsuppressed(e);
-				wait(tr.onError(e));
+				wait(tr->onError(e));
 			}
 		}
 
-		TraceEvent("TestCommitSuccess").detail("CommitVersion", tr.getCommittedVersion()).detail("DebugID", debugID);
+		TraceEvent("TestCommitSuccess").detail("CommitVersion", tr->getCommittedVersion()).detail("DebugID", debugID);
 
 		wait(self->readAndVerify(self, cx, key, value));
 
