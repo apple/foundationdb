@@ -903,12 +903,6 @@ struct DDQueueData {
 		// logRelocation( results, "GotSourceServers" );
 
 		fetchingSourcesQueue.erase(results);
-
-		// when doing read rebalance, to avoid the hottest team is chosen many times within 1 traffic sample period, if there are too many shard in the queue or the last shard appending time is less than 1 min, just discard this relocation request
-		if(results.reason == RelocateReason::REBALANCE_READ && !canQueue(results.src)) {
-			return;
-		}
-
 		queueMap.insert(results.keys, results);
 		for (int i = 0; i < results.src.size(); i++) {
 			queue[results.src[i]].insert(results);
@@ -1081,7 +1075,7 @@ struct DDQueueData {
 
 	bool canQueue(const std::vector<UID>& ids) const {
 		return std::all_of(ids.begin(), ids.end(), [this](const UID& id) {
-			if(this->queue.count(id) && this->queue.at(id).size()) {
+			if (this->queue.count(id) && this->queue.at(id).size()) {
 				return now() - this->queue.at(id).rbegin()->startTime >= 60.0;
 			}
 			return true;
@@ -1179,11 +1173,12 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 					    rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT)
 						inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_ONE_LEFT;
 
-					auto req = GetTeamRequest(WantNewServers(rd.wantsNewServers),
-					                          WantTrueBest(isValleyFillerPriority(rd.priority)),
-					                          PreferLowerUtilization::True,
-					                          TeamMustHaveShards::False,
-					                          inflightPenalty);
+					auto req =
+					    GetTeamRequest(WantNewServers(rd.wantsNewServers),
+					                   WantTrueBest(rd.priority == SERVER_KNOBS->PRIORITY_REBALANCE_UNDERUTILIZED_TEAM),
+					                   PreferLowerUtilization::True,
+					                   TeamMustHaveShards::False,
+					                   inflightPenalty);
 
 					req.src = rd.src;
 					req.completeSources = rd.completeSources;
@@ -1764,7 +1759,9 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueueData* self, int teamCollectionIndex,
 				wait(getSrcDestTeams(self, teamCollectionIndex, srcReq, destReq, &sourceTeam, &destTeam,ddPriority,&traceEvent));
 				if (sourceTeam.isValid() && destTeam.isValid()) {
 					if (readRebalance) {
-						wait(store(moved,rebalanceReadLoad(self, ddPriority, sourceTeam, destTeam, teamCollectionIndex == 0, &traceEvent)));
+						if(self->canQueue(sourceTeam->getServerIDs())) {
+							wait(store(moved,rebalanceReadLoad(self, ddPriority, sourceTeam, destTeam, teamCollectionIndex == 0, &traceEvent)));
+						}
 					} else {
 						wait(store(moved,rebalanceTeams(self, ddPriority, sourceTeam, destTeam, teamCollectionIndex == 0, &traceEvent)));
 					}
