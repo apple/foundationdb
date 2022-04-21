@@ -253,23 +253,39 @@ endif()
             ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests
             )
 
-  add_test(NAME fdb_c_upgrade_single_threaded
+  if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" AND NOT USE_SANITIZER)
+    add_test(NAME fdb_c_upgrade_single_threaded_630api
       COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
             --build-dir ${CMAKE_BINARY_DIR}
-            --disable-log-dump
             --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadSingleThr.toml
-            --upgrade-path "6.3.23" "7.0.0" "6.3.23"
+            --upgrade-path "6.3.23" "7.0.0" "7.2.0"
             --process-number 1
-    )
+            )
 
-    add_test(NAME fdb_c_upgrade_multi_threaded
-    COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
-          --build-dir ${CMAKE_BINARY_DIR}
-          --disable-log-dump
-          --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-          --upgrade-path "6.3.23" "7.0.0" "6.3.23"
-          --process-number 3
-    )
+    add_test(NAME fdb_c_upgrade_single_threaded_700api
+      COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+            --build-dir ${CMAKE_BINARY_DIR}
+            --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadSingleThr.toml
+            --upgrade-path "7.0.0" "7.2.0"
+            --process-number 1
+            )
+
+    add_test(NAME fdb_c_upgrade_multi_threaded_630api
+        COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+            --build-dir ${CMAKE_BINARY_DIR}
+            --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
+            --upgrade-path "6.3.23" "7.0.0" "7.2.0"
+            --process-number 3
+          )
+
+    add_test(NAME fdb_c_upgrade_multi_threaded_700api
+        COMMAND ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+            --build-dir ${CMAKE_BINARY_DIR}
+            --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
+            --upgrade-path "7.0.0" "7.2.0"
+            --process-number 3
+          )
+  endif()
 
 endif()
 
@@ -314,6 +330,7 @@ fdb_install(
   FILES foundationdb/fdb_c.h
   ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/fdb_c_options.g.h
   ${CMAKE_SOURCE_DIR}/fdbclient/vexillographer/fdb.options
+  ${CMAKE_SOURCE_DIR}/bindings/c/foundationdb/fdb_c_types.h
   DESTINATION include
   DESTINATION_SUFFIX /foundationdb
   COMPONENT clients)

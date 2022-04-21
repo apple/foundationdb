@@ -2037,7 +2037,22 @@ static void enableLargePages() {
 #endif
 }
 
-static void* allocateInternal(size_t length, bool largePages) {
+#ifndef _WIN32
+static void* mmapInternal(size_t length, int flags, bool guardPages) {
+	if (guardPages) {
+		constexpr size_t pageSize = 4096;
+		length += 2 * pageSize; // Map enough for the guard pages
+		void* resultWithGuardPages = mmap(nullptr, length, PROT_READ | PROT_WRITE, flags, -1, 0);
+		mprotect(resultWithGuardPages, pageSize, PROT_NONE); // left guard page
+		mprotect((void*)(uintptr_t(resultWithGuardPages) + length - pageSize), pageSize, PROT_NONE); // right guard page
+		return (void*)(uintptr_t(resultWithGuardPages) + pageSize);
+	} else {
+		return mmap(nullptr, length, PROT_READ | PROT_WRITE, flags, -1, 0);
+	}
+}
+#endif
+
+static void* allocateInternal(size_t length, bool largePages, bool guardPages) {
 
 #ifdef _WIN32
 	DWORD allocType = MEM_COMMIT | MEM_RESERVE;
@@ -2052,31 +2067,31 @@ static void* allocateInternal(size_t length, bool largePages) {
 	if (largePages)
 		flags |= MAP_HUGETLB;
 
-	return mmap(nullptr, length, PROT_READ | PROT_WRITE, flags, -1, 0);
+	return mmapInternal(length, flags, guardPages);
 #elif defined(__APPLE__) || defined(__FreeBSD__)
 	int flags = MAP_PRIVATE | MAP_ANON;
 
-	return mmap(nullptr, length, PROT_READ | PROT_WRITE, flags, -1, 0);
+	return mmapInternal(length, flags, guardPages);
 #else
 #error Port me!
 #endif
 }
 
 static bool largeBlockFail = false;
-void* allocate(size_t length, bool allowLargePages) {
+void* allocate(size_t length, bool allowLargePages, bool includeGuardPages) {
 	if (allowLargePages)
 		enableLargePages();
 
 	void* block = ALLOC_FAIL;
 
 	if (allowLargePages && !largeBlockFail) {
-		block = allocateInternal(length, true);
+		block = allocateInternal(length, true, includeGuardPages);
 		if (block == ALLOC_FAIL)
 			largeBlockFail = true;
 	}
 
 	if (block == ALLOC_FAIL)
-		block = allocateInternal(length, false);
+		block = allocateInternal(length, false, includeGuardPages);
 
 	// FIXME: SevWarnAlways trace if "close" to out of memory
 
