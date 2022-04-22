@@ -56,6 +56,9 @@ def run_tester(args, test_file):
         cmd += ["--external-client-library", args.external_client_library]
     if args.tmp_dir is not None:
         cmd += ["--tmp-dir", args.tmp_dir]
+    if args.blob_granule_local_file_path is not None:
+        cmd += ["--blob-granule-local-file-path",
+                args.blob_granule_local_file_path]
 
     get_logger().info('\nRunning tester \'%s\'...' % ' '.join(cmd))
     proc = Popen(cmd, stdout=sys.stdout, stderr=sys.stderr)
@@ -85,8 +88,8 @@ def run_tester(args, test_file):
 
 def run_tests(args):
     num_failed = 0
-    test_files = [f for f in os.listdir(args.test_dir)
-                  if os.path.isfile(os.path.join(args.test_dir, f)) and f.endswith(".toml")]
+    test_files = [f for f in os.listdir(args.test_dir) if os.path.isfile(
+        os.path.join(args.test_dir, f)) and f.endswith(".toml")]
 
     for test_file in test_files:
         get_logger().info('=========================================================')
@@ -116,6 +119,8 @@ def parse_args(argv):
                         choices=['ERROR', 'WARNING', 'INFO', 'DEBUG'], help='Specifies the level of detail in the tester output (default=\'INFO\').')
     parser.add_argument('--tmp-dir', type=str, default=None,
                         help='The directory for storing temporary files (default: None)')
+    parser.add_argument('--blob-granule-local-file-path', type=str, default=None,
+                        help='Enable blob granule tests if set, value is path to local blob granule files')
 
     return parser.parse_args(argv)
 

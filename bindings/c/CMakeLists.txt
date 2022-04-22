@@ -106,6 +106,7 @@ if(NOT WIN32)
     test/apitester/TesterApiWrapper.h
     test/apitester/TesterTestSpec.cpp
     test/apitester/TesterTestSpec.h
+    test/apitester/TesterBlobGranuleCorrectnessWorkload.cpp
     test/apitester/TesterCancelTransactionWorkload.cpp
     test/apitester/TesterCorrectnessWorkload.cpp
     test/apitester/TesterKeyValueStore.cpp
@@ -253,6 +254,23 @@ endif()
             ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests
             --tmp-dir
             @TMP_DIR@
+            )
+
+  add_fdbclient_test(
+    NAME fdb_c_api_tests_blob_granule
+    DISABLE_LOG_DUMP
+    API_TEST_BLOB_GRANULES_ENABLED
+    COMMAND ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/run_c_api_tests.py
+            --cluster-file
+            @CLUSTER_FILE@
+            --tester-binary
+            $<TARGET_FILE:fdb_c_api_tester>
+            --external-client-library
+            ${CMAKE_CURRENT_BINARY_DIR}/libfdb_c_external.so
+            --test-dir
+            ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/blobgranuletests
+            --blob-granule-local-file-path
+            @DATA_DIR@/fdbblob/
             )
 
   if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" AND NOT USE_SANITIZER)
