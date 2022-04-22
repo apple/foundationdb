@@ -38,6 +38,7 @@ public:
 	std::string logGroup;
 	std::string externalClientLibrary;
 	std::string externalClientDir;
+	std::string tmpDir;
 	bool disableLocalClient = false;
 	std::string testFile;
 	std::string inputPipeName;
@@ -49,6 +50,7 @@ public:
 	int numClients;
 	std::vector<std::pair<std::string, std::string>> knobs;
 	TestSpec testSpec;
+	std::string bgBasePath;
 };
 
 } // namespace FdbApiTester

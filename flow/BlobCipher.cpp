@@ -116,19 +116,32 @@ void BlobCipherKey::reset() {
 // BlobKeyIdCache class methods
 
 BlobCipherKeyIdCache::BlobCipherKeyIdCache()
-  : domainId(ENCRYPT_INVALID_DOMAIN_ID), latestBaseCipherKeyId(ENCRYPT_INVALID_CIPHER_KEY_ID) {}
+  : domainId(ENCRYPT_INVALID_DOMAIN_ID), latestBaseCipherKeyId(ENCRYPT_INVALID_CIPHER_KEY_ID),
+    latestRandomSalt(ENCRYPT_INVALID_RANDOM_SALT) {}
 
 BlobCipherKeyIdCache::BlobCipherKeyIdCache(EncryptCipherDomainId dId)
-  : domainId(dId), latestBaseCipherKeyId(ENCRYPT_INVALID_CIPHER_KEY_ID) {
+  : domainId(dId), latestBaseCipherKeyId(ENCRYPT_INVALID_CIPHER_KEY_ID), latestRandomSalt(ENCRYPT_INVALID_RANDOM_SALT) {
 	TraceEvent("Init_BlobCipherKeyIdCache").detail("DomainId", domainId);
 }
 
 BlobCipherKeyIdCacheKey BlobCipherKeyIdCache::getCacheKey(const EncryptCipherBaseKeyId& baseCipherKeyId,
                                                           const EncryptCipherRandomSalt& salt) {
+	if (baseCipherKeyId == ENCRYPT_INVALID_CIPHER_KEY_ID || salt == ENCRYPT_INVALID_RANDOM_SALT) {
+		throw encrypt_invalid_id();
+	}
 	return std::make_pair(baseCipherKeyId, salt);
 }
 
 Reference<BlobCipherKey> BlobCipherKeyIdCache::getLatestCipherKey() {
+	if (keyIdCache.empty()) {
+		// Cache is empty, nothing more to do.
+		throw encrypt_key_not_found();
+	}
+
+	// Ensure latestCipher details sanity
+	ASSERT_GT(latestBaseCipherKeyId, ENCRYPT_INVALID_CIPHER_KEY_ID);
+	ASSERT_GT(latestRandomSalt, ENCRYPT_INVALID_RANDOM_SALT);
+
 	return getCipherByBaseCipherId(latestBaseCipherKeyId, latestRandomSalt);
 }
 
@@ -154,7 +167,7 @@ void BlobCipherKeyIdCache::insertBaseCipherKey(const EncryptCipherBaseKeyId& bas
 	// ensure no key-tampering is done
 	try {
 		Reference<BlobCipherKey> cipherKey = getLatestCipherKey();
-		if (cipherKey->getBaseCipherId() == baseCipherId) {
+		if (cipherKey.isValid() && cipherKey->getBaseCipherId() == baseCipherId) {
 			if (memcmp(cipherKey->rawBaseCipher(), baseCipher, baseCipherLen) == 0) {
 				TraceEvent("InsertBaseCipherKey_AlreadyPresent")
 				    .detail("BaseCipherKeyId", baseCipherId)
@@ -189,6 +202,7 @@ void BlobCipherKeyIdCache::insertBaseCipherKey(const EncryptCipherBaseKeyId& bas
                                                int baseCipherLen,
                                                const EncryptCipherRandomSalt& salt) {
 	ASSERT_GT(baseCipherId, ENCRYPT_INVALID_CIPHER_KEY_ID);
+	ASSERT_GT(salt, ENCRYPT_INVALID_RANDOM_SALT);
 
 	BlobCipherKeyIdCacheKey cacheKey = getCacheKey(baseCipherId, salt);
 
@@ -265,7 +279,8 @@ void BlobCipherKeyCache::insertCipherKey(const EncryptCipherDomainId& domainId,
                                          const uint8_t* baseCipher,
                                          int baseCipherLen,
                                          const EncryptCipherRandomSalt& salt) {
-	if (domainId == ENCRYPT_INVALID_DOMAIN_ID || baseCipherId == ENCRYPT_INVALID_CIPHER_KEY_ID) {
+	if (domainId == ENCRYPT_INVALID_DOMAIN_ID || baseCipherId == ENCRYPT_INVALID_CIPHER_KEY_ID ||
+	    salt == ENCRYPT_INVALID_RANDOM_SALT) {
 		throw encrypt_invalid_id();
 	}
 

@@ -246,6 +246,7 @@ class UpgradeTest:
                         '--api-version', str(self.api_version),
                         '--log',
                         '--log-dir', self.log,
+                        '--tmp-dir', self.tmp_dir,
                         '--transaction-retry-limit', str(TRANSACTION_RETRY_LIMIT)]
             if (RUN_WITH_GDB):
                 cmd_args = ['gdb', '-ex', 'run', '--args'] + cmd_args
