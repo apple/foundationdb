@@ -46,6 +46,7 @@ enum TesterOptionId {
 	OPT_KNOB,
 	OPT_EXTERNAL_CLIENT_LIBRARY,
 	OPT_EXTERNAL_CLIENT_DIRECTORY,
+	OPT_TMP_DIR,
 	OPT_DISABLE_LOCAL_CLIENT,
 	OPT_TEST_FILE,
 	OPT_INPUT_PIPE,
@@ -67,6 +68,7 @@ CSimpleOpt::SOption TesterOptionDefs[] = //
 	  { OPT_KNOB, "--knob-", SO_REQ_SEP },
 	  { OPT_EXTERNAL_CLIENT_LIBRARY, "--external-client-library", SO_REQ_SEP },
 	  { OPT_EXTERNAL_CLIENT_DIRECTORY, "--external-client-dir", SO_REQ_SEP },
+	  { OPT_TMP_DIR, "--tmp-dir", SO_REQ_SEP },
 	  { OPT_DISABLE_LOCAL_CLIENT, "--disable-local-client", SO_NONE },
 	  { OPT_TEST_FILE, "-f", SO_REQ_SEP },
 	  { OPT_TEST_FILE, "--test-file", SO_REQ_SEP },
@@ -100,6 +102,8 @@ void printProgramUsage(const char* execName) {
 	       "                 Path to the external client library.\n"
 	       "  --external-client-dir DIR\n"
 	       "                 Directory containing external client libraries.\n"
+	       "  --tmp-dir DIR\n"
+	       "                 Directory for temporary files of the client.\n"
 	       "  --disable-local-client DIR\n"
 	       "                 Disable the local client, i.e. use only external client libraries.\n"
 	       "  --input-pipe NAME\n"
@@ -184,6 +188,9 @@ bool processArg(TesterOptions& options, const CSimpleOpt& args) {
 	case OPT_EXTERNAL_CLIENT_DIRECTORY:
 		options.externalClientDir = args.OptionArg();
 		break;
+	case OPT_TMP_DIR:
+		options.tmpDir = args.OptionArg();
+		break;
 	case OPT_DISABLE_LOCAL_CLIENT:
 		options.disableLocalClient = true;
 		break;
@@ -243,6 +250,9 @@ void fdb_check(fdb_error_t e) {
 }
 
 void applyNetworkOptions(TesterOptions& options) {
+	if (!options.tmpDir.empty()) {
+		fdb_check(FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_CLIENT_TMP_DIR, options.tmpDir));
+	}
 	if (!options.externalClientLibrary.empty()) {
 		fdb_check(FdbApi::setOption(FDBNetworkOption::FDB_NET_OPTION_DISABLE_LOCAL_CLIENT));
 		fdb_check(

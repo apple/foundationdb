@@ -21,11 +21,15 @@
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/Stats.h"
 #include "fdbserver/EncryptKeyProxyInterface.h"
+#include "fdbserver/KmsConnector.h"
+#include "fdbserver/KmsConnectorInterface.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/ServerDBInfo.actor.h"
-#include "fdbserver/SimEncryptKmsProxy.actor.h"
+#include "fdbserver/SimKmsConnector.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "flow/Arena.h"
+#include "flow/EncryptUtils.h"
 #include "flow/Error.h"
 #include "flow/EventTypes.actor.h"
 #include "flow/FastRef.h"
@@ -38,11 +42,9 @@
 
 #include <boost/mpl/not.hpp>
 #include <utility>
+#include <memory>
 
 #include "flow/actorcompiler.h" // This must be the last #include.
-
-using EncryptDomainId = uint64_t;
-using EncryptBaseCipherId = uint64_t;
 
 namespace {
 bool canReplyWith(Error e) {
@@ -57,16 +59,16 @@ bool canReplyWith(Error e) {
 } // namespace
 
 struct EncryptBaseCipherKey {
-	EncryptDomainId domainId;
-	EncryptBaseCipherId baseCipherId;
+	EncryptCipherDomainId domainId;
+	EncryptCipherBaseKeyId baseCipherId;
 	Standalone<StringRef> baseCipherKey;
 	uint64_t creationTimeSec;
 	bool noExpiry;
 
 	EncryptBaseCipherKey()
 	  : domainId(0), baseCipherId(0), baseCipherKey(StringRef()), creationTimeSec(0), noExpiry(false) {}
-	explicit EncryptBaseCipherKey(EncryptDomainId dId,
-	                              EncryptBaseCipherId cipherId,
+	explicit EncryptBaseCipherKey(EncryptCipherDomainId dId,
+	                              EncryptCipherBaseKeyId cipherId,
 	                              StringRef cipherKey,
 	                              bool neverExpire)
 	  : domainId(dId), baseCipherId(cipherId), baseCipherKey(cipherKey), creationTimeSec(now()), noExpiry(neverExpire) {
@@ -75,8 +77,8 @@ struct EncryptBaseCipherKey {
 	bool isValid() { return noExpiry ? true : ((now() - creationTimeSec) < FLOW_KNOBS->ENCRYPT_CIPHER_KEY_CACHE_TTL); }
 };
 
-using EncryptBaseDomainIdCache = std::unordered_map<EncryptDomainId, EncryptBaseCipherKey>;
-using EncryptBaseCipherKeyIdCache = std::unordered_map<EncryptBaseCipherId, EncryptBaseCipherKey>;
+using EncryptBaseDomainIdCache = std::unordered_map<EncryptCipherDomainId, EncryptBaseCipherKey>;
+using EncryptBaseCipherKeyIdCache = std::unordered_map<EncryptCipherBaseKeyId, EncryptBaseCipherKey>;
 
 struct EncryptKeyProxyData : NonCopyable, ReferenceCounted<EncryptKeyProxyData> {
 public:
@@ -86,6 +88,8 @@ public:
 
 	EncryptBaseDomainIdCache baseCipherDomainIdCache;
 	EncryptBaseCipherKeyIdCache baseCipherKeyIdCache;
+
+	std::unique_ptr<KmsConnector> kmsConnector;
 
 	CounterCollection ekpCacheMetrics;
 
@@ -107,8 +111,8 @@ public:
 	    numResponseWithErrors("EKPNumResponseWithErrors", ekpCacheMetrics),
 	    numEncryptionKeyRefreshErrors("EKPNumEncryptionKeyRefreshErrors", ekpCacheMetrics) {}
 
-	void insertIntoBaseDomainIdCache(const EncryptDomainId domainId,
-	                                 const EncryptBaseCipherId baseCipherId,
+	void insertIntoBaseDomainIdCache(const EncryptCipherDomainId domainId,
+	                                 const EncryptCipherBaseKeyId baseCipherId,
 	                                 const StringRef baseCipherKey) {
 		// Entries in domainId cache are eligible for periodic refreshes to support 'limiting lifetime of encryption
 		// key' support if enabled on external KMS solutions.
@@ -119,8 +123,8 @@ public:
 		insertIntoBaseCipherIdCache(domainId, baseCipherId, baseCipherKey);
 	}
 
-	void insertIntoBaseCipherIdCache(const EncryptDomainId domainId,
-	                                 const EncryptBaseCipherId baseCipherId,
+	void insertIntoBaseCipherIdCache(const EncryptCipherDomainId domainId,
+	                                 const EncryptCipherBaseKeyId baseCipherId,
 	                                 const StringRef baseCipherKey) {
 		// Given an cipherKey is immutable, it is OK to NOT expire cached information.
 		// TODO: Update cache to support LRU eviction policy to limit the total cache size.
@@ -151,18 +155,27 @@ public:
 };
 
 ACTOR Future<Void> getCipherKeysByBaseCipherKeyIds(Reference<EncryptKeyProxyData> ekpProxyData,
-                                                   SimKmsProxyInterface simKmsInterface,
+                                                   KmsConnectorInterface kmsConnectorInf,
                                                    EKPGetBaseCipherKeysByIdsRequest req) {
 	// Scan the cached cipher-keys and filter our baseCipherIds locally cached
 	// for the rest, reachout to KMS to fetch the required details
 
-	std::vector<std::pair<EncryptBaseCipherId, EncryptDomainId>> lookupCipherIds;
+	std::vector<std::pair<EncryptCipherBaseKeyId, EncryptCipherDomainId>> lookupCipherIds;
 	state std::vector<EKPBaseCipherDetails> cachedCipherDetails;
 
 	state EKPGetBaseCipherKeysByIdsRequest keysByIds = req;
 	state EKPGetBaseCipherKeysByIdsReply keyIdsReply;
 
+	// Dedup the requested pair<baseCipherId, encryptDomainId>
+	// TODO: endpoint serialization of std::unordered_set isn't working at the moment
+	std::unordered_set<std::pair<EncryptCipherBaseKeyId, EncryptCipherDomainId>,
+	                   boost::hash<std::pair<EncryptCipherBaseKeyId, EncryptCipherDomainId>>>
+	    dedupedCipherIds;
 	for (const auto& item : req.baseCipherIds) {
+		dedupedCipherIds.emplace(item);
+	}
+
+	for (const auto& item : dedupedCipherIds) {
 		const auto itr = ekpProxyData->baseCipherKeyIdCache.find(item.first);
 		if (itr != ekpProxyData->baseCipherKeyIdCache.end()) {
 			ASSERT(itr->second.isValid());
@@ -176,38 +189,32 @@ ACTOR Future<Void> getCipherKeysByBaseCipherKeyIds(Reference<EncryptKeyProxyData
 	ekpProxyData->baseCipherKeyIdCacheHits += cachedCipherDetails.size();
 	ekpProxyData->baseCipherKeyIdCacheMisses += lookupCipherIds.size();
 
-	if (g_network->isSimulated()) {
-		if (!lookupCipherIds.empty()) {
-			try {
-				SimGetEncryptKeysByKeyIdsRequest simKeyIdsReq(lookupCipherIds);
-				SimGetEncryptKeysByKeyIdsReply simKeyIdsReply =
-				    wait(simKmsInterface.encryptKeyLookupByKeyIds.getReply(simKeyIdsReq));
+	if (!lookupCipherIds.empty()) {
+		try {
+			KmsConnLookupEKsByKeyIdsReq keysByIdsReq(lookupCipherIds);
+			KmsConnLookupEKsByKeyIdsRep keysByIdsRep = wait(kmsConnectorInf.ekLookupByIds.getReply(keysByIdsReq));
 
-				for (const auto& item : simKeyIdsReply.encryptKeyDetails) {
-					keyIdsReply.baseCipherDetails.emplace_back(
-					    item.encryptDomainId, item.encryptKeyId, item.encryptKey, keyIdsReply.arena);
-				}
-
-				// Record the fetched cipher details to the local cache for the future references
-				// Note: cache warm-up is done after reponding to the caller
-
-				for (auto& item : simKeyIdsReply.encryptKeyDetails) {
-					// DomainId isn't available here, the caller must know the encryption domainId
-					ekpProxyData->insertIntoBaseCipherIdCache(item.encryptDomainId, item.encryptKeyId, item.encryptKey);
-				}
-			} catch (Error& e) {
-				if (!canReplyWith(e)) {
-					TraceEvent("GetCipherKeysByIds", ekpProxyData->myId).error(e);
-					throw;
-				}
-				TraceEvent("GetCipherKeysByIds", ekpProxyData->myId).detail("ErrorCode", e.code());
-				ekpProxyData->sendErrorResponse(keysByIds.reply, e);
-				return Void();
+			for (const auto& item : keysByIdsRep.cipherKeyDetails) {
+				keyIdsReply.baseCipherDetails.emplace_back(
+				    item.encryptDomainId, item.encryptKeyId, item.encryptKey, keyIdsReply.arena);
 			}
+
+			// Record the fetched cipher details to the local cache for the future references
+			// Note: cache warm-up is done after reponding to the caller
+
+			for (auto& item : keysByIdsRep.cipherKeyDetails) {
+				// DomainId isn't available here, the caller must know the encryption domainId
+				ekpProxyData->insertIntoBaseCipherIdCache(item.encryptDomainId, item.encryptKeyId, item.encryptKey);
+			}
+		} catch (Error& e) {
+			if (!canReplyWith(e)) {
+				TraceEvent("GetCipherKeysByIds", ekpProxyData->myId).error(e);
+				throw;
+			}
+			TraceEvent("GetCipherKeysByIds", ekpProxyData->myId).detail("ErrorCode", e.code());
+			ekpProxyData->sendErrorResponse(keysByIds.reply, e);
+			return Void();
 		}
-	} else {
-		// TODO: Call to non-FDB KMS connector process.
-		throw not_implemented();
 	}
 
 	// Append cached cipherKeyDetails to the result-set
@@ -221,7 +228,7 @@ ACTOR Future<Void> getCipherKeysByBaseCipherKeyIds(Reference<EncryptKeyProxyData
 }
 
 ACTOR Future<Void> getLatestCipherKeys(Reference<EncryptKeyProxyData> ekpProxyData,
-                                       SimKmsProxyInterface simKmsInterface,
+                                       KmsConnectorInterface kmsConnectorInf,
                                        EKPGetLatestBaseCipherKeysRequest req) {
 	// Scan the cached cipher-keys and filter our baseCipherIds locally cached
 	// for the rest, reachout to KMS to fetch the required details
@@ -231,49 +238,51 @@ ACTOR Future<Void> getLatestCipherKeys(Reference<EncryptKeyProxyData> ekpProxyDa
 	state EKPGetLatestBaseCipherKeysReply latestCipherReply;
 	state Arena& arena = latestCipherReply.arena;
 
+	// Dedup the requested domainIds.
+	// TODO: endpoint serialization of std::unordered_set isn't working at the moment
+	std::unordered_set<EncryptCipherDomainId> dedupedDomainIds;
+	for (EncryptCipherDomainId id : req.encryptDomainIds) {
+		dedupedDomainIds.emplace(id);
+	}
+
 	// First, check if the requested information is already cached by the server.
 	// Ensure the cached information is within FLOW_KNOBS->ENCRYPT_CIPHER_KEY_CACHE_TTL time window.
 
-	std::vector<EncryptDomainId> lookupCipherDomains;
-	for (EncryptDomainId id : req.encryptDomainIds) {
+	std::vector<EncryptCipherDomainId> lookupCipherDomains;
+	for (EncryptCipherDomainId id : dedupedDomainIds) {
 		const auto itr = ekpProxyData->baseCipherDomainIdCache.find(id);
 		if (itr != ekpProxyData->baseCipherDomainIdCache.end() && itr->second.isValid()) {
 			cachedCipherDetails.emplace_back(id, itr->second.baseCipherId, itr->second.baseCipherKey, arena);
 		} else {
-			lookupCipherDomains.push_back(id);
+			lookupCipherDomains.emplace_back(id);
 		}
 	}
 
 	ekpProxyData->baseCipherDomainIdCacheHits += cachedCipherDetails.size();
 	ekpProxyData->baseCipherDomainIdCacheMisses += lookupCipherDomains.size();
 
-	if (g_network->isSimulated()) {
-		if (!lookupCipherDomains.empty()) {
-			try {
-				SimGetEncryptKeysByDomainIdsRequest simKeysByDomainIdReq(lookupCipherDomains);
-				SimGetEncryptKeyByDomainIdReply simKeysByDomainIdRep =
-				    wait(simKmsInterface.encryptKeyLookupByDomainId.getReply(simKeysByDomainIdReq));
+	if (!lookupCipherDomains.empty()) {
+		try {
+			KmsConnLookupEKsByDomainIdsReq keysByDomainIdReq(lookupCipherDomains);
+			KmsConnLookupEKsByDomainIdsRep keysByDomainIdRep =
+			    wait(kmsConnectorInf.ekLookupByDomainIds.getReply(keysByDomainIdReq));
 
-				for (auto& item : simKeysByDomainIdRep.encryptKeyDetails) {
-					latestCipherReply.baseCipherDetails.emplace_back(
-					    item.encryptDomainId, item.encryptKeyId, item.encryptKey, arena);
+			for (auto& item : keysByDomainIdRep.cipherKeyDetails) {
+				latestCipherReply.baseCipherDetails.emplace_back(
+				    item.encryptDomainId, item.encryptKeyId, item.encryptKey, arena);
 
-					// Record the fetched cipher details to the local cache for the future references
-					ekpProxyData->insertIntoBaseDomainIdCache(item.encryptDomainId, item.encryptKeyId, item.encryptKey);
-				}
-			} catch (Error& e) {
-				if (!canReplyWith(e)) {
-					TraceEvent("GetLatestCipherKeys", ekpProxyData->myId).error(e);
-					throw;
-				}
-				TraceEvent("GetLatestCipherKeys", ekpProxyData->myId).detail("ErrorCode", e.code());
-				ekpProxyData->sendErrorResponse(latestKeysReq.reply, e);
-				return Void();
+				// Record the fetched cipher details to the local cache for the future references
+				ekpProxyData->insertIntoBaseDomainIdCache(item.encryptDomainId, item.encryptKeyId, item.encryptKey);
 			}
+		} catch (Error& e) {
+			if (!canReplyWith(e)) {
+				TraceEvent("GetLatestCipherKeys", ekpProxyData->myId).error(e);
+				throw;
+			}
+			TraceEvent("GetLatestCipherKeys", ekpProxyData->myId).detail("ErrorCode", e.code());
+			ekpProxyData->sendErrorResponse(latestKeysReq.reply, e);
+			return Void();
 		}
-	} else {
-		// TODO: Call to non-FDB KMS connector process.
-		throw not_implemented();
 	}
 
 	for (auto& item : cachedCipherDetails) {
@@ -287,27 +296,27 @@ ACTOR Future<Void> getLatestCipherKeys(Reference<EncryptKeyProxyData> ekpProxyDa
 	return Void();
 }
 
-ACTOR Future<Void> refreshEncryptionKeysUsingSimKms(Reference<EncryptKeyProxyData> ekpProxyData,
-                                                    SimKmsProxyInterface simKmsInterface) {
+ACTOR Future<Void> refreshEncryptionKeysCore(Reference<EncryptKeyProxyData> ekpProxyData,
+                                             KmsConnectorInterface kmsConnectorInf) {
 
 	ASSERT(g_network->isSimulated());
 
-	TraceEvent("RefreshEKs_Start", ekpProxyData->myId).detail("Inf", simKmsInterface.id());
+	TraceEvent("RefreshEKs_Start", ekpProxyData->myId).detail("KmsConnInf", kmsConnectorInf.id());
 
 	try {
-		SimGetEncryptKeysByDomainIdsRequest req;
+		KmsConnLookupEKsByDomainIdsReq req;
 		req.encryptDomainIds.reserve(ekpProxyData->baseCipherDomainIdCache.size());
 
 		for (auto& item : ekpProxyData->baseCipherDomainIdCache) {
 			req.encryptDomainIds.emplace_back(item.first);
 		}
-		SimGetEncryptKeyByDomainIdReply rep = wait(simKmsInterface.encryptKeyLookupByDomainId.getReply(req));
-		for (auto& item : rep.encryptKeyDetails) {
+		KmsConnLookupEKsByDomainIdsRep rep = wait(kmsConnectorInf.ekLookupByDomainIds.getReply(req));
+		for (auto& item : rep.cipherKeyDetails) {
 			ekpProxyData->insertIntoBaseDomainIdCache(item.encryptDomainId, item.encryptKeyId, item.encryptKey);
 		}
 
-		ekpProxyData->baseCipherKeysRefreshed += rep.encryptKeyDetails.size();
-		TraceEvent("RefreshEKs_Done", ekpProxyData->myId).detail("KeyCount", rep.encryptKeyDetails.size());
+		ekpProxyData->baseCipherKeysRefreshed += rep.cipherKeyDetails.size();
+		TraceEvent("RefreshEKs_Done", ekpProxyData->myId).detail("KeyCount", rep.cipherKeyDetails.size());
 	} catch (Error& e) {
 		if (!canReplyWith(e)) {
 			TraceEvent("RefreshEncryptionKeys_Error").error(e);
@@ -320,30 +329,34 @@ ACTOR Future<Void> refreshEncryptionKeysUsingSimKms(Reference<EncryptKeyProxyDat
 	return Void();
 }
 
-ACTOR Future<Void> refreshEncryptionKeysUsingKms(Reference<EncryptKeyProxyData> ekpProxyData) {
-	wait(delay(0)); // compiler needs to be happy
-	throw not_implemented();
+void refreshEncryptionKeys(Reference<EncryptKeyProxyData> ekpProxyData, KmsConnectorInterface kmsConnectorInf) {
+	Future<Void> ignored = refreshEncryptionKeysCore(ekpProxyData, kmsConnectorInf);
 }
 
-void refreshEncryptionKeys(Reference<EncryptKeyProxyData> ekpProxyData, SimKmsProxyInterface simKmsInterface) {
-
-	Future<Void> ignored;
+void activateKmsConnector(Reference<EncryptKeyProxyData> ekpProxyData, KmsConnectorInterface kmsConnectorInf) {
 	if (g_network->isSimulated()) {
-		ignored = refreshEncryptionKeysUsingSimKms(ekpProxyData, simKmsInterface);
+		ekpProxyData->kmsConnector = std::make_unique<SimKmsConnector>();
+	} else if (SERVER_KNOBS->KMS_CONNECTOR_TYPE.compare("HttpKmsConnector")) {
+		throw not_implemented();
 	} else {
-		ignored = refreshEncryptionKeysUsingKms(ekpProxyData);
+		throw not_implemented();
 	}
+
+	TraceEvent("EKP_ActiveKmsConnector", ekpProxyData->myId).detail("ConnectorType", SERVER_KNOBS->KMS_CONNECTOR_TYPE);
+	ekpProxyData->addActor.send(ekpProxyData->kmsConnector->connectorCore(kmsConnectorInf));
 }
 
 ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ekpInterface, Reference<AsyncVar<ServerDBInfo>> db) {
 	state Reference<EncryptKeyProxyData> self(new EncryptKeyProxyData(ekpInterface.id()));
-	state PromiseStream<Future<Void>> addActor;
 	state Future<Void> collection = actorCollection(self->addActor.getFuture());
 	self->addActor.send(traceRole(Role::ENCRYPT_KEY_PROXY, ekpInterface.id()));
 
-	state SimKmsProxyInterface simKmsProxyInf;
+	state KmsConnectorInterface kmsConnectorInf;
+	kmsConnectorInf.initEndpoints();
 
-	TraceEvent("EKP_Start", self->myId).log();
+	TraceEvent("EKP_Start", self->myId).detail("KmsConnectorInf", kmsConnectorInf.id());
+
+	activateKmsConnector(self, kmsConnectorInf);
 
 	// Register a recurring task to refresh the cached Encryption keys.
 	// Approach avoids external RPCs due to EncryptionKey refreshes for the inline write encryption codepath such as:
@@ -352,31 +365,17 @@ ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ekpInterface, 
 	// FLOW_KNOB->ENCRRYPTION_KEY_REFRESH_INTERVAL_SEC, allowing the interactions with external Encryption Key Manager
 	// mostly not co-inciding with FDB process encryption key refresh attempts.
 
-	if (g_network->isSimulated()) {
-		// In simulation construct an Encryption KMSProxy actor to satisfy encryption keys lookups otherwise satisfied
-		// by integrating external Encryption Key Management solutions.
-
-		simKmsProxyInf.initEndpoints();
-		self->addActor.send(simEncryptKmsProxyCore(simKmsProxyInf));
-
-		TraceEvent("EKP_InitSimKmsInf", self->myId).detail("Inf", simKmsProxyInf.id());
-
-		self->encryptionKeyRefresher = recurring([&]() { refreshEncryptionKeys(self, simKmsProxyInf); },
-		                                         FLOW_KNOBS->ENCRYPT_KEY_REFRESH_INTERVAL,
-		                                         TaskPriority::Worker);
-
-	} else {
-		// TODO: Add recurring actor to talk to external KMS proxy process
-		throw not_implemented();
-	}
+	self->encryptionKeyRefresher = recurring([&]() { refreshEncryptionKeys(self, kmsConnectorInf); },
+	                                         FLOW_KNOBS->ENCRYPT_KEY_REFRESH_INTERVAL,
+	                                         TaskPriority::Worker);
 
 	try {
 		loop choose {
 			when(EKPGetBaseCipherKeysByIdsRequest req = waitNext(ekpInterface.getBaseCipherKeysByIds.getFuture())) {
-				wait(getCipherKeysByBaseCipherKeyIds(self, simKmsProxyInf, req));
+				wait(getCipherKeysByBaseCipherKeyIds(self, kmsConnectorInf, req));
 			}
 			when(EKPGetLatestBaseCipherKeysRequest req = waitNext(ekpInterface.getLatestBaseCipherKeys.getFuture())) {
-				wait(getLatestCipherKeys(self, simKmsProxyInf, req));
+				wait(getLatestCipherKeys(self, kmsConnectorInf, req));
 			}
 			when(HaltEncryptKeyProxyRequest req = waitNext(ekpInterface.haltEncryptKeyProxy.getFuture())) {
 				TraceEvent("EKP_Halted", self->myId).detail("ReqID", req.requesterID);
