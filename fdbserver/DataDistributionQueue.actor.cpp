@@ -423,13 +423,6 @@ void completeDest(RelocateData const& relocation, std::map<UID, Busyness>& destB
 	}
 }
 
-void completeDest(RelocateData const& relocation, std::map<UID, Busyness>& destBusymap) {
-	int destWorkFactor = getDestWorkFactor();
-	for (UID id : relocation.completeDests) {
-		destBusymap[id].removeWork(relocation.priority, destWorkFactor);
-	}
-}
-
 void complete(RelocateData const& relocation, std::map<UID, Busyness>& busymap, std::map<UID, Busyness>& destBusymap) {
 	ASSERT(relocation.workFactor > 0);
 	for (int i = 0; i < relocation.src.size(); i++)
@@ -470,6 +463,9 @@ struct DDQueueData {
 	KeyRangeActorMap getSourceActors;
 	std::map<UID, std::set<RelocateData, std::greater<RelocateData>>>
 	    queue; // Key UID is serverID, value is the serverID's set of RelocateData to relocate
+	// The last time one server was selected as source team for read rebalance reason. We want to throttle read
+	// rebalance on time bases because the read workload sample update has delay after the previous moving
+	std::map<UID, double> lastAsSource;
 
 	KeyRangeMap<RelocateData> inFlight;
 	// Track all actors that relocates specified keys to a good place; Key: keyRange; Value: actor
@@ -1181,12 +1177,11 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 					    rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT)
 						inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_ONE_LEFT;
 
-					auto req =
-					    GetTeamRequest(WantNewServers(rd.wantsNewServers),
-					                   WantTrueBest(isValleyFillerPriority(rd.priority)),
-					                   PreferLowerUtilization::True,
-					                   TeamMustHaveShards::False,
-					                   inflightPenalty);
+					auto req = GetTeamRequest(WantNewServers(rd.wantsNewServers),
+					                          WantTrueBest(isValleyFillerPriority(rd.priority)),
+					                          PreferLowerUtilization::True,
+					                          TeamMustHaveShards::False,
+					                          inflightPenalty);
 
 					req.src = rd.src;
 					req.completeSources = rd.completeSources;
@@ -1524,6 +1519,10 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 
 	state std::vector<KeyRange> shards = self->shardsAffectedByTeamFailure->getShardsFor(
 	    ShardsAffectedByTeamFailure::Team(sourceTeam->getServerIDs(), primary));
+	traceEvent->detail("ShardsInSource", shards.size());
+	// For read rebalance if there is just 1 hot shard remained, move this shard to another server won't solve the
+	// problem.
+	// TODO: This situation should be solved by split and merge
 	if (shards.size() <= 1) {
 		traceEvent->detail("SkipReason", "NoShardOnSource");
 		return false;
@@ -1544,11 +1543,11 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 		return false;
 	}
 
+	deterministicRandom()->randomShuffle(metricsList);
 	int chosenIdx = -1;
-	for (int i = 0; i < 10; ++i) {
-		int idx = deterministicRandom()->randomInt(0, metricsList.size());
-		if (metricsList[idx].keys.present() && metricsList[i].bytes > 0) {
-			chosenIdx = idx;
+	for (int i = 0; i < metricsList.size(); ++i) {
+		if (metricsList[i].keys.present() && metricsList[i].bytes > 0) {
+			chosenIdx = i;
 			break;
 		}
 	}
