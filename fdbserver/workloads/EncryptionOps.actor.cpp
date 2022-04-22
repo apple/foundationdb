@@ -135,7 +135,6 @@ struct EncryptionOpsWorkload : TestWorkload {
 		maxDomainId = deterministicRandom()->randomInt(minDomainId, minDomainId + 10) + 5;
 		minBaseCipherId = 100;
 		headerBaseCipherId = wcx.clientId * 100 + 1;
-		headerRandomSalt = wcx.clientId * 100 + 1;
 
 		metrics = std::make_unique<WorkloadMetrics>();
 
@@ -183,12 +182,20 @@ struct EncryptionOpsWorkload : TestWorkload {
 			ASSERT_EQ(cipherKeys.size(), 1);
 		}
 
-		// insert the Encrypt Header cipherKey
+		// insert the Encrypt Header cipherKey; record cipherDetails as getLatestCipher() may not work with multiple
+		// test clients
 		generateRandomBaseCipher(AES_256_KEY_LENGTH, &buff[0], &cipherLen);
-		cipherKeyCache->insertCipherKey(
-		    ENCRYPT_HEADER_DOMAIN_ID, headerBaseCipherId, buff, cipherLen, headerRandomSalt);
+		cipherKeyCache->insertCipherKey(ENCRYPT_HEADER_DOMAIN_ID, headerBaseCipherId, buff, cipherLen);
+		Reference<BlobCipherKey> latestCipher = cipherKeyCache->getLatestCipherKey(ENCRYPT_HEADER_DOMAIN_ID);
+		ASSERT_EQ(latestCipher->getBaseCipherId(), headerBaseCipherId);
+		ASSERT_EQ(memcmp(latestCipher->rawBaseCipher(), buff, cipherLen), 0);
+		headerRandomSalt = latestCipher->getSalt();
 
-		TraceEvent("SetupCipherEssentials_Done").detail("MinDomainId", minDomainId).detail("MaxDomainId", maxDomainId);
+		TraceEvent("SetupCipherEssentials_Done")
+		    .detail("MinDomainId", minDomainId)
+		    .detail("MaxDomainId", maxDomainId)
+		    .detail("HeaderBaseCipherId", headerBaseCipherId)
+		    .detail("HeaderRandomSalt", headerRandomSalt);
 	}
 
 	void resetCipherEssentials() {
