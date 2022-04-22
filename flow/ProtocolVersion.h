@@ -246,4 +246,3 @@ struct Traceable<SWVersion> : std::true_type {
 		              swVersion.lowestCompatibleProtocolVersion());
 	}
 };
-
