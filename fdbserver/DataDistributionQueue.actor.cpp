@@ -423,6 +423,13 @@ void completeDest(RelocateData const& relocation, std::map<UID, Busyness>& destB
 	}
 }
 
+void completeDest(RelocateData const& relocation, std::map<UID, Busyness>& destBusymap) {
+	int destWorkFactor = getDestWorkFactor();
+	for (UID id : relocation.completeDests) {
+		destBusymap[id].removeWork(relocation.priority, destWorkFactor);
+	}
+}
+
 void complete(RelocateData const& relocation, std::map<UID, Busyness>& busymap, std::map<UID, Busyness>& destBusymap) {
 	ASSERT(relocation.workFactor > 0);
 	for (int i = 0; i < relocation.src.size(); i++)

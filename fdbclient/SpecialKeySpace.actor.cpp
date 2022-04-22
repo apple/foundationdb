@@ -548,6 +548,8 @@ void SpecialKeySpace::registerKeyRange(SpecialKeySpace::MODULE module,
                                        SpecialKeySpace::IMPLTYPE type,
                                        const KeyRangeRef& kr,
                                        SpecialKeyRangeReadImpl* impl) {
+	// Not allowed to register an empty range
+	ASSERT(!kr.empty());
 	// module boundary check
 	if (module == SpecialKeySpace::MODULE::TESTONLY) {
 		ASSERT(normalKeys.contains(kr));
@@ -1999,7 +2001,6 @@ ACTOR static Future<RangeResult> ClientProfilingGetRangeActor(ReadYourWritesTran
 	return result;
 }
 
-// TODO : add limitation on set operation
 Future<RangeResult> ClientProfilingImpl::getRange(ReadYourWritesTransaction* ryw,
                                                   KeyRangeRef kr,
                                                   GetRangeLimits limitsHint) const {

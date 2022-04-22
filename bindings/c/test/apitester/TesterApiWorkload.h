@@ -114,6 +114,11 @@ protected:
 	// Clear the data of the workload
 	void clearData(TTaskFct cont);
 
+	// common operations
+	void randomInsertOp(TTaskFct cont);
+	void randomClearOp(TTaskFct cont);
+	void randomClearRangeOp(TTaskFct cont);
+
 private:
 	void populateDataTx(TTaskFct cont);
 

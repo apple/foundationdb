@@ -323,6 +323,9 @@ KeyValueStoreSuffix redwoodSuffix = { KeyValueStoreType::SSD_REDWOOD_V1, ".redwo
 KeyValueStoreSuffix rocksdbSuffix = { KeyValueStoreType::SSD_ROCKSDB_V1,
 	                                  ".rocksdb",
 	                                  FilesystemCheck::DIRECTORIES_ONLY };
+KeyValueStoreSuffix shardedRocksdbSuffix = { KeyValueStoreType::SSD_SHARDED_ROCKSDB,
+	                                         ".shardedrocksdb",
+	                                         FilesystemCheck::DIRECTORIES_ONLY };
 
 std::string validationFilename = "_validate";
 
@@ -336,6 +339,8 @@ std::string filenameFromSample(KeyValueStoreType storeType, std::string folder, 
 	else if (storeType == KeyValueStoreType::SSD_REDWOOD_V1)
 		return joinPath(folder, sample_filename);
 	else if (storeType == KeyValueStoreType::SSD_ROCKSDB_V1)
+		return joinPath(folder, sample_filename);
+	else if (storeType == KeyValueStoreType::SSD_SHARDED_ROCKSDB)
 		return joinPath(folder, sample_filename);
 	UNREACHABLE();
 }
@@ -352,6 +357,8 @@ std::string filenameFromId(KeyValueStoreType storeType, std::string folder, std:
 		return joinPath(folder, prefix + id.toString() + ".redwood-v1");
 	else if (storeType == KeyValueStoreType::SSD_ROCKSDB_V1)
 		return joinPath(folder, prefix + id.toString() + ".rocksdb");
+	else if (storeType == KeyValueStoreType::SSD_SHARDED_ROCKSDB)
+		return joinPath(folder, prefix + id.toString() + ".shardedrocksdb");
 
 	TraceEvent(SevError, "UnknownStoreType").detail("StoreType", storeType.toString());
 	UNREACHABLE();
@@ -528,6 +535,9 @@ std::vector<DiskStore> getDiskStores(std::string folder) {
 	result.insert(result.end(), result4.begin(), result4.end());
 	auto result5 = getDiskStores(folder, rocksdbSuffix.suffix, rocksdbSuffix.type, rocksdbSuffix.check);
 	result.insert(result.end(), result5.begin(), result5.end());
+	auto result6 =
+	    getDiskStores(folder, shardedRocksdbSuffix.suffix, shardedRocksdbSuffix.type, shardedRocksdbSuffix.check);
+	result.insert(result.end(), result6.begin(), result6.end());
 	return result;
 }
 
@@ -1657,6 +1667,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				    SERVER_KNOBS->REMOTE_KV_STORE && /* testing mixed mode in simulation if remote kvs enabled */
 				        (g_network->isSimulated()
 				             ? (/* Disable for RocksDB */ s.storeType != KeyValueStoreType::SSD_ROCKSDB_V1 &&
+				                s.storeType != KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
 				                deterministicRandom()->coinflip())
 				             : true));
 				Future<Void> kvClosed = kv->onClosed();
@@ -2234,6 +2245,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					    SERVER_KNOBS->REMOTE_KV_STORE && /* testing mixed mode in simulation if remote kvs enabled */
 					        (g_network->isSimulated()
 					             ? (/* Disable for RocksDB */ req.storeType != KeyValueStoreType::SSD_ROCKSDB_V1 &&
+					                req.storeType != KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
 					                deterministicRandom()->coinflip())
 					             : true));
 
@@ -2430,6 +2442,9 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 						} else if (d.storeType == KeyValueStoreType::SSD_REDWOOD_V1) {
 							included = fileExists(d.filename + "0.pagerlog") && fileExists(d.filename + "1.pagerlog");
 						} else if (d.storeType == KeyValueStoreType::SSD_ROCKSDB_V1) {
+							included = fileExists(joinPath(d.filename, "CURRENT")) &&
+							           fileExists(joinPath(d.filename, "IDENTITY"));
+						} else if (d.storeType == KeyValueStoreType::SSD_SHARDED_ROCKSDB) {
 							included = fileExists(joinPath(d.filename, "CURRENT")) &&
 							           fileExists(joinPath(d.filename, "IDENTITY"));
 						} else if (d.storeType == KeyValueStoreType::MEMORY) {
