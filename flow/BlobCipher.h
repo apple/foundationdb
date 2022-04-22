@@ -298,8 +298,8 @@ public:
 private:
 	EncryptCipherDomainId domainId;
 	BlobCipherKeyIdCacheMap keyIdCache;
-	EncryptCipherBaseKeyId latestBaseCipherKeyId;
-	EncryptCipherRandomSalt latestRandomSalt;
+	Optional<EncryptCipherBaseKeyId> latestBaseCipherKeyId;
+	Optional<EncryptCipherRandomSalt> latestRandomSalt;
 };
 
 using BlobCipherDomainCacheMap = std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKeyIdCache>>;
