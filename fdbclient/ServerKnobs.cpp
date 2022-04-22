@@ -855,6 +855,10 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
     init( ENCRYPTION_MODE,                              "AES-256-CTR");
     init( SIM_KMS_MAX_KEYS,                                      4096);
 
+    // Support KmsConnector types are:
+    // KMS_CONNECTOR_TYPE_HTTP -> 1
+    init( KMS_CONNECTOR_TYPE,                      "HttpKmsConnector");
+
 	// Blob granlues
 	init( BG_URL,               isSimulated ? "file://fdbblob/" : "" ); // TODO: store in system key space or something, eventually
 	init( BG_SNAPSHOT_FILE_TARGET_BYTES,                    10000000 ); if( buggifySmallShards ) BG_SNAPSHOT_FILE_TARGET_BYTES = 100000; else if (simulationMediumShards || (randomize && BUGGIFY) ) BG_SNAPSHOT_FILE_TARGET_BYTES = 1000000; 
