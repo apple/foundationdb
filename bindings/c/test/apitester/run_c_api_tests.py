@@ -56,6 +56,7 @@ def run_tester(args, test_file):
         cmd += ["--external-client-library", args.external_client_library]
     if args.tmp_dir is not None:
         cmd += ["--tmp-dir", args.tmp_dir]
+
     if args.blob_granule_local_file_path is not None:
         cmd += ["--blob-granule-local-file-path",
                 args.blob_granule_local_file_path]
@@ -63,6 +64,7 @@ def run_tester(args, test_file):
     get_logger().info('\nRunning tester \'%s\'...' % ' '.join(cmd))
     proc = Popen(cmd, stdout=sys.stdout, stderr=sys.stderr)
     timed_out = False
+    ret_code = 1
     try:
         ret_code = proc.wait(args.timeout)
     except TimeoutExpired:
@@ -72,13 +74,12 @@ def run_tester(args, test_file):
         raise Exception('Unable to run tester (%s)' % e)
 
     if ret_code != 0:
-        if ret_code < 0:
+        if timed_out:
+            reason = 'timed out after %d seconds' % args.timeout
+        elif ret_code < 0:
             reason = signal.Signals(-ret_code).name
         else:
             reason = 'exit code: %d' % ret_code
-        if timed_out:
-            reason = 'timed out after %d seconds' % args.timeout
-            ret_code = 1
         get_logger().error('\n\'%s\' did not complete succesfully (%s)' %
                            (cmd[0], reason))
 
