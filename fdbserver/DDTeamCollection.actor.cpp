@@ -2039,6 +2039,8 @@ public:
 		}
 
 		loop {
+			state Future<Void> pauseChanged = self->pauseWiggle->onChange();
+			state Future<Void> stopChanged = stopSignal->onChange();
 			if (self->wigglingId.present()) {
 				state UID id = self->wigglingId.get();
 				if (self->pauseWiggle->get()) {
@@ -2067,7 +2069,7 @@ public:
 							    .detail("ExtraHealthyTeamCount", extraTeamCount)
 							    .detail("HealthyTeamCount", self->healthyTeamCount);
 						}
-						when(wait(self->pauseWiggle->onChange())) { continue; }
+						when(wait(pauseChanged)) { continue; }
 					}
 				}
 			}
@@ -2098,7 +2100,7 @@ public:
 					finishStorageWiggleSignal.send(Void());
 					extraTeamCount = std::max(0, extraTeamCount - 1);
 				}
-				when(wait(ddQueueCheck || self->pauseWiggle->onChange() || stopSignal->onChange())) {}
+				when(wait(ddQueueCheck || pauseChanged || stopChanged)) {}
 			}
 
 			if (stopSignal->get()) {
