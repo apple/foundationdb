@@ -39,7 +39,6 @@ public:
 	std::string externalClientLibrary;
 	std::string externalClientDir;
 	std::string tmpDir;
-	std::string clientTmpDir;
 	bool disableLocalClient = false;
 	std::string testFile;
 	std::string inputPipeName;
