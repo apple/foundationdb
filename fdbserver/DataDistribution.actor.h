@@ -155,13 +155,14 @@ struct GetMetricsRequest {
 	// whether a < b
 	typedef std::function<bool(const StorageMetrics& a, const StorageMetrics& b)> MetricsComparator;
 	std::vector<KeyRange> keys;
-	Promise<StorageMetrics> reply;
+	int topK = 1; // default only return the top 1 shard based on the comparator
+	Promise<std::vector<StorageMetrics>> reply; // topK storage metrics
 	Optional<MetricsComparator>
-	    comparator; // if comparator is assigned, return the largest one in keys, otherwise return the sum of metrics
+	    comparator; // if comparator is assigned, return the largest topK in keys, otherwise return the sum of metrics
 
 	GetMetricsRequest() {}
-	GetMetricsRequest(KeyRange const& keys) : keys({ keys }) {}
-	GetMetricsRequest(std::vector<KeyRange> const& keys) : keys(keys) {}
+	GetMetricsRequest(KeyRange const& keys, int topK = 1) : keys({ keys }), topK(topK) {}
+	GetMetricsRequest(std::vector<KeyRange> const& keys, int topK = 1) : keys(keys), topK(topK) {}
 };
 
 struct GetMetricsListRequest {

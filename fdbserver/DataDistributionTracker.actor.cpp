@@ -836,7 +836,9 @@ ACTOR Future<Void> fetchShardMetrics_impl(DataDistributionTracker* self, GetMetr
 	try {
 		loop {
 			Future<Void> onChange;
-			StorageMetrics returnMetrics;
+			std::vector<StorageMetrics> returnMetrics;
+			if (!req.comparator.present())
+				returnMetrics.push_back(StorageMetrics());
 			for (auto range : req.keys) {
 				StorageMetrics metrics;
 				for (auto t : self->shards.intersectingRanges(range)) {
@@ -854,20 +856,25 @@ ACTOR Future<Void> fetchShardMetrics_impl(DataDistributionTracker* self, GetMetr
 				}
 
 				if (req.comparator.present()) {
-					if (req.comparator.get()(returnMetrics, metrics)) {
-						returnMetrics = metrics;
-						returnMetrics.keys = range;
-					}
+					returnMetrics.push_back(metrics);
 				} else {
-					returnMetrics += metrics;
+					returnMetrics[0] += metrics;
 				}
 			}
 
 			if (!onChange.isValid()) {
-				req.reply.send(returnMetrics);
+				if (req.topK >= returnMetrics.size())
+					req.reply.send(returnMetrics);
+				else if (req.comparator.present()) {
+					std::nth_element(returnMetrics.begin(),
+					                 returnMetrics.end() - req.topK,
+					                 returnMetrics.end(),
+					                 req.comparator.get());
+					req.reply.send(
+					    std::vector<StorageMetrics>(returnMetrics.rbegin(), returnMetrics.rbegin() + req.topK));
+				}
 				return Void();
 			}
-
 			wait(onChange);
 		}
 	} catch (Error& e) {
@@ -884,7 +891,7 @@ ACTOR Future<Void> fetchShardMetrics(DataDistributionTracker* self, GetMetricsRe
 			TEST(true); // DD_SHARD_METRICS_TIMEOUT
 			StorageMetrics largeMetrics;
 			largeMetrics.bytes = getMaxShardSize(self->dbSizeEstimate->get());
-			req.reply.send(largeMetrics);
+			req.reply.send(std::vector<StorageMetrics>(1, largeMetrics));
 		}
 	}
 	return Void();
@@ -931,7 +938,9 @@ ACTOR Future<Void> fetchShardMetricsList_impl(DataDistributionTracker* self, Get
 ACTOR Future<Void> fetchShardMetricsList(DataDistributionTracker* self, GetMetricsListRequest req) {
 	choose {
 		when(wait(fetchShardMetricsList_impl(self, req))) {}
-		when(wait(delay(SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT))) { req.reply.sendError(timed_out()); }
+		when(wait(delay(SERVER_KNOBS->DD_SHARD_METRICS_TIMEOUT))) {
+			req.reply.sendError(timed_out());
+		}
 	}
 	return Void();
 }

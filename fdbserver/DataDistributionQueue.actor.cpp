@@ -1146,8 +1146,9 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 			self->suppressIntervals = 0;
 		}
 
-		state StorageMetrics metrics =
+		std::vector<StorageMetrics> metricsList =
 		    wait(brokenPromiseToNever(self->getShardMetrics.getReply(GetMetricsRequest(rd.keys))));
+		state StorageMetrics metrics = metricsList[0];
 
 		ASSERT(rd.src.size());
 		loop {
@@ -1521,45 +1522,55 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueueData* self,
 		return false;
 	}
 
-	// TODO: set 1000 as a knob
-	// randomly compare a portion of all shards
-	int shuffleLen = std::min((int)(shards.size() * 0.67), 1000);
-	deterministicRandom()->randomShuffle(shards, shuffleLen);
+	// TODO: set 100 as a knob
+	// randomly choose topK shards
 	state Future<HealthMetrics> healthMetrics = self->cx->getHealthMetrics(true);
-	state GetMetricsRequest req(std::vector<KeyRange>(shards.begin(), shards.begin() + shuffleLen));
+	state GetMetricsRequest req(shards, 100);
 	req.comparator = [](const StorageMetrics& a, const StorageMetrics& b) {
 		return a.bytesReadPerKSecond / std::max(a.bytes * 1.0, 1.0 * SERVER_KNOBS->MIN_SHARD_BYTES) <
 		       b.bytesReadPerKSecond / std::max(b.bytes * 1.0, 1.0 * SERVER_KNOBS->MIN_SHARD_BYTES);
 	};
-	state StorageMetrics metrics = wait(brokenPromiseToNever(self->getShardMetrics.getReply(req)));
+	state std::vector<StorageMetrics> metricsList = wait(brokenPromiseToNever(self->getShardMetrics.getReply(req)));
 	wait(ready(healthMetrics));
 	if (getWorstCpu(healthMetrics.get()) < 25.0) { // 25%
 		traceEvent->detail("SkipReason", "LowReadLoad");
 		return false;
 	}
-	if (metrics.keys.present() && metrics.bytes > 0) {
-		auto srcLoad = sourceTeam->getLoadReadBandwidth(false), destLoad = destTeam->getLoadReadBandwidth();
-		traceEvent->detail("ShardReadBandwidth", metrics.bytesReadPerKSecond)
-		    .detail("SrcReadBandwidth", srcLoad)
-		    .detail("DestReadBandwidth", destLoad);
 
-		if (srcLoad - destLoad <=
-		    5 * std::max(metrics.bytesReadPerKSecond, SERVER_KNOBS->SHARD_READ_HOT_BANDWITH_MIN_PER_KSECONDS)) {
-			traceEvent->detail("SkipReason", "TeamTooSimilar");
-			return false;
+	int chosenIdx = -1;
+	for (int i = 0; i < SERVER_KNOBS->REBALANCE_MAX_RETRIES; ++i) {
+		int idx = deterministicRandom()->randomInt(0, metricsList.size());
+		if (metricsList[idx].keys.present() && metricsList[i].bytes > 0) {
+			chosenIdx = idx;
+			break;
 		}
-		//  Verify the shard is still in ShardsAffectedByTeamFailure
-		shards = self->shardsAffectedByTeamFailure->getShardsFor(
-		    ShardsAffectedByTeamFailure::Team(sourceTeam->getServerIDs(), primary));
-		for (int i = 0; i < shards.size(); i++) {
-			if (metrics.keys == shards[i]) {
-				self->output.send(RelocateShard(metrics.keys.get(), priority, RelocateReason::REBALANCE_READ));
-				return true;
-			}
+	}
+	if (chosenIdx == -1) {
+		traceEvent->detail("SkipReason", "NoEligibleShards");
+		return false;
+	}
+
+	auto& metrics = metricsList[chosenIdx];
+	auto srcLoad = sourceTeam->getLoadReadBandwidth(false), destLoad = destTeam->getLoadReadBandwidth();
+	traceEvent->detail("ShardReadBandwidth", metrics.bytesReadPerKSecond)
+	    .detail("SrcReadBandwidth", srcLoad)
+	    .detail("DestReadBandwidth", destLoad);
+
+	if (srcLoad - destLoad <=
+	    5 * std::max(metrics.bytesReadPerKSecond, SERVER_KNOBS->SHARD_READ_HOT_BANDWITH_MIN_PER_KSECONDS)) {
+		traceEvent->detail("SkipReason", "TeamTooSimilar");
+		return false;
+	}
+	//  Verify the shard is still in ShardsAffectedByTeamFailure
+	shards = self->shardsAffectedByTeamFailure->getShardsFor(
+	    ShardsAffectedByTeamFailure::Team(sourceTeam->getServerIDs(), primary));
+	for (int i = 0; i < shards.size(); i++) {
+		if (metrics.keys == shards[i]) {
+			self->output.send(RelocateShard(metrics.keys.get(), priority, RelocateReason::REBALANCE_READ));
+			return true;
 		}
-		traceEvent->detail("SkipReason", "ShardNotPresent");
-	} else
-		traceEvent->detail("SkipReason", metrics.keys.present() ? "ShardZeroSize" : "ShardNoKeys");
+	}
+	traceEvent->detail("SkipReason", "ShardNotPresent");
 	return false;
 }
 
@@ -1594,11 +1605,11 @@ ACTOR static Future<bool> rebalanceTeams(DDQueueData* self,
 	state int retries = 0;
 	while (retries < SERVER_KNOBS->REBALANCE_MAX_RETRIES) {
 		state KeyRange testShard = deterministicRandom()->randomChoice(shards);
-		StorageMetrics testMetrics =
+		std::vector<StorageMetrics> testMetrics =
 		    wait(brokenPromiseToNever(self->getShardMetrics.getReply(GetMetricsRequest(testShard))));
-		if (testMetrics.bytes > metrics.bytes) {
+		if (testMetrics[0].bytes > metrics.bytes) {
 			moveShard = testShard;
-			metrics = testMetrics;
+			metrics = testMetrics[0];
 			if (metrics.bytes > averageShardBytes) {
 				break;
 			}
