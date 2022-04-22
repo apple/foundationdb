@@ -110,7 +110,11 @@ public:
 	void reset();
 	fdb_error_t setOption(FDBTransactionOption option);
 
-	KeyValuesResult readBlobGranules(std::string_view begin, std::string_view end, const std::string& basePath);
+	KeyValuesResult readBlobGranules(std::string_view begin,
+	                                 std::string_view end,
+	                                 const std::string& basePath,
+	                                 bool doMaterialize = true,
+	                                 int64_t readVersion = -2 /* latest read version */);
 	KeyRangesFuture getBlobGranuleRanges(std::string_view begin, std::string_view end);
 
 private:

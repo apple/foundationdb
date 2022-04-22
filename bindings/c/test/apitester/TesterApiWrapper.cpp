@@ -186,8 +186,13 @@ static int64_t granule_start_load(const char* filename,
 
 	uint8_t* buffer = new uint8_t[length];
 	std::ifstream fin(ctx->basePath + std::string(filename, filenameLength), std::ios::in | std::ios::binary);
-	fin.seekg(offset);
-	fin.read((char*)buffer, length);
+	if (fin.fail()) {
+		delete[] buffer;
+		buffer = nullptr;
+	} else {
+		fin.seekg(offset);
+		fin.read((char*)buffer, length);
+	}
 
 	ctx->loadsInProgress.insert({ loadId, buffer });
 
@@ -203,14 +208,16 @@ static void granule_free_load(int64_t loadId, void* context) {
 	TesterGranuleContext* ctx = (TesterGranuleContext*)context;
 	auto it = ctx->loadsInProgress.find(loadId);
 	uint8_t* dataToFree = it->second;
-	delete dataToFree;
+	delete[] dataToFree;
 
 	ctx->loadsInProgress.erase(it);
 }
 
 KeyValuesResult Transaction::readBlobGranules(std::string_view begin,
                                               std::string_view end,
-                                              const std::string& basePath) {
+                                              const std::string& basePath,
+                                              bool doMaterialize,
+                                              int64_t readVersion) {
 	ASSERT(tx_);
 
 	TesterGranuleContext testerContext;
@@ -218,7 +225,7 @@ KeyValuesResult Transaction::readBlobGranules(std::string_view begin,
 
 	FDBReadBlobGranuleContext granuleContext;
 	granuleContext.userContext = &testerContext;
-	granuleContext.debugNoMaterialize = false;
+	granuleContext.debugNoMaterialize = !doMaterialize;
 	granuleContext.granuleParallelism = 1;
 	granuleContext.start_load_f = &granule_start_load;
 	granuleContext.get_load_f = &granule_get_load;
@@ -230,7 +237,7 @@ KeyValuesResult Transaction::readBlobGranules(std::string_view begin,
 	                                                          (const uint8_t*)end.data(),
 	                                                          end.size(),
 	                                                          0 /* beginVersion */,
-	                                                          -2 /* latest read version */,
+	                                                          readVersion,
 	                                                          granuleContext));
 }
 

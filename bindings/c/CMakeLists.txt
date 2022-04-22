@@ -107,6 +107,7 @@ if(NOT WIN32)
     test/apitester/TesterTestSpec.cpp
     test/apitester/TesterTestSpec.h
     test/apitester/TesterBlobGranuleCorrectnessWorkload.cpp
+    test/apitester/TesterBlobGranuleErrorsWorkload.cpp
     test/apitester/TesterCancelTransactionWorkload.cpp
     test/apitester/TesterCorrectnessWorkload.cpp
     test/apitester/TesterKeyValueStore.cpp
