@@ -898,6 +898,7 @@ private:
 
 	int nextThread = 0;
 	int threadCount;
+	std::string tmpDir;
 
 	Mutex lock;
 	std::vector<std::pair<FDBNetworkOptions::Option, Optional<Standalone<StringRef>>>> options;
