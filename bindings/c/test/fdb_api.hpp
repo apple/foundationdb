@@ -26,6 +26,14 @@
 #define FDB_API_VERSION 720
 #endif
 
+#if defined(__GNUG__)
+#define force_inline inline __attribute__((__always_inline__))
+#elif defined(_MSC_VER)
+#define force_inline __forceinline
+#else
+#error Missing force inline
+#endif
+
 #include <cassert>
 #include <cstdint>
 #include <memory>
@@ -359,15 +367,39 @@ public:
 	}
 };
 
+struct KeySelector {
+	const uint8_t* key;
+	int keyLength;
+	bool orEqual;
+	int offset;
+};
+
 namespace key_select {
 
-struct Inclusive {
-	static constexpr const bool value = true;
-};
+inline KeySelector firstGreaterThan(KeyRef key, int offset=0) {
+	return KeySelector{
+		FDB_KEYSEL_FIRST_GREATER_THAN(key.data(), intSize(key)) + offset
+	};
+}
 
-struct Exclusive {
-	static constexpr const bool value = false;
-};
+inline KeySelector firstGreaterOrEqual(KeyRef key, int offset=0) {
+	return KeySelector{
+		FDB_KEYSEL_FIRST_GREATER_OR_EQUAL(key.data(), intSize(key)) + offset
+	};
+}
+
+inline KeySelector lastLessThan(KeyRef key, int offset=0) {
+	return KeySelector{
+		FDB_KEYSEL_LAST_LESS_THAN(key.data(), intSize(key)) + offset
+	};
+}
+
+inline KeySelector lastLessOrEqual(KeyRef key, int offset=0) {
+	return KeySelector{
+		FDB_KEYSEL_LAST_LESS_OR_EQUAL(key.data(), intSize(key)) + offset
+	};
+}
+
 } // namespace key_select
 
 class Transaction {
@@ -428,62 +460,39 @@ public:
 		return out;
 	}
 
+	TypedFuture<future_var::Key> getKey(KeySelector sel, bool snapshot) {
+		return native::fdb_transaction_get_key(tr.get(), sel.key, sel.keyLength, sel.orEqual, sel.offset, snapshot);
+	}
+
 	TypedFuture<future_var::Value> get(KeyRef key, bool snapshot) {
 		return native::fdb_transaction_get(tr.get(), key.data(), intSize(key), snapshot);
 	}
 
-	// Usage: tx.getRange<key_select::Inclusive, key_select::Exclusive>(begin, end, ...);
+	// Usage: tx.getRange(key_select::firstGreaterOrEqual(firstKey), key_select::lastLessThan(lastKey), ...)
 	// gets key-value pairs in key range [begin, end)
-	template <class FirstInclusive, class LastInclusive>
-	TypedFuture<future_var::KeyValueArray> getRange(KeyRef begin,
-	                                                KeyRef end,
+	TypedFuture<future_var::KeyValueArray> getRange(KeySelector first,
+	                                                KeySelector last,
 	                                                int limit,
 	                                                int target_bytes,
 	                                                FDBStreamingMode mode,
 	                                                int iteration,
 	                                                bool snapshot,
 	                                                bool reverse) {
-		if constexpr (FirstInclusive::value && LastInclusive::value) {
-			return native::fdb_transaction_get_range(tr.get(),
-			                                         FDB_KEYSEL_FIRST_GREATER_OR_EQUAL(begin.data(), intSize(begin)),
-			                                         FDB_KEYSEL_LAST_LESS_OR_EQUAL(end.data(), intSize(end)),
-			                                         limit,
-			                                         target_bytes,
-			                                         mode,
-			                                         iteration,
-			                                         snapshot,
-			                                         reverse);
-		} else if constexpr (FirstInclusive::value && !LastInclusive::value) {
-			return native::fdb_transaction_get_range(tr.get(),
-			                                         FDB_KEYSEL_FIRST_GREATER_OR_EQUAL(begin.data(), intSize(begin)),
-			                                         FDB_KEYSEL_LAST_LESS_THAN(end.data(), intSize(end)),
-			                                         limit,
-			                                         target_bytes,
-			                                         mode,
-			                                         iteration,
-			                                         snapshot,
-			                                         reverse);
-		} else if constexpr (!FirstInclusive::value && LastInclusive::value) {
-			return native::fdb_transaction_get_range(tr.get(),
-			                                         FDB_KEYSEL_FIRST_GREATER_THAN(begin.data(), intSize(begin)),
-			                                         FDB_KEYSEL_LAST_LESS_OR_EQUAL(end.data(), intSize(end)),
-			                                         limit,
-			                                         target_bytes,
-			                                         mode,
-			                                         iteration,
-			                                         snapshot,
-			                                         reverse);
-		} else {
-			return native::fdb_transaction_get_range(tr.get(),
-			                                         FDB_KEYSEL_FIRST_GREATER_THAN(begin.data(), intSize(begin)),
-			                                         FDB_KEYSEL_LAST_LESS_THAN(end.data(), intSize(end)),
-			                                         limit,
-			                                         target_bytes,
-			                                         mode,
-			                                         iteration,
-			                                         snapshot,
-			                                         reverse);
-		}
+		return native::fdb_transaction_get_range(tr.get(),
+												 first.key,
+												 first.keyLength,
+												 first.orEqual,
+												 first.offset,
+												 last.key,
+												 last.keyLength,
+												 last.orEqual,
+												 last.offset,
+												 limit,
+												 target_bytes,
+												 mode,
+												 iteration,
+												 snapshot,
+												 reverse);
 	}
 
 	Result readBlobGranules(KeyRef begin,

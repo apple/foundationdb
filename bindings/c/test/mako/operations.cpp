@@ -60,14 +60,14 @@ const std::array<Operation, MAX_OP> opTable{
 	    { { StepKind::READ,
 	        [](Transaction& tx, Arguments const& args, ByteString& begin, ByteString& end, ByteString&) {
 	            return tx
-	                .getRange<key_select::Inclusive, key_select::Inclusive>(begin,
-	                                                                        end,
-	                                                                        0 /*limit*/,
-	                                                                        0 /*target_bytes*/,
-	                                                                        args.streaming_mode,
-	                                                                        0 /*iteration*/,
-	                                                                        false /*snapshot*/,
-	                                                                        args.txnspec.ops[OP_GETRANGE][OP_REVERSE])
+	                .getRange(key_select::firstGreaterOrEqual(begin),
+	                          key_select::lastLessOrEqual(end, 1),
+	                          0 /*limit*/,
+	                          0 /*target_bytes*/,
+	                          args.streaming_mode,
+	                          0 /*iteration*/,
+	                          false /*snapshot*/,
+	                          args.txnspec.ops[OP_GETRANGE][OP_REVERSE])
 	                .eraseType();
 	        },
 	        [](Future& f, Transaction&, Arguments const&, ByteString&, ByteString&, ByteString& val) {
@@ -95,14 +95,14 @@ const std::array<Operation, MAX_OP> opTable{
 	        StepKind::READ,
 	        [](Transaction& tx, Arguments const& args, ByteString& begin, ByteString& end, ByteString&) {
 	            return tx
-	                .getRange<key_select::Inclusive, key_select::Inclusive>(begin,
-	                                                                        end,
-	                                                                        0 /*limit*/,
-	                                                                        0 /*target_bytes*/,
-	                                                                        args.streaming_mode,
-	                                                                        0 /*iteration*/,
-	                                                                        true /*snapshot*/,
-	                                                                        args.txnspec.ops[OP_SGETRANGE][OP_REVERSE])
+	                .getRange(key_select::firstGreaterOrEqual(begin),
+	                          key_select::lastLessOrEqual(end, 1),
+	                          0 /*limit*/,
+	                          0 /*target_bytes*/,
+	                          args.streaming_mode,
+	                          0 /*iteration*/,
+	                          false /*snapshot*/,
+	                          args.txnspec.ops[OP_GETRANGE][OP_REVERSE])
 	                .eraseType();
 	        },
 	        [](Future& f, Transaction&, Arguments const&, ByteString&, ByteString&, ByteString& val) {
