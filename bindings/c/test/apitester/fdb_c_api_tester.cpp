@@ -51,7 +51,8 @@ enum TesterOptionId {
 	OPT_INPUT_PIPE,
 	OPT_OUTPUT_PIPE,
 	OPT_FDB_API_VERSION,
-	OPT_TRANSACTION_RETRY_LIMIT
+	OPT_TRANSACTION_RETRY_LIMIT,
+	OPT_BLOB_GRANULE_LOCAL_FILE_PATH
 };
 
 CSimpleOpt::SOption TesterOptionDefs[] = //
@@ -73,6 +74,7 @@ CSimpleOpt::SOption TesterOptionDefs[] = //
 	  { OPT_OUTPUT_PIPE, "--output-pipe", SO_REQ_SEP },
 	  { OPT_FDB_API_VERSION, "--api-version", SO_REQ_SEP },
 	  { OPT_TRANSACTION_RETRY_LIMIT, "--transaction-retry-limit", SO_REQ_SEP },
+	  { OPT_BLOB_GRANULE_LOCAL_FILE_PATH, "--blob-granule-local-file-path", SO_REQ_SEP },
 	  SO_END_OF_OPTIONS };
 
 void printProgramUsage(const char* execName) {
@@ -108,6 +110,8 @@ void printProgramUsage(const char* execName) {
 	       "                 Required FDB API version (default %d).\n"
 	       "  --transaction-retry-limit NUMBER\n"
 	       "				 Maximum number of retries per tranaction (default: 0 - unlimited)\n"
+	       "  --blob-granule-local-file-path PATH\n"
+	       "				 Path to blob granule files on local filesystem\n"
 	       "  -f, --test-file FILE\n"
 	       "                 Test file to run.\n"
 	       "  -h, --help     Display this help and exit.\n",
@@ -199,6 +203,9 @@ bool processArg(TesterOptions& options, const CSimpleOpt& args) {
 		break;
 	case OPT_TRANSACTION_RETRY_LIMIT:
 		processIntOption(args.OptionText(), args.OptionArg(), 0, 1000, options.transactionRetryLimit);
+		break;
+	case OPT_BLOB_GRANULE_LOCAL_FILE_PATH:
+		options.bgBasePath = args.OptionArg();
 		break;
 	}
 	return true;
@@ -295,7 +302,7 @@ bool runWorkloads(TesterOptions& options) {
 
 		std::unique_ptr<IScheduler> scheduler = createScheduler(options.numClientThreads);
 		std::unique_ptr<ITransactionExecutor> txExecutor = createTransactionExecutor(txExecOptions);
-		txExecutor->init(scheduler.get(), options.clusterFile.c_str());
+		txExecutor->init(scheduler.get(), options.clusterFile.c_str(), options.bgBasePath);
 
 		WorkloadManager workloadMgr(txExecutor.get(), scheduler.get());
 		for (const auto& workloadSpec : options.testSpec.workloads) {

@@ -300,7 +300,9 @@ ThreadResult<RangeResult> DLTransaction::readBlobGranules(const KeyRangeRef& key
 	int count;
 	FdbCApi::fdb_bool_t more;
 	FdbCApi::fdb_error_t error = api->resultGetKeyValueArray(r, &kvs, &count, &more);
-	ASSERT(!error);
+	if (error) {
+		return ThreadResult<RangeResult>(Error(error));
+	}
 
 	// The memory for this is stored in the FDBResult and is released when the result gets destroyed
 	return ThreadResult<RangeResult>(
