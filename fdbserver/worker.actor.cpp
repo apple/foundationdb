@@ -1210,13 +1210,9 @@ struct TrackRunningStorage {
 	                    KeyValueStoreType storeType,
 	                    std::set<std::pair<UID, KeyValueStoreType>>* runningStorages)
 	  : self(self), storeType(storeType), runningStorages(runningStorages) {
-		TraceEvent(SevDebug, "TrackingRunningStorageConstruction").detail("StorageID", self);
 		runningStorages->emplace(self, storeType);
 	}
-	~TrackRunningStorage() {
-		runningStorages->erase(std::make_pair(self, storeType));
-		TraceEvent(SevDebug, "TrackingRunningStorageDesctruction").detail("StorageID", self);
-	};
+	~TrackRunningStorage() { runningStorages->erase(std::make_pair(self, storeType)); };
 };
 
 ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValueStoreType>>* runningStorages,
@@ -1732,7 +1728,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					logQueueBasename = fileLogQueuePrefix.toString() + optionsString.toString() + "-";
 				}
 				ASSERT_WE_THINK(abspath(parentDirectory(s.filename)) == folder);
-				// TraceEvent(SevDebug, "openRemoteKVStore").detail("storeType", "TlogData");
 				IKeyValueStore* kv = openKVStore(s.storeType, s.filename, s.storeID, memoryLimit, validateDataFiles);
 				const DiskQueueVersion dqv = s.tLogOptions.getDiskQueueVersion();
 				const int64_t diskQueueWarnSize =
@@ -2137,7 +2132,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					    req.logVersion > TLogVersion::V2 ? fileVersionedLogDataPrefix : fileLogDataPrefix;
 					std::string filename =
 					    filenameFromId(req.storeType, folder, prefix.toString() + tLogOptions.toPrefix(), logId);
-					// TraceEvent(SevDebug, "openRemoteKVStore").detail("storeType", "3");
 					IKeyValueStore* data = openKVStore(req.storeType, filename, logId, memoryLimit);
 					const DiskQueueVersion dqv = tLogOptions.getDiskQueueVersion();
 					IDiskQueue* queue = openDiskQueue(
@@ -2484,7 +2478,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			when(wait(handleErrors)) {}
 		}
 	} catch (Error& err) {
-		TraceEvent(SevDebug, "WorkerServer").detail("Error", err.code()).backtrace();
 		// Make sure actors are cancelled before "recovery" promises are destructed.
 		for (auto f : recoveries)
 			f.cancel();

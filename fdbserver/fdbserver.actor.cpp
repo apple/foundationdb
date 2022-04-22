@@ -2222,7 +2222,7 @@ int main(int argc, char* argv[]) {
 			openTraceFile(
 			    g_network->getLocalAddress(), opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace", opts.logGroup);
 			auto m = startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId);
-			TraceEvent(SevDebug, "StartingFlowProcess").detail("From", "fdbserver");
+			TraceEvent(SevDebug, "StartingFlowProcess").detail("FlowProcessName", opts.flowProcessName);
 #if defined(__linux__) || defined(__FreeBSD__)
 			prctl(PR_SET_PDEATHSIG, SIGTERM);
 			if (getppid() == 1) /* parent already died before prctl */
